@@ -1,0 +1,30 @@
+{
+	"name": "valour-workflow",
+	"owner": {
+		"name": "Yuki-Maeda-valour",
+		"email": "y.maeda@valour-tec.com"
+	},
+	"metadata": {
+		"description": "どのプロジェクトでも使える汎用開発ワークフロー skills 集(understand-project / create-task / do-task / update-doc ほか)",
+		"version": "3.2.2"
+	},
+	"plugins": [
+		{
+			"name": "dev-workflow",
+			"source": "./plugins/dev-workflow",
+			"description": "タスク駆動開発の汎用ワークフロー skills 7 種。プロジェクト固有情報は .claude/project-profile.yml と実行時自動検出で吸収し、どの技術スタックでも動作する。",
+			"version": "3.2.2",
+			"author": {
+				"name": "Yuki-Maeda-valour"
+			},
+			"category": "workflow",
+			"keywords": [
+				"workflow",
+				"task-driven",
+				"quality",
+				"refactoring",
+				"japanese"
+			]
+		}
+	]
+}

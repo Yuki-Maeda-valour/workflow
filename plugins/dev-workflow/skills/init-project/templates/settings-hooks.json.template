@@ -1,0 +1,24 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "rm -f \"$CLAUDE_PROJECT_DIR/.claude/.understand-project-done\""
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "STATE=\"$CLAUDE_PROJECT_DIR/.claude/.understand-project-done\"; if [ ! -f \"$STATE\" ]; then mkdir -p \"$CLAUDE_PROJECT_DIR/.claude\" && touch \"$STATE\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"このセッションではまだ /understand-project が実行されていません。作業を始める前に、まず /understand-project(通常は --quick で十分)を実行してプロジェクトの全体像を把握してから本来の依頼に着手してください。\"}}'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

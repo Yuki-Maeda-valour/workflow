@@ -1,0 +1,79 @@
+# dev-workflow プロジェクトプロファイル
+# 全 skill が最初に読む「プロジェクト固有の事実」の集約点。
+# 全フィールド任意 — 無い項目は各 skill が動的検出でフォールバックする。
+# 迷ったら値をコメントアウトのままにしてよい(検出に任せる)。
+
+# ── 基本(明示を推奨) ──────────────────────────────────
+name: {{PROJECT_NAME}}                    # 表示用プロジェクト名
+
+# リポジトリ構成: single(既定) | parent-child | monorepo
+#   parent-child: AI 管理リポジトリの下に本体ソースが独立 git である構成
+repo_layout: {{REPO_LAYOUT}}
+
+# 本体ソースのルート(parent-child のときのみ意味を持つ。探索・コマンドは必ずこの下で行う)
+root: {{ROOT}}
+
+# コードを持つか(false: ドキュメントのみ。品質ゲートをスキップ)
+has_code: {{HAS_CODE}}
+
+# パッケージマネージャ(省略時: packageManager フィールド / lockfile から自動判定)
+package_manager: {{PACKAGE_MANAGER}}
+
+# コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | claude-md
+#   serena:    Serena メモリが正本、CLAUDE.md は薄型維持
+#   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
+#   claude-md: CLAUDE.md 自体が正本(小規模・メモリ未使用)
+# ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は
+#   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄
+source_of_truth: {{SOURCE_OF_TRUTH}}
+
+# ── 品質ゲート(省略時: package.json scripts から自動検出) ──
+# build に build_optional: true を添えると完了条件から除外できる
+quality:
+{{QUALITY_BLOCK}}
+
+# ── 以下は任意。必要になったらコメントを外して設定する ──────
+
+# 汎用カテゴリ → 実 Serena メモリ名のマップ(命名揺れの吸収。省略時は list_memories から意味マッチ)
+# memory_map:
+#   overview: project_overview
+#   structure: project_architecture
+#   tech: tech_stack
+#   commands: suggested_commands
+#   conventions: code_style_conventions
+#   completion: task_completion_checklist
+
+# --area オプションで使う領域定義(省略時: backend / frontend / database の汎用 3 分類)
+# areas:
+#   backend: ["src/server/", "src/api/"]
+#   frontend: ["src/app/", "src/components/"]
+#   database: ["prisma/", "drizzle/"]
+
+# 型伝播チェーン(create-task の影響範囲調査で使用)
+# type_propagation_chain: "DB schema → server functions → API routes → frontend hooks → components"
+
+# ドメイン固有リスク(create-task / do-task がチェックリストに反映)
+# domain_risks: []                        # 例: [web3, i18n, e2e-data, salesforce, zenstack]
+
+# 機密ファイル(読まない・値を出力しない・ログ混入を検査)
+secret_paths: [".env", ".env.*", ".dev.vars"]
+
+# 実行機能レベル(タスク系 skills の重さを調整)
+# features:
+#   impact_analysis: true                 # create-task の影響範囲調査
+#   external_review: true                 # create-task の外部レビュー
+#   reviewer_count: 1                     # do-task のレビュアー数: 1 | 3
+#   review_models: [opus, sonnet]         # レビューに使うモデル群(省略時: 環境で使える上位+標準を自動選定)
+#   implementer: internal                 # internal | cursor(外部 CLI 委託)
+#   implementer_model: sonnet             # implementer のモデル(エイリアスのみ)
+
+# ローカル環境の構築コマンド(環境構築を依頼されたとき doc/05 と併せて参照される)
+# setup_commands: []                      # 例: ["docker compose up -d db", "pnpm db:migrate", "pnpm db:seed"]
+
+# 地雷リストの場所の上書き(任意)。既定は doc/05_operations.md の「引き継ぎ・地雷」節。
+# 既存プロジェクトで別ファイル(docs/HANDOVER.md 等)に地雷リストがある場合のみ設定する
+# known_facts_ref: docs/HANDOVER.md
+
+# ── dev-workflow 管理メタ(init-project が記録・更新する。手動編集不要) ──
+workflow_version: "{{WORKFLOW_VERSION}}"  # 導入時の dev-workflow バージョン(再実行時に更新)
+initialized_at: "{{DATE}}"                # 初回導入日

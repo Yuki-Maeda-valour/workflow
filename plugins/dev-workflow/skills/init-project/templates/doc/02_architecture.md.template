@@ -1,0 +1,46 @@
+# 02. アーキテクチャ
+
+> 状態: 🟡 検討中 / 最終更新: {{DATE}}
+> 位置づけ: システム全体構成・技術選定・ディレクトリ構造の正本。
+
+## 技術スタック
+
+{{TECH_STACK}}
+
+## システム構成
+
+（全体の構成・コンポーネント関係。外部サービス・DB・デプロイ先を含む。以下の雛形を実態に合わせて書き換える）
+
+```mermaid
+flowchart TD
+    subgraph client["クライアント"]
+        web["Web アプリ"]
+    end
+    subgraph server["サーバー"]
+        api["API"]
+    end
+    db[("DB")]
+    ext["外部サービス"]
+    web --> api
+    api --> db
+    api --> ext
+```
+
+## ディレクトリ構造
+
+```
+（主要ディレクトリとその役割。詳細は /understand-project で実測できるため要点のみ）
+```
+
+## データフロー / 型伝播
+
+（データがどこで生まれ、どのレイヤを通って UI に届くか。確定したら .claude/project-profile.yml の type_propagation_chain にも反映する）
+
+```mermaid
+flowchart LR
+    schema["DB schema"] --> srv["server 関数"] --> route["API routes"] --> hook["hooks"] --> ui["components"]
+```
+
+## 外部依存 / 連携
+
+（外部 API・SaaS・キューなどの前提。必要な環境変数はキー名のみ 05_operations.md に記載し、値は書かない）

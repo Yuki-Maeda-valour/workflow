@@ -1,0 +1,16 @@
+# {{PROJECT_NAME}}
+
+{{OVERVIEW}}
+
+## ドキュメント
+
+詳細は [doc/](doc/README.md) を参照:
+[概要](doc/01_overview.md) / [アーキテクチャ](doc/02_architecture.md) / [要件](doc/03_requirements.md) / [設計](doc/04_design.md) / [運用](doc/05_operations.md)
+
+## 開発
+
+```bash
+{{COMMANDS}}
+```
+
+環境構築の手順は [doc/05_operations.md](doc/05_operations.md) を参照。

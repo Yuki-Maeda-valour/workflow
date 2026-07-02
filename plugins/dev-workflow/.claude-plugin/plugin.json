@@ -1,0 +1,19 @@
+{
+	"name": "dev-workflow",
+	"displayName": "Dev Workflow",
+	"version": "3.2.2",
+	"description": "タスク駆動開発の汎用ワークフロー skills 集。プロジェクト把握(understand-project)→タスク設計(create-task。リファクタ分析 --refactor 内蔵)→実装・検証(do-task)→ドキュメント同期(update-doc)のコアサイクルに、tool-check(機械検査)・stack-research(バージョン固有調査)・init-project(導入)を加えた 7 skills。プロジェクト固有情報は .claude/project-profile.yml と実行時自動検出で吸収する。",
+	"author": {
+		"name": "Yuki-Maeda-valour",
+		"email": "y.maeda@valour-tec.com"
+	},
+	"repository": "https://github.com/Yuki-Maeda-valour/workflow",
+	"license": "MIT",
+	"keywords": [
+		"workflow",
+		"task-driven-development",
+		"quality-gate",
+		"refactoring",
+		"japanese"
+	]
+}
