@@ -5,7 +5,7 @@
 ## ドキュメント
 
 詳細は [doc/](doc/README.md) を参照:
-[概要](doc/01_overview.md) / [アーキテクチャ](doc/02_architecture.md) / [要件](doc/03_requirements.md) / [設計](doc/04_design.md) / [運用](doc/05_operations.md)
+[概要](doc/01_overview.md) / [アーキテクチャ](doc/02_architecture.md) / [要件](doc/03_requirements.md) / [設計](doc/04_design.md) / [運用](doc/05_operations.md) / [計画](doc/07_plan.md)
 
 ## 開発
 

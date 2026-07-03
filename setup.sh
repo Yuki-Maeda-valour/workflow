@@ -44,7 +44,7 @@ if [[ "$MODE" == "list" ]]; then
   echo "含まれる skills:"
   for d in "$SKILLS_SRC"/*/; do
     name="$(basename "$d")"
-    desc="$(grep -m1 '^description:' "$d/SKILL.md" 2>/dev/null | cut -c 14-90 || true)"
+    desc="$(grep -m1 '^description:' "$d/SKILL.md" 2>/dev/null | cut -c 14-90 | iconv -f UTF-8 -t UTF-8 -c 2>/dev/null || true)"
     printf '  %-20s %s\n' "$name" "$desc..."
   done
   exit 0

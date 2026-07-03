@@ -43,6 +43,8 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
    - 類似実装・既存パターン(新規実装が既存規約に沿うため)
    - 影響を受ける呼び出し元・参照元
    - `doc/06_stack-notes.md`(あれば): 対象領域に関わるバージョン固有の注意点・既知の脆弱性 → タスク MD の「技術的考慮事項」に反映
+   - `doc/03_requirements.md`(あれば): タスクが対応する要件行(`[決]` 未実装・「実装未追従」)を特定し、タスク MD に要件番号を紐づける(完了後の /update-doc --task が `[決]`→`[実]` 昇格を突合できるようにする)
+   - `doc/07_plan.md`(あれば): 関係するマイルストーン・期限をタスク MD の前提・完了条件に反映する
 4. 中〜大規模(対象 3 ファイル以上または契約変更)では researcher を観点別に並列起動してよい(単一メッセージで複数 spawn)
 
 ## Phase 1.5: 影響範囲調査(features.impact_analysis が true のとき)
@@ -92,5 +94,6 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 ## 関連スキル
 
 - 前提: /understand-project(プロジェクト把握)
+- 流入元: /reflect-decisions(会議決定のタスク化。決定内容・出典・期限を引き継ぐ)・/stack-research(該当箇所のタスク化)
 - 次: /do-task(このタスク MD を実装)
 - タスク完了後: /update-doc(ドキュメント同期)

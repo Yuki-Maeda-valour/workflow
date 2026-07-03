@@ -63,6 +63,7 @@ disallowed-tools: Edit, NotebookEdit
 | 概要・スコープ・用語 | `01_overview.md` |
 | 構造・技術 | `02_architecture.md` |
 | 要件・設計 | `03_requirements.md` / `04_design.md`(標準以上のみ) |
+| 計画・期限(見積もり・マイルストーン) | `07_plan.md`(標準以上のみ・あれば) |
 | コマンド・完了条件・地雷 | `05_operations.md`(+ CLAUDE.md の Quick Commands) |
 
 --quick では索引+ 01 + 05 に絞る。doc/ も無ければ 0-2 の CLAUDE.md と Phase 1 の実測だけで把握する(このスキルは Serena 必須ではない)。

@@ -149,7 +149,7 @@ argument-hint: "[対象パス] [--yes]"
 - Figma 等のデザイン MCP はアプリ側の有効化が必要なため、**`.mcp.json` を生成せず設定手順を案内**する(例: Figma デスクトップアプリで Dev Mode MCP Server を有効化 → 表示されたエンドポイントを `.mcp.json` に登録)。
 
 **8. `.gitignore` の整備と git init**
-- `templates/gitignore.snippet` を Read し、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ hook の state ファイル / `.env` 系(`!.env.example` は共有)。
+- `templates/gitignore.snippet` を Read し、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ `.claude/grasp.md`(把握キャッシュ)/ hook の state ファイル / `.env` 系(`!.env.example` は共有)/ `export/`(export-doc の出力)。
 - `.env` 系が**既に git 管理されている**場合は、追記だけでは除外されないため警告し、対応(`git rm --cached` 等)はユーザーに委ねる。
 - `.git` が無い場合(新規): タスク運用(`git mv` による `進行中_` → `完了_` リネーム)が git 前提であることを伝え、`git init` を提案する(不要と言われたら task 運用の制約を案内する)。
 

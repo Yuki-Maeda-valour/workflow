@@ -5,7 +5,7 @@
   1. .claude-plugin/marketplace.json / plugin.json の JSON 構文と必須フィールド
   2. 各 SKILL.md: frontmatter の存在と name / description 必須、name とディレクトリ名の一致
   3. SKILL.md 500 行以下(design.md §6)
-  4. description の長さ(推奨 150〜350 字 / 上限 1024 字)
+  4. description の長さ(規約 150〜500 字 / 上限 1024 字)
   5. 禁止パターン(design.md §5): 特定プロジェクトへのハードコード・絶対パス・
      TeamCreate/TeamDelete・日付付きモデル ID・claude -p
   6. SKILL.md 内の相対リンク(references/ scripts/ templates/)の存在
@@ -138,10 +138,10 @@ def check_skills():
         else:
             if len(desc) > 1024:
                 ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(上限 1024)")
-            elif len(desc) < 100:
-                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(推奨 150〜350。トリガー語句を足す)")
+            elif len(desc) < 150:
+                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
             elif len(desc) > 500:
-                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(推奨 150〜350)")
+                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
 
         # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル)
         for f in sorted(d.rglob("*")):
