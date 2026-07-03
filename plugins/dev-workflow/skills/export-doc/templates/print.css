@@ -1,0 +1,94 @@
+/* export-doc 印刷スタイル(A4 縦・日本語)。HTML に埋め込むか pandoc --css で使う */
+
+@page {
+  size: A4 portrait;
+  margin: 18mm 15mm;
+}
+
+html {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+body {
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic",
+    "Noto Sans CJK JP", "Noto Sans JP", "Meiryo", sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.75;
+  color: #222;
+  margin: 0;
+}
+
+/* 表紙(使う場合は .cover で囲む) */
+.cover {
+  page-break-after: always;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 80vh;
+  text-align: center;
+}
+.cover h1 { border: none; font-size: 22pt; }
+.cover .meta { color: #555; font-size: 11pt; }
+
+h1 {
+  font-size: 16pt;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0.2em;
+}
+h2 {
+  font-size: 13pt;
+  border-bottom: 1px solid #999;
+  padding-bottom: 0.15em;
+  margin-top: 1.6em;
+}
+h3 { font-size: 11.5pt; margin-top: 1.4em; }
+h2, h3, h4 { page-break-after: avoid; }
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.8em 0;
+  font-size: 9.5pt;
+}
+th, td {
+  border: 1px solid #999;
+  padding: 4px 8px;
+  vertical-align: top;
+  text-align: left;
+  word-break: break-word;
+}
+th { background: #f0f0f0; }
+tr { page-break-inside: avoid; }
+
+pre, code {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 9pt;
+}
+pre {
+  background: #f6f6f6;
+  border: 1px solid #ddd;
+  padding: 8px 10px;
+  overflow-wrap: break-word;
+  white-space: pre-wrap;
+  page-break-inside: avoid;
+}
+
+blockquote {
+  margin: 0.8em 0;
+  padding: 0.1em 1em;
+  border-left: 4px solid #ccc;
+  color: #555;
+  background: #fafafa;
+}
+
+img, svg {
+  max-width: 100%;
+  page-break-inside: avoid;
+}
+
+ul, ol { padding-left: 1.6em; }
+
+a { color: #1a4f8a; text-decoration: none; }
+
+hr { border: none; border-top: 1px solid #ccc; margin: 1.5em 0; }

@@ -23,6 +23,8 @@
                     抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05/07)へ出典付き反映
                     (update-doc が「実コード→doc」なのに対しこちらは「人の決定→doc」。
                      実装が必要な決定・宿題は /create-task へチェーン提案)
+出力系(任意の時点): /export-doc = doc/ をクライアント提出用に PDF / xlsx / HTML へ変換
+                    (サニタイズ確認+機密検査。doc/ は不変。変換ツールは動的検出で縮退あり)
 ```
 
 | skill | 責務 | 読む | 書く |
@@ -35,6 +37,7 @@
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
 | stack-research | 依存の実バージョンに固有の注意点・ベストプラクティス・脆弱性の Web 調査とノート生成 | マニフェスト, lockfile, Web | doc/06_stack-notes.md, doc/README.md |
 | reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01〜05・07, doc/README.md(索引) |
+| export-doc | doc/ をクライアント提出用に PDF / xlsx / HTML へ変換。サニタイズ確認(地雷・管理タグ・内部記述)+機密検査+ Mermaid 画像化。ツールは動的検出・縮退あり | doc/, profile | export/(出力のみ。doc/ は不変) |
 
 ## 3. 固有情報の 3 層吸収アーキテクチャ(最重要原則)
 
