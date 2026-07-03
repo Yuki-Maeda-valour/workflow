@@ -20,7 +20,7 @@
 
 品質系(任意の時点): /tool-check = ツールによる機械検査(チェック 3 階層の 1+2。第 3 層の実動確認は do-task)
 入力系(任意の時点): /reflect-decisions = 原資料(議事録・文字起こし・チャットログ・資料)から決定事項を
-                    抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05)へ出典付き反映
+                    抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05/07)へ出典付き反映
                     (update-doc が「実コード→doc」なのに対しこちらは「人の決定→doc」。
                      実装が必要な決定・宿題は /create-task へチェーン提案)
 ```
@@ -34,7 +34,7 @@
 | update-doc | メモリ / CLAUDE.md / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, CLAUDE.md, doc/(索引含む) |
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
 | stack-research | 依存の実バージョンに固有の注意点・ベストプラクティス・脆弱性の Web 調査とノート生成 | マニフェスト, lockfile, Web | doc/06_stack-notes.md, doc/README.md |
-| reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01〜05, doc/README.md(索引) |
+| reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01〜05・07, doc/README.md(索引) |
 
 ## 3. 固有情報の 3 層吸収アーキテクチャ(最重要原則)
 
@@ -79,8 +79,9 @@ package_manager: pnpm
 #   serena:    Serena メモリが正本、CLAUDE.md は薄型維持
 #   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
 #   claude-md: CLAUDE.md 自体が正本(小規模・メモリ未使用)
-# ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は
-#   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄
+# ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)・計画(doc/07)は
+#   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄、
+#   doc/07(見積もり・スケジュール)は人の合意が源泉(/reflect-decisions が反映先。update-doc は書かない)
 source_of_truth: serena
 
 # 汎用カテゴリ → 実 Serena メモリ名のマップ(命名揺れの吸収。省略時は list_memories から意味マッチ)
