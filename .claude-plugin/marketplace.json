@@ -12,7 +12,7 @@
 		{
 			"name": "dev-workflow",
 			"source": "./plugins/dev-workflow",
-			"description": "タスク駆動開発の汎用ワークフロー skills 9 種。プロジェクト固有情報は .claude/project-profile.yml と実行時自動検出で吸収し、どの技術スタックでも動作する。",
+			"description": "タスク駆動開発の汎用ワークフロー skills 10 種。プロジェクト固有情報は .claude/project-profile.yml と実行時自動検出で吸収し、どの技術スタックでも動作する。",
 			"version": "3.3.0",
 			"author": {
 				"name": "Yuki-Maeda-valour"

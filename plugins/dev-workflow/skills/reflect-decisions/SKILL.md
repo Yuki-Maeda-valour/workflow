@@ -158,6 +158,7 @@ argument-hint: "[議事録・文字起こし・資料ファイル...] [--analyze
 ## 関連 skill
 
 - 前提: /init-project(doc/ の統一構成が無い場合は先に導入)
+- 前段: /discuss-spec(会議・資料が無く、これから決める場合は壁打ちで決定録を作ってから本 skill へ)
 - 対になる skill: /update-doc = 実コード → doc の同期。本 skill = 人の決定 → doc の同期。両輪で doc を最新に保つ
 - 後続: /create-task(実装が必要な決定・宿題のタスク化)→ /do-task → /update-doc --task(実装完了後に `[決]` → `[実]` へ昇格し、02 を実態に追従させるのはこちら)
 - 提出: /export-doc(反映後の doc をクライアント向けに PDF / xlsx 出力)
