@@ -19,6 +19,10 @@
   毎セッション hook が促し)   --refactor = リファクタ分析)  +実動確認+独立レビュー)     タグ昇格・ADR・図・索引)
 
 品質系(任意の時点): /tool-check = ツールによる機械検査(チェック 3 階層の 1+2。第 3 層の実動確認は do-task)
+入力系(任意の時点): /reflect-decisions = 原資料(議事録・文字起こし・チャットログ・資料)から決定事項を
+                    抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05)へ出典付き反映
+                    (update-doc が「実コード→doc」なのに対しこちらは「人の決定→doc」。
+                     実装が必要な決定・宿題は /create-task へチェーン提案)
 ```
 
 | skill | 責務 | 読む | 書く |
@@ -30,6 +34,7 @@
 | update-doc | メモリ / CLAUDE.md / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, CLAUDE.md, doc/(索引含む) |
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
 | stack-research | 依存の実バージョンに固有の注意点・ベストプラクティス・脆弱性の Web 調査とノート生成 | マニフェスト, lockfile, Web | doc/06_stack-notes.md, doc/README.md |
+| reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01〜05, doc/README.md(索引) |
 
 ## 3. 固有情報の 3 層吸収アーキテクチャ(最重要原則)
 
