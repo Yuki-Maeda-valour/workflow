@@ -94,6 +94,6 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 ## 関連スキル
 
 - 前提: /understand-project(プロジェクト把握)
-- 流入元: /reflect-decisions(会議決定のタスク化。決定内容・出典・期限を引き継ぐ)・/stack-research(該当箇所のタスク化)
+- 流入元: /reflect-decisions(会議決定のタスク化。決定内容・出典・期限を引き継ぐ)・/stack-research(該当箇所のタスク化)・/data-audit(承認済み監査指摘のタスク化。path:行・根拠・修正方針と種別ヒントを引き継ぐ)
 - 次: /do-task(このタスク MD を実装)
 - タスク完了後: /update-doc(ドキュメント同期)

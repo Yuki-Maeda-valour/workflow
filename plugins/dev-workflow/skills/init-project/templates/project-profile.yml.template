@@ -58,6 +58,12 @@ quality:
 # 機密ファイル(読まない・値を出力しない・ログ混入を検査)
 secret_paths: [".env", ".env.*", ".dev.vars"]
 
+# データ境界監査(data-audit)の調整(無ければ既定辞書+全境界を対象)
+# audit:
+#   sensitive_fields: []                  # 機密フィールド名の追加(既定辞書に加算)
+#   public_boundaries: []                 # 認可チェック不要と確認済みの公開境界(パス・ルート名)
+#   exclude_paths: []                     # 監査対象から除外するパス(生成コード・vendor 等)
+
 # 実行機能レベル(タスク系 skills の重さを調整)
 # features:
 #   impact_analysis: true                 # create-task の影響範囲調査

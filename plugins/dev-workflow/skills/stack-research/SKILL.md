@@ -108,6 +108,6 @@ argument-hint: "[--update | --security-only | --deps=<pkg1,pkg2>]"
 
 ## 関連スキル
 
-- 生成したノートの参照元: /understand-project(⚠️ 事項に反映)・/create-task(技術的考慮事項。--refactor ではアンチパターン検出対象に追加)
+- 生成したノートの参照元: /understand-project(⚠️ 事項に反映)・/create-task(技術的考慮事項。--refactor ではアンチパターン検出対象に追加)・/data-audit(バージョン固有の脆弱性・注意点を監査観点に追加)
 - 該当箇所の修正: /create-task → /do-task
 - 初期導入: /init-project の直後に実行を推奨
