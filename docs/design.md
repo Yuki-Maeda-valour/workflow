@@ -19,6 +19,8 @@
   毎セッション hook が促し)   --refactor = リファクタ分析)  +実動確認+独立レビュー)     タグ昇格・ADR・図・索引)
 
 品質系(任意の時点): /tool-check = ツールによる機械検査(チェック 3 階層の 1+2。第 3 層の実動確認は do-task)
+                    /data-audit = データ境界監査(機密露出・認可欠如・過剰取得を 3 層で検査、裏取り済み指摘を提案)
+                    (承認された指摘はタスク化をチェーン提案──→ /create-task)
 入力系(任意の時点): /discuss-spec = テーマ単位の壁打ちで仕様を決め、決定録を生成(doc は書かない)──チェーン──→
                     /reflect-decisions = 原資料(議事録・文字起こし・チャットログ・資料・壁打ち決定録)から
                     決定事項を抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05/07)へ出典付き反映
@@ -37,6 +39,7 @@
 | update-doc | メモリ / CLAUDE.md / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, CLAUDE.md, doc/(索引含む) |
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
 | stack-research | 依存の実バージョンに固有の注意点・ベストプラクティス・脆弱性の Web 調査とノート生成 | マニフェスト, lockfile, Web | doc/06_stack-notes.md, doc/README.md |
+| data-audit | サーバー境界を越えるデータの監査(機密露出・認可欠如・IDOR・過剰取得・DB 防御)。読み取り専用で裏取り済み指摘を提案し、承認分を /create-task へチェーン | コード全域, スキーマ, profile, doc/06 | .claude/reviews/(レポートのみ) |
 | reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01・03〜05・07(02・06 は対象外), doc/README.md(索引) |
 | discuss-spec | テーマ単位の壁打ちでユーザーと仕様を決める(論点分解 → 選択肢・推奨提示 → 1 論点ずつ合意)。結論を決定 / 暫定 / 未決 / 却下に峻別した決定録を生成し /reflect-decisions へチェーン | doc/, 実装コード, profile | 決定録(doc/minutes/ 等)のみ。doc/ は書かない |
 | export-doc | doc/ をクライアント提出用に PDF / xlsx / HTML へ変換。サニタイズ確認(地雷・管理タグ・内部記述)+機密検査+ Mermaid 画像化。ツールは動的検出・縮退あり | doc/, profile | export/(出力のみ。doc/ は不変) |
@@ -121,6 +124,12 @@ domain_risks: []             # 例: [web3, i18n, e2e-data, salesforce, zenstack]
 
 # 機密ファイル(読まない・値を出力しない・ログ混入を検査)
 secret_paths: [".env", ".env.*", ".dev.vars"]
+
+# データ境界監査(data-audit)の調整(任意。無ければ既定辞書+全境界を対象)
+audit:
+  sensitive_fields: []       # 機密フィールド名の追加(既定辞書に加算。例: [memberCode, planRank])
+  public_boundaries: []      # 認可チェック不要と確認済みの公開境界(パス・ルート名)
+  exclude_paths: []          # 監査対象から除外するパス(生成コード・vendor 等)
 
 # 実行機能レベル(タスク系 skills の重さを調整)
 features:

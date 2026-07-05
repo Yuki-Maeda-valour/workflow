@@ -6,7 +6,7 @@
 - プロジェクト固有情報(パス・コマンド・スタック)は skill にハードコードされていない。`.claude/project-profile.yml` +実行時自動検出+ CLAUDE.md の 3 層で吸収する(profile が無くても動く)
 - 設計の詳細・規約・出典は [docs/design.md](docs/design.md)
 
-## skills 一覧(10 種)
+## skills 一覧(11 種)
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
@@ -20,6 +20,7 @@
 | `/reflect-decisions` | 議事録・文字起こし・チャットログ等から決定事項を抽出し、精査(裏取り・レビュー・確認)を経て要件定義(doc/03)・ADR(doc/04)等へ出典付きで反映。未決・宿題は /create-task へチェーン提案 | 「議事録を反映して」「決まったことを反映して」 |
 | `/export-doc` | doc をクライアント提出用に PDF / xlsx / HTML へ変換。内部情報のサニタイズ確認・機密検査・Mermaid 図の画像化付き。doc 自体は変更しない | 「PDF にして」「エクセルで出して」 |
 | `/tool-check` | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | コミット前 |
+| `/data-audit` | データ境界監査(読み取り専用)。機密露出・認可欠如・IDOR・過剰取得・DB 防御不足を 3 層(frontend / backend / database)で検査し、裏取り済み指摘を提案。承認分は /create-task へチェーン | 「データが漏れていないか調べて」「セキュリティ監査して」 |
 
 推奨サイクル: `/init-project`(初回。→ stack-research へチェーン)→ `/understand-project`(毎セッション hook が促し)→ `/create-task` → `/do-task` → `/update-doc --task`
 

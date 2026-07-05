@@ -1,0 +1,8 @@
+# Python 派生物
+__pycache__/
+*.pyc
+
+# Claude Code の揮発性キャッシュ(design.md §5-18)
+.claude/grasp.md
+.claude/reviews/
+.claude/.understand-project-done
