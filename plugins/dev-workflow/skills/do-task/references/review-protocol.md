@@ -17,10 +17,10 @@
 | reviewer | タイプ / モデル | 狙い |
 |---|---|---|
 | reviewer-internal | Explore(モデル継承) | プロジェクト規約・実装整合の視点 |
-| reviewer-strong | general-purpose / 上位モデル(読み取り指示) | 深い論理・設計面の見落とし |
-| reviewer-alt | general-purpose / 標準・別系統モデル(読み取り指示) | 別モデル視点による多様性 |
+| reviewer-strong | general-purpose / 利用可能な最上位モデル(読み取り指示) | 深い論理・設計面の見落とし |
+| reviewer-alt | general-purpose / 上位〜標準の別モデル(読み取り指示) | 別モデル視点による多様性 |
 
-モデルは実行環境で利用可能なものから能力帯が異なるように選ぶ(profile の `features.review_models` 優先。Claude Code の目安: 上位= opus、標準= sonnet)。エイリアスのみで指定し、版数・日付付き ID をハードコードしない。general-purpose を使う reviewer には「読み取り専用。ファイルを編集しない」を明示する。
+モデルは実行環境で利用可能なものを実行時に確認し、能力上位から順に(最上位を必ず含めて)能力帯が異なるように選ぶ(profile の `features.review_models` 優先。Claude Code の現時点の目安: 最上位= fable、上位= opus、標準= sonnet)。組み合わせを固定せずモデルの世代交代に追従する。エイリアスのみで指定し、版数・日付付き ID をハードコードしない。Claude Code 単体(他ベンダーのモデルを選べない環境)では Claude の上位モデルのみで編成し、外部 CLI・他ベンダーのモデルを探しに行かない。外部 CLI(Cursor 等)へ委託できる環境でベンダーの異なるモデルを選べる場合は、ベンダー横断の多様性(各社の最上位級)を優先する。外部 CLI・他ベンダーが利用不可のとき(レート制限・認証切れ・未導入・応答なし等)は Claude Code 単体の編成(Claude 上位モデル)に自動縮退し、縮退の事実と理由を報告に明記する。general-purpose を使う reviewer には「読み取り専用。ファイルを編集しない」を明示する。
 
 ## レビュー観点(6 カテゴリ)
 

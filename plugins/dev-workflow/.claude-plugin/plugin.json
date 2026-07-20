@@ -1,7 +1,7 @@
 {
 	"name": "dev-workflow",
 	"displayName": "Dev Workflow",
-	"version": "3.4.1",
+	"version": "3.5.0",
 	"description": "タスク駆動開発の汎用ワークフロー skills 集。プロジェクト把握(understand-project)→タスク設計(create-task。リファクタ分析 --refactor 内蔵)→実装・検証(do-task)→ドキュメント同期(update-doc)のコアサイクルに、tool-check(機械検査)・data-audit(データ境界監査: 機密露出・認可欠如・過剰取得)・stack-research(バージョン固有調査)・init-project(導入)・discuss-spec(壁打ちでの仕様決め)・reflect-decisions(議事録等からの決定事項のドキュメント反映)・export-doc(クライアント向け PDF / xlsx 出力)を加えた 11 skills。プロジェクト固有情報は .claude/project-profile.yml と実行時自動検出で吸収する。",
 	"author": {
 		"name": "Yuki-Maeda-valour",

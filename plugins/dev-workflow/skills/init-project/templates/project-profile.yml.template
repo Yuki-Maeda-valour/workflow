@@ -69,7 +69,7 @@ secret_paths: [".env", ".env.*", ".dev.vars"]
 #   impact_analysis: true                 # create-task の影響範囲調査
 #   external_review: true                 # create-task の外部レビュー
 #   reviewer_count: 1                     # do-task のレビュアー数: 1 | 3
-#   review_models: [opus, sonnet]         # レビューに使うモデル群(省略時: 環境で使える上位+標準を自動選定)
+#   review_models: [fable, opus, sonnet]  # レビューに使うモデル群(省略時: 環境で使える最上位から能力順に自動選定)
 #   implementer: internal                 # internal | cursor(外部 CLI 委託)
 #   implementer_model: sonnet             # implementer のモデル(エイリアスのみ)
 

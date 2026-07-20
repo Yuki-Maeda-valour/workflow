@@ -90,7 +90,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 ## Phase 5: レビューループ(--no-review 以外)
 
-1. **能力帯の異なる複数レビュアーを単一メッセージで並列 Agent 起動**(実行環境で利用可能なモデルから上位+標準を選ぶ。profile の `features.review_models` 優先。Claude Code の目安: opus + sonnet。エイリアスのみ)。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
+1. **能力帯の異なる複数レビュアーを単一メッセージで並列 Agent 起動**(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアスのみ)。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
    - 合格基準: 実コードとの整合 / 網羅性(今回の変更範囲)/ 古い情報の不在 / ドキュメント間の無矛盾 / **タグ・ADR・図・索引の整合** / フォーマット規約
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**全レビュアー PASS(valid 0 件)で合格**

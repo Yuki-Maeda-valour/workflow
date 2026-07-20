@@ -12,7 +12,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 2. **実コード裏取り**。現状分析は必ず実コードを読んで書く。推測・記憶で「〜のはず」と書かない。対象ファイルはパス+行番号で特定する
 3. **スコープ縮小を設計段階で殺す**。実装タスクは「何を確認したら完了か」まで書く。曖昧な表現(「対応する」「整理する」)を残さない
 4. **契約の整合**。スコープ外にした機能がある場合、「入力は受理するが処理されない」type の不整合が生まれないかを必ず検証し、生まれるなら受理側を塞ぐタスクを含める
-5. サブエージェントは Agent + SendMessage のみ。モデルはエイリアス(opus / sonnet)のみ。`claude -p` の Bash 起動は禁止(別課金)
+5. サブエージェントは Agent + SendMessage のみ。モデルはエイリアス(fable / opus / sonnet 等、実行環境で指定可能なもの)のみ。`claude -p` の Bash 起動は禁止(別課金)
 
 ## オプション
 
@@ -75,7 +75,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 
 ## Phase 4.5: 外部レビュー(features.external_review が true のとき)
 
-1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから上位+標準を選ぶ。profile の `features.review_models` 優先。Claude Code の目安: opus + sonnet。エイリアス指定のみ)。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
+1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
 3. valid を反映 → 両者 PASS(valid 指摘 0 件)まで反復。**セーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告を出して継続可否を確認
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する

@@ -28,8 +28,8 @@ WARNS: list[str] = []
 FORBIDDEN_PATTERNS = [
     (rf"{re.escape(str(Path.home()))}(?!/dev/workflow\b)", "ユーザー環境の絶対パス"),
     (r"TeamCreate|TeamDelete", "廃止 API(Agent + SendMessage を使う)"),
-    (r"claude-(?:opus|sonnet|haiku)-[0-9][-0-9a-z]*", "日付付き/版数付きモデル ID(エイリアスを使う)"),
-    (r"(?:Opus|Sonnet)\s*4\.[0-9]", "モデル版数のハードコード(エイリアスを使う)"),
+    (r"claude-(?:fable|mythos|opus|sonnet|haiku)-[0-9][-0-9a-z]*", "日付付き/版数付きモデル ID(エイリアスを使う)"),
+    (r"(?:Fable|Mythos|Opus|Sonnet|Haiku)\s*[0-9]", "モデル版数のハードコード(エイリアスを使う)"),
     (r"claude\s+-p\b|claude\s+--print", "claude -p の Bash 起動(禁止・別課金)"),
 ]
 
