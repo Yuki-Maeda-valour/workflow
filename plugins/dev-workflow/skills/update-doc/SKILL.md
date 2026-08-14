@@ -118,6 +118,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 - 事前把握: /understand-project(--deep でドリフト検出)
 - タスク完了の流れ: /do-task → /update-doc --task(差分同期)
+- 設計から PR まで通しで回す: /ship-task(このスキルを最終工程として内部で実行し、doc 更新を別 commit にして PR に載せる)
 - 依存バージョン起因の更新: /stack-research --update(06 はこちら)
 - 会議決定の反映: /reflect-decisions(人の決定 → doc。07 と「実装未追従」の `[決]` 行はこちらが書く)
 - クライアント提出用の出力: /export-doc(doc を PDF / xlsx へ変換)

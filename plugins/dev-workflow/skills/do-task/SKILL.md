@@ -122,3 +122,4 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 - 前提: /create-task(タスク MD が無い場合はまず設計書を作る)
 - 完了後: /update-doc --task(完了タスク駆動の差分同期)
+- 設計から PR まで通しで回す: /ship-task(このスキルを実装工程として内部で実行し、doc 同期と PR 作成まで続ける)

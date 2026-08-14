@@ -6,7 +6,7 @@
 - プロジェクト固有情報(パス・コマンド・スタック)は skill にハードコードされていない。`.claude/project-profile.yml` +実行時自動検出+ CLAUDE.md の 3 層で吸収する(profile が無くても動く)
 - 設計の詳細・規約・出典は [docs/design.md](docs/design.md)
 
-## skills 一覧(11 種)
+## skills 一覧(12 種)
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
@@ -16,6 +16,7 @@
 | `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を `task/進行中_*.md` に生成。`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |
 | `/do-task` | タスク設計書を実装(implementer 委託)・機械検証・実動確認・独立レビュー・完了処理。中断再開可。「検証だけ」も可 | 「タスクをやって」「続きをやって」 |
 | `/update-doc` | メモリ / CLAUDE.md / doc を実コードと同期。`--task` で完了タスク駆動の差分同期(要件タグ昇格・ADR・図・索引まで) | タスク完了後の締め |
+| `/ship-task` | 上の 3 工程(設計 → 実装 → doc 同期)を 1 コマンドで通し、作業ブランチ・実装/doc の commit・push・PR 作成まで出す。既定は走り切り、要件不明・品質ゲート赤・レビュー未収束でのみ停止 | 「まるっとやって」「設計から PR まで一気に」 |
 | `/discuss-spec` | テーマ単位の壁打ちで仕様を対話決定(論点分解 → 選択肢・推奨 → 合意)。決定録を生成して /reflect-decisions へチェーン | 「壁打ちしたい」「仕様を相談して決めたい」 |
 | `/reflect-decisions` | 議事録・文字起こし・チャットログ等から決定事項を抽出し、精査(裏取り・レビュー・確認)を経て要件定義(doc/03)・ADR(doc/04)等へ出典付きで反映。未決・宿題は /create-task へチェーン提案 | 「議事録を反映して」「決まったことを反映して」 |
 | `/export-doc` | doc をクライアント提出用に PDF / xlsx / HTML へ変換。内部情報のサニタイズ確認・機密検査・Mermaid 図の画像化付き。doc 自体は変更しない | 「PDF にして」「エクセルで出して」 |
@@ -23,6 +24,7 @@
 | `/data-audit` | データ境界監査(読み取り専用)。機密露出・認可欠如・IDOR・過剰取得・DB 防御不足を 3 層(frontend / backend / database)で検査し、裏取り済み指摘を提案。承認分は /create-task へチェーン | 「データが漏れていないか調べて」「セキュリティ監査して」 |
 
 推奨サイクル: `/init-project`(初回。→ stack-research へチェーン)→ `/understand-project`(毎セッション hook が促し)→ `/create-task` → `/do-task` → `/update-doc --task`
+一気通貫で回す場合: `/understand-project` → `/ship-task <タスク内容>`(設計 → 実装 → doc 同期 → PR。工程の中身は上の 3 スキルそのもの)
 
 ## 導入方法
 

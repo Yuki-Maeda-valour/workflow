@@ -14,9 +14,13 @@
 /init-project(初回のみ: 標準構成を生成)──チェーン提案──→ /stack-research
       │                                    (依存バージョン固有の調査 → doc/06。
       ▼                                     実在する問題はタスク化をチェーン提案──→ /create-task)
-/understand-project ──→ /create-task ──→ /do-task ──→ /update-doc --task
+/understand-project ──→ /create-task ──→ /do-task ──→ /update-doc --task ──→ PR
  (把握。grasp にキャッシュ、  (種別判定+設計書生成。   (implementer 委託+機械検証   (完了タスク駆動の差分同期。
   毎セッション hook が促し)   --refactor = リファクタ分析)  +実動確認+独立レビュー)     タグ昇格・ADR・図・索引)
+                             └──────────────── /ship-task(一気通貫)────────────────┘
+                              薄いオーケストレーター。上の 3 工程を順に実行し、作業ブランチ作成・
+                              実装 commit・doc commit・push・PR 作成まで出す。既定は走り切り、
+                              要件不明の残存・品質ゲート赤・スコープ縮小・レビュー未収束でのみ停止する
 
 品質系(任意の時点): /tool-check = ツールによる機械検査(チェック 3 階層の 1+2。第 3 層の実動確認は do-task)
                     /data-audit = データ境界監査(機密露出・認可欠如・過剰取得を 3 層で検査、裏取り済み指摘を提案)
@@ -35,6 +39,7 @@
 | init-project | 標準構成(CLAUDE.md / doc/ / task/ / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | CLAUDE.md, doc/, task/, .claude/, .mcp.json |
 | understand-project | プロジェクト把握。読み取り専用(キャッシュ除く) | profile, CLAUDE.md, メモリ / doc, コード | .claude/grasp.md(キャッシュのみ) |
 | create-task | 種別判定・影響範囲調査済みのタスク設計書生成(--refactor = 対象発見型リファクタ分析) | コード全域 | task/進行中_*.md のみ |
+| ship-task | create-task → do-task → update-doc --task を通しで実行し、ブランチ・commit・push・PR まで出す薄いオーケストレーター(工程の中身は持たない) | 各工程の成果物 | 3 工程の書き込み+ git ブランチ / commit / PR |
 | do-task | タスク実装(委託)〜機械検証・実動確認〜独立レビュー〜完了処理。検証のみモード可 | task MD, コード | ソースコード, task MD |
 | update-doc | メモリ / CLAUDE.md / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, CLAUDE.md, doc/(索引含む) |
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
@@ -174,6 +179,8 @@ known_facts_ref: docs/HANDOVER.md
     - **最小**(サブエージェント機構なし): 全工程を実行者自身が直列に行う。多モデルレビューは**観点を切り替えたセルフレビュー**(事実整合 → 契約 → セキュリティ → 規約を別パスで実施)+機械検証(diff 突合・grep・数値突合)に縮退する。「検証者と実装者の分離」は、フェーズを分けること・機械検証を必ず実行すること・品質ゲートを完了報告前に再実行することで最低限担保する
 18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / CLAUDE.md)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない
 19. **チェックの 3 階層**: ① 静的検査(format / lint / typecheck)② 自動テスト ③ **実動確認**(実際に動かして変更フローを観察する)。①②はタスクに依存しない定型実行で /tool-check が担う。③はタスク種別に依存するため、create-task(完了条件を実行可能な確認手順として書く+task-types.md の実動確認列)と do-task(Phase 5.5)が担う。③を省略したときは必ず「未実施+理由」を明記する(サイレントスキップ禁止)
+20. **git 出口の規律**: ブランチ作成・commit・push・PR 作成を能動的に行うのは `/ship-task` のみ(`/do-task` はユーザーが `--branch` 等で明示指定したときだけブランチを作る。コミットは従来どおり求められた場合のみ)。**マージは決して行わない**。PR は品質ゲート・実動確認・レビューがすべて緑のときだけ開き、緑でないときはブランチと commit を残して停止する。commit メッセージ規約は `git log` から推定してプロジェクトに合わせ、実装と doc は別 commit に分ける
+21. **チェーン実行時の責務分界**: 複数 skill を連鎖させる skill(/ship-task)は**工程の中身を再定義しない**。順序・工程間の続行判定・出口(git)だけを持ち、各工程の手順・品質基準は元の skill に委ねる。連鎖元から呼ばれた skill は、ユーザーへの次アクション提案(チェーン提案)を出さない(呼び出し元が判断するため)
 
 ## 6. SKILL.md 執筆規約
 
