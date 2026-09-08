@@ -1,7 +1,7 @@
 ---
 name: create-task
 description: 実装に着手できる品質のタスク設計書(task/進行中_{名}.md)を生成する。「タスクを作って」「タスク化して」「設計書にまとめて」「〜の実装を計画して」と言われたとき、または実装依頼が複数ファイル・契約変更・DB 変更を含み計画が必要なときに使う。「リファクタして」「整理して」「技術的負債を返済したい」も --refactor(対象発見型の定量分析でリファクタタスクを設計)としてこのスキルが扱う。実コード調査に基づく現状分析、影響範囲調査(型伝播チェーン・操作カバレッジ・テスト影響)、チェックリスト、完了条件を含むタスク MD を作り、checker 検証と外部レビュー(能力帯の異なる複数モデル並列)で品質を担保する。このスキルは設計書を作るだけで実装はしない(実装は /do-task)。
-argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<name>]] [--light | --no-review]"
+argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<name>]] [--light | --no-review] [--runners=<名前,...>]"
 ---
 
 # create-task — タスク設計書の生成
@@ -23,6 +23,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 | `--refactor [対象\|--area]` | リファクタモード: 対象発見型の定量分析([references/refactor-analysis.md](references/refactor-analysis.md))で候補を選定してタスク化。対象未指定なら全体を探査 |
 | `--light` | 影響範囲調査(Phase 1.5)と外部レビュー(Phase 4.5)を省略。小規模変更向け |
 | `--no-review` | 外部レビュー(Phase 4.5)のみ省略 |
+| `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 
 ## Phase 0: 前提
 
@@ -77,6 +78,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 ## Phase 4.5: 外部レビュー(features.external_review が true のとき)
 
 1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。各 Agent に `reviewer-{モデル}` の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
+   - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
 3. valid を反映 → 両者 PASS(valid 指摘 0 件)まで反復。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**セーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告を出して継続可否を確認
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する

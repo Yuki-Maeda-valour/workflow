@@ -14,8 +14,18 @@ usage() {
   ./setup.sh --global                    ~/.claude/skills に symlink(全プロジェクト共通)
   ./setup.sh --list                      含まれる skills を表示
 
+  他ホスト(Codex / Cursor)向け — .agents/skills へ配置する:
+  ./setup.sh --agents <プロジェクトパス>        <パス>/.agents/skills に symlink
+  ./setup.sh --agents-copy <プロジェクトパス>   <パス>/.agents/skills にコピー
+  ./setup.sh --agents-global                    ~/.agents/skills に symlink
+
 オプション:
   --force    既存の同名 skill を上書き(既定: スキップして警告)
+
+注意:
+  - <プロジェクトパス> は事前に存在している必要がある(存在しないとエラー終了する)
+  - skill を 1 本だけ取り出す配置は非サポート。skill 間の兄弟参照
+    (../do-task/... など)が解決できず、外部ランナー等の機能が無効化される
 
 推奨導入(plugin marketplace 方式)は Claude Code 内で:
   /plugin marketplace add <このリポジトリのパス or GitHub repo>
@@ -30,7 +40,9 @@ TARGET=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --link|--copy) MODE="${1#--}"; TARGET="${2:-}"; shift 2 ;;
+    --agents|--agents-copy) MODE="${1#--}"; TARGET="${2:-}"; shift 2 ;;
     --global) MODE="global"; shift ;;
+    --agents-global) MODE="agents-global"; shift ;;
     --list) MODE="list"; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
@@ -56,8 +68,19 @@ case "$MODE" in
     [[ -d "$TARGET" ]] || { echo "ERROR: $TARGET が存在しません" >&2; exit 1; }
     DEST="$TARGET/.claude/skills"
     ;;
+  agents|agents-copy)
+    # Codex(.agents/skills)/ Cursor(.agents/skills or .cursor/skills)向けの配置
+    [[ -n "$TARGET" ]] || { echo "ERROR: プロジェクトパスを指定してください" >&2; usage; exit 2; }
+    [[ -d "$TARGET" ]] || { echo "ERROR: $TARGET が存在しません" >&2; exit 1; }
+    DEST="$TARGET/.agents/skills"
+    if [[ "$MODE" == "agents-copy" ]]; then MODE="copy"; else MODE="link"; fi
+    ;;
   global)
     DEST="$HOME/.claude/skills"
+    MODE="link"
+    ;;
+  agents-global)
+    DEST="$HOME/.agents/skills"
     MODE="link"
     ;;
   *) usage; exit 2 ;;
@@ -91,4 +114,9 @@ done
 
 echo
 echo "完了: ${installed} 件導入 / ${skipped} 件スキップ(導入先: $DEST)"
-echo "次のステップ: 対象プロジェクトの Claude Code で /init-project を実行して標準構成を生成してください。"
+if [[ "$DEST" == */.agents/skills ]]; then
+  echo "次のステップ: 対象ホスト(Codex / Cursor)で /init-project を実行して標準構成を生成してください。"
+  echo "  ※ 外部 CLI レビュアーは既定では起動しません(profile の features.runners または --runners で宣言したときのみ)。"
+else
+  echo "次のステップ: 対象プロジェクトの Claude Code で /init-project を実行して標準構成を生成してください。"
+fi
