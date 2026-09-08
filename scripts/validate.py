@@ -8,7 +8,7 @@
   4. description の長さ(規約 150〜500 字 / 上限 1024 字)
   5. 禁止パターン(design.md §5): 特定プロジェクトへのハードコード・絶対パス・
      TeamCreate/TeamDelete・日付付きモデル ID・claude -p
-  6. SKILL.md 内の相対リンク(references/ scripts/ templates/)の存在
+  6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の存在
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -158,14 +158,18 @@ def check_skills():
                         continue
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: 禁止パターン [{why}] -> {m.group(0)!r}")
 
-        # 相対リンクの存在
-        for m in LINK_RE.finditer(text):
-            target = m.group(1)
-            if target.startswith(("http://", "https://", "mailto:")):
-                continue
-            if not (d / target).exists():
-                line = text.count("\n", 0, m.start()) + 1
-                ERRORS.append(f"{d.name}/SKILL.md:{line}: リンク切れ -> {target}")
+        # 相対リンクの存在(SKILL.md と references/ 配下の md をどちらも検査する。
+        # リンクは「そのファイルの位置」から解決する)
+        md_files = [md] + sorted(f for f in d.rglob("*.md") if f != md)
+        for f in md_files:
+            body = f.read_text(encoding="utf-8", errors="replace")
+            for m in LINK_RE.finditer(body):
+                target = m.group(1)
+                if target.startswith(("http://", "https://", "mailto:")):
+                    continue
+                if not (f.parent / target).exists():
+                    line = body.count("\n", 0, m.start()) + 1
+                    ERRORS.append(f"{f.relative_to(REPO)}:{line}: リンク切れ -> {target}")
 
 
 def main() -> int:

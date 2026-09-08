@@ -1,7 +1,7 @@
 ---
 name: init-project
 description: 新規・既存どちらのプロジェクトにも dev-workflow の標準構成(薄型 CLAUDE.md / .claude/project-profile.yml / doc/ 一式 / task/ ・任意で understand-project 強制 hook・specialist agent・MCP セットアップ)を導入する初期化 skill。技術スタック・パッケージマネージャ・リポジトリ構成・MCP 利用可否を自動検出し、「Serena を使うか」(= ドキュメント正本の向き)を起点とした対話で必要な MCP(ブラウザ分析 / デザイン連携)まで確認してから生成する。doc/ は規模に関わらず統一構成(索引 + 01〜05・07 計画〈見積もり・スケジュール。未定のまま設置可〉の番号付き文書)。生成した軸ドキュメントは能力帯の異なる複数モデルの並列レビューで合格まで検証する。「プロジェクトを初期化して」「標準構成を入れて」「ワークフローを導入して」「開発環境をセットアップして」「CLAUDE.md を整備して」等で使う。既存 CLAUDE.md は上書きせず差分提案する。
-argument-hint: "[対象パス] [--yes]"
+argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 ---
 
 # init-project — 標準構成の導入
@@ -19,6 +19,7 @@ argument-hint: "[対象パス] [--yes]"
 ## 引数
 
 - 第 1 引数: 対象パス(省略時はカレントディレクトリ)。以降これを `<root>` と呼ぶ。
+- `--runners=<名前,...>`: Phase 3.5 の生成物レビューに外部 CLI レビュアーを追加する(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md)
 - `--yes`: Phase 2 の対話を省略し推奨既定で進める(既定: Serena は検出結果に従う〈使用可能なら正本 serena・無ければ正本 docs〉・hook 無・agents 無・MCP は設定せず検出結果の案内のみ)。
 
 ---
@@ -163,6 +164,7 @@ argument-hint: "[対象パス] [--yes]"
 ここで生成・変更した軸ドキュメント(CLAUDE.md とその差分提案 / profile / doc/ 一式 / settings・mcp のマージ結果 / 初期メモリを整備した場合はそれも)は**以後の開発全体の判断基準になる**ため、多モデル・多角レビューを行い、合格するまで完了しない。
 
 1. **レビュアー編成**: 実行環境で利用可能なモデルから**能力上位順に 2〜3 体(最上位を必ず含める)**を単一メッセージで並列 Agent 起動する(Claude Code の現時点の目安: fable + opus + sonnet。profile の `features.review_models` があれば優先。モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-{モデル}` の `name` を付けて起動する。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じ name へ SendMessage で依頼する**(再スポーンしない。design §5-17 フル段階)。
+   - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
 2. **観点の分担**:
    - **事実整合**: 記載した PM・コマンド・スタック・パスが実プロジェクトと一致するか(マニフェスト・lockfile・実ディレクトリで裏取り)
    - **内部整合**: CLAUDE.md ↔ profile ↔ doc/ の間に矛盾・重複・食い違いがないか

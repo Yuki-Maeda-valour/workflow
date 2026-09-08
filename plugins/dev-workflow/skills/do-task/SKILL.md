@@ -1,7 +1,7 @@
 ---
 name: do-task
 description: task/ のタスク設計書(進行中_*.md)を実装し、検証・レビュー・完了処理まで行う実行スキル。「タスクをやって」「実装して」「タスクを進めて」「続きをやって」と言われたとき、/create-task で作った設計書を実装に移すときに使う。規模判定に基づき researcher / implementer / reviewer のサブエージェントを編成し、team-lead(このセッション)が diff とチェックリストの機械突合でスコープ縮小を検出、品質ゲートを自ら再実行して完了を判定する。完了時はタスクファイルを 完了_ にリネームし追加修正記録を追記する。「検証だけして」と依頼された場合は検証フェーズのみを実行し、修正せず合否を報告する。
-argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)] [--max-iter=<N>] [--reviewers=1|3] [--branch[=<名前>]]"
+argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)] [--max-iter=<N>] [--reviewers=1|3] [--runners=<名前,...>] [--branch[=<名前>]]"
 ---
 
 # do-task — タスクの実装・検証・完了処理
@@ -22,7 +22,7 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 ## Phase 0: 前提と対象確定
 
 1. 対象タスク: 引数のパス、無ければ `ls task/進行中_*.md` から選択(複数あればユーザーに確認)。タスク MD を全文読む
-2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら以降のコマンド・編集は root 配下)、`quality`、`features`(reviewer_count / implementer / implementer_model)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)
+2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら以降のコマンド・編集は root 配下)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。契約の詳細は [references/external-runners.md](references/external-runners.md) §1
 3. `git status` を確認。未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する。**ユーザーがブランチ作成を指定した場合のみ**(`--branch` または口頭指示)、着手前にブランチを作成して切り替える(名前省略時は `task/{タスク名}`)。指定が無ければ現在のブランチのまま進める(能動的な提案はしない)
 4. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): `SendMessage` / `ListAgents` が使えるか(= Agent Teams が有効か)をツールの実在で確認し、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
 5. タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
@@ -55,7 +55,7 @@ researcher(Explore)に、タスク MD の対象ファイル群の現状・既存
 - 機密ファイル(`secret_paths`)を読まない・報告に値を含めないこと
 - `.claude/grasp.md`(あれば)のパス — プロジェクト全体像・規約・コマンドの再構築を省くため
 
-`features.implementer: cursor` の場合(外部 CLI 委託)は、事前に外部ツールの疎通を 1 ショット検証し、失敗したら内部 implementer にフォールバックする。
+`features.implementer: cursor`(外部 CLI 委託)は**未実装**(起動コマンドが定義されていないため実行できない)。宣言されていても**内部 implementer で実装し**、「implementer の外部委託は未実装のため内部で実行した」と報告に明記する。外部 CLI はレビュアーとしてのみ使える(Phase 6 の外部ランナー。多様性が目的なら `features.runners` へ移行する)。
 
 長時間応答がない場合の死活監視は [references/review-protocol.md](references/review-protocol.md) の M1〜M4 に従う。
 
@@ -96,6 +96,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - reviewer は実装に関与していない Explore を新規起動(1 体)。`--reviewers=3` では内部+能力帯の異なる 2 モデル(実行環境の最上位が全体に必ず含まれるよう能力上位から選ぶ。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus)の 3 体を単一メッセージで並列起動
 - reviewer には diff・タスク MD・レビュー観点(6 カテゴリ: 機能保全 / 契約整合 / タスク充足 / テスト妥当性 / 規約 / セキュリティ・機密)を渡し、APPROVED または指摘リスト(JSON)を返させる
 - **team-lead が各指摘を実コードで裏取りしてトリアージ**(valid / invalid / needs-user)。invalid は理由を記録。valid のみ修正へ
+- **外部ランナー(オプトイン)**: `--runners` または `features.runners` が**宣言されている場合に限り**、外部 CLI レビュアーを追加する。手順・編成・判定・終了コードの契約はすべて [references/external-runners.md](references/external-runners.md) が正本(ここでは再掲しない)。宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない。宣言されたのに使えないときはエラーとして報告し、内蔵編成に縮退して続行する
 - 全 reviewer APPROVED まで Phase 3〜6 を反復。同一指摘 2 回連続残存 → ユーザー確認。`--max-iter`(既定 5)到達 → 状況報告
 - 記録: `.claude/reviews/{role}-{TASK_NAME}-iter{ITER}.md`
 

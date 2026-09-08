@@ -1,7 +1,7 @@
 ---
 name: ship-task
 description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければそのまま /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計に必要な情報が欠けている場合は設計書だけ返して実装に進まない。品質ゲート赤・スコープ縮小検出・レビュー未収束のときも停止し、PR は作らない。工程を個別に回したいときは各スキルを直接呼ぶ。
-argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--reviewers=1|3]"
+argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--reviewers=1|3] [--runners=<名前,...>]"
 ---
 
 # ship-task — 設計 → 実装 → doc 同期 → PR の一気通貫実行
@@ -24,6 +24,7 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 | `--branch=<名前>` | 作業ブランチ名を明示(省略時は `task/{タスク名}`) |
 | `--refactor [対象]` | /create-task の対象発見型リファクタモードで設計する |
 | `--reviewers=1\|3` | /do-task のレビュアー数を指定 |
+| `--runners=<名前,...>` | 外部 CLI レビュアー(オプトイン)を /create-task・/do-task・/update-doc へ透過。既定は内蔵のみ |
 
 `--light` `--no-review` `--max-iter` など各スキル固有の引数は、そのまま該当工程へ透過的に渡す。
 
@@ -61,7 +62,7 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 
 ## Phase 3: 実装(/do-task)
 
-Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`--reviewers` 等は透過)。ブランチは Phase 1 で作成済みのため `--branch` は渡さない。
+Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過)。ブランチは Phase 1 で作成済みのため `--branch` は渡さない。
 
 /do-task が以下で終わった場合は **Phase 4 へ進まず停止**する(実装 commit だけ残し、PR は作らない):
 
@@ -74,7 +75,7 @@ Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`-
 
 ## Phase 4: ドキュメント同期(/update-doc --task)
 
-完了タスク MD を入力に **/update-doc --task=task/完了_{タスク名}.md を実行**する(要件タグ昇格・ADR 追記・図・索引まで)。
+完了タスク MD を入力に **/update-doc --task=task/完了_{タスク名}.md を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過)。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)
