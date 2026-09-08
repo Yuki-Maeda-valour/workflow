@@ -12,7 +12,8 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 2. **実コード裏取り**。現状分析は必ず実コードを読んで書く。推測・記憶で「〜のはず」と書かない。対象ファイルはパス+行番号で特定する
 3. **スコープ縮小を設計段階で殺す**。実装タスクは「何を確認したら完了か」まで書く。曖昧な表現(「対応する」「整理する」)を残さない
 4. **契約の整合**。スコープ外にした機能がある場合、「入力は受理するが処理されない」type の不整合が生まれないかを必ず検証し、生まれるなら受理側を塞ぐタスクを含める
-5. サブエージェントは Agent + SendMessage のみ。モデルはエイリアス(fable / opus / sonnet 等、実行環境で指定可能なもの)のみ。`claude -p` の Bash 起動は禁止(別課金)
+5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアス(fable / opus / sonnet 等、実行環境で指定可能なもの)のみ。`claude -p` の Bash 起動は禁止(別課金)
+6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。SendMessage が使えるなら**フル段階**で運用し、checker・レビュアーへの再検証依頼は同じ name へ SendMessage で戻す(再スポーンしない)。どの段階で実行したかを報告に明記する
 
 ## オプション
 
@@ -71,13 +72,13 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 
 ## Phase 3: checker 検証
 
-**checker(Explore・読み取り専用)を Agent で起動**し、生成したタスク MD を [references/checker-checklist.md](references/checker-checklist.md) の観点で検証させる。指摘は team-lead(このセッション)が実コードで裏取りし、valid のみ反映する。修正 → 再検証を指摘ゼロまで繰り返す(3 回同一指摘が残る場合はユーザーに相談)。
+**checker(Explore・読み取り専用、`name` は `checker`)を Agent で起動**し、生成したタスク MD を [references/checker-checklist.md](references/checker-checklist.md) の観点で検証させる。指摘は team-lead(このセッション)が実コードで裏取りし、valid のみ反映する。修正 → 再検証を指摘ゼロまで繰り返す(3 回同一指摘が残る場合はユーザーに相談)。**フル段階では再検証を `SendMessage` で同じ `checker` に依頼する**(design §5-17)。
 
 ## Phase 4.5: 外部レビュー(features.external_review が true のとき)
 
-1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
+1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。各 Agent に `reviewer-{モデル}` の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
-3. valid を反映 → 両者 PASS(valid 指摘 0 件)まで反復。**セーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告を出して継続可否を確認
+3. valid を反映 → 両者 PASS(valid 指摘 0 件)まで反復。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**セーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告を出して継続可否を確認
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する
 
 ## 最終ゲート(完了報告前セルフチェック)

@@ -12,8 +12,8 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 2. **完了条件は team-lead が再実行**。品質ゲートコマンドは implementer の報告に関わらず team-lead 自身がもう一度実行して緑を確認する
 3. **タスク MD が契約**。実装範囲の拡大・縮小は勝手に行わない。設計と実態がずれたらタスク MD を更新するか、ユーザーに確認する
 4. **反復は仕組みで安全に**。レビュー・修正の反復は APPROVED まで続けるのが基本動作。`--max-iter`(既定 5)は安全弁で、到達したら状況を報告して指示を仰ぐ
-5. サブエージェントは Agent + SendMessage のみ。モデルはエイリアスのみ。`claude -p` の Bash 起動禁止。調査・レビューは Explore(読み取り専用)、実装は general-purpose
-6. **環境縮退**(design §5-17): SendMessage が使えない環境では一方向委託(差し戻しは前回成果物パスを含む新規 Agent 起動)に、サブエージェント自体が無い環境では直列セルフ実行+機械検証に縮退する。どの段階で実行したかを完了報告に明記する
+5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアスのみ。`claude -p` の Bash 起動禁止。調査・レビューは Explore(読み取り専用)、実装は general-purpose
+6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**SendMessage が使える(Agent Teams 有効)ならフル段階で運用し、差し戻し・再レビューは同じ name へ SendMessage で戻す**(再スポーンしない — 実装・レビューの文脈が保たれる)。使えなければ一方向委託(差し戻しは前回成果物パスを含む新規 Agent 起動)、サブエージェント自体が無ければ直列セルフ実行+機械検証に縮退する。どの段階で実行したかを完了報告に明記する
 
 ## 検証のみモード
 
@@ -24,7 +24,7 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 1. 対象タスク: 引数のパス、無ければ `ls task/進行中_*.md` から選択(複数あればユーザーに確認)。タスク MD を全文読む
 2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら以降のコマンド・編集は root 配下)、`quality`、`features`(reviewer_count / implementer / implementer_model)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)
 3. `git status` を確認。未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する。**ユーザーがブランチ作成を指定した場合のみ**(`--branch` または口頭指示)、着手前にブランチを作成して切り替える(名前省略時は `task/{タスク名}`)。指定が無ければ現在のブランチのまま進める(能動的な提案はしない)
-4. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める
+4. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): `SendMessage` / `ListAgents` が使えるか(= Agent Teams が有効か)をツールの実在で確認し、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
 5. タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
 6. **再開判定**(「続きをやって」対応): 対象タスク MD に既に `- [x]` があり、`.claude/reviews/` に同タスクの iter ログがある場合は**再開モード**で入る — まず Phase 4 の機械検証(diff・チェックリスト突合)を先に実行して「実際にどこまで終わっているか」を復元し(チェック状態の自己申告を信じない)、最後の iter のレビュー状態を確認してから残タスクの実装を続行する。ITER は既存ログの最大値+1 から。復元結果(完了済み / 未完了 / チェック済みだが実装なし)を報告してから進む
 
@@ -44,7 +44,7 @@ researcher(Explore)に、タスク MD の対象ファイル群の現状・既存
 
 ## Phase 3: implementer 委託
 
-**implementer(general-purpose、model: profile の `implementer_model`、既定 sonnet)** を Agent で起動する。委託プロンプトに必ず含めるもの:
+**implementer(general-purpose、model: profile の `implementer_model`、既定 sonnet)** を Agent で起動する。**`name` は `implementer`**(フル段階では以降の差し戻し・STATUS 問い合わせの宛先になる)。委託プロンプトに必ず含めるもの:
 
 - タスク MD の全文パスと「このタスク MD のチェックリストが完了の定義(DoD)である」こと
 - タスク MD の「参考実装」節のパターンを踏襲すること(構成・命名・エラー処理・テストの書き方を既存に合わせる)
@@ -69,7 +69,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 4. **数値突合**: タスク MD に「N 件の〜を…」とあれば実際に数える(Grep -c 等)
 5. **契約整合**: スコープ外項目について「受理するが処理されない」不整合が生まれていないか実コードで確認する
 
-問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。
+問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。**フル段階では `SendMessage` で `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。標準段階では前回成果物のパスを含めた新規 Agent 起動で代替する。
 
 ## Phase 5: 完了条件の再実行
 
