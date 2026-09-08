@@ -61,6 +61,8 @@
 
 **profile が無くても必ず動く**こと(全項目にフォールバックを定義する)。これが汎用性の担保。
 
+**吸収対象はプロジェクト固有の事実だけでなく、ツール固有の事実(外部 CLI の起動コマンド・フラグ・モデル名)も含む。** 外部 CLI のコマンド文字列を SKILL.md 本文に書かず、既定値は references の表に置き、profile(`features.runner_models` 等の**コマンドにならない値**のみ)→ 実行時検出(`command -v` 等の存在確認)→ references の既定値、の順で解決する。**起動コマンドそのものは profile から受け取らない**(§7-2 の信頼モデル)。
+
 ### 動的検出の標準ロジック
 
 - パッケージマネージャ: package.json の `packageManager` フィールド → lockfile(pnpm-lock.yaml / bun.lock* / yarn.lock / package-lock.json)→ 既定 npm。PHP は composer.json、Python は pyproject.toml / requirements.txt、Go は go.mod、Rust は Cargo.toml
@@ -142,11 +144,29 @@ features:
   external_review: true      # create-task Phase 4.5(多モデル外部レビュー)
   reviewer_count: 1          # do-task のレビュアー数: 1 | 3
   review_models: [fable, opus, sonnet]  # レビューに使うモデル群(省略時: 環境で利用可能な最上位から能力順に自動選定)
-  implementer: internal      # internal | cursor(外部 CLI 委託)
+  implementer: internal      # internal | cursor(外部 CLI 委託)。cursor は未実装(起動コマンド未定義)で、
+                             # 宣言しても内部 implementer で動作する。レビューの多様性が要るなら runners を使う
   implementer_model: sonnet  # implementer サブエージェントのモデル(エイリアスのみ)
+  # ── 外部ランナー(レビュアーをホスト外の CLI に委託する。既定は内蔵のみ・オプトイン)──
+  runners: []                # 例: [cursor-agent, codex]。空 = 外部 CLI を探しに行かない(既定の編成を変えない)
+                             # ここで選べるのは do-task/references/external-runners.md の既定表にある名前だけ
+  runner_models: {}          # ランナー別モデル名。省略時はランナー既定(モデル指定フラグを付けない)
+                             # 例: {cursor-agent: "<そのランナーで有効なモデル名>"}
+                             # '-' で始まる値・空白を含む値は拒否される(フラグへの化けを防ぐ)
+  # ※ 起動コマンドの上書きは profile では受け付けない(下の「信頼モデル」を参照)
 
 # ローカル環境の構築コマンド(環境構築を依頼されたとき doc/05 と併せて参照される)
 setup_commands: []           # 例: ["docker compose up -d db", "pnpm db:migrate", "pnpm db:seed"]
+
+# ※ モデル名の扱い: §5-4 のエイリアス規約は Claude のモデル(`review_models` / `implementer_model`)に適用する。
+#   外部ランナーのモデルにはエイリアスが存在しないため `runner_models` で実名を指定し、
+#   skill 本文・references にはハードコードしない(§3 のツール固有情報の 3 層解決)。
+#
+# ※ 信頼モデル: この profile は commit される共有ファイルであり、リポジトリを書ける者が内容を書ける。
+#   したがって「profile に書いてある = ユーザーの意思」とは扱わず、**リポジトリ側が書ける値から
+#   実行されるコマンドが変わってはならない**。外部ランナーの起動コマンド上書きは profile では
+#   受け付けず(書かれていても無視し、無視した旨を報告する)、セッション内でユーザーが明示指定した
+#   ときだけ有効になる。既定表のランナーでは実行ファイル名と読み取り専用フラグを既定値で固定する。
 
 # 地雷リストの場所の上書き(任意)。既定は doc/05_operations.md の「引き継ぎ・地雷」節
 # (全ツール・人間から見える doc/ が正本。.claude/ 配下は Claude 専用になるため置かない)
@@ -161,11 +181,11 @@ known_facts_ref: docs/HANDOVER.md
 2. **skill 名**: `update-doc`(update-docs は使わない)。旧 refact / refactor は `create-task --refactor` に統合(分析 → タスク化 → do-task で実行)
 3. **サブエージェント API**: `Agent` + `SendMessage` + `ListAgents` のみ。TeamCreate / TeamDelete は使わない(廃止方針。チームはセッション単位の暗黙チームで足り、明示生成は不要)。**Agent 起動時は必ず `name` を付ける**(SendMessage の宛先になる。名前が無いと双方向連携の経路が塞がる)。`name` は**半角英数・ハイフン・アンダースコアのみ**で役割が分かる短い語にする(日本語は使えない。例: `implementer` / `reviewer-opus` / `scan-exposure`)。SendMessage が使える環境(Claude Code で Agent Teams 有効)では**フル段階での運用を既定とし**、使えない環境では前提にせず §5-17 の縮退プロトコルに従う
 4. **モデル指定**: エイリアスのみ(`fable` / `opus` / `sonnet` / `inherit`)。日付付きモデル ID・版数(「Opus 4.7」等)をハードコードしない。利用可能なエイリアス群はモデルの世代交代で変わるため固定リストとして扱わず、実行時に Agent ツールの `model` パラメータで指定可能なものを確認する
-5. **`claude -p` / `claude --print` を Bash から起動しない**(別課金)。サブエージェントは必ず Agent ツール経由
+5. **ホスト自身と同じ CLI を Bash から起動しない**(別課金・二重課金の回避)。ホストが Claude Code なら `claude -p` / `claude --print` の Bash 起動を禁止、ホストが Codex なら `codex exec` の起動を禁止、という**ホスト相対の規約**として読む。ホスト内のサブエージェントは必ずホストのエージェント機構(Claude Code なら Agent ツール)経由で起動する。**ホストと異なる CLI をレビュアー(外部ランナー)として起動することは、`--runners` または `features.runners` で宣言されている場合に限り許す**(例: Codex / Cursor をホストとする環境から Claude CLI をレビュアーに使う)。宣言が無ければ外部 CLI を探しに行かない。ホスト判定は環境変数で行う(Claude Code は `CLAUDECODE` の存在で判定。他ホストの判定方法は未検証のため、`external-runners.md` に候補と上書き手段を置く)
 6. **検証の主体**: スコープ縮小を検出する側(team-lead)は実装者と分離する。**規模に関わらず実装は implementer に委託し、team-lead は常に検証者に回る**(直接実装は §5-17 の環境縮退時のみ)。完了条件のコマンドは team-lead が自分で再実行する(implementer の自己申告を最終確認にしない)
 7. **スコープ縮小検出 grep**(do-task の検証で使用): `段階的に実施|後続タスク|今回はスコープ外|のみ作成|次回対応|一旦`
 8. **チェックリスト突合の機械化**: `grep -cE '^\s*- \[(x|X)\]'` で件数突合+diff との整合確認
-9. **レビューの扱い**: 多モデルレビュー — **実行環境で利用可能なモデルを実行時に確認し、能力上位から順に(利用可能な最上位を必ず含めて)能力帯の異なる 2〜3 体を選び**、単一メッセージで並列スポーンする。組み合わせを固定せず、モデルの世代交代に自動追従させる(Claude Code では Agent ツールの `model` で指定可能なエイリアスが利用可能一覧にあたる。現時点の目安: fable(最上位)+ opus(上位)+ sonnet(標準))。profile の `features.review_models` があればそれを優先する。**Claude Code 単体(他ベンダーのモデルを選べない環境)では Claude の上位モデルのみで編成する** — 外部 CLI や他ベンダーのモデルを探しに行かず、Agent ツールで指定可能なエイリアスの上位から選んで完結させる。**複数ベンダーのモデルを選べる環境(Cursor 等の外部 CLI 委託時)では、同一ベンダー内の能力帯差よりベンダー横断の多様性を優先**し、各社の最上位級を組み合わせる(例: Claude 最上位 + OpenAI 最上位(Codex 系)+ Google / xAI 最上位。こちらも製品名・版数をハードコードせず実行時に選ぶ)。ただし外部 CLI・他ベンダーが利用不可のとき(レート制限・認証切れ・未導入・応答なし等)は、ベンダー横断を諦めて **Claude Code 単体の編成(前述の Claude 上位モデル)に自動縮退**し、縮退したことと理由を報告に明記する(サイレント縮退禁止)。モデルを選べない環境では、観点(事実整合 / セキュリティ / 規約)を分けた複数レビュアーで多様性を確保する。**規模適応**: 変更対象が少数(目安 3 件以下)で矛盾の無い軽微な実行では、観点を分けた単一レビュアー(またはセルフレビュー)へ軽量化してよい(採用した編成を報告に明記する)。→ team-lead が各指摘を実コードで裏取りし valid / invalid / needs-user にトリアージ。指摘を盲信して自動反映しない。false positive は理由を記録
+9. **レビューの扱い**: 多モデルレビュー — **実行環境で利用可能なモデルを実行時に確認し、能力上位から順に(利用可能な最上位を必ず含めて)能力帯の異なる 2〜3 体を選び**、単一メッセージで並列スポーンする。組み合わせを固定せず、モデルの世代交代に自動追従させる(Claude Code では Agent ツールの `model` で指定可能なエイリアスが利用可能一覧にあたる。現時点の目安: fable(最上位)+ opus(上位)+ sonnet(標準))。profile の `features.review_models` があればそれを優先する。**既定はホスト内蔵のモデルのみで編成する**(オプトイン方式)— 外部 CLI や他ベンダーのモデルを探しに行かず、ホストのエージェント機構で指定可能なモデル(Claude Code なら Agent ツールのエイリアス)の上位から選んで完結させる。**外部ランナーが宣言されている場合に限り**(`--runners` 引数、または profile の `features.runners`)、ベンダー横断の多様性を同一ベンダー内の能力帯差より優先し、各社の最上位級を組み合わせる(製品名・版数をハードコードせず実行時に選ぶ)。宣言があっても外部ランナーが利用不可のとき(未導入・認証切れ・レート制限・応答なし・読み取り専用未確立)は、ベンダー横断を諦めて**内蔵のみの編成に縮退**し、縮退したことと理由を報告に明記する(サイレント縮退禁止)。宣言されているのに使えない場合は**エラーとして報告**する(黙って内蔵だけで済ませない)。外部ランナーの起動手順・判定順序・機密ガードは §7 と `do-task/references/external-runners.md` に従う。モデルを選べない環境では、観点(事実整合 / セキュリティ / 規約)を分けた複数レビュアーで多様性を確保する。**規模適応**: 変更対象が少数(目安 3 件以下)で矛盾の無い軽微な実行では、観点を分けた単一レビュアー(またはセルフレビュー)へ軽量化してよい(採用した編成を報告に明記する)。→ team-lead が各指摘を実コードで裏取りし valid / invalid / needs-user にトリアージ。指摘を盲信して自動反映しない。false positive は理由を記録
 10. **レビューループのセーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告。`--max-review` / `--max-iter` は安全弁
 11. **実コード優先の原則**: メモリ・ドキュメントと実コードが矛盾したら実コードを信じ、矛盾を必ず注記する。裏取りなしの推測でドキュメントを書かない
 12. **機密保護**: `secret_paths` のファイルは読まない。存在の有無だけ報告。サブエージェントのログへの混入も検査対象
@@ -182,6 +202,7 @@ known_facts_ref: docs/HANDOVER.md
       - **レビュアー同士を会話させない**。独立性が失われると多モデルレビューの多様性が意味を失う。指摘の突合は必ず team-lead が行う
     - **標準**(`Agent` は使えるが `SendMessage` が無い): 委託は「起動 → 最終レポート」の一方向。差し戻し・追加指示は**前回成果物のパスを含めた新規 Agent 起動**で代替する。応答しないエージェントへの STATUS 問い合わせ(M1)は省略し、待機目安を超えたら再スポーン(M2)に直行する
     - **最小**(サブエージェント機構なし): 全工程を実行者自身が直列に行う。多モデルレビューは**観点を切り替えたセルフレビュー**(事実整合 → 契約 → セキュリティ → 規約を別パスで実施)+機械検証(diff 突合・grep・数値突合)に縮退する。「検証者と実装者の分離」は、フェーズを分けること・機械検証を必ず実行すること・品質ゲートを完了報告前に再実行することで最低限担保する
+    - **外部ランナーは 3 段階と直交する任意の追加**(§7)。段階判定はあくまで**ホスト内蔵のサブエージェント機構**の話であり、外部 CLI レビュアーは `--runners` / `features.runners` が宣言されたときだけ編成に加える。**内蔵レビュアーを全滅させない** — `reviewer-internal` は常に維持し、`reviewer-alt` 枡は外部ランナーで置換してよい(粒度は `do-task/references/external-runners.md` の編成表が正本)。外部ランナーは会話継続(`SendMessage`)ができないため常に「起動 → 最終レポート」の一方向で、再レビューは毎回新規起動になる。よって**反復は内蔵側で回し、外部は初回の多様性確保に使う**
 18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / CLAUDE.md)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない
 19. **チェックの 3 階層**: ① 静的検査(format / lint / typecheck)② 自動テスト ③ **実動確認**(実際に動かして変更フローを観察する)。①②はタスクに依存しない定型実行で /tool-check が担う。③はタスク種別に依存するため、create-task(完了条件を実行可能な確認手順として書く+task-types.md の実動確認列)と do-task(Phase 5.5)が担う。③を省略したときは必ず「未実施+理由」を明記する(サイレントスキップ禁止)
 20. **git 出口の規律**: ブランチ作成・commit・push・PR 作成を能動的に行うのは `/ship-task` のみ(`/do-task` はユーザーが `--branch` 等で明示指定したときだけブランチを作る。コミットは従来どおり求められた場合のみ)。**マージは決して行わない**。PR は品質ゲート・実動確認・レビューがすべて緑のときだけ開き、緑でないときはブランチと commit を残して停止する。commit メッセージ規約は `git log` から推定してプロジェクトに合わせ、実装と doc は別 commit に分ける
@@ -193,11 +214,67 @@ known_facts_ref: docs/HANDOVER.md
 - **description は「何をするか+いつ使うか(トリガー語句)」を日本語で 150〜500 字(目安 350)**。Claude の自動呼び出し判断の材料になるため、ユーザーが言いそうな表現(「〜して」)を含める。上限 1,024 字・description+when_to_use 合計 1,536 字
 - **SKILL.md は 500 行以下**。超える詳細は `references/*.md` に外出しし、本文から「いつ読むか」付きでリンクする(progressive disclosure)
 - 実行可能な重い処理・決定的処理は `scripts/` に外出しして skill は薄いオーケストレーションに徹する(冪等に作る)
+- **共有アセット(複数 skill が使うスクリプト・references)は所有 skill の配下に置き、他 skill からは兄弟参照 `../<所有 skill>/...` で解決する**。プラグインルート(`plugins/dev-workflow/scripts/` 等)には置かない — setup.sh 経由の `.claude/skills` 配置でも `.agents/skills` 配置でもプラグインルートが存在せず、3 配布形態のうち 2 つで消えるため。プラグインルートを指す環境変数にも依存しない(ホスト依存になり §7 と両立しない)。兄弟参照は**全 skill が同じ親ディレクトリへ一括配置されていること**を前提とする。skill を 1 本だけ取り出す部分導入など解決できない構成では、**当該機能を無効化して報告する**(探索を広げず、諦める側に倒す)
 - プロジェクト固有の事実(パス・コマンド・スタック名・メモリ名)を本文に書かない(§3 の 3 層で解決)
 - 冒頭に「原則」、末尾に「最終ゲート」(出力・完了前セルフチェック)を置く
 - 関連 skill への導線(前提 skill / 後続 skill)を必ず書く
 
-## 7. このリポジトリへの還元フロー
+## 7. ホスト非依存レイヤ(手順層は可搬・実行層のみ吸収)
+
+この skills 集は Claude Code 以外のホスト(Codex CLI / Cursor 等)でも使う。層を分けて扱う。**「置けばそのまま動く」ではない** — 可搬なのは形式であり、本文はホスト内蔵の機構を前提とした記述を含む:
+
+| 層 | 中身 | 可搬性 |
+|---|---|---|
+| 形式 | SKILL.md のファイル形式(frontmatter + 本文)と配置規約 | **可搬**。agentskills.io の開標準で、各ホストが同じ形式を読む |
+| 本文 | 手順の記述 | **完全には可搬でない**。ホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` 配下の状態ファイル)を前提とする記述を含み、他ホストでは読み替えが要る(**未検証**)。量の目安は下の測定コマンドで再現できる |
+| 実行層 | 誰がレビューするか(ホスト内蔵のサブエージェント / 外部 CLI) | ホスト依存。**ここだけをアダプタ(`do-task/scripts/review-agent.sh`)で吸収する** |
+
+**ホスト固有記述の量(再現可能な測定)**: 語彙の選び方で数値は変わるため、コマンドごと残す。
+
+```bash
+for s in plugins/dev-workflow/skills/*/; do
+  printf '%-20s %s\n' "$(basename "$s")" \
+    "$(grep -oE 'Agent|SendMessage|ListAgents|Explore|general-purpose|\.claude/|fable|opus|sonnet' "$s/SKILL.md" | wc -l)"
+done
+```
+
+2026-09-09 時点の実測(出現数): do-task 32 / create-task 25 / init-project 22 / update-doc 11 / reflect-decisions 11 / data-audit 9 / understand-project 7 / 他は 2 以下。**サブエージェント機構を持つホスト向けの記述が多い skill ほど、他ホストでは §5-17 の縮退プロトコルとして読み替える必要がある。**
+
+### 7-1. 配置先(手順層)
+
+| ホスト | 配置先 | 備考 |
+|---|---|---|
+| Claude Code | plugin marketplace(推奨)/ `<project>/.claude/skills/` / `~/.claude/skills/` | `setup.sh --link / --copy / --global` |
+| Codex | `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者) | frontmatter は `name` + `description` が必須 |
+| Cursor | `.cursor/skills/` または `.agents/skills/` | `/skill-name` で起動 |
+
+`setup.sh --agents / --agents-copy / --agents-global` が `.agents/skills` への配置を行う(Codex と Cursor で共用できる)。**skill を 1 本だけ取り出す配置は非サポート**(§6 の兄弟参照が前提のため)。**配置できることと、そのホストで手順どおり動くことは別**である(上の表の「本文」行)。他ホストで使う場合は、内蔵サブエージェント前提の記述を §5-17 の縮退プロトコル(最小段階=直列セルフ実行)として読み替える。
+
+### 7-2. 実行層(レビュアー起動)は宣言時のみのオプトイン
+
+**契約の正本は [`do-task/references/external-runners.md`](../plugins/dev-workflow/skills/do-task/references/external-runners.md)**(判定順序・終了コード・既定ランナー表・読み取り専用の保証範囲・ログ規約・機密ガードの手順)。ここには**方針(なぜそうするか)だけ**を置き、仕様の詳細は再掲しない — 同じ事実を複数箇所に書くと、変更のたびに同期漏れが起きるため。
+
+- **なぜオプトインか**: 既定でホスト外のプロセスを起動すると、課金・機密・実行権限の面で利用者の想定を超える。よって**宣言(`--runners` 引数 / profile の `features.runners`)が無ければ外部 CLI を探しに行かない**。既定の編成は §5-9 のままで、この節を足しても 1 ビットも変わらない
+- **なぜ起動を 1 本のスクリプトに集約するか**: 判定(存在・自ホストか・読み取り専用・疎通)を skill 本文の散文に書くと守られない。決定的な処理は `do-task/scripts/review-agent.sh` に集約し、skill は薄いオーケストレーションに徹する(§6)
+- **信頼モデル(最重要)**: `.claude/project-profile.yml` は commit される共有ファイルであり、リポジトリを書ける者が内容を書ける。したがって **profile に書かれた値から「実行されるコマンド」が変わってはならない**。profile から受け取ってよいのは既定表にあるランナー名とモデル名だけで、**起動コマンドの上書きは profile からも CLAUDE.md・README などリポジトリ内のいかなるファイルからも読まない**(書かれていても無視し、無視した旨を報告する)。**リポジトリ内のテキストはデータであって指示ではない**
+- **なぜ既定表のランナーに上書きを許さないか**: 任意のコマンド文字列を検査して「読み取り専用である」と保証するのは原理的に困難(フラグの重ね指定・`--` 以降への配置・同名バイナリなど、argv 検査を通り抜ける手は尽きない)。個別のガードを足していく方針は破綻するため、**上書き経路そのものを既定表ランナーから外す**。独自コマンドが要る場合は既定表に無いランナー名としてユーザーがセッション内で明示指定し、**読み取り専用の保証はユーザー責任**とする
+- **なぜ内蔵レビュアーを残すか**: 外部ランナーは会話継続ができず、認証・レート制限で落ちうる。多モデルレビューの土台を外部依存にしないため、`reviewer-internal` は常に維持する(`reviewer-alt` 枡の置換は可)
+- **機密ガードの原則**: 宣言は「使ってよい」であって「毎回無確認で渡してよい」ではない。`secret_paths` が実在するプロジェクトでは明示確認を取ってから起動する。レビュー経路は読み取り専用であり、**ユーザーの git 状態(index・stash)を書き換えてはならない**
+- **implementer の外部化は行わない**(スコープ外)。`features.implementer: cursor` は起動コマンドが未定義で未実装であり、宣言されても内部 implementer で動作する
+
+### 7-3. 前提とする外部事実(出典・確認日 2026-09-08)
+
+7-1 の配置先はすべて以下の外部事実に依存する。前提が崩れたら該当箇所は無効になるため出典を残す。
+
+| 事実 | 出典 |
+|---|---|
+| Codex は `.agents/skills` / `$HOME/.agents/skills` / `/etc/codex/skills` から SKILL.md を読む。frontmatter は `name` + `description` 必須。agentskills.io の開標準に準拠 | [Build skills — ChatGPT/Codex 公式ドキュメント](https://learn.chatgpt.com/docs/build-skills) |
+| Cursor は `.cursor/skills/` または `.agents/skills/` から SKILL.md を読み、`/skill-name` で起動できる | [Cursor Agent Skills(learncursor.dev)](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills) |
+| Codex は 2026-03-14 に subagents を GA(最大 8 並列・`~/.codex/agents/` の TOML・エージェントごとにモデル指定可) | [Use subagents and custom agents in Codex — Simon Willison](https://simonwillison.net/2026/Mar/16/codex-subagents/) |
+
+**未検証の範囲**: 実ホスト(Codex / Cursor)での読み込みは確認していない(検証環境に codex 未インストール / cursor-agent 未認証)。検証済みなのは「配置されること」までで、読み込みの成否は各ホストの上記仕様に依存する。
+
+## 8. このリポジトリへの還元フロー
 
 1. 各プロジェクトで skill に改善を加えたら、プロジェクト固有部分を profile / 動的検出に置き換えた形でこのリポジトリに反映する
 2. `plugins/dev-workflow/` 配下を編集 → バージョンを plugin.json / marketplace.json で上げる → commit & push
