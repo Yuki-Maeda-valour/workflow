@@ -62,6 +62,25 @@ cd ~/dev/workflow
 /understand-project      # 把握(以後は hook が毎セッション自動で促す)
 ```
 
+### D. 他ホスト(Codex / Cursor)で使う
+
+SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る。
+
+```bash
+cd ~/dev/workflow
+mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に存在している必要がある
+./setup.sh --agents ~/dev/新プロジェクト          # <パス>/.agents/skills に symlink
+./setup.sh --agents-copy ~/dev/新プロジェクト     # 同じ場所にコピー(独自改変する場合)
+./setup.sh --agents-global                       # ~/.agents/skills に symlink(全プロジェクト共通)
+```
+
+- **読み込み先の出典(確認日 2026-09-08)**: Codex は `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者)から読み、frontmatter は `name` + `description` が必須 — [Build skills(ChatGPT/Codex 公式)](https://learn.chatgpt.com/docs/build-skills)。Cursor は `.cursor/skills/` または `.agents/skills/` から読み `/skill-name` で起動 — [Cursor Agent Skills](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills)。Codex の subagents は 2026-03-14 に GA — [解説記事](https://simonwillison.net/2026/Mar/16/codex-subagents/)
+- **未検証**: 実ホスト(Codex / Cursor)での読み込み・動作は確認していない。検証済みなのは「配置されること」までで、読み込みの成否は上記の各ホスト仕様に依存する
+- **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。内蔵サブエージェントが無い環境では同 §5-17 の縮退プロトコル(最小段階=観点を分けた直列セルフレビュー)として読み替える
+- **外部 CLI レビュアーはオプトイン**: `--runners=<名前,...>` か profile の `features.runners` を宣言したときだけ起動する。宣言が無ければホスト内蔵のレビュアーだけを使い、外部 CLI を探しに行かない(既定の挙動は従来と同じ)。**契約の正本**(使えるランナー・判定順序・終了コード・機密ガード)は [external-runners.md](plugins/dev-workflow/skills/do-task/references/external-runners.md) の 1 ファイルだけで、README や design はそれを参照する
+- **skill を 1 本だけ取り出す配置は非サポート**: skill 間の兄弟参照(`../do-task/...`)が解決できず、外部ランナー等の機能が無効化される
+- **`features.implementer: cursor` を設定している場合**: これは未実装(起動コマンドが未定義)で、宣言しても内部 implementer で動作する。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
+
 ## 既存プロジェクトとの共存・移行
 
 - 既存プロジェクトの同名 skill(`.claude/skills/` 配下)はプロジェクト版が優先される。プラグイン版は `dev-workflow:名前` の名前空間で常に呼べる
@@ -69,11 +88,14 @@ cd ~/dev/workflow
 
 ## このリポジトリへの還元
 
-各プロジェクトで skill を改善したら、固有部分を profile / 動的検出に置き換えて `plugins/dev-workflow/` に反映 → バージョンを上げて commit → 各プロジェクトで更新を取得。詳細は [docs/design.md §7](docs/design.md)。
+各プロジェクトで skill を改善したら、固有部分を profile / 動的検出に置き換えて `plugins/dev-workflow/` に反映 → バージョンを上げて commit → 各プロジェクトで更新を取得。詳細は [docs/design.md §8](docs/design.md)。
 
 ## 検証
 
 ```bash
-python3 scripts/validate.py       # frontmatter / 規約 / JSON の一括検証
+python3 scripts/validate.py       # frontmatter / 規約 / リンク / JSON の一括検証
 claude plugin validate .          # Claude Code 本体による検証
+bash -n setup.sh                  # シェル構文
+bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh
+                                  # 外部ランナー起動スクリプトの回帰テスト(スタブのみ・外部 CLI 不要)
 ```

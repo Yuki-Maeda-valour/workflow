@@ -27,9 +27,14 @@ setup.sh                            # plugin を使わない導入(コピー / s
 ## 検証(実装終了時に必ず実行)
 
 ```bash
-# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン)の一括検証
+# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・リンク)の一括検証
 python3 scripts/validate.py
 
 # Claude Code 本体によるプラグイン検証
 claude plugin validate .
+
+# シェルスクリプトを触ったとき
+bash -n setup.sh
+bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
+bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh   # 外部ランナー起動の回帰テスト(必須)
 ```
