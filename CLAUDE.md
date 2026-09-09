@@ -21,8 +21,8 @@ setup.sh                            # plugin を使わない導入(コピー / s
 
 - プロジェクト固有の事実(パス・コマンド・スタック名・メモリ名)を skill 本文にハードコードしない。profile → 動的検出 → 権威参照ファイル(AGENTS.md)の 3 層で解決する
 - `.claude/project-profile.yml` が無くても必ず動くこと(全項目フォールバック)
-- SKILL.md は 500 行以下。description は「何を+いつ(トリガー語句)」を日本語 150〜350 字で
-- サブエージェントは Agent + SendMessage のみ。モデルはエイリアス(opus / sonnet)のみ
+- SKILL.md は 500 行以下。description は「何を+いつ(トリガー語句)」を日本語 150〜500 字(目安 350)で
+- 委託は役割語で書き、ホスト機構への解決は references の解決表に従う(design §5 前文・§7-5)。Claude Code での API・モデルエイリアスは design §5-3 / §5-4 に従い、ここに列挙しない
 - skill 本文・出力は日本語
 
 ## 検証(実装終了時に必ず実行)

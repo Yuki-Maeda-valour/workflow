@@ -79,6 +79,7 @@ secret_paths: [".env", ".env.*", ".dev.vars"]
 #   runners: []                           # 例: [cursor-agent, codex]。空 = 外部 CLI を探しに行かない(既定)
 #                                         # 既定表(do-task/references/external-runners.md §4)にある名前だけが有効。
 #                                         # 既定表に無い名前を書いても無視される(報告される)
+#                                         # ③ CLI バックエンドの有効化。② MCP の有効化キーは未定で、決まるまで ① 既定から変えられない
 #   runner_models: {}                     # ランナー別モデル名(省略時はランナー既定。エイリアスではなく実名)
 #                                         # '-' 始まり・空白入りの値は拒否される
 #   # ※ 起動コマンドはこの profile では指定できない。commit される共有ファイルの値から

@@ -64,7 +64,7 @@ cd ~/dev/workflow
 
 ### D. 他ホスト(Codex / Cursor)で使う
 
-SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る。
+SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る(委託の語は役割語 + 解決表で吸収していく方針。design §7-5)。
 
 ```bash
 cd ~/dev/workflow
