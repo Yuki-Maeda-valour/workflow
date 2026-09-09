@@ -1,6 +1,6 @@
 ---
 name: update-doc
-description: プロジェクトのドキュメント類(Serena メモリ / CLAUDE.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は直近の完了タスクを自動検出)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
+description: プロジェクトのドキュメント類(Serena メモリ / 権威参照ファイル AGENTS.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は直近の完了タスクを自動検出)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
 argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--no-review] [--runners=<名前,...>] [--yes]"
 ---
 
@@ -10,7 +10,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 1. **実コード裏取り**。ドキュメントに書く内容は必ず実コード・実設定で確認する。前のドキュメントからの転記や推測で書かない
 2. **カテゴリ別の正本を守る**。コード理解系(概要・構造・技術・規約・コマンド)の正本は profile の `source_of_truth` に従う。**要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は、設定に関わらず常に doc/ が正本**。`doc/06_stack-notes.md` は /stack-research、`doc/07_plan.md`(見積もり・スケジュール)は /reflect-decisions の管轄 — このスキルはどちらも**読むだけで書き換えない**(依存が変わっていたら /stack-research --update、計画の変更は /reflect-decisions を案内する)
-3. **薄い CLAUDE.md**。CLAUDE.md は要点+参照の薄型を維持し、詳細は正本(メモリまたは doc/)に置く
+3. **薄い権威参照ファイル**。正本は `AGENTS.md`(無ければ未移行の `CLAUDE.md`)。要点+参照の薄型を維持し(最も厳しいホストの上限 32 KiB 以内)、詳細は正本(メモリまたは doc/)に置く。`CLAUDE.md` が `@AGENTS.md` の import で橋渡ししている構成では、**`CLAUDE.md` に内容を複写せず `AGENTS.md` 側だけを更新する**(design §7-4)
 4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲートは実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
 5. 機密ファイルの値をドキュメントに書かない(存在と用途だけ記す)
 
@@ -29,7 +29,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 |---|---|
 | `--task=<パス>` | 指定した完了タスク MD を入力に差分同期(省略時は自動検出) |
 | `--analyze-only` | 全量監査の差分と監査結果の報告のみ(更新しない) |
-| `--memory-only` | Serena メモリのみ更新(CLAUDE.md / doc を触らない) |
+| `--memory-only` | Serena メモリのみ更新(権威参照ファイル / doc を触らない) |
 | `--specific=<name>` | 特定メモリ・特定ファイルのみ |
 | `--no-review` | Phase 5 の外部レビューを省略 |
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
@@ -41,7 +41,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 1. モードを判定する(上記)。**差分同期**では完了タスク MD を読み、更新の種(スコープ / 変更ファイル / 図解 / 技術的考慮事項の設計判断 / 追加修正記録の発見事項)を抽出する
 2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決
 3. **Serena がある場合**: `get_current_config` でアクティブプロジェクト確認(違えば `activate_project`)→ `list_memories` で実在メモリを動的列挙(固定名・固定数を仮定しない)→ 読む(差分同期では関連カテゴリのみ、全量監査では全部)
-4. doc/(または docs/)の索引(README.md)と関連文書を読む。CLAUDE.md を読む
+4. doc/(または docs/)の索引(README.md)と関連文書を読む。**権威参照ファイルを読む**(`AGENTS.md` があればそれ → 無ければ `CLAUDE.md`。両方あれば `AGENTS.md` が正本。design §3 の検出順)
 
 ## Phase 2: 実態調査と更新対象マップ
 
@@ -55,8 +55,8 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | 画面の追加・変更 | 画面・ルーティング実装 | 04(画面設計+ **画面遷移図**) |
 | ステータス・状態機械 | 状態遷移の実装 | 04(**状態遷移図**) |
 | 構造変更 | ディレクトリ実測 | 02(構造・データフロー図)/ structure メモリ |
-| 規約変更 | フォーマッタ・tsconfig 等 | 規約の置き場(source_of_truth 従属)+ CLAUDE.md の要点 |
-| コマンド変更 | scripts | 05・CLAUDE.md の Quick Commands / commands メモリ |
+| 規約変更 | フォーマッタ・tsconfig 等 | 規約の置き場(source_of_truth 従属)+ 権威参照ファイルの要点 |
+| コマンド変更 | scripts | 05・権威参照ファイルの Quick Commands / commands メモリ |
 | インフラ・デプロイ変更 | 設定・デプロイ手順 | 05(**デプロイ構成図**)/ 02(システム構成図) |
 | **機能の実装完了** | 完了タスク MD のスコープ | **03 の該当要件のタグを `[決]`→`[実]` へ昇格**(部分実装は昇格せず備考に状況を注記) |
 | **設計判断の発生** | タスクの技術的考慮事項・「該当なし・新規パターン」の判断 | **04 の ADR 表に追記**(日付 / 決定 / 理由 / 却下した代替案) |
@@ -68,7 +68,8 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
    - **doc 先行の保護**: 03 で `[決]` かつ備考に「実装未追従」がある行は、/reflect-decisions が会議決定を実装に先行して反映した正当な状態。実コードと食い違っていても乖離・陳腐化として扱わず、巻き戻し・削除・`[実]` への変更をしない(実装は /create-task → /do-task の完了後、差分同期で昇格する)
 2. **監査(全量監査モードのみ)**: 次の 3 点も検出する
    - 未管理: 実態に存在するがどのドキュメントにも書かれていない重要事項
-   - 内容乖離: ドキュメント間(メモリ vs CLAUDE.md vs doc/)の矛盾
+   - 内容乖離: ドキュメント間(メモリ vs 権威参照ファイル vs doc/)の矛盾
+   - **権威参照ファイルのドリフト**: `AGENTS.md` と `CLAUDE.md` が両方あるのに `CLAUDE.md` が `@AGENTS.md` を import していない(= 内容が二重管理になっている)。**判定ではコードブロック内・インラインコード内に現れる `@AGENTS.md` を import とみなさない**(Claude Code の import パース仕様。素朴な文字列一致では import を説明しているだけの記述を誤検出する)
    - 参照切れ: ドキュメントが指すパス・ファイルの不存在
 3. `--analyze-only` はここで報告して終了(更新推奨リスト+本実行の案内)
 
@@ -77,9 +78,10 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 原則 2 の**カテゴリ別正本**に従って更新する:
 
 - **コード理解系**(概要・構造・技術・規約・コマンド)は `source_of_truth` の向きで:
-  - **serena**(既定): メモリを更新(最新化 / 新規 add / 陳腐化 delete の提案)→ CLAUDE.md は薄型のまま要点のみ追従 → doc 02/05 の重複箇所は要約レベルで追従
-  - **docs**: doc/(02・05 等)を正本として更新 → メモリは探索用の要約として一方向同期 → CLAUDE.md は参照を追従
-  - **claude-md**: CLAUDE.md を直接更新(小規模・メモリ / doc 未整備の構成)
+  - **serena**(既定): メモリを更新(最新化 / 新規 add / 陳腐化 delete の提案)→ 権威参照ファイルは薄型のまま要点のみ追従 → doc 02/05 の重複箇所は要約レベルで追従
+  - **docs**: doc/(02・05 等)を正本として更新 → メモリは探索用の要約として一方向同期 → 権威参照ファイルは参照を追従
+  - **claude-md**: 権威参照ファイルを直接更新(小規模・メモリ / doc 未整備の構成。値名 `claude-md` は据え置きで、書き込み先は正本 = `AGENTS.md`)
+  - いずれの向きでも、**書き込み先の権威参照ファイルは `AGENTS.md`**(未移行のプロジェクトのみ `CLAUDE.md`)。import 1 行の `CLAUDE.md` には書き足さない
 - **常に doc/ が正本のカテゴリ**(source_of_truth に関わらず):
   - **要件タグの昇格**: 完了タスクのスコープと 03 を突合し、実装が完了した要件を `[実]` へ。スコープ外・部分実装・備考「実装未追従」の行(完了タスクで解消を確認できるまで)は昇格しない(備考に状況を注記)
   - **ADR 追記**: タスク中の設計判断を 04 の ADR 表へ 1 判断 1 行(大きな判断は `04_design/adr-YYYYMMDD-*.md` へ切り出し)
@@ -96,7 +98,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
-4. セーフティ: 同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → 状況報告
+4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ
 5. 記録: `.claude/reviews/update-doc-iter{N}.md`
 
 ## Phase 6: 最終チェック
@@ -113,7 +115,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 - [ ] 更新した文書の索引(doc/README.md)の状態・最終更新日を更新した
 - [ ] `doc/06_stack-notes.md`・`doc/07_plan.md` を書き換えていない(依存変更は /stack-research、計画変更は /reflect-decisions を案内した)
 - [ ] 備考「実装未追従」の `[決]` 行を巻き戻し・削除・昇格していない
-- [ ] CLAUDE.md を肥大化させていない(詳細は正本へ)
+- [ ] 権威参照ファイルを肥大化させていない(詳細は正本へ。32 KiB 以内)。import 1 行の `CLAUDE.md` に内容を書き足していない
 - [ ] 機密値を書いていない。ソースコードを変更していない。リンク検査を実行した
 
 ## 関連スキル

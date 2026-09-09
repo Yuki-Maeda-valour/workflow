@@ -23,7 +23,8 @@
 #   --readonly-flag "<語>"  読み取り専用フラグ。**既定表に無いランナーでのみ指定でき、必須**
 #   --prompt-file <パス>    レビュー依頼プロンプト(必須)
 #   --target <パス>         レビュー対象(繰り返し可。プロンプト末尾に付記しログに残す)
-#   --cwd <ディレクトリ>    ランナーの実行ディレクトリ(機密ガードの一時ツリーを渡す)
+#   --cwd <ディレクトリ>    ランナーの実行ディレクトリ(機密ガードの一時ツリーを渡す。呼び出し側の義務。
+#                           未指定でも起動するが、その旨を NOTE で stderr に出す)
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
 #   --run-timeout <秒>      本実行のタイムアウト(既定 600。0 は不可)
 #   --log-file <パス>       ログ出力先(既定 .claude/reviews/reviewer-<runner>-iter<N>.md)
@@ -45,7 +46,7 @@
 # 副作用: ログファイルの書き出しのみ(冪等)。ランナーは読み取り専用フラグを付けた形でのみ起動する。
 #         ただし「そのフラグで本当に書き込まない」ことはランナー側の実装への信頼であり、
 #         このスクリプトが保証できるものではない(保証範囲は external-runners.md §3 の表)。
-#         機構として封じたい場合は --cwd に使い捨ての一時ツリーを渡す(同 §9)。
+#         機構として封じるため --cwd に使い捨ての一時ツリーを必ず渡す(同 §9)。
 # --- end usage ---
 set -eEuo pipefail
 
@@ -151,7 +152,7 @@ case "$RUN_TIMEOUT" in ''|*[!0-9]*) fail_usage "--run-timeout は正の秒数" ;
 # 出典と確認日は ../references/external-runners.md の表に記載する。
 default_command() {
   case "$1" in
-    cursor-agent) printf '%s' 'cursor-agent --mode ask --model {model} -p --output-format json' ;;
+    cursor-agent) printf '%s' 'cursor-agent --mode ask --trust --model {model} -p --output-format json' ;;
     gemini)       printf '%s' 'gemini --approval-mode plan -m {model} -o json -p {prompt}' ;;
     codex)        printf '%s' 'codex exec --sandbox read-only -m {model}' ;;
     *) return 1 ;;
@@ -372,6 +373,12 @@ fi
 
 if [ -n "$COMMAND_TMPL" ]; then
   echo "NOTE: 起動コマンドを上書きしています(profile 由来ではなく、ユーザーの明示指定であることが前提)" >&2
+fi
+
+# 一時ツリーの適用は呼び出し側の義務(external-runners.md §5・§9)。機構では強制しないため、
+# 未指定を素通りさせず NOTE で可視化する(終了コードと判定順序は変えない)
+if [ -z "$CWD" ] && [ "$DRY_RUN" -eq 0 ]; then
+  echo "NOTE: --cwd が未指定です($(pwd) で起動します)。機密ガードは呼び出し側が §9 の一時ツリーを渡す前提" >&2
 fi
 
 # ── 判定 1: 存在 ──

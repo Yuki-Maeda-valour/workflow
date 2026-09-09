@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: 新規・既存どちらのプロジェクトにも dev-workflow の標準構成(薄型 CLAUDE.md / .claude/project-profile.yml / doc/ 一式 / task/ ・任意で understand-project 強制 hook・specialist agent・MCP セットアップ)を導入する初期化 skill。技術スタック・パッケージマネージャ・リポジトリ構成・MCP 利用可否を自動検出し、「Serena を使うか」(= ドキュメント正本の向き)を起点とした対話で必要な MCP(ブラウザ分析 / デザイン連携)まで確認してから生成する。doc/ は規模に関わらず統一構成(索引 + 01〜05・07 計画〈見積もり・スケジュール。未定のまま設置可〉の番号付き文書)。生成した軸ドキュメントは能力帯の異なる複数モデルの並列レビューで合格まで検証する。「プロジェクトを初期化して」「標準構成を入れて」「ワークフローを導入して」「開発環境をセットアップして」「CLAUDE.md を整備して」等で使う。既存 CLAUDE.md は上書きせず差分提案する。
+description: 新規・既存のプロジェクトに dev-workflow の標準構成(権威参照ファイル AGENTS.md + @AGENTS.md を import する薄い CLAUDE.md / .claude/project-profile.yml / doc/ 一式 / task/ ・任意で understand-project 強制 hook・specialist agent・MCP セットアップ)を導入する。技術スタック・パッケージマネージャ・構成・MCP 可否を自動検出し、「Serena を使うか」(= 正本の向き)を起点とした対話で必要な MCP(ブラウザ分析 / デザイン連携)まで確認して生成する。doc/ は統一構成(索引 + 01〜05・07 計画〈見積もり・スケジュール。未定可〉)。軸ドキュメントは能力帯の異なる複数モデルの並列レビューで検証する。「プロジェクトを初期化して」「標準構成を入れて」「ワークフローを導入して」「開発環境をセットアップして」「CLAUDE.md / AGENTS.md を整備して」等で使う。既存は上書きせず差分提案。AGENTS.md への移行は承認制。
 argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 ---
 
@@ -11,7 +11,8 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 ## 原則
 
 - **本 skill は手順(how)だけを持つ。** 生成する事実(what)は Phase 1 の検出とユーザー確認で解決し、プロジェクト固有の値をハードコードしない。
-- **既存を壊さない。** CLAUDE.md は既存があれば上書きせず差分提案。`.claude/settings.json` は既存キーを保ってマージ。既存 doc は上書きしない。
+- **権威参照ファイルの正本は `AGENTS.md`。** Codex / Cursor はこれを直接読む。Claude Code は AGENTS.md を読まないため、`CLAUDE.md` は `@AGENTS.md` の **import 1 行**として橋渡しに徹し、内容を複写しない(design §7-4)。
+- **既存を壊さない。** 権威参照ファイル(`AGENTS.md` / `CLAUDE.md`)は既存があれば上書きせず差分提案。`.claude/settings.json` は既存キーを保ってマージ。既存 doc は上書きしない。**この原則の唯一の例外が既存 `CLAUDE.md` から `AGENTS.md` への移行**で、原則を外すのではなく「**ユーザーの明示承認を条件とする例外**」として扱う(design §7-4。手順は Phase 3-1。承認が得られなければ移行しない)。
 - **構成の設置だけを行う。** 既存プロジェクトのソースコード・既存ドキュメントの中身の改善(リファクタ・修正・書き直し)には踏み込まない。気づいた改善点があっても報告に「後続候補」として列挙するに留め、実施は /understand-project → /stack-research → /create-task(リファクタは --refactor)→ /do-task のサイクルに委ねる。
 - **profile が無くても他 skill が動く。** ここで生成する `.claude/project-profile.yml` は各 skill の検出を助ける補助であり、必須ではない。最小限の検出値だけ埋める。
 - **テンプレは Read → 置換 → Write。** テンプレートは本スキルの `templates/`(この SKILL.md と同階層)に置いてある。Read し、`{{PLACEHOLDER}}` を検出値に置換してから対象パスへ Write する。値が不明な箇所は「（〜を記述）」等のガイド文を残したまま出力してよい。
@@ -20,7 +21,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 - 第 1 引数: 対象パス(省略時はカレントディレクトリ)。以降これを `<root>` と呼ぶ。
 - `--runners=<名前,...>`: Phase 3.5 の生成物レビューに外部 CLI レビュアーを追加する(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md)
-- `--yes`: Phase 2 の対話を省略し推奨既定で進める(既定: Serena は検出結果に従う〈使用可能なら正本 serena・無ければ正本 docs〉・hook 無・agents 無・MCP は設定せず検出結果の案内のみ)。
+- `--yes`: Phase 2 の対話を省略し推奨既定で進める(既定: Serena は検出結果に従う〈使用可能なら正本 serena・無ければ正本 docs〉・hook 無・agents 無・MCP は設定せず検出結果の案内のみ)。**既存 `CLAUDE.md` の `AGENTS.md` への移行だけは `--yes` でも省略せず明示承認を取る**(既存ファイルの内容を動かすため。Phase 3-1)。
 
 ---
 
@@ -30,7 +31,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **1. 新規 / 既存 / 再実行の判定**
 - ソースファイル数・`package.json` 等のマニフェスト有無・`.git` 有無を確認する。
-- マニフェストもソースもほぼ無い → **新規**(テンプレの雛形をそのまま出す)。コードがある → **既存**(検出値でテンプレを埋め、CLAUDE.md は差分提案に切り替える)。
+- マニフェストもソースもほぼ無い → **新規**(テンプレの雛形をそのまま出す)。コードがある → **既存**(検出値でテンプレを埋め、権威参照ファイルは差分提案に切り替える)。
 - profile に `workflow_version` が既にある → **再実行(アップデート)モード**: 現在の標準構成テンプレ一式と既存物を突合し、**新標準で増えた・変わった項目だけ**を差分提案する(既存の記述・過去に回答済みの選択は変えない)。完了時に `workflow_version` を現バージョンへ更新する。
 
 **2. 技術スタック・パッケージマネージャ**(design 3 層の「動的検出」)
@@ -45,10 +46,13 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **4. 品質コマンド**
 - `package.json` の `scripts` から `format` / `check` / `lint` / `type-check`|`typecheck` / `test` / `build` を存在検出する。
-- 無ければ言語別既定(例: PHP `./vendor/bin/pint --test` + `php artisan test`、Python `ruff check` + `pytest`)。判定できなければ空にし、CLAUDE.md 側にプレースホルダを残す。
+- 無ければ言語別既定(例: PHP `./vendor/bin/pint --test` + `php artisan test`、Python `ruff check` + `pytest`)。判定できなければ空にし、`AGENTS.md` 側にプレースホルダを残す。
 
 **5. 既存構成の有無**
-- `CLAUDE.md` / `.claude/project-profile.yml` / `.claude/settings.json` / `doc/`(または `docs/`)/ `task/` / `.serena/` / `.gitignore` / `README.md` の有無を控える。以降の「上書きしない」判断に使う。
+- `AGENTS.md` / `CLAUDE.md` / `.claude/project-profile.yml` / `.claude/settings.json` / `doc/`(または `docs/`)/ `task/` / `.serena/` / `.gitignore` / `README.md` の有無を控える。以降の「上書きしない」判断に使う。
+- **権威参照ファイルの状態を 4 通りに分類する**(design §3 の検出順): ① どちらも無い ② `AGENTS.md` のみ ③ `CLAUDE.md` のみ(未移行)④ 両方。
+- ④ のときは `CLAUDE.md` が `@AGENTS.md` を import しているかを判定する。**判定では、コードブロック(3 連バッククォートで囲まれた範囲)内とインラインコード(バッククォートで囲まれた範囲)内に現れる `@AGENTS.md` を import とみなさない**(Claude Code の import パース仕様。素朴な文字列一致だと、import を説明しているだけの `CLAUDE.md` を「import 済み」と誤判定する)。import が無ければドリフトとして控え、Phase 3-1 で import 行の追加を提案する。
+- ③ のときは、**他ツール・CI が `CLAUDE.md` を直接参照していないか**を調べて控える(Phase 3-1 の移行提案で提示する)。`grep -rn 'CLAUDE\.md' --exclude-dir=.git .` 相当で CI 設定・スクリプト・README・ドキュメント・エディタ設定を横断する。
 
 **6. MCP の利用可否**
 - **Serena**: `mcp__serena__*` ツールが現在使えるか。使えない場合は既存 `.mcp.json` の serena エントリ・`.serena/` の有無も確認する。
@@ -75,7 +79,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - 使わない → 正本 = docs
 - 例外(補足として提示。該当時のみ):
   - Serena は**コード探索専用**にして正本は docs にしたい(人間も読む文書を正本にする) → 正本 = docs のハイブリッド
-  - メモリも doc/ も本格運用しない超小規模 → 正本 = claude-md
+  - メモリも doc/ も本格運用しない超小規模 → 正本 = `claude-md`(値名は据え置き。実体は権威参照ファイル `AGENTS.md` 自体が正本という意味)
 
 **残りの質問(該当するものだけ)**
 
@@ -102,10 +106,26 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 検出値と確認結果で以下を生成する。各テンプレは `templates/` から Read → `{{PLACEHOLDER}}` 置換 → Write。
 
-**1. CLAUDE.md**(`templates/CLAUDE.md.template`)
-- 置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) / `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}`。
+**1. 権威参照ファイル(正本 `AGENTS.md` + 橋渡しの `CLAUDE.md`)**(`templates/AGENTS.md.template` / `templates/CLAUDE.md.template`)
+- **正本は `AGENTS.md`**。置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) / `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}`。
 - `{{DOC_REFERENCES}}` は正本で切り替える。serena → 主要メモリ名の箇条書き(`project_overview` / `code_style_conventions` / `suggested_commands` 等、存在は Phase 4 で onboarding 前提)。docs → 生成した `doc/` ファイルへのリンク箇条書き。
-- **既存 CLAUDE.md がある場合は上書きしない。** テンプレの 7 セクションと突き合わせ、不足しているセクションだけを「追記提案」として提示し、ユーザーの承認を得てから追記する。既存の記述は書き換えない。
+- **`CLAUDE.md` は `@AGENTS.md` の import 1 行**(テンプレをそのまま Write。置換なし)。内容を複写しない。ホスト固有の追記が要るときだけ import 行の下に書くが、**`CLAUDE.md` は Cursor CLI にも読まれる**ため、他ホストで有害・無意味になる指示は書かない(design §7-4)。
+- **サイズ**: 権威参照ファイルは最も厳しいホストの上限(Codex の `project_doc_max_bytes` 既定 32 KiB)に収まるよう薄く保つ。詳細は正本(メモリ / `doc/`)へ逃がす。
+- **既存ファイルの扱い**(Phase 1-5 の 4 分類):
+
+| 既存 | 動作 |
+|---|---|
+| ① どちらも無い | `AGENTS.md` と import 1 行の `CLAUDE.md` を新規生成 |
+| ② `AGENTS.md` のみ | `AGENTS.md` は上書きせず追記提案。`CLAUDE.md` が無ければ import 1 行を新規生成する |
+| ③ `CLAUDE.md` のみ | **上書きしない。** 下の移行フローで承認を得られたときだけ移行する。得られなければ `CLAUDE.md` を正本のまま扱い、追記提案に留める(`AGENTS.md` を作らない) |
+| ④ 両方 | どちらも上書きしない。`AGENTS.md` を正本として追記提案。`CLAUDE.md` に import が無ければ(Phase 1-5 の判定)ドリフトとして報告し、import 行の追加を提案する |
+
+- **追記提案の作り方**(② ③ ④ 共通): テンプレの 7 セクションと突き合わせ、不足しているセクションだけを提示し、ユーザーの承認を得てから追記する。既存の記述は書き換えない。
+- **既存 `CLAUDE.md` の移行フロー**(「既存を壊さない」原則に対する、**ユーザーの明示承認を条件とする例外**。design §7-4):
+  1. Phase 1-5 で調べた**他ツール・CI からの `CLAUDE.md` 参照**を一覧で提示する。参照があれば「移行すると壊れる箇所」であり、参照側の更新が別途必要になることを明示する。
+  2. 移行内容を提示する: `CLAUDE.md` の記述を**そのまま** `AGENTS.md` へ移し、`CLAUDE.md` を `@AGENTS.md` の import 1 行に置き換える。ホスト固有の記述だけは `CLAUDE.md` の import 行の下に残す。
+  3. **明示承認を得る**(`--yes` でも省略しない)。承認された場合のみ実行し、**移動のみで文言を書き換えない**(内容の改善は原則「構成の設置だけを行う」の範囲外)。
+  4. 承認されなければ移行しない。`CLAUDE.md` を正本のまま扱い、見送った旨と理由を Phase 4 の生成物一覧に残す。
 
 **2. .claude/project-profile.yml**(`templates/project-profile.yml.template`)
 - 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{HAS_CODE}}` / `{{PACKAGE_MANAGER}}` / `{{SOURCE_OF_TRUTH}}` / `{{QUALITY_BLOCK}}` / `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の version を Read して埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
@@ -161,15 +181,15 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 ## Phase 3.5: 生成物レビュー(合格まで反復)
 
-ここで生成・変更した軸ドキュメント(CLAUDE.md とその差分提案 / profile / doc/ 一式 / settings・mcp のマージ結果 / 初期メモリを整備した場合はそれも)は**以後の開発全体の判断基準になる**ため、多モデル・多角レビューを行い、合格するまで完了しない。
+ここで生成・変更した軸ドキュメント(権威参照ファイル〈`AGENTS.md` と import 1 行の `CLAUDE.md`〉とその差分提案・移行結果 / profile / doc/ 一式 / settings・mcp のマージ結果 / 初期メモリを整備した場合はそれも)は**以後の開発全体の判断基準になる**ため、多モデル・多角レビューを行い、合格するまで完了しない。
 
 1. **レビュアー編成**: 実行環境で利用可能なモデルから**能力上位順に 2〜3 体(最上位を必ず含める)**を単一メッセージで並列 Agent 起動する(Claude Code の現時点の目安: fable + opus + sonnet。profile の `features.review_models` があれば優先。モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-{モデル}` の `name` を付けて起動する。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じ name へ SendMessage で依頼する**(再スポーンしない。design §5-17 フル段階)。
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
 2. **観点の分担**:
    - **事実整合**: 記載した PM・コマンド・スタック・パスが実プロジェクトと一致するか(マニフェスト・lockfile・実ディレクトリで裏取り)
-   - **内部整合**: CLAUDE.md ↔ profile ↔ doc/ の間に矛盾・重複・食い違いがないか
+   - **内部整合**: `AGENTS.md` ↔ profile ↔ doc/ の間に矛盾・重複・食い違いがないか。`CLAUDE.md` が `@AGENTS.md` の import に徹し、`AGENTS.md` の内容を複写していないか
    - **完全性と過不足**: プレースホルダの置換漏れ / 過剰生成 / 既存記述の破壊がないか
-   - **規約**: 薄型 CLAUDE.md・機密値なし・タスク命名(`進行中_`/`完了_`)等の統一規約との整合
+   - **規約**: 薄型の権威参照ファイル(32 KiB 以内)・機密値なし・タスク命名(`進行中_`/`完了_`)等の統一規約との整合
 3. **トリアージ**: 指摘は team-lead が実ファイルで裏取りし、valid のみ修正に反映(盲信しない。false positive は理由を記録)。
 4. **合格まで反復**: 全レビュアー PASS(valid 指摘 0)になるまで修正 → 再レビューを続ける。同一指摘が 2 回連続残存・5 ラウンド超過の場合は**勝手に打ち切らず**、状況を報告してユーザーの指示を仰ぐ(未合格のまま完了報告しない)。
 5. 記録: `.claude/reviews/init-project-iter{N}.md`。
@@ -182,7 +202,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **2. 妥当性の自己確認**
 - `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。
-- CLAUDE.md の `{{...}}` が置換済みか(意図的に残したガイド文以外にプレースホルダが残っていないか)。
+- `AGENTS.md` の `{{...}}` が置換済みか(意図的に残したガイド文以外にプレースホルダが残っていないか)。`CLAUDE.md` が `@AGENTS.md` の import を持つか(判定基準は Phase 1-5 と同じ — コードスパン・コードブロック内は import とみなさない)。
 - hook をマージした場合、`.claude/settings.json` が有効な JSON か(必要なら再 Read で確認)。
 - `.mcp.json` を生成・マージした場合、有効な JSON で既存エントリが保持されているか。
 
@@ -199,20 +219,21 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - 以降のサイクル: `/create-task`(タスク設計)→ `/do-task`(実装・検証・レビュー)→ `/update-doc`(ドキュメント同期)。機械検査だけなら `/tool-check`。
 - 正本が serena で `.serena/` が未整備なら、Serena の onboarding(プロジェクト有効化 + メモリ作成)を先に済ませ、続けて /update-doc で初期メモリを整備するよう案内する(メモリも多モデルレビューのループで品質担保される)。
 - `.mcp.json` を生成・変更した場合、次回セッション起動時に MCP サーバーの承認が求められる旨を伝える。正本 = serena なのに Serena を設定しなかった場合は、把握・同期が浅くなることを明示的に警告する。
-- doc / CLAUDE.md の `{{...}}` ガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
+- doc / `AGENTS.md` の `{{...}}` ガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
 
 ---
 
 ## 最終ゲート(出力前セルフチェック)
 
 - [ ] テンプレは `templates/` から Read し、値をハードコードせず置換して Write したか。
-- [ ] 既存の CLAUDE.md / profile / doc / settings.json / .mcp.json / .gitignore / README を上書きせず、差分提案またはマージ(無い行・無いファイルのみ追加)で扱ったか。
+- [ ] 既存の AGENTS.md / CLAUDE.md / profile / doc / settings.json / .mcp.json / .gitignore / README を上書きせず、差分提案またはマージ(無い行・無いファイルのみ追加)で扱ったか。
+- [ ] 既存 `CLAUDE.md` を `AGENTS.md` へ移行した場合、他ツール・CI からの参照を提示したうえで**明示承認**を得てから実行し、文言を書き換えず移動のみに留めたか(未承認なら移行していないか)。
 - [ ] ソースコード・既存ドキュメントの中身を変更していないか(このスキルの成果物は構成ファイルの設置のみ)。
 - [ ] 生成物レビュー(Phase 3.5)を全レビュアー PASS まで実施したか(未合格のまま完了報告していないか)。
 - [ ] 再実行モードでは、既存の記述・過去の選択を変えずに新標準の差分だけを提案し、workflow_version を更新したか。
 - [ ] MCP は「検出 → 設定済みならスキップ → 必要時のみ質問」の順で扱い、不要な設定を押し付けていないか。
 - [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている)か。
-- [ ] `task/.gitkeep` を作り、命名規約(`進行中_` / `完了_`)を CLAUDE.md か案内で伝えたか。
+- [ ] `task/.gitkeep` を作り、命名規約(`進行中_` / `完了_`)を `AGENTS.md` か案内で伝えたか。
 - [ ] 生成物一覧と次ステップ(`/understand-project` からのサイクル)を日本語で提示したか。
 
 ## 関連 skill

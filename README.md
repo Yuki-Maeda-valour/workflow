@@ -10,12 +10,12 @@
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
-| `/init-project` | 新規/既存プロジェクトに標準構成(CLAUDE.md / profile / doc / task / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
+| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import / profile / doc / task / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
 | `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。結果は grasp キャッシュに保存され、変更が無ければ次回は即答 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
 | `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を `task/進行中_*.md` に生成。`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |
 | `/do-task` | タスク設計書を実装(implementer 委託)・機械検証・実動確認・独立レビュー・完了処理。中断再開可。「検証だけ」も可 | 「タスクをやって」「続きをやって」 |
-| `/update-doc` | メモリ / CLAUDE.md / doc を実コードと同期。`--task` で完了タスク駆動の差分同期(要件タグ昇格・ADR・図・索引まで) | タスク完了後の締め |
+| `/update-doc` | メモリ / 権威参照ファイル / doc を実コードと同期。`--task` で完了タスク駆動の差分同期(要件タグ昇格・ADR・図・索引まで) | タスク完了後の締め |
 | `/ship-task` | 上の 3 工程(設計 → 実装 → doc 同期)を 1 コマンドで通し、作業ブランチ・実装/doc の commit・push・PR 作成まで出す。既定は走り切り、要件不明・品質ゲート赤・レビュー未収束でのみ停止 | 「まるっとやって」「設計から PR まで一気に」 |
 | `/discuss-spec` | テーマ単位の壁打ちで仕様を対話決定(論点分解 → 選択肢・推奨 → 合意)。決定録を生成して /reflect-decisions へチェーン | 「壁打ちしたい」「仕様を相談して決めたい」 |
 | `/reflect-decisions` | 議事録・文字起こし・チャットログ等から決定事項を抽出し、精査(裏取り・レビュー・確認)を経て要件定義(doc/03)・ADR(doc/04)等へ出典付きで反映。未決・宿題は /create-task へチェーン提案 | 「議事録を反映して」「決まったことを反映して」 |
@@ -64,7 +64,7 @@ cd ~/dev/workflow
 
 ### D. 他ホスト(Codex / Cursor)で使う
 
-SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る。
+SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る(委託の語は役割語 + 解決表で吸収していく方針。design §7-5)。
 
 ```bash
 cd ~/dev/workflow
