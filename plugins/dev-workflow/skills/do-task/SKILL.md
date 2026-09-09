@@ -14,6 +14,7 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 4. **反復は仕組みで安全に**。レビュー・修正の反復は APPROVED まで続けるのが基本動作。`--max-iter`(既定 5)は安全弁で、到達したら状況を報告して指示を仰ぐ
 5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアスのみ。`claude -p` の Bash 起動禁止。調査・レビューは Explore(読み取り専用)、実装は general-purpose
 6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**SendMessage が使える(Agent Teams 有効)ならフル段階で運用し、差し戻し・再レビューは同じ name へ SendMessage で戻す**(再スポーンしない — 実装・レビューの文脈が保たれる)。使えなければ一方向委託(差し戻しは前回成果物パスを含む新規 Agent 起動)、サブエージェント自体が無ければ直列セルフ実行+機械検証に縮退する。どの段階で実行したかを完了報告に明記する
+7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [references/delegation-map.md](references/delegation-map.md) が正本(上の 5・6 に現れる API 名・エージェント種別はホスト = Claude Code での解決)
 
 ## 検証のみモード
 
@@ -97,6 +98,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - reviewer には diff・タスク MD・レビュー観点(6 カテゴリ: 機能保全 / 契約整合 / タスク充足 / テスト妥当性 / 規約 / セキュリティ・機密)を渡し、APPROVED または指摘リスト(JSON)を返させる
 - **team-lead が各指摘を実コードで裏取りしてトリアージ**(valid / invalid / needs-user)。invalid は理由を記録。valid のみ修正へ
 - **外部ランナー(オプトイン)**: `--runners` または `features.runners` が**宣言されている場合に限り**、外部 CLI レビュアーを追加する。手順・編成・判定・終了コードの契約はすべて [references/external-runners.md](references/external-runners.md) が正本(ここでは再掲しない)。宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない。宣言されたのに使えないときはエラーとして報告し、内蔵編成に縮退して続行する
+- **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [references/delegation-map.md](references/delegation-map.md) が正本(ここでは再掲しない)。この解決表は本 skill が所有する共有アセットで、他 skill は兄弟参照で解決する(design §6)。解決表に到達できない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 - **収束条件は全 reviewer の APPROVED**。そこに至るまで Phase 3〜6 を反復し、コストを理由に打ち切らない(design §5-10)。同一指摘 2 回連続残存・`--max-iter`(既定 5)到達は**停止点ではなく報告点**で、状況を報告してユーザーの判断を仰ぐ
 - 記録: `.claude/reviews/{role}-{TASK_NAME}-iter{ITER}.md`
 

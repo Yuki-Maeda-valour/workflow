@@ -14,6 +14,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 4. **契約の整合**。スコープ外にした機能がある場合、「入力は受理するが処理されない」type の不整合が生まれないかを必ず検証し、生まれるなら受理側を塞ぐタスクを含める
 5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアス(fable / opus / sonnet 等、実行環境で指定可能なもの)のみ。`claude -p` の Bash 起動は禁止(別課金)
 6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。SendMessage が使えるなら**フル段階**で運用し、checker・レビュアーへの再検証依頼は同じ name へ SendMessage で戻す(再スポーンしない)。どの段階で実行したかを報告に明記する
+7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(上の 5・6 に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
 
 ## オプション
 
@@ -79,6 +80,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 
 1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。各 Agent に `reviewer-{モデル}` の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
+   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
 3. valid を反映 → **全レビュアー PASS(valid 指摘 0 件)まで反復**(design §5-10。コストを理由に反復を打ち切らない)。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**報告点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する

@@ -17,6 +17,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 5. **修正しない**。提案 → ユーザーのトリアージ → 承認分を /create-task へ。このスキル自身はコードに触れない
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
 7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
+8. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
 
 ## 引数
 
@@ -57,6 +58,8 @@ Explore(読み取り専用)エージェントを**観点グループ別に単一
 | 認可スキャン | `scan-authz` | B2 認証・認可 / B3 IDOR / B4 入力検証 / F3 UI だけの認可 | ✅ |
 | DB 防御スキャン | `scan-db` | D1 機密カラム保護 / D2 行レベル制御 / D3 論理削除の漏れ | ✅ |
 | 取得効率スキャン | `scan-efficiency` | B5 過剰取得 / F4 過剰保持 / D4 インデックス / D5 巨大カラム | 省略 |
+
+**委託の解決(役割語 → 実行バックエンド)**: 上表の 4 体はいずれも読み取り専用の並列調査(`researcher` の観点別派生)である。役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフスキャン+機械検証)に縮退して報告する。
 
 各エージェントへの指示に必ず含めること:
 - Phase 1 の境界一覧と機密フィールド辞書、checks.md の担当節(検出シグネチャ)

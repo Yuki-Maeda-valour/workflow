@@ -78,6 +78,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 - **未検証**: 実ホスト(Codex / Cursor)での読み込み・動作は確認していない。検証済みなのは「配置されること」までで、読み込みの成否は上記の各ホスト仕様に依存する
 - **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。内蔵サブエージェントが無い環境では同 §5-17 の縮退プロトコル(最小段階=観点を分けた直列セルフレビュー)として読み替える
 - **外部 CLI レビュアーはオプトイン**: `--runners=<名前,...>` か profile の `features.runners` を宣言したときだけ起動する。宣言が無ければホスト内蔵のレビュアーだけを使い、外部 CLI を探しに行かない(既定の挙動は従来と同じ)。**契約の正本**(使えるランナー・判定順序・終了コード・機密ガード)は [external-runners.md](plugins/dev-workflow/skills/do-task/references/external-runners.md) の 1 ファイルだけで、README や design はそれを参照する
+- **委託はホスト非依存に書く(移行中)**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。既存 skill 本文にはホスト固有語が残っており、移行の単位・順序・到達条件は [docs/design.md](docs/design.md) §7-7
 - **skill を 1 本だけ取り出す配置は非サポート**: skill 間の兄弟参照(`../do-task/...`)が解決できず、外部ランナー等の機能が無効化される
 - **`features.implementer: cursor` を設定している場合**: これは未実装(起動コマンドが未定義)で、宣言しても内部 implementer で動作する。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
 

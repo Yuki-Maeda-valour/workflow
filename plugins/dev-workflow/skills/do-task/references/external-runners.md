@@ -3,7 +3,7 @@
 レビュアーをホスト内蔵のサブエージェントではなく**外部 CLI** に委託するための仕様。do-task / create-task / update-doc / reflect-decisions / init-project のレビュアー起動箇所から参照する。
 
 > **このファイルが外部ランナー契約の唯一の正本**(判定順序・終了コード・既定ランナー表・読み取り専用の保証範囲・ログ規約・機密ガードの手順)。
-> `docs/design.md` §7 は**方針(なぜオプトインか・なぜ上書きを禁じるか)**だけを持ち、各 SKILL.md / review-protocol.md / README は**再掲せずここを参照する**。
+> `docs/design.md` §7 は**方針(なぜオプトインか・なぜ上書きを禁じるか)**だけを持ち、各 SKILL.md / review-protocol.md / [delegation-map.md](delegation-map.md)(委託の解決表。③ CLI の手順は本書へ委譲する)/ README は**再掲せずここを参照する**。
 > 契約を変えるときは、このファイルと `scripts/review-agent.sh`・`scripts/review-agent-selftest.sh` の 3 点だけを直せばよい(既定表の同期は回帰テストが照合する)。
 
 ## 1. 原則: オプトイン + 信頼モデル
@@ -162,6 +162,8 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
 | `reviewer-strong` | 内蔵のまま(反復の主役) |
 | `reviewer-alt` | 外部ランナーで**置換可**、または `reviewer-{ランナー名}` を追加枡として足す |
 
+- 上表の `reviewer-alt` 行は **`alt` 系(`alt` / `alt2` / `alt3` …)全体**を指す(添字付きの枠は [delegation-map.md](delegation-map.md) §2 (a) が体数から割り当てる)。**置換してよいのは `alt` 系のうち 1 枠まで**で、残る `alt` 系は内蔵で維持する(全枠を外部に置き換えると内蔵側の能力帯の多様性が消える)。追加枠として足す場合は枠数を制限しない
+- **能力帯の抽象語の定義元は [delegation-map.md](delegation-map.md)**(`internal` / `strong` / `alt` の意味と、能力帯 → エイリアスの指定方法)。上表はその**消費側**であり、定義をここに生やさない
 - `--reviewers=1` + ランナー宣言 = **「内蔵 1 + 外部 N」**
 - **並列性**: 外部ランナーは Bash 同期実行になるため、内蔵 Agent と同一ターンに走らせるには `run_in_background` で起動する(「単一メッセージで並列スポーン」を維持するため)
 - **滞在時間**: 既定値のままだと 1 回の起動で最長およそ 700 秒(ヘルプ最大 2 回 × 20 + プローブ 60 + 本実行 600 + kill 猶予)かかる。**Claude Code の Bash ツールは既定 120 秒・上限 600 秒**なので、既定のままではどちらも超えうる。`run_in_background` で起動する(推奨)か、`--probe-timeout` / `--run-timeout` を縮めて呼び出し側の timeout も明示的に伸ばす

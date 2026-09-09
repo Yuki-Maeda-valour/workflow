@@ -16,6 +16,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **構成の設置だけを行う。** 既存プロジェクトのソースコード・既存ドキュメントの中身の改善(リファクタ・修正・書き直し)には踏み込まない。気づいた改善点があっても報告に「後続候補」として列挙するに留め、実施は /understand-project → /stack-research → /create-task(リファクタは --refactor)→ /do-task のサイクルに委ねる。
 - **profile が無くても他 skill が動く。** ここで生成する `.claude/project-profile.yml` は各 skill の検出を助ける補助であり、必須ではない。最小限の検出値だけ埋める。
 - **テンプレは Read → 置換 → Write。** テンプレートは本スキルの `templates/`(この SKILL.md と同階層)に置いてある。Read し、`{{PLACEHOLDER}}` を検出値に置換してから対象パスへ Write する。値が不明な箇所は「（〜を記述）」等のガイド文を残したまま出力してよい。
+- **委託の解決は解決表に従う。** 役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)。
 
 ## 引数
 
@@ -185,6 +186,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 1. **レビュアー編成**: 実行環境で利用可能なモデルから**能力上位順に 2〜3 体(最上位を必ず含める)**を単一メッセージで並列 Agent 起動する(Claude Code の現時点の目安: fable + opus + sonnet。profile の `features.review_models` があれば優先。モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-{モデル}` の `name` を付けて起動する。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じ name へ SendMessage で依頼する**(再スポーンしない。design §5-17 フル段階)。
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
+   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 2. **観点の分担**:
    - **事実整合**: 記載した PM・コマンド・スタック・パスが実プロジェクトと一致するか(マニフェスト・lockfile・実ディレクトリで裏取り)
    - **内部整合**: `AGENTS.md` ↔ profile ↔ doc/ の間に矛盾・重複・食い違いがないか。`CLAUDE.md` が `@AGENTS.md` の import に徹し、`AGENTS.md` の内容を複写していないか
