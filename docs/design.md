@@ -160,7 +160,19 @@ features:
                              # '-' で始まる値・空白を含む値は拒否される(フラグへの化けを防ぐ)
   # ※ 起動コマンドの上書きは profile では受け付けない(下の「信頼モデル」を参照)
 
-# MCP サーバー(ツール接続)。宣言のキー名と値の形は未定で、決まるまで生成しない(§7-6)
+# MCP サーバー(ツール接続)。同じツールにどの AI からも繋ぐための宣言(§7-6 が生成)
+mcp_servers: {}              # <id>: {command, args} の形で宣言する(§7-6 が生成)
+                             # 例: {'serena': {command: 'uvx', args: ['--from', 'git+https://github.com/oraios/serena', 'serena', 'start-mcp-server', '--context', 'ide-assistant', '--project', '.']}}
+                             # command は必須。欠く宣言・空文字列の宣言・id 制約違反はエントリ単位で除外して報告する(空エントリ防止)
+                             #   args の要素が空文字列を含む場合も同様にエントリ単位で除外する
+                             # args は省略可(省略時は生成側で args 行を出さない。空配列は args: [])
+                             # id は [A-Za-z0-9_-]+ のみ(TOML のテーブルパスと JSON のキーで意味が変わるため)
+                             # url / env は受け付けない。書かれていたら無視して報告する
+                             #   url: Claude Code 側のリモート MCP の形が §7-3 に未記録のため
+                             #   env: commit されるファイルに値が載り secret_paths(§5-12)と衝突するため
+                             # 値(command / args の要素)は U+0000〜U+001F と U+007F(DEL)を含めない
+                             #   含む宣言はエントリ単位で除外して報告する(改行・タブを含む値も対象)
+                             # TOML/JSON への表現時のエスケープ規則は生成側(init-project)の責務(§7-6)
 
 # ローカル環境の構築コマンド(環境構築を依頼されたとき doc/05 と併せて参照される)
 setup_commands: []           # 例: ["docker compose up -d db", "pnpm db:migrate", "pnpm db:seed"]
@@ -293,6 +305,7 @@ done
 | Cursor は AGENTS.md をプロジェクトルートとサブディレクトリで読む。位置づけは `.cursor/rules` の**簡易な代替**。入れ子は親と結合し、より具体的な方が優先 | [Rules \| Cursor Docs](https://cursor.com/docs/rules) | 7-4 |
 | **Cursor CLI** はプロジェクトルートの `AGENTS.md` と `CLAUDE.md` を読み、`.cursor/rules` と併せてルールとして適用する | [Using Agent in CLI \| Cursor Docs](https://cursor.com/docs/cli/using) | 7-4 |
 | Claude Code は `.mcp.json` のプロジェクトスコープサーバーを**対話セッションでのみ**承認を求め、`claude -p` / Agent SDK / クラウド実行では**承認なしに読む**。承認はサーバー名単位(`enabledMcpjsonServers` / `disabledMcpjsonServers`。未承認は `⏸ Pending approval`)。**リポジトリにコミットされた一括承認設定は未信頼フォルダでは無視される**。`.mcp.json` は VCS に入れる前提 | [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp) | 7-6 |
+| `.mcp.json` の stdio サーバーは、トップレベルキー **`mcpServers`** の下にサーバー名をキーとするオブジェクトを置く。各エントリのキーは `command`(**必須**)/ `args`(省略可・配列)/ `env`(省略可・オブジェクト)/ `type`(省略可・既定 stdio)。`command` / `args` / `env` は `${VAR}` 展開に対応する | [Connect Claude Code to tools via MCP](https://code.claude.com/docs/en/mcp) | 7-6 |
 | Codex はプロジェクトスコープの設定(`.codex/config.toml`)を**信頼済みプロジェクトのときだけ**読む。MCP は `[mcp_servers.<id>]`(`command` / `args` / `env` / `url` / `cwd` / `enabled` / `startup_timeout_sec` 等)。カスタムエージェントは `agents.<name>.config_file` / `agents.<name>.description` で**ロールを宣言**し、**定義本体は `config_file` が指す別の TOML 設定層**に置く(相対パスは宣言した設定ファイルから解決される)。プロジェクト層で無視されるキーの列挙に `agents` は無い | [Configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference) | 7-6 |
 | **Codex** の `codex review` を cwd を限定せずに起動したとき、カレントリポジトリ外の兄弟ディレクトリのファイルパスが出力に含まれた(既定サンドボックス〈restricted fs〉は読み取りを制限しなかった。一時ツリー下での越境は未確認) | ローカル実測(2026-09-09・codex 0.153.4) | 7-2 |
 | **Cursor CLI** は**ワークスペースの信頼を要求する**。`--trust` を付けないと `Workspace Trust Required` で終了コード 1 になり非対話実行できない。`--trust` はワークスペース信頼のみを与えるもので、コマンド許可の `-f, --force` とは**別物**(`--help` の記載: `--trust`=Trust the current workspace without prompting / `-f, --force`=Force allow commands unless explicitly denied)。読み取り専用は `--mode ask` が担保したまま | ローカル実測(2026-09-09。1 文目は `--trust` 無しでの非対話実行、フラグの意味は `cursor-agent --help`) | 7-2 |
@@ -350,7 +363,7 @@ done
 
 **ツール接続としての MCP(本節)と、委託バックエンド ② としての MCP(§7-5)は別概念**。本節は「同じツールにどの AI からも繋ぐ」ための設定生成を扱う。
 
-- **profile で 1 回宣言し、`/init-project` がホスト別の設定を生成する** — `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)。ただし**宣言のキー名と値の形は未定**(§4)であり、確定するまで生成しない
+- **profile で 1 回宣言し、`/init-project` がホスト別の設定を生成する** — `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)。**スキーマ(キー名・値の形)は §4 の `mcp_servers` を正本とする**(同じ事実を 2 箇所に書かない。§7-2)
 - **MCP サーバー自体は同梱しない**(理由は下の「なぜそうするか」)
 - **Codex へ生成するのは `.codex/config.toml` の MCP のみで、カスタムエージェント定義は生成しない** — エージェント編成は §7-5 の ① としてホストに任せるため。公式の定義機構はプロジェクト層でも宣言できると読めるので、「ユーザースコープにしか住まない」ことは理由にしない(事実と出典は §7-3)。なお `codex agents` **サブコマンド**はセッション閲覧であり(実測)、定義は設定ファイル側の機構で行う(§7-3)
 
