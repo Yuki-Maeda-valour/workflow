@@ -169,7 +169,25 @@ cat >"$WORK/pathbin/mytool" <<'EOF'
 : >"$SELFTEST_SIDEEFFECT"
 echo '{"verdict":"APPROVED","issues":[]}'
 EOF
-chmod +x "$WORK/evilbin/cursor-agent" "$WORK/helphang/cursor-agent" "$WORK/pathbin/mytool"
+# ワークスペース信頼を要求するランナー(cursor-agent の実挙動の再現)。
+# --trust が argv に無ければ Workspace Trust Required で落ちる。--help 分岐は
+# ヘルプ照合を通すため trust チェックより先に置く
+mkdir -p "$WORK/trustbin"
+cat >"$WORK/trustbin/cursor-agent" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--help" ]; then echo '  --mode <mode>  (choices: "ask", "other")'; exit 0; fi
+done
+for a in "$@"; do
+  if [ "$a" = "--trust" ]; then
+    echo '{"verdict":"CHANGES_REQUESTED","issues":[{"file":"src/a.ts","line":42,"category":"契約整合","severity":"major","description":"説明","suggestion":"提案"}]}'
+    exit 0
+  fi
+done
+echo "Workspace Trust Required" >&2
+exit 1
+EOF
+chmod +x "$WORK/evilbin/cursor-agent" "$WORK/helphang/cursor-agent" "$WORK/pathbin/mytool" "$WORK/trustbin/cursor-agent"
 
 echo "レビューしてください" >"$WORK/prompt.md"
 SIDEEFFECT="$WORK/sideeffect.marker"
@@ -594,6 +612,37 @@ else
   if [ "$rc" -eq 10 ]; then ok "壊れた正規化結果を parse-failed で止める (exit=$rc)"; else
     ng "壊れた正規化結果を parse-failed で止める (期待 exit=10 / 実際 exit=$rc)"; cat "$CASE_OUT" "$CASE_ERR" >&2; fi
 fi
+
+# 39. 既定コマンドの --trust でワークスペース信頼を要求するランナーが通る
+rc=0
+PATH="$WORK/trustbin:$PATH" guard bash "$TARGET" --runner cursor-agent --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --log-file "$WORK/log39.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+if check "既定コマンドの --trust でワークスペース信頼を通過する" 0 "$rc"; then
+  assert_stdout_equals "--trust による成功経路" "$EXPECT_ISSUE_JSON"
+fi
+
+# 40. --trust を落とすと同じランナーが probe-failed で止まる(決定 16 の再現)。
+# 既定表のランナーには --command を渡せない(usage エラー)ため、既定表外のランナー名で再現する
+rc=0
+run_agent --runner stubrunner --command "bash $WORK/trustbin/cursor-agent --mode ask" \
+  --readonly-flag "--mode ask" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --log-file "$WORK/log40.md" || rc=$?
+check "失敗: --trust 無しはワークスペース信頼で probe-failed" 6 "$rc"
+# 因果の固定: 単に非ゼロ終了したのではなく、信頼要求で落ちたことをログで確認する
+if grep -q 'Workspace Trust Required' "$WORK/log40.md"; then ok "--trust 無しの失敗理由がログに残る"; else
+  ng "--trust 無しの失敗理由がログに残る"; cat "$WORK/log40.md" >&2; fi
+
+# 41. 既定コマンドから --trust / --mode ask が消える退行を拾う
+actual="$(PATH="$WORK/pathbin:$PATH" guard bash "$TARGET" --runner cursor-agent \
+            --prompt-file "$WORK/prompt.md" --dry-run --log-file "$WORK/log41.md" 2>/dev/null)"
+case "$actual" in
+  *"--mode ask"*)
+    case "$actual" in
+      *"--trust"*) ok "既定コマンドが --mode ask と --trust を保持する" ;;
+      *) ng "既定コマンドが --trust を保持する(実際: $actual)" ;;
+    esac ;;
+  *) ng "既定コマンドが --mode ask を保持する(実際: $actual)" ;;
+esac
 
 echo
 printf '%s\n' "$RESULTS"
