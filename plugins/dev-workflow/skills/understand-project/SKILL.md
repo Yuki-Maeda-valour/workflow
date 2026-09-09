@@ -1,6 +1,6 @@
 ---
 name: understand-project
-description: 作業開始前にプロジェクトの全体像(目的・構造・技術スタック・規約・開発コマンド)を把握する読み取り専用スキル。「プロジェクトを把握して」「プロジェクト理解して」「全体像を教えて」「このプロジェクトは何?」と言われたとき、新しいセッションで最初の実作業に入る前、または他のスキル(create-task / do-task)の前提として使う。Serena メモリ・CLAUDE.md・実コードの 3 系統を突き合わせ、矛盾があれば実コードを優先して注記する。--quick(メモリのみ 30 秒)、--area=<領域>(特定領域を深掘り)、--deep(設定・規約まで全確認)を選択可能。結果は .claude/grasp.md にキャッシュされ、コードに変更が無ければ次回は再調査せず即答する。
+description: 作業開始前にプロジェクトの全体像(目的・構造・技術スタック・規約・開発コマンド)を把握する読み取り専用スキル。「プロジェクトを把握して」「プロジェクト理解して」「全体像を教えて」「このプロジェクトは何?」と言われたとき、新しいセッションで最初の実作業に入る前、または他のスキル(create-task / do-task)の前提として使う。Serena メモリ・権威参照ファイル(AGENTS.md / CLAUDE.md)・実コードの 3 系統を突き合わせ、矛盾があれば実コードを優先して注記する。--quick(メモリのみ 30 秒)、--area=<領域>(特定領域を深掘り)、--deep(設定・規約まで全確認)を選択可能。結果は .claude/grasp.md にキャッシュされ、コードに変更が無ければ次回は再調査せず即答する。
 argument-hint: "[--quick | --area=<name> | --deep]"
 disallowed-tools: Edit, NotebookEdit
 ---
@@ -20,7 +20,7 @@ disallowed-tools: Edit, NotebookEdit
 | オプション | 内容 | 目安 |
 |---|---|---|
 | (なし) | 標準把握: プロファイル+メモリ+構造の実測+サマリー | 1〜3 分 |
-| `--quick` | プロファイル+知識の正本(Serena メモリ / 無ければ doc/ の索引と主要文書 / それも無ければ CLAUDE.md)のみ。構造実測なし | 30 秒 |
+| `--quick` | プロファイル+知識の正本(Serena メモリ / 無ければ doc/ の索引と主要文書 / それも無ければ権威参照ファイル)のみ。構造実測なし | 30 秒 |
 | `--area=<name>` | 指定領域に絞って深掘り(定義は profile の `areas`、無ければ backend / frontend / database) | 1〜2 分 |
 | `--deep` | 標準+設定ファイル精読+ドキュメントドリフト検出 | 5〜10 分 |
 
@@ -29,7 +29,7 @@ disallowed-tools: Edit, NotebookEdit
 - **実行冒頭で確認**: `.claude/grasp.md` があり、記録された HEAD と `git rev-parse HEAD` が一致し、記録の把握レベルが今回の要求以上なら、**再調査せずキャッシュのサマリーを提示して終了**する。working tree が dirty の場合は `git status --short` の変更ファイルを注記に添え、**変更に lockfile が含まれるときは stack-research 鮮度チェックだけ追加実行**する。HEAD 不一致・レベル不足・git 無しなら通常フローへ進み、末尾でキャッシュを更新する
 - **把握レベルの順序**: `quick < 標準 < deep`。`area:{X}` は「標準+X 領域の深掘り」として扱い、**同一領域の要求のみ再利用可**。別領域の要求には標準部分を再利用し、不足領域だけ追加深掘りして grasp に**追記累積**する(レベル表記は `標準+area:X,Y` の形式。/create-task の段階的深化による更新も同じ形式で追記する)
 - **実行末尾で更新**: Phase 5 のサマリー+メタ(把握レベル / 日時 / HEAD / 未確認事項)を `.claude/grasp.md` に Write する(gitignore 対象)
-- **キャッシュの規律**(design §5-18): grasp.md が無くても動作は同一(再把握するだけ)。知識の正本(doc/ / メモリ / CLAUDE.md)に無い情報をここに溜めない — 把握中の発見(ドリフト・地雷)は /update-doc での正本反映を促す
+- **キャッシュの規律**(design §5-18): grasp.md が無くても動作は同一(再把握するだけ)。知識の正本(doc/ / メモリ / 権威参照ファイル)に無い情報をここに溜めない — 把握中の発見(ドリフト・地雷)は /update-doc での正本反映を促す
 
 ## Phase 0: コンテキスト源の解決
 
@@ -44,9 +44,13 @@ disallowed-tools: Edit, NotebookEdit
 
 地雷リスト(`known_facts_ref` が指すファイル、未指定なら `doc/05_operations.md` の「引き継ぎ・地雷」節)があれば必ず読み、サマリーの「⚠️ 絶対に忘れない事項」に転記する。`doc/06_stack-notes.md`(または docs/ 配下。/stack-research が生成)があれば読み、バージョン固有の注意点も同じく「⚠️」へ反映する。
 
-### 0-2. CLAUDE.md(必ず)
+### 0-2. 権威参照ファイル(必ず)
 
-プロジェクトルートの CLAUDE.md を Read。基本指示・Quick Commands・タスク完了条件・プロジェクト固有の禁止事項を把握する。モノレポでサブディレクトリに CLAUDE.md がある場合(`Glob: **/CLAUDE.md`、node_modules 除外)、作業対象に近いものも読む。
+**検出順**(design §3): プロジェクトルートの `AGENTS.md` があればそれ → 無ければ `CLAUDE.md`(未移行)。**両方あれば `AGENTS.md` を正本**とし、`CLAUDE.md` は import 行より下のホスト固有の追記だけを補完として読む。
+
+Read して基本指示・Quick Commands・タスク完了条件・プロジェクト固有の禁止事項を把握する。モノレポでサブディレクトリに権威参照ファイルがある場合(`Glob: **/AGENTS.md` と `**/CLAUDE.md`、node_modules 除外)、作業対象に近いものも読む。
+
+**ドリフト判定**: 両方あって `CLAUDE.md` が `@AGENTS.md` を import していなければ、内容の二重管理としてサマリーの「🔺 ドリフト検出」に載せる(--deep 以外でも、両方を読んだ時点で気づいたら注記する)。**判定ではコードブロック内・インラインコード内に現れる `@AGENTS.md` を import とみなさない**(Claude Code の import パース仕様。素朴な文字列一致では import を説明しているだけの記述を import と誤判定する)。
 
 ### 0-3. 知識の正本(Serena メモリ または doc/)
 
@@ -64,9 +68,9 @@ disallowed-tools: Edit, NotebookEdit
 | 構造・技術 | `02_architecture.md` |
 | 要件・設計 | `03_requirements.md` / `04_design.md`(標準以上のみ) |
 | 計画・期限(見積もり・マイルストーン) | `07_plan.md`(標準以上のみ・あれば) |
-| コマンド・完了条件・地雷 | `05_operations.md`(+ CLAUDE.md の Quick Commands) |
+| コマンド・完了条件・地雷 | `05_operations.md`(+ 権威参照ファイルの Quick Commands) |
 
---quick では索引+ 01 + 05 に絞る。doc/ も無ければ 0-2 の CLAUDE.md と Phase 1 の実測だけで把握する(このスキルは Serena 必須ではない)。
+--quick では索引+ 01 + 05 に絞る。doc/ も無ければ 0-2 の権威参照ファイルと Phase 1 の実測だけで把握する(このスキルは Serena 必須ではない)。
 
 ## Phase 1: 技術スタック検出(--quick 以外)
 
@@ -96,7 +100,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 
 ## Phase 4: ドキュメントドリフト検出(--deep のみ)
 
-メモリ・CLAUDE.md の記述と実測の間の乖離を 4 観点でチェックする:
+メモリ・権威参照ファイルの記述と実測の間の乖離を 5 観点でチェックする:
 
 | 観点 | 方法 |
 |---|---|
@@ -104,6 +108,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 | コマンドの乖離 | 記載コマンド vs scripts 実在 |
 | 構造の乖離 | 記載ディレクトリ vs 実在 |
 | 参照切れ | 記載ファイルパスの存在確認 |
+| 権威参照ファイルの二重管理 | `AGENTS.md` と `CLAUDE.md` が両方あるのに `CLAUDE.md` が `@AGENTS.md` を import していない(0-2 の判定基準に従う。コード表記内の `@AGENTS.md` は import とみなさない) |
 
 乖離はサマリーの「🔺 ドリフト検出」に列挙し、/update-doc の実行を提案する(このスキルでは直さない)。
 
@@ -133,10 +138,10 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {dev / format / lint / typecheck / test / build。PM 込みの実行形}
 
 ## ✅ タスク完了条件
-{CLAUDE.md・メモリ・profile から解決した品質ゲート}
+{権威参照ファイル・メモリ・profile から解決した品質ゲート}
 
 ## ⚠️ 絶対に忘れない事項
-{known_facts / CLAUDE.md の禁止事項・地雷}
+{known_facts / 権威参照ファイルの禁止事項・地雷}
 
 ## ❗ 実コードとの矛盾(あれば)
 {「メモリでは X だが実コードは Y。実コードを優先」形式}
@@ -155,7 +160,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 ## 最終ゲート(出力前セルフチェック)
 
 - [ ] コード・ドキュメント・設定を変更していない(書き込みは `.claude/grasp.md` のみ)
-- [ ] grasp.md に正本(doc/ / メモリ / CLAUDE.md)へ無い情報を溜めていない(発見は /update-doc を促した)
+- [ ] grasp.md に正本(doc/ / メモリ / 権威参照ファイル)へ無い情報を溜めていない(発見は /update-doc を促した)
 - [ ] 機密ファイルの値を出力していない
 - [ ] メモリ・ドキュメント由来の情報と実測由来の情報を区別できている
 - [ ] 矛盾を見つけた場合、実コード優先で注記した
@@ -166,4 +171,4 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 - 把握した内容でタスクを設計する → `/create-task`
 - ドリフトを検出した → `/update-doc`
 - 環境がまだ動かない → `doc/05_operations.md` の手順(と profile の `setup_commands`)を基に環境構築を依頼
-- 標準構成(profile / CLAUDE.md)自体が無い → `/init-project`
+- 標準構成(profile / 権威参照ファイル)自体が無い → `/init-project`

@@ -1,6 +1,6 @@
 # ドメインリスク別チェック(profile: domain_risks)
 
-profile の `domain_risks` に列挙されたキーに応じて、該当節の観点を Phase 1.5 とタスク MD のチェックリストに反映する。ここに無いドメインは地雷リスト(profile の `known_facts_ref`、既定は `doc/05_operations.md` の「引き継ぎ・地雷」節)と CLAUDE.md の記述から同様の観点を組み立てる。
+profile の `domain_risks` に列挙されたキーに応じて、該当節の観点を Phase 1.5 とタスク MD のチェックリストに反映する。ここに無いドメインは地雷リスト(profile の `known_facts_ref`、既定は `doc/05_operations.md` の「引き継ぎ・地雷」節)と権威参照ファイル(`AGENTS.md`。無ければ `CLAUDE.md`)の記述から同様の観点を組み立てる。
 
 ## e2e-data — 共有テストデータの汚染防止
 

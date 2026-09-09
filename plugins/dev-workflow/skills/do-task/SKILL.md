@@ -97,7 +97,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - reviewer には diff・タスク MD・レビュー観点(6 カテゴリ: 機能保全 / 契約整合 / タスク充足 / テスト妥当性 / 規約 / セキュリティ・機密)を渡し、APPROVED または指摘リスト(JSON)を返させる
 - **team-lead が各指摘を実コードで裏取りしてトリアージ**(valid / invalid / needs-user)。invalid は理由を記録。valid のみ修正へ
 - **外部ランナー(オプトイン)**: `--runners` または `features.runners` が**宣言されている場合に限り**、外部 CLI レビュアーを追加する。手順・編成・判定・終了コードの契約はすべて [references/external-runners.md](references/external-runners.md) が正本(ここでは再掲しない)。宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない。宣言されたのに使えないときはエラーとして報告し、内蔵編成に縮退して続行する
-- 全 reviewer APPROVED まで Phase 3〜6 を反復。同一指摘 2 回連続残存 → ユーザー確認。`--max-iter`(既定 5)到達 → 状況報告
+- **収束条件は全 reviewer の APPROVED**。そこに至るまで Phase 3〜6 を反復し、コストを理由に打ち切らない(design §5-10)。同一指摘 2 回連続残存・`--max-iter`(既定 5)到達は**停止点ではなく報告点**で、状況を報告してユーザーの判断を仰ぐ
 - 記録: `.claude/reviews/{role}-{TASK_NAME}-iter{ITER}.md`
 
 ## Phase 7: 完了処理
