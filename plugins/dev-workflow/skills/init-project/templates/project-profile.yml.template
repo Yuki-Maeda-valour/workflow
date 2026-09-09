@@ -20,9 +20,9 @@ has_code: {{HAS_CODE}}
 package_manager: {{PACKAGE_MANAGER}}
 
 # コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | claude-md
-#   serena:    Serena メモリが正本、CLAUDE.md は薄型維持
+#   serena:    Serena メモリが正本、権威参照ファイルは薄型維持
 #   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
-#   claude-md: CLAUDE.md 自体が正本(小規模・メモリ未使用)
+#   claude-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)。値名 claude-md は据え置き(改名は未決)
 # ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は
 #   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄
 source_of_truth: {{SOURCE_OF_TRUTH}}

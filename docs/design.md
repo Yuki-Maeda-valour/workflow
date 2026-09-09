@@ -36,12 +36,12 @@
 
 | skill | 責務 | 読む | 書く |
 |---|---|---|---|
-| init-project | 標準構成(CLAUDE.md / doc/ / task/ / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | CLAUDE.md, doc/, task/, .claude/, .mcp.json |
-| understand-project | プロジェクト把握。読み取り専用(キャッシュ除く) | profile, CLAUDE.md, メモリ / doc, コード | .claude/grasp.md(キャッシュのみ) |
+| init-project | 標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import 1 行 / doc/ / task/ / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | AGENTS.md, CLAUDE.md, doc/, task/, .claude/, .mcp.json |
+| understand-project | プロジェクト把握。読み取り専用(キャッシュ除く) | profile, 権威参照ファイル, メモリ / doc, コード | .claude/grasp.md(キャッシュのみ) |
 | create-task | 種別判定・影響範囲調査済みのタスク設計書生成(--refactor = 対象発見型リファクタ分析) | コード全域 | task/進行中_*.md のみ |
 | ship-task | create-task → do-task → update-doc --task を通しで実行し、ブランチ・commit・push・PR まで出す薄いオーケストレーター(工程の中身は持たない) | 各工程の成果物 | 3 工程の書き込み+ git ブランチ / commit / PR |
 | do-task | タスク実装(委託)〜機械検証・実動確認〜独立レビュー〜完了処理。検証のみモード可 | task MD, コード | ソースコード, task MD |
-| update-doc | メモリ / CLAUDE.md / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, CLAUDE.md, doc/(索引含む) |
+| update-doc | メモリ / 権威参照ファイル / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, 権威参照ファイル, doc/(索引含む) |
 | tool-check | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | package.json 等 | 自動修正のみ |
 | stack-research | 依存の実バージョンに固有の注意点・ベストプラクティス・脆弱性の Web 調査とノート生成 | マニフェスト, lockfile, Web | doc/06_stack-notes.md, doc/README.md |
 | data-audit | サーバー境界を越えるデータの監査(機密露出・認可欠如・IDOR・過剰取得・DB 防御)。読み取り専用で裏取り済み指摘を提案し、承認分を /create-task へチェーン | コード全域, スキーマ, profile, doc/06 | .claude/reviews/(レポートのみ) |
@@ -57,7 +57,7 @@
 |---|---|---|
 | 1. プロファイル | `.claude/project-profile.yml` を Read(存在すれば) | リポジトリ構成 / 品質コマンド / area 定義 / メモリ名マップ / 正本の向き / 機能フラグ |
 | 2. 動的検出 | Glob / ls / list_memories を実行時に叩く | パッケージマネージャ / 技術スタック / ディレクトリ構造 / 実在メモリ名 |
-| 3. 権威参照 | CLAUDE.md(と doc/)を Read | プロジェクト固有原則 / 禁止事項 / 地雷 |
+| 3. 権威参照 | 権威参照ファイル(検出順は下記)と doc/ を Read | プロジェクト固有原則 / 禁止事項 / 地雷 |
 
 **profile が無くても必ず動く**こと(全項目にフォールバックを定義する)。これが汎用性の担保。
 
@@ -68,6 +68,7 @@
 - パッケージマネージャ: package.json の `packageManager` フィールド → lockfile(pnpm-lock.yaml / bun.lock* / yarn.lock / package-lock.json)→ 既定 npm。PHP は composer.json、Python は pyproject.toml / requirements.txt、Go は go.mod、Rust は Cargo.toml
 - 品質コマンド: profile の `quality` → package.json の scripts から `format` / `check` / `lint` / `type-check`|`typecheck` / `test` / `build` を存在検出 → 言語別既定(PHP: `./vendor/bin/pint --test` + `php artisan test`、Python: ruff/pytest 等)
 - モノレポ: pnpm-workspace.yaml / package.json#workspaces から自動列挙
+- 権威参照ファイル: `AGENTS.md` があればそれ → 無ければ `CLAUDE.md`(未移行)。両方あれば `AGENTS.md` を正本とし、`CLAUDE.md` が `@AGENTS.md` の import を含まなければドリフトとして注記する(§5-11 と同型)。import に加えてホスト固有の追記を持つ構成は正常。**ホスト側の探索順・サイズ上限は §7-3(事実と出典)、運用方針は §7-4**
 - Serena: 使う前に get_current_config でアクティブプロジェクトを確認し、違えば activate_project(別プロジェクトのメモリ誤参照防止)。メモリ名は list_memories() で動的列挙し、固定名を仮定しない
 
 ## 4. project-profile.yml スキーマ
@@ -91,9 +92,9 @@ has_code: true
 package_manager: pnpm
 
 # コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | claude-md
-#   serena:    Serena メモリが正本、CLAUDE.md は薄型維持
+#   serena:    Serena メモリが正本、権威参照ファイルは薄型維持
 #   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
-#   claude-md: CLAUDE.md 自体が正本(小規模・メモリ未使用)
+#   claude-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)。値名 claude-md は据え置き(改名は未決)
 # ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)・計画(doc/07)は
 #   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄、
 #   doc/07(見積もり・スケジュール)は人の合意が源泉(/reflect-decisions が反映先。update-doc は書かない)
@@ -186,7 +187,7 @@ known_facts_ref: docs/HANDOVER.md
 7. **スコープ縮小検出 grep**(do-task の検証で使用): `段階的に実施|後続タスク|今回はスコープ外|のみ作成|次回対応|一旦`
 8. **チェックリスト突合の機械化**: `grep -cE '^\s*- \[(x|X)\]'` で件数突合+diff との整合確認
 9. **レビューの扱い**: 多モデルレビュー — **実行環境で利用可能なモデルを実行時に確認し、能力上位から順に(利用可能な最上位を必ず含めて)能力帯の異なる 2〜3 体を選び**、単一メッセージで並列スポーンする。組み合わせを固定せず、モデルの世代交代に自動追従させる(Claude Code では Agent ツールの `model` で指定可能なエイリアスが利用可能一覧にあたる。現時点の目安: fable(最上位)+ opus(上位)+ sonnet(標準))。profile の `features.review_models` があればそれを優先する。**既定はホスト内蔵のモデルのみで編成する**(オプトイン方式)— 外部 CLI や他ベンダーのモデルを探しに行かず、ホストのエージェント機構で指定可能なモデル(Claude Code なら Agent ツールのエイリアス)の上位から選んで完結させる。**外部ランナーが宣言されている場合に限り**(`--runners` 引数、または profile の `features.runners`)、ベンダー横断の多様性を同一ベンダー内の能力帯差より優先し、各社の最上位級を組み合わせる(製品名・版数をハードコードせず実行時に選ぶ)。宣言があっても外部ランナーが利用不可のとき(未導入・認証切れ・レート制限・応答なし・読み取り専用未確立)は、ベンダー横断を諦めて**内蔵のみの編成に縮退**し、縮退したことと理由を報告に明記する(サイレント縮退禁止)。宣言されているのに使えない場合は**エラーとして報告**する(黙って内蔵だけで済ませない)。外部ランナーの起動手順・判定順序・機密ガードは §7 と `do-task/references/external-runners.md` に従う。モデルを選べない環境では、観点(事実整合 / セキュリティ / 規約)を分けた複数レビュアーで多様性を確保する。**規模適応**: 変更対象が少数(目安 3 件以下)で矛盾の無い軽微な実行では、観点を分けた単一レビュアー(またはセルフレビュー)へ軽量化してよい(採用した編成を報告に明記する)。→ team-lead が各指摘を実コードで裏取りし valid / invalid / needs-user にトリアージ。指摘を盲信して自動反映しない。false positive は理由を記録
-10. **レビューループのセーフティ**: 同一指摘が 2 回連続残存 → ユーザー確認。5 ラウンド超え → トークンコスト警告。`--max-review` / `--max-iter` は安全弁
+10. **レビューループのセーフティ**: **収束条件は全 reviewer の APPROVED**。コストを理由にレビュー反復を打ち切らない。同一指摘の 2 回連続残存・5 ラウンド超え・`--max-review` / `--max-iter` 到達は**停止ではなく報告点**であり、状況を報告してユーザーの判断を仰ぐ
 11. **実コード優先の原則**: メモリ・ドキュメントと実コードが矛盾したら実コードを信じ、矛盾を必ず注記する。裏取りなしの推測でドキュメントを書かない
 12. **機密保護**: `secret_paths` のファイルは読まない。存在の有無だけ報告。サブエージェントのログへの混入も検査対象
 13. **読み取り専用エージェントの原則**: 調査・レビューは Explore(読み取り専用)、編集・コマンド実行は general-purpose に集約
@@ -203,7 +204,7 @@ known_facts_ref: docs/HANDOVER.md
     - **標準**(`Agent` は使えるが `SendMessage` が無い): 委託は「起動 → 最終レポート」の一方向。差し戻し・追加指示は**前回成果物のパスを含めた新規 Agent 起動**で代替する。応答しないエージェントへの STATUS 問い合わせ(M1)は省略し、待機目安を超えたら再スポーン(M2)に直行する
     - **最小**(サブエージェント機構なし): 全工程を実行者自身が直列に行う。多モデルレビューは**観点を切り替えたセルフレビュー**(事実整合 → 契約 → セキュリティ → 規約を別パスで実施)+機械検証(diff 突合・grep・数値突合)に縮退する。「検証者と実装者の分離」は、フェーズを分けること・機械検証を必ず実行すること・品質ゲートを完了報告前に再実行することで最低限担保する
     - **外部ランナーは 3 段階と直交する任意の追加**(§7)。段階判定はあくまで**ホスト内蔵のサブエージェント機構**の話であり、外部 CLI レビュアーは `--runners` / `features.runners` が宣言されたときだけ編成に加える。**内蔵レビュアーを全滅させない** — `reviewer-internal` は常に維持し、`reviewer-alt` 枡は外部ランナーで置換してよい(粒度は `do-task/references/external-runners.md` の編成表が正本)。外部ランナーは会話継続(`SendMessage`)ができないため常に「起動 → 最終レポート」の一方向で、再レビューは毎回新規起動になる。よって**反復は内蔵側で回し、外部は初回の多様性確保に使う**
-18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / CLAUDE.md)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない
+18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / 権威参照ファイル)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない
 19. **チェックの 3 階層**: ① 静的検査(format / lint / typecheck)② 自動テスト ③ **実動確認**(実際に動かして変更フローを観察する)。①②はタスクに依存しない定型実行で /tool-check が担う。③はタスク種別に依存するため、create-task(完了条件を実行可能な確認手順として書く+task-types.md の実動確認列)と do-task(Phase 5.5)が担う。③を省略したときは必ず「未実施+理由」を明記する(サイレントスキップ禁止)
 20. **git 出口の規律**: ブランチ作成・commit・push・PR 作成を能動的に行うのは `/ship-task` のみ(`/do-task` はユーザーが `--branch` 等で明示指定したときだけブランチを作る。コミットは従来どおり求められた場合のみ)。**マージは決して行わない**。PR は品質ゲート・実動確認・レビューがすべて緑のときだけ開き、緑でないときはブランチと commit を残して停止する。commit メッセージ規約は `git log` から推定してプロジェクトに合わせ、実装と doc は別 commit に分ける
 21. **チェーン実行時の責務分界**: 複数 skill を連鎖させる skill(/ship-task)は**工程の中身を再定義しない**。順序・工程間の続行判定・出口(git)だけを持ち、各工程の手順・品質基準は元の skill に委ねる。連鎖元から呼ばれた skill は、ユーザーへの次アクション提案(チェーン提案)を出さない(呼び出し元が判断するため)
@@ -262,17 +263,45 @@ done
 - **機密ガードの原則**: 宣言は「使ってよい」であって「毎回無確認で渡してよい」ではない。`secret_paths` が実在するプロジェクトでは明示確認を取ってから起動する。レビュー経路は読み取り専用であり、**ユーザーの git 状態(index・stash)を書き換えてはならない**
 - **implementer の外部化は行わない**(スコープ外)。`features.implementer: cursor` は起動コマンドが未定義で未実装であり、宣言されても内部 implementer で動作する
 
-### 7-3. 前提とする外部事実(出典・確認日 2026-09-08)
+### 7-3. 前提とする外部事実(出典・確認日 2026-09-08、一部 2026-09-09)
 
-7-1 の配置先はすべて以下の外部事実に依存する。前提が崩れたら該当箇所は無効になるため出典を残す。
+§7 が依存する外部事実。前提が崩れたら該当箇所は無効になるため出典を残す。
 
-| 事実 | 出典 |
-|---|---|
-| Codex は `.agents/skills` / `$HOME/.agents/skills` / `/etc/codex/skills` から SKILL.md を読む。frontmatter は `name` + `description` 必須。agentskills.io の開標準に準拠 | [Build skills — ChatGPT/Codex 公式ドキュメント](https://learn.chatgpt.com/docs/build-skills) |
-| Cursor は `.cursor/skills/` または `.agents/skills/` から SKILL.md を読み、`/skill-name` で起動できる | [Cursor Agent Skills(learncursor.dev)](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills) |
-| Codex は 2026-03-14 に subagents を GA(最大 8 並列・`~/.codex/agents/` の TOML・エージェントごとにモデル指定可) | [Use subagents and custom agents in Codex — Simon Willison](https://simonwillison.net/2026/Mar/16/codex-subagents/) |
+| 事実 | 出典 | 依存する節 |
+|---|---|---|
+| Codex は `.agents/skills` / `$HOME/.agents/skills` / `/etc/codex/skills` から SKILL.md を読む。frontmatter は `name` + `description` 必須。agentskills.io の開標準に準拠 | [Build skills — ChatGPT/Codex 公式ドキュメント](https://learn.chatgpt.com/docs/build-skills) | 7-1 |
+| Cursor は `.cursor/skills/` または `.agents/skills/` から SKILL.md を読み、`/skill-name` で起動できる | [Cursor Agent Skills(learncursor.dev)](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills) | 7-1 |
+| Codex は 2026-03-14 に subagents を GA(最大 8 並列・`~/.codex/agents/` の TOML・エージェントごとにモデル指定可) | [Use subagents and custom agents in Codex — Simon Willison](https://simonwillison.net/2026/Mar/16/codex-subagents/) | 7 |
+| Claude Code は `CLAUDE.md` を読み `AGENTS.md` は読まない。既存の AGENTS.md がある場合は「それを import する CLAUDE.md を作る」が公式の案内。`@path` import は公式機能(相対・絶対パス可・最大 4 段)。symlink も可だが **Windows では管理者権限か開発者モードが必要**なため import が推奨。CLAUDE.md は 200 行以内が目安、4 MiB 超はスキップ、import 先も起動時に全量ロード | [How Claude remembers your project](https://code.claude.com/docs/en/memory) | 7-4 |
+| Codex は AGENTS.md をネイティブに読む。グローバル `~/.codex/AGENTS.md` → プロジェクトルート(通常は Git ルート。見つからなければ cwd のみ)から cwd まで。各階層で `AGENTS.override.md` → `AGENTS.md` → `project_doc_fallback_filenames` の順。root から下へ連結し近い方が上書き | [Custom instructions with AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md) | 7-4 |
+| Codex は連結後の合計が `project_doc_max_bytes`(既定 32 KiB・設定で変更可)に達すると、以降のファイルを追加しない。公式の対処は上限を上げるか入れ子へ分割 | 同上 | 7-4 |
+| Cursor は AGENTS.md をプロジェクトルートとサブディレクトリで読む。位置づけは `.cursor/rules` の**簡易な代替**。入れ子は親と結合し、より具体的な方が優先 | [Rules \| Cursor Docs](https://cursor.com/docs/rules) | 7-4 |
+| **Cursor CLI** はプロジェクトルートの `AGENTS.md` と `CLAUDE.md` を読み、`.cursor/rules` と併せてルールとして適用する | [Using Agent in CLI \| Cursor Docs](https://cursor.com/docs/cli/using) | 7-4 |
 
-**未検証の範囲**: 実ホスト(Codex / Cursor)での読み込みは確認していない(検証環境に codex 未インストール / cursor-agent 未認証)。検証済みなのは「配置されること」までで、読み込みの成否は各ホストの上記仕様に依存する。
+**未検証の範囲**: 実ホスト(Codex / Cursor)での **SKILL.md 読み込み**は確認していない。**CLI ランナーとしての疎通は両 CLI で実測済み**(2026-09-09: codex 0.153.4 を導入・cursor-agent は認証済みで実レビューを取得)。検証済みなのは「配置されること」までで、読み込みの成否は各ホストの上記仕様に依存する。
+
+### 7-4. 権威参照ファイル(AGENTS.md)
+
+**正本は `AGENTS.md`**。Claude Code は AGENTS.md を読まないため、`CLAUDE.md` は `@AGENTS.md` の import で橋渡しする(事実と出典は §7-3)。
+
+| ホスト | AGENTS.md | 経路 |
+|---|---|---|
+| Codex | ネイティブに読む | そのまま |
+| Cursor | ネイティブに読む | そのまま。`.cursor/rules` は生成しない(併存できるが実体を 1 つに保つ) |
+| Claude Code | **読まない** | `CLAUDE.md` の `@AGENTS.md` import で橋渡し |
+
+**なぜ import か**(symlink・CLAUDE.md 正本・複写を採らない理由):
+
+- **symlink**: Windows では管理者権限か開発者モードが必要(Claude Code 公式が import を推奨)。コピーを伴う配布・チェックアウトでは実体化されて意図が崩れる(本リポジトリでも review-agent.sh の配布で同型の問題を踏んだ)
+- **CLAUDE.md を正本にする**: Codex 側に import 構文があるか未確認
+- **両方に同じ内容を置く**: ドリフトの再生産。同じ事実が複数箇所にあると同期漏れが起きる(§7-2 と同じ理由)
+
+**運用**:
+
+- **サイズ**: 権威参照ファイルは**最も厳しいホストの上限**(現状 Codex の `project_doc_max_bytes` 既定 32 KiB。実値と出典は §7-3)に収まるよう薄く保つ
+- **生成既定**: `/init-project` が生成する `CLAUDE.md` は `@AGENTS.md` の import 1 行とする。ホスト固有の追記が必要になったら import の下に書く(Claude Code 公式が示す構成)。ただし **`CLAUDE.md` への追記は Cursor CLI にも読まれる**(§7-3)ため、他ホストで有害・無意味になる指示は書かない
+- **Cursor CLI と CLAUDE.md**: Cursor CLI は CLAUDE.md も読む(事実)。ただし `@path` import を展開する記載は Cursor 側に無く(**未検証**)、展開しなければ CLAUDE.md は `@AGENTS.md` の 1 行のみで**内容は重複しない**
+- **既存プロジェクトの移行**: `/init-project` は既存 `CLAUDE.md` を検出したら AGENTS.md への移行を提案し、**承認を得てから**実行する。**他ツール・CI が `CLAUDE.md` を直接参照している場合に壊れるため、移行提案時にその確認を挟む**。これは `/init-project` の「既存を壊さない」原則(`init-project/SKILL.md`)に対する、**ユーザーの明示承認を条件とする例外**である
 
 ## 8. このリポジトリへの還元フロー
 
