@@ -9,8 +9,9 @@
   5. 禁止パターン(design.md §5): 特定プロジェクトへのハードコード・絶対パス・
      TeamCreate/TeamDelete・日付付きモデル ID・claude -p
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の存在
-  7. 委託の語(design.md §7-7): 全 skill の SKILL.md と references/*.md を検査し、
-     未移行 skill(許容リスト)と検査対象外ファイルを除外する
+  7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
+     *.md・scripts/ 配下(画像を除く)を検査し、未移行 skill(許容リスト)と
+     検査対象外ファイルを除外する
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -25,6 +26,9 @@ SKILLS_DIR = REPO / "plugins" / "dev-workflow" / "skills"
 
 ERRORS: list[str] = []
 WARNS: list[str] = []
+
+# 画像拡張子(禁止パターン検査・委託の語検査の両方が走査から除外する)
+_IMAGE_EXTS = {".png", ".jpg"}
 
 # 固有名のハードコード検出(ユーザー環境の絶対パス・周辺プロジェクト名の混入)
 FORBIDDEN_PATTERNS = [
@@ -170,7 +174,7 @@ def check_skills():
         # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル。
         # SKILL.md の有無に関わらず走る)
         for f in sorted(d.rglob("*")):
-            if not f.is_file() or f.suffix in {".png", ".jpg"}:
+            if not f.is_file() or f.suffix in _IMAGE_EXTS:
                 continue
             body = f.read_text(encoding="utf-8", errors="replace")
             body_lines = body.splitlines()
@@ -199,11 +203,12 @@ def check_skills():
 
 
 def _in_delegation_scope(f: Path) -> bool:
-    """委託の語検査の走査範囲(design.md §7-7 の検査範囲〈SKILL.md と references/ 配下〉と
-    検査対象外ファイル)を 1 式で判定する。②`<skill>/SKILL.md` または `<skill>/references/`
-    配下の `*.md`(再帰)で、③除外 2 本(_EXEMPT_FILES)でない、の論理積。許容リスト(①)は
-    ここに含めない — check_migration_allowlist_staleness() が①抜きで再利用するため。"""
-    if not f.is_file() or f.suffix != ".md":
+    """委託の語検査の走査範囲を 1 式で判定する。skill 直下のファイル(画像以外)、または
+    `references/` 配下の *.md(再帰)、または `scripts/` 配下の画像以外(再帰)で、除外 2 本
+    (_EXEMPT_FILES)でない、の論理積。拡張子の絞り方が references/ と scripts/ で非対称な
+    理由は design.md §7-7。許容リスト(①)は含めない —
+    check_migration_allowlist_staleness() が①抜きで再利用するため。"""
+    if not f.is_file():
         return False
     try:
         rel = f.relative_to(SKILLS_DIR)
@@ -212,9 +217,10 @@ def _in_delegation_scope(f: Path) -> bool:
     rest = rel.parts[1:]
     if not rest:
         return False
-    is_skill_md = rest == ("SKILL.md",)
-    is_references_md = rest[0] == "references"
-    return (is_skill_md or is_references_md) and rel.as_posix() not in _EXEMPT_FILES
+    is_skill_root = len(rest) == 1 and f.suffix not in _IMAGE_EXTS
+    is_references_md = len(rest) > 1 and rest[0] == "references" and f.suffix == ".md"
+    is_scripts_any = len(rest) > 1 and rest[0] == "scripts" and f.suffix not in _IMAGE_EXTS
+    return (is_skill_root or is_references_md or is_scripts_any) and rel.as_posix() not in _EXEMPT_FILES
 
 
 def _is_delegation_target(f: Path) -> bool:
