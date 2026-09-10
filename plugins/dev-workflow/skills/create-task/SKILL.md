@@ -12,9 +12,9 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 2. **実コード裏取り**。現状分析は必ず実コードを読んで書く。推測・記憶で「〜のはず」と書かない。対象ファイルはパス+行番号で特定する
 3. **スコープ縮小を設計段階で殺す**。実装タスクは「何を確認したら完了か」まで書く。曖昧な表現(「対応する」「整理する」)を残さない
 4. **契約の整合**。スコープ外にした機能がある場合、「入力は受理するが処理されない」type の不整合が生まれないかを必ず検証し、生まれるなら受理側を塞ぐタスクを含める
-5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアス(fable / opus / sonnet 等、実行環境で指定可能なもの)のみ。`claude -p` の Bash 起動は禁止(別課金)
-6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。SendMessage が使えるなら**フル段階**で運用し、checker・レビュアーへの再検証依頼は同じ name へ SendMessage で戻す(再スポーンしない)。どの段階で実行したかを報告に明記する
-7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(上の 5・6 に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
+5. **委託は役割語で行う**。委託先を宛先として識別可能にする(`name` を必ず付ける)。ホスト自身と同じ CLI を Bash から起動しない(design §5-5)
+6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**フル段階で運用できるときは、checker・レビュアーへの再検証依頼を同じ委託先へ差し戻す**(再スポーンしない)。どの段階で実行したかを報告に明記する
+7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する
 
 ## オプション
 
@@ -41,7 +41,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 1. **入口ガード(調査が先か?)**: 要求がまだ調査段階 — 何を作るか未確定・実現可能性が不明・技術選定が済んでいない — なら、**タスク化せず調査を先に行うことを提案**する。受け皿: コード調査 = /understand-project --area(または口頭)/ 依存・バージョン = /stack-research / Web 深掘り = /deep-research / 実現可能性 spike = 口頭依頼。調査の結論は doc/04 の ADR に記録し、それを入力にこのスキルへ戻る
 2. ユーザーの要求を「目的 / 対象 / 制約 / 完了の定義」に分解し、**タスク種別を判定する**(新機能 / 機能変更 / バグ修正 / DB スキーマ変更 / API / UI / 状態機械 / パフォーマンス / リファクタ。複合可)。種別ごとの設計観点・テスト手法・必須節・添える図は [references/task-types.md](references/task-types.md) に従う。曖昧な点は推測せず AskUserQuestion で確認する
    - **リファクタ種別(--refactor または要求から判定)は対象発見型**: researcher は [references/refactor-analysis.md](references/refactor-analysis.md) の定量スキャン → スコアリングで対象を発見・選定する(対象パス・--area 指定があればその範囲)。候補が複数ならスコア付きで提示し、どれをタスク化するかユーザーに確認する。挙動維持の検証方法・before メトリクス・段階ゲートを必ずタスク MD に組み込む(同ガイド §5)
-3. **researcher(Explore・読み取り専用)を Agent で起動**し、以下を調査させる:
+3. **researcher に委託**し、以下を調査させる:
    - 対象機能の現状実装(ファイル・シンボル・データフロー)
    - 類似実装・既存パターン(新規実装が既存規約に沿うため)
    - 影響を受ける呼び出し元・参照元
@@ -74,15 +74,15 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 
 ## Phase 3: checker 検証
 
-**checker(Explore・読み取り専用、`name` は `checker`)を Agent で起動**し、生成したタスク MD を [references/checker-checklist.md](references/checker-checklist.md) の観点で検証させる。指摘は team-lead(このセッション)が実コードで裏取りし、valid のみ反映する。修正 → 再検証を指摘ゼロまで繰り返す(3 回同一指摘が残る場合はユーザーに相談)。**フル段階では再検証を `SendMessage` で同じ `checker` に依頼する**(design §5-17)。
+**checker に委託**し、生成したタスク MD を [references/checker-checklist.md](references/checker-checklist.md) の観点で検証させる。指摘は team-lead(このセッション)が実コードで裏取りし、valid のみ反映する。修正 → 再検証を指摘ゼロまで繰り返す(3 回同一指摘が残る場合はユーザーに相談)。**フル段階では再検証を同じ checker へ差し戻す**(design §5-17)。
 
 ## Phase 4.5: 外部レビュー(features.external_review が true のとき)
 
-1. **能力帯の異なる 2〜3 レビュアーを単一メッセージで並列に Agent 起動**する(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアス指定のみ)。各 Agent に `reviewer-{モデル}` の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
+1. **能力帯の異なる 2〜3 体のレビュアーを単一メッセージで並列に委託**する。各レビュアーに `reviewer-strong` / `reviewer-alt`(3 体目は `reviewer-alt2`)の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
-3. valid を反映 → **全レビュアー PASS(valid 指摘 0 件)まで反復**(design §5-10。コストを理由に反復を打ち切らない)。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**報告点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
+3. valid を反映 → **全レビュアー PASS(valid 指摘 0 件)まで反復**(design §5-10。コストを理由に反復を打ち切らない)。**フル段階では、修正後の再レビューを同じレビュアー(宛先)へ差し戻す**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**報告点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する
 
 ## 最終ゲート(完了報告前セルフチェック)
