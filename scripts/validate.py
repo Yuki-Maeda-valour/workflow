@@ -64,7 +64,7 @@ _DELEGATION_WORDS = [r"\bAgent\b", "SendMessage", "ListAgents", "Explore", "gene
 # 移行の許容リスト(design.md §7-7)。委託の語検査から除外する未移行 skill の名前。
 # 移行のたびにここから削る。許容リストが空の状態でこの検査が通った時点が v4.0.0(design.md §7-7)。
 _MIGRATION_ALLOWLIST = {
-    "do-task", "create-task", "reflect-decisions",
+    "do-task", "create-task",
 }
 
 # 検査対象外ファイル(design.md §7-7 の「検査対象外ファイル」が正本)。値は SKILLS_DIR からの相対パス。
