@@ -141,32 +141,34 @@ def check_skills():
         ERRORS.append("skills が 1 つもない")
     for d in skill_dirs:
         md = d / "SKILL.md"
-        if not md.exists():
+        md_ok = md.is_file()
+        if not md_ok:
             ERRORS.append(f"{d.name}: SKILL.md がない")
-            continue
-        text = md.read_text(encoding="utf-8")
-        lines = text.count("\n") + 1
-        if lines > 500:
-            ERRORS.append(f"{d.name}/SKILL.md: {lines} 行(500 行以下の規約違反)")
-
-        fm = parse_frontmatter(text, md)
-        name = fm.get("name")
-        desc = str(fm.get("description", "") or "")
-        if not name:
-            ERRORS.append(f"{d.name}/SKILL.md: frontmatter に name がない")
-        elif name != d.name:
-            ERRORS.append(f"{d.name}/SKILL.md: name '{name}' がディレクトリ名と不一致")
-        if not desc:
-            ERRORS.append(f"{d.name}/SKILL.md: frontmatter に description がない")
         else:
-            if len(desc) > 1024:
-                ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(上限 1024)")
-            elif len(desc) < 150:
-                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
-            elif len(desc) > 500:
-                WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
+            text = md.read_text(encoding="utf-8", errors="replace")
+            lines = text.count("\n") + 1
+            if lines > 500:
+                ERRORS.append(f"{d.name}/SKILL.md: {lines} 行(500 行以下の規約違反)")
 
-        # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル)
+            fm = parse_frontmatter(text, md)
+            name = fm.get("name")
+            desc = str(fm.get("description", "") or "")
+            if not name:
+                ERRORS.append(f"{d.name}/SKILL.md: frontmatter に name がない")
+            elif name != d.name:
+                ERRORS.append(f"{d.name}/SKILL.md: name '{name}' がディレクトリ名と不一致")
+            if not desc:
+                ERRORS.append(f"{d.name}/SKILL.md: frontmatter に description がない")
+            else:
+                if len(desc) > 1024:
+                    ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(上限 1024)")
+                elif len(desc) < 150:
+                    WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
+                elif len(desc) > 500:
+                    WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
+
+        # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル。
+        # SKILL.md の有無に関わらず走る)
         for f in sorted(d.rglob("*")):
             if not f.is_file() or f.suffix in {".png", ".jpg"}:
                 continue
@@ -181,9 +183,10 @@ def check_skills():
                         continue
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: 禁止パターン [{why}] -> {m.group(0)!r}")
 
-        # 相対リンクの存在(SKILL.md と references/ 配下の md をどちらも検査する。
-        # リンクは「そのファイルの位置」から解決する)
-        md_files = [md] + sorted(f for f in d.rglob("*.md") if f != md)
+        # 相対リンクの存在(SKILL.md が使える場合はそれと、references/ 配下の md を検査する。
+        # 禁止パターンと同じく SKILL.md の有無に関わらず走る。リンクは「そのファイルの位置」から
+        # 解決する)
+        md_files = ([md] if md_ok else []) + sorted(f for f in d.rglob("*.md") if f != md and f.is_file())
         for f in md_files:
             body = f.read_text(encoding="utf-8", errors="replace")
             for m in LINK_RE.finditer(body):
