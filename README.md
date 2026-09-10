@@ -75,7 +75,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 ```
 
 - **読み込み先の出典(確認日 2026-09-08)**: Codex は `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者)から読み、frontmatter は `name` + `description` が必須 — [Build skills(ChatGPT/Codex 公式)](https://learn.chatgpt.com/docs/build-skills)。Cursor は `.cursor/skills/` または `.agents/skills/` から読み `/skill-name` で起動 — [Cursor Agent Skills](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills)。Codex の subagents は 2026-03-14 に GA — [解説記事](https://simonwillison.net/2026/Mar/16/codex-subagents/)
-- **未検証**: 実ホスト(Codex / Cursor)での読み込み・動作は確認していない。検証済みなのは「配置されること」までで、読み込みの成否は上記の各ホスト仕様に依存する
+- **検証済み(2026-09-11)**: Codex / Cursor での SKILL.md の読み込み・動作を確認済み(ユーザーによる実環境での確認報告)。
 - **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。内蔵サブエージェントが無い環境では同 §5-17 の縮退プロトコル(最小段階=観点を分けた直列セルフレビュー)として読み替える
 - **外部 CLI レビュアーはオプトイン**: `--runners=<名前,...>` か profile の `features.runners` を宣言したときだけ起動する。宣言が無ければホスト内蔵のレビュアーだけを使い、外部 CLI を探しに行かない(既定の挙動は従来と同じ)。**契約の正本**(使えるランナー・判定順序・終了コード・機密ガード)は [external-runners.md](plugins/dev-workflow/skills/do-task/references/external-runners.md) の 1 ファイルだけで、README や design はそれを参照する
 - **委託はホスト非依存に書く(移行中)**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。既存 skill 本文にはホスト固有語が残っており、移行の単位・順序・到達条件は [docs/design.md](docs/design.md) §7-7
