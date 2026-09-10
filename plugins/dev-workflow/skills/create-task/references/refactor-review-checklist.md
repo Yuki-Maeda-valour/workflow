@@ -1,6 +1,6 @@
 # リファクタリング レビューチェックリスト(6 カテゴリ)
 
-SKILL.md「Phase 6: レビュー」の詳細版。小・中規模は team-lead が、大規模は reviewer(Explore, 読み取り専用)がこのチェックリストで検証する。
+SKILL.md「Phase 6: レビュー」の詳細版。小・中規模は team-lead が、大規模は reviewer(読み取り専用)がこのチェックリストで検証する。
 
 **指摘は盲信しない。** team-lead が各指摘を実コードで裏取りし、valid / invalid / needs-user にトリアージする。false positive は理由を記録する。React 固有項目は該当スタックのみ適用し、他スタックは読み替える。
 
