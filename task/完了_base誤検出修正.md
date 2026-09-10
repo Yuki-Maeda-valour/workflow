@@ -83,3 +83,9 @@ Codex の plugin validate は現 CLI で未対応。配布元の claude plugin v
 - reviewer: 内蔵の独立 reviewer が APPROVED(反復1)。team-lead が unittest 3件・通常検証・元の再現手順・Python構文・差分検査を再実行して成功。配布元 `claude plugin validate .` も成功。
 - create-task: checker と能力帯を分けた2 reviewer で設計レビュー2回、全員承認。Phase 2 は未確定事項なしで続行。
 - 機械突合: 実装2ファイル、テスト3件、未完了チェックなし。スコープ縮小の対象語句なし。README同期とPRは ship-task の後工程で実施する。
+
+### 2026-09-11 / update-doc --task --yes
+- README へ回帰コマンドと一般語除外の説明を同期。
+- 能力帯を分けた内蔵 reviewer 2体が APPROVED、反復1。
+- README リンク検査 ERROR 0 / WARN 3。警告は既存の利用者設定パス例で変更前も同じ3件。
+- 回帰3件、通常検証 ERROR 0 / WARN 0、差分検査を最終確認。配布スキル本文の変更はない。

@@ -95,9 +95,12 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 ## 検証
 
 ```bash
+python3 -m unittest discover -s scripts -p 'test_*.py'  # 検証器の回帰テスト
 python3 scripts/validate.py       # frontmatter / 規約(委託の語を含む)/ リンク / JSON の一括検証
 claude plugin validate .          # Claude Code 本体による検証
 bash -n setup.sh                  # シェル構文
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh
                                   # 外部ランナー起動スクリプトの回帰テスト(スタブのみ・外部 CLI 不要)
 ```
+
+`validate.py` は `~/dev` 配下のディレクトリ名からプロジェクト固有名の混入を検査します。`base` など、検証器の一般語除外集合に含まれる名前は対象外です。回帰テストは一時ホームとリポジトリのコピーを使い、一般語の除外と固有名・ユーザー絶対パスの検出を確認します。
