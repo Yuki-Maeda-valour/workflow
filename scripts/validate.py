@@ -41,7 +41,7 @@ FORBIDDEN_PATTERNS = [
 
 # 周辺プロジェクト名の動的検査: 実行環境の ~/dev 配下ディレクトリ名を禁止語として追加する
 # (skill の還元時に固有プロジェクト名が紛れ込むのを防ぐ。一般語のディレクトリは除外)
-_GENERIC_DIR_NAMES = {"workflow", "demo", "memo", "resume", "test", "tmp", "sandbox"}
+_GENERIC_DIR_NAMES = {"workflow", "demo", "memo", "resume", "test", "tmp", "sandbox", "base"}
 _dev_dir = Path.home() / "dev"
 if _dev_dir.is_dir():
     _names = sorted(
