@@ -12,9 +12,9 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 2. **完了条件は team-lead が再実行**。品質ゲートコマンドは implementer の報告に関わらず team-lead 自身がもう一度実行して緑を確認する
 3. **タスク MD が契約**。実装範囲の拡大・縮小は勝手に行わない。設計と実態がずれたらタスク MD を更新するか、ユーザーに確認する
 4. **反復は仕組みで安全に**。レビュー・修正の反復は APPROVED まで続けるのが基本動作。`--max-iter`(既定 5)は安全弁で、到達したら状況を報告して指示を仰ぐ
-5. サブエージェントは Agent + SendMessage + ListAgents のみ。**起動時に `name` を必ず付ける**(SendMessage の宛先になる)。モデルはエイリアスのみ。`claude -p` の Bash 起動禁止。調査・レビューは Explore(読み取り専用)、実装は general-purpose
-6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**SendMessage が使える(Agent Teams 有効)ならフル段階で運用し、差し戻し・再レビューは同じ name へ SendMessage で戻す**(再スポーンしない — 実装・レビューの文脈が保たれる)。使えなければ一方向委託(差し戻しは前回成果物パスを含む新規 Agent 起動)、サブエージェント自体が無ければ直列セルフ実行+機械検証に縮退する。どの段階で実行したかを完了報告に明記する
-7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [references/delegation-map.md](references/delegation-map.md) が正本(上の 5・6 に現れる API 名・エージェント種別はホスト = Claude Code での解決)
+5. **委託は役割語で行う**(`researcher` / `implementer` / `reviewer` / `checker`)。**起動時に `name` を必ず付ける**(完了後の再依頼・状態確認の宛先になる)。ホスト自身と同じ CLI を Bash から起動しない(design §5-5)。**調査・レビュー・検証は読み取り専用の委託、実装は編集を伴う委託**にする
+6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**フル段階で運用できるときは、差し戻し・再レビューを同じ `name` へ再依頼する**(再スポーンしない — 実装・レビューの文脈が保たれる)。使えなければ一方向委託(差し戻しは前回成果物パスを含む新規委託)、サブエージェント自体が無ければ直列セルフ実行+機械検証に縮退する。どの段階で実行したかを完了報告に明記する
+7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [references/delegation-map.md](references/delegation-map.md) が正本
 
 ## 検証のみモード
 
@@ -25,7 +25,7 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 1. 対象タスク: 引数のパス、無ければ `ls task/進行中_*.md` から選択(複数あればユーザーに確認)。タスク MD を全文読む
 2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら以降のコマンド・編集は root 配下)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。契約の詳細は [references/external-runners.md](references/external-runners.md) §1
 3. `git status` を確認。未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する。**ユーザーがブランチ作成を指定した場合のみ**(`--branch` または口頭指示)、着手前にブランチを作成して切り替える(名前省略時は `task/{タスク名}`)。指定が無ければ現在のブランチのまま進める(能動的な提案はしない)
-4. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): `SendMessage` / `ListAgents` が使えるか(= Agent Teams が有効か)をツールの実在で確認し、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
+4. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): 走行中の問い合わせ・生存確認ができるかを**ツールの実在で確認**し(判定手段は軸 8)、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
 5. タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
 6. **再開判定**(「続きをやって」対応): 対象タスク MD に既に `- [x]` があり、`.claude/reviews/` に同タスクの iter ログがある場合は**再開モード**で入る — まず Phase 4 の機械検証(diff・チェックリスト突合)を先に実行して「実際にどこまで終わっているか」を復元し(チェック状態の自己申告を信じない)、最後の iter のレビュー状態を確認してから残タスクの実装を続行する。ITER は既存ログの最大値+1 から。復元結果(完了済み / 未完了 / チェック済みだが実装なし)を報告してから進む
 
@@ -33,7 +33,7 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 
 | 規模 | 目安 | 編成 |
 |---|---|---|
-| 小・中 | 1〜5 ファイル | implementer(general-purpose)+ reviewer(Explore) |
+| 小・中 | 1〜5 ファイル | implementer + reviewer |
 | 大 | 6 ファイル以上 / 契約変更 / migration | researcher + implementer + reviewer |
 
 - **規模が小さくても team-lead は実装しない**(検証者と実装者の分離を常に保つ)。直接実装への簡略化は、サブエージェント機構が使えない環境縮退(design §5-17)のときだけの代替
@@ -41,11 +41,11 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 
 ## Phase 2: 事前コンテキスト(大規模、または /create-task の調査記録が無いとき)
 
-researcher(Explore)に、タスク MD の対象ファイル群の現状・既存パターン・注意点を調査させ、100〜200 語の要約+参照パスで返させる。委託プロンプトには `.claude/grasp.md`(あれば)のパスを含め、プロジェクト全体像の再構築を省かせる。/create-task 時の調査記録(`.claude/reviews/create-task-*`)があれば再利用して省略してよい。
+researcher に、タスク MD の対象ファイル群の現状・既存パターン・注意点を調査させ、100〜200 語の要約+参照パスで返させる。委託プロンプトには `.claude/grasp.md`(あれば)のパスを含め、プロジェクト全体像の再構築を省かせる。/create-task 時の調査記録(`.claude/reviews/create-task-*`)があれば再利用して省略してよい。
 
 ## Phase 3: implementer 委託
 
-**implementer(general-purpose、model: profile の `implementer_model`、既定 sonnet)** を Agent で起動する。**`name` は `implementer`**(フル段階では以降の差し戻し・STATUS 問い合わせの宛先になる)。委託プロンプトに必ず含めるもの:
+**implementer**(モデルは profile の `implementer_model` に従う。単一枠の能力帯は軸 3)を起動する。**`name` は `implementer`**(フル段階では以降の差し戻し・STATUS 問い合わせの宛先になる)。委託プロンプトに必ず含めるもの:
 
 - タスク MD の全文パスと「このタスク MD のチェックリストが完了の定義(DoD)である」こと
 - タスク MD の「参考実装」節のパターンを踏襲すること(構成・命名・エラー処理・テストの書き方を既存に合わせる)
@@ -70,7 +70,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 4. **数値突合**: タスク MD に「N 件の〜を…」とあれば実際に数える(Grep -c 等)
 5. **契約整合**: スコープ外項目について「受理するが処理されない」不整合が生まれていないか実コードで確認する
 
-問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。**フル段階では `SendMessage` で `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。標準段階では前回成果物のパスを含めた新規 Agent 起動で代替する。
+問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。**フル段階では同じ宛先へ再依頼して `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。標準段階では前回成果物のパスを含めた新規委託で代替する。
 
 ## Phase 5: 完了条件の再実行
 
@@ -94,7 +94,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
 
-- reviewer は実装に関与していない Explore を新規起動(1 体)。`--reviewers=3` では内部+能力帯の異なる 2 モデル(実行環境の最上位が全体に必ず含まれるよう能力上位から選ぶ。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus)の 3 体を単一メッセージで並列起動
+- reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では `reviewer-internal` / `reviewer-strong` / `reviewer-alt` の 3 体を単一メッセージで並列起動する(枡割り当ては §2(a)、能力帯の解決は軸 3)
 - reviewer には diff・タスク MD・レビュー観点(6 カテゴリ: 機能保全 / 契約整合 / タスク充足 / テスト妥当性 / 規約 / セキュリティ・機密)を渡し、APPROVED または指摘リスト(JSON)を返させる
 - **team-lead が各指摘を実コードで裏取りしてトリアージ**(valid / invalid / needs-user)。invalid は理由を記録。valid のみ修正へ
 - **外部ランナー(オプトイン)**: `--runners` または `features.runners` が**宣言されている場合に限り**、外部 CLI レビュアーを追加する。手順・編成・判定・終了コードの契約はすべて [references/external-runners.md](references/external-runners.md) が正本(ここでは再掲しない)。宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない。宣言されたのに使えないときはエラーとして報告し、内蔵編成に縮退して続行する
