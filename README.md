@@ -95,7 +95,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 ## 検証
 
 ```bash
-python3 scripts/validate.py       # frontmatter / 規約 / リンク / JSON の一括検証
+python3 scripts/validate.py       # frontmatter / 規約(委託の語を含む)/ リンク / JSON の一括検証
 claude plugin validate .          # Claude Code 本体による検証
 bash -n setup.sh                  # シェル構文
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh
