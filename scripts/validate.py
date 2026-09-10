@@ -9,6 +9,8 @@
   5. 禁止パターン(design.md §5): 特定プロジェクトへのハードコード・絶対パス・
      TeamCreate/TeamDelete・日付付きモデル ID・claude -p
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の存在
+  7. 委託の語(design.md §7-7): 全 skill の SKILL.md と references/*.md を検査し、
+     未移行 skill(許容リスト)と検査対象外ファイルを除外する
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -45,6 +47,27 @@ if _dev_dir.is_dir():
     )
     if _names:
         FORBIDDEN_PATTERNS.append((rf"\b(?:{'|'.join(_names)})\b", "周辺プロジェクト固有名の混入"))
+
+# 検査語彙としてのモデルエイリアス。§5-4 の「固定リストとして扱わない」は
+# 実行時に指定できるエイリアス集合の話で、こちらは skill 本文に書いてはいけない語の
+# スナップショット。世代交代で新エイリアスが出たら design §7-7 の測定コマンドを先に直し、
+# 本定数 → FORBIDDEN_PATTERNS の 2 パターン(日付付き ID・版数)の順で追随させる。
+_MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
+
+# 委託の語(design.md §7-7・測定コマンドの語彙に一致させる)。ホスト固有の委託機構名 5 語 +
+# モデルエイリアス。エイリアスは _MODEL_ALIASES だけを参照し、ここで独自に列挙しない。
+_DELEGATION_WORDS = [r"\bAgent\b", "SendMessage", "ListAgents", "Explore", "general-purpose"] + list(_MODEL_ALIASES)
+
+# 移行の許容リスト(design.md §7-7)。委託の語検査から除外する未移行 skill の名前。
+# 移行のたびにここから削る。許容リストが空の状態でこの検査が通った時点が v4.0.0(design.md §7-7)。
+_MIGRATION_ALLOWLIST = {
+    "do-task", "create-task", "update-doc", "reflect-decisions",
+    "init-project", "data-audit", "stack-research",
+}
+
+# 検査対象外ファイル(design.md §7-7 の「検査対象外ファイル」が正本)。値は SKILLS_DIR からの相対パス。
+_DELEGATION_MAP = "do-task/references/delegation-map.md"
+_EXEMPT_FILES = {_DELEGATION_MAP, "do-task/references/external-runners.md"}
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s#]+)\)")
 
@@ -172,9 +195,101 @@ def check_skills():
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: リンク切れ -> {target}")
 
 
+def _in_delegation_scope(f: Path) -> bool:
+    """委託の語検査の走査範囲(design.md §7-7 の検査範囲〈SKILL.md と references/ 配下〉と
+    検査対象外ファイル)を 1 式で判定する。②`<skill>/SKILL.md` または `<skill>/references/`
+    配下の `*.md`(再帰)で、③除外 2 本(_EXEMPT_FILES)でない、の論理積。許容リスト(①)は
+    ここに含めない — check_migration_allowlist_staleness() が①抜きで再利用するため。"""
+    if not f.is_file() or f.suffix != ".md":
+        return False
+    try:
+        rel = f.relative_to(SKILLS_DIR)
+    except ValueError:
+        return False
+    rest = rel.parts[1:]
+    if not rest:
+        return False
+    is_skill_md = rest == ("SKILL.md",)
+    is_references_md = rest[0] == "references"
+    return (is_skill_md or is_references_md) and rel.as_posix() not in _EXEMPT_FILES
+
+
+def _is_delegation_target(f: Path) -> bool:
+    """委託の語検査の対象かどうかを 1 式で判定する(対象集合はこの述語だけで決まり、
+    他の場所に追加の絞り込みを置かない)。①skill 名が許容リストに無く、かつ ②③(_in_delegation_scope)。"""
+    try:
+        skill = f.relative_to(SKILLS_DIR).parts[0]
+    except (ValueError, IndexError):
+        return False
+    return skill not in _MIGRATION_ALLOWLIST and _in_delegation_scope(f)
+
+
+def check_delegation_words():
+    """design.md §7-7 の委託の語検査。check_skills() のループには相乗りせず、
+    自前で SKILLS_DIR.iterdir() から skill ディレクトリを列挙する(check_skills() が
+    SKILL.md 欠落時に打つ continue を継承しないため)。既存の禁止パターンループ
+    (免除規則・templates/ 走査)も流用せず、免除規則は持たない。
+    ⚠ 既存の禁止パターン検査の挙動変更は別論点として扱い、この検査だけが同じ穴を
+       継承しないようにする(スコープ外)。
+    """
+    if not SKILLS_DIR.exists():
+        return
+    for d in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
+        for f in sorted(d.rglob("*")):
+            if not _is_delegation_target(f):
+                continue
+            body = f.read_text(encoding="utf-8", errors="replace")
+            for pat in _DELEGATION_WORDS:
+                for m in re.finditer(pat, body):
+                    line = body.count("\n", 0, m.start()) + 1
+                    ERRORS.append(f"{f.relative_to(REPO)}:{line}: 委託の語 -> {m.group(0)!r}")
+
+
+def check_delegation_map_invariant():
+    """design.md §7-7 の除外の不変条件: 解決表(_DELEGATION_MAP)はモデルエイリアス名だけは
+    自ら 0 件に保つ。語彙(_MODEL_ALIASES)と対象(_DELEGATION_MAP)は他の関数と共通の定義を
+    参照し、ここで再列挙しない。分類できない(対象ファイルが無い)場合も PASS に倒さず
+    ERROR にする。"""
+    path = SKILLS_DIR / _DELEGATION_MAP
+    if not path.is_file():
+        ERRORS.append(f"{path.relative_to(REPO)}: 除外の不変条件の対象ファイルが無い")
+        return
+    body = path.read_text(encoding="utf-8", errors="replace")
+    for word in _MODEL_ALIASES:
+        for m in re.finditer(word, body):
+            line = body.count("\n", 0, m.start()) + 1
+            ERRORS.append(f"{path.relative_to(REPO)}:{line}: 除外の不変条件 -> {m.group(0)!r}")
+
+
+def check_migration_allowlist_staleness():
+    """design.md §7-7 の許容リストの陳腐化検出(逆検査)。
+    (a) 許容リストに載っているが委託の語が実際は 0 件の skill → WARN(移行済みなのに残っている)
+    (b) 許容リストに載っているが skill ディレクトリが実在しない → WARN(タイプミス・リネーム・
+        削除の取り残し。許容リスト側から回さないと (b) はループに一度も現れない)
+    (a) の件数は _is_delegation_target と同じ範囲判定(_in_delegation_scope。②③)を再利用し、
+    独自の走査や除外の再実装はしない。"""
+    for name in sorted(_MIGRATION_ALLOWLIST):
+        d = SKILLS_DIR / name
+        if not d.is_dir():
+            WARNS.append(f"{name}: 許容リストの skill が実在しない")
+            continue
+        count = 0
+        for f in sorted(d.rglob("*")):
+            if not _in_delegation_scope(f):
+                continue
+            body = f.read_text(encoding="utf-8", errors="replace")
+            for pat in _DELEGATION_WORDS:
+                count += len(re.findall(pat, body))
+        if count == 0:
+            WARNS.append(f"{name}: 許容リストの skill に委託の語が無い")
+
+
 def main() -> int:
     check_json_files()
     check_skills()
+    check_delegation_words()
+    check_delegation_map_invariant()
+    check_migration_allowlist_staleness()
     skills = sorted(d.name for d in SKILLS_DIR.iterdir() if d.is_dir()) if SKILLS_DIR.exists() else []
     print(f"skills: {len(skills)} 件 — {', '.join(skills)}")
     for w in WARNS:
