@@ -394,6 +394,8 @@ done
 - **退行防止は機械検査とレビュー観点の両方**(理由は下の「なぜそうするか」): `scripts/validate.py` が**全 skill の `SKILL.md`・`references/`・`scripts/` を検査し、未移行 skill を許容リストで除外する**(2026-09-10 のユーザー判断。許容リストは `scripts/validate.py` が持つ。自己申告マーカーではない。未移行 skill = 許容リストに載っている skill。上の除外集合と `templates/` は検査対象から外す)。移行のたびに許容リストから削る。削り忘れは `scripts/validate.py` の逆検査が WARN で知らせる。あわせてこのリポジトリの skill 変更レビューの観点に「ホスト結合の混入」を加える(§6)
 - **版の刻み**: 基盤は 3.9.0(解決表が入ってから公開する)。移行は 3.9.x 系で刻み、**委託の語が全 skill の `SKILL.md`・`references/`・`scripts/`(上の除外集合を除く)でゼロになった時点**(= 許容リストが空の状態で `scripts/validate.py` が通る)で **v4.0.0** とする。移行途中の利用者は 3.9.x を使い続けても壊れない
 
+**v4.0.0 に到達した(2026-09-10)**: 到達時の実測は `SKILL.md` **0**(基準 73)/ `references/`(検査対象外の 2 本を除く)**0**(基準 21)/ `scripts/` **0**(基準 0)= **計 0**(基準 94)。許容リストは `set()` で空。**移行は skill ごとに 7 本の PR** で行った — stack-research 1 / data-audit 3 / init-project 7 / update-doc 8 / reflect-decisions 8 / create-task 25 / do-task 42。⚠ **許容リストの定数は空でも残す** — `check_delegation_words()` と `check_migration_allowlist_staleness()` が参照するので、消すと退行防止の検査が壊れる。⚠ **到達条件は「委託の語 0」だけでは足りない** — 0 件は「検査が何も見ていない」でも達成されるので、公開前に**委託の語を 1 つ含む治具 skill を置いて ERROR + exit=1 になることを実測する**(#7 で確立した方式。治具は消し忘れると exit=1 で落ちるので必ず気づく)。あわせて **§5 前文・§7-5 の要約併記も v4.0.0 で終了した**(§7-2 の原則に復帰。ホストの事実は解決表 か §7-3 が持つ)
+
 **委託の語による実測(2026-09-09・上の「委託の語」の語彙)**: `SKILL.md` **73** / `references/`(検査対象外の 2 本を除く)**21** / `scripts/` **0** / 計 **94**。内訳は do-task 42(24 + 18)/ create-task 25(22 + 3)/ update-doc 8 / reflect-decisions 8 / init-project 7 / data-audit 3 / stack-research 1。
 
 ```bash
