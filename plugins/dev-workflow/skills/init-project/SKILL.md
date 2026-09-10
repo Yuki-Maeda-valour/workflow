@@ -199,7 +199,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 ここで生成・変更した軸ドキュメント(権威参照ファイル〈`AGENTS.md` と import 1 行の `CLAUDE.md`〉とその差分提案・移行結果 / profile / doc/ 一式 / settings・`.mcp.json`・`.codex/config.toml` のマージ結果 / 初期メモリを整備した場合はそれも)は**以後の開発全体の判断基準になる**ため、多モデル・多角レビューを行い、合格するまで完了しない。
 
-1. **レビュアー編成**: 実行環境で利用可能なモデルから**能力上位順に 2〜3 体(最上位を必ず含める)**を単一メッセージで並列 Agent 起動する(Claude Code の現時点の目安: fable + opus + sonnet。profile の `features.review_models` があれば優先。モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-{モデル}` の `name` を付けて起動する。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じ name へ SendMessage で依頼する**(再スポーンしない。design §5-17 フル段階)。
+1. **レビュアー編成**: 能力帯の異なる 2〜3 体を単一メッセージで並列起動する(モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-strong` / `reviewer-alt`(3 体目は `reviewer-alt2`)の `name` を付けて起動する。**フル段階(design §5-17)では、修正後の再レビューを同じ `name` へ再依頼する**(再スポーンしない)。
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 2. **観点の分担**:

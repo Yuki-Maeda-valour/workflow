@@ -65,7 +65,6 @@ _DELEGATION_WORDS = [r"\bAgent\b", "SendMessage", "ListAgents", "Explore", "gene
 # 移行のたびにここから削る。許容リストが空の状態でこの検査が通った時点が v4.0.0(design.md §7-7)。
 _MIGRATION_ALLOWLIST = {
     "do-task", "create-task", "update-doc", "reflect-decisions",
-    "init-project",
 }
 
 # 検査対象外ファイル(design.md §7-7 の「検査対象外ファイル」が正本)。値は SKILLS_DIR からの相対パス。
