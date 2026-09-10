@@ -94,12 +94,12 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 ## Phase 5: レビューループ(--no-review 以外)
 
-1. **能力帯の異なる複数レビュアーを単一メッセージで並列 Agent 起動**(実行環境で利用可能なモデルから能力上位順に選ぶ。最上位を必ず含める。profile の `features.review_models` 優先。Claude Code の現時点の目安: fable + opus + sonnet。エイリアスのみ)。各 Agent に `reviewer-{モデル}` の `name` を付ける。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
+1. **能力帯の異なる複数レビュアーを単一メッセージで並列起動**する。各エージェントに `reviewer-strong` / `reviewer-alt`(3 体目以降は `reviewer-alt2` / `reviewer-alt3` …)の `name` を付ける。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
    - 合格基準: 実コードとの整合 / 網羅性(今回の変更範囲)/ 古い情報の不在 / ドキュメント間の無矛盾 / **タグ・ADR・図・索引の整合** / フォーマット規約
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
-3. valid を修正 → 再レビュー。**`SendMessage` が使える(Agent Teams 有効)環境では、修正後の再レビューを同じレビュアー名へ `SendMessage` で依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
+3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
 4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ
 5. 記録: `.claude/reviews/update-doc-iter{N}.md`
 
