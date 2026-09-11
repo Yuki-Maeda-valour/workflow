@@ -2,7 +2,6 @@
 name: tool-check
 description: ツールによる機械検査(format/lint/typecheck/test/build)を一括実行する。「チェックして」「品質確認して」「lint かけて」「型チェックして」「テスト通して」「ビルド確認」等で使う。コマンドは profile→package.json scripts→設定ファイル検出→言語別既定の順で解決し、パッケージマネージャとモノレポ構成を自動判定する。--fix で自動修正(修正後に全ゲート再実行)、--only=<gate> で単一ゲートのみ。実際に動かして観察する実動確認はここでは行わない(/do-task の実動確認フェーズの責務)。
 argument-hint: "[--fix | --only=<gate>]"
-allowed-tools: Bash, Read, Glob
 ---
 
 # tool-check — ツールによる機械検査の一括実行
@@ -41,7 +40,7 @@ format → lint → typecheck → test → build を、プロジェクトに実�
 
 ## 4. 引数
 
-- `--fix`: format/lint を修正モードで実行(`biome check --write` / `prettier --write` / `eslint --fix` / `ruff check --fix` + `ruff format` / `cargo fmt` / `pint`)。修正後に `git diff --stat` を提示し、**全ゲートを通常モードで再実行して緑を確認してから**報告する(修正した結果まだ赤いものを「修正済み」と報告しない)。
+- `--fix`: format/lint を修正モードで実行(`biome check --write` / `prettier --write` / `eslint --fix` / `ruff check --fix` + `ruff format` / `cargo fmt` / `pint`)。修正後に `git diff --stat` を提示し、**全ゲートを通常モードで再実行して緑を確認してから**報告する。コード・設定・正本文書を変更した場合は `reviewer` を [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) に従って起動し独立レビューを実施する。できなければレビュー未完了を報告して修正完了として扱わない。
 - `--only=<gate>`: 指定ゲートのみ実行(`format`|`lint`|`typecheck`|`test`|`build`)。
 
 ## 5. モノレポ対応

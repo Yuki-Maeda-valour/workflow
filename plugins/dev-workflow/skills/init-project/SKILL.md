@@ -201,7 +201,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 1. **レビュアー編成**: 能力帯の異なる 2〜3 体を単一メッセージで並列起動する(モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。全員読み取り専用で、`reviewer-strong` / `reviewer-alt`(3 体目は `reviewer-alt2`)の `name` を付けて起動する。**フル段階(design §5-17)では、修正後の再レビューを同じ `name` へ再依頼する**(再スポーンしない)。
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
-   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
+   - 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表または独立レビュアーが使えない場合はレビュー未完了を報告し、導入完了として扱わない
 2. **観点の分担**:
    - **事実整合**: 記載した PM・コマンド・スタック・パスが実プロジェクトと一致するか(マニフェスト・lockfile・実ディレクトリで裏取り)
    - **内部整合**: `AGENTS.md` ↔ profile ↔ doc/ の間に矛盾・重複・食い違いがないか。`CLAUDE.md` が `@AGENTS.md` の import に徹し、`AGENTS.md` の内容を複写していないか

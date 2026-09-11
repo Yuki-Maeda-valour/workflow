@@ -1,7 +1,7 @@
 ---
 name: create-task
 description: 実装に着手できる品質のタスク設計書(task/進行中_{名}.md)を生成する。「タスクを作って」「タスク化して」「設計書にまとめて」「〜の実装を計画して」と言われたとき、または実装依頼が複数ファイル・契約変更・DB 変更を含み計画が必要なときに使う。「リファクタして」「整理して」「技術的負債を返済したい」も --refactor(対象発見型の定量分析でリファクタタスクを設計)としてこのスキルが扱う。実コード調査に基づく現状分析、影響範囲調査(型伝播チェーン・操作カバレッジ・テスト影響)、チェックリスト、完了条件を含むタスク MD を作り、checker 検証と外部レビュー(能力帯の異なる複数モデル並列)で品質を担保する。このスキルは設計書を作るだけで実装はしない(実装は /do-task)。
-argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<name>]] [--light | --no-review] [--runners=<名前,...>]"
+argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<name>]] [--compact] [--light | --no-review] [--runners=<名前,...>]"
 ---
 
 # create-task — タスク設計書の生成
@@ -22,19 +22,21 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 |---|---|
 | (なし) | 全 Phase 実行(profile の `features` に従う) |
 | `--refactor [対象\|--area]` | リファクタモード: 対象発見型の定量分析([references/refactor-analysis.md](references/refactor-analysis.md))で候補を選定してタスク化。対象未指定なら全体を探査 |
-| `--light` | 影響範囲調査(Phase 1.5)と外部レビュー(Phase 4.5)を省略。小規模変更向け |
-| `--no-review` | 外部レビュー(Phase 4.5)のみ省略 |
+| `--light` | 影響範囲調査(Phase 1.5)は省略できるが、独立レビューは省略しない |
+| `--no-review` | 互換入力。独立レビュー必須のため無効化して報告する |
+| `--compact` | 参照元まで確認して実行動作・公開契約・認可・DB・依存・設定・業務要件を変えない誤字・文言・コメント等だけの短縮設計。ファイル数では判定しない。短縮するのは記述と調査の再構成だけで、checker・設計レビュー・実装後独立レビュー・品質ゲート・実動確認は維持する。`--no-review` と profile のレビュー省略設定、`--light` と profile の影響調査省略設定は無効化して報告する。通常の `--light` 単独では影響範囲調査を省略できるが、compact が指定された実行は通常形式へ戻っても影響範囲調査を実行する。短縮・通常のどちらでも品質維持契約を記録する |
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 
 ## Phase 0: 前提
 
-1. **把握を「深い」レベルへ引き上げる**。タスク設計は浅い把握では漏れが出るため、このセッションの把握状況に応じて不足分を必ず補う(段階的深化):
+1. **現在の一次情報を読む**。`.claude/grasp.md` は前回要約と参照索引としてのみ使い、HEAD・把握レベル・過去調査で読取りを省略しない。毎回、現在の profile・権威参照ファイル・関連文書・対象と依存先を読む。関連領域だけでよく、全リポジトリ通読は不要。
+2. **把握を「深い」レベルへ引き上げる**。タスク設計は浅い把握では漏れが出るため、このセッションの把握状況に応じて不足分を必ず補う(段階的深化):
    - 未把握 → /understand-project 相当を標準レベルで実施(profile・権威参照ファイル〈`AGENTS.md`。無ければ `CLAUDE.md`〉・メモリ・構造実測)
    - `--quick` 把握のみ → **タスクの対象領域を `--area` 相当で深掘り**する(該当領域のファイル一覧・エントリポイント/ルーティング/スキーマの精読・関連メモリ)
    - 契約変更・DB スキーマ変更・横断変更を含むタスク → さらに `--deep` 相当まで実施(フォーマッタ・tsconfig 等の規約精読、`doc/06_stack-notes.md` の該当依存の注意点)
-   あわせて `.claude/project-profile.yml` の `root`(parent-child 構成)、`quality`、`type_propagation_chain`、`domain_risks`、`features` を解決する。把握状況の判定には `.claude/grasp.md`(あれば)の把握レベルを使い、ここで深化したら grasp.md も更新する
-2. `task/` ディレクトリの存在確認(無ければ作成)。既存タスクと重複しないか `ls task/` で確認する
-3. タスク名を決める: 内容を表す簡潔な日本語。ファイル名は `task/進行中_{タスク名}.md`(この命名は /do-task の自動選択と連動する統一規約)
+   あわせて `.claude/project-profile.yml` の `root`(parent-child 構成)、`quality`、`type_propagation_chain`、`domain_risks`、`features` を解決する。判定は今回実際に読んだ範囲で行い、`.claude/grasp.md` は参照索引に留める。ここで読んだ範囲・日時・未確認事項を grasp.md に更新する
+3. `task/` ディレクトリの存在確認(無ければ作成)。既存タスクと重複しないか `ls task/` で確認する
+4. タスク名を決める: 内容を表す簡潔な日本語。ファイル名は `task/進行中_{タスク名}.md`(この命名は /do-task の自動選択と連動する統一規約)
 
 ## Phase 1: 要求分析と実コード調査
 
@@ -50,7 +52,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
    - `doc/07_plan.md`(あれば): 関係するマイルストーン・期限をタスク MD の前提・完了条件に反映する
 4. 中〜大規模(対象 3 ファイル以上または契約変更)では researcher を観点別に並列起動してよい(単一メッセージで複数 spawn)
 
-## Phase 1.5: 影響範囲調査(features.impact_analysis が true のとき)
+## Phase 1.5: 影響範囲調査(features.impact_analysis が true のとき。`--compact` の品質維持契約中は常に実行)
 
 タスク漏れの主因を 4 つの体系調査で塞ぐ:
 
@@ -62,6 +64,9 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 ## Phase 2: タスク MD 生成
 
 [references/task-template.md](references/task-template.md) のフォーマットに従って `task/進行中_{タスク名}.md` を Write する。要点:
+
+- `--compact` が適格なら、[references/task-template.md の短縮記録](references/task-template.md#短縮記録---compact)を使う。目的、軽微判定の根拠、対象と参照元、参考実装、作業チェックリスト、品質コマンド、実行可能な完了条件、スコープ外の整合、検証・レビュー結果の追記先を必ず残す。checker・設計レビュー・実装と検証の分離・実装後独立レビュー・品質ゲート・実動確認は省略しない。長い背景・無関係な章や図・全体系の表は必須にしない。必要情報が増えたら通常形式へ戻す
+- `--compact` が不適格で通常形式へ戻る場合も、通常テンプレートの「品質維持契約」メタ情報を残す。その実行で品質工程を省略しないことを、別セッションの /do-task が読める形で伝える
 
 - **タスク分割の判断(生成前に必ず)**: 実装タスクが 10 個を超える、または Phase が 4 つ以上になる場合、**独立して完了検証できる単位**で複数のタスク MD への分割を提案する(例: 「スキーマ+API」と「画面」)。巨大な単一タスクはレビューも検証も精度が落ちる。分割時は各 MD の概要に依存関係(「依存: 完了_X の後」)を明記する
 - 現状分析には「実コード確認済み」の根拠(パス:行番号)を含める
@@ -76,11 +81,11 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
 
 **checker に委託**し、生成したタスク MD を [references/checker-checklist.md](references/checker-checklist.md) の観点で検証させる。指摘は team-lead(このセッション)が実コードで裏取りし、valid のみ反映する。修正 → 再検証を指摘ゼロまで繰り返す(3 回同一指摘が残る場合はユーザーに相談)。**フル段階では再検証を同じ checker へ差し戻す**(design §5-17)。
 
-## Phase 4.5: 外部レビュー(features.external_review が true のとき)
+## Phase 4.5: 独立レビュー(常に実行)
 
 1. **能力帯の異なる 2〜3 体のレビュアーを単一メッセージで並列に委託**する。各レビュアーに `reviewer-strong` / `reviewer-alt`(3 体目は `reviewer-alt2`)の `name` を付ける。それぞれにタスク MD 全文+検証観点(checker-checklist の要約)を渡し、JSON(指摘リスト: 対象箇所 / 問題 / 深刻度 / 提案)で返させる
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
-   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
+   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、設計完了として扱わない
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
 3. valid を反映 → **全レビュアー PASS(valid 指摘 0 件)まで反復**(design §5-10。コストを理由に反復を打ち切らない)。**フル段階では、修正後の再レビューを同じレビュアー(宛先)へ差し戻す**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**報告点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する

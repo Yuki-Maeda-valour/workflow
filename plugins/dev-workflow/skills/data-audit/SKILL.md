@@ -30,7 +30,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 ## Phase 0: 前提解決
 
 1. profile(`.claude/project-profile.yml`)を解決: `root` / `has_code` / `areas` / `secret_paths` / `audit.*`。`has_code: false` なら対象外と報告して終了
-2. `.claude/grasp.md` があれば読む(無ければ /understand-project の実行を促すか、マニフェストから最小限のスタック把握を行う)
+2. `.claude/grasp.md` は参照索引として読む。毎回、現在の profile・権威参照ファイル・関連文書・設定・対象境界・依存先を確認する(無ければ /understand-project の実行を促すか、マニフェストから最小限のスタック把握を行う)
 3. **機密フィールド辞書を構築**する(3 層で解決):
    - profile の `audit.sensitive_fields`(あれば追加)
    - スキーマ実測: DB スキーマのカラム名を [references/checks.md](references/checks.md) の既定辞書とパターンマッチし、一致したものを実在機密として昇格

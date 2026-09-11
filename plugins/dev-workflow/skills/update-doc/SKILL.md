@@ -32,14 +32,14 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | `--analyze-only` | 全量監査の差分と監査結果の報告のみ(更新しない) |
 | `--memory-only` | Serena メモリのみ更新(権威参照ファイル / doc を触らない) |
 | `--specific=<name>` | 特定メモリ・特定ファイルのみ |
-| `--no-review` | Phase 5 の外部レビューを省略 |
+| `--no-review` | 互換入力。独立レビュー必須のため無効化して報告する |
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
 
 ## Phase 1: 入力と現状把握
 
-1. モードを判定する(上記)。**差分同期**では完了タスク MD を読み、更新の種(スコープ / 変更ファイル / 図解 / 技術的考慮事項の設計判断 / 追加修正記録の発見事項)を抽出する
+1. モードを判定する(上記)。**差分同期**では完了タスク MD を読み、更新の種(スコープ / 変更ファイル / 図解 / 技術的考慮事項の設計判断 / 追加修正記録の発見事項)を抽出する。`.claude/grasp.md` は参照索引としてのみ使い、今回同期する領域の現在のコード・設定・依存先の確認を省略しない
 2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決
 3. **Serena がある場合**: `get_current_config` でアクティブプロジェクト確認(違えば `activate_project`)→ `list_memories` で実在メモリを動的列挙(固定名・固定数を仮定しない)→ 読む(差分同期では関連カテゴリのみ、全量監査では全部)
 4. doc/(または docs/)の索引(README.md)と関連文書を読む。**権威参照ファイルを読む**(`AGENTS.md` があればそれ → 無ければ `CLAUDE.md`。両方あれば `AGENTS.md` が正本。design §3 の検出順)
@@ -92,12 +92,12 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 `--yes` でなければ、適用前に更新内容の一覧(対象 / 変更概要)を提示して確認を取る。適用は 1 ファイルずつ、根拠と共に。
 
-## Phase 5: レビューループ(--no-review 以外)
+## Phase 5: 独立レビューループ(常に実行)
 
 1. **能力帯の異なる複数レビュアーを単一メッセージで並列起動**する。各エージェントに `reviewer-strong` / `reviewer-alt`(3 体目以降は `reviewer-alt2` / `reviewer-alt3` …)の `name` を付ける。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
    - 合格基準: 実コードとの整合 / 網羅性(今回の変更範囲)/ 古い情報の不在 / ドキュメント間の無矛盾 / **タグ・ADR・図・索引の整合** / フォーマット規約
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
-   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ実行+機械検証)に縮退して報告する
+   - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
 4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ
@@ -106,7 +106,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 ## Phase 6: 最終チェック
 
 1. **リンク・参照検査**: `python3 {このスキルの}scripts/check_links.py <doc ディレクトリ or 対象ファイル...>` を実行し、Markdown 相対リンク・記載パスの切れを検出(スクリプトが使えない環境では Grep で代替)
-2. **把握キャッシュの無効化**: ドキュメント・メモリを更新した場合、`.claude/grasp.md` を削除する(メモリの変更は git HEAD に現れず、古いキャッシュが有効と誤判定されるため。次回の /understand-project が再把握して作り直す)
+2. **把握キャッシュの無効化**: ドキュメント・メモリを更新した場合、`.claude/grasp.md` を削除する(前回要約と参照索引を今回の一次情報に合わせて作り直すため。次回の /understand-project が再把握して作り直す)
 3. 更新サマリーを報告: 更新したドキュメント一覧 / 主な変更点(タグ昇格・ADR 追記を含む)/ 削除(陳腐化)したもの / レビュー反復回数 / 残った needs-user 項目
 
 ## 最終ゲート(完了報告前セルフチェック)
