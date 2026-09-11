@@ -46,7 +46,7 @@ Codex / Cursor はこのファイルを直接読む。Claude Code は `CLAUDE.md
 | skill | 用途 |
 |-------|------|
 | `/understand-project` | 構造・技術スタック・規約を把握（読み取り専用） |
-| `/create-task` | タスク内容から構造化タスク MD を `task/` に作成（影響範囲調査込み） |
+| `/create-task` | タスク内容から構造化タスク MD を `{{TASK_DIR}}/` に作成（影響範囲調査込み） |
 | `/do-task` | タスク MD をサブエージェントで実装・検証・レビュー |
 | `/update-doc` | ドキュメント / メモリを実コードに同期 |
 | `/tool-check` | ツールによる機械検査（format / lint / typecheck / test / build）を一括実行 |

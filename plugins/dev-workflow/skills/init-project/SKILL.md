@@ -1,6 +1,6 @@
 ---
 name: init-project
-description: 新規・既存のプロジェクトに dev-workflow の標準構成(権威参照ファイル AGENTS.md + @AGENTS.md を import する薄い CLAUDE.md / .claude/project-profile.yml / doc/ 一式 / task/ ・任意で understand-project 強制 hook・specialist agent・MCP セットアップ)を導入する。技術スタック・パッケージマネージャ・構成・MCP 可否を自動検出し、「Serena を使うか」(= 正本の向き)を起点とした対話で必要な MCP(ブラウザ分析 / デザイン連携)まで確認して生成する。doc/ は統一構成(索引 + 01〜05・07 計画〈見積もり・スケジュール。未定可〉)。軸ドキュメントは能力帯の異なる複数モデルの並列レビューで検証する。「プロジェクトを初期化して」「標準構成を入れて」「ワークフローを導入して」「開発環境をセットアップして」「CLAUDE.md / AGENTS.md を整備して」等で使う。既存は上書きせず差分提案。AGENTS.md への移行は承認制。
+description: プロジェクトに dev-workflow の標準構成(権威参照ファイル AGENTS.md + @AGENTS.md を import する薄い CLAUDE.md / .claude/project-profile.yml / doc/ 一式 / 解決したタスク保存先・任意で understand-project 強制 hook・specialist agent・MCP セットアップ)を導入する。技術スタック・パッケージマネージャ・構成・MCP 可否を自動検出し、「Serena を使うか」(= 正本の向き)を起点とした対話で必要な MCP(ブラウザ分析 / デザイン連携)まで確認して生成する。doc/ は統一構成(索引 + 01〜05・07 計画〈見積もり・スケジュール。未定可〉)。軸ドキュメントは能力帯の異なる複数モデルの並列レビューで検証する。「プロジェクトを初期化して」「標準構成を入れて」「ワークフローを導入して」「開発環境をセットアップして」「CLAUDE.md / AGENTS.md を整備して」等で使う。既存は上書きせず差分提案。AGENTS.md への移行は承認制。
 argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 ---
 
@@ -51,7 +51,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - 無ければ言語別既定(例: PHP `./vendor/bin/pint --test` + `php artisan test`、Python `ruff check` + `pytest`)。判定できなければ空にし、`AGENTS.md` 側にプレースホルダを残す。
 
 **5. 既存構成の有無**
-- `AGENTS.md` / `CLAUDE.md` / `.claude/project-profile.yml` / `.claude/settings.json` / `doc/`(または `docs/`)/ `task/` / `.serena/` / `.gitignore` / `README.md` の有無を控える。以降の「上書きしない」判断に使う。
+- `AGENTS.md` / `CLAUDE.md` / `.claude/project-profile.yml` / `.claude/settings.json` / `doc/`(または `docs/`)/ 状態名 MD を持つタスク候補 / `.serena/` / `.gitignore` / `README.md` の有無を控える。以降の「上書きしない」判断に使う。
 - **権威参照ファイルの状態を 4 通りに分類する**(design §3 の検出順): ① どちらも無い ② `AGENTS.md` のみ ③ `CLAUDE.md` のみ(未移行)④ 両方。
 - ④ のときは `CLAUDE.md` が `@AGENTS.md` を import しているかを判定する。**判定では、コードブロック(3 連バッククォートで囲まれた範囲)内とインラインコード(バッククォートで囲まれた範囲)内に現れる `@AGENTS.md` を import とみなさない**(Claude Code の import パース仕様。素朴な文字列一致だと、import を説明しているだけの `CLAUDE.md` を「import 済み」と誤判定する)。import が無ければドリフトとして控え、Phase 3-1 で import 行の追加を提案する。
 - ③ のときは、**他ツール・CI が `CLAUDE.md` を直接参照していないか**を調べて控える(Phase 3-1 の移行提案で提示する)。`grep -rn 'CLAUDE\.md' --exclude-dir=.git .` 相当で CI 設定・スクリプト・README・ドキュメント・エディタ設定を横断する。
@@ -64,7 +64,11 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **7. 既存 Serena メモリの列挙(既存プロジェクト移行時)**
 - Serena が使用可能で `.serena/memories/` がある場合、`list_memories` で実在メモリを列挙し、汎用カテゴリ(overview / structure / tech / commands / conventions / completion)への対応を名前の意味から推定する(命名揺れの吸収)。Phase 3 の profile 生成で `memory_map` の提案に使う。
 
-検出結果(新規/既存・PM・スタック・構成・品質コマンド・既存物・MCP)を短く提示してから Phase 2 へ進む。
+**8. タスク保存先の解決**
+- profile を生成する前に [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従い、`<root>` を管理プロジェクトルートとして保存先を解決する。既存 profile の `task_dir` はホスト側で型を検証し、キー欠落・null のときだけ未指定として検出へ進む。不正値・複数候補では生成を停止して選択を求める
+- 解決した相対パスを `TASK_DIR` として以降の profile・AGENTS.md・運用文書・`.gitkeep` で一貫して使う。既存 profile は上書きせず、不足する `task_dir` の追記案を提示する
+
+検出結果(新規/既存・PM・スタック・構成・品質コマンド・既存物・タスク保存先・MCP)を短く提示してから Phase 2 へ進む。
 
 ---
 
@@ -109,7 +113,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 検出値と確認結果で以下を生成する。各テンプレは `templates/` から Read → `{{PLACEHOLDER}}` 置換 → Write。
 
 **1. 権威参照ファイル(正本 `AGENTS.md` + 橋渡しの `CLAUDE.md`)**(`templates/AGENTS.md.template` / `templates/CLAUDE.md.template`)
-- **正本は `AGENTS.md`**。置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) / `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}`。
+- **正本は `AGENTS.md`**。置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) / `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}` / `{{TASK_DIR}}`。
 - `{{DOC_REFERENCES}}` は正本で切り替える。serena → 主要メモリ名の箇条書き(`project_overview` / `code_style_conventions` / `suggested_commands` 等、存在は Phase 4 で onboarding 前提)。docs → 生成した `doc/` ファイルへのリンク箇条書き。
 - **`CLAUDE.md` は `@AGENTS.md` の import 1 行**(テンプレをそのまま Write。置換なし)。内容を複写しない。ホスト固有の追記が要るときだけ import 行の下に書くが、**`CLAUDE.md` は Cursor CLI にも読まれる**ため、他ホストで有害・無意味になる指示は書かない(design §7-4)。
 - **サイズ**: 権威参照ファイルは最も厳しいホストの上限(Codex の `project_doc_max_bytes` 既定 32 KiB)に収まるよう薄く保つ。詳細は正本(メモリ / `doc/`)へ逃がす。
@@ -130,15 +134,15 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   4. 承認されなければ移行しない。`CLAUDE.md` を正本のまま扱い、見送った旨と理由を Phase 4 の生成物一覧に残す。
 
 **2. .claude/project-profile.yml**(`templates/project-profile.yml.template`)
-- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{HAS_CODE}}` / `{{PACKAGE_MANAGER}}` / `{{SOURCE_OF_TRUTH}}` / `{{QUALITY_BLOCK}}` / `{{MCP_SERVERS_BLOCK}}` / `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の version を Read して埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
+- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{TASK_DIR}}` / `{{HAS_CODE}}` / `{{PACKAGE_MANAGER}}` / `{{SOURCE_OF_TRUTH}}` / `{{QUALITY_BLOCK}}` / `{{MCP_SERVERS_BLOCK}}` / `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の version を Read して埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
 - Phase 1-7 で既存メモリを列挙した場合、推定した対応表を `memory_map` として有効化した形で提案する(確定は生成内容の提示時にユーザーが確認)。
 - `{{QUALITY_BLOCK}}` は検出した品質コマンドを 2 スペースインデントの `key: value` で列挙(例 `  format: pnpm format`)。build はロジック依存が薄いプロジェクトなら `build_optional: true` を添える。検出ゼロなら `{}` にして自動検出へ委ねる旨のコメントを残す。
 - **`{{MCP_SERVERS_BLOCK}}`**(参考実装: `{{QUALITY_BLOCK}}`)は Phase 2 の起点質問・ブラウザ分析の質問で承認された `mcp_servers` 宣言を埋め込む。**承認された宣言が無い既定では、`features` ブロックと同じ全行コメントの例示**(`# mcp_servers:` 以下に `<id>: {command, args}` の書き方を示すコメント行)を出す。**承認された宣言があれば、コメントではない有効な YAML** として `mcp_servers:` 以下に `<id>` ごとの `command` / `args` を書く。この置換の実行順序は Phase 3-7 の「1 回の実行内の順序」に従う(先に profile へ書き込み、その profile を Read して Phase 3-7 が 2 形式を生成する)。
   - **⚠ 注入する YAML の引用形**: **フロースタイルで、`command` / `args` の要素は必ずシングルクォート `'…'` で囲む**(例: `'serena': {command: 'uvx', args: ['--from', 'C:\path\mcp.exe']}`)。値に `'` が含まれる場合は `''` に二重化する。**ダブルクォートは使わない** — YAML のダブルクォートは JSON と同様にエスケープ処理をするため、`C:\path\mcp.exe` のような Windows パスを含む宣言が `ScannerError` になる(シングルクォートはエスケープ処理をしないので `\` をそのまま持てる)。**これが壊れるのは `.claude/project-profile.yml` 自体**であり、影響は MCP 生成に留まらず**全 skill が profile を読めなくなる**(design §3 のフォールバックは「profile が無い」想定で「あるが壊れている」は想定外)。**サーバー id も必ずシングルクォートで囲む**(`'yes'` / `'123'` のように)。囲まないと YAML が `yes` / `no` / `true` 等を bool、`123` のような数字列を int、`2026-09-10` のような日付形式を date と解釈し、id が文字列でなくなる(`[A-Za-z0-9_-]+` の charset 制約はこれらの語を排除しないため、id を引用しないと YAML 側で型が化ける)。
-- 既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。**既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
+- `{{TASK_DIR}}` は通常の YAML 文字列としてシングルクォートで囲み、値中の `'` は `''` に二重化する。既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。**既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
 
 **3. doc/ 一式(規模に関わらず統一構成)**
-- `templates/doc/` の 7 テンプレートを `doc/` 直下へ生成する。置換は `{{PROJECT_NAME}}` / `{{DATE}}`(今日の日付) / `{{TECH_STACK}}`(02 のみ、検出スタックの箇条書き):
+- `templates/doc/` の 7 テンプレートを `doc/` 直下へ生成する。置換は `{{PROJECT_NAME}}` / `{{DATE}}`(今日の日付) / `{{TECH_STACK}}`(02 のみ、検出スタックの箇条書き) / `{{TASK_DIR}}`(05 のみ、Phase 1-8 の解決値):
 
 | ファイル | 内容 |
 |---|---|
@@ -154,8 +158,8 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - 小さく始めて**同じ構造のまま育てる**: 1 ファイルが約 300 行を超えたら同番号のディレクトリへ分割する(規則は README.md.template に記載済み。番号体系は変えない)。
 - **既存の doc / docs があるファイルは上書きしない**(無いファイルだけ足す)。既存プロジェクトに別構成の doc がある場合は、統一構成への対応表を提示するに留める(移行は提案のみ)。
 
-**4. task/**
-- `task/.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時 `git mv` で `完了_{名}.md`。中断は `中断_`、保留は `保留_`)。
+**4. タスク保存先**
+- Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時 `git mv` で同じディレクトリの `完了_{名}.md`。中断は `中断_`、保留は `保留_`)。
 
 **5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
 - **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。追加する一覧を提示してから書き込む。サイクル(/check・/do-task)実行時の許可プロンプトを減らすのが目的。
@@ -252,7 +256,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - [ ] 再実行モードでは、既存の記述・過去の選択を変えずに新標準の差分だけを提案し、workflow_version を更新したか。
 - [ ] MCP は「宣言 → 承認 → 生成」の順で扱ったか。承認提示に生成先(`.mcp.json` / `.codex/config.toml`)を列挙したか(**既定は両方生成し**、ユーザーがその場でホスト単位の除外を申し出た場合のみ個別にスキップする)。不要な設定を押し付けていないか。
 - [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている)か。
-- [ ] `task/.gitkeep` を作り、命名規約(`進行中_` / `完了_`)を `AGENTS.md` か案内で伝えたか。
+- [ ] 解決したタスク保存先に `.gitkeep` を作り、profile・AGENTS.md・運用文書で同じパスを示し、命名規約(`進行中_` / `完了_`)を伝えたか。
 - [ ] 生成物一覧と次ステップ(`/understand-project` からのサイクル)を日本語で提示したか。
 
 ## 関連 skill

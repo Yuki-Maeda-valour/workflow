@@ -41,10 +41,11 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 
 ## Phase 1: 設計(/create-task)
 
-`--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。生成物は `task/進行中_{タスク名}.md`。
+`--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。生成物は解決した保存先の `進行中_{タスク名}.md`。
 
 - 設計に必要な情報が不足している場合は、/create-task の規定どおり **AskUserQuestion で確認する**(推測で埋めない)
 - タスク名が確定したら、Phase 0 の 4 の判定に従って作業ブランチを作成・切り替える(`git switch -c task/{タスク名}`)
+- /create-task が返した**実際のタスク MD パス**を保持し、以降の /do-task・/update-doc・commit・PR に同じパスを渡す。保存先を推測・再構築しない([../create-task/references/task-directory.md](../create-task/references/task-directory.md))
 - /create-task が「複数タスクへの分割」を提案した場合は、**一気通貫を中止して分割案を報告する**(このスキルは 1 タスク 1 PR を単位にする)
 
 ## Phase 2: 続行判定ゲート(唯一の自動停止判断)
@@ -58,13 +59,13 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 4. **前提タスク未完**: タスク MD の概要に「依存: 完了_X の後」があり、その依存が未完了
 5. **設計の独立レビュー未完了**: reviewer の APPROVED が無い、またはレビュー未完了が記録されている
 
-判定結果(続行 / 停止 + 該当項目)を**必ず報告に残す**。停止時は「この情報が決まれば /ship-task を再開できる」形で不明点を列挙し、`/do-task task/進行中_{タスク名}.md` からの手動再開の導線も示す。
+判定結果(続行 / 停止 + 該当項目)を**必ず報告に残す**。停止時は「この情報が決まれば /ship-task を再開できる」形で不明点を列挙し、`/do-task {実際のタスクMDパス}` からの手動再開の導線も示す。
 
 `--design-only` の場合はこの Phase を実行せず、設計書を返して終了する。
 
 ## Phase 3: 実装(/do-task)
 
-Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過)。ブランチは Phase 1 で作成済みのため `--branch` は渡さない。
+Phase 1 で生成した実際のタスク MD パスを対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過)。ブランチは Phase 1 で作成済みのため `--branch` は渡さない。
 
 /do-task が以下で終わった場合は **Phase 4 へ進まず停止**する(実装 commit だけ残し、PR は作らない):
 
@@ -77,7 +78,7 @@ Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`-
 
 ## Phase 4: ドキュメント同期(/update-doc --task)
 
-完了タスク MD を入力に **/update-doc --task=task/完了_{タスク名}.md を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過)。
+同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過)。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)
@@ -94,7 +95,7 @@ Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`-
    - **品質ゲート**: 実行したコマンドと結果
    - **レビュー**: 反復回数・レビュアー編成・最終判定
    - **残課題 / needs-user**(あれば)
-   - タスク MD へのリンク(`task/完了_{タスク名}.md`)
+   - 実際の完了タスク MD へのリンク
 4. 完了報告に PR の URL を含める
 
 **縮退**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(サイレントスキップ禁止)。`--no-pr` のときも同様にコマンド列だけ示す。
@@ -123,5 +124,5 @@ Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`-
 
 - 内部で実行: /create-task(設計)→ /do-task(実装・検証)→ /update-doc --task(doc 同期)
 - 前提: /understand-project(未把握なら Phase 0 で実施)
-- 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task task/進行中_{名}.md` で Phase 3 から再開できる)
+- 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task {実際のタスクMDパス}` で Phase 3 から再開できる)
 - タスク MD が既にある場合: このスキルではなく /do-task から始める
