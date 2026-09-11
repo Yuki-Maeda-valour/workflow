@@ -1,7 +1,7 @@
 ---
 name: ship-task
 description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければそのまま /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計に必要な情報が欠けている場合は設計書だけ返して実装に進まない。品質ゲート赤・スコープ縮小検出・レビュー未収束のときも停止し、PR は作らない。工程を個別に回したいときは各スキルを直接呼ぶ。
-argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--reviewers=1|3] [--runners=<名前,...>]"
+argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>]"
 ---
 
 # ship-task — 設計 → 実装 → doc 同期 → PR の一気通貫実行
@@ -23,14 +23,15 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 | `--no-pr` | Phase 5 の push / PR 作成を行わない(ブランチ + commit まで) |
 | `--branch=<名前>` | 作業ブランチ名を明示(省略時は `task/{タスク名}`) |
 | `--refactor [対象]` | /create-task の対象発見型リファクタモードで設計する |
+| `--compact` | /create-task の短縮設計を要求する。起点で `--no-review` と profile のレビュー省略設定、`--light` と profile の影響調査省略設定を無効化して報告する。通常の `--light` 単独では影響範囲調査を省略できるが、compact の実行は通常形式へ戻っても維持する。/update-doc へ `--no-review` を渡さない |
 | `--reviewers=1\|3` | /do-task のレビュアー数を指定 |
 | `--runners=<名前,...>` | 外部 CLI レビュアー(オプトイン)を /create-task・/do-task・/update-doc へ透過。既定は内蔵のみ |
 
-`--light` `--no-review` `--max-iter` など各スキル固有の引数は、そのまま該当工程へ透過的に渡す。
+`--light` `--no-review` `--max-iter` など各スキル固有の引数は、そのまま該当工程へ透過的に渡す。通常の `--light` は影響範囲調査だけを省略できる。`--compact` の実行では `--light` と profile の影響調査省略設定、`--no-review` と profile のレビュー省略設定を無効化し、通常形式へ戻っても維持する。後段の /update-doc へ `--no-review` を渡さない。
 
 ## Phase 0: 前提と作業ブランチ
 
-1. **把握**: `.claude/grasp.md` を確認し、未把握なら /understand-project 相当を実施する(以降の工程が把握済みを前提にするため。深化は /create-task の Phase 0 に任せる)
+1. **把握**: `.claude/grasp.md` は参照索引として確認し、毎回、現在の profile・権威参照ファイル・関連文書・設定・対象領域と依存先を読む。前回の把握状況を理由に省略しない(深化は /create-task の Phase 0 に任せる)
 2. **profile 解決**: `.claude/project-profile.yml` から `root`・`quality`・`features` を得る(無ければ動的検出)
 3. **作業ツリーの清潔性**: `git status --short` を確認。無関係な未コミット変更があれば、PR にそれが混ざる旨を警告して続行可否を確認する(ここは安全のため必ず確認する)
 4. **作業ブランチ**: `--branch` があればその名前で作成。無い場合は現在ブランチで判断する
@@ -55,6 +56,7 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
 2. **needs-user の残存**: /create-task の checker・外部レビューで `needs-user` にトリアージされた指摘が未解決で残っている
 3. **完了条件が検証不能**: 完了条件が「① 操作 ② 期待される観察結果」の実行可能な手順になっておらず、実動確認の可否を判定できない
 4. **前提タスク未完**: タスク MD の概要に「依存: 完了_X の後」があり、その依存が未完了
+5. **設計の独立レビュー未完了**: reviewer の APPROVED が無い、またはレビュー未完了が記録されている
 
 判定結果(続行 / 停止 + 該当項目)を**必ず報告に残す**。停止時は「この情報が決まれば /ship-task を再開できる」形で不明点を列挙し、`/do-task task/進行中_{タスク名}.md` からの手動再開の導線も示す。
 
@@ -79,7 +81,7 @@ Phase 1 で生成したタスク MD を対象に **/do-task を実行**する(`-
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)
-- /update-doc が `needs-user` を残した場合は PR 本文の「残課題」に転記する(これは停止理由にしない)
+- /update-doc の独立レビューが未完了・未承認なら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する
 
 ## Phase 5: PR 作成
 

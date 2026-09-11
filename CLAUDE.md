@@ -40,3 +40,10 @@ bash -n setup.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh   # 外部ランナー起動の回帰テスト(必須)
 ```
+
+## このリポジトリの Issue 運用
+
+- このリポジトリ自身の作業記録は GitHub Issue 本文・コメントに残し、ローカルのタスク成果物は新設しない。配布スキルの既定の task ファイル方式は変更しない
+- create-task の設計成果物は指定 Issue、do-task の対象も指定 Issue とする。未指定で複数候補なら選択を確認する
+- チェック状態・レビューには Issue 本文と diff を使い、完了リネームの代わりに検証結果を Issue へ記録する。update-doc はその完了記録を入力にする
+- ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする

@@ -5,15 +5,16 @@
 
 - プロジェクト固有情報(パス・コマンド・スタック)は skill にハードコードされていない。`.claude/project-profile.yml` +実行時自動検出+ CLAUDE.md の 3 層で吸収する(profile が無くても動く)
 - 設計の詳細・規約・出典は [docs/design.md](docs/design.md)
+- どんなに小さい変更でも独立レビューを必須とし、セルフレビューや機械チェックだけで完了・公開しない
 
 ## skills 一覧(12 種)
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
 | `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import / profile / doc / task / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
-| `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。結果は grasp キャッシュに保存され、変更が無ければ次回は即答 | セッション開始時(hook が自動促し) |
+| `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。grasp は前回要約と参照索引に使い、毎回現在の一次情報を確認 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
-| `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を `task/進行中_*.md` に生成。`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |
+| `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を `task/進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |
 | `/do-task` | タスク設計書を実装(implementer 委託)・機械検証・実動確認・独立レビュー・完了処理。中断再開可。「検証だけ」も可 | 「タスクをやって」「続きをやって」 |
 | `/update-doc` | メモリ / 権威参照ファイル / doc を実コードと同期。`--task` で完了タスク駆動の差分同期(要件タグ昇格・ADR・図・索引まで) | タスク完了後の締め |
 | `/ship-task` | 上の 3 工程(設計 → 実装 → doc 同期)を 1 コマンドで通し、作業ブランチ・実装/doc の commit・push・PR 作成まで出す。既定は走り切り、要件不明・品質ゲート赤・レビュー未収束でのみ停止 | 「まるっとやって」「設計から PR まで一気に」 |
@@ -76,7 +77,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 
 - **読み込み先の出典(確認日 2026-09-08)**: Codex は `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者)から読み、frontmatter は `name` + `description` が必須 — [Build skills(ChatGPT/Codex 公式)](https://learn.chatgpt.com/docs/build-skills)。Cursor は `.cursor/skills/` または `.agents/skills/` から読み `/skill-name` で起動 — [Cursor Agent Skills](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills)。Codex の subagents は 2026-03-14 に GA — [解説記事](https://simonwillison.net/2026/Mar/16/codex-subagents/)
 - **検証済み(2026-09-11)**: Codex / Cursor での SKILL.md の読み込み・動作を確認済み(ユーザーによる実環境での確認報告)。
-- **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。内蔵サブエージェントが無い環境では同 §5-17 の縮退プロトコル(最小段階=観点を分けた直列セルフレビュー)として読み替える
+- **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。独立レビューを実施できない環境ではレビュー未完了として扱い、完了承認・公開へ進めない
 - **外部 CLI レビュアーはオプトイン**: `--runners=<名前,...>` か profile の `features.runners` を宣言したときだけ起動する。宣言が無ければホスト内蔵のレビュアーだけを使い、外部 CLI を探しに行かない(既定の挙動は従来と同じ)。**契約の正本**(使えるランナー・判定順序・終了コード・機密ガード)は [external-runners.md](plugins/dev-workflow/skills/do-task/references/external-runners.md) の 1 ファイルだけで、README や design はそれを参照する
 - **委託はホスト非依存に書く(移行中)**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。既存 skill 本文にはホスト固有語が残っており、移行の単位・順序・到達条件は [docs/design.md](docs/design.md) §7-7
 - **MCP のツール接続は宣言駆動**: profile の `mcp_servers` で 1 回宣言し、`/init-project` が `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)の 2 形式を生成する。**生成前に解決後の宣言を提示して明示承認を得る**(信頼モデルに対する明示的な例外。`--yes` でも省略せず、応答を受け取れない実行では生成しない)。**生成手順の正本**(append-only・既存 id の判定と内容比較・退避条件・生成後の検証とロールバック)は [mcp-config-generation.md](plugins/dev-workflow/skills/init-project/references/mcp-config-generation.md) の 1 ファイルだけで、README や design はそれを参照する。**宣言のスキーマ**(`<id>: {command, args}`。`url` / `env` は受け付けない)は [docs/design.md](docs/design.md) §4
@@ -91,6 +92,8 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 ## このリポジトリへの還元
 
 各プロジェクトで skill を改善したら、固有部分を profile / 動的検出に置き換えて `plugins/dev-workflow/` に反映 → バージョンを上げて commit → 各プロジェクトで更新を取得。詳細は [docs/design.md §8](docs/design.md)。
+
+このリポジトリ自身では作業記録を GitHub Issue に残し、ローカルのタスク成果物を新設しない。これは配布スキルの task ファイル方式には影響しない。
 
 ## 検証
 

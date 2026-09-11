@@ -15,7 +15,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "STATE=\"$CLAUDE_PROJECT_DIR/.claude/.understand-project-done\"; if [ ! -f \"$STATE\" ]; then mkdir -p \"$CLAUDE_PROJECT_DIR/.claude\" && touch \"$STATE\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"このセッションではまだ /understand-project が実行されていません。作業を始める前に、まず /understand-project(通常は --quick で十分)を実行してプロジェクトの全体像を把握してから本来の依頼に着手してください。\"}}'; fi"
+            "command": "STATE=\"$CLAUDE_PROJECT_DIR/.claude/.understand-project-done\"; if [ ! -f \"$STATE\" ]; then mkdir -p \"$CLAUDE_PROJECT_DIR/.claude\" && touch \"$STATE\" && printf '%s' '{\"hookSpecificOutput\":{\"hookEventName\":\"UserPromptSubmit\",\"additionalContext\":\"このセッションではまだ /understand-project が実行されていません。まず /understand-project で初期把握を行ってから本来の依頼に着手してください。--quick は初期把握に限り、実作業では対象領域の現在の一次情報を追加確認してください。\"}}'; fi"
           }
         ]
       }
