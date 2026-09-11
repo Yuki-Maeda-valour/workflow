@@ -1,7 +1,7 @@
 ---
 name: do-task
-description: task/ のタスク設計書(進行中_*.md)を実装し、検証・レビュー・完了処理まで行う実行スキル。「タスクをやって」「実装して」「タスクを進めて」「続きをやって」と言われたとき、/create-task で作った設計書を実装に移すときに使う。規模判定に基づき researcher / implementer / reviewer のサブエージェントを編成し、team-lead(このセッション)が diff とチェックリストの機械突合でスコープ縮小を検出、品質ゲートを自ら再実行して完了を判定する。完了時はタスクファイルを 完了_ にリネームし追加修正記録を追記する。「検証だけして」と依頼された場合は検証フェーズのみを実行し、修正せず合否を報告する。
-argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)] [--max-iter=<N>] [--reviewers=1|3] [--runners=<名前,...>] [--branch[=<名前>]]"
+description: 解決した保存先のタスク設計書(進行中_*.md)を実装し、検証・レビュー・完了処理まで行う実行スキル。「タスクをやって」「実装して」「タスクを進めて」「続きをやって」と言われたとき、/create-task で作った設計書を実装に移すときに使う。規模判定に基づき researcher / implementer / reviewer のサブエージェントを編成し、team-lead(このセッション)が diff とチェックリストの機械突合でスコープ縮小を検出、品質ゲートを自ら再実行して完了を判定する。完了時はタスクファイルを 完了_ にリネームし追加修正記録を追記する。「検証だけして」と依頼された場合は検証フェーズのみを実行し、修正せず合否を報告する。
+argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_*.md から選択)] [--max-iter=<N>] [--reviewers=1|3] [--runners=<名前,...>] [--branch[=<名前>]]"
 ---
 
 # do-task — タスクの実装・検証・完了処理
@@ -22,8 +22,8 @@ argument-hint: "[タスクMDパス(省略時: task/進行中_*.md から選択)]
 
 ## Phase 0: 前提と対象確定
 
-1. 対象タスク: 引数のパス、無ければ `ls task/進行中_*.md` から選択(複数あればユーザーに確認)。タスク MD を全文読む
-2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら以降のコマンド・編集は root 配下)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。契約の詳細は [references/external-runners.md](references/external-runners.md) §1
+1. **管理ルートと対象タスク**: 本体 `root` へ移動する前に管理プロジェクトルートを固定する。引数のパスがあれば管理ルート相対として最優先し、profile の `task_dir` が不正でも保存先の再解決を行わない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `進行中_*.md` から選択する(複数あればユーザーに確認)。無効指定・複数候補では停止する。対象タスク MD の絶対パスを保持して全文読む
+2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら本体ソースの探索・実装・品質コマンドは root 配下。保持したタスク MD は管理ルート側)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。契約の詳細は [references/external-runners.md](references/external-runners.md) §1
 3. `git status` を確認。未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する。**ユーザーがブランチ作成を指定した場合のみ**(`--branch` または口頭指示)、着手前にブランチを作成して切り替える(名前省略時は `task/{タスク名}`)。指定が無ければ現在のブランチのまま進める(能動的な提案はしない)
 4. `.claude/grasp.md` は参照索引としてのみ使い、毎回、現在の profile・権威参照ファイル・関連文書・設定・タスク対象と依存先を読む。前回の調査記録も再探索や説明の作り直しを減らす参考に限り、読取りを省略しない。短縮記録なら短縮判定と品質維持契約を読み、実装と検証の分離・独立レビューを省略しない
 5. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): 走行中の問い合わせ・生存確認ができるかを**ツールの実在で確認**し(判定手段は軸 8)、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
@@ -109,7 +109,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 2. 独立レビュアーが 1 名以上いて全員 APPROVED であることを確認する。未承認なら完了状態・リネームへ進まず、中断記録に理由を残す
 3. **追加修正記録**をタスク MD 末尾に追記: 日付 / 使用スキル(do-task)/ 反復回数 / reviewer 結果(3 体なら内訳)/ 品質ゲート実行結果 / 特記事項
 4. ステータス行を `> **ステータス**: ✅ 完了({YYYY-MM-DD})` に更新
-5. `git mv task/進行中_{タスク名}.md task/完了_{タスク名}.md`
+5. `git mv` で対象タスク MD と同じディレクトリ内の `進行中_{タスク名}.md` を `完了_{タスク名}.md` に改名する。別の保存先へ移動しない
 6. 完了報告: 変更ファイル一覧 / 品質ゲート結果 / レビュー概要 / 残課題(あれば)/ 次の提案(/update-doc --task でドキュメント同期、コミットの提案 — **コミットはユーザーが求めた場合のみ**)
 
 中断する場合(ユーザー判断待ち・ブロッカー)は、ステータスを 🚧 のまま進捗を追加修正記録に書き、何がブロッカーかを報告する。長期保留なら `保留_` へのリネームを提案する。

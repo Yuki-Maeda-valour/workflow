@@ -36,9 +36,9 @@
 
 | skill | 責務 | 読む | 書く |
 |---|---|---|---|
-| init-project | 標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import 1 行 / doc/ / task/ / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | AGENTS.md, CLAUDE.md, doc/, task/, .claude/, .mcp.json, .codex/config.toml |
+| init-project | 標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import 1 行 / doc/ / task_dir / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | AGENTS.md, CLAUDE.md, doc/, task_dir, .claude/, .mcp.json, .codex/config.toml |
 | understand-project | プロジェクト把握。読み取り専用(grasp は参照索引) | profile, 権威参照ファイル, メモリ / doc, コード | .claude/grasp.md(前回要約・参照索引のみ) |
-| create-task | 種別判定・影響範囲調査済みのタスク設計書生成(--refactor = 対象発見型リファクタ分析) | コード全域 | task/進行中_*.md のみ |
+| create-task | 種別判定・影響範囲調査済みのタスク設計書生成(--refactor = 対象発見型リファクタ分析) | コード全域 | 解決した task_dir の進行中_*.md のみ |
 | ship-task | create-task → do-task → update-doc --task を通しで実行し、ブランチ・commit・push・PR まで出す薄いオーケストレーター(工程の中身は持たない) | 各工程の成果物 | 3 工程の書き込み+ git ブランチ / commit / PR |
 | do-task | タスク実装(委託)〜機械検証・実動確認〜独立レビュー〜完了処理。検証のみモード可 | task MD, コード | ソースコード, task MD |
 | update-doc | メモリ / 権威参照ファイル / doc/ の実コード同期(--task = 完了タスク駆動。タグ昇格・ADR・索引) | コード全域, 完了タスク MD | メモリ, 権威参照ファイル, doc/(索引含む) |
@@ -82,8 +82,11 @@ name: MyProject
 # リポジトリ構成: single(既定) | parent-child | monorepo
 # parent-child: AI 管理リポジトリの下に本体ソースが独立 git である構成
 repo_layout: single
-# 本体ソースのルート(parent-child のときのみ。探索・コマンド実行は必ずこの下で行う)
+# 本体ソースのルート(parent-child のときのみ。ソース探索・実装・品質コマンドはこの下で行う)
 root: .
+
+# タスク成果物の保存先(管理プロジェクトルート相対)。省略時は既存の状態名 MD を検出し、無ければ docs/tasks
+task_dir: docs/tasks
 
 # コードを持つか(false: ドキュメントのみのプロジェクト。品質ゲートをスキップ)
 has_code: true
@@ -200,7 +203,8 @@ known_facts_ref: docs/HANDOVER.md
 
 以下の各項が扱う委託の具体(サブエージェント起動の API・エージェント種別・モデルの指定方法)は、**ホスト = Claude Code における解決先**を持つ。skill 本文は役割語(一覧は §7-5)で委託を書き、ホスト固有の識別子は references の解決表からのみ参照する(§6・§7-5)。**役割の分離・段階判定と縮退の規則はホスト非依存**である。`name` は 2 層に分かれる — 双方向連携を持つホストでは、委託先を宛先として識別可能にすること自体はホスト非依存(§5-17 フル段階。名前が無いと双方向連携の経路が塞がる。標準・最小段階では宛先が存在せず要請自体が生じない)。一方 `name` という引数名と文字種の規則は Claude Code の解決(解決表が正本)。具体の解決(API 名・`name` 規則・エイリアス)は**解決表([`do-task/references/delegation-map.md`](../plugins/dev-workflow/skills/do-task/references/delegation-map.md))を正本とする**。以下の各項(**§5-3・§5-4・§5-5・§5-9・§5-13・§5-17** の 6 項)は、ホストでの解決先を解決表・[`do-task/references/external-runners.md`](../plugins/dev-workflow/skills/do-task/references/external-runners.md)・§7-3 のいずれかへ委ね、規則そのもの(ホスト非依存の部分)だけを持つ。**変更の向きは一方向** — 解決表を先に直し、§5 の記述を追随させる(逆向きに §5 だけを直さない)。
 
-1. **タスクファイル命名**: `task/進行中_{タスク名}.md` → 完了時に `git mv` で `task/完了_{タスク名}.md`。中断は `中断_`、保留は `保留_`
+1. **タスク保存先と命名**: 保存先は [`create-task/references/task-directory.md`](../plugins/dev-workflow/skills/create-task/references/task-directory.md) を正本として、管理プロジェクトルート基準で profile の `task_dir` → 既存状態名 MD の検出 → `docs/tasks` の順に解決する。`root` は本体ソース用で保存先の基準にはしない。ファイル名は `進行中_{タスク名}.md` → 完了時に同じディレクトリで `完了_{タスク名}.md`。中断は `中断_`、保留は `保留_`
+   - 決定記録: [Issue #48](https://github.com/Yuki-Maeda-valour/workflow/issues/48)
 2. **skill 名**: `update-doc`(update-docs は使わない)。旧 refact / refactor は `create-task --refactor` に統合(分析 → タスク化 → do-task で実行)
 3. **サブエージェントの起動**: 委託先を**宛先として識別可能にする**(名前が無いと双方向連携の経路が塞がる)。起動 API・`name` の文字種規則・派生名の系統は解決表(軸 4・§2)が正本。宛先識別ができる環境では**フル段階での運用を既定とし**、できない環境では前提にせず §5-17 の縮退プロトコルに従う
 4. **モデル指定**: エイリアスのみで指定する(指定方法は解決表 軸 3 が正本)。日付付きモデル ID・版数(「Opus 4.7」等)をハードコードしない。利用可能なエイリアス群はモデルの世代交代で変わるため固定リストとして扱わず、実行時に指定可能なものを確認する

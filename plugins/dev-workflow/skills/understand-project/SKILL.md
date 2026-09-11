@@ -38,7 +38,7 @@ disallowed-tools: Edit, NotebookEdit
 ### 0-1. プロジェクトプロファイル(あれば)
 
 `.claude/project-profile.yml` を Read。存在すれば以下を得る:
-- `repo_layout` / `root`: **parent-child 構成(AI 管理リポジトリの下に本体ソースが独立 git)の場合、以降の探索・コマンド実行はすべて `root` 配下を対象にする**
+- `repo_layout` / `root`: **parent-child 構成(AI 管理リポジトリの下に本体ソースが独立 git)の場合、本体ソースの探索・実装・品質コマンドは `root` 配下を対象にする**。管理ファイルやタスク保存先の基準は管理プロジェクトルートのまま
 - `has_code`: false ならコード分析をスキップし、ドキュメント構成の把握に切り替える
 - `memory_map` / `areas` / `quality` / `source_of_truth` / `known_facts_ref`
 
