@@ -57,7 +57,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 - 機密ファイル(`secret_paths`)を読まない・報告に値を含めないこと(**外部 implementer にはこの指示に保証が無く、明示承認〈references/external-runners.md §12-4〉が唯一の防御である**)
 - `.claude/grasp.md`(あれば)のパス — 前回要約と参照索引として使う。ただし現在の対象ファイル・依存先・規約を読むこと
 
-実装の委託先は Phase 0 の解決結果に従う。**実装用の既定表にエントリが無い間は内蔵で実行し、その旨を報告する。**
+実装の委託先は Phase 0 の解決結果に従う。**skill 本文の配線が入るまでは内蔵で実行し、その旨を報告する。**
 
 長時間応答がない場合の死活監視は、**内蔵 implementer では** [references/review-protocol.md](references/review-protocol.md) の M1〜M4 に従う(**外部 implementer には走行中の問い合わせ・生存確認の送達手段が無く M1〜M4 がそのままでは成立せず、待機目安の経過だけでは新規起動しない** — 停止後の引き継ぎ条件は references/external-runners.md §12-7、縮退の定義は design §5-17)。起動前・走行中の失敗時の扱いも references/external-runners.md §12 の契約に従う。
 
