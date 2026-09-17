@@ -12,7 +12,8 @@
 |---|---|
 | **§7-2 の「implementer の外部化は行わない(スコープ外)」は検討の結果ではない** — 出典の決定録(2026-09-09)に該当する決定は 1 件も無く、`features.implementer: internal \| cursor` のスキーマだけが残っている | `docs/minutes/2026-09-09_壁打ち_AI非依存の開発基盤.md` を grep(0 件) |
 | `codex-cli 0.153.4` / ChatGPT ログイン済 / `review-agent.sh --runner codex --dry-run` が `codex exec --sandbox read-only` を出力し exit 0 | ローカル実測(2026-09-17) |
-| **`codex exec` は `resume` サブコマンドを持つ**(`Resume a previous session by id or pick the most recent with --last`)。`-C, --cd <DIR>` と `-s, --sandbox`(`read-only` / `workspace-write` / `danger-full-access`)も持つ | `codex exec --help` の実測(2026-09-17)。**resume の実挙動は未実測** |
+| `codex exec` は `-C, --cd <DIR>` と `-s, --sandbox`(`read-only` / `workspace-write` / `danger-full-access`)を持つ | `codex exec --help` の実測(2026-09-17)。不正値 `-s bogus` で `invalid value ... [possible values: ...]` が返ることも確認 |
+| **`codex exec resume` は `-s/--sandbox` も `-C/--cd` も受け付けない**(`error: unexpected argument '-s' found` / 同 `'-C'`)。ヘルプにも両フラグと `workspace-write` の語が存在しない | ローカル実測(2026-09-17)。`codex exec resume -s bogus --last` / `-C /nonexistent --last` の双方でパース段階で失敗 |
 | OpenAI 公式プラグイン `openai/codex-plugin-cc` v1.0.6 は skills(3)+commands(8)+agent(1)+hooks(3)、常時 ~449 tok。`codex:codex-rescue` は `Agent` の `subagent_type` で呼べる subagent | `claude plugin details` + プラグイン本体の読解(2026-09-17) |
 | **plugin は codex CLI の薄いラッパー** — agent 定義自身が "thin forwarding wrapper" と名乗り、`--write` は内部で `sandbox: "workspace-write"` に解決され、resume は app-server の `thread/resume` を叩く | `agents/codex-rescue.md` / `scripts/codex-companion.mjs:491` / `scripts/lib/codex.mjs:750` の実測 |
 | plugin の Stop hook(review gate)は既定 `stopReviewGate: false` | `scripts/lib/state.mjs:23` の実測 |
@@ -27,7 +28,8 @@
 2. **起動経路は ③ CLI を自前実装する**(`codex exec --sandbox workspace-write`)。
    - 理由: 柔軟さ = 制御の細かさでは CLI が上。`secret_paths` の除外・ログ規約(何を渡したかの記録)・cwd の限定を自前で持てる。配布物が自己完結する(外部プラグイン・MCP 設定に依存しない)
    - 却下: 「① plugin(`codex:codex-rescue`)に乗る」— **実測で「plugin のほうが柔軟」という前提が成立しなかった**。plugin の機能はすべて codex CLI 由来で、plugin 固有の優位は実装済みのジョブ管理(status / result / cancel)だけ。その代わりに `secret_paths` 除外とログ規約を放棄し、plugin 未導入環境では動かなくなる /「② MCP」— 据え置き(解決表 §5 の「有効化手段が未定・未検証」を動かさない)/「③ を正・① を任意の高速路」— 契約が 2 本になり維持コストが倍
-   - 派生: ジョブ管理(進捗・中止)は自前実装が要る。`codex exec resume --last` を差し戻しループに使えるかは実装時に実測する
+   - 派生: ジョブ管理(進捗・中止)は自前実装が要る
+   - 派生(**実測で確定**): **差し戻しは毎回 `codex exec` の新規起動で行い、resume 経路は採らない。** `codex exec resume` が `--sandbox` と `--cd` を受け付けないため、判定 3(フラグの確立)と §9(cwd の限定)をどちらも満たせない — `codex review` を既定表から外した理由(design §7-3)とまったく同じ構造。文脈は渡すプロンプト(前回の diff・レビュー指摘)で補う。これは既存のレビュー経路の扱い(`external-runners.md` §8「外部ランナーは会話継続ができない。再レビューは毎回新規起動」)と一致する
 
 3. **実装は作業ツリーで直接行わせる。** 保護は「実行前に clean を要求 + HEAD を記録 + 実行後に diff を提示」。
    - 理由: 依存・ビルド環境がそのまま使えるため implementer 自身がテストを回せる。`external-runners.md` §9 自身が一時ツリーを「機密の封じ込めではない」と認めており、実装で失うのは越境読み取りの防止だけ
@@ -60,9 +62,10 @@
 
 ## 未決(宿題)
 
+> 壁打ち時点の未決 4 件のうち 1 件(`codex exec resume` の可否)は**同日の実測で解決**した。決定 2 の派生に移した。
+
 | 未決 | 何が分かれば決まるか |
 |---|---|
-| `codex exec resume --last` を差し戻しループに使えるか | 実挙動の実測(セッション id の受け渡し・cwd をまたいだときの挙動)。実装時に治具で確認する |
 | 走行中にリミットへ到達したときの codex の終了コードと出力形式 | 実測。判定 4(疎通プローブ)は起動前の話であり、走行中の到達は未確認。決定 5 の「自動引き継ぎ」の発火条件を書くのに必要 |
 | 実装用エントリ(`codex exec --sandbox workspace-write`)のヘルプ照合をどう課すか | 既定表の判定 3 は「読み取り専用フラグの確立」を求める。書き込み用では「書き込み範囲の限定の確立」に読み替える必要があり、照合対象の語を決める必要がある |
 | ② MCP バックエンド(`codex mcp-server`)の評価 | 解決表 §5 の「有効化手段が未定」を動かすかどうか。今回は据え置き |
