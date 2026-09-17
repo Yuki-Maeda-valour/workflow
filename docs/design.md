@@ -278,6 +278,17 @@ done
 
 2026-09-09 時点の実測(出現数): do-task 32 / create-task 25 / init-project 22 / update-doc 11 / reflect-decisions 11 / data-audit 9 / understand-project 7 / 他は 2 以下。**この語彙は `.claude/` のパス参照を含む**ので、委託の語がゼロになっても値はゼロにならない(2026-09-18 の実測: この語彙では 12 skill で 1〜17 件ヒットするが、**その全件が `.claude/` のパス参照**で、§7-7 の語彙では計 0)。**この値は移行当時(2026-09-09)に順序を決めるための測定記録**であり、⚠ **現在の `.claude/` 依存度の指標には転用しない** — `.claude/` のヒットには共有設定(`project-profile.yml`)もホスト固有設定(`settings.json`)も同じパスの反復もまとめて入るため(実測〈2026-09-18〉: 最多の init-project 17 件の内訳は profile 7 / settings 6 / **状態ファイル 3** / その他 1 で、状態ファイルだけなら do-task の 8 件が最多)。⚠ **他ホストで読み替えが要るかは、この値ではなくホストが実際に持つ機構で決まる**(判定手段と縮退の中身は §5-17)。
 
+**内訳の再現**(分類の仕方で数値が変わるので、上と同じくコマンドごと残す):
+
+```bash
+# 状態ファイルだけを数える(共有設定 project-profile.yml とホスト固有設定 settings*.json を除く)
+for s in plugins/dev-workflow/skills/*/; do
+  printf '%-20s %s\n' "$(basename "$s")" \
+    "$(grep -oE '\.claude/(grasp\.md|reviews)' "$s/SKILL.md" | wc -l)"
+done | sort -k2 -rn
+```
+
+
 ### 7-1. 配置先(手順層)
 
 | ホスト | 配置先 | 備考 |
