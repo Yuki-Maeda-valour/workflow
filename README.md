@@ -83,7 +83,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 - **委託はホスト非依存に書く(移行中)**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。既存 skill 本文にはホスト固有語が残っており、移行の単位・順序・到達条件は [docs/design.md](docs/design.md) §7-7
 - **MCP のツール接続は宣言駆動**: profile の `mcp_servers` で 1 回宣言し、`/init-project` が `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)の 2 形式を生成する。**生成前に解決後の宣言を提示して明示承認を得る**(信頼モデルに対する明示的な例外。`--yes` でも省略せず、応答を受け取れない実行では生成しない)。**生成手順の正本**(append-only・既存 id の判定と内容比較・退避条件・生成後の検証とロールバック)は [mcp-config-generation.md](plugins/dev-workflow/skills/init-project/references/mcp-config-generation.md) の 1 ファイルだけで、README や design はそれを参照する。**宣言のスキーマ**(`<id>: {command, args}`。`url` / `env` は受け付けない)は [docs/design.md](docs/design.md) §4
 - **skill を 1 本だけ取り出す配置は非サポート**: skill 間の兄弟参照(`../do-task/...`)が解決できず、外部ランナー等の機能が無効化される
-- **`features.implementer`**: `internal`(既定)| 既定表にある実装用ランナー名。既定表外の名前は無視して報告する(`runners` と同じ信頼モデル)。宣言されていてもセッション初回に明示承認を得るまでは内蔵で実行する。**実装用の既定表エントリは未整備のため、現時点では `internal` 以外を宣言しても無視され内蔵で実行される**。旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
+- **`features.implementer`**: `internal`(既定)| 既定表にある実装用ランナー名。既定表外の名前は無視して報告する(`runners` と同じ信頼モデル)。宣言されていてもセッション初回に明示承認を得るまでは内蔵で実行する。既定表エントリと skill 本文の配線は **v4.2.0 で完了**しており、宣言すれば実際に外部で実装される(判定・作業ツリー保護・縮退・引き継ぎは上記の契約が正本)。旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
 
 ## 既存プロジェクトとの共存・移行
 
