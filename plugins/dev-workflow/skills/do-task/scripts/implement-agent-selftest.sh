@@ -591,7 +591,7 @@ check "失敗: ヘルプ照合のタイムアウト" 7 "$rc" && assert_error_for
 
 # ── D. 判定 4′(疎通プローブ)と本実行の分離 ──
 
-# D1. プローブは読み取り専用モード + 一時ディレクトリ、本実行は書き込みモード + --cwd
+# D1. プローブは読み取り専用モード、本実行は書き込みモード。cwd は両者とも --cwd(決定 43)
 reset_record
 STUB_DIR="$WORK/pathbin"
 run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
@@ -608,12 +608,12 @@ if check "プローブと本実行の 2 回が記録される" 0 "$rc"; then
     ng "本実行は書き込みモードで起動する(実際: '$run_mode')"; fi
   if [ "$run_cwd" = "$CWD_TARGET" ]; then ok "本実行の cwd は --cwd で渡したディレクトリ"; else
     ng "本実行の cwd は --cwd で渡したディレクトリ(実際: '$run_cwd')"; fi
-  if [ -n "$probe_cwd" ] && [ "$probe_cwd" != "$CWD_TARGET" ] && [ "$probe_cwd" != "$WORK/proj" ]; then
-    ok "プローブの cwd は --cwd ともスクリプトの起動場所とも別"
-  else
-    ng "プローブの cwd は --cwd ともスクリプトの起動場所とも別(実際: '$probe_cwd')"; fi
-  if [ -n "$probe_cwd" ] && [ ! -e "$probe_cwd" ]; then ok "プローブ用の一時ディレクトリは終了時に消える"; else
-    ng "プローブ用の一時ディレクトリは終了時に消える(残存: '$probe_cwd')"; fi
+  # 決定 43: 使い捨ての一時ディレクトリを cwd にすると、信頼していないディレクトリでの
+  # 非対話実行を拒否するランナーでプローブが必ず失敗する(実測)。cwd は本実行と揃える
+  if [ "$probe_cwd" = "$CWD_TARGET" ]; then ok "プローブの cwd は --cwd(本実行と同じ。決定 43)"; else
+    ng "プローブの cwd は --cwd(本実行と同じ。決定 43)(実際: '$probe_cwd')"; fi
+  if [ "$probe_cwd" = "$run_cwd" ]; then ok "プローブと本実行の cwd が一致する"; else
+    ng "プローブと本実行の cwd が一致する(プローブ '$probe_cwd' / 本実行 '$run_cwd')"; fi
   case "$probe_arg" in *ping*) ok "プローブには短いプロンプトを渡す" ;; *) ng "プローブには短いプロンプトを渡す(実際: '$probe_arg')" ;; esac
   case "$run_arg" in *実装*) ok "本実行には --prompt-file の内容を渡す" ;; *) ng "本実行には --prompt-file の内容を渡す(実際: '$run_arg')" ;; esac
 fi

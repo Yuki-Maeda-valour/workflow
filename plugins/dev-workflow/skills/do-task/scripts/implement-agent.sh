@@ -93,7 +93,6 @@ CMD=()
 WRITE_TOKENS=()
 PROBE_TOKENS=()
 
-TMP_DIR=""      # プローブ用の cwd(読み取り専用モードで起動するので /tmp でよい。決定 40)
 STATE_DIR=""    # 本実行の出力を受ける scratch(保護領域。決定 40)
 CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッパ)の PID(決定 41)
 RAW_OUT=""      # 中止時に「得られた分の生出力」を流すために先に宣言しておく
@@ -104,7 +103,6 @@ RAW_OUT=""      # 中止時に「得られた分の生出力」を流すため�
 exec 9>&1 8>&2
 
 cleanup() {
-  if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi
   if [ -n "$STATE_DIR" ]; then rm -rf "$STATE_DIR"; fi
 }
 trap cleanup EXIT
@@ -447,14 +445,15 @@ effective_bin() {
   printf '%s' "$(basename "${CMD[0]}")"
 }
 
-# ── 一時領域 ①: プローブ用の cwd(終了時に消す)──
-# **ここは /tmp のままでよい** — プローブは読み取り専用モードで起動するため、
-# 書き込みモードのサンドボックスから書き換えられても困る出力をここに置かないから(決定 40)
-TMP_DIR="$(mktemp -d)"
-PROBE_CWD="$TMP_DIR/probe-cwd"
-mkdir -p "$PROBE_CWD"
+# ── プローブの cwd は本実行と同じ(決定 43)──
+# 使い捨ての一時ディレクトリを cwd にすると、**信頼していないディレクトリでの非対話実行を
+# 拒否する**ランナーでプローブが必ず失敗する(実測〈2026-09-17〉: codex が
+# `Not inside a trusted directory and --skip-git-repo-check was not specified.` で終了コード 1)。
+# プローブは読み取り専用モードなので、cwd が実ツリーでも書き込みは起きない。
+# 決定 40 の保護領域(本実行の出力を受ける scratch)は下記のとおり維持する
+PROBE_CWD="$CWD"
 
-# ── 一時領域 ②: 本実行の出力を受ける scratch = 保護領域(決定 40)──
+# ── 一時領域: 本実行の出力を受ける scratch = 保護領域(決定 40)──
 # 解決順は §12-2 と同じ($XDG_STATE_HOME → $HOME/.local/state → $HOME/.cache)。
 # 名前だけでは要件を満たす保証にならないので、**解決後の実体パス**が
 # /tmp・$TMPDIR・--cwd(= 外部の書き込み範囲)の配下でないことを検査してから使う。
@@ -520,7 +519,7 @@ esac
   printf -- '- 書き込みフラグ(本実行): %s\n' "$WRITE_FLAG"
   printf -- '- プローブ用の読み取り専用フラグ(判定 4′): %s\n' "$PROBE_FLAG"
   printf -- '- 渡した --cwd(本実行の書き込み範囲): %s\n' "$CWD"
-  printf -- '- プローブ用の一時ディレクトリ: %s(読み取り専用モードで使うので /tmp でよい。終了時に削除する)\n' "$PROBE_CWD"
+  printf -- '- プローブの cwd: %s(本実行と同じ。読み取り専用モードで打つので書き込みは起きない。決定 43)\n' "$PROBE_CWD"
   printf -- '- スクリプトの一時領域(保護領域): %s(本実行の生出力を受ける。外部の書き込み範囲外。終了時に削除する)\n' "$STATE_DIR"
   printf -- '- プロンプトファイル: %s\n' "$PROMPT_FILE"
   printf -- '- タイムアウト: ヘルプ照合 %s 秒 / プローブ %s 秒 / 本実行 %s 秒(TERM → %s 秒 → KILL)\n' \
@@ -618,9 +617,10 @@ PROBE_ERR="$STATE_DIR/probe.err"
 RAW_OUT="$STATE_DIR/raw.txt"
 RAW_ERR="$STATE_DIR/raw.err"
 
-# ── 判定 4′: 疎通プローブ(読み取り専用モード + 一時ディレクトリ)──
-# 疎通確認に書き込み権限は要らない。モード(権限)と cwd(範囲)の二重で絞る
-# (cwd だけでは §9-2 限界②〈cwd 外の絶対パスへの読み書き〉が残るため)。
+# ── 判定 4′: 疎通プローブ(読み取り専用モード・cwd は本実行と同じ)──
+# 疎通確認に書き込み権限は要らないので、モード(権限)だけで絞る。cwd を分けない理由は
+# 決定 43(上記)。§9-2 限界②〈cwd 外の絶対パスへの読み書き〉は cwd を分けても残るため、
+# もともと cwd は限界②に対する防御になっていない。
 build_cmd "ping と 1 語だけ返答してください。"
 apply_probe_mode || die 20 internal "プローブ用モードへの差し替えに失敗した(書き込みフラグ '$WRITE_FLAG' が argv に見つからない)"
 PROBE_RESOLVED="$(quote_cmd)"
@@ -628,7 +628,7 @@ log_line "- プローブの解決後コマンド: \`$PROBE_RESOLVED\`(cwd: $PROB
 rc=0
 # サブシェルで包むと `run_timeout` が掴んだ子 PID が親から見えず、中止経路で道連れにできない
 # (決定 41)。cd はこのシェル自身で行い、終わったら戻す
-cd "$PROBE_CWD" || die 20 internal "プローブ用の一時ディレクトリへ移動できない: $PROBE_CWD"
+cd "$PROBE_CWD" || die 20 internal "プローブの cwd へ移動できない: $PROBE_CWD"
 run_timeout "$PROBE_TIMEOUT" "${CMD[@]}" </dev/null >"$PROBE_OUT" 2>"$PROBE_ERR" || rc=$?
 cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
 # 失敗経路でも「得られた分の生出力」を残して返す(§12-8 の出力契約。プローブの失敗は
@@ -649,7 +649,7 @@ fi
 if [ ! -s "$PROBE_OUT" ]; then
   probe_fail 6 probe-failed "ランナー '$RUNNER' の疎通で出力が空だった"
 fi
-log_line "- 疎通プローブ: OK(読み取り専用モード '$PROBE_FLAG' + 一時ディレクトリ)"
+log_line "- 疎通プローブ: OK(読み取り専用モード '$PROBE_FLAG'・cwd は本実行と同じ)"
 
 # ── 本実行(書き込みモード + --cwd)──
 # NUL バイトはコマンド置換でも argv でも運べず黙って落ちるので、落ちたことを記録に残す
