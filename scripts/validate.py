@@ -12,6 +12,10 @@
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
      *.md・scripts/ 配下(画像を除く)を検査し、未移行 skill(許容リスト)と
      検査対象外ファイルを除外する
+  8. ホスト CLI 語(design.md §7-7-1): 全 skill の skill 直下(画像を除く)・
+     references/ 配下の *.md を大小無視で検査する(scripts/ は対象外。委託の語と同じ
+     除外 2 本を共有する)。ランナー名・サンドボックスモード名・コマンド形・
+     プラグイン/subagent 名の 4 系統
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -68,6 +72,42 @@ _MIGRATION_ALLOWLIST: set[str] = set()   # v4.0.0 到達(2026-09-10)。空でも
 # 検査対象外ファイル(design.md §7-7 の「検査対象外ファイル」が正本)。値は SKILLS_DIR からの相対パス。
 _DELEGATION_MAP = "do-task/references/delegation-map.md"
 _EXEMPT_FILES = {_DELEGATION_MAP, "do-task/references/external-runners.md"}
+
+# ホスト CLI 語(design.md §7-7-1)。_DELEGATION_WORDS(委託機構の語)とは別カテゴリ
+# ——スコープが違う(design.md §7-7-1 は scripts/ を対象外にする。scripts/ は正当に CLI 名を持つ)
+# ため、同じ定数に混ぜると scripts/ 配下が一斉に ERROR になる。ランナー名・サンドボックスモード名・
+# コマンド形・プラグイン/subagent 名の 4 系統。**大小を無視する**(check_host_cli_words() が
+# re.IGNORECASE を付ける。既存の _DELEGATION_WORDS は大小を区別したまま — `Codex に実装を委託する`
+# のような大文字始まりが最も混入しやすい書き方なのに、既存の検査は大小を区別するため素通りする)。
+# **単語境界(\b)を付けない(部分一致にする)**。§7-7 の「語彙の限界」がすでに明文で否定した
+# 設計だからで、既存 _DELEGATION_WORDS の \bAgent\b は唯一境界を持つ例外であり手本にしない
+# ——日本語文字が \w に含まれるため \b を付けると助詞が直接続く形(`Geminiに実装を委託する` /
+# `Codex execで委託`)を取りこぼす(偽陰性 = 到達条件をすり抜ける危険側)一方、誤検出は ERROR
+# で落ちる安全側なので部分一致を選ぶ(実測 2026-09-17: \b 付きだとこの 2 例は MISS、空白区切りの
+# `gemini を使う` だけが HIT した)。コマンド形は「codex exec」のように空白を含むため \s+ で
+# 繋ぐだけで、前後に \b は付けない。⚠ 部分一致の副作用: 日本語隣接の取りこぼしは無くなるが、
+# `my-cursor-agent-wrapper` のようなハイフン隣接語では誤検出しうる——誤検出は ERROR で落ちる
+# 安全側なので許容し、出たらその語を書き換えるか除外集合に足す(§7-7 と同じ方針)。単独の
+# `codex`・`read-only`・単独の製品名(`Codex`/`Cursor`/`Claude Code`)は対象外(既知の限界。
+# 設定パス `.codex/` や一般語・`init-project` の正当な散文用例と衝突するため
+# — 衝突を避ける方針は「コマンド形だけを検査語にしてパス形と衝突させない」を既定にし、
+# 「検出前に `.codex/` 等のパス形をマスクする」方式は将来 codex 単独を検査したくなった場合の
+# 拡張余地として残す。その場合 Python の re は固定長後読みしか許さない点に注意)。
+_HOST_CLI_WORDS = [
+    # ランナー名
+    r"cursor-agent",
+    r"gemini",
+    # サンドボックスモード名
+    r"workspace-write",
+    r"danger-full-access",
+    # コマンド形(単独の codex は入れない)
+    r"codex\s+exec",
+    r"codex\s+review",
+    r"codex\s+mcp",
+    # プラグイン・subagent 名
+    r"codex-plugin-cc",
+    r"codex-rescue",
+]
 
 LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s#]+)\)")
 
@@ -250,6 +290,55 @@ def check_delegation_words():
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: 委託の語 -> {m.group(0)!r}")
 
 
+def _in_host_cli_scope(f: Path) -> bool:
+    """ホスト CLI 語検査の走査範囲を 1 式で判定する(design.md §7-7-1)。
+    `_in_delegation_scope()` と同じ判定のうち **`scripts/` だけを対象外にする**
+    (scripts/ はモデル名を `--model` 引数等で外から受け取る実行層のアダプタで、
+    CLI 名を持つことが仕事であるため。この差分だけが既存とのズレ)。skill 直下は
+    既存と同じ「非画像ファイル全部」に揃える(`*.md` に絞らない — `README.md` のような
+    レイアウト外のファイルに置くと到達条件をすり抜けるため。design.md §7-7-1(決定 24))。
+    除外 2 本(_EXEMPT_FILES)は委託の語検査と共有する。未移行 skill の許容リストは
+    このカテゴリには存在しない(新設のため移行対象が無い)ので参照しない。"""
+    if not f.is_file():
+        return False
+    try:
+        rel = f.relative_to(SKILLS_DIR)
+    except ValueError:
+        return False
+    rest = rel.parts[1:]
+    if not rest:
+        return False
+    is_skill_root = len(rest) == 1 and f.suffix not in _IMAGE_EXTS
+    is_references_md = len(rest) > 1 and rest[0] == "references" and f.suffix == ".md"
+    return (is_skill_root or is_references_md) and rel.as_posix() not in _EXEMPT_FILES
+
+
+def check_host_cli_words():
+    """design.md §7-7-1 のホスト CLI 語検査。`check_delegation_words()` の
+    構成(定数 → スコープ判定 → 検査関数)を踏襲するが、対象語(_HOST_CLI_WORDS)・
+    スコープ(_in_host_cli_scope。scripts/ を含まない)が委託の語検査とは別である。
+    **大小を無視する**(re.IGNORECASE)— _DELEGATION_WORDS 側は大小を区別したままで、
+    この差は design.md §7-7-1 に明記する。"""
+    if not SKILLS_DIR.exists():
+        return
+    for d in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
+        for f in sorted(d.rglob("*")):
+            if not _in_host_cli_scope(f):
+                continue
+            body = f.read_text(encoding="utf-8", errors="replace")
+            for pat in _HOST_CLI_WORDS:
+                for m in re.finditer(pat, body, flags=re.IGNORECASE):
+                    line = body.count("\n", 0, m.start()) + 1
+                    ERRORS.append(
+                        f"{f.relative_to(REPO)}:{line}: ホスト固有の CLI 語 -> {m.group(0)!r}"
+                        "(役割語に書き換えるか、CLI の手順の契約として"
+                        " do-task/references/external-runners.md へ移す。"
+                        " delegation-map.md は役割語→機構の解決表で CLI 名を持たないため"
+                        " 移し先にならず、他の references/*.md はこの検査の対象内なので"
+                        " 移しても解消しない)"
+                    )
+
+
 def check_delegation_map_invariant():
     """design.md §7-7 の除外の不変条件: 解決表(_DELEGATION_MAP)はモデルエイリアス名だけは
     自ら 0 件に保つ。語彙(_MODEL_ALIASES)と対象(_DELEGATION_MAP)は他の関数と共通の定義を
@@ -293,6 +382,7 @@ def main() -> int:
     check_json_files()
     check_skills()
     check_delegation_words()
+    check_host_cli_words()
     check_delegation_map_invariant()
     check_migration_allowlist_staleness()
     skills = sorted(d.name for d in SKILLS_DIR.iterdir() if d.is_dir()) if SKILLS_DIR.exists() else []
