@@ -38,6 +38,7 @@ argument-hint: "<タスク内容の説明> [--design-only] [--no-pr] [--branch=<
    - デフォルトブランチ(`git symbolic-ref --quiet refs/remotes/origin/HEAD` で解決、取れなければ `git branch --show-current` と `main`/`master` の照合)にいる → 着手前に作業ブランチを作成する。名前はタスク名確定後(Phase 1 の後)に `task/{タスク名}` で作るため、この時点では判定だけ行う
    - 既に作業ブランチにいる → そのまま使う(新規作成しない)
 5. リモートと `gh` の有無を先に確認しておく(`git remote` / `gh auth status`)。無い場合は Phase 5 が縮退することを**この時点で報告**する(最後まで走ってから「PR を作れません」と言わない)
+6. **外部実装委託の承認を先取りする**: profile によって実装の委託先が外部に解決される場合(解決順・parent-child での縮退・提示内容・保持と取り消しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12 に従う)、**Phase 3 まで待たずにこの時点で承認を取る**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。承認はセッション内で 1 回の判断として保持され、Phase 3 の /do-task がそれを再利用するので**同じ承認を 2 回求めない**。**承認が得られなくても停止しない** — 内蔵 implementer で走り切り、その旨を報告する(停止条件には加えない)。**このための引数は設けない**(承認は発話でのみ行う)
 
 ## Phase 1: 設計(/create-task)
 

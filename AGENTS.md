@@ -35,7 +35,9 @@ python3 scripts/validate.py
 # シェルスクリプトを触ったとき
 bash -n setup.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
-bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh   # 外部ランナー起動の回帰テスト(必須)
+bash -n plugins/dev-workflow/skills/do-task/scripts/implement-agent.sh
+bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
+bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
 ```
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホストの権威参照ファイル側に追記する)。

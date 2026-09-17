@@ -110,7 +110,7 @@ skill 本文が**役割語**で書いた委託を、**どのバックエンド�
 | ② | MCP ツール | 無効 | **有効化手段が未定**(§5) |
 | ③ | CLI 起動(外部ランナー) | 無効 | 宣言時のみ。**レビュアー = `features.runners` / implementer = `features.implementer`**(役割ごとに宣言キーが異なる。既定表の名前を宣言すると有効化)。**宣言方法・信頼モデルの方針は design §7-2 が正本**、implementer の契約詳細は [external-runners.md](external-runners.md) |
 
-- **順序は固定**(候補として列挙する順序)。profile が宣言できるのは**各バックエンドの有効化のみで、列挙順そのものは変えられない**が、**役割ごとにどのバックエンドを実際に採るかは宣言(`features.runners` / `features.implementer`)に従う**——implementer は宣言時に既定が ③ になる(決定 1)。**ただし [external-runners.md](external-runners.md) §12-6 の実装用既定表にエントリが入っても、skill 本文の配線が入るまでは ① に解決される**(既定表の中身と起動の契約はそちらが正本)。宣言が無い役割・枠は常に ① だけが候補になる(design §7-5)
+- **順序は固定**(候補として列挙する順序)。profile が宣言できるのは**各バックエンドの有効化のみで、列挙順そのものは変えられない**が、**役割ごとにどのバックエンドを実際に採るかは宣言(`features.runners` / `features.implementer`)に従う**——implementer は宣言時に既定が ③ になる(決定 1。既定表の中身と起動の契約は [external-runners.md](external-runners.md) §12-6・§12 が正本)。宣言が無い役割・枠は常に ① だけが候補になる(design §7-5)
   - **これはバックエンドの順序についての制約**である。モデル指定(`features.review_models` / `features.implementer_model`)・ランナー名(`features.runners`)・ランナー別モデル(`features.runner_models`)の profile 宣言は別で、従来どおり有効(design §3・§7-2 の信頼モデルの範囲内)
 - **どのバックエンドで実行したかを報告に明記する**(design §5-9 / §5-17 の報告義務の適用)
 - **③ 宣言時の枡ごとの置換可否・内蔵の維持範囲**は [external-runners.md](external-runners.md) §8 が正本(本表は**体数 → 枡名の割り当て**だけを §2 (a) で持つ)。**implementer の契約詳細(判定・作業ツリー保護・機密ガード等)も同ファイルが正本**
