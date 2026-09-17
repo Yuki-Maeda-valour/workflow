@@ -254,7 +254,7 @@ known_facts_ref: docs/HANDOVER.md
 - プロジェクト固有の事実(パス・コマンド・スタック名・メモリ名)を本文に書かない(§3 の 3 層で解決)
 - 冒頭に「原則」、末尾に「最終ゲート」(出力・完了前セルフチェック)を置く
 - 関連 skill への導線(前提 skill / 後続 skill)を必ず書く
-- **委託は役割語で書き、ホスト機構への解決は references の解決表([`do-task/references/delegation-map.md`](../plugins/dev-workflow/skills/do-task/references/delegation-map.md))に集約する**(§5 前文・§7-5)。skill 本文にホスト固有の API 名・モデルエイリアスを書かない(**移行中**。既存 skill には残っており、移行の順序と単位は §7-7)
+- **委託は役割語で書き、ホスト機構への解決は references の解決表([`do-task/references/delegation-map.md`](../plugins/dev-workflow/skills/do-task/references/delegation-map.md))に集約する**(§5 前文・§7-5)。skill 本文にホスト固有の API 名・モデルエイリアスを書かない(**語彙・検査範囲・除外集合・移行の状況は §7-7 が正本**。新規混入は `scripts/validate.py` が ERROR で止める)
 - **skill 本文を変更するレビューでは「ホスト結合の混入」(役割語ではなくホスト機構名で委託を書いていないか)を観点に含める**(全 skill が対象。未移行 skill〈§7-7 の許容リスト〉の既存記述は §7-7 の移行で扱うが、未移行 skill への新規記述は対象に含める)
 
 ## 7. ホスト非依存レイヤ(手順層は可搬・実行層のみ吸収)
@@ -264,7 +264,7 @@ known_facts_ref: docs/HANDOVER.md
 | 層 | 中身 | 可搬性 |
 |---|---|---|
 | 形式 | SKILL.md のファイル形式(frontmatter + 本文)と配置規約 | **可搬**。agentskills.io の開標準で、各ホストが同じ形式を読む |
-| 本文 | 手順の記述 | **移行中**。ホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` 配下の状態ファイル)を前提とする記述が残る。委託の語(`Agent` / `SendMessage` / `Explore` / `general-purpose` / モデルエイリアス)は役割語 + 解決表(§7-5)で吸収する(進め方は §7-7)。`.claude/` 配下の状態ファイルの扱いは未決。他ホストでは読み替えが要る。**Codex / Cursor での読み込み・動作は検証済み**(2026-09-11、ユーザーによる実環境での確認報告。§7-3)。量の目安は下の測定コマンドで再現できる |
+| 本文 | 手順の記述 | 委託の語は役割語 + 解決表(§7-5)で吸収する(**語彙・検査範囲・除外集合・移行の状況は §7-7 が正本**)。**`.claude/` 配下の状態ファイルを前提とする記述は残っており、その扱いは未決**。他ホストでは、内蔵サブエージェントを前提とする実行のしかたを §5-17 の縮退プロトコルとして読み替える。**Codex / Cursor での読み込み・動作は検証済み**(2026-09-11、ユーザーによる実環境での確認報告。§7-3)。量の目安は下の測定コマンドで再現できるが、**その語彙は `.claude/` を含む広いもので移行順序の目安専用**であり、**検査と到達条件は §7-7 の語彙で判定する**(両者の実測値は比較できない。§7-7 末尾) |
 | 実行層 | 誰が委託を実行するか(**① ホスト内蔵 → ② MCP → ③ CLI**) | ホスト依存。**解決表(§7-5)とアダプタ(`do-task/scripts/review-agent.sh`)で吸収する** |
 
 **ホスト固有記述の量(再現可能な測定)**: 語彙の選び方で数値は変わるため、コマンドごと残す。
@@ -276,7 +276,18 @@ for s in plugins/dev-workflow/skills/*/; do
 done
 ```
 
-2026-09-09 時点の実測(出現数): do-task 32 / create-task 25 / init-project 22 / update-doc 11 / reflect-decisions 11 / data-audit 9 / understand-project 7 / 他は 2 以下。**サブエージェント機構を持つホスト向けの記述が多い skill ほど、他ホストでは §5-17 の縮退プロトコルとして読み替える必要がある。**
+2026-09-09 時点の実測(出現数): do-task 32 / create-task 25 / init-project 22 / update-doc 11 / reflect-decisions 11 / data-audit 9 / understand-project 7 / 他は 2 以下。**この語彙は `.claude/` のパス参照を含む**ので、委託の語がゼロになっても値はゼロにならない(2026-09-18 の実測: この語彙では 12 skill で 1〜17 件ヒットするが、**その全件が `.claude/` のパス参照**で、§7-7 の語彙では計 0)。**この値は移行当時(2026-09-09)に順序を決めるための測定記録**であり、⚠ **現在の `.claude/` 依存度の指標には転用しない** — `.claude/` のヒットには共有設定(`project-profile.yml`)もホスト固有設定(`settings.json`)も同じパスの反復もまとめて入るため(実測〈2026-09-18〉: 最多の init-project 17 件の内訳は profile 7 / settings 6 / **状態ファイル 3** / その他 1 で、状態ファイルだけなら do-task の 8 件が最多)。⚠ **他ホストで読み替えが要るかは、この値ではなくホストが実際に持つ機構で決まる**(判定手段と縮退の中身は §5-17)。
+
+**内訳の再現**(分類の仕方で数値が変わるので、上と同じくコマンドごと残す):
+
+```bash
+# 状態ファイルだけを数える(共有設定 project-profile.yml とホスト固有設定 settings*.json を除く)
+for s in plugins/dev-workflow/skills/*/; do
+  printf '%-20s %s\n' "$(basename "$s")" \
+    "$(grep -oE '\.claude/(grasp\.md|reviews)' "$s/SKILL.md" | wc -l)"
+done | sort -k2 -rn
+```
+
 
 ### 7-1. 配置先(手順層)
 
@@ -286,7 +297,7 @@ done
 | Codex | `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者) | frontmatter は `name` + `description` が必須 |
 | Cursor | `.cursor/skills/` または `.agents/skills/` | `/skill-name` で起動 |
 
-`setup.sh --agents / --agents-copy / --agents-global` が `.agents/skills` への配置を行う(Codex と Cursor で共用できる)。**skill を 1 本だけ取り出す配置は非サポート**(§6 の兄弟参照が前提のため)。**配置できることと、そのホストで手順どおり動くことは別**である(上の表の「本文」行)。他ホストで使う場合は、内蔵サブエージェント前提の記述を §5-17 の縮退プロトコル(最小段階=直列セルフ実行)として読み替える(移行済み skill は解決表(§7-5)で解決する)。
+`setup.sh --agents / --agents-copy / --agents-global` が `.agents/skills` への配置を行う(Codex と Cursor で共用できる)。**skill を 1 本だけ取り出す配置は非サポート**(§6 の兄弟参照が前提のため)。**配置できることと、そのホストで手順どおり動くことは別**である(上の表の「本文」行)。他ホストで使う場合は、内蔵サブエージェント前提の記述を §5-17 の縮退プロトコル(最小段階=直列セルフ実行)として読み替える(**委託そのものは全 skill が解決表(§7-5)で解決する**)。
 
 ### 7-2. 実行層(外部 CLI の起動)は宣言時のみのオプトイン
 

@@ -66,7 +66,7 @@ cd ~/dev/workflow
 
 ### D. 他ホスト(Codex / Cursor)で使う
 
-SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文はホスト内蔵の機構(`Agent` / `SendMessage` / `Explore` / モデルエイリアス / `.claude/` の状態ファイル)を前提とした記述を含み、他ホストでは読み替えが要る(委託の語は役割語 + 解決表で吸収していく方針。design §7-5)。
+SKILL.md は agentskills.io の開標準で、Claude Code 以外のホストも同じ形式を読む。**可搬なのは「SKILL.md の形式」であって「置けばそのまま動く」ではない** — 本文は `.claude/` 配下の状態ファイルを前提とする記述を含み、また**ホストがサブエージェント機構を持つかどうかで実行のしかたが変わる**ため、他ホストでは §5-17 の縮退プロトコルとして読み替えが要る(**委託そのものは役割語 + 解決表で解決する**。design §7-5・移行の状況は §7-7)。
 
 ```bash
 cd ~/dev/workflow
@@ -78,9 +78,9 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 
 - **読み込み先の出典(確認日 2026-09-08)**: Codex は `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者)から読み、frontmatter は `name` + `description` が必須 — [Build skills(ChatGPT/Codex 公式)](https://learn.chatgpt.com/docs/build-skills)。Cursor は `.cursor/skills/` または `.agents/skills/` から読み `/skill-name` で起動 — [Cursor Agent Skills](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills)。Codex の subagents は 2026-03-14 に GA — [解説記事](https://simonwillison.net/2026/Mar/16/codex-subagents/)
 - **検証済み(2026-09-11)**: Codex / Cursor での SKILL.md の読み込み・動作を確認済み(ユーザーによる実環境での確認報告)。
-- **ホスト固有記述の量**: サブエージェント委託を多用する skill(`/do-task`・`/create-task`・`/init-project` が特に多く、`/update-doc`・`/reflect-decisions` が続く)ほど読み替えが要る。測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある。独立レビューを実施できない環境ではレビュー未完了として扱い、完了承認・公開へ進めない
+- **ホスト固有記述の量**: 測定コマンドと実測値は [docs/design.md](docs/design.md) §7 に置いてある(**その語彙は `.claude/` のパス参照を含む**)。**読み替えが要るかはこの値ではなくホストが実際に持つ機構で決まる**(判定手段と縮退の中身は design §5-17)。独立レビューを実施できない環境ではレビュー未完了として扱い、完了承認・公開へ進めない
 - **外部 CLI のレビュアーと implementer はオプトイン**: `--runners=<名前,...>` か profile の `features.runners`(レビュアー)/ `features.implementer`(実装。既定表にある実装用ランナー名)を宣言したときだけ起動する。宣言が無ければホスト内蔵だけを使い、外部 CLI を探しに行かない(既定の挙動は従来と同じ)。**implementer 側だけセッション初回に明示承認が要る**(書き込み委託のため。MCP 宣言〈design §7-6〉と同型)。**契約の正本**(使えるランナー・判定順序・終了コード・機密ガード)は [external-runners.md](plugins/dev-workflow/skills/do-task/references/external-runners.md) の 1 ファイルだけで、README や design はそれを参照する
-- **委託はホスト非依存に書く(移行中)**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。既存 skill 本文にはホスト固有語が残っており、移行の単位・順序・到達条件は [docs/design.md](docs/design.md) §7-7
+- **委託はホスト非依存に書く**: skill 本文は役割語(`researcher` / `implementer` / `reviewer` / `checker`)で委託を書き、どのバックエンドの何で実行するかは 1 箇所に集約する。**解決の正本**(役割語の一覧・派生名の体系・属性軸・解決順・ホストでの解決・縮退)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。**移行は完了している**(新規混入は `scripts/validate.py` が ERROR で止める)。**語彙・検査範囲・除外集合・到達時の実測・残る論点は [docs/design.md](docs/design.md) §7-7 が正本**
 - **MCP のツール接続は宣言駆動**: profile の `mcp_servers` で 1 回宣言し、`/init-project` が `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)の 2 形式を生成する。**生成前に解決後の宣言を提示して明示承認を得る**(信頼モデルに対する明示的な例外。`--yes` でも省略せず、応答を受け取れない実行では生成しない)。**生成手順の正本**(append-only・既存 id の判定と内容比較・退避条件・生成後の検証とロールバック)は [mcp-config-generation.md](plugins/dev-workflow/skills/init-project/references/mcp-config-generation.md) の 1 ファイルだけで、README や design はそれを参照する。**宣言のスキーマ**(`<id>: {command, args}`。`url` / `env` は受け付けない)は [docs/design.md](docs/design.md) §4
 - **skill を 1 本だけ取り出す配置は非サポート**: skill 間の兄弟参照(`../do-task/...`)が解決できず、外部ランナー等の機能が無効化される
 - **`features.implementer`**: `internal`(既定)| 既定表にある実装用ランナー名。既定表外の名前は無視して報告する(`runners` と同じ信頼モデル)。宣言されていてもセッション初回に明示承認を得るまでは内蔵で実行する。既定表エントリと skill 本文の配線は **v4.2.0 で完了**しており、宣言すれば実際に外部で実装される(判定・作業ツリー保護・縮退・引き継ぎは上記の契約が正本)。旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
