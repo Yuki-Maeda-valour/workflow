@@ -23,7 +23,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 ## Phase 0: 前提と対象確定
 
 1. **管理ルートと対象タスク**: 本体 `root` へ移動する前に管理プロジェクトルートを固定する。引数のパスがあれば管理ルート相対として最優先し、profile の `task_dir` が不正でも保存先の再解決を行わない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `進行中_*.md` から選択する(複数あればユーザーに確認)。無効指定・複数候補では停止する。対象タスク MD の絶対パスを保持して全文読む
-2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら本体ソースの探索・実装・品質コマンドは root 配下。保持したタスク MD は管理ルート側)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。契約の詳細は [references/external-runners.md](references/external-runners.md) §1
+2. profile 解決: `.claude/project-profile.yml` から `root`(parent-child なら本体ソースの探索・実装・品質コマンドは root 配下。保持したタスク MD は管理ルート側)、`quality`、`features`(reviewer_count / implementer / implementer_model / **runners / runner_models**)、`secret_paths` を得る。無ければ動的検出(パッケージマネージャ・scripts)。**外部ランナーの解決順は `--runners` 引数 → `features.runners` → 既定=内蔵のみ**(宣言が無ければ外部 CLI を探しに行かない)。**profile は commit される共有ファイルなので、①起動コマンドの上書き(`runner_commands` 等)②`features.runners` に書かれた既定表外のランナー名 は、いずれも**無視して報告する**(既定表外のランナーは `--runners` 引数でユーザーが明示指定したときだけ受け付け、そのコマンドはユーザーの発話由来のものだけを使う)。**実装の委託先(`features.implementer`)の解決順は `features.implementer` → 既定=内蔵のみ**の 2 層で(実装用には `--runners` に相当する引数経路が無い)、**実装用の既定表外の名前は受け付ける経路が存在しないため無視して報告する**。**名前が受け付けられても、実行はセッション初回の明示承認を得るまで保留し、承認が無い間は内蔵に解決する**。**管理ルート ≠ `root`(parent-child 構成)では外部委託を解決せず内蔵に決まり、理由を報告する**。契約の詳細は [references/external-runners.md](references/external-runners.md) §1(信頼モデル)・§12-1(実装経路の解決と判定)
 3. `git status` を確認。未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する。**ユーザーがブランチ作成を指定した場合のみ**(`--branch` または口頭指示)、着手前にブランチを作成して切り替える(名前省略時は `task/{タスク名}`)。指定が無ければ現在のブランチのまま進める(能動的な提案はしない)
 4. `.claude/grasp.md` は参照索引としてのみ使い、毎回、現在の profile・権威参照ファイル・関連文書・設定・タスク対象と依存先を読む。前回の調査記録も再探索や説明の作り直しを減らす参考に限り、読取りを省略しない。短縮記録なら短縮判定と品質維持契約を読み、実装と検証の分離・独立レビューを省略しない
 5. `.claude/reviews/` を mkdir -p。`TASK_NAME`(ファイル名から)と `ITER=1` を決める。**実行段階を判定する**(design §5-17): 走行中の問い合わせ・生存確認ができるかを**ツールの実在で確認**し(判定手段は軸 8)、フル / 標準 / 最小 のどれで走るかを決めて以降の委託方式に反映する
@@ -54,12 +54,12 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 - **スコープ縮小の禁止**: 「一部のみ実装」「段階的に実施」への言い換えを禁止。実装できない事情が出たら中断して報告する(勝手に縮めない)
 - 完了したタスクはタスク MD のチェックボックスを `- [x]` に更新すること
 - 品質ゲート(解決済みコマンド列)を自分でも実行し、結果を報告に含めること
-- 機密ファイル(`secret_paths`)を読まない・報告に値を含めないこと
+- 機密ファイル(`secret_paths`)を読まない・報告に値を含めないこと(**外部 implementer にはこの指示に保証が無く、明示承認〈references/external-runners.md §12-4〉が唯一の防御である**)
 - `.claude/grasp.md`(あれば)のパス — 前回要約と参照索引として使う。ただし現在の対象ファイル・依存先・規約を読むこと
 
-`features.implementer: cursor`(外部 CLI 委託)は**未実装**(起動コマンドが定義されていないため実行できない)。宣言されていても**内部 implementer で実装し**、「implementer の外部委託は未実装のため内部で実行した」と報告に明記する。外部 CLI はレビュアーとしてのみ使える(Phase 6 の外部ランナー。多様性が目的なら `features.runners` へ移行する)。
+実装の委託先は Phase 0 の解決結果に従う。**実装用の既定表にエントリが無い間は内蔵で実行し、その旨を報告する。**
 
-長時間応答がない場合の死活監視は [references/review-protocol.md](references/review-protocol.md) の M1〜M4 に従う。
+長時間応答がない場合の死活監視は、**内蔵 implementer では** [references/review-protocol.md](references/review-protocol.md) の M1〜M4 に従う(**外部 implementer には走行中の問い合わせ・生存確認の送達手段が無く M1〜M4 がそのままでは成立せず、待機目安の経過だけでは新規起動しない** — 停止後の引き継ぎ条件は references/external-runners.md §12-7、縮退の定義は design §5-17)。起動前・走行中の失敗時の扱いも references/external-runners.md §12 の契約に従う。
 
 ## Phase 4: team-lead 検証(スコープ縮小・偽完了の検出)
 
@@ -71,7 +71,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 4. **数値突合**: タスク MD に「N 件の〜を…」とあれば実際に数える(Grep -c 等)
 5. **契約整合**: スコープ外項目について「受理するが処理されない」不整合が生まれていないか実コードで確認する
 
-問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。**フル段階では同じ宛先へ再依頼して `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。標準段階では前回成果物のパスを含めた新規委託で代替する。
+問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。**フル段階かつ内蔵 implementer のときは同じ宛先へ再依頼して `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。**標準段階、および外部 implementer(段階を問わず宛先にならない)では**前回成果物のパスを含めた新規委託で代替する。
 
 ## Phase 5: 完了条件の再実行
 
