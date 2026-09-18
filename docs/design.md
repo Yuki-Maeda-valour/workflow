@@ -343,6 +343,7 @@ done | sort -k2 -rn
 | **既定の `workspace-write` サンドボックスは `/tmp` と `$TMPDIR` を書き込み可能にしている**(`exclude_slash_tmp` / `exclude_tmpdir_env_var` という除外オプションの存在が証拠)。`$HOME/.cache` 等(リポジトリ外 かつ tmp 外)への書き込みは `Read-only file system` になる | ローカル実測(2026-09-17・codex-cli 0.153.4) | 7-2 |
 | **`git hash-object` のクリーンフィルタ(`.gitattributes` の `text` / `eol`、`core.autocrlf`)はリポジトリ内でのみ適用される**。退避先で素朴に計算すると同一バイト列でも値が変わり改竄ゼロでも不一致になる。**だから git のハッシュを使わず生バイトハッシュ(`sha256sum` 相当)を使う**(決定 39。リポジトリ内でも退避先でも同じ値になり、クリーンフィルタで消える変更も検出できる) | ローカル実測(2026-09-17・git 2.55.0) | 7-2 |
 | **実効サンドボックスモードは argv とヘルプだけでは確定できない**(config / permission profile / managed config で上書きされうる)。ローカルの `~/.codex/config.toml` が `sandbox_mode = "danger-full-access"` だった | ローカル実測(2026-09-17・codex-cli 0.153.4) | 7-2 |
+| **Codex** の `codex exec` は `--output-schema <FILE>`(final response の JSON Schema)を持つ。既定表では採用しない(理由は external-runners.md §4) | ローカル実測(2026-09-18・codex-cli 0.153.4) | 7-2 |
 
 **検証済みの範囲**: 実ホスト(Codex / Cursor)での **SKILL.md の読み込み・動作を確認済み**(2026-09-11、ユーザーによる実環境での確認報告)。**CLI ランナーとしての疎通は両 CLI で実測済み**(2026-09-09: codex 0.153.4 を導入・cursor-agent は認証済みで実レビューを取得)。**Codex のエージェント定義本体の置き場所**は公式に明記が無い(上記の `~/.codex/agents/` の TOML がこれにあたると見られるが**未確認**)。
 
