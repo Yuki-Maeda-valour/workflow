@@ -21,8 +21,9 @@
 #                           **既定表に無いランナーでのみ指定でき、必須**(既定表ランナーに渡すと usage エラー)
 #   --model <名前>          ランナーへ渡すモデル名(省略時はモデル指定フラグごと落とす)
 #   --readonly-flag "<語>"  読み取り専用フラグ。**既定表に無いランナーでのみ指定でき、必須**
-#   --prompt-file <パス>    レビュー依頼プロンプト(必須)
-#   --target <パス>         レビュー対象(繰り返し可。プロンプト末尾に付記しログに残す)
+#   --prompt-file <パス>    レビュー依頼プロンプト(必須)。出力形式(指摘 JSON)の指示はスクリプトが末尾に付ける
+#                           (呼び出し側は不要。付与ブロックのバイト数も prompt-too-large の上限判定に含まれる)
+#   --target <パス>         レビュー対象(繰り返し可。プロンプト末尾・出力形式の指示の前に付記しログに残す)
 #   --cwd <ディレクトリ>    ランナーの実行ディレクトリ(機密ガードの一時ツリーを渡す。呼び出し側の義務。
 #                           未指定でも起動するが、その旨を NOTE で stderr に出す)
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
@@ -67,6 +68,18 @@ DRY_RUN=0
 TARGETS=()
 CMD=()
 RO_TOKENS=()
+
+# スキーマ指示(出力形式の固定ブロック)。本実行のプロンプト末尾に必ず 1 回付与する(呼び出し側は付けない)。
+# 文面は ../references/review-protocol.md「指摘 JSON 形式」とその「制約:」行の写し
+# (同期義務は ../references/external-runners.md §6。selftest が集合一致を照合する)。
+# 定義形式(クォート付き heredoc・両端の行)は selftest が両端アンカーで本文を抽出するため変えない。
+SCHEMA_BLOCK="$(cat <<'SCHEMA_EOF'
+## 出力形式(review-agent.sh が付与)
+返答は次の形の JSON だけを返す(前後に説明文を置かない。```json フェンスは可)。例:
+{"verdict":"CHANGES_REQUESTED","issues":[{"file":"src/example.ts","line":42,"category":"契約整合","severity":"major","description":"戻り値の型が呼び出し元の期待と一致しない","suggestion":"呼び出し元に合わせて型を修正する"}]}
+制約: verdict は APPROVED / CHANGES_REQUESTED のいずれか。severity は blocker / major / minor のいずれか。category は「機能保全」「契約整合」「タスク充足」「テスト妥当性」「規約」「セキュリティ / 機密」の 6 つのいずれか(review-protocol.md の観点名。セキュリティと機密で 1 つの category)。line は行番号(不明なら 0)。指摘が無ければ {"verdict":"APPROVED","issues":[]} を返す。
+SCHEMA_EOF
+)"
 
 TMP_DIR=""
 cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
@@ -467,8 +480,30 @@ if [ ! -s "$PROBE_OUT" ]; then
 fi
 log_line "- 疎通プローブ: OK"
 
-# ── 本実行 ──
+# ── 本実行(プロンプト組み立て: ① 既存ブロックの除去 → ② --target の付記 → ③ スキーマ指示を最後に 1 回連結)──
 PROMPT_TEXT="$(cat "$PROMPT_FILE")"
+SCHEMA_NOTE="付与"
+# ① 入力が付与ブロック全体で終わるなら、いったん取り除く(冪等。③ で必ず付け直すので二重にならない)。
+#    判定は末尾アンカー(ブロック全体との一致)だけ。見出しや "verdict" の部分一致は使わない
+#    (契約・diff・依頼文の引用で付与が黙って抑止されるため)。
+#    全文ではなく末尾の窓(ブロック長 + 4096 文字。ASCII 空白なら 4 KiB)だけを見る — 全文を 1 文字ずつトリムすると末尾空白 1 万文字で
+#    O(n²)(約 1.8 秒)になり、サイズ検査より前・run_timeout の外で停滞する。窓を超える末尾空白は除去対象外
+#    (その場合はブロックが再付与され旧ブロックが本文中に残る = 重複。害は無い)。
+#    本文が窓より短いときは全文を窓にする(負のオフセットは substring expression < 0 で落ちる)
+sb_win_len=$(( ${#SCHEMA_BLOCK} + 4096 ))
+if [ "${#PROMPT_TEXT}" -lt "$sb_win_len" ]; then
+  sb_win="$PROMPT_TEXT"; sb_head=""
+else
+  sb_off=$(( ${#PROMPT_TEXT} - sb_win_len )); sb_win="${PROMPT_TEXT:sb_off}"; sb_head="${PROMPT_TEXT:0:sb_off}"
+fi
+while [ "${sb_win%[[:space:]]}" != "$sb_win" ]; do sb_win="${sb_win%[[:space:]]}"; done
+case "$sb_win" in
+  *"$SCHEMA_BLOCK")
+    PROMPT_TEXT="$sb_head${sb_win%"$SCHEMA_BLOCK"}"
+    SCHEMA_NOTE="入力末尾の既存ブロックを除去して付与"
+    ;;
+esac
+# ② --target の一覧
 if [ ${#TARGETS[@]} -gt 0 ]; then
   PROMPT_TEXT="$PROMPT_TEXT
 
@@ -478,6 +513,10 @@ if [ ${#TARGETS[@]} -gt 0 ]; then
 - $t"
   done
 fi
+# ③ スキーマ指示を最後に 1 回だけ連結する(本実行のプロンプトは常にブロックで終わる)
+printf -v PROMPT_TEXT '%s\n\n%s' "$PROMPT_TEXT" "$SCHEMA_BLOCK"
+log_line "- スキーマ指示: $SCHEMA_NOTE"
+# サイズ検査は連結後に行う(付与ブロックのバイト数も上限判定に含まれる)
 PROMPT_BYTES="$(printf '%s' "$PROMPT_TEXT" | wc -c | tr -d ' ')"
 if [ "$PROMPT_BYTES" -gt "$MAX_PROMPT_BYTES" ]; then
   die 12 prompt-too-large "プロンプトが ${PROMPT_BYTES} バイトで上限 ${MAX_PROMPT_BYTES} を超える(argv 1 個の上限 128KiB)。diff を直接貼らずパスで渡す"

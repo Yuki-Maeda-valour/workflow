@@ -6,7 +6,8 @@
 #   bash review-agent-selftest.sh -v         # 各ケースの出力も表示
 #   REVIEW_AGENT=<パス> bash review-agent-selftest.sh   # 別の実装を対象にする(変異テスト用)
 #
-# 検証するのは「終了コードと出力の契約」「信頼モデルが破れないこと」「正規化 2 経路の一致」。
+# 検証するのは「終了コードと出力の契約」「信頼モデルが破れないこと」「正規化 2 経路の一致」
+# 「プロンプト組み立て(スキーマ指示の付与と冪等)」。
 # 期待終了コード: 0=成功 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #                 7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed 12=prompt-too-large
 #
@@ -102,6 +103,41 @@ cat >"$WORK/bin/stub-record.sh" <<'EOF'
 pwd >"$SELFTEST_RECORD_DIR/cwd.txt"
 printf '%s' "${@: -1}" >"$SELFTEST_RECORD_DIR/lastarg.txt"
 echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+
+# ── スキーマ指示(SCHEMA_BLOCK)の出所 ──
+# 差し替え不可の原本 $SCRIPT_DIR/review-agent.sh(REVIEW_AGENT で差し替わる $TARGET ではない)から
+# 両端アンカー付きで定義本文を抽出する。抽出が空・先頭行が見出しでない・末尾行が制約文でない場合は
+# 即終了する(空チェックだけでは、変異版で抽出が空になり `case … in *""` が常に一致する経路を塞げない)
+SCHEMA_SRC="$SCRIPT_DIR/review-agent.sh"
+SCHEMA_FILE="$WORK/schema-block.txt"
+SCHEMA_HEAD='## 出力形式(review-agent.sh が付与)'
+sed -n "/^SCHEMA_BLOCK=\"\$(cat <<'SCHEMA_EOF'$/,/^SCHEMA_EOF$/p" "$SCHEMA_SRC" | sed '1d;$d' >"$SCHEMA_FILE"
+bail() { ng "$1"; printf '%s\n' "$RESULTS"; echo; echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件(SCHEMA_BLOCK を抽出できないため中断)"; exit 1; }
+[ -s "$SCHEMA_FILE" ] || bail "SCHEMA_BLOCK の抽出: 原本 $SCHEMA_SRC から定義本文を抽出できない(両端アンカーの行が無い)"
+[ "$(head -n 1 "$SCHEMA_FILE")" = "$SCHEMA_HEAD" ] || bail "SCHEMA_BLOCK の抽出: 先頭行が見出し '$SCHEMA_HEAD' でない(実際: $(head -n 1 "$SCHEMA_FILE"))"
+case "$(tail -n 1 "$SCHEMA_FILE")" in
+  制約:*を返す。) : ;;
+  *) bail "SCHEMA_BLOCK の抽出: 末尾行が制約文('制約:' で始まり 'を返す。' で終わる行)でない(実際: $(tail -n 1 "$SCHEMA_FILE"))" ;;
+esac
+ok "SCHEMA_BLOCK の抽出: 原本から両端アンカーで定義本文を取得($(wc -l <"$SCHEMA_FILE" | tr -d ' ') 行)"
+SCHEMA_BLOCK_TEXT="$(cat "$SCHEMA_FILE")"   # $(…) は末尾の改行だけを落とすので review-agent.sh の値と一致する
+export SELFTEST_SCHEMA_FILE="$SCHEMA_FILE"
+schema_head_count() { grep -oF -- "$SCHEMA_HEAD" "$1" | wc -l | tr -d ' '; }   # grep -c は行数なので使わない
+
+# スキーマ指示のゲートスタブ: 最後の引数が付与ブロック全体(見出し〜末尾行)で終わるときだけ指摘 JSON を
+# 返し、それ以外(プローブの ping を含む)は非空の散文を stdout に出して exit 0(プローブを通す。空出力や
+# 非ゼロは probe-failed(6)になり、逆ケースの期待 exit 10 が成立しない)。付与を壊すと本実行が散文になり
+# parse-failed(10)で落ちる = 逆ケースをスタブ自身が内包する。cwd と最後の引数の記録は stub-record と同じ
+cat >"$WORK/bin/stub-schema-gate.sh" <<'EOF'
+#!/usr/bin/env bash
+pwd >"$SELFTEST_RECORD_DIR/cwd.txt"
+printf '%s' "${@: -1}" >"$SELFTEST_RECORD_DIR/lastarg.txt"
+block="$(cat "$SELFTEST_SCHEMA_FILE")"
+case "${@: -1}" in
+  *"$block") echo '{"verdict":"APPROVED","issues":[]}' ;;
+  *) echo "スキーマ指示が末尾に無いので散文で返す" ;;
+esac
 EOF
 # プローブで終了コード 0・出力なし
 cat >"$WORK/bin/stub-empty.sh" <<'EOF'
@@ -643,6 +679,162 @@ case "$actual" in
     esac ;;
   *) ng "既定コマンドが --mode ask を保持する(実際: $actual)" ;;
 esac
+
+# ── プロンプト組み立て: スキーマ指示の付与と冪等(external-runners.md §6・§11)──
+# 期待値は原本の文面退行も拾うため literal でハードコードする($SCHEMA_FILE から導出しない)
+GATE_CMD="bash $WORK/bin/stub-schema-gate.sh --readonly-x"
+rec_reset() { rm -f "$SELFTEST_RECORD_DIR/cwd.txt" "$SELFTEST_RECORD_DIR/lastarg.txt"; }
+LASTARG="$SELFTEST_RECORD_DIR/lastarg.txt"
+
+# 42. スキーマ指示の付与: 窓幅より短い通常の依頼文(クランプ分岐)でも末尾にブロックが 1 回付く
+rec_reset
+run_agent --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt.md" --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log42.md"; rc=$?
+if check "スキーマ指示の付与: ブロック付きの本実行だけ JSON を返すゲートスタブが成功する" 0 "$rc"; then
+  if grep -qF -- '## 出力形式(review-agent.sh が付与)' "$LASTARG"; then ok "スキーマ指示: 見出しがプロンプトに含まれる"; else
+    ng "スキーマ指示: 見出しがプロンプトに含まれる"; fi
+  if grep -qF -- '"verdict"' "$LASTARG" && grep -qF -- '"issues"' "$LASTARG"; then ok "スキーマ指示: \"verdict\" と \"issues\" が含まれる"; else
+    ng "スキーマ指示: \"verdict\" と \"issues\" が含まれる"; fi
+  if grep -qF -- '"suggestion"' "$LASTARG" && grep -qF -- 'blocker' "$LASTARG"; then ok "スキーマ指示: \"suggestion\" と severity の列挙値 blocker が含まれる"; else
+    ng "スキーマ指示: \"suggestion\" と severity の列挙値 blocker が含まれる"; fi
+  if grep -qF -- 'JSON だけを返す' "$LASTARG" && grep -qF -- '{"verdict":"APPROVED","issues":[]}' "$LASTARG"; then
+    ok "スキーマ指示: 根因に直結する 2 文(JSON だけを返す / 指摘なしの形)が含まれる"
+  else
+    ng "スキーマ指示: 根因に直結する 2 文(JSON だけを返す / 指摘なしの形)が含まれる"; fi
+  if grep -q '^- スキーマ指示: 付与$' "$WORK/log42.md"; then ok "スキーマ指示: 付与の別がログに残る(そのまま付与)"; else
+    ng "スキーマ指示: 付与の別がログに残る(そのまま付与)"; cat "$WORK/log42.md" >&2; fi
+fi
+
+# 43. 冪等: 付与ブロック全体で終わる入力は除去してから付け直す(見出しは 1 回)
+printf '%s\n\n%s\n' "レビューしてください" "$SCHEMA_BLOCK_TEXT" >"$WORK/prompt-with-block.md"
+rec_reset
+run_agent --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt-with-block.md" --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log43.md"; rc=$?
+if check "スキーマ指示の冪等: ブロック付き入力でも成功する" 0 "$rc"; then
+  n="$(schema_head_count "$LASTARG")"
+  if [ "$n" -eq 1 ]; then ok "スキーマ指示の冪等: 見出しの出現が 1 回"; else ng "スキーマ指示の冪等: 見出しの出現が 1 回(実際 $n 回)"; fi
+  if grep -q '^- スキーマ指示: 入力末尾の既存ブロックを除去して付与$' "$WORK/log43.md"; then ok "スキーマ指示の冪等: 除去して付与した旨がログに残る"; else
+    ng "スキーマ指示の冪等: 除去して付与した旨がログに残る"; cat "$WORK/log43.md" >&2; fi
+fi
+
+# 44. ブロック付き入力 + --target + 末尾空白(スペース 2 + タブ 1 + 改行。$(cat) は改行しか落とさない)
+#     → 対象一覧がブロックより前に 1 回だけ置かれる(除去 → --target 付記 → 最後に 1 回連結)
+printf '%s\n\n%s  \t\n' "レビューしてください" "$SCHEMA_BLOCK_TEXT" >"$WORK/prompt-block-ws.md"
+rec_reset
+run_agent --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt-block-ws.md" --target src/c.ts --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log44.md"; rc=$?
+if check "スキーマ指示 + --target + 末尾空白: 成功する" 0 "$rc"; then
+  n="$(schema_head_count "$LASTARG")"
+  if [ "$n" -eq 1 ]; then ok "スキーマ指示 + --target + 末尾空白: 見出しの出現が 1 回"; else
+    ng "スキーマ指示 + --target + 末尾空白: 見出しの出現が 1 回(実際 $n 回)"; fi
+  head_ln="$(grep -nF -- "$SCHEMA_HEAD" "$LASTARG" | cut -d: -f1 | head -1)"
+  tgt_max="$(grep -nF -- 'src/c.ts' "$LASTARG" | cut -d: -f1 | sort -n | tail -1)"
+  if [ -n "$head_ln" ] && [ -n "$tgt_max" ] && [ "$tgt_max" -lt "$head_ln" ]; then
+    ok "スキーマ指示 + --target: 対象一覧(行 $tgt_max)が見出し(行 $head_ln)より前にある"
+  else
+    ng "スキーマ指示 + --target: 対象一覧が見出しより前にある(対象の最終行=${tgt_max:-なし} / 見出し行=${head_ln:-なし})"; fi
+fi
+
+# 45. 長い末尾空白(60,000 文字)でも停滞しない: 判定は末尾の窓(ブロック長 + 4 KiB)だけを見る。
+#     ①〜③ の 3 件を固定順で評価する(① は独立に先に評価し、停滞はそれ自体が FAIL 行として出る)。
+#     停滞の判定はケース専用の外側タイムアウト 20 秒(全文を 1 文字ずつトリムする実装は二乗で約 65 秒かかる)。
+#     窓を超える空白は除去対象外なので見出しの出現回数は検証しない
+{ printf '%s\n\n%s' "レビューしてください" "$SCHEMA_BLOCK_TEXT"; head -c 60000 /dev/zero | tr '\0' ' '; printf '\n'; } >"$WORK/prompt-long-ws.md"
+rec_reset
+if [ -n "$OUTER_TIMEOUT_BIN" ]; then
+  rc=0
+  "$OUTER_TIMEOUT_BIN" -k 5 20 bash "$TARGET" --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt-long-ws.md" --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 \
+    --log-file "$WORK/log45.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  if [ "$rc" -ne 124 ]; then ok "長い末尾空白: 20 秒以内に完了する (exit=$rc)"; else
+    ng "長い末尾空白: 20 秒以内に完了する(外側タイムアウト 20 秒で停滞 exit=124)"; fi
+  if check "長い末尾空白: 成功する" 0 "$rc"; then
+    case "$(cat "$LASTARG")" in
+      *"$SCHEMA_BLOCK_TEXT") ok "長い末尾空白: プロンプトが付与ブロックで終わる" ;;
+      *) ng "長い末尾空白: プロンプトが付与ブロックで終わる"; tail -c 300 "$LASTARG" >&2; echo >&2 ;;
+    esac
+  fi
+else
+  ok "長い末尾空白: 20 秒以内に完了する(timeout が無いため飛ばす)"
+  ok "長い末尾空白: 成功する(timeout が無いため飛ばす)"
+  ok "長い末尾空白: プロンプトが付与ブロックで終わる(timeout が無いため飛ばす)"
+fi
+
+# 46. 付与後に上限を超える境界: 本文が MAX_PROMPT_BYTES − 100 バイト(付与前は上限内)→ prompt-too-large。
+#     付与ブロックのバイト数が上限判定に含まれる契約の裏付け
+max_bytes="$(sed -n 's/^MAX_PROMPT_BYTES=\([0-9][0-9]*\).*/\1/p' "$TARGET" | head -1)"
+if [ -z "$max_bytes" ]; then
+  ng "付与後に上限を超える境界: $TARGET から MAX_PROMPT_BYTES を読めない"
+else
+  head -c "$((max_bytes - 100))" /dev/zero | tr '\0' 'a' >"$WORK/prompt-near-limit.md"
+  run_agent --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt-near-limit.md" --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log46.md"; rc=$?
+  check "付与後に上限を超える境界: prompt-too-large" 12 "$rc"
+fi
+
+# 47. 本文中の引用では省略しない: 見出し文字列を含む行が本文に 1 行あり、末尾はブロックで終わらない
+#     (契約や diff の引用を模す)→ 付与され、見出しは 2 回(引用 + 付与)
+printf '%s\n%s\n' "レビューしてください" "本文中の引用: 契約には ## 出力形式(review-agent.sh が付与) という見出しがある" >"$WORK/prompt-quoted-head.md"
+rec_reset
+run_agent --runner stubrunner --command "$GATE_CMD" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt-quoted-head.md" --cwd "$WORK/othercwd" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log47.md"; rc=$?
+if check "本文中の引用では省略しない: 成功する" 0 "$rc"; then
+  n="$(schema_head_count "$LASTARG")"
+  case "$(cat "$LASTARG")" in
+    *"$SCHEMA_BLOCK_TEXT")
+      if [ "$n" -eq 2 ]; then ok "本文中の引用では省略しない: 末尾にブロックがあり見出しは 2 回(引用 + 付与)"; else
+        ng "本文中の引用では省略しない: 見出しの出現が 2 回(実際 $n 回)"; fi ;;
+    *) ng "本文中の引用では省略しない: プロンプトが付与ブロックで終わる" ;;
+  esac
+fi
+
+# 48. スキーマの同期検査: review-protocol.md「指摘 JSON 形式」節と SCHEMA_BLOCK の 4 集合が一致する
+#     (包含ではなく一致。ブロック側だけに値が増えた退行も拾う)。抽出は固定書式に依存する
+#     (「verdict は A / B のいずれか」「severity は A / B / C のいずれか」「category は「…」「…」の 6 つのいずれか」)。
+#     書式を変えるときは契約側・ブロック側・この検査の 3 点を同時に直す
+PROTO="$SCRIPT_DIR/../references/review-protocol.md"
+json_issue_keys() { # $1=JSON ファイル → issues[0] のキーを 1 行 1 個で
+  if command -v python3 >/dev/null 2>&1; then
+    python3 -c 'import json,sys; d=json.load(open(sys.argv[1],encoding="utf-8")); print("\n".join(d["issues"][0].keys()))' "$1" 2>/dev/null
+  elif command -v jq >/dev/null 2>&1; then
+    jq -r '.issues[0] | keys_unsorted[]' "$1" 2>/dev/null
+  fi
+}
+enum_values() { # $1=制約文 $2=verdict|severity|category → 許容値を 1 行 1 個で
+  case "$2" in
+    verdict)  printf '%s\n' "$1" | sed -n 's/.*verdict は \(.*\) のいずれか。severity は .*/\1/p' | sed 's| / |\
+|g' ;;
+    severity) printf '%s\n' "$1" | sed -n 's/.*severity は \(.*\) のいずれか。category は.*/\1/p' | sed 's| / |\
+|g' ;;
+    category) printf '%s\n' "$1" | sed -n 's/.*category は\(「.*」\)の 6 つのいずれか.*/\1/p' | sed 's/」「/」\
+「/g' | sed 's/^「//; s/」$//' ;;
+  esac
+}
+sorted() { LC_ALL=C sort; }
+if [ -f "$PROTO" ]; then
+  sed -n '/^## 指摘 JSON 形式$/,/^## /p' "$PROTO" >"$WORK/proto-section.txt"
+  sed -n '/^```json$/,/^```$/p' "$WORK/proto-section.txt" | sed '1d;$d' >"$WORK/proto-schema.json"
+  proto_constraint="$(grep '^制約: ' "$WORK/proto-section.txt" | head -1)"
+  sed -n '3p' "$SCHEMA_FILE" >"$WORK/block-schema.json"
+  block_constraint="$(sed -n '4p' "$SCHEMA_FILE")"
+  # (i) 6 キー
+  pk="$(json_issue_keys "$WORK/proto-schema.json" | sorted)"; bk="$(json_issue_keys "$WORK/block-schema.json" | sorted)"
+  if [ -n "$pk" ] && [ -n "$bk" ] && [ "$pk" = "$bk" ]; then ok "スキーマの同期: issues[0] のキー集合が一致($(printf '%s\n' "$bk" | wc -l | tr -d ' ') 個)"; else
+    ng "スキーマの同期: issues[0] のキー集合が一致(契約=$(printf '%s' "$pk" | tr '\n' ' ') / ブロック=$(printf '%s' "$bk" | tr '\n' ' '))"; fi
+  # (ii)〜(iv) 列挙値
+  for kind in verdict severity category; do
+    pv="$(enum_values "$proto_constraint" "$kind" | sorted)"; bv="$(enum_values "$block_constraint" "$kind" | sorted)"
+    if [ -n "$pv" ] && [ -n "$bv" ] && [ "$pv" = "$bv" ]; then ok "スキーマの同期: $kind の許容値が集合一致($(printf '%s\n' "$bv" | wc -l | tr -d ' ') 個)"; else
+      ng "スキーマの同期: $kind の許容値が集合一致(契約=$(printf '%s' "$pv" | tr '\n' ' ') / ブロック=$(printf '%s' "$bv" | tr '\n' ' '))"; fi
+  done
+  # (v) 観点見出し 6 語と制約行の category 6 語
+  hv="$(sed -n '/^## レビュー観点/,/^## /p' "$PROTO" | sed -n 's/^[0-9]\. \*\*\(.*\)\*\*:.*/\1/p' | sorted)"
+  pv="$(enum_values "$proto_constraint" category | sorted)"
+  if [ -n "$hv" ] && [ -n "$pv" ] && [ "$hv" = "$pv" ]; then ok "スキーマの同期: 観点見出しと制約行の category が集合一致"; else
+    ng "スキーマの同期: 観点見出しと制約行の category が集合一致(見出し=$(printf '%s' "$hv" | tr '\n' ' ') / 制約=$(printf '%s' "$pv" | tr '\n' ' '))"; fi
+else
+  ng "スキーマの同期: 契約 $PROTO が見つからない"
+fi
 
 echo
 printf '%s\n' "$RESULTS"
