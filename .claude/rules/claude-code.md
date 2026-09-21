@@ -1,5 +1,3 @@
-@AGENTS.md
-
 ## Claude Code 固有(他ホストには無関係)
 
 - 検証には本体のプラグイン検証も加える(`claude plugin validate .`)

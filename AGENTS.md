@@ -42,7 +42,7 @@ bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   #
 bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
 ```
 
-本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホストの権威参照ファイル側に追記する)。
+本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
 
 ## このリポジトリの Issue 運用
 
