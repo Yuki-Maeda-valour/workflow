@@ -6,7 +6,7 @@
 
 実装に関与していない reviewer(読み取り専用)を新規に起動する(`name` は `reviewer`)。**③ 外部ランナーが宣言されている場合はこの 1 体も `reviewer-internal` を名乗る**(枡名の写像は [delegation-map.md](delegation-map.md) §2 (a)。下の「外部ランナー」節の「`reviewer-internal` は常に維持」がこの枠を指す)。渡すもの:
 
-- diff(`.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md`)とタスク MD のパス
+- diff(`.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md`。基準コミットからの追跡差分 + index + 途中 commit + 未追跡の新規ファイルを含む。生成は do-task Phase 4 の手順 1 の `scripts/diff-snapshot.sh`。対象が git リポジトリでないときは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡し、レビュアーは実ファイルを読む)とタスク MD のパス
 - レビュー観点(下記 6 カテゴリ)
 - 返答形式: `APPROVED` または指摘リスト JSON
 

@@ -59,6 +59,7 @@ quality:
 # domain_risks: []                        # 例: [web3, i18n, e2e-data, salesforce, zenstack]
 
 # 機密ファイル(読まない・値を出力しない・ログ混入を検査)
+# 各要素は glob(`*` / `**` / `?`。末尾 `/` は配下全体、先頭 `/` はルート固定。`//`・空要素・引用符/改行/制御文字/バッククォート/`$`/ブラケット/ブレースを含む要素は不可)。書式の正本は do-task/scripts/diff-snapshot.sh の usage。既定の 3 要素は常に適用され、この設定で外せない。`.env.example` / `.env.sample` / `.env.template` のようなテンプレートも要素 `.env.*` に当たれば除外され、外部レビューにはパスだけが載る(許可リストの例外は無い)
 secret_paths: [".env", ".env.*", ".dev.vars"]
 
 # データ境界監査(data-audit)の調整(無ければ既定辞書+全境界を対象)

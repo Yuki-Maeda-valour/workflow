@@ -36,8 +36,10 @@ python3 scripts/validate.py
 bash -n setup.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/implement-agent.sh
+bash -n plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
+bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
 ```
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホストの権威参照ファイル側に追記する)。
@@ -48,3 +50,4 @@ bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   #
 - create-task の設計成果物は指定 Issue、do-task の対象も指定 Issue とする。未指定で複数候補なら選択を確認する
 - チェック状態・レビューには Issue 本文と diff を使い、完了リネームの代わりに検証結果を Issue へ記録する。update-doc はその完了記録を入力にする
 - ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする
+- do-task の基準コミット行(書式は `> **基準コミット**: <sha>[ / 未追跡一覧: <sha256>]`。**書式の正本は do-task/SKILL.md Phase 0 の手順 5**)は対象 Issue 本文のヘッダ引用ブロックに追記する(全文置換前に取得した本文の中身と行数を検査する)
