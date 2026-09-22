@@ -1,7 +1,7 @@
 ---
 name: update-doc
 description: プロジェクトのドキュメント類(Serena メモリ / 権威参照ファイル AGENTS.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は直近の完了タスクを自動検出)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
-argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--no-review] [--runners=<名前,...>] [--yes]"
+argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--runners=<名前,...>] [--yes]"
 ---
 
 # update-doc — ドキュメント・メモリの実コード同期

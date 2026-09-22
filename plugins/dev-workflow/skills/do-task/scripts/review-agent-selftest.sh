@@ -836,6 +836,28 @@ else
   ng "スキーマの同期: 契約 $PROTO が見つからない"
 fi
 
+# 既定のログ置き場が**書き込み不可**のとき、番号の衝突と区別して止める。
+# noclobber の採番は「作成に失敗したら次の番号へ」なので、権限不足まで再試行の対象に
+# すると**無限ループ**する(実測: 外側の timeout で exit=124 になる)。
+ROLOG="$WORK/rolog"
+rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
+: > "$ROLOG/.claude/reviews/reviewer-codex-iter1.md"
+chmod 555 "$ROLOG/.claude/reviews"
+rc=0
+( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
+if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
+  ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
+else
+  ng "ログ置き場に書けない: 番号の衝突と区別して止まる(実際 exit=$rc。124 なら無限ループ)"
+  cat "$CASE_ERR" >&2
+fi
+if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
+  ok "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"
+else
+  ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
+fi
+
 echo
 printf '%s\n' "$RESULTS"
 echo

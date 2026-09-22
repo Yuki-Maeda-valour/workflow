@@ -362,8 +362,22 @@ effective_bin() {
 if [ -z "$LOG_FILE" ]; then
   LOG_DIR=".claude/reviews"
   mkdir -p "$LOG_DIR"
+  # 採番と作成を分けると、同時に走った別プロセスと同じ番号を取り、後勝ちで上書きする。
+  # noclobber で「作成できたら自分のもの」にする(存在確認と作成を 1 手にする)。
+  set -o noclobber
   iter=1
-  while [ -e "$LOG_DIR/reviewer-${RUNNER}-iter${iter}.md" ]; do iter=$((iter + 1)); done
+  while :; do
+    LOG_FILE_TRY="$LOG_DIR/reviewer-${RUNNER}-iter${iter}.md"
+    if { : > "$LOG_FILE_TRY"; } 2>/dev/null; then break; fi
+    # 作成に失敗したのに**そのパスが存在しない**なら、番号の衝突ではない
+    # (置き場に書き込めない等)。再採番しても解消しないので止める。
+    if [ ! -e "$LOG_FILE_TRY" ]; then
+      set +o noclobber
+      fail_usage "ログを作れない: $LOG_FILE_TRY(置き場 '$LOG_DIR' に書き込めない。--log-file で別の置き場を指定する)"
+    fi
+    iter=$((iter + 1))
+  done
+  set +o noclobber
   LOG_FILE="$LOG_DIR/reviewer-${RUNNER}-iter${iter}.md"
 else
   LOG_DIR="$(dirname "$LOG_FILE")"
