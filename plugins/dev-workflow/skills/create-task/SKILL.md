@@ -35,7 +35,7 @@ argument-hint: "<タスク内容の説明> [--refactor [対象パス|--area=<nam
    - `--quick` 把握のみ → **タスクの対象領域を `--area` 相当で深掘り**する(該当領域のファイル一覧・エントリポイント/ルーティング/スキーマの精読・関連メモリ)
    - 契約変更・DB スキーマ変更・横断変更を含むタスク → さらに `--deep` 相当まで実施(フォーマッタ・tsconfig 等の規約精読、`doc/06_stack-notes.md` の該当依存の注意点)
    あわせて `.claude/project-profile.yml` の `root`(parent-child 構成)、`quality`、`type_propagation_chain`、`domain_risks`、`features` を解決する。判定は今回実際に読んだ範囲で行い、`.claude/grasp.md` は参照索引に留める。ここで読んだ範囲・日時・未確認事項を grasp.md に更新する
-3. **管理ルートと保存先を解決する**。[references/task-directory.md](references/task-directory.md) に従い、profile の `task_dir` の型をホスト側で検証してから helper を使う。無効指定・複数候補なら作成せず停止する。確定したディレクトリが無ければここで作成し、既存タスクとの重複をその直下で確認する
+3. **管理ルートと保存先を解決する**。[references/task-directory.md](references/task-directory.md) に従い、profile の `task_dir` の型をホスト側で検証してから helper を使う。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは作成せず停止する。確定したディレクトリが無ければここで作成し、既存タスクとの重複をその直下で確認する
 4. タスク名を決める: 内容を表す簡潔な日本語。ファイル名は `{解決したタスクディレクトリ}/進行中_{タスク名}.md`(状態名は /do-task の自動選択と連動する統一規約)
 
 ## Phase 1: 要求分析と実コード調査

@@ -13,6 +13,8 @@ from pathlib import Path
 
 STATE_FILE = re.compile(r"^(?:進行中|完了|中断|保留)_.+\.md$")
 DEFAULT_TASK_DIR = "docs/tasks"
+# init-project のテンプレートの置換漏れ。一重の {x} は正当なディレクトリ名としてありうるので対象外
+PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
 
 
 class ResolutionError(Exception):
@@ -63,6 +65,23 @@ def _validate_relative(value: str, root: Path) -> tuple[str, Path]:
     return normalized or ".", resolved
 
 
+def _placeholder_error(value: str, root: Path) -> ResolutionError:
+    message = (
+        f"task_dir にテンプレートの置換漏れ({{{{...}}}})が残っています: {value}。"
+        "task_dir を管理プロジェクトルートからの相対パスに直すか、キーを消して検出に任せてください"
+    )
+    # 置換漏れのまま保存先として作られたパスが在れば、その後始末を案内する(存在を確かめるだけ)。
+    # `{{X}}/../docs` のように `..` で置換漏れが消える値では、無関係な既存パスを案内しない
+    raw = Path(value)
+    if not raw.is_absolute():
+        lexical = Path(os.path.normpath(root / raw))
+        if _inside(lexical, root):
+            shown = lexical.relative_to(root).as_posix()
+            if PLACEHOLDER.search(shown) and os.path.lexists(lexical):
+                message += f"。{shown} が既に在ります。中身を正しい保存先へ移してから削除してください"
+    return ResolutionError(message)
+
+
 def _has_state_file(directory: Path) -> bool:
     try:
         with os.scandir(directory) as entries:
@@ -106,10 +125,19 @@ def resolve(project_root: str, task_dir: str | None) -> dict[str, str]:
         raise ResolutionError("管理プロジェクトルートがディレクトリではありません")
 
     if task_dir is not None:
+        if PLACEHOLDER.search(task_dir):
+            raise _placeholder_error(task_dir, root)
         normalized, path = _validate_relative(task_dir, root)
         return {"task_dir": normalized, "path": str(path), "source": "profile"}
 
     candidates = _candidate_directories(root)
+    # 置換漏れのまま作られたディレクトリを検出で採用すると、キーを消しても同じ場所へ書き続ける
+    leftovers = [candidate for candidate in candidates if PLACEHOLDER.search(candidate)]
+    if leftovers:
+        raise ResolutionError(
+            "テンプレートの置換漏れ({{...}})の名前のディレクトリにタスクがあります: "
+            f"{', '.join(leftovers)}。中身を正しい保存先へ移してから削除してください"
+        )
     if len(candidates) > 1:
         raise ResolutionError(
             "タスクディレクトリの候補が複数あります。task_dir を明示してください",

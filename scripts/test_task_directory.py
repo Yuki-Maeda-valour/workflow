@@ -177,6 +177,58 @@ class TaskDirectoryResolverTest(unittest.TestCase):
         after = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
         self.assertEqual(before, after)
 
+    def test_unreplaced_template_placeholder_returns_error(self):
+        for value in ("{{TASK_DIR}}", "docs/{{TASK_DIR}}"):
+            with self.subTest(value=value):
+                code, result = self.run_resolver(value)
+                self.assertEqual(1, code)
+                self.assertIn("置換漏れ", result["error"])
+                self.assertIn("キーを消して検出に任せて", result["error"])
+                self.assertNotIn("既に在ります", result["error"])
+
+    def test_single_braces_are_valid_directory_names(self):
+        for value in ("{x}", "a{b}c"):
+            with self.subTest(value=value):
+                code, result = self.run_resolver(value)
+                self.assertEqual((0, value), (code, result["task_dir"]))
+
+    def test_placeholder_error_guides_existing_directory_without_touching_it(self):
+        self.state_file("{{TASK_DIR}}")
+        before = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
+        code, result = self.run_resolver("{{TASK_DIR}}")
+        after = sorted(str(path.relative_to(self.root)) for path in self.root.rglob("*"))
+        self.assertEqual(1, code)
+        self.assertIn("{{TASK_DIR}} が既に在ります", result["error"])
+        self.assertIn("移してから削除", result["error"])
+        self.assertEqual(before, after)
+
+    def test_detection_refuses_placeholder_named_directory(self):
+        self.state_file("{{TASK_DIR}}")
+        code, result = self.run_resolver()
+        self.assertEqual(1, code)
+        self.assertIn("{{TASK_DIR}}", result["error"])
+        self.assertIn("移してから削除", result["error"])
+        self.state_file("docs/{{TASK_DIR}}")
+        self.state_file("task")
+        code, result = self.run_resolver()
+        self.assertEqual(1, code)
+        self.assertNotIn("candidates", result)
+        self.assertIn("docs/{{TASK_DIR}}", result["error"])
+
+    def test_placeholder_error_does_not_guide_unrelated_paths(self):
+        (self.root / "docs").mkdir()
+        (Path(self.temp.name) / "{{X}}").mkdir()
+        for value in ("{{X}}/..", "{{X}}/../docs", "docs/{{X}}/..", "../{{X}}"):
+            with self.subTest(value=value):
+                code, result = self.run_resolver(value)
+                self.assertEqual(1, code)
+                self.assertIn("置換漏れ", result["error"])
+                self.assertNotIn("既に在ります", result["error"])
+
+    def test_placeholder_error_has_no_side_effects(self):
+        self.run_resolver("docs/{{TASK_DIR}}")
+        self.assertEqual([], list(self.root.iterdir()))
+
     def test_helper_runs_from_copied_skills_distribution(self):
         copied = Path(self.temp.name) / "installed-skills"
         shutil.copytree(REPO_ROOT / "plugins/dev-workflow/skills", copied)
