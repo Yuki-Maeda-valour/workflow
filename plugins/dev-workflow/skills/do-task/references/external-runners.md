@@ -139,7 +139,7 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
 
 **責務分界**: profile(YAML)の解決は skill 側(LLM)が行い、**スクリプトは YAML を読まない**。ランナー名・モデル・タイムアウトはすべて引数で渡す。
 
-**空文字の扱い**: `--model ""` / `--target ""` / `--cwd ""` / `--log-file ""` は「省略」として受理する。`--runner` / `--prompt-file`、および既定表に無いランナーの `--command` が空・未指定なら **`usage`(exit 2)**。既定表に無いランナーで `--readonly-flag` が空・未指定なら **`no-readonly`(exit 5)**(読み取り専用を確立できないランナーは起動しない、という §3 の扱いに合わせる)。
+**空文字の扱い**: `--model ""` / `--target ""` / `--cwd ""` / `--log-file ""` は「省略」として扱う(**`--cwd` は必須なので、空は `usage`(exit 2)になる**)。`--runner` / `--prompt-file`、および既定表に無いランナーの `--command` が空・未指定なら **`usage`(exit 2)**。既定表に無いランナーで `--readonly-flag` が空・未指定なら **`no-readonly`(exit 5)**(読み取り専用を確立できないランナーは起動しない、という §3 の扱いに合わせる)。
 
 **実行前の提示と承認**:
 

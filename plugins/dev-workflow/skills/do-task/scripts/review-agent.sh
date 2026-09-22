@@ -13,7 +13,7 @@
 #     - 既定表に無いランナーは --command + --readonly-flag が必須。**その保証はユーザー責任**
 #
 # 使い方:
-#   bash review-agent.sh --runner <名前> --prompt-file <パス> [オプション]
+#   bash review-agent.sh --runner <名前> --prompt-file <パス> --cwd <ディレクトリ> [オプション]
 #
 # オプション:
 #   --runner <名前>         ランナー名(既定表: cursor-agent / gemini / codex)
@@ -51,6 +51,9 @@
 #         機構として封じるため --cwd に使い捨ての一時ツリーを必ず渡す(同 §9)。
 # --- end usage ---
 set -eEuo pipefail
+# export された CDPATH があると、素の `cd` が行き先を stdout へ出す(パスの正規化が 2 行に化け、
+# stdout は指摘 JSON / 生出力だけ、という出力契約も崩れる)。このスクリプトの `cd` はすべて明示パスなので要らない
+unset CDPATH
 
 RUNNER=""
 COMMAND_TMPL=""
@@ -164,6 +167,9 @@ fi
 [ -n "$PROMPT_FILE" ] || fail_usage "--prompt-file が必要です"
 [ -f "$PROMPT_FILE" ] || fail_usage "プロンプトファイルが無い: $PROMPT_FILE"
 if [ -n "$CWD" ] && [ ! -d "$CWD" ]; then fail_usage "--cwd が存在しない: $CWD"; fi
+# `[ -d ]` は通るが中に入れない場所は、親シェルの cd が失敗して internal(不具合扱い)に化ける。
+# 引数の誤りとして usage で返す(implement-agent.sh と同じ)
+if [ -n "$CWD" ] && [ ! -x "$CWD" ]; then fail_usage "--cwd に検索(実行)権限が無くて移動できない: $CWD"; fi
 # レビュー経路は一時ツリーで起動する(external-runners.md §5・§9-1)。**省略時の実リポジトリ
 # 直下起動を認めない**という契約を機構として強制する。ログを作るより前に止める(usage エラーで
 # ログ置き場にファイルを残さない)。--dry-run は起動しないので不要。--cwd "" は省略と同じ扱い
@@ -444,6 +450,13 @@ if [ -n "$COMMAND_TMPL" ]; then
 fi
 
 
+ensure_tmp_dir() { # 一時領域を 1 回だけ作り、物理パスにする(作成箇所をここに集める)
+  [ -n "$TMP_DIR" ] && return 0
+  TMP_DIR="$(mktemp -d)"
+  # TMPDIR が相対だと、cd してからのリダイレクトで一時ファイルの場所がずれる。先に物理パスへ
+  TMP_DIR="$(cd "$TMP_DIR" && pwd -P)"
+}
+
 on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   os_sig="$1"; os_code="$2"
   trap - TERM HUP INT ERR
@@ -490,7 +503,7 @@ log_line "- 読み取り専用フラグ(argv 照合): '$READONLY_FLAG' を確認
 if [ "$KNOWN" -eq 1 ] && [ "$DRY_RUN" -eq 0 ]; then
   RO_NAME="${RO_TOKENS[0]}"
   RO_VALUE="${RO_TOKENS[$((${#RO_TOKENS[@]} - 1))]}"
-  TMP_DIR="$(mktemp -d)"
+  ensure_tmp_dir
   HELP_OUT="$TMP_DIR/help.txt"
   : >"$HELP_OUT"
   help_rc=0
@@ -528,7 +541,7 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-if [ -z "$TMP_DIR" ]; then TMP_DIR="$(mktemp -d)"; fi
+ensure_tmp_dir
 PROBE_OUT="$TMP_DIR/probe.txt"
 PROBE_ERR="$TMP_DIR/probe.err"
 RAW_OUT="$TMP_DIR/raw.txt"

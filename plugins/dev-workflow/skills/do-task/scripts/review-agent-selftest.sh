@@ -951,6 +951,37 @@ rc=0
   >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "--cwd 必須: --dry-run は --cwd が無くても通る" 0 "$rc"
 
+# cd を親シェルで行う形にしたことの副作用を塞いだ 3 点
+ENVCASE="$WORK/envcase"; rm -rf "$ENVCASE"; mkdir -p "$ENVCASE/sub" "$ENVCASE/reltmp"
+# (1) export された CDPATH: 素の cd が行き先を stdout に出すと、ログパスが 2 行に化け、
+#     stdout(指摘 JSON だけ)の出力契約も崩れる。既定のログ置き場と相対の --cwd で見る
+rc=0
+( cd "$ENVCASE" && exec env CDPATH=. bash "$TARGET" --runner stubrunner \
+    --command "bash $WORK/bin/stub-record.sh --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd sub --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+if check "CDPATH を export した環境: 成功する" 0 "$rc"; then
+  if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CASE_OUT" 2>/dev/null; then
+    ok "CDPATH を export した環境: stdout は指摘 JSON だけ"
+  else
+    ng "CDPATH を export した環境: stdout は指摘 JSON だけ"; head -3 "$CASE_OUT" >&2
+  fi
+fi
+# (2) 中に入れない --cwd(検索権限なし)は引数の誤り。cd の失敗が internal(不具合扱い)に化けない
+mkdir -p "$ENVCASE/noexec"; chmod 600 "$ENVCASE/noexec"
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-record.sh --readonly-x" \
+  --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" --cwd "$ENVCASE/noexec" --probe-timeout 10; rc=$?
+chmod 700 "$ENVCASE/noexec"
+if check "検索権限の無い --cwd: usage で止まる" 2 "$rc"; then
+  if grep -qF 'に検索(実行)権限が無くて移動できない' "$CASE_ERR"; then ok "検索権限の無い --cwd: 理由が stderr に出る"; else
+    ng "検索権限の無い --cwd: 理由が stderr に出る"; cat "$CASE_ERR" >&2; fi
+fi
+# (3) 相対の TMPDIR: 一時ファイルへのリダイレクトが cd の後で解決されてずれない
+rc=0
+( cd "$ENVCASE" && exec env TMPDIR=reltmp bash "$TARGET" --runner stubrunner \
+    --command "bash $WORK/bin/stub-record.sh --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+check "相対の TMPDIR: 成功する" 0 "$rc"
+
 # 中止(TERM / HUP): スクリプト自身へのシグナルで、走行中の外部 CLI の子を道連れにする。
 # 呼び出し側は背景実行するので、中止操作はシグナルとして届く。子が生き残ると、
 # 読み取り専用のはずのプロセスが残り続ける(implement-agent.sh には既にある保護)。

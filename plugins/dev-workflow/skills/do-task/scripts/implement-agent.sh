@@ -77,6 +77,9 @@
 #         このスクリプトが保証できるものではない(限界は external-runners.md §12-4)。
 # --- end usage ---
 set -eEuo pipefail
+# export された CDPATH があると、素の `cd` が行き先を stdout へ出す(パスの正規化が 2 行に化け、
+# stdout は指摘 JSON / 生出力だけ、という出力契約も崩れる)。このスクリプトの `cd` はすべて明示パスなので要らない
+unset CDPATH
 
 RUNNER=""
 MODEL=""

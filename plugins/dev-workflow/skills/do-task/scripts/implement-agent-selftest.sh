@@ -456,7 +456,7 @@ if check "§12-8 の任意引数を全て同時に受理する" 0 "$rc"; then
     ng "--model が本実行の argv に入る(実際: $(call_field 2 model))"; fi
 fi
 
-# A3. --cwd の省略は usage(レビュー経路との最大の差)
+# A3. --cwd の省略は usage(レビュー経路も必須。違いは渡す場所で、こちらは実リポジトリ)
 rm -f "$SIDEEFFECT"
 STUB_DIR="$WORK/evilbin"
 run_agent --runner codex --prompt-file "$PROMPT" --probe-timeout 10 --log-file "$WORK/log-a3.md"; rc=$?
