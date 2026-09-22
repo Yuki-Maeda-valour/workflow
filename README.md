@@ -89,6 +89,7 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 
 - 既存プロジェクトの同名 skill(`.claude/skills/` 配下)はプロジェクト版が優先される。プラグイン版は `dev-workflow:名前` の名前空間で常に呼べる
 - 旧来の独自 skills から移行する場合は旧 skill を削除し、プロジェクト固有の内容(パス・コマンド・地雷)は `.claude/project-profile.yml` と doc/05 の「引き継ぎ・地雷」へ移す。書き方は [docs/design.md §4](docs/design.md)
+- **v4.3.0 への移行**: profile の `source_of_truth: claude-md` は `agents-md` に置換する(置換しないと skill が停止する)。標準構成が `AGENTS.md` のみになった — `@AGENTS.md` を import する `CLAUDE.md` を持つ既存の構成(互換形)は引き続き正常で、`/init-project` の再実行で完成形への移行を提案する
 
 ## このリポジトリへの還元
 
