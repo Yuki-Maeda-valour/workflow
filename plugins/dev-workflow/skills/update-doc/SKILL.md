@@ -22,7 +22,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | **タスク後の差分同期(最頻・軽量)** | /do-task 完了直後 | 完了タスク MD から更新対象を導出し、関係する文書・メモリだけを同期 |
 | **全量監査** | 定期・/understand-project のドリフト検出後・久しぶりの実行 | 全ドキュメント vs 実態(`--analyze-only` で差分報告のみも可) |
 
-モード判定: `--task=<パス>` 指定があれば管理プロジェクトルート相対として最優先し、profile の `task_dir` が不正でも保存先を再解決しない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `完了_*.md` から直近のもの(このセッションで /do-task を終えたもの、または git log / 更新時刻で判定)を入力に**差分同期**する。無効指定・複数候補では自動選択せず停止する。タスク文脈が無ければ**全量監査**。
+モード判定: `--task=<パス>` 指定があれば管理プロジェクトルート相対として最優先し、profile の `task_dir` が不正でも保存先を再解決しない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `完了_*.md` から直近のもの(このセッションで /do-task を終えたもの、または git log / 更新時刻で判定)を入力に**差分同期**する。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは自動選択せず停止する。タスク文脈が無ければ**全量監査**。
 
 ## オプション
 
