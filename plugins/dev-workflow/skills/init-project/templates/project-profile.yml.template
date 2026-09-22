@@ -22,12 +22,17 @@ has_code: {{HAS_CODE}}
 # パッケージマネージャ(省略時: packageManager フィールド / lockfile から自動判定)
 package_manager: {{PACKAGE_MANAGER}}
 
-# コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | claude-md
+# コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | agents-md
 #   serena:    Serena メモリが正本、権威参照ファイルは薄型維持
 #   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
-#   claude-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)。値名 claude-md は据え置き(改名は未決)
-# ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は
-#   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄
+#   agents-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)
+#   ※ 上の 3 値以外が書かれていたら、skill は停止して有効値を案内する(既定へフォールバックしない。
+#     フォールバックすると、報告は出ても書き込み自体は止まらず、update-doc の書き込み先が変わるため)。
+#     この項目が無い場合、または値が空(null・空文字)の場合のフォールバック(既定 serena)は従来どおり
+#     (空以外は型を問わず「値がある」として扱い、3 値でなければ停止する)
+# ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)・計画(doc/07)は
+#   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄、
+#   doc/07(見積もり・スケジュール)は人の合意が源泉(/reflect-decisions が反映先。update-doc は書かない)
 source_of_truth: {{SOURCE_OF_TRUTH}}
 
 # ── 品質ゲート(省略時: package.json scripts から自動検出) ──

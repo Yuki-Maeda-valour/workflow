@@ -40,7 +40,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 ## Phase 1: 入力と現状把握
 
 1. 管理プロジェクトルートを固定してモードを判定する(上記)。**差分同期**では完了タスク MD を読み、更新の種(スコープ / 変更ファイル / 図解 / 技術的考慮事項の設計判断 / 追加修正記録の発見事項)を抽出する。`.claude/grasp.md` は参照索引としてのみ使い、今回同期する領域の現在のコード・設定・依存先の確認を省略しない
-2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決
+2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決する。`source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない。profile が無い・項目が無い・値が空の場合の既定 serena は従来どおり)
 3. **Serena がある場合**: `get_current_config` でアクティブプロジェクト確認(違えば `activate_project`)→ `list_memories` で実在メモリを動的列挙(固定名・固定数を仮定しない)→ 読む(差分同期では関連カテゴリのみ、全量監査では全部)
 4. doc/(または docs/)の索引(README.md)と関連文書を読む。**権威参照ファイルを読む**(`AGENTS.md` があればそれ → 無ければ `CLAUDE.md`。両方あれば `AGENTS.md` が正本。design §3 の検出順)
 
@@ -81,7 +81,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 - **コード理解系**(概要・構造・技術・規約・コマンド)は `source_of_truth` の向きで:
   - **serena**(既定): メモリを更新(最新化 / 新規 add / 陳腐化 delete の提案)→ 権威参照ファイルは薄型のまま要点のみ追従 → doc 02/05 の重複箇所は要約レベルで追従
   - **docs**: doc/(02・05 等)を正本として更新 → メモリは探索用の要約として一方向同期 → 権威参照ファイルは参照を追従
-  - **claude-md**: 権威参照ファイルを直接更新(小規模・メモリ / doc 未整備の構成。値名 `claude-md` は据え置きで、書き込み先は正本 = `AGENTS.md`)
+  - **agents-md**: 権威参照ファイルを直接更新(小規模・メモリ / doc 未整備の構成。書き込み先は正本 = `AGENTS.md`)
   - いずれの向きでも、**書き込み先の権威参照ファイルは `AGENTS.md`**(未移行のプロジェクトのみ `CLAUDE.md`)。import 1 行の `CLAUDE.md` には書き足さない
 - **常に doc/ が正本のカテゴリ**(source_of_truth に関わらず):
   - **要件タグの昇格**: 完了タスクのスコープと 03 を突合し、実装が完了した要件を `[実]` へ。スコープ外・部分実装・備考「実装未追従」の行(完了タスクで解消を確認できるまで)は昇格しない(備考に状況を注記)
@@ -119,6 +119,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 - [ ] 備考「実装未追従」の `[決]` 行を巻き戻し・削除・昇格していない
 - [ ] 権威参照ファイルを肥大化させていない(詳細は正本へ。32 KiB 以内)。import 1 行の `CLAUDE.md` に内容を書き足していない
 - [ ] 全量監査では権威参照ファイルのドリフトを検出したら注記したか(reference に到達できない場合は無効化を報告したか)
+- [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
 - [ ] 機密値を書いていない。ソースコードを変更していない。リンク検査を実行した
 
 ## 関連スキル

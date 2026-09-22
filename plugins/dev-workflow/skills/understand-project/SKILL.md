@@ -42,6 +42,8 @@ disallowed-tools: Edit, NotebookEdit
 - `has_code`: false ならコード分析をスキップし、ドキュメント構成の把握に切り替える
 - `memory_map` / `areas` / `quality` / `source_of_truth` / `known_facts_ref`
 
+`source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない。profile が無い・項目が無い・値が空の場合の既定 serena は従来どおり)。
+
 地雷リスト(`known_facts_ref` が指すファイル、未指定なら `doc/05_operations.md` の「引き継ぎ・地雷」節)があれば必ず読み、サマリーの「⚠️ 絶対に忘れない事項」に転記する。`doc/06_stack-notes.md`(または docs/ 配下。/stack-research が生成)があれば読み、バージョン固有の注意点も同じく「⚠️」へ反映する。
 
 ### 0-2. 権威参照ファイル(必ず)
@@ -59,7 +61,7 @@ Read して基本指示・Quick Commands・タスク完了条件・プロジェ�
 2. `list_memories` で実在メモリを動的列挙(固定名・固定数を仮定しない)
 3. profile の `memory_map` があればそれに従い、無ければメモリ名から意味的に「概要 / 構造 / 技術 / コマンド / 規約 / 完了条件」に対応するものを選んで `read_memory`。--quick ではこのカテゴリのみ、標準では関連するもの全部を読む
 
-**Serena を使わない場合(正本 = docs / claude-md、または MCP 不在)**: 同じカテゴリを `doc/`(または `docs/`)から得る:
+**Serena を使わない場合(正本 = docs / agents-md、または MCP 不在)**: 同じカテゴリを `doc/`(または `docs/`)から得る:
 
 | カテゴリ | 読む文書 |
 |---|---|
@@ -166,6 +168,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 - [ ] 矛盾を見つけた場合、実コード優先で注記した
 - [ ] parent-child / モノレポの場合、対象ルートを明示した
 - [ ] ドリフトを見つけたら注記し対処を案内した
+- [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
 
 ## 関連スキル
 
