@@ -60,7 +60,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **6. MCP の利用可否**
 - **Serena**: `mcp__serena__*` ツールが現在使えるか。使えない場合は既存 `.mcp.json` の serena エントリ・`.serena/` の有無も確認する。
-- **ブラウザ分析**(API・画面の実測分析用): `mcp__claude-in-chrome__*` または `mcp__chrome-devtools__*` が使えるか。
+- **ブラウザ分析**(API・画面の実測分析用): ブラウザ分析用の MCP ツールが使えるか(具体値は Phase 3-7 の「代表エントリ」を参照)。
 - **デザイン連携**: Figma 等のデザイン系 MCP ツールが使えるか。
 
 **7. 既存 Serena メモリの列挙(既存プロジェクト移行時)**
@@ -76,7 +76,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 ## Phase 2: 対話確認
 
-`--yes` が指定されていればこの Phase を飛ばし、推奨既定を採用する。そうでなければ **AskUserQuestion 1 回(最大 4 問)にまとめて**確認する(逐次に分けない。起点の質問+検出・文脈から該当する残りの質問を同時に提示し、検出結果を踏まえて推奨選択肢に印を付ける)。
+`--yes` が指定されていればこの Phase を飛ばし、推奨既定を採用する。そうでなければ **AskUserQuestion 1 回(最大 5 問)にまとめて**確認する(Serena が未設定のときは起点の質問が 1 問増える)(逐次に分けない。起点の質問+検出・文脈から該当する残りの質問を同時に提示し、検出結果を踏まえて推奨選択肢に印を付ける)。
 
 **起点の質問: Serena を使うか(= ドキュメント正本の向きが決まる)**
 
@@ -101,7 +101,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **MCP の分岐ルール**
 
 - **Serena**: 起点の質問に統合済み(設定済みなら質問しない)。承認された宣言は profile の `mcp_servers` に書き、Phase 3-7 で 2 形式(`.mcp.json` / `.codex/config.toml`)を生成する。
-- **ブラウザ分析**: プロジェクトで API・画面分析を使わないならスキップ。使う場合、`claude-in-chrome` が使えるなら追加設定不要(そのまま観測できる)。使えなければ **profile の `mcp_servers` に `chrome-devtools` の宣言を書く提案をし**(具体値は Phase 3-7 の「代表エントリ」を参照)、承認を得てから Phase 3-7 で `.mcp.json` / `.codex/config.toml` の 2 形式を生成する。Claude Code 以外のツールを併用するメンバーにも案内する(2 形式ともツール非依存で共有できる)。
+- **ブラウザ分析**: プロジェクトで API・画面分析を使わないならスキップ。使う場合、**すでに使えるブラウザ分析用の MCP があるなら追加設定不要**(そのまま観測できる)。**無ければ profile の `mcp_servers` に宣言を書く提案をし**(具体値は Phase 3-7 の「代表エントリ」を参照)、承認を得てから Phase 3-7 で `.mcp.json` / `.codex/config.toml` の 2 形式を生成する。Claude Code 以外のツールを併用するメンバーにも案内する(2 形式ともツール非依存で共有できる)。
 - **デザイン連携**: Figma 等を使うプロジェクトなら該当 MCP の設定手順を促す(この分岐は宣言駆動に置き換えない。Phase 3-7 の案内を参照)。使わなければスキップ。
 
 - doc/ の構成は質問しない(規模に関わらず統一構成で生成する。Phase 3 参照)。
@@ -182,7 +182,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`)。
 
 **5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
-- **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。追加する一覧を提示してから書き込む。サイクル(/check・/do-task)実行時の許可プロンプトを減らすのが目的。
+- **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。追加する一覧を提示してから書き込む。サイクル(/tool-check・/do-task)実行時の許可プロンプトを減らすのが目的。
 - **hook(選択されたときのみ)**: `templates/settings-hooks.json.template` を Read してマージ。
 - `.claude/settings.json` が無ければ新規 Write。**既存があれば壊さずマージ**: 既存 JSON を Read し、`permissions.allow` 配列・`hooks.*` 配列に**無いエントリだけ**追記する。他のキーは一切変更しない。マージ結果全体を Write する。
 
@@ -197,7 +197,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **入力と順序**(1 回の実行内): Phase 3-2 で提案・承認された宣言を profile に有効な形で書き込む → 本 Phase がその profile を Read して 2 形式を生成する。既存 profile がある場合は既存の `mcp_servers` を入力にする。**既存宣言が無く新規宣言もしない場合は、生成対象ゼロで正常終了する**(エラーにしない)。
 - **代表エントリ**(Phase 2 の起点の質問とブラウザ分析の質問が profile へ提案する具体値。**コマンド・引数は変わりうるため、導入時に各公式ドキュメントの最新手順を確認**し、差異があればそちらを優先):
   - Serena(要 `uv`。無ければ提案せず導入手順の案内に切替): `'serena': {command: 'uvx', args: ['--from', 'git+https://github.com/oraios/serena', 'serena', 'start-mcp-server', '--context', 'ide-assistant', '--project', '.']}`
-  - chrome-devtools(要 Node): `'chrome-devtools': {command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest']}`
+  - chrome-devtools(要 Node): `'chrome-devtools': {command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest']}` <!-- validate-allow: 生成する MCP 設定の識別子そのもので、役割語へ書き換えると設定が作れない -->
 - **受け付けないキー**: `url` / `env` / その他のキーが書かれていたら**無視して報告する**(信頼モデルと同型。[external-runners.md](../do-task/references/external-runners.md) §1 の信頼モデル表の「profile から受け付けない → 無視して報告する」の様式)。
 - **エントリ単位の除外**: `command` を欠く宣言・**`command` が空文字列の宣言**・`args` の要素に空文字列を含む宣言・**サーバー id が `[A-Za-z0-9_-]+` に一致しない**宣言は**生成対象から除外して報告する**(キー単位の無視では空エントリを生成してしまうため。空文字列は実行できないコマンド・引数を「生成した」と報告してしまう事故を防ぐ)。`command` が揃った宣言に余分なキーが付いた場合だけキー単位で無視してよい。
 - **値のエスケープ**: `command` / `args` の要素に `U+0000`〜`U+001F` と `U+007F`(DEL、改行・タブを含む)がある宣言はエントリ単位で除外して報告する。`.mcp.json` 側は `\` と `"` をエスケープする(例: `"command": "C:\\path\\mcp.exe"`)。`.codex/config.toml` 側も TOML 基本文字列(`"…"`)で書き、同じく `\` と `"` をエスケープする。`args` を省略した宣言では出力側でも `args` を出さない(空配列は `args: []` / `args = []`)。

@@ -11,8 +11,7 @@
   5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
      claude -p と、環境変数 WORKFLOW_PROJECT_NAMES に渡した周辺プロジェクト名
      (未設定なら 1 語も足さない)。行内に `<!-- validate-allow: 理由 -->` があれば
-     その行だけ免除する —— **この検査にだけ効く**(7・8・委託の語の除外の不変条件は
-     免除規則を持たない)
+     その行だけ免除する(8 でも効く。7 と委託の語の除外の不変条件では効かない)
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の
      存在。fragment 付き・タイトル付きも検査し、コードフェンスの中は除外する
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
@@ -21,7 +20,9 @@
   8. ホスト CLI 語(design.md §7-7-1): 全 skill の skill 直下(画像を除く)・
      references/ 配下の *.md を大小無視で検査する(scripts/ は対象外。委託の語と同じ
      除外 2 本を共有する)。ランナー名・サンドボックスモード名・コマンド形・
-     プラグイン/subagent 名の 4 系統
+     プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名の 6 系統。
+     **5 と同じ行単位のマーカーで免除できる** —— MCP サーバ名は生成する設定の
+     識別子そのもので、役割語へ書き換えて消せないため(design.md §7-7-1)
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -52,8 +53,10 @@ FORBIDDEN_PATTERNS = [
 
 # 禁止パターン検査の免除マーカー(design.md §5)。`<!-- validate-allow: 理由 -->` の形で、
 # **理由の記述が必須**(`<!-- validate-allow -->` だけでは免除しない)。行単位で効き、
-# コードフェンスの内外を問わない。**効くのはこの禁止パターン検査だけ** —— 委託の語・
-# ホスト CLI 語・除外の不変条件は免除規則を持たない(そちらは役割語へ書き換えて消す)。
+# コードフェンスの内外を問わない。**効くのは禁止パターン検査とホスト CLI 語検査の 2 つ** ——
+# 委託の語・除外の不変条件は免除規則を持たない(そちらは役割語へ書き換えて消せるため)。
+# ホスト CLI 語に効かせるのは、MCP サーバ名のように**生成する設定の識別子そのもので、
+# 書き換えて消せない**語が実在するから(design.md §7-7-1)。
 # 以前は「禁止・使わない・しない・廃止・ではなく」を含む行を一律に免除していたが、
 # 語の偶然の一致(普通の文に「〜しない」が入っているだけ)で混入が素通りしていた。
 # 理由は**最初のコメント終端まで**を取る —— `:\s*\S.*?-->` のように貪欲さを抑えるだけでは、
@@ -131,7 +134,8 @@ _EXEMPT_FILES = {_DELEGATION_MAP, "do-task/references/external-runners.md"}
 # ホスト CLI 語(design.md §7-7-1)。_DELEGATION_WORDS(委託機構の語)とは別カテゴリ
 # ——スコープが違う(design.md §7-7-1 は scripts/ を対象外にする。scripts/ は正当に CLI 名を持つ)
 # ため、同じ定数に混ぜると scripts/ 配下が一斉に ERROR になる。ランナー名・サンドボックスモード名・
-# コマンド形・プラグイン/subagent 名の 4 系統。**大小を無視する**(check_host_cli_words() が
+# コマンド形・プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名の 6 系統。
+# **正当に具体名を持つ行は `<!-- validate-allow: 理由 -->` で免除する**(design.md §5-24・§7-7-1)。**大小を無視する**(check_host_cli_words() が
 # re.IGNORECASE を付ける。既存の _DELEGATION_WORDS は大小を区別したまま — `Codex に実装を委託する`
 # のような大文字始まりが最も混入しやすい書き方なのに、既存の検査は大小を区別するため素通りする)。
 # **単語境界(\b)を付けない(部分一致にする)**。§7-7 の「語彙の限界」がすでに明文で否定した
@@ -164,6 +168,11 @@ _HOST_CLI_WORDS = [
     # プラグイン・subagent 名
     r"codex-plugin-cc",
     r"codex-rescue",
+    # MCP サーバ名(ホストが接続する外部ツールの識別子)
+    r"claude-in-chrome",
+    r"chrome-devtools",
+    # ホストのツール引数名(委託機構そのものではないが、ホストに結合する)
+    r"run_in_background",
 ]
 
 # 配布メタの skill 件数の表記(「skills 12 種」/「12 skills」の両形)。
@@ -479,7 +488,9 @@ def check_host_cli_words():
     構成(定数 → スコープ判定 → 検査関数)を踏襲するが、対象語(_HOST_CLI_WORDS)・
     スコープ(_in_host_cli_scope。scripts/ を含まない)が委託の語検査とは別である。
     **大小を無視する**(re.IGNORECASE)— _DELEGATION_WORDS 側は大小を区別したままで、
-    この差は design.md §7-7-1 に明記する。"""
+    この差は design.md §7-7-1 に明記する。
+    **禁止パターン検査と同じ行単位のマーカー(_has_allow_marker)で免除できる**。
+    委託の語検査・除外の不変条件は免除規則を持たない(この 2 つとの違い)。"""
     if not SKILLS_DIR.exists():
         return
     for d in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
@@ -487,9 +498,14 @@ def check_host_cli_words():
             if not _in_host_cli_scope(f):
                 continue
             body = f.read_text(encoding="utf-8", errors="replace")
+            body_lines = body.splitlines()
             for pat in _HOST_CLI_WORDS:
                 for m in re.finditer(pat, body, flags=re.IGNORECASE):
                     line = body.count("\n", 0, m.start()) + 1
+                    # 正当に具体名を持つ行だけ、明示マーカーで免除する(design.md §5-24)。
+                    # ファイルごと除外にしないのは、その先で新しく混入しても捕まらなくなるため。
+                    if _has_allow_marker(body_lines[line - 1] if line <= len(body_lines) else ""):
+                        continue
                     ERRORS.append(
                         f"{f.relative_to(REPO)}:{line}: ホスト固有の CLI 語 -> {m.group(0)!r}"
                         "(役割語に書き換えるか、CLI の手順の契約として"

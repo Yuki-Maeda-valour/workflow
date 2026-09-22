@@ -934,6 +934,12 @@ for spec in "TERM:143" "HUP:129" "INT:130"; do
     ng "中止($sig): ログに中止が残る"; fi
   if grep -qF '途中まで書いた' "$CASE_OUT"; then ok "中止($sig): 中止時点までの生出力を stdout に流す"; else
     ng "中止($sig): 中止時点までの生出力を stdout に流す"; cat "$CASE_OUT" >&2; fi
+  # プローブの生出力も残す。プローブ成功時は probe_fail を通らずログに出ないので、
+  # このラベルが在れば中止ハンドラが書いたものだと分かる(プローブ中の中止では
+  # 本実行の生出力がまだ空で、こちらだけが引き継ぎの手がかりになる)
+  if grep -qF 'プローブ生出力(中止時点まで)' "$WORK/log-h1-$sig.md"; then
+    ok "中止($sig): プローブの生出力もログに残る"; else
+    ng "中止($sig): プローブの生出力もログに残る"; fi
 done
 leak_cleanup
 
@@ -1081,6 +1087,28 @@ done
 if [ -z "$UNKNOWN" ]; then ok "引き継ぎ: §6 の終了コード表に無い失敗コードを持たない(実装が返すのは $DIE_CODES)"; else
   ng "引き継ぎ: §6 の終了コード表に無い失敗コードを持たない(表外:$UNKNOWN)"; fi
 STUB_DIR="$WORK/pathbin"
+
+# 既定のログ置き場が**書き込み不可**のとき、番号の衝突と区別して止める。
+# noclobber の採番は「作成に失敗したら次の番号へ」なので、権限不足まで再試行の対象に
+# すると**無限ループ**する(実測: 外側の timeout で exit=124 になる)。
+ROLOG="$WORK/rolog"
+rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
+: > "$ROLOG/.claude/reviews/implementer-codex-iter1.md"
+chmod 555 "$ROLOG/.claude/reviews"
+rc=0
+( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
+if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
+  ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
+else
+  ng "ログ置き場に書けない: 番号の衝突と区別して止まる(実際 exit=$rc。124 なら無限ループ)"
+  cat "$CASE_ERR" >&2
+fi
+if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
+  ok "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"
+else
+  ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
+fi
 
 echo
 printf '%s\n' "$RESULTS"

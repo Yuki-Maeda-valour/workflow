@@ -386,6 +386,66 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(0, sum("委託の語" in e for e in errors), errors)
         self.assertEqual(0, status, errors)
 
+    # ------------------------------------------------------ ホスト CLI 語の検査
+
+    def test_host_cli_words_are_detected(self):
+        # 書き先は references/*.md に固定する —— CHECKED_PY は scripts/ 配下で
+        # _in_host_cli_scope() の対象外なので、そこに書くと ERROR 0 になり空虚に真になる
+        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
+            with self.subTest(word=word):
+                self.write_file(CHECKED_MD, f"# t\n\n{word} を使う\n")
+                self.assert_error(["ホスト固有の CLI 語", word])
+
+    def test_host_cli_words_are_not_detected_in_scripts_dir(self):
+        # 上のテストの「書き先を固定する」理由を固定する(scripts/ は対象外)
+        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
+            self.append_to_checked_file(word)
+        self.assert_clean()
+
+    def test_host_cli_words_are_exempted_by_marker(self):
+        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
+            with self.subTest(word=word):
+                self.write_file(
+                    CHECKED_MD,
+                    f"# t\n\n{word} を使う <!-- validate-allow: 生成する設定の識別子 -->\n",
+                )
+                self.assert_clean()
+
+    def test_host_cli_marker_exempts_only_its_own_line(self):
+        # 免除は**その行だけ**に効く。ファイル単位にすると、一度マーカーを置いた
+        # ファイルでは以後どれだけ混入しても捕まらなくなる(設計がファイル全体の
+        # 除外を退けた理由そのもの)
+        self.write_file(
+            CHECKED_MD,
+            "# t\n\nchrome-devtools <!-- validate-allow: 生成する設定の識別子 -->\n"
+            "chrome-devtools を素で足す\n",
+        )
+        errors = self.assert_error(["ホスト固有の CLI 語", "chrome-devtools"])
+        # **1 件だけ**であることまで見る。件数を見ないと、配線を丸ごと外して
+        # 2 件になった場合(免除が一切効かない退行)を素通りさせる
+        hits = [e for e in errors if "ホスト固有の CLI 語" in e]
+        self.assertEqual(1, len(hits), hits)
+
+    def test_host_cli_marker_without_reason_does_not_exempt(self):
+        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
+            with self.subTest(word=word):
+                self.write_file(CHECKED_MD, f"# t\n\n{word} を使う <!-- validate-allow -->\n")
+                self.assert_error(["ホスト固有の CLI 語", word])
+
+    def test_marker_does_not_exempt_delegation_words(self):
+        # マーカーが効くのは禁止パターン検査とホスト CLI 語検査の 2 つだけ。
+        # 委託の語は役割語へ書き換えて消すので免除規則を持たない
+        self.write_file(
+            CHECKED_MD, "# t\n\nAgentに委託する <!-- validate-allow: 理由 -->\n"
+        )
+        self.assert_error(["委託の語", "'Agent'"])
+
+    def test_marker_does_not_exempt_delegation_map_invariant(self):
+        target = self.repo / "plugins" / "dev-workflow" / "skills" / "do-task" / "references" / "delegation-map.md"
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("\nopus を使う <!-- validate-allow: 理由 -->\n")
+        self.assert_error(["除外の不変条件", "'opus'"])
+
     # ---------------------------------------------- 既存テスト(V3 の方式に追従)
 
     def test_base_directory_is_treated_as_generic(self):

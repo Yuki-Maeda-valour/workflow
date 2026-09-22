@@ -95,6 +95,8 @@ PROBE_TOKENS=()
 STATE_DIR=""    # 本実行の出力を受ける scratch(保護領域。決定 40)
 CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッパ)の PID(決定 41)
 RAW_OUT=""      # 中止時に「得られた分の生出力」を流すために先に宣言しておく
+PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空で、こちらだけが手がかりになる)。
+                # set -u が効いているので、on_signal より前に宣言しないとハンドラ自体が壊れる
 
 # シグナル処理・中止報告では、リダイレクト中でも必ず元の stdout / stderr へ出す。
 # 本実行中は stdout が RAW_OUT へ向いており、退避しないと `cat "$RAW_OUT"` が自分自身へ
@@ -275,7 +277,11 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   if [ -n "$CHILD_PID" ]; then kill_tree "$CHILD_PID"; CHILD_PID=""; fi
   log_line ""
   log_line "**中止**: シグナル $os_sig を受信したため外部ランナーの子プロセスを終了させた(終了コード $os_code)"
-  # 中止時点までに得られた生出力は残す(§12-8「失敗時は得られた分の生出力」。引き継ぎの手がかり)
+  # 中止時点までに得られた生出力は残す(§12-8「失敗時は得られた分の生出力」。引き継ぎの手がかり)。
+  # プローブ中の中止では RAW_OUT がまだ空なので、プローブの生出力だけが手がかりになる。
+  if [ -n "$PROBE_OUT" ] && [ -s "$PROBE_OUT" ]; then
+    log_block "プローブ生出力(中止時点まで)" "$PROBE_OUT"
+  fi
   if [ -n "$RAW_OUT" ] && [ -s "$RAW_OUT" ]; then
     log_block "生出力(中止時点まで)" "$RAW_OUT"
     cat "$RAW_OUT" >&9 2>/dev/null || true
@@ -491,8 +497,22 @@ if [ -z "$LOG_FILE" ]; then
   LOG_DIR=".claude/reviews"
   mkdir -p "$LOG_DIR" 2>/dev/null \
     || fail_usage "既定のログ置き場 '$LOG_DIR' を作れない(カレントディレクトリに書けないなら --log-file で置き場を指定する)"
+  # 採番と作成を分けると、同時に走った別プロセスと同じ番号を取り、後勝ちで上書きする。
+  # noclobber で「作成できたら自分のもの」にする(存在確認と作成を 1 手にする)。
+  set -o noclobber
   iter=1
-  while [ -e "$LOG_DIR/implementer-${RUNNER}-iter${iter}.md" ]; do iter=$((iter + 1)); done
+  while :; do
+    LOG_FILE_TRY="$LOG_DIR/implementer-${RUNNER}-iter${iter}.md"
+    if { : > "$LOG_FILE_TRY"; } 2>/dev/null; then break; fi
+    # 作成に失敗したのに**そのパスが存在しない**なら、番号の衝突ではない
+    # (置き場に書き込めない等)。再採番しても解消しないので止める。
+    if [ ! -e "$LOG_FILE_TRY" ]; then
+      set +o noclobber
+      fail_usage "ログを作れない: $LOG_FILE_TRY(置き場 '$LOG_DIR' に書き込めない。--log-file で別の置き場を指定する)"
+    fi
+    iter=$((iter + 1))
+  done
+  set +o noclobber
   LOG_FILE="$LOG_DIR/implementer-${RUNNER}-iter${iter}.md"
 else
   LOG_DIR="$(dirname "$LOG_FILE")"

@@ -6,3 +6,6 @@ __pycache__/
 .claude/grasp.md
 .claude/reviews/
 .claude/.understand-project-done
+
+# ホスト固有のローカル設定(commit しない)
+.claude/settings.local.json
