@@ -83,6 +83,10 @@ SCHEMA_EOF
 
 TMP_DIR=""
 cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
+CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッパ)の PID
+RAW_OUT=""      # 中止時に「得られた分の生出力」を残すために先に宣言しておく
+PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空)
+
 trap cleanup EXIT
 trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&2; exit 20' ERR
 
@@ -242,7 +246,12 @@ run_timeout() { # $1=秒 残り=コマンド
   rt_start="$(date +%s)"
   if [ -n "$TIMEOUT_BIN" ]; then
     rt_rc=0
-    "$TIMEOUT_BIN" -k "$KILL_GRACE" "$rt_secs" "$@" || rt_rc=$?
+    # **前景で待たずに背景 + wait にする**。前景実行だと bash はシグナルの trap を
+    # 子の終了後にしか走らせず、子を道連れにできない(implement-agent.sh と同じ形)
+    "$TIMEOUT_BIN" -k "$KILL_GRACE" "$rt_secs" "$@" &
+    CHILD_PID=$!
+    wait "$CHILD_PID" || rt_rc=$?
+    CHILD_PID=""
     # TERM を無視するプロセスは -k の KILL で落ちるため 137/143 で返る。
     # 経過時間が指定秒を超えていればタイムアウト(124)に正規化する
     case "$rt_rc" in
@@ -297,7 +306,16 @@ build_cmd() { # $1=プロンプト本文 → 配列 CMD を組む
       *) CMD[${#CMD[@]}]="$w" ;;
     esac
   done
-  if [ "$bc_placed" -ne 1 ]; then CMD[${#CMD[@]}]="$bc_prompt"; fi
+  if [ "$bc_placed" -ne 1 ]; then
+    # `{prompt}` を持たないテンプレでは末尾に足す。**`-` で始まるプロンプトは
+    # オプションと誤認される**(実測: codex は `error: unexpected argument '- '` で拒否し、
+    # `tip: to pass '- ' as a value, use '-- - '` と案内する)。箇条書き・frontmatter で
+    # 始まる依頼文が通らなくなるので、その形のときだけ `--` を挟む。
+    case "$bc_prompt" in
+      -*) CMD[${#CMD[@]}]="--" ;;
+    esac
+    CMD[${#CMD[@]}]="$bc_prompt"
+  fi
 }
 
 quote_cmd() { # 表示・ログ用(実行には使わない)
@@ -402,11 +420,33 @@ if [ -n "$COMMAND_TMPL" ]; then
   echo "NOTE: 起動コマンドを上書きしています(profile 由来ではなく、ユーザーの明示指定であることが前提)" >&2
 fi
 
-# 一時ツリーの適用は呼び出し側の義務(external-runners.md §5・§9)。機構では強制しないため、
-# 未指定を素通りさせず NOTE で可視化する(終了コードと判定順序は変えない)
+# レビュー経路は一時ツリーで起動する(external-runners.md §5・§9-1)。**省略時の実リポジトリ
+# 直下起動を認めない**という契約を、機構として強制する。--dry-run は起動しないので不要。
 if [ -z "$CWD" ] && [ "$DRY_RUN" -eq 0 ]; then
-  echo "NOTE: --cwd が未指定です($(pwd) で起動します)。機密ガードは呼び出し側が §9 の一時ツリーを渡す前提" >&2
+  fail_usage "--cwd が必要です(レビュー経路は一時ツリーで起動する。external-runners.md §9-1 の手順で作る)"
 fi
+
+on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
+  os_sig="$1"; os_code="$2"
+  trap - TERM HUP INT ERR
+  if [ -n "$CHILD_PID" ]; then kill_tree "$CHILD_PID"; CHILD_PID=""; fi
+  log_line ""
+  log_line "**中止**: シグナル $os_sig を受信したため外部ランナーの子プロセスを終了させた(終了コード $os_code)"
+  # 中止時点までに得られた生出力は残す(引き継ぎの手がかり)。
+  # プローブ中の中止では RAW_OUT がまだ空なので、プローブの生出力だけが手がかりになる
+  if [ -n "$PROBE_OUT" ] && [ -s "$PROBE_OUT" ]; then
+    log_block "プローブ生出力(中止時点まで)" "$PROBE_OUT"
+  fi
+  if [ -n "$RAW_OUT" ] && [ -s "$RAW_OUT" ]; then
+    log_block "生出力(中止時点まで)" "$RAW_OUT"
+  fi
+  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーの子プロセスは終了させた)" >&2
+  exit "$os_code"   # EXIT trap が一時領域を後始末する
+}
+# 非対話 shell の非同期ジョブは SIGINT を無視するため、INT は「保険」として捕捉する
+trap 'on_signal TERM 143' TERM
+trap 'on_signal HUP 129' HUP
+trap 'on_signal INT 130' INT
 
 # ── 判定 1: 存在 ──
 build_cmd "<プロンプト>"
@@ -479,7 +519,10 @@ RAW_ERR="$TMP_DIR/raw.err"
 # ── 判定 4: 疎通プローブ(タイムアウト内)──
 build_cmd "ping と 1 語だけ返答してください。"
 rc=0
-( cd "${CWD:-.}" && run_timeout "$PROBE_TIMEOUT" "${CMD[@]}" </dev/null ) >"$PROBE_OUT" 2>"$PROBE_ERR" || rc=$?
+ORIG_PWD="$PWD"
+cd "${CWD:-.}" || die 20 internal "cwd へ移動できない: ${CWD:-.}"
+run_timeout "$PROBE_TIMEOUT" "${CMD[@]}" </dev/null >"$PROBE_OUT" 2>"$PROBE_ERR" || rc=$?
+cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
 if [ "$rc" -eq 124 ]; then
   log_block "プローブ標準エラー" "$PROBE_ERR"
   die 7 probe-timeout "ランナー '$RUNNER' がプローブに ${PROBE_TIMEOUT} 秒以内に応答しない(無応答)"
@@ -538,7 +581,10 @@ fi
 
 build_cmd "$PROMPT_TEXT"
 rc=0
-( cd "${CWD:-.}" && run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null ) >"$RAW_OUT" 2>"$RAW_ERR" || rc=$?
+ORIG_PWD="$PWD"
+cd "${CWD:-.}" || die 20 internal "cwd へ移動できない: ${CWD:-.}"
+run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null >"$RAW_OUT" 2>"$RAW_ERR" || rc=$?
+cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
 log_block "生出力" "$RAW_OUT"
 if [ "$rc" -eq 124 ]; then
   log_block "標準エラー" "$RAW_ERR"

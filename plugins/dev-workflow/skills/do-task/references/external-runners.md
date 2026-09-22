@@ -131,7 +131,7 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
   [--probe-timeout 60] [--run-timeout 600] [--log-file <パス>] [--dry-run]
 ```
 
-**呼び出し側は `--cwd` に §9 の一時ツリーを渡す(レビュー経路)**(引数の構文は任意だが、契約としては省略時の実リポジトリ直下起動を認めない)。スクリプト側で必須にはしない — 一時ツリーの生成と検証(§9-1)は git の状態を扱う**呼び出し側の責務**であり、スクリプトは受け口を提供するに留める(design §7-2 と同じ役割分担)。**未指定のまま起動した場合は stderr に `NOTE:` 行が出る**(`--dry-run` を除く。§6)。**実装経路はこれと向きが反転する** — `--cwd` には一時ツリーではなく **profile の `root`(実リポジトリ)を渡す**ことが契約であり、`--cwd` は省略できない(§12-1・§12-8)。
+**呼び出し側は `--cwd` に §9 の一時ツリーを渡す(レビュー経路)**(引数の構文は任意だが、契約としては省略時の実リポジトリ直下起動を認めない)。スクリプト側で必須にはしない — 一時ツリーの生成と検証(§9-1)は git の状態を扱う**呼び出し側の責務**であり、スクリプトは受け口を提供するに留める(design §7-2 と同じ役割分担)。**未指定なら usage エラー(exit 2)で止まる**(`--dry-run` を除く。§6)—— 契約が「省略時の実リポジトリ直下起動を認めない」としている以上、機構として強制する。**実装経路はこれと向きが反転する** — `--cwd` には一時ツリーではなく **profile の `root`(実リポジトリ)を渡す**ことが契約であり、`--cwd` は省略できない(§12-1・§12-8)。
 
 他 skill からは兄弟参照 `bash ../do-task/scripts/review-agent.sh` で解決する(design §6)。実行ビットに依存しないよう **`bash` 経由で起動する**。**解決できない構成(skill を 1 本だけ取り出した部分導入)では外部ランナーを無効化して報告する。**
 
@@ -289,6 +289,11 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
    case "$(CDPATH= cd -P -- "$(dirname "$TREE")" && pwd -P)/" in "${TOP%/}"/*|"${TOP%/}/") echo "一時ツリーがリポジトリ内にある"; exit 1;; esac
 
    # 2) EXCLUDE の生成(secret_paths の集合と glob→ERE の変換は scripts/diff-snapshot.sh が正本。
+   #    ⚠ **`secret_path_exceptions`(`.env.example` 等)はここには効かない** —— ERE 1 本では
+   #    「除外に当たるが例外にも当たる」を表せないため(grep -E に否定先読みが無い)。
+   #    例外は scripts/diff-snapshot.sh の `--exclude-exception-glob` が**パッチと本文の側で**効き、
+   #    一時ツリーからは削除されたままになる。レビュアーはパッチで内容を読む。
+   #    一時ツリー側にも例外を効かせるかは別 Issue。
    #    渡す集合の組み立てと要素の内容検査は diff-snapshot-call.md が正本で、ここに列挙しない)
    EXCLUDE="$(bash {do-task の}scripts/diff-snapshot.sh --print-exclude-ere --exclude-glob <secret_paths の各要素>)" || { echo "除外 ERE を生成できない"; exit 1; }
    [ -n "$EXCLUDE" ] || { echo "除外 ERE が空"; exit 1; }

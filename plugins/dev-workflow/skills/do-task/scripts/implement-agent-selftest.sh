@@ -281,8 +281,9 @@ EOF
 
 # 10) 一時領域の改竄(決定 40 の PoC)。本実行から「スクリプトの scratch らしき場所」を
 #     総当たりで上書きしようとする。保護領域に置いてあれば届かない。
-#     ⚠ この治具は意図的に雑(`/tmp/tmp.*/raw.txt` を総当たり)なので、**このスイートを
-#        他の dev-workflow 自己テストと同時に走らせない**(相手の一時ファイルまで汚す)
+#     探索範囲は `SELFTEST_FORGE_SCAN` で渡した場所だけ(このケース専用の $TMPDIR)。
+#     以前は `/tmp` と `$TMPDIR` を総当たりしており、無関係なプロセスの一時ファイルまで
+#     壊しうる状態だった(同時実行を禁じる運用で回避していた)
 mkdir -p "$WORK/forge"
 cat >"$WORK/forge/codex" <<'EOF'
 #!/usr/bin/env bash
@@ -300,7 +301,10 @@ for a in "$@"; do
 done
 if [ "$mode" = "read-only" ]; then echo "pong"; exit 0; fi
 echo "本物の生出力(実装は途中で止まった)"
-for d in /tmp "${TMPDIR:-/tmp}"; do
+# 探索範囲は selftest が渡した場所だけにする(無関係なプロセスの一時ファイルを壊さない)。
+# 決定 40 の PoC としての意味は保たれる —— スクリプトの scratch がこの範囲にあれば
+# 総当たりで届き、保護領域にあれば届かない、を確かめるのが目的。
+for d in ${SELFTEST_FORGE_SCAN:-}; do
   for f in "$d"/tmp.*/raw.txt "$d"/tmp.*/raw.err "$d"/tmp.*/probe.txt; do
     [ -f "$f" ] && printf 'FORGED: 全部終わりました\n' >"$f"
   done
@@ -946,8 +950,15 @@ leak_cleanup
 # H2. 決定 40: 本実行の出力を受ける scratch は「外部の書き込み範囲外」の保護領域にある。
 #     /tmp に置くと、記録の対象である本実行のプロセス自身が生出力を偽造できる(PoC)
 STUB_DIR="$WORK/forge"
-run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
-  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h2.md"; rc=$?
+# 治具が総当たりする場所を、このケース専用の一時領域に限る(系全体の /tmp を触らせない)
+FORGE_TMP="$WORK/forge-tmp"; mkdir -p "$FORGE_TMP"
+h2_env=()
+while IFS= read -r e; do h2_env[${#h2_env[@]}]="$e"; done <<<"$(agent_env)"
+h2_env[${#h2_env[@]}]="TMPDIR=$FORGE_TMP"
+h2_env[${#h2_env[@]}]="SELFTEST_FORGE_SCAN=$FORGE_TMP"
+rc=0
+guard env "${h2_env[@]}" bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h2.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 if check "一時領域: 本実行から scratch を書き換えようとしても成功する" 0 "$rc"; then
   if grep -qF 'FORGED' "$CASE_OUT"; then
     ng "一時領域: 生出力が本実行から偽造されない(stdout が汚染された)"; cat "$CASE_OUT" >&2

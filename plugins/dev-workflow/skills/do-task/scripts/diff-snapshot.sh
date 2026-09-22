@@ -44,6 +44,10 @@
 #   --base <tree-ish>            必須。比較の基準。空ツリーも可
 #   --out <file>                 必須。生成先。呼び出し側 cwd 基準の相対 / 絶対。親は作る
 #   --exclude-glob <glob>        繰り返し可。機密パスの glob 指定(下の書式)
+#   --exclude-exception-glob <glob>
+#                                繰り返し可。**除外に当たっても機密扱いにしない**パス
+#                                (`.env.example` のような公開例)。--exclude-glob / --exclude と
+#                                併せてのみ指定でき、全パスに当たる指定は usage エラー
 #   --exclude <ERE>              繰り返し可。機密パスの拡張正規表現指定
 #                                (--exclude-glob と --exclude のどちらか 1 つ以上が必須)
 #   --pre-untracked <file>       任意。基準時点の未追跡一覧(NUL 区切り・toplevel 相対)。
@@ -190,6 +194,8 @@ CWD=""
 BASE=""
 OUT=""
 GLOBS=()
+EXCEPT_GLOBS=()   # 除外の例外(--exclude-exception-glob)。除外に当たっても機密扱いにしない
+EXCEPT_ERE=""
 ERES=()
 PRE_LIST=""
 PRE_LIST_GIVEN=0
@@ -378,6 +384,7 @@ while [ $# -gt 0 ]; do
     --base) need_val "$1" "$#"; BASE="$2"; shift 2 ;;
     --out) need_val "$1" "$#"; OUT="$2"; shift 2 ;;
     --exclude-glob) need_val "$1" "$#"; GLOBS[${#GLOBS[@]}]="$2"; shift 2 ;;
+    --exclude-exception-glob) need_val "$1" "$#"; EXCEPT_GLOBS[${#EXCEPT_GLOBS[@]}]="$2"; shift 2 ;;
     --exclude) need_val "$1" "$#"; ERES[${#ERES[@]}]="$2"; shift 2 ;;
     --pre-untracked) need_val "$1" "$#"; PRE_LIST="$2"; PRE_LIST_GIVEN=1; shift 2 ;;
     --pre-untracked-sha256) need_val "$1" "$#"; PRE_SHA="$2"; PRE_SHA_GIVEN=1; shift 2 ;;
@@ -526,6 +533,22 @@ build_ere() {
   ERE="$acc"
 }
 
+build_except_ere() { # EXCEPT_GLOBS → EXCEPT_ERE。書式検査は --exclude-glob と同じものを使う
+  local g parts=() one acc=""
+  for g in ${EXCEPT_GLOBS[@]+"${EXCEPT_GLOBS[@]}"}; do check_glob_raw "$g"; done
+  for g in ${EXCEPT_GLOBS[@]+"${EXCEPT_GLOBS[@]}"}; do
+    one="$(glob_to_ere "$g")"
+    validate_one_ere "$one"
+    # 例外が全パスに当たると除外が丸ごと無効になる(機密が素通りする)ので止める
+    if matches_all_paths "$one"; then fail_usage "除外の例外が全パスに当たる: $g"; fi
+    parts[${#parts[@]}]="$one"
+  done
+  for one in ${parts[@]+"${parts[@]}"}; do
+    if [ -z "$acc" ]; then acc="$one"; else acc="$acc|$one"; fi
+  done
+  EXCEPT_ERE="$acc"
+}
+
 validate_ere() { # 結合 ERE を 1 回だけ検証する(rc 1 は妥当な非マッチ)
   local rc=0
   printf '' | grep -Eqz -- "$ERE" 2>/dev/null || rc=$?
@@ -536,6 +559,10 @@ if [ ${#GLOBS[@]} -gt 0 ] || [ ${#ERES[@]} -gt 0 ]; then
   build_ere
   validate_ere
   if matches_all_paths "$ERE"; then fail_usage "secret_paths が全パスに当たる: $ERE"; fi
+fi
+if [ ${#EXCEPT_GLOBS[@]} -gt 0 ]; then
+  [ -n "$ERE" ] || fail_usage "--exclude-exception-glob は --exclude-glob / --exclude と併せて指定する"
+  build_except_ere
 fi
 
 if [ "$PRINT_ERE" -eq 1 ]; then
@@ -1083,6 +1110,7 @@ assemble_out() { # $1=固定文字列(空なら通常出力)
     printf -- '- 現在 HEAD: %s\n' "$HEAD_DESC"
     printf -- '- 生成日時: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf -- '- 除外 ERE: %s\n' "$ERE"
+    [ -n "$EXCEPT_ERE" ] && printf -- '- 除外の例外 ERE: %s\n' "$EXCEPT_ERE"
     printf -- '- 祖先判定: %s\n' "$ANC_DESC"
     printf -- '- 基準時点の未追跡一覧: %s\n' "$PRE_DESC"
     printf -- '- 件数の数え方: 要約行の件数は未追跡だけを数える(追跡の除外はパスだけ各節に載る)\n'
@@ -1184,7 +1212,9 @@ classify() { # $1=パス $2=tracked|untracked
   CLASS=include
   if ere_hit "$1" "$DEFAULT_EXCLUDE"; then CLASS=default; DEF_REASON="既定除外"; return 0; fi
   if is_output_path "$1"; then CLASS=default; DEF_REASON="出力先自身"; return 0; fi
-  if [ "$1" != "$PROFILE_PATH" ] && [ -n "$ERE" ] && ere_hit "$1" "$ERE"; then CLASS=secret; return 0; fi
+  # 除外に当たっても、例外に当たるものは機密扱いにしない(`.env.example` のような公開例)
+  if [ "$1" != "$PROFILE_PATH" ] && [ -n "$ERE" ] && ere_hit "$1" "$ERE" \
+     && { [ -z "$EXCEPT_ERE" ] || ! ere_hit "$1" "$EXCEPT_ERE"; }; then CLASS=secret; return 0; fi
   if [ "$2" = untracked ] && [ -n "${PRE_SET[$1]:-}" ] && [ -z "${INC_SET[$1]:-}" ]; then CLASS=outside; return 0; fi
   return 0
 }

@@ -365,7 +365,16 @@ build_cmd() { # $1=プロンプト本文 → 配列 CMD を組む(常に既定�
       *) CMD[${#CMD[@]}]="$w" ;;
     esac
   done
-  if [ "$bc_placed" -ne 1 ]; then CMD[${#CMD[@]}]="$bc_prompt"; fi
+  if [ "$bc_placed" -ne 1 ]; then
+    # `{prompt}` を持たないテンプレでは末尾に足す。**`-` で始まるプロンプトは
+    # オプションと誤認される**(実測: codex は `error: unexpected argument '- '` で拒否し、
+    # `tip: to pass '- ' as a value, use '-- - '` と案内する)。箇条書き・frontmatter で
+    # 始まる依頼文が通らなくなるので、その形のときだけ `--` を挟む。
+    case "$bc_prompt" in
+      -*) CMD[${#CMD[@]}]="--" ;;
+    esac
+    CMD[${#CMD[@]}]="$bc_prompt"
+  fi
 }
 
 # 判定 4′ 用: CMD の中の「書き込みフラグ 値」を「プローブ用フラグ 値」へ**対で**差し替える。
