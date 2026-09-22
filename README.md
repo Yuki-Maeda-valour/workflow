@@ -99,21 +99,8 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 
 ## 検証
 
-```bash
-python3 -m unittest discover -s scripts -p 'test_*.py'  # 検証器の回帰テスト
-python3 scripts/validate.py       # frontmatter / 規約(委託の語を含む)/ リンク / JSON の一括検証
-claude plugin validate .          # Claude Code 本体による検証
-bash -n setup.sh                  # シェル構文
-bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh
-                                  # 外部ランナー起動スクリプトの回帰テスト(スタブのみ・外部 CLI 不要)
-bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh
-                                  # 実装委託の起動スクリプトの回帰テスト(スタブのみ・外部 CLI 不要)
-bash -n plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh
-bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh
-                                  # diff スナップショットの回帰テスト(スタブのみ・外部 CLI 不要)
-bash -n plugins/dev-workflow/skills/do-task/scripts/implement-guard.sh
-bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh
-                                  # 実装委託の前後の保護(スナップショット・退避・比較・復元)の回帰テスト(scratch repo のみ・外部 CLI 不要)
-```
+検証コマンドの一覧は [AGENTS.md](AGENTS.md) の検証節にあります。同じ一覧を 2 か所に置くと同期漏れが起きるため、このリポジトリでは `AGENTS.md` の 1 か所だけが持ちます。
+
+ホスト固有の検証コマンドは各ホストの指示ファイルにあります — Claude Code なら [.claude/rules/claude-code.md](.claude/rules/claude-code.md) です。
 
 `validate.py` は `~/dev` 配下のディレクトリ名からプロジェクト固有名の混入を検査します。`base` など、検証器の一般語除外集合に含まれる名前は対象外です。回帰テストは一時ホームとリポジトリのコピーを使い、一般語の除外と固有名・ユーザー絶対パスの検出を確認します。
