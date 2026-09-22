@@ -55,6 +55,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **権威参照ファイルの状態を、ルートの `AGENTS.md` × `CLAUDE.md` の 4 通りに分類する**(design §3 の検出順): ① どちらも無い ② `AGENTS.md` のみ(完成形)③ `CLAUDE.md` のみ(未移行)④ 両方。
 - ④ のときは、**ルートの `CLAUDE.md` 自身**に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(1) import の判定」を当てる(**(2) のドリフト判定は使わない** — 使うと、import を持たない中身入りの `CLAUDE.md` と import を持つ `CLAUDE.local.md` がある構成まで互換形に分類してしまう)。import あり(symlink を含む)= 互換形、import なし = そうでない、に分ける。**参照先に到達できない構成(skill 単体のコピー)では、この分岐だけ「import の有無を判定できない」と報告する**(① 〜 ③ の分類は reference 無しで動く)。**この場合は追記提案だけを行い、経路 a の提案とルートの `CLAUDE.md` への import 行の追加の提案は、どちらも見送る**(design §6 の縮退)。
 - ③ のときは、**他ツール・CI が `CLAUDE.md` を直接参照していないか**を調べて控える(Phase 3-1 の移行提案で提示する)。④-互換形のときも同様に調べる(経路 a の提案に含める)。`grep -rn 'CLAUDE\.md' --exclude-dir=.git .` 相当で CI 設定・スクリプト・README・ドキュメント・エディタ設定を横断する。
+- 既存の `.claude/project-profile.yml` があり `source_of_truth` に値があるとき(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもなければ、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない。新規プロジェクト・profile なし・項目なし・値が空は対象外で、停止しない)。
 
 **6. MCP の利用可否**
 - **Serena**: `mcp__serena__*` ツールが現在使えるか。使えない場合は既存 `.mcp.json` の serena エントリ・`.serena/` の有無も確認する。
@@ -85,7 +86,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - 使わない → 正本 = docs
 - 例外(補足として提示。該当時のみ):
   - Serena は**コード探索専用**にして正本は docs にしたい(人間も読む文書を正本にする) → 正本 = docs のハイブリッド
-  - メモリも doc/ も本格運用しない超小規模 → 正本 = `claude-md`(値名は据え置き。実体は権威参照ファイル `AGENTS.md` 自体が正本という意味)
+  - メモリも doc/ も本格運用しない超小規模 → 正本 = `agents-md`
 
 **残りの質問(該当するものだけ)**
 
@@ -241,7 +242,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **1. 生成物一覧を表として提示**する(パス / 新規作成 or 追記提案 / 概要)。上書きを避けた既存物も「既存のため据え置き」と明示する。
 
 **2. 妥当性の自己確認**
-- `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。
+- `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。`source_of_truth` に値がある場合、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれかであるか。
 - `AGENTS.md` の `{{...}}` が置換済みか(意図的に残したガイド文以外にプレースホルダが残っていないか)。**どの分類でも**、最終状態に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」をかける(ルートに `CLAUDE.md` が無くても、`.claude/CLAUDE.md` / `CLAUDE.local.md` があればドリフトになりうる)。ドリフトなら注記し、対処 2 つを案内する。**片方だけ import があるとき**(例: ④-import なしで import の追加が断られ、`CLAUDE.local.md` には import がある)は判定自体は正常を返すが、「この環境では `CLAUDE.local.md` の import 経由で読まれているが、ルートの `CLAUDE.md` には import が無い」のように両方を報告する。**reference に到達できない構成では、この検査を無効化して報告する**(design §6)。
 - hook をマージした場合、`.claude/settings.json` が有効な JSON か(必要なら再 Read で確認)。
 - `.mcp.json` を生成・マージした場合、有効な JSON で既存エントリが保持されているか。
@@ -276,6 +277,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - [ ] 再実行モードでは、既存の記述・過去の選択を変えずに新標準の差分だけを提案し、workflow_version を更新したか。
 - [ ] MCP は「宣言 → 承認 → 生成」の順で扱ったか。承認提示に生成先(`.mcp.json` / `.codex/config.toml`)を列挙したか(**既定は両方生成し**、ユーザーがその場でホスト単位の除外を申し出た場合のみ個別にスキップする)。不要な設定を押し付けていないか。
 - [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている)か。
+- [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
 - [ ] 解決したタスク保存先に `.gitkeep` を作り、profile・AGENTS.md・運用文書で同じパスを示し、命名規約(`進行中_` / `完了_`)を伝えたか。
 - [ ] 生成物一覧と次ステップ(`/understand-project` からのサイクル)を日本語で提示したか。
 

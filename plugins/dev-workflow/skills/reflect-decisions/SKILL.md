@@ -35,7 +35,7 @@ argument-hint: "[議事録・文字起こし・資料ファイル...] [--analyze
 
 ## Phase 1: 入力とプロジェクト状態の把握
 
-1. `.claude/project-profile.yml` があれば Read し、`root` / `source_of_truth` を解決する(無くても続行)
+1. `.claude/project-profile.yml` があれば Read し、`root` / `source_of_truth` を解決する(profile が無い、または `source_of_truth` の項目が無い・値が空(null・空文字)の場合は従来どおり続行する)。`source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない)
 2. **doc ディレクトリを検出**する: `doc/` → `docs/` の順で探す。統一構成(README 索引+ 01〜05)が無い場合は /init-project の先行実行を提案する(承諾されればチェーン実行してから続行。即席で 03 だけ作らない — 構成の設置は init-project の責務)
 3. doc/README.md(索引)と 01_overview / 03_requirements / 04_design / 05_operations / 07_plan(あれば)を読み、現在の記述状態(空テンプレか・どこまで書かれているか・タグ凡例)を把握する。**01 の用語集は Phase 2 の誤認識検出でも使うため控えておく**
 4. 入力を読み込む。**資料メタ情報**(日付・会議名/資料名・参加者・議題)を冒頭やファイル名から抽出する。日付が読み取れなければファイルの更新日時から推定し、ユーザーに確認する
@@ -158,6 +158,7 @@ argument-hint: "[議事録・文字起こし・資料ファイル...] [--analyze
 - [ ] ソースコード・Serena メモリ・doc/02・doc/06 を変更していない。機密値を書いていない
 - [ ] 未決事項・宿題・反映先が無かった決定を報告し、必要なチェーン(/create-task・/update-doc)を提案した
 - [ ] 外部レビューを実施し(規模適応・縮退した場合はその旨を報告に明記)、全レビュアー PASS まで反復した
+- [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
 
 ## 関連 skill
 
