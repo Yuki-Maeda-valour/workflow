@@ -24,8 +24,8 @@
 #   --prompt-file <パス>    レビュー依頼プロンプト(必須)。出力形式(指摘 JSON)の指示はスクリプトが末尾に付ける
 #                           (呼び出し側は不要。付与ブロックのバイト数も prompt-too-large の上限判定に含まれる)
 #   --target <パス>         レビュー対象(繰り返し可。プロンプト末尾・出力形式の指示の前に付記しログに残す)
-#   --cwd <ディレクトリ>    ランナーの実行ディレクトリ(機密ガードの一時ツリーを渡す。呼び出し側の義務。
-#                           未指定でも起動するが、その旨を NOTE で stderr に出す)
+#   --cwd <ディレクトリ>    ランナーの実行ディレクトリ。**必須**(--dry-run を除く)。機密ガードの一時ツリーを渡す
+#                           (external-runners.md §9-1)。空・未指定は usage(2)で、ログを作る前に止まる。
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
 #   --run-timeout <秒>      本実行のタイムアウト(既定 600。0 は不可)
 #   --log-file <パス>       ログ出力先(既定 .claude/reviews/reviewer-<runner>-iter<N>.md)
@@ -38,9 +38,10 @@
 #
 # 終了コード: 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #             7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed
-#             12=prompt-too-large 20=internal
+#             12=prompt-too-large 20=internal 128+N=aborted(シグナル N で中止。子プロセスは道連れにする)
 #
-# 空文字の扱い: --model "" / --target "" / --cwd "" / --log-file "" は「省略」として受理する。
+# 空文字の扱い: --model "" / --target "" / --cwd "" / --log-file "" は「省略」として扱う
+#               (--cwd は必須なので、空は usage(2)になる)。
 #               --runner / --prompt-file、既定表に無いランナーの --command が空・未指定なら usage(2)。
 #               既定表に無いランナーで --readonly-flag が空・未指定なら no-readonly(5)。
 #
@@ -83,6 +84,10 @@ SCHEMA_EOF
 
 TMP_DIR=""
 cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
+# 元の stdout / stderr を退避する。中止ハンドラは `run_timeout … >"$RAW_OUT" 2>"$RAW_ERR"` の
+# リダイレクトが効いたまま走るので、素の `>&2` では ERROR 行が消える一時ファイルへ行ってしまう
+# (implement-agent.sh と同じ形)
+exec 9>&1 8>&2
 CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッパ)の PID
 RAW_OUT=""      # 中止時に「得られた分の生出力」を残すために先に宣言しておく
 PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空)
@@ -159,6 +164,12 @@ fi
 [ -n "$PROMPT_FILE" ] || fail_usage "--prompt-file が必要です"
 [ -f "$PROMPT_FILE" ] || fail_usage "プロンプトファイルが無い: $PROMPT_FILE"
 if [ -n "$CWD" ] && [ ! -d "$CWD" ]; then fail_usage "--cwd が存在しない: $CWD"; fi
+# レビュー経路は一時ツリーで起動する(external-runners.md §5・§9-1)。**省略時の実リポジトリ
+# 直下起動を認めない**という契約を機構として強制する。ログを作るより前に止める(usage エラーで
+# ログ置き場にファイルを残さない)。--dry-run は起動しないので不要。--cwd "" は省略と同じ扱い
+if [ -z "$CWD" ] && [ "$DRY_RUN" -eq 0 ]; then
+  fail_usage "--cwd が必要です(レビュー経路は一時ツリーで起動する。external-runners.md §9-1 の手順で作る)"
+fi
 # 0 は GNU timeout では「無制限」、フォールバックでは「即 kill」で意味が反転するため受け付けない
 case "$PROBE_TIMEOUT" in ''|*[!0-9]*) fail_usage "--probe-timeout は正の秒数" ;; esac
 case "$RUN_TIMEOUT" in ''|*[!0-9]*) fail_usage "--run-timeout は正の秒数" ;; esac
@@ -248,7 +259,7 @@ run_timeout() { # $1=秒 残り=コマンド
     rt_rc=0
     # **前景で待たずに背景 + wait にする**。前景実行だと bash はシグナルの trap を
     # 子の終了後にしか走らせず、子を道連れにできない(implement-agent.sh と同じ形)
-    "$TIMEOUT_BIN" -k "$KILL_GRACE" "$rt_secs" "$@" &
+    "$TIMEOUT_BIN" -k "$KILL_GRACE" "$rt_secs" "$@" 8>&- 9>&- &
     CHILD_PID=$!
     wait "$CHILD_PID" || rt_rc=$?
     CHILD_PID=""
@@ -264,14 +275,16 @@ run_timeout() { # $1=秒 残り=コマンド
   # monitor モードで起動すると、そのジョブが独立したプロセスグループのリーダーになる
   # (pgid == pid)。これでタイムアウト時にグループごと止められる
   set -m 2>/dev/null || true
-  "$@" &
+  "$@" 8>&- 9>&- &
   rt_pid=$!
+  CHILD_PID="$rt_pid"   # 中止ハンドラが道連れにできるよう、この経路でも掴む
   set +m 2>/dev/null || true
   rt_waited=0
   while kill -0 "$rt_pid" 2>/dev/null; do
     if [ "$rt_waited" -ge "$rt_secs" ]; then
       kill_tree "$rt_pid"
       wait "$rt_pid" 2>/dev/null || true
+      CHILD_PID=""
       return 124
     fi
     sleep 1
@@ -279,6 +292,7 @@ run_timeout() { # $1=秒 残り=コマンド
   done
   rt_rc=0
   wait "$rt_pid" || rt_rc=$?
+  CHILD_PID=""
   return "$rt_rc"
 }
 
@@ -401,6 +415,15 @@ else
   LOG_DIR="$(dirname "$LOG_FILE")"
   mkdir -p "$LOG_DIR"
 fi
+# 本実行とプローブは cd してから起動する(子 PID を掴むためサブシェルを使えない)。相対パスの
+# ままだと、cd 中に中止されたときログを一時ツリー基準で探して見失う。先に絶対パスへ正規化する
+# (implement-agent.sh と同じ形)
+case "$LOG_FILE" in /*) : ;;
+  *) LOG_FILE="$(cd "$(dirname "$LOG_FILE")" && pwd -P)/$(basename "$LOG_FILE")" ;;
+esac
+case "$PROMPT_FILE" in /*) : ;;
+  *) PROMPT_FILE="$(cd "$(dirname "$PROMPT_FILE")" && pwd -P)/$(basename "$PROMPT_FILE")" ;;
+esac
 
 {
   printf '# 外部ランナー実行記録: %s\n\n' "$RUNNER"
@@ -420,11 +443,6 @@ if [ -n "$COMMAND_TMPL" ]; then
   echo "NOTE: 起動コマンドを上書きしています(profile 由来ではなく、ユーザーの明示指定であることが前提)" >&2
 fi
 
-# レビュー経路は一時ツリーで起動する(external-runners.md §5・§9-1)。**省略時の実リポジトリ
-# 直下起動を認めない**という契約を、機構として強制する。--dry-run は起動しないので不要。
-if [ -z "$CWD" ] && [ "$DRY_RUN" -eq 0 ]; then
-  fail_usage "--cwd が必要です(レビュー経路は一時ツリーで起動する。external-runners.md §9-1 の手順で作る)"
-fi
 
 on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   os_sig="$1"; os_code="$2"
@@ -440,7 +458,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   if [ -n "$RAW_OUT" ] && [ -s "$RAW_OUT" ]; then
     log_block "生出力(中止時点まで)" "$RAW_OUT"
   fi
-  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーの子プロセスは終了させた)" >&2
+  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーの子プロセスは終了させた)" >&8
   exit "$os_code"   # EXIT trap が一時領域を後始末する
 }
 # 非対話 shell の非同期ジョブは SIGINT を無視するため、INT は「保険」として捕捉する

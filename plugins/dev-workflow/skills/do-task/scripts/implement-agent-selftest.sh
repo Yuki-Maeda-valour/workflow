@@ -1121,6 +1121,66 @@ else
   ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
 fi
 
+# `-` で始まるプロンプト(箇条書き・frontmatter)がオプションと誤認されない。
+# スタブは codex と同じく、`--` より前にある未知の `-` 始まりの引数を拒否する —— 最後の引数を
+# 記録するだけのスタブでは、`--` を挟まない実装でも同じ最後の引数が届いて判別できない。
+mkdir -p "$WORK/strictopt"
+cat >"$WORK/strictopt/codex" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--help" ]; then
+    echo '  -s, --sandbox <SANDBOX_MODE>'
+    echo '          [possible values: read-only, workspace-write, danger-full-access]'
+    exit 0
+  fi
+done
+seen_dd=0; skip=0
+for a in "$@"; do
+  if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+  [ "$seen_dd" -eq 1 ] && continue
+  case "$a" in
+    --) seen_dd=1 ;;
+    --sandbox|-m) skip=1 ;;
+    exec) : ;;
+    -*) echo "error: unexpected argument '$a' found" >&2; exit 2 ;;
+  esac
+done
+printf '%s' "${@: -2:1}" >"$SELFTEST_RECORD_DIR/strict-penult.txt"
+printf '%s' "${@: -1}" >"$SELFTEST_RECORD_DIR/strict-last.txt"
+echo "外部 implementer の生出力(strict)"
+EOF
+chmod +x "$WORK/strictopt/codex"
+STUB_DIR="$WORK/strictopt"
+PROBE_BEHAVIOR="none"   # 前のケースの設定を持ち込まない
+printf -- '- 箇条書きで始まる実装依頼\n- 2 行目\n' >"$WORK/prompt-dash.md"
+rm -f "$RECORD_DIR/strict-penult.txt" "$RECORD_DIR/strict-last.txt"
+run_agent --runner codex --prompt-file "$WORK/prompt-dash.md" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-dash.md"; rc=$?
+if check "- 始まりのプロンプト: 拒否されずに本実行まで通る" 0 "$rc"; then
+  if [ "$(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null)" = "--" ]; then
+    ok "- 始まりのプロンプト: 直前に -- が挟まる"
+  else
+    ng "- 始まりのプロンプト: 直前に -- が挟まる(実際: $(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null))"
+  fi
+  if grep -q '箇条書きで始まる実装依頼' "$RECORD_DIR/strict-last.txt" 2>/dev/null; then
+    ok "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  else
+    ng "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  fi
+fi
+# `-` で始まらないプロンプトには `--` を挟まない(必要なときだけ足す)
+rm -f "$RECORD_DIR/strict-penult.txt"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-nodash.md"; rc=$?
+if check "通常のプロンプト: 本実行まで通る" 0 "$rc"; then
+  if [ "$(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null)" != "--" ]; then
+    ok "通常のプロンプト: -- を挟まない"
+  else
+    ng "通常のプロンプト: -- を挟まない"
+  fi
+fi
+STUB_DIR="$WORK/pathbin"
+
 echo
 printf '%s\n' "$RESULTS"
 echo
