@@ -159,7 +159,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **既存の doc / docs があるファイルは上書きしない**(無いファイルだけ足す)。既存プロジェクトに別構成の doc がある場合は、統一構成への対応表を提示するに留める(移行は提案のみ)。
 
 **4. タスク保存先**
-- Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時 `git mv` で同じディレクトリの `完了_{名}.md`。中断は `中断_`、保留は `保留_`)。
+- Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`)。
 
 **5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
 - **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。追加する一覧を提示してから書き込む。サイクル(/check・/do-task)実行時の許可プロンプトを減らすのが目的。
@@ -192,7 +192,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **8. `.gitignore` の整備と git init**
 - `templates/gitignore.snippet` を Read し、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ `.claude/grasp.md`(把握キャッシュ)/ hook の state ファイル / `.env` 系(`!.env.example` は共有)/ `export/`(export-doc の出力)。
 - `.env` 系が**既に git 管理されている**場合は、追記だけでは除外されないため警告し、対応(`git rm --cached` 等)はユーザーに委ねる。
-- `.git` が無い場合(新規): タスク運用(`git mv` による `進行中_` → `完了_` リネーム)が git 前提であることを伝え、`git init` を提案する(不要と言われたら task 運用の制約を案内する)。
+- `.git` が無い場合(新規): タスク運用(/do-task の diff スナップショット・/ship-task の commit と PR)が git 前提であることを伝え(完了時の改名だけは git が無くても `mv` で動く)、`git init` を提案する(不要と言われたら task 運用の制約を案内する)。
 
 **9.（新規プロジェクトのみ）プロジェクト README.md**
 - ルートに README.md が無い場合のみ、`templates/project-README.md.template` から生成する(doc/ への参照+開発コマンドの薄い雛形。置換: `{{PROJECT_NAME}}` / `{{OVERVIEW}}` / `{{COMMANDS}}`)。既存 README には触れない。
