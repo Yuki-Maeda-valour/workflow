@@ -3,7 +3,7 @@
 複数の実プロジェクトで実証されたベスト要素を統合した、**どのプロジェクトでも使える** Claude Code skills 集。
 新しいプロジェクトを始めるとき、ここから skills を導入すれば、タスク駆動開発のワークフロー一式がすぐ使える。
 
-- プロジェクト固有情報(パス・コマンド・スタック)は skill にハードコードされていない。`.claude/project-profile.yml` +実行時自動検出+ CLAUDE.md の 3 層で吸収する(profile が無くても動く)
+- プロジェクト固有情報(パス・コマンド・スタック)は skill にハードコードされていない。`.claude/project-profile.yml` +実行時自動検出+ 権威参照ファイル(AGENTS.md)の 3 層で吸収する(profile が無くても動く)
 - 設計の詳細・規約・出典は [docs/design.md](docs/design.md)
 - どんなに小さい変更でも独立レビューを必須とし、セルフレビューや機械チェックだけで完了・公開しない
 - タスク保存先は profile の `task_dir` を優先し、未指定なら既存の状態名 MD を持つディレクトリを検出する。候補が無ければ `docs/tasks`、複数なら選択を求める。空の旧 `task/` は候補にしない
@@ -12,7 +12,7 @@
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
-| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import / profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
+| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
 | `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。grasp は前回要約と参照索引に使い、毎回現在の一次情報を確認 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
 | `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を解決した保存先の `進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |

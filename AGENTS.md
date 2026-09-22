@@ -14,6 +14,7 @@ plugins/dev-workflow/
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
+.claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
 setup.sh                            # plugin を使わない導入(コピー / symlink)
 ```
 
@@ -44,7 +45,7 @@ bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     #
 bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   # 実装委託の前後の保護の回帰テスト(必須)
 ```
 
-本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホストの権威参照ファイル側に追記する)。
+本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
 
 ## このリポジトリの Issue 運用
 

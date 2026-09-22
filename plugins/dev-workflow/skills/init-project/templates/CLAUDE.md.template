@@ -2,4 +2,4 @@
 
 @AGENTS.md
 
-<!-- 権威参照ファイルの正本は AGENTS.md。Claude Code 固有の指示が必要ならこの下に書く（詳細は AGENTS.md 冒頭）。 -->
+<!-- 権威参照ファイルの正本は AGENTS.md。固有の指示は .claude/rules/claude-code.md に書き、このファイルは import 1 行に保つ。 -->

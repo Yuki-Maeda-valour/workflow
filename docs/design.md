@@ -37,7 +37,7 @@
 
 | skill | 責務 | 読む | 書く |
 |---|---|---|---|
-| init-project | 標準構成(権威参照ファイル(AGENTS.md)+ CLAUDE.md の import 1 行 / doc/ / task_dir / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | AGENTS.md, CLAUDE.md, doc/, task_dir, .claude/, .mcp.json, .codex/config.toml |
+| init-project | 標準構成(権威参照ファイル(AGENTS.md)/ doc/ / task_dir / profile)+ MCP セットアップ(opt)の生成 | 対象プロジェクト全体 | AGENTS.md, doc/, task_dir, .claude/, .mcp.json, .codex/config.toml(`CLAUDE.md` は生成しない。既存の `CLAUDE.md` の扱いは §7-4) |
 | understand-project | プロジェクト把握。読み取り専用(grasp は参照索引) | profile, 権威参照ファイル, メモリ / doc, コード | .claude/grasp.md(前回要約・参照索引のみ) |
 | create-task | 種別判定・影響範囲調査済みのタスク設計書生成(--refactor = 対象発見型リファクタ分析) | コード全域 | 解決した task_dir の進行中_*.md のみ |
 | ship-task | create-task → do-task → update-doc --task を通しで実行し、ブランチ・commit・push・PR まで出す薄いオーケストレーター(工程の中身は持たない) | 各工程の成果物 | 3 工程の書き込み+ git ブランチ / commit / PR |
@@ -69,7 +69,7 @@
 - パッケージマネージャ: package.json の `packageManager` フィールド → lockfile(pnpm-lock.yaml / bun.lock* / yarn.lock / package-lock.json)→ 既定 npm。PHP は composer.json、Python は pyproject.toml / requirements.txt、Go は go.mod、Rust は Cargo.toml
 - 品質コマンド: profile の `quality` → package.json の scripts から `format` / `check` / `lint` / `type-check`|`typecheck` / `test` / `build` を存在検出 → 言語別既定(PHP: `./vendor/bin/pint --test` + `php artisan test`、Python: ruff/pytest 等)
 - モノレポ: pnpm-workspace.yaml / package.json#workspaces から自動列挙
-- 権威参照ファイル: `AGENTS.md` があればそれ → 無ければ `CLAUDE.md`(未移行)。両方あれば `AGENTS.md` を正本とし、`CLAUDE.md` が `@AGENTS.md` の import を含まなければドリフトとして注記する(§5-11 と同型)。import に加えてホスト固有の追記を持つ構成は正常。**ホスト側の探索順・サイズ上限は §7-3(事実と出典)、運用方針は §7-4**
+- 権威参照ファイル: `AGENTS.md` があればそれ → 無ければ `CLAUDE.md`(未移行)。両方あれば `AGENTS.md` を正本とし、`CLAUDE.md` は import 行より下の追記だけを補完として読む。完成形・互換形(定義は §7-4)はいずれも正常。**ルートの `AGENTS.md` への symlink は import ありと同じに扱う**(決定 16)。**ドリフト判定はルートの 3 種を見る**: `AGENTS.md` があり、ルートに `CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md` が 1 つ以上あるのに、**そのいずれにも**ルートの `AGENTS.md` を指す import(`CLAUDE.md`・`CLAUDE.local.md` なら `@AGENTS.md`。相対パスの基準は §7-3。symlink を含む)が無ければ、ドリフトとして注記し(§5-11 と同型)、対処(その import の追加、またはユーザー設定 `claude-md-and-agents-md` への変更)を案内する — Claude Code の既定設定では `AGENTS.md` が読まれないため(事実は §7-3)。**`AGENTS.md` 自体がルートの 3 種のいずれかへの symlink なら、内容はそのファイル経由で読まれているためドリフトとせず、構成の報告だけを行う(import の追加もユーザー設定の変更も案内しない)**。リポジトリより上の階層は走査しない。`.claude/rules/` は skills の読取り・同期の対象外(理由は §7-4)。**ホスト側の探索順・サイズ上限は §7-3(事実と出典)、運用方針は §7-4**
 - Serena: 使う前に get_current_config でアクティブプロジェクトを確認し、違えば activate_project(別プロジェクトのメモリ誤参照防止)。メモリ名は list_memories() で動的列挙し、固定名を仮定しない
 
 ## 4. project-profile.yml スキーマ
@@ -95,10 +95,14 @@ has_code: true
 # パッケージマネージャ(省略時: packageManager フィールド / lockfile から自動判定)
 package_manager: pnpm
 
-# コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | claude-md
+# コード理解系(概要・構造・技術・規約・コマンド)の正本: serena(既定) | docs | agents-md
 #   serena:    Serena メモリが正本、権威参照ファイルは薄型維持
 #   docs:      doc/(02・05 等)が正本、メモリは探索用の要約(一方向同期)
-#   claude-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)。値名 claude-md は据え置き(改名は未決)
+#   agents-md: 権威参照ファイル自体が正本(小規模・メモリ未使用)
+#   ※ 上の 3 値以外が書かれていたら、skill は停止して有効値を案内する(既定へフォールバックしない。
+#     フォールバックすると、報告は出ても書き込み自体は止まらず、update-doc の書き込み先が変わるため)。
+#     この項目が**無い**場合のフォールバック(既定 serena)は従来どおり。旧値名は 2026-09-22 に廃止した
+#     (出典は §7-4 末尾の決定録。配布中の skill の追従状況と profile の値を置換するタイミングは §7-4 の実装状況)
 # ※ 要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)・計画(doc/07)は
 #   この設定に関わらず常に doc/ が正本。doc/06 は /stack-research の管轄、
 #   doc/07(見積もり・スケジュール)は人の合意が源泉(/reflect-decisions が反映先。update-doc は書かない)
@@ -239,7 +243,7 @@ known_facts_ref: docs/HANDOVER.md
     - **最小**(サブエージェント機構なし): 調査・機械検証は実行者自身が直列に行えるが、独立レビューの代替にはならない。独立レビュアーを解決できないためレビュー未完了として報告し、完了承認・後続公開へ進めない
     - **外部ランナーは 3 段階と直交する任意の追加**(§7。② MCP は §7-5。有効化手段が未定のため現状は ③ のみ)。段階判定はあくまで**ホスト内蔵のサブエージェント機構**の話であり、外部 CLI レビュアーは `--runners` / `features.runners` が宣言されたときだけ編成に加える。**内蔵レビュアーを全滅させない** — `reviewer-internal` は常に維持する。外部ランナーは会話継続できないため、valid 修正後の再レビューは毎回新規起動し、起動した全レビュアーの APPROVED を得る
     - **外部 implementer(`features.implementer` 宣言時)は軸 6(走行中の STATUS 問い合わせ・前提是正・中止)が成立しない**(送達手段が無いため。待機目安 15 分の STATUS 問い合わせはホスト内蔵のサブエージェントが前提)。**差し戻しは毎回新規起動**になる(外部は会話継続できないため)。**ただし待機目安 15 分を超えても外部 implementer を再起動しない**(M1 を飛ばして M2 の再スポーンへ直行しない) — 正常に走行中の外部プロセスと新規起動が同じ作業ツリーへ同時に書き込むためで、**終了・タイムアウトによって外部プロセスが停止した後に、起動前後の比較と引き継ぎ条件の判定(`external-runners.md` §12-3・§12-7)を経て内蔵 implementer が引き継ぐ**(本実行の既定タイムアウトは待機目安より長い。値は同 §12-6)。直前の「外部ランナーは 3 段階と直交する任意の追加」は**レビュー前提の記述**であり、実装委託では**フル段階の環境でも implementer 枠だけが標準相当(一方向委託)に落ちる**ことを表現できない — implementer が外部宣言されている場合はこの縮退として扱う。判定・終了コード・機密ガードの契約は `external-runners.md` §12 が正本(**軸 6 の縮退の正本はここ**であり、解決表・契約側は参照だけを持つ)
-18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / 権威参照ファイル)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。`grasp.md` は前回要約と参照索引だけに使い、HEAD・過去レベル・累積記録を理由に現在の規約・profile・関連文書・設定・対象・依存先の読取りを省略しない。毎工程で関連領域の一次情報を読み、全リポジトリ通読は求めない。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない
+18. **キャッシュの規律**: skill が `.claude/` 配下に置く状態ファイル(把握キャッシュ `grasp.md`・レビューログ等)は揮発性キャッシュであり、次の 3 条件を必ず満たす: ①無くても全 skill の動作が同一(再計算のコストがかかるだけで、依存を作らない)②知識の正本(doc/ / メモリ / 権威参照ファイル)に無い情報を溜めない(把握中の発見は正本への反映を促す)③gitignore 対象(共有しない)。`grasp.md` は前回要約と参照索引だけに使い、HEAD・過去レベル・累積記録を理由に現在の規約・profile・関連文書・設定・対象・依存先の読取りを省略しない。毎工程で関連領域の一次情報を読み、全リポジトリ通読は求めない。「人間・他ツールが読むべき知識は doc/、Claude Code の動作状態は .claude/」の区分を崩さない(**ホストが自動で読む指示ファイル `.claude/rules/` は状態ファイルではなく commit して共有する** — §7-4)
 19. **チェックの 3 階層**: ① 静的検査(format / lint / typecheck)② 自動テスト ③ **実動確認**(実際に動かして変更フローを観察する)。①②はタスクに依存しない定型実行で /tool-check が担う。③はタスク種別に依存するため、create-task(完了条件を実行可能な確認手順として書く+task-types.md の実動確認列)と do-task(Phase 5.5)が担う。③の状態は「実施済 / 実施不能(確認を実行できない、またはユーザーが確認しないと答えた。理由付き)/ 結果待ち(ユーザーの対応を待っている)」の 3 つで、状態ごとの /do-task の完了可否と /ship-task の PR 可否は do-task の Phase 5.5 の表が正本(サイレントスキップ禁止)
 20. **git 出口の規律**: ブランチ作成・commit・push・PR 作成を能動的に行うのは `/ship-task` のみ(`/do-task` はユーザーが `--branch` 等で明示指定したときだけブランチを作る。コミットは従来どおり求められた場合のみ。**求められていないのに `/do-task` が index に触れるのは、Phase 7 で追跡済みのタスク MD を `git mv` で改名するときのリネームの stage だけ**(未追跡のタスク MD は `mv` で改名し index に触れない。どちらも commit はしない)。**外部 implementer にはこの規律が及ばない** — 外部委託は規約の外にいる実行主体を生み、機構では git 操作を止められないため、委託プロンプトでの禁止と実行後の検証〈`external-runners.md` §12-3〉で扱う)。**マージは決して行わない**。PR は品質ゲートが緑・レビューが全員 APPROVED・実動確認が「実施済」か「実施不能」(§5-19)のときだけ開き、そうでないときはブランチと commit を残して停止する。commit メッセージ規約は `git log` から推定してプロジェクトに合わせ、実装と doc は別 commit に分ける
 21. **チェーン実行時の責務分界**: 複数 skill を連鎖させる skill(/ship-task)は**工程の中身を再定義しない**。順序・工程間の続行判定・出口(git)だけを持ち、各工程の手順・品質基準は元の skill に委ねる。連鎖元から呼ばれた skill は、ユーザーへの次アクション提案(チェーン提案)を出さない(呼び出し元が判断するため)
@@ -319,7 +323,7 @@ done | sort -k2 -rn
   - **なぜセッション初回に明示承認を要るか**(決定 4): 書き込み委託は「リポジトリを書ける者が、外部に書かせる設定を仕込める」状態を作るため、既定表にある名前でも実行は宣言だけでは行わない。MCP 宣言(§7-6)と同型の「profile に書いてある = 承認済みとは扱わない」を踏襲する
   - **なぜ走行中失敗を内蔵へ自動で引き継ぐか**(決定 5): 完走を優先し、ユーザーの git 状態を書き換える巻き戻しは採らない。起動前の失敗は縮退して報告し、走行中の失敗は残った変更を捨てずに内蔵 implementer が引き継ぐ(サイレント禁止)
 
-### 7-3. 前提とする外部事実(出典・確認日 2026-09-08、一部 2026-09-09)
+### 7-3. 前提とする外部事実(出典・確認日 2026-09-08、一部 2026-09-09。以降の確認・訂正は行ごとに併記)
 
 §7 が依存する外部事実。前提が崩れたら該当箇所は無効になるため出典を残す。
 
@@ -328,7 +332,11 @@ done | sort -k2 -rn
 | Codex は `.agents/skills` / `$HOME/.agents/skills` / `/etc/codex/skills` から SKILL.md を読む。frontmatter は `name` + `description` 必須。agentskills.io の開標準に準拠 | [Build skills — ChatGPT/Codex 公式ドキュメント](https://learn.chatgpt.com/docs/build-skills) | 7-1 |
 | Cursor は `.cursor/skills/` または `.agents/skills/` から SKILL.md を読み、`/skill-name` で起動できる | [Cursor Agent Skills(learncursor.dev)](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills) | 7-1 |
 | Codex は 2026-03-14 に subagents を GA(最大 8 並列・`~/.codex/agents/` の TOML・エージェントごとにモデル指定可) | [Use subagents and custom agents in Codex — Simon Willison](https://simonwillison.net/2026/Mar/16/codex-subagents/) | 7 |
-| Claude Code は `CLAUDE.md` を読み `AGENTS.md` は読まない。既存の AGENTS.md がある場合は「それを import する CLAUDE.md を作る」が公式の案内。`@path` import は公式機能(相対・絶対パス可・最大 4 段)。symlink も可だが **Windows では管理者権限か開発者モードが必要**なため import が推奨。CLAUDE.md は 200 行以内が目安、4 MiB 超はスキップ、import 先も起動時に全量ロード | [How Claude remembers your project](https://code.claude.com/docs/en/memory) | 7-4 |
+| **Claude Code は v2.1.277 以降、`AGENTS.md` を直接読む**(CLAUDE.md・import・設定なしで動く。**2026-09-21 確認。2026-09-09 時点の「読まない」から変わった**)。ただし既定(`claude-md-or-agents-md`)では、作業ディレクトリ**またはその上位**に `CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md` のいずれかがあると、**直読みせず CLAUDE.md 系だけを読む**(その CLAUDE.md が `@AGENTS.md` を import していれば、`AGENTS.md` は import 経由で読まれる)。`~/.claude/CLAUDE.md`・組織の managed CLAUDE.md・`.claude/rules/` は**この判定に数えられず**、`AGENTS.md` と併せて読まれる。直読みで読むのは作業ディレクトリと上位の `AGENTS.md` / `.claude/AGENTS.md`(サブディレクトリの `AGENTS.md` は、そこに CLAUDE.md 系が無ければ Read 時に遅延読み込み)。`AGENTS.local.md` / `AGENTS.override.md` / `.agents/` 配下は読まない。**既定値のもとで**直読みした対話セッションには `no CLAUDE.md found; AGENTS.md loaded: <path>` のような行が出る(公式はこの確認方法を既定値に限定している。他の設定値では Claude に指示内容を尋ねて確認する) | [How Claude remembers your project — AGENTS.md](https://code.claude.com/docs/en/memory#agents-md) | 3, 7-4 |
+| **Claude Code が `AGENTS.md` を直読みできないセッションがある**: v2.1.277 未満 / feature flag を取得しないセッション(Amazon Bedrock 等の第三者プロバイダ・telemetry 無効など。全条件は公式のリンク先)/ 対応版へのインストール・アップグレード直後の初回セッション / `disableAllHooks`・`allowManagedHooksOnly` の設定 / 内蔵 `agents-md` プラグインの無効化。このとき CLAUDE.md 系だけを読み、`AGENTS.md` は読まれない(**出典ページに警告表示の記載は無い**。これらのセッションでは `/config` に **Project instructions** の項目自体が出ず、それで判別できる。このセッションでの `.claude/rules/` の扱いは出典ページに明記なし)。公式の対処は CLAUDE.md からの `@AGENTS.md` import | 同上(2026-09-21 確認) | 7-4 |
+| Claude Code の読み込み対象は **Project instructions** 設定で切り替える(`claude-md-or-agents-md` 既定 / `claude-md-and-agents-md` = 両方を読む / `claude-md` / `managed-only`)。`/config`・`~/.claude/settings.json`・`--settings`・managed settings でのみ効き、**プロジェクト設定・ローカル設定に書いても無視される**(リポジトリ側から切り替えを強制できない) | 同上(2026-09-21 確認) | 3, 7-4 |
+| Claude Code が直読みした `AGENTS.md` は CLAUDE.md と次の点で違う: `/memory` と `/context` の一覧に出ない / `InstructionsLoaded` hook が発火しない(CLAUDE.md が import・symlink する `AGENTS.md` では従来どおり発火する)/ `CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD` を設定して `--add-dir` したディレクトリの `AGENTS.md` は読まれない(CLAUDE.md は読まれる)/ 作業ディレクトリ外への `@path` import は承認済みのときだけ読まれる(確認は出ない)。`@AGENTS.md` を import する CLAUDE.md は**残してよく、設定値に関わらず二重読みは起きない**(公式: 他に内容が無ければ削除可。直読みできないセッションがあるなら残す) | 同上(2026-09-21 確認) | 7-4 |
+| Claude Code の `@path` import は公式機能(相対・絶対パス可・最大 4 段。`AGENTS.md` の中でも展開される)。**相対パスは import を書いたファイルの位置から解決される**(したがって `.claude/CLAUDE.md` に書いた `@AGENTS.md` は `.claude/AGENTS.md` を指し、ルートの `AGENTS.md` を指すには `@../AGENTS.md` になる — 公式の記述からの導出・未実測)。symlink も可だが **Windows では管理者権限か開発者モードが必要**なため import が推奨。CLAUDE.md は 200 行以内が目安、4 MiB 超はスキップ、import 先も起動時に全量ロード | [How Claude remembers your project](https://code.claude.com/docs/en/memory)(2026-09-09 確認・2026-09-21 再確認) | 3, 7-4 |
 | Codex は AGENTS.md をネイティブに読む。グローバル `~/.codex/AGENTS.md` → プロジェクトルート(通常は Git ルート。見つからなければ cwd のみ)から cwd まで。各階層で `AGENTS.override.md` → `AGENTS.md` → `project_doc_fallback_filenames` の順。root から下へ連結し近い方が上書き | [Custom instructions with AGENTS.md](https://learn.chatgpt.com/docs/agent-configuration/agents-md) | 7-4 |
 | Codex は連結後の合計が `project_doc_max_bytes`(既定 32 KiB・設定で変更可)に達すると、以降のファイルを追加しない。公式の対処は上限を上げるか入れ子へ分割 | 同上 | 7-4 |
 | Cursor は AGENTS.md をプロジェクトルートとサブディレクトリで読む。位置づけは `.cursor/rules` の**簡易な代替**。入れ子は親と結合し、より具体的な方が優先 | [Rules \| Cursor Docs](https://cursor.com/docs/rules) | 7-4 |
@@ -346,20 +354,26 @@ done | sort -k2 -rn
 | **`git hash-object` のクリーンフィルタ(`.gitattributes` の `text` / `eol`、`core.autocrlf`)はリポジトリ内でのみ適用される**。退避先で素朴に計算すると同一バイト列でも値が変わり改竄ゼロでも不一致になる。**だから git のハッシュを使わず生バイトハッシュ(`sha256sum` 相当)を使う**(決定 39。リポジトリ内でも退避先でも同じ値になり、クリーンフィルタで消える変更も検出できる) | ローカル実測(2026-09-17・git 2.55.0) | 7-2 |
 | **実効サンドボックスモードは argv とヘルプだけでは確定できない**(config / permission profile / managed config で上書きされうる)。ローカルの `~/.codex/config.toml` が `sandbox_mode = "danger-full-access"` だった | ローカル実測(2026-09-17・codex-cli 0.153.4) | 7-2 |
 | **Codex** の `codex exec` は `--output-schema <FILE>`(final response の JSON Schema)を持つ。既定表では採用しない(理由は external-runners.md §4) | ローカル実測(2026-09-18・codex-cli 0.153.4) | 7-2 |
+| **Claude Code の `AGENTS.md` の直読みと `.claude/rules/` の読み込みは併存する**(実測)。上位に CLAUDE.md 系が無い clone で対話セッションを起動すると `agents-md: no CLAUDE.md found; AGENTS.md loaded: <path>` の行が出て、**同じセッションで** `AGENTS.md` と `.claude/rules/claude-code.md` の双方に入れた乱数の合言葉を、ツール呼び出し無しで出所つきで即答した。**未解明**: 同じ clone の 1 回目のセッションでは `AGENTS.md loaded` の行が出ず(rules の合言葉には答えた)、`AGENTS.md` を書き換えた後の 2 回目で出た。原因は特定していない | ローカル実測(2026-09-22・Claude Code v2.1.278・既定値) | 7-4 |
 
 **検証済みの範囲**: 実ホスト(Codex / Cursor)での **SKILL.md の読み込み・動作を確認済み**(2026-09-11、ユーザーによる実環境での確認報告)。**CLI ランナーとしての疎通は両 CLI で実測済み**(2026-09-09: codex 0.153.4 を導入・cursor-agent は認証済みで実レビューを取得)。**Codex のエージェント定義本体の置き場所**は公式に明記が無い(上記の `~/.codex/agents/` の TOML がこれにあたると見られるが**未確認**)。
 
 ### 7-4. 権威参照ファイル(AGENTS.md)
 
-**正本は `AGENTS.md`**。Claude Code は AGENTS.md を読まないため、`CLAUDE.md` は `@AGENTS.md` の import で橋渡しする(事実と出典は §7-3)。
+**正本は `AGENTS.md`、標準構成は `AGENTS.md` のみ**。Codex / Cursor に加えて Claude Code も `AGENTS.md` を直接読むようになったため(v2.1.277 以降。事実と出典は §7-3)、`CLAUDE.md` による橋渡しを標準構成から外した(2026-09-22)。
 
 | ホスト | AGENTS.md | 経路 |
 |---|---|---|
 | Codex | ネイティブに読む | そのまま |
 | Cursor | ネイティブに読む | そのまま。`.cursor/rules` は生成しない(併存できるが実体を 1 つに保つ) |
-| Claude Code | **読まない** | `CLAUDE.md` の `@AGENTS.md` import で橋渡し |
+| Claude Code | **直接読む**(作業ディレクトリまたはその上位に CLAUDE.md 系が無いとき。§7-3) | そのまま。互換形では `CLAUDE.md` の import 経由で読む(互換形を使う場面は下の運用) |
 
-**なぜ import か**(symlink・CLAUDE.md 正本・複写を採らない理由):
+**正常な構成は 2 つ**(検出とドリフト判定の手順は §3):
+
+- **完成形**: `AGENTS.md` のみ(`CLAUDE.md` を持たない)
+- **互換形**: `AGENTS.md` + `@AGENTS.md` を import する `CLAUDE.md`(import の下にホスト固有の追記を持つものを含む)。v3.9.0〜v4.2.0 の標準構成であり、直読みできない環境の橋渡しでもある。二重読みも欠落も起きないため **skills は警告しない**
+
+**正本の選択と、互換形の橋渡しに import を使う理由**(symlink・CLAUDE.md 正本・複写を採らない理由。2026-09-09 から変更なし):
 
 - **symlink**: Windows では管理者権限か開発者モードが必要(Claude Code 公式が import を推奨)。コピーを伴う配布・チェックアウトでは実体化されて意図が崩れる(本リポジトリでも review-agent.sh の配布で同型の問題を踏んだ)
 - **CLAUDE.md を正本にする**: Codex 側に import 構文があるか未確認
@@ -368,11 +382,17 @@ done | sort -k2 -rn
 **運用**:
 
 - **サイズ**: 権威参照ファイルは**最も厳しいホストの上限**(現状 Codex の `project_doc_max_bytes` 既定 32 KiB。実値と出典は §7-3)に収まるよう薄く保つ
-- **生成既定**: `/init-project` が生成する `CLAUDE.md` は `@AGENTS.md` の import 1 行とする。ホスト固有の追記が必要になったら import の下に書く(Claude Code 公式が示す構成)。ただし **`CLAUDE.md` への追記は Cursor CLI にも読まれる**(§7-3)ため、他ホストで有害・無意味になる指示は書かない
-- **Cursor CLI と CLAUDE.md**: Cursor CLI は CLAUDE.md も読む(事実)。ただし `@path` import を展開する記載は Cursor 側に無く(**未検証**)、展開しなければ CLAUDE.md は `@AGENTS.md` の 1 行のみで**内容は重複しない**
-- **既存プロジェクトの移行**: `/init-project` は既存 `CLAUDE.md` を検出したら AGENTS.md への移行を提案し、**承認を得てから**実行する。**他ツール・CI が `CLAUDE.md` を直接参照している場合に壊れるため、移行提案時にその確認を挟む**。これは `/init-project` の「既存を壊さない」原則(`init-project/SKILL.md`)に対する、**ユーザーの明示承認を条件とする例外**である
+- **生成既定**: `/init-project` は `AGENTS.md` のみを生成する。既に `AGENTS.md` だけがあるプロジェクトにも `CLAUDE.md` を足さない
+- **ホスト固有の指示の置き場**: `AGENTS.md` には他ホストでも通じる記述だけを置く。Claude Code 固有の指示は `.claude/rules/*.md`(**既定のファイル名は `claude-code.md`**。決定 13)に置く(直読みを止めず、併せて読まれる — 既定値のもと。§7-3。**併存は 2026-09-22 に実機で確認した**〈Claude Code v2.1.278・既定値・上位に CLAUDE.md 系が無い clone。`AGENTS.md loaded` の行と、両ファイルに入れた乱数の合言葉の即答で確認〉)。`.claude/rules/` はホストが自動で読む**指示ファイル**であり、commit して共有する — §5-18 の状態ファイル(揮発性キャッシュ・gitignore 対象)には当たらない。skills がここを読取り・同期の対象外とする(§3)のは、ホストが自動で読むうえ、skill 本文のホスト結合を増やさないため。承知した欠点: rules 内のコマンドが陳腐化しても `/update-doc` では拾えない
+- **互換形と Cursor CLI**: Cursor CLI は CLAUDE.md も読む(§7-3)ため、互換形の `CLAUDE.md` に他ホストで有害・無意味になる指示は書かない。`@path` import を展開する記載は Cursor 側に無く(**未検証**)、展開しなければ import 1 行の `CLAUDE.md` は**内容が重複しない**
+- **導入済みプロジェクト(互換形)の移行**: **`/init-project` だけが、承認制で完成形への移行を提案する**(他の skill は提案しない)。import のみの `CLAUDE.md` は削除、import + 追記の `CLAUDE.md` は追記を `.claude/rules/` へ移してから削除、**ルートの `AGENTS.md` への symlink の `CLAUDE.md` はリンクの削除だけを行う**(移す内容は無い。決定 16)。**それ以外のファイルへの symlink は解決先の内容に応じて上の 2 分岐に従い、リンク先は書き換えない**。削除の前に「直読みできない環境で使う人がいないか」を確認し、いれば残す(`CLAUDE.md` への外部参照があるときは、下の「移行の規律」の提示を経てユーザーが判断する)
+- **未移行プロジェクト(`CLAUDE.md` のみ)の移行**: `/init-project` は既存 `CLAUDE.md` を検出したら AGENTS.md への移行を提案する。移行後の既定は完成形(記述を `AGENTS.md` へ移して `CLAUDE.md` を削除。Claude Code 固有の記述だけ `.claude/rules/` へ)。直読みできない環境で使う人がいる、または `CLAUDE.md` への外部参照(他ツール・CI)があるときだけ、互換形を選べる。互換形を選んだときも、Claude Code 固有の記述は `.claude/rules/` へ移す(`CLAUDE.md` は import 1 行になる。この規則は移行で作る互換形に適用し、既存の互換形の扱いは上の定義のまま。**直読みできない環境でも `.claude/rules/` が読まれることは公式記載からの推定で未実測** — 決定録の「実装時の確認事項」)
+- **移行の規律**(上の 2 つに共通): ユーザーの**明示承認**を得てから実行し、**`--yes` でも省略しない**。**他ツール・CI が `CLAUDE.md` を直接参照している場合に壊れるため、移行提案時に参照の一覧を提示する**。**import を持たない他の CLAUDE.md 系(`CLAUDE.local.md` / `.claude/CLAUDE.md`)がルートに残り、削除後の最終状態が §3 のドリフト判定に当たるなら、承認前に警告する。当たらなくても残るファイルの一覧は提示する。残るファイルには書き込まない**(決定 15)。これは `/init-project` の「既存を壊さない」原則(`init-project/SKILL.md`)に対する、**ユーザーの明示承認を条件とする例外**である
+- **直読みできない環境**: 検出はせず**案内のみ**。`/init-project` の完了報告と `AGENTS.md` テンプレート冒頭に、直読みの確認方法と互換形の作り方を書く(確認方法の事実と限定は §7-3)。dev-workflow のフローでは `/understand-project` が権威参照ファイルを必ず Read するため、欠落するのは skills を通さない素のセッションに限られる
+- **版**: この改訂への追従は **v4.3.0** で出す。マイナーでの旧値廃止(§4 の `source_of_truth`)は §8 の「後方互換な機能追加はマイナー」と緊張するが、影響範囲の小ささ(旧値を持つのは超小規模構成の profile のみ)を理由に承知の上で選択した(§8 の基準は変えない)
+- **実装状況**(一時的な注記): 構成の一本化(Issue #82)の完了により §2・§3・本節の 2026-09-22 改訂への skill 本文・テンプレートの追従は済んだ。残るのは**§4(`source_of_truth` の値名)の追従だけ**: 配布中の skill は旧値名 `claude-md` しか知らず、新しい値名 `agents-md` には未対応 — 値名の改名・不正値の停止は Issue #83 で行う。**profile の値の置換は v4.3.0 への更新と同時に行う**。追従が済んだら、この項と §4 コメント内のこの項への参照を削除する
 
-出典: `docs/minutes/2026-09-09_壁打ち_AI非依存の開発基盤.md`(決定 5・6・13、派生判断 17・18)
+出典: `docs/minutes/2026-09-09_壁打ち_AI非依存の開発基盤.md`(決定 5・6・13、派生判断 17・18)/ `docs/minutes/2026-09-21_壁打ち_権威参照ファイルの一本化.md`(決定 1〜6・8〜13・15・16 と帰結。決定 4・16 の反映先は §3、決定 8・9 は §4。2026-09-09 決定 5 の後半を変更)
 
 ### 7-5. 委託の解決(どのバックエンドで実行するか)
 
@@ -423,7 +443,7 @@ done | sort -k2 -rn
 - **単位**: 基盤(解決表 + §6 の規約)を先に入れ、その後は skill 単位で移行する
 - **順序**: 本文のホスト結合が多い skill から。量は §7 の測定コマンドで着手時に測り直す(語彙の選び方で数値が変わるため、順序を固定列として持たない。現行の測定コマンドは `.claude/` 等を含む広い語彙だが、順序の目安はこれで足り、検査と到達条件は下の「委託の語」で判定する)。決定時点の測定(決定録。範囲・語彙の明記は無い)では init-project が最多、§7 のコマンド(SKILL.md のみ・9 トークン)では do-task が最多
 - **委託の語**: 移行の対象・検査・到達条件で使うホスト固有語は `Agent` / `SendMessage` / `ListAgents` / `Explore` / `general-purpose` / モデルエイリアス。**`.claude/` 配下の状態ファイルは別論点(未決)**であり、この語彙に含めない
-- **検査範囲**: 各 skill の **skill 直下のファイル(画像を除く)・`references/` 配下・`scripts/` 配下**(`SKILL.md` と `references/` は 2026-09-09 のユーザー判断、`scripts/` と skill 直下への拡張は 2026-09-10 の追加)。**skill 直下を `SKILL.md` に限定しない**のは、`README.md` のようなレイアウト外のファイルに委託の語を置くと到達条件をすり抜けるため。`SKILL.md` だけを対象にすると、references に残るホスト結合(実測で `do-task/references/review-protocol.md` に 18 箇所)が到達条件をすり抜け、v4.0.0 に達してもホスト結合が残る。**`scripts/` を加える理由**: `scripts/` はモデル名を `--model` 引数と `{model}` プレースホルダで外から受け取る設計で、ホスト内蔵の委託機構(`Agent` / `SendMessage` / `ListAgents` / `Explore` / `general-purpose`)は shell / python から呼べないため、呼び出しとして現れることはない(実測 0 件)。スクリプトがホスト内蔵機構との関係を説明する必要が生じた場合は、`external-runners.md`(除外 2 本の 1 つ)を参照する形にし、スクリプト側で機構名を再掲しない — **正当な必要は参照で満たす**のであり、再掲は §7-2 の複写にあたる。**拡張子の扱いは非対称**: **`references/` は design がドキュメント専用と定めたディレクトリで**ファイル集合が閉じているのでホワイトリスト(`.md`)で絞れる一方、**`scripts/` は任意言語のコードが入り**ファイル集合が開いているのでブラックリスト(画像だけ除外)しか成立しない。副理由として、`references/` の `.md` 限定は #7 が定めた `.bak` 退避イディオムの治具を巻き込まないためでもある。**`templates/` 配下は対象外**とし、理由は 3 ファイルそれぞれ次のとおり — `project-profile.yml.template` は **profile こそがモデルエイリアスの置き場**である(§3)/ `AGENTS.md.template` は**利用者プロジェクトへ生成される成果物**であって skill 本文ではない(**検査の管轄外という意味であり、ホスト固有語を持ってよいという意味ではない。生成物は複数ホストから読まれる(§7-3 の実測)ため、2026-09-10 に役割語と能力の記述へ移行済み。⚠ 生成先に解決表は無いので、skill 本文の移行と違って解決表を参照せず能力で書く**) / `specialist-agent.md.template` は **Claude Code 固有のエージェント定義 frontmatter そのもの**で、ホスト非依存化は §7-6 の管轄であり本節の語彙とは別論点
+- **検査範囲**: 各 skill の **skill 直下のファイル(画像を除く)・`references/` 配下・`scripts/` 配下**(`SKILL.md` と `references/` は 2026-09-09 のユーザー判断、`scripts/` と skill 直下への拡張は 2026-09-10 の追加)。**skill 直下を `SKILL.md` に限定しない**のは、`README.md` のようなレイアウト外のファイルに委託の語を置くと到達条件をすり抜けるため。`SKILL.md` だけを対象にすると、references に残るホスト結合(実測で `do-task/references/review-protocol.md` に 18 箇所)が到達条件をすり抜け、v4.0.0 に達してもホスト結合が残る。**`scripts/` を加える理由**: `scripts/` はモデル名を `--model` 引数と `{model}` プレースホルダで外から受け取る設計で、ホスト内蔵の委託機構(`Agent` / `SendMessage` / `ListAgents` / `Explore` / `general-purpose`)は shell / python から呼べないため、呼び出しとして現れることはない(実測 0 件)。スクリプトがホスト内蔵機構との関係を説明する必要が生じた場合は、`external-runners.md`(除外 2 本の 1 つ)を参照する形にし、スクリプト側で機構名を再掲しない — **正当な必要は参照で満たす**のであり、再掲は §7-2 の複写にあたる。**拡張子の扱いは非対称**: **`references/` は design がドキュメント専用と定めたディレクトリで**ファイル集合が閉じているのでホワイトリスト(`.md`)で絞れる一方、**`scripts/` は任意言語のコードが入り**ファイル集合が開いているのでブラックリスト(画像だけ除外)しか成立しない。副理由として、`references/` の `.md` 限定は #7 が定めた `.bak` 退避イディオムの治具を巻き込まないためでもある。**`templates/` 配下は対象外**とし、理由は 3 ファイルそれぞれ次のとおり — `project-profile.yml.template` は **profile こそがモデルエイリアスの置き場**である(§3)/ `AGENTS.md.template` は**利用者プロジェクトへ生成される成果物**であって skill 本文ではない(**検査の管轄外という意味であり、ホスト固有語を持ってよいという意味ではない。生成物は複数ホストから読まれる(§7-3 の実測)ため、2026-09-10 に役割語と能力の記述へ移行済み。直読みの案内(§7-4)は明示的な例外。⚠ 生成先に解決表は無いので、skill 本文の移行と違って解決表を参照せず能力で書く**) / `specialist-agent.md.template` は **Claude Code 固有のエージェント定義 frontmatter そのもの**で、ホスト非依存化は §7-6 の管轄であり本節の語彙とは別論点
 - **検査対象外ファイル(ここが正本)**: [`do-task/references/delegation-map.md`](../plugins/dev-workflow/skills/do-task/references/delegation-map.md)(解決表)と [`do-task/references/external-runners.md`](../plugins/dev-workflow/skills/do-task/references/external-runners.md) の **2 本**。**ホスト固有の解決を持つことがそのファイルの役割**であるため。ファイル側の自己申告は補助に留め、**判別の正本はこの除外集合**とする(自己申告マーカーは検査が判別できる契約にならず、判別規則が設計書に残らない)。`external-runners.md` の該当 2 箇所は ③ CLI と ① 内蔵の相互作用を説明する契約本文であり、役割語化すると意味を失う。この除外集合が無いと下の到達条件(references もゼロ)は到達不能になる。**除外の不変条件**: 解決表は委託の語の検査対象外だが、**モデルエイリアス名だけは自ら 0 件に保つ**(§3 の「解決表はエイリアスの一覧を持たず、指定方法だけを持つ」)。この不変条件は `scripts/validate.py` の機械検査で保つ
 - **語彙の限界**: モデルエイリアス 4 語は**単語境界を持たない部分一致**なので、英単語の一部(`affable` / `opuscule` / `sonnets` 等)で**誤検出しうる**。単語境界を付けない理由は、**日本語文字が `\w` に含まれるため `\bopus\b` が『モデルはopus』を取りこぼす**(偽陰性 = 到達条件をすり抜ける危険側)一方、**誤検出は ERROR で落ちる安全側**であること。誤検出が出たら**その語を書き換えるか除外集合に足す**(行単位の免除規則は持たない)。あわせて**大文字小文字を区別する**ため、大文字で書かれた同種の衝突(`Agent` を含む文書名など)は素通りしない。実測(2026-09-10): `IGNORECASE` にすると `SKILL.md` の件数は **73 → 75**(増分 2 件は `init-project/SKILL.md` の概念語 `specialist agent` とファイル名 `specialist-agent.md.template`)
 - **退行防止は機械検査とレビュー観点の両方**(理由は下の「なぜそうするか」): `scripts/validate.py` が**全 skill の `SKILL.md`・`references/`・`scripts/` を検査し、未移行 skill を許容リストで除外する**(2026-09-10 のユーザー判断。許容リストは `scripts/validate.py` が持つ。自己申告マーカーではない。未移行 skill = 許容リストに載っている skill。上の除外集合と `templates/` は検査対象から外す)。移行のたびに許容リストから削る。削り忘れは `scripts/validate.py` の逆検査が WARN で知らせる。あわせてこのリポジトリの skill 変更レビューの観点に「ホスト結合の混入」を加える(§6)

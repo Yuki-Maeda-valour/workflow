@@ -10,7 +10,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 1. **実コード裏取り**。ドキュメントに書く内容は必ず実コード・実設定で確認する。前のドキュメントからの転記や推測で書かない
 2. **カテゴリ別の正本を守る**。コード理解系(概要・構造・技術・規約・コマンド)の正本は profile の `source_of_truth` に従う。**要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は、設定に関わらず常に doc/ が正本**。`doc/06_stack-notes.md` は /stack-research、`doc/07_plan.md`(見積もり・スケジュール)は /reflect-decisions の管轄 — このスキルはどちらも**読むだけで書き換えない**(依存が変わっていたら /stack-research --update、計画の変更は /reflect-decisions を案内する)
-3. **薄い権威参照ファイル**。正本は `AGENTS.md`(無ければ未移行の `CLAUDE.md`)。要点+参照の薄型を維持し(最も厳しいホストの上限 32 KiB 以内)、詳細は正本(メモリまたは doc/)に置く。`CLAUDE.md` が `@AGENTS.md` の import で橋渡ししている構成では、**`CLAUDE.md` に内容を複写せず `AGENTS.md` 側だけを更新する**(design §7-4)
+3. **薄い権威参照ファイル**。正本は `AGENTS.md`(無ければ未移行の `CLAUDE.md`)。要点+参照の薄型を維持し(最も厳しいホストの上限 32 KiB 以内)、詳細は正本(メモリまたは doc/)に置く。`CLAUDE.md` が `@AGENTS.md` を import する**互換形**では、**`CLAUDE.md` に内容を複写せず `AGENTS.md` 側だけを更新する**(design §7-4)
 4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲートは実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
 5. 機密ファイルの値をドキュメントに書かない(存在と用途だけ記す)
 6. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
@@ -70,7 +70,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 2. **監査(全量監査モードのみ)**: 次の 3 点も検出する
    - 未管理: 実態に存在するがどのドキュメントにも書かれていない重要事項
    - 内容乖離: ドキュメント間(メモリ vs 権威参照ファイル vs doc/)の矛盾
-   - **権威参照ファイルのドリフト**: `AGENTS.md` と `CLAUDE.md` が両方あるのに `CLAUDE.md` が `@AGENTS.md` を import していない(= 内容が二重管理になっている)。**判定ではコードブロック内・インラインコード内に現れる `@AGENTS.md` を import とみなさない**(Claude Code の import パース仕様。素朴な文字列一致では import を説明しているだけの記述を誤検出する)
+   - **権威参照ファイルのドリフト**: [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」に従う(`AGENTS.md` が読まれない構成の検出)。**reference に到達できない構成では、この検査を無効化して報告する**(design §6。外部ランナーの縮退と同じ書式)
    - 参照切れ: ドキュメントが指すパス・ファイルの不存在
 3. `--analyze-only` はここで報告して終了(更新推奨リスト+本実行の案内)
 
@@ -118,6 +118,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 - [ ] `doc/06_stack-notes.md`・`doc/07_plan.md` を書き換えていない(依存変更は /stack-research、計画変更は /reflect-decisions を案内した)
 - [ ] 備考「実装未追従」の `[決]` 行を巻き戻し・削除・昇格していない
 - [ ] 権威参照ファイルを肥大化させていない(詳細は正本へ。32 KiB 以内)。import 1 行の `CLAUDE.md` に内容を書き足していない
+- [ ] 全量監査では権威参照ファイルのドリフトを検出したら注記したか(reference に到達できない場合は無効化を報告したか)
 - [ ] 機密値を書いていない。ソースコードを変更していない。リンク検査を実行した
 
 ## 関連スキル
