@@ -34,7 +34,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **1. 新規 / 既存 / 再実行の判定**
 - ソースファイル数・`package.json` 等のマニフェスト有無・`.git` 有無を確認する。
 - マニフェストもソースもほぼ無い → **新規**(テンプレの雛形をそのまま出す)。コードがある → **既存**(検出値でテンプレを埋め、権威参照ファイルは差分提案に切り替える)。
-- profile に `workflow_version` が既にある → **再実行(アップデート)モード**: 現在の標準構成テンプレ一式と既存物を突合し、**新標準で増えた・変わった項目だけ**を差分提案する(既存の記述・過去に回答済みの選択は変えない)。完了時に `workflow_version` を現バージョンへ更新する。
+- profile に `workflow_version` が既にある → **再実行(アップデート)モード**: 現在の標準構成テンプレ一式と既存物を突合し、**新標準で増えた・変わった項目**を差分提案する(既存の記述・過去に回答済みの選択は変えない。**ただし profile の値が `{{...}}` の形の項目は「過去の選択」ではなく置換漏れとして扱い、再実行モードでも差分提案に含める** — Phase 3-2。`AGENTS.md` の `{{...}}` は Phase 1-4 のとおり意図的に残るので対象にしない)。完了時に `workflow_version` を現バージョンへ更新する。
 
 **2. 技術スタック・パッケージマネージャ**(design 3 層の「動的検出」)
 - PM: `package.json` の `packageManager` フィールド → lockfile(`pnpm-lock.yaml` / `bun.lock*` / `yarn.lock` / `package-lock.json`)→ 既定 `npm`。PHP は `composer.json`、Python は `pyproject.toml` / `requirements.txt`、Go は `go.mod`、Rust は `Cargo.toml`。
@@ -55,6 +55,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **権威参照ファイルの状態を、ルートの `AGENTS.md` × `CLAUDE.md` の 4 通りに分類する**(design §3 の検出順): ① どちらも無い ② `AGENTS.md` のみ(完成形)③ `CLAUDE.md` のみ(未移行)④ 両方。
 - ④ のときは、**ルートの `CLAUDE.md` 自身**に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(1) import の判定」を当てる(**(2) のドリフト判定は使わない** — 使うと、import を持たない中身入りの `CLAUDE.md` と import を持つ `CLAUDE.local.md` がある構成まで互換形に分類してしまう)。import あり(symlink を含む)= 互換形、import なし = そうでない、に分ける。**参照先に到達できない構成(skill 単体のコピー)では、この分岐だけ「import の有無を判定できない」と報告する**(① 〜 ③ の分類は reference 無しで動く)。**この場合は追記提案だけを行い、経路 a の提案とルートの `CLAUDE.md` への import 行の追加の提案は、どちらも見送る**(design §6 の縮退)。
 - ③ のときは、**他ツール・CI が `CLAUDE.md` を直接参照していないか**を調べて控える(Phase 3-1 の移行提案で提示する)。④-互換形のときも同様に調べる(経路 a の提案に含める)。`grep -rn 'CLAUDE\.md' --exclude-dir=.git .` 相当で CI 設定・スクリプト・README・ドキュメント・エディタ設定を横断する。
+- 既存の `.claude/project-profile.yml` に `{{...}}` の形の値が残っているときは(**判定はコメント行〈`#` 始まり〉を除いた値について行う** — 利用者が書き足したコメントに例示として現れても誤検知しないため。テンプレート由来のコメントには現れない〈テンプレート冒頭の注記〉)、**次の停止規則を判定する前に**、テンプレートの置換が完了していない可能性を、残っている項目名を挙げて報告する。**判定はファイルをテキストとして行う**(引用符の無い `{{...}}` は YAML としてパースできないため、パースを前提にすると最も典型的な置換漏れを検出できない)。報告だけで停止はしない。対処は Phase 3-2 の差分提案で埋める(`{{...}}` の項目は未設定項目として扱う)。ただし **`source_of_truth` 自体が `{{...}}` のときは次の停止規則で止まる**ので、その値だけは先に手で直すか、profile を退避してから再実行する必要があることを添える(再実行を促すだけでは報告と停止を繰り返す)。
 - 既存の `.claude/project-profile.yml` があり `source_of_truth` に値があるとき(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもなければ、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない。新規プロジェクト・profile なし・項目なし・値が空は対象外で、停止しない)。
 
 **6. MCP の利用可否**
@@ -66,8 +67,8 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - Serena が使用可能で `.serena/memories/` がある場合、`list_memories` で実在メモリを列挙し、汎用カテゴリ(overview / structure / tech / commands / conventions / completion)への対応を名前の意味から推定する(命名揺れの吸収)。Phase 3 の profile 生成で `memory_map` の提案に使う。
 
 **8. タスク保存先の解決**
-- profile を生成する前に [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従い、`<root>` を管理プロジェクトルートとして保存先を解決する。既存 profile の `task_dir` はホスト側で型を検証し、キー欠落・null のときだけ未指定として検出へ進む。不正値・複数候補では生成を停止して選択を求める
-- 解決した相対パスを `TASK_DIR` として以降の profile・AGENTS.md・運用文書・`.gitkeep` で一貫して使う。既存 profile は上書きせず、不足する `task_dir` の追記案を提示する
+- profile を生成する前に [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従い、`<root>` を管理プロジェクトルートとして保存先を解決する。既存 profile の `task_dir` はホスト側で型を検証し、キー欠落・null・**値が `{{...}}` の形**のときは未指定として検出へ進む(`{{...}}` は正本の優先順位 2 では文字列として通るため、これは **init-project 固有の上乗せ**。そのまま保存先にすると、その名前のディレクトリを実際に作ってしまう)。不正値・複数候補では生成を停止して選択を求める
+- 解決した相対パスを `TASK_DIR` として以降の profile・AGENTS.md・運用文書・`.gitkeep` で一貫して使う。既存 profile は上書きせず、不足する(または値が `{{...}}` の)`task_dir` の補完案を提示する
 
 検出結果(新規/既存・PM・スタック・構成・品質コマンド・既存物・タスク保存先・MCP)を短く提示してから Phase 2 へ進む。
 
@@ -158,7 +159,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - `{{QUALITY_BLOCK}}` は検出した品質コマンドを 2 スペースインデントの `key: value` で列挙(例 `  format: pnpm format`)。build はロジック依存が薄いプロジェクトなら `build_optional: true` を添える。検出ゼロなら `{}` にして自動検出へ委ねる旨のコメントを残す。
 - **`{{MCP_SERVERS_BLOCK}}`**(参考実装: `{{QUALITY_BLOCK}}`)は Phase 2 の起点質問・ブラウザ分析の質問で承認された `mcp_servers` 宣言を埋め込む。**承認された宣言が無い既定では、`features` ブロックと同じ全行コメントの例示**(`# mcp_servers:` 以下に `<id>: {command, args}` の書き方を示すコメント行)を出す。**承認された宣言があれば、コメントではない有効な YAML** として `mcp_servers:` 以下に `<id>` ごとの `command` / `args` を書く。この置換の実行順序は Phase 3-7 の「1 回の実行内の順序」に従う(先に profile へ書き込み、その profile を Read して Phase 3-7 が 2 形式を生成する)。
   - **⚠ 注入する YAML の引用形**: **フロースタイルで、`command` / `args` の要素は必ずシングルクォート `'…'` で囲む**(例: `'serena': {command: 'uvx', args: ['--from', 'C:\path\mcp.exe']}`)。値に `'` が含まれる場合は `''` に二重化する。**ダブルクォートは使わない** — YAML のダブルクォートは JSON と同様にエスケープ処理をするため、`C:\path\mcp.exe` のような Windows パスを含む宣言が `ScannerError` になる(シングルクォートはエスケープ処理をしないので `\` をそのまま持てる)。**これが壊れるのは `.claude/project-profile.yml` 自体**であり、影響は MCP 生成に留まらず**全 skill が profile を読めなくなる**(design §3 のフォールバックは「profile が無い」想定で「あるが壊れている」は想定外)。**サーバー id も必ずシングルクォートで囲む**(`'yes'` / `'123'` のように)。囲まないと YAML が `yes` / `no` / `true` 等を bool、`123` のような数字列を int、`2026-09-10` のような日付形式を date と解釈し、id が文字列でなくなる(`[A-Za-z0-9_-]+` の charset 制約はこれらの語を排除しないため、id を引用しないと YAML 側で型が化ける)。
-- `{{TASK_DIR}}` は通常の YAML 文字列としてシングルクォートで囲み、値中の `'` は `''` に二重化する。既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。**既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
+- `{{TASK_DIR}}` は通常の YAML 文字列としてシングルクォートで囲み、値中の `'` は `''` に二重化する。既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。**値が `{{...}}` の形の項目は未設定項目とみなして提案に含める**(置換漏れは検出値で埋められる。上書きではなく提案なので「既存を壊さない」原則は保つ)。**既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
 
 **3. doc/ 一式(規模に関わらず統一構成)**
 - `templates/doc/` の 7 テンプレートを `doc/` 直下へ生成する。置換は `{{PROJECT_NAME}}` / `{{DATE}}`(今日の日付) / `{{TECH_STACK}}`(02 のみ、検出スタックの箇条書き) / `{{TASK_DIR}}`(05 のみ、Phase 1-8 の解決値):
@@ -242,7 +243,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **1. 生成物一覧を表として提示**する(パス / 新規作成 or 追記提案 / 概要)。上書きを避けた既存物も「既存のため据え置き」と明示する。
 
 **2. 妥当性の自己確認**
-- `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。`source_of_truth` に値がある場合、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれかであるか。
+- `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。`source_of_truth` に値がある場合、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれかであるか。**コメント行(`#` 始まり)を除いた値に `{{...}}` が残っていないか**(この実行で生成・追記した分について。`source_of_truth` 以外の項目も見る。profile のテンプレートは値を**意図的にプレースホルダのまま残さない**ので、値に 1 つでも残っていれば置換漏れ — `AGENTS.md` だけは Phase 1-4(品質コマンドの検出)のとおり、判定できない品質コマンドのプレースホルダを意図的に残す)。
 - `AGENTS.md` の `{{...}}` が置換済みか(意図的に残したガイド文以外にプレースホルダが残っていないか)。**どの分類でも**、最終状態に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」をかける(ルートに `CLAUDE.md` が無くても、`.claude/CLAUDE.md` / `CLAUDE.local.md` があればドリフトになりうる)。ドリフトなら注記し、対処 2 つを案内する。**片方だけ import があるとき**(例: ④-import なしで import の追加が断られ、`CLAUDE.local.md` には import がある)は判定自体は正常を返すが、「この環境では `CLAUDE.local.md` の import 経由で読まれているが、ルートの `CLAUDE.md` には import が無い」のように両方を報告する。**reference に到達できない構成では、この検査を無効化して報告する**(design §6)。
 - hook をマージした場合、`.claude/settings.json` が有効な JSON か(必要なら再 Read で確認)。
 - `.mcp.json` を生成・マージした場合、有効な JSON で既存エントリが保持されているか。
@@ -261,7 +262,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - 以降のサイクル: `/create-task`(タスク設計)→ `/do-task`(実装・検証・レビュー)→ `/update-doc`(ドキュメント同期)。機械検査だけなら `/tool-check`。
 - 正本が serena で `.serena/` が未整備なら、Serena の onboarding(プロジェクト有効化 + メモリ作成)を先に済ませ、続けて /update-doc で初期メモリを整備するよう案内する(メモリも多モデルレビューのループで品質担保される)。
 - `.mcp.json` を生成・変更した場合、承認が求められるのは**対話セッションでのみ**であり、それ以外の実行形(非対話・自動実行)では承認なしに読まれることを伝える(Claude Code の挙動。design §7-3)。**Codex 側は信頼済みプロジェクトのときだけ** `.codex/config.toml` を読む旨も添える。**既に `.mcp.json` / `.codex/config.toml` を持つリポジトリ(クローン直後)では、この skill の承認は介在せず、ホスト側のゲートだけが防御になる**(design §7-6。skill 側の承認とホスト側のゲートは互いの代替にならない)。正本 = serena なのに Serena を設定しなかった場合は、把握・同期が浅くなることを明示的に警告する。
-- doc / `AGENTS.md` の `{{...}}` ガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
+- `AGENTS.md` の `{{...}}` プレースホルダと doc の「（…）」形式のガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
 - **最終状態に `AGENTS.md` があるとき**(①・②・④、および ③ で移行が承認されたとき)、**直読みの確認方法と互換形の作り方を案内する**(決定 6)。文面の正本は `templates/AGENTS.md.template` 冒頭であり、SKILL.md には複写しない — テンプレート冒頭の案内を Read して完了報告に転記する(**テンプレートを読むため**、`AGENTS.md` を書かない分類 ②・④ でも案内できる)。**③ で移行が未承認のときは案内せず、移行を見送った旨だけを残す**。
 
 ---
@@ -269,14 +270,15 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 ## 最終ゲート(出力前セルフチェック)
 
 - [ ] テンプレは `templates/` から Read し、値をハードコードせず置換して Write したか。
-- [ ] 既存の AGENTS.md / CLAUDE.md / `.claude/CLAUDE.md` / `CLAUDE.local.md` / `.claude/rules/` / profile / doc / settings.json / .mcp.json / .codex/config.toml / .gitignore / README を上書きせず、差分提案・マージ(無い行・無いファイルのみ追加)・append-only(`.codex/config.toml` は既存行に一切触れない。パース失敗時の復元だけが例外)で扱ったか。
+- [ ] 既存の AGENTS.md / CLAUDE.md / `.claude/CLAUDE.md` / `CLAUDE.local.md` / `.claude/rules/` / profile / doc / settings.json / .mcp.json / .codex/config.toml / .gitignore / README を上書きせず、差分提案・マージ(無い行・無いファイルのみ追加。profile の `{{...}}` が残る行の置き換えは差分提案として扱う)・append-only(`.codex/config.toml` は既存行に一切触れない。パース失敗時の復元だけが例外)で扱ったか。
 - [ ] 新規生成・`AGENTS.md` のみのプロジェクトで `CLAUDE.md` を生成していないか。
 - [ ] 既存 `CLAUDE.md` を移行した場合、次をすべて満たしたか: symlink には import を書き足さず、**ルートの `AGENTS.md` への symlink の移行はリンクの削除だけに留め、それ以外の symlink でもリンク先のファイルを書き換えていない** / 参照一覧を提示し明示承認を得た / 残る CLAUDE.md 系があれば一覧を提示し、削除後の最終状態がドリフトになるときは承認前に警告し、そのファイルに書き込んでいない / 移行先が ignore 対象なら承認前に示した / 移行後の形を利用者に選ばせ、互換形なら理由を記録した / 経路 a で直読みできない環境の確認を先に行い、いれば何も動かしていない / Claude Code 固有の記述を `.claude/rules/claude-code.md` へ移した / 保留を残したまま `CLAUDE.md` を削除・置換していない / 移動のみに留めた(未承認なら移行していないか)。
 - [ ] ソースコード・既存ドキュメントの中身を変更していないか(このスキルの成果物は構成ファイルの設置のみ)。
 - [ ] 生成物レビュー(Phase 3.5)を全レビュアー PASS まで実施したか(未合格のまま完了報告していないか)。
-- [ ] 再実行モードでは、既存の記述・過去の選択を変えずに新標準の差分だけを提案し、workflow_version を更新したか。
+- [ ] 再実行モードでは、既存の記述・過去の選択を変えずに**新標準の差分と、profile に `{{...}}` が残る未設定項目だけ**を提案し、workflow_version を更新したか。
 - [ ] MCP は「宣言 → 承認 → 生成」の順で扱ったか。承認提示に生成先(`.mcp.json` / `.codex/config.toml`)を列挙したか(**既定は両方生成し**、ユーザーがその場でホスト単位の除外を申し出た場合のみ個別にスキップする)。不要な設定を押し付けていないか。
-- [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている)か。
+- [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている・コメント行を除いた値に `{{...}}` が残っていない)か。
+- [ ] 既存 profile に `{{...}}` が残っていたとき、停止規則の判定より前に項目名を挙げて報告し、**報告自体では停止せず**(`source_of_truth` が `{{...}}` のときに次の停止規則で止まるのは別)、`task_dir` が `{{...}}` ならそれを保存先に採用せず、`{{...}}` の項目を Phase 3-2 の差分提案に含めたか。
 - [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
 - [ ] 解決したタスク保存先に `.gitkeep` を作り、profile・AGENTS.md・運用文書で同じパスを示し、命名規約(`進行中_` / `完了_`)を伝えたか。
 - [ ] 生成物一覧と次ステップ(`/understand-project` からのサイクル)を日本語で提示したか。

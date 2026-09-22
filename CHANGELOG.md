@@ -2,6 +2,12 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.3.1
+
+### 変更
+
+- `/init-project` が `.claude/project-profile.yml` の `{{...}}` 残存(テンプレートの置換漏れ)を検査する — 既存 profile は Phase 1 の読み込み時に項目名を挙げて報告し、生成物は Phase 4 の自己確認で見る。`task_dir` が未置換のとき、**`/init-project` は**その値を保存先に採用しない(他の skill から使う経路は未対応)
+
 ## v4.3.0
 
 ### 変更
