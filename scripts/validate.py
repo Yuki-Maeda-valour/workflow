@@ -2,13 +2,19 @@
 """workflow リポジトリの一括検証。
 
 検証内容:
-  1. .claude-plugin/marketplace.json / plugin.json の JSON 構文と必須フィールド
+  1. .claude-plugin/marketplace.json / plugin.json の JSON 構文と必須フィールド、
+     配布メタの整合(version 3 箇所の一致・plugins[].source の実在・
+     description の skill 件数の表記と実数の一致)
   2. 各 SKILL.md: frontmatter の存在と name / description 必須、name とディレクトリ名の一致
-  3. SKILL.md 500 行以下(design.md §6)
-  4. description の長さ(規約 150〜500 字 / 上限 1024 字)
-  5. 禁止パターン(design.md §5): 特定プロジェクトへのハードコード・絶対パス・
-     TeamCreate/TeamDelete・日付付きモデル ID・claude -p
-  6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の存在
+  3. SKILL.md 500 行以下(design.md §6。論理行数 = 改行の数 + 末尾が改行で終わらなければ 1)
+  4. description の長さ(規約 150〜500 字は ERROR / 上限 1024 字)
+  5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
+     claude -p と、環境変数 WORKFLOW_PROJECT_NAMES に渡した周辺プロジェクト名
+     (未設定なら 1 語も足さない)。行内に `<!-- validate-allow: 理由 -->` があれば
+     その行だけ免除する —— **この検査にだけ効く**(7・8・委託の語の除外の不変条件は
+     免除規則を持たない)
+  6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の
+     存在。fragment 付き・タイトル付きも検査し、コードフェンスの中は除外する
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
      *.md・scripts/ 配下(画像を除く)を検査し、未移行 skill(許容リスト)と
      検査対象外ファイルを除外する
@@ -21,6 +27,7 @@
 """
 
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -43,18 +50,60 @@ FORBIDDEN_PATTERNS = [
     (r"claude\s+-p\b|claude\s+--print", "claude -p の Bash 起動(禁止・別課金)"),
 ]
 
-# 周辺プロジェクト名の動的検査: 実行環境の ~/dev 配下ディレクトリ名を禁止語として追加する
-# (skill の還元時に固有プロジェクト名が紛れ込むのを防ぐ。一般語のディレクトリは除外)
+# 禁止パターン検査の免除マーカー(design.md §5)。`<!-- validate-allow: 理由 -->` の形で、
+# **理由の記述が必須**(`<!-- validate-allow -->` だけでは免除しない)。行単位で効き、
+# コードフェンスの内外を問わない。**効くのはこの禁止パターン検査だけ** —— 委託の語・
+# ホスト CLI 語・除外の不変条件は免除規則を持たない(そちらは役割語へ書き換えて消す)。
+# 以前は「禁止・使わない・しない・廃止・ではなく」を含む行を一律に免除していたが、
+# 語の偶然の一致(普通の文に「〜しない」が入っているだけ)で混入が素通りしていた。
+# 理由は**最初のコメント終端まで**を取る —— `:\s*\S.*?-->` のように貪欲さを抑えるだけでは、
+# `<!-- validate-allow: --> <!-- 別のコメント -->` が後ろのコメントの終端まで飲み込んで
+# 「理由あり」に化ける(実測)。
+_ALLOW_MARKER_RE = re.compile(r"<!--\s*validate-allow\s*:((?:(?!-->).)*)-->")
+
+
+def _has_allow_marker(line_text: str) -> bool:
+    """行に**理由付きの**免除マーカーがあるか。理由が空白だけのものは免除しない。"""
+    return any(m.group(1).strip() for m in _ALLOW_MARKER_RE.finditer(line_text))
+
+# 周辺プロジェクト名の検査(design.md §5): 環境変数 WORKFLOW_PROJECT_NAMES に
+# 「名前の一覧」(カンマ区切り)を渡したときだけ、その名前を禁止語として追加する。
+# **未設定なら 1 語も足さない**。実行環境のディレクトリを列挙しないので、検査の結果は
+# 渡した値だけで決まり、その PC のファイルシステムに依らない(同じリポジトリなら再現する)。
+# 一般語は渡されても除外する(現状の挙動に合わせる。明示的に渡した一般語も黙って捨てる)。
 _GENERIC_DIR_NAMES = {"workflow", "demo", "memo", "resume", "test", "tmp", "sandbox", "base"}
-_dev_dir = Path.home() / "dev"
-if _dev_dir.is_dir():
-    _names = sorted(
-        re.escape(p.name)
-        for p in _dev_dir.iterdir()
-        if p.is_dir() and not p.name.startswith(".") and p.name.lower() not in _GENERIC_DIR_NAMES
+_PROJECT_NAMES_ENV = "WORKFLOW_PROJECT_NAMES"
+
+
+def _name_boundary_pattern(name: str) -> str:
+    r"""名前 1 語を、**名前の端が英数字・`_` のときだけ**境界を付けた正規表現にする。
+
+    `\b` は日本語と `_` を単語文字として扱うため、`customer-portalに配線する` のような
+    日本語直結を取りこぼす。かといって固定で両側に `(?<![A-Za-z0-9_])` / `(?![A-Za-z0-9_])`
+    を付けると、ハイフンで終わる名前(`Proj-`)で境界の意味が反転し、`\b` が捕まえていた
+    `Proj-x` / `Proj-2` を取りこぼす(退行)。名前の端の文字を見て付け外しすると、
+    `\b` の完全な上位互換になる(端が集合外なら境界を要求しない = 必ず緩い)。
+    プロジェクト名は小文字の一般語を含みうるので、除外集合は `Agent` 側(`[A-Za-z]`)より
+    広い `[A-Za-z0-9_]` を使う —— この非対称の理由は design.md §7-7-1。"""
+    left = r"(?<![A-Za-z0-9_])" if re.match(r"[A-Za-z0-9_]", name) else ""
+    right = r"(?![A-Za-z0-9_])" if re.search(r"[A-Za-z0-9_]\Z", name) else ""
+    return f"{left}{re.escape(name)}{right}"
+
+
+_names = sorted(
+    {
+        n
+        for n in (s.strip() for s in os.environ.get(_PROJECT_NAMES_ENV, "").split(","))
+        if n and n.lower() not in _GENERIC_DIR_NAMES
+    }
+)
+if _names:
+    FORBIDDEN_PATTERNS.append(
+        (
+            "(?:" + "|".join(_name_boundary_pattern(n) for n in _names) + ")",
+            "周辺プロジェクト固有名の混入",
+        )
     )
-    if _names:
-        FORBIDDEN_PATTERNS.append((rf"\b(?:{'|'.join(_names)})\b", "周辺プロジェクト固有名の混入"))
 
 # 検査語彙としてのモデルエイリアス(スナップショット)。§5-4 の「固定リストとして扱わない」は
 # 実行時に指定できるエイリアス集合の話で、こちらは skill 本文に書いてはいけない語。
@@ -63,7 +112,13 @@ _MODEL_ALIASES = ("fable", "opus", "sonnet", "haiku")
 
 # 委託の語(design.md §7-7・測定コマンドの語彙に一致させる)。ホスト固有の委託機構名 5 語 +
 # モデルエイリアス。エイリアスは _MODEL_ALIASES だけを参照し、ここで独自に列挙しない。
-_DELEGATION_WORDS = [r"\bAgent\b", "SendMessage", "ListAgents", "Explore", "general-purpose"] + list(_MODEL_ALIASES)
+_DELEGATION_WORDS = [
+    r"(?<![A-Za-z])Agent(?![A-Za-z])",
+    "SendMessage",
+    "ListAgents",
+    "Explore",
+    "general-purpose",
+] + list(_MODEL_ALIASES)
 
 # 移行の許容リスト(design.md §7-7)。委託の語検査から除外する未移行 skill の名前。
 # 移行のたびにここから削る。許容リストが空の状態でこの検査が通った時点が v4.0.0(design.md §7-7)。
@@ -80,7 +135,9 @@ _EXEMPT_FILES = {_DELEGATION_MAP, "do-task/references/external-runners.md"}
 # re.IGNORECASE を付ける。既存の _DELEGATION_WORDS は大小を区別したまま — `Codex に実装を委託する`
 # のような大文字始まりが最も混入しやすい書き方なのに、既存の検査は大小を区別するため素通りする)。
 # **単語境界(\b)を付けない(部分一致にする)**。§7-7 の「語彙の限界」がすでに明文で否定した
-# 設計だからで、既存 _DELEGATION_WORDS の \bAgent\b は唯一境界を持つ例外であり手本にしない
+# 設計だからで、_DELEGATION_WORDS 側の `Agent` も \b はやめて英字だけの否定先読み・後読み
+# ((?<![A-Za-z])Agent(?![A-Za-z]))に替えた。**`Agent` は部分一致ではない** ——
+# 以下の「部分一致を選ぶ」は _HOST_CLI_WORDS の側の話
 # ——日本語文字が \w に含まれるため \b を付けると助詞が直接続く形(`Geminiに実装を委託する` /
 # `Codex execで委託`)を取りこぼす(偽陰性 = 到達条件をすり抜ける危険側)一方、誤検出は ERROR
 # で落ちる安全側なので部分一致を選ぶ(実測 2026-09-17: \b 付きだとこの 2 例は MISS、空白区切りの
@@ -109,7 +166,47 @@ _HOST_CLI_WORDS = [
     r"codex-rescue",
 ]
 
-LINK_RE = re.compile(r"\[[^\]]*\]\(([^)\s#]+)\)")
+# 配布メタの skill 件数の表記(「skills 12 種」/「12 skills」の両形)。
+_SKILL_COUNT_RE = re.compile(r"skills?\s*(\d+)\s*種|(\d+)\s*skills?")
+
+# Markdown の相対リンク(design.md §5)。旧形 `\[[^\]]*\]\(([^)\s#]+)\)` は
+# fragment 付き(`](path#sec)`)とタイトル付き(`](path "title")`)にそもそも一致せず、
+# 切れたリンクを検査せず素通りさせていた。パスだけを group(1) に取り、`#` 以降は
+# 呼び出し側で落とす。括弧を含むパスは扱わない(現物に無い)。
+LINK_RE = re.compile(r"""\[[^\]]*\]\(\s*([^)\s]+?)\s*(?:"[^"]*"|'[^']*')?\s*\)""")
+
+
+def _mask_code_fences(body: str) -> str:
+    """コードフェンス(``` / ~~~)の中身を空行に置き換えた写しを返す(行番号は保つ)。
+
+    **リンク検査にだけ掛ける**。禁止パターン検査には掛けない —— フェンスを免除の単位に
+    すると、行単位のマーカーに絞った免除が一気に広がるため(design.md §5-24)。
+
+    CommonMark の規則のうち、**解析が同期を失うと以降のリンクが黙って検査されなくなる**
+    3 点に従う(いずれも実測で再現した穴):
+      - 開きフェンスの字下げは 3 空白まで(4 以上はインデントコードブロックで、フェンスを開かない)
+      - 閉じは開きと**同じ文字・同じ長さ以上**で、info string を持たない
+        (長さを見ないと ```` の中の ``` が外側を閉じ、以降の内外が反転する)
+      - バッククォートの開きフェンスの info string に ` は入らない
+        (行頭のインラインコード ```x``` をフェンスと誤認すると、そこから下が丸ごと検査されなくなる)
+    """
+    out = []
+    fence = ""
+    for line in body.split("\n"):
+        m = re.match(r"[ ]{0,3}(`{3,}|~{3,})(.*)$", line)
+        marker, info = (m.group(1), m.group(2)) if m else ("", "")
+        if not fence:
+            if marker and not (marker[0] == "`" and "`" in info):
+                fence = marker
+                out.append("")
+                continue
+        else:
+            if marker and marker[0] == fence[0] and len(marker) >= len(fence) and not info.strip():
+                fence = ""
+            out.append("")
+            continue
+        out.append(line)
+    return "\n".join(out)
 
 
 def parse_frontmatter(text: str, path: Path):
@@ -168,8 +265,65 @@ def check_json_files():
             entries = {pl.get("name") for pl in mp_data.get("plugins", [])}
             if pj_data.get("name") not in entries:
                 ERRORS.append("marketplace.json の plugins に plugin.json の name が載っていない")
+
+            # 版は 3 箇所にあり、1 箇所だけ上げると配布が壊れる
+            # (marketplace の metadata.version / plugins[].version、plugin.json の version)
+            versions = {
+                "marketplace.json metadata.version": (mp_data.get("metadata") or {}).get("version"),
+                "plugin.json version": pj_data.get("version"),
+            }
+            for pl in mp_data.get("plugins", []):
+                versions[f"marketplace.json plugins[{pl.get('name')}].version"] = pl.get("version")
+            # None が混じると set の要素数が 1 になり「全部欠けている」が一致として通る
+            if None in versions.values() or len(set(versions.values())) > 1:
+                detail = " / ".join(f"{k}={v!r}" for k, v in sorted(versions.items()))
+                ERRORS.append(f"配布メタの version が一致しない(または欠けている): {detail}")
+
+            # source が `./` 始まりならリポジトリ相対のパスとして実在を見る
+            for pl in mp_data.get("plugins", []):
+                src = pl.get("source")
+                if isinstance(src, str) and src.startswith("./") and not (REPO / src).exists():
+                    ERRORS.append(f"marketplace.json plugins[{pl.get('name')}].source が実在しない -> {src}")
         except Exception:
             pass
+
+
+def check_skill_count_claims():
+    """配布メタの skill 件数の表記が実数と一致するかを検査する(design.md §5)。
+
+    対象は `marketplace.json` の `plugins[].description` と `plugin.json` の
+    `description` だけ。`docs/design.md` は**対象にしない** —— そこの「12 skill」は
+    測定の記録で、skill を増やすと正しい記録が ERROR になってしまう。
+    件数の表記が見つからない場合は WARN(見つかったときだけ実数と突き合わせる)。
+    1 検査 = 1 関数の構成規約に従い、JSON 以外を読みうるこの検査は
+    check_json_files() に相乗りしない。"""
+    if not SKILLS_DIR.is_dir():
+        return
+    actual = len([d for d in SKILLS_DIR.iterdir() if d.is_dir()])
+    mp = REPO / ".claude-plugin" / "marketplace.json"
+    pj = REPO / "plugins" / "dev-workflow" / ".claude-plugin" / "plugin.json"
+    claims: list[tuple[str, str]] = []
+    try:
+        mp_data = json.loads(mp.read_text(encoding="utf-8"))
+        for pl in mp_data.get("plugins", []):
+            claims.append((f"marketplace.json plugins[{pl.get('name')}].description", str(pl.get("description") or "")))
+    except Exception:
+        pass
+    try:
+        pj_data = json.loads(pj.read_text(encoding="utf-8"))
+        claims.append(("plugin.json description", str(pj_data.get("description") or "")))
+    except Exception:
+        pass
+    for label, desc in claims:
+        # 「skills 12 種」と「12 skills」の両方を拾う。素朴に最初の \d+ を取ると
+        # plugin.json 側の「1 コマンド」を拾って偽 ERROR になる(実測)。
+        found = {int(m.group(1) or m.group(2)) for m in _SKILL_COUNT_RE.finditer(desc)}
+        if not found:
+            WARNS.append(f"{label}: skill 件数の表記が見つからない(実数 {actual} 件)")
+            continue
+        for n in sorted(found):
+            if n != actual:
+                ERRORS.append(f"{label}: skill 件数の表記 {n} 件が実数 {actual} 件と一致しない")
 
 
 def check_skills():
@@ -186,7 +340,10 @@ def check_skills():
             ERRORS.append(f"{d.name}: SKILL.md がない")
         else:
             text = md.read_text(encoding="utf-8", errors="replace")
-            lines = text.count("\n") + 1
+            # 論理行数 = 改行の数 + 末尾が改行で終わらなければ 1(design.md §6)。
+            # 旧形の `count("\n") + 1` は末尾改行ありの 500 行を 501 行と数えて誤検出し、
+            # `wc -l` に揃えると末尾改行なしの 501 行を 500 と数えて見逃す。
+            lines = text.count("\n") + (0 if text.endswith("\n") else 1)
             if lines > 500:
                 ERRORS.append(f"{d.name}/SKILL.md: {lines} 行(500 行以下の規約違反)")
 
@@ -203,9 +360,9 @@ def check_skills():
                 if len(desc) > 1024:
                     ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(上限 1024)")
                 elif len(desc) < 150:
-                    WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
+                    ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
                 elif len(desc) > 500:
-                    WARNS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
+                    ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
 
         # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル。
         # SKILL.md の有無に関わらず走る)
@@ -218,8 +375,9 @@ def check_skills():
                 for m in re.finditer(pat, body):
                     line = body.count("\n", 0, m.start()) + 1
                     line_text = body_lines[line - 1] if line <= len(body_lines) else ""
-                    # 「〜は禁止」「〜を使わない」等、規約としての言及は許容する
-                    if re.search(r"禁止|使わない|しない|廃止|ではなく", line_text):
+                    # 明示のマーカーがある行だけ免除する(design.md §5)。
+                    # コードフェンスの内外は問わない(フェンスは免除の単位にしない)。
+                    if _has_allow_marker(line_text):
                         continue
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: 禁止パターン [{why}] -> {m.group(0)!r}")
 
@@ -229,13 +387,16 @@ def check_skills():
         md_files = ([md] if md_ok else []) + sorted(f for f in d.rglob("*.md") if f != md and f.is_file())
         for f in md_files:
             body = f.read_text(encoding="utf-8", errors="replace")
-            for m in LINK_RE.finditer(body):
-                target = m.group(1)
-                if target.startswith(("http://", "https://", "mailto:")):
+            scanned = _mask_code_fences(body)
+            for m in LINK_RE.finditer(scanned):
+                # fragment(`#sec`)を落としてパスだけを見る。落として空になるもの
+                # (同一文書内アンカー `[x](#見出し)`)は検査しない。
+                target = m.group(1).split("#", 1)[0]
+                if not target or target.startswith(("http://", "https://", "mailto:")):
                     continue
                 if not (f.parent / target).exists():
-                    line = body.count("\n", 0, m.start()) + 1
-                    ERRORS.append(f"{f.relative_to(REPO)}:{line}: リンク切れ -> {target}")
+                    line = scanned.count("\n", 0, m.start()) + 1
+                    ERRORS.append(f"{f.relative_to(REPO)}:{line}: リンク切れ -> {m.group(1)}")
 
 
 def _in_delegation_scope(f: Path) -> bool:
@@ -380,6 +541,7 @@ def check_migration_allowlist_staleness():
 
 def main() -> int:
     check_json_files()
+    check_skill_count_claims()
     check_skills()
     check_delegation_words()
     check_host_cli_words()
