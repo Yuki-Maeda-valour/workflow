@@ -289,10 +289,12 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
    case "$(CDPATH= cd -P -- "$(dirname "$TREE")" && pwd -P)/" in "${TOP%/}"/*|"${TOP%/}/") echo "一時ツリーがリポジトリ内にある"; exit 1;; esac
 
    # 2) EXCLUDE の生成(secret_paths の集合と glob→ERE の変換は scripts/diff-snapshot.sh が正本。
-   #    ⚠ **`secret_path_exceptions`(`.env.example` 等)はここには効かない** —— ERE 1 本では
-   #    「除外に当たるが例外にも当たる」を表せないため(grep -E に否定先読みが無い)。
-   #    例外は scripts/diff-snapshot.sh の `--exclude-exception-glob` が**パッチと本文の側で**効き、
-   #    一時ツリーからは削除されたままになる。レビュアーはパッチで内容を読む。
+   #    ⚠ **`secret_path_exceptions`(`.env.example` 等)は §9-1 の一時ツリーには効かせない**。
+   #    ここの EXCLUDE は ERE 1 本で、「除外に当たるが例外にも当たる」を表せない(grep -E に
+   #    否定先読みが無い)。**手順 1 の `.review-diff.patch` にも例外を渡さない** —— 渡すと、
+   #    TREE_EXCLUDE が消したファイルへパッチの hunk が当たり、一時ツリーと食い違う。
+   #    例外が効くのは do-task Phase 4 の diff スナップショット(diff-snapshot-call.md)で、
+   #    外部レビュアーはそれを一時ツリーへ置いたもの(review-protocol.md の「渡すもの」)から読む。
    #    一時ツリー側にも例外を効かせるかは別 Issue。
    #    渡す集合の組み立てと要素の内容検査は diff-snapshot-call.md が正本で、ここに列挙しない)
    EXCLUDE="$(bash {do-task の}scripts/diff-snapshot.sh --print-exclude-ere --exclude-glob <secret_paths の各要素>)" || { echo "除外 ERE を生成できない"; exit 1; }

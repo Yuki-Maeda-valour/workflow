@@ -651,7 +651,7 @@ else
   rc=0
   guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-nopython" \
     bash "$BROKEN" --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
-    --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log38.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --log-file "$WORK/log38.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
   if [ "$rc" -eq 10 ]; then ok "壊れた正規化結果を parse-failed で止める (exit=$rc)"; else
     ng "壊れた正規化結果を parse-failed で止める (期待 exit=10 / 実際 exit=$rc)"; cat "$CASE_OUT" "$CASE_ERR" >&2; fi
 fi
@@ -851,7 +851,7 @@ rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
 : > "$ROLOG/.claude/reviews/reviewer-codex-iter1.md"
 chmod 555 "$ROLOG/.claude/reviews"
 rc=0
-( cd "$ROLOG" --cwd "$WORK" && guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
 if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
   ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
@@ -893,10 +893,9 @@ SH
 chmod +x "$SIGDIR/runproc.sh"
 cat >"$SIGDIR/stub.sh" <<SH
 #!/usr/bin/env bash
-# プローブ(--readonly-x 付き)は即答し、本実行だけ子を残して待つ
-for a in "\$@"; do
-  if [ "\$a" = "--readonly-x" ]; then echo '{"verdict":"APPROVED","issues":[]}'; exit 0; fi
-done
+# プローブ(末尾引数に ping を含む)は即答し、本実行だけ子を残して待つ。
+# 読み取り専用フラグはプローブにも本実行にも付くので、フラグの有無では見分けられない
+for a in "\$@"; do case "\$a" in *ping*) echo '{"verdict":"APPROVED","issues":[]}'; exit 0 ;; esac; done
 touch "$SIGDIR/started"
 bash "$SIGDIR/runproc.sh"
 SH
@@ -909,7 +908,7 @@ sig_cleanup() {
 for spec in "TERM:143" "HUP:129"; do
   sig="${spec%%:*}"; want="${spec##*:}"
   rm -f "$SIGDIR/started"
-  bash "$TARGET" --runner stubrunner --command "bash $SIGDIR/stub.sh" --readonly-flag "--readonly-x" \
+  bash "$TARGET" --runner stubrunner --command "bash $SIGDIR/stub.sh --readonly-x" --readonly-flag "--readonly-x" \
     --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 60 \
     --log-file "$WORK/log-sig-$sig.md" >"$CASE_OUT" 2>"$CASE_ERR" &
   sig_pid=$!

@@ -3559,6 +3559,57 @@ ckeq "㊺ 止まるまでにオブジェクトを読む git を呼ばない" \
 ckeq "㊺ --base の rev-parse --verify も呼ばれない" \
   "$(grep -E 'rev-parse' "$SELFTEST_GITLOG" | grep -c -- '--verify' || true)" 0
 ckne "㊺ git スタブは実際に呼ばれている(記録が空でない)" "$(grep -c . "$SELFTEST_GITLOG")" 0
+# ── 除外の例外(--exclude-exception-glob)──
+# `.env.*` の保護は保ったまま、公開例(ダミー値の .env.example 等)だけを通す。
+# 「除外 glob を具体形へ狭める」方式では `.env.production` / `.env.staging` が漏れるので、
+# 例外として抜く形にした。**本物の .env 系が 1 つでも漏れたら失敗**にする。
+mkrepo cexc
+R="$WORK/cexc"
+EXC_SECRETS=".env .env.local .env.production .env.staging .env.dev .dev.vars"
+EXC_PUBLIC=".env.example .env.sample .env.template"
+for f in $EXC_SECRETS $EXC_PUBLIC a.txt; do printf 'V=old\n' >"$R/$f"; done
+GIT "$R" add -A
+GIT "$R" commit -q -m base
+B="$(GIT "$R" rev-parse HEAD)"
+for f in $EXC_SECRETS $EXC_PUBLIC a.txt; do printf 'V=NEW-%s\n' "$f" >"$R/$f"; done
+# (a) 例外なし: 公開例も機密扱いで落ちる(修正前の挙動。この固定が無いと例外の効果を判別できない)
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" \
+  --exclude-glob '.env' --exclude-glob '.env.*' --exclude-glob '.dev.vars'
+ckeq "例外 (a) 例外なし: exit 0" "$RC" 0
+ckf "例外 (a) 例外なしでは .env.example もパッチに入らない" inf "$PATCHF" 'b/.env.example'
+# (b) 例外あり: 公開例と通常ファイルは通り、本物は 1 つも通らない
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" \
+  --exclude-glob '.env' --exclude-glob '.env.*' --exclude-glob '.dev.vars' \
+  --exclude-exception-glob '.env.example' --exclude-exception-glob '.env.sample' \
+  --exclude-exception-glob '.env.template'
+ckeq "例外 (b) 例外あり: exit 0" "$RC" 0
+for f in $EXC_PUBLIC a.txt; do
+  ckt "例外 (b) $f はパッチに入る" inf "$PATCHF" "b/$f"
+  ckt "例外 (b) $f の新しい値が本文に出る" grep -qxF -e "+V=NEW-$f" -- "$OUT"
+done
+for f in $EXC_SECRETS; do
+  # 行の完全一致で見る(`V=NEW-.env` は `V=NEW-.env.example` の部分文字列なので、部分一致だと誤判定する)
+  ckf "例外 (b) $f はパッチに入らない" grep -qxF -e "+V=NEW-$f" -- "$PATCHF"
+  ckf "例外 (b) $f の値は本文にも出ない" grep -qxF -e "+V=NEW-$f" -- "$OUT"
+done
+headf "$OUT"
+ckt "例外 (b) 見出しに例外 ERE が記録される" inf "$HDF" '除外の例外 ERE:'
+# (c) 例外が全パスに当たる指定は止める(除外が丸ごと無効になり、機密が素通りするため)
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env.*' --exclude-exception-glob '**'
+ckeq "例外 (c) 全パスに当たる例外は usage エラー" "$RC" 2
+ckt "例外 (c) 理由が stderr に出る" inf "$CASE_ERR" '除外の例外が全パスに当たる'
+# (d) 例外だけを渡す指定は止める(何の例外かが定まらない)
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-exception-glob '.env.example'
+ckeq "例外 (d) 除外なしの例外指定は usage エラー" "$RC" 2
+# (e) 例外の glob にも除外と同じ書式検査が掛かる(黙って「1 件も当たらない例外」に化けない)
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env.*' --exclude-exception-glob '.env.[ex]'
+ckeq "例外 (e) 受け付けない書式の例外は usage エラー" "$RC" 2
+
 unset SELFTEST_GITLOG
 unset SELFTEST_TRACE
 
