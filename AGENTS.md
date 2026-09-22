@@ -14,6 +14,7 @@ plugins/dev-workflow/
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
+.claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
 setup.sh                            # plugin を使わない導入(コピー / symlink)
 ```
 
