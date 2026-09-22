@@ -282,7 +282,16 @@ guard() {
 
 run_agent() { # 残り=引数。stdout/stderr を分離して保存し、終了コードを返す
   rc=0
-  guard bash "$TARGET" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  # --cwd はレビュー経路で必須(一時ツリーで起動する契約)。個別のケースが
+  # 明示しないときは $WORK を使う —— ここで補わないと、--cwd を検査する目的でない
+  # ケースまで usage エラーで落ちる。**必須であること自体は下の専用ケースで検査する**。
+  # **先頭に**補う: 末尾に足すと `run_agent --runner` のような値の欠落を見るケースが
+  # 「--runner の値が --cwd」になり、別のエラーで落ちて判別力を失う
+  ra_args=("$@")
+  ra_has_cwd=0
+  for ra_a in "$@"; do [ "$ra_a" = "--cwd" ] && ra_has_cwd=1; done
+  if [ "$ra_has_cwd" -eq 0 ]; then ra_args=(--cwd "$WORK" "$@"); fi
+  guard bash "$TARGET" "${ra_args[@]}" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
   if [ "$VERBOSE" -eq 1 ]; then
     echo "--- args: $* (exit=$rc)"; echo "  stdout:"; sed 's/^/    /' "$CASE_OUT"; echo "  stderr:"; sed 's/^/    /' "$CASE_ERR"
   fi
@@ -358,7 +367,7 @@ check "失敗: 未検出" 3 "$rc"
 rc=0
 guard env -u DEV_WORKFLOW_HOST_CLI CLAUDECODE=1 bash "$TARGET" --runner claude \
   --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
-  --prompt-file "$WORK/prompt.md" --log-file "$WORK/log7.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --prompt-file "$WORK/prompt.md" --log-file "$WORK/log7.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "失敗: 自ホスト拒否" 4 "$rc"
 
 # 8. 読み取り専用フラグが argv に無い
@@ -377,14 +386,14 @@ rm -f "$SIDEEFFECT"
 rc=0
 PATH="$WORK/evilbin:$PATH" guard bash "$TARGET" --runner cursor-agent \
   --command "bash $WORK/bin/stub-sideeffect.sh --mode ask {prompt}" \
-  --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log10.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log10.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "信頼モデル: 既定表ランナーへの --command を拒否" 2 "$rc"
 if [ -e "$SIDEEFFECT" ]; then ng "PoC 非再現(--command 経路で副作用が起きない)"; else ok "PoC 非再現(--command 経路で副作用が起きない)"; fi
 
 rm -f "$SIDEEFFECT"
 rc=0
 PATH="$WORK/evilbin:$PATH" guard bash "$TARGET" --runner cursor-agent --readonly-flag "--readonly" \
-  --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log11.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log11.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "信頼モデル: 既定表ランナーへの --readonly-flag を拒否" 2 "$rc"
 if [ -e "$SIDEEFFECT" ]; then ng "PoC 非再現(--readonly-flag 経路で副作用が起きない)"; else ok "PoC 非再現(--readonly-flag 経路で副作用が起きない)"; fi
 
@@ -441,7 +450,7 @@ check "失敗: 本実行のタイムアウト(run-timeout)" 9 "$rc"
 # 21. 既定表ランナーの成功経路(PATH 先頭にランナー名のスタブを置く)
 rc=0
 PATH="$WORK/pathbin:$PATH" guard bash "$TARGET" --runner cursor-agent --prompt-file "$WORK/prompt.md" \
-  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log21.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log21.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 if check "既定表ランナーの成功経路(ヘルプ照合 → 疎通 → 本実行)" 0 "$rc"; then
   assert_stdout_equals "既定表ランナー" "$EXPECT_ISSUE_JSON"
 fi
@@ -469,7 +478,7 @@ fi
 jq_run() { # 残り=引数
   rc=0
   guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-nopython" \
-    bash "$TARGET" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+    bash "$TARGET" --cwd "$WORK" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
   return "$rc"
 }
 jq_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
@@ -544,7 +553,7 @@ start=$(date +%s)
 rc=0
 guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-notimeout" \
   bash "$TARGET" --runner stubrunner --command "bash $WORK/bin/hangproc.sh --readonly-x" --readonly-flag "--readonly-x" \
-  --prompt-file "$WORK/prompt.md" --probe-timeout 3 --log-file "$WORK/log27fb.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --prompt-file "$WORK/prompt.md" --probe-timeout 3 --log-file "$WORK/log27fb.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 elapsed=$(( $(date +%s) - start ))
 if [ "$rc" -eq 7 ] && [ "$elapsed" -lt 25 ]; then ok "フォールバック経路でもタイムアウト成立 (exit=$rc / ${elapsed}s)"; else
   ng "フォールバック経路でもタイムアウト成立 (期待 exit=7 かつ 25 秒未満 / 実際 exit=$rc ${elapsed}s)"; fi
@@ -559,7 +568,7 @@ rm -f "$SIDEEFFECT"
 rc=0
 PATH="$WORK/pathbin:$PATH" guard env DEV_WORKFLOW_HOST_CLI="mytool" bash "$TARGET" --runner wrapped \
   --command "env FOO=1 mytool --readonly-x" --readonly-flag "--readonly-x" \
-  --prompt-file "$WORK/prompt.md" --log-file "$WORK/log28.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --prompt-file "$WORK/prompt.md" --log-file "$WORK/log28.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "自ホスト判定: env ラッパー越しでも実効の実行ファイルで判定" 4 "$rc"
 if [ -e "$SIDEEFFECT" ]; then ng "自ホスト拒否で起動していない"; else ok "自ホスト拒否で起動していない"; fi
 
@@ -605,7 +614,7 @@ check "読み取り専用フラグの --名前=値 形を認める" 0 "$rc"
 # 34. 既定表ランナーの --help がハングしたら probe-timeout(no-readonly に化けない)
 rc=0
 PATH="$WORK/helphang:$PATH" guard bash "$TARGET" --runner cursor-agent --prompt-file "$WORK/prompt.md" \
-  --log-file "$WORK/log34.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --log-file "$WORK/log34.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "失敗: ヘルプ照合のタイムアウト" 7 "$rc" && assert_error_format "ヘルプ照合タイムアウト"
 
 # 35. 想定外の失敗は ERR trap が拾って exit 20 にする(黙って落ちない)
@@ -630,7 +639,7 @@ fi
 # 37. サブコマンド側の --help でしか読み取り専用フラグを出さないランナーも通す
 rc=0
 PATH="$WORK/subhelp:$PATH" guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" \
-  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log37.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log37.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 if check "既定表ランナー: <bin> <sub> --help でのヘルプ照合" 0 "$rc"; then
   assert_stdout_equals "サブコマンドのヘルプ照合" "$EXPECT_ISSUE_JSON"
 fi
@@ -644,7 +653,7 @@ else
   rc=0
   guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-nopython" \
     bash "$BROKEN" --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
-    --prompt-file "$WORK/prompt.md" --probe-timeout 10 --log-file "$WORK/log38.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --log-file "$WORK/log38.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
   if [ "$rc" -eq 10 ]; then ok "壊れた正規化結果を parse-failed で止める (exit=$rc)"; else
     ng "壊れた正規化結果を parse-failed で止める (期待 exit=10 / 実際 exit=$rc)"; cat "$CASE_OUT" "$CASE_ERR" >&2; fi
 fi
@@ -652,7 +661,7 @@ fi
 # 39. 既定コマンドの --trust でワークスペース信頼を要求するランナーが通る
 rc=0
 PATH="$WORK/trustbin:$PATH" guard bash "$TARGET" --runner cursor-agent --prompt-file "$WORK/prompt.md" \
-  --probe-timeout 10 --log-file "$WORK/log39.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  --probe-timeout 10 --log-file "$WORK/log39.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 if check "既定コマンドの --trust でワークスペース信頼を通過する" 0 "$rc"; then
   assert_stdout_equals "--trust による成功経路" "$EXPECT_ISSUE_JSON"
 fi
@@ -844,7 +853,7 @@ rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
 : > "$ROLOG/.claude/reviews/reviewer-codex-iter1.md"
 chmod 555 "$ROLOG/.claude/reviews"
 rc=0
-( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
 if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
   ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
@@ -857,6 +866,198 @@ if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
 else
   ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
 fi
+
+# `-` で始まるプロンプト(箇条書き・frontmatter)がオプションと誤認されない。
+# スタブは codex と同じく、`--` より前にある未知の `-` 始まりの引数を拒否する —— 最後の引数を
+# 記録するだけのスタブでは、`--` を挟まない実装でも同じ最後の引数が届いて判別できない。
+cat >"$WORK/bin/stub-strictopt.sh" <<'EOF'
+#!/usr/bin/env bash
+seen_dd=0
+for a in "$@"; do
+  [ "$seen_dd" -eq 1 ] && continue
+  case "$a" in
+    --) seen_dd=1 ;;
+    --readonly-x) : ;;
+    -*) echo "error: unexpected argument '$a' found" >&2; exit 2 ;;
+  esac
+done
+printf '%s' "${@: -2:1}" >"$SELFTEST_RECORD_DIR/penult.txt"
+printf '%s' "${@: -1}" >"$SELFTEST_RECORD_DIR/lastarg.txt"
+echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+chmod +x "$WORK/bin/stub-strictopt.sh"
+printf -- '- 箇条書きで始まるレビュー依頼\n- 2 行目\n' >"$WORK/prompt-dash.md"
+rec_reset; rm -f "$SELFTEST_RECORD_DIR/penult.txt"
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-strictopt.sh --readonly-x" \
+  --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt-dash.md" \
+  --probe-timeout 10 --log-file "$WORK/log-dash.md"; rc=$?
+if check "- 始まりのプロンプト: 拒否されずに通る" 0 "$rc"; then
+  if [ "$(cat "$SELFTEST_RECORD_DIR/penult.txt" 2>/dev/null)" = "--" ]; then
+    ok "- 始まりのプロンプト: 直前に -- が挟まる"
+  else
+    ng "- 始まりのプロンプト: 直前に -- が挟まる(実際: $(cat "$SELFTEST_RECORD_DIR/penult.txt" 2>/dev/null))"
+  fi
+  if grep -q '箇条書きで始まるレビュー依頼' "$SELFTEST_RECORD_DIR/lastarg.txt"; then
+    ok "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  else
+    ng "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  fi
+fi
+# `-` で始まらないプロンプトには `--` を挟まない(必要なときだけ足す)
+rec_reset; rm -f "$SELFTEST_RECORD_DIR/penult.txt"
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-strictopt.sh --readonly-x" \
+  --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --log-file "$WORK/log-nodash.md"; rc=$?
+if check "通常のプロンプト: 通る" 0 "$rc"; then
+  if [ "$(cat "$SELFTEST_RECORD_DIR/penult.txt" 2>/dev/null)" != "--" ]; then
+    ok "通常のプロンプト: -- を挟まない"
+  else
+    ng "通常のプロンプト: -- を挟まない"
+  fi
+fi
+
+# --cwd の必須化(R1)。run_agent は --cwd を補うので、ここでは**補わずに直接起動**して
+# 「省略すると止まる」を見る。止めるのはログを作る前で、ランナーは起動しない
+# (実リポジトリ直下での起動を機構として防ぐ)。--cwd "" は省略と同じ扱い
+CWDREQ="$WORK/cwdreq"
+for cv in omit empty; do
+  rm -rf "$CWDREQ"; mkdir -p "$CWDREQ"; rm -f "$SIDEEFFECT"
+  rc=0
+  if [ "$cv" = omit ]; then
+    ( cd "$CWDREQ" && exec bash "$TARGET" --runner stubrunner \
+        --command "bash $WORK/bin/stub-sideeffect.sh --readonly-x" --readonly-flag "--readonly-x" \
+        --prompt-file "$WORK/prompt.md" --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  else
+    ( cd "$CWDREQ" && exec bash "$TARGET" --runner stubrunner --cwd "" \
+        --command "bash $WORK/bin/stub-sideeffect.sh --readonly-x" --readonly-flag "--readonly-x" \
+        --prompt-file "$WORK/prompt.md" --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  fi
+  check "--cwd 必須($cv): usage で止まる" 2 "$rc"
+  if grep -qE '^ERROR \[usage\] --cwd が必要' "$CASE_ERR"; then ok "--cwd 必須($cv): 理由が stderr に出る"; else
+    ng "--cwd 必須($cv): 理由が stderr に出る"; cat "$CASE_ERR" >&2; fi
+  if [ ! -e "$SIDEEFFECT" ]; then ok "--cwd 必須($cv): ランナーを起動しない"; else
+    ng "--cwd 必須($cv): ランナーを起動しない(副作用ファイルが作られた)"; fi
+  if [ -z "$(find "$CWDREQ" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+    ok "--cwd 必須($cv): 起動した場所にログを残さない"
+  else
+    ng "--cwd 必須($cv): 起動した場所にログを残さない(残存: $(find "$CWDREQ" -mindepth 1 | head -3 | tr '\n' ' '))"
+  fi
+done
+# --dry-run は起動しないので --cwd が無くても通る
+rc=0
+( cd "$CWDREQ" && exec bash "$TARGET" --runner stubrunner \
+    --command "bash $WORK/bin/stub-sideeffect.sh --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --dry-run ) \
+  >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+check "--cwd 必須: --dry-run は --cwd が無くても通る" 0 "$rc"
+
+# cd を親シェルで行う形にしたことの副作用を塞いだ 3 点
+ENVCASE="$WORK/envcase"; rm -rf "$ENVCASE"; mkdir -p "$ENVCASE/sub" "$ENVCASE/reltmp"
+# (1) export された CDPATH: 素の cd が行き先を stdout に出すと、ログパスが 2 行に化け、
+#     stdout(指摘 JSON だけ)の出力契約も崩れる。既定のログ置き場と相対の --cwd で見る
+rc=0
+( cd "$ENVCASE" && exec env CDPATH=. bash "$TARGET" --runner stubrunner \
+    --command "bash $WORK/bin/stub-record.sh --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd sub --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+if check "CDPATH を export した環境: 成功する" 0 "$rc"; then
+  if python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$CASE_OUT" 2>/dev/null; then
+    ok "CDPATH を export した環境: stdout は指摘 JSON だけ"
+  else
+    ng "CDPATH を export した環境: stdout は指摘 JSON だけ"; head -3 "$CASE_OUT" >&2
+  fi
+fi
+# (2) 中に入れない --cwd(検索権限なし)は引数の誤り。cd の失敗が internal(不具合扱い)に化けない
+mkdir -p "$ENVCASE/noexec"; chmod 600 "$ENVCASE/noexec"
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-record.sh --readonly-x" \
+  --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" --cwd "$ENVCASE/noexec" --probe-timeout 10; rc=$?
+chmod 700 "$ENVCASE/noexec"
+if check "検索権限の無い --cwd: usage で止まる" 2 "$rc"; then
+  if grep -qF 'に検索(実行)権限が無くて移動できない' "$CASE_ERR"; then ok "検索権限の無い --cwd: 理由が stderr に出る"; else
+    ng "検索権限の無い --cwd: 理由が stderr に出る"; cat "$CASE_ERR" >&2; fi
+fi
+# (3) 相対の TMPDIR: 一時ファイルへのリダイレクトが cd の後で解決されてずれない
+rc=0
+( cd "$ENVCASE" && exec env TMPDIR=reltmp bash "$TARGET" --runner stubrunner \
+    --command "bash $WORK/bin/stub-record.sh --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+check "相対の TMPDIR: 成功する" 0 "$rc"
+
+# 中止(TERM / HUP): スクリプト自身へのシグナルで、走行中の外部 CLI の子を道連れにする。
+# 呼び出し側は背景実行するので、中止操作はシグナルとして届く。子が生き残ると、
+# 読み取り専用のはずのプロセスが残り続ける(implement-agent.sh には既にある保護)。
+SIGDIR="$WORK/sig"; mkdir -p "$SIGDIR"
+cat >"$SIGDIR/runproc.sh" <<'SH'
+#!/usr/bin/env bash
+trap '' TERM
+sleep 120
+SH
+chmod +x "$SIGDIR/runproc.sh"
+cat >"$SIGDIR/stub.sh" <<SH
+#!/usr/bin/env bash
+# プローブ(末尾引数に ping を含む)は即答し、本実行だけ子を残して待つ。
+# 読み取り専用フラグはプローブにも本実行にも付くので、フラグの有無では見分けられない
+for a in "\$@"; do case "\$a" in *ping*) echo '{"verdict":"APPROVED","issues":[]}'; exit 0 ;; esac; done
+: >"$SIGDIR/started"   # touch はサンドボックスの PATH に無いことがあるので組み込みで作る
+bash "$SIGDIR/runproc.sh"
+SH
+chmod +x "$SIGDIR/stub.sh"
+sig_leak_count() { ps -eo args 2>/dev/null | grep -c "^bash $SIGDIR/runproc.sh"; }
+sig_cleanup() {
+  ps -eo pid,args 2>/dev/null | awk -v s="bash $SIGDIR/runproc.sh" '$0 ~ "[0-9] "s {print $1}' \
+    | while read -r pp; do kill -9 "$pp" 2>/dev/null; done
+}
+# $1=ラベル $2=シグナル $3=期待終了コード $4=path(timeout|fallback) $5=log(abs|default)
+sig_case() {
+  sc_label="$1"; sc_sig="$2"; sc_want="$3"; sc_path="$4"; sc_log="$5"
+  rm -f "$SIGDIR/started"
+  sc_logcwd="$SIGDIR/logcwd-$sc_label"; rm -rf "$sc_logcwd"; mkdir -p "$sc_logcwd"
+  sc_logargs=(--log-file "$WORK/log-sig-$sc_label.md")
+  sc_logpath="$WORK/log-sig-$sc_label.md"
+  if [ "$sc_log" = default ]; then
+    # 既定のログ置き場は起動した場所からの相対パス。cd した後で中止されても見失わないこと
+    sc_logargs=()
+    sc_logpath="$sc_logcwd/.claude/reviews/reviewer-stubrunner-iter1.md"
+  fi
+  if [ "$sc_path" = fallback ]; then
+    ( cd "$sc_logcwd" && exec env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" \
+        PATH="$WORK/sandbox-notimeout" bash "$TARGET" --runner stubrunner \
+        --command "bash $SIGDIR/stub.sh --readonly-x" --readonly-flag "--readonly-x" \
+        --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 60 \
+        ${sc_logargs[@]+"${sc_logargs[@]}"} ) >"$CASE_OUT" 2>"$CASE_ERR" &
+  else
+    ( cd "$sc_logcwd" && exec bash "$TARGET" --runner stubrunner \
+        --command "bash $SIGDIR/stub.sh --readonly-x" --readonly-flag "--readonly-x" \
+        --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 60 \
+        ${sc_logargs[@]+"${sc_logargs[@]}"} ) >"$CASE_OUT" 2>"$CASE_ERR" &
+  fi
+  sig_pid=$!
+  waited=0
+  while [ ! -e "$SIGDIR/started" ] && [ "$waited" -lt 40 ]; do sleep 1; waited=$((waited + 1)); done
+  sleep 1
+  if [ ! -e "$SIGDIR/started" ]; then
+    ng "中止($sc_label): 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
+    kill -9 "$sig_pid" 2>/dev/null; wait "$sig_pid" 2>/dev/null; sig_cleanup; return 0
+  fi
+  kill -"$sc_sig" "$sig_pid" 2>/dev/null
+  rc=0; wait "$sig_pid" || rc=$?
+  sleep 2
+  if [ "$rc" -eq "$sc_want" ]; then ok "中止($sc_label): 終了コード $sc_want で終わる"; else
+    ng "中止($sc_label): 終了コード $sc_want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
+  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($sc_label): 外部ランナーの子を残さない"; else
+    ng "中止($sc_label): 外部ランナーの子を残さない(残存 $(sig_leak_count) 件)"; sig_cleanup; fi
+  # ERROR 行は元の stderr に出る(本実行の stderr を受ける一時ファイルへ消えない)
+  if grep -qE '^ERROR \[aborted\] ' "$CASE_ERR"; then ok "中止($sc_label): stderr に ERROR [aborted] が出る"; else
+    ng "中止($sc_label): stderr に ERROR [aborted] が出る"; cat "$CASE_ERR" >&2; fi
+  if grep -qF '**中止**' "$sc_logpath" 2>/dev/null; then ok "中止($sc_label): ログに中止が残る"; else
+    ng "中止($sc_label): ログに中止が残る($sc_logpath)"; fi
+}
+sig_case TERM TERM 143 timeout abs
+sig_case HUP HUP 129 timeout abs
+# timeout / gtimeout が無い環境(macOS 既定)の代替経路でも子を道連れにする
+sig_case TERM-fallback TERM 143 fallback abs
+# 既定のログ置き場(相対パス)で中止しても、cd 先の一時ツリー基準で見失わない
+sig_case TERM-defaultlog TERM 143 timeout default
+sig_cleanup
 
 echo
 printf '%s\n' "$RESULTS"

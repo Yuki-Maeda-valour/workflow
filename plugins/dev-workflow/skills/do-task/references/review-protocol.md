@@ -6,7 +6,7 @@
 
 実装に関与していない reviewer(読み取り専用)を新規に起動する(`name` は `reviewer`)。**③ 外部ランナーが宣言されている場合はこの 1 体も `reviewer-internal` を名乗る**(枡名の写像は [delegation-map.md](delegation-map.md) §2 (a)。下の「外部ランナー」節の「`reviewer-internal` は常に維持」がこの枠を指す)。渡すもの:
 
-- diff(`.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md`。基準コミットからの追跡差分 + index + 途中 commit + 未追跡の新規ファイルを含む。生成は do-task Phase 4 の手順 1 の `scripts/diff-snapshot.sh`。対象が git リポジトリでないときは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡し、レビュアーは実ファイルを読む)とタスク MD のパス
+- diff(`.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md`。**内蔵 reviewer はこのパスのまま読む**。**外部ランナー(③)にはこのパスを渡さない** —— この置き場は `.gitignore` の対象で、一時ツリー(HEAD + パッチ)に運ばれず外部レビュアーからは読めない(実測)。**外部ランナーには、external-runners.md §9-1 の手順 1 が同じ入力で一時ツリーの中に生成する `.review-snapshot.md` と `.review-diff.patch` を `--target` で渡す**(依頼文でもこの 2 つのファイル名で指す。一時ツリーに無いパスを書くと、外部レビュアーは読めずに推測でレビューすることになる)。基準コミットからの追跡差分 + index + 途中 commit + 未追跡の新規ファイルを含む。生成は do-task Phase 4 の手順 1 の `scripts/diff-snapshot.sh`。対象が git リポジトリでないときは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡し、レビュアーは実ファイルを読む)とタスク MD のパス
 - レビュー観点(下記 6 カテゴリ)
 - 返答形式: `APPROVED` または指摘リスト JSON
 
@@ -112,7 +112,9 @@ minor のみが残った場合の扱い: 過剰修正で新たな問題を作る
 
 ## 死活監視 M1〜M4(長時間サブエージェントの停止対策)
 
-委託したサブエージェントから長時間(目安: implementer 15 分 / reviewer 10 分)応答がない場合:
+委託したサブエージェントから長時間(目安: implementer 15 分 / **reviewer 20 分**)応答がない場合:
+
+> **reviewer の目安の根拠**: 外部ランナーの既定の**最大所要時間**はプローブ 60 秒 + 本実行 600 秒 + ヘルプ照合(20 秒 × 最大 2 回)+ 終了猶予で、**目安がそれより短いと M2 が正常な実行を二重起動する**。目安は常に**既定の最大所要時間より長く**保つ(既定値は `review-agent.sh` の `PROBE_TIMEOUT` / `RUN_TIMEOUT` / `HELP_TIMEOUT` / `KILL_GRACE`)。
 
 - **M1 状態確認**(フル段階のみ): **生存確認(軸 7)**を行い、**走行中の問い合わせ(軸 6)**で `STATUS を 1〜2 行で返答して` と尋ねる。**標準・最小段階では M1 を省略し、外部 implementer(③ 宣言時)以外は待機目安を超えたら M2 へ直行する**。**外部 implementer には軸 6 の送達手段が無く問い合わせ自体ができないが、待機目安の経過だけでは M2(新規起動)へ進まない**([delegation-map.md](delegation-map.md) 軸 6。縮退の正本は design §5-17)
 - **M2 個別再委託**: 応答がなければ、そのエージェントは失われたものとみなし、**外部 implementer(③ 宣言時)を除いて**同じ役割を**新規に起動**して引き継ぐ。引き継ぎプロンプトには前回までの成果(diff・レビュー記録のパス)を含め、ITER はリセットしない。**外部 implementer は待機目安を超えても新規起動せず、終了・タイムアウトで停止した後に契約の比較と引き継ぎ条件の判定を経て内蔵が引き継ぐ**(走行中の外部プロセスと新規起動が同じ作業ツリーへ同時に書き込むのを避けるため。条件は [external-runners.md](external-runners.md) §12-3・§12-7、縮退の正本は design §5-17)

@@ -26,7 +26,8 @@
 #   --prompt-file <パス>    委託プロンプトのファイル(必須。空・未指定は usage)
 #   --cwd <ディレクトリ>    本実行の作業ディレクトリ = 書き込み範囲(**必須**。空・未指定は usage)。
 #                           profile の root(未設定なら管理ルート)を呼び出し側が渡す。
-#                           レビュー経路は省略を許すが、実装経路は向きが反転して必須
+#                           レビュー経路も必須だが渡すのは一時ツリー。実装経路は向きが反転し、
+#                           実リポジトリ(root)を渡す
 #   --model <名前>          ランナーへ渡すモデル名(省略・空はモデル指定フラグごと落とす)
 #   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md)
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
@@ -76,6 +77,9 @@
 #         このスクリプトが保証できるものではない(限界は external-runners.md §12-4)。
 # --- end usage ---
 set -eEuo pipefail
+# export された CDPATH があると、素の `cd` が行き先を stdout へ出す(パスの正規化が 2 行に化け、
+# stdout は指摘 JSON / 生出力だけ、という出力契約も崩れる)。このスクリプトの `cd` はすべて明示パスなので要らない
+unset CDPATH
 
 RUNNER=""
 MODEL=""
@@ -365,7 +369,16 @@ build_cmd() { # $1=プロンプト本文 → 配列 CMD を組む(常に既定�
       *) CMD[${#CMD[@]}]="$w" ;;
     esac
   done
-  if [ "$bc_placed" -ne 1 ]; then CMD[${#CMD[@]}]="$bc_prompt"; fi
+  if [ "$bc_placed" -ne 1 ]; then
+    # `{prompt}` を持たないテンプレでは末尾に足す。**`-` で始まるプロンプトは
+    # オプションと誤認される**(実測: codex は `error: unexpected argument '- '` で拒否し、
+    # `tip: to pass '- ' as a value, use '-- - '` と案内する)。箇条書き・frontmatter で
+    # 始まる依頼文が通らなくなるので、その形のときだけ `--` を挟む。
+    case "$bc_prompt" in
+      -*) CMD[${#CMD[@]}]="--" ;;
+    esac
+    CMD[${#CMD[@]}]="$bc_prompt"
+  fi
 }
 
 # 判定 4′ 用: CMD の中の「書き込みフラグ 値」を「プローブ用フラグ 値」へ**対で**差し替える。

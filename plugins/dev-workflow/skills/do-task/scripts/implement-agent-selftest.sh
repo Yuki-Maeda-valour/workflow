@@ -281,8 +281,9 @@ EOF
 
 # 10) 一時領域の改竄(決定 40 の PoC)。本実行から「スクリプトの scratch らしき場所」を
 #     総当たりで上書きしようとする。保護領域に置いてあれば届かない。
-#     ⚠ この治具は意図的に雑(`/tmp/tmp.*/raw.txt` を総当たり)なので、**このスイートを
-#        他の dev-workflow 自己テストと同時に走らせない**(相手の一時ファイルまで汚す)
+#     探索範囲は `SELFTEST_FORGE_SCAN` で渡した場所だけ(このケース専用の $TMPDIR)。
+#     以前は `/tmp` と `$TMPDIR` を総当たりしており、無関係なプロセスの一時ファイルまで
+#     壊しうる状態だった(同時実行を禁じる運用で回避していた)
 mkdir -p "$WORK/forge"
 cat >"$WORK/forge/codex" <<'EOF'
 #!/usr/bin/env bash
@@ -300,7 +301,10 @@ for a in "$@"; do
 done
 if [ "$mode" = "read-only" ]; then echo "pong"; exit 0; fi
 echo "本物の生出力(実装は途中で止まった)"
-for d in /tmp "${TMPDIR:-/tmp}"; do
+# 探索範囲は selftest が渡した場所だけにする(無関係なプロセスの一時ファイルを壊さない)。
+# 決定 40 の PoC としての意味は保たれる —— スクリプトの scratch がこの範囲にあれば
+# 総当たりで届き、保護領域にあれば届かない、を確かめるのが目的。
+for d in ${SELFTEST_FORGE_SCAN:-}; do
   for f in "$d"/tmp.*/raw.txt "$d"/tmp.*/raw.err "$d"/tmp.*/probe.txt; do
     [ -f "$f" ] && printf 'FORGED: 全部終わりました\n' >"$f"
   done
@@ -452,7 +456,7 @@ if check "§12-8 の任意引数を全て同時に受理する" 0 "$rc"; then
     ng "--model が本実行の argv に入る(実際: $(call_field 2 model))"; fi
 fi
 
-# A3. --cwd の省略は usage(レビュー経路との最大の差)
+# A3. --cwd の省略は usage(レビュー経路も必須。違いは渡す場所で、こちらは実リポジトリ)
 rm -f "$SIDEEFFECT"
 STUB_DIR="$WORK/evilbin"
 run_agent --runner codex --prompt-file "$PROMPT" --probe-timeout 10 --log-file "$WORK/log-a3.md"; rc=$?
@@ -946,8 +950,15 @@ leak_cleanup
 # H2. 決定 40: 本実行の出力を受ける scratch は「外部の書き込み範囲外」の保護領域にある。
 #     /tmp に置くと、記録の対象である本実行のプロセス自身が生出力を偽造できる(PoC)
 STUB_DIR="$WORK/forge"
-run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
-  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h2.md"; rc=$?
+# 治具が総当たりする場所を、このケース専用の一時領域に限る(系全体の /tmp を触らせない)
+FORGE_TMP="$WORK/forge-tmp"; mkdir -p "$FORGE_TMP"
+h2_env=()
+while IFS= read -r e; do h2_env[${#h2_env[@]}]="$e"; done <<<"$(agent_env)"
+h2_env[${#h2_env[@]}]="TMPDIR=$FORGE_TMP"
+h2_env[${#h2_env[@]}]="SELFTEST_FORGE_SCAN=$FORGE_TMP"
+rc=0
+guard env "${h2_env[@]}" bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h2.md" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 if check "一時領域: 本実行から scratch を書き換えようとしても成功する" 0 "$rc"; then
   if grep -qF 'FORGED' "$CASE_OUT"; then
     ng "一時領域: 生出力が本実行から偽造されない(stdout が汚染された)"; cat "$CASE_OUT" >&2
@@ -1109,6 +1120,66 @@ if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
 else
   ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
 fi
+
+# `-` で始まるプロンプト(箇条書き・frontmatter)がオプションと誤認されない。
+# スタブは codex と同じく、`--` より前にある未知の `-` 始まりの引数を拒否する —— 最後の引数を
+# 記録するだけのスタブでは、`--` を挟まない実装でも同じ最後の引数が届いて判別できない。
+mkdir -p "$WORK/strictopt"
+cat >"$WORK/strictopt/codex" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--help" ]; then
+    echo '  -s, --sandbox <SANDBOX_MODE>'
+    echo '          [possible values: read-only, workspace-write, danger-full-access]'
+    exit 0
+  fi
+done
+seen_dd=0; skip=0
+for a in "$@"; do
+  if [ "$skip" -eq 1 ]; then skip=0; continue; fi
+  [ "$seen_dd" -eq 1 ] && continue
+  case "$a" in
+    --) seen_dd=1 ;;
+    --sandbox|-m) skip=1 ;;
+    exec) : ;;
+    -*) echo "error: unexpected argument '$a' found" >&2; exit 2 ;;
+  esac
+done
+printf '%s' "${@: -2:1}" >"$SELFTEST_RECORD_DIR/strict-penult.txt"
+printf '%s' "${@: -1}" >"$SELFTEST_RECORD_DIR/strict-last.txt"
+echo "外部 implementer の生出力(strict)"
+EOF
+chmod +x "$WORK/strictopt/codex"
+STUB_DIR="$WORK/strictopt"
+PROBE_BEHAVIOR="none"   # 前のケースの設定を持ち込まない
+printf -- '- 箇条書きで始まる実装依頼\n- 2 行目\n' >"$WORK/prompt-dash.md"
+rm -f "$RECORD_DIR/strict-penult.txt" "$RECORD_DIR/strict-last.txt"
+run_agent --runner codex --prompt-file "$WORK/prompt-dash.md" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-dash.md"; rc=$?
+if check "- 始まりのプロンプト: 拒否されずに本実行まで通る" 0 "$rc"; then
+  if [ "$(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null)" = "--" ]; then
+    ok "- 始まりのプロンプト: 直前に -- が挟まる"
+  else
+    ng "- 始まりのプロンプト: 直前に -- が挟まる(実際: $(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null))"
+  fi
+  if grep -q '箇条書きで始まる実装依頼' "$RECORD_DIR/strict-last.txt" 2>/dev/null; then
+    ok "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  else
+    ng "- 始まりのプロンプト: 内容が欠けずに最後の引数として届く"
+  fi
+fi
+# `-` で始まらないプロンプトには `--` を挟まない(必要なときだけ足す)
+rm -f "$RECORD_DIR/strict-penult.txt"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-nodash.md"; rc=$?
+if check "通常のプロンプト: 本実行まで通る" 0 "$rc"; then
+  if [ "$(cat "$RECORD_DIR/strict-penult.txt" 2>/dev/null)" != "--" ]; then
+    ok "通常のプロンプト: -- を挟まない"
+  else
+    ng "通常のプロンプト: -- を挟まない"
+  fi
+fi
+STUB_DIR="$WORK/pathbin"
 
 echo
 printf '%s\n' "$RESULTS"

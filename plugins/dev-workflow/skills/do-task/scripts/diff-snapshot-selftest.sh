@@ -3559,6 +3559,31 @@ ckeq "㊺ 止まるまでにオブジェクトを読む git を呼ばない" \
 ckeq "㊺ --base の rev-parse --verify も呼ばれない" \
   "$(grep -E 'rev-parse' "$SELFTEST_GITLOG" | grep -c -- '--verify' || true)" 0
 ckne "㊺ git スタブは実際に呼ばれている(記録が空でない)" "$(grep -c . "$SELFTEST_GITLOG")" 0
+# ── 許可リストの例外は設けない(diff-snapshot-call.md の決定を固定する)──
+# `.env.example` のような公開テンプレートも `.env.*` に当たれば機密として除外する。
+# 除外を外す経路は改竄の余地になるので、スクリプトにもその口を設けない
+# (テンプレートの変更が外部レビューの対象外になるのは受け入れた限界)。
+mkrepo cnoexc
+R="$WORK/cnoexc"
+for f in .env .env.production .env.example a.txt; do printf 'V=old\n' >"$R/$f"; done
+GIT "$R" add -A
+GIT "$R" commit -q -m base
+B="$(GIT "$R" rev-parse HEAD)"
+for f in .env .env.production .env.example a.txt; do printf 'V=NEW-%s\n' "$f" >"$R/$f"; done
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" \
+  --exclude-glob '.env' --exclude-glob '.env.*' --exclude-glob '.dev.vars'
+ckeq "例外なし: 既定の除外で exit 0" "$RC" 0
+ckt "例外なし: 通常ファイルはパッチに入る" grep -qxF -e '+V=NEW-a.txt' -- "$PATCHF"
+# 行の完全一致で見る(`V=NEW-.env` は `V=NEW-.env.example` の部分文字列)
+for f in .env .env.production .env.example; do
+  ckf "例外なし: $f はパッチに入らない" grep -qxF -e "+V=NEW-$f" -- "$PATCHF"
+  ckf "例外なし: $f の値は本文にも出ない" grep -qxF -e "+V=NEW-$f" -- "$OUT"
+done
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env.*' --exclude-exception-glob '.env.example'
+ckeq "例外なし: 除外を外すオプションは存在しない(usage エラー)" "$RC" 2
+
 unset SELFTEST_GITLOG
 unset SELFTEST_TRACE
 
