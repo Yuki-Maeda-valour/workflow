@@ -12,7 +12,7 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器とタスク保存先の解決)
+scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器・タスク保存先の解決・本文ダイジェスト)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
@@ -34,7 +34,7 @@ setup.sh                            # plugin を使わない導入(コピー / s
 ```bash
 # JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク)+ 配布メタの一括検証
 python3 scripts/validate.py
-python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決)
+python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト)
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
 # —— 合否がリポジトリ外のデータで決まらないようにするため)。誤検出が出た語は渡さないか、
@@ -68,3 +68,4 @@ bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   #
 - ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする
 - do-task の基準コミット行(書式は `> **基準コミット**: <sha>[ / 未追跡一覧: <sha256>]`。**書式の正本は do-task/SKILL.md Phase 0 の手順 5**)は対象 Issue 本文のヘッダ引用ブロックに追記する(全文置換前に取得した本文の中身と行数を検査する)
 - 設計レビューの行と do-task の検証結果の記録は、Issue 本文の末尾の `## 追加修正記録` 節(見出しはレベル 2)に置く(無ければ作る。設計レビューの行の書式は create-task/references/task-template.md の記法の規約)。基準コミット行と同じく、全文置換の前に取得した本文の中身と行数を検査する
+- 設計レビューの行の `本文` は Issue 本文から算出する(`gh issue view <N> --json body -q .body | python3 plugins/dev-workflow/skills/create-task/scripts/task-digest.py -`)
