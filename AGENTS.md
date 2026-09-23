@@ -67,3 +67,4 @@ bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   #
 - チェック状態・レビューには Issue 本文と diff を使い、完了リネームの代わりに検証結果を Issue へ記録する。update-doc はその完了記録を入力にする
 - ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする
 - do-task の基準コミット行(書式は `> **基準コミット**: <sha>[ / 未追跡一覧: <sha256>]`。**書式の正本は do-task/SKILL.md Phase 0 の手順 5**)は対象 Issue 本文のヘッダ引用ブロックに追記する(全文置換前に取得した本文の中身と行数を検査する)
+- 設計レビューの行と do-task の検証結果の記録は、Issue 本文の末尾の `## 追加修正記録` 節(見出しはレベル 2)に置く(無ければ作る。設計レビューの行の書式は create-task/references/task-template.md の記法の規約)。基準コミット行と同じく、全文置換の前に取得した本文の中身と行数を検査する
