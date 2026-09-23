@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.7.0
+
+### 変更
+
+- `/do-task` の外部 implementer(`features.implementer`)に、外部に解決しない条件を 2 つ足した。A: タスク MD がファイルでない(課題管理システムの本文など。本文の写しを `--task-md` に渡さない)。B: そのセッションで最後に承認した一覧に filter がある(承認の場所は問わない)。どちらも Phase 3 に入るたび(ITER ごと)に、外部の手順の手順 1 で承認より前に判定し、当たれば内蔵 implementer で走って理由を報告する。B は手順 1 で `diff-snapshot.sh --precheck` を打ち直して判定する(rc 22 なら人の承認を求め、承認されなければ停止する)。git でないプロジェクトも、承認を求めずにここで内蔵に決まる(これまでは承認の後に `take` の `not-git` で縮退していた)
+- 外部に解決されたときは、`implement-guard.sh take` の後、外部を起動する前に、保護領域のパスと 2 つのダイジェストを報告に出す。値を埋めた 3 本のコマンド行(`--precheck`・`compare`・`taskmd-diff`)と、手順 1 の `--precheck` の NOTE「無効化して実行」の行も出す。値を失ったら、このセッションのユーザーの発話からだけ受け取る(受け取れなければ比較不能)
+- 別のセッションで再開するときの手順を定めた(`do-task/references/external-runners.md` §12-2 の受け入れた限界 (a))。外部のプロセスが残っていないことを確かめ、報告の値で `--precheck` → `compare` → `taskmd-diff` を通してから /do-task で再開し、完了処理の後に `cleanup` を打つ
+- 起動後の共通工程で、`--precheck` の stdout に `GIT_CONFIG_COUNT` が出たら `compare` を打たず(`taskmd-diff` は打つ)、比較不能として人の判断へ回す。再開は、外部が足した設定・属性・hooks をファイルの編集で戻してから、`--precheck` から打ち直す
+- 共通工程の `--precheck` と Phase 4 の diff スナップショットの `--accept` は、Phase 0 の値ではなく、そのセッションで最後に承認した値を付ける(差し戻しのたびに同じ承認を求めない)
+- `/ship-task` の Phase 0 で先取りした外部実装委託の承認は、/do-task が上の条件で内蔵に縮退したときは使わず、そのことを報告する
+
 ## v4.6.0
 
 ### 変更
