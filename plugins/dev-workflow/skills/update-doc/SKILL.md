@@ -1,7 +1,7 @@
 ---
 name: update-doc
 description: プロジェクトのドキュメント類(Serena メモリ / 権威参照ファイル AGENTS.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は直近の完了タスクを自動検出)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
-argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--runners=<名前,...>] [--yes]"
+argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--runners=<名前,...>] [--yes] [--unattended]"
 ---
 
 # update-doc — ドキュメント・メモリの実コード同期
@@ -36,6 +36,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
+| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。報告点では止まり「未承認」で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)) |
 
 ## Phase 1: 入力と現状把握
 
@@ -90,7 +91,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
   - **地雷の追記**: 恒久的な発見のみ 05 へ(一時的なものは書かない)
 - **索引の更新**: 内容を変更した文書について、doc/README.md の状態絵文字・最終更新日を更新する
 
-`--yes` でなければ、適用前に更新内容の一覧(対象 / 変更概要)を提示して確認を取る。適用は 1 ファイルずつ、根拠と共に。
+`--yes` でなければ、適用前に更新内容の一覧(対象 / 変更概要)を提示して確認を取る(`--unattended` は `--yes` を含む — U1)。適用は 1 ファイルずつ、根拠と共に。
 
 ## Phase 5: 独立レビューループ(常に実行)
 
@@ -100,7 +101,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
-4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ
+4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ。`--unattended` では報告点で止まり、「未承認」で返す(U2。/ship-task は失敗扱いにする)
 5. 記録: `.claude/reviews/update-doc-iter{N}.md`
 
 ## Phase 6: 最終チェック
