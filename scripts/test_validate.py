@@ -105,6 +105,14 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(1, n, "description 行が 1 行見つからない")
         target.write_text(new, encoding="utf-8")
 
+    def add_frontmatter_line(self, skill, line):
+        """SKILL.md の frontmatter の name の行の直後に 1 行を足す。"""
+        target = self.repo / "plugins" / "dev-workflow" / "skills" / skill / "SKILL.md"
+        text = target.read_text(encoding="utf-8")
+        new, n = re.subn(r"^(name: .*)$", lambda m: m.group(1) + "\n" + line, text, count=1, flags=re.MULTILINE)
+        self.assertEqual(1, n, "name 行が 1 行見つからない")
+        target.write_text(new, encoding="utf-8")
+
     def patch_json(self, relpath, mutate):
         target = self.repo / relpath
         data = json.loads(target.read_text(encoding="utf-8"))
@@ -249,6 +257,29 @@ class ValidateTest(unittest.TestCase):
             with self.subTest(length=length):
                 self.set_description("tool-check", length)
                 self.assert_clean()
+
+    # ------------------------------ V9: frontmatter の allowed-tools / disallowed-tools
+
+    def test_v9_allowed_tools_in_frontmatter_is_error(self):
+        self.add_frontmatter_line("tool-check", "allowed-tools: Read, Grep")
+        self.assert_error(["tool-check/SKILL.md", "frontmatter に allowed-tools がある", "design.md §6"])
+
+    def test_v9_disallowed_tools_in_frontmatter_is_error(self):
+        self.add_frontmatter_line("tool-check", "disallowed-tools: Edit, NotebookEdit")
+        self.assert_error(["tool-check/SKILL.md", "frontmatter に disallowed-tools がある", "design.md §6"])
+
+    def test_v9_both_keys_are_errors(self):
+        self.add_frontmatter_line("tool-check", "allowed-tools: Read")
+        self.add_frontmatter_line("tool-check", "disallowed-tools: Edit")
+        errors = self.assert_error(["tool-check/SKILL.md", "frontmatter に allowed-tools がある"])
+        self.assertTrue(any("frontmatter に disallowed-tools がある" in e for e in errors), errors)
+
+    def test_v9_without_keys_passes_and_body_mention_is_not_checked(self):
+        # 鍵が無ければ通る。本文でこの語に触れるだけ(frontmatter の外)は検査しない
+        target = self.repo / "plugins" / "dev-workflow" / "skills" / "tool-check" / "SKILL.md"
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("\nfrontmatter に allowed-tools・disallowed-tools を付けない。\n")
+        self.assert_clean()
 
     # ------------------------------------------------------------ V5: リンク検査
 

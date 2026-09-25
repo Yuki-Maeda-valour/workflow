@@ -13,7 +13,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 3. **要件不明のまま実装しない**。設計に必要な情報が欠けている場合は /create-task の中で確認する。それでも不明が残るなら、設計書を成果物として返し実装へ進まない(誤った物を全力で作らないため)
 4. **PR は「緑」でしか開かない**。ここでの緑は、品質ゲートが緑・レビューが全員 APPROVED・実動確認が「実施済」か「実施不能」(状態の定義は /do-task の Phase 5.5 の表)の 3 つが揃うこと。揃わない状態で PR を作らない。停止時は作業ブランチと commit を残し、何が未達かを報告する
 5. **git 操作の範囲を明示する**。ブランチ作成・commit・push・PR 作成はこのスキルの責務だが、マージはしない。レビュアーの自動アサインもしない
-6. **無人モードは正本に従う**。`--unattended` のときは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。対話点ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)
+6. **無人モードは正本に従う**。`--unattended` のときは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。対話点ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。`--unattended` のときは、最初に references/unattended-mode.md を Read し、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない(特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介に拒否されると、打ち直さずに失敗扱いになる)
 
 ## オプション
 
@@ -104,7 +104,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 ## Phase 5: PR 作成
 
 1. `git push -u origin {ブランチ名}`(無人では、下の push の直前の照合を通してから)
-2. `gh pr create --base {デフォルトブランチ} --title "{タスク名}" --body-file {本文}` で **通常の PR を開く**(draft にしない。レビュアー・アサインは付けない)
+2. `gh pr create --base {デフォルトブランチ} --title "{タスク名}" --body-file -` で、本文を stdin から渡して **通常の PR を開く**(draft にしない。レビュアー・アサインは付けない)。本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。対話でも無人でも同じ
 3. PR 本文には次を含める(タスク MD と各工程の報告から転記する。推測で書かない):
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
@@ -155,3 +155,4 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 前提: /understand-project(未把握なら Phase 0 で実施)
 - 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task {実際のタスクMDパス}` で Phase 3 から再開できる)
 - タスク MD が既にある場合: `--task=<タスク MD>` で Phase 2 から始める(設計レビュー済みの MD を、実装から PR まで回す)。実装だけなら /do-task から始める
+- 無人ループ: 外側の while は同梱の `scripts/loop.sh` が回し、周ごとに新しいセッションで `--task=<タスク MD> --unattended` を呼ぶ(人のシェル・cron から起動する。契約は [references/loop.md](references/loop.md))

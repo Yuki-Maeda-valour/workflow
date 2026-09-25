@@ -2,6 +2,21 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.8.0
+
+### 変更
+
+- 無人ループ `ship-task/scripts/loop.sh` を足した(人のシェル・cron から、このリポジトリの clone のパスで起動する。既定はオフで、起動しなければ挙動は変わらない)。メタ行 `> **無人実行**: 可` がある `進行中_` を作成日の古い順に拾い、周ごとにローカルのデフォルトブランチから使い捨ての worktree を作って、新しいヘッドレスセッションで `/ship-task --task=<タスク MD> --unattended` を回す。作業ブランチか残った worktree があるタスクは拾わない。止まる条件は最大周回数・連続失敗・時間予算・停止ファイル・許可の拒否の保留の連続・共有の git の状態の変化など。時間上限を超えた周は打ち切って worktree を残す。リポジトリ側のホスト設定を読ませずに起動し、全許可のモードは使わない(許可リストはホストの利用者設定か `--allowed-tools`)。周の子の環境から `OLDPWD` を外す(周の中の `cd -` の行き先にさせない)。朝の報告のホストの結果の拒否の欄は、周の中でバックグラウンドに委託して結果がターンごとに出るときも、すべてのターンの拒否を集める。対象ホストは Claude Code だけ・Linux 専用。profile の `features.loop` に `max_iterations`・`max_consecutive_failures`・`time_budget`・`iteration_timeout` を足した(値を小さくする向きだけ効く)。契約の正本は `ship-task/references/loop.md`、回帰テストは `ship-task/scripts/loop-selftest.sh`
+- `loop.sh` の許可の仲介: 保護パス(`.claude/`・`.git` など)への書き込みは、編集の自動許可でも許可リストでも通らず確認に回り、無人の周では拒否になる。`loop.sh` は周を起動する前に worktree の `.claude/reviews/` を作り、`PermissionRequest` の hook(`ship-task/scripts/loop-permission.py`)を渡して、その周の worktree の状態ファイル(`.claude/reviews/` の下・`.claude/grasp.md`・`.claude/.understand-project-done`)への書き込みだけを許す。ほかは拒否して種類つきで記録し、朝の報告に写す。hook は、Bash の先頭の `CDPATH= cd -P -- <worktree の中のディレクトリ> && <続き>` を受け付け、続きをそのディレクトリを作業ディレクトリとして判定する(最初の `||`・`;` より後ろは、元の作業ディレクトリからも判定する。行き先が `-` で始まるか `~` を含むものは受け付けない)。hook を無効にする設定(`disableAllHooks`・`allowManagedHooksOnly`)があると起動しない。保護パスを変えるタスクは無人では完了しない。task_dir が保護パスの下(`.claude/tasks` など)のリポジトリでは、最初の周の選定で止まる
+- `/do-task` の `.claude/reviews/` の作成と、基準時点の未追跡一覧の保存を、同梱のスクリプト `do-task/scripts/reviews-dir.sh`(`ensure` / `save-untracked`)で行う(対話でも無人でも)。検査・停止の条件・基準行に書く sha256 は今までと同じ
+- `/do-task` の事前検査(`diff-snapshot.sh --precheck`)は、`--accept` を付けないとき(最初の実行。無人では常に)一時ファイルに受けずに直接実行し、終了コードだけを見る(対話でも。結果は同じ)。`--accept` を付けて打ち直すときは今までどおり一時ファイルに受ける
+- 無人モード(`ship-task/references/unattended-mode.md`)に、`loop.sh` の周の Bash の書き方を足した: `$(…)`・変数の展開・heredoc・改行を使わず解決した値を書く、本文のファイルは `.claude/reviews/` の下に置いて `<` か `-F` で渡す、など(最初の呼び出しからこの書き方で打つ)。許可の仲介の hook に拒否されたら、打ち直さずに許可の拒否(G1)に従う(hook の拒否の理由にもそう添える)
+- 無人(`--unattended`)で `/do-task`・`/update-doc` がサブエージェントに委託するとき、委託プロンプトに `ship-task/references/unattended-mode.md` の「委託するサブエージェント」の項の要点(周の Bash の書き方の具体の値)を要約し直さずにそのまま入れる。委託先が許可の拒否を報告したときも、メインは打ち直さずに許可の拒否(G1)に従う
+- タスク MD の記法の規約(`create-task/references/task-template.md`)に、作成日の行の照合パターンと、保留の行の `<停止条件>` の書式(対話点番号で始め、直後は空白か `:`)と取り出しパターンを足した。無人モードの `/ship-task` はこの書式で保留の行を書く(既存のタスク MD は変わらない)
+- 無人モードの結末の行の照合パターン(`^無人の周の結果: (PR|縮退|保留|失敗扱い) — `)を `ship-task/references/unattended-mode.md` §2 に足した
+- `/ship-task` は PR 本文を stdin で gh に渡す(`--body-file -`。対話でも無人でも)。PR の中身は変わらない
+- `/understand-project` を呼んだ後も、同じターンで Edit・NotebookEdit が使える(frontmatter の `disallowed-tools` を外した。呼んだ後のターンの残りにも効き、`/ship-task` などが続けて行う編集まで止めていた)。読み取り専用は本文の原則で守る
+
 ## v4.7.0
 
 ### 変更
