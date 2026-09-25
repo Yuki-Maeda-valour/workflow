@@ -5,7 +5,8 @@
   1. .claude-plugin/marketplace.json / plugin.json の JSON 構文と必須フィールド、
      配布メタの整合(version 3 箇所の一致・plugins[].source の実在・
      description の skill 件数の表記と実数の一致)
-  2. 各 SKILL.md: frontmatter の存在と name / description 必須、name とディレクトリ名の一致
+  2. 各 SKILL.md: frontmatter の存在と name / description 必須、name とディレクトリ名の一致、
+     frontmatter に allowed-tools / disallowed-tools の鍵が無いこと(design.md §6)
   3. SKILL.md 500 行以下(design.md §6。論理行数 = 改行の数 + 末尾が改行で終わらなければ 1)
   4. description の長さ(規約 150〜500 字は ERROR / 上限 1024 字)
   5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
@@ -372,6 +373,15 @@ def check_skills():
                     ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500。トリガー語句を足す)")
                 elif len(desc) > 500:
                     ERRORS.append(f"{d.name}/SKILL.md: description {len(desc)} 字(規約 150〜500)")
+            # skill の frontmatter でツールを制限・許可しない(design.md §6)。この鍵は skill を呼んだ後の
+            # ターンの残りにも効き、呼び出し側の skill を止めるか、確認を飛ばす許可を足しうる(§7-3)
+            for key in ("allowed-tools", "disallowed-tools"):
+                if key in fm:
+                    ERRORS.append(
+                        f"{d.name}/SKILL.md: frontmatter に {key} がある(呼んだ後のターンの残りにも効き、"
+                        "呼び出し側を止めるか確認を飛ばす許可を足しうる — design.md §6・§7-3。"
+                        "ツールの制約は本文の原則で書く)"
+                    )
 
         # 禁止パターン(SKILL.md と references/ scripts/ templates/ 全ファイル。
         # SKILL.md の有無に関わらず走る)

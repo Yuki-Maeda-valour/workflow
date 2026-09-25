@@ -9,6 +9,7 @@
 - diff(`.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md`。**内蔵 reviewer はこのパスのまま読む**。**外部ランナー(③)にはこのパスを渡さない** —— この置き場は `.gitignore` の対象で、一時ツリー(HEAD + パッチ)に運ばれず外部レビュアーからは読めない(実測)。**外部ランナーには、external-runners.md §9-1 の手順 1 が同じ入力で一時ツリーの中に生成する `.review-snapshot.md` と `.review-diff.patch` を `--target` で渡す**(依頼文でもこの 2 つのファイル名で指す。一時ツリーに無いパスを書くと、外部レビュアーは読めずに推測でレビューすることになる)。基準コミットからの追跡差分 + index + 途中 commit + 未追跡の新規ファイルを含む。生成は do-task Phase 4 の手順 1 の `scripts/diff-snapshot.sh`。対象が git リポジトリでないときは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡し、レビュアーは実ファイルを読む)とタスク MD のパス
 - レビュー観点(下記 6 カテゴリ)
 - 返答形式: `APPROVED` または指摘リスト JSON
+- 無人(`--unattended`)では、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる(「拒否されたら打ち直さずに報告する」は要点の最後の行。3 体構成でも、checker などほかの委託でも同じ)
 
 ### 3 体構成(--reviewers=3 / 高リスクタスク)
 

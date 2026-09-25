@@ -85,6 +85,31 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 - **skill を 1 本だけ取り出す配置は非サポート**: skill 間の兄弟参照(`../do-task/...`)が解決できず、外部ランナー等の機能が無効化される
 - **`features.implementer`**: `internal`(既定)| 既定表にある実装用ランナー名。既定表外の名前は無視して報告する(`runners` と同じ信頼モデル)。宣言されていてもセッション初回に明示承認を得るまでは内蔵で実行する。既定表エントリと skill 本文の配線は **v4.2.0 で完了**しており、宣言すれば実際に外部で実装される(判定・作業ツリー保護・縮退・引き継ぎは上記の契約が正本)。旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。レビューのベンダー横断が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
 
+## 無人ループ(`loop.sh`。任意・既定オフ)
+
+メタ行 `> **無人実行**: 可` を付けた `進行中_` のタスク MD を、`/ship-task` の無人モードで 1 件ずつ回す同梱スクリプト。1 周 = 新しいヘッドレスセッションで、周ごとに使い捨ての worktree を作る(人のチェックアウトには触れない。merge はしない)。**契約の正本**(引数・既定値・停止条件・終了コード・報告・限界)は [loop.md](plugins/dev-workflow/skills/ship-task/references/loop.md) の 1 ファイルだけで、README や design はそれを参照する。
+
+```bash
+# 人のシェルから(まず --dry-run で対象の一覧と、周で起動するコマンドを確かめる)
+bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
+  --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>' --dry-run
+bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
+  --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>'
+
+# cron から(例: 毎晩 1 時)。cron の PATH は短いので、ホスト CLI・gh・品質ゲートのコマンドが見える PATH を書く
+# (crontab の変数の行では $HOME が展開されないので、<利用者> を埋めた絶対パスで書く)
+PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
+0 1 * * * bash $HOME/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh --repo $HOME/dev/対象プロジェクト --allowed-tools '<許可リスト>'
+```
+
+- **起動の場所**: 人のシェルか cron から、利用者が持つこのリポジトリの clone のパスで呼ぶ。導入先のキャッシュは版ごとのパスなので、そこから呼ぶとプラグインを更新しても古い版が走る。ホストのセッションの中から起動されたと判定したら止まる
+- **cron と手動の起動で環境を揃える**: `HOME`・`XDG_STATE_HOME` を同じにする。揃わないと状態ディレクトリが別になり、ロックと止めの印が共有されない(二重起動を防げず、止めの印があっても cron の起動が進む)。PATH は上の例のように crontab に書く
+- **導入済みの版との関係**: `loop.sh` は自分が置かれたプラグイン(clone)を周のセッションに渡す。導入済みの `dev-workflow` が有効で版が違えば、起動時に止まる(導入済みを更新するか、無効にする)。同じ版なら中身が同じとみなす
+- **許可リスト**: 全許可のモードは使わない。許可リストはホストの利用者設定か `--allowed-tools` で渡し(profile では受け付けない)、コマンド単位で列挙する(git・gh・python3・bash・判定と照合〈test・echo・sha256sum〉・読み取り系・品質ゲートのコマンドなど)。許可リストは誤操作を減らす仕組みで、隔離ではない。実走で使った値は [docs/design.md](docs/design.md) §7-3 に記録する
+- **許可の仲介**: 保護パス(`.claude/` など)への書き込みは確認に回って拒否になるので、`loop.sh` が渡す hook が、周の中の状態ファイル(`.claude/reviews/` など)への書き込みだけを通す。hook が Bash のコマンドを照合する許可リストも、`--allowed-tools` か利用者の設定(`permissions.allow`)から作るので、許可リストはこのどちらかに置く。hook を無効にする設定(`disableAllHooks`・管理者設定の `allowManagedHooksOnly`)があると、`loop.sh` は起動しない
+- **Linux 専用**: `setsid`・`flock`・`/proc` を使う。ほかの OS では起動時に止まる
+- 結果(周ごとの結末・残った worktree・人の次の手順)は朝の報告に出る。停止条件・報告の場所・保留のタスクを再び回す手順は loop.md
+
 ## 既存プロジェクトとの共存・移行
 
 - 既存プロジェクトの同名 skill(`.claude/skills/` 配下)はプロジェクト版が優先される。プラグイン版は `dev-workflow:名前` の名前空間で常に呼べる

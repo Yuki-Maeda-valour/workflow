@@ -50,10 +50,15 @@ bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/implement-agent.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/implement-guard.sh
+bash -n plugins/dev-workflow/skills/ship-task/scripts/loop.sh
+bash -n plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh
+bash -n plugins/dev-workflow/skills/do-task/scripts/reviews-dir.sh
+python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py   # 構文検査(__pycache__ を作らない)
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   # 実装委託の前後の保護の回帰テスト(必須)
+bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 無人ループ(loop.sh)の回帰テスト(必須)
 ```
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。
