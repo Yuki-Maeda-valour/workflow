@@ -1,6 +1,6 @@
 ---
 name: update-doc
-description: プロジェクトのドキュメント類(Serena メモリ / 権威参照ファイル AGENTS.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は直近の完了タスクを自動検出)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
+description: プロジェクトのドキュメント類(Serena メモリ / 権威参照ファイル AGENTS.md / doc 配下)を実コードと同期させる。「ドキュメント更新して」「メモリを最新化して」「docs を同期して」と言われたとき、タスク完了後の締めとして、または /understand-project がドリフトを検出したときに使う。タスク完了直後は完了タスク MD を入力に変更範囲だけを軽量同期し(--task、省略時は、このセッションで完了したタスクか、完了タスクの候補から選ぶ)、要件タグの昇格([決]→[実])・ADR 追記・図・索引まで doc 統一構成を一貫して更新する。実コード裏取りと能力帯の異なる複数モデルの並列レビュー付き。--analyze-only は全量監査の差分報告のみ。update-docs という旧名の依頼もこのスキルで扱う。
 argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | --specific=<name>] [--runners=<名前,...>] [--yes] [--unattended]"
 ---
 
@@ -22,13 +22,22 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | **タスク後の差分同期(最頻・軽量)** | /do-task 完了直後 | 完了タスク MD から更新対象を導出し、関係する文書・メモリだけを同期 |
 | **全量監査** | 定期・/understand-project のドリフト検出後・久しぶりの実行 | 全ドキュメント vs 実態(`--analyze-only` で差分報告のみも可) |
 
-モード判定: `--task=<パス>` 指定があれば管理プロジェクトルート相対として最優先し、profile の `task_dir` が不正でも保存先を再解決しない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `完了_*.md` から直近のもの(このセッションで /do-task を終えたもの、または git log / 更新時刻で判定)を入力に**差分同期**する。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは自動選択せず停止する。タスク文脈が無ければ**全量監査**。
+モード判定: `--task=<パス>` があれば、管理プロジェクトルート相対として最優先し、profile の `task_dir` が不正でも保存先を再解決しない(差分同期)。
+
+- `--analyze-only` はモードを変える指定(全量監査の差分報告だけ。入力を選ばない)で、`--task` の差分同期と両立しないので、**`--task` と `--analyze-only` を併用されたら停止し、どちらか一方を指定するよう案内する**
+- `--task` も `--analyze-only` も無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決する。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・**保存先のディレクトリの候補が複数** など)になったときは停止する
+- 解決できたら入力を選ぶ
+  - このセッションで /do-task が完了にしたタスク MD が 1 つなら、それを使う(差分同期)。2 つ以上なら並べてユーザーに選ばせる
+  - 無ければ、直下の `完了_*.md` を並べてユーザーに選ばせる(1 件でも確認する。全量監査も選べる)。**git log・更新時刻では自動で選ばない**(`完了_` は未 commit のことが多く、更新時刻は完了の順を保証しない)
+  - `完了_` が 1 件も無ければ**全量監査**
+- `--memory-only`・`--specific` は更新の対象を絞るだけで、入力の選び方は上のとおり
+- 無人(`--unattended`)は `--task` が必須(オプション表の `--unattended` の行)
 
 ## オプション
 
 | オプション | 内容 |
 |---|---|
-| `--task=<パス>` | 指定した完了タスク MD を入力に差分同期(省略時は自動検出) |
+| `--task=<パス>` | 指定した完了タスク MD を入力に差分同期(省略時の選び方はモード判定) |
 | `--analyze-only` | 全量監査の差分と監査結果の報告のみ(更新しない) |
 | `--memory-only` | Serena メモリのみ更新(権威参照ファイル / doc を触らない) |
 | `--specific=<name>` | 特定メモリ・特定ファイルのみ |
@@ -36,7 +45,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
-| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。報告点では止まり「未承認」で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` の周では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` の周の Bash の書き方」で打つ |
+| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。報告点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` の周では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` の周の Bash の書き方」で打つ |
 
 ## Phase 1: 入力と現状把握
 
@@ -101,15 +110,15 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
-3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする。**全レビュアー PASS(valid 0 件)で合格**
-4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ。`--unattended` では報告点で止まり、「未承認」で返す(U2。/ship-task は失敗扱いにする)
+3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする
+4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ。`--unattended` では報告点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
 5. 記録: `.claude/reviews/update-doc-iter{N}.md`
 
 ## Phase 6: 最終チェック
 
 1. **リンク・参照検査**: `python3 {このスキルの}scripts/check_links.py <doc ディレクトリ or 対象ファイル...>` を実行し、Markdown 相対リンク・記載パスの切れを検出(スクリプトが使えない環境では Grep で代替)
 2. **把握キャッシュの無効化**: ドキュメント・メモリを更新した場合、`.claude/grasp.md` を削除する(前回要約と参照索引を今回の一次情報に合わせて作り直すため。次回の /understand-project が再把握して作り直す)
-3. 更新サマリーを報告: 更新したドキュメント一覧 / 主な変更点(タグ昇格・ADR 追記を含む)/ 削除(陳腐化)したもの / レビュー反復回数 / 残った needs-user 項目
+3. 更新サマリーを報告: 更新したドキュメント一覧 / 主な変更点(タグ昇格・ADR 追記を含む)/ 削除(陳腐化)したもの / レビュー反復回数 / 残った needs-user 項目。**報告の最後に、必ず 1 行 `レビュー判定: <APPROVED | 未収束 | 未完了>` を書く**(ship-task が読む)。`APPROVED` = 全レビュアーの valid 指摘 0 / `未収束` = 反復しても指摘が残った・報告点で止まった(打ち切りを選んだ場合を含む)/ `未完了` = レビュアーを起動できない・途中で止まった。**止まるときも、報告の最後に必ずこの 1 行を書く**(Phase 5 の 1 のレビュー未完了・報告点・無人の停止を含む)。語は設計レビューの行([../create-task/references/task-template.md](../create-task/references/task-template.md) の記法の規約)と同じ。update-doc には checker が無いので、`APPROVED` はレビュアーだけで決まる
 
 ## 最終ゲート(完了報告前セルフチェック)
 

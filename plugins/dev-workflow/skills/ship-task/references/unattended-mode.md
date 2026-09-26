@@ -29,7 +29,7 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 - 発見の周では、ship-task は発見元の候補モード(`/data-audit --candidates --unattended`・`/create-task --refactor --candidates --unattended`)を呼ぶ。候補モードは `候補_` を書いて結果の行を返すだけで、改名・commit・チェーンの提案をしない(手順と対話点の扱いの正本は [candidate-mode.md](../../create-task/references/candidate-mode.md))
 - 子の skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(git の出口は ship-task — design §5-20)
 - 子の skill を単独で `--unattended` で呼んでもよい。ただし、保留の改名・commit を行う者はいない
-  - 対象のパスを必須にする(do-task はタスク MD のパス、update-doc は `--task`)。無ければ、候補の選択より前に失敗扱い(候補が複数のときの確認で固まらないように)
+  - 対象のパスを必須にする(do-task はタスク MD のパス、update-doc は `--task`)。無ければ、候補の選択より前に失敗扱い(候補の確認で固まらないように)
   - do-task は、parent-child 構成でないことも前提にする(照合をどのリポジトリで行うかが決まらないため)。満たさなければ、候補の選択より前に失敗扱い
   - do-task は、R を最後の設計レビューの行の `本文` とも照合する(ship-task の Phase 2 を経ていないため)。不一致・行が無い・`本文` が無い・`算出不能` なら保留(理由は S4 と同じ — 承認後の本文の変更は人の判断。単独なので、改名・commit は誰もしない)
 
@@ -146,7 +146,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | D13 | do-task Phase 6 → review-protocol.md の「team-lead トリアージ」 | needs-user → ユーザーに確認 | 保留 |
 | D14 | review-protocol.md の死活監視 M4 | エスカレーション | 失敗扱い |
 | D15 | do-task Phase 6 → external-runners.md §5・§9-3 | `--command` の明示承認 / `secret_paths` があるときの明示確認 | 起動しない。内蔵編成で続行して報告する |
-| D16 | do-task Phase 7 の 2・中断 | 未承認 → 中断。長期保留なら `保留_` を提案 | 保留(改名と commit は ship-task) |
+| D16 | do-task Phase 7 の 2・中断 | 未承認 → 中断。長期保留なら `保留_` を提案し、合意があれば改名(/ship-task から呼ばれたときはしない) | 保留(改名と commit は ship-task) |
 | D17 | do-task Phase 7 の 3 | `完了_{名}.md` が既に在る → 停止 | 失敗扱い |
 | D18 | do-task 原則 6 | 独立レビュアーを起動できない → レビュー未完了を報告 | 失敗扱い(環境) |
 | D19 | do-task Phase 4 の 1 → diff-snapshot-call.md(sparse-checkout の NOTE) | sparse-checkout の心当たりがユーザーに無ければ、改竄として扱い続行しない | 失敗扱い(無人では心当たりを確かめられない) |
@@ -263,7 +263,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 - do-task が単独で呼ばれたときは、R を最後の設計レビューの行の `本文` とも照合する(通らなければ失敗扱いではなく保留。§1)
 - **値を失ったとき**(文脈の圧縮など)は失敗扱い(G4)。設計レビューの行や作業ツリーから読み直さない。どれも implementer が書けるため
 - do-task は、無人の implementer への委託プロンプトで、タスク MD の本文の変更と git の書き込み操作を禁じる(文面は do-task の Phase 3)。無人の do-task は本文だけを契約とし、ヘッダ・追加修正記録の注記で完了条件を変えない(do-task の「無人モード」。原則 3 のタスク MD の更新もしない — D1)。除外 1 の行と追加修正記録の節は照合で守れないため(限界 ②)
-- 対話モードの do-task には照合を足さない。原則 3 で team-lead が本文を直すことがあるので、挙動を変えない
+- 対話モードの do-task は R との照合を足さない(原則 3 で team-lead が本文を直すことがあるので)。代わりに、内蔵 implementer への委託ごとに、委託の直前に控えた値と照らす(do-task の対話の本文の照合。不一致は人に確認し、失敗扱いにしない)
 
 ## 8. 保留の行と、人が次にすること
 
