@@ -41,7 +41,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
    - `--task`: パスが管理ルート相対で、ファイル名が `進行中_{名}.md` の通常ファイルであること。併用できない引数(オプション表)が無いこと。満たさなければ停止する(無人では失敗扱い)
    - `--discover`: `--unattended` が無ければ停止する(対話で発見するなら各発見元を直接呼ぶよう案内する)。あれば、発見の周の前提(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど。一覧は references/discover-mode.md §4)を確かめ、1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。以後の手順 3〜6 と Phase 1〜5 は、discover-mode.md の工程(公開の確認 → 工程 D1〜D3 → Phase 5)に差し替える
    - `--unattended`(`--discover` が無いとき): `--task` が無ければ失敗扱い。`--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD がデフォルトブランチか detached HEAD(ローカルのデフォルトブランチの履歴の中)・メタ行がある・タスク MD が git の追跡下にある、を検査する(一覧と理由は references/unattended-mode.md §1)。1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。最後に本文ダイジェスト R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(exit 0 以外は失敗扱い)。以後、周の中で守る値(同 §7)を失ったら失敗扱い(G4)
-3. **作業ツリーの清潔性**: `git status --short` を確認。無関係な未コミット変更があれば、PR にそれが混ざる旨を警告して続行可否を確認する(ここは安全のため必ず確認する)。無人では確認せず失敗扱い(S1)
+3. **作業ツリーの清潔性**: `git status --short` を確認する。無関係な未コミット変更が**あるときだけ**、PR にそれが混ざる旨を警告して続行可否を確認する(停止条件のまとめの表の行に当たるので、このときは必ず確認する。無ければ確認せずに進む)。無人では確認せず失敗扱い(S1)
 4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。`DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。**デフォルトブランチにいるかは、現在のブランチ名(`git branch --show-current`)で判定する**(従来と同じ): `refs/remotes/origin/HEAD` を解決できたら(`git symbolic-ref --quiet refs/remotes/origin/HEAD`)、その名前(`DEF_NAME`)との一致だけで判定する。解決できなければ、`main` / `master` のどちらかであれば「いる」とする(origin/HEAD が無く main と master が両方あるリポジトリで、master の上を作業ブランチと取り違えないため)。`DEF_REF`・`DEF_NAME` は、この判定のほか、下の起点の確認・一覧の算出に使う。これらの git 呼び出しの前置きも base-commit.md と同じ
    - `--branch` がある → 現在のブランチに関わらず、**ここで**その名前で作成して切り替える(`git switch -c <名前>`。従来どおり。無人は 2′ で `--branch` を禁じている)
    - `--branch` が無く、デフォルトブランチか detached HEAD にいる → 作業ブランチ `task/{タスク名}` を作る(`git switch -c task/{タスク名}`)。`--task` のときはタスク名(ファイル名の `{名}`)が決まっているので、**ここで作る**(Phase 2 より前)。それ以外は Phase 1 の後に作るので、ここでは判定だけ行う
@@ -109,7 +109,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
-- /update-doc の独立レビューが未完了・未承認なら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
+- /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
 
 ## Phase 5: PR 作成
 
