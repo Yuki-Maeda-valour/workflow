@@ -104,14 +104,15 @@ PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空で�
 
 # シグナル処理・中止報告では、リダイレクト中でも必ず元の stdout / stderr へ出す。
 # 本実行中は stdout が RAW_OUT へ向いており、退避しないと `cat "$RAW_OUT"` が自分自身へ
-# 追記して止まらなくなる(決定 41 の実装上の罠)
+# 追記して止まらなくなる(決定 41 の実装上の罠)。ERR trap も同じ理由で fd 8 に書く(呼び出しの
+# 形によらず、stderr を一時ファイルへ向けている間に発火しても、元の stderr に残すため)
 exec 9>&1 8>&2
 
 cleanup() {
   if [ -n "$STATE_DIR" ]; then rm -rf "$STATE_DIR"; fi
 }
 trap cleanup EXIT
-trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&2; exit 20' ERR
+trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&8; exit 20' ERR
 
 log_line() {
   if [ -n "$LOG_FILE" ]; then printf '%s\n' "$1" >>"$LOG_FILE"; fi
@@ -519,7 +520,8 @@ if [ -z "$LOG_FILE" ]; then
     if { : > "$LOG_FILE_TRY"; } 2>/dev/null; then break; fi
     # 作成に失敗したのに**そのパスが存在しない**なら、番号の衝突ではない
     # (置き場に書き込めない等)。再採番しても解消しないので止める。
-    if [ ! -e "$LOG_FILE_TRY" ]; then
+    # リンク先の無い symlink は `-e` が偽になるが、その名前のエントリが在るので、番号の衝突として次の番号へ進む
+    if [ ! -e "$LOG_FILE_TRY" ] && [ ! -L "$LOG_FILE_TRY" ]; then
       set +o noclobber
       fail_usage "ログを作れない: $LOG_FILE_TRY(置き場 '$LOG_DIR' に書き込めない。--log-file で別の置き場を指定する)"
     fi

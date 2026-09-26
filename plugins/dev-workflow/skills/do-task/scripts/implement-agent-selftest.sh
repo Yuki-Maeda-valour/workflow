@@ -710,6 +710,54 @@ else
   ok "usage: 既定のログ置き場を作れない(root のため飛ばす)"
 fi
 
+# (#100 D3)。ERR の出力先: 本実行の呼び出し(`run_timeout … || rc=$?`)から ` || rc=$?` を
+# 外した写しに、`date +%s` だけを失敗させるスタブを当てる。本実行の stderr を一時ファイルへ
+# 向けている間に ERR trap が発火しても、ERROR [internal] が元の stderr(fd 8)に残ることを見る。
+# sed の区切りは # にする(対象行に | が含まれるため)。$ [ ] はメタ文字なのでエスケープする
+# (${CMD[@]} の [ ] をそのまま埋めると GNU sed の BRE では黙って 0 件の置換になる)。
+# `-i` は GNU sed 限定(BSD sed では失敗する)なので使わず、リダイレクトで写しを作る。
+D3_TARGET="$WORK/d3-target.sh"
+sed 's#run_timeout "\$RUN_TIMEOUT" "\${CMD\[@\]}" </dev/null >"\$RAW_OUT" 2>"\$RAW_ERR" || rc=\$?#run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null >"$RAW_OUT" 2>"$RAW_ERR"#' "$TARGET" >"$D3_TARGET"
+D3_OK=1; D3_MSG=""
+# 空振りの治具で PASS しないように、外した後の行が 1・元の行が 0 であることを先に確かめる
+if [ "$(grep -cxF 'run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null >"$RAW_OUT" 2>"$RAW_ERR"' "$D3_TARGET")" -ne 1 ] \
+  || [ "$(grep -cxF 'run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null >"$RAW_OUT" 2>"$RAW_ERR" || rc=$?' "$D3_TARGET")" -ne 0 ]; then
+  D3_OK=0; D3_MSG="写しの治具(本実行の呼び出しから || rc=\$? を外す)が当たらない"
+fi
+D3_LINE=""
+if [ "$D3_OK" -eq 1 ]; then
+  D3_LINE="$(grep -nF 'rt_start="$(date +%s)"' "$D3_TARGET" | head -1 | cut -d: -f1)"
+  if [ -z "$D3_LINE" ]; then D3_OK=0; D3_MSG="写しに rt_start の行が見つからない"; fi
+fi
+rc=-1; D3_GOTLINE=""
+if [ "$D3_OK" -eq 1 ]; then
+  D3_STUBDIR="$WORK/d3-stubdir"; rm -rf "$D3_STUBDIR"; mkdir -p "$D3_STUBDIR"
+  cp "$WORK/pathbin/codex" "$D3_STUBDIR/codex"; chmod +x "$D3_STUBDIR/codex"
+  D3_REALDATE="$(command -v date)"
+  cat >"$D3_STUBDIR/date" <<EOF
+#!/usr/bin/env bash
+if [ "\$#" -eq 1 ] && [ "\$1" = "+%s" ]; then exit 1; fi
+exec "$D3_REALDATE" "\$@"
+EOF
+  chmod +x "$D3_STUBDIR/date"
+  D3_PREV_STUBDIR="$STUB_DIR"
+  STUB_DIR="$D3_STUBDIR"
+  run_mutant "$D3_TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+    --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-d3x.md"; rc=$?
+  STUB_DIR="$D3_PREV_STUBDIR"
+  D3_ERRLINE="$(grep -E '^ERROR \[internal\] ' "$CASE_ERR" | head -1)"
+  D3_GOTLINE="$(printf '%s' "$D3_ERRLINE" | sed -n 's/.*行 \([0-9][0-9]*\)).*/\1/p')"
+  if [ "$rc" -ne 20 ] || [ -z "$D3_ERRLINE" ] || [ "$D3_GOTLINE" != "$D3_LINE" ]; then
+    D3_OK=0; D3_MSG="実際 exit=$rc・行=${D3_GOTLINE:-無し}(期待 exit=20・行 $D3_LINE)"
+  fi
+fi
+if [ "$D3_OK" -eq 1 ]; then
+  ok "ERR の出力先: 本実行の stderr を一時ファイルへ向けている間に想定外の失敗が起きても ERROR [internal] が元の stderr に残る (exit=$rc)"
+else
+  ng "ERR の出力先: 本実行の stderr を一時ファイルへ向けている間に想定外の失敗が起きても ERROR [internal] が元の stderr に残る($D3_MSG)"
+  cat "$CASE_ERR" >&2 2>/dev/null || true
+fi
+
 # E5. TERM を無視するプロセスでもタイムアウトが成立し、残骸を残さない
 leak_cleanup; sleep 1
 STUB_DIR="$WORK/termignore"
@@ -1102,23 +1150,48 @@ STUB_DIR="$WORK/pathbin"
 # 既定のログ置き場が**書き込み不可**のとき、番号の衝突と区別して止める。
 # noclobber の採番は「作成に失敗したら次の番号へ」なので、権限不足まで再試行の対象に
 # すると**無限ループ**する(実測: 外側の timeout で exit=124 になる)。
-ROLOG="$WORK/rolog"
-rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
-: > "$ROLOG/.claude/reviews/implementer-codex-iter1.md"
-chmod 555 "$ROLOG/.claude/reviews"
-rc=0
-( cd "$ROLOG" && guard bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
-chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
-if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
-  ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
+# run_script / AGENT_CWD の制限 PATH で打つ(制限しない PATH で直接 bash を起動すると、root
+# では採番を抜けて実機の codex まで進みうるため)。chmod 555 は root には効かないので、E4c と
+# 同じく root では飛ばす旨を ok で出す。
+if [ "$(id -u)" -ne 0 ]; then
+  ROLOG="$WORK/rolog"
+  rm -rf "$ROLOG"; mkdir -p "$ROLOG/.claude/reviews"
+  : > "$ROLOG/.claude/reviews/implementer-codex-iter1.md"
+  chmod 555 "$ROLOG/.claude/reviews"
+  AGENT_CWD="$ROLOG"
+  run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --probe-timeout 10 --run-timeout 20; rc=$?
+  AGENT_CWD=""
+  chmod 755 "$ROLOG/.claude/reviews" 2>/dev/null
+  if [ "$rc" -eq 2 ] || [ "$rc" -eq 20 ]; then
+    ok "ログ置き場に書けない: 番号の衝突と区別して止まる (exit=$rc)"
+  else
+    ng "ログ置き場に書けない: 番号の衝突と区別して止まる(実際 exit=$rc。124 なら無限ループ)"
+    cat "$CASE_ERR" >&2
+  fi
+  if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
+    ok "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"
+  else
+    ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
+  fi
 else
-  ng "ログ置き場に書けない: 番号の衝突と区別して止まる(実際 exit=$rc。124 なら無限ループ)"
-  cat "$CASE_ERR" >&2
+  ok "ログ置き場に書けない: 番号の衝突と区別して止まる(root のため飛ばす)"
 fi
-if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then
-  ok "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"
+
+# 採番(リンク先の無い symlink):(#100 D4)。`-e` は偽になるが、その名前のエントリが在るので
+# 番号の衝突として次の番号へ進む(「置き場に書き込めない」と誤って止まらない)。
+DANGLOG="$WORK/danglog"
+rm -rf "$DANGLOG"; mkdir -p "$DANGLOG/.claude/reviews"
+ln -s "./does-not-exist" "$DANGLOG/.claude/reviews/implementer-codex-iter1.md"
+AGENT_CWD="$DANGLOG"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --probe-timeout 10 --run-timeout 20; rc=$?
+AGENT_CWD=""
+if [ "$rc" -eq 0 ] && [ -f "$DANGLOG/.claude/reviews/implementer-codex-iter2.md" ] \
+  && [ -L "$DANGLOG/.claude/reviews/implementer-codex-iter1.md" ] \
+  && [ ! -e "$DANGLOG/.claude/reviews/implementer-codex-iter1.md" ]; then
+  ok "採番(リンク先の無い symlink): 番号の衝突として次の番号へ進む (exit=$rc)"
 else
-  ng "ログ置き場に書けない: stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2
+  ng "採番(リンク先の無い symlink): 番号の衝突として次の番号へ進む(実際 exit=$rc)"
+  cat "$CASE_ERR" >&2
 fi
 
 # `-` で始まるプロンプト(箇条書き・frontmatter)がオプションと誤認されない。
