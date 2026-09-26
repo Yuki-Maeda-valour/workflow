@@ -89,14 +89,15 @@ TMP_DIR=""
 cleanup() { if [ -n "$TMP_DIR" ]; then rm -rf "$TMP_DIR"; fi; }
 # 元の stdout / stderr を退避する。中止ハンドラは `run_timeout … >"$RAW_OUT" 2>"$RAW_ERR"` の
 # リダイレクトが効いたまま走るので、素の `>&2` では ERROR 行が消える一時ファイルへ行ってしまう
-# (implement-agent.sh と同じ形)
+# (implement-agent.sh と同じ形)。ERR trap も同じ理由で fd 8 に書く(呼び出しの形によらず、
+# stderr を一時ファイルへ向けている間に発火しても、元の stderr に残すため)
 exec 9>&1 8>&2
 CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッパ)の PID
 RAW_OUT=""      # 中止時に「得られた分の生出力」を残すために先に宣言しておく
 PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空)
 
 trap cleanup EXIT
-trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&2; exit 20' ERR
+trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&8; exit 20' ERR
 
 log_line() {
   if [ -n "$LOG_FILE" ]; then printf '%s\n' "$1" >>"$LOG_FILE"; fi
@@ -409,7 +410,8 @@ if [ -z "$LOG_FILE" ]; then
     if { : > "$LOG_FILE_TRY"; } 2>/dev/null; then break; fi
     # 作成に失敗したのに**そのパスが存在しない**なら、番号の衝突ではない
     # (置き場に書き込めない等)。再採番しても解消しないので止める。
-    if [ ! -e "$LOG_FILE_TRY" ]; then
+    # リンク先の無い symlink は `-e` が偽になるが、その名前のエントリが在るので、番号の衝突として次の番号へ進む
+    if [ ! -e "$LOG_FILE_TRY" ] && [ ! -L "$LOG_FILE_TRY" ]; then
       set +o noclobber
       fail_usage "ログを作れない: $LOG_FILE_TRY(置き場 '$LOG_DIR' に書き込めない。--log-file で別の置き場を指定する)"
     fi
