@@ -43,7 +43,7 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 
 ### B1 レスポンス形状(露出)— 重大
 - **何を探すか**: ORM の取得結果を**加工なしで**レスポンス(`Response.json` / `res.json` / server action の return / API の戻り値)に渡している経路。select / omit / serializer(Resource・Serializer・DTO・zod の `.pick()`)を通らずに返る形
-- **判定**: 返却されるモデルが機密辞書のフィールドを含む → **重大**。含まない → 過剰露出として「中」(B5 と統合可)
+- **判定**: 返却されるモデルが機密辞書のフィールドを含む → **重大**。含まない → 過剰露出として「中」(B5 と統合可。候補モードでは行わない — 下の「候補モードの識別子と観点群」)
 - シグネチャ例: `findMany()`(select 無し)→ そのまま return、Eloquent `->get()` → `->toJson()`、Django Model → `JsonResponse(model.__dict__)`
 
 ### B2 認証・認可の欠如 — 重大
@@ -102,6 +102,66 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 ### D5 巨大カラムの常時取得 — 中
 - **何を探すか**: text / blob / json 型の大きいカラムが、一覧系クエリでも select されている(select 指定が無く全カラム取得になっている場合を含む)
 - **判定**: 一覧で本文・バイナリを毎回取得 → 中(B5 と統合可)
+
+## 候補モードの識別子と観点群(指摘キー)
+
+候補モード(`--candidates`。手順・正規化・既知の判定の正本は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md))で、候補の指摘キー `data-audit:{観点群}:{種類}:{識別子}` を決める定義。同じ指摘の同一性を、行番号に頼らずに表す。
+
+### 観点群と候補の単位
+
+- 観点群は Phase 2 の 4 群: `exposure`(`scan-exposure` の担当)・`authz`(`scan-authz`)・`db`(`scan-db`)・`efficiency`(`scan-efficiency`)。観点 ID から群への対応は SKILL.md の Phase 2 の表が正本
+- **1 候補 = 1 つの(観点群・識別子)**。同じ識別子で同じ群の観点(例 B2 と B3)は 1 候補にまとめ、観点 ID の列は候補の「出典」に書く
+- 識別子をまたいで統合しない(同じ根本原因の候補どうしは、本文で互いを挙げる)
+- 観点群をまたぐ統合(B1 の「B5 と統合可」)は行わない。見つけた観点の群でキーにする
+- D2 の「サーバー経由のみなら B2 / B3 に還元」は判定の規則なので、そのまま使う(サーバー経由だけの構成では D2 を候補にせず、認可の問題は B2・B3 の候補として出る)
+
+### 識別子の場所
+
+- 境界を越える入口(route・handler・action・rpc・component)があれば、それにする
+- 入口の無い定義(model・column・index・env・storage)は、その定義にする
+- どちらでもないときだけ file にする
+- 補助の関数・サービス層の中の指摘も、それを呼ぶ入口の識別子にする。呼ぶ入口が複数なら、入口ごとに 1 候補にして、本文で互いを挙げる
+- 振り分けが入れ子のとき(前置きの mount・ルーターへの受け渡し・連ねた呼び出し)は、欠陥のある関数(か、それを呼ぶ関数)を直接登録・振り分けた、いちばん内側の段を入口にする。外側の段(ルーターへ渡すだけの振り分け・mount)は入口にしない
+
+### 種類と識別子
+
+| 種類 | 識別子 | 使うとき |
+|---|---|---|
+| route | `{宣言のあるファイル}#{登録先}:{METHOD} {宣言の字面}` | パスの字面と関数を、1 つの登録にするとき(下の「route の形」) |
+| handler | `{path}#{関数名}`(振り分けた先の関数) | それ以外の振り分け(`if` の比較・正規表現・辞書の引き・呼び出しを含まない表) |
+| action | `{path}#{export 名}` | server action |
+| rpc | `{ルーター}.{手続き}` | RPC の手続き |
+| model・column | `{モデル}[.{カラム}]` | モデル・カラムの定義 |
+| index | `{テーブル}({カラムを辞書順に,区切り})` | インデックス |
+| component | `{path}#{名}` | コンポーネント |
+| env | `{変数名}` | 環境変数 |
+| storage | `{種別}:{キー}` | ブラウザのストレージ・cookie |
+| file | `{path}` | ほかに当たらないとき |
+
+- クラスのメソッドは、`{関数名}`・`{export 名}` の所を `{Class.method}` と書く
+- パスは管理ルート相対(正規化は candidate-mode.md)
+
+**route の形**(API をどこで定義したか〈フレームワークか、リポジトリの中の自作か〉は問わない)
+
+- `<対象>.<メソッド>(<パスの字面>, <関数>)` の呼び出し(`app.get('/x', fn)`・`self.router.get('/:id', self.show)` など)
+- `@<対象>.route(<パスの字面>)` のデコレータ
+- 各要素がパスの字面と関数を受け取る呼び出しである宣言(`urlpatterns = [path(…), re_path(…)]` など)
+- 連ねた呼び出し(`app.route('/x').get(fn)`)。パスの字面と関数を 1 つの登録とみなす(登録先は `app`、METHOD は `GET`)
+- ファイルの置き場によるルーティング(`app/**/route.ts`・`pages/api/**` など)
+
+呼び出しを含まない表(`ROUTES = [('/x', fn), …]` のようなタプル・辞書のリテラルを、ループと比較で振り分けるもの)は route ではなく handler にする。
+
+**route の各部**
+
+- 登録先: ルーティングの API を呼んだ対象・デコレータの対象の字面(`app`・`usersRouter`・`bp` など)を、定義のスコープで修飾したもの
+  - 定義のスコープは、囲むクラス・関数の名を `.` でつないだもの(モジュールの直下なら無し)。例 `Users.register.self.router`
+  - 名の無い関数の段は、代入先の変数名があればそれにする。無ければ(default export・`module.exports`・引数の callback)、その段を省く
+  - 呼び出しの対象を持たない宣言(`urlpatterns = [path(…)]`)では、代入先の変数名
+  - ファイルの置き場によるルーティングでは `file`。宣言のあるファイル = そのファイル、字面 = 置き場から決まるパス
+- METHOD: メソッドを絞らない宣言(`path()`・`app.use`・`app.all`)なら `ANY`。複数なら、大文字を辞書順に `,` でつなぐ
+- 字面は書かれたとおりにする。パラメータの書き方(`:id`・`[id]`・`{id}`)も揃えない
+
+例: `data-audit:authz:route:src/routes/orders.ts#ordersRouter:GET /:id` / `data-audit:exposure:handler:app.py#login`
 
 ## 深刻度・確度の基準
 

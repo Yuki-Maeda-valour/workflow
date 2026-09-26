@@ -1,14 +1,17 @@
-# 無人モード(`/ship-task --task=<タスク MD> --unattended`)
+# 無人モード(`/ship-task --task=<タスク MD> --unattended`・`/ship-task --discover=<発見元> --unattended`)
 
 ship-task の無人モードの正本。無人モードでは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに必ず倒す。ship-task・do-task・update-doc と do-task の references には、各対話点に 1 行の分岐とこの文書への参照だけを置く(同じ事実を 2 か所に書かない)。
 
 - 本文ダイジェスト・設計レビューの行の `本文`・保留の行・メタ行の書式と照合パターンの正本は [../../create-task/references/task-template.md](../../create-task/references/task-template.md) の記法の規約。算出は `python3 {create-task の}scripts/task-digest.py <パス | ->`
 - `--unattended` を宣言しなければ、この文書は使わない(対話点は従来どおり止まる)。ship-task の Phase 2 の 6(本文の照合)と、do-task の新規着手の条件 ⑤ の例外(同じセッションの ship-task が作ったばかりの作業ブランチでは、⑤ を満たしたとみなす。①〜④ はそのまま問う。S8 の一覧の確認で「続行しない」と答えたブランチには当てない)は、対話にも効く。正本はそれぞれ ship-task の本文と [../../do-task/references/base-commit.md](../../do-task/references/base-commit.md)
 - 無人ループ(`loop.sh`)全体の設計は design §2。この文書は、周の中の ship-task とその子の skill の振る舞いだけを定める
+- 発見の周(`--discover`)に固有の前提・工程・照合・結末の正本は [discover-mode.md](discover-mode.md)。この文書の一般則(§3)・G1〜G4・周の Bash の書き方・委託するサブエージェントの要点は、発見の周にもそのまま効く
 
 ## 1. 前提と分担
 
-**前提**(ship-task の Phase 0。ブランチを作る前に、すべて検査する。1 つでも満たさなければ失敗扱い — G3。何も書き換えない)
+**前提**(ship-task の Phase 0。ブランチを作る前に、すべて検査する。1 つでも満たさなければ失敗扱い — G3。何も書き換えない)。タスクの周と発見の周で分ける。
+
+**タスクの周(`--task`)の前提**
 
 - `--task=<タスク MD>` がある。`--branch` は無い
 - 管理ルート = profile の `root`(parent-child 構成でない)。無人の git の手順(作業ブランチ・基準・保留の手順)は、リポジトリが 1 つである前提で書いているため
@@ -18,9 +21,12 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 - この文書と `task-digest.py` と Python 3 がある
 - 本文ダイジェストを算出でき(exit 0)、R として保持した
 
+**発見の周(`--discover`)の前提**: 正本は [discover-mode.md](discover-mode.md) §4(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど)。parent-child 構成でないことと、開始時の HEAD の条件は、タスクの周と同じ。発見の周は本文ダイジェスト R を持たない
+
 **子の skill との分担**
 
 - ship-task は /do-task・/update-doc に `--unattended` を渡す
+- 発見の周では、ship-task は発見元の候補モード(`/data-audit --candidates --unattended`・`/create-task --refactor --candidates --unattended`)を呼ぶ。候補モードは `候補_` を書いて結果の行を返すだけで、改名・commit・チェーンの提案をしない(手順と対話点の扱いの正本は [candidate-mode.md](../../create-task/references/candidate-mode.md))
 - 子の skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(git の出口は ship-task — design §5-20)
 - 子の skill を単独で `--unattended` で呼んでもよい。ただし、保留の改名・commit を行う者はいない
   - 対象のパスを必須にする(do-task はタスク MD のパス、update-doc は `--task`)。無ければ、候補の選択より前に失敗扱い(候補が複数のときの確認で固まらないように)
@@ -29,16 +35,18 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 
 ## 2. 結末
 
-結末は 4 つ。完了報告の最後に `無人の周の結果: <結末> — <理由か URL>` の 1 行で書く。
+結末は 5 つ。完了報告の最後に `無人の周の結果: <結末> — <理由か URL>` の 1 行で書く。
 
 | 結末 | 意味 |
 |---|---|
 | `PR` | PR を開いた |
-| `縮退` | 品質ゲートとレビューは揃ったが、PR を開けなかった(gh が無い・未認証・リモートが無い・`--no-pr`)。commit は作業ブランチに在る |
-| `保留` | 保留の手順(§5)を終えた |
+| `縮退` | タスクの周: 品質ゲートとレビューは揃ったが、PR を開けなかった(gh が無い・未認証・リモートが無い・`--no-pr`)。commit は作業ブランチに在る。発見の周: 候補の commit はあるが、PR を開かなかった(条件は discover-mode.md §8) |
+| `保留` | 保留の手順(§5)を終えた。タスクの周だけ |
 | `失敗扱い` | 何もせずに止まった(§6) |
+| `候補なし` | 候補が 0 件か、公開の確認で発見元を回さなかった。ブランチ・commit・PR を作らない。発見の周だけ(discover-mode.md §9) |
 
-- 照合パターン(`grep -E`): `^無人の周の結果: (PR|縮退|保留|失敗扱い) — `。`loop.sh` は、ホストの結果テキストの中でこれに一致する**最後の行**を結末として読む
+- 照合パターン(`grep -E`): `^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — `。`loop.sh` は、ホストの結果テキストの中でこれに一致する**最後の行**を結末として読む
+- `候補なし` は発見の周だけ、`保留` はタスクの周だけで書く。もう一方の周で書くと、`loop.sh` は失敗と判定する
 - `loop.sh` がこの行と git の状態をどう使うか(周が正常に終わったことの定義)は [loop.md](loop.md) §5
 
 ## 3. 一般則
@@ -79,7 +87,7 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 
 拒否されたら、打ち直さずに上の許可の拒否(G1)に従う(書き方を変えて同じ操作を打ち直すのも、別の手段での回り込みに当たる)。hook の拒否の理由にも、このことが添えてある
 
-**委託するサブエージェント**: 無人の周で委託するサブエージェント(implementer・reviewer・checker・researcher)は、この文書を読んでいない。メインはこの要点をそのまま委託プロンプトに写す(要約し直さない)。委託するときは、この要点を最後の行まで委託プロンプトに入れる(do-task・update-doc の委託の手順から、この項を指す)。要点の中の worktree は、委託したセッションの作業ディレクトリ。プラグインルートは、メインが解決した絶対パス(skill の置き場〈`skills/<名>`〉の 2 つ上)を委託プロンプトに書き添える。
+**委託するサブエージェント**: 無人の周で委託するサブエージェント(implementer・reviewer・checker・researcher)は、この文書を読んでいない。メインはこの要点をそのまま委託プロンプトに写す(要約し直さない)。委託するときは、この要点を最後の行まで委託プロンプトに入れる(do-task・update-doc の委託の手順と、候補モードの data-audit の Phase 2・create-task の refactor の researcher の委託から、この項を指す)。要点の中の worktree は、委託したセッションの作業ディレクトリ。プラグインルートは、メインが解決した絶対パス(skill の置き場〈`skills/<名>`〉の 2 つ上)を委託プロンプトに書き添える。
 
 - `$` とバッククォートは単引用符の中だけで使う(二重引用符の中でも使わない)。変数の展開・コマンド置換・`$?` を使わず、解決した値(パス・sha)をそのまま書く。正規表現の `$` は単引用符で囲む(1)
 - heredoc・here-string・プロセス置換(`<<`・`<(`・`>(`)・改行・行の継続・`#` で始まる単語(コメント)を使わない(2)
@@ -104,7 +112,7 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 
 ## 4. 対話点の表
 
-ship-task・do-task・update-doc と、do-task の references(base-commit.md・diff-snapshot-call.md・external-runners.md・review-protocol.md)の対話点のうち、無人の経路で実行されうるものを網羅する。
+ship-task・do-task・update-doc と、do-task の references(base-commit.md・diff-snapshot-call.md・external-runners.md・review-protocol.md)の対話点のうち、無人の経路で実行されうるものを網羅する。発見元の候補モード(data-audit・create-task の `--candidates --unattended`)の対話点は、[candidate-mode.md](../../create-task/references/candidate-mode.md) の置き換えの表が正本(この表には載せない)。
 
 | # | 場所 | 対話時 | 無人 |
 |---|---|---|---|
@@ -116,6 +124,10 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | S6 | ship-task Phase 4(/update-doc の未完了・未承認) | 停止する | 失敗扱い(`完了_` への改名後の停止) |
 | S7 | ship-task Phase 5(縮退・push・PR 作成) | 縮退(gh が無い等・`--no-pr`)ではコマンド列を示す | 同じ(結末 `縮退`)。push・PR 作成の失敗・拒否は失敗扱い(`完了_` への改名後の停止) |
 | S8 | ship-task Phase 0 の 4・Phase 1(作業ブランチの作成) | 先行する commit の一覧を示して続行を確かめる。続行しないなら停止 | 確かめない。報告と PR 本文に載せて続ける |
+| S9 | ship-task Phase 0 の 2′(発見の周の前提。discover-mode.md §4) | `--unattended` が無ければ停止し、各発見元を直接呼ぶよう案内する | 前提を 1 つでも欠ければ失敗扱い(G3) |
+| S10 | 発見の周の公開の確認(data-audit だけ。discover-mode.md §5) | 起きない(`--discover` は無人専用) | 非公開と確かめられなければ、発見元を呼ばずに結末 `候補なし`(失敗扱いではない) |
+| S11 | 発見の周の工程 D2(候補モードの返り値。discover-mode.md §7) | 起きない | 結果の行が `失敗扱い`・無い・照合に通らない → 失敗扱い(G2) |
+| S12 | 発見の周の工程 D3(候補 0 件。discover-mode.md §6) | 起きない | ブランチ・commit・PR を作らずに、結末 `候補なし` |
 | D1 | do-task 原則 3 | 設計と実態がずれたら、MD を更新するかユーザーに確認 | 保留(MD を更新しない) |
 | D2 | do-task 原則 4・Phase 6・review-protocol.md の「反復の終了条件とセーフティ」 | 報告点(`--max-iter` 到達・同一指摘の 2 回連続残存)→ 判断を仰ぐ | 保留。Phase 5・5.5 からの差し戻しも数える(§3) |
 | D3 | do-task 検証のみモード | 修正に進むかはユーザーが決める | `--unattended` とは併用しない(失敗扱い) |
@@ -137,9 +149,9 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | D19 | do-task Phase 4 の 1 → diff-snapshot-call.md(sparse-checkout の NOTE) | sparse-checkout の心当たりがユーザーに無ければ、改竄として扱い続行しない | 失敗扱い(無人では心当たりを確かめられない) |
 | U1 | update-doc Phase 4(事前確認) | `--yes` でなければ事前確認 | 確認しない(無人は `--yes` を含む。ship-task は元々 `--yes` を渡す) |
 | U2 | update-doc Phase 5 の 4(報告点) | 判断を仰ぐ | 止まって「未承認」で返す(ship-task は S6 で失敗扱い) |
-| G1 | どこでも | 許可の要る操作が拒否された | 保留のガードを満たせば保留、満たさなければ失敗扱い(§3) |
-| G2 | ship-task・do-task | 周の中の照合に通らない(本文ダイジェスト・基準行・未追跡一覧・HEAD・ブランチ・index・commit の後の中身。§7) | 失敗扱い(改竄ガード) |
-| G3 | ship-task Phase 0 | 無人の前提を欠く(§1) | 失敗扱い |
+| G1 | どこでも | 許可の要る操作が拒否された | 保留のガードを満たせば保留、満たさなければ失敗扱い(§3)。発見の周と候補モードでは、常に失敗扱い(保留が無い) |
+| G2 | ship-task・do-task | 周の中の照合に通らない(本文ダイジェスト・基準行・未追跡一覧・HEAD・ブランチ・index・commit の後の中身。§7。発見の周は discover-mode.md §7 の表) | 失敗扱い(改竄ガード) |
+| G3 | ship-task Phase 0 | 無人の前提を欠く(§1。発見の周の前提は discover-mode.md §4) | 失敗扱い |
 | G4 | ship-task・do-task | 周の中で守る値(§7)を失った(文脈の圧縮など) | 失敗扱い。条件 ⑤ の例外が読む報告の値(ship-task Phase 0 の 4)も同時に失うので、D8 の保留より G4 を優先する |
 
 **S5 の注**(do-task が返す分類)
@@ -207,7 +219,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 - 本文ダイジェストの不一致で止まったときは、タスク MD の差分(`git diff -- <タスク MD>`。未 commit なら作業ツリーとの差分)を報告に添える
 - commit の直後の tree の不一致で止まったときは、控えた tree と `HEAD^{tree}` の差分(`git diff --name-status <控えた tree> HEAD^{tree}`)を報告に添える(hook が何を変えたかを人が見られるように)
 - 作業ブランチを作った後なら、ブランチは残る(以後そのタスクは `loop.sh` に拾われない)。実装 commit の後なら、その commit も残る
-- `loop.sh` は worktree を残し、以後そのタスクを拾わない(design §5-1 の例外)
+- `loop.sh` は worktree を残し、以後そのタスクを拾わない(design §5-1 の例外)。発見の周では、以後その発見元を回さない(残るものは discover-mode.md §9)
 - 失敗扱いになるもの
   - 表で「失敗扱い」とした点
   - 一般則の後半(環境・リポジトリの状態・ツールの異常、`完了_` の後の停止)
@@ -215,6 +227,8 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
   - 保留の手順の途中の失敗
 
 ## 7. 周の中で守る値と照合(改竄ガード)
+
+この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の守る値と照合の表を使い、R を持たない(git の前置きと「push の直前」は、この節と同じ)。
 
 **守る値**(セッション文脈に保持し、報告にも書く)
 

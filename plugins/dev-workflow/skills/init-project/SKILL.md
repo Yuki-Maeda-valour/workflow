@@ -179,7 +179,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **既存の doc / docs があるファイルは上書きしない**(無いファイルだけ足す)。既存プロジェクトに別構成の doc がある場合は、統一構成への対応表を提示するに留める(移行は提案のみ)。
 
 **4. タスク保存先**
-- Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`)。
+- Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`、発見ループの採用前の候補は `候補_`)。
 
 **5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
 - **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。追加する一覧を提示してから書き込む。サイクル(/tool-check・/do-task)実行時の許可プロンプトを減らすのが目的。
