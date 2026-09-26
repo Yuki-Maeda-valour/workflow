@@ -198,6 +198,94 @@ is_p=0
 for a in "$@"; do [ "$a" = -p ] && is_p=1; done
 [ "$is_p" -eq 1 ] || { echo "stub: unexpected invocation: $*" >&2; exit 64; }
 prompt="$(cat)"
+case "$prompt" in
+  *--discover=*)
+    # 発見モードの周(loop.md §11)。発見元ごとの振る舞いは環境変数 SELFTEST_DISC_DA(data-audit)・SELFTEST_DISC_RF
+    # (refactor)で選ぶ(既定は none = 候補なし)。記録のファイルの名は disc-<発見元>
+    src="${prompt#*--discover=}"; src="${src%%[[:space:]]*}"
+    case "$src" in data-audit) beh="${SELFTEST_DISC_DA:-none}" ;; refactor) beh="${SELFTEST_DISC_RF:-none}" ;; *) beh=none ;; esac
+    rn="disc-$src"
+    printf '%s\n' "$0" "$@" >"$REC/argv-$rn"
+    printf '%s' "$prompt" >"$REC/prompt-$rn"
+    printf '%s' "${DEV_WORKFLOW_LOOP_ITER:-}" >"$REC/iter-$rn"
+    env >"$REC/env-$rn"
+    pwd -P >"$REC/cwd-$rn"
+    echo "$$" >"$REC/pid-$rn"
+    printf '%s\n' "$rn" >>"$REC/calls.log"
+    if [ -f "$REC/watch.pid" ]; then
+      wp="$(cat "$REC/watch.pid")"; st="$(sed -E 's/.*\) ([A-Za-z]).*/\1/' "/proc/$wp/stat" 2>/dev/null)"
+      case "$st" in ""|Z|X) echo dead ;; *) echo alive ;; esac >"$REC/watch-at-$rn"
+    fi
+    exec 3>>"$REC/stub-git.err"
+    g() { git "$@" 2>&3; }
+    tdir="${SELFTEST_DISC_TDIR:-docs/tasks}"
+    base="$(git rev-parse HEAD)"
+    br="task/候補-$src-${base:0:12}"
+    dres() { # $1=結末の行(改行で複数行も)
+      python3 -c 'import json,sys; print(json.dumps({"type": "result", "subtype": "success", "is_error": False, "result": "発見の周の完了報告(スタブ)\n" + sys.argv[1] + "\n", "permission_denials": []}, ensure_ascii=False))' "$1"
+    }
+    cand() { # $1=task_dir 相対のファイル名 → 候補の書式のファイルを書いて stage する
+      mkdir -p "$(dirname -- "$tdir/$1")"
+      printf '# %s\n\n> **ステータス**: 候補\n> **発見元**: %s\n> **指摘キー**: %s:file:%s\n\n## 指摘\n\nstub\n' "$1" "$src" "$src" "$1" >"$tdir/$1"
+      g add -- "$tdir/$1"
+    }
+    dbr() { g checkout -q -b "$br"; }
+    dcommit() { g commit -q -m "候補 $src"; }
+    dpush() { g push -q -u origin "$br"; }
+    dlinger() { # TERM を無視して居座る(同じプロセスグループに孫、別セッションに印つきの子孫も置く)
+      bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
+      echo $! >>"$REC/spawned-$rn"
+      setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
+      echo $! >>"$REC/spawned-$rn"
+      trap '' TERM
+      touch "$REC/started-$rn"
+      while :; do sleep 1; done
+    }
+    PRL="無人の周の結果: PR — https://example.invalid/pr/$src"
+    case "$beh" in
+      pr) dbr; cand "候補_$src-a.md"; cand "候補_$src-b.md"; dcommit; dpush; dres "$PRL" ;;
+      degrade) dbr; cand "候補_$src-a.md"; dcommit; dres "無人の周の結果: 縮退 — --no-pr" ;;
+      degradepush) dbr; cand "候補_$src-a.md"; dcommit; dpush; dres "無人の周の結果: 縮退 — repo が null" ;;
+      none) dres "無人の周の結果: 候補なし — $src: 新しい候補 0 件(既知 0 件・回帰の疑い 0 件)" ;;
+      inprog) dbr; cand "候補_$src-a.md"; cand "進行中_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
+      modify) dbr; cand "候補_$src-a.md"; echo x >>README.md; g add README.md; dcommit; dpush; dres "$PRL" ;;
+      modcand) dbr; cand "候補_$src-a.md"; echo x >>"$tdir/候補_old.md"; g add -- "$tdir/候補_old.md"; dcommit; dpush; dres "$PRL" ;;
+      nested) dbr; cand "sub/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
+      outside) dbr; cand "memo-$src.md"; dcommit; dpush; dres "$PRL" ;;
+      d21) dbr; cand "候補_bad name.md"; dcommit; dpush; dres "$PRL" ;;
+      emptyname) dbr; cand "候補_.md"; dcommit; dpush; dres "$PRL" ;;
+      mode) dbr; cand "候補_$src-a.md"; g update-index --chmod=+x -- "$tdir/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
+      twocommits) dbr; cand "候補_$src-a.md"; dcommit; cand "候補_$src-b.md"; dcommit; dpush; dres "$PRL" ;;
+      untracked) dbr; cand "候補_$src-a.md"; dcommit; dpush; echo x >"leftover-$src.txt"; dres "$PRL" ;;
+      otherbranch) g checkout -q -b "task/候補-$src-000000000000"; cand "候補_$src-a.md"; dcommit; dres "無人の周の結果: 縮退 — x" ;;
+      fail) dres "無人の周の結果: 失敗扱い — G3 前提を欠く" ;;
+      pushfail) dbr; cand "候補_$src-a.md"; dcommit; dpush; dres "無人の周の結果: 失敗扱い — PR 作成の失敗" ;;
+      hold) dres "無人の周の結果: 保留 — S4" ;;
+      holdlast) dres $'無人の周の結果: 候補なし — 途中\n無人の周の結果: 保留 — 最後' ;;
+      prunpushed) dbr; cand "候補_$src-a.md"; dcommit; dres "$PRL" ;;
+      pushdel) dbr; cand "候補_$src-a.md"; dcommit; dpush; g checkout -q --detach "$base"; g branch -q -D "$br"
+               dres "無人の周の結果: 候補なし — 今夜の名を push してローカルを消した" ;;
+      hang) dlinger ;;
+      pushsleep) dbr; cand "候補_$src-a.md"; dcommit; dpush; dlinger ;;
+      cfgchange) dbr; cand "候補_$src-a.md"; dcommit; g config selftest.tampered yes; dres "無人の周の結果: 縮退 — tamper" ;;
+      late) # 判定の後に書く: 許可の仲介の記録を FIFO にし、loop.sh が読んだとき(判定の後・後片付けの前)に未追跡を置く
+            dbr; cand "候補_$src-a.md"; dcommit
+            python3 -c 'import os,sys; os.mkfifo(sys.argv[1])' "${DEV_WORKFLOW_LOOP_PERMLOG:?}"
+            env -u DEV_WORKFLOW_LOOP_ITER setsid timeout 60 bash -c 'exec 3>"$1"; echo late >"$2/late-$3.txt"; exec 3>&-' \
+              _ "$DEV_WORKFLOW_LOOP_PERMLOG" "$PWD" "$src" </dev/null >/dev/null 2>&1 &
+            dres "無人の周の結果: 縮退 — late" ;;
+      pushdiff) # push した中身(進行中_ を含む)と違う HEAD(候補_ だけ)で 縮退
+                dbr; cand "候補_$src-a.md"; cand "進行中_$src-a.md"; dcommit; dpush
+                g reset -q --hard "$base"; cand "候補_$src-a.md"; dcommit; dres "無人の周の結果: 縮退 — push した中身と違う" ;;
+      dashname) dbr; cand "候補_-x.md"; dcommit; dpush; dres "$PRL" ;;
+      noneuntracked) echo x >"leftover-$src.txt"; dres "無人の周の結果: 候補なし — 未追跡を残した" ;;
+      noneotherbranch) g checkout -q -b "task/other-$src"; dres "無人の周の結果: 候補なし — 別のブランチに居る" ;;
+      nonelocal) g branch -q "$br"; dres "無人の周の結果: 候補なし — 今夜の名をローカルにだけ作った" ;;
+      *) dres "無人の周の結果: 失敗扱い — スタブの未知の振る舞い $beh" ;;
+    esac
+    printf -- '--- stub-end %s\n' "$rn" >>"$REC/ssh.log"
+    exit 0 ;;
+esac
 task="${prompt#*--task=}"; task="${task%% *}"
 tdir="$(dirname -- "$task")"
 name="$(basename -- "$task")"; name="${name#進行中_}"; name="${name%.md}"
@@ -359,6 +447,8 @@ PY
               result "無人の周の結果: 縮退 — tamper" ;;
   badreviews) branch; done_commit; push; mkdir -p .claude/reviews; echo r >.claude/reviews/unreadable.md
               chmod 000 .claude/reviews/unreadable.md; result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
+  candlast) branch; done_commit; push   # 実装の周の最後の結末の行が 候補なし(実装モードでは取りえない)
+            result $'無人の周の結果: PR — https://example.invalid/pr/'"$name"$'\n無人の周の結果: 候補なし — 実装の周では取りえない' ;;
   nobranch) done_commit; result "無人の周の結果: 縮退 — detached" ;;
   nodone) branch; g rm -q "$md"; echo "impl" >"impl-$name.txt"; g add "impl-$name.txt"; g commit -q -m "nodone $name"; result "無人の周の結果: 縮退 — no done" ;;
   holdnofile) branch; done_commit; result "無人の周の結果: 保留 — S4" ;;
@@ -404,6 +494,7 @@ cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
+cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 発見モードの起動時の検査で使う(loop.md §11)
 LOOP="$PLUG/skills/ship-task/scripts/loop.sh"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUG/.claude-plugin/plugin.json")"
 
@@ -520,7 +611,7 @@ wt_count() { git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -c '
 COMMON_ARGS=(--kill-grace 2 --net-timeout 10)
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv order skip judge breakers signals kill hooks perm d22 between)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv order skip judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -2210,6 +2301,403 @@ run_loop between -- --repo "$R" "${COMMON_ARGS[@]}"
 check "実行と実行の間の変化: 止まらずに続ける" 0 "$RC"
 has "実行と実行の間の変化: 報告に差分が出る" "$(report_of "$OUT")" "selftest.between=yes"
 has "実行と実行の間の変化: 次のタスクを回す" "$REC/calls.log" "pr-b"
+
+fi
+
+# ════════════════ 発見モード(--discover。loop.md §11・Issue #69)════════════════
+if want discover; then
+# 発見元の列が discover-mode.md §1 の「発見元の列」の行と同じ(順も)
+DM_DOC="$PLUGIN_SRC/skills/ship-task/references/discover-mode.md"
+DISC_DIFF="$(python3 -B - "$DM_DOC" "$TARGET" <<'PY' 2>&1
+import re, sys
+try:
+    doc = open(sys.argv[1], encoding="utf-8").read()
+except OSError as exc:
+    print("(discover-mode.md を読めない: %s)" % exc)
+    sys.exit(0)
+rows = [l for l in doc.split("\n") if l.startswith("- **発見元の列**: ")]
+if len(rows) != 1:
+    print("(文書の「発見元の列」の行がちょうど 1 つでない: %d)" % len(rows))
+    sys.exit(0)
+doc_list = re.findall(r"`([^`]+)`", rows[0])
+found = re.findall(r"^DISCOVER_DEFAULT=\(([^)]*)\)", open(sys.argv[2], encoding="utf-8").read(), re.M)
+if len(found) != 1:
+    print("(loop.sh の DISCOVER_DEFAULT の行がちょうど 1 つでない: %d)" % len(found))
+    sys.exit(0)
+loop_list = found[0].split()
+if not doc_list or doc_list != loop_list:
+    print("文書: %s / loop.sh: %s" % (" ".join(doc_list), " ".join(loop_list)))
+PY
+)"
+if [ -z "$DISC_DIFF" ]; then ok "同期: 発見元の列が discover-mode.md と一致する(順も)"
+else ng "同期: 発見元の列が discover-mode.md と一致する(順も)($DISC_DIFF)"; fi
+
+# newdisc <名> [noorigin] → R・B。状態ファイル 3 つを ignore し、task_dir(docs/tasks)に既存の 候補_old.md を置く
+newdisc() {
+  newrepo "$1" "${2:-}"
+  printf '.claude/grasp.md\n.claude/.understand-project-done\n' >>"$R/.gitignore"
+  mkdir -p "$R/docs/tasks"
+  printf '# old\n\n> **ステータス**: 候補\n> **発見元**: refactor\n> **指摘キー**: refactor:file:old.py\n\n## 指摘\n\nold\n' \
+    >"$R/docs/tasks/候補_old.md"
+  commit
+}
+dqueue() { # 直前の --dry-run の出力の「発見元の列」(空白区切り)
+  sed -n '/^発見元の列/,/^止まった理由/p' "$OUT" | sed -n 's/^  \([a-z-]*\)(ブランチ .*/\1/p' | tr '\n' ' '
+}
+dargv_has_seq() { # $1=argv の記録 $2..=連続するトークン
+  python3 - "$@" <<'PY'
+import sys
+toks = open(sys.argv[1], encoding="utf-8").read().split("\n")[1:]
+want = sys.argv[2:]
+sys.exit(0 if any(toks[i:i + len(want)] == want for i in range(len(toks))) else 1)
+PY
+}
+
+# ── 引数(使い方の誤りは exit 2)・--dry-run・プロンプト ──
+newdisc dargs
+newrec dargs
+for a in "--discover=" "--discover=data-audit," "--discover=,refactor" "--discover=data-audit,data-audit" \
+         "--discover=foo" "--discover=Data-audit"; do
+  run_loop dargs -- --repo "$R" --dry-run "$a"
+  check "発見モードの引数の誤り('$a'): 終了コード 2" 2 "$RC"
+  has "発見モードの引数の誤り('$a'): 理由" "$OUT" "[usage]"
+done
+run_loop dargs -- --repo "$R" --dry-run --discover --discover=refactor
+check "発見モードの引数の誤り(--discover を 2 回): 終了コード 2" 2 "$RC"
+run_loop dargs -- --repo "$R" --dry-run --discover --only pr-a
+check "発見モードの引数の誤り(--only と併用): 終了コード 2" 2 "$RC"
+run_loop dargs -- --repo "$R" --dry-run --discover data-audit
+check "発見モードの引数の誤り(値を = で付けない): 終了コード 2" 2 "$RC"
+has "発見モードの引数の誤り(値を = で付けない): 不明な引数" "$OUT" "不明な引数: data-audit"
+D12="$(git -C "$R" rev-parse main | cut -c1-12)"
+run_loop dargs -- --repo "$R" --dry-run --discover
+check "発見モードの --dry-run: 終了コード 0" 0 "$RC"
+check "発見モードの --dry-run: -p を起動しない" "" "$(calls)"
+check "発見モードの --dry-run: worktree が残らない" 1 "$(wt_count)"
+check "発見モードの --dry-run: 既定の列を既定の順に出す" "data-audit refactor " "$(dqueue)"
+has "発見モードの --dry-run: 今夜の名のブランチを出す" "$OUT" "data-audit(ブランチ task/候補-data-audit-$D12)"
+has "発見モードの --dry-run: task_dir を出す" "$OUT" "発見元の列(task_dir: docs/tasks)"
+hasnt "発見モードの --dry-run: 読み飛ばしが無い" "$OUT" "読み飛ばし:"
+has "発見モード: 報告にモードの行(既定)" "$(report_of "$OUT")" "モード: 発見(発見元の列: data-audit,refactor・既定"
+run_loop dargs -- --repo "$R" --dry-run --discover=refactor,data-audit
+check "発見モードの --dry-run: 引数の列を引数の順に出す" "refactor data-audit " "$(dqueue)"
+has "発見モード: 報告にモードの行(引数)" "$(report_of "$OUT")" "モード: 発見(発見元の列: refactor,data-audit・引数"
+run_loop dargs -- --repo "$R" --dry-run --discover=refactor
+check "発見モードの --dry-run: 引数で 1 つに絞る" "refactor " "$(dqueue)"
+
+# ── 起動の前提: origin の URL(fetch と push・vcs・origin-repo.py の失敗)・状態ファイルの ignore ──
+newdisc dmis
+G -C "$R" remote set-url --push origin "sshstub:$W/repos/elsewhere-secret.git"
+newrec dmis
+run_loop dmis -- --repo "$R" --dry-run --discover
+check "発見モード: fetch と push の URL が別のリポジトリなら 20" 20 "$RC"
+has "発見モード: fetch と push の URL が別: 理由" "$OUT" "[origin-url-mismatch]"
+hasnt "発見モード: fetch と push の URL が別: URL の字面を出さない(stdout・stderr)" "$OUT" "elsewhere-secret"
+hasnt "発見モード: fetch と push の URL が別: URL の字面を出さない(報告)" "$(report_of "$OUT")" "elsewhere-secret"
+check "発見モード: fetch と push の URL が別: worktree を作らない" 1 "$(wt_count)"
+run_loop dmis -- --repo "$R" --dry-run
+check "実装モードは origin の URL を検査しない(fetch と push が別でも起動する)" 0 "$RC"
+# remote.origin.vcs: 起動時の最初の ls-remote より前に origin-vcs で止まる(vcs のヘルパーを起動しない — M4)
+printf '#!/bin/sh\necho "$0 $*" >>"${SELFTEST_REC:?}/vcs.log"\nexit 1\n' >"$STUBBIN/git-remote-selftestvcs"
+chmod +x "$STUBBIN/git-remote-selftestvcs"
+newdisc dvcs
+G -C "$R" config remote.origin.vcs selftestvcs
+newrec dvcs
+run_loop dvcs -- --repo "$R" --dry-run --discover
+check "発見モード: remote.origin.vcs があれば 20" 20 "$RC"
+has "発見モード: remote.origin.vcs: 理由は origin-vcs" "$OUT" "[origin-vcs]"
+f "発見モード: remote.origin.vcs: ls-remote を打たない(vcs のヘルパーが起動されない)" test -e "$REC/vcs.log"
+run_loop dvcs -- --repo "$R" --dry-run
+check "前提: 実装モードの起動時の ls-remote は vcs のヘルパーを通って止まる" 20 "$RC"
+t "前提: 実装モードでは vcs のヘルパーが起動される" test -e "$REC/vcs.log"
+# origin-repo.py の失敗(exit 2・例外・読めない出力)と、無いとき(発見モードだけ plugin-root)
+newdisc dor
+newrec dor
+or_variant() { # $1=名 $2=origin-repo.py の中身(空なら消す)→ LOOP_BIN
+  local d="$W/plugin-or-$1"
+  rm -rf "$d"
+  mkdir -p "$d"
+  cp -r "$PLUG/." "$d/"
+  if [ -z "$2" ]; then rm -f "$d/skills/ship-task/scripts/origin-repo.py"
+  else printf '%s\n' "$2" >"$d/skills/ship-task/scripts/origin-repo.py"; fi
+  LOOP_BIN="$d/skills/ship-task/scripts/loop.sh"
+}
+or_variant exit2 'import sys; sys.exit(2)'
+run_loop dor -- --repo "$R" --dry-run --discover
+check "発見モード: origin-repo.py の exit 2 で 20" 20 "$RC"
+has "発見モード: origin-repo.py の exit 2: 理由" "$OUT" "[origin-url]"
+or_variant raise 'raise RuntimeError("selftest")'
+run_loop dor -- --repo "$R" --dry-run --discover
+check "発見モード: origin-repo.py の例外(exit 1)で 20" 20 "$RC"
+has "発見モード: origin-repo.py の例外: 理由" "$OUT" "[origin-url]"
+or_variant badjson 'print("not json")'
+run_loop dor -- --repo "$R" --dry-run --discover
+check "発見モード: origin-repo.py の出力が読めなければ 20" 20 "$RC"
+has "発見モード: origin-repo.py の出力が読めない: 理由" "$OUT" "[origin-url]"
+or_variant missing ''
+run_loop dor -- --repo "$R" --dry-run --discover
+check "発見モード: origin-repo.py が無ければ 20" 20 "$RC"
+has "発見モード: origin-repo.py が無い: 理由" "$OUT" "[plugin-root]"
+run_loop dor -- --repo "$R" --dry-run
+check "実装モードは origin-repo.py が無くても起動する" 0 "$RC"
+LOOP_BIN="$LOOP"
+# 状態ファイルが ignore されていない / .claude/grasp.md が追跡済み(worktree を消して 20)
+newrepo dign
+newrec dign
+run_loop dign -- --repo "$R" --dry-run --discover
+check "発見モード: 状態ファイルが ignore されていなければ 20" 20 "$RC"
+has "発見モード: 状態ファイルが ignore されていない: 理由" "$OUT" "[state-not-ignored]"
+has "発見モード: 状態ファイルが ignore されていない: gitignore の断片を報告に出す" "$(report_of "$OUT")" ".claude/.understand-project-done"
+check "発見モード: 状態ファイルが ignore されていない: worktree を消す" 1 "$(wt_count)"
+newdisc dtrk
+mkdir -p "$R/.claude"
+echo g >"$R/.claude/grasp.md"
+G -C "$R" add -f .claude/grasp.md
+commit
+run_loop dtrk -- --repo "$R" --dry-run --discover
+check "発見モード: .claude/grasp.md が追跡済みなら 20(ignore の検査に --no-index を付けない)" 20 "$RC"
+has "発見モード: 追跡済みの grasp.md: 理由" "$OUT" "[state-not-ignored]"
+has "発見モード: 追跡済みの grasp.md: git rm --cached を案内する" "$(report_of "$OUT")" "git rm --cached -- .claude/grasp.md"
+check "発見モード: 追跡済みの grasp.md: worktree を消す" 1 "$(wt_count)"
+
+# ── 読み飛ばし(--dry-run の発見元の列と読み飛ばしで見る)──
+newdisc dskip
+newrec dskip
+DEF="$(git -C "$R" rev-parse main)"
+D12="${DEF:0:12}"
+INIT="$(git -C "$R" rev-list --max-parents=0 main)"                # 祖先(merge 済み)
+SIDE="$(git -C "$R" commit-tree 'main^{tree}' -p main -m side)"   # 祖先でない(未 merge)
+dskip_run() { run_loop dskip -- --repo "$R" --dry-run --discover; }
+G -C "$R" branch "task/候補-data-audit-aaaaaaaaaaaa" "$SIDE"
+dskip_run
+check "読み飛ばし(発見): ローカルの未 merge の候補のブランチ" "refactor " "$(dqueue)"
+has "読み飛ばし(発見): ローカルの未 merge: 理由" "$OUT" "data-audit: 未 merge の候補のブランチがある(refs/heads/task/候補-data-audit-aaaaaaaaaaaa)"
+has "読み飛ばし(発見): ローカルの未 merge: 片付けの定型" "$OUT" "git branch -D task/候補-data-audit-aaaaaaaaaaaa"
+G -C "$R" branch -D "task/候補-data-audit-aaaaaaaaaaaa"
+G -C "$R" update-ref "refs/remotes/origin/task/候補-refactor-bbbbbbbbbbbb" "$SIDE"
+dskip_run
+check "読み飛ばし(発見): 追跡用の ref の未 merge の候補のブランチ" "data-audit " "$(dqueue)"
+has "読み飛ばし(発見): 追跡用の ref の未 merge: 片付けの定型" "$OUT" "git branch -dr origin/task/候補-refactor-bbbbbbbbbbbb"
+G -C "$R" update-ref -d "refs/remotes/origin/task/候補-refactor-bbbbbbbbbbbb"
+ORPH="$(git -C "$B" commit-tree 'main^{tree}' -m only-in-origin)"
+git -C "$B" update-ref "refs/heads/task/候補-data-audit-cccccccccccc" "$ORPH"
+f "前提: origin にだけある候補のブランチの sha はローカルに無い" git -C "$R" cat-file -e "$ORPH^{commit}"
+dskip_run
+check "読み飛ばし(発見): origin の未 merge(sha がローカルに無い)の候補のブランチ" "refactor " "$(dqueue)"
+has "読み飛ばし(発見): origin の未 merge: 片付けの定型" "$OUT" "git push origin --delete task/候補-data-audit-cccccccccccc"
+git -C "$B" update-ref -d "refs/heads/task/候補-data-audit-cccccccccccc"
+G -C "$R" branch "task/候補-data-audit-dddddddddddd" "$INIT"
+G -C "$R" update-ref "refs/remotes/origin/task/候補-refactor-dddddddddddd" "$INIT"
+git -C "$B" update-ref "refs/heads/task/候補-refactor-ffffffffffff" "$INIT"
+dskip_run
+check "読み飛ばし(発見): merge 済み(祖先)の候補のブランチは拾う" "data-audit refactor " "$(dqueue)"
+G -C "$R" branch -D "task/候補-data-audit-dddddddddddd"
+G -C "$R" update-ref -d "refs/remotes/origin/task/候補-refactor-dddddddddddd"
+git -C "$B" update-ref -d "refs/heads/task/候補-refactor-ffffffffffff"
+G -C "$R" branch "task/候補-data-audit-$D12" "$DEF"
+git -C "$B" update-ref "refs/heads/task/候補-refactor-$D12" "$DEF"
+dskip_run
+check "読み飛ばし(発見): 今夜の名のブランチは祖先でも読み飛ばす(ローカル・origin)" "" "$(dqueue)"
+has "読み飛ばし(発見): 今夜の名(ローカル): 理由" "$OUT" "data-audit: 今夜の名のブランチ task/候補-data-audit-$D12 がある(refs/heads/task/候補-data-audit-$D12)"
+has "読み飛ばし(発見): 今夜の名(origin): 理由" "$OUT" "refactor: 今夜の名のブランチ task/候補-refactor-$D12 がある(origin:refs/heads/task/候補-refactor-$D12)"
+has "読み飛ばし(発見): 今夜の名: 片付けの定型" "$OUT" "git push origin --delete task/候補-refactor-$D12"
+has "読み飛ばし(発見): 報告にも片付けの定型" "$(report_of "$OUT")" "片付け: \`git branch -D task/候補-data-audit-$D12\`"
+G -C "$R" branch -D "task/候補-data-audit-$D12"
+git -C "$B" update-ref -d "refs/heads/task/候補-refactor-$D12"
+for n in "task/候補-data-audit-eeeeeeeeeeee0" "task/候補-data-audit-eeeee" "task/候補-data-audit-EEEEEEEEEEEE" \
+         "task/候補-data-audit-x-eeeeeeeeeeee" "task/x候補-data-audit-eeeeeeeeeeee" "task/候補-refactor-eeeeeeeeeeee-x"; do
+  G -C "$R" branch "$n" "$SIDE"
+done
+dskip_run
+check "読み飛ばし(発見): 名が完全一致しない候補のブランチは数えない" "data-audit refactor " "$(dqueue)"
+for n in "task/候補-data-audit-eeeeeeeeeeee0" "task/候補-data-audit-eeeee" "task/候補-data-audit-EEEEEEEEEEEE" \
+         "task/候補-data-audit-x-eeeeeeeeeeee" "task/x候補-data-audit-eeeeeeeeeeee" "task/候補-refactor-eeeeeeeeeeee-x"; do
+  G -C "$R" branch -D "$n"
+done
+G -C "$R" worktree add -q --detach --lock --reason "dev-workflow-loop: 候補:refactor" "$W/repos/dskip-lock" HEAD
+G -C "$R" worktree add -q --detach --lock --reason "dev-workflow-loop: 候補:data-audit-x" "$W/repos/dskip-lock2" HEAD
+dskip_run
+check "読み飛ばし(発見): lock の理由がちょうど 候補:<発見元> の worktree" "data-audit " "$(dqueue)"
+has "読み飛ばし(発見): lock: 理由" "$OUT" "refactor: 前の周が残した worktree がある($W/repos/dskip-lock)"
+
+# ── 判定の各場合と worktree の扱い(1 回の実行で data-audit・refactor の 2 周)──
+DA_ARGS=(--max-consecutive-failures 50 "${COMMON_ARGS[@]}")
+disc_pair() { # $1=名 $2=data-audit の振る舞い $3=refactor の振る舞い [$4=noorigin] 残り=loop.sh の追加の引数
+  local name="$1" da="$2" rf="$3" org="${4:-}"
+  shift 4 2>/dev/null || shift $#
+  newdisc "dp-$name" "$org"
+  newrec "dp-$name"
+  D12="$(git -C "$R" rev-parse main | cut -c1-12)"
+  run_loop "dp-$name" "SELFTEST_DISC_DA=$da" "SELFTEST_DISC_RF=$rf" -- --repo "$R" --discover "${DA_ARGS[@]}" "$@"
+  RP="$(report_of "$OUT")"
+}
+djudged() { # $1=発見元 $2=判定(先頭一致) $3=removed|kept $4=振る舞い
+  has "発見の判定($4): $2" "$OUT" "発見元 $1 → $2"
+  if [ "$3" = kept ]; then
+    t "発見の判定($4): worktree を残す(lock の理由 候補:$1)" locked_reason_of "候補:$1"
+  else
+    f "発見の判定($4): worktree を消す" locked_reason_of "候補:$1"
+  fi
+}
+disc_pair pr pr degrade
+check "発見の周(pr・degrade): キューが空で終わる" 0 "$RC"
+check "発見の周: 発見元を列の順に 1 回ずつ回す" "disc-data-audit disc-refactor" "$(calls)"
+djudged data-audit "正常(PR)" removed pr
+djudged refactor "正常(縮退)" removed degrade
+t "発見の周(pr): origin に今夜の名のブランチがある" git -C "$B" rev-parse --verify -q "refs/heads/task/候補-data-audit-$D12"
+has "発見の周: 共有の config の 2 項目(今夜の名のブランチ)を許す" "$RP" "branch.task/候補-data-audit-$D12.remote=origin"
+has "発見の周: 候補の件数を報告に出す" "$RP" "- 候補: 2 件"
+has "発見の周: 候補のパスを報告に出す" "$RP" "  - docs/tasks/候補_data-audit-a.md"
+has "発見の周: 今夜の名のブランチを報告に出す" "$RP" "今夜の名のブランチ: task/候補-data-audit-$D12"
+has "発見の周(縮退・push していない): ローカルのブランチの手順" "$RP" "push していないとき(origin に task/候補-refactor-$D12 が無い)"
+has "発見の周(縮退・push していない): 消し方" "$RP" "git branch -D task/候補-refactor-$D12"
+has "発見の周(縮退): 処理するまでその発見元は回らない" "$RP" "処理するまで、発見元 refactor は回らない"
+check "発見の周: プロンプトの字面" "/dev-workflow:ship-task --discover=data-audit --unattended" "$(cat "$REC/prompt-disc-data-audit" 2>/dev/null)"
+t "発見の周: argv の隔離・権限のフラグは実装モードと同じ" dargv_has_seq "$REC/argv-disc-data-audit" -p --output-format json \
+  --setting-sources user --strict-mcp-config --plugin-dir "$PLUG" --permission-mode acceptEdits --permission-prompts none --settings
+f "発見の周: プロンプトを位置引数で渡さない" grep -qF -- "--discover=" "$REC/argv-disc-data-audit"
+has "発見の周: 子の環境に周の印" "$REC/env-disc-data-audit" "DEV_WORKFLOW_LOOP_ITER="
+has "発見の周: 要約" "$RP" "## 発見元ごとの要約"
+has "発見の周: 採用の手順" "$RP" "/create-task <候補_ のパス>"
+has "発見の周: 片付けの定型(squash・rebase)" "$RP" "squash・rebase で merge したとき"
+has "発見の周: 片付けの定型(閉じた)" "$RP" "PR を閉じたとき"
+disc_pair degpush degradepush none
+djudged data-audit "正常(縮退)" removed degradepush
+djudged refactor "正常(候補なし)" removed none
+has "発見の周(縮退・push 済み): push 済みのブランチ" "$RP" "push 済みのブランチ: task/候補-data-audit-$D12"
+has "発見の周(縮退・push 済み): PR を作るコマンドの雛形" "$RP" "gh pr create -R <HOST/OWNER/REPO> --head task/候補-data-audit-$D12"
+has "発見の周(縮退・push 済み): 作らないときの消し方" "$RP" "git push origin --delete task/候補-data-audit-$D12"
+has "発見の周(縮退・push 済み): 処理するまでその発見元は回らない" "$RP" "処理するまで、発見元 data-audit は回らない"
+f "発見の周(候補なし): 今夜の名のブランチを作らない" git -C "$R" rev-parse --verify -q "refs/heads/task/候補-refactor-$D12"
+has "発見の周(候補なし): 候補モードの報告の写し先を出す" "$RP" "候補モードの報告: "
+disc_pair noorg degrade pr noorigin
+djudged data-audit "正常(縮退)" removed "degrade・origin 無し"
+djudged refactor "失敗(食い違い: 結末 PR だが origin が無い)" kept "pr・origin 無し"
+has "発見の周(縮退・origin 無し): ローカルの手順" "$RP" "origin が無く、push していない: ローカルのブランチ task/候補-data-audit-$D12 を merge するか、消す"
+has "発見の周(縮退・origin 無し): merge の手順" "$RP" "git merge task/候補-data-audit-$D12"
+hasnt "発見の周(縮退・origin 無し): PR の雛形を出さない" "$RP" "gh pr create -R"
+disc_pair inprog inprog modcand
+djudged data-audit "失敗(食い違い: 名前が 候補_<名>.md でない(docs/tasks/進行中_data-audit-a.md)" kept "進行中_ を足す"
+djudged refactor "失敗(食い違い: 追加でない変更がある(M docs/tasks/候補_old.md)" kept "既存の 候補_ を書き換える"
+disc_pair nested nested outside
+djudged data-audit "失敗(食い違い: task_dir の直下でない(docs/tasks/sub/候補_data-audit-a.md)" kept "入れ子"
+djudged refactor "失敗(食い違い: 名前が 候補_<名>.md でない(docs/tasks/memo-refactor.md)" kept "名前空間の外"
+disc_pair modify modify d21
+djudged data-audit "失敗(食い違い: 追加でない変更がある(M README.md)" kept "既存ファイルの書き換え"
+djudged refactor "失敗(食い違い: D21 に外れる" kept "D21 に外れる名"
+disc_pair name emptyname mode
+djudged data-audit "失敗(食い違い: <名> が空" kept "名が空"
+djudged refactor "失敗(食い違い: モードが 100644 でない(100755" kept "モード"
+disc_pair commits twocommits untracked
+djudged data-audit "失敗(食い違い: HEAD が固定した sha の上の 1 commit でない" kept "2 commit"
+djudged refactor "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "未追跡の残り"
+disc_pair branch otherbranch fail
+djudged data-audit "失敗(食い違い: HEAD が refs/heads/task/候補-data-audit-$D12 でない" kept "今夜の名でないブランチ"
+djudged refactor "失敗(結末 失敗扱い)" kept "失敗扱い"
+has "失敗の周(origin に今夜の名が無い): 報告" "$RP" "origin に task/候補-refactor-$D12 は無い"
+disc_pair hold hold holdlast
+djudged data-audit "失敗(結末 保留 は発見の周では取りえない)" kept "保留"
+djudged refactor "失敗(結末 保留 は発見の周では取りえない)" kept "前に 候補なし・最後に 保留"
+has "結末の行の選び方(発見): 最後の行を読む" "$RP" "- 結末: 保留 — 最後"
+disc_pair late late prunpushed
+djudged data-audit "正常(縮退)" kept "判定の後に未追跡が書かれた"
+has "発見の周(remove の拒否): 報告" "$RP" "消せなかったので残した"
+djudged refactor "失敗(食い違い: origin の task/候補-refactor-$D12(無い)" kept "PR だが push していない"
+disc_pair pushdel pushdel pushfail
+djudged data-audit "失敗(食い違い: 結末 候補なし だが origin に task/候補-data-audit-$D12 がある)" kept "今夜の名を push してローカルを消して 候補なし"
+djudged refactor "失敗(結末 失敗扱い)" kept "push の後の失敗扱い"
+has "失敗の周: PR が開いている可能性(候補なし の食い違い)" "$RP" "origin に task/候補-data-audit-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
+has "失敗の周: PR が開いている可能性(失敗扱い)" "$RP" "origin に task/候補-refactor-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
+disc_pair pushdiff pushdiff dashname
+djudged data-audit "失敗(食い違い: 結末 縮退 だが origin の task/候補-data-audit-$D12(" kept "push した中身と違う HEAD で 縮退"
+has "発見の周(縮退・origin のブランチが判定した中身と違う): 報告" "$RP" "origin の task/候補-data-audit-$D12 が判定した中身(HEAD)と違う: PR を作らずに消す"
+hasnt "発見の周(縮退・origin のブランチが判定した中身と違う): PR の雛形を出さない" "$RP" "gh pr create -R"
+djudged refactor "失敗(食い違い: D21 に外れる — <名> が '-' で始まる" kept "名が - で始まる"
+disc_pair noneclean noneuntracked noneotherbranch
+djudged data-audit "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "候補なし で未追跡を残す"
+djudged refactor "失敗(食い違い: 結末 候補なし だが HEAD が detached でない" kept "候補なし で別のブランチに居る"
+disc_pair nonelocal nonelocal none
+djudged data-audit "失敗(食い違い: 結末 候補なし だがローカルに task/候補-data-audit-$D12 がある)" kept "候補なし で今夜の名をローカルにだけ作る"
+djudged refactor "正常(候補なし)" removed "今夜の名がローカルにある周の後の none"
+disc_pair hang hang none "" --iteration-timeout 4
+djudged data-audit "失敗(時間切れ)" kept "時間切れ"
+djudged refactor "正常(候補なし)" removed "時間切れの後の周"
+for p in $(cat "$REC/pid-disc-data-audit" "$REC/spawned-disc-data-audit" 2>/dev/null); do
+  if wait_dead "$p" 3; then ok "発見の周(時間切れ): pid $p が止まる"; else ng "発見の周(時間切れ): pid $p が止まる"; fi
+done
+# 連続失敗・同じ実行で 2 度回さない・共有の config の変化
+newdisc dcf
+newrec dcf
+run_loop dcf SELFTEST_DISC_DA=fail SELFTEST_DISC_RF=fail -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+check "発見の周の連続失敗: 終了コード 10" 10 "$RC"
+has "発見の周の連続失敗: 理由" "$OUT" "[consecutive-failures]"
+check "発見の周の連続失敗: 2 周で止まる" "disc-data-audit disc-refactor" "$(calls)"
+newdisc donce
+newrec donce
+run_loop donce SELFTEST_DISC_DA=none SELFTEST_DISC_RF=none -- --repo "$R" --discover --max-iterations 10 "${COMMON_ARGS[@]}"
+check "発見の周: 同じ実行で同じ発見元を 2 度回さない(キューが空で終わる)" 0 "$RC"
+check "発見の周: 同じ実行で同じ発見元を 2 度回さない(各 1 回)" "disc-data-audit disc-refactor" "$(calls)"
+has "発見の周: 同じ実行で同じ発見元を 2 度回さない(理由)" "$OUT" "止まった理由: キューが空"
+newdisc dcfg
+newrec dcfg
+run_loop dcfg SELFTEST_DISC_DA=cfgchange SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+check "発見の周(共有の config の変化): 終了コード 10" 10 "$RC"
+has "発見の周(共有の config の変化): 理由" "$OUT" "[shared-state]"
+check "発見の周(共有の config の変化): 次の周へ進まない" "disc-data-audit" "$(calls)"
+# 周の途中の印(meta に mode・source・name)と、push の後の KILL の後の起動(許す 2 項目だけなら続ける)
+newdisc dkill
+newrec dkill
+D12="$(git -C "$R" rev-parse main | cut -c1-12)"
+start_bg dkill SELFTEST_DISC_DA=pushsleep SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-disc-data-audit" 30; then
+  sleep 0.5
+  SD="$(state_dir dkill)"
+  has "発見の周の途中の印: mode=discover" "$SD/inflight/meta" "mode=discover"
+  has "発見の周の途中の印: source=<発見元>" "$SD/inflight/meta" "source=data-audit"
+  has "発見の周の途中の印: name=今夜の名" "$SD/inflight/meta" "name=候補-data-audit-$D12"
+  has "発見の周の途中の印: rel=候補:<発見元>" "$SD/inflight/meta" "rel=候補:data-audit"
+  kill -KILL "$BG_PID"; wait_bg
+  CHILD="$(cat "$REC/pid-disc-data-audit")"
+  t "発見の周の KILL: loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
+  run_loop dkill SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+  check "発見の周の KILL の後の起動: push の 2 項目だけなら続ける" 0 "$RC"
+  if wait_dead "$CHILD" 1; then ok "発見の周の KILL の後の起動: 残った子を止める"; else ng "発見の周の KILL の後の起動: 残った子を止める"; fi
+  f "発見の周の KILL の後の起動: 周の途中の印は消える" test -e "$SD/inflight"
+  f "発見の周の KILL の後の起動: 止めの印を置かない" test -e "$SD/stop-mark.md"
+  has "発見の周の KILL の後の起動: 発見モードの周だったことを報告する" "$(report_of "$OUT")" "発見モードの周(発見元 data-audit"
+  has "発見の周の KILL の後の起動: その発見元は今夜の名で読み飛ばす" "$(report_of "$OUT")" "data-audit: 今夜の名のブランチ task/候補-data-audit-$D12 がある"
+  has "発見の周の KILL の後の起動: ほかの発見元を回す" "$REC/calls.log" "disc-refactor"
+else
+  ng "発見の周の KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+
+# ── 結末の行の選び方(実装モード)・実装モードが 候補_ を拾わない・候補_ だけのディレクトリの検出 ──
+newrepo dimpl
+addtask candlast-a
+commit
+newrec dimpl
+run_loop dimpl -- --repo "$R" "${COMMON_ARGS[@]}"
+has "結末の行の選び方(実装): 最後の行が 候補なし なら失敗" "$OUT" "docs/tasks/進行中_candlast-a.md → 失敗(結末の行が読めない)"
+newrepo dimpl2
+addtask pr-a
+printf '# c\n\n> **ステータス**: 候補\n> **無人実行**: 可\n> **発見元**: refactor\n> **指摘キー**: refactor:file:c.py\n\n## 指摘\n\nc\n' \
+  >"$R/docs/tasks/候補_pr-c.md"
+commit
+newrec dimpl2
+run_loop dimpl2 -- --repo "$R" --dry-run
+has "実装モードは 候補_ を拾わない: 進行中_ は一覧に出る" "$OUT" "docs/tasks/進行中_pr-a.md"
+hasnt "実装モードは 候補_ を拾わない(メタ行があっても)" "$OUT" "候補_pr-c.md"
+run_loop dimpl2 -- --repo "$R" "${COMMON_ARGS[@]}"
+check "実装モードは 候補_ を拾わない: 回すのは 進行中_ だけ" "pr-a" "$(calls)"
+newrepo dcand
+printf '.claude/grasp.md\n.claude/.understand-project-done\n' >>"$R/.gitignore"
+mkdir -p "$R/cands"
+printf '# c\n\n> **ステータス**: 候補\n> **発見元**: refactor\n> **指摘キー**: refactor:file:c.py\n\n## 指摘\n\nc\n' >"$R/cands/候補_c.md"
+commit
+newrec dcand
+run_loop dcand -- --repo "$R" --dry-run --discover
+check "候補_ だけのディレクトリ: 起動する" 0 "$RC"
+has "候補_ だけのディレクトリが task_dir に検出される" "$OUT" "発見元の列(task_dir: cands)"
 
 fi
 

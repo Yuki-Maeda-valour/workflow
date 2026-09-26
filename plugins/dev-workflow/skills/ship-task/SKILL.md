@@ -1,7 +1,7 @@
 ---
 name: ship-task
-description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければそのまま /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計に必要な情報が欠けている場合は設計書だけ返して実装に進まない。品質ゲート赤・スコープ縮小検出・レビュー未収束のときも停止し、PR は作らない。既存のタスク MD から実装・PR まで回すときは --task、無人ループから呼ぶ無人の実行は --unattended(対話点で止まらず、保留か失敗扱いに倒す)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
-argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended] [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>]"
+description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければ /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計の情報が欠ければ設計書だけ返し、品質ゲート赤・スコープ縮小・レビュー未収束では停止して PR を作らない。既存のタスク MD から回すときは --task、無人ループの周は --unattended(対話点で止まらず、保留か失敗扱いに倒す)、発見ループの周は --discover=<発見元> --unattended(発見元が積んだ候補_ だけを PR にする)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
+argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended] [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>] | --discover=<発見元> --unattended [--no-pr]"
 ---
 
 # ship-task — 設計 → 実装 → doc 同期 → PR の一気通貫実行
@@ -11,9 +11,9 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 1. **薄いオーケストレーターに徹する**。工程の中身は既存スキル(/create-task・/do-task・/update-doc)が持つ。このスキルは順序・続行判定・git 出口だけを担い、各スキルの手順を再定義しない
 2. **既定は走り切る**。工程間でいちいち確認を取らない。止まるのは下の「停止条件」に該当したときだけ(サイレント続行も、無意味な確認も避ける)
 3. **要件不明のまま実装しない**。設計に必要な情報が欠けている場合は /create-task の中で確認する。それでも不明が残るなら、設計書を成果物として返し実装へ進まない(誤った物を全力で作らないため)
-4. **PR は「緑」でしか開かない**。ここでの緑は、品質ゲートが緑・レビューが全員 APPROVED・実動確認が「実施済」か「実施不能」(状態の定義は /do-task の Phase 5.5 の表)の 3 つが揃うこと。揃わない状態で PR を作らない。停止時は作業ブランチと commit を残し、何が未達かを報告する
+4. **PR は「緑」でしか開かない**。ここでの緑は、品質ゲートが緑・レビューが全員 APPROVED・実動確認が「実施済」か「実施不能」(状態の定義は /do-task の Phase 5.5 の表)の 3 つが揃うこと。揃わない状態で PR を作らない。停止時は作業ブランチと commit を残し、何が未達かを報告する。発見の周(`--discover`)の「緑」は、[references/discover-mode.md](references/discover-mode.md) の照合にすべて通ったこと(品質ゲート・レビュー・実動確認は、採用の後の /create-task・/do-task で行う。design §5-20 の例外)
 5. **git 操作の範囲を明示する**。ブランチ作成・commit・push・PR 作成はこのスキルの責務だが、マージはしない。レビュアーの自動アサインもしない
-6. **無人モードは正本に従う**。`--unattended` のときは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。対話点ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。`--unattended` のときは、最初に references/unattended-mode.md を Read し、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない(特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介に拒否されると、打ち直さずに失敗扱いになる)
+6. **無人モードは正本に従う**。`--unattended` のときは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。対話点ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。発見の周に固有の前提・工程・照合・結末は references/discover-mode.md が正本。`--unattended` のときは、最初に references/unattended-mode.md を Read し(`--discover` もあれば references/discover-mode.md も同じ応答で Read し)、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない(特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介に拒否されると、打ち直さずに失敗扱いになる)
 
 ## オプション
 
@@ -21,7 +21,8 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 |---|---|
 | (なし) | 設計 → 実装 → doc 同期 → PR まで全工程 |
 | `--task=<タスク MD>` | 既存のタスク MD(管理ルート相対。`進行中_{名}.md` の通常ファイル)から始める。Phase 1 を飛ばし、Phase 0 で作業ブランチを作ってから Phase 2 へ進む。`--design-only`・`--refactor`・`--compact`・`--light` とは併用できない(create-task のための引数。指定されたら停止する) |
-| `--unattended` | 無人モード(無人ループの 1 周)。`--task` が必須。前提・対話点ごとの扱いは [references/unattended-mode.md](references/unattended-mode.md) |
+| `--unattended` | 無人モード(無人ループの 1 周)。`--task` か `--discover` が必須。前提・対話点ごとの扱いは [references/unattended-mode.md](references/unattended-mode.md) |
+| `--discover=<発見元>` | 発見の周(無人ループの発見モードの 1 周)。発見元の候補モードが書いた `候補_` だけを commit して PR を開く。`--unattended` と一緒にだけ受け付ける(無ければ停止する)。発見元の列・前提・併用しない引数・工程・照合・結末は [references/discover-mode.md](references/discover-mode.md) |
 | `--design-only` | Phase 1 のみ(= /create-task 単体と同じ)。設計書を返して終了 |
 | `--no-pr` | Phase 5 の push / PR 作成を行わない(ブランチ + commit まで) |
 | `--branch=<名前>` | 作業ブランチ名を明示(省略時は `task/{タスク名}`) |
@@ -36,9 +37,10 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 1. **把握**: `.claude/grasp.md` は参照索引として確認し、毎回、現在の profile・権威参照ファイル・関連文書・設定・対象領域と依存先を読む。前回の把握状況を理由に省略しない(深化は /create-task の Phase 0 に任せる)
 2. **profile 解決**: `.claude/project-profile.yml` から `root`・`quality`・`features` を得る(無ければ動的検出)
-2′. **入口と無人の前提**(`--task` / `--unattended` のとき。手順 3 より前に、何も書き換えずに検査する):
+2′. **入口と無人の前提**(`--task` / `--unattended` / `--discover` のとき。手順 3 より前に、何も書き換えずに検査する):
    - `--task`: パスが管理ルート相対で、ファイル名が `進行中_{名}.md` の通常ファイルであること。併用できない引数(オプション表)が無いこと。満たさなければ停止する(無人では失敗扱い)
-   - `--unattended`: `--task` が無ければ失敗扱い。`--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD がデフォルトブランチか detached HEAD(ローカルのデフォルトブランチの履歴の中)・メタ行がある・タスク MD が git の追跡下にある、を検査する(一覧と理由は references/unattended-mode.md §1)。1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。最後に本文ダイジェスト R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(exit 0 以外は失敗扱い)。以後、周の中で守る値(同 §7)を失ったら失敗扱い(G4)
+   - `--discover`: `--unattended` が無ければ停止する(対話で発見するなら各発見元を直接呼ぶよう案内する)。あれば、発見の周の前提(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど。一覧は references/discover-mode.md §4)を確かめ、1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。以後の手順 3〜6 と Phase 1〜5 は、discover-mode.md の工程(公開の確認 → 工程 D1〜D3 → Phase 5)に差し替える
+   - `--unattended`(`--discover` が無いとき): `--task` が無ければ失敗扱い。`--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD がデフォルトブランチか detached HEAD(ローカルのデフォルトブランチの履歴の中)・メタ行がある・タスク MD が git の追跡下にある、を検査する(一覧と理由は references/unattended-mode.md §1)。1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。最後に本文ダイジェスト R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(exit 0 以外は失敗扱い)。以後、周の中で守る値(同 §7)を失ったら失敗扱い(G4)
 3. **作業ツリーの清潔性**: `git status --short` を確認。無関係な未コミット変更があれば、PR にそれが混ざる旨を警告して続行可否を確認する(ここは安全のため必ず確認する)。無人では確認せず失敗扱い(S1)
 4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。`DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。**デフォルトブランチにいるかは、現在のブランチ名(`git branch --show-current`)で判定する**(従来と同じ): `refs/remotes/origin/HEAD` を解決できたら(`git symbolic-ref --quiet refs/remotes/origin/HEAD`)、その名前(`DEF_NAME`)との一致だけで判定する。解決できなければ、`main` / `master` のどちらかであれば「いる」とする(origin/HEAD が無く main と master が両方あるリポジトリで、master の上を作業ブランチと取り違えないため)。`DEF_REF`・`DEF_NAME` は、この判定のほか、下の起点の確認・一覧の算出に使う。これらの git 呼び出しの前置きも base-commit.md と同じ
    - `--branch` がある → 現在のブランチに関わらず、**ここで**その名前で作成して切り替える(`git switch -c <名前>`。従来どおり。無人は 2′ で `--branch` を禁じている)
@@ -53,6 +55,8 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 ## Phase 1: 設計(/create-task)
 
 `--task` のときは実行せず、Phase 2 へ進む(S3)。
+
+`--discover` のときは実行しない(references/discover-mode.md の工程 D1 で、発見元の候補モードを呼ぶ)。
 
 `--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。生成物は解決した保存先の `進行中_{タスク名}.md`。
 
@@ -79,7 +83,11 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 `--design-only` の場合はこの Phase を実行せず、設計書を返して終了する。
 
+`--discover` のときはこの Phase を実行しない(`候補_` は設計の手前。設計と設計レビューは、採用の後の /create-task で行う)。
+
 ## Phase 3: 実装(/do-task)
+
+`--discover` のときは実行しない(実装は、採用の後の /do-task で行う)。
 
 実際のタスク MD パスを対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過。無人では `--unattended` も渡す)。ブランチは作成済みのため `--branch` は渡さない。
 
@@ -95,6 +103,8 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 ## Phase 4: ドキュメント同期(/update-doc --task)
 
+`--discover` のときは実行しない。
+
 同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
@@ -102,6 +112,8 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - /update-doc の独立レビューが未完了・未承認なら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
 
 ## Phase 5: PR 作成
+
+`--discover` のときは、下の 1〜3 の代わりに、references/discover-mode.md §7・§8 の照合 → push → PR(push 先に結び付けた `-R` つき)で行う。PR 本文・縮退の条件も同 §8。
 
 1. `git push -u origin {ブランチ名}`(無人では、下の push の直前の照合を通してから)
 2. `gh pr create --base {デフォルトブランチ} --title "{タスク名}" --body-file -` で、本文を stdin から渡して **通常の PR を開く**(draft にしない。レビュアー・アサインは付けない)。本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。対話でも無人でも同じ
@@ -123,6 +135,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - **commit の照合**(実装 commit・doc commit・保留の commit のすべて): 直前に、本文ダイジェストを R と照合する。あわせて、現在のブランチ(`git symbolic-ref --quiet HEAD`)= 作業ブランチ・HEAD = 最後に知る HEAD・index に除外対象が無いことを確かめ、stage を終えた index の tree を `git write-tree` で控える。直後に、`HEAD^{tree}` = 控えた tree・`git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> | python3 {create-task の}scripts/task-digest.py -` = R・現在のブランチ = 作業ブランチを確かめ、最後に知る HEAD を更新する。照合するタスク MD のパスは commit の後のパス(実装 commit・doc commit は `完了_`、保留の commit は `保留_`)。push の直前には、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる。どれかに通らなければ失敗扱い(G2)。時点ごとの表・除外対象・git の前置きは references/unattended-mode.md §7
 - **停止**: 保留なら保留の手順(ガード → 保留の行 → `git mv` → `git add` → commit。同 §5)を行う。失敗扱いなら、改名・保留の行・commit・push をせずに止まる(同 §6)
 - **結末**: 完了報告の最後に結末の行を書く(同 §2)
+- **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
 
 ## 停止条件のまとめ
 
@@ -147,6 +160,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - [ ] 縮退(gh 不在等)があれば理由付きで明記した。実動確認が「実施不能」なら、理由と確認手順を PR の残課題(PR を開かなかったときは完了報告)に転記した
 - [ ] 作業ブランチを作ったら、Phase 0 の 4 の 4 項目を報告に残した(一覧が空でなければ PR 本文にも載せた)
 - [ ] 無人では、各 commit の直前・直後と push の直前の照合を通し、結末の行を報告の最後に書いた
+- [ ] 発見の周(`--discover`)では、discover-mode.md §7 の表の時点ごとの照合を通し、`候補_` だけを commit し、結末の行を報告の最後に書いた(PR を開くのは、照合にすべて通ったときだけ)
 - [ ] マージしていない。レビュアーを自動アサインしていない
 
 ## 関連スキル
@@ -156,3 +170,4 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task {実際のタスクMDパス}` で Phase 3 から再開できる)
 - タスク MD が既にある場合: `--task=<タスク MD>` で Phase 2 から始める(設計レビュー済みの MD を、実装から PR まで回す)。実装だけなら /do-task から始める
 - 無人ループ: 外側の while は同梱の `scripts/loop.sh` が回し、周ごとに新しいセッションで `--task=<タスク MD> --unattended` を呼ぶ(人のシェル・cron から起動する。契約は [references/loop.md](references/loop.md))
+- 発見ループ: `scripts/loop.sh --discover` が、周ごとに `--discover=<発見元> --unattended` を呼ぶ(契約は references/discover-mode.md と loop.md の発見モード)。発見元は /data-audit と /create-task --refactor の候補モード(`--candidates`)。merge された `候補_` の採用は `/create-task <候補_ のパス>` で行い、その後の実装は `--task=<進行中_ のパス>` で回す

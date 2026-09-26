@@ -54,6 +54,25 @@ class TaskDirectoryResolverTest(unittest.TestCase):
                 self.state_file("task", f"{state}_項目.md")
                 self.assertEqual("task", self.run_resolver()[1]["task_dir"])
 
+    def test_detects_candidate_only_directory(self):
+        # 発見ループの候補(`候補_`)だけのディレクトリも保存先の候補になる
+        self.state_file("task", "候補_監査-項目.md")
+        code, result = self.run_resolver()
+        self.assertEqual((0, "task", "detected"), (code, result["task_dir"], result["source"]))
+
+    def test_candidate_and_in_progress_in_same_directory_is_one_candidate(self):
+        self.state_file("task", "候補_監査-項目.md")
+        self.state_file("task", "進行中_作業.md")
+        code, result = self.run_resolver()
+        self.assertEqual((0, "task", "detected"), (code, result["task_dir"], result["source"]))
+
+    def test_candidate_only_directory_and_task_directory_stop(self):
+        self.state_file("docs/candidates", "候補_監査-項目.md")
+        self.state_file("task", "進行中_作業.md")
+        code, result = self.run_resolver()
+        self.assertEqual(2, code)
+        self.assertEqual(["docs/candidates", "task"], result["candidates"])
+
     def test_ignores_empty_suffix_and_deep_state_file(self):
         self.state_file("docs/archive/deep", "進行中_項目.md")
         self.state_file("task", "進行中_.md")

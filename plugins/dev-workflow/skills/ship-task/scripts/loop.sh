@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # 無人ループ(dev-workflow)。無人実行のメタ行がある `進行中_` を 1 件ずつ、周ごとの使い捨ての worktree と
 # 新しいヘッドレスのセッションで /ship-task の無人モードに回す。人のシェル・cron から呼ぶ(skill ではない)。
+# `--discover` では、発見元を 1 周ずつ /ship-task の発見の周に回して `候補_` を積む(loop.md §11)。
 # **契約(既定値と意味・停止条件・終了コード・報告・限界・実走の手順)の正本は ../references/loop.md**。
 # ここには引数だけを書く。対応するのは Linux だけ(setsid・flock・/proc を使う)。
 #
@@ -12,6 +13,7 @@
 #   --host <名前>                    既定表のホスト名(既定 claude)
 #   --host-argv <トークン>           雛形(実行ファイルと前置きのフラグ)を置き換える。繰り返し可
 #   --only <名>                      対象をタスク名で絞る。繰り返し可
+#   --discover[=<名>[,<名>…]]        発見モード(発見元を 1 つずつ回す。値が無ければ既定の列)。--only と併用しない
 #   --dry-run                        対象の一覧と解決後の argv を出して終わる(セッションを起動しない)
 #   --allowed-tools <値>             ホスト CLI に渡す許可リスト。繰り返し可
 #   --allow-classifier               分類器による自動承認を使う
@@ -80,6 +82,22 @@ declare -A LOCKED_BY=()
 declare -A SKIP_REPORTED=()
 declare -A TRACKING_SEEN=()   # 追跡用の ref で読み飛ばしたタスク(名前で重複を除く)
 declare -A WT_OUTCOME=()      # この実行で残した worktree → その周の結末(判定)
+# 発見モード(loop.md §11)
+ITER_SOURCE=""    # 周の発見元
+ITER_TITLE=""     # 報告の周の見出し(実装モードは ITER_REL と同じ)
+ITER_PROMPT=""
+ITER_META_EXTRA=""
+DISC_PATHS=""     # 判定で読んだ候補のパス(改行区切り)
+DISC_PUSHED=""    # 正常(縮退)の判定で見た push の有無(yes = origin のブランチ = HEAD / no = origin に無い・origin が無い)
+DISC_ORIGIN_DIFF=0  # 縮退の判定で、origin の今夜の名のブランチが判定した HEAD と違った
+DISC_QUEUE=()     # この選定で回せる発見元(引数の順)
+DISC_REFS=()      # 「<sha><TAB><ref>」。origin の分は ref を「origin:refs/heads/…」にする
+DISC_DEGRADED=()  # 縮退で終わった周の「<発見元><TAB><ブランチ><TAB><push の有無>」
+declare -A DISC_DONE=()       # この実行で回した発見元
+declare -A DISC_RESULT=()     # 発見元 → その周の判定と結末
+declare -A DISC_SKIP=()       # 発見元 → 読み飛ばしの理由
+declare -A DISC_CLEAN=()      # 発見元 → 片付けの定型(改行区切り)
+declare -A DISC_SEEN=()
 
 # ── 引数 ──
 REPO=""
@@ -99,6 +117,15 @@ NET_TIMEOUT=60
 WORKTREE_ADD_TIMEOUT=600   # worktree add は LFS の checkout が取りに行くので長め(設計 §2)
 STOP_FILE=""
 WT_ROOT=""
+DISCOVER=0          # 発見モード(--discover)
+DISCOVER_ARG=""
+DISCOVER_FROM_ARG=0
+DISCOVER_SOURCES=()
+DISCOVER_SRC_DESC=""
+
+# 発見モードの発見元の列(既定の順)。**ship-task/references/discover-mode.md §1 の「発見元の列」と同じにする**
+# (loop-selftest.sh が照合する)。列の外の名は使い方の誤り
+DISCOVER_DEFAULT=(data-audit refactor)
 
 # 既定値(決定 4)。profile は締める向きにだけ効く
 DEF_MAX_ITER=5
@@ -178,7 +205,8 @@ CREATED = re.compile(r"^> \*\*作成日\*\*: ([0-9]{4}-[0-9]{2}-[0-9]{2})")
 H2 = re.compile(r"^## ")
 RECORD = re.compile(r"^## 追加修正記録$")
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
-OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い) — (.*)$")
+# unattended-mode.md §2 の 5 値のパターン(両モード共通。モードで取りえない値は判定で失敗にする — loop.md §5)
+OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
 PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
 D21_BAD = set("$`;|&<>(){}[]*?!'\"\\#~^%")
 LOOP_KEYS = ("max_iterations", "max_consecutive_failures", "time_budget", "iteration_timeout")
@@ -812,6 +840,60 @@ def cmd_permlog(path):
         print("line=" + line)
 
 
+def cmd_origin_json():
+    # origin-repo.py の出力(discover-mode.md §3)を読む。欄が欠けるか型が違えば 1(URL の字面は出力に無い)
+    try:
+        data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
+    except ValueError:
+        sys.exit(1)
+    if not isinstance(data, dict) or not all(isinstance(data.get(k), bool) for k in ("origin", "same", "vcs")):
+        sys.exit(1)
+    reason = data.get("reason")
+    for key in ("origin", "same", "vcs"):
+        print(f"{key}={1 if data[key] else 0}")
+    print("reason=" + one_line(reason if isinstance(reason, str) else "", 300))
+
+
+def cmd_candiff(task_dir):
+    # 発見の周の差分(`git diff --no-renames --raw -z <固定した sha> HEAD`)を stdin で読む。全行が状態 A・モード 100644・
+    # task_dir の直下の `候補_<名>.md`(<名> が空でない・D21)で 1 件以上なら、パスを 1 行ずつ出す。外れれば理由を出して 1
+    parts = sys.stdin.buffer.read().split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    prefix = "" if task_dir == "." else task_dir + "/"
+    paths, i = [], 0
+    while i < len(parts):
+        head = parts[i].decode("utf-8", "surrogateescape")
+        fields = head[1:].split(" ") if head.startswith(":") else []
+        if len(fields) != 5 or i + 1 >= len(parts):
+            fail(1, "差分の形を読めない")
+        path = parts[i + 1].decode("utf-8", "surrogateescape")
+        i += 2
+        shown = one_line(path, 300)
+        if fields[4] != "A":
+            fail(1, f"追加でない変更がある({fields[4]} {shown})")
+        if fields[1] != "100644":
+            fail(1, f"モードが 100644 でない({fields[1]} {shown})")
+        rest = path[len(prefix):] if path.startswith(prefix) else None
+        if rest is None or "/" in rest:
+            fail(1, f"task_dir の直下でない({shown})")
+        if not (rest.startswith("候補_") and rest.endswith(".md")):
+            fail(1, f"名前が 候補_<名>.md でない({shown})")
+        name = rest[len("候補_"):-len(".md")]
+        if name == "":
+            fail(1, f"<名> が空({shown})")
+        problem = d21_problem(path, "パス")
+        if problem is None and name.startswith("-"):
+            problem = "<名> が '-' で始まる"
+        if problem:
+            fail(1, f"D21 に外れる — {problem}({shown})")
+        paths.append(path)
+    if not paths:
+        fail(1, "候補の追加が無い")
+    for p in paths:
+        print(p)
+
+
 COMMANDS = {
     "taskinfo": cmd_taskinfo, "holdcount": cmd_holdcount, "holdcode": cmd_holdcode,
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
@@ -819,6 +901,7 @@ COMMANDS = {
     "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
     "procs": cmd_procs, "json-get": cmd_json_get, "help-values": cmd_help_values, "allowlist": cmd_allowlist,
     "hookcheck": cmd_hookcheck, "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
+    "origin-json": cmd_origin_json, "candiff": cmd_candiff,
 }
 try:
     COMMANDS[sys.argv[1]](*sys.argv[2:])
@@ -1051,6 +1134,7 @@ finish() { # $1=終了コード $2=止まった理由
           rep "- task/$n: \`git branch -dr origin/task/$n\`(ローカルに作業ブランチがあれば \`git branch -D task/$n\` も)"
         done
       fi
+      report_discover_end
     } 2>/dev/null || { [ "$code" -ne 0 ] || code=30; }
   fi
   say "止まった理由: $why"
@@ -1242,7 +1326,9 @@ aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <s
 read_inflight_meta() { # INF_* に読む
   local k v
   INF_ITER=""; INF_NAME=""; INF_REL=""; INF_DEF_NAME=""; INF_DEF_SHA=""; INF_WTADMIN="-"; INF_WT=""
+  INF_MODE=""; INF_SOURCE=""
   [ -f "$INFLIGHT/meta" ] || return 1
+  # mode= が無い meta は実装モードとして読む(発見モードの周は mode=discover・source=<発見元> を足す)
   while IFS='=' read -r k v; do
     case "$k" in
       iter) INF_ITER="$v" ;;
@@ -1252,6 +1338,8 @@ read_inflight_meta() { # INF_* に読む
       def_sha) INF_DEF_SHA="$v" ;;
       wtadmin) INF_WTADMIN="$v" ;;
       wt) INF_WT="$v" ;;
+      mode) INF_MODE="$v" ;;
+      source) INF_SOURCE="$v" ;;
     esac
   done <"$INFLIGHT/meta"
   [ -n "$INF_ITER" ] && [ -n "$INF_NAME" ] && [ -n "$INF_DEF_NAME" ] && [ -n "$INF_DEF_SHA" ] && [ -f "$INFLIGHT/base.json" ]
@@ -1308,6 +1396,9 @@ handle_marks_at_start() {
     rm -rf -- "$INFLIGHT"
     save_last_verified
     STARTUP_NOTES+=("前の実行の周 $INF_ITER が途中で終わっていた。残りのプロセスを止め、照合に通った(worktree ${INF_WT:-?} は残っている)")
+    if [ "$INF_MODE" = discover ]; then
+      STARTUP_NOTES+=("前の実行の周 $INF_ITER は発見モードの周(発見元 ${INF_SOURCE:-?}・ブランチ task/$INF_NAME)。残った worktree と今夜の名のブランチで、その発見元は読み飛ばす")
+    fi
     ITER_ID=""; ITER_REL=""
     return 0
   fi
@@ -1435,8 +1526,33 @@ prepare_reviews_dir() { # $1=周の worktree
 SEQ=0
 FIRST_SELECTION=1
 declare -A REMOTE_TASKS=()
-select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
-  local wt out rc p f name reason line lines=() date ref
+
+# 発見モードの前提(loop.md §11): 状態ファイル 3 つが周の worktree で ignore されていて、追跡されていない。
+# `.claude/reviews/` を作る前に確かめる。`--no-index` を付けない(付けると追跡済みのファイルも ignore 済みと答える)
+check_state_ignored() { # $1=周の worktree
+  local p bad=() tracked=()
+  for p in .claude/reviews/x.md .claude/grasp.md .claude/.understand-project-done; do
+    if ! G -C "$1" check-ignore -q -- "$p" >/dev/null 2>&1; then
+      bad+=("$p")
+      if G -C "$1" ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then tracked+=("$p"); fi
+    fi
+  done
+  [ "${#bad[@]}" -gt 0 ] || return 0
+  rep "" "## 状態ファイルが ignore されていない(起動時に止まった)" ""
+  for p in "${bad[@]}"; do rep "- $p"; done
+  rep "" "発見モードは、状態ファイル 3 つが ignore されていて追跡されていないことを前提にする(判定が未追跡・未 commit の無いことを求めるため)。.gitignore に次を足して commit する(init-project の gitignore の断片と同じ):" "" \
+    '```' ".claude/reviews/" ".claude/grasp.md" ".claude/.understand-project-done" '```'
+  if [ "${#tracked[@]}" -gt 0 ]; then
+    rep "" "追跡済みのものは、索引から外して commit する:"
+    for p in "${tracked[@]}"; do rep "- \`git rm --cached -- $p\`"; done
+  fi
+  remove_selection_worktree
+  die 20 state-not-ignored "状態ファイルが ignore されていないか追跡済み: ${bad[*]}${tracked[*]:+(追跡済み: ${tracked[*]}。git rm --cached で外す)}。.gitignore に足して commit してから起動する"
+}
+
+# 選定中の worktree を作り、task_dir を解決する(§3 の 2〜3。実装モードと発見モードで共通)
+make_selection_worktree() {
+  local wt out rc
   SEQ=$((SEQ + 1))
   wt="$WT_ROOT/$RUN_ID-$SEQ"
   mkdir -p "$WT_ROOT"
@@ -1446,6 +1562,8 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
     >>"$RUN_DIR/worktree.log" 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || die 30 worktree-add "worktree を作れない(終了コード $rc。$RUN_DIR/worktree.log)"
   SEL_WT="$wt"
+  # 発見モード: 状態ファイルの ignore の検査(.claude/reviews/ を作る前。外れたら worktree を消して exit 20)
+  if [ "$DISCOVER" -eq 1 ]; then check_state_ignored "$wt"; fi
   # 2b. worktree の .claude/・.claude/reviews/ を先に作る(D22 ①)
   prepare_reviews_dir "$wt"
   # 3. task_dir(worktree の中で解決する。profile の文字列は --task-dir=<値> で渡す)
@@ -1472,6 +1590,12 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
     *) die 30 internal "task_dir が保護パスの下かを判定できない(終了コード $rc)" ;;
   esac
   SEL_TASK_DIR="$TASK_DIR"
+}
+
+select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
+  local wt out rc p f name reason line lines=() date ref
+  make_selection_worktree
+  wt="$SEL_WT"
   # 3a(最初の周だけ)
   if [ "$FIRST_SELECTION" -eq 1 ]; then check_untracked_tasks; fi
   # 4. 候補
@@ -1531,6 +1655,117 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
     done
   fi
   FIRST_SELECTION=0
+}
+
+# ── 発見モードの選定と読み飛ばし(loop.md §11)──
+clean_cmd() { # $1=DISC_REFS の ref → そのブランチの消し方(1 行)
+  case "$1" in
+    origin:refs/heads/*) printf 'git push origin --delete %s' "${1#origin:refs/heads/}" ;;
+    refs/heads/*) printf 'git branch -D %s' "${1#refs/heads/}" ;;
+    refs/remotes/*) printf 'git branch -dr %s' "${1#refs/remotes/}" ;;
+  esac
+}
+
+# 読み飛ばしの ② 今夜の名 → ③ 未 merge → ④ lock の理由(① この実行で回した、は呼び出し側で見る)。
+# → SKIP_WHY(読み飛ばす理由。無ければ空)・SKIP_CLEAN(片付けの定型。改行区切り)
+discover_skip() { # $1=発見元
+  local s="$1" tonight="task/候補-$1-${DEF_SHA:0:12}" line sha ref re hits=() cmds=()
+  SKIP_WHY=""; SKIP_CLEAN=""
+  # ② 今夜の名のブランチ(ローカル・追跡用の ref・origin のどこか。祖先かどうかに関わらない)
+  for line in ${DISC_REFS[@]+"${DISC_REFS[@]}"}; do
+    sha="${line%%"$TAB"*}"; ref="${line#*"$TAB"}"
+    case "$ref" in
+      "refs/heads/$tonight"|"origin:refs/heads/$tonight"|refs/remotes/*/"$tonight") hits+=("$ref"); cmds+=("$(clean_cmd "$ref")") ;;
+    esac
+  done
+  if [ "${#hits[@]}" -gt 0 ]; then
+    SKIP_WHY="今夜の名のブランチ $tonight がある(${hits[*]})"
+    SKIP_CLEAN="$(printf '%s\n' "${cmds[@]}")"
+    return 0
+  fi
+  # ③ 名が task/候補-<発見元>-<12 桁> に完全一致し、固定した sha の祖先でない(か、sha がローカルに無い)ブランチ = 未 merge
+  re="^(origin:refs/heads/|refs/heads/|refs/remotes/.+/)task/候補-$s-[0-9a-f]{12}\$"
+  for line in ${DISC_REFS[@]+"${DISC_REFS[@]}"}; do
+    sha="${line%%"$TAB"*}"; ref="${line#*"$TAB"}"
+    [[ "$ref" =~ $re ]] || continue
+    if G -C "$TOP" cat-file -e "$sha^{commit}" 2>/dev/null && G -C "$TOP" merge-base --is-ancestor "$sha" "$DEF_SHA" 2>/dev/null; then
+      continue
+    fi
+    hits+=("$ref"); cmds+=("$(clean_cmd "$ref")")
+  done
+  if [ "${#hits[@]}" -gt 0 ]; then
+    SKIP_WHY="未 merge の候補のブランチがある(${hits[*]})"
+    SKIP_CLEAN="$(printf '%s\n' "${cmds[@]}")"
+    return 0
+  fi
+  # ④ 失敗の周が残した除外の印
+  if [ -n "${LOCKED_BY["dev-workflow-loop: 候補:$s"]:-}" ]; then
+    SKIP_WHY="前の周が残した worktree がある(${LOCKED_BY["dev-workflow-loop: 候補:$s"]})"
+    SKIP_CLEAN="git worktree unlock ${LOCKED_BY["dev-workflow-loop: 候補:$s"]} → git worktree remove ${LOCKED_BY["dev-workflow-loop: 候補:$s"]}(調べてから)"
+  fi
+  return 0
+}
+
+select_discover() { # 選定中の worktree を作り、DISC_QUEUE(回せる発見元)を並べる
+  local s out rc sha ref line
+  make_selection_worktree
+  DISC_REFS=()
+  # origin の task/* の一覧(選定ごとに 1 回。ネットワークの規則。失敗は終了コード 30)
+  if [ "$HAS_ORIGIN" -eq 1 ]; then
+    rc=0
+    out="$(net_git "$NET_TIMEOUT" -C "$TOP" ls-remote origin 'refs/heads/task/*' 2>>"$RUN_DIR/ls-remote.err")" || rc=$?
+    [ "$rc" -eq 0 ] || die 30 ls-remote "origin の task/* を読めない(git ls-remote の終了コード $rc)"
+    while IFS="$TAB" read -r sha ref; do
+      case "$ref" in refs/heads/task/*) DISC_REFS+=("$sha${TAB}origin:$ref") ;; esac
+    done <<<"$out"
+  fi
+  G -C "$TOP" for-each-ref --format='%(objectname)%09%(refname)' refs/heads/task refs/remotes >"$RUN_DIR/disc-refs.txt"
+  while IFS="$TAB" read -r sha ref; do
+    [ -z "$ref" ] || DISC_REFS+=("$sha$TAB$ref")
+  done <"$RUN_DIR/disc-refs.txt"
+  load_worktrees
+  SKIPS=()
+  NEW_SKIPS=()
+  DISC_QUEUE=()
+  for s in "${DISCOVER_SOURCES[@]}"; do
+    [ -z "${DISC_DONE[$s]:-}" ] || continue   # ① この実行で回した(周の報告にあるので、読み飛ばしには出さない)
+    discover_skip "$s"
+    if [ -n "$SKIP_WHY" ]; then
+      note_skip "$s" "$SKIP_WHY"
+      if [ -z "${DISC_SKIP[$s]:-}" ] || [ "${DISC_SKIP[$s]}" != "$SKIP_WHY" ]; then
+        DISC_SKIP[$s]="$SKIP_WHY"
+        DISC_CLEAN[$s]="$SKIP_CLEAN"
+      fi
+      continue
+    fi
+    DISC_QUEUE+=("$s")
+  done
+  if [ "${#NEW_SKIPS[@]}" -gt 0 ]; then
+    rep "" "### 読み飛ばし(選定 $SEQ)" ""
+    for line in "${NEW_SKIPS[@]}"; do
+      rep "- $line"
+      s="${line%%: *}"
+      while IFS= read -r ref; do [ -z "$ref" ] || rep "  - 片付け: \`$ref\`"; done <<<"${DISC_CLEAN[$s]:-}"
+    done
+  fi
+  if [ "$FIRST_SELECTION" -eq 1 ]; then
+    rep "" "## 発見元の列(task_dir: $TASK_DIR)" ""
+    if [ "${#DISC_QUEUE[@]}" -eq 0 ]; then rep "(無し)"; fi
+    for s in ${DISC_QUEUE[@]+"${DISC_QUEUE[@]}"}; do rep "- $s(ブランチ task/候補-$s-${DEF_SHA:0:12})"; done
+  fi
+  FIRST_SELECTION=0
+}
+
+# origin の refs/heads/<ブランチ> の sha(1 回の ls-remote。ネットワークの規則)→ ORIGIN_BRANCH_SHA(無ければ空)。
+# ls-remote が失敗したら 1(終了コードは ORIGIN_LS_RC)
+origin_branch_sha() { # $1=ブランチ(refs/heads/ の後ろ)
+  local out sha ref
+  ORIGIN_BRANCH_SHA=""
+  ORIGIN_LS_RC=0
+  out="$(net_git "$NET_TIMEOUT" -C "$TOP" ls-remote origin "refs/heads/$1" 2>>"$RUN_DIR/ls-remote.err")" || ORIGIN_LS_RC=$?
+  [ "$ORIGIN_LS_RC" -eq 0 ] || return 1
+  while IFS="$TAB" read -r sha ref; do [ "$ref" != "refs/heads/$1" ] || ORIGIN_BRANCH_SHA="$sha"; done <<<"$out"
+  return 0
 }
 
 # ── §6: 周の前の停止条件(最大周回数 → 時間予算 → 停止ファイル)──
@@ -1605,6 +1840,190 @@ judge() { # $1=終了コード $2=時間切れか → JUDGE・JUDGE_OK・OUTCOME
   JUDGE_OK=1
 }
 
+# 周の worktree に未追跡・未 commit が無い(ignore 済みは除く)→ 0。あるか、読めなければ 1(ITER_WT_DIRTY に最初の項目)
+iter_wt_clean() {
+  local f="$RUN_DIR/iter-$ITER_SEQ.status"
+  ITER_WT_DIRTY=""
+  if ! G -C "$ITER_WT" status --porcelain=v1 -z --untracked-files=all >"$f" 2>/dev/null; then
+    ITER_WT_DIRTY="(git status が失敗した)"
+    return 1
+  fi
+  [ -s "$f" ] || return 0
+  ITER_WT_DIRTY="$(head -c 300 "$f" | tr '\0' ' ')"
+  return 1
+}
+
+# 発見の周の判定(loop.md §11)。材料は終了コード・結末の行・git の状態 → JUDGE・JUDGE_OK・OUTCOME・DETAIL・DISC_PATHS
+judge_discover() { # $1=終了コード $2=時間切れか
+  local rc="$1" timed_out="$2" res line head parents count out lsha branch="task/$ITER_NAME"
+  JUDGE=""; JUDGE_OK=0; OUTCOME=""; DETAIL=""; HOLD_CODE=""; DENIALS=""; DISC_PATHS=""; DISC_PUSHED=""; DISC_ORIGIN_DIFF=0
+  res="$(py result "$RUN_DIR/iter-$ITER_SEQ.out" 2>/dev/null || printf 'json=bad\n')"
+  while IFS= read -r line; do
+    case "$line" in
+      outcome=*) OUTCOME="${line#outcome=}" ;;
+      detail=*) DETAIL="${line#detail=}" ;;
+      denials=*) DENIALS="${line#denials=}" ;;
+    esac
+  done <<<"$res"
+  if [ "$timed_out" -eq 1 ]; then JUDGE="失敗(時間切れ)"; return 0; fi
+  if [ "$rc" -ne 0 ]; then JUDGE="失敗(終了コード $rc)"; return 0; fi
+  case "$res" in *json=ok*) : ;; *) JUDGE="失敗(JSON が読めない)"; return 0 ;; esac
+  if [ -z "$OUTCOME" ]; then JUDGE="失敗(結末の行が無い)"; return 0; fi
+  case "$OUTCOME" in
+    失敗扱い) JUDGE="失敗(結末 失敗扱い)"; return 0 ;;
+    保留) JUDGE="失敗(結末 保留 は発見の周では取りえない)"; return 0 ;;
+    PR|縮退)
+      # 共通の条件 G: 今夜の名のブランチの上で、固定した sha の上に 1 commit・task_dir の直下の新しい 候補_ だけ・清潔
+      head="$(G -C "$ITER_WT" symbolic-ref --quiet HEAD 2>/dev/null || true)"
+      if [ "$head" != "refs/heads/$branch" ]; then
+        JUDGE="失敗(食い違い: HEAD が refs/heads/$branch でない — ${head:-detached})"; return 0
+      fi
+      parents="$(G -C "$ITER_WT" rev-parse 'HEAD^@' 2>/dev/null || true)"
+      count="$(G -C "$ITER_WT" rev-list --count "$DEF_SHA..HEAD" 2>/dev/null || true)"
+      if [ "$parents" != "$DEF_SHA" ] || [ "$count" != 1 ]; then
+        JUDGE="失敗(食い違い: HEAD が固定した sha の上の 1 commit でない — 固定した sha からの commit ${count:-?} 個)"; return 0
+      fi
+      if ! G -C "$ITER_WT" diff --no-renames --raw -z "$DEF_SHA" HEAD >"$RUN_DIR/iter-$ITER_SEQ.diff" 2>/dev/null; then
+        JUDGE="失敗(固定した sha との差分を取れない)"; return 0
+      fi
+      if ! out="$(py candiff "$SEL_TASK_DIR" <"$RUN_DIR/iter-$ITER_SEQ.diff" 2>&1)"; then
+        out="${out//$'\n'/ }"
+        JUDGE="失敗(食い違い: ${out:0:400})"; return 0
+      fi
+      DISC_PATHS="$out"
+      if ! iter_wt_clean; then
+        JUDGE="失敗(食い違い: 作業ツリーに未追跡か未 commit が残った — $ITER_WT_DIRTY)"; return 0
+      fi
+      if [ "$OUTCOME" = PR ]; then
+        if [ "$HAS_ORIGIN" -ne 1 ]; then JUDGE="失敗(食い違い: 結末 PR だが origin が無い)"; return 0; fi
+        lsha="$(G -C "$ITER_WT" rev-parse HEAD)"
+        if ! origin_branch_sha "$branch"; then JUDGE="失敗(判定の ls-remote が失敗した: 終了コード $ORIGIN_LS_RC)"; return 0; fi
+        if [ "$ORIGIN_BRANCH_SHA" != "$lsha" ]; then
+          JUDGE="失敗(食い違い: origin の $branch(${ORIGIN_BRANCH_SHA:-無い})≠ HEAD $lsha)"; return 0
+        fi
+        JUDGE="正常(PR)"
+      else
+        # 縮退: origin に今夜の名のブランチがあれば、その sha = 判定した HEAD(違う中身を push して、人に PR を作らせない)。
+        # ls-remote の失敗は、正常(候補なし)と同じく失敗
+        DISC_PUSHED=no
+        if [ "$HAS_ORIGIN" -eq 1 ]; then
+          if ! origin_branch_sha "$branch"; then JUDGE="失敗(判定の ls-remote が失敗した: 終了コード $ORIGIN_LS_RC)"; return 0; fi
+          if [ -n "$ORIGIN_BRANCH_SHA" ]; then
+            lsha="$(G -C "$ITER_WT" rev-parse HEAD)"
+            if [ "$ORIGIN_BRANCH_SHA" != "$lsha" ]; then
+              DISC_ORIGIN_DIFF=1
+              JUDGE="失敗(食い違い: 結末 縮退 だが origin の $branch($ORIGIN_BRANCH_SHA)≠ HEAD $lsha)"; return 0
+            fi
+            DISC_PUSHED=yes
+          fi
+        fi
+        JUDGE="正常(縮退)"
+      fi
+      ;;
+    候補なし)
+      head="$(G -C "$ITER_WT" symbolic-ref --quiet HEAD 2>/dev/null || true)"
+      if [ -n "$head" ]; then JUDGE="失敗(食い違い: 結末 候補なし だが HEAD が detached でない — $head)"; return 0; fi
+      if [ "$(G -C "$ITER_WT" rev-parse HEAD 2>/dev/null || true)" != "$DEF_SHA" ]; then
+        JUDGE="失敗(食い違い: 結末 候補なし だが HEAD が固定した sha でない)"; return 0
+      fi
+      if G -C "$TOP" show-ref --verify --quiet "refs/heads/$branch"; then
+        JUDGE="失敗(食い違い: 結末 候補なし だがローカルに $branch がある)"; return 0
+      fi
+      if [ "$HAS_ORIGIN" -eq 1 ]; then
+        if ! origin_branch_sha "$branch"; then JUDGE="失敗(判定の ls-remote が失敗した: 終了コード $ORIGIN_LS_RC)"; return 0; fi
+        if [ -n "$ORIGIN_BRANCH_SHA" ]; then
+          JUDGE="失敗(食い違い: 結末 候補なし だが origin に $branch がある)"; return 0
+        fi
+      fi
+      if ! iter_wt_clean; then
+        JUDGE="失敗(食い違い: 作業ツリーに未追跡か未 commit が残った — $ITER_WT_DIRTY)"; return 0
+      fi
+      JUDGE="正常(候補なし)"
+      ;;
+    *) JUDGE="失敗(結末の行が読めない)"; return 0 ;;
+  esac
+  JUDGE_OK=1
+}
+
+# 発見の周の判定の後の報告(候補・報告の写し・縮退の手順・失敗の周の PR の可能性)。worktree の後片付けの後に呼ぶ
+discover_after_iteration() {
+  local branch="task/$ITER_NAME" s="$ITER_SOURCE" rv p pushed="" found=0
+  rv="$RUN_DIR/iter-$ITER_SEQ-reviews"
+  [ -d "$rv" ] || rv="$ITER_WT/.claude/reviews"
+  if [ -f "$rv/candidates-$s.md" ]; then rep "- 候補モードの報告: $rv/candidates-$s.md"; found=1; fi
+  for p in "$rv"/data-audit-iter*.md; do
+    [ -f "$p" ] || continue
+    rep "- data-audit の監査の報告: $p"; found=1
+  done
+  [ "$found" -eq 1 ] || rep "- 候補モードの報告: 見つからない(周の中で書かれなかったか、写せなかった)"
+  if [ "$JUDGE" = "正常(縮退)" ]; then
+    pushed="$DISC_PUSHED"   # 判定の ls-remote で見た(origin のブランチ = 判定した HEAD なら yes)
+    DISC_DEGRADED+=("$s$TAB$branch$TAB$pushed")
+    rep "- 縮退の後の人の手順(処理するまで、発見元 $s は回らない — 未 merge の候補のブランチとして読み飛ばす):"
+    if [ "$pushed" = yes ]; then
+      rep "  - push 済みのブランチ: $branch(origin。判定した HEAD と同じ sha)"
+      rep "  - 手で PR を作る(<HOST/OWNER/REPO> は人が実名で埋める。loop.sh は実名を知らない): \`gh pr create -R <HOST/OWNER/REPO> --head $branch --base $DEF_NAME\`" \
+        "  - PR を作らないときの消し方: \`git push origin --delete $branch\` と \`git branch -D $branch\`"
+    else
+      if [ "$HAS_ORIGIN" -eq 1 ]; then
+        rep "  - push していないとき(origin に $branch が無い): ローカルのブランチを merge するか、消す"
+      else
+        rep "  - origin が無く、push していない: ローカルのブランチ $branch を merge するか、消す"
+      fi
+      rep "    - merge する: デフォルトブランチ($DEF_NAME)の上で \`git merge $branch\` → \`git branch -d $branch\`" \
+        "    - 消す: \`git branch -D $branch\`"
+    fi
+  fi
+  if [ "$DISC_ORIGIN_DIFF" -eq 1 ]; then
+    rep "- origin の $branch が判定した中身(HEAD)と違う: PR を作らずに消す(\`git push origin --delete $branch\`)。開いた PR があれば merge せずに閉じる"
+  fi
+  if [ "$JUDGE_OK" -ne 1 ] && [ "$HAS_ORIGIN" -eq 1 ]; then
+    # 失敗の周: 理由を問わず、origin に今夜の名のブランチがあるかを 1 回の ls-remote で確かめる(失敗しても止めない)
+    if origin_branch_sha "$branch"; then
+      if [ -n "$ORIGIN_BRANCH_SHA" ]; then
+        rep "- origin に $branch がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す(\`git push origin --delete $branch\`)"
+      else
+        rep "- origin に $branch は無い"
+      fi
+    else
+      rep "- origin に $branch があるかを確かめられない(ls-remote の終了コード $ORIGIN_LS_RC)。PR が開いていたら、merge せずに閉じ、ブランチを消す"
+    fi
+  fi
+}
+
+# 発見モードの朝の報告の終わり(finish から呼ぶ。選定が 1 回以上あったときだけ)
+report_discover_end() {
+  local s line f b p
+  [ "$DISCOVER" -eq 1 ] && [ "$SEQ" -gt 0 ] || return 0
+  rep "" "## 発見元ごとの要約" ""
+  for s in "${DISCOVER_SOURCES[@]}"; do
+    if [ -n "${DISC_RESULT[$s]:-}" ]; then
+      rep "- $s: ${DISC_RESULT[$s]}"
+    elif [ -n "${DISC_SKIP[$s]:-}" ]; then
+      rep "- $s: 読み飛ばし — ${DISC_SKIP[$s]}"
+      while IFS= read -r line; do [ -z "$line" ] || rep "  - 片付け: \`$line\`"; done <<<"${DISC_CLEAN[$s]:-}"
+    else
+      rep "- $s: 回していない"
+    fi
+  done
+  if [ "${#DISC_DEGRADED[@]}" -gt 0 ]; then
+    rep "" "## 縮退の周のブランチ(処理するまで、その発見元は回らない)" ""
+    for line in "${DISC_DEGRADED[@]}"; do
+      IFS="$TAB" read -r f b p <<<"$line"
+      case "$p" in
+        yes) rep "- $f: $b(push 済み。PR を手で作るか、消す — 周の報告の手順)" ;;
+        *) rep "- $f: $b(push していない。ローカルのブランチを merge するか、消す — 周の報告の手順)" ;;
+      esac
+    done
+  fi
+  rep "" "## 候補の PR の片付けと採用の手順" ""
+  rep "- merge commit で merge した後: 作業ブランチを消す(\`git branch -d task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`)。デフォルトブランチの祖先になるので、消す前でも読み飛ばしには数えない" \
+    "- squash・rebase で merge したとき: ブランチの sha がデフォルトブランチの祖先にならないので、消すまで、その発見元は回らない(\`git branch -D task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`。手元の追跡用の ref が残れば \`git branch -dr origin/task/候補-<発見元>-<sha>\`)" \
+    "- PR を閉じたとき(merge しない): 上と同じく、消すまで、その発見元は回らない。候補は task_dir に入らないので、同じ指摘がまた出うる" \
+    "- 採用: merge して pull した後に、人が対話で \`/create-task <候補_ のパス>\` を打つ(見送りの行がある候補は止まる)" \
+    "- 失敗の周が残した worktree(lock の理由 \`dev-workflow-loop: 候補:<発見元>\`)は、調べてから消すまで、その発見元は回らない"
+}
+
 # 許可の仲介の判定の記録(PERMLOG)を読み、周ごとの deny を報告に写す → PERM_DENY・PERM_KINDS
 read_permlog() {
   local out line
@@ -1660,11 +2079,27 @@ remove_iteration_worktree() {
 ITER_COUNT=0
 CONSEC_FAIL=0
 CONSEC_G1=0
-run_iteration() { # 候補の先頭の 1 件を回す
+run_iteration() { # 候補の先頭の 1 件(発見モードでは発見元の列の先頭)を回す
   local date f name start now rc timed_out pid dur
-  IFS="$TAB" read -r _ date f name <<<"${CANDIDATES[0]}"
-  ITER_NAME="$name"
-  ITER_REL="$(join_rel "$SEL_TASK_DIR" "$f")"
+  if [ "$DISCOVER" -eq 1 ]; then
+    # 発見モード: 名 = 今夜の名のブランチの task/ の後ろ・lock の理由は「候補:<発見元>」(loop.md §11)
+    ITER_SOURCE="${DISC_QUEUE[0]}"
+    ITER_NAME="候補-$ITER_SOURCE-${DEF_SHA:0:12}"
+    ITER_REL="候補:$ITER_SOURCE"
+    ITER_TITLE="発見元 $ITER_SOURCE"
+    ITER_PROMPT="/dev-workflow:ship-task --discover=$ITER_SOURCE --unattended"
+    ITER_META_EXTRA="mode=discover
+source=$ITER_SOURCE
+"
+    DISC_DONE[$ITER_SOURCE]=1
+  else
+    IFS="$TAB" read -r _ date f name <<<"${CANDIDATES[0]}"
+    ITER_NAME="$name"
+    ITER_REL="$(join_rel "$SEL_TASK_DIR" "$f")"
+    ITER_TITLE="$ITER_REL"
+    ITER_PROMPT="/dev-workflow:ship-task --task=$ITER_REL --unattended"
+    ITER_META_EXTRA=""
+  fi
   ITER_WT="$SEL_WT"
   ITER_SEQ="$SEQ"
   ITER_ID="$RUN_ID-$SEQ"
@@ -1687,10 +2122,12 @@ run_iteration() { # 候補の先頭の 1 件を回す
   printf 'iter=%s\nname=%s\nrel=%s\ndef_name=%s\ndef_sha=%s\nwtadmin=%s\nwt=%s\nrun=%s\n' \
     "$ITER_ID" "$ITER_NAME" "$ITER_REL" "$DEF_NAME" "$DEF_SHA" "$ITER_WTADMIN" "$ITER_WT" "$RUN_ID" \
     >"$STATE/inflight.tmp/meta"
+  printf '%s' "$ITER_META_EXTRA" >>"$STATE/inflight.tmp/meta"
   mv -T -- "$STATE/inflight.tmp" "$INFLIGHT"
   ITER_ACTIVE=1
-  rep "" "### 周 $ITER_COUNT: $ITER_REL" "" "- 周の識別子: $ITER_ID" "- worktree: $ITER_WT"
-  printf '/dev-workflow:ship-task --task=%s --unattended\n' "$ITER_REL" >"$RUN_DIR/iter-$ITER_SEQ.prompt"
+  rep "" "### 周 $ITER_COUNT: $ITER_TITLE" "" "- 周の識別子: $ITER_ID" "- worktree: $ITER_WT"
+  [ "$DISCOVER" -eq 0 ] || rep "- 今夜の名のブランチ: task/$ITER_NAME"
+  printf '%s\n' "$ITER_PROMPT" >"$RUN_DIR/iter-$ITER_SEQ.prompt"
   start="$(date +%s)"
   # 子: setsid で新しいセッションにする(片付けでグループごと止める)。DEV_WORKFLOW_HOST_CLI を外し、
   # 周の印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
@@ -1746,11 +2183,18 @@ run_iteration() { # 候補の先頭の 1 件を回す
   else
     rep "- 共有の config の差分: 無し"
   fi
-  # §5 の判定と後片付け
-  judge "$rc" "$timed_out"
+  # §5 の判定と後片付け(発見モードは §11 の判定)
+  if [ "$DISCOVER" -eq 1 ]; then judge_discover "$rc" "$timed_out"; else judge "$rc" "$timed_out"; fi
   rep "- 結末: ${OUTCOME:-(無し)}${DETAIL:+ — $DETAIL}" "- 判定: $JUDGE"
   [ -z "$HOLD_CODE" ] || rep "- 保留の停止条件の対話点番号: $HOLD_CODE"
   [ -z "$DENIALS" ] || rep "- ホストの結果の拒否の欄: $DENIALS"
+  if [ "$DISCOVER" -eq 1 ]; then
+    DISC_RESULT[$ITER_SOURCE]="$JUDGE — 結末 ${OUTCOME:-(無し)}${DETAIL:+ — $DETAIL}"
+    if [ -n "$DISC_PATHS" ]; then
+      rep "- 候補: $(printf '%s\n' "$DISC_PATHS" | wc -l | tr -d ' ') 件"
+      while IFS= read -r f; do rep "  - $f"; done <<<"$DISC_PATHS"
+    fi
+  fi
   read_permlog
   if [ "$JUDGE_OK" -eq 1 ]; then
     remove_iteration_worktree
@@ -1761,6 +2205,7 @@ run_iteration() { # 候補の先頭の 1 件を回す
     rep "- worktree: 残した(lock の理由: dev-workflow-loop: $ITER_REL)"
     CONSEC_FAIL=$((CONSEC_FAIL + 1))
   fi
+  [ "$DISCOVER" -eq 0 ] || discover_after_iteration
   if [ "$JUDGE_OK" -eq 1 ] && [ "$OUTCOME" = 保留 ] && [ "$HOLD_CODE" = G1 ]; then
     if g1_protected_only; then
       # 拒否の記録が保護パスの種類だけの G1 は数えない(保護パスを変えるタスクで、許可リストの不足ではない)。
@@ -1775,7 +2220,7 @@ run_iteration() { # 候補の先頭の 1 件を回す
   else
     CONSEC_G1=0
   fi
-  say "周 $ITER_COUNT: $ITER_REL → $JUDGE"
+  say "周 $ITER_COUNT: $ITER_TITLE → $JUDGE"
   ITER_ID=""; ITER_PGID=""
   # §6: 周の後の停止条件
   if [ "$CONSEC_FAIL" -ge "$MAX_FAIL" ]; then die 10 consecutive-failures "連続失敗($CONSEC_FAIL 回)"; fi
@@ -1811,6 +2256,12 @@ while [ $# -gt 0 ]; do
     --host) need_val "$1" "$#"; HOST="$2"; shift 2 ;;
     --host-argv) need_val "$1" "$#"; HOST_ARGV_OVERRIDE+=("$2"); shift 2 ;;
     --only) need_val "$1" "$#"; ONLY+=("$2"); shift 2 ;;
+    # 発見モード。値は `=` の形だけ(`--discover data-audit` の data-audit は下の「不明な引数」になる)
+    --discover|--discover=*)
+      [ "$DISCOVER" -eq 0 ] || fail_usage "--discover を 2 回書いた"
+      DISCOVER=1
+      case "$1" in --discover=*) DISCOVER_FROM_ARG=1; DISCOVER_ARG="${1#--discover=}" ;; esac
+      shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --allowed-tools)
       need_val "$1" "$#"
@@ -1833,6 +2284,26 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$HOST" ] || fail_usage "--host が空"
 for v in ${ONLY[@]+"${ONLY[@]}"}; do [ -n "$v" ] || fail_usage "--only が空"; done
+if [ "$DISCOVER" -eq 1 ]; then
+  # 発見元の列(loop.md §11): 空の要素・重複・未知の名前・--only との併用は使い方の誤り
+  [ "${#ONLY[@]}" -eq 0 ] || fail_usage "--discover と --only は併用できない(1 回の実行はどちらかのモードだけ)"
+  if [ "$DISCOVER_FROM_ARG" -eq 1 ]; then
+    case ",$DISCOVER_ARG," in *,,*) fail_usage "--discover= の値に空の要素がある: '$DISCOVER_ARG'" ;; esac
+    case "$DISCOVER_ARG" in *[!a-z0-9,-]*) fail_usage "--discover= の値に使えない文字がある: '$DISCOVER_ARG'(列: ${DISCOVER_DEFAULT[*]})" ;; esac
+    IFS=, read -r -a DISCOVER_SOURCES <<<"$DISCOVER_ARG"
+    DISCOVER_SRC_DESC="引数"
+  else
+    DISCOVER_SOURCES=("${DISCOVER_DEFAULT[@]}")
+    DISCOVER_SRC_DESC="既定"
+  fi
+  for v in "${DISCOVER_SOURCES[@]}"; do
+    known=0
+    for k in "${DISCOVER_DEFAULT[@]}"; do [ "$k" != "$v" ] || known=1; done
+    [ "$known" -eq 1 ] || fail_usage "--discover の未知の発見元: '$v'(列: ${DISCOVER_DEFAULT[*]})"
+    [ -z "${DISC_SEEN[$v]:-}" ] || fail_usage "--discover の発見元が重複している: '$v'"
+    DISC_SEEN[$v]=1
+  done
+fi
 for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do [ -n "$v" ] || fail_usage "--allowed-tools が空"; done
 for v in ${HOST_ARGV_OVERRIDE[@]+"${HOST_ARGV_OVERRIDE[@]}"}; do [ -n "$v" ] || fail_usage "--host-argv が空"; done
 i=0
@@ -1874,6 +2345,11 @@ RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
 # 許可の仲介の hook(D22 ③)。python3 と hook のスクリプトの絶対パスを、それぞれシェルのクォートで囲んで組み立てる
 PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
 [ -f "$PERM_SCRIPT" ] || die 20 plugin-root "許可の仲介の hook(loop-permission.py)が無い: $PERM_SCRIPT"
+# 発見モードだけ: origin の URL の読み方(D9。実装モードでは見ない)
+ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
+if [ "$DISCOVER" -eq 1 ]; then
+  [ -f "$ORIGIN_REPO_PY" ] || die 20 plugin-root "兄弟の origin-repo.py が無い(発見モードで使う): $ORIGIN_REPO_PY"
+fi
 PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
 HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
@@ -2014,6 +2490,27 @@ WT_ROOT="${WT_ROOT:-$(dirname -- "$TOP")/$(basename -- "$TOP").loop}"
 WT_ROOT="$(realpath -m -- "$WT_ROOT")"
 if inside_checkout "$WT_ROOT"; then die 20 worktree-root "worktree の置き場が人のチェックアウトの中にある($WT_ROOT)"; fi
 
+# ── 発見モード: origin の URL の検査(loop.md §11。起動時の最初の ls-remote〈§2 の 11〉より前 — vcs のヘルパーが失敗する
+# 構成で、ls-remote の失敗ではなく origin-vcs の案内に届くように)。どの理由にも URL の字面を出さない ──
+ORIGIN_URL_STATE=""
+if [ "$DISCOVER" -eq 1 ]; then
+  rc=0
+  ORIGIN_OUT="$(cd / && exec python3 -B "$ORIGIN_REPO_PY" --dir="$TOP" 7>&- 2>"$RUN_DIR/origin-repo.err")" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 origin-url "origin の URL を読めない(origin-repo.py の終了コード $rc。stderr は $RUN_DIR/origin-repo.err)"
+  ORIGIN_INFO="$(printf '%s' "$ORIGIN_OUT" | py origin-json)" || die 20 origin-url "origin の URL を読めない(origin-repo.py の出力を解析できない)"
+  O_ORIGIN="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^origin=//p')"
+  O_SAME="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^same=//p')"
+  O_VCS="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^vcs=//p')"
+  O_REASON="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^reason=//p')"
+  if [ "$O_ORIGIN" = 1 ] && [ "$O_VCS" = 1 ]; then
+    die 20 origin-vcs "origin に remote.origin.vcs がある(push・ls-remote が git-remote-<vcs> のヘルパーを通り、URL の字面と送り先が離れるので、発見モードでは使えない)。\`git config --unset remote.origin.vcs\` で外してから起動する"
+  fi
+  if [ "$O_ORIGIN" = 1 ] && [ "$O_SAME" != 1 ]; then
+    die 20 origin-url-mismatch "origin の fetch と push の URL が同じリポジトリを指さない(${O_REASON:-理由なし})。fetch と push の URL をそれぞれ 1 つにし、同じリポジトリに揃えてから起動する(remote.origin.pushurl・pushInsteadOf を見直す)"
+  fi
+  if [ "$O_ORIGIN" = 1 ]; then ORIGIN_URL_STATE="検査に通った(fetch と push が同じリポジトリ)"; else ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"; fi
+fi
+
 # ── §2 の 11: 決定 19 の帰結(D8)──
 LEADING=""
 ORIGIN_STATE=""
@@ -2127,6 +2624,11 @@ if [ "${#MCP_CONFIGS[@]}" -gt 0 ]; then
 else
   MCP_STATE="渡さない(周では MCP が使えない。MCP を使う手順は「無い場合」の経路になる)"
 fi
+if [ "$DISCOVER" -eq 1 ]; then
+  DISCOVER_LIST="$(IFS=,; printf '%s' "${DISCOVER_SOURCES[*]}")"
+  rep "- モード: 発見(発見元の列: $DISCOVER_LIST・$DISCOVER_SRC_DESC。loop.md §11)" "- origin の URL: $ORIGIN_URL_STATE"
+  say "モード: 発見(発見元の列: $DISCOVER_LIST・$DISCOVER_SRC_DESC)"
+fi
 rep "- ホスト: $HOST(雛形の出所: $HOST_ARGV_SOURCE)"
 rep "- 解決後の argv: $RESOLVED_ARGV" "- プロンプトは stdin で渡す"
 rep "- 実効値: max_iterations=$MAX_ITER($MAX_ITER_SRC) max_consecutive_failures=$MAX_FAIL($MAX_FAIL_SRC) time_budget=$BUDGET($BUDGET_SRC) iteration_timeout=$ITER_TIMEOUT($ITER_TIMEOUT_SRC) kill_grace=$KILL_GRACE net_timeout=$NET_TIMEOUT"
@@ -2168,6 +2670,26 @@ for note in ${STARTUP_NOTES[@]+"${STARTUP_NOTES[@]}"}; do say "$note"; done
 # ── §3〜§6: ループ ──
 while :; do
   if [ "$DRY_RUN" -eq 0 ]; then check_stop_before_iteration; fi
+  if [ "$DISCOVER" -eq 1 ]; then
+    # 発見モード(loop.md §11): 発見元の列を引数の順に 1 つずつ回す
+    select_discover
+    if [ "$DRY_RUN" -eq 1 ]; then
+      say "発見元の列(task_dir: $TASK_DIR):"
+      for s in ${DISC_QUEUE[@]+"${DISC_QUEUE[@]}"}; do say "  $s(ブランチ task/候補-$s-${DEF_SHA:0:12})"; done
+      if [ "${#SKIPS[@]}" -gt 0 ]; then
+        say "読み飛ばし:"
+        for line in "${SKIPS[@]}"; do
+          say "  $line"
+          s="${line%%: *}"
+          while IFS= read -r l; do [ -z "$l" ] || say "    片付け: \`$l\`"; done <<<"${DISC_CLEAN[$s]:-}"
+        done
+      fi
+      finish 0 "--dry-run(発見元の列と読み飛ばしを出して終わる)"
+    fi
+    if [ "${#DISC_QUEUE[@]}" -eq 0 ]; then finish 0 "キューが空"; fi
+    run_iteration
+    continue
+  fi
   select_task
   if [ "$DRY_RUN" -eq 1 ]; then
     say "対象の一覧(task_dir: $TASK_DIR):"

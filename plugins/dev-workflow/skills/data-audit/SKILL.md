@@ -1,7 +1,7 @@
 ---
 name: data-audit
-description: サーバーアクション・API・データベース・フロントエンドを横断し、機密データの露出(モデル丸ごと返却・クライアントへの機密混入)・認可チェック欠如・IDOR・過剰取得(N+1・全件取得)・DB の防御不足(RLS・機密カラム保護)などセキュリティとパフォーマンスの問題を読み取り専用で監査する。全指摘を実コードで裏取りしてから提案し、承認された指摘は /create-task にチェーンしてタスク化する。「データが漏れていないか調べて」「API のセキュリティをチェックして」「無駄なデータ取得がないか見て」「セキュリティ監査して」「パフォーマンスに問題がないか調査して」等で使う。--layer で単一層のみ、--quick で性能系のスキャンを省ける。問題ゼロでも健全性レポートを出す。
-argument-hint: "[--layer=frontend|backend|database] [--quick]"
+description: サーバーアクション・API・データベース・フロントエンドを横断し、機密データの露出(モデル丸ごと返却・クライアントへの機密混入)・認可チェック欠如・IDOR・過剰取得(N+1・全件取得)・DB の防御不足(RLS・機密カラム保護)などセキュリティとパフォーマンスの問題を読み取り専用で監査する。全指摘を実コードで裏取りしてから提案し、承認された指摘は /create-task にチェーンしてタスク化する。「データが漏れていないか調べて」「API のセキュリティをチェックして」「無駄なデータ取得がないか見て」「セキュリティ監査して」「パフォーマンスに問題がないか調査して」等で使う。--layer で単一層のみ、--quick で性能系のスキャンを省ける。--candidates では承認を待たずに指摘を 候補_ として保存先へ書き出す(発見ループ用)。問題ゼロでも健全性レポートを出す。
+argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--max-candidates=<N>] [--unattended]]"
 ---
 
 # data-audit — データ境界監査(読み取り専用)
@@ -11,10 +11,12 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 ## 原則
 
 1. **読み取り専用**。コード・ドキュメント・設定を一切変更しない。唯一の書き込みはレビューログ `.claude/reviews/`(design §5-14)
+   - 例外: 候補モード(`--candidates`)では、解決した task_dir に新しい `候補_*.md` も書く。既存の状態名 MD・コード・ドキュメント・設定は変えない([../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md))
 2. **全指摘に実コードの裏取り(path:行)**。裏取りできない指摘・一般論・推測は出さない。確信が持てないものは「要確認」として区別する
 3. **機密の値そのものを出力しない**。フィールド名と場所のみ報告する。profile の `secret_paths` は開かない(存在の有無だけ扱う)
 4. **3 層吸収**(design §3)。機密の定義・層のパス・スタック判定をハードコードせず、profile → 動的検出 → 権威参照ファイル(`AGENTS.md`。無ければ `CLAUDE.md`)/ doc で解決する
 5. **修正しない**。提案 → ユーザーのトリアージ → 承認分を /create-task へ。このスキル自身はコードに触れない
+   - 例外: 候補モードでは、トリアージとチェーンの代わりに、選定の規則で機械的に選んだ指摘を `候補_` として書き出す。採用は人が /create-task で行う
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
 7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
 8. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
@@ -26,11 +28,18 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 | (なし) | 存在する全層(frontend / backend / database)をフル監査 |
 | `--layer=<層>` | 指定層のみ(frontend \| backend \| database。カンマ区切り可) |
 | `--quick` | 重大クラスの 3 体(露出・認可・DB 防御)だけを起動し、`scan-efficiency`(性能系)を起動しない。**起動した 3 体は担当観点を全部見る**(観点単位では絞らない) |
+| `--candidates` | 候補モード(発見ループ用): 指摘を承認を待たずに `候補_{名}.md` として書き出す。`--max-candidates=<N>`(既定 10)・`--unattended` を併せて渡せる。既定はオフ(下の「候補モード」) |
+
+## 候補モード(`--candidates`)
+
+無人ループの発見の周(`/ship-task --discover=data-audit --unattended`)が呼ぶ。指摘を承認を待たずに task_dir の `候補_{名}.md` として書き出し、対話点を出さない。引数・対話点と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、指摘キーの識別子と観点群は [references/checks.md](references/checks.md) の「候補モードの識別子と観点群」。以下の各所には 1 行の分岐だけを置く。
 
 ## Phase 0: 前提解決
 
 1. profile(`.claude/project-profile.yml`)を解決: `root` / `has_code` / `areas` / `secret_paths` / `audit.*`。`has_code: false` なら対象外と報告して終了
+   - 候補モードでは、`has_code: false` なら何も書かずに、結果の行 `候補なし` を返す
 2. `.claude/grasp.md` は参照索引として読む。毎回、現在の profile・権威参照ファイル・関連文書・設定・対象境界・依存先を確認する(無ければ /understand-project の実行を促すか、マニフェストから最小限のスタック把握を行う)
+   - 候補モードでは、/understand-project の実行を促さない(マニフェストから最小限のスタック把握を行う)
 3. **機密フィールド辞書を構築**する(3 層で解決):
    - profile の `audit.sensitive_fields`(あれば追加)
    - スキーマ実測: DB スキーマのカラム名を [references/checks.md](references/checks.md) の既定辞書とパターンマッチし、一致したものを実在機密として昇格
@@ -66,14 +75,18 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 - 返答形式: `観点 ID / path:行 / 根拠(該当コードの要点) / 深刻度案 / 確度(確実 or 要確認)`
 - 「**確信が持てないものは『要確認』として返す。該当なしの観点は『該当なし』と返す**(推測で埋めない)」
 - 「機密の値・認証情報をレポートに書き写さない(フィールド名と場所のみ)」
+- 候補モードの無人(`--unattended`)では、unattended-mode.md の「委託するサブエージェント」の項の要点も、要約し直さずに写す(→ candidate-mode.md)
 
 `--layer` 指定時は該当層の観点だけを起動する。F3(UI だけの認可)は認可スキャンがフロントとバックエンドの結果を突合して判定するため、--layer=frontend 単独時は「要バックエンド突合」として報告する。
+
+候補モードでは、「要バックエンド突合」の F3 は候補にせず、報告だけにする。
 
 ## Phase 3: 裏取りとトリアージ準備
 
 1. team-lead(このセッション)が**全指摘を実コードで再確認**する(Read で該当箇所を開き、経路を追う)。エージェントの申告を鵜呑みにしない(design §5-9)
 2. false positive は除去し、**除去理由を記録**する
 3. 深刻度(重大 / 高 / 中)× 確度(確実 / 要確認)を確定し、同一根本原因の指摘を統合する(基準は checks.md「深刻度・確度の基準」)
+   - 候補モードでは、統合は指摘キーの単位(同じ観点群・同じ識別子)の中だけで行う(checks.md の「候補モードの識別子と観点群」)
 4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)
 
 ## Phase 4: 報告と提案(提案 → 選択)
@@ -103,11 +116,15 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 
 指摘があれば **AskUserQuestion(multiSelect)でトリアージ**する: どの指摘をタスク化するか(深刻度・修正規模を添えて)。「要確認」の指摘は、確認に必要な情報(実行時設定・仕様意図)をユーザーへの質問として提示する。
 
+候補モードでは尋ねない。選定の規則で機械的に選び、「要確認」は確度 `要確認` の候補として書く(質問は候補の「人が確かめること」の節に置く → candidate-mode.md)。
+
 ## Phase 5: /create-task へチェーン
 
 1. 承認された指摘を**グルーピング提案**する(同一境界・同一修正パターンは 1 タスクに、独立した問題は分割。最終判断は create-task の分割判断に委ねる)
 2. /create-task に渡すもの: 指摘(path:行・根拠・修正方針案)+種別ヒント(認可欠如・露出 = セキュリティ修正 / 過剰取得・インデックス = 挙動維持の性能改善で `--refactor` 相当)+監査レポートのパス
 3. 見送られた指摘は `.claude/reviews/` のレポートに残る旨を案内する(後から /create-task 可能)
+
+候補モードでは、グルーピングの提案もチェーンもしない。candidate-mode.md の書き出しの手順で `候補_` を書き、結果の行を返す。
 
 ## 最終ゲート(出力前セルフチェック)
 
@@ -117,6 +134,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 - [ ] false positive の除去理由を記録した
 - [ ] 未監査の層・観点を理由付きで明記した(サイレントスキップしていない)
 - [ ] 実行形態(フル / 標準 / 最小)を報告に明記した
+- [ ] 候補モード: 書き込みは `.claude/reviews/` と task_dir の新しい `候補_*.md` だけで、candidate-mode.md の最終ゲートを満たした
 
 ## 関連スキル
 
@@ -124,3 +142,4 @@ argument-hint: "[--layer=frontend|backend|database] [--quick]"
 - 観点の権威ソース: /stack-research の doc/06(バージョン固有の脆弱性・注意点を監査に反映)
 - 後続: /create-task(承認指摘のタスク化)→ /do-task(実装)
 - 補完: /tool-check は構文・型の機械検査、本スキルはデータの通り道の意味的監査(役割分担)
+- 発見ループ: /ship-task --discover=data-audit が候補モードを呼ぶ。候補の採用は /create-task <候補_ のパス>

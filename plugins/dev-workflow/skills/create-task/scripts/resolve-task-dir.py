@@ -11,7 +11,8 @@ import sys
 from pathlib import Path
 
 
-STATE_FILE = re.compile(r"^(?:進行中|完了|中断|保留)_.+\.md$")
+# 状態名の列の正本は references/task-directory.md。candidate-keys.py がこの定義を取り込む(2 か所に置かない)
+STATE_FILE = re.compile(r"^(?:進行中|完了|中断|保留|候補)_.+\.md$")
 DEFAULT_TASK_DIR = "docs/tasks"
 # init-project のテンプレートの置換漏れ。一重の {x} は正当なディレクトリ名としてありうるので対象外
 PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")

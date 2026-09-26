@@ -2,6 +2,18 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.9.0
+
+### 変更
+
+- 発見ループを足した(既定はオフ)。`loop.sh --discover[=<発見元>,…]` は、発見元(`data-audit`・`refactor`)を 1 周ずつ、新しいヘッドレスセッションの `/ship-task --discover=<発見元> --unattended` で回す。発見元の候補モードが書いた `候補_` のタスク MD だけを、作業ブランチ `task/候補-<発見元>-<起点の sha の先頭 12 桁>` に 1 commit して PR を開く(1 晩・1 発見元ごとに 1 本)。実装はしない(`進行中_` を機械が作らない)。候補が 0 件なら、ブランチも PR も作らずに結末 `候補なし` で終わる。今夜の名のブランチか未 merge の候補のブランチがある発見元・失敗の周の worktree が残っている発見元は回さない。発見モードは、状態ファイル(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)が ignore されていて追跡されていないこと、origin の fetch と push の URL が同じリポジトリを指し `remote.origin.vcs` が無いことが前提で、満たさなければ起動時に止まる(exit 20)。正本は `ship-task/references/discover-mode.md` と `loop.md` の「発見モード」
+- 状態名に `候補_` を足した(発見ループの採用前の候補)。保存先の検出(`create-task/scripts/resolve-task-dir.py`)は `候補_` の MD も数えるので、`候補_` だけを置いたディレクトリも保存先の候補になる(`候補_` を別の場所に持つプロジェクトでは、保存先の検出の結果が変わりうる)。`進行中_` を選ぶ処理(`/do-task` の自動選択・`loop.sh` の実装モード)は `候補_` を拾わない
+- `/data-audit --candidates`・`/create-task --refactor --candidates`(候補モード)を足した。承認を待たずに、1 指摘 = 1 つの `候補_` のタスク MD を書く(上限は data-audit 10・refactor 5。`--max-candidates` で変えられる)。ヘッダの指摘キーで、保存先の全状態の MD と照らして既知の指摘を積まない(`完了_` と一致したら回帰の疑いとして報告する)。refactor の候補モードは、機密のログ・URL の露出と doc/06 の既知の脆弱性から来た指摘を候補にしない。`--candidates` の無い呼び出しは今までどおり(承認 → チェーン)。正本は `create-task/references/candidate-mode.md`、既知のキーの収集と候補の検査は `create-task/scripts/candidate-keys.py`
+- `/create-task <候補_ のパス>` で候補を採用する経路を足した。指摘を実コードで確かめ直し、`候補_{名}` を `進行中_{名}` に改名して(追跡済みなら `git mv`。stage だけで commit しない)設計を書き足す。発見元と指摘キーの行はヘッダに引き継ぐ。ヘッダに見送りの行(`> **見送り**: YYYY-MM-DD — <理由>`)がある候補と `--unattended` では止まる。`/do-task` は `候補_` のパスを渡されたら止まり、`/create-task` での採用を案内する
+- `ship-task/scripts/origin-repo.py` を足した。origin の fetch と push の URL が同じリポジトリを指すか、公開の確認と PR に使える push 先(https、または ssh の上書きの無い `git@github.com`)かを JSON で返す。URL の字面は出力しない
+- 無人の周(`loop.sh`)の読むだけの調査は、ツールを先に使う: 中身は Read で読み、一覧・検索は Glob・Grep のツールがあればそれを使う(`ship-task/references/unattended-mode.md`。委託するサブエージェントの要点にも足した)。worktree の中を読むこれらのツールは許可の仲介に掛からないので、Bash の書き方の誤りによる拒否(G1)が起きにくくなる(指示で守るもので、機構では保証しない)。Glob・Grep を既定で持たないホストのために、`loop.md` §4 の許可リストの推奨に、`--allowed-tools` でそのツールを名指す値を足した(値は `docs/design.md` §7-3)
+- 無人モードの結末の行の照合パターンを `^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — ` にした。`loop.sh` は、実装モードでもこのパターンに一致する最後の行を結末として読み、そのモードで取りえない値(実装モードの `候補なし`)は失敗と判定する(今までは 4 値のパターンで読んでいた)
+
 ## v4.8.0
 
 ### 変更

@@ -12,7 +12,7 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器・タスク保存先の解決・本文ダイジェスト)
+scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
@@ -34,7 +34,7 @@ setup.sh                            # plugin を使わない導入(コピー / s
 ```bash
 # JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク)+ 配布メタの一括検証
 python3 scripts/validate.py
-python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト)
+python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方)
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
 # —— 合否がリポジトリ外のデータで決まらないようにするため)。誤検出が出た語は渡さないか、
@@ -54,6 +54,8 @@ bash -n plugins/dev-workflow/skills/ship-task/scripts/loop.sh
 bash -n plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/reviews-dir.sh
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py   # 構文検査(__pycache__ を作らない)
+python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py
+python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/create-task/scripts/candidate-keys.py
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
