@@ -15,15 +15,15 @@
 | `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
 | `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。grasp は前回要約と参照索引に使い、毎回現在の一次情報を確認 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
-| `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を解決した保存先の `進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析 | 「〜をタスク化して」「リファクタして」 |
+| `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を解決した保存先の `進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析(`--refactor --candidates` は発見ループの候補モード)。`候補_` のパスを渡すと、その候補を `進行中_` に採用して設計する | 「〜をタスク化して」「リファクタして」 |
 | `/do-task` | タスク設計書を実装(implementer 委託)・機械検証・実動確認・独立レビュー・完了処理。中断再開可。「検証だけ」も可 | 「タスクをやって」「続きをやって」 |
 | `/update-doc` | メモリ / 権威参照ファイル / doc を実コードと同期。`--task` で完了タスク駆動の差分同期(要件タグ昇格・ADR・図・索引まで) | タスク完了後の締め |
-| `/ship-task` | 上の 3 工程(設計 → 実装 → doc 同期)を 1 コマンドで通し、作業ブランチ・実装/doc の commit・push・PR 作成まで出す。既定は走り切り、停止条件(要件不明・品質ゲート赤・レビュー未収束・実動確認の結果待ち など)に当たったときだけ停止。設計済みのタスク MD からは `--task=<タスク MD>`(Phase 2 から)、無人ループの 1 周は `--task=<タスク MD> --unattended`(`--task` が必須。対話点で止まらず、保留か失敗扱いに倒す) | 「まるっとやって」「設計から PR まで一気に」 |
+| `/ship-task` | 上の 3 工程(設計 → 実装 → doc 同期)を 1 コマンドで通し、作業ブランチ・実装/doc の commit・push・PR 作成まで出す。既定は走り切り、停止条件(要件不明・品質ゲート赤・レビュー未収束・実動確認の結果待ち など)に当たったときだけ停止。設計済みのタスク MD からは `--task=<タスク MD>`(Phase 2 から)、無人ループの 1 周は `--task=<タスク MD> --unattended`(`--discover` が無ければ `--task` が必須。対話点で止まらず、保留か失敗扱いに倒す)。発見ループの 1 周は `--discover=<発見元> --unattended`(候補の `候補_` だけを PR で届ける) | 「まるっとやって」「設計から PR まで一気に」 |
 | `/discuss-spec` | テーマ単位の壁打ちで仕様を対話決定(論点分解 → 選択肢・推奨 → 合意)。決定録を生成して /reflect-decisions へチェーン | 「壁打ちしたい」「仕様を相談して決めたい」 |
 | `/reflect-decisions` | 議事録・文字起こし・チャットログ等から決定事項を抽出し、精査(裏取り・レビュー・確認)を経て要件定義(doc/03)・ADR(doc/04)等へ出典付きで反映。未決・宿題は /create-task へチェーン提案 | 「議事録を反映して」「決まったことを反映して」 |
 | `/export-doc` | doc をクライアント提出用に PDF / xlsx / HTML へ変換。内部情報のサニタイズ確認・機密検査・Mermaid 図の画像化付き。doc 自体は変更しない | 「PDF にして」「エクセルで出して」 |
 | `/tool-check` | ツールによる機械検査(format/lint/typecheck/test/build)一括実行 | コミット前 |
-| `/data-audit` | データ境界監査(読み取り専用)。機密露出・認可欠如・IDOR・過剰取得・DB 防御不足を 3 層(frontend / backend / database)で検査し、裏取り済み指摘を提案。承認分は /create-task へチェーン | 「データが漏れていないか調べて」「セキュリティ監査して」 |
+| `/data-audit` | データ境界監査(読み取り専用)。機密露出・認可欠如・IDOR・過剰取得・DB 防御不足を 3 層(frontend / backend / database)で検査し、裏取り済み指摘を提案。承認分は /create-task へチェーン。`--candidates` は承認を待たずに `候補_` を書く発見ループの候補モード | 「データが漏れていないか調べて」「セキュリティ監査して」 |
 
 推奨サイクル: `/init-project`(初回。→ stack-research へチェーン)→ `/understand-project`(毎セッション hook が促し)→ `/create-task` → `/do-task` → `/update-doc --task`
 一気通貫で回す場合: `/understand-project` → `/ship-task <タスク内容>`(設計 → 実装 → doc 同期 → PR。工程の中身は上の 3 スキルそのもの)。設計済みのタスク MD から回すなら `/ship-task --task=<タスク MD>`
@@ -109,6 +109,11 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 - **許可の仲介**: 保護パス(`.claude/` など)への書き込みは確認に回って拒否になるので、`loop.sh` が渡す hook が、周の中の状態ファイル(`.claude/reviews/` など)への書き込みだけを通す。hook が Bash のコマンドを照合する許可リストも、`--allowed-tools` か利用者の設定(`permissions.allow`)から作るので、許可リストはこのどちらかに置く。hook を無効にする設定(`disableAllHooks`・管理者設定の `allowManagedHooksOnly`)があると、`loop.sh` は起動しない
 - **Linux 専用**: `setsid`・`flock`・`/proc` を使う。ほかの OS では起動時に止まる
 - 結果(周ごとの結末・残った worktree・人の次の手順)は朝の報告に出る。停止条件・報告の場所・保留のタスクを再び回す手順は loop.md
+- **発見モード**(`--discover`。既定オフ): 発見元(`/data-audit`・`/create-task --refactor` の分析)の候補モードを 1 周ずつ回し、指摘を `候補_` のタスク MD にして、1 晩・1 発見元ごとに PR を 1 本開く。実装はしない(`進行中_` を機械が作らない)。人は要らない候補に見送りの行を足すか消してから merge し、採用するものを `/create-task <候補_ のパス>` に通す。data-audit の候補は、origin の push 先が非公開と確かめられたときだけ PR にする。前提(状態ファイルが ignore されていること・origin の fetch と push が同じリポジトリを指すこと)と手順の正本は loop.md の「発見モード」と [discover-mode.md](plugins/dev-workflow/skills/ship-task/references/discover-mode.md)
+  ```bash
+  bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
+    --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>' --discover --dry-run
+  ```
 
 ## 既存プロジェクトとの共存・移行
 
