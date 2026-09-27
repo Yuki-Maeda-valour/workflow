@@ -108,8 +108,9 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 - **許可リスト**: 全許可のモードは使わない。許可リストはホストの利用者設定か `--allowed-tools` で渡し(profile では受け付けない)、コマンド単位で列挙する(git・gh・python3・bash・判定と照合〈test・echo・sha256sum〉・読み取り系・品質ゲートのコマンドなど)。許可リストは誤操作を減らす仕組みで、隔離ではない。実走で使った値は [docs/design.md](docs/design.md) §7-3 に記録する
 - **許可の仲介**: 保護パス(`.claude/` など)への書き込みは確認に回って拒否になるので、`loop.sh` が渡す hook が、周の中の状態ファイル(`.claude/reviews/` など)への書き込みだけを通す。hook が Bash のコマンドを照合する許可リストも、`--allowed-tools` か利用者の設定(`permissions.allow`)から作るので、許可リストはこのどちらかに置く。hook を無効にする設定(`disableAllHooks`・管理者設定の `allowManagedHooksOnly`)があると、`loop.sh` は起動しない
 - **Linux 専用**: `setsid`・`flock`・`/proc` を使う。ほかの OS では起動時に止まる
+- **状態ファイルの ignore**: 状態ファイル 3 つ(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)を ignore し(追跡していれば `git rm --cached` で外し)、commit しておく(init-project の gitignore の断片)。無いと起動時に止まる(`--dry-run` も exit 20。正本は loop.md §3 の 2a)
 - 結果(周ごとの結末・残った worktree・人の次の手順)は朝の報告に出る。停止条件・報告の場所・保留のタスクを再び回す手順は loop.md
-- **発見モード**(`--discover`。既定オフ): 発見元(`/data-audit`・`/create-task --refactor` の分析)の候補モードを 1 周ずつ回し、指摘を `候補_` のタスク MD にして、1 晩・1 発見元ごとに PR を 1 本開く。実装はしない(`進行中_` を機械が作らない)。人は要らない候補に見送りの行を足すか消してから merge し、採用するものを `/create-task <候補_ のパス>` に通す。data-audit の候補は、origin の push 先が非公開と確かめられたときだけ PR にする。前提(状態ファイルが ignore されていること・origin の fetch と push が同じリポジトリを指すこと)と手順の正本は loop.md の「発見モード」と [discover-mode.md](plugins/dev-workflow/skills/ship-task/references/discover-mode.md)
+- **発見モード**(`--discover`。既定オフ): 発見元(`/data-audit`・`/create-task --refactor` の分析)の候補モードを 1 周ずつ回し、指摘を `候補_` のタスク MD にして、1 晩・1 発見元ごとに PR を 1 本開く。実装はしない(`進行中_` を機械が作らない)。人は要らない候補に見送りの行を足すか消してから merge し、採用するものを `/create-task <候補_ のパス>` に通す。data-audit の候補は、origin の push 先が非公開と確かめられたときだけ PR にする。前提(origin の fetch と push が同じリポジトリを指すこと。状態ファイルの ignore は上の項目)と手順の正本は loop.md の「発見モード」と [discover-mode.md](plugins/dev-workflow/skills/ship-task/references/discover-mode.md)
   ```bash
   bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
     --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>' --discover --dry-run

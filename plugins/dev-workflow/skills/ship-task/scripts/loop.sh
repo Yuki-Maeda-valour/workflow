@@ -1527,12 +1527,15 @@ SEQ=0
 FIRST_SELECTION=1
 declare -A REMOTE_TASKS=()
 
-# 発見モードの前提(loop.md §11): 状態ファイル 3 つが周の worktree で ignore されていて、追跡されていない。
+# 無人ループの前提(loop.md §3 の 2a): 状態ファイル 3 つが周の worktree で ignore されていて、追跡されていない。
 # `.claude/reviews/` を作る前に確かめる。`--no-index` を付けない(付けると追跡済みのファイルも ignore 済みと答える)
 check_state_ignored() { # $1=周の worktree
-  local p bad=() tracked=()
+  local p rc bad=() tracked=()
   for p in .claude/reviews/x.md .claude/grasp.md .claude/.understand-project-done; do
-    if ! G -C "$1" check-ignore -q -- "$p" >/dev/null 2>&1; then
+    rc=0
+    G -C "$1" check-ignore -q -- "$p" >/dev/null 2>&1 || rc=$?
+    # 0 は ignore 済み・1 は外れ。0 と 1 以外(symlink の先・サブモジュールの中など、ignore の有無を判定できないもの)は数えず、後の段(2b の置き場の検査など)に任せる
+    if [ "$rc" -eq 1 ]; then
       bad+=("$p")
       if G -C "$1" ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then tracked+=("$p"); fi
     fi
@@ -1540,7 +1543,7 @@ check_state_ignored() { # $1=周の worktree
   [ "${#bad[@]}" -gt 0 ] || return 0
   rep "" "## 状態ファイルが ignore されていない(起動時に止まった)" ""
   for p in "${bad[@]}"; do rep "- $p"; done
-  rep "" "発見モードは、状態ファイル 3 つが ignore されていて追跡されていないことを前提にする(判定が未追跡・未 commit の無いことを求めるため)。.gitignore に次を足して commit する(init-project の gitignore の断片と同じ):" "" \
+  rep "" "無人ループは、状態ファイル 3 つが ignore されていて追跡されていないことを前提にする(周の中で書かれた状態ファイルが未追跡か未 commit の変更として残ると、周の worktree を消せずに残る。発見モードでは、判定が未追跡・未 commit の無いことを求めるので、正しい周も失敗になる)。.gitignore に次を足して commit する(init-project の gitignore の断片と同じ):" "" \
     '```' ".claude/reviews/" ".claude/grasp.md" ".claude/.understand-project-done" '```'
   if [ "${#tracked[@]}" -gt 0 ]; then
     rep "" "追跡済みのものは、索引から外して commit する:"
@@ -1562,8 +1565,8 @@ make_selection_worktree() {
     >>"$RUN_DIR/worktree.log" 2>&1 || rc=$?
   [ "$rc" -eq 0 ] || die 30 worktree-add "worktree を作れない(終了コード $rc。$RUN_DIR/worktree.log)"
   SEL_WT="$wt"
-  # 発見モード: 状態ファイルの ignore の検査(.claude/reviews/ を作る前。外れたら worktree を消して exit 20)
-  if [ "$DISCOVER" -eq 1 ]; then check_state_ignored "$wt"; fi
+  # 状態ファイルの ignore の検査(両モード。.claude/reviews/ を作る前。外れたら worktree を消して exit 20)
+  check_state_ignored "$wt"
   # 2b. worktree の .claude/・.claude/reviews/ を先に作る(D22 ①)
   prepare_reviews_dir "$wt"
   # 3. task_dir(worktree の中で解決する。profile の文字列は --task-dir=<値> で渡す)

@@ -76,10 +76,10 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 - parent-child 構成でない(管理ルート = profile の `root`。タスクの周と同じ — unattended-mode.md §1)
 - 開始時の HEAD が、デフォルトブランチか detached HEAD で、ローカルのデフォルトブランチの履歴の中にある(判定と起点の確認は、タスクの周と同じ — unattended-mode.md §1)。S0 = 開始時の HEAD の sha と、開始時の ref(`git symbolic-ref --quiet HEAD` の値か、detached HEAD)を控える
 - 作業ツリーが清潔(ship-task の Phase 0 の 3 と同じ。無人では S1)
-- **状態ファイルが ignore されていて、追跡されていない**: `.claude/reviews/x.md`・`.claude/grasp.md`・`.claude/.understand-project-done` の 3 つを、それぞれ `git check-ignore -q -- <パス>` で確かめ、すべて rc 0
+- **状態ファイルが ignore されていて、追跡されていない**: `.claude/reviews/x.md`・`.claude/grasp.md`・`.claude/.understand-project-done` の 3 つを、それぞれ `git check-ignore -q -- <パス>` で確かめ、rc 1 のもの(ignore されていない。追跡済みも 1)が無い。`.claude` か `.claude/reviews` が symlink なら欠け(この層には置き場の検査が無い)。そのほかの 0 と 1 以外(サブモジュールの中など)は判定できないので数えない(loop.md §3 の 2a と同じ。2a では symlink は 2b で止まる)
   - `--no-index` を付けない(付けると、追跡済みのファイルも ignore 済みと答える)
   - `.claude/reviews/x.md` は `.claude/reviews/` の下を表す名で、在らなくてよい
-  - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する
+  - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する。symlink なら、`.claude`・`.claude/reviews` を実体のディレクトリにする(symlink を追跡から外す)ことを案内する
   - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しい周も失敗になる
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`(§3)が exit 0 で、`origin` が真なら次の 2 つを満たす。`origin` が偽なら満たしたとみなす(push しないので、候補があれば結末は `縮退`)
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
@@ -124,7 +124,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 | 時点 | 照合 |
 |---|---|
-| 工程 D2(発見元から戻った直後) | ① HEAD の ref が開始時のまま・`HEAD` = S0 ② index が空(`git diff --cached --name-only -z` が空) ③ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みなので出ない) ④ ③ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑤ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths` に当たらない |
+| 工程 D2(発見元から戻った直後) | ① HEAD の ref が開始時のまま・`HEAD` = S0 ② index が空(`git diff --cached --name-only -z` が空) ③ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ④ ③ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑤ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths` に当たらない |
 | ブランチを作った直後 | 現在のブランチ = 作業ブランチ・`HEAD` = S0 |
 | stage の直前 | 現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える |
