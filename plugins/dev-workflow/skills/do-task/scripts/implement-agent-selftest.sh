@@ -710,6 +710,27 @@ run_agent --runner codex --prompt-file "$WORK/big-prompt.md" --cwd "$CWD_TARGET"
   --probe-timeout 10 --log-file "$WORK/log-e3.md"; rc=$?
 check "失敗: プロンプト長超過(prompt-too-large)" 12 "$rc"
 
+# E3b. 大きさの判定の順序: プロンプトの大きさは、外部 CLI(ヘルプ照合・プローブ・本実行)を 1 回も起動する前に
+#      判定する。E3 は終了コードしか見ていないので、起動のたびに 1 行を記録するスタブ(--help も数える)で、
+#      起動が記録されないことを見る
+mkdir -p "$WORK/sizeorder"
+cat >"$WORK/sizeorder/codex" <<EOF
+#!/usr/bin/env bash
+echo called >>"\$SELFTEST_RECORD_DIR/size-calls.txt"
+exec bash "$WORK/pathbin/codex" "\$@"
+EOF
+chmod +x "$WORK/sizeorder/codex"
+reset_record
+E3B_PREV_STUBDIR="$STUB_DIR"
+STUB_DIR="$WORK/sizeorder"
+run_agent --runner codex --prompt-file "$WORK/big-prompt.md" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --log-file "$WORK/log-e3b.md"; rc=$?
+STUB_DIR="$E3B_PREV_STUBDIR"
+check "大きさの判定の順序: prompt-too-large" 12 "$rc"
+e3b_calls="$(cat "$RECORD_DIR/size-calls.txt" 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$e3b_calls" -eq 0 ]; then ok "大きさの判定の順序: 外部 CLI の起動が記録されない"; else
+  ng "大きさの判定の順序: 外部 CLI の起動が記録されない(実際 $e3b_calls 回)"; fi
+
 # E4. 想定外の失敗は ERR trap が exit 20 にする。PATH の先頭に `wc` だけを失敗させるスタブを置き、
 #     ログの初期化の後のプロンプト長の計測(`PROMPT_BYTES=…`)を失敗させる —— 事前検査では
 #     捕まえない「本当に想定外」の形。空振りを防ぐため、stderr の最初の ERROR [internal] の行

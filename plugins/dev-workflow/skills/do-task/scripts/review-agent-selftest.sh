@@ -445,6 +445,40 @@ run_agent --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-
   --prompt-file "$WORK/big-prompt.md" --probe-timeout 10 --log-file "$WORK/log18.md"; rc=$?
 check "失敗: プロンプト長超過" 12 "$rc"
 
+# 18b. 大きさの判定の順序: プロンプトの大きさは、外部 CLI(ヘルプ照合・プローブ・本実行)を 1 回も起動する前に
+#      判定する(--dry-run でも)。18 は終了コードしか見ていないので、起動の有無を見る
+# (a) --command のランナー: 副作用のスタブを起動しない
+rm -f "$SIDEEFFECT"
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-sideeffect.sh --readonly-x" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/big-prompt.md" --probe-timeout 10 --log-file "$WORK/log18b.md"; rc=$?
+check "大きさの判定の順序: --command のランナー: prompt-too-large" 12 "$rc"
+if [ -e "$SIDEEFFECT" ]; then ng "大きさの判定の順序: --command のランナー: スタブを起動しない"; else
+  ok "大きさの判定の順序: --command のランナー: スタブを起動しない"; fi
+# (b) 既定表のランナー: 起動のたびに 1 行を記録するスタブで、起動が 0 回(ヘルプ照合もプローブも打たない)
+mkdir -p "$WORK/sizebin"
+cat >"$WORK/sizebin/cursor-agent" <<EOF
+#!/usr/bin/env bash
+echo called >>"\$SELFTEST_SIZE_CALLS"
+exec bash "$WORK/pathbin/cursor-agent" "\$@"
+EOF
+chmod +x "$WORK/sizebin/cursor-agent"
+SIZE_CALLS="$WORK/size-calls.txt"
+rm -f "$SIZE_CALLS"
+rc=0
+SELFTEST_SIZE_CALLS="$SIZE_CALLS" PATH="$WORK/sizebin:$PATH" guard bash "$TARGET" --runner cursor-agent \
+  --prompt-file "$WORK/big-prompt.md" --probe-timeout 10 --log-file "$WORK/log18c.md" --cwd "$WORK" \
+  >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+check "大きさの判定の順序: 既定表のランナー: prompt-too-large" 12 "$rc"
+size_calls="$(cat "$SIZE_CALLS" 2>/dev/null | wc -l | tr -d ' ')"
+if [ "$size_calls" -eq 0 ]; then ok "大きさの判定の順序: 既定表のランナー: 起動が 0 回"; else
+  ng "大きさの判定の順序: 既定表のランナー: 起動が 0 回(実際 $size_calls 回)"; fi
+# (c) --dry-run でも 12 で止まり、解決後のコマンドを出さない
+run_agent --runner stubrunner --command "bash $WORK/bin/stub-sideeffect.sh --readonly-x" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/big-prompt.md" --dry-run --log-file "$WORK/log18d.md"; rc=$?
+check "大きさの判定の順序: --dry-run: prompt-too-large" 12 "$rc"
+if [ ! -s "$CASE_OUT" ]; then ok "大きさの判定の順序: --dry-run: stdout は空"; else
+  ng "大きさの判定の順序: --dry-run: stdout は空"; cat "$CASE_OUT" >&2; fi
+
 # 19-20. 本実行だけ失敗 / 本実行だけハング
 run_agent --runner stubrunner --command "bash $WORK/bin/stub-runfail.sh --readonly-x" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --probe-timeout 10 --run-timeout 10 --log-file "$WORK/log19.md"; rc=$?
@@ -623,11 +657,64 @@ PATH="$WORK/helphang:$PATH" guard bash "$TARGET" --runner cursor-agent --prompt-
   --log-file "$WORK/log34.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "失敗: ヘルプ照合のタイムアウト" 7 "$rc" && assert_error_format "ヘルプ照合タイムアウト"
 
-# 35. 想定外の失敗は ERR trap が拾って exit 20 にする(黙って落ちない)
+# 35. 置き場を作れない: ログの置き場を作れないときは usage(2)で理由を返す(implement-agent-selftest.sh の
+#     E4b・E4c と同じ形)。明示の --log-file の置き場
 run_agent --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --log-file "/dev/null/nested/x.md"; rc=$?
-if [ "$rc" -eq 20 ] && grep -q '^ERROR \[internal\]' "$CASE_ERR"; then ok "想定外の失敗を ERR trap が exit 20 で報告 (exit=$rc)"; else
-  ng "想定外の失敗を ERR trap が exit 20 で報告 (実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
+if check "置き場を作れない: --log-file の置き場を作れないときは usage" 2 "$rc"; then
+  if grep -qE '^ERROR \[usage\] ' "$CASE_ERR"; then ok "置き場を作れない: --log-file の置き場: stderr に ERROR [usage] が出る"; else
+    ng "置き場を作れない: --log-file の置き場: stderr に ERROR [usage] が出る"; cat "$CASE_ERR" >&2; fi
+  if grep -qF -- '--log-file の置き場' "$CASE_ERR"; then ok "置き場を作れない: --log-file の置き場: 理由の分かる文になっている"; else
+    ng "置き場を作れない: --log-file の置き場: 理由の分かる文になっている"; cat "$CASE_ERR" >&2; fi
+fi
+#     既定の置き場(書けない cwd の .claude/reviews)。root では作れてしまうので飛ばす
+if [ "$(id -u)" -ne 0 ]; then
+  ROCWD="$WORK/ro-cwd"
+  rm -rf "$ROCWD"; mkdir -p "$ROCWD"; chmod 555 "$ROCWD"
+  rc=0
+  ( cd "$ROCWD" && guard bash "$TARGET" --runner stubrunner --command "bash $STUB_OK --readonly-x" \
+    --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" --cwd "$WORK" \
+    --probe-timeout 10 --run-timeout 20 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  chmod 755 "$ROCWD"
+  if check "置き場を作れない: 既定の置き場を作れないときは usage" 2 "$rc"; then
+    if grep -qE '^ERROR \[usage\] ' "$CASE_ERR"; then ok "置き場を作れない: 既定の置き場: stderr に ERROR [usage] が出る"; else
+      ng "置き場を作れない: 既定の置き場: stderr に ERROR [usage] が出る"; cat "$CASE_ERR" >&2; fi
+    if grep -qF -- '既定のログ置き場' "$CASE_ERR"; then ok "置き場を作れない: 既定の置き場: 理由の分かる文になっている"; else
+      ng "置き場を作れない: 既定の置き場: 理由の分かる文になっている"; cat "$CASE_ERR" >&2; fi
+  fi
+else
+  ok "置き場を作れない: 既定の置き場を作れないときは usage(root のため飛ばす)"
+fi
+
+# 35a. 開く前の ERR: ログを開く前の想定外の失敗は ERR trap が拾い、exit 20 で ERROR [internal] を 1 行だけ出し、
+#      ログを作らない(黙って落ちない)。`dirname` だけを失敗させるスタブで、明示の分岐の
+#      LOG_DIR="$(dirname …)" を失敗させる。空振りを防ぐため、ERROR [internal] の行の「行 N」が
+#      対象スクリプトのその行の行番号と一致することを見る
+OE_LINE="$(grep -nF 'LOG_DIR="$(dirname "$LOG_FILE")"' "$TARGET" | head -1 | cut -d: -f1)"
+OE_BIN="$WORK/dirnamebin"
+mkdir -p "$OE_BIN"
+cat >"$OE_BIN/dirname" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$OE_BIN/dirname"
+OE_LOG="$WORK/log-openerr.md"
+rm -f "$OE_LOG"
+rc=0
+PATH="$OE_BIN:$PATH" guard bash "$TARGET" --runner stubrunner --command "bash $STUB_OK --readonly-x" \
+  --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" --cwd "$WORK" --log-file "$OE_LOG" \
+  >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+oe_got="$(grep -E '^ERROR \[internal\] ' "$CASE_ERR" | head -1 | sed -n 's/.*行 \([0-9][0-9]*\)).*/\1/p')"
+if [ -n "$OE_LINE" ] && [ "$rc" -eq 20 ] && [ "$oe_got" = "$OE_LINE" ]; then
+  ok "開く前の ERR: 想定外の失敗は exit 20(置き場の dirname の行) (exit=$rc)"
+else
+  ng "開く前の ERR: 想定外の失敗は exit 20(置き場の dirname の行)(実際 exit=$rc・行=${oe_got:-無し}(期待 exit=20・行 ${OE_LINE:-対象の行が見つからない}))"
+  cat "$CASE_ERR" >&2
+fi
+oe_n="$(grep -cE '^ERROR \[internal\] ' "$CASE_ERR")"
+if [ "$oe_n" -eq 1 ]; then ok "開く前の ERR: ERROR [internal] の行が 1 行"; else
+  ng "開く前の ERR: ERROR [internal] の行が 1 行(実際 $oe_n 行)"; cat "$CASE_ERR" >&2; fi
+if [ -e "$OE_LOG" ] || [ -L "$OE_LOG" ]; then ng "開く前の ERR: ログを作らない"; else ok "開く前の ERR: ログを作らない"; fi
 
 # 35b(#100 D3)。ERR の出力先: 本実行の呼び出し(`run_timeout … || rc=$?`)から ` || rc=$?` を
 # 外した写しに、`date +%s` だけを失敗させるスタブを当てる。本実行の stderr を一時ファイルへ
@@ -1297,7 +1384,7 @@ cat >"$WORK/bin/stub-fd.sh" <<'EOF'
 { printf 'FORGED: 外部 CLI がログの fd に書いた\n' >&7; } 2>/dev/null || true
 echo '{"verdict":"APPROVED","issues":[]}'
 EOF
-# `wc` だけを失敗させるスタブ(最初の `wc` はプロンプト長の計測。ログを開いてプローブが済んだ後)
+# `wc` だけを失敗させるスタブ(最初の `wc` はプロンプト長の計測。ログを開いた後・外部 CLI を起動する前)
 cat >"$K_DIR/wcbin/wc" <<'EOF'
 #!/usr/bin/env bash
 exit 1
@@ -1408,7 +1495,7 @@ else
 fi
 k_deflog_case "(b) /dev/null を指す symlink" devnull
 
-# ERR のログ: `wc` だけを失敗させるスタブで、ログを開いてプローブが済んだ後(プロンプト長の計測)に
+# ERR のログ: `wc` だけを失敗させるスタブで、ログを開いた後・外部 CLI を起動する前(プロンプト長の計測)に
 # 主シェルの ERR を起こす。ログにも結果行を書く
 K_PATH="$K_DIR/wcbin:$K_SANDBOX"
 k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \

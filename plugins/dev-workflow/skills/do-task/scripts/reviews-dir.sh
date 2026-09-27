@@ -18,7 +18,8 @@
 #   -h / --help     この使い方を出す
 #
 # 終了コード: 0=成功 2=使い方の誤り 3=検査で止まる(symlink・通常のディレクトリでない・<LIST> が symlink か
-#             通常ファイルでない) 4=git の失敗 20=内部の失敗。止まるときは stderr に "ERROR [理由コード] 説明"。
+#             通常ファイルでない) 4=git の失敗 20=内部の失敗(公開の失敗を含む)・sha256 を計算する道具が無い
+#             (tool-missing)。止まるときは stderr に "ERROR [理由コード] 説明"。
 #             止まったときは何も公開しない(一時ファイルは消す)
 #
 # git は base-commit.md と同じ前置きで打ち、GIT_NO_LAZY_FETCH=1 を自分で付ける。呼び出し側が渡した
@@ -45,6 +46,22 @@ die() { # $1=終了コード $2=理由コード 残り=説明
   exit "$code"
 }
 need_val() { if [ "$2" -lt 2 ]; then fail_usage "$1 に値が必要です"; fi; }
+
+# sha256 の道具の解決順と取り出し方は diff-snapshot.sh と同じ(sha256sum → shasum -a 256 → openssl dgst -sha256)
+resolve_sha_cmd() {
+  if command -v sha256sum >/dev/null 2>&1; then SHA_CMD=sha256sum
+  elif command -v shasum >/dev/null 2>&1; then SHA_CMD=shasum
+  elif command -v openssl >/dev/null 2>&1; then SHA_CMD=openssl
+  else SHA_CMD=""; fi
+}
+sha256_file() { # $1=ファイル → 16 進を stdout へ
+  case "$SHA_CMD" in
+    sha256sum) sha256sum <"$1" | cut -d' ' -f1 ;;
+    shasum) shasum -a 256 <"$1" | cut -d' ' -f1 ;;
+    openssl) openssl dgst -sha256 <"$1" | sed 's/.*[= ]//' ;;
+    *) return 1 ;;
+  esac
+}
 
 # base-commit.md ①: 階層ごとに「検査 → 無ければ作成」(`mkdir -p` を先に呼ばない。symlink を辿って外に作らない)
 ensure_dirs() { # $1=管理ルート
@@ -92,7 +109,7 @@ fi
 [ -n "$TOP" ] || fail_usage "--top が必要です"
 [ -n "$LIST" ] || fail_usage "--list が必要です"
 [ -d "$TOP" ] || fail_usage "--top がディレクトリでない: $TOP"
-# LIST は <管理ルート>/.claude/reviews/ の直下(一時ファイルと同じディレクトリで mv するので、公開が原子的になる)
+# LIST は <管理ルート>/.claude/reviews/ の直下(一時ファイルと同じディレクトリから rename(2) で公開するので、公開は原子的。② の検査の後に置き換えられて、公開先がディレクトリになっていれば失敗し、symlink になっていればリンクを辿らずにリンク自体を置き換える)
 REVIEWS="$ROOT/.claude/reviews"
 case "$LIST" in
   "$REVIEWS"/*) : ;;
@@ -111,12 +128,32 @@ if [ -e "$LIST" ] || [ -L "$LIST" ]; then
     die 3 list-not-regular "$LIST が symlink か通常ファイルでない(何も書かずに止まる)"
   fi
 fi
+# 公開の手段と sha256 の道具は、一時ファイルを作る前に解決する(sha256 の道具が無ければ何も書かずに止まる)。
+# 公開は rename(2) で行う: python3 が起動できれば os.replace、起動できなければ mv -f -T。
+# mv が -T を持つかは前もって判定しない(--help の字面は実装ごとに違う)。持たなければ公開で失敗して止まる
+PUBLISH=mv
+if python3 -I -c 'import os' >/dev/null 2>&1; then PUBLISH=os.replace; fi
+resolve_sha_cmd
+[ -n "$SHA_CMD" ] || die 20 tool-missing "sha256 を計算する道具が無い(sha256sum・shasum・openssl のどれか)"
 # base-commit.md ③: 一時ファイルへ書き、git の終了コードを確かめ、sha256 を一時ファイルから計算してから公開する
 TMP="$(mktemp "$REVIEWS/.base-untracked.XXXXXX")" || die 20 internal "一時ファイルを作れない: $REVIEWS"
 rc=0
 git -C "$TOP" "${GIT_PRE[@]}" ls-files -o --exclude-standard -z >"$TMP" || rc=$?
 [ "$rc" -eq 0 ] || die 4 git "git ls-files が失敗した(終了コード $rc。何も公開しない)"
-SHA="$(sha256sum <"$TMP" | cut -d' ' -f1)"
-mv -f -T -- "$TMP" "$LIST" || die 20 internal "一覧を公開できない: $LIST"
+SHA="$(sha256_file "$TMP")"
+# 公開に失敗したら、失敗の理由(stderr の最初の 1 行)を添えて止まる。-I は利用者の site と PYTHON* の環境変数を
+# 読まない。-c の後の引数は、- で始まってもパスとして渡る
+NL=$'\n'
+if [ "$PUBLISH" = os.replace ]; then
+  reason="$(python3 -I -c 'import os, sys
+try:
+    os.replace(sys.argv[1], sys.argv[2])
+except OSError as e:
+    sys.stderr.write("%s\n" % (e.strerror or e))
+    sys.exit(1)' "$TMP" "$LIST" 2>&1)" || die 20 internal "一覧を公開できない: $LIST(${reason%%"$NL"*})"
+else
+  reason="$(mv -f -T -- "$TMP" "$LIST" 2>&1)" \
+    || die 20 internal "一覧を公開できない: $LIST(${reason%%"$NL"*}。python3 が無いので mv -f -T で公開した。-T を持たない mv では python3 が要る)"
+fi
 TMP=""
 printf '%s\n' "$SHA"
