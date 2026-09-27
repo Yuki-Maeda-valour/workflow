@@ -1133,6 +1133,91 @@ sig_case TERM-fallback TERM 143 fallback abs
 sig_case TERM-defaultlog TERM 143 timeout default
 sig_cleanup
 
+# 明示した --log-file のパスに既存のエントリが在れば、何も書かずに usage(2)で止まる。
+# 呼び出し側がログの名前を決めると、前に動いた外部ランナーが、その名前に外のファイルを指す
+# symlink やハードリンクを先に置ける。スタブのランナー(起動されたら痕跡を残す)と制限した PATH で打つ
+mkdir -p "$WORK/sandbox-d4"
+make_sandbox "$WORK/sandbox-d4"
+D4_DIR="$WORK/d4"
+rm -rf "$D4_DIR"; mkdir -p "$D4_DIR/outside" "$D4_DIR/logs"
+D4_VICTIM="$D4_DIR/outside/victim.txt"
+D4_VICTIM_TEXT="外のファイルの中身(書き換えられてはならない)"
+d4_reset_victim() { printf '%s\n' "$D4_VICTIM_TEXT" >"$D4_VICTIM"; }
+d4_victim_same() { [ "$(cat "$D4_VICTIM" 2>/dev/null)" = "$D4_VICTIM_TEXT" ]; }
+d4_run() { # 残り=引数。制限した PATH で打つ
+  rc=0
+  guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-d4" \
+    SELFTEST_SIDEEFFECT="$SIDEEFFECT" bash "$TARGET" --cwd "$WORK" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  return "$rc"
+}
+D4_CMD="bash $WORK/bin/stub-sideeffect.sh --readonly-x"
+
+# 外のファイルを指す symlink
+d4_reset_victim
+ln -s "$D4_VICTIM" "$D4_DIR/logs/symlink.md"
+rm -f "$SIDEEFFECT"
+d4_run --runner stubrunner --command "$D4_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/symlink.md"; rc=$?
+check "明示のログ(既存のエントリ): 外のファイルを指す symlink を usage で拒む" 2 "$rc"
+if d4_victim_same; then ok "明示のログ(既存のエントリ): 外のファイルを指す symlink のリンク先の中身が変わらない"; else
+  ng "明示のログ(既存のエントリ): 外のファイルを指す symlink のリンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
+if [ -e "$SIDEEFFECT" ]; then ng "明示のログ(既存のエントリ): 外のファイルを指す symlink でランナーを起動しない"; else
+  ok "明示のログ(既存のエントリ): 外のファイルを指す symlink でランナーを起動しない"; fi
+
+# 通常ファイル(ハードリンクも通常ファイルに見える)
+D4_REGULAR_TEXT="前に残したログ"
+printf '%s\n' "$D4_REGULAR_TEXT" >"$D4_DIR/logs/regular.md"
+d4_run --runner stubrunner --command "$D4_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/regular.md"; rc=$?
+check "明示のログ(既存のエントリ): 通常ファイルを usage で拒む" 2 "$rc"
+if [ "$(cat "$D4_DIR/logs/regular.md" 2>/dev/null)" = "$D4_REGULAR_TEXT" ]; then
+  ok "明示のログ(既存のエントリ): 通常ファイルの中身が変わらない"
+else
+  ng "明示のログ(既存のエントリ): 通常ファイルの中身が変わらない"; cat "$D4_DIR/logs/regular.md" >&2
+fi
+
+# リンク先の無い symlink(`-e` は偽になる)
+D4_DANGLING_TARGET="$D4_DIR/outside/created-by-log.txt"
+rm -f "$D4_DANGLING_TARGET"
+ln -s "$D4_DANGLING_TARGET" "$D4_DIR/logs/dangling.md"
+d4_run --runner stubrunner --command "$D4_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/dangling.md"; rc=$?
+check "明示のログ(既存のエントリ): リンク先の無い symlink を usage で拒む" 2 "$rc"
+if [ -e "$D4_DANGLING_TARGET" ] || [ -L "$D4_DANGLING_TARGET" ]; then
+  ng "明示のログ(既存のエントリ): リンク先の無い symlink のリンク先が作られない"
+else
+  ok "明示のログ(既存のエントリ): リンク先の無い symlink のリンク先が作られない"
+fi
+
+# ディレクトリ
+mkdir -p "$D4_DIR/logs/dir.md"
+d4_run --runner stubrunner --command "$D4_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/dir.md"; rc=$?
+check "明示のログ(既存のエントリ): ディレクトリを usage で拒む" 2 "$rc"
+
+# ログの初期化より前に die する形(既定表に無いランナーを --command で渡し、--readonly-flag を
+# 渡さない → no-readonly の die)で、外のファイルを指す symlink。die はログに書くので、検査が
+# その die より前に無いとリンク先へ追記する。前提として、既存のエントリが無い名前を渡すと、
+# 初期化より前の die がそのログへ書くことを先に確かめる(この形が初期化より前の die を通らないと、
+# 1 つ目と同じケースになる)
+d4_run --runner stubrunner --command "$D4_CMD" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --log-file "$D4_DIR/logs/early-fresh.md"; rc=$?
+if [ "$rc" -eq 5 ] && grep -qF '**結果**: ERROR [no-readonly]' "$D4_DIR/logs/early-fresh.md" 2>/dev/null \
+   && ! grep -qF '# 外部ランナー実行記録' "$D4_DIR/logs/early-fresh.md" 2>/dev/null; then
+  ok "初期化より前の die: --readonly-flag の欠けは、ログの初期化より前に明示したログへ書いて止まる(前提) (exit=$rc)"
+else
+  ng "初期化より前の die: --readonly-flag の欠けは、ログの初期化より前に明示したログへ書いて止まる(前提)(実際 exit=$rc)"
+  cat "$CASE_ERR" >&2
+fi
+d4_reset_victim
+ln -s "$D4_VICTIM" "$D4_DIR/logs/symlink-early.md"
+rm -f "$SIDEEFFECT"
+d4_run --runner stubrunner --command "$D4_CMD" --prompt-file "$WORK/prompt.md" \
+  --probe-timeout 10 --log-file "$D4_DIR/logs/symlink-early.md"; rc=$?
+check "明示のログ(既存のエントリ): 初期化より前に die する形でも、外のファイルを指す symlink を usage で拒む" 2 "$rc"
+if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化より前に die する形でも、リンク先の中身が変わらない"; else
+  ng "明示のログ(既存のエントリ): 初期化より前に die する形でも、リンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
+
 echo
 printf '%s\n' "$RESULTS"
 echo

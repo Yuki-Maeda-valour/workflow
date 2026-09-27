@@ -680,12 +680,27 @@ run_agent --runner codex --prompt-file "$WORK/big-prompt.md" --cwd "$CWD_TARGET"
   --probe-timeout 10 --log-file "$WORK/log-e3.md"; rc=$?
 check "失敗: プロンプト長超過(prompt-too-large)" 12 "$rc"
 
-# E4. 想定外の失敗は ERR trap が exit 20 にする(ログの置き場は作れるが、ログファイル自体が
-#     ディレクトリで書けない — 事前検査では捕まえない「本当に想定外」の形)
-mkdir -p "$WORK/logfile-is-a-dir"
-run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --log-file "$WORK/logfile-is-a-dir"; rc=$?
-if [ "$rc" -eq 20 ] && grep -q '^ERROR \[internal\]' "$CASE_ERR"; then ok "想定外の失敗を ERR trap が exit 20 で報告 (exit=$rc)"; else
-  ng "想定外の失敗を ERR trap が exit 20 で報告 (実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
+# E4. 想定外の失敗は ERR trap が exit 20 にする。PATH の先頭に `wc` だけを失敗させるスタブを置き、
+#     ログの初期化の後のプロンプト長の計測(`PROMPT_BYTES=…`)を失敗させる —— 事前検査では
+#     捕まえない「本当に想定外」の形。空振りを防ぐため、stderr の最初の ERROR [internal] の行
+#     (head -1)の「行 N」が、対象スクリプトのその行の行番号と一致することを見る
+E4_LINE="$(grep -nF 'PROMPT_BYTES="$(wc -c <"$PROMPT_FILE"' "$TARGET" | head -1 | cut -d: -f1)"
+E4_STUBDIR="$WORK/e4-stubdir"; rm -rf "$E4_STUBDIR"; mkdir -p "$E4_STUBDIR"
+cp "$WORK/pathbin/codex" "$E4_STUBDIR/codex"; chmod +x "$E4_STUBDIR/codex"
+cat >"$E4_STUBDIR/wc" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$E4_STUBDIR/wc"
+E4_PREV_STUBDIR="$STUB_DIR"
+STUB_DIR="$E4_STUBDIR"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-e4.md"; rc=$?
+STUB_DIR="$E4_PREV_STUBDIR"
+E4_GOTLINE="$(grep -E '^ERROR \[internal\] ' "$CASE_ERR" | head -1 | sed -n 's/.*行 \([0-9][0-9]*\)).*/\1/p')"
+if [ -n "$E4_LINE" ] && [ "$rc" -eq 20 ] && [ "$E4_GOTLINE" = "$E4_LINE" ]; then ok "想定外の失敗を ERR trap が exit 20 で報告 (exit=$rc)"; else
+  ng "想定外の失敗を ERR trap が exit 20 で報告 (実際 exit=$rc・行=${E4_GOTLINE:-無し}(期待 exit=20・行 ${E4_LINE:-対象の行が見つからない}))"
+  cat "$CASE_ERR" >&2; fi
 
 # E4b. ログの置き場が作れないケースは事前検査で usage(2)。生の mkdir エラー + internal(20) に倒さない
 run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --log-file "/dev/null/nested/x.md"; rc=$?
@@ -1055,16 +1070,19 @@ if [ -e "$SIDEEFFECT" ]; then ng "PoC 非再現(保護領域を解決できな�
 
 # H4. 決定 42: 自ホスト判定は「立っている指標すべて」を候補にする。
 #     先に一致したものを host とする方式だと、指標が 2 つ立つ環境で後ろの指標が隠れて
-#     自分自身を起動してしまう(実装用既定表は 1 件しかなく、この判定が唯一の防波堤)
+#     自分自身を起動してしまう(実装用既定表は 1 件しかなく、この判定が唯一の防波堤)。
+#     ログは呼び出しごとに別の名前にする(明示した --log-file は、既にエントリが在るパスを usage で拒む)
+HC_N=0
 host_case() { # $1=ケース名 $2=期待終了コード 残り=環境変数
   hc_name="$1"; hc_want="$2"; shift 2
+  HC_N=$((HC_N + 1))
   rm -f "$SIDEEFFECT"
   rc=0
   guard env -u CLAUDECODE -u CODEX_SANDBOX -u CURSOR_AGENT -u DEV_WORKFLOW_HOST_CLI \
     PATH="$WORK/evilbin:$SAFEPATH" SELFTEST_SIDEEFFECT="$SIDEEFFECT" \
     SELFTEST_PROBE_BEHAVIOR="none" SELFTEST_RECORD_DIR="$RECORD_DIR" \
     "$@" bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
-    --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h4.md" \
+    --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-h4-$HC_N.md" \
     >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
   check "$hc_name" "$hc_want" "$rc"
   if [ "$hc_want" -eq 4 ]; then
@@ -1252,6 +1270,90 @@ if check "通常のプロンプト: 本実行まで通る" 0 "$rc"; then
     ng "通常のプロンプト: -- を挟まない"
   fi
 fi
+STUB_DIR="$WORK/pathbin"
+
+# ── J. 明示した --log-file のパスに既存のエントリが在れば、何も書かずに usage(2)で止まる ──
+# 呼び出し側がタスク名と反復番号でログの名前を決めると、前の反復の外部ランナーが、その名前に
+# 外のファイルを指す symlink やハードリンクを先に置ける(置き場は外部の書き込み範囲の中にある)。
+# ランナーは起動されたら痕跡を残すスタブ(evilbin)にして、止まる位置が起動より前であることも見る
+D4_DIR="$WORK/d4"
+rm -rf "$D4_DIR"; mkdir -p "$D4_DIR/outside" "$D4_DIR/logs"
+D4_VICTIM="$D4_DIR/outside/victim.txt"
+D4_VICTIM_TEXT="外のファイルの中身(書き換えられてはならない)"
+d4_reset_victim() { printf '%s\n' "$D4_VICTIM_TEXT" >"$D4_VICTIM"; }
+d4_victim_same() { [ "$(cat "$D4_VICTIM" 2>/dev/null)" = "$D4_VICTIM_TEXT" ]; }
+STUB_DIR="$WORK/evilbin"
+
+# J1. 外のファイルを指す symlink
+d4_reset_victim
+ln -s "$D4_VICTIM" "$D4_DIR/logs/symlink.md"
+rm -f "$SIDEEFFECT"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/symlink.md"; rc=$?
+check "明示のログ(既存のエントリ): 外のファイルを指す symlink を usage で拒む" 2 "$rc"
+if d4_victim_same; then ok "明示のログ(既存のエントリ): 外のファイルを指す symlink のリンク先の中身が変わらない"; else
+  ng "明示のログ(既存のエントリ): 外のファイルを指す symlink のリンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
+if [ -e "$SIDEEFFECT" ]; then ng "明示のログ(既存のエントリ): 外のファイルを指す symlink でランナーを起動しない"; else
+  ok "明示のログ(既存のエントリ): 外のファイルを指す symlink でランナーを起動しない"; fi
+
+# J2. 通常ファイル(ハードリンクも通常ファイルに見える)
+D4_REGULAR_TEXT="前の反復が残したログ"
+printf '%s\n' "$D4_REGULAR_TEXT" >"$D4_DIR/logs/regular.md"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/regular.md"; rc=$?
+check "明示のログ(既存のエントリ): 通常ファイルを usage で拒む" 2 "$rc"
+if [ "$(cat "$D4_DIR/logs/regular.md" 2>/dev/null)" = "$D4_REGULAR_TEXT" ]; then
+  ok "明示のログ(既存のエントリ): 通常ファイルの中身が変わらない"
+else
+  ng "明示のログ(既存のエントリ): 通常ファイルの中身が変わらない"; cat "$D4_DIR/logs/regular.md" >&2
+fi
+
+# J3. リンク先の無い symlink(`-e` は偽になる)
+D4_DANGLING_TARGET="$D4_DIR/outside/created-by-log.txt"
+rm -f "$D4_DANGLING_TARGET"
+ln -s "$D4_DANGLING_TARGET" "$D4_DIR/logs/dangling.md"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/dangling.md"; rc=$?
+check "明示のログ(既存のエントリ): リンク先の無い symlink を usage で拒む" 2 "$rc"
+if [ -e "$D4_DANGLING_TARGET" ] || [ -L "$D4_DANGLING_TARGET" ]; then
+  ng "明示のログ(既存のエントリ): リンク先の無い symlink のリンク先が作られない"
+else
+  ok "明示のログ(既存のエントリ): リンク先の無い symlink のリンク先が作られない"
+fi
+
+# J4. ディレクトリ
+mkdir -p "$D4_DIR/logs/dir.md"
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --run-timeout 20 --log-file "$D4_DIR/logs/dir.md"; rc=$?
+check "明示のログ(既存のエントリ): ディレクトリを usage で拒む" 2 "$rc"
+
+# J5. ログの初期化より前に die する環境(H3 と同じ: 保護領域を解決できない)で、外のファイルを
+#     指す symlink。die はログに書くので、検査がその die より前に無いとリンク先へ追記する。
+#     前提として、同じ環境で既存のエントリが無い名前を渡すと、初期化より前の die がそのログへ書く
+#     ことを先に確かめる(この環境が初期化より前の die を通らないと、J1 と同じケースになる)
+mkdir -p "$WORK/fakehome"
+D4_EARLY_ENV=("HOME=$WORK/fakehome" "XDG_STATE_HOME=$WORK/fakehome/state" "TMPDIR=$WORK")
+EXTRA_ENV=("${D4_EARLY_ENV[@]}")
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --log-file "$D4_DIR/logs/early-fresh.md"; rc=$?
+EXTRA_ENV=()
+if [ "$rc" -eq 20 ] && grep -qF '**結果**: ERROR [internal]' "$D4_DIR/logs/early-fresh.md" 2>/dev/null \
+   && ! grep -qF '# 外部ランナー実行記録' "$D4_DIR/logs/early-fresh.md" 2>/dev/null; then
+  ok "初期化より前の die: 保護領域を解決できない環境では、明示したログへ書いて止まる(J5 の前提) (exit=$rc)"
+else
+  ng "初期化より前の die: 保護領域を解決できない環境では、明示したログへ書いて止まる(J5 の前提)(実際 exit=$rc)"
+  cat "$CASE_ERR" >&2
+fi
+d4_reset_victim
+ln -s "$D4_VICTIM" "$D4_DIR/logs/symlink-early.md"
+rm -f "$SIDEEFFECT"
+EXTRA_ENV=("${D4_EARLY_ENV[@]}")
+run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 10 --log-file "$D4_DIR/logs/symlink-early.md"; rc=$?
+EXTRA_ENV=()
+check "明示のログ(既存のエントリ): 初期化より前に die する環境でも、外のファイルを指す symlink を usage で拒む" 2 "$rc"
+if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化より前に die する環境でも、リンク先の中身が変わらない"; else
+  ng "明示のログ(既存のエントリ): 初期化より前に die する環境でも、リンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
 STUB_DIR="$WORK/pathbin"
 
 echo
