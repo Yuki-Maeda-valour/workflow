@@ -5,7 +5,7 @@
 # 起動の前に take、起動の後に compare → taskmd-diff →(引き継ぎなら)restore-taskmd、完了処理の後に
 # cleanup。呼び出し側は起動と、終了コードによる分岐だけを行う。
 # diff-snapshot.sh(レビュー用の diff スナップショット)とは別物で、共通部分の切り出しもしていない
-# (external-runners.md §11 の決定 9。必要な部品は複製して持つ)。
+# (external-runners.md §11 の 2026-09-17 決定 9。必要な部品は複製して持つ)。
 #
 # 使い方:
 #   bash implement-guard.sh take           --cwd <dir> --task-md <path>
@@ -584,7 +584,7 @@ snapshot_digest() { # $1=snapshot ディレクトリ → 16 進を stdout へ(�
   } | sha256_stdin
 }
 
-# ── 比較の対象か(除外 = ログの置き場。**タスク MD は除外より優先する**。決定 50)──
+# ── 比較の対象か(除外 = ログの置き場。**タスク MD は除外より優先する**。2026-09-17 決定 50)──
 in_scope() { # $1=toplevel 相対パス → 0: 対象 / 1: 除外
   if [ "$1" = "$TASKMD_REL" ] || [ "$1" = "$TASKMD_SEL_REL" ]; then return 0; fi # MUT:g
   case "$1" in "$EXCL"|"$EXCL"/*) return 1 ;; esac
@@ -840,7 +840,7 @@ build_row() { # $1=toplevel 相対パス $2=take(退避して退避コピー側�
   else
     if [ "$how" = take ]; then
       if ! cp -a -- "$p" "$dest" 2>/dev/null; then rm -f -- "$dest" 2>/dev/null || true; return 0; fi
-      h="$(sha256_file "$dest" 2>/dev/null)" || h=""      # 退避コピー側の生バイト(決定 39)
+      h="$(sha256_file "$dest" 2>/dev/null)" || h=""      # 退避コピー側の生バイト(2026-09-17 決定 39)
     else
       h="$(sha256_file "$p" 2>/dev/null)" || h=""
     fi
@@ -998,7 +998,7 @@ cmd_take() {
   WORK="$NEW_STATE/.work"
   mkdir -- "$WORK" "$NEW_STATE/snapshot" "$NEW_STATE/files"
 
-  # タスク MD の実体の確定(symlink なら辿る。決定 50)
+  # タスク MD の実体の確定(symlink なら辿る。2026-09-17 決定 50)
   local sel="$TASK_MD" parent base
   case "$sel" in /*) : ;; *) sel="$CWD_PHYS/$sel" ;; esac
   split_path "$sel"
@@ -1046,7 +1046,7 @@ cmd_take() {
     if [ "$n_ent" -gt "$MAX_ENTRIES" ] || [ "$total" -gt "$MAX_BYTES" ]; then degrade over-limit "退避の上限を超えた(上限: $MAX_ENTRIES 件・$MAX_BYTES バイト。.gitignore が薄い可能性がある)"; fi # MUT:i
   done 3<"$WORK/untracked.z" </dev/null
 
-  # 退避: まずタスク MD の実体(追跡済み・ignore 済み・リポジトリ外でも必ず。決定 46・49)
+  # 退避: まずタスク MD の実体(追跡済み・ignore 済み・リポジトリ外でも必ず。2026-09-17 決定 46・49)
   t_kind=u; t_sha="-"; t_mode="-"
   if cp -a -- "$TASKMD_REAL" "$NEW_STATE/taskmd-body" 2>"$WORK/cp.err"; then
     if t_sha="$(sha256_file "$NEW_STATE/taskmd-body" 2>/dev/null)" && [ -n "$t_sha" ] \
@@ -1228,7 +1228,7 @@ compare_taskmd_row() { # マニフェストの T 行(タスク MD の実体)。�
     if [ -n "${REPORTED[$key]+x}" ]; then return 0; fi   # 未追跡のエントリとして報告済み
   fi
   if ! verify_taskmd_body; then
-    # 退避コピーを信頼できない。変化の有無は T 行の値で判定する(決定 47)
+    # 退避コピーを信頼できない。変化の有無は T 行の値で判定する(2026-09-17 決定 47)
     :
   else
     st=ok
