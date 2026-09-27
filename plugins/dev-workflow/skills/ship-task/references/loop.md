@@ -285,8 +285,8 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 
 **② スクリプトに寄せる**
 
-- `.claude/reviews/` の作成と未追跡一覧の保存は、同梱の `do-task/scripts/reviews-dir.sh`(`ensure` / `save-untracked`)が行う(base-commit.md の ①〜③ と do-task Phase 0 の手順 5。対話でも同じ)。スクリプトの中の書き込みは、ホストの保護パスの検査(出力のリダイレクト先と、編集の自動許可が許すファイル操作のコマンドの引数)に掛からない
-- `reviews-dir.sh` の終了コード: 0 = 成功(`save-untracked` は stdout に一覧の sha256)/ 2 = 使い方の誤り(`--list` が `--root` の `<管理ルート>/.claude/reviews/` の直下でないときを含む)/ 3 = 検査で止まる(symlink・通常のディレクトリでない・`LIST` が symlink か通常ファイルでない)/ 4 = git の失敗 / 20 = 内部の失敗。止まるときは何も公開せず(一時ファイルは消す)、stderr に `ERROR [理由コード]` を出す。呼び出し側(base-commit.md・do-task)は exit 0 以外で停止して報告する
+- `.claude/reviews/` の作成と未追跡一覧の保存は、同梱の `do-task/scripts/reviews-dir.sh`(`ensure` / `save-untracked`)が行う(base-commit.md の ①〜③ と do-task Phase 0 の手順 5。対話でも同じ)。スクリプトの中の書き込みは、ホストの保護パスの検査(出力のリダイレクト先と、編集の自動許可が許すファイル操作のコマンドの引数)に掛からない。公開は rename(2)(python3 の `os.replace`、無ければ `mv -f -T`)。sha256 は `sha256sum`・`shasum`・`openssl` の順
+- `reviews-dir.sh` の終了コード: 0 = 成功(`save-untracked` は stdout に一覧の sha256)/ 2 = 使い方の誤り(`--list` が `--root` の `<管理ルート>/.claude/reviews/` の直下でないときを含む)/ 3 = 検査で止まる(symlink・通常のディレクトリでない・`LIST` が symlink か通常ファイルでない)/ 4 = git の失敗 / 20 = 内部の失敗・sha256 を計算する道具が無い(tool-missing)。止まるときは何も公開せず(一時ファイルは消す)、stderr に `ERROR [理由コード]` を出す。呼び出し側(base-commit.md・do-task)は exit 0 以外で停止して報告する
 
 **③ hook**
 

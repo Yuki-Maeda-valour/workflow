@@ -2186,6 +2186,155 @@ if ls -A "$RDW/notrepo/.claude/reviews" "$RR/.claude/reviews" 2>/dev/null | grep
 else
   ok "reviews-dir save-untracked: 一時ファイルを残さない"
 fi
+
+# reviews-dir の移植性: 公開は rename(2)(python3 の os.replace、無ければ mv -f -T)、sha256 は
+# sha256sum → shasum -a 256 → openssl dgst -sha256 の順。道具を選んだ PATH(reviews-dir.sh と git が使う道具の
+# symlink だけを並べた scratch の bin)で打ち、外す道具は置かない。BSD の mv を模すラッパは、-f・-i・-n・-v・-h・--
+# 以外の - で始まる引数(-T・--help など)を illegal option と exit 64 で拒み、ほかは本物の mv に渡す。
+# 競合のケースは、git ls-files の直後に公開先を差し替える git のラッパで打つ(② の検査の後の置き換え)
+RDP="$W/rdp"
+rm -rf "$RDP"
+mkdir -p "$RDP/outside"
+RDP_REAL_MV="$(command -v mv)"
+RDP_REAL_GIT="$(command -v git)"
+RDP_REAL_MKDIR="$(command -v mkdir)"
+RDP_REAL_LN="$(command -v ln)"
+cat >"$RDP/mv-bsd" <<EOF
+#!/bin/sh
+for a in "\$@"; do
+  case "\$a" in
+    --) break ;;
+    -f|-i|-n|-v|-h) : ;;
+    -*) echo "mv: illegal option -- \${a#-}" >&2; echo "usage: mv [-f | -i | -n] [-hv] source target" >&2; exit 64 ;;
+  esac
+done
+exec "$RDP_REAL_MV" "\$@"
+EOF
+cat >"$RDP/git-race" <<EOF
+#!/bin/sh
+"$RDP_REAL_GIT" "\$@"
+rc=\$?
+for a in "\$@"; do
+  if [ "\$a" = ls-files ]; then
+    case "\${RDP_RACE:-}" in
+      dir) "$RDP_REAL_MKDIR" -- "\$RDP_RACE_LIST" ;;
+      symlink) "$RDP_REAL_LN" -s -- "\$RDP_RACE_TARGET" "\$RDP_RACE_LIST" ;;
+    esac
+  fi
+done
+exit \$rc
+EOF
+chmod +x "$RDP/mv-bsd" "$RDP/git-race"
+rdp_bin() { # $1=名前 残り=置く道具(mv-bsd はラッパを mv に、git-race はラッパを git に置く)→ bin のパス
+  local d="$RDP/bin-$1" c src
+  shift
+  rm -rf "$d"
+  mkdir -p "$d"
+  for c in bash sed mktemp rm mkdir cut "$@"; do
+    case "$c" in
+      mv-bsd) ln -s "$RDP/mv-bsd" "$d/mv" ;;
+      git-race) ln -s "$RDP/git-race" "$d/git" ;;
+      *)
+        src="$(command -v "$c" 2>/dev/null)" || continue
+        case "$src" in /*) ln -s "$src" "$d/$c" ;; esac
+        ;;
+    esac
+  done
+  printf '%s' "$d"
+}
+RDP_REPO="$RDP/repo"
+git init -q "$RDP_REPO"
+echo u >"$RDP_REPO/untracked.txt"
+RDP_REVIEWS="$RDP_REPO/.claude/reviews"
+RDP_OUT="$RDP/out"
+RDP_ERR="$RDP/err"
+rdp_run() { # $1=bin $2=LIST の名前 残り=足す環境変数(VAR=値)。stdout は RDP_OUT、stderr は RDP_ERR
+  local bin="$1" name="$2"
+  shift 2
+  env PATH="$bin" "$@" "$bin/bash" "$RD" save-untracked --top "$RDP_REPO" --root "$RDP_REPO" \
+    --list "$RDP_REVIEWS/$name" >"$RDP_OUT" 2>"$RDP_ERR"
+}
+rdp_sha() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1" 2>/dev/null; }
+rdp_listed() { # $1=ケース名 $2=LIST。一覧が通常ファイルとして公開され、stdout の sha256 が一覧の中身と同じ
+  local want got
+  if [ -f "$2" ] && [ ! -L "$2" ] && tr '\0' '\n' <"$2" | grep -qx 'untracked.txt'; then
+    ok "$1: 一覧が通常ファイルとして公開される"
+  else
+    ng "$1: 一覧が通常ファイルとして公開される"
+  fi
+  want="$(rdp_sha "$2")"
+  got="$(cat "$RDP_OUT" 2>/dev/null)"
+  if [ -n "$want" ] && [ "$got" = "$want" ]; then ok "$1: stdout は一覧の sha256"; else
+    ng "$1: stdout は一覧の sha256(stdout '$got'・一覧 '${want:-無し}')"; fi
+}
+rdp_no_tmp() { # $1=ケース名
+  if ls -A "$RDP_REVIEWS" 2>/dev/null | grep -q '^\.base-untracked\.'; then ng "$1: 一時ファイルを残さない"; else
+    ok "$1: 一時ファイルを残さない"; fi
+}
+rdp_nothing() { # $1=ケース名 $2=LIST。一覧も一時ファイルも残らない
+  if [ -e "$2" ] || [ -L "$2" ]; then ng "$1: 一覧を公開しない"; else ok "$1: 一覧を公開しない"; fi
+  rdp_no_tmp "$1"
+}
+RP="reviews-dir の移植性"
+B="$(rdp_bin bsd python3 mv-bsd sha256sum git)"
+rdp_run "$B" bsd.z
+check "$RP: BSD の mv: 成功" 0 "$?"
+rdp_listed "$RP: BSD の mv" "$RDP_REVIEWS/bsd.z"
+B="$(rdp_bin nopy-gnu mv sha256sum git)"
+rdp_run "$B" nopy-gnu.z
+check "$RP: python3 なし・GNU の mv: 成功" 0 "$?"
+rdp_listed "$RP: python3 なし・GNU の mv" "$RDP_REVIEWS/nopy-gnu.z"
+B="$(rdp_bin nopy-bsd mv-bsd sha256sum git)"
+rdp_run "$B" nopy-bsd.z
+check "$RP: python3 なし・BSD の mv: 止まる" 20 "$?"
+if grep -E '^ERROR \[internal\] ' "$RDP_ERR" | grep -qF 'python3'; then
+  ok "$RP: python3 なし・BSD の mv: ERROR [internal] の行に python3 がある"
+else
+  ng "$RP: python3 なし・BSD の mv: ERROR [internal] の行に python3 がある($(head -1 "$RDP_ERR"))"
+fi
+rdp_nothing "$RP: python3 なし・BSD の mv" "$RDP_REVIEWS/nopy-bsd.z"
+if command -v shasum >/dev/null 2>&1; then
+  B="$(rdp_bin shasum python3 mv shasum perl git)"
+  rdp_run "$B" shasum.z
+  check "$RP: shasum: 成功" 0 "$?"
+  rdp_listed "$RP: shasum" "$RDP_REVIEWS/shasum.z"
+else
+  ok "$RP: shasum: shasum が無いため飛ばす"
+fi
+if command -v openssl >/dev/null 2>&1; then
+  B="$(rdp_bin openssl python3 mv openssl git)"
+  rdp_run "$B" openssl.z
+  check "$RP: openssl: 成功" 0 "$?"
+  rdp_listed "$RP: openssl" "$RDP_REVIEWS/openssl.z"
+else
+  ok "$RP: openssl: openssl が無いため飛ばす"
+fi
+B="$(rdp_bin nosha python3 mv git)"
+rdp_run "$B" nosha.z
+check "$RP: sha256 の道具なし: 止まる" 20 "$?"
+if grep -qE '^ERROR \[tool-missing\] ' "$RDP_ERR"; then ok "$RP: sha256 の道具なし: ERROR [tool-missing] が出る"; else
+  ng "$RP: sha256 の道具なし: ERROR [tool-missing] が出る($(head -1 "$RDP_ERR"))"; fi
+rdp_nothing "$RP: sha256 の道具なし" "$RDP_REVIEWS/nosha.z"
+B="$(rdp_bin race python3 mv sha256sum git-race)"
+rdp_run "$B" race-dir.z RDP_RACE=dir RDP_RACE_LIST="$RDP_REVIEWS/race-dir.z"
+check "$RP: 競合でディレクトリ: 止まる" 20 "$?"
+if [ -d "$RDP_REVIEWS/race-dir.z" ] && [ -z "$(ls -A "$RDP_REVIEWS/race-dir.z" 2>/dev/null)" ]; then
+  ok "$RP: 競合でディレクトリ: ディレクトリの中に一覧が入らない"
+else
+  ng "$RP: 競合でディレクトリ: ディレクトリの中に一覧が入らない"
+fi
+rdp_no_tmp "$RP: 競合でディレクトリ"
+rdp_run "$B" race-sym.z RDP_RACE=symlink RDP_RACE_LIST="$RDP_REVIEWS/race-sym.z" RDP_RACE_TARGET="$RDP/outside"
+check "$RP: 競合で symlink: 成功" 0 "$?"
+rdp_listed "$RP: 競合で symlink" "$RDP_REVIEWS/race-sym.z"
+if [ -z "$(ls -A "$RDP/outside" 2>/dev/null)" ]; then ok "$RP: 競合で symlink: 外のディレクトリに一覧を書かない"; else
+  ng "$RP: 競合で symlink: 外のディレクトリに一覧を書かない"; fi
+B="$(rdp_bin plain python3 mv sha256sum git)"
+mkdir -p "$RDP_REVIEWS/isdir.z"
+rdp_run "$B" isdir.z
+check "$RP: 公開先がディレクトリ: 止まる" 3 "$?"
+if grep -qE '^ERROR \[list-not-regular\] ' "$RDP_ERR"; then ok "$RP: 公開先がディレクトリ: ERROR [list-not-regular] が出る"; else
+  ng "$RP: 公開先がディレクトリ: ERROR [list-not-regular] が出る($(head -1 "$RDP_ERR"))"; fi
 fi
 
 # ════════════════ 許可の仲介の loop.sh の側(D22 ①・③・起動時の検査・D6)════════════════

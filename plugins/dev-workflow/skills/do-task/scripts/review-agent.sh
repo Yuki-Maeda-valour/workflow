@@ -33,7 +33,7 @@
 #                           ログは作るときに 1 回だけ開き(noclobber)、以後の書き込みはすべてその fd に行う
 #                           (開いたものが通常ファイルでなければ usage)。開いたら stderr に "NOTE: ログ: <絶対パス>" を出す。
 #                           ログを開く前の失敗(使い方の誤り・初期化より前の失敗)はログに書かず、stderr だけに出す
-#   --dry-run               静的検査のみ行い、解決したコマンドを表示して終了(起動しない)
+#   --dry-run               静的検査(プロンプトの大きさの判定を含む)のみ行い、解決したコマンドを表示して終了(起動しない)
 #
 # 出力契約:
 #   exit 0  stdout = 指摘 JSON(既存スキーマへ正規化済み)
@@ -504,9 +504,11 @@ open_log() { # $1=パス
   set +o noclobber
   return 1
 }
+# 置き場を作れないときは usage(2)で理由を返す(生の mkdir のエラーと internal(20)では理由が伝わらない)
 if [ -z "$LOG_FILE" ]; then
   LOG_DIR=".claude/reviews"
-  mkdir -p "$LOG_DIR"
+  mkdir -p "$LOG_DIR" 2>/dev/null \
+    || fail_usage "既定のログ置き場 '$LOG_DIR' を作れない(カレントディレクトリに書けないなら --log-file で置き場を指定する)"
   # その番号の名前にエントリが在れば(FIFO・それを指す symlink・/dev/null を指す symlink を含む)、開こうとせずに
   # 次の番号へ進む(FIFO は開くと待ち続け、/dev/null を指す symlink は開けてしまいログが消える)。
   # 無ければ開く。検査と作成の間に同時に走った別プロセスが同じ番号を取りうるので、noclobber で
@@ -527,7 +529,8 @@ if [ -z "$LOG_FILE" ]; then
   LOG_FILE="$LOG_FILE_TRY"
 else
   LOG_DIR="$(dirname "$LOG_FILE")"
-  mkdir -p "$LOG_DIR"
+  mkdir -p "$LOG_DIR" 2>/dev/null \
+    || fail_usage "--log-file の置き場 '$LOG_DIR' を作れない: $LOG_FILE"
   # 検査と作成の間に置かれた通常ファイル・リンク先の無い symlink・ディレクトリは、開けずにここで止まる
   if ! open_log "$LOG_FILE"; then
     fail_usage "--log-file を作れない: $LOG_FILE(既にエントリが在るか、置き場に書き込めない。別の名前を渡す)"
@@ -564,6 +567,50 @@ if [ -n "$COMMAND_TMPL" ]; then
   echo "NOTE: 起動コマンドを上書きしています(profile 由来ではなく、ユーザーの明示指定であることが前提)" >&2
 fi
 
+# ── プロンプトの組み立てと大きさの検査(外部 CLI を起動する前)──
+# 外部 CLI(ヘルプ照合・プローブ・本実行)を 1 回も起動する前に、本実行のプロンプトを組み立てて大きさを判定する
+# (--dry-run でも。必ず落ちると分かっている実行のために外部 CLI を起動しない)。ログを開いた後なので、理由は記録に残る。
+# 組み立ての順: ① 既存ブロックの除去 → ② --target の付記 → ③ スキーマ指示を最後に 1 回連結
+PROMPT_TEXT="$(cat "$PROMPT_FILE")"
+SCHEMA_NOTE="付与"
+# ① 入力が付与ブロック全体で終わるなら、いったん取り除く(冪等。③ で必ず付け直すので二重にならない)。
+#    判定は末尾アンカー(ブロック全体との一致)だけ。見出しや "verdict" の部分一致は使わない
+#    (契約・diff・依頼文の引用で付与が黙って抑止されるため)。
+#    全文ではなく末尾の窓(ブロック長 + 4096 文字。ASCII 空白なら 4 KiB)だけを見る — 全文を 1 文字ずつトリムすると末尾空白 1 万文字で
+#    O(n²)(約 1.8 秒)になり、サイズ検査より前・run_timeout の外で停滞する。窓を超える末尾空白は除去対象外
+#    (その場合はブロックが再付与され旧ブロックが本文中に残る = 重複。害は無い)。
+#    本文が窓より短いときは全文を窓にする(負のオフセットは substring expression < 0 で落ちる)
+sb_win_len=$(( ${#SCHEMA_BLOCK} + 4096 ))
+if [ "${#PROMPT_TEXT}" -lt "$sb_win_len" ]; then
+  sb_win="$PROMPT_TEXT"; sb_head=""
+else
+  sb_off=$(( ${#PROMPT_TEXT} - sb_win_len )); sb_win="${PROMPT_TEXT:sb_off}"; sb_head="${PROMPT_TEXT:0:sb_off}"
+fi
+while [ "${sb_win%[[:space:]]}" != "$sb_win" ]; do sb_win="${sb_win%[[:space:]]}"; done
+case "$sb_win" in
+  *"$SCHEMA_BLOCK")
+    PROMPT_TEXT="$sb_head${sb_win%"$SCHEMA_BLOCK"}"
+    SCHEMA_NOTE="入力末尾の既存ブロックを除去して付与"
+    ;;
+esac
+# ② --target の一覧
+if [ ${#TARGETS[@]} -gt 0 ]; then
+  PROMPT_TEXT="$PROMPT_TEXT
+
+## レビュー対象(このパスだけを読む)"
+  for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
+    PROMPT_TEXT="$PROMPT_TEXT
+- $t"
+  done
+fi
+# ③ スキーマ指示を最後に 1 回だけ連結する(本実行のプロンプトは常にブロックで終わる)
+printf -v PROMPT_TEXT '%s\n\n%s' "$PROMPT_TEXT" "$SCHEMA_BLOCK"
+log_line "- スキーマ指示: $SCHEMA_NOTE"
+# サイズ検査は連結後に行う(付与ブロックのバイト数も上限判定に含まれる)
+PROMPT_BYTES="$(printf '%s' "$PROMPT_TEXT" | wc -c | tr -d ' ')"
+if [ "$PROMPT_BYTES" -gt "$MAX_PROMPT_BYTES" ]; then
+  die 12 prompt-too-large "プロンプトが ${PROMPT_BYTES} バイトで上限 ${MAX_PROMPT_BYTES} を超える(argv 1 個の上限 128KiB)。diff を直接貼らずパスで渡す"
+fi
 
 ensure_tmp_dir() { # 一時領域を 1 回だけ作り、物理パスにする(作成箇所をここに集める)
   [ -n "$TMP_DIR" ] && return 0
@@ -661,48 +708,7 @@ if [ ! -s "$PROBE_OUT" ]; then
 fi
 log_line "- 疎通プローブ: OK"
 
-# ── 本実行(プロンプト組み立て: ① 既存ブロックの除去 → ② --target の付記 → ③ スキーマ指示を最後に 1 回連結)──
-PROMPT_TEXT="$(cat "$PROMPT_FILE")"
-SCHEMA_NOTE="付与"
-# ① 入力が付与ブロック全体で終わるなら、いったん取り除く(冪等。③ で必ず付け直すので二重にならない)。
-#    判定は末尾アンカー(ブロック全体との一致)だけ。見出しや "verdict" の部分一致は使わない
-#    (契約・diff・依頼文の引用で付与が黙って抑止されるため)。
-#    全文ではなく末尾の窓(ブロック長 + 4096 文字。ASCII 空白なら 4 KiB)だけを見る — 全文を 1 文字ずつトリムすると末尾空白 1 万文字で
-#    O(n²)(約 1.8 秒)になり、サイズ検査より前・run_timeout の外で停滞する。窓を超える末尾空白は除去対象外
-#    (その場合はブロックが再付与され旧ブロックが本文中に残る = 重複。害は無い)。
-#    本文が窓より短いときは全文を窓にする(負のオフセットは substring expression < 0 で落ちる)
-sb_win_len=$(( ${#SCHEMA_BLOCK} + 4096 ))
-if [ "${#PROMPT_TEXT}" -lt "$sb_win_len" ]; then
-  sb_win="$PROMPT_TEXT"; sb_head=""
-else
-  sb_off=$(( ${#PROMPT_TEXT} - sb_win_len )); sb_win="${PROMPT_TEXT:sb_off}"; sb_head="${PROMPT_TEXT:0:sb_off}"
-fi
-while [ "${sb_win%[[:space:]]}" != "$sb_win" ]; do sb_win="${sb_win%[[:space:]]}"; done
-case "$sb_win" in
-  *"$SCHEMA_BLOCK")
-    PROMPT_TEXT="$sb_head${sb_win%"$SCHEMA_BLOCK"}"
-    SCHEMA_NOTE="入力末尾の既存ブロックを除去して付与"
-    ;;
-esac
-# ② --target の一覧
-if [ ${#TARGETS[@]} -gt 0 ]; then
-  PROMPT_TEXT="$PROMPT_TEXT
-
-## レビュー対象(このパスだけを読む)"
-  for t in ${TARGETS[@]+"${TARGETS[@]}"}; do
-    PROMPT_TEXT="$PROMPT_TEXT
-- $t"
-  done
-fi
-# ③ スキーマ指示を最後に 1 回だけ連結する(本実行のプロンプトは常にブロックで終わる)
-printf -v PROMPT_TEXT '%s\n\n%s' "$PROMPT_TEXT" "$SCHEMA_BLOCK"
-log_line "- スキーマ指示: $SCHEMA_NOTE"
-# サイズ検査は連結後に行う(付与ブロックのバイト数も上限判定に含まれる)
-PROMPT_BYTES="$(printf '%s' "$PROMPT_TEXT" | wc -c | tr -d ' ')"
-if [ "$PROMPT_BYTES" -gt "$MAX_PROMPT_BYTES" ]; then
-  die 12 prompt-too-large "プロンプトが ${PROMPT_BYTES} バイトで上限 ${MAX_PROMPT_BYTES} を超える(argv 1 個の上限 128KiB)。diff を直接貼らずパスで渡す"
-fi
-
+# ── 本実行 ──
 build_cmd "$PROMPT_TEXT"
 rc=0
 ORIG_PWD="$PWD"

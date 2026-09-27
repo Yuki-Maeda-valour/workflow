@@ -2,6 +2,25 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.13.0
+
+### 変更
+
+- python3 が起動できる環境では、`-T` の無い `mv`(BSD など)でも、新規着手の基準の記録(`reviews-dir.sh save-untracked`)が exit 20 で止まらない。`sha256sum` の無い環境では `shasum`・`openssl` で代わりに計算する(macOS の実機では未確認)
+- `reviews-dir.sh save-untracked` は、未追跡一覧を rename(2)(python3 の `os.replace`、無ければ `mv -f -T`)で公開し、公開に失敗したときは理由の 1 行を `ERROR [internal]` の行に添える(`mv -f -T` で失敗したときは、`-T` を持たない `mv` では python3 が要ることも書く)。sha256 を計算する道具(`sha256sum`・`shasum`・`openssl`)がどれも無ければ、`ERROR [tool-missing]`(exit 20)で止まる
+- review-agent.sh は、プロンプトの大きさを外部 CLI を起動する前に判定する(`--dry-run` でも)。レビュー経路で `prompt-too-large`(12)が出たら、diff を貼らずにパスで渡すように直して 1 回だけ打ち直し、それでも 12 なら内蔵編成で続けて報告する(external-runners.md §10)
+- 実装経路で `prompt-too-large`(12)が出たら、`/do-task` は外部 CLI を起動する前の失敗として報告し、内蔵 implementer で続ける(打ち直さない。external-runners.md §12-5・do-task の Phase 3 の手順 6)
+- review-agent.sh は、ログの置き場を作れないとき、usage(exit 2)で理由を返す(implement-agent.sh と同じ)
+
+### 後方互換を破る変更
+
+- `review-agent.sh` は、ログの置き場(既定の `.claude/reviews/`・明示した `--log-file` の置き場)を作れないとき、exit 2(`usage`)で終わる(今までは exit 20・`internal`)
+- `review-agent.sh` は、プロンプトが大きすぎれば、判定 1〜4(未検出・自ホスト・読み取り専用・疎通)より前に exit 12(`prompt-too-large`)で終わる。`--dry-run` でも 12 で、解決後の起動コマンドを出さない(今までは、`--dry-run` は exit 0 でコマンドを出し、それ以外は判定とプローブの後に 12 で終わった)
+
+### 移行方法
+
+- review-agent.sh の終了コードで分岐している呼び出し側は、置き場を作れないときの 2(usage)と、`--dry-run` でプロンプトが大きすぎるときの 12 を扱う。python3 が無く、`-T` の無い `mv` の環境では、python3 を入れる
+
 ## v4.12.0
 
 ### 変更
