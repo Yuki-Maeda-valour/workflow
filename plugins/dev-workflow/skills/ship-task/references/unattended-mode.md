@@ -193,7 +193,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
    - 集合の元: `git diff --name-only -z --no-renames <基準>`(基準コミットからの追跡差分)と `git ls-files -o --exclude-standard -z`(未追跡)
    - 除くもの
      - 基準時点の未追跡一覧(基準行の `未追跡一覧` のファイル)にあるパス。手順 1 で確かめた一覧だけを使う。保持した状態が「無し」なら除外に使わない(後から現れたファイルも使わない)
-     - `secret_paths` にマッチするもの
+     - `secret_paths`(§7 の除外対象の和集合)にマッチするもの
      - `.claude/` の状態ファイル(§7 の除外対象)
      - タスク MD の新旧のパス(`進行中_{名}.md`・`保留_{名}.md`。手順 3・4 が扱う。旧パスは `git mv` で作業ツリーにも index にも無いので、渡すと `git add` が rc 128 で止まる)
      - 作業ツリーにも index にも無いパス(`[ -e ] || [ -L ]` が偽で、`git ls-files --error-unmatch -- ':(literal)<パス>'` も失敗する。implementer の `git mv` の旧パスなど。削除は既に stage されている)
@@ -204,7 +204,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 **無人の実装 commit・doc commit の集合**
 
 - 実装 commit: 手順 5 と同じ集合。タスク MD は `完了_{名}.md` のパスを `git add` し、`進行中_` の旧パスは除く
-- doc commit: update-doc が変えたファイル。`secret_paths` と `.claude/` の状態ファイルは除く
+- doc commit: update-doc が変えたファイル。`secret_paths`(§7 の除外対象の和集合)と `.claude/` の状態ファイルは除く
 - どちらも、commit の直前・直後の照合(§7)を通す
 - 対話の commit の選び方(「ソースコードとタスク MD を 1 commit にまとめる」)は変えない
 
@@ -232,7 +232,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 
 ## 7. 周の中で守る値と照合(改竄ガード)
 
-この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の守る値と照合の表を使い、R を持たない(git の前置きと「push の直前」は、この節と同じ)。
+この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の守る値と照合の表を使い、R を持たない(git の前置き・「push の直前」・除外対象は、この節と同じ)。
 
 **守る値**(セッション文脈に保持し、報告にも書く)
 
@@ -255,7 +255,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | ship-task の push の直前 | `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ |
 
 - 照合の git 呼び出し(と §5 の集合の算出)には、base-commit.md が全 git 呼び出しに定める前置き(`--no-pager --no-replace-objects` ほか)を付ける。置換参照で元の本文を見せる経路を塞ぐため。commit は照合ではないので、この前置きの対象外(commit のときの hook は動く — 限界 ③)
-- **除外対象**: `secret_paths` にマッチするものと、`.claude/` の状態ファイル。状態ファイルは diff-snapshot.sh の既定除外と同じ集合(`.claude/reviews/`・`.claude/grasp.md`・`.claude/settings.local.json`・`.claude/.understand-project-done`)。追跡対象の設定(`.claude/project-profile.yml`・`.claude/rules/` など)は除外しない
+- **除外対象**: `secret_paths`(この項の和集合)にマッチするものと、`.claude/` の状態ファイル。状態ファイルは diff-snapshot.sh の既定除外と同じ集合(`.claude/reviews/`・`.claude/grasp.md`・`.claude/settings.local.json`・`.claude/.understand-project-done`)。追跡対象の設定(`.claude/project-profile.yml`・`.claude/rules/` など)は除外しない。`secret_paths` は、基準側の profile の `secret_paths` と現在の profile の `secret_paths` の和集合で読み、作業ツリーの profile の値だけで決めない。基準側の読み方・読めないときの扱い・要素の内容の検査は [diff-snapshot-call.md](../../do-task/references/diff-snapshot-call.md) のとおりで、その `<REF>` を次のように読み替える: タスクの周では、作業ブランチの作成時の sha と、do-task が基準を決めた後は基準の sha の両方(作成時の sha は上の守る値。基準の sha は §5 のガードと同じ保持した基準。両方の profile を和集合に入れる。基準行を再利用した再開では両者が違いうるので、do-task の Phase 4 が除外した(レビューしていない)ファイルを commit に入れないため)、発見の周では S0(discover-mode.md §7 の守る値)。現在の profile は、その時点(各 commit・照合・discover-mode.md §4 と工程 D2)の作業ツリーの `.claude/project-profile.yml` を読んだ値。diff-snapshot-call.md が停止と定める場合(`<REF>` が commit に解決できない・要素の内容の検査に当たる など)は失敗扱い(§3 の一般則。保留にしない)。diff-snapshot-call.md が既定 3 要素とする場合(基準側に profile が無い・`<REF>` が空ツリー など)は続けて、報告に書く。基準側にだけある要素も報告に列挙する
 - 照合の理由
   - Phase 7 の前の照合は、Phase 5 の format ゲートなどが本文を変えたまま完了にしないため(単独で呼ばれた do-task には ship-task の commit 前の照合が無い)
   - 基準行と HEAD の照合は、implementer が実装を commit して基準行をその commit へ進め、レビューの diff から実装を消す経路を塞ぐため
