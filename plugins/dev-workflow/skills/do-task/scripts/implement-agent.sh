@@ -29,7 +29,7 @@
 #                           レビュー経路も必須だが渡すのは一時ツリー。実装経路は向きが反転し、
 #                           実リポジトリ(root)を渡す
 #   --model <名前>          ランナーへ渡すモデル名(省略・空はモデル指定フラグごと落とす)
-#   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md)
+#   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md)。既にエントリが在るパスは usage
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
 #   --run-timeout <秒>      本実行のタイムアウト(既定 1800。0 は不可)
 #   --dry-run               解決後コマンドを表示して終了(**起動しない**。承認提示に使う)
@@ -196,6 +196,13 @@ case "$PROBE_TIMEOUT" in ''|*[!0-9]*) fail_usage "--probe-timeout は正の秒�
 case "$RUN_TIMEOUT" in ''|*[!0-9]*) fail_usage "--run-timeout は正の秒数" ;; esac
 [ "$PROBE_TIMEOUT" -gt 0 ] || fail_usage "--probe-timeout に 0 は指定できない(無制限/即 kill で意味が反転する)"
 [ "$RUN_TIMEOUT" -gt 0 ] || fail_usage "--run-timeout に 0 は指定できない(無制限/即 kill で意味が反転する)"
+# 明示した `--log-file` は、既にエントリが在れば書かない。
+# 呼び出し側がタスク名と反復番号で名前を決めると、前の反復の外部ランナーが、その名前に外のファイルを指す
+# symlink やハードリンクを先に置けるため(置き場は外部の書き込み範囲の中にある)。
+# ログの初期化より前の `die` もログに書くので、検査は引数の検査の直後に置く
+if [ -n "$LOG_FILE" ] && { [ -e "$LOG_FILE" ] || [ -L "$LOG_FILE" ]; }; then
+  fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(上書きしない。symlink やハードリンクを経由して外のファイルへ書かないため。別の名前を渡す)"
+fi
 
 # ── 実装用既定表(信頼の基点。ここに無いランナーは受け付けない)──
 # **../references/external-runners.md §12-6 の実装用既定表と二重管理になる。どちらかを変えたら必ず両方を直す**
@@ -533,6 +540,14 @@ else
   LOG_DIR="$(dirname "$LOG_FILE")"
   mkdir -p "$LOG_DIR" 2>/dev/null \
     || fail_usage "--log-file の置き場 '$LOG_DIR' を作れない: $LOG_FILE"
+  # 空のファイルを noclobber で作り、作れたものだけに書く(検査と作成の間に置かれた通常ファイル・
+  # リンク先の無い symlink・ディレクトリは、ここで止まる)
+  set -o noclobber
+  if ! { : > "$LOG_FILE"; } 2>/dev/null; then
+    set +o noclobber
+    fail_usage "--log-file を作れない: $LOG_FILE(既にエントリが在るか、置き場に書き込めない。別の名前を渡す)"
+  fi
+  set +o noclobber
 fi
 # 本実行とプローブは cd してから起動する(子 PID を掴むためサブシェルを使えない。決定 41)。
 # 相対パスのままだと cd 後にログとプロンプトを見失うので、先に絶対パスへ正規化する

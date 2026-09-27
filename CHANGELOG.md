@@ -2,6 +2,26 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.11.0
+
+### 変更
+
+- `/do-task` の新規着手の条件 ③(`do-task/references/base-commit.md`)は、`.claude/reviews/` の直下に、ファイル名が `-{TASK_NAME}-iter<数字>.md` で終わる名前(`create-task-` で始まるものを除く)か `recovery-{TASK_NAME}.md` が在るときだけ不成立になる。名前は、タスク名をグロブ・正規表現に埋め込まずに文字列として比べる。タスク名の無い名前(外部ランナーの既定名 `implementer-{ランナー}-iter{N}.md` など)は数えないので、同じチェックアウトに別のタスクの外部 implementer のログがあっても、新規着手が『基準不明』にならない
+- `/do-task` の ITER は、再開かどうかに関わらず、条件 ③ の 1 つ目の項に当たる名前の番号の最大値+1(無ければ 1)から始める。前の走行のログがあると、`--max-iter` の報告点はその分早く来る
+- `/do-task` は外部 implementer の本実行に `--log-file <管理ルート>/.claude/reviews/implementer-{ランナー}-{TASK_NAME}-iter{ITER}.md` を渡す(承認の提示の `--dry-run` には渡さない)。外部 implementer の起動は ITER ごとに 1 回で、同じ ITER で既に外部を起動していれば(Phase 5・5.5 からの差し戻しや、比較不能から人の判断でもう一度起動するとき)、ITER を 1 つ進めてから起動する。こうして進めた ITER も `--max-iter` の報告点に数える
+- 外部ランナーのスクリプト(`review-agent.sh`・`implement-agent.sh`)は、明示した `--log-file` のパスに既にエントリ(通常ファイル・symlink・リンク先の無い symlink・ディレクトリ・FIFO)が在れば、何も書かずに usage(exit 2)で止まる(`--dry-run` でも)。前の反復の外部ランナーが、次の反復のログ名に外のファイルを指すリンクを先に置いても、リンク先に書かないため
+- レビュー経路の外部ランナーのログは、skill の手順からは `--log-file` を渡さず、既定名 `reviewer-{ランナー}-iter{N}.md` で残す(`do-task/references/external-runners.md` §7)。design §5-14 の記録は team-lead が残し、このログはその生出力の控えになる
+
+### 後方互換を破る変更
+
+- `review-agent.sh`・`implement-agent.sh` に、既にエントリが在るパスを `--log-file` で渡すと exit 2 になる(今までは切り詰めて書いた)
+
+### 移行方法
+
+- 条件 ③ は、タスク名の無い外部ランナーのログを自タスクのものとして数えない(この版より前の `/do-task` が残した `implementer-{ランナー}-iter{N}.md` など。名前の末尾がたまたまタスク名と一致するときは数える — base-commit.md の限界)。基準行が残っていれば影響は無い
+- この版より前に、タスク名つきの名前で残した設計レビューの外部ログ(`reviewer-{ランナー}-{タスク名}-iter{N}.md`)は、条件 ③ に数えられる。そのタスクを新規着手すると『基準不明』になるので、ログを置き場の外へ移す
+- `--log-file` に既存のパスを渡す呼び出しは exit 2 になる。同じパスを使い回していたら、番号を進める
+
 ## v4.10.1
 
 ### 変更
