@@ -806,7 +806,7 @@ if check "既定コマンドの --trust でワークスペース信頼を通過�
   assert_stdout_equals "--trust による成功経路" "$EXPECT_ISSUE_JSON"
 fi
 
-# 40. --trust を落とすと同じランナーが probe-failed で止まる(決定 16 の再現)。
+# 40. --trust を落とすと同じランナーが probe-failed で止まる(2026-09-09 決定 16 の再現)。
 # 既定表のランナーには --command を渡せない(usage エラー)ため、既定表外のランナー名で再現する
 rc=0
 run_agent --runner stubrunner --command "bash $WORK/trustbin/cursor-agent --mode ask" \

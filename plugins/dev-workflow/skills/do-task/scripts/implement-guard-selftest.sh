@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # implement-guard.sh の回帰テスト(scratch リポジトリだけを使う。外部 CLI 不要・ネットワーク不要)。
 # diff-snapshot-selftest.sh / implement-agent-selftest.sh とは独立したスイートで、互いのファイルには
-# 触れない(../references/external-runners.md §11 の決定 9)。
+# 触れない(../references/external-runners.md §11 の 2026-09-17 決定 9)。
 #
 # 使い方:
 #   bash implement-guard-selftest.sh              # 全ケース(A〜K)+ 変異テスト(L)

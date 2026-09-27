@@ -847,7 +847,7 @@ check "メタ行だけ未 commit で止まる" 20 "$RC"
 has "メタ行だけ未 commit: 一覧に出る" "$OUT" "進行中_meta-later.md"
 G -C "$R" checkout -q -- docs/tasks/進行中_meta-later.md
 
-# 決定 19 の帰結(D8): 遅れ・分岐・origin の sha がローカルに無い・ls-remote の失敗と固まり
+# 2026-09-23 決定 19 の帰結(D8): 遅れ・分岐・origin の sha がローカルに無い・ls-remote の失敗と固まり
 newrepo d8
 addtask pr-a
 commit
@@ -995,8 +995,8 @@ sys.exit(0 if any(toks[i:i + len(want)] == want for i in range(len(toks))) else 
 PY
 }
 t "argv: -p --output-format json" argv_has_seq -p --output-format json
-t "argv: --setting-sources user(決定 16)" argv_has_seq --setting-sources user
-t "argv: --strict-mcp-config(決定 16)" argv_has_seq --strict-mcp-config
+t "argv: --setting-sources user(2026-09-23 決定 16)" argv_has_seq --setting-sources user
+t "argv: --strict-mcp-config(2026-09-23 決定 16)" argv_has_seq --strict-mcp-config
 t "argv: --plugin-dir <プラグインルート>" argv_has_seq --plugin-dir "$PLUG"
 t "argv: --permission-mode acceptEdits" argv_has_seq --permission-mode acceptEdits
 t "argv: --permission-prompts none" argv_has_seq --permission-prompts none
@@ -1999,7 +1999,7 @@ pdk "test -f .claude/grasp.md(test が許可リストに無いとき)" other Bas
 case "$(tail -1 "$PERMLOG")" in *"許可リストに無いコマンド"*) ok "test が許可リストに無いときの理由は「許可リストに無いコマンド」" ;;
   *) ng "test が許可リストに無いときの理由は「許可リストに無いコマンド」" ;; esac
 # D22 ④ の対応表: (1)〜(10) の各項に、従った例(allow)と外れた例(deny)を 1 つ以上ずつ置く
-# (許可リストは決定 5 の形。git・sed・bash・gh・cat・test・sha256sum など)
+# (許可リストは #68 の決定 5 の形。git・sed・bash・gh・cat・test・sha256sum など)
 PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a += [{"kind": "prefix", "words": ["test"]}, {"kind": "prefix", "words": ["sha256sum"]}]; print(json.dumps(a))')"
 pa "④ (1) 従う: \$ は単引用符の中だけ(git log --format='%H \$x')" Bash "$(bash_in "git log --format='%H \$x'")"
 pd "④ (1) 外れる: 二重引用符の中の \$(git log \"\$HOME\")" Bash "$(bash_in 'git log "$HOME"')"

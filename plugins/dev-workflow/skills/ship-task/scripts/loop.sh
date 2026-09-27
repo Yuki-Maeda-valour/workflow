@@ -127,7 +127,7 @@ DISCOVER_SRC_DESC=""
 # (loop-selftest.sh が照合する)。列の外の名は使い方の誤り
 DISCOVER_DEFAULT=(data-audit refactor)
 
-# 既定値(決定 4)。profile は締める向きにだけ効く
+# 既定値(#68 の決定 4)。profile は締める向きにだけ効く
 DEF_MAX_ITER=5
 DEF_MAX_FAIL=2
 DEF_BUDGET=28800
@@ -1171,7 +1171,7 @@ on_exit() {
   finish "$code" "内部の失敗"
 }
 
-# ── 既定表(ホスト名 → 雛形。信頼の基点。既定表は Claude Code の 1 行だけ — 決定 1)──
+# ── 既定表(ホスト名 → 雛形。信頼の基点。既定表は Claude Code の 1 行だけ — #68 の決定 1)──
 # 雛形 = 実行ファイルと前置きのフラグ(`--host-argv` で置き換えられる)。隔離と判定に要るフラグ
 # (ISOLATION・--plugin-dir・--permission-mode・--permission-prompts・--mcp-config・--allowedTools)は
 # loop.sh が必ず後ろに足す(D20)。解決後の形(既定):
@@ -1198,7 +1198,7 @@ load_host_table() { # $1=ホスト名
         --disallowedTools --disallowed-tools --settings -- --bg --background -w --worktree)
       # 短いフラグの束ね書きで、これらの文字を含むものは書けない(-p・-w の別名になりうる)
       FORBIDDEN_SHORT_CHARS=pw
-      # 全許可のフラグ名と、--permission-mode の全許可の値(決定 3)・分類器の値(--allow-classifier のときだけ)
+      # 全許可のフラグ名と、--permission-mode の全許可の値(#68 の決定 3)・分類器の値(--allow-classifier のときだけ)
       FULL_PERMISSION_NAMES=(--dangerously-skip-permissions --allow-dangerously-skip-permissions)
       FULL_PERMISSION_VALUE=bypassPermissions
       CLASSIFIER_VALUE=auto
@@ -1289,7 +1289,7 @@ build_child_argv() {
   CHILD_ARGV+=("$SETTINGS_FLAG" "$HOOK_SETTINGS")
 }
 
-# 決定 3: 全許可のフラグを、ホスト CLI へ渡す argv 全体(--host-argv・--allowed-tools 経由を含む)で走査して拒否する
+# #68 の決定 3: 全許可のフラグを、ホスト CLI へ渡す argv 全体(--host-argv・--allowed-tools 経由を含む)で走査して拒否する
 scan_full_permission() {
   local n="${#CHILD_ARGV[@]}" i=0 tok name value bad
   while [ "$i" -lt "$n" ]; do
@@ -1429,7 +1429,7 @@ has_meta() { # $1=ファイル(- なら stdin)
   return 1
 }
 
-# 追跡外のタスクの検査(決定 10。最初の周の 3a)。人のチェックアウトを読むだけで、index を書き換えうる
+# 追跡外のタスクの検査(2026-09-23 決定 10。最初の周の 3a)。人のチェックアウトを読むだけで、index を書き換えうる
 # git status は使わない。固定した sha の tree に無いか、その blob のヘッダにメタ行が無ければ止まる
 check_untracked_tasks() {
   local dir="$TOP/$TASK_DIR" p f rel bad=() typ
@@ -2357,7 +2357,7 @@ PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
 HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
 
-# ── §2 の 5: 既定表・--host-argv(D20)・全許可のフラグ(決定 3)──
+# ── §2 の 5: 既定表・--host-argv(D20)・全許可のフラグ(#68 の決定 3)──
 load_host_table "$HOST"
 if [ "${#HOST_ARGV_OVERRIDE[@]}" -gt 0 ]; then
   HOST_ARGV=("${HOST_ARGV_OVERRIDE[@]}")
@@ -2474,7 +2474,7 @@ if [ -n "$LS_TREE" ]; then
   PROFILE_STATE="$DEF_NAME の commit $DEF_SHA から読んだ"
 fi
 
-# ── §2 の 10: 実効値(決定 4: min(既定値か起動引数の値, profile の値)。profile は締める向きだけ)──
+# ── §2 の 10: 実効値(#68 の決定 4: min(既定値か起動引数の値, profile の値)。profile は締める向きだけ)──
 effective() { # $1=既定値 $2=起動引数 $3=profile → 「実効値 出所」
   local base="$1" src="既定"
   if [ -n "$2" ]; then base="$2"; src="起動引数"; fi
@@ -2514,7 +2514,7 @@ if [ "$DISCOVER" -eq 1 ]; then
   if [ "$O_ORIGIN" = 1 ]; then ORIGIN_URL_STATE="検査に通った(fetch と push が同じリポジトリ)"; else ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"; fi
 fi
 
-# ── §2 の 11: 決定 19 の帰結(D8)──
+# ── §2 の 11: 2026-09-23 決定 19 の帰結(D8)──
 LEADING=""
 ORIGIN_STATE=""
 HAS_ORIGIN=0
