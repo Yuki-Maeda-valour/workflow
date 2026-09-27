@@ -565,13 +565,13 @@ state_dir() { # $1=状態名 → 状態ディレクトリ(1 つだけのはず)
 # ── scratch のリポジトリ ──
 newrec() { REC="$W/rec/$1"; rm -rf "$REC"; mkdir -p "$REC"; }
 G() { git "$@" >/dev/null 2>&1; }
-# newrepo <名> [noorigin] → R(作業ツリー)・B(bare のリモート)
+# newrepo <名> [noorigin] → R(作業ツリー)・B(bare のリモート)。状態ファイル 3 つ(loop.md §3 の 2a)を ignore する
 newrepo() {
   R="$W/repos/$1"
   B="$W/repos/$1.remote.git"
   rm -rf "$R" "$B" "$R.loop"
   git init -q -b main "$R"
-  printf '*.ignored\n.claude/reviews\n' >"$R/.gitignore"
+  printf '*.ignored\n.claude/reviews\n.claude/grasp.md\n.claude/.understand-project-done\n' >"$R/.gitignore"
   echo "# $1" >"$R/README.md"
   mkdir -p "$R/docs/tasks"
   G -C "$R" add -A
@@ -2627,11 +2627,13 @@ check "実装モードは origin-repo.py が無くても起動する" 0 "$RC"
 LOOP_BIN="$LOOP"
 # 状態ファイルが ignore されていない / .claude/grasp.md が追跡済み(worktree を消して 20)
 newrepo dign
+printf '*.ignored\n.claude/reviews\n' >"$R/.gitignore"   # .claude/grasp.md・.claude/.understand-project-done を ignore しない土台
+commit
 newrec dign
 run_loop dign -- --repo "$R" --dry-run --discover
 check "発見モード: 状態ファイルが ignore されていなければ 20" 20 "$RC"
 has "発見モード: 状態ファイルが ignore されていない: 理由" "$OUT" "[state-not-ignored]"
-has "発見モード: 状態ファイルが ignore されていない: gitignore の断片を報告に出す" "$(report_of "$OUT")" ".claude/.understand-project-done"
+has "発見モード: 状態ファイルが ignore されていない: gitignore の断片を報告に出す" "$(report_of "$OUT")" "init-project の gitignore の断片と同じ"
 check "発見モード: 状態ファイルが ignore されていない: worktree を消す" 1 "$(wt_count)"
 newdisc dtrk
 mkdir -p "$R/.claude"
@@ -2643,6 +2645,72 @@ check "発見モード: .claude/grasp.md が追跡済みなら 20(ignore の検�
 has "発見モード: 追跡済みの grasp.md: 理由" "$OUT" "[state-not-ignored]"
 has "発見モード: 追跡済みの grasp.md: git rm --cached を案内する" "$(report_of "$OUT")" "git rm --cached -- .claude/grasp.md"
 check "発見モード: 追跡済みの grasp.md: worktree を消す" 1 "$(wt_count)"
+# 状態ファイルの前提(loop.md §3 の 2a)は実装モードでも同じ(worktree を消して 20)
+newrepo stign
+printf '*.ignored\n.claude/reviews\n' >"$R/.gitignore"   # .claude/grasp.md・.claude/.understand-project-done を ignore しない土台
+addtask pr-a
+commit
+newrec stign
+run_loop stign -- --repo "$R" --dry-run
+check "状態ファイルの前提(実装モード): 状態ファイルが ignore されていなければ 20" 20 "$RC"
+has "状態ファイルの前提(実装モード): 状態ファイルが ignore されていない: 理由" "$OUT" "[state-not-ignored]"
+has "状態ファイルの前提(実装モード): 状態ファイルが ignore されていない: gitignore の断片を報告に出す" "$(report_of "$OUT")" "init-project の gitignore の断片と同じ"
+check "状態ファイルの前提(実装モード): 状態ファイルが ignore されていない: worktree を消す" 1 "$(wt_count)"
+newrepo sttrk
+addtask pr-a
+mkdir -p "$R/.claude"
+echo g >"$R/.claude/grasp.md"
+G -C "$R" add -f .claude/grasp.md
+commit
+newrec sttrk
+run_loop sttrk -- --repo "$R" --dry-run
+check "状態ファイルの前提(実装モード): .claude/grasp.md が追跡済みなら 20" 20 "$RC"
+has "状態ファイルの前提(実装モード): 追跡済みの grasp.md: git rm --cached を案内する" "$(report_of "$OUT")" "git rm --cached -- .claude/grasp.md"
+hasnt "状態ファイルの前提(実装モード): 追跡済みの grasp.md: ignore 済みの .claude/.understand-project-done を外れの一覧に出さない" "$(report_of "$OUT")" "- .claude/.understand-project-done"
+newrepo stok
+addtask pr-a
+commit
+newrec stok
+run_loop stok -- --repo "$R" --dry-run
+check "状態ファイルの前提(実装モード): 3 つとも ignore されていれば起動する" 0 "$RC"
+# check-ignore が判定できないもの(rc が 0 と 1 以外: symlink の先・サブモジュールの中)は数えず、後の段に任せる
+newdisc stsym
+mkdir -p "$W/stsym-outside"
+ln -s "$W/stsym-outside" "$R/.claude"
+commit
+newrec stsym
+run_loop stsym -- --repo "$R" --dry-run --discover
+check "状態ファイルの前提(判定できない): 発見モードで .claude が symlink なら 2b の 30" 30 "$RC"
+has "状態ファイルの前提(判定できない): 発見モードで .claude が symlink: 理由" "$OUT" "[reviews-dir]"
+newrepo strsym
+addtask pr-a
+mkdir -p "$R/.claude" "$W/strsym-outside"
+ln -s "$W/strsym-outside" "$R/.claude/reviews"
+G -C "$R" add -f .claude/reviews
+commit
+newrec strsym
+run_loop strsym -- --repo "$R" --dry-run
+check "状態ファイルの前提(判定できない): 実装モードで .claude/reviews が symlink なら 2b の 30" 30 "$RC"
+has "状態ファイルの前提(判定できない): 実装モードで .claude/reviews が symlink: 理由" "$OUT" "[reviews-dir]"
+newrepo stprio
+printf '*.ignored\n.claude/reviews\n.claude/.understand-project-done\n' >"$R/.gitignore"   # .claude/grasp.md を ignore しない土台
+addtask pr-a
+mkdir -p "$R/.claude" "$W/stprio-outside"
+ln -s "$W/stprio-outside" "$R/.claude/reviews"
+G -C "$R" add -f .claude/reviews
+commit
+newrec stprio
+run_loop stprio -- --repo "$R" --dry-run
+check "状態ファイルの前提(判定できない): .claude/reviews が symlink でも、ほかの状態ファイルが外れていれば 20(2a は 2b より先)" 20 "$RC"
+has "状態ファイルの前提(判定できない): .claude/reviews が symlink で grasp.md が外れる: 理由" "$OUT" "[state-not-ignored]"
+newrepo stsub
+addtask pr-a
+mkdir -p "$R/.claude"
+G -C "$R" update-index --add --cacheinfo "160000,$(git -C "$R" rev-parse HEAD),.claude"   # .claude を gitlink にする
+commit
+newrec stsub
+run_loop stsub -- --repo "$R" --dry-run
+check "状態ファイルの前提(判定できない): 実装モードで .claude がサブモジュールなら起動する" 0 "$RC"
 
 # ── 読み飛ばし(--dry-run の発見元の列と読み飛ばしで見る)──
 newdisc dskip

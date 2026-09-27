@@ -2,6 +2,22 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.15.0
+
+### 変更
+
+- `loop.sh` の実装モードも、状態ファイル(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)が ignore されていて追跡されていないことを、周の worktree を作った直後に確かめる。外れていれば exit 20(`state-not-ignored`)で止まり、gitignore の断片を報告に出す
+- この検査は、`git check-ignore` が判定できないもの(`.claude` か `.claude/reviews` が symlink・`.claude` がサブモジュール)を数えず、後の検査に任せる(両モード)
+
+### 後方互換を破る変更
+
+- 状態ファイルを ignore していない、または追跡しているリポジトリでは、実装モードの `loop.sh` が起動しない(`--dry-run` も exit 20)
+- 発見モードで `.claude` か `.claude/reviews` が symlink の worktree は、ほかの状態ファイルが外れていなければ exit 30(`reviews-dir`)で止まる(exit 20・`state-not-ignored` ではない)。`.claude` がサブモジュールのリポジトリは、起動時に止まらず、発見の周の前提も通る
+
+### 移行方法
+
+- init-project の gitignore の断片(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)を `.gitignore` に足して commit する。追跡済みのものは `git rm --cached -- <パス>` で索引から外して commit する。前の実行が残した周の worktree は、`git -C <パス> status --porcelain --untracked-files=all` で残りが状態ファイルだけであることを確かめてから、`git worktree unlock <パス>` → `git worktree remove --force <パス>` で片付ける(その worktree の `.gitignore` は古いままなので、`--force` なしでは拒否される。ほかの変更が残っていれば、中を調べてから決める)
+
 ## v4.14.0
 
 ### 変更
