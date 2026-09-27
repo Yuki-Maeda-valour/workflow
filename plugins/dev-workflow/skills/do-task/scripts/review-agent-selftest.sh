@@ -7,7 +7,7 @@
 #   REVIEW_AGENT=<パス> bash review-agent-selftest.sh   # 別の実装を対象にする(変異テスト用)
 #
 # 検証するのは「終了コードと出力の契約」「信頼モデルが破れないこと」「正規化 2 経路の一致」
-# 「プロンプト組み立て(スキーマ指示の付与と冪等)」。
+# 「プロンプト組み立て(スキーマ指示の付与と冪等)」「ログの置き場の固定(L 節: 置き場の経路)」。
 # 期待終了コード: 0=成功 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #                 7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed 12=prompt-too-large
 #
@@ -1627,8 +1627,270 @@ if [ "$kf_hits" -ge 1 ] && [ "$kf_left" -eq 0 ]; then
   kf_count="$(find "$KF/.claude/reviews" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
   if [ "${kf_count:-0}" -le 1 ]; then ok "/dev/fd の判定が偽: 置き場のファイルが 1 つ以下(採番を繰り返さない)"; else
     ng "/dev/fd の判定が偽: 置き場のファイルが 1 つ以下(採番を繰り返さない)(実際 $kf_count 個)"; fi
+  # ログのパス・置き場に関わる usage の失敗は、開けたものが通常ファイルでないときも置き場の語を含む(既定名・明示の両方)
+  if grep -E '^ERROR \[usage\] ' "$CASE_ERR" | grep -qF -- '既定のログ置き場'; then
+    ok "/dev/fd の判定が偽: 既定名: ERROR [usage] の行に「既定のログ置き場」がある"
+  else
+    ng "/dev/fd の判定が偽: 既定名: ERROR [usage] の行に「既定のログ置き場」がある"; cat "$CASE_ERR" >&2; fi
+  K_TARGET="$K_DEVFD_TARGET"
+  K_CWD="$KF"
+  OUTER_TIMEOUT="$K_FIFO_TIMEOUT"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$KF/explicit/x.md"; rc=$?
+  OUTER_TIMEOUT="$K_PREV_TIMEOUT"
+  K_CWD=""
+  K_TARGET=""
+  check "/dev/fd の判定が偽: 明示の --log-file でも usage で止まる" 2 "$rc"
+  if grep -E '^ERROR \[usage\] ' "$CASE_ERR" | grep -qF -- '--log-file の置き場'; then
+    ok "/dev/fd の判定が偽: 明示の --log-file: ERROR [usage] の行に「--log-file の置き場」がある"
+  else
+    ng "/dev/fd の判定が偽: 明示の --log-file: ERROR [usage] の行に「--log-file の置き場」がある"; cat "$CASE_ERR" >&2; fi
 else
   ng "/dev/fd の判定が偽: 写しの治具([ -f /dev/fd/7 ] を false に替える)が当たらない"
+fi
+
+# ── L. 置き場の経路: ログの置き場を物理パスで固定してから開く ──
+# ケース名の接頭辞: 置き場の経路。既定名の置き場(起動時の cwd の .claude/reviews)と、起動時の cwd の中の明示の
+# --log-file の置き場は、起動時の pwd -P を基点に、階層ごとに symlink を拒み、cd -P の後の pwd -P を照合して物理パスに
+# 固定してから相対名で開く。基点の外の --log-file は信頼して mkdir -p で作る。
+# 止まるケースは exit 2・stderr の ERROR [usage] の行(既定名なら「既定のログ置き場」、明示なら「--log-file の置き場」と、
+# 「置き場の経路が symlink か差し替えられた: 」)・リンク先が空・ランナーを起動しない(副作用のスタブ)・NOTE: ログ: が無い。
+# (d) は PATH の先頭に置いた mkdir の包み(K 節の wcbin と同じ置き方)で、検査と作成の間の差し替えを起こす。
+# (f)・(g) は BASH_ENV で読み込ませた cd・pwd の関数で、検査と cd の間・固定と開く間の差し替えを決定的に起こす
+# (対象で発火する・ファイルの印で 1 回だけ・条件の外では builtin を呼ぶだけ・対象の set -eEu と ERR trap の下で失敗しない)。
+# 明示の --log-file では接頭辞の照合のサブシェルの pwd -P で先に発火するので、(f)・(g) は既定名で打つ。
+# どれも k_run(制限した PATH・env -i)で打つ
+L_DIR="$K_DIR/place"
+rm -rf "$L_DIR"; mkdir -p "$L_DIR"
+L_CWD="$L_DIR/cwd"; mkdir -p "$L_CWD"
+L_MARK="$L_DIR/hook.mark"
+REAL_MKDIR="$(command -v mkdir)"
+REAL_RMDIR="$(command -v rmdir)"
+REAL_MV="$(command -v mv)"
+L_CMD="bash $WORK/bin/stub-sideeffect.sh --readonly-x"
+L_EXTRA=()
+l_run() { # $1=起動する場所 $2=--cwd 残り=追加の引数。副作用のスタブで打つ(起動したら $SIDEEFFECT が残る)
+  lr_cwd="$1"; lr_runcwd="$2"; shift 2
+  rm -f "$SIDEEFFECT"
+  K_CWD="$lr_cwd"
+  K_EXTRA=("SELFTEST_SIDEEFFECT=$SIDEEFFECT" ${L_EXTRA[@]+"${L_EXTRA[@]}"})
+  k_run --runner stubrunner --command "$L_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+    --cwd "$lr_runcwd" --probe-timeout 10 --run-timeout 20 "$@"; rc=$?
+  K_CWD=""; K_EXTRA=()
+  return "$rc"
+}
+l_empty() { [ -z "$(find "$1" -mindepth 1 -print -quit 2>/dev/null)" ]; }
+l_note_is() { # $1=ログの実体。stderr の NOTE: ログ: が絶対パスで、そのログを指す
+  ln_note="$(sed -n 's/^NOTE: ログ: //p' "$CASE_ERR" | head -1)"
+  case "$ln_note" in /*) [ -f "$1" ] && [ "$ln_note" -ef "$1" ] ;; *) return 1 ;; esac
+}
+l_assert_stopped() { # $1=ケース名 $2=実際の exit $3=置き場の語 $4=リンク先(空ならこの検査を飛ばす) [$5=在ってはならないパス]
+  la_name="$1"; la_rc="$2"; la_word="$3"; la_out="$4"; la_absent="${5:-}"
+  if [ "$la_rc" -eq 2 ] && grep -qE '^ERROR \[usage\] ' "$CASE_ERR"; then ok "$la_name: exit 2 で ERROR [usage] の行が出る"; else
+    ng "$la_name: exit 2 で ERROR [usage] の行が出る(実際 exit=$la_rc)"; cat "$CASE_ERR" >&2; fi
+  if grep -E '^ERROR \[usage\] ' "$CASE_ERR" | grep -qF -- "$la_word" \
+     && grep -E '^ERROR \[usage\] ' "$CASE_ERR" | grep -qF -- '置き場の経路が symlink か差し替えられた: '; then
+    ok "$la_name: 理由に「$la_word」と「置き場の経路が symlink か差し替えられた: 」がある"
+  else
+    ng "$la_name: 理由に「$la_word」と「置き場の経路が symlink か差し替えられた: 」がある"; cat "$CASE_ERR" >&2; fi
+  if [ -n "$la_out" ]; then
+    if l_empty "$la_out"; then ok "$la_name: リンク先が空"; else
+      ng "$la_name: リンク先が空(残存: $(find "$la_out" -mindepth 1 | head -3 | tr '\n' ' '))"; fi
+  fi
+  if [ -n "$la_absent" ]; then
+    if [ ! -e "$la_absent" ] && [ ! -L "$la_absent" ]; then ok "$la_name: 基点の直下に書かない"; else
+      ng "$la_name: 基点の直下に書かない(残存: $la_absent)"; fi
+  fi
+  if [ ! -e "$SIDEEFFECT" ]; then ok "$la_name: ランナーを起動しない"; else ng "$la_name: ランナーを起動しない(副作用ファイルが作られた)"; fi
+  if ! grep -q '^NOTE: ログ: ' "$CASE_ERR"; then ok "$la_name: NOTE: ログ: が無い"; else
+    ng "$la_name: NOTE: ログ: が無い"; cat "$CASE_ERR" >&2; fi
+}
+# (f)・(g) のフック。$1=出力 $2=発火する側(cd|pwd) $3=cd の最後の引数(階層名) $4=置き場の物理パス $5=外のディレクトリ
+l_make_hook() {
+  cat >"$1" <<EOF
+# selftest の (f)・(g) のフック(BASH_ENV で読み込ませる)。対象で発火し、ファイルの印で 1 回だけ。条件の外では builtin を呼ぶだけ。
+# 対象の set -eEu と ERR trap の下で走るので、失敗しうるコマンドには || true を付ける
+cd() {
+  if [ "$2" = cd ] && [ \$# -gt 0 ] && { [ "\${!#}" = "$3" ] || [ "\${!#}" = "./$3" ]; } && [ ! -e "$L_MARK" ]; then
+    : >"$L_MARK" 2>/dev/null || true
+    "$REAL_RMDIR" -- "$3" 2>/dev/null || true
+    "$REAL_LN" -s -- "$5" "$3" 2>/dev/null || true
+  fi
+  builtin cd "\$@"
+}
+pwd() {
+  builtin pwd "\$@"
+  if [ "$2" = pwd ] && [ ! -e "$L_MARK" ] && [ "\$(builtin pwd -P)" = "$4" ]; then
+    : >"$L_MARK" 2>/dev/null || true
+    "$REAL_MV" -- "$4" "$4.moved" 2>/dev/null || true
+    "$REAL_LN" -s -- "$5" "$4" 2>/dev/null || true
+  fi
+  return 0
+}
+EOF
+}
+
+# (a) 既定名で .claude/reviews が外を指す symlink
+la="$L_DIR/a"; mkdir -p "$la/proj/.claude" "$la/out"; "$REAL_LN" -s "$la/out" "$la/proj/.claude/reviews"
+l_run "$la/proj" "$L_CWD"; rc=$?
+l_assert_stopped "置き場の経路: (a) 既定名で .claude/reviews が外を指す symlink" "$rc" "既定のログ置き場" "$la/out"
+
+# (b) 既定名で .claude が外を指す symlink
+lb="$L_DIR/b"; mkdir -p "$lb/proj" "$lb/out"; "$REAL_LN" -s "$lb/out" "$lb/proj/.claude"
+l_run "$lb/proj" "$L_CWD"; rc=$?
+l_assert_stopped "置き場の経路: (b) 既定名で .claude が外を指す symlink" "$rc" "既定のログ置き場" "$lb/out"
+
+# (c) 明示の --log-file(起動時の cwd の中)で置き場の経路に symlink
+lc="$L_DIR/c"; mkdir -p "$lc/proj/.claude" "$lc/out"; "$REAL_LN" -s "$lc/out" "$lc/proj/.claude/reviews"
+l_run "$lc/proj" "$L_CWD" --log-file "$lc/proj/.claude/reviews/reviewer-stubrunner-iter1.md"; rc=$?
+l_assert_stopped "置き場の経路: (c) 明示の --log-file で置き場の経路に symlink" "$rc" "--log-file の置き場" "$lc/out"
+
+# (c2) .claude/reviews が基点そのものを指す symlink + 明示の --log-file(最も深い一致でなく最初の一致で基点を決めるので、
+#      .claude の後ろの reviews を検査して止まる。基点の直下に x.md を書かない)
+lc2="$L_DIR/c2"; mkdir -p "$lc2/proj/.claude"; "$REAL_LN" -s "$lc2/proj" "$lc2/proj/.claude/reviews"
+l_run "$lc2/proj" "$L_CWD" --log-file "$lc2/proj/.claude/reviews/x.md"; rc=$?
+l_assert_stopped "置き場の経路: (c2) .claude/reviews が基点そのものを指す symlink + 明示の --log-file" "$rc" "--log-file の置き場" "" "$lc2/proj/x.md"
+
+# (d) 検査と作成の間に置かれた symlink: PATH の先頭に置いた mkdir の包みが、作ろうとする置き場(mkdir -- reviews の形と
+#     mkdir -p .claude/reviews の形の両方)に先に外を指す symlink を置いてから本物の mkdir を呼ぶ
+ld="$L_DIR/d"; mkdir -p "$ld/proj/.claude" "$ld/out" "$ld/mkdirbin"
+cat >"$ld/mkdirbin/mkdir" <<EOF
+#!/usr/bin/env bash
+if [ \$# -gt 0 ]; then
+  case "\${!#}" in
+    reviews|.claude/reviews)
+      if [ ! -e "\${!#}" ] && [ ! -L "\${!#}" ]; then "$REAL_LN" -s -- "$ld/out" "\${!#}"; fi ;;
+  esac
+fi
+exec "$REAL_MKDIR" "\$@"
+EOF
+chmod +x "$ld/mkdirbin/mkdir"
+K_PATH="$ld/mkdirbin:$K_SANDBOX"
+l_run "$ld/proj" "$L_CWD"; rc=$?
+K_PATH="$K_SANDBOX"
+ld_name="置き場の経路: (d) 検査と作成の間に置かれた symlink"
+if [ -L "$ld/proj/.claude/reviews" ]; then ok "$ld_name: 治具(mkdir の包み)が置き場に symlink を置いた"; else
+  ng "$ld_name: 治具(mkdir の包み)が置き場に symlink を置いた"; fi
+l_assert_stopped "$ld_name" "$rc" "既定のログ置き場" "$ld/out"
+
+# (f) 検査の後・cd の前の差し替え: cd の関数が、置き場の階層(reviews)へ入る呼び出しの前に、その階層を外を指す symlink に差し替える
+lf="$L_DIR/f"; mkdir -p "$lf/proj/.claude/reviews" "$lf/out"
+lf_phys="$(cd "$lf/proj" && pwd -P)"
+l_make_hook "$lf/hook.sh" cd reviews "$lf_phys/.claude/reviews" "$lf/out"
+rm -f "$L_MARK"
+L_EXTRA=("BASH_ENV=$lf/hook.sh")
+l_run "$lf/proj" "$L_CWD"; rc=$?
+L_EXTRA=()
+lf_name="置き場の経路: (f) 検査の後・cd の前の差し替え"
+if [ -e "$L_MARK" ]; then ok "$lf_name: フックが発火した(cd の最後の引数が階層名)"; else
+  ng "$lf_name: フックが発火した(cd の最後の引数が階層名)"; fi
+l_assert_stopped "$lf_name" "$rc" "既定のログ置き場" "$lf/out"
+
+# (g) 固定の後・開く前の差し替え: pwd の関数が、置き場の中で呼ばれた後に、置き場を退かして外を指す symlink を置く。
+#     相対名で開くので、ログは退かした置き場に書かれ、外には書かれない
+lg="$L_DIR/g"; mkdir -p "$lg/proj/.claude/reviews" "$lg/out"
+lg_phys="$(cd "$lg/proj" && pwd -P)"
+l_make_hook "$lg/hook.sh" pwd reviews "$lg_phys/.claude/reviews" "$lg/out"
+rm -f "$L_MARK"
+L_EXTRA=("BASH_ENV=$lg/hook.sh")
+l_run "$lg/proj" "$L_CWD"; rc=$?
+L_EXTRA=()
+lg_name="置き場の経路: (g) 固定の後・開く前の差し替え"
+check "$lg_name: スクリプトが終わる" 0 "$rc"
+if [ -e "$L_MARK" ]; then ok "$lg_name: フックが発火した(pwd -P が置き場の物理パス)"; else
+  ng "$lg_name: フックが発火した(pwd -P が置き場の物理パス)"; fi
+if l_empty "$lg/out"; then ok "$lg_name: 外に書かない(リンク先が空)"; else
+  ng "$lg_name: 外に書かない(リンク先が空)(残存: $(find "$lg/out" -mindepth 1 | head -3 | tr '\n' ' '))"; fi
+if [ -s "$lg_phys/.claude/reviews.moved/reviewer-stubrunner-iter1.md" ]; then ok "$lg_name: ログは退かした置き場に書かれる"; else
+  ng "$lg_name: ログは退かした置き場に書かれる"; ls -la "$lg_phys/.claude" >&2 2>/dev/null; fi
+
+# (h) 基点の外の --log-file は開ける(基点の外は信頼するので、経路の symlink は辿る)
+lh="$L_DIR/h"; mkdir -p "$lh/proj" "$lh/real"; "$REAL_LN" -s "$lh/real" "$lh/link"
+l_run "$lh/proj" "$L_CWD" --log-file "$lh/link/logs/x.md"; rc=$?
+lh_name="置き場の経路: (h) 基点の外の --log-file"
+if check "$lh_name: 開ける" 0 "$rc"; then
+  if [ -f "$lh/real/logs/x.md" ]; then ok "$lh_name: リンク先にログがある"; else ng "$lh_name: リンク先にログがある"; fi
+  if l_note_is "$lh/real/logs/x.md"; then ok "$lh_name: NOTE: ログ: が絶対パスでそのログを指す"; else
+    ng "$lh_name: NOTE: ログ: が絶対パスでそのログを指す"; cat "$CASE_ERR" >&2; fi
+fi
+
+# (i) 起動場所と --cwd を分けたときの既定名は、起動場所の .claude/reviews に出る(--cwd の下には作らない)
+li="$L_DIR/i"; mkdir -p "$li/launch" "$li/cwd"
+l_run "$li/launch" "$li/cwd"; rc=$?
+li_name="置き場の経路: (i) 起動場所と --cwd を分けた既定名"
+if check "$li_name: 成功する" 0 "$rc"; then
+  if [ -f "$li/launch/.claude/reviews/reviewer-stubrunner-iter1.md" ]; then ok "$li_name: 起動場所の .claude/reviews に出る"; else
+    ng "$li_name: 起動場所の .claude/reviews に出る"; fi
+  if [ ! -e "$li/cwd/.claude" ] && [ ! -L "$li/cwd/.claude" ]; then ok "$li_name: --cwd の下には作らない"; else
+    ng "$li_name: --cwd の下には作らない"; fi
+fi
+
+# (j) 相対の --log-file: plain.md・./x.md は起動時の cwd の直下、../x.md は起動時の cwd の親に開ける
+lj="$L_DIR/j"; mkdir -p "$lj/proj"
+for lj_spec in "plain.md|$lj/proj/plain.md" "./x.md|$lj/proj/x.md" "../x.md|$lj/x.md"; do
+  lj_arg="${lj_spec%%|*}"; lj_want="${lj_spec#*|}"
+  l_run "$lj/proj" "$L_CWD" --log-file "$lj_arg"; rc=$?
+  lj_name="置き場の経路: (j) 相対の --log-file $lj_arg"
+  if check "$lj_name: 開ける" 0 "$rc"; then
+    if [ -f "$lj_want" ]; then ok "$lj_name: 置き場は $lj_want"; else ng "$lj_name: 置き場は $lj_want"; fi
+    if l_note_is "$lj_want"; then ok "$lj_name: NOTE: ログ: が絶対パスでそのログを指す"; else
+      ng "$lj_name: NOTE: ログ: が絶対パスでそのログを指す"; cat "$CASE_ERR" >&2; fi
+  fi
+done
+
+# ログのパス・置き場に関わる usage の失敗は、どれも ERROR [usage] の行に置き場の語(既定名は「既定のログ置き場」、明示は
+# 「--log-file の置き場」)を含む(呼び出し側はこの語で置き場の理由の停止と判定する)。exit 2・ランナーを起動しない・NOTE: ログ: が無い
+l_assert_word() { # $1=ケース名 $2=実際の exit $3=置き場の語
+  lw_name="$1"; lw_rc="$2"; lw_word="$3"
+  if [ "$lw_rc" -eq 2 ] && grep -qE '^ERROR \[usage\] ' "$CASE_ERR"; then ok "$lw_name: exit 2 で ERROR [usage] の行が出る"; else
+    ng "$lw_name: exit 2 で ERROR [usage] の行が出る(実際 exit=$lw_rc)"; cat "$CASE_ERR" >&2; fi
+  if grep -E '^ERROR \[usage\] ' "$CASE_ERR" | grep -qF -- "$lw_word"; then ok "$lw_name: ERROR [usage] の行に「$lw_word」がある"; else
+    ng "$lw_name: ERROR [usage] の行に「$lw_word」がある"; cat "$CASE_ERR" >&2; fi
+  if [ ! -e "$SIDEEFFECT" ]; then ok "$lw_name: ランナーを起動しない"; else ng "$lw_name: ランナーを起動しない(副作用ファイルが作られた)"; fi
+  if ! grep -q '^NOTE: ログ: ' "$CASE_ERR"; then ok "$lw_name: NOTE: ログ: が無い"; else
+    ng "$lw_name: NOTE: ログ: が無い"; cat "$CASE_ERR" >&2; fi
+}
+
+# (k) 置き場が在って書けない(chmod 555): 既定名・明示の両方で止まる。root は書けてしまうので飛ばす
+lk="$L_DIR/k"; mkdir -p "$lk/proj/.claude/reviews"
+lk_name="置き場の経路: (k) 置き場が在って書けない"
+if [ "$(id -u)" -ne 0 ]; then
+  chmod 555 "$lk/proj/.claude/reviews"
+  l_run "$lk/proj" "$L_CWD"; rc=$?
+  l_assert_word "$lk_name(既定名)" "$rc" "既定のログ置き場"
+  l_run "$lk/proj" "$L_CWD" --log-file "$lk/proj/.claude/reviews/x.md"; rc=$?
+  l_assert_word "$lk_name(明示の --log-file)" "$rc" "--log-file の置き場"
+  chmod 755 "$lk/proj/.claude/reviews"
+else
+  ok "$lk_name(既定名): root のため飛ばす"
+  ok "$lk_name(明示の --log-file): root のため飛ばす"
+fi
+
+# (k2) 名前に既にエントリが在る: 引数の直後の早い検査は、語彙的に正規化したパスで見る(a/link/../x.md は a/x.md。
+#      link の先を辿って proj/x.md を見ない)
+lk2="$L_DIR/k2"; mkdir -p "$lk2/proj/a" "$lk2/proj/b"; : >"$lk2/proj/a/x.md"; "$REAL_LN" -s "$lk2/proj/b" "$lk2/proj/a/link"
+l_run "$lk2/proj" "$L_CWD" --log-file "$lk2/proj/a/link/../x.md"; rc=$?
+lk2_name="置き場の経路: (k2) 名前に既にエントリが在る(a/link/../x.md は a/x.md)"
+l_assert_word "$lk2_name" "$rc" "--log-file の置き場"
+if [ ! -e "$lk2/proj/x.md" ] && [ ! -L "$lk2/proj/x.md" ] && [ ! -s "$lk2/proj/a/x.md" ]; then
+  ok "$lk2_name: リンク先の側にも既存の名前にも書かない"
+else
+  ng "$lk2_name: リンク先の側にも既存の名前にも書かない"; ls -la "$lk2/proj" "$lk2/proj/a" >&2; fi
+
+# (k2′) (k2) の補い: 字面のパスの側の proj/x.md が在っても、正規化した a/x.md が無ければそこに開く(proj/x.md も b の側も触らない)
+lk3="$L_DIR/k2p"; mkdir -p "$lk3/proj/a" "$lk3/proj/b"; printf 'keep\n' >"$lk3/proj/x.md"; "$REAL_LN" -s "$lk3/proj/b" "$lk3/proj/a/link"
+l_run "$lk3/proj" "$L_CWD" --log-file "$lk3/proj/a/link/../x.md"; rc=$?
+lk3_name="置き場の経路: (k2′) proj/x.md が在っても a/x.md に開く(a/link/../x.md は a/x.md)"
+if check "$lk3_name: 開ける" 0 "$rc"; then
+  if [ -f "$lk3/proj/a/x.md" ] && [ ! -L "$lk3/proj/a/x.md" ]; then ok "$lk3_name: a/x.md にログがある"; else ng "$lk3_name: a/x.md にログがある"; fi
+  if l_note_is "$lk3/proj/a/x.md"; then ok "$lk3_name: NOTE: ログ: が a/x.md を指す"; else
+    ng "$lk3_name: NOTE: ログ: が a/x.md を指す"; cat "$CASE_ERR" >&2; fi
+  if [ "$(cat "$lk3/proj/x.md")" = keep ] && [ "$(wc -c <"$lk3/proj/x.md" | tr -d ' ')" -eq 5 ]; then
+    ok "$lk3_name: proj/x.md の中身と大きさが変わらない"
+  else
+    ng "$lk3_name: proj/x.md の中身と大きさが変わらない"; head -c 200 "$lk3/proj/x.md" >&2; fi
+  if l_empty "$lk3/proj/b"; then ok "$lk3_name: b の側に書かない"; else
+    ng "$lk3_name: b の側に書かない(残存: $(find "$lk3/proj/b" -mindepth 1 | head -3 | tr '\n' ' '))"; fi
 fi
 
 echo

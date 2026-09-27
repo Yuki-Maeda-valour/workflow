@@ -29,10 +29,20 @@
 #                           レビュー経路も必須だが渡すのは一時ツリー。実装経路は向きが反転し、
 #                           実リポジトリ(root)を渡す
 #   --model <名前>          ランナーへ渡すモデル名(省略・空はモデル指定フラグごと落とす)
-#   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md)。既にエントリが在るパスは usage。
-#                           既定名は、その番号の名前にエントリ(FIFO・symlink を含む)が在れば次の番号へ進む。
+#   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md。起動時の cwd の下で、--cwd とは別)。
+#                           既にエントリが在るパスは usage(語彙的に正規化したパスで見る)。既定名は、その番号の名前にエントリ
+#                           (FIFO・symlink を含む)が在れば次の番号へ進む。
+#                           ログのパス・置き場に関わる usage の失敗(置き場が symlink・差し替え・作れない・書けない・名前に既に
+#                           エントリが在る)は、どれも stderr の ERROR [usage] の行に「既定のログ置き場」か「--log-file の置き場」の語を含む。
+#                           置き場は物理パスで固定してから開く: 既定名は起動時の pwd -P を基点に、その下の .claude と .claude/reviews を、
+#                           明示は語彙的に正規化した置き場のうち、浅い順に最初に基点(起動時の pwd -P か --cwd の実体)と物理的に
+#                           一致した接頭辞より後ろを、階層ごとに symlink を拒み、cd -P の後の pwd -P の照合で固定し、その中で相対名で
+#                           開く。経路が symlink か差し替えられていれば usage(2)で止まり、ランナーは起動しない(--dry-run でも)。
+#                           基点の外の --log-file は信頼して mkdir -p で作る。相対の --log-file は起動時の cwd の下と読む
+#                           (plain.md・./x.md は起動時の cwd の直下、../x.md はその親)。
 #                           ログは作るときに 1 回だけ開き(noclobber)、以後の書き込みはすべてその fd に行う
-#                           (開いたものが通常ファイルでなければ usage)。開いたら stderr に "NOTE: ログ: <絶対パス>" を出す。
+#                           (開いたものが通常ファイルでなければ usage)。開いたら stderr に "NOTE: ログ: <パス>" を出す
+#                           (基点の中なら固定した物理パス、基点の外なら語彙的に正規化した絶対パス)。
 #                           ログを開く前の失敗(使い方の誤り・初期化より前の失敗)はログに書かず、stderr だけに出す
 #   --probe-timeout <秒>    疎通プローブのタイムアウト(既定 60。0 は不可)
 #   --run-timeout <秒>      本実行のタイムアウト(既定 1800。0 は不可)
@@ -51,7 +61,8 @@
 #   exit 0  stdout = 外部ランナーの生出力をそのまま
 #   exit 0  --dry-run のとき stdout = 解決後の起動コマンド
 #   exit>0  stdout = 得られた分の生出力 / stderr に "ERROR [理由コード] 説明"
-#   stderr には診断用の "NOTE:" 行も出る(ログを開いたら "NOTE: ログ: <絶対パス>"。記録のパスはここから取る。
+#   stderr には診断用の "NOTE:" 行も出る(ログを開いたら "NOTE: ログ: <パス>" — 基点の中なら固定した物理パス、
+#   基点の外なら語彙的に正規化した絶対パス。記録のパスはここから取る。
 #   走行中にログのパスが差し替えられたら "NOTE: ログのパスが走行中に差し替えられた: <パス>…")。
 #   成否の判定は終了コードと ERROR 行だけで行う(stdout の内容では判定しない)。
 #   「成果が残っているか」は呼び出し側がスナップショット比較で判定する(§12-7)。
@@ -66,9 +77,10 @@
 # 空文字の扱い: --model "" / --log-file "" は「省略」として受理する。
 #               --runner / --prompt-file / --cwd が空・未指定なら usage(2)。
 #
-# 中止(§12-8・2026-09-17 決定 41): TERM / HUP / INT を受けたら**走行中の外部ランナーの子プロセスを
-#         kill_tree で終了させてから**終了する。呼び出し側は背景実行するため中止操作は
-#         シグナルとしてこのスクリプトに届き、放置すると外部 CLI が書き込みモードのまま
+# 中止(§12-8・2026-09-17 決定 41): TERM / HUP / INT を受けたら**走行中の外部ランナーのプロセスグループと
+#         直接の子に kill_tree で終了のシグナルを送ってから**終了する(止まったことは確かめない。タイムアウトの
+#         経路で保持する PID は timeout のもので、timeout がプロセスグループに送る)。呼び出し側は背景実行するため
+#         中止操作はシグナルとしてこのスクリプトに届き、放置すると外部 CLI が書き込みモードのまま
 #         孤児として走り続け、§12-3 の「起動後の 5 要素の再取得と比較」がまだ書いている
 #         プロセスの傍らで行われることになる。
 #
@@ -254,9 +266,35 @@ case "$RUN_TIMEOUT" in ''|*[!0-9]*) fail_usage "--run-timeout は正の秒数" ;
 # 明示した `--log-file` は、既にエントリが在れば書かない。
 # 呼び出し側がタスク名と反復番号で名前を決めると、前の反復の外部ランナーが、その名前に外のファイルを指す
 # symlink やハードリンク・FIFO を先に置けるため(置き場は外部の書き込み範囲の中にある)。
-# FIFO は開くと待ち続けるので、開く前にここで止める(既定表の形・`--cwd` の実体・保護領域の検査より前に、使い方の誤りとして返す)
-if [ -n "$LOG_FILE" ] && { [ -e "$LOG_FILE" ] || [ -L "$LOG_FILE" ]; }; then
-  fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(上書きしない。symlink やハードリンクを経由して外のファイルへ書かないため。別の名前を渡す)"
+# FIFO は開くと待ち続けるので、開く前にここで止める(既定表の形・`--cwd` の実体・保護領域の検査より前に、使い方の誤りとして返す)。
+# 見るのは語彙的に正規化したパス(置き場 = dirname は、相対なら起動時の pwd -P の下と読み、`.` と空の階層を捨て、
+# `..` は 1 つ前の階層と相殺する。相殺する相手が無い `..` は捨てる)。ログの初期化も、この置き場と名前を使う
+lex_norm() { # $1=絶対パス → LEX
+  ln_rem="${1#/}"; ln_out=()
+  while [ -n "$ln_rem" ]; do
+    ln_seg="${ln_rem%%/*}"
+    if [ "$ln_seg" = "$ln_rem" ]; then ln_rem=""; else ln_rem="${ln_rem#*/}"; fi
+    case "$ln_seg" in
+      ""|.) : ;;
+      ..) if [ "${#ln_out[@]}" -gt 0 ]; then unset "ln_out[$((${#ln_out[@]} - 1))]"; ln_out=(${ln_out[@]+"${ln_out[@]}"}); fi ;;
+      *) ln_out[${#ln_out[@]}]="$ln_seg" ;;
+    esac
+  done
+  LEX=""
+  for ln_seg in ${ln_out[@]+"${ln_out[@]}"}; do LEX="$LEX/$ln_seg"; done
+  [ -n "$LEX" ] || LEX="/"
+}
+PHYS_PWD="$(pwd -P)"
+LOG_DIR=""; LOG_NAME=""; LOG_NORM=""
+if [ -n "$LOG_FILE" ]; then
+  LOG_DIR="$(dirname "$LOG_FILE")"
+  LOG_NAME="$(basename "$LOG_FILE")"
+  case "$LOG_DIR" in /*) : ;; *) LOG_DIR="$PHYS_PWD/$LOG_DIR" ;; esac
+  lex_norm "$LOG_DIR"; LOG_DIR="$LEX"
+  LOG_NORM="${LOG_DIR%/}/$LOG_NAME"
+  if [ -e "$LOG_NORM" ] || [ -L "$LOG_NORM" ]; then
+    fail_usage "--log-file のパスに既にエントリが在る: $LOG_NORM(--log-file の置き場 '$LOG_DIR' に同じ名前が先に置かれている。上書きしない。symlink やハードリンクを経由して外のファイルへ書かないため。別の名前を渡す)"
+  fi
 fi
 
 # ── 実装用既定表(信頼の基点。ここに無いランナーは受け付けない)──
@@ -323,7 +361,8 @@ elif command -v gtimeout >/dev/null 2>&1 && gtimeout -k 1 1 true >/dev/null 2>&1
 fi
 kill_tree() { # $1=pid。TERM → KILL_GRACE 秒 → KILL(timeout -k と同じ振る舞い)
   # フォールバック経路では monitor モードで起動するため pid == プロセスグループ ID。
-  # グループ・子プロセス・本体の 3 方向へ撃つ(いずれかが空振りしても残骸を残さない)
+  # いずれかが空振りしても、グループ・直接の子・本体のどれかに届くように 3 方向へ送る(送信の失敗は無視し、
+  # 止まったことは確かめない。setsid などでグループを抜けた子孫には届かない)
   kt_pid="$1"
   kill -TERM "-$kt_pid" 2>/dev/null || true
   pkill -TERM -P "$kt_pid" 2>/dev/null || true
@@ -344,7 +383,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   if [ -n "$CHILD_PID" ]; then kill_tree "$CHILD_PID"; CHILD_PID=""; fi
   note_log_swap
   log_line ""
-  log_line "**中止**: シグナル $os_sig を受信したため外部ランナーの子プロセスを終了させた(終了コード $os_code)"
+  log_line "**中止**: シグナル $os_sig を受信したため外部ランナーのプロセスグループと直接の子に終了のシグナルを送った(終了コード $os_code)"
   # 中止時点までに得られた生出力は残す(§12-8「失敗時は得られた分の生出力」。引き継ぎの手がかり)。
   # プローブ中の中止では RAW_OUT がまだ空なので、プローブの生出力だけが手がかりになる。
   if [ -n "$PROBE_OUT" ] && [ -s "$PROBE_OUT" ]; then
@@ -354,7 +393,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
     log_block "生出力(中止時点まで)" "$RAW_OUT"
     cat "$RAW_OUT" >&9 2>/dev/null || true
   fi
-  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーの子プロセスは終了させた)" >&8
+  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーのプロセスグループと直接の子に終了のシグナルを送った)" >&8
   exit "$os_code"   # EXIT trap が一時領域を後始末する
 }
 # 非対話 shell の非同期ジョブは SIGINT を無視するため、INT は「保険」として捕捉する
@@ -574,62 +613,144 @@ STATE_DIR="$(mktemp -d "$STATE_BASE/implement-XXXXXX")" || die 20 internal "保�
 # 開けたら、開いたものが通常ファイルかを /dev/fd/7 で確かめる。通常ファイルでなければ、既定名・明示の
 # どちらでも止まる(開く前の検査で何も無かったのに通常ファイルでないのは、検査と作成の間の差し替えか、
 # この環境では /dev/fd で確かめられないかのどちらかで、どちらも止めるのが安全側)。
-# 戻り値: 0=通常ファイルを開けた / 1=開けない(そのパスの有無で、呼び出し側が番号の衝突と作れないを分ける)
-open_log() { # $1=パス
+# 戻り値: 0=通常ファイルを開けた / 1=開けない(そのパスの有無で、呼び出し側が番号の衝突と作れないを分ける)。
+# 止まるときの行には置き場の語(PIN_LABEL。既定名・明示のどちらの呼び出しでも、呼ぶ前に設定する)を含める
+open_log() { # $1=パス(固定した置き場の中で開くときは、その中の相対名)
   ol_path="$1"
   set -o noclobber
   if { exec 7>"$ol_path"; } 2>/dev/null; then
     set +o noclobber
     if [ -f /dev/fd/7 ]; then return 0; fi
     exec 7>&-
-    fail_usage "ログを開けたが通常ファイルでない: $ol_path(検査と作成の間に差し替えられたか、この環境では /dev/fd で開いたファイルを確かめられない)"
+    fail_usage "$PIN_LABEL のログを開けたが通常ファイルでない: $ol_path(検査と作成の間に差し替えられたか、この環境では /dev/fd で開いたファイルを確かめられない)"
   fi
   set +o noclobber
   return 1
 }
-# 置き場が作れないケースを事前に潰す(生の mkdir エラー + internal(20) では理由が伝わらない)
+# 置き場は外部の書き込み範囲の中にある(外部 implementer は `.claude` や `.claude/reviews` を外を指す symlink に差し替えられる)。
+# 置き場は物理パスで固定してから、その中で相対名で開く(pin_dir):
+#   基点へ cd -P し、pwd -P が基点と一致することを確かめる → 階層ごとに、symlink なら止める / 無ければ `mkdir -- <階層名>`
+#   (-p なし。失敗したらもう一度 symlink を見てから止める)/ cd -P で入り、pwd -P が「1 つ上の物理パス + / + 階層名」と
+#   一致することを確かめる → 最後の置き場の中で相対名で開く → 起動時の cwd へ戻る。
+# 止まるときは usage(2)で、ランナーは起動せず(--dry-run でも)、ログの外への書き込みも置き場の外への mkdir も起きない。
+# `cd`・`pwd` は素の名前で呼ぶ(builtin・command を付けない。selftest が BASH_ENV の関数で包んで、検査と cd の間・
+# 固定と開く間の差し替えを起こすため)。
+# 既定名の置き場は起動時の cwd の .claude/reviews(--cwd とは別)で、基点は起動時の pwd -P。明示の --log-file は、語彙的に
+# 正規化した置き場(引数の検査で求めた LOG_DIR)の接頭辞を `/` から浅い順に見て、最初に基点の候補(起動時の pwd -P と
+# --cwd の実体)のどれかと物理的に一致した接頭辞より後ろの階層を全部検査する(diff-snapshot.sh の check_out_path と同じく
+# 最初の一致で決める。最も深い一致にすると、`.claude/reviews` を基点そのものを指す symlink にされたときに検査する範囲が
+# 空になる)。一致する接頭辞が無ければ基点の外として信頼し、正規化したパスを mkdir -p で作って開く。
+# ログのパス・置き場に関わる usage の失敗(symlink・差し替え・作れない・書けない・名前に既にエントリが在る)は、どれも
+# ERROR [usage] の行に「既定のログ置き場」か「--log-file の置き場」の語を含める(呼び出し側は、この語で置き場の理由の
+# 停止と判定し、内蔵へ縮退しない)。生の mkdir エラー + internal(20) では理由が伝わらない
+PIN_DIR=""
+PIN_LABEL=""
+pin_dir() { # $1=基点(物理パス) $2=基点からの相対パス(検査する階層。空なら基点そのもの)→ PIN_DIR(cwd もそこ)
+  pd_expect="$1"; pd_rem="$2"
+  cd -P -- "$pd_expect" 2>/dev/null || fail_usage "$PIN_LABEL の基点へ入れない: $pd_expect"
+  pd_real="$(pwd -P)"
+  [ "$pd_real" = "$pd_expect" ] || fail_usage "$PIN_LABEL を固定できない。置き場の経路が symlink か差し替えられた: $pd_expect(実体: $pd_real)"
+  while [ -n "$pd_rem" ]; do
+    pd_seg="${pd_rem%%/*}"
+    if [ "$pd_seg" = "$pd_rem" ]; then pd_rem=""; else pd_rem="${pd_rem#*/}"; fi
+    [ -n "$pd_seg" ] || continue
+    pd_child="${pd_expect%/}/$pd_seg"   # 基点が / のときに // を作らない
+    if [ -L "$pd_seg" ]; then
+      fail_usage "$PIN_LABEL を固定できない。置き場の経路が symlink か差し替えられた: $pd_child(辿らずに止まる。置き場を実ディレクトリにする)"
+    fi
+    if [ ! -e "$pd_seg" ]; then
+      if ! mkdir -- "$pd_seg" 2>/dev/null; then
+        if [ -L "$pd_seg" ]; then
+          fail_usage "$PIN_LABEL を固定できない。置き場の経路が symlink か差し替えられた: $pd_child(検査と作成の間に置かれた)"
+        fi
+        [ -d "$pd_seg" ] || fail_usage "$PIN_LABEL を作れない: $pd_child(書けないなら --log-file で別の置き場を指定する)"
+      fi
+    elif [ ! -d "$pd_seg" ]; then
+      fail_usage "$PIN_LABEL を固定できない。置き場の経路が通常のディレクトリでない: $pd_child"
+    fi
+    # `./` を前に付ける(`-` という名前の階層を、cd が `--` の後でも OLDPWD と読むため)
+    cd -P -- "./$pd_seg" 2>/dev/null || fail_usage "$PIN_LABEL へ入れない: $pd_child"
+    pd_expect="$pd_child"
+    pd_real="$(pwd -P)"
+    [ "$pd_real" = "$pd_expect" ] || fail_usage "$PIN_LABEL を固定できない。置き場の経路が symlink か差し替えられた: $pd_expect(実体: $pd_real。検査の後に差し替えられた)"
+  done
+  PIN_DIR="$pd_expect"
+}
+ORIG_PWD="$PWD"
 if [ -z "$LOG_FILE" ]; then
   LOG_DIR=".claude/reviews"
-  mkdir -p "$LOG_DIR" 2>/dev/null \
-    || fail_usage "既定のログ置き場 '$LOG_DIR' を作れない(カレントディレクトリに書けないなら --log-file で置き場を指定する)"
+  PIN_LABEL="既定のログ置き場 '$LOG_DIR'"
+  pin_dir "$PHYS_PWD" "$LOG_DIR"
   # その番号の名前にエントリが在れば(FIFO・それを指す symlink・/dev/null を指す symlink を含む)、開こうとせずに
   # 次の番号へ進む(FIFO は開くと待ち続け、/dev/null を指す symlink は開けてしまいログが消える)。
   # 無ければ開く。検査と作成の間に同時に走った別プロセスが同じ番号を取りうるので、noclobber で
-  # 「開けたら自分のもの」にする
+  # 「開けたら自分のもの」にする。名前は固定した置き場の中の相対名(開く瞬間に置き場のエントリが差し替えられても外へ行かない)
   iter=1
   while :; do
-    LOG_FILE_TRY="$LOG_DIR/implementer-${RUNNER}-iter${iter}.md"
+    LOG_FILE_TRY="implementer-${RUNNER}-iter${iter}.md"
     if [ -e "$LOG_FILE_TRY" ] || [ -L "$LOG_FILE_TRY" ]; then iter=$((iter + 1)); continue; fi
     if open_log "$LOG_FILE_TRY"; then break; fi
     # 開けなかったのに**そのパスが存在しない**なら、番号の衝突ではない
     # (置き場に書き込めない等)。再採番しても解消しないので止める。
     # そのパスが在れば(リンク先の無い symlink を含む)、別プロセスとの番号の衝突として次の番号へ進む
     if [ ! -e "$LOG_FILE_TRY" ] && [ ! -L "$LOG_FILE_TRY" ]; then
-      fail_usage "ログを作れない: $LOG_FILE_TRY(置き場 '$LOG_DIR' に書き込めない。--log-file で別の置き場を指定する)"
+      fail_usage "既定のログ置き場 '$LOG_DIR' に書き込めない: ${PIN_DIR%/}/$LOG_FILE_TRY(ログを作れない。--log-file で別の置き場を指定する)"
     fi
     iter=$((iter + 1))
   done
-  LOG_FILE="$LOG_FILE_TRY"
+  LOG_FILE="${PIN_DIR%/}/$LOG_FILE_TRY"
 else
-  LOG_DIR="$(dirname "$LOG_FILE")"
-  mkdir -p "$LOG_DIR" 2>/dev/null \
-    || fail_usage "--log-file の置き場 '$LOG_DIR' を作れない: $LOG_FILE"
-  # 検査と作成の間に置かれた通常ファイル・リンク先の無い symlink・ディレクトリは、開けずにここで止まる
-  if ! open_log "$LOG_FILE"; then
-    fail_usage "--log-file を作れない: $LOG_FILE(既にエントリが在るか、置き場に書き込めない。別の名前を渡す)"
+  PIN_LABEL="--log-file の置き場 '$LOG_DIR'"
+  PIN_BASE=""; PIN_REL=""
+  pf_acc="/"; pf_rem="${LOG_DIR#/}"
+  while :; do
+    pf_real="$(real_dir "$pf_acc")" || pf_real=""
+    if [ -n "$pf_real" ] && { [ "$pf_real" = "$PHYS_PWD" ] || [ "$pf_real" = "$EXCL_CWD" ]; }; then
+      PIN_BASE="$pf_real"; PIN_REL="$pf_rem"; break
+    fi
+    [ -n "$pf_rem" ] || break
+    pf_seg="${pf_rem%%/*}"; pf_acc="${pf_acc%/}/$pf_seg"
+    if [ "$pf_seg" = "$pf_rem" ]; then pf_rem=""; else pf_rem="${pf_rem#*/}"; fi
+  done
+  if [ -n "$PIN_BASE" ]; then
+    pin_dir "$PIN_BASE" "$PIN_REL"
+    LOG_FILE="${PIN_DIR%/}/$LOG_NAME"
+    if [ -e "$LOG_NAME" ] || [ -L "$LOG_NAME" ]; then
+      fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(--log-file の置き場 '$LOG_DIR' に同じ名前が先に置かれている。上書きしない。symlink やハードリンクを経由して外のファイルへ書かないため。別の名前を渡す)"
+    fi
+    # 検査と作成の間に置かれた通常ファイル・リンク先の無い symlink・ディレクトリは、開けずにここで止まる
+    if ! open_log "$LOG_NAME"; then
+      if [ -e "$LOG_NAME" ] || [ -L "$LOG_NAME" ]; then
+        fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(--log-file の置き場 '$LOG_DIR' に、検査と作成の間に同じ名前が置かれた。上書きしない。別の名前を渡す)"
+      fi
+      fail_usage "--log-file の置き場 '$LOG_DIR' に書き込めない: $LOG_FILE(ログを作れない。別の置き場を渡す)"
+    fi
+  else
+    mkdir -p -- "$LOG_DIR" 2>/dev/null \
+      || fail_usage "--log-file の置き場 '$LOG_DIR' を作れない: $LOG_NORM"
+    LOG_FILE="$LOG_NORM"
+    if [ -e "$LOG_FILE" ] || [ -L "$LOG_FILE" ]; then
+      fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(--log-file の置き場 '$LOG_DIR' に同じ名前が先に置かれている。上書きしない。symlink やハードリンクを経由して外のファイルへ書かないため。別の名前を渡す)"
+    fi
+    if ! open_log "$LOG_FILE"; then
+      if [ -e "$LOG_FILE" ] || [ -L "$LOG_FILE" ]; then
+        fail_usage "--log-file のパスに既にエントリが在る: $LOG_FILE(--log-file の置き場 '$LOG_DIR' に、検査と作成の間に同じ名前が置かれた。上書きしない。別の名前を渡す)"
+      fi
+      fail_usage "--log-file の置き場 '$LOG_DIR' に書き込めない: $LOG_FILE(ログを作れない。別の置き場を渡す)"
+    fi
   fi
 fi
+# 起動時の cwd へ戻る(cd -P で戻すと相対パスの表示が変わるので、戻った先の物理パスの照合だけを行う)
+cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
+[ "$(pwd -P)" = "$PHYS_PWD" ] || die 20 internal "元の作業ディレクトリへ戻った先が起動時の物理パスと一致しない: $ORIG_PWD(実体: $(pwd -P)。起動時: $PHYS_PWD)"
 # 本実行とプローブは cd してから起動する(子 PID を掴むためサブシェルを使えない。2026-09-17 決定 41)。
-# 相対パスのままだと cd 後にプロンプトを見失い、走行中の差し替えの照合(ログのパスとの比較)もずれるので、
-# 先に絶対パスへ正規化する
-ORIG_PWD="$PWD"
-case "$LOG_FILE" in /*) : ;;
-  *) LOG_FILE="$(cd "$(dirname "$LOG_FILE")" && pwd -P)/$(basename "$LOG_FILE")" ;;
-esac
+# 相対パスのままだと cd 後にプロンプトを見失うので、先に絶対パスへ正規化する。
+# ログのパスは、基点の中なら固定した置き場の物理パス、基点の外なら語彙的に正規化した絶対パスで、
+# 走行中の差し替えの照合はこのパスと比べる
 case "$PROMPT_FILE" in /*) : ;;
   *) PROMPT_FILE="$(cd "$(dirname "$PROMPT_FILE")" && pwd -P)/$(basename "$PROMPT_FILE")" ;;
 esac
-# ログの絶対パスが決まってから、ログへ書き始める(走行中の差し替えの照合は、この絶対パスと比べる)
+# ログのパスが決まってから、ログへ書き始める
 LOG_FD_OPEN=1
 echo "NOTE: ログ: $LOG_FILE" >&2
 
@@ -647,7 +768,7 @@ echo "NOTE: ログ: $LOG_FILE" >&2
   printf -- '- プロンプトファイル: %s\n' "$PROMPT_FILE"
   printf -- '- タイムアウト: ヘルプ照合 %s 秒 / プローブ %s 秒 / 本実行 %s 秒(TERM → %s 秒 → KILL)\n' \
     "$HELP_TIMEOUT" "$PROBE_TIMEOUT" "$RUN_TIMEOUT" "$KILL_GRACE"
-  printf -- '- 中止の扱い: TERM / HUP / INT を受けたら外部ランナーの子プロセスを終了させてから終了する(終了コード 128+N)\n'
+  printf -- '- 中止の扱い: TERM / HUP / INT を受けたら外部ランナーのプロセスグループと直接の子に終了のシグナルを送ってから終了する(終了コード 128+N。止まったことは確かめない)\n'
   printf -- '- 起動形態: 呼び出し側は背景実行で起動する(最長およそ 1900 秒でホストのコマンド実行ツールの上限を超えるため)\n'
   printf -- '- git 操作: このスクリプトは git を呼ばない(スナップショット・退避・起動後の比較・引き継ぎ判定は implement-guard.sh が行う。前後に起動し diff を提示するのは呼び出し側)\n'
   printf -- '- 限界: プローブは読み取り専用モードで打つため、通っても本実行が書き込みモードで通る保証はない(判定 3′ のヘルプ照合と併せて補完する)\n'

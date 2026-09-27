@@ -87,7 +87,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 2. false positive は除去し、**除去理由を記録**する
 3. 深刻度(重大 / 高 / 中)× 確度(確実 / 要確認)を確定し、同一根本原因の指摘を統合する(基準は checks.md「深刻度・確度の基準」)
    - 候補モードでは、統合は指摘キーの単位(同じ観点群・同じ識別子)の中だけで行う(checks.md の「候補モードの識別子と観点群」)
-4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)
+4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
