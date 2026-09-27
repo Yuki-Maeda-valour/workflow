@@ -130,7 +130,7 @@ argument-hint: "<タスク内容の説明 | 候補_ のパス> [--refactor [対�
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、設計完了として扱わない
 2. team-lead が各指摘を実コードで再検証し、valid / invalid / needs-user に分類。invalid は理由を記録(盲信して自動反映しない)
 3. valid を反映 → **全レビュアー APPROVED(valid 指摘 0 件)まで反復**(design §5-10。コストを理由に反復を打ち切らない)。**フル段階では、修正後の再レビューを同じレビュアー(宛先)へ差し戻す**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17 フル段階)。宛先が失われている場合のみ新規起動にフォールバックする。**報告点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
-4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する
+4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 5. **設計レビューの行を残す**: 結末を問わず(`APPROVED` / `未収束` / `未完了`)、タスク MD の追加修正記録の節の末尾に設計レビューの行を 1 行足す。書式・判定の語・節の範囲は [references/task-template.md](references/task-template.md) の記法の規約が正本。ship-task の Phase 2 と別のセッションの工程はこの行で判定する(`.claude/reviews/` のログはキャッシュで、別の worktree・別の PC には無い — design §5-18 ①)。追加修正記録に書くのは設計レビューの行だけ。報告点でユーザーが打ち切りを選んだら、判定は `未収束`。既存のタスク MD を設計し直すときは、節の既存の行を残し、書き換える前に先に `未完了` の行を足す。行の `本文` には、行を足す時点のタスク MD の本文ダイジェストを `python3 {このスキルの}scripts/task-digest.py <タスク MD>` で算出して書く(ship-task の Phase 2 が、承認後に本文が変わっていないかをこの値で確かめる)。exit 0 以外・スクリプトや Python が無いときは `本文: 算出不能` と書き、その理由を報告する
 
 ## 最終ゲート(完了報告前セルフチェック)

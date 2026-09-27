@@ -113,7 +113,7 @@ argument-hint: "[議事録・文字起こし・資料ファイル...] [--analyze
 3. team-lead が各指摘を**入力原文と doc の実ファイルで裏取り**し、valid / invalid / needs-user にトリアージする(盲信しない。invalid は理由を記録)
 4. valid を反映案に修正 → 再レビュー
 5. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ
-6. 記録: `.claude/reviews/reflect-decisions-iter{N}.md`
+6. 記録: `.claude/reviews/reflect-decisions-iter{N}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 7. **実行段階**(design §5-17): 着手時にツールの実在で段階を決める。独立レビュアーを使えない環境ではレビュー未完了を報告し、反映完了として扱わない
 
 **3-4. ユーザー確認**: 精査済みの反映一覧(対象文書 / 分類 / 内容 / 出典)を提示する。以下は `--yes` でも必ず個別確認する:

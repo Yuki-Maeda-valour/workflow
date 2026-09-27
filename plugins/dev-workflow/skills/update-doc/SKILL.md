@@ -112,7 +112,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする
 4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ。`--unattended` では報告点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
-5. 記録: `.claude/reviews/update-doc-iter{N}.md`
+5. 記録: `.claude/reviews/update-doc-iter{N}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 6: 最終チェック
 

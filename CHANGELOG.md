@@ -2,6 +2,27 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.16.0
+
+### 変更
+
+- `review-agent.sh`・`implement-agent.sh` は、ログの置き場を物理パスで固定してから開く。既定名の基点は起動時の `pwd -P`(置き場は起動時の cwd の `.claude/reviews`)。明示した `--log-file` は、置き場を語彙的に正規化してから、基点(review は起動時の `pwd -P`、implement は起動時の `pwd -P` と `--cwd` の実体)に最初に一致した接頭辞より後ろの階層を、階層ごとに symlink の検査と `cd -P`・`pwd -P` の照合で固定し、置き場の中で相対名で開く。基点の外の `--log-file` は開ける(信頼する)。止まるときは usage(exit 2)で、ランナーを起動せず、stderr の `ERROR [usage] ` の行に `既定のログ置き場` か `--log-file の置き場` と、symlink・照合の不一致なら `置き場の経路が symlink か差し替えられた: <物理パス>` を出す(置き場を作れない・書けない・名前に既にエントリが在るときも同じ語を含む)。`NOTE: ログ:` は、基点の中なら固定した置き場の物理パス、基点の外なら語彙的に正規化した絶対パスで出す
+- do-task の外部 implementer の手順は、`--dry-run` と本実行の直前に `reviews-dir.sh ensure --root <管理ルート>` を打ち、共通工程の最後(④)にも打つ。起動の直前の検査が 0 以外のとき・スクリプトが置き場の理由の exit 2 で止まったときは、内蔵 implementer へ縮退せずに停止する。④ が 0 以外は比較不能(人の判断)
+- team-lead が `.claude/reviews/` に記録を書く 9 か所(do-task の Phase 6・トリアージ・リカバリ・create-task・update-doc・init-project・reflect-decisions・data-audit・候補モード)は、書く直前に同じ `reviews-dir.sh ensure` を打ち、0 以外なら書かずに停止する
+- レビュー経路(`review-agent.sh`)が置き場の理由の exit 2 で止まったときは、内蔵編成に縮退せず停止する(external-runners.md §10)
+- 中止・タイムアウトの文言を実態に合わせた(usage・ログ・stderr・external-runners.md): プロセスグループと直接の子に終了のシグナルを送り、止まったことは確かめない。external-runners.md の既知の限界に、team-lead の記録の名前が予測できることと、外部ランナーが残す常駐プロセスの 2 件を足した(14 件)。design §7-3 に、ホストの書き込みツールの挙動(名前の symlink・FIFO の拒否・ハードリンクの置き換え・親ディレクトリの symlink を辿る)を記録した
+- review・implement の selftest に `置き場の経路:` のケースを足した(既定名・明示の `--log-file`・基点そのものを指す symlink・検査と作成の間・検査と `cd` の間・固定と開く間の差し替え・基点の外・相対の `--log-file`・書けない置き場・名前に既にエントリが在る〈`..` を語彙的に解いた名前で見る〉)
+
+### 後方互換を破る変更
+
+- 起動時の cwd の `.claude` か `.claude/reviews`、または明示した `--log-file` の基点より後ろの経路が symlink なら、両スクリプトが usage(exit 2)で止まる(リンク先には作らない)。起動時の cwd と `--cwd` の間に symlink の階層がある呼び方も止まる。明示した `--log-file` の `..` は語彙的に解く(`a/link/../x.md` は `a/x.md`)
+- skill は、置き場(`.claude`・`.claude/reviews`)が symlink か通常のディレクトリでなければ、記録を書かずに止まる
+- do-task の外部 implementer とレビュー経路は、スクリプトが置き場の理由で止まったとき、内蔵へ縮退せずに止まる
+
+### 移行方法
+
+- 置き場(`.claude`・`.claude/reviews`)を実ディレクトリにする(symlink を消し、リンク先にある記録を移す)。スクリプトを直接呼ぶ場合は、`--cwd` に cd してから打つか、`--log-file` を `--cwd` の実体パスか基点の外で渡す
+
 ## v4.15.2
 
 ### 変更

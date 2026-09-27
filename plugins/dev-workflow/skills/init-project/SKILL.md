@@ -234,7 +234,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
    - **`.codex/config.toml` の append-only**: TOML が有効な形か・既存セクションとコメントが保持されているか(生成した場合のみ)
 3. **トリアージ**: 指摘は team-lead が実ファイルで裏取りし、valid のみ修正に反映(盲信しない。false positive は理由を記録)。
 4. **合格まで反復**: 全レビュアー APPROVED(valid 指摘 0)になるまで修正 → 再レビューを続ける。同一指摘が 2 回連続残存・5 ラウンド超過の場合は**勝手に打ち切らず**、状況を報告してユーザーの指示を仰ぐ(`APPROVED` に達しないまま完了報告しない)。
-5. 記録: `.claude/reviews/init-project-iter{N}.md`。
+5. 記録: `.claude/reviews/init-project-iter{N}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <プロジェクトルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)。
 
 ---
 
