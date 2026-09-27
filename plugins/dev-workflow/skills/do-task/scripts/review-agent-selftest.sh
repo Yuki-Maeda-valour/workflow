@@ -11,6 +11,10 @@
 # 期待終了コード: 0=成功 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #                 7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed 12=prompt-too-large
 #
+# K 節(ログの fd)のケースは、制限した PATH で打ち、対象の一時領域($TMPDIR の下の mktemp -d)を
+# このスイートの一時領域へ向ける(FIFO のケースが KILL で終わって対象の後始末が走らなくても、
+# 系の一時領域に残らないように)。
+#
 # 終了コード: 0=全件 PASS / 1=FAIL あり
 set -uo pipefail
 
@@ -264,8 +268,10 @@ make_sandbox "$WORK/sandbox-notimeout" timeout gtimeout
 
 leak_count() { ps -eo args 2>/dev/null | grep -c "^bash $WORK/bin/hangproc.sh"; }
 leak_cleanup() {
-  ps -eo pid,args 2>/dev/null | awk -v s="bash $WORK/bin/hangproc.sh" '$0 ~ "[0-9] "s {print $1}' \
-    | while read -r p; do kill -9 "$p" 2>/dev/null; done
+  for s in hangproc swaphold; do
+    ps -eo pid,args 2>/dev/null | awk -v s="bash $WORK/bin/$s.sh" '$0 ~ "[0-9] "s {print $1}' \
+      | while read -r p; do kill -9 "$p" 2>/dev/null; done
+  done
 }
 
 CASE_OUT="$WORK/case.out"
@@ -1196,18 +1202,20 @@ d4_run --runner stubrunner --command "$D4_CMD" --readonly-flag "--readonly-x" --
 check "明示のログ(既存のエントリ): ディレクトリを usage で拒む" 2 "$rc"
 
 # ログの初期化より前に die する形(既定表に無いランナーを --command で渡し、--readonly-flag を
-# 渡さない → no-readonly の die)で、外のファイルを指す symlink。die はログに書くので、検査が
-# その die より前に無いとリンク先へ追記する。前提として、既存のエントリが無い名前を渡すと、
-# 初期化より前の die がそのログへ書くことを先に確かめる(この形が初期化より前の die を通らないと、
-# 1 つ目と同じケースになる)
+# 渡さない → no-readonly の die)で、外のファイルを指す symlink。明示した --log-file の既存のエントリは、
+# 引数の検査の直後の早い検査が usage で止める。この検査が無いと、ログを開く位置まで進む形では FIFO で
+# 待ち続け、この形では usage でなく 5(no-readonly の die)で返る。前提として、既存のエントリの無い名前を
+# 渡すと、初期化より前の die で止まり、そのパスにエントリを作らない(ログを開く前の失敗はログに書かない)
+# ことを先に確かめる(「開く前の失敗:」。この形が初期化より前の die を通らないと、1 つ目と同じケースになる)
 d4_run --runner stubrunner --command "$D4_CMD" --prompt-file "$WORK/prompt.md" \
   --probe-timeout 10 --log-file "$D4_DIR/logs/early-fresh.md"; rc=$?
-if [ "$rc" -eq 5 ] && grep -qF '**結果**: ERROR [no-readonly]' "$D4_DIR/logs/early-fresh.md" 2>/dev/null \
-   && ! grep -qF '# 外部ランナー実行記録' "$D4_DIR/logs/early-fresh.md" 2>/dev/null; then
-  ok "初期化より前の die: --readonly-flag の欠けは、ログの初期化より前に明示したログへ書いて止まる(前提) (exit=$rc)"
+check "開く前の失敗: 初期化より前の die(--readonly-flag の欠け)は exit 5 で止まる" 5 "$rc"
+if grep -qE '^ERROR \[no-readonly\] ' "$CASE_ERR"; then ok "開く前の失敗: stderr に ERROR [no-readonly] が出る"; else
+  ng "開く前の失敗: stderr に ERROR [no-readonly] が出る"; cat "$CASE_ERR" >&2; fi
+if [ -e "$D4_DIR/logs/early-fresh.md" ] || [ -L "$D4_DIR/logs/early-fresh.md" ]; then
+  ng "開く前の失敗: 明示したパスにエントリを作らない"; cat "$D4_DIR/logs/early-fresh.md" >&2 2>/dev/null
 else
-  ng "初期化より前の die: --readonly-flag の欠けは、ログの初期化より前に明示したログへ書いて止まる(前提)(実際 exit=$rc)"
-  cat "$CASE_ERR" >&2
+  ok "開く前の失敗: 明示したパスにエントリを作らない"
 fi
 d4_reset_victim
 ln -s "$D4_VICTIM" "$D4_DIR/logs/symlink-early.md"
@@ -1217,6 +1225,324 @@ d4_run --runner stubrunner --command "$D4_CMD" --prompt-file "$WORK/prompt.md" \
 check "明示のログ(既存のエントリ): 初期化より前に die する形でも、外のファイルを指す symlink を usage で拒む" 2 "$rc"
 if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化より前に die する形でも、リンク先の中身が変わらない"; else
   ng "明示のログ(既存のエントリ): 初期化より前に die する形でも、リンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
+
+# ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
+# ケース名の接頭辞: 走行中の差し替え / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 / ログのパス /
+# 子に渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
+# どれもスタブと制限した PATH で打ち、対象の一時領域($TMPDIR)はこのスイートの一時領域へ向ける。
+# FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
+# (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
+# timeout か mkfifo が無い環境では、FIFO のケースを飛ばす(待ち続けて selftest が終わらないのを避ける)
+K_DIR="$WORK/k"
+rm -rf "$K_DIR"; mkdir -p "$K_DIR" "$K_DIR/tmp" "$K_DIR/wcbin" "$WORK/sandbox-k"
+make_sandbox "$WORK/sandbox-k"
+K_SANDBOX="$WORK/sandbox-k"
+K_TMP="$K_DIR/tmp"
+K_PATH="$K_SANDBOX"   # k_run の PATH(ケースごとにスタブのディレクトリを先頭に足す)
+K_TARGET=""           # 空なら $TARGET
+K_CWD=""              # 空ならスイートの cwd で打つ
+K_EXTRA=()            # 追加の環境変数(`VAR=値` の並び)
+K_FIFO_TIMEOUT=30
+K_PREV_TIMEOUT="$OUTER_TIMEOUT"
+REAL_LN="$(command -v ln)"
+REAL_MKFIFO="$(command -v mkfifo 2>/dev/null || true)"
+K_FIFO_OK=0
+if [ -n "$OUTER_TIMEOUT_BIN" ] && [ -n "$REAL_MKFIFO" ]; then K_FIFO_OK=1; fi
+K_VICTIM="$K_DIR/victim.txt"
+K_VICTIM_TEXT="外のファイルの中身(書き換えられてはならない)"
+k_reset_victim() { printf '%s\n' "$K_VICTIM_TEXT" >"$K_VICTIM"; }
+k_victim_same() { [ "$(cat "$K_VICTIM" 2>/dev/null)" = "$K_VICTIM_TEXT" ]; }
+k_run() { # 残り=引数。制限した PATH・このスイートの一時領域の TMPDIR で、guard を付けて打つ
+  rc=0
+  kr_target="${K_TARGET:-$TARGET}"
+  if [ -n "$K_CWD" ]; then
+    ( cd "$K_CWD" && guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$K_PATH" TMPDIR="$K_TMP" \
+        ${K_EXTRA[@]+"${K_EXTRA[@]}"} bash "$kr_target" "$@" ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  else
+    guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$K_PATH" TMPDIR="$K_TMP" \
+      ${K_EXTRA[@]+"${K_EXTRA[@]}"} bash "$kr_target" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  fi
+  if [ "$VERBOSE" -eq 1 ]; then
+    echo "--- args: $* (exit=$rc)"; echo "  stdout:"; sed 's/^/    /' "$CASE_OUT"; echo "  stderr:"; sed 's/^/    /' "$CASE_ERR"
+  fi
+  return "$rc"
+}
+
+# 本実行の間に、スクリプトが開いたログのパスを差し替えるスタブ(プローブは即答する)。
+# 差し替えた後は長く眠らない。中止のケース(SELFTEST_SWAP_HOLD=1)だけ、中止されるまで居座る(最長 60 秒)
+cat >"$WORK/bin/swaphold.sh" <<'EOF'
+#!/usr/bin/env bash
+i=0
+while [ "$i" -lt 60 ]; do sleep 1; i=$((i + 1)); done
+EOF
+cat >"$WORK/bin/stub-swap.sh" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do case "\$a" in *ping*) echo '{"verdict":"APPROVED","issues":[]}'; exit 0 ;; esac; done
+rm -f "\$SELFTEST_SWAP_LOG"
+case "\$SELFTEST_SWAP_MODE" in
+  symlink)  "$REAL_LN" -s "\$SELFTEST_SWAP_VICTIM" "\$SELFTEST_SWAP_LOG" ;;
+  hardlink) "$REAL_LN" "\$SELFTEST_SWAP_VICTIM" "\$SELFTEST_SWAP_LOG" ;;
+  fifo)     "$REAL_MKFIFO" "\$SELFTEST_SWAP_LOG" ;;
+esac
+echo '{"verdict":"APPROVED","issues":[]}'
+if [ "\${SELFTEST_SWAP_HOLD:-0}" = 1 ]; then
+  : >"\$SELFTEST_SWAP_MARKER"
+  exec bash "$WORK/bin/swaphold.sh"
+fi
+exit 0
+EOF
+# 渡された fd 7 が開いていれば、そこへ偽の行を書くスタブ(ログの fd が外部 CLI に渡ると、ログを偽造できる)
+cat >"$WORK/bin/stub-fd.sh" <<'EOF'
+#!/usr/bin/env bash
+{ printf 'FORGED: 外部 CLI がログの fd に書いた\n' >&7; } 2>/dev/null || true
+echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+# `wc` だけを失敗させるスタブ(最初の `wc` はプロンプト長の計測。ログを開いてプローブが済んだ後)
+cat >"$K_DIR/wcbin/wc" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+chmod +x "$WORK/bin/swaphold.sh" "$WORK/bin/stub-swap.sh" "$WORK/bin/stub-fd.sh" "$K_DIR/wcbin/wc"
+K_SWAP_CMD="bash $WORK/bin/stub-swap.sh --readonly-x"
+
+# 走行中の差し替え: (a) victim への symlink (b) victim へのハードリンク (c) FIFO。
+# 開いたファイルに書き続けるので victim は変わらず、スタブどおり exit 0 で終わり、差し替えを NOTE で知らせる。
+# (c) はログのパスを読むと FIFO で塞がるので、NOTE と終わったことだけを見る
+k_swap_case() { # $1=ラベル $2=差し替えの形(symlink|hardlink|fifo)
+  ks_label="$1"; ks_mode="$2"
+  ks_log="$K_DIR/swap-$ks_mode.md"
+  k_reset_victim
+  K_EXTRA=("SELFTEST_SWAP_MODE=$ks_mode" "SELFTEST_SWAP_LOG=$ks_log" "SELFTEST_SWAP_VICTIM=$K_VICTIM")
+  if [ "$ks_mode" = fifo ]; then OUTER_TIMEOUT="$K_FIFO_TIMEOUT"; fi
+  k_run --runner stubrunner --command "$K_SWAP_CMD" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+    --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$ks_log"; rc=$?
+  OUTER_TIMEOUT="$K_PREV_TIMEOUT"
+  K_EXTRA=()
+  check "走行中の差し替え: $ks_label: スクリプトが終わる(スタブどおりの終了コード)" 0 "$rc"
+  if grep -qF 'NOTE: ログのパスが走行中に差し替えられた:' "$CASE_ERR"; then
+    ok "走行中の差し替え: $ks_label: stderr に差し替えの NOTE が出る"
+  else
+    ng "走行中の差し替え: $ks_label: stderr に差し替えの NOTE が出る"; cat "$CASE_ERR" >&2
+  fi
+  if [ "$ks_mode" != fifo ]; then
+    if k_victim_same; then ok "走行中の差し替え: $ks_label: victim の中身が変わらない"; else
+      ng "走行中の差し替え: $ks_label: victim の中身が変わらない"; cat "$K_VICTIM" >&2; fi
+  fi
+}
+k_swap_case "(a) symlink" symlink
+k_swap_case "(b) ハードリンク" hardlink
+if [ "$K_FIFO_OK" -eq 1 ]; then
+  k_swap_case "(c) FIFO" fifo
+else
+  ok "走行中の差し替え: (c) FIFO: timeout か mkfifo が無いため飛ばす"
+fi
+
+# (d) (a) の差し替えの後、本実行の間に TERM を送る。中止の処理は本実行の stderr のリダイレクトが
+#     効いたまま走るので、差し替えの NOTE が消えずに元の stderr に出ることを見る
+leak_cleanup
+K_MARKER="$K_DIR/swap.marker"
+rm -f "$K_MARKER"
+k_reset_victim
+kd_log="$K_DIR/swap-term.md"
+env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$K_SANDBOX" TMPDIR="$K_TMP" \
+  SELFTEST_SWAP_MODE=symlink SELFTEST_SWAP_LOG="$kd_log" SELFTEST_SWAP_VICTIM="$K_VICTIM" \
+  SELFTEST_SWAP_HOLD=1 SELFTEST_SWAP_MARKER="$K_MARKER" \
+  bash "$TARGET" --runner stubrunner --command "$K_SWAP_CMD" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 45 --log-file "$kd_log" \
+  >"$CASE_OUT" 2>"$CASE_ERR" &
+kd_pid=$!
+waited=0
+while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+sleep 1
+if [ ! -e "$K_MARKER" ]; then
+  ng "走行中の差し替え: (d) 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
+  kill -9 "$kd_pid" 2>/dev/null; wait "$kd_pid" 2>/dev/null
+else
+  kill -TERM "$kd_pid" 2>/dev/null
+  rc=0; wait "$kd_pid" || rc=$?
+  if grep -qE '^ERROR \[aborted\] ' "$CASE_ERR"; then ok "走行中の差し替え: (d) 中止: stderr に ERROR [aborted] が出る"; else
+    ng "走行中の差し替え: (d) 中止: stderr に ERROR [aborted] が出る(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
+  if grep -qF 'NOTE: ログのパスが走行中に差し替えられた:' "$CASE_ERR"; then
+    ok "走行中の差し替え: (d) 中止: 差し替えの NOTE が中止の経路でも stderr に出る"
+  else
+    ng "走行中の差し替え: (d) 中止: 差し替えの NOTE が中止の経路でも stderr に出る"; cat "$CASE_ERR" >&2
+  fi
+  if k_victim_same; then ok "走行中の差し替え: (d) 中止: victim の中身が変わらない"; else
+    ng "走行中の差し替え: (d) 中止: victim の中身が変わらない"; cat "$K_VICTIM" >&2; fi
+fi
+leak_cleanup
+
+# 既定名の置き場: 既定の置き場の iter1 に (a) FIFO (b) /dev/null を指す symlink を置く。
+# その番号の名前にエントリが在れば開かずに次の番号へ進むので、iter2 に通常ファイルのログを作って exit 0 で終わる
+k_deflog_case() { # $1=ラベル $2=形(fifo|devnull)
+  kl_label="$1"; kl_kind="$2"
+  kl_dir="$K_DIR/deflog-$kl_kind"
+  rm -rf "$kl_dir"; mkdir -p "$kl_dir/.claude/reviews"
+  kl_iter1="$kl_dir/.claude/reviews/reviewer-stubrunner-iter1.md"
+  kl_iter2="$kl_dir/.claude/reviews/reviewer-stubrunner-iter2.md"
+  case "$kl_kind" in
+    fifo) "$REAL_MKFIFO" "$kl_iter1" ;;
+    devnull) "$REAL_LN" -s /dev/null "$kl_iter1" ;;
+  esac
+  K_CWD="$kl_dir"
+  OUTER_TIMEOUT="$K_FIFO_TIMEOUT"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20; rc=$?
+  OUTER_TIMEOUT="$K_PREV_TIMEOUT"
+  K_CWD=""
+  check "既定名の置き場: $kl_label: exit 0 で終わる" 0 "$rc"
+  if [ -f "$kl_iter2" ] && [ ! -L "$kl_iter2" ]; then ok "既定名の置き場: $kl_label: iter2 が通常ファイル"; else
+    ng "既定名の置き場: $kl_label: iter2 が通常ファイル"; fi
+  kl_same=0
+  case "$kl_kind" in
+    fifo) if [ -p "$kl_iter1" ] && [ ! -L "$kl_iter1" ]; then kl_same=1; fi ;;
+    devnull) if [ -L "$kl_iter1" ] && [ "$(readlink "$kl_iter1")" = /dev/null ]; then kl_same=1; fi ;;
+  esac
+  if [ "$kl_same" -eq 1 ]; then ok "既定名の置き場: $kl_label: iter1 はそのまま"; else
+    ng "既定名の置き場: $kl_label: iter1 はそのまま"; fi
+}
+if [ "$K_FIFO_OK" -eq 1 ]; then
+  k_deflog_case "(a) FIFO" fifo
+else
+  ok "既定名の置き場: (a) FIFO: timeout か mkfifo が無いため飛ばす"
+fi
+k_deflog_case "(b) /dev/null を指す symlink" devnull
+
+# ERR のログ: `wc` だけを失敗させるスタブで、ログを開いてプローブが済んだ後(プロンプト長の計測)に
+# 主シェルの ERR を起こす。ログにも結果行を書く
+K_PATH="$K_DIR/wcbin:$K_SANDBOX"
+k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/err-log.md"; rc=$?
+K_PATH="$K_SANDBOX"
+if [ "$rc" -eq 20 ] && grep -qF '**結果**: ERROR [internal]' "$K_DIR/err-log.md" 2>/dev/null; then
+  ok "ERR のログ: ログを開いた後の想定外の失敗は、ログに **結果**: ERROR [internal] の行を書く (exit=$rc)"
+else
+  ng "ERR のログ: ログを開いた後の想定外の失敗は、ログに **結果**: ERROR [internal] の行を書く(実際 exit=$rc)"
+  cat "$CASE_ERR" >&2
+fi
+
+# ERR の生出力: 写しの本実行の行の直後に `false` を 1 行差し込み、生出力の後で ERR を起こす。
+# 得られた分の生出力はログの節にだけ残す(stdout には出さない)。写しが当たったこと(差し込んだ行が 1 つ)を先に確かめる
+K_RUN_LINE='run_timeout "$RUN_TIMEOUT" "${CMD[@]}" </dev/null >"$RAW_OUT" 2>"$RAW_ERR" || rc=$?'
+K_ERRRAW_TARGET="$K_DIR/err-raw-target.sh"
+awk -v anchor="$K_RUN_LINE" '{ print } $0 == anchor { print "false" }' "$TARGET" >"$K_ERRRAW_TARGET"
+if [ "$(grep -cxF 'false' "$K_ERRRAW_TARGET")" -ne "$(( $(grep -cxF 'false' "$TARGET") + 1 ))" ]; then
+  ng "ERR の生出力: 写しの治具(本実行の行の直後に false を差し込む)が当たらない"
+else
+  K_TARGET="$K_ERRRAW_TARGET"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/err-raw.md"; rc=$?
+  K_TARGET=""
+  if grep -qF '### 生出力(想定外の失敗の時点まで)' "$K_DIR/err-raw.md" 2>/dev/null; then
+    ok "ERR の生出力: ログに「生出力(想定外の失敗の時点まで)」の節がある"
+  else
+    ng "ERR の生出力: ログに「生出力(想定外の失敗の時点まで)」の節がある(実際 exit=$rc)"; cat "$CASE_ERR" >&2
+  fi
+  if [ ! -s "$CASE_OUT" ]; then ok "ERR の生出力: stdout は空"; else
+    ng "ERR の生出力: stdout は空"; cat "$CASE_OUT" >&2; fi
+fi
+
+# ERR の行数: #100 D3 の治具(サブシェルの中の失敗)。置換の終了コードが親へ伝わる形では、
+# 親の ERR が同じ行で 1 回だけ報告する(終了コードの欄はサブシェルの値)
+if [ -n "${D3_LINE:-}" ] && [ -n "${D3_DATESTUB:-}" ] && [ -d "$D3_DATESTUB" ]; then
+  K_TARGET="$D3_TARGET"
+  K_PATH="$D3_DATESTUB:$K_SANDBOX"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/err-lines.md"; rc=$?
+  K_TARGET=""
+  K_PATH="$K_SANDBOX"
+  kn_lines="$(grep -cE '^ERROR \[internal\] ' "$CASE_ERR")"
+  kn_first="$(grep -E '^ERROR \[internal\] ' "$CASE_ERR" | head -1)"
+  kn_code="$(printf '%s' "$kn_first" | sed -n 's/.*終了コード \([0-9][0-9]*\)・行.*/\1/p')"
+  kn_line="$(printf '%s' "$kn_first" | sed -n 's/.*行 \([0-9][0-9]*\)).*/\1/p')"
+  if [ "$rc" -eq 20 ] && [ "$kn_lines" -eq 1 ] && [ "$kn_code" = 1 ] && [ "$kn_line" = "$D3_LINE" ]; then
+    ok "ERR の行数: サブシェルの中の失敗は ERROR [internal] の行を 1 行だけ出す(終了コードの欄は 1・行は D3 と同じ) (exit=$rc)"
+  else
+    ng "ERR の行数: サブシェルの中の失敗は ERROR [internal] の行を 1 行だけ出す(実際 exit=$rc・行数=$kn_lines・終了コード=${kn_code:-無し}・行=${kn_line:-無し}(期待 exit=20・1 行・1・行 $D3_LINE))"
+    cat "$CASE_ERR" >&2
+  fi
+else
+  ng "ERR の行数: #100 D3 の治具が当たらない"
+fi
+
+# ログのパス: ログを開いたら、stderr に `NOTE: ログ: <絶対パス>` を 1 行出す(既定名・明示のどちらでも)
+k_logpath_case() { # $1=ラベル $2=起動する場所 $3=実際のログのパス 残り=追加の引数
+  kp_label="$1"; kp_cwd="$2"; kp_want="$3"; shift 3
+  rm -rf "$kp_cwd"; mkdir -p "$kp_cwd"
+  K_CWD="$kp_cwd"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 "$@"; rc=$?
+  K_CWD=""
+  kp_n="$(grep -c '^NOTE: ログ: ' "$CASE_ERR")"
+  kp_note="$(sed -n 's/^NOTE: ログ: //p' "$CASE_ERR" | head -1)"
+  kp_abs=0
+  case "$kp_note" in /*) kp_abs=1 ;; esac
+  if [ "$rc" -eq 0 ] && [ "$kp_n" -eq 1 ] && [ "$kp_abs" -eq 1 ] && [ -f "$kp_want" ] && [ "$kp_note" -ef "$kp_want" ]; then
+    ok "ログのパス: $kp_label: stderr の NOTE: ログ: が実際のログの絶対パスを 1 行で示す"
+  else
+    ng "ログのパス: $kp_label: stderr の NOTE: ログ: が実際のログの絶対パスを 1 行で示す(実際 exit=$rc・行数=$kp_n・'$kp_note')"
+    cat "$CASE_ERR" >&2
+  fi
+}
+k_logpath_case "既定名" "$K_DIR/logpath-default" "$K_DIR/logpath-default/.claude/reviews/reviewer-stubrunner-iter1.md"
+k_logpath_case "明示(相対パス)" "$K_DIR/logpath-explicit" "$K_DIR/logpath-explicit/rel/explicit.md" --log-file "rel/explicit.md"
+
+# 子に渡す fd: 外部 CLI(プローブ・本実行)にログの fd を渡さない。スタブは fd 7 が開いていれば
+# 偽の行を書く(パスで開き直す実装では fd 7 が無いので、この形の差は変異でだけ現れる)
+k_run --runner stubrunner --command "bash $WORK/bin/stub-fd.sh --readonly-x" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/fd.md"; rc=$?
+check "子に渡す fd: 本実行まで通る" 0 "$rc"
+if [ -s "$K_DIR/fd.md" ] && ! grep -qF 'FORGED' "$K_DIR/fd.md"; then
+  ok "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"
+else
+  ng "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"; cat "$K_DIR/fd.md" >&2 2>/dev/null
+fi
+
+# POSIX モード: POSIXLY_CORRECT の環境でも、特殊組み込みのリダイレクトの失敗でシェルが終わらず、
+# 置き場に書けない既定名(ROLOG と同じ構成)を usage で止める。root は置き場に書けてしまうので飛ばす
+if [ "$(id -u)" -ne 0 ]; then
+  KX="$K_DIR/posix"
+  rm -rf "$KX"; mkdir -p "$KX/.claude/reviews"
+  : > "$KX/.claude/reviews/reviewer-stubrunner-iter1.md"
+  chmod 555 "$KX/.claude/reviews"
+  K_CWD="$KX"
+  K_EXTRA=("POSIXLY_CORRECT=1")
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20; rc=$?
+  K_EXTRA=()
+  K_CWD=""
+  chmod 755 "$KX/.claude/reviews" 2>/dev/null
+  check "POSIX モード: 置き場に書けない既定名は usage で止まる" 2 "$rc"
+  if grep -qE '^ERROR \[usage\] ' "$CASE_ERR"; then ok "POSIX モード: stderr に ERROR [usage] が出る"; else
+    ng "POSIX モード: stderr に ERROR [usage] が出る"; cat "$CASE_ERR" >&2; fi
+else
+  ok "POSIX モード: 置き場に書けない既定名は usage で止まる(root のため飛ばす)"
+fi
+
+# /dev/fd の判定が偽: 写しで `[ -f /dev/fd/7 ]` を false に替え、既定名で打つ。開いたものを通常ファイルと
+# 確かめられないときは、既定名でも次の番号へ進まずに止まる(採番を繰り返して空のファイルを作り続けない)
+K_DEVFD_TARGET="$K_DIR/devfd-false.sh"
+sed 's#\[ -f /dev/fd/7 \]#false#g' "$TARGET" >"$K_DEVFD_TARGET"
+kf_hits="$(grep -cF '[ -f /dev/fd/7 ]' "$TARGET")"
+kf_left="$(grep -cF '[ -f /dev/fd/7 ]' "$K_DEVFD_TARGET")"
+if [ "$kf_hits" -ge 1 ] && [ "$kf_left" -eq 0 ]; then
+  KF="$K_DIR/devfd"
+  rm -rf "$KF"; mkdir -p "$KF"
+  K_TARGET="$K_DEVFD_TARGET"
+  K_CWD="$KF"
+  OUTER_TIMEOUT="$K_FIFO_TIMEOUT"
+  k_run --runner stubrunner --command "bash $STUB_OK --readonly-x" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20; rc=$?
+  OUTER_TIMEOUT="$K_PREV_TIMEOUT"
+  K_CWD=""
+  K_TARGET=""
+  check "/dev/fd の判定が偽: 外側の timeout の中で usage で止まる" 2 "$rc"
+  kf_count="$(find "$KF/.claude/reviews" -mindepth 1 2>/dev/null | wc -l | tr -d ' ')"
+  if [ "${kf_count:-0}" -le 1 ]; then ok "/dev/fd の判定が偽: 置き場のファイルが 1 つ以下(採番を繰り返さない)"; else
+    ng "/dev/fd の判定が偽: 置き場のファイルが 1 つ以下(採番を繰り返さない)(実際 $kf_count 個)"; fi
+else
+  ng "/dev/fd の判定が偽: 写しの治具([ -f /dev/fd/7 ] を false に替える)が当たらない"
+fi
 
 echo
 printf '%s\n' "$RESULTS"
