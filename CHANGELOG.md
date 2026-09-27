@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.14.0
+
+### 変更
+
+- ship-task の Phase 0 の 3 は、do-task の Phase 0 の 3 と同じ字面の `git status` で未コミット変更を確かめる。状態ファイル(`.claude/reviews/`・`.claude/grasp.md`・`.claude/settings.local.json`・`.claude/.understand-project-done`)の変更と、サブモジュールの中の未コミット変更は確認の対象にしない(gitlink の変更は対象)。状態ファイルを ignore していないリポジトリでも、無人の周が S1 で失敗扱いにならない
+- do-task の Phase 0 の 3 の `git status` も同じ字面で、`GIT_LITERAL_PATHSPECS` と `status.showUntrackedFiles` の設定に左右されない
+- 対話の ship-task の実装 commit・doc commit は、状態ファイルを stage しない。commit の直前に index に在れば、外すか残すかを確認する
+
 ## v4.13.0
 
 ### 変更

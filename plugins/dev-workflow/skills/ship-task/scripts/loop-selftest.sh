@@ -1750,6 +1750,41 @@ PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.l
 pdk "パターンでも . で始まる語はパスとして判定される(grep -F '.mcp.json' src/x)" other Bash "$(bash_in "grep -F '.mcp.json' src/x")"
 pa "パターンの . を [.] で書く(grep '[.]mcp[.]json' src/x)" Bash "$(bash_in "grep '[.]mcp[.]json' src/x")"
 PALLOW=""
+# 状態ファイルを外す git status(do-task・ship-task の Phase 0 の 3): do-task/SKILL.md の `git --no-literal-pathspecs status …`
+# の字面に、base-commit.md の前置きを git の直後に置いたコマンドを、cwd が worktree のルートでも src/ でも許す。
+# 字面の `[.]claude` を `.claude` にすると、pathspec がパスとして保護パスの下を指すので拒否する(`[.]` で書く理由)。
+# 字面は文書から取り出す(ハードコードしない。-B で __pycache__ を作らない)。取り出せなければ FAIL にする
+SF_CMD="$(python3 -B -c '
+import re, sys
+def one(path, pattern):
+    name = path.rsplit("/", 1)[-1]
+    try:
+        text = open(path, encoding="utf-8").read()
+    except OSError as exc:
+        return None, "%s を読めない: %s" % (name, exc)
+    hits = sorted(set(re.findall(pattern, text)))
+    if len(hits) != 1:
+        return None, "%s の字面がちょうど 1 種類でない(%d 種類)" % (name, len(hits))
+    return hits[0], None
+st, e1 = one(sys.argv[1], r"`(git --no-literal-pathspecs status [^`]+)`")
+pre, e2 = one(sys.argv[2], r"`(git --no-pager --no-replace-objects [^`]*-c core\.ignoreCase=false)`")
+if e1 or e2:
+    print("NG " + " / ".join(e for e in (e1, e2) if e))
+else:
+    print("OK " + pre + st[len("git"):])
+' "$PLUGIN_SRC/skills/do-task/SKILL.md" "$PLUGIN_SRC/skills/do-task/references/base-commit.md" 2>&1)"
+case "$SF_CMD" in
+  "OK "*)
+    SF_CMD="${SF_CMD#OK }"
+    pa "状態ファイルを外す git status: do-task の字面に前置きを置いたコマンド(cwd が worktree のルート)" Bash "$(bash_in "$SF_CMD")"
+    pa "状態ファイルを外す git status: do-task の字面に前置きを置いたコマンド(cwd が src/)" Bash "$(bash_in "$SF_CMD")" "$PW/src"
+    pd "状態ファイルを外す git status: 字面の [.]claude を .claude にすると保護パスの下を指す" Bash \
+      "$(bash_in "${SF_CMD//\[.\]claude/.claude}")"
+    pd "状態ファイルを外す git status: 字面の [.]claude を .claude にすると保護パスの下を指す(cwd が src/)" Bash \
+      "$(bash_in "${SF_CMD//\[.\]claude/.claude}")" "$PW/src"
+    ;;
+  *) ng "状態ファイルを外す git status: do-task/SKILL.md と base-commit.md から字面を取り出す(${SF_CMD#NG })" ;;
+esac
 pa "Bash の mkdir .claude/reviews/sub" Bash "$(bash_in 'mkdir .claude/reviews/sub')"
 pa "Bash の git status --short > .claude/reviews/st.txt(git が許可リストにある)" Bash "$(bash_in 'git status --short > .claude/reviews/st.txt')"
 pa "Bash の rm -f .claude/grasp.md" Bash "$(bash_in 'rm -f .claude/grasp.md')"
