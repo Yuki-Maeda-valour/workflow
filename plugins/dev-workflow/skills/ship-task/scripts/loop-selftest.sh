@@ -494,7 +494,8 @@ cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
-cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 発見モードの起動時の検査で使う(loop.md §11)
+cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
+cp "$SCRIPT_DIR/git-config-digest.py" "$PLUG/skills/ship-task/scripts/git-config-digest.py"   # 在ることを起動時に確かめる(両方のモード。loop.md §2 の 4)
 LOOP="$PLUG/skills/ship-task/scripts/loop.sh"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUG/.claude-plugin/plugin.json")"
 
@@ -1785,6 +1786,96 @@ case "$SF_CMD" in
     ;;
   *) ng "状態ファイルを外す git status: do-task/SKILL.md と base-commit.md から字面を取り出す(${SF_CMD#NG })" ;;
 esac
+# 無人の周の git・gh の字面(#133 の D1・D2・D4・D6): ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
+# hook に掛ける字面は文書から取り出す(ハードコードしない。-B で __pycache__ を作らない)。文書ごとにちょうど 1 種類を求め、
+# 取り出せなければ FAIL にする。python3 の呼び出しは、許可リストに python3 を足して掛ける(推奨の列は python3 を含む — loop.md §4)。
+# 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・完全な refspec)で、
+# SKILL.md と discover-mode.md で同じであることも照らす
+UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
+import re, sys
+root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
+digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
+push_d1 = ("python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && "
+           "git push --no-follow-tags --recurse-submodules=no -u origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'")
+pushes = {}
+items = [
+    ("無人の push", "SKILL.md", digest + r"git push [^`]+"),
+    ("無人の push", "references/discover-mode.md", digest + r"git push [^`]+"),
+    ("無人のブランチ作成", "SKILL.md", r"git switch --no-track -c [^`]+"),
+    ("無人のブランチ作成", "references/discover-mode.md", r"git switch --no-track -c [^`]+"),
+    ("照合つきの commit", "references/unattended-mode.md", digest + r"git commit [^`]+"),
+    ("照合つきの commit", "references/discover-mode.md", digest + r"git commit [^`]+"),
+    ("PR の作成先の確かめ", "SKILL.md", r"gh repo view [^`]+"),
+    ("PR の作成", "SKILL.md", r"gh pr create -R [^`]+"),
+]
+subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<守る値>", "sha256:" + "0123456789abcdef" * 4),
+        ("<repo>", "github.com/o/r"), ("<デフォルトブランチ>", "main"), ("<タスク名>", "日本語のタスク"),
+        ("<名>", "m.md"), ("<発見元>", "data-audit")]
+for label, rel, pat in items:
+    name = rel.rsplit("/", 1)[-1]
+    try:
+        text = open(root + "/" + rel, encoding="utf-8").read()
+    except OSError as exc:
+        print("NG\t%s(%s)を文書から取り出す\t%s を読めない: %s" % (label, name, name, exc))
+        continue
+    hits = sorted(set(re.findall("`(" + pat + ")`", text)))
+    if len(hits) != 1:
+        print("NG\t%s(%s)を文書から取り出す\t字面がちょうど 1 種類でない(%d 種類)" % (label, name, len(hits)))
+        continue
+    tmpl = hits[0]
+    if label == "無人の push":
+        pushes[name] = tmpl
+        d1_tag = "無人の push(%s)が D1 の字面(--no-follow-tags・--recurse-submodules=no・完全な refspec)" % name
+        if tmpl == push_d1:
+            print("YES\t%s\t-" % d1_tag)
+        else:
+            print("NG\t%s\t字面が違う: %s" % (d1_tag, tmpl))
+    for k, v in subs:
+        tmpl = tmpl.replace(k, v)
+    for b in (["task/x", "task/日本語"] if "<作業ブランチ>" in tmpl else [None]):
+        cmd = tmpl if b is None else tmpl.replace("<作業ブランチ>", b)
+        tag = "%s(%s%s)" % (label, name, "" if b is None else "・" + b)
+        left = re.findall(r"<[^<>\s]+>|\{[^{}]*\}", cmd)
+        if left:
+            print("NG\t%sを置き換える\t置き換えられないプレースホルダ: %s" % (tag, " ".join(left)))
+        elif "\t" in cmd or "\n" in cmd:
+            print("NG\t%sを置き換える\t字面にタブか改行がある" % tag)
+        else:
+            print("OK\t%s\t%s" % (tag, cmd))
+same_tag = "無人の push の字面が SKILL.md と discover-mode.md で同じ"
+if len(pushes) != 2:
+    print("NG\t%s\t両方の文書から取り出せない(%d 文書)" % (same_tag, len(pushes)))
+elif pushes["SKILL.md"] == pushes["discover-mode.md"]:
+    print("YES\t%s\t-" % same_tag)
+else:
+    print("NG\t%s\t字面が違う" % same_tag)
+PY
+)"
+UW_PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind": "prefix", "words": ["python3"]}); print(json.dumps(a))')"
+UW_CTRL=""
+while IFS=$'\t' read -r st tag body; do
+  case "$st" in
+    OK)
+      PALLOW="$UW_PALLOW"
+      pa "無人の周の字面: $tag" Bash "$(bash_in "$body")"
+      PALLOW=""
+      case "$body" in python3\ *) [ -n "$UW_CTRL" ] || UW_CTRL="$body" ;; esac
+      ;;
+    YES) ok "無人の周の字面: $tag" ;;
+    NG) ng "無人の周の字面: $tag($body)" ;;
+    *) ng "無人の周の字面: 文書から取り出す(読めない出力: $st $tag $body)" ;;
+  esac
+done <<<"$UW_CMDS"
+# 掛け方の対照: 許可リストに python3 が無ければ、照合つきの行は拒否される(allow が許可リストの python3 による)
+if [ -n "$UW_CTRL" ]; then
+  pd "無人の周の字面: 許可リストに python3 が無ければ照合つきの行を拒否する(掛け方の対照)" Bash "$(bash_in "$UW_CTRL")"
+  case "$(decision_field message)" in
+    *"許可リストに無いコマンド: python3 "*) ok "無人の周の字面: 掛け方の対照の拒否の理由は python3 の許可リスト" ;;
+    *) ng "無人の周の字面: 掛け方の対照の拒否の理由は python3 の許可リスト($(decision_field message | head -c 200))" ;;
+  esac
+else
+  ng "無人の周の字面: 掛け方の対照(python3 で始まる字面を取り出せない)"
+fi
 pa "Bash の mkdir .claude/reviews/sub" Bash "$(bash_in 'mkdir .claude/reviews/sub')"
 pa "Bash の git status --short > .claude/reviews/st.txt(git が許可リストにある)" Bash "$(bash_in 'git status --short > .claude/reviews/st.txt')"
 pa "Bash の rm -f .claude/grasp.md" Bash "$(bash_in 'rm -f .claude/grasp.md')"
@@ -2563,68 +2654,99 @@ has "発見モードの --dry-run: 今夜の名のブランチを出す" "$OUT" 
 has "発見モードの --dry-run: task_dir を出す" "$OUT" "発見元の列(task_dir: docs/tasks)"
 hasnt "発見モードの --dry-run: 読み飛ばしが無い" "$OUT" "読み飛ばし:"
 has "発見モード: 報告にモードの行(既定)" "$(report_of "$OUT")" "モード: 発見(発見元の列: data-audit,refactor・既定"
+has "発見モード: 報告に origin の URL の行" "$(report_of "$OUT")" "- origin の URL: 検査に通った(fetch と push が同じリポジトリ)"
 run_loop dargs -- --repo "$R" --dry-run --discover=refactor,data-audit
 check "発見モードの --dry-run: 引数の列を引数の順に出す" "refactor data-audit " "$(dqueue)"
 has "発見モード: 報告にモードの行(引数)" "$(report_of "$OUT")" "モード: 発見(発見元の列: refactor,data-audit・引数"
 run_loop dargs -- --repo "$R" --dry-run --discover=refactor
 check "発見モードの --dry-run: 引数で 1 つに絞る" "refactor " "$(dqueue)"
 
-# ── 起動の前提: origin の URL(fetch と push・vcs・origin-repo.py の失敗)・状態ファイルの ignore ──
+# ── 起動の前提: origin の URL(fetch と push・vcs・origin-repo.py の失敗)・兄弟のスクリプト・状態ファイルの ignore ──
+# origin の URL の検査と兄弟のスクリプトの検査は、両方のモードで行う(loop.md §2)
 newdisc dmis
 G -C "$R" remote set-url --push origin "sshstub:$W/repos/elsewhere-secret.git"
 newrec dmis
-run_loop dmis -- --repo "$R" --dry-run --discover
-check "発見モード: fetch と push の URL が別のリポジトリなら 20" 20 "$RC"
-has "発見モード: fetch と push の URL が別: 理由" "$OUT" "[origin-url-mismatch]"
-hasnt "発見モード: fetch と push の URL が別: URL の字面を出さない(stdout・stderr)" "$OUT" "elsewhere-secret"
-hasnt "発見モード: fetch と push の URL が別: URL の字面を出さない(報告)" "$(report_of "$OUT")" "elsewhere-secret"
-check "発見モード: fetch と push の URL が別: worktree を作らない" 1 "$(wt_count)"
-run_loop dmis -- --repo "$R" --dry-run
-check "実装モードは origin の URL を検査しない(fetch と push が別でも起動する)" 0 "$RC"
+for m in 発見 実装; do
+  if [ "$m" = 発見 ]; then run_loop dmis -- --repo "$R" --dry-run --discover; else run_loop dmis -- --repo "$R" --dry-run; fi
+  check "${m}モード: fetch と push の URL が別のリポジトリなら 20" 20 "$RC"
+  has "${m}モード: fetch と push の URL が別: 理由" "$OUT" "[origin-url-mismatch]"
+  hasnt "${m}モード: fetch と push の URL が別: URL の字面を出さない(stdout・stderr)" "$OUT" "elsewhere-secret"
+  hasnt "${m}モード: fetch と push の URL が別: URL の字面を出さない(報告)" "$(report_of "$OUT")" "elsewhere-secret"
+  check "${m}モード: fetch と push の URL が別: worktree を作らない" 1 "$(wt_count)"
+done
 # remote.origin.vcs: 起動時の最初の ls-remote より前に origin-vcs で止まる(vcs のヘルパーを起動しない — M4)
 printf '#!/bin/sh\necho "$0 $*" >>"${SELFTEST_REC:?}/vcs.log"\nexit 1\n' >"$STUBBIN/git-remote-selftestvcs"
 chmod +x "$STUBBIN/git-remote-selftestvcs"
 newdisc dvcs
 G -C "$R" config remote.origin.vcs selftestvcs
-newrec dvcs
-run_loop dvcs -- --repo "$R" --dry-run --discover
-check "発見モード: remote.origin.vcs があれば 20" 20 "$RC"
-has "発見モード: remote.origin.vcs: 理由は origin-vcs" "$OUT" "[origin-vcs]"
-f "発見モード: remote.origin.vcs: ls-remote を打たない(vcs のヘルパーが起動されない)" test -e "$REC/vcs.log"
-run_loop dvcs -- --repo "$R" --dry-run
-check "前提: 実装モードの起動時の ls-remote は vcs のヘルパーを通って止まる" 20 "$RC"
-t "前提: 実装モードでは vcs のヘルパーが起動される" test -e "$REC/vcs.log"
-# origin-repo.py の失敗(exit 2・例外・読めない出力)と、無いとき(発見モードだけ plugin-root)
+for m in 発見 実装; do
+  newrec "dvcs-$m"
+  if [ "$m" = 発見 ]; then run_loop dvcs -- --repo "$R" --dry-run --discover; else run_loop dvcs -- --repo "$R" --dry-run; fi
+  check "${m}モード: remote.origin.vcs があれば 20" 20 "$RC"
+  has "${m}モード: remote.origin.vcs: 理由は origin-vcs" "$OUT" "[origin-vcs]"
+  f "${m}モード: remote.origin.vcs: ls-remote を打たない(vcs のヘルパーが起動されない)" test -e "$REC/vcs.log"
+done
+# 陽性対照: 同じ構成・loop.sh と同じ環境で ls-remote を直接打つと、vcs のヘルパーが起動される(上の「起動されない」が
+# スタブに届かないことによる空振りでない)
+newrec dvcs-対照
+build_env dvcs
+( cd "$W/cwd" && exec env -i "${ENV_ARGS[@]}" git -C "$R" ls-remote origin ) >/dev/null 2>&1
+t "前提: remote.origin.vcs の構成で ls-remote を打つと vcs のヘルパーが起動される(陽性対照)" test -e "$REC/vcs.log"
+# origin-repo.py の失敗(exit 2・例外・読めない出力)と、兄弟の origin-repo.py・git-config-digest.py が無いとき(plugin-root)
 newdisc dor
 newrec dor
-or_variant() { # $1=名 $2=origin-repo.py の中身(空なら消す)→ LOOP_BIN
-  local d="$W/plugin-or-$1"
+or_variant() { # $1=名 $2=兄弟のスクリプトの中身(空なら消す)[$3=ファイル名。既定は origin-repo.py]→ LOOP_BIN
+  local d="$W/plugin-or-$1" fn="${3:-origin-repo.py}"
   rm -rf "$d"
   mkdir -p "$d"
   cp -r "$PLUG/." "$d/"
-  if [ -z "$2" ]; then rm -f "$d/skills/ship-task/scripts/origin-repo.py"
-  else printf '%s\n' "$2" >"$d/skills/ship-task/scripts/origin-repo.py"; fi
+  if [ -z "$2" ]; then rm -f "$d/skills/ship-task/scripts/$fn"
+  else printf '%s\n' "$2" >"$d/skills/ship-task/scripts/$fn"; fi
   LOOP_BIN="$d/skills/ship-task/scripts/loop.sh"
 }
-or_variant exit2 'import sys; sys.exit(2)'
-run_loop dor -- --repo "$R" --dry-run --discover
-check "発見モード: origin-repo.py の exit 2 で 20" 20 "$RC"
-has "発見モード: origin-repo.py の exit 2: 理由" "$OUT" "[origin-url]"
-or_variant raise 'raise RuntimeError("selftest")'
-run_loop dor -- --repo "$R" --dry-run --discover
-check "発見モード: origin-repo.py の例外(exit 1)で 20" 20 "$RC"
-has "発見モード: origin-repo.py の例外: 理由" "$OUT" "[origin-url]"
-or_variant badjson 'print("not json")'
-run_loop dor -- --repo "$R" --dry-run --discover
-check "発見モード: origin-repo.py の出力が読めなければ 20" 20 "$RC"
-has "発見モード: origin-repo.py の出力が読めない: 理由" "$OUT" "[origin-url]"
-or_variant missing ''
-run_loop dor -- --repo "$R" --dry-run --discover
-check "発見モード: origin-repo.py が無ければ 20" 20 "$RC"
-has "発見モード: origin-repo.py が無い: 理由" "$OUT" "[plugin-root]"
-run_loop dor -- --repo "$R" --dry-run
-check "実装モードは origin-repo.py が無くても起動する" 0 "$RC"
+or_run() { # $1=モード(発見|実装)
+  if [ "$1" = 発見 ]; then run_loop dor -- --repo "$R" --dry-run --discover; else run_loop dor -- --repo "$R" --dry-run; fi
+}
+for m in 発見 実装; do
+  or_variant exit2 'import sys; sys.exit(2)'
+  or_run "$m"
+  check "${m}モード: origin-repo.py の exit 2 で 20" 20 "$RC"
+  has "${m}モード: origin-repo.py の exit 2: 理由" "$OUT" "[origin-url]"
+  or_variant raise 'raise RuntimeError("selftest")'
+  or_run "$m"
+  check "${m}モード: origin-repo.py の例外(exit 1)で 20" 20 "$RC"
+  has "${m}モード: origin-repo.py の例外: 理由" "$OUT" "[origin-url]"
+  or_variant badjson 'print("not json")'
+  or_run "$m"
+  check "${m}モード: origin-repo.py の出力が読めなければ 20" 20 "$RC"
+  has "${m}モード: origin-repo.py の出力が読めない: 理由" "$OUT" "[origin-url]"
+  or_variant missing ''
+  or_run "$m"
+  check "${m}モード: origin-repo.py が無ければ 20" 20 "$RC"
+  has "${m}モード: origin-repo.py が無い: 理由" "$OUT" "[plugin-root]"
+  has "${m}モード: origin-repo.py が無い: 名を出す" "$OUT" "origin-repo.py が無い"
+  or_variant gcdmissing '' git-config-digest.py
+  or_run "$m"
+  check "${m}モード: git-config-digest.py が無ければ 20" 20 "$RC"
+  has "${m}モード: git-config-digest.py が無い: 理由" "$OUT" "[plugin-root]"
+  has "${m}モード: git-config-digest.py が無い: 名を出す" "$OUT" "git-config-digest.py が無い"
+done
 LOOP_BIN="$LOOP"
+# 起動時の報告の origin の URL の行(実装モード。origin がある構成と無い構成 — loop.md §7)
+newrepo orep
+addtask pr-a
+commit
+newrec orep
+run_loop orep -- --repo "$R" --dry-run
+check "実装モード: origin がある構成で起動する" 0 "$RC"
+has "実装モード: 報告に origin の URL の行(origin がある)" "$(report_of "$OUT")" "- origin の URL: 検査に通った(fetch と push が同じリポジトリ)"
+newrepo orepn noorigin
+addtask pr-a
+commit
+newrec orepn
+run_loop orepn -- --repo "$R" --dry-run
+check "実装モード: origin が無い構成で起動する" 0 "$RC"
+has "実装モード: 報告に origin の URL の行(origin が無い)" "$(report_of "$OUT")" "- origin の URL: origin が無い(周は push しないので、結末は 縮退)"
 # 状態ファイルが ignore されていない / .claude/grasp.md が追跡済み(worktree を消して 20)
 newrepo dign
 printf '*.ignored\n.claude/reviews\n' >"$R/.gitignore"   # .claude/grasp.md・.claude/.understand-project-done を ignore しない土台

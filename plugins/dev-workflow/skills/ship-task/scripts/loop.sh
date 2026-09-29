@@ -2348,11 +2348,12 @@ RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
 # 許可の仲介の hook(D22 ③)。python3 と hook のスクリプトの絶対パスを、それぞれシェルのクォートで囲んで組み立てる
 PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
 [ -f "$PERM_SCRIPT" ] || die 20 plugin-root "許可の仲介の hook(loop-permission.py)が無い: $PERM_SCRIPT"
-# 発見モードだけ: origin の URL の読み方(D9。実装モードでは見ない)
+# 両方のモード: origin の URL の読み方(起動時の origin の URL の検査で打つ。周の skill も前提と push の直前に使う)と、
+# ローカルの git 設定のダイジェスト(周の skill が周の中の照合に使う。loop.sh は打たず、在ることだけを確かめる)
 ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
-if [ "$DISCOVER" -eq 1 ]; then
-  [ -f "$ORIGIN_REPO_PY" ] || die 20 plugin-root "兄弟の origin-repo.py が無い(発見モードで使う): $ORIGIN_REPO_PY"
-fi
+[ -f "$ORIGIN_REPO_PY" ] || die 20 plugin-root "兄弟の origin-repo.py が無い(起動時の origin の URL の検査と周の照合で使う): $ORIGIN_REPO_PY"
+GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
+[ -f "$GIT_CONFIG_DIGEST_PY" ] || die 20 plugin-root "兄弟の git-config-digest.py が無い(周の中のローカルの git 設定の照合で使う): $GIT_CONFIG_DIGEST_PY"
 PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
 HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
@@ -2493,25 +2494,28 @@ WT_ROOT="${WT_ROOT:-$(dirname -- "$TOP")/$(basename -- "$TOP").loop}"
 WT_ROOT="$(realpath -m -- "$WT_ROOT")"
 if inside_checkout "$WT_ROOT"; then die 20 worktree-root "worktree の置き場が人のチェックアウトの中にある($WT_ROOT)"; fi
 
-# ── 発見モード: origin の URL の検査(loop.md §11。起動時の最初の ls-remote〈§2 の 11〉より前 — vcs のヘルパーが失敗する
+# ── origin の URL の検査(両方のモード。loop.md §2。起動時の最初の ls-remote〈§2 の 11〉より前 — vcs のヘルパーが失敗する
 # 構成で、ls-remote の失敗ではなく origin-vcs の案内に届くように)。どの理由にも URL の字面を出さない ──
-ORIGIN_URL_STATE=""
-if [ "$DISCOVER" -eq 1 ]; then
-  rc=0
-  ORIGIN_OUT="$(cd / && exec python3 -B "$ORIGIN_REPO_PY" --dir="$TOP" 7>&- 2>"$RUN_DIR/origin-repo.err")" || rc=$?
-  [ "$rc" -eq 0 ] || die 20 origin-url "origin の URL を読めない(origin-repo.py の終了コード $rc。stderr は $RUN_DIR/origin-repo.err)"
-  ORIGIN_INFO="$(printf '%s' "$ORIGIN_OUT" | py origin-json)" || die 20 origin-url "origin の URL を読めない(origin-repo.py の出力を解析できない)"
-  O_ORIGIN="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^origin=//p')"
-  O_SAME="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^same=//p')"
-  O_VCS="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^vcs=//p')"
-  O_REASON="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^reason=//p')"
-  if [ "$O_ORIGIN" = 1 ] && [ "$O_VCS" = 1 ]; then
-    die 20 origin-vcs "origin に remote.origin.vcs がある(push・ls-remote が git-remote-<vcs> のヘルパーを通り、URL の字面と送り先が離れるので、発見モードでは使えない)。\`git config --unset remote.origin.vcs\` で外してから起動する"
-  fi
-  if [ "$O_ORIGIN" = 1 ] && [ "$O_SAME" != 1 ]; then
-    die 20 origin-url-mismatch "origin の fetch と push の URL が同じリポジトリを指さない(${O_REASON:-理由なし})。fetch と push の URL をそれぞれ 1 つにし、同じリポジトリに揃えてから起動する(remote.origin.pushurl・pushInsteadOf を見直す)"
-  fi
-  if [ "$O_ORIGIN" = 1 ]; then ORIGIN_URL_STATE="検査に通った(fetch と push が同じリポジトリ)"; else ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"; fi
+rc=0
+ORIGIN_OUT="$(cd / && exec python3 -B "$ORIGIN_REPO_PY" --dir="$TOP" 7>&- 2>"$RUN_DIR/origin-repo.err")" || rc=$?
+[ "$rc" -eq 0 ] || die 20 origin-url "origin の URL を読めない(origin-repo.py の終了コード $rc。stderr は $RUN_DIR/origin-repo.err)"
+ORIGIN_INFO="$(printf '%s' "$ORIGIN_OUT" | py origin-json)" || die 20 origin-url "origin の URL を読めない(origin-repo.py の出力を解析できない)"
+O_ORIGIN="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^origin=//p')"
+O_SAME="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^same=//p')"
+O_VCS="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^vcs=//p')"
+O_REASON="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^reason=//p')"
+if [ "$O_ORIGIN" = 1 ] && [ "$O_VCS" = 1 ]; then
+  die 20 origin-vcs "origin に remote.origin.vcs がある(push・ls-remote が git-remote-<vcs> のヘルパーを通り、URL の字面と送り先が離れるので、無人ループでは使えない)。\`git config --unset remote.origin.vcs\` で外してから起動する"
+fi
+if [ "$O_ORIGIN" = 1 ] && [ "$O_SAME" != 1 ]; then
+  die 20 origin-url-mismatch "origin の fetch と push の URL が同じリポジトリを指さない(${O_REASON:-理由なし})。fetch と push の URL をそれぞれ 1 つにし、同じリポジトリに揃えてから起動する(remote.origin.pushurl・pushInsteadOf を見直す)"
+fi
+if [ "$O_ORIGIN" = 1 ]; then
+  ORIGIN_URL_STATE="検査に通った(fetch と push が同じリポジトリ)"
+elif [ "$DISCOVER" -eq 1 ]; then
+  ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"
+else
+  ORIGIN_URL_STATE="origin が無い(周は push しないので、結末は 縮退)"
 fi
 
 # ── §2 の 11: 2026-09-23 決定 19 の帰結(D8)──
@@ -2629,9 +2633,10 @@ else
 fi
 if [ "$DISCOVER" -eq 1 ]; then
   DISCOVER_LIST="$(IFS=,; printf '%s' "${DISCOVER_SOURCES[*]}")"
-  rep "- モード: 発見(発見元の列: $DISCOVER_LIST・$DISCOVER_SRC_DESC。loop.md §11)" "- origin の URL: $ORIGIN_URL_STATE"
+  rep "- モード: 発見(発見元の列: $DISCOVER_LIST・$DISCOVER_SRC_DESC。loop.md §11)"
   say "モード: 発見(発見元の列: $DISCOVER_LIST・$DISCOVER_SRC_DESC)"
 fi
+rep "- origin の URL: $ORIGIN_URL_STATE"
 rep "- ホスト: $HOST(雛形の出所: $HOST_ARGV_SOURCE)"
 rep "- 解決後の argv: $RESOLVED_ARGV" "- プロンプトは stdin で渡す"
 rep "- 実効値: max_iterations=$MAX_ITER($MAX_ITER_SRC) max_consecutive_failures=$MAX_FAIL($MAX_FAIL_SRC) time_budget=$BUDGET($BUDGET_SRC) iteration_timeout=$ITER_TIMEOUT($ITER_TIMEOUT_SRC) kill_grace=$KILL_GRACE net_timeout=$NET_TIMEOUT"
