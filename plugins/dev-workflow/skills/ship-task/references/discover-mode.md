@@ -85,7 +85,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
   - `same` が真(fetch と push の URL がそれぞれ 1 つで、同じリポジトリを指す)。偽なら、fetch と push の URL を揃える案内をする
   - exit 0 でなければ、「origin の URL を読めない」を理由にする。どの理由にも URL の字面を書かない
-- **task_dir**: helper(`resolve-task-dir.py`)で解決できる(exit 1・2 は欠け)。保護パスの下でない(列は unattended-mode.md の「委託するサブエージェント」の項)。`secret_paths` に当たらない。`git check-ignore --no-index -q -- '<task_dir>/候補_x.md'` が rc 1(ignore 済みの場所では commit できない)
+- **task_dir**: helper(`resolve-task-dir.py`)で解決できる(exit 1・2 は欠け)。保護パスの下でない(列は unattended-mode.md の「委託するサブエージェント」の項)。`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない。`git check-ignore --no-index -q -- '<task_dir>/候補_x.md'` が rc 1(ignore 済みの場所では commit できない)
 - 同名の作業ブランチ(§2)がローカルに無い
 
 ## 5. 公開の確認(data-audit の周だけ)
@@ -124,7 +124,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 | 時点 | 照合 |
 |---|---|
-| 工程 D2(発見元から戻った直後) | ① HEAD の ref が開始時のまま・`HEAD` = S0 ② index が空(`git diff --cached --name-only -z` が空) ③ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ④ ③ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑤ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths` に当たらない |
+| 工程 D2(発見元から戻った直後) | ① HEAD の ref が開始時のまま・`HEAD` = S0 ② index が空(`git diff --cached --name-only -z` が空) ③ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ④ ③ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑤ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
 | ブランチを作った直後 | 現在のブランチ = 作業ブランチ・`HEAD` = S0 |
 | stage の直前 | 現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える |
