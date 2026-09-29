@@ -18,7 +18,9 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 - 開始時の HEAD が、デフォルトブランチ(判定は ship-task の Phase 0 の 4)か detached HEAD である(作業ブランチの上なら満たさない)。detached HEAD なら、ローカルのデフォルトブランチの履歴の中にある(起点の確認。`git rev-list --count refs/heads/<DEF_NAME>..HEAD` が rc 0 で `0` を出す)。デフォルトブランチ(`DEF_REF`・`DEF_NAME`)は base-commit.md と同じ手順で求め、解決できなければ満たさない
 - タスク MD のヘッダにメタ行(`> **無人実行**: 可`)がある
 - タスク MD が git の追跡下にある
-- この文書と `task-digest.py` と Python 3 がある
+- ローカルの git 設定のダイジェストを `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出でき(exit 0)、守る値(§7)として保持した。下の origin の URL の検査より先に打つ(設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため)
+- **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は discover-mode.md §4 の「origin の URL」と同じ。出力の 5 欄(`origin`・`same`・`vcs`・`repo`・`form`)を、守る値の origin の判定(§7)として保持した
+- この文書と `task-digest.py`・`origin-repo.py`・`git-config-digest.py` と Python 3 がある
 - 本文ダイジェストを算出でき(exit 0)、R として保持した
 
 **発見の周(`--discover`)の前提**: 正本は [discover-mode.md](discover-mode.md) §4(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど)。parent-child 構成でないことと、開始時の HEAD の条件は、タスクの周と同じ。発見の周は本文ダイジェスト R を持たない
@@ -40,7 +42,7 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 | 結末 | 意味 |
 |---|---|
 | `PR` | PR を開いた |
-| `縮退` | タスクの周: 品質ゲートとレビューは揃ったが、PR を開けなかった(gh が無い・未認証・リモートが無い・`--no-pr`)。commit は作業ブランチに在る。発見の周: 候補の commit はあるが、PR を開かなかった(条件は discover-mode.md §8) |
+| `縮退` | タスクの周: 品質ゲートとレビューは揃ったが、PR を開けなかった(gh が無い・未認証・リモートが無い・`--no-pr`・PR の作成先を確かめられない〈origin の判定の `repo` が null・`gh repo view` が通らない〉)。push もしない。commit は作業ブランチに在る。発見の周: 候補の commit はあるが、PR を開かなかった(条件は discover-mode.md §8) |
 | `保留` | 保留の手順(§5)を終えた。タスクの周だけ |
 | `失敗扱い` | 何もせずに止まった(§6) |
 | `候補なし` | 候補が 0 件か、公開の確認で発見元を回さなかった。ブランチ・commit・PR を作らない。発見の周だけ(discover-mode.md §9) |
@@ -84,8 +86,9 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 8. ファイル操作のコマンド(`mkdir`・`touch`・`rm`・`rmdir`・`mv`・`cp`・`tee`・`sed -i`)のオプションは、許可の仲介の列だけ: `rm` は `-f`・`-r`・`-R`・`-v` / `cp`・`mv` は `-f`・`-r`・`-R`・`-p`・`-v` / `tee` は `-a` / `sed` は `-i`・`--in-place`(どちらも接尾辞なし)・`-e`・`-E`・`-n`・`-r`(束ねない)/ `mkdir`・`touch`・`rmdir` はオプションなし(`mkdir -p` を使わない)。どれも `--` は使える
 9. それ以外のコマンドは、許可リスト(`--allowed-tools` か利用者の設定の `permissions.allow`。推奨の列は loop.md §4 の権限。`test`・`echo`・`sha256sum` を含む)に一致するものだけ
 10. 終了コードで判断するときは、複数の値で分岐するコマンド(`diff-snapshot.sh`・`review-agent.sh`・`reviews-dir.sh` など)は後ろに `&&`・`||` を付けずに単独で打ち、ツールの結果の終了コードで見る。0 か 0 以外かだけで決まる判断は、`<コマンド> && echo ok || echo ng` の形で出力に出してよい(4 と同じ理由で、ホストが偽を隠すコマンドがあるため)。一時ファイルや本文のファイルは `Write` で `.claude/reviews/` の下に置き、`< <ファイル>` か `-F <ファイル>` で渡す
-    - PR の本文: `gh pr create … --body-file - < .claude/reviews/<名>`
+    - PR の本文: `gh pr create -R '<repo>' … --body-file - < .claude/reviews/<名>`
     - commit のメッセージ: `-m` を段落ごとに重ねるか、`-F <ファイル>`
+    - git 設定のダイジェストの `--expect` と `&&` でつないだ commit・push の 1 行(§7 の照合の表)は、単独で打つ規則の対象外。どちらのコマンドの rc が 0 以外でも失敗扱いで、値で分岐しないため
 
 拒否されたら、打ち直さずに上の許可の拒否(G1)に従う(書き方を変えて同じ操作を打ち直すのも、別の手段での回り込みに当たる)。hook の拒否の理由にも、このことが添えてある
 
@@ -125,7 +128,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | S4 | ship-task Phase 2(続行判定ゲートの 1〜6) | 停止して設計書を返す | 保留。要件不明は「実装の分岐を左右しない」と言い切れないヒットも保留に倒す。構造の理由で本文ダイジェストを算出できないときは、前提の検査で既に失敗扱い |
 | S5 | ship-task Phase 3(/do-task の停止) | 停止し、実装 commit だけ残す | do-task が返した分類に従う(下の注)。停止時に実装 commit だけ残すことはしない |
 | S6 | ship-task Phase 4(/update-doc の未完了・未承認) | 停止する | 失敗扱い(`完了_` への改名後の停止) |
-| S7 | ship-task Phase 5(縮退・push・PR 作成) | 縮退(gh が無い等・`--no-pr`)ではコマンド列を示す | 同じ(結末 `縮退`)。push・PR 作成の失敗・拒否は失敗扱い(`完了_` への改名後の停止) |
+| S7 | ship-task Phase 5(縮退・push・PR 作成) | 縮退(gh が無い等・`--no-pr`)ではコマンド列を示す | 同じ(結末 `縮退`。push もしない)。PR の作成先を確かめられない(origin の判定の `repo` が null・`gh repo view` が通らない)ときも、push も PR もせずに結末 `縮退`。`gh repo view` が許可の仲介に拒否されたとき(G1)と、push・PR 作成の失敗・拒否は失敗扱い(`完了_` への改名後の停止) |
 | S8 | ship-task Phase 0 の 4・Phase 1(作業ブランチの作成) | 先行する commit の一覧を示して続行を確かめる。続行しないなら停止 | 確かめない。報告と PR 本文に載せて続ける |
 | S9 | ship-task Phase 0 の 2′(発見の周の前提。discover-mode.md §4) | `--unattended` が無ければ停止し、各発見元を直接呼ぶよう案内する | 前提を 1 つでも欠ければ失敗扱い(G3) |
 | S10 | 発見の周の公開の確認(data-audit だけ。discover-mode.md §5) | 起きない(`--discover` は無人専用) | 非公開と確かめられなければ、発見元を呼ばずに結末 `候補なし`(失敗扱いではない) |
@@ -154,7 +157,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | U1 | update-doc Phase 4(事前確認) | `--yes` でなければ事前確認 | 確認しない(無人は `--yes` を含む。ship-task は元々 `--yes` を渡す) |
 | U2 | update-doc Phase 5 の 4(報告点) | 判断を仰ぐ | 止まって「未承認」で返す(ship-task は S6 で失敗扱い) |
 | G1 | どこでも | 許可の要る操作が拒否された | 保留のガードを満たせば保留、満たさなければ失敗扱い(§3)。発見の周と候補モードでは、常に失敗扱い(保留が無い) |
-| G2 | ship-task・do-task | 周の中の照合に通らない(本文ダイジェスト・基準行・未追跡一覧・HEAD・ブランチ・index・commit の後の中身。§7。発見の周は discover-mode.md §7 の表) | 失敗扱い(改竄ガード) |
+| G2 | ship-task・do-task | 周の中の照合に通らない(本文ダイジェスト・基準行・未追跡一覧・HEAD・ブランチ・index・commit の後の中身・git 設定のダイジェスト〈`git-config-digest.py` の `--expect` が exit 0 でない〉・origin の判定。§7。発見の周は discover-mode.md §7 の表) | 失敗扱い(改竄ガード) |
 | G3 | ship-task Phase 0 | 無人の前提を欠く(§1。発見の周の前提は discover-mode.md §4) | 失敗扱い |
 | G4 | ship-task・do-task | 周の中で守る値(§7)を失った(文脈の圧縮など) | 失敗扱い。条件 ⑤ の例外が読む報告の値(ship-task Phase 0 の 4)も同時に失うので、D8 の保留より G4 を優先する |
 
@@ -174,6 +177,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 
 **ガード**: 手順 1 で、何も書き換える前にすべて確かめる。1 つでも満たさなければ、保留せず失敗扱いにする(作業ツリーと index はそのまま)。
 
+- git 設定のダイジェストが守る値のまま(`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0。§7 の commit の手順の最初の照合。ガードの最初に打つ)
 - 現在のブランチが、この周で ship-task が作った作業ブランチである(`git symbolic-ref --quiet HEAD` = `refs/heads/<作業ブランチ>`)
 - HEAD = 最後に知る HEAD(§7)
 - タスク MD が `進行中_` である
@@ -198,14 +202,15 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
      - タスク MD の新旧のパス(`進行中_{名}.md`・`保留_{名}.md`。手順 3・4 が扱う。旧パスは `git mv` で作業ツリーにも index にも無いので、渡すと `git add` が rc 128 で止まる)
      - 作業ツリーにも index にも無いパス(`[ -e ] || [ -L ]` が偽で、`git ls-files --error-unmatch -- ':(literal)<パス>'` も失敗する。implementer の `git mv` の旧パスなど。削除は既に stage されている)
    - 残りを `git add -- ':(literal)<パス>' …` で stage する。作業ツリーから消えた追跡ファイルは、これで削除として stage される
-6. commit の直前の照合(§7。index に除外対象が無いことを含む)を通してから commit する。メッセージは実装 commit と同じ規約で推定する。直後の照合(§7)も行う。push はしない
+6. commit の直前の照合(§7。index に除外対象が無いことを含む)を通してから、§7 の `--expect` つきの commit の 1 行で commit する。メッセージは実装 commit と同じ規約で推定する。直後の照合(§7)も行う。push はしない
 7. `git status --porcelain` が空でなければ、残ったパスを報告する(`loop.sh` はその worktree を残す)
 
 **無人の実装 commit・doc commit の集合**
 
 - 実装 commit: 手順 5 と同じ集合。タスク MD は `完了_{名}.md` のパスを `git add` し、`進行中_` の旧パスは除く
 - doc commit: update-doc が変えたファイル。`secret_paths`(§7 の除外対象の和集合)と `.claude/` の状態ファイルは除く
-- どちらも、commit の直前・直後の照合(§7)を通す
+- どちらも、commit の手順の最初・直前・直後の照合(§7)を通す
+- stage する集合が空なら、その commit の手順を行わない(照合もしない)。update-doc が何も変えなかった doc commit で、`git commit` の rc 1 を失敗扱いにしないため
 - 対話の commit の選び方(「ソースコードとタスク MD を 1 commit にまとめる」)は変えない
 
 **補足**
@@ -239,6 +244,8 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | 値 | 取る者と時点 |
 |---|---|
 | R(本文ダイジェスト) | ship-task: Phase 0 の前提の検査 / do-task: 自分の Phase 0 |
+| git 設定のダイジェスト(`git-config-digest.py` の出力 `sha256:<64 桁>`) | ship-task: Phase 0 の前提の検査(§1。ブランチを作る前に、origin の判定より先に算出する) / do-task: 自分の Phase 0 の手順 3 の後(`--branch` でブランチを作る段の後)。do-task は、ship-task から呼ばれたときも単独のときも、自分で算出した値を持つ |
+| origin の判定(`origin-repo.py` の出力の `origin`・`same`・`vcs`・`repo`・`form`。`reason` は比べない) | ship-task: Phase 0 の前提の検査(§1。git 設定のダイジェストの後)。push する ship-task だけが持つ |
 | 作業ブランチ名と作成時の sha | ship-task: ブランチを作ったとき / do-task: 自分の Phase 0 の手順 3 の後(`--branch` でブランチを作る段の後)の現在のブランチ(`git symbolic-ref --quiet HEAD`。単独で detached HEAD から呼ばれたときは「無し」を保持し、無しのままであることを確かめる) |
 | ship-task が最後に知る HEAD | ship-task: ブランチを作ったとき(= 作成時の sha)。以後は自分の commit のたびに更新する |
 | do-task の開始時の HEAD | do-task: 自分の Phase 0 |
@@ -249,18 +256,23 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 
 | 時点 | 照合すること |
 |---|---|
-| do-task の Phase 4 の各回(implementer から戻るたび)と、Phase 7 の手順 1 の前 | 本文ダイジェスト = R / 現在のブランチ = 保持した作業ブランチ / HEAD = do-task の開始時の HEAD(周の中で commit するのは ship-task だけ) / ヘッダの基準行 = 保持した基準 / 未追跡一覧が保持した状態のまま(「有り」ならファイルがあり sha256 が一致する。「無し」なら後から現れたファイルを使わない) |
-| ship-task の各 commit の直前(実装 commit・doc commit・保留の commit) | 本文ダイジェスト = R / 現在のブランチ = 作業ブランチ / HEAD = 最後に知る HEAD / index に除外対象が無い(`git diff --cached --name-only -z --no-renames` で見る。stage 済みのものも commit に入るため)。通ったら、stage を終えた index の tree を `git write-tree` で控える |
+| do-task の Phase 4 の各回(implementer から戻るたび)と、Phase 7 の手順 1 の前 | 本文ダイジェスト = R / git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` が exit 0(do-task の値) / 現在のブランチ = 保持した作業ブランチ / HEAD = do-task の開始時の HEAD(周の中で commit するのは ship-task だけ) / ヘッダの基準行 = 保持した基準 / 未追跡一覧が保持した状態のまま(「有り」ならファイルがあり sha256 が一致する。「無し」なら後から現れたファイルを使わない) |
+| ship-task の各 commit の手順の最初(実装 commit・doc commit・保留の commit。stage の前。保留の commit では §5 のガードの最初) | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 |
+| ship-task の各 commit の直前(実装 commit・doc commit・保留の commit) | 本文ダイジェスト = R / 現在のブランチ = 作業ブランチ / HEAD = 最後に知る HEAD / index に除外対象が無い(`git diff --cached --name-only -z --no-renames` で見る。stage 済みのものも commit に入るため)。通ったら、stage を終えた index の tree を `git write-tree` で控える。commit は `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/<名>` の 1 回の Bash で打つ(メッセージのファイルは `Write` で置く — §3 の 10) |
 | ship-task の各 commit の直後 | `HEAD^{tree}` = 直前に控えた tree(commit の hook がソースや除外対象を書き換え・stage した場合を捉える)/ `git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> \| python3 <task-digest.py> -` = R(パスは commit の後のパス。実装 commit・doc commit は `完了_`、保留の commit は `保留_`。直前の照合は作業ツリーを読むので、index に別の本文が stage されていた場合を捉える)/ 現在のブランチ = 作業ブランチ。通らなければ、commit は残ったまま失敗扱い。通れば、最後に知る HEAD を更新する |
-| ship-task の push の直前 | `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ |
+| ship-task の push の直前(Phase 5 の PR の前の確かめの後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 ② origin の判定: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>` を打ち直し、exit 0 で 5 欄が守る値と一致 / `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ ③ push は、ship-task の Phase 5 の `--expect` つきの 1 行(git 設定のダイジェストの `--expect` と `&&` でつないだ push)の 1 回の Bash で打つ |
 
+- 表の `<守る値>` は、照らす者(ship-task・do-task)が自分で持つ git 設定のダイジェストの値。`<管理ルート>` は管理ルートの絶対パス(タスクの周では profile の `root` と同じ)。`git-config-digest.py` の `--expect` は exit 0(一致)だけが通る(1 = 不一致、2 = 算出できない)。`--expect` と `&&` でつないだ commit・push の 1 行は、rc が 0 以外なら失敗扱い(`--expect` が通らなければ、commit・push は行われない)
 - 照合の git 呼び出し(と §5 の集合の算出)には、base-commit.md が全 git 呼び出しに定める前置き(`--no-pager --no-replace-objects` ほか)を付ける。置換参照で元の本文を見せる経路を塞ぐため。commit は照合ではないので、この前置きの対象外(commit のときの hook は動く — 限界 ③)
 - **除外対象**: `secret_paths`(この項の和集合)にマッチするものと、`.claude/` の状態ファイル。状態ファイルは diff-snapshot.sh の既定除外と同じ集合(`.claude/reviews/`・`.claude/grasp.md`・`.claude/settings.local.json`・`.claude/.understand-project-done`)。追跡対象の設定(`.claude/project-profile.yml`・`.claude/rules/` など)は除外しない。`secret_paths` は、基準側の profile の `secret_paths` と現在の profile の `secret_paths` の和集合で読み、作業ツリーの profile の値だけで決めない。基準側の読み方・読めないときの扱い・要素の内容の検査は [diff-snapshot-call.md](../../do-task/references/diff-snapshot-call.md) のとおりで、その `<REF>` を次のように読み替える: タスクの周では、作業ブランチの作成時の sha と、do-task が基準を決めた後は基準の sha の両方(作成時の sha は上の守る値。基準の sha は §5 のガードと同じ保持した基準。両方の profile を和集合に入れる。基準行を再利用した再開では両者が違いうるので、do-task の Phase 4 が除外した(レビューしていない)ファイルを commit に入れないため)、発見の周では S0(discover-mode.md §7 の守る値)。現在の profile は、その時点(各 commit・照合・discover-mode.md §4 と工程 D2)の作業ツリーの `.claude/project-profile.yml` を読んだ値。diff-snapshot-call.md が停止と定める場合(`<REF>` が commit に解決できない・要素の内容の検査に当たる など)は失敗扱い(§3 の一般則。保留にしない)。diff-snapshot-call.md が既定 3 要素とする場合(基準側に profile が無い・`<REF>` が空ツリー など)は続けて、報告に書く。基準側にだけある要素も報告に列挙する
 - 照合の理由
   - Phase 7 の前の照合は、Phase 5 の format ゲートなどが本文を変えたまま完了にしないため(単独で呼ばれた do-task には ship-task の commit 前の照合が無い)
   - 基準行と HEAD の照合は、implementer が実装を commit して基準行をその commit へ進め、レビューの diff から実装を消す経路を塞ぐため
   - ブランチの照合は、implementer が同じ sha で別ブランチへ切り替え、ship-task の commit を作業ブランチの外に入れる経路を塞ぐため
+  - git 設定のダイジェストと origin の判定の照合は、周の中で書き換えたローカルの git 設定(`remote.origin.push`・`remote.origin.pushurl`・`core.hooksPath` など)で、ship-task 自身の add・commit・push が別の送り先・別の ref・差し替えた hook に従う経路を、実行の前に塞ぐため。`loop.sh` の周の後の照合(loop.md §4)は push の後にしか見つけず、`loop.sh` を通さない起動には無い。do-task の Phase 4 の各回は、周の中の書き換えを最初に見つける時点。commit の手順の最初の照合は、`git add`・`git mv`・`git status` で差し替えた hook(post-index-change など)が動く前に止め、`--expect` と `&&` でつないだ commit・push の 1 行は、その後の書き換えを止める。push の直前に git 設定のダイジェストを origin の判定より先に照らすのは、設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため
 - push は、すべての照合に通った後にだけ行う
+- 無人の push は、完全な refspec と `--no-follow-tags --recurse-submodules=no` で打つ(字面は ship-task の Phase 5。発見の周は discover-mode.md §8)。周の前からある設定(global・ローカル)の `remote.origin.push` の写像・`push.followTags`・`push.recurseSubmodules` で、送り先の ref と送る ref が変わらないようにするため(design §7-3)。周の中の書き換えは、git 設定のダイジェストの照合が捉える。利用者の設定に `branch.autoSetupRebase`(`always`・`remote`)が無ければ、push の `-u` が共有の `config` に足すのは `branch.<作業ブランチ>.remote`・`branch.<作業ブランチ>.merge` の 2 項目で、`loop.sh` の周の後の照合が許す(loop.md §4)。`branch.autoSetupRebase` が `always`・`remote` の構成では `branch.<作業ブランチ>.rebase=true` も足され、`loop.sh` は周の後の照合で止まる(loop.md §10)
+- 無人の作業ブランチは `git switch --no-track -c <作業ブランチ>` で作る(ship-task の Phase 0 の 4・discover-mode.md §6)。利用者の設定の `branch.autoSetupMerge`(`always`・`inherit`)で共有の `config` に項目が足され、git 設定のダイジェストの照合を誤って落とさないため
 - do-task が単独で呼ばれたときは、R を最後の設計レビューの行の `本文` とも照合する(通らなければ失敗扱いではなく保留。§1)
 - **値を失ったとき**(文脈の圧縮など)は失敗扱い(G4)。設計レビューの行や作業ツリーから読み直さない。どれも implementer が書けるため
 - do-task は、無人の implementer への委託プロンプトで、タスク MD の本文の変更と git の書き込み操作を禁じる(文面は do-task の Phase 3)。無人の do-task は本文だけを契約とし、ヘッダ・追加修正記録の注記で完了条件を変えない(do-task の「無人モード」。原則 3 のタスク MD の更新もしない — D1)。除外 1 の行と追加修正記録の節は照合で守れないため(限界 ②)
@@ -291,6 +303,16 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
   - `- [ ]` の見本: Phase 7 の手順 1 で全部に印を求めるが、フェンスの中に印を付けると本文ダイジェストが変わり、照合で失敗扱いになる
   - `- [x]` の見本: 着手の段階で `- [x]` として数えられ、新規着手の条件 ①(`- [x]` が 1 つも無い)が崩れ、再開判定の (B) も成り立つ。そのため新規着手にならず『基準不明』になる(無人では保留 — D8)
   - do-task の集計は対話の挙動に関わるので変えず、限界とする。create-task は、無人に回すタスク MD のフェンスの中にチェックボックス形の行(`- [ ]`・`- [x]` とも)を書かない
+- ⑥ ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)。発見の周も同じ(discover-mode.md §10)
+  - include の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリーの中の versioned な hook)の中身は照合しない(loop.md §4・§10 の限界と同じ)
+  - 利用者の global・XDG の設定は照合しない。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`core.hooksPath`・`credential.helper`・`http.*` の効き目は受ける。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ
+  - 照合のスクリプト自身(プラグインルートの `git-config-digest.py`・`origin-repo.py`)も、周が書き換えうる(loop.md §10 の hook の本体と同じ)
+  - 許可リストが `git`・`python3` を許すので、周は自分で `git push <URL>`・`git config` を打てる(loop.md §10 の「許可リストは誤操作を減らす仕組みで、隔離ではない」)。この照合が塞ぐのは、ship-task 自身の add・commit・push が、周の中で書き換えられた設定に従う経路
+  - 照合と実行の間の書き換え: commit・push は `--expect` と `&&` でつないだ 1 回の Bash にして間を縮めるが、間は無くならない。`loop.sh` の経路では、書き換えが周の終わりまで残れば、周の後の照合(loop.md §4)が捉える
+  - 誤って失敗扱いになる構成: 周の中で git の設定を書くスクリプト(husky の prepare・`git lfs install --local` など。人のチェックアウトで先に打っておけば、同じ値の書き直しは項目の並びを変えない)/ 利用者の global に `worktree.useRelativePaths=true` があり、単独の起動で外部レビュアーの一時ツリー(external-runners.md §9-1)を初めて作るとき / 周の間に、人が同じリポジトリの共有の設定を変える操作(`git push -u`・追跡つきの `git switch`・`gh pr checkout` など)をしたとき
+  - github の ssh の push 先は、origin の判定の `repo` が `ssh -G`(打ち切り 10 秒・`Match exec`)の結果で決まる。前提と push の直前のどちらか一方だけで `ssh -G` が時間切れになると、`repo` が null と値の間で変わり、正しい周が失敗扱いになる
+  - タスクの周で `repo` が null になる構成(ssh の設定の別名・`ssh.github.com` の 443・ローカルのパス・TLS の検証を外した https など — discover-mode.md §10 と同じ)では、毎周 `縮退`(push もしない)。`origin-repo.py` の `ssh -G` が利用者の ssh の設定の `Match exec` を実行しうること(discover-mode.md §3)は、タスクの周でも同じ
+  - 対話の Phase 5 は `-R` を付けず、push と PR の作成先は利用者の設定に従う
 - parent-child 構成(管理ルート ≠ `root`)では無人を起動しない(前提の検査で失敗扱い)
 - 同じ理由の保留が続いたら止める仕組み(許可リストの不足は全タスクで起きる)は `loop.sh` が扱う: `G1` の保留が続いたら止まる([loop.md](loop.md) §6)。ホスト側の拒否の現れ方(結果の拒否の欄)は周の報告に写す(同 §7。形は実走で測る — 同 §8)。拒否に気づいて保留か失敗扱いにするのは、周の中の team-lead(§3)
 - ローカルのデフォルトブランチが origin より先行しているときは、先行する commit を PR 本文に一覧で示すだけ(S8)。`loop.sh` は起動時に、ローカルが先行なら続けて先行する commit を報告に列挙し、遅れ・分岐なら止まる([loop.md](loop.md) §2 の 11)

@@ -2,6 +2,34 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.17.0
+
+### 変更
+
+- 無人の push(タスクの周・発見の周)を、完全な refspec と `--no-follow-tags --recurse-submodules=no` で打つ(`git push --no-follow-tags --recurse-submodules=no -u origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'`)。利用者の設定の `remote.origin.push` の写像・`push.followTags`・`push.recurseSubmodules` で、送り先の ref と送る ref が変わらないようにするため
+- 無人の作業ブランチを `git switch --no-track -c <作業ブランチ>` で作る(利用者の設定の `branch.autoSetupMerge` で共有の `config` に項目が足されないように)
+- 無人の周の中で、ローカルの git 設定のダイジェストを周の開始時の値と照らす。時点は、do-task の implementer から戻るたびと Phase 7 の手順 1 の前・ship-task の各 commit の手順の最初(stage の前)・commit と push のコマンドの直前(`git-config-digest.py --expect=<守る値> && git commit …`・`… && git push …` の 1 行で打つ)。通らなければ失敗扱い(G2)。ダイジェストを算出する `ship-task/scripts/git-config-digest.py --dir=<ディレクトリ> [--expect=sha256:<64 桁>]` を新設した(共有の `config` と `config.worktree` を include を辿らずに項目の並びで読み、置き場の絶対パスと合わせて sha256 を取る。git は 10 秒で打ち切る。設定の値は出力しない。終了コードは 0 = 算出した〈一致した〉/ 1 = 不一致 / 2 = 算出できない)
+- push の直前に、origin の判定(`origin-repo.py` の `origin`・`same`・`vcs`・`repo`・`form`)を打ち直し、周の開始時の値と照らす(タスクの周・発見の周)
+- タスクの周の前提に、ローカルの git 設定のダイジェストの算出と、発見の周と同じ origin の URL の検査を入れた。PR は、PR の作成先を `gh repo view '<repo>' --json name -q .name` で確かめてから、`gh pr create -R '<repo>'` で push 先(origin)のリポジトリに作る(`<repo>` は `origin-repo.py` の `repo`)
+- `loop.sh` の実装モードも、起動時に兄弟の `origin-repo.py` と origin の URL を検査し、兄弟の `git-config-digest.py` が在ることを確かめる(発見モードと同じ理由コード)。起動時の報告の origin の行を両モードで出す
+
+### 後方互換を破る変更
+
+- タスクの周(`--task=<タスク MD> --unattended`)の前提に origin の URL が入る: fetch と push の URL がそれぞれ 1 つで同じリポジトリを指し、`remote.origin.vcs` が無いこと。満たさなければ失敗扱い(G3)
+- 単独の `/do-task --unattended` の前提に、`{ship-task の}scripts/git-config-digest.py` が在り、管理ルートでローカルの git 設定のダイジェストを算出できる(exit 0)ことが入る。満たさなければ、候補の選択より前に失敗扱い
+- `loop.sh` の実装モードも、起動時に origin の URL を検査する(fetch と push の食い違い・`remote.origin.vcs`・兄弟のスクリプトの欠けで exit 20)
+- タスクの周の PR は push 先(origin)のリポジトリに開く。fork の運用で、gh の既定のリポジトリ(upstream など)に開いていた PR は開かない
+- origin の判定の `repo` が読めない push 先(ssh の設定の別名・`ssh.github.com` の 443・ローカルのパス・TLS の検証を外した https など)では、タスクの周は push も PR もせずに結末 `縮退` で終わる
+- 周の中でローカルの git 設定(共有の `config`・`config.worktree`)が変わると、失敗扱い(G2)になる。周の中で設定を書くスクリプト(husky の prepare・`git lfs install --local` など)と、周の間の人の操作(同じリポジトリでの `git push -u`・追跡つきの `git switch`・`gh pr checkout` など)も含む
+
+### 移行方法
+
+- origin の fetch と push の URL を 1 つずつにして、同じリポジトリに揃える。`remote.origin.vcs` を外す
+- ssh の設定の別名は、`git@github.com:OWNER/REPO` か https の形にする
+- upstream への PR は人が作る
+- 周の中で git の設定を書くスクリプト(husky の prepare など)は、人のチェックアウトで先に打っておく(同じ値の書き直しは、ダイジェストを変えない)
+- 無人ループの周の間は、同じリポジトリの共有の設定を変える操作をしない
+
 ## v4.16.1
 
 ### 変更
