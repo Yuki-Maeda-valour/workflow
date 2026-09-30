@@ -141,7 +141,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 - **stage**: C の各パスを `git add -- ':(literal)<パス>'` で足すだけ
 - **commit**: 1 本。メッセージは `git log --oneline -20` の流儀に合わせる(例 `chore: 発見の候補 — data-audit(3 件)`)。`Write` で `.claude/reviews/discover-<発見元>-msg.md` に置き、`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/discover-<発見元>-msg.md` の 1 回の Bash で渡す(§7 の commit の直前の照合の後。rc が 0 以外なら失敗扱い)
-- **push**: origin があり、`--no-pr` でなければ、push の直前の照合(§7)の後に `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no -u origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` の 1 回の Bash で打つ(字面の理由は unattended-mode.md §7)。利用者の設定に `branch.autoSetupRebase`(`always`・`remote`)が無ければ、共有の `config` に付くのは `branch.<作業ブランチ>.remote`・`.merge` の 2 項目(`loop.sh` が許す — loop.md の発見モード)。`always`・`remote` の構成では `.rebase` も付き、`loop.sh` は周の後の照合で止まる(loop.md §10)。push の失敗・拒否は失敗扱い
+- **push**: origin があり、`--no-pr` でなければ、push の直前の照合(§7)の後に `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` の 1 回の Bash で打つ(字面の理由は unattended-mode.md §7)。push は `-u` を付けず、共有の `config` に項目を足さない(`loop.sh` の周の後の照合は、共有の `config` への追加を許さない — loop.md §4)。push の失敗・拒否は失敗扱い
 - **PR の前の確かめ**: `repo` が null か、`gh repo view '<R>' --json name -q .name` が rc 0 でなければ(active なアカウントでそのリポジトリを読めない)、PR を作らずに結末 `縮退`(push はする)
   - `gh auth status` では決めない(複数のアカウントのどれかに問題があるだけで rc 1 になり、active なアカウントがリポジトリに触れるかも見ない)
 - **PR**: `gh pr create -R '<R>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タイトル>' --body-file - < .claude/reviews/discover-<発見元>-pr.md`
@@ -158,7 +158,8 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
    - 要らない候補は、見送りの行を足すか、消してから merge する(消す = また出てよい / 見送り = もう出さない)。写して使える見送りの行の字面 `> **見送り**: YYYY-MM-DD — <理由>` を載せる(区切りは `—`)
    - 見送り・既知は、同じ観点群・同じ場所(refactor はファイル)の以後の指摘を、すべて止める
    - PR を閉じるだけだと、また出る
-   - merge したら、作業ブランチを消す
+   - 手元で直すとき: 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — unattended-mode.md §9 ⑥)
+   - merge して pull した後に、作業ブランチを消す
    - 採用は、merge の後に `/create-task <候補_ のパス>`
 4. 走査の範囲・未監査と理由・既知として除いた件数・回帰の疑い。data-audit の PR だけ、除外(誤検知の除去)の件数も載せる。refactor の PR には除外の件数を出さない(公開の PR で、未修正のセキュリティの問題があることを知らせないため — candidate-mode.md)
 5. 先行する commit の一覧(空でなければ。件名はコードブロックに入れる)

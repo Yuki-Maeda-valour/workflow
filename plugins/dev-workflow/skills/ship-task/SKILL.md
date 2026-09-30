@@ -125,10 +125,11 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
    - **レビュー**: 反復回数・レビュアー編成・最終判定
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user**(あれば)
+   - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
    - 実際の完了タスク MD へのリンク
 4. 完了報告に PR の URL を含める
 
-**無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7): PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→ push の直前の照合 → `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no -u origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` → `gh pr create -R '<repo>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タスク名>' --body-file - < .claude/reviews/<名>`(`<repo>` は origin の判定の `repo`)
+**無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7): PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→ push の直前の照合 → `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` → `gh pr create -R '<repo>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タスク名>' --body-file - < .claude/reviews/<名>`(`<repo>` は origin の判定の `repo`)
 
 **縮退**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(サイレントスキップ禁止)。`--no-pr` のときも同様にコマンド列だけ示す。無人では結末 `縮退` で終える。無人のタスクの周では、PR の作成先を確かめられない(`repo` が null・`gh repo view` が通らない)ときも同じく push・PR を行わず、結末 `縮退` で終える。`gh repo view` が許可の仲介に拒否されたとき(G1)と、push・PR 作成の失敗・拒否は失敗扱い(S7)。
 
