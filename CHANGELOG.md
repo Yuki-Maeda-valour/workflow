@@ -2,6 +2,26 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.18.0
+
+### 変更
+
+- 無人の push(タスクの周・発見の周)を `-u` なしで打つ(`git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'`)。利用者の設定の `branch.autoSetupRebase`(`always`・`remote`)のもとで、`-u` が共有の `config` に `branch.<作業ブランチ>.rebase=true` も書き、PR まで進んだ周のたびに `loop.sh` の周の後の照合で止まっていたため。無人の周は作業ブランチの追跡を使わない(PR は `--head` で作る)
+- `loop.sh` の周の後の照合は、共有の `config` への追加を許さない(`-u` の push が書く `branch.task/{名}.remote`・`.merge` も差分になる)。周ごとの報告は「許した」の一覧を出さず、照合に通った周では `- 共有の config の差分: 無し` だけを出す
+- 候補の PR の片付けの案内(`loop.sh` の朝の報告・loop.md)を「merge commit で merge して pull した後」にした。発見の周の PR 本文の「人がすること」も「merge して pull した後に、作業ブランチを消す」にした
+- 無人の周の PR 本文(タスクの周・発見の周)に、手元で直して push するときの手段(`git push origin <作業ブランチ>`)を載せる
+
+### 後方互換を破る変更
+
+- 無人の周が push した作業ブランチに upstream(追跡)が付かない。引数なしの `git push` は、`push.default` が既定の `simple` で `push.autoSetupRemote` が無ければ通らない(`push.autoSetupRemote=true` なら通り、追跡を共有の `config` に書く)。`git branch -d <作業ブランチ>` は、手元のデフォルトブランチに merge を pull した後でないと通らない
+- 周の中で共有の `config` に項目が足されると(`-u` の push を含む)、`loop.sh` が周の後の照合で止まる(exit 10・`shared-state`)
+- 旧版の周が push の後に途中で止まり、周の途中の印が残っていると、新しい版の次の起動が `inflight-diff` で止まる(exit 20)
+
+### 移行方法
+
+- 手元で作業ブランチを直して push するときは `git push origin <作業ブランチ>` で打つ。追跡を付ける操作(`git push -u`・`git branch --set-upstream-to`・`gh pr checkout`・`push.autoSetupRemote=true` のもとでの引数なしの `git push`)は共有の `config` に書きうるので、ループが動いていないときに限る
+- 旧版の印で止まったら、差分が `branch.task/{名}.remote`・`.merge`(・`.rebase`)だけと確かめてから、止めの印を消す(loop.md §4・§7)
+
 ## v4.17.0
 
 ### 変更

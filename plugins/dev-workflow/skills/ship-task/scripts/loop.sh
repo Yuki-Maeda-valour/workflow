@@ -70,7 +70,6 @@ ITER_BASE_SHA=""  # 比べる元のファイルの sha256(照合の前にファ�
 ITER_PERMLOG=""
 CLEANUP_LEFT=""
 VERIFY_DIFF=""
-VERIFY_ALLOWED=""
 ABORT_CODE=""
 STOP_MARK_WRITTEN=""
 HELD_NAMES=()
@@ -585,42 +584,19 @@ def entry_text(key, value):
     return key if value is None else f"{key}={value}"
 
 
-def cmd_compare(base_path, cur_path, task):
+def cmd_compare(base_path, cur_path):
     base = json.load(open(base_path, encoding="ascii"))
     cur = json.load(open(cur_path, encoding="ascii"))
-    diffs, allowed_log = [], []
+    diffs = []
     for key in sorted(set(base) | set(cur)):
         bv, cv = base.get(key), cur.get(key)
-        if key == "config" and bv and cv and bv.get("state") == "ok" and cv.get("state") == "ok":
-            be = [tuple(e) for e in bv["entries"]]
-            ce = [tuple(e) for e in cv["entries"]]
-            if ce[:len(be)] == be:
-                # 許すのは、末尾への 2 項目(値の完全一致)の追加だけ(D14)。重複・並べ替え・ほかの値は許さない
-                allowed = []
-                if task != "-":
-                    allowed = [(f"branch.task/{task}.remote", "origin"),
-                               (f"branch.task/{task}.merge", f"refs/heads/task/{task}")]
-                suffix, ok, seen = ce[len(be):], True, set()
-                for e in suffix:
-                    if e not in allowed or e in seen or e in be:
-                        ok = False
-                        break
-                    seen.add(e)
-                if ok:
-                    allowed_log.extend(entry_text(*e) for e in suffix)
-                    continue
-            for line in difflib.unified_diff([entry_text(*e) for e in be], [entry_text(*e) for e in ce],
-                                             lineterm="", n=0):
-                if line.startswith(("---", "+++", "@@")):
-                    continue
-                diffs.append(f"{key}: {one_line(line, 300)}")
-            continue
         if bv == cv:
             continue
         if bv and cv and bv.get("state") == cv.get("state") and "entries" in bv and "entries" in cv:
             be = [tuple(e) for e in bv["entries"]]
             ce = [tuple(e) for e in cv["entries"]]
-            if key in ("config.worktree", "wt:config.worktree"):
+            # config・config.worktree は項目の並びで比べ、追加・削除・値・並べ替えのどの変化も差分にする(D14・#134)
+            if key in ("config", "config.worktree", "wt:config.worktree"):
                 bl = [entry_text(*e) for e in be]
                 cl = [entry_text(*e) for e in ce]
                 for line in difflib.unified_diff(bl, cl, lineterm="", n=0):
@@ -636,8 +612,6 @@ def cmd_compare(base_path, cur_path, task):
                 diffs.append(f"{key}: モード {bv.get('mode')} → {cv.get('mode')}")
             continue
         diffs.append(f"{key}: {show(bv)} → {show(cv)}")
-    for line in allowed_log:
-        print("許した: " + one_line(line, 300))
     for line in diffs:
         print("差分: " + line)
     sys.exit(1 if diffs else 0)
@@ -1003,11 +977,10 @@ cleanup_iteration() {
 }
 
 # 照合(D14・D8): 周の起動の直前の控えと、今の共有の git ディレクトリの状態・refs/heads/<DEF> を比べる。
-# 差分は VERIFY_DIFF、許した 2 項目は VERIFY_ALLOWED に入れる
+# 差分は VERIFY_DIFF に入れる(共有の config への追加を含め、どの変化も差分)
 verify_iteration() {
   local cur="$RUN_DIR/iter-$ITER_SEQ.after.json" out="" rc=0 now
   VERIFY_DIFF=""
-  VERIFY_ALLOWED=""
   # 比べる元が周の起動の直前に取ったままか(食い違えば、共有の状態の変化と同じく止める)
   if [ -z "$ITER_BASE_SHA" ] || [ "$(sha256sum <"$ITER_BASE" 2>/dev/null | cut -d' ' -f1)" != "$ITER_BASE_SHA" ]; then
     VERIFY_DIFF="差分: 比べる元($ITER_BASE)が周の起動の直前に取ったものと違う(書き換えられた)"
@@ -1017,12 +990,11 @@ verify_iteration() {
     VERIFY_DIFF="差分: 今の状態を控えられない(照合できない)"
     return 0
   fi
-  out="$(py compare "$ITER_BASE" "$cur" "$ITER_NAME")" || rc=$?
+  out="$(py compare "$ITER_BASE" "$cur")" || rc=$?
   if [ "$rc" -gt 1 ]; then
     VERIFY_DIFF="差分: 照合できない(補助の終了コード $rc)"
     return 0
   fi
-  VERIFY_ALLOWED="$(printf '%s\n' "$out" | sed -n 's/^許した: //p')"
   VERIFY_DIFF="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
   now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$DEF_NAME" 2>/dev/null || true)"
   if [ "$now" != "$DEF_SHA" ]; then
@@ -1375,11 +1347,11 @@ handle_marks_at_start() {
       place_stop_mark "残ったプロセス(前の実行の周 $INF_ITER の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
       die 20 inflight-leftover "前の実行の周 $INF_ITER のプロセスが残った($CLEANUP_LEFT)。$(stop_mark_guide)"
     fi
-    # 2. 印に残した周の起動の直前の状態と比べる(その周のタスクの 2 項目は許す)+ D8
+    # 2. 印に残した周の起動の直前の状態と、周の後の照合と同じ規則で比べる + D8
     cur="$RUN_DIR/inflight-now.json"
     take_snapshot "$cur" "$INF_WTADMIN"
     rc=0
-    out="$(py compare "$INFLIGHT/base.json" "$cur" "$INF_NAME")" || rc=$?
+    out="$(py compare "$INFLIGHT/base.json" "$cur")" || rc=$?
     [ "$rc" -le 1 ] || die 30 internal "周の途中の印の照合に失敗した(補助の終了コード $rc)"
     diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
     now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$INF_DEF_NAME" 2>/dev/null || true)"
@@ -1408,7 +1380,7 @@ handle_marks_at_start() {
     cur="$RUN_DIR/start-now.json"
     take_snapshot "$cur" -
     rc=0
-    out="$(py compare "$LAST_VERIFIED" "$cur" -)" || rc=$?
+    out="$(py compare "$LAST_VERIFIED" "$cur")" || rc=$?
     [ "$rc" -le 1 ] || die 30 internal "最後に照合に通った状態との比較に失敗した(補助の終了コード $rc)"
     diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
     if [ -n "$diff" ]; then
@@ -2020,7 +1992,7 @@ report_discover_end() {
     done
   fi
   rep "" "## 候補の PR の片付けと採用の手順" ""
-  rep "- merge commit で merge した後: 作業ブランチを消す(\`git branch -d task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`)。デフォルトブランチの祖先になるので、消す前でも読み飛ばしには数えない" \
+  rep "- merge commit で merge して pull した後: 作業ブランチを消す(\`git branch -d task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`)。デフォルトブランチの祖先になるので、消す前でも読み飛ばしには数えない" \
     "- squash・rebase で merge したとき: ブランチの sha がデフォルトブランチの祖先にならないので、消すまで、その発見元は回らない(\`git branch -D task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`。手元の追跡用の ref が残れば \`git branch -dr origin/task/候補-<発見元>-<sha>\`)" \
     "- PR を閉じたとき(merge しない): 上と同じく、消すまで、その発見元は回らない。候補は task_dir に入らないので、同じ指摘がまた出うる" \
     "- 採用: merge して pull した後に、人が対話で \`/create-task <候補_ のパス>\` を打つ(見送りの行がある候補は止まる)" \
@@ -2181,11 +2153,7 @@ source=$ITER_SOURCE
   rm -rf -- "$INFLIGHT"
   save_last_verified
   ITER_ACTIVE=0
-  if [ -n "$VERIFY_ALLOWED" ]; then
-    rep "- 共有の config の差分(許した):" "$(printf '%s\n' "$VERIFY_ALLOWED" | sed 's/^/  - /')"
-  else
-    rep "- 共有の config の差分: 無し"
-  fi
+  rep "- 共有の config の差分: 無し"
   # §5 の判定と後片付け(発見モードは §11 の判定)
   if [ "$DISCOVER" -eq 1 ]; then judge_discover "$rc" "$timed_out"; else judge "$rc" "$timed_out"; fi
   rep "- 結末: ${OUTCOME:-(無し)}${DETAIL:+ — $DETAIL}" "- 判定: $JUDGE"

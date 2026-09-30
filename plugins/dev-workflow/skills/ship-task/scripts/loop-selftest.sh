@@ -231,7 +231,8 @@ case "$prompt" in
     }
     dbr() { g checkout -q -b "$br"; }
     dcommit() { g commit -q -m "候補 $src"; }
-    dpush() { g push -q -u origin "$br"; }
+    dpush() { g push -q origin "$br"; }
+    dpushu() { g push -q -u origin "$br"; }   # 共有の config に branch.<作業ブランチ>.* を書く push(照合で止まる)
     dlinger() { # TERM を無視して居座る(同じプロセスグループに孫、別セッションに印つきの子孫も置く)
       bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
       echo $! >>"$REC/spawned-$rn"
@@ -267,6 +268,8 @@ case "$prompt" in
                dres "無人の周の結果: 候補なし — 今夜の名を push してローカルを消した" ;;
       hang) dlinger ;;
       pushsleep) dbr; cand "候補_$src-a.md"; dcommit; dpush; dlinger ;;
+      pushu) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dres "$PRL" ;;
+      pushusleep) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dlinger ;;
       cfgchange) dbr; cand "候補_$src-a.md"; dcommit; g config selftest.tampered yes; dres "無人の周の結果: 縮退 — tamper" ;;
       late) # 判定の後に書く: 許可の仲介の記録を FIFO にし、loop.sh が読んだとき(判定の後・後片付けの前)に未追跡を置く
             dbr; cand "候補_$src-a.md"; dcommit
@@ -356,7 +359,8 @@ hookcall() { # $1=tool_name $2=tool_input の JSON
   printf '\n' >>"$REC/hookout-$name"
 }
 done_commit() { g mv "$md" "$tdir/完了_$name.md"; echo "impl $name" >"impl-$name.txt"; g add "impl-$name.txt"; g commit -q -m "impl $name"; }
-push() { g push -q -u origin "task/$name"; g gc -q; }
+push() { g push -q origin "task/$name"; g gc -q; }
+pushu() { g push -q -u origin "task/$name"; g gc -q; }   # 共有の config に branch.task/{名}.* を書く push(照合で止まる)
 hold_commit() { # $1=停止条件(空なら保留の行を足さない)
   if [ -n "$1" ]; then
     printf -- '- **保留**(ship-task・2026-09-24): %s — 本文を直し、/create-task で設計レビューをやり直す\n' "$1" >>"$md"
@@ -415,11 +419,17 @@ case "$beh" in
   cfgsleep) g config selftest.tampered yes; linger ;;
   defsleep) branch; done_commit; g update-ref refs/heads/main HEAD; linger ;;
   pushsleep) branch; done_commit; push; linger ;;
+  pushusleep) branch; done_commit; pushu; linger ;;
   crash) touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
   crashcfg) g config selftest.tampered yes; touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
   cfgadd) branch; done_commit; g config selftest.added yes; result "無人の周の結果: 縮退 — tamper" ;;
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人の周の結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人の周の結果: PR — x" ;;
+  pushu) branch; done_commit; pushu; result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
+  docpush) # 文書の無人の push(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を打つ。周の中の branch.autoSetupRebase を控える
+           branch; done_commit; git config --get branch.autoSetupRebase >"$REC/asr-$name" 2>&3
+           eval "${SELFTEST_PUSH_CMD:?}" >&3 2>&3; g gc -q
+           result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
   cfgreorder) branch; done_commit
               python3 - "$common/config" <<'PY'
 import sys
@@ -610,6 +620,33 @@ locked_reason_of() { # $1=相対パス → その理由で locked の worktree �
 }
 wt_count() { git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -c '^worktree '; }
 COMMON_ARGS=(--kill-grace 2 --net-timeout 10)
+# doc_push_cmd <作業ブランチ> → 「OK <コマンド>」か「NG <理由>」。ship-task/SKILL.md の無人の push の字面(照合つき)から
+# `&& ` より後ろの git push を取り出し、<作業ブランチ> を置き換える。取り出しは UW_CMDS と同じ(バッククォートの中・
+# ちょうど 1 種類)。ハードコードしない(-B で __pycache__ を作らない)
+doc_push_cmd() {
+  python3 -B - "$PLUGIN_SRC/skills/ship-task/SKILL.md" "$1" <<'PY' 2>&1
+import re, sys
+path, branch = sys.argv[1], sys.argv[2]
+digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
+try:
+    text = open(path, encoding="utf-8").read()
+except OSError as exc:
+    print("NG SKILL.md を読めない: %s" % exc)
+    sys.exit(0)
+hits = sorted(set(re.findall("`(" + digest + r"git push [^`]+)`", text)))
+if len(hits) != 1:
+    print("NG 字面がちょうど 1 種類でない(%d 種類)" % len(hits))
+    sys.exit(0)
+cmd = hits[0].split("&& ", 1)[1].replace("<作業ブランチ>", branch)
+left = re.findall(r"<[^<>\s]+>|\{[^{}]*\}", cmd)
+if left:
+    print("NG 置き換えられないプレースホルダ: %s" % " ".join(left))
+elif "\t" in cmd or "\n" in cmd:
+    print("NG 字面にタブか改行がある")
+else:
+    print("OK " + cmd)
+PY
+}
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
 # LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv order skip judge breakers signals kill hooks perm d22 between discover)
@@ -1215,7 +1252,8 @@ check "片付け(時間切れ): 孫と別セッションの子孫を記録した
 for p in $(cat "$REC/spawned-leak-j" 2>/dev/null); do
   if wait_dead "$p" 3; then ok "片付け(正常な周): 印つきの残りのプロセスが止まる"; else ng "片付け(正常な周): 印つきの残りのプロセスが止まる(pid $p)"; fi
 done
-has "判定: 許した 2 項目を報告に出す" "$RP" "branch.task/pr-j.remote=origin"
+has "判定: 照合に通った周は共有の config の差分が無いことを報告に出す" "$RP" "- 共有の config の差分: 無し"
+hasnt "判定: 報告に許した項目の一覧を出さない" "$RP" "許した"
 has "判定: .claude/reviews を写せなくても止めずに報告して続ける" "$RP" ".claude/reviews を写せなかった"
 # 報告の「残った worktree」に、その周の結末を添える(この実行の分)・過去の実行の分は報告のパスを示す
 has "残った worktree: この実行の分はその周の結末を添える" "$RP" "(lock の理由: dev-workflow-loop: docs/tasks/進行中_fail-j.md)— 結末: 周 "
@@ -1395,10 +1433,35 @@ addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; addtask hold-c 2026-01-03
 commit
 newrec normal
 run_loop normal -- --repo "$R" "${COMMON_ARGS[@]}"
-check "正常な周で止まらない: push -u と gc を打っても次の周へ進む" 0 "$RC"
+check "正常な周で止まらない: push と gc を打っても次の周へ進む" 0 "$RC"
 check "正常な周で止まらない: PR → PR → 保留" "pr-a pr-b hold-c" "$(calls)"
 has "正常な周で止まらない: キューが空で終わる" "$OUT" "止まった理由: キューが空"
-t "正常な周: push -u が共有の config に書いた" git -C "$R" config --get branch.task/pr-a.merge
+check "正常な周: 共有の config に branch.task/pr-a.* が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/pr-a\.' 2>/dev/null)"
+# 文書の無人の push(SKILL.md の字面の `&& ` より後ろ)を、利用者の設定の branch.autoSetupRebase = always のもとで打つ周:
+# 共有の config に branch.* を書かず、照合に通って次の周へ進む。設定はこの周だけ GIT_CONFIG_SYSTEM で渡す(治具の
+# identity・init.defaultBranch・gc.auto は global の $W/gitconfig にしか無いので GIT_CONFIG_GLOBAL は差し替えない。
+# 共有の $W/gitconfig は書き換えない)
+DP_CMD="$(doc_push_cmd task/docpush-a)"
+case "$DP_CMD" in
+  "OK "*)
+    DP_CMD="${DP_CMD#OK }"
+    printf '[branch]\n\tautoSetupRebase = always\n' >"$W/gitconfig-system-asr"
+    newrepo docpush
+    addtask docpush-a 2026-01-01; addtask pr-b 2026-01-02
+    commit
+    newrec docpush
+    DP_BEFORE="$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
+    run_loop docpush "GIT_CONFIG_SYSTEM=$W/gitconfig-system-asr" "SELFTEST_PUSH_CMD=$DP_CMD" -- --repo "$R" "${COMMON_ARGS[@]}"
+    check "文書の push(autoSetupRebase = always): 周の中で設定が効いている(前提)" always "$(cat "$REC/asr-docpush-a" 2>/dev/null)"
+    check "文書の push(autoSetupRebase = always): 照合に通り、キューが空で終わる" 0 "$RC"
+    check "文書の push(autoSetupRebase = always): 次の周へ進む" "docpush-a pr-b" "$(calls)"
+    has "文書の push(autoSetupRebase = always): 判定は正常(PR)" "$OUT" "docs/tasks/進行中_docpush-a.md → 正常(PR)"
+    t "文書の push(autoSetupRebase = always): origin に作業ブランチがある" git -C "$B" rev-parse --verify -q refs/heads/task/docpush-a
+    check "文書の push(autoSetupRebase = always): 共有の config の branch.* が増えない" "$DP_BEFORE" \
+      "$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
+    ;;
+  *) ng "文書の push(autoSetupRebase = always): SKILL.md から無人の push を取り出す(${DP_CMD#NG })" ;;
+esac
 
 # 共有の git ディレクトリの変化(周の後に照合して止まる。§5 のネットワークの git を打たない)
 shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
@@ -1426,6 +1489,8 @@ shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
 shared_case cfgadd "config に項目を足す"
 shared_case cfgpushremote "branch.task/{名}.pushRemote を足す"
 shared_case cfgremote "branch.task/{名}.remote の値が origin でない"
+shared_case pushu "-u つきの push が branch.task/{名}.remote・.merge を足す"
+has "共有の状態(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/pushu-a.merge=refs/heads/task/pushu-a"
 shared_case cfgreorder "既存の項目の並べ替え"
 shared_case hookchmod "hooks の既存のファイルに実行権を付ける"
 shared_case infoexclude "info/exclude"
@@ -1538,7 +1603,8 @@ kill_case() { # $1=名 $2=振る舞い $3=期待する次の起動の終了コ�
 kill_case cfg cfgsleep 20 "周の中で共有の config を変えた"
 kill_case def defsleep 20 "周の中で refs/heads/<DEF> を動かした"
 kill_case none longsleep 0 "変えずに KILL・最初の周"
-kill_case push pushsleep 0 "push -u の後(許す 2 項目だけ)"
+kill_case push pushsleep 0 "共有の config に書かない push の後"
+kill_case pushu pushusleep 20 "-u つきの push の後(共有の config に branch.task/{名}.* を書いた)"
 # 次の起動の照合で止まった後、止めの印を消すと、最後に照合に通った状態(食い違いを見つけた状態ではない)
 # との差分を報告して続ける
 newrepo xkilldiff
@@ -1789,14 +1855,14 @@ esac
 # 無人の周の git・gh の字面(#133 の D1・D2・D4・D6): ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
 # hook に掛ける字面は文書から取り出す(ハードコードしない。-B で __pycache__ を作らない)。文書ごとにちょうど 1 種類を求め、
 # 取り出せなければ FAIL にする。python3 の呼び出しは、許可リストに python3 を足して掛ける(推奨の列は python3 を含む — loop.md §4)。
-# 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・完全な refspec)で、
+# 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)で、
 # SKILL.md と discover-mode.md で同じであることも照らす
 UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
 import re, sys
 root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
 digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
 push_d1 = ("python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && "
-           "git push --no-follow-tags --recurse-submodules=no -u origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'")
+           "git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'")
 pushes = {}
 items = [
     ("無人の push", "SKILL.md", digest + r"git push [^`]+"),
@@ -1825,7 +1891,7 @@ for label, rel, pat in items:
     tmpl = hits[0]
     if label == "無人の push":
         pushes[name] = tmpl
-        d1_tag = "無人の push(%s)が D1 の字面(--no-follow-tags・--recurse-submodules=no・完全な refspec)" % name
+        d1_tag = "無人の push(%s)が D1 の字面(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)" % name
         if tmpl == push_d1:
             print("YES\t%s\t-" % d1_tag)
         else:
@@ -2919,7 +2985,7 @@ check "発見の周: 発見元を列の順に 1 回ずつ回す" "disc-data-audi
 djudged data-audit "正常(PR)" removed pr
 djudged refactor "正常(縮退)" removed degrade
 t "発見の周(pr): origin に今夜の名のブランチがある" git -C "$B" rev-parse --verify -q "refs/heads/task/候補-data-audit-$D12"
-has "発見の周: 共有の config の 2 項目(今夜の名のブランチ)を許す" "$RP" "branch.task/候補-data-audit-$D12.remote=origin"
+check "発見の周: 共有の config に branch.task/*(今夜の名のブランチ)が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/' 2>/dev/null)"
 has "発見の周: 候補の件数を報告に出す" "$RP" "- 候補: 2 件"
 has "発見の周: 候補のパスを報告に出す" "$RP" "  - docs/tasks/候補_data-audit-a.md"
 has "発見の周: 今夜の名のブランチを報告に出す" "$RP" "今夜の名のブランチ: task/候補-data-audit-$D12"
@@ -3018,7 +3084,15 @@ run_loop dcfg SELFTEST_DISC_DA=cfgchange SELFTEST_DISC_RF=none -- --repo "$R" --
 check "発見の周(共有の config の変化): 終了コード 10" 10 "$RC"
 has "発見の周(共有の config の変化): 理由" "$OUT" "[shared-state]"
 check "発見の周(共有の config の変化): 次の周へ進まない" "disc-data-audit" "$(calls)"
-# 周の途中の印(meta に mode・source・name)と、push の後の KILL の後の起動(許す 2 項目だけなら続ける)
+newdisc dpushu
+newrec dpushu
+D12="$(git -C "$R" rev-parse main | cut -c1-12)"
+run_loop dpushu SELFTEST_DISC_DA=pushu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+check "発見の周(-u つきの push): 終了コード 10" 10 "$RC"
+has "発見の周(-u つきの push): 理由" "$OUT" "[shared-state]"
+check "発見の周(-u つきの push): 次の周へ進まない" "disc-data-audit" "$(calls)"
+has "発見の周(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
+# 周の途中の印(meta に mode・source・name)と、push の後の KILL の後の起動(共有の config に書かない push なら続ける)
 newdisc dkill
 newrec dkill
 D12="$(git -C "$R" rev-parse main | cut -c1-12)"
@@ -3034,7 +3108,7 @@ if wait_file "$REC/started-disc-data-audit" 30; then
   CHILD="$(cat "$REC/pid-disc-data-audit")"
   t "発見の周の KILL: loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
   run_loop dkill SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
-  check "発見の周の KILL の後の起動: push の 2 項目だけなら続ける" 0 "$RC"
+  check "発見の周の KILL の後の起動: 共有の config に書かない push なら続ける" 0 "$RC"
   if wait_dead "$CHILD" 1; then ok "発見の周の KILL の後の起動: 残った子を止める"; else ng "発見の周の KILL の後の起動: 残った子を止める"; fi
   f "発見の周の KILL の後の起動: 周の途中の印は消える" test -e "$SD/inflight"
   f "発見の周の KILL の後の起動: 止めの印を置かない" test -e "$SD/stop-mark.md"
@@ -3043,6 +3117,33 @@ if wait_file "$REC/started-disc-data-audit" 30; then
   has "発見の周の KILL の後の起動: ほかの発見元を回す" "$REC/calls.log" "disc-refactor"
 else
   ng "発見の周の KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+# -u つきの push の後の KILL の後の起動(共有の config に今夜の名のブランチの branch.* を書いた周 → 20・止めの印)
+newdisc dkillu
+newrec dkillu
+D12="$(git -C "$R" rev-parse main | cut -c1-12)"
+start_bg dkillu SELFTEST_DISC_DA=pushusleep SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-disc-data-audit" 30; then
+  sleep 0.5
+  SD="$(state_dir dkillu)"
+  kill -KILL "$BG_PID"; wait_bg
+  CHILD="$(cat "$REC/pid-disc-data-audit")"
+  t "発見の周の KILL(-u つきの push の後): loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
+  run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+  check "発見の周の KILL(-u つきの push の後): 次の起動の終了コード" 20 "$RC"
+  has "発見の周の KILL(-u つきの push の後): 理由" "$OUT" "[inflight-diff]"
+  if wait_dead "$CHILD" 1; then ok "発見の周の KILL(-u つきの push の後): 残った子を止める"; else ng "発見の周の KILL(-u つきの push の後): 残った子を止める"; fi
+  f "発見の周の KILL(-u つきの push の後): 周の途中の印は消える" test -e "$SD/inflight"
+  t "発見の周の KILL(-u つきの push の後): 止めの印が残る" test -f "$SD/stop-mark.md"
+  has "発見の周の KILL(-u つきの push の後): 差分を報告する" "$(report_of "$OUT")" \
+    "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
+  hasnt "発見の周の KILL(-u つきの push の後): ほかの発見元を回さない" "$REC/calls.log" "disc-refactor"
+  # 人が差分を確かめてから止めの印を消すと続く
+  rm -f "$SD/stop-mark.md"
+  run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
+  check "発見の周の KILL(-u つきの push の後): 止めの印を消すと続く" 0 "$RC"
+else
+  ng "発見の周の KILL(-u つきの push の後): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
 
 # ── 結末の行の選び方(実装モード)・実装モードが 候補_ を拾わない・候補_ だけのディレクトリの検出 ──
