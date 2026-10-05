@@ -33,6 +33,21 @@ SKILLS_REL = "plugins/dev-workflow/skills"
 SKILL_COUNT_RE = re.compile(r"skills?\s*(\d+)\s*種|(\d+)\s*skills?")
 MARKETPLACE_JSON = ".claude-plugin/marketplace.json"
 PLUGIN_JSON = "plugins/dev-workflow/.claude-plugin/plugin.json"
+# 人が読む文の書き方の正本(validate.py の _WRITING_RULES と対。SKILLS_REL からの相対パス)
+WRITING_RULES_REL = "do-task/references/writing-for-people.md"
+WRITING_LINK_MISSING = "writing-for-people.md へのリンクが無い"
+
+
+def writing_rules_line(skill):
+    """各 SKILL.md の `## 原則` に置く、書き方の正本を指す 1 行。リンクは SKILL.md の位置からの
+    相対パス(正本を持つ do-task だけ `references/…`)。"""
+    link = "references/writing-for-people.md" if skill == "do-task" else f"../{WRITING_RULES_REL}"
+    return (
+        "- **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に "
+        f"[{link}]({link}) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・"
+        "口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、"
+        "口調の決まりを書いた節に従い、届かないことを報告に書く)"
+    )
 
 # Issue #101 の期待語彙。検証器の定数を参照せず、欠落や分類違いも検知する。
 HOST_CLI_BOUNDED_WORDS = (
@@ -89,14 +104,17 @@ class ValidateTest(unittest.TestCase):
         return target
 
     def write_skill_md(self, skill, total_lines, trailing_newline=True):
-        """SKILL.md を frontmatter を残したまま**論理行数ちょうど**に作り替える。"""
+        """SKILL.md を frontmatter を残したまま**論理行数ちょうど**に作り替える。
+        `## 原則` の見出しと書き方の正本を指す 1 行は残す(無いと原則の節の検査で ERROR になり、
+        行数の境界の検証にならない)。"""
         target = self.repo / "plugins" / "dev-workflow" / "skills" / skill / "SKILL.md"
         text = target.read_text(encoding="utf-8")
         end = text.index("\n---", 3) + len("\n---\n")
         front = text[:end]
-        filler_count = total_lines - front.count("\n")
-        self.assertGreater(filler_count, 0, "frontmatter だけで指定行数を超えている")
-        out = front + "\n".join(["本文"] * filler_count)
+        kept = ["## 原則", writing_rules_line(skill)]
+        filler_count = total_lines - front.count("\n") - len(kept)
+        self.assertGreater(filler_count, 0, "frontmatter と原則の節だけで指定行数を超えている")
+        out = front + "\n".join(kept + ["本文"] * filler_count)
         if trailing_newline:
             out += "\n"
         target.write_text(out, encoding="utf-8")
@@ -120,6 +138,33 @@ class ValidateTest(unittest.TestCase):
         new, n = re.subn(r"^(name: .*)$", lambda m: m.group(1) + "\n" + line, text, count=1, flags=re.MULTILINE)
         self.assertEqual(1, n, "name 行が 1 行見つからない")
         target.write_text(new, encoding="utf-8")
+
+    def skill_md(self, skill):
+        return self.repo / SKILLS_REL / skill / "SKILL.md"
+
+    def replace_in_skill_md(self, skill, old, new):
+        """SKILL.md の中の `old` を 1 か所だけ `new` に置き換える(見つからなければ試験を落とす)。"""
+        target = self.skill_md(skill)
+        text = target.read_text(encoding="utf-8")
+        self.assertEqual(1, text.count(old), f"{skill}/SKILL.md に置き換え元がちょうど 1 か所ない")
+        target.write_text(text.replace(old, new), encoding="utf-8")
+
+    def writing_rules_line_of(self, skill):
+        """写しの SKILL.md から、書き方の正本へのリンクを持つ行(行全体)を取る。"""
+        lines = [
+            line
+            for line in self.skill_md(skill).read_text(encoding="utf-8").split("\n")
+            if "writing-for-people.md](" in line
+        ]
+        self.assertEqual(1, len(lines), lines)
+        return lines[0]
+
+    def rewrite_skill_body(self, skill, body_lines):
+        """SKILL.md の frontmatter を残し、本文を `body_lines` だけにする。"""
+        target = self.skill_md(skill)
+        text = target.read_text(encoding="utf-8")
+        end = text.index("\n---", 3) + len("\n---\n")
+        target.write_text(text[:end] + "\n".join(body_lines) + "\n", encoding="utf-8")
 
     def patch_json(self, relpath, mutate):
         target = self.repo / relpath
@@ -288,6 +333,79 @@ class ValidateTest(unittest.TestCase):
         with target.open("a", encoding="utf-8") as stream:
             stream.write("\nfrontmatter に allowed-tools・disallowed-tools を付けない。\n")
         self.assert_clean()
+
+    # ------------------------------ 原則の節の、人が読む文の書き方の正本へのリンク
+
+    def test_writing_link_in_principles_passes(self):
+        # 写しの実ファイルに頼らず、原則の節にリンクを置いた最小の本文で通ることを見る。
+        # do-task は正本と同じ skill なので、リンクの形が `references/…` になる
+        for skill in ("tool-check", "do-task"):
+            with self.subTest(skill=skill):
+                self.rewrite_skill_body(
+                    skill,
+                    [f"# {skill}", "", "## 原則", "", "- 推測で進めない", writing_rules_line(skill),
+                     "", "## 1. 手順", "", "本文"],
+                )
+                self.assert_clean()
+
+    def test_writing_link_missing_is_error(self):
+        line = self.writing_rules_line_of("tool-check")
+        self.replace_in_skill_md("tool-check", line + "\n", "")
+        self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
+
+    def test_writing_link_without_principles_section_is_error(self):
+        # 原則の節そのものが無いときも ERROR(リンクは H1 の下の段落に残る)
+        self.replace_in_skill_md("tool-check", "\n## 原則\n", "\n")
+        self.assertIn("writing-for-people.md](", self.skill_md("tool-check").read_text(encoding="utf-8"))
+        self.assert_error(["tool-check/SKILL.md", "`## 原則` の節が無い"])
+
+    def test_writing_link_only_outside_principles_is_error(self):
+        # リンクは実在するのでリンク切れにはならない。原則の節の外にあるから ERROR になる。
+        # 節の前(H1 の下)と、節の後(ファイルの末尾。別の `## ` の節の中)の両方を見る
+        line = self.writing_rules_line_of("tool-check")
+        original = self.skill_md("tool-check").read_text(encoding="utf-8")
+        for where in ("前", "後"):
+            with self.subTest(where=where):
+                self.skill_md("tool-check").write_text(original, encoding="utf-8")
+                self.replace_in_skill_md("tool-check", line + "\n", "")
+                if where == "前":
+                    self.replace_in_skill_md("tool-check", "\n## 原則\n", f"\n{line}\n\n## 原則\n")
+                else:
+                    with self.skill_md("tool-check").open("a", encoding="utf-8") as stream:
+                        stream.write(f"\n{line}\n")
+                errors = self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
+                self.assertFalse(any("リンク切れ" in e for e in errors), errors)
+
+    def test_writing_link_inside_code_fence_is_not_counted(self):
+        line = self.writing_rules_line_of("tool-check")
+        for opening, closing in (("```", "```"), ("~~~", "~~~")):
+            with self.subTest(fence=opening):
+                self.replace_in_skill_md("tool-check", line, f"{opening}\n{line}\n{closing}")
+                self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
+                # 次の subTest のために戻す
+                self.replace_in_skill_md("tool-check", f"{opening}\n{line}\n{closing}", line)
+
+    def test_writing_link_plain_mention_is_error(self):
+        # リンクの形でない素の言及は数えない
+        line = self.writing_rules_line_of("tool-check")
+        for mention in (
+            "- writing-for-people.md に従う",
+            f"- `../{WRITING_RULES_REL}` を読み、それに従う",
+        ):
+            with self.subTest(mention=mention):
+                self.replace_in_skill_md("tool-check", line, mention)
+                self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
+                self.replace_in_skill_md("tool-check", mention, line)
+
+    def test_writing_link_to_another_file_with_the_same_name_is_error(self):
+        # 名前だけでなく、SKILL.md の位置から解決した実パスで比べる
+        self.write_file(f"{SKILLS_REL}/tool-check/writing-for-people.md", "# 別のファイル\n")
+        line = self.writing_rules_line_of("tool-check")
+        self.replace_in_skill_md(
+            "tool-check", line, "- [writing-for-people.md](writing-for-people.md) を読み、それに従う"
+        )
+        errors = self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
+        self.assertFalse(any("リンク切れ" in e for e in errors), errors)
 
     # ------------------------------------------------------------ V5: リンク検査
 

@@ -12,7 +12,7 @@
 
 - 本体は `ship-task/scripts/loop.sh`、回帰テストは `ship-task/scripts/loop-selftest.sh`。task_dir の解決は兄弟参照の `create-task/scripts/resolve-task-dir.py` を呼ぶ
 - 人のシェル・cron から呼ぶ。skill ではない(決定録 2026-09-23 の決定 1)。ホストのセッションの中から起動されたら止まる(§2 の 2)
-- 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。ほかの OS では起動時に止まる
+- 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 起動できる配置は、プラグインのルート(`loop.sh` の物理パスから 4 階層上 = `scripts/` から 3 階層上。`.claude-plugin/plugin.json` の `name` が `dev-workflow`)の下にあるときだけ。このリポジトリの clone・導入先のキャッシュ・setup.sh の `--link` の配置(物理パスで clone のルートに解決されて起動する)が当たる。setup.sh の `--copy` の配置は plugin.json を置かないので止まる
 - cron から呼ぶときは、利用者が持つこのリポジトリの clone のパスで呼ぶ。導入先のキャッシュは版ごとのパスで、プラグインを更新しても古い版が黙って走るため
   - cron の環境は PATH が短いので、ホスト CLI・gh・品質ゲートのコマンドが見える PATH を crontab に書く。`HOME`・`XDG_STATE_HOME` は手動の起動と揃える(揃わないと状態ディレクトリが別になり、ロックと止めの印が共有されない)
@@ -58,9 +58,14 @@
 
 この順で行う。1 つでも満たさなければ、worktree を作らずに `ERROR [理由コード]` を出して止まる(exit 20。1 の使い方の誤りだけは exit 2)。理由コードと文言は `loop.sh` が持つ。
 
-**前置き**(最初に行う)
+**最優先の環境検査**(引数・ホスト判定より前)
 
-- 最初に `git` の有無を確かめ(無ければ理由コード `tool-missing`)、git のローカルな環境変数(`git rev-parse --local-env-vars` の列と `GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>`)を外し、`GIT_NO_LAZY_FETCH=1` を付ける。`GIT_CONFIG_GLOBAL`・`GIT_CONFIG_SYSTEM`・`GIT_CONFIG_NOSYSTEM` は利用者の側の値として残す
+- `uname -s` で Linux を確認する。非 Linux と `uname` 自体の失敗は exit 20 / `ERROR [os]`。続いて bash 4.4 以上を確認し、Linux の旧 bash は exit 20 / `ERROR [bash-version]`。bash 3.2 でも読める構文で、未初期化の `die`・trap は使わず診断する。
+- OS → bash の版 → `shopt`・配列・date・git・trap などの初期化の順。非対応環境では `--help`・不正引数より環境エラーを優先する。対応環境の `--help` は exit 0、不正引数は exit 2 を維持する。
+
+**前置き**(環境検査を通った後に行う)
+
+- `git` の有無を確かめ(無ければ理由コード `tool-missing`)、git のローカルな環境変数(`git rev-parse --local-env-vars` の列と `GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>`)を外し、`GIT_NO_LAZY_FETCH=1` を付ける。`GIT_CONFIG_GLOBAL`・`GIT_CONFIG_SYSTEM`・`GIT_CONFIG_NOSYSTEM` は利用者の側の値として残す
 - `loop.sh` 自身の git には [base-commit.md](../../do-task/references/base-commit.md) の前置き(`-c core.hooksPath=/dev/null -c core.fsmonitor=` ほか)を付ける。前置きが無いと `git worktree add` が post-checkout hook を実行する
 - ネットワークに出うる git(`ls-remote`・`worktree add`〈LFS の checkout が取りに行く〉)は、`GIT_TERMINAL_PROMPT=0`・stdin を `/dev/null`・`setsid`・タイムアウト(`--net-timeout`。`worktree add` は 600 秒で固定)で打つ(夜中に認証を尋ねられて固まらないように)。以下「ネットワークの規則」と呼ぶ
 
@@ -68,7 +73,7 @@
 
 1. 引数の検査(使い方の誤りは exit 2。`--mcp-config` のファイルが無いときを含む)
 2. ホストのセッションの中でない: [external-runners.md](../../do-task/references/external-runners.md) §3 判定 2 の環境変数の列のどれか 1 つでも立っていれば止まる。`DEV_WORKFLOW_HOST_CLI` は非空なら止まる向きに読む(判定 2 では「どのホストか」を知るための上書きだが、`loop.sh` には「ホストの中か」だけが要る)。判定はベストエフォートで、判定できないホストは素通りする(決定録 2026-09-23 の決定 12)。列が external-runners.md と一致することは `loop-selftest.sh` が照合する
-3. OS と道具: Linux で、`setsid`・`flock`・`python3`・`timeout`・`realpath`・`sha256sum` がある(無ければ理由コード `tool-missing`。`git` は前置きで確かめる。ホスト CLI の実在は 12)
+3. 道具(OS・bash は最優先で検査済み): `setsid`・`flock`・`python3`・`timeout`・`realpath`・`sha256sum` がある(無ければ理由コード `tool-missing`。`git` は前置きで確かめる。ホスト CLI の実在は 12)
 4. プラグインのルートと名前(§1)。兄弟の `resolve-task-dir.py`・許可の仲介の `loop-permission.py`・`origin-repo.py`(10 の後の origin の URL の検査で打つ。周の skill も使う)・`git-config-digest.py`(周の skill がローカルの git 設定の照合に使う。`loop.sh` は打たない)が在る(無ければ理由コード `plugin-root`)。`python3` を絶対パスに解決する(`/` で始まらなければ `tool-missing`。許可の仲介の hook のコマンドに使う — §9)
 5. `--host` が既定表にある。`--host-argv` の検査: 隔離と判定に要るフラグは、置き換えても `loop.sh` が必ず足す。置き換えのトークンを `=` の前で切って照合し、それらのフラグ名・その別名(ホストの `--help` にあるもの)・全許可のフラグ・設定を足す起動引数(設定で全許可のモードを指定できるため)・argv の区切りを終えるフラグ・背景実行のフラグ・worktree を作るフラグ(一覧は既定表)があれば止まる。値を取るフラグの形の照合は、ホストの `--help` を読んだ後の 12 で行う。最初のトークン(実行ファイル)が `-` で始まるときと、既定表の禁止の短いフラグの文字(ヘッドレス起動のフラグと worktree を作るフラグの 1 文字の別名)を含む短いフラグの束ね書き(`=` で切らずにトークン全体で見る)も止まる
    - ホスト CLI へ渡す argv の順は、雛形か `--host-argv` のトークン → 許可リストの値(`--allowed-tools`。`-` で始まる値は使い方の誤り)→ MCP の設定 → 隔離と権限のフラグ(と、許可の仲介の hook を渡す設定を足す起動引数。§9)。隔離と権限のフラグを argv の最後に置く
@@ -328,7 +333,7 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 
 ## 10. 受け入れる限界
 
-- Linux 専用。`setsid`・`flock`・`/proc` を使うので、ほかの OS では起動時に止まる
+- Linux 専用(`setsid`・`flock`・`/proc` を使う)。`inherit_errexit` を使うため bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 片付けは周の印(`/proc/<pid>/environ` の `DEV_WORKFLOW_LOOP_ITER`)とプロセスグループで子孫を探す。印を消した・環境を書き換えたプロセスは見つけられない
 - 許可リストは誤操作を減らす仕組みで、隔離ではない。python3・bash を許した時点で実質のコード実行になり、周は利用者の権限で、利用者が書ける場所ならどこでも書ける。`loop.sh` が守る・検出するのは、人のチェックアウトと、リポジトリの共有の git の状態(§4 の照合とデフォルトブランチの固定)だけで、その中にも見ない経路がある(下の項)。利用者の側のファイル(ホストの利用者設定・git の global 設定・シェルの設定・プラグインの clone など)は見ない(周がそれらを書き換えて後の周に持ち越す経路は #107)
 - `--mcp-config` を渡さないと、周では MCP が使えない。MCP を前提にする工程(メモリの同期など)は各 skill の「無い場合」の経路で動く

@@ -15,6 +15,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 5. **委託は役割語で行う**(`researcher` / `implementer` / `reviewer` / `checker`)。**起動時に `name` を必ず付ける**(完了後の再依頼・状態確認の宛先になる)。ホスト自身と同じ CLI を Bash から起動しない(design §5-5)。**調査・レビュー・検証は読み取り専用の委託、実装は編集を伴う委託**にする。無人(`--unattended`)では、どの役割(researcher・implementer・reviewer・checker)の委託でも、[unattended-mode.md](../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる(「拒否されたら打ち直さずに報告する」は要点の最後の行)
 6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。独立レビュアーまたは解決表を使えない場合はレビュー未完了を報告し、完了承認・後続公開へ進めない。セルフ実行と機械検証は独立レビューの代替にしない。無人では失敗扱い(D18)
 7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [references/delegation-map.md](references/delegation-map.md) が正本
+8. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [references/writing-for-people.md](references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
 
 ## 検証のみモード
 
@@ -32,6 +33,8 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 - **反復の数え方**: Phase 5・5.5 からの差し戻しも ITER を増やし、`--max-iter` の報告点に数える(報告点に届かないまま、時間切れまで回らないように)
 
 ## Phase 0: 前提と対象確定
+
+最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、PATH 上の bash 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
 
 1. **管理ルートと対象タスク**: 本体 `root` へ移動する前に管理プロジェクトルートを固定する。引数のパスがあれば管理ルート相対として最優先し、profile の `task_dir` が不正でも保存先の再解決を行わない。無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `進行中_*.md` から選択する(複数あればユーザーに確認。無人ではパスが無ければ、ここより前に失敗扱い — D4)。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは停止する。対象タスク MD の絶対パスを保持して全文読む
    - 引数のパスのファイル名が `候補_` で始まる(発見ループの候補。設計書の手前)ときは、何も書き換えずに停止し、`/create-task <そのパス>` での採用を案内する(設計と設計レビューを飛ばして実装に入らない。無人では失敗扱い)

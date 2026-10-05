@@ -24,8 +24,9 @@ class DigestError(Exception):
     pass
 
 
-def _fence_flags(lines: list[str]) -> list[bool]:
-    # 開きの行・閉じの行もフェンスの中に数える。閉じないまま末尾に達したら、そこまでがフェンスの中
+def _fence_flags(lines: list[str], *, require_closed: bool = False) -> list[bool]:
+    # 開きの行・閉じの行もフェンスの中に数える。キー収集では従来どおり未閉鎖を末尾まで数え、
+    # 本文ダイジェストでは除外する節も含め、全フェンスの閉鎖を必須にする
     flags: list[bool] = []
     closing: re.Pattern[str] | None = None
     for line in lines:
@@ -39,6 +40,8 @@ def _fence_flags(lines: list[str]) -> list[bool]:
         flags.append(True)
         if closing.match(line):
             closing = None
+    if require_closed and closing is not None:
+        raise DigestError("閉じていないコードフェンスがある")
     return flags
 
 
@@ -47,7 +50,7 @@ def body_lines(text: str) -> list[str]:
         text = text[1:]
     # 改行を LF に揃え、各行の末尾の空白(半角スペースとタブ)を削る
     lines = [line.rstrip(" \t") for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    fenced = _fence_flags(lines)
+    fenced = _fence_flags(lines, require_closed=True)
     headings = [i for i, line in enumerate(lines) if not fenced[i] and H2.match(line)]
 
     records = [i for i in headings if RECORD_HEADING.match(lines[i])]

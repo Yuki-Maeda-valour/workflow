@@ -3,7 +3,7 @@
 # 新しいヘッドレスのセッションで /ship-task の無人モードに回す。人のシェル・cron から呼ぶ(skill ではない)。
 # `--discover` では、発見元を 1 周ずつ /ship-task の発見の周に回して `候補_` を積む(loop.md §11)。
 # **契約(既定値と意味・停止条件・終了コード・報告・限界・実走の手順)の正本は ../references/loop.md**。
-# ここには引数だけを書く。対応するのは Linux だけ(setsid・flock・/proc を使う)。
+# ここには引数と必要環境を書く。Linux・bash 4.4 以上が必要(setsid・flock・/proc を使う)。
 #
 # 使い方:
 #   bash loop.sh [オプション]
@@ -30,6 +30,19 @@
 #
 # 終了コード: 0 / 2 / 10 / 20 / 30 / 128+N(意味は loop.md)
 # --- end usage ---
+# OS → bash の版 → 初期化。bash 3.2 でも読める範囲だけで診断し、trap/die はまだ使わない。
+if ! OS_NAME="$(uname -s 2>/dev/null)"; then
+  printf '%s\n' 'ERROR [os] OS を判定できない(uname -s が失敗)。loop.sh は Linux だけに対応する' >&2
+  exit 20
+fi
+if [ "$OS_NAME" != Linux ]; then
+  printf 'ERROR [os] Linux でない(%s)。loop.sh は Linux だけに対応する(setsid・flock・/proc を使う)\n' "$OS_NAME" >&2
+  exit 20
+fi
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }; then
+  printf '%s\n' 'ERROR [bash-version] bash 4.4 以上が必要(inherit_errexit を使う)。PATH 上の bash の実体と版を確認する' >&2
+  exit 20
+fi
 set -eEuo pipefail
 shopt -s inherit_errexit
 # export された CDPATH があると、素の `cd` が行き先を stdout へ出す。このスクリプトの `cd` はすべて明示パス
@@ -2294,9 +2307,7 @@ check_host_session
 # 子のホスト CLI には渡さない(D7)
 unset DEV_WORKFLOW_HOST_CLI
 
-# ── §2 の 3: OS と道具 ──
-OS_NAME="$(uname -s)"
-[ "$OS_NAME" = Linux ] || die 20 os "Linux でない($OS_NAME)。loop.sh は Linux だけに対応する(setsid・flock・/proc を使う)"
+# ── §2 の 3: 道具(OS/bash は初期化前に検査済み) ──
 for t in setsid flock python3 timeout realpath sha256sum; do
   command -v "$t" >/dev/null 2>&1 || die 20 tool-missing "$t が PATH に無い"
 done

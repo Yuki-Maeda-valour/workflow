@@ -14,6 +14,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 4. **PR は「緑」でしか開かない**。ここでの緑は、品質ゲートが緑・レビューが全員 APPROVED・実動確認が「実施済」か「実施不能」(状態の定義は /do-task の Phase 5.5 の表)の 3 つが揃うこと。揃わない状態で PR を作らない。停止時は作業ブランチと commit を残し、何が未達かを報告する。発見の周(`--discover`)の「緑」は、[references/discover-mode.md](references/discover-mode.md) の照合にすべて通ったこと(品質ゲート・レビュー・実動確認は、採用の後の /create-task・/do-task で行う。design §5-20 の例外)
 5. **git 操作の範囲を明示する**。ブランチ作成・commit・push・PR 作成はこのスキルの責務だが、マージはしない。レビュアーの自動アサインもしない
 6. **無人モードは正本に従う**。`--unattended` のときは、対話点で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。対話点ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。発見の周に固有の前提・工程・照合・結末は references/discover-mode.md が正本。`--unattended` のときは、最初に references/unattended-mode.md を Read し(`--discover` もあれば references/discover-mode.md も同じ応答で Read し)、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない(特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介に拒否されると、打ち直さずに失敗扱いになる)
+7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
 
 ## オプション
 
@@ -160,6 +161,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - [ ] 品質ゲートが緑で、実動確認が「実施済」か「実施不能」であることを確認してから PR を開いた(または開かなかった理由を書いた)
 - [ ] 実装 commit と doc commit を分けた
 - [ ] PR 本文の記述がすべてタスク MD・実行結果に裏付けられている(推測を書いていない)
+- [ ] PR 本文が [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の決まりに沿う(転記した決まった行は字面どおり)
 - [ ] 縮退(gh 不在等)があれば理由付きで明記した。実動確認が「実施不能」なら、理由と確認手順を PR の残課題(PR を開かなかったときは完了報告)に転記した
 - [ ] 作業ブランチを作ったら、Phase 0 の 4 の 4 項目を報告に残した(一覧が空でなければ PR 本文にも載せた)
 - [ ] 無人では、各 commit の手順の最初・直前・直後と push の直前の照合(git 設定のダイジェスト・origin の判定を含む)を通し、タスクの周の PR を `-R '<repo>'` で作り(作成先を確かめられなければ `縮退`)、結末の行を報告の最後に書いた
