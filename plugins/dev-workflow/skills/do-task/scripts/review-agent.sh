@@ -286,7 +286,7 @@ fi
 default_command() {
   case "$1" in
     cursor-agent) printf '%s' 'cursor-agent --mode ask --trust --model {model} -p --output-format json' ;;
-    gemini)       printf '%s' 'gemini --approval-mode plan -m {model} -o json -p {prompt}' ;;
+    gemini)       printf '%s' 'gemini --approval-mode plan -m {model} -o json --prompt={prompt}' ;;
     codex)        printf '%s' 'codex exec --sandbox read-only -m {model}' ;;
     *) return 1 ;;
   esac
@@ -424,6 +424,10 @@ build_cmd() { # $1=プロンプト本文 → 配列 CMD を組む
           fi
         fi
         ;;
+      # Gemini のように option と値を等号で結ぶ完全一致のプレースホルダも、本文を 1 argv にする。
+      # 任意トークン内の置換はしない(テンプレートを一般的な文字列展開器にしない)。
+      '--prompt={prompt}') CMD[${#CMD[@]}]="--prompt=$bc_prompt"; bc_placed=1 ;;
+      '-p={prompt}') CMD[${#CMD[@]}]="-p=$bc_prompt"; bc_placed=1 ;;
       '{prompt}') CMD[${#CMD[@]}]="$bc_prompt"; bc_placed=1 ;;
       *) CMD[${#CMD[@]}]="$w" ;;
     esac

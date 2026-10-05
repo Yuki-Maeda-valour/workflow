@@ -1083,6 +1083,105 @@ if check "通常のプロンプト: 通る" 0 "$rc"; then
   fi
 fi
 
+# Gemini の prompt 値は `--prompt=<本文>` / `-p=<本文>` の等号形と、安全な分離形を受け付ける。
+# 未知 option・重複 prompt・余分な位置引数を拒否し、プローブと本実行の両方で prompt の全文を
+# 記録する。これで `-p {prompt}` の分離形へ戻す変異は、`-` 始まりの本実行本文で拒否される。プローブは固定
+# ping、本実行はスキーマ付与後の本文全体として、それぞれ 1 argv として照合する。
+cat >"$WORK/pathbin/gemini" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--help" ]; then
+    echo '  -p, --prompt <string>'
+    echo '  --approval-mode <mode> (plan)'
+    exit 0
+  fi
+done
+prompt_count=0
+model=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --approval-mode) [ "${2:-}" = plan ] || { echo 'bad approval mode' >&2; exit 2; }; shift 2 ;;
+    -m) model="${2:-}"; [ -n "$model" ] || { echo 'missing model' >&2; exit 2; }; shift 2 ;;
+    -o) [ "${2:-}" = json ] || { echo 'bad output mode' >&2; exit 2; }; shift 2 ;;
+    --readonly-x) shift ;;
+    --prompt=*) prompt="${1#--prompt=}"; prompt_count=$((prompt_count + 1)); shift ;;
+    -p=*) prompt="${1#-p=}"; prompt_count=$((prompt_count + 1)); shift ;;
+    --prompt|-p)
+      [ $# -ge 2 ] || { echo "error: missing prompt after '$1'" >&2; exit 2; }
+      case "$2" in -*) echo "error: option '$2' cannot be a separated prompt value" >&2; exit 2 ;; esac
+      prompt="$2"; prompt_count=$((prompt_count + 1)); shift 2 ;;
+    -*) echo "error: unknown option '$1'" >&2; exit 2 ;;
+    *) echo "error: unexpected positional argument '$1'" >&2; exit 2 ;;
+  esac
+done
+[ "$prompt_count" -eq 1 ] || { echo "error: prompt count is $prompt_count" >&2; exit 2; }
+serial="$(cat "$SELFTEST_STRICT_SERIAL")"
+serial=$((serial + 1)); printf '%s' "$serial" >"$SELFTEST_STRICT_SERIAL"
+printf '%s' "$prompt" >"$SELFTEST_STRICT_RECORD_DIR/prompt-$serial.txt"
+printf '%s' "$model" >"$SELFTEST_STRICT_RECORD_DIR/model-$serial.txt"
+echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+chmod +x "$WORK/pathbin/gemini"
+STRICT_RECORD="$WORK/strict-prompt-record"; mkdir -p "$STRICT_RECORD"
+STRICT_SERIAL="$WORK/strict-prompt-serial"; printf '0' >"$STRICT_SERIAL"
+export SELFTEST_STRICT_RECORD_DIR="$STRICT_RECORD" SELFTEST_STRICT_SERIAL="$STRICT_SERIAL"
+
+strict_prompt_case() { # $1=名前 $2=本文ファイル $3=runner $4=model(空可) [$5=command $6=readonly]
+  sp_name="$1"; sp_file="$2"; sp_runner="$3"; sp_model="$4"; sp_command="${5:-}"; sp_readonly="${6:-}"
+  sp_before="$(cat "$STRICT_SERIAL")"
+  sp_expected="$WORK/strict-expected-$sp_name.txt"
+  sp_body="$(cat "$sp_file")"  # review-agent.sh と同じく末尾改行を落としてから schema を付与する
+  printf '%s\n\n%s' "$sp_body" "$SCHEMA_BLOCK_TEXT" >"$sp_expected"
+  sp_args=(--runner "$sp_runner" --prompt-file "$sp_file" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/log-strict-$sp_name.md")
+  [ -n "$sp_model" ] && sp_args+=(--model "$sp_model")
+  [ -n "$sp_command" ] && sp_args+=(--command "$sp_command" --readonly-flag "$sp_readonly")
+  rc=0
+  PATH="$WORK/pathbin:$PATH" guard bash "$TARGET" "${sp_args[@]}" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  if check "Gemini 等号 prompt: $sp_name" 0 "$rc"; then
+    sp_probe=$((sp_before + 1)); sp_run=$((sp_before + 2))
+    if [ "$(cat "$STRICT_RECORD/prompt-$sp_probe.txt")" = 'ping と 1 語だけ返答してください。' ] \
+      && cmp -s "$sp_expected" "$STRICT_RECORD/prompt-$sp_run.txt"; then
+      ok "Gemini 等号 prompt: $sp_name: プローブ ping と本実行の本文+付与 schema が完全一致"
+    else
+      ng "Gemini 等号 prompt: $sp_name: プローブ ping と本実行の本文+付与 schema が完全一致"
+    fi
+    if [ -n "$sp_model" ] && [ "$(cat "$STRICT_RECORD/model-$sp_probe.txt")" = "$sp_model" ] \
+      && [ "$(cat "$STRICT_RECORD/model-$sp_run.txt")" = "$sp_model" ]; then
+      ok "Gemini 等号 prompt: $sp_name: モデルあり"
+    elif [ -z "$sp_model" ] && [ ! -s "$STRICT_RECORD/model-$sp_probe.txt" ] && [ ! -s "$STRICT_RECORD/model-$sp_run.txt" ]; then
+      ok "Gemini 等号 prompt: $sp_name: モデルなし"
+    else
+      ng "Gemini 等号 prompt: $sp_name: モデルの有無が一致"
+    fi
+  fi
+}
+
+printf '%s\n' '通常のレビュー本文' >"$WORK/prompt-strict-normal.md"
+printf -- '- 箇条書きの本文\n- 2 行目\n' >"$WORK/prompt-strict-bullet.md"
+printf '%s\n' '---' 'title: frontmatter' '---' '本文' >"$WORK/prompt-strict-frontmatter.md"
+printf '%s\n' '--option-like 本文' >"$WORK/prompt-strict-option.md"
+printf '%s\n' '- 日本語「引用」 "double quote" `backtick` $HOME; && | {model} {prompt}' '改行を含む本文' >"$WORK/prompt-strict-japanese.md"
+
+# 先行 red: 旧分離形は通常の probe を通しても、`-` 始まりの本実行本文で拒否される。
+strict_prompt_case normal "$WORK/prompt-strict-normal.md" gemini model-for-test
+strict_prompt_case bullet "$WORK/prompt-strict-bullet.md" gemini model-for-test
+strict_prompt_case frontmatter "$WORK/prompt-strict-frontmatter.md" gemini model-for-test
+strict_prompt_case option "$WORK/prompt-strict-option.md" gemini model-for-test
+strict_prompt_case japanese "$WORK/prompt-strict-japanese.md" gemini ""
+
+# build_cmd のレビュー専用の完全一致拡張。短い `-p=` と長い `--prompt=` の両方を、既定表外の
+# ランナーで通す(任意文字列の置換を広げない)。
+strict_prompt_case short-equals "$WORK/prompt-strict-bullet.md" strict-short "" \
+  "gemini --readonly-x -p={prompt}" "--readonly-x"
+strict_prompt_case long-equals "$WORK/prompt-strict-option.md" strict-long "" \
+  "gemini --readonly-x --prompt={prompt}" "--readonly-x"
+
+# 明示負例: 旧分離形では probe の ping は通るが、箇条書きの本実行が option と解釈されて失敗する。
+PATH="$WORK/pathbin:$PATH" run_agent --runner strict-old-split --command "gemini --readonly-x -p {prompt}" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt-strict-bullet.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 \
+  --log-file "$WORK/log-strict-old-split.md"; rc=$?
+check "Gemini 等号 prompt: 旧分離形 + 箇条書きは本実行で失敗" 8 "$rc"
+
 # --cwd の必須化(R1)。run_agent は --cwd を補うので、ここでは**補わずに直接起動**して
 # 「省略すると止まる」を見る。止めるのはログを作る前で、ランナーは起動しない
 # (実リポジトリ直下での起動を機構として防ぐ)。--cwd "" は省略と同じ扱い
