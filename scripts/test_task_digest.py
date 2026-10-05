@@ -1,5 +1,7 @@
 import hashlib
+import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -76,7 +78,37 @@ class TaskDigestTest(unittest.TestCase):
         data = content.encode("utf-8") if isinstance(content, str) else content
         path.write_bytes(data)
         command = [sys.executable, str(DIGEST), *(args or (str(path),))]
-        return subprocess.run(command, input=data if args == ("-",) else None, capture_output=True, check=False)
+        return subprocess.run(command, input=data if args == ("-",) else None, capture_output=True, check=False, timeout=2)
+
+    def run_path(self, path):
+        return subprocess.run(
+            [sys.executable, str(DIGEST), str(path)],
+            capture_output=True,
+            check=False,
+            timeout=2,
+        )
+
+    def run_hooked_path(self, path, hook, name):
+        digest = repr(str(DIGEST))
+        target = repr(str(path))
+        code = f"""\
+import os
+import runpy
+import sys
+from unittest.mock import patch
+
+digest = {digest}
+target = {target}
+sys.argv = [digest, target]
+module = runpy.run_path(digest, run_name="task_digest_test")
+{hook}
+with patch.object(os, "{name}", wrapped):
+    status = module["main"]()
+if not fired[0]:
+    raise RuntimeError("test hook did not run")
+sys.exit(status)
+"""
+        return subprocess.run([sys.executable, "-c", code], capture_output=True, check=False, timeout=2)
 
     def value(self, content):
         completed = self.run_digest(content)
@@ -311,6 +343,77 @@ class TaskDigestTest(unittest.TestCase):
         self.assertEqual(0, completed.returncode)
         self.assertEqual(self.value(BASE), completed.stdout.decode("utf-8").strip())
         self.assertRegex(completed.stdout.decode("utf-8"), re.compile(r"\Asha256:[0-9a-f]{16}\n\Z"))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO を作れない環境")
+    def test_non_regular_paths_are_rejected_without_waiting(self):
+        fifo = self.root / "input.fifo"
+        os.mkfifo(fifo)
+        paths = {"FIFO": fifo, "ディレクトリ": self.root}
+
+        socket_path = self.root / "input.socket"
+        server = socket.socket(socket.AF_UNIX)
+        try:
+            server.bind(str(socket_path))
+            paths["Unix socket"] = socket_path
+            null = Path("/dev/null")
+            if null.exists() and null.is_char_device():
+                paths["文字 device"] = null
+            for name, path in paths.items():
+                with self.subTest(name=name):
+                    self.assert_cannot_compute(self.run_path(path), "通常ファイル")
+                link = self.root / f"{name}.link"
+                link.symlink_to(path)
+                with self.subTest(name=f"{name} への symlink"):
+                    self.assert_cannot_compute(self.run_path(link), "通常ファイル")
+        finally:
+            server.close()
+
+    def test_regular_file_and_symlink_keep_the_known_value(self):
+        path = self.root / "regular.md"
+        path.write_text(BASE, encoding="utf-8")
+        link = self.root / "regular.link"
+        link.symlink_to(path)
+        for input_path in (path, link):
+            with self.subTest(path=input_path):
+                completed = self.run_path(input_path)
+                self.assertEqual(0, completed.returncode, completed.stderr.decode("utf-8", "replace"))
+                self.assertEqual("sha256:21eefa756f838e54\n", completed.stdout.decode("utf-8"))
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO を作れない環境")
+    def test_replacement_before_open_is_rejected_without_waiting(self):
+        path = self.root / "replace-before-open.md"
+        path.write_text(BASE, encoding="utf-8")
+        hook = """\
+fired = [False]
+real_stat = os.stat
+def wrapped(value, *args, **kwargs):
+    found = real_stat(value, *args, **kwargs)
+    if os.fspath(value) == target and not fired[0]:
+        os.unlink(target)
+        os.mkfifo(target)
+        fired[0] = True
+    return found
+"""
+        self.assert_cannot_compute(self.run_hooked_path(path, hook, "stat"), "通常ファイル")
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "FIFO を作れない環境")
+    def test_replacement_after_open_reads_the_opened_regular_file(self):
+        path = self.root / "replace-after-open.md"
+        path.write_text(BASE, encoding="utf-8")
+        hook = """\
+fired = [False]
+real_open = os.open
+def wrapped(value, flags, *args, **kwargs):
+    fd = real_open(value, flags, *args, **kwargs)
+    if os.fspath(value) == target and not fired[0]:
+        os.unlink(target)
+        os.mkfifo(target)
+        fired[0] = True
+    return fd
+"""
+        completed = self.run_hooked_path(path, hook, "open")
+        self.assertEqual(0, completed.returncode, completed.stderr.decode("utf-8", "replace"))
+        self.assertEqual("sha256:21eefa756f838e54\n", completed.stdout.decode("utf-8"))
 
 
 if __name__ == "__main__":
