@@ -15,7 +15,10 @@
 #   追跡側の比較は **stat 情報を持たない使い捨ての index** に対して行い、ユーザーの
 #   `.git/index` は読むだけで書き換えない(mtime とサイズを合わせた隠蔽を通さないため)。
 #   サブモジュールは gitlink(コミット ID)の変更だけを扱い、サブモジュール内の未コミットの
-#   変更は出ない。
+#   変更は出ない。index の gitlink が `.git` 名エントリの無い非空ディレクトリを指すときは、
+#   未追跡を隠せる改竄の疑いとして exit 22 で停止する(空・不存在・初期化済みは許可)。
+#   `.git` 名エントリの真正性・内容は検証しないため、偽の通常ファイル・ディレクトリ・symlink
+#   による回避と、index/作業ツリーの並行書き換え(TOCTOU)は保証範囲外。
 #
 # 除外:
 #   - `--exclude-glob` / `--exclude`(= 機密パスの指定)に一致したものは、追跡・未追跡・変更・
@@ -94,8 +97,8 @@
 #   一覧の全行をユーザーが明示的に承認したときだけ**渡すもので、一覧が 1 行でも変われば
 #   一致せず exit 22 に戻る。承認した項目は見出しの NOTE に出る。
 #   `core.worktree` の差し替え・`.git/info/attributes` が通常ファイルでない・事後検出の
-#   `Binary files 検出`・`ident` / `working-tree-encoding` 属性・git 2.45 未満での promisor 構成は
-#   承認の対象外。
+#   `Binary files 検出`・`ident` / `working-tree-encoding` 属性・git 2.45 未満での promisor 構成・
+#   gitlink の `.git` 名エントリ不在かつ非空、またはディレクトリ列挙不能は承認の対象外。
 #   **承認した filter は実行せず、作業ツリーの実内容で比較する**。
 #   exit 22 のときの出力: 事前検査の疑いでは本文を生成せず、11 節に固定文字列を書く。
 #   `--patch-out` は公開しない。`core.worktree` の差し替えと、git 2.45 未満での promisor 構成では
@@ -830,6 +833,27 @@ lfs_diag_or_fail "$rc" "$TMPD/untracked.err"
 rc=0
 git --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false ls-files -s -z >"$TMPD/stage.z" 2>"$TMPD/stage.err" || rc=$?
 lfs_diag_or_fail "$rc" "$TMPD/stage.err"
+
+# ── H1 gitlink 検査 ──
+# git は index の gitlink 配下を未追跡として列挙しない。初期化済み submodule は直下に
+# `.git` 名エントリを持つが、偽 gitlink は通常の非空ディレクトリにして内容を隠せる。
+# 内容は読まず、直下の名前だけを列挙する。列挙不能も空とは扱わない。
+while IFS= read -r -d '' gl_rec; do
+  [ "${gl_rec%% *}" = 160000 ] || continue
+  gl_path="${gl_rec#*$'\t'}"
+  [ -d "$gl_path" ] || continue
+  if [ -e "$gl_path/.git" ] || [ -L "$gl_path/.git" ]; then continue; fi
+  : >"$TMPD/gitlink-children.z"
+  gl_rc=0
+  # `./` は先頭が `-` の git パスを find の式に読ませず、末尾の `/.` はディレクトリ
+  # symlink でも対象の直下を列挙するために付ける。
+  find "./$gl_path/." -mindepth 1 -maxdepth 1 -print -quit >"$TMPD/gitlink-children.z" 2>"$TMPD/gitlink-children.err" || gl_rc=$?
+  if [ "$gl_rc" -ne 0 ]; then
+    add_tamper "$gl_path" "gitlink のディレクトリを列挙できない" "-" "" 0
+  elif [ -s "$TMPD/gitlink-children.z" ]; then
+    add_tamper "$gl_path" "gitlink に .git 名エントリが無い非空ディレクトリ" "-" "" 0
+  fi
+done <"$TMPD/stage.z"
 
 # ── 改竄耐性 ④: 属性検査(index 全体 + 未追跡の全パス)──
 cat "$TMPD/tracked.z" "$TMPD/untracked.z" >"$TMPD/attrin.z"
