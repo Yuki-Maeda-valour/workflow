@@ -83,6 +83,7 @@ setup.sh                            # plugin を使わない導入(コピー / s
 - skill 本文・出力は日本語
 - 各 SKILL.md の `## 原則` の節に、人が読む文の書き方の正本 [`do-task/references/writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) を指す 1 行を、リンクの形で置く(**無いと `validate.py` が ERROR で落とす**。素の言及・節の外・コードフェンスの中は数えない)
 - skill 本文を変更するレビューでは「ホスト結合の混入」(役割語ではなくホスト機構名で委託を書いていないか)を観点に含める(design §6 が正本。対象範囲・許容リストとの関係はそちらを参照。詳細をここに列挙しない)
+- skill 本文を変更するレビューでは、SKILL.md の報告の型と、その変更が書く文が [`writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) に沿うかも観点に含める(design §6 が正本)
 
 ## 検証(実装終了時に必ず実行)
 
