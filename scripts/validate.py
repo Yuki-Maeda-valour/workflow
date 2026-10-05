@@ -138,48 +138,43 @@ _MIGRATION_ALLOWLIST: set[str] = set()   # v4.0.0 到達(2026-09-10)。空でも
 _DELEGATION_MAP = "do-task/references/delegation-map.md"
 _EXEMPT_FILES = {_DELEGATION_MAP, "do-task/references/external-runners.md"}
 
-# ホスト CLI 語(design.md §7-7-1)。_DELEGATION_WORDS(委託機構の語)とは別カテゴリ
-# ——スコープが違う(design.md §7-7-1 は scripts/ を対象外にする。scripts/ は正当に CLI 名を持つ)
-# ため、同じ定数に混ぜると scripts/ 配下が一斉に ERROR になる。ランナー名・サンドボックスモード名・
-# コマンド形・プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名の 6 系統。
-# **正当に具体名を持つ行は `<!-- validate-allow: 理由 -->` で免除する**(design.md §5-24・§7-7-1)。**大小を無視する**(check_host_cli_words() が
-# re.IGNORECASE を付ける。既存の _DELEGATION_WORDS は大小を区別したまま — `Codex に実装を委託する`
-# のような大文字始まりが最も混入しやすい書き方なのに、既存の検査は大小を区別するため素通りする)。
-# **単語境界(\b)を付けない(部分一致にする)**。§7-7 の「語彙の限界」がすでに明文で否定した
-# 設計だからで、_DELEGATION_WORDS 側の `Agent` も \b はやめて英字だけの否定先読み・後読み
-# ((?<![A-Za-z])Agent(?![A-Za-z]))に替えた。**`Agent` は部分一致ではない** ——
-# 以下の「部分一致を選ぶ」は _HOST_CLI_WORDS の側の話
-# ——日本語文字が \w に含まれるため \b を付けると助詞が直接続く形(`Geminiに実装を委託する` /
-# `Codex execで委託`)を取りこぼす(偽陰性 = 到達条件をすり抜ける危険側)一方、誤検出は ERROR
-# で落ちる安全側なので部分一致を選ぶ(実測 2026-09-17: \b 付きだとこの 2 例は MISS、空白区切りの
-# `gemini を使う` だけが HIT した)。コマンド形は「codex exec」のように空白を含むため \s+ で
-# 繋ぐだけで、前後に \b は付けない。⚠ 部分一致の副作用: 日本語隣接の取りこぼしは無くなるが、
-# `my-cursor-agent-wrapper` のようなハイフン隣接語では誤検出しうる——誤検出は ERROR で落ちる
-# 安全側なので許容し、出たらその語を書き換えるか除外集合に足す(§7-7 と同じ方針)。単独の
-# `codex`・`read-only`・単独の製品名(`Codex`/`Cursor`/`Claude Code`)は対象外(既知の限界。
-# 設定パス `.codex/` や一般語・`init-project` の正当な散文用例と衝突するため
-# — 衝突を避ける方針は「コマンド形だけを検査語にしてパス形と衝突させない」を既定にし、
-# 「検出前に `.codex/` 等のパス形をマスクする」方式は将来 codex 単独を検査したくなった場合の
-# 拡張余地として残す。その場合 Python の re は固定長後読みしか許さない点に注意)。
+def _host_cli_boundary_pattern(pattern: str) -> str:
+    """通常のホスト CLI 語だけに ASCII 英数字・_・- の境界を付ける。"""
+    # IGNORECASE の [A-Za-z] が İ / ı / ſ / K へ広がらないよう、境界だけ大小を区別。
+    # 語本体の大小無視とコマンド形の Unicode 空白(\s+)は呼出し元の契約を維持する。
+    return rf"(?<!(?-i:[A-Za-z0-9_-]))(?:{pattern})(?!(?-i:[A-Za-z0-9_-]))"
+
+
+# ホスト CLI 語(design.md §7-7-1)。委託の語とは別カテゴリで、scripts/ は対象外。
+# 6 系統 12 語の語本体は大小無視(check_host_cli_words() の re.IGNORECASE)。
+# 通常 10 語は ASCII 境界により別識別子内の誤検出を避け、日本語直結は検出する。
+# Unicode の \b は助詞直結を取りこぼすので使わない。周辺プロジェクト名の
+# _name_boundary_pattern() はハイフンを境界に含めない別契約なので共有しない。
+# MCP 2 語だけは部分一致を維持し、未列挙の接頭・接尾の派生名も検出する。
+# MCP 語を含む別語の誤検出は受容する。正当な行は理由付き validate-allow で免除する。
+# 通常語の Gemini2 / gemini_bot / cursor-agent-wrapper は非検出となる限界がある。
+# コマンド形の \s+ は全角空白・改行も許容し、跨行の一致は開始行で診断・免除する。
+# 単独 codex・製品名(Codex / Cursor / Claude Code)・read-only は従来どおり対象外
+# (設定パス .codex/・正当な散文・一般語との衝突を避ける)。
 _HOST_CLI_WORDS = [
     # ランナー名
-    r"cursor-agent",
-    r"gemini",
+    _host_cli_boundary_pattern(r"cursor-agent"),
+    _host_cli_boundary_pattern(r"gemini"),
     # サンドボックスモード名
-    r"workspace-write",
-    r"danger-full-access",
+    _host_cli_boundary_pattern(r"workspace-write"),
+    _host_cli_boundary_pattern(r"danger-full-access"),
     # コマンド形(単独の codex は入れない)
-    r"codex\s+exec",
-    r"codex\s+review",
-    r"codex\s+mcp",
+    _host_cli_boundary_pattern(r"codex\s+exec"),
+    _host_cli_boundary_pattern(r"codex\s+review"),
+    _host_cli_boundary_pattern(r"codex\s+mcp"),
     # プラグイン・subagent 名
-    r"codex-plugin-cc",
-    r"codex-rescue",
-    # MCP サーバ名(ホストが接続する外部ツールの識別子)
+    _host_cli_boundary_pattern(r"codex-plugin-cc"),
+    _host_cli_boundary_pattern(r"codex-rescue"),
+    # MCP サーバ名(派生名を列挙せず部分一致にする)
     r"claude-in-chrome",
     r"chrome-devtools",
     # ホストのツール引数名(委託機構そのものではないが、ホストに結合する)
-    r"run_in_background",
+    _host_cli_boundary_pattern(r"run_in_background"),
 ]
 
 # 配布メタの skill 件数の表記(「skills 12 種」/「12 skills」の両形)。
