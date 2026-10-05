@@ -14,6 +14,7 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲートは実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
 5. 機密ファイルの値をドキュメントに書かない(存在と用途だけ記す)
 6. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
+7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
 
 ## 2 つの実行モード
 
