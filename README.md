@@ -12,7 +12,7 @@
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
-| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
+| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。AGENTS.md には「応答の書き方」節(人が読む文の書き方の決まりと、応答の口調)を入れ、口調は「応答の口調」の質問で選ぶ(既定は報告調。段落の先頭に「告。」などの短い印を置く口調)。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
 | `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。grasp は前回要約と参照索引に使い、毎回現在の一次情報を確認 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
 | `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を解決した保存先の `進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析(`--refactor --candidates` は発見ループの候補モード)。`候補_` のパスを渡すと、その候補を `進行中_` に採用して設計する | 「〜をタスク化して」「リファクタして」 |
@@ -60,7 +60,7 @@ cd ~/dev/workflow
 ### C. 新プロジェクトの立ち上げ(導入後)
 
 ```
-/init-project            # 標準構成一式を生成(対話で MCP・hook まで。完了時に stack-research をチェーン提案)
+/init-project            # 標準構成一式を生成(対話で応答の口調・MCP・hook まで。AGENTS.md に「応答の書き方」節を入れる。完了時に stack-research をチェーン提案)
 /understand-project      # 把握(以後は hook が毎セッション自動で促す)
 ```
 
