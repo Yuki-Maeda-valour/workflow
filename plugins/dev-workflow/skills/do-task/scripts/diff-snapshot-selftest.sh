@@ -12,8 +12,33 @@
 #
 # 前提: bash 4.0 以上(対象のスクリプトと同じく連想配列を使う)。git は PATH にあるもの。
 #
-# 終了コード: 0=全件 PASS / 1=FAIL あり
+# 終了コード: 0=全件 PASS / 1=FAIL あり / 2=必要環境の不足
+# fixture を作る前に、使用する bash と GNU 道具の実行名・能力を検査する。
+requirements_error() { printf 'ERROR [requirements] %s\n' "$1" >&2; exit 2; }
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || requirements_error 'bash 4.0 以上が必要'
 set -uo pipefail
+for requirements_tool in sha256sum touch find head grep sort; do
+  command -v "$requirements_tool" >/dev/null 2>&1 || requirements_error "$requirements_tool が PATH に無い(GNU coreutils・findutils・grep が必要)"
+  requirements_version="$("$requirements_tool" --version 2>/dev/null)" || requirements_error "$requirements_tool の GNU 版を確認できない"
+  case "$requirements_version" in *'GNU coreutils'*|*'GNU findutils'*|*'GNU grep'*) : ;; *) requirements_error "$requirements_tool は GNU 版が必要" ;; esac
+done
+# 専用領域だけを使い、git・対象スクリプト・ホストはまだ起動しない。
+REQUIREMENTS_WORK="$(mktemp -d)" || requirements_error '必要道具の確認用一時領域を作れない'
+trap 'rm -rf -- "$REQUIREMENTS_WORK"' EXIT
+printf 'a\n' >"$REQUIREMENTS_WORK/input"
+requirements_hash="$(sha256sum -- "$REQUIREMENTS_WORK/input" 2>/dev/null)" || requirements_error 'sha256sum が使えない'
+[ "${requirements_hash%% *}" = 87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7 ] || requirements_error 'sha256sum の結果が不正'
+touch -d @1000000000 -- "$REQUIREMENTS_WORK/input" 2>/dev/null || requirements_error 'touch -d が使えない'
+requirements_found="$(find "$REQUIREMENTS_WORK" -maxdepth 1 -type f -print -quit 2>/dev/null)" || requirements_error 'find -maxdepth/-quit が使えない'
+[ "$requirements_found" = "$REQUIREMENTS_WORK/input" ] || requirements_error 'find の結果が不正'
+requirements_head="$(head -c 1 -- "$REQUIREMENTS_WORK/input" 2>/dev/null)" || requirements_error 'head -c が使えない'
+[ "$requirements_head" = a ] || requirements_error 'head -c が使えない'
+printf 'a\0' | grep -zq '^a$' 2>/dev/null || requirements_error 'grep -z が使えない'
+requirements_sorted="$(printf 'b\0a\0' | sort -z 2>/dev/null | tr '\0' '\n')" || requirements_error 'sort -z が使えない'
+[ "$requirements_sorted" = "$(printf 'a\nb')" ] || requirements_error 'sort -z の結果が不正'
+rm -rf -- "$REQUIREMENTS_WORK"
+trap - EXIT
+unset REQUIREMENTS_WORK requirements_tool requirements_version requirements_hash requirements_found requirements_sorted requirements_head
 
 SELF_PATH="${BASH_SOURCE[0]}"
 case "$SELF_PATH" in /*) : ;; *) SELF_PATH="$PWD/$SELF_PATH" ;; esac
@@ -2876,10 +2901,10 @@ while [ "$c32_try" -le 5 ]; do
   c32_s="$(date +%S)"
   while [ "$(date +%S)" = "$c32_s" ]; do :; done
   printf 'const t = "SAFEMARK";\n' >"$R/src/auth.ts"
-  touch -d "$C32_FIXED" -- "$R/src/auth.ts"
+  touch -d "$C32_FIXED" -- "$R/src/auth.ts" || requirements_error 'touch -d の時刻固定に失敗(㉜ fixture を作れない)'
   OGIT "$R" update-index --refresh >/dev/null 2>&1
   printf 'const t = "EVILMARK";\n' >"$R/src/auth.ts"
-  touch -d "$C32_FIXED" -- "$R/src/auth.ts"
+  touch -d "$C32_FIXED" -- "$R/src/auth.ts" || requirements_error 'touch -d の時刻固定に失敗(㉜ fixture を作れない)'
   sleep 1.1
   if [ -z "$(OGIT "$R" diff --name-only "$B" 2>/dev/null)" ] && [ -z "$(OGIT "$R" status --porcelain 2>/dev/null)" ]; then
     c32_hidden=1

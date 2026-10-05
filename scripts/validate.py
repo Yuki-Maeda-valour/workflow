@@ -24,6 +24,11 @@
      プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名の 6 系統。
      **5 と同じ行単位のマーカーで免除できる** —— MCP サーバ名は生成する設定の
      識別子そのもので、役割語へ書き換えて消せないため(design.md §7-7-1)
+  9. 人が読む文の書き方の正本へのリンク(design.md §6・§5-25): 各 SKILL.md の `## 原則` の節
+     (見出しの次の行から次の `## ` の前まで。コードフェンスの中は除く)に、6 と同じリンクの形で
+     do-task/references/writing-for-people.md を指すものが 1 つ以上あること。リンク先は
+     SKILL.md の位置から解決し、実パスで比べる。素の言及・節の外・フェンスの中は数えない。
+     マーカーでは免除しない
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -33,6 +38,7 @@ import os
 import re
 import sys
 from pathlib import Path
+from typing import Optional
 
 REPO = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO / "plugins" / "dev-workflow" / "skills"
@@ -413,6 +419,62 @@ def check_skills():
                     ERRORS.append(f"{f.relative_to(REPO)}:{line}: リンク切れ -> {m.group(1)}")
 
 
+# 人が読む文の書き方の正本(design.md §5-25)。値は SKILLS_DIR からの相対パス。
+# 各 SKILL.md の `## 原則` の節が、ここをリンクで指す(design.md §6)。
+_WRITING_RULES = "do-task/references/writing-for-people.md"
+_PRINCIPLES_HEADING_RE = re.compile(r"^## 原則\s*$")
+
+
+def _principles_section(body: str) -> Optional[str]:
+    """SKILL.md の `## 原則` の節を返す。範囲は見出しの次の行から次の `## ` の行の前まで。
+    節が無ければ None。
+
+    コードフェンスの中身を空行にした写し(_mask_code_fences)から取る。フェンスの中の
+    見出しは節の境目にならず、フェンスの中のリンクは数えない。"""
+    lines = _mask_code_fences(body).split("\n")
+    for i, line in enumerate(lines):
+        if not _PRINCIPLES_HEADING_RE.match(line):
+            continue
+        section = []
+        for rest in lines[i + 1 :]:
+            if rest.startswith("## "):
+                break
+            section.append(rest)
+        return "\n".join(section)
+    return None
+
+
+def check_writing_rules_link():
+    """各 SKILL.md の `## 原則` の節に、人が読む文の書き方の正本(_WRITING_RULES)への
+    リンクが 1 つ以上あるかを検査する(design.md §6)。
+
+    リンクの取り出しはリンク検査(check_skills())と同じ LINK_RE を使い、fragment を落とした
+    パスを SKILL.md の位置から解決して、正本の実パスと比べる。同じ名前の別のファイルを指す
+    リンク・リンクの形でない素の言及・節の外のリンク・コードフェンスの中のリンクは数えない。
+    SKILL.md の欠けは check_skills() が ERROR にするので、ここでは飛ばす。"""
+    if not SKILLS_DIR.exists():
+        return
+    want = (SKILLS_DIR / _WRITING_RULES).resolve()
+    for d in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
+        md = d / "SKILL.md"
+        if not md.is_file():
+            continue
+        section = _principles_section(md.read_text(encoding="utf-8", errors="replace"))
+        if section is None:
+            ERRORS.append(
+                f"{d.name}/SKILL.md: `## 原則` の節が無い(人が読む文の書き方の正本 {_WRITING_RULES} への"
+                "リンクを置く節 — design.md §6)"
+            )
+            continue
+        targets = (m.group(1).split("#", 1)[0] for m in LINK_RE.finditer(section))
+        if not any(t and (md.parent / t).resolve() == want for t in targets):
+            ERRORS.append(
+                f"{d.name}/SKILL.md: `## 原則` の節に {_WRITING_RULES} へのリンクが無い"
+                "(正本を指す 1 行をリンクの形で置く。素の言及・節の外・コードフェンスの中は数えない"
+                " — design.md §6)"
+            )
+
+
 def _in_delegation_scope(f: Path) -> bool:
     """委託の語検査の走査範囲を 1 式で判定する。skill 直下のファイル(画像以外)、または
     `references/` 配下の *.md(再帰)、または `scripts/` 配下の画像以外(再帰)で、除外 2 本
@@ -564,6 +626,7 @@ def main() -> int:
     check_json_files()
     check_skill_count_claims()
     check_skills()
+    check_writing_rules_link()
     check_delegation_words()
     check_host_cli_words()
     check_delegation_map_invariant()

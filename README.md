@@ -12,7 +12,7 @@
 
 | skill | 用途 | 呼び出し例 |
 |---|---|---|
-| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
+| `/init-project` | 新規/既存プロジェクトに標準構成(権威参照ファイル(AGENTS.md)/ profile / doc / 解決したタスク保存先 / gitignore / permissions / MCP)を導入。AGENTS.md には「応答の書き方」節(人が読む文の書き方の決まりと、応答の口調)を入れ、口調は「応答の口調」の質問で選ぶ(既定は報告調。段落の先頭に「告。」などの短い印を置く口調)。完了時に stack-research をチェーン提案 | プロジェクト開始時に一度 |
 | `/understand-project` | プロジェクト把握(読み取り専用)。`--quick / --area / --deep`。grasp は前回要約と参照索引に使い、毎回現在の一次情報を確認 | セッション開始時(hook が自動促し) |
 | `/stack-research` | 依存バージョン固有のアンチパターン・ベストプラクティス・脆弱性を Web 調査し doc/06 に出典付き生成。プロジェクトに実在する問題はタスク化をチェーン提案 | init 直後・依存更新後(`--update`) |
 | `/create-task` | 種別判定(9 種)・影響範囲調査・図解付きのタスク設計書を解決した保存先の `進行中_*.md` に生成。`--compact` は軽微変更の記録だけを短縮し品質工程を維持、`--refactor` で対象発見型のリファクタ分析(`--refactor --candidates` は発見ループの候補モード)。`候補_` のパスを渡すと、その候補を `進行中_` に採用して設計する | 「〜をタスク化して」「リファクタして」 |
@@ -29,6 +29,8 @@
 一気通貫で回す場合: `/understand-project` → `/ship-task <タスク内容>`(設計 → 実装 → doc 同期 → PR。工程の中身は上の 3 スキルそのもの)。設計済みのタスク MD から回すなら `/ship-task --task=<タスク MD>`
 
 ## 導入方法
+
+do-task の補助スクリプトは bash 4.0 以上と GNU 系ツールを使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH 上の実体を確認してください。macOS 実機は未確認で、同文書に確認手順を残しています。
 
 ### A. plugin marketplace(推奨)
 
@@ -60,7 +62,7 @@ cd ~/dev/workflow
 ### C. 新プロジェクトの立ち上げ(導入後)
 
 ```
-/init-project            # 標準構成一式を生成(対話で MCP・hook まで。完了時に stack-research をチェーン提案)
+/init-project            # 標準構成一式を生成(対話で応答の口調・MCP・hook まで。AGENTS.md に「応答の書き方」節を入れる。完了時に stack-research をチェーン提案)
 /understand-project      # 把握(以後は hook が毎セッション自動で促す)
 ```
 
@@ -107,7 +109,7 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 - **導入済みの版との関係**: `loop.sh` は自分が置かれたプラグイン(clone)を周のセッションに渡す。導入済みの `dev-workflow` が有効で版が違えば、起動時に止まる(導入済みを更新するか、無効にする)。同じ版なら中身が同じとみなす
 - **許可リスト**: 全許可のモードは使わない。許可リストはホストの利用者設定か `--allowed-tools` で渡し(profile では受け付けない)、コマンド単位で列挙する(git・gh・python3・bash・判定と照合〈test・echo・sha256sum〉・読み取り系・品質ゲートのコマンドなど)。許可リストは誤操作を減らす仕組みで、隔離ではない。実走で使った値は [docs/design.md](docs/design.md) §7-3 に記録する
 - **許可の仲介**: 保護パス(`.claude/` など)への書き込みは確認に回って拒否になるので、`loop.sh` が渡す hook が、周の中の状態ファイル(`.claude/reviews/` など)への書き込みだけを通す。hook が Bash のコマンドを照合する許可リストも、`--allowed-tools` か利用者の設定(`permissions.allow`)から作るので、許可リストはこのどちらかに置く。hook を無効にする設定(`disableAllHooks`・管理者設定の `allowManagedHooksOnly`)があると、`loop.sh` は起動しない
-- **Linux 専用**: `setsid`・`flock`・`/proc` を使う。ほかの OS では起動時に止まる
+- **Linux 専用・bash 4.4 以上**: `setsid`・`flock`・`/proc` と `inherit_errexit` を使う。OS → bash の版 → 初期化の順に検査し、非対応環境は `--help` より先に止まる
 - **状態ファイルの ignore**: 状態ファイル 3 つ(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)を ignore し(追跡していれば `git rm --cached` で外し)、commit しておく(init-project の gitignore の断片)。無いと起動時に止まる(`--dry-run` も exit 20。正本は loop.md §3 の 2a)
 - **origin の URL**: origin があれば、fetch と push の URL をそれぞれ 1 つにして同じリポジトリに揃え、`remote.origin.vcs` を置かない。満たさなければ起動時に止まる(`--dry-run` も exit 20。両モード)。origin が無ければ起動し、周は push しない(実装モードで PR まで進む周と、発見モードで候補がある周の結末は `縮退`)。正本は loop.md §2 の「origin の URL の検査」
 - 結果(周ごとの結末・残った worktree・人の次の手順)は朝の報告に出る。停止条件・報告の場所・保留のタスクを再び回す手順は loop.md
@@ -132,6 +134,8 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 ## 検証
 
 検証コマンドの一覧は [AGENTS.md](AGENTS.md) の検証節にあります。同じ一覧を 2 か所に置くと同期漏れが起きるため、このリポジトリでは `AGENTS.md` の 1 か所だけが持ちます。
+
+シェル回帰一式の必要環境は Linux と GNU 系ツールです。GNU コマンドの不足を確認する回帰も含みます。詳細は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) を参照してください。
 
 ホスト固有の検証コマンドは各ホストの指示ファイルにあります — Claude Code なら [.claude/rules/claude-code.md](.claude/rules/claude-code.md) です。
 
