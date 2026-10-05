@@ -20,6 +20,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
 7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
 8. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
+9. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
 
 ## 引数
 

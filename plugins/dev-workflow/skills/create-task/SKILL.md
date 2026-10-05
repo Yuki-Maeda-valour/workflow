@@ -16,6 +16,7 @@ argument-hint: "<タスク内容の説明 | 候補_ のパス> [--refactor [対�
 5. **委託は役割語で行う**。委託先を宛先として識別可能にする(`name` を必ず付ける)。ホスト自身と同じ CLI を Bash から起動しない(design §5-5)
 6. **実行段階の判定**(design §5-17): 着手時にツールの実在で段階を決める。**フル段階で運用できるときは、checker・レビュアーへの再検証依頼を同じ委託先へ差し戻す**(再スポーンしない)。どの段階で実行したかを報告に明記する
 7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する
+8. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
 
 ## オプション
 
