@@ -34,6 +34,14 @@ SKILL_COUNT_RE = re.compile(r"skills?\s*(\d+)\s*種|(\d+)\s*skills?")
 MARKETPLACE_JSON = ".claude-plugin/marketplace.json"
 PLUGIN_JSON = "plugins/dev-workflow/.claude-plugin/plugin.json"
 
+# Issue #101 の期待語彙。検証器の定数を参照せず、欠落や分類違いも検知する。
+HOST_CLI_BOUNDED_WORDS = (
+    "cursor-agent", "gemini", "workspace-write", "danger-full-access",
+    "codex exec", "codex review", "codex mcp", "codex-plugin-cc",
+    "codex-rescue", "run_in_background",
+)
+HOST_CLI_MCP_WORDS = ("claude-in-chrome", "chrome-devtools")
+
 
 class ValidateTest(unittest.TestCase):
     def setUp(self):
@@ -418,6 +426,137 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(0, status, errors)
 
     # ------------------------------------------------------ ホスト CLI 語の検査
+
+    def assert_host_cli_result(self, text, detected, relpath=CHECKED_MD, line=3):
+        """1 ケースずつ実際の検証器へ渡し、他カテゴリの ERROR による偽陽性も防ぐ。"""
+        self.write_file(relpath, f"# t\n\n{text}\n")
+        status, errors, _ = self.run_validator()
+        hits = [e for e in errors if "ホスト固有の CLI 語" in e]
+        self.assertEqual(hits, errors, errors)
+        self.assertEqual(int(detected), len(hits), errors)
+        self.assertEqual(int(detected), status, errors)
+        if detected:
+            self.assertIn(f"{relpath}:{line}: ホスト固有の CLI 語", hits[0])
+        return hits
+
+    def test_host_cli_issue_101_examples(self):
+        cases = (
+            ("P1", "Geminiに実装を委託する", True),
+            ("P2", "Codex execで委託", True),
+            ("P3", "cursor-agentで実装", True),
+            ("N1", "my-cursor-agent-wrapper", False),
+            ("N2", "geminibot", False),
+            ("N3", "workspace-writer", False),
+            ("N4", "x-codex-rescue-y", False),
+            ("P4", "chrome-devtools-mcp", True),
+        )
+        for case, text, detected in cases:
+            with self.subTest(case=case, text=text):
+                self.assert_host_cli_result(text, detected)
+
+    def test_host_cli_all_words_and_boundaries(self):
+        for word in HOST_CLI_BOUNDED_WORDS + HOST_CLI_MCP_WORDS:
+            cases = (
+                word, word[0].upper() + word[1:], f"設定は{word}で", f"{word}で", f"設定は{word}",
+                f" {word} ", f"、{word}。", f"'{word}'", f'"{word}"',
+                f"/{word}/", f".{word}.", f"@{word}@",
+            )
+            for text in cases:
+                with self.subTest(word=word, text=text):
+                    self.assert_host_cli_result(text, True)
+
+    def test_host_cli_ascii_adjacent_left_is_not_detected(self):
+        for word in HOST_CLI_BOUNDED_WORDS:
+            for adjacent in ("x", "Z", "2", "_", "-"):
+                with self.subTest(word=word, adjacent=adjacent):
+                    self.assert_host_cli_result(adjacent + word, False)
+
+    def test_host_cli_ascii_adjacent_right_is_not_detected(self):
+        for word in HOST_CLI_BOUNDED_WORDS:
+            for adjacent in ("x", "Z", "2", "_", "-"):
+                with self.subTest(word=word, adjacent=adjacent):
+                    self.assert_host_cli_result(word + adjacent, False)
+
+    def test_host_cli_non_ascii_adjacent_is_detected(self):
+        # IGNORECASE の [A-Z] は İ / ı / ſ / K にも一致するが、境界は ASCII だけ。
+        for word in HOST_CLI_BOUNDED_WORDS:
+            for adjacent in ("に", "é", "İ", "ı", "ſ", "K"):
+                for text in (adjacent + word, word + adjacent):
+                    with self.subTest(word=word, text=text):
+                        self.assert_host_cli_result(text, True)
+
+    def test_host_cli_mcp_derivatives_are_detected(self):
+        for text in (
+            "chrome-devtools-mcp@latest", "CHROME-DEVTOOLS-MCPに接続",
+            "claude-in-chrome-helper", "my-chrome-devtools-wrapper",
+        ):
+            with self.subTest(text=text):
+                self.assert_host_cli_result(text, True)
+        # MCP は左右とも境界なし。片側だけの派生も独立に固定する。
+        for word in HOST_CLI_MCP_WORDS:
+            for adjacent in ("x", "2", "_", "-"):
+                for text in (adjacent + word, word + adjacent):
+                    with self.subTest(text=text):
+                        hits = self.assert_host_cli_result(text, True)
+                        self.assertIn(repr(word), hits[0])
+
+    def test_host_cli_commands_keep_unicode_whitespace(self):
+        for command in ("exec", "review", "mcp"):
+            for space in (" ", "   ", "\t", "\u3000", "\n"):
+                with self.subTest(command=command, space=space):
+                    self.assert_host_cli_result(f"codex{space}{command}で委託", True)
+
+    def test_host_cli_multiline_command_marker_uses_start_line(self):
+        marker = "<!-- validate-allow: 生成する設定の識別子 -->"
+        self.assert_host_cli_result(f"{marker} codex\nexecで委託", False)
+        self.assert_host_cli_result(f"codex\nexecで委託 {marker}", True)
+
+    def test_host_cli_marker_reason_and_mcp_derivatives(self):
+        for word in ("gemini", "chrome-devtools-mcp", "claude-in-chrome-helper"):
+            for marker, detected in (
+                ("<!-- validate-allow: 生成する設定の識別子 -->", False),
+                ("<!-- validate-allow -->", True),
+                ("<!-- validate-allow: -->", True),
+                ("<!-- validate-allow:   -->", True),
+            ):
+                with self.subTest(word=word, marker=marker):
+                    self.assert_host_cli_result(f"{word} {marker}", detected)
+            with self.subTest(word=word, marker="別行"):
+                self.assert_host_cli_result(
+                    f"<!-- validate-allow: 生成する設定の識別子 -->\n{word}", True, line=4
+                )
+
+    def test_host_cli_product_names_and_config_path_are_not_detected(self):
+        for text in ("Codex", "Cursor", "Claude Code", "read-only", ".codex/config.toml"):
+            with self.subTest(text=text):
+                self.assert_host_cli_result(text, False)
+
+    def test_host_cli_scan_scope(self):
+        cases = (
+            ("tool-check/references/validate-test.md", True),
+            ("tool-check/references/nested/validate-test.md", True),
+            ("tool-check/README.md", True),
+            ("tool-check/validate-test.txt", True),
+            ("tool-check/scripts/validate-test.py", False),
+            ("tool-check/templates/validate-test.md", False),
+            ("tool-check/references/validate-test.txt", False),
+            ("tool-check/validate-test.png", False),
+            ("tool-check/validate-test.jpg", False),
+            ("do-task/references/delegation-map.md", False),
+            ("do-task/references/external-runners.md", False),
+        )
+        for path, detected in cases:
+            with self.subTest(path=path):
+                relpath = f"{SKILLS_REL}/{path}"
+                target = self.repo / relpath
+                original = target.read_bytes() if target.exists() else None
+                try:
+                    self.assert_host_cli_result("gemini", detected, relpath=relpath)
+                finally:
+                    if original is None:
+                        target.unlink()
+                    else:
+                        target.write_bytes(original)
 
     def test_host_cli_words_are_detected(self):
         # 書き先は references/*.md に固定する —— CHECKED_PY は scripts/ 配下で
