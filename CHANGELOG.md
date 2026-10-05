@@ -2,6 +2,15 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.18.2
+
+### 修正・必要環境
+
+- `loop.sh` は初期化より前に OS → bash 版を検査する。非 Linux・OS 判定失敗は rc 20 / `ERROR [os]`、Linux の bash 4.4 未満は rc 20 / `ERROR [bash-version]`。対応環境の help=0・不正引数=2 は維持する。
+- `diff-snapshot-selftest.sh` は bash 4.0 以上と GNU coreutils・findutils・grep の不足を起動前に rc 2 で診断する。`touch -d` の失敗は fixture 不成立による skip と区別して停止する。
+- do-task Phase 0 の必要環境・PATH の選択・パス解決の代替の限界を reference にまとめた。回帰一式は Linux と GNU 系ツールを前提とし、loop の Linux 専用は維持する。
+- Linux の Darwin スタブと bash 3.2 / 4.3 / 4.4 実体で起動境界を確認。macOS 実機は未確認(実機なし)で、確認手順を reference に残した。
+
 ## v4.18.1
 
 ### 修正
