@@ -98,7 +98,7 @@
 #   一致せず exit 22 に戻る。承認した項目は見出しの NOTE に出る。
 #   `core.worktree` の差し替え・`.git/info/attributes` が通常ファイルでない・事後検出の
 #   `Binary files 検出`・`ident` / `working-tree-encoding` 属性・git 2.45 未満での promisor 構成・
-#   gitlink の `.git` 名エントリ不在かつ非空、またはディレクトリ列挙不能は承認の対象外。
+#   gitlink の `.git` 名エントリ不在かつ非空、パス解決不能、ディレクトリ列挙不能は承認の対象外。
 #   **承認した filter は実行せず、作業ツリーの実内容で比較する**。
 #   exit 22 のときの出力: 事前検査の疑いでは本文を生成せず、11 節に固定文字列を書く。
 #   `--patch-out` は公開しない。`core.worktree` の差し替えと、git 2.45 未満での promisor 構成では
@@ -841,7 +841,20 @@ lfs_diag_or_fail "$rc" "$TMPD/stage.err"
 while IFS= read -r -d '' gl_rec; do
   [ "${gl_rec%% *}" = 160000 ] || continue
   gl_path="${gl_rec#*$'\t'}"
-  [ -d "$gl_path" ] || continue
+  if [ ! -d "$gl_path" ]; then
+    # -d だけでは不存在と検索権限不足を区別できない。自身から最初の存在する
+    # 祖先まで戻り、検索不能・解決不能を「未初期化で不存在」として通さない。
+    gl_probe="$gl_path"
+    while [ ! -e "$gl_probe" ] && [ ! -L "$gl_probe" ] && [ "$gl_probe" != . ]; do
+      case "$gl_probe" in */*) gl_probe="${gl_probe%/*}" ;; *) gl_probe=. ;; esac
+    done
+    if { [ -d "$gl_probe" ] && [ ! -x "$gl_probe" ]; } ||
+       { [ -L "$gl_probe" ] && [ ! -e "$gl_probe" ]; } ||
+       { [ "$gl_probe" = . ] && [ ! -e "$gl_probe" ]; }; then
+      add_tamper "$gl_path" "gitlink のパスを解決できない" "-" "" 0
+    fi
+    continue
+  fi
   if [ -e "$gl_path/.git" ] || [ -L "$gl_path/.git" ]; then continue; fi
   : >"$TMPD/gitlink-children.z"
   gl_rc=0

@@ -528,6 +528,54 @@ PATH="$H1_PATH"
 ckeq "④‴H1 gitlink の列挙不能: --precheck exit 22" "$RC" 22
 ckt "④‴H1 gitlink の列挙不能は理由を報告" grep -qF 'gitlink のディレクトリを列挙できない' "$CASE_ERR"
 
+# 検索権限のない祖先を「不存在」と誤認しない。実権限の検査なので root は除く。
+if [ "$IS_ROOT" -eq 0 ]; then
+  base_repo c04h1search
+  mkdir -p "$R/locked/child"
+  printf 'H1_PERMISSION_HIDDEN\n' >"$R/locked/child/hidden"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),locked/child"
+  H1_INDEX_BEFORE="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+  chmod 600 "$R/locked"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 祖先の検索権限なし: --precheck exit 22" "$RC" 22
+  ckt "④‴H1 祖先の検索権限なし: パス解決不能を報告" grep -qF 'gitlink のパスを解決できない' "$CASE_ERR"
+  reset_out
+  run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" --exclude-glob '.env'
+  ckeq "④‴H1 祖先の検索権限なし: 通常生成 exit 22" "$RC" 22
+  ckf "④‴H1 祖先の検索権限なし: patch を公開しない" test -e "$PATCHF"
+  H1_INDEX_AFTER="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+  ckeq "④‴H1 祖先の検索権限なし: index は不変" "$H1_INDEX_AFTER" "$H1_INDEX_BEFORE"
+  chmod 700 "$R/locked"
+
+  base_repo c04h1searchlink
+  mkdir -p "$R/locked/child"
+  printf 'H1_LINK_PERMISSION_HIDDEN\n' >"$R/locked/child/hidden"
+  ln -s locked/child "$R/link"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),link"
+  chmod 600 "$R/locked"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 symlink 先の検索権限なし: --precheck exit 22" "$RC" 22
+  chmod 700 "$R/locked"
+else
+  ok "④‴H1 検索権限の実測は root のため省略(非 root で検証する)"
+fi
+
+# 真に不存在の複数階層と、通常ファイルへのリンクは既存の許可を保つ。
+base_repo c04h1missingparent
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),missing/child"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 親から不存在の gitlink: --precheck exit 0" "$RC" 0
+base_repo c04h1filelink
+printf 'regular target\n' >"$R/target"
+ln -s target "$R/link"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),link"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 通常ファイルへの symlink: --precheck exit 0" "$RC" 0
+
 # H1 検査を外した構文正常な写しでは、上の偽gitlinkが通ってしまう。
 VAR_H1="$WORK/var-h1.sh"
 mkvariant "$VAR_H1" '/# ── H1 gitlink 検査/,/# ── 改竄耐性 ④: 属性検査/d'
