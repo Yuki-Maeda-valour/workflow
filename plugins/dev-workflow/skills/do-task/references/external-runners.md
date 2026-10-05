@@ -110,13 +110,13 @@
 | ランナー | 実行ファイル | 既定の起動コマンド | 読み取り専用フラグ | モデル指定 | 確認状況 |
 |---|---|---|---|---|---|
 | `cursor-agent` | `cursor-agent` | `cursor-agent --mode ask --trust --model {model} -p --output-format json` | `--mode ask` | `--model`(`--list-models` で列挙) | 実測(要 `agent login`)。`--help` に `--mode` と `ask` を確認。**`--trust` が無いと `Workspace Trust Required` で終了コード 1 になり非対話実行できない**(実測)。`--trust` はワークスペース信頼のみを与えるもので、コマンド許可の `-f` / `--yolo` とは別物 — 読み取り専用は `--mode ask` が担保したまま |
-| `gemini` | `gemini` | `gemini --approval-mode plan -m {model} -o json -p {prompt}` | `--approval-mode plan` | `-m` | 実測。`--help` に `--approval-mode` と `plan` があるため判定 3 は通過し、**`experimental.plan` が無効な環境では判定 4(疎通)で落ちる**(実測エラー: plan は experimental.plan 有効時のみ)。書き込み可能なモードで走ることはない |
+| `gemini` | `gemini` | `gemini --approval-mode plan -m {model} -o json --prompt={prompt}` | `--approval-mode plan` | `-m` | 実測(2026-10-06、0.27.0)。`--version` / `--help` で `-p, --prompt` は string、`--approval-mode` に plan を確認。同梱の `parseArguments` へ直接渡す確認では、`--prompt=` / `-p=` の両方で `-` 始まりの日本語・改行・引用符・シェル記号・`{model}` / `{prompt}` を含む本文が prompt と完全一致した。実 CLI でも旧分離形 `-p '- 箇条書き…'` は exit 1 (`Not enough arguments following: p`) になり、等号形は同じ条件で引数解析を通って認証未設定の exit 41 まで到達した。認証が無いためモデルへの全文到達は**未確認**で、受け入れ済みとは扱わない。`experimental.plan` が無効な環境では判定 4(疎通)で落ちる(実測エラー: plan は experimental.plan 有効時のみ)。書き込み可能なモードで走ることはない |
 | `codex` | `codex` | `codex exec --sandbox read-only -m {model}` | `--sandbox read-only` | `-m` | 実測(2026-09-09 に codex 0.153.4 をローカル導入して確認)。`codex --help` と `codex exec --help` の双方に `-s, --sandbox` と値 `read-only` があるため**判定 3(ヘルプ照合)は 1 回目の `--help` で通過する**。既定サンドボックスは設定で変わりうるため明示フラグを固定し、ヘルプ照合が通らなければ起動しない。**`--output-schema <FILE>`(final response の JSON Schema)は実在するが既定表では採用しない**(2026-09-18 に codex 0.153.4 の `codex exec --help` で実在を確認。理由: 既定表は実測済みコマンドのみを載せる・スキーマファイルの生成と受け渡しが要る・プロンプト末尾のスキーマ指示 + 正規化〈§6〉で足りるかを実 CLI スモークで先に確認する)。採否は実測後に見直す |
 | Claude CLI | — | 既定なし(既定表に無いため `--command` + `--readonly-flag` が必須。保証はユーザー責任) | 明示指定 | 明示指定 | ホストが Claude Code のときはランナーにしない(§3 の判定 2)。他ホストからは宣言+明示指定時に限り使える |
 
 - `{model}` は `runner_models` の値に置換する。値が無ければ**そのトークンと直前のフラグごと落とす**(ランナー既定モデルで走る)
-- `{prompt}` はプロンプト本文に置換する。テンプレートに `{prompt}` が無ければ**末尾の位置引数として付く**。**プロンプトが `-` で始まるとき(箇条書き・frontmatter)は、その前に `--` を挟む** —— 挟まないとランナーがオプションと誤認して拒否する(実測: codex は `unexpected argument '- '` で落ちる)
-- 起動コマンドは空白区切りで解釈する(引用符で囲んだ空白入りの引数は使えない)。プロンプトは引数として別に渡る
+- `{prompt}` はプロンプト本文に置換する。単独の `{prompt}` は 1 argv に置換する。レビュー経路の `review-agent.sh` は、完全一致する `--prompt={prompt}` と `-p={prompt}` も、それぞれ `--prompt=<本文>` / `-p=<本文>` の**1 argv**に展開する。任意のトークン内の文字列置換は行わない。テンプレートに `{prompt}` が無ければ**末尾の位置引数として付く**。**プロンプトが `-` で始まるとき(箇条書き・frontmatter)は、その前に `--` を挟む** —— 挟まないとランナーがオプションと誤認して拒否する(実測: codex は `unexpected argument '- '` で落ちる)
+- 起動コマンドは空白区切りで解釈する(引用符で囲んだ空白入りの引数は使えない)。プロンプトは本文を再分割せず、1 引数として別に渡る
 - **起動コマンド列にバージョン・モデル名を書かない**(陳腐化するため)。モデルは `runner_models` で指定する。確認状況の欄に「いつ・どの版で実測したか」を残すのは可(前提が崩れたときに判別できるようにするため)
 - **同期義務**: この表と `review-agent.sh` の `default_command` / `default_readonly_flag` は二重管理になる。**どちらかを変えたら必ず両方を直す。** `review-agent-selftest.sh` が各ランナーの `--dry-run` 出力とこの表の「既定の起動コマンド」列を照合するので、ずれると回帰テストが落ちる
 
@@ -505,6 +505,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - 信頼モデル(既定表ランナーへの `--command` / `--readonly-flag` が usage エラーになり、副作用が起きないこと)
 - **ワークスペース信頼を要求するランナー**に対して 3 点: ①既定コマンド(`--trust` 込み)なら成功する ②同じランナーへ `--trust` を落としたコマンドを渡すと `probe-failed` になり、失敗理由がログに残る(既定表のランナーには `--command` を渡せないため、既定表外のランナー名 + `--command` + `--readonly-flag` で再現する)③既定コマンドの `--dry-run` 出力に `--mode ask` と `--trust` が残っている
 - 既定表ランナーの成功経路(ヘルプ照合 → 疎通 → 本実行)と、**§4 の表と実装の既定コマンドが一致**していること
+- **Gemini の等号形 prompt**: 未知 option・重複 prompt・余分な位置引数を拒否する厳格スタブで、旧分離形が失敗し、`--prompt={prompt}` と `-p={prompt}` が各 1 argv へ展開されること。通常文 / 箇条書き / frontmatter / option 風文字列 / 日本語・改行・引用符・シェル記号・`{model}` / `{prompt}` を含む本文について、モデル有無、プローブの固定 ping、本実行の本文 + 付与 schema の完全一致を確認する
 - 正規化 2 経路(`python3` / `jq` 単独)の**出力一致**と、`issues` 非配列・JSONL・列挙値でない verdict の扱い
 - タイムアウトが `timeout -k` 経路とフォールバック経路の両方で成立し、**プロセスを残さない**こと
 - **`--cwd` の必須**: `run_agent` の補完を通さずに直接起動し、省略・空のどちらも usage(2)で止まること・**ランナーを起動しないこと・起動した場所にログを残さないこと**、`--dry-run` は `--cwd` 無しで通ること
@@ -826,7 +827,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 | `codex` | `codex` | `codex exec --sandbox workspace-write -m {model}` | `--sandbox workspace-write` | `--sandbox read-only` | `-m` | 実測(2026-09-17 に codex 0.153.4 で確認)。`codex --help` と `codex exec --help` の双方に `-s, --sandbox` と値 `workspace-write` / `read-only` があるため**判定 3′(ヘルプ照合)は 1 回目の `--help` で通過する**。書き込み範囲はプロセスの作業ディレクトリ(= `--cwd` に渡した場所)で、**実効サンドボックスは config で上書きされうる**(§12-4 の限界⑧) |
 
 - `{model}` は `runner_models` の値に置換する。値が無ければ**そのトークンと直前のフラグごと落とす**(ランナー既定モデルで走る。§4 と同じ規則)
-- `{prompt}` はプロンプト本文に置換する。テンプレートに `{prompt}` が無ければ**末尾の位置引数として付く**(`-` 始まりなら `--` を挟むことも含め、§4 と同じ規則)
+- `{prompt}` はプロンプト本文に置換する。テンプレートに `{prompt}` が無ければ**末尾の位置引数として付く**(`-` 始まりなら `--` を挟むことも含め、§4 と同じ規則)。ただし、§4 のレビュー用 `review-agent.sh` にだけある完全一致 `--prompt={prompt}` / `-p={prompt}` の 1 argv 展開は、実装経路へは適用しない
 - 起動コマンドは空白区切りで解釈する。**起動コマンド列にバージョン・モデル名を書かない**(陳腐化するため。確認状況の欄に「いつ・どの版で実測したか」を残すのは可)
 - **判定 4′ は、この表の「起動コマンド」の argv 上で「書き込みフラグ」の対を「プローブ用の読み取り専用フラグ」の対へ差し替えて打つ**(フラグ名は同じで値だけが変わるため、名前だけ・値だけの置換にしない)
 - **同期義務**: この表と `implement-agent.sh` の `default_command` / `default_writeflag` / `default_probe_flag` は二重管理になる。**どちらかを変えたら必ず両方を直す。** `implement-agent-selftest.sh` が**この節を特定してから行を拾い**、`--dry-run` の出力と照合する(§4 の表と誤照合しないよう、節を絞ってから読む)
