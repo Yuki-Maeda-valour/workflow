@@ -1,5 +1,9 @@
 # Phase 4 の diff スナップショット生成
 
+**無人の profile 集合**: `diff-snapshot.sh` には、基準と開始時の完全 OID をそれぞれ `--secret-profile-ref` として渡す。現在は作業ツリーの `.claude/project-profile.yml` を指し、OID ではない。スクリプトが既定 3 要素、作業ツリーの現在 profile、全参照の profile を決定的に和集合にする。caller は事前検査の後に helper が出した NUL 和集合を SHA-256 化し、その値を `--secret-profile-union-sha256` として同時に渡す。snapshot は profile を安全に再読取して同じ和集合を作り、digest が違えば停止する。これにより caller 側の EXCLUDE と snapshot 内部の除外集合が変化をまたいで食い違わない。開始時 OID は委託前に保持し、消失・短縮 OID・可変 ref・commit に解決できない参照は停止する。空ツリー OID だけは、そのリポジトリで計算した値との完全一致なら profile 無しとして続ける。profile の読取は事前検査の後だけに行い、現在ファイルと親を symlink・特殊ファイルにしない。open 前後と読取後の `fstat` が変われば停止する。profile が存在するときだけ PyYAML が必要で、不在なら標準ライブラリだけで既定 3 要素を使う。snapshot、内蔵レビュー、外部 patch、無人の commit 除外はこの同じ集合を使う。
+
+`bash {do-task の}scripts/diff-snapshot.sh --cwd <root> --base <基準commit> --out <出力> --secret-profile-ref <基準OID> --secret-profile-ref <開始時OID> --secret-profile-union-sha256 <caller が同じ NUL 和集合から計算した SHA-256>` の繰返し指定で集合を作る。通常の手動 snapshot は `--secret-profile-ref` を付けず、既存の `--exclude-glob` / `--exclude` の契約だけで動く。
+
 `loop.sh` の周では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。
 
 **診断表示と元データ**: 改竄の疑いの各列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。承認ダイジェスト、filter 無効化用の NUL 終端トークン、比較する内容と patch は元のバイト列を保つ。表示後の文字列を承認や比較に使わない。対象範囲と限界は [external-runners.md §9-1](external-runners.md) を参照する。
