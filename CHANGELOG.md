@@ -2,12 +2,28 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
-## v4.22.2
+## v4.22.4
 
 ### 修正
 
 - `/init-project` の完了時の案内で、profile の `source_of_truth` が `serena` なのに Serena を設定しなかったときの警告を、`.mcp.json` を生成・変更したときの案内の下から外した。`.mcp.json` を生成したかどうかによらず警告する(Serena の設定を自分で行うと選んだとき・MCP の設定の生成の承認を断ったとき・非対話で生成しなかったときなど)([Issue #185](https://github.com/Yuki-Maeda-valour/workflow/issues/185))
 - 残る `.mcp.json` の案内は、条件「`.mcp.json` を生成・変更した場合、」で終わる行の下に、伝える 3 つの文を並べる形に分け直した(文言は変えていない)
+
+## v4.22.3
+
+### 修正
+
+- `loop-permission.py` が、語中を含む未引用の `~` を許可判定より先に拒否する([子 Issue #181](https://github.com/Yuki-Maeda-valour/workflow/issues/181)、親 #107 の H38)。`x=~/z`・`x=a:~/z` など、Bash の展開で検査先と書き込み先がずれる経路を塞ぐ。
+- 引数・代入・リダイレクトを一括して検査する。引用・エスケープしたリテラルは既存のパス検査に従う。`cd` の行き先に含む `~` の全面拒否は維持する。
+- scratch 内の実 Bash と symlink による書換え、同じ入力の hook 拒否と対象の不変、引用したパスへの実書き込みを回帰検証する。
+
+## v4.22.2
+
+### 修正
+
+- `loop-permission.py` が、保護ディレクトリ内から指定した裸の引数・長いオプションの値・代入値をパスとして検査する([子 Issue #179](https://github.com/Yuki-Maeda-valour/workflow/issues/179)、親 #107 の H27)。入力の作業ディレクトリと、許可された `cd` の移動先の両方で、`git checkout -- settings.json` などの検査漏れを防ぐ。
+- W の例外と通常ディレクトリでの操作を維持する。短縮オプションの連結値は既存の狭い範囲で検査し、保護ディレクトリから W に対する `cp -pv`・`rm -rf` などの正常な束ねフラグを保つ。
+- scratch の実 Git による復元操作、実 hook の拒否とログ、W へのコピーと削除を回帰テストで確認する。保守的に裸の値を検査する範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
 
 ## v4.22.1
 
