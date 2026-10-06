@@ -108,6 +108,7 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 - **cron と手動の起動で環境を揃える**: `HOME`・`XDG_STATE_HOME` を同じにする。揃わないと状態ディレクトリが別になり、ロックと止めの印が共有されない(二重起動を防げず、止めの印があっても cron の起動が進む)。PATH は上の例のように crontab に書く
 - **導入済みの版との関係**: `loop.sh` は自分が置かれたプラグイン(clone)を周のセッションに渡す。導入済みの `dev-workflow` が有効で版が違えば、起動時に止まる(導入済みを更新するか、無効にする)。同じ版なら中身が同じとみなす
 - **許可リスト**: 全許可のモードは使わない。許可リストはホストの利用者設定か `--allowed-tools` で渡し(profile では受け付けない)、コマンド単位で列挙する(git・gh・python3・bash・判定と照合〈test・echo・sha256sum〉・読み取り系・品質ゲートのコマンドなど)。許可リストは誤操作を減らす仕組みで、隔離ではない。実走で使った値は [docs/design.md](docs/design.md) §7-3 に記録する
+- **自動メモリ**: 実装・発見とも、子セッションの自動メモリを無効化する環境変数を強制する。利用者設定や既存メモリは変更しない。任意のファイル書き込みを防ぐものではない。保証範囲と実機確認の残りは [loop.md](plugins/dev-workflow/skills/ship-task/references/loop.md) §4・§8・§10。
 - **許可の仲介**: 保護パス(`.claude/` など)への書き込みは確認に回って拒否になるので、`loop.sh` が渡す hook が、周の中の状態ファイル(`.claude/reviews/` など)への書き込みだけを通す。hook が Bash のコマンドを照合する許可リストも、`--allowed-tools` か利用者の設定(`permissions.allow`)から作るので、許可リストはこのどちらかに置く。hook を無効にする設定(`disableAllHooks`・管理者設定の `allowManagedHooksOnly`)があると、`loop.sh` は起動しない
 - **Linux 専用・bash 4.4 以上**: `setsid`・`flock`・`/proc` と `inherit_errexit` を使う。OS → bash の版 → 初期化の順に検査し、非対応環境は `--help` より先に止まる
 - **状態ファイルの ignore**: 状態ファイル 3 つ(`.claude/reviews/`・`.claude/grasp.md`・`.claude/.understand-project-done`)を ignore し(追跡していれば `git rm --cached` で外し)、commit しておく(init-project の gitignore の断片)。無いと起動時に止まる(`--dry-run` も exit 20。正本は loop.md §3 の 2a)

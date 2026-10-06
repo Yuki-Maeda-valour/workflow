@@ -182,6 +182,7 @@ cat >"$STUBBIN/claude" <<'STUB'
 REC="${SELFTEST_REC:?}"
 mkdir -p "$REC"
 me="$(basename "$0")"
+case "${1:-}" in --help|auth|plugin) env >"$REC/env-aux-${1}" ;; esac
 case "${1:-}" in
   --help) printf '%s --help\n' "$me" >>"$REC/aux.log"; cat "${SELFTEST_HELP_FILE:?}"; exit 0 ;;
   auth) printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"; echo "logged in (stub)"; exit "${SELFTEST_AUTH_RC:-0}" ;;
@@ -649,7 +650,7 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv order skip judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -1001,6 +1002,59 @@ LOOP_BIN="$LOOP"
 check "--link の配置から起動する(clone のルートに解決される)" 0 "$RC"
 has "--link: --plugin-dir が clone のルート" "$OUT" "--plugin-dir $PLUG"
 
+fi
+
+# ════════════════ 自動メモリ(H32。実物の読み書きの試験ではなく、子への受け渡し)════════════════
+if want memory; then
+for memory_mode in implementation discover; do
+  for memory_parent in unset 0 1; do
+    memory_case="memory-$memory_mode-$memory_parent"
+    newrepo "$memory_case"
+    addtask pr-memory 2026-01-01
+    commit
+    memory_home="$W/$memory_case-home"
+    memory_settings="$memory_home/.claude/settings.json"
+    memory_file="$memory_home/.claude/projects/-fixture/memory/MEMORY.md"
+    mkdir -p "$(dirname "$memory_file")"
+    printf '{"autoMemoryEnabled":true}\n' >"$memory_settings"
+    printf '# Existing memory\n\nH32 fixture: preserve these bytes.\n' >"$memory_file"
+    cp "$memory_settings" "$W/$memory_case-settings.before"
+    cp "$memory_file" "$W/$memory_case-memory.before"
+    memory_env=("HOME=$memory_home")
+    if [ "$memory_parent" != unset ]; then memory_env+=("CLAUDE_CODE_DISABLE_AUTO_MEMORY=$memory_parent"); fi
+    memory_args=()
+    memory_child=pr-memory
+    if [ "$memory_mode" = discover ]; then
+      memory_args=(--discover=data-audit)
+      memory_child=disc-data-audit
+    fi
+    newrec "$memory_case-dry"
+    run_loop "$memory_case-dry" "${memory_env[@]}" -- --repo "$R" --dry-run "${memory_args[@]}"
+    check "H32($memory_mode・親=$memory_parent): dry-run が成功" 0 "$RC"
+    has "H32($memory_mode・親=$memory_parent): dry-run は子の無効化を表示" "$OUT" 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1'
+    check "H32($memory_mode・親=$memory_parent): dry-run は子を起動しない" "" "$(calls)"
+    newrec "$memory_case"
+    run_loop "$memory_case" "${memory_env[@]}" -- --repo "$R" "${memory_args[@]}" "${COMMON_ARGS[@]}"
+    check "H32($memory_mode・親=$memory_parent): 周が成功" 0 "$RC"
+    check "H32($memory_mode・親=$memory_parent): 対象の子を起動" "$memory_child" "$(calls)"
+    t "H32($memory_mode・親=$memory_parent): 子は自動メモリを無効化" grep -qx 'CLAUDE_CODE_DISABLE_AUTO_MEMORY=1' "$REC/env-$memory_child"
+    # 補助 CLI は loop.sh 自身から起動する。ここへの漏出も調べ、親の shell が不変という自明な確認で済ませない。
+    for memory_aux in --help auth plugin; do
+      t "H32($memory_mode・親=$memory_parent): 補助 $memory_aux の環境を取得" test -s "$REC/env-aux-$memory_aux"
+      if [ "$memory_parent" = unset ]; then
+        f "H32($memory_mode・親=$memory_parent): 補助 $memory_aux は未設定を保持" grep -q '^CLAUDE_CODE_DISABLE_AUTO_MEMORY=' "$REC/env-aux-$memory_aux"
+      else
+        t "H32($memory_mode・親=$memory_parent): 補助 $memory_aux は親の値を保持" grep -qx "CLAUDE_CODE_DISABLE_AUTO_MEMORY=$memory_parent" "$REC/env-aux-$memory_aux"
+      fi
+    done
+    for memory_fixture in settings memory; do
+      if [ "$memory_fixture" = settings ]; then memory_actual="$memory_settings"; else memory_actual="$memory_file"; fi
+      t "H32($memory_mode・親=$memory_parent): $memory_fixture の内容をバイト単位で保持" python3 -c \
+        'import pathlib,sys; sys.exit(pathlib.Path(sys.argv[1]).read_bytes() != pathlib.Path(sys.argv[2]).read_bytes())' \
+        "$W/$memory_case-$memory_fixture.before" "$memory_actual"
+    done
+  done
+done
 fi
 
 # ════════════════ --dry-run・argv ════════════════
