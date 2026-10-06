@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.20.4
+
+### 修正
+
+- `task-digest.py` が対応外の字下げのフェンスを算出不能として拒否する([子 Issue #168](https://github.com/Yuki-Maeda-valour/workflow/issues/168)、親 #107 の H10)。フェンスの外で、半角スペース 4 個以上かタブを含む字下げの直後に、同じバッククォートかチルダが 3 個以上続く行を検査する。閉鎖の有無や追加修正記録の節への配置で検査を逃れない。
+- 正常な半角スペース 0〜3 個の囲みの計算値と、囲みの中の字下げ文字列を保つ。未閉鎖の拒否・通常ファイル限定の読み込み・既知キー収集と候補検証の JSON 契約も維持する。拒否条件と期待出力の書き方は [task-template.md の記法の規約](plugins/dev-workflow/skills/create-task/references/task-template.md) を参照。
+
 ## v4.20.3
 
 ### 修正
