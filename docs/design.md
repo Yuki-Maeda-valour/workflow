@@ -321,6 +321,24 @@ initialized_at: "YYYY-MM-DD"              # 初回導入日
     - 各 SKILL.md の `## 原則` に、正本を指す 1 行を置く(§6)
     - 決定記録: [Issue #137](https://github.com/Yuki-Maeda-valour/workflow/issues/137)
 
+### review と commit・検証根拠の固定
+
+[review-guard.py](../plugins/dev-workflow/skills/ship-task/scripts/review-guard.py) は実装開始時の task_dir・未追跡・ignore・品質入口を控え、
+review 前後の対象集合と実入力を hash で結び付ける。検証担当が state hash を外部に保持し、
+機械照合で index/blob/commit tree を比べる。詳細な CLI・順序・mode は
+[review-protocol.md](../plugins/dev-workflow/skills/do-task/references/review-protocol.md#reviewcommit-照合)が正本。
+
+最終 task は元本文と直接検証結果から作る期待バイトだけを許し、他の状態名 MD を保護する。
+source、doc、未承認保留は別の phase。文書は実装 commit 後に別 start を取り、改名なしの commit を検証する。
+開始前の無関係な未追跡を stage 集合へ取り込まない。ignore の全有効入力と ignored path の変化、
+品質定義・入口・テスト・検証器の変更を review と PR に開示し、独立した clean checkout で実検証する。
+品質入口の静的検出は動的依存の網羅を保証しない。
+
+PR の検証欄は直接実行したコマンドの構造化結果と reviewer の直接返答から生成する。
+task/Issue 記録中の APPROVED は根拠にしない。外部本文を正本とする構成では、trusted caller が fresh な本文の控えと
+保持 hash、保護する task_dir を渡す任意入口を使う。既定の task MD 方式を変えず、外部サービスの読書きは caller が担う。
+同一 UID の完全隔離や、検査間だけ変えて戻す競合の排除は主張しない。実装者停止と工程ごとの再照合が前提となる。
+
 ## 6. SKILL.md 執筆規約
 
 - frontmatter: `name`(ディレクトリ名と一致・kebab-case)+ `description` は必須。ユーザーが打つ引数がある skill は `argument-hint` を付ける。skill の frontmatter に `allowed-tools`・`disallowed-tools` を付けない(呼んだ後のターンの残りに効き、`disallowed-tools` は呼び出し側を止め、`allowed-tools` は確認を飛ばす許可を足しうる — §7-3。ツールの制約は本文の原則で書く)

@@ -100,7 +100,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
    - (同じセッションの /ship-task が作った作業ブランチの例外も同書の条件 ⑤)。
    - 無人では『基準不明』を保留にする(git の失敗で基準不明になったときは失敗扱い — D8)。
    - 基準が決まったら、基準の sha と未追跡一覧の状態を控える値として保持する
-6. タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
+6. commit が続く周では、実装前に [review-protocol.md](references/review-protocol.md) の `review-guard.py start` を取り、開始 hash を保持する。タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
 7. **再開判定**(「続きをやって」対応): 次の**いずれか**に当たれば**再開モード**で入る —
    - (A) 手順 5 に入る前から、タスク MD のヘッダに基準コミット行があった(手順 5 は新規着手でも基準行を書くので、手順 5 の前に読んでおいた有無を使う)/
    - (B) タスク MD に `- [x]` がある /
@@ -248,6 +248,9 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
    - **exit 0 か 21 のときだけ Phase 4 の突合へ進む** — それ以外(2 / 4 / 20 / 22 と契約表に無いコード)は終了コードと stderr をそのまま報告して停止する(無人では失敗扱い — D10・D19)。
    - 対象が git リポジトリでないときは生成できないので、その旨を報告し、対象ファイルを直接読んで突合し、Phase 6 の独立レビューへは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡す(タスク MD に基準行があるのに git リポジトリでないと判定されたら、続行せず停止して報告する)。
    - 呼び出し引数の組み立て・`secret_paths` 要素の内容ガード・ダイジェスト不一致時の再実行・`- [x]` に対応する変更が見当たらないときの確認手順は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
+   - **commit が続く周では** snapshot 生成の前後を `review-guard.py take` と `seal` で挟む。
+   - snapshot・patch と同じ review 入力、除外 ERE、対象集合を固定する。seal 後の 3 hash と開示一覧を保持し、Phase 6 の reviewer へ渡す。
+   - 機密除外・state・review 入力・照合不能時の停止は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
 2. **チェックリスト突合**: `grep -cE '^\s*- \[(x|X)\]' {タスクMD}` の完了数と Phase 0 の総数を比較。未完了が残るのに完了報告されていないか。各 `- [x]` に対応する変更が diff に実在するか(**全件**。`- [x]` ごとに、対応する変更のパスか、diff を伴わない項目〈品質ゲートの実行など〉である旨を報告に並べる)
 3. **スコープ縮小 grep**: implementer の報告とタスク MD 追記に対して `grep -E '段階的に実施|後続タスク|今回はスコープ外|のみ作成|次回対応|一旦'` を実行。ヒットしたら設計時のスコープと突合し、縮小なら差し戻す
 4. **数値突合**: タスク MD に「N 件の〜を…」とあれば実際に数える(Grep -c 等)
@@ -259,6 +262,9 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - **検証手順そのものは担い手によって変わらない**(変わるのは差し戻しの手段だけ)。
 
 ## Phase 5: 完了条件の再実行
+
+commit が続く周では、[review-protocol.md](references/review-protocol.md) の `run-checks` で必須 gate 全件を直接実行し、構造化結果と hash を保持する。
+clean checkout の検査を実行結果として使う。作業ツリー側でも検査して内容が変わった場合は、Phase 4 から対象を固定し直す。
 
 タスク MD のチェックリストにある品質ゲート(format / check / typecheck / test、必要なら build)を **team-lead 自身が実行**し、全て緑を確認する。ロジック変更を含むのにテストが 1 件も追加・更新されていない場合は妥当性を確認する。
 
@@ -288,6 +294,10 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 ## Phase 6: 独立レビュー
 
+Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/ignored 未追跡の差を reviewer の入力に含める。
+品質コマンドと入口・test/selftest/検証器の変更一覧も渡す。`APPROVED` は、その固定集合だけに対する返答として扱う。
+改名・commit・PR の前の照合と保留の扱いは [references/review-protocol.md](references/review-protocol.md) が正本。
+
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
 
 - reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では `reviewer-internal` / `reviewer-strong` / `reviewer-alt` の 3 体を単一メッセージで並列起動する(枡割り当ては §2(a)、能力帯の解決は軸 3)
@@ -309,7 +319,10 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 2. 独立レビュアーが 1 名以上いて全員 APPROVED であることを確認する。未承認なら完了状態・リネームへ進まず、中断記録に理由を残す(無人では保留として返す — D16)
 3. 改名先(対象タスク MD と同じディレクトリ。以下 `<dir>`)の `<dir>/完了_{タスク名}.md` が既に在れば(`[ -e ] || [ -L ]`)、追記・ステータス更新・改名のどれも行わず停止し、既存ファイルのパスを添えて報告する
    - (上書きも連番もしない — 素の `mv` は黙って上書きする。この停止ではタスク MD を変更しない — 中断時の追加修正記録への追記もしない。無人では失敗扱い — D17)
-4. **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は ../create-task/references/task-template.md の記法の規約):
+4. **commit が続く周**は、この手順 4〜6 の代わりに [review-protocol.md](references/review-protocol.md) の attest→finalize→期待バイト適用を行う。
+   - 元のモードを保つファイル改名で index をまだ変えず、stage 前の照合を通す。記録の任意追記と `git mv` は使わない。
+   - 以下の 4〜6 は commit が続かない単独実行だけ。外部本文の正本ではローカル MD を新設せず、同 reference の外部本文経路に従う。
+   **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は ../create-task/references/task-template.md の記法の規約):
    - 日付 / 使用スキル(do-task)/ 反復回数 / reviewer 結果(3 体なら内訳)/ 品質ゲート実行結果 / 特記事項
 5. ステータス行を `> **ステータス**: ✅ 完了({YYYY-MM-DD})` に更新
 6. 対象タスク MD と同じディレクトリ内で `進行中_{タスク名}.md` を `完了_{タスク名}.md` に改名する。

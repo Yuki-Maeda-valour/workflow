@@ -4,6 +4,25 @@
 
 `bash {do-task の}scripts/diff-snapshot.sh --cwd <root> --base <基準commit> --out <出力> --secret-profile-ref <基準OID> --secret-profile-ref <開始時OID> --secret-profile-union-sha256 <caller が同じ NUL 和集合から計算した SHA-256>` の繰返し指定で集合を作る。通常の手動 snapshot は `--secret-profile-ref` を付けず、既存の `--exclude-glob` / `--exclude` の契約だけで動く。
 
+## review/commit 照合の入力
+
+`ship-task` が commit する周では、snapshot と patch を生成する**前**に
+`{ship-task の}scripts/review-guard.py take` を実行し、生成の**後**に `seal` を実行する。
+`seal --review-input` には内蔵 reviewer へ渡す snapshot と、外部 reviewer 用 patch の両方を渡す。
+生成中に対象集合が変われば `seal` は停止する。reviewer が実際に読むファイルと、guard が hash した
+入力を同じパスに固定する。
+
+- `--exclude-ere` には、この文書で解決した `secret_paths` と既定除外を
+  `diff-snapshot.sh --print-exclude-ere` で得た ERE と同じ結果として渡す。除外された path は
+  種別と mode だけを控え、内容も内容 hash も読まない。対象 task MD や状態名 MD を除外する結果は停止する。
+- `take` と `seal` の `STATE_SHA256`、`seal` の `TARGET_SHA256`・`REVIEW_BINDING_SHA256` は session に保持する。
+  state は `.claude/reviews/` の新規ディレクトリに置く。state と review の状態ファイルは
+  review 対象集合には入れない。
+- 生成順序、全入口の precheck、結果の保持、stage/commit の mode、文書・保留・外部本文の経路は
+  [review-protocol.md の review/commit 照合](review-protocol.md#reviewcommit-照合)に従う。
+- 開始の `start` は実装前、`take` は snapshot 前、`seal` は実入力の生成後。seal が返す hash に更新し、
+  `verify --mode pre-stage` に通った集合を reviewer へ渡す。開示一覧も省略しない。
+
 `loop.sh` の周では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。
 
 **診断表示と元データ**: 改竄の疑いの各列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。承認ダイジェスト、filter 無効化用の NUL 終端トークン、比較する内容と patch は元のバイト列を保つ。表示後の文字列を承認や比較に使わない。対象範囲と限界は [external-runners.md §9-1](external-runners.md) を参照する。
