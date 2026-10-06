@@ -78,6 +78,7 @@ setup.sh                            # plugin を使わない導入(コピー / s
 - プロジェクト固有の事実(パス・コマンド・スタック名・メモリ名)を skill 本文にハードコードしない。profile → 動的検出 → 権威参照ファイル(AGENTS.md)の 3 層で解決する
 - `.claude/project-profile.yml` が無くても必ず動くこと(全項目フォールバック)
 - SKILL.md は 500 行以下。description は「何を+いつ(トリガー語句)」を日本語 150〜500 字(目安 350)で(**どちらも満たさないと `validate.py` が ERROR で落とす**)
+- SKILL.md の本文の 1 行は 200 字以下(表の行・コードフェンス・frontmatter を除く。超えると `validate.py` が WARN)。超える行の分け方(1 文 1 つの下位の箇条書きにする。条件と結果は同じ行に置く。収まらないときは括弧の前後で分け、それでも収まらないときだけ条件の下に 1 段深い行を置く)と、内部の言葉(言い換えを添える 27 語・置き換える語・「縮退」の分け方)は design §6 にある
 - 禁止パターン(絶対パス・廃止 API・モデル ID 等)を文書に**例示として書く必要があるとき**は、その行に `<!-- validate-allow: 理由 -->` を置く(理由の記述が必須)。**救うのは禁止パターン検査とホスト CLI 語検査の 2 つ**で、委託の語はマーカーでは消えない(役割語へ書き換える)。ホスト CLI 語に効くのは、MCP サーバ名のように**生成する設定の識別子そのもので書き換えて消せない**語があるため。マーカーの**理由文にモデルエイリアスを書かない**
 - 委託は役割語で書き、ホスト機構への解決は解決表 [`do-task/references/delegation-map.md`](plugins/dev-workflow/skills/do-task/references/delegation-map.md) に従う(方針は design §5 前文・§7-5)。ホストごとの API・エージェント種別・モデルエイリアスの指定方法は解決表が正本で、**この AGENTS.md には列挙しない**。**v4.0.0(2026-09-10)で移行が完了し、design §5 / §7-5 の要約併記も終了した** — 委託の語(ホスト固有の委託機構名・モデルエイリアス)は skill 本文・design のどちらにも**新たに足さない**。ホストの事実が必要なときは解決表(指定方法)か design §7-3(前提とする外部事実)へ置く
 - skill 本文・出力は日本語
@@ -92,8 +93,8 @@ setup.sh                            # plugin を使わない導入(コピー / s
 `test_shell_requirements.py` の旧 bash 境界は `SHELL_REQUIREMENTS_BASH_3_2`・`SHELL_REQUIREMENTS_BASH_4_3`・`SHELL_REQUIREMENTS_BASH_4_4` に各実体の絶対パスを渡して検証する。不在なら該当ケースを明示的に skip する(互換モードで代用しない)。bash の下限・起動順を変更するときは 3 版すべてで検証する。
 
 ```bash
-# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク)+ 配布メタの一括検証
-python3 scripts/validate.py
+# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ)+ 配布メタの一括検証
+python3 scripts/validate.py   # 結果の行が ERROR 0・WARN 0 で合格(WARN も直す)
 python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりの写しの一致)
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
