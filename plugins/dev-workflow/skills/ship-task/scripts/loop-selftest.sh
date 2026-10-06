@@ -650,7 +650,7 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -1241,6 +1241,143 @@ check "追跡用の ref の案内は 1 回だけ(選定が 2 回あっても重�
 has "追跡用の ref で読み飛ばしたタスクは、保留のタスクと別の見出し" "$RP" "## 追跡用の ref で読み飛ばしたタスク"
 hasnt "追跡用の ref だけなら、保留の見出しを出さない" "$RP" "## 保留のタスクを再び回す手順"
 
+fi
+
+# ════════════════ 同じ理由で残った worktree(H42)════════════════
+if want locked; then
+# 実 worktree の NUL 区切りを対象の関数へそのまま渡す。同じプロセスで再読取りも確かめる。
+newrepo locked-read noorigin
+mkdir -p "$W/locked-read"
+python3 - "$TARGET" "$W/locked-read/functions.sh" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+start = text.index("load_worktrees() {")
+end = text.index("\nfinish() {", start)
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    out.write("\n".join(re.findall(r"^declare -A LOCKED_[^\n]+", text, re.M)) + "\n")
+    out.write(text[start:end])
+PY
+LOCK_READ_OUT="$W/locked-read/result.txt"
+bash -s -- "$W/locked-read/functions.sh" "$R" "$W/locked-read" <<'SH' >"$LOCK_READ_OUT" 2>&1
+set -euo pipefail
+source "$1"
+TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current
+declare -A WT_OUTCOME=()
+G() { git "$@"; }
+rep() { printf '%s\n' "$@"; }
+a="$RUN_DIR/same space"; b="$RUN_DIR/"$'same\nnewline'; c="$RUN_DIR/other"
+reason='dev-workflow-loop: docs/tasks/進行中_same.md'
+report_left_worktrees >"$RUN_DIR/zero.txt"
+[ ! -s "$RUN_DIR/zero.txt" ]
+git -C "$TOP" worktree add -q --detach --lock --reason "$reason" "$a" HEAD
+WT_OUTCOME["$a"]='結末 A'
+report_left_worktrees >"$RUN_DIR/one.txt"
+git -C "$TOP" worktree add -q --detach --lock --reason "$reason" "$b" HEAD
+git -C "$TOP" worktree add -q --detach --lock --reason 'dev-workflow-loop: 候補:refactor' "$c" HEAD
+WT_OUTCOME["$b"]='結末 B'; WT_OUTCOME["$c"]='結末 C'
+report_left_worktrees >"$RUN_DIR/many.txt"
+# 同理由の 1 件を unlock しても残りの 1 件を保持する。実体は消さない。
+git -C "$TOP" worktree unlock "$a"
+report_left_worktrees >"$RUN_DIR/remaining.txt"
+git -C "$TOP" worktree unlock "$b"
+git -C "$TOP" worktree unlock "$c"
+report_left_worktrees >"$RUN_DIR/zero-again.txt"
+[ ! -s "$RUN_DIR/zero-again.txt" ]
+[ -d "$a" ] && [ -d "$b" ] && [ -d "$c" ]
+SH
+check "H42: NUL 読取り・再読取りの実行" 0 "$?"
+python3 - "$W/locked-read" <<'PY' >"$W/locked-read/check.txt" 2>&1
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+a, b, c = (str(root / x) for x in ("same space", "same\nnewline", "other"))
+reason = "dev-workflow-loop: docs/tasks/進行中_same.md"
+rows = {a: f"- {a}(lock の理由: {reason})— 結末: 結末 A",
+        b: f"- {b}(lock の理由: {reason})— 結末: 結末 B",
+        c: f"- {c}(lock の理由: dev-workflow-loop: 候補:refactor)— 結末: 結末 C"}
+for name, paths in [("zero", []), ("one", [a]), ("many", [a, b, c]),
+                    ("remaining", [b, c]), ("zero-again", [])]:
+    text = (root / f"{name}.txt").read_text()
+    assert text.count("(lock の理由: ") == len(paths), (name, text)
+    for path, row in rows.items():
+        assert (row in text) == (path in paths), (name, path, text)
+print("0/1/同理由2/異理由/空白/改行/個別結末/再読取り: PASS")
+PY
+check "H42: NUL 読取りで全件・各結末を保持し古い lock を消す" 0 "$?"
+
+# 両モードを実際に起動する。残った worktree は一切変更せず、対象の周を起動しない。
+for lm in task discover; do
+  newrepo "locked-$lm"
+  addtask locked
+  commit
+  newrec "locked-$lm"
+  lp1="$W/repos/locked-$lm-a space"
+  lp2="$W/repos/locked-$lm-b"
+  lp3="$W/repos/locked-$lm-other"
+  lp4="$W/repos/locked-$lm-foreign"
+  lp5="$W/repos/locked-$lm-no-reason"
+  if [ "$lm" = task ]; then
+    lr='dev-workflow-loop: docs/tasks/進行中_locked.md'
+    lo='dev-workflow-loop: docs/tasks/進行中_locked.md-x'
+    LARGS=()
+  else
+    lr='dev-workflow-loop: 候補:refactor'
+    lo='dev-workflow-loop: 候補:refactor-x'
+    LARGS=(--discover=refactor)
+  fi
+  # 0 件では報告しない。dry-run なので候補の周は起動しない。
+  run_loop "locked-$lm" -- --repo "$R" --dry-run "${LARGS[@]}"
+  check "H42($lm): 0 件で終了 0" 0 "$RC"
+  hasnt "H42($lm): 0 件で残存報告なし" "$(report_of "$OUT")" "残った worktree"
+  G -C "$R" worktree add -q --detach --lock --reason "$lr" "$lp1" HEAD
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 1 件で読み飛ばす" 0 "$RC"
+  has "H42($lm): 1 件の開始報告" "$(report_of "$OUT")" "残った worktree(過去の実行の分を含む): $lp1($lr)"
+  G -C "$R" worktree add -q --detach --lock --reason "$lr" "$lp2" HEAD
+  G -C "$R" worktree add -q --detach --lock --reason "$lo" "$lp3" HEAD
+  G -C "$R" worktree add -q --detach --lock --reason 'foreign lock' "$lp4" HEAD
+  G -C "$R" worktree add -q --detach --lock "$lp5" HEAD
+  git -C "$R" worktree list --porcelain -z >"$W/locked-$lm-before.z"
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 同理由複数で終了 0" 0 "$RC"
+  check "H42($lm): 対象の周を起動しない" "" "$(calls)"
+  RP="$(report_of "$OUT")"
+  for lp in "$lp1" "$lp2" "$lp3"; do
+    if [ "$lp" = "$lp3" ]; then expected_reason="$lo"; else expected_reason="$lr"; fi
+    has "H42($lm): 開始に全件($lp)" "$RP" "残った worktree(過去の実行の分を含む): $lp($expected_reason)— 結末:"
+    has "H42($lm): 終了に全件($lp)" "$RP" "- $lp(lock の理由: $expected_reason)— 結末:"
+  done
+  # 読み飛ばしの理由だけを抽出して照合する。開始/終了報告にあるだけでは成功にしない。
+  sed -n '/前の周が残した worktree がある/p' "$RP" >"$W/locked-$lm-skip.txt"
+  for lp in "$lp1" "$lp2"; do
+    printf -v quoted_lp '%q' "$lp"
+    has "H42($lm): 読み飛ばしに全件($lp)" "$W/locked-$lm-skip.txt" "$quoted_lp"
+    if [ "$lm" = discover ]; then
+      has "H42($lm): 各パスの片付け($lp)" "$RP" "git worktree unlock $quoted_lp → git worktree remove $quoted_lp(調べてから)"
+    fi
+  done
+  hasnt "H42($lm): 理由の部分一致で混ぜない" "$W/locked-$lm-skip.txt" "$lp3"
+  hasnt "H42($lm): 非 loop 理由は報告しない" "$RP" "$lp4"
+  hasnt "H42($lm): 理由なしの lock は報告しない" "$RP" "$lp5"
+  git -C "$R" worktree list --porcelain -z >"$W/locked-$lm-after.z"
+  t "H42($lm): 既存 worktree と lock を変更しない" cmp -s "$W/locked-$lm-before.z" "$W/locked-$lm-after.z"
+  for lp in "$lp1" "$lp2" "$lp3" "$lp4" "$lp5"; do t "H42($lm): 実体を残す($lp)" test -d "$lp"; done
+  G -C "$R" worktree unlock "$lp1"
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 1 件片付けても残りで読み飛ばす" 0 "$RC"
+  check "H42($lm): 残り 1 件でも対象の周を起動しない" "" "$(calls)"
+  has "H42($lm): 残り 1 件を報告" "$(report_of "$OUT")" "$lp2(lock の理由: $lr)"
+  hasnt "H42($lm): unlock 済みは次の報告に残らない" "$(report_of "$OUT")" "$lp1"
+  G -C "$R" worktree unlock "$lp2"
+  run_loop "locked-$lm" -- --repo "$R" --dry-run "${LARGS[@]}"
+  check "H42($lm): 該当 lock が 0 件なら選定できる" 0 "$RC"
+  hasnt "H42($lm): 異なる理由だけでは読み飛ばさない" "$(report_of "$OUT")" "前の周が残した worktree がある"
+  if [ "$lm" = task ]; then
+    has "H42($lm): 対象タスクが候補に戻る" "$OUT" "  docs/tasks/進行中_locked.md"
+  else
+    has "H42($lm): 対象の発見元が候補に戻る" "$OUT" "  refactor(ブランチ task/候補-refactor-"
+  fi
+done
 fi
 
 # ════════════════ 判定・片付け・人のチェックアウト ════════════════
