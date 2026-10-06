@@ -7,6 +7,46 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 - 無人ループ(`loop.sh`)全体の設計は design §2。この文書は、周の中の ship-task とその子の skill の振る舞いだけを定める
 - 発見の周(`--discover`)に固有の前提・工程・照合・結末の正本は [discover-mode.md](discover-mode.md)。この文書の一般則(§3)・G1〜G4・周の Bash の書き方・委託するサブエージェントの要点は、発見の周にもそのまま効く
 
+## 0. 最初に配布物と実行環境を控える
+
+loop の有無にかかわらず、無人の入口はこの手順から始める。起動時の配布元を信頼の起点にする。
+以後は元の helper・文書へ戻らない。コピーの相対配置を保ち、sibling import・source もコピー内で閉じる。
+
+- `loop.sh` の子: 親が渡す `DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256` と、
+  `DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256` をセッション文脈へ保持する。
+  コピーの plugin ルートは `DEV_WORKFLOW_LOOP_PLUGIN_ROOT`。これは同じ UID に対する秘密や隔離ではない。
+- loop なし: 配布元の `skills/ship-task/scripts/environment-guard.py` を起動時に一度だけ使う。
+  ホストの正式な一覧取得手段で有効 plugin の配列を取り、通常ファイルの JSON に保存する。
+  各有効項目に絶対 `installPath` が必要。配列が空であることも確認する。一覧を確定できなければ失敗扱い。
+  同じホストの CLI をセッション内から起動する制限は緩めない。利用可能な一覧取得手段がなければ止まる。
+  `python3 -B <配布元helper> bootstrap --root <配布元plugin> --output <外部の新規ディレクトリ> --inventory <一覧JSON>` を実行する。
+  呼出側は使用ホストの利用者設定・skill/command の保存先を動的に解決し、設定ファイルは `--setting`、
+  設定ディレクトリは `--settings-dir`、skill/command ディレクトリは `--skills-dir` で全て渡す(複数回指定可)。
+  追加の Git/shell 設定は `--config` / `--shell`。既定の監視先だけで他ホストの監視を済ませた扱いにしない。
+  保存先を確定できなければ失敗扱い。正式な導入リンクの扱いは loop.md §4 に従う。
+  出力 JSON の `state`・`sha256`・`guard`・`guard_sha256`・`plugin` をセッション文脈へ保持する。
+  保存済みの控えから保持値を復元しない。前回のコピー先を再利用しない。対象リポジトリには書かない。
+
+**使用直前の手順**(どの入口も共通。値は省略せず実パス・64 桁の保持値へ展開する):
+
+1. 信頼して読み込んだ入口 SKILL の固定 Python 本文を使う。正本は [ship-task の無人入口](../SKILL.md#無人入口)。do-task・update-doc の入口にも同じ字面を置く。検査前に別ファイルから本文を読み直さない。
+2. `python3 -I -B -c <保持した固定本文> <guard_sha256> <guard> verify --state <state> --expect-sha256 <sha256>` が exit 0 であることを確認する。Python の隔離起動で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。固定本文は親・末尾を nofollow で検査し、1 MiB・15秒以内の通常ファイルだけを読み、保持hashと一致した同じバイト列を実行する。hash用にパスを開き直さない。
+3. コピー内の対象 helper を実行するか、文書を読む。元の helper を import/source しない。
+
+task-digest・diff-snapshot・設定照合・origin 判定・公開 helper、委託起動 helper、各 SKILL/reference の前に必ず行う。
+判断・commit・push・PR の前、工程の終了時にも行う。有効 plugin 一覧は同じ取得手段で再取得し、
+loop なしでは `verify` に `--current-inventory <今回JSON>` を追加する。loop は親がこの照合も行う。
+保持値が無い・照合不能・不一致なら G2/G4 の失敗扱いで止める。新しい控えの作成で成功へ置き換えない。
+loop の許可の仲介は、固定本文と親の全保持引数が一致する `verify` だけを状態領域への例外として許す。raw hash 読取、guard の直接起動、本文への追加、別引数は拒否する。
+一般の Python 許可を、未知の guard サブコマンドや別の状態へのアクセスへ広げない。
+
+loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文書>` と
+`exec --path <plugin相対helper> -- python3 <引数...>`(shell は `bash`)も使える。
+どちらも `--state` と `--expect-sha256` が必須で、同じ固定本文に渡す guard の引数を `read` または `exec` にする。loop の子は上の `verify` 固定形だけを使う。
+子の skill と委託先へ保持値・コピーのルート・使用直前の手順をそのまま引き継ぐ。元パスの文書を先に読ませない。
+
+監視する集合・上限・同じ UID に対する限界は [loop.md](loop.md) §4 が正本。
+
 ## 1. 前提と分担
 
 **前提**(ship-task の Phase 0。ブランチを作る前に、すべて検査する。1 つでも満たさなければ失敗扱い — G3。何も書き換えない)。タスクの周と発見の周で分ける。
@@ -328,9 +368,9 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
   - `- [x]` の見本: 着手の段階で `- [x]` として数えられ、新規着手の条件 ①(`- [x]` が 1 つも無い)が崩れ、再開判定の (B) も成り立つ。そのため新規着手にならず『基準不明』になる(無人では保留 — D8)
   - do-task の集計は対話の挙動に関わるので変えず、限界とする。create-task は、無人に回すタスク MD のフェンスの中にチェックボックス形の行(`- [ ]`・`- [x]` とも)を書かない
 - ⑥ ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)。発見の周も同じ(discover-mode.md §10)
-  - `git-config-digest.py` 単独では、include の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリー内の versioned な hook)の中身を照合しない。`loop.sh` の状態観察は別に、開始時に保持した既知の有効 config graph と hook の metadata・通常ファイル内容 hash を有界に再検査する。どちらも未知の origin や任意のリポジトリ外ファイルを本文まで読むものではない(loop.md §4・§10)
-  - `git-config-digest.py` 単独では利用者の global・XDG の設定を照合しない。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`credential.helper`・`http.*` の効き目は受ける。hook は共通前置きで無効にする。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ
-  - 照合のスクリプト自身(プラグインルートの `git-config-digest.py`・`origin-repo.py`)も、周が書き換えうる(loop.md §10 の hook の本体と同じ)
+  - `git-config-digest.py` 単独では、include の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリー内の versioned な hook)の中身を照合しない。`loop.sh` の状態観察は別に、開始時に保持した既知の有効 config graph と hook の metadata・通常ファイル内容 hash を有界に再検査する。利用者側の global/XDG/system とその include 先は §0 の環境照合でも守る。
+  - `git-config-digest.py` 単独では利用者の global・XDG の設定を照合しない。これらは §0 の環境照合で守る。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`credential.helper`・`http.*` の効き目は受ける。hook は共通前置きで無効にする。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ。
+  - 配布元 helper とコピーは §0 で照合する。観測間だけ変えて戻す操作と、保持値自体への同じ UID の攻撃は検出保証外(loop.md §4)。
   - Git の専用検査は `git config`・共有状態を変える subcommand と、固定の無人 push 以外の push 形式を拒否する。Python・Bash など任意プログラムを許可すると同じ利用者権限の範囲では回避できるので、照合は ship-task 自身の add・commit・push が書き換えられた設定に従う経路も塞ぐ。公開 helper は保持した origin 判定と固定 repository を照合し、送信後の remote SHA と作成 PR 自身の repository/head/base/SHA も確認する。
   - 照合と実行の間の書き換え: commit は `--expect` と `&&` の 1 回の Bash、push は公開 helper 内の直前照合で間を縮めるが、間は無くならない。`loop.sh` の経路では、書き換えが周の終わりまで残れば、周の後の照合(loop.md §4)が捉える
   - 誤って失敗扱いになる構成: 周の中で git の設定を書くスクリプト(husky の prepare・`git lfs install --local` など。人のチェックアウトで先に打っておけば、同じ値の書き直しは項目の並びを変えない)/ 利用者の global に `worktree.useRelativePaths=true` があり、単独の起動で外部レビュアーの一時ツリー(external-runners.md §9-1)を初めて作るとき / 周の間に、人が同じリポジトリの共有の設定を変える操作(`git push -u`・追跡つきの `git switch`・`gh pr checkout` など)をしたとき
