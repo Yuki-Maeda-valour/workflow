@@ -157,9 +157,10 @@ class Ctx:
         if not (inside(loc, self.wt) and inside(full, self.wt)):
             raise other(f"{what}が周の worktree の外: {path[:200]}")
         self.mark_write(loc)
-        rel = self.rel(loc)
-        if is_protected(rel) and (link or not self.in_w(rel, mkdir=mkdir)):
-            self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
+        for target in dict.fromkeys((loc, full)):
+            rel = self.rel(target)
+            if is_protected(rel) and (link or not self.in_w(rel, mkdir=mkdir)):
+                self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
 
     # 削除・移動の元(rm・rmdir・mv の元)
     def check_remove(self, path: str, what: str, recursive: bool) -> None:
@@ -191,10 +192,14 @@ class Ctx:
         ok_full = inside(full, self.wt) or inside(full, self.pr)
         if not (ok_loc and ok_full):
             raise other(f"パスが周の worktree とプラグインルートの外: {path[:200]}")
-        if inside(loc, self.wt):
-            rel = self.rel(loc)
-            if is_protected(rel) and (link or not self.in_w(rel, mkdir=True)):
-                self.nonwrite_hits.append((rel, f"パスが保護パスの下で W の外: {rel[:200]}"))
+        # nonwrite_hits のキーは常に元の loc にする。書き込み先でもある loc は
+        # mark_write で除かれ、rm・mv の元は引き続き check_remove が判定する。
+        rel = self.rel(loc)
+        for target in dict.fromkeys((loc, full)):
+            if inside(target, self.wt):
+                target_rel = self.rel(target)
+                if is_protected(target_rel) and (link or not self.in_w(target_rel, mkdir=True)):
+                    self.nonwrite_hits.append((rel, f"パスが保護パスの下で W の外: {target_rel[:200]}"))
 
 
 # ── Bash の限定の構文 ──
@@ -410,8 +415,13 @@ def looks_like_path(text: str, tilde: bool) -> bool:
     return "/" in text or text.startswith(".") or text in PROTECTED_NAMES
 
 
-def check_words_as_paths(ctx: Ctx, words: list[Word]) -> None:
-    for w in words:
+def is_bare_symlink(ctx: Ctx, text: str, tilde: bool) -> bool:
+    """字面がパスでなくても、cwd に在る symlink はパスとして判定する。"""
+    return not looks_like_path(text, tilde) and bool(text) and os.path.islink(ctx.resolve(text, tilde))
+
+
+def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool = False) -> None:
+    for index, w in enumerate(words):
         text = w.text
         tilde = w.tilde
         if text.startswith("-"):
@@ -419,13 +429,13 @@ def check_words_as_paths(ctx: Ctx, words: list[Word]) -> None:
                 value = text.split("=", 1)[1]
                 # --name=値 の値の部分を見る(~ は引用符の外で値の先頭にあるときだけ)
                 vtilde = value.startswith("~") and not w.quoted[text.index("=") + 1] if value else False
-                if value and looks_like_path(value, vtilde):
+                if value and (looks_like_path(value, vtilde) or is_bare_symlink(ctx, value, vtilde)):
                     ctx.check_path_word(ctx.resolve(value, vtilde))
                 continue
             if "/" in text:
                 raise other(f"パスを含むオプションの形を判定できない: {text[:100]}")
             continue
-        if looks_like_path(text, tilde):
+        if looks_like_path(text, tilde) or (not (skip_bare_first and index == 0) and is_bare_symlink(ctx, text, tilde)):
             ctx.check_path_word(ctx.resolve(text, tilde))
 
 
@@ -435,7 +445,7 @@ def check_assignment(ctx: Ctx, word: Word) -> None:
         raise other(f"代入を許さない環境変数の名: {name}")
     if name == "CDPATH" and value.text != "":
         raise other("CDPATH の値は空だけ")
-    if value.text and looks_like_path(value.text, value.tilde):
+    if value.text and (looks_like_path(value.text, value.tilde) or is_bare_symlink(ctx, value.text, value.tilde)):
         ctx.check_path_word(ctx.resolve(value.text, value.tilde))
 
 
@@ -706,8 +716,11 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                 check_assignment(ctx, w)
             continue
         is_sed_inplace = name == "sed" and sed_in_place(words[1:])
-        check_words_as_paths(ctx, words[1:] if (name in FILE_OP_SHORT or is_sed_inplace) else words)
-        if name in FILE_OP_SHORT or is_sed_inplace:
+        # コマンド名は従来どおり字面がパスなら検査する。PATH で解決する裸名だけは
+        # symlink 検出の対象にしない。
+        file_op = name in FILE_OP_SHORT or is_sed_inplace
+        check_words_as_paths(ctx, words[1:] if file_op else words, skip_bare_first=not file_op)
+        if file_op:
             check_file_op(ctx, "sed" if is_sed_inplace else name, words[1:])
             continue
         literal = [w.text for w in words]
