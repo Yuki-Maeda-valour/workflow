@@ -9,6 +9,7 @@ the URLs themselves, because they may carry credentials.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import posixpath
@@ -189,7 +190,8 @@ def trusted_repo(directory: str, push: dict | None, push_url: str) -> tuple[str 
 
 
 def judge(directory: str) -> dict:
-    result = {"origin": False, "same": False, "repo": None, "form": None, "vcs": False, "reason": ""}
+    result = {"origin": False, "same": False, "repo": None, "form": None, "vcs": False, "reason": "",
+              "push_url_sha256": None}
     if "origin" not in lines(directory, "remote"):
         result["reason"] = "origin が無い"
         return result
@@ -205,6 +207,11 @@ def judge(directory: str) -> dict:
         result["reason"] = "fetch か push の URL が 1 つでない"
         return result
     fetch_url, push_url = fetch_urls[0], push_urls[0]
+    # Keep a comparison value for the later publish boundary without exposing a
+    # possibly credential-bearing URL in the JSON protocol or diagnostics.
+    result["push_url_sha256"] = "sha256:" + hashlib.sha256(
+        push_url.encode("utf-8", "surrogateescape")
+    ).hexdigest()
     fetch, push = parse(fetch_url), parse(push_url)
     result["form"] = push["form"] if push else "other"
     if fetch and push:

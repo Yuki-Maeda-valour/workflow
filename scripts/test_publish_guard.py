@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 from pathlib import Path
 import shutil
@@ -74,10 +75,10 @@ class PublishGuardTest(unittest.TestCase):
         path.write_text(
             "#!/bin/sh\n"
             "case \" $* \" in\n"
-            "  *' remote get-url --all origin '*) printf '%s\\n' https://github.com/o/r.git; exit 0;;\n"
-            "  *' remote get-url --push --all origin '*) printf '%s\\n' https://github.com/o/r.git; exit 0;;\n"
-            "  *' ls-remote origin refs/heads/task/publish-test '*)\n"
-            "    if [ \"${PG_REMOTE_MODE:-}\" = bad ]; then printf '%s\\t%s\\n' 0000000000000000000000000000000000000000 refs/heads/task/publish-test; exit 0; fi;;\n"
+            "  *' remote get-url --all origin '*|*' remote get-url --push --all origin '*)\n"
+            "    if [ -n \"${PG_PUSH_ONLY:-}\" ]; then printf '%s\\n' \"${PG_PUSH_URLS:-${PG_PUSH_URL}}\"; else printf '%s\\n' https://github.com/o/r.git; fi; exit 0;;\n"
+            "  *' push --dry-run --porcelain --no-follow-tags --recurse-submodules=no origin '*refs/heads/task/publish-test*)\n"
+            "    if [ \"${PG_REMOTE_MODE:-}\" = bad ]; then printf ' \\t%s\\t%s\\n' \"${PG_REMOTE_BAD_SHA:-0000000000000000000000000000000000000000}:refs/heads/task/publish-test\" rejected; else printf '=\\t%s\\t[up to date]\\n' \"${PG_REMOTE_EXPECT_SHA}:refs/heads/task/publish-test\"; fi; exit 0;;\n"
             "esac\n"
             "case \" $* \" in *' cat-file -e '*)\n"
             "  if [ -n \"${PG_SWAP_SHA:-}\" ]; then " + self.real_git + " -C \"${PG_SWAP_WT}\" update-ref refs/heads/task/publish-test \"${PG_SWAP_SHA}\"; fi;; esac\n"
@@ -111,21 +112,40 @@ class PublishGuardTest(unittest.TestCase):
         path.chmod(0o755)
         self.gh = path
 
-    def digest(self) -> str:
+    def digest(self, *, extra_env: dict[str, str] | None = None) -> str:
         return subprocess.run(["python3", str(DIGEST), "--dir", str(self.wt)], text=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True).stdout.strip()
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                              env={**os.environ, **(extra_env or {})}).stdout.strip()
+
+    def push_url_digest(self, *, extra_env: dict[str, str] | None = None) -> str:
+        url = subprocess.run([self.real_git, "remote", "get-url", "--push", "origin"], cwd=self.wt,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True,
+                             env={**os.environ, **(extra_env or {})}).stdout.strip()
+        return "sha256:" + hashlib.sha256(url.encode("utf-8", "surrogateescape")).hexdigest()
 
     def guard(self, *, sha: str | None = None, digest: str | None = None, mode: str = "",
-              remote_mode: str = "", swap_sha: str = "", upstream: bool = False, unattended: bool = False) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "PATH": f"{self.fakebin}:{os.environ['PATH']}", "PG_GH_LOG": str(self.log),
+              remote_mode: str = "", swap_sha: str = "", upstream: bool = False, unattended: bool = False,
+              push_only: bool = False, push_url_digest: str | None = None, stub_push_url: str | None = None,
+              stub_push_urls: str | None = None, use_git_stub: bool = True,
+              extra_env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+        env = {**os.environ, "PATH": f"{self.fakebin}:{os.environ['PATH']}" if use_git_stub else os.environ['PATH'], "PG_GH_LOG": str(self.log),
                "PG_GH_MODE": mode, "PG_REMOTE_MODE": remote_mode, "GH_REPO": "evil/default",
-               "PG_SWAP_SHA": swap_sha, "PG_SWAP_WT": str(self.wt)}
+               "PG_SWAP_SHA": swap_sha, "PG_SWAP_WT": str(self.wt), "PG_REMOTE_EXPECT_SHA": sha or self.sha}
+        if push_only:
+            env["PG_PUSH_ONLY"] = "1"
+            env["PG_PUSH_URL"] = stub_push_url or self.git("remote", "get-url", "--push", "origin", cwd=self.wt).stdout.strip()
+            if stub_push_urls is not None:
+                env["PG_PUSH_URLS"] = stub_push_urls
         if unattended:
             env["DEV_WORKFLOW_LOOP_ITER"] = "loop-1"
+        env.update(extra_env or {})
         argv = ["python3", str(GUARD), "--dir", str(self.wt), "--sha", sha or self.sha,
-             "--branch", "task/publish-test", "--repo", "github.com/o/r", "--base", "main",
-             "--config-digest", digest or self.digest(), "--body-file", str(self.body.relative_to(self.wt)), "--title", "title",
-             "--gh", str(self.gh)]
+             "--branch", "task/publish-test", "--config-digest", digest or self.digest(), "--gh", str(self.gh)]
+        if push_only:
+            argv += ["--push-only", "--push-url-digest", push_url_digest or self.push_url_digest()]
+        else:
+            argv += ["--repo", "github.com/o/r", "--base", "main",
+                     "--body-file", str(self.body.relative_to(self.wt)), "--title", "title"]
         if upstream:
             argv.append("--set-upstream")
         return subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
@@ -189,6 +209,107 @@ class PublishGuardTest(unittest.TestCase):
         self.assertNotEqual(0, result.returncode)
         self.assertIn("https://github.com/o/r/pull/17", result.stderr)
         self.assertNotIn("close", self.log.read_text(encoding="utf-8"))
+
+    def test_push_only_local_remote_needs_no_gh_or_pr(self) -> None:
+        result = self.guard(push_only=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual("PUSH_ONLY\n", result.stdout)
+        self.assertEqual(self.sha, self.git("rev-parse", "refs/heads/task/publish-test", cwd=self.remote).stdout.strip())
+        self.assertFalse(self.log.exists(), result.stderr)
+        self.assertFalse(self.hook_marker.exists())
+        self.assertFalse(self.monitor_marker.exists())
+
+    def test_push_only_rejects_tracking_before_send(self) -> None:
+        result = self.guard(push_only=True, upstream=True)
+        self.assertNotEqual(0, result.returncode)
+        self.assertFalse(self.log.exists())
+        self.assertEqual("", subprocess.run([self.real_git, "show-ref"], cwd=self.remote, text=True,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout)
+
+    def test_push_only_url_change_multiple_url_and_remote_mismatch_stop_without_gh(self) -> None:
+        held = self.push_url_digest()
+        secret = "https://user:secret-value@example.invalid/other.git"
+        self.git("remote", "set-url", "origin", secret, cwd=self.wt)
+        changed = self.guard(push_only=True, push_url_digest=held)
+        self.assertNotEqual(0, changed.returncode)
+        self.assertNotIn("secret-value", changed.stderr)
+        self.assertFalse(self.log.exists())
+        self.git("remote", "set-url", "origin", str(self.remote), cwd=self.wt)
+        self.git("config", "--add", "remote.origin.pushurl", str(self.remote), cwd=self.wt)
+        self.git("config", "--add", "remote.origin.pushurl", str(self.root / "second.git"), cwd=self.wt)
+        multiple = self.guard(push_only=True, push_url_digest=held)
+        self.assertNotEqual(0, multiple.returncode)
+        self.assertFalse(self.log.exists())
+        # The two-url case must be removed before the remote-mismatch case:
+        # otherwise Git rejects the real push before dry-run porcelain runs.
+        self.git("config", "--unset-all", "remote.origin.pushurl", cwd=self.wt)
+        mismatch = self.guard(push_only=True, remote_mode="bad")
+        self.assertNotEqual(0, mismatch.returncode)
+        self.assertIn("送信後の remote branch", mismatch.stderr)
+        self.assertEqual(self.sha, self.git("rev-parse", "refs/heads/task/publish-test", cwd=self.remote).stdout.strip())
+        self.assertFalse(self.log.exists())
+
+    def test_push_only_branch_swap_still_sends_held_sha(self) -> None:
+        (self.wt / "later.txt").write_text("later\n", encoding="utf-8")
+        self.git("add", "later.txt", cwd=self.wt)
+        self.git("commit", "-qm", "later", cwd=self.wt)
+        later = self.git("rev-parse", "HEAD", cwd=self.wt).stdout.strip()
+        self.git("update-ref", "refs/heads/task/publish-test", self.sha, cwd=self.wt)
+        result = self.guard(push_only=True, swap_sha=later)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.sha, self.git("rev-parse", "refs/heads/task/publish-test", cwd=self.remote).stdout.strip())
+        self.assertFalse(self.log.exists())
+
+    def test_push_only_uses_origin_once_for_chained_instead_of(self) -> None:
+        first = self.root / "first.git"
+        second = self.root / "second.git"
+        self.git("init", "-q", "--bare", str(first), cwd=self.root)
+        self.git("init", "-q", "--bare", str(second), cwd=self.root)
+        self.git("config", "remote.origin.url", "alias:", cwd=self.wt)
+        self.git("config", "--add", f"url.{first}.insteadOf", "alias:", cwd=self.wt)
+        self.git("config", "--add", f"url.{second}.insteadOf", str(first), cwd=self.wt)
+        held = "sha256:" + hashlib.sha256(str(first).encode()).hexdigest()
+        result = self.guard(push_only=True, push_url_digest=held, use_git_stub=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.sha, self.git("rev-parse", "refs/heads/task/publish-test", cwd=first).stdout.strip())
+        self.assertEqual("", subprocess.run([self.real_git, "show-ref"], cwd=second, text=True,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout)
+
+    def test_push_only_preserves_explicit_pushurl_before_push_instead_of(self) -> None:
+        first = self.root / "explicit-first.git"
+        second = self.root / "explicit-second.git"
+        self.git("init", "-q", "--bare", str(first), cwd=self.root)
+        self.git("init", "-q", "--bare", str(second), cwd=self.root)
+        self.git("config", "remote.origin.url", str(first), cwd=self.wt)
+        self.git("config", "remote.origin.pushurl", str(first), cwd=self.wt)
+        self.git("config", "--add", f"url.{second}.pushInsteadOf", str(first), cwd=self.wt)
+        held = "sha256:" + hashlib.sha256(str(first).encode()).hexdigest()
+        result = self.guard(push_only=True, push_url_digest=held, use_git_stub=False)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual(self.sha, self.git("rev-parse", "refs/heads/task/publish-test", cwd=first).stdout.strip())
+        self.assertEqual("", subprocess.run([self.real_git, "show-ref"], cwd=second, text=True,
+                                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout)
+
+    def test_push_only_global_rewrite_changes_effective_digest_while_local_digest_is_unchanged(self) -> None:
+        first = self.root / "global-first.git"
+        second = self.root / "global-second.git"
+        self.git("init", "-q", "--bare", str(first), cwd=self.root)
+        self.git("init", "-q", "--bare", str(second), cwd=self.root)
+        self.git("config", "remote.origin.url", "alias:", cwd=self.wt)
+        global_config = self.root / "global.gitconfig"
+        changed_env = {"GIT_CONFIG_GLOBAL": str(global_config), "GIT_CONFIG_NOSYSTEM": "1"}
+        global_config.write_text(f'[url "{first}"]\n\tinsteadOf = alias:\n', encoding="utf-8")
+        held_url = self.push_url_digest(extra_env=changed_env)
+        held_config = self.digest(extra_env=changed_env)
+        global_config.write_text(f'[url "{second}"]\n\tinsteadOf = alias:\n', encoding="utf-8")
+        self.assertEqual(held_config, self.digest(extra_env=changed_env))
+        result = self.guard(push_only=True, push_url_digest=held_url, digest=held_config,
+                            use_git_stub=False, extra_env=changed_env)
+        self.assertNotEqual(0, result.returncode)
+        self.assertIn("push URL", result.stderr)
+        for remote in (first, second):
+            self.assertEqual("", subprocess.run([self.real_git, "show-ref"], cwd=remote, text=True,
+                                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False).stdout)
 
     def test_body_symlink_is_rejected_before_pr_creation(self) -> None:
         linked = self.wt / ".claude/reviews/body-link.md"

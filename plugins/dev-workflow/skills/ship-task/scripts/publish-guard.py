@@ -10,6 +10,7 @@ values are intentionally never copied to diagnostics.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -102,11 +103,18 @@ def local_checked_sha(directory: str, branch: str, held_sha: str) -> None:
     git(directory, "cat-file", "-e", f"{held_sha}^{{commit}}")
 
 
-def origin_checked(directory: str, repo: str) -> None:
+def origin_decision(directory: str) -> dict:
     try:
         data = json.loads(tool(directory, "origin-repo.py"))
     except (json.JSONDecodeError, TypeError) as exc:
         raise Failed("origin の判定を読めない") from exc
+    if not isinstance(data, dict):
+        raise Failed("origin の判定を読めない")
+    return data
+
+
+def origin_checked(directory: str, repo: str) -> None:
+    data = origin_decision(directory)
     if not (data.get("origin") is True and data.get("same") is True and data.get("vcs") is False
             and data.get("repo") == repo):
         raise Failed("origin の送信先が固定リポジトリと一致しない")
@@ -118,13 +126,38 @@ def config_checked(directory: str, expected: str) -> None:
     tool(directory, "git-config-digest.py", "--expect", expected)
 
 
+def effective_push_url_checked(directory: str, expected: str) -> None:
+    """Check one effective URL, but leave its one-time resolution inside Git.
+
+    The helper never supplies the returned URL to transport commands.  Passing
+    it back to Git would apply chained url.*.insteadOf rules a second time.
+    Holding the effective value still detects a changed global rewrite rule.
+    """
+    if not re.fullmatch(r"sha256:[0-9a-f]{64}", expected):
+        raise Failed("固定 push URL ダイジェストの形でない")
+    data = origin_decision(directory)
+    if not (data.get("origin") is True and data.get("same") is True and data.get("vcs") is False):
+        raise Failed("origin の送信先を一意に確認できない")
+    urls = [line for line in git(directory, "remote", "get-url", "--push", "--all", "origin").splitlines() if line]
+    if len(urls) != 1:
+        raise Failed("origin の push URL を一意に確認できない")
+    actual = "sha256:" + hashlib.sha256(urls[0].encode("utf-8", "surrogateescape")).hexdigest()
+    if actual != expected:
+        raise Failed("origin の push URL が開始時の値と一致しない")
+
+
 def remote_checked(directory: str, branch: str, held_sha: str) -> None:
+    """Verify the actual push endpoint without resolving an URL a second time."""
     ref = f"refs/heads/{branch}"
-    lines = [line for line in git(directory, "ls-remote", "origin", ref).splitlines() if line]
-    if len(lines) != 1:
-        raise Failed("送信後の remote branch を一意に確認できない")
-    fields = lines[0].split("\t")
-    if len(fields) != 2 or fields[0] != held_sha or fields[1] != ref:
+    # `ls-remote origin` can consult the fetch URL.  A dry push uses the same
+    # remote-name resolution and receive-pack endpoint as the preceding real
+    # exact-SHA push, without mutating it.  The porcelain status must say that
+    # the exact refspec is already up to date; absent or divergent branches are
+    # represented by `*` and space, respectively.
+    output = git(directory, "push", "--dry-run", "--porcelain", "--no-follow-tags",
+                 "--recurse-submodules=no", "origin", f"{held_sha}:{ref}")
+    records = [line.split("\t") for line in output.splitlines() if "\t" in line]
+    if len(records) != 1 or len(records[0]) != 3 or records[0][0] != "=" or records[0][1] != f"{held_sha}:{ref}":
         raise Failed("送信後の remote branch がレビュー済み SHA と一致しない")
 
 
@@ -233,10 +266,24 @@ def created_pr_checked(directory: str, gh: str, repo: str, branch: str, base: st
 
 
 def publish(args: argparse.Namespace) -> int:
+    local_checked_sha(args.dir, args.branch, args.sha)
+    if args.push_only:
+        if args.set_upstream:
+            raise Failed("push-only では追跡設定を変更できない")
+        if not args.push_url_digest:
+            raise Failed("push-only に固定 push URL ダイジェストが無い")
+        config_checked(args.dir, args.config_digest)
+        effective_push_url_checked(args.dir, args.push_url_digest)
+        destination = f"refs/heads/{args.branch}"
+        git(args.dir, "push", "--no-follow-tags", "--recurse-submodules=no", "origin", f"{args.sha}:{destination}")
+        remote_checked(args.dir, args.branch, args.sha)
+        print("PUSH_ONLY")
+        return 0
+    if not args.repo or not args.base or not args.body_file or not args.title:
+        raise Failed("PR 公開に必要な固定値が無い")
     if not valid_ref_name(args.base):
         raise Failed("base ブランチ名の形でない")
     repo_parts(args.repo)
-    local_checked_sha(args.dir, args.branch, args.sha)
     # These are deliberately the final operations before the exact-SHA push.
     origin_checked(args.dir, args.repo)
     config_checked(args.dir, args.config_digest)
@@ -255,13 +302,15 @@ def main() -> int:
     parser.add_argument("--dir", required=True)
     parser.add_argument("--sha", required=True)
     parser.add_argument("--branch", required=True)
-    parser.add_argument("--repo", required=True)
-    parser.add_argument("--base", required=True)
+    parser.add_argument("--repo")
+    parser.add_argument("--base")
     parser.add_argument("--config-digest", required=True)
-    parser.add_argument("--body-file", required=True)
-    parser.add_argument("--title", required=True)
+    parser.add_argument("--body-file")
+    parser.add_argument("--title")
     parser.add_argument("--gh", default="gh")
     parser.add_argument("--set-upstream", action="store_true")
+    parser.add_argument("--push-only", action="store_true")
+    parser.add_argument("--push-url-digest")
     try:
         args = parser.parse_args()
     except SystemExit as exc:

@@ -2486,11 +2486,11 @@ subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<守る値>", 
         ("<名>", "m.md"), ("<発見元>", "data-audit")]
 discover = open(root + "/references/discover-mode.md", encoding="utf-8").read()
 discover_required = ("unattended-mode.md §7 の「push の直前」と同じ", "publish-guard.py",
-                     "保持したレビュー済み完全 SHA", "固定 branch/repo/base", "`-u` は使わず")
+                     "保持したレビュー済み完全 SHA", "push_url_sha256", "--push-only", "`-u` は使わず")
 if all(value in discover for value in discover_required):
-    print("YES\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/repo/base・no-u を維持\t-")
+    print("YES\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t-")
 else:
-    print("NG\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/repo/base・no-u を維持\t必要な契約語が無い")
+    print("NG\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t必要な契約語が無い")
 for label, rel, pat in items:
     name = rel.rsplit("/", 1)[-1]
     try:
