@@ -2,6 +2,26 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.21.1
+
+### 修正
+
+- `loop-permission.py` が、Bash 入力のサンドボックス無効化指定と、その項目の不正な型を拒否する([子 Issue #172](https://github.com/Yuki-Maeda-valour/workflow/issues/172)、親 #107 の H25)。コマンドが許可対象でも拒否し、未指定・真偽値の偽だけを通常判定へ進める。
+- 通常の説明・タイムアウトなどの入力は維持する。実際の hook 入出力と判定ログを回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
+## v4.21.0
+
+### 変更
+
+- skill 本文の人に聞く場面を「質問で確認する」「複数選択の質問」などと書き、ホストの道具の名前を外した
+- 解決表(`do-task/references/delegation-map.md`)に質問の節を足し、ホストの道具への対応づけを置いた
+- 書き方の正本(`do-task/references/writing-for-people.md`)の「質問と選択肢」に、1 回の数の確かめ方と、質問の仕組みが無いホストでの聞き方を足した。仕組みが無いホストでは、すべての skill が、質問と同じ内容を文で聞き、答えを待つ。1 回の質問で聞くと決めた問いは文でもまとめ、前の答えで次の問いが変わるときは 1 つずつ聞く。聞く順とまとめ方は各 skill の決まりが先
+- 検証器 `scripts/validate.py` のホスト CLI 語の検査に `AskUserQuestion`・`multiSelect` を足した(大小を問わない)
+
+### 移行方法
+
+- 独自の skill に `AskUserQuestion`・`multiSelect`(大小を問わない。UI 部品の名前 `MultiSelect` も含む)を書いた fork は、`validate.py` が ERROR を出す。ホストに依らない言い方に書き換えるか、正当な記述なら理由つきの `<!-- validate-allow: 理由 -->` で外す
+
 ## v4.20.6
 
 ### 修正

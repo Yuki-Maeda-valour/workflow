@@ -21,7 +21,8 @@
   8. ホスト CLI 語(design.md §7-7-1): 全 skill の skill 直下(画像を除く)・
      references/ 配下の *.md を大小無視で検査する(scripts/ は対象外。委託の語と同じ
      除外 2 本を共有する)。ランナー名・サンドボックスモード名・コマンド形・
-     プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名の 6 系統。
+     プラグイン/subagent 名・MCP サーバ名・ホストのツール引数名・
+     ホストの質問の道具名と引数名の 7 系統。
      **5 と同じ行単位のマーカーで免除できる** —— MCP サーバ名は生成する設定の
      識別子そのもので、役割語へ書き換えて消せないため(design.md §7-7-1)
   9. 人が読む文の書き方の正本へのリンク(design.md §6・§5-25): 各 SKILL.md の `## 原則` の節
@@ -151,8 +152,8 @@ def _host_cli_boundary_pattern(pattern: str) -> str:
 
 
 # ホスト CLI 語(design.md §7-7-1)。委託の語とは別カテゴリで、scripts/ は対象外。
-# 6 系統 12 語の語本体は大小無視(check_host_cli_words() の re.IGNORECASE)。
-# 通常 10 語は ASCII 境界により別識別子内の誤検出を避け、日本語直結は検出する。
+# 7 系統 14 語の語本体は大小無視(check_host_cli_words() の re.IGNORECASE)。
+# 通常 12 語は ASCII 境界により別識別子内の誤検出を避け、日本語直結は検出する。
 # Unicode の \b は助詞直結を取りこぼすので使わない。周辺プロジェクト名の
 # _name_boundary_pattern() はハイフンを境界に含めない別契約なので共有しない。
 # MCP 2 語だけは部分一致を維持し、未列挙の接頭・接尾の派生名も検出する。
@@ -161,6 +162,13 @@ def _host_cli_boundary_pattern(pattern: str) -> str:
 # コマンド形の \s+ は全角空白・改行も許容し、跨行の一致は開始行で診断・免除する。
 # 単独 codex・製品名(Codex / Cursor / Claude Code)・read-only は従来どおり対象外
 # (設定パス .codex/・正当な散文・一般語との衝突を避ける)。
+# ホストの質問の道具名と引数名は、ERROR の案内だけがほかの語と違う(解決表の質問の節を指す)。
+# 案内は一致した字面ではなく、このリストのパターンに一致したかで選ぶ —— 大小無視の照合は
+# ſ(ロングエス)にも一致し、ſ は lower() でも s に戻らないため(AſkUserQueſtion)。
+_HOST_CLI_QUESTION_WORDS = [
+    _host_cli_boundary_pattern(r"AskUserQuestion"),
+    _host_cli_boundary_pattern(r"multiSelect"),
+]
 _HOST_CLI_WORDS = [
     # ランナー名
     _host_cli_boundary_pattern(r"cursor-agent"),
@@ -180,7 +188,22 @@ _HOST_CLI_WORDS = [
     r"chrome-devtools",
     # ホストのツール引数名(委託機構そのものではないが、ホストに結合する)
     _host_cli_boundary_pattern(r"run_in_background"),
+    # ホストの質問の道具名と引数名
+    *_HOST_CLI_QUESTION_WORDS,
 ]
+
+# ホスト CLI 語の ERROR の案内(括弧の中)。質問の道具名と引数名だけ、移し先が違う。
+_HOST_CLI_GUIDANCE = (
+    "(役割語に書き換えるか、CLI の手順の契約として"
+    " do-task/references/external-runners.md へ移す。"
+    " delegation-map.md は役割語→機構の解決表で CLI 名を持たないため"
+    " 移し先にならず、他の references/*.md はこの検査の対象内なので"
+    " 移しても解消しない)"
+)
+_HOST_CLI_QUESTION_GUIDANCE = (
+    "(「質問で確認する」「複数選択の質問」などのホストに依らない言い方に書き換える。"
+    "ホストの道具への対応づけは do-task/references/delegation-map.md §8)"
+)
 
 # 配布メタの skill 件数の表記(「skills 12 種」/「12 skills」の両形)。
 _SKILL_COUNT_RE = re.compile(r"skills?\s*(\d+)\s*種|(\d+)\s*skills?")
@@ -621,6 +644,10 @@ def check_host_cli_words():
             body = f.read_text(encoding="utf-8", errors="replace")
             body_lines = body.splitlines()
             for pat in _HOST_CLI_WORDS:
+                guidance = (
+                    _HOST_CLI_QUESTION_GUIDANCE if pat in _HOST_CLI_QUESTION_WORDS
+                    else _HOST_CLI_GUIDANCE
+                )
                 for m in re.finditer(pat, body, flags=re.IGNORECASE):
                     line = body.count("\n", 0, m.start()) + 1
                     # 正当に具体名を持つ行だけ、明示マーカーで免除する(design.md §5-24)。
@@ -629,11 +656,7 @@ def check_host_cli_words():
                         continue
                     ERRORS.append(
                         f"{f.relative_to(REPO)}:{line}: ホスト固有の CLI 語 -> {m.group(0)!r}"
-                        "(役割語に書き換えるか、CLI の手順の契約として"
-                        " do-task/references/external-runners.md へ移す。"
-                        " delegation-map.md は役割語→機構の解決表で CLI 名を持たないため"
-                        " 移し先にならず、他の references/*.md はこの検査の対象内なので"
-                        " 移しても解消しない)"
+                        + guidance
                     )
 
 

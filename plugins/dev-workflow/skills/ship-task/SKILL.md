@@ -104,7 +104,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 `--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。生成物は解決した保存先の `進行中_{タスク名}.md`。
 
-- 設計に必要な情報が不足している場合は、/create-task の規定どおり **AskUserQuestion で確認する**(推測で埋めない)
+- 設計に必要な情報が不足している場合は、/create-task の規定どおり **質問で確認する**(推測で埋めない)
 - Phase 0 の 4 でまだ作っていない(デフォルトブランチか detached HEAD にいた)ときは、タスク名が確定したら作業ブランチを作成・切り替え(`git switch -c task/{タスク名}`)、Phase 0 の 4 の 4 項目の報告と一覧の確認(S8)を行う
 - /create-task が返した**実際のタスク MD パス**を保持し、以降の /do-task・/update-doc・commit・PR に同じパスを渡す。
   - 保存先を推測・再構築しない([../create-task/references/task-directory.md](../create-task/references/task-directory.md))。
