@@ -184,7 +184,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 - HEAD = 最後に知る HEAD(§7)
 - タスク MD が `進行中_` である
 - 本文ダイジェスト = R(周の中で書き換えられた本文を commit しない)
-- タスク MD の `進行中_` のパスが、追跡済みの通常ファイルである(`git ls-files --error-unmatch -- ':(literal)<dir>/進行中_{名}.md'` が rc 0、かつ `[ -f ]` で `[ ! -L ]`)。追跡から外されていると、手順 3 の `git mv` が失敗して半端な状態が残るため
+- タスク MD の `進行中_` のパスが、追跡済みの通常ファイルである(`git ls-files --error-unmatch -- ':(literal)<dir>/進行中_{名}.md'` が rc 0、かつ `[ -f ]` で `[ ! -L ]`)。保留時も開始時の追跡対象との一致を保つため
 - do-task が基準を決めた後なら(再開で再利用した場合を含む): ヘッダの基準行 = 保持した基準 / 未追跡一覧が保持した状態のまま(「有り」ならファイルの sha256 が一致する。§7)
 - index に除外対象(§7)が無い
 - `保留_{名}.md` が無い(`[ -e ] || [ -L ]` でない)
@@ -192,16 +192,18 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 **手順**: 手順 2 以降の段で失敗しても失敗扱い。
 
 1. ガードをすべて確かめる
-2. 追加修正記録の節の末尾に、保留の行を 1 行足す(書式は template の記法の規約。`<停止条件>` は対話点の番号〈§4 の表の `#`〉で始め、直後に空白か `:` を置いて中身を書く〈`loop.sh` が番号を取り出す〉。`<人が次にすること>` には §8 の例のどれかを書く)
-3. `git mv -- '<dir>/進行中_{名}.md' '<dir>/保留_{名}.md'`
-4. `git add -- ':(literal)<dir>/保留_{名}.md'` を行う。`git mv` は index にある旧い内容のまま改名するので、2 で足した行はこの `add` で初めて stage される
+2. 元の開始 state から `take --phase hold` を作る。`attest --hold-reason <対話点番号で始まる停止条件> --hold-next <人が次にすること>` で未承認根拠を固定する。
+   `finalize --transition pending` が template と同じ保留の行を 1 行だけ生成する。自由な追記はしない。期待バイトと hash を保持する。
+3. 改名先不存在を再確認し、元モードを保って期待バイトを `保留_` のパスへ適用し、旧パスを除く。まだ index は変えない。
+   `verify --mode pre-stage --task-transition pending` に期待バイト・根拠の保持値を渡す。全共通引数は review-protocol.md に従う。
+4. `git add -- ':(literal)<dir>/保留_{名}.md'` と `git rm --cached --ignore-unmatch -- ':(literal)<dir>/進行中_{名}.md'` で新旧パスを stage する。
 5. do-task が Phase 3 に入った後に止まった場合は、次の集合を stage する(do-task の Phase 4 の diff スナップショットの対象と同じ考え方)
    - 集合の元: `git diff --name-only -z --no-renames <基準>`(基準コミットからの追跡差分)と `git ls-files -o --exclude-standard -z`(未追跡)
    - 除くもの
      - 基準時点の未追跡一覧(基準行の `未追跡一覧` のファイル)にあるパス。手順 1 で確かめた一覧だけを使う。保持した状態が「無し」なら除外に使わない(後から現れたファイルも使わない)
      - `secret_paths`(§7 の除外対象の和集合)にマッチするもの
      - `.claude/` の状態ファイル(§7 の除外対象)
-     - タスク MD の新旧のパス(`進行中_{名}.md`・`保留_{名}.md`。手順 3・4 が扱う。旧パスは `git mv` で作業ツリーにも index にも無いので、渡すと `git add` が rc 128 で止まる)
+     - タスク MD の新旧のパス(`進行中_{名}.md`・`保留_{名}.md`。手順 3・4 が扱う。旧パスは手順 3・4 で作業ツリーにも index にも無いので、渡すと `git add` が rc 128 で止まる)
      - 作業ツリーにも index にも無いパス(`[ -e ] || [ -L ]` が偽で、`git ls-files --error-unmatch -- ':(literal)<パス>'` も失敗する。implementer の `git mv` の旧パスなど。削除は既に stage されている)
    - 残りを `git add -- ':(literal)<パス>' …` で stage する。作業ツリーから消えた追跡ファイルは、これで削除として stage される
 6. commit の直前の照合(§7。index に除外対象が無いことを含む)を通してから、§7 の `--expect` つきの commit の 1 行で commit する。メッセージは実装 commit と同じ規約で推定する。直後の照合(§7)も行う。push はしない
@@ -229,7 +231,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 - 作業ツリーには触らない。未 commit の変更も、調べる材料として残す
 - 本文ダイジェストの不一致で止まったときは、タスク MD の差分(`git diff -- <タスク MD>`。未 commit なら作業ツリーとの差分)を報告に添える
 - commit の直後の tree の不一致で止まったときは、控えた tree と `HEAD^{tree}` の差分(`git diff --name-status <控えた tree> HEAD^{tree}`)を報告に添える(hook が何を変えたかを人が見られるように)
-- 止まる前にできたものは残る: 作業ブランチ(以後そのタスクは `loop.sh` に拾われない)・実装 commit・doc commit・保留の commit(commit の直後の照合に通らなかったとき)・origin の作業ブランチ(push の後に PR の作成で失敗したとき)・未 commit の保留の行と `git mv` による改名(保留の手順の途中で失敗したとき)
+- 止まる前にできたものは残る: 作業ブランチ(以後そのタスクは `loop.sh` に拾われない)・実装 commit・doc commit・保留の commit(commit の直後の照合に通らなかったとき)・origin の作業ブランチ(push の後に PR の作成で失敗したとき)・未 commit の保留の行と期待バイト適用による改名(保留の手順の途中で失敗したとき)
 - `loop.sh` は worktree を残し、以後そのタスクを拾わない(design §5-1 の例外)。発見の周では、以後その発見元を回さない(残るものは discover-mode.md §9)
 - 失敗扱いになるもの
   - 表で「失敗扱い」とした点
@@ -238,6 +240,20 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
   - 保留の手順の途中の失敗
 
 ## 7. 周の中で守る値と照合(改竄ガード)
+
+### review/commit 照合
+
+無人の周も [review-protocol.md](../../do-task/references/review-protocol.md#reviewcommit-照合) の全工程を通す。
+実装前の start→take→snapshot→seal→review→直接検証→attest→finalize→stage→commit の順序を守る。
+source と doc は別 state。保留は元の開始控えから `take --phase hold` を作り、UNAPPROVED の根拠で保存する。
+共通 ERE と、START/STATE/TARGET/REVIEW_BINDING/CHECKS/EVIDENCE/EXPECTED_TASK の各 hash をセッションに保持する。
+state 内の値から保持値を再構成しない。全入口は precheck を通し、無人では `--accept` を使わない。
+
+stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後と push/PR 直前は `--mode commit`。
+task 改名時は全 mode に task 遷移・期待バイト・根拠の保持値を渡す。文書は task 改名なしで同じ mode を使う。
+対象以外の状態名 MD、秘密除外集合、review 入力、対象集合、index/tree の不一致は失敗扱い。
+ignore/ignored と品質入口の変更を開示し、直接実行した clean checkout の結果で確認する。
+PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task 記録から APPROVED・実施済を採用しない。
 
 この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の守る値と照合の表を使い、R を持たない(git の前置き・「push の直前」・除外対象は、この節と同じ)。
 

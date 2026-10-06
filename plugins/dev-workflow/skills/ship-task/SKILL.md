@@ -157,6 +157,9 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 状態ファイル(do-task の Phase 0 の 3 が外す 4 つ)は stage しない。
 - commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(前置きつき)で index を見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。前置きつき)か残すかを確認する。
 - `git commit -a`・パスを渡す `git commit` は使わず、stage を終えた index を commit する(無人では、下の「無人の周の commit と停止」の照合に従う)。
+- **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠 hash を保持する。
+  最終 task は `finalize` の期待バイトで更新する。stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
+  task 遷移時は期待バイト・根拠の外部保持 hash を全照合に渡す。不一致・保持値欠落では commit・公開しない。
 - メッセージ規約はこのリポジトリの `git log --oneline -20` から推定して合わせる(Conventional Commits を使っていればそれに従う)。
 - 無人では、stage する集合を references/unattended-mode.md §5 の「無人の実装 commit・doc commit の集合」にし、下の「無人の周の commit と停止」の照合を通す。
 
@@ -164,11 +167,15 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 `--discover` のときは実行しない。
 
+文書を変更する前に、完了 task で doc 用の新しい `review-guard.py start` を取り、開始 hash を保持する。
+
 同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
 - /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
+- 文書変更後は doc 用の開始 state から `take --phase doc`→snapshot→seal→review→run-checks→attest を行う。
+  task 改名なしで doc の stage/commit を照合する。実装 state は流用しない。詳細は review-protocol.md の「文書、保留、公開」。
 
 ## Phase 5: PR 作成
 
@@ -179,12 +186,13 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
    - 本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。
    - 無人の周では、`--body-file - < .claude/reviews/<名>` の入力リダイレクトを使う。入力は reviews 下の非 symlink の通常ファイル 1 件だけにする。
    - 本文の渡し方は対話でも無人でも同じ(`-R` は無人だけ — 下の分岐)
-3. PR 本文には次を含める(タスク MD と各工程の報告から転記する。推測で書かない):
+3. PR 本文には次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
    - **完了条件と確認結果**: タスク MD の確認手順と、/do-task の Phase 5.5 で実際に観察した事実(「実施不能」の確認手順は、その旨と理由を書き、手順を残課題へ転記する)
    - **書式・型・テスト・ビルドの自動の検査**: 実行したコマンドと結果
    - **レビュー**: 反復回数・レビュアー編成・最終判定
+   - **review/commit 照合**: push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。task 記録の APPROVED・実施済を採用しない
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user(人の判断が要る指摘)**(あれば)
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
@@ -213,7 +221,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
   - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の打ち直し)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
   - どれかに通らなければ失敗扱い(G2)。
   - 時点ごとの表・コマンドの字面・除外対象・git の前置きは references/unattended-mode.md §7
-- **停止**: 保留なら保留の手順(ガード → 保留の行 → `git mv` → `git add` → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
+- **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
 - **結末**: 完了報告の最後に結末の行を書く(同 §2)
 - **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
 
