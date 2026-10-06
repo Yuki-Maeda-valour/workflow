@@ -8,25 +8,35 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 ## 原則
 
-1. **実コード裏取り**。ドキュメントに書く内容は必ず実コード・実設定で確認する。前のドキュメントからの転記や推測で書かない
-2. **カテゴリ別の正本を守る**。コード理解系(概要・構造・技術・規約・コマンド)の正本は profile の `source_of_truth` に従う。**要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は、設定に関わらず常に doc/ が正本**。`doc/06_stack-notes.md` は /stack-research、`doc/07_plan.md`(見積もり・スケジュール)は /reflect-decisions の管轄 — このスキルはどちらも**読むだけで書き換えない**(依存が変わっていたら /stack-research --update、計画の変更は /reflect-decisions を案内する)
-3. **薄い権威参照ファイル**。正本は `AGENTS.md`(無ければ未移行の `CLAUDE.md`)。要点+参照の薄型を維持し(最も厳しいホストの上限 32 KiB 以内)、詳細は正本(メモリまたは doc/)に置く。`CLAUDE.md` が `@AGENTS.md` を import する**互換形**では、**`CLAUDE.md` に内容を複写せず `AGENTS.md` 側だけを更新する**(design §7-4)
-4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲートは実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
+1. **実コード裏取り(実際のコードやファイルを読んで確かめること)**。ドキュメントに書く内容は必ず実コード・実設定で確認する。前のドキュメントからの転記や推測で書かない
+2. **カテゴリ別の正本(ほかが合わせる元)を守る**。
+   - コード理解系(概要・構造・技術・規約・コマンド)の正本は profile の `source_of_truth` に従う。
+   - **要件+タグ(doc/03)・設計判断 ADR と図(doc/04)・運用と地雷(doc/05)は、設定に関わらず常に doc/ が正本**。
+   - `doc/06_stack-notes.md` は /stack-research、`doc/07_plan.md`(見積もり・スケジュール)は /reflect-decisions の管轄 — このスキルはどちらも**読むだけで書き換えない**(依存が変わっていたら /stack-research --update、計画の変更は /reflect-decisions を案内する)
+3. **薄い権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)**。
+   - 正本は `AGENTS.md`(無ければ未移行の `CLAUDE.md`)。
+   - 要点+参照の薄型を維持し(最も厳しいホストの上限 32 KiB 以内)、詳細は正本(メモリまたは doc/)に置く。
+   - `CLAUDE.md` が `@AGENTS.md` を import する**互換形(AGENTS.md を読み込む行を持つ CLAUDE.md)**では、**`CLAUDE.md` に内容を複写せず `AGENTS.md` 側だけを更新する**(design §7-4)
+4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲート(書式・型・テスト・ビルドの自動の検査)は実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
 5. 機密ファイルの値をドキュメントに書かない(存在と用途だけ記す)
-6. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
-7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
+6. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
+   - ホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
+7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
+   - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
 ## 2 つの実行モード
 
 | モード | いつ | 範囲 |
 |---|---|---|
 | **タスク後の差分同期(最頻・軽量)** | /do-task 完了直後 | 完了タスク MD から更新対象を導出し、関係する文書・メモリだけを同期 |
-| **全量監査** | 定期・/understand-project のドリフト検出後・久しぶりの実行 | 全ドキュメント vs 実態(`--analyze-only` で差分報告のみも可) |
+| **全量監査** | 定期・/understand-project のドリフト(文書や設定と実際との食い違い)検出後・久しぶりの実行 | 全ドキュメント vs 実態(`--analyze-only` で差分報告のみも可) |
 
 モード判定: `--task=<パス>` があれば、管理プロジェクトルート相対として最優先し、profile の `task_dir` が不正でも保存先を再解決しない(差分同期)。
 
 - `--analyze-only` はモードを変える指定(全量監査の差分報告だけ。入力を選ばない)で、`--task` の差分同期と両立しないので、**`--task` と `--analyze-only` を併用されたら停止し、どちらか一方を指定するよう案内する**
-- `--task` も `--analyze-only` も無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決する。型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・**保存先のディレクトリの候補が複数** など)になったときは停止する
+- `--task` も `--analyze-only` も無ければ、
+  - [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決する。
+  - 型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・**保存先のディレクトリの候補が複数** など)になったときは停止する
 - 解決できたら入力を選ぶ
   - このセッションで /do-task が完了にしたタスク MD が 1 つなら、それを使う(差分同期)。2 つ以上なら並べてユーザーに選ばせる
   - 無ければ、直下の `完了_*.md` を並べてユーザーに選ばせる(1 件でも確認する。全量監査も選べる)。**git log・更新時刻では自動で選ばない**(`完了_` は未 commit のことが多く、更新時刻は完了の順を保証しない)
@@ -46,12 +56,14 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
-| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。報告点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` の周では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` の周の Bash の書き方」で打つ |
+| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。判断を仰ぐ点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` の周(無人ループの 1 回分の実行)では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` の周の Bash の書き方」で打つ |
 
 ## Phase 1: 入力と現状把握
 
 1. 管理プロジェクトルートを固定してモードを判定する(上記)。**差分同期**では完了タスク MD を読み、更新の種(スコープ / 変更ファイル / 図解 / 技術的考慮事項の設計判断 / 追加修正記録の発見事項)を抽出する。`.claude/grasp.md` は参照索引としてのみ使い、今回同期する領域の現在のコード・設定・依存先の確認を省略しない
-2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決する。`source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバックしない。profile が無い・項目が無い・値が空の場合の既定 serena は従来どおり)
+2. `.claude/project-profile.yml` から `source_of_truth`(既定 serena)・`memory_map`・`root` を解決する。
+   - `source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する
+   - (既定へフォールバック〈先の手段が使えないときに次の手段へ切り替えること〉しない。profile が無い・項目が無い・値が空の場合の既定 serena は従来どおり)
 3. **Serena がある場合**: `get_current_config` でアクティブプロジェクト確認(違えば `activate_project`)→ `list_memories` で実在メモリを動的列挙(固定名・固定数を仮定しない)→ 読む(差分同期では関連カテゴリのみ、全量監査では全部)
 4. doc/(または docs/)の索引(README.md)と関連文書を読む。**権威参照ファイルを読む**(`AGENTS.md` があればそれ → 無ければ `CLAUDE.md`。両方あれば `AGENTS.md` が正本。design §3 の検出順)
 
@@ -76,12 +88,13 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 
 ## Phase 3: 差分検出と監査
 
-1. **差分検出**: ドキュメント記述 vs 実態を突合し、「追加すべき / 更新すべき / 削除すべき(陳腐化)」に分類。各項目に実コードの根拠(パス:行番号)を付ける
+1. **差分検出**: ドキュメント記述 vs 実態を突合(2 つを照らし合わせて食い違いを探すこと)し、「追加すべき / 更新すべき / 削除すべき(陳腐化)」に分類。各項目に実コードの根拠(パス:行番号)を付ける
    - **doc 先行の保護**: 03 で `[決]` かつ備考に「実装未追従」がある行は、/reflect-decisions が会議決定を実装に先行して反映した正当な状態。実コードと食い違っていても乖離・陳腐化として扱わず、巻き戻し・削除・`[実]` への変更をしない(実装は /create-task → /do-task の完了後、差分同期で昇格する)
 2. **監査(全量監査モードのみ)**: 次の 3 点も検出する
    - 未管理: 実態に存在するがどのドキュメントにも書かれていない重要事項
    - 内容乖離: ドキュメント間(メモリ vs 権威参照ファイル vs doc/)の矛盾
-   - **権威参照ファイルのドリフト**: [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」に従う(`AGENTS.md` が読まれない構成の検出)。**reference に到達できない構成では、この検査を無効化して報告する**(design §6。外部ランナーの縮退と同じ書式)
+   - **権威参照ファイルのドリフト**: [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」に従う(`AGENTS.md` が読まれない構成の検出)。
+     - **reference に到達できない構成では、この検査を無効化して報告する**(design §6。外部ランナー〈レビューや実装に使う外部の AI のコマンド〉を内蔵に切り替えたときの報告と同じ書式)
    - 参照切れ: ドキュメントが指すパス・ファイルの不存在
 3. `--analyze-only` はここで報告して終了(更新推奨リスト+本実行の案内)
 
@@ -108,18 +121,27 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 1. **能力帯の異なる複数レビュアーを単一メッセージで並列起動**する。各エージェントに `reviewer-strong` / `reviewer-alt`(3 体目以降は `reviewer-alt2` / `reviewer-alt3` …)の `name` を付ける。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
    - 合格基準: 実コードとの整合 / 網羅性(今回の変更範囲)/ 古い情報の不在 / ドキュメント間の無矛盾 / **タグ・ADR・図・索引の整合** / フォーマット規約
    - 無人(`--unattended`)では、[unattended-mode.md](../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる(「拒否されたら打ち直さずに報告する」は要点の最後の行。レビュアー以外に委託するときも同じ)
-   - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
+   - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。
+     - 手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない
-2. team-lead が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(盲信禁止、invalid は理由記録)
+2. team-lead(作業を進め、結果を確かめる側の AI)が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(指摘を扱いごとに振り分けること。盲信禁止、invalid は理由記録)
 3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。宛先が失われている場合のみ新規起動にフォールバックする
-4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく報告点**であり、状況を報告して判断を仰ぐ。`--unattended` では報告点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
-5. 記録: `.claude/reviews/update-doc-iter{N}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。
+   - 同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく判断を仰ぐ点**であり、状況を報告して判断を仰ぐ。
+   - `--unattended` では判断を仰ぐ点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
+5. 記録: `.claude/reviews/update-doc-iter{N}.md`。
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 6: 最終チェック
 
 1. **リンク・参照検査**: `python3 {このスキルの}scripts/check_links.py <doc ディレクトリ or 対象ファイル...>` を実行し、Markdown 相対リンク・記載パスの切れを検出(スクリプトが使えない環境では Grep で代替)
 2. **把握キャッシュの無効化**: ドキュメント・メモリを更新した場合、`.claude/grasp.md` を削除する(前回要約と参照索引を今回の一次情報に合わせて作り直すため。次回の /understand-project が再把握して作り直す)
-3. 更新サマリーを報告: 更新したドキュメント一覧 / 主な変更点(タグ昇格・ADR 追記を含む)/ 削除(陳腐化)したもの / レビュー反復回数 / 残った needs-user 項目。**報告の最後に、必ず 1 行 `レビュー判定: <APPROVED | 未収束 | 未完了>` を書く**(ship-task が読む)。`APPROVED` = 全レビュアーの valid 指摘 0 / `未収束` = 反復しても指摘が残った・報告点で止まった(打ち切りを選んだ場合を含む)/ `未完了` = レビュアーを起動できない・途中で止まった。**止まるときも、報告の最後に必ずこの 1 行を書く**(Phase 5 の 1 のレビュー未完了・報告点・無人の停止を含む)。語は設計レビューの行([../create-task/references/task-template.md](../create-task/references/task-template.md) の記法の規約)と同じ。update-doc には checker が無いので、`APPROVED` はレビュアーだけで決まる
+3. 更新サマリーを報告: 更新したドキュメント一覧 / 主な変更点(タグ昇格・ADR 追記を含む)/ 削除(陳腐化)したもの / レビュー反復回数 / 残った needs-user 項目。
+   - **報告の最後に、必ず 1 行 `レビュー判定: <APPROVED | 未収束 | 未完了>` を書く**(ship-task が読む)。
+   - `APPROVED` = 全レビュアーの valid 指摘 0 / `未収束` = 反復しても指摘が残った・判断を仰ぐ点で止まった(打ち切りを選んだ場合を含む)/ `未完了` = レビュアーを起動できない・途中で止まった。
+   - **止まるときも、報告の最後に必ずこの 1 行を書く**(Phase 5 の 1 のレビュー未完了・判断を仰ぐ点・無人の停止を含む)。
+   - 語は設計レビューの行([../create-task/references/task-template.md](../create-task/references/task-template.md) の記法の規約)と同じ。
+   - update-doc には checker が無いので、`APPROVED` はレビュアーだけで決まる
 
 ## 最終ゲート(完了報告前セルフチェック)
 
