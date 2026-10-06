@@ -10,7 +10,9 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 LOOP = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop.sh"
 SHIP_SCRIPTS = LOOP.parent
+CREATE_SCRIPTS = ROOT / "plugins/dev-workflow/skills/create-task/scripts"
 PY_CALLERS = {
+    "adoption": CREATE_SCRIPTS / "adopt-candidate.py",
     "publish": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py",
     "loop_state": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-state.py",
     "origin": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py",
@@ -194,7 +196,7 @@ class SafeGitCallersTest(unittest.TestCase):
                 self.assertTrue(all(has_safe_starred(call) for call in calls), ast.unparse(calls[0]))
 
     def test_each_direct_python_git_caller_is_registered_or_has_a_narrow_basis(self):
-        discovered=direct_python_git_callers(SHIP_SCRIPTS)
+        discovered=direct_python_git_callers(SHIP_SCRIPTS) | direct_python_git_callers(CREATE_SCRIPTS)
         self.assertEqual(discovered, set(PY_CALLERS.values()) | set(PY_GIT_EXCEPTIONS))
         state=(SHIP_SCRIPTS / "loop-state.py").read_text(encoding="utf-8")
         self.assertIn('"--no-pager", "--no-replace-objects"', state)
