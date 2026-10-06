@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.21.1
+
+### 修正
+
+- `loop.sh` が、値を取る短いフラグの単独・束ね書き・値の連結形を、子セッションの起動前に拒否する([子 Issue #174](https://github.com/Yuki-Maeda-valour/workflow/issues/174)、親 #107 の H28)。後ろに足す固定フラグの値消費を防ぐ。
+- 長い `--名前=値` と既存の禁止フラグ検査は維持する。短い引数は `=` の後ろも保守的に検査する。保証範囲は [loop.md §2](plugins/dev-workflow/skills/ship-task/references/loop.md#2-起動と前提の検査) を参照。
+- help・引数解析のスタブを使う全体回帰で、拒否理由と子セッション未起動を確認する。
+
 ## v4.21.0
 
 ### 変更
