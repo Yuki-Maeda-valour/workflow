@@ -1,10 +1,11 @@
-"""loop-permission.py の最終 symlink 判定の回帰テスト。"""
+"""loop-permission.py の symlink と再帰削除の回帰テスト。"""
 
 import importlib.util
 import os
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 
@@ -28,6 +29,8 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         (self.wt / ".claude/settings.json").write_text("settings")
         (self.wt / ".mcp.json").write_text("mcp")
         (self.wt / "safe.txt").write_text("safe")
+        (self.wt / "ordinary/deep").mkdir(parents=True)
+        (self.wt / "ordinary/deep/file.txt").write_text("ordinary")
         self.env = {"worktree": str(self.wt), "plugin_root": str(self.pr), "permlog": str(root / "log"),
                     "allow": [{"kind": "prefix", "words": ["cat"]},
                               {"kind": "prefix", "words": ["git"]},
@@ -275,6 +278,121 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         (self.wt / "sub").mkdir()
         self.expect("CDPATH= cd -P -- sub && pwd -P", "allow")
         self.expect("CDPATH= cd -P -- sub && echo ok", "allow")
+
+    def test_h26_recursive_remove_rejects_worktree_and_protected_descendants(self):
+        (self.wt / "protected/.claude").mkdir(parents=True)
+        (self.wt / "protected/.claude/settings.json").write_text("settings")
+        (self.wt / "git-child/.config/git").mkdir(parents=True)
+        (self.wt / "name-child").mkdir()
+        (self.wt / "name-child/.mcp.json").write_text("mcp")
+        (self.wt / "dotgit-child/.git").mkdir(parents=True)
+        (self.wt / "dotgit-file").mkdir()
+        (self.wt / "dotgit-file/.git").write_text("gitdir")
+        (self.wt / "sub").mkdir()
+        os.symlink("protected", self.wt / "protected-link")
+
+        for path in (str(self.wt), f"{self.wt}/", ".."):
+            with self.subTest(worktree=path):
+                got = self.decide("Bash", {"command": f"rm -rf {path}"}) if path != ".." else \
+                    PERMISSION.decide({"tool_name": "Bash", "tool_input": {"command": f"rm -rf {path}"},
+                                       "cwd": str(self.wt / "sub")}, self.env)
+                self.assertEqual(("deny", "other"), got[:2], got)
+        for path in ("protected", "protected/", "protected/../protected", "git-child", "name-child", "dotgit-child",
+                     "dotgit-file", "protected-link/", "protected-link//"):
+            with self.subTest(path=path):
+                self.expect(f"rm -rf {path}", "deny", "protected")
+
+    def test_h26_recursive_remove_preserves_normal_w_and_link_contracts(self):
+        (self.wt / ".claude/worktrees/ordinary").mkdir(parents=True)
+        (self.wt / ".claude/worktrees/ordinary/file.txt").write_text("ordinary")
+        (self.wt / ".claude/reviews/d").mkdir(parents=True)
+        (self.wt / ".claude/reviews/d/file.txt").write_text("review")
+        (self.wt / ".claude/reviews/safe").mkdir()
+        (self.wt / ".claude/reviews/safe/file.txt").write_text("review")
+        os.symlink(".claude/settings.json", self.wt / "safe-link")
+        os.symlink("ordinary", self.wt / "ordinary-link")
+        os.symlink("ordinary-link", self.wt / "multi-link")
+        os.symlink(".claude/reviews/safe", self.wt / "review-link")
+        os.symlink(".", self.wt / "worktree-link")
+        os.symlink("safe.txt", self.wt / ".claude/reviews/protected-link")
+        os.symlink("safe.txt", self.wt / ".claude/reviews/d/child-link")
+        os.symlink(".claude/settings.json", self.wt / "ordinary/protected-link")
+
+        for path in ("ordinary", "ordinary/", "ordinary/../ordinary", ".claude/worktrees/ordinary"):
+            with self.subTest(path=path):
+                self.expect(f"rm -rf {path}", "allow")
+        self.expect("rm -rf missing", "allow")
+        self.expect("rm -rf safe-link", "allow")
+        self.expect("rm -rf ordinary-link/", "allow")
+        self.expect("rm -rf multi-link//", "allow")
+        self.expect("rm -rf review-link/", "allow")
+        self.expect("rm -rf safe-link/", "deny", "protected")
+        self.expect("rm -rf worktree-link/", "deny", "other")
+        self.expect("rm -rf .claude/reviews/protected-link", "deny", "protected")
+        self.expect("rm -rf .claude/reviews/d", "deny", "protected")
+        self.expect("rm -rf safe-link/.", "deny", "protected")
+
+    def test_h26_recursive_remove_rejects_plugin_link_even_when_its_target_is_safe(self):
+        os.symlink(str(self.wt / "ordinary"), self.pr / "ordinary-alias")
+        self.expect(f"rm -rf {self.pr}/ordinary-alias/", "deny", "other")
+        self.expect(f"rm -rf {self.pr}/ordinary-alias//", "deny", "other")
+        os.symlink("ordinary", self.wt / "ordinary-alias")
+        self.expect("rm -rf ordinary-alias/", "allow")
+
+    def test_h26_recursive_remove_rejects_worktree_link_to_plugin_only_with_trailing_slash(self):
+        (self.pr / "ordinary").mkdir()
+        (self.pr / "ordinary/file.txt").write_text("plugin")
+        os.symlink(str(self.pr / "ordinary"), self.wt / "plugin-alias")
+        self.expect("rm -rf plugin-alias", "allow")
+        self.expect("rm -rf plugin-alias/", "deny", "other")
+        self.expect("rm -rf plugin-alias//", "deny", "other")
+
+    def test_h26_recursive_remove_denies_uninspectable_descendants_without_recursion_limit(self):
+        current = self.wt / "deep"
+        current.mkdir()
+        for index in range(1200):
+            current = current / "d"
+            current.mkdir()
+        self.expect("rm -rf deep", "allow")
+        subprocess.run(["rm", "-rf", str(self.wt / "deep")], check=True)
+
+        with mock.patch.object(PERMISSION.os, "scandir", side_effect=OSError("blocked")):
+            self.expect("rm -rf ordinary", "deny", "other")
+
+    def test_h26_recursive_remove_denies_disappearing_and_unreadable_children(self):
+        with mock.patch.object(PERMISSION.os, "scandir", side_effect=FileNotFoundError("gone")):
+            self.expect("rm -rf ordinary", "deny", "other")
+
+        class BrokenEntries:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def __iter__(self):
+                yield object()
+                raise OSError("interrupted")
+
+        with mock.patch.object(PERMISSION.os, "scandir", return_value=BrokenEntries()):
+            self.expect("rm -rf ordinary", "deny", "other")
+
+        original_lstat = PERMISSION.os.lstat
+        child = str(self.wt / "ordinary/deep")
+
+        def unreadable(path):
+            if os.fspath(path) == child:
+                raise PermissionError("blocked")
+            return original_lstat(path)
+
+        with mock.patch.object(PERMISSION.os, "lstat", side_effect=unreadable):
+            self.expect("rm -rf ordinary", "deny", "other")
+
+    def test_h26_recursive_remove_keeps_rmdir_and_mv_non_recursive(self):
+        (self.wt / "move-source/.claude").mkdir(parents=True)
+        (self.wt / "move-source/.claude/settings.json").write_text("settings")
+        self.expect("rmdir move-source", "allow")
+        self.expect("mv move-source moved", "allow")
 
 
 if __name__ == "__main__":
