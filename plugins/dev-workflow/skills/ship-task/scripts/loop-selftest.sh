@@ -669,6 +669,7 @@ cp "$SCRIPT_DIR/loop-startup.py" "$PLUG/skills/ship-task/scripts/loop-startup.py
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
 cp "$SCRIPT_DIR/environment-guard.py" "$PLUG/skills/ship-task/scripts/environment-guard.py"
+cp "$SCRIPT_DIR/host-argv.py" "$SCRIPT_DIR/loop-supervisor.py" "$PLUG/skills/ship-task/scripts/"
 cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
 cp "$SCRIPT_DIR/git-config-digest.py" "$PLUG/skills/ship-task/scripts/git-config-digest.py"   # 在ることを起動時に確かめる(両方のモード。loop.md §2 の 4)
 cp "$SCRIPT_DIR/publish-guard.py" "$PLUG/skills/ship-task/scripts/publish-guard.py"
@@ -894,7 +895,8 @@ has "未知のホスト: 理由" "$OUT" "[host-unknown]"
 for tok in -p --print --output-format=text --setting-sources=project --strict-mcp-config --plugin-dir=/x \
            --permission-mode=plan --permission-prompts --mcp-config --allowedTools=Read --allowed-tools \
            --disallowedTools --disallowed-tools=Bash --settings --settings=x.json -cp \
-           -- --bg --background -w --worktree=x -dw -c=p; do
+           -- --bg --background -w --worktree=x -dw -c=p \
+           --continue -c --resume=old -rOld -cv --remote --cloud=id --plugin-url=url --bare --safe-mode --unknown; do
   run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" --host-argv --model=m1
   check "--host-argv の '$tok' で止まる" 20 "$RC"
   has "--host-argv の '$tok': 理由" "$OUT" "[host-argv]"
@@ -909,12 +911,12 @@ has "--host-argv の値を取るフラグ: 理由" "$OUT" "[host-argv]"
 run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv -n=x
 check "--host-argv の値を取る短いフラグは止まる" 20 "$RC"
 run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv --model=m1 --host-argv --verbose --host-argv --debug
-check "--host-argv の表に無いフラグ(値を取らない)は最後に置いてもよい" 0 "$RC"
+check "--host-argv の表に無いフラグは値を取らなくても拒否する" 20 "$RC"
 # 全許可のフラグ(--host-argv 経由・--allowed-tools 経由)
 for tok in --dangerously-skip-permissions --allow-dangerously-skip-permissions=true; do
   run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" --host-argv --model=m1
   check "全許可のフラグ('$tok'・--host-argv 経由)で止まる" 20 "$RC"
-  has "全許可のフラグ('$tok'): 理由" "$OUT" "[full-permission]"
+  has "全許可のフラグ('$tok'): 理由" "$OUT" "[host-argv]"
 done
 run_loop hs -- --repo "$R" --dry-run --allowed-tools Read --allowed-tools bypassPermissions
 check "全許可のモードの値(--allowed-tools 経由)で止まる" 20 "$RC"
@@ -1275,8 +1277,8 @@ has "H28 '--name demo': 拒否理由" "$OUT" "[host-argv]"
 check "H28 '--name demo': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
 check "H28 '--name demo': 対象タスクを起動しない" "" "$(calls)"
 
-# 値に n がある長い引数と、値付き短名を含まない束ね書き、既定起動を解析して確認する。
-H28_GOOD=(-cv --name=demo --name=n default)
+# 値に n がある長い引数、許可した単独フラグ、既定起動を解析して確認する。
+H28_GOOD=(--verbose --name=demo --name=n default)
 for i in "${!H28_GOOD[@]}"; do
   tok="${H28_GOOD[$i]}"
   args=()
@@ -1300,8 +1302,8 @@ assert state['copy'] == str(copy) and state['root'] == sys.argv[2], state
 assert "PermissionRequest" in json.loads(p["settings"])["hooks"], p
 if sys.argv[3].startswith("--name="):
     assert p.get("name") == sys.argv[3].split("=", 1)[1], p
-elif sys.argv[3] == "-cv":
-    assert p.get("c") is True and p.get("v") is True, p
+elif sys.argv[3] == "--verbose":
+    assert p.get("verbose") is True, p
 PY
 done
 fi
@@ -2052,6 +2054,11 @@ kill_case() { # 元の中断条件を保ち、全て未信頼停止を求める�
     ng "KILL($behavior): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg; return
   fi
   kill -KILL "$BG_PID"; wait_bg
+  CHILD="$(cat "$REC/pid-$behavior-a")"
+  if wait_dead "$CHILD" 7; then ok "KILL($behavior): supervisor が親の死後も子を回収する"; else ng "KILL($behavior): supervisor が親の死後も子を回収する"; fi
+  for p in $(cat "$REC/spawned-$behavior-a" 2>/dev/null); do
+    if wait_dead "$p" 3; then ok "KILL($behavior): 別セッションの子孫も回収する"; else ng "KILL($behavior): 別セッションの子孫も回収する(pid $p)"; fi
+  done
   SD="$(state_dir "$state")"
   held="$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json")"
   before="$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
@@ -2063,6 +2070,10 @@ kill_case() { # 元の中断条件を保ち、全て未信頼停止を求める�
   check "KILL($behavior): ref/worktree/lockを変更しない" "$before" "$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
   check "KILL($behavior): 次へ進まない" "$behavior-a" "$(calls)"
   f "KILL($behavior): network Gitなし" grep -q git-upload-pack "$REC/ssh.log"
+  t "KILL($behavior): worktree の lock を残す" locked_reason_of "docs/tasks/進行中_$behavior-a.md"
+  rm -f "$SD/stop-mark.md"
+  run_loop "$state" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "KILL($behavior): stop-mark だけ消しても再開しない" 20 "$RC"
   stop_fixture_children
 }
 for behavior in cfgsleep defsleep longsleep pushsleep pushusleep; do kill_case "$behavior"; done
@@ -2083,6 +2094,72 @@ t '偽 inflight/checksum: 無関係な同UIDプロセス生存' proc_alive "$MAN
 check '偽 inflight/checksum: ref/worktree不変' "$before" "$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
 check '偽 inflight/checksum: 記録不変' "$held" "$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json" "$SD/inflight/checksum")"
 kill -KILL -- "-$MANUAL" 2>/dev/null || true; wait "$MANUAL" 2>/dev/null || true
+
+# supervisor だけが強制終了した場合も loop は成功判定と次の周を止める。
+newrepo ksuperonly
+addtask longsleep-a 2026-01-01; addtask pr-b 2026-01-02
+commit
+newrec ksuperonly
+start_bg ksuperonly -- --repo "$R" "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-longsleep-a" 30; then
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  SUP_PID="$(python3 - "$CHILD" <<'PID'
+import sys
+raw=open('/proc/'+sys.argv[1]+'/stat','rb').read()
+print(int(raw[raw.rindex(b')')+2:].split()[1]))
+PID
+)"
+  kill -KILL "$SUP_PID"; wait_bg
+  check "supervisor だけ KILL: loop は 10 で停止" 10 "$BG_RC"
+  SD="$(state_dir ksuperonly)"
+  has "supervisor だけ KILL: 不在証明が無い" "$SD/stop-mark.md" "不在証明"
+  t "supervisor だけ KILL: inflight を残す" test -d "$SD/inflight"
+  hasnt "supervisor だけ KILL: 次の周へ進まない" "$REC/calls.log" "pr-b"
+  kill -KILL -- "-$CHILD" 2>/dev/null || true
+  for p in $(cat "$REC/spawned-longsleep-a" 2>/dev/null); do kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true; done
+else
+  ng "supervisor だけ KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+
+# supervisor も loop も強制終了したとき、次の起動は不在証明を補完しない。
+newrepo kbothers
+addtask longsleep-a 2026-01-01; addtask pr-b 2026-01-02
+commit
+newrec kbothers
+start_bg kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-longsleep-a" 30; then
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  SUP_PID="$(python3 - "$CHILD" <<'PID'
+import sys
+raw=open('/proc/'+sys.argv[1]+'/stat','rb').read()
+print(int(raw[raw.rindex(b')')+2:].split()[1]))
+PID
+)"
+  kill -KILL "$SUP_PID" "$BG_PID"; wait_bg
+  SD="$(state_dir kbothers)"
+  run_loop kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "監督側も KILL: 次の起動は停止" 20 "$RC"
+  t "監督側も KILL: inflight を残す" test -d "$SD/inflight"
+  hasnt "監督側も KILL: 次の周を起動しない" "$REC/calls.log" "pr-b"
+  # supervisor は既に死んだ。テストが起動を記録したこの子の group だけを回収する。
+  kill -KILL -- "-$CHILD" 2>/dev/null || true
+  for p in $(cat "$REC/spawned-longsleep-a" 2>/dev/null); do kill -KILL "$p" 2>/dev/null || true; done
+else
+  ng "監督側も KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+
+# 偽の meta の印と一致する、今回の supervisor が所有していない同 UID を止めない。
+ITER="$(cat "$REC/iter-longsleep-a")"
+env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER="$ITER" setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
+MANUAL=$!
+sleep .3
+BEFORE_META="$(sha256sum <"$SD/inflight/meta")"
+run_loop kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+check "未信頼 meta: 20 で停止" 20 "$RC"
+t "未信頼 meta: 無関係な同 UID のプロセスを止めない" proc_alive "$MANUAL"
+check "未信頼 meta: 記録は不変" "$BEFORE_META" "$(sha256sum <"$SD/inflight/meta")"
+kill -KILL -- "-$MANUAL" 2>/dev/null || true
+wait "$MANUAL" 2>/dev/null || true
 
 fi
 

@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.23.7
+
+### 修正
+
+- 無人ループの子孫を、環境変数やプロセスグループだけで探す方式から、Linux subreaper と pidfd で所有関係を確かめて回収する方式へ変更した([子 Issue #204](https://github.com/Yuki-Maeda-valour/workflow/issues/204)、親 #107 の H21・H29)。環境を消した子、別セッション、二重 fork も、最後の waitpid で不在を確認する。
+- 親側の終了処理も supervisor の親 PID・開始時刻と pidfd を照合し、再利用された PID へ signal を送らない。所有関係や不在を確認できない場合は worktree と途中の印を残して停止する。
+- 起動引数を副作用のない専用 helper で検査し、実行ファイル以外は許可した名前と値の形式に限定する。通常の model・effort・budget・max-turns・name と verbose を維持する。実ホストの認証や権限の同一ターン検証は #193 の H31・H34 に残し、この変更の完了とは区別する。
+
 ## v4.23.6
 
 ### 修正
