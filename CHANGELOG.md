@@ -2,6 +2,28 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.19.9
+
+### 修正
+
+- `origin-repo.py` が SSH のホスト鍵検証を外した構成を信頼判定から除外する([子 Issue #161](https://github.com/Yuki-Maeda-valour/workflow/issues/161)、親 #107 の H44)。検証設定・照合名・ローカル宛先の検証省略と、`accept-new` の先頭保存先を確認する。必要な設定が欠落・空・重複した場合や取得に失敗した場合も拒否する。
+- 通常の SSH・HTTPS と JSON 形式を保ち、理由に設定値や認証情報を出さない。判定は設定に限り、実際の鍵内容や保存成功は検査しない。保証範囲は [discover-mode.md §3・§10](plugins/dev-workflow/skills/ship-task/references/discover-mode.md) を参照。
+
+## v4.19.8
+
+### 修正
+
+- `loop.sh` で、同じ lock 理由の worktree が複数あると報告から漏れる問題を修正した([子 Issue #160](https://github.com/Yuki-Maeda-valour/workflow/issues/160)、親 #107 の H42)。開始・終了の報告、実装／発見モードの読み飛ばし理由、発見モードの片付け案内に全パスを出す。
+- NUL 区切りの読取りを維持する。空白・改行を含むパスを分割せず保持し、同じ理由の worktree が 1 件でも残れば読み飛ばす。既存の残存 worktree を自動削除する処理は追加しない。
+- 実 worktree を使う回帰で、0 件・1 件・同理由の複数件・異なる理由・空白／改行パス・再読取りと候補への復帰を確認する。
+
+## v4.19.7
+
+### 修正
+
+- `loop-permission.py` が最終 symlink の実体も保護判定する。無害な名前のリンクを経由する保護パスへの Bash の読み書きを拒否する([子 Issue #159](https://github.com/Yuki-Maeda-valour/workflow/issues/159)、親 #107 の H36)。裸名の既存リンクも引数・オプション値・代入値で検査する。`--` 後の `-` 始まりのリンクも調べ、別コマンドの削除・移動で読み取りの拒否が取り消されないようにする。
+- リンク自体の削除・移動と、通常パス・状態ファイル領域 W の許可を保つ。多段・相対・不存在対象・worktree 外のリンクと、拒否の種類を回帰検証する。保証範囲は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.19.6
 
 ### 修正
