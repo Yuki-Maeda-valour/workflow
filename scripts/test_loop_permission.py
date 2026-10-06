@@ -680,6 +680,7 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
             "env git clean -fd",
             "env -S 'git clean -fd'",
             "command git reset --hard",
+            "command git branch -m renamed -v",
             "bash -c 'git clean -fd'",
             "bash -c 'exec /usr/bin/git clean -fd'",
             "/usr/bin/git clean -fd",
@@ -696,6 +697,7 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
             "git switch -c task/normal",
             "git switch --no-track -c task/example",
             "git hash-object -t tree /dev/null",
+            "command -v git",
         )
         for command in allowed:
             with self.subTest(command=command):

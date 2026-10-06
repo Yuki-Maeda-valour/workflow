@@ -1326,8 +1326,10 @@ def check_sensitive_wrappers(words: list[Word]) -> None:
         # argv 解釈では安全に正規化できない。無人経路に env は不要なので閉じる。
         raise other("env ラッパーを受け付けない")
     if name == "command":
-        query = any(word.text.startswith("-") and ("v" in word.text[1:] or "V" in word.text[1:])
-                    for word in words[1:])
+        # command(1) の問い合わせは、実行対象へ渡す argv を含まない厳密な
+        # ``command -v NAME`` / ``command -V NAME`` だけに限る。後ろの Git
+        # option にある ``-v`` を command の照会 option と誤認しない。
+        query = (len(words) == 3 and words[1].text in {"-v", "-V"})
         if not query and any(is_sensitive_tool(word.text) for word in words[1:]):
             raise other("command 経由の Git/GH を受け付けない")
         return
