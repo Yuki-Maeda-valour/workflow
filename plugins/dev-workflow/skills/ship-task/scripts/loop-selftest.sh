@@ -2003,6 +2003,58 @@ pa "入力の cwd が worktree の下のディレクトリのときの W への�
 pa "CDPATH= cd -P -- <worktree の中> && pwd -P" Bash "$(bash_in 'CDPATH= cd -P -- src && pwd -P')"
 pa "CDPATH= cd -P -- <プラグインルートの中> && pwd -P" Bash "$(bash_in "CDPATH= cd -P -- $PP/skills && pwd -P")"
 pa "プラグインルートの下の Read" Read "$(file_in "$PP/skills/x/ref.md")"
+# H37: 実 Bash は追跡しない組み込み移動の後に symlink の先を書き換えられる。hook は全許可でも入口で止める。
+mkdir -p "$PW/sub"
+printf 'before\n' >"$PW/.claude/settings.json"
+ln -s ../.claude/settings.json "$PW/sub/local.txt"
+h37_run() { # $1=同じ文字列で hook と実 Bash に渡す攻撃 $2=stdin(任意)
+  local command="$1" input="${2:-}"
+  if [ -n "$input" ]; then
+    printf '%s' "$input" | timeout -k 2 5 bash -c 'cd "$1" && exec env -i HOME="$2" PATH="$3" bash --noprofile --norc -c "$4"' \
+      _ "$PW" "$W/home" "$SAFEBIN" "$command"
+  else
+    timeout -k 2 5 bash -c 'cd "$1" && exec env -i HOME="$2" PATH="$3" bash --noprofile --norc -c "$4"' \
+      _ "$PW" "$W/home" "$SAFEBIN" "$command"
+  fi
+}
+h37_attack() { # $1=表示名 $2=攻撃 $3=stdin(任意)。陽性対照→復元→hook→allow時だけ実行→不変を同じ文字列で確認する。
+  local label="$1" command="$2" input="${3:-}" rc
+  printf 'before\n' >"$PW/.claude/settings.json"
+  h37_run "$command" "$input" >/dev/null 2>&1; rc=$?
+  check "H37 陽性対照: $label は実 Bash で完走する" 0 "$rc"
+  check "H37 陽性対照: $label は symlink の先を書き換える" changed "$(cat "$PW/.claude/settings.json")"
+  printf 'before\n' >"$PW/.claude/settings.json"
+  pdk "H37: $label を全許可でも拒否する" other Bash "$(bash_in "$command")"
+  if [ "$PDEC" = allow ]; then h37_run "$command" "$input" >/dev/null 2>&1; fi
+  check "H37: $label の deny 後に symlink の先が不変" before "$(cat "$PW/.claude/settings.json")"
+}
+PALLOW='[{"kind":"all","words":[]}]'
+h37_attack "builtin cd" 'builtin cd sub && echo changed > local.txt'
+h37_attack "command cd" 'command cd sub && echo changed > local.txt'
+h37_attack "pushd" 'pushd sub >/dev/null && echo changed > local.txt'
+h37_attack "popd(pushd -n で準備)" 'pushd -n sub >/dev/null && popd >/dev/null && echo changed > local.txt'
+h37_attack "深い command/builtin" 'command -p -- command -pp -- builtin -- cd sub && echo changed > local.txt'
+h37_attack "予約語 ! time" '! time builtin cd sub; echo changed > local.txt'
+h37_attack "許可 cd 前置きの後の builtin cd" 'CDPATH= cd -P -- src && builtin cd ../sub && echo changed > local.txt'
+h37_attack "if" 'if builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "通常コマンド後の if" 'echo ok && if builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "while" 'while builtin cd sub; do echo changed > local.txt; break; done'
+h37_attack "until" 'until builtin cd sub; do break; done; echo changed > local.txt'
+h37_attack "for" 'for x in once; do builtin cd sub; echo changed > local.txt; done'
+h37_attack "elif" 'if false; then :; elif builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "select" 'select x in once; do builtin cd sub; echo changed > local.txt; break; done' $'1\n'
+h37_attack "許可 cd 前置き後の if" 'CDPATH= cd -P -- src && if builtin cd ../sub; then echo changed > local.txt; fi'
+for H37_QUOTED in "t''ime true" "''time true" "!'' true" "\\time true" "'if' true"; do
+  pa "H37: 引用・エスケープした予約語は通常判定($H37_QUOTED)" Bash "$(bash_in "$H37_QUOTED")"
+done
+pa "H37: builtin echo は通常操作として allow" Bash "$(bash_in 'builtin echo normal')"
+pa "H37: command -p echo は通常操作として allow" Bash "$(bash_in 'command -p echo normal')"
+check "H37: builtin echo は実 Bash で実行できる" normal "$(h37_run 'builtin echo normal')"
+check "H37: command -p echo は実 Bash で実行できる" normal "$(h37_run 'command -p echo normal')"
+pa "H37: 通常操作は全許可で allow" Bash "$(bash_in 'echo normal > src/h37.txt')"
+if [ "$PDEC" = allow ]; then h37_run 'echo normal > src/h37.txt' >/dev/null 2>&1; fi
+check "H37: allow の通常操作は実行できる" normal "$(cat "$PW/src/h37.txt")"
+PALLOW=""
 # 保護パスの判定は worktree のルートからの相対で見る: `.claude` の段を含む場所(導入先のキャッシュに似せた置き場)に
 # プラグインルートを置いても、その中を読むのは保護パスに当たらない
 PPC="$W/home/.claude/plugins/cache/m/dev-workflow/9.9.9"
