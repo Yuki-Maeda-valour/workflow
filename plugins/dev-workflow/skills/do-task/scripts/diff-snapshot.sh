@@ -4,7 +4,7 @@
 #
 # 使い方:
 #   bash diff-snapshot.sh --cwd <dir> --base <tree-ish> --out <file> \
-#        (--exclude-glob <glob> | --exclude <ERE>)… [オプション]
+#        (--exclude-glob <glob> | --exclude <ERE>)… [--secret-profile-ref <完全OID>]… [--secret-profile-union-sha256 <sha256>] [オプション]
 #   bash diff-snapshot.sh --cwd <dir> --precheck [--accept <承認ダイジェスト>]
 #   bash diff-snapshot.sh --print-exclude-ere (--exclude-glob <glob> | --exclude <ERE>)…
 #
@@ -49,6 +49,10 @@
 #   --exclude-glob <glob>        繰り返し可。機密パスの glob 指定(下の書式)
 #   --exclude <ERE>              繰り返し可。機密パスの拡張正規表現指定
 #                                (--exclude-glob と --exclude のどちらか 1 つ以上が必須)
+#   --secret-profile-ref <OID>   繰り返し可。現在・既定・指定commitの profile を安全に和集合へ足す
+#   --secret-profile-union-sha256 <hex>
+#                                無人 caller が直前に確定した NUL 和集合の SHA-256。profile
+#                                再読取の和集合と異なれば停止する。--secret-profile-ref と対で使う
 #   --pre-untracked <file>       任意。基準時点の未追跡一覧(NUL 区切り・toplevel 相対)。
 #                                呼び出し側 cwd 基準。symlink でない読める通常ファイルに限る
 #   --pre-untracked-sha256 <hex> --pre-untracked と対で必須。一覧の sha256
@@ -195,6 +199,9 @@ BASE=""
 OUT=""
 GLOBS=()
 ERES=()
+SECRET_PROFILE_REFS=()
+SECRET_PROFILE_UNION_SHA256=""
+SECRET_PROFILE_UNION_SHA256_GIVEN=0
 PRE_LIST=""
 PRE_LIST_GIVEN=0
 PRE_SHA=""
@@ -388,6 +395,8 @@ while [ $# -gt 0 ]; do
     --out) need_val "$1" "$#"; OUT="$2"; shift 2 ;;
     --exclude-glob) need_val "$1" "$#"; GLOBS[${#GLOBS[@]}]="$2"; shift 2 ;;
     --exclude) need_val "$1" "$#"; ERES[${#ERES[@]}]="$2"; shift 2 ;;
+    --secret-profile-ref) need_val "$1" "$#"; SECRET_PROFILE_REFS[${#SECRET_PROFILE_REFS[@]}]="$2"; shift 2 ;;
+    --secret-profile-union-sha256) need_val "$1" "$#"; [ "$SECRET_PROFILE_UNION_SHA256_GIVEN" -eq 0 ] || fail_usage "--secret-profile-union-sha256 は 1 回だけ指定できる"; SECRET_PROFILE_UNION_SHA256_GIVEN=1; SECRET_PROFILE_UNION_SHA256="$2"; shift 2 ;;
     --pre-untracked) need_val "$1" "$#"; PRE_LIST="$2"; PRE_LIST_GIVEN=1; shift 2 ;;
     --pre-untracked-sha256) need_val "$1" "$#"; PRE_SHA="$2"; PRE_SHA_GIVEN=1; shift 2 ;;
     --include-untracked) need_val "$1" "$#"; INCLUDES[${#INCLUDES[@]}]="$2"; shift 2 ;;
@@ -411,7 +420,7 @@ if [ "$PRINT_ERE" -eq 1 ]; then
   # 除外指定だけが必須。それ以外の引数との併用は受け付けない
   if [ -n "$CWD" ] || [ -n "$BASE" ] || [ -n "$OUT" ] || [ -n "$PATCH_OUT" ] || [ -n "$PRE_LIST" ] \
      || [ "$PRE_SHA_GIVEN" -eq 1 ] || [ "$PATCH_BASE_GIVEN" -eq 1 ] || [ "$ACCEPT_GIVEN" -eq 1 ] \
-     || [ ${#INCLUDES[@]} -gt 0 ] || [ "$MAX_BYTES" != 8388608 ]; then
+     || [ ${#INCLUDES[@]} -gt 0 ] || [ ${#SECRET_PROFILE_REFS[@]} -gt 0 ] || [ -n "$SECRET_PROFILE_UNION_SHA256" ] || [ "$MAX_BYTES" != 8388608 ]; then
     fail_usage "--print-exclude-ere は除外指定以外の引数と併用できない"
   fi
 elif [ "$PRECHECK" -eq 1 ]; then
@@ -419,7 +428,7 @@ elif [ "$PRECHECK" -eq 1 ]; then
   if [ -n "$BASE" ] || [ -n "$OUT" ] || [ -n "$PATCH_OUT" ] || [ -n "$PRE_LIST" ] \
      || [ "$PRE_SHA_GIVEN" -eq 1 ] || [ "$PATCH_BASE_GIVEN" -eq 1 ] \
      || [ ${#INCLUDES[@]} -gt 0 ] || [ ${#GLOBS[@]} -gt 0 ] || [ ${#ERES[@]} -gt 0 ] \
-     || [ "$MAX_BYTES" != 8388608 ]; then
+     || [ ${#SECRET_PROFILE_REFS[@]} -gt 0 ] || [ -n "$SECRET_PROFILE_UNION_SHA256" ] || [ "$MAX_BYTES" != 8388608 ]; then
     fail_usage "--precheck は --cwd と --accept 以外の引数と併用できない"
   fi
   [ -n "$CWD" ] || fail_usage "--cwd が必要です"
@@ -438,9 +447,16 @@ else
   esac
 fi
 
+if [ "$SECRET_PROFILE_UNION_SHA256_GIVEN" -eq 1 ] && [ ${#SECRET_PROFILE_REFS[@]} -eq 0 ]; then
+  fail_usage "--secret-profile-union-sha256 には --secret-profile-ref が必要です"
+fi
+if [ "$SECRET_PROFILE_UNION_SHA256_GIVEN" -eq 1 ] && ! [[ "$SECRET_PROFILE_UNION_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+  fail_usage "--secret-profile-union-sha256 は完全な小文字 SHA-256 でなければならない"
+fi
+
 # ── 除外指定 → 結合 ERE(glob の変換はこのスクリプトが行う)──
 if [ "$PRECHECK" -eq 0 ]; then
-  if [ ${#GLOBS[@]} -eq 0 ] && [ ${#ERES[@]} -eq 0 ]; then
+  if [ ${#GLOBS[@]} -eq 0 ] && [ ${#ERES[@]} -eq 0 ] && [ ${#SECRET_PROFILE_REFS[@]} -eq 0 ]; then
     fail_usage "--exclude-glob か --exclude のどちらか 1 つ以上が必要です"
   fi
 fi
@@ -541,7 +557,7 @@ validate_ere() { # 結合 ERE を 1 回だけ検証する(rc 1 は妥当な非�
   if [ "$rc" -ge 2 ]; then fail_usage "除外の正規表現が不正"; fi
 }
 
-if [ ${#GLOBS[@]} -gt 0 ] || [ ${#ERES[@]} -gt 0 ]; then
+if { [ ${#GLOBS[@]} -gt 0 ] || [ ${#ERES[@]} -gt 0 ]; } && [ ${#SECRET_PROFILE_REFS[@]} -eq 0 ]; then
   build_ere
   validate_ere
   if matches_all_paths "$ERE"; then fail_usage "secret_paths が全パスに当たる: $ERE"; fi
@@ -583,6 +599,9 @@ case "${CWD_PHYS:-/dev/null/none}" in
 esac
 
 CALLER_PWD="$PWD"
+SCRIPT_PATH="$0"
+case "$SCRIPT_PATH" in /*) : ;; *) SCRIPT_PATH="$CALLER_PWD/$SCRIPT_PATH" ;; esac
+SCRIPT_DIR="$(CDPATH= cd -P -- "$(dirname -- "$SCRIPT_PATH")" && pwd -P)" || fail_internal "profile helper の場所を解決できない"
 abs_from_caller() { case "$1" in /*) printf '%s' "$1" ;; *) printf '%s/%s' "$CALLER_PWD" "$1" ;; esac; }
 if [ -n "$OUT" ]; then OUT="$(abs_from_caller "$OUT")"; fi
 if [ -n "$PATCH_OUT" ]; then PATCH_OUT="$(abs_from_caller "$PATCH_OUT")"; fi
@@ -1193,6 +1212,33 @@ if [ "$TAMPER" -eq 1 ]; then
   exit 22
 fi
 emit_accept_tokens
+
+# `--secret-profile-ref` を使う無人経路だけが profile をここで読む。precheck と
+# 未承認の改竄検出を通った後なので、profile blob を先に読ませない。
+if [ ${#SECRET_PROFILE_REFS[@]} -gt 0 ]; then
+  PROFILE_HELPER="$SCRIPT_DIR/secret-profiles.py"
+  [ -f "$PROFILE_HELPER" ] || fail_internal "profile helper が無い"
+  : >"$TMPD/secret-profile-globs.z"
+  : >"$TMPD/secret-profile.err"
+  profile_args=(--cwd "$TOP")
+  for profile_ref in "${SECRET_PROFILE_REFS[@]}"; do profile_args+=(--ref "$profile_ref"); done
+  profile_rc=0
+  python3 "$PROFILE_HELPER" "${profile_args[@]}" >"$TMPD/secret-profile-globs.z" 2>"$TMPD/secret-profile.err" || profile_rc=$?
+  if [ "$profile_rc" -ne 0 ]; then
+    cat "$TMPD/secret-profile.err" >&2
+    fail_internal "secret profile の和集合を作れない"
+  fi
+  if [ "$SECRET_PROFILE_UNION_SHA256_GIVEN" -eq 1 ]; then
+    actual_profile_union_sha256="$(sha256_file "$TMPD/secret-profile-globs.z")"
+    if [ "$actual_profile_union_sha256" != "$SECRET_PROFILE_UNION_SHA256" ]; then
+      fail_internal "secret profile の和集合が開始時から変わった"
+    fi
+  fi
+  while IFS= read -r -d '' profile_glob; do GLOBS[${#GLOBS[@]}]="$profile_glob"; done <"$TMPD/secret-profile-globs.z"
+  build_ere
+  validate_ere
+  if matches_all_paths "$ERE"; then fail_usage "secret_paths が全パスに当たる: $ERE"; fi
+fi
 
 # ── 改竄耐性 ⑧: stat 情報を持たない使い捨ての index を作り、以後の差分をそれに向ける ──
 TMPIDX="$TMPD/index.tmp"
