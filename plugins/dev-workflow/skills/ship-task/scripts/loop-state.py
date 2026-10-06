@@ -25,6 +25,25 @@ from typing import Any
 SCHEMA = 4
 DEFAULT_SECRET_PATHS = (".env", ".env.*", ".dev.vars")
 
+# Keep every helper Git process on the shared publish-path contract.  State
+# observation must not invoke repository hooks, filters, signing, fsmonitor or
+# a pager while it is reading a repository that an interrupted child may alter.
+SAFE_GIT_PREFIX = (
+    "--no-pager", "--no-replace-objects",
+    "-c", "core.quotePath=false",
+    "-c", "core.fsmonitor=",
+    "-c", "core.hooksPath=/dev/null",
+    "-c", "core.ignoreCase=false",
+    "-c", "core.splitIndex=false",
+    "-c", "core.ignoreStat=false",
+    "-c", "commit.gpgSign=false",
+    "-c", "push.gpgSign=false",
+    "-c", "filter.lfs.smudge=",
+    "-c", "filter.lfs.clean=",
+    "-c", "filter.lfs.process=",
+    "-c", "filter.lfs.required=false",
+)
+
 
 class Stop(RuntimeError):
     pass
@@ -339,8 +358,7 @@ def run_git(top: str, *args: str, budget: Budget | None = None,
             return_status: bool = False) -> bytes | tuple[int, bytes]:
     proc: subprocess.Popen[bytes] | None = None
     try:
-        proc = subprocess.Popen(["git", "-C", top, "--no-pager", "--no-replace-objects",
-                                 "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", *args],
+        proc = subprocess.Popen(["git", "-C", top, *SAFE_GIT_PREFIX, *args],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}, pass_fds=pass_fds)
         assert proc.stdout is not None
@@ -988,8 +1006,7 @@ def index_snapshot(admin: str, worktree: str, budget: Budget) -> dict[str, Any]:
     # Raw index bytes catch all human worktrees.  For the loop's own checkout a
     # commit necessarily rewrites them, so record whether that rewrite is clean
     # and only then allow its exact ref/HEAD transition in compare().
-    proc = subprocess.run(["git", "-C", worktree, "--no-pager", "--no-replace-objects",
-                           "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=",
+    proc = subprocess.run(["git", "-C", worktree, *SAFE_GIT_PREFIX,
                            "diff-index", "--quiet", "HEAD", "--"], stdin=subprocess.DEVNULL,
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=min(10, budget.remaining()),
                           env={**os.environ, "GIT_NO_LAZY_FETCH": "1"})
