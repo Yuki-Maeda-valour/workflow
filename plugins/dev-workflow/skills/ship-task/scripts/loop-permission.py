@@ -51,8 +51,26 @@ ASSIGN_NAMES = {"CDPATH", "LC_ALL", "LANG", "GIT_NO_LAZY_FETCH", "GIT_TERMINAL_P
 
 # ファイル操作のコマンドと、受け付ける短いオプションの文字(どれも `--` を受け付ける)
 FILE_OP_SHORT = {"mkdir": "", "touch": "", "rmdir": "", "rm": "frRv", "cp": "frRpv", "mv": "frRpv", "tee": "a"}
-# sed はオプションを束ねない(`-in` は接尾辞 n の -i になる)。接尾辞つきの -i・--in-place は受け付けない
-SED_OPTS = {"-i", "--in-place", "-e", "-E", "-n", "-r"}
+
+# 許可の仲介が受け付ける Git の global option と `-c`。loop.sh 自身の GIT_PRE と同じ
+# 値だけにする。値を一般化すると alias・filter・helper などが任意のプログラムを起動できる。
+SAFE_GIT_CONFIGS = {
+    "core.quotePath=false", "core.fsmonitor=", "core.hooksPath=/dev/null", "core.ignoreCase=false",
+    "core.splitIndex=false", "core.filemode=true", "core.symlinks=true", "core.ignoreStat=false",
+    "diff.autoRefreshIndex=false", "core.autocrlf=false", "core.eol=lf", "apply.whitespace=nowarn",
+    "core.sparseCheckout=false", "core.sparseCheckoutCone=false", "filter.lfs.smudge=", "filter.lfs.clean=",
+    "filter.lfs.process=", "filter.lfs.required=false",
+}
+SAFE_GIT_GLOBALS = {"--no-pager", "--no-replace-objects", "--literal-pathspecs", "--no-literal-pathspecs"}
+GIT_READ_COMMANDS = {
+    "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-ref-format", "describe", "diff",
+    "diff-tree", "for-each-ref", "grep", "log", "ls-files", "ls-tree", "merge-base", "name-rev", "reflog",
+    "rev-list", "rev-parse", "show", "show-ref", "status", "verify-commit", "verify-tag", "version",
+}
+GIT_DIRECT_STATE_COMMANDS = {
+    "config", "update-ref", "symbolic-ref", "replace", "worktree", "update-index", "read-tree",
+    "checkout-index", "remote", "tag",
+}
 
 # deny の message に理由へ続けて添える固定の文(D22 ③ (d))。無人の周では打ち直さず、unattended-mode.md の
 # 許可の拒否(G1)に従う(拒否されたら別の手段で回り込まない — 保留か失敗扱い)。判定の記録(PERMLOG)の reason には入れない
@@ -365,6 +383,14 @@ def tokenize(s: str) -> list[tuple]:
             raise other("単引用符の外の $ かバッククォート")
         if c == "~":
             raise other("引用符の外の ~")
+        # Git の `@{upstream}` は Bash の brace expansion ではなく、rev-parse の固定の revision suffix。
+        # 文書化された query だけを許し、一般の `{...}` は従来どおり構文として受け付けない。
+        if s.startswith("@{upstream}", i):
+            cur = cur or Word()
+            for char in "@{upstream}":
+                cur.add(char, False)
+            i += len("@{upstream}")
+            continue
         if c in "(){}":
             raise other("括弧か中括弧")
         if c == "#" and cur is None:
@@ -525,6 +551,23 @@ def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool =
             ctx.check_path_word(ctx.resolve(text, tilde))
 
 
+def check_git_words_as_paths(ctx: Ctx, words: list[Word]) -> None:
+    """Git の global option の値を一般の短縮 option として誤認せず、operand は既存のパス規則で読む。"""
+    skip_next = False
+    for word in words:
+        text = word.text
+        if skip_next:
+            skip_next = False
+            continue
+        if text == "-c":
+            skip_next = True
+            continue
+        if text.startswith("-") or text == "--":
+            continue
+        if looks_like_path(text, word.tilde) or is_bare_path(ctx, text, word.tilde):
+            ctx.check_path_word(ctx.resolve(text, word.tilde))
+
+
 def check_assignment(ctx: Ctx, word: Word) -> None:
     name, value = word.assignment()  # type: ignore[misc]
     if name not in ASSIGN_NAMES:
@@ -550,31 +593,6 @@ def split_opts(words: list[Word]) -> tuple[list[str], list[Word]]:
 
 
 def check_file_op(ctx: Ctx, name: str, args: list[Word]) -> None:
-    if name == "sed":
-        opts, operands = [], []
-        ended = False
-        k = 0
-        script_given = False
-        while k < len(args):
-            t = args[k].text
-            if not ended and t == "--":
-                ended = True
-            elif not ended and t.startswith("-") and t != "-":
-                if t not in SED_OPTS:
-                    raise other(f"sed のオプションを受け付けない: {t[:100]}")
-                opts.append(t)
-                if t == "-e":
-                    if k + 1 >= len(args):
-                        raise other("sed -e の値が無い")
-                    script_given = True
-                    k += 1
-            else:
-                operands.append(args[k])
-            k += 1
-        files = operands if script_given else operands[1:]
-        for w in files:
-            ctx.check_write(ctx.resolve(w.text, w.tilde), "sed -i の対象")
-        return
     allowed = FILE_OP_SHORT[name]
     opts, operands = split_opts(args)
     recursive = False
@@ -611,18 +629,529 @@ def check_file_op(ctx: Ctx, name: str, args: list[Word]) -> None:
             ctx.check_write(target, f"{name} の行き先")
 
 
-def sed_in_place(args: list[Word]) -> bool:
-    """sed が書き込むか(-i・--in-place、接尾辞つき、束ねた短いオプションの中の i を含む)。書くならファイル操作として
-    判定する(束ねたオプション・接尾辞は列挙に無いので拒否になる)。`--` の後は見ない。"""
-    for w in args:
-        t = w.text
-        if t == "--":
-            return False
-        if t.startswith("--in-place"):
-            return True
-        if t.startswith("-") and not t.startswith("--") and "i" in t[1:]:
-            return True
+def _sed_command_start(script: str) -> int | None:
+    """限定した sed の address の後にある command の位置を返す。"""
+    i, n = 0, len(script)
+    if i < n and script[i].isdigit():
+        while i < n and script[i].isdigit():
+            i += 1
+    elif i < n and script[i] == "$":
+        i += 1
+    elif i + 1 < n and script[i] == "\\":
+        delim = script[i + 1]
+        i += 2
+        while i < n:
+            if script[i] == "\\" and i + 1 < n:
+                i += 2
+            elif script[i] == delim:
+                i += 1
+                break
+            else:
+                i += 1
+        else:
+            return None
+    elif i < n and script[i] == "/":
+        i += 1
+        while i < n:
+            if script[i] == "\\" and i + 1 < n:
+                i += 2
+            elif script[i] == "/":
+                i += 1
+                break
+            else:
+                i += 1
+        else:
+            return None
+    if i < n and script[i] == ",":
+        i += 1
+        if i < n and script[i].isdigit():
+            while i < n and script[i].isdigit():
+                i += 1
+        elif i < n and script[i] == "$":
+            i += 1
+        else:
+            return None
+    return i
+
+
+def sed_script_safe(script: str) -> bool:
+    """出力だけを行う、短い sed script だけを受け付ける。"""
+    if not script or "\n" in script or "\r" in script or ";" in script:
+        return False
+    start = _sed_command_start(script)
+    if start is None or start >= len(script):
+        return False
+    command = script[start]
+    if command in "pd":
+        return start + 1 == len(script)
+    if command != "s" or start + 2 >= len(script):
+        return False
+    delim = script[start + 1]
+    if delim.isalnum() or delim.isspace() or delim == "\\":
+        return False
+    i, closes = start + 2, 0
+    while i < len(script):
+        if script[i] == "\\" and i + 1 < len(script):
+            i += 2
+            continue
+        if script[i] == delim:
+            closes += 1
+            if closes == 2:
+                flags = script[i + 1:]
+                return bool(re.fullmatch(r"[0-9gIp]*", flags))
+        i += 1
     return False
+
+
+def check_sed(ctx: Ctx, args: list[Word]) -> bool:
+    """`sed` は入力を読むだけの固定した script に限定する。"""
+    scripts: list[Word] = []
+    files: list[Word] = []
+    ended = False
+    in_place = False
+    implicit_script = True
+    k = 0
+    while k < len(args):
+        word = args[k]
+        text = word.text
+        if not ended and text == "--":
+            ended = True
+        elif not ended and text in ("-i", "--in-place"):
+            in_place = True
+        elif not ended and (text.startswith("-i") or text.startswith("--in-place")):
+            raise other("sed の in-place 接尾辞を受け付けない")
+        elif not ended and text in ("-n", "-E", "-r", "--sandbox"):
+            pass
+        elif not ended and text == "-e":
+            if k + 1 >= len(args):
+                raise other("sed -e の値が無い")
+            scripts.append(args[k + 1])
+            implicit_script = False
+            k += 1
+        elif not ended and text.startswith("-") and text != "-":
+            raise other(f"sed のオプションを受け付けない: {text[:100]}")
+        elif implicit_script:
+            scripts.append(word)
+            implicit_script = False
+        else:
+            files.append(word)
+        k += 1
+    if not scripts:
+        raise other("sed の script が無い")
+    for script in scripts:
+        if not sed_script_safe(script.text):
+            raise other("sed の read/write/execute または未知の script")
+    if in_place and not files:
+        raise other("sed -i の対象が無い")
+    for path in files:
+        target = ctx.resolve(path.text, path.tilde)
+        if in_place:
+            ctx.check_write(target, "sed -i の対象")
+        else:
+            ctx.check_path_word(target)
+    return in_place
+
+
+def check_find(args: list[Word]) -> None:
+    """find の副作用を持つ action は allow=all でも通さない。"""
+    denied = {"-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprint0", "-fprintf", "-fls"}
+    for word in args:
+        if word.text in denied:
+            raise other(f"find の書き込み/実行 action を受け付けない: {word.text}")
+
+
+def check_awk(args: list[Word]) -> None:
+    """awk は任意プログラムなので、必要な固定の品質確認以外に拡げない。"""
+    fixed = {
+        "{print}", "{ print }", "{print $0}", "{ print $0 }",
+        "NR==1 {print}", "NR==1 { print }",
+    }
+    if not args or args[0].text not in fixed:
+        raise other("awk の任意 program を受け付けない")
+    if any(word.text.startswith("-") for word in args[1:]):
+        raise other("awk の program 後の option を受け付けない")
+
+
+def git_pathspec_safe(ctx: Ctx, word: Word, *, source: bool = True) -> None:
+    """書き込み Git の pathspec を通常ファイル 1 件に限定する。"""
+    text = word.text
+    if text in ("", ".") or text.startswith("-"):
+        raise other("Git の広域 pathspec を受け付けない")
+    if text.startswith(":("):
+        if not text.startswith(":(literal)"):
+            raise other("Git の magic/glob pathspec を受け付けない")
+        text = text[len(":(literal)"):]
+    elif text.startswith(":") or any(ch in text for ch in "*?["):
+        raise other("Git の magic/glob pathspec を受け付けない")
+    path = ctx.resolve(text, word.tilde)
+    loc, full, link = locate(path)
+    if link or not (inside(loc, ctx.wt) and inside(full, ctx.wt)):
+        raise other("Git の pathspec が worktree の外か symlink")
+    if os.path.isdir(loc):
+        raise other("Git のディレクトリ pathspec を受け付けない")
+    if source and not git_source_pathspec_safe(ctx, loc):
+        raise other("Git の pathspec が index/HEAD の通常ファイル 1 件と整合しない")
+    if is_protected(ctx.rel(ctx.cwd)) and not ctx.in_w(ctx.rel(ctx.cwd), mkdir=True) and not looks_like_path(text, word.tilde):
+        raise other("保護 cwd の裸の Git pathspec")
+    ctx.check_write(path, "Git の書き込み pathspec")
+
+
+def git_source_pathspec_safe(ctx: Ctx, loc: str) -> bool:
+    """Git pathspec を index と HEAD の 1 ファイル集合に照合する。
+
+    不存在の `subtree` を Git が directory pathspec として展開すると保護ファイルを
+    復元できる。逆に、現在の通常ファイル `subtree` でも index/HEAD に `subtree/.claude/...`
+    が残れば `git add -- subtree` が保護 path を index から消せる。`reset` と
+    `restore --source=HEAD` は HEAD tree を使うため、両方の descendant を見る。
+    """
+    rel = os.path.relpath(loc, ctx.wt)
+    dotgit = os.path.join(ctx.wt, ".git")
+    if not os.path.exists(dotgit):
+        # 単体の permission regression fixture は Git worktree ではない。この場合は実行時の
+        # Git 自身が失敗し、directory pathspec の展開は起きないため従来の parser 契約を保つ。
+        return True
+    try:
+        import subprocess
+        git_env = dict(os.environ)
+        git_env["GIT_NO_LAZY_FETCH"] = "1"
+        git_prefix = [
+            "git", "-C", ctx.wt, "--no-pager", "--no-replace-objects",
+            "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.ignoreCase=false",
+        ]
+        index = subprocess.run(
+            [*git_prefix, "ls-files", "--stage", "-z", "--", rel],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=3, check=False, env=git_env,
+        )
+        tree = subprocess.run(
+            [*git_prefix, "ls-tree", "-r", "-z", "--name-only", "HEAD", "--", rel],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=3, check=False, env=git_env,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    if index.returncode != 0:
+        return False
+    paths: set[str] = set()
+    for record in index.stdout.split(b"\0"):
+        if not record:
+            continue
+        try:
+            _meta, path = record.split(b"\t", 1)
+        except ValueError:
+            return False
+        try:
+            paths.add(path.decode("utf-8", "strict"))
+        except UnicodeDecodeError:
+            return False
+    # unborn HEAD では ls-tree が失敗する。index に通常ファイルが 1 件だけなら、
+    # pathspec の展開で保護ファイルを復元する source tree 自体が存在しない。
+    if tree.returncode == 0:
+        try:
+            paths.update(item.decode("utf-8", "strict") for item in tree.stdout.split(b"\0") if item)
+        except UnicodeDecodeError:
+            return False
+    if any(path != rel for path in paths):
+        return False
+    if not os.path.lexists(loc):
+        return (paths == {rel}
+                and (not is_protected(rel) or ctx.in_w(rel, mkdir=True)))
+    return True
+
+
+def git_output_dir_safe(ctx: Ctx, word: Word) -> None:
+    """format-patch の出力先は、書き込み判定より先に通常の path word として読む。
+
+    接尾辞に隠した protected path/symlink は G1 の other として集計する既存契約を保つ。
+    """
+    path = ctx.resolve(word.text, word.tilde)
+    ctx.check_path_word(path)
+    pending = pending_denial(ctx)
+    if pending is not None:
+        raise pending
+    ctx.check_write(path, "Git format-patch の出力先", mkdir=True)
+
+
+def task_branch_safe(name: str) -> bool:
+    """task/ 配下の実在する Git ref として安全な branch 名だけを許す。
+
+    ASCII に限定せず、日本語を含む Git が受け付ける通常の task 名を保つ。
+    """
+    suffix = name.removeprefix("task/")
+    if not suffix or name == suffix or suffix.endswith(".") or suffix.endswith("/") or ".." in suffix or "@{" in suffix:
+        return False
+    return not any(ord(char) < 32 or ord(char) == 127 or char in " ~^:?*[\\" for char in suffix)
+
+
+def check_git_read_options(subcommand: str, rest: list[Word]) -> None:
+    """無人の周で実際に必要な、読み取り Git の option だけを列挙する。"""
+    common = {"--"}
+    allowed = {
+        "status": common | {"--short", "--branch", "--porcelain=v1", "--untracked-files=normal",
+                             "--untracked-files=all", "--ignore-submodules=dirty", "-uall", "-z"},
+        "diff": common | {"--no-renames", "--raw", "--cached", "--name-only", "--name-status", "--binary",
+                           "--no-ext-diff", "--no-textconv", "--no-relative", "--no-color", "--no-index", "-z",
+                           "--ignore-submodules=dirty", "--submodule=short", "--text", "--stat",
+                           "--stat-width=200", "--stat-name-width=500", "--unified=3", "--src-prefix=a/",
+                           "--dst-prefix=b/"},
+        "log": common | {"--oneline", "--no-show-signature", "--no-decorate", "--pickaxe-regex"},
+        "show": common | {"--no-show-signature"},
+        "rev-parse": common | {"--show-toplevel", "--local-env-vars", "--git-dir", "--git-common-dir",
+                                 "--absolute-git-dir", "--verify", "--quiet", "-q", "--path-format=absolute",
+                                 "--git-path", "--abbrev-ref"},
+        "check-ignore": common | {"-q", "--no-index"},
+        "check-attr": common | {"--cached", "--stdin", "-z"},
+        "check-ref-format": {"--branch"},
+        "ls-files": common | {"-o", "--ignored", "--exclude-standard", "--error-unmatch", "-z", "-s",
+                                "--stage", "-u", "-v"},
+        "ls-tree": common | {"-r", "--name-only", "-z"},
+        "rev-list": common | {"--count"},
+        "merge-base": common | {"--is-ancestor"},
+        "branch": common | {"--show-current"},
+        "show-ref": common | {"--verify", "--quiet", "-q"},
+    }.get(subcommand, common)
+    for word in rest:
+        text = word.text
+        if not text.startswith("-") or text == "-":
+            continue
+        if text in allowed:
+            continue
+        if subcommand == "log" and (text.startswith("--format=") or text.startswith("--grep=")
+                                     or re.fullmatch(r"-[0-9]+", text) or text.startswith(("-G", "-S"))):
+            continue
+        if subcommand == "for-each-ref" and text.startswith("--format=") and len(text) > len("--format="):
+            continue
+        if subcommand == "reflog" and text.startswith("--format=") and len(text) > len("--format="):
+            continue
+        raise other(f"Git {subcommand} の option を受け付けない: {text[:100]}")
+
+
+def check_git(ctx: Ctx, args: list[Word]) -> None:
+    """Git の global option・subcommand・書き込み pathspec を先に限定する。"""
+    if not args:
+        raise other("Git の subcommand が無い")
+    i, original_cwd = 0, ctx.cwd
+    try:
+        while i < len(args):
+            text = args[i].text
+            if text in SAFE_GIT_GLOBALS:
+                i += 1
+            elif text == "-c":
+                if i + 1 >= len(args) or args[i + 1].text not in SAFE_GIT_CONFIGS:
+                    raise other("Git -c の key=value を受け付けない")
+                i += 2
+            elif text.startswith("-c") and text != "-c":
+                if text[2:] not in SAFE_GIT_CONFIGS:
+                    raise other("Git -c の key=value を受け付けない")
+                i += 1
+            elif text == "-C":
+                if i + 1 >= len(args):
+                    raise other("Git -C の行き先が無い")
+                target = args[i + 1]
+                if target.glob():
+                    raise other("Git -C のグロブを受け付けない")
+                target_path = os.path.realpath(ctx.resolve(target.text, target.tilde))
+                if not inside(target_path, ctx.wt) or not os.path.isdir(target_path):
+                    raise other("Git -C が worktree 内のディレクトリでない")
+                ctx.cwd = target_path
+                i += 2
+            elif text.startswith("-C") and text != "-C":
+                raise other("Git -C の連結形を受け付けない")
+            elif text.startswith("--config-env"):
+                raise other("Git --config-env を受け付けない")
+            elif text.startswith("-"):
+                raise other(f"Git の global option を受け付けない: {text[:100]}")
+            else:
+                break
+        if i >= len(args):
+            raise other("Git の subcommand が無い")
+        subcommand = args[i].text
+        rest = args[i + 1:]
+        if subcommand == "symbolic-ref":
+            if [word.text for word in rest] in (["--quiet", "HEAD"], ["-q", "HEAD"],
+                                                ["--quiet", "refs/remotes/origin/HEAD"],
+                                                ["-q", "refs/remotes/origin/HEAD"]):
+                return
+            raise other("Git symbolic-ref の更新形を受け付けない")
+        if subcommand == "remote":
+            values = [word.text for word in rest]
+            if values in ([], ["get-url", "--all", "origin"], ["get-url", "--push", "--all", "origin"]):
+                return
+            raise other("Git remote の更新形を受け付けない")
+        if subcommand == "ls-remote":
+            values = [word.text for word in rest]
+            valid_ref = lambda ref: ref.startswith("refs/heads/") and not any(char in ref for char in " ~^:?[")
+            if len(values) in (1, 2) and values[0] == "origin" and (len(values) == 1 or valid_ref(values[1])):
+                return
+            raise other("Git ls-remote は origin の heads query だけ")
+        if subcommand == "switch":
+            values = [word.text for word in rest]
+            if (len(values) in (2, 3) and values[-2] == "-c" and values[-1].startswith("task/")
+                    and (len(values) == 2 or values[0] == "--no-track")
+                    and task_branch_safe(values[-1])):
+                return
+            raise other("Git switch は task/ の --no-track -c だけ")
+        if subcommand == "branch":
+            if [word.text for word in rest] == ["--show-current"]:
+                return
+            raise other("Git branch は --show-current だけ")
+        if subcommand == "reflog":
+            values = [word.text for word in rest]
+            if not values or values[0] != "show":
+                raise other("Git reflog の更新形を受け付けない")
+            formats = [value for value in values[1:] if value.startswith("--format=")]
+            refs = [value for value in values[1:] if not value.startswith("--format=")]
+            if len(formats) <= 1 and refs in ([], ["refs/stash"]):
+                return
+            raise other("Git reflog show の query だけ")
+        if subcommand in GIT_DIRECT_STATE_COMMANDS or subcommand in {"clean", "stash", "apply"}:
+            raise other(f"Git の直接状態変更を受け付けない: {subcommand}")
+        if subcommand in GIT_READ_COMMANDS:
+            check_git_read_options(subcommand, rest)
+            return
+        if subcommand in {"add", "rm"}:
+            allowed_options = {"--"} if subcommand == "add" else {"--", "-f", "--force", "--cached", "--ignore-unmatch"}
+            for word in rest:
+                if word.text.startswith("-") and word.text not in allowed_options:
+                    raise other(f"Git {subcommand} の option を受け付けない: {word.text[:100]}")
+            operands = [w for w in rest if not w.text.startswith("-") and w.text != "--"]
+            if not operands:
+                raise other(f"Git {subcommand} の pathspec が無い")
+            for word in operands:
+                git_pathspec_safe(ctx, word)
+            return
+        if subcommand in {"checkout", "restore", "reset"}:
+            if "--" not in [w.text for w in rest]:
+                raise other(f"Git {subcommand} の暗黙の全体操作を受け付けない")
+            marker = next(k for k, word in enumerate(rest) if word.text == "--")
+            before = [word.text for word in rest[:marker]]
+            allowed = {
+                "checkout": set(),
+                "restore": {"--worktree", "--staged", "--source=HEAD"},
+                "reset": {"--mixed"},
+            }[subcommand]
+            if any(option not in allowed for option in before):
+                raise other(f"Git {subcommand} の option を受け付けない")
+            operands = rest[marker + 1:]
+            if not operands:
+                raise other(f"Git {subcommand} の pathspec が無い")
+            for word in operands:
+                git_pathspec_safe(ctx, word)
+            return
+        if subcommand == "mv":
+            if any(word.text.startswith("-") and word.text not in {"--", "-f", "--force"} for word in rest):
+                raise other("Git mv の option を受け付けない")
+            operands = [w for w in rest if not w.text.startswith("-") and w.text != "--"]
+            if len(operands) != 2:
+                raise other("Git mv は通常ファイル 2 件だけ")
+            git_pathspec_safe(ctx, operands[0])
+            git_pathspec_safe(ctx, operands[1], source=False)
+            return
+        if subcommand == "hash-object":
+            values = [word.text for word in rest]
+            if values == ["-t", "tree", "/dev/null"]:
+                return
+            if any(word.text.startswith("-") for word in rest):
+                raise other("Git hash-object の option を受け付けない")
+            if not rest:
+                raise other("Git hash-object の入力が無い")
+            return
+        if subcommand == "format-patch":
+            k = 0
+            while k < len(rest):
+                text = rest[k].text
+                if text == "--":
+                    for operand in rest[k + 1:]:
+                        if operand.text.startswith(":(") or operand.text.startswith(":") or any(
+                            char in operand.text for char in "*?["
+                        ):
+                            raise other("Git format-patch の magic/glob を受け付けない")
+                        if looks_like_path(operand.text, operand.tilde) or is_bare_symlink(ctx, operand.text, operand.tilde):
+                            ctx.check_path_word(ctx.resolve(operand.text, operand.tilde))
+                    return
+                if re.fullmatch(r"-[0-9]+", text) or text == "--stdout" or (
+                    text.startswith("-") and len(text) > 1 and set(text[1:]) <= {"n", "p", "v"}
+                ):
+                    k += 1
+                    continue
+                if text == "-o":
+                    if k + 1 >= len(rest):
+                        raise other("Git format-patch -o の行き先が無い")
+                    git_output_dir_safe(ctx, rest[k + 1])
+                    k += 2
+                    continue
+                if text.startswith("-o") and len(text) > 2:
+                    check_attached_short_option(ctx, rest[k])
+                    output = Word()
+                    for char in text[2:]:
+                        output.add(char, True)
+                    git_output_dir_safe(ctx, output)
+                    k += 1
+                    continue
+                if text.startswith("-"):
+                    raise other("Git format-patch の option を受け付けない")
+                k += 1
+            return
+        if subcommand == "commit":
+            if len(rest) != 2 or rest[0].text not in ("-F", "--file"):
+                raise other("Git commit は reviews の -F だけ")
+            review_input(ctx, rest[1])
+            return
+        if subcommand == "push":
+            if any(word.text in ("-u", "--set-upstream", "--force", "-f") for word in rest):
+                raise other("Git push の追跡/強制 option を受け付けない")
+            return
+        raise other(f"Git の subcommand を受け付けない: {subcommand}")
+    finally:
+        ctx.cwd = original_cwd
+
+
+def review_input(ctx: Ctx, word: Word) -> None:
+    """PR/commit 本文の入力を W の通常ファイル 1 件に固定する。"""
+    if word.glob():
+        raise other("reviews の入力にグロブ")
+    path = ctx.resolve(word.text, word.tilde)
+    loc, full, link = locate(path)
+    rel = ctx.rel(loc)
+    if link or loc != full or not rel.startswith(REVIEWS + "/"):
+        raise other("reviews の入力が通常ファイルでない")
+    try:
+        mode = os.stat(loc).st_mode
+    except OSError as exc:
+        raise other(f"reviews の入力を検査できない: {str(exc)[:160]}") from exc
+    if not stat.S_ISREG(mode):
+        raise other("reviews の入力が通常ファイルでない")
+
+
+def check_gh(ctx: Ctx, command: dict) -> None:
+    """gh は必要な読み取りと PR 作成だけを、argv と stdin 契約ごとに許す。"""
+    words = command["words"]
+    args = [word.text for word in words[1:]]
+    redirs = command["redirs"]
+    if args[:2] == ["repo", "view"]:
+        if redirs or len(args) != 7 or args[3:5] != ["--json", "name"] or args[5] != "-q" or args[6] != ".name":
+            if redirs or len(args) != 7 or args[3:5] != ["--json", "isPrivate"] or args[5] != "-q" or args[6] != ".isPrivate":
+                raise other("gh repo view の argv を受け付けない")
+        return
+    if args[:2] == ["auth", "status"] and len(args) == 2 and not redirs:
+        return
+    if (len(args) == 5 and args[:2] == ["pr", "view"] and args[2].isdigit()
+            and args[3:] == ["--json", "state"] and not redirs):
+        return
+    if args[:2] != ["pr", "create"]:
+        raise other("gh の subcommand を受け付けない")
+    body_positions = [index for index, value in enumerate(args) if value == "--body-file"]
+    if len(body_positions) != 1 or body_positions[0] + 1 >= len(args) or args[body_positions[0] + 1] != "-":
+        raise other("gh pr create は --body-file - だけ")
+    allowed_flags = {"-R", "--base", "--head", "--title", "--body-file"}
+    i = 2
+    while i < len(args):
+        if args[i] not in allowed_flags or i + 1 >= len(args):
+            raise other("gh pr create の flag を受け付けない")
+        i += 2
+    if len(redirs) != 1 or redirs[0][0] != "<" or redirs[0][1] is not None or redirs[0][2] is None:
+        raise other("gh pr create の stdin は reviews の 1 ファイルだけ")
+    review_input(ctx, redirs[0][2])
 
 
 def matches_allow(words: list[str], allow: list[dict]) -> bool:
@@ -636,6 +1165,12 @@ def matches_allow(words: list[str], allow: list[dict]) -> bool:
         if kind == "exact" and words == rw:
             return True
     return False
+
+
+def require_allow(ctx: Ctx, words: list[Word]) -> None:
+    literal = [word.text for word in words]
+    if not matches_allow(literal, ctx.allow):
+        raise other(f"許可リストに無いコマンド: {' '.join(literal)[:200]}")
 
 
 def cd_target_rejected(text: str) -> bool:
@@ -762,6 +1297,48 @@ def check_untracked_moves(cmds: list[dict]) -> None:
             raise other(f"追跡しないディレクトリ移動: {target}")
 
 
+def is_sensitive_tool(word: str) -> bool:
+    """直接の git/gh と、path で隠した同名実行ファイルを同じものとして扱う。"""
+    return os.path.basename(word) in {"git", "gh"}
+
+
+def bash_script_mentions_sensitive_tool(script: Word) -> bool:
+    """`bash -c` の中の Git/GH は外側の allow に落とさず拒否する。"""
+    try:
+        tokens = tokenize(script.text)
+        commands, _ = parse(tokens)
+    except Denied:
+        return True
+    return (any(is_sensitive_tool(word.text) for command in commands for word in command["words"])
+            or bool(re.search(r"(?:^|[^A-Za-z0-9_])(?:git|gh)(?:$|[^A-Za-z0-9_])", script.text)))
+
+
+def check_sensitive_wrappers(words: list[Word]) -> None:
+    """専用 grammar を env/command/bash -c で迂回させない。
+
+    `command -v git` は実行しない照会なので既存の許可リスト判定へ残す。
+    """
+    name = words[0].text
+    if is_sensitive_tool(name) and name not in {"git", "gh"}:
+        raise other("Git/GH の path ラッパーを受け付けない")
+    if name == "env":
+        # `env -S 'git …'` は 1 語の中へ command line を再解釈するため、部分的な
+        # argv 解釈では安全に正規化できない。無人経路に env は不要なので閉じる。
+        raise other("env ラッパーを受け付けない")
+    if name == "command":
+        query = any(word.text.startswith("-") and ("v" in word.text[1:] or "V" in word.text[1:])
+                    for word in words[1:])
+        if not query and any(is_sensitive_tool(word.text) for word in words[1:]):
+            raise other("command 経由の Git/GH を受け付けない")
+        return
+    if name in {"bash", "sh"}:
+        for index, word in enumerate(words[1:], 1):
+            if word.text == "-c" and index + 1 < len(words):
+                if bash_script_mentions_sensitive_tool(words[index + 1]):
+                    raise other("bash -c 経由の Git/GH を受け付けない")
+                return
+
+
 def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     cwd_phys = os.path.realpath(ctx.cwd)
     if not inside(cwd_phys, ctx.wt):
@@ -770,6 +1347,8 @@ def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     toks = tokenize(command)
     cmds, ops = parse(toks)
     check_untracked_moves(cmds)
+    if "|" in ops and any(c["words"] and c["words"][0].text == "gh" for c in cmds):
+        raise other("gh に pipe の stdin を渡せない")
     uses_cd = any(c["words"] and c["words"][0].text == "cd" for c in cmds)
     if not uses_cd:
         check_cmds(ctx, cmds)
@@ -832,11 +1411,16 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                 raise other(f"引用符の外のグロブ: {w.text[:100]}")
         for w in c["assigns"]:
             check_assignment(ctx, w)
+        words = c["words"]
+        name = words[0].text if words else ""
         for op, fd, target in c["redirs"]:
             if target is None:
                 continue
             if target.glob():
                 raise other("リダイレクトの先に引用符の外のグロブ")
+            if name == "gh" and op == "<":
+                # gh の stdin は check_gh が reviews の通常ファイル 1 件かを検査する。
+                continue
             path = ctx.resolve(target.text, target.tilde)
             if op == "<":
                 loc, full, _ = locate(path)
@@ -845,10 +1429,9 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                     raise other(f"読み込み元が周の worktree とプラグインルートの外: {target.text[:200]}")
             else:
                 ctx.check_write(path, "リダイレクトの先", allow_devnull=True)
-        words = c["words"]
         if not words:
             continue
-        name = words[0].text
+        check_sensitive_wrappers(words)
         if name == "export":
             if len(words) < 2:
                 raise other("export の後に代入が無い")
@@ -857,13 +1440,37 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                     raise other(f"export の後に代入でない単語: {w.text[:100]}")
                 check_assignment(ctx, w)
             continue
-        is_sed_inplace = name == "sed" and sed_in_place(words[1:])
+        if name == "git":
+            check_git_words_as_paths(ctx, words[1:])
+            # `git > protected` は、subcommand 欠落より既存どおり書き込み先の分類を返す。
+            if len(words) == 1:
+                pending = pending_denial(ctx)
+                if pending is not None:
+                    raise pending
+            check_git(ctx, words[1:])
+            require_allow(ctx, words)
+            continue
+        if name == "gh":
+            check_gh(ctx, c)
+            require_allow(ctx, words)
+            continue
+        if name == "sed":
+            check_sed(ctx, words[1:])
+            pending = pending_denial(ctx)
+            if pending is not None:
+                raise pending
+            require_allow(ctx, words)
+            continue
+        if name == "find":
+            check_find(words[1:])
+        if name == "awk":
+            check_awk(words[1:])
         # コマンド名は従来どおり字面がパスなら検査する。PATH で解決する裸名だけは
         # 保護 cwd と symlink による裸名の追加判定の対象にしない。
-        file_op = name in FILE_OP_SHORT or is_sed_inplace
+        file_op = name in FILE_OP_SHORT
         check_words_as_paths(ctx, words[1:] if file_op else words, skip_bare_first=not file_op)
         if file_op:
-            check_file_op(ctx, "sed" if is_sed_inplace else name, words[1:])
+            check_file_op(ctx, name, words[1:])
             continue
         literal = [w.text for w in words]
         if not matches_allow(literal, ctx.allow):

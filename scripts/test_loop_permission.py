@@ -230,10 +230,11 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
                 # A redirection alone is outside the supported grammar.
                 expected = "other" if command.startswith(">") else "protected"
                 self.assertEqual(("deny", expected), got[:2], got)
-        for command in ("git", "touch grasp.md", "touch reviews/out", "echo > reviews/out"):
+        for command in ("touch grasp.md", "touch reviews/out", "echo > reviews/out"):
             with self.subTest(command=command):
                 got = self.decide("Bash", {"command": command}, cwd)
                 self.assertEqual(("allow", None), got[:2], got)
+        self.expect("git", "deny", "other")
         got = self.decide("Bash", {"command": "echo data > reviews/out"}, cwd)
         self.assertEqual(("deny", "other"), got[:2], got)
 
@@ -249,13 +250,14 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
     def test_h27_w_and_ordinary_cwd_keep_bare_arguments(self):
         for directory in ("ordinary", ".claude/reviews", ".claude/worktrees"):
             for command in ("git checkout -- settings.json", "touch missing", "echo data > out",
-                            "git --path=missing", "LANG=missing cat", "cat -- -missing"):
+                            "LANG=missing cat", "cat -- -missing"):
                 for prefix in (False, True):
                     with self.subTest(directory=directory, command=command, prefix=prefix):
                         actual = f"CDPATH= cd -P -- {directory} && {command}" if prefix else command
                         got = self.decide("Bash", {"command": actual},
                                           self.wt if prefix else self.wt / directory)
                         self.assertEqual(("allow", None), got[:2], got)
+            self.expect("git --path=missing", "deny", "other")
         os.symlink("../settings.json", self.wt / ".claude/reviews/alias")
         got = self.decide("Bash", {"command": "cat alias"}, self.wt / ".claude/reviews")
         self.assertEqual(("deny", "other"), got[:2], got)
@@ -651,6 +653,184 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         self.assertFalse(output.exists())
         subprocess.run(["bash", "-c", request["tool_input"]["command"]], cwd=self.wt, check=True)
         self.assertEqual("h24\n", output.read_text())
+
+    def test_h35_git_command_internals_are_checked_before_an_all_rule(self):
+        """An all-rule authorizes the tool name, never an unchecked subcommand."""
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        (self.wt / ".claude/reviews/pr.md").write_text("review")
+        attacks = (
+            "git -c alias.pwn='!touch .claude/settings.json' pwn",
+            "git -c core.hooksPath=/dev/null checkout -- .claude/settings.json",
+            "git restore -- .claude/settings.json",
+            "git clean -fd",
+            "git stash push --all",
+            "git config core.hooksPath .claude/reviews",
+            "git symbolic-ref refs/remotes/origin/HEAD refs/heads/evil",
+            "git tag -f x HEAD",
+            "git remote rename origin evil",
+            "git add --pathspec-from-file=safe.txt",
+            "git diff --output=.claude/settings.json",
+            "git grep --open-files-in-pager='touch .claude/settings.json' x",
+            "git cat-file --filters HEAD:SAFE",
+            "git rev-parse @{1}",
+            "git switch -c task/悪い..名前",
+            "git branch accidental",
+            "git reflog drop HEAD",
+            "git reflog expire HEAD",
+            "env git clean -fd",
+            "env -S 'git clean -fd'",
+            "command git reset --hard",
+            "bash -c 'git clean -fd'",
+            "bash -c 'exec /usr/bin/git clean -fd'",
+            "/usr/bin/git clean -fd",
+        )
+        for command in attacks:
+            with self.subTest(command=command):
+                self.assertEqual("deny", self.bash(command)[0])
+
+        allowed = (
+            "git -c core.hooksPath=/dev/null status --short",
+            "git status -- ':!*.md'",
+            "git symbolic-ref --quiet HEAD",
+            "git remote get-url --all origin",
+            "git switch -c task/normal",
+            "git switch --no-track -c task/example",
+            "git hash-object -t tree /dev/null",
+        )
+        for command in allowed:
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+
+    def test_h35_documented_git_forms_remain_available(self):
+        """base-commit.md・unattended-mode.md・ship-task/SKILL.md の代表字面。"""
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        documented = (
+            "git -c core.splitIndex=false -c core.filemode=true -c core.symlinks=true rev-parse --verify --quiet 'HEAD^{commit}'",
+            "git -c core.splitIndex=false show --no-show-signature HEAD:.claude/project-profile.yml",
+            "git -c core.splitIndex=false ls-files --stage --ignored --exclude-standard -z",
+            "git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**'",
+            "git for-each-ref --format='%(objectname)%09%(refname)' refs/heads/task refs/remotes",
+            "git switch -c task/候補_日本語",
+            "git switch --no-track -c task/候補-日本語",
+            "git status --porcelain=v1 -z -uall --ignore-submodules=dirty",
+            "git ls-tree -r -z --name-only HEAD",
+            "git merge-base --is-ancestor HEAD HEAD",
+            "git show-ref --verify --quiet refs/heads/main",
+            "git branch --show-current",
+            "git reflog show --format='%H %gd %gs' refs/stash",
+            "git check-attr --cached --stdin -z filter working-tree-encoding ident < .claude/reviews/pr.md",
+            "git ls-remote origin 'refs/heads/task/*'",
+            "git rev-parse --abbrev-ref @{upstream}",
+            "git -ccore.hooksPath=/dev/null status --short",
+        )
+        for command in documented:
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+
+    def test_h23_command_internals_are_checked_before_an_all_rule(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        attacks = (
+            "sed -n '1r .claude/settings.json' safe.txt",
+            "sed -n 's/x/y/e' safe.txt",
+            "find . -exec touch .claude/settings.json \\;",
+            "find . -delete",
+            "awk 'BEGIN { system(\"touch .claude/settings.json\") }'",
+            "awk '{print}' -f safe.txt",
+        )
+        for command in attacks:
+            with self.subTest(command=command):
+                self.assertEqual("deny", self.bash(command)[0])
+
+        allowed = (
+            "sed --sandbox -n '1p' safe.txt",
+            "sed --sandbox -n '1,3p' safe.txt",
+            "sed -n 's/^safe$/ok/p' safe.txt",
+            "find . -type f -name '*.txt' -print",
+        )
+        for command in allowed:
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+
+    def test_h35_deleted_pathspec_is_one_indexed_normal_file_only(self):
+        """不存在の directory pathspec は保護ファイルを復元し得るため index と照合する。"""
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        subprocess.run(["git", "init", "-q"], cwd=self.wt, check=True)
+        (self.wt / "subtree/.claude").mkdir(parents=True)
+        (self.wt / "subtree/.claude/settings.json").write_text("protected")
+        (self.wt / "deleted.txt").write_text("normal")
+        subprocess.run(["git", "add", "subtree/.claude/settings.json", "deleted.txt"], cwd=self.wt, check=True)
+        subprocess.run(["git", "-c", "user.name=test", "-c", "user.email=test@example.invalid",
+                        "commit", "-qm", "fixture"], cwd=self.wt, check=True)
+        subprocess.run(["rm", "-rf", "subtree"], cwd=self.wt, check=True)
+        (self.wt / "deleted.txt").unlink()
+        self.expect("git restore -- subtree", "deny", "other")
+        self.expect("git restore --source=HEAD -- subtree", "deny", "other")
+        self.expect("git reset -- subtree", "deny", "other")
+        self.assertFalse((self.wt / "subtree/.claude/settings.json").exists())
+        # 現在の通常ファイルで覆っても、index/HEAD に残る保護 descendant を add では消せない。
+        (self.wt / "subtree").write_text("replacement")
+        self.expect("git add -- subtree", "deny", "other")
+        staged = subprocess.run(["git", "ls-files", "--", "subtree"], cwd=self.wt, text=True,
+                                capture_output=True, check=True).stdout
+        self.assertEqual("subtree/.claude/settings.json\n", staged)
+        # `env` の wrapper を通しても clean が通らず、未追跡の保護ファイルは残る。
+        self.expect("env git clean -fd", "deny", "other")
+        self.assertEqual("settings", (self.wt / ".claude/settings.json").read_text())
+        self.expect("git restore -- deleted.txt", "allow")
+        subprocess.run(["git", "restore", "--", "deleted.txt"], cwd=self.wt, check=True)
+        self.assertEqual("normal", (self.wt / "deleted.txt").read_text())
+        # index から削除済みでも HEAD の同名通常ファイルだけなら --source=HEAD は安全に復元できる。
+        subprocess.run(["git", "rm", "--cached", "deleted.txt"], cwd=self.wt, check=True,
+                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        (self.wt / "deleted.txt").unlink()
+        self.expect("git restore --source=HEAD -- deleted.txt", "allow")
+        subprocess.run(["git", "restore", "--source=HEAD", "--", "deleted.txt"], cwd=self.wt, check=True)
+        self.assertEqual("normal", (self.wt / "deleted.txt").read_text())
+        # pathspec の内部照合も repository の fsmonitor helper を発火させない。
+        sentinel = self.wt / "fsmonitor-ran"
+        monitor = self.wt / "fsmonitor.sh"
+        monitor.write_text(f"#!/bin/sh\ntouch {sentinel}\nprintf '%s\\n' '2'\nprintf '%s\\n' 'token'\n", encoding="utf-8")
+        monitor.chmod(0o755)
+        subprocess.run(["git", "config", "core.fsmonitor", str(monitor)], cwd=self.wt, check=True)
+        self.expect("git add -- deleted.txt", "allow")
+        self.assertFalse(sentinel.exists())
+        self.expect("git hash-object -t tree /dev/null", "allow")
+        empty_tree = subprocess.run(["git", "hash-object", "-t", "tree", "/dev/null"], cwd=self.wt,
+                                    text=True, capture_output=True, check=True).stdout.strip()
+        self.assertEqual(40, len(empty_tree))
+
+    def test_h35_unborn_regular_git_add_remains_available(self):
+        """HEAD が無い通常の新規ファイルを add する既存経路は descendant が無ければ通す。"""
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        subprocess.run(["git", "init", "-q"], cwd=self.wt, check=True)
+        (self.wt / "new.txt").write_text("new")
+        self.expect("git add -- new.txt", "allow")
+        subprocess.run(["git", "add", "--", "new.txt"], cwd=self.wt, check=True)
+        self.assertEqual("new.txt\n", subprocess.run(["git", "ls-files"], cwd=self.wt, text=True,
+                                                        capture_output=True, check=True).stdout)
+
+    def test_h40_gh_subcommands_and_stdin_are_closed(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        (self.wt / ".claude/reviews/pr.md").write_text("review")
+        (self.wt / ".env").write_text("secret")
+        attacks = (
+            "gh repo edit --visibility public",
+            "gh api repos/example/example",
+            "gh pr create --title title --body-file - < .env",
+            "gh pr create --title title --body-file - < .claude/reviews/pr.md < safe.txt",
+            "cat .claude/reviews/pr.md | gh pr create --title title --body-file -",
+            "gh pr create --title title --body-file .claude/reviews/pr.md",
+        )
+        for command in attacks:
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        for command in (
+            "gh repo view example/example --json name -q .name",
+            "gh pr view 1 --json state",
+            "gh pr create -R example/example --base main --head task/x --title title --body-file - < .claude/reviews/pr.md",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "allow")
 
 
 if __name__ == "__main__":
