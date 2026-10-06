@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.20.4
+
+### 修正
+
+- `loop.sh` が、人の linked worktree の `config.worktree` の追加・削除・値変更・項目の並べ替えを検出する([子 Issue #167](https://github.com/Yuki-Maeda-valour/workflow/issues/167)、親 #107 の H20)。通常終了・シグナル終了・中断後の再起動で既存の停止規則を適用する。利用者の設定は自動復元・削除しない。
+- 中断後に起動元を変えた場合と、人の設定の比較元が無い旧 `inflight` は停止し、前の起動元の設定確認を促す。中断の無い実行間の変更や旧 `last-verified.json` は報告して続ける。詳しい再開手順と限界は [loop.md §4・§10](plugins/dev-workflow/skills/ship-task/references/loop.md) を参照。
+
 ## v4.20.3
 
 ### 修正
