@@ -18,11 +18,12 @@ import selectors
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 4
+SCHEMA = 6
 DEFAULT_SECRET_PATHS = (".env", ".env.*", ".dev.vars")
 
 # Keep every helper Git process on the shared publish-path contract.  State
@@ -355,12 +356,15 @@ def tree(root: str, patterns: list[str], budget: Budget) -> list[dict[str, Any]]
 
 def run_git(top: str, *args: str, budget: Budget | None = None,
             allow_failure: bool = False, pass_fds: tuple[int, ...] = (),
-            return_status: bool = False) -> bytes | tuple[int, bytes]:
+            return_status: bool = False, env_extra: dict[str, str] | None = None) -> bytes | tuple[int, bytes]:
     proc: subprocess.Popen[bytes] | None = None
     try:
+        env = {**os.environ, "GIT_NO_LAZY_FETCH": "1"}
+        if env_extra:
+            env.update(env_extra)
         proc = subprocess.Popen(["git", "-C", top, *SAFE_GIT_PREFIX, *args],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}, pass_fds=pass_fds)
+                                env=env, pass_fds=pass_fds)
         assert proc.stdout is not None
         deadline = time.monotonic() + 10
         if budget: deadline = min(deadline, budget.deadline)
@@ -555,7 +559,9 @@ def open_regular_path(path: str, budget: Budget) -> tuple[int, os.stat_result]:
 
 
 def safe_config_file(top: str, path: str, budget: Budget,
-                     trusted: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[tuple[str, str | None]]]:
+                     trusted: dict[str, Any] | None = None, *,
+                     require_exact: bool = False,
+                     parse: bool = True) -> tuple[dict[str, Any], list[tuple[str, str | None]]]:
     """Parse config through a held fd, accepting a trusted leaf link only once."""
     parent_path, name = os.path.split(path)
     parent = open_dir_path(parent_path)
@@ -604,19 +610,35 @@ def safe_config_file(top: str, path: str, budget: Budget,
         if not stat.S_ISREG(opened.st_mode) or not same(target_before, opened):
             raise Stop("config が lstat と open の間に変わった")
         raw = read_open_regular(fd, target_before, budget)
-        parsed = run_git(top, "config", "--file", f"/proc/self/fd/{fd}", "--no-includes", "--null", "--list",
-                         budget=budget, pass_fds=(fd,))
-        if not same(target_before, os.fstat(fd)):
-            raise Stop("config が Git の解析中に変わった")
         target_entry = {"kind": "file", "meta": meta(target_before), "sha256": hashlib.sha256(raw).hexdigest()}
         if link_before is not None:
-            now = os.stat(name, dir_fd=parent, follow_symlinks=False)
-            if not same(link_before, now) or os.readlink(name, dir_fd=parent) != link_target:
-                raise Stop("config の link が読取中に変わった")
+            # Build the held record before any Git invocation.  A child can
+            # change a root config to enable a new config layer; preflight must
+            # reject that source before Git's setup has a chance to follow it.
             observed = {"path": "config:" + path, "kind": "link", "meta": meta(link_before), "target": link_target,
                         "target_entry": target_entry}
         else:
             observed = {"path": "config:" + path, **target_entry}
+        if require_exact and observed != expected:
+            raise Stop("保持済み config が周の途中で変わった")
+        if link_before is not None:
+            now = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not same(link_before, now) or os.readlink(name, dir_fd=parent) != link_target:
+                raise Stop("config の link が読取中に変わった")
+        if not parse:
+            return observed, []
+        # A --file parser has no reason to initialize the observed repository.
+        # Run it outside that worktree with user/system config disabled, so a
+        # root source cannot make Git discover another config layer first.
+        parsed = run_git("/", "config", "--file", f"/proc/self/fd/{fd}", "--no-includes", "--null", "--list",
+                         budget=budget, pass_fds=(fd,),
+                         env_extra={"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull})
+        if not same(target_before, os.fstat(fd)):
+            raise Stop("config が Git の解析中に変わった")
+        if link_before is not None:
+            now = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not same(link_before, now) or os.readlink(name, dir_fd=parent) != link_target:
+                raise Stop("config の link が読取中に変わった")
         return observed, config_rows(parsed)
     except OSError as exc:
         raise Stop("到達する config を安全に開けない") from exc
@@ -647,7 +669,9 @@ def memory_file(name: str, raw: bytes) -> int:
 
 
 def probe_condition(top: str, condition: str, origin: str,
-                    effective: list[tuple[str, str | None]], budget: Budget) -> bool:
+                    effective: list[tuple[str, str | None]], budget: Budget,
+                    *, execution_top: str | None = None,
+                    env_extra: dict[str, str] | None = None) -> bool:
     """Let this Git evaluate one includeIf condition without opening its target."""
     lower = condition.lower()
     for prefix in ("gitdir/i:", "gitdir:"):
@@ -668,9 +692,9 @@ def probe_condition(top: str, condition: str, origin: str,
                               f"\tpath = /proc/self/fd/{marker_fd}", "")).encode()
         probe_fd = memory_file("loop-state-include-condition", probe)
         try:
-            rc, out = run_git(top, "config", "--file", f"/proc/self/fd/{probe_fd}", "--includes", "--get",
+            rc, out = run_git(execution_top or top, "config", "--file", f"/proc/self/fd/{probe_fd}", "--includes", "--get",
                               "loop-state-probe.active", budget=budget, allow_failure=True,
-                              pass_fds=(probe_fd, marker_fd), return_status=True)
+                              pass_fds=(probe_fd, marker_fd), return_status=True, env_extra=env_extra)
             if rc == 1:
                 return False
             if rc != 0:
@@ -680,6 +704,203 @@ def probe_condition(top: str, condition: str, origin: str,
             os.close(probe_fd)
     finally:
         os.close(marker_fd)
+
+
+def held_git_dir(top: str, budget: Budget) -> str:
+    """Resolve .git through held descriptors, without opening its target."""
+    root = open_dir_path(top)
+    try:
+        dotgit = os.stat(".git", dir_fd=root, follow_symlinks=False)
+        budget.tick()
+        if stat.S_ISDIR(dotgit.st_mode):
+            admin = os.open(".git", DIR_FLAGS, dir_fd=root)
+            try:
+                if not same(dotgit, os.fstat(admin)):
+                    raise Stop("worktree の git-dir が差し替わった")
+            finally:
+                os.close(admin)
+            return os.path.abspath(os.path.join(top, ".git"))
+        if stat.S_ISREG(dotgit.st_mode):
+            raw = read_at(root, ".git", dotgit, budget)
+            prefix = b"gitdir: "
+            if not raw.startswith(prefix) or raw.count(b"\n") > 1:
+                raise Stop("worktree の git-dir を読めない")
+            value = raw[len(prefix):].rstrip(b"\n")
+            if not value or b"\0" in value:
+                raise Stop("worktree の git-dir を読めない")
+            target = value.decode("utf-8", "surrogateescape")
+            return target if os.path.isabs(target) else os.path.abspath(os.path.join(top, target))
+        raise Stop("worktree の git-dir を安全に開けない")
+    except OSError as exc:
+        raise Stop("worktree の git-dir を安全に読めない") from exc
+    finally:
+        os.close(root)
+
+
+def held_head(top: str, expected_git_dir: str, budget: Budget) -> bytes:
+    """Read only a previously fixed worktree HEAD; config is never consulted."""
+    actual_git_dir = held_git_dir(top, budget)
+    if actual_git_dir != os.path.abspath(expected_git_dir):
+        raise Stop("worktree の git-dir が基準から変わった")
+    admin = -1
+    try:
+        admin = open_dir_path(actual_git_dir)
+        head = os.stat("HEAD", dir_fd=admin, follow_symlinks=False)
+        if not stat.S_ISREG(head.st_mode):
+            raise Stop("worktree の HEAD を安全に読めない")
+        return read_at(admin, "HEAD", head, budget)
+    except OSError as exc:
+        raise Stop("worktree の HEAD を安全に読めない") from exc
+    finally:
+        if admin >= 0: os.close(admin)
+
+
+def held_common_dir(top: str, expected_git_dir: str, common: str, budget: Budget) -> None:
+    """Fix a linked admin's commondir before Git setup can follow it."""
+    actual_git_dir = held_git_dir(top, budget)
+    if actual_git_dir != os.path.abspath(expected_git_dir):
+        raise Stop("worktree の git-dir が基準から変わった")
+    admin = -1
+    try:
+        admin = open_dir_path(actual_git_dir)
+        try:
+            before = os.stat("commondir", dir_fd=admin, follow_symlinks=False)
+        except FileNotFoundError:
+            # The primary worktree's admin is already the common directory.
+            if actual_git_dir != os.path.abspath(common):
+                raise Stop("worktree の commondir が基準から変わった")
+            return
+        if not stat.S_ISREG(before.st_mode):
+            raise Stop("worktree の commondir を安全に読めない")
+        raw = read_at(admin, "commondir", before, budget)
+        if raw.count(b"\n") > 1:
+            raise Stop("worktree の commondir を安全に読めない")
+        value = raw.rstrip(b"\n")
+        if not value or b"\0" in value:
+            raise Stop("worktree の commondir を安全に読めない")
+        target = value.decode("utf-8", "surrogateescape")
+        resolved = target if os.path.isabs(target) else os.path.abspath(os.path.join(actual_git_dir, target))
+        if resolved != os.path.abspath(common):
+            raise Stop("worktree の commondir が基準から変わった")
+    except OSError as exc:
+        raise Stop("worktree の commondir を安全に読めない") from exc
+    finally:
+        if admin >= 0:
+            os.close(admin)
+
+
+def held_branch(top: str, expected_git_dir: str, common: str, budget: Budget) -> str | None:
+    """Resolve HEAD's loose symbolic-ref chain without letting Git read config.
+
+    ``includeIf.onbranch`` uses the final branch name, not merely the first
+    spelling in HEAD.  A linked worktree HEAD can name a common ref which is in
+    turn a symbolic ref.  Read that bounded chain through nofollow descriptors
+    before the isolated condition probe; a direct or packed ref needs no bytes
+    to establish its branch spelling.
+    """
+    head = held_head(top, expected_git_dir, budget)
+    if not head.startswith(b"ref: refs/heads/"):
+        return None
+    current = head[len(b"ref: "):].strip().decode("utf-8", "surrogateescape")
+    seen: set[str] = set()
+    for _ in range(32):
+        budget.tick()
+        if (not current.startswith("refs/heads/") or current in seen
+                or any(part in ("", ".", "..") for part in current.split("/"))):
+            raise Stop("worktree の HEAD を読めない")
+        seen.add(current)
+        parts = current.split("/")
+        parent = -1
+        try:
+            parent = open_dir_path(common)
+            missing_parent = False
+            for part in parts[:-1]:
+                try:
+                    before_parent = os.stat(part, dir_fd=parent, follow_symlinks=False)
+                except FileNotFoundError:
+                    # ``pack-refs --prune`` removes even a nested loose-ref
+                    # parent.  There is then no symbolic link to follow; the
+                    # current spelling is a normal packed/direct branch.
+                    missing_parent = True
+                    break
+                if not stat.S_ISDIR(before_parent.st_mode):
+                    raise Stop("worktree の HEAD を読めない")
+                child = os.open(part, DIR_FLAGS, dir_fd=parent)
+                try:
+                    if not same_directory_path(before_parent, os.fstat(child)):
+                        raise Stop("worktree の HEAD を読めない")
+                except Exception:
+                    os.close(child)
+                    raise
+                os.close(parent); parent = child
+            if missing_parent:
+                return current
+            name = parts[-1]
+            try:
+                before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            except FileNotFoundError:
+                # A packed/direct ref has no loose file.  Its name, which is
+                # what onbranch evaluates, is already fixed by this chain.
+                return current
+            if not stat.S_ISREG(before.st_mode):
+                raise Stop("worktree の HEAD を読めない")
+            raw = read_at(parent, name, before, budget)
+        except OSError as exc:
+            raise Stop("worktree の HEAD を読めない") from exc
+        finally:
+            if parent >= 0:
+                os.close(parent)
+        if not raw.startswith(b"ref: "):
+            return current
+        current = raw[len(b"ref: "):].strip().decode("utf-8", "surrogateescape")
+    raise Stop("worktree の HEAD の symbolic ref が深すぎる")
+
+
+def preflight_condition(top: str, expected_git_dir: str, common: str, condition: str, origin: str,
+                        effective: list[tuple[str, str | None]], budget: Budget,
+                        expected_branch: str | None = None) -> bool | None:
+    """Evaluate onbranch/hasconfig without loading this worktree configuration."""
+    lower = condition.lower()
+    isolated = {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+    if lower.startswith("hasconfig:remote.*.url:"):
+        return probe_condition(top, condition, origin, effective, budget, execution_top="/", env_extra=isolated)
+    if not lower.startswith("onbranch:"):
+        return None if lower.startswith(("gitdir:", "gitdir/i:")) else False
+    branch = held_branch(top, expected_git_dir, common, budget)
+    if branch is None:
+        return False
+    if expected_branch is not None and branch != expected_branch:
+        raise Stop("worktree の branch が基準から変わった")
+    parts = branch.split("/")
+    parent = tempfile.mkdtemp(prefix="loop-state-branch-")
+    temp = os.path.join(parent, "git")
+    try:
+        run_git("/", "init", "--bare", temp, budget=budget, env_extra=isolated)
+        head_path = os.path.join(temp, "HEAD")
+        fd = os.open(head_path, os.O_WRONLY | os.O_TRUNC, 0o600)
+        try:
+            os.write(fd, ("ref: " + branch + "\n").encode("utf-8", "surrogateescape"))
+        finally:
+            os.close(fd)
+        ref_path = os.path.join(temp, *parts)
+        os.makedirs(os.path.dirname(ref_path), mode=0o700, exist_ok=True)
+        ref_fd = os.open(ref_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            os.write(ref_fd, b"0" * 40 + b"\n")
+        finally:
+            os.close(ref_fd)
+        return probe_condition(top, condition, origin, effective, budget, execution_top="/",
+                               env_extra={**isolated, "GIT_DIR": temp})
+    finally:
+        # init can fail before it creates temp.  Do not replace that original
+        # comparison failure with a cleanup-only ENOENT.
+        if os.path.isdir(temp):
+            for base, directories, files in os.walk(temp, topdown=False):
+                for name in files: os.unlink(os.path.join(base, name))
+                for name in directories: os.rmdir(os.path.join(base, name))
+            os.rmdir(temp)
+        if os.path.isdir(parent):
+            os.rmdir(parent)
 
 
 def include_target(top: str, value: str | None, origin: str, budget: Budget) -> str:
@@ -703,8 +924,104 @@ def include_target(top: str, value: str | None, origin: str, budget: Budget) -> 
     return os.path.join(os.path.dirname(origin), expanded)
 
 
+def config_candidate_paths(common: str, git_dir: str, budget: Budget, *,
+                           held_system: str | None = None) -> list[tuple[str, str]]:
+    """Potential setup roots, including absent roots, with their Git role.
+
+    An explicit ``GIT_CONFIG_GLOBAL`` is authoritative even when it is
+    ``/dev/null``: Git does not then fall back to HOME/XDG.  The installation
+    system path comes from the same Git binary only while establishing a fresh
+    baseline.  Later observations retain that spelling from state, before an
+    ordinary repository Git command can consult a changed environment.
+    """
+    paths: list[tuple[str, str]] = [
+        ("common", os.path.join(common, "config")),
+        ("common", os.path.join(common, "config.worktree")),
+    ]
+    if os.path.abspath(git_dir) != os.path.abspath(common):
+        paths.append(("worktree", os.path.join(git_dir, "config.worktree")))
+    if "GIT_CONFIG_GLOBAL" in os.environ:
+        global_config = os.environ["GIT_CONFIG_GLOBAL"]
+        if global_config != os.devnull:
+            paths.append(("global", os.path.abspath(global_config)))
+    elif os.environ.get("HOME"):
+        xdg = os.environ.get("XDG_CONFIG_HOME") or os.path.join(os.environ["HOME"], ".config")
+        paths.extend((("global", os.path.join(xdg, "git", "config")),
+                      ("global", os.path.join(os.environ["HOME"], ".gitconfig"))))
+    if os.environ.get("GIT_CONFIG_NOSYSTEM") not in ("1", "true", "yes"):
+        explicit = os.environ.get("GIT_CONFIG_SYSTEM")
+        if explicit:
+            system_path = os.path.abspath(explicit)
+        elif held_system is not None:
+            system_path = held_system
+        else:
+            try:
+                raw = run_git("/", "var", "GIT_CONFIG_SYSTEM", budget=budget,
+                              env_extra={"GIT_CONFIG_GLOBAL": os.devnull})
+            except Stop as exc:
+                raise Stop("Git が system config の既定パス取得(git var GIT_CONFIG_SYSTEM)に対応しない。GIT_CONFIG_SYSTEM で実パスを明示する") from exc
+            system_path = raw.decode("utf-8", "surrogateescape").strip()
+            if not system_path or "\0" in system_path:
+                raise Stop("Git の system config の既定パスを読めない。GIT_CONFIG_SYSTEM で実パスを明示する")
+            system_path = os.path.abspath(system_path)
+        paths.append(("system", system_path))
+    return list(dict.fromkeys((kind, os.path.abspath(path)) for kind, path in paths))
+
+
+def config_candidates(top: str, common: str, git_dir: str, budget: Budget) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for kind, path in config_candidate_paths(common, git_dir, budget):
+        if not os.path.lexists(path):
+            result.append({"kind": kind, "path": path, "state": "absent"})
+            continue
+        item, _ = safe_config_file(top, path, budget, parse=False)
+        result.append({"kind": kind, "path": path, "state": "present", "entry": item})
+    return result
+
+
+def preflight_config_candidates(top: str, common: str, git_dir: str,
+                                expected: dict[tuple[str, str], dict[str, Any]], budget: Budget,
+                                *, allow_new_worktree_root: bool = False) -> None:
+    """Compare setup roots before opening an appeared or retargeted root."""
+    held_systems = {path for (kind, path) in expected if kind == "system"}
+    if len(held_systems) > 1:
+        raise Stop("保存済み system config の場所が矛盾している")
+    held_system = next(iter(held_systems), None)
+    paths = config_candidate_paths(common, git_dir, budget, held_system=held_system)
+    # The aggregate has a distinct worktree root for every linked checkout;
+    # only this context's root is relevant here, while common/global/system
+    # records must remain identical everywhere.
+    relevant = {key: expected[key] for key in paths if key in expected}
+    missing = set(paths) - set(relevant)
+    own_root = ("worktree", os.path.abspath(os.path.join(git_dir, "config.worktree")))
+    if missing:
+        # The parent supplied this exact new admin for its own just-created
+        # checkout.  Git normally leaves config.worktree absent; accept only
+        # that absence, never a new file or link, and never a human checkout.
+        if not allow_new_worktree_root or missing != {own_root} or os.path.lexists(own_root[1]):
+            raise Stop("config 候補が周の途中で変わった")
+        paths = [key for key in paths if key != own_root]
+    for kind, path in paths:
+        saved = relevant[(kind, path)]
+        exists = os.path.lexists(path)
+        if saved["state"] == "absent":
+            if exists:
+                # In particular, do not follow a newly created symlink to
+                # decide its digest: Git setup has not yet been invoked.
+                raise Stop("config 候補が周の途中で変わった")
+            continue
+        if not exists:
+            raise Stop("config 候補が周の途中で変わった")
+        # Present candidates may themselves be leaf links.  Give their held
+        # record to the no-parser read so a retarget is rejected before its
+        # target bytes are opened.
+        item, _ = safe_config_file(top, path, budget, {path: saved["entry"]},
+                                   require_exact=True, parse=False)
+        if {"kind": kind, "path": path, "state": "present", "entry": item} != saved:
+            raise Stop("config 候補が周の途中で変わった")
+
 def config_snapshot(top: str, common: str, budget: Budget,
-                    trusted: dict[str, Any] | None = None) -> dict[str, Any]:
+                    trusted: dict[str, Any] | None = None, *, git_dir: str | None = None) -> dict[str, Any]:
     # First ask Git only for its non-include source list.  Every include target
     # is then opened through a held nofollow fd *before* the effective command
     # below can follow it.
@@ -717,31 +1034,38 @@ def config_snapshot(top: str, common: str, budget: Budget,
     effective: list[tuple[str, str | None]] = []
     # An origin spelling is part of its context: two paths may name the same
     # inode but resolve a relative nested include from different directories.
-    # Keep that context in every recorded/processed node.  Inode identity is
-    # used only while descending, where it detects a real active recursion.
-    prepared: dict[str, tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]] = {}
+    # Keep that context in every recorded/processed node.  A recursion is the
+    # same config inode reached from the same held parent directory; a hardlink
+    # under another parent can legitimately resolve another relative include.
+    prepared: dict[str, tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int], tuple[int, int, int]]] = {}
     registered: set[str] = set()
     done: set[str] = set()
-    active: set[tuple[int, int]] = set()
+    active: set[tuple[tuple[int, int], tuple[int, int, int]]] = set()
     pending: list[tuple[str, str, str, str | None]] = []
     pending_seen: set[tuple[str, str, str | None]] = set()
     edges: dict[str, set[str]] = {}
 
-    def load(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]:
+    def load(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int], tuple[int, int, int]]:
         if path not in prepared:
             item, rows = safe_config_file(top, path, budget, trusted)
-            prepared[path] = (item, rows, (item["meta"]["dev"], item["meta"]["ino"]))
+            parent = open_dir_path(os.path.dirname(path))
+            try:
+                parent_st = os.fstat(parent)
+            finally:
+                os.close(parent)
+            prepared[path] = (item, rows, (item["meta"]["dev"], item["meta"]["ino"]),
+                              (parent_st.st_dev, parent_st.st_ino, stat.S_IMODE(parent_st.st_mode)))
         return prepared[path]
 
-    def register(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]:
-        item, rows, identity = load(path)
+    def register(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int], tuple[int, int, int]]:
+        item, rows, identity, parent_identity = load(path)
         if path not in registered:
             registered.add(path); observed.append(item)
             # The full value stream is retained for Git's hasconfig condition.
             # include directives themselves are control flow, not values.
             effective.extend((key, value) for key, value in rows
                              if key.lower() != "include.path" and not key.lower().startswith("includeif."))
-        return item, rows, identity
+        return item, rows, identity, parent_identity
 
     def follow(parent: str, origin: str, value: str | None) -> None:
         target = include_target(top, value, origin, budget)
@@ -751,12 +1075,13 @@ def config_snapshot(top: str, common: str, budget: Budget,
         non_hasconfig(target)
 
     def non_hasconfig(path: str) -> None:
-        _, rows, identity = register(path)
+        _, rows, identity, parent_identity = register(path)
         if path in done:
             return
-        if identity in active:
+        context = (identity, parent_identity)
+        if context in active:
             raise Stop("include が循環している")
-        active.add(identity)
+        active.add(context)
         try:
             for key, value in rows:
                 folded = key.lower()
@@ -775,7 +1100,7 @@ def config_snapshot(top: str, common: str, budget: Budget,
                     # normal configuration state.
             done.add(path)
         finally:
-            active.remove(identity)
+            active.remove(context)
 
     # Git's hasconfig scans all normal source files, including a later local
     # remote URL when a global file came first.  Register every root before any
@@ -817,7 +1142,8 @@ def config_snapshot(top: str, common: str, budget: Budget,
         after, _ = safe_config_file(top, path, budget, trusted)
         if after != checked[path]:
             raise Stop("config が実効値の読取中に変わった")
-    return {"effective_sha256": hashlib.sha256(raw).hexdigest(), "origins": sorted(observed, key=lambda x: x["path"])}
+    return {"effective_sha256": hashlib.sha256(raw).hexdigest(), "origins": sorted(observed, key=lambda x: x["path"]),
+            "candidates": config_candidates(top, common, git_dir or common, budget)}
 
 
 def profile_patterns(root: str, budget: Budget) -> list[str]:
@@ -962,7 +1288,75 @@ def trusted_config_origins(prior: dict[str, Any] | None, fresh: bool) -> dict[st
     return trusted
 
 
-def preflight_trusted_configs(top: str, trusted: dict[str, Any] | None, budget: Budget) -> None:
+def trusted_config_candidates(prior: dict[str, Any] | None, fresh: bool) -> dict[tuple[str, str], dict[str, Any]] | None:
+    if prior is None or fresh:
+        return None
+    blocks: list[object] = [prior.get("config")]
+    worktree_configs = prior.get("worktree_configs")
+    if not isinstance(worktree_configs, list):
+        raise Stop("前の config 候補の状態を読めない")
+    blocks.extend(row.get("effective") if isinstance(row, dict) else None for row in worktree_configs)
+    result: dict[tuple[str, str], dict[str, Any]] = {}
+    for block in blocks:
+        candidates = block.get("candidates") if isinstance(block, dict) else None
+        if not isinstance(candidates, list):
+            raise Stop("前の config 候補の状態を読めない")
+        for item in candidates:
+            if (not isinstance(item, dict) or not isinstance(item.get("kind"), str)
+                    or item["kind"] not in ("common", "worktree", "global", "system")
+                    or not isinstance(item.get("path"), str) or item.get("state") not in ("absent", "present")):
+                raise Stop("前の config 候補の状態を読めない")
+            if item["state"] == "present" and not isinstance(item.get("entry"), dict):
+                raise Stop("前の config 候補の状態を読めない")
+            if item["state"] == "absent" and set(item) != {"kind", "path", "state"}:
+                raise Stop("前の config 候補の状態を読めない")
+            key = (item["kind"], item["path"])
+            old = result.get(key)
+            if old is not None and old != item:
+                raise Stop("前の config 候補の状態が矛盾している")
+            result[key] = item
+    return result
+
+
+def prior_worktree_git_dirs(prior: dict[str, Any] | None) -> dict[str, str]:
+    if prior is None:
+        return {}
+    rows = prior.get("worktree_configs")
+    if not isinstance(rows, list):
+        raise Stop("前の worktree の git-dir 状態を読めない")
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("path"), str) or not isinstance(row.get("git_dir"), str):
+            raise Stop("前の worktree の git-dir 状態を読めない")
+        path, raw_git_dir = row["path"], row["git_dir"]
+        if path in result or not os.path.isabs(raw_git_dir):
+            raise Stop("前の worktree の git-dir 状態が重複している")
+        result[path] = os.path.abspath(raw_git_dir)
+    return result
+
+
+def prior_worktree_branches(prior: dict[str, Any] | None) -> dict[str, str]:
+    if prior is None:
+        return {}
+    rows = prior.get("worktrees")
+    if not isinstance(rows, list):
+        raise Stop("前の worktree の branch 状態を読めない")
+    result: dict[str, str] = {}
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("worktree"), str) or not isinstance(row.get("branch"), str):
+            raise Stop("前の worktree の branch 状態を読めない")
+        path, branch = row["worktree"], row["branch"]
+        if path in result:
+            raise Stop("前の worktree の branch 状態が重複している")
+        result[path] = branch
+    return result
+
+
+def preflight_trusted_configs(top: str, trusted: dict[str, Any] | None,
+                              candidates: dict[str, dict[str, Any]] | None, budget: Budget,
+                              expected_git_dir: str | None = None, *, common: str | None = None,
+                              expected_branch: str | None = None,
+                              allow_new_worktree_root: bool = False) -> None:
     """Validate the held config graph before an ordinary Git command can load it.
 
     ``git config --file /proc/self/fd/... --no-includes`` only parses the fd
@@ -973,24 +1367,49 @@ def preflight_trusted_configs(top: str, trusted: dict[str, Any] | None, budget: 
     """
     if trusted is None:
         return
-    prepared: dict[str, list[tuple[str, str | None]]] = {}
+    if candidates is None or not expected_git_dir or not common:
+        raise Stop("worktree の git-dir の基準が無い")
+    # Reject a replaced linked-worktree admin before it can supply a new HEAD
+    # to onbranch or a new config to any ordinary Git command.
+    if held_git_dir(top, budget) != os.path.abspath(expected_git_dir):
+        raise Stop("worktree の git-dir が基準から変わった")
+    held_common_dir(top, expected_git_dir, common, budget)
+    preflight_config_candidates(top, common, expected_git_dir, candidates, budget,
+                                allow_new_worktree_root=allow_new_worktree_root)
+    prepared: dict[str, tuple[dict[str, Any], list[tuple[str, str | None]]]] = {}
     effective: list[tuple[str, str | None]] = []
-    # Open every formerly active source first.  This is intentionally stricter
-    # than a current condition: an in-run change must not turn a formerly held
-    # source into an unchecked link before Git decides that it is inactive.
+    # Complete a no-Git identity/hash pass before *any* parser is launched.
+    # A changed root source can otherwise enable another config layer while a
+    # previously checked global/include source is being parsed.
     for path in trusted:
-        _, rows = safe_config_file(top, path, budget, trusted)
-        prepared[path] = rows
+        item, _ = safe_config_file(top, path, budget, trusted, require_exact=True, parse=False)
+        prepared[path] = item, []
+    # The checked files can now be parsed from held fds outside the repository.
+    # Preserve their rows for include and hasconfig evaluation.
+    for path in trusted:
+        item, rows = safe_config_file(top, path, budget, trusted, require_exact=True)
+        prepared[path] = item, rows
         effective.extend((key, value) for key, value in rows
                          if key.lower() != "include.path" and not key.lower().startswith("includeif."))
-    for origin, rows in prepared.items():
+    for origin, (item, rows) in prepared.items():
         for key, value in rows:
             folded = key.lower()
             if folded == "include.path":
                 target = include_target(top, value, origin, budget)
             elif folded.startswith("includeif.") and folded.endswith(".path"):
                 condition = key[len("includeif."):-len(".path")]
-                if not probe_condition(top, condition, origin, effective, budget):
+                active = preflight_condition(top, expected_git_dir, common, condition, origin, effective, budget,
+                                             expected_branch)
+                if active is None:
+                    # gitdir is unchanged for a held worktree.  An unknown
+                    # target is therefore safe only when its source bytes are
+                    # also unchanged from the graph that already classified it
+                    # inactive.  Any edited source is comparison-impossible.
+                    target = include_target(top, value, origin, budget)
+                    if target not in trusted and item != trusted.get(origin):
+                        raise Stop("config の条件付き origin を安全に判定できない")
+                    continue
+                if not active:
                     continue
                 target = include_target(top, value, origin, budget)
             else:
@@ -1116,9 +1535,14 @@ def snapshot(args: argparse.Namespace) -> None:
     prior = prior_state(args)
     previous_patterns, previous_patterns_by_git_dir = prior_secret_patterns(prior)
     trusted_configs = trusted_config_origins(prior, args.fresh_config_baseline)
+    trusted_candidates = trusted_config_candidates(prior, args.fresh_config_baseline)
+    prior_git_dirs = prior_worktree_git_dirs(prior)
+    prior_branches = prior_worktree_branches(prior)
     # This must precede worktree/rev-parse/config discovery: those ordinary Git
     # commands may load GIT_CONFIG_GLOBAL and other held config roots.
-    preflight_trusted_configs(args.top, trusted_configs, budget)
+    top_expected = prior_git_dirs.get(args.top)
+    preflight_trusted_configs(args.top, trusted_configs, trusted_candidates, budget, top_expected,
+                              common=args.common, expected_branch=prior_branches.get(args.top))
     wts = worktrees(args.top, budget)
     if prior is not None and not args.fresh_config_baseline:
         old_paths = {row["worktree"] for row in prior.get("worktrees", [])
@@ -1132,6 +1556,27 @@ def snapshot(args: argparse.Namespace) -> None:
                 # A moved/added human checkout can otherwise lose its path-keyed
                 # secret union before its profile or files are observed.
                 raise Stop("人の worktree が周の途中で追加または移動した")
+    # includeIf.onbranch/gitdir is evaluated in the worktree that will later
+    # run rev-parse/index/config.  Preflight each such context first: a target
+    # inactive at TOP can be active in a human or the loop's own checkout.
+    top_real = os.path.realpath(args.top)
+    for worktree in wts:
+        path = worktree["worktree"]
+        if os.path.realpath(path) == top_real:
+            continue
+        expected = prior_git_dirs.get(path)
+        own_path = bool(args.exclude_worktree and os.path.realpath(path) == os.path.realpath(args.exclude_worktree))
+        own_new = False
+        if expected is None and own_path:
+            expected = args.wt_admin if args.wt_admin != "-" else None
+            own_new = expected is not None
+        # The loop's own detached checkout legitimately becomes its exact task
+        # branch before compare() verifies that bounded ref/HEAD transition.
+        # Human worktrees remain branch-fixed before ordinary Git is invoked.
+        expected_branch = None if own_path else prior_branches.get(path)
+        preflight_trusted_configs(path, trusted_configs, trusted_candidates, budget, expected,
+                                  common=args.common, expected_branch=expected_branch,
+                                  allow_new_worktree_root=own_new)
     contents, configs, secret_patterns = [], [], []
     for wt in wts:
         path = wt["worktree"]
@@ -1157,7 +1602,7 @@ def snapshot(args: argparse.Namespace) -> None:
                         "private_refs": (private_ref_snapshot(git_dir, budget)
                                          if os.path.realpath(git_dir) != os.path.realpath(args.common)
                                          else {"state": "common-refs-covered"}),
-                        "effective": config_snapshot(path, args.common, budget, trusted_configs)})
+                        "effective": config_snapshot(path, args.common, budget, trusted_configs, git_dir=git_dir)})
         if os.path.realpath(path) != os.path.realpath(args.exclude_worktree or ""):
             content["files"] = tree(path, patterns, budget)
         else:
@@ -1166,7 +1611,7 @@ def snapshot(args: argparse.Namespace) -> None:
     state = {"schema": SCHEMA, "refs": refs(args.top, budget), "worktrees": wts,
              "worktree_contents": contents, "worktree_configs": configs,
              "secret_patterns": secret_patterns,
-             "config": config_snapshot(args.top, args.common, budget, trusted_configs),
+             "config": config_snapshot(args.top, args.common, budget, trusted_configs, git_dir=args.repo_admin),
              "common_admin": common_admin_snapshot(args.common, budget),
              "common_config": config_file_snapshot(args.top, os.path.join(args.common, "config"), "config", budget, trusted_configs),
              "common_config_worktree": config_file_snapshot(args.top, os.path.join(args.common, "config.worktree"), "config.worktree", budget, trusted_configs),
