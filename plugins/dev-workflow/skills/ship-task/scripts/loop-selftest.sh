@@ -163,6 +163,7 @@ Options:
   --settings <file-or-json>             Additional settings
   --model <model>                       Model for the current session
   -n, --name <name>                     Set a display name
+  -z, --label <label>                   Set a label
   -d, --debug [filter]                  Enable debug mode
   --verbose                             Override verbose mode
   --dangerously-skip-permissions        Bypass all permission checks
@@ -195,8 +196,60 @@ case "${1:-}" in
     if [ -n "${SELFTEST_PLUGINS_FILE:-}" ]; then cat "$SELFTEST_PLUGINS_FILE"; else echo '[]'; fi
     exit 0 ;;
 esac
+# 子起動は解析の前に記録する。固定フラグを値として消費し、解析に失敗した呼び出しも残す。
+printf '%s\n' "$me" >>"$REC/child-starts.log"
 is_p=0
-for a in "$@"; do [ "$a" = -p ] && is_p=1; done
+if [ "${SELFTEST_PARSE_ARGV:-}" = 1 ]; then
+  # H28 専用の解析。短い必須値は残りの文字か次のトークンを取り、フラグも値として消費する。
+  python3 - "$REC/parsed.json" "$@" <<'PY'
+import json, sys
+args = sys.argv[2:]
+values = {"--name": "name", "--label": "label", "--model": "model",
+          "--output-format": "output-format", "--setting-sources": "setting-sources",
+          "--plugin-dir": "plugin-dir", "--permission-mode": "permission-mode",
+          "--permission-prompts": "permission-prompts", "--settings": "settings"}
+short_values = {"n": "name", "z": "label"}
+parsed = {}
+i = 0
+while i < len(args):
+    arg = args[i]
+    i += 1
+    if arg.startswith("--"):
+        name, sep, value = arg.partition("=")
+        if name in values:
+            if not sep:
+                value = args[i] if i < len(args) else None
+                i += 1
+            parsed[values[name]] = value
+        elif name in ("--allowedTools", "--mcp-config"):
+            items = [value] if sep else []
+            while i < len(args) and not args[i].startswith("-"):
+                items.append(args[i])
+                i += 1
+            parsed[name[2:]] = items
+        else:
+            parsed[name[2:]] = True
+    elif arg.startswith("-"):
+        chars = arg[1:]
+        for j, char in enumerate(chars):
+            if char in short_values:
+                value = chars[j + 1:].lstrip("=")
+                if not value:
+                    value = args[i] if i < len(args) else None
+                    i += 1
+                parsed[short_values[char]] = value
+                break
+            parsed["print" if char == "p" else char] = True
+with open(sys.argv[1], "w", encoding="utf-8") as out:
+    json.dump(parsed, out)
+sys.exit(0 if parsed.get("print") else 64)
+PY
+  parse_rc=$?
+  [ "$parse_rc" -eq 0 ] || exit "$parse_rc"
+  is_p=1
+else
+  for a in "$@"; do [ "$a" = -p ] && is_p=1; done
+fi
 [ "$is_p" -eq 1 ] || { echo "stub: unexpected invocation: $*" >&2; exit 64; }
 prompt="$(cat)"
 # H20: 人の設定だけを変える。対象は治具が明示した scratch のファイルに限る。
@@ -660,7 +713,7 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip locked judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -1064,6 +1117,75 @@ for memory_mode in implementation discover; do
         "$W/$memory_case-$memory_fixture.before" "$memory_actual"
     done
   done
+done
+fi
+
+# ════════════════ H28: 短い値付きフラグ ════════════════
+if want h28; then
+# スタブの陽性対照。-p が値になると、解析失敗でも起動記録を必ず残す。
+for swallowed in -p --allowedTools; do
+  newrec "h28-control-${swallowed#-}"
+  build_env h28-control SELFTEST_PARSE_ARGV=1
+  env -i "${ENV_ARGS[@]}" "$ALTBIN/claude-alt" -cn "$swallowed" Read </dev/null >"$W/out/h28-control.txt" 2>&1
+  check "H28 スタブ: $swallowed を値として消費すると印字モードを失う" 64 "$?"
+  check "H28 スタブ: 解析前の子起動記録($swallowed)" claude-alt "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  check "H28 スタブ: -n の値が $swallowed" "$swallowed" \
+    "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$REC/parsed.json" 2>/dev/null)"
+  if [ "$swallowed" = --allowedTools ]; then
+    f "H28 スタブ: 消費された許可リストは本来の引数として残らない" \
+      python3 -c 'import json,sys; sys.exit("allowedTools" not in json.load(open(sys.argv[1])))' "$REC/parsed.json"
+  fi
+done
+
+newrepo h28
+H28_BAD=(-n -cn -nc -cn=demo -ndemo -cndemo -n=demo -c=n -z -cz -zc -cz=demo -zdemo -czdemo -z=demo -c=z --name)
+for i in "${!H28_BAD[@]}"; do addtask "pr-h28-bad-$i"; done
+addtask pr-h28-separated
+for i in 0 1 2 3; do addtask "pr-h28-good-$i"; done
+commit
+for i in "${!H28_BAD[@]}"; do
+  tok="${H28_BAD[$i]}"
+  newrec "h28-bad-$i"
+  run_loop "h28-bad-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only "pr-h28-bad-$i" \
+    --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" "${COMMON_ARGS[@]}"
+  check "H28 '$tok': 終了コード20" 20 "$RC"
+  has "H28 '$tok': 拒否理由" "$OUT" "[host-argv]"
+  check "H28 '$tok': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  check "H28 '$tok': 対象タスクを起動しない" "" "$(calls)"
+done
+newrec h28-separated
+run_loop h28-separated SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only pr-h28-separated \
+  --host-argv "$ALTBIN/claude-alt" --host-argv --name --host-argv demo "${COMMON_ARGS[@]}"
+check "H28 '--name demo': 終了コード20" 20 "$RC"
+has "H28 '--name demo': 拒否理由" "$OUT" "[host-argv]"
+check "H28 '--name demo': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+check "H28 '--name demo': 対象タスクを起動しない" "" "$(calls)"
+
+# 値に n がある長い引数と、値付き短名を含まない束ね書き、既定起動を解析して確認する。
+H28_GOOD=(-cv --name=demo --name=n default)
+for i in "${!H28_GOOD[@]}"; do
+  tok="${H28_GOOD[$i]}"
+  args=()
+  [ "$tok" = default ] || args=(--host-argv "$ALTBIN/claude-alt" --host-argv "$tok")
+  newrec "h28-good-$i"
+  run_loop "h28-good-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only "pr-h28-good-$i" \
+    "${args[@]}" --allowed-tools Read "${COMMON_ARGS[@]}"
+  check "H28 '$tok': 1 周回って終わる" 0 "$RC"
+  check "H28 '$tok': 対象タスクを起動する" "pr-h28-good-$i" "$(calls)"
+  check "H28 '$tok': 解析前の子起動記録が1行" 1 "$(wc -l <"$REC/child-starts.log" 2>/dev/null)"
+  t "H28 '$tok': 許可リストと固定フラグの役割を保つ" python3 - "$REC/parsed.json" "$PLUG" "$tok" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))
+expected = {"allowedTools": ["Read"], "print": True, "output-format": "json",
+            "setting-sources": "user", "strict-mcp-config": True, "plugin-dir": sys.argv[2],
+            "permission-mode": "acceptEdits", "permission-prompts": "none"}
+assert all(p.get(key) == value for key, value in expected.items()), p
+assert "PermissionRequest" in json.loads(p["settings"])["hooks"], p
+if sys.argv[3].startswith("--name="):
+    assert p.get("name") == sys.argv[3].split("=", 1)[1], p
+elif sys.argv[3] == "-cv":
+    assert p.get("c") is True and p.get("v") is True, p
+PY
 done
 fi
 
@@ -1977,11 +2099,14 @@ PERM_ALLOW_JSON='[{"kind":"prefix","words":["git"]},{"kind":"prefix","words":["s
 PERM_BIN="$PP/loop-permission.py"
 cp "$PERM_SRC" "$PERM_BIN"
 perm() { # $1=tool_name $2=tool_input の JSON [$3=cwd] → PDEC(allow|deny)・PKIND・POUT(hook の出力)
-  local out
+  local out before
+  before="$(wc -l <"$PERMLOG")"
   out="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PermissionRequest","tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2]),"cwd":sys.argv[3]}))' "$1" "$2" "${3:-$PW}" \
     | env -i HOME="${PHOME:-$W/home}" PATH="$SAFEBIN" DEV_WORKFLOW_LOOP_WORKTREE="${PWT:-$PW}" DEV_WORKFLOW_LOOP_PERMLOG="$PERMLOG" \
         DEV_WORKFLOW_LOOP_PLUGIN_ROOT="${PPR:-$PP}" \
         DEV_WORKFLOW_LOOP_ALLOW="${PALLOW:-$PERM_ALLOW_JSON}" python3 "$PERM_BIN")"
+  PRC=$?
+  PLINES=$(( $(wc -l <"$PERMLOG") - before ))
   PDEC="$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin)["hookSpecificOutput"]; assert d["hookEventName"]=="PermissionRequest"; print(d["decision"]["behavior"])' 2>/dev/null || echo broken)"
   PKIND="$(tail -1 "$PERMLOG" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("kind"))' 2>/dev/null)"
   POUT="$out"
@@ -1993,6 +2118,10 @@ pa() { perm "$2" "$3" "${4:-}"; check "hook allow: $1" allow "$PDEC"; }
 pd() { perm "$2" "$3" "${4:-}"; check "hook deny: $1" deny "$PDEC"; }
 pdk() { perm "$3" "$4" "${5:-}"; check "hook deny: $1" deny "$PDEC"; check "hook deny の種類: $1" "$2" "$PKIND"; }
 bash_in() { python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1]}))' "$1"; }
+bash_in_extra() { # $1=command $2=追加する JSON object
+  python3 -c 'import json,sys; d={"command": sys.argv[1]}; d.update(json.loads(sys.argv[2])); print(json.dumps(d))' "$1" "$2"
+}
+h25_log_field() { tail -1 "$PERMLOG" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 file_in() { python3 -c 'import json,sys; print(json.dumps({"file_path": sys.argv[1]}))' "$1"; }
 # allow
 pa "W の中への Write(.claude/reviews/x.md)" Write "$(file_in "$PW/.claude/reviews/x.md")"
@@ -2003,6 +2132,63 @@ pa "入力の cwd が worktree の下のディレクトリのときの W への�
 pa "CDPATH= cd -P -- <worktree の中> && pwd -P" Bash "$(bash_in 'CDPATH= cd -P -- src && pwd -P')"
 pa "CDPATH= cd -P -- <プラグインルートの中> && pwd -P" Bash "$(bash_in "CDPATH= cd -P -- $PP/skills && pwd -P")"
 pa "プラグインルートの下の Read" Read "$(file_in "$PP/skills/x/ref.md")"
+# H25: Bash の sandbox 無効化指定は、コマンドの許可判定より先に厳密な boolean として検査する。
+perm Bash "$(bash_in_extra 'git status' '{"description":"status","timeout":1000}')"
+check "H25 未指定: allow" allow "$PDEC"
+check "H25 未指定: kind は null" None "$PKIND"
+check "H25 未指定: reason は空" "" "$(h25_log_field reason)"
+check "H25 未指定: message は無い" "(無い)" "$(decision_field message)"
+perm Bash "$(bash_in_extra 'git status' '{"dangerouslyDisableSandbox":false,"description":"status","timeout":1000}')"
+check "H25 false(description/timeout を維持): allow" allow "$PDEC"
+check "H25 false: kind は null" None "$PKIND"
+check "H25 false: reason は空" "" "$(h25_log_field reason)"
+check "H25 false: message は無い" "(無い)" "$(decision_field message)"
+for H25_CASE in \
+  'prefix|git status > .claude/reviews/x' \
+  'exact|npm run build' \
+  'file-op|touch .claude/reviews/h25' \
+  'cd|CDPATH= cd -P -- src && pwd -P'; do
+  H25_LABEL="${H25_CASE%%|*}"
+  H25_COMMAND="${H25_CASE#*|}"
+  perm Bash "$(bash_in_extra "$H25_COMMAND" '{"dangerouslyDisableSandbox":true,"description":"h25","timeout":1000}')"
+  check "H25 true($H25_LABEL): deny" deny "$PDEC"
+  check "H25 true($H25_LABEL): 種類" other "$PKIND"
+  check "H25 true($H25_LABEL): 終了コード" 0 "$PRC"
+  check "H25 true($H25_LABEL): 1 呼び出し 1 行" 1 "$PLINES"
+  check "H25 true($H25_LABEL): tool_name" Bash "$(h25_log_field tool_name)"
+  check "H25 true($H25_LABEL): cwd" "$PW" "$(h25_log_field cwd)"
+  check "H25 true($H25_LABEL): subject" "$H25_COMMAND" "$(h25_log_field subject)"
+  check "H25 true($H25_LABEL): reason" "dangerouslyDisableSandbox が true" "$(h25_log_field reason)"
+  case "$(decision_field message)" in *"dangerouslyDisableSandbox"*"回り込"*"G1"*) ok "H25 true($H25_LABEL): 理由と固定の文" ;;
+    *) ng "H25 true($H25_LABEL): 理由と固定の文" ;; esac
+  case "$(h25_log_field reason)" in *"回り込"*|*"G1"*) ng "H25 true($H25_LABEL): ログの reason に固定の文を入れない" ;;
+    *) ok "H25 true($H25_LABEL): ログの reason に固定の文を入れない" ;; esac
+done
+PALLOW='[{"kind":"all","words":[]}]'
+perm Bash "$(bash_in_extra 'unknown-command' '{"dangerouslyDisableSandbox":true}')"
+check "H25 true(all): deny" deny "$PDEC"
+check "H25 true(all): 種類" other "$PKIND"
+check "H25 true(all): 終了コード" 0 "$PRC"
+check "H25 true(all): 1 呼び出し 1 行" 1 "$PLINES"
+check "H25 true(all): tool_name" Bash "$(h25_log_field tool_name)"
+check "H25 true(all): cwd" "$PW" "$(h25_log_field cwd)"
+check "H25 true(all): subject" unknown-command "$(h25_log_field subject)"
+check "H25 true(all): reason" "dangerouslyDisableSandbox が true" "$(h25_log_field reason)"
+PALLOW=""
+for H25_VALUE in 'null' '0' '1' '0.0' '""' '"false"' '"true"' '[]' '{}'; do
+  perm Bash "$(bash_in_extra 'git status' "{\"dangerouslyDisableSandbox\":$H25_VALUE}")"
+  check "H25 非 boolean($H25_VALUE): deny" deny "$PDEC"
+  check "H25 非 boolean($H25_VALUE): 種類" other "$PKIND"
+  check "H25 非 boolean($H25_VALUE): 終了コード" 0 "$PRC"
+  check "H25 非 boolean($H25_VALUE): 1 呼び出し 1 行" 1 "$PLINES"
+  check "H25 非 boolean($H25_VALUE): 型不正の理由" "dangerouslyDisableSandbox が boolean でない" "$(h25_log_field reason)"
+done
+perm Bash "$(bash_in_extra 'curl --version' '{"dangerouslyDisableSandbox":false}')"
+check "H25 false: 既存の other は deny" deny "$PDEC"
+check "H25 false: 既存の other を維持" other "$PKIND"
+perm Bash "$(bash_in_extra 'git status > .git/h25' '{"dangerouslyDisableSandbox":false}')"
+check "H25 false: 既存の protected は deny" deny "$PDEC"
+check "H25 false: 既存の protected を維持" protected "$PKIND"
 # H37: 実 Bash は追跡しない組み込み移動の後に symlink の先を書き換えられる。hook は全許可でも入口で止める。
 mkdir -p "$PW/sub"
 printf 'before\n' >"$PW/.claude/settings.json"
@@ -2348,6 +2534,52 @@ pdk "書き込みでない代入の値が保護パスの下(LANG=.git)" other Ba
 pd "sed -i … ~/.bashrc" Bash "$(bash_in 'sed -i s/a/b/ ~/.bashrc')"
 pdk "rm -rf .claude" protected Bash "$(bash_in 'rm -rf .claude')"
 pdk "mv .claude x" protected Bash "$(bash_in 'mv .claude x')"
+pdk "H26: worktree 自体の絶対パスを rm -rf" other Bash "$(bash_in "rm -rf $PW")"
+mkdir -p -- "$PW/h26/protected/.claude" "$PW/h26/git/.config/git" "$PW/h26/dotgit/.git" "$PW/h26/name" \
+  "$PW/h26/ordinary/d" "$PW/.claude/worktrees/h26" "$PW/.claude/reviews/h26"
+echo protected >"$PW/h26/protected/.claude/settings.json"
+echo protected >"$PW/h26/name/.mcp.json"
+echo ordinary >"$PW/h26/ordinary/d/file"
+ln -s -- "$PW/.claude/settings.json" "$PW/h26/ordinary/protected-link"
+echo worktree >"$PW/.claude/worktrees/h26/file"
+echo review >"$PW/.claude/reviews/h26/file"
+pdk "H26: .claude/settings.json を含む子孫" protected Bash "$(bash_in 'rm -rf h26/protected')"
+pdk "H26: .config/git を含む子孫" protected Bash "$(bash_in 'rm -rf h26/git')"
+pdk "H26: .git を含む子孫" protected Bash "$(bash_in 'rm -rf h26/dotgit')"
+pdk "H26: 保護ファイル名を含む子孫" protected Bash "$(bash_in 'rm -rf h26/name')"
+pa "H26: 通常木の末尾 /・.." Bash "$(bash_in 'rm -rf h26/ordinary/../ordinary/')"
+pa "H26: .claude/worktrees 下の通常木" Bash "$(bash_in 'rm -rf .claude/worktrees/h26')"
+pa "H26: reviews 下の通常木" Bash "$(bash_in 'rm -rf .claude/reviews/h26')"
+ln -s -- "h26/ordinary" "$PW/h26-link"
+ln -s -- "h26-link" "$PW/h26-multi-link"
+ln -s -- ".claude/reviews/h26" "$PW/h26-review-link"
+ln -s -- ".claude/settings.json" "$PW/h26-protected-link"
+ln -s -- "." "$PW/h26-worktree-link"
+pa "H26: 最終 symlink 自体の削除は H36 のまま" Bash "$(bash_in 'rm -rf h26-protected-link')"
+pa "H26: 末尾 / の通常先と多段リンク" Bash "$(bash_in 'rm -rf h26-multi-link//')"
+pa "H26: 末尾 / の W の先" Bash "$(bash_in 'rm -rf h26-review-link/')"
+pdk "H26: 末尾 / の保護先" protected Bash "$(bash_in 'rm -rf h26-protected-link/')"
+pdk "H26: 末尾 / の worktree 先" other Bash "$(bash_in 'rm -rf h26-worktree-link/')"
+ln -s -- "$PW/h26/ordinary" "$PP/h26-plugin-link"
+pdk "H26: plugin_root 内の通常先へのリンク末尾 /" other Bash "$(bash_in "rm -rf $PP/h26-plugin-link/")"
+pdk "H26: plugin_root 内の通常先へのリンク末尾 //" other Bash "$(bash_in "rm -rf $PP/h26-plugin-link//")"
+mkdir -p -- "$PP/h26-plugin-target"
+echo plugin >"$PP/h26-plugin-target/file"
+ln -s -- "$PP/h26-plugin-target" "$PW/h26-worktree-link-to-plugin"
+pa "H26: worktree 内から plugin_root へのリンク自体の削除は H36 のまま" Bash "$(bash_in 'rm -rf h26-worktree-link-to-plugin')"
+pdk "H26: worktree 内から plugin_root へのリンク末尾 /" other Bash "$(bash_in 'rm -rf h26-worktree-link-to-plugin/')"
+pdk "H26: worktree 内から plugin_root へのリンク末尾 //" other Bash "$(bash_in 'rm -rf h26-worktree-link-to-plugin//')"
+check "H26: 拒否した plugin_root 側のリンク先は scratch で不変" 0 "$(test -f "$PP/h26-plugin-target/file"; echo $?)"
+rm -rf -- "$PW/h26/ordinary"
+check "H26: 許可した通常木だけを scratch で削除" 1 "$(test -e "$PW/h26/ordinary"; echo $?)"
+check "H26: 通常木内のリンク先の保護ファイルは残る" 0 "$(test -f "$PW/.claude/settings.json"; echo $?)"
+mkdir -p -- "$PW/h26-target/d"
+echo target >"$PW/h26-target/d/file"
+ln -s -- "h26-target" "$PW/h26-exec-link"
+pa "H26: 末尾 / の通常リンク先を実行前に許可" Bash "$(bash_in 'rm -rf h26-exec-link/')"
+rm -rf -- "$PW/h26-exec-link/"
+check "H26: 末尾 / のリンク先だけを scratch で削除" 1 "$(test -e "$PW/h26-target/d/file"; echo $?)"
+check "H26: 末尾 / のリンク自体は scratch に残る" 0 "$(test -L "$PW/h26-exec-link"; echo $?)"
 pdk "cp .claude/reviews/settings.json .claude/" protected Bash "$(bash_in 'cp .claude/reviews/settings.json .claude/')"
 pdk "mkdir .claude(.claude そのものは W に入れない)" protected Bash "$(bash_in 'mkdir .claude')"
 pdk "リダイレクトの先が保護パス(> .git/x)" protected Bash "$(bash_in 'git status > .git/x')"

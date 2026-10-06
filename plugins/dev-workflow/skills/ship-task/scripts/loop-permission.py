@@ -30,6 +30,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import sys
 import time
 
@@ -167,26 +168,76 @@ class Ctx:
             if is_protected(rel) and (link or not self.in_w(rel, mkdir=mkdir)):
                 self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
 
-    # 削除・移動の元(rm・rmdir・mv の元)
-    def check_remove(self, path: str, what: str, recursive: bool) -> None:
-        loc, full, link = locate(path)
-        if not inside(loc, self.wt) or (not link and not inside(full, self.wt)):
-            raise other(f"{what}が周の worktree の外: {path[:200]}")
-        self.mark_write(loc)
+    def remove_allowed(self, loc: str, link: bool, directory: bool, recursive: bool) -> bool:
+        """loc の削除に既存の保護パスと W の例外を適用する。"""
         rel = self.rel(loc)
         if not is_protected(rel):
-            return
+            return True
         under_reviews = rel.startswith(REVIEWS + "/")
         if link:
             ok = False
-        elif os.path.isdir(loc):
+        elif directory:
             ok = under_reviews  # .claude/reviews/ の下のディレクトリだけ(そのものは除く)
         else:
             ok = under_reviews or rel in W_FILES  # W の通常ファイル(無くてもよい)
-        if recursive and not under_reviews:
-            ok = False
-        if not ok:
+        return ok and (not recursive or under_reviews)
+
+    def check_recursive_descendants(self, root: str, root_stat: os.stat_result) -> None:
+        """symlink を辿らず、root 以下を明示的なスタックで検査する。"""
+        if not stat.S_ISDIR(root_stat.st_mode):
+            return
+        stack = [root]
+        while stack:
+            directory = stack.pop()
+            try:
+                with os.scandir(directory) as entries:
+                    children = list(entries)
+            except OSError as exc:
+                raise other(f"再帰削除の子孫を検査できない: {str(exc)[:160]}") from exc
+            for entry in children:
+                try:
+                    entry_stat = os.lstat(entry.path)
+                except OSError as exc:
+                    raise other(f"再帰削除の子孫を検査できない: {str(exc)[:160]}") from exc
+                link = stat.S_ISLNK(entry_stat.st_mode)
+                directory_entry = stat.S_ISDIR(entry_stat.st_mode)
+                if not self.remove_allowed(entry.path, link, directory_entry, True):
+                    rel = self.rel(entry.path)
+                    self.protected(f"再帰削除の子孫が保護パスの下で W の外: {rel[:200]}")
+                if directory_entry:
+                    stack.append(entry.path)
+
+    # 削除・移動の元(rm・rmdir・mv の元)
+    def check_remove(self, path: str, what: str, recursive: bool) -> None:
+        loc, full, link = locate(path)
+        # 最終リンクの末尾 `/` の意味を解く前にも、削除するリンク自体は worktree の中でなければならない。
+        # check_path_word は plugin_root の読取りを許すため、ここで従来の削除元の範囲を保つ。
+        if not inside(loc, self.wt) or (not link and not inside(full, self.wt)):
+            raise other(f"{what}が周の worktree の外: {path[:200]}")
+        # `rm -r link/` は link 自体でなくリンク先を再帰削除する。末尾 `/` の場合だけ、最終リンクを
+        # たどった場所を対象にする。`rm link` の H36 の契約は変えない。
+        follows_final_link = recursive and path.endswith("/") and path.rstrip("/") != ""
+        if follows_final_link and link:
+            if not inside(full, self.wt):
+                raise other(f"{what}が周の worktree の外: {path[:200]}")
+            self.mark_write(loc)  # check_path_word が記録したリンク自体の非書き込み判定を打ち消す
+            loc, full, link = full, full, False
+        self.mark_write(loc)
+        if recursive and loc == self.wt:
+            raise other(f"{what}が周の worktree 自体: {path[:200]}")
+        target_stat = None
+        try:
+            target_stat = os.lstat(loc) if not link else None
+            directory = stat.S_ISDIR(target_stat.st_mode) if target_stat is not None else False
+        except FileNotFoundError:
+            directory = False
+        except OSError as exc:
+            raise other(f"{what}の対象を検査できない: {str(exc)[:160]}") from exc
+        if not self.remove_allowed(loc, link, directory, recursive):
+            rel = self.rel(loc)
             self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
+        if recursive and target_stat is not None:
+            self.check_recursive_descendants(loc, target_stat)
 
     # パスとして解ける単語(どのコマンドでも)
     def check_path_word(self, path: str) -> None:
@@ -835,6 +886,12 @@ def decide(inp: dict, env: dict) -> tuple[str, str | None, str, str]:
             if not isinstance(command, str):
                 raise other("command が無い")
             subject = command
+            if "dangerouslyDisableSandbox" in tin:
+                disable_sandbox = tin["dangerouslyDisableSandbox"]
+                if not isinstance(disable_sandbox, bool):
+                    raise other("dangerouslyDisableSandbox が boolean でない")
+                if disable_sandbox:
+                    raise other("dangerouslyDisableSandbox が true")
             decide_bash(ctx, command, env)
         else:
             raise other(f"扱わないツール: {tool}")
