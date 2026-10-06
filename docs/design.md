@@ -671,3 +671,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 3. 各プロジェクトでは `/plugin` の更新(marketplace update)で新版を取得
 
 - 版の刻み: 後方互換な機能追加はマイナー、内部の移行・修正はパッチ、AI 非依存の到達点はメジャーで示す(委託の語の移行の版の刻み〈3.9.x → v4.0.0。2026-09-10 に到達〉は §7-7)
+
+### 公開経路の安全前置き
+
+公開、commit、index 操作を含む Git 呼出は hook、fsmonitor、署名、filter を無効化する共通前置きを使い、品質確認を hook に委ねない。公開 helper は保持した完全 SHA を送信し、origin・設定・remote SHA・作成 PR を照合する。同じ OS 利用者の任意プログラムを隔離するものではないため、保持値と結果は worktree 外で照合する。

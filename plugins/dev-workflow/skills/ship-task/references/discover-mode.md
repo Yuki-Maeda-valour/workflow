@@ -149,7 +149,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 | stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で打つ |
 | commit の直後 | `HEAD^{tree}` = 控えた tree・`git diff --name-status -z --no-renames S0 HEAD` が C の `A` だけ・`git rev-list --count S0..HEAD` = 1・C の各パスを `git show HEAD:./<パス> \| python3 {create-task の}scripts/candidate-keys.py --check --source=<S> -` で確かめる・現在のブランチ = 作業ブランチ・`git status --porcelain=v1 -z --untracked-files=all` が空 |
-| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② origin-repo.py を打ち直して 5 欄が守る値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push は §8 の `--expect` つきの 1 行で打つ) |
+| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② origin-repo.py を打ち直して 5 欄が守る値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
 
 - 表の `<S>` は発見元。「現在のブランチ」は `git symbolic-ref --quiet HEAD` で見る
 - 表の `<守る値>` は git 設定のダイジェストの値、`<管理ルート>` は管理ルートの絶対パス。`--expect` は exit 0 だけが通る(unattended-mode.md §7 と同じ)
@@ -159,7 +159,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 - **stage**: C の各パスを `git add -- ':(literal)<パス>'` で足すだけ
 - **commit**: 1 本。メッセージは `git log --oneline -20` の流儀に合わせる(例 `chore: 発見の候補 — data-audit(3 件)`)。`Write` で `.claude/reviews/discover-<発見元>-msg.md` に置き、`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/discover-<発見元>-msg.md` の 1 回の Bash で渡す(§7 の commit の直前の照合の後。rc が 0 以外なら失敗扱い)
-- **push**: origin があり、`--no-pr` でなければ、push の直前の照合(§7)の後に `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` の 1 回の Bash で打つ(字面の理由は unattended-mode.md §7)。push は `-u` を付けず、共有の `config` に項目を足さない(`loop.sh` の周の後の照合は、共有の `config` への追加を許さない — loop.md §4)。push の失敗・拒否は失敗扱い
+- **公開**: origin があり、`--no-pr` でなければ、push の直前の照合(§7)の後に `publish-guard.py` へ保持したレビュー済み完全 SHA・固定 branch/repo/base・設定 digest・本文を渡す。helper だけが `<SHA>:refs/heads/<作業ブランチ>` を送信し、remote SHA と返った PR の URL/番号/head/base を照合する。`-u` は使わず、共有の `config` に項目を足さない。失敗・拒否は失敗扱い
 - **PR の前の確かめ**: `repo` が null か、`gh repo view '<R>' --json name -q .name` が rc 0 でなければ(active なアカウントでそのリポジトリを読めない)、PR を作らずに結末 `縮退`(push はする)
   - `gh auth status` では決めない(複数のアカウントのどれかに問題があるだけで rc 1 になり、active なアカウントがリポジトリに触れるかも見ない)
 - **PR**: `gh pr create -R '<R>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タイトル>' --body-file - < .claude/reviews/discover-<発見元>-pr.md`
