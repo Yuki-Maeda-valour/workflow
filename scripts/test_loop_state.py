@@ -85,12 +85,32 @@ class LoopStateTest(unittest.TestCase):
         self.git("worktree", "add", "-q", "--detach", str(second), "HEAD")
         (second / ".claude").mkdir(); (second / ".claude/project-profile.yml").write_text("secret_paths: [second.txt]\n")
         (second / "second.txt").write_text("second-secret\n")
-        self.assertEqual(0, self.snap("secret-c.json", secret_patterns_from="secret-b.json").returncode)
+        self.assertEqual(0, self.snap("secret-c.json", secret_patterns_from="secret-b.json", fresh_config_baseline=True).returncode)
         state = json.loads((self.root.parent / "secret-c.json").read_text())
         two = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(second))
         self.assertTrue(next(row for row in two if row["path"] == "second.txt")["secret"])
         root_files = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(self.root))
         self.assertIn("sha256", next(row for row in root_files if row["path"] == "tracked"))
+
+    def test_secret_union_follows_human_worktree_move_at_fresh_boundary(self) -> None:
+        other = self.root.parent / "human-move"
+        self.git("worktree", "add", "-q", "--detach", str(other), "HEAD")
+        (other / ".claude").mkdir(); (other / ".claude/project-profile.yml").write_text("secret_paths: [private.txt]\n")
+        (other / "private.txt").write_text("must remain metadata-only\n")
+        self.assertEqual(0, self.snap("move-a.json").returncode)
+        moved = self.root.parent / "human-moved"
+        self.git("worktree", "move", str(other), str(moved))
+        (moved / ".claude/project-profile.yml").write_text("secret_paths: []\n")
+        # A normal completed-run boundary permits the human move, but carries
+        # that checkout's union via its stable Git admin directory.
+        self.assertEqual(0, self.snap("move-b.json", secret_patterns_from="move-a.json", fresh_config_baseline=True).returncode)
+        state = json.loads((self.root.parent / "move-b.json").read_text())
+        files = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(moved))
+        private = next(row for row in files if row["path"] == "private.txt")
+        self.assertTrue(private["secret"]); self.assertNotIn("sha256", private)
+        # The same move during a child run has no trusted path baseline and is
+        # stopped before profile or worktree content observation.
+        self.assertEqual(20, self.snap("move-c.json", secret_patterns_from="move-a.json").returncode)
 
     def test_ref_and_ignored_file_attacks_are_detected(self) -> None:
         self.assertEqual(0, self.snap("a.json").returncode)
@@ -308,6 +328,91 @@ class LoopStateTest(unittest.TestCase):
         self.git("config", key, str(conditional))
         self.changed(lambda: conditional.write_text("[demo]\nvalue = two\n"))
 
+    def test_same_inode_include_aliases_keep_each_origin_context(self) -> None:
+        # Git accepts both spellings.  They must remain distinct graph nodes:
+        # a later hardlink in another directory can resolve nested includes
+        # relative to that origin, even when its inode is identical.
+        inc = pathlib.Path(self.common) / "inc"; inc.write_text("[demo]\nvalue = normal\n")
+        self.git("config", "--add", "include.path", "inc")
+        self.git("config", "--add", "include.path", "./inc")
+        # The more consequential case is a hardlinked include whose nested
+        # relative path is resolved from two different parent directories.
+        left = pathlib.Path(self.common) / "left"; right = pathlib.Path(self.common) / "right"
+        left.mkdir(); right.mkdir()
+        left_config = left / "config"; left_config.write_text("[include]\npath = child\n")
+        right_config = right / "config"; os.link(left_config, right_config)
+        (left / "child").write_text("[demo]\nvalue = left\n")
+        (right / "child").write_text("[demo]\nvalue = right\n")
+        self.git("config", "--add", "include.path", "left/config")
+        self.git("config", "--add", "include.path", "right/config")
+        first = self.snap("aliases-a.json")
+        self.assertEqual(0, first.returncode, first.stderr.decode())
+        self.assertEqual(0, self.snap("aliases-b.json").returncode)
+        self.assertEqual(0, self.compare("aliases-a.json", "aliases-b.json").returncode)
+        state = json.loads((self.root.parent / "aliases-a.json").read_text())
+        paths = [row["path"] for row in state["config"]["origins"]]
+        self.assertIn("config:" + str(inc), paths)
+        self.assertIn("config:" + str(pathlib.Path(self.common) / "./inc"), paths)
+        self.assertIn("config:" + str(left / "child"), paths)
+        self.assertIn("config:" + str(right / "child"), paths)
+
+    def test_held_global_config_link_is_checked_before_normal_git_discovery(self) -> None:
+        normal = self.root.parent / "normal-global"; normal.write_text("[demo]\nvalue = normal\n")
+        secret = self.root.parent / "secret-global"; secret.write_text("[demo]\nvalue = never-disclose\n")
+        link = self.root.parent / "global-link"; os.symlink(normal, link)
+        old_global, old_system = os.environ.get("GIT_CONFIG_GLOBAL"), os.environ.get("GIT_CONFIG_NOSYSTEM")
+        os.environ["GIT_CONFIG_GLOBAL"] = str(link); os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+        try:
+            self.assertEqual(0, self.snap("global-before.json").returncode)
+            os.unlink(link); os.symlink(secret, link)
+            args = LOOP_STATE.argparse.Namespace(out=str(self.root.parent / "unused.json"), top=str(self.root), common=self.common,
+                                                 repo_admin=self.admin, wt_admin="-", exclude_worktree="",
+                                                 secret_patterns_from=str(self.root.parent / "global-before.json"),
+                                                 fresh_config_baseline=False, max_items=10_000, max_bytes=10_000_000,
+                                                 max_file_bytes=1_000_000, max_seconds=10)
+            old_run = LOOP_STATE.run_git
+            def no_normal_git(top, *argv, **kwargs):
+                if "--file" not in argv:
+                    raise AssertionError("ordinary Git ran before held global link rejection")
+                return old_run(top, *argv, **kwargs)
+            LOOP_STATE.run_git = no_normal_git
+            try:
+                with self.assertRaises(LOOP_STATE.Stop):
+                    LOOP_STATE.snapshot(args)
+            finally:
+                LOOP_STATE.run_git = old_run
+        finally:
+            if old_global is None: os.environ.pop("GIT_CONFIG_GLOBAL", None)
+            else: os.environ["GIT_CONFIG_GLOBAL"] = old_global
+            if old_system is None: os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
+            else: os.environ["GIT_CONFIG_NOSYSTEM"] = old_system
+
+    def test_held_regular_config_cannot_name_new_include_before_git_discovery(self) -> None:
+        self.assertEqual(0, self.snap("regular-before.json").returncode)
+        secret = self.root.parent / "new-include-secret"
+        secret.write_text("[demo]\nvalue = never-open-this-target\n")
+        with (pathlib.Path(self.common) / "config").open("a") as fh:
+            fh.write("\n[include]\n\tpath = " + str(secret) + "\n")
+        args = LOOP_STATE.argparse.Namespace(out=str(self.root.parent / "unused.json"), top=str(self.root), common=self.common,
+                                             repo_admin=self.admin, wt_admin="-", exclude_worktree="",
+                                             secret_patterns_from=str(self.root.parent / "regular-before.json"),
+                                             fresh_config_baseline=False, max_items=10_000, max_bytes=10_000_000,
+                                             max_file_bytes=1_000_000, max_seconds=10)
+        secret_inode = os.lstat(secret).st_ino; opened_secret = False; old_read = LOOP_STATE.read_open_regular
+        def no_secret_read(fd, before, budget):
+            nonlocal opened_secret
+            if before.st_ino == secret_inode:
+                opened_secret = True
+                raise AssertionError("new include target was read")
+            return old_read(fd, before, budget)
+        LOOP_STATE.read_open_regular = no_secret_read
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.snapshot(args)
+        finally:
+            LOOP_STATE.read_open_regular = old_read
+        self.assertFalse(opened_secret)
+
     def test_include_preflight_preserves_normal_conditions_and_stops_active_unsafe_targets(self) -> None:
         # Git parses quoted values and condition grammar.  The helper asks that
         # same Git binary to evaluate the condition, rather than approximating
@@ -453,6 +558,45 @@ class LoopStateTest(unittest.TestCase):
         os.unlink(target); os.symlink("tracked", target)
         with self.assertRaises(LOOP_STATE.Stop):
             LOOP_STATE.safe_hash(str(target), before, LOOP_STATE.Budget(10, 1000, 1000, 10))
+
+    def test_path_ancestor_ignores_sibling_churn_but_rejects_inode_replacement(self) -> None:
+        # open_dir_path holds ancestors only to resolve the descendant.  A
+        # sibling creation changes the ancestor ctime, not its identity, and
+        # must not make an ordinary snapshot fail closed.
+        parent = self.root.parent / "path-parent"; parent.mkdir()
+        ancestor = parent / "ancestor"; ancestor.mkdir()
+        leaf = ancestor / "leaf"; leaf.mkdir()
+        old_open = LOOP_STATE.os.open; churned = False
+        def sibling_churn(name, flags, *args, **kwargs):
+            nonlocal churned
+            if name == "ancestor" and not churned:
+                churned = True; (ancestor / "sibling").write_text("changed parent ctime only")
+                # Filesystems may coalesce timestamp updates.  Make the old
+                # over-broad ancestor metadata check fail deterministically.
+                before = os.stat(ancestor)
+                os.utime(ancestor, ns=(before.st_atime_ns, before.st_mtime_ns + 1_000_000_000))
+            return old_open(name, flags, *args, **kwargs)
+        LOOP_STATE.os.open = sibling_churn
+        try:
+            fd = LOOP_STATE.open_dir_path(str(ancestor / "leaf"))
+        finally:
+            LOOP_STATE.os.open = old_open
+        os.close(fd); self.assertTrue(churned)
+        # Replacing that exact directory after lstat still opens a different
+        # inode and must stop before descending into it.
+        replacement = parent / "replacement"; replacement.mkdir()
+        moved = parent / "moved"; swapped = False
+        def replace_ancestor(name, flags, *args, **kwargs):
+            nonlocal swapped
+            if name == "ancestor" and not swapped:
+                swapped = True; os.rename(ancestor, moved); os.rename(replacement, ancestor)
+            return old_open(name, flags, *args, **kwargs)
+        LOOP_STATE.os.open = replace_ancestor
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.open_dir_path(str(ancestor / "leaf"))
+        finally:
+            LOOP_STATE.os.open = old_open
 
     def test_profile_symlink_and_output_tmp_symlink_cannot_redirect_reads_or_writes(self) -> None:
         claude = self.root / ".claude"; claude.mkdir()
