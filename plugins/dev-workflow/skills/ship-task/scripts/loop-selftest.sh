@@ -2401,6 +2401,7 @@ esac
 # 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)で、
 # SKILL.md と discover-mode.md で同じであることも照らす
 printf 'review fixture\n' >"$PW/.claude/reviews/m.md"
+printf 'discover commit fixture\n' >"$PW/.claude/reviews/discover-data-audit-msg.md"
 UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
 import re, sys
 root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -2551,8 +2552,8 @@ pdk "cd の前置きの後ろの ; より後ろは入力の cwd からも解く(
   "$(bash_in 'CDPATH= cd -P -- src && git status ; cat ../src/x.txt')"
 pdk "cd の前置きの後ろの裸引数も P から解く(… .claude && git status || echo x > settings.json)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- .claude && git status || echo x > settings.json')"
-pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && git || echo > settings.json)" protected Bash \
-  "$(bash_in 'CDPATH= cd -P -- .claude && git || echo > settings.json')"
+pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && test || echo > settings.json)" protected Bash \
+  "$(bash_in 'CDPATH= cd -P -- .claude && test || echo > settings.json')"
 pdk "cd の前置きの後ろは最初の || で分ける(… src && git status || cat ../src/x.txt ; git log)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status || cat ../src/x.txt ; git log')"
 # P から解くと W(.claude/reviews/ の下)、入力の cwd から解くと保護パスになる書き込み先で、2 回目の判定の種類を縛る
@@ -2767,7 +2768,9 @@ pdk "H23: sed の execute flag を拒否" other Bash "$(bash_in "sed -n 's/x/y/e
 pa "H23: sed --sandbox の print script を許す" Bash "$(bash_in "sed --sandbox -n '1,3p' src/x")"
 pdk "H23: find -exec を拒否" other Bash "$(bash_in 'find . -exec touch .claude/settings.json \;')"
 pdk "H23: find -delete を拒否" other Bash "$(bash_in 'find . -delete')"
+PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind":"prefix","words":["find"]}); print(json.dumps(a))')"
 pa "H23: find の読み取り action を許す" Bash "$(bash_in "find . -type f -name '*.txt' -print")"
+PALLOW=""
 pdk "H23: 任意 awk program を拒否" other Bash "$(bash_in "awk 'BEGIN { system(\"touch .claude/settings.json\") }'")"
 pdk "H40: gh api を拒否" other Bash "$(bash_in 'gh api repos/example/example')"
 pdk "H40: gh repo edit を拒否" other Bash "$(bash_in 'gh repo edit --visibility public')"
