@@ -97,6 +97,20 @@ for name in os.listdir("/proc"):
 PY
 }
 
+# 未信頼設定による再開拒否の後、人が実体を確認して片付ける操作を scratch で模擬する。
+# production の meta/PID は使わず、この selftest 自身の TAG を持つプロセスだけを止める。
+confirm_rejected_inflight() { # $1=この試験が作った state $2=ラベル
+  local state="$1" label="$2" p held_pids
+  held_pids="$(tagged_pids)"
+  for p in $held_pids; do kill -KILL "$p" 2>/dev/null || true; done
+  for p in $held_pids; do
+    if wait_dead "$p" 5; then ok "$label: 人の確認後に試験用の子を片付けた"; else ng "$label: 試験用の子が残った"; fi
+  done
+  # 検査対象の証拠は別名で保存し、確認済みの中断印だけを外す。
+  mv "$state/inflight" "$REC/confirmed-inflight"
+  rm -f "$state/stop-mark.md"
+}
+
 cleanup_all() {
   local p
   for p in $(tagged_pids 2>/dev/null); do kill -KILL "$p" 2>/dev/null; done
@@ -358,7 +372,7 @@ case "$prompt" in
       outside) dbr; cand "memo-$src.md"; dcommit; dpush; dres "$PRL" ;;
       d21) dbr; cand "候補_bad name.md"; dcommit; dpush; dres "$PRL" ;;
       emptyname) dbr; cand "候補_.md"; dcommit; dpush; dres "$PRL" ;;
-      mode) dbr; cand "候補_$src-a.md"; g update-index --chmod=+x -- "$tdir/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
+      mode) dbr; cand "候補_$src-a.md"; chmod +x -- "$tdir/候補_$src-a.md"; g update-index --chmod=+x -- "$tdir/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
       twocommits) dbr; cand "候補_$src-a.md"; dcommit; cand "候補_$src-b.md"; dcommit; dpush; dres "$PRL" ;;
       untracked) dbr; cand "候補_$src-a.md"; dcommit; dpush; echo x >"leftover-$src.txt"; dres "$PRL" ;;
       otherbranch) g checkout -q -b "task/候補-$src-000000000000"; cand "候補_$src-a.md"; dcommit; dres "無人の周の結果: 縮退 — x" ;;
@@ -556,13 +570,16 @@ PY
   basetamper) branch; done_commit; g config selftest.tampered yes
               # 周の起動の直前に取った比べる元を、書き換えた後の状態に合わせて書き直す(照合をすり抜けようとする)
               for b in "${XDG_STATE_HOME:?}"/dev-workflow/loop/*/*/iter-*.base.json; do
+                before="$(sha256sum <"$b" | cut -d' ' -f1)"
                 python3 - "$b" <<'PY'
 import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
-d["config"]["entries"].append(["selftest.tampered", "yes"])
+d["common_config"]["entries"].append(["selftest.tampered", "yes"])
 json.dump(d, open(p, "w"))
 PY
+                after="$(sha256sum <"$b" | cut -d' ' -f1)"
+                [ "$before" != "$after" ] || exit 91
               done
               result "無人の周の結果: 縮退 — tamper" ;;
   badreviews) branch; done_commit; push; mkdir -p .claude/reviews; echo r >.claude/reviews/unreadable.md
@@ -613,6 +630,7 @@ mkdir -p "$PLUG/.claude-plugin" "$PLUG/skills/ship-task/scripts" "$PLUG/skills/c
 cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
 cp "$SCRIPT_DIR/loop-state.py" "$PLUG/skills/ship-task/scripts/loop-state.py"
+cp "$SCRIPT_DIR/loop-startup.py" "$PLUG/skills/ship-task/scripts/loop-startup.py"
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
 cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
@@ -1452,7 +1470,7 @@ LOCK_READ_OUT="$W/locked-read/result.txt"
 bash -s -- "$W/locked-read/functions.sh" "$R" "$W/locked-read" <<'SH' >"$LOCK_READ_OUT" 2>&1
 set -euo pipefail
 source "$1"
-TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current
+TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current; STATE_GIT_UNSAFE=0
 declare -A WT_OUTCOME=()
 G() { git "$@"; }
 rep() { printf '%s\n' "$@"; }
@@ -1877,7 +1895,8 @@ shared_case cfgadd "config に項目を足す"
 shared_case cfgpushremote "branch.task/{名}.pushRemote を足す"
 shared_case cfgremote "branch.task/{名}.remote の値が origin でない"
 shared_case pushu "-u つきの push が branch.task/{名}.remote・.merge を足す"
-has "共有の状態(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/pushu-a.merge=refs/heads/task/pushu-a"
+has "共有の状態(-u つきの push): 設定の 構造差分を報告する" "$(report_of "$OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "共有の状態(-u つきの push): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/pushu-a.merge"
 shared_case cfgreorder "既存の項目の並べ替え"
 shared_case hookchmod "hooks の既存のファイルに実行権を付ける"
 shared_case infoexclude "info/exclude"
@@ -1897,7 +1916,8 @@ check "ループの照合で止まる: 10" 10 "$RC"
 rm -f "$(state_dir xloopdiff)/stop-mark.md"
 run_loop xloopdiff -- --repo "$R" "${COMMON_ARGS[@]}"
 check "ループの照合の後: 止めの印を消すと続く" 0 "$RC"
-has "ループの照合の後: 食い違いを見つけた状態を残さない(最後に照合に通った状態との差分を報告する)" "$(report_of "$OUT")" "selftest.added=yes"
+has "ループの照合の後: 食い違いを見つけた状態を残さない(digest 分類を報告する)" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+hasnt "ループの照合の後: 変更した設定値を報告しない" "$(report_of "$OUT")" "selftest.added=yes"
 
 fi
 
@@ -1929,7 +1949,8 @@ start_bg sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
 if wait_file "$REC/started-cfgsleep-b" 30; then
   kill -TERM "$BG_PID"; wait_bg
   check "TERM(config を変えた周): 143" 143 "$BG_RC"
-  has "TERM(config を変えた周): 報告に差分が出る" "$(report_of "$BG_OUT")" "selftest.tampered=yes"
+  has "TERM(config を変えた周): 設定の 構造差分を報告する" "$(report_of "$BG_OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+  hasnt "TERM(config を変えた周): 設定値を報告しない" "$(report_of "$BG_OUT")" "selftest.tampered=yes"
   SD="$(state_dir sigcfg)"
   t "TERM(config を変えた周): 止めの印が残る" test -f "$SD/stop-mark.md"
   : >"$REC/ssh.log"
@@ -1940,7 +1961,8 @@ if wait_file "$REC/started-cfgsleep-b" 30; then
   rm -f "$SD/stop-mark.md"
   run_loop sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
   check "止めの印を消すと続く" 0 "$RC"
-  has "止めの印を消すと: 最後に照合に通った状態との差分を報告する" "$(report_of "$OUT")" "selftest.tampered=yes"
+  has "止めの印を消すと: 最後に照合に通った状態との差分を digest で報告する" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+  hasnt "止めの印を消すと: 設定値を報告しない" "$(report_of "$OUT")" "selftest.tampered=yes"
   has "止めの印を消すと: 次のタスクを回す" "$REC/calls.log" "pr-c"
 else
   ng "TERM(config を変えた周): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
@@ -1965,14 +1987,25 @@ kill_case() { # $1=名 $2=振る舞い $3=期待する次の起動の終了コ�
   CHILD="$(cat "$REC/pid-$2-a")"
   t "KILL($4): loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
   echo "$CHILD" >"$REC/watch.pid"
+  SD="$(state_dir "k-$1")"
+  cp "$SD/inflight/meta" "$REC/held-meta"
+  cp "$SD/inflight/base.json" "$REC/held-base.json"
   run_loop "k-$1" -- --repo "$R" "${COMMON_ARGS[@]}"
   check "KILL($4): 次の起動の終了コード" "$3" "$RC"
-  if wait_dead "$CHILD" 1; then ok "KILL($4): 次の起動が残った子を止める"; else ng "KILL($4): 次の起動が残った子を止める"; fi
-  for p in $(cat "$REC/spawned-$2-a" 2>/dev/null); do
-    if wait_dead "$p" 1; then ok "KILL($4): 別セッションの子孫も止める"; else ng "KILL($4): 別セッションの子孫も止める(pid $p)"; fi
-  done
-  SD="$(state_dir "k-$1")"
-  f "KILL($4): 周の途中の印は消える" test -e "$SD/inflight"
+  if [ "$2" = cfgsleep ] || [ "$2" = pushusleep ]; then
+    t "KILL($4): 設定を信頼できない再開では子を勝手に止めない" proc_alive "$CHILD"
+    for p in $(cat "$REC/spawned-$2-a" 2>/dev/null); do
+      t "KILL($4): 別セッションの子孫も保全する(pid $p)" proc_alive "$p"
+    done
+    t "KILL($4): 中断metaを変更しない" cmp -s "$REC/held-meta" "$SD/inflight/meta"
+    t "KILL($4): 中断基準を変更しない" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
+  else
+    if wait_dead "$CHILD" 1; then ok "KILL($4): 次の起動が残った子を止める"; else ng "KILL($4): 次の起動が残った子を止める"; fi
+    for p in $(cat "$REC/spawned-$2-a" 2>/dev/null); do
+      if wait_dead "$p" 1; then ok "KILL($4): 別セッションの子孫も止める(pid $p)"; else ng "KILL($4): 別セッションの子孫も止める(pid $p)"; fi
+    done
+    f "KILL($4): 周の途中の印は消える" test -e "$SD/inflight"
+  fi
   if [ "$3" = 0 ]; then
     has "KILL($4): 続いて次のタスクを回す" "$REC/calls.log" "pr-b"
     check "KILL($4): 残った子が止まるまで次の周の -p を起動しない" "dead" "$(cat "$REC/watch-at-pr-b" 2>/dev/null)"
@@ -1980,11 +2013,16 @@ kill_case() { # $1=名 $2=振る舞い $3=期待する次の起動の終了コ�
     has "KILL($4): 理由" "$OUT" "[inflight-diff]"
     t "KILL($4): 止めの印が残る" test -f "$SD/stop-mark.md"
     hasnt "KILL($4): 次のタスクを回さない" "$REC/calls.log" "pr-b"
-    # 人が差分を確かめて元に戻してから(動いたデフォルトブランチを戻す)、止めの印を消す
-    G -C "$R" update-ref refs/heads/main "$ORIG_MAIN"
-    rm -f "$SD/stop-mark.md"
+    if [ "$2" = cfgsleep ] || [ "$2" = pushusleep ]; then
+      confirm_rejected_inflight "$SD" "KILL($4)"
+    else
+      # 検査可能なref差分は、人が元に戻して止めの印を外す。
+      G -C "$R" update-ref refs/heads/main "$ORIG_MAIN"
+      rm -f "$SD/stop-mark.md"
+    fi
     run_loop "k-$1" -- --repo "$R" "${COMMON_ARGS[@]}"
-    check "KILL($4): 止めの印を消すと続く" 0 "$RC"
+    check "KILL($4): 人が差分と残存物を確認した後は続く" 0 "$RC"
+    has "KILL($4): 確認後に次のタスクを回す" "$REC/calls.log" "pr-b"
   fi
 }
 kill_case cfg cfgsleep 20 "周の中で共有の config を変えた"
@@ -2004,10 +2042,13 @@ if wait_file "$REC/started-cfgsleep-b" 30; then
   kill -KILL "$BG_PID"; wait_bg
   run_loop xkilldiff -- --repo "$R" "${COMMON_ARGS[@]}"
   check "KILL の後の照合で止まる: 20" 20 "$RC"
-  rm -f "$(state_dir xkilldiff)/stop-mark.md"
+  SD="$(state_dir xkilldiff)"
+  t "KILL の後の照合: 未確認の中断印を保全する" test -d "$SD/inflight"
+  confirm_rejected_inflight "$SD" "KILL の後の照合"
   run_loop xkilldiff -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "KILL の後の照合の後: 止めの印を消すと続く" 0 "$RC"
-  has "KILL の後の照合の後: 食い違いを見つけた状態を残さない(最後に照合に通った状態との差分を報告する)" "$(report_of "$OUT")" "selftest.tampered=yes"
+  check "KILL の後の照合の後: 人が差分と残存物を確認すると続く" 0 "$RC"
+  has "KILL の後の照合の後: 食い違いを見つけた状態を残さない(digest 分類を報告する)" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+  hasnt "KILL の後の照合の後: 設定値を報告しない" "$(report_of "$OUT")" "selftest.tampered=yes"
 else
   ng "KILL の後の照合: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
@@ -2023,7 +2064,8 @@ start_bg kbetween -- --repo "$R" "${COMMON_ARGS[@]}"
 if wait_file "$REC/started-longsleep-b" 30; then
   sleep 0.5
   kill -KILL "$BG_PID"; wait_bg
-  has "実行と実行の間の変化: 報告に差分が出て止まらずに続ける" "$(latest_report kbetween)" "selftest.human=between"
+  has "実行と実行の間の変化: 値を出さずdigest差分を報告して続ける" "$(latest_report kbetween)" "config の内容が変わった(sha256:"
+  hasnt "実行と実行の間の変化: 設定値を出さない" "$(latest_report kbetween)" "selftest.human=between"
   run_loop kbetween -- --repo "$R" "${COMMON_ARGS[@]}"
   check "KILL(実行の間に人が変えた直後の周): 続く" 0 "$RC"
   has "KILL(実行の間に人が変えた直後の周): 次のタスクを回す" "$REC/calls.log" "pr-c"
@@ -2095,7 +2137,7 @@ has "フック + 内部の失敗: 止めの印の理由は「残ったプロセ�
 t "フック + 内部の失敗: 周の途中の印が残る" test -d "$SD/inflight"
 
 # ループの最中の片付けの失敗(試験用のフック)→ 判定と次の周へ進まずに 10 →
-# 両方の印がある状態で起動すると、その周の識別子を持つ残りのプロセスを止めてから 20
+# 両方の印がある状態で起動すると、子と中断記録を保全して 20。人の確認より先に子へ信号を送らない。
 newrepo midleft
 addtask pr-a 2026-01-01; addtask pr-b 2026-01-02
 commit
@@ -2113,9 +2155,18 @@ hasnt "ループの最中の片付けの失敗: 判定しない" "$OUT" "→ 正
 env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER="$ITER" setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
 MANUAL=$!
 sleep 0.3
+cp "$SD/inflight/meta" "$REC/held-meta"
+cp "$SD/inflight/base.json" "$REC/held-base.json"
+cp "$SD/stop-mark.md" "$REC/held-stop-mark.md"
 run_loop midleft -- --repo "$R" "${COMMON_ARGS[@]}"
 check "両方の印がある起動: 20" 20 "$RC"
-if wait_dead "$MANUAL" 1; then ok "両方の印がある起動: その周の識別子の残りのプロセスを止める"; else ng "両方の印がある起動: その周の識別子の残りのプロセスを止める"; fi
+t "両方の印がある起動: 確認前の子を保全する" proc_alive "$MANUAL"
+t "両方の印がある起動: 中断記録を保全する" cmp -s "$REC/held-meta" "$SD/inflight/meta"
+t "両方の印がある起動: 比較基準を保全する" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
+t "両方の印がある起動: 停止印を保全する" cmp -s "$REC/held-stop-mark.md" "$SD/stop-mark.md"
+# fixture が起動した既知の PID/プロセスグループだけを人の確認後の片付けとして止める。
+kill -KILL -- "-$MANUAL" 2>/dev/null || true
+wait "$MANUAL" 2>/dev/null || true
 
 # 内部の失敗(周の途中で loop.sh の sleep を失敗させる)→ 子が片付き、30(照合で差分があれば 10)
 newrepo internal
@@ -2139,7 +2190,8 @@ newrec internal2
 run_loop internal2 "PATH=$STUBBIN:$W/failsleepbin:$SAFEBIN" "SELFTEST_SLEEP_TRIGGER=$REC/trigger" -- --repo "$R" "${COMMON_ARGS[@]}"
 check "内部の失敗(照合で差分): 10" 10 "$RC"
 SD="$(state_dir internal2)"
-has "内部の失敗(照合で差分): 止めの印に差分" "$SD/stop-mark.md" "selftest.tampered=yes"
+has "内部の失敗(照合で差分): 止めの印に 構造差分" "$SD/stop-mark.md" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "内部の失敗(照合で差分): 設定値を印に出さない" "$SD/stop-mark.md" "selftest.tampered=yes"
 
 fi
 
@@ -3345,7 +3397,8 @@ check "実行の間の変化(準備): 1 周目" 0 "$RC"
 G -C "$R" config selftest.between yes
 run_loop between -- --repo "$R" "${COMMON_ARGS[@]}"
 check "実行と実行の間の変化: 止まらずに続ける" 0 "$RC"
-has "実行と実行の間の変化: 報告に差分が出る" "$(report_of "$OUT")" "selftest.between=yes"
+has "実行と実行の間の変化: 値を出さずdigest差分を報告する" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+hasnt "実行と実行の間の変化: 設定値を出さない" "$(report_of "$OUT")" "selftest.between=yes"
 has "実行と実行の間の変化: 次のタスクを回す" "$REC/calls.log" "pr-b"
 
 fi
@@ -3684,6 +3737,16 @@ djudged() { # $1=発見元 $2=判定(先頭一致) $3=removed|kept $4=振る舞�
     f "発見の判定($4): worktree を消す" locked_reason_of "候補:$1"
   fi
 }
+# H18 の共有 ref 防御は、候補の形を調べる判定器より先に働く。
+# 異なる branch / remote-tracking OID は後続の発見元へ進めず停止し、証拠を残す。
+dshared() { # $1=停止した発見元 $2=振る舞い $3=起動済みの発見元列
+  check "発見の共有状態($2): 10 で止まる" 10 "$RC"
+  has "発見の共有状態($2): 理由" "$OUT" "[shared-state]"
+  has "発見の共有状態($2): 差分を記録" "$RP" "差分:"
+  t "発見の共有状態($2): 当該 worktree を保持" locked_reason_of "候補:$1"
+  check "発見の共有状態($2): 次の発見元を起動しない" "$3" "$(calls)"
+  t "発見の共有状態($2): 止めの印を保持" test -f "$(dirname "$(dirname "$RP")")/stop-mark.md"
+}
 disc_pair pr pr degrade
 check "発見の周(pr・degrade): キューが空で終わる" 0 "$RC"
 check "発見の周: 発見元を列の順に 1 回ずつ回す" "disc-data-audit disc-refactor" "$(calls)"
@@ -3737,7 +3800,10 @@ disc_pair commits twocommits untracked
 djudged data-audit "失敗(食い違い: HEAD が固定した sha の上の 1 commit でない" kept "2 commit"
 djudged refactor "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "未追跡の残り"
 disc_pair branch otherbranch fail
-djudged data-audit "失敗(食い違い: HEAD が refs/heads/task/候補-data-audit-$D12 でない" kept "今夜の名でないブランチ"
+dshared data-audit "今夜の名でないブランチ" "disc-data-audit"
+# 前の共有状態違反では未起動になる後段も、独立した正常共有状態で判定する。
+disc_pair fail none fail
+djudged data-audit "正常(候補なし)" removed "失敗扱いの前の正常な周"
 djudged refactor "失敗(結末 失敗扱い)" kept "失敗扱い"
 has "失敗の周(origin に今夜の名が無い): 報告" "$RP" "origin に task/候補-refactor-$D12 は無い"
 disc_pair hold hold holdlast
@@ -3749,21 +3815,27 @@ djudged data-audit "正常(縮退)" kept "判定の後に未追跡が書かれ�
 has "発見の周(remove の拒否): 報告" "$RP" "消せなかったので残した"
 djudged refactor "失敗(食い違い: origin の task/候補-refactor-$D12(無い)" kept "PR だが push していない"
 disc_pair pushdel pushdel pushfail
-djudged data-audit "失敗(食い違い: 結末 候補なし だが origin に task/候補-data-audit-$D12 がある)" kept "今夜の名を push してローカルを消して 候補なし"
+dshared data-audit "push 後に今夜の名のローカル branch を削除" "disc-data-audit"
+t "共有状態停止(push 後の削除): remote の証拠を保持" git -C "$B" rev-parse --verify -q "refs/heads/task/候補-data-audit-$D12"
+disc_pair pushfail none pushfail
+djudged data-audit "正常(候補なし)" removed "push 後の失敗扱いの前の正常な周"
 djudged refactor "失敗(結末 失敗扱い)" kept "push の後の失敗扱い"
-has "失敗の周: PR が開いている可能性(候補なし の食い違い)" "$RP" "origin に task/候補-data-audit-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
 has "失敗の周: PR が開いている可能性(失敗扱い)" "$RP" "origin に task/候補-refactor-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
 disc_pair pushdiff pushdiff dashname
-djudged data-audit "失敗(食い違い: 結末 縮退 だが origin の task/候補-data-audit-$D12(" kept "push した中身と違う HEAD で 縮退"
-has "発見の周(縮退・origin のブランチが判定した中身と違う): 報告" "$RP" "origin の task/候補-data-audit-$D12 が判定した中身(HEAD)と違う: PR を作らずに消す"
-hasnt "発見の周(縮退・origin のブランチが判定した中身と違う): PR の雛形を出さない" "$RP" "gh pr create -R"
+dshared data-audit "push した中身と異なる HEAD" "disc-data-audit"
+has "発見の共有状態(remote OID): 一致しない理由" "$RP" "自分の remote-tracking ref の期待状態に一致しない"
+hasnt "発見の共有状態(remote OID): PR の雛形を出さない" "$RP" "gh pr create -R"
+disc_pair dashname none dashname
+djudged data-audit "正常(候補なし)" removed "D21 違反の前の正常な周"
 djudged refactor "失敗(食い違い: D21 に外れる — <名> が '-' で始まる" kept "名が - で始まる"
 disc_pair noneclean noneuntracked noneotherbranch
 djudged data-audit "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "候補なし で未追跡を残す"
-djudged refactor "失敗(食い違い: 結末 候補なし だが HEAD が detached でない" kept "候補なし で別のブランチに居る"
+dshared refactor "候補なし で別のブランチに居る" "disc-data-audit disc-refactor"
 disc_pair nonelocal nonelocal none
-djudged data-audit "失敗(食い違い: 結末 候補なし だがローカルに task/候補-data-audit-$D12 がある)" kept "候補なし で今夜の名をローカルにだけ作る"
-djudged refactor "正常(候補なし)" removed "今夜の名がローカルにある周の後の none"
+dshared data-audit "候補なし で今夜の名をローカルにだけ作る" "disc-data-audit"
+disc_pair none none none
+djudged data-audit "正常(候補なし)" removed "変更のない候補なし"
+djudged refactor "正常(候補なし)" removed "変更のない候補なしの次の周"
 disc_pair hang hang none "" --iteration-timeout 4
 djudged data-audit "失敗(時間切れ)" kept "時間切れ"
 djudged refactor "正常(候補なし)" removed "時間切れの後の周"
@@ -3796,7 +3868,8 @@ run_loop dpushu SELFTEST_DISC_DA=pushu SELFTEST_DISC_RF=none -- --repo "$R" --di
 check "発見の周(-u つきの push): 終了コード 10" 10 "$RC"
 has "発見の周(-u つきの push): 理由" "$OUT" "[shared-state]"
 check "発見の周(-u つきの push): 次の周へ進まない" "disc-data-audit" "$(calls)"
-has "発見の周(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
+has "発見の周(-u つきの push): 構造差分を報告する" "$(report_of "$OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "発見の周(-u つきの push): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/候補-data-audit-$D12.merge"
 # 周の途中の印(meta に mode・source・name)と、push の後の KILL の後の起動(共有の config に書かない push なら続ける)
 newdisc dkill
 newrec dkill
@@ -3837,16 +3910,17 @@ if wait_file "$REC/started-disc-data-audit" 30; then
   run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
   check "発見の周の KILL(-u つきの push の後): 次の起動の終了コード" 20 "$RC"
   has "発見の周の KILL(-u つきの push の後): 理由" "$OUT" "[inflight-diff]"
-  if wait_dead "$CHILD" 1; then ok "発見の周の KILL(-u つきの push の後): 残った子を止める"; else ng "発見の周の KILL(-u つきの push の後): 残った子を止める"; fi
-  f "発見の周の KILL(-u つきの push の後): 周の途中の印は消える" test -e "$SD/inflight"
+  t "発見の周の KILL(-u つきの push の後): 未確認の子を勝手に止めない" proc_alive "$CHILD"
+  t "発見の周の KILL(-u つきの push の後): 周の途中の印を保全する" test -d "$SD/inflight"
   t "発見の周の KILL(-u つきの push の後): 止めの印が残る" test -f "$SD/stop-mark.md"
-  has "発見の周の KILL(-u つきの push の後): 差分を報告する" "$(report_of "$OUT")" \
-    "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
+  has "発見の周の KILL(-u つきの push の後): 内容を読まない構造差分を報告する" "$(report_of "$OUT")" \
+    "保存した config と現在の構造が一致しない(内容は読まない)"
+  hasnt "発見の周の KILL(-u つきの push の後): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/候補-data-audit-$D12.merge"
   hasnt "発見の周の KILL(-u つきの push の後): ほかの発見元を回さない" "$REC/calls.log" "disc-refactor"
-  # 人が差分を確かめてから止めの印を消すと続く
-  rm -f "$SD/stop-mark.md"
+  # 人が差分・残った子・中断記録を確認して片付けると続く。
+  confirm_rejected_inflight "$SD" "発見の周の KILL(-u つきの push の後)"
   run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
-  check "発見の周の KILL(-u つきの push の後): 止めの印を消すと続く" 0 "$RC"
+  check "発見の周の KILL(-u つきの push の後): 人が残存物を確認した後は続く" 0 "$RC"
 else
   ng "発見の周の KILL(-u つきの push の後): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
@@ -3938,8 +4012,9 @@ for action in add delete value reorder inactive; do
   has "H20 $HC_NAME: 理由" "$OUT" '[shared-state]'
   check "H20 $HC_NAME: 次のタスクへ進まない" humancfg-a "$(calls)"
   SD="$(state_dir "$HC_NAME")"
-  has "H20 $HC_NAME: 停止印に人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree'
-  has "H20 $HC_NAME: 報告に人の設定の差分" "$(report_of "$OUT")" 'repo:config.worktree'
+  has "H20 $HC_NAME: 停止印に保持済み設定の構造差分" "$SD/stop-mark.md" '保持済み config'
+  has "H20 $HC_NAME: 報告に保持済み設定の構造差分" "$(report_of "$OUT")" '保持済み config'
+  hasnt "H20 $HC_NAME: 変更後の設定値を出さない" "$SD/stop-mark.md" selftest.human
   if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then
     ng "H20 $HC_NAME: 後続ネットワークを打たない"
   else
@@ -3978,10 +4053,10 @@ for action in add delete value unchanged absent switch legacy term; do
     hc_change value
     kill -TERM "$BG_PID"; wait_bg
     check "H20 TERM: 143" 143 "$BG_RC"
-    has "H20 TERM: 停止印に差分" "$SD/stop-mark.md" 'repo:config.worktree'
+    has "H20 TERM: 停止印に保持済み設定の構造差分" "$SD/stop-mark.md" '保持済み config'
     check "H20 TERM: 次のタスクへ進まない" longsleep-a "$(calls)"
     hc_preserved value
-    has "H20 TERM: 報告に差分" "$(report_of "$OUT")" 'repo:config.worktree'
+    has "H20 TERM: 報告に保持済み設定の構造差分" "$(report_of "$OUT")" '保持済み config'
     : >"$REC/ssh.log"
     run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
     check "H20 TERM: 停止印がある再起動は20" 20 "$RC"
@@ -3997,23 +4072,44 @@ for action in add delete value unchanged absent switch legacy term; do
     legacy) hc_strip_saved "$SD/inflight/base.json" ;;
   esac
   HC_BEFORE="$(hc_fingerprint)"
+  cp "$SD/inflight/meta" "$REC/held-meta"
+  cp "$SD/inflight/base.json" "$REC/held-base.json"
   : >"$REC/ssh.log"
   run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
   if [ "$action" = unchanged ] || [ "$action" = absent ]; then
     check "H20 $HC_NAME: 変更なしは再開" 0 "$RC"
     check "H20 $HC_NAME: 次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
+    f "H20 $HC_NAME: 子を片付けた" proc_alive "$CHILD"
   else
     check "H20 $HC_NAME: 再起動は停止" 20 "$RC"
-    has "H20 $HC_NAME: 理由" "$OUT" '[inflight-diff]'
     check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
-    t "H20 $HC_NAME: 停止印" test -f "$SD/stop-mark.md"
     f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
-    case "$action" in
-      switch|legacy) has "H20 $HC_NAME: 前の起動元の確認を案内" "$SD/stop-mark.md" '前の起動元の設定を確認' ;;
-      *) has "H20 $HC_NAME: 人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree' ;;
-    esac
+    if [ "$action" = switch ]; then
+      has "H20 $HC_NAME: 未知の起動元を拒否する理由" "$OUT" '[startup-state]'
+      has "H20 $HC_NAME: 保存状態の確認を案内" "$OUT" '保存状態を人が確認する'
+      f "H20 $HC_NAME: 未確認の起動元から停止印を書かない" test -e "$SD/stop-mark.md"
+    else
+      has "H20 $HC_NAME: 理由" "$OUT" '[inflight-diff]'
+      t "H20 $HC_NAME: 停止印" test -f "$SD/stop-mark.md"
+      if [ "$action" = legacy ]; then
+        has "H20 $HC_NAME: 前の起動元の確認を案内" "$SD/stop-mark.md" '前の起動元の設定を確認'
+      else
+        has "H20 $HC_NAME: 人の設定の構造差分" "$SD/stop-mark.md" '保持済み config'
+        hasnt "H20 $HC_NAME: 変更後の設定値を出さない" "$SD/stop-mark.md" selftest.human
+      fi
+    fi
+    if [ "$action" = legacy ]; then
+      f "H20 $HC_NAME: 検査可能な設定では子を片付けた" proc_alive "$CHILD"
+    else
+      t "H20 $HC_NAME: 未確認の子を勝手に止めない" proc_alive "$CHILD"
+      t "H20 $HC_NAME: 中断metaを保全する" cmp -s "$REC/held-meta" "$SD/inflight/meta"
+      t "H20 $HC_NAME: 中断基準を保全する" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
+      confirm_rejected_inflight "$SD" "H20 $HC_NAME"
+      run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+      check "H20 $HC_NAME: 人が残存物を確認した後は再開" 0 "$RC"
+      check "H20 $HC_NAME: 確認後に次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
+    fi
   fi
-  f "H20 $HC_NAME: 子を片付けた" proc_alive "$CHILD"
   check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
 done
 # 正常実行間は既存どおり報告だけで続く。旧形式を黙って無視しない。
@@ -4040,7 +4136,8 @@ hc_setup discover pr present linked
 run_loop "$HC_NAME" SELFTEST_DISC_DA=humancfg "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" SELFTEST_HUMAN_ACTION=value -- --repo "$HC_REPO" --discover "${COMMON_ARGS[@]}"
 check "H20 発見: 停止" 10 "$RC"
 check "H20 発見: 次の発見元へ進まない" disc-data-audit "$(calls)"
-has "H20 発見: 停止印に人の設定" "$(state_dir "$HC_NAME")/stop-mark.md" 'repo:config.worktree'
+has "H20 発見: 停止印に人の設定の構造差分" "$(state_dir "$HC_NAME")/stop-mark.md" '保持済み config'
+hasnt "H20 発見: 設定値を出さない" "$(state_dir "$HC_NAME")/stop-mark.md" selftest.human
 hc_preserved value
 fi
 

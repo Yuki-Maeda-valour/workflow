@@ -36,6 +36,7 @@ class LoopStateTest(unittest.TestCase):
     def git(self, *args: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(["git", "-C", str(self.root), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def snap(self, name: str, secret_patterns_from: str = "", fresh_config_baseline: bool = False,
+             stop_control: tuple[str, str, tuple[str, ...]] | None = None,
              **limits: int) -> subprocess.CompletedProcess[bytes]:
         args = ["python3", str(SCRIPT), "snapshot", "--out", str(self.root.parent / name), "--top", str(self.root),
                 "--common", self.common, "--repo-admin", self.admin]
@@ -43,10 +44,32 @@ class LoopStateTest(unittest.TestCase):
             args += ["--secret-patterns-from", str(self.root.parent / secret_patterns_from)]
         if fresh_config_baseline:
             args += ["--fresh-config-baseline"]
+        if stop_control is not None:
+            worktree, rel, new_dirs = stop_control
+            args += ["--stop-control-worktree", worktree, "--stop-control-rel", rel]
+            for directory in new_dirs:
+                args += ["--stop-control-new-dir", directory]
         for key, value in limits.items(): args += ["--" + key.replace("_", "-"), str(value)]
         return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def compare(self, a: str, b: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(["python3", str(SCRIPT), "compare", "--before", str(self.root.parent / a), "--after", str(self.root.parent / b)], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def derive_removed(self, source: str, out: str, removed: pathlib.Path,
+                       own: pathlib.Path | None = None) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(["python3", str(SCRIPT), "derive-removed-worktree",
+                               "--state", str(self.root.parent / source), "--out", str(self.root.parent / out),
+                               "--removed-worktree", str(removed), "--own-worktree", str(own or removed)],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def preflight(self, name: str) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.run(["python3", str(SCRIPT), "preflight", "--state", str(self.root.parent / name),
+                               "--top", str(self.root), "--common", self.common, "--repo-admin", self.admin],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def digest(self, name: str, **limits: int) -> subprocess.CompletedProcess[bytes]:
+        args = ["python3", str(SCRIPT), "state-digest", "--state", str(self.root.parent / name)]
+        for key, value in limits.items(): args += ["--" + key.replace("_", "-"), str(value)]
+        return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
 
     def changed(self, mutate) -> subprocess.CompletedProcess[bytes]:
         self.assertEqual(0, self.snap("before.json").returncode)
@@ -65,6 +88,85 @@ class LoopStateTest(unittest.TestCase):
         secret = next(item for item in state["worktree_contents"][0]["files"] if item["path"] == ".env")
         self.assertTrue(secret["secret"])
         self.assertNotIn("sha256", secret)
+
+    def test_stop_control_only_normalizes_the_initially_absent_empty_leaf_chain(self) -> None:
+        control = (str(self.root), ".claude/loop.stop", (".claude",))
+        self.assertEqual(0, self.snap("stop-base.json", stop_control=control).returncode)
+        state = json.loads((self.root.parent / "stop-base.json").read_text())
+        self.assertEqual({"worktree": str(self.root), "rel": ".claude/loop.stop", "new_dirs": [".claude"]},
+                         state["stop_control"])
+        (self.root / ".claude").mkdir(); (self.root / ".claude/loop.stop").write_text("")
+        self.assertEqual(0, self.snap("stop-empty.json", "stop-base.json", stop_control=control).returncode)
+        self.assertEqual(0, self.compare("stop-base.json", "stop-empty.json").returncode)
+        # Restart plumbing may restore only the exact descriptor from the
+        # bounded held state.  The shell passes this to snapshot before it
+        # observes the now-existing control leaf.
+        held = subprocess.run(["python3", str(SCRIPT), "stop-control", "--state", str(self.root.parent / "stop-base.json")],
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, held.returncode, held.stderr.decode())
+        self.assertEqual([str(self.root), ".claude/loop.stop", ".claude"],
+                         [part.decode() for part in held.stdout.split(b"\0") if part])
+        broken = json.loads((self.root.parent / "stop-base.json").read_text())
+        broken["stop_control"] = {"worktree": str(self.root), "rel": "../other", "new_dirs": []}
+        (self.root.parent / "stop-broken.json").write_text(json.dumps(broken))
+        invalid = subprocess.run(["python3", str(SCRIPT), "stop-control", "--state", str(self.root.parent / "stop-broken.json")],
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(20, invalid.returncode)
+        self.assertEqual(b"", invalid.stdout)
+        # A nonempty control file is visible but never content-hashed while the
+        # loop is deciding whether to stop.
+        (self.root / ".claude/loop.stop").write_text("stop\n")
+        self.assertEqual(0, self.snap("stop-nonempty.json", "stop-base.json", stop_control=control).returncode)
+        nonempty = json.loads((self.root.parent / "stop-nonempty.json").read_text())
+        row = next(item for item in nonempty["worktree_contents"][0]["files"] if item["path"] == ".claude/loop.stop")
+        self.assertNotIn("sha256", row)
+        self.assertEqual(1, self.compare("stop-base.json", "stop-nonempty.json").returncode)
+        # The missing-chain exception has no wildcard effect: a sibling makes
+        # the empty leaf visible as a normal worktree change.
+        (self.root / ".claude/loop.stop").write_text(""); (self.root / ".claude/sibling").write_text("x")
+        self.assertEqual(0, self.snap("stop-sibling.json", "stop-base.json", stop_control=control).returncode)
+        self.assertEqual(1, self.compare("stop-base.json", "stop-sibling.json").returncode)
+
+    def test_stop_control_rejects_existing_leaf_and_prior_descriptor_substitution(self) -> None:
+        (self.root / "README.stop").write_text("")
+        existing = (str(self.root), "README.stop", ())
+        self.assertEqual(20, self.snap("existing-stop.json", stop_control=existing).returncode)
+        control = (str(self.root), "new.stop", ())
+        self.assertEqual(0, self.snap("control-base.json", stop_control=control).returncode)
+        changed = (str(self.root), "other.stop", ())
+        result = self.snap("control-tampered.json", "control-base.json", stop_control=changed)
+        self.assertEqual(20, result.returncode)
+        self.assertIn("停止ファイルの基準".encode(), result.stderr)
+        # A completed-run boundary deliberately establishes a new control
+        # plan.  It is not an in-flight exemption and still requires the new
+        # leaf to be absent.
+        self.assertEqual(0, self.snap("control-fresh.json", "control-base.json",
+                                     fresh_config_baseline=True, stop_control=changed).returncode)
+
+    def test_stop_control_overrides_secret_classification_without_hashing(self) -> None:
+        control = (str(self.root), ".env", ())
+        (self.root / ".env").unlink()
+        self.assertEqual(0, self.snap("secret-stop-base.json", stop_control=control).returncode)
+        (self.root / ".env").write_text("")
+        self.assertEqual(0, self.snap("secret-stop-empty.json", "secret-stop-base.json", stop_control=control).returncode)
+        self.assertEqual(0, self.compare("secret-stop-base.json", "secret-stop-empty.json").returncode)
+        (self.root / ".env").write_text("never hash this control contents")
+        self.assertEqual(0, self.snap("secret-stop-nonempty.json", "secret-stop-base.json", stop_control=control).returncode)
+        row = next(item for item in json.loads((self.root.parent / "secret-stop-nonempty.json").read_text())
+                   ["worktree_contents"][0]["files"] if item["path"] == ".env")
+        self.assertNotIn("sha256", row); self.assertNotIn("secret", row)
+
+    def test_preflight_checks_held_graph_before_startup_git(self) -> None:
+        self.assertEqual(0, self.snap("preflight.json").returncode)
+        self.assertEqual(0, self.preflight("preflight.json").returncode)
+        target = self.root.parent / "would-be-include"; target.write_text("[x]\nsecret = never-read\n")
+        config = pathlib.Path(self.common) / "config"
+        with config.open("a") as fh:
+            fh.write(f"\n[include]\n\tpath = {target}\n")
+        result = self.preflight("preflight.json")
+        self.assertEqual(20, result.returncode)
+        self.assertIn("config".encode(), result.stderr)
+        self.assertNotIn(b"secret = never-read", result.stderr)
 
     def test_prior_secret_patterns_keep_each_existing_worktree_metadata_only(self) -> None:
         other = self.root.parent / "human"
@@ -124,6 +226,112 @@ class LoopStateTest(unittest.TestCase):
                                   "--after", str(self.root.parent / "own-parent-c.json"), "--self-worktree", str(own),
                                   "--self-ref", "refs/heads/task/demo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, compare.returncode, compare.stdout.decode() + compare.stderr.decode())
+
+    def test_parent_verified_exact_removed_worktree_is_pruned_but_not_other_rows(self) -> None:
+        own = self.root.parent / "removed-parent-owned"
+        human = self.root.parent / "other-starting-human"
+        # This human checkout already exists at the start and must remain in
+        # the verified state: it is not hidden by the parent's exact removal.
+        self.git("worktree", "add", "-q", "--detach", str(human), "HEAD")
+        self.assertEqual(0, self.snap("removed-before.json").returncode)
+        self.git("worktree", "add", "-q", "--detach", str(own), "HEAD")
+        admin = subprocess.run(["git", "-C", str(own), "rev-parse", "--path-format=absolute", "--git-dir"],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        with_own = ["python3", str(SCRIPT), "snapshot", "--out", str(self.root.parent / "removed-with-own.json"),
+                    "--top", str(self.root), "--common", self.common, "--repo-admin", self.admin,
+                    "--exclude-worktree", str(own), "--wt-admin", admin,
+                    "--secret-patterns-from", str(self.root.parent / "removed-before.json")]
+        self.assertEqual(0, subprocess.run(with_own, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode)
+        self.git("worktree", "remove", "-f", str(own))
+        final = ["python3", str(SCRIPT), "snapshot", "--out", str(self.root.parent / "removed-final.json"),
+                 "--top", str(self.root), "--common", self.common, "--repo-admin", self.admin,
+                 "--exclude-worktree", str(own), "--wt-admin", "-",
+                 "--secret-patterns-from", str(self.root.parent / "removed-with-own.json"),
+                 "--removed-parent-worktree", str(own)]
+        result = subprocess.run(final, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        state = json.loads((self.root.parent / "removed-final.json").read_text())
+        paths = {row["path"] for row in state["worktree_configs"]}
+        self.assertNotIn(str(own), paths); self.assertIn(str(human), paths)
+        # A verified after-state is projected before the final observation.
+        # It keeps every human row, and a later human write is therefore a
+        # strict mismatch instead of a new last-verified baseline.
+        raw_before = (self.root.parent / "removed-with-own.json").read_bytes()
+        projected = self.derive_removed("removed-with-own.json", "removed-expected.json", own)
+        self.assertEqual(0, projected.returncode, projected.stderr.decode())
+        self.assertEqual(raw_before, (self.root.parent / "removed-with-own.json").read_bytes())
+        self.assertEqual(0, self.compare("removed-expected.json", "removed-final.json").returncode)
+        (human / "tracked").write_text("late persistent human change")
+        self.assertEqual(0, self.snap("removed-late.json", "removed-expected.json").returncode)
+        self.assertEqual(1, self.compare("removed-expected.json", "removed-late.json").returncode)
+        wrong_own = self.derive_removed("removed-with-own.json", "removed-wrong-own.json", own, human)
+        self.assertEqual(20, wrong_own.returncode)
+        # A direct, broad attempt to hide the surviving human checkout has no
+        # parent-removal evidence and is rejected.
+        final[-1] = str(human)
+        self.assertEqual(20, subprocess.run(final, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode)
+
+    def test_new_parent_owned_worktree_accepts_only_git_copied_known_config_root(self) -> None:
+        # Git copies the primary worktree's config.worktree into a newly added
+        # linked admin when extensions.worktreeConfig is enabled.  That is a
+        # normal loop-owned transition, but a present arbitrary/link root is
+        # not a new trust source.
+        self.git("config", "extensions.worktreeConfig", "true")
+        self.git("config", "--worktree", "demo.value", "held")
+        self.assertEqual(0, self.snap("own-copy-before.json").returncode)
+        own = self.root.parent / "parent-owned-copied-config"
+        self.git("worktree", "add", "-q", "--detach", str(own), "HEAD")
+        admin = subprocess.run(["git", "-C", str(own), "rev-parse", "--path-format=absolute", "--git-dir"],
+                               check=True, capture_output=True, text=True).stdout.strip()
+        own_config = pathlib.Path(admin) / "config.worktree"
+        self.assertTrue(own_config.is_file())
+        args = ["python3", str(SCRIPT), "snapshot", "--out", str(self.root.parent / "own-copy-ok.json"),
+                "--top", str(self.root), "--common", self.common, "--repo-admin", self.admin,
+                "--exclude-worktree", str(own), "--wt-admin", admin,
+                "--secret-patterns-from", str(self.root.parent / "own-copy-before.json")]
+        accepted = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, accepted.returncode, accepted.stderr.decode())
+        state = json.loads((self.root.parent / "own-copy-ok.json").read_text())
+        effective = next(row["effective"] for row in state["worktree_configs"] if row["path"] == str(own))
+        candidate = next(row for row in effective["candidates"] if row["kind"] == "worktree")
+        self.assertEqual("present", candidate["state"])
+        own_config.write_text("[demo]\nvalue = replaced\n")
+        rejected = subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(20, rejected.returncode)
+        self.assertIn(b"config", rejected.stderr)
+
+    def test_new_parent_owned_worktree_accepts_config_copy_from_linked_starting_admin(self) -> None:
+        # `git worktree add` inherits config.worktree from the checkout that
+        # issued it.  A linked human checkout therefore is the exact held
+        # source, rather than common/config.worktree.
+        self.git("config", "extensions.worktreeConfig", "true")
+        human = self.root.parent / "human-copy-source"
+        self.git("worktree", "add", "-q", "--detach", str(human), "HEAD")
+        subprocess.run(["git", "-C", str(human), "config", "--worktree", "demo.value", "human-held"], check=True)
+        human_admin = subprocess.run(["git", "-C", str(human), "rev-parse", "--path-format=absolute", "--git-dir"],
+                                     check=True, capture_output=True, text=True).stdout.strip()
+        before = self.root.parent / "linked-copy-before.json"
+        baseline = ["python3", str(SCRIPT), "snapshot", "--out", str(before), "--top", str(human),
+                    "--common", self.common, "--repo-admin", human_admin]
+        self.assertEqual(0, subprocess.run(baseline, stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode)
+        own = self.root.parent / "linked-copy-own"
+        subprocess.run(["git", "-C", str(human), "worktree", "add", "-q", "--detach", str(own), "HEAD"], check=True)
+        own_admin = subprocess.run(["git", "-C", str(own), "rev-parse", "--path-format=absolute", "--git-dir"],
+                                   check=True, capture_output=True, text=True).stdout.strip()
+        human_config = pathlib.Path(human_admin) / "config.worktree"
+        own_config = pathlib.Path(own_admin) / "config.worktree"
+        self.assertTrue(human_config.is_file()); self.assertTrue(own_config.is_file())
+        self.assertEqual(human_config.read_bytes(), own_config.read_bytes())
+        after = self.root.parent / "linked-copy-after.json"
+        current = ["python3", str(SCRIPT), "snapshot", "--out", str(after), "--top", str(human),
+                   "--common", self.common, "--repo-admin", human_admin, "--exclude-worktree", str(own),
+                   "--wt-admin", own_admin, "--secret-patterns-from", str(before)]
+        result = subprocess.run(current, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        own_config.write_text("[demo]\nvalue = replacement\n")
+        rejected = subprocess.run(current, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(20, rejected.returncode)
+        self.assertIn(b"config", rejected.stderr)
 
     def test_new_parent_owned_worktree_rejects_present_config_root_without_opening_it(self) -> None:
         self.assertEqual(0, self.snap("own-root-before.json").returncode)
@@ -323,7 +531,17 @@ class LoopStateTest(unittest.TestCase):
         self.assertEqual(0, self.snap("diag-b.json").returncode)
         result = self.compare("diag-a.json", "diag-b.json")
         self.assertEqual(1, result.returncode)
-        self.assertIn(b"config: +selftest.added=yes", result.stdout)
+        self.assertIn("config の内容が変わった(sha256:".encode(), result.stdout)
+        self.assertIn("設定値は出さない".encode(), result.stdout)
+        self.assertNotIn(b"selftest.added", result.stdout)
+        self.assertNotIn(b"=yes", result.stdout)
+        forged = json.loads((self.root.parent / "diag-b.json").read_text())
+        forged["common_config"]["entry"]["sha256"] = "SECRET-SENTINEL-not-a-digest"
+        (self.root.parent / "diag-forged.json").write_text(json.dumps(forged))
+        result = self.compare("diag-a.json", "diag-forged.json")
+        self.assertEqual(1, result.returncode)
+        self.assertNotIn(b"SECRET-SENTINEL", result.stdout)
+        self.assertIn("内容は出さない".encode(), result.stdout)
 
     def test_git_output_and_empty_directory_enumeration_obey_shared_limits(self) -> None:
         # The Git reader must stop while draining stdout, before retaining an
@@ -888,6 +1106,52 @@ class LoopStateTest(unittest.TestCase):
         self.assertEqual(0, self.snap("good.json").returncode)
         bad = subprocess.run(["python3", str(SCRIPT), "compare", "--before", str(fifo), "--after", str(self.root.parent / "good.json")], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
         self.assertEqual(1, bad.returncode)
+
+    def test_state_digest_reads_exact_regular_bytes_and_rejects_unsafe_paths(self) -> None:
+        import hashlib
+        raw = b'{"schema":3,"normal":"value"}\n'
+        state = self.root.parent / "digest-state.json"; state.write_bytes(raw)
+        good = self.digest("digest-state.json")
+        self.assertEqual(0, good.returncode, good.stderr.decode())
+        self.assertEqual(hashlib.sha256(raw).hexdigest(), good.stdout.decode().strip())
+
+        secret = self.root.parent / "digest-secret"; secret.write_text("SECRET-SENTINEL-must-not-be-read")
+        link = self.root.parent / "digest-link"; os.symlink(secret, link)
+        linked = self.digest("digest-link")
+        self.assertEqual(20, linked.returncode)
+        self.assertNotIn(b"SECRET-SENTINEL", linked.stdout + linked.stderr)
+
+        fifo = self.root.parent / "digest.fifo"; os.mkfifo(fifo)
+        self.assertEqual(20, self.digest("digest.fifo").returncode)
+        self.assertEqual(20, self.digest("digest-state.json", max_bytes=1).returncode)
+        # State is an aggregate: its permitted single-file ceiling is the
+        # total, not max-file-bytes.  Conversely an over-total record is
+        # rejected before read_at/open can touch it.
+        self.assertEqual(0, self.digest("digest-state.json", max_bytes=100, max_file_bytes=1).returncode)
+        with mock.patch.object(LOOP_STATE, "read_at", side_effect=AssertionError("over-total state was opened")):
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.state_digest(str(state), 100, 1, 1_000_000, 10)
+
+        held = self.root.parent / "held-parent"; held.mkdir(); (held / "state.json").write_bytes(raw)
+        alias = self.root.parent / "linked-parent"; os.symlink(held, alias)
+        parent_link = subprocess.run(["python3", str(SCRIPT), "state-digest", "--state", str(alias / "state.json")],
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
+        self.assertEqual(20, parent_link.returncode)
+
+        original_read = LOOP_STATE.os.read; changed = False
+        def mutate_during_read(fd, amount):
+            nonlocal changed
+            block = original_read(fd, amount)
+            if block and not changed:
+                changed = True
+                with state.open("ab") as fh: fh.write(b"changed")
+            return block
+        LOOP_STATE.os.read = mutate_during_read
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.state_digest(str(state), 100, 1_000_000, 1_000_000, 10)
+        finally:
+            LOOP_STATE.os.read = original_read
 
     def test_read_growth_and_lstat_open_replacement_fail_closed(self) -> None:
         target = self.root / "growth"; target.write_bytes(b"a" * 8)

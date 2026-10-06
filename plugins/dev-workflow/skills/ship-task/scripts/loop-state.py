@@ -9,7 +9,6 @@ changes while a child is running.
 from __future__ import annotations
 
 import argparse
-import difflib
 import hashlib
 import json
 import os
@@ -23,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 6
+SCHEMA = 7
 DEFAULT_SECRET_PATHS = (".env", ".env.*", ".dev.vars")
 
 # Keep every helper Git process on the shared publish-path contract.  State
@@ -320,7 +319,157 @@ def bounded_names(parent: int, budget: Budget, label: str) -> list[str]:
     return sorted(names)
 
 
-def tree(root: str, patterns: list[str], budget: Budget) -> list[dict[str, Any]]:
+def _valid_rel_components(value: str) -> list[str]:
+    if not isinstance(value, str) or not value or value.startswith("/"):
+        raise Stop("停止ファイルの相対パスが不正")
+    parts = value.split("/")
+    if any(not part or part in (".", "..") for part in parts):
+        raise Stop("停止ファイルの相対パスが不正")
+    return parts
+
+
+def stop_control_from_args(args: argparse.Namespace, prior: dict[str, Any] | None,
+                           worktree_paths: set[str], budget: Budget) -> dict[str, Any] | None:
+    """Validate the one narrow loop-control exception before walking files.
+
+    This is deliberately a state descriptor, not a general exclude option.  A
+    caller may only describe the initially absent stop leaf under an existing
+    observed worktree, and an in-flight snapshot must use the exact descriptor
+    already stored in the held state.
+    """
+    raw_worktree = getattr(args, "stop_control_worktree", "")
+    rel = getattr(args, "stop_control_rel", "")
+    raw_dirs = getattr(args, "stop_control_new_dir", [])
+    fresh = bool(getattr(args, "fresh_config_baseline", False))
+    if not raw_worktree and not rel and not raw_dirs:
+        if prior is not None and not fresh and prior.get("stop_control") is not None:
+            raise Stop("停止ファイルの基準が欠けている")
+        return None
+    if not raw_worktree or not rel:
+        raise Stop("停止ファイルの基準が不完全")
+    worktree = os.path.realpath(raw_worktree)
+    if not os.path.isabs(raw_worktree) or worktree not in {os.path.realpath(path) for path in worktree_paths}:
+        raise Stop("停止ファイルの worktree が観察対象でない")
+    parts = _valid_rel_components(rel)
+    dirs: list[str] = []
+    for value in raw_dirs:
+        dparts = _valid_rel_components(value)
+        joined = "/".join(dparts)
+        if joined != value or len(dparts) >= len(parts) or dparts != parts[:len(dparts)]:
+            raise Stop("停止ファイルの新規ディレクトリが不正")
+        dirs.append(joined)
+    expected_dirs = ["/".join(parts[:i]) for i in range(1, len(parts))]
+    if dirs and dirs != expected_dirs[-len(dirs):]:
+        raise Stop("停止ファイルの新規ディレクトリが連続していない")
+    descriptor: dict[str, Any] = {"worktree": worktree, "rel": rel, "new_dirs": dirs}
+    if prior is not None and not fresh:
+        held = prior.get("stop_control")
+        if held != descriptor:
+            raise Stop("停止ファイルの基準が周の途中で変わった")
+        return descriptor
+
+    # Only an absent leaf can establish a baseline.  Walk the already-existing
+    # prefix with directory fds; a direct caller cannot use an arbitrary empty
+    # in-tree file as a content-exclusion switch.
+    fd = open_dir_path(worktree)
+    try:
+        missing: list[str] = []
+        for index, part in enumerate(parts):
+            try:
+                before = os.stat(part, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                missing = ["/".join(parts[:i]) for i in range(index + 1, len(parts))]
+                break
+            if index == len(parts) - 1:
+                raise Stop("停止ファイルは開始時に無い必要がある")
+            if not stat.S_ISDIR(before.st_mode):
+                raise Stop("停止ファイルの親が通常ディレクトリでない")
+            nxt = os.open(part, DIR_FLAGS, dir_fd=fd)
+            try:
+                if not same(before, os.fstat(nxt)):
+                    raise Stop("停止ファイルの親が差し替わった")
+            except Exception:
+                os.close(nxt)
+                raise
+            os.close(fd); fd = nxt
+        if missing != dirs:
+            raise Stop("停止ファイルの新規ディレクトリが開始時と合わない")
+    finally:
+        os.close(fd)
+    return descriptor
+
+
+def held_stop_control(path: str, items: int, total: int, one: int, seconds: int) -> dict[str, Any] | None:
+    """Read only a bounded saved descriptor for shell restart plumbing."""
+    prior = read_state(path, items, total, one, seconds)
+    if prior.get("schema") != SCHEMA:
+        raise Stop("前の状態が新しい必須欄を持たない")
+    control = prior.get("stop_control")
+    if control is None:
+        return None
+    if not isinstance(control, dict) or set(control) != {"worktree", "rel", "new_dirs"}:
+        raise Stop("停止ファイルの基準を読めない")
+    worktree, rel, dirs = control.get("worktree"), control.get("rel"), control.get("new_dirs")
+    if not isinstance(worktree, str) or not os.path.isabs(worktree) or not isinstance(rel, str) or not isinstance(dirs, list):
+        raise Stop("停止ファイルの基準を読めない")
+    parts = _valid_rel_components(rel)
+    expected = ["/".join(parts[:i]) for i in range(1, len(parts))]
+    if not all(isinstance(value, str) and _valid_rel_components(value) == value.split("/") for value in dirs):
+        raise Stop("停止ファイルの基準を読めない")
+    if dirs and dirs != expected[-len(dirs):]:
+        raise Stop("停止ファイルの基準を読めない")
+    return {"worktree": os.path.realpath(worktree), "rel": rel, "new_dirs": dirs}
+
+
+def normalize_stop_control(entries: list[dict[str, Any]], control: dict[str, Any]) -> list[dict[str, Any]]:
+    """Erase only the safe empty stop leaf and its initially absent sole chain."""
+    by_path = {row.get("path"): row for row in entries if isinstance(row, dict) and isinstance(row.get("path"), str)}
+    rel, dirs = control["rel"], control["new_dirs"]
+    # Creating an allowed leaf necessarily changes mtime/ctime (and commonly
+    # size) on its already-existing parent.  Keep that parent as an observed
+    # directory, but compare its stable identity/mode only; replacement or a
+    # permission/type change remains a difference, while a sibling remains an
+    # explicit entry below it.  Without this narrow metadata normalization the
+    # control file could never be created under an existing TOP directory.
+    first_missing = dirs[0] if dirs else rel
+    stable_parent = first_missing.rsplit("/", 1)[0] if "/" in first_missing else "."
+    stable_paths = ["."]
+    if stable_parent != ".":
+        stable_paths.extend("/".join(stable_parent.split("/")[:index])
+                            for index in range(1, len(stable_parent.split("/")) + 1))
+    for path in stable_paths:
+        row = by_path.get(path)
+        if isinstance(row, dict) and row.get("kind") == "dir" and isinstance(row.get("meta"), dict):
+            old = row["meta"]
+            row["meta"] = {key: old.get(key) for key in ("mode", "dev", "ino")}
+    leaf = by_path.get(rel)
+    if leaf is None:
+        # The initial absent state is canonical only while none of the
+        # initially-missing directories remains behind.
+        return entries if any(path in by_path for path in dirs) else entries
+    if leaf.get("kind") != "file" or leaf.get("meta", {}).get("size") != 0:
+        return entries
+    # A special leaf never receives sha256 in tree(), so its presence remains
+    # a visible strict difference without opening its bytes.
+    if "sha256" in leaf or leaf.get("secret"):
+        return entries
+    removable = {rel}
+    for index in range(len(dirs) - 1, -1, -1):
+        path = dirs[index]
+        row = by_path.get(path)
+        if not isinstance(row, dict) or row.get("kind") != "dir":
+            return entries
+        next_path = rel if index == len(dirs) - 1 else dirs[index + 1]
+        prefix = path + "/"
+        children = [candidate for candidate in by_path if candidate.startswith(prefix)
+                    and "/" not in candidate[len(prefix):]]
+        if children != [next_path]:
+            return entries
+        removable.add(path)
+    return [row for row in entries if row.get("path") not in removable]
+
+
+def tree(root: str, patterns: list[str], budget: Budget, stop_control: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     def walk(parent: int, name: str, rel: str, inherited_secret: bool = False) -> None:
         try: before = os.stat(name, dir_fd=parent, follow_symlinks=False)
@@ -330,7 +479,12 @@ def tree(root: str, patterns: list[str], budget: Budget) -> list[dict[str, Any]]
         # metadata.  Continue enumeration through it so add/remove/type/size
         # changes are still observed, but never open descendants for hashing.
         secret = inherited_secret or secret_path(rel, patterns)
-        if secret: item["secret"] = True
+        stop_leaf = stop_control is not None and rel == stop_control["rel"]
+        if stop_leaf and k == "file":
+            # A nonempty control leaf must be visible as a difference but its
+            # bytes are neither needed nor safe to hash before the loop stops.
+            pass
+        elif secret: item["secret"] = True
         elif k == "file": item["sha256"] = hash_at(parent, name, before, budget)
         elif k == "link": item["target"] = os.readlink(name, dir_fd=parent)
         elif k in ("char", "block"): item["rdev"] = before.st_rdev
@@ -351,7 +505,7 @@ def tree(root: str, patterns: list[str], budget: Budget) -> list[dict[str, Any]]
         walk(root_parent, name, ".")
     finally:
         if root_parent >= 0: os.close(root_parent)
-    return result
+    return normalize_stop_control(result, stop_control) if stop_control is not None else result
 
 
 def run_git(top: str, *args: str, budget: Budget | None = None,
@@ -981,7 +1135,8 @@ def config_candidates(top: str, common: str, git_dir: str, budget: Budget) -> li
 
 def preflight_config_candidates(top: str, common: str, git_dir: str,
                                 expected: dict[tuple[str, str], dict[str, Any]], budget: Budget,
-                                *, allow_new_worktree_root: bool = False) -> None:
+                                *, allow_new_worktree_root: bool = False,
+                                copy_source_git_dir: str | None = None) -> dict[str, dict[str, Any]]:
     """Compare setup roots before opening an appeared or retargeted root."""
     held_systems = {path for (kind, path) in expected if kind == "system"}
     if len(held_systems) > 1:
@@ -994,13 +1149,56 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
     relevant = {key: expected[key] for key in paths if key in expected}
     missing = set(paths) - set(relevant)
     own_root = ("worktree", os.path.abspath(os.path.join(git_dir, "config.worktree")))
+    added_origins: dict[str, dict[str, Any]] = {}
     if missing:
         # The parent supplied this exact new admin for its own just-created
-        # checkout.  Git normally leaves config.worktree absent; accept only
-        # that absence, never a new file or link, and never a human checkout.
-        if not allow_new_worktree_root or missing != {own_root} or os.path.lexists(own_root[1]):
+        # checkout.  Git normally leaves config.worktree absent.  When
+        # extensions.worktreeConfig is enabled it instead copies the held
+        # config.worktree of the repository from which the parent issued
+        # `git worktree add`.  That is often common, but a linked human
+        # checkout copies its own admin/config.worktree.  Accept only that
+        # exact held regular source; a human checkout, link, or unrelated
+        # present file still has no basis and must not reach ordinary Git
+        # setup.
+        if not allow_new_worktree_root or missing != {own_root}:
             raise Stop("config 候補が周の途中で変わった")
-        paths = [key for key in paths if key != own_root]
+        if not os.path.lexists(own_root[1]):
+            paths = [key for key in paths if key != own_root]
+        else:
+            if not copy_source_git_dir:
+                raise Stop("config 候補が周の途中で変わった")
+            source_admin = os.path.abspath(copy_source_git_dir)
+            source_kind = "common" if source_admin == os.path.abspath(common) else "worktree"
+            source_key = (source_kind, os.path.abspath(os.path.join(source_admin, "config.worktree")))
+            copied_from = expected.get(source_key)
+            if not isinstance(copied_from, dict) or copied_from.get("state") != "present":
+                raise Stop("config 候補が周の途中で変わった")
+            source = copied_from.get("entry")
+            if not isinstance(source, dict):
+                raise Stop("保存済み config の形式を読めない")
+            # Do not permit a newly-created link: it could redirect the first
+            # ordinary Git setup to arbitrary bytes.  A regular Git copy is
+            # bounded and compared only with that held source digest.
+            try:
+                fd, before = open_regular_path(own_root[1], budget)
+            except Stop:
+                raise Stop("config 候補が周の途中で変わった") from None
+            try:
+                raw = read_open_regular(fd, before, budget)
+            finally:
+                os.close(fd)
+            source_file = source.get("target_entry") if source.get("kind") == "link" else source
+            if (not isinstance(source_file, dict)
+                    or source_file.get("kind") != "file"
+                    or source_file.get("sha256") != hashlib.sha256(raw).hexdigest()
+                    or source_file.get("meta", {}).get("mode") != meta(before).get("mode")):
+                raise Stop("config 候補が周の途中で変わった")
+            added_origins[own_root[1]] = {"path": "config:" + own_root[1], "kind": "file",
+                                          "meta": meta(before), "sha256": hashlib.sha256(raw).hexdigest()}
+            # This root has no prior candidate record: it was just created by
+            # the parent worktree-add.  Its copied form has been checked above,
+            # and config_snapshot() will retain its own independent record.
+            paths = [key for key in paths if key != own_root]
     for kind, path in paths:
         saved = relevant[(kind, path)]
         exists = os.path.lexists(path)
@@ -1019,6 +1217,7 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
                                    require_exact=True, parse=False)
         if {"kind": kind, "path": path, "state": "present", "entry": item} != saved:
             raise Stop("config 候補が周の途中で変わった")
+    return added_origins
 
 def config_snapshot(top: str, common: str, budget: Budget,
                     trusted: dict[str, Any] | None = None, *, git_dir: str | None = None) -> dict[str, Any]:
@@ -1219,6 +1418,75 @@ def prior_state(args: argparse.Namespace) -> dict[str, Any] | None:
     return prior
 
 
+
+def remove_exact_worktree_rows(state: dict[str, Any], removed: str) -> dict[str, Any]:
+    """Return a held state without exactly one known worktree in four rows.
+
+    This is a projection of an already verified observation.  It never looks
+    at the current filesystem, so the caller can use it as the expected state
+    after the parent has successfully removed only its own checkout.
+    """
+    if state.get("schema") != SCHEMA or not isinstance(removed, str) or not os.path.isabs(removed):
+        raise Stop("親が削除した worktree の記録が不正")
+    if os.path.normpath(removed) != removed:
+        raise Stop("親が削除した worktree の記録が不正")
+    result = dict(state)
+    for key, path_key in (("worktrees", "worktree"), ("worktree_contents", "path"),
+                          ("worktree_configs", "path"), ("secret_patterns", "path")):
+        rows = state.get(key)
+        if not isinstance(rows, list):
+            raise Stop("前の worktree の状態を読めない")
+        matched = 0
+        kept: list[Any] = []
+        for row in rows:
+            if not isinstance(row, dict) or not isinstance(row.get(path_key), str):
+                raise Stop("前の worktree の状態を読めない")
+            if row[path_key] == removed:
+                matched += 1
+            else:
+                kept.append(row)
+        if matched != 1:
+            raise Stop("親が削除した worktree の記録が基準と一致しない")
+        result[key] = kept
+    return result
+
+
+def derive_removed_worktree(args: argparse.Namespace) -> None:
+    """Write the exact expected state after an already verified own removal."""
+    if args.own_worktree != args.removed_worktree:
+        raise Stop("親が削除した worktree の記録が基準と一致しない")
+    held = read_state(args.state, args.max_items, args.max_bytes,
+                      args.max_file_bytes, args.max_seconds)
+    write_state(args.out, remove_exact_worktree_rows(held, args.removed_worktree))
+
+
+def without_exact_removed_parent_worktree(prior: dict[str, Any] | None, args: argparse.Namespace) -> dict[str, Any] | None:
+    """Omit one checkout only after this parent reports its successful removal.
+
+    This is not a lock-prefix exemption: the shell supplies the physical path
+    only after its own ``git worktree remove`` returned zero, and it must equal
+    the current exact excluded checkout.  Any pre-existing human or another
+    task checkout remains in the observation and is still fail-closed.
+    """
+    removed_args = getattr(args, "removed_parent_worktree", [])
+    if not removed_args:
+        return prior
+    if prior is None or args.wt_admin != "-" or not args.exclude_worktree:
+        raise Stop("親が削除した worktree の記録が基準と一致しない")
+    if len(removed_args) != 1 or not isinstance(removed_args[0], str) or not os.path.isabs(removed_args[0]):
+        raise Stop("親が削除した worktree の記録が不正")
+    removed = os.path.realpath(removed_args[0])
+    if removed != os.path.realpath(args.exclude_worktree) or os.path.lexists(removed):
+        raise Stop("親が削除した worktree の記録が基準と一致しない")
+    # Snapshot records physical paths.  Match that held exact spelling as
+    # well as the current physical removal evidence; never turn this into a
+    # broad lock/name exemption.
+    for row in prior.get("worktrees", []):
+        if isinstance(row, dict) and row.get("worktree") == removed:
+            return remove_exact_worktree_rows(prior, removed)
+    raise Stop("親が削除した worktree の記録が基準と一致しない")
+
+
 def prior_secret_patterns(prior: dict[str, Any] | None) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """Load the prior safe union before any current worktree bytes are opened."""
     if prior is None:
@@ -1356,7 +1624,8 @@ def preflight_trusted_configs(top: str, trusted: dict[str, Any] | None,
                               candidates: dict[str, dict[str, Any]] | None, budget: Budget,
                               expected_git_dir: str | None = None, *, common: str | None = None,
                               expected_branch: str | None = None,
-                              allow_new_worktree_root: bool = False) -> None:
+                              allow_new_worktree_root: bool = False,
+                              copy_source_git_dir: str | None = None) -> None:
     """Validate the held config graph before an ordinary Git command can load it.
 
     ``git config --file /proc/self/fd/... --no-includes`` only parses the fd
@@ -1374,8 +1643,13 @@ def preflight_trusted_configs(top: str, trusted: dict[str, Any] | None,
     if held_git_dir(top, budget) != os.path.abspath(expected_git_dir):
         raise Stop("worktree の git-dir が基準から変わった")
     held_common_dir(top, expected_git_dir, common, budget)
-    preflight_config_candidates(top, common, expected_git_dir, candidates, budget,
-                                allow_new_worktree_root=allow_new_worktree_root)
+    added_origins = preflight_config_candidates(top, common, expected_git_dir, candidates, budget,
+                                                allow_new_worktree_root=allow_new_worktree_root,
+                                                copy_source_git_dir=copy_source_git_dir)
+    for path, item in added_origins.items():
+        if path in trusted and trusted[path] != item:
+            raise Stop("保存済み config の状態が矛盾している")
+        trusted[path] = item
     prepared: dict[str, tuple[dict[str, Any], list[tuple[str, str | None]]]] = {}
     effective: list[tuple[str, str | None]] = []
     # Complete a no-Git identity/hash pass before *any* parser is launched.
@@ -1434,8 +1708,8 @@ def index_snapshot(admin: str, worktree: str, budget: Budget) -> dict[str, Any]:
     return result
 
 
-def read_state(path: str, items: int, total: int, one: int, seconds: int) -> dict[str, Any]:
-    """Read a saved state as an untrusted filesystem object, never as a pathname."""
+def read_state_bytes(path: str, items: int, total: int, one: int, seconds: int) -> bytes:
+    """Read saved-state bytes through a held parent fd and a bounded nofollow fd."""
     parent_path, name = os.path.split(os.path.abspath(path))
     parent = open_dir_path(parent_path)
     try:
@@ -1445,12 +1719,30 @@ def read_state(path: str, items: int, total: int, one: int, seconds: int) -> dic
             raise Stop("状態を読めない") from exc
         if not stat.S_ISREG(before.st_mode):
             raise Stop("状態が通常ファイルでない")
+        # A state aggregates observations, so it may legitimately exceed the
+        # ordinary per-file ceiling.  Its ceiling is the caller's total
+        # budget, and this check must happen before open: otherwise a link or
+        # sentinel substituted at this path would be accessed before the
+        # bounded reader rejects the over-limit size.
+        if before.st_size > total:
+            raise Stop("状態の読取量が上限を超えた")
         # A state file aggregates many permitted files, so its own single-file
         # ceiling is the caller's total ceiling.  It remains bounded and is never
         # a reason to silently skip comparison.
         raw = read_at(parent, name, before, Budget(items, total, max(total, one), seconds))
     finally:
         os.close(parent)
+    return raw
+
+
+def state_digest(path: str, items: int, total: int, one: int, seconds: int) -> str:
+    """Digest exact saved-state bytes without following links or parsing JSON."""
+    return hashlib.sha256(read_state_bytes(path, items, total, one, seconds)).hexdigest()
+
+
+def read_state(path: str, items: int, total: int, one: int, seconds: int) -> dict[str, Any]:
+    """Read a saved state as an untrusted filesystem object, never as a pathname."""
+    raw = read_state_bytes(path, items, total, one, seconds)
     try:
         value = json.loads(raw)
     except (UnicodeDecodeError, ValueError) as exc:
@@ -1532,7 +1824,7 @@ def config_file_snapshot(top: str, path: str, rel: str, budget: Budget,
 
 def snapshot(args: argparse.Namespace) -> None:
     budget = Budget(args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
-    prior = prior_state(args)
+    prior = without_exact_removed_parent_worktree(prior_state(args), args)
     previous_patterns, previous_patterns_by_git_dir = prior_secret_patterns(prior)
     trusted_configs = trusted_config_origins(prior, args.fresh_config_baseline)
     trusted_candidates = trusted_config_candidates(prior, args.fresh_config_baseline)
@@ -1544,6 +1836,7 @@ def snapshot(args: argparse.Namespace) -> None:
     preflight_trusted_configs(args.top, trusted_configs, trusted_candidates, budget, top_expected,
                               common=args.common, expected_branch=prior_branches.get(args.top))
     wts = worktrees(args.top, budget)
+    control = stop_control_from_args(args, prior, {row["worktree"] for row in wts}, budget)
     if prior is not None and not args.fresh_config_baseline:
         old_paths = {row["worktree"] for row in prior.get("worktrees", [])
                      if isinstance(row, dict) and isinstance(row.get("worktree"), str)}
@@ -1576,7 +1869,8 @@ def snapshot(args: argparse.Namespace) -> None:
         expected_branch = None if own_path else prior_branches.get(path)
         preflight_trusted_configs(path, trusted_configs, trusted_candidates, budget, expected,
                                   common=args.common, expected_branch=expected_branch,
-                                  allow_new_worktree_root=own_new)
+                                  allow_new_worktree_root=own_new,
+                                  copy_source_git_dir=args.repo_admin if own_new else None)
     contents, configs, secret_patterns = [], [], []
     for wt in wts:
         path = wt["worktree"]
@@ -1604,13 +1898,15 @@ def snapshot(args: argparse.Namespace) -> None:
                                          else {"state": "common-refs-covered"}),
                         "effective": config_snapshot(path, args.common, budget, trusted_configs, git_dir=git_dir)})
         if os.path.realpath(path) != os.path.realpath(args.exclude_worktree or ""):
-            content["files"] = tree(path, patterns, budget)
+            matching_control = control if control is not None and os.path.realpath(path) == control["worktree"] else None
+            content["files"] = tree(path, patterns, budget, matching_control)
         else:
             content["files"] = {"state": "self-worktree-content-excluded"}
         contents.append(content)
     state = {"schema": SCHEMA, "refs": refs(args.top, budget), "worktrees": wts,
              "worktree_contents": contents, "worktree_configs": configs,
              "secret_patterns": secret_patterns,
+             "stop_control": control,
              "config": config_snapshot(args.top, args.common, budget, trusted_configs, git_dir=args.repo_admin),
              "common_admin": common_admin_snapshot(args.common, budget),
              "common_config": config_file_snapshot(args.top, os.path.join(args.common, "config"), "config", budget, trusted_configs),
@@ -1620,13 +1916,53 @@ def snapshot(args: argparse.Namespace) -> None:
     write_state(args.out, state)
 
 
+def preflight(args: argparse.Namespace) -> None:
+    """Check the held config graph without discovering repository state by Git.
+
+    This entry point is for a marked, interrupted iteration.  It intentionally
+    reads only the parent-held snapshot and its already-recorded worktree
+    contexts, so a changed include cannot be reached by a startup `git
+    rev-parse` or `git worktree list` before the shell decides to stop.
+    """
+    budget = Budget(args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
+    prior = read_state(args.state, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
+    if prior.get("schema") != SCHEMA:
+        raise Stop("前の状態が新しい必須欄を持たない")
+    top = os.path.realpath(args.top)
+    common = os.path.realpath(args.common)
+    admin = os.path.abspath(args.repo_admin)
+    trusted = trusted_config_origins(prior, False)
+    candidates = trusted_config_candidates(prior, False)
+    git_dirs = prior_worktree_git_dirs(prior)
+    branches = prior_worktree_branches(prior)
+    rows = prior.get("worktrees")
+    if not isinstance(rows, list) or trusted is None or candidates is None:
+        raise Stop("前の config の状態を読めない")
+    if git_dirs.get(top) != admin:
+        raise Stop("保存済み状態の起動元と現在の管理パスが一致しない")
+    for kind, path in (("common", os.path.join(common, "config")),
+                       ("common", os.path.join(common, "config.worktree"))):
+        if (kind, os.path.abspath(path)) not in candidates:
+            raise Stop("保存済み状態の common config が現在の管理パスと一致しない")
+    for row in rows:
+        if not isinstance(row, dict) or not isinstance(row.get("worktree"), str):
+            raise Stop("前の worktree の状態を読めない")
+        context = row["worktree"]
+        expected = git_dirs.get(context)
+        if expected is None:
+            raise Stop("worktree の git-dir の基準が無い")
+        own = isinstance(row.get("locked"), str) and row["locked"].startswith("dev-workflow-loop: ")
+        preflight_trusted_configs(context, trusted, candidates, budget, expected,
+                                  common=common, expected_branch=None if own else branches.get(context))
+
+
 def compare(args: argparse.Namespace) -> int:
     try:
         before = read_state(args.before, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
         after = read_state(args.after, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
     except Stop:
         print("差分: 状態を読めない", file=sys.stdout); return 1
-    required = {"schema", "refs", "worktrees", "worktree_contents", "worktree_configs", "secret_patterns", "config", "common_admin", "common_config", "common_config_worktree", "repo_admin"}
+    required = {"schema", "refs", "worktrees", "worktree_contents", "worktree_configs", "secret_patterns", "stop_control", "config", "common_admin", "common_config", "common_config_worktree", "repo_admin"}
     if not isinstance(before, dict) or before.get("schema") != SCHEMA or not required <= before.keys():
         if isinstance(before, dict) and "repo_admin" not in before:
             print("差分: repo:git-dir: 保存済み状態に人の管理パスが無い(前の起動元の設定を確認する。現在の設定で中断前の基準を補完しない)")
@@ -1705,6 +2041,33 @@ def compare(args: argparse.Namespace) -> int:
     return 1
 
 
+def _config_diagnostic(name: str, left: Any, right: Any) -> str:
+    """Describe a config change without disclosing its keys or values.
+
+    Config rows remain in the held state because equality needs the complete
+    effective configuration.  They are untrusted after a preflight failure,
+    though, and reports must never turn a changed config value into output.
+    The file-content digest is sufficient to distinguish an in-place change
+    from a structural absent/present transition.
+    """
+    if not isinstance(left, dict) or not isinstance(right, dict):
+        return name + " の状態を読めない"
+    if left.get("state") != right.get("state"):
+        return name + " の有無または種類が変わった(内容は出さない)"
+    if left.get("state") != "ok":
+        return name + " が変わった(内容は出さない)"
+    left_entry, right_entry = left.get("entry"), right.get("entry")
+    if not isinstance(left_entry, dict) or not isinstance(right_entry, dict):
+        return name + " の構造が変わった(内容は出さない)"
+    lh, rh = left_entry.get("sha256"), right_entry.get("sha256")
+    valid_hash = lambda value: isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+    if valid_hash(lh) and valid_hash(rh) and lh != rh:
+        return name + f" の内容が変わった(sha256:{lh} → {rh}; 設定値は出さない)"
+    if left_entry.get("kind") != right_entry.get("kind") or left_entry.get("meta") != right_entry.get("meta"):
+        return name + " の構造が変わった(内容は出さない)"
+    return name + " が変わった(内容は出さない)"
+
+
 def diagnostic_diffs(before: dict[str, Any], after: dict[str, Any], required: set[str]) -> list[str]:
     """Preserve actionable config diagnostics while retaining strict equality."""
     out: list[str] = []
@@ -1715,16 +2078,25 @@ def diagnostic_diffs(before: dict[str, Any], after: dict[str, Any], required: se
         out.append("repo:git-dir: 人の管理パスが変わった(前の起動元の設定を確認する。未変更とは判定しない)")
     for name, left, right in configs:
         if left == right: continue
-        if isinstance(left, dict) and isinstance(right, dict) and left.get("state") == right.get("state") == "ok":
-            old = [k if v is None else k + "=" + v for k, v in left.get("entries", [])]
-            new = [k if v is None else k + "=" + v for k, v in right.get("entries", [])]
-            for line in difflib.unified_diff(old, new, lineterm="", n=0):
-                if not line.startswith(("---", "+++", "@@")): out.append(name + ": " + line)
-        else:
-            out.append(name + " が変わった")
+        out.append(_config_diagnostic(name, left, right))
     for key in sorted(required):
         if key not in {"common_config", "common_config_worktree", "repo_admin"} and before.get(key) != after.get(key):
             out.append(f"{key} が変わった")
+    # No extra Git query is safe after a rejected comparison.  Report changed
+    # names from these already-held snapshots, never config values or new reads.
+    if before.get("refs") != after.get("refs"):
+        def ref_rows(value: Any) -> dict[str, Any]:
+            if not isinstance(value, list):
+                return {}
+            return {row["name"]: row for row in value
+                    if isinstance(row, dict) and isinstance(row.get("name"), str)
+                    and row["name"].startswith("refs/") and len(row["name"]) <= 1024
+                    and not any(ord(c) < 33 or ord(c) == 127 for c in row["name"])}
+        left, right = ref_rows(before.get("refs")), ref_rows(after.get("refs"))
+        changed = sorted(name for name in left.keys() | right.keys() if left.get(name) != right.get(name))
+        out.extend(name + ": ref が変わった" for name in changed[:50])
+        if len(changed) > 50:
+            out.append("ほかの ref の差分は保存した状態で確認する")
     return out
 
 
@@ -1736,8 +2108,29 @@ def main() -> int:
     snap.add_argument("--wt-admin", default="-"); snap.add_argument("--exclude-worktree", default="")
     snap.add_argument("--secret-patterns-from", default="")
     snap.add_argument("--fresh-config-baseline", action="store_true")
+    snap.add_argument("--stop-control-worktree", default="")
+    snap.add_argument("--stop-control-rel", default="")
+    snap.add_argument("--stop-control-new-dir", action="append", default=[])
+    snap.add_argument("--removed-parent-worktree", action="append", default=[])
     snap.add_argument("--max-items", type=int, default=100000); snap.add_argument("--max-bytes", type=int, default=1073741824)
     snap.add_argument("--max-file-bytes", type=int, default=67108864); snap.add_argument("--max-seconds", type=int, default=60)
+    control = sub.add_parser("stop-control")
+    control.add_argument("--state", required=True)
+    control.add_argument("--max-items", type=int, default=100000); control.add_argument("--max-bytes", type=int, default=1073741824)
+    control.add_argument("--max-file-bytes", type=int, default=67108864); control.add_argument("--max-seconds", type=int, default=60)
+    pre = sub.add_parser("preflight")
+    for option in ("state", "top", "common", "repo-admin"): pre.add_argument("--" + option, required=True)
+    pre.add_argument("--max-items", type=int, default=100000); pre.add_argument("--max-bytes", type=int, default=1073741824)
+    pre.add_argument("--max-file-bytes", type=int, default=67108864); pre.add_argument("--max-seconds", type=int, default=60)
+    derive = sub.add_parser("derive-removed-worktree")
+    derive.add_argument("--state", required=True); derive.add_argument("--out", required=True)
+    derive.add_argument("--removed-worktree", required=True); derive.add_argument("--own-worktree", required=True)
+    derive.add_argument("--max-items", type=int, default=100000); derive.add_argument("--max-bytes", type=int, default=1073741824)
+    derive.add_argument("--max-file-bytes", type=int, default=67108864); derive.add_argument("--max-seconds", type=int, default=60)
+    digest = sub.add_parser("state-digest")
+    digest.add_argument("--state", required=True)
+    digest.add_argument("--max-items", type=int, default=100000); digest.add_argument("--max-bytes", type=int, default=1073741824)
+    digest.add_argument("--max-file-bytes", type=int, default=67108864); digest.add_argument("--max-seconds", type=int, default=60)
     cmp = sub.add_parser("compare"); cmp.add_argument("--before", required=True); cmp.add_argument("--after", required=True)
     cmp.add_argument("--self-worktree", default=""); cmp.add_argument("--self-ref", default="")
     cmp.add_argument("--max-items", type=int, default=100000); cmp.add_argument("--max-bytes", type=int, default=1073741824)
@@ -1748,6 +2141,29 @@ def main() -> int:
             if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
                 raise Stop("状態観察の上限は正の整数でなければならない")
             snapshot(args)
+            return 0
+        if args.command == "stop-control":
+            if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
+                raise Stop("状態観察の上限は正の整数でなければならない")
+            control = held_stop_control(args.state, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
+            if control is not None:
+                for value in (control["worktree"], control["rel"], *control["new_dirs"]):
+                    sys.stdout.buffer.write(value.encode("utf-8", "surrogateescape") + b"\0")
+            return 0
+        if args.command == "preflight":
+            if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
+                raise Stop("状態観察の上限は正の整数でなければならない")
+            preflight(args)
+            return 0
+        if args.command == "derive-removed-worktree":
+            if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
+                raise Stop("状態観察の上限は正の整数でなければならない")
+            derive_removed_worktree(args)
+            return 0
+        if args.command == "state-digest":
+            if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
+                raise Stop("状態観察の上限は正の整数でなければならない")
+            print(state_digest(args.state, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds))
             return 0
         if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
             raise Stop("状態観察の上限は正の整数でなければならない")

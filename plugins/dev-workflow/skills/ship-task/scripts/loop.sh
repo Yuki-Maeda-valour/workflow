@@ -86,11 +86,22 @@ ITER_NAME=""
 ITER_REL=""
 ITER_BASE=""
 ITER_BASE_SHA=""  # 比べる元のファイルの sha256(照合の前にファイルと突き合わせる)
+ITER_VERIFIED=""      # verify_iteration が通した生の after state
+ITER_VERIFIED_SHA=""  # その生 state を親が保持した sha256
 ITER_PERMLOG=""
 CLEANUP_LEFT=""
 VERIFY_DIFF=""
+SNAPSHOT_DIFF=""
 ABORT_CODE=""
 STOP_MARK_WRITTEN=""
+STATE_GIT_UNSAFE=0  # 状態検査の拒否後は、報告・後片付けのためにも Git で設定を再読しない
+PROMOTION_CRITICAL=0 # verified state を last-verified へ昇格する不可分区間
+DEFERRED_SIGNAL_NAME=""
+DEFERRED_SIGNAL_CODE=""
+STOP_CONTROL_WORKTREE=""
+STOP_CONTROL_REL=""
+STOP_CONTROL_NEW_DIRS=()
+REMOVED_PARENT_WORKTREES=()
 HELD_NAMES=()
 TRACKING_SKIPPED=()
 STARTUP_NOTES=()
@@ -162,7 +173,7 @@ REVIEWS_COPY_LIMIT=52428800 # .claude/reviews を状態ディレクトリへ写�
 HOST_SESSION_VARS=(DEV_WORKFLOW_HOST_CLI CLAUDECODE CODEX_SANDBOX CURSOR_AGENT)
 
 # 全 git 呼び出しの前置き(base-commit.md と同じ。hook・fsmonitor・置換参照を効かせない)
-GIT_PRE=(--no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false)
+GIT_PRE=(--no-pager --no-replace-objects --no-optional-locks -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false)
 
 # ═══════════════════════════════ 関数 ═══════════════════════════════
 
@@ -938,7 +949,11 @@ die() { # $1=終了コード $2=理由コード 残り=説明
 }
 
 stop_mark_guide() {
-  printf '止めの印: %s(差分を確かめ、必要なら元に戻してから、このファイルを消すと次の起動が続く)' "$STOP_MARK"
+  if [ "$STATE_GIT_UNSAFE" = 1 ] && [ -d "$INFLIGHT" ]; then
+    printf '止めの印: %s(未確認の設定・子・作業場所・中断記録を人が確認する。印だけを消しても再開しない)' "$STOP_MARK"
+  else
+    printf '止めの印: %s(差分を確かめ、必要なら元に戻してから、このファイルを消すと次の起動が続く)' "$STOP_MARK"
+  fi
 }
 
 # 止めの印を置く。$3=1 なら周の途中の印を残す(片付けが済んでいないとき。止めの印を消した後の起動で、
@@ -954,8 +969,13 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
     printf '\n## 差分\n\n'
     if [ -n "$2" ]; then printf '%s\n' "$2"; else printf '(無し)\n'; fi
     printf '\n## 消し方\n\n'
-    printf '差分を確かめ、必要なら元に戻してから、このファイルを消す: rm -- %q\n' "$STOP_MARK"
-    if [ "$3" = 1 ]; then
+    if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" = 1 ]; then
+      printf '設定・管理構造を確認できないため、子と中断記録(%s)を自動で片付けていない。\n' "$INFLIGHT"
+      printf '人が実際の子・作業場所・差分を確認して片付け、中断記録を証拠として退避する。その後で止めの印を外す。印だけを消しても再開しない。\n'
+    else
+      printf '差分を確かめ、必要なら元に戻してから、このファイルを消す: rm -- %q\n' "$STOP_MARK"
+    fi
+    if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" != 1 ]; then
       printf '周の途中の印(%s)は残す。止めの印を消した後の起動で、片付けと照合をやり直す\n' "$INFLIGHT"
     fi
   } >"$tmp"
@@ -964,18 +984,185 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
   if [ "$3" != 1 ]; then rm -rf -- "$INFLIGHT"; fi
 }
 
-take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか
-  local own=() prior=() fresh=()
+take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか $5=親削除記録を使わない
+  local own=() prior=() fresh=() control=() removed=() directory path rc=0 err
+  SNAPSHOT_DIFF=""
   [ -z "$ITER_WT" ] || own=(--exclude-worktree "$ITER_WT")
   [ -z "${3:-}" ] || prior=(--secret-patterns-from "$3")
   [ "${4:-0}" != 1 ] || fresh=(--fresh-config-baseline)
+  if [ -n "$STOP_CONTROL_WORKTREE" ]; then
+    control=(--stop-control-worktree "$STOP_CONTROL_WORKTREE" --stop-control-rel "$STOP_CONTROL_REL")
+    for directory in "${STOP_CONTROL_NEW_DIRS[@]}"; do control+=(--stop-control-new-dir "$directory"); done
+  fi
+  if [ "$2" = - ] && [ "${5:-0}" != 1 ]; then
+    for path in "${REMOVED_PARENT_WORKTREES[@]}"; do removed+=(--removed-parent-worktree "$path"); done
+  fi
+  err="$RUN_DIR/loop-state-snapshot.err"
   "$PY_ABS" "$LOOP_STATE_PY" snapshot --out "$1" --top "$TOP" --common "$COMMON" --repo-admin "$REPO_GIT_DIR" --wt-admin "$2" "${own[@]}" \
-    "${prior[@]}" "${fresh[@]}" \
-    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"
+    "${prior[@]}" "${fresh[@]}" "${control[@]}" "${removed[@]}" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS" \
+    2>"$err" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    STATE_GIT_UNSAFE=1
+    if grep -qE 'config|origin|git-dir|commondir|HEAD|worktree' "$err" 2>/dev/null; then
+      SNAPSHOT_DIFF="差分: 保持済み config または worktree の構造が周の途中で変わった(内容は出さない)"
+    else
+      SNAPSHOT_DIFF="差分: 今の状態を安全に控えられない(照合できない)"
+    fi
+    cat "$err" >&2 2>/dev/null || true
+    return "$rc"
+  fi
+  return 0
 }
 
-save_last_verified() { # 最後に照合に通った状態(照合に通ったときだけ更新する)
-  take_snapshot "$LAST_VERIFIED" - "${1:-${ITER_BASE:-}}"
+# 状態 JSON の生バイトを、親ディレクトリから nofollow で開く helper にだけ読ませて
+# digest 化する。シェルの `<state` は link/FIFO を開いてしまうため、ここで使わない。
+state_digest() { # $1=parent-held state pathname
+  local value
+  value="$("$PY_ABS" "$LOOP_STATE_PY" state-digest --state "$1" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" \
+    --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || return 1
+  if [[ ! "$value" =~ ^[0-9a-f]{64}$ ]]; then return 1; fi
+  printf '%s\n' "$value"
+}
+
+# 止止ファイルは状態観察の一部であり、任意パスの除外ではない。人の checkout の
+# physical TOP 直下で、開始時に葉が無いときだけ、helper へ狭い descriptor を渡す。
+plan_stop_control() { # $1=中断前state（あれば、保持済み descriptor だけを復元する）
+  local prior="${1:-}" rel part path prefix missing=0 held_fd held_pid
+  local -a held=()
+  STOP_CONTROL_WORKTREE=""; STOP_CONTROL_REL=""; STOP_CONTROL_NEW_DIRS=()
+  case "$STOP_FILE" in "$TOP"/*) rel="${STOP_FILE#"$TOP"/}" ;; *) return 0 ;; esac
+  case "$rel" in ""|/*|*"//"*|.|..|*/.|*/..|../*|*"/../"*) return 0 ;; esac
+  IFS=/ read -r -a _stop_parts <<<"$rel"
+  path="$TOP"
+  for (( _stop_i=0; _stop_i<${#_stop_parts[@]}-1; _stop_i++ )); do
+    part="${_stop_parts[$_stop_i]}"
+    case "$part" in ""|.|..) return 0 ;; esac
+    path="$path/$part"; prefix="${path#"$TOP"/}"
+    if [ "$missing" = 1 ]; then
+      STOP_CONTROL_NEW_DIRS+=("$prefix")
+    elif [ -e "$path" ] || [ -L "$path" ]; then
+      :
+    else
+      missing=1; STOP_CONTROL_NEW_DIRS+=("$prefix")
+    fi
+  done
+  if [ -e "$STOP_FILE" ] || [ -L "$STOP_FILE" ]; then
+    # On an interrupted run the leaf may be the exact empty control file that
+    # was created after its held baseline.  Restore only that held descriptor;
+    # any other path, malformed held state, link, sibling, or nonempty leaf is
+    # still observed by loop-state and cannot become a broad exclusion.
+    [ -n "$prior" ] || { STOP_CONTROL_NEW_DIRS=(); return 0; }
+    # `mapfile` reports a successful EOF even when process substitution
+    # failed.  Wait for the bounded reader explicitly before accepting any
+    # descriptor from the saved state.
+    exec {held_fd}< <("$PY_ABS" "$LOOP_STATE_PY" stop-control --state "$prior" \
+      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")
+    held_pid=$!
+    mapfile -d '' -u "$held_fd" -t held
+    if ! wait "$held_pid"; then
+      exec {held_fd}<&-
+      die 20 state-snapshot "中断前の停止ファイル基準を安全に読めない"
+    fi
+    exec {held_fd}<&-
+    if [ "${#held[@]}" -lt 2 ] || [ "${held[0]}" != "$TOP" ] || [ "${held[1]}" != "$rel" ]; then
+      STOP_CONTROL_NEW_DIRS=()
+      return 0
+    fi
+    STOP_CONTROL_WORKTREE="${held[0]}"; STOP_CONTROL_REL="${held[1]}"
+    STOP_CONTROL_NEW_DIRS=("${held[@]:2}")
+    return 0
+  fi
+  STOP_CONTROL_WORKTREE="$TOP"; STOP_CONTROL_REL="$rel"
+}
+
+save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合に通った観測だけを昇格する
+  local verified="${1:-}" verified_sha="${2:-}" now_sha expected expected_sha observed observed_sha out rc=0 removed
+  SNAPSHOT_DIFF=""
+  if [ -z "$verified" ] || [ -z "$verified_sha" ] || [ ! -f "$verified" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 検証済みの状態を失ったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  now_sha="$(state_digest "$verified" || true)"
+  if [ -z "$now_sha" ] || [ "$now_sha" != "$verified_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 検証済みの状態が照合後に書き換わったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  expected="$verified"
+  if [ "${#REMOVED_PARENT_WORKTREES[@]}" -gt 1 ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 親が削除した worktree の記録が基準と一致しない"
+    return 1
+  elif [ "${#REMOVED_PARENT_WORKTREES[@]}" -eq 1 ]; then
+    removed="${REMOVED_PARENT_WORKTREES[0]}"
+    expected="$RUN_DIR/iter-${ITER_SEQ:-0}.expected-after-remove.json"
+    if ! "$PY_ABS" "$LOOP_STATE_PY" derive-removed-worktree --state "$verified" --out "$expected" --removed-worktree "$removed" --own-worktree "$ITER_WT" \
+      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"; then
+      STATE_GIT_UNSAFE=1
+      SNAPSHOT_DIFF="差分: 親が削除した worktree の検証済み基準を安全に作れない"
+      return 1
+    fi
+  fi
+  expected_sha="$(state_digest "$expected" || true)"
+  if [ -z "$expected_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 検証済みの期待状態を保持できない"
+    return 1
+  fi
+  # The verified source is parent-held.  Check it again after the helper has
+  # consumed it, before observing the post-removal repository once.
+  now_sha="$(state_digest "$verified" || true)"
+  if [ -z "$now_sha" ] || [ "$now_sha" != "$verified_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 検証済みの状態が基準の作成中に書き換わったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  observed="$RUN_DIR/iter-${ITER_SEQ:-0}.final-observed.json"
+  # expected already incorporates the only permitted parent removal.  Do not
+  # pass that removal into snapshot again: it must remain a strict comparison.
+  if ! take_snapshot "$observed" - "$expected" 0 1; then return 1; fi
+  observed_sha="$(state_digest "$observed" || true)"
+  if [ -z "$observed_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 最終観察の状態を保持できない"
+    return 1
+  fi
+  now_sha="$(state_digest "$verified" || true)"
+  if [ -z "$now_sha" ] || [ "$now_sha" != "$verified_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 検証済みの状態が最終観察中に書き換わったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$expected" --after "$observed" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
+    [ -n "$SNAPSHOT_DIFF" ] || SNAPSHOT_DIFF="差分: 検証後の状態を厳密に照合できない"
+    return 1
+  fi
+  now_sha="$(state_digest "$expected" || true)"
+  if [ -z "$now_sha" ] || [ "$now_sha" != "$expected_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 期待状態が最終照合中に書き換わったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  now_sha="$(state_digest "$observed" || true)"
+  if [ -z "$now_sha" ] || [ "$now_sha" != "$observed_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 最終観察の状態が照合中に書き換わったため最後に照合に通った状態を更新しない"
+    return 1
+  fi
+  if ! mv -f -- "$observed" "$LAST_VERIFIED"; then
+    STATE_GIT_UNSAFE=1
+    SNAPSHOT_DIFF="差分: 照合済みの状態を最後に照合に通った状態へ安全に昇格できない"
+    return 1
+  fi
+  # 削除の許可はこの照合で消費する。次の周や別の控えへ引き継がない。
+  REMOVED_PARENT_WORKTREES=()
 }
 
 marked_pids() { # $1=周の識別子 $2=プロセスグループ(無ければ -)
@@ -1024,34 +1211,71 @@ cleanup_iteration() {
 # 照合(D14・D8): 周の起動の直前の控えと、今の共有の git ディレクトリの状態・refs/heads/<DEF> を比べる。
 # 差分は VERIFY_DIFF に入れる(共有の config への追加を含め、どの変化も差分)
 verify_iteration() {
-  local cur="$RUN_DIR/iter-$ITER_SEQ.after.json" out="" rc=0 now
+  local cur="$RUN_DIR/iter-$ITER_SEQ.after.json" cur_sha="" out="" rc=0 now
   VERIFY_DIFF=""
+  ITER_VERIFIED=""
+  ITER_VERIFIED_SHA=""
   # 比べる元が周の起動の直前に取ったままか(食い違えば、共有の状態の変化と同じく止める)
-  if [ -z "$ITER_BASE_SHA" ] || [ "$(sha256sum <"$ITER_BASE" 2>/dev/null | cut -d' ' -f1)" != "$ITER_BASE_SHA" ]; then
+  if [ -z "$ITER_BASE_SHA" ] || [ "$(state_digest "$ITER_BASE" || true)" != "$ITER_BASE_SHA" ]; then
+    STATE_GIT_UNSAFE=1
     VERIFY_DIFF="差分: 比べる元($ITER_BASE)が周の起動の直前に取ったものと違う(書き換えられた)"
     return 0
   fi
   if ! take_snapshot "$cur" "$ITER_WTADMIN" "$ITER_BASE"; then
-    VERIFY_DIFF="差分: 今の状態を控えられない(照合できない)"
+    VERIFY_DIFF="${SNAPSHOT_DIFF:-差分: 今の状態を控えられない(照合できない)}"
+    return 0
+  fi
+  cur_sha="$(state_digest "$cur" || true)"
+  if [ -z "$cur_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    VERIFY_DIFF="差分: 照合後の状態を保持できない"
     return 0
   fi
   out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$ITER_BASE" --after "$cur" --self-worktree "$ITER_WT" --self-ref "refs/heads/task/$ITER_NAME" \
     --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
-  if [ "$rc" -gt 1 ]; then
-    VERIFY_DIFF="差分: 照合できない(補助の終了コード $rc)"
+  if [ "$rc" -ne 0 ]; then
+    VERIFY_DIFF="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
+    [ -n "$VERIFY_DIFF" ] || VERIFY_DIFF="差分: 照合できない(補助の終了コード $rc)"
+    STATE_GIT_UNSAFE=1
     return 0
   fi
   VERIFY_DIFF="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
+  # A strict helper difference is enough to stop.  Do not run rev-parse
+  # afterwards: it would reload a config graph that the comparison just marked
+  # unsafe.
+  if [ -n "$VERIFY_DIFF" ]; then STATE_GIT_UNSAFE=1; return 0; fi
+  if [ "$(state_digest "$ITER_BASE" || true)" != "$ITER_BASE_SHA" ] || \
+     [ "$(state_digest "$cur" || true)" != "$cur_sha" ]; then
+    STATE_GIT_UNSAFE=1
+    VERIFY_DIFF="差分: 照合中に状態の控えが書き換わった"
+    return 0
+  fi
   now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$DEF_NAME" 2>/dev/null || true)"
   if [ "$now" != "$DEF_SHA" ]; then
     VERIFY_DIFF="${VERIFY_DIFF:+$VERIFY_DIFF
 }差分: refs/heads/$DEF_NAME: $DEF_SHA → ${now:-(無い)}"
+  fi
+  if [ -n "$VERIFY_DIFF" ]; then
+    STATE_GIT_UNSAFE=1
+    return 0
+  fi
+  # compare() normalizes only its in-memory copies.  This file is the exact
+  # after-observation that passed verification and is the sole source from
+  # which a later last-verified state may be derived.
+  ITER_VERIFIED="$cur"
+  ITER_VERIFIED_SHA="$cur_sha"
+  if [ "$(state_digest "$cur" || true)" != "$ITER_VERIFIED_SHA" ]; then
+    STATE_GIT_UNSAFE=1
+    ITER_VERIFIED=""
+    ITER_VERIFIED_SHA=""
+    VERIFY_DIFF="差分: 照合済みの状態が照合後に書き換わった"
   fi
 }
 
 # 周の途中で終わるとき(シグナル・EXIT の trap)の手順: 片付け → 照合 → 印 → 報告。
 # ABORT_CODE に終了コードを入れる(このシェルで呼ぶ。$( ) の中で呼ばない)
 abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=差分があるときのコード $4=どちらも無いときのコード
+  local worktree_state="worktree は残す"
   [ -z "$ITER_WT" ] || WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $1 で止まった(判定していない)"
   cleanup_iteration
   if [ -n "$CLEANUP_LEFT" ]; then
@@ -1061,16 +1285,28 @@ abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=�
     ABORT_CODE="$2"
     return 0
   fi
-  verify_iteration
+  # Once the child has been verified, that after-state is the only valid
+  # promotion source.  In particular, the parent may already have removed the
+  # exact own checkout.  Re-verifying ITER_BASE here would mistake that
+  # permitted removal for a human change and discard the in-flight evidence.
+  if [ -z "$ITER_VERIFIED" ] || [ -z "$ITER_VERIFIED_SHA" ]; then
+    verify_iteration
+  fi
   if [ -n "$VERIFY_DIFF" ]; then
     place_stop_mark "共有の状態の変化($1 の後の照合)" "$VERIFY_DIFF" 0
     rep "- $1: 共有の状態の変化(止めの印を置いた)" "$VERIFY_DIFF" 2>/dev/null || true
     ABORT_CODE="$3"
   else
-    rm -rf -- "$INFLIGHT"
-    save_last_verified || true
-    rep "- $1: 子を片付けた。照合に通った(worktree は残す)" 2>/dev/null || true
-    ABORT_CODE="$4"
+    [ "${#REMOVED_PARENT_WORKTREES[@]}" -eq 0 ] || worktree_state="worktree は親が削除済み"
+    if save_last_verified "$ITER_VERIFIED" "$ITER_VERIFIED_SHA"; then
+      rm -rf -- "$INFLIGHT"
+      rep "- $1: 子を片付けた。照合に通った($worktree_state)" 2>/dev/null || true
+      ABORT_CODE="$4"
+    else
+      place_stop_mark "共有の状態の変化($1 の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
+      rep "- $1: 基準を昇格できない(止めの印と周の途中の印を残した)" "${SNAPSHOT_DIFF:-}" 2>/dev/null || true
+      ABORT_CODE="$3"
+    fi
   fi
   ITER_ACTIVE=0
 }
@@ -1133,6 +1369,23 @@ describe_left_wt() { # $1=worktree のパス
 
 report_left_worktrees() {
   local path reason found=0
+  if [ "$STATE_GIT_UNSAFE" = 1 ]; then
+    rep "" "## 保持済みの worktree 情報" ""
+    rep "設定を安全に読み直せないため Git は再実行していない。以下は親が保持した情報で、現在の存在・lock を再確認した一覧ではない。"
+    for path in "${!LOCKED_REASON[@]}"; do
+      reason="${LOCKED_REASON[$path]}"
+      case "$reason" in
+        "dev-workflow-loop: "*) rep "- $path(保持した lock の理由: $reason)" ;;
+      esac
+    done
+    for path in "${!WT_OUTCOME[@]}"; do
+      rep "- $path — ${WT_OUTCOME[$path]}"
+    done
+    [ -z "$ITER_WT" ] || rep "- 中断した周の保持パス: $ITER_WT"
+    [ -z "$SEL_WT" ] || rep "- 選定中の保持パス: $SEL_WT(自動削除していない)"
+    rep "" "人の次の手順: 変更された設定と保持した作業場所を確認する。push・PR が既に作成されている可能性も外部から確認し、未確認の内容を merge しない。"
+    return 0
+  fi
   load_worktrees || return 0
   for path in "${!LOCKED_REASON[@]}"; do
     reason="${LOCKED_REASON[$path]}"
@@ -1151,7 +1404,7 @@ report_left_worktrees() {
 finish() { # $1=終了コード $2=止まった理由
   local code="$1" why="$2" n
   trap - TERM HUP INT
-  remove_selection_worktree
+  if [ "$STATE_GIT_UNSAFE" != 1 ]; then remove_selection_worktree; fi
   if [ -n "$REPORT" ]; then
     {
       rep "" "## 終わり" ""
@@ -1182,8 +1435,32 @@ finish() { # $1=終了コード $2=止まった理由
   exit "$code"
 }
 
+begin_promotion_critical() {
+  DEFERRED_SIGNAL_NAME="" DEFERRED_SIGNAL_CODE=""
+  PROMOTION_CRITICAL=1
+}
+
+end_promotion_critical() {
+  local name code
+  PROMOTION_CRITICAL=0
+  name="$DEFERRED_SIGNAL_NAME"
+  code="$DEFERRED_SIGNAL_CODE"
+  DEFERRED_SIGNAL_NAME="" DEFERRED_SIGNAL_CODE=""
+  # The original traps are still installed while a deferred handler returns.
+  # Deliver the first signal only after either the promotion or its preserved
+  # failure state is complete; on_signal finishes the process and does not
+  # return on this path.
+  [ -z "$name" ] || on_signal "$name" "$code"
+}
+
 on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   local name="$1" code="$2"
+  if [ "$PROMOTION_CRITICAL" = 1 ]; then
+    if [ -z "$DEFERRED_SIGNAL_NAME" ]; then
+      DEFERRED_SIGNAL_NAME="$name" DEFERRED_SIGNAL_CODE="$code"
+    fi
+    return 0
+  fi
   trap - TERM HUP INT
   set +e
   [ -z "$REPORT" ] || rep "" "- シグナル $name を受けた" 2>/dev/null
@@ -1392,7 +1669,7 @@ read_inflight_meta() { # INF_* に読む
 }
 
 handle_marks_at_start() {
-  local out rc now cur diff
+  local out rc now cur diff cur_sha base_sha
   # 止めの印があれば、人が差分を確かめて消すまで起動しない。周の途中の印もあれば、先にその周のプロセスを止める
   if [ -e "$STOP_MARK" ] || [ -L "$STOP_MARK" ]; then
     if [ -d "$INFLIGHT" ]; then
@@ -1423,12 +1700,36 @@ handle_marks_at_start() {
     fi
     # 2. 印に残した周の起動の直前の状態と、周の後の照合と同じ規則で比べる + D8
     cur="$RUN_DIR/inflight-now.json"
-    take_snapshot "$cur" "$INF_WTADMIN" "$INFLIGHT/base.json"
+    if ! take_snapshot "$cur" "$INF_WTADMIN" "$INFLIGHT/base.json"; then
+      diff="${SNAPSHOT_DIFF:-差分: 今の状態を安全に控えられない(照合できない)}"
+      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "$diff" 0
+      rep "- 前の実行の周 $INF_ITER の観察で差分:" "$diff"
+      die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
+    fi
+    cur_sha="$(state_digest "$cur" || true)"
+    base_sha="$(state_digest "$INFLIGHT/base.json" || true)"
+    if [ -z "$cur_sha" ] || [ -z "$base_sha" ]; then
+      STATE_GIT_UNSAFE=1
+      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "差分: 照合する状態を保持できない" 1
+      die 20 inflight-diff "前の実行の周 $INF_ITER の状態を安全に照合できない。$(stop_mark_guide)"
+    fi
     rc=0
     out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$INFLIGHT/base.json" --after "$cur" --self-worktree "$INF_WT" --self-ref "refs/heads/task/$INF_NAME" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
-    [ "$rc" -le 1 ] || die 30 internal "周の途中の印の照合に失敗した(補助の終了コード $rc)"
     diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
+    if [ "$rc" -ne 0 ] && [ -z "$diff" ]; then diff="差分: 照合できない(補助の終了コード $rc)"; fi
+    if [ -n "$diff" ]; then
+      STATE_GIT_UNSAFE=1
+      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の照合)" "$diff" 0
+      rep "- 前の実行の周 $INF_ITER の照合で差分:" "$diff"
+      die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
+    fi
+    if [ "$(state_digest "$INFLIGHT/base.json" || true)" != "$base_sha" ] || \
+       [ "$(state_digest "$cur" || true)" != "$cur_sha" ]; then
+      STATE_GIT_UNSAFE=1
+      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "差分: 照合中に状態の控えが書き換わった" 1
+      die 20 inflight-diff "前の実行の周 $INF_ITER の状態が照合中に書き換わった。$(stop_mark_guide)"
+    fi
     now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$INF_DEF_NAME" 2>/dev/null || true)"
     if [ "$now" != "$INF_DEF_SHA" ]; then
       diff="${diff:+$diff
@@ -1441,8 +1742,15 @@ handle_marks_at_start() {
     fi
     # 3. 差分が無ければ、最後に照合に通った状態を更新してから周の途中の印を消す。
     # base.json は累積 secret_paths の基準でもあるため、先に消してはならない。
-    save_last_verified "$INFLIGHT/base.json"
+    begin_promotion_critical
+    if ! save_last_verified "$cur" "$cur_sha"; then
+      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
+      rep "- 前の実行の周 $INF_ITER の基準を昇格できない:" "${SNAPSHOT_DIFF:-}"
+      end_promotion_critical
+      die 20 inflight-diff "前の実行の周 $INF_ITER の後の状態を基準へ昇格できない。$(stop_mark_guide)"
+    fi
     rm -rf -- "$INFLIGHT"
+    end_promotion_critical
     STARTUP_NOTES+=("前の実行の周 $INF_ITER が途中で終わっていた。残りのプロセスを止め、照合に通った(worktree ${INF_WT:-?} は残っている)")
     if [ "$INF_MODE" = discover ]; then
       STARTUP_NOTES+=("前の実行の周 $INF_ITER は発見モードの周(発見元 ${INF_SOURCE:-?}・ブランチ task/$INF_NAME)。残った worktree と今夜の名のブランチで、その発見元は読み飛ばす")
@@ -1454,7 +1762,9 @@ handle_marks_at_start() {
   # (実行と実行の間の変化は人の操作でもありうるため)
   if [ -f "$LAST_VERIFIED" ]; then
     cur="$RUN_DIR/start-now.json"
-    take_snapshot "$cur" - "$LAST_VERIFIED" 1
+    if ! take_snapshot "$cur" - "$LAST_VERIFIED" 1; then
+      die 20 state-snapshot "最後に照合に通った状態を安全に更新できない。${SNAPSHOT_DIFF:-状態を控えられない}"
+    fi
     FRESH_CONFIG_BASELINE=1
     rc=0
     out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$LAST_VERIFIED" --after "$cur" \
@@ -2127,6 +2437,7 @@ remove_iteration_worktree() {
   G -C "$TOP" worktree unlock "$ITER_WT" >/dev/null 2>&1 || true
   if G -C "$TOP" worktree remove "$ITER_WT" >/dev/null 2>"$err"; then
     rep "- worktree: 消した"
+    REMOVED_PARENT_WORKTREES+=("$ITER_WT")
   else
     G -C "$TOP" worktree lock --reason "dev-workflow-loop: $ITER_REL" "$ITER_WT" >/dev/null 2>&1 || true
     WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $JUDGE(worktree を消せなかった。未追跡・未 commit が残った)"
@@ -2174,13 +2485,22 @@ source=$ITER_SOURCE
   # 初回には保存済み state は無い。存在した周だけ、開始時からの
   # secret_paths の和を引き継ぐ(初回に未作成パスを補助へ渡さない)。
   if [ -f "$LAST_VERIFIED" ]; then
-    take_snapshot "$ITER_BASE" "$ITER_WTADMIN" "$LAST_VERIFIED" "$FRESH_CONFIG_BASELINE"
+    if ! take_snapshot "$ITER_BASE" "$ITER_WTADMIN" "$LAST_VERIFIED" "$FRESH_CONFIG_BASELINE"; then
+      die 20 state-snapshot "周の開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
+    fi
   else
-    take_snapshot "$ITER_BASE" "$ITER_WTADMIN"
+    if ! take_snapshot "$ITER_BASE" "$ITER_WTADMIN"; then
+      die 20 state-snapshot "周の開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
+    fi
   fi
   FRESH_CONFIG_BASELINE=0
   # 比べる元の sha256 をシェルの変数に持つ(周の中で状態ディレクトリのファイルを書き換えられても気づく)
-  ITER_BASE_SHA="$(sha256sum <"$ITER_BASE" | cut -d' ' -f1)"
+  if ! ITER_BASE_SHA="$(state_digest "$ITER_BASE")"; then
+    # The digest rejection itself means that a later finish/report Git call
+    # must not reload a config graph changed alongside this state pathname.
+    STATE_GIT_UNSAFE=1
+    die 20 state-snapshot "周の開始直前の状態を安全に保持できない"
+  fi
   # 周の途中の印(周の起動の直前に置く)
   rm -rf -- "$STATE/inflight.tmp"
   mkdir "$STATE/inflight.tmp"
@@ -2190,6 +2510,12 @@ source=$ITER_SOURCE
     >"$STATE/inflight.tmp/meta"
   printf '%s' "$ITER_META_EXTRA" >>"$STATE/inflight.tmp/meta"
   mv -T -- "$STATE/inflight.tmp" "$INFLIGHT"
+  # A prior iteration may have promoted a verified after-state.  It is never
+  # evidence for this child: a signal before this child's verification must
+  # run the ordinary cleanup and fresh verification path.
+  ITER_VERIFIED=""
+  ITER_VERIFIED_SHA=""
+  VERIFY_DIFF=""
   ITER_ACTIVE=1
   rep "" "### 周 $ITER_COUNT: $ITER_TITLE" "" "- 周の識別子: $ITER_ID" "- worktree: $ITER_WT"
   [ "$DISCOVER" -eq 0 ] || rep "- 今夜の名のブランチ: task/$ITER_NAME"
@@ -2244,9 +2570,6 @@ source=$ITER_SOURCE
     rep "- 共有の状態の変化:" "$VERIFY_DIFF"
     die 10 shared-state "周 $ITER_ID の後に共有の git の状態が変わった。$(stop_mark_guide)"
   fi
-  rm -rf -- "$INFLIGHT"
-  save_last_verified
-  ITER_ACTIVE=0
   rep "- 共有の config の差分: 無し"
   # §5 の判定と後片付け(発見モードは §11 の判定)
   if [ "$DISCOVER" -eq 1 ]; then judge_discover "$rc" "$timed_out"; else judge "$rc" "$timed_out"; fi
@@ -2261,6 +2584,7 @@ source=$ITER_SOURCE
     fi
   fi
   read_permlog
+  begin_promotion_critical
   if [ "$JUDGE_OK" -eq 1 ]; then
     remove_iteration_worktree
     CONSEC_FAIL=0
@@ -2270,6 +2594,21 @@ source=$ITER_SOURCE
     rep "- worktree: 残した(lock の理由: dev-workflow-loop: $ITER_REL)"
     CONSEC_FAIL=$((CONSEC_FAIL + 1))
   fi
+  # A normal PR/候補なしの周では own worktree を先に消してから基準を更新する。
+  # 消した admin の config.worktree/origin を次の周の preflight へ残すと、
+  # Git が正しく作成・削除したものまで未検査の欠落として止まってしまう。
+  # 残した worktree はここでなお観察され、次の起動でも厳密に照合される。
+  if ! save_last_verified "$ITER_VERIFIED" "$ITER_VERIFIED_SHA"; then
+    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: 基準を昇格できず止まった"
+    place_stop_mark "共有の状態の変化(周 $ITER_ID の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
+    rep "- 基準を昇格できない:" "${SNAPSHOT_DIFF:-}"
+    ITER_ACTIVE=0
+    end_promotion_critical
+    die 10 shared-state "周 $ITER_ID の後の状態を基準へ昇格できない。$(stop_mark_guide)"
+  fi
+  rm -rf -- "$INFLIGHT"
+  ITER_ACTIVE=0
+  end_promotion_critical
   [ "$DISCOVER" -eq 0 ] || discover_after_iteration
   if [ "$JUDGE_OK" -eq 1 ] && [ "$OUTCOME" = 保留 ] && [ "$HOLD_CODE" = G1 ]; then
     if g1_protected_only; then
@@ -2307,7 +2646,16 @@ trap 'on_signal INT 130' INT
 # GIT_CONFIG_KEY_<n>・GIT_CONFIG_VALUE_<n>。GIT_CONFIG_GLOBAL・GIT_CONFIG_SYSTEM・GIT_CONFIG_NOSYSTEM は
 # 利用者の側の値として残す
 command -v git >/dev/null 2>&1 || die 20 tool-missing "git が PATH に無い"
-LOCAL_ENV_VARS="$(G rev-parse --local-env-vars)"
+LOCAL_ENV_VARS="$(
+  # この能力照会自身が cwd や利用者設定を読まないよう、全 Git 環境を
+  # 外した repository 外の文脈で実行する。返された列は親へ適用する。
+  for startup_env in $(compgen -e); do
+    case "$startup_env" in GIT_*) unset "$startup_env" ;; esac
+  done
+  export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+  cd /
+  G rev-parse --local-env-vars
+)"
 for v in $LOCAL_ENV_VARS; do unset "$v"; done
 for v in $(compgen -e); do
   case "$v" in GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*) unset "$v" ;; esac
@@ -2393,7 +2741,7 @@ check_host_session
 unset DEV_WORKFLOW_HOST_CLI
 
 # ── §2 の 3: 道具(OS/bash は初期化前に検査済み) ──
-for t in setsid flock python3 timeout realpath sha256sum; do
+for t in setsid flock python3 timeout realpath; do
   command -v "$t" >/dev/null 2>&1 || die 20 tool-missing "$t が PATH に無い"
 done
 
@@ -2420,6 +2768,8 @@ GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py
 [ -f "$GIT_CONFIG_DIGEST_PY" ] || die 20 plugin-root "兄弟の git-config-digest.py が無い(周の中のローカルの git 設定の照合で使う): $GIT_CONFIG_DIGEST_PY"
 LOOP_STATE_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"
 [ -f "$LOOP_STATE_PY" ] || die 20 plugin-root "状態観察 helper(loop-state.py)が無い: $LOOP_STATE_PY"
+LOOP_STARTUP_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
+[ -f "$LOOP_STARTUP_PY" ] || die 20 plugin-root "起動前の管理パス helper(loop-startup.py)が無い: $LOOP_STARTUP_PY"
 PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
 HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
@@ -2439,10 +2789,85 @@ scan_full_permission
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
 HOST_BIN="${HOST_ARGV[0]}"
 
-# ── §2 の 6: 対象が git の作業ツリーのトップで、bare でない ──
+# ── §2 の 6: Git より前に現在の管理入口と中断印だけを観察する ──
 REPO="${REPO:-$PWD}"
 [ -d "$REPO" ] || die 20 not-git "--repo がディレクトリでない: $REPO"
 REPO_PHYS="$(cd -P -- "$REPO" && pwd -P)"
+STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow/loop"
+STATE_GIT_UNSAFE=1
+STARTUP_JSON="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
+  || die 20 startup-state "Git を使う前の起動先確認に失敗した。保存状態と管理入口を人が確認する"
+mapfile -d '' -t STARTUP_FIELDS < <(printf '%s' "$STARTUP_JSON" | "$PY_ABS" -c '
+import json,sys
+s=json.load(sys.stdin)
+for k in ("top","repo_admin","common","state_id","state_path","bound","management_sha256"):
+ sys.stdout.buffer.write(str(s[k]).encode()+b"\0")
+for k in ("inflight","stop_mark"):
+ sys.stdout.buffer.write(s["markers"][k].encode()+b"\0")
+sys.stdout.buffer.write(str(s["locked"]).encode()+b"\0")
+')
+[ "${#STARTUP_FIELDS[@]}" -eq 10 ] || die 20 startup-state "起動先確認の出力を読めない"
+TOP="${STARTUP_FIELDS[0]}"; REPO_GIT_DIR="${STARTUP_FIELDS[1]}"; COMMON="${STARTUP_FIELDS[2]}"
+STATE_ID="${STARTUP_FIELDS[3]}"; STATE_PLAN="${STARTUP_FIELDS[4]}"
+STARTUP_MARKED=0
+if [ "${STARTUP_FIELDS[7]}" != absent ] || [ "${STARTUP_FIELDS[8]}" != absent ]; then STARTUP_MARKED=1; fi
+STATE_READY=0
+prepare_startup_state() {
+  chmod 700 "$STATE"
+  exec 7>>"$STATE/lock"
+  flock -n 7 || die 20 locked "同じリポジトリの loop.sh が動いている(ロック: $STATE/lock)"
+
+  RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
+  RUN_DIR="$STATE/$RUN_ID"
+  mkdir "$RUN_DIR"
+  REPORT="$RUN_DIR/report.md"
+  {
+    printf '# 無人ループの報告(%s)\n\n' "$RUN_ID"
+    printf -- '- 対象: %s\n' "$TOP"
+    printf -- '- 開始: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf -- '- 状態ディレクトリ: %s\n' "$STATE"
+    [ "$DRY_RUN" -eq 0 ] || printf -- '- --dry-run(セッションを起動しない)\n'
+  } >"$REPORT"
+  STOP_MARK="$STATE/stop-mark.md"
+  INFLIGHT="$STATE/inflight"
+  LAST_VERIFIED="$STATE/last-verified.json"
+  STATE_READY=1
+}
+if [ "${STARTUP_FIELDS[5]}" = True ]; then
+  # 初回に配置検査を通した同一 state だけを使う。前の実行の終了との競合を
+  # 避けるため、ロック取得後に印を再観察してから通常 Git の可否を決める。
+  STATE="$STATE_PLAN"
+  [ -d "$STATE" ] || die 20 startup-state "保持した状態の置き場が無い"
+  under "$STATE" "$TOP" && die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある"
+  prepare_startup_state
+  STARTUP_LATEST="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
+    || die 20 startup-state "ロック取得後に起動先の対応を確認できない"
+  mapfile -d '' -t STARTUP_MARKERS < <(printf '%s' "$STARTUP_LATEST" | "$PY_ABS" -c '
+import json,sys
+s=json.load(sys.stdin)
+for k in ("inflight","stop_mark"):
+ sys.stdout.buffer.write(s["markers"][k].encode()+b"\0")
+')
+  [ "${#STARTUP_MARKERS[@]}" -eq 2 ] || die 20 startup-state "中断印の再観察を読めない"
+  STARTUP_FIELDS[7]="${STARTUP_MARKERS[0]}"; STARTUP_FIELDS[8]="${STARTUP_MARKERS[1]}"
+  if [ "${STARTUP_FIELDS[7]}" != absent ] || [ "${STARTUP_FIELDS[8]}" != absent ]; then STARTUP_MARKED=1; fi
+fi
+if [ "$STARTUP_MARKED" -eq 1 ]; then
+  [ "${STARTUP_FIELDS[9]}" != True ] || die 20 locked "同じリポジトリの loop.sh が動いている(既存のロック)"
+  [ "${STARTUP_FIELDS[5]}" = True ] || die 20 startup-state "中断印と結び付く起動先の対応が無い。保存状態を人が確認する"
+  [ "${STARTUP_FIELDS[8]}" = absent ] || die 20 stop-mark "止めの印がある。保存した差分と中断印を人が確認する"
+  if ! "$PY_ABS" "$LOOP_STATE_PY" preflight --state "$INFLIGHT/base.json" --top "$TOP" --repo-admin "$REPO_GIT_DIR" --common "$COMMON" \
+      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"; then
+    rep "- 差分: 保存した config と現在の構造が一致しない(内容は読まない)"
+    place_stop_mark "起動前に保持済み config または管理構造の変化を検知した" "差分: 保存した config と現在の構造が一致しない(内容は読まない)" 1
+    die 20 inflight-diff "保存した設定を安全に確認できない。周の途中の印を残して停止する"
+  fi
+  STATE_GIT_UNSAFE=0
+  STOP_FILE="${STOP_FILE:-$TOP/.claude/loop.stop}"
+  plan_stop_control "$INFLIGHT/base.json"
+  handle_marks_at_start
+fi
+# 中断記録が無い初回、または保持した設定の検査を通った再開だけが通常 Git へ進む。
 G -C "$REPO_PHYS" rev-parse --git-dir >/dev/null 2>&1 || die 20 not-git "git リポジトリでない: $REPO_PHYS"
 [ "$(G -C "$REPO_PHYS" rev-parse --is-bare-repository 2>/dev/null || true)" = false ] || die 20 bare "bare リポジトリには使えない: $REPO_PHYS"
 TOP_RAW="$(G -C "$REPO_PHYS" rev-parse --show-toplevel 2>/dev/null)" || die 20 not-git "作業ツリーを持たない: $REPO_PHYS"
@@ -2461,37 +2886,26 @@ done < <(G -C "$TOP" worktree list --porcelain -z)
 [ -n "$MAIN_WT" ] || die 20 not-git "main の worktree を解決できない: $TOP"
 MAIN_WT="$(realpath -m -- "$MAIN_WT")"
 
-# ── §2 の 7: 状態ディレクトリのロック(D18)──
-# 識別子は共有の git ディレクトリの物理パスのハッシュ(同じリポジトリの別の worktree からでも同じロック)
-STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow/loop"
-STATE_ID="$(printf '%s' "$COMMON" | sha256sum | cut -c1-16)"
-# 人のチェックアウトの中かは、作る前に(`..` と既存の親の symlink を物理パスへ正規化して)確かめる。
-# 拒否したときは、ディレクトリを作らず、既存のモードも変えない
-STATE_PLAN="$(realpath -m -- "$STATE_BASE/$STATE_ID")"
-if inside_checkout "$STATE_PLAN"; then die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある($STATE_PLAN)。XDG_STATE_HOME を外へ向ける"; fi
-mkdir -p "$STATE_PLAN" || die 20 state-dir "状態ディレクトリを作れない: $STATE_PLAN"
-STATE="$(cd -P -- "$STATE_PLAN" && pwd -P)"
-if inside_checkout "$STATE"; then die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある($STATE)。XDG_STATE_HOME を外へ向ける"; fi
-chmod 700 "$STATE"
-exec 7>>"$STATE/lock"
-flock -n 7 || die 20 locked "同じリポジトリの loop.sh が動いている(ロック: $STATE/lock)"
 
-RUN_ID="$(date +%Y%m%d-%H%M%S)-$$"
-RUN_DIR="$STATE/$RUN_ID"
-mkdir "$RUN_DIR"
-REPORT="$RUN_DIR/report.md"
-{
-  printf '# 無人ループの報告(%s)\n\n' "$RUN_ID"
-  printf -- '- 対象: %s\n' "$TOP"
-  printf -- '- 開始: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
-  printf -- '- 状態ディレクトリ: %s\n' "$STATE"
-  [ "$DRY_RUN" -eq 0 ] || printf -- '- --dry-run(セッションを起動しない)\n'
-} >"$REPORT"
-STOP_MARK="$STATE/stop-mark.md"
-INFLIGHT="$STATE/inflight"
-LAST_VERIFIED="$STATE/last-verified.json"
-# ロックの直後に、止めの印と周の途中の印を確かめる(§4 の「次の起動」)
-handle_marks_at_start
+[ "$TOP" = "${STARTUP_FIELDS[0]}" ] && [ "$REPO_GIT_DIR" = "${STARTUP_FIELDS[1]}" ] && [ "$COMMON" = "${STARTUP_FIELDS[2]}" ] \
+  || die 20 startup-state "Git の解決結果が起動前の管理入口と一致しない"
+# ── §2 の 7: 状態の配置検査を通してから起動先の対応を排他的に固定する ──
+if inside_checkout "$STATE_PLAN"; then die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある($STATE_PLAN)。XDG_STATE_HOME を外へ向ける"; fi
+if [ "$STATE_READY" -eq 0 ]; then
+  mkdir -p "$STATE_PLAN" || die 20 state-dir "状態ディレクトリを作れない: $STATE_PLAN"
+  STATE="$(cd -P -- "$STATE_PLAN" && pwd -P)"
+  if inside_checkout "$STATE"; then die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある($STATE)。XDG_STATE_HOME を外へ向ける"; fi
+  prepare_startup_state
+fi
+"$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE" --bind \
+  --expect-top "$TOP" --expect-repo-admin "$REPO_GIT_DIR" --expect-common "$COMMON" \
+  --expect-management-sha256 "${STARTUP_FIELDS[6]}" >/dev/null \
+  || die 20 startup-state "検証した起動先の対応を保存できない"
+STATE_GIT_UNSAFE=0
+STOP_FILE="${STOP_FILE:-$TOP/.claude/loop.stop}"
+plan_stop_control
+# ロック取得中に現れた印も無視しない。
+if [ "$STARTUP_MARKED" -eq 0 ]; then handle_marks_at_start; fi
 
 # ── §2 の 8: デフォルトブランチ(base-commit.md と同じ順)とその sha の固定(D8)──
 if DEF_SYM="$(G -C "$TOP" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null)"; then
@@ -2557,7 +2971,6 @@ read -r ITER_TIMEOUT ITER_TIMEOUT_SRC <<<"$(effective "$DEF_ITER_TIMEOUT" "$ARG_
 [ "$BUDGET" -ge "$ITER_TIMEOUT" ] \
   || die 20 budget "実効値で time_budget($BUDGET)< iteration_timeout($ITER_TIMEOUT)。1 周も回らない"
 
-STOP_FILE="${STOP_FILE:-$TOP/.claude/loop.stop}"
 WT_ROOT="${WT_ROOT:-$(dirname -- "$TOP")/$(basename -- "$TOP").loop}"
 # `..` と既存の親の symlink を物理パスへ正規化してから、人のチェックアウト(物理パス)と比べる
 WT_ROOT="$(realpath -m -- "$WT_ROOT")"
