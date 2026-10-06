@@ -6,9 +6,15 @@ v4.2.0 以前は commit 履歴を参照。
 
 ### 修正
 
-- 無人ループの共有状態の照合を、全 ref・他の worktree の内容と index・実効 Git 設定と include 先へ広げる([子 Issue #191](https://github.com/Yuki-Maeda-valour/workflow/issues/191)、親 #107 の H16・H17・H18・H19)。自分の周で認める変更を限定し、人の checkout の変更を見逃さない。
+- 無人ループの共有状態の照合を、全 ref・他の worktree の内容と index・既知の有効な Git 設定 graph と include 先へ広げる([子 Issue #191](https://github.com/Yuki-Maeda-valour/workflow/issues/191)、親 #107 の H16・H17・H18・H19)。自分の周で認める変更を限定し、人の checkout の変更を見逃さない。機密 path は本文を読まず metadata だけを比べ、書込元は識別しない。
 - 機密指定は既定値と各 worktree の profile から解決し、機密ファイルは本文を読まず属性を記録する。機密ディレクトリ内も本文を読まず変化を検査する。読取不能・特殊ファイル・検査上限の超過は、未変更として扱わず停止する。
 - 検査量の既定上限と明示的な調整方法、観測間に復元された変更や監視外の symlink 先などの限界を、無人ループの参照文書へ記載する。
+- `extensions.worktreeConfig` が当該周の管理領域へ複製・親が削除する設定、保持済みの停止ファイルだけが不在から空の通常ファイルになる操作を、厳密な path と構造の照合で通常の周に限り受け入れる。ほかの人の worktree・既存ファイル・link・特殊型は保護したままにする。
+- 設定差分は新しい値や include 先を読まずに構造として報告する。発見の周で保持した ref と異なる遷移を見つけたときは判定より前に停止し、既に公開済みかを人が確認するまで新しい通信や PR の雛形を出さない。
+- 起動前に入力 repo と admin/common・状態ディレクトリの対応を no-follow で束縛し、中断印・binding の不一致は通常 Git や設定を読まず exit 20 として保全する。拒否後の報告と選定 worktree の片付けも Git を打ち直さない。
+- `inflight` を伴う起動前・中断後の拒否は、止めの印だけを消して再開しない。人が子・中断記録・差分を確認して片付けた後に再開し、binding は入力 repo の絶対 path を hash にした `STATE_BASE` 直下の専用ファイルで保持する。
+- 設定の通常実行間の診断は key/value を出さず hash と構造だけを示す。正常な reinit・管理ディレクトリ移転は旧状態を人が確認してから binding を作り直す。no-follow は state 内容の真正性を保証せず、同一利用者が全 state を同時に改竄・削除する限界は実測と運用を明記する。
+- 周の照合に通った after-state の生バイトと hash を保持し、親が実際に削除した own worktree の四集合だけを派生して最終観察と厳密比較する。比較中の記録差替えや持続した他 worktree・ref・設定の変更は基準へ昇格せず、成功時だけ `last-verified.json` を更新して `inflight` を消す。通常終了と中断再開の昇格区間では TERM/HUP/INT を成功または保全済み失敗の後まで保留する。最終観察後の同一利用者権限の競合は隔離できない。
 
 ## v4.23.3
 
