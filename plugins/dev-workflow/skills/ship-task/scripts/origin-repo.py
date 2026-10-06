@@ -22,6 +22,10 @@ PART = r"[A-Za-z0-9._-]+"
 HTTPS = re.compile(rf"^https://(?:[^@/]+@)?(?P<host>[A-Za-z0-9.-]+)/(?P<owner>{PART})/(?P<repo>{PART})/?$")
 SSH = re.compile(rf"^ssh://(?:(?P<user>[^@/:]+)@)?(?P<host>[A-Za-z0-9.-]+)/(?P<owner>{PART})/(?P<repo>{PART})/?$")
 SCP = re.compile(rf"^(?:(?P<user>[^@/:]+)@)?(?P<host>[A-Za-z0-9.-]+):(?P<owner>{PART})/(?P<repo>{PART})$")
+SAFE_GIT = ("--no-pager", "--no-replace-objects", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+            "-c", "core.ignoreCase=false", "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+            "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false", "-c", "filter.lfs.smudge=",
+            "-c", "filter.lfs.clean=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false")
 
 
 class GitFailed(Exception):
@@ -31,7 +35,7 @@ class GitFailed(Exception):
 def git(directory: str, *args: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            ["git", "-C", directory, *args],
+            ["git", "-C", directory, *SAFE_GIT, *args],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,

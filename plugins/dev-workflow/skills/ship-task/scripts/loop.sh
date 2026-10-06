@@ -153,7 +153,7 @@ REVIEWS_COPY_LIMIT=52428800 # .claude/reviews を状態ディレクトリへ写�
 HOST_SESSION_VARS=(DEV_WORKFLOW_HOST_CLI CLAUDECODE CODEX_SANDBOX CURSOR_AGENT)
 
 # 全 git 呼び出しの前置き(base-commit.md と同じ。hook・fsmonitor・置換参照を効かせない)
-GIT_PRE=(--no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false)
+GIT_PRE=(--no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false)
 
 # ═══════════════════════════════ 関数 ═══════════════════════════════
 
@@ -849,9 +849,13 @@ def cmd_origin_json():
     if not isinstance(data, dict) or not all(isinstance(data.get(k), bool) for k in ("origin", "same", "vcs")):
         sys.exit(1)
     reason = data.get("reason")
+    repo = data.get("repo")
+    if repo is not None and not isinstance(repo, str):
+        sys.exit(1)
     for key in ("origin", "same", "vcs"):
         print(f"{key}={1 if data[key] else 0}")
     print("reason=" + one_line(reason if isinstance(reason, str) else "", 300))
+    print("repo=" + (repo or ""))
 
 
 def cmd_candiff(task_dir):
@@ -2174,6 +2178,7 @@ source=$ITER_SOURCE
     exec "$ENV_BIN" -u DEV_WORKFLOW_HOST_CLI -u OLDPWD DEV_WORKFLOW_LOOP_ITER="$ITER_ID" \
       DEV_WORKFLOW_LOOP_WORKTREE="$ITER_WT" DEV_WORKFLOW_LOOP_PERMLOG="$ITER_PERMLOG" \
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
+      DEV_WORKFLOW_LOOP_PUSH_REPO="$O_REPO" DEV_WORKFLOW_LOOP_PUSH_REF="refs/heads/task/$ITER_NAME" \
       CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
       "$SETSID_BIN" "${CHILD_ARGV[@]}" \
       <"$RUN_DIR/iter-$ITER_SEQ.prompt" >"$RUN_DIR/iter-$ITER_SEQ.out" 2>"$RUN_DIR/iter-$ITER_SEQ.err"
@@ -2275,7 +2280,7 @@ trap 'on_signal INT 130' INT
 # GIT_CONFIG_KEY_<n>・GIT_CONFIG_VALUE_<n>。GIT_CONFIG_GLOBAL・GIT_CONFIG_SYSTEM・GIT_CONFIG_NOSYSTEM は
 # 利用者の側の値として残す
 command -v git >/dev/null 2>&1 || die 20 tool-missing "git が PATH に無い"
-LOCAL_ENV_VARS="$(git rev-parse --local-env-vars)"
+LOCAL_ENV_VARS="$(G rev-parse --local-env-vars)"
 for v in $LOCAL_ENV_VARS; do unset "$v"; done
 for v in $(compgen -e); do
   case "$v" in GIT_CONFIG_KEY_*|GIT_CONFIG_VALUE_*) unset "$v" ;; esac
@@ -2535,6 +2540,7 @@ O_ORIGIN="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^origin=//p')"
 O_SAME="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^same=//p')"
 O_VCS="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^vcs=//p')"
 O_REASON="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^reason=//p')"
+O_REPO="$(printf '%s\n' "$ORIGIN_INFO" | sed -n 's/^repo=//p')"
 if [ "$O_ORIGIN" = 1 ] && [ "$O_VCS" = 1 ]; then
   die 20 origin-vcs "origin に remote.origin.vcs がある(push・ls-remote が git-remote-<vcs> のヘルパーを通り、URL の字面と送り先が離れるので、無人ループでは使えない)。\`git config --unset remote.origin.vcs\` で外してから起動する"
 fi

@@ -19,6 +19,10 @@ import sys
 
 GIT_TIMEOUT = 10
 EXPECT = re.compile(r"\Asha256:[0-9a-f]{64}\Z")
+SAFE_GIT = ("--no-pager", "--no-replace-objects", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+            "-c", "core.ignoreCase=false", "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+            "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false", "-c", "filter.lfs.smudge=",
+            "-c", "filter.lfs.clean=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false")
 
 
 class Unreadable(Exception):
@@ -29,7 +33,7 @@ def git(directory: str, *args: str) -> bytes:
     # 設定ファイルが FIFO だと git は戻らないので打ち切る。呼び出し元のパイプは継がせない
     try:
         done = subprocess.run(
-            ["git", "-C", directory, *args],
+            ["git", "-C", directory, *SAFE_GIT, *args],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             timeout=GIT_TIMEOUT,
