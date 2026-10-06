@@ -199,6 +199,14 @@ is_p=0
 for a in "$@"; do [ "$a" = -p ] && is_p=1; done
 [ "$is_p" -eq 1 ] || { echo "stub: unexpected invocation: $*" >&2; exit 64; }
 prompt="$(cat)"
+# H20: 人の設定だけを変える。対象は治具が明示した scratch のファイルに限る。
+human_config_change() {
+  case "${SELFTEST_HUMAN_ACTION:?}" in
+    add|value) git config --file "${SELFTEST_HUMAN_CONFIG:?}" selftest.human after ;;
+    delete) rm -- "${SELFTEST_HUMAN_CONFIG:?}" ;;
+    reorder) printf '[selftest]\n\tb = 2\n\ta = 1\n' >"${SELFTEST_HUMAN_CONFIG:?}" ;;
+  esac
+}
 case "$prompt" in
   *--discover=*)
     # 発見モードの周(loop.md §11)。発見元ごとの振る舞いは環境変数 SELFTEST_DISC_DA(data-audit)・SELFTEST_DISC_RF
@@ -271,6 +279,7 @@ case "$prompt" in
       pushsleep) dbr; cand "候補_$src-a.md"; dcommit; dpush; dlinger ;;
       pushu) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dres "$PRL" ;;
       pushusleep) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dlinger ;;
+      humancfg) human_config_change; dres "無人の周の結果: 候補なし — H20" ;;
       cfgchange) dbr; cand "候補_$src-a.md"; dcommit; g config selftest.tampered yes; dres "無人の周の結果: 縮退 — tamper" ;;
       late) # 判定の後に書く: 許可の仲介の記録を FIFO にし、loop.sh が読んだとき(判定の後・後片付けの前)に未追跡を置く
             dbr; cand "候補_$src-a.md"; dcommit
@@ -423,6 +432,7 @@ case "$beh" in
   pushusleep) branch; done_commit; pushu; linger ;;
   crash) touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
   crashcfg) g config selftest.tampered yes; touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
+  humancfg) branch; done_commit; human_config_change; result "無人の周の結果: 縮退 — H20" ;;
   cfgadd) branch; done_commit; g config selftest.added yes; result "無人の周の結果: 縮退 — tamper" ;;
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人の周の結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人の周の結果: PR — x" ;;
@@ -3365,6 +3375,168 @@ run_loop dcand -- --repo "$R" --dry-run --discover
 check "候補_ だけのディレクトリ: 起動する" 0 "$RC"
 has "候補_ だけのディレクトリが task_dir に検出される" "$OUT" "発見元の列(task_dir: cands)"
 
+fi
+
+# ════════════════ 人の linked worktree の設定(H20)════════════════
+if want humanconfig; then
+hc_setup() { # $1=名 $2=最初のタスク $3=初期設定 $4=main|linked [$5=拡張]
+  HC_NAME="hc-$1"
+  newrepo "$HC_NAME"
+  addtask "$2-a" 2026-01-01; addtask pr-b 2026-01-02
+  commit
+  [ "${5:-on}" = off ] || G -C "$R" config extensions.worktreeConfig true
+  HC_REPO="$R"
+  if [ "$4" = linked ]; then
+    HC_REPO="$W/repos/$HC_NAME human"
+    G -C "$R" worktree add -q --detach "$HC_REPO" HEAD
+  fi
+  HC_CONFIG="$(git -C "$HC_REPO" rev-parse --absolute-git-dir)/config.worktree"
+  case "$3" in
+    present) git -C "$R" config --file "$HC_CONFIG" selftest.human before ;;
+    reorder) printf '[selftest]\n\ta = 1\n\tb = 2\n' >"$HC_CONFIG" ;;
+  esac
+  newrec "$HC_NAME"
+}
+hc_change() {
+  case "$1" in
+    add|value) git -C "$R" config --file "$HC_CONFIG" selftest.human after ;;
+    delete) rm -- "$HC_CONFIG" ;;
+  esac
+}
+hc_fingerprint() {
+  if [ -f "$HC_CONFIG" ]; then sha256sum <"$HC_CONFIG"; else printf absent; fi
+}
+hc_preserved() { # $1=変更方法
+  case "$1" in
+    add|value) check "H20 $HC_NAME: 設定を復元しない" after "$(git -C "$R" config --file "$HC_CONFIG" --get selftest.human)" ;;
+    delete) f "H20 $HC_NAME: 設定を作り直さない" test -e "$HC_CONFIG" ;;
+    reorder) check "H20 $HC_NAME: 順序を復元しない" $'selftest.b=2\nselftest.a=1' "$(git -C "$R" config --file "$HC_CONFIG" --list)" ;;
+  esac
+}
+hc_strip_saved() { # 旧版と同じ保存形式にする(設定そのものは変更しない)
+  python3 - "$1" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d.pop("repo:git-dir", None)
+d.pop("repo:config.worktree", None)
+json.dump(d, open(p, "w"))
+PY
+}
+# 通常終了。拡張なしで後から置かれたファイルと、順序だけの変更も見る。
+for action in add delete value reorder inactive; do
+  initial=present; extension=on; change="$action"
+  case "$action" in add) initial=absent ;; reorder) initial=reorder ;; inactive) initial=absent; extension=off; change=add ;; esac
+  hc_setup "normal-$action" humancfg "$initial" linked "$extension"
+  run_loop "$HC_NAME" "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" "SELFTEST_HUMAN_ACTION=$change" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 終了コード" 10 "$RC"
+  has "H20 $HC_NAME: 理由" "$OUT" '[shared-state]'
+  check "H20 $HC_NAME: 次のタスクへ進まない" humancfg-a "$(calls)"
+  SD="$(state_dir "$HC_NAME")"
+  has "H20 $HC_NAME: 停止印に人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree'
+  has "H20 $HC_NAME: 報告に人の設定の差分" "$(report_of "$OUT")" 'repo:config.worktree'
+  if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then
+    ng "H20 $HC_NAME: 後続ネットワークを打たない"
+  else
+    ok "H20 $HC_NAME: 後続ネットワークを打たない"
+  fi
+  hc_preserved "$change"
+done
+# 設定あり/なし・主/linked の変更なしはどれも 2 周を完了する。
+for location in main linked; do
+  for initial in absent present; do
+    hc_setup "normal-$location-$initial" pr "$initial" "$location"
+    HC_BEFORE="$(hc_fingerprint)"
+    run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+    check "H20 $HC_NAME: 変更なしは成功" 0 "$RC"
+    check "H20 $HC_NAME: 次のタスクを実行" 'pr-a pr-b' "$(calls)"
+    check "H20 $HC_NAME: 設定に書かない" "$HC_BEFORE" "$(hc_fingerprint)"
+  done
+done
+# 中断後の追加/削除/値変更、無変更、起動元変更、旧形式。TERM も同じ照合を通す。
+for action in add delete value unchanged absent switch legacy term; do
+  initial=present
+  case "$action" in add|absent) initial=absent ;; esac
+  hc_setup "restart-$action" longsleep "$initial" linked
+  HC_OTHER="$W/repos/$HC_NAME other"
+  if [ "$action" = switch ]; then
+    G -C "$R" worktree add -q --detach "$HC_OTHER" HEAD
+    git -C "$R" config --file "$(git -C "$HC_OTHER" rev-parse --absolute-git-dir)/config.worktree" selftest.human before
+  fi
+  start_bg "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  if ! wait_file "$REC/started-longsleep-a" 30; then
+    ng "H20 $HC_NAME: 中断する周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg; continue
+  fi
+  SD="$(state_dir "$HC_NAME")"
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  if [ "$action" = term ]; then
+    hc_change value
+    kill -TERM "$BG_PID"; wait_bg
+    check "H20 TERM: 143" 143 "$BG_RC"
+    has "H20 TERM: 停止印に差分" "$SD/stop-mark.md" 'repo:config.worktree'
+    check "H20 TERM: 次のタスクへ進まない" longsleep-a "$(calls)"
+    hc_preserved value
+    has "H20 TERM: 報告に差分" "$(report_of "$OUT")" 'repo:config.worktree'
+    : >"$REC/ssh.log"
+    run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+    check "H20 TERM: 停止印がある再起動は20" 20 "$RC"
+    has "H20 TERM: 再起動の理由" "$OUT" '[stop-mark]'
+    f "H20 TERM: 再起動後にネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+    check "H20 TERM: 再起動後も次のタスクへ進まない" longsleep-a "$(calls)"
+    continue
+  fi
+  kill -KILL "$BG_PID"; wait_bg
+  case "$action" in
+    add|delete|value) hc_change "$action" ;;
+    switch) HC_REPO="$HC_OTHER" ;;
+    legacy) hc_strip_saved "$SD/inflight/base.json" ;;
+  esac
+  HC_BEFORE="$(hc_fingerprint)"
+  : >"$REC/ssh.log"
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  if [ "$action" = unchanged ] || [ "$action" = absent ]; then
+    check "H20 $HC_NAME: 変更なしは再開" 0 "$RC"
+    check "H20 $HC_NAME: 次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
+  else
+    check "H20 $HC_NAME: 再起動は停止" 20 "$RC"
+    has "H20 $HC_NAME: 理由" "$OUT" '[inflight-diff]'
+    check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
+    t "H20 $HC_NAME: 停止印" test -f "$SD/stop-mark.md"
+    f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+    case "$action" in
+      switch|legacy) has "H20 $HC_NAME: 前の起動元の確認を案内" "$SD/stop-mark.md" '前の起動元の設定を確認' ;;
+      *) has "H20 $HC_NAME: 人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree' ;;
+    esac
+  fi
+  f "H20 $HC_NAME: 子を片付けた" proc_alive "$CHILD"
+  check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
+done
+# 正常実行間は既存どおり報告だけで続く。旧形式を黙って無視しない。
+for action in value switch legacy; do
+  hc_setup "between-$action" pr present linked
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" --max-iterations 1 "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 最初の周" 0 "$RC"
+  SD="$(state_dir "$HC_NAME")"
+  case "$action" in
+    value) hc_change value ;;
+    switch) HC_REPO="$R" ;;
+    legacy) hc_strip_saved "$SD/last-verified.json" ;;
+  esac
+  HC_BEFORE="$(hc_fingerprint)"
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 正常実行間は続く" 0 "$RC"
+  check "H20 $HC_NAME: 次のタスクを実行" 'pr-a pr-b' "$(calls)"
+  has "H20 $HC_NAME: 差分を報告" "$(report_of "$OUT")" '最後に照合に通った状態からの差分'
+  has "H20 $HC_NAME: 人の管理パスか設定を報告" "$(report_of "$OUT")" 'repo:'
+  check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
+done
+# 発見モードも共用の照合を通り、次の発見元へ進まない。
+hc_setup discover pr present linked
+run_loop "$HC_NAME" SELFTEST_DISC_DA=humancfg "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" SELFTEST_HUMAN_ACTION=value -- --repo "$HC_REPO" --discover "${COMMON_ARGS[@]}"
+check "H20 発見: 停止" 10 "$RC"
+check "H20 発見: 次の発見元へ進まない" disc-data-audit "$(calls)"
+has "H20 発見: 停止印に人の設定" "$(state_dir "$HC_NAME")/stop-mark.md" 'repo:config.worktree'
+hc_preserved value
 fi
 
 # ════════════════ 後片付け ════════════════
