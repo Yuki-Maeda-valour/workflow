@@ -363,6 +363,8 @@ def tokenize(s: str) -> list[tuple]:
             raise other("改行")
         if c in "$`":
             raise other("単引用符の外の $ かバッククォート")
+        if c == "~":
+            raise other("引用符の外の ~")
         if c in "(){}":
             raise other("括弧か中括弧")
         if c == "#" and cur is None:
