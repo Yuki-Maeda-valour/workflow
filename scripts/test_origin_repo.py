@@ -1,12 +1,14 @@
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -19,6 +21,10 @@ case "$mode" in
   fail) exit 255 ;;
   sleep) sleep 5; exit 0 ;;
 esac
+if [ -n "${SSH_STUB_OUTPUT:-}" ]; then
+  cat "$SSH_STUB_OUTPUT"
+  exit 0
+fi
 user_given=no
 for a in "$@"; do case "$a" in *@*) user_given=yes ;; esac; done
 host=github.com
@@ -28,7 +34,7 @@ case "$mode" in
   otherhost) host=gh.example.com ;;
   port443) host=ssh.github.com; port=443 ;;
 esac
-printf 'user git\\nhostname %s\\nport %s\\n' "$host" "$port"
+printf 'user git\\nhostname %s\\nport %s\\nstricthostkeychecking ask\\nuserknownhostsfile ~/.ssh/known_hosts\\nglobalknownhostsfile /etc/ssh/ssh_known_hosts\\nnohostauthenticationforlocalhost no\\n' "$host" "$port"
 """
 
 
@@ -79,6 +85,25 @@ class OriginRepoTest(unittest.TestCase):
         done = self.run_script(**kwargs)
         self.assertEqual(0, done.returncode, done.stderr)
         return json.loads(done.stdout), done.stdout
+
+    def ssh_output(self, settings, *, form="scp"):
+        """ssh -G の出力を隔離したスタブから渡す。"""
+        output = Path(self.temp.name) / "ssh-output"
+        output.write_text(settings, encoding="utf-8")
+        url = "git@github.com:o/r.git" if form == "scp" else "ssh://git@github.com/o/r.git"
+        self.origin(url)
+        return self.result(extra_env={"SSH_STUB_OUTPUT": str(output)})
+
+    def standard_settings(self, **changes):
+        settings = {
+            "hostname": "github.com", "port": "22",
+            "stricthostkeychecking": "ask",
+            "userknownhostsfile": "~/.ssh/known_hosts",
+            "globalknownhostsfile": "/etc/ssh/ssh_known_hosts",
+            "nohostauthenticationforlocalhost": "no",
+        }
+        settings.update(changes)
+        return "".join(f"{key} {value}\n" for key, value in settings.items())
 
     # ── origin の有無・URL の数 ──
     def test_no_origin(self):
@@ -217,6 +242,191 @@ class OriginRepoTest(unittest.TestCase):
             os.environ.update(saved)
         self.assertFalse(ok)
         self.assertIn("時間切れ", why)
+
+    def test_ssh_strict_modes_and_url_forms(self):
+        for form in ("scp", "ssh"):
+            for strict, allowed in (
+                ("no", False), ("off", False), ("false", False),
+                ("yes", True), ("true", True), ("ask", True), ("accept-new", True),
+                ("unknown", False),
+            ):
+                with self.subTest(form=form, strict=strict):
+                    got, _ = self.ssh_output(
+                        self.standard_settings(stricthostkeychecking=strict), form=form
+                    )
+                    self.assertEqual("github.com/o/r" if allowed else None, got["repo"])
+                    if not allowed:
+                        self.assertTrue(got["reason"])
+
+    def test_ssh_accept_new_first_user_file_and_none(self):
+        for first in ("/dev/null", "/dev//null", "/dev/./null",
+                      "/dev/x/../null", "//dev/null"):
+            for global_file in ("none", "/etc/ssh/ssh_known_hosts"):
+                with self.subTest(first=first, global_file=global_file):
+                    settings = self.standard_settings(
+                        stricthostkeychecking="accept-new",
+                        userknownhostsfile=f"{first} /safe/second",
+                        globalknownhostsfile=global_file,
+                    )
+                    got, _ = self.ssh_output(settings)
+                    self.assertIsNone(got["repo"])
+                    self.assertTrue(got["reason"])
+        for user_file in ("none", "/safe/first /dev/null"):
+            with self.subTest(user_file=user_file):
+                got, _ = self.ssh_output(self.standard_settings(
+                    stricthostkeychecking="accept-new",
+                    userknownhostsfile=user_file,
+                ))
+                self.assertEqual("github.com/o/r", got["repo"])
+        got, _ = self.ssh_output(self.standard_settings(
+            stricthostkeychecking="accept-new", userknownhostsfile="none /safe/second"
+        ))
+        self.assertIsNone(got["repo"])
+        for strict in ("yes", "true", "ask"):
+            with self.subTest(strict=strict):
+                got, _ = self.ssh_output(self.standard_settings(
+                    stricthostkeychecking=strict,
+                    userknownhostsfile="/dev/null",
+                    globalknownhostsfile="none",
+                ))
+                self.assertEqual("github.com/o/r", got["repo"])
+
+    def test_ssh_hostkeyalias_and_localhost_setting(self):
+        for alias, allowed in (("", True), ("github.com", True),
+                               ("none", False), ("other.example", False)):
+            with self.subTest(alias=alias):
+                settings = self.standard_settings()
+                if alias:
+                    settings += f"hostkeyalias {alias}\n"
+                got, _ = self.ssh_output(settings)
+                self.assertEqual("github.com/o/r" if allowed else None, got["repo"])
+        for local, allowed in (("no", True), ("false", True),
+                               ("yes", False), ("true", False), ("other", False)):
+            with self.subTest(local=local):
+                got, _ = self.ssh_output(self.standard_settings(
+                    nohostauthenticationforlocalhost=local
+                ))
+                self.assertEqual("github.com/o/r" if allowed else None, got["repo"])
+
+    def test_ssh_required_settings_are_present_unique_and_nonempty(self):
+        for key in ("hostname", "port", "stricthostkeychecking",
+                    "userknownhostsfile", "globalknownhostsfile",
+                    "nohostauthenticationforlocalhost"):
+            lines = self.standard_settings().splitlines()
+            for mode in ("missing", "empty", "duplicate"):
+                with self.subTest(key=key, mode=mode):
+                    selected = [line for line in lines if not line.startswith(f"{key} ")]
+                    if mode == "empty":
+                        selected.append(f"{key}\t  ")
+                    elif mode == "duplicate":
+                        original = next(line for line in lines if line.startswith(f"{key} "))
+                        selected.extend((original, original))
+                    got, _ = self.ssh_output("\n".join(selected) + "\n")
+                    self.assertIsNone(got["repo"])
+                    self.assertTrue(got["reason"])
+        got, _ = self.ssh_output(self.standard_settings() +
+                                 "hostkeyalias github.com\nhostkeyalias github.com\n")
+        self.assertIsNone(got["repo"])
+        got, _ = self.ssh_output(self.standard_settings() + "hostkeyalias\t \n")
+        self.assertIsNone(got["repo"])
+
+    def test_ssh_keys_are_case_insensitive_and_whitespace_separated(self):
+        settings = self.standard_settings()
+        settings = settings.replace("hostname github.com", "  HostName\tgithub.com")
+        settings = settings.replace("port 22", "PORT\t22")
+        settings = settings.replace("stricthostkeychecking ask", "StrictHostKeyChecking\task")
+        got, _ = self.ssh_output(settings + "identityfile a\nidentityfile b\n")
+        self.assertEqual("github.com/o/r", got["repo"])
+        got, _ = self.ssh_output(settings + "HOSTNAME github.com\n")
+        self.assertIsNone(got["repo"])
+
+    def test_ssh_unrelated_repeatable_settings_do_not_rescue_or_reject(self):
+        extras = (
+            "identityfile /tmp/key1\nidentityfile /tmp/key2\n"
+            "proxycommand secret-proxy-command\nproxyjump jump.example\n"
+            "knownhostscommand secret-known-hosts-command\nverifyhostkeydns yes\n"
+        )
+        for strict, allowed in (("ask", True), ("no", False)):
+            with self.subTest(strict=strict):
+                got, raw = self.ssh_output(
+                    self.standard_settings(stricthostkeychecking=strict) + extras
+                )
+                self.assertEqual("github.com/o/r" if allowed else None, got["repo"])
+                self.assertNotIn("secret-", raw)
+                self.assertNotIn("secret-", self.run_script(
+                    extra_env={"SSH_STUB_OUTPUT": str(Path(self.temp.name) / "ssh-output")}
+                ).stderr)
+
+    def test_ssh_decode_failure_is_rejected_without_leaking(self):
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("origin_repo", SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with mock.patch.object(module.subprocess, "run", side_effect=UnicodeDecodeError(
+                "utf-8", b"\xff", 0, 1, "invalid")):
+            ok, why = module.ssh_is_github()
+        self.assertFalse(ok)
+        self.assertTrue(why)
+        self.assertNotIn("xff", why)
+
+    def test_ssh_launch_failure_has_safe_reason(self):
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("origin_repo", SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with mock.patch.object(module.subprocess, "run", side_effect=OSError("SECRET-PATH")):
+            ok, why = module.ssh_is_github()
+        self.assertFalse(ok)
+        self.assertTrue(why)
+        self.assertNotIn("SECRET-PATH", why)
+
+    @unittest.skipUnless(shutil.which("ssh"), "OpenSSH が無い")
+    def test_real_ssh_g_with_isolated_config(self):
+        config = Path(self.temp.name) / "ssh-config"
+        cases = (
+            ("unsafe", "StrictHostKeyChecking no\n"
+                       "UserKnownHostsFile /dev/null /safe/second\n"
+                       "GlobalKnownHostsFile /safe/global\n"
+                       "ProxyCommand /bin/false\n", False),
+            ("safe", "StrictHostKeyChecking accept-new\n"
+                     "UserKnownHostsFile /safe/first /dev/null\n"
+                     "GlobalKnownHostsFile /safe/global\n"
+                     "ProxyJump jump.example\n", True),
+            ("first-null", "StrictHostKeyChecking accept-new\n"
+                           "UserKnownHostsFile /dev/null /safe/second\n"
+                           "GlobalKnownHostsFile /safe/global\n", False),
+            ("none", "StrictHostKeyChecking accept-new\n"
+                     "UserKnownHostsFile none\n"
+                     "GlobalKnownHostsFile none\n", True),
+            ("yes", "StrictHostKeyChecking true\n"
+                    "UserKnownHostsFile /dev/null\n"
+                    "GlobalKnownHostsFile none\n", True),
+            ("ask", "StrictHostKeyChecking ask\n"
+                    "UserKnownHostsFile /dev/null\n"
+                    "GlobalKnownHostsFile none\n", True),
+        )
+        for name, body, allowed in cases:
+            with self.subTest(name=name):
+                config.write_text("Host github.com\n"
+                                  "  HostName github.com\n"
+                                  "  Port 22\n"
+                                  "  NoHostAuthenticationForLocalhost no\n"
+                                  + body, encoding="utf-8")
+                done = subprocess.run(
+                    [shutil.which("ssh"), "-G", "-F", str(config), "--", "git@github.com"],
+                    env=self.env, stdin=subprocess.DEVNULL, capture_output=True,
+                    text=True, check=False,
+                )
+                self.assertEqual(0, done.returncode, done.stderr)
+                got, _ = self.ssh_output(done.stdout)
+                self.assertEqual("github.com/o/r" if allowed else None, got["repo"])
+
+    def test_https_ignores_ssh_settings(self):
+        self.origin("https://github.com/o/r.git")
+        got, _ = self.result(extra_env={"SSH_STUB_MODE": "fail"})
+        self.assertEqual("github.com/o/r", got["repo"])
 
     # ── どの形でも repo を null にする設定 ──
     def test_vcs_helper(self):
