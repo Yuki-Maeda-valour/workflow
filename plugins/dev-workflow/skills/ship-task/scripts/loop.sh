@@ -1275,22 +1275,30 @@ in_lines() { # $1=語 $2=ファイル(1 行 1 語)→ 在れば 0
   return 1
 }
 
-# D20: 値を取るフラグの表(--help で `<…>` の値の表記を持つフラグ)にあるフラグは `--名前=値` の形だけ
+# D20・H28: 表(--help の `<…>` 表記)にある長名は `--名前=値` の形だけ。
+# 短い引数は `=` の後ろを含む全体を文字単位で調べ、値を取る短名を含めば拒否する。
 check_host_argv_values() { # $1=表のファイル(1 行 1 名)
-  local tok name
+  local tok name chars i short
   [ "${#HOST_ARGV_OVERRIDE[@]}" -gt 0 ] || return 0
   for tok in "${HOST_ARGV[@]:1}"; do
-    name="${tok%%=*}"
-    if in_lines "$name" "$1"; then
-      case "$name" in
-        --*) : ;;
-        *) die 20 host-argv "--host-argv の短いフラグ '$tok' は値を取る(--名前=値 の形にできない)" ;;
-      esac
-      case "$tok" in
-        *=*) : ;;
-        *) die 20 host-argv "--host-argv の '$tok' は値を取るフラグ。値は --名前=値 の形で書く" ;;
-      esac
-    fi
+    case "$tok" in
+      --*)
+        name="${tok%%=*}"
+        if in_lines "$name" "$1"; then
+          case "$tok" in
+            *=*) : ;;
+            *) die 20 host-argv "--host-argv の '$tok' は値を取るフラグ。値は --名前=値 の形で書く" ;;
+          esac
+        fi ;;
+      -*)
+        chars="${tok#-}"
+        for ((i = 0; i < ${#chars}; i++)); do
+          short="-${chars:i:1}"
+          if in_lines "$short" "$1"; then
+            die 20 host-argv "--host-argv の '$tok' は値を取る短いフラグ '$short' を含むため拒否する。値は --名前=値 の形で書く"
+          fi
+        done ;;
+    esac
   done
 }
 

@@ -163,6 +163,7 @@ Options:
   --settings <file-or-json>             Additional settings
   --model <model>                       Model for the current session
   -n, --name <name>                     Set a display name
+  -z, --label <label>                   Set a label
   -d, --debug [filter]                  Enable debug mode
   --verbose                             Override verbose mode
   --dangerously-skip-permissions        Bypass all permission checks
@@ -195,8 +196,60 @@ case "${1:-}" in
     if [ -n "${SELFTEST_PLUGINS_FILE:-}" ]; then cat "$SELFTEST_PLUGINS_FILE"; else echo '[]'; fi
     exit 0 ;;
 esac
+# 子起動は解析の前に記録する。固定フラグを値として消費し、解析に失敗した呼び出しも残す。
+printf '%s\n' "$me" >>"$REC/child-starts.log"
 is_p=0
-for a in "$@"; do [ "$a" = -p ] && is_p=1; done
+if [ "${SELFTEST_PARSE_ARGV:-}" = 1 ]; then
+  # H28 専用の解析。短い必須値は残りの文字か次のトークンを取り、フラグも値として消費する。
+  python3 - "$REC/parsed.json" "$@" <<'PY'
+import json, sys
+args = sys.argv[2:]
+values = {"--name": "name", "--label": "label", "--model": "model",
+          "--output-format": "output-format", "--setting-sources": "setting-sources",
+          "--plugin-dir": "plugin-dir", "--permission-mode": "permission-mode",
+          "--permission-prompts": "permission-prompts", "--settings": "settings"}
+short_values = {"n": "name", "z": "label"}
+parsed = {}
+i = 0
+while i < len(args):
+    arg = args[i]
+    i += 1
+    if arg.startswith("--"):
+        name, sep, value = arg.partition("=")
+        if name in values:
+            if not sep:
+                value = args[i] if i < len(args) else None
+                i += 1
+            parsed[values[name]] = value
+        elif name in ("--allowedTools", "--mcp-config"):
+            items = [value] if sep else []
+            while i < len(args) and not args[i].startswith("-"):
+                items.append(args[i])
+                i += 1
+            parsed[name[2:]] = items
+        else:
+            parsed[name[2:]] = True
+    elif arg.startswith("-"):
+        chars = arg[1:]
+        for j, char in enumerate(chars):
+            if char in short_values:
+                value = chars[j + 1:].lstrip("=")
+                if not value:
+                    value = args[i] if i < len(args) else None
+                    i += 1
+                parsed[short_values[char]] = value
+                break
+            parsed["print" if char == "p" else char] = True
+with open(sys.argv[1], "w", encoding="utf-8") as out:
+    json.dump(parsed, out)
+sys.exit(0 if parsed.get("print") else 64)
+PY
+  parse_rc=$?
+  [ "$parse_rc" -eq 0 ] || exit "$parse_rc"
+  is_p=1
+else
+  for a in "$@"; do [ "$a" = -p ] && is_p=1; done
+fi
 [ "$is_p" -eq 1 ] || { echo "stub: unexpected invocation: $*" >&2; exit 64; }
 prompt="$(cat)"
 # H20: 人の設定だけを変える。対象は治具が明示した scratch のファイルに限る。
@@ -660,7 +713,7 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip locked judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -1064,6 +1117,75 @@ for memory_mode in implementation discover; do
         "$W/$memory_case-$memory_fixture.before" "$memory_actual"
     done
   done
+done
+fi
+
+# ════════════════ H28: 短い値付きフラグ ════════════════
+if want h28; then
+# スタブの陽性対照。-p が値になると、解析失敗でも起動記録を必ず残す。
+for swallowed in -p --allowedTools; do
+  newrec "h28-control-${swallowed#-}"
+  build_env h28-control SELFTEST_PARSE_ARGV=1
+  env -i "${ENV_ARGS[@]}" "$ALTBIN/claude-alt" -cn "$swallowed" Read </dev/null >"$W/out/h28-control.txt" 2>&1
+  check "H28 スタブ: $swallowed を値として消費すると印字モードを失う" 64 "$?"
+  check "H28 スタブ: 解析前の子起動記録($swallowed)" claude-alt "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  check "H28 スタブ: -n の値が $swallowed" "$swallowed" \
+    "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["name"])' "$REC/parsed.json" 2>/dev/null)"
+  if [ "$swallowed" = --allowedTools ]; then
+    f "H28 スタブ: 消費された許可リストは本来の引数として残らない" \
+      python3 -c 'import json,sys; sys.exit("allowedTools" not in json.load(open(sys.argv[1])))' "$REC/parsed.json"
+  fi
+done
+
+newrepo h28
+H28_BAD=(-n -cn -nc -cn=demo -ndemo -cndemo -n=demo -c=n -z -cz -zc -cz=demo -zdemo -czdemo -z=demo -c=z --name)
+for i in "${!H28_BAD[@]}"; do addtask "pr-h28-bad-$i"; done
+addtask pr-h28-separated
+for i in 0 1 2 3; do addtask "pr-h28-good-$i"; done
+commit
+for i in "${!H28_BAD[@]}"; do
+  tok="${H28_BAD[$i]}"
+  newrec "h28-bad-$i"
+  run_loop "h28-bad-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only "pr-h28-bad-$i" \
+    --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" "${COMMON_ARGS[@]}"
+  check "H28 '$tok': 終了コード20" 20 "$RC"
+  has "H28 '$tok': 拒否理由" "$OUT" "[host-argv]"
+  check "H28 '$tok': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  check "H28 '$tok': 対象タスクを起動しない" "" "$(calls)"
+done
+newrec h28-separated
+run_loop h28-separated SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only pr-h28-separated \
+  --host-argv "$ALTBIN/claude-alt" --host-argv --name --host-argv demo "${COMMON_ARGS[@]}"
+check "H28 '--name demo': 終了コード20" 20 "$RC"
+has "H28 '--name demo': 拒否理由" "$OUT" "[host-argv]"
+check "H28 '--name demo': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+check "H28 '--name demo': 対象タスクを起動しない" "" "$(calls)"
+
+# 値に n がある長い引数と、値付き短名を含まない束ね書き、既定起動を解析して確認する。
+H28_GOOD=(-cv --name=demo --name=n default)
+for i in "${!H28_GOOD[@]}"; do
+  tok="${H28_GOOD[$i]}"
+  args=()
+  [ "$tok" = default ] || args=(--host-argv "$ALTBIN/claude-alt" --host-argv "$tok")
+  newrec "h28-good-$i"
+  run_loop "h28-good-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only "pr-h28-good-$i" \
+    "${args[@]}" --allowed-tools Read "${COMMON_ARGS[@]}"
+  check "H28 '$tok': 1 周回って終わる" 0 "$RC"
+  check "H28 '$tok': 対象タスクを起動する" "pr-h28-good-$i" "$(calls)"
+  check "H28 '$tok': 解析前の子起動記録が1行" 1 "$(wc -l <"$REC/child-starts.log" 2>/dev/null)"
+  t "H28 '$tok': 許可リストと固定フラグの役割を保つ" python3 - "$REC/parsed.json" "$PLUG" "$tok" <<'PY'
+import json, sys
+p = json.load(open(sys.argv[1]))
+expected = {"allowedTools": ["Read"], "print": True, "output-format": "json",
+            "setting-sources": "user", "strict-mcp-config": True, "plugin-dir": sys.argv[2],
+            "permission-mode": "acceptEdits", "permission-prompts": "none"}
+assert all(p.get(key) == value for key, value in expected.items()), p
+assert "PermissionRequest" in json.loads(p["settings"])["hooks"], p
+if sys.argv[3].startswith("--name="):
+    assert p.get("name") == sys.argv[3].split("=", 1)[1], p
+elif sys.argv[3] == "-cv":
+    assert p.get("c") is True and p.get("v") is True, p
+PY
 done
 fi
 
