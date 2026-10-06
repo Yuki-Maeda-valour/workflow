@@ -2087,6 +2087,8 @@ PP="$W/permplug"
 rm -rf "$PW" "$PP" "$W/permout"
 mkdir -p "$PW/.claude/reviews/d" "$PW/src" "$PW/.git" "$PW/.claude/tasks" "$PP/skills/x" "$W/permout"
 echo a >"$PW/.claude/reviews/a"
+echo pr >"$PW/.claude/reviews/pr.md"
+echo msg >"$PW/.claude/reviews/msg.txt"
 echo s >"$PW/.claude/reviews/settings.json"
 echo g >"$PW/.claude/grasp.md"
 echo r >"$PP/skills/x/ref.md"
@@ -2398,6 +2400,8 @@ esac
 # 取り出せなければ FAIL にする。python3 の呼び出しは、許可リストに python3 を足して掛ける(推奨の列は python3 を含む — loop.md §4)。
 # 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)で、
 # SKILL.md と discover-mode.md で同じであることも照らす
+printf 'review fixture\n' >"$PW/.claude/reviews/m.md"
+printf 'discover commit fixture\n' >"$PW/.claude/reviews/discover-data-audit-msg.md"
 UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
 import re, sys
 root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -2548,8 +2552,8 @@ pdk "cd の前置きの後ろの ; より後ろは入力の cwd からも解く(
   "$(bash_in 'CDPATH= cd -P -- src && git status ; cat ../src/x.txt')"
 pdk "cd の前置きの後ろの裸引数も P から解く(… .claude && git status || echo x > settings.json)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- .claude && git status || echo x > settings.json')"
-pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && git || echo > settings.json)" protected Bash \
-  "$(bash_in 'CDPATH= cd -P -- .claude && git || echo > settings.json')"
+pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && test || echo > settings.json)" protected Bash \
+  "$(bash_in 'CDPATH= cd -P -- .claude && test || echo > settings.json')"
 pdk "cd の前置きの後ろは最初の || で分ける(… src && git status || cat ../src/x.txt ; git log)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status || cat ../src/x.txt ; git log')"
 # P から解くと W(.claude/reviews/ の下)、入力の cwd から解くと保護パスになる書き込み先で、2 回目の判定の種類を縛る
@@ -2730,6 +2734,50 @@ pa "git hash-object .claude/reviews/msg.txt" Bash "$(bash_in 'git hash-object .c
 pa "cat < .claude/reviews/msg.txt" Bash "$(bash_in 'cat < .claude/reviews/msg.txt')"
 pa "gh pr create --title t --body-file - < .claude/reviews/pr.md" Bash "$(bash_in 'gh pr create --title t --body-file - < .claude/reviews/pr.md')"
 pa "git commit -F .claude/reviews/msg.txt" Bash "$(bash_in 'git commit -F .claude/reviews/msg.txt')"
+pdk "H35: Git alias の -c を拒否" other Bash "$(bash_in "git -c alias.pwn='!touch .claude/settings.json' pwn")"
+pdk "H35: Git symbolic-ref の更新を拒否" other Bash "$(bash_in 'git symbolic-ref refs/remotes/origin/HEAD refs/heads/evil')"
+pdk "H35: Git tag の更新を拒否" other Bash "$(bash_in 'git tag -f x HEAD')"
+pdk "H35: Git remote の更新を拒否" other Bash "$(bash_in 'git remote rename origin evil')"
+pdk "H35: Git add の file pathspec を拒否" other Bash "$(bash_in 'git add --pathspec-from-file=src/x')"
+pdk "H35: Git grep の pager option を拒否" other Bash "$(bash_in "git grep --open-files-in-pager='touch .claude/settings.json' x")"
+pdk "H35: Git cat-file の textconv を拒否" other Bash "$(bash_in 'git cat-file --filters HEAD:src/x')"
+pdk "H35: Git diff の output option を拒否" other Bash "$(bash_in 'git diff --output=.claude/settings.json')"
+pdk "H35: Git checkout の magic pathspec を拒否" other Bash "$(bash_in "git checkout -- ':(glob)**/.claude/*'")"
+pdk "H35: Git restore の全体操作を拒否" other Bash "$(bash_in 'git restore .')"
+pdk "H35: Git clean を拒否" other Bash "$(bash_in 'git clean -fd')"
+pdk "H35: Git branch の作成を拒否" other Bash "$(bash_in 'git branch accidental')"
+pdk "H35: Git reflog の削除を拒否" other Bash "$(bash_in 'git reflog drop HEAD')"
+pdk "H35: env 経由の Git clean を拒否" other Bash "$(bash_in 'env git clean -fd')"
+pdk "H35: command 経由の Git reset を拒否" other Bash "$(bash_in 'command git reset --hard')"
+pdk "H35: bash -c 経由の Git clean を拒否" other Bash "$(bash_in "bash -c 'git clean -fd'")"
+pa "H35: Git symbolic-ref の HEAD query を許す" Bash "$(bash_in 'git symbolic-ref --quiet HEAD')"
+pa "H35: Git remote の query を許す" Bash "$(bash_in 'git remote get-url --all origin')"
+pa "H35: Git switch -c を許す" Bash "$(bash_in 'git switch -c task/h35-normal')"
+pa "H35: Git switch --no-track -c を許す" Bash "$(bash_in 'git switch --no-track -c task/h35-unattended')"
+pa "H35: base-commit の verify query を許す" Bash \
+  "$(bash_in "git -c core.splitIndex=false -c core.filemode=true -c core.symlinks=true rev-parse --verify --quiet 'HEAD^{commit}'")"
+pa "H35: index 除外確認の diff --no-relative を許す" Bash \
+  "$(bash_in "git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**'")"
+pa "H35: refs の format query を許す" Bash \
+  "$(bash_in "git for-each-ref --format='%(objectname)%09%(refname)' refs/heads/task refs/remotes")"
+pa "H35: 日本語 task branch を許す" Bash "$(bash_in 'git switch --no-track -c task/候補-日本語')"
+pa "H35: 空 tree の hash-object を許す" Bash "$(bash_in 'git hash-object -t tree /dev/null')"
+pa "H35: 連結した安全な -c を許す" Bash "$(bash_in 'git -ccore.hooksPath=/dev/null status --short')"
+pdk "H23: sed の read script を拒否" other Bash "$(bash_in "sed -n '1r .claude/settings.json' src/x")"
+pdk "H23: sed の execute flag を拒否" other Bash "$(bash_in "sed -n 's/x/y/e' src/x")"
+pa "H23: sed --sandbox の print script を許す" Bash "$(bash_in "sed --sandbox -n '1,3p' src/x")"
+pdk "H23: find -exec を拒否" other Bash "$(bash_in 'find . -exec touch .claude/settings.json \;')"
+pdk "H23: find -delete を拒否" other Bash "$(bash_in 'find . -delete')"
+PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind":"prefix","words":["find"]}); print(json.dumps(a))')"
+pa "H23: find の読み取り action を許す" Bash "$(bash_in "find . -type f -name '*.txt' -print")"
+PALLOW=""
+pdk "H23: 任意 awk program を拒否" other Bash "$(bash_in "awk 'BEGIN { system(\"touch .claude/settings.json\") }'")"
+pdk "H40: gh api を拒否" other Bash "$(bash_in 'gh api repos/example/example')"
+pdk "H40: gh repo edit を拒否" other Bash "$(bash_in 'gh repo edit --visibility public')"
+pdk "H40: gh の .env stdin を拒否" other Bash "$(bash_in 'gh pr create --title t --body-file - < .env')"
+pdk "H40: gh の複数 stdin を拒否" other Bash "$(bash_in 'gh pr create --title t --body-file - < .claude/reviews/pr.md < src/x')"
+pdk "H40: gh の pipe stdin を拒否" other Bash "$(bash_in 'cat .claude/reviews/pr.md | gh pr create --title t --body-file -')"
+pa "H40: gh pr view の state query を許す" Bash "$(bash_in 'gh pr view 1 --json state')"
 pdk "旧い受け方(tmp=\"\$(mktemp)\" && …)" other Bash "$(bash_in "tmp=\"\$(mktemp)\" && bash $PP/skills/do-task/scripts/diff-snapshot.sh --cwd $PW --precheck > \"\$tmp\"")"
 pdk "TOP=\$(git rev-parse --show-toplevel)" other Bash "$(bash_in 'TOP=$(git rev-parse --show-toplevel)')"
 pdk "git -C \"\$TOP\" rev-parse HEAD" other Bash "$(bash_in 'git -C "$TOP" rev-parse HEAD')"

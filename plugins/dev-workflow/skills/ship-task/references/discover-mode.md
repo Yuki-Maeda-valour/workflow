@@ -165,6 +165,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - **PR**: `gh pr create -R '<R>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タイトル>' --body-file - < .claude/reviews/discover-<発見元>-pr.md`
   - R は origin-repo.py の `repo`(`HOST/OWNER/REPO`)。refactor の周も同じ R を使う(gh の既定のリポジトリの解決に頼らない — §5)
   - タイトルは `候補: <発見元>(<N> 件)`。draft にせず、アサインもしない
+  - stdin は pipe・here document・複数リダイレクトを使わない。reviews 下の非 symlink の通常ファイル 1 件を、単一の `<` で渡す。
   - PR 作成の失敗・拒否は失敗扱い
 - **`縮退`**: origin が無い・`--no-pr`(どちらも push しない)/ `repo` が null・`gh repo view` が通らない(push はする)。報告に、理由と push の有無を書く。手で PR を作るコマンドの雛形と、作らないときの消し方は、`loop.sh` の朝の報告に出る(loop.md の発見モード)
 
