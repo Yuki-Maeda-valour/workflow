@@ -2,13 +2,37 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
-## v4.21.4
+## v4.22.3
 
 ### 修正
 
 - `loop-permission.py` が、語中を含む未引用の `~` を許可判定より先に拒否する([子 Issue #181](https://github.com/Yuki-Maeda-valour/workflow/issues/181)、親 #107 の H38)。`x=~/z`・`x=a:~/z` など、Bash の展開で検査先と書き込み先がずれる経路を塞ぐ。
 - 引数・代入・リダイレクトを一括して検査する。引用・エスケープしたリテラルは既存のパス検査に従う。`cd` の行き先に含む `~` の全面拒否は維持する。
 - scratch 内の実 Bash と symlink による書換え、同じ入力の hook 拒否と対象の不変、引用したパスへの実書き込みを回帰検証する。
+
+## v4.22.2
+
+### 修正
+
+- `loop-permission.py` が、保護ディレクトリ内から指定した裸の引数・長いオプションの値・代入値をパスとして検査する([子 Issue #179](https://github.com/Yuki-Maeda-valour/workflow/issues/179)、親 #107 の H27)。入力の作業ディレクトリと、許可された `cd` の移動先の両方で、`git checkout -- settings.json` などの検査漏れを防ぐ。
+- W の例外と通常ディレクトリでの操作を維持する。短縮オプションの連結値は既存の狭い範囲で検査し、保護ディレクトリから W に対する `cp -pv`・`rm -rf` などの正常な束ねフラグを保つ。
+- scratch の実 Git による復元操作、実 hook の拒否とログ、W へのコピーと削除を回帰テストで確認する。保守的に裸の値を検査する範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
+## v4.22.1
+
+### 修正
+
+- `loop-permission.py` が、短縮オプションに連結した保護パスを検査する([子 Issue #180](https://github.com/Yuki-Maeda-valour/workflow/issues/180)、親 #107 の H24)。`-o.git`・`-o.mcp.json` と束ね書きの `-ko.git`、ドットなしの保護名や裸名の symlink による検査漏れを防ぐ。
+- 通常の短縮フラグ、長いオプションと `--` 以降の位置引数の扱いを確認した。候補を保守的に検査する範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+- scratch の実 Git によるパッチ生成の陽性対照と、実 hook の拒否・ログ・保護領域不変、通常出力先への成功を回帰テストに追加した。
+
+## v4.22.0
+
+### 変更
+
+- skill の本文が決める、人に出す報告の型(見出し・項目名・質問・選択肢)の内部の言葉を、ふつうの言葉にした。字面を残す決まった語と名前には、型の中に短い説明を添えた
+- `/understand-project` のサマリーの見出し「🔺 ドリフト検出」を「🔺 文書や設定と実際との食い違い」に、`/tool-check` の結果の表の列名「ゲート」を「検査」に変えた
+- 設計書(`docs/design.md` §6)に、報告の型の言葉の決まりを足した(references が決める型は、言葉の整理の Issue で同じ決まりを当てる)
 
 ## v4.21.3
 

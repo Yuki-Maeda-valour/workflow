@@ -480,6 +480,26 @@ def is_bare_symlink(ctx: Ctx, text: str, tilde: bool) -> bool:
     return not looks_like_path(text, tilde) and bool(text) and os.path.islink(ctx.resolve(text, tilde))
 
 
+def is_bare_path(ctx: Ctx, text: str, tilde: bool) -> bool:
+    """裸名も、保護 cwd 内か既存 symlink ならパスとして判定する。"""
+    return (not looks_like_path(text, tilde) and bool(text)
+            and (is_protected(ctx.rel(ctx.cwd)) or is_bare_symlink(ctx, text, tilde)))
+
+
+def check_attached_short_option(ctx: Ctx, word: Word) -> None:
+    """短いオプションへ連結した値を、字面だけで保守的にパスとして検査する。"""
+    text = word.text
+    # コマンド固有のオプション文法は持たない。`-ko.git` のような束ね書きも含め、3 文字目以降の各接尾辞を
+    # 候補にする。値を取らない通常の短いフラグも、保護名や既存 symlink と重ならなければ従来どおり通る。
+    for start in range(2, len(text)):
+        candidate = text[start:]
+        # `~` が引用・escape されていても、展開規則をここで再現せず拒否する。
+        if candidate.startswith("~"):
+            raise other(f"~ を含む短いオプションの形を判定できない: {text[:100]}")
+        if looks_like_path(candidate, False) or is_bare_symlink(ctx, candidate, False):
+            ctx.check_path_word(ctx.resolve(candidate, False))
+
+
 def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool = False) -> None:
     options = True
     for index, w in enumerate(words):
@@ -493,13 +513,15 @@ def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool =
                 value = text.split("=", 1)[1]
                 # --name=値 の値の部分を見る(~ は引用符の外で値の先頭にあるときだけ)
                 vtilde = value.startswith("~") and not w.quoted[text.index("=") + 1] if value else False
-                if value and (looks_like_path(value, vtilde) or is_bare_symlink(ctx, value, vtilde)):
+                if value and (looks_like_path(value, vtilde) or is_bare_path(ctx, value, vtilde)):
                     ctx.check_path_word(ctx.resolve(value, vtilde))
                 continue
             if "/" in text:
                 raise other(f"パスを含むオプションの形を判定できない: {text[:100]}")
+            if not text.startswith("--") and len(text) >= 3:
+                check_attached_short_option(ctx, w)
             continue
-        if looks_like_path(text, tilde) or (not (skip_bare_first and index == 0) and is_bare_symlink(ctx, text, tilde)):
+        if looks_like_path(text, tilde) or (not (skip_bare_first and index == 0) and is_bare_path(ctx, text, tilde)):
             ctx.check_path_word(ctx.resolve(text, tilde))
 
 
@@ -509,7 +531,7 @@ def check_assignment(ctx: Ctx, word: Word) -> None:
         raise other(f"代入を許さない環境変数の名: {name}")
     if name == "CDPATH" and value.text != "":
         raise other("CDPATH の値は空だけ")
-    if value.text and (looks_like_path(value.text, value.tilde) or is_bare_symlink(ctx, value.text, value.tilde)):
+    if value.text and (looks_like_path(value.text, value.tilde) or is_bare_path(ctx, value.text, value.tilde)):
         ctx.check_path_word(ctx.resolve(value.text, value.tilde))
 
 
@@ -837,7 +859,7 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
             continue
         is_sed_inplace = name == "sed" and sed_in_place(words[1:])
         # コマンド名は従来どおり字面がパスなら検査する。PATH で解決する裸名だけは
-        # symlink 検出の対象にしない。
+        # 保護 cwd と symlink による裸名の追加判定の対象にしない。
         file_op = name in FILE_OP_SHORT or is_sed_inplace
         check_words_as_paths(ctx, words[1:] if file_op else words, skip_bare_first=not file_op)
         if file_op:
