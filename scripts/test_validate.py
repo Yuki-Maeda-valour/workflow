@@ -51,12 +51,16 @@ def writing_rules_line(skill):
         "口調の決まりを書いた節に従い、届かないことを報告に書く)"
     )
 
-# Issue #101 の期待語彙。検証器の定数を参照せず、欠落や分類違いも検知する。
+# Issue #101・#148 の期待語彙。検証器の定数を参照せず、欠落や分類違いも検知する。
 HOST_CLI_BOUNDED_WORDS = (
     "cursor-agent", "gemini", "workspace-write", "danger-full-access",
     "codex exec", "codex review", "codex mcp", "codex-plugin-cc",
-    "codex-rescue", "run_in_background",
+    "codex-rescue", "run_in_background", "AskUserQuestion", "multiSelect",
 )
+# 質問の道具名と引数名。ERROR の案内がほかの語と違い、解決表の質問の節を指す。
+HOST_CLI_QUESTION_WORDS = ("AskUserQuestion", "multiSelect")
+HOST_CLI_QUESTION_GUIDANCE = "delegation-map.md §8"
+HOST_CLI_OTHER_GUIDANCE = "external-runners.md へ移す"
 HOST_CLI_MCP_WORDS = ("claude-in-chrome", "chrome-devtools")
 
 
@@ -777,6 +781,88 @@ class ValidateTest(unittest.TestCase):
                         target.unlink()
                     else:
                         target.write_bytes(original)
+
+    def assert_host_cli_question_guidance(self, hit):
+        """質問の道具名と引数名の ERROR は、案内が解決表の質問の節を指し、ほかの語の案内を持たない。"""
+        self.assertIn(HOST_CLI_QUESTION_GUIDANCE, hit)
+        self.assertNotIn(HOST_CLI_OTHER_GUIDANCE, hit)
+
+    def test_host_cli_question_guidance(self):
+        for word in HOST_CLI_QUESTION_WORDS:
+            with self.subTest(word=word):
+                hits = self.assert_host_cli_result(word, True)
+                # 文の頭の字面は、ほかの語と同じ。括弧の中の案内だけが違う
+                self.assertTrue(
+                    hits[0].startswith(f"{CHECKED_MD}:3: ホスト固有の CLI 語 -> {word!r}("), hits
+                )
+                self.assert_host_cli_question_guidance(hits[0])
+        # 対照: ほかの語の案内は external-runners.md を指し、解決表の質問の節を指さない
+        with self.subTest(word="gemini"):
+            hits = self.assert_host_cli_result("gemini", True)
+            self.assertIn(HOST_CLI_OTHER_GUIDANCE, hits[0])
+            self.assertNotIn("§8", hits[0])
+
+    def test_host_cli_question_case_variants(self):
+        # 末尾の変種は s をロングエス(ſ)にした形。大小無視の照合では s に一致するが、
+        # 字面の lower() では s に戻らない —— 案内を字面から選ぶと、ほかの語の案内になる
+        for text in (
+            "askuserquestion", "ASKUSERQUESTION", "multiselect", "MULTISELECT", "MultiSelect",
+            "AſkUserQueſtion",
+        ):
+            with self.subTest(text=text):
+                hits = self.assert_host_cli_result(text, True)
+                self.assertIn(repr(text), hits[0])
+                self.assert_host_cli_question_guidance(hits[0])
+
+    def test_host_cli_question_marker(self):
+        reason = "<!-- validate-allow: 質問の道具の名前を例として示す -->"
+        for word in HOST_CLI_QUESTION_WORDS:
+            for marker, detected in (
+                (reason, False),
+                ("<!-- validate-allow -->", True),
+                ("<!-- validate-allow: -->", True),
+            ):
+                with self.subTest(word=word, marker=marker):
+                    hits = self.assert_host_cli_result(f"{word} {marker}", detected)
+                    if detected:
+                        self.assert_host_cli_question_guidance(hits[0])
+            # マーカーは、その行だけに効く
+            with self.subTest(word=word, marker="別行"):
+                hits = self.assert_host_cli_result(f"{reason}\n{word}", True, line=4)
+                self.assert_host_cli_question_guidance(hits[0])
+
+    def test_host_cli_question_scope(self):
+        cases = (
+            ("tool-check/README.md", True),
+            ("tool-check/references/validate-test.md", True),
+            ("tool-check/scripts/validate-test.py", False),
+            ("do-task/references/delegation-map.md", False),
+            ("do-task/references/external-runners.md", False),
+        )
+        for word in HOST_CLI_QUESTION_WORDS:
+            for path, detected in cases:
+                with self.subTest(word=word, path=path):
+                    relpath = f"{SKILLS_REL}/{path}"
+                    target = self.repo / relpath
+                    original = target.read_bytes() if target.exists() else None
+                    try:
+                        self.assert_host_cli_result(word, detected, relpath=relpath)
+                    finally:
+                        if original is None:
+                            target.unlink()
+                        else:
+                            target.write_bytes(original)
+
+    def test_host_cli_question_adjacent(self):
+        # 日本語の直結は検出し、英字が続く別の語は検出しない
+        for text, detected in (
+            ("AskUserQuestionで", True),
+            ("multiSelectで", True),
+            ("AskUserQuestions", False),
+            ("multiSelected", False),
+        ):
+            with self.subTest(text=text):
+                self.assert_host_cli_result(text, detected)
 
     def test_host_cli_words_are_detected(self):
         # 書き先は references/*.md に固定する —— CHECKED_PY は scripts/ 配下で
