@@ -61,6 +61,7 @@ RUN_ID=""
 STATE=""
 TOP=""
 COMMON=""
+REPO_GIT_DIR=""
 DEF_NAME=""
 DEF_SHA=""
 STOP_MARK=""
@@ -573,9 +574,13 @@ def snap_info(path):
     return {"state": "ok", "entries": entries}
 
 
-def cmd_snapshot(out, common, wtadmin, *git):
+def cmd_snapshot(out, common, repoadmin, wtadmin, *git):
     git = list(git)
     snap = {
+        # --repo の管理パスも保存する。別の worktree で中断後に起動したとき、
+        # 設定が同じでも、前の起動元を照合できたとは扱わない(H20)。
+        "repo:git-dir": {"state": "ok", "path": repoadmin},
+        "repo:config.worktree": snap_config(git, os.path.join(repoadmin, "config.worktree")),
         "config": snap_config(git, os.path.join(common, "config")),
         "config.worktree": snap_config(git, os.path.join(common, "config.worktree")),
         "hooks": snap_hooks(os.path.join(common, "hooks")),
@@ -605,11 +610,19 @@ def cmd_compare(base_path, cur_path):
         bv, cv = base.get(key), cur.get(key)
         if bv == cv:
             continue
+        if key == "repo:git-dir":
+            reason = "保存済み状態に人の管理パスが無い" if bv is None else "人の管理パスが変わった"
+            diffs.append(f"{key}: {show(bv)} → {show(cv)} ({reason}。前の起動元の設定を確認する。未変更とは判定しない)")
+            continue
+        if key == "repo:config.worktree" and bv is None:
+            diffs.append(f"{key}: 保存済み状態に人の設定の控えが無い → {show(cv)}"
+                         " (前の起動元の設定を確認する。現在の設定で中断前の基準を補完しない)")
+            continue
         if bv and cv and bv.get("state") == cv.get("state") and "entries" in bv and "entries" in cv:
             be = [tuple(e) for e in bv["entries"]]
             ce = [tuple(e) for e in cv["entries"]]
             # config・config.worktree は項目の並びで比べ、追加・削除・値・並べ替えのどの変化も差分にする(D14・#134)
-            if key in ("config", "config.worktree", "wt:config.worktree"):
+            if key in ("config", "config.worktree", "wt:config.worktree", "repo:config.worktree"):
                 bl = [entry_text(*e) for e in be]
                 cl = [entry_text(*e) for e in ce]
                 for line in difflib.unified_diff(bl, cl, lineterm="", n=0):
@@ -939,7 +952,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
 }
 
 take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -)
-  py snapshot "$1" "$COMMON" "$2" git "${GIT_PRE[@]}"
+  py snapshot "$1" "$COMMON" "$REPO_GIT_DIR" "$2" git "${GIT_PRE[@]}"
 }
 
 save_last_verified() { # 最後に照合に通った状態(照合に通ったときだけ更新する)
@@ -2391,6 +2404,9 @@ TOP="$(cd -P -- "$TOP_RAW" && pwd -P)"
 [ "$TOP" = "$REPO_PHYS" ] || die 20 not-toplevel "--repo が作業ツリーのトップでない(トップは $TOP)"
 COMMON_RAW="$(G -C "$TOP" rev-parse --path-format=absolute --git-common-dir)"
 COMMON="$(cd -P -- "$COMMON_RAW" && pwd -P)"
+# --repo が指す人の worktree の管理パスを固定する。拡張が無効でも設定の不在/追加を控える(H20)。
+REPO_GIT_DIR_RAW="$(G -C "$TOP" rev-parse --path-format=absolute --git-dir)"
+REPO_GIT_DIR="$(cd -P -- "$REPO_GIT_DIR_RAW" && pwd -P)"
 # main の worktree(--repo が linked worktree のとき、人のチェックアウトはこちらにもある)
 MAIN_WT=""
 while IFS= read -r -d '' line; do
