@@ -2,12 +2,20 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
-## v4.22.1
+## v4.22.2
 
 ### 修正
 
 - `/init-project` の完了時の案内で、profile の `source_of_truth` が `serena` なのに Serena を設定しなかったときの警告を、`.mcp.json` を生成・変更したときの案内の下から外した。`.mcp.json` を生成したかどうかによらず警告する(Serena の設定を自分で行うと選んだとき・MCP の設定の生成の承認を断ったとき・非対話で生成しなかったときなど)([Issue #185](https://github.com/Yuki-Maeda-valour/workflow/issues/185))
 - 残る `.mcp.json` の案内は、条件「`.mcp.json` を生成・変更した場合、」で終わる行の下に、伝える 3 つの文を並べる形に分け直した(文言は変えていない)
+
+## v4.22.1
+
+### 修正
+
+- `loop-permission.py` が、短縮オプションに連結した保護パスを検査する([子 Issue #180](https://github.com/Yuki-Maeda-valour/workflow/issues/180)、親 #107 の H24)。`-o.git`・`-o.mcp.json` と束ね書きの `-ko.git`、ドットなしの保護名や裸名の symlink による検査漏れを防ぐ。
+- 通常の短縮フラグ、長いオプションと `--` 以降の位置引数の扱いを確認した。候補を保守的に検査する範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+- scratch の実 Git によるパッチ生成の陽性対照と、実 hook の拒否・ログ・保護領域不変、通常出力先への成功を回帰テストに追加した。
 
 ## v4.22.0
 
