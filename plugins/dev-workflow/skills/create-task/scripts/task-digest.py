@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
+import stat
 import sys
-from pathlib import Path
 
 
 # 定義(コードフェンス・対象・正規化・値・算出できない場合)の正本は task-template.md の記法の規約。
@@ -24,8 +25,9 @@ class DigestError(Exception):
     pass
 
 
-def _fence_flags(lines: list[str]) -> list[bool]:
-    # 開きの行・閉じの行もフェンスの中に数える。閉じないまま末尾に達したら、そこまでがフェンスの中
+def _fence_flags(lines: list[str], *, require_closed: bool = False) -> list[bool]:
+    # 開きの行・閉じの行もフェンスの中に数える。キー収集では従来どおり未閉鎖を末尾まで数え、
+    # 本文ダイジェストでは除外する節も含め、全フェンスの閉鎖を必須にする
     flags: list[bool] = []
     closing: re.Pattern[str] | None = None
     for line in lines:
@@ -39,6 +41,8 @@ def _fence_flags(lines: list[str]) -> list[bool]:
         flags.append(True)
         if closing.match(line):
             closing = None
+    if require_closed and closing is not None:
+        raise DigestError("閉じていないコードフェンスがある")
     return flags
 
 
@@ -47,7 +51,7 @@ def body_lines(text: str) -> list[str]:
         text = text[1:]
     # 改行を LF に揃え、各行の末尾の空白(半角スペースとタブ)を削る
     lines = [line.rstrip(" \t") for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    fenced = _fence_flags(lines)
+    fenced = _fence_flags(lines, require_closed=True)
     headings = [i for i, line in enumerate(lines) if not fenced[i] and H2.match(line)]
 
     records = [i for i in headings if RECORD_HEADING.match(lines[i])]
@@ -80,12 +84,28 @@ def digest(text: str) -> str:
     return "sha256:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+def read_path(path: str) -> bytes:
+    # 先にリンク先を含めて検査する。検査後に差し替えられても、non-blocking open 後の実体を
+    # 同じ記述子で再検査してから読むため、FIFO 待ちや別のパスの開き直しをしない。
+    if not stat.S_ISREG(os.stat(path).st_mode):
+        raise DigestError("入力パスが通常ファイルでない")
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise DigestError("入力パスが通常ファイルでない")
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            return source.read()
+    finally:
+        os.close(fd)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, add_help=False)
     parser.add_argument("path", help="タスク MD のパス。`-` なら stdin を読む")
     args = parser.parse_args()
     try:
-        data = sys.stdin.buffer.read() if args.path == "-" else Path(args.path).read_bytes()
+        data = sys.stdin.buffer.read() if args.path == "-" else read_path(args.path)
         result = digest(data.decode("utf-8"))
     except OSError as exc:
         print(f"算出できない: ファイルを読めない: {exc}", file=sys.stderr)

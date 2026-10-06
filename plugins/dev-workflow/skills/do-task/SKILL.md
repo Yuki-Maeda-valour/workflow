@@ -59,6 +59,8 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 
 ## Phase 0: 前提と対象確定
 
+最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、PATH 上の bash 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
+
 1. **管理ルートと対象タスク**: 本体 `root` へ移動する前に管理プロジェクトルートを固定する。
    - 引数のパスがあれば管理ルート相対として最優先し、profile の `task_dir` が不正でも保存先の再解決を行わない。
    - 無ければ [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従って保存先を解決し、その直下の `進行中_*.md` から選択する(複数あればユーザーに確認。無人ではパスが無ければ、ここより前に失敗扱い — D4)。

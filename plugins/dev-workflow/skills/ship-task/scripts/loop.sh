@@ -3,7 +3,7 @@
 # 新しいヘッドレスのセッションで /ship-task の無人モードに回す。人のシェル・cron から呼ぶ(skill ではない)。
 # `--discover` では、発見元を 1 周ずつ /ship-task の発見の周に回して `候補_` を積む(loop.md §11)。
 # **契約(既定値と意味・停止条件・終了コード・報告・限界・実走の手順)の正本は ../references/loop.md**。
-# ここには引数だけを書く。対応するのは Linux だけ(setsid・flock・/proc を使う)。
+# ここには引数と必要環境を書く。Linux・bash 4.4 以上が必要(setsid・flock・/proc を使う)。
 #
 # 使い方:
 #   bash loop.sh [オプション]
@@ -30,6 +30,19 @@
 #
 # 終了コード: 0 / 2 / 10 / 20 / 30 / 128+N(意味は loop.md)
 # --- end usage ---
+# OS → bash の版 → 初期化。bash 3.2 でも読める範囲だけで診断し、trap/die はまだ使わない。
+if ! OS_NAME="$(uname -s 2>/dev/null)"; then
+  printf '%s\n' 'ERROR [os] OS を判定できない(uname -s が失敗)。loop.sh は Linux だけに対応する' >&2
+  exit 20
+fi
+if [ "$OS_NAME" != Linux ]; then
+  printf 'ERROR [os] Linux でない(%s)。loop.sh は Linux だけに対応する(setsid・flock・/proc を使う)\n' "$OS_NAME" >&2
+  exit 20
+fi
+if [ "${BASH_VERSINFO[0]}" -lt 4 ] || { [ "${BASH_VERSINFO[0]}" -eq 4 ] && [ "${BASH_VERSINFO[1]}" -lt 4 ]; }; then
+  printf '%s\n' 'ERROR [bash-version] bash 4.4 以上が必要(inherit_errexit を使う)。PATH 上の bash の実体と版を確認する' >&2
+  exit 20
+fi
 set -eEuo pipefail
 shopt -s inherit_errexit
 # export された CDPATH があると、素の `cd` が行き先を stdout へ出す。このスクリプトの `cd` はすべて明示パス
@@ -2107,12 +2120,14 @@ source=$ITER_SOURCE
   # 子: setsid で新しいセッションにする(片付けでグループごと止める)。DEV_WORKFLOW_HOST_CLI を外し、
   # 周の印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
   # OLDPWD も外す(直前の cd で worktree の外を指す。周の中の `cd -` の行き先にさせない)
+  # H32: 自動メモリは周の子だけで無効にする。親の値や利用者の設定・既存メモリは変更しない。
   (
     exec 7>&-
     cd "$ITER_WT"
     exec "$ENV_BIN" -u DEV_WORKFLOW_HOST_CLI -u OLDPWD DEV_WORKFLOW_LOOP_ITER="$ITER_ID" \
       DEV_WORKFLOW_LOOP_WORKTREE="$ITER_WT" DEV_WORKFLOW_LOOP_PERMLOG="$ITER_PERMLOG" \
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
       "$SETSID_BIN" "${CHILD_ARGV[@]}" \
       <"$RUN_DIR/iter-$ITER_SEQ.prompt" >"$RUN_DIR/iter-$ITER_SEQ.out" 2>"$RUN_DIR/iter-$ITER_SEQ.err"
   ) &
@@ -2294,9 +2309,7 @@ check_host_session
 # 子のホスト CLI には渡さない(D7)
 unset DEV_WORKFLOW_HOST_CLI
 
-# ── §2 の 3: OS と道具 ──
-OS_NAME="$(uname -s)"
-[ "$OS_NAME" = Linux ] || die 20 os "Linux でない($OS_NAME)。loop.sh は Linux だけに対応する(setsid・flock・/proc を使う)"
+# ── §2 の 3: 道具(OS/bash は初期化前に検査済み) ──
 for t in setsid flock python3 timeout realpath sha256sum; do
   command -v "$t" >/dev/null 2>&1 || die 20 tool-missing "$t が PATH に無い"
 done
@@ -2637,7 +2650,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
     "  DEV_WORKFLOW_LOOP_WORKTREE=<周の worktree の物理パス($WT_ROOT/<実行 ID>-<周の番号>)>" \
     "  DEV_WORKFLOW_LOOP_PERMLOG=<状態ディレクトリの周の記録($STATE/<実行 ID>/iter-<周の番号>.permlog)>" \
     "  DEV_WORKFLOW_LOOP_PLUGIN_ROOT=$PLUGIN_ROOT" \
-    "  DEV_WORKFLOW_LOOP_ALLOW=$ALLOW_JSON"
+    "  DEV_WORKFLOW_LOOP_ALLOW=$ALLOW_JSON" \
+    "  CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
   if [ -n "$ALLOW_UNUSED" ]; then say "許可リストの規則のうち使わない形:" "$ALLOW_UNUSED"; fi
 fi
 if [ -n "$LEADING" ]; then say "先行する commit(ローカルが origin より先行):" "$LEADING"; fi

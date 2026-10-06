@@ -209,6 +209,26 @@ class CandidateKeysTest(unittest.TestCase):
         self.assertEqual(0, code)
         self.assertTrue(json.loads(out)["ok"])
 
+    def test_unclosed_fence_preserves_check_and_collect_json(self):
+        # 本文ダイジェストの未閉鎖拒否は、既知のキー収集の契約を変えない。
+        expected_key = "data-audit:authz:route:src/routes/orders.ts#ordersRouter:GET /:id"
+        for marker in ("```", "~~~"):
+            source = CANDIDATE + f"\n{marker}\n> **指摘キー**: fenced\n## 追加修正記録\n"
+            self.write("候補_未閉鎖.md", source)
+            for mode in ("check", "collect"):
+                with self.subTest(marker=marker, mode=mode):
+                    args = ("--check", str(self.dir / "候補_未閉鎖.md")) if mode == "check" else (f"--task-dir={self.dir}",)
+                    code, out, err = self.run_script(*args)
+                    self.assertEqual(0, code, err)
+                    self.assertEqual("", err)
+                    result = json.loads(out)
+                    item = result if mode == "check" else self.by_file(result)["候補_未閉鎖.md"]
+                    self.assertEqual([expected_key], item["keys"])
+                    self.assertEqual([], item["problems"])
+                    if mode == "check":
+                        self.assertTrue(item["ok"])
+                        self.assertEqual("data-audit", item["source"])
+
     def test_check_without_source_option_accepts_any_known_source(self):
         code, result = self.check(CANDIDATE.replace("data-audit(/data-audit --candidates --quick)", "refactor"))
         self.assertEqual((0, "refactor"), (code, result["source"]))

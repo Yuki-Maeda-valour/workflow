@@ -12,8 +12,33 @@
 #
 # 前提: bash 4.0 以上(対象のスクリプトと同じく連想配列を使う)。git は PATH にあるもの。
 #
-# 終了コード: 0=全件 PASS / 1=FAIL あり
+# 終了コード: 0=全件 PASS / 1=FAIL あり / 2=必要環境の不足
+# fixture を作る前に、使用する bash と GNU 道具の実行名・能力を検査する。
+requirements_error() { printf 'ERROR [requirements] %s\n' "$1" >&2; exit 2; }
+[ "${BASH_VERSINFO[0]}" -ge 4 ] || requirements_error 'bash 4.0 以上が必要'
 set -uo pipefail
+for requirements_tool in sha256sum touch find head grep sort; do
+  command -v "$requirements_tool" >/dev/null 2>&1 || requirements_error "$requirements_tool が PATH に無い(GNU coreutils・findutils・grep が必要)"
+  requirements_version="$("$requirements_tool" --version 2>/dev/null)" || requirements_error "$requirements_tool の GNU 版を確認できない"
+  case "$requirements_version" in *'GNU coreutils'*|*'GNU findutils'*|*'GNU grep'*) : ;; *) requirements_error "$requirements_tool は GNU 版が必要" ;; esac
+done
+# 専用領域だけを使い、git・対象スクリプト・ホストはまだ起動しない。
+REQUIREMENTS_WORK="$(mktemp -d)" || requirements_error '必要道具の確認用一時領域を作れない'
+trap 'rm -rf -- "$REQUIREMENTS_WORK"' EXIT
+printf 'a\n' >"$REQUIREMENTS_WORK/input"
+requirements_hash="$(sha256sum -- "$REQUIREMENTS_WORK/input" 2>/dev/null)" || requirements_error 'sha256sum が使えない'
+[ "${requirements_hash%% *}" = 87428fc522803d31065e7bce3cf03fe475096631e5e07bbd7a0fde60c4cf25c7 ] || requirements_error 'sha256sum の結果が不正'
+touch -d @1000000000 -- "$REQUIREMENTS_WORK/input" 2>/dev/null || requirements_error 'touch -d が使えない'
+requirements_found="$(find "$REQUIREMENTS_WORK" -maxdepth 1 -type f -print -quit 2>/dev/null)" || requirements_error 'find -maxdepth/-quit が使えない'
+[ "$requirements_found" = "$REQUIREMENTS_WORK/input" ] || requirements_error 'find の結果が不正'
+requirements_head="$(head -c 1 -- "$REQUIREMENTS_WORK/input" 2>/dev/null)" || requirements_error 'head -c が使えない'
+[ "$requirements_head" = a ] || requirements_error 'head -c が使えない'
+printf 'a\0' | grep -zq '^a$' 2>/dev/null || requirements_error 'grep -z が使えない'
+requirements_sorted="$(printf 'b\0a\0' | sort -z 2>/dev/null | tr '\0' '\n')" || requirements_error 'sort -z が使えない'
+[ "$requirements_sorted" = "$(printf 'a\nb')" ] || requirements_error 'sort -z の結果が不正'
+rm -rf -- "$REQUIREMENTS_WORK"
+trap - EXIT
+unset REQUIREMENTS_WORK requirements_tool requirements_version requirements_hash requirements_found requirements_sorted requirements_head
 
 SELF_PATH="${BASH_SOURCE[0]}"
 case "$SELF_PATH" in /*) : ;; *) SELF_PATH="$PWD/$SELF_PATH" ;; esac
@@ -29,6 +54,7 @@ REAL_GIT="$(command -v git)"
 [ -n "$REAL_GIT" ] || { echo "ERROR: git が無い" >&2; exit 1; }
 REAL_MV="$(command -v mv)"
 REAL_MKTEMP="$(command -v mktemp)"
+REAL_FIND="$(command -v find)"
 
 WORK="$(mktemp -d)"
 cleanup_work() {
@@ -401,6 +427,228 @@ ckeq "④″(ii) 設定検査を外した変異版: exit 0" "$RC" 0
 secf "$OUT" "追跡差分"
 ckt "④″(ii) --no-textconv により実内容が出る" grep -qF '+real change' "$SECF"
 ckf "④″(ii) CONVERTED: が出力全体に無い" grep -qF 'CONVERTED:' "$OUT"
+
+# ── ④‴ submodule ──
+# H1: index の gitlink に対応する通常ディレクトリは、git が未追跡を列挙しないため
+# 内容を隠せる。`.git` 名エントリを持たない非空ディレクトリだけを改竄として止める。
+base_repo c04h1
+mkdir -p "$R/tools"
+printf 'H1_HIDDEN_BODY\n' >"$R/tools/run.sh"
+printf 'HIDDEN_ONLY\n' >"$R/tools/.hidden"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),tools"
+H1_TREE_BEFORE="$(OGIT "$R" write-tree)"
+H1_INDEX_BEFORE="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 偽gitlink の --precheck: exit 22" "$RC" 22
+ckt "④‴H1 偽gitlink の --precheck はパスを報告" grep -qF $'tools\t' "$CASE_ERR"
+ckt "④‴H1 偽gitlink の --precheck は理由を報告" grep -qF 'gitlink に .git 名エントリが無い非空ディレクトリ' "$CASE_ERR"
+ckf "④‴H1 偽gitlink の --precheck は本文を出さない" grep -qF 'H1_HIDDEN_BODY' "$CASE_ERR"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" --exclude-glob 'tools/**'
+ckeq "④‴H1 偽gitlink の通常生成: exit 22" "$RC" 22
+ckt "④‴H1 偽gitlink は診断 snapshot を出す" test -f "$OUT"
+ckf "④‴H1 偽gitlink は patch を公開しない" test -e "$PATCHF"
+ckf "④‴H1 偽gitlink は非公開の内容を出さない" grep -qF 'H1_HIDDEN_BODY' "$OUT"
+secf "$OUT" "改竄の疑い"
+ckt "④‴H1 偽gitlink は診断 snapshot にパスを出す" grep -qF $'tools\t' "$SECF"
+H1_TREE_AFTER="$(OGIT "$R" write-tree)"
+ckeq "④‴H1 偽gitlink でも index tree は不変" "$H1_TREE_AFTER" "$H1_TREE_BEFORE"
+H1_INDEX_AFTER="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+ckeq "④‴H1 偽gitlink でも index の生バイトは不変" "$H1_INDEX_AFTER" "$H1_INDEX_BEFORE"
+reset_out
+run --cwd "$R" --precheck --accept 0000000000000000000000000000000000000000000000000000000000000000
+ckeq "④‴H1 偽gitlink は --accept でも exit 22" "$RC" 22
+
+# 空または存在しない gitlink は deinit/未初期化の既存契約として許可する。
+base_repo c04h1empty
+mkdir -p "$R/empty-link"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),empty-link"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 空の gitlink: --precheck exit 0" "$RC" 0
+rm -rf -- "$R/empty-link"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 不存在の gitlink: --precheck exit 0" "$RC" 0
+
+# 先頭 `-` の gitlink とディレクトリ symlink でも、その先の非空実体を空と誤認しない。
+base_repo c04h1special
+mkdir -p "$R/real-dir"
+printf 'H1_SYMLINK_HIDDEN\n' >"$R/real-dir/file"
+ln -s real-dir "$R/-link"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),-link"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 先頭 - の symlink gitlink: --precheck exit 22" "$RC" 22
+ckt "④‴H1 先頭 - の symlink gitlink は理由を報告" grep -qF 'gitlink に .git 名エントリが無い非空ディレクトリ' "$CASE_ERR"
+
+base_repo c04h1tab
+H1_TAB=$'tab\tname'
+mkdir -p "$R/$H1_TAB"
+printf 'TAB_PATH_HIDDEN\n' >"$R/$H1_TAB/file"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),$H1_TAB"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 TAB を含む gitlink: --precheck exit 22" "$RC" 22
+
+# 隠しエントリ、空の子ディレクトリ、FIFO、壊れた symlink だけでも、対象ディレクトリ自体は
+# 非空である。検査は内容を読まないので、FIFO で待たず壊れたリンクも辿らない。
+for kind in hidden childdir fifo brokenlink; do
+  base_repo "c04h1_$kind"
+  mkdir -p "$R/check"
+  case "$kind" in
+    hidden) printf 'HIDDEN_ONLY\n' >"$R/check/.hidden" ;;
+    childdir) mkdir "$R/check/empty-child" ;;
+    fifo) mkfifo "$R/check/pipe" ;;
+    brokenlink) ln -s missing-target "$R/check/broken" ;;
+  esac
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),check"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 $kind だけの偽gitlink: --precheck exit 22" "$RC" 22
+done
+
+# 空白・glob・日本語・改行を含む path も、NUL 区切りの index 列挙のまま検査する。
+H1_SPECIAL_PATHS=('space name' 'glob[*?]' '日本語' $'line\nbreak')
+for H1_SPECIAL in "${H1_SPECIAL_PATHS[@]}"; do
+  base_repo c04h1specialpath
+  mkdir -p "$R/$H1_SPECIAL"
+  printf 'SPECIAL_PATH_HIDDEN\n' >"$R/$H1_SPECIAL/file"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),$H1_SPECIAL"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 特殊パスの偽gitlink: --precheck exit 22" "$RC" 22
+done
+
+# 基準時点の未追跡一覧も H1 検査を抑止しない。
+base_repo c04h1pre
+mkdir -p "$R/skip"
+printf 'PRE_LIST_HIDDEN\n' >"$R/skip/file"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),skip"
+H1_PRE="$WORK/h1-pre.z"
+printf 'skip/file\0' >"$H1_PRE"
+H1_PRE_SHA="$(sha256sum -- "$H1_PRE" | cut -d' ' -f1)"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob 'skip/**' --pre-untracked "$H1_PRE" --pre-untracked-sha256 "$H1_PRE_SHA"
+ckeq "④‴H1 基準未追跡一覧でも偽gitlink: exit 22" "$RC" 22
+
+# 直下の列挙に失敗したときも空として通さない。
+base_repo c04h1find
+mkdir -p "$R/blocked"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),blocked"
+H1_FIND_BIN="$WORK/h1-find-bin"
+mkdir -p "$H1_FIND_BIN"
+cat >"$H1_FIND_BIN/find" <<EOF
+#!/usr/bin/env bash
+if [ "\${1:-}" = ./blocked/. ]; then exit 1; fi
+exec "$REAL_FIND" "\$@"
+EOF
+chmod +x "$H1_FIND_BIN/find"
+H1_PATH="$PATH"
+PATH="$H1_FIND_BIN:$PATH"
+reset_out
+run --cwd "$R" --precheck
+PATH="$H1_PATH"
+ckeq "④‴H1 gitlink の列挙不能: --precheck exit 22" "$RC" 22
+ckt "④‴H1 gitlink の列挙不能は理由を報告" grep -qF 'gitlink のディレクトリを列挙できない' "$CASE_ERR"
+
+# 検索権限のない祖先を「不存在」と誤認しない。実権限の検査なので root は除く。
+if [ "$IS_ROOT" -eq 0 ]; then
+  base_repo c04h1search
+  mkdir -p "$R/locked/child"
+  printf 'H1_PERMISSION_HIDDEN\n' >"$R/locked/child/hidden"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),locked/child"
+  H1_INDEX_BEFORE="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+  chmod 600 "$R/locked"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 祖先の検索権限なし: --precheck exit 22" "$RC" 22
+  ckt "④‴H1 祖先の検索権限なし: パス解決不能を報告" grep -qF 'gitlink のパスを解決できない' "$CASE_ERR"
+  reset_out
+  run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" --exclude-glob '.env'
+  ckeq "④‴H1 祖先の検索権限なし: 通常生成 exit 22" "$RC" 22
+  ckf "④‴H1 祖先の検索権限なし: patch を公開しない" test -e "$PATCHF"
+  H1_INDEX_AFTER="$(sha256sum -- "$R/.git/index" | cut -d' ' -f1)"
+  ckeq "④‴H1 祖先の検索権限なし: index は不変" "$H1_INDEX_AFTER" "$H1_INDEX_BEFORE"
+  chmod 700 "$R/locked"
+
+  base_repo c04h1searchlink
+  mkdir -p "$R/locked/child"
+  printf 'H1_LINK_PERMISSION_HIDDEN\n' >"$R/locked/child/hidden"
+  ln -s locked/child "$R/link"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),link"
+  chmod 600 "$R/locked"
+  reset_out
+  run --cwd "$R" --precheck
+  ckeq "④‴H1 symlink 先の検索権限なし: --precheck exit 22" "$RC" 22
+  chmod 700 "$R/locked"
+else
+  ok "④‴H1 検索権限の実測は root のため省略(非 root で検証する)"
+fi
+
+# 真に不存在の複数階層と、通常ファイルへのリンクは既存の許可を保つ。
+base_repo c04h1missingparent
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),missing/child"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 親から不存在の gitlink: --precheck exit 0" "$RC" 0
+base_repo c04h1filelink
+printf 'regular target\n' >"$R/target"
+ln -s target "$R/link"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),link"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 通常ファイルへの symlink: --precheck exit 0" "$RC" 0
+
+# H1 検査を外した構文正常な写しでは、上の偽gitlinkが通ってしまう。
+VAR_H1="$WORK/var-h1.sh"
+mkvariant "$VAR_H1" '/# ── H1 gitlink 検査/,/# ── 改竄耐性 ④: 属性検査/d'
+ckt "④‴H1 検査を外した変異版が bash -n を通る" bash -n "$VAR_H1"
+base_repo c04h1mut
+mkdir -p "$R/mut-tools"
+printf 'H1_MUTANT_HIDDEN\n' >"$R/mut-tools/run.sh"
+GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R" rev-parse HEAD),mut-tools"
+reset_out
+runv "$VAR_H1" --cwd "$R" --precheck
+ckeq "④‴H1 検査を外した変異版は偽gitlinkを通す" "$RC" 0
+
+# ── ④‴ submodule ──
+# 実際の submodule を deinit した空ディレクトリ、未初期化 clone、不存在は許可する。deinit 後に
+# 通常ファイルを置けば偽 gitlink と同じく停止する。
+mkrepo c04h1_real_src
+H1_REAL_SRC="$WORK/c04h1_real_src"
+printf 'sub source\n' >"$H1_REAL_SRC/lib.txt"
+GIT "$H1_REAL_SRC" add lib.txt
+GIT "$H1_REAL_SRC" commit -q -m source
+base_repo c04h1_real
+GIT "$R" submodule add -q -- "$H1_REAL_SRC" real-sub >/dev/null 2>&1
+GIT "$R" commit -q -m add-real-sub
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 初期化済み real submodule: --precheck exit 0" "$RC" 0
+GIT "$R" submodule deinit -f -- real-sub >/dev/null 2>&1
+mkdir -p "$R/real-sub"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 deinit 後の空 gitlink: --precheck exit 0" "$RC" 0
+printf 'deinit hidden\n' >"$R/real-sub/left-behind"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 deinit 後にファイルを置いた gitlink: --precheck exit 22" "$RC" 22
+rm -rf -- "$R/real-sub"
+reset_out
+run --cwd "$R" --precheck
+ckeq "④‴H1 real submodule の不存在: --precheck exit 0" "$RC" 0
+H1_CLONE="$WORK/c04h1_real_clone"
+GIT "$WORK" clone -q -- "$R" "$H1_CLONE"
+reset_out
+run --cwd "$H1_CLONE" --precheck
+ckeq "④‴H1 未初期化 clone の submodule: --precheck exit 0" "$RC" 0
+rm -rf -- "$H1_CLONE/real-sub"
+reset_out
+run --cwd "$H1_CLONE" --precheck
+ckeq "④‴H1 未初期化 clone の submodule 不存在: --precheck exit 0" "$RC" 0
 
 # ── ④‴ submodule ──
 mkrepo c04d_sub
@@ -2876,10 +3124,10 @@ while [ "$c32_try" -le 5 ]; do
   c32_s="$(date +%S)"
   while [ "$(date +%S)" = "$c32_s" ]; do :; done
   printf 'const t = "SAFEMARK";\n' >"$R/src/auth.ts"
-  touch -d "$C32_FIXED" -- "$R/src/auth.ts"
+  touch -d "$C32_FIXED" -- "$R/src/auth.ts" || requirements_error 'touch -d の時刻固定に失敗(㉜ fixture を作れない)'
   OGIT "$R" update-index --refresh >/dev/null 2>&1
   printf 'const t = "EVILMARK";\n' >"$R/src/auth.ts"
-  touch -d "$C32_FIXED" -- "$R/src/auth.ts"
+  touch -d "$C32_FIXED" -- "$R/src/auth.ts" || requirements_error 'touch -d の時刻固定に失敗(㉜ fixture を作れない)'
   sleep 1.1
   if [ -z "$(OGIT "$R" diff --name-only "$B" 2>/dev/null)" ] && [ -z "$(OGIT "$R" status --porcelain 2>/dev/null)" ]; then
     c32_hidden=1
