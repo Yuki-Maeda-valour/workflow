@@ -736,7 +736,7 @@ while IFS= read -r -d '' cf_scope && IFS= read -r -d '' cf_kv; do
 done <"$TMPD/cfg.z"
 if [ ${#DIS1[@]} -gt 0 ]; then add_note "無効化して実行: ${DIS1[*]}"; fi
 if [ ${#DIS2[@]} -gt 0 ]; then add_note "無効化して実行: ${DIS2[*]}"; fi
-if [ ${#DIS3[@]} -gt 0 ]; then add_note "無効化して実行: ${DIS3[*]}"; fi
+if [ ${#DIS3[@]} -gt 0 ]; then add_note "無効化して実行: $(sanitize "${DIS3[*]}")"; fi
 # promisor 構成で git が 2.45 未満なら遅延取得(= `remote.<名>.uploadpack` の起動)を
 # 止められない。**この場で** exit 22 にする(①′ の core.worktree と同じ形)。
 # 検出のあとに回す ④ の check-attr も見出しの git も欠落オブジェクトを読みに行くので、

@@ -2,7 +2,7 @@
 
 `loop.sh` の周では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。
 
-**診断表示**: 改竄の疑いの各列、承認済み項目・filter 名の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。表示から元の値は復元できないため、承認には出力された承認ダイジェストを使う。対象範囲と元データの保持は [external-runners.md §9-1](external-runners.md) を参照する。
+**診断表示**: 改竄の疑いの各列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。表示から元の値は復元できないため、承認には出力された承認ダイジェストを使う。対象範囲と元データの保持は [external-runners.md §9-1](external-runners.md) を参照する。
 
 **gitlink の停止**: `--precheck` が index の gitlink に対応する `.git` 名エントリ無しの非空ディレクトリ、またはパス解決不能または列挙不能なディレクトリを報告して exit 22 で止めたときは、承認では復帰できない。内容を保全して誤った gitlink 登録を修正するか、正当な submodule を復旧してから再検査する。空・不存在・初期化済み submodule は従来どおり通る。この検査は除外指定や基準時点の未追跡一覧では回避できない。真正性・TOCTOU・submodule 内部の未commit変更などの限界は [external-runners.md §9-1](external-runners.md) を正本とする。
 

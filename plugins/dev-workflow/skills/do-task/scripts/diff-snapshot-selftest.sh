@@ -3899,6 +3899,26 @@ run --cwd "$R" --precheck --accept "$DGH2"
 ckeq 'H2 同表示の別C1へ変更すると再承認が必要' "$RC" 22
 ckne 'H2 同表示の別C1でも承認値は異なる' "$(digest_of)" "$DGH2"
 
+# pager.* の名前も利用者が決められる。事前検査と通常生成の無効化NOTEを確かめる。
+base_repo h2pager
+GIT "$R" config "pager.$RAWNAMEH2.cmd" cat
+cp "$R/.git/config" "$WORK/h2-pager-config.before"
+cp "$R/.git/index" "$WORK/h2-pager-index.before"
+# 無効化NOTEは既存仕様どおりキー名をASCII小文字で表示する。
+PAGERDISPH2="$(printf '%s' "pager.$DISPNAMEH2.cmd" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+run --cwd "$R" --precheck
+ckeq 'H2 pagerのprecheckはexit 0' "$RC" 0
+ckt 'H2 pagerのprecheck NOTEは全32文字を置換する' inf "$CASE_ERR" "無効化して実行: $PAGERDISPH2"
+ckf 'H2 pagerのprecheck NOTEに生のC1が残らない' inf "$CASE_ERR" "$C1H2"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env'
+ckeq 'H2 pagerの通常生成はexit 0' "$RC" 0
+headf "$OUT"
+ckt 'H2 pagerのsnapshot NOTEは全32文字を置換する' inf "$HDF" "無効化して実行: $PAGERDISPH2"
+ckf 'H2 pagerのsnapshot NOTEに生のC1が残らない' inf "$HDF" "$C1H2"
+ckt 'H2 pagerの設定の元バイト列を保持する' cmp -s "$R/.git/config" "$WORK/h2-pager-config.before"
+ckt 'H2 pagerの検査でindexのバイト列を変えない' cmp -s "$R/.git/index" "$WORK/h2-pager-index.before"
+
 # 新旧Gitの判定は既存の版スタブを使用する。全32字はremote名とpartialclone値へ入れる。
 base_repo h2promisor
 GIT "$R" config "remote.$RAWNAMEH2.promisor" true
