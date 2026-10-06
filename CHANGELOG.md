@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.20.4
+
+### 修正
+
+- `loop-permission.py` が、`builtin`・`command` 経由の移動と `pushd`・`popd` を許可リストより先に拒否する([子 Issue #166](https://github.com/Yuki-Maeda-valour/workflow/issues/166)、親 #107 の H37)。重ねたラッパー・オプションと、複合コマンドの全位置を調べる。
+- `!`・`time` の前置きや `if`・`for` など、移動を追跡しない制御構文も拒否する。空引用を含む引用語、情報照会、通常操作、既存の2種類の `cd` とH36のsymlink保護は維持する。
+- scratchの実Bashによる書換えの陽性対照と、同じコマンドの実hook入力を回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.20.3
 
 ### 修正
