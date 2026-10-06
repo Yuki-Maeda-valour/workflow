@@ -15,7 +15,8 @@ stdin の JSON(tool_name・tool_input・cwd)を読み、stdout に
 許すのは、周の worktree の中の決まった状態ファイル(W)への書き込みと、限定の構文で読める Bash だけ。
 Bash の `cd` は、`CDPATH= cd -P -- <P> && pwd -P` と、先頭の前置き `CDPATH= cd -P -- <P> && <続き>`(続きを <P> で
 判定する。<P> は worktree の中のディレクトリ。続きの最初の `||`・`;` より後ろは <P> と入力の cwd の両方で判定する)の
-2 つの形だけを受け付ける。<P> の字面が `-` で始まるもの・`~` を含むもの(位置を問わない)は受け付けない。
+2 つの形だけを受け付ける。追跡できない `pushd`・`popd`、ラッパー経由の移動、引用のない予約語の前置きは拒否する。
+<P> の字面が `-` で始まるもの・`~` を含むもの(位置を問わない)は受け付けない。
 判定できない入力(JSON が読めない・環境変数が無い)も deny。hook は隔離ではない(同じ利用者の権限で動く)。
 標準ライブラリだけで書く。
 
@@ -62,6 +63,10 @@ DENY_NOTE = (
 REVIEWS = ".claude/reviews"
 W_FILES = {".claude/grasp.md", ".claude/.understand-project-done"}
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+RESERVED_PREFIXES = {
+    "!", "time", "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "select", "case",
+    "esac", "in", "function", "coproc",
+}
 
 
 class Denied(Exception):
@@ -208,10 +213,12 @@ class Word:
     def __init__(self) -> None:
         self.chars: list[str] = []
         self.quoted: list[bool] = []
+        self.had_quote = False
 
     def add(self, ch: str, quoted: bool) -> None:
         self.chars.append(ch)
         self.quoted.append(quoted)
+        self.had_quote = self.had_quote or quoted
 
     @property
     def text(self) -> str:
@@ -632,6 +639,54 @@ def split_after_fallthrough(ops: list[str]) -> int:
     return len(ops)
 
 
+def check_untracked_moves(cmds: list[dict]) -> None:
+    """全単純コマンドの予約語と、追跡しない移動の実行を先に拒否する。"""
+    for command in cmds:
+        words = command["words"]
+        if not words:
+            continue
+        index = 0
+        ordinary = False
+        # 空引用符も含む引用・エスケープがあれば予約語でない。予約語を使う制御構文は追跡しないため拒否する。
+        if index < len(words) and words[index].text in RESERVED_PREFIXES and not words[index].had_quote:
+            raise other(f"追跡しない予約語の前置き: {words[index].text}")
+        wrapped = False
+        while index < len(words):
+            name = words[index].text
+            if name == "builtin":
+                wrapped = True
+                index += 1
+                if index < len(words) and words[index].text == "--":
+                    index += 1
+                continue
+            if name != "command":
+                break
+            wrapped = True
+            index += 1
+            while index < len(words):
+                option = words[index].text
+                if option == "--":
+                    index += 1
+                    break
+                if not option.startswith("-") or option == "-":
+                    break
+                letters = option[1:]
+                # -v/-V は実行でなく照会。未知の option は command が失敗して移動しないので通常の判定へ残す。
+                if "v" in letters or "V" in letters or not letters or any(ch != "p" for ch in letters):
+                    ordinary = True
+                    break
+                index += 1
+            if ordinary:
+                break
+        if ordinary:
+            continue
+        if index >= len(words):
+            continue
+        target = words[index].text
+        if target in ("pushd", "popd") or (wrapped and target == "cd"):
+            raise other(f"追跡しないディレクトリ移動: {target}")
+
+
 def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     cwd_phys = os.path.realpath(ctx.cwd)
     if not inside(cwd_phys, ctx.wt):
@@ -639,6 +694,7 @@ def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     ctx.cwd = cwd_phys
     toks = tokenize(command)
     cmds, ops = parse(toks)
+    check_untracked_moves(cmds)
     uses_cd = any(c["words"] and c["words"][0].text == "cd" for c in cmds)
     if not uses_cd:
         check_cmds(ctx, cmds)

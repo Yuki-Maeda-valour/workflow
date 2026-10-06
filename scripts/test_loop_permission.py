@@ -180,6 +180,102 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         self.expect("rm -- -protected", "allow")
         self.expect("mv -- -protected moved", "allow")
 
+    def test_h37_untracked_directory_moves_are_denied_before_allow_rules(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        for command in (
+            "pushd .",
+            "popd",
+            "builtin cd .",
+            "builtin -- cd .",
+            "command cd .",
+            "command -p cd .",
+            "command -pp -- builtin -- cd .",
+            "command command -p -- pushd .",
+            "builtin command -p -- popd",
+            "echo ok && command cd .",
+            "echo ok || pushd .",
+            "echo ok; popd",
+            "echo ok | command -p cd .",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        for allow in (
+            [{"kind": "prefix", "words": ["builtin"]}],
+            [{"kind": "exact", "words": ["command", "cd", "."]}],
+        ):
+            self.env["allow"] = allow
+            with self.subTest(allow=allow):
+                command = "builtin cd ." if allow[0]["kind"] == "prefix" else "command cd ."
+                self.expect(command, "deny", "other")
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        (self.wt / "sub").mkdir()
+        for command in (
+            "CDPATH= cd -P -- sub && builtin cd ../sub && echo changed > local.txt",
+            "LANG=C builtin cd sub > .claude/reviews/h37.txt",
+            "command -p -- command -pp -- builtin -- cd sub",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+
+    def test_h37_reserved_prefixes_and_command_queries_keep_their_contract(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        for command in ("! echo ok", "time -p echo ok", "! time echo ok", "time ! echo ok"):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        for command in ("!'' echo ok", "time'' echo ok", "command -v cd", "command -V pushd",
+                        "echo cd pushd popd", "command -x cd"):
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+        for command in ("command -v echo; builtin cd .", "command -x echo; command -p cd ."):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        for command in (
+            "builtin echo ok", "builtin -- echo ok", "command -p echo ok", "command -pp -- echo ok",
+            "command command -p -- builtin -- echo ok", "'builtin' echo ok", "\\command -p echo ok",
+            "command -pv cd", "command -Vp pushd", "command -- echo ok", "builtin -- echo ok",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+        for command in ("command -- cd .", "builtin -- pushd ."):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        deep = " ".join(["command"] * 2000 + ["cd", "."])
+        self.expect(deep, "deny", "other")
+
+    def test_h37_all_unquoted_reserved_prefixes_are_denied(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        (self.wt / "sub").mkdir()
+        reserved = {
+            "!", "time", "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "select",
+            "case", "esac", "in", "function", "coproc",
+        }
+        for word in sorted(reserved):
+            with self.subTest(word=word):
+                self.expect(f"{word} echo ok", "deny", "other")
+        for command in (
+            "if builtin cd sub; then echo changed > local.txt; fi",
+            "while builtin cd sub; do echo changed > local.txt; done",
+            "until builtin cd sub; do echo changed > local.txt; done",
+            "for x in once; do builtin cd sub; done",
+            "elif builtin cd sub; then echo changed > local.txt; fi",
+            "select x in once; do builtin cd sub; done",
+            "echo ok && if builtin cd sub; then echo changed > local.txt; fi",
+            "echo ok | time builtin cd sub",
+            "CDPATH= cd -P -- sub && if builtin cd ..; then echo changed > local.txt; fi",
+            "CDPATH= cd -P -- sub && time builtin cd ..",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+        for command in ("t''ime echo ok", "''time echo ok", "!'' echo ok", "\\time echo ok", "'if' echo ok"):
+            with self.subTest(command=command):
+                self.expect(command, "allow")
+
+    def test_h37_existing_cd_form_and_prefix_remain_allowed(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        (self.wt / "sub").mkdir()
+        self.expect("CDPATH= cd -P -- sub && pwd -P", "allow")
+        self.expect("CDPATH= cd -P -- sub && echo ok", "allow")
+
 
 if __name__ == "__main__":
     unittest.main()
