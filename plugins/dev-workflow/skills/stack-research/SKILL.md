@@ -112,7 +112,7 @@ argument-hint: "[--update | --security-only | --deps=<pkg1,pkg2>]"
 Phase 4 の path:line 追記と索引更新を含む全変更後に、`reviewer` を [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) に従って起動する。
 - 作成に関与していない独立レビュアーが 1 名以上いて全員 APPROVED になるまで、指摘を実コードで裏取り(実際のコードやファイルを読んで確かめること)し valid を修正して再レビューする。
 - 独立レビュアーまたは解決表が使えない場合はレビュー未完了を報告し、/create-task へのチェーン・更新完了として扱わない。
-- **承認後、Phase 4 の一覧を提示して AskUserQuestion で「タスク化しますか?」を確認する**(multiSelect でどれを対象にするか選べる形に)。
+- **承認後、Phase 4 の一覧を提示して、質問で「タスク化しますか?」を確認する**(複数選択の質問にして、どれを対象にするか選べる形に)。
 - 選択が Yes なら選択された該当箇所(path:行)・ノートの該当節(出典付きの根拠)・種別ヒント(脆弱性対応 = 依存更新を伴う機能変更 / 非推奨 API・アンチパターン置換 = `--refactor` 相当の挙動維持)を入力に /create-task へチェーンする。複数該当を 1 タスクにするか分けるかは create-task の分割判断に委ねる。
 - No または該当なしならノートの記録を残して完了する。
 
