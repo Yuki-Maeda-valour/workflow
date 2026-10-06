@@ -1,6 +1,8 @@
-"""loop-permission.py の symlink と再帰削除の回帰テスト。"""
+"""loop-permission.py の symlink・再帰削除・保護 cwd の回帰テスト。"""
 
 import importlib.util
+import json
+import sys
 import os
 import subprocess
 import tempfile
@@ -39,8 +41,8 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def decide(self, tool, payload):
-        return PERMISSION.decide({"tool_name": tool, "tool_input": payload, "cwd": str(self.wt)}, self.env)
+    def decide(self, tool, payload, cwd=None):
+        return PERMISSION.decide({"tool_name": tool, "tool_input": payload, "cwd": str(cwd or self.wt)}, self.env)
 
     def bash(self, command):
         return self.decide("Bash", {"command": command})
@@ -182,6 +184,129 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         self.expect("cat -- -safe", "allow")
         self.expect("rm -- -protected", "allow")
         self.expect("mv -- -protected moved", "allow")
+
+    def test_h27_protected_cwd_checks_bare_values_even_when_missing(self):
+        for directory in (".claude", ".config/git", "nested/.claude"):
+            cwd = self.wt / directory
+            cwd.mkdir(parents=True, exist_ok=True)
+            for command in ("git checkout -- settings.json", "cat missing", "git --path=missing",
+                            "LANG=missing cat", "export LANG=missing", "cat -- -missing"):
+                for prefix in (False, True):
+                    with self.subTest(directory=directory, command=command, prefix=prefix):
+                        actual = f"CDPATH= cd -P -- {directory} && {command}" if prefix else command
+                        got = self.decide("Bash", {"command": actual}, self.wt if prefix else cwd)
+                        self.assertEqual(("deny", "other"), got[:2], got)
+
+    def test_h27_symlink_cwd_resolves_to_protected_directory(self):
+        os.symlink(".claude", self.wt / "alias")
+        (self.wt / ".claude/child").mkdir()
+        for directory in ("alias", "alias/child"):
+            for prefix in (False, True):
+                with self.subTest(directory=directory, prefix=prefix):
+                    command = "git checkout -- settings.json"
+                    if prefix:
+                        command = f"CDPATH= cd -P -- {directory} && {command}"
+                    got = self.decide("Bash", {"command": command},
+                                      self.wt if prefix else self.wt / directory)
+                    self.assertEqual(("deny", "other"), got[:2], got)
+
+    def test_h27_nested_protected_name_inside_reviews_keeps_existing_w_contract(self):
+        # W includes every real descendant of reviews, including a directory named .git.
+        cwd = self.wt / ".claude/reviews/.git"
+        cwd.mkdir()
+        for prefix in (False, True):
+            command = "git checkout -- config"
+            if prefix:
+                command = "CDPATH= cd -P -- .claude/reviews/.git && " + command
+            got = self.decide("Bash", {"command": command}, self.wt if prefix else cwd)
+            self.assertEqual(("allow", None), got[:2], got)
+
+    def test_h27_write_kinds_and_bare_command_names(self):
+        cwd = self.wt / ".claude"
+        for command in ("touch settings.json", "tee settings.json", "cp grasp.md settings.json",
+                        "> settings.json"):
+            with self.subTest(command=command):
+                got = self.decide("Bash", {"command": command}, cwd)
+                # A redirection alone is outside the supported grammar.
+                expected = "other" if command.startswith(">") else "protected"
+                self.assertEqual(("deny", expected), got[:2], got)
+        for command in ("git", "touch grasp.md", "touch reviews/out", "echo > reviews/out"):
+            with self.subTest(command=command):
+                got = self.decide("Bash", {"command": command}, cwd)
+                self.assertEqual(("allow", None), got[:2], got)
+        got = self.decide("Bash", {"command": "echo data > reviews/out"}, cwd)
+        self.assertEqual(("deny", "other"), got[:2], got)
+
+    def test_h27_fallthrough_checks_original_protected_cwd(self):
+        for operator in ("||", ";"):
+            command = f"CDPATH= cd -P -- ../ordinary && git {operator} git checkout -- settings.json"
+            got = self.decide("Bash", {"command": command}, self.wt / ".claude")
+            self.assertEqual(("deny", "other"), got[:2], got)
+        got = self.decide("Bash", {"command":
+            "CDPATH= cd -P -- ../ordinary && git checkout -- settings.json"}, self.wt / ".claude")
+        self.assertEqual(("allow", None), got[:2], got)
+
+    def test_h27_w_and_ordinary_cwd_keep_bare_arguments(self):
+        for directory in ("ordinary", ".claude/reviews", ".claude/worktrees"):
+            for command in ("git checkout -- settings.json", "touch missing", "echo data > out",
+                            "git --path=missing", "LANG=missing cat", "cat -- -missing"):
+                for prefix in (False, True):
+                    with self.subTest(directory=directory, command=command, prefix=prefix):
+                        actual = f"CDPATH= cd -P -- {directory} && {command}" if prefix else command
+                        got = self.decide("Bash", {"command": actual},
+                                          self.wt if prefix else self.wt / directory)
+                        self.assertEqual(("allow", None), got[:2], got)
+        os.symlink("../settings.json", self.wt / ".claude/reviews/alias")
+        got = self.decide("Bash", {"command": "cat alias"}, self.wt / ".claude/reviews")
+        self.assertEqual(("deny", "other"), got[:2], got)
+
+    def test_h27_stdin_hook_and_real_git_checkout(self):
+        git_env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
+        def git(*args):
+            return subprocess.run(["git", *args], cwd=self.wt, env=git_env, check=True,
+                                  capture_output=True, text=True)
+        git("init")
+        paths = (".claude/settings.json", ".claude/reviews/settings.json", "ordinary/settings.json")
+        for path in paths:
+            (self.wt / path).write_text("original")
+        git("add", "--", *paths)
+        git("-c", "user.name=Test", "-c", "user.email=test@example.invalid", "commit", "-m", "fixture")
+        hook_env = dict(git_env, DEV_WORKFLOW_LOOP_WORKTREE=str(self.wt),
+                        DEV_WORKFLOW_LOOP_PLUGIN_ROOT=str(self.pr),
+                        DEV_WORKFLOW_LOOP_PERMLOG=self.env["permlog"],
+                        DEV_WORKFLOW_LOOP_ALLOW=json.dumps(self.env["allow"]))
+        for path in paths:
+            target = self.wt / path
+            for prefix in (False, True):
+                for missing in (False, True):
+                    with self.subTest(path=path, prefix=prefix, missing=missing):
+                        target.write_text("changed")
+                        if missing:
+                            target.unlink()
+                        directory = str(Path(path).parent)
+                        command = "git checkout -- settings.json"
+                        if prefix:
+                            command = f"CDPATH= cd -P -- {directory} && {command}"
+                        cwd = self.wt if prefix else target.parent
+                        payload = {"tool_name": "Bash", "tool_input": {"command": command}, "cwd": str(cwd)}
+                        run = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(payload),
+                                             text=True, capture_output=True, env=hook_env, check=True)
+                        decision = json.loads(run.stdout)["hookSpecificOutput"]["decision"]
+                        log = json.loads(Path(self.env["permlog"]).read_text().splitlines()[-1])
+                        expected = "deny" if path == paths[0] else "allow"
+                        self.assertEqual(expected, decision["behavior"], decision)
+                        self.assertEqual((expected, "other" if expected == "deny" else None),
+                                         (log["decision"], log["kind"]), log)
+                        self.assertEqual(str(cwd), log["cwd"])
+                        self.assertEqual(command, log["subject"])
+                        if expected == "allow":
+                            subprocess.run(["bash", "-c", command], cwd=cwd, env=git_env, check=True,
+                                           capture_output=True, text=True)
+                            self.assertEqual("original", target.read_text())
+                        elif missing:
+                            self.assertFalse(target.exists())
+                        else:
+                            self.assertEqual("changed", target.read_text())
 
     def test_h37_untracked_directory_moves_are_denied_before_allow_rules(self):
         self.env["allow"] = [{"kind": "all", "words": []}]
