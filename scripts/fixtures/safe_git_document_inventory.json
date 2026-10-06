@@ -32,7 +32,7 @@
     },
     {
       "code": "git mv",
-      "count": 2,
+      "count": 3,
       "classification": "index/worktree",
       "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
     },
@@ -319,12 +319,6 @@
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     },
     {
-      "code": "git add",
-      "count": 1,
-      "classification": "index/worktree",
-      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
-    },
-    {
       "code": "git add -- ':(literal)<完了_ のパス>'",
       "count": 1,
       "classification": "index/worktree",
@@ -368,7 +362,7 @@
     },
     {
       "code": "git mv",
-      "count": 3,
+      "count": 2,
       "classification": "index/worktree",
       "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
     },
@@ -568,13 +562,7 @@
     },
     {
       "code": "git mv",
-      "count": 8,
-      "classification": "index/worktree",
-      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
-    },
-    {
-      "code": "git mv -- '<dir>/進行中_{名}.md' '<dir>/保留_{名}.md'",
-      "count": 1,
+      "count": 4,
       "classification": "index/worktree",
       "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
     },
@@ -601,6 +589,12 @@
       "count": 1,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rm --cached --ignore-unmatch -- ':(literal)<dir>/進行中_{名}.md'",
+      "classification": "index/worktree",
+      "basis": "#188のreview-guardによる確定記録の反映。共通safe Git前置きとfilter事前検査を適用し、stage前後を検証担当が照合する。",
+      "count": 1
     },
     {
       "code": "git status",
