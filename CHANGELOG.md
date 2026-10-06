@@ -2,13 +2,20 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
-## v4.21.1
+## v4.21.2
 
 ### 修正
 
 - `loop-permission.py` が、worktree 自体や、許されない保護対象を含むディレクトリの再帰削除を拒否する([子 Issue #173](https://github.com/Yuki-Maeda-valour/workflow/issues/173)、親 #107 の H26)。対象と子孫に既存の削除規則を適用し、列挙・情報取得に失敗した場合も許可しない。
 - 絶対・相対パス、末尾 `/`、`.`・`..` を解決して検査する。H36 のリンク自体の削除判定と通常削除・W の例外を維持し、末尾 `/` 付きリンクの再帰削除ではリンク先を検査する。子孫のリンク先は辿らない。
 - scratch での hook・実削除の確認と、検査不能・深いディレクトリ・worktree とプラグイン間のリンクの回帰試験を追加した。
+
+## v4.21.1
+
+### 修正
+
+- `loop-permission.py` が、Bash 入力のサンドボックス無効化指定と、その項目の不正な型を拒否する([子 Issue #172](https://github.com/Yuki-Maeda-valour/workflow/issues/172)、親 #107 の H25)。コマンドが許可対象でも拒否し、未指定・真偽値の偽だけを通常判定へ進める。
+- 通常の説明・タイムアウトなどの入力は維持する。実際の hook 入出力と判定ログを回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
 
 ## v4.21.0
 

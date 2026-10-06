@@ -1977,11 +1977,14 @@ PERM_ALLOW_JSON='[{"kind":"prefix","words":["git"]},{"kind":"prefix","words":["s
 PERM_BIN="$PP/loop-permission.py"
 cp "$PERM_SRC" "$PERM_BIN"
 perm() { # $1=tool_name $2=tool_input の JSON [$3=cwd] → PDEC(allow|deny)・PKIND・POUT(hook の出力)
-  local out
+  local out before
+  before="$(wc -l <"$PERMLOG")"
   out="$(python3 -c 'import json,sys; print(json.dumps({"hook_event_name":"PermissionRequest","tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2]),"cwd":sys.argv[3]}))' "$1" "$2" "${3:-$PW}" \
     | env -i HOME="${PHOME:-$W/home}" PATH="$SAFEBIN" DEV_WORKFLOW_LOOP_WORKTREE="${PWT:-$PW}" DEV_WORKFLOW_LOOP_PERMLOG="$PERMLOG" \
         DEV_WORKFLOW_LOOP_PLUGIN_ROOT="${PPR:-$PP}" \
         DEV_WORKFLOW_LOOP_ALLOW="${PALLOW:-$PERM_ALLOW_JSON}" python3 "$PERM_BIN")"
+  PRC=$?
+  PLINES=$(( $(wc -l <"$PERMLOG") - before ))
   PDEC="$(printf '%s' "$out" | python3 -c 'import json,sys; d=json.load(sys.stdin)["hookSpecificOutput"]; assert d["hookEventName"]=="PermissionRequest"; print(d["decision"]["behavior"])' 2>/dev/null || echo broken)"
   PKIND="$(tail -1 "$PERMLOG" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("kind"))' 2>/dev/null)"
   POUT="$out"
@@ -1993,6 +1996,10 @@ pa() { perm "$2" "$3" "${4:-}"; check "hook allow: $1" allow "$PDEC"; }
 pd() { perm "$2" "$3" "${4:-}"; check "hook deny: $1" deny "$PDEC"; }
 pdk() { perm "$3" "$4" "${5:-}"; check "hook deny: $1" deny "$PDEC"; check "hook deny の種類: $1" "$2" "$PKIND"; }
 bash_in() { python3 -c 'import json,sys; print(json.dumps({"command": sys.argv[1]}))' "$1"; }
+bash_in_extra() { # $1=command $2=追加する JSON object
+  python3 -c 'import json,sys; d={"command": sys.argv[1]}; d.update(json.loads(sys.argv[2])); print(json.dumps(d))' "$1" "$2"
+}
+h25_log_field() { tail -1 "$PERMLOG" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$1"; }
 file_in() { python3 -c 'import json,sys; print(json.dumps({"file_path": sys.argv[1]}))' "$1"; }
 # allow
 pa "W の中への Write(.claude/reviews/x.md)" Write "$(file_in "$PW/.claude/reviews/x.md")"
@@ -2003,6 +2010,63 @@ pa "入力の cwd が worktree の下のディレクトリのときの W への�
 pa "CDPATH= cd -P -- <worktree の中> && pwd -P" Bash "$(bash_in 'CDPATH= cd -P -- src && pwd -P')"
 pa "CDPATH= cd -P -- <プラグインルートの中> && pwd -P" Bash "$(bash_in "CDPATH= cd -P -- $PP/skills && pwd -P")"
 pa "プラグインルートの下の Read" Read "$(file_in "$PP/skills/x/ref.md")"
+# H25: Bash の sandbox 無効化指定は、コマンドの許可判定より先に厳密な boolean として検査する。
+perm Bash "$(bash_in_extra 'git status' '{"description":"status","timeout":1000}')"
+check "H25 未指定: allow" allow "$PDEC"
+check "H25 未指定: kind は null" None "$PKIND"
+check "H25 未指定: reason は空" "" "$(h25_log_field reason)"
+check "H25 未指定: message は無い" "(無い)" "$(decision_field message)"
+perm Bash "$(bash_in_extra 'git status' '{"dangerouslyDisableSandbox":false,"description":"status","timeout":1000}')"
+check "H25 false(description/timeout を維持): allow" allow "$PDEC"
+check "H25 false: kind は null" None "$PKIND"
+check "H25 false: reason は空" "" "$(h25_log_field reason)"
+check "H25 false: message は無い" "(無い)" "$(decision_field message)"
+for H25_CASE in \
+  'prefix|git status > .claude/reviews/x' \
+  'exact|npm run build' \
+  'file-op|touch .claude/reviews/h25' \
+  'cd|CDPATH= cd -P -- src && pwd -P'; do
+  H25_LABEL="${H25_CASE%%|*}"
+  H25_COMMAND="${H25_CASE#*|}"
+  perm Bash "$(bash_in_extra "$H25_COMMAND" '{"dangerouslyDisableSandbox":true,"description":"h25","timeout":1000}')"
+  check "H25 true($H25_LABEL): deny" deny "$PDEC"
+  check "H25 true($H25_LABEL): 種類" other "$PKIND"
+  check "H25 true($H25_LABEL): 終了コード" 0 "$PRC"
+  check "H25 true($H25_LABEL): 1 呼び出し 1 行" 1 "$PLINES"
+  check "H25 true($H25_LABEL): tool_name" Bash "$(h25_log_field tool_name)"
+  check "H25 true($H25_LABEL): cwd" "$PW" "$(h25_log_field cwd)"
+  check "H25 true($H25_LABEL): subject" "$H25_COMMAND" "$(h25_log_field subject)"
+  check "H25 true($H25_LABEL): reason" "dangerouslyDisableSandbox が true" "$(h25_log_field reason)"
+  case "$(decision_field message)" in *"dangerouslyDisableSandbox"*"回り込"*"G1"*) ok "H25 true($H25_LABEL): 理由と固定の文" ;;
+    *) ng "H25 true($H25_LABEL): 理由と固定の文" ;; esac
+  case "$(h25_log_field reason)" in *"回り込"*|*"G1"*) ng "H25 true($H25_LABEL): ログの reason に固定の文を入れない" ;;
+    *) ok "H25 true($H25_LABEL): ログの reason に固定の文を入れない" ;; esac
+done
+PALLOW='[{"kind":"all","words":[]}]'
+perm Bash "$(bash_in_extra 'unknown-command' '{"dangerouslyDisableSandbox":true}')"
+check "H25 true(all): deny" deny "$PDEC"
+check "H25 true(all): 種類" other "$PKIND"
+check "H25 true(all): 終了コード" 0 "$PRC"
+check "H25 true(all): 1 呼び出し 1 行" 1 "$PLINES"
+check "H25 true(all): tool_name" Bash "$(h25_log_field tool_name)"
+check "H25 true(all): cwd" "$PW" "$(h25_log_field cwd)"
+check "H25 true(all): subject" unknown-command "$(h25_log_field subject)"
+check "H25 true(all): reason" "dangerouslyDisableSandbox が true" "$(h25_log_field reason)"
+PALLOW=""
+for H25_VALUE in 'null' '0' '1' '0.0' '""' '"false"' '"true"' '[]' '{}'; do
+  perm Bash "$(bash_in_extra 'git status' "{\"dangerouslyDisableSandbox\":$H25_VALUE}")"
+  check "H25 非 boolean($H25_VALUE): deny" deny "$PDEC"
+  check "H25 非 boolean($H25_VALUE): 種類" other "$PKIND"
+  check "H25 非 boolean($H25_VALUE): 終了コード" 0 "$PRC"
+  check "H25 非 boolean($H25_VALUE): 1 呼び出し 1 行" 1 "$PLINES"
+  check "H25 非 boolean($H25_VALUE): 型不正の理由" "dangerouslyDisableSandbox が boolean でない" "$(h25_log_field reason)"
+done
+perm Bash "$(bash_in_extra 'curl --version' '{"dangerouslyDisableSandbox":false}')"
+check "H25 false: 既存の other は deny" deny "$PDEC"
+check "H25 false: 既存の other を維持" other "$PKIND"
+perm Bash "$(bash_in_extra 'git status > .git/h25' '{"dangerouslyDisableSandbox":false}')"
+check "H25 false: 既存の protected は deny" deny "$PDEC"
+check "H25 false: 既存の protected を維持" protected "$PKIND"
 # H37: 実 Bash は追跡しない組み込み移動の後に symlink の先を書き換えられる。hook は全許可でも入口で止める。
 mkdir -p "$PW/sub"
 printf 'before\n' >"$PW/.claude/settings.json"

@@ -886,6 +886,12 @@ def decide(inp: dict, env: dict) -> tuple[str, str | None, str, str]:
             if not isinstance(command, str):
                 raise other("command が無い")
             subject = command
+            if "dangerouslyDisableSandbox" in tin:
+                disable_sandbox = tin["dangerouslyDisableSandbox"]
+                if not isinstance(disable_sandbox, bool):
+                    raise other("dangerouslyDisableSandbox が boolean でない")
+                if disable_sandbox:
+                    raise other("dangerouslyDisableSandbox が true")
             decide_bash(ctx, command, env)
         else:
             raise other(f"扱わないツール: {tool}")
