@@ -2120,12 +2120,14 @@ source=$ITER_SOURCE
   # 子: setsid で新しいセッションにする(片付けでグループごと止める)。DEV_WORKFLOW_HOST_CLI を外し、
   # 周の印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
   # OLDPWD も外す(直前の cd で worktree の外を指す。周の中の `cd -` の行き先にさせない)
+  # H32: 自動メモリは周の子だけで無効にする。親の値や利用者の設定・既存メモリは変更しない。
   (
     exec 7>&-
     cd "$ITER_WT"
     exec "$ENV_BIN" -u DEV_WORKFLOW_HOST_CLI -u OLDPWD DEV_WORKFLOW_LOOP_ITER="$ITER_ID" \
       DEV_WORKFLOW_LOOP_WORKTREE="$ITER_WT" DEV_WORKFLOW_LOOP_PERMLOG="$ITER_PERMLOG" \
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
       "$SETSID_BIN" "${CHILD_ARGV[@]}" \
       <"$RUN_DIR/iter-$ITER_SEQ.prompt" >"$RUN_DIR/iter-$ITER_SEQ.out" 2>"$RUN_DIR/iter-$ITER_SEQ.err"
   ) &
@@ -2648,7 +2650,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
     "  DEV_WORKFLOW_LOOP_WORKTREE=<周の worktree の物理パス($WT_ROOT/<実行 ID>-<周の番号>)>" \
     "  DEV_WORKFLOW_LOOP_PERMLOG=<状態ディレクトリの周の記録($STATE/<実行 ID>/iter-<周の番号>.permlog)>" \
     "  DEV_WORKFLOW_LOOP_PLUGIN_ROOT=$PLUGIN_ROOT" \
-    "  DEV_WORKFLOW_LOOP_ALLOW=$ALLOW_JSON"
+    "  DEV_WORKFLOW_LOOP_ALLOW=$ALLOW_JSON" \
+    "  CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"
   if [ -n "$ALLOW_UNUSED" ]; then say "許可リストの規則のうち使わない形:" "$ALLOW_UNUSED"; fi
 fi
 if [ -n "$LEADING" ]; then say "先行する commit(ローカルが origin より先行):" "$LEADING"; fi
