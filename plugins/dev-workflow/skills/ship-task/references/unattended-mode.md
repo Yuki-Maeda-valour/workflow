@@ -19,7 +19,7 @@ ship-task の無人モードの正本。無人モードでは、対話点で止�
 - タスク MD のヘッダにメタ行(`> **無人実行**: 可`)がある
 - タスク MD が git の追跡下にある
 - ローカルの git 設定のダイジェストを `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出でき(exit 0)、守る値(§7)として保持した。下の origin の URL の検査より先に打つ(設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため)
-- **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は discover-mode.md §4 の「origin の URL」と同じ。出力の 5 欄(`origin`・`same`・`vcs`・`repo`・`form`)を、守る値の origin の判定(§7)として保持した
+- **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は discover-mode.md §4 の「origin の URL」と同じ。出力の 6 欄(`origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`)を、守る値の origin の判定(§7)として保持した
 - この文書と `task-digest.py`・`origin-repo.py`・`git-config-digest.py` と Python 3 がある
 - 本文ダイジェストを算出でき(exit 0)、R として保持した
 
@@ -278,7 +278,7 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
 | ship-task の各 commit の手順の最初(実装 commit・doc commit・保留の commit。stage の前。保留の commit では §5 のガードの最初) | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 |
 | ship-task の各 commit の直前(実装 commit・doc commit・保留の commit) | 本文ダイジェスト = R / 現在のブランチ = 作業ブランチ / HEAD = 最後に知る HEAD / index に除外対象が無い(`git diff --cached --name-only -z --no-renames` で見る。stage 済みのものも commit に入るため)。通ったら、stage を終えた index の tree を `git write-tree` で控える。commit は `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/<名>` の 1 回の Bash で打つ(メッセージのファイルは `Write` で置く — §3 の 10) |
 | ship-task の各 commit の直後 | `HEAD^{tree}` = 直前に控えた tree(commit の hook がソースや除外対象を書き換え・stage した場合を捉える)/ `git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> \| python3 <task-digest.py> -` = R(パスは commit の後のパス。実装 commit・doc commit は `完了_`、保留の commit は `保留_`。直前の照合は作業ツリーを読むので、index に別の本文が stage されていた場合を捉える)/ 現在のブランチ = 作業ブランチ。通らなければ、commit は残ったまま失敗扱い。通れば、最後に知る HEAD を更新する |
-| ship-task の push の直前(Phase 5 の PR の前の確かめの後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 ② origin の判定: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>` を打ち直し、exit 0 で 5 欄が守る値と一致 / `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ ③ push/PR は保持したレビュー済み SHA を `publish-guard.py` へ渡し、helper の直前 digest/origin 照合と exact refspec を使う |
+| ship-task の push の直前(Phase 5 の PR の前の確かめの後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 ② origin の判定: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>` を打ち直し、exit 0 で 6 欄(`push_url_sha256`を含む)が守る値と一致 / `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ ③ push/PR は保持したレビュー済み SHA を `publish-guard.py` へ渡し、helper の直前 digest/origin 照合と exact refspec を使う |
 
 - 表の `<守る値>` は、照らす者(ship-task・do-task)が自分で持つ git 設定のダイジェストの値。`<管理ルート>` は管理ルートの絶対パス(タスクの周では profile の `root` と同じ)。`git-config-digest.py` の `--expect` は exit 0(一致)だけが通る(1 = 不一致、2 = 算出できない)。commit は `--expect` と `&&` でつないだ 1 行にし、rc が 0 以外なら失敗扱い。公開は `publish-guard.py` が保持した origin 判定と設定ダイジェストを照合してから、レビュー済みの完全 SHA を送る。どちらも照合に通らなければ実行しない
 - 照合・index・commit・公開の Git 呼び出しには、base-commit.md が定める safe Git 前置き(`--no-pager --no-replace-objects`、hook/fsmonitor/GPG/LFS filter の無効化)を付ける。品質確認は hook に委ねない。公開は `publish-guard.py` だけが行い、保持 SHA を source にした完全 refspec、origin/digest の直前照合、remote SHA と PR 実体照合を行う
@@ -317,11 +317,11 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
 - ② 除外 1 の 3 種の行と追加修正記録の節は、書き足し・書き換え・削除を検出しない。そのため無人の do-task は、本文だけを契約にする。ただし、末尾まで閉じないコードフェンスは記録節の内外を問わず算出不能(exit 1・stdout は空)になる。記録節の未閉鎖フェンスで後続本文を除外する H9 は拒否し、開始時は前提の検査(§1)、周の途中は照合(§7)で失敗扱いにする。正常に閉じた記録節内のフェンスは従来どおり除外する
   - 対応外の字下げのフェンスも算出不能になる(H10)。フェンスの外で、半角スペース 4 個以上かタブを含む字下げの直後に、同じバッククォートかチルダが 3 個以上続く行を拒否する。閉鎖の有無にかかわらず、記録節を除外する前に全体を検査する。開始時は前提の検査(§1)、周の途中は照合(§7)で失敗扱いにする。
   - 期待出力の囲みは半角スペース 0〜3 個で書く。正常な囲みの中にある字下げ文字列は受理し、本文内の空行やチェック状態の変更は値に反映する。記録節内の正常な囲みは除外する。この検査は Markdown 全体の解析ではなく、リスト・引用・字下げコードの構造は判定しない。拒否条件の正本は [task-template.md の記法の規約](../../create-task/references/task-template.md)。
-- ③ 書き込み型の formatter が task_dir を整形すると、改竄が無くても値が変わる。経路は 3 つ
+- ③ 書き込み型の formatter が task_dir を整形すると、改竄が無くても値が変わる。経路と対処は次のとおり
   - 周の中の format ゲート(例: markdown を整形する format スクリプト)→ 毎周が失敗扱いになる
   - 人がタスク MD を commit するときの pre-commit hook の整形 → 承認後の本文の変更として、Phase 2 で止まる(無人は保留、対話は停止)
-  - ship-task 自身の commit で動く hook の整形 → commit の直後の照合(tree の一致)で失敗扱い(commit は残る)。タスク MD に限らず、commit のときに内容を書き換える hook(書き込み型の formatter を含む)がある構成では、無人の周は毎回失敗扱いになる
-  - 導入時の案内: format ゲートから task_dir を外す。commit のときに内容を書き換える hook(lint-staged の整形など)は、無人の周では無効にするか、書き換えない構成にする(tree の一致の照合があるので、task_dir を外すだけでは足りない)。失敗の報告に差分を添えるので、整形だけの変化だと人が見分けられる
+  - ship-task 自身の commit は共通 safe Git 前置きで repository hook を無効にして打つ。hook の整形に依存せず format ゲートで品質を確認し、tree の一致の照合は hook 以外の変更を検出するために維持する
+  - 導入時の案内: format ゲートから task_dir を外す。commit のときに内容を書き換える hook(lint-staged の整形など)は、人が task MD を commit するときには停止条件になり得る。無人の ship-task の commit には共通前置きが hook を無効にする。失敗の報告に差分を添えるので、整形だけの変化だと人が見分けられる
 - ④ 除外 1 は 3 種の行だけなので、それ以外のヘッダの行(`> **関連**:`・`> **注意**:` など)を承認後に書き換えると、Phase 2 で止まる(設計レビューのやり直しが要る)。ヘッダにも設計の中身(品質維持契約・短縮判定など)があるため、丸ごとは外さない
 - ⑤ コードフェンスの中にチェックボックス形の行(テンプレートの引用・期待出力の見本など)を持つタスク MD は、無人では完了できない。do-task の集計(`grep -cE '^\s*- \[[ xX]\]'`・`grep -cE '^\s*- \[(x|X)\]'`)は、フェンスの中の行も数えるため
   - `- [ ]` の見本: Phase 7 の手順 1 で全部に印を求めるが、フェンスの中に印を付けると本文ダイジェストが変わり、照合で失敗扱いになる

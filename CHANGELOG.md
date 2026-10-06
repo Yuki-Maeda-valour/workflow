@@ -7,6 +7,7 @@ v4.2.0 以前は commit 履歴を参照。
 ### 修正
 
 - 公開前に保持したレビュー済み commit の完全 SHA と送信先を `publish-guard.py` で照合する([子 Issue #190](https://github.com/Yuki-Maeda-valour/workflow/issues/190)、親 #107 の H6・H7・H12・H39・H45)。送信元をその SHA に固定し、送信後の remote branch が同じ SHA を指すときだけ PR を作る。
+- 発見の周で `repo` を読めない・`gh` を使えない既存の縮退経路では、PR を作らず固定 SHA を origin 名で一度だけ解決して送信する。effective push URL の保持値を照合し、URL を渡し直して `insteadOf` / `pushInsteadOf` を再展開しない。送信後も同じ経路の dry-run で remote branch を照合する。
 - 作成結果の URL と番号でその PR を取得し、送信先、head の所有者・リポジトリ・branch・SHA、base を照合する。不一致の PR は失敗として URL を報告し、自動では閉じない。
 - 無人の直接 push は親が固定した送信先と完全な refspec に限定する。別 remote・別 ref・force・タグ一括送信・追加設定を拒否する。Git の hook、fsmonitor、署名処理と既知の変換処理を無効にする契約を同期する。
 - PR 本文は通常ファイルから安全に読み取り、`gh` の標準入力に渡す。公開先の固定を対話にも適用し、無人の追跡設定を付けない規則を維持する。
