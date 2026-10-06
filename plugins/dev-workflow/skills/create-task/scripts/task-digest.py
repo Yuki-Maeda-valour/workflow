@@ -5,9 +5,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import os
 import re
+import stat
 import sys
-from pathlib import Path
 
 
 # 定義(コードフェンス・対象・正規化・値・算出できない場合)の正本は task-template.md の記法の規約。
@@ -83,12 +84,28 @@ def digest(text: str) -> str:
     return "sha256:" + hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
 
 
+def read_path(path: str) -> bytes:
+    # 先にリンク先を含めて検査する。検査後に差し替えられても、non-blocking open 後の実体を
+    # 同じ記述子で再検査してから読むため、FIFO 待ちや別のパスの開き直しをしない。
+    if not stat.S_ISREG(os.stat(path).st_mode):
+        raise DigestError("入力パスが通常ファイルでない")
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode):
+            raise DigestError("入力パスが通常ファイルでない")
+        with os.fdopen(fd, "rb", closefd=False) as source:
+            return source.read()
+    finally:
+        os.close(fd)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, add_help=False)
     parser.add_argument("path", help="タスク MD のパス。`-` なら stdin を読む")
     args = parser.parse_args()
     try:
-        data = sys.stdin.buffer.read() if args.path == "-" else Path(args.path).read_bytes()
+        data = sys.stdin.buffer.read() if args.path == "-" else read_path(args.path)
         result = digest(data.decode("utf-8"))
     except OSError as exc:
         print(f"算出できない: ファイルを読めない: {exc}", file=sys.stderr)
