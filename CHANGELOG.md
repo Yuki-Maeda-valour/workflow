@@ -19,6 +19,14 @@ v4.2.0 以前は commit 履歴を参照。
 
 - 独自の skill を持つ fork では、本文に 200 字を超える行があると `validate.py` が WARN を出す(終了コードは変わらない)。分けるか、そのままにする。分け方の決まりは `docs/design.md` §6 の「行の長さ」
 
+## v4.19.6
+
+### 修正
+
+- `diff-snapshot.sh` の診断表示で、UTF-8 の C1 制御文字(U+0080〜U+009F)が残る問題を修正した。既存の表示用関数が処理する疑い行・承認済み項目とfilter名の NOTE・`pager.*` 無効化の NOTE・promisor表示で、C1を各1個の `?` に置き換える([子Issue #152](https://github.com/Yuki-Maeda-valour/workflow/issues/152)、親 #77 の H2)。
+- 通常の UTF-8 と既存の ASCII 制御文字の置換を保つ。承認ダイジェストの計算元、filter無効化用トークン、比較する内容、patch、終了コード、Bash下限と依存は変えない。
+- 全32文字の回帰と、旧処理・表示経路の置換漏れを検出する変異確認を追加した。共通関数を通らない別の診断と通常本文の表示は今回の保証外。詳細は [外部ランナー契約 §9-1](plugins/dev-workflow/skills/do-task/references/external-runners.md)を参照。
+
 ## v4.19.5
 
 - `loop.sh` の実装・発見の子環境で `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` を強制する(#107 H32 / #151)。親が未設定・`0`・`1` のどれでも子を無効化する。親環境・利用者設定・既存メモリは変更しない。`--dry-run` の子環境表示も同期する。

@@ -80,6 +80,8 @@
 
 **do-task の補助スクリプトと回帰の必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機で残す確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性を保証せず、今回の対応は必要環境の明示と起動前の診断に絞る([Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121))。
 
+**診断表示のC1置換**: `diff-snapshot.sh` は、既存の表示用関数で UTF-8 の C1(U+0080〜U+009F)を `?` に置き換える。限界として残す案は、診断の表示を書き換える文字が残るため採用しなかった。既存の Bash 機能で表示用コピーだけを加工し、新しい依存を足さない。元データによる承認・比較と patch は保持する。対象の診断・NOTEと限界の正本は [external-runners.md §9-1](../plugins/dev-workflow/skills/do-task/references/external-runners.md)。決定と検証は [Issue #152](https://github.com/Yuki-Maeda-valour/workflow/issues/152)(親 #77 の H2)を参照する。
+
 ## 3. 固有情報の 3 層吸収アーキテクチャ(最重要原則)
 
 **skill 本文は手順(how)だけを持ち、プロジェクト固有の事実(what)を一切ハードコードしない。** 事実は以下の 3 層で実行時に解決する。全 skill がこの順で解決すること。

@@ -3807,6 +3807,142 @@ ckeq "㊺ 止まるまでにオブジェクトを読む git を呼ばない" \
 ckeq "㊺ --base の rev-parse --verify も呼ばれない" \
   "$(grep -E 'rev-parse' "$SELFTEST_GITLOG" | grep -c -- '--verify' || true)" 0
 ckne "㊺ git スタブは実際に呼ばれている(記録が空でない)" "$(grep -c . "$SELFTEST_GITLOG")" 0
+# ── H2 UTF-8 C1 は表示用コピーだけで置換する ──
+# 全32文字を1 fixtureへまとめる。C2以外の先頭バイトを持つ正常文字も含め、
+# 継続バイトだけを置換する退行と、200文字の境界で置換を省く退行を判別する。
+C1H2=""; QH2=""; ACCENTH2=""
+for (( h2b=128; h2b<=159; h2b++ )); do
+  printf -v h2oct '%03o' "$h2b"
+  printf -v h2ch '%b' "\\302\\$h2oct"
+  C1H2="$C1H2$h2ch"; QH2="$QH2?"
+  printf -v h2ch '%b' "\\303\\$h2oct"
+  ACCENTH2="$ACCENTH2$h2ch"
+done
+UTFH2="日本語éà€🙂 $ACCENTH2"
+RAWNAMEH2="x$UTFH2$C1H2"
+DISPNAMEH2="x$UTFH2$QH2"
+# 表示関数だけを対象から取り出す。起動処理と実リポジトリの読み取りは行わない。
+awk '/^sanitize\(\)/{p=1} /^add_note\(\)/{p=0} p' "$TARGET" >"$WORK/h2-display.sh"
+awk '/^emit_tamper_rows\(\)/{p=1} p{print} p && /^}/{exit}' "$TARGET" >>"$WORK/h2-display.sh"
+(
+  source "$WORK/h2-display.sh"
+  printf '%s' "$(sanitize "$UTFH2$C1H2")" >"$WORK/h2-sanitized"
+  c0=''; q0=''
+  for (( b=1; b<=31; b++ )); do printf -v oct '%03o' "$b"; printf -v ch '%b' "\\$oct"; c0="$c0$ch"; q0="$q0?"; done
+  printf '%s' "$(sanitize "$c0"$'\x7f')" >"$WORK/h2-c0"
+  printf '%s' "$q0?" >"$WORK/h2-c0-expected"
+  long=''; for (( b=0; b<198; b++ )); do long="$long日"; done
+  printf '%s' "$(disp_val "$long"$'\xc2\x80\xc2\x9f'"TAIL")" >"$WORK/h2-cut"
+  printf '%s' "$long??" >"$WORK/h2-cut-expected"
+  TC1=("$C1H2"); TC2=("$C1H2"); TC3=("$C1H2"); TC4=("$C1H2"); SHOW_DIGEST=0
+  emit_tamper_rows "$WORK/h2-rows"
+  emit_tamper_rows '' 2>"$WORK/h2-rows-stderr"
+)
+ckeq 'H2 C1全32文字が各1個の?になり正常UTF-8を保持する' "$(cat "$WORK/h2-sanitized")" "$UTFH2$QH2"
+ckt 'H2 既存C0全31文字とDELの置換を保持する' cmp -s "$WORK/h2-c0" "$WORK/h2-c0-expected"
+ckt 'H2 200文字で切る前にC1を置換する' cmp -s "$WORK/h2-cut" "$WORK/h2-cut-expected"
+printf '%s\t%s\t%s\t%s\n' "$QH2" "$QH2" "$QH2" "$QH2" >"$WORK/h2-rows-expected"
+ckt 'H2 疑い行の全4列をsnapshot表示で置換する' cmp -s "$WORK/h2-rows" "$WORK/h2-rows-expected"
+ckt 'H2 疑い行の全4列をstderr表示で置換する' cmp -s "$WORK/h2-rows-stderr" "$WORK/h2-rows-expected"
+
+base_repo h2c1
+PATHH2="path-$UTFH2$C1H2.ts"
+printf 'base\n' >"$R/$PATHH2"
+printf '*.ts filter=%s\n' "$RAWNAMEH2" >"$R/.gitattributes"
+GIT "$R" add -A
+GIT "$R" commit -q -m fixture
+B="$(GIT "$R" rev-parse HEAD)"
+printf '追加-%s%s\n' "$UTFH2" "$C1H2" >>"$R/$PATHH2"
+export SELFTEST_TRACE="$WORK/h2-trace"
+: >"$SELFTEST_TRACE"
+CMDH2="sh $STUBS/trace-clean.sh $UTFH2$C1H2"
+KEYH2="filter.$RAWNAMEH2.clean"
+GIT "$R" config "$KEYH2" "$CMDH2"
+run --cwd "$R" --precheck
+ckeq 'H2 C1入りfilterのprecheckはexit 22' "$RC" 22
+DGH2="$(digest_of)"
+# 表示結果を再利用せず、元3列のレコードを独立に組み立てる。
+EXPDGH2="$( { printf '%s\t%s\t%s\0' "$KEYH2" "ローカル設定: $KEYH2" "$(sha_str "$CMDH2")"; printf '%s\t%s\t-\0' "$PATHH2" "filter 属性: $RAWNAMEH2"; } | LC_ALL=C sort -z | sha256sum | cut -d' ' -f1)"
+ckeq 'H2 元3列から独立計算した承認値が一致する' "$DGH2" "$EXPDGH2"
+printf '%s\t%s\t%s\t%s\n' "filter.$DISPNAMEH2.clean" "ローカル設定: filter.$DISPNAMEH2.clean" "$(sha_str "$CMDH2")" "sh $STUBS/trace-clean.sh $UTFH2$QH2" >"$WORK/h2-config-expected"
+printf '%s\t%s\t-\n' "path-$UTFH2$QH2.ts" "filter 属性: $DISPNAMEH2" >>"$WORK/h2-config-expected"
+# 行の順序は契約に含めない。比較するのは列のバイト列。
+grep -F -e "$(sha_str "$CMDH2")" -e 'filter 属性:' "$CASE_ERR" | sort >"$WORK/h2-config-actual"
+sort "$WORK/h2-config-expected" >"$WORK/h2-config-sorted"
+ckt 'H2 precheckのキー・理由・値が全32文字を置換する' cmp -s "$WORK/h2-config-actual" "$WORK/h2-config-sorted"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env'
+ckeq 'H2 未承認の通常実行はexit 22' "$RC" 22
+secf "$OUT" '改竄の疑い'
+grep -F -e "$(sha_str "$CMDH2")" -e 'filter 属性:' "$SECF" | sort >"$WORK/h2-config-actual"
+ckt 'H2 snapshotのキー・理由・値が全32文字を置換する' cmp -s "$WORK/h2-config-actual" "$WORK/h2-config-sorted"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --patch-out "$PATCHF" --exclude-glob '.env' --accept "$DGH2"
+ckeq 'H2 承認した通常実行はexit 0' "$RC" 0
+headf "$OUT"
+ckt 'H2 承認項目NOTEのパスと理由を置換する' inf "$HDF" "承認済み: path-$UTFH2$QH2.ts${TB}filter 属性: $DISPNAMEH2"
+ckt 'H2 承認項目NOTEのキーと理由を置換する' inf "$HDF" "承認済み: filter.$DISPNAMEH2.clean${TB}ローカル設定: filter.$DISPNAMEH2.clean"
+ckt 'H2 通常実行のfilter名NOTEを置換する' inf "$HDF" "実内容で比較した: $DISPNAMEH2("
+ckt 'H2 通常実行のNULトークンは生filter名を保持する' grep -zqF -e "filter.$RAWNAMEH2.clean" -- "$CASE_OUT"
+ckt 'H2 snapshot本文はC1と正常UTF-8を保持する' inf "$OUT" "追加-$UTFH2$C1H2"
+ckt 'H2 patchはC1と正常UTF-8を保持する' inf "$PATCHF" "+追加-$UTFH2$C1H2"
+ckeq 'H2 比較元の内容を加工しない' "$(tail -1 "$R/$PATHH2")" "追加-$UTFH2$C1H2"
+run --cwd "$R" --precheck --accept "$DGH2"
+ckeq 'H2 承認したprecheckはexit 0' "$RC" 0
+ckt 'H2 precheckの承認項目NOTEを置換する' inf "$CASE_ERR" "承認済み: filter.$DISPNAMEH2.clean${TB}ローカル設定: filter.$DISPNAMEH2.clean"
+ckt 'H2 precheckのfilter名NOTEを置換する' inf "$CASE_ERR" "実内容で比較した: $DISPNAMEH2("
+ckt 'H2 precheckのNULトークンは生filter名を保持する' grep -zqF -e "filter.$RAWNAMEH2.clean" -- "$CASE_OUT"
+ckeq 'H2 通常実行・precheckともfilterを実行しない' "$(wc -c <"$SELFTEST_TRACE" | tr -d ' ')" 0
+# 同じ表示になる別のC1を元値へ入れても、以前の承認は使えない。
+GIT "$R" config "$KEYH2" "${CMDH2%$'\xc2\x9f'}"$'\xc2\x80'
+run --cwd "$R" --precheck --accept "$DGH2"
+ckeq 'H2 同表示の別C1へ変更すると再承認が必要' "$RC" 22
+ckne 'H2 同表示の別C1でも承認値は異なる' "$(digest_of)" "$DGH2"
+
+# pager.* の名前も利用者が決められる。事前検査と通常生成の無効化NOTEを確かめる。
+base_repo h2pager
+GIT "$R" config "pager.$RAWNAMEH2.cmd" cat
+cp "$R/.git/config" "$WORK/h2-pager-config.before"
+cp "$R/.git/index" "$WORK/h2-pager-index.before"
+# 無効化NOTEは既存仕様どおりキー名をASCII小文字で表示する。
+PAGERDISPH2="$(printf '%s' "pager.$DISPNAMEH2.cmd" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+run --cwd "$R" --precheck
+ckeq 'H2 pagerのprecheckはexit 0' "$RC" 0
+ckt 'H2 pagerのprecheck NOTEは全32文字を置換する' inf "$CASE_ERR" "無効化して実行: $PAGERDISPH2"
+ckf 'H2 pagerのprecheck NOTEに生のC1が残らない' inf "$CASE_ERR" "$C1H2"
+reset_out
+run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env'
+ckeq 'H2 pagerの通常生成はexit 0' "$RC" 0
+headf "$OUT"
+ckt 'H2 pagerのsnapshot NOTEは全32文字を置換する' inf "$HDF" "無効化して実行: $PAGERDISPH2"
+ckf 'H2 pagerのsnapshot NOTEに生のC1が残らない' inf "$HDF" "$C1H2"
+ckt 'H2 pagerの設定の元バイト列を保持する' cmp -s "$R/.git/config" "$WORK/h2-pager-config.before"
+ckt 'H2 pagerの検査でindexのバイト列を変えない' cmp -s "$R/.git/index" "$WORK/h2-pager-index.before"
+
+# 新旧Gitの判定は既存の版スタブを使用する。全32字はremote名とpartialclone値へ入れる。
+base_repo h2promisor
+GIT "$R" config "remote.$RAWNAMEH2.promisor" true
+GIT "$R" config extensions.partialclone "$RAWNAMEH2"
+reset_out
+run45 --cwd "$R" --precheck
+ckeq 'H2 新Gitのpromisor precheckはexit 0' "$RC" 0
+ckt 'H2 新Gitのpromisor precheck NOTEを置換する' inf "$CASE_ERR" "remote.$DISPNAMEH2.promisor"
+reset_out
+run45 --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env'
+ckeq 'H2 新Gitのpromisor snapshotはexit 0' "$RC" 0
+headf "$OUT"
+ckt 'H2 新Gitのpromisor snapshot NOTEを置換する' inf "$HDF" "remote.$DISPNAMEH2.promisor"
+for h2mode in precheck normal; do
+  reset_out
+  if [ "$h2mode" = precheck ]; then runp45 "$GSTUB45" --cwd "$R" --precheck --accept "$DGH2"
+  else runp45 "$GSTUB45" --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env' --accept "$DGH2"; fi
+  ckeq "H2 旧Gitのpromisor($h2mode)は承認でもexit 22" "$RC" 22
+  ckeq "H2 旧Gitのpromisor名と理由($h2mode)を置換する" "$(grep -F 'remote.' "$CASE_ERR" | head -1)" "remote.$DISPNAMEH2.promisor${TB}ローカル設定: remote.$DISPNAMEH2.promisor${TB}$(sha_str true)${TB}true"
+  ckeq "H2 旧Gitのpartialclone表示値($h2mode)を置換し元値のshaを保持する" "$(grep -F 'extensions.partialclone' "$CASE_ERR" | head -1)" "extensions.partialclone${TB}ローカル設定: extensions.partialclone${TB}$(sha_str "$RAWNAMEH2")${TB}$DISPNAMEH2"
+  ckf "H2 旧Gitのpromisor($h2mode)に承認値を出さない" inf "$CASE_ERR" '承認ダイジェスト:'
+  ckf "H2 旧Gitのpromisor($h2mode)でsnapshotを作らない" test -e "$OUT"
+done
+
 # ── 許可リストの例外は設けない(diff-snapshot-call.md の決定を固定する)──
 # `.env.example` のような公開テンプレートも `.env.*` に当たれば機密として除外する。
 # 除外を外す経路は改竄の余地になるので、スクリプトにもその口を設けない
