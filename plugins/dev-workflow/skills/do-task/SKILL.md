@@ -357,3 +357,9 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 - 前提: /create-task(タスク MD が無い場合はまず設計書を作る)
 - 完了後: /update-doc --task(完了タスク駆動の差分同期)
 - 設計から PR まで通しで回す: /ship-task(このスキルを実装工程として内部で実行し、doc 同期と PR 作成まで続ける)
+
+## Git の共通安全前置き
+
+read・index/worktree の変更・commit・network の全 Git 呼出は、base-commit.md の safe Git 前置きを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
+
+filter を使う既存リポジトリは、前置きで一般化しない。base-commit.md の precheck が承認した filter だけを明示的に無効化してから実行する。

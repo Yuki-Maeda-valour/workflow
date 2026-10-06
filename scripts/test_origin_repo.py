@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import json
 import os
 import shutil
@@ -123,11 +124,13 @@ class OriginRepoTest(unittest.TestCase):
 
     # ── 字面の読み方 ──
     def test_https_drops_userinfo_and_keeps_case(self):
-        self.origin("https://x-access-token:SECRETTOKEN@github.com/Owner/Repo.git/")
+        url = "https://x-access-token:SECRETTOKEN@github.com/Owner/Repo.git/"
+        self.origin(url)
         got, raw = self.result()
         self.assertTrue(got["same"])
         self.assertEqual("github.com/Owner/Repo", got["repo"])
         self.assertEqual("https", got["form"])
+        self.assertEqual("sha256:" + hashlib.sha256(url.encode()).hexdigest(), got["push_url_sha256"])
         self.assertNotIn("SECRETTOKEN", raw)
         self.assertNotIn("x-access-token", raw)
 

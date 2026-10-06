@@ -9,6 +9,7 @@ the URLs themselves, because they may carry credentials.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import posixpath
@@ -22,6 +23,10 @@ PART = r"[A-Za-z0-9._-]+"
 HTTPS = re.compile(rf"^https://(?:[^@/]+@)?(?P<host>[A-Za-z0-9.-]+)/(?P<owner>{PART})/(?P<repo>{PART})/?$")
 SSH = re.compile(rf"^ssh://(?:(?P<user>[^@/:]+)@)?(?P<host>[A-Za-z0-9.-]+)/(?P<owner>{PART})/(?P<repo>{PART})/?$")
 SCP = re.compile(rf"^(?:(?P<user>[^@/:]+)@)?(?P<host>[A-Za-z0-9.-]+):(?P<owner>{PART})/(?P<repo>{PART})$")
+SAFE_GIT = ("--no-pager", "--no-replace-objects", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+            "-c", "core.ignoreCase=false", "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+            "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false", "-c", "filter.lfs.smudge=",
+            "-c", "filter.lfs.clean=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false")
 
 
 class GitFailed(Exception):
@@ -31,7 +36,7 @@ class GitFailed(Exception):
 def git(directory: str, *args: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            ["git", "-C", directory, *args],
+            ["git", "-C", directory, *SAFE_GIT, *args],
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
@@ -185,7 +190,8 @@ def trusted_repo(directory: str, push: dict | None, push_url: str) -> tuple[str 
 
 
 def judge(directory: str) -> dict:
-    result = {"origin": False, "same": False, "repo": None, "form": None, "vcs": False, "reason": ""}
+    result = {"origin": False, "same": False, "repo": None, "form": None, "vcs": False, "reason": "",
+              "push_url_sha256": None}
     if "origin" not in lines(directory, "remote"):
         result["reason"] = "origin が無い"
         return result
@@ -201,6 +207,11 @@ def judge(directory: str) -> dict:
         result["reason"] = "fetch か push の URL が 1 つでない"
         return result
     fetch_url, push_url = fetch_urls[0], push_urls[0]
+    # Keep a comparison value for the later publish boundary without exposing a
+    # possibly credential-bearing URL in the JSON protocol or diagnostics.
+    result["push_url_sha256"] = "sha256:" + hashlib.sha256(
+        push_url.encode("utf-8", "surrogateescape")
+    ).hexdigest()
     fetch, push = parse(fetch_url), parse(push_url)
     result["form"] = push["form"] if push else "other"
     if fetch and push:

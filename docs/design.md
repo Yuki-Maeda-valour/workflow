@@ -65,6 +65,7 @@
   - 正常な半角スペース 0〜3 個の囲みの計算値と、囲みの中の字下げ文字列は保つ。既知キー収集・候補検証の既定動作も保つ。Markdown 全体の解析は行わない。フェンスの判定・除外・正規化と期待出力の書き方の正本は [task-template.md の記法の規約](../plugins/dev-workflow/skills/create-task/references/task-template.md)。
 - **人の linked worktree の設定(H20)**: `loop.sh` は `--repo` の管理ディレクトリを物理パスで固定し、その下の `config.worktree` を不在も含めて控える。通常・シグナル終了・中断後の再起動で追加・削除・値変更・項目の並べ替えを検出する。中断後の起動元変更と、比較元を持たない旧状態は停止する。中断の無い実行間の差分は従来どおり報告して続ける。利用者の設定は自動復元・削除しない。起動元変更・旧状態の扱いと保証範囲の正本は [loop.md §4・§10](../plugins/dev-workflow/skills/ship-task/references/loop.md)。設計・検証記録は [Issue #167](https://github.com/Yuki-Maeda-valour/workflow/issues/167)。
 - **SSH のホスト鍵検証(H44)**: `origin-repo.py` は、ホスト名・ポートに加え、鍵検証と保存先・照合名・ローカル宛先の検証省略を確認する。検証を外す構成と、判定に必要な情報の欠落・取得失敗では `repo: null` と理由を返す。通常の SSH・HTTPS の返却形式は維持する。判定表と、実際の鍵内容や保存成功を検査しない限界の正本は [discover-mode.md §3・§10](../plugins/dev-workflow/skills/ship-task/references/discover-mode.md)。設計・検証記録は [Issue #161](https://github.com/Yuki-Maeda-valour/workflow/issues/161)。
+- **発見の push-only 縮退(H6・H39)**: 発見モードは、origin が一意で fetch/push が同じ送信先なら、PR の作成先を読めない場合も保持した完全 SHA だけを送信する。開始時の effective push URL は本文を出さず SHA-256 として保持し、helper は直前の origin・設定・URL digest を照合する。URLをargvへ再入力せず origin 名へ exact refspec を送り、送信後は同じ送信経路への dry-run で remote SHA を確かめ、push-only では gh を呼ばない。URL変更・複数URL・照合不能は停止する。通常の repo 固定 PR 経路、対話追跡、無人 no-u は保つ。手順と限界の正本は [discover-mode.md §8](../plugins/dev-workflow/skills/ship-task/references/discover-mode.md#8-commitpushpr)。
 - **本文ダイジェストのパス入力**: 通常ファイル以外は、終了コード 1・stdout は空・理由は stderr で速やかに拒否する([#150](https://github.com/Yuki-Maeda-valour/workflow/issues/150)、#107 H11)。事前の種類検査だけでなく、待機しない方法で開いた実体を再検査し、同じ実体から読む。検査後の FIFO 差し替えで書き手を待つ経路を防ぐ。通常ファイルへのリンク・stdin のパイプ入力・正常入力の計算値は維持する。契約と保証範囲の正本は [task-template.md の記法の規約](../plugins/dev-workflow/skills/create-task/references/task-template.md)。
 - **短い値付きフラグの束ね書き(H28)**: `loop.sh` は上書き引数の短いフラグを1文字ずつ調べ、help の必須値付き短名が含まれれば子セッションの起動前に拒否する。値の連結形と `=` の後ろも検査し、後ろに足す固定フラグの値消費を防ぐ。長い `--名前=値` と既存の禁止フラグ検査は維持する。受理・拒否と保証範囲の正本は [loop.md §2](../plugins/dev-workflow/skills/ship-task/references/loop.md)。設計・検証記録は [Issue #174](https://github.com/Yuki-Maeda-valour/workflow/issues/174)。
 - **既定はオフ**: 無人の経路(`loop.sh` と ship-task の無人モード)は、起動しなければ既存の挙動を変えない。profile の `features.loop`(§4)は調整値だけを持ち、有効化のスイッチではない。ただし ship-task の「既存のタスク MD から始める入口」は、無人モードと別に対話でも使える入口として加わる
@@ -671,3 +672,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 3. 各プロジェクトでは `/plugin` の更新(marketplace update)で新版を取得
 
 - 版の刻み: 後方互換な機能追加はマイナー、内部の移行・修正はパッチ、AI 非依存の到達点はメジャーで示す(委託の語の移行の版の刻み〈3.9.x → v4.0.0。2026-09-10 に到達〉は §7-7)
+
+### 公開経路の安全前置き
+
+公開、commit、index 操作を含む Git 呼出は hook、fsmonitor、署名、filter を無効化する共通前置きを使い、品質確認を hook に委ねない。公開 helper は保持した完全 SHA を送信し、origin・設定・remote SHA・作成 PR を照合する。同じ OS 利用者の任意プログラムを隔離するものではないため、保持値と結果は worktree 外で照合する。

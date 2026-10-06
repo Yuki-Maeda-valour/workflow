@@ -1,0 +1,794 @@
+{
+  "plugins/dev-workflow/skills/do-task/SKILL.md": [
+    {
+      "code": "git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <dir> <前置き> ls-files --error-unmatch -- ':(literal)進行中_{タスク名}.md'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <dir> <前置き> mv -- '進行中_{タスク名}.md' '完了_{タスク名}.md'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git config",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git diff -- <タスク MD>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git mv",
+      "count": 3,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git status",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git symbolic-ref --quiet HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ],
+  "plugins/dev-workflow/skills/do-task/references/base-commit.md": [
+    {
+      "code": "TOP=$(git -C <root(parent-child)または管理ルート> --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false rev-parse --show-toplevel)",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git -C \"$TOP\" <前置き>",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git -C \"$TOP\" <前置き> rev-list --count refs/heads/<DEF_NAME>..<作成時の sha>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" <前置き> rev-parse HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" branch --show-current",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" diff --name-only -z --no-renames --ignore-submodules=dirty HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" hash-object -t tree /dev/null",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" log --no-show-signature --no-decorate --format='%H %s' \"$DEF_REF\"",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" log --no-show-signature --no-decorate --format='%H %s' <候補>..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" ls-files -o --exclude-standard -z",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" merge-base --is-ancestor '<基準行の sha>' HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" rev-list --count \"$DEF_REF\"..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" rev-parse --verify --quiet '<基準行の sha>^{commit}' 2>/dev/null",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" rev-parse --verify --quiet HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" rev-parse HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" show-ref --verify --quiet refs/heads/main",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C \"$TOP\" symbolic-ref --quiet refs/remotes/origin/HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <そのディレクトリ> rev-parse --git-dir",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <そのディレクトリ> rev-parse --show-toplevel",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff <base>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git for-each-ref --format='%(refname:short)' --contains <commit> refs/heads refs/remotes",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git log",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git merge-base \"$DEF_REF\" HEAD",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git replace",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git rev-list --count \"$DEF_REF\"..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-list <候補>..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-parse --abbrev-ref @{upstream}",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-parse --verify <指定>^{commit}",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-parse <候補>^{commit}",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-parse HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git show",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git status",
+      "count": 6,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ],
+  "plugins/dev-workflow/skills/do-task/references/diff-snapshot-call.md": [
+    {
+      "code": "git -C \"$TOP\" log --no-show-signature --no-decorate --format='%H %s' <base>..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <管理ルート> rev-parse --git-dir",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <管理ルート> rev-parse --verify --quiet <REF>^{commit}",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git -C <管理ルート> show <REF>:.claude/project-profile.yml",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git add",
+      "count": 2,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git init",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git ls-files -o --ignored --exclude-standard",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ],
+  "plugins/dev-workflow/skills/ship-task/SKILL.md": [
+    {
+      "code": "git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> | python3 {create-task の}scripts/task-digest.py -",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git add -- ':(literal)<完了_ のパス>'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git add -f",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git branch --show-current",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git commit",
+      "count": 1,
+      "classification": "commit",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git commit -a",
+      "count": 1,
+      "classification": "commit",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git log --no-show-signature --no-decorate --format='%H %s'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git log --oneline -20",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git mv",
+      "count": 2,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git push origin <作業ブランチ>",
+      "count": 1,
+      "classification": "network",
+      "basis": "公開の説明例。実行経路は held SHA を publish-guard.py へ渡し、共通 safe Git 前置きと固定 refspec を適用する。"
+    },
+    {
+      "code": "git remote",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git rev-list --count refs/heads/<DEF_NAME>..<sha>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-list refs/remotes/origin/<DEF_NAME>..<sha>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rm --cached",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git rm --cached --ignore-unmatch -- ':(literal)<進行中_ の旧パス>'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git status",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git switch --no-track -c <作業ブランチ>",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git switch -c <名前>",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git switch -c task/{タスク名}",
+      "count": 2,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git symbolic-ref --quiet HEAD",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git symbolic-ref --quiet refs/remotes/origin/HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git write-tree",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "index の tree を控える読取操作。実行時は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ],
+  "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md": [
+    {
+      "code": "git -C <パス>",
+      "count": 2,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> \\| python3 <task-digest.py> -",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git add",
+      "count": 3,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git add -- ':(literal)<dir>/保留_{名}.md'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git add -- ':(literal)<パス>' …",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git commit",
+      "count": 1,
+      "classification": "commit",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git config",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git diff -- <タスク MD>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff --cached --name-only -z --no-renames",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff --name-only -z --no-renames <基準>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff --name-status <控えた tree> HEAD^{tree}",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git grep",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git grep -F",
+      "count": 4,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git lfs install --local",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git log -G",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git log -S",
+      "count": 4,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git ls-files --error-unmatch -- ':(literal)<dir>/進行中_{名}.md'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git ls-files --error-unmatch -- ':(literal)<パス>'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git ls-files -o --exclude-standard -z",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git mv",
+      "count": 4,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git push",
+      "count": 1,
+      "classification": "network",
+      "basis": "公開の説明例。実行経路は held SHA を publish-guard.py へ渡し、共通 safe Git 前置きと固定 refspec を適用する。"
+    },
+    {
+      "code": "git push -u",
+      "count": 1,
+      "classification": "network",
+      "basis": "公開の説明例。実行経路は held SHA を publish-guard.py へ渡し、共通 safe Git 前置きと固定 refspec を適用する。"
+    },
+    {
+      "code": "git rev-list --count refs/heads/<DEF_NAME>..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rev-parse refs/heads/<作業ブランチ>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rm --cached --ignore-unmatch -- ':(literal)<dir>/進行中_{名}.md'",
+      "classification": "index/worktree",
+      "basis": "#188のreview-guardによる確定記録の反映。共通safe Git前置きとfilter事前検査を適用し、stage前後を検証担当が照合する。",
+      "count": 1
+    },
+    {
+      "code": "git status",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git status --porcelain",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git switch",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git switch --no-track -c <作業ブランチ>",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git symbolic-ref --quiet HEAD",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git write-tree",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "index の tree を控える読取操作。実行時は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/<名>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ],
+  "plugins/dev-workflow/skills/ship-task/references/discover-mode.md": [
+    {
+      "code": "git -C <ディレクトリ> remote",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git add",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git add -- ':(literal)<パス>'",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git check-ignore --no-index -q -- '<task_dir>/候補_x.md'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git check-ignore -q -- <パス>",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git check-ref-format --branch 'task/{名}'",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git config --get core.sshCommand",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git config --get remote.origin.vcs",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git config --type=bool --get-urlmatch http.sslverify <push の URL>",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git diff --cached --name-only -z",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff --cached --name-status -z --no-renames",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git diff --name-status -z --no-renames S0 HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git log --oneline -20",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git push origin <作業ブランチ>",
+      "count": 1,
+      "classification": "network",
+      "basis": "公開の説明例。実行経路は held SHA を publish-guard.py へ渡し、共通 safe Git 前置きと固定 refspec を適用する。"
+    },
+    {
+      "code": "git remote get-url --all origin",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git remote get-url --push --all origin",
+      "count": 1,
+      "classification": "setting-or-example",
+      "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
+    },
+    {
+      "code": "git rev-list --count S0..HEAD",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git rm --cached",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git show HEAD:./<パス> \\| python3 {create-task の}scripts/candidate-keys.py --check --source=<S> -",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git status",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git status --porcelain=v1 -z --untracked-files=all",
+      "count": 4,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git switch --no-track -c <作業ブランチ>",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git symbolic-ref --quiet HEAD",
+      "count": 2,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git write-tree",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "index の tree を控える読取操作。実行時は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/discover-<発見元>-msg.md",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    }
+  ]
+}

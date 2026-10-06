@@ -181,11 +181,11 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 `--discover` のときは、下の 1〜3 の代わりに、references/discover-mode.md §7・§8 の照合 → push → PR(push 先に結び付けた `-R` つき)で行う。PR 本文・結末を `縮退` にする条件も同 §8。
 
-1. `git push -u origin {ブランチ名}`(無人のタスクの周は下の分岐)
-2. `gh pr create --base {デフォルトブランチ} --title "{タスク名}" --body-file -` で、本文を stdin から渡して **通常の PR を開く**(draft にしない。レビュアー・アサインは付けない)。
+1. push 先を origin の判定から固定し、保持したレビュー済み SHA を `publish-guard.py` へ渡す。対話は `--set-upstream` を付け、exact-SHA push と remote SHA 照合の後にだけ既存の `-u` 相当の追跡設定を記録する。
+2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin へ渡す。
+   作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で repository/head/base/SHA を照合してから成功にする(draft にしない。レビュアー・アサインは付けない)。
    - 本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。
-   - 無人の周では、`--body-file - < .claude/reviews/<名>` の入力リダイレクトを使う。入力は reviews 下の非 symlink の通常ファイル 1 件だけにする。
-   - 本文の渡し方は対話でも無人でも同じ(`-R` は無人だけ — 下の分岐)
+   - helper は reviews 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
 3. PR 本文には次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
@@ -202,8 +202,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 **無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7):
 - PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→
 - push の直前の照合 →
-- `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` →
-- `gh pr create -R '<repo>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タスク名>' --body-file - < .claude/reviews/<名>`(`<repo>` は origin の判定の `repo`)
+- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<守る値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。helper は exact SHA refspec の push、remote SHA、作成した PR の URL/番号/head/base を順に照合する。無人では `--set-upstream` を付けない
 
 **push・PR をしないとき**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(サイレントスキップ禁止)。
 - `--no-pr` のときも同様にコマンド列だけ示す。
@@ -262,3 +261,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 発見ループ: `scripts/loop.sh --discover` が、周ごとに `--discover=<発見元> --unattended` を呼ぶ(契約は references/discover-mode.md と loop.md の発見モード)。
   - 発見元は /data-audit と /create-task --refactor の候補モード(`--candidates`)。
   - merge された `候補_` の採用は `/create-task <候補_ のパス>` で行い、その後の実装は `--task=<進行中_ のパス>` で回す
+
+## Git の共通安全前置き
+
+対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は base-commit.md の safe Git 前置きを付ける。品質確認は hook に依存させない。filter の例外は base-commit.md の precheck が許したものだけを明示無効化する。公開はこの規則に加えて publish-guard.py を通す。

@@ -31,6 +31,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 import time
 
@@ -59,9 +60,16 @@ SAFE_GIT_CONFIGS = {
     "core.splitIndex=false", "core.filemode=true", "core.symlinks=true", "core.ignoreStat=false",
     "diff.autoRefreshIndex=false", "core.autocrlf=false", "core.eol=lf", "apply.whitespace=nowarn",
     "core.sparseCheckout=false", "core.sparseCheckoutCone=false", "filter.lfs.smudge=", "filter.lfs.clean=",
-    "filter.lfs.process=", "filter.lfs.required=false",
+    "filter.lfs.process=", "filter.lfs.required=false", "commit.gpgSign=false", "push.gpgSign=false",
 }
 SAFE_GIT_GLOBALS = {"--no-pager", "--no-replace-objects", "--literal-pathspecs", "--no-literal-pathspecs"}
+SAFE_PUSH_PREFIX = (
+    "--no-pager", "--no-replace-objects",
+    "-c", "core.quotePath=false", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+    "-c", "core.ignoreCase=false", "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+    "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false", "-c", "filter.lfs.smudge=",
+    "-c", "filter.lfs.clean=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+)
 GIT_READ_COMMANDS = {
     "blame", "branch", "cat-file", "check-attr", "check-ignore", "check-ref-format", "describe", "diff",
     "diff-tree", "for-each-ref", "grep", "log", "ls-files", "ls-tree", "merge-base", "name-rev", "reflog",
@@ -130,6 +138,7 @@ def is_protected(rel: str) -> bool:
 
 class Ctx:
     def __init__(self, env: dict, cwd: str):
+        self.env = env
         self.wt = os.path.realpath(env["worktree"])
         self.pr = os.path.realpath(env["plugin_root"])
         self.cwd = cwd
@@ -811,7 +820,6 @@ def git_source_pathspec_safe(ctx: Ctx, loc: str) -> bool:
         # Git 自身が失敗し、directory pathspec の展開は起きないため従来の parser 契約を保つ。
         return True
     try:
-        import subprocess
         git_env = dict(os.environ)
         git_env["GIT_NO_LAZY_FETCH"] = "1"
         git_prefix = [
@@ -1098,8 +1106,27 @@ def check_git(ctx: Ctx, args: list[Word]) -> None:
             review_input(ctx, rest[1])
             return
         if subcommand == "push":
-            if any(word.text in ("-u", "--set-upstream", "--force", "-f") for word in rest):
-                raise other("Git push の追跡/強制 option を受け付けない")
+            # 親が worktree の外で固定した宛先だけを、完全な refspec で送る。子の
+            # 任意の設定注入を避けるため global options もこの safe prefix に一致する。
+            repo = ctx.env.get("DEV_WORKFLOW_LOOP_PUSH_REPO", "")
+            ref = ctx.env.get("DEV_WORKFLOW_LOOP_PUSH_REF", "")
+            prefix = tuple(word.text for word in args[:i])
+            if not repo or not ref.startswith("refs/heads/") or not task_branch_safe(ref.removeprefix("refs/heads/")):
+                raise other("Git push の親が固定した送信先が無い")
+            origin_script = os.path.join(ctx.pr, "skills", "ship-task", "scripts", "origin-repo.py")
+            try:
+                checked = subprocess.run([sys.executable, "-B", origin_script, "--dir", ctx.wt], stdin=subprocess.DEVNULL,
+                                         capture_output=True, text=True, timeout=10, check=False)
+                origin = json.loads(checked.stdout) if checked.returncode == 0 else {}
+            except (OSError, subprocess.TimeoutExpired, ValueError):
+                origin = {}
+            if not (origin.get("origin") is True and origin.get("same") is True and origin.get("vcs") is False
+                    and origin.get("repo") == repo):
+                raise other("Git push の現在の origin が親の固定リポジトリと一致しない")
+            expected = ("--no-follow-tags", "--recurse-submodules=no", "origin",
+                        f"refs/heads/{ref.removeprefix('refs/heads/')}:{ref}")
+            if prefix != SAFE_PUSH_PREFIX or tuple(word.text for word in rest) != expected:
+                raise other("Git push は親が固定した safe prefix・origin・完全 refspec だけ")
             return
         raise other(f"Git の subcommand を受け付けない: {subcommand}")
     finally:
@@ -1557,6 +1584,10 @@ def load_env() -> dict | None:
     if not isinstance(allow, list) or not all(isinstance(r, dict) for r in allow):
         return None
     env["allow"] = allow
+    # 親が worktree 外で固定した公開方針。通常の Git 操作には不要なので空も許すが、
+    # push の grammar は両方が無ければ閉じる。
+    env["DEV_WORKFLOW_LOOP_PUSH_REPO"] = os.environ.get("DEV_WORKFLOW_LOOP_PUSH_REPO", "")
+    env["DEV_WORKFLOW_LOOP_PUSH_REF"] = os.environ.get("DEV_WORKFLOW_LOOP_PUSH_REF", "")
     return env
 
 

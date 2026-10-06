@@ -145,6 +145,47 @@ STUBBIN="$W/stubbin"
 ALTBIN="$W/altbin"
 mkdir -p "$STUBBIN" "$ALTBIN" "$W/unamebin" "$W/failsleepbin" "$W/noyaml"
 
+# publish-guard の公開後照合だけを通す gh。本文は stdin で受け、作成と REST 照合の argv を記録する。
+DP_GH="$W/docpush-gh"
+mkdir -p "$DP_GH"
+cat >"$DP_GH/gh" <<'STUB'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"${SELFTEST_REC:?}/docpush-gh.log"
+case "${1:-} ${2:-}" in
+  'pr create')
+    body="$(cat)"
+    [ "$body" = 'review fixture' ] || exit 64
+    printf '%s\n' 'https://github.com/o/r/pull/42'
+    ;;
+  'api --hostname')
+    [ "${3:-}" = github.com ] || exit 64
+    [ "${4:-}" = repos/o/r/pulls/42 ] || exit 64
+    printf '%s\n' '{"html_url":"https://github.com/o/r/pull/42","number":42,"head":{"ref":"task/docpush-a","sha":"'"${SELFTEST_HELD_SHA:?}"'","repo":{"full_name":"o/r","owner":{"login":"o"}}},"base":{"ref":"main","repo":{"full_name":"o/r"}}}'
+    ;;
+  *) exit 64 ;;
+esac
+STUB
+chmod +x "$DP_GH/gh"
+
+# origin-repo.py には canonical HTTPS のまま読ませる。公開 helper と loop.sh が実際に打つ
+# push / ls-remote だけを scratch bare remote へ写し、network 実行を伴う通常経路を保つ。
+DP_GIT="$W/docpush-git"
+mkdir -p "$DP_GIT"
+cat >"$DP_GIT/git" <<'STUB'
+#!/usr/bin/env bash
+set -eu
+network=0
+for arg in "$@"; do
+  case "$arg" in push|ls-remote) network=1 ;; esac
+done
+if [ "$network" = 1 ]; then
+  exec "${SELFTEST_REAL_GIT:?}" -c "url.sshstub:${SELFTEST_PUBLISH_BARE:?}.insteadOf=https://github.com/o/r.git" "$@"
+fi
+exec "${SELFTEST_REAL_GIT:?}" "$@"
+STUB
+chmod +x "$DP_GIT/git"
+
 # スタブの --help(雛形のフラグと別名をすべて載せる。形は実物の --help を模す)
 cat >"$W/help.txt" <<'EOF'
 Usage: claude [options] [command] [prompt]
@@ -490,9 +531,14 @@ case "$beh" in
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人の周の結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人の周の結果: PR — x" ;;
   pushu) branch; done_commit; pushu; result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
-  docpush) # 文書の無人の push(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を打つ。周の中の branch.autoSetupRebase を控える
+  docpush) # 文書の無人公開 helper(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を gh stub まで打つ。
            branch; done_commit; git config --get branch.autoSetupRebase >"$REC/asr-$name" 2>&3
-           eval "${SELFTEST_PUSH_CMD:?}" >&3 2>&3; g gc -q
+           mkdir -p .claude/reviews; printf 'review fixture\n' >.claude/reviews/docpush-body.md
+           SELFTEST_BRANCH="task/$name" SELFTEST_HELD_SHA="$(git rev-parse HEAD)"
+           SELFTEST_CONFIG_DIGEST="$(python3 "${DEV_WORKFLOW_LOOP_PLUGIN_ROOT:?}/skills/ship-task/scripts/git-config-digest.py" --dir="$PWD")"
+           export SELFTEST_BRANCH SELFTEST_HELD_SHA SELFTEST_CONFIG_DIGEST
+           if ! eval "${SELFTEST_PUSH_CMD:?}" >&3 2>&3; then exit 3; fi
+           g gc -q
            result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
   cfgreorder) branch; done_commit
               python3 - "$common/config" <<'PY'
@@ -570,6 +616,7 @@ cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/cr
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
 cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
 cp "$SCRIPT_DIR/git-config-digest.py" "$PLUG/skills/ship-task/scripts/git-config-digest.py"   # 在ることを起動時に確かめる(両方のモード。loop.md §2 の 4)
+cp "$SCRIPT_DIR/publish-guard.py" "$PLUG/skills/ship-task/scripts/publish-guard.py"
 LOOP="$PLUG/skills/ship-task/scripts/loop.sh"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUG/.claude-plugin/plugin.json")"
 
@@ -684,24 +731,35 @@ locked_reason_of() { # $1=相対パス → その理由で locked の worktree �
 }
 wt_count() { git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -c '^worktree '; }
 COMMON_ARGS=(--kill-grace 2 --net-timeout 10)
-# doc_push_cmd <作業ブランチ> → 「OK <コマンド>」か「NG <理由>」。ship-task/SKILL.md の無人の push の字面(照合つき)から
-# `&& ` より後ろの git push を取り出し、<作業ブランチ> を置き換える。取り出しは UW_CMDS と同じ(バッククォートの中・
-# ちょうど 1 種類)。ハードコードしない(-B で __pycache__ を作らない)
+# doc_push_cmd → 「OK <コマンド>」か「NG <理由>」。ship-task/SKILL.md の無人公開 helper の字面を
+# 取り出し、scratch の保持 SHA・設定 digest・ブランチへ置き換える。helper 自身を gh stub まで実行する。
+# 取り出しは UW_CMDS と同じ(バッククォートの中・ちょうど 1 種類)。ハードコードしない(-B で __pycache__ を作らない)
 doc_push_cmd() {
-  python3 -B - "$PLUGIN_SRC/skills/ship-task/SKILL.md" "$1" <<'PY' 2>&1
+  python3 -B - "$PLUGIN_SRC/skills/ship-task/SKILL.md" "$PLUG/skills/ship-task/" <<'PY' 2>&1
 import re, sys
-path, branch = sys.argv[1], sys.argv[2]
-digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
+path, skill_dir = sys.argv[1], sys.argv[2]
 try:
     text = open(path, encoding="utf-8").read()
 except OSError as exc:
     print("NG SKILL.md を読めない: %s" % exc)
     sys.exit(0)
-hits = sorted(set(re.findall("`(" + digest + r"git push [^`]+)`", text)))
+hits = sorted(set(re.findall(r"`(python3 \{ship-task の\}scripts/publish-guard\.py [^`]+)`", text)))
 if len(hits) != 1:
     print("NG 字面がちょうど 1 種類でない(%d 種類)" % len(hits))
     sys.exit(0)
-cmd = hits[0].split("&& ", 1)[1].replace("<作業ブランチ>", branch)
+cmd = hits[0].replace("{ship-task の}", skill_dir)
+subs = {
+    "<管理ルート>": '"$PWD"',
+    "<保持したレビュー済み SHA>": '"$SELFTEST_HELD_SHA"',
+    "<作業ブランチ>": '"$SELFTEST_BRANCH"',
+    "<repo>": "github.com/o/r",
+    "<デフォルトブランチ>": "main",
+    "<守る値>": '"$SELFTEST_CONFIG_DIGEST"',
+    "<名>": "docpush-body.md",
+    "<タスク名>": "docpush",
+}
+for old, new in subs.items():
+    cmd = cmd.replace(old, new)
 left = re.findall(r"<[^<>\s]+>|\{[^{}]*\}", cmd)
 if left:
     print("NG 置き換えられないプレースホルダ: %s" % " ".join(left))
@@ -1760,26 +1818,31 @@ check "正常な周で止まらない: push と gc を打っても次の周へ�
 check "正常な周で止まらない: PR → PR → 保留" "pr-a pr-b hold-c" "$(calls)"
 has "正常な周で止まらない: キューが空で終わる" "$OUT" "止まった理由: キューが空"
 check "正常な周: 共有の config に branch.task/pr-a.* が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/pr-a\.' 2>/dev/null)"
-# 文書の無人の push(SKILL.md の字面の `&& ` より後ろ)を、利用者の設定の branch.autoSetupRebase = always のもとで打つ周:
+# 文書の無人公開 helper(SKILL.md の字面)を、利用者の設定の branch.autoSetupRebase = always のもとで打つ周:
 # 共有の config に branch.* を書かず、照合に通って次の周へ進む。設定はこの周だけ GIT_CONFIG_SYSTEM で渡す(治具の
 # identity・init.defaultBranch・gc.auto は global の $W/gitconfig にしか無いので GIT_CONFIG_GLOBAL は差し替えない。
 # 共有の $W/gitconfig は書き換えない)
-DP_CMD="$(doc_push_cmd task/docpush-a)"
+DP_CMD="$(doc_push_cmd)"
 case "$DP_CMD" in
   "OK "*)
     DP_CMD="${DP_CMD#OK }"
     printf '[branch]\n\tautoSetupRebase = always\n' >"$W/gitconfig-system-asr"
     newrepo docpush
+    # origin-repo.py には公開先を GitHub として読ませ、Git の送信だけ scratch bare remote へ差し替える。
+    # helper が exact-SHA push と gh の作成後 REST 照合を実行する対照になる。
+    G -C "$R" remote set-url origin https://github.com/o/r.git
     addtask docpush-a 2026-01-01; addtask pr-b 2026-01-02
     commit
     newrec docpush
     DP_BEFORE="$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
-    run_loop docpush "GIT_CONFIG_SYSTEM=$W/gitconfig-system-asr" "SELFTEST_PUSH_CMD=$DP_CMD" -- --repo "$R" "${COMMON_ARGS[@]}"
+    run_loop docpush "PATH=$DP_GIT:$DP_GH:$STUBBIN:$SAFEBIN" "GIT_CONFIG_SYSTEM=$W/gitconfig-system-asr" "SELFTEST_REAL_GIT=$SAFEBIN/git" "SELFTEST_PUBLISH_BARE=$B" "SELFTEST_PUSH_CMD=$DP_CMD" -- --repo "$R" "${COMMON_ARGS[@]}"
     check "文書の push(autoSetupRebase = always): 周の中で設定が効いている(前提)" always "$(cat "$REC/asr-docpush-a" 2>/dev/null)"
     check "文書の push(autoSetupRebase = always): 照合に通り、キューが空で終わる" 0 "$RC"
     check "文書の push(autoSetupRebase = always): 次の周へ進む" "docpush-a pr-b" "$(calls)"
     has "文書の push(autoSetupRebase = always): 判定は正常(PR)" "$OUT" "docs/tasks/進行中_docpush-a.md → 正常(PR)"
     t "文書の push(autoSetupRebase = always): origin に作業ブランチがある" git -C "$B" rev-parse --verify -q refs/heads/task/docpush-a
+    has "文書の push(autoSetupRebase = always): helper が gh で PR を作る" "$REC/docpush-gh.log" 'pr create -R github.com/o/r --base main --head task/docpush-a'
+    has "文書の push(autoSetupRebase = always): helper が作成後 REST を照合する" "$REC/docpush-gh.log" 'api --hostname github.com repos/o/r/pulls/42'
     check "文書の push(autoSetupRebase = always): 共有の config の branch.* が増えない" "$DP_BEFORE" \
       "$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
     ;;
@@ -2377,7 +2440,7 @@ def one(path, pattern):
         return None, "%s の字面がちょうど 1 種類でない(%d 種類)" % (name, len(hits))
     return hits[0], None
 st, e1 = one(sys.argv[1], r"`(git --no-literal-pathspecs status [^`]+)`")
-pre, e2 = one(sys.argv[2], r"`(git --no-pager --no-replace-objects [^`]*-c core\.ignoreCase=false)`")
+pre, e2 = one(sys.argv[2], r"`(git --no-pager --no-replace-objects [^`]*-c filter\.lfs\.required=false)`")
 if e1 or e2:
     print("NG " + " / ".join(e for e in (e1, e2) if e))
 else:
@@ -2395,33 +2458,39 @@ case "$SF_CMD" in
     ;;
   *) ng "状態ファイルを外す git status: do-task/SKILL.md と base-commit.md から字面を取り出す(${SF_CMD#NG })" ;;
 esac
-# 無人の周の git・gh の字面(#133 の D1・D2・D4・D6): ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
+# 無人の周の git・公開 helper の字面: ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
 # hook に掛ける字面は文書から取り出す(ハードコードしない。-B で __pycache__ を作らない)。文書ごとにちょうど 1 種類を求め、
 # 取り出せなければ FAIL にする。python3 の呼び出しは、許可リストに python3 を足して掛ける(推奨の列は python3 を含む — loop.md §4)。
-# 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)で、
-# SKILL.md と discover-mode.md で同じであることも照らす
+# 公開は direct push ではなく helper に集約する。無人の helper は --set-upstream を受けず、保持 SHA・固定 repo/base・
+# 設定 digest・reviews 内の本文を必ず渡す。helper の実行と gh の作成後 REST 照合は上の docpush 対照で行う。
 printf 'review fixture\n' >"$PW/.claude/reviews/m.md"
 printf 'discover commit fixture\n' >"$PW/.claude/reviews/discover-data-audit-msg.md"
-UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
+# 文書から取り出す helper は loop が渡す plugin root に置く。任意の外部 Python ではないことも同時に検査する。
+PPR="$PLUG"
+UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PLUG/skills/ship-task/" "$PW" <<'PY' 2>&1
 import re, sys
 root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
 digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
-push_d1 = ("python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && "
-           "git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'")
-pushes = {}
+publish = r"python3 \{ship-task の\}scripts/publish-guard\.py [^`]+"
 items = [
-    ("無人の push", "SKILL.md", digest + r"git push [^`]+"),
-    ("無人の push", "references/discover-mode.md", digest + r"git push [^`]+"),
+    ("無人の公開 helper", "SKILL.md", publish),
     ("無人のブランチ作成", "SKILL.md", r"git switch --no-track -c [^`]+"),
     ("無人のブランチ作成", "references/discover-mode.md", r"git switch --no-track -c [^`]+"),
     ("照合つきの commit", "references/unattended-mode.md", digest + r"git commit [^`]+"),
     ("照合つきの commit", "references/discover-mode.md", digest + r"git commit [^`]+"),
     ("PR の作成先の確かめ", "SKILL.md", r"gh repo view [^`]+"),
-    ("PR の作成", "SKILL.md", r"gh pr create -R [^`]+"),
 ]
 subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<守る値>", "sha256:" + "0123456789abcdef" * 4),
+        ("<保持したレビュー済み SHA>", "0123456789abcdef" * 4),
         ("<repo>", "github.com/o/r"), ("<デフォルトブランチ>", "main"), ("<タスク名>", "日本語のタスク"),
         ("<名>", "m.md"), ("<発見元>", "data-audit")]
+discover = open(root + "/references/discover-mode.md", encoding="utf-8").read()
+discover_required = ("unattended-mode.md §7 の「push の直前」と同じ", "publish-guard.py",
+                     "保持したレビュー済み完全 SHA", "push_url_sha256", "--push-only", "`-u` は使わず")
+if all(value in discover for value in discover_required):
+    print("YES\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t-")
+else:
+    print("NG\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t必要な契約語が無い")
 for label, rel, pat in items:
     name = rel.rsplit("/", 1)[-1]
     try:
@@ -2434,13 +2503,14 @@ for label, rel, pat in items:
         print("NG\t%s(%s)を文書から取り出す\t字面がちょうど 1 種類でない(%d 種類)" % (label, name, len(hits)))
         continue
     tmpl = hits[0]
-    if label == "無人の push":
-        pushes[name] = tmpl
-        d1_tag = "無人の push(%s)が D1 の字面(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)" % name
-        if tmpl == push_d1:
-            print("YES\t%s\t-" % d1_tag)
+    if label == "無人の公開 helper":
+        required = ("--sha=<保持したレビュー済み SHA>", "--branch=<作業ブランチ>", "--repo=<repo>",
+                    "--base=<デフォルトブランチ>", "--config-digest=<守る値>", "--body-file=.claude/reviews/<名>")
+        tag = "無人の公開 helper(%s)が保持 SHA・固定 repo/base・digest・reviews 本文を渡し -u を付けない" % name
+        if all(value in tmpl for value in required) and "--set-upstream" not in tmpl:
+            print("YES\t%s\t-" % tag)
         else:
-            print("NG\t%s\t字面が違う: %s" % (d1_tag, tmpl))
+            print("NG\t%s\t字面が違う: %s" % (tag, tmpl))
     for k, v in subs:
         tmpl = tmpl.replace(k, v)
     for b in (["task/x", "task/日本語"] if "<作業ブランチ>" in tmpl else [None]):
@@ -2453,13 +2523,6 @@ for label, rel, pat in items:
             print("NG\t%sを置き換える\t字面にタブか改行がある" % tag)
         else:
             print("OK\t%s\t%s" % (tag, cmd))
-same_tag = "無人の push の字面が SKILL.md と discover-mode.md で同じ"
-if len(pushes) != 2:
-    print("NG\t%s\t両方の文書から取り出せない(%d 文書)" % (same_tag, len(pushes)))
-elif pushes["SKILL.md"] == pushes["discover-mode.md"]:
-    print("YES\t%s\t-" % same_tag)
-else:
-    print("NG\t%s\t字面が違う" % same_tag)
 PY
 )"
 UW_PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind": "prefix", "words": ["python3"]}); print(json.dumps(a))')"
@@ -2487,6 +2550,7 @@ if [ -n "$UW_CTRL" ]; then
 else
   ng "無人の周の字面: 掛け方の対照(python3 で始まる字面を取り出せない)"
 fi
+PPR=""
 pa "Bash の mkdir .claude/reviews/sub" Bash "$(bash_in 'mkdir .claude/reviews/sub')"
 pa "Bash の git status --short > .claude/reviews/st.txt(git が許可リストにある)" Bash "$(bash_in 'git status --short > .claude/reviews/st.txt')"
 pa "Bash の rm -f .claude/grasp.md" Bash "$(bash_in 'rm -f .claude/grasp.md')"
