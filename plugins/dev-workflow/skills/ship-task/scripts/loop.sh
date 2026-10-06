@@ -71,6 +71,7 @@ DEF_SHA=""
 STOP_MARK=""
 INFLIGHT=""
 LAST_VERIFIED=""
+FRESH_CONFIG_BASELINE=0 # 正常完走した別実行間の config link は新しい基準として受け直す
 SEL_WT=""         # 選定中の worktree(周を起動する前。終わるときに消す)
 SEL_TASK_DIR=""
 TASK_DIR=""
@@ -963,15 +964,18 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
   if [ "$3" != 1 ]; then rm -rf -- "$INFLIGHT"; fi
 }
 
-take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -)
-  local own=()
+take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか
+  local own=() prior=() fresh=()
   [ -z "$ITER_WT" ] || own=(--exclude-worktree "$ITER_WT")
+  [ -z "${3:-}" ] || prior=(--secret-patterns-from "$3")
+  [ "${4:-0}" != 1 ] || fresh=(--fresh-config-baseline)
   "$PY_ABS" "$LOOP_STATE_PY" snapshot --out "$1" --top "$TOP" --common "$COMMON" --repo-admin "$REPO_GIT_DIR" --wt-admin "$2" "${own[@]}" \
+    "${prior[@]}" "${fresh[@]}" \
     --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"
 }
 
 save_last_verified() { # 最後に照合に通った状態(照合に通ったときだけ更新する)
-  take_snapshot "$LAST_VERIFIED" -
+  take_snapshot "$LAST_VERIFIED" - "${1:-${ITER_BASE:-}}"
 }
 
 marked_pids() { # $1=周の識別子 $2=プロセスグループ(無ければ -)
@@ -1027,7 +1031,7 @@ verify_iteration() {
     VERIFY_DIFF="差分: 比べる元($ITER_BASE)が周の起動の直前に取ったものと違う(書き換えられた)"
     return 0
   fi
-  if ! take_snapshot "$cur" "$ITER_WTADMIN"; then
+  if ! take_snapshot "$cur" "$ITER_WTADMIN" "$ITER_BASE"; then
     VERIFY_DIFF="差分: 今の状態を控えられない(照合できない)"
     return 0
   fi
@@ -1419,7 +1423,7 @@ handle_marks_at_start() {
     fi
     # 2. 印に残した周の起動の直前の状態と、周の後の照合と同じ規則で比べる + D8
     cur="$RUN_DIR/inflight-now.json"
-    take_snapshot "$cur" "$INF_WTADMIN"
+    take_snapshot "$cur" "$INF_WTADMIN" "$INFLIGHT/base.json"
     rc=0
     out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$INFLIGHT/base.json" --after "$cur" --self-worktree "$INF_WT" --self-ref "refs/heads/task/$INF_NAME" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
@@ -1435,9 +1439,10 @@ handle_marks_at_start() {
       rep "- 前の実行の周 $INF_ITER の照合で差分:" "$diff"
       die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
     fi
-    # 3. 差分が無ければ、周の途中の印を消し、最後に照合に通った状態を更新して続ける
+    # 3. 差分が無ければ、最後に照合に通った状態を更新してから周の途中の印を消す。
+    # base.json は累積 secret_paths の基準でもあるため、先に消してはならない。
+    save_last_verified "$INFLIGHT/base.json"
     rm -rf -- "$INFLIGHT"
-    save_last_verified
     STARTUP_NOTES+=("前の実行の周 $INF_ITER が途中で終わっていた。残りのプロセスを止め、照合に通った(worktree ${INF_WT:-?} は残っている)")
     if [ "$INF_MODE" = discover ]; then
       STARTUP_NOTES+=("前の実行の周 $INF_ITER は発見モードの周(発見元 ${INF_SOURCE:-?}・ブランチ task/$INF_NAME)。残った worktree と今夜の名のブランチで、その発見元は読み飛ばす")
@@ -1449,7 +1454,8 @@ handle_marks_at_start() {
   # (実行と実行の間の変化は人の操作でもありうるため)
   if [ -f "$LAST_VERIFIED" ]; then
     cur="$RUN_DIR/start-now.json"
-    take_snapshot "$cur" -
+    take_snapshot "$cur" - "$LAST_VERIFIED" 1
+    FRESH_CONFIG_BASELINE=1
     rc=0
     out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$LAST_VERIFIED" --after "$cur" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
@@ -2165,7 +2171,14 @@ source=$ITER_SOURCE
   ITER_PERMLOG="$RUN_DIR/iter-$ITER_SEQ.permlog"   # 許可の仲介の判定の記録(D22 ③。hook が 1 行ずつ足す)
   # 8. 共有の git ディレクトリの状態を控える(周の後の照合の比べる元。周ごとに取り直す)
   ITER_BASE="$RUN_DIR/iter-$ITER_SEQ.base.json"
-  take_snapshot "$ITER_BASE" "$ITER_WTADMIN"
+  # 初回には保存済み state は無い。存在した周だけ、開始時からの
+  # secret_paths の和を引き継ぐ(初回に未作成パスを補助へ渡さない)。
+  if [ -f "$LAST_VERIFIED" ]; then
+    take_snapshot "$ITER_BASE" "$ITER_WTADMIN" "$LAST_VERIFIED" "$FRESH_CONFIG_BASELINE"
+  else
+    take_snapshot "$ITER_BASE" "$ITER_WTADMIN"
+  fi
+  FRESH_CONFIG_BASELINE=0
   # 比べる元の sha256 をシェルの変数に持つ(周の中で状態ディレクトリのファイルを書き換えられても気づく)
   ITER_BASE_SHA="$(sha256sum <"$ITER_BASE" | cut -d' ' -f1)"
   # 周の途中の印(周の起動の直前に置く)

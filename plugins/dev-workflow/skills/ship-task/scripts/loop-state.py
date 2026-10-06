@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-SCHEMA = 3
+SCHEMA = 4
 DEFAULT_SECRET_PATHS = (".env", ".env.*", ".dev.vars")
 
 
@@ -71,6 +71,12 @@ def meta(st: os.stat_result) -> dict[str, Any]:
 def same(a: os.stat_result, b: os.stat_result) -> bool:
     return (a.st_dev, a.st_ino, a.st_mode, a.st_size, a.st_mtime_ns, a.st_ctime_ns) == (
         b.st_dev, b.st_ino, b.st_mode, b.st_size, b.st_mtime_ns, b.st_ctime_ns)
+
+
+def same_inode(a: os.stat_result, expected: dict[str, Any]) -> bool:
+    """Identity check that permits a held regular target's content to change."""
+    return (a.st_dev, a.st_ino, stat.S_IMODE(a.st_mode)) == (
+        expected.get("dev"), expected.get("ino"), expected.get("mode"))
 
 
 def safe_hash(path: str, before: os.stat_result, budget: Budget) -> str:
@@ -322,13 +328,15 @@ def tree(root: str, patterns: list[str], budget: Budget) -> list[dict[str, Any]]
     return result
 
 
-def run_git(top: str, *args: str, budget: Budget | None = None) -> bytes:
+def run_git(top: str, *args: str, budget: Budget | None = None,
+            allow_failure: bool = False, pass_fds: tuple[int, ...] = (),
+            return_status: bool = False) -> bytes | tuple[int, bytes]:
     proc: subprocess.Popen[bytes] | None = None
     try:
         proc = subprocess.Popen(["git", "-C", top, "--no-pager", "--no-replace-objects",
                                  "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", *args],
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                env={**os.environ, "GIT_NO_LAZY_FETCH": "1"})
+                                env={**os.environ, "GIT_NO_LAZY_FETCH": "1"}, pass_fds=pass_fds)
         assert proc.stdout is not None
         deadline = time.monotonic() + 10
         if budget: deadline = min(deadline, budget.deadline)
@@ -355,9 +363,10 @@ def run_git(top: str, *args: str, budget: Budget | None = None) -> bytes:
             rc = proc.wait(timeout=max(0.01, deadline - time.monotonic()))
         except subprocess.TimeoutExpired as exc:
             raise Stop("git の状態読取が時間内に終わらない") from exc
-        if rc:
+        if rc and not allow_failure:
             raise Stop("git の状態読取に失敗した")
-        return bytes(output)
+        result = bytes(output)
+        return (rc, result) if return_status else result
     except OSError as exc:
         raise Stop("git の状態読取に失敗した") from exc
     except Stop:
@@ -447,24 +456,339 @@ def worktrees(top: str, budget: Budget) -> list[dict[str, str]]:
     return sorted(records, key=lambda x: x["worktree"])
 
 
-def config_snapshot(top: str, common: str, budget: Budget) -> dict[str, Any]:
-    # Git resolves include/includeIf.  The origin list is then observed as files so a
-    # missing, cyclic, unreadable, FIFO, or symlink-structure change cannot pass.
-    raw = run_git(top, "config", "--show-origin", "--show-scope", "--includes", "--null", "--list", budget=budget)
-    origins: set[str] = set()
+def config_rows(raw: bytes) -> list[tuple[str, str | None]]:
+    rows: list[tuple[str, str | None]] = []
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        key, sep, value = record.partition(b"\n")
+        rows.append((key.decode("utf-8", "surrogateescape"),
+                     value.decode("utf-8", "surrogateescape") if sep else None))
+    return rows
+
+
+def config_origins(raw: bytes, top: str) -> list[str]:
+    """Return file origins in Git's order without asking it to follow includes."""
+    result: list[str] = []
     for part in raw.split(b"\0"):
-        if part.startswith(b"file:"):
-            origin = part.decode("utf-8", "surrogateescape").split("\t", 1)[0][5:]
-            if not os.path.isabs(origin):
-                origin = os.path.normpath(os.path.join(top, origin))
-            origins.add(origin)
-    origins.add(os.path.join(common, "config"))
-    observed = []
-    for path in sorted(origins):
-        if not os.path.lexists(path):
-            raise Stop("到達する config が無い")
-        observed.append(entry(path, "config:" + path, [], budget))
-    return {"effective_sha256": hashlib.sha256(raw).hexdigest(), "origins": observed}
+        if not part.startswith(b"file:"):
+            continue
+        origin = part.decode("utf-8", "surrogateescape").split("\t", 1)[0][5:]
+        # Keep `..` and other spelling intact.  open_dir_path() validates each
+        # component; normalizing here could turn symlink/../target into another
+        # object before that check.
+        if not os.path.isabs(origin):
+            origin = os.path.join(top, origin)
+        if origin not in result:
+            result.append(origin)
+    return result
+
+
+def read_open_regular(fd: int, before: os.stat_result, budget: Budget) -> bytes:
+    """Read a held regular fd with the same bounds as a pathname observation."""
+    if before.st_size > budget.one:
+        raise Stop("通常ファイル 1 件の読取量が上限を超えた")
+    try:
+        os.lseek(fd, 0, os.SEEK_SET)
+        blocks: list[bytes] = []; got = 0
+        while True:
+            block = os.read(fd, 65536)
+            if not block:
+                break
+            got += len(block); budget.read(len(block))
+            if got > budget.one:
+                raise Stop("通常ファイル 1 件の読取量が上限を超えた")
+            blocks.append(block)
+        if not same(before, os.fstat(fd)):
+            raise Stop("通常ファイルが読取中に変わった")
+        return b"".join(blocks)
+    except OSError as exc:
+        raise Stop("通常ファイルを読めない") from exc
+
+
+def open_regular_path(path: str, budget: Budget) -> tuple[int, os.stat_result]:
+    """Open one leaf through held parent fds, rejecting links and special files."""
+    parent_path, name = os.path.split(path)
+    parent = open_dir_path(parent_path)
+    try:
+        try:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except OSError as exc:
+            raise Stop("到達する config が無い") from exc
+        budget.tick()
+        if not stat.S_ISREG(before.st_mode):
+            raise Stop("到達する config が通常ファイルでない")
+        fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+        opened = os.fstat(fd)
+        if not same(before, opened):
+            os.close(fd)
+            raise Stop("config が lstat と open の間に変わった")
+        return fd, before
+    except OSError as exc:
+        raise Stop("到達する config を安全に開けない") from exc
+    finally:
+        os.close(parent)
+
+
+def safe_config_file(top: str, path: str, budget: Budget,
+                     trusted: dict[str, Any] | None = None) -> tuple[dict[str, Any], list[tuple[str, str | None]]]:
+    """Parse config through a held fd, accepting a trusted leaf link only once."""
+    parent_path, name = os.path.split(path)
+    parent = open_dir_path(parent_path)
+    fd = -1
+    try:
+        try:
+            before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        except OSError as exc:
+            raise Stop("到達する config が無い") from exc
+        budget.tick()
+        expected = trusted.get(path) if trusted is not None else None
+        if trusted is not None and expected is None:
+            # A prior state fixes the complete active config graph.  A new
+            # include must not be parsed merely because its parent was changed
+            # during a child run; a fresh completed-run baseline is the only
+            # point where a new origin becomes trusted.
+            raise Stop("config の新しい origin は基準が無いため開けない")
+        if expected is not None and (not isinstance(expected, dict) or expected.get("kind") not in ("file", "link")):
+            raise Stop("保存済み config の形式を読めない")
+        link_target: str | None = None
+        link_before: os.stat_result | None = None
+        if stat.S_ISREG(before.st_mode):
+            if expected is not None and expected.get("kind") != "file":
+                raise Stop("config の link 構造が基準から変わった")
+            fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | getattr(os, "O_NOFOLLOW", 0), dir_fd=parent)
+            target_before = before
+        elif stat.S_ISLNK(before.st_mode):
+            if expected is not None and (expected.get("kind") != "link" or expected.get("meta") != meta(before)):
+                raise Stop("config の link 構造が基準から変わった")
+            try:
+                link_target = os.readlink(name, dir_fd=parent)
+            except OSError as exc:
+                raise Stop("config の link を読めない") from exc
+            if expected is not None and expected.get("target") != link_target:
+                raise Stop("config の link 先が基準から変わった")
+            target_path = link_target if os.path.isabs(link_target) else os.path.join(parent_path, link_target)
+            fd, target_before = open_regular_path(target_path, budget)
+            if expected is not None:
+                target_expected = expected.get("target_entry")
+                if not isinstance(target_expected, dict) or not isinstance(target_expected.get("meta"), dict) or not same_inode(target_before, target_expected["meta"]):
+                    raise Stop("config の link 先の実体が基準から変わった")
+            link_before = before
+        else:
+            raise Stop("到達する config が通常ファイルでも link でもない")
+        opened = os.fstat(fd)
+        if not stat.S_ISREG(opened.st_mode) or not same(target_before, opened):
+            raise Stop("config が lstat と open の間に変わった")
+        raw = read_open_regular(fd, target_before, budget)
+        parsed = run_git(top, "config", "--file", f"/proc/self/fd/{fd}", "--no-includes", "--null", "--list",
+                         budget=budget, pass_fds=(fd,))
+        if not same(target_before, os.fstat(fd)):
+            raise Stop("config が Git の解析中に変わった")
+        target_entry = {"kind": "file", "meta": meta(target_before), "sha256": hashlib.sha256(raw).hexdigest()}
+        if link_before is not None:
+            now = os.stat(name, dir_fd=parent, follow_symlinks=False)
+            if not same(link_before, now) or os.readlink(name, dir_fd=parent) != link_target:
+                raise Stop("config の link が読取中に変わった")
+            observed = {"path": "config:" + path, "kind": "link", "meta": meta(link_before), "target": link_target,
+                        "target_entry": target_entry}
+        else:
+            observed = {"path": "config:" + path, **target_entry}
+        return observed, config_rows(parsed)
+    except OSError as exc:
+        raise Stop("到達する config を安全に開けない") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        os.close(parent)
+
+
+def config_quote(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\t", "\\t") + '"'
+
+
+def memory_file(name: str, raw: bytes) -> int:
+    try:
+        fd = os.memfd_create(name, 0)
+    except (AttributeError, OSError) as exc:
+        raise Stop("includeIf の安全な条件判定を作れない") from exc
+    try:
+        offset = 0
+        while offset < len(raw):
+            offset += os.write(fd, raw[offset:])
+        os.lseek(fd, 0, os.SEEK_SET)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def probe_condition(top: str, condition: str, origin: str,
+                    effective: list[tuple[str, str | None]], budget: Budget) -> bool:
+    """Let this Git evaluate one includeIf condition without opening its target."""
+    lower = condition.lower()
+    for prefix in ("gitdir/i:", "gitdir:"):
+        if lower.startswith(prefix) and condition[len(prefix):].startswith("./"):
+            condition = condition[:len(prefix)] + os.path.join(os.path.dirname(origin), condition[len(prefix) + 2:])
+            break
+    # hasconfig:remote.*.url must see the active remote URLs.  Do not emulate
+    # Git's pattern grammar; give those values to the same Git binary instead.
+    remote_lines: list[str] = []
+    for key, value in effective:
+        folded = key.lower()
+        if value is not None and folded.startswith("remote.") and folded.endswith(".url") and len(key) > len("remote..url"):
+            remote_lines.extend((f"[remote {config_quote(key[7:-4])}]", f"\turl = {config_quote(value)}"))
+    marker_fd = memory_file("loop-state-include-marker", b"[loop-state-probe]\n\tactive = yes\n")
+    try:
+        probe = "\n".join((*remote_lines,
+                              f"[includeIf {config_quote(condition)}]",
+                              f"\tpath = /proc/self/fd/{marker_fd}", "")).encode()
+        probe_fd = memory_file("loop-state-include-condition", probe)
+        try:
+            rc, out = run_git(top, "config", "--file", f"/proc/self/fd/{probe_fd}", "--includes", "--get",
+                              "loop-state-probe.active", budget=budget, allow_failure=True,
+                              pass_fds=(probe_fd, marker_fd), return_status=True)
+            if rc == 1:
+                return False
+            if rc != 0:
+                raise Stop("includeIf の条件を Git で判定できない")
+            return out.strip() == b"yes"
+        finally:
+            os.close(probe_fd)
+    finally:
+        os.close(marker_fd)
+
+
+def include_target(top: str, value: str | None, origin: str, budget: Budget) -> str:
+    if not value or "\0" in value:
+        raise Stop("include の path が不正である")
+    # Git owns ~(user) and %(prefix) semantics.  Feed the literal through its
+    # path converter on a held memfd; a still-unexpanded ~ is not a safe path.
+    fd = memory_file("loop-state-include-path", ("[loop-state-path]\n\tvalue = " + config_quote(value) + "\n").encode())
+    try:
+        raw = run_git(top, "config", "--file", f"/proc/self/fd/{fd}", "--no-includes", "--type=path", "--get",
+                      "loop-state-path.value", budget=budget, pass_fds=(fd,))
+    finally:
+        os.close(fd)
+    expanded = raw.decode("utf-8", "surrogateescape")
+    if expanded.endswith("\n"):
+        expanded = expanded[:-1]
+    if not expanded or expanded.startswith("~"):
+        raise Stop("include の path を Git と同じ規則で展開できない")
+    if os.path.isabs(expanded):
+        return expanded
+    return os.path.join(os.path.dirname(origin), expanded)
+
+
+def config_snapshot(top: str, common: str, budget: Budget,
+                    trusted: dict[str, Any] | None = None) -> dict[str, Any]:
+    # First ask Git only for its non-include source list.  Every include target
+    # is then opened through a held nofollow fd *before* the effective command
+    # below can follow it.
+    base = run_git(top, "config", "--show-origin", "--show-scope", "--no-includes", "--null", "--list", budget=budget)
+    roots = config_origins(base, top)
+    common_config = os.path.join(common, "config")
+    if common_config not in roots:
+        roots.append(common_config)
+    observed: list[dict[str, Any]] = []
+    effective: list[tuple[str, str | None]] = []
+    prepared: dict[str, tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]] = {}
+    registered: set[tuple[int, int]] = set()
+    done: set[tuple[int, int]] = set()
+    active: set[tuple[int, int]] = set()
+    pending: list[tuple[tuple[int, int], str, str, str | None]] = []
+    pending_seen: set[tuple[tuple[int, int], str, str | None]] = set()
+    edges: dict[tuple[int, int], set[tuple[int, int]]] = {}
+
+    def load(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]:
+        if path not in prepared:
+            item, rows = safe_config_file(top, path, budget, trusted)
+            prepared[path] = (item, rows, (item["meta"]["dev"], item["meta"]["ino"]))
+        return prepared[path]
+
+    def register(path: str) -> tuple[dict[str, Any], list[tuple[str, str | None]], tuple[int, int]]:
+        item, rows, identity = load(path)
+        if identity not in registered:
+            registered.add(identity); observed.append(item)
+            # The full value stream is retained for Git's hasconfig condition.
+            # include directives themselves are control flow, not values.
+            effective.extend((key, value) for key, value in rows
+                             if key.lower() != "include.path" and not key.lower().startswith("includeif."))
+        return item, rows, identity
+
+    def follow(parent: tuple[int, int], origin: str, value: str | None) -> None:
+        target = include_target(top, value, origin, budget)
+        _, _, child = register(target)
+        edges.setdefault(parent, set()).add(child)
+        non_hasconfig(target)
+
+    def non_hasconfig(path: str) -> None:
+        _, rows, identity = register(path)
+        if identity in done:
+            return
+        if identity in active:
+            raise Stop("include が循環している")
+        active.add(identity)
+        try:
+            for key, value in rows:
+                folded = key.lower()
+                if folded == "include.path":
+                    follow(identity, path, value)
+                elif folded.startswith("includeif.") and folded.endswith(".path"):
+                    condition = key[len("includeif."):-len(".path")]
+                    if condition.lower().startswith("hasconfig:"):
+                        marker = (identity, path, condition, value)
+                        if marker not in pending_seen:
+                            pending_seen.add(marker); pending.append(marker)
+                    elif probe_condition(top, condition, path, effective, budget):
+                        follow(identity, path, value)
+                    # A false non-hasconfig condition is deliberately not
+                    # opened.  Missing machine-specific inactive files are a
+                    # normal configuration state.
+            done.add(identity)
+        finally:
+            active.remove(identity)
+
+    # Git's hasconfig scans all normal source files, including a later local
+    # remote URL when a global file came first.  Register every root before any
+    # condition is tested, then collect the active non-hasconfig graph.
+    for root in roots:
+        register(root)
+    for root in roots:
+        non_hasconfig(root)
+    cursor = 0
+    while cursor < len(pending):
+        parent, origin, condition, value = pending[cursor]; cursor += 1
+        if probe_condition(top, condition, origin, effective, budget):
+            follow(parent, origin, value)
+    visited: set[tuple[int, int]] = set()
+    visiting: set[tuple[int, int]] = set()
+    def no_cycle(node: tuple[int, int]) -> None:
+        if node in visiting:
+            raise Stop("include が循環している")
+        if node in visited:
+            return
+        visiting.add(node)
+        for child in edges.get(node, ()):
+            no_cycle(child)
+        visiting.remove(node); visited.add(node)
+    for node in edges:
+        no_cycle(node)
+    # Preflight has established that every active target is a held regular file.
+    # Git may now calculate the normal effective configuration, including quoted
+    # paths and all of its own includeIf grammar.
+    raw = run_git(top, "config", "--show-origin", "--show-scope", "--includes", "--null", "--list", budget=budget)
+    actual = set(config_origins(raw, top))
+    checked = {item["path"][len("config:"):]: item for item in observed}
+    if not actual <= checked.keys():
+        raise Stop("include の到達先を事前に安全に検査できない")
+    # `--includes` runs only after the graph is complete.  Re-open each source
+    # through nofollow dirfds and require identical bytes/identity afterwards;
+    # a swap during either phase is comparison-impossible, never accepted.
+    for path in actual:
+        after, _ = safe_config_file(top, path, budget, trusted)
+        if after != checked[path]:
+            raise Stop("config が実効値の読取中に変わった")
+    return {"effective_sha256": hashlib.sha256(raw).hexdigest(), "origins": sorted(observed, key=lambda x: x["path"])}
 
 
 def profile_patterns(root: str, budget: Budget) -> list[str]:
@@ -516,13 +840,80 @@ def profile_patterns(root: str, budget: Budget) -> list[str]:
     except Exception as exc:
         raise Stop("secret_paths を安全に読めない") from exc
     paths = data.get("secret_paths", []) if isinstance(data, dict) else []
+    return canonical_secret_patterns(paths)
+
+
+def canonical_secret_patterns(paths: object) -> list[str]:
+    """Validate profile patterns and make their persisted union deterministic."""
     if not isinstance(paths, list) or not all(isinstance(p, str) and p for p in paths):
         raise Stop("secret_paths が文字列配列でない")
     for value in paths:
         if ("//" in value or not value.strip("/") or any(ord(ch) < 32 or ord(ch) == 127 for ch in value)
                 or any(ch in "'\"`$[]{}" for ch in value)):
             raise Stop("secret_paths に不正な glob がある")
-    return list(DEFAULT_SECRET_PATHS) + paths
+    return list(dict.fromkeys((*DEFAULT_SECRET_PATHS, *paths)))
+
+
+def prior_state(args: argparse.Namespace) -> dict[str, Any] | None:
+    if not args.secret_patterns_from:
+        return None
+    prior = read_state(args.secret_patterns_from, args.max_items, args.max_bytes,
+                       args.max_file_bytes, args.max_seconds)
+    if prior.get("schema") != SCHEMA:
+        raise Stop("前の状態が新しい必須欄を持たない")
+    return prior
+
+
+def prior_secret_patterns(prior: dict[str, Any] | None) -> dict[str, list[str]]:
+    """Load the prior safe union before any current worktree bytes are opened."""
+    if prior is None:
+        return {}
+    rows = prior.get("secret_patterns")
+    if not isinstance(rows, list):
+        raise Stop("前の secret_paths の状態が新しい必須欄を持たない")
+    found: dict[str, list[str]] = {}
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {"path", "patterns"} or not isinstance(row["path"], str):
+            raise Stop("前の secret_paths の状態を読めない")
+        if row["path"] in found:
+            raise Stop("前の secret_paths の状態が重複している")
+        # Stored values include the defaults.  Validate as a profile-shaped
+        # list by removing only the fixed prefix when it is present.
+        patterns = row["patterns"]
+        if not isinstance(patterns, list) or not all(isinstance(v, str) for v in patterns):
+            raise Stop("前の secret_paths の状態を読めない")
+        if not all(value in patterns for value in DEFAULT_SECRET_PATHS):
+            raise Stop("前の secret_paths の状態に既定値が無い")
+        canonical = canonical_secret_patterns([value for value in patterns if value not in DEFAULT_SECRET_PATHS])
+        if canonical != patterns:
+            raise Stop("前の secret_paths の状態が正規形でない")
+        found[row["path"]] = canonical
+    return found
+
+
+def trusted_config_origins(prior: dict[str, Any] | None, fresh: bool) -> dict[str, Any] | None:
+    """Use a prior run as link structure trust only inside one execution."""
+    if prior is None or fresh:
+        return None
+    blocks: list[object] = [prior.get("config")]
+    worktree_configs = prior.get("worktree_configs")
+    if not isinstance(worktree_configs, list):
+        raise Stop("前の config の状態を読めない")
+    blocks.extend(row.get("effective") if isinstance(row, dict) else None for row in worktree_configs)
+    trusted: dict[str, Any] = {}
+    for block in blocks:
+        origins = block.get("origins") if isinstance(block, dict) else None
+        if not isinstance(origins, list):
+            raise Stop("前の config の状態を読めない")
+        for item in origins:
+            if not isinstance(item, dict) or not isinstance(item.get("path"), str) or not item["path"].startswith("config:"):
+                raise Stop("前の config の状態を読めない")
+            path = item["path"][len("config:"):]
+            old = trusted.get(path)
+            if old is not None and old != item:
+                raise Stop("前の config の状態が矛盾している")
+            trusted[path] = item
+    return trusted
 
 
 def index_snapshot(admin: str, worktree: str, budget: Budget) -> dict[str, Any]:
@@ -626,30 +1017,31 @@ def private_ref_snapshot(git_dir: str, budget: Budget) -> dict[str, Any]:
     return {"head": head, "refs": refs}
 
 
-def config_file_snapshot(top: str, path: str, rel: str, budget: Budget) -> dict[str, Any]:
+def config_file_snapshot(top: str, path: str, rel: str, budget: Budget,
+                         trusted: dict[str, Any] | None = None) -> dict[str, Any]:
     """Keep the old useful config diagnostic without trusting Git to open links."""
     if not os.path.lexists(path):
         return {"state": "absent"}
-    observed = entry(path, rel, [], budget)
-    if observed.get("kind") != "file":
-        return {"state": "not-file", "entry": observed}
-    raw = run_git(top, "config", "--file", path, "--no-includes", "--list", "-z", budget=budget)
-    entries: list[list[str | None]] = []
-    for record in raw.split(b"\0"):
-        if not record: continue
-        key, sep, value = record.partition(b"\n")
-        entries.append([key.decode("utf-8", "surrogateescape"),
-                        value.decode("utf-8", "surrogateescape") if sep else None])
-    return {"state": "ok", "entry": observed, "entries": entries}
+    observed, rows = safe_config_file(top, path, budget, trusted)
+    observed["path"] = rel
+    return {"state": "ok", "entry": observed,
+            "entries": [[key, value] for key, value in rows]}
 
 
 def snapshot(args: argparse.Namespace) -> None:
     budget = Budget(args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
+    prior = prior_state(args)
+    previous_patterns = prior_secret_patterns(prior)
+    trusted_configs = trusted_config_origins(prior, args.fresh_config_baseline)
     wts = worktrees(args.top, budget)
-    contents, configs = [], []
+    contents, configs, secret_patterns = [], [], []
     for wt in wts:
         path = wt["worktree"]
-        patterns = profile_patterns(path, budget)
+        # Once a path was declared secret, later profile deletion or narrowing
+        # cannot turn its pre-comparison observation into a content hash.  The
+        # parent-held preceding state is read before this worktree is walked.
+        patterns = list(dict.fromkeys(previous_patterns.get(path, []) + profile_patterns(path, budget)))
+        secret_patterns.append({"path": path, "patterns": patterns})
         git_dir = run_git(path, "rev-parse", "--path-format=absolute", "--git-dir", budget=budget).decode().strip()
         content: dict[str, Any] = {"path": path, "index": index_snapshot(git_dir, path, budget)}
         configs.append({"path": path, "git_dir": git_dir,
@@ -661,7 +1053,7 @@ def snapshot(args: argparse.Namespace) -> None:
                         "private_refs": (private_ref_snapshot(git_dir, budget)
                                          if os.path.realpath(git_dir) != os.path.realpath(args.common)
                                          else {"state": "common-refs-covered"}),
-                        "effective": config_snapshot(path, args.common, budget)})
+                        "effective": config_snapshot(path, args.common, budget, trusted_configs)})
         if os.path.realpath(path) != os.path.realpath(args.exclude_worktree or ""):
             content["files"] = tree(path, patterns, budget)
         else:
@@ -669,12 +1061,13 @@ def snapshot(args: argparse.Namespace) -> None:
         contents.append(content)
     state = {"schema": SCHEMA, "refs": refs(args.top, budget), "worktrees": wts,
              "worktree_contents": contents, "worktree_configs": configs,
-             "config": config_snapshot(args.top, args.common, budget),
+             "secret_patterns": secret_patterns,
+             "config": config_snapshot(args.top, args.common, budget, trusted_configs),
              "common_admin": common_admin_snapshot(args.common, budget),
-             "common_config": config_file_snapshot(args.top, os.path.join(args.common, "config"), "config", budget),
-             "common_config_worktree": config_file_snapshot(args.top, os.path.join(args.common, "config.worktree"), "config.worktree", budget),
+             "common_config": config_file_snapshot(args.top, os.path.join(args.common, "config"), "config", budget, trusted_configs),
+             "common_config_worktree": config_file_snapshot(args.top, os.path.join(args.common, "config.worktree"), "config.worktree", budget, trusted_configs),
              "repo_admin": {"path": args.repo_admin,
-                            "config_worktree": config_file_snapshot(args.top, os.path.join(args.repo_admin, "config.worktree"), "repo:config.worktree", budget)}}
+                            "config_worktree": config_file_snapshot(args.top, os.path.join(args.repo_admin, "config.worktree"), "repo:config.worktree", budget, trusted_configs)}}
     write_state(args.out, state)
 
 
@@ -684,7 +1077,7 @@ def compare(args: argparse.Namespace) -> int:
         after = read_state(args.after, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds)
     except Stop:
         print("差分: 状態を読めない", file=sys.stdout); return 1
-    required = {"schema", "refs", "worktrees", "worktree_contents", "worktree_configs", "config", "common_admin", "common_config", "common_config_worktree", "repo_admin"}
+    required = {"schema", "refs", "worktrees", "worktree_contents", "worktree_configs", "secret_patterns", "config", "common_admin", "common_config", "common_config_worktree", "repo_admin"}
     if not isinstance(before, dict) or before.get("schema") != SCHEMA or not required <= before.keys():
         if isinstance(before, dict) and "repo_admin" not in before:
             print("差分: repo:git-dir: 保存済み状態に人の管理パスが無い(前の起動元の設定を確認する。現在の設定で中断前の基準を補完しない)")
@@ -792,6 +1185,8 @@ def main() -> int:
     snap = sub.add_parser("snapshot")
     for option in ("out", "top", "common", "repo-admin"): snap.add_argument("--" + option, required=True)
     snap.add_argument("--wt-admin", default="-"); snap.add_argument("--exclude-worktree", default="")
+    snap.add_argument("--secret-patterns-from", default="")
+    snap.add_argument("--fresh-config-baseline", action="store_true")
     snap.add_argument("--max-items", type=int, default=100000); snap.add_argument("--max-bytes", type=int, default=1073741824)
     snap.add_argument("--max-file-bytes", type=int, default=67108864); snap.add_argument("--max-seconds", type=int, default=60)
     cmp = sub.add_parser("compare"); cmp.add_argument("--before", required=True); cmp.add_argument("--after", required=True)

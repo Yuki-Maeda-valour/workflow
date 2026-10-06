@@ -33,9 +33,14 @@ class LoopStateTest(unittest.TestCase):
     def tearDown(self) -> None: self.temp.cleanup()
     def git(self, *args: str) -> subprocess.CompletedProcess[bytes]:
         return subprocess.run(["git", "-C", str(self.root), *args], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    def snap(self, name: str, **limits: int) -> subprocess.CompletedProcess[bytes]:
+    def snap(self, name: str, secret_patterns_from: str = "", fresh_config_baseline: bool = False,
+             **limits: int) -> subprocess.CompletedProcess[bytes]:
         args = ["python3", str(SCRIPT), "snapshot", "--out", str(self.root.parent / name), "--top", str(self.root),
                 "--common", self.common, "--repo-admin", self.admin]
+        if secret_patterns_from:
+            args += ["--secret-patterns-from", str(self.root.parent / secret_patterns_from)]
+        if fresh_config_baseline:
+            args += ["--fresh-config-baseline"]
         for key, value in limits.items(): args += ["--" + key.replace("_", "-"), str(value)]
         return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     def compare(self, a: str, b: str) -> subprocess.CompletedProcess[bytes]:
@@ -58,6 +63,34 @@ class LoopStateTest(unittest.TestCase):
         secret = next(item for item in state["worktree_contents"][0]["files"] if item["path"] == ".env")
         self.assertTrue(secret["secret"])
         self.assertNotIn("sha256", secret)
+
+    def test_prior_secret_patterns_keep_each_existing_worktree_metadata_only(self) -> None:
+        other = self.root.parent / "human"
+        self.git("worktree", "add", "-q", "--detach", str(other), "HEAD")
+        (other / ".claude").mkdir()
+        (other / ".claude/project-profile.yml").write_text("secret_paths: [private.txt]\n")
+        (other / "private.txt").write_text("must never become a snapshot hash\n")
+        self.assertEqual(0, self.snap("secret-a.json").returncode)
+        (other / ".claude/project-profile.yml").write_text("secret_paths: []\n")
+        self.assertEqual(0, self.snap("secret-b.json", secret_patterns_from="secret-a.json").returncode)
+        state = json.loads((self.root.parent / "secret-b.json").read_text())
+        files = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(other))
+        private = next(row for row in files if row["path"] == "private.txt")
+        self.assertTrue(private["secret"]); self.assertNotIn("sha256", private)
+        patterns = next(row["patterns"] for row in state["secret_patterns"] if row["path"] == str(other))
+        self.assertIn("private.txt", patterns)
+        # A different existing worktree contributes its own starting union;
+        # no path's profile may widen another path's content observation.
+        second = self.root.parent / "human-two"
+        self.git("worktree", "add", "-q", "--detach", str(second), "HEAD")
+        (second / ".claude").mkdir(); (second / ".claude/project-profile.yml").write_text("secret_paths: [second.txt]\n")
+        (second / "second.txt").write_text("second-secret\n")
+        self.assertEqual(0, self.snap("secret-c.json", secret_patterns_from="secret-b.json").returncode)
+        state = json.loads((self.root.parent / "secret-c.json").read_text())
+        two = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(second))
+        self.assertTrue(next(row for row in two if row["path"] == "second.txt")["secret"])
+        root_files = next(row["files"] for row in state["worktree_contents"] if row["path"] == str(self.root))
+        self.assertIn("sha256", next(row for row in root_files if row["path"] == "tracked"))
 
     def test_ref_and_ignored_file_attacks_are_detected(self) -> None:
         self.assertEqual(0, self.snap("a.json").returncode)
@@ -274,6 +307,118 @@ class LoopStateTest(unittest.TestCase):
         key = "includeIf.gitdir:" + str(self.root) + "/.path"
         self.git("config", key, str(conditional))
         self.changed(lambda: conditional.write_text("[demo]\nvalue = two\n"))
+
+    def test_include_preflight_preserves_normal_conditions_and_stops_active_unsafe_targets(self) -> None:
+        # Git parses quoted values and condition grammar.  The helper asks that
+        # same Git binary to evaluate the condition, rather than approximating
+        # onbranch/gitdir patterns itself.
+        quoted = self.root.parent / "quoted include.inc"; quoted.write_text("[demo]\nvalue = one\n")
+        self.git("config", "include.path", str(quoted))
+        self.assertEqual(0, self.snap("quoted.json").returncode)
+        self.tearDown(); self.setUp()
+        inactive = self.root.parent / "machine-only.inc"
+        self.git("config", "includeIf.onbranch:never-used-branch.path", str(inactive))
+        self.assertEqual(0, self.snap("inactive.json").returncode)
+        self.tearDown(); self.setUp()
+        branch = self.git("symbolic-ref", "--short", "HEAD").stdout.decode().strip()
+        self.git("config", f"includeIf.onbranch:{branch}.path", str(self.root.parent / "missing-active.inc"))
+        self.assertEqual(20, self.snap("missing-active.json").returncode)
+        self.tearDown(); self.setUp()
+        outside = self.root.parent / "outside.inc"; outside.write_text("[demo]\nvalue = outside\n")
+        link = self.root.parent / "included-link"; os.symlink(outside, link)
+        self.git("config", "include.path", str(link))
+        # A normal config leaf link is supported at a fresh start; it is
+        # recorded as the link plus its regular target instead of being followed
+        # unchecked by Git.
+        self.assertEqual(0, self.snap("linked-active.json").returncode)
+
+    def test_config_link_is_fixed_within_a_run_but_refreshed_between_normal_runs(self) -> None:
+        first_target = self.root.parent / "first.inc"; first_target.write_text("[demo]\nvalue = one\n")
+        second_target = self.root.parent / "second.inc"; second_target.write_text("[demo]\nvalue = private-new-target\n")
+        link = self.root.parent / "config-link"; os.symlink(first_target, link)
+        self.git("config", "include.path", str(link))
+        self.assertEqual(0, self.snap("link-a.json").returncode)
+        state = json.loads((self.root.parent / "link-a.json").read_text())
+        trusted = LOOP_STATE.trusted_config_origins(state, False)
+        # Retargeting is rejected before open_regular_path can open/hash the new
+        # target.  It therefore cannot disclose a newly pointed-at secret.
+        os.unlink(link); os.symlink(second_target, link)
+        calls: list[str] = []; old_open = LOOP_STATE.open_regular_path
+        LOOP_STATE.open_regular_path = lambda path, budget: (calls.append(path), old_open(path, budget))[1]
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.config_snapshot(str(self.root), self.common, LOOP_STATE.Budget(10000, 10_000_000, 1_000_000, 10), trusted)
+        finally:
+            LOOP_STATE.open_regular_path = old_open
+        self.assertNotIn(str(second_target), calls)
+        # Replacing a normal target's bytes is allowed to be observed; its hash
+        # makes compare report the change rather than treating it as a link swap.
+        os.unlink(link); os.symlink(first_target, link)
+        self.assertEqual(0, self.snap("link-restored.json", secret_patterns_from="link-a.json", fresh_config_baseline=True).returncode)
+        trusted = LOOP_STATE.trusted_config_origins(json.loads((self.root.parent / "link-restored.json").read_text()), False)
+        new_target = self.root.parent / "new-secret.inc"; new_target.write_text("[demo]\nvalue = never-open-this-new-target\n")
+        new_link = self.root.parent / "new-config-link"; os.symlink(new_target, new_link)
+        self.git("config", "--add", "include.path", str(new_link))
+        calls = []; old_open = LOOP_STATE.open_regular_path
+        LOOP_STATE.open_regular_path = lambda path, budget: (calls.append(path), old_open(path, budget))[1]
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.config_snapshot(str(self.root), self.common, LOOP_STATE.Budget(10000, 10_000_000, 1_000_000, 10), trusted)
+        finally:
+            LOOP_STATE.open_regular_path = old_open
+        self.assertNotIn(str(new_target), calls)
+        self.git("config", "--unset-all", "include.path")
+        self.git("config", "include.path", str(link))
+        new_regular = self.root.parent / "new-secret-regular.inc"; new_regular.write_text("[demo]\nvalue = never-read-new-regular\n")
+        self.git("config", "--add", "include.path", str(new_regular))
+        new_inode = os.lstat(new_regular).st_ino; seen_regular = False; old_read = LOOP_STATE.read_open_regular
+        def no_new_regular(fd, before, budget):
+            nonlocal seen_regular
+            if before.st_ino == new_inode:
+                seen_regular = True
+                raise AssertionError("new regular include was opened")
+            return old_read(fd, before, budget)
+        LOOP_STATE.read_open_regular = no_new_regular
+        try:
+            with self.assertRaises(LOOP_STATE.Stop):
+                LOOP_STATE.config_snapshot(str(self.root), self.common, LOOP_STATE.Budget(10000, 10_000_000, 1_000_000, 10), trusted)
+        finally:
+            LOOP_STATE.read_open_regular = old_read
+        self.assertFalse(seen_regular)
+        self.git("config", "--unset-all", "include.path")
+        self.git("config", "include.path", str(link))
+        first_target.write_text("[demo]\nvalue = changed\n")
+        self.assertEqual(0, self.snap("link-content.json", secret_patterns_from="link-restored.json").returncode)
+        self.assertEqual(1, self.compare("link-restored.json", "link-content.json").returncode)
+        # A completed earlier run establishes a fresh config-link baseline while
+        # retaining the old secret_paths union.
+        os.unlink(link); os.symlink(second_target, link)
+        self.assertEqual(0, self.snap("link-fresh.json", secret_patterns_from="link-content.json", fresh_config_baseline=True).returncode)
+
+    def test_hasconfig_uses_later_local_remote_and_boolean_without_value_is_normal(self) -> None:
+        # Git evaluates hasconfig against all ordinary sources, including a
+        # repository remote declared after the global source.  A hand-written
+        # boolean also has no value field in --null --list output.
+        target = self.root.parent / "hasconfig.inc"; target.write_text("[demo]\nvalue = yes\n")
+        global_config = self.root.parent / "global-config"
+        global_config.write_text('[includeIf "hasconfig:remote.*.url:https://example.invalid/**"]\n\tpath = ' + str(target) + '\n')
+        config = pathlib.Path(self.common) / "config"
+        with config.open("a") as fh:
+            fh.write("\n[selftest]\n\tboolean\n")
+        self.git("config", "remote.origin.url", "https://example.invalid/repo")
+        old_global = os.environ.get("GIT_CONFIG_GLOBAL"); old_system = os.environ.get("GIT_CONFIG_NOSYSTEM")
+        os.environ["GIT_CONFIG_GLOBAL"] = str(global_config); os.environ["GIT_CONFIG_NOSYSTEM"] = "1"
+        try:
+            result = self.snap("hasconfig.json")
+        finally:
+            if old_global is None: os.environ.pop("GIT_CONFIG_GLOBAL", None)
+            else: os.environ["GIT_CONFIG_GLOBAL"] = old_global
+            if old_system is None: os.environ.pop("GIT_CONFIG_NOSYSTEM", None)
+            else: os.environ["GIT_CONFIG_NOSYSTEM"] = old_system
+        self.assertEqual(0, result.returncode, result.stderr.decode())
+        state = json.loads((self.root.parent / "hasconfig.json").read_text())
+        origins = state["config"]["origins"]
+        self.assertTrue(any(row["path"].endswith("hasconfig.inc") for row in origins))
 
     def test_limits_and_safe_saved_state_fail_closed(self) -> None:
         (self.root / "a").write_text("123456"); (self.root / "b").write_text("123456")
