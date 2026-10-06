@@ -717,8 +717,8 @@ echo "loop-selftest: 対象 $TARGET(scratch $W)"
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
-# 文書の §3 判定 2 の行から、バッククォートで囲んだ大文字の環境変数名だけを取り出す
-DOC_VARS="$(grep -E '^2\. \*\*自ホストと別 CLI か\*\*' "$DOC_ER" | grep -oE '`[A-Z][A-Z0-9_]*`' | tr -d '`' | sort -u | tr '\n' ' ')"
+# 文書の §3 判定 2 の項目(その行と下位の行)から、バッククォートで囲んだ大文字の環境変数名だけを取り出す
+DOC_VARS="$(awk '/^2\. \*\*自ホストと別 CLI か\*\*/{f=1;print;next} f&&/^[[:space:]]/{print;next} {f=0}' "$DOC_ER" | grep -oE '`[A-Z][A-Z0-9_]*`' | tr -d '`' | sort -u | tr '\n' ' ')"
 if want sync; then
 LOOP_VARS="$(grep -E '^HOST_SESSION_VARS=\(' "$TARGET" | sed -E 's/^HOST_SESSION_VARS=\((.*)\).*/\1/' | tr ' ' '\n' | sed '/^$/d' | sort -u | tr '\n' ' ')"
 if [ -n "$DOC_VARS" ] && [ "$DOC_VARS" = "$LOOP_VARS" ]; then
