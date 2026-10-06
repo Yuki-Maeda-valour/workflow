@@ -229,6 +229,39 @@ class CandidateKeysTest(unittest.TestCase):
                         self.assertTrue(item["ok"])
                         self.assertEqual("data-audit", item["source"])
 
+    def test_unsupported_indentation_preserves_full_check_and_collect_json(self):
+        expected_key = "data-audit:authz:route:src/routes/orders.ts#ordersRouter:GET /:id"
+        for indent in (" " * 4, " " * 5, " " * 8, "\t", " \t", "\t ", "  \t  "):
+            for marker in ("```", "~~~"):
+                for closed in (False, True):
+                    # 対応外の開きは従来どおり通常の行。ヘッダ内のキーを隠さない。
+                    header = f"{indent}{marker}text\n> **指摘キー**: literal\n"
+                    if closed:
+                        header += f"{indent}{marker}\n"
+                    source = CANDIDATE.replace("> **発見時点**:", header + "> **発見時点**:")
+                    self.write("候補_字下げ.md", source)
+                    expected_check = {
+                        "ok": False, "source": "data-audit", "keys": [expected_key, "literal"],
+                        "problems": [{"code": "key-count", "detail":
+                                      "ヘッダの指摘キーの行が 2 行(値のあるもの 2 個)。ちょうど 1 行が必要"}],
+                    }
+                    expected_collect = {
+                        "files": [{"file": "候補_字下げ.md", "state": "候補", "name": "字下げ",
+                                   "keys": [expected_key, "literal"], "skipped": None, "problems": []}],
+                        "names": ["字下げ"],
+                    }
+                    cases = (
+                        ((f"--task-dir={self.dir}",), None, 0, expected_collect),
+                        (("--check", str(self.dir / "候補_字下げ.md")), None, 1, expected_check),
+                        (("--check", "-"), source.encode("utf-8"), 1, expected_check),
+                    )
+                    for args, stdin, expected_code, expected in cases:
+                        with self.subTest(indent=indent, marker=marker, closed=closed, args=args):
+                            code, out, err = self.run_script(*args, stdin=stdin)
+                            self.assertEqual(expected_code, code, err)
+                            self.assertEqual("", err)
+                            self.assertEqual(expected, json.loads(out))
+
     def test_check_without_source_option_accepts_any_known_source(self):
         code, result = self.check(CANDIDATE.replace("data-audit(/data-audit --candidates --quick)", "refactor"))
         self.assertEqual((0, "refactor"), (code, result["source"]))

@@ -10,6 +10,20 @@ v4.2.0 以前は commit 履歴を参照。
 - `!`・`time` の前置きや `if`・`for` など、移動を追跡しない制御構文も拒否する。空引用を含む引用語、情報照会、通常操作、既存の2種類の `cd` とH36のsymlink保護は維持する。
 - scratchの実Bashによる書換えの陽性対照と、同じコマンドの実hook入力を回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
 
+## v4.20.5
+
+### 修正
+
+- `task-digest.py` が対応外の字下げのフェンスを算出不能として拒否する([子 Issue #168](https://github.com/Yuki-Maeda-valour/workflow/issues/168)、親 #107 の H10)。フェンスの外で、半角スペース 4 個以上かタブを含む字下げの直後に、同じバッククォートかチルダが 3 個以上続く行を検査する。閉鎖の有無や追加修正記録の節への配置で検査を逃れない。
+- 正常な半角スペース 0〜3 個の囲みの計算値と、囲みの中の字下げ文字列を保つ。未閉鎖の拒否・通常ファイル限定の読み込み・既知キー収集と候補検証の JSON 契約も維持する。拒否条件と期待出力の書き方は [task-template.md の記法の規約](plugins/dev-workflow/skills/create-task/references/task-template.md) を参照。
+
+## v4.20.4
+
+### 修正
+
+- `loop.sh` が、人の linked worktree の `config.worktree` の追加・削除・値変更・項目の並べ替えを検出する([子 Issue #167](https://github.com/Yuki-Maeda-valour/workflow/issues/167)、親 #107 の H20)。通常終了・シグナル終了・中断後の再起動で既存の停止規則を適用する。利用者の設定は自動復元・削除しない。
+- 中断後に起動元を変えた場合と、人の設定の比較元が無い旧 `inflight` は停止し、前の起動元の設定確認を促す。中断の無い実行間の変更や旧 `last-verified.json` は報告して続ける。詳しい再開手順と限界は [loop.md §4・§10](plugins/dev-workflow/skills/ship-task/references/loop.md) を参照。
+
 ## v4.20.3
 
 ### 修正

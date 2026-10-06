@@ -16,6 +16,7 @@ import sys
 RECORD_HEADING = re.compile(r"^## 追加修正記録$")
 H2 = re.compile(r"^## ")
 FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+INDENTED_FENCE = re.compile(r"^[ \t]+(`{3,}|~{3,})")
 # 除外 1: 最初の `## ` の見出しより前で、do-task・人が承認の後に書き換える 3 種の行
 MUTABLE_HEADER = re.compile(r"^> \*\*(?:ステータス|基準コミット|無人実行)\*\*:")
 CHECKBOX = re.compile(r"^(\s*)- \[[xX]\]")
@@ -25,14 +26,18 @@ class DigestError(Exception):
     pass
 
 
-def _fence_flags(lines: list[str], *, require_closed: bool = False) -> list[bool]:
+def _fence_flags(
+    lines: list[str], *, require_closed: bool = False, reject_unsupported_indent: bool = False
+) -> list[bool]:
     # 開きの行・閉じの行もフェンスの中に数える。キー収集では従来どおり未閉鎖を末尾まで数え、
-    # 本文ダイジェストでは除外する節も含め、全フェンスの閉鎖を必須にする
+    # 本文ダイジェストでは除外する節も含め、全フェンスの閉鎖と対応する字下げを必須にする
     flags: list[bool] = []
     closing: re.Pattern[str] | None = None
     for line in lines:
         if closing is None:
             opened = FENCE_OPEN.match(line)
+            if reject_unsupported_indent and not opened and INDENTED_FENCE.match(line):
+                raise DigestError("対応外の字下げのコードフェンスがある(半角スペースは0〜3個、タブは不可)")
             if opened:
                 marker = opened.group(1)
                 closing = re.compile(r"^ {0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}[ \t]*$")
@@ -51,7 +56,7 @@ def body_lines(text: str) -> list[str]:
         text = text[1:]
     # 改行を LF に揃え、各行の末尾の空白(半角スペースとタブ)を削る
     lines = [line.rstrip(" \t") for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
-    fenced = _fence_flags(lines, require_closed=True)
+    fenced = _fence_flags(lines, require_closed=True, reject_unsupported_indent=True)
     headings = [i for i, line in enumerate(lines) if not fenced[i] and H2.match(line)]
 
     records = [i for i in headings if RECORD_HEADING.match(lines[i])]
