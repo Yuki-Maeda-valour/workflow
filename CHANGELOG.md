@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.22.4
+
+### 修正
+
+- `/init-project` の完了時の案内で、profile の `source_of_truth` が `serena` なのに Serena を設定しなかったときの警告を、`.mcp.json` を生成・変更したときの案内の下から外した。`.mcp.json` を生成したかどうかによらず警告する(Serena の設定を自分で行うと選んだとき・MCP の設定の生成の承認を断ったとき・非対話で生成しなかったときなど)([Issue #185](https://github.com/Yuki-Maeda-valour/workflow/issues/185))
+- 残る `.mcp.json` の案内は、条件「`.mcp.json` を生成・変更した場合、」で終わる行の下に、伝える 3 つの文を並べる形に分け直した(文言は変えていない)
+
 ## v4.22.3
 
 ### 修正
