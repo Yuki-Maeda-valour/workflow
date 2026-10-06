@@ -2189,6 +2189,108 @@ check "H25 false: 既存の other を維持" other "$PKIND"
 perm Bash "$(bash_in_extra 'git status > .git/h25' '{"dangerouslyDisableSandbox":false}')"
 check "H25 false: 既存の protected は deny" deny "$PDEC"
 check "H25 false: 既存の protected を維持" protected "$PKIND"
+# H38: 未引用の ~ は位置と構文を問わず入口で拒否する。引用・エスケープした ~ は通常のパス検査へ進む。
+mkdir -p -- "$PW/h38/~" "$PW/x=~" "$PW/x=a:~" "$W/permout/h38"
+printf 'changed\n' >"$PW/f.txt"
+PALLOW='[{"kind":"all","words":[]}]'
+for H38_CASE in \
+  '引数の = 後|cp f.txt x=~/z' \
+  '引数の : 後|cp f.txt x=a:~/z' \
+  '先頭|cat ~/z' \
+  '語中|cat h38/a~b' \
+  '末尾|cat h38/z~' \
+  'スラッシュ後|cat h38/~/z' \
+  '先頭の単引用に隣接|cat '\''h38/'\''~/z' \
+  '先頭の二重引用に隣接|cat "h38/"~/z' \
+  '後ろの単引用に隣接|cat h38/~'\''/z'\''' \
+  '後ろの二重引用に隣接|cat h38/~"/z"' \
+  '空単引用の後|cat '\'''\''~/z' \
+  '空二重引用の後|cat ""~/z' \
+  '空単引用の前|cat h38/z~'\'''\''' \
+  '空二重引用の前|cat h38/z~""' \
+  'コマンド語の先頭|~/tool' \
+  'コマンド語の語中|tool~name' \
+  'コマンド語の末尾|tool~' \
+  '先頭代入|LANG=~/z git status' \
+  '先頭代入の : 後|LANG=a:~/z git status' \
+  '先頭代入の語中|LANG=a~b git status' \
+  '代入だけ|LANG=~/z' \
+  '代入だけの末尾|LANG=z~' \
+  'export|export LANG=~/z' \
+  'export の : 後|export LANG=a:~/z' \
+  '入力リダイレクト|cat < h38/~/z' \
+  '入力リダイレクトの = 後|cat < x=~/z' \
+  '出力リダイレクト|echo changed > h38/~/z' \
+  '追記リダイレクト|echo changed >> x=a:~/z' \
+  '両方の出力リダイレクト|echo changed &> h38/z~' \
+  '複合 &&|git status && cp f.txt x=~/z' \
+  '複合 OR|git status || cp f.txt x=a:~/z' \
+  '複合 ;|git status ; cat h38/z~' \
+  '複合パイプ|cat f.txt | cat h38/a~b' \
+  '保護パス判定より先|echo ~ > .git/h38'; do
+  pdk "H38 未引用: ${H38_CASE%%|*}" other Bash "$(bash_in "${H38_CASE#*|}")"
+done
+h38_run() { # 既存の scratch HOME を継承し、実 Bash を制限 PATH で実行する。
+  timeout -k 2 5 bash -c 'cd "$1" && exec env PATH="$2" bash --noprofile --norc -c "$3"' \
+    _ "$PW" "$SAFEBIN" "$1"
+}
+# = と : の後の ~ が展開されたパスの HOME 部分を scratch 内に模す。末尾だけ外部役へリンクする。
+for H38_PREFIX in 'x=' 'x=a:'; do
+  mkdir -p -- "$PW/$H38_PREFIX${HOME%/*}"
+  ln -s -- "$W/permout/h38" "$PW/$H38_PREFIX$HOME"
+  H38_COMMAND="cp f.txt $H38_PREFIX~/z"
+  printf 'before\n' >"$W/permout/h38/z"
+  h38_run "$H38_COMMAND" >/dev/null 2>&1; H38_RC=$?
+  check "H38 陽性対照: $H38_COMMAND は実 Bash で完走する" 0 "$H38_RC"
+  check "H38 陽性対照: $H38_COMMAND は外部役を書き換える" changed "$(cat "$W/permout/h38/z")"
+  printf 'before\n' >"$W/permout/h38/z"
+  pdk "H38 実行ゲート: $H38_COMMAND" other Bash "$(bash_in "$H38_COMMAND")"
+  if [ "$PDEC" = allow ]; then h38_run "$H38_COMMAND" >/dev/null 2>&1; fi
+  check "H38 拒否後: $H38_COMMAND の外部役が不変" before "$(cat "$W/permout/h38/z")"
+  rm -f -- "$PW/$H38_PREFIX$HOME"
+  rm -rf -- "$PW/$H38_PREFIX"  # 後続の cd 回帰が作る同名のパスを残さない。
+done
+for H38_LITERAL in "'h38/~/z'" '"h38/~/z"' 'h38/\~/z' "h38/'~'/z" 'h38/"~"/z' "h38/''\~/z" 'h38/""\~/z'; do
+  printf 'before\n' >"$PW/h38/~/z"
+  H38_COMMAND="cp f.txt $H38_LITERAL"
+  pa "H38 リテラル: $H38_LITERAL" Bash "$(bash_in "$H38_COMMAND")"
+  H38_RC=not-run
+  if [ "$PDEC" = allow ]; then h38_run "$H38_COMMAND" >/dev/null 2>&1; H38_RC=$?; fi
+  check "H38 リテラル: $H38_LITERAL は実 Bash で完走する" 0 "$H38_RC"
+  check "H38 リテラル: $H38_LITERAL の字面の場所へ書く" changed "$(cat "$PW/h38/~/z")"
+done
+ln -s -- "$W/permout/h38" "$PW/h38/~/outside"
+ln -s -- "$PW/.claude/settings.json" "$PW/h38/~/protected"
+printf 'before\n' >"$PW/.claude/settings.json"
+for H38_LITERAL in "'h38/~/outside/z'" '"h38/~/outside/z"' 'h38/\~/outside/z'; do
+  pdk "H38 リテラル外部: 引数 $H38_LITERAL" other Bash "$(bash_in "cat $H38_LITERAL")"
+  pdk "H38 リテラル外部: 書き込み $H38_LITERAL" other Bash "$(bash_in "cp f.txt $H38_LITERAL")"
+  pdk "H38 リテラル外部: 入力 $H38_LITERAL" other Bash "$(bash_in "cat < $H38_LITERAL")"
+  pdk "H38 リテラル外部: 出力 $H38_LITERAL" other Bash "$(bash_in "echo changed > $H38_LITERAL")"
+done
+for H38_LITERAL in "'h38/~/protected'" '"h38/~/protected"' 'h38/\~/protected'; do
+  pdk "H38 リテラル保護: 引数 $H38_LITERAL" other Bash "$(bash_in "cat $H38_LITERAL")"
+  pdk "H38 リテラル保護: 書き込み $H38_LITERAL" protected Bash "$(bash_in "cp f.txt $H38_LITERAL")"
+  pdk "H38 リテラル保護: 出力 $H38_LITERAL" protected Bash "$(bash_in "echo changed > $H38_LITERAL")"
+  H38_COMMAND="cat < $H38_LITERAL > 'h38/~/input'"
+  pa "H38 リテラル保護: 入力は既存の範囲検査 $H38_LITERAL" Bash "$(bash_in "$H38_COMMAND")"
+  H38_RC=not-run
+  if [ "$PDEC" = allow ]; then h38_run "$H38_COMMAND" >/dev/null 2>&1; H38_RC=$?; fi
+  check "H38 リテラル保護: scratch の入力を実 Bash で読める $H38_LITERAL" 0 "$H38_RC"
+  check "H38 リテラル保護: scratch の入力内容 $H38_LITERAL" before "$(cat "$PW/h38/~/input")"
+done
+pa "H38 引用した先頭代入" Bash "$(bash_in "LANG='h38/~/z' git status")"
+pa "H38 引用した代入だけ" Bash "$(bash_in 'LANG="h38/~/z"')"
+pa "H38 エスケープした export" Bash "$(bash_in 'export LANG=h38/\~/z')"
+pa "H38 引用したコマンド語は通常判定" Bash "$(bash_in "'tool~'")"
+pa "H38 エスケープしたコマンド語は通常判定" Bash "$(bash_in 'tool\~')"
+for H38_LITERAL in "'h38/~'" '"h38/~"' 'h38/\~' "'x=~/z'" '"x=a:~/z"'; do
+  pdk "H38 cd の既存制約: $H38_LITERAL && pwd" other Bash "$(bash_in "CDPATH= cd -P -- $H38_LITERAL && pwd -P")"
+  pdk "H38 cd の既存制約: $H38_LITERAL && git" other Bash "$(bash_in "CDPATH= cd -P -- $H38_LITERAL && git status")"
+done
+pa "H38 構造化 Write の ~ はリテラル" Write "$(file_in "$PW/.claude/reviews/h38~")"
+pa "H38 構造化 Read の ~ はリテラル" Read "$(file_in "$PP/skills/x/h38~")"
+PALLOW=""
 # H37: 実 Bash は追跡しない組み込み移動の後に symlink の先を書き換えられる。hook は全許可でも入口で止める。
 mkdir -p "$PW/sub"
 printf 'before\n' >"$PW/.claude/settings.json"
