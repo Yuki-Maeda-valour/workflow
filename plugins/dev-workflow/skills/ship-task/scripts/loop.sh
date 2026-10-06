@@ -26,6 +26,10 @@
 #   --net-timeout <秒>               ネットワークに出うる git と補助の CLI のタイムアウト
 #   --stop-file <パス>               停止ファイル
 #   --worktree-root <ディレクトリ>   周の worktree を作る場所
+#   --state-max-items <N>            状態観察の項目上限(既定 100000)
+#   --state-max-bytes <N>            状態観察の通常ファイル総読取上限(既定 1 GiB)
+#   --state-max-file-bytes <N>       状態観察の通常ファイル1件上限(既定 64 MiB)
+#   --state-max-seconds <N>          状態観察の壁時計上限(既定 60 秒)
 #   -h, --help                       この使い方を出す
 #
 # 終了コード: 0 / 2 / 10 / 20 / 30 / 128+N(意味は loop.md)
@@ -130,6 +134,10 @@ NET_TIMEOUT=60
 WORKTREE_ADD_TIMEOUT=600   # worktree add は LFS の checkout が取りに行くので長め(設計 §2)
 STOP_FILE=""
 WT_ROOT=""
+STATE_MAX_ITEMS=100000
+STATE_MAX_BYTES=1073741824
+STATE_MAX_FILE_BYTES=67108864
+STATE_MAX_SECONDS=60
 DISCOVER=0          # 発見モード(--discover)
 DISCOVER_ARG=""
 DISCOVER_FROM_ARG=0
@@ -956,7 +964,10 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
 }
 
 take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -)
-  py snapshot "$1" "$COMMON" "$REPO_GIT_DIR" "$2" git "${GIT_PRE[@]}"
+  local own=()
+  [ -z "$ITER_WT" ] || own=(--exclude-worktree "$ITER_WT")
+  "$PY_ABS" "$LOOP_STATE_PY" snapshot --out "$1" --top "$TOP" --common "$COMMON" --repo-admin "$REPO_GIT_DIR" --wt-admin "$2" "${own[@]}" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"
 }
 
 save_last_verified() { # 最後に照合に通った状態(照合に通ったときだけ更新する)
@@ -1020,7 +1031,8 @@ verify_iteration() {
     VERIFY_DIFF="差分: 今の状態を控えられない(照合できない)"
     return 0
   fi
-  out="$(py compare "$ITER_BASE" "$cur")" || rc=$?
+  out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$ITER_BASE" --after "$cur" --self-worktree "$ITER_WT" --self-ref "refs/heads/task/$ITER_NAME" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
   if [ "$rc" -gt 1 ]; then
     VERIFY_DIFF="差分: 照合できない(補助の終了コード $rc)"
     return 0
@@ -1398,7 +1410,7 @@ handle_marks_at_start() {
   if [ -d "$INFLIGHT" ]; then
     # SIGKILL・再起動で片付けと照合が抜けた周
     read_inflight_meta || die 20 inflight "周の途中の印を読めない($INFLIGHT)。中身を確かめてから消す"
-    ITER_ID="$INF_ITER"; ITER_REL="$INF_REL"
+    ITER_ID="$INF_ITER"; ITER_REL="$INF_REL"; ITER_WT="$INF_WT"
     # 1. その周の識別子のプロセスを止める
     kill_marked "$INF_ITER" -
     if [ -n "$CLEANUP_LEFT" ]; then
@@ -1409,7 +1421,8 @@ handle_marks_at_start() {
     cur="$RUN_DIR/inflight-now.json"
     take_snapshot "$cur" "$INF_WTADMIN"
     rc=0
-    out="$(py compare "$INFLIGHT/base.json" "$cur")" || rc=$?
+    out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$INFLIGHT/base.json" --after "$cur" --self-worktree "$INF_WT" --self-ref "refs/heads/task/$INF_NAME" \
+      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
     [ "$rc" -le 1 ] || die 30 internal "周の途中の印の照合に失敗した(補助の終了コード $rc)"
     diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
     now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$INF_DEF_NAME" 2>/dev/null || true)"
@@ -1429,7 +1442,7 @@ handle_marks_at_start() {
     if [ "$INF_MODE" = discover ]; then
       STARTUP_NOTES+=("前の実行の周 $INF_ITER は発見モードの周(発見元 ${INF_SOURCE:-?}・ブランチ task/$INF_NAME)。残った worktree と今夜の名のブランチで、その発見元は読み飛ばす")
     fi
-    ITER_ID=""; ITER_REL=""
+    ITER_ID=""; ITER_REL=""; ITER_WT=""
     return 0
   fi
   # どちらの印も無ければ、最後に照合に通った状態と比べて、差分は報告に出して続ける
@@ -1438,7 +1451,8 @@ handle_marks_at_start() {
     cur="$RUN_DIR/start-now.json"
     take_snapshot "$cur" -
     rc=0
-    out="$(py compare "$LAST_VERIFIED" "$cur")" || rc=$?
+    out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$LAST_VERIFIED" --after "$cur" \
+      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
     [ "$rc" -le 1 ] || die 30 internal "最後に照合に通った状態との比較に失敗した(補助の終了コード $rc)"
     diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
     if [ -n "$diff" ]; then
@@ -2316,6 +2330,10 @@ while [ $# -gt 0 ]; do
     --net-timeout) need_val "$1" "$#"; pos_int "$1" "$2"; NET_TIMEOUT="$2"; shift 2 ;;
     --stop-file) need_val "$1" "$#"; STOP_FILE="$2"; shift 2 ;;
     --worktree-root) need_val "$1" "$#"; WT_ROOT="$2"; shift 2 ;;
+    --state-max-items) need_val "$1" "$#"; pos_int "$1" "$2"; STATE_MAX_ITEMS="$2"; shift 2 ;;
+    --state-max-bytes) need_val "$1" "$#"; pos_int "$1" "$2"; STATE_MAX_BYTES="$2"; shift 2 ;;
+    --state-max-file-bytes) need_val "$1" "$#"; pos_int "$1" "$2"; STATE_MAX_FILE_BYTES="$2"; shift 2 ;;
+    --state-max-seconds) need_val "$1" "$#"; pos_int "$1" "$2"; STATE_MAX_SECONDS="$2"; shift 2 ;;
     -h|--help) usage; EXPLICIT_EXIT=1; exit 0 ;;
     *) fail_usage "不明な引数: $1" ;;
   esac
@@ -2387,6 +2405,8 @@ ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
 [ -f "$ORIGIN_REPO_PY" ] || die 20 plugin-root "兄弟の origin-repo.py が無い(起動時の origin の URL の検査と周の照合で使う): $ORIGIN_REPO_PY"
 GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
 [ -f "$GIT_CONFIG_DIGEST_PY" ] || die 20 plugin-root "兄弟の git-config-digest.py が無い(周の中のローカルの git 設定の照合で使う): $GIT_CONFIG_DIGEST_PY"
+LOOP_STATE_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"
+[ -f "$LOOP_STATE_PY" ] || die 20 plugin-root "状態観察 helper(loop-state.py)が無い: $LOOP_STATE_PY"
 PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
 HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
