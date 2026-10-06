@@ -41,6 +41,10 @@
 | `--net-timeout <秒>` | 60 | ネットワークに出うる git と補助の CLI のタイムアウト(§2 の前置き)。`worktree add` は 600 秒で固定で、この引数では変えない |
 | `--stop-file <パス>` | `<対象>/.claude/loop.stop` | 停止ファイル(§6) |
 | `--worktree-root <パス>` | `<対象の親ディレクトリ>/<対象の名前>.loop` | 周の worktree を作る場所(§3 の 2) |
+| `--state-max-items <N>` | 100000 | 状態観察で記録する filesystem 項目の上限。超過は比較不能として停止 |
+| `--state-max-bytes <N>` | 1073741824 (1 GiB) | 状態観察で読む通常ファイルの合計上限。機密・特殊ファイル本文は開かない |
+| `--state-max-file-bytes <N>` | 67108864 (64 MiB) | 状態観察で読む通常ファイル 1 件の上限 |
+| `--state-max-seconds <N>` | 60 | 状態観察 1 回の壁時計上限 |
 
 ### profile(`features.loop`)と実効値
 
@@ -177,9 +181,18 @@
 
 **共有の状態の照合**(片付けの直後、残りが無いとき。`loop.sh` の次の git〈§5 の `ls-remote` を含む〉より前)
 
+状態観察は共有の全 ref(参照先 OID と symref の指す先。未解決の loose symref も含む)と、各 linked worktree の private `HEAD`・private `refs/`、全 worktree(パス・HEAD・lock の理由)、開始時点にある各 worktree の index 生バイトと追跡・未追跡・ignored を含むファイル木を控える。新しく作った当該周の worktree だけは内容走査から外すが、他の既存 worktree は外さない。通常ファイルは `lstat`→`O_NOFOLLOW|O_NONBLOCK` の open→同一 fd の hash→`fstat` で観察し、symlink は字面、directory は構造、FIFO/socket/device は種別・mode・device 番号だけを記録する。`secret_paths` は内容を開かず path・種別・metadata だけにし、機密ディレクトリの子も列挙するため追加・削除・型・size・時刻の変化は検出する。通常ファイルを同じ ctime まで保ったまま変えられるとは主張しない。限界は、機密 symlink の**作業ツリー外**の target の内容だけを変え、symlink 自体の字面・metadata が変わらない場合である。target は開かないので検出しない。機密は別の保護領域で管理する。
+
+既定の上限は 100000 項目、通常ファイル合計 1 GiB、1 件 64 MiB、壁時計 60 秒である。Git の状態出力は保持する前に同じ合計上限で drain し、ディレクトリ名は項目上限を消費してから保持する。上限、到達する include/includeIf の欠落・循環・読取不能・FIFO、または lstat/open/read の間の置換は検査不能として止まる。利用者だけが `loop.sh` の `--state-max-items`、`--state-max-bytes`、`--state-max-file-bytes`、`--state-max-seconds` で上限を広げられ、profile と子プロセスからは変えられない。旧形式の inflight は必須欄を現状で補完せず停止する。
+
+- profile と設定 origin は、親ディレクトリを fd で保持してから `lstat`・`open`・`fstat` を行う。途中の symlink、親ディレクトリの差替え、通常ファイル以外、読取中の変更は内容を採用せず停止する。到達する include/includeIf は各 worktree で Git が解決した実効設定の digest と、origin の種別・metadata・通常ファイル digest を両方比べる。
+- state JSON も外部から書き換えられうる入力として扱う。比較時は parent fd から通常ファイルだけを `O_NOFOLLOW|O_NONBLOCK` で有界に読み、FIFO・symlink・不正 JSON・旧 schema は比較不能として停止する。出力は予測可能な `.tmp` 名を開かず、同じ parent fd 内の排他的な一時ファイルを fsync 後に置換する。
+- 許す差は、当該周の worktree が保持した path と lock 理由のまま、`refs/heads/task/{名}` と HEAD が同一の commit へ進むこと、その commit と同じ OID の `refs/remotes/origin/task/{名}` が新設または進むことだけである。commit に伴う当該 worktree の clean index の生バイト変更もこの条件に限り許す。child が detached のまま commit したときは、その当該 worktree の限定差だけを判定器へ渡すが、正常の条件を満たせないので失敗として残す。他の ref、symref、worktree、index、ファイル、設定の差は名前の接頭辞だけで許さない。
+
 - 共有の git ディレクトリ(`git rev-parse --git-common-dir`)を、その周の起動の直前の控え(§3 の 8)と比べる
   - `config`: `git config --file <パス> --no-includes --list -z` の項目の並びで比べ、どんな変化も許さない。周の skill は共有の `config` に書かない(無人の push は `-u` を付けず、作業ブランチは `--no-track` で作る — unattended-mode.md §7)
   - `config.worktree`: 同じく項目の並びで比べ、どんな変化も許さない
+  - `hooks` の全木と `info/exclude`・`info/attributes`・`info/sparse-checkout`・`info/grafts`: 通常ファイル・symlink・特殊ファイル・不在を含めて控え、どんな変化も許さない
   - `hooks/`: ファイルの種類・モード・symlink の行き先・中身を比べる(実行権を付けるだけの変更も捉える)
   - `info/`: `exclude`・`attributes`・`sparse-checkout`・`grafts` だけをバイト列で比べる(`git gc` が作る `info/refs` などは比べない)
   - その周の worktree の `config.worktree`: 同じく項目の並びで比べ、どんな変化も許さない
