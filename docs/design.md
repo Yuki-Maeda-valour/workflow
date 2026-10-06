@@ -323,7 +323,7 @@ initialized_at: "YYYY-MM-DD"              # 初回導入日
 
 ### review と commit・検証根拠の固定
 
-`ship-task/scripts/review-guard.py` は実装開始時の task_dir・未追跡・ignore・品質入口を控え、
+[review-guard.py](../plugins/dev-workflow/skills/ship-task/scripts/review-guard.py) は実装開始時の task_dir・未追跡・ignore・品質入口を控え、
 review 前後の対象集合と実入力を hash で結び付ける。検証担当が state hash を外部に保持し、
 機械照合で index/blob/commit tree を比べる。詳細な CLI・順序・mode は
 [review-protocol.md](../plugins/dev-workflow/skills/do-task/references/review-protocol.md#reviewcommit-照合)が正本。
