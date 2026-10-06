@@ -2415,8 +2415,11 @@ pa "cd の前置き: 続きのリダイレクトの先も P から解く(CDPATH=
   "$(bash_in 'CDPATH= cd -P -- src && git status > ../.claude/reviews/p.txt')"
 pa "cd の前置き: 続きの区切りに | を使える(CDPATH= cd -P -- src && git status | cat)" Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status | cat')"
-pdk "cd の前置き: 続きの書き込み先を P から解くと保護パス(CDPATH= cd -P -- .claude && git status > settings.json)" protected Bash \
+# H27: 保護 cwd の裸引数も検査するため、status の拒否(other)を保護書き込み(protected)より優先する
+pdk "cd の前置き: 保護 cwd の裸引数と保護書き込み(CDPATH= cd -P -- .claude && git status > settings.json)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- .claude && git status > settings.json')"
+pdk "cd の前置き: 書き込み先だけが保護パス(CDPATH= cd -P -- .claude && git > settings.json)" protected Bash \
+  "$(bash_in 'CDPATH= cd -P -- .claude && git > settings.json')"
 pdk "cd の前置き: プラグインルートへの前置き(CDPATH= cd -P -- <プラグインルート> && cat x)" other Bash \
   "$(bash_in "CDPATH= cd -P -- $PP && cat x")"
 pdk "cd の前置き: 2 つ目の cd(CDPATH= cd -P -- <worktree> && cd sub && ls)" other Bash \
@@ -2441,8 +2444,10 @@ pdk "cd の前置きの後ろの || より後ろは入力の cwd からも解く
   "$(bash_in 'CDPATH= cd -P -- src && git status || cat ../src/x.txt')"
 pdk "cd の前置きの後ろの ; より後ろは入力の cwd からも解く(… src && git status ; cat ../src/x.txt)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status ; cat ../src/x.txt')"
-pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && git status || echo x > settings.json)" protected Bash \
+pdk "cd の前置きの後ろの裸引数も P から解く(… .claude && git status || echo x > settings.json)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- .claude && git status || echo x > settings.json')"
+pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && git || echo > settings.json)" protected Bash \
+  "$(bash_in 'CDPATH= cd -P -- .claude && git || echo > settings.json')"
 pdk "cd の前置きの後ろは最初の || で分ける(… src && git status || cat ../src/x.txt ; git log)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status || cat ../src/x.txt ; git log')"
 # P から解くと W(.claude/reviews/ の下)、入力の cwd から解くと保護パスになる書き込み先で、2 回目の判定の種類を縛る

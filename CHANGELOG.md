@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.22.2
+
+### 修正
+
+- `loop-permission.py` が、保護ディレクトリ内から指定した裸の引数・長いオプションの値・代入値をパスとして検査する([子 Issue #179](https://github.com/Yuki-Maeda-valour/workflow/issues/179)、親 #107 の H27)。入力の作業ディレクトリと、許可された `cd` の移動先の両方で、`git checkout -- settings.json` などの検査漏れを防ぐ。
+- W の例外と通常ディレクトリでの操作を維持する。短縮オプションの連結値は既存の狭い範囲で検査し、保護ディレクトリから W に対する `cp -pv`・`rm -rf` などの正常な束ねフラグを保つ。
+- scratch の実 Git による復元操作、実 hook の拒否とログ、W へのコピーと削除を回帰テストで確認する。保守的に裸の値を検査する範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.22.1
 
 ### 修正
