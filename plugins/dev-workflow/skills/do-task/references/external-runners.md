@@ -248,6 +248,10 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 
    **手順の実行順**(下のコードブロックもこの順に並べる): 手順 0(遅延取得の無効化)→ 縮退判定 → `TREE` の決定と `TOP` の解決(`$TREE` が `$TOP` の配下なら起動しない)→ `EXCLUDE` の生成 → 事前検査 → `worktree add` → 生バイト検査 → 衝突検査 ① → 手順 1(snapshot とパッチを一時ツリーへ生成・終了コード検査・両ファイルの sha256 取得)→ 適用前除去 → `apply` → 手順 2(未追跡の cp)→ 衝突検査 ② → 一時ツリーの切り離し → 手順 3(依頼文の配置 → symlink の解決先検査 → 機密検査 → 新規ファイルの存在検査)→ 起動。**依頼文は呼び出し側が一時ツリーの外で組み立て**、この節は NOTE と「一時ツリーに含めなかった未追跡」の一覧をその末尾に追記してから、手順 3 で `$TREE/.review-prompt.md` へ配置する。生バイト検査を適用前除去より前に置くのは、除去後では削除したパスが不一致になるため。衝突検査 ② を手順 2 の後に置くのは、配置の直前に 1 回で「パッチが作った symlink」と「手順 2 が作ったエントリ」の両方を検出するため(手順 2 は `COPY_EXCLUDE` により制御ファイル名へは書き込まないので、間に挟んでもリンク先は上書きされない)。
 
+   **診断表示の制御文字**: `diff-snapshot.sh` の `sanitize` は、表示用コピーの ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F、バイト列 `C2 80`〜`C2 9F`)を各1個の `?` に置き換える。対象は `## 改竄の疑い` の各列、承認済み項目の列挙・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断と NOTE。設定の表示値は、置換してから200文字で切る。通常の日本語などの UTF-8 は保持する。
+
+   内容・承認ダイジェストは元データから計算する。filter 無効化用の NUL 終端トークン、比較する内容、patch、終了コードは変えない。これは全出力を加工する処理ではなく、通常本文・パス引用や、`sanitize` を通らない既存診断(filter 無効化失敗時の ERROR など)の表示は保証対象外。C1以外の Unicode 表示制御と、不正な UTF-8 全体の検証も行わない。
+
    **gitlink の停止**: 手順 1 は一時 worktree の作成・生バイト検査・衝突検査 ①を終えた後という上記の順序を変えず、index の gitlink に `.git` 名エントリ無しの非空ディレクトリ、またはパス解決不能または列挙不能なディレクトリを検出して exit 22 になれば、手順 2・3と外部 CLI の起動へ進まない。通常生成は診断 snapshot だけを出し patch を公開しない。`--accept`、除外、基準時点の未追跡一覧では回避できず、内容を保全して誤った gitlink 登録を修正するか正当な submodule を復旧してから再実行する。`.git` 名エントリの真正性・内容は検証しないため、偽の通常ファイル・ディレクトリ・symlinkによる回避、index/作業ツリーの並行書き換え(TOCTOU)、および正当な submodule 内部の未commit変更は範囲外である。
 
    **手順 0(遅延取得の無効化)**: ① 最初に `export GIT_NO_LAZY_FETCH=1` を実行する(以後の全 git 呼び出し — 元リポジトリ向けも一時ツリー向けも — に効く。promisor remote の遅延取得は `remote.<名>.uploadpack` 等の設定値をコマンドとして実行する — 実測: git 2.55 で、欠けた blob を読む `diff` が `uploadpack` の `touch` を実行し、この変数を付けると実行されない)。② **git が 2.45 未満のとき**(`git --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false version` の出力の 3 語目を `.` で分け、メジャーとマイナーを数値で比べて判定する — 文字列で比べると `2.5` を 2.45 以上と誤る。この変数を解さない版。版を取れないときも同じ扱い — `scripts/diff-snapshot.sh` と同じ fail-closed)**は、続けて `git -C "<手順 1 の --cwd と同じ値>" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false config --show-scope --includes --list -z` を引き**(設定を読むだけでオブジェクトを読まない)、**scope `local` / `worktree` に `extensions.partialclone` か `remote.<名>.promisor` があれば(値は見ない — `remote.<名>.promisor=false` でも同じ扱い。fail-closed。`scripts/diff-snapshot.sh` の検査と同じ)、以後の git を 1 つも打たずに停止して報告する**(この版では遅延取得を無効化できず、縮退判定の `rev-parse --verify HEAD^{commit}` や事前検査の `read-tree` / `ls-tree`、`worktree add` が欠けたオブジェクトを読みに行くだけで設定値のコマンドが実行されうる。`config` の rc が 0 でないとき — 非 git・壊れた config — はここでは何も判定せず次へ進む。縮退判定が扱う)。2.45 以上ではこの節の側で追加の判定はしない — 手順 1 のスクリプトが出す NOTE「promisor 構成: 遅延取得を無効化して実行」が `.review-snapshot.md` の見出しに載るだけ。
@@ -498,6 +502,8 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 この報告を省略しない(サイレント縮退禁止)。複数ランナーを宣言した場合は 1 件ずつ結果を出す。profile に `runner_commands` 等の**無視した設定**があった場合も、無視した事実を報告に入れる。
 
 ## 11. 回帰テスト
+
+- **C1の診断表示**: `diff-snapshot-selftest.sh` は、C1全32文字、通常の UTF-8、C1と同じ継続バイトを含む正常文字、既存の C0・DEL、200文字の境界を確認する。疑い行の全列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor の新旧 Git 分岐を検査する。元の3列から独立に計算した承認値、同じ表示になる別C1への変更時の承認失効、生のfilter名を持つトークン、filterの非実行、本文・patchの保持も確認する。旧置換へ戻す変異と各表示経路の置換を外す変異は、追加した回帰で検出する。
 
 - **gitlink 検査**: `diff-snapshot-selftest.sh` は、偽gitlink、隠しエントリ、FIFO、壊れた symlink、空白・glob・日本語・改行・先頭 `-`・TAB を含むパス、空・不存在・初期化済み submodule、祖先・symlink先の検索権限不足、列挙不能、除外・基準未追跡一覧・`--accept` による回避不可、診断のみとpatch非公開、index tree・生バイト不変を確認する。検査を外す構文正常な写しが偽gitlinkを exit 0 で通し、正しい実装では対応ケースだけが exit 22 となる変異も確認する。
 
