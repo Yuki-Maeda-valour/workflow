@@ -222,6 +222,7 @@ run_detached() { # $1=秒 残り=コマンド
 net_git() { # $1=秒 残り=git の引数
   local secs="$1"
   shift
+  verify_environment || die 20 environment "network Git の前に環境が変わった"
   GIT_TERMINAL_PROMPT=0 run_detached "$secs" git "${GIT_PRE[@]}" "$@"
 }
 
@@ -822,42 +823,68 @@ def cmd_hookcheck(user_settings, *managed):
     sys.exit(1 if reasons else 0)
 
 
-def cmd_hook_settings(python_bin, script):
-    # --settings に渡す JSON 文字列(PermissionRequest の hook)。コマンドは 2 つの絶対パスをシェルのクォートで囲む
+def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha):
+    # command 自体に保持した loader と hash を置き、改変された helper を先に実行しない。
     def quote(p):
         return "'" + p.replace("'", "'\\''") + "'"
+    argv = [python_bin, '-I', '-B', '-c', ENVIRONMENT_LOADER, guard_sha, guard,
+            'hook', '--state', state, '--expect-sha256', state_sha,
+            '--path', 'skills/ship-task/scripts/loop-permission.py']
     settings = {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
-        {"type": "command", "command": f"{quote(python_bin)} {quote(script)}"}]}]}}
+        {"type": "command", "command": ' '.join(map(quote, argv))}]}]}}
     print(json.dumps(settings, ensure_ascii=False, separators=(",", ":")))
 
 
 def cmd_permlog(path):
-    # 周の判定の記録(PERMLOG)を要約する: allow・deny の数と、deny の種類ごとの数・deny の行
+    # 子が書ける参考表示。内容・欠落・エラーのどれも制御判断に使わない。
     allow = deny = 0
-    kinds = {}
-    lines = []
-    if os.path.exists(path):
-        for raw in open(path, "rb").read().decode("utf-8", "replace").split("\n"):
-            if not raw.strip():
-                continue
-            try:
-                e = json.loads(raw)
-            except ValueError:
-                deny += 1
-                kinds["unreadable"] = kinds.get("unreadable", 0) + 1
-                continue
-            if e.get("decision") == "allow":
+    kinds, lines = {}, []
+    issue = ''
+    fds = []
+    try:
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY); fds.append(fd)
+        parts = os.path.abspath(path).split('/')[1:]
+        for name in parts[:-1]:
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd); fds.append(fd)
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd); fds.append(fd)
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > 1048576:
+            raise ValueError('通常ファイルでないか読取上限を超える')
+        raw = b''
+        while len(raw) < st.st_size:
+            chunk = os.read(fd, min(65536, st.st_size - len(raw)))
+            if not chunk: raise ValueError('読取中に切り詰められた')
+            raw += chunk
+        after = os.fstat(fd)
+        if os.read(fd, 1) or (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (st.st_dev, st.st_ino, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns):
+            raise ValueError('読取中に変わった')
+        if raw and not raw.endswith(b'\n'):
+            raise ValueError('末尾の行が途中で切れている')
+        records = raw.decode('utf-8').splitlines()
+        if len(records) > 10000: raise ValueError('行数上限を超える')
+        for raw_line in records:
+            e = json.loads(raw_line)
+            if not isinstance(e, dict) or e.get('decision') not in ('allow', 'deny'):
+                raise ValueError('行の形式が違う')
+            if e['decision'] == 'allow':
                 allow += 1
-                continue
-            deny += 1
-            k = str(e.get("kind") or "other")
-            kinds[k] = kinds.get(k, 0) + 1
-            lines.append(one_line(f"{e.get('tool_name')} [{k}] {e.get('reason')} — {e.get('subject')}", 600))
-    print(f"allow={allow}")
-    print(f"deny={deny}")
-    print("kinds=" + ",".join(f"{k}:{v}" for k, v in sorted(kinds.items())))
-    for line in lines:
-        print("line=" + line)
+            else:
+                deny += 1
+                kind = e.get('kind', 'other')
+                if not isinstance(kind, str): raise ValueError('kind が文字列でない')
+                kind = one_line(kind, 100)
+                kinds[kind] = kinds.get(kind, 0) + 1
+                if len(lines) < 100:
+                    lines.append(one_line(f"{e.get('tool_name')} [{kind}] {e.get('reason')} — {e.get('subject')}", 600))
+    except (OSError, ValueError, UnicodeError) as exc:
+        issue = one_line(str(exc), 300)
+    finally:
+        for fd in reversed(fds): os.close(fd)
+    print(f'allow={allow}')
+    print(f'deny={deny}')
+    print('kinds=' + ','.join(f'{k}:{v}' for k,v in sorted(kinds.items())))
+    if issue: print('reference-error=' + issue)
+    for line in lines: print('line=' + line)
 
 
 def cmd_origin_json():
@@ -918,7 +945,15 @@ def cmd_candiff(task_dir):
         print(p)
 
 
+ENVIRONMENT_LOADER = 'import os,sys,stat,re,hashlib,json,signal\n\ndef load_guard(expected, path):\n    if not re.fullmatch("[a-f0-9]{64}", expected):\n        raise RuntimeError("hash")\n    parts = path.split("/")\n    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):\n        raise RuntimeError("path")\n    def expired(*unused):\n        raise RuntimeError("timeout")\n    def identity(st):\n        return st.st_dev, st.st_ino, st.st_mode\n    def version(st):\n        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns\n    previous = signal.signal(signal.SIGALRM, expired)\n    signal.setitimer(signal.ITIMER_REAL, 15)\n    fd = None\n    try:\n        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)\n        for name in parts[1:-1]:\n            before = os.stat(name, dir_fd=fd, follow_symlinks=False)\n            if not stat.S_ISDIR(before.st_mode):\n                raise RuntimeError("directory")\n            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)\n            os.close(fd); fd = child\n            if identity(before) != identity(os.fstat(fd)):\n                raise RuntimeError("directory changed")\n        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)\n        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:\n            raise RuntimeError("file")\n        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)\n        try:\n            if version(before) != version(os.fstat(child)):\n                raise RuntimeError("file changed")\n            raw = b""\n            while len(raw) < before.st_size:\n                chunk = os.read(child, min(65536, before.st_size - len(raw)))\n                if not chunk:\n                    raise RuntimeError("short read")\n                raw += chunk\n            if os.read(child, 1) or version(before) != version(os.fstat(child)):\n                raise RuntimeError("file changed")\n            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):\n                raise RuntimeError("path changed")\n            if hashlib.sha256(raw).hexdigest() != expected:\n                raise RuntimeError("hash mismatch")\n            return raw\n        finally:\n            os.close(child)\n    finally:\n        if fd is not None:\n            os.close(fd)\n        signal.setitimer(signal.ITIMER_REAL, 0)\n        signal.signal(signal.SIGALRM, previous)\n\nargs = []\ntry:\n    expected, path, *args = sys.argv[1:]\n    raw = load_guard(expected, path)\n    sys.argv = [path, *args]\n    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})\nexcept (Exception, SystemExit) as exc:\n    if isinstance(exc, SystemExit) and exc.code in (0, None):\n        raise\n    if args[:1] == ["hook"]:\n        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))\n        raise SystemExit(0)\n    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)\n    raise SystemExit(20)\n'
+
+def cmd_environment_run(expected, path, *args):
+    sys.argv = ['environment-loader', expected, path, *args]
+    exec(compile(ENVIRONMENT_LOADER, '<environment-loader>', 'exec'), {'__name__':'__main__'})
+
+
 COMMANDS = {
+    "environment-run": cmd_environment_run,
     "taskinfo": cmd_taskinfo, "holdcount": cmd_holdcount, "holdcode": cmd_holdcode,
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
@@ -935,7 +970,13 @@ except Exception as exc:  # 想定外の失敗は 9(呼び出し側は「差分�
     print(f"補助の失敗: {exc!r}", file=sys.stderr)
     sys.exit(9)
 PY
-py() { ( cd / && exec python3 -c "$PY_HELPER" "$@" 7>&- ); }
+py() {
+  local isolation=()
+  # 固定検査と hook の組立は stdlib だけを使い、cwd/PYTHONPATH/user-site を探索しない。
+  # profile の PyYAML など、ほかの補助処理の利用者 site は従来どおり使う。
+  case "${1:-}" in environment-run|hook-settings) isolation=(-I) ;; esac
+  ( cd / && exec python3 "${isolation[@]}" -c "$PY_HELPER" "$@" 7>&- )
+}
 
 # ── 報告(状態ディレクトリの <実行 ID>/report.md。要約は stdout)──
 rep() { printf '%s\n' "$@" >>"$REPORT"; }
@@ -987,6 +1028,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
 take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか $5=親削除記録を使わない
   local own=() prior=() fresh=() control=() removed=() directory path rc=0 err
   SNAPSHOT_DIFF=""
+  verify_environment || die 20 environment "状態観察 helper の直前に環境が変わった"
   [ -z "$ITER_WT" ] || own=(--exclude-worktree "$ITER_WT")
   [ -z "${3:-}" ] || prior=(--secret-patterns-from "$3")
   [ "${4:-0}" != 1 ] || fresh=(--fresh-config-baseline)
@@ -1015,10 +1057,43 @@ take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクト�
   return 0
 }
 
+environment_call() {
+  py environment-run "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$@"
+}
+verify_environment() {
+  [ -n "${ENVIRONMENT_SHA:-}" ] || return 0
+  environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" || { STATE_GIT_UNSAFE=1; return 1; }
+  if [ "${ENV_INVENTORY_READY:-0}" -eq 1 ]; then
+    local current
+    current="$(mktemp "$ENV_TEMP/plugins-current.XXXXXXXX")" || { STATE_GIT_UNSAFE=1; return 1; }
+    aux "$current" "${AUX_PLUGINS[@]}" || { STATE_GIT_UNSAFE=1; return 1; }
+    environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" --current-inventory "$current" || { STATE_GIT_UNSAFE=1; return 1; }
+  fi
+}
+bind_environment() { # bootstrap の出力だけから保持する。過去の状態から復元しない。
+  local receipt="$1"
+  ENVIRONMENT_STATE="$(printf '%s' "$receipt" | py json-get state)"
+  ENVIRONMENT_SHA="$(printf '%s' "$receipt" | py json-get sha256)"
+  TRUSTED_ENV_GUARD="$(printf '%s' "$receipt" | py json-get guard)"
+  ENV_GUARD_SHA="$(printf '%s' "$receipt" | py json-get guard_sha256)"
+  PLUGIN_ROOT="$(printf '%s' "$receipt" | py json-get plugin)"
+  RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
+  PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
+  ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
+  GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
+  LOOP_STATE_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"
+  LOOP_STARTUP_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
+  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY"; do
+    [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
+  done
+  HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA")"
+}
+
 # 状態 JSON の生バイトを、親ディレクトリから nofollow で開く helper にだけ読ませて
 # digest 化する。シェルの `<state` は link/FIFO を開いてしまうため、ここで使わない。
 state_digest() { # $1=parent-held state pathname
   local value
+  verify_environment || return 1
   value="$("$PY_ABS" "$LOOP_STATE_PY" state-digest --state "$1" \
     --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" \
     --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || return 1
@@ -1057,6 +1132,7 @@ plan_stop_control() { # $1=中断前state（あれば、保持済み descriptor 
     # `mapfile` reports a successful EOF even when process substitution
     # failed.  Wait for the bounded reader explicitly before accepting any
     # descriptor from the saved state.
+    verify_environment || die 20 environment "停止ファイルの基準を読む直前に環境が変わった"
     exec {held_fd}< <("$PY_ABS" "$LOOP_STATE_PY" stop-control --state "$prior" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")
     held_pid=$!
@@ -1099,6 +1175,7 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
   elif [ "${#REMOVED_PARENT_WORKTREES[@]}" -eq 1 ]; then
     removed="${REMOVED_PARENT_WORKTREES[0]}"
     expected="$RUN_DIR/iter-${ITER_SEQ:-0}.expected-after-remove.json"
+    verify_environment || die 20 environment "検証済み状態を派生する直前に環境が変わった"
     if ! "$PY_ABS" "$LOOP_STATE_PY" derive-removed-worktree --state "$verified" --out "$expected" --removed-worktree "$removed" --own-worktree "$ITER_WT" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"; then
       STATE_GIT_UNSAFE=1
@@ -1136,6 +1213,7 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
     SNAPSHOT_DIFF="差分: 検証済みの状態が最終観察中に書き換わったため最後に照合に通った状態を更新しない"
     return 1
   fi
+  verify_environment || die 20 environment "基準昇格の照合直前に環境が変わった"
   out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$expected" --after "$observed" \
     --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -1215,6 +1293,10 @@ verify_iteration() {
   VERIFY_DIFF=""
   ITER_VERIFIED=""
   ITER_VERIFIED_SHA=""
+  if ! verify_environment; then
+    VERIFY_DIFF="差分: plugin または利用者設定の照合に失敗した"
+    return 0
+  fi
   # 比べる元が周の起動の直前に取ったままか(食い違えば、共有の状態の変化と同じく止める)
   if [ -z "$ITER_BASE_SHA" ] || [ "$(state_digest "$ITER_BASE" || true)" != "$ITER_BASE_SHA" ]; then
     STATE_GIT_UNSAFE=1
@@ -1231,6 +1313,7 @@ verify_iteration() {
     VERIFY_DIFF="差分: 照合後の状態を保持できない"
     return 0
   fi
+  verify_environment || die 20 environment "状態比較 helper の直前に環境が変わった"
   out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$ITER_BASE" --after "$cur" --self-worktree "$ITER_WT" --self-ref "refs/heads/task/$ITER_NAME" \
     --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -1404,6 +1487,15 @@ report_left_worktrees() {
 finish() { # $1=終了コード $2=止まった理由
   local code="$1" why="$2" n
   trap - TERM HUP INT
+  # command substitution 内の失敗フラグは親へ戻らない。終了時の Git より前に
+  # 親自身が保持済み環境を照合し、照合後に続いている変更もここで止める。
+  if [ "$STATE_GIT_UNSAFE" != 1 ] && [ -n "${ENVIRONMENT_SHA:-}" ]; then
+    if ! verify_environment; then
+      STATE_GIT_UNSAFE=1
+      [ "$code" -ne 0 ] || code=20
+      why="$why / environment-changed: 終了前の環境照合に失敗した"
+    fi
+  fi
   if [ "$STATE_GIT_UNSAFE" != 1 ]; then remove_selection_worktree; fi
   if [ -n "$REPORT" ]; then
     {
@@ -1646,117 +1738,18 @@ aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <s
 }
 
 # ── 次の起動(§4。ロックの直後、デフォルトブランチの固定・profile の読み取り・ネットワークの git より前)──
-read_inflight_meta() { # INF_* に読む
-  local k v
-  INF_ITER=""; INF_NAME=""; INF_REL=""; INF_DEF_NAME=""; INF_DEF_SHA=""; INF_WTADMIN="-"; INF_WT=""
-  INF_MODE=""; INF_SOURCE=""
-  [ -f "$INFLIGHT/meta" ] || return 1
-  # mode= が無い meta は実装モードとして読む(発見モードの周は mode=discover・source=<発見元> を足す)
-  while IFS='=' read -r k v; do
-    case "$k" in
-      iter) INF_ITER="$v" ;;
-      name) INF_NAME="$v" ;;
-      rel) INF_REL="$v" ;;
-      def_name) INF_DEF_NAME="$v" ;;
-      def_sha) INF_DEF_SHA="$v" ;;
-      wtadmin) INF_WTADMIN="$v" ;;
-      wt) INF_WT="$v" ;;
-      mode) INF_MODE="$v" ;;
-      source) INF_SOURCE="$v" ;;
-    esac
-  done <"$INFLIGHT/meta"
-  [ -n "$INF_ITER" ] && [ -n "$INF_NAME" ] && [ -n "$INF_DEF_NAME" ] && [ -n "$INF_DEF_SHA" ] && [ -f "$INFLIGHT/base.json" ]
-}
-
 handle_marks_at_start() {
   local out rc now cur diff cur_sha base_sha
   # 止めの印があれば、人が差分を確かめて消すまで起動しない。周の途中の印もあれば、先にその周のプロセスを止める
   if [ -e "$STOP_MARK" ] || [ -L "$STOP_MARK" ]; then
-    if [ -d "$INFLIGHT" ]; then
-      if read_inflight_meta; then
-        kill_marked "$INF_ITER" -
-        if [ -n "$CLEANUP_LEFT" ]; then
-          rep "- 周の途中の印(周 $INF_ITER)の残りのプロセスを止められなかった: $CLEANUP_LEFT"
-        else
-          rep "- 周の途中の印(周 $INF_ITER)の残りのプロセスを止めた(残り無し)"
-        fi
-      else
-        rep "- 周の途中の印を読めない($INFLIGHT)"
-      fi
-    fi
-    rep "" "### 止めの印の中身" "" "$(cat -- "$STOP_MARK" 2>/dev/null || true)"
-    cat -- "$STOP_MARK" >&2 2>/dev/null || true
+    # inflight は同じ UID が書ける状態領域であり、そこだけの iter を
+    # 根拠に signal を送らない。止めの印がある再開は人が確認する。
+    [ ! -d "$INFLIGHT" ] || rep "- 周の途中の印は未信頼のため signal せず保全した($INFLIGHT)"
+    rep "- 止めの印は未信頼のため内容を実行・自動採用せず保全した: $STOP_MARK"
     die 20 stop-mark "止めの印がある。$(stop_mark_guide)"
   fi
-  if [ -d "$INFLIGHT" ]; then
-    # SIGKILL・再起動で片付けと照合が抜けた周
-    read_inflight_meta || die 20 inflight "周の途中の印を読めない($INFLIGHT)。中身を確かめてから消す"
-    ITER_ID="$INF_ITER"; ITER_REL="$INF_REL"; ITER_WT="$INF_WT"
-    # 1. その周の識別子のプロセスを止める
-    kill_marked "$INF_ITER" -
-    if [ -n "$CLEANUP_LEFT" ]; then
-      place_stop_mark "残ったプロセス(前の実行の周 $INF_ITER の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
-      die 20 inflight-leftover "前の実行の周 $INF_ITER のプロセスが残った($CLEANUP_LEFT)。$(stop_mark_guide)"
-    fi
-    # 2. 印に残した周の起動の直前の状態と、周の後の照合と同じ規則で比べる + D8
-    cur="$RUN_DIR/inflight-now.json"
-    if ! take_snapshot "$cur" "$INF_WTADMIN" "$INFLIGHT/base.json"; then
-      diff="${SNAPSHOT_DIFF:-差分: 今の状態を安全に控えられない(照合できない)}"
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "$diff" 0
-      rep "- 前の実行の周 $INF_ITER の観察で差分:" "$diff"
-      die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
-    fi
-    cur_sha="$(state_digest "$cur" || true)"
-    base_sha="$(state_digest "$INFLIGHT/base.json" || true)"
-    if [ -z "$cur_sha" ] || [ -z "$base_sha" ]; then
-      STATE_GIT_UNSAFE=1
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "差分: 照合する状態を保持できない" 1
-      die 20 inflight-diff "前の実行の周 $INF_ITER の状態を安全に照合できない。$(stop_mark_guide)"
-    fi
-    rc=0
-    out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$INFLIGHT/base.json" --after "$cur" --self-worktree "$INF_WT" --self-ref "refs/heads/task/$INF_NAME" \
-      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
-    diff="$(printf '%s\n' "$out" | sed -n '/^差分: /p')"
-    if [ "$rc" -ne 0 ] && [ -z "$diff" ]; then diff="差分: 照合できない(補助の終了コード $rc)"; fi
-    if [ -n "$diff" ]; then
-      STATE_GIT_UNSAFE=1
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の照合)" "$diff" 0
-      rep "- 前の実行の周 $INF_ITER の照合で差分:" "$diff"
-      die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
-    fi
-    if [ "$(state_digest "$INFLIGHT/base.json" || true)" != "$base_sha" ] || \
-       [ "$(state_digest "$cur" || true)" != "$cur_sha" ]; then
-      STATE_GIT_UNSAFE=1
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の観察)" "差分: 照合中に状態の控えが書き換わった" 1
-      die 20 inflight-diff "前の実行の周 $INF_ITER の状態が照合中に書き換わった。$(stop_mark_guide)"
-    fi
-    now="$(G -C "$TOP" rev-parse -q --verify "refs/heads/$INF_DEF_NAME" 2>/dev/null || true)"
-    if [ "$now" != "$INF_DEF_SHA" ]; then
-      diff="${diff:+$diff
-}差分: refs/heads/$INF_DEF_NAME: $INF_DEF_SHA → ${now:-(無い)}"
-    fi
-    if [ -n "$diff" ]; then
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER が途中で終わった後の照合)" "$diff" 0
-      rep "- 前の実行の周 $INF_ITER の照合で差分:" "$diff"
-      die 20 inflight-diff "前の実行の周 $INF_ITER の後に共有の状態が変わった。$(stop_mark_guide)"
-    fi
-    # 3. 差分が無ければ、最後に照合に通った状態を更新してから周の途中の印を消す。
-    # base.json は累積 secret_paths の基準でもあるため、先に消してはならない。
-    begin_promotion_critical
-    if ! save_last_verified "$cur" "$cur_sha"; then
-      place_stop_mark "共有の状態の変化(前の実行の周 $INF_ITER の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
-      rep "- 前の実行の周 $INF_ITER の基準を昇格できない:" "${SNAPSHOT_DIFF:-}"
-      end_promotion_critical
-      die 20 inflight-diff "前の実行の周 $INF_ITER の後の状態を基準へ昇格できない。$(stop_mark_guide)"
-    fi
-    rm -rf -- "$INFLIGHT"
-    end_promotion_critical
-    STARTUP_NOTES+=("前の実行の周 $INF_ITER が途中で終わっていた。残りのプロセスを止め、照合に通った(worktree ${INF_WT:-?} は残っている)")
-    if [ "$INF_MODE" = discover ]; then
-      STARTUP_NOTES+=("前の実行の周 $INF_ITER は発見モードの周(発見元 ${INF_SOURCE:-?}・ブランチ task/$INF_NAME)。残った worktree と今夜の名のブランチで、その発見元は読み飛ばす")
-    fi
-    ITER_ID=""; ITER_REL=""; ITER_WT=""
-    return 0
+  if [ -e "$INFLIGHT" ] || [ -L "$INFLIGHT" ]; then
+    die 20 inflight-untrusted "周の途中の印は未信頼($INFLIGHT)。signal・削除・unlock・ref 更新をせず保全した。人が所有者と成果物を確認する"
   fi
   # どちらの印も無ければ、最後に照合に通った状態と比べて、差分は報告に出して続ける
   # (実行と実行の間の変化は人の操作でもありうるため)
@@ -1767,6 +1760,7 @@ handle_marks_at_start() {
     fi
     FRESH_CONFIG_BASELINE=1
     rc=0
+    verify_environment || die 20 environment "状態比較 helper の直前に環境が変わった"
     out="$("$PY_ABS" "$LOOP_STATE_PY" compare --before "$LAST_VERIFIED" --after "$cur" \
       --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || rc=$?
     [ "$rc" -le 1 ] || die 30 internal "最後に照合に通った状態との比較に失敗した(補助の終了コード $rc)"
@@ -1933,9 +1927,11 @@ make_selection_worktree() {
   # 3. task_dir(worktree の中で解決する。profile の文字列は --task-dir=<値> で渡す)
   rc=0
   if [ "$TASK_DIR_SET" -eq 1 ]; then
-    out="$(cd / && python3 "$RESOLVER" --project-root "$wt" --task-dir="$TASK_DIR_VALUE" 7>&-)" || rc=$?
+    verify_environment || die 20 environment "resolver の直前に環境が変わった"
+    out="$(cd / && python3 -B "$RESOLVER" --project-root "$wt" --task-dir="$TASK_DIR_VALUE" 7>&-)" || rc=$?
   else
-    out="$(cd / && python3 "$RESOLVER" --project-root "$wt" 7>&-)" || rc=$?
+    verify_environment || die 20 environment "resolver の直前に環境が変わった"
+    out="$(cd / && python3 -B "$RESOLVER" --project-root "$wt" 7>&-)" || rc=$?
   fi
   [ "$rc" -eq 0 ] || die 30 task-dir-helper "task_dir を解決できない(resolve-task-dir.py の終了コード $rc: $(printf '%s' "$out" | head -c 300))"
   TASK_DIR="$(printf '%s' "$out" | py json-get task_dir)" || die 30 task-dir-helper "resolve-task-dir.py の出力を読めない"
@@ -1946,7 +1942,8 @@ make_selection_worktree() {
   # 保護パス(許可の仲介の hook と同じ列。.claude/worktrees の下を除く)の下の task_dir は止まる(無人の周の skill が
   # タスク MD を Bash の引数に渡す操作を、hook が拒否するため)。選定の worktree を消してから exit 20
   rc=0
-  ( cd / && exec "$PY_ABS" "$PERM_SCRIPT" --is-protected "$TASK_DIR" 7>&- ) || rc=$?
+  verify_environment || die 20 environment "保護パス検査の直前に環境が変わった"
+  ( cd / && exec "$PY_ABS" -B "$PERM_SCRIPT" --is-protected "$TASK_DIR" 7>&- ) || rc=$?
   case "$rc" in
     0) remove_selection_worktree
        die 20 task-dir "解決した task_dir が保護パスの下にある: $TASK_DIR(無人の周ではタスク MD を扱えない。task_dir を保護パスの外へ移す)" ;;
@@ -2405,15 +2402,13 @@ read_permlog() {
       kinds=*) PERM_KINDS="${line#kinds=}" ;;
     esac
   done <<<"$out"
-  rep "- 許可の仲介(D22): allow $PERM_ALLOW 件・deny $PERM_DENY 件${PERM_KINDS:+(種類: $PERM_KINDS)}。記録: $ITER_PERMLOG"
+  while IFS= read -r line; do
+    case "$line" in reference-error=*) rep "- 許可の参考記録を読めない(制御判断には使わない): ${line#reference-error=}" ;; esac
+  done <<<"$out"
+  rep "- 許可の仲介(D22、参考表示のみ): allow $PERM_ALLOW 件・deny $PERM_DENY 件${PERM_KINDS:+(種類: $PERM_KINDS)}。記録: $ITER_PERMLOG"
   if [ "$PERM_DENY" -gt 0 ]; then
     printf '%s\n' "$out" | sed -n 's/^line=/  - deny: /p' >>"$REPORT"
   fi
-}
-
-# その周の deny がすべて種類 protected か(deny が 1 件以上あり、ほかの種類が無い)
-g1_protected_only() {
-  [ "$PERM_DENY" -gt 0 ] && [ "$PERM_KINDS" = "protected:$PERM_DENY" ]
 }
 
 # 正常の周の後片付け: .claude/reviews を写す → unlock → remove(--force なし)。拒否されたら残して lock し直す
@@ -2501,6 +2496,7 @@ source=$ITER_SOURCE
     STATE_GIT_UNSAFE=1
     die 20 state-snapshot "周の開始直前の状態を安全に保持できない"
   fi
+  verify_environment || die 20 environment "子の起動直前に plugin または利用者設定が変わった"
   # 周の途中の印(周の起動の直前に置く)
   rm -rf -- "$STATE/inflight.tmp"
   mkdir "$STATE/inflight.tmp"
@@ -2530,6 +2526,8 @@ source=$ITER_SOURCE
     cd "$ITER_WT"
     exec "$ENV_BIN" -u DEV_WORKFLOW_HOST_CLI -u OLDPWD DEV_WORKFLOW_LOOP_ITER="$ITER_ID" \
       DEV_WORKFLOW_LOOP_WORKTREE="$ITER_WT" DEV_WORKFLOW_LOOP_PERMLOG="$ITER_PERMLOG" \
+      DEV_WORKFLOW_ENV_STATE="$ENVIRONMENT_STATE" DEV_WORKFLOW_ENV_SHA256="$ENVIRONMENT_SHA" \
+      DEV_WORKFLOW_ENV_GUARD="$TRUSTED_ENV_GUARD" DEV_WORKFLOW_ENV_GUARD_SHA256="$ENV_GUARD_SHA" \
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
       DEV_WORKFLOW_LOOP_PUSH_REPO="$O_REPO" DEV_WORKFLOW_LOOP_PUSH_REF="refs/heads/task/$ITER_NAME" \
       CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
@@ -2587,7 +2585,11 @@ source=$ITER_SOURCE
   begin_promotion_critical
   if [ "$JUDGE_OK" -eq 1 ]; then
     remove_iteration_worktree
-    CONSEC_FAIL=0
+    if [ "$OUTCOME" = 保留 ] && [ "$HOLD_CODE" = G1 ]; then
+      CONSEC_FAIL=$((CONSEC_FAIL + 1))
+    else
+      CONSEC_FAIL=0
+    fi
     if [ "$OUTCOME" = 保留 ]; then HELD_NAMES+=("$ITER_NAME"); fi
   else
     WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $JUDGE"
@@ -2611,16 +2613,10 @@ source=$ITER_SOURCE
   end_promotion_critical
   [ "$DISCOVER" -eq 0 ] || discover_after_iteration
   if [ "$JUDGE_OK" -eq 1 ] && [ "$OUTCOME" = 保留 ] && [ "$HOLD_CODE" = G1 ]; then
-    if g1_protected_only; then
-      # 拒否の記録が保護パスの種類だけの G1 は数えない(保護パスを変えるタスクで、許可リストの不足ではない)。
-      # 連続の数は動かさない(増やしも 0 に戻しもしない)
-      rep "- G1 の保留: 許可の仲介の拒否が保護パスの種類だけ(D6 の連続に数えない)"
-    else
-      if [ "$PERM_DENY" -eq 0 ]; then
-        rep "- G1 の保留: 許可の仲介の拒否の記録が無い(hook が動いていない疑い)"
-      fi
-      CONSEC_G1=$((CONSEC_G1 + 1))
-    fi
+    # PERMLOG は子が書ける参考記録であり、種類・欠落・削除・順序で
+    # ブレーカーを緩めない。protected だけの deny も同じ G1 と数える。
+    CONSEC_G1=$((CONSEC_G1 + 1))
+    rep "- G1 の保留: 拒否記録の種類にかかわらず連続 $CONSEC_G1 回として数える"
   else
     CONSEC_G1=0
   fi
@@ -2749,30 +2745,46 @@ done
 # 自身の物理パスから 4 階層上(scripts/ から 3 階層上)。setup.sh の --link の配置は clone に解決される
 SELF="$(readlink -f -- "${BASH_SOURCE[0]}")"
 PLUGIN_ROOT="$(dirname -- "$(dirname -- "$(dirname -- "$(dirname -- "$SELF")")")")"
+ORIGINAL_PLUGIN_ROOT="$PLUGIN_ROOT"
+PY_ABS="$(command -v python3)"
+case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない" ;; esac
+# 初回配布元の helper で管理入口と印だけを確認する。Git・利用者設定・
+# 保存した周の本文は読まない。未信頼の印から実行や信頼集合を復活させない。
+STATE_GIT_UNSAFE=1
+REPO="${REPO:-$PWD}"
+STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow/loop"
+LOOP_STARTUP_PY="$ORIGINAL_PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
+EARLY_STARTUP="$("$PY_ABS" -B "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
+  || die 20 startup-state "環境を読む前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+mapfile -t EARLY_MARKERS < <(printf '%s' "$EARLY_STARTUP" | "$PY_ABS" -c '
+import json,sys
+s=json.load(sys.stdin)
+print(s["locked"])
+print(s["markers"]["stop_mark"])
+print(s["markers"]["inflight"])
+')
+[ "${#EARLY_MARKERS[@]}" -eq 3 ] || die 20 startup-state "起動先の印を読めない"
+[ "${EARLY_MARKERS[0]}" != True ] || die 20 locked "同じリポジトリの loop.sh が動いている(既存のロック)"
+[ "${EARLY_MARKERS[1]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容や利用者設定を読まず保存して停止する。人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+[ "${EARLY_MARKERS[2]}" = absent ] || die 20 inflight-untrusted "周の途中の印は未信頼。利用者設定を読まず signal・削除・unlock・ref 更新をせず保全した"
+# 現在の配布元を起動時だけ信頼する。過去の STATE 内コードは実行しない。
+ENV_GUARD_PY="$PLUGIN_ROOT/skills/ship-task/scripts/environment-guard.py"
+ENV_TEMP="$(mktemp -d)" || die 20 environment "現在の実行のコピー先を作れない"
+ENV_BOOT_ARGS=()
+for f in ${MCP_CONFIGS[@]+"${MCP_CONFIGS[@]}"}; do ENV_BOOT_ARGS+=(--setting "$f"); done
+ENV_RECEIPT="$(cd / && "$PY_ABS" -B "$ENV_GUARD_PY" bootstrap --root "$ORIGINAL_PLUGIN_ROOT" --output "$ENV_TEMP/start" "${ENV_BOOT_ARGS[@]}")" \
+  || die 20 environment "配布物・利用者環境を安全に控えられない"
+bind_environment "$ENV_RECEIPT"
+export PYTHONDONTWRITEBYTECODE=1
+verify_environment || die 20 environment "開始時の環境を照合できない"
 PLUGIN_JSON="$PLUGIN_ROOT/.claude-plugin/plugin.json"
-[ -f "$PLUGIN_JSON" ] || die 20 plugin-root "プラグインのルートに .claude-plugin/plugin.json が無い($PLUGIN_ROOT)。コピーの配置からは起動できない。clone(か導入先)の loop.sh を呼ぶ"
-PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読めない: $PLUGIN_JSON"
+PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読めない"
 PLUGIN_NAME="$(printf '%s\n' "$PJ" | sed -n 1p)"
 PLUGIN_VERSION="$(printf '%s\n' "$PJ" | sed -n 2p)"
-[ "$PLUGIN_NAME" = dev-workflow ] || die 20 plugin-root "プラグインの名前が dev-workflow でない('$PLUGIN_NAME'。$PLUGIN_JSON)"
-RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
-[ -f "$RESOLVER" ] || die 20 plugin-root "兄弟の resolve-task-dir.py が無い: $RESOLVER"
-# 許可の仲介の hook(D22 ③)。python3 と hook のスクリプトの絶対パスを、それぞれシェルのクォートで囲んで組み立てる
-PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
-[ -f "$PERM_SCRIPT" ] || die 20 plugin-root "許可の仲介の hook(loop-permission.py)が無い: $PERM_SCRIPT"
-# 両方のモード: origin の URL の読み方(起動時の origin の URL の検査で打つ。周の skill も前提と push の直前に使う)と、
-# ローカルの git 設定のダイジェスト(周の skill が周の中の照合に使う。loop.sh は打たず、在ることだけを確かめる)
-ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
-[ -f "$ORIGIN_REPO_PY" ] || die 20 plugin-root "兄弟の origin-repo.py が無い(起動時の origin の URL の検査と周の照合で使う): $ORIGIN_REPO_PY"
-GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
-[ -f "$GIT_CONFIG_DIGEST_PY" ] || die 20 plugin-root "兄弟の git-config-digest.py が無い(周の中のローカルの git 設定の照合で使う): $GIT_CONFIG_DIGEST_PY"
-LOOP_STATE_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"
-[ -f "$LOOP_STATE_PY" ] || die 20 plugin-root "状態観察 helper(loop-state.py)が無い: $LOOP_STATE_PY"
-LOOP_STARTUP_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
-[ -f "$LOOP_STARTUP_PY" ] || die 20 plugin-root "起動前の管理パス helper(loop-startup.py)が無い: $LOOP_STARTUP_PY"
-PY_ABS="$(command -v python3)"
-case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない('$PY_ABS')" ;; esac
-HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT")"
+[ "$PLUGIN_NAME" = dev-workflow ] || die 20 plugin-root "プラグインの名前が dev-workflow でない"
+for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY"; do
+  [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
+done
 
 # ── §2 の 5: 既定表・--host-argv(D20)・全許可のフラグ(#68 の決定 3)──
 load_host_table "$HOST"
@@ -2795,8 +2807,9 @@ REPO="${REPO:-$PWD}"
 REPO_PHYS="$(cd -P -- "$REPO" && pwd -P)"
 STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow/loop"
 STATE_GIT_UNSAFE=1
+verify_environment || die 20 environment "起動先確認 helper の直前に環境が変わった"
 STARTUP_JSON="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
-  || die 20 startup-state "Git を使う前の起動先確認に失敗した。保存状態と管理入口を人が確認する"
+  || die 20 startup-state "Git を使う前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
 mapfile -d '' -t STARTUP_FIELDS < <(printf '%s' "$STARTUP_JSON" | "$PY_ABS" -c '
 import json,sys
 s=json.load(sys.stdin)
@@ -2840,8 +2853,9 @@ if [ "${STARTUP_FIELDS[5]}" = True ]; then
   [ -d "$STATE" ] || die 20 startup-state "保持した状態の置き場が無い"
   under "$STATE" "$TOP" && die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある"
   prepare_startup_state
+  verify_environment || die 20 environment "中断印の再観察前に環境が変わった"
   STARTUP_LATEST="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
-    || die 20 startup-state "ロック取得後に起動先の対応を確認できない"
+    || die 20 startup-state "ロック取得後に起動先の対応を確認できない。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
   mapfile -d '' -t STARTUP_MARKERS < <(printf '%s' "$STARTUP_LATEST" | "$PY_ABS" -c '
 import json,sys
 s=json.load(sys.stdin)
@@ -2854,20 +2868,10 @@ for k in ("inflight","stop_mark"):
 fi
 if [ "$STARTUP_MARKED" -eq 1 ]; then
   [ "${STARTUP_FIELDS[9]}" != True ] || die 20 locked "同じリポジトリの loop.sh が動いている(既存のロック)"
-  [ "${STARTUP_FIELDS[5]}" = True ] || die 20 startup-state "中断印と結び付く起動先の対応が無い。保存状態を人が確認する"
-  [ "${STARTUP_FIELDS[8]}" = absent ] || die 20 stop-mark "止めの印がある。保存した差分と中断印を人が確認する"
-  if ! "$PY_ABS" "$LOOP_STATE_PY" preflight --state "$INFLIGHT/base.json" --top "$TOP" --repo-admin "$REPO_GIT_DIR" --common "$COMMON" \
-      --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS"; then
-    rep "- 差分: 保存した config と現在の構造が一致しない(内容は読まない)"
-    place_stop_mark "起動前に保持済み config または管理構造の変化を検知した" "差分: 保存した config と現在の構造が一致しない(内容は読まない)" 1
-    die 20 inflight-diff "保存した設定を安全に確認できない。周の途中の印を残して停止する"
-  fi
-  STATE_GIT_UNSAFE=0
-  STOP_FILE="${STOP_FILE:-$TOP/.claude/loop.stop}"
-  plan_stop_control "$INFLIGHT/base.json"
-  handle_marks_at_start
+  [ "${STARTUP_FIELDS[8]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容と成果物を保全した。人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+  die 20 inflight-untrusted "周の途中の印は未信頼。signal・削除・unlock・ref 更新をせず保全した"
 fi
-# 中断記録が無い初回、または保持した設定の検査を通った再開だけが通常 Git へ進む。
+# 中断記録が無い起動だけが通常 Git へ進む。
 G -C "$REPO_PHYS" rev-parse --git-dir >/dev/null 2>&1 || die 20 not-git "git リポジトリでない: $REPO_PHYS"
 [ "$(G -C "$REPO_PHYS" rev-parse --is-bare-repository 2>/dev/null || true)" = false ] || die 20 bare "bare リポジトリには使えない: $REPO_PHYS"
 TOP_RAW="$(G -C "$REPO_PHYS" rev-parse --show-toplevel 2>/dev/null)" || die 20 not-git "作業ツリーを持たない: $REPO_PHYS"
@@ -2897,6 +2901,7 @@ if [ "$STATE_READY" -eq 0 ]; then
   if inside_checkout "$STATE"; then die 20 state-dir "状態ディレクトリが人のチェックアウトの中にある($STATE)。XDG_STATE_HOME を外へ向ける"; fi
   prepare_startup_state
 fi
+verify_environment || die 20 environment "起動先の対応を固定する前に環境が変わった"
 "$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE" --bind \
   --expect-top "$TOP" --expect-repo-admin "$REPO_GIT_DIR" --expect-common "$COMMON" \
   --expect-management-sha256 "${STARTUP_FIELDS[6]}" >/dev/null \
@@ -2979,6 +2984,7 @@ if inside_checkout "$WT_ROOT"; then die 20 worktree-root "worktree の置き場�
 # ── origin の URL の検査(両方のモード。loop.md §2。起動時の最初の ls-remote〈§2 の 11〉より前 — vcs のヘルパーが失敗する
 # 構成で、ls-remote の失敗ではなく origin-vcs の案内に届くように)。どの理由にも URL の字面を出さない ──
 rc=0
+verify_environment || die 20 environment "origin の検査直前に環境が変わった"
 ORIGIN_OUT="$(cd / && exec python3 -B "$ORIGIN_REPO_PY" --dir="$TOP" 7>&- 2>"$RUN_DIR/origin-repo.err")" || rc=$?
 [ "$rc" -eq 0 ] || die 20 origin-url "origin の URL を読めない(origin-repo.py の終了コード $rc。stderr は $RUN_DIR/origin-repo.err)"
 ORIGIN_INFO="$(printf '%s' "$ORIGIN_OUT" | py origin-json)" || die 20 origin-url "origin の URL を読めない(origin-repo.py の出力を解析できない)"
@@ -2999,38 +3005,6 @@ elif [ "$DISCOVER" -eq 1 ]; then
   ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"
 else
   ORIGIN_URL_STATE="origin が無い(周は push しないので、結末は 縮退)"
-fi
-
-# ── §2 の 11: 2026-09-23 決定 19 の帰結(D8)──
-LEADING=""
-ORIGIN_STATE=""
-HAS_ORIGIN=0
-if [ -n "$(G -C "$TOP" config --get remote.origin.url 2>/dev/null || true)" ]; then HAS_ORIGIN=1; fi
-if [ "$HAS_ORIGIN" -eq 1 ]; then
-  rc=0
-  LS_OUT="$(net_git "$NET_TIMEOUT" -C "$TOP" ls-remote origin "refs/heads/$DEF_NAME" 2>"$RUN_DIR/ls-remote.err")" || rc=$?
-  [ "$rc" -eq 0 ] || die 20 ls-remote "origin の $DEF_NAME を読めない(git ls-remote の終了コード $rc。${NET_TIMEOUT} 秒で打ち切る。$(head -c 300 "$RUN_DIR/ls-remote.err" | tr '\n' ' '))"
-  ORIGIN_SHA=""
-  while IFS="$TAB" read -r sha ref; do
-    if [ "$ref" = "refs/heads/$DEF_NAME" ]; then ORIGIN_SHA="$sha"; fi
-  done <<<"$LS_OUT"
-  [ -n "$ORIGIN_SHA" ] || die 20 origin-unknown "origin に refs/heads/$DEF_NAME が無い(ローカルとの前後を判定できない)"
-  if [ "$ORIGIN_SHA" = "$DEF_SHA" ]; then
-    ORIGIN_STATE="origin と同じ"
-  else
-    G -C "$TOP" cat-file -e "$ORIGIN_SHA^{commit}" 2>/dev/null \
-      || die 20 origin-unknown "origin の $DEF_NAME($ORIGIN_SHA)がローカルに無い(遅れているか分岐している。fetch して確かめる)"
-    if G -C "$TOP" merge-base --is-ancestor "$ORIGIN_SHA" "$DEF_SHA"; then
-      ORIGIN_STATE="ローカルが origin より先行"
-      LEADING="$(G -C "$TOP" log --no-show-signature --format='%h %s' "$ORIGIN_SHA..$DEF_SHA")"
-    elif G -C "$TOP" merge-base --is-ancestor "$DEF_SHA" "$ORIGIN_SHA"; then
-      die 20 behind "ローカルの $DEF_NAME が origin より遅れている(更新してから起動する)"
-    else
-      die 20 diverged "ローカルの $DEF_NAME と origin が分岐している"
-    fi
-  fi
-else
-  ORIGIN_STATE="origin が無い(検査しない)"
 fi
 
 # ── §2 の 12: ホスト CLI の実在と雛形のフラグの 2 段照合(argv と --help)・導入済みの同名プラグインの版(D11)──
@@ -3076,10 +3050,21 @@ PLUGINS_OUT="$(py plugins "$RUN_DIR/plugins.json" "$PLUGIN_VERSION")" || rc=$?
 [ "$rc" -eq 0 ] || die 20 plugin-list "導入済みのプラグインの一覧を解析できない($RUN_DIR/plugins.json)"
 case "$PLUGINS_OUT" in
   none) INSTALLED_STATE="有効な dev-workflow は導入されていない" ;;
-  "same "*) INSTALLED_STATE="同じ版 ${PLUGINS_OUT#same } が導入済み(同じ版なら中身が同じとみなす)" ;;
+  "same "*) INSTALLED_STATE="同じ版 ${PLUGINS_OUT#same } が導入済み(一覧と実体を監視する)" ;;
   "mismatch "*) die 20 plugin-version "導入済みの dev-workflow の版(${PLUGINS_OUT#mismatch })が loop.sh のプラグインの版($PLUGIN_VERSION)と違う。導入済みを更新するか、無効にしてから起動する" ;;
   *) die 20 plugin-list "導入済みのプラグインの一覧を解析できない" ;;
 esac
+
+verify_environment || die 20 environment "有効 plugin を控える前に開始時の環境が変わった"
+ENV_RECEIPT="$(environment_call bootstrap --root "$ORIGINAL_PLUGIN_ROOT" --output "$ENV_TEMP/active" --inventory "$RUN_DIR/plugins.json" "${ENV_BOOT_ARGS[@]}")" \
+  || die 20 environment "有効 plugin の実体を控えられない"
+verify_environment || die 20 environment "有効 plugin の控えの作成中に開始時の環境が変わった"
+bind_environment "$ENV_RECEIPT"
+ENV_INVENTORY_READY=1
+verify_environment || die 20 environment "有効 plugin の一覧または実体が変わった"
+build_child_argv
+CHILD_ARGV[0]="$HOST_BIN_ABS"
+RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
 
 # ── 許可の仲介(D22 ③)の起動時の検査と許可リスト ──
 # 利用者の設定か管理者設定(Linux の既定の置き場)に disableAllHooks: true、管理者設定に
@@ -3107,6 +3092,39 @@ if [ "$DRY_RUN" -eq 0 ]; then
   aux "$RUN_DIR/auth.txt" "${AUX_AUTH[@]}" || rc=$?
   [ "$rc" -eq 0 ] || die 20 auth "認証の確認('$HOST_BIN ${AUX_AUTH[*]}')が通らない(終了コード $rc。$RUN_DIR/auth.txt)"
 fi
+
+# ── §2 の 11: 2026-09-23 決定 19 の帰結(D8)──
+LEADING=""
+ORIGIN_STATE=""
+HAS_ORIGIN=0
+if [ -n "$(G -C "$TOP" config --get remote.origin.url 2>/dev/null || true)" ]; then HAS_ORIGIN=1; fi
+if [ "$HAS_ORIGIN" -eq 1 ]; then
+  rc=0
+  LS_OUT="$(net_git "$NET_TIMEOUT" -C "$TOP" ls-remote origin "refs/heads/$DEF_NAME" 2>"$RUN_DIR/ls-remote.err")" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 ls-remote "origin の $DEF_NAME を読めない(git ls-remote の終了コード $rc。${NET_TIMEOUT} 秒で打ち切る。$(head -c 300 "$RUN_DIR/ls-remote.err" | tr '\n' ' '))"
+  ORIGIN_SHA=""
+  while IFS="$TAB" read -r sha ref; do
+    if [ "$ref" = "refs/heads/$DEF_NAME" ]; then ORIGIN_SHA="$sha"; fi
+  done <<<"$LS_OUT"
+  [ -n "$ORIGIN_SHA" ] || die 20 origin-unknown "origin に refs/heads/$DEF_NAME が無い(ローカルとの前後を判定できない)"
+  if [ "$ORIGIN_SHA" = "$DEF_SHA" ]; then
+    ORIGIN_STATE="origin と同じ"
+  else
+    G -C "$TOP" cat-file -e "$ORIGIN_SHA^{commit}" 2>/dev/null \
+      || die 20 origin-unknown "origin の $DEF_NAME($ORIGIN_SHA)がローカルに無い(遅れているか分岐している。fetch して確かめる)"
+    if G -C "$TOP" merge-base --is-ancestor "$ORIGIN_SHA" "$DEF_SHA"; then
+      ORIGIN_STATE="ローカルが origin より先行"
+      LEADING="$(G -C "$TOP" log --no-show-signature --format='%h %s' "$ORIGIN_SHA..$DEF_SHA")"
+    elif G -C "$TOP" merge-base --is-ancestor "$DEF_SHA" "$ORIGIN_SHA"; then
+      die 20 behind "ローカルの $DEF_NAME が origin より遅れている(更新してから起動する)"
+    else
+      die 20 diverged "ローカルの $DEF_NAME と origin が分岐している"
+    fi
+  fi
+else
+  ORIGIN_STATE="origin が無い(検査しない)"
+fi
+
 
 # ── §2 の 14・15: 起動時の報告(DEF の sha は上で固定した。共有の状態は各周の起動の直前に控える)──
 if [ "${#MCP_CONFIGS[@]}" -gt 0 ]; then

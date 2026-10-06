@@ -27,6 +27,7 @@ Bash の `cd` は、`CDPATH= cd -P -- <P> && pwd -P` と、先頭の前置き `C
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -63,6 +64,13 @@ SAFE_GIT_CONFIGS = {
     "filter.lfs.process=", "filter.lfs.required=false", "commit.gpgSign=false", "push.gpgSign=false",
 }
 SAFE_GIT_GLOBALS = {"--no-pager", "--no-replace-objects", "--literal-pathspecs", "--no-literal-pathspecs"}
+SAFE_GIT_PREFIX = (
+    "--no-pager", "--no-replace-objects",
+    "-c", "core.quotePath=false", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
+    "-c", "core.ignoreCase=false", "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+    "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false", "-c", "filter.lfs.smudge=",
+    "-c", "filter.lfs.clean=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+)
 SAFE_PUSH_PREFIX = (
     "--no-pager", "--no-replace-objects",
     "-c", "core.quotePath=false", "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null",
@@ -144,6 +152,7 @@ class Ctx:
         self.cwd = cwd
         self.home = os.environ.get("HOME", "")
         self.allow = env["allow"]
+        self.environment = env
         self.protected_hits: list[str] = []
         # 書き込みでない単語(パスの引数・代入の値)が保護パスの下で W の外を指したもの(rel, 理由)。
         # 同じ場所が書き込み先でもあれば、その書き込み先の判定(protected)に任せる。そうでなければ other
@@ -822,10 +831,7 @@ def git_source_pathspec_safe(ctx: Ctx, loc: str) -> bool:
     try:
         git_env = dict(os.environ)
         git_env["GIT_NO_LAZY_FETCH"] = "1"
-        git_prefix = [
-            "git", "-C", ctx.wt, "--no-pager", "--no-replace-objects",
-            "-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", "-c", "core.ignoreCase=false",
-        ]
+        git_prefix = ["git", "-C", ctx.wt, *SAFE_GIT_PREFIX]
         index = subprocess.run(
             [*git_prefix, "ls-files", "--stage", "-z", "--", rel],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -1425,6 +1431,59 @@ def judge_cmds(ctx: Ctx, cmds: list[dict]) -> Denied | None:
     return pending_denial(ctx)
 
 
+ENVIRONMENT_LOADER = 'import os,sys,stat,re,hashlib,json,signal\n\ndef load_guard(expected, path):\n    if not re.fullmatch("[a-f0-9]{64}", expected):\n        raise RuntimeError("hash")\n    parts = path.split("/")\n    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):\n        raise RuntimeError("path")\n    def expired(*unused):\n        raise RuntimeError("timeout")\n    def identity(st):\n        return st.st_dev, st.st_ino, st.st_mode\n    def version(st):\n        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns\n    previous = signal.signal(signal.SIGALRM, expired)\n    signal.setitimer(signal.ITIMER_REAL, 15)\n    fd = None\n    try:\n        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)\n        for name in parts[1:-1]:\n            before = os.stat(name, dir_fd=fd, follow_symlinks=False)\n            if not stat.S_ISDIR(before.st_mode):\n                raise RuntimeError("directory")\n            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)\n            os.close(fd); fd = child\n            if identity(before) != identity(os.fstat(fd)):\n                raise RuntimeError("directory changed")\n        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)\n        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:\n            raise RuntimeError("file")\n        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)\n        try:\n            if version(before) != version(os.fstat(child)):\n                raise RuntimeError("file changed")\n            raw = b""\n            while len(raw) < before.st_size:\n                chunk = os.read(child, min(65536, before.st_size - len(raw)))\n                if not chunk:\n                    raise RuntimeError("short read")\n                raw += chunk\n            if os.read(child, 1) or version(before) != version(os.fstat(child)):\n                raise RuntimeError("file changed")\n            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):\n                raise RuntimeError("path changed")\n            if hashlib.sha256(raw).hexdigest() != expected:\n                raise RuntimeError("hash mismatch")\n            return raw\n        finally:\n            os.close(child)\n    finally:\n        if fd is not None:\n            os.close(fd)\n        signal.setitimer(signal.ITIMER_REAL, 0)\n        signal.signal(signal.SIGALRM, previous)\n\nargs = []\ntry:\n    expected, path, *args = sys.argv[1:]\n    raw = load_guard(expected, path)\n    sys.argv = [path, *args]\n    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})\nexcept (Exception, SystemExit) as exc:\n    if isinstance(exc, SystemExit) and exc.code in (0, None):\n        raise\n    if args[:1] == ["hook"]:\n        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))\n        raise SystemExit(0)\n    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)\n    raise SystemExit(20)\n'
+
+
+def environment_command(ctx: Ctx, command: dict) -> bool:
+    """外部の状態へ届く例外は、保持した固定 loader と引数の verify だけ。"""
+    words = [w.text for w in command['words']]
+    held = ctx.environment
+    guard = held.get('environment_guard')
+    state = held.get('environment_state')
+    expected = held.get('environment_sha256')
+    guard_hash = held.get('environment_guard_sha256')
+    if not guard or not state or not expected or not guard_hash:
+        return False
+    verify = ['python3', '-I', '-B', '-c', ENVIRONMENT_LOADER, guard_hash, guard, 'verify', '--state', state, '--expect-sha256', expected]
+    if words != verify:
+        # 名前が一致する guard の未知のモードを一般の python 許可へ戻さない。
+        if guard in words:
+            raise other('環境照合器は固定本文と保持引数の verify だけ')
+        return False
+    if command['assigns'] or command['redirs']:
+        raise other('環境照合器に代入・リダイレクトを付けない')
+    if not all(re.fullmatch('[a-f0-9]{64}', x) for x in (expected, guard_hash)):
+        raise other('環境の保持 hash が不正')
+    for path, digest in ((guard, guard_hash), (state, expected)):
+        parts = os.path.abspath(path).split('/')[1:]
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            for name in parts[:-1]:
+                child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                os.close(fd); fd = child
+            before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+            limit = 1048576 if path == guard else 8388608
+            if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+                raise other('環境の控えが通常ファイルでないか上限を超える')
+            child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            try:
+                opened = os.fstat(child)
+                if (before.st_dev, before.st_ino, before.st_mode, before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_size, opened.st_mtime_ns, opened.st_ctime_ns):
+                    raise other('環境の控えが読取前に変わった')
+                raw = b''
+                while len(raw) < before.st_size:
+                    chunk = os.read(child, min(65536, before.st_size - len(raw)))
+                    if not chunk: raise other('環境の控えが短くなった')
+                    raw += chunk
+                if os.read(child, 1) or hashlib.sha256(raw).hexdigest() != digest:
+                    raise other('環境の控えが保持 hash と違う')
+            finally:
+                os.close(child)
+        finally:
+            os.close(fd)
+    return True
+
+
 def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
     """コマンドの並びを、ctx.cwd を作業ディレクトリとして通常の規則で判定する(cd を含まないこと)。"""
     for c in cmds:
@@ -1494,6 +1553,8 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
             check_find(words[1:])
         if name == "awk":
             check_awk(words[1:])
+        if environment_command(ctx, c):
+            continue
         # コマンド名は従来どおり字面がパスなら検査する。PATH で解決する裸名だけは
         # 保護 cwd と symlink による裸名の追加判定の対象にしない。
         file_op = name in FILE_OP_SHORT
@@ -1588,6 +1649,9 @@ def load_env() -> dict | None:
     # push の grammar は両方が無ければ閉じる。
     env["DEV_WORKFLOW_LOOP_PUSH_REPO"] = os.environ.get("DEV_WORKFLOW_LOOP_PUSH_REPO", "")
     env["DEV_WORKFLOW_LOOP_PUSH_REF"] = os.environ.get("DEV_WORKFLOW_LOOP_PUSH_REF", "")
+    for key, var in {'environment_state':'DEV_WORKFLOW_ENV_STATE', 'environment_sha256':'DEV_WORKFLOW_ENV_SHA256',
+                     'environment_guard':'DEV_WORKFLOW_ENV_GUARD', 'environment_guard_sha256':'DEV_WORKFLOW_ENV_GUARD_SHA256'}.items():
+        if os.environ.get(var): env[key] = os.environ[var]
     return env
 
 
@@ -1600,15 +1664,22 @@ def emit(behavior: str, message: str) -> None:
 
 
 def record(permlog: str, entry: dict) -> None:
-    line = json.dumps(entry, ensure_ascii=False) + "\n"
+    line = (json.dumps(entry, ensure_ascii=False) + "\n").encode('utf-8')
+    fds = []
     try:
-        fd = os.open(permlog, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-        try:
-            os.write(fd, line.encode("utf-8"))
-        finally:
-            os.close(fd)
+        parts = os.path.abspath(permlog).split('/')[1:]
+        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY); fds.append(fd)
+        for name in parts[:-1]:
+            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd); fds.append(fd)
+        fd = os.open(parts[-1], os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NONBLOCK | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+        fds.append(fd)
+        st = os.fstat(fd)
+        if stat.S_ISREG(st.st_mode) and st.st_size + len(line) <= 1048576:
+            os.write(fd, line)
     except OSError:
         pass
+    finally:
+        for fd in reversed(fds): os.close(fd)
 
 
 def main() -> int:
