@@ -4,15 +4,26 @@ import collections
 import json
 from pathlib import Path
 import re
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 LOOP = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop.sh"
+SHIP_SCRIPTS = LOOP.parent
 PY_CALLERS = {
     "publish": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py",
     "loop_state": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-state.py",
     "origin": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py",
     "digest": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py",
+    "environment": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py",
+    "permission": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py",
+}
+# Every direct Python Git caller under ship-task/scripts must be listed here or
+# in PY_GIT_EXCEPTIONS.  The review-guard exception creates an isolated, new
+# throw-away repository with all inherited GIT_* variables removed.  A new
+# caller cannot silently inherit that rationale.
+PY_GIT_EXCEPTIONS = {
+    ROOT / "plugins/dev-workflow/skills/ship-task/scripts/review-guard.py": "fresh isolated review repository; GIT_* is removed and NOSYSTEM/GLOBAL=/dev/null are fixed",
 }
 DOCS = [
     ROOT / "plugins/dev-workflow/skills/do-task/SKILL.md",
@@ -128,16 +139,40 @@ def shell_bare_calls(text: str) -> list[str]:
     return result
 
 
-def python_git_calls(text: str) -> list[ast.List]:
+def python_git_calls(text: str) -> list[ast.List | ast.Tuple]:
     tree=ast.parse(text)
     found=[]
     for node in ast.walk(tree):
-        if isinstance(node, ast.List) and node.elts and isinstance(node.elts[0], ast.Constant) and node.elts[0].value == 'git':
+        if isinstance(node, (ast.List, ast.Tuple)) and node.elts and isinstance(node.elts[0], ast.Constant) and node.elts[0].value == 'git':
             found.append(node)
     return found
 
 
-def has_safe_starred(argv: ast.List) -> bool:
+def direct_python_git_callers(directory: Path) -> set[Path]:
+    """Return production Python files that construct a literal Git argv."""
+    return {path for path in directory.glob("*.py") if python_git_calls(path.read_text(encoding="utf-8"))}
+
+
+def git_subprocess_calls(text: str) -> list[ast.Call]:
+    tree=ast.parse(text)
+    found=[]
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name) and node.func.value.id == 'subprocess'
+                and node.func.attr in {'run', 'Popen'} and node.args):
+            continue
+        argv=node.args[0]
+        if isinstance(argv, (ast.List, ast.Tuple)) and argv.elts and isinstance(argv.elts[0], ast.Constant) and argv.elts[0].value == 'git':
+            found.append(node)
+    return found
+
+
+def git_call_inventory(calls: list[ast.Call]) -> collections.Counter[str]:
+    """Count literal argv forms so duplicate or tuple calls cannot hide."""
+    return collections.Counter(ast.unparse(call.args[0]) for call in calls)
+
+
+def has_safe_starred(argv: ast.List | ast.Tuple) -> bool:
     return any(isinstance(e, ast.Starred) and isinstance(e.value, ast.Name) and 'SAFE_GIT' in e.value.id for e in argv.elts)
 
 
@@ -157,6 +192,46 @@ class SafeGitCallersTest(unittest.TestCase):
                 calls=python_git_calls(text)
                 self.assertTrue(calls)
                 self.assertTrue(all(has_safe_starred(call) for call in calls), ast.unparse(calls[0]))
+
+    def test_each_direct_python_git_caller_is_registered_or_has_a_narrow_basis(self):
+        discovered=direct_python_git_callers(SHIP_SCRIPTS)
+        self.assertEqual(discovered, set(PY_CALLERS.values()) | set(PY_GIT_EXCEPTIONS))
+        state=(SHIP_SCRIPTS / "loop-state.py").read_text(encoding="utf-8")
+        self.assertIn('"--no-pager", "--no-replace-objects"', state)
+        self.assertIn('"core.hooksPath=/dev/null"', state)
+        isolated=(SHIP_SCRIPTS / "review-guard.py").read_text(encoding="utf-8")
+        for text in ('def run_checks', 'if not key.startswith("GIT_")',
+                     'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL', 'GIT_NO_LAZY_FETCH',
+                     'subprocess.run(["git", "init", "-q", str(clean)], env=env'):
+            self.assertIn(text, isolated)
+        safe_wrapper="('git', '-C', str(cwd), *SAFE_GIT, *args)"
+        clean_expected=collections.Counter({
+            safe_wrapper,
+            "['git', 'init', '-q', str(clean)]",
+            "['git', '-C', str(clean), 'add', '-f', '--all']",
+            "['git', '-C', str(clean), 'update-index', '--add', '--cacheinfo', '160000', item['oid'], item['path']]",
+            "['git', '-C', str(clean), '-c', 'user.name=review-guard', '-c', 'user.email=review-guard@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'reviewed tree']",
+        })
+        calls=git_subprocess_calls(isolated)
+        self.assertEqual(git_call_inventory(calls), clean_expected)
+        for call in calls:
+            keywords={item.arg: ast.unparse(item.value) for item in call.keywords}
+            if ast.unparse(call.args[0]) == safe_wrapper:
+                self.assertEqual(keywords, {None: 'options'})
+            else:
+                self.assertEqual(keywords, {'env':'env', 'check':'True', 'stdout':'subprocess.PIPE', 'stderr':'subprocess.PIPE'})
+        for argv in ('["git", "status"]', '("git", "status")'):
+            with self.subTest(argv=argv):
+                mutated=isolated+f'\nsubprocess.run({argv}, env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)\n'
+                self.assertNotEqual(git_call_inventory(git_subprocess_calls(mutated)), clean_expected)
+
+    def test_unregistered_direct_python_git_caller_is_detected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            extra=Path(temp) / "new-helper.py"
+            extra.write_text('import subprocess\nsubprocess.run(("git", "status"))\n', encoding="utf-8")
+            discovered=direct_python_git_callers(Path(temp))
+            self.assertEqual(discovered, {extra})
+            self.assertEqual(discovered - set(PY_CALLERS.values()) - set(PY_GIT_EXCEPTIONS), {extra})
 
     def test_document_git_inventory_matches_reviewed_manifest(self):
         manifest=document_manifest()

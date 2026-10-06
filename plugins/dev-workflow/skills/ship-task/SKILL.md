@@ -21,10 +21,97 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
    - `--unattended` のときは、人に確かめる場面で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。
    - 人に確かめる場面ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。
    - 発見の周に固有の前提・工程・照合・結末は references/discover-mode.md が正本。
-   - `--unattended` のときは、最初に references/unattended-mode.md を Read し(`--discover` もあれば references/discover-mode.md も同じ応答で Read し)、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない
-   - (特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否されると、打ち直さずに失敗扱いになる)
+   - `--unattended` の入口では、現在の配布元を信頼の起点として環境の控えとコピーを作り、その後にコピー内の無人契約を読む。手順は下の「無人入口」。
+
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
+
+## 無人入口
+
+親の保持値が1つでも渡された入口は、`DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
+下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の無人契約を読む。
+親の保持値が全て無い単独入口だけは、現在の配布元の `scripts/environment-guard.py bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を `python3 -B` で一度実行する。
+使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
+返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、同じ照合を行う。一覧はホストの正式な手段で確定した `installPath` 付き配列とし、取得不能なら失敗扱い。
+以後の helper 実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
+
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+
+<!-- environment-loader:begin -->
+```bash
+python3 -I -B -c 'import os,sys,stat,re,hashlib,json,signal
+
+def load_guard(expected, path):
+    if not re.fullmatch("[a-f0-9]{64}", expected):
+        raise RuntimeError("hash")
+    parts = path.split("/")
+    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):
+        raise RuntimeError("path")
+    def expired(*unused):
+        raise RuntimeError("timeout")
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_mode
+    def version(st):
+        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 15)
+    fd = None
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for name in parts[1:-1]:
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("directory")
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = child
+            if identity(before) != identity(os.fstat(fd)):
+                raise RuntimeError("directory changed")
+        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:
+            raise RuntimeError("file")
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            if version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            raw = b""
+            while len(raw) < before.st_size:
+                chunk = os.read(child, min(65536, before.st_size - len(raw)))
+                if not chunk:
+                    raise RuntimeError("short read")
+                raw += chunk
+            if os.read(child, 1) or version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):
+                raise RuntimeError("path changed")
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("hash mismatch")
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+args = []
+try:
+    expected, path, *args = sys.argv[1:]
+    raw = load_guard(expected, path)
+    sys.argv = [path, *args]
+    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})
+except (Exception, SystemExit) as exc:
+    if isinstance(exc, SystemExit) and exc.code in (0, None):
+        raise
+    if args[:1] == ["hook"]:
+        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))
+        raise SystemExit(0)
+    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)
+    raise SystemExit(20)
+' '<guard_sha256>' '<guard>' verify --state '<state>' --expect-sha256 '<sha256>'
+```
+<!-- environment-loader:end -->
 
 ## オプション
 

@@ -260,6 +260,35 @@ run_loop config-finish "SELFTEST_SECRET=$SENTINEL" "SELFTEST_COMMON=$R/.git" -- 
 [ -f "$(report_of "$OUT")" ] || exit 71
 ''', 10)
         self.assertIn('shared-state', out)
+    def test_environment_rejection_keeps_finish_from_reading_a_new_global_include(self):
+        def transform(source):
+            point = '  # 照合(D14・D8)。§5 のネットワークの git より前\n  verify_iteration\n'
+            self.assertEqual(source.count(point), 1)
+            action = '  printf "\\n[include]\\n path = %s\\n" "$SELFTEST_SECRET" >>"$GIT_CONFIG_GLOBAL"\n'
+            return source.replace(point, action + point)
+        self.run_case("""
+newrepo global-config-finish
+addtask sync-a 2026-01-01
+commit
+newrec global-config-finish
+run_loop global-config-finish "SELFTEST_SECRET=$SENTINEL" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+""", 10, transform)
+
+    def test_finish_rechecks_environment_after_the_last_successful_verification(self):
+        def transform(source):
+            point = '  local code="$1" why="$2" n\n  trap - TERM HUP INT\n'
+            self.assertEqual(source.count(point), 1)
+            action = '  printf "\\n[include]\\n path = %s\\n" "$SELFTEST_SECRET" >>"$GIT_CONFIG_GLOBAL"\n'
+            return source.replace(point, point + action)
+        out = self.run_case("""
+newrepo late-global-config-finish
+addtask sync-a 2026-01-01
+commit
+newrec late-global-config-finish
+run_loop late-global-config-finish "SELFTEST_SECRET=$SENTINEL" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+""", 20, transform)
+        self.assertIn('environment-changed', out)
+
     def test_restart_changed_local_config_from_repository_cwd_never_reads_include(self):
         self.run_case(self.restart_body('printf "\\n[include]\\n path = %s\\n" "$SENTINEL" >>"$R/.git/config"'), 20)
     def test_restart_changed_global_config_never_reads_include(self):
@@ -279,7 +308,7 @@ STARTUP_CWD="$R"
 run_loop restart -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 [ -d "$(state_dir restart)/inflight" ] || exit 73
 '''
-    def test_unchanged_restart_keeps_normal_next_iteration(self):
+    def test_unchanged_inflight_requires_confirmation_before_next_iteration(self):
         self.run_case("""
 newrepo unchanged
 addtask longsleep-a 2026-01-01
@@ -290,12 +319,50 @@ start_bg unchanged -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 wait_file "$REC/started-longsleep-a" 35 || { cat "$BG_OUT"; exit 72; }
 kill -KILL "$BG_PID"
 wait_bg
+SD="$(state_dir unchanged)"
+cp "$SD/inflight/meta" "$REC/held-meta"
+cp "$SD/inflight/base.json" "$REC/held-base.json"
+CHILD="$(cat "$REC/pid-longsleep-a")"
 run_loop unchanged -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
-[ ! -d "$(state_dir unchanged)/inflight" ] || { cat "$OUT"; exit 76; }
+[ "$RC" = 20 ] || { cat "$OUT"; exit 75; }
+proc_alive "$CHILD" || exit 78
+cmp -s "$REC/held-meta" "$SD/inflight/meta" || exit 79
+cmp -s "$REC/held-base.json" "$SD/inflight/base.json" || exit 80
+[ "$(calls)" = longsleep-a ] || exit 81
+confirm_rejected_inflight "$SD" "unchanged inflight"
+run_loop unchanged -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ ! -d "$SD/inflight" ] || { cat "$OUT"; exit 76; }
 [ "$(calls)" = 'longsleep-a sync-b' ] || { cat "$OUT"; exit 77; }
 """, 0)
 
-    def test_stop_file_created_before_restart_keeps_the_held_control(self):
+    def test_early_stop_mark_reports_its_name_and_human_confirmation_without_reading_it(self):
+        for stage in ('early', 'after-environment'):
+            with self.subTest(stage=stage):
+                def transform(source):
+                    if stage == 'early':
+                        return source
+                    point = 'STARTUP_JSON="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")"'
+                    self.assertEqual(source.count(point), 1)
+                    action = 'if [ -n "${SELFTEST_LATE_MARK:-}" ]; then ln -s "$SELFTEST_SECRET" "$SELFTEST_LATE_MARK"; fi\n'
+                    return source.replace(point, action + point)
+                mutation = 'ln -s "$SENTINEL" "$SD/stop-mark.md"' if stage == 'early' else ':'
+                late_args = '"SELFTEST_SECRET=$SENTINEL" "SELFTEST_LATE_MARK=$SD/stop-mark.md"' if stage != 'early' else ''
+                out = self.run_case("""
+newrepo early-stop-diagnostic
+addtask sync-a 2026-01-01
+commit
+newrec early-stop-diagnostic
+run_loop early-stop-diagnostic -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$RC" = 0 ] || { cat "$OUT"; exit 121; }
+SD="$(state_dir early-stop-diagnostic)"
+@MUTATION@
+run_loop early-stop-diagnostic @LATE_ARGS@ -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ -L "$SD/stop-mark.md" ] || exit 122
+""".replace('@MUTATION@', mutation).replace('@LATE_ARGS@', late_args), 20, transform)
+                self.assertIn('stop-mark.md', out)
+                self.assertIn('人が設定・中断記録・残った子を確認するまで印を外して再開しない', out)
+
+    def test_stop_file_with_inflight_requires_confirmation_then_stops_normally(self):
         for rel in ('.claude/loop.stop', 'custom.stop', 'new/control/stop'):
             with self.subTest(path=rel):
                 out = self.run_case("""
@@ -315,8 +382,17 @@ kill -KILL "$BG_PID"
 wait_bg
 CHILD="$(cat "$REC/pid-longsleep-a")"
 proc_alive "$CHILD" || exit 78
+SD="$(state_dir stop-restart)"
+cp "$SD/inflight/meta" "$REC/held-meta"
+cp "$SD/inflight/base.json" "$REC/held-base.json"
 run_loop stop-restart -- --repo "$R" "${STOP_ARGS[@]}" "${COMMON_ARGS[@]}"
-[ ! -d "$(state_dir stop-restart)/inflight" ] || { cat "$OUT"; exit 76; }
+[ "$RC" = 20 ] || { cat "$OUT"; exit 75; }
+proc_alive "$CHILD" || exit 78
+cmp -s "$REC/held-meta" "$SD/inflight/meta" || exit 81
+cmp -s "$REC/held-base.json" "$SD/inflight/base.json" || exit 82
+confirm_rejected_inflight "$SD" "stop with inflight"
+run_loop stop-restart -- --repo "$R" "${STOP_ARGS[@]}" "${COMMON_ARGS[@]}"
+[ ! -d "$SD/inflight" ] || { cat "$OUT"; exit 76; }
 [ "$(calls)" = longsleep-a ] || { cat "$OUT"; exit 77; }
 wait_dead "$CHILD" 5 || exit 79
 [ -f "$STOP_PATH" ] && [ ! -s "$STOP_PATH" ] || exit 80
@@ -411,6 +487,27 @@ SD="$(state_dir state-digest-link)"
 [ -f "$SD/stop-mark.md" ] || { cat "$OUT"; exit 111; }
         """, 10, transform)
         self.assertIn('state', out.lower())
+
+    def test_state_digest_verifies_the_environment_before_running_the_helper(self):
+        def transform(source):
+            point = '  if ! ITER_BASE_SHA="$(state_digest "$ITER_BASE")"; then\n'
+            self.assertEqual(source.count(point), 1)
+            action = """  cat >"$LOOP_STATE_PY" <<'PY_DIGEST'
+import os
+with open(os.environ['SELFTEST_ATTACK_MARKER'], 'w') as stream:
+    stream.write('executed')
+print('0' * 64)
+PY_DIGEST
+"""
+            return source.replace(point, action + point)
+        self.run_case("""
+newrepo state-digest-environment
+addtask sync-a 2026-01-01
+commit
+newrec state-digest-environment
+run_loop state-digest-environment "SELFTEST_ATTACK_MARKER=$REC/digest-executed" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ ! -e "$REC/digest-executed" ] || { cat "$OUT"; exit 113; }
+""", 20, transform)
 
     def test_initial_state_digest_rejection_prevents_finish_from_reloading_config(self):
         # The initial digest is taken after snapshot creation.  If its pathname

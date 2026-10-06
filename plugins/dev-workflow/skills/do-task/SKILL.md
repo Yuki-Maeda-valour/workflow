@@ -35,6 +35,13 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 ## 無人モード(`--unattended`)
 
 /ship-task の無人モードが渡す(単独で呼んでもよい)。
+- **文書を読む前の入口**: 親の保持値が1つでも渡された入口は、state・sha256・guard・guard_sha256・plugin の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
+  下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の文書を読む。
+- 親の保持値が全て無い単独入口だけは、現在の配布元の `../ship-task/scripts/environment-guard.py` を `python3 -B` で一度使う。
+  引数は `bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>`。
+  使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
+  一覧は正式な手段で確定した `installPath` 付き配列。取得不能なら失敗扱い。返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、上と同じ照合を行う。
+- 以後の helper 呼出・文書読取はコピーだけを使い、毎回直前に照合する。詳細はコピー内の無人契約 §0 に従う。
 - 人に確かめる場面ごとの扱い(D1〜D19)・周の中で守る値と照合の表・限界の正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)。
 - 以下の各所には 1 行の分岐だけを置く。
 - `loop.sh` の周(無人ループの 1 回分の実行)では、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` の周の Bash の書き方」で打つ。
@@ -56,6 +63,84 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
   - 現在のブランチ・HEAD・基準行・未追跡一覧もあわせて見る(表は unattended-mode.md §7)。
   - 通らなければ失敗扱い(G2)
 - **反復の数え方**: Phase 5・5.5 からの差し戻し(相手に返して、やり直してもらうこと)も ITER を増やし、`--max-iter` の判断を仰ぐ点に数える(判断を仰ぐ点に届かないまま、時間切れまで回らないように)
+
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+
+<!-- environment-loader:begin -->
+```bash
+python3 -I -B -c 'import os,sys,stat,re,hashlib,json,signal
+
+def load_guard(expected, path):
+    if not re.fullmatch("[a-f0-9]{64}", expected):
+        raise RuntimeError("hash")
+    parts = path.split("/")
+    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):
+        raise RuntimeError("path")
+    def expired(*unused):
+        raise RuntimeError("timeout")
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_mode
+    def version(st):
+        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 15)
+    fd = None
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for name in parts[1:-1]:
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("directory")
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = child
+            if identity(before) != identity(os.fstat(fd)):
+                raise RuntimeError("directory changed")
+        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:
+            raise RuntimeError("file")
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            if version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            raw = b""
+            while len(raw) < before.st_size:
+                chunk = os.read(child, min(65536, before.st_size - len(raw)))
+                if not chunk:
+                    raise RuntimeError("short read")
+                raw += chunk
+            if os.read(child, 1) or version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):
+                raise RuntimeError("path changed")
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("hash mismatch")
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+args = []
+try:
+    expected, path, *args = sys.argv[1:]
+    raw = load_guard(expected, path)
+    sys.argv = [path, *args]
+    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})
+except (Exception, SystemExit) as exc:
+    if isinstance(exc, SystemExit) and exc.code in (0, None):
+        raise
+    if args[:1] == ["hook"]:
+        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))
+        raise SystemExit(0)
+    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)
+    raise SystemExit(20)
+' '<guard_sha256>' '<guard>' verify --state '<state>' --expect-sha256 '<sha256>'
+```
+<!-- environment-loader:end -->
 
 ## Phase 0: 前提と対象確定
 

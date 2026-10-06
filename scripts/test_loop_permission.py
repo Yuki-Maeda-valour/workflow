@@ -884,3 +884,104 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class EnvironmentPermissionTest(unittest.TestCase):
+    setUp = LoopPermissionSymlinkTest.setUp
+    tearDown = LoopPermissionSymlinkTest.tearDown
+    decide = LoopPermissionSymlinkTest.decide
+    bash = LoopPermissionSymlinkTest.bash
+    expect = LoopPermissionSymlinkTest.expect
+    def held(self):
+        import hashlib
+        base=Path(self.tmp.name)/'private'; base.mkdir()
+        guard=base/'environment-guard.py'; guard.write_text('print("verified")')
+        state=base/'environment.json'; state.write_text('{}')
+        self.env.update(environment_guard=str(guard),environment_state=str(state),
+                        environment_guard_sha256=hashlib.sha256(guard.read_bytes()).hexdigest(),
+                        environment_sha256=hashlib.sha256(state.read_bytes()).hexdigest())
+        return guard,state
+    def command(self, guard, state, loader=None):
+        import shlex
+        return shlex.join(['python3', '-I', '-B', '-c', PERMISSION.ENVIRONMENT_LOADER if loader is None else loader,
+                           self.env['environment_guard_sha256'], str(guard), 'verify', '--state', str(state),
+                           '--expect-sha256', self.env['environment_sha256']])
+    def test_exact_private_verify_and_hash(self):
+        guard,state=self.held(); digest=self.env['environment_sha256']
+        self.expect(self.command(guard,state),'allow')
+        self.expect(f'python3 -B {guard} verify --state {state} --expect-sha256 {digest}','deny','other')
+        self.expect(f'sha256sum -- {guard}','deny','other')
+        self.expect(f'python3 -B {guard} exec --state {state} --expect-sha256 {digest}','deny','other')
+        self.expect(self.command(guard,state).replace(digest,'0'*64),'deny','other')
+    def test_tampered_private_guard_denied(self):
+        guard,state=self.held(); guard.write_text('raise SystemExit(0)')
+        self.expect(self.command(guard,state),'deny','other')
+    def test_private_guard_parent_symlink_denied(self):
+        guard,state=self.held(); parent=guard.parent; saved=parent.with_name('saved'); parent.rename(saved); parent.symlink_to(saved,target_is_directory=True)
+        self.expect(self.command(guard,state),'deny','other')
+    def test_fixed_loader_and_argv_changes_are_denied(self):
+        guard,state=self.held(); command=self.command(guard,state)
+        self.env['allow'].append({'kind':'prefix','words':['python3']})
+        for changed in [self.command(guard,state,PERMISSION.ENVIRONMENT_LOADER+'\nprint("extra")\n'),
+                        self.command(guard,state,PERMISSION.ENVIRONMENT_LOADER.replace('1048576','2097152')),
+                        command+' --extra',command.replace(' verify ', ' exec '),command.replace(' -I ', ' '),
+                        command.replace(str(state),str(state)+'-other')]:
+            with self.subTest(command=changed[-100:]):self.expect(changed,'deny','other')
+    def test_fixed_exception_does_not_broaden_general_python_allow(self):
+        self.held()
+        command='python3 -c '+__import__('shlex').quote('print("normal")')
+        self.expect(command,'deny','other')
+        self.env['allow'].append({'kind':'prefix','words':['python3']})
+        self.expect(command,'allow')
+    def test_partial_parent_values_are_denied(self):
+        guard,state=self.held(); command=self.command(guard,state)
+        self.env['allow'].append({'kind':'prefix','words':['python3']})
+        # The real entry rejects a missing required plugin_root before Ctx construction.
+        variables={'worktree':'DEV_WORKFLOW_LOOP_WORKTREE','plugin_root':'DEV_WORKFLOW_LOOP_PLUGIN_ROOT',
+                   'permlog':'DEV_WORKFLOW_LOOP_PERMLOG','allow':'DEV_WORKFLOW_LOOP_ALLOW',
+                   'environment_guard':'DEV_WORKFLOW_ENV_GUARD','environment_state':'DEV_WORKFLOW_ENV_STATE',
+                   'environment_guard_sha256':'DEV_WORKFLOW_ENV_GUARD_SHA256','environment_sha256':'DEV_WORKFLOW_ENV_SHA256'}
+        env={k:v for k,v in os.environ.items() if not k.startswith('DEV_WORKFLOW_')}
+        env.update({var:json.dumps(self.env[key]) if key=='allow' else self.env[key] for key,var in variables.items()})
+        data=json.dumps({'tool_name':'Bash','tool_input':{'command':command},'cwd':str(self.wt)})
+        for missing in [None,'environment_guard','environment_state','environment_guard_sha256','environment_sha256','plugin_root']:
+            actual=dict(env)
+            if missing:actual.pop(variables[missing])
+            result=subprocess.run([sys.executable,str(SCRIPT)],input=data,text=True,capture_output=True,env=actual,timeout=5)
+            self.assertEqual(result.returncode,0,result.stderr)
+            decision=json.loads(result.stdout)['hookSpecificOutput']['decision']['behavior']
+            self.assertEqual(decision,'deny' if missing else 'allow',(missing,result.stdout))
+    def test_all_three_skill_entry_commands_are_allowed(self):
+        import shlex
+        guard,state=self.held()
+        for name in ['ship-task','do-task','update-doc']:
+            text=(Path(__file__).resolve().parents[1]/'plugins/dev-workflow/skills'/name/'SKILL.md').read_text()
+            block=text.split('<!-- environment-loader:begin -->\n```bash\n',1)[1].split('\n```',1)[0]
+            words=shlex.split(block)
+            self.assertEqual(words[4],PERMISSION.ENVIRONMENT_LOADER)
+            replacements={'<guard_sha256>':self.env['environment_guard_sha256'],'<guard>':str(guard),'<state>':str(state),'<sha256>':self.env['environment_sha256']}
+            self.expect(shlex.join([replacements.get(w,w) for w in words]),'allow')
+    @unittest.skipUnless(sys.platform == 'linux', 'inotify is Linux-specific')
+    def test_guard_fifo_and_oversize_are_denied_without_open(self):
+        import ctypes
+        guard,state=self.held(); command=self.command(guard,state)
+        libc=ctypes.CDLL(None,use_errno=True)
+        for kind in ['fifo','oversize']:
+            guard.unlink()
+            if kind=='fifo':os.mkfifo(guard)
+            else:guard.write_bytes(b'#'*1048577)
+            fd=libc.inotify_init1(os.O_NONBLOCK|os.O_CLOEXEC)
+            self.assertGreaterEqual(fd,0)
+            try:
+                self.assertGreaterEqual(libc.inotify_add_watch(fd,os.fsencode(guard),0x20|0x1),0)
+                self.expect(command,'deny','other')
+                try:events=os.read(fd,65536)
+                except BlockingIOError:events=b''
+                self.assertEqual(events,b'')
+            finally:os.close(fd)
+    def test_reference_log_fifo_and_symlink_nonblocking(self):
+        target=Path(self.tmp.name)/'reference'; os.mkfifo(target)
+        PERMISSION.record(str(target),{'decision':'deny'})
+        target.unlink(); external=Path(self.tmp.name)/'outside'; external.write_text('unchanged'); target.symlink_to(external)
+        PERMISSION.record(str(target),{'decision':'deny'})
+        self.assertEqual(external.read_text(),'unchanged')
