@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.21.1
+
+### 修正
+
+- `loop-permission.py` が、Bash 入力のサンドボックス無効化指定と、その項目の不正な型を拒否する([子 Issue #172](https://github.com/Yuki-Maeda-valour/workflow/issues/172)、親 #107 の H25)。コマンドが許可対象でも拒否し、未指定・真偽値の偽だけを通常判定へ進める。
+- 通常の説明・タイムアウトなどの入力は維持する。実際の hook 入出力と判定ログを回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.21.0
 
 ### 変更
