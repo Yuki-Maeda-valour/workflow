@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.20.1
+
+### 修正
+
+- `loop-permission.py` が最終 symlink の実体も保護判定する。無害な名前のリンクを経由する保護パスへの Bash の読み書きを拒否する([子 Issue #159](https://github.com/Yuki-Maeda-valour/workflow/issues/159)、親 #107 の H36)。裸名の既存リンクも引数・オプション値・代入値で検査する。`--` 後の `-` 始まりのリンクも調べ、別コマンドの削除・移動で読み取りの拒否が取り消されないようにする。
+- リンク自体の削除・移動と、通常パス・状態ファイル領域 W の許可を保つ。多段・相対・不存在対象・worktree 外のリンクと、拒否の種類を回帰検証する。保証範囲は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.20.0
 
 ### 変更
