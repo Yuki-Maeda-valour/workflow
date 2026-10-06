@@ -2,9 +2,9 @@
 
 import importlib.util
 import json
-import sys
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -259,6 +259,30 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         os.symlink("../settings.json", self.wt / ".claude/reviews/alias")
         got = self.decide("Bash", {"command": "cat alias"}, self.wt / ".claude/reviews")
         self.assertEqual(("deny", "other"), got[:2], got)
+
+    def test_h24_h27_bundled_flags_keep_w_file_operations_from_protected_cwd(self):
+        cwd = self.wt / ".claude"
+        source = cwd / "grasp.md"
+        source.write_text("grasp")
+        for prefix in (False, True):
+            for command in ("cp -pv grasp.md reviews/out", "rm -rf reviews/sub"):
+                with self.subTest(prefix=prefix, command=command):
+                    target = cwd / ("reviews/out" if command.startswith("cp") else "reviews/sub")
+                    if command.startswith("rm"):
+                        target.mkdir(exist_ok=True)
+                        (target / "file").write_text("remove")
+                    actual = f"CDPATH= cd -P -- .claude && {command}" if prefix else command
+                    run_cwd = self.wt if prefix else cwd
+                    got = self.decide("Bash", {"command": actual}, run_cwd)
+                    self.assertEqual(("allow", None), got[:2], got)
+                    subprocess.run(["bash", "-c", actual], cwd=run_cwd, check=True,
+                                   capture_output=True, text=True)
+                    if command.startswith("cp"):
+                        self.assertEqual("grasp", target.read_text())
+                        target.unlink()
+                    else:
+                        self.assertFalse(target.exists())
+                    self.assertEqual("settings", (cwd / "settings.json").read_text())
 
     def test_h27_stdin_hook_and_real_git_checkout(self):
         git_env = dict(os.environ, GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull)
@@ -518,6 +542,115 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         (self.wt / "move-source/.claude/settings.json").write_text("settings")
         self.expect("rmdir move-source", "allow")
         self.expect("mv move-source moved", "allow")
+
+    def test_h24_attached_short_option_path_candidates_are_denied(self):
+        os.symlink(".claude/settings.json", self.wt / "attached-link")
+        for command in (
+            "git format-patch -1 -o.git HEAD",
+            "git format-patch -1 -o.mcp.json HEAD",
+            "git format-patch -1 -ko.git HEAD",
+            "git format-patch -1 -klefthook.yml HEAD",
+            "git format-patch -1 -oattached-link HEAD",
+            "git format-patch -1 -ofoo/bar HEAD",
+            "git format-patch -1 -o~ HEAD",
+            "git format-patch -1 -o'.git' HEAD",
+            "git format-patch -1 -o\\.git HEAD",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+
+    def test_h24_short_option_normal_flags_and_option_terminator_remain_allowed(self):
+        self.expect("git format-patch -1 -n -pv HEAD", "allow")
+        self.expect("git format-patch -- -o.git", "allow")
+        os.symlink(".claude/settings.json", self.wt / "-o.git")
+        self.expect("git format-patch -- -o.git", "deny", "other")
+
+    def test_h24_long_option_and_file_operation_contracts_remain_unchanged(self):
+        self.expect("git format-patch --output=.git HEAD", "deny", "other")
+        self.expect("rm -rf ordinary", "allow")
+        self.expect("cp -pv safe.txt copy.txt", "allow")
+
+    def test_h24_real_git_positive_control_and_hook_denial_do_not_create_patch(self):
+        git_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        git_env |= {"GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+        template = self.wt / "git-template"
+        template.mkdir()
+        subprocess.run(["git", "init", "-q", f"--template={template}"], cwd=self.wt, env=git_env, check=True)
+        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=self.wt, env=git_env, check=True)
+        subprocess.run(["git", "config", "user.name", "Loop Test"], cwd=self.wt, env=git_env, check=True)
+        subprocess.run(["git", "config", "commit.gpgsign", "false"], cwd=self.wt, env=git_env, check=True)
+        subprocess.run(["git", "add", "safe.txt"], cwd=self.wt, env=git_env, check=True)
+        subprocess.run(["git", "commit", "-qm", "probe"], cwd=self.wt, env=git_env, check=True)
+        original = "git format-patch -1 -o.git HEAD > .claude/reviews/z"
+        subprocess.run(["bash", "-c", original], cwd=self.wt, env=git_env, check=True)
+        self.assertTrue(any((self.wt / ".git").glob("*.patch")))
+        self.assertTrue((self.wt / ".claude/reviews/z").exists())
+        for patch in (self.wt / ".git").glob("*.patch"):
+            patch.unlink()
+        (self.wt / ".claude/reviews/z").unlink()
+
+        def snapshot(root):
+            entries = {}
+            for path in sorted(root.rglob("*")):
+                rel = str(path.relative_to(root))
+                if path.is_symlink():
+                    entries[rel] = ("symlink", os.readlink(path))
+                elif path.is_dir():
+                    entries[rel] = ("directory", "")
+                else:
+                    entries[rel] = ("file", path.read_bytes())
+            return entries
+
+        git_before = snapshot(self.wt / ".git")
+        request = {"tool_name": "Bash", "tool_input": {"command": original},
+                   "cwd": str(self.wt)}
+        hook_env = os.environ | {
+            "DEV_WORKFLOW_LOOP_WORKTREE": str(self.wt),
+            "DEV_WORKFLOW_LOOP_PLUGIN_ROOT": str(self.pr),
+            "DEV_WORKFLOW_LOOP_PERMLOG": self.env["permlog"],
+            "DEV_WORKFLOW_LOOP_ALLOW": json.dumps(self.env["allow"]),
+        }
+        result = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(request), text=True,
+                                capture_output=True, env=hook_env, check=True)
+        response = json.loads(result.stdout)
+        self.assertEqual("deny", response["hookSpecificOutput"]["decision"]["behavior"])
+        if response["hookSpecificOutput"]["decision"]["behavior"] == "allow":
+            subprocess.run(["bash", "-c", original], cwd=self.wt, env=git_env, check=True)
+        self.assertEqual(git_before, snapshot(self.wt / ".git"))
+        self.assertFalse((self.wt / ".claude/reviews/z").exists())
+        logged = json.loads(Path(self.env["permlog"]).read_text().splitlines()[-1])
+        self.assertEqual(("deny", "other"), (logged["decision"], logged["kind"]))
+
+        patches = self.wt / "patches"
+        patches.mkdir()
+        allowed = "git format-patch -1 -opatches HEAD > .claude/reviews/z"
+        request["tool_input"]["command"] = allowed
+        result = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(request), text=True,
+                                capture_output=True, env=hook_env, check=True)
+        response = json.loads(result.stdout)
+        self.assertEqual("allow", response["hookSpecificOutput"]["decision"]["behavior"])
+        if response["hookSpecificOutput"]["decision"]["behavior"] == "allow":
+            subprocess.run(["bash", "-c", allowed], cwd=self.wt, env=git_env, check=True)
+        self.assertTrue(any(patches.glob("*.patch")))
+        self.assertTrue((self.wt / ".claude/reviews/z").exists())
+
+    def test_h24_hook_allows_normal_output_and_runs_only_after_allow(self):
+        output = self.wt / ".claude/reviews/h24.txt"
+        request = {"tool_name": "Bash", "tool_input": {"command": "echo h24 > .claude/reviews/h24.txt"},
+                   "cwd": str(self.wt)}
+        hook_env = os.environ | {
+            "DEV_WORKFLOW_LOOP_WORKTREE": str(self.wt),
+            "DEV_WORKFLOW_LOOP_PLUGIN_ROOT": str(self.pr),
+            "DEV_WORKFLOW_LOOP_PERMLOG": self.env["permlog"],
+            "DEV_WORKFLOW_LOOP_ALLOW": json.dumps(self.env["allow"]),
+        }
+        result = subprocess.run([sys.executable, str(SCRIPT)], input=json.dumps(request), text=True,
+                                capture_output=True, env=hook_env, check=True)
+        response = json.loads(result.stdout)
+        self.assertEqual("allow", response["hookSpecificOutput"]["decision"]["behavior"])
+        self.assertFalse(output.exists())
+        subprocess.run(["bash", "-c", request["tool_input"]["command"]], cwd=self.wt, check=True)
+        self.assertEqual("h24\n", output.read_text())
 
 
 if __name__ == "__main__":
