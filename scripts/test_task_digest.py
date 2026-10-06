@@ -314,11 +314,70 @@ sys.exit(status)
                     self.assertEqual(expected, self.value(changed))
                     self.assertNotEqual(expected, self.value(changed.replace("本文 A", "本文 B")))
 
-    def test_fence_indentation(self):
-        four = "# t\n\n## 概要\n\n    ```\n- [{}] 後ろ\n\n## 追加修正記録\n\n- 記録\n"
-        self.assertEqual(self.value(four.format("x")), self.value(four.format(" ")))
-        three = "# t\n\n## 概要\n\n   ```\n- [{}] 後ろ\n   ```\n\n## 追加修正記録\n\n- 記録\n"
-        self.assertNotEqual(self.value(three.format("x")), self.value(three.format(" ")))
+    def test_unsupported_fence_indentation_is_rejected_everywhere(self):
+        # H10: 除外する記録節も先に検査し、閉鎖・空行・チェック状態で拒否が変わらない。
+        for indent in (" " * 4, " " * 5, " " * 8, "\t", " \t", "\t ", "  \t  "):
+            for marker in ("```", "~~~"):
+                for closed in (False, True):
+                    fence = f"{indent}{marker}text\n{indent}first\n\n{indent}- [x] second\n"
+                    if closed:
+                        fence += f"{indent}{marker}\n"
+                    for changed in (fence, fence.replace("\n\n", "\n"), fence.replace("[x]", "[ ]")):
+                        sections = {
+                            "本文": f"## 概要\n{changed}## 追加修正記録\n記録\n",
+                            "記録内": f"## 概要\n本文\n## 追加修正記録\n{changed}",
+                            "記録後": f"## 追加修正記録\n記録\n## 補足\n{changed}",
+                        }
+                        for location, source in sections.items():
+                            for args in ((), ("-",)):
+                                with self.subTest(indent=indent, marker=marker, closed=closed,
+                                                  changed=changed, location=location, args=args):
+                                    self.assert_cannot_compute(self.run_digest(source, *args), "字下げ")
+
+    def test_supported_indentation_keeps_fixed_values(self):
+        # 修正前にCLIで採った値を固定する。現行実装から期待値を計算しない。
+        expected = {
+            "```": ("12d06c0621400774", "34debf0f800c7281", "6bd493892b4a2207", "0de0655494181367"),
+            "~~~": ("97c6cf508f1b7288", "1fd4b78d5cb1bd5d", "4585a18ac78a8883", "978a0fbe620cdf33"),
+            "````": ("5617a4ab16c88156", "27502a5f34e855c2", "22245ad357e153c6", "7d642bf54a0c295a"),
+            "~~~~": ("e6f11583c84d0f17", "01896950abd1dfc0", "473c73d9f07031e9", "7f765d89054018dc"),
+        }
+        for marker, values in expected.items():
+            for indent, value in enumerate(values):
+                source = (
+                    "> **ステータス**: 進行中\n## 概要\n本文\n"
+                    f"{' ' * indent}{marker}text\nalpha\n\nbeta\n{' ' * indent}{marker}{marker[0]} \t\n"
+                    "## 追加修正記録\n記録\n## 補足\n本文\n"
+                )
+                for ending in ("\n", "\r\n", "\r"):
+                    for args in ((), ("-",)):
+                        with self.subTest(marker=marker, indent=indent, ending=ending, args=args):
+                            completed = self.run_digest(source.replace("\n", ending), *args)
+                            self.assertEqual(0, completed.returncode, completed.stderr.decode("utf-8", "replace"))
+                            self.assertEqual(f"sha256:{value}\n".encode(), completed.stdout)
+                            self.assertEqual(b"", completed.stderr)
+
+    def test_indented_fence_strings_inside_supported_fences_are_preserved(self):
+        for marker in ("```", "~~~"):
+            for indent in range(4):
+                for literal_indent in (" " * 4, " " * 5, " " * 8, "\t", " \t", "\t ", "  \t  "):
+                    for literal in ("```", "~~~"):
+                        source = (
+                            f"## 概要\n{' ' * indent}{marker}text\n{literal_indent}{literal}literal\n"
+                            f"\n{literal_indent}- [x] expected\n{' ' * indent}{marker}\n"
+                            "## 追加修正記録\n記録\n"
+                        )
+                        with self.subTest(marker=marker, indent=indent, literal_indent=literal_indent, literal=literal):
+                            value = self.value(source)
+                            self.assertNotEqual(value, self.value(source.replace("\n\n", "\n")))
+                            self.assertNotEqual(value, self.value(source.replace("[x]", "[ ]")))
+
+    def test_short_or_non_immediate_markers_do_not_trigger_indentation_rejection(self):
+        for indent in (" " * 4, " " * 5, " " * 8, "\t", " \t", "\t ", "  \t  "):
+            for literal in ("`", "``", "~", "~~", "`~`", "~`~", "text ```", "text ~~~"):
+                with self.subTest(indent=indent, literal=literal):
+                    source = f"## 概要\n{indent}{literal}\n- [{{}}] 後ろ\n## 追加修正記録\n記録\n"
+                    self.assertEqual(self.value(source.format("x")), self.value(source.format(" ")))
 
     def test_cr_only_line_endings(self):
         self.assert_same(BASE.replace("\n", "\r"))
