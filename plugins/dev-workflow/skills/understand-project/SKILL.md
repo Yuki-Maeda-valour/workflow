@@ -59,7 +59,7 @@ Read して基本指示・Quick Commands・タスク完了条件・プロジェ�
 
 **ドリフト判定**:
 - 0-2 で `AGENTS.md` があり、[references/authority-file-drift.md](references/authority-file-drift.md) の「(0) が挙げる対象ファイル」のいずれかが存在するとき、**モードに関わらず**同 reference の「(2) ドリフト判定」を行い、
-- ドリフトなら『権威参照ファイルが読まれない構成』としてサマリーの「🔺 ドリフト検出」に載せ、reference の注記と対処を転記する(--deep 以外でも、気づいたら注記する)。
+- ドリフトなら『AI への指示をまとめたプロジェクトのファイルが読まれない構成』としてサマリーの「🔺 文書や設定と実際との食い違い」に載せ、reference の注記と対処を転記する(--deep 以外でも、気づいたら注記する)。
 - **reference に到達できない構成では、この検査を無効化して報告する**。
 
 ### 0-3. 知識の正本(Serena メモリ または doc/)
@@ -118,9 +118,9 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 | コマンドの乖離 | 記載コマンド vs scripts 実在 |
 | 構造の乖離 | 記載ディレクトリ vs 実在 |
 | 参照切れ | 記載ファイルパスの存在確認 |
-| 権威参照ファイルが読まれない構成 | [references/authority-file-drift.md](references/authority-file-drift.md) の「(2) ドリフト判定」に従う |
+| AI への指示をまとめたプロジェクトのファイルが読まれない構成 | [references/authority-file-drift.md](references/authority-file-drift.md) の「(2) ドリフト判定」に従う |
 
-乖離はサマリーの「🔺 ドリフト検出」に列挙し、/update-doc の実行を提案する(このスキルでは直さない)。
+乖離はサマリーの「🔺 文書や設定と実際との食い違い」に列挙し、/update-doc の実行を提案する(このスキルでは直さない)。
 
 ## Phase 5: サマリー出力
 
@@ -130,7 +130,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 # プロジェクト把握: {プロジェクト名}
 
 > 把握レベル: {quick | 標準 | area:{名} | deep} / 今回読んだ範囲: {現在確認した profile・規約・関連文書・設定・対象・依存先} / 実行: {日時}
-> 未確認事項: {このレベルで確認していないこと。例: quick → 構造実測・規約・ドキュメントドリフト未確認(権威参照ファイルの判定は実施)}
+> 未確認事項: {このレベルで確認していないこと。例: quick → 構造実測・規約・文書や設定と実際との食い違いは未確認(AI への指示をまとめたプロジェクトのファイルの判定は実施)}
 
 ## 🎯 目的
 {1〜3 行}
@@ -156,11 +156,11 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 ## ❗ 実コードとの矛盾(あれば)
 {「メモリでは X だが実コードは Y。実コードを優先」形式}
 
-## 🔺 ドリフト検出(権威参照ファイルの判定は全モード。他は --deep 時)
+## 🔺 文書や設定と実際との食い違い(AI への指示をまとめたプロジェクトのファイルの判定は全モード。ほかは --deep 時)
 {Phase 4 の結果。/update-doc を提案}
 
 ## 次のアクション
-{推奨: /create-task(新規タスク)、/update-doc(ドリフトあり)、Serena onboarding(未実施)}
+{推奨: /create-task(新規タスク)、/update-doc(文書や設定と実際との食い違いあり)、Serena onboarding(未実施)}
 ```
 
 `--area` のときは該当領域の詳細(主要ファイル・データフロー・関連メモリ)に置き換える。
