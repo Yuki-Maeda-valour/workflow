@@ -80,6 +80,10 @@ ITER_SEQ=""
 ITER_ID=""
 ITER_PGID=""
 CHILD_PID=""
+CHILD_START=""
+SUPERVISOR_RESULT=""
+SUPERVISOR_NONCE=""
+SUPERVISOR_RC=97
 ITER_WT=""
 ITER_WTADMIN="-"
 ITER_NAME=""
@@ -664,29 +668,60 @@ def cmd_compare(base_path, cur_path):
     sys.exit(1 if diffs else 0)
 
 
-def cmd_procs(iter_id, pgid, *exclude):
-    # 同じ UID のプロセスのうち、周の印(環境変数)を持つもの・周のプロセスグループに属するもの(ゾンビは除く)
-    want = b"\0DEV_WORKFLOW_LOOP_ITER=" + iter_id.encode() + b"\0"
-    uid = os.getuid()
-    skip = set(exclude) | {str(os.getpid()), str(os.getppid())}
-    for name in os.listdir("/proc"):
-        if not name.isdigit() or name in skip:
-            continue
+def supervisor_identity(pid):
+    # proc の PID は再利用される。親 PID と開始時刻を同じ read で照合する。
+    fd = os.open(f"/proc/{pid}/stat", os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        raw = os.read(fd, 4097)
+        if len(raw) > 4096:
+            raise ValueError("supervisor の状態が上限を超えた")
+        fields = raw[raw.rindex(b")") + 2:].split()
+        return int(fields[1]), int(fields[19]), fields[0]
+    finally:
+        os.close(fd)
+
+
+def cmd_supervisor_control(mode, pid, parent, start=""):
+    import signal
+    pid, parent = int(pid), int(parent)
+    if pid <= 1 or parent <= 1 or mode not in ("capture", "alive", "term", "kill"):
+        fail(9, "supervisor の照合引数が不正")
+    try:
+        before = supervisor_identity(pid)
+        if before[0] != parent or before[2] == b"Z":
+            sys.exit(3)
+        if mode == "capture":
+            print(before[1]); return
+        if before[1] != int(start):
+            sys.exit(3)
+        if mode == "alive":
+            return
+        fd = os.pidfd_open(pid)
         try:
-            if os.stat("/proc/" + name).st_uid != uid:
-                continue
-            raw = open(f"/proc/{name}/stat", "rb").read()
-            fields = raw[raw.rindex(b")") + 2:].split()
-            if fields[0] in (b"Z", b"X"):
-                continue
-            hit = pgid != "-" and fields[2] == pgid.encode()
-            if not hit:
-                env = open(f"/proc/{name}/environ", "rb").read()
-                hit = (b"\0" + env + b"\0").find(want) >= 0
-            if hit:
-                print(name)
-        except (OSError, ValueError, IndexError):
-            continue
+            if supervisor_identity(pid) != before:
+                sys.exit(3)
+            signal.pidfd_send_signal(fd, signal.SIGTERM if mode == "term" else signal.SIGKILL)
+        finally:
+            os.close(fd)
+    except (ProcessLookupError, FileNotFoundError):
+        # 消滅と読取拒否を区別する。PermissionError 等は不明として上位で止める。
+        sys.exit(3)
+
+
+def cmd_supervisor_result(path, nonce):
+    import stat
+    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 4096:
+            fail(1, "supervisor の結果が通常ファイルでない")
+        raw = os.read(fd, 4097)
+        data = json.loads(raw)
+        if data.get("nonce") != nonce or data.get("clean") is not True or type(data.get("returncode")) is not int or type(data.get("timed_out")) is not bool:
+            fail(1, "supervisor の結果が保持値と違う")
+        print(data["returncode"], int(data["timed_out"]))
+    finally:
+        os.close(fd)
 
 
 def cmd_json_get(key):
@@ -958,7 +993,7 @@ COMMANDS = {
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
     "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
-    "procs": cmd_procs, "json-get": cmd_json_get, "help-values": cmd_help_values, "allowlist": cmd_allowlist,
+    "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values, "allowlist": cmd_allowlist,
     "hookcheck": cmd_hookcheck, "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
     "origin-json": cmd_origin_json, "candiff": cmd_candiff,
 }
@@ -998,7 +1033,7 @@ stop_mark_guide() {
 }
 
 # 止めの印を置く。$3=1 なら周の途中の印を残す(片付けが済んでいないとき。止めの印を消した後の起動で、
-# 片付けと照合をやり直す)。0 なら周の途中の印を消す(止めの印が差分を持つので役目が終わる)
+# 外部から確認して再開する)。0 なら周の途中の印を消す(止めの印が差分を持つので役目が終わる)
 place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残すか
   local tmp="$STOP_MARK.tmp.$$"
   {
@@ -1017,7 +1052,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
       printf '差分を確かめ、必要なら元に戻してから、このファイルを消す: rm -- %q\n' "$STOP_MARK"
     fi
     if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" != 1 ]; then
-      printf '周の途中の印(%s)は残す。止めの印を消した後の起動で、片付けと照合をやり直す\n' "$INFLIGHT"
+      printf '周の途中の印(%s)は残す。別の信頼領域から子の不在と共有状態を確認するまで再開しない\n' "$INFLIGHT"
     fi
   } >"$tmp"
   mv -f -- "$tmp" "$STOP_MARK"
@@ -1083,7 +1118,9 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
   LOOP_STATE_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"
   LOOP_STARTUP_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
-  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY"; do
+  HOST_ARGV_PY="$PLUGIN_ROOT/skills/ship-task/scripts/host-argv.py"
+  SUPERVISOR="$PLUGIN_ROOT/skills/ship-task/scripts/loop-supervisor.py"
+  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR"; do
     [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
   done
   HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA")"
@@ -1243,47 +1280,57 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
   REMOVED_PARENT_WORKTREES=()
 }
 
-marked_pids() { # $1=周の識別子 $2=プロセスグループ(無ければ -)
-  local out
-  out="$(py procs "$1" "${2:--}" "$$" "$BASHPID")"
-  printf '%s' "$out" | tr '\n' ' ' | sed 's/ *$//'
-}
-
-# 片付けの 2〜4: 周の印を持つプロセス(と、分かるときはプロセスグループ)へ TERM → 猶予 → KILL → 確かめる。
-# 結果(残った pid)は CLEANUP_LEFT に入れる
-kill_marked() { # $1=周の識別子 $2=プロセスグループ(無ければ -)
-  local id="$1" pg="${2:--}" pids p i
-  pids="$(marked_pids "$id" "$pg")"
-  for p in $pids; do kill -TERM "$p" 2>/dev/null || true; done
-  i=0
-  while [ -n "$pids" ] && [ "$i" -lt "$KILL_GRACE" ]; do
-    nap 1 || true
-    i=$((i + 1))
-    pids="$(marked_pids "$id" "$pg")"
-  done
-  if [ -n "$pids" ]; then
-    [ "$pg" = - ] || kill -KILL -- "-$pg" 2>/dev/null || true
-    for p in $pids; do kill -KILL "$p" 2>/dev/null || true; done
-    i=0
-    while [ -n "$pids" ] && [ "$i" -lt 5 ]; do
-      nap 1 || true
-      i=$((i + 1))
-      pids="$(marked_pids "$id" "$pg")"
-    done
-  fi
-  CLEANUP_LEFT="$pids"
-  # 試験用のフック(loop-selftest.sh が使う): 確かめを「残った」に倒す。止める向きにだけ効く
-  # (残りが無いときに「残った」にするだけで、残りを「無い」にする経路は持たない)
-  if [ -n "${DEV_WORKFLOW_LOOP_TEST_LEFTOVER:-}" ] && [ -z "$CLEANUP_LEFT" ]; then
-    CLEANUP_LEFT="(試験用のフック)"
-  fi
-}
-
-# 片付け(§4): 1. 子のプロセスグループへ TERM → 2〜4. 周の印を持つプロセス(kill_marked)
+# 周の supervisor を止め、waitpid による不在証明を確かめる。
 cleanup_iteration() {
-  if [ -n "$ITER_PGID" ]; then kill -TERM -- "-$ITER_PGID" 2>/dev/null || true; fi
-  kill_marked "$ITER_ID" "${ITER_PGID:--}"
-  if [ -n "$CHILD_PID" ]; then wait "$CHILD_PID" 2>/dev/null || true; CHILD_PID=""; fi
+  local waited=0 result control_rc=0
+  CLEANUP_LEFT=""
+  if [ -n "$CHILD_PID" ]; then
+    if [ -z "$CHILD_START" ]; then
+      CLEANUP_LEFT="supervisor の開始時刻を照合できない"
+      return
+    fi
+    py supervisor-control term "$CHILD_PID" "$$" "$CHILD_START" || control_rc=$?
+    if [ "$control_rc" -ne 0 ] && [ "$control_rc" -ne 3 ]; then
+      CLEANUP_LEFT="supervisor の所有関係を照合できない"
+      return
+    fi
+    while [ "$waited" -lt "$(((KILL_GRACE + 9) * 10))" ]; do
+      control_rc=0
+      py supervisor-control alive "$CHILD_PID" "$$" "$CHILD_START" || control_rc=$?
+      [ "$control_rc" -ne 3 ] || break
+      if [ "$control_rc" -ne 0 ]; then
+        CLEANUP_LEFT="supervisor の生存を照合できない"
+        return
+      fi
+      if [ "$waited" -eq "$(((KILL_GRACE + 7) * 10))" ]; then
+        control_rc=0
+        py supervisor-control kill "$CHILD_PID" "$$" "$CHILD_START" || control_rc=$?
+        if [ "$control_rc" -ne 0 ] && [ "$control_rc" -ne 3 ]; then
+          CLEANUP_LEFT="supervisor の停止対象を照合できない"
+          return
+        fi
+      fi
+      "$PY_ABS" -c 'import time; time.sleep(.1)' || break
+      waited=$((waited + 1))
+    done
+    if [ "$control_rc" -ne 3 ]; then
+      CLEANUP_LEFT="supervisor の停止を期限内に確認できない"
+      return
+    fi
+    SUPERVISOR_RC=0
+    wait "$CHILD_PID" 2>/dev/null || SUPERVISOR_RC=$?
+    CHILD_PID=""; CHILD_START=""
+  fi
+  if [ "$SUPERVISOR_RC" -ne 0 ] || [ -z "$SUPERVISOR_RESULT" ]; then
+    CLEANUP_LEFT="supervisor の不在証明が無い"
+    return
+  fi
+  if ! result="$(py supervisor-result "$SUPERVISOR_RESULT" "$SUPERVISOR_NONCE")"; then
+    CLEANUP_LEFT="supervisor の回収結果を照合できない"
+    return
+  fi
+  read -r rc timed_out <<<"$result"
+  if [ -n "${DEV_WORKFLOW_LOOP_TEST_LEFTOVER:-}" ]; then CLEANUP_LEFT="(試験用のフック)"; fi
 }
 
 # 照合(D14・D8): 周の起動の直前の控えと、今の共有の git ディレクトリの状態・refs/heads/<DEF> を比べる。
@@ -1598,13 +1645,6 @@ load_host_table() { # $1=ホスト名
       ALLOWED_FLAG=--allowedTools
       # 許可の仲介(D22 ③): PermissionRequest の hook を持つ設定を JSON 文字列で渡すフラグ
       SETTINGS_FLAG=--settings
-      # --host-argv に書けないフラグ名(隔離と判定に要るフラグ・--help にある別名・--settings)
-      # `--`(以降を位置引数にする)・背景実行・worktree の作成も書けない(隔離と片付けを外すため)
-      FORBIDDEN_NAMES=(-p --print --output-format --setting-sources --strict-mcp-config --plugin-dir
-        --permission-mode --permission-prompts --mcp-config --allowedTools --allowed-tools
-        --disallowedTools --disallowed-tools --settings -- --bg --background -w --worktree)
-      # 短いフラグの束ね書きで、これらの文字を含むものは書けない(-p・-w の別名になりうる)
-      FORBIDDEN_SHORT_CHARS=pw
       # 全許可のフラグ名と、--permission-mode の全許可の値(#68 の決定 3)・分類器の値(--allow-classifier のときだけ)
       FULL_PERMISSION_NAMES=(--dangerously-skip-permissions --allow-dangerously-skip-permissions)
       FULL_PERMISSION_VALUE=bypassPermissions
@@ -1634,28 +1674,10 @@ check_host_session() {
   done
 }
 
-# D20: 上書きのトークンを `=` の前で切って、隔離・判定のフラグ名・別名・--settings などを照合する。
-# 値を取るフラグは `--名前=値` の形だけを受け付ける(値を別のトークンにすると、後ろに足す隔離のフラグが
-# 値として食われうる)。そのため、実行ファイルの後ろのトークンはすべてフラグにする。どのフラグが値を
-# 取るかは、2 段照合の --help から作る表で見る(check_host_argv_values。表に無いフラグは値を取らない)
+# D20/H28: 実行ファイル以外は閉じた許可表で型ごとに検査する。
 check_host_argv() {
-  local tok name bad
-  case "${HOST_ARGV[0]}" in -*) die 20 host-argv "--host-argv の最初のトークンは実行ファイル('-' で始まらない): '${HOST_ARGV[0]}'" ;; esac
-  for tok in "${HOST_ARGV[@]:1}"; do
-    name="${tok%%=*}"
-    for bad in "${FORBIDDEN_NAMES[@]}"; do
-      if [ "$name" = "$bad" ]; then
-        die 20 host-argv "--host-argv に書けないフラグがある('$tok')。隔離・判定のフラグは loop.sh が後ろに足す"
-      fi
-    done
-    case "$tok" in
-      --*) : ;;
-      # 短いフラグの束ね書きは、`=` の後ろも含めたトークン全体で見る
-      -*["$FORBIDDEN_SHORT_CHARS"]*) die 20 host-argv "--host-argv に -p・-w を含みうる短いフラグがある('$tok')" ;;
-      -*) : ;;
-      *) die 20 host-argv "--host-argv の値は --名前=値 の形で書く(フラグでないトークン '$tok')" ;;
-    esac
-  done
+  verify_environment || die 20 environment "起動引数検査の直前に環境が変わった"
+  "$PY_ABS" "$HOST_ARGV_PY" -- "${HOST_ARGV[@]}" || die 20 host-argv "--host-argv は model・effort・budget・max-turns・name の = 形式と --verbose だけを受け付ける"
 }
 
 in_lines() { # $1=語 $2=ファイル(1 行 1 語)→ 在れば 0
@@ -2517,10 +2539,14 @@ source=$ITER_SOURCE
   [ "$DISCOVER" -eq 0 ] || rep "- 今夜の名のブランチ: task/$ITER_NAME"
   printf '%s\n' "$ITER_PROMPT" >"$RUN_DIR/iter-$ITER_SEQ.prompt"
   start="$(date +%s)"
-  # 子: setsid で新しいセッションにする(片付けでグループごと止める)。DEV_WORKFLOW_HOST_CLI を外し、
+  # 子: supervisor が別セッションで起動し、子孫を回収する。DEV_WORKFLOW_HOST_CLI を外し、
   # 周の印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
   # OLDPWD も外す(直前の cd で worktree の外を指す。周の中の `cd -` の行き先にさせない)
   # H32: 自動メモリは周の子だけで無効にする。親の値や利用者の設定・既存メモリは変更しない。
+  SUPERVISOR_RESULT="$RUN_DIR/iter-$ITER_SEQ.supervisor.json"
+  SUPERVISOR_NONCE="$("$PY_ABS" -c 'import secrets; print(secrets.token_hex(32))')"
+  SUPERVISOR_RC=97
+  verify_environment || die 20 environment "監督プロセスの起動直前に環境が変わった"
   (
     exec 7>&-
     cd "$ITER_WT"
@@ -2531,20 +2557,32 @@ source=$ITER_SOURCE
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
       DEV_WORKFLOW_LOOP_PUSH_REPO="$O_REPO" DEV_WORKFLOW_LOOP_PUSH_REF="refs/heads/task/$ITER_NAME" \
       CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
-      "$SETSID_BIN" "${CHILD_ARGV[@]}" \
+      "$PY_ABS" "$SUPERVISOR" --result "$SUPERVISOR_RESULT" --nonce "$SUPERVISOR_NONCE" \
+      --timeout "$ITER_TIMEOUT" --grace "$KILL_GRACE" -- "${CHILD_ARGV[@]}" \
       <"$RUN_DIR/iter-$ITER_SEQ.prompt" >"$RUN_DIR/iter-$ITER_SEQ.out" 2>"$RUN_DIR/iter-$ITER_SEQ.err"
   ) &
   pid=$!
   CHILD_PID="$pid"
+  CHILD_START=""
   ITER_PGID="$pid"
   timed_out=0
-  while kill -0 "$pid" 2>/dev/null; do
-    now="$(date +%s)"
-    if [ $((now - start)) -ge "$ITER_TIMEOUT" ]; then timed_out=1; break; fi
-    nap 1
-  done
+  local control_rc=0
+  CHILD_START="$(py supervisor-control capture "$pid" "$$")" || control_rc=$?
+  if [ "$control_rc" -ne 0 ] && [ "$control_rc" -ne 3 ]; then
+    timed_out=1
+  else
+    while [ "$control_rc" -eq 0 ]; do
+      control_rc=0
+      py supervisor-control alive "$pid" "$$" "$CHILD_START" || control_rc=$?
+      [ "$control_rc" -ne 3 ] || break
+      if [ "$control_rc" -ne 0 ]; then timed_out=1; break; fi
+      now="$(date +%s)"
+      if [ $((now - start)) -ge "$((ITER_TIMEOUT + KILL_GRACE + 7))" ]; then timed_out=1; break; fi
+      nap 1
+    done
+  fi
   rc=0
-  if [ "$timed_out" -eq 0 ]; then wait "$pid" || rc=$?; CHILD_PID=""; fi
+  if [ "$timed_out" -eq 0 ]; then SUPERVISOR_RC=0; wait "$pid" || SUPERVISOR_RC=$?; CHILD_PID=""; CHILD_START=""; fi
   # 片付け(時間切れでも正常に終わっても、判定より前に必ず行う)。止めた子についての bash の通知
   # (「Killed」など)は周のログへ向ける
   cleanup_iteration 2>>"$RUN_DIR/iter-$ITER_SEQ.err"
@@ -2782,9 +2820,12 @@ PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読�
 PLUGIN_NAME="$(printf '%s\n' "$PJ" | sed -n 1p)"
 PLUGIN_VERSION="$(printf '%s\n' "$PJ" | sed -n 2p)"
 [ "$PLUGIN_NAME" = dev-workflow ] || die 20 plugin-root "プラグインの名前が dev-workflow でない"
-for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY"; do
+for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR"; do
   [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
 done
+
+verify_environment || die 20 environment "監督機構の診断直前に環境が変わった"
+"$PY_ABS" "$SUPERVISOR" --check || die 20 supervisor-runtime "子の監督に必要な Linux subreaper・pidfd を使えない"
 
 # ── §2 の 5: 既定表・--host-argv(D20)・全許可のフラグ(#68 の決定 3)──
 load_host_table "$HOST"
@@ -2795,6 +2836,7 @@ if [ "${#HOST_ARGV_OVERRIDE[@]}" -gt 0 ]; then
 else
   HOST_ARGV=("${TEMPLATE[@]}")
   HOST_ARGV_SOURCE="既定表"
+  check_host_argv
 fi
 build_child_argv
 scan_full_permission
