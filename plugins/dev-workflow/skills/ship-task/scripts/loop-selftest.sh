@@ -199,6 +199,14 @@ is_p=0
 for a in "$@"; do [ "$a" = -p ] && is_p=1; done
 [ "$is_p" -eq 1 ] || { echo "stub: unexpected invocation: $*" >&2; exit 64; }
 prompt="$(cat)"
+# H20: 人の設定だけを変える。対象は治具が明示した scratch のファイルに限る。
+human_config_change() {
+  case "${SELFTEST_HUMAN_ACTION:?}" in
+    add|value) git config --file "${SELFTEST_HUMAN_CONFIG:?}" selftest.human after ;;
+    delete) rm -- "${SELFTEST_HUMAN_CONFIG:?}" ;;
+    reorder) printf '[selftest]\n\tb = 2\n\ta = 1\n' >"${SELFTEST_HUMAN_CONFIG:?}" ;;
+  esac
+}
 case "$prompt" in
   *--discover=*)
     # 発見モードの周(loop.md §11)。発見元ごとの振る舞いは環境変数 SELFTEST_DISC_DA(data-audit)・SELFTEST_DISC_RF
@@ -271,6 +279,7 @@ case "$prompt" in
       pushsleep) dbr; cand "候補_$src-a.md"; dcommit; dpush; dlinger ;;
       pushu) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dres "$PRL" ;;
       pushusleep) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dlinger ;;
+      humancfg) human_config_change; dres "無人の周の結果: 候補なし — H20" ;;
       cfgchange) dbr; cand "候補_$src-a.md"; dcommit; g config selftest.tampered yes; dres "無人の周の結果: 縮退 — tamper" ;;
       late) # 判定の後に書く: 許可の仲介の記録を FIFO にし、loop.sh が読んだとき(判定の後・後片付けの前)に未追跡を置く
             dbr; cand "候補_$src-a.md"; dcommit
@@ -423,6 +432,7 @@ case "$beh" in
   pushusleep) branch; done_commit; pushu; linger ;;
   crash) touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
   crashcfg) g config selftest.tampered yes; touch "${SELFTEST_SLEEP_TRIGGER:?}"; linger ;;
+  humancfg) branch; done_commit; human_config_change; result "無人の周の結果: 縮退 — H20" ;;
   cfgadd) branch; done_commit; g config selftest.added yes; result "無人の周の結果: 縮退 — tamper" ;;
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人の周の結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人の周の結果: PR — x" ;;
@@ -650,7 +660,7 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
@@ -1241,6 +1251,143 @@ check "追跡用の ref の案内は 1 回だけ(選定が 2 回あっても重�
 has "追跡用の ref で読み飛ばしたタスクは、保留のタスクと別の見出し" "$RP" "## 追跡用の ref で読み飛ばしたタスク"
 hasnt "追跡用の ref だけなら、保留の見出しを出さない" "$RP" "## 保留のタスクを再び回す手順"
 
+fi
+
+# ════════════════ 同じ理由で残った worktree(H42)════════════════
+if want locked; then
+# 実 worktree の NUL 区切りを対象の関数へそのまま渡す。同じプロセスで再読取りも確かめる。
+newrepo locked-read noorigin
+mkdir -p "$W/locked-read"
+python3 - "$TARGET" "$W/locked-read/functions.sh" <<'PY'
+import re, sys
+text = open(sys.argv[1], encoding="utf-8").read()
+start = text.index("load_worktrees() {")
+end = text.index("\nfinish() {", start)
+with open(sys.argv[2], "w", encoding="utf-8") as out:
+    out.write("\n".join(re.findall(r"^declare -A LOCKED_[^\n]+", text, re.M)) + "\n")
+    out.write(text[start:end])
+PY
+LOCK_READ_OUT="$W/locked-read/result.txt"
+bash -s -- "$W/locked-read/functions.sh" "$R" "$W/locked-read" <<'SH' >"$LOCK_READ_OUT" 2>&1
+set -euo pipefail
+source "$1"
+TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current
+declare -A WT_OUTCOME=()
+G() { git "$@"; }
+rep() { printf '%s\n' "$@"; }
+a="$RUN_DIR/same space"; b="$RUN_DIR/"$'same\nnewline'; c="$RUN_DIR/other"
+reason='dev-workflow-loop: docs/tasks/進行中_same.md'
+report_left_worktrees >"$RUN_DIR/zero.txt"
+[ ! -s "$RUN_DIR/zero.txt" ]
+git -C "$TOP" worktree add -q --detach --lock --reason "$reason" "$a" HEAD
+WT_OUTCOME["$a"]='結末 A'
+report_left_worktrees >"$RUN_DIR/one.txt"
+git -C "$TOP" worktree add -q --detach --lock --reason "$reason" "$b" HEAD
+git -C "$TOP" worktree add -q --detach --lock --reason 'dev-workflow-loop: 候補:refactor' "$c" HEAD
+WT_OUTCOME["$b"]='結末 B'; WT_OUTCOME["$c"]='結末 C'
+report_left_worktrees >"$RUN_DIR/many.txt"
+# 同理由の 1 件を unlock しても残りの 1 件を保持する。実体は消さない。
+git -C "$TOP" worktree unlock "$a"
+report_left_worktrees >"$RUN_DIR/remaining.txt"
+git -C "$TOP" worktree unlock "$b"
+git -C "$TOP" worktree unlock "$c"
+report_left_worktrees >"$RUN_DIR/zero-again.txt"
+[ ! -s "$RUN_DIR/zero-again.txt" ]
+[ -d "$a" ] && [ -d "$b" ] && [ -d "$c" ]
+SH
+check "H42: NUL 読取り・再読取りの実行" 0 "$?"
+python3 - "$W/locked-read" <<'PY' >"$W/locked-read/check.txt" 2>&1
+from pathlib import Path
+import sys
+root = Path(sys.argv[1])
+a, b, c = (str(root / x) for x in ("same space", "same\nnewline", "other"))
+reason = "dev-workflow-loop: docs/tasks/進行中_same.md"
+rows = {a: f"- {a}(lock の理由: {reason})— 結末: 結末 A",
+        b: f"- {b}(lock の理由: {reason})— 結末: 結末 B",
+        c: f"- {c}(lock の理由: dev-workflow-loop: 候補:refactor)— 結末: 結末 C"}
+for name, paths in [("zero", []), ("one", [a]), ("many", [a, b, c]),
+                    ("remaining", [b, c]), ("zero-again", [])]:
+    text = (root / f"{name}.txt").read_text()
+    assert text.count("(lock の理由: ") == len(paths), (name, text)
+    for path, row in rows.items():
+        assert (row in text) == (path in paths), (name, path, text)
+print("0/1/同理由2/異理由/空白/改行/個別結末/再読取り: PASS")
+PY
+check "H42: NUL 読取りで全件・各結末を保持し古い lock を消す" 0 "$?"
+
+# 両モードを実際に起動する。残った worktree は一切変更せず、対象の周を起動しない。
+for lm in task discover; do
+  newrepo "locked-$lm"
+  addtask locked
+  commit
+  newrec "locked-$lm"
+  lp1="$W/repos/locked-$lm-a space"
+  lp2="$W/repos/locked-$lm-b"
+  lp3="$W/repos/locked-$lm-other"
+  lp4="$W/repos/locked-$lm-foreign"
+  lp5="$W/repos/locked-$lm-no-reason"
+  if [ "$lm" = task ]; then
+    lr='dev-workflow-loop: docs/tasks/進行中_locked.md'
+    lo='dev-workflow-loop: docs/tasks/進行中_locked.md-x'
+    LARGS=()
+  else
+    lr='dev-workflow-loop: 候補:refactor'
+    lo='dev-workflow-loop: 候補:refactor-x'
+    LARGS=(--discover=refactor)
+  fi
+  # 0 件では報告しない。dry-run なので候補の周は起動しない。
+  run_loop "locked-$lm" -- --repo "$R" --dry-run "${LARGS[@]}"
+  check "H42($lm): 0 件で終了 0" 0 "$RC"
+  hasnt "H42($lm): 0 件で残存報告なし" "$(report_of "$OUT")" "残った worktree"
+  G -C "$R" worktree add -q --detach --lock --reason "$lr" "$lp1" HEAD
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 1 件で読み飛ばす" 0 "$RC"
+  has "H42($lm): 1 件の開始報告" "$(report_of "$OUT")" "残った worktree(過去の実行の分を含む): $lp1($lr)"
+  G -C "$R" worktree add -q --detach --lock --reason "$lr" "$lp2" HEAD
+  G -C "$R" worktree add -q --detach --lock --reason "$lo" "$lp3" HEAD
+  G -C "$R" worktree add -q --detach --lock --reason 'foreign lock' "$lp4" HEAD
+  G -C "$R" worktree add -q --detach --lock "$lp5" HEAD
+  git -C "$R" worktree list --porcelain -z >"$W/locked-$lm-before.z"
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 同理由複数で終了 0" 0 "$RC"
+  check "H42($lm): 対象の周を起動しない" "" "$(calls)"
+  RP="$(report_of "$OUT")"
+  for lp in "$lp1" "$lp2" "$lp3"; do
+    if [ "$lp" = "$lp3" ]; then expected_reason="$lo"; else expected_reason="$lr"; fi
+    has "H42($lm): 開始に全件($lp)" "$RP" "残った worktree(過去の実行の分を含む): $lp($expected_reason)— 結末:"
+    has "H42($lm): 終了に全件($lp)" "$RP" "- $lp(lock の理由: $expected_reason)— 結末:"
+  done
+  # 読み飛ばしの理由だけを抽出して照合する。開始/終了報告にあるだけでは成功にしない。
+  sed -n '/前の周が残した worktree がある/p' "$RP" >"$W/locked-$lm-skip.txt"
+  for lp in "$lp1" "$lp2"; do
+    printf -v quoted_lp '%q' "$lp"
+    has "H42($lm): 読み飛ばしに全件($lp)" "$W/locked-$lm-skip.txt" "$quoted_lp"
+    if [ "$lm" = discover ]; then
+      has "H42($lm): 各パスの片付け($lp)" "$RP" "git worktree unlock $quoted_lp → git worktree remove $quoted_lp(調べてから)"
+    fi
+  done
+  hasnt "H42($lm): 理由の部分一致で混ぜない" "$W/locked-$lm-skip.txt" "$lp3"
+  hasnt "H42($lm): 非 loop 理由は報告しない" "$RP" "$lp4"
+  hasnt "H42($lm): 理由なしの lock は報告しない" "$RP" "$lp5"
+  git -C "$R" worktree list --porcelain -z >"$W/locked-$lm-after.z"
+  t "H42($lm): 既存 worktree と lock を変更しない" cmp -s "$W/locked-$lm-before.z" "$W/locked-$lm-after.z"
+  for lp in "$lp1" "$lp2" "$lp3" "$lp4" "$lp5"; do t "H42($lm): 実体を残す($lp)" test -d "$lp"; done
+  G -C "$R" worktree unlock "$lp1"
+  run_loop "locked-$lm" -- --repo "$R" "${LARGS[@]}"
+  check "H42($lm): 1 件片付けても残りで読み飛ばす" 0 "$RC"
+  check "H42($lm): 残り 1 件でも対象の周を起動しない" "" "$(calls)"
+  has "H42($lm): 残り 1 件を報告" "$(report_of "$OUT")" "$lp2(lock の理由: $lr)"
+  hasnt "H42($lm): unlock 済みは次の報告に残らない" "$(report_of "$OUT")" "$lp1"
+  G -C "$R" worktree unlock "$lp2"
+  run_loop "locked-$lm" -- --repo "$R" --dry-run "${LARGS[@]}"
+  check "H42($lm): 該当 lock が 0 件なら選定できる" 0 "$RC"
+  hasnt "H42($lm): 異なる理由だけでは読み飛ばさない" "$(report_of "$OUT")" "前の周が残した worktree がある"
+  if [ "$lm" = task ]; then
+    has "H42($lm): 対象タスクが候補に戻る" "$OUT" "  docs/tasks/進行中_locked.md"
+  else
+    has "H42($lm): 対象の発見元が候補に戻る" "$OUT" "  refactor(ブランチ task/候補-refactor-"
+  fi
+done
 fi
 
 # ════════════════ 判定・片付け・人のチェックアウト ════════════════
@@ -1856,6 +2003,58 @@ pa "入力の cwd が worktree の下のディレクトリのときの W への�
 pa "CDPATH= cd -P -- <worktree の中> && pwd -P" Bash "$(bash_in 'CDPATH= cd -P -- src && pwd -P')"
 pa "CDPATH= cd -P -- <プラグインルートの中> && pwd -P" Bash "$(bash_in "CDPATH= cd -P -- $PP/skills && pwd -P")"
 pa "プラグインルートの下の Read" Read "$(file_in "$PP/skills/x/ref.md")"
+# H37: 実 Bash は追跡しない組み込み移動の後に symlink の先を書き換えられる。hook は全許可でも入口で止める。
+mkdir -p "$PW/sub"
+printf 'before\n' >"$PW/.claude/settings.json"
+ln -s ../.claude/settings.json "$PW/sub/local.txt"
+h37_run() { # $1=同じ文字列で hook と実 Bash に渡す攻撃 $2=stdin(任意)
+  local command="$1" input="${2:-}"
+  if [ -n "$input" ]; then
+    printf '%s' "$input" | timeout -k 2 5 bash -c 'cd "$1" && exec env -i HOME="$2" PATH="$3" bash --noprofile --norc -c "$4"' \
+      _ "$PW" "$W/home" "$SAFEBIN" "$command"
+  else
+    timeout -k 2 5 bash -c 'cd "$1" && exec env -i HOME="$2" PATH="$3" bash --noprofile --norc -c "$4"' \
+      _ "$PW" "$W/home" "$SAFEBIN" "$command"
+  fi
+}
+h37_attack() { # $1=表示名 $2=攻撃 $3=stdin(任意)。陽性対照→復元→hook→allow時だけ実行→不変を同じ文字列で確認する。
+  local label="$1" command="$2" input="${3:-}" rc
+  printf 'before\n' >"$PW/.claude/settings.json"
+  h37_run "$command" "$input" >/dev/null 2>&1; rc=$?
+  check "H37 陽性対照: $label は実 Bash で完走する" 0 "$rc"
+  check "H37 陽性対照: $label は symlink の先を書き換える" changed "$(cat "$PW/.claude/settings.json")"
+  printf 'before\n' >"$PW/.claude/settings.json"
+  pdk "H37: $label を全許可でも拒否する" other Bash "$(bash_in "$command")"
+  if [ "$PDEC" = allow ]; then h37_run "$command" "$input" >/dev/null 2>&1; fi
+  check "H37: $label の deny 後に symlink の先が不変" before "$(cat "$PW/.claude/settings.json")"
+}
+PALLOW='[{"kind":"all","words":[]}]'
+h37_attack "builtin cd" 'builtin cd sub && echo changed > local.txt'
+h37_attack "command cd" 'command cd sub && echo changed > local.txt'
+h37_attack "pushd" 'pushd sub >/dev/null && echo changed > local.txt'
+h37_attack "popd(pushd -n で準備)" 'pushd -n sub >/dev/null && popd >/dev/null && echo changed > local.txt'
+h37_attack "深い command/builtin" 'command -p -- command -pp -- builtin -- cd sub && echo changed > local.txt'
+h37_attack "予約語 ! time" '! time builtin cd sub; echo changed > local.txt'
+h37_attack "許可 cd 前置きの後の builtin cd" 'CDPATH= cd -P -- src && builtin cd ../sub && echo changed > local.txt'
+h37_attack "if" 'if builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "通常コマンド後の if" 'echo ok && if builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "while" 'while builtin cd sub; do echo changed > local.txt; break; done'
+h37_attack "until" 'until builtin cd sub; do break; done; echo changed > local.txt'
+h37_attack "for" 'for x in once; do builtin cd sub; echo changed > local.txt; done'
+h37_attack "elif" 'if false; then :; elif builtin cd sub; then echo changed > local.txt; fi'
+h37_attack "select" 'select x in once; do builtin cd sub; echo changed > local.txt; break; done' $'1\n'
+h37_attack "許可 cd 前置き後の if" 'CDPATH= cd -P -- src && if builtin cd ../sub; then echo changed > local.txt; fi'
+for H37_QUOTED in "t''ime true" "''time true" "!'' true" "\\time true" "'if' true"; do
+  pa "H37: 引用・エスケープした予約語は通常判定($H37_QUOTED)" Bash "$(bash_in "$H37_QUOTED")"
+done
+pa "H37: builtin echo は通常操作として allow" Bash "$(bash_in 'builtin echo normal')"
+pa "H37: command -p echo は通常操作として allow" Bash "$(bash_in 'command -p echo normal')"
+check "H37: builtin echo は実 Bash で実行できる" normal "$(h37_run 'builtin echo normal')"
+check "H37: command -p echo は実 Bash で実行できる" normal "$(h37_run 'command -p echo normal')"
+pa "H37: 通常操作は全許可で allow" Bash "$(bash_in 'echo normal > src/h37.txt')"
+if [ "$PDEC" = allow ]; then h37_run 'echo normal > src/h37.txt' >/dev/null 2>&1; fi
+check "H37: allow の通常操作は実行できる" normal "$(cat "$PW/src/h37.txt")"
+PALLOW=""
 # 保護パスの判定は worktree のルートからの相対で見る: `.claude` の段を含む場所(導入先のキャッシュに似せた置き場)に
 # プラグインルートを置いても、その中を読むのは保護パスに当たらない
 PPC="$W/home/.claude/plugins/cache/m/dev-workflow/9.9.9"
@@ -3228,6 +3427,168 @@ run_loop dcand -- --repo "$R" --dry-run --discover
 check "候補_ だけのディレクトリ: 起動する" 0 "$RC"
 has "候補_ だけのディレクトリが task_dir に検出される" "$OUT" "発見元の列(task_dir: cands)"
 
+fi
+
+# ════════════════ 人の linked worktree の設定(H20)════════════════
+if want humanconfig; then
+hc_setup() { # $1=名 $2=最初のタスク $3=初期設定 $4=main|linked [$5=拡張]
+  HC_NAME="hc-$1"
+  newrepo "$HC_NAME"
+  addtask "$2-a" 2026-01-01; addtask pr-b 2026-01-02
+  commit
+  [ "${5:-on}" = off ] || G -C "$R" config extensions.worktreeConfig true
+  HC_REPO="$R"
+  if [ "$4" = linked ]; then
+    HC_REPO="$W/repos/$HC_NAME human"
+    G -C "$R" worktree add -q --detach "$HC_REPO" HEAD
+  fi
+  HC_CONFIG="$(git -C "$HC_REPO" rev-parse --absolute-git-dir)/config.worktree"
+  case "$3" in
+    present) git -C "$R" config --file "$HC_CONFIG" selftest.human before ;;
+    reorder) printf '[selftest]\n\ta = 1\n\tb = 2\n' >"$HC_CONFIG" ;;
+  esac
+  newrec "$HC_NAME"
+}
+hc_change() {
+  case "$1" in
+    add|value) git -C "$R" config --file "$HC_CONFIG" selftest.human after ;;
+    delete) rm -- "$HC_CONFIG" ;;
+  esac
+}
+hc_fingerprint() {
+  if [ -f "$HC_CONFIG" ]; then sha256sum <"$HC_CONFIG"; else printf absent; fi
+}
+hc_preserved() { # $1=変更方法
+  case "$1" in
+    add|value) check "H20 $HC_NAME: 設定を復元しない" after "$(git -C "$R" config --file "$HC_CONFIG" --get selftest.human)" ;;
+    delete) f "H20 $HC_NAME: 設定を作り直さない" test -e "$HC_CONFIG" ;;
+    reorder) check "H20 $HC_NAME: 順序を復元しない" $'selftest.b=2\nselftest.a=1' "$(git -C "$R" config --file "$HC_CONFIG" --list)" ;;
+  esac
+}
+hc_strip_saved() { # 旧版と同じ保存形式にする(設定そのものは変更しない)
+  python3 - "$1" <<'PY'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d.pop("repo:git-dir", None)
+d.pop("repo:config.worktree", None)
+json.dump(d, open(p, "w"))
+PY
+}
+# 通常終了。拡張なしで後から置かれたファイルと、順序だけの変更も見る。
+for action in add delete value reorder inactive; do
+  initial=present; extension=on; change="$action"
+  case "$action" in add) initial=absent ;; reorder) initial=reorder ;; inactive) initial=absent; extension=off; change=add ;; esac
+  hc_setup "normal-$action" humancfg "$initial" linked "$extension"
+  run_loop "$HC_NAME" "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" "SELFTEST_HUMAN_ACTION=$change" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 終了コード" 10 "$RC"
+  has "H20 $HC_NAME: 理由" "$OUT" '[shared-state]'
+  check "H20 $HC_NAME: 次のタスクへ進まない" humancfg-a "$(calls)"
+  SD="$(state_dir "$HC_NAME")"
+  has "H20 $HC_NAME: 停止印に人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree'
+  has "H20 $HC_NAME: 報告に人の設定の差分" "$(report_of "$OUT")" 'repo:config.worktree'
+  if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then
+    ng "H20 $HC_NAME: 後続ネットワークを打たない"
+  else
+    ok "H20 $HC_NAME: 後続ネットワークを打たない"
+  fi
+  hc_preserved "$change"
+done
+# 設定あり/なし・主/linked の変更なしはどれも 2 周を完了する。
+for location in main linked; do
+  for initial in absent present; do
+    hc_setup "normal-$location-$initial" pr "$initial" "$location"
+    HC_BEFORE="$(hc_fingerprint)"
+    run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+    check "H20 $HC_NAME: 変更なしは成功" 0 "$RC"
+    check "H20 $HC_NAME: 次のタスクを実行" 'pr-a pr-b' "$(calls)"
+    check "H20 $HC_NAME: 設定に書かない" "$HC_BEFORE" "$(hc_fingerprint)"
+  done
+done
+# 中断後の追加/削除/値変更、無変更、起動元変更、旧形式。TERM も同じ照合を通す。
+for action in add delete value unchanged absent switch legacy term; do
+  initial=present
+  case "$action" in add|absent) initial=absent ;; esac
+  hc_setup "restart-$action" longsleep "$initial" linked
+  HC_OTHER="$W/repos/$HC_NAME other"
+  if [ "$action" = switch ]; then
+    G -C "$R" worktree add -q --detach "$HC_OTHER" HEAD
+    git -C "$R" config --file "$(git -C "$HC_OTHER" rev-parse --absolute-git-dir)/config.worktree" selftest.human before
+  fi
+  start_bg "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  if ! wait_file "$REC/started-longsleep-a" 30; then
+    ng "H20 $HC_NAME: 中断する周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg; continue
+  fi
+  SD="$(state_dir "$HC_NAME")"
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  if [ "$action" = term ]; then
+    hc_change value
+    kill -TERM "$BG_PID"; wait_bg
+    check "H20 TERM: 143" 143 "$BG_RC"
+    has "H20 TERM: 停止印に差分" "$SD/stop-mark.md" 'repo:config.worktree'
+    check "H20 TERM: 次のタスクへ進まない" longsleep-a "$(calls)"
+    hc_preserved value
+    has "H20 TERM: 報告に差分" "$(report_of "$OUT")" 'repo:config.worktree'
+    : >"$REC/ssh.log"
+    run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+    check "H20 TERM: 停止印がある再起動は20" 20 "$RC"
+    has "H20 TERM: 再起動の理由" "$OUT" '[stop-mark]'
+    f "H20 TERM: 再起動後にネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+    check "H20 TERM: 再起動後も次のタスクへ進まない" longsleep-a "$(calls)"
+    continue
+  fi
+  kill -KILL "$BG_PID"; wait_bg
+  case "$action" in
+    add|delete|value) hc_change "$action" ;;
+    switch) HC_REPO="$HC_OTHER" ;;
+    legacy) hc_strip_saved "$SD/inflight/base.json" ;;
+  esac
+  HC_BEFORE="$(hc_fingerprint)"
+  : >"$REC/ssh.log"
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  if [ "$action" = unchanged ] || [ "$action" = absent ]; then
+    check "H20 $HC_NAME: 変更なしは再開" 0 "$RC"
+    check "H20 $HC_NAME: 次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
+  else
+    check "H20 $HC_NAME: 再起動は停止" 20 "$RC"
+    has "H20 $HC_NAME: 理由" "$OUT" '[inflight-diff]'
+    check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
+    t "H20 $HC_NAME: 停止印" test -f "$SD/stop-mark.md"
+    f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+    case "$action" in
+      switch|legacy) has "H20 $HC_NAME: 前の起動元の確認を案内" "$SD/stop-mark.md" '前の起動元の設定を確認' ;;
+      *) has "H20 $HC_NAME: 人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree' ;;
+    esac
+  fi
+  f "H20 $HC_NAME: 子を片付けた" proc_alive "$CHILD"
+  check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
+done
+# 正常実行間は既存どおり報告だけで続く。旧形式を黙って無視しない。
+for action in value switch legacy; do
+  hc_setup "between-$action" pr present linked
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" --max-iterations 1 "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 最初の周" 0 "$RC"
+  SD="$(state_dir "$HC_NAME")"
+  case "$action" in
+    value) hc_change value ;;
+    switch) HC_REPO="$R" ;;
+    legacy) hc_strip_saved "$SD/last-verified.json" ;;
+  esac
+  HC_BEFORE="$(hc_fingerprint)"
+  run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 正常実行間は続く" 0 "$RC"
+  check "H20 $HC_NAME: 次のタスクを実行" 'pr-a pr-b' "$(calls)"
+  has "H20 $HC_NAME: 差分を報告" "$(report_of "$OUT")" '最後に照合に通った状態からの差分'
+  has "H20 $HC_NAME: 人の管理パスか設定を報告" "$(report_of "$OUT")" 'repo:'
+  check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
+done
+# 発見モードも共用の照合を通り、次の発見元へ進まない。
+hc_setup discover pr present linked
+run_loop "$HC_NAME" SELFTEST_DISC_DA=humancfg "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" SELFTEST_HUMAN_ACTION=value -- --repo "$HC_REPO" --discover "${COMMON_ARGS[@]}"
+check "H20 発見: 停止" 10 "$RC"
+check "H20 発見: 次の発見元へ進まない" disc-data-audit "$(calls)"
+has "H20 発見: 停止印に人の設定" "$(state_dir "$HC_NAME")/stop-mark.md" 'repo:config.worktree'
+hc_preserved value
 fi
 
 # ════════════════ 後片付け ════════════════

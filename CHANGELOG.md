@@ -15,6 +15,50 @@ v4.2.0 以前は commit 履歴を参照。
 
 - 独自の skill に `AskUserQuestion`・`multiSelect`(大小を問わない。UI 部品の名前 `MultiSelect` も含む)を書いた fork は、`validate.py` が ERROR を出す。ホストに依らない言い方に書き換えるか、正当な記述なら理由つきの `<!-- validate-allow: 理由 -->` で外す
 
+## v4.20.6
+
+### 修正
+
+- `loop-permission.py` が、`builtin`・`command` 経由の移動と `pushd`・`popd` を許可リストより先に拒否する([子 Issue #166](https://github.com/Yuki-Maeda-valour/workflow/issues/166)、親 #107 の H37)。重ねたラッパー・オプションと、複合コマンドの全位置を調べる。
+- `!`・`time` の前置きや `if`・`for` など、移動を追跡しない制御構文も拒否する。空引用を含む引用語、情報照会、通常操作、既存の2種類の `cd` とH36のsymlink保護は維持する。
+- scratchの実Bashによる書換えの陽性対照と、同じコマンドの実hook入力を回帰検証する。拒否範囲と限界は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
+## v4.20.5
+
+### 修正
+
+- `task-digest.py` が対応外の字下げのフェンスを算出不能として拒否する([子 Issue #168](https://github.com/Yuki-Maeda-valour/workflow/issues/168)、親 #107 の H10)。フェンスの外で、半角スペース 4 個以上かタブを含む字下げの直後に、同じバッククォートかチルダが 3 個以上続く行を検査する。閉鎖の有無や追加修正記録の節への配置で検査を逃れない。
+- 正常な半角スペース 0〜3 個の囲みの計算値と、囲みの中の字下げ文字列を保つ。未閉鎖の拒否・通常ファイル限定の読み込み・既知キー収集と候補検証の JSON 契約も維持する。拒否条件と期待出力の書き方は [task-template.md の記法の規約](plugins/dev-workflow/skills/create-task/references/task-template.md) を参照。
+
+## v4.20.4
+
+### 修正
+
+- `loop.sh` が、人の linked worktree の `config.worktree` の追加・削除・値変更・項目の並べ替えを検出する([子 Issue #167](https://github.com/Yuki-Maeda-valour/workflow/issues/167)、親 #107 の H20)。通常終了・シグナル終了・中断後の再起動で既存の停止規則を適用する。利用者の設定は自動復元・削除しない。
+- 中断後に起動元を変えた場合と、人の設定の比較元が無い旧 `inflight` は停止し、前の起動元の設定確認を促す。中断の無い実行間の変更や旧 `last-verified.json` は報告して続ける。詳しい再開手順と限界は [loop.md §4・§10](plugins/dev-workflow/skills/ship-task/references/loop.md) を参照。
+
+## v4.20.3
+
+### 修正
+
+- `origin-repo.py` が SSH のホスト鍵検証を外した構成を信頼判定から除外する([子 Issue #161](https://github.com/Yuki-Maeda-valour/workflow/issues/161)、親 #107 の H44)。検証設定・照合名・ローカル宛先の検証省略と、`accept-new` の先頭保存先を確認する。必要な設定が欠落・空・重複した場合や取得に失敗した場合も拒否する。
+- 通常の SSH・HTTPS と JSON 形式を保ち、理由に設定値や認証情報を出さない。判定は設定に限り、実際の鍵内容や保存成功は検査しない。保証範囲は [discover-mode.md §3・§10](plugins/dev-workflow/skills/ship-task/references/discover-mode.md) を参照。
+
+## v4.20.2
+
+### 修正
+
+- `loop.sh` で、同じ lock 理由の worktree が複数あると報告から漏れる問題を修正した([子 Issue #160](https://github.com/Yuki-Maeda-valour/workflow/issues/160)、親 #107 の H42)。開始・終了の報告、実装／発見モードの読み飛ばし理由、発見モードの片付け案内に全パスを出す。
+- NUL 区切りの読取りを維持する。空白・改行を含むパスを分割せず保持し、同じ理由の worktree が 1 件でも残れば読み飛ばす。既存の残存 worktree を自動削除する処理は追加しない。
+- 実 worktree を使う回帰で、0 件・1 件・同理由の複数件・異なる理由・空白／改行パス・再読取りと候補への復帰を確認する。
+
+## v4.20.1
+
+### 修正
+
+- `loop-permission.py` が最終 symlink の実体も保護判定する。無害な名前のリンクを経由する保護パスへの Bash の読み書きを拒否する([子 Issue #159](https://github.com/Yuki-Maeda-valour/workflow/issues/159)、親 #107 の H36)。裸名の既存リンクも引数・オプション値・代入値で検査する。`--` 後の `-` 始まりのリンクも調べ、別コマンドの削除・移動で読み取りの拒否が取り消されないようにする。
+- リンク自体の削除・移動と、通常パス・状態ファイル領域 W の許可を保つ。多段・相対・不存在対象・worktree 外のリンクと、拒否の種類を回帰検証する。保証範囲は [loop.md §9](plugins/dev-workflow/skills/ship-task/references/loop.md#9-許可の仲介保護パスへの書き込み) を参照。
+
 ## v4.20.0
 
 ### 変更

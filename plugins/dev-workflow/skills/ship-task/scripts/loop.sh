@@ -61,6 +61,7 @@ RUN_ID=""
 STATE=""
 TOP=""
 COMMON=""
+REPO_GIT_DIR=""
 DEF_NAME=""
 DEF_SHA=""
 STOP_MARK=""
@@ -90,7 +91,7 @@ TRACKING_SKIPPED=()
 STARTUP_NOTES=()
 SKIPS=()
 CANDIDATES=()
-declare -A LOCKED_BY=()
+declare -A LOCKED_REASON=()  # worktree のパス → lock の理由(同じ理由の全件を保持)
 declare -A SKIP_REPORTED=()
 declare -A TRACKING_SEEN=()   # 追跡用の ref で読み飛ばしたタスク(名前で重複を除く)
 declare -A WT_OUTCOME=()      # この実行で残した worktree → その周の結末(判定)
@@ -573,9 +574,13 @@ def snap_info(path):
     return {"state": "ok", "entries": entries}
 
 
-def cmd_snapshot(out, common, wtadmin, *git):
+def cmd_snapshot(out, common, repoadmin, wtadmin, *git):
     git = list(git)
     snap = {
+        # --repo の管理パスも保存する。別の worktree で中断後に起動したとき、
+        # 設定が同じでも、前の起動元を照合できたとは扱わない(H20)。
+        "repo:git-dir": {"state": "ok", "path": repoadmin},
+        "repo:config.worktree": snap_config(git, os.path.join(repoadmin, "config.worktree")),
         "config": snap_config(git, os.path.join(common, "config")),
         "config.worktree": snap_config(git, os.path.join(common, "config.worktree")),
         "hooks": snap_hooks(os.path.join(common, "hooks")),
@@ -605,11 +610,19 @@ def cmd_compare(base_path, cur_path):
         bv, cv = base.get(key), cur.get(key)
         if bv == cv:
             continue
+        if key == "repo:git-dir":
+            reason = "保存済み状態に人の管理パスが無い" if bv is None else "人の管理パスが変わった"
+            diffs.append(f"{key}: {show(bv)} → {show(cv)} ({reason}。前の起動元の設定を確認する。未変更とは判定しない)")
+            continue
+        if key == "repo:config.worktree" and bv is None:
+            diffs.append(f"{key}: 保存済み状態に人の設定の控えが無い → {show(cv)}"
+                         " (前の起動元の設定を確認する。現在の設定で中断前の基準を補完しない)")
+            continue
         if bv and cv and bv.get("state") == cv.get("state") and "entries" in bv and "entries" in cv:
             be = [tuple(e) for e in bv["entries"]]
             ce = [tuple(e) for e in cv["entries"]]
             # config・config.worktree は項目の並びで比べ、追加・削除・値・並べ替えのどの変化も差分にする(D14・#134)
-            if key in ("config", "config.worktree", "wt:config.worktree"):
+            if key in ("config", "config.worktree", "wt:config.worktree", "repo:config.worktree"):
                 bl = [entry_text(*e) for e in be]
                 cl = [entry_text(*e) for e in ce]
                 for line in difflib.unified_diff(bl, cl, lineterm="", n=0):
@@ -939,7 +952,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
 }
 
 take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -)
-  py snapshot "$1" "$COMMON" "$2" git "${GIT_PRE[@]}"
+  py snapshot "$1" "$COMMON" "$REPO_GIT_DIR" "$2" git "${GIT_PRE[@]}"
 }
 
 save_last_verified() { # 最後に照合に通った状態(照合に通ったときだけ更新する)
@@ -1050,16 +1063,35 @@ remove_selection_worktree() {
   G -C "$TOP" worktree remove "$wt" >/dev/null 2>&1 || true
 }
 
-load_worktrees() { # LOCKED_BY[lock の理由]=パス
+load_worktrees() { # LOCKED_REASON[worktree のパス]=lock の理由
   local line cur="" f="$RUN_DIR/worktrees.z"
-  LOCKED_BY=()
+  LOCKED_REASON=()
   G -C "$TOP" worktree list --porcelain -z >"$f"
   while IFS= read -r -d '' line; do
     case "$line" in
       "worktree "*) cur="${line#worktree }" ;;
-      "locked "*) LOCKED_BY["${line#locked }"]="$cur" ;;
+      "locked "*) LOCKED_REASON["$cur"]="${line#locked }" ;;
     esac
   done <"$f"
+}
+
+# 理由が完全一致するパスを、呼び出し元の配列へ返す。区切り文字で連結・分割しない。
+find_locked_worktrees() { # $1=理由 $2=出力先の配列名
+  local reason="$1" path
+  local -n matches="$2"
+  matches=()
+  for path in "${!LOCKED_REASON[@]}"; do
+    [ "${LOCKED_REASON[$path]}" != "$reason" ] || matches+=("$path")
+  done
+}
+
+# 表示だけを 1 行にまとめる。空白・改行を含むパスも境界が分かる形にする。
+format_worktree_paths() {
+  local path separator=""
+  for path in "$@"; do
+    printf '%s%q' "$separator" "$path"
+    separator=', '
+  done
 }
 
 # 残った worktree のその周の結末。この実行の分は判定を、過去の実行の分は「(過去の実行)」とその実行の
@@ -1080,13 +1112,14 @@ describe_left_wt() { # $1=worktree のパス
 }
 
 report_left_worktrees() {
-  local reason found=0
+  local path reason found=0
   load_worktrees || return 0
-  for reason in "${!LOCKED_BY[@]}"; do
+  for path in "${!LOCKED_REASON[@]}"; do
+    reason="${LOCKED_REASON[$path]}"
     case "$reason" in
       "dev-workflow-loop: "*)
         if [ "$found" -eq 0 ]; then rep "" "## 残った worktree" ""; found=1; fi
-        rep "- ${LOCKED_BY[$reason]}(lock の理由: $reason)— 結末: $(describe_left_wt "${LOCKED_BY[$reason]}")"
+        rep "- $path(lock の理由: $reason)— 結末: $(describe_left_wt "$path")"
         ;;
     esac
   done
@@ -1450,7 +1483,7 @@ note_skip() { # $1=相対パス $2=理由(同じ組は 1 回だけ報告する)
 }
 
 skip_reason() { # $1=worktree $2=ファイル名 → 読み飛ばす理由(無ければ空)
-  local wt="$1" f="$2" p name rel info meta ref r o hit
+  local wt="$1" f="$2" p name rel info meta ref r o hit locked_paths=()
   p="$wt/$TASK_DIR/$f"
   name="${f#進行中_}"
   name="${name%.md}"
@@ -1478,8 +1511,9 @@ skip_reason() { # $1=worktree $2=ファイル名 → 読み飛ばす理由(無�
   if [ -n "${REMOTE_TASKS[$name]:-}" ]; then
     printf '作業ブランチ task/%s が origin にある' "$name"; return 0
   fi
-  if [ -n "${LOCKED_BY["dev-workflow-loop: $rel"]:-}" ]; then
-    printf '前の周が残した worktree がある(%s)' "${LOCKED_BY["dev-workflow-loop: $rel"]}"; return 0
+  find_locked_worktrees "dev-workflow-loop: $rel" locked_paths
+  if [ "${#locked_paths[@]}" -gt 0 ]; then
+    printf '前の周が残した worktree がある(%s)' "$(format_worktree_paths "${locked_paths[@]}")"; return 0
   fi
   if [ -e "$wt/$TASK_DIR/完了_$name.md" ] || [ -L "$wt/$TASK_DIR/完了_$name.md" ] \
      || [ -e "$wt/$TASK_DIR/保留_$name.md" ] || [ -L "$wt/$TASK_DIR/保留_$name.md" ]; then
@@ -1657,7 +1691,7 @@ clean_cmd() { # $1=DISC_REFS の ref → そのブランチの消し方(1 行)
 # 読み飛ばしの ② 今夜の名 → ③ 未 merge → ④ lock の理由(① この実行で回した、は呼び出し側で見る)。
 # → SKIP_WHY(読み飛ばす理由。無ければ空)・SKIP_CLEAN(片付けの定型。改行区切り)
 discover_skip() { # $1=発見元
-  local s="$1" tonight="task/候補-$1-${DEF_SHA:0:12}" line sha ref re hits=() cmds=()
+  local s="$1" tonight="task/候補-$1-${DEF_SHA:0:12}" line sha ref re path quoted_path hits=() cmds=() locked_paths=()
   SKIP_WHY=""; SKIP_CLEAN=""
   # ② 今夜の名のブランチ(ローカル・追跡用の ref・origin のどこか。祖先かどうかに関わらない)
   for line in ${DISC_REFS[@]+"${DISC_REFS[@]}"}; do
@@ -1687,9 +1721,14 @@ discover_skip() { # $1=発見元
     return 0
   fi
   # ④ 失敗の周が残した除外の印
-  if [ -n "${LOCKED_BY["dev-workflow-loop: 候補:$s"]:-}" ]; then
-    SKIP_WHY="前の周が残した worktree がある(${LOCKED_BY["dev-workflow-loop: 候補:$s"]})"
-    SKIP_CLEAN="git worktree unlock ${LOCKED_BY["dev-workflow-loop: 候補:$s"]} → git worktree remove ${LOCKED_BY["dev-workflow-loop: 候補:$s"]}(調べてから)"
+  find_locked_worktrees "dev-workflow-loop: 候補:$s" locked_paths
+  if [ "${#locked_paths[@]}" -gt 0 ]; then
+    SKIP_WHY="前の周が残した worktree がある($(format_worktree_paths "${locked_paths[@]}"))"
+    for path in "${locked_paths[@]}"; do
+      printf -v quoted_path '%q' "$path"
+      cmds+=("git worktree unlock $quoted_path → git worktree remove $quoted_path(調べてから)")
+    done
+    SKIP_CLEAN="$(printf '%s\n' "${cmds[@]}")"
   fi
   return 0
 }
@@ -2365,6 +2404,9 @@ TOP="$(cd -P -- "$TOP_RAW" && pwd -P)"
 [ "$TOP" = "$REPO_PHYS" ] || die 20 not-toplevel "--repo が作業ツリーのトップでない(トップは $TOP)"
 COMMON_RAW="$(G -C "$TOP" rev-parse --path-format=absolute --git-common-dir)"
 COMMON="$(cd -P -- "$COMMON_RAW" && pwd -P)"
+# --repo が指す人の worktree の管理パスを固定する。拡張が無効でも設定の不在/追加を控える(H20)。
+REPO_GIT_DIR_RAW="$(G -C "$TOP" rev-parse --path-format=absolute --git-dir)"
+REPO_GIT_DIR="$(cd -P -- "$REPO_GIT_DIR_RAW" && pwd -P)"
 # main の worktree(--repo が linked worktree のとき、人のチェックアウトはこちらにもある)
 MAIN_WT=""
 while IFS= read -r -d '' line; do
@@ -2638,9 +2680,10 @@ rep "- 導入済みの同名プラグイン: $INSTALLED_STATE(loop.sh のプラ�
 rep "- 停止ファイル: $STOP_FILE" "- worktree の置き場: $WT_ROOT"
 for note in ${STARTUP_NOTES[@]+"${STARTUP_NOTES[@]}"}; do rep "- $note"; done
 load_worktrees
-for reason in "${!LOCKED_BY[@]}"; do
+for path in "${!LOCKED_REASON[@]}"; do
+  reason="${LOCKED_REASON[$path]}"
   case "$reason" in
-    "dev-workflow-loop: "*) rep "- 残った worktree(過去の実行の分を含む): ${LOCKED_BY[$reason]}($reason)— 結末: $(describe_left_wt "${LOCKED_BY[$reason]}")" ;;
+    "dev-workflow-loop: "*) rep "- 残った worktree(過去の実行の分を含む): $path($reason)— 結末: $(describe_left_wt "$path")" ;;
   esac
 done
 say "解決後の argv: $RESOLVED_ARGV"

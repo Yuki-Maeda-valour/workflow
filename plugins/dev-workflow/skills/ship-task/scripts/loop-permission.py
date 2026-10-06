@@ -15,7 +15,8 @@ stdin の JSON(tool_name・tool_input・cwd)を読み、stdout に
 許すのは、周の worktree の中の決まった状態ファイル(W)への書き込みと、限定の構文で読める Bash だけ。
 Bash の `cd` は、`CDPATH= cd -P -- <P> && pwd -P` と、先頭の前置き `CDPATH= cd -P -- <P> && <続き>`(続きを <P> で
 判定する。<P> は worktree の中のディレクトリ。続きの最初の `||`・`;` より後ろは <P> と入力の cwd の両方で判定する)の
-2 つの形だけを受け付ける。<P> の字面が `-` で始まるもの・`~` を含むもの(位置を問わない)は受け付けない。
+2 つの形だけを受け付ける。追跡できない `pushd`・`popd`、ラッパー経由の移動、引用のない予約語の前置きは拒否する。
+<P> の字面が `-` で始まるもの・`~` を含むもの(位置を問わない)は受け付けない。
 判定できない入力(JSON が読めない・環境変数が無い)も deny。hook は隔離ではない(同じ利用者の権限で動く)。
 標準ライブラリだけで書く。
 
@@ -62,6 +63,10 @@ DENY_NOTE = (
 REVIEWS = ".claude/reviews"
 W_FILES = {".claude/grasp.md", ".claude/.understand-project-done"}
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
+RESERVED_PREFIXES = {
+    "!", "time", "if", "then", "elif", "else", "fi", "for", "while", "until", "do", "done", "select", "case",
+    "esac", "in", "function", "coproc",
+}
 
 
 class Denied(Exception):
@@ -157,9 +162,10 @@ class Ctx:
         if not (inside(loc, self.wt) and inside(full, self.wt)):
             raise other(f"{what}が周の worktree の外: {path[:200]}")
         self.mark_write(loc)
-        rel = self.rel(loc)
-        if is_protected(rel) and (link or not self.in_w(rel, mkdir=mkdir)):
-            self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
+        for target in dict.fromkeys((loc, full)):
+            rel = self.rel(target)
+            if is_protected(rel) and (link or not self.in_w(rel, mkdir=mkdir)):
+                self.protected(f"{what}が保護パスの下で W の外: {rel[:200]}")
 
     # 削除・移動の元(rm・rmdir・mv の元)
     def check_remove(self, path: str, what: str, recursive: bool) -> None:
@@ -191,10 +197,14 @@ class Ctx:
         ok_full = inside(full, self.wt) or inside(full, self.pr)
         if not (ok_loc and ok_full):
             raise other(f"パスが周の worktree とプラグインルートの外: {path[:200]}")
-        if inside(loc, self.wt):
-            rel = self.rel(loc)
-            if is_protected(rel) and (link or not self.in_w(rel, mkdir=True)):
-                self.nonwrite_hits.append((rel, f"パスが保護パスの下で W の外: {rel[:200]}"))
+        # nonwrite_hits のキーは常に元の loc にする。書き込み先でもある loc は
+        # mark_write で除かれ、rm・mv の元は引き続き check_remove が判定する。
+        rel = self.rel(loc)
+        for target in dict.fromkeys((loc, full)):
+            if inside(target, self.wt):
+                target_rel = self.rel(target)
+                if is_protected(target_rel) and (link or not self.in_w(target_rel, mkdir=True)):
+                    self.nonwrite_hits.append((rel, f"パスが保護パスの下で W の外: {target_rel[:200]}"))
 
 
 # ── Bash の限定の構文 ──
@@ -203,10 +213,12 @@ class Word:
     def __init__(self) -> None:
         self.chars: list[str] = []
         self.quoted: list[bool] = []
+        self.had_quote = False
 
     def add(self, ch: str, quoted: bool) -> None:
         self.chars.append(ch)
         self.quoted.append(quoted)
+        self.had_quote = self.had_quote or quoted
 
     @property
     def text(self) -> str:
@@ -410,22 +422,31 @@ def looks_like_path(text: str, tilde: bool) -> bool:
     return "/" in text or text.startswith(".") or text in PROTECTED_NAMES
 
 
-def check_words_as_paths(ctx: Ctx, words: list[Word]) -> None:
-    for w in words:
+def is_bare_symlink(ctx: Ctx, text: str, tilde: bool) -> bool:
+    """字面がパスでなくても、cwd に在る symlink はパスとして判定する。"""
+    return not looks_like_path(text, tilde) and bool(text) and os.path.islink(ctx.resolve(text, tilde))
+
+
+def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool = False) -> None:
+    options = True
+    for index, w in enumerate(words):
         text = w.text
         tilde = w.tilde
-        if text.startswith("-"):
+        if options and text == "--":
+            options = False
+            continue
+        if options and text.startswith("-"):
             if "=" in text and text.startswith("--"):
                 value = text.split("=", 1)[1]
                 # --name=値 の値の部分を見る(~ は引用符の外で値の先頭にあるときだけ)
                 vtilde = value.startswith("~") and not w.quoted[text.index("=") + 1] if value else False
-                if value and looks_like_path(value, vtilde):
+                if value and (looks_like_path(value, vtilde) or is_bare_symlink(ctx, value, vtilde)):
                     ctx.check_path_word(ctx.resolve(value, vtilde))
                 continue
             if "/" in text:
                 raise other(f"パスを含むオプションの形を判定できない: {text[:100]}")
             continue
-        if looks_like_path(text, tilde):
+        if looks_like_path(text, tilde) or (not (skip_bare_first and index == 0) and is_bare_symlink(ctx, text, tilde)):
             ctx.check_path_word(ctx.resolve(text, tilde))
 
 
@@ -435,7 +456,7 @@ def check_assignment(ctx: Ctx, word: Word) -> None:
         raise other(f"代入を許さない環境変数の名: {name}")
     if name == "CDPATH" and value.text != "":
         raise other("CDPATH の値は空だけ")
-    if value.text and looks_like_path(value.text, value.tilde):
+    if value.text and (looks_like_path(value.text, value.tilde) or is_bare_symlink(ctx, value.text, value.tilde)):
         ctx.check_path_word(ctx.resolve(value.text, value.tilde))
 
 
@@ -618,6 +639,54 @@ def split_after_fallthrough(ops: list[str]) -> int:
     return len(ops)
 
 
+def check_untracked_moves(cmds: list[dict]) -> None:
+    """全単純コマンドの予約語と、追跡しない移動の実行を先に拒否する。"""
+    for command in cmds:
+        words = command["words"]
+        if not words:
+            continue
+        index = 0
+        ordinary = False
+        # 空引用符も含む引用・エスケープがあれば予約語でない。予約語を使う制御構文は追跡しないため拒否する。
+        if index < len(words) and words[index].text in RESERVED_PREFIXES and not words[index].had_quote:
+            raise other(f"追跡しない予約語の前置き: {words[index].text}")
+        wrapped = False
+        while index < len(words):
+            name = words[index].text
+            if name == "builtin":
+                wrapped = True
+                index += 1
+                if index < len(words) and words[index].text == "--":
+                    index += 1
+                continue
+            if name != "command":
+                break
+            wrapped = True
+            index += 1
+            while index < len(words):
+                option = words[index].text
+                if option == "--":
+                    index += 1
+                    break
+                if not option.startswith("-") or option == "-":
+                    break
+                letters = option[1:]
+                # -v/-V は実行でなく照会。未知の option は command が失敗して移動しないので通常の判定へ残す。
+                if "v" in letters or "V" in letters or not letters or any(ch != "p" for ch in letters):
+                    ordinary = True
+                    break
+                index += 1
+            if ordinary:
+                break
+        if ordinary:
+            continue
+        if index >= len(words):
+            continue
+        target = words[index].text
+        if target in ("pushd", "popd") or (wrapped and target == "cd"):
+            raise other(f"追跡しないディレクトリ移動: {target}")
+
+
 def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     cwd_phys = os.path.realpath(ctx.cwd)
     if not inside(cwd_phys, ctx.wt):
@@ -625,6 +694,7 @@ def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     ctx.cwd = cwd_phys
     toks = tokenize(command)
     cmds, ops = parse(toks)
+    check_untracked_moves(cmds)
     uses_cd = any(c["words"] and c["words"][0].text == "cd" for c in cmds)
     if not uses_cd:
         check_cmds(ctx, cmds)
@@ -675,6 +745,13 @@ def judge_cmds(ctx: Ctx, cmds: list[dict]) -> Denied | None:
 def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
     """コマンドの並びを、ctx.cwd を作業ディレクトリとして通常の規則で判定する(cd を含まないこと)。"""
     for c in cmds:
+        # 読む場所を削除・書き込み先として扱う例外は、同じコマンド内だけに限る。
+        # 書き込みの拒否は後続の other を優先できるよう残し、読み取りの拒否はここで確定する。
+        previous = pending_denial(ctx)
+        if previous is not None and previous.kind == "other":
+            raise previous
+        ctx.nonwrite_hits.clear()
+        ctx.write_rels.clear()
         for w in c["assigns"] + c["words"]:
             if w.glob():
                 raise other(f"引用符の外のグロブ: {w.text[:100]}")
@@ -706,8 +783,11 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                 check_assignment(ctx, w)
             continue
         is_sed_inplace = name == "sed" and sed_in_place(words[1:])
-        check_words_as_paths(ctx, words[1:] if (name in FILE_OP_SHORT or is_sed_inplace) else words)
-        if name in FILE_OP_SHORT or is_sed_inplace:
+        # コマンド名は従来どおり字面がパスなら検査する。PATH で解決する裸名だけは
+        # symlink 検出の対象にしない。
+        file_op = name in FILE_OP_SHORT or is_sed_inplace
+        check_words_as_paths(ctx, words[1:] if file_op else words, skip_bare_first=not file_op)
+        if file_op:
             check_file_op(ctx, "sed" if is_sed_inplace else name, words[1:])
             continue
         literal = [w.text for w in words]
