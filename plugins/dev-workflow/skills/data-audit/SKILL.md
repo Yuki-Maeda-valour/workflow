@@ -12,15 +12,17 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 1. **読み取り専用**。コード・ドキュメント・設定を一切変更しない。唯一の書き込みはレビューログ `.claude/reviews/`(design §5-14)
    - 例外: 候補モード(`--candidates`)では、解決した task_dir に新しい `候補_*.md` も書く。既存の状態名 MD・コード・ドキュメント・設定は変えない([../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md))
-2. **全指摘に実コードの裏取り(path:行)**。裏取りできない指摘・一般論・推測は出さない。確信が持てないものは「要確認」として区別する
+2. **全指摘に実コードの裏取り(実際のコードやファイルを読んで確かめること。path:行)**。裏取りできない指摘・一般論・推測は出さない。確信が持てないものは「要確認」として区別する
 3. **機密の値そのものを出力しない**。フィールド名と場所のみ報告する。profile の `secret_paths` は開かない(存在の有無だけ扱う)
-4. **3 層吸収**(design §3)。機密の定義・層のパス・スタック判定をハードコードせず、profile → 動的検出 → 権威参照ファイル(`AGENTS.md`。無ければ `CLAUDE.md`)/ doc で解決する
-5. **修正しない**。提案 → ユーザーのトリアージ → 承認分を /create-task へ。このスキル自身はコードに触れない
+4. **3 層吸収**(design §3)。機密の定義・層のパス・スタック判定をハードコードせず、profile → 動的検出 → 権威参照ファイル(AI への指示をまとめたプロジェクトのファイル。`AGENTS.md`。無ければ `CLAUDE.md`)/ doc で解決する
+5. **修正しない**。提案 → ユーザーのトリアージ(指摘を扱いごとに振り分けること) → 承認分を /create-task へ。このスキル自身はコードに触れない
    - 例外: 候補モードでは、トリアージとチェーンの代わりに、選定の規則で機械的に選んだ指摘を `候補_` として書き出す。採用は人が /create-task で行う
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
 7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
-8. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
-9. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
+8. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
+   - ホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
+9. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
+   - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
 ## 引数
 
@@ -33,7 +35,11 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## 候補モード(`--candidates`)
 
-無人ループの発見の周(`/ship-task --discover=data-audit --unattended`)が呼ぶ。指摘を承認を待たずに task_dir の `候補_{名}.md` として書き出し、対話点を出さない。引数・対話点と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、指摘キーの識別子と観点群は [references/checks.md](references/checks.md) の「候補モードの識別子と観点群」。以下の各所には 1 行の分岐だけを置く。
+無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=data-audit --unattended`)が呼ぶ。
+- 指摘を承認を待たずに task_dir の `候補_{名}.md` として書き出し、人に確かめる場面を出さない。
+- 引数・対話点と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本(ほかが合わせる元)は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、
+- 指摘キーの識別子と観点群は [references/checks.md](references/checks.md) の「候補モードの識別子と観点群」。
+- 以下の各所には 1 行の分岐だけを置く。
 
 ## Phase 0: 前提解決
 
@@ -44,7 +50,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 3. **機密フィールド辞書を構築**する(3 層で解決):
    - profile の `audit.sensitive_fields`(あれば追加)
    - スキーマ実測: DB スキーマのカラム名を [references/checks.md](references/checks.md) の既定辞書とパターンマッチし、一致したものを実在機密として昇格
-   - フォールバック: checks.md の既定辞書のみ
+   - フォールバック(先の手段が使えないときに次の手段へ切り替えること): checks.md の既定辞書のみ
 4. `doc/06_stack-notes.md`(/stack-research の成果)があれば読み、バージョン固有の脆弱性・セキュリティ注意点を監査観点に追加する
 5. **層の存在を検出**する: DB スキーマが無ければ database 層をスキップ、クライアントコードが無ければ frontend 層をスキップ(checks.md「境界の検出」参照)。検出した層を報告する
 
@@ -60,7 +66,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## Phase 2: 観点別並列スキャン
 
-**読み取り専用のエージェント**を**観点グループ別に単一メッセージで並列起動**する(design §5-13。各エージェントには下表の `name` 列を付ける。実行段階の判定と縮退は §5-17 に従う — フル段階では追加調査を同じ `name` へ再依頼し、最小段階では直列セルフスキャンへ縮退する):
+**読み取り専用のエージェント**を**観点グループ別に単一メッセージで並列起動**する(design §5-13。各エージェントには下表の `name` 列を付ける。実行段階の判定と段階の下げ方は §5-17 に従う — フル段階では追加調査を同じ `name` へ再依頼し、最小段階では直列セルフスキャンに段階を下げて続ける):
 
 | エージェント | `name` | 担当観点(checks.md の節) | --quick |
 |---|---|---|---|
@@ -69,7 +75,8 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 | DB 防御スキャン | `scan-db` | D1 機密カラム保護 / D2 行レベル制御 / D3 論理削除の漏れ | ✅ |
 | 取得効率スキャン | `scan-efficiency` | B5 過剰取得 / F4 過剰保持 / D4 インデックス / D5 巨大カラム | 省略 |
 
-**委託の解決(役割語 → 実行バックエンド)**: 上表の 4 体はいずれも読み取り専用の並列調査(`researcher` の観点別派生)である。役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフスキャン+機械検証)に縮退して報告する。
+**委託の解決(役割語 → 実行バックエンド)**: 上表の 4 体はいずれも読み取り専用の並列調査(`researcher` の観点別派生)である。
+- 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフスキャン+機械検証)に段階を下げて続け、そのことを報告する。
 
 各エージェントへの指示に必ず含めること:
 - Phase 1 の境界一覧と機密フィールド辞書、checks.md の担当節(検出シグネチャ)
@@ -78,17 +85,18 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 - 「機密の値・認証情報をレポートに書き写さない(フィールド名と場所のみ)」
 - 候補モードの無人(`--unattended`)では、unattended-mode.md の「委託するサブエージェント」の項の要点も、要約し直さずに写す(→ candidate-mode.md)
 
-`--layer` 指定時は該当層の観点だけを起動する。F3(UI だけの認可)は認可スキャンがフロントとバックエンドの結果を突合して判定するため、--layer=frontend 単独時は「要バックエンド突合」として報告する。
+`--layer` 指定時は該当層の観点だけを起動する。F3(UI だけの認可)は認可スキャンがフロントとバックエンドの結果を突合(2 つを照らし合わせて食い違いを探すこと)して判定するため、--layer=frontend 単独時は「要バックエンド突合」として報告する。
 
 候補モードでは、「要バックエンド突合」の F3 は候補にせず、報告だけにする。
 
 ## Phase 3: 裏取りとトリアージ準備
 
-1. team-lead(このセッション)が**全指摘を実コードで再確認**する(Read で該当箇所を開き、経路を追う)。エージェントの申告を鵜呑みにしない(design §5-9)
+1. team-lead(作業を進め、結果を確かめる側の AI。このセッション)が**全指摘を実コードで再確認**する(Read で該当箇所を開き、経路を追う)。エージェントの申告を鵜呑みにしない(design §5-9)
 2. false positive は除去し、**除去理由を記録**する
 3. 深刻度(重大 / 高 / 中)× 確度(確実 / 要確認)を確定し、同一根本原因の指摘を統合する(基準は checks.md「深刻度・確度の基準」)
    - 候補モードでは、統合は指摘キーの単位(同じ観点群・同じ識別子)の中だけで行う(checks.md の「候補モードの識別子と観点群」)
-4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)。
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
@@ -98,7 +106,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 # データ境界監査: {プロジェクト名}
 
 > 実行: {日付} / HEAD: {ハッシュ先頭 12 桁} / 層: {監査した層} / 母数: {境界の列挙数}
-> 実行形態: {フル / 標準 / 最小(縮退時)} / モード: {フル / --quick / --layer=X}
+> 実行形態: {フル / 標準 / 最小(段階を下げたとき)} / モード: {フル / --quick / --layer=X}
 
 ## 指摘一覧(深刻度順)
 | # | 層 | 観点 | 場所 | 内容(1 行) | 深刻度 | 確度 |

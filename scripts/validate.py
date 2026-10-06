@@ -29,6 +29,11 @@
      do-task/references/writing-for-people.md を指すものが 1 つ以上あること。リンク先は
      SKILL.md の位置から解決し、実パスで比べる。素の言及・節の外・フェンスの中は数えない。
      マーカーでは免除しない
+ 10. SKILL.md の本文の行の長さ(design.md §6。WARN): frontmatter の後の、コードフェンスの外
+     (判定は 6 と同じ _mask_code_fences)の行のうち、行頭の空白を除いて `|` で始まらない行
+     (表の行を除く)について、文字数から、200 字を超えるインラインのコード(1 行の中の
+     `[^`]+`)の長さを引いた数が 200 を超えたら WARN にする。ファイル:行番号と文字数を出す。
+     マーカーでは免除しない
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -475,6 +480,55 @@ def check_writing_rules_link():
             )
 
 
+# SKILL.md の本文の行の長さ(design.md §6)。上限を超える行は WARN にする(独自の skill を持つ fork を
+# 止めない)。インラインのコードは 1 行の中の `…`(改行をまたがない)で、上限を超える長さのものだけを
+# 数えから引く(コマンドの字面は分けられないため)。
+_LINE_LENGTH_LIMIT = 200
+_INLINE_CODE_RE = re.compile(r"`[^`]+`")
+
+
+def _measured_line_length(line: str) -> int:
+    """行の文字数から、_LINE_LENGTH_LIMIT を超えるインラインのコードの長さを引いた数を返す。"""
+    long_code = sum(
+        len(m.group(0)) for m in _INLINE_CODE_RE.finditer(line) if len(m.group(0)) > _LINE_LENGTH_LIMIT
+    )
+    return len(line) - long_code
+
+
+def check_line_length():
+    """各 SKILL.md の本文の行の長さを検査する(design.md §6)。WARN だけを出す。
+
+    本文は frontmatter の閉じの行(parse_frontmatter() と同じく、2 行目以降で最初に `---` で
+    始まる行)の次の行から。コードフェンスの中(_mask_code_fences が空行にする行)と、
+    行頭の空白(半角の空白・タブ)を除いて `|` で始まる行(表の行)は数えない。
+    行番号は SKILL.md の先頭からの番号。frontmatter が無い・閉じていない SKILL.md は
+    check_skills() が ERROR にするので、ここでは飛ばす。"""
+    if not SKILLS_DIR.exists():
+        return
+    for d in sorted(p for p in SKILLS_DIR.iterdir() if p.is_dir()):
+        md = d / "SKILL.md"
+        if not md.is_file():
+            continue
+        lines = md.read_text(encoding="utf-8", errors="replace").split("\n")
+        if not lines[0].startswith("---"):
+            continue
+        close = next((i for i in range(1, len(lines)) if lines[i].startswith("---")), None)
+        if close is None:
+            continue
+        body_start = close + 1
+        body = _mask_code_fences("\n".join(lines[body_start:])).split("\n")
+        for offset, line in enumerate(body):
+            if line.lstrip(" \t").startswith("|"):
+                continue
+            length = _measured_line_length(line)
+            if length > _LINE_LENGTH_LIMIT:
+                WARNS.append(
+                    f"{md.relative_to(REPO)}:{body_start + offset + 1}: 行が {length} 字"
+                    f"({_LINE_LENGTH_LIMIT} 字以下にする。{_LINE_LENGTH_LIMIT} 字を超えるインラインのコードは"
+                    "数えない。1 文 1 つの下位の箇条書きに分ける — design.md §6)"
+                )
+
+
 def _in_delegation_scope(f: Path) -> bool:
     """委託の語検査の走査範囲を 1 式で判定する。skill 直下のファイル(画像以外)、または
     `references/` 配下の *.md(再帰)、または `scripts/` 配下の画像以外(再帰)で、除外 2 本
@@ -627,6 +681,7 @@ def main() -> int:
     check_skill_count_claims()
     check_skills()
     check_writing_rules_link()
+    check_line_length()
     check_delegation_words()
     check_host_cli_words()
     check_delegation_map_invariant()

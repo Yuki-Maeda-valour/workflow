@@ -36,6 +36,8 @@ PLUGIN_JSON = "plugins/dev-workflow/.claude-plugin/plugin.json"
 # 人が読む文の書き方の正本(validate.py の _WRITING_RULES と対。SKILLS_REL からの相対パス)
 WRITING_RULES_REL = "do-task/references/writing-for-people.md"
 WRITING_LINK_MISSING = "writing-for-people.md へのリンクが無い"
+# 行の長さの WARN の文に必ずある字面(validate.py の check_line_length() と対)
+LINE_LENGTH_WARN = "200 字以下にする"
 
 
 def writing_rules_line(skill):
@@ -80,6 +82,11 @@ class ValidateTest(unittest.TestCase):
     def run_validator(self, env=None):
         """写しの validate.py を走らせる。`env` で渡した環境変数だけが見える状態にする
         (実行環境の WORKFLOW_PROJECT_NAMES を持ち込まない)。"""
+        status, namespace, output = self.run_validator_namespace(env)
+        return status, namespace["ERRORS"], output
+
+    def run_validator_namespace(self, env=None):
+        """run_validator() と同じく走らせ、ERRORS・WARNS を持つ名前空間ごと返す。"""
         script = self.repo / "scripts" / "validate.py"
         environ = {k: v for k, v in os.environ.items() if k != PROJECT_NAMES_ENV}
         environ.update(env or {})
@@ -90,7 +97,7 @@ class ValidateTest(unittest.TestCase):
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             status = namespace["main"]()
-        return status, namespace["ERRORS"], output.getvalue()
+        return status, namespace, output.getvalue()
 
     def append_to_checked_file(self, text, relpath=CHECKED_PY, prefix="# "):
         target = self.repo / relpath
@@ -406,6 +413,101 @@ class ValidateTest(unittest.TestCase):
         )
         errors = self.assert_error(["tool-check/SKILL.md", WRITING_LINK_MISSING])
         self.assertFalse(any("リンク切れ" in e for e in errors), errors)
+
+    # ------------------------------------------- 検査 10: SKILL.md の本文の行の長さ
+
+    def write_length_body(self, lines):
+        """tool-check の本文を、原則の節(書き方の正本への短いリンク)と `lines` だけにする。
+        リンクの行を短くするのは、試験で見たい行のほかに長い行を置かないため。"""
+        link = f"../{WRITING_RULES_REL}"
+        self.rewrite_skill_body(
+            "tool-check",
+            ["# tool-check", "", "## 原則", "", f"- [書き方の正本]({link}) に従う", "", "## 1. 手順", ""]
+            + lines,
+        )
+
+    def line_number_of(self, text):
+        """写しの tool-check/SKILL.md で、行全体が `text` の行の番号(1 始まり)。"""
+        lines = self.skill_md("tool-check").read_text(encoding="utf-8").split("\n")
+        self.assertEqual(1, lines.count(text))
+        return lines.index(text) + 1
+
+    def line_length_warns(self):
+        """写しの validate.py を走らせ、tool-check/SKILL.md の行の長さの WARN だけを返す。
+        WARN だけでは落ちない(ERROR 0・終了コード 0)ことも確かめる。"""
+        status, namespace, _ = self.run_validator_namespace()
+        self.assertEqual([], namespace["ERRORS"])
+        self.assertEqual(0, status)
+        prefix = f"{SKILLS_REL}/tool-check/SKILL.md:"
+        return [w for w in namespace["WARNS"] if w.startswith(prefix) and LINE_LENGTH_WARN in w]
+
+    def assert_one_line_length_warn(self, line, length):
+        warns = self.line_length_warns()
+        self.assertEqual(1, len(warns), warns)
+        self.assertIn(
+            f"{SKILLS_REL}/tool-check/SKILL.md:{self.line_number_of(line)}: 行が {length} 字", warns[0]
+        )
+
+    def test_line_length_200_chars_passes(self):
+        for line in ("あ" * 200, "- " + "あ" * 198, "  - " + "a" * 196):
+            with self.subTest(line=line[:6]):
+                self.write_length_body([line])
+                self.assertEqual([], self.line_length_warns())
+
+    def test_line_length_201_chars_is_warn(self):
+        for line in ("あ" * 201, "- " + "あ" * 199, "1. " + "a" * 198):
+            with self.subTest(line=line[:6]):
+                self.write_length_body([line])
+                self.assert_one_line_length_warn(line, 201)
+
+    def test_line_length_excluded_lines_are_not_counted(self):
+        long = "あ" * 250
+        cases = (
+            ("``` のフェンス", ["```", long, "```"]),
+            ("info string 付きの ``` のフェンス", ["```bash", long, "```"]),
+            ("~~~ のフェンス", ["~~~", long, "~~~"]),
+            ("表の行", [f"| {long} |"]),
+            ("字下げした表の行", [f"  | {long} |", f"\t| {long} |"]),
+        )
+        for name, lines in cases:
+            with self.subTest(case=name):
+                self.write_length_body(lines)
+                self.assertEqual([], self.line_length_warns())
+        with self.subTest(case="frontmatter"):
+            self.write_length_body([])
+            self.set_description("tool-check", 500)
+            self.assertIn("\ndescription: " + "あ" * 500 + "\n", self.skill_md("tool-check").read_text(encoding="utf-8"))
+            self.assertEqual([], self.line_length_warns())
+
+    def test_line_length_counts_again_after_fence_closes(self):
+        # フェンスが閉じた後の行は数える(閉じを見落とすと、以降の長い行が黙って通る)
+        line = "あ" * 201
+        for opening, closing in (("```", "```"), ("~~~", "~~~")):
+            with self.subTest(fence=opening):
+                self.write_length_body([opening, "あ" * 250, closing, "", line])
+                self.assert_one_line_length_warn(line, 201)
+
+    def test_line_length_long_inline_code_alone_passes(self):
+        # 200 字を超えるインラインのコード(コマンドの字面)は分けられないので数えない
+        code = "`" + "a" * 250 + "`"
+        for line in (code, "- " + code, "- 次を打つ: " + code, f"- {code} と {code}"):
+            with self.subTest(line=line[:8]):
+                self.write_length_body([line])
+                self.assertEqual([], self.line_length_warns())
+
+    def test_line_length_long_inline_code_with_201_chars_of_text_is_warn(self):
+        code = "`" + "a" * 250 + "`"
+        cases = (
+            "あ" * 201 + code,
+            code + "あ" * 201,
+            "あ" * 100 + code + "あ" * 101,
+            # 200 字ちょうどのインラインのコードは数えから引かない(引くのは 200 字を超えるものだけ)
+            "あ" + "`" + "a" * 198 + "`",
+        )
+        for line in cases:
+            with self.subTest(line=line[:8]):
+                self.write_length_body([line])
+                self.assert_one_line_length_warn(line, 201)
 
     # ------------------------------------------------------------ V5: リンク検査
 
