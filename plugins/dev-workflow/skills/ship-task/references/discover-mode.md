@@ -1,9 +1,10 @@
 # 発見の周(`/ship-task --discover=<発見元> --unattended`)
 
-ship-task の発見の周の正本。発見の周は、発見元の候補モードが task_dir に書いた `候補_` だけを 1 commit にして、PR を開く。設計・実装・品質ゲート・レビューは行わない(採用の後の /create-task・/do-task で行う)。
+ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほかが合わせる元)。発見の周は、発見元(改善の候補を見つける skill)の候補モードが task_dir に書いた `候補_` だけを 1 commit にして、PR を開く。設計・実装・品質ゲート(書式・型・テスト・ビルドの自動の検査)・レビューは行わない(採用の後の /create-task・/do-task で行う)。
 
-- 無人モードの一般(一般則・G1〜G4・`loop.sh` の周の Bash の書き方・委託するサブエージェントの要点・失敗扱いの止まり方)は [unattended-mode.md](unattended-mode.md) が正本。この文書は、発見の周に固有の前提・工程・照合・結末だけを定める
-- 候補モード(発見元の側の手順・結果の行・報告)と指摘キーの正本は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md)。`候補_` の書式は [../../create-task/references/task-template.md](../../create-task/references/task-template.md) の記法の規約
+- 無人モードの一般(一般則・G1〜G4・`loop.sh` の周の Bash の書き方・委託するサブエージェントの要点・失敗扱いの止まり方)は [unattended-mode.md](unattended-mode.md) が正本。この文書は、発見の周に固有の前提・工程・照合(照らし合わせて確かめること)・結末だけを定める
+- 候補モード(発見元の側の手順・結果の行・報告)と指摘キーの正本は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md)。
+  - `候補_` の書式は [../../create-task/references/task-template.md](../../create-task/references/task-template.md) の記法の規約
 - 周の外側(発見元の選定・読み飛ばし・判定・朝の報告)は [loop.md](loop.md) の「発見モード」
 - 要点は design §2「無人ループ」。決定の経緯は決定録 2026-09-23(#66)と Issue #69
 
@@ -98,7 +99,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
   - `.claude/reviews/x.md` は `.claude/reviews/` の下を表す名で、在らなくてよい
   - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する。symlink なら、`.claude`・`.claude/reviews` を実体のディレクトリにする(symlink を追跡から外す)ことを案内する
   - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しい周も失敗になる
-- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は unattended-mode.md §1)。値と、origin-repo.py の出力の 5 欄は守る値(§7)
+- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は unattended-mode.md §1)。値と、origin-repo.py の出力の 5 欄は守る値(§7。作業の途中で変わっていないかを確かめるために、最初に控える値)
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`(§3)が exit 0 で、`origin` が真なら次の 2 つを満たす。`origin` が偽なら満たしたとみなす(push しないので、候補があれば結末は `縮退`)
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
   - `same` が真(fetch と push の URL がそれぞれ 1 つで、同じリポジトリを指す)。偽なら、fetch と push の URL を揃える案内をする
@@ -111,7 +112,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 前提を満たした後・発見元を呼ぶ前に行う。refactor の周では行わない(refactor の候補モードはセキュリティ由来の指摘を候補にしないので、公開のリポジトリでも回す — candidate-mode.md)。data-audit の候補(未修正の脆弱性の場所と筋書き)は、origin が非公開と確かめられたときだけ PR にする。
 
 1. origin-repo.py の `origin` が偽なら、確かめずに続ける(push しないので、候補があれば結末は `縮退`。候補はローカルのブランチだけに残る)
-2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に写りうるため)
+2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に写りうるため)
 3. `gh repo view '<repo>' --json isPrivate -q .isPrivate` の出力がちょうど `true` なら続ける。`false`・エラー・それ以外の出力なら「確かめられない」
    - repo は引数で渡す。gh の既定のリポジトリの解決(`upstream` などのリモート・`GH_REPO`・`gh repo set-default`)に頼ると、確認の対象が push 先と食い違いうる。`HOST/OWNER/REPO` の形を受け付けることと、引数が `GH_REPO` より優先されることは実測した(design §7-3)
 4. 「確かめられない」ときは、発見元を呼ばずに、結末 `候補なし — data-audit: origin が非公開と確かめられないため回さなかった(<理由の要約>)` で終わる。何も書かず、ブランチも作らない(失敗扱いではない)
@@ -121,7 +122,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 
 ## 6. 工程
 
-ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う。2′ で前提(§4)を確かめ、data-audit なら公開の確認(§5)を行う。Phase 0 の 3〜6 と Phase 1〜4 は、次の工程に差し替える(清潔性は前提に含む。作業ブランチは工程 D3 で作る。origin と gh は §4・§5・§8 で確かめる。実装の委託は無い)。
+ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う。2′ で前提(§4)を確かめ、data-audit なら公開の確認(§5)を行う。Phase 0 の 3〜6 と Phase 1〜4 は、次の工程に差し替える(清潔性は前提に含む。作業ブランチは工程 D3 で作る。origin と gh は §4・§5・§8 で確かめる。実装の委託〈作業を別の AI に任せること〉は無い)。
 
 - **工程 D1**: 発見元の候補モードを呼ぶ(§1 の対応。`--unattended` を必ず渡す)。候補モードは、task_dir に新しい `候補_*.md` を書き、書いたパスの一覧と結果の行(`候補モードの結果: …`。書式は candidate-mode.md)を返す。改名・commit・チェーンの提案はしない
 - **工程 D2**: 結果の検証(§7 の表の「工程 D2」の行)。通らなければ失敗扱い(G2)
@@ -133,7 +134,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 ## 7. 周の中で守る値と照合(改竄ガード)
 
-**守る値**(セッション文脈に保持し、報告にも書く): 発見元・task_dir・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(origin-repo.py の出力の `origin`・`same`・`vcs`・`repo`・`form`。`reason` は比べない。どれも認証情報を含まない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見の周は、本文ダイジェスト R を持たない(タスク MD が無い)。
+**守る値**(セッション文脈に保持し、報告にも書く): 発見元・task_dir・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(origin-repo.py の出力の `origin`・`same`・`vcs`・`repo`・`form`。`reason` は比べない。どれも認証情報を含まない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見の周は、本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を持たない(タスク MD が無い)。
 
 - origin の判定と git 設定のダイジェストは、§4 の前提(工程 D1 の前。git 設定のダイジェストを先に)で取る
 - 最後に知る HEAD は、ブランチを作ったときに S0 にし、commit の直後の照合に通ったら、その HEAD に更新する
@@ -169,8 +170,8 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 **PR 本文**: 候補のファイルと、発見元の報告(`.claude/reviews/candidates-<発見元>.md`)からの転記だけ。推測で書かない。`Write` で `.claude/reviews/discover-<発見元>-pr.md` に置く。
 
-1. 発見ループの候補であること(merge すると task_dir に `候補_` として入るが、実装はされない)
-2. 候補の一覧(ファイル・指摘 1 行・場所・深刻度と確度かスコア・指摘キー)
+1. 発見ループの候補(見つけた改善案のうち、まだ採用していないもの)であること(merge すると task_dir〈設計書を置くフォルダ〉に `候補_` として入るが、実装はされない)
+2. 候補(見つけた改善案のうち、まだ採用していないもの)の一覧(ファイル・指摘 1 行・場所・深刻度と確度かスコア・指摘キー)
 3. 人がすること
    - 要らない候補は、見送りの行を足すか、消してから merge する(消す = また出てよい / 見送り = もう出さない)。写して使える見送りの行の字面 `> **見送り**: YYYY-MM-DD — <理由>` を載せる(区切りは `—`)
    - 見送り・既知は、同じ観点群・同じ場所(refactor はファイル)の以後の指摘を、すべて止める
@@ -180,7 +181,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
    - 採用は、merge の後に `/create-task <候補_ のパス>`
 4. 走査の範囲・未監査と理由・既知として除いた件数・回帰の疑い。data-audit の PR だけ、除外(誤検知の除去)の件数も載せる。refactor の PR には除外の件数を出さない(公開の PR で、未修正のセキュリティの問題があることを知らせないため — candidate-mode.md)
 5. 先行する commit の一覧(空でなければ。件名はコードブロックに入れる)
-6. 「設計レビュー・品質ゲートは、採用の後の /create-task・/do-task で行う」
+6. 「設計レビュー・品質ゲート(書式・型・テスト・ビルドの自動の検査)は、採用の後の /create-task・/do-task で行う」
 
 ## 9. 結末
 
@@ -200,11 +201,11 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - ブランチの作成の後・commit の前: ブランチと候補
 - commit の後(照合・push・PR の失敗): ブランチと commit。push の後に PR の作成で失敗したときは、origin にもブランチが残る
 
-**原則 4 の読み替え**: 発見の周の「緑」は、§7 の照合にすべて通ったこと。品質ゲート・レビュー・実動確認は、採用の後の /create-task・/do-task で行う(実装を含まない候補の PR への、design §5-20 の例外)。
+**原則 4 の読み替え**: 発見の周の「緑」は、§7 の照合にすべて通ったこと。品質ゲート・レビュー・実動確認(実際に動かして、変更どおりに動くかを見る確認)は、採用の後の /create-task・/do-task で行う(実装を含まない候補の PR への、design §5-20 の例外)。
 
 ## 10. 受け入れる限界
 
-- 候補の中身の正しさ・機密の値の混入・候補の文面に仕込まれた指示は、機構では守らない。人が PR で読み、採用のときに create-task が実コードで裏取りする(candidate-mode.md の限界)
+- 候補の中身の正しさ・機密の値の混入・候補の文面に仕込まれた指示は、機構では守らない。人が PR で読み、採用のときに create-task が実コードで裏取り(実際のコードやファイルを読んで確かめること)する(candidate-mode.md の限界)
 - 公開の確認の後に公開に変えられた場合は、防げない。PR は、非公開のリポジトリの中に留まる前提。周の許可リストが `gh` を丸ごと許すと、周の中で公開に変える操作も通る(#107)
 - origin の push 先が §3 の許す形(https、または上書きの無い `git@github.com`)でないか、gh で isPrivate を読めないホストなら、data-audit の発見は回らない(毎晩 `候補なし` と報告する)。refactor は、PR を作らずに `縮退` になる(ssh の設定の別名・`ssh.github.com` の 443・ポートの明示・ローカルのパス・TLS の検証を外した構成など)。`縮退` で push したブランチを処理するまで、refactor は回らない
 - 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路と、ホスト鍵検証を外す H44 の構成を拒否するが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
