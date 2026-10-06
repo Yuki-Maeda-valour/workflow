@@ -313,7 +313,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
   - 照合と実行の間の書き換え: commit・push は `--expect` と `&&` でつないだ 1 回の Bash にして間を縮めるが、間は無くならない。`loop.sh` の経路では、書き換えが周の終わりまで残れば、周の後の照合(loop.md §4)が捉える
   - 誤って失敗扱いになる構成: 周の中で git の設定を書くスクリプト(husky の prepare・`git lfs install --local` など。人のチェックアウトで先に打っておけば、同じ値の書き直しは項目の並びを変えない)/ 利用者の global に `worktree.useRelativePaths=true` があり、単独の起動で外部レビュアーの一時ツリー(external-runners.md §9-1)を初めて作るとき / 周の間に、人が同じリポジトリの共有の設定を変える操作(`git push -u`・追跡つきの `git switch`・`gh pr checkout` など)をしたとき
   - github の ssh の push 先は、origin の判定の `repo` が `ssh -G`(打ち切り 10 秒・`Match exec`)の結果で決まる。前提と push の直前のどちらか一方だけで `ssh -G` が時間切れになると、`repo` が null と値の間で変わり、正しい周が失敗扱いになる
-  - タスクの周で `repo` が null になる構成(ssh の設定の別名・`ssh.github.com` の 443・ローカルのパス・TLS の検証を外した https など — discover-mode.md §10 と同じ)では、毎周 `縮退`(push もしない)。`origin-repo.py` の `ssh -G` が利用者の ssh の設定の `Match exec` を実行しうること(discover-mode.md §3)は、タスクの周でも同じ
+  - タスクの周で `repo` が null になる構成(ssh の設定の別名・`ssh.github.com` の 443・ホスト鍵検証を外した SSH や判定情報の欠落〈H44。条件は discover-mode.md §3〉・ローカルのパス・TLS の検証を外した https など — discover-mode.md §10 と同じ)では、毎周 `縮退`(push もしない)。`origin-repo.py` の `ssh -G` が利用者の ssh の設定の `Match exec` を実行しうること(discover-mode.md §3)は、タスクの周でも同じ
   - 対話の Phase 5 は `-R` を付けず、push と PR の作成先は利用者の設定に従う
 - parent-child 構成(管理ルート ≠ `root`)では無人を起動しない(前提の検査で失敗扱い)
 - 同じ理由の保留が続いたら止める仕組み(許可リストの不足は全タスクで起きる)は `loop.sh` が扱う: `G1` の保留が続いたら止まる([loop.md](loop.md) §6)。ホスト側の拒否の現れ方(結果の拒否の欄)は周の報告に写す(同 §7。形は実走で測る — 同 §8)。拒否に気づいて保留か失敗扱いにするのは、周の中の team-lead(§3)

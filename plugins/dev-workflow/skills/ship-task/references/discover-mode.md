@@ -60,11 +60,28 @@ OWNER・REPO はそれぞれ 1 段で `[A-Za-z0-9._-]+`。ポートを明示し�
 - scp か `ssh://` の形で、ユーザー名が `git`・HOST が `github.com`。さらに次をすべて満たす
   - ssh を上書きする設定が無い: 環境変数 `GIT_SSH_COMMAND`・`GIT_SSH` が無く、`git config --get core.sshCommand` が空
   - `ssh -G -- git@github.com`(タイムアウト 10 秒・stdin は `/dev/null`。引数は固定)の出力の `hostname` の行が `github.com`、`port` の行が `22`
+  - ホスト鍵の設定が、下の H44 の判定をすべて通る
+
+**ホスト鍵の判定(H44)**: 接続先の鍵を検査する設定が残っていることを確認する。拒否時は終了コード 0 のまま `repo: null` と理由を返す。設定値・URL・ssh の stderr は理由へ転載しない。
+
+| 設定 | 許す条件 |
+|---|---|
+| `StrictHostKeyChecking` | `yes` / `true` / `ask` / `accept-new`。変更鍵を許す `no` / `off` / `false` と、未知の値は拒否する |
+| `UserKnownHostsFile`・`GlobalKnownHostsFile` | 両方の行が必要。`yes` / `true` / `ask` は、保存先が `none` や `/dev/null` でも、未知鍵の拒否または人の確認が残るため許す |
+| `accept-new` の User 保存先 | 先頭が `/dev/null` なら拒否する。`/dev/./null`・`//dev/null` など字面のパス正規化で同じになる形も拒否する。Global の保存先や User の 2 本目があっても救済しない。新しい鍵の保存先は User の先頭だけであるため |
+| User 保存先が単独の `none` | `accept-new` でも許す。OpenSSH は一覧を 0 本にし、未知鍵を拒否する。`/dev/null` と同一視しない。`none` と別の要素を並べた出力は拒否する |
+| `HostKeyAlias` | 未出力または `github.com`。`none` を含む別名・空値は拒否する |
+| `NoHostAuthenticationForLocalhost` | `no` / `false`。ローカル宛先でホスト鍵の検証を省く設定は拒否する |
+
+- `hostname`・`port`・`stricthostkeychecking`・`userknownhostsfile`・`globalknownhostsfile`・`nohostauthenticationforlocalhost` の欠落・空値、これらと `hostkeyalias` の重複は拒否する。未知の設定キーや、無関係な繰り返し可能キーは判定しない。
+- `ssh -G` の起動失敗・非 0 終了・時間切れ・出力の復号失敗も拒否する。必須項目が無い出力を既定値で補わない。
+- `KnownHostsCommand`・`VerifyHostKeyDNS` の指定だけで、上の拒否を救済しない。鍵を取得できたか、DNS の検証が成功したかは `-G` では分からない。`CheckHostIP`・`UpdateHostKeys` も代替の検証には使わない。
+- 公式根拠: [ssh_config(5)](https://man.openbsd.org/ssh_config)、[ssh.c](https://github.com/openssh/openssh-portable/blob/master/ssh.c)、[sshconnect.c](https://github.com/openssh/openssh-portable/blob/master/sshconnect.c)(2026-10-06 確認)。
 
 ssh の設定の別名(`github-work` など)・`ssh.github.com` の 443・ほかのユーザー名・ssh の上書きは、許さない。git の実際の接続を再現しきれないため(`Match user` のように、ユーザー名の有無だけでポートが変わる構成がある)。
 
 - `ssh -G` は接続しない。ただし、利用者の ssh の設定の `Match exec` のコマンドは実行されうる(利用者の設定は信頼の範囲 — §10)
-- ProxyCommand・ProxyJump は、`%h:%p` への中継として信頼する(ホスト鍵の検証が github.com への到達を担保する)
+- ProxyCommand・ProxyJump は、上の条件を通ったときだけ中継として信頼する。中継の有無でホスト鍵の判定を緩めない。実際の鍵照合や新しい鍵の受け入れは SSH に任せる
 - 利用者の git・ssh の設定は信頼の範囲。この列挙は、送り先を URL の字面から離す主な経路を外すが、すべての設定を網羅はしない(§10)
 
 ## 4. 前提
@@ -190,7 +207,8 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - 候補の中身の正しさ・機密の値の混入・候補の文面に仕込まれた指示は、機構では守らない。人が PR で読み、採用のときに create-task が実コードで裏取りする(candidate-mode.md の限界)
 - 公開の確認の後に公開に変えられた場合は、防げない。PR は、非公開のリポジトリの中に留まる前提。周の許可リストが `gh` を丸ごと許すと、周の中で公開に変える操作も通る(#107)
 - origin の push 先が §3 の許す形(https、または上書きの無い `git@github.com`)でないか、gh で isPrivate を読めないホストなら、data-audit の発見は回らない(毎晩 `候補なし` と報告する)。refactor は、PR を作らずに `縮退` になる(ssh の設定の別名・`ssh.github.com` の 443・ポートの明示・ローカルのパス・TLS の検証を外した構成など)。`縮退` で push したブランチを処理するまで、refactor は回らない
-- 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路を外すが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
+- 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路と、ホスト鍵検証を外す H44 の構成を拒否するが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
+- ホスト鍵の判定は設定の検査だけで、接続成功や GitHub の鍵の所有を証明しない。known_hosts の内容・実体・書込可否、DNS の結果、鍵取得コマンドの出力、既存の共有接続は検査しない。通常の `accept-new` の初回受け入れと、通常パスへの保存失敗は SSH に任せる。`-G` のファイル一覧は引用符を保持しないため、空白入りパスを完全には復元しない。明示された先頭の `/dev/null` を保守的に判定し、symlink や別の破棄先は追わない
 - ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)の限界は、unattended-mode.md §9 の ⑥ と同じ(include の先・hook の中身・global の設定を見ない・照合と実行の間の書き換え・誤って失敗扱いになる構成など)
 - fetch と push の URL が、字面から直した値で別のリポジトリか、`remote.origin.vcs` があれば、発見の周は前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
 - `/ship-task <候補_ のパス>`(説明として渡す)は、採用の入口として保証しない。採用は `/create-task <候補_ のパス>` で行ってから、`/ship-task --task=<進行中_ のパス>` を使う
