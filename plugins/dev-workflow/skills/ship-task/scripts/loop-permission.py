@@ -421,10 +421,14 @@ def is_bare_symlink(ctx: Ctx, text: str, tilde: bool) -> bool:
 
 
 def check_words_as_paths(ctx: Ctx, words: list[Word], *, skip_bare_first: bool = False) -> None:
+    options = True
     for index, w in enumerate(words):
         text = w.text
         tilde = w.tilde
-        if text.startswith("-"):
+        if options and text == "--":
+            options = False
+            continue
+        if options and text.startswith("-"):
             if "=" in text and text.startswith("--"):
                 value = text.split("=", 1)[1]
                 # --name=値 の値の部分を見る(~ は引用符の外で値の先頭にあるときだけ)
@@ -685,6 +689,13 @@ def judge_cmds(ctx: Ctx, cmds: list[dict]) -> Denied | None:
 def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
     """コマンドの並びを、ctx.cwd を作業ディレクトリとして通常の規則で判定する(cd を含まないこと)。"""
     for c in cmds:
+        # 読む場所を削除・書き込み先として扱う例外は、同じコマンド内だけに限る。
+        # 書き込みの拒否は後続の other を優先できるよう残し、読み取りの拒否はここで確定する。
+        previous = pending_denial(ctx)
+        if previous is not None and previous.kind == "other":
+            raise previous
+        ctx.nonwrite_hits.clear()
+        ctx.write_rels.clear()
         for w in c["assigns"] + c["words"]:
             if w.glob():
                 raise other(f"引用符の外のグロブ: {w.text[:100]}")

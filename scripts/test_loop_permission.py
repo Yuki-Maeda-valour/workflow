@@ -135,6 +135,51 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         os.symlink(".claude/settings.json", self.wt / "input-link")
         self.expect("cat < ./input-link", "allow")
 
+    def test_other_command_cannot_cancel_protected_link_read(self):
+        os.symlink(".claude/settings.json", self.wt / "joined")
+        for command in (
+            "cat joined; rm joined",
+            "cat joined && mv joined moved",
+            "cat joined || rm joined",
+            "cat joined | tee out; rm joined",
+            "rm joined; cat joined",
+            "LANG=joined cat safe.txt; rm joined",
+            "CDPATH= cd -P -- . && cat joined; rm joined",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+
+    def test_other_denial_still_takes_priority_over_protected_write(self):
+        os.symlink(".claude/settings.json", self.wt / "mixed")
+        for command in (
+            "echo x > .claude/settings.json; cat mixed; rm mixed",
+            "cat mixed; echo x > .claude/settings.json; rm mixed",
+        ):
+            with self.subTest(command=command):
+                self.expect(command, "deny", "other")
+
+    def test_separate_safe_commands_preserve_link_removal_and_write_kinds(self):
+        os.symlink(".claude/settings.json", self.wt / "removable")
+        self.expect("rm removable; echo done", "allow")
+        self.expect("mv removable moved && echo done", "allow")
+        self.expect("echo x > removable; echo done", "deny", "protected")
+        self.expect("echo done; echo x > removable", "deny", "protected")
+
+    def test_protected_link_after_option_terminator_is_a_path(self):
+        for name in ("-alias", "--path=alias"):
+            os.symlink(".claude/settings.json", self.wt / name)
+            with self.subTest(name=name):
+                self.expect(f"cat -- {name}", "deny", "other")
+                self.expect(f"cp -- {name} copy", "deny", "other")
+                self.expect(f"cat -- {name}; rm -- {name}", "deny", "other")
+
+    def test_option_terminator_preserves_safe_paths_and_link_removal(self):
+        os.symlink("safe.txt", self.wt / "-safe")
+        os.symlink(".claude/settings.json", self.wt / "-protected")
+        self.expect("cat -- -safe", "allow")
+        self.expect("rm -- -protected", "allow")
+        self.expect("mv -- -protected moved", "allow")
+
 
 if __name__ == "__main__":
     unittest.main()
