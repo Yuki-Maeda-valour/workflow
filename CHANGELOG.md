@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.20.3
+
+### 修正
+
+- `origin-repo.py` が SSH のホスト鍵検証を外した構成を信頼判定から除外する([子 Issue #161](https://github.com/Yuki-Maeda-valour/workflow/issues/161)、親 #107 の H44)。検証設定・照合名・ローカル宛先の検証省略と、`accept-new` の先頭保存先を確認する。必要な設定が欠落・空・重複した場合や取得に失敗した場合も拒否する。
+- 通常の SSH・HTTPS と JSON 形式を保ち、理由に設定値や認証情報を出さない。判定は設定に限り、実際の鍵内容や保存成功は検査しない。保証範囲は [discover-mode.md §3・§10](plugins/dev-workflow/skills/ship-task/references/discover-mode.md) を参照。
+
 ## v4.20.2
 
 ### 修正

@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import posixpath
 import re
 import subprocess
 import sys
@@ -92,7 +93,7 @@ def comparable(parsed: dict) -> str:
 
 
 def ssh_is_github() -> tuple[bool, str]:
-    """`ssh -G -- git@github.com` の hostname と port を見る。接続はしない"""
+    """`ssh -G -- git@github.com` の宛先とホスト鍵設定を見る。接続はしない"""
     try:
         done = subprocess.run(
             ["ssh", "-G", "--", "git@github.com"],
@@ -104,18 +105,50 @@ def ssh_is_github() -> tuple[bool, str]:
         )
     except subprocess.TimeoutExpired:
         return False, "ssh -G が時間切れ"
+    except UnicodeError:
+        return False, "ssh -G の出力を読めない"
     except OSError:
         return False, "ssh -G を起動できない"
     if done.returncode != 0:
         return False, f"ssh -G が失敗した(終了コード {done.returncode})"
+    checked = {
+        "hostname", "port", "stricthostkeychecking", "userknownhostsfile",
+        "globalknownhostsfile", "nohostauthenticationforlocalhost", "hostkeyalias",
+    }
     settings = {}
     for line in done.stdout.splitlines():
-        key, _, rest = line.partition(" ")
-        settings.setdefault(key.lower(), rest.strip())
+        parts = line.strip().split(None, 1)
+        if not parts:
+            continue
+        key = parts[0].lower()
+        if key not in checked:
+            continue
+        if key in settings:
+            return False, "ssh の判定に必要な設定が重複している"
+        settings[key] = parts[1].strip() if len(parts) == 2 else ""
+    required = checked - {"hostkeyalias"}
+    if any(not settings.get(key) for key in required):
+        return False, "ssh の判定に必要な設定が欠落または空である"
     if settings.get("hostname") != "github.com":
         return False, "ssh の設定で github.com の hostname が github.com でない"
     if settings.get("port") != "22":
         return False, "ssh の設定で github.com の port が 22 でない"
+    strict = settings["stricthostkeychecking"].lower()
+    if strict not in {"yes", "true", "ask", "accept-new"}:
+        return False, "ssh のホスト鍵検証を確認できない"
+    if settings.get("hostkeyalias", "github.com") != "github.com":
+        return False, "ssh のホスト鍵の照合名が github.com でない"
+    if settings["nohostauthenticationforlocalhost"].lower() not in {"no", "false"}:
+        return False, "ssh のローカル宛先のホスト鍵検証を確認できない"
+    user_files = settings["userknownhostsfile"].split()
+    if user_files[0].lower() == "none":
+        if len(user_files) != 1:
+            return False, "ssh のユーザー保存先を確認できない"
+    elif strict == "accept-new":
+        first = user_files[0]
+        # -G は引用符を保持しないため、明示された先頭の無効先を安全側で判定する。
+        if first.startswith("/") and posixpath.normpath("/" + first.lstrip("/")) == "/dev/null":
+            return False, "ssh の新しいホスト鍵を保存できない"
     return True, ""
 
 
