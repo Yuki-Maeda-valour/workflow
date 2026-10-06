@@ -311,7 +311,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 
 1. **一時ツリー方式(必須)**(**レビュー専用**。実装経路は一時ツリーを使わない。§12-4)(具体手順)
 
-   **手順の実行順**(下のコードブロックもこの順に並べる): 手順 0(遅延取得の無効化)→ 縮退判定 → `TREE` の決定と `TOP` の解決(`$TREE` が `$TOP` の配下なら起動しない)→ `EXCLUDE` の生成 → 事前検査 → `worktree add` → 生バイト検査 → 衝突検査 ① → 手順 1(snapshot とパッチを一時ツリーへ生成・終了コード検査・両ファイルの sha256 取得)→ 適用前除去 → `apply` → 手順 2(未追跡の cp)→ 衝突検査 ② → 一時ツリーの切り離し → 手順 3(依頼文の配置 → symlink の解決先検査 → 機密検査 → 新規ファイルの存在検査)→ 起動。
+   **手順の実行順**(下のコードブロックもこの順に並べる): 手順 0(遅延取得の無効化)→ 縮退判定 → `TREE` の決定と `TOP` の解決(`$TREE` が `$TOP` の配下なら起動しない)→ 事前検査 → `EXCLUDE` の生成 → `worktree add` → 生バイト検査 → 衝突検査 ① → 手順 1(snapshot とパッチを一時ツリーへ生成・終了コード検査・両ファイルの sha256 取得)→ 適用前除去 → `apply` → 手順 2(未追跡の cp)→ 衝突検査 ② → 一時ツリーの切り離し → 手順 3(依頼文の配置 → symlink の解決先検査 → 機密検査 → 新規ファイルの存在検査)→ 起動。
    - **依頼文は呼び出し側が一時ツリーの外で組み立て**、この節は NOTE と「一時ツリーに含めなかった未追跡」の一覧をその末尾に追記してから、手順 3 で `$TREE/.review-prompt.md` へ配置する。
    - 生バイト検査を適用前除去より前に置くのは、除去後では削除したパスが不一致になるため。
    - 衝突検査 ② を手順 2 の後に置くのは、配置の直前に 1 回で「パッチが作った symlink」と「手順 2 が作ったエントリ」の両方を検出するため(手順 2 は `COPY_EXCLUDE` により制御ファイル名へは書き込まないので、間に挟んでもリンク先は上書きされない)。
@@ -413,18 +413,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    TREE="$(mktemp -d)/review"
    case "$(CDPATH= cd -P -- "$(dirname "$TREE")" && pwd -P)/" in "${TOP%/}"/*|"${TOP%/}/") echo "一時ツリーがリポジトリ内にある"; exit 1;; esac
 
-   # 2) EXCLUDE の生成(secret_paths の集合と glob→ERE の変換は scripts/diff-snapshot.sh が正本。
-   #    渡す集合の組み立てと要素の内容検査は diff-snapshot-call.md が正本で、ここに列挙しない)
-   EXCLUDE="$(bash {do-task の}scripts/diff-snapshot.sh --print-exclude-ere --exclude-glob <secret_paths の各要素>)" || { echo "除外 ERE を生成できない"; exit 1; }
-   [ -n "$EXCLUDE" ] || { echo "除外 ERE が空"; exit 1; }
-   printf '' | LC_ALL=C grep -Eqz -- "$EXCLUDE"; [ $? -le 1 ] || { echo "除外 ERE が不正"; exit 1; }
-   DEFAULT_EXCLUDE='(^|/)\.claude/(reviews/|grasp\.md$|settings\.local\.json$|\.understand-project-done$)'
-   TREE_EXCLUDE="$EXCLUDE|$DEFAULT_EXCLUDE"
-   CTRL_RE='(^|/)\.review-(snapshot\.md|diff\.patch|prompt\.md)$'
-   COPY_EXCLUDE="$TREE_EXCLUDE|$CTRL_RE"
-   excluded() { printf '%s' "$1" | LC_ALL=C grep -Eiqz -- "$2"; }
-
-   # 3) 事前検査(上の段落の規則。出力は一時ファイルへ受けて rc を検査してから読む)
+   # 2) 事前検査(上の段落の規則。出力は一時ファイルへ受けて rc を検査してから読む)
    CFG=$(mktemp); REPL=$(mktemp); HL=$(mktemp); HA=$(mktemp); WL=$(mktemp); WA=$(mktemp)
    git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false config --show-scope --includes --list -z >"$CFG" || { echo "設定を読めない"; exit 1; }
    ATTR=$(git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --path-format=absolute --git-path info/attributes) || exit 1
@@ -438,6 +427,52 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false config --get-regexp '^filter\.(unset|unspecified)\.' >/dev/null; [ $? -eq 1 ] || { echo "unset / unspecified という名前の filter がある"; exit 1; }
 
    rm -f -- "$CFG" "$REPL" "$HL" "$HA" "$WL" "$WA"; rm -rf -- "$(dirname -- "$IDX")"
+
+   # 3) EXCLUDE の生成。これは事前検査に通った後だけに行う。
+   #    無人は保持した OID から helper を使う。手動と parent-child は従来の caller が検査済みで
+   #    作った glob 配列をそのまま使い、ここで profile を読み直さない。
+   PROFILE_GLOB_ARGS=(); SNAPSHOT_PROFILE_REFS=(); SNAPSHOT_PROFILE_UNION_ARG=()
+   if [ "<無人で基準 B が確定済み>" = true ]; then
+     PROFILE_GLOBS=$(mktemp)
+     python3 {do-task の}scripts/secret-profiles.py --cwd "$TOP" --ref "$B" --ref "$S" >"$PROFILE_GLOBS" || { rm -f -- "$PROFILE_GLOBS"; echo "開始時を含む機密指定を読めない"; exit 1; }
+     while IFS= read -r -d '' g; do PROFILE_GLOB_ARGS+=(--exclude-glob "$g"); done <"$PROFILE_GLOBS"
+     PROFILE_UNION_RAW=$(sha256sum <"$PROFILE_GLOBS") || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合を要約できない"; exit 1; }
+     IFS=' ' read -r PROFILE_UNION_SHA256 _ <<<"$PROFILE_UNION_RAW"
+     [[ "$PROFILE_UNION_SHA256" =~ ^[0-9a-f]{64}$ ]] || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合の要約が不正"; exit 1; }
+     rm -f -- "$PROFILE_GLOBS"
+     SNAPSHOT_PROFILE_REFS=(--secret-profile-ref "$B" --secret-profile-ref "$S")
+     SNAPSHOT_PROFILE_UNION_ARG=(--secret-profile-union-sha256 "$PROFILE_UNION_SHA256")
+   elif [ "<無人の発見周>" = true ]; then
+     PROFILE_GLOBS=$(mktemp)
+     python3 {do-task の}scripts/secret-profiles.py --cwd "$TOP" --ref "$S0" >"$PROFILE_GLOBS" || { rm -f -- "$PROFILE_GLOBS"; echo "開始時の機密指定を読めない"; exit 1; }
+     while IFS= read -r -d '' g; do PROFILE_GLOB_ARGS+=(--exclude-glob "$g"); done <"$PROFILE_GLOBS"
+     PROFILE_UNION_RAW=$(sha256sum <"$PROFILE_GLOBS") || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合を要約できない"; exit 1; }
+     IFS=' ' read -r PROFILE_UNION_SHA256 _ <<<"$PROFILE_UNION_RAW"
+     [[ "$PROFILE_UNION_SHA256" =~ ^[0-9a-f]{64}$ ]] || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合の要約が不正"; exit 1; }
+     rm -f -- "$PROFILE_GLOBS"
+     SNAPSHOT_PROFILE_REFS=(--secret-profile-ref "$S0")
+     SNAPSHOT_PROFILE_UNION_ARG=(--secret-profile-union-sha256 "$PROFILE_UNION_SHA256")
+   elif [ "<無人で B が未確定>" = true ]; then
+     PROFILE_GLOBS=$(mktemp)
+     python3 {do-task の}scripts/secret-profiles.py --cwd "$TOP" --ref "$S" >"$PROFILE_GLOBS" || { rm -f -- "$PROFILE_GLOBS"; echo "開始時の機密指定を読めない"; exit 1; }
+     while IFS= read -r -d '' g; do PROFILE_GLOB_ARGS+=(--exclude-glob "$g"); done <"$PROFILE_GLOBS"
+     PROFILE_UNION_RAW=$(sha256sum <"$PROFILE_GLOBS") || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合を要約できない"; exit 1; }
+     IFS=' ' read -r PROFILE_UNION_SHA256 _ <<<"$PROFILE_UNION_RAW"
+     [[ "$PROFILE_UNION_SHA256" =~ ^[0-9a-f]{64}$ ]] || { rm -f -- "$PROFILE_GLOBS"; echo "機密指定の和集合の要約が不正"; exit 1; }
+     rm -f -- "$PROFILE_GLOBS"
+     SNAPSHOT_PROFILE_REFS=(--secret-profile-ref "$S")
+     SNAPSHOT_PROFILE_UNION_ARG=(--secret-profile-union-sha256 "$PROFILE_UNION_SHA256")
+   else
+     PROFILE_GLOB_ARGS=(--exclude-glob <従来の caller が得た各要素>)
+   fi
+   EXCLUDE="$(bash {do-task の}scripts/diff-snapshot.sh --print-exclude-ere "${PROFILE_GLOB_ARGS[@]}")" || { echo "除外 ERE を生成できない"; exit 1; }
+   [ -n "$EXCLUDE" ] || { echo "除外 ERE が空"; exit 1; }
+   printf '' | LC_ALL=C grep -Eqz -- "$EXCLUDE"; [ $? -le 1 ] || { echo "除外 ERE が不正"; exit 1; }
+   DEFAULT_EXCLUDE='(^|/)\.claude/(reviews/|grasp\.md$|settings\.local\.json$|\.understand-project-done$)'
+   TREE_EXCLUDE="$EXCLUDE|$DEFAULT_EXCLUDE"
+   CTRL_RE='(^|/)\.review-(snapshot\.md|diff\.patch|prompt\.md)$'
+   COPY_EXCLUDE="$TREE_EXCLUDE|$CTRL_RE"
+   excluded() { printf '%s' "$1" | LC_ALL=C grep -Eiqz -- "$2"; }
 
    # 4) worktree add(LFS・改行変換・sparse の上書きまで含めた 1 行)
    git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false -c core.autocrlf=false -c core.eol=lf -c apply.whitespace=nowarn -c core.symlinks=true -c core.sparseCheckout=false -c core.sparseCheckoutCone=false worktree add --detach "$TREE" HEAD || { echo "一時ツリーを作れない"; exit 1; }
@@ -465,9 +500,9 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    #    うち --out だけを差し替え、--patch-out / --patch-base を足した 1 回の呼び出しにする
    #    (引数・終了コードの契約は scripts/diff-snapshot.sh の usage と同じ集合。変えるときは両方を直す)
    rc=0
-   bash {do-task の}scripts/diff-snapshot.sh --cwd "$CWD" --base <基準コミット または HEAD> \
+   bash {do-task の}scripts/diff-snapshot.sh --cwd "$CWD" --base <基準コミット または HEAD> "${SNAPSHOT_PROFILE_REFS[@]}" "${SNAPSHOT_PROFILE_UNION_ARG[@]}" \
         --out "$TREE/.review-snapshot.md" --patch-out "$TREE/.review-diff.patch" --patch-base HEAD \
-        --exclude-glob <secret_paths の各要素> [--pre-untracked <一覧>] [--pre-untracked-sha256 <sha256>] \
+        "${PROFILE_GLOB_ARGS[@]}" [--pre-untracked <一覧>] [--pre-untracked-sha256 <sha256>] \
         [--include-untracked <パス>] [--accept <承認ダイジェスト>] || rc=$?
    case "$rc" in 0|21) ;; *) echo "スナップショットを生成できない: $rc"; exit 1;; esac
    SNAP_SHA=$(sha256sum -- "$TREE/.review-snapshot.md") || exit 1
@@ -559,8 +594,16 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    `.review-diff.patch` は HEAD からの追跡差分なので未追跡の新規ファイルと途中 commit を含まない。
    - **レビュー対象を内蔵 reviewer と揃えるため、do-task Phase 4 の手順 1 と同じ引数で `scripts/diff-snapshot.sh` を実行して一時ツリーの `.review-snapshot.md` に生成し、`--target .review-diff.patch --target .review-snapshot.md` で両方渡す**(パッチは一時ツリーへの適用用、snapshot がレビュー用。この生成物の回帰は diff-snapshot-selftest.sh が持つ)
 
-   **手順 1 は、do-task Phase 4 の手順 1 と同一の引数一式**(`--cwd` / `--base` / `--exclude-glob` / `--pre-untracked` と対の `--pre-untracked-sha256` / `--include-untracked` / do-task Phase 4 の手順 1 でユーザーが承認済みの `--accept`)**のうち `--out` だけを `--out "$TREE/.review-snapshot.md"` に替え、`--patch-out "$TREE/.review-diff.patch" --patch-base HEAD` を足した 1 回の呼び出しにする**(**do-task Phase 4 の手順 1 が生成した `.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md` と同じパスを `--out` に渡さない** — そのファイルは内蔵 reviewer に渡す当のファイルで、この節の呼び出しが exit 22 になると固定文字列で上書きされ、切り替え先の内蔵 reviewer が中身の無い diff を受け取る。同じ状態・同じ引数からの生成なので、各節の本文は do-task Phase 4 の生成物と同じになる(見出しの生成日時と、出力先に由来する `## 除外(既定)` の件数は一致しない)。`--patch-out` 専用の別呼び出しにはしない — `--out` 等が必須なので exit 2 になる)。
-   - **その終了コードを `rc=0; bash {do-task の}scripts/diff-snapshot.sh … || rc=$?` で受け、0 か 21 のときだけ続行し**(rc を問わず `## 含められなかった未追跡` の全行を依頼文に転記する — 手順 2・3 の規則と同じ)、**2 / 4 / 20 / 22 と表に無いコード(スクリプトを解決できない部分導入での 127 等)は起動の前に停止して報告する**(未生成のパッチを空扱いして起動する経路を塞ぐ。`[ -s ]` は rc 確認後の正当な空パッチの判定にだけ使う)。
+   **無人の do-task と update-doc は、基準 B が確定した後に開始時 S と B を、上の `PROFILE_GLOB_ARGS` と `SNAPSHOT_PROFILE_REFS` の両方へ渡す。**
+   - helper の NUL 出力を消す前に SHA-256 を取り、`SNAPSHOT_PROFILE_UNION_ARG` も snapshot に渡す。
+   - snapshot が再読取した和集合の digest が違えば停止する。EXCLUDE、snapshot/patch、適用前除去、未追跡のコピー除外、手順 3 の最終検査は同じ集合を使う。
+   - B が未確定の開始前は S だけを渡す。発見の周は S0 だけを渡す。手動の呼び出しは S を足さず、従来の caller が得た集合を使う。保持値を失ったときは、現在の profile や HEAD から復元せず停止する。
+
+   **手順 1 は、do-task Phase 4 の手順 1 と同一の引数一式を使う。**
+   - `--out` だけを `--out "$TREE/.review-snapshot.md"` に替える。`--patch-out "$TREE/.review-diff.patch" --patch-base HEAD` を足し、1 回だけ呼ぶ。
+   - **do-task Phase 4 の手順 1 が生成した `.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md` と同じパスを `--out` に渡さない**。固定文字列で上書きされると、縮退先の内蔵 reviewer が中身の無い diff を受け取る。
+   - 終了コードは `rc=0; bash {do-task の}scripts/diff-snapshot.sh … || rc=$?` で受ける。0 か 21 のときだけ続行し、2 / 4 / 20 / 22 と表に無いコードは起動前に停止して報告する。
+   - `[ -s ]` は rc 確認後の正当な空パッチの判定にだけ使う。`## 含められなかった未追跡` の全行は、rc を問わず依頼文に転記する。
 
    **`EXCLUDE` は上のスクリプト呼び出しで生成し、終了コードが 0 でないか空文字なら起動しない。** 空の正規表現は `grep -Eqz -- ''` が常に一致して全部を除外側へ倒すため、`${EXCLUDE:-^$}` のような既定値へ落とさない。
    - **以下の除外判定はすべて `excluded()` = 「`X` に当たる」で行う**(`X` は `TREE_EXCLUDE` または `COPY_EXCLUDE`)— `scripts/diff-snapshot.sh` の判定と一致させる。
@@ -607,12 +650,17 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    - **省略した symlink は「依頼文に列挙されている」かつ「`.review-snapshot.md` の分類と一致する」ことを検査する** — snapshot の `## 未追跡ファイル` に収録された symlink はリンク文字列の diff があること、`## 基準時点から存在(対象外)` / `## 含められなかった未追跡`(リンク切れ)/ `## 内容を省略した未追跡`(総量上限)に分類された symlink はその節に理由付きで載っていること(新規 symlink がタスク成果物でも意図した省略で停止しない)。
 
    **呼び出し元ごとの入力**: do-task(Phase 4)からは Phase 4 の手順 1 の値をそのまま使う。
-   - **基準行の無い呼び出し元**(create-task の設計レビュー・update-doc・reflect-decisions・init-project — この節は 5 skill 共有の契約)では、`--cwd` は各 skill が対象にしているディレクトリ(`root`(parent-child)または管理ルート = リポジトリのトップ。縮退判定と `TOP` の解決もこの値)、`--base HEAD`、`--exclude-glob` は現在の profile の `secret_paths` と `--base` の commit(= HEAD)の profile の和集合([diff-snapshot-call.md](diff-snapshot-call.md) と同じ規則 — 基準側の取得可否の扱いも同じ)、`--pre-untracked` は付けず NOTE、`--include-untracked` と `--accept` は無し(承認の経路は do-task の中だけ〈場所は問わない。§12-1〉。事前検査または手順 1 が exit 22 なら起動せず内蔵編成に切り替える)。
-   - **管理対象が git リポジトリでない(基準行の無い呼び出し元)、または縮退判定が commit 0 と判定した(HEAD が commit に解決できず、手順 1 の `--base` が空ツリーか `HEAD`)ときは、一時ツリー方式を使わず内蔵編成に切り替えて理由を報告する — `worktree add --detach "$TREE" HEAD` の失敗だけでは内蔵に切り替えない**(正本は実行順の先頭の縮退判定)。
-   - **この経路の和集合(基準 = HEAD = 現在)は改竄耐性を与えない — 守るのは常時包含の既定 3 要素だけ**。
-   - **基準側の取得で停止する構成([diff-snapshot-call.md](diff-snapshot-call.md) の規則)では、外部ランナーを起動せず停止して報告する — 内蔵に切り替えない**(内蔵への切り替えは外部レビューを消す。§9-7 の内蔵への切り替えとは別)。
-   - **`--exclude-glob` に渡す集合の組み立てと各要素の内容検査は [diff-snapshot-call.md](diff-snapshot-call.md) が正本**で、拒否する文字の集合をここには列挙しない(`glob`→ERE の変換はスクリプトが行うので手で組み立てない)。
-   - **`--pre-untracked` は呼び出し元が解決した絶対パス(管理ルート配下)をそのまま使い、`$TOP` 基準へは変えない**(parent-child では管理ルートと `$TOP` が別リポジトリで、本体側に一覧は無い)。
+   - 無人ではその値が、状態により B+S、S、または S0 と現在の作業ツリー profile、既定 3 要素から作る 1 つの集合になる。
+   - **外部 patch・一時ツリーの適用前除去・コピー除外・最終検査は全て同じ集合を使い、外部ランナーへ渡す `--cwd` はその結果の一時ツリーだけにする**。
+   - **無人 update-doc は基準行の有無で次の既定へ縮退しない**。ship-task が保持した状態別の OID を引き継ぎ、同じ OID を `--secret-profile-ref` と helper へ渡す。保持値が無ければ停止する。
+   - **基準行の無い呼び出し元**(create-task の設計レビュー・手動の update-doc・reflect-decisions・init-project — この節は 5 skill 共有の契約)では、`--cwd` は各 skill の対象ディレクトリにする。parent-child では `root`、それ以外では管理ルート(リポジトリのトップ)を使い、縮退判定と `$TOP` の解決も同じ値で行う。
+   - `--base` は HEAD にする。除外は現在と HEAD の profile の `secret_paths` の和集合を使う。
+   - `--pre-untracked` は付けず、そのことを NOTE に残す。`--include-untracked` と `--accept` も付けない。承認を受けて `--accept` を渡せる経路は do-task の中だけである(場所は問わない。§12-1)。
+   - この呼び出し元の事前検査または手順 1 が exit 22 なら、外部ランナーを起動せず、内蔵編成に切り替えて理由を報告する。
+   - **管理対象が git リポジトリでない、または縮退判定が commit 0 と判定したときは、一時ツリー方式を使わず内蔵編成に縮退して理由を報告する**。`worktree add --detach "$TREE" HEAD` の失敗だけでは縮退しない。
+   - **この経路の和集合(基準 = HEAD = 現在)は改竄耐性を与えない。守るのは常時包含の既定 3 要素だけである。**
+   - **基準側の取得で停止する構成では、外部ランナーを起動せず停止して報告する。縮退しない。** 規則と `--exclude-glob` の組み立ては [diff-snapshot-call.md](diff-snapshot-call.md) に従う。
+   - **`--pre-untracked` は呼び出し元が解決した絶対パス(管理ルート配下)をそのまま使い、`$TOP` 基準へは変えない**。parent-child では管理ルートと `$TOP` が別リポジトリで、本体側に一覧は無い。
 
    **`$TOP` の解決に使うディレクトリと手順 1 の `--cwd` に渡すディレクトリは、どちらも do-task Phase 4 の手順 1 の `--cwd` と同じ値にする**。
    - 列挙・コピー元・手順 2 のファイル種別ガード(`[ -L "$TOP/$f" ]` / `[ ! -f "$TOP/$f" ]` / `[ ! -r "$TOP/$f" ]`)・手順 3 の存在検査に渡すパスもこの `$TOP` 基準に揃え、一時ツリー側を指す `$TREE` 基準のパス(コピー先 `"$TREE/$f"`・起動例の `--cwd "$TREE"` / `--prompt-file "$TREE/…"` / `--target`)は変更しない(`-C` 無しの `rev-parse` は呼び出し側 cwd 基準になり、parent-child〈管理ルート ≠ `root`〉では snapshot の基準リポジトリと列挙・cp・`worktree add` の基準リポジトリが別になる — 実測: 管理ルートから実行すると `ls-files -o` が本体側リポジトリを `app/` 1 件として返し cp が失敗する。サブディレクトリから実行すると、snapshot は toplevel 基準で全体を載せる一方、cwd 基準の `ls-files` + `cp` は cwd 配下だけを一時ツリーのルートへ誤配置し、外部レビューの対象が欠落・誤配置される)。

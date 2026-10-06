@@ -244,6 +244,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 1. **diff スナップショット**: `bash {do-task の}scripts/diff-snapshot.sh` で `.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md` を生成する
    - (基準コミットからの追跡差分 + index + 途中 commit + 未追跡。secret_paths・`.claude/` の状態ファイル・基準時点から在った未追跡は除外)。
+   - 無人では基準・開始時・現在の profile 集合を `--secret-profile-ref` で固定し、同じ集合を内蔵レビュー・外部 patch・commit 除外にも渡す。
    - **exit 0 か 21 のときだけ Phase 4 の突合へ進む** — それ以外(2 / 4 / 20 / 22 と契約表に無いコード)は終了コードと stderr をそのまま報告して停止する(無人では失敗扱い — D10・D19)。
    - 対象が git リポジトリでないときは生成できないので、その旨を報告し、対象ファイルを直接読んで突合し、Phase 6 の独立レビューへは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡す(タスク MD に基準行があるのに git リポジトリでないと判定されたら、続行せず停止して報告する)。
    - 呼び出し引数の組み立て・`secret_paths` 要素の内容ガード・ダイジェスト不一致時の再実行・`- [x]` に対応する変更が見当たらないときの確認手順は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本

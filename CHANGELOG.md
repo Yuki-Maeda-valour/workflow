@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.23.0
+
+### 修正
+
+- 無人レビューの機密除外に、基準・開始時・現在の profile と既定 3 要素の和集合を使うようにした([Issue #187](https://github.com/Yuki-Maeda-valour/workflow/issues/187)、親 #107)。開始時だけにあった指定を削除しても、snapshot・patch・レビュー用ツリー・commit の対象に内容を出さない。
+- profile の現在ファイルは symlink と特殊ファイルを拒否し、`lstat`・`O_NOFOLLOW`・同じ fd の `fstat` を通して読む。参照は完全 OID の commit だけを受け、空ツリーはそのリポジトリの OID と一致したときだけ許可する。
+- profile が存在するときだけ PyYAML を求める helper と、開始時・基準・現在・不正参照・特殊ファイルの回帰試験を追加した。
+
 ## v4.22.6
 
 ### 変更
