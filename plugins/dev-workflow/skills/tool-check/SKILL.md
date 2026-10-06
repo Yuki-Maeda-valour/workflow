@@ -6,21 +6,27 @@ argument-hint: "[--fix | --only=<gate>]"
 
 # tool-check — ツールによる機械検査の一括実行
 
-format → lint → typecheck → test → build を、プロジェクトに実在するコマンドで順に実行する。**チェック 3 階層(design §5-19)のうち階層 1(静的検査)+ 2(自動テスト)を担う定型実行層** — タスク文脈に依存する階層 3(実動確認)は /do-task が担う。
+format → lint → typecheck → test → build を、プロジェクトに実在するコマンドで順に実行する。**チェック 3 階層(design §5-19)のうち階層 1(静的検査)+ 2(自動テスト)を担う定型実行層** — タスク文脈に依存する階層 3(実動確認〈実際に動かして、変更どおりに動くかを見る確認〉)は /do-task が担う。
 
 ## 原則
 
 - **推測でコマンドを作らない。** 実在を確認したコマンドだけを実行する。
-- 固有の事実(コマンド・PM・構成)は本文にハードコードせず、実行時に解決する(profile → 動的検出 → 権威参照ファイル〈`AGENTS.md`。無ければ `CLAUDE.md`〉)。
-- `has_code: false` の profile なら **品質ゲート対象外**(ドキュメントのみのプロジェクト)と報告して終了。
-- **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**(わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く)
+- 固有の事実(コマンド・PM・構成)は本文にハードコードせず、実行時に解決する(profile → 動的検出 → 権威参照ファイル〈AI への指示をまとめたプロジェクトのファイル。`AGENTS.md`。無ければ `CLAUDE.md`〉)。
+- `has_code: false` の profile なら **品質ゲート(書式・型・テスト・ビルドの自動の検査)対象外**(ドキュメントのみのプロジェクト)と報告して終了。
+- **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
+  - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
 ## 1. コマンド解決チェーン(この順)
 
-1. **profile**: `.claude/project-profile.yml` の `quality`(`format`/`check`/`typecheck`/`test`/`build`)。`root` があればその配下で実行。`build_optional: true` なら build は既定でスキップ。profile が `check` を持つ場合は **format+lint 兼務ゲート** として扱う(下記の Biome と同じ)。
+1. **profile**: `.claude/project-profile.yml` の `quality`(`format`/`check`/`typecheck`/`test`/`build`)。
+   - `root` があればその配下で実行。
+   - `build_optional: true` なら build は既定でスキップ。
+   - profile が `check` を持つ場合は **format+lint 兼務ゲート** として扱う(下記の Biome と同じ)。
 2. **package.json scripts の存在検出**: `format` / `check` / `lint` / `type-check`|`typecheck` / `test` / `build` を scripts から拾う。
    - **Biome の重複排除**: `check` スクリプトが `biome check`(format+lint 兼務)を呼ぶ場合、format と lint を個別に走らせない。`check` 単独を lint ゲートとして扱う。
-3. **設定ファイル検出**(scripts に該当が無いゲートのみ): 設定ファイルの存在からツールを直接特定して実行する(実行形は PM に合わせ `pnpm exec` / `npx` 等)。例: biome.json → `biome check` / eslint.config.* → `eslint .` / .prettierrc* → `prettier --check .` / tsconfig.json → `tsc --noEmit` / vitest.config.* → `vitest run` / jest.config.* → `jest` / playwright.config.* → `playwright test`(E2E は test ゲートと別枠で報告)。
+3. **設定ファイル検出**(scripts に該当が無いゲートのみ): 設定ファイルの存在からツールを直接特定して実行する(実行形は PM に合わせ `pnpm exec` / `npx` 等)。
+   - 例: biome.json → `biome check` / eslint.config.* → `eslint .` / .prettierrc* → `prettier --check .` / tsconfig.json → `tsc --noEmit` /
+   - vitest.config.* → `vitest run` / jest.config.* → `jest` / playwright.config.* → `playwright test`(E2E は test ゲートと別枠で報告)。
 4. **言語別既定**(上記のいずれでも解決しないとき、マニフェストで判定):
    | 言語 | 検出ファイル | lint/format | test |
    |---|---|---|---|
@@ -41,7 +47,9 @@ format → lint → typecheck → test → build を、プロジェクトに実�
 
 ## 4. 引数
 
-- `--fix`: format/lint を修正モードで実行(`biome check --write` / `prettier --write` / `eslint --fix` / `ruff check --fix` + `ruff format` / `cargo fmt` / `pint`)。修正後に `git diff --stat` を提示し、**全ゲートを通常モードで再実行して緑を確認してから**報告する。コード・設定・正本文書を変更した場合は `reviewer` を [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) に従って起動し独立レビューを実施する。できなければレビュー未完了を報告して修正完了として扱わない。
+- `--fix`: format/lint を修正モードで実行(`biome check --write` / `prettier --write` / `eslint --fix` / `ruff check --fix` + `ruff format` / `cargo fmt` / `pint`)。
+  - 修正後に `git diff --stat` を提示し、**全ゲートを通常モードで再実行して緑を確認してから**報告する。
+  - コード・設定・正本(ほかが合わせる元)文書を変更した場合は `reviewer`(変更を確かめる AI)を [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) に従って起動し独立レビューを実施する。できなければレビュー未完了を報告して修正完了として扱わない。
 - `--only=<gate>`: 指定ゲートのみ実行(`format`|`lint`|`typecheck`|`test`|`build`)。
 
 ## 5. モノレポ対応
