@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOOP = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop.sh"
 PY_CALLERS = {
     "publish": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py",
+    "loop_state": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-state.py",
     "origin": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py",
     "digest": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py",
 }

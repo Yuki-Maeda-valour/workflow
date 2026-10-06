@@ -328,8 +328,8 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
   - `- [x]` の見本: 着手の段階で `- [x]` として数えられ、新規着手の条件 ①(`- [x]` が 1 つも無い)が崩れ、再開判定の (B) も成り立つ。そのため新規着手にならず『基準不明』になる(無人では保留 — D8)
   - do-task の集計は対話の挙動に関わるので変えず、限界とする。create-task は、無人に回すタスク MD のフェンスの中にチェックボックス形の行(`- [ ]`・`- [x]` とも)を書かない
 - ⑥ ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)。発見の周も同じ(discover-mode.md §10)
-  - include の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリーの中の versioned な hook)の中身は照合しない(loop.md §4・§10 の限界と同じ)
-  - 利用者の global・XDG の設定は照合しない。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`credential.helper`・`http.*` の効き目は受ける。hook は共通前置きで無効にする。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ
+  - `git-config-digest.py` 単独では、include の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリー内の versioned な hook)の中身を照合しない。`loop.sh` の状態観察は別に、開始時に保持した既知の有効 config graph と hook の metadata・通常ファイル内容 hash を有界に再検査する。どちらも未知の origin や任意のリポジトリ外ファイルを本文まで読むものではない(loop.md §4・§10)
+  - `git-config-digest.py` 単独では利用者の global・XDG の設定を照合しない。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`credential.helper`・`http.*` の効き目は受ける。hook は共通前置きで無効にする。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ
   - 照合のスクリプト自身(プラグインルートの `git-config-digest.py`・`origin-repo.py`)も、周が書き換えうる(loop.md §10 の hook の本体と同じ)
   - Git の専用検査は `git config`・共有状態を変える subcommand と、固定の無人 push 以外の push 形式を拒否する。Python・Bash など任意プログラムを許可すると同じ利用者権限の範囲では回避できるので、照合は ship-task 自身の add・commit・push が書き換えられた設定に従う経路も塞ぐ。公開 helper は保持した origin 判定と固定 repository を照合し、送信後の remote SHA と作成 PR 自身の repository/head/base/SHA も確認する。
   - 照合と実行の間の書き換え: commit は `--expect` と `&&` の 1 回の Bash、push は公開 helper 内の直前照合で間を縮めるが、間は無くならない。`loop.sh` の経路では、書き換えが周の終わりまで残れば、周の後の照合(loop.md §4)が捉える
