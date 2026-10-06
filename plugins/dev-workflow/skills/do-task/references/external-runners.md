@@ -653,7 +653,10 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    - 無人ではその値が、状態により B+S、S、または S0 と現在の作業ツリー profile、既定 3 要素から作る 1 つの集合になる。
    - **外部 patch・一時ツリーの適用前除去・コピー除外・最終検査は全て同じ集合を使い、外部ランナーへ渡す `--cwd` はその結果の一時ツリーだけにする**。
    - **無人 update-doc は基準行の有無で次の既定へ縮退しない**。ship-task が保持した状態別の OID を引き継ぎ、同じ OID を `--secret-profile-ref` と helper へ渡す。保持値が無ければ停止する。
-   - **基準行の無い呼び出し元**(create-task の設計レビュー・手動の update-doc・reflect-decisions・init-project — この節は 5 skill 共有の契約)では、`--cwd` は対象ディレクトリ、`--base` は HEAD、除外は現在と HEAD の profile の和集合を使う。
+   - **基準行の無い呼び出し元**(create-task の設計レビュー・手動の update-doc・reflect-decisions・init-project — この節は 5 skill 共有の契約)では、`--cwd` は各 skill の対象ディレクトリにする。parent-child では `root`、それ以外では管理ルート(リポジトリのトップ)を使い、縮退判定と `$TOP` の解決も同じ値で行う。
+   - `--base` は HEAD にする。除外は現在と HEAD の profile の `secret_paths` の和集合を使う。
+   - `--pre-untracked` は付けず、そのことを NOTE に残す。`--include-untracked` と `--accept` も付けない。承認を受けて `--accept` を渡せる経路は do-task の中だけである(場所は問わない。§12-1)。
+   - この呼び出し元の事前検査または手順 1 が exit 22 なら、外部ランナーを起動せず、内蔵編成に切り替えて理由を報告する。
    - **管理対象が git リポジトリでない、または縮退判定が commit 0 と判定したときは、一時ツリー方式を使わず内蔵編成に縮退して理由を報告する**。`worktree add --detach "$TREE" HEAD` の失敗だけでは縮退しない。
    - **この経路の和集合(基準 = HEAD = 現在)は改竄耐性を与えない。守るのは常時包含の既定 3 要素だけである。**
    - **基準側の取得で停止する構成では、外部ランナーを起動せず停止して報告する。縮退しない。** 規則と `--exclude-glob` の組み立ては [diff-snapshot-call.md](diff-snapshot-call.md) に従う。
