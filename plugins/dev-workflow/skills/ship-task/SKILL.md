@@ -21,10 +21,97 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
    - `--unattended` のときは、人に確かめる場面で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。
    - 人に確かめる場面ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。
    - 発見の周に固有の前提・工程・照合・結末は references/discover-mode.md が正本。
-   - `--unattended` のときは、最初に references/unattended-mode.md を Read し(`--discover` もあれば references/discover-mode.md も同じ応答で Read し)、その結果を受け取るまで、ほかのツール(特に Bash)を同じ応答に並べて呼ばない
-   - (特に「`loop.sh` の周の Bash の書き方」。読む前に打った Bash が許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否されると、打ち直さずに失敗扱いになる)
+   - `--unattended` の入口では、現在の配布元を信頼の起点として環境の控えとコピーを作り、その後にコピー内の無人契約を読む。手順は下の「無人入口」。
+
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
+
+## 無人入口
+
+親の保持値が1つでも渡された入口は、`DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
+下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の無人契約を読む。
+親の保持値が全て無い単独入口だけは、現在の配布元の `scripts/environment-guard.py bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を `python3 -B` で一度実行する。
+使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
+返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、同じ照合を行う。一覧はホストの正式な手段で確定した `installPath` 付き配列とし、取得不能なら失敗扱い。
+以後の helper 実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
+
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+
+<!-- environment-loader:begin -->
+```bash
+python3 -I -B -c 'import os,sys,stat,re,hashlib,json,signal
+
+def load_guard(expected, path):
+    if not re.fullmatch("[a-f0-9]{64}", expected):
+        raise RuntimeError("hash")
+    parts = path.split("/")
+    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):
+        raise RuntimeError("path")
+    def expired(*unused):
+        raise RuntimeError("timeout")
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_mode
+    def version(st):
+        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 15)
+    fd = None
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for name in parts[1:-1]:
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("directory")
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = child
+            if identity(before) != identity(os.fstat(fd)):
+                raise RuntimeError("directory changed")
+        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:
+            raise RuntimeError("file")
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            if version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            raw = b""
+            while len(raw) < before.st_size:
+                chunk = os.read(child, min(65536, before.st_size - len(raw)))
+                if not chunk:
+                    raise RuntimeError("short read")
+                raw += chunk
+            if os.read(child, 1) or version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):
+                raise RuntimeError("path changed")
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("hash mismatch")
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+args = []
+try:
+    expected, path, *args = sys.argv[1:]
+    raw = load_guard(expected, path)
+    sys.argv = [path, *args]
+    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})
+except (Exception, SystemExit) as exc:
+    if isinstance(exc, SystemExit) and exc.code in (0, None):
+        raise
+    if args[:1] == ["hook"]:
+        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))
+        raise SystemExit(0)
+    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)
+    raise SystemExit(20)
+' '<guard_sha256>' '<guard>' verify --state '<state>' --expect-sha256 '<sha256>'
+```
+<!-- environment-loader:end -->
 
 ## オプション
 
@@ -157,6 +244,9 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 状態ファイル(do-task の Phase 0 の 3 が外す 4 つ)は stage しない。
 - commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(前置きつき)で index を見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。前置きつき)か残すかを確認する。
 - `git commit -a`・パスを渡す `git commit` は使わず、stage を終えた index を commit する(無人では、下の「無人の周の commit と停止」の照合に従う)。
+- **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠 hash を保持する。
+  最終 task は `finalize` の期待バイトで更新する。stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
+  task 遷移時は期待バイト・根拠の外部保持 hash を全照合に渡す。不一致・保持値欠落では commit・公開しない。
 - メッセージ規約はこのリポジトリの `git log --oneline -20` から推定して合わせる(Conventional Commits を使っていればそれに従う)。
 - 無人では、stage する集合を references/unattended-mode.md §5 の「無人の実装 commit・doc commit の集合」にし、下の「無人の周の commit と停止」の照合を通す。
 
@@ -164,26 +254,32 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 `--discover` のときは実行しない。
 
+文書を変更する前に、完了 task で doc 用の新しい `review-guard.py start` を取り、開始 hash を保持する。
+
 同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
 - /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
+- 文書変更後は doc 用の開始 state から `take --phase doc`→snapshot→seal→review→run-checks→attest を行う。
+  task 改名なしで doc の stage/commit を照合する。実装 state は流用しない。詳細は review-protocol.md の「文書、保留、公開」。
 
 ## Phase 5: PR 作成
 
 `--discover` のときは、下の 1〜3 の代わりに、references/discover-mode.md §7・§8 の照合 → push → PR(push 先に結び付けた `-R` つき)で行う。PR 本文・結末を `縮退` にする条件も同 §8。
 
-1. `git push -u origin {ブランチ名}`(無人のタスクの周は下の分岐)
-2. `gh pr create --base {デフォルトブランチ} --title "{タスク名}" --body-file -` で、本文を stdin から渡して **通常の PR を開く**(draft にしない。レビュアー・アサインは付けない)。
+1. push 先を origin の判定から固定し、保持したレビュー済み SHA を `publish-guard.py` へ渡す。対話は `--set-upstream` を付け、exact-SHA push と remote SHA 照合の後にだけ既存の `-u` 相当の追跡設定を記録する。
+2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin へ渡す。
+   作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で repository/head/base/SHA を照合してから成功にする(draft にしない。レビュアー・アサインは付けない)。
    - 本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。
-   - 本文の渡し方は対話でも無人でも同じ(`-R` は無人だけ — 下の分岐)
-3. PR 本文には次を含める(タスク MD と各工程の報告から転記する。推測で書かない):
+   - helper は reviews 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
+3. PR 本文には次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
    - **完了条件と確認結果**: タスク MD の確認手順と、/do-task の Phase 5.5 で実際に観察した事実(「実施不能」の確認手順は、その旨と理由を書き、手順を残課題へ転記する)
    - **書式・型・テスト・ビルドの自動の検査**: 実行したコマンドと結果
    - **レビュー**: 反復回数・レビュアー編成・最終判定
+   - **review/commit 照合**: push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。task 記録の APPROVED・実施済を採用しない
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user(人の判断が要る指摘)**(あれば)
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
@@ -193,8 +289,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 **無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7):
 - PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→
 - push の直前の照合 →
-- `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'` →
-- `gh pr create -R '<repo>' --base <デフォルトブランチ> --head <作業ブランチ> --title '<タスク名>' --body-file - < .claude/reviews/<名>`(`<repo>` は origin の判定の `repo`)
+- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<守る値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。helper は exact SHA refspec の push、remote SHA、作成した PR の URL/番号/head/base を順に照合する。無人では `--set-upstream` を付けない
 
 **push・PR をしないとき**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(サイレントスキップ禁止)。
 - `--no-pr` のときも同様にコマンド列だけ示す。
@@ -212,7 +307,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
   - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の打ち直し)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
   - どれかに通らなければ失敗扱い(G2)。
   - 時点ごとの表・コマンドの字面・除外対象・git の前置きは references/unattended-mode.md §7
-- **停止**: 保留なら保留の手順(ガード → 保留の行 → `git mv` → `git add` → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
+- **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
 - **結末**: 完了報告の最後に結末の行を書く(同 §2)
 - **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
 
@@ -253,3 +348,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 - 発見ループ: `scripts/loop.sh --discover` が、周ごとに `--discover=<発見元> --unattended` を呼ぶ(契約は references/discover-mode.md と loop.md の発見モード)。
   - 発見元は /data-audit と /create-task --refactor の候補モード(`--candidates`)。
   - merge された `候補_` の採用は `/create-task <候補_ のパス>` で行い、その後の実装は `--task=<進行中_ のパス>` で回す
+
+## Git の共通安全前置き
+
+対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は base-commit.md の safe Git 前置きを付ける。品質確認は hook に依存させない。filter の例外は base-commit.md の precheck が許したものだけを明示無効化する。公開はこの規則に加えて publish-guard.py を通す。

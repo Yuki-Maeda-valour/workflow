@@ -35,6 +35,13 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 ## 無人モード(`--unattended`)
 
 /ship-task の無人モードが渡す(単独で呼んでもよい)。
+- **文書を読む前の入口**: 親の保持値が1つでも渡された入口は、state・sha256・guard・guard_sha256・plugin の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
+  下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の文書を読む。
+- 親の保持値が全て無い単独入口だけは、現在の配布元の `../ship-task/scripts/environment-guard.py` を `python3 -B` で一度使う。
+  引数は `bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>`。
+  使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
+  一覧は正式な手段で確定した `installPath` 付き配列。取得不能なら失敗扱い。返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、上と同じ照合を行う。
+- 以後の helper 呼出・文書読取はコピーだけを使い、毎回直前に照合する。詳細はコピー内の無人契約 §0 に従う。
 - 人に確かめる場面ごとの扱い(D1〜D19)・周の中で守る値と照合の表・限界の正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)。
 - 以下の各所には 1 行の分岐だけを置く。
 - `loop.sh` の周(無人ループの 1 回分の実行)では、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` の周の Bash の書き方」で打つ。
@@ -56,6 +63,84 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
   - 現在のブランチ・HEAD・基準行・未追跡一覧もあわせて見る(表は unattended-mode.md §7)。
   - 通らなければ失敗扱い(G2)
 - **反復の数え方**: Phase 5・5.5 からの差し戻し(相手に返して、やり直してもらうこと)も ITER を増やし、`--max-iter` の判断を仰ぐ点に数える(判断を仰ぐ点に届かないまま、時間切れまで回らないように)
+
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+
+<!-- environment-loader:begin -->
+```bash
+python3 -I -B -c 'import os,sys,stat,re,hashlib,json,signal
+
+def load_guard(expected, path):
+    if not re.fullmatch("[a-f0-9]{64}", expected):
+        raise RuntimeError("hash")
+    parts = path.split("/")
+    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):
+        raise RuntimeError("path")
+    def expired(*unused):
+        raise RuntimeError("timeout")
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_mode
+    def version(st):
+        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 15)
+    fd = None
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for name in parts[1:-1]:
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("directory")
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = child
+            if identity(before) != identity(os.fstat(fd)):
+                raise RuntimeError("directory changed")
+        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 1048576:
+            raise RuntimeError("file")
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            if version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            raw = b""
+            while len(raw) < before.st_size:
+                chunk = os.read(child, min(65536, before.st_size - len(raw)))
+                if not chunk:
+                    raise RuntimeError("short read")
+                raw += chunk
+            if os.read(child, 1) or version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):
+                raise RuntimeError("path changed")
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("hash mismatch")
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+args = []
+try:
+    expected, path, *args = sys.argv[1:]
+    raw = load_guard(expected, path)
+    sys.argv = [path, *args]
+    exec(compile(raw, path, "exec"), {"__name__":"__main__", "__file__":path})
+except (Exception, SystemExit) as exc:
+    if isinstance(exc, SystemExit) and exc.code in (0, None):
+        raise
+    if args[:1] == ["hook"]:
+        print(json.dumps({"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"deny","message":"環境の保持値との照合に失敗"}}}))
+        raise SystemExit(0)
+    print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)
+    raise SystemExit(20)
+' '<guard_sha256>' '<guard>' verify --state '<state>' --expect-sha256 '<sha256>'
+```
+<!-- environment-loader:end -->
 
 ## Phase 0: 前提と対象確定
 
@@ -100,7 +185,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
    - (同じセッションの /ship-task が作った作業ブランチの例外も同書の条件 ⑤)。
    - 無人では『基準不明』を保留にする(git の失敗で基準不明になったときは失敗扱い — D8)。
    - 基準が決まったら、基準の sha と未追跡一覧の状態を控える値として保持する
-6. タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
+6. commit が続く周では、実装前に [review-protocol.md](references/review-protocol.md) の `review-guard.py start` を取り、開始 hash を保持する。タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
 7. **再開判定**(「続きをやって」対応): 次の**いずれか**に当たれば**再開モード**で入る —
    - (A) 手順 5 に入る前から、タスク MD のヘッダに基準コミット行があった(手順 5 は新規着手でも基準行を書くので、手順 5 の前に読んでおいた有無を使う)/
    - (B) タスク MD に `- [x]` がある /
@@ -244,9 +329,13 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 1. **diff スナップショット**: `bash {do-task の}scripts/diff-snapshot.sh` で `.claude/reviews/diff-{TASK_NAME}-iter{ITER}.md` を生成する
    - (基準コミットからの追跡差分 + index + 途中 commit + 未追跡。secret_paths・`.claude/` の状態ファイル・基準時点から在った未追跡は除外)。
+   - 無人では基準・開始時・現在の profile 集合を `--secret-profile-ref` で固定し、同じ集合を内蔵レビュー・外部 patch・commit 除外にも渡す。
    - **exit 0 か 21 のときだけ Phase 4 の突合へ進む** — それ以外(2 / 4 / 20 / 22 と契約表に無いコード)は終了コードと stderr をそのまま報告して停止する(無人では失敗扱い — D10・D19)。
    - 対象が git リポジトリでないときは生成できないので、その旨を報告し、対象ファイルを直接読んで突合し、Phase 6 の独立レビューへは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡す(タスク MD に基準行があるのに git リポジトリでないと判定されたら、続行せず停止して報告する)。
    - 呼び出し引数の組み立て・`secret_paths` 要素の内容ガード・ダイジェスト不一致時の再実行・`- [x]` に対応する変更が見当たらないときの確認手順は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
+   - **commit が続く周では** snapshot 生成の前後を `review-guard.py take` と `seal` で挟む。
+   - snapshot・patch と同じ review 入力、除外 ERE、対象集合を固定する。seal 後の 3 hash と開示一覧を保持し、Phase 6 の reviewer へ渡す。
+   - 機密除外・state・review 入力・照合不能時の停止は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
 2. **チェックリスト突合**: `grep -cE '^\s*- \[(x|X)\]' {タスクMD}` の完了数と Phase 0 の総数を比較。未完了が残るのに完了報告されていないか。各 `- [x]` に対応する変更が diff に実在するか(**全件**。`- [x]` ごとに、対応する変更のパスか、diff を伴わない項目〈品質ゲートの実行など〉である旨を報告に並べる)
 3. **スコープ縮小 grep**: implementer の報告とタスク MD 追記に対して `grep -E '段階的に実施|後続タスク|今回はスコープ外|のみ作成|次回対応|一旦'` を実行。ヒットしたら設計時のスコープと突合し、縮小なら差し戻す
 4. **数値突合**: タスク MD に「N 件の〜を…」とあれば実際に数える(Grep -c 等)
@@ -258,6 +347,9 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - **検証手順そのものは担い手によって変わらない**(変わるのは差し戻しの手段だけ)。
 
 ## Phase 5: 完了条件の再実行
+
+commit が続く周では、[review-protocol.md](references/review-protocol.md) の `run-checks` で必須 gate 全件を直接実行し、構造化結果と hash を保持する。
+clean checkout の検査を実行結果として使う。作業ツリー側でも検査して内容が変わった場合は、Phase 4 から対象を固定し直す。
 
 タスク MD のチェックリストにある品質ゲート(format / check / typecheck / test、必要なら build)を **team-lead 自身が実行**し、全て緑を確認する。ロジック変更を含むのにテストが 1 件も追加・更新されていない場合は妥当性を確認する。
 
@@ -287,6 +379,10 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 ## Phase 6: 独立レビュー
 
+Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/ignored 未追跡の差を reviewer の入力に含める。
+品質コマンドと入口・test/selftest/検証器の変更一覧も渡す。`APPROVED` は、その固定集合だけに対する返答として扱う。
+改名・commit・PR の前の照合と保留の扱いは [references/review-protocol.md](references/review-protocol.md) が正本。
+
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
 
 - reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では `reviewer-internal` / `reviewer-strong` / `reviewer-alt` の 3 体を単一メッセージで並列起動する(枡割り当ては §2(a)、能力帯の解決は軸 3)
@@ -308,7 +404,10 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 2. 独立レビュアーが 1 名以上いて全員 APPROVED であることを確認する。未承認なら完了状態・リネームへ進まず、中断記録に理由を残す(無人では保留として返す — D16)
 3. 改名先(対象タスク MD と同じディレクトリ。以下 `<dir>`)の `<dir>/完了_{タスク名}.md` が既に在れば(`[ -e ] || [ -L ]`)、追記・ステータス更新・改名のどれも行わず停止し、既存ファイルのパスを添えて報告する
    - (上書きも連番もしない — 素の `mv` は黙って上書きする。この停止ではタスク MD を変更しない — 中断時の追加修正記録への追記もしない。無人では失敗扱い — D17)
-4. **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は ../create-task/references/task-template.md の記法の規約):
+4. **commit が続く周**は、この手順 4〜6 の代わりに [review-protocol.md](references/review-protocol.md) の attest→finalize→期待バイト適用を行う。
+   - 元のモードを保つファイル改名で index をまだ変えず、stage 前の照合を通す。記録の任意追記と `git mv` は使わない。
+   - 以下の 4〜6 は commit が続かない単独実行だけ。外部本文の正本ではローカル MD を新設せず、同 reference の外部本文経路に従う。
+   **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は ../create-task/references/task-template.md の記法の規約):
    - 日付 / 使用スキル(do-task)/ 反復回数 / reviewer 結果(3 体なら内訳)/ 品質ゲート実行結果 / 特記事項
 5. ステータス行を `> **ステータス**: ✅ 完了({YYYY-MM-DD})` に更新
 6. 対象タスク MD と同じディレクトリ内で `進行中_{タスク名}.md` を `完了_{タスク名}.md` に改名する。
@@ -343,3 +442,9 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 - 前提: /create-task(タスク MD が無い場合はまず設計書を作る)
 - 完了後: /update-doc --task(完了タスク駆動の差分同期)
 - 設計から PR まで通しで回す: /ship-task(このスキルを実装工程として内部で実行し、doc 同期と PR 作成まで続ける)
+
+## Git の共通安全前置き
+
+read・index/worktree の変更・commit・network の全 Git 呼出は、base-commit.md の safe Git 前置きを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
+
+filter を使う既存リポジトリは、前置きで一般化しない。base-commit.md の precheck が承認した filter だけを明示的に無効化してから実行する。

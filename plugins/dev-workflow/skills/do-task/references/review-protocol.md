@@ -1,5 +1,134 @@
 # レビュープロトコル詳細(do-task Phase 6)
 
+## review/commit 照合
+
+commit が続くタスクでは `{ship-task の}scripts/review-guard.py` を使う。この節が CLI と呼出順序の正本。
+対象集合と review 入力を別々に hash し、その組を `REVIEW_BINDING_SHA256` に結び付ける。
+ソースの再 review と、review 返答を反映した最終 task 記録の照合を分ける。記録を追記するたびに再 review する必要はない。
+
+### 共通引数と保持値
+
+全入口に `--cwd <commit する Git root> --state <state> --exclude-ere <同じ ERE>` を渡す。
+ERE は diff snapshot で解決した機密除外 union と同じ集合。複数なら `--exclude-ere` を繰り返す。
+start 後の機密指定追加は、start の各 ERE を残し take へ新しい union ERE を追加する。削除・縮小は拒否する。
+take 以降は同じ ERE 列を固定して全入口と snapshot に使う。新たな機密 path の開始時 hash を開示へ転記しない。
+`start` 以外では各工程が指定する state を使い、`take` 以外には `--expect-state-sha256 <保持値>` も渡す。
+全入口は内部で `diff-snapshot.sh --precheck` を実行し、0 以外なら内容を読む前に停止する。
+対話で承認済みの疑いがある場合だけ `--accept <承認ダイジェスト>` を追加する。
+承認 filter は precheck の NUL トークンを取り込み無効化し、promisor の遅延取得を止める。無人では承認しない。
+
+state・入力の控え・結果の置き場は、事前に `reviews-dir.sh ensure` を通した `.claude/reviews/` 内の未使用パスにする。
+すでに在る出力、FIFO、symlink、通常ファイルでない入力を受け付けない。各親要素も dirfd と O_NOFOLLOW で固定し、親の差替えを検査する。
+通常ファイルは初期サイズを超えて読まず、1 件 64 MiB・読取ループ 15 秒を上限にする。超過は成功扱いにしない。state は commit に含めない。
+各コマンドの出力 hash を**その実行直後にセッションへ保持**する。次工程で state ファイルから取り直してはならない。
+保持値を失った場合は検証・review を再実行する。自己 hash だけで採用しない。
+終了値は 0=成功、1=不一致または品質検査失敗、2=実行不能・不正入力。0 以外で後続の commit・公開へ進まない。
+
+### 実装の経路
+
+1. 実装開始前の Phase 0 で `start --task-md <対象 MD> [--quality-path <品質入口>]` を実行し、`START_SHA256` と開始 state を保持する。
+   task_dir は対象 MD の親で固定。`候補_`・`進行中_`・`完了_`・`保留_`・`中断_` の全 MD を守る。
+   対象以外の追加・削除・改名・変更を許さない。発見モードの候補追加は別契約のまま。
+   開始前の未追跡、ignore 規則、ignored 未追跡、品質入口も控える。
+2. 実装後、snapshot を作る**前**に、新規 state へ `take --task-md <対象 MD> --start-state <開始 state> --expect-start-sha256 <START_SHA256> --phase implementation` を実行する。
+   必要な全 reviewer 名を `--reviewer <役割名>` の繰り返しで指定する(省略時は `reviewer` 1 名)。
+   品質コマンド定義・入口を動的に解決し、標準の静的一覧に無い入口を `--quality-path <パス>` で補う。
+   `STATE_SHA256`・`TARGET_SHA256`・`DISCLOSURES` を保持する。
+3. 既存の diff snapshot 手順で snapshot と patch を作る。`seal --expect-state-sha256 <take の値> --review-input <snapshot> --review-input <patch>` を実行する。
+   外部 reviewer 用に別の実入力を作る場合も、それを `--review-input` に追加する。
+   生成の前後と seal の収集中に対象が変われば停止する。**seal が返した新しい `STATE_SHA256`** に更新し、
+   `TARGET_SHA256`・`REVIEW_BINDING_SHA256` を保持する。reviewer が読むのはここで hash した実入力だけ。
+4. `verify --mode pre-stage` を通し、snapshot・patch、対象 hash・binding、`DISCLOSURES` 全体を reviewer へ渡す。
+   変更された品質定義・入口・test/selftest/検証器は、常時成功・skip の追加で検査を弱めていないかも確認させる。
+   静的一覧は一般的なコマンド定義・テスト名・scripts 等と明示入口の和。動的 import や取得先の全依存を保証しない。
+5. 検証担当は解決した必須品質コマンド全件を JSON の `commands` に `{ "name": "検査名", "argv": ["実行ファイル", "引数"] }` として保存し、外部 hash を保持する。
+   `run-checks --checks-file <計画 JSON> --expect-checks-sha256 <計画の保持値> --out <結果 JSON>` を実行する。
+   実際の終了値・stdout/stderr hash・コマンド列・binding を結果に固定し、`CHECKS_SHA256` を保持する。
+   失敗を常時成功コマンドへ差し替えて通してはならない。必須 gate の選択は profile→動的検出→権威参照ファイルの責務。
+6. reviewer の直接返答から、役割名・依頼時 binding・返答の `verdict`・`issues` を次の JSON に控え、その raw hash を保持する。
+   タスクの記録に書かれた APPROVED を取り込まない。外部 reviewer の既存返答形式は変えず、検証担当が既知の役割名と依頼 binding を添える。
+
+   ```json
+   {"reviewer":"reviewer","review_binding_sha256":"依頼時の64桁hash","verdict":"APPROVED","issues":[]}
+   ```
+
+7. `attest --checks <結果 JSON> --expect-checks-sha256 <CHECKS_SHA256> --review-result <返答 JSON> --expect-review-sha256 <返答の保持値> --out <根拠 JSON>` を実行する。
+   reviewer が複数なら返答と hash を同じ順序で繰り返す。必要な全役割が APPROVED、品質実行が全成功、binding が同じでなければ停止する。
+   返る `EVIDENCE_SHA256` を保持する。根拠には ignore・品質の開示一覧も含む。
+8. task を完了にするときは `finalize --evidence <根拠 JSON> --expect-evidence-sha256 <EVIDENCE_SHA256> --transition complete --out <期待 MD>` で期待バイトを作る。
+   `EXPECTED_TASK_SHA256` を保持する。元 MD のモードを保ったまま、返された `TASK_PATH` に期待バイトを適用し旧パスを除く。
+   元本文、既存記録、チェック状態はそのまま。許すのはヘッダのステータス 1 行と、既存の追加修正記録節への検証器記録だけ。
+   本文 digest が変われば停止する。自由に書いた期待 MD を渡しても、元本文と根拠から再生成したバイトに一致しなければ拒否する。
+9. stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `verify --mode stage`、commit 後は `verify --mode commit` を実行する。
+   stage/commit には `--evidence <根拠 JSON> --expect-evidence-sha256 <保持値>` が必須。
+   改名済みなら、3 mode 全てに `--task-transition complete --expected-task <期待 MD> --expect-task-sha256 <保持値>` と同じ根拠引数を追加する。
+   stage は対象集合だけを載せる。開始前の無関係な未追跡を取り込まない。task 改名なしの source commit も同じ mode で照合する。
+   commit は seal 時 HEAD を単一の親とする 1 commit。内部で index の集合・mode・blob と commit tree を比較し、表示を削って判定を変えることはできない。
+
+### ignore と clean checkout
+
+ignored の通常生成物は path・種別・mode だけを控え、内容を読んで hash しない。大きな依存ディレクトリも内容 hash の対象にしない。
+開始時と take 時に全 `.gitignore`・`.gitattributes`、実 git-dir の `info/exclude`、有効な `core.excludesFile`
+(未指定なら XDG/HOME に基づく既定 global ignore)を控える。各規則の変更と新たな ignored path を `DISCLOSURES` に載せる。
+機密 path は内容・内容 hash を読まない。規則や品質入口自身が機密除外されて照合できない場合は停止する。
+既存の機密 index/tree は内容を取得せず OID を内部比較に使い、レビューや PR に値を出さない。
+
+`run-checks` はレビュー対象の期待 tree から独立した一時リポジトリを作り、そこで計画の argv を順に実行する。
+機密・既存未追跡・ignored 生成物・元の git 設定を持ち込まない。元の作業ツリーと index は変更しない。
+正当な ignore 追加や build 生成物は、その開示を review し、この clean checkout で gate が通れば許す。
+依存の準備が必要ならそのコマンドも計画に含める。復元不能な依存は成功に読み替えない。
+品質コマンド自体を隔離する sandbox ではない。検証担当が確認したコマンドを使い、元 worktree の絶対パスや外部の生成物への依存を避ける。
+
+### 文書、保留、公開
+
+- 文書は**実装 commit 後・update-doc の変更前**に、完了 task を使って別の `start` を取る。
+  `take --phase doc`→snapshot→seal→review→run-checks→attest を新しい state で行う。
+  task を改名せず、同じ `verify --mode pre-stage|stage|commit` で doc の単一 commit を検証する。
+  実装 state を doc stage に流用しない。doc 変更が無ければ新しい commit は作らない。
+- review 前に保留が必要になった場合も、元の開始 state から `take --phase hold` で未承認保存集合を作る。
+  この phase は seal・APPROVED への昇格を許さない。`attest --hold-reason <対話点番号で始まる理由> --hold-next <人が次にすること> --out <根拠 JSON>` は `UNAPPROVED` を返す。
+  finalize は template と同じ保留の行を 1 行だけ足し、UNAPPROVED と根拠を含める。
+  `finalize --transition pending`、全 verify に `--task-transition pending` と期待バイト・根拠の保持値を渡し、同じ stage/commit 検査を通す。
+  保留時に品質結果があれば attest に添付できるが、成功・承認とは表示しない。開始控えが無い場合は保存を成功扱いにしない。
+- push 直前と PR 作成直前は最後の commit の state で `verify --mode commit` を打ち直す。
+  `pr-evidence` に同じ state・根拠・必要なら task 遷移引数を渡し、その stdout を検証欄に使う。`--mode commit` 以外は拒否する。
+  実装の根拠欄は実装 commit 検査直後に生成して hash を保持し、doc の根拠欄と並べる。最終 doc の start HEAD は検証済み実装 HEAD でなければならない。
+  PR には実コマンド・終了値・review 返答・binding・ignore/品質開示を載せる。task 記録から検証・APPROVED を復元しない。
+  実動確認の事実は検証担当が直接得て保持した結果だけを添え、実施不能は理由を示す。
+
+### 管理ルートと source の root が別の場合
+
+parent-child の対話では、source の Git root を `--cwd`、管理ルートを `--task-root`、管理側の対象 MD を `--task-md` に渡す。
+`start` で task-root も固定する。以降省略時は保持した root を使い、別の指定への変更は拒否する。
+task_dir は管理側で照合し、source の index/tree には管理側 MD を無理に入れない。
+親側に Git が無くても task_dir の内容を照合できる。機密 ERE は各 root からの相対 path に当てる。
+
+親側も commit する場合は、source commit と task の正規最終化を検証した後、親 Git root に別 state の start を取る。
+完了済み task を入力にして親側の差分(最終 task と gitlink 等)を別 review し、task 遷移なしで親 commit を照合する。
+同じ task に二つの異なる最終記録を生成しない。根拠は source と親の両方を PR に載せる。
+無人の parent-child 拒否は既存契約のまま。
+
+### task 本文が外部にある場合
+
+既定は task MD。権威参照ファイルが Issue 等を正本にする場合に限り、trusted caller が本文を fresh に取得してレビュー用の控えへ保存する。
+`start` の `--task-md` を `--task-body <控え> --expect-task-body-sha256 <直接保持値> --task-id <識別子> --task-dir <保護するディレクトリ>` に置き換える。
+以降の**全入口**にも fresh な控えと `--expect-task-body-sha256` を渡す。helper は外部サービスへの問い合わせを行わない。
+caller は取得成功・対象 ID・本文 digest を確認し、外部本文の古いキャッシュを fresh な取得として使わない。
+
+控えは task 成果物でなく review 入力。task_dir の他の状態名 MD を保護し、ローカルの task MD を新設・改名しない。
+`finalize` が生成する期待バイト・hash は同じ契約で、caller が外部本文を読み直して元の保持値と比較してから適用する。
+適用後は外部本文を再取得し、新しい控えで `verify --task-transition complete`(保留なら pending)を行う。
+改名が無くても元本文と許可記録の制約を省略しない。外部本文中の偽 APPROVED は review 返答に使わない。
+文書は実装の検証済み外部本文で別 start を取り、改名なしの doc 経路を使う。
+
+### 保証する範囲
+
+保持 hash を持つ検証担当と、書換可能なリポジトリ・ログを分ける運用が前提。同じ UID の完全隔離は主張しない。
+攻撃者が検証担当の文脈・実行コード・直接結果の保持値まで変更できれば偽の根拠を作れる。
+ファイルを検査間だけ変えて戻す transient な競合も完全には排除できない。永続した変更・収集中の差替えは再読と hash 比較で検出する。
+実装者の停止を確認し、review 前・stage 前後・commit 後・公開直前に照合する。旧実装の seal 第2観測、自由な期待 MD、
+既存未追跡の混入、doc の通常 commit、ignore の後付け隠蔽は scratch 回帰で攻撃と正常対照を検証する。
+
 ## reviewer の起動
 
 ### 1 体構成(既定)

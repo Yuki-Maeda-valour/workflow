@@ -97,6 +97,20 @@ for name in os.listdir("/proc"):
 PY
 }
 
+# 未信頼設定による再開拒否の後、人が実体を確認して片付ける操作を scratch で模擬する。
+# production の meta/PID は使わず、この selftest 自身の TAG を持つプロセスだけを止める。
+confirm_rejected_inflight() { # $1=この試験が作った state $2=ラベル
+  local state="$1" label="$2" p held_pids
+  held_pids="$(tagged_pids)"
+  for p in $held_pids; do kill -KILL "$p" 2>/dev/null || true; done
+  for p in $held_pids; do
+    if wait_dead "$p" 5; then ok "$label: 人の確認後に試験用の子を片付けた"; else ng "$label: 試験用の子が残った"; fi
+  done
+  # 検査対象の証拠は別名で保存し、確認済みの中断印だけを外す。
+  mv "$state/inflight" "$REC/confirmed-inflight"
+  rm -f "$state/stop-mark.md"
+}
+
 cleanup_all() {
   local p
   for p in $(tagged_pids 2>/dev/null); do kill -KILL "$p" 2>/dev/null; done
@@ -144,6 +158,47 @@ REAL_SLEEP="$(command -v sleep)"
 STUBBIN="$W/stubbin"
 ALTBIN="$W/altbin"
 mkdir -p "$STUBBIN" "$ALTBIN" "$W/unamebin" "$W/failsleepbin" "$W/noyaml"
+
+# publish-guard の公開後照合だけを通す gh。本文は stdin で受け、作成と REST 照合の argv を記録する。
+DP_GH="$W/docpush-gh"
+mkdir -p "$DP_GH"
+cat >"$DP_GH/gh" <<'STUB'
+#!/usr/bin/env bash
+set -eu
+printf '%s\n' "$*" >>"${SELFTEST_REC:?}/docpush-gh.log"
+case "${1:-} ${2:-}" in
+  'pr create')
+    body="$(cat)"
+    [ "$body" = 'review fixture' ] || exit 64
+    printf '%s\n' 'https://github.com/o/r/pull/42'
+    ;;
+  'api --hostname')
+    [ "${3:-}" = github.com ] || exit 64
+    [ "${4:-}" = repos/o/r/pulls/42 ] || exit 64
+    printf '%s\n' '{"html_url":"https://github.com/o/r/pull/42","number":42,"head":{"ref":"task/docpush-a","sha":"'"${SELFTEST_HELD_SHA:?}"'","repo":{"full_name":"o/r","owner":{"login":"o"}}},"base":{"ref":"main","repo":{"full_name":"o/r"}}}'
+    ;;
+  *) exit 64 ;;
+esac
+STUB
+chmod +x "$DP_GH/gh"
+
+# origin-repo.py には canonical HTTPS のまま読ませる。公開 helper と loop.sh が実際に打つ
+# push / ls-remote だけを scratch bare remote へ写し、network 実行を伴う通常経路を保つ。
+DP_GIT="$W/docpush-git"
+mkdir -p "$DP_GIT"
+cat >"$DP_GIT/git" <<'STUB'
+#!/usr/bin/env bash
+set -eu
+network=0
+for arg in "$@"; do
+  case "$arg" in push|ls-remote) network=1 ;; esac
+done
+if [ "$network" = 1 ]; then
+  exec "${SELFTEST_REAL_GIT:?}" -c "url.sshstub:${SELFTEST_PUBLISH_BARE:?}.insteadOf=https://github.com/o/r.git" "$@"
+fi
+exec "${SELFTEST_REAL_GIT:?}" "$@"
+STUB
+chmod +x "$DP_GIT/git"
 
 # スタブの --help(雛形のフラグと別名をすべて載せる。形は実物の --help を模す)
 cat >"$W/help.txt" <<'EOF'
@@ -317,7 +372,7 @@ case "$prompt" in
       outside) dbr; cand "memo-$src.md"; dcommit; dpush; dres "$PRL" ;;
       d21) dbr; cand "候補_bad name.md"; dcommit; dpush; dres "$PRL" ;;
       emptyname) dbr; cand "候補_.md"; dcommit; dpush; dres "$PRL" ;;
-      mode) dbr; cand "候補_$src-a.md"; g update-index --chmod=+x -- "$tdir/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
+      mode) dbr; cand "候補_$src-a.md"; chmod +x -- "$tdir/候補_$src-a.md"; g update-index --chmod=+x -- "$tdir/候補_$src-a.md"; dcommit; dpush; dres "$PRL" ;;
       twocommits) dbr; cand "候補_$src-a.md"; dcommit; cand "候補_$src-b.md"; dcommit; dpush; dres "$PRL" ;;
       untracked) dbr; cand "候補_$src-a.md"; dcommit; dpush; echo x >"leftover-$src.txt"; dres "$PRL" ;;
       otherbranch) g checkout -q -b "task/候補-$src-000000000000"; cand "候補_$src-a.md"; dcommit; dres "無人の周の結果: 縮退 — x" ;;
@@ -334,11 +389,9 @@ case "$prompt" in
       pushusleep) dbr; cand "候補_$src-a.md"; dcommit; dpushu; dlinger ;;
       humancfg) human_config_change; dres "無人の周の結果: 候補なし — H20" ;;
       cfgchange) dbr; cand "候補_$src-a.md"; dcommit; g config selftest.tampered yes; dres "無人の周の結果: 縮退 — tamper" ;;
-      late) # 判定の後に書く: 許可の仲介の記録を FIFO にし、loop.sh が読んだとき(判定の後・後片付けの前)に未追跡を置く
+      late) # 判定後の remove の直前に Git スタブが未追跡を置く。
             dbr; cand "候補_$src-a.md"; dcommit
-            python3 -c 'import os,sys; os.mkfifo(sys.argv[1])' "${DEV_WORKFLOW_LOOP_PERMLOG:?}"
-            env -u DEV_WORKFLOW_LOOP_ITER setsid timeout 60 bash -c 'exec 3>"$1"; echo late >"$2/late-$3.txt"; exec 3>&-' \
-              _ "$DEV_WORKFLOW_LOOP_PERMLOG" "$PWD" "$src" </dev/null >/dev/null 2>&1 &
+            printf '%s\n' "$PWD" >"$REC/late-target"
             dres "無人の周の結果: 縮退 — late" ;;
       pushdiff) # push した中身(進行中_ を含む)と違う HEAD(候補_ だけ)で 縮退
                 dbr; cand "候補_$src-a.md"; cand "進行中_$src-a.md"; dcommit; dpush
@@ -443,6 +496,23 @@ linger() { # TERM を無視して居座る(同じプロセスグループに孫�
   while :; do sleep 1; done
 }
 end() { printf -- '--- stub-end %s\n' "$name" >>"$REC/ssh.log"; }
+# 環境と参考ログの攻撃 fixture。helper は起動済みの親が検査する。
+case "${SELFTEST_ENV_ATTACK:-}" in
+  source) printf 'raise SystemExit(0)\n' >"$SELFTEST_PLUGIN_SOURCE/skills/create-task/scripts/resolve-task-dir.py" ;;
+  skill) printf 'changed\n' >"$SELFTEST_PLUGIN_SOURCE/skills/ship-task/SKILL.md" ;;
+  copy) printf 'raise SystemExit(0)\n' >"$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py" ;;
+  guard) printf 'raise SystemExit(0)\n' >"$DEV_WORKFLOW_ENV_GUARD" ;;
+  user) mkdir -p "$HOME/.claude"; printf '{}\n' >"$HOME/.claude/settings.json" ;;
+  global) printf '[user]\nname = changed\n' >>"$GIT_CONFIG_GLOBAL" ;;
+  fake) printf '{"decision":"deny","kind":"protected"}\n' >"$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  delete) hookcall Bash '{"command":"curl --version"}'; rm -f "$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  duplicate) printf '{"decision":"deny","kind":"protected"}\n{"decision":"deny","kind":"protected"}\n' >"$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  reorder) printf '{"decision":"allow"}\n{"decision":"deny","kind":"protected"}\n' >"$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  malformed) printf '{broken\n' >"$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  truncated) printf '{"decision":"deny"}' >"$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  fifo) python3 -c 'import os,sys; os.mkfifo(sys.argv[1])' "$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+  symlink) ln -s "$SELFTEST_LOG_OUTSIDE" "$DEV_WORKFLOW_LOOP_PERMLOG" ;;
+esac
 case "$beh" in
   pr) branch; done_commit; push; result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
   degrade) branch; done_commit; result "無人の周の結果: 縮退 — gh が無い" ;;
@@ -490,9 +560,14 @@ case "$beh" in
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人の周の結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人の周の結果: PR — x" ;;
   pushu) branch; done_commit; pushu; result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
-  docpush) # 文書の無人の push(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を打つ。周の中の branch.autoSetupRebase を控える
+  docpush) # 文書の無人公開 helper(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を gh stub まで打つ。
            branch; done_commit; git config --get branch.autoSetupRebase >"$REC/asr-$name" 2>&3
-           eval "${SELFTEST_PUSH_CMD:?}" >&3 2>&3; g gc -q
+           mkdir -p .claude/reviews; printf 'review fixture\n' >.claude/reviews/docpush-body.md
+           SELFTEST_BRANCH="task/$name" SELFTEST_HELD_SHA="$(git rev-parse HEAD)"
+           SELFTEST_CONFIG_DIGEST="$(python3 "${DEV_WORKFLOW_LOOP_PLUGIN_ROOT:?}/skills/ship-task/scripts/git-config-digest.py" --dir="$PWD")"
+           export SELFTEST_BRANCH SELFTEST_HELD_SHA SELFTEST_CONFIG_DIGEST
+           if ! eval "${SELFTEST_PUSH_CMD:?}" >&3 2>&3; then exit 3; fi
+           g gc -q
            result "無人の周の結果: PR — https://example.invalid/pr/$name" ;;
   cfgreorder) branch; done_commit
               python3 - "$common/config" <<'PY'
@@ -510,13 +585,16 @@ PY
   basetamper) branch; done_commit; g config selftest.tampered yes
               # 周の起動の直前に取った比べる元を、書き換えた後の状態に合わせて書き直す(照合をすり抜けようとする)
               for b in "${XDG_STATE_HOME:?}"/dev-workflow/loop/*/*/iter-*.base.json; do
+                before="$(sha256sum <"$b" | cut -d' ' -f1)"
                 python3 - "$b" <<'PY'
 import json, sys
 p = sys.argv[1]
 d = json.load(open(p))
-d["config"]["entries"].append(["selftest.tampered", "yes"])
+d["common_config"]["entries"].append(["selftest.tampered", "yes"])
 json.dump(d, open(p, "w"))
 PY
+                after="$(sha256sum <"$b" | cut -d' ' -f1)"
+                [ "$before" != "$after" ] || exit 91
               done
               result "無人の周の結果: 縮退 — tamper" ;;
   badreviews) branch; done_commit; push; mkdir -p .claude/reviews; echo r >.claude/reviews/unreadable.md
@@ -561,15 +639,40 @@ chmod +x "$W/failsleepbin/sleep"
 # PyYAML を隠す(import yaml を失敗させる)
 echo 'raise ImportError("blocked by loop-selftest")' >"$W/noyaml/yaml.py"
 
+# remove の拒否の正常対照。FIFO や生き残りの子孫に同期を依存させない。
+REAL_GIT="$(command -v git)"
+cat >"$STUBBIN/git" <<EOF
+#!/usr/bin/env bash
+saw=0
+for arg in "\$@"; do
+  if [ "\$saw" = 1 ] && [ "\$arg" = remove ]; then saw=2; break; fi
+  [ "\$arg" != worktree ] || saw=1
+done
+if [ "\$saw" = 2 ] && [ -f "\${SELFTEST_REC:-}/late-target" ]; then
+  target="\$(cat "\$SELFTEST_REC/late-target")"
+  if [ "\${@: -1}" = "\$target" ]; then
+    echo late >"\$target/late-untracked.txt"
+    rm -f "\$SELFTEST_REC/late-target"
+  fi
+fi
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUBBIN/git"
+
 # ── scratch のプラグイン(対象の loop.sh を置く。変異版もここに写して打つ)──
 PLUG="$W/plugin"
 mkdir -p "$PLUG/.claude-plugin" "$PLUG/skills/ship-task/scripts" "$PLUG/skills/create-task/scripts"
 cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
+cp "$SCRIPT_DIR/loop-state.py" "$PLUG/skills/ship-task/scripts/loop-state.py"
+cp "$SCRIPT_DIR/loop-startup.py" "$PLUG/skills/ship-task/scripts/loop-startup.py"
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
+cp "$SCRIPT_DIR/environment-guard.py" "$PLUG/skills/ship-task/scripts/environment-guard.py"
+cp "$SCRIPT_DIR/host-argv.py" "$SCRIPT_DIR/loop-supervisor.py" "$PLUG/skills/ship-task/scripts/"
 cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
 cp "$SCRIPT_DIR/git-config-digest.py" "$PLUG/skills/ship-task/scripts/git-config-digest.py"   # 在ることを起動時に確かめる(両方のモード。loop.md §2 の 4)
+cp "$SCRIPT_DIR/publish-guard.py" "$PLUG/skills/ship-task/scripts/publish-guard.py"
 LOOP="$PLUG/skills/ship-task/scripts/loop.sh"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUG/.claude-plugin/plugin.json")"
 
@@ -684,24 +787,35 @@ locked_reason_of() { # $1=相対パス → その理由で locked の worktree �
 }
 wt_count() { git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -c '^worktree '; }
 COMMON_ARGS=(--kill-grace 2 --net-timeout 10)
-# doc_push_cmd <作業ブランチ> → 「OK <コマンド>」か「NG <理由>」。ship-task/SKILL.md の無人の push の字面(照合つき)から
-# `&& ` より後ろの git push を取り出し、<作業ブランチ> を置き換える。取り出しは UW_CMDS と同じ(バッククォートの中・
-# ちょうど 1 種類)。ハードコードしない(-B で __pycache__ を作らない)
+# doc_push_cmd → 「OK <コマンド>」か「NG <理由>」。ship-task/SKILL.md の無人公開 helper の字面を
+# 取り出し、scratch の保持 SHA・設定 digest・ブランチへ置き換える。helper 自身を gh stub まで実行する。
+# 取り出しは UW_CMDS と同じ(バッククォートの中・ちょうど 1 種類)。ハードコードしない(-B で __pycache__ を作らない)
 doc_push_cmd() {
-  python3 -B - "$PLUGIN_SRC/skills/ship-task/SKILL.md" "$1" <<'PY' 2>&1
+  python3 -B - "$PLUGIN_SRC/skills/ship-task/SKILL.md" "$PLUG/skills/ship-task/" <<'PY' 2>&1
 import re, sys
-path, branch = sys.argv[1], sys.argv[2]
-digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
+path, skill_dir = sys.argv[1], sys.argv[2]
 try:
     text = open(path, encoding="utf-8").read()
 except OSError as exc:
     print("NG SKILL.md を読めない: %s" % exc)
     sys.exit(0)
-hits = sorted(set(re.findall("`(" + digest + r"git push [^`]+)`", text)))
+hits = sorted(set(re.findall(r"`(python3 \{ship-task の\}scripts/publish-guard\.py [^`]+)`", text)))
 if len(hits) != 1:
     print("NG 字面がちょうど 1 種類でない(%d 種類)" % len(hits))
     sys.exit(0)
-cmd = hits[0].split("&& ", 1)[1].replace("<作業ブランチ>", branch)
+cmd = hits[0].replace("{ship-task の}", skill_dir)
+subs = {
+    "<管理ルート>": '"$PWD"',
+    "<保持したレビュー済み SHA>": '"$SELFTEST_HELD_SHA"',
+    "<作業ブランチ>": '"$SELFTEST_BRANCH"',
+    "<repo>": "github.com/o/r",
+    "<デフォルトブランチ>": "main",
+    "<守る値>": '"$SELFTEST_CONFIG_DIGEST"',
+    "<名>": "docpush-body.md",
+    "<タスク名>": "docpush",
+}
+for old, new in subs.items():
+    cmd = cmd.replace(old, new)
 left = re.findall(r"<[^<>\s]+>|\{[^{}]*\}", cmd)
 if left:
     print("NG 置き換えられないプレースホルダ: %s" % " ".join(left))
@@ -781,7 +895,8 @@ has "未知のホスト: 理由" "$OUT" "[host-unknown]"
 for tok in -p --print --output-format=text --setting-sources=project --strict-mcp-config --plugin-dir=/x \
            --permission-mode=plan --permission-prompts --mcp-config --allowedTools=Read --allowed-tools \
            --disallowedTools --disallowed-tools=Bash --settings --settings=x.json -cp \
-           -- --bg --background -w --worktree=x -dw -c=p; do
+           -- --bg --background -w --worktree=x -dw -c=p \
+           --continue -c --resume=old -rOld -cv --remote --cloud=id --plugin-url=url --bare --safe-mode --unknown; do
   run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" --host-argv --model=m1
   check "--host-argv の '$tok' で止まる" 20 "$RC"
   has "--host-argv の '$tok': 理由" "$OUT" "[host-argv]"
@@ -796,12 +911,12 @@ has "--host-argv の値を取るフラグ: 理由" "$OUT" "[host-argv]"
 run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv -n=x
 check "--host-argv の値を取る短いフラグは止まる" 20 "$RC"
 run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv --model=m1 --host-argv --verbose --host-argv --debug
-check "--host-argv の表に無いフラグ(値を取らない)は最後に置いてもよい" 0 "$RC"
+check "--host-argv の表に無いフラグは値を取らなくても拒否する" 20 "$RC"
 # 全許可のフラグ(--host-argv 経由・--allowed-tools 経由)
 for tok in --dangerously-skip-permissions --allow-dangerously-skip-permissions=true; do
   run_loop hs -- --repo "$R" --dry-run --host-argv "$ALTBIN/claude-alt" --host-argv "$tok" --host-argv --model=m1
   check "全許可のフラグ('$tok'・--host-argv 経由)で止まる" 20 "$RC"
-  has "全許可のフラグ('$tok'): 理由" "$OUT" "[full-permission]"
+  has "全許可のフラグ('$tok'): 理由" "$OUT" "[host-argv]"
 done
 run_loop hs -- --repo "$R" --dry-run --allowed-tools Read --allowed-tools bypassPermissions
 check "全許可のモードの値(--allowed-tools 経由)で止まる" 20 "$RC"
@@ -830,8 +945,9 @@ run_loop hs "SELFTEST_HELP_FILE=$W/help-missing.txt" -- --repo "$R" --dry-run
 check "--help に雛形のフラグが無いと止まる" 20 "$RC"
 has "--help の照合: 理由" "$OUT" "[help-mismatch]"
 # 導入済みの同名プラグインの版の違い・解析できない・同じ版・無効。試験データは実物の形(トップは配列。要素は id・
-# version・scope・enabled・installPath・installedAt・lastUpdated で、name は無い。installPath 以下の値はダミーで読まない)
+# version・scope・enabled・installPath・installedAt・lastUpdated で、name は無い。installPath には実際の配布物を置いて内容も監視する)
 plugin_item() { # $1=id $2=version $3=enabled(true|false) → 実物の形の要素 1 つ
+  mkdir -p "$W/cache/market/${1%%@*}/$2"
   printf '{"id":"%s","version":"%s","scope":"user","enabled":%s,"installPath":"%s/cache/market/%s/%s","installedAt":"(dummy)","lastUpdated":"(dummy)"}' \
     "$1" "$2" "$3" "$W" "${1%%@*}" "$2"
 }
@@ -1063,7 +1179,7 @@ LOOP_BIN="$W/linkproj/.claude/skills/ship-task/scripts/loop.sh"
 run_loop link -- --repo "$R" --dry-run
 LOOP_BIN="$LOOP"
 check "--link の配置から起動する(clone のルートに解決される)" 0 "$RC"
-has "--link: --plugin-dir が clone のルート" "$OUT" "--plugin-dir $PLUG"
+has "--link: --plugin-dir が検証済みコピー" "$OUT" "/active/plugin --permission-mode"
 
 fi
 
@@ -1161,8 +1277,8 @@ has "H28 '--name demo': 拒否理由" "$OUT" "[host-argv]"
 check "H28 '--name demo': 解析前の子起動記録が空" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
 check "H28 '--name demo': 対象タスクを起動しない" "" "$(calls)"
 
-# 値に n がある長い引数と、値付き短名を含まない束ね書き、既定起動を解析して確認する。
-H28_GOOD=(-cv --name=demo --name=n default)
+# 値に n がある長い引数、許可した単独フラグ、既定起動を解析して確認する。
+H28_GOOD=(--verbose --name=demo --name=n default)
 for i in "${!H28_GOOD[@]}"; do
   tok="${H28_GOOD[$i]}"
   args=()
@@ -1177,14 +1293,17 @@ for i in "${!H28_GOOD[@]}"; do
 import json, sys
 p = json.load(open(sys.argv[1]))
 expected = {"allowedTools": ["Read"], "print": True, "output-format": "json",
-            "setting-sources": "user", "strict-mcp-config": True, "plugin-dir": sys.argv[2],
+            "setting-sources": "user", "strict-mcp-config": True,
             "permission-mode": "acceptEdits", "permission-prompts": "none"}
 assert all(p.get(key) == value for key, value in expected.items()), p
+from pathlib import Path
+copy = Path(p['plugin-dir']); state = json.loads((copy.parent / 'environment.json').read_text())
+assert state['copy'] == str(copy) and state['root'] == sys.argv[2], state
 assert "PermissionRequest" in json.loads(p["settings"])["hooks"], p
 if sys.argv[3].startswith("--name="):
     assert p.get("name") == sys.argv[3].split("=", 1)[1], p
-elif sys.argv[3] == "-cv":
-    assert p.get("c") is True and p.get("v") is True, p
+elif sys.argv[3] == "--verbose":
+    assert p.get("verbose") is True, p
 PY
 done
 fi
@@ -1200,7 +1319,9 @@ run_loop argv -- --repo "$R" --dry-run --allow-classifier
 check "--dry-run: 終了コード 0" 0 "$RC"
 check "--dry-run: -p を起動しない" "" "$(calls)"
 check "--dry-run: worktree が残らない" 1 "$(wt_count)"
-has "--dry-run: 解決後の argv が出る(実行ファイルは絶対パス)" "$OUT" "解決後の argv: $STUBBIN/claude -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir $PLUG --permission-mode auto --permission-prompts none"  # <!-- validate-allow: loop.sh --dry-run が出す解決後の argv の文字列を照合する(起動はしない) -->
+DRY_COPY="$(sed -n 's/.*--plugin-dir \([^ ]*\) --permission-mode.*/\1/p' "$OUT" | head -1)"
+t "--dry-run: コピーの状態控えがある" test -f "${DRY_COPY%/plugin}/environment.json"
+has "--dry-run: 解決後の argv が出る(実行ファイルは絶対パス)" "$OUT" "解決後の argv: $STUBBIN/claude -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir $DRY_COPY --permission-mode auto --permission-prompts none"  # <!-- validate-allow: loop.sh --dry-run が出す解決後の argv の文字列を照合する(起動はしない) -->
 has "--dry-run: 対象の一覧が出る" "$OUT" "docs/tasks/進行中_pr-argv.md"
 hasnt "--dry-run: 疎通(auth status)を打たない" "$REC/aux.log" "auth status"
 has "--dry-run: --help で照合する" "$REC/aux.log" "claude --help"
@@ -1210,6 +1331,15 @@ run_loop argv DEV_WORKFLOW_HOST_CLI= OLDPWD="$W/oldpwd-marker" -- --repo "$R" --
   --mcp-config "$W/mcp.json" "${COMMON_ARGS[@]}"
 check "argv: 1 周回って終わる" 0 "$RC"
 A="$REC/argv-pr-argv"
+ARGV_COPY="$(python3 - "$A" "$PLUG" <<'PY2'
+import json,sys
+from pathlib import Path
+tokens=Path(sys.argv[1]).read_text().splitlines(); copy=Path(tokens[tokens.index('--plugin-dir')+1])
+state=json.loads((copy.parent/'environment.json').read_text())
+assert state['copy']==str(copy) and state['root']==sys.argv[2]
+print(copy)
+PY2
+)"
 argv_has_seq() { # $1..=連続するトークン
   python3 - "$A" "$@" <<'PY'
 import sys
@@ -1221,19 +1351,28 @@ PY
 t "argv: -p --output-format json" argv_has_seq -p --output-format json
 t "argv: --setting-sources user(2026-09-23 決定 16)" argv_has_seq --setting-sources user
 t "argv: --strict-mcp-config(2026-09-23 決定 16)" argv_has_seq --strict-mcp-config
-t "argv: --plugin-dir <プラグインルート>" argv_has_seq --plugin-dir "$PLUG"
+t "argv: --plugin-dir <プラグインルート>" argv_has_seq --plugin-dir "$ARGV_COPY"
 t "argv: --permission-mode acceptEdits" argv_has_seq --permission-mode acceptEdits
 t "argv: --permission-prompts none" argv_has_seq --permission-prompts none
 t "argv: --mcp-config <絶対パス>" argv_has_seq --mcp-config "$W/mcp.json"
 t "argv: --allowedTools <値>" argv_has_seq --allowedTools 'Bash(git:*)' Read
 t "argv: 許可リスト → MCP の設定 → 隔離・権限のフラグ(最後)の並び" argv_has_seq --allowedTools 'Bash(git:*)' Read \
-  --mcp-config "$W/mcp.json" -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir "$PLUG" \
+  --mcp-config "$W/mcp.json" -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir "$ARGV_COPY" \
   --permission-mode acceptEdits --permission-prompts none
 t "argv: 権限のフラグの後に許可の仲介の --settings(argv の最後)" argv_has_seq --permission-prompts none --settings \
   "$(sed '/^$/d' "$A" | tail -1)"
-check "argv: --settings の hook のコマンドは python3 と hook の絶対パスをクォートしたもの" \
-  "'$SAFEBIN/python3' '$PLUG/skills/ship-task/scripts/loop-permission.py'" \
-  "$(sed '/^$/d' "$A" | tail -1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["hooks"]["PermissionRequest"][0]["hooks"][0]["command"])' 2>/dev/null)"
+t "argv: hook は保持 hash の loader と固定権限判定器を実行する" python3 - "$A" "$SAFEBIN/python3" "$ARGV_COPY" <<'PY2'
+import json,sys,shlex
+from pathlib import Path
+args=Path(sys.argv[1]).read_text().splitlines()
+settings=json.loads(args[args.index('--settings')+1])
+cmd=shlex.split(settings['hooks']['PermissionRequest'][0]['hooks'][0]['command'])
+assert cmd[:4]==[sys.argv[2],'-I','-B','-c'],cmd
+assert 'hashlib.sha256(raw).hexdigest() != expected' in cmd[4]
+assert cmd[7:]==['hook','--state',str(Path(sys.argv[3]).parent/'environment.json'),'--expect-sha256',cmd[11],'--path','skills/ship-task/scripts/loop-permission.py'],cmd
+assert len(cmd[5])==64 and len(cmd[11])==64
+PY2
+
 hasnt "argv: 全許可のフラグが載らない" "$A" "--dangerously-skip-permissions"
 hasnt "argv: 全許可のモードが載らない" "$A" "bypassPermissions"
 check "argv: プロンプトが stdin で届く" "/dev-workflow:ship-task --task=docs/tasks/進行中_pr-argv.md --unattended" "$(cat "$REC/prompt-pr-argv" 2>/dev/null)"
@@ -1393,7 +1532,7 @@ LOCK_READ_OUT="$W/locked-read/result.txt"
 bash -s -- "$W/locked-read/functions.sh" "$R" "$W/locked-read" <<'SH' >"$LOCK_READ_OUT" 2>&1
 set -euo pipefail
 source "$1"
-TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current
+TOP="$2"; RUN_DIR="$3"; STATE="$3"; RUN_ID=current; STATE_GIT_UNSAFE=0
 declare -A WT_OUTCOME=()
 G() { git "$@"; }
 rep() { printf '%s\n' "$@"; }
@@ -1721,7 +1860,7 @@ commit
 newrec g1
 run_loop g1 -- --repo "$R" "${COMMON_ARGS[@]}"
 check "G1 の保留の連続: 終了コード 10(G1 …・G1: … の両方を数える)" 10 "$RC"
-has "G1 の保留の連続: 理由" "$OUT" "[g1-holds]"
+has "G1 の保留の連続: 理由" "$OUT" "[consecutive-failures]"
 check "G1 の保留の連続: 2 回で止まる" "holdg1-a holdg1c-b" "$(calls)"
 newrepo g1b
 addtask holdg1-a 2026-01-01
@@ -1760,26 +1899,31 @@ check "正常な周で止まらない: push と gc を打っても次の周へ�
 check "正常な周で止まらない: PR → PR → 保留" "pr-a pr-b hold-c" "$(calls)"
 has "正常な周で止まらない: キューが空で終わる" "$OUT" "止まった理由: キューが空"
 check "正常な周: 共有の config に branch.task/pr-a.* が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/pr-a\.' 2>/dev/null)"
-# 文書の無人の push(SKILL.md の字面の `&& ` より後ろ)を、利用者の設定の branch.autoSetupRebase = always のもとで打つ周:
+# 文書の無人公開 helper(SKILL.md の字面)を、利用者の設定の branch.autoSetupRebase = always のもとで打つ周:
 # 共有の config に branch.* を書かず、照合に通って次の周へ進む。設定はこの周だけ GIT_CONFIG_SYSTEM で渡す(治具の
 # identity・init.defaultBranch・gc.auto は global の $W/gitconfig にしか無いので GIT_CONFIG_GLOBAL は差し替えない。
 # 共有の $W/gitconfig は書き換えない)
-DP_CMD="$(doc_push_cmd task/docpush-a)"
+DP_CMD="$(doc_push_cmd)"
 case "$DP_CMD" in
   "OK "*)
     DP_CMD="${DP_CMD#OK }"
     printf '[branch]\n\tautoSetupRebase = always\n' >"$W/gitconfig-system-asr"
     newrepo docpush
+    # origin-repo.py には公開先を GitHub として読ませ、Git の送信だけ scratch bare remote へ差し替える。
+    # helper が exact-SHA push と gh の作成後 REST 照合を実行する対照になる。
+    G -C "$R" remote set-url origin https://github.com/o/r.git
     addtask docpush-a 2026-01-01; addtask pr-b 2026-01-02
     commit
     newrec docpush
     DP_BEFORE="$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
-    run_loop docpush "GIT_CONFIG_SYSTEM=$W/gitconfig-system-asr" "SELFTEST_PUSH_CMD=$DP_CMD" -- --repo "$R" "${COMMON_ARGS[@]}"
+    run_loop docpush "PATH=$DP_GIT:$DP_GH:$STUBBIN:$SAFEBIN" "GIT_CONFIG_SYSTEM=$W/gitconfig-system-asr" "SELFTEST_REAL_GIT=$SAFEBIN/git" "SELFTEST_PUBLISH_BARE=$B" "SELFTEST_PUSH_CMD=$DP_CMD" -- --repo "$R" "${COMMON_ARGS[@]}"
     check "文書の push(autoSetupRebase = always): 周の中で設定が効いている(前提)" always "$(cat "$REC/asr-docpush-a" 2>/dev/null)"
     check "文書の push(autoSetupRebase = always): 照合に通り、キューが空で終わる" 0 "$RC"
     check "文書の push(autoSetupRebase = always): 次の周へ進む" "docpush-a pr-b" "$(calls)"
     has "文書の push(autoSetupRebase = always): 判定は正常(PR)" "$OUT" "docs/tasks/進行中_docpush-a.md → 正常(PR)"
     t "文書の push(autoSetupRebase = always): origin に作業ブランチがある" git -C "$B" rev-parse --verify -q refs/heads/task/docpush-a
+    has "文書の push(autoSetupRebase = always): helper が gh で PR を作る" "$REC/docpush-gh.log" 'pr create -R github.com/o/r --base main --head task/docpush-a'
+    has "文書の push(autoSetupRebase = always): helper が作成後 REST を照合する" "$REC/docpush-gh.log" 'api --hostname github.com repos/o/r/pulls/42'
     check "文書の push(autoSetupRebase = always): 共有の config の branch.* が増えない" "$DP_BEFORE" \
       "$(git config --file "$R/.git/config" --get-regexp '^branch\.' 2>/dev/null)"
     ;;
@@ -1813,7 +1957,8 @@ shared_case cfgadd "config に項目を足す"
 shared_case cfgpushremote "branch.task/{名}.pushRemote を足す"
 shared_case cfgremote "branch.task/{名}.remote の値が origin でない"
 shared_case pushu "-u つきの push が branch.task/{名}.remote・.merge を足す"
-has "共有の状態(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/pushu-a.merge=refs/heads/task/pushu-a"
+has "共有の状態(-u つきの push): 設定の 構造差分を報告する" "$(report_of "$OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "共有の状態(-u つきの push): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/pushu-a.merge"
 shared_case cfgreorder "既存の項目の並べ替え"
 shared_case hookchmod "hooks の既存のファイルに実行権を付ける"
 shared_case infoexclude "info/exclude"
@@ -1833,7 +1978,8 @@ check "ループの照合で止まる: 10" 10 "$RC"
 rm -f "$(state_dir xloopdiff)/stop-mark.md"
 run_loop xloopdiff -- --repo "$R" "${COMMON_ARGS[@]}"
 check "ループの照合の後: 止めの印を消すと続く" 0 "$RC"
-has "ループの照合の後: 食い違いを見つけた状態を残さない(最後に照合に通った状態との差分を報告する)" "$(report_of "$OUT")" "selftest.added=yes"
+has "ループの照合の後: 食い違いを見つけた状態を残さない(digest 分類を報告する)" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+hasnt "ループの照合の後: 変更した設定値を報告しない" "$(report_of "$OUT")" "selftest.added=yes"
 
 fi
 
@@ -1865,7 +2011,8 @@ start_bg sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
 if wait_file "$REC/started-cfgsleep-b" 30; then
   kill -TERM "$BG_PID"; wait_bg
   check "TERM(config を変えた周): 143" 143 "$BG_RC"
-  has "TERM(config を変えた周): 報告に差分が出る" "$(report_of "$BG_OUT")" "selftest.tampered=yes"
+  has "TERM(config を変えた周): 設定の 構造差分を報告する" "$(report_of "$BG_OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+  hasnt "TERM(config を変えた周): 設定値を報告しない" "$(report_of "$BG_OUT")" "selftest.tampered=yes"
   SD="$(state_dir sigcfg)"
   t "TERM(config を変えた周): 止めの印が残る" test -f "$SD/stop-mark.md"
   : >"$REC/ssh.log"
@@ -1876,7 +2023,8 @@ if wait_file "$REC/started-cfgsleep-b" 30; then
   rm -f "$SD/stop-mark.md"
   run_loop sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
   check "止めの印を消すと続く" 0 "$RC"
-  has "止めの印を消すと: 最後に照合に通った状態との差分を報告する" "$(report_of "$OUT")" "selftest.tampered=yes"
+  has "止めの印を消すと: 最後に照合に通った状態との差分を digest で報告する" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+  hasnt "止めの印を消すと: 設定値を報告しない" "$(report_of "$OUT")" "selftest.tampered=yes"
   has "止めの印を消すと: 次のタスクを回す" "$REC/calls.log" "pr-c"
 else
   ng "TERM(config を変えた周): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
@@ -1884,117 +2032,134 @@ fi
 
 fi
 
+stop_fixture_children() {
+  local p pg selfpg
+  selfpg="$(ps -o pgid= -p $$ | tr -d ' ')"
+  for p in $(cat "$REC"/pid-* "$REC"/spawned-* 2>/dev/null); do
+    [ -r "/proc/$p/stat" ] || continue
+    pg="$(sed -E 's/.*\) //' "/proc/$p/stat" | cut -d' ' -f3)"
+    if [ -n "$pg" ] && [ "$pg" != "$selfpg" ] && [ "$pg" -gt 1 ]; then kill -KILL -- "-$pg" 2>/dev/null || true; fi
+    kill -KILL "$p" 2>/dev/null || true
+  done
+}
 # ════════════════ 周の途中で落ちた(loop.sh だけを KILL)════════════════
 if want kill; then
-kill_case() { # $1=名 $2=振る舞い $3=期待する次の起動の終了コード $4=ラベル
-  newrepo "k-$1"
-  addtask "$2-a" 2026-01-01; addtask pr-b 2026-01-02
-  commit
-  newrec "k-$1"
-  ORIG_MAIN="$(git -C "$R" rev-parse refs/heads/main)"
-  start_bg "k-$1" -- --repo "$R" "${COMMON_ARGS[@]}"
-  if ! wait_file "$REC/started-$2-a" 30; then
-    ng "KILL($4): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg; return 1
+kill_case() { # 元の中断条件を保ち、全て未信頼停止を求める。
+  local behavior="$1" state="k-$1" held before
+  newrepo "$state"
+  addtask "$behavior-a" 2026-01-01; addtask pr-b 2026-01-02
+  commit; newrec "$state"
+  start_bg "$state" -- --repo "$R" "${COMMON_ARGS[@]}"
+  if ! wait_file "$REC/started-$behavior-a" 30; then
+    ng "KILL($behavior): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg; return
   fi
-  sleep 0.5
   kill -KILL "$BG_PID"; wait_bg
-  CHILD="$(cat "$REC/pid-$2-a")"
-  t "KILL($4): loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
-  echo "$CHILD" >"$REC/watch.pid"
-  run_loop "k-$1" -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "KILL($4): 次の起動の終了コード" "$3" "$RC"
-  if wait_dead "$CHILD" 1; then ok "KILL($4): 次の起動が残った子を止める"; else ng "KILL($4): 次の起動が残った子を止める"; fi
-  for p in $(cat "$REC/spawned-$2-a" 2>/dev/null); do
-    if wait_dead "$p" 1; then ok "KILL($4): 別セッションの子孫も止める"; else ng "KILL($4): 別セッションの子孫も止める(pid $p)"; fi
+  CHILD="$(cat "$REC/pid-$behavior-a")"
+  if wait_dead "$CHILD" 7; then ok "KILL($behavior): supervisor が親の死後も子を回収する"; else ng "KILL($behavior): supervisor が親の死後も子を回収する"; fi
+  for p in $(cat "$REC/spawned-$behavior-a" 2>/dev/null); do
+    if wait_dead "$p" 3; then ok "KILL($behavior): 別セッションの子孫も回収する"; else ng "KILL($behavior): 別セッションの子孫も回収する(pid $p)"; fi
   done
-  SD="$(state_dir "k-$1")"
-  f "KILL($4): 周の途中の印は消える" test -e "$SD/inflight"
-  if [ "$3" = 0 ]; then
-    has "KILL($4): 続いて次のタスクを回す" "$REC/calls.log" "pr-b"
-    check "KILL($4): 残った子が止まるまで次の周の -p を起動しない" "dead" "$(cat "$REC/watch-at-pr-b" 2>/dev/null)"
-  else
-    has "KILL($4): 理由" "$OUT" "[inflight-diff]"
-    t "KILL($4): 止めの印が残る" test -f "$SD/stop-mark.md"
-    hasnt "KILL($4): 次のタスクを回さない" "$REC/calls.log" "pr-b"
-    # 人が差分を確かめて元に戻してから(動いたデフォルトブランチを戻す)、止めの印を消す
-    G -C "$R" update-ref refs/heads/main "$ORIG_MAIN"
-    rm -f "$SD/stop-mark.md"
-    run_loop "k-$1" -- --repo "$R" "${COMMON_ARGS[@]}"
-    check "KILL($4): 止めの印を消すと続く" 0 "$RC"
-  fi
+  SD="$(state_dir "$state")"
+  held="$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json")"
+  before="$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
+  : >"$REC/ssh.log"
+  run_loop "$state" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "KILL($behavior): 未信頼中断で20" 20 "$RC"
+  has "KILL($behavior): 理由" "$OUT" '[inflight-untrusted]'
+  check "KILL($behavior): 控えを変更しない" "$held" "$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json")"
+  check "KILL($behavior): ref/worktree/lockを変更しない" "$before" "$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
+  check "KILL($behavior): 次へ進まない" "$behavior-a" "$(calls)"
+  f "KILL($behavior): network Gitなし" grep -q git-upload-pack "$REC/ssh.log"
+  t "KILL($behavior): worktree の lock を残す" locked_reason_of "docs/tasks/進行中_$behavior-a.md"
+  rm -f "$SD/stop-mark.md"
+  run_loop "$state" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "KILL($behavior): stop-mark だけ消しても再開しない" 20 "$RC"
+  stop_fixture_children
 }
-kill_case cfg cfgsleep 20 "周の中で共有の config を変えた"
-kill_case def defsleep 20 "周の中で refs/heads/<DEF> を動かした"
-kill_case none longsleep 0 "変えずに KILL・最初の周"
-kill_case push pushsleep 0 "共有の config に書かない push の後"
-kill_case pushu pushusleep 20 "-u つきの push の後(共有の config に branch.task/{名}.* を書いた)"
-# 次の起動の照合で止まった後、止めの印を消すと、最後に照合に通った状態(食い違いを見つけた状態ではない)
-# との差分を報告して続ける
-newrepo xkilldiff
-addtask pr-a 2026-01-01; addtask cfgsleep-b 2026-01-02; addtask pr-c 2026-01-03
-commit
-newrec xkilldiff
-start_bg xkilldiff -- --repo "$R" "${COMMON_ARGS[@]}"
-if wait_file "$REC/started-cfgsleep-b" 30; then
-  sleep 0.5
-  kill -KILL "$BG_PID"; wait_bg
-  run_loop xkilldiff -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "KILL の後の照合で止まる: 20" 20 "$RC"
-  rm -f "$(state_dir xkilldiff)/stop-mark.md"
-  run_loop xkilldiff -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "KILL の後の照合の後: 止めの印を消すと続く" 0 "$RC"
-  has "KILL の後の照合の後: 食い違いを見つけた状態を残さない(最後に照合に通った状態との差分を報告する)" "$(report_of "$OUT")" "selftest.tampered=yes"
-else
-  ng "KILL の後の照合: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
-fi
-# 実行の間に人が変えて報告だけで続けた直後の周で KILL → 続く
-newrepo kbetween
-addtask pr-a 2026-01-01; addtask longsleep-b 2026-01-02; addtask pr-c 2026-01-03
-commit
-newrec kbetween
-run_loop kbetween -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
-check "実行の間の変化(準備): 1 周目" 0 "$RC"
-G -C "$R" config selftest.human between
-start_bg kbetween -- --repo "$R" "${COMMON_ARGS[@]}"
-if wait_file "$REC/started-longsleep-b" 30; then
-  sleep 0.5
-  kill -KILL "$BG_PID"; wait_bg
-  has "実行と実行の間の変化: 報告に差分が出て止まらずに続ける" "$(latest_report kbetween)" "selftest.human=between"
-  run_loop kbetween -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "KILL(実行の間に人が変えた直後の周): 続く" 0 "$RC"
-  has "KILL(実行の間に人が変えた直後の周): 次のタスクを回す" "$REC/calls.log" "pr-c"
-else
-  ng "実行の間の変化: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
-fi
-# 次の起動で残った子を止められない(試験用のフック)→ 止めの印を置いて 20・周の途中の印は残る →
-# 止めの印を消した次の起動は片付けと照合をやり直す(子が止まるまで次の周を起動しない)
-newrepo kleft
+for behavior in cfgsleep defsleep longsleep pushsleep pushusleep; do kill_case "$behavior"; done
+# 同じ印を持つ無関係なプロセスと偽 checksum は所有根拠にならない。
+newrepo forged192; addtask pr-a; commit; newrec forged192
+run_loop forged192 -- --repo "$R" --dry-run
+SD="$(state_dir forged192)"; mkdir "$SD/inflight"
+printf 'iter=forged192\nname=pr-a\n' >"$SD/inflight/meta"
+printf '{}\n' >"$SD/inflight/base.json"
+sha256sum "$SD/inflight/meta" >"$SD/inflight/checksum"
+env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER=forged192 setsid sleep 60 &
+MANUAL=$!; sleep 0.1
+before="$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
+held="$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json" "$SD/inflight/checksum")"
+run_loop forged192 -- --repo "$R" "${COMMON_ARGS[@]}"
+check '偽 inflight/checksum:20' 20 "$RC"
+t '偽 inflight/checksum: 無関係な同UIDプロセス生存' proc_alive "$MANUAL"
+check '偽 inflight/checksum: ref/worktree不変' "$before" "$(G -C "$R" show-ref; G -C "$R" worktree list --porcelain)"
+check '偽 inflight/checksum: 記録不変' "$held" "$(sha256sum "$SD/inflight/meta" "$SD/inflight/base.json" "$SD/inflight/checksum")"
+kill -KILL -- "-$MANUAL" 2>/dev/null || true; wait "$MANUAL" 2>/dev/null || true
+
+# supervisor だけが強制終了した場合も loop は成功判定と次の周を止める。
+newrepo ksuperonly
 addtask longsleep-a 2026-01-01; addtask pr-b 2026-01-02
 commit
-newrec kleft
-start_bg kleft -- --repo "$R" "${COMMON_ARGS[@]}"
+newrec ksuperonly
+start_bg ksuperonly -- --repo "$R" "${COMMON_ARGS[@]}"
 if wait_file "$REC/started-longsleep-a" 30; then
-  sleep 0.5
-  kill -KILL "$BG_PID"; wait_bg
-  run_loop kleft DEV_WORKFLOW_LOOP_TEST_LEFTOVER=1 -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "次の起動で残りを止められない: 20" 20 "$RC"
-  has "次の起動で残りを止められない: 理由" "$OUT" "[inflight-leftover]"
-  SD="$(state_dir kleft)"
-  t "次の起動で残りを止められない: 止めの印を置く" test -f "$SD/stop-mark.md"
-  t "次の起動で残りを止められない: 周の途中の印が残る" test -d "$SD/inflight"
-  rm -f "$SD/stop-mark.md"
-  ITER="$(cat "$REC/iter-longsleep-a")"
-  env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER="$ITER" setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
-  MANUAL=$!
-  echo "$MANUAL" >"$REC/watch.pid"
-  sleep 0.3
-  run_loop kleft -- --repo "$R" "${COMMON_ARGS[@]}"
-  check "止めの印を消した次の起動: 片付けと照合をやり直して続く" 0 "$RC"
-  if wait_dead "$MANUAL" 1; then ok "止めの印を消した次の起動: 残りのプロセスを止める"; else ng "止めの印を消した次の起動: 残りのプロセスを止める"; fi
-  check "止めの印を消した次の起動: 子が止まるまで次の周の -p を起動しない" "dead" "$(cat "$REC/watch-at-pr-b" 2>/dev/null)"
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  SUP_PID="$(python3 - "$CHILD" <<'PID'
+import sys
+raw=open('/proc/'+sys.argv[1]+'/stat','rb').read()
+print(int(raw[raw.rindex(b')')+2:].split()[1]))
+PID
+)"
+  kill -KILL "$SUP_PID"; wait_bg
+  check "supervisor だけ KILL: loop は 10 で停止" 10 "$BG_RC"
+  SD="$(state_dir ksuperonly)"
+  has "supervisor だけ KILL: 不在証明が無い" "$SD/stop-mark.md" "不在証明"
+  t "supervisor だけ KILL: inflight を残す" test -d "$SD/inflight"
+  hasnt "supervisor だけ KILL: 次の周へ進まない" "$REC/calls.log" "pr-b"
+  kill -KILL -- "-$CHILD" 2>/dev/null || true
+  for p in $(cat "$REC/spawned-longsleep-a" 2>/dev/null); do kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true; done
 else
-  ng "次の起動で残りを止められない: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+  ng "supervisor だけ KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
+
+# supervisor も loop も強制終了したとき、次の起動は不在証明を補完しない。
+newrepo kbothers
+addtask longsleep-a 2026-01-01; addtask pr-b 2026-01-02
+commit
+newrec kbothers
+start_bg kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-longsleep-a" 30; then
+  CHILD="$(cat "$REC/pid-longsleep-a")"
+  SUP_PID="$(python3 - "$CHILD" <<'PID'
+import sys
+raw=open('/proc/'+sys.argv[1]+'/stat','rb').read()
+print(int(raw[raw.rindex(b')')+2:].split()[1]))
+PID
+)"
+  kill -KILL "$SUP_PID" "$BG_PID"; wait_bg
+  SD="$(state_dir kbothers)"
+  run_loop kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "監督側も KILL: 次の起動は停止" 20 "$RC"
+  t "監督側も KILL: inflight を残す" test -d "$SD/inflight"
+  hasnt "監督側も KILL: 次の周を起動しない" "$REC/calls.log" "pr-b"
+  # supervisor は既に死んだ。テストが起動を記録したこの子の group だけを回収する。
+  kill -KILL -- "-$CHILD" 2>/dev/null || true
+  for p in $(cat "$REC/spawned-longsleep-a" 2>/dev/null); do kill -KILL "$p" 2>/dev/null || true; done
+else
+  ng "監督側も KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+
+# 偽の meta の印と一致する、今回の supervisor が所有していない同 UID を止めない。
+ITER="$(cat "$REC/iter-longsleep-a")"
+env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER="$ITER" setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
+MANUAL=$!
+sleep .3
+BEFORE_META="$(sha256sum <"$SD/inflight/meta")"
+run_loop kbothers -- --repo "$R" "${COMMON_ARGS[@]}"
+check "未信頼 meta: 20 で停止" 20 "$RC"
+t "未信頼 meta: 無関係な同 UID のプロセスを止めない" proc_alive "$MANUAL"
+check "未信頼 meta: 記録は不変" "$BEFORE_META" "$(sha256sum <"$SD/inflight/meta")"
+kill -KILL -- "-$MANUAL" 2>/dev/null || true
+wait "$MANUAL" 2>/dev/null || true
 
 fi
 
@@ -2031,7 +2196,7 @@ has "フック + 内部の失敗: 止めの印の理由は「残ったプロセ�
 t "フック + 内部の失敗: 周の途中の印が残る" test -d "$SD/inflight"
 
 # ループの最中の片付けの失敗(試験用のフック)→ 判定と次の周へ進まずに 10 →
-# 両方の印がある状態で起動すると、その周の識別子を持つ残りのプロセスを止めてから 20
+# 両方の印がある状態で起動すると、子と中断記録を保全して 20。人の確認より先に子へ信号を送らない。
 newrepo midleft
 addtask pr-a 2026-01-01; addtask pr-b 2026-01-02
 commit
@@ -2049,9 +2214,18 @@ hasnt "ループの最中の片付けの失敗: 判定しない" "$OUT" "→ 正
 env SELFTEST_TAG="$TAG" DEV_WORKFLOW_LOOP_ITER="$ITER" setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
 MANUAL=$!
 sleep 0.3
+cp "$SD/inflight/meta" "$REC/held-meta"
+cp "$SD/inflight/base.json" "$REC/held-base.json"
+cp "$SD/stop-mark.md" "$REC/held-stop-mark.md"
 run_loop midleft -- --repo "$R" "${COMMON_ARGS[@]}"
 check "両方の印がある起動: 20" 20 "$RC"
-if wait_dead "$MANUAL" 1; then ok "両方の印がある起動: その周の識別子の残りのプロセスを止める"; else ng "両方の印がある起動: その周の識別子の残りのプロセスを止める"; fi
+t "両方の印がある起動: 確認前の子を保全する" proc_alive "$MANUAL"
+t "両方の印がある起動: 中断記録を保全する" cmp -s "$REC/held-meta" "$SD/inflight/meta"
+t "両方の印がある起動: 比較基準を保全する" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
+t "両方の印がある起動: 停止印を保全する" cmp -s "$REC/held-stop-mark.md" "$SD/stop-mark.md"
+# fixture が起動した既知の PID/プロセスグループだけを人の確認後の片付けとして止める。
+kill -KILL -- "-$MANUAL" 2>/dev/null || true
+wait "$MANUAL" 2>/dev/null || true
 
 # 内部の失敗(周の途中で loop.sh の sleep を失敗させる)→ 子が片付き、30(照合で差分があれば 10)
 newrepo internal
@@ -2075,7 +2249,8 @@ newrec internal2
 run_loop internal2 "PATH=$STUBBIN:$W/failsleepbin:$SAFEBIN" "SELFTEST_SLEEP_TRIGGER=$REC/trigger" -- --repo "$R" "${COMMON_ARGS[@]}"
 check "内部の失敗(照合で差分): 10" 10 "$RC"
 SD="$(state_dir internal2)"
-has "内部の失敗(照合で差分): 止めの印に差分" "$SD/stop-mark.md" "selftest.tampered=yes"
+has "内部の失敗(照合で差分): 止めの印に 構造差分" "$SD/stop-mark.md" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "内部の失敗(照合で差分): 設定値を印に出さない" "$SD/stop-mark.md" "selftest.tampered=yes"
 
 fi
 
@@ -2087,6 +2262,8 @@ PP="$W/permplug"
 rm -rf "$PW" "$PP" "$W/permout"
 mkdir -p "$PW/.claude/reviews/d" "$PW/src" "$PW/.git" "$PW/.claude/tasks" "$PP/skills/x" "$W/permout"
 echo a >"$PW/.claude/reviews/a"
+echo pr >"$PW/.claude/reviews/pr.md"
+echo msg >"$PW/.claude/reviews/msg.txt"
 echo s >"$PW/.claude/reviews/settings.json"
 echo g >"$PW/.claude/grasp.md"
 echo r >"$PP/skills/x/ref.md"
@@ -2375,7 +2552,7 @@ def one(path, pattern):
         return None, "%s の字面がちょうど 1 種類でない(%d 種類)" % (name, len(hits))
     return hits[0], None
 st, e1 = one(sys.argv[1], r"`(git --no-literal-pathspecs status [^`]+)`")
-pre, e2 = one(sys.argv[2], r"`(git --no-pager --no-replace-objects [^`]*-c core\.ignoreCase=false)`")
+pre, e2 = one(sys.argv[2], r"`(git --no-pager --no-replace-objects [^`]*-c filter\.lfs\.required=false)`")
 if e1 or e2:
     print("NG " + " / ".join(e for e in (e1, e2) if e))
 else:
@@ -2393,31 +2570,39 @@ case "$SF_CMD" in
     ;;
   *) ng "状態ファイルを外す git status: do-task/SKILL.md と base-commit.md から字面を取り出す(${SF_CMD#NG })" ;;
 esac
-# 無人の周の git・gh の字面(#133 の D1・D2・D4・D6): ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
+# 無人の周の git・公開 helper の字面: ship-task の文書から取り出し、プレースホルダを置き換えて hook に掛ける。
 # hook に掛ける字面は文書から取り出す(ハードコードしない。-B で __pycache__ を作らない)。文書ごとにちょうど 1 種類を求め、
 # 取り出せなければ FAIL にする。python3 の呼び出しは、許可リストに python3 を足して掛ける(推奨の列は python3 を含む — loop.md §4)。
-# 無人の push は、取り出した字面が照合つきの D1 の字面そのもの(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)で、
-# SKILL.md と discover-mode.md で同じであることも照らす
-UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PP/skills/ship-task/" "$PW" <<'PY' 2>&1
+# 公開は direct push ではなく helper に集約する。無人の helper は --set-upstream を受けず、保持 SHA・固定 repo/base・
+# 設定 digest・reviews 内の本文を必ず渡す。helper の実行と gh の作成後 REST 照合は上の docpush 対照で行う。
+printf 'review fixture\n' >"$PW/.claude/reviews/m.md"
+printf 'discover commit fixture\n' >"$PW/.claude/reviews/discover-data-audit-msg.md"
+# 文書から取り出す helper は loop が渡す plugin root に置く。任意の外部 Python ではないことも同時に検査する。
+PPR="$PLUG"
+UW_CMDS="$(python3 -B - "$PLUGIN_SRC/skills/ship-task" "$PLUG/skills/ship-task/" "$PW" <<'PY' 2>&1
 import re, sys
 root, st_dir, wt = sys.argv[1], sys.argv[2], sys.argv[3]
 digest = r"python3 \{ship-task の\}scripts/git-config-digest\.py [^`]*?&& "
-push_d1 = ("python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && "
-           "git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/<作業ブランチ>:refs/heads/<作業ブランチ>'")
-pushes = {}
+publish = r"python3 \{ship-task の\}scripts/publish-guard\.py [^`]+"
 items = [
-    ("無人の push", "SKILL.md", digest + r"git push [^`]+"),
-    ("無人の push", "references/discover-mode.md", digest + r"git push [^`]+"),
+    ("無人の公開 helper", "SKILL.md", publish),
     ("無人のブランチ作成", "SKILL.md", r"git switch --no-track -c [^`]+"),
     ("無人のブランチ作成", "references/discover-mode.md", r"git switch --no-track -c [^`]+"),
     ("照合つきの commit", "references/unattended-mode.md", digest + r"git commit [^`]+"),
     ("照合つきの commit", "references/discover-mode.md", digest + r"git commit [^`]+"),
     ("PR の作成先の確かめ", "SKILL.md", r"gh repo view [^`]+"),
-    ("PR の作成", "SKILL.md", r"gh pr create -R [^`]+"),
 ]
 subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<守る値>", "sha256:" + "0123456789abcdef" * 4),
+        ("<保持したレビュー済み SHA>", "0123456789abcdef" * 4),
         ("<repo>", "github.com/o/r"), ("<デフォルトブランチ>", "main"), ("<タスク名>", "日本語のタスク"),
         ("<名>", "m.md"), ("<発見元>", "data-audit")]
+discover = open(root + "/references/discover-mode.md", encoding="utf-8").read()
+discover_required = ("unattended-mode.md §7 の「push の直前」と同じ", "publish-guard.py",
+                     "保持したレビュー済み完全 SHA", "push_url_sha256", "--push-only", "`-u` は使わず")
+if all(value in discover for value in discover_required):
+    print("YES\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t-")
+else:
+    print("NG\t発見公開(discover-mode.md)が共通 publish-guard 手順を参照し固定 SHA/URL digest・push-only・no-u を維持\t必要な契約語が無い")
 for label, rel, pat in items:
     name = rel.rsplit("/", 1)[-1]
     try:
@@ -2430,13 +2615,14 @@ for label, rel, pat in items:
         print("NG\t%s(%s)を文書から取り出す\t字面がちょうど 1 種類でない(%d 種類)" % (label, name, len(hits)))
         continue
     tmpl = hits[0]
-    if label == "無人の push":
-        pushes[name] = tmpl
-        d1_tag = "無人の push(%s)が D1 の字面(--no-follow-tags・--recurse-submodules=no・-u なし・完全な refspec)" % name
-        if tmpl == push_d1:
-            print("YES\t%s\t-" % d1_tag)
+    if label == "無人の公開 helper":
+        required = ("--sha=<保持したレビュー済み SHA>", "--branch=<作業ブランチ>", "--repo=<repo>",
+                    "--base=<デフォルトブランチ>", "--config-digest=<守る値>", "--body-file=.claude/reviews/<名>")
+        tag = "無人の公開 helper(%s)が保持 SHA・固定 repo/base・digest・reviews 本文を渡し -u を付けない" % name
+        if all(value in tmpl for value in required) and "--set-upstream" not in tmpl:
+            print("YES\t%s\t-" % tag)
         else:
-            print("NG\t%s\t字面が違う: %s" % (d1_tag, tmpl))
+            print("NG\t%s\t字面が違う: %s" % (tag, tmpl))
     for k, v in subs:
         tmpl = tmpl.replace(k, v)
     for b in (["task/x", "task/日本語"] if "<作業ブランチ>" in tmpl else [None]):
@@ -2449,13 +2635,6 @@ for label, rel, pat in items:
             print("NG\t%sを置き換える\t字面にタブか改行がある" % tag)
         else:
             print("OK\t%s\t%s" % (tag, cmd))
-same_tag = "無人の push の字面が SKILL.md と discover-mode.md で同じ"
-if len(pushes) != 2:
-    print("NG\t%s\t両方の文書から取り出せない(%d 文書)" % (same_tag, len(pushes)))
-elif pushes["SKILL.md"] == pushes["discover-mode.md"]:
-    print("YES\t%s\t-" % same_tag)
-else:
-    print("NG\t%s\t字面が違う" % same_tag)
 PY
 )"
 UW_PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind": "prefix", "words": ["python3"]}); print(json.dumps(a))')"
@@ -2483,6 +2662,7 @@ if [ -n "$UW_CTRL" ]; then
 else
   ng "無人の周の字面: 掛け方の対照(python3 で始まる字面を取り出せない)"
 fi
+PPR=""
 pa "Bash の mkdir .claude/reviews/sub" Bash "$(bash_in 'mkdir .claude/reviews/sub')"
 pa "Bash の git status --short > .claude/reviews/st.txt(git が許可リストにある)" Bash "$(bash_in 'git status --short > .claude/reviews/st.txt')"
 pa "Bash の rm -f .claude/grasp.md" Bash "$(bash_in 'rm -f .claude/grasp.md')"
@@ -2548,8 +2728,8 @@ pdk "cd の前置きの後ろの ; より後ろは入力の cwd からも解く(
   "$(bash_in 'CDPATH= cd -P -- src && git status ; cat ../src/x.txt')"
 pdk "cd の前置きの後ろの裸引数も P から解く(… .claude && git status || echo x > settings.json)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- .claude && git status || echo x > settings.json')"
-pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && git || echo > settings.json)" protected Bash \
-  "$(bash_in 'CDPATH= cd -P -- .claude && git || echo > settings.json')"
+pdk "cd の前置きの後ろの || より後ろは P からも解く(… .claude && test || echo > settings.json)" protected Bash \
+  "$(bash_in 'CDPATH= cd -P -- .claude && test || echo > settings.json')"
 pdk "cd の前置きの後ろは最初の || で分ける(… src && git status || cat ../src/x.txt ; git log)" other Bash \
   "$(bash_in 'CDPATH= cd -P -- src && git status || cat ../src/x.txt ; git log')"
 # P から解くと W(.claude/reviews/ の下)、入力の cwd から解くと保護パスになる書き込み先で、2 回目の判定の種類を縛る
@@ -2730,6 +2910,50 @@ pa "git hash-object .claude/reviews/msg.txt" Bash "$(bash_in 'git hash-object .c
 pa "cat < .claude/reviews/msg.txt" Bash "$(bash_in 'cat < .claude/reviews/msg.txt')"
 pa "gh pr create --title t --body-file - < .claude/reviews/pr.md" Bash "$(bash_in 'gh pr create --title t --body-file - < .claude/reviews/pr.md')"
 pa "git commit -F .claude/reviews/msg.txt" Bash "$(bash_in 'git commit -F .claude/reviews/msg.txt')"
+pdk "H35: Git alias の -c を拒否" other Bash "$(bash_in "git -c alias.pwn='!touch .claude/settings.json' pwn")"
+pdk "H35: Git symbolic-ref の更新を拒否" other Bash "$(bash_in 'git symbolic-ref refs/remotes/origin/HEAD refs/heads/evil')"
+pdk "H35: Git tag の更新を拒否" other Bash "$(bash_in 'git tag -f x HEAD')"
+pdk "H35: Git remote の更新を拒否" other Bash "$(bash_in 'git remote rename origin evil')"
+pdk "H35: Git add の file pathspec を拒否" other Bash "$(bash_in 'git add --pathspec-from-file=src/x')"
+pdk "H35: Git grep の pager option を拒否" other Bash "$(bash_in "git grep --open-files-in-pager='touch .claude/settings.json' x")"
+pdk "H35: Git cat-file の textconv を拒否" other Bash "$(bash_in 'git cat-file --filters HEAD:src/x')"
+pdk "H35: Git diff の output option を拒否" other Bash "$(bash_in 'git diff --output=.claude/settings.json')"
+pdk "H35: Git checkout の magic pathspec を拒否" other Bash "$(bash_in "git checkout -- ':(glob)**/.claude/*'")"
+pdk "H35: Git restore の全体操作を拒否" other Bash "$(bash_in 'git restore .')"
+pdk "H35: Git clean を拒否" other Bash "$(bash_in 'git clean -fd')"
+pdk "H35: Git branch の作成を拒否" other Bash "$(bash_in 'git branch accidental')"
+pdk "H35: Git reflog の削除を拒否" other Bash "$(bash_in 'git reflog drop HEAD')"
+pdk "H35: env 経由の Git clean を拒否" other Bash "$(bash_in 'env git clean -fd')"
+pdk "H35: command 経由の Git reset を拒否" other Bash "$(bash_in 'command git reset --hard')"
+pdk "H35: bash -c 経由の Git clean を拒否" other Bash "$(bash_in "bash -c 'git clean -fd'")"
+pa "H35: Git symbolic-ref の HEAD query を許す" Bash "$(bash_in 'git symbolic-ref --quiet HEAD')"
+pa "H35: Git remote の query を許す" Bash "$(bash_in 'git remote get-url --all origin')"
+pa "H35: Git switch -c を許す" Bash "$(bash_in 'git switch -c task/h35-normal')"
+pa "H35: Git switch --no-track -c を許す" Bash "$(bash_in 'git switch --no-track -c task/h35-unattended')"
+pa "H35: base-commit の verify query を許す" Bash \
+  "$(bash_in "git -c core.splitIndex=false -c core.filemode=true -c core.symlinks=true rev-parse --verify --quiet 'HEAD^{commit}'")"
+pa "H35: index 除外確認の diff --no-relative を許す" Bash \
+  "$(bash_in "git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**'")"
+pa "H35: refs の format query を許す" Bash \
+  "$(bash_in "git for-each-ref --format='%(objectname)%09%(refname)' refs/heads/task refs/remotes")"
+pa "H35: 日本語 task branch を許す" Bash "$(bash_in 'git switch --no-track -c task/候補-日本語')"
+pa "H35: 空 tree の hash-object を許す" Bash "$(bash_in 'git hash-object -t tree /dev/null')"
+pa "H35: 連結した安全な -c を許す" Bash "$(bash_in 'git -ccore.hooksPath=/dev/null status --short')"
+pdk "H23: sed の read script を拒否" other Bash "$(bash_in "sed -n '1r .claude/settings.json' src/x")"
+pdk "H23: sed の execute flag を拒否" other Bash "$(bash_in "sed -n 's/x/y/e' src/x")"
+pa "H23: sed --sandbox の print script を許す" Bash "$(bash_in "sed --sandbox -n '1,3p' src/x")"
+pdk "H23: find -exec を拒否" other Bash "$(bash_in 'find . -exec touch .claude/settings.json \;')"
+pdk "H23: find -delete を拒否" other Bash "$(bash_in 'find . -delete')"
+PALLOW="$(printf '%s' "$PERM_ALLOW_JSON" | python3 -c 'import json,sys; a=json.load(sys.stdin); a.append({"kind":"prefix","words":["find"]}); print(json.dumps(a))')"
+pa "H23: find の読み取り action を許す" Bash "$(bash_in "find . -type f -name '*.txt' -print")"
+PALLOW=""
+pdk "H23: 任意 awk program を拒否" other Bash "$(bash_in "awk 'BEGIN { system(\"touch .claude/settings.json\") }'")"
+pdk "H40: gh api を拒否" other Bash "$(bash_in 'gh api repos/example/example')"
+pdk "H40: gh repo edit を拒否" other Bash "$(bash_in 'gh repo edit --visibility public')"
+pdk "H40: gh の .env stdin を拒否" other Bash "$(bash_in 'gh pr create --title t --body-file - < .env')"
+pdk "H40: gh の複数 stdin を拒否" other Bash "$(bash_in 'gh pr create --title t --body-file - < .claude/reviews/pr.md < src/x')"
+pdk "H40: gh の pipe stdin を拒否" other Bash "$(bash_in 'cat .claude/reviews/pr.md | gh pr create --title t --body-file -')"
+pa "H40: gh pr view の state query を許す" Bash "$(bash_in 'gh pr view 1 --json state')"
 pdk "旧い受け方(tmp=\"\$(mktemp)\" && …)" other Bash "$(bash_in "tmp=\"\$(mktemp)\" && bash $PP/skills/do-task/scripts/diff-snapshot.sh --cwd $PW --precheck > \"\$tmp\"")"
 pdk "TOP=\$(git rev-parse --show-toplevel)" other Bash "$(bash_in 'TOP=$(git rev-parse --show-toplevel)')"
 pdk "git -C \"\$TOP\" rev-parse HEAD" other Bash "$(bash_in 'git -C "$TOP" rev-parse HEAD')"
@@ -3134,15 +3358,16 @@ SPACEPLUG="$W/plug dir"
 rm -rf "$SPACEPLUG"
 cp -r "$PLUG" "$SPACEPLUG"
 LOOP_BIN="$SPACEPLUG/skills/ship-task/scripts/loop.sh"
-run_loop d22 "CLAUDE_CONFIG_DIR=$W/ccd" -- --repo "$R" --allowed-tools 'Bash(git:*)' "${COMMON_ARGS[@]}"
+mkdir -p "$W/tmp space"
+run_loop d22 "CLAUDE_CONFIG_DIR=$W/ccd" "TMPDIR=$W/tmp space" -- --repo "$R" --allowed-tools 'Bash(git:*)' "${COMMON_ARGS[@]}"
 LOOP_BIN="$LOOP"
 check "D22: 1 周回って終わる(プラグインルートに空白を含む配置)" 0 "$RC"
 check "D22 ①: 周の worktree の .claude/reviews/ が周の起動の前にある" yes "$(cat "$REC/reviews-hookcall-a" 2>/dev/null)"
 E="$REC/env-hookcall-a"
 check "D22: 子の環境の DEV_WORKFLOW_LOOP_WORKTREE は周の worktree の物理パス" "$(cat "$REC/cwd-hookcall-a" 2>/dev/null)" "$(sed -n 's/^DEV_WORKFLOW_LOOP_WORKTREE=//p' "$E")"
 has "D22: 子の環境の DEV_WORKFLOW_LOOP_PERMLOG" "$E" "DEV_WORKFLOW_LOOP_PERMLOG=$W/state/d22/"
-has "D22: 子の環境の DEV_WORKFLOW_LOOP_PLUGIN_ROOT" "$E" "DEV_WORKFLOW_LOOP_PLUGIN_ROOT=$SPACEPLUG"
-f "D22: 子の環境に DEV_WORKFLOW_LOOP_TASKMD は無い(環境変数は 4 つ — v20)" grep -q '^DEV_WORKFLOW_LOOP_TASKMD=' "$E"
+has "D22: 子の環境の DEV_WORKFLOW_LOOP_PLUGIN_ROOT は現在のコピー" "$E" "DEV_WORKFLOW_LOOP_PLUGIN_ROOT=$W/tmp space/"
+f "D22: 子の環境に DEV_WORKFLOW_LOOP_TASKMD は無い(task MD の特別許可は無い)" grep -q '^DEV_WORKFLOW_LOOP_TASKMD=' "$E"
 has "D22: 許可リストに --allowed-tools の Bash の規則(接頭辞)" "$E" '{"kind": "prefix", "words": ["git"]}'
 has "D22: 許可リストに利用者の設定の Bash の規則(完全一致)" "$E" '{"kind": "exact", "words": ["make", "test"]}'
 hasnt "D22: 途中の * の規則は使わない" "$E" '"main"'
@@ -3203,22 +3428,22 @@ run_loop d22 "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$W/managed1" -- --repo "$R" --d
 check "管理者設定の allowManagedHooksOnly: true で止まる" 20 "$RC"
 run_loop d22 "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$W/managed2" -- --repo "$R" --dry-run
 check "管理者設定(managed-settings.d)の disableAllHooks: true で止まる" 20 "$RC"
-# D6: 拒否の記録が保護パスの種類だけの G1 は連続に数えない / 記録が無い G1 は「hook が動いていない疑い」
+# D6: protected も欠落も同じ G1 に数える。参考ログで制限を緩めない。
 newrepo g1prot
 addtask holdg1prot-a 2026-01-01; addtask holdg1prot-b 2026-01-02; addtask pr-c 2026-01-03
 commit
 newrec g1prot
 run_loop g1prot -- --repo "$R" "${COMMON_ARGS[@]}"
-check "D6: 保護パスの拒否だけの G1 の保留は連続に数えない" 0 "$RC"
-check "D6: 保護パスの拒否だけの G1 の保留が続いても全周を回る" "holdg1prot-a holdg1prot-b pr-c" "$(calls)"
-has "D6: 保護パスの拒否だけの G1 を報告に分けて出す" "$(report_of "$OUT")" "保護パスの種類だけ"
+check "D6: 正常な保護パス拒否も G1 に数える" 10 "$RC"
+check "D6: 正常な保護パス拒否も2回で止まる" "holdg1prot-a holdg1prot-b" "$(calls)"
+has "D6: 記録の種類によらず計数" "$(report_of "$OUT")" "種類にかかわらず"
 newrepo g1oth
 addtask holdg1oth-a 2026-01-01; addtask holdg1-b 2026-01-02; addtask pr-c 2026-01-03
 commit
 newrec g1oth
 run_loop g1oth -- --repo "$R" "${COMMON_ARGS[@]}"
 check "D6: 保護パス以外の拒否の G1 は数える(2 回で止まる)" 10 "$RC"
-has "D6: 拒否の記録が無い G1 は「hook が動いていない疑い」を報告に出す" "$(report_of "$OUT")" "hook が動いていない疑い"
+has "D6: 欠落は参考記録の読取不能として報告" "$(report_of "$OUT")" "参考記録を読めない"
 fi
 
 # ════════════════ 実行と実行の間の変化 ════════════════
@@ -3232,7 +3457,8 @@ check "実行の間の変化(準備): 1 周目" 0 "$RC"
 G -C "$R" config selftest.between yes
 run_loop between -- --repo "$R" "${COMMON_ARGS[@]}"
 check "実行と実行の間の変化: 止まらずに続ける" 0 "$RC"
-has "実行と実行の間の変化: 報告に差分が出る" "$(report_of "$OUT")" "selftest.between=yes"
+has "実行と実行の間の変化: 値を出さずdigest差分を報告する" "$(report_of "$OUT")" "config の内容が変わった(sha256:"
+hasnt "実行と実行の間の変化: 設定値を出さない" "$(report_of "$OUT")" "selftest.between=yes"
 has "実行と実行の間の変化: 次のタスクを回す" "$REC/calls.log" "pr-b"
 
 fi
@@ -3571,6 +3797,16 @@ djudged() { # $1=発見元 $2=判定(先頭一致) $3=removed|kept $4=振る舞�
     f "発見の判定($4): worktree を消す" locked_reason_of "候補:$1"
   fi
 }
+# H18 の共有 ref 防御は、候補の形を調べる判定器より先に働く。
+# 異なる branch / remote-tracking OID は後続の発見元へ進めず停止し、証拠を残す。
+dshared() { # $1=停止した発見元 $2=振る舞い $3=起動済みの発見元列
+  check "発見の共有状態($2): 10 で止まる" 10 "$RC"
+  has "発見の共有状態($2): 理由" "$OUT" "[shared-state]"
+  has "発見の共有状態($2): 差分を記録" "$RP" "差分:"
+  t "発見の共有状態($2): 当該 worktree を保持" locked_reason_of "候補:$1"
+  check "発見の共有状態($2): 次の発見元を起動しない" "$3" "$(calls)"
+  t "発見の共有状態($2): 止めの印を保持" test -f "$(dirname "$(dirname "$RP")")/stop-mark.md"
+}
 disc_pair pr pr degrade
 check "発見の周(pr・degrade): キューが空で終わる" 0 "$RC"
 check "発見の周: 発見元を列の順に 1 回ずつ回す" "disc-data-audit disc-refactor" "$(calls)"
@@ -3586,7 +3822,7 @@ has "発見の周(縮退・push していない): 消し方" "$RP" "git branch -
 has "発見の周(縮退): 処理するまでその発見元は回らない" "$RP" "処理するまで、発見元 refactor は回らない"
 check "発見の周: プロンプトの字面" "/dev-workflow:ship-task --discover=data-audit --unattended" "$(cat "$REC/prompt-disc-data-audit" 2>/dev/null)"
 t "発見の周: argv の隔離・権限のフラグは実装モードと同じ" dargv_has_seq "$REC/argv-disc-data-audit" -p --output-format json \
-  --setting-sources user --strict-mcp-config --plugin-dir "$PLUG" --permission-mode acceptEdits --permission-prompts none --settings
+  --setting-sources user --strict-mcp-config --plugin-dir "$(sed -n '/^--plugin-dir$/{n;p;}' "$REC/argv-disc-data-audit")" --permission-mode acceptEdits --permission-prompts none --settings
 f "発見の周: プロンプトを位置引数で渡さない" grep -qF -- "--discover=" "$REC/argv-disc-data-audit"
 has "発見の周: 子の環境に周の印" "$REC/env-disc-data-audit" "DEV_WORKFLOW_LOOP_ITER="
 has "発見の周: 要約" "$RP" "## 発見元ごとの要約"
@@ -3624,7 +3860,10 @@ disc_pair commits twocommits untracked
 djudged data-audit "失敗(食い違い: HEAD が固定した sha の上の 1 commit でない" kept "2 commit"
 djudged refactor "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "未追跡の残り"
 disc_pair branch otherbranch fail
-djudged data-audit "失敗(食い違い: HEAD が refs/heads/task/候補-data-audit-$D12 でない" kept "今夜の名でないブランチ"
+dshared data-audit "今夜の名でないブランチ" "disc-data-audit"
+# 前の共有状態違反では未起動になる後段も、独立した正常共有状態で判定する。
+disc_pair fail none fail
+djudged data-audit "正常(候補なし)" removed "失敗扱いの前の正常な周"
 djudged refactor "失敗(結末 失敗扱い)" kept "失敗扱い"
 has "失敗の周(origin に今夜の名が無い): 報告" "$RP" "origin に task/候補-refactor-$D12 は無い"
 disc_pair hold hold holdlast
@@ -3636,21 +3875,27 @@ djudged data-audit "正常(縮退)" kept "判定の後に未追跡が書かれ�
 has "発見の周(remove の拒否): 報告" "$RP" "消せなかったので残した"
 djudged refactor "失敗(食い違い: origin の task/候補-refactor-$D12(無い)" kept "PR だが push していない"
 disc_pair pushdel pushdel pushfail
-djudged data-audit "失敗(食い違い: 結末 候補なし だが origin に task/候補-data-audit-$D12 がある)" kept "今夜の名を push してローカルを消して 候補なし"
+dshared data-audit "push 後に今夜の名のローカル branch を削除" "disc-data-audit"
+t "共有状態停止(push 後の削除): remote の証拠を保持" git -C "$B" rev-parse --verify -q "refs/heads/task/候補-data-audit-$D12"
+disc_pair pushfail none pushfail
+djudged data-audit "正常(候補なし)" removed "push 後の失敗扱いの前の正常な周"
 djudged refactor "失敗(結末 失敗扱い)" kept "push の後の失敗扱い"
-has "失敗の周: PR が開いている可能性(候補なし の食い違い)" "$RP" "origin に task/候補-data-audit-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
 has "失敗の周: PR が開いている可能性(失敗扱い)" "$RP" "origin に task/候補-refactor-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
 disc_pair pushdiff pushdiff dashname
-djudged data-audit "失敗(食い違い: 結末 縮退 だが origin の task/候補-data-audit-$D12(" kept "push した中身と違う HEAD で 縮退"
-has "発見の周(縮退・origin のブランチが判定した中身と違う): 報告" "$RP" "origin の task/候補-data-audit-$D12 が判定した中身(HEAD)と違う: PR を作らずに消す"
-hasnt "発見の周(縮退・origin のブランチが判定した中身と違う): PR の雛形を出さない" "$RP" "gh pr create -R"
+dshared data-audit "push した中身と異なる HEAD" "disc-data-audit"
+has "発見の共有状態(remote OID): 一致しない理由" "$RP" "自分の remote-tracking ref の期待状態に一致しない"
+hasnt "発見の共有状態(remote OID): PR の雛形を出さない" "$RP" "gh pr create -R"
+disc_pair dashname none dashname
+djudged data-audit "正常(候補なし)" removed "D21 違反の前の正常な周"
 djudged refactor "失敗(食い違い: D21 に外れる — <名> が '-' で始まる" kept "名が - で始まる"
 disc_pair noneclean noneuntracked noneotherbranch
 djudged data-audit "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "候補なし で未追跡を残す"
-djudged refactor "失敗(食い違い: 結末 候補なし だが HEAD が detached でない" kept "候補なし で別のブランチに居る"
+dshared refactor "候補なし で別のブランチに居る" "disc-data-audit disc-refactor"
 disc_pair nonelocal nonelocal none
-djudged data-audit "失敗(食い違い: 結末 候補なし だがローカルに task/候補-data-audit-$D12 がある)" kept "候補なし で今夜の名をローカルにだけ作る"
-djudged refactor "正常(候補なし)" removed "今夜の名がローカルにある周の後の none"
+dshared data-audit "候補なし で今夜の名をローカルにだけ作る" "disc-data-audit"
+disc_pair none none none
+djudged data-audit "正常(候補なし)" removed "変更のない候補なし"
+djudged refactor "正常(候補なし)" removed "変更のない候補なしの次の周"
 disc_pair hang hang none "" --iteration-timeout 4
 djudged data-audit "失敗(時間切れ)" kept "時間切れ"
 djudged refactor "正常(候補なし)" removed "時間切れの後の周"
@@ -3683,7 +3928,8 @@ run_loop dpushu SELFTEST_DISC_DA=pushu SELFTEST_DISC_RF=none -- --repo "$R" --di
 check "発見の周(-u つきの push): 終了コード 10" 10 "$RC"
 has "発見の周(-u つきの push): 理由" "$OUT" "[shared-state]"
 check "発見の周(-u つきの push): 次の周へ進まない" "disc-data-audit" "$(calls)"
-has "発見の周(-u つきの push): 差分を報告する" "$(report_of "$OUT")" "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
+has "発見の周(-u つきの push): 構造差分を報告する" "$(report_of "$OUT")" "保持済み config または worktree の構造が周の途中で変わった"
+hasnt "発見の周(-u つきの push): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/候補-data-audit-$D12.merge"
 # 周の途中の印(meta に mode・source・name)と、push の後の KILL の後の起動(共有の config に書かない push なら続ける)
 newdisc dkill
 newrec dkill
@@ -3700,13 +3946,12 @@ if wait_file "$REC/started-disc-data-audit" 30; then
   CHILD="$(cat "$REC/pid-disc-data-audit")"
   t "発見の周の KILL: loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
   run_loop dkill SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
-  check "発見の周の KILL の後の起動: 共有の config に書かない push なら続ける" 0 "$RC"
-  if wait_dead "$CHILD" 1; then ok "発見の周の KILL の後の起動: 残った子を止める"; else ng "発見の周の KILL の後の起動: 残った子を止める"; fi
-  f "発見の周の KILL の後の起動: 周の途中の印は消える" test -e "$SD/inflight"
-  f "発見の周の KILL の後の起動: 止めの印を置かない" test -e "$SD/stop-mark.md"
-  has "発見の周の KILL の後の起動: 発見モードの周だったことを報告する" "$(report_of "$OUT")" "発見モードの周(発見元 data-audit"
-  has "発見の周の KILL の後の起動: その発見元は今夜の名で読み飛ばす" "$(report_of "$OUT")" "data-audit: 今夜の名のブランチ task/候補-data-audit-$D12 がある"
-  has "発見の周の KILL の後の起動: ほかの発見元を回す" "$REC/calls.log" "disc-refactor"
+  check "発見の周の KILL の後の起動: 未信頼印で止まる" 20 "$RC"
+  has "発見の周の KILL の後の起動: 理由" "$OUT" '[inflight-untrusted]'
+  t "発見の周の KILL の後の起動: 印を保全" test -d "$SD/inflight"
+  hasnt "発見の周の KILL の後の起動: 他の発見元を回さない" "$REC/calls.log" disc-refactor
+  stop_fixture_children
+
 else
   ng "発見の周の KILL: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
@@ -3723,17 +3968,14 @@ if wait_file "$REC/started-disc-data-audit" 30; then
   t "発見の周の KILL(-u つきの push の後): loop.sh だけを止めると子が残る(前提)" proc_alive "$CHILD"
   run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
   check "発見の周の KILL(-u つきの push の後): 次の起動の終了コード" 20 "$RC"
-  has "発見の周の KILL(-u つきの push の後): 理由" "$OUT" "[inflight-diff]"
-  if wait_dead "$CHILD" 1; then ok "発見の周の KILL(-u つきの push の後): 残った子を止める"; else ng "発見の周の KILL(-u つきの push の後): 残った子を止める"; fi
-  f "発見の周の KILL(-u つきの push の後): 周の途中の印は消える" test -e "$SD/inflight"
-  t "発見の周の KILL(-u つきの push の後): 止めの印が残る" test -f "$SD/stop-mark.md"
-  has "発見の周の KILL(-u つきの push の後): 差分を報告する" "$(report_of "$OUT")" \
-    "差分: config: +branch.task/候補-data-audit-$D12.merge=refs/heads/task/候補-data-audit-$D12"
-  hasnt "発見の周の KILL(-u つきの push の後): ほかの発見元を回さない" "$REC/calls.log" "disc-refactor"
-  # 人が差分を確かめてから止めの印を消すと続く
-  rm -f "$SD/stop-mark.md"
+  has "発見の周の KILL(-u つきの push の後): 理由" "$OUT" '[inflight-untrusted]'
+  t "発見の周の KILL(-u つきの push の後): 印を保全" test -d "$SD/inflight"
+  hasnt "発見の周の KILL(-u つきの push の後): 他の発見元を回さない" "$REC/calls.log" disc-refactor
+  t "発見の周の KILL(-u つきの push の後): 未確認の子を保全する" proc_alive "$CHILD"
+  confirm_rejected_inflight "$SD" "発見の周の KILL(-u つきの push の後)"
   run_loop dkillu SELFTEST_DISC_RF=none -- --repo "$R" --discover "${COMMON_ARGS[@]}"
-  check "発見の周の KILL(-u つきの push の後): 止めの印を消すと続く" 0 "$RC"
+  check "発見の周の KILL(-u つきの push の後): 人が残存物を確認した後は続く" 0 "$RC"
+
 else
   ng "発見の周の KILL(-u つきの push の後): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
@@ -3811,6 +4053,7 @@ p = sys.argv[1]
 d = json.load(open(p))
 d.pop("repo:git-dir", None)
 d.pop("repo:config.worktree", None)
+d.pop("repo_admin", None)
 json.dump(d, open(p, "w"))
 PY
 }
@@ -3824,8 +4067,9 @@ for action in add delete value reorder inactive; do
   has "H20 $HC_NAME: 理由" "$OUT" '[shared-state]'
   check "H20 $HC_NAME: 次のタスクへ進まない" humancfg-a "$(calls)"
   SD="$(state_dir "$HC_NAME")"
-  has "H20 $HC_NAME: 停止印に人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree'
-  has "H20 $HC_NAME: 報告に人の設定の差分" "$(report_of "$OUT")" 'repo:config.worktree'
+  has "H20 $HC_NAME: 停止印に保持済み設定の構造差分" "$SD/stop-mark.md" '保持済み config'
+  has "H20 $HC_NAME: 報告に保持済み設定の構造差分" "$(report_of "$OUT")" '保持済み config'
+  hasnt "H20 $HC_NAME: 変更後の設定値を出さない" "$SD/stop-mark.md" selftest.human
   if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then
     ng "H20 $HC_NAME: 後続ネットワークを打たない"
   else
@@ -3864,10 +4108,10 @@ for action in add delete value unchanged absent switch legacy term; do
     hc_change value
     kill -TERM "$BG_PID"; wait_bg
     check "H20 TERM: 143" 143 "$BG_RC"
-    has "H20 TERM: 停止印に差分" "$SD/stop-mark.md" 'repo:config.worktree'
+    has "H20 TERM: 停止印に保持済み設定の構造差分" "$SD/stop-mark.md" '保持済み config'
     check "H20 TERM: 次のタスクへ進まない" longsleep-a "$(calls)"
     hc_preserved value
-    has "H20 TERM: 報告に差分" "$(report_of "$OUT")" 'repo:config.worktree'
+    has "H20 TERM: 報告に保持済み設定の構造差分" "$(report_of "$OUT")" '保持済み config'
     : >"$REC/ssh.log"
     run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
     check "H20 TERM: 停止印がある再起動は20" 20 "$RC"
@@ -3883,23 +4127,24 @@ for action in add delete value unchanged absent switch legacy term; do
     legacy) hc_strip_saved "$SD/inflight/base.json" ;;
   esac
   HC_BEFORE="$(hc_fingerprint)"
+  cp "$SD/inflight/meta" "$REC/held-meta"
+  cp "$SD/inflight/base.json" "$REC/held-base.json"
   : >"$REC/ssh.log"
   run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+  check "H20 $HC_NAME: 中断は未変更でも20" 20 "$RC"
+  has "H20 $HC_NAME: 理由" "$OUT" '[inflight-untrusted]'
+  check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
+  t "H20 $HC_NAME: 中断印を保全" test -d "$SD/inflight"
+  f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+  t "H20 $HC_NAME: 未確認の子を保全する" proc_alive "$CHILD"
+  t "H20 $HC_NAME: 中断記録を保全する" cmp -s "$REC/held-meta" "$SD/inflight/meta"
+  t "H20 $HC_NAME: 比較基準を保全する" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
+  confirm_rejected_inflight "$SD" "H20 $HC_NAME"
   if [ "$action" = unchanged ] || [ "$action" = absent ]; then
-    check "H20 $HC_NAME: 変更なしは再開" 0 "$RC"
-    check "H20 $HC_NAME: 次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
-  else
-    check "H20 $HC_NAME: 再起動は停止" 20 "$RC"
-    has "H20 $HC_NAME: 理由" "$OUT" '[inflight-diff]'
-    check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
-    t "H20 $HC_NAME: 停止印" test -f "$SD/stop-mark.md"
-    f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
-    case "$action" in
-      switch|legacy) has "H20 $HC_NAME: 前の起動元の確認を案内" "$SD/stop-mark.md" '前の起動元の設定を確認' ;;
-      *) has "H20 $HC_NAME: 人の設定の差分" "$SD/stop-mark.md" 'repo:config.worktree' ;;
-    esac
+    run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
+    check "H20 $HC_NAME: 人の確認後は正常に次周へ進む" 0 "$RC"
+    check "H20 $HC_NAME: 確認後に次のタスクを実行" 'longsleep-a pr-b' "$(calls)"
   fi
-  f "H20 $HC_NAME: 子を片付けた" proc_alive "$CHILD"
   check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
 done
 # 正常実行間は既存どおり報告だけで続く。旧形式を黙って無視しない。
@@ -3926,8 +4171,53 @@ hc_setup discover pr present linked
 run_loop "$HC_NAME" SELFTEST_DISC_DA=humancfg "SELFTEST_HUMAN_CONFIG=$HC_CONFIG" SELFTEST_HUMAN_ACTION=value -- --repo "$HC_REPO" --discover "${COMMON_ARGS[@]}"
 check "H20 発見: 停止" 10 "$RC"
 check "H20 発見: 次の発見元へ進まない" disc-data-audit "$(calls)"
-has "H20 発見: 停止印に人の設定" "$(state_dir "$HC_NAME")/stop-mark.md" 'repo:config.worktree'
+has "H20 発見: 停止印に人の設定の構造差分" "$(state_dir "$HC_NAME")/stop-mark.md" '保持済み config'
+hasnt "H20 発見: 設定値を出さない" "$(state_dir "$HC_NAME")/stop-mark.md" selftest.human
 hc_preserved value
+fi
+
+# ════════════════ 配布物・利用者環境・参考ログ(#192) ════════════════
+if want environment; then
+for attack in source skill copy guard user global; do
+  newrepo "env-$attack"; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec "env-$attack"
+  cp "$PLUG/skills/create-task/scripts/resolve-task-dir.py" "$W/resolver-save"
+  cp "$GIT_CONFIG_GLOBAL" "$W/global-save"
+  if [ -e "$W/home/.claude/settings.json" ]; then cp "$W/home/.claude/settings.json" "$W/user-save"; else rm -f "$W/user-save"; fi
+  run_loop "env-$attack" "SELFTEST_ENV_ATTACK=$attack" "SELFTEST_PLUGIN_SOURCE=$PLUG" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "環境改変($attack): 停止" 10 "$RC"
+  check "環境改変($attack): 次の周なし" pr-a "$(calls)"
+  has "環境改変($attack): 環境の照合失敗" "$(report_of "$OUT")" 'plugin または利用者設定の照合に失敗'
+  if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then ng "環境改変($attack): 後続networkなし"; else ok "環境改変($attack): 後続networkなし"; fi
+  cp "$W/resolver-save" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
+  rm -f "$PLUG/skills/ship-task/SKILL.md"
+  cp "$W/global-save" "$GIT_CONFIG_GLOBAL"
+  if [ -e "$W/user-save" ]; then cp "$W/user-save" "$W/home/.claude/settings.json"; else rm -f "$W/home/.claude/settings.json"; fi
+done
+# 初回の正常完走と、起動間の設定更新は再利用コピーを使わず成功する。
+newrepo env-normal; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec env-normal
+run_loop env-normal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+check '環境正常: 最初の周' 0 "$RC"
+SD="$(state_dir env-normal)"
+printf 'raise SystemExit(77)\n' >"$SD/environment-guard.py"
+printf 'forged\n' >"$SD/environment.json"
+mkdir -p "$W/home/.claude"; printf '{}\n' >"$W/home/.claude/settings.json"
+run_loop env-normal -- --repo "$R" "${COMMON_ARGS[@]}"
+check '環境正常: 起動間設定更新と旧STATE偽helperを再利用しない' 0 "$RC"
+check '環境正常: 次のタスクを実行' 'pr-a pr-b' "$(calls)"
+rm -f "$W/home/.claude/settings.json"
+# 攻撃と正常保留の全てに同じブレーカーを適用する。
+for attack in fake delete duplicate reorder malformed truncated fifo symlink; do
+  newrepo "log-$attack"; addtask holdg1-a 2026-01-01; addtask holdg1-b 2026-01-02; addtask pr-c 2026-01-03; commit; newrec "log-$attack"
+  printf unchanged >"$W/outside-log"
+  run_loop "log-$attack" "SELFTEST_ENV_ATTACK=$attack" "SELFTEST_LOG_OUTSIDE=$W/outside-log" -- --repo "$R" --max-consecutive-failures 50 "${COMMON_ARGS[@]}"
+  check "参考ログ($attack):2回で10" 10 "$RC"
+  check "参考ログ($attack):計数を緩めない" 'holdg1-a holdg1-b' "$(calls)"
+  check "参考ログ($attack):外部ファイル不変" unchanged "$(cat "$W/outside-log")"
+done
+newrepo log-stricter; addtask holdg1-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec log-stricter
+run_loop log-stricter SELFTEST_ENV_ATTACK=fake -- --repo "$R" --max-consecutive-failures 1 "${COMMON_ARGS[@]}"
+check 'G1: 通常ブレーカー1が厳しければ1回で10' 10 "$RC"
+check 'G1: 通常ブレーカー1の後は回らない' holdg1-a "$(calls)"
 fi
 
 # ════════════════ 後片付け ════════════════

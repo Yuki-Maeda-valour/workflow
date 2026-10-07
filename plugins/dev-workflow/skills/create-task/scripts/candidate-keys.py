@@ -149,10 +149,11 @@ def collect(task_dir: Path) -> tuple[int, dict]:
     return code, {"files": files, "names": sorted(names)}
 
 
-def check(path: str, expected: str | None) -> tuple[int, dict]:
+def check_text(text: str, expected: str | None) -> tuple[int, dict]:
+    """Check already-held candidate bytes without reopening the candidate path."""
     try:
-        parsed = Parsed(_read(path))
-    except (OSError, UnicodeDecodeError) as exc:
+        parsed = Parsed(text)
+    except UnicodeDecodeError as exc:
         problem = _problem("unreadable", f"読めない: {exc}")
         return 1, {"ok": False, "source": None, "keys": [], "problems": [problem]}
 
@@ -188,6 +189,14 @@ def check(path: str, expected: str | None) -> tuple[int, dict]:
         problems.append(_problem("checkbox", f"チェックボックス形の行がある(フェンスの中も数える。行 {lines})"))
     payload = {"ok": not problems, "source": source, "keys": parsed.keys, "problems": problems}
     return (0 if not problems else 1), payload
+
+
+def check(path: str, expected: str | None) -> tuple[int, dict]:
+    try:
+        return check_text(_read(path), expected)
+    except (OSError, UnicodeDecodeError) as exc:
+        problem = _problem("unreadable", f"読めない: {exc}")
+        return 1, {"ok": False, "source": None, "keys": [], "problems": [problem]}
 
 
 def main() -> int:
