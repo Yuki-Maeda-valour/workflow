@@ -1,10 +1,10 @@
 # 候補モード(`--candidates`)
 
-発見元(data-audit と create-task `--refactor`)の候補モードの正本。候補モードは、見つけた指摘を承認を待たずに task_dir の `候補_{名}.md`(設計書の手前の候補)として書き出す。対話点を出さず、改名・commit・チェーンの提案もしない。data-audit・create-task の SKILL.md には、各対話点に 1 行の分岐とこの文書への参照だけを置く(同じ事実を 2 か所に書かない)。
+発見元(改善の候補を見つける skill。data-audit と create-task `--refactor`)の候補モードの正本(ほかが合わせる元)。候補モードは、見つけた指摘を承認を待たずに task_dir の `候補_{名}.md`(設計書の手前の候補)として書き出す。人に確かめる場面を出さず、改名・commit・チェーンの提案もしない。data-audit・create-task の SKILL.md には、人に確かめる場面ごとに 1 行の分岐とこの文書への参照だけを置く(同じ事実を 2 か所に書かない)。
 
 - `候補_` の書式・メタ行の照合パターン・採用の引き継ぎの正本は [task-template.md](task-template.md) の記法の規約。採用の経路の手順は [../SKILL.md](../SKILL.md) の「採用の経路」
 - 識別子の定義は発見元の側に置く: data-audit は [../../data-audit/references/checks.md](../../data-audit/references/checks.md) の「候補モードの識別子と観点群」、refactor は [refactor-analysis.md](refactor-analysis.md) §6
-- 無人ループの発見の周(`/ship-task --discover=<発見元> --unattended`)が候補モードを呼ぶ。周の照合・commit・PR は [../../ship-task/references/discover-mode.md](../../ship-task/references/discover-mode.md)
+- 無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=<発見元> --unattended`)が候補モードを呼ぶ。周の照合(照らし合わせて確かめること)・commit・PR は [../../ship-task/references/discover-mode.md](../../ship-task/references/discover-mode.md)
 - `--candidates` を付けなければ、この文書は使わない(既存の「承認 → /create-task チェーン」のまま)
 
 ## 1. 引数
@@ -36,15 +36,15 @@
 
 ## 3. 対話点と工程の置き換え
 
-無人の周の対話点の表([../../ship-task/references/unattended-mode.md](../../ship-task/references/unattended-mode.md) §4)からは、この表を指す。候補モードでは、`--unattended` の有無に関わらず、この表のとおりに振る舞う。
+無人の周の対話点の表(人に確かめる場面の表。[../../ship-task/references/unattended-mode.md](../../ship-task/references/unattended-mode.md) §4)からは、この表を指す。候補モードでは、`--unattended` の有無に関わらず、この表のとおりに振る舞う。
 
 | 発見元 | 場所 | 対話(既定) | 候補モード |
 |---|---|---|---|
 | data-audit | Phase 0 の 1(`has_code: false`) | 対象外と報告して終える | 何も書かずに、結果の行 `候補なし` を返す |
 | data-audit | Phase 0 の 2(把握) | /understand-project の実行を促す | 促さない。マニフェストから最小限のスタック把握を行う |
-| data-audit | Phase 2(観点別スキャン) | そのまま | そのまま。無人では委託プロンプトに要点を写す(§7)。`--layer=frontend` 単独の F3 の「要バックエンド突合」は、候補にせず報告だけにする |
-| data-audit | Phase 3(裏取り) | 裏取り・誤検知の除去・統合・レポートの保存 | そのまま(team-lead の裏取りは省けない)。ただし 3 の「同一根本原因の統合」は、キーの単位(同じ観点群・同じ識別子)の中だけで行う |
-| data-audit | Phase 4(トリアージ) | 質問で確認して選ぶ。「要確認」は質問として示す | 尋ねない。選定(§4)で機械的に選ぶ。「要確認」は落とさず、確度 `要確認` の候補として書き、質問は候補の「人が確かめること」の節に置く |
+| data-audit | Phase 2(観点別スキャン) | そのまま | そのまま。無人では委託(作業を別の AI に任せること)プロンプトに要点を写す(§7)。`--layer=frontend` 単独の F3 の「要バックエンド突合」は、候補にせず報告だけにする |
+| data-audit | Phase 3(裏取り〈実際のコードやファイルを読んで確かめること〉) | 裏取り・誤検知の除去・統合・レポートの保存 | そのまま(team-lead〈作業を進め、結果を確かめる側の AI〉の裏取りは省けない)。ただし 3 の「同一根本原因の統合」は、キーの単位(同じ観点群・同じ識別子)の中だけで行う |
+| data-audit | Phase 4(トリアージ〈指摘を扱いごとに振り分けること〉) | 質問で確認して選ぶ。「要確認」は質問として示す | 尋ねない。選定(§4)で機械的に選ぶ。「要確認」は落とさず、確度 `要確認` の候補として書き、質問は候補の「人が確かめること」の節に置く |
 | data-audit | Phase 5(チェーン) | グルーピングの提案と /create-task へのチェーン | しない。書き出し(§5)を行い、結果の行(§6)を返す |
 | create-task | Phase 0 の 1・2(把握) | そのまま | そのまま |
 | create-task | Phase 0 の 3(保存先) | 解決できなければ停止。無ければ作る | 書き出しの手順 1 で解く。ディレクトリは候補を書くときに作る |
@@ -52,11 +52,11 @@
 | create-task | Phase 1 の 1(入口ガード) | 調査を先に行う提案 | しない |
 | create-task | Phase 1 の 2(分解と種別) | 曖昧な点を質問で確かめる | 尋ねない。種別はリファクタ |
 | create-task | Phase 1 の 2(リファクタの候補) | スコア付きで示し、どれをタスク化するか確かめる | 尋ねない。refactor-analysis.md §6 の足切りと選定(§4)で機械的に選ぶ |
-| create-task | Phase 1 の 3・4(researcher の調査) | 現状・類似実装・影響・doc/06・03・07 | refactor-analysis.md §1〜3 と、候補に要る調査(before メトリクス・path:line・doc/06 の該当)だけ。team-lead がメトリクスを測り直して裏を取る。無人では委託プロンプトに要点を写す(§7) |
-| create-task | Phase 1.5・2・3・4.5 | 影響範囲調査・タスク MD・checker・設計レビュー | 行わない(採用のときに create-task の checker と設計レビューが必ず走る) |
+| create-task | Phase 1 の 3・4(researcher〈調べものを受け持つ AI〉の調査) | 現状・類似実装・影響・doc/06・03・07 | refactor-analysis.md §1〜3 と、候補に要る調査(before メトリクス・path:line・doc/06 の該当)だけ。team-lead がメトリクスを測り直して裏を取る。無人では委託プロンプトに要点を写す(§7) |
+| create-task | Phase 1.5・2・3・4.5 | 影響範囲調査・タスク MD・checker(設計書を点検する AI)・設計レビュー | 行わない(採用のときに create-task の checker と設計レビューが必ず走る) |
 | create-task | 完了報告・一気通貫の提案 | 報告と `/ship-task` の提案 | 提案しない。結果の行(§6)を返す |
 
-- 表に無い対話点が出たら、尋ねずに停止する(無人では失敗扱い)
+- 表に無い、人に確かめる場面が出たら、尋ねずに停止する(無人では失敗扱い)
 - 独立レビュー: `候補_` には当てない。候補は設計の手前で、コード・設定・正本の doc ではない。採用のときに create-task の checker と設計レビューが必ず走る(design §5-23 の対象外)
 
 ## 4. 選定
@@ -75,7 +75,7 @@
 3. 指摘ごとにキーを正規化(§2)して、既知の集合と比べる。在れば書かず、報告にキー・既存のファイル・状態・見送りかを載せる(`完了_` なら回帰の疑い — §2)。同じ実行の中で重なったキーは、1 つにまとめる
 4. `git status --porcelain=v1 --untracked-files=all` を控える(git の作業ツリーでなければ task_dir の直下の一覧)。名の衝突を解いてから(task-template.md の「候補の書式」の名)、選定の順で上限まで `Write` する。書くのは新しい `候補_*.md` だけで、既存の状態名 MD は書き換えない
 5. 増えたのが task_dir の新しい `候補_*.md` だけかを、4 で控えたものと比べて確かめる。書いた各ファイルを `python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> <パス>` で確かめる。どちらかが通らなければ失敗扱い(書いたファイルは消さずに報告する)
-6. 報告を `.claude/reviews/candidates-<発見元>.md` に保存する(書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い)。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く): 書いた候補・既知として除いたキーと既存のファイル・上限超え・回帰の疑い・除外(誤検知の除去・セキュリティ由来の除外)と理由・走査の範囲・未監査と理由。書式は次のとおり(見出しの字面を変えない。loop.sh が状態ディレクトリに写し、人と実走の確かめが読む)
+6. 報告を `.claude/reviews/candidates-<発見元>.md` に保存する(書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い)。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く): 書いた候補(見つけた改善案のうち、まだ採用していないもの)・既知として除いたキーと既存のファイル・上限超え・回帰の疑い・除外(誤検知の除去・セキュリティ由来の除外)と理由・走査の範囲・未監査と理由。書式は次のとおり(見出しの字面を変えない。loop.sh が状態ディレクトリに写し、人と実走の確かめが読む)
    - `## 書いた候補`: `` - `<キー>` — <パス> `` を 1 行に 1 つ
    - `## 既知として除いた指摘`: `` - `<キー>` — <既存のファイル>(<状態名>) `` を 1 行に 1 つ。見送りの候補なら末尾に ` 見送り`、回帰の疑いなら ` 回帰の疑い` を足す
    - `## 上限超え`・`## 除外`(理由つき)・`## 走査の範囲と未監査`: 同じく 1 行に 1 つ
@@ -115,7 +115,7 @@
 
 - 周の Bash の書き方・委託するサブエージェントの要点・G1 は、unattended-mode.md のとおりに効く
 - data-audit の Phase 2 の委託と、create-task の refactor の researcher の委託にも、unattended-mode.md の「委託するサブエージェント」の項の要点を、要約し直さずに委託プロンプトへ写す
-- 引用符の外のグロブで一覧を取る書き方は、許可の仲介に拒否される。既知のキーは `candidate-keys.py` で集める
+- 引用符の外のグロブで一覧を取る書き方は、許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)に拒否される。既知のキーは `candidate-keys.py` で集める
 - 許可の拒否(G1)は、候補モードでは常に失敗扱い(`保留_` にするタスク MD が無い)。書きかけの `候補_` は残す(worktree ごと残る)
 - **書き込みの範囲**: task_dir の新しい `候補_*.md` と、状態ファイル(`.claude/reviews/`・`.claude/grasp.md`)だけ。data-audit の原則 1 と create-task の原則 1 の例外
 - **許可の前提**: `候補_` の `Write` は、保護パスの外の worktree の中への書き込みなので、編集の自動許可で確認に回らず、許可の仲介の hook に届かない(実装モードで do-task がソースやタスク MD を書くのと同じ経路)。task_dir が保護パスの下なら、`loop.sh` が起動時に止める([../../ship-task/references/loop.md](../../ship-task/references/loop.md) §3 の 3)。確認に回る構成(`loop.sh` の `--allow-classifier` で分類器が確認に回したときなど)では、hook が W の外として拒否し、G1 で失敗扱いになる
@@ -126,7 +126,7 @@
 - [ ] 書いた各候補が `candidate-keys.py --check --source=<発見元>` で ok
 - [ ] 全指摘に path:line と実コードの裏取りがある(data-audit は Phase 3、refactor はメトリクスの測り直し)
 - [ ] 機密の値を候補と報告に書いていない(値ではなく場所で書いた)
-- [ ] 対話点を出していない(質問で確認すること・承認・チェーン・一気通貫・入口ガードの提案)
+- [ ] 人に確かめる場面を出していない(質問で確認すること・承認・チェーン・一気通貫・入口ガードの提案)
 - [ ] 置き場を確かめてから、報告を `.claude/reviews/candidates-<発見元>.md` に保存した
 - [ ] 最後の行が結果の行で、N・M・K・R・E が報告と合う
 
