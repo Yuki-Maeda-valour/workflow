@@ -47,7 +47,7 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 - シグネチャ例: `findMany()`(select 無し)→ そのまま return、Eloquent `->get()` → `->toJson()`、Django Model → `JsonResponse(model.__dict__)`
 
 ### B2 認証・認可の欠如 — 重大
-- **何を探すか**: Phase 1 の境界一覧の**各エントリ**について、認証チェック(セッション / トークン検証、ミドルウェア適用、server action 冒頭の認可関数)が通るかを突合する。ミドルウェアの除外パス(matcher / except)設定も確認
+- **何を探すか**: Phase 1 の境界一覧の**各エントリ**について、認証チェック(セッション / トークン検証、ミドルウェア適用、server action 冒頭の認可関数)が通るかを突合(2 つを照らし合わせて食い違いを探すこと)する。ミドルウェアの除外パス(matcher / except)設定も確認
 - **判定**: 認可が見つからない境界のうち、profile の `audit.public_boundaries` に載っていないもの → **重大**(公開が意図なら profile への追記を提案)
 - 注意: server actions は「フォームから呼ばれるだけ」でも公開エンドポイントである(直接呼び出し可能)
 
@@ -105,7 +105,7 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 
 ## 候補モードの識別子と観点群(指摘キー)
 
-候補モード(`--candidates`。手順・正規化・既知の判定の正本は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md))で、候補の指摘キー `data-audit:{観点群}:{種類}:{識別子}` を決める定義。同じ指摘の同一性を、行番号に頼らずに表す。
+候補モード(`--candidates`。手順・正規化・既知の判定の正本〈ほかが合わせる元〉は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md))で、候補の指摘キー `data-audit:{観点群}:{種類}:{識別子}` を決める定義。同じ指摘の同一性を、行番号に頼らずに表す。
 
 ### 観点群と候補の単位
 
