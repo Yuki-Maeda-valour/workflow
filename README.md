@@ -119,6 +119,9 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 - **契約の正本**(引数・既定値・停止条件・終了コード・報告・限界)は [loop.md](plugins/dev-workflow/skills/ship-task/references/loop.md) の 1 ファイルだけで、README や design はそれを参照する。
 
 ```bash
+# 最初とホスト CLI を更新したときに、人のシェルから 1 回: 許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)の hook が実際に効くことを確かめ、証明を書く
+bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
+  --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>' --prove-host
 # 人のシェルから(まず --dry-run で対象の一覧と、周で起動するコマンドを確かめる)
 bash ~/dev/workflow/plugins/dev-workflow/skills/ship-task/scripts/loop.sh \
   --repo ~/dev/対象プロジェクト --allowed-tools '<許可リスト>' --dry-run
@@ -132,7 +135,9 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 ```
 
 - **起動の場所**: 人のシェルか cron から、利用者が持つこのリポジトリの clone のパスで呼ぶ。導入先のキャッシュは版ごとのパスなので、そこから呼ぶとプラグインを更新しても古い版が走る。ホストのセッションの中から起動されたと判定したら止まる
-- **cron と手動の起動で環境を揃える**: `HOME`・`XDG_STATE_HOME` を同じにする。揃わないと状態ディレクトリが別になり、ロックと止めの印(人が消すまで無人ループを止める印のファイル)が共有されない(二重起動を防げず、止めの印があっても cron の起動が進む)。PATH は上の例のように crontab に書く
+- **cron と手動の起動で環境を揃える**: `HOME`・`XDG_STATE_HOME`・`XDG_CONFIG_HOME` を同じにする。`HOME`・`XDG_STATE_HOME` が揃わないと状態ディレクトリが別になり、ロックと止めの印(人が消すまで無人ループを止める印のファイル)が共有されない(二重起動を防げず、止めの印があっても cron の起動が進む)。`XDG_CONFIG_HOME` が揃わないと、手動で書いたホスト CLI の証明が見つからず exit 20(`host-proof`)で止まる。ループ用の `CLAUDE_CONFIG_DIR` で起動するなら、cron にも同じ値を渡す(正本は loop.md §1)。PATH は上の例のように crontab に書く
+- **ホスト CLI の証明**: `loop.sh` は、`--prove-host` で確かめた実体(実行ファイルの中身と置き場)と起動の形(`loop.sh` が足す隔離・権限・hook のフラグ)でしかホスト CLI を起動しない(`--dry-run` も)。この版へ初めて上げたとき(証明がまだ無い)・ホスト CLI を更新したとき(自動更新を含む)・`loop.sh` の起動の形が変わる版に上げたときは、`--prove-host` を打つ(打つまで `--dry-run` も止まる)。打つ前に、更新が正規のものかを確かめる(例: native の導入(ホスト CLI を単体の実行ファイルとして入れる導入)なら、実体が `~/.local/share/claude/versions/<版>` のファイルそのもので、その版が `--version` の値と同じこと)。`--prove-host` は打った時点の実体を信頼する。`--allow-classifier` の形は、分類器(操作を自動で許すかを AI が判定する仕組み)が許可の仲介を通さずに書き込みを許した(Claude Code 2.1.289 の実測)ため証明を書けず、今は起動しない。証明は署名ではない(正本は loop.md §2 の 12・§10)
+- **skill・plugin の allowed-tools**: 有効な plugin・利用者の skill と command の `allowed-tools` が許可リストより広いと、起動時に止まる(`--dry-run` も)。その plugin・skill を無効にするか、ループ用の設定ディレクトリ(`CLAUDE_CONFIG_DIR`)で起動する。許可リストより広いだけの規則なら、同じ規則を許可リストに足してもよい(人が決める。Bash の全体・解釈できない形などは足しても止まる。正本は loop.md §4)
 - **導入済みの版との関係**: `loop.sh` は自分が置かれたプラグイン(clone)を周のセッションに渡す。導入済みの `dev-workflow` が有効で版が違えば、起動時に止まる(導入済みを更新するか、無効にする)。同じ版なら中身が同じとみなす
 - **許可リスト**: 全許可のモードは使わない。
   - 許可リストはホストの利用者設定か `--allowed-tools` で渡し(profile では受け付けない)、コマンド単位で列挙する(git・gh・python3・bash・判定と照合〈照らし合わせて確かめること。test・echo・sha256sum〉・読み取り系・品質ゲートのコマンドなど)。

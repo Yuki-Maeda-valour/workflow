@@ -2,6 +2,24 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.24.0
+
+### 追加
+
+- 無人ループに `--prove-host` を足した([子 Issue #193](https://github.com/Yuki-Maeda-valour/workflow/issues/193)、親 #107 の H31)。周(無人ループの 1 回分の実行)の子と同じ起動で、cwd の外への `Write` を許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)の hook が拒否したことを確かめたときだけ、ホスト CLI の証明を書く。
+- 起動時に、ホスト CLI の実体(realpath・inode・内容の sha256)を一度も起動しないうちに控え、証明が無い実体・起動の形(`loop.sh` が足す隔離・権限・hook のフラグ)を起動しない。`--version`・`--help` の出力が証明と違えば止まる。以後の補助の CLI(セッションを起動しない `--version`・`--help`・認証の確認・プラグインの一覧)と周の子は控えた実体で起動し、直前に同じ実体かを照らし合わせる。ホスト CLI を更新したら `--prove-host` を打ち直す。
+- 有効な plugin・利用者の skill と command・`--plugin-dir` のコピーの frontmatter の `allowed-tools` が、許可リストより広い権限を足さないかを判定する(H34。許可リストと同じか狭い規則だけを通す)。plugin のマニフェストの `commands` から合成される分(`allowedTools`・インラインの `content`)も含める。Bash の全体・未知の道具・解釈できない形・重複は理由とファイルを出して止まる。`setup.sh --global` が作る skill のリンクは、控えた字面と対象の実体が同じときだけ辿る。
+
+### 変更
+
+- 更新の後の手順: この版に上げた後、cron などで回す前に、人が同じ引数(`--repo`・`--host-argv`・`--allowed-tools`・`--mcp-config`)に `--prove-host` を足して 1 回打つ。打つまで `loop.sh` と `--dry-run` は exit 20(`host-proof`)で止まる。ホスト CLI を更新したときと、`loop.sh` の起動の形が変わる版に上げたときも打ち直す。
+- `--dry-run` も、ホスト CLI の証明と allowed-tools の検査を通らないと exit 20 になる。
+- `loop.sh` は `stat` も要る(無ければ `tool-missing` で止まる)。
+- hook などの自動の読み込みを止める環境変数(`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`)が立っていると、起動時に止まる(exit 20・`hooks-disabled`)。証明を取った起動と形が違うため。
+- cron と手動の起動で `HOME`・`XDG_CONFIG_HOME`(証明の置き場)を揃える。揃わないと cron の起動が証明を見つけられず exit 20(`host-proof`)で止まる。
+- `--allowed-tools` に道具の名だけの規則(`Grep` など)を渡していたら外す。Claude Code 2.1.289 の実測で、`Grep` を名だけで許すと cwd の外の読み取りが許可の仲介を通らずに通った(#107 の H47)。
+- `--allow-classifier` の無人ループは起動しなくなった(起動時に exit 20・`classifier` で拒否する。`--prove-host`・`--dry-run` も同じ)。Claude Code 2.1.289 の実測で、分類器(操作を自動で許すかを AI が判定する仕組み)が worktree の外への `Write` を許可の仲介を通さずに許したため、証明を書けない(#107 の H48: 分類器の起動での許可の仲介の素通り)。
+
 ## v4.23.10
 
 ### 変更
