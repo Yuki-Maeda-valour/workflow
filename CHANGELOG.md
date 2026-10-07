@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.23.8
+
+### 修正
+
+- `/init-project` の完了時に、`.codex/config.toml` だけを生成・変更した場合も、Codex が設定を読む条件と既存設定の注意点を案内する。各ホストの説明は、その設定ファイルを生成・変更した場合に出す([Issue #195](https://github.com/Yuki-Maeda-valour/workflow/issues/195))。
+- Serena の「使う(設定は自分で行う)」を選んだ人に、設定先・貼り付け用の設定例・接続確認を案内する。`uv` が無い場合は導入手順も示す。この案内では設定ファイルを書き込まず、既存の生成・承認の規則を保つ([Issue #196](https://github.com/Yuki-Maeda-valour/workflow/issues/196))。
+
 ## v4.23.7
 
 ### 修正
