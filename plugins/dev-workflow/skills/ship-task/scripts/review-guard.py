@@ -16,9 +16,11 @@ import importlib.util
 import re
 import hashlib
 import json
+import math
 import os
 import stat
 import secrets
+import shutil
 import time
 import subprocess
 import sys
@@ -1023,7 +1025,26 @@ def verify(args: argparse.Namespace) -> int:
     return 0 if good else 1
 
 
+def check_process_module():
+    spec = importlib.util.spec_from_file_location("review_guard_check_process", Path(__file__).with_name("check-process.py"))
+    module = importlib.util.module_from_spec(spec)
+    # 検査対象内の helper でも .pyc を生成しない。呼出元の設定は必ず戻す。
+    previous = sys.dont_write_bytecode
+    try:
+        sys.dont_write_bytecode = True
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
+    return module
+
+
 def run_checks(args: argparse.Namespace) -> int:
+    try:
+        valid_timeout = type(args.timeout) is int and args.timeout > 0 and math.isfinite(float(args.timeout))
+    except OverflowError:
+        valid_timeout = False
+    if not valid_timeout:
+        raise GuardError("timeout は有限の正の整数が必要")
     root, saved, patterns = read_context(args)
     if not check_current(args, saved, root, patterns):
         raise GuardError("品質実行前に集合が変わった")
@@ -1034,51 +1055,76 @@ def run_checks(args: argparse.Namespace) -> int:
         raise GuardError("品質コマンド計画が空")
     results = []
     # 実リポジトリの index/config/hooks/ignore・既存未追跡・ignored 生成物を持ち込まない。
-    with tempfile.TemporaryDirectory(prefix="review-guard-clean-") as directory:
-        clean = Path(directory)
-        for item in saved["worktree"]:
-            if item["path"] not in saved["commit_paths"]:
-                continue
-            target = clean / item["path"]
-            target.parent.mkdir(parents=True, exist_ok=True)
-            if item["kind"] == "gitlink":
-                target.mkdir(exist_ok=True)
-            elif item["kind"] == "symlink":
-                # checkout の外へ向くリンクを品質コマンドに渡さない。
-                resolved = (target.parent / item["link"]).resolve()
-                if clean not in resolved.parents:
-                    raise GuardError("clean checkout の外を指す symlink")
-                target.symlink_to(item["link"])
-            else:
-                raw = read_regular(root / item["path"], "clean checkout 入力")
-                if sha256(raw) != item["sha256"]:
-                    raise GuardError("clean checkout 作成中に入力が変わった")
-                target.write_bytes(raw)
-                target.chmod(int(item["mode"], 8))
-        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
-        env["GIT_CONFIG_NOSYSTEM"] = "1"
-        env["GIT_CONFIG_GLOBAL"] = os.devnull
-        env["GIT_NO_LAZY_FETCH"] = "1"
-        subprocess.run(["git", "init", "-q", str(clean)], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        # 機密除外済みの実体だけ。clean checkout の git 依存 test 用に index と HEAD も作る。
-        subprocess.run(["git", "-C", str(clean), "add", "-f", "--all"], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for item in saved["worktree"]:
-            if item["kind"] == "gitlink" and item["path"] in saved["commit_paths"]:
-                subprocess.run(["git", "-C", str(clean), "update-index", "--add", "--cacheinfo", "160000", item["oid"], item["path"]],
-                               env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        subprocess.run(["git", "-C", str(clean), "-c", "user.name=review-guard", "-c", "user.email=review-guard@example.invalid",
-                        "-c", "core.hooksPath=/dev/null", "commit", "-qm", "reviewed tree"], env=env, check=True,
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        for command in commands:
-            if not isinstance(command, dict) or not isinstance(command.get("name"), str) or not command["name"] or not isinstance(command.get("argv"), list) or not command["argv"] or not all(isinstance(a, str) and "\0" not in a for a in command["argv"]):
-                raise GuardError("品質コマンドの name/argv が不正")
-            try:
-                proc = subprocess.run(command["argv"], cwd=clean, env=env, stdin=subprocess.DEVNULL,
-                                      stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=args.timeout)
-                results.append({"name": command["name"], "argv": command["argv"], "exit_code": proc.returncode,
-                                "stdout_sha256": sha256(proc.stdout), "stderr_sha256": sha256(proc.stderr)})
-            except subprocess.TimeoutExpired:
-                results.append({"name": command["name"], "argv": command["argv"], "exit_code": None, "error": "timeout"})
+    helper = check_process_module()
+    clean = Path(tempfile.mkdtemp(prefix="review-guard-clean-"))
+    control = Path(tempfile.mkdtemp(prefix="review-guard-checks-"))
+    confirmed = True
+    stop = helper.StopSignals()
+    try:
+        with stop:
+            for item in saved["worktree"]:
+                if item["path"] not in saved["commit_paths"]:
+                    continue
+                target = clean / item["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                if item["kind"] == "gitlink":
+                    target.mkdir(exist_ok=True)
+                elif item["kind"] == "symlink":
+                    # checkout の外へ向くリンクを品質コマンドに渡さない。
+                    resolved = (target.parent / item["link"]).resolve()
+                    if clean not in resolved.parents:
+                        raise GuardError("clean checkout の外を指す symlink")
+                    target.symlink_to(item["link"])
+                else:
+                    raw = read_regular(root / item["path"], "clean checkout 入力")
+                    if sha256(raw) != item["sha256"]:
+                        raise GuardError("clean checkout 作成中に入力が変わった")
+                    target.write_bytes(raw)
+                    target.chmod(int(item["mode"], 8))
+            env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+            env["GIT_CONFIG_NOSYSTEM"] = "1"
+            env["GIT_CONFIG_GLOBAL"] = os.devnull
+            env["GIT_NO_LAZY_FETCH"] = "1"
+            subprocess.run(["git", "init", "-q", str(clean)], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # 機密除外済みの実体だけ。clean checkout の git 依存 test 用に index と HEAD も作る。
+            subprocess.run(["git", "-C", str(clean), "add", "-f", "--all"], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for item in saved["worktree"]:
+                if item["kind"] == "gitlink" and item["path"] in saved["commit_paths"]:
+                    subprocess.run(["git", "-C", str(clean), "update-index", "--add", "--cacheinfo", "160000", item["oid"], item["path"]],
+                                   env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(["git", "-C", str(clean), "-c", "user.name=review-guard", "-c", "user.email=review-guard@example.invalid",
+                            "-c", "core.hooksPath=/dev/null", "commit", "-qm", "reviewed tree"], env=env, check=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            for index, command in enumerate(commands):
+                stop.check()
+                if not isinstance(command, dict) or not isinstance(command.get("name"), str) or not command["name"] or not isinstance(command.get("argv"), list) or not command["argv"] or not all(isinstance(a, str) and "\0" not in a for a in command["argv"]):
+                    raise GuardError("品質コマンドの name/argv が不正")
+                record = control / str(index)
+                record.mkdir()
+                confirmed = False
+                outcome = helper.run_command(command["argv"], clean, env, args.timeout, record, stop)
+                confirmed = True
+                stop.check()
+                result = {"name": command["name"], "argv": command["argv"],
+                          "exit_code": outcome["returncode"],
+                          "stdout_sha256": outcome["stdout_sha256"], "stderr_sha256": outcome["stderr_sha256"],
+                          "recovery_method": outcome["recovery_method"], "recovery_scope": outcome["recovery_scope"]}
+                if outcome["timed_out"]:
+                    result.update(exit_code=None, error="timeout")
+                results.append(result)
+                if outcome["timed_out"]:
+                    break
+            stop.check()
+    except helper.RecoveryError as exc:
+        raise GuardError(f"{exc}; 検証用コピーを保持: {clean}; 診断: {control}") from exc
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        if not confirmed or stop.number:
+            raise GuardError(f"{exc}; 検証用コピーを保持: {clean}; 診断: {control}") from exc
+        raise
+    finally:
+        if confirmed and not stop.number:
+            shutil.rmtree(clean)
+            shutil.rmtree(control)
     if not check_current(args, saved, root, patterns):
         raise GuardError("品質実行中に集合が変わった")
     receipt = {"kind": "direct-checks", "review_binding_sha256": saved["review_binding_sha256"],
