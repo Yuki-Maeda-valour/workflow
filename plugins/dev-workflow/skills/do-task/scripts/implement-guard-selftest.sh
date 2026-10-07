@@ -4,7 +4,7 @@
 # 触れない(../references/external-runners.md §11 の 2026-09-17 決定 9)。
 #
 # 使い方:
-#   bash implement-guard-selftest.sh              # 全ケース(A〜K)+ 変異テスト(L)
+#   bash implement-guard-selftest.sh              # 全ケース(A〜K・M)+ 変異テスト(L)
 #   bash implement-guard-selftest.sh -v           # 各起動の終了コード・stdout・stderr も表示
 #   bash implement-guard-selftest.sh --only B1,G  # 指定したケースだけ(1 文字なら群の全体)。
 #                                                 # L を含めない限り変異テストは回さない
@@ -19,11 +19,11 @@
 # 期待終了コード: 0=成功 2=usage 20=internal 30=縮退(take) 31=引き継ぎ 32=縮退(compare)
 #                 33=比較不能・照合や復元の失敗 34=要件本文の変更 35=選択パスと実体の対応の変化
 #
-# ケース名の先頭はケース ID(A1〜K2・L)。検出の類型に当たるケース名には固定のタグ
+# ケース名の先頭はケース ID(A1〜K2・M1〜M10・L)。検出の類型に当たるケース名には固定のタグ
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
-# 変異テスト(L・13 個): 対象の写しに sed で変異を 1 つ当て(対象側の目印 `# MUT:a`〜`# MUT:m`)、
+# 変異テスト(L・14 個): 対象の写しに sed で変異を 1 つ当て(対象側の目印 `# MUT:a`〜`# MUT:n`)、
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
 # FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした変異は
 # それ自体を FAIL にする。変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
@@ -518,7 +518,7 @@ case_B4() {
   ckeq "clean: 保護領域の直下のレイアウト(作業用の一時領域を残さない)" "$(ls -A "$STATE_DIR" | LC_ALL=C sort | tr '\n' ' ')" \
     'files manifest.tsv snapshot taskmd-body '
   ckeq "clean: snapshot のレイアウト" "$(ls "$STATE_DIR/snapshot" | LC_ALL=C sort | tr '\n' ' ')" \
-    '1-diff.bin 2-status.z 4-meta.txt 5-stash.txt taskmd.txt '
+    '1-diff.bin 2-status.z 4-meta.txt 5-stash.txt config-origins.txt taskmd.txt '
   ckt "clean: 4-meta.txt に head・index-tree・branch・hooks・config が在る" \
     ine "$STATE_DIR/snapshot/4-meta.txt" "^branch${TAB}refs/heads/main\$"
   ckt "clean: 4-meta.txt に refs 全体が在る" ine "$STATE_DIR/snapshot/4-meta.txt" "^ref${TAB}[0-9a-f]{40} refs/heads/main\$"
@@ -2119,12 +2119,265 @@ case_L() {
   mutant k "タスク MD の退避の失敗を u で続行する" "C1" '/# MUT:k$/d'
   mutant l "① から -c diff.autoRefreshIndex=false を外す" "B1" '/# MUT:l$/d'
   mutant m "保護領域の候補の .. の正規化を外す" "C9 C10" '/# MUT:m$/d'
+  mutant n "origin 固有検査だけを外す" "M2" '/# MUT:n$/d'
+}
+
+# ════════════════════════ M 開始時の設定 origin ════════════════════════
+origin_repo() { # $1=名前 $2=tracked|ignored
+  base_repo "$1"
+  mkdir -p "$R/settings"
+  printf '[core]\n fsmonitor = before\n[private]\n token = ORIGIN_SECRET_219\n' >"$R/settings/active.inc"
+  if [ "$2" = ignored ]; then printf 'settings/\n' >"$R/.gitignore"; fi
+  GIT "$R" add -A -- . ':!task'
+  GIT "$R" commit -qm 'include fixture'
+  GIT "$R" config include.path ../settings/active.inc
+  take "$R" task/t.md
+  rc_is "origin $2: take 成功" 0
+}
+case_M1() {
+  CID=M1; TAG=""
+  origin_repo m1 tracked
+  local idx="$(sha_of "$R/.git/index")"
+  : >"$GITLOG"; : >"$TRACE"
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
+  rc_is "origin 不変の正常対照 → 0" 0
+  out_line "origin 不変: normal" 'RESULT=normal'
+  ckne "origin 不変: Git 呼出記録の対照" "$(gitlog_n)" 0
+  ckeq "origin 不変: index 不変" "$(sha_of "$R/.git/index")" "$idx"
+}
+case_M2() { # origin 固有の変異検出先。root は変えない
+  CID=M2; TAG="[類型:内容変更] "
+  local mode root_sha idx
+  for mode in tracked ignored; do
+    origin_repo "m2-$mode" "$mode"
+    root_sha="$(sha_of "$R/.git/config")"; idx="$(sha_of "$R/.git/index")"
+    printf '[core]\n fsmonitor = %s\n[private]\n token = ORIGIN_SECRET_219\n' "$STUBS/trace.sh" >"$R/settings/active.inc"
+    : >"$GITLOG"; : >"$TRACE"
+    runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
+    rc_is "$mode include 値変更 → 33" 33
+    out_line "$mode include 値変更: reason" 'REASON=config-changed'
+    out_line "$mode include 値変更: Git未起動" 'GIT_SKIPPED=yes'
+    ckeq "$mode include 値変更: Git 0 回" "$(gitlog_n)" 0
+    ckeq "$mode include 値変更: 痕跡 0" "$(trace_n)" 0
+    ckeq "$mode include 値変更: root 不変" "$(sha_of "$R/.git/config")" "$root_sha"
+    ckeq "$mode include 値変更: index 不変" "$(sha_of "$R/.git/index")" "$idx"
+  done
+}
+
+
+origin_rejected() { # $1=説明。Git 呼出しと実行痕跡を別々に確認
+  : >"$GITLOG"; : >"$TRACE"
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
+  rc_is "$1 → 33" 33
+  out_line "$1: config-changed" 'REASON=config-changed'
+  out_line "$1: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "$1: Git 0 回" "$(gitlog_n)" 0
+  ckeq "$1: 痕跡 0" "$(trace_n)" 0
+}
+case_M3() {
+  CID=M3; TAG=""
+  local how
+  for how in removed fifo directory symlink parent parentlink unreadable; do
+    origin_repo "m3-$how" ignored
+    case "$how" in
+      symlink)
+        mv "$R/settings/active.inc" "$R/settings/real.inc"
+        ln -s real.inc "$R/settings/active.inc"
+        take "$R" task/t.md
+        rc_is "symlink 正常対照: take" 0
+        run compare "${ARGS[@]}" --run-rc 0
+        rc_is "symlink 正常対照: compare" 0 ;;
+      parentlink)
+        mv "$R/settings" "$R/settings-real"
+        ln -s settings-real "$R/settings"
+        take "$R" task/t.md
+        rc_is "親 symlink 正常対照: take" 0
+        run compare "${ARGS[@]}" --run-rc 0
+        rc_is "親 symlink 正常対照: compare" 0 ;;
+    esac
+    case "$how" in
+      removed) rm "$R/settings/active.inc" ;;
+      fifo) rm "$R/settings/active.inc"; mkfifo "$R/settings/active.inc" ;;
+      directory) rm "$R/settings/active.inc"; mkdir "$R/settings/active.inc" ;;
+      symlink) rm "$R/settings/active.inc"; ln -s ./real.inc "$R/settings/active.inc" ;;
+      parent)
+        mv "$R/settings" "$R/settings-old"
+        mkdir "$R/settings"
+        cp "$R/settings-old/active.inc" "$R/settings/active.inc" ;;
+      parentlink) rm "$R/settings"; ln -s ./settings-real "$R/settings" ;;
+      unreadable)
+        if [ "$IS_ROOT" -eq 1 ]; then ok "root のため読取拒否は実測不能"; continue; fi
+        chmod 000 "$R/settings/active.inc" ;;
+    esac
+    origin_rejected "origin $how"
+    if [ "$how" = unreadable ]; then chmod 600 "$R/settings/active.inc"; fi
+  done
+}
+case_M4() {
+  CID=M4; TAG=""
+  base_repo m4
+  mkdir -p "$R/config/actual" "$R/config/alias"
+  # symlink の中にある相対 include は、実体の親ではなく alias の親を基準に Git が解決する。
+  printf '[include]\n path = next.inc\n' >"$R/config/actual/entry.inc"
+  printf '[demo]\n value = ORIGIN_SECRET_219\n' >"$R/config/alias/next.inc"
+  printf '[demo]\n value = wrong-place\n' >"$R/config/actual/next.inc"
+  ln -s ../actual/entry.inc "$R/config/alias/entry.inc"
+  GIT "$R" config include.path ../config/alias/entry.inc
+  take "$R" task/t.md
+  rc_is "相対 include + symlink + 多段: take" 0
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "相対 include + symlink + 多段: 無変更成功" 0
+  printf '[demo]\n value = changed\n' >"$R/config/alias/next.inc"
+  origin_rejected "Git が読む alias 側の多段 include"
+
+  base_repo m4linked
+  local main="$R" linked="$WORK/m4-linked"
+  mkdir "$main/settings"
+  printf '[demo]\n value = stable\n' >"$main/settings/main.inc"
+  GIT "$main" config include.path ../settings/main.inc
+  GIT "$main" worktree add -q -b linked "$linked"
+  mkdir "$linked/task"; write_task "$linked/task/t.md"
+  take "$linked" task/t.md
+  rc_is "linked worktree の include: take" 0
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "linked worktree の include: 無変更成功" 0
+  printf '[demo]\n value = changed\n' >"$main/settings/main.inc"
+  origin_rejected "linked worktree の common 側 include"
+}
+case_M5() {
+  CID=M5; TAG="[類型:日本語パス] "
+  local name n=0 secret=ORIGIN_SECRET_219
+  for name in '日本語 空白.inc' $'tab\tname.inc' $'line\nname.inc' $'tail.inc\n' 'quote"back\slash.inc'; do
+    n=$((n + 1)); base_repo "m5-$n"
+    mkdir "$R/settings"
+    printf '[demo]\n value = %s\n' "$secret" >"$R/settings/$name"
+    GIT "$R" config include.path "$R/settings/$name"
+    take "$R" task/t.md
+    rc_is "特殊パス $n: take" 0
+    ckf "特殊パス $n: 新規記録に値なし" inf "$STATE_DIR/snapshot/config-origins.txt" "$secret"
+    run compare "${ARGS[@]}" --run-rc 0
+    rc_is "特殊パス $n: 無変更成功" 0
+    printf '[demo]\n value = changed-%s\n' "$secret" >"$R/settings/$name"
+    origin_rejected "特殊パス $n 値変更"
+    ckf "特殊パス $n: stdout に値なし" inf "$CASE_OUT" "$secret"
+    ckf "特殊パス $n: stderr に値なし" inf "$CASE_ERR" "$secret"
+  done
+}
+old_snapshot_hash() { # 現行ダイジェストの形式を使い、旧版が持つファイル集合だけの値を作る
+  local f
+  : >"$WORK/old-snapshot-hashes"
+  for f in "$STATE_DIR/snapshot"/*; do
+    printf '%s  %s\n' "$(sha_of "$f")" "${f##*/}" >>"$WORK/old-snapshot-hashes"
+  done
+  SNAP="$(sha_of "$WORK/old-snapshot-hashes")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+}
+case_M6() {
+  CID=M6; TAG=""
+  origin_repo m6 ignored
+  printf 'tampered\n' >>"$STATE_DIR/snapshot/config-origins.txt"
+  run compare "${ARGS[@]}" --run-rc 0
+  incomparable "origin 記録改変" snapshot-digest
+  # record を削除し、その集合に対して取得した正規ダイジェストを渡して旧 state を再現。
+  rm "$STATE_DIR/snapshot/config-origins.txt"
+  old_snapshot_hash
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
+  incomparable "旧 state" config-origin-missing
+  ckeq "旧 state compare: Git 0 回" "$(gitlog_n)" 0
+  run taskmd-diff "${ARGS[@]}"
+  rc_is "旧 state: taskmd-diff 維持" 0
+  printf 'edited\n' >"$R/task/t.md"
+  run restore-taskmd "${ARGS[@]}"
+  rc_is "旧 state: restore-taskmd 維持" 0
+  ckeq "旧 state: 復元本文" "$(cat "$R/task/t.md")" "${TASK_BODY%$'\n'}"
+  run cleanup --state "$STATE_DIR"
+  rc_is "旧 state: cleanup 維持" 0
+  ckf "旧 state: state 消去" test -e "$STATE_DIR"
+}
+case_M7() {
+  CID=M7; TAG=""
+  base_repo m7
+  mkdir -p "$STUBS/originbad"
+  cat >"$STUBS/originbad/git" <<EOF
+#!/usr/bin/env bash
+for arg in "\$@"; do
+  if [ "\$arg" = --name-only ]; then
+    case "\$ORIGIN_BAD_MODE" in
+      odd) printf 'file:.git/config\\0' ;;
+      partial) printf 'file:.git/config\\0core.bare\\0truncated' ;;
+      emptykey) printf 'file:.git/config\\0\\0' ;;
+      emptyorigin) printf '\\0core.bare\\0' ;;
+      empty) : ;;
+      unknown) printf 'blob:HEAD:config\\0core.bare\\0' ;;
+      error) printf 'ORIGIN_SECRET_219\\n' >&2; exit 1 ;;
+    esac
+    exit 0
+  fi
+done
+exec "$REAL_GIT" "\$@"
+EOF
+  chmod +x "$STUBS/originbad/git"
+  local mode before="$(nstates)"
+  for mode in odd partial emptykey emptyorigin empty unknown error; do
+    rune ORIGIN_BAD_MODE="$mode" PATH="$STUBS/originbad:$PATH" -- take --cwd "$R" --task-md task/t.md
+    rc_is "origin 列挙 $mode を成功扱いしない" 20
+    ckeq "origin 列挙 $mode: 作りかけを残さない" "$(nstates)" "$before"
+    ckf "origin 列挙 $mode: Git stderr 値を転記しない" inf "$CASE_ERR" ORIGIN_SECRET_219
+  done
+  rune GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0= -- take --cwd "$R" --task-md task/t.md
+  rc_is "利用者の同名 command-line origin を捨てない" 20
+  rune "GIT_CONFIG_PARAMETERS='core.fsmonitor='" -- take --cwd "$R" --task-md task/t.md
+  rc_is "PARAMETERS の同名 command-line origin を捨てない" 20
+  rune GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=private.token GIT_CONFIG_VALUE_0=ORIGIN_SECRET_219 -- take --cwd "$R" --task-md task/t.md
+  rc_is "未知 command-line key を捨てない" 20
+  ckf "command-line 由来の値を診断へ出さない" inf "$CASE_ERR" ORIGIN_SECRET_219
+}
+case_M8() {
+  CID=M8; TAG=""
+  base_repo m8
+  mkdir "$R/settings"
+  printf '[demo]\n value = ORIGIN_SECRET_219\n' >"$R/settings/active.inc"
+  GIT "$R" config include.path ../settings/active.inc
+  take "$R" task/t.md
+  rc_is "未追跡 origin: take" 0
+  ckf "新規 origin 記録に設定値なし" inf "$STATE_DIR/snapshot/config-origins.txt" ORIGIN_SECRET_219
+  ckt "既存の未追跡 raw 退避は維持する" inf "$STATE_DIR/files/settings/active.inc" ORIGIN_SECRET_219
+  ckf "正常時 stderr に設定値なし" inf "$CASE_ERR" ORIGIN_SECRET_219
+}
+case_M9() { # 正規の空 file-origin 一覧と、取得失敗・旧 state は別物
+  CID=M9; TAG=""
+  base_repo m9
+  : >"$R/.git/config"
+  take "$R" task/t.md
+  rc_is "空 config・file-origin 0 件: take" 0
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "空 config・file-origin 0 件: compare" 0
+  out_line "空 config: 正常終了" 'RESULT=normal'
+}
+
+
+case_M10() { # 同内容の通常ファイル再作成は許可し、内容変更は引き続き検出する
+  CID=M10; TAG=""
+  origin_repo m10 ignored
+  local before after
+  before="$(ls -id "$R/settings/active.inc" | cut -d' ' -f1)"
+  cp "$R/settings/active.inc" "$R/settings/replacement.inc"
+  mv "$R/settings/replacement.inc" "$R/settings/active.inc"
+  after="$(ls -id "$R/settings/active.inc" | cut -d' ' -f1)"
+  ckne "末端通常ファイル: 別 inode への置換を実施" "$before" "$after"
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "末端通常ファイル: 同内容の atomic replace は成功" 0
+  out_line "末端通常ファイル: normal" 'RESULT=normal'
+  printf '[core]\n fsmonitor = %s\n' "$STUBS/trace.sh" >"$R/settings/replacement.inc"
+  mv "$R/settings/replacement.inc" "$R/settings/active.inc"
+  origin_rejected "末端通常ファイル: 内容変更を伴う atomic replace"
 }
 
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-J1 J2 J3 J4 J5 J6 J7 K1 K2 L"
+J1 J2 J3 J4 J5 J6 J7 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0

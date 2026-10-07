@@ -79,7 +79,7 @@
 #                               未追跡の changed / removed の直後に出す。unverified は退避コピーが実体照合を
 #                               通らなかった(または退避が無い)= 「変更の有無」は言えるが「内容差分は提示不能」
 #     RESULT=incomparable のとき:
-#       REASON=manifest-digest|snapshot-digest|state-missing|hooks-changed|config-changed|retake-failed
+#       REASON=manifest-digest|snapshot-digest|state-missing|hooks-changed|config-changed|config-origin-missing|retake-failed
 #       GIT_SKIPPED=yes|no     (yes = git を 1 回も呼んでいない。retake-failed は git を呼んだ後の失敗なら no)
 #   taskmd-diff:
 #     TASKMD=same|checks-only|body-changed|mapping-changed
@@ -110,7 +110,7 @@
 #   **棄却する候補には mkdir も chmod もしない**(相殺しきれない `..` が残る候補も棄却する)。
 #   `<候補>/dev-workflow/guard-XXXXXX/` を 0700 で作る。レイアウト:
 #     snapshot/1-diff.bin  snapshot/2-status.z  snapshot/4-meta.txt  snapshot/5-stash.txt
-#     snapshot/taskmd.txt(選択パス・実体パス・種別)
+#     snapshot/taskmd.txt(選択パス・実体パス・種別)、snapshot/config-origins.txt(設定の出典記録)
 #     manifest.tsv         files/<toplevel 相対パス>(退避コピー)
 #     taskmd-body          (タスク MD の実体のコピー。追跡済み・ignore 済み・リポジトリ外でも必ず)
 #   **追跡ファイルの差分と未追跡ファイルの平文複製が入る。** 消すのは cleanup だけ。
@@ -139,7 +139,9 @@
 #      ①② には現れず、③ の T 行が単独で担う)
 #   ④ HEAD / index の tree(**使い捨ての index** で `write-tree`)/ ブランチ名 / refs 全体 /
 #      hooks ディレクトリ(git が実際に hook を探す場所)の全エントリのダイジェスト /
-#      `config` と `config.worktree` の sha256(無いファイルは `(無し)`)
+#      `config` と `config.worktree` の sha256(無いファイルは `(無し)`)と、開始時にキーを提供した
+#      file origin の経路・構成要素の種別/リンク字面/device/inode・実体の sha256。値は新規記録に含めない。
+#      親とリンクの識別子は厳密に照合。末端通常ファイルの同内容の再作成は許可する。
 #   ⑤ stash: `refs/stash` が在れば `reflog show --format='%H %gd %gs' refs/stash` の全体、無ければ `stash 無し`
 #
 # git の状態を変えない:
@@ -150,6 +152,9 @@
 #   compare は、保護領域の検査 → ダイジェスト照合 → **hooks と config の検査(記録済みの実体パスからの
 #   ファイル読み取りだけ)** を終えるまで git を 1 回も呼ばない。hooks か config が変わっていたら
 #   `incomparable`(hooks-changed / config-changed)で止まり、以後の git も打たない。
+#   出典記録の無い旧 state の compare は config-origin-missing・33。他サブコマンドは従来どおり。
+#   空/欠落/非成立 include や未知 root の新設、検査中だけの変更を完全には守らない。
+#   設定値を含まないのは新規出典記録と診断だけ。既存の生 diff・未追跡退避の範囲は変えない。
 #   taskmd-diff と restore-taskmd は git を呼ばない。
 #
 # 前提:
@@ -591,6 +596,145 @@ in_scope() { # $1=toplevel 相対パス → 0: 対象 / 1: 除外
   return 0
 }
 
+# ── 開始時にキーを提供した設定 origin(値は列挙・保存しない)──
+# Git の解決済み origin を使い、include graph を独自に展開しない。空/欠落/非成立の
+# include 先や未知 root の新設は対象外。保存済み経路の持続変更だけを Git より先に調べる。
+# 親の識別子に時刻やサイズを含めない(通常のファイル追加でディレクトリは更新される)。
+stat_identity() {
+  case "$STAT_FLAVOR" in
+    gnu) stat -c '%d:%i' -- "$1" ;;
+    bsd) stat -f '%d:%i' -- "$1" ;;
+    *) return 1 ;;
+  esac
+}
+ORIGIN_MODE=""
+ORIGIN_CHANGED=""
+origin_row() { # take は出力、compare は FD 4 の次の記録と一致するかだけを見る
+  local expected actual="$1"
+  if [ "$ORIGIN_MODE" = take ]; then printf '%s\n' "$actual"
+  else
+    IFS= read -r expected <&4 || return 1
+    if [ "${2:-}" = f ]; then
+      # Git の branch -D も root config を同内容で再作成する。末端通常ファイル
+      # だけは inode を照合せず、種別・経路と、この後の読取可否/生 hash で確かめる。
+      case "$expected" in node$'\t'f$'\t'*$'\t'*) : ;; *) return 1 ;; esac
+      expected="${expected#*$'\t'}"; expected="${expected#*$'\t'}"; expected="${expected#*$'\t'}"
+      actual="${actual#*$'\t'}"; actual="${actual#*$'\t'}"; actual="${actual#*$'\t'}"
+    fi
+    [ "$expected" = "$actual" ]
+  fi
+}
+origin_walk() { # $1=元の絶対パス。各 component を照合してから次の先へ進む
+  local rest="${1#/}" p=/ part kind ident link links=0 h
+  case "$1" in /*) : ;; *) return 1 ;; esac
+  while :; do
+    link=-
+    if [ -L "$p" ]; then
+      kind=l
+      read_link "$p" || return 1
+      link="$RP"
+    elif [ -d "$p" ]; then kind=d
+    elif [ -f "$p" ]; then kind=f
+    else return 1
+    fi
+    ident="$(stat_identity "$p" 2>/dev/null)" || return 1
+    [ -n "$ident" ] || return 1
+    origin_row "node"$'\t'"$kind"$'\t'"$ident"$'\t'"$(path_field "$link")"$'\t'"$(path_field "$p")" "$kind" || return 1
+    # symlink は字面と lstat の照合後に展開する。実体パスへ先に置き換えると、途中の
+    # リンクや親の差替えが消える。.. もリンクを展開してから OS と同じ順に辿る。
+    if [ "$kind" = l ]; then
+      links=$((links + 1))
+      [ "$links" -le 40 ] && [ -n "$link" ] || return 1
+      if [ -n "$rest" ]; then link="$link/$rest"; fi
+      case "$link" in
+        /*) p=/; rest="${link#/}" ;;
+        *) split_path "$p"; p="$SP_DIR"; rest="$link" ;;
+      esac
+      continue
+    fi
+    if [ -z "$rest" ]; then
+      [ "$kind" = f ] && [ -r "$p" ] || return 1
+      h="$(sha256_file "$p" 2>/dev/null)" && [ -n "$h" ] || return 1
+      origin_row "data"$'\t'"$h" || return 1
+      return 0
+    fi
+    [ "$kind" = d ] || return 1
+    part="${rest%%/*}"
+    if [ "$part" = "$rest" ]; then rest=""; else rest="${rest#*/}"; fi
+    # 重複 / は経路を変えない。空の末尾 / で通常ファイルを受理しないため、Git が
+    # file origin として返した経路だけを入力にする(比較時も保存済みの同じ経路)。
+    [ -n "$part" ] || continue
+    p="${p%/}/$part"
+  done
+}
+collect_config_origins() { # $1=保存先。Git の stderr に値があっても転記しない
+  local origin key p item pending=0 pair_count=0
+  local command_keys=() seen_commands=()
+  declare -A seen=()
+  # 前置きが本当に与える順序だけを許可。同名の利用者設定が混ざっても個数が変わる。
+  for item in "${GIT_PRE[@]}"; do
+    if [ "$pending" -eq 1 ]; then
+      key="${item%%=*}"; command_keys[${#command_keys[@]}]="${key,,}"; pending=0
+    elif [ "$item" = -c ]; then pending=1
+    fi
+  done
+  if ! git "${GIT_PRE[@]}" config --null --show-origin --name-only --includes --list >"$WORK/origins.z" 2>/dev/null; then return 1; fi
+  ORIGIN_MODE=take
+  printf 'config-origins-v1\n' >"$1" || return 1
+  while :; do
+    origin=""
+    if ! IFS= read -r -d '' origin <&3; then
+      [ -z "$origin" ] || return 1
+      break
+    fi
+    key=""
+    IFS= read -r -d '' key <&3 || return 1
+    [ -n "$origin" ] && [ -n "$key" ] || return 1
+    pair_count=$((pair_count + 1))
+    case "$origin" in
+      file:*)
+        p="${origin#file:}"
+        [ -n "$p" ] || return 1
+        case "$p" in /*) : ;; *) p="$TOP/$p" ;; esac
+        if [ -z "${seen[":$p"]+x}" ]; then
+          seen[":$p"]=1
+          printf 'origin\t%s\n' "$(path_field "$p")" >>"$1" || return 1
+          origin_walk "$p" >>"$1" || return 1
+        fi ;;
+      'command line:') seen_commands[${#seen_commands[@]}]="$key" ;;
+      *) return 1 ;;
+    esac
+  done 3<"$WORK/origins.z"
+  [ "$pair_count" -gt 0 ] || return 1
+  [ "${#seen_commands[@]}" -eq "${#command_keys[@]}" ] || return 1
+  for ((pending=0; pending<${#command_keys[@]}; pending++)); do
+    [ "${seen_commands[$pending]}" = "${command_keys[$pending]}" ] || return 1
+  done
+}
+verify_config_origins() { # FD 4 は呼び出し側が開く。変更先の本文を読む前に node を照合
+  local line p
+  IFS= read -r line <&4 && [ "$line" = config-origins-v1 ] || return 1
+  ORIGIN_MODE=compare
+  while IFS= read -r line <&4; do
+    case "$line" in origin$'\t'?*) field_value "${line#*$'\t'}"; p="$UNQ" ;; *) return 1 ;; esac
+    ORIGIN_CHANGED="$p"
+    origin_walk "$p" || return 1
+  done
+  [ -z "$line" ]
+}
+check_config_origins() {
+  local record="$STATE/snapshot/config-origins.txt"
+  if [ ! -f "$record" ] || [ -L "$record" ]; then
+    echo 'ERROR [config-origin-missing] 開始時の設定出典記録が無い。旧 state は比較できない' >&2
+    emit_incomparable config-origin-missing
+  fi
+  ORIGIN_CHANGED=""
+  if ! verify_config_origins 4<"$record"; then
+    FS_CONFIG_CHANGED=1
+    add_change config "$(path_field "$ORIGIN_CHANGED")"
+  fi
+}
+
 # ── hooks と config の記録(**ファイルの読み取りだけ**で作る。git を呼ばない)──
 hooks_listing() { # $1=hooks ディレクトリの実体パス → `hook\t種別\tモード\tsha256\t名前` を stdout へ
   local dir="$1" p name kind mode val
@@ -614,7 +758,7 @@ file_digest() { # $1=パス → sha256 か `(無し)` か `(読めない)`
   printf '(読めない)'
 }
 fs_meta_lines() { # $1=hooks のパス $2=config のパス $3=config.worktree のパス(いずれも絶対)→ stdout
-  local hp="$1" hreal="(無し)" hdig="(無し)" list="$WORK/hooks.list"
+  local hp="$1" hreal="(無し)" hdig="(無し)" list="$WORK/hooks.list" key rest
   : >"$list"
   if [ -e "$hp" ] || [ -L "$hp" ]; then
     if real_path "$hp"; then hreal="$RP"; else hreal="(無し)"; fi
@@ -630,6 +774,13 @@ fs_meta_lines() { # $1=hooks のパス $2=config のパス $3=config.worktree �
   printf 'hooks-real\t%s\n' "$(path_field "$hreal")"
   printf 'hooks-digest\t%s\n' "$hdig"
   cat "$list"
+  if [ -n "${4:-}" ]; then
+    # origin が変わった場合は root も読み直さず、hooks だけ独立して照合する。
+    while IFS=$'\t' read -r key rest; do
+      case "$key" in config-path|config-digest|config-worktree-path|config-worktree-digest) printf '%s\t%s\n' "$key" "$rest" ;; esac
+    done <"$4"
+    return 0
+  fi
   printf 'config-path\t%s\n' "$(path_field "$2")"
   printf 'config-digest\t%s\n' "$(file_digest "$2")"
   printf 'config-worktree-path\t%s\n' "$(path_field "$3")"
@@ -1022,6 +1173,10 @@ cmd_take() {
 
   CDPATH= cd -P -- "$TOP"
 
+  if ! collect_config_origins "$NEW_STATE/snapshot/config-origins.txt"; then
+    fail_internal "設定の出典を安全に収集・保存できない"
+  fi
+
   # ④ → ①②⑤(unmerged は ④ で検出して縮退する)
   rc=0
   collect_git "$NEW_STATE/snapshot" take || rc=$?
@@ -1099,10 +1254,13 @@ emit_incomparable() { # $1=REASON(stdout を出して exit 33)
   exit 33
 }
 check_hooks_config() { # 記録済みの実体パスから**ファイルの読み取りだけ**で再計算する(git を呼ばない)
+  check_config_origins # MUT:n
+  local held=""
+  if [ "$FS_CONFIG_CHANGED" -eq 1 ]; then held="$STATE/snapshot/4-meta.txt"; fi
   fs_meta_filter "$STATE/snapshot/4-meta.txt" >"$WORK/fsmeta.old"
-  fs_meta_lines "${META[hooks-path]}" "${META[config-path]}" "${META[config-worktree-path]}" >"$WORK/fsmeta.raw"
+  fs_meta_lines "${META[hooks-path]}" "${META[config-path]}" "${META[config-worktree-path]}" "$held" >"$WORK/fsmeta.raw"
   fs_meta_filter "$WORK/fsmeta.raw" >"$WORK/fsmeta.new"
-  if cmp -s "$WORK/fsmeta.old" "$WORK/fsmeta.new"; then return 0; fi
+  if [ "$FS_CONFIG_CHANGED" -eq 0 ] && cmp -s "$WORK/fsmeta.old" "$WORK/fsmeta.new"; then return 0; fi
   diff_fs_meta "$WORK/fsmeta.old" "$WORK/fsmeta.new"
   if [ "$FS_HOOKS_CHANGED" -eq 1 ]; then
     echo "ERROR [hooks-changed] hooks が起動前から変わっている(以後の git を打たない)" >&2
