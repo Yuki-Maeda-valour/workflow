@@ -2,7 +2,7 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
-## v4.23.8
+## v4.23.10
 
 ### 変更
 
@@ -11,6 +11,20 @@ v4.2.0 以前は commit 履歴を参照。
 - `base-commit.md` の閉じていなかった丸括弧を 1 つ補った(文の区切りを判定できるようにするため。意味は変えていない)
 - 候補モードの報告の項目の「候補」に説明を添えた。init-project の MCP 設定の生成の、パーサが無いときの経路の名前を「テキスト判定」にした
 - 言い換え表(`writing-for-people.md` 4 節)の「守る値」「対話点」「報告点」「止めの印」の行の補足に、初めて出す所に限らず置き換えることと名前の所の扱いを書いた。「縮退」の箇条書きに、どれにも当たらないときの書き方と名前の扱いを足した。「内蔵に切り替える」の言い方を、実装を受け持つ外部の AI にも当てた
+
+## v4.23.9
+
+### 修正
+
+- 発見モードで push 後に PR を作らない条件を、`repo` が null の場合と `gh repo view` が成功しない場合の2つとして説明する。朝の報告では、どちらも `<HOST/OWNER/REPO>` を人が実名で埋める固定の雛形を示す。実名を自動で埋めない既存の動作は変えない([Issue #205](https://github.com/Yuki-Maeda-valour/workflow/issues/205))。
+- `.claude/reviews/` が gitignore 済みの場合に、`review-guard.py` が自身の記録や snapshot の追加を変更と誤認し、`seal` を拒否する不具合を修正する。Git が無視するファイルの一覧から、既存の固定除外に一致するパスだけを外す。レビュー入力の改変や、除外範囲外の変更の検査は維持する([Issue #215](https://github.com/Yuki-Maeda-valour/workflow/issues/215))。
+
+## v4.23.8
+
+### 修正
+
+- `/init-project` の完了時に、`.codex/config.toml` だけを生成・変更した場合も、Codex が設定を読む条件と既存設定の注意点を案内する。各ホストの説明は、その設定ファイルを生成・変更した場合に出す([Issue #195](https://github.com/Yuki-Maeda-valour/workflow/issues/195))。
+- Serena の「使う(設定は自分で行う)」を選んだ人に、設定先・貼り付け用の設定例・接続確認を案内する。`uv` が無い場合は導入手順も示す。この案内では設定ファイルを書き込まず、既存の生成・承認の規則を保つ([Issue #196](https://github.com/Yuki-Maeda-valour/workflow/issues/196))。
 
 ## v4.23.7
 

@@ -417,11 +417,20 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **5. 次のステップを案内**
 - まず `/understand-project` を実行してプロジェクト全体像を把握する。
 - 以降のサイクル: `/create-task`(タスク設計)→ `/do-task`(実装・検証・レビュー)→ `/update-doc`(ドキュメント同期)。機械検査だけなら `/tool-check`。
+- Phase 2 で「使う(設定は自分で行う)」を選んだ場合、Serena の手動設定を次の順で案内する。
+  - Phase 3-7 の「代表エントリ」に従って公式の最新手順を確認し、`command` / `args` と「値のエスケープ」を使って、利用するホスト向けの貼り付け用の設定例を提示する。
+  - 設定先は、Claude Code なら `.mcp.json` の `mcpServers.serena`、Codex なら `.codex/config.toml` の `[mcp_servers.serena]` と示す。
+  - 既存設定がある場合は、Phase 3-7 と [references/mcp-config-generation.md](references/mcp-config-generation.md) の保持の手順を参照し、他の設定を残し、同じサーバーの設定を重複して足さないよう案内する。
+  - `uv` が無い場合は、Phase 3-7 と同じく導入手順を案内する。
+  - 設定後は、利用するホストで設定を読み直して Serena のツールが使えることを確認し、下の onboarding の案内へ進むよう伝える。
+  - この案内では設定ファイルを生成・変更しない。既存の profile の宣言を処理する Phase 3-7 の手順と承認の規則は変えない。
 - 正本が serena で `.serena/` が未整備なら、Serena の onboarding(プロジェクト有効化 + メモリ作成)を先に済ませ、続けて /update-doc で初期メモリを整備するよう案内する(メモリも多モデルレビューのループで品質担保される)。
 - 正本 = serena なのに Serena を設定しなかった場合は、把握・同期が浅くなることを明示的に警告する。
 - `.mcp.json` を生成・変更した場合、
   - 承認が求められるのは**対話セッションでのみ**であり、それ以外の実行形(非対話・自動実行)では承認なしに読まれることを伝える(Claude Code の挙動。design §7-3)。
+- `.codex/config.toml` を生成・変更した場合、
   - **Codex 側は信頼済みプロジェクトのときだけ** `.codex/config.toml` を読む旨も添える。
+- `.mcp.json` または `.codex/config.toml` を生成・変更した場合、
   - **既に `.mcp.json` / `.codex/config.toml` を持つリポジトリ(クローン直後)では、この skill の承認は介在せず、ホスト側のゲートだけが防御になる**(design §7-6。skill 側の承認とホスト側のゲートは互いの代替にならない)。
 - `AGENTS.md` の `{{...}}` プレースホルダと doc の「（…）」形式のガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
 - **最終状態に `AGENTS.md` があるとき**(①・②・④、および ③ で移行が承認されたとき)、**直読みの確認方法と互換形の作り方を案内する**(2026-09-21 決定 6)。
