@@ -339,6 +339,11 @@ source、doc、未承認保留は別の phase。文書は実装 commit 後に別
 品質定義・入口・テスト・検証器の変更を review と PR に開示し、独立した clean checkout で実検証する。
 品質入口の静的検出は動的依存の網羅を保証しない。
 
+品質コマンドは、起動した処理の停止を確認してから次へ進み、検証用コピーを削除する。
+時間切れは計画を打ち切る。中断や停止確認の失敗ではコピーを保持する([Issue #220](https://github.com/Yuki-Maeda-valour/workflow/issues/220))。
+停止・回復手順は [review-protocol.md](../plugins/dev-workflow/skills/do-task/references/review-protocol.md#品質コマンドの停止とコピーの保持)、
+Linux と他 POSIX の必要機構・保証範囲は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#品質コマンドの監督)を正本とする。
+
 PR の検証欄は直接実行したコマンドの構造化結果と reviewer の直接返答から生成する。
 task/Issue 記録中の APPROVED は根拠にしない。外部本文を正本とする構成では、trusted caller が fresh な本文の控えと
 保持 hash、保護する task_dir を渡す任意入口を使う。既定の task MD 方式を変えず、外部サービスの読書きは caller が担う。
