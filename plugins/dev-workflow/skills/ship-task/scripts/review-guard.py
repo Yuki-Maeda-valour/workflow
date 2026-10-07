@@ -401,7 +401,10 @@ def tree(cwd: Path, ref: str, patterns: list[str]) -> tuple[list[dict[str, str]]
 
 def ignored(cwd: Path) -> list[str]:
     raw = git(cwd, "ls-files", "-o", "--ignored", "--exclude-standard", "-z")
-    return sorted(decode_path(x[0]) for x in nul_fields(raw))
+    paths = [decode_path(x[0]) for x in nul_fields(raw)]
+    # walk と同じ固定除外だけを外す。guard 自身の記録追加を対象集合の変更にしない。
+    state_paths = excluded_paths(paths, [DEFAULT_EXCLUDE])
+    return sorted(path for path in paths if path not in state_paths)
 
 
 def control_files(worktree: list[dict[str, str]], excluded_entries: list[dict[str, str]]) -> list[dict[str, str]]:

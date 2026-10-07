@@ -170,6 +170,72 @@ class ReviewGuardTest(unittest.TestCase):
         self.guard("verify", "--cwd", str(self.repo), "--state", str(state), "--expect-state-sha256", sha,
                    "--exclude-ere", r"(^|/)[.]env($|[.])")
 
+    def capture_ignored_reviews(self, *extra_ignores):
+        reviews = self.repo / ".claude/reviews"
+        reviews.mkdir(parents=True, exist_ok=True)
+        (self.repo / ".gitignore").write_text("\n".join((".claude/reviews/", *extra_ignores)) + "\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore review records")
+        self.state = reviews / "state"
+        self.start_state = reviews / "start"
+        self.review = reviews / "snapshot.md"
+        self.begin()
+        taken = self.guard("take", "--cwd", str(self.repo), "--state", str(self.state),
+                           "--task-md", str(self.task), "--start-state", str(self.start_state),
+                           "--expect-start-sha256", self.start_sha256,
+                           "--exclude-ere", r"(^|/)[.]env($|[.])")
+        self.state_sha256 = next(line.split("=", 1)[1] for line in taken.stdout.splitlines()
+                                 if line.startswith("STATE_SHA256="))
+        # take 自身の manifest と、その後に生成する snapshot が seal を妨げないこと。
+        self.review.write_text("reviewed snapshot\n", encoding="utf-8")
+        sealed = self.guard(*self.context("seal"), "--review-input", str(self.review))
+        self.state_sha256 = next(line.split("=", 1)[1] for line in sealed.stdout.splitlines()
+                                 if line.startswith("STATE_SHA256="))
+        self.guard(*self.context("verify"))
+        return reviews
+
+    def test_ignored_reviews_accept_generated_state_snapshot_and_later_records(self):
+        reviews = self.capture_ignored_reviews()
+        (reviews / "review-result.json").write_text('{"verdict": "APPROVED"}\n')
+        (reviews / "fresh-issue-body.md").write_bytes(self.task.read_bytes())
+        self.guard(*self.context("verify"))
+        # 正規の検証根拠を取得し、記録追加後も stage の照合まで通す。
+        self.prove()
+        self.git("add", "-A")
+        self.verify("--mode", "stage")
+
+    def test_ignored_reviews_still_reject_modified_sealed_review_input(self):
+        self.capture_ignored_reviews()
+        self.review.write_text("changed snapshot\n", encoding="utf-8")
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_ignored_reviews_still_reject_new_ignored_file_outside_reviews(self):
+        generated = self.repo / "generated"
+        generated.mkdir()
+        self.capture_ignored_reviews("generated/")
+        (generated / "output.txt").write_text("new ignored output\n")
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_ignored_reviews_still_reject_changed_ignore_rules(self):
+        self.capture_ignored_reviews()
+        ignore = self.repo / ".gitignore"
+        ignore.write_text(ignore.read_text() + "source.txt\n")
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_ignored_reviews_still_reject_similarly_named_paths(self):
+        names = (".claude/reviews-other/output.txt", ".claude/reviews.md", "other.claude/reviews/output.txt")
+        # 親ディレクトリの追加だけで拒否される対照にしない。
+        for name in names:
+            (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        self.capture_ignored_reviews(*names)
+        for name in names:
+            with self.subTest(path=name):
+                path = self.repo / name
+                path.write_text("new ignored file\n")
+                self.guard(*self.context("verify"), expect=1)
+                path.unlink()
+                self.guard(*self.context("verify"))
+
     def test_tracked_untracked_index_and_commit_changes_are_rejected(self):
         cases = (
             ("tracked", lambda: (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")),
