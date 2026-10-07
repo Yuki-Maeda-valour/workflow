@@ -604,6 +604,8 @@ done | sort -k2 -rn
 - **profile で 1 回宣言し、`/init-project` がホスト別の設定を生成する** — `.mcp.json`(Claude Code)と `.codex/config.toml`(Codex)。**スキーマ(キー名・値の形)は §4 の `mcp_servers` を正本とする**(同じ事実を 2 箇所に書かない。§7-2)
 - **「1 宣言 → 2 形式」の等価性は完全ではない** — `.codex/config.toml` は**コメント・キー順序・整形を持ち全体 Write が既存を壊す**ため(書き込み手段の実在も前提にしない。§3)append-only で、**不一致の置換**ができず、**他記法が混在するファイルへの追記**もできない(後者は TOML パーサを検出できた環境では解消する)。**限界の一覧と報告義務は生成手順の正本(下記の `mcp-config-generation.md`)**
 - **MCP サーバー自体は同梱しない**(理由は下の「なぜそうするか」)
+- **完了時の案内は、生成・変更した設定ファイルに応じて出す**。ホストごとの説明と共通の説明を分け、片方だけを生成した場合も必要な説明を欠かさない([Issue #195](https://github.com/Yuki-Maeda-valour/workflow/issues/195))。
+- **Serena を自分で設定する選択には、設定先と貼り付け用の設定例を案内する**。案内の手順は [`init-project/SKILL.md`](../plugins/dev-workflow/skills/init-project/SKILL.md) Phase 4-5 に置く。この案内で設定ファイルは書き込まず、既存の生成・承認の規則は変えない([Issue #196](https://github.com/Yuki-Maeda-valour/workflow/issues/196))。
 - **生成手順の正本は [`init-project/references/mcp-config-generation.md`](../plugins/dev-workflow/skills/init-project/references/mcp-config-generation.md)**(`.codex/config.toml` の append-only・既存 id の判定と内容比較・退避条件・改行終端・生成後の 2 段階検証とロールバック・貼り付け用スニペット)。本節は方針だけを持ち、手順は再掲しない(§7-2)
 - **Codex へ生成するのは `.codex/config.toml` の MCP のみで、カスタムエージェント定義は生成しない** — エージェント編成は §7-5 の ① としてホストに任せるため。公式の定義機構はプロジェクト層でも宣言できると読めるので、「ユーザースコープにしか住まない」ことは理由にしない(事実と出典は §7-3)。なお `codex agents` **サブコマンド**はセッション閲覧であり(実測)、定義は設定ファイル側の機構で行う(§7-3)
 
