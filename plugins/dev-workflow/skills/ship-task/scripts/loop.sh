@@ -15,8 +15,9 @@
 #   --only <名>                      対象をタスク名で絞る。繰り返し可
 #   --discover[=<名>[,<名>…]]        発見モード(発見元を 1 つずつ回す。値が無ければ既定の列)。--only と併用しない
 #   --dry-run                        対象の一覧と解決後の argv を出して終わる(セッションを起動しない)
+#   --prove-host                     ホスト CLI の実体で許可の仲介の hook が効くことを実際に確かめ、証明を書いて終わる
 #   --allowed-tools <値>             ホスト CLI に渡す許可リスト。繰り返し可
-#   --allow-classifier               分類器による自動承認を使う
+#   --allow-classifier               分類器による自動承認(今は起動しない。#107 の H48)
 #   --mcp-config <ファイル>          周に渡す MCP の設定。繰り返し可
 #   --max-iterations <N>             最大周回数
 #   --max-consecutive-failures <N>   連続失敗の上限
@@ -155,6 +156,12 @@ STATE_MAX_BYTES=1073741824
 STATE_MAX_FILE_BYTES=67108864
 STATE_MAX_SECONDS=60
 DISCOVER=0          # 発見モード(--discover)
+PROVE_HOST=0        # --prove-host(実 hook の確認と証明の書き込みだけを行う)
+HOST_EXEC=""        # 確かめたホスト CLI の実体(realpath)。補助の CLI・周の子・確認はすべてこれで起動する
+HOST_IDENTITY=""    # その実体の値(realpath・dev・ino・size・mtime・ctime・sha256 の JSON)
+HOST_STAT=""        # その実体の stat の値(補助の CLI ごとの軽い照合に使う)
+HOST_SHAPE=""       # 証明に結び付ける起動の形(loop.sh が足すフラグ。可変の値は置き換える)
+PROOF_STORE=""      # 証明の置き場(人の信頼の記録。状態ディレクトリとは別)
 DISCOVER_ARG=""
 DISCOVER_FROM_ARG=0
 DISCOVER_SOURCES=()
@@ -1120,7 +1127,8 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   LOOP_STARTUP_PY="$PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
   HOST_ARGV_PY="$PLUGIN_ROOT/skills/ship-task/scripts/host-argv.py"
   SUPERVISOR="$PLUGIN_ROOT/skills/ship-task/scripts/loop-supervisor.py"
-  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR"; do
+  HOST_CHECK_PY="$PLUGIN_ROOT/skills/ship-task/scripts/host-check.py"
+  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
     [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
   done
   HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA")"
@@ -1645,12 +1653,13 @@ load_host_table() { # $1=ホスト名
       ALLOWED_FLAG=--allowedTools
       # 許可の仲介(D22 ③): PermissionRequest の hook を持つ設定を JSON 文字列で渡すフラグ
       SETTINGS_FLAG=--settings
-      # 全許可のフラグ名と、--permission-mode の全許可の値(#68 の決定 3)・分類器の値(--allow-classifier のときだけ)
+      # 全許可のフラグ名と、--permission-mode の全許可の値(#68 の決定 3)・分類器の値(無人ループでは使わない。#107 H48)
       FULL_PERMISSION_NAMES=(--dangerously-skip-permissions --allow-dangerously-skip-permissions)
       FULL_PERMISSION_VALUE=bypassPermissions
       CLASSIFIER_VALUE=auto
       # 補助の CLI(セッションを起動しない。cwd は状態ディレクトリ)
       AUX_HELP=(--help)
+      AUX_VERSION=(--version)
       AUX_AUTH=(auth status)
       AUX_PLUGINS=(plugin list --json)
       ;;
@@ -1726,6 +1735,30 @@ build_child_argv() {
   CHILD_ARGV+=("$SETTINGS_FLAG" "$HOOK_SETTINGS")
 }
 
+# H31: 証明に結び付ける起動の形。loop.sh が必ず足す隔離・権限・hook のフラグ(と権限のモード)を
+# build_child_argv と同じ並びで並べ、実行ごとに変わる値(プラグインのコピー・hook の設定)は置き換える。
+# 許可リスト・MCP の設定・--host-argv の上書き(model・effort など。host-argv.py の許可表)は、hook が呼ばれる
+# 仕組みに関わらないので入れない(変えても確かめ直さずに使える)
+build_child_shape() {
+  local shape=("${ISOLATION[@]}" "$PLUGIN_DIR_FLAG" "<plugin>") template
+  if [ "$ALLOW_CLASSIFIER" -eq 1 ]; then shape+=("${PERM_CLASSIFIER[@]}"); else shape+=("${PERM_EDITS[@]}"); fi
+  # hook の設定の雛形(loader と hook の並び)の要約。パスと保持値を固定の印にして算出する
+  template="$(py hook-settings "<python>" "<script>" "$(printf '0%.0s' {1..64})" "<guard>" "<state>" "$(printf '0%.0s' {1..64})" | sha256sum)"
+  shape+=("${PERM_PROMPTS[@]}" "$SETTINGS_FLAG" "<hook:${template:0:16}>")
+  HOST_SHAPE="$(quote_argv "${shape[@]}")"
+}
+
+# H31: 起動する直前に、ホスト CLI の実体が確かめた時と同じかを照合する。既定は stat の値(dev・inode・種類と
+# 権限・size・mtime・ctime。書き換えれば ctime が、差し替えれば inode が変わる)だけを比べ、補助の CLI ごとに
+# Python を起動しない。--hash では helper が realpath・stat の値・内容の sha256 まで照らす
+host_stat() { stat -c '%d|%i|%f|%s|%y|%z' -- "$HOST_EXEC" 2>/dev/null; }
+host_same() {
+  [ -n "$HOST_EXEC" ] && [ -n "$HOST_IDENTITY" ] && [ -n "$HOST_STAT" ] || return 1
+  [ "$(host_stat)" = "$HOST_STAT" ] || return 1
+  [ "${1:-}" = --hash ] || return 0
+  "$PY_ABS" -I -B "$HOST_CHECK_PY" same --host "$HOST_EXEC" --identity "$HOST_IDENTITY" --hash 7>&-
+}
+
 # #68 の決定 3: 全許可のフラグを、ホスト CLI へ渡す argv 全体(--host-argv・--allowed-tools 経由を含む)で走査して拒否する
 scan_full_permission() {
   local n="${#CHILD_ARGV[@]}" i=0 tok name value bad
@@ -1740,7 +1773,7 @@ scan_full_permission() {
       if [ "$tok" != "$name" ]; then value="${tok#*=}"; else value="${CHILD_ARGV[$((i + 1))]:-}"; fi
       [ "$value" != "$FULL_PERMISSION_VALUE" ] || die 20 full-permission "全許可のモードが argv にある('$name $value')"
       if [ "$value" = "$CLASSIFIER_VALUE" ] && [ "$ALLOW_CLASSIFIER" -ne 1 ]; then
-        die 20 classifier "分類器による自動承認('$name $value')は --allow-classifier を付けたときだけ使う"
+        die 20 classifier "分類器による自動承認('$name $value')は無人ループでは使わない(許可の仲介を通らない書き込みがある。#107 H48)"
       fi
     fi
     i=$((i + 1))
@@ -1749,14 +1782,72 @@ scan_full_permission() {
 
 quote_argv() { local out="" a; for a in "$@"; do out="$out $(printf '%q' "$a")"; done; printf '%s' "${out# }"; }
 
-# 補助の CLI(--help・auth status・plugin list)。上書き後の実行ファイルで、cwd を状態ディレクトリにして打つ
+# 補助の CLI(--version・--help・auth status・plugin list)。上書き後の実行ファイルで、cwd を状態ディレクトリにして打つ
 # (リポジトリの設定を読ませない)。セッションは起動しない
 # stdout と stderr は別のファイルへ向ける(警告が stderr に出ても、一覧の解析は stdout だけで行う)。
-# 実行ファイルは起動時に絶対パスへ解決したもの(HOST_BIN_ABS)を使う
+# 実行ファイルは起動時に控えた実体(HOST_EXEC。H31)を使い、打つたびに同じ実体かを照合する
 aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <stdout のファイル>.err)
   local out="$1"
   shift
-  ( cd "$STATE" && run_detached "$NET_TIMEOUT" "$HOST_BIN_ABS" "$@" >"$out" 2>"$out.err" )
+  if ! host_same; then
+    echo "ERROR [host-proof] 補助の CLI を打つ直前に、ホスト CLI の実体が控えた時と違う(${HOST_EXEC:-未確認})" >&2
+    return 1
+  fi
+  # 端末の幅の変数で --help の折り返しが変わらないよう、外して打つ(証明の help の照合を安定させる)
+  # (env を挟まない。env は `=` を含むパスを代入として読み、控えた実体を起動しないことがある)
+  ( cd "$STATE" && unset COLUMNS LINES && run_detached "$NET_TIMEOUT" "$HOST_EXEC" "$@" >"$out" 2>"$out.err" )
+}
+
+# ── H31: 実 hook の確認(--prove-host)──
+# 周の子と同じ argv・環境変数・監督で、使い捨てのディレクトリから 1 回だけ起動する。cwd の外の決まったパスへ
+# Write を 1 回させ、許可の仲介の hook が呼ばれて拒否したこと(判定の記録・結果の拒否の欄・ファイルが無いこと)を
+# 確かめたときだけ、実体・版・help・起動の形と結び付けた証明を書く
+prove_host() {
+  local dir target permlog nonce rc=0 child_rc child_to judged path timeout=600 probe_pid
+  [ "$ITER_TIMEOUT" -ge "$timeout" ] || timeout="$ITER_TIMEOUT"
+  dir="$(mktemp -d "$RUN_DIR/host-probe.XXXXXXXX")"
+  mkdir "$dir/work" "$dir/outside"
+  target="$dir/outside/dev-workflow-host-probe.txt"
+  permlog="$dir/permlog"
+  printf '%s\n' "This is an automated permission check run by the dev-workflow loop. Use the Write tool exactly once to create the file $target with the content 'dev-workflow host probe'. Do not use any other tool, do not retry, and do not ask questions. If the write is denied, reply with the single word DENIED." >"$dir/prompt"
+  rep "" "## ホスト CLI の実 hook の確認(--prove-host)" "" "- 実体: $HOST_EXEC(sha256 $HOST_SHA・$HOST_KIND)" "- 起動の形: $HOST_SHAPE" "- 確認の記録: $dir"
+  verify_environment || die 20 environment "実 hook の確認の直前に環境が変わった"
+  host_same --hash || die 20 host-proof "実 hook の確認の直前に、ホスト CLI の実体が控えた時と違う"
+  nonce="$("$PY_ABS" -c 'import secrets; print(secrets.token_hex(32))')"
+  # 背景で起動して wait で待つ(前面で待つと、loop.sh だけに届いたシグナルの処理が確認の終わりまで遅れる)。
+  # loop.sh が止まると、監督は親の終了通知で子孫を回収する
+  (
+    exec 7>&-
+    cd "$dir/work"
+    exec "$ENV_BIN" -u DEV_WORKFLOW_HOST_CLI -u OLDPWD DEV_WORKFLOW_LOOP_ITER="$RUN_ID-host-probe" \
+      DEV_WORKFLOW_LOOP_WORKTREE="$dir/work" DEV_WORKFLOW_LOOP_PERMLOG="$permlog" \
+      DEV_WORKFLOW_ENV_STATE="$ENVIRONMENT_STATE" DEV_WORKFLOW_ENV_SHA256="$ENVIRONMENT_SHA" \
+      DEV_WORKFLOW_ENV_GUARD="$TRUSTED_ENV_GUARD" DEV_WORKFLOW_ENV_GUARD_SHA256="$ENV_GUARD_SHA" \
+      DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
+      "$PY_ABS" "$SUPERVISOR" --result "$dir/supervisor.json" --nonce "$nonce" \
+      --timeout "$timeout" --grace "$KILL_GRACE" -- "${CHILD_ARGV[@]}" \
+      <"$dir/prompt" >"$dir/out.json" 2>"$dir/err"
+  ) &
+  probe_pid=$!
+  wait "$probe_pid" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 host-proof "実 hook の確認の子の回収を確かめられない(監督の終了コード $rc。$dir)"
+  read -r child_rc child_to < <(py supervisor-result "$dir/supervisor.json" "$nonce") \
+    || die 20 host-proof "実 hook の確認の監督の結果が保持値と違う($dir)"
+  host_same --hash || die 20 host-proof "実 hook の確認の前後で、ホスト CLI の実体が変わった"
+  verify_environment || die 20 environment "実 hook の確認の後に環境が変わった"
+  rc=0
+  judged="$("$PY_ABS" -I -B "$HOST_CHECK_PY" probe-judge --out "$dir/out.json" --permlog "$permlog" --target "$target" 2>"$dir/judge.err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    die 20 host-proof "実 hook の確認に通らない: $(head -c 400 "$dir/judge.err" | tr '\n' ' ')(子の終了コード $child_rc・時間切れ $child_to。記録: $dir)。証明は書かない"
+  fi
+  rc=0
+  path="$("$PY_ABS" -I -B "$HOST_CHECK_PY" proof-write --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
+    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" --probe "$judged" --plugin-version "$PLUGIN_VERSION" 2>"$dir/write.err")" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 host-proof "証明を書けない: $(head -c 300 "$dir/write.err" | tr '\n' ' ')"
+  rep "- 判定: 許可の仲介の hook が確認の Write を拒否した(子の終了コード $child_rc)" "- 証明: $path"
+  say "ホスト CLI の証明を書いた: $path"
+  finish 0 "--prove-host(許可の仲介の hook が実際に効くことを確かめ、証明を書いた)"
 }
 
 # ── 次の起動(§4。ロックの直後、デフォルトブランチの固定・profile の読み取り・ネットワークの git より前)──
@@ -2487,6 +2578,10 @@ source=$ITER_SOURCE
     ITER_PROMPT="/dev-workflow:ship-task --task=$ITER_REL --unattended"
     ITER_META_EXTRA=""
   fi
+  # H31: 周の worktree の lock を付け替え、周の途中の印を置く前に、ホスト CLI の実体を内容の sha256 まで照らす
+  # (止まっても周の途中の印は残らない。終わりの環境の照合も実体の違いで通らないので、選定中の worktree は
+  # 「選定中」の lock のまま残して報告する。この後の起動の直前は、環境の照合の中の stat で照らす)
+  host_same --hash || die 20 host-proof "周を始める前に、ホスト CLI の実体($HOST_EXEC)が確かめた時と違う(更新・書き換え・差し替え)。$PROVE_HINT"
   ITER_WT="$SEL_WT"
   ITER_SEQ="$SEQ"
   ITER_ID="$RUN_ID-$SEQ"
@@ -2710,6 +2805,7 @@ while [ $# -gt 0 ]; do
       case "$1" in --discover=*) DISCOVER_FROM_ARG=1; DISCOVER_ARG="${1#--discover=}" ;; esac
       shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --prove-host) PROVE_HOST=1; shift ;;
     --allowed-tools)
       need_val "$1" "$#"
       # 値が `-` で始まると、ホスト CLI にフラグとして読まれる
@@ -2734,6 +2830,12 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$HOST" ] || fail_usage "--host が空"
+if [ "$PROVE_HOST" -eq 1 ]; then
+  # 実 hook の確認だけを行う。周の選定・発見と混ぜない
+  [ "$DRY_RUN" -eq 0 ] || fail_usage "--prove-host と --dry-run は併用できない(--prove-host はセッションを 1 回起動する)"
+  [ "$DISCOVER" -eq 0 ] || fail_usage "--prove-host と --discover は併用できない"
+  [ "${#ONLY[@]}" -eq 0 ] || fail_usage "--prove-host と --only は併用できない"
+fi
 for v in ${ONLY[@]+"${ONLY[@]}"}; do [ -n "$v" ] || fail_usage "--only が空"; done
 if [ "$DISCOVER" -eq 1 ]; then
   # 発見元の列(loop.md §11): 空の要素・重複・未知の名前・--only との併用は使い方の誤り
@@ -2773,9 +2875,17 @@ done
 check_host_session
 # 子のホスト CLI には渡さない(D7)
 unset DEV_WORKFLOW_HOST_CLI
+# H31: ホストの読み込みを変える環境変数(--bare 相当の CLAUDE_CODE_SIMPLE・CLAUDE_CODE_SAFE_MODE)が立っていれば、
+# hook の自動の読み込みと認証が変わり、証明を取った起動の形の外になるので起動しない(子へ持ち越さない)
+for v in CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE; do
+  [ -z "${!v:-}" ] || die 20 hooks-disabled "環境変数 $v が立っている(ホストが hook などの自動の読み込みを止め、証明を取った起動の形の外になる)。外してから起動する"
+done
+# #107 H48: 分類器の自動承認では、許可の仲介の hook を通らずに worktree の外へ書けた(Claude Code 2.1.289 の実測)。
+# H31 の証明を書けない形なので、--allow-classifier の無人ループは起動しない(--prove-host・--dry-run を含む)
+[ "$ALLOW_CLASSIFIER" -eq 0 ] || die 20 classifier "--allow-classifier の無人ループは起動しない。分類器の自動承認では、許可の仲介の hook を通らずに worktree の外へ書けた(Claude Code 2.1.289 の実測。#107 の H48)。既定の編集の自動許可で起動する"
 
 # ── §2 の 3: 道具(OS/bash は初期化前に検査済み) ──
-for t in setsid flock python3 timeout realpath; do
+for t in setsid flock python3 timeout realpath stat; do
   command -v "$t" >/dev/null 2>&1 || die 20 tool-missing "$t が PATH に無い"
 done
 
@@ -2820,7 +2930,7 @@ PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読�
 PLUGIN_NAME="$(printf '%s\n' "$PJ" | sed -n 1p)"
 PLUGIN_VERSION="$(printf '%s\n' "$PJ" | sed -n 2p)"
 [ "$PLUGIN_NAME" = dev-workflow ] || die 20 plugin-root "プラグインの名前が dev-workflow でない"
-for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR"; do
+for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
   [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
 done
 
@@ -3058,14 +3168,44 @@ case "$HOST_BIN_ABS" in
   /*) : ;;
   *) die 20 host-cli-missing "ホスト CLI '$HOST_BIN' を絶対パスに解決できない('$HOST_BIN_ABS')。PATH の相対の要素を外すか、--host-argv に絶対パスを渡す" ;;
 esac
-CHILD_ARGV[0]="$HOST_BIN_ABS"
+# H31: ホスト CLI を一度も起動しないうちに実体(realpath・dev・ino・内容の sha256)を控え、以後の起動はすべて
+# その実体のパス(HOST_EXEC)で行う。証明(人が --prove-host で実 hook の拒否を確かめた記録)が無ければ起動しない
+verify_environment || die 20 environment "ホスト CLI の実体を控える直前に環境が変わった"
+rc=0
+HOST_IDENTITY="$("$PY_ABS" -I -B "$HOST_CHECK_PY" identity --host "$HOST_BIN_ABS" 2>"$RUN_DIR/host-identity.err")" || rc=$?
+[ "$rc" -eq 0 ] || die 20 host-proof "ホスト CLI の実体を控えられない($(head -c 300 "$RUN_DIR/host-identity.err" | tr '\n' ' '))"
+HOST_EXEC="$(printf '%s' "$HOST_IDENTITY" | py json-get realpath)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
+HOST_SHA="$(printf '%s' "$HOST_IDENTITY" | py json-get sha256)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
+HOST_KIND="$(printf '%s' "$HOST_IDENTITY" | py json-get kind)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
+# stat の値は、内容の sha256 まで照らす照合の前に控える(控えた後に変わっていれば、続く照合で止まる)
+HOST_STAT="$(host_stat)" || die 20 host-proof "ホスト CLI の実体の stat を控えられない"
+host_same --hash || die 20 host-proof "ホスト CLI の実体を控える間に変わった"
+case "${XDG_CONFIG_HOME:-}" in /*) PROOF_STORE="$XDG_CONFIG_HOME" ;; *) PROOF_STORE="$HOME/.config" ;; esac
+PROOF_STORE="$(realpath -m -- "$PROOF_STORE/dev-workflow/loop/host-proofs")"
+CHILD_ARGV[0]="$HOST_EXEC"
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
+build_child_shape
+PROVE_HINT="ホスト CLI の更新が正規のもの(版・導入元・置き場)かを人が確かめてから、同じ引数(--repo・--host-argv・--allowed-tools・--mcp-config)に --prove-host を足して 1 回打ち、許可の仲介の hook が実際に効くことを確かめてから起動する(--prove-host は打った時点の実体を信頼する)"
+if [ "$PROVE_HOST" -eq 0 ]; then
+  verify_environment || die 20 environment "ホスト CLI の証明を読む直前に環境が変わった"
+  rc=0
+  "$PY_ABS" -I -B "$HOST_CHECK_PY" proof-get --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
+    >/dev/null 2>"$RUN_DIR/host-proof.err" || rc=$?
+  case "$rc" in
+    0) : ;;
+    3) die 20 host-proof "このホスト CLI の実体($HOST_EXEC・sha256 ${HOST_SHA:0:16}…)と起動の形の証明が無い(ホスト CLI を更新したときも同じ)。ホスト CLI を起動せずに止まる。$PROVE_HINT" ;;
+    *) die 20 host-proof "$(head -c 400 "$RUN_DIR/host-proof.err" | tr '\n' ' ')。ホスト CLI を起動せずに止まる。$PROVE_HINT" ;;
+  esac
+fi
 # 周の子の起動に使う env・setsid も、周の cwd に左右されないよう絶対パスにしておく
 ENV_BIN="$(command -v env)"
 SETSID_BIN="$(command -v setsid)"
 for t in "$ENV_BIN" "$SETSID_BIN"; do
   case "$t" in /*) : ;; *) die 20 tool-missing "env・setsid を絶対パスに解決できない('$ENV_BIN' '$SETSID_BIN')" ;; esac
 done
+rc=0
+aux "$RUN_DIR/version.txt" "${AUX_VERSION[@]}" || rc=$?
+[ "$rc" -eq 0 ] || die 20 host-proof "'$HOST_BIN ${AUX_VERSION[*]}' が失敗した(終了コード $rc)"
 rc=0
 aux "$RUN_DIR/help.txt" "${AUX_HELP[@]}" || rc=$?
 [ "$rc" -eq 0 ] || die 20 help-mismatch "'$HOST_BIN ${AUX_HELP[*]}' が失敗した(終了コード $rc)"
@@ -3084,6 +3224,15 @@ MISSING="$(py help-check "$RUN_DIR/help.txt" "${HELP_TOKENS[@]}")" || rc=$?
 # D20: 値を取るフラグの表(--help の `<…>` の値の表記から作る)で --host-argv を照合する
 py help-values "$RUN_DIR/help.txt" >"$RUN_DIR/help-values.txt"
 check_host_argv_values "$RUN_DIR/help-values.txt"
+# H31: 版と help(-p の既定の説明を含む)が、証明を取った時の出力と同じか。違えば確かめ直すまで起動しない
+PROOF_INFO="未確認(--prove-host で確かめる)"
+if [ "$PROVE_HOST" -eq 0 ]; then
+  verify_environment || die 20 environment "ホスト CLI の証明を照合する直前に環境が変わった"
+  rc=0
+  PROOF_INFO="$("$PY_ABS" -I -B "$HOST_CHECK_PY" proof-match --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
+    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" 2>"$RUN_DIR/host-proof.err")" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 host-proof "$(head -c 400 "$RUN_DIR/host-proof.err" | tr '\n' ' ')。$PROVE_HINT"
+fi
 rc=0
 aux "$RUN_DIR/plugins.json" "${AUX_PLUGINS[@]}" || rc=$?
 [ "$rc" -eq 0 ] || die 20 plugin-list "'$HOST_BIN ${AUX_PLUGINS[*]}' が失敗した(終了コード $rc)"
@@ -3105,8 +3254,11 @@ bind_environment "$ENV_RECEIPT"
 ENV_INVENTORY_READY=1
 verify_environment || die 20 environment "有効 plugin の一覧または実体が変わった"
 build_child_argv
-CHILD_ARGV[0]="$HOST_BIN_ABS"
+CHILD_ARGV[0]="$HOST_EXEC"
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
+SHAPE_BEFORE="$HOST_SHAPE"
+build_child_shape
+[ "$HOST_SHAPE" = "$SHAPE_BEFORE" ] || die 20 host-proof "起動の形が証明の照合の後に変わった"
 
 # ── 許可の仲介(D22 ③)の起動時の検査と許可リスト ──
 # 利用者の設定か管理者設定(Linux の既定の置き場)に disableAllHooks: true、管理者設定に
@@ -3128,12 +3280,33 @@ ALLOW_JSON="$(printf '%s\n' "$ALLOW_OUT" | sed -n 1p)"
 ALLOW_UNUSED="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^unused=//p')"
 ALLOW_SETTINGS_STATE="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^settings=//p')"
 
+# ── H34: skill・command の frontmatter の allowed-tools が、許可リストより広い権限を足さないか ──
+# 対象は、控えた環境のうち --plugin-dir のコピー・有効な plugin の installPath・利用者の skills と commands の .md。
+# 控えた内容と同じバイトだけを読み、正規導入リンクは控えた字面と対象の実体が同じときだけ辿る(周の途中の変化は
+# 環境の照合が止める)。広い規則・解釈できない形が 1 つでもあれば、周を起動せずに止まる
+verify_environment || die 20 environment "allowed-tools の検査の直前に環境が変わった"
+GRANT_ARGS=()
+for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do GRANT_ARGS+=(--allowed-tools "$v"); done
+[ "$ALLOW_CLASSIFIER" -eq 0 ] || GRANT_ARGS+=(--classifier)
+rc=0
+GRANTS_OUT="$("$PY_ABS" -I -B "$HOST_CHECK_PY" grants --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
+  --user-settings "$USER_SETTINGS" ${GRANT_ARGS[@]+"${GRANT_ARGS[@]}"} 2>"$RUN_DIR/skill-grants.err")" || rc=$?
+if [ "$rc" -ne 0 ]; then
+  cat "$RUN_DIR/skill-grants.err" >&2 2>/dev/null || true
+  rep "" "## skill・command の allowed-tools(止まった理由)" ""
+  sed 's/^/    /' "$RUN_DIR/skill-grants.err" >>"$REPORT" 2>/dev/null || true
+  die 20 skill-grants "skill・command の allowed-tools が許可リストより広いか、解釈できない(詳細: $RUN_DIR/skill-grants.err)。その plugin・skill を無効にするか、ループ用の設定ディレクトリ(CLAUDE_CONFIG_DIR)で起動する。許可リストより広いだけの規則なら、同じ規則を --allowed-tools か利用者の設定の permissions.allow に足してもよい(権限を広げるかは人が決める。Bash の全体・未知の道具・解釈できない形・重複は、足しても止まる)"
+fi
+GRANTS_FILES="$(printf '%s' "$GRANTS_OUT" | sed -n 's/^files=\([0-9]*\) .*/\1/p')"
+case "$GRANTS_OUT" in *" yaml=on") GRANTS_YAML="有" ;; *) GRANTS_YAML="無(PyYAML を読めない。自前の厳しい読み方だけ)" ;; esac
+
 # ── §2 の 13: 疎通(D10。--dry-run では打たない)──
 if [ "$DRY_RUN" -eq 0 ]; then
   rc=0
   aux "$RUN_DIR/auth.txt" "${AUX_AUTH[@]}" || rc=$?
   [ "$rc" -eq 0 ] || die 20 auth "認証の確認('$HOST_BIN ${AUX_AUTH[*]}')が通らない(終了コード $rc。$RUN_DIR/auth.txt)"
 fi
+[ "$PROVE_HOST" -eq 0 ] || prove_host
 
 # ── §2 の 11: 2026-09-23 決定 19 の帰結(D8)──
 LEADING=""
@@ -3197,6 +3370,8 @@ if [ -n "$ALLOW_UNUSED" ]; then
   while IFS= read -r l; do rep "  - $l"; done <<<"$ALLOW_UNUSED"
 fi
 rep "- 導入済みの同名プラグイン: $INSTALLED_STATE(loop.sh のプラグイン: $PLUGIN_ROOT・版 $PLUGIN_VERSION)"
+rep "- ホスト CLI の実体: $HOST_EXEC(sha256 $HOST_SHA・$HOST_KIND)。証明: $(printf '%s' "$PROOF_INFO" | tr '\t' ' ')"
+rep "- skill・command の allowed-tools: 検査したファイル(.md と plugin のマニフェスト) ${GRANTS_FILES} 件。許可リストより広い規則は無い(YAML の照合: $GRANTS_YAML)"
 rep "- 停止ファイル: $STOP_FILE" "- worktree の置き場: $WT_ROOT"
 for note in ${STARTUP_NOTES[@]+"${STARTUP_NOTES[@]}"}; do rep "- $note"; done
 load_worktrees

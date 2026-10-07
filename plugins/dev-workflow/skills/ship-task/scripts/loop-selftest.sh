@@ -240,8 +240,41 @@ mkdir -p "$REC"
 me="$(basename "$0")"
 case "${1:-}" in --help|auth|plugin) env >"$REC/env-aux-${1}" ;; esac
 case "${1:-}" in
+  --version) printf '%s --version\n' "$me" >>"$REC/aux.log"; echo "${SELFTEST_HOST_VERSION:-2.1.289 (stub)}"; exit 0 ;;
   --help) printf '%s --help\n' "$me" >>"$REC/aux.log"; cat "${SELFTEST_HELP_FILE:?}"; exit 0 ;;
-  auth) printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"; echo "logged in (stub)"; exit "${SELFTEST_AUTH_RC:-0}" ;;
+  auth)
+    printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"
+    # H31: 起動時の検査の後に実体を書き換える(周の途中の差し替えの模擬)
+    #   内容は「パス<TAB>形」。append: 末尾に足す / ctime: 同じ大きさで 2 行目を書き換え、mtime を戻す / inode: 同じ大きさ・
+    #   同じ mtime の別の inode に差し替える。書き換え後の 2 行目は、起動されると印を残す行
+    if [ -f "$REC/mutate-on-auth" ]; then
+      IFS=$'\t' read -r mpath mmode <"$REC/mutate-on-auth"
+      rm -f "$REC/mutate-on-auth"
+      case "${mmode:-append}" in
+        append) printf '# mutated\n' >>"$mpath" ;;
+        ctime|inode)
+          python3 - "$mpath" "$mmode" <<'PY'
+import os, sys
+path, mode = sys.argv[1:]
+mark = 'echo replaced >>"${SELFTEST_REC:?}/replaced-ran"'
+st = os.stat(path)
+lines = open(path, 'rb').read().split(b'\n')
+assert len(lines[1]) == len(mark), 'pad'
+lines[1] = mark.encode()
+data = b'\n'.join(lines)
+target = path if mode == 'ctime' else path + '.new'
+with open(target, 'r+b' if mode == 'ctime' else 'wb') as f:
+    f.write(data)
+if mode == 'inode':
+    os.chmod(target, st.st_mode & 0o7777)
+os.utime(target, ns=(st.st_atime_ns, st.st_mtime_ns))
+if mode == 'inode':
+    os.replace(target, path)
+PY
+          ;;
+      esac
+    fi
+    echo "logged in (stub)"; exit "${SELFTEST_AUTH_RC:-0}" ;;
   plugin)
     printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"
     # 出力は SELFTEST_PLUGINS_FILE の中身。試験データは実物の形(#68 の実走で測った — design §7-3。トップは配列で、
@@ -316,6 +349,34 @@ human_config_change() {
   esac
 }
 case "$prompt" in
+  *"automated permission check run by the dev-workflow loop"*)
+    # H31: 実 hook の確認(--prove-host)の模擬。SELFTEST_PROBE_MODE で振る舞いを選ぶ
+    #   hook(既定): --settings の PermissionRequest の hook を実際に呼び、その判定に従う(loop-permission.py を通す)
+    #   skip: hook を呼ばずに拒否する(設定の hook を読まない起動の模擬)/ allow: hook を呼ばずに書く(許可リストで通る模擬)
+    #   autherr: 認証の失敗を返す / noattempt: Write を試みない
+    printf '%s\n' "$0" "$@" >"$REC/argv-probe"
+    env >"$REC/env-probe"
+    target="$(printf '%s' "$prompt" | sed -n 's/.*create the file \(.*\) with the content.*/\1/p')"
+    settings=""; prev=""
+    for a in "$@"; do [ "$prev" != --settings ] || settings="$a"; prev="$a"; done
+    decision=deny
+    case "${SELFTEST_PROBE_MODE:-hook}" in
+      hook)
+        cmd="$(printf '%s' "$settings" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hooks"]["PermissionRequest"][0]["hooks"][0]["command"])')"
+        decision="$(python3 -c 'import json,os,sys; print(json.dumps({"session_id":"stub","hook_event_name":"PermissionRequest","tool_name":"Write","tool_input":{"file_path":sys.argv[1],"content":"dev-workflow host probe"},"cwd":os.getcwd(),"permission_mode":"acceptEdits"}))' "$target" \
+          | sh -c "$cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["decision"]["behavior"])')"
+        ;;
+      allow) decision=allow ;;
+      autherr) echo '{"type":"result","subtype":"error","is_error":true,"result":"Not logged in (stub)","permission_denials":[]}'; exit 1 ;;
+      noattempt) echo '{"type":"result","subtype":"success","is_error":false,"result":"I will not write files.","permission_denials":[]}'; exit 0 ;;
+    esac
+    if [ "$decision" = allow ]; then
+      printf 'dev-workflow host probe' >"$target"
+      echo '{"type":"result","subtype":"success","is_error":false,"result":"written","permission_denials":[]}'
+    else
+      python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":"DENIED","permission_denials":[{"tool_name":"Write","tool_use_id":"stub","tool_input":{"file_path":sys.argv[1],"content":"dev-workflow host probe"}}]}))' "$target"
+    fi
+    exit 0 ;;
   *--discover=*)
     # 発見モードの周(loop.md §11)。発見元ごとの振る舞いは環境変数 SELFTEST_DISC_DA(data-audit)・SELFTEST_DISC_RF
     # (refactor)で選ぶ(既定は none = 候補なし)。記録のファイルの名は disc-<発見元>
@@ -669,7 +730,7 @@ cp "$SCRIPT_DIR/loop-startup.py" "$PLUG/skills/ship-task/scripts/loop-startup.py
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
 cp "$PERM_SRC" "$PLUG/skills/ship-task/scripts/loop-permission.py"
 cp "$SCRIPT_DIR/environment-guard.py" "$PLUG/skills/ship-task/scripts/environment-guard.py"
-cp "$SCRIPT_DIR/host-argv.py" "$SCRIPT_DIR/loop-supervisor.py" "$PLUG/skills/ship-task/scripts/"
+cp "$SCRIPT_DIR/host-argv.py" "$SCRIPT_DIR/loop-supervisor.py" "$SCRIPT_DIR/host-check.py" "$PLUG/skills/ship-task/scripts/"
 cp "$SCRIPT_DIR/origin-repo.py" "$PLUG/skills/ship-task/scripts/origin-repo.py"   # 起動時の origin の URL の検査で使う(両方のモード。loop.md §2)
 cp "$SCRIPT_DIR/git-config-digest.py" "$PLUG/skills/ship-task/scripts/git-config-digest.py"   # 在ることを起動時に確かめる(両方のモード。loop.md §2 の 4)
 cp "$SCRIPT_DIR/publish-guard.py" "$PLUG/skills/ship-task/scripts/publish-guard.py"
@@ -692,7 +753,7 @@ build_env() { # 使い方: build_env <状態名> [VAR=値 ...] → ENV_ARGS
   ENV_ARGS=()
   for v in "$@"; do case "$v" in PATH=*) path="${v#PATH=}" ;; esac; done
   guard_path "$path"
-  ENV_ARGS=(HOME="$W/home" PATH="$path" XDG_STATE_HOME="$W/state/$state" GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"
+  ENV_ARGS=(HOME="$W/home" PATH="$path" XDG_STATE_HOME="$W/state/$state" XDG_CONFIG_HOME="$W/home/.config" GIT_CONFIG_GLOBAL="$GIT_CONFIG_GLOBAL"
     GIT_CONFIG_SYSTEM="$GIT_CONFIG_SYSTEM" GIT_SSH_COMMAND="$STUBBIN/ssh-stub" LANG=C.UTF-8
     SELFTEST_REC="$REC" SELFTEST_TAG="$TAG" SELFTEST_HELP_FILE="$W/help.txt" TMPDIR="$W/tmp")
   for v in "$@"; do case "$v" in PATH=*) : ;; *) ENV_ARGS+=("$v") ;; esac; done
@@ -827,8 +888,22 @@ PY
 }
 
 echo "loop-selftest: 対象 $TARGET(scratch $W)"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
+
+# ════════════════ 治具: スタブのホスト CLI の証明(H31。以後の起動の前提)════════════════
+# loop.sh は証明(実 hook の拒否を確かめた記録)の無いホスト CLI を起動しない。スタブは --settings の hook を
+# 実際に呼んで判定に従うので、--prove-host を通常どおり打って証明を作る(scripts/test_loop_startup.py も
+# この前半を使う)。旧実装(--prove-host が無い)と比べるときも続けられるよう、失敗は記録だけにする
+newrepo provefix
+newrec provefix
+PROOF_DIR="$W/home/.config/dev-workflow/loop/host-proofs"
+run_loop prove-default -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "治具: スタブの証明を作れる(default)" 0 "$RC"
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(host sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
+
+# ════════════════ 治具: 上書きの実行ファイルの証明(H31)════════════════
+run_loop prove-alt -- --repo "$R" --prove-host --host-argv "$ALTBIN/claude-alt" "${COMMON_ARGS[@]}"
+check "治具: スタブの証明を作れる(alt)" 0 "$RC"
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
 # 文書の §3 判定 2 の項目(その行と下位の行)から、バッククォートで囲んだ大文字の環境変数名だけを取り出す
@@ -1315,13 +1390,13 @@ addtask pr-argv 2026-01-01
 addtask pr-second 2026-01-02
 commit
 newrec argv
-run_loop argv -- --repo "$R" --dry-run --allow-classifier
+run_loop argv -- --repo "$R" --dry-run
 check "--dry-run: 終了コード 0" 0 "$RC"
 check "--dry-run: -p を起動しない" "" "$(calls)"
 check "--dry-run: worktree が残らない" 1 "$(wt_count)"
 DRY_COPY="$(sed -n 's/.*--plugin-dir \([^ ]*\) --permission-mode.*/\1/p' "$OUT" | head -1)"
 t "--dry-run: コピーの状態控えがある" test -f "${DRY_COPY%/plugin}/environment.json"
-has "--dry-run: 解決後の argv が出る(実行ファイルは絶対パス)" "$OUT" "解決後の argv: $STUBBIN/claude -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir $DRY_COPY --permission-mode auto --permission-prompts none"  # <!-- validate-allow: loop.sh --dry-run が出す解決後の argv の文字列を照合する(起動はしない) -->
+has "--dry-run: 解決後の argv が出る(実行ファイルは絶対パス)" "$OUT" "解決後の argv: $STUBBIN/claude -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir $DRY_COPY --permission-mode acceptEdits --permission-prompts none"  # <!-- validate-allow: loop.sh --dry-run が出す解決後の argv の文字列を照合する(起動はしない) -->
 has "--dry-run: 対象の一覧が出る" "$OUT" "docs/tasks/進行中_pr-argv.md"
 hasnt "--dry-run: 疎通(auth status)を打たない" "$REC/aux.log" "auth status"
 has "--dry-run: --help で照合する" "$REC/aux.log" "claude --help"
@@ -4218,6 +4293,217 @@ newrepo log-stricter; addtask holdg1-a 2026-01-01; addtask pr-b 2026-01-02; comm
 run_loop log-stricter SELFTEST_ENV_ATTACK=fake -- --repo "$R" --max-consecutive-failures 1 "${COMMON_ARGS[@]}"
 check 'G1: 通常ブレーカー1が厳しければ1回で10' 10 "$RC"
 check 'G1: 通常ブレーカー1の後は回らない' holdg1-a "$(calls)"
+fi
+
+# ════════════════ H31・H34: ホスト CLI の証明と allowed-tools(#193)════════════════
+if want host; then
+newrepo hostproof
+addtask pr-a 2026-01-01
+commit
+H31BIN="$W/h31bin"
+mkdir -p "$H31BIN"
+h31_copy() { # $1=名 → 中身はスタブと同じ、別の実体(証明は別になる)
+  cp "$STUBBIN/claude" "$H31BIN/$1"
+  chmod +x "$H31BIN/$1"
+}
+proofs() { find "$PROOF_DIR" -maxdepth 1 -name '*.json' 2>/dev/null | wc -l; }
+# 正常: 証明があれば起動前の検査に通り、報告に実体と証明が出る
+newrec h31-normal
+run_loop h31 -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H31 正常: 証明があれば --dry-run が通る" 0 "$RC"
+has "H31 正常: 報告に実体と証明が出る" "$(latest_report h31)" "ホスト CLI の実体: $STUBBIN/claude"
+has "H31 正常: --version を打つ" "$REC/aux.log" "claude --version"
+# 証明が無い実体は、一度も起動せずに止まる
+h31_copy fresh
+newrec h31-fresh
+run_loop h31 -- --repo "$R" --dry-run --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 証明の無い実体で止まる" 20 "$RC"
+has "H31 証明の無い実体: 理由" "$OUT" "[host-proof]"
+hasnt "H31 証明の無い実体: 起動しない" "$REC/aux.log" "fresh"
+# --prove-host: hook が拒否したときだけ証明を書く(認証の失敗・hook が呼ばれない・書けた・試みない は書かない)
+before="$(proofs)"
+for mode in skip allow autherr noattempt; do
+  newrec "h31-probe-$mode"
+  run_loop h31 "SELFTEST_PROBE_MODE=$mode" -- --repo "$R" --prove-host --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+  check "H31 確認($mode)で証明を書かない: 終了コード" 20 "$RC"
+  has "H31 確認($mode): 理由" "$OUT" "[host-proof]"
+  check "H31 確認($mode): 証明が増えない" "$before" "$(proofs)"
+done
+newrec h31-auth
+run_loop h31 SELFTEST_AUTH_RC=1 -- --repo "$R" --prove-host --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 認証の失敗で証明を書かない" 20 "$RC"
+has "H31 認証の失敗: 理由" "$OUT" "[auth]"
+check "H31 認証の失敗: 証明が増えない" "$before" "$(proofs)"
+newrec h31-prove
+run_loop h31 -- --repo "$R" --prove-host --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 hook が拒否すれば証明を書く" 0 "$RC"
+has "H31 証明を書いた: 報告" "$OUT" "ホスト CLI の証明を書いた:"
+check "H31 証明が 1 つ増える" "$((before + 1))" "$(proofs)"
+has "H31 確認は周と同じ hook の設定で起動する" "$REC/argv-probe" "--settings"
+has "H31 確認は許可の仲介の記録を残す" "$(ls -d "$(state_dir h31)"/*/host-probe.*/permlog | tail -1)" '"decision": "deny"'
+run_loop h31 -- --repo "$R" --dry-run --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 証明の後は --dry-run が通る" 0 "$RC"
+# 版・help の変化(実体は同じ)
+newrec h31-version
+run_loop h31 "SELFTEST_HOST_VERSION=2.1.999 (stub)" -- --repo "$R" --dry-run --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 版が変われば止まる" 20 "$RC"
+has "H31 版の変化: 理由" "$OUT" "--version の出力が確認した時と違う"
+{ cat "$W/help.txt"; printf '  --bare                                Minimal mode (default for -p)\n'; } >"$W/help-changed.txt"
+newrec h31-help
+run_loop h31 "SELFTEST_HELP_FILE=$W/help-changed.txt" -- --repo "$R" --dry-run --host-argv "$H31BIN/fresh" "${COMMON_ARGS[@]}"
+check "H31 help が変われば止まる" 20 "$RC"
+has "H31 help の変化: 理由" "$OUT" "--help の出力が確認した時と違う"
+# 分類器の起動(#107 H48): 許可の仲介を通らない書き込みがあるので、証明を書かず、起動もしない
+newrec h31-classifier
+for mode in --prove-host --dry-run; do
+  run_loop h31 -- --repo "$R" "$mode" --allow-classifier "${COMMON_ARGS[@]}"
+  check "H31 分類器の起動($mode)は止まる" 20 "$RC"
+  has "H31 分類器の起動($mode): 理由" "$OUT" "[classifier]"
+done
+check "H31 分類器の起動: ホスト CLI を起動しない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+# 同じ inode の書き換え・別の inode への差し替え: 置き換わった実体を起動せずに止まる
+for how in rewrite replace; do
+  h31_copy "$how"
+  run_loop h31 -- --repo "$R" --prove-host --host-argv "$H31BIN/$how" "${COMMON_ARGS[@]}"
+  check "H31 $how: 先に証明を書く" 0 "$RC"
+  # 置き換わった実体は、起動されると最初の行で印を残す(どの分岐でも exit する前)
+  { head -1 "$STUBBIN/claude"; printf 'echo replaced >>"${SELFTEST_REC:?}/replaced-ran"\n'; tail -n +2 "$STUBBIN/claude"; } >"$W/h31-$how.body"
+  if [ "$how" = rewrite ]; then
+    ino_before="$(stat -c %i "$H31BIN/$how")"
+    cat "$W/h31-$how.body" >"$H31BIN/$how"   # 同じ inode のまま中身を書き換える
+    check "H31 rewrite: inode を保つ" "$ino_before" "$(stat -c %i "$H31BIN/$how")"
+  else
+    cp "$W/h31-$how.body" "$H31BIN/$how.new"
+    chmod +x "$H31BIN/$how.new"
+    mv -f "$H31BIN/$how.new" "$H31BIN/$how"
+  fi
+  newrec "h31-$how"
+  run_loop h31 -- --repo "$R" --dry-run --host-argv "$H31BIN/$how" "${COMMON_ARGS[@]}"
+  check "H31 $how: 止まる" 20 "$RC"
+  has "H31 $how: 理由" "$OUT" "[host-proof]"
+  f "H31 $how: 置き換わった実体を起動しない" test -e "$REC/replaced-ran"
+  hasnt "H31 $how: 補助の CLI も打たない" "$REC/aux.log" "$how"
+done
+# 対照: 置き換わった実体が起動されれば印が残る(上の検査が空でないこと)
+( cd "$W/cwd" && env -i PATH="$STUBBIN:$SAFEBIN" SELFTEST_REC="$REC" SELFTEST_HELP_FILE="$W/help.txt" "$H31BIN/replace" --version ) >/dev/null 2>&1
+t "H31 対照: 置き換わった実体を起動すると印が残る" test -e "$REC/replaced-ran"
+# 周の途中の差し替え: 起動時の検査の後に実体が変わったら、周の子を起動しない
+h31_copy midrun
+run_loop h31 -- --repo "$R" --prove-host --host-argv "$H31BIN/midrun" "${COMMON_ARGS[@]}"
+check "H31 周の途中: 先に証明を書く" 0 "$RC"
+newrec h31-midrun
+printf '%s\n' "$H31BIN/midrun" >"$REC/mutate-on-auth"
+run_loop h31 -- --repo "$R" --host-argv "$H31BIN/midrun" "${COMMON_ARGS[@]}"
+check "H31 周の途中で実体が変われば止まる" 20 "$RC"
+has "H31 周の途中: 理由" "$OUT" "[host-proof]"
+check "H31 周の途中: 周の子を起動しない" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+# 同じ大きさ・同じ mtime の書き換え(ctime だけが変わる)と、同じ大きさ・同じ mtime の別 inode への差し替え。
+# 次の補助の CLI の前に止まり、置き換わった実体を起動しない(stat の照合が ctime・inode を見ていること)
+mark_len="$(printf '%s' 'echo replaced >>"${SELFTEST_REC:?}/replaced-ran"' | wc -c)"
+for how in ctime inode; do
+  { head -1 "$STUBBIN/claude"; printf '#%*s\n' "$((mark_len - 1))" ''; tail -n +2 "$STUBBIN/claude"; } >"$H31BIN/mid-$how"
+  chmod +x "$H31BIN/mid-$how"
+  # 状態名を分ける(片方の失敗で残った印が、もう片方の起動を止めないように)
+  run_loop "h31mid-$how" -- --repo "$R" --prove-host --host-argv "$H31BIN/mid-$how" "${COMMON_ARGS[@]}"
+  check "H31 周の途中($how): 先に証明を書く" 0 "$RC"
+  newrec "h31-mid-$how"
+  printf '%s\t%s\n' "$H31BIN/mid-$how" "$how" >"$REC/mutate-on-auth"
+  size_before="$(stat -c %s "$H31BIN/mid-$how")"
+  run_loop "h31mid-$how" -- --repo "$R" --host-argv "$H31BIN/mid-$how" "${COMMON_ARGS[@]}"
+  check "H31 周の途中($how): 大きさは変わっていない" "$size_before" "$(stat -c %s "$H31BIN/mid-$how")"
+  check "H31 周の途中($how): 止まる" 20 "$RC"
+  has "H31 周の途中($how): 理由" "$OUT" "[host-proof]"
+  f "H31 周の途中($how): 置き換わった実体を起動しない" test -e "$REC/replaced-ran"
+  check "H31 周の途中($how): 周の子を起動しない" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+done
+# hook を読ませない環境変数が立っていれば、ホスト CLI を起動せずに止まる
+newrec h31-simple
+for v in CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE; do
+  run_loop h31 "$v=1" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+  check "H31 $v が立っていれば止まる" 20 "$RC"
+  has "H31 $v: 理由" "$OUT" "[hooks-disabled]"
+done
+check "H31 hook を読ませない環境変数: ホスト CLI を起動しない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+# 使い方の誤り
+run_loop h31 -- --repo "$R" --prove-host --dry-run
+check "H31 --prove-host と --dry-run は併用できない" 2 "$RC"
+
+# H34: skill・command の allowed-tools(利用者の設定ディレクトリは試験ごとに分ける)
+h34_cfg() { # $1=名 → H34CFG(空の設定ディレクトリ)
+  H34CFG="$W/h34cfg-$1"
+  mkdir -p "$H34CFG/skills"
+}
+h34_skill() { # $1=置き場の skills $2=名 $3=frontmatter の行
+  mkdir -p "$1/$2"
+  printf -- '---\nname: %s\ndescription: h34\n%s\n---\nbody\n' "$2" "$3" >"$1/$2/SKILL.md"
+}
+h34_cfg safe
+h34_skill "$H34CFG/skills" reader 'allowed-tools: Read'
+newrec h34-safe
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H34 許可リストに含まれる skill は通る" 0 "$RC"
+has "H34 通った: 報告" "$(latest_report h34)" "skill・command の allowed-tools: 検査したファイル(.md と plugin のマニフェスト)"
+h34_cfg wide
+h34_skill "$H34CFG/skills" runner 'allowed-tools: Bash(node:*)'
+newrec h34-wide
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H34 権限を足す skill で止まる" 20 "$RC"
+has "H34 権限を足す skill: 理由" "$OUT" "[skill-grants]"
+has "H34 権限を足す skill: ファイルと規則を出す" "$OUT" "runner/SKILL.md: allowed-tools の Bash(node:*) が許可リストより広い"
+h34_cfg cmd
+mkdir -p "$H34CFG/commands"
+printf -- '---\nallowed-tools: Write\n---\n' >"$H34CFG/commands/w.md"
+newrec h34-cmd
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H34 権限を足す command で止まる" 20 "$RC"
+has "H34 権限を足す command: 理由" "$OUT" "[skill-grants]"
+has "H34 権限を足す command: ファイルと規則" "$OUT" "commands/w.md: allowed-tools の Write が許可リストより広い"
+# 有効な plugin の installPath(plugin 一覧の形は実物と同じ)
+h34_cfg plug
+mkdir -p "$W/h34plug/commands"
+printf -- '---\ndescription: x\nallowed-tools: Bash(node:*), AskUserQuestion\n---\n' >"$W/h34plug/commands/rescue.md"
+printf '[{"id":"codex@m","version":"1.0","scope":"user","enabled":true,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug.json"
+newrec h34-plug
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" "SELFTEST_PLUGINS_FILE=$W/h34plug.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H34 有効な plugin の command で止まる" 20 "$RC"
+has "H34 plugin: ファイルを出す" "$OUT" "$W/h34plug/commands/rescue.md"
+printf '[{"id":"codex@m","version":"1.0","scope":"user","enabled":false,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug-off.json"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" "SELFTEST_PLUGINS_FILE=$W/h34plug-off.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H34 無効の plugin は見ない" 0 "$RC"
+# 同じ exact は通り、許可リストに無ければ止まる(分類器の起動の包含は単体の回帰で確かめる。起動は H48 で止まる)
+h34_cfg exact
+h34_skill "$H34CFG/skills" status 'allowed-tools: Bash(git status)'
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Bash(git status)' "${COMMON_ARGS[@]}"
+check "H34 同じ exact の skill は通る" 0 "$RC"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Bash(git status --short)' "${COMMON_ARGS[@]}"
+check "H34 違う exact では止まる" 20 "$RC"
+has "H34 違う exact: 理由" "$OUT" "[skill-grants]"
+has "H34 違う exact: ファイルと規則" "$OUT" "status/SKILL.md: allowed-tools の Bash(git status) が許可リストより広い"
+# 正規導入(setup.sh --global の形のリンク)は通る。リンク先の frontmatter が権限を足せば止まる
+h34_cfg link
+mkdir -p "$W/h34clone/skills"
+h34_skill "$W/h34clone/skills" do-task 'allowed-tools: Read'
+h34_skill "$W/h34clone/skills" evil 'allowed-tools: Bash(rm *)'
+ln -s "$W/h34clone/skills/do-task" "$H34CFG/skills/do-task"
+newrec h34-link
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H34 正規導入のリンクは通る" 0 "$RC"
+ln -s "$W/h34clone/skills/evil" "$H34CFG/skills/evil"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H34 正規導入でも権限を足すリンク先なら止まる" 20 "$RC"
+has "H34 リンク先: 理由" "$OUT" "[skill-grants]"
+# 特殊ファイル・内側のリンクは、検査の前に控えの段階で止まる
+h34_cfg fifo
+mkfifo "$H34CFG/skills/pipe.md"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H34 FIFO で止まる" 20 "$RC"
+has "H34 FIFO: 理由" "$OUT" "[environment]"
+h34_cfg inner
+h34_skill "$H34CFG/skills" in 'allowed-tools: Read'
+ln -s "$W/h34clone/skills/evil/SKILL.md" "$H34CFG/skills/in/other.md"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H34 内側のリンクで止まる" 20 "$RC"
+has "H34 内側のリンク: 理由" "$OUT" "[environment]"
 fi
 
 # ════════════════ 後片付け ════════════════
