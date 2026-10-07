@@ -566,7 +566,9 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 - 起動時: 「モード: 発見(発見元の列・既定か引数か)」。最初の選定で、発見元の列(task_dir と今夜の名のブランチ)
 - 周ごと: 発見元・今夜の名のブランチ・結末・判定・PR の URL(結末の詳細)・候補の件数とパス・`.claude/reviews` を写した先(候補モードの報告 `candidates-<発見元>.md`・data-audit の監査の報告 `data-audit-iter*.md`)・許可の仲介の要約
 - `縮退` の周: push したか(判定の `ls-remote` で見た値。origin のブランチ = 判定した HEAD なら push 済み)で分ける。どちらも、処理するまでその発見元は回らないことを添える
-  - push したとき: push 済みのブランチ・手で PR を作るコマンドの雛形 `gh pr create -R <HOST/OWNER/REPO> --head <ブランチ> --base <デフォルトブランチ>`(`<HOST/OWNER/REPO>` は人が実名で埋める。push したのに PR を作らない `縮退` は origin-repo.py の `repo` が null のときで、`loop.sh` は実名を知らない)・作らないときの消し方
+  - push したとき: push 済みのブランチ・手で PR を作るコマンドの雛形 `gh pr create -R <HOST/OWNER/REPO> --head <ブランチ> --base <デフォルトブランチ>`・作らないときの消し方
+    - `origin-repo.py` の `repo` が null か、`gh repo view` の終了コードが 0 以外のときは、push が成功しても PR を作らず `縮退` になる。公開手順は [discover-mode.md](discover-mode.md) §8 を参照する。
+    - どちらの理由でも、`loop.sh` は `<HOST/OWNER/REPO>` を実名で自動補完しない。雛形を使う人が実名で埋める。
   - push していないとき(origin が無い・`--no-pr`): ローカルのブランチを merge するか、消す手順
 - 終わり: 発見元ごとの要約・読み飛ばした発見元と理由(片付けの定型つき)・`縮退` の周のブランチ・片付けの定型(merge commit で merge して pull した後・squash や rebase で merge したとき・PR を閉じたときのブランチの消し方)・採用の手順(merge の後に人が `/create-task <候補_ のパス>`)
 - `--dry-run`: 起動の前提と 1 回の選定(状態ファイルの前提を含む)を行い、発見元の列(task_dir と今夜の名のブランチ)と読み飛ばし(片付けの定型つき)を出して終わる

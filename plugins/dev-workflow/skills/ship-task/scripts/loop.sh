@@ -2350,7 +2350,7 @@ discover_after_iteration() {
     rep "- 縮退の後の人の手順(処理するまで、発見元 $s は回らない — 未 merge の候補のブランチとして読み飛ばす):"
     if [ "$pushed" = yes ]; then
       rep "  - push 済みのブランチ: $branch(origin。判定した HEAD と同じ sha)"
-      rep "  - 手で PR を作る(<HOST/OWNER/REPO> は人が実名で埋める。loop.sh は実名を知らない): \`gh pr create -R <HOST/OWNER/REPO> --head $branch --base $DEF_NAME\`" \
+      rep "  - 手で PR を作る(<HOST/OWNER/REPO> は人が実名で埋める。loop.sh は実名を自動で埋めない): \`gh pr create -R <HOST/OWNER/REPO> --head $branch --base $DEF_NAME\`" \
         "  - PR を作らないときの消し方: \`git push origin --delete $branch\` と \`git branch -D $branch\`"
     else
       if [ "$HAS_ORIGIN" -eq 1 ]; then

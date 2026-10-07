@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.23.9
+
+### 修正
+
+- 発見モードで push 後に PR を作らない条件を、`repo` が null の場合と `gh repo view` が成功しない場合の2つとして説明する。朝の報告では、どちらも `<HOST/OWNER/REPO>` を人が実名で埋める固定の雛形を示す。実名を自動で埋めない既存の動作は変えない([Issue #205](https://github.com/Yuki-Maeda-valour/workflow/issues/205))。
+- `.claude/reviews/` が gitignore 済みの場合に、`review-guard.py` が自身の記録や snapshot の追加を変更と誤認し、`seal` を拒否する不具合を修正する。Git が無視するファイルの一覧から、既存の固定除外に一致するパスだけを外す。レビュー入力の改変や、除外範囲外の変更の検査は維持する([Issue #215](https://github.com/Yuki-Maeda-valour/workflow/issues/215))。
+
 ## v4.23.8
 
 ### 修正
