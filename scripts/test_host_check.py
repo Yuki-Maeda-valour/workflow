@@ -127,7 +127,10 @@ class ProofTests(Base):
         self.probe = {'tool': 'Write', 'hook': 'invoked', 'decision': 'deny', 'file_absent': True}
 
     def write(self, shape=None):
-        return HC.proof_write(self.store, self.held, shape or self.shape, str(self.version), str(self.help), self.probe, '9.9.9')
+        empty = HC.sha256(b'')
+        init = {'init_schema': HC.INIT_SCHEMA_VERSION, 'public_names': []}
+        return HC.proof_write(self.store, self.held, shape or self.shape, str(self.version), str(self.help), self.probe,
+                              '9.9.9', empty, empty, [], 1, init)
 
     def test_missing_then_written_then_matches(self):
         with self.assertRaises(HC.Missing):
@@ -139,13 +142,17 @@ class ProofTests(Base):
 
     def test_cli_exit_codes(self):
         ident = json.dumps(self.held)
-        p = run('proof-get', '--store', self.store, '--identity', ident, '--shape', self.shape)
+        component = HC.sha256(b'')
+        p = run('proof-get', '--store', self.store, '--identity', ident, '--shape', self.shape,
+                '--component-sha256', component, '--policy-sha256', component)
         self.assertEqual(p.returncode, 3, p.stderr)
         self.write()
-        p = run('proof-get', '--store', self.store, '--identity', ident, '--shape', self.shape)
+        p = run('proof-get', '--store', self.store, '--identity', ident, '--shape', self.shape,
+                '--component-sha256', component, '--policy-sha256', component)
         self.assertEqual(p.returncode, 0, p.stderr)
         p = run('proof-match', '--store', self.store, '--identity', ident, '--shape', self.shape,
-                '--version-file', self.version, '--help-file', self.help)
+                '--version-file', self.version, '--help-file', self.help,
+                '--component-sha256', component, '--policy-sha256', component)
         self.assertEqual(p.returncode, 0, p.stderr)
 
     def test_other_shape_or_entity_needs_its_own_proof(self):
@@ -161,6 +168,18 @@ class ProofTests(Base):
         self.version.write_text('2.1.290 (Claude Code)\n')
         with self.assertRaises(HC.Stop):
             HC.proof_match(self.store, self.held, self.shape, str(self.version), str(self.help))
+
+    def test_component_or_policy_change_needs_a_new_proof(self):
+        component = '1' * 64
+        policy = '2' * 64
+        HC.proof_write(self.store, self.held, self.shape, str(self.version), str(self.help), self.probe,
+                       '9.9.9', component, policy, [], 1,
+                       {'init_schema': HC.INIT_SCHEMA_VERSION, 'public_names': []})
+        HC.proof_match(self.store, self.held, self.shape, str(self.version), str(self.help), component, policy)
+        with self.assertRaises(HC.Stop):
+            HC.proof_match(self.store, self.held, self.shape, str(self.version), str(self.help), '3' * 64, policy)
+        with self.assertRaises(HC.Stop):
+            HC.proof_match(self.store, self.held, self.shape, str(self.version), str(self.help), component, '4' * 64)
         self.version.write_text('2.1.289 (Claude Code)\n')
         self.help.write_text(self.help.read_text() + '  --bare  now default for -p\n')
         with self.assertRaises(HC.Stop):
@@ -171,7 +190,8 @@ class ProofTests(Base):
         good = json.loads(path.read_text())
         for change in ({'probe': {'tool': 'Write', 'hook': 'skipped', 'decision': 'deny', 'file_absent': True}},
                        {'probe': {'tool': 'Edit', 'hook': 'invoked', 'decision': 'deny', 'file_absent': True}},
-                       {'ino': good['ino'] + 1}, {'shape_sha256': '0' * 64}, {'version': 2},
+                       {'ino': good['ino'] + 1}, {'shape_sha256': '0' * 64}, {'version': 1},
+                       {'resolver_version': HC.RESOLVER_VERSION + 1},
                        {'help_sha256': 'x'}):
             with self.subTest(change=change):
                 path.write_text(json.dumps(dict(good, **change)))
@@ -181,6 +201,18 @@ class ProofTests(Base):
         os.symlink(self.base / 'version.txt', path)
         with self.assertRaises((HC.Stop, OSError)):
             HC.load_proof(self.store, self.held, self.shape)
+
+    def test_failed_reprove_preserves_existing_proof(self):
+        path = Path(self.write())
+        before = path.read_bytes()
+        for field, value in (('hook', 'skipped'), ('decision', 'allow'), ('tool', 'Read'), ('file_absent', False)):
+            with self.subTest(field=field):
+                original = self.probe
+                self.probe = dict(original, **{field: value})
+                with self.assertRaises(HC.Stop):
+                    self.write()
+                self.probe = original
+                self.assertEqual(path.read_bytes(), before)
 
 
 class ProbeJudgeTests(Base):
@@ -585,25 +617,311 @@ class GrantsTests(Base):
         self.skill(self.cfg / 'skills', 'evil', 'allowed-tools: Bash(node:*)\n')
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20)
-        self.assertIn('evil/SKILL.md', p.stderr)
-        self.assertIn('Bash(node:*)', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
         (self.cfg / 'skills/evil/SKILL.md').unlink()
         (self.cfg / 'commands').mkdir()
         (self.cfg / 'commands/c.md').write_text('---\nallowed-tools: Write\n---\n')
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20)
-        self.assertIn('commands/c.md', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
 
     def test_installed_plugin_command_stops(self):
         plug = self.base / 'cache/codex/1.0'
         (plug / 'commands').mkdir(parents=True)
         (plug / 'commands/rescue.md').write_text('---\ndescription: x\nallowed-tools: Bash(node:*), AskUserQuestion\n---\n')
-        self.inventory.write_text(json.dumps([{'id': 'codex@m', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
+        self.inventory.write_text(json.dumps([{'id': 'codex', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20)
-        self.assertIn('rescue.md', p.stderr)
-        self.inventory.write_text(json.dumps([{'id': 'codex@m', 'version': '1.0', 'enabled': False, 'installPath': str(plug)}]))
+        self.assertIn('allowed-tools', p.stderr)
+        self.inventory.write_text(json.dumps([{'id': 'codex', 'version': '1.0', 'enabled': False, 'installPath': str(plug)}]))
         self.assertEqual(self.grants(self.boot()).returncode, 0)
+
+    def test_selected_marketplace_plugin_is_checked_from_held_source(self):
+        market = self.base / 'market'
+        plug = market / 'p'
+        (plug / 'commands').mkdir(parents=True)
+        (plug / '.claude-plugin').mkdir()
+        (plug / '.claude-plugin/plugin.json').write_text('{"name":"p"}')
+        (plug / 'commands/evil.md').write_text('---\nallowed-tools: Bash(node:*)\n---\n')
+        config = self.cfg / 'plugins'
+        config.mkdir()
+        (config / 'known_marketplaces.json').write_text(json.dumps({'m': {'installLocation': str(market)}}))
+        (config / 'installed_plugins.json').write_text(json.dumps({'plugins': {'p@m': [
+            {'installPath': str(plug), 'scope': 'user'}]}}))
+        (market / '.claude-plugin').mkdir()
+        (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'plugins': [
+            {'name': 'p', 'source': './p'}]}))
+        self.inventory.write_text(json.dumps([{'id': 'p@m', 'version': '1', 'enabled': True, 'installPath': str(plug)}]))
+        p = self.grants(self.boot())
+        self.assertEqual(p.returncode, 20, p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
+
+    def market_fixture(self, command):
+        market, installed = self.base / 'market', self.base / 'installed'
+        for root in (market / 'p', installed):
+            (root / '.claude-plugin').mkdir(parents=True, exist_ok=True)
+            (root / '.claude-plugin/plugin.json').write_text('{"name":"p"}')
+            (root / 'private').mkdir(exist_ok=True)
+            (root / 'private/entry.md').write_text('---\nuser-invocable: true\n---\nbody\n')
+        (market / '.claude-plugin').mkdir(exist_ok=True)
+        (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'plugins': [
+            {'name': 'p', 'source': './p', 'strict': False, 'commands': {'mapped': command}},
+            {'name': 'inactive', 'source': './missing', 'hooks': {'evil': ['SECRET_COMMAND']}}
+        ]}))
+        registry = self.cfg / 'plugins'
+        registry.mkdir(exist_ok=True)
+        (registry / 'known_marketplaces.json').write_text(json.dumps({'m': {'installLocation': str(market)}}))
+        (registry / 'installed_plugins.json').write_text(json.dumps({'plugins': {'p@m': [
+            {'installPath': str(installed), 'scope': 'user'}]}}))
+        self.inventory.write_text(json.dumps([{'id': 'p@m', 'version': '1', 'scope': 'user',
+                                              'enabled': True, 'installPath': str(installed)}]))
+        return market, installed
+
+    def policy(self, receipt):
+        return run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+
+    def test_marketplace_map_only_grants_reach_cli(self):
+        for command in ({'content': 'body', 'allowedTools': ['Bash']},
+                        {'content': '---\nallowed-tools: Bash\n---\nbody'}):
+            with self.subTest(command=command):
+                self.market_fixture(command)
+                result = self.grants(self.boot(), '--allowed-tools', 'Read')
+                self.assertEqual(result.returncode, 20, result.stderr)
+
+    def test_marketplace_map_only_names_reach_cli_and_inactive_is_ignored(self):
+        for command in ({'content': 'body', 'allowedTools': ['Read']}, {'source': './private/entry.md'}):
+            with self.subTest(command=command):
+                self.market_fixture(command)
+                receipt = self.boot()
+                result = self.grants(receipt, '--allowed-tools', 'Read')
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = self.policy(receipt)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                result = json.loads(result.stdout)
+                self.assertNotIn('p:mapped', result['public_names'])
+                self.assertIn('p:mapped', result['loaded_commands'])
+                self.assertIn('p:mapped', result['invocation_names'])
+                self.assertNotIn('p:entry', result['public_names'])
+
+    def test_manifest_empty_hook_and_mcp_references_are_held(self):
+        (self.root / 'private').mkdir()
+        (self.root / 'private/hooks.json').write_text('{"hooks":{}}')
+        (self.root / 'private/mcp.json').write_text('{"mcpServers":{"data":{"command":"not-executed"}}}')
+        manifest = self.root / '.claude-plugin/plugin.json'
+        manifest.write_text(json.dumps({'name': 'dev-workflow', 'hooks': './private/hooks.json',
+                                        'mcpServers': './private/mcp.json'}))
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+        (self.root / 'private/hooks.json').write_text('{"hooks":{"PreToolUse":[{"command":"SECRET_COMMAND"}]}}')
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 20)
+        self.assertNotIn('SECRET_COMMAND', result.stderr)
+
+    def test_empty_declared_skill_directory_is_normal_and_absent_is_rejected(self):
+        (self.root / 'empty-skills').mkdir()
+        manifest = self.root / '.claude-plugin/plugin.json'
+        manifest.write_text('{"name":"dev-workflow","skills":"./empty-skills"}')
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest.write_text('{"name":"dev-workflow","skills":"./missing"}')
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
+
+    def test_rejected_grant_diagnostics_do_not_disclose_rule_values(self):
+        self.skill(self.cfg / 'skills', 'bad', 'allowed-tools: Bash(SECRET_SENTINEL)\n')
+        result = self.grants(self.boot(), '--allowed-tools', 'Read')
+        self.assertEqual(result.returncode, 20)
+        self.assertNotIn('SECRET_SENTINEL', result.stderr)
+        self.assertIn('kind=personal-skill', result.stderr)
+
+    def test_skill_folder_manifest_references_use_folder_root(self):
+        folder = self.skill(self.cfg / 'skills', 'folder', '')
+        (folder / '.claude-plugin').mkdir()
+        (folder / 'private').mkdir()
+        manifest = folder / '.claude-plugin/plugin.json'
+        manifest.write_text(json.dumps({'name': 'folder', 'hooks': './private/hooks.json',
+                                        'mcpServers': './private/mcp.json'}))
+        (folder / 'private/hooks.json').write_text('{"hooks":{}}')
+        (folder / 'private/mcp.json').write_text('{"mcpServers":{}}')
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+        (folder / 'private/hooks.json').write_text('{"hooks":{"SessionStart":[{"command":"SECRET"}]}}')
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
+
+    def test_skill_folder_plugin_has_personal_root_and_plugin_inner_namespace(self):
+        folder = self.skill(self.cfg / 'skills', 'container', '')
+        (folder / 'SKILL.md').write_text('---\nname: root-alias\n---\nroot body')
+        (folder / '.claude-plugin').mkdir()
+        (folder / '.claude-plugin/plugin.json').write_text('{"name":"folderplugin"}')
+        (folder / 'skills/inner').mkdir(parents=True)
+        (folder / 'skills/inner/SKILL.md').write_text('---\nname: inner-alias\n---\ninner body')
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        names = json.loads(result.stdout)
+        self.assertEqual(names['public_names'], ['container', 'dev-workflow:a', 'folderplugin:inner'])
+        self.assertIn('root-alias', names['invocation_names'])
+        self.assertIn('folderplugin:inner-alias', names['invocation_names'])
+        self.assertNotIn('inner', names['public_names'])
+        self.assertNotIn('folderplugin:root-alias', names['public_names'])
+        self.assertEqual(names['invocation_routes']['folderplugin:inner-alias'],
+                         {'target': 'folderplugin:inner', 'user': True, 'model': True})
+        self.assertEqual(names['loaded_commands']['folderplugin:inner']['kind'], 'plugin')
+        self.assertEqual(names['loaded_commands']['container']['kind'], 'personal-skill')
+
+    def test_skill_folder_plugin_agent_has_proven_plugin_privileges(self):
+        folder = self.skill(self.cfg / 'skills', 'container', '')
+        (folder / '.claude-plugin').mkdir()
+        (folder / '.claude-plugin/plugin.json').write_text('{"name":"folderplugin","agents":"./private/helper.md"}')
+        (folder / 'private').mkdir()
+        agent = folder / 'private/helper.md'
+        agent.write_text('---\nhooks: {PreToolUse: [ignored]}\nmcpServers: {x: {command: ignored}}\n'
+                         'permissionMode: bypassPermissions\nskills: [container]\n---\nbody')
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+        agent.write_text('---\nallowed-tools: Bash\n---\nbody')
+        self.assertEqual(self.grants(self.boot(), '--allowed-tools', 'Read').returncode, 20)
+
+    def test_manifestless_plugin_default_mcp_references_are_held(self):
+        plug = self.base / 'cache/p/1.0'
+        plug.mkdir(parents=True)
+        mcp = plug / '.mcp.json'
+        mcp.write_text('{"mcpServers":{"x":{"command":"not-executed"}}}')
+        self.inventory.write_text(json.dumps([{'id': 'p', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        mcp.write_text('{"mcpServers":"./missing.json"}')
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
+
+    def test_six_bypass_sources_reach_policy_or_grants_cli(self):
+        paths = [
+            (self.cfg / 'skills/one/SKILL.md', '---\nhooks:\n  PreToolUse:\n    - command: SECRET\n---\n'),
+            (self.root / 'hooks/hooks.json', '{"hooks":{"PreToolUse":[{"command":"SECRET"}]}}'),
+            (self.root / '.claude-plugin/plugin.json', '{"name":"dev-workflow","modules":["SECRET.js"]}'),
+            (self.cfg / 'agents/reader.md', '---\nhooks: {PreToolUse: [SECRET]}\n---\n'),
+            (self.cfg / 'skills/plug/.claude-plugin/plugin.json', '{"name":"plug","hooks":{"PreToolUse":["SECRET"]}}'),
+        ]
+        for path, content in paths:
+            with self.subTest(source=str(path)):
+                previous = path.read_bytes() if path.exists() else None
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+                result = self.policy(self.boot())
+                self.assertEqual(result.returncode, 20, result.stdout)
+                self.assertNotIn('SECRET', result.stderr)
+                if previous is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(previous)
+        self.market_fixture({'content': 'body', 'allowedTools': ['Bash(SECRET)']})
+        result = self.grants(self.boot(), '--allowed-tools', 'Read')
+        self.assertEqual(result.returncode, 20)
+        self.assertNotIn('SECRET', result.stderr)
+
+    def test_custom_plugin_agent_keeps_ignored_fields_but_checks_preload(self):
+        (self.root / 'private').mkdir()
+        (self.root / 'private/helper.md').write_text('---\npermissionMode: bypassPermissions\n'
+            'hooks: {PreToolUse: []}\nskills: [dev-workflow:a]\n---\nbody')
+        (self.root / '.claude-plugin/plugin.json').write_text(json.dumps({
+            'name': 'dev-workflow', 'agents': ['./private/helper.md']}))
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+
+    def test_plugin_agent_exception_does_not_cross_skill_or_command_roles(self):
+        cases = (
+            ('skills/a/SKILL.md', {}),
+            ('commands/shared.md', {}),
+            ('SKILL.md', {}),
+            ('custom/shared/SKILL.md', {'skills': './custom'}),
+            ('custom/shared.md', {'commands': './custom'}),
+            ('private/shared.md', {'commands': {'shared': {'source': './private/shared.md'}}}),
+        )
+        manifest = self.root / '.claude-plugin/plugin.json'
+        for relative, fields in cases:
+            with self.subTest(relative=relative):
+                path = self.root / relative
+                before = path.read_bytes() if path.exists() else None
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('---\nhooks: {PreToolUse: [SECRET_ROLE]}\n---\nbody')
+                manifest.write_text(json.dumps(dict(name='dev-workflow', agents=['./' + relative], **fields)))
+                receipt = self.boot()
+                for result in (self.policy(receipt), self.grants(receipt)):
+                    self.assertEqual(result.returncode, 20, result.stdout)
+                    self.assertNotIn('SECRET_ROLE', result.stderr)
+                if before is None:
+                    path.unlink()
+                else:
+                    path.write_bytes(before)
+        manifest.write_text('{"name":"dev-workflow","agents":"./private/agent.md"}')
+        (self.root / 'private/agent.md').write_text('---\nhooks: {PreToolUse: [ignored]}\n'
+            'mcpServers: {x: {command: ignored}}\npermissionMode: bypassPermissions\n---\nbody')
+        receipt = self.boot()
+        self.assertEqual(self.policy(receipt).returncode, 0)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+
+    def test_skill_folder_and_marketplace_shared_agent_roles_are_strict(self):
+        folder = self.skill(self.cfg / 'skills', 'container', 'hooks: {PreToolUse: [SECRET_ROLE]}\n')
+        (folder / '.claude-plugin').mkdir()
+        (folder / '.claude-plugin/plugin.json').write_text('{"name":"folderplugin","agents":"./SKILL.md"}')
+        receipt = self.boot()
+        for result in (self.policy(receipt), self.grants(receipt)):
+            self.assertEqual(result.returncode, 20, result.stdout)
+        (folder / 'SKILL.md').write_text('body')
+        market, installed = self.market_fixture({'source': './private/entry.md'})
+        for root in (market / 'p', installed):
+            (root / 'private/entry.md').write_text('---\nhooks: {PreToolUse: [SECRET_ROLE]}\n---\nbody')
+            (root / '.claude-plugin/plugin.json').write_text('{"name":"p","agents":"./private/entry.md"}')
+        receipt = self.boot()
+        for result in (self.policy(receipt), self.grants(receipt)):
+            self.assertEqual(result.returncode, 20, result.stdout)
+            self.assertNotIn('SECRET_ROLE', result.stderr)
+
+    def test_indentless_agent_security_lists_and_preloads_reach_both_cli_checks(self):
+        (self.cfg / 'agents').mkdir()
+        agent = self.cfg / 'agents/helper.md'
+        for key, tail in (('hooks', '- PreToolUse: [SECRET_LIST]'),
+                          ('modules', '- SECRET_LIST.js'),
+                          ('mcpServers', '- unsafe:\n    command: SECRET_LIST'),
+                          ('permissionMode', '- bypassPermissions'),
+                          ('skills', '- unknown')):
+            with self.subTest(key=key):
+                agent.write_text('---\n' + key + ':\n' + tail + '\n---\nbody')
+                receipt = self.boot()
+                for result in (self.policy(receipt), self.grants(receipt)):
+                    self.assertEqual(result.returncode, 20, result.stdout)
+                    self.assertNotIn('SECRET_LIST', result.stderr)
+        for body in ('hooks: {}\nmodules: []\nmcpServers: []\nskills: []\n',
+                     'skills:\n- dev-workflow:a\n', 'skills:\n- "dev-workflow:a"\n'):
+            with self.subTest(normal=body):
+                agent.write_text('---\n' + body + '---\nbody')
+                receipt = self.boot()
+                for result in (self.policy(receipt), self.grants(receipt)):
+                    self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_marketplace_inline_hooks_rejected_by_policy_cli(self):
+        self.market_fixture({'content': '---\nhooks: {PreToolUse: []}\n---\nbody'})
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 20, result.stderr)
+
+    def test_plugin_agent_ignored_privileges_and_preload_are_connected(self):
+        agent = self.root / 'agents/helper.md'
+        agent.parent.mkdir()
+        agent.write_text('---\nhooks: {PreToolUse: []}\nmcpServers: {x: {command: node}}\n'
+                         'permissionMode: bypassPermissions\nskills: [dev-workflow:a]\n---\nbody')
+        receipt = self.boot()
+        self.assertEqual(self.policy(receipt).returncode, 0)
+        result = self.grants(receipt, '--allowed-tools', 'Read')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        agent.write_text('---\nskills: [unknown]\n---\nbody')
+        result = self.policy(self.boot())
+        self.assertEqual(result.returncode, 20)
 
     def test_unnormalized_install_path_is_still_checked(self):
         plug = self.base / 'cache/codex/1.0'
@@ -611,26 +929,26 @@ class GrantsTests(Base):
         (plug / 'commands/rescue.md').write_text('---\nallowed-tools: Bash(node:*)\n---\n')
         for path in (str(self.base) + '//cache/codex/1.0', str(self.base) + '/./cache/codex/1.0'):
             with self.subTest(path=path):
-                self.inventory.write_text(json.dumps([{'id': 'codex@m', 'version': '1.0', 'enabled': True, 'installPath': path}]))
+                self.inventory.write_text(json.dumps([{'id': 'codex', 'version': '1.0', 'enabled': True, 'installPath': path}]))
                 p = self.grants(self.boot())
                 self.assertEqual(p.returncode, 20, p.stdout)
-                self.assertIn('rescue.md', p.stderr)
+                self.assertIn('allowed-tools', p.stderr)
 
     def test_upper_case_md_is_checked(self):
         plug = self.base / 'cache/p/1.0'
         (plug / 'commands').mkdir(parents=True)
         (plug / 'commands/evil.MD').write_text('---\nallowed-tools: Bash\n---\n')
-        self.inventory.write_text(json.dumps([{'id': 'p@m', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
+        self.inventory.write_text(json.dumps([{'id': 'p', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20, p.stdout)
-        self.assertIn('evil.MD', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
         self.inventory.write_text('[]')
         self.skill(self.cfg / 'skills', 'up', '')
         (self.cfg / 'skills/up/SKILL.md').rename(self.cfg / 'skills/up/SKILL.MD')
         (self.cfg / 'skills/up/SKILL.MD').write_text('---\nallowed-tools: Write\n---\n')
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20, p.stdout)
-        self.assertIn('SKILL.MD', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
 
     def test_cli_values_split_like_the_host(self):
         self.skill(self.cfg / 'skills', 'push', 'allowed-tools: Bash(git push:*)\n')
@@ -656,13 +974,13 @@ class GrantsTests(Base):
         (plug / 'commands').mkdir()
         for name in files:
             (plug / 'commands' / name).write_text('---\ndescription: x\n---\nrun\n')
-        self.inventory.write_text(json.dumps([{'id': f'm{self.n}@m', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
+        self.inventory.write_text(json.dumps([{'id': f'm{self.n}', 'version': '1.0', 'enabled': True, 'installPath': str(plug)}]))
         return plug
 
     def test_manifest_commands_synthesize_allowed_tools(self):
         cases = [
-            ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'allowedTools': ['Bash']}}}, 20, 'commands.x.allowedTools'),
-            ({'name': 'p', 'commands': {'y': {'content': '---\nallowed-tools: Bash(rm:*)\n---\nrun'}}}, 20, 'commands.y.content'),
+            ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'allowedTools': ['Bash']}}}, 20, 'allowed-tools'),
+            ({'name': 'p', 'commands': {'y': {'content': '---\nallowed-tools: Bash(rm:*)\n---\nrun'}}}, 20, 'allowed-tools'),
             ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'allowedTools': 'Bash'}}}, 20, '文字列の列でない'),
             ({'name': 'p', 'commands': ['../outside/x.md']}, 20, 'installPath の外'),
             ({'name': 'p', 'commands': {'x': {'source': '/etc/x.md'}}}, 20, 'installPath の外'),
@@ -684,7 +1002,7 @@ class GrantsTests(Base):
         (direct / '.claude-plugin/plugin.json').write_text(json.dumps(manifest))
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20, p.stdout)
-        self.assertIn('skills/sp/.claude-plugin/plugin.json の commands.x.allowedTools', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
         # 正規導入のリンクの先にある場合も同じ
         clone = self.base / 'clone2/sp'
         clone.parent.mkdir(parents=True)
@@ -692,13 +1010,13 @@ class GrantsTests(Base):
         os.symlink(clone, self.cfg / 'skills/sp')
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20, p.stdout)
-        self.assertIn('commands.x.allowedTools', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
 
     def test_own_plugin_copy_is_checked(self):
         self.skill(self.root / 'skills', 'b', 'allowed-tools: Edit\n')
         p = self.grants(self.boot())
         self.assertEqual(p.returncode, 20)
-        self.assertIn('plugin/skills/b/SKILL.md', p.stderr)
+        self.assertIn('allowed-tools', p.stderr)
 
     def test_unclear_frontmatter_stops(self):
         self.skill(self.cfg / 'skills', 'odd', 'allowed-tools: |\n  Bash\n')
@@ -723,7 +1041,7 @@ class GrantsTests(Base):
         os.symlink(bad_target, self.cfg / 'skills/do-task')
         p = self.grants(receipt, '--allowed-tools', 'Read')
         self.assertEqual(p.returncode, 20)
-        self.assertIn('導入リンク', p.stderr)
+        self.assertIn('component の実体', p.stderr)
         # 対象の実体の差し替え(字面は同じ)
         os.unlink(self.cfg / 'skills/do-task')
         os.symlink(target, self.cfg / 'skills/do-task')
@@ -732,7 +1050,7 @@ class GrantsTests(Base):
         self.skill(clone, 'do-task', 'allowed-tools: Read\n')
         p = self.grants(receipt, '--allowed-tools', 'Read')
         self.assertEqual(p.returncode, 20)
-        self.assertIn('導入リンクの対象', p.stderr)
+        self.assertIn('component の実体', p.stderr)
 
     def test_state_must_match_the_held_digest(self):
         receipt = self.boot()
@@ -761,7 +1079,7 @@ class GrantsTests(Base):
         p = run('grants', '--state', state, '--expect-sha256', HC.sha256(raw), '--allowed-tools', 'Read',
                 '--user-settings', self.cfg / 'settings.json', env=self.env)
         self.assertEqual(p.returncode, 20)
-        self.assertIn('導入リンクが控えた時から変わった', p.stderr)
+        self.assertIn('component の実体', p.stderr)
 
     def test_odd_settings_shapes_stop_with_the_contract(self):
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': []}))
@@ -850,13 +1168,30 @@ class GrantsTests(Base):
                            cwd=elsewhere, text=True, capture_output=True, env=self.env, timeout=30)
         self.assertEqual(p.returncode, 0, p.stderr)
 
+    def test_component_hooks_and_modules_are_rejected_but_plain_skill_is_allowed(self):
+        self.skill(self.cfg / 'skills', 'plain', 'description: plain\n')
+        receipt = self.boot()
+        self.assertEqual(self.grants(receipt).returncode, 0)
+        self.skill(self.cfg / 'skills', 'hooked', 'hooks: {PreToolUse: []}\n')
+        receipt = self.boot()
+        p = self.grants(receipt)
+        self.assertEqual(p.returncode, 20)
+        self.assertIn('hooks', p.stderr)
+        (self.cfg / 'skills/hooked/SKILL.md').unlink()
+        # plugin manifest modules are executable entrypoints even when no command grant exists.
+        (self.root / '.claude-plugin/plugin.json').write_text('{"name":"dev-workflow","modules":["x.js"]}')
+        receipt = self.boot()
+        p = self.grants(receipt)
+        self.assertEqual(p.returncode, 20)
+        self.assertIn('modules', p.stderr)
+
     def test_skill_changed_after_snapshot_stops(self):
         self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read\n')
         receipt = self.boot()
         (self.cfg / 'skills/safe/SKILL.md').write_text('---\nname: safe\nallowed-tools: Bash\n---\n')
         p = self.grants(receipt, '--allowed-tools', 'Read')
         self.assertEqual(p.returncode, 20)
-        self.assertIn('内容が変わった', p.stderr)
+        self.assertIn('component の実体', p.stderr)
 
     def test_special_files_and_links_are_rejected_before_judging(self):
         # environment-guard が控えの段階で止める(黙って通さない)
@@ -873,7 +1208,7 @@ class GrantsTests(Base):
             real = self.base / 'realplug'
             (real / 'commands').mkdir(parents=True)
             os.symlink(real, self.base / 'linkplug')
-            self.inventory.write_text(json.dumps([{'id': 'p@m', 'version': '1', 'enabled': True, 'installPath': str(self.base / 'linkplug')}]))
+            self.inventory.write_text(json.dumps([{'id': 'p', 'version': '1', 'enabled': True, 'installPath': str(self.base / 'linkplug')}]))
         cases.update(fifo=fifo, unreadable=unreadable, inner_link=inner_link, install_link=install_link)
         for name, prepare in cases.items():
             with self.subTest(case=name):
@@ -901,6 +1236,300 @@ class SplitRulesParityTests(unittest.TestCase):
         for value in ('Read, Grep', 'Bash(git add *) Read', 'Bash(a, b),Edit', '  ', 'Bash((x)) y'):
             with self.subTest(value=value):
                 self.assertEqual(HC.split_rules(value), namespace.split_rules(value))
+
+
+class ComponentPolicyTests(unittest.TestCase):
+    def component(self, kind, relative, frontmatter=''):
+        return {'key': 'component:%s:/safe/%s' % (kind, relative), 'kind': kind,
+                'root': '/safe', 'relative': relative, 'path': '/safe/' + relative,
+                'raw': ('---\n' + frontmatter + '---\nbody\n').encode()}
+
+    def test_namespace_keeps_aliases_out_of_public_names_and_directory_wins(self):
+        items = [
+            self.component('personal-skill', 'alpha/SKILL.md', 'name: beta\n'),
+            self.component('personal-skill', 'beta/SKILL.md', 'user-invocable: false\n'),
+            self.component('enterprise-skill', 'same/SKILL.md', 'name: enterprise-alias\n'),
+            self.component('personal-skill', 'same/SKILL.md', 'name: personal-alias\n'),
+        ]
+        ns = HC.component_namespace(items)
+        self.assertEqual(ns['public_names'], ['alpha', 'same'])
+        self.assertEqual(ns['invocation_names'], ['alpha', 'enterprise-alias', 'same'])
+        self.assertIn('enterprise-alias', ns['model_invocation_names'])
+
+    def test_same_plugin_source_and_install_bytes_are_one_definition(self):
+        one = self.component('plugin', 'skills/plain/SKILL.md')
+        two = dict(one, key='component:plugin:/other/skills/plain/SKILL.md', root='/other',
+                   path='/other/skills/plain/SKILL.md', plugin='p@m')
+        one['plugin'] = 'p@m'
+        self.assertEqual(HC.component_namespace([one, two])['public_names'], ['p:plain'])
+
+    def test_plugin_manifest_command_map_uses_prefix_and_nested_command_uses_colon(self):
+        manifest = {'key': 'component:plugin:/safe/.claude-plugin/plugin.json', 'kind': 'plugin',
+                    'root': '/safe', 'relative': '.claude-plugin/plugin.json',
+                    'path': '/safe/.claude-plugin/plugin.json', 'plugin': 'work@m',
+                    'raw': json.dumps({'name': 'work', 'commands': {'run': {'content': 'body'}}}).encode()}
+        nested = self.component('personal-command', 'tools/check.md')
+        ns = HC.component_namespace([manifest, nested])
+        self.assertIn('work:run', ns['loaded_commands'])
+        self.assertIn('tools:check', ns['loaded_commands'])
+        self.assertEqual(ns['public_names'], [])
+
+    def test_plugin_command_directory_preserves_relative_path_but_file_uses_basename(self):
+        manifest = {'key': 'component:plugin:/safe/.claude-plugin/plugin.json', 'kind': 'plugin',
+                    'root': '/safe', 'relative': '.claude-plugin/plugin.json',
+                    'path': '/safe/.claude-plugin/plugin.json', 'plugin': 'work@m'}
+        for source, relative, expected in ((None, 'commands/nested/a.md', 'work:nested:a'),
+                                           ('./custom', 'custom/nested/a.md', 'work:nested:a'),
+                                           ('./custom/nested/a.md', 'custom/nested/a.md', 'work:a')):
+            with self.subTest(source=source):
+                data = {'name': 'work'}
+                if source is not None:
+                    data['commands'] = source
+                part = dict(self.component('plugin', relative, 'name: separate-alias\n'), plugin='work@m')
+                ns = HC.component_namespace([dict(manifest, raw=json.dumps(data).encode()), part])
+                self.assertEqual(list(ns['loaded_commands']), [expected])
+                self.assertIn(expected, ns['invocation_names'])
+                self.assertEqual(ns['public_names'], [])
+
+    def test_plugin_manifest_source_must_be_held_and_prefix_is_not_doubled(self):
+        manifest = {'key': 'component:plugin:/safe/.claude-plugin/plugin.json', 'kind': 'plugin',
+                    'root': '/safe', 'relative': '.claude-plugin/plugin.json', 'path': '/safe/.claude-plugin/plugin.json',
+                    'plugin': 'work@m', 'raw': json.dumps({'commands': {'work:run': {'source': './commands/run.md'}}}).encode()}
+        source = {'key': 'component:plugin:/safe/commands/run.md', 'kind': 'plugin', 'root': '/safe',
+                  'relative': 'commands/run.md', 'path': '/safe/commands/run.md', 'raw': b'body'}
+        self.assertEqual(HC.plugin_command_names([manifest, source]), {'work:run'})
+        with self.assertRaises(HC.Unclear):
+            HC.plugin_command_names([manifest])
+
+    def test_reserved_and_synced_names_do_not_enter_any_namespace(self):
+        skipped = self.component('personal-skill', 'synced/SKILL.md', 'name: escaped\n')
+        reserved = self.component('plugin', 'anthropic-skills/x/SKILL.md')
+        ns = HC.component_namespace([skipped, reserved])
+        self.assertEqual(ns['public_names'], [])
+        self.assertEqual(ns['lookup_names'], [])
+
+    def test_visibility_and_conditional_native_off_are_separate(self):
+        hidden = self.component('personal-skill', 'checkup/SKILL.md',
+                                'user-invocable: false\ndisable-model-invocation: true\n')
+        ns = HC.component_namespace([hidden])
+        self.assertEqual(ns['public_names'], [])
+        self.assertNotIn('checkup', ns['model_invocation_names'])
+        self.assertNotIn('checkup', HC.fixed_host_policy(ns)['skillOverrides'])
+        # frontmatter-only checkup is a measured native-alias winner; doctor is not.
+        checkup = self.component('personal-skill', 'other/SKILL.md', 'name: checkup\n')
+        doctor = self.component('personal-skill', 'else/SKILL.md', 'name: doctor\n')
+        off = HC.fixed_host_policy(HC.component_namespace([checkup, doctor]))['skillOverrides']
+        self.assertNotIn('checkup', off)
+        self.assertIn('doctor', off)
+
+    def test_component_security_rejects_hidden_execution_and_duplicate_json(self):
+        for frontmatter in ('hooks: {PreToolUse: []}\n', 'mcpServers: {x: y}\n'):
+            with self.subTest(frontmatter=frontmatter), self.assertRaises(HC.Unclear):
+                HC.component_security(('---\n' + frontmatter + '---\n').encode(), 'agent.md')
+        self.assertIsNone(HC.component_security(b'---\nhooks: {}\n---\n', 'safe.md'))
+        self.assertIsNone(HC.component_security(b'---\npermission-mode: plan\ndescription: hooks are documented\n---\n', 'safe.md'))
+        with self.assertRaises(HC.Unclear):
+            HC.component_security(b'{"name":"x","name":"y"}', 'plugin.json')
+        with self.assertRaises(HC.Unclear):
+            HC.component_security(b'{"name":"x","modules":["run.js"]}', 'plugin.json')
+
+    def test_component_security_rejects_quoted_escaped_and_indented_hook_keys(self):
+        cases = (
+            b'---\n"hooks": {PreToolUse: []}\n---\n',
+            b'---\n  hooks: {PreToolUse: []}\n---\n',
+            b'---\nhooks: {}\nhooks: {PreToolUse: []}\n---\n',
+            b'---\n"mcpServers": {danger: {command: node}}\n---\n',
+        )
+        for raw in cases:
+            with self.subTest(raw=raw), self.assertRaises(HC.Unclear):
+                HC.component_security(raw, 'agent.md')
+
+    def test_component_security_rejects_default_hook_and_mod_files(self):
+        with self.assertRaises(HC.Unclear):
+            HC.component_security(b'{"PreToolUse":[{"command":"node x"}]}', 'hooks.json')
+        with self.assertRaises(HC.Unclear):
+            HC.component_security(b'export default {}', 'mods/unsafe.ts')
+
+    def test_marketplace_entry_rejects_nested_execution_fields(self):
+        entry = {'name': 'p', 'source': './p', 'hooks': {'PreToolUse': []}}
+        with self.assertRaises(HC.Unclear):
+            HC.marketplace_security({'path': '/safe/marketplace.json',
+                                    'raw': json.dumps({'plugins': [entry]}).encode(),
+                                    'entry': [{'plugin': 'p@m', 'entry': entry}]})
+
+    def test_plugin_mcp_reference_must_be_held_and_root_relative(self):
+        manifest = {'kind': 'plugin', 'root': '/safe', 'relative': '.claude-plugin/plugin.json',
+                    'raw': json.dumps({'mcpServers': './mcp.json'}).encode()}
+        config = {'kind': 'plugin', 'root': '/safe', 'relative': 'mcp.json', 'raw': b'{}'}
+        self.assertIsNone(HC.strict_plugin_mcp([manifest, config]))
+        for value in ('/tmp/mcp.json', '../mcp.json', ['./mcp.json', './mcp.json']):
+            with self.subTest(value=value), self.assertRaises(HC.Unclear):
+                bad = dict(manifest, raw=json.dumps({'mcpServers': value}).encode())
+                HC.strict_plugin_mcp([bad, config])
+
+    def test_agent_preload_must_name_an_inspected_skill(self):
+        skill = self.component('personal-skill', 'plain/SKILL.md')
+        agent = self.component('personal-agent', 'helper.md', 'skills: [plain]\n')
+        self.assertIsNone(HC.agent_preloads([skill, agent], HC.component_namespace([skill])))
+        bad = self.component('personal-agent', 'helper.md', 'skills: [unseen]\n')
+        with self.assertRaises(HC.Unclear):
+            HC.agent_preloads([skill, bad], HC.component_namespace([skill]))
+
+    def test_reserved_prefix_and_synced_case_skip_all_aliases(self):
+        for relative, fm in (('Synced/SKILL.md', 'name: harmless\n'),
+                             ('normal/SKILL.md', 'name: anthropic-skills:hidden\n'),
+                             ('anthropic-skills:bad/SKILL.md', 'name: harmless\n')):
+            with self.subTest(relative=relative):
+                ns = HC.component_namespace([self.component('personal-skill', relative, fm)])
+                self.assertEqual(ns['public_names'], [])
+                self.assertEqual(ns['lookup_names'], [])
+
+    def test_skill_beats_legacy_and_directory_beats_visible_alias(self):
+        items = [self.component('personal-command', 'same.md'),
+                 self.component('personal-skill', 'same/SKILL.md', 'user-invocable: false\n'),
+                 self.component('personal-skill', 'other/SKILL.md', 'name: same\n')]
+        ns = HC.component_namespace(items)
+        self.assertNotIn('same', ns['public_names'])
+        self.assertNotIn('same', ns['invocation_names'])
+        self.assertIn('same', ns['model_invocation_names'])
+
+    def test_plugin_root_and_direct_custom_names_use_observed_fallback(self):
+        manifest = self.component('plugin', '.claude-plugin/plugin.json')
+        manifest['plugin'] = 'work@m'
+        manifest['raw'] = b'{"name":"work","skills":"./"}'
+        for name, expected in (('name: root-alias\n', 'work:root-alias'), ('', 'work:safe')):
+            skill = self.component('plugin', 'SKILL.md', name)
+            skill['plugin'] = 'work@m'
+            ns = HC.component_namespace([manifest, skill])
+            self.assertEqual(ns['public_names'], [expected])
+        manifest['raw'] = b'{"name":"work","skills":"./custom"}'
+        skill = self.component('plugin', 'custom/SKILL.md', 'name: root-alias\n')
+        skill['plugin'] = 'work@m'
+        self.assertEqual(HC.component_namespace([manifest, skill])['public_names'], ['work:root-alias'])
+
+    def test_plugin_namespace_never_reenables_native_names(self):
+        item = self.component('plugin', 'skills/doctor/SKILL.md', 'name: checkup\n')
+        item['plugin'] = 'p@m'
+        ns = HC.component_namespace([item])
+        self.assertEqual(ns['public_names'], ['p:doctor'])
+        self.assertIn('p:checkup', ns['invocation_names'])
+        self.assertEqual(set(HC.fixed_host_policy(ns)['skillOverrides']), HC.NATIVE_RESERVED)
+
+    def test_component_security_is_independent_of_yaml_installation(self):
+        original = HC.yaml_loader
+        try:
+            for loader in (original, lambda: None):
+                HC.yaml_loader = loader
+                for raw in (b'---\nhooks: {}\nmodules: []\nmcpServers: {}\npermissionMode: plan\n---\n',
+                            b'\xef\xbb\xbf---\nhooks: {}\n---\n'):
+                    HC.component_security(raw, 'skill.md')
+                for raw in (b'---\n"\\u0068ooks": {PreToolUse: []}\n---\n',
+                            b'\xef\xbb\xbf---\nhooks: {PreToolUse: []}\n---\n',
+                            b'---\nhooks: {}\nhooks: []\n---\n',
+                            b'---\npermissionMode: auto\n---\n',
+                            b'---\nhooks:\n  PreToolUse:\n    - command: SECRET_COMMAND\n---\n',
+                            b'---\nfoo: &a {hooks: {PreToolUse: []}}\n<<: *a\n---\n'):
+                    with self.subTest(raw=raw, loader=loader), self.assertRaises(HC.Unclear):
+                        HC.component_security(raw, 'skill.md')
+                for key in ('hooks', 'modules', 'mcpServers', 'permissionMode'):
+                    for tail in ('- unsafe', '-\n  unsafe: value', '- unsafe:\n    command: value'):
+                        raw = ('---\n' + key + ':\n' + tail + '\n---\nbody').encode()
+                        with self.subTest(key=key, tail=tail, loader=loader), self.assertRaises(HC.Unclear):
+                            HC.component_security(raw, 'agent.md')
+                known = self.component('personal-skill', 'plain/SKILL.md')
+                ns = HC.component_namespace([known])
+                for value in ('plain', '"plain"'):
+                    agent = self.component('personal-agent', 'a.md', 'skills:\n- ' + value + '\n')
+                    self.assertIsNone(HC.agent_preloads([known, agent], ns))
+                for tail in ('unknown', '', 'plain\n- unknown', '[plain]'):
+                    agent = self.component('personal-agent', 'a.md', 'skills:\n- ' + tail + '\n')
+                    with self.subTest(tail=tail, loader=loader), self.assertRaises(HC.Unclear):
+                        HC.agent_preloads([known, agent], ns)
+        finally:
+            HC.yaml_loader = original
+
+    def test_all_retained_off_settings_remove_routes_without_native_fallback(self):
+        item = self.component('personal-skill', 'doctor/SKILL.md')
+        ns = HC.component_namespace([item])
+        for source in ('user', 'cache', 'managed'):
+            settings = {source: [{'skillOverrides': {'doctor': 'off'}}] if source == 'managed'
+                        else {'skillOverrides': {'doctor': 'off'}}}
+            changed = HC.apply_user_skill_off(ns, settings)
+            self.assertNotIn('doctor', changed['invocation_names'])
+            self.assertNotIn('doctor', HC.fixed_host_policy(changed)['skillOverrides'])
+
+    def test_init_sanitizer_discards_raw_fields_and_rejects_unknown(self):
+        saved = HC.sanitize_init(b'{"type":"init","skills":["plain"]}', ['plain'])
+        self.assertEqual(saved, {'init_schema': HC.INIT_SCHEMA_VERSION, 'public_names': ['plain']})
+        for raw in (b'{"type":"init","skills":[{"name":"plain"}]}',
+                    b'{"type":"init","skills":["plain","plain"]}',
+                    b'{"type":"init","skills":["other"]}',
+                    b'{"type":"init","account":"secret","skills":["plain"]}'):
+            with self.subTest(raw=raw), self.assertRaises(HC.Stop):
+                HC.sanitize_init(raw, ['plain'])
+
+    def test_supervisor_sanitizer_keeps_only_probe_result_and_public_init(self):
+        raw = json.dumps([
+            {'type': 'system', 'subtype': 'init', 'account': {'id': 'private'}, 'skills': ['plain']},
+            {'type': 'result', 'is_error': False, 'account': 'private', 'result': 'SECRET_RESULT', 'subtype': 'SECRET_SUBTYPE',
+             'permission_denials': [{'tool_name': 'Write', 'tool_input': {'file_path': '/safe/probe'}}]},
+        ]).encode()
+        saved = HC.sanitize_supervisor(raw, ['plain'])
+        self.assertEqual(saved, {'init': {'init_schema': HC.INIT_SCHEMA_VERSION, 'public_names': ['plain']},
+                                 'result': {'type': 'result', 'is_error': False,
+                                            'permission_denials': [{'tool_name': 'Write',
+                                                                    'tool_input': {'file_path': '/safe/probe'}}]}})
+        self.assertNotIn('private', json.dumps(saved))
+        self.assertNotIn('SECRET_', json.dumps(saved))
+        with self.assertRaises(HC.Stop):
+            HC.sanitize_supervisor(b'[{"type":"init","skills":[]}]', [])
+
+    def test_policy_digest_is_stable_for_same_bytes_and_binds_visibility(self):
+        first = self.component('personal-skill', 'plain/SKILL.md')
+        copied = dict(first, key='component:personal-skill:/other/plain/SKILL.md', root='/other',
+                      path='/other/plain/SKILL.md')
+        one = HC.component_namespace([first])
+        two = HC.component_namespace([copied])
+        digest = 'a' * 64
+        self.assertEqual(HC.policy_digest(digest, one, HC.fixed_host_policy(one)),
+                         HC.policy_digest(digest, two, HC.fixed_host_policy(two)))
+        hidden = self.component('personal-skill', 'plain/SKILL.md', 'user-invocable: false\n')
+        changed = HC.component_namespace([hidden])
+        self.assertNotEqual(HC.policy_digest(digest, one, HC.fixed_host_policy(one)),
+                            HC.policy_digest(digest, changed, HC.fixed_host_policy(changed)))
+
+    def test_conflicting_fixed_settings_stop(self):
+        policy = {'disableBundledSkills': True, 'syncClaudeAiSkills': False,
+                  'syncClaudeAiPlugins': False, 'skillOverrides': {'doctor': 'off'}}
+        HC.assert_fixed_policy({'user': {}, 'cache': None, 'managed': []}, policy)
+        with self.assertRaises(HC.Stop):
+            HC.assert_fixed_policy({'user': {'syncClaudeAiSkills': True}, 'cache': None, 'managed': []}, policy)
+
+    def test_fixed_settings_require_boolean_types_in_every_source(self):
+        policy = HC.fixed_host_policy(HC.component_namespace([]))
+        for source in ('user', 'cache', 'managed'):
+            for key in ('disableBundledSkills', 'syncClaudeAiSkills', 'syncClaudeAiPlugins'):
+                for value in (policy[key], not policy[key], 0, 1, 0.0, 1.0, None, 'false', 'true'):
+                    with self.subTest(source=source, key=key, value=repr(value), type=type(value).__name__):
+                        settings = {source: [{key: value}] if source == 'managed' else {key: value}}
+                        if type(value) is bool and value == policy[key]:
+                            self.assertIsNone(HC.assert_fixed_policy(settings, policy))
+                        else:
+                            with self.assertRaises(HC.Stop):
+                                HC.assert_fixed_policy(settings, policy)
+
+    def test_marketplace_entry_must_be_selected_once_and_local(self):
+        entry = {'name': 'p', 'source': './plugins/p'}
+        selected = [{'plugin': 'p@m', 'entry': entry}]
+        item = {'path': '/safe/marketplace.json', 'raw': json.dumps({'plugins': [entry]}).encode(), 'entry': selected}
+        self.assertIsNone(HC.marketplace_security(item))
+        for registry, chosen in (({'plugins': [entry, entry]}, selected),
+                                 ({'plugins': [entry]}, [{'plugin': 'other@m', 'entry': {'name': 'other'}}]),
+                                 ({'plugins': [{'name': 'p', 'source': '/tmp/p'}]},
+                                  [{'plugin': 'p@m', 'entry': {'name': 'p', 'source': '/tmp/p'}}])):
+            with self.subTest(registry=registry), self.assertRaises(HC.Unclear):
+                HC.marketplace_security({'path': '/safe/marketplace.json', 'raw': json.dumps(registry).encode(),
+                                         'entry': chosen})
 
 
 if __name__ == '__main__':

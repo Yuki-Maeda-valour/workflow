@@ -157,6 +157,7 @@ STATE_MAX_FILE_BYTES=67108864
 STATE_MAX_SECONDS=60
 DISCOVER=0          # 発見モード(--discover)
 PROVE_HOST=0        # --prove-host(実 hook の確認と証明の書き込みだけを行う)
+FIXED_POLICY='{}' # component検査後の同期・組込み停止。active再bindでも保持する
 HOST_EXEC=""        # 確かめたホスト CLI の実体(realpath)。補助の CLI・周の子・確認はすべてこれで起動する
 HOST_IDENTITY=""    # その実体の値(realpath・dev・ino・size・mtime・ctime・sha256 の JSON)
 HOST_STAT=""        # その実体の stat の値(補助の CLI ごとの軽い照合に使う)
@@ -741,6 +742,20 @@ def cmd_json_get(key):
     print(value)
 
 
+def cmd_json_value(key):
+    print(json.dumps(json.load(sys.stdin)[key], ensure_ascii=True, sort_keys=True, separators=(",", ":")))
+
+
+def cmd_init_names():
+    value = json.load(sys.stdin)
+    if not isinstance(value, dict) or not isinstance(value.get("public_names"), list):
+        fail(1, "init の証拠が不正")
+    for name in value["public_names"]:
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z0-9][a-z0-9:_-]*", name):
+            fail(1, "init の公開名が不正")
+        print(name)
+
+
 HELP_OPT = re.compile(r"^  ((?:-[A-Za-z0-9]|--[A-Za-z0-9][A-Za-z0-9-]*)(?:, (?:-[A-Za-z0-9]|--[A-Za-z0-9][A-Za-z0-9-]*))*)"
                       r"(?: (<[^>]*>|\[[^\]]*\]))?")
 
@@ -757,7 +772,7 @@ def cmd_help_values(path):
         print(n)
 
 
-def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha):
+def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha, fixed="{}"):
     # command 自体に保持した loader と hash を置き、改変された helper を先に実行しない。
     def quote(p):
         return "'" + p.replace("'", "'\\''") + "'"
@@ -766,7 +781,11 @@ def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha):
             '--path', 'skills/ship-task/scripts/loop-permission.py']
     settings = {"hooks": {"PermissionRequest": [{"matcher": "*", "hooks": [
         {"type": "command", "command": ' '.join(map(quote, argv))}]}]}}
-    print(json.dumps(settings, ensure_ascii=False, separators=(",", ":")))
+    policy = json.loads(fixed)
+    if not isinstance(policy, dict) or set(policy) - {"disableBundledSkills", "syncClaudeAiSkills", "syncClaudeAiPlugins", "skillOverrides"}:
+        fail(1, "固定設定の形が違う")
+    settings.update(policy)
+    print(json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
 def cmd_permlog(path):
@@ -892,6 +911,7 @@ COMMANDS = {
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
     "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
+    "json-value": cmd_json_value, "init-names": cmd_init_names,
     "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values,
     "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
     "origin-json": cmd_origin_json, "candiff": cmd_candiff,
@@ -1033,7 +1053,56 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
     [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
   done
-  HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA")"
+  HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA" "$FIXED_POLICY")"
+}
+
+# H46: 設定と定義は、補助CLIより前とactive一覧の確定後に同じreaderで検査する。
+component_check() {
+  local err="${RUN_DIR:-$ENV_TEMP}/component-policy.err" rc=0
+  COMPONENT_POLICY="$("$PY_ABS" -I -B "$HOST_CHECK_PY" component-policy --state "$ENVIRONMENT_STATE" \
+    --expect-sha256 "$ENVIRONMENT_SHA" 2>"$err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$err" >&2
+    die 20 component-policy "有効な定義と固定設定を安全に検査できない"
+  fi
+  COMPONENT_SHA="$(printf '%s' "$COMPONENT_POLICY" | py json-get component_sha256)" || die 20 component-policy "定義の保持値が不正"
+  POLICY_SHA="$(printf '%s' "$COMPONENT_POLICY" | py json-get policy_sha256)" || die 20 component-policy "固定設定の保持値が不正"
+  FIXED_POLICY="$(printf '%s' "$COMPONENT_POLICY" | py json-value fixed)" || die 20 component-policy "固定設定を読めない"
+  COMPONENT_RESOLVER="$(printf '%s' "$COMPONENT_POLICY" | py json-value resolver_version)" || die 20 component-policy "名前解決の版を読めない"
+  HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" \
+    "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA" "$FIXED_POLICY")" || die 20 component-policy "hook と固定設定を組み立てられない"
+  local args=() v
+  for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do args+=(--allowed-tools "$v"); done
+  [ "$ALLOW_CLASSIFIER" -eq 0 ] || args+=(--classifier)
+  err="${RUN_DIR:-$ENV_TEMP}/skill-grants.err"; rc=0
+  GRANTS_OUT="$("$PY_ABS" -I -B "$HOST_CHECK_PY" grants --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
+    --user-settings "$USER_SETTINGS" "${args[@]}" 2>"$err")" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    cat "$err" >&2
+    if [ -n "$REPORT" ]; then
+      rep "" "## skill・command の allowed-tools(止まった理由)" ""
+      sed 's/^/    /' "$err" >>"$REPORT"
+    fi
+    die 20 skill-grants "skill・command・agent の許可規則が許可リストより広いか、解釈できない"
+  fi
+  GRANTS_FILES="$(printf '%s' "$GRANTS_OUT" | sed -n 's/^files=\([0-9]*\) .*/\1/p')"
+  case "$GRANTS_OUT" in *" yaml=on") GRANTS_YAML="有" ;; *) GRANTS_YAML="無(PyYAML を読めない。自前の厳しい読み方だけ)" ;; esac
+}
+
+match_component_proof() {
+  local rc=0
+  PROOF_INFO="$("$PY_ABS" -I -B "$HOST_CHECK_PY" proof-match --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
+    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" \
+    --component-sha256 "$COMPONENT_SHA" --policy-sha256 "$POLICY_SHA" 2>"$RUN_DIR/host-proof.err")" || rc=$?
+  [ "$rc" -eq 0 ] || die 20 host-proof "$(head -c 400 "$RUN_DIR/host-proof.err" | tr '\n' ' ')。$PROVE_HINT"
+}
+
+recheck_component_proof() {
+  local component="$COMPONENT_SHA" policy="$POLICY_SHA" fixed="$FIXED_POLICY"
+  component_check
+  [ "$component" = "$COMPONENT_SHA" ] && [ "$policy" = "$POLICY_SHA" ] && [ "$fixed" = "$FIXED_POLICY" ] \
+    || die 20 host-proof "起動直前に検査済みの定義または固定設定が変わった"
+  match_component_proof
 }
 
 # 状態 JSON の生バイトを、親ディレクトリから nofollow で開く helper にだけ読ませて
@@ -1645,8 +1714,9 @@ build_child_shape() {
   local shape=("${ISOLATION[@]}" "$PLUGIN_DIR_FLAG" "<plugin>") template
   if [ "$ALLOW_CLASSIFIER" -eq 1 ]; then shape+=("${PERM_CLASSIFIER[@]}"); else shape+=("${PERM_EDITS[@]}"); fi
   # hook の設定の雛形(loader と hook の並び)の要約。パスと保持値を固定の印にして算出する
-  template="$(py hook-settings "<python>" "<script>" "$(printf '0%.0s' {1..64})" "<guard>" "<state>" "$(printf '0%.0s' {1..64})" | sha256sum)"
+  template="$(py hook-settings "<python>" "<script>" "$(printf '0%.0s' {1..64})" "<guard>" "<state>" "$(printf '0%.0s' {1..64})" "$FIXED_POLICY" | sha256sum)"
   shape+=("${PERM_PROMPTS[@]}" "$SETTINGS_FLAG" "<hook:${template:0:16}>")
+  shape+=("<initial-policy:$INITIAL_POLICY_SHA>" "<aux-settings:$FIXED_POLICY>")
   HOST_SHAPE="$(quote_argv "${shape[@]}")"
 }
 
@@ -1697,7 +1767,7 @@ aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <s
   fi
   # 端末の幅の変数で --help の折り返しが変わらないよう、外して打つ(証明の help の照合を安定させる)
   # (env を挟まない。env は `=` を含むパスを代入として読み、控えた実体を起動しないことがある)
-  ( cd "$STATE" && unset COLUMNS LINES && run_detached "$NET_TIMEOUT" "$HOST_EXEC" "$@" >"$out" 2>"$out.err" )
+  ( cd "$STATE" && unset COLUMNS LINES && run_detached "$NET_TIMEOUT" "$HOST_EXEC" "$SETTINGS_FLAG" "$FIXED_POLICY" "$@" >"$out" 2>"$out.err" )
 }
 
 # ── H31: 実 hook の確認(--prove-host)──
@@ -1706,6 +1776,8 @@ aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <s
 # 確かめたときだけ、実体・版・help・起動の形と結び付けた証明を書く
 prove_host() {
   local dir target permlog nonce rc=0 child_rc child_to judged path timeout=600 probe_pid
+  local sanitizer_pid sanitizer_rc=0 probe_stream pipe_in pipe_out init_evidence name
+  local proof_names=()
   [ "$ITER_TIMEOUT" -ge "$timeout" ] || timeout="$ITER_TIMEOUT"
   dir="$(mktemp -d "$RUN_DIR/host-probe.XXXXXXXX")"
   mkdir "$dir/work" "$dir/outside"
@@ -1716,6 +1788,16 @@ prove_host() {
   verify_environment || die 20 environment "実 hook の確認の直前に環境が変わった"
   host_same --hash || die 20 host-proof "実 hook の確認の直前に、ホスト CLI の実体が控えた時と違う"
   nonce="$("$PY_ABS" -c 'import secrets; print(secrets.token_hex(32))')"
+  # raw stdout は匿名pipeだけを通す。縮約済みのinit/resultだけを保存する。
+  # sanitizerとsupervisorをloopの別々の子にし、親終了時の回収を維持する。
+  coproc H46_SANITIZER {
+    exec "$PY_ABS" -I -B "$HOST_CHECK_PY" init-sanitize --state "$ENVIRONMENT_STATE" \
+      --expect-sha256 "$ENVIRONMENT_SHA" >"$dir/out.json" 2>"$dir/sanitize.err" 7>&-
+  }
+  sanitizer_pid="$H46_SANITIZER_PID"
+  pipe_in="${H46_SANITIZER[1]}"; pipe_out="${H46_SANITIZER[0]}"
+  exec {probe_stream}>&"$pipe_in"
+  exec {pipe_in}>&- {pipe_out}<&-
   # 背景で起動して wait で待つ(前面で待つと、loop.sh だけに届いたシグナルの処理が確認の終わりまで遅れる)。
   # loop.sh が止まると、監督は親の終了通知で子孫を回収する
   (
@@ -1728,14 +1810,18 @@ prove_host() {
       DEV_WORKFLOW_LOOP_PLUGIN_ROOT="$PLUGIN_ROOT" DEV_WORKFLOW_LOOP_ALLOW="$ALLOW_JSON" \
       CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
       "$PY_ABS" "$SUPERVISOR" --result "$dir/supervisor.json" --nonce "$nonce" \
-      --timeout "$timeout" --grace "$KILL_GRACE" -- "${CHILD_ARGV[@]}" \
-      <"$dir/prompt" >"$dir/out.json" 2>"$dir/err"
+      --timeout "$timeout" --grace "$KILL_GRACE" -- "${CHILD_ARGV[@]}" --verbose \
+      <"$dir/prompt" 1>&"$probe_stream" 2>"$dir/err"
   ) &
   probe_pid=$!
+  exec {probe_stream}>&-
   wait "$probe_pid" || rc=$?
+  wait "$sanitizer_pid" || sanitizer_rc=$?
   [ "$rc" -eq 0 ] || die 20 host-proof "実 hook の確認の子の回収を確かめられない(監督の終了コード $rc。$dir)"
   read -r child_rc child_to < <(py supervisor-result "$dir/supervisor.json" "$nonce") \
     || die 20 host-proof "実 hook の確認の監督の結果が保持値と違う($dir)"
+  [ "$child_rc" -eq 0 ] && [ "$child_to" -eq 0 ] || die 20 host-proof "実 hook の確認の子が失敗または時間切れになった。証明は書かない"
+  [ "$sanitizer_rc" -eq 0 ] || die 20 host-proof "init と結果を安全に縮約できない。証明は書かない"
   host_same --hash || die 20 host-proof "実 hook の確認の前後で、ホスト CLI の実体が変わった"
   verify_environment || die 20 environment "実 hook の確認の後に環境が変わった"
   rc=0
@@ -1743,9 +1829,14 @@ prove_host() {
   if [ "$rc" -ne 0 ]; then
     die 20 host-proof "実 hook の確認に通らない: $(head -c 400 "$dir/judge.err" | tr '\n' ' ')(子の終了コード $child_rc・時間切れ $child_to。記録: $dir)。証明は書かない"
   fi
+  init_evidence="$(py json-value init <"$dir/out.json")" || die 20 host-proof "init の証拠を読めない"
+  while IFS= read -r name; do [ -z "$name" ] || proof_names+=(--public-name "$name"); done \
+    < <(printf '%s' "$init_evidence" | py init-names)
   rc=0
   path="$("$PY_ABS" -I -B "$HOST_CHECK_PY" proof-write --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
-    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" --probe "$judged" --plugin-version "$PLUGIN_VERSION" 2>"$dir/write.err")" || rc=$?
+    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" --probe "$judged" --plugin-version "$PLUGIN_VERSION" \
+    --component-sha256 "$COMPONENT_SHA" --policy-sha256 "$POLICY_SHA" --resolver-version "$COMPONENT_RESOLVER" \
+    --init-evidence "$init_evidence" "${proof_names[@]}" 2>"$dir/write.err")" || rc=$?
   [ "$rc" -eq 0 ] || die 20 host-proof "証明を書けない: $(head -c 300 "$dir/write.err" | tr '\n' ' ')"
   rep "- 判定: 許可の仲介の hook が確認の Write を拒否した(子の終了コード $child_rc)" "- 証明: $path"
   say "ホスト CLI の証明を書いた: $path"
@@ -2484,6 +2575,7 @@ source=$ITER_SOURCE
   # (止まっても周の途中の印は残らない。終わりの環境の照合も実体の違いで通らないので、選定中の worktree は
   # 「選定中」の lock のまま残して報告する。この後の起動の直前は、環境の照合の中の stat で照らす)
   host_same --hash || die 20 host-proof "周を始める前に、ホスト CLI の実体($HOST_EXEC)が確かめた時と違う(更新・書き換え・差し替え)。$PROVE_HINT"
+  recheck_component_proof
   ITER_WT="$SEL_WT"
   ITER_SEQ="$SEQ"
   ITER_ID="$RUN_ID-$SEQ"
@@ -2854,6 +2946,10 @@ for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$
   [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
 done
 
+component_check
+INITIAL_POLICY_SHA="$POLICY_SHA"
+INITIAL_FIXED_POLICY="$FIXED_POLICY"
+
 verify_environment || die 20 environment "監督機構の診断直前に環境が変わった"
 "$PY_ABS" "$SUPERVISOR" --check || die 20 supervisor-runtime "子の監督に必要な Linux subreaper・pidfd を使えない"
 
@@ -3130,6 +3226,7 @@ rc=0
 aux "$RUN_DIR/help.txt" "${AUX_HELP[@]}" || rc=$?
 [ "$rc" -eq 0 ] || die 20 help-mismatch "'$HOST_BIN ${AUX_HELP[*]}' が失敗した(終了コード $rc)"
 HELP_CHECK=("${ISOLATION[@]}" "$PLUGIN_DIR_FLAG" "$PERM_MODE_FLAG" "${PERM_PROMPTS[0]}" "$SETTINGS_FLAG")
+[ "$PROVE_HOST" -eq 0 ] || HELP_CHECK+=(--verbose)
 if [ "$ALLOW_CLASSIFIER" -eq 1 ]; then HELP_CHECK+=("$CLASSIFIER_VALUE"); else HELP_CHECK+=("${PERM_EDITS[1]}"); fi
 [ "${#MCP_CONFIGS[@]}" -eq 0 ] || HELP_CHECK+=("$MCP_FLAG")
 [ "${#ALLOWED_TOOLS[@]}" -eq 0 ] || HELP_CHECK+=("$ALLOWED_FLAG")
@@ -3144,15 +3241,7 @@ MISSING="$(py help-check "$RUN_DIR/help.txt" "${HELP_TOKENS[@]}")" || rc=$?
 # D20: 値を取るフラグの表(--help の `<…>` の値の表記から作る)で --host-argv を照合する
 py help-values "$RUN_DIR/help.txt" >"$RUN_DIR/help-values.txt"
 check_host_argv_values "$RUN_DIR/help-values.txt"
-# H31: 版と help(-p の既定の説明を含む)が、証明を取った時の出力と同じか。違えば確かめ直すまで起動しない
 PROOF_INFO="未確認(--prove-host で確かめる)"
-if [ "$PROVE_HOST" -eq 0 ]; then
-  verify_environment || die 20 environment "ホスト CLI の証明を照合する直前に環境が変わった"
-  rc=0
-  PROOF_INFO="$("$PY_ABS" -I -B "$HOST_CHECK_PY" proof-match --store "$PROOF_STORE" --identity "$HOST_IDENTITY" --shape "$HOST_SHAPE" \
-    --version-file "$RUN_DIR/version.txt" --help-file "$RUN_DIR/help.txt" 2>"$RUN_DIR/host-proof.err")" || rc=$?
-  [ "$rc" -eq 0 ] || die 20 host-proof "$(head -c 400 "$RUN_DIR/host-proof.err" | tr '\n' ' ')。$PROVE_HINT"
-fi
 rc=0
 aux "$RUN_DIR/plugins.json" "${AUX_PLUGINS[@]}" || rc=$?
 [ "$rc" -eq 0 ] || die 20 plugin-list "'$HOST_BIN ${AUX_PLUGINS[*]}' が失敗した(終了コード $rc)"
@@ -3178,6 +3267,8 @@ ACTIVE_HOST_SETTINGS_OUT="$HOST_SETTINGS_REPLY"
 ACTIVE_USER_SETTINGS="$(printf '%s' "$ACTIVE_HOST_SETTINGS_OUT" | py json-get user_settings)" \
   || die 20 host-settings "active bootstrap 後の利用者設定のパスを読めない"
 [ "$ACTIVE_USER_SETTINGS" = "$USER_SETTINGS" ] || die 20 host-config-path "active bootstrap 後に利用者設定のパスが変わった"
+component_check
+[ "$FIXED_POLICY" = "$INITIAL_FIXED_POLICY" ] || die 20 component-policy "有効pluginの確定後に固定設定が変わった"
 build_child_argv
 CHILD_ARGV[0]="$HOST_EXEC"
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
@@ -3195,25 +3286,8 @@ ALLOW_OUT="$HOST_SETTINGS_REPLY"
 ALLOW_JSON="$(printf '%s\n' "$ALLOW_OUT" | sed -n 1p)"
 ALLOW_UNUSED="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^unused=//p')"
 
-# ── H34: skill・command の frontmatter の allowed-tools が、許可リストより広い権限を足さないか ──
-# 対象は、控えた環境のうち --plugin-dir のコピー・有効な plugin の installPath・利用者の skills と commands の .md。
-# 控えた内容と同じバイトだけを読み、正規導入リンクは控えた字面と対象の実体が同じときだけ辿る(周の途中の変化は
-# 環境の照合が止める)。広い規則・解釈できない形が 1 つでもあれば、周を起動せずに止まる
-verify_environment || die 20 environment "allowed-tools の検査の直前に環境が変わった"
-GRANT_ARGS=()
-for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do GRANT_ARGS+=(--allowed-tools "$v"); done
-[ "$ALLOW_CLASSIFIER" -eq 0 ] || GRANT_ARGS+=(--classifier)
-rc=0
-GRANTS_OUT="$("$PY_ABS" -I -B "$HOST_CHECK_PY" grants --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
-  --user-settings "$USER_SETTINGS" ${GRANT_ARGS[@]+"${GRANT_ARGS[@]}"} 2>"$RUN_DIR/skill-grants.err")" || rc=$?
-if [ "$rc" -ne 0 ]; then
-  cat "$RUN_DIR/skill-grants.err" >&2 2>/dev/null || true
-  rep "" "## skill・command の allowed-tools(止まった理由)" ""
-  sed 's/^/    /' "$RUN_DIR/skill-grants.err" >>"$REPORT" 2>/dev/null || true
-  die 20 skill-grants "skill・command の allowed-tools が許可リストより広いか、解釈できない(詳細: $RUN_DIR/skill-grants.err)。その plugin・skill を無効にするか、ループ用の設定ディレクトリ(CLAUDE_CONFIG_DIR)で起動する。許可リストより広いだけの規則なら、同じ規則を --allowed-tools か利用者の設定の permissions.allow に足してもよい(権限を広げるかは人が決める。Bash の全体・未知の道具・解釈できない形・重複は、足しても止まる)"
-fi
-GRANTS_FILES="$(printf '%s' "$GRANTS_OUT" | sed -n 's/^files=\([0-9]*\) .*/\1/p')"
-case "$GRANTS_OUT" in *" yaml=on") GRANTS_YAML="有" ;; *) GRANTS_YAML="無(PyYAML を読めない。自前の厳しい読み方だけ)" ;; esac
+# active component の全出所が確定した時点で、証明の必須digestを照合する。
+[ "$PROVE_HOST" -eq 1 ] || match_component_proof
 
 # ── §2 の 13: 疎通(D10。--dry-run では打たない)──
 if [ "$DRY_RUN" -eq 0 ]; then

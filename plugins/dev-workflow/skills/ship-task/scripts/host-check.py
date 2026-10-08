@@ -35,8 +35,10 @@ MAX_TEXT = 4 * 1024 * 1024
 MAX_STATE = 64 * 1024 * 1024
 MAX_PROOF = 64 * 1024
 MAX_SECONDS = 120.0
-PROOF_VERSION = 1
+PROOF_VERSION = 2
 PROOF_BOUND = ('realpath', 'dev', 'ino', 'size', 'sha256')
+INIT_SCHEMA_VERSION = 1
+RESOLVER_VERSION = 1
 
 
 class Stop(RuntimeError):
@@ -215,7 +217,7 @@ def shape_digest(shape):
     return sha256(shape.encode('utf-8'))
 
 
-def load_proof(store, held, shape):
+def load_proof(store, held, shape, component_digest=None, policy_digest=None):
     path = proof_file(store, held, shape)
     try:
         raw = read_regular(path, MAX_PROOF)
@@ -235,6 +237,19 @@ def load_proof(store, held, shape):
     for key in ('host_version_sha256', 'help_sha256'):
         if not re.fullmatch('[0-9a-f]{64}', str(value.get(key))):
             raise Stop(f'証明の形が違う({key}): {path}')
+    # H46 からは、同じ host と argv でも読込む component 又は固定方針が
+    # 変われば証明を再利用しない。旧形式は version でここまで到達せず拒否する。
+    for key in ('component_sha256', 'policy_sha256'):
+        if not re.fullmatch('[0-9a-f]{64}', str(value.get(key))):
+            raise Stop(f'証明の形が違う({key}): {path}')
+    if value.get('init_schema') != INIT_SCHEMA_VERSION:
+        raise Stop(f'証明の init の形が違う: {path}')
+    proof_names(value.get('public_names'))
+    resolver_version_check(value.get('resolver_version'))
+    init_evidence_check(value.get('init'), value.get('public_names'))
+    for name, got in (('component_sha256', component_digest), ('policy_sha256', policy_digest)):
+        if got is not None and value[name] != digest_value(got, name):
+            raise Stop(f'証明を取った時と {name} が違う: {path}')
     probe = value.get('probe')
     if not isinstance(probe, dict) or probe.get('hook') != 'invoked' or probe.get('decision') != 'deny' \
             or probe.get('tool') != 'Write' or probe.get('file_absent') is not True:
@@ -246,8 +261,8 @@ def output_digest(path):
     return sha256(read_regular(path, MAX_TEXT))
 
 
-def proof_match(store, held, shape, version_file, help_file):
-    path, value = load_proof(store, held, shape)
+def proof_match(store, held, shape, version_file, help_file, component_digest=None, policy_digest=None):
+    path, value = load_proof(store, held, shape, component_digest, policy_digest)
     if output_digest(version_file) != value['host_version_sha256']:
         raise Stop(f'--version の出力が確認した時と違う(証明: {path})')
     if output_digest(help_file) != value['help_sha256']:
@@ -290,7 +305,17 @@ def ensure_store(store):
         os.close(fd)
 
 
-def proof_write(store, held, shape, version_file, help_file, probe, plugin_version):
+def digest_value(value, label):
+    if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
+        raise Stop(f'{label} の形が違う')
+    return value
+
+
+def proof_write(store, held, shape, version_file, help_file, probe, plugin_version,
+                component_digest, policy_digest, public_names, resolver_version, init_evidence):
+    if not isinstance(probe, dict) or probe.get('hook') != 'invoked' or probe.get('decision') != 'deny' or \
+            probe.get('tool') != 'Write' or probe.get('file_absent') is not True:
+        raise Stop('証明に実 hook の拒否の記録が無い')
     version_raw = read_regular(version_file, MAX_TEXT)
     record = {
         'version': PROOF_VERSION,
@@ -305,6 +330,12 @@ def proof_write(store, held, shape, version_file, help_file, probe, plugin_versi
         'host_version_sha256': sha256(version_raw),
         'help_sha256': output_digest(help_file),
         'kind': held['kind'],
+        'component_sha256': digest_value(component_digest, 'component_sha256'),
+        'policy_sha256': digest_value(policy_digest, 'policy_sha256'),
+        'init_schema': INIT_SCHEMA_VERSION,
+        'public_names': sorted(proof_names(public_names)),
+        'resolver_version': resolver_version_check(resolver_version),
+        'init': init_evidence_check(init_evidence, public_names),
         'probe': dict(probe, date=time.strftime('%Y-%m-%dT%H:%M:%S%z'), plugin_version=plugin_version),
     }
     ensure_store(store)
@@ -313,8 +344,31 @@ def proof_write(store, held, shape, version_file, help_file, probe, plugin_versi
     return path
 
 
+def proof_names(value):
+    if not isinstance(value, (list, tuple)) or len(set(value)) != len(value) or \
+            not all(isinstance(name, str) and NAME.fullmatch(name) for name in value):
+        raise Stop('public_names の形が違う')
+    return list(value)
+
+
+def resolver_version_check(value):
+    if type(value) is not int or value != RESOLVER_VERSION:
+        raise Stop('resolver_version の形が違う')
+    return value
+
+
+def init_evidence_check(value, public_names):
+    if not isinstance(value, dict) or set(value) != {'init_schema', 'public_names'} or \
+            value.get('init_schema') != INIT_SCHEMA_VERSION or \
+            sorted(proof_names(value.get('public_names'))) != sorted(proof_names(public_names)):
+        raise Stop('init の縮約証拠の形が違う')
+    return {'init_schema': INIT_SCHEMA_VERSION, 'public_names': sorted(value['public_names'])}
+
+
 def result_object(raw):
     value = json.loads(raw)
+    if isinstance(value, dict) and set(value) == {'init', 'result'}:
+        value = value['result']
     if isinstance(value, list):
         results = [v for v in value if isinstance(v, dict) and v.get('type') == 'result']
         if not results:
@@ -649,7 +703,7 @@ def parse_frontmatter_lines(text):
         if not KEY_GUARD.search(key):
             continue
         if key != GRANT_KEY:
-            raise Unclear(f'allowed-tools に似た鍵がある({one_line(key, 60)})')
+            raise Unclear('allowed-tools に似た鍵がある')
         if found is not None:
             raise Unclear('allowed-tools の鍵が重複している')
         rest = rest.strip(' \t')
@@ -827,7 +881,7 @@ def judge_rules(rules, allow_rules, classifier=False):
     for rule in rules:
         key = parse_rule(rule)
         if key in seen or rule in seen:
-            raise Unclear(f'同じ規則が重複している({one_line(rule, 80)})')
+            raise Unclear('同じ規則が重複している')
         seen.add(key)
         seen.add(rule)
     return [r for r in rules if not covered(r, allow_rules, classifier)]
@@ -922,6 +976,17 @@ def verified_host_settings(state_path, expected):
             '配布物または利用者環境が変わった': '配布物または利用者の設定の内容が変わった',
             '導入リンクが開始時から変わった': '導入リンクが控えた時から変わった',
             '導入リンクの対象が開始時から変わった': '導入リンクの対象が控えた時から変わった',
+            '導入リンクが走査中に変わった': '導入リンクが控えた時から変わった',
+            '導入リンクの対象が走査中に変わった': '導入リンクの対象が控えた時から変わった',
+            'component の親または導入リンクが検査中に変わった': '導入リンクが控えた時から変わった',
+            '本文読取前に監視対象が変わった': '控えた時から内容が変わった',
+            '本文読取前にリンク対象が変わった': '控えた時から内容が変わった',
+            'component 導入リンクが開始時から変わった': '導入リンクが控えた時から変わった',
+            'component 導入リンクの対象が開始時から変わった': '導入リンクの対象が控えた時から変わった',
+            'component の実体が開始時から変わった': '控えた時から component の実体が変わった',
+            'component の導入リンクが検査中に変わった': '控えた時から component の実体が変わった',
+            'component が読取中に変わった': '控えた時から component の実体が変わった',
+            'component の集合が検査中に変わった': '控えた時から component の実体が変わった',
             'host-config-path': 'host-config-path',
             'host-settings': 'host-settings',
             'host-config-source': 'host-config-source',
@@ -933,12 +998,867 @@ def verified_host_settings(state_path, expected):
 MANIFEST_SUFFIX = '/.claude-plugin/plugin.json'
 
 
+def strict_json(raw, label):
+    """重複した object key を受け入れず JSON を読む。
+
+    plugin manifest の後勝ちは host の版で変わりうる。通常の json.loads は
+    重複を黙って上書きするため、ここで policy を広げる方向を残さない。
+    """
+    def pairs(values):
+        result = {}
+        for key, value in values:
+            if key in result:
+                raise Unclear(f'{label} の JSON の鍵が重複している')
+            result[key] = value
+        return result
+    try:
+        return json.loads(raw, object_pairs_hook=pairs)
+    except Unclear:
+        raise
+    except (ValueError, UnicodeDecodeError):
+        raise Unclear(f'{label} を JSON として読めない') from None
+
+
+def verified_components(state_path, expected):
+    """H50 の保持 reader が再照合して返した bytes だけを component として使う。"""
+    value = load_state(state_path, expected)
+    if not isinstance(value.get('guard_sha256'), str) or not re.fullmatch('[0-9a-f]{64}', value['guard_sha256']):
+        raise Stop('component の保持 reader が無い')
+    path = Path(state_path).parent / 'environment-guard.py'
+    raw = read_regular(str(path), MAX_TEXT)
+    if sha256(raw) != value['guard_sha256']:
+        raise Stop('component の保持 reader が保持値と違う')
+    try:
+        namespace = {'__name__': 'verified_environment_guard', '__file__': str(path)}
+        exec(compile(raw, str(path), 'exec'), namespace)
+        reader = namespace.get('read_components')
+        if not callable(reader):
+            raise RuntimeError('read_components')
+        result = reader(state_path, expected)
+    except Exception as exc:
+        detail = str(exc)
+        fixed = {
+            '導入リンクが開始時から変わった': '導入リンクが控えた時から変わった',
+            '導入リンクの対象が開始時から変わった': '導入リンクの対象が控えた時から変わった',
+            'component の本文が控えた時から変わった': 'component の本文が控えた時から変わった',
+        }
+        raise Stop(fixed.get(detail, 'component の保持 reader を検査できない')) from None
+    if not isinstance(result, list):
+        raise Stop('component の保持値の形が違う')
+    keys, checked, directory_cache = set(), [], {}
+    for item in result:
+        if not isinstance(item, dict) or not {'key', 'kind', 'root', 'relative', 'path', 'raw'} <= set(item) or \
+                set(item) - {'key', 'kind', 'root', 'relative', 'path', 'raw', 'source', 'plugin', 'entry'}:
+            raise Stop('component の保持値の形が違う')
+        key, kind = item['key'], item['kind']
+        if not isinstance(key, str) or key in keys or not isinstance(kind, str) or \
+                kind not in ('personal-skill', 'enterprise-skill', 'personal-command', 'enterprise-command',
+                             'personal-agent', 'enterprise-agent', 'marketplace-manifest', 'plugin') or \
+                not all(isinstance(item[name], str) for name in ('root', 'relative', 'path')) or \
+                not isinstance(item['raw'], bytes):
+            raise Stop('component の保持値の形が違う')
+        if not key.startswith('component:' + kind + ':') or not os.path.isabs(item['root']) or not os.path.isabs(item['path']):
+            raise Stop('component の保持値の形が違う')
+        if any(name in item and not isinstance(item[name], (str, dict, list, type(None)))
+               for name in ('source', 'plugin', 'entry')):
+            raise Stop('component の保持値の形が違う')
+        keys.add(key)
+        prefix = 'component:' + kind + ':' + item['root']
+        if prefix not in directory_cache:
+            directory_cache[prefix] = tuple(k[len(prefix):].lstrip('/') for k, v in value.get('entries', {}).items()
+                         if (k == prefix or k.startswith(prefix + '/')) and isinstance(v, list) and v[:1] == ['directory'])
+        item = dict(item, held_directories=directory_cache[prefix])
+        checked.append(item)
+    return checked
+
+
+def verified_component_digest(state_path, expected):
+    """保持 reader の正規化済み digest を使用する。run 固有の stat は混ぜない。"""
+    value = load_state(state_path, expected)
+    path = Path(state_path).parent / 'environment-guard.py'
+    raw = read_regular(str(path), MAX_TEXT)
+    if sha256(raw) != value.get('guard_sha256'):
+        raise Stop('component の保持 reader が保持値と違う')
+    try:
+        namespace = {'__name__': 'verified_environment_guard', '__file__': str(path)}
+        exec(compile(raw, str(path), 'exec'), namespace)
+        result = namespace['component_policy_digest'](state_path, expected)
+    except Exception:
+        raise Stop('component の digest を検査できない') from None
+    return digest_value(result, 'component_sha256')
+
+
+NAME = re.compile(r'[a-z0-9][a-z0-9:_-]*\Z')
+NATIVE_RESERVED = frozenset(('doctor', 'checkup', 'design', 'plugin-authoring'))
+RESERVED_COMPONENT_NAMES = frozenset(('anthropic-skills', 'synced'))
+
+
+def component_fields(raw):
+    """特権・名前の限定 YAML を自前で読む。任意の YAML loader に依存しない。"""
+    try:
+        text = raw.decode('utf-8')
+    except UnicodeDecodeError:
+        raise Unclear('component が UTF-8 でない') from None
+    core = text.lstrip(' \t\r\n\ufeff\u200b')
+    if not core.startswith('---'):
+        return {}
+    region = frontmatter_region(core)
+    sensitive = {'hooks', 'modules', 'mcpservers', 'permissionmode', 'skills',
+                 'name', 'userinvocable', 'disablemodelinvocation'}
+    marker = re.compile(r'(?i)(hooks|modules|mcp.?servers|permission.?mode|skills|name|user.?invocable|disable.?model.?invocation)')
+    regions = [region]
+    for pattern in HOST_FRONTMATTER:
+        match = pattern.match(core)
+        if match:
+            regions.append(match.group(1))
+    if region is None or len({normalize_region(r) for r in regions if r is not None}) != 1:
+        if any(r and (marker.search(r) or '\\' in r) for r in regions) or marker.search(core):
+            raise Unclear('component frontmatter の範囲を確定できない')
+        return {}
+    if len(region) > 65536:
+        raise Unclear('component frontmatter が上限を超えた')
+    if any(ch in region.replace('\r\n', '\n') for ch in '\r\x85\u2028\u2029\x0b\x0c'):
+        raise Unclear('component frontmatter の改行が曖昧')
+    fields, block, current_key = {}, False, None
+    for line in region.splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        indented = line.startswith((' ', '\t'))
+        sequence = re.match(r'^-(?:[ \t]|$)', line.lstrip())
+        # YAML は mapping value の列を key と同じ字下げでも書ける。
+        # 次の key と誤認すると hooks/MCP/preload を空値に戻してしまう。
+        if indented or (current_key and sequence):
+            if block:
+                continue
+            if current_key == 'skills' and sequence:
+                if fields['skills'] == '':
+                    fields['skills'] = []
+                if not isinstance(fields['skills'], list):
+                    raise Unclear('agent skills の列が曖昧')
+                fields['skills'].append(line.lstrip()[1:].strip())
+                continue
+            if current_key:
+                fields[current_key] = '__nonempty_block__'
+                continue
+            if marker.search(line) or '\\' in line or line.lstrip().startswith('<<'):
+                raise Unclear('component frontmatter の階層を確定できない')
+            continue
+        block, current_key = False, None
+        key, sep, value = line.partition(':')
+        if not sep:
+            if marker.search(line) or '\\' in line:
+                raise Unclear('component frontmatter の鍵を確定できない')
+            continue
+        key = key.strip()
+        if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*', key):
+            if marker.search(key) or '\\' in key or key.startswith(('<<', '{', '[', '?')):
+                raise Unclear('component frontmatter の鍵を確定できない')
+            continue
+        normalized = normalized_yaml_key(key)
+        if normalized in sensitive:
+            if normalized in fields:
+                raise Unclear('component frontmatter の鍵が重複している')
+            fields[normalized] = value.strip().split(' #', 1)[0].strip()
+            current_key = normalized
+        elif value.strip().startswith(('|', '>')):
+            block = True
+    return fields
+
+
+def component_frontmatter(raw, label):
+    fields = component_fields(raw)
+    out = {}
+    for key in ('name', 'userinvocable', 'disablemodelinvocation'):
+        if key not in fields:
+            continue
+        value = fields[key]
+        if key == 'name':
+            value = scalar(value)
+            if not NAME.fullmatch(value):
+                raise Unclear('component の name の形が違う')
+        elif value not in ('true', 'false'):
+            raise Unclear('component の可視性が真偽値でない')
+        out[key] = value
+    return out
+
+
+def component_manifests(components):
+    """保持済み選択 entry を、対応する各 plugin root の追加 manifest として結ぶ。"""
+    result = list(components)
+    # skill folder の root SKILL は personal/enterprise のまま。内部の
+    # plugin 宣言は別の検査済み出所にし、保持済み bytes を再分類するだけにする。
+    for manifest in components:
+        if manifest['kind'] not in ('personal-skill', 'enterprise-skill') or not manifest['relative'].endswith(MANIFEST_SUFFIX):
+            continue
+        prefix = manifest['relative'][:-len('.claude-plugin/plugin.json')]
+        if len(prefix.rstrip('/').split('/')) != 1:
+            raise Unclear('skill-folder plugin の位置を確定できない')
+        data = strict_json(manifest['raw'], 'skill-folder plugin')
+        name = data.get('name') if isinstance(data, dict) else None
+        if not isinstance(name, str) or not NAME.fullmatch(name):
+            raise Unclear('skill-folder plugin の名前を確定できない')
+        folder = prefix.rstrip('/').lower()
+        if folder in ('synced', 'anthropic-skills') or folder.startswith('anthropic-skills:'):
+            continue
+        root = manifest['root'] + '/' + prefix.rstrip('/')
+        for part in components:
+            if part['root'] == manifest['root'] and part['relative'].startswith(prefix):
+                rel = part['relative'][len(prefix):]
+                result.append(dict(part, key='component:plugin:' + root + '/' + rel,
+                                   kind='plugin', root=root, relative=rel, plugin=name,
+                                   source='skill-folder-plugin',
+                                   held_directories=tuple(directory[len(prefix):] for directory in part.get('held_directories', ())
+                                                          if directory.startswith(prefix))))
+
+    for item in components:
+        if item['kind'] != 'marketplace-manifest':
+            continue
+        marketplace_security(item)
+        for selected in item['entry']:
+            plugin, entry = selected['plugin'], selected['entry']
+            roots = sorted({part['root'] for part in components
+                            if part['kind'] == 'plugin' and part.get('plugin') == plugin})
+            if not roots or not isinstance(item.get('source'), str):
+                raise Unclear('選択 marketplace entry の plugin root が無い')
+            source_root = str(Path(item['source']) / entry['source'])
+            if source_root not in roots:
+                raise Unclear('選択 marketplace entry の source が保持されていない')
+            if 'strict' in entry and not isinstance(entry['strict'], bool):
+                raise Unclear('選択 marketplace entry の strict が真偽値でない')
+            for root in roots:
+                result.append({'key': item['key'] + ':' + plugin + ':' + root,
+                               'kind': 'plugin', 'root': root, 'plugin': plugin,
+                               'source': 'selected-entry',
+                               'namespace_source': 'marketplace-source' if any(part['root'] == root and part.get('source') == 'marketplace-source' for part in components) else 'active',
+                               'relative': '.claude-plugin/plugin.json',
+                               'path': item['path'], 'raw': json.dumps(entry).encode()})
+    return result
+
+
+def plugin_prefix(component, manifests):
+    plugin = component.get('plugin')
+    if not plugin:
+        ids = {manifest.get('plugin') for manifest, _ in manifests if manifest['root'] == component['root'] and manifest.get('plugin')}
+        if len(ids) == 1:
+            plugin = next(iter(ids))
+        elif ids:
+            raise Unclear('plugin の出所が競合している')
+    names = {data.get('name') for manifest, data in manifests
+             if manifest['root'] == component['root'] and isinstance(data.get('name'), str)}
+    if plugin:
+        prefix = plugin.rsplit('@', 1)[0]
+        if names and names != {prefix}:
+            raise Unclear('plugin ID と manifest 名が一致しない')
+    elif len(names) == 1:
+        prefix = next(iter(names))
+    else:
+        raise Unclear('plugin の名前空間を一意に解決できない')
+    if not NAME.fullmatch(prefix):
+        raise Unclear('plugin の名前空間の形が違う')
+    return prefix
+
+
+def held_reference(components, root, source, directory=False):
+    if not isinstance(source, str) or not manifest_paths_ok(source):
+        raise Unclear('component の参照が root 内相対パスでない')
+    relative = source
+    while relative.startswith('./'):
+        relative = relative[2:]
+    relative = relative.rstrip('/')
+    matches = [item for item in components if item['root'] == root and
+               (item['relative'] == relative or (directory and (not relative or item['relative'].startswith(relative + '/'))))]
+    if not matches and not (directory and any(item['root'] == root and relative in item.get('held_directories', ()) for item in components)):
+        raise Unclear('component の参照先が保持されていない')
+    return matches
+
+
+def component_namespace(components):
+    """定義の優先順位、呼出先、初期化で表示する主名を別々に決める。"""
+    components = component_manifests(components)
+    namespace_components = [item for item in components if item.get('source') != 'marketplace-source' and item.get('namespace_source') != 'marketplace-source']
+    manifests = [(item, strict_json(item['raw'], 'plugin.json')) for item in namespace_components
+                 if item['relative'] == '.claude-plugin/plugin.json' and item['kind'] == 'plugin']
+    if any(not isinstance(data, dict) for _, data in manifests):
+        raise Unclear('plugin manifest が対応表でない')
+    definitions = []
+
+    def add(item, primary, kind, raw=None, alias=True):
+        raw = item['raw'] if raw is None else raw
+        data = component_frontmatter(raw, item['path'])
+        alternate = data.get('name') if alias else None
+        plugin = item['kind'] == 'plugin'
+        if not plugin:
+            parts = item['relative'].split('/')
+            reserved = lambda name: name.lower() == 'anthropic-skills' or name.lower().startswith('anthropic-skills:')
+            if (kind == 'skill' and parts[0].lower() == 'synced') or \
+                    any(reserved(name) for name in (primary, alternate or '', *parts)):
+                return
+        if not NAME.fullmatch(primary) or (alternate and not NAME.fullmatch(alternate)):
+            raise Unclear('component の公開名の形を確定できない')
+        prefix = plugin_prefix(item, manifests) if plugin else None
+        qualify = lambda name: name if not prefix or name.startswith(prefix + ':') else prefix + ':' + name
+        definitions.append({'primary': qualify(primary), 'alias': qualify(alternate) if alternate else None,
+                            'kind': item['kind'], 'loader': kind, 'path': item['path'],
+                            'public': data.get('userinvocable') != 'false',
+                            'model': data.get('disablemodelinvocation') != 'true',
+                            'plugin': prefix, 'content_sha256': sha256(raw)})
+
+    for item in namespace_components:
+        rel, kind = item['relative'], item['kind']
+        if not rel.lower().endswith('.md'):
+            continue
+        if kind.endswith('-skill') and len(rel.split('/')) == 2 and rel.lower().endswith('/skill.md'):
+            add(item, rel.split('/')[-2], 'skill')
+        elif kind.endswith('-command'):
+            add(item, rel[:-3].replace('/', ':'), 'command')
+        elif kind == 'plugin':
+            if rel == 'SKILL.md' and item.get('source') != 'skill-folder-plugin':
+                rootname = component_frontmatter(item['raw'], item['path']).get('name', Path(item['root']).name)
+                add(item, rootname, 'skill', alias=False)
+            elif rel.startswith('skills/') and rel.lower().endswith('/skill.md'):
+                add(item, rel.split('/')[-2], 'skill')
+            elif rel.startswith('commands/'):
+                add(item, rel[len('commands/'):-3].replace('/', ':'), 'command')
+    for manifest, data in manifests:
+        commands = data.get('commands')
+        if isinstance(commands, dict):
+            for name, entry in commands.items():
+                if not isinstance(name, str) or not isinstance(entry, dict):
+                    raise Unclear('plugin commands map の形が違う')
+                source = entry.get('source')
+                content = entry.get('content')
+                bodies = []
+                if source is not None:
+                    refs = held_reference(components, manifest['root'], source)
+                    if len(refs) != 1:
+                        raise Unclear('command source が一意でない')
+                    bodies.append(refs[0]['raw'])
+                if content is not None:
+                    if not isinstance(content, str):
+                        raise Unclear('command content が文字列でない')
+                    bodies.append(content.encode())
+                if not bodies:
+                    raise Unclear('command の本文が無い')
+                # 合成優先順位が解決できない異内容は許可名へ推定追加しない。
+                if len(set(bodies)) != 1:
+                    raise Unclear('command source と content が競合している')
+                add(manifest, name, 'command', bodies[0], alias=False)
+        elif commands is not None:
+            refs = [commands] if isinstance(commands, str) else commands
+            if not isinstance(refs, list):
+                raise Unclear('plugin commands の形が違う')
+            for source in refs:
+                held = held_reference(components, manifest['root'], source, directory=True)
+                relative = source
+                while relative.startswith('./'):
+                    relative = relative[2:]
+                relative = relative.rstrip('/')
+                for item in held:
+                    if item['relative'].lower().endswith('.md'):
+                        command_path = item['relative']
+                        if command_path == relative:
+                            primary = Path(command_path).stem
+                        else:
+                            primary = command_path[len(relative) + 1:] if relative else command_path
+                            primary = primary[:-3].replace('/', ':')
+                        add(item, primary, 'command')
+        skills = data.get('skills')
+        if skills is not None:
+            refs = [skills] if isinstance(skills, str) else skills
+            if not isinstance(refs, list):
+                raise Unclear('plugin skills の形が違う')
+            for source in refs:
+                for item in held_reference(components, manifest['root'], source, directory=True):
+                    if item['relative'].lower().endswith('/skill.md'):
+                        root_relative = source[2:] if source.startswith('./') else source
+                        direct = item['relative'] == root_relative.rstrip('/') + '/SKILL.md'
+                        folder = item['relative'].split('/')[-2]
+                        primary = component_frontmatter(item['raw'], item['path']).get('name', folder) if direct else folder
+                        add(item, primary, 'skill', alias=not direct)
+                    elif item['relative'] == 'SKILL.md':
+                        primary = component_frontmatter(item['raw'], item['path']).get('name', Path(item['root']).name)
+                        add(item, primary, 'skill', alias=False)
+
+    def rank(item):
+        return (2 if item['kind'].startswith('enterprise-') else 1, item['loader'] == 'skill')
+    winners = {}
+    for item in definitions:
+        old = winners.get(item['primary'])
+        if old is None or rank(item) > rank(old):
+            winners[item['primary']] = item
+        elif rank(item) == rank(old):
+            if all(old[key] == item[key] for key in ('content_sha256', 'plugin', 'public', 'model', 'alias')):
+                continue
+            raise Unclear('同じ主名の component の出所が競合している')
+    routes = dict(winners)
+    for item in winners.values():
+        alias = item['alias']
+        if not alias or alias in winners:
+            continue
+        old = routes.get(alias)
+        if old is None or rank(item) > rank(old):
+            routes[alias] = item
+        elif rank(item) == rank(old) and old != item:
+            raise Unclear('component の alias の出所が競合している')
+    loaded = {name: {key: item[key] for key in
+                    ('primary', 'alias', 'kind', 'loader', 'plugin', 'content_sha256', 'public', 'model')}
+              for name, item in sorted(winners.items())}
+    resolved = {name: {'target': item['primary'], 'user': item['public'], 'model': item['model']}
+                for name, item in sorted(routes.items())}
+    return {'definitions': sorted(winners.values(), key=lambda item: item['primary']),
+            'loaded_commands': loaded, 'invocation_routes': resolved, 'lookup_names': sorted(routes),
+            'invocation_names': sorted(name for name, item in routes.items() if item['public']),
+            'model_invocation_names': sorted(name for name, item in routes.items() if item['model']),
+            # legacy command は slash_commands へ載る。init.skills の照合名へ
+            # 加えず、保持済み定義と user/model の呼出先には残す。
+            'public_names': sorted(name for name, item in winners.items() if item['public'] and item['loader'] == 'skill')}
+
+
+def plugin_command_names(components):
+    return {name for name in component_namespace(components)['loaded_commands'] if ':' in name}
+
+
+def fixed_host_policy(namespace):
+    """外部 component の有効 winner から、固定する host settings を導出する。"""
+    external = [item for item in namespace['definitions'] if item['kind'].startswith(('enterprise-', 'personal-'))]
+    definitions = {item['primary']: item for item in external}
+    aliases = {item['alias'] for item in external if item['alias'] and item['alias'] in namespace['lookup_names']}
+    off = set()
+    # Directory exact owns reserved names. checkup's frontmatter alias is also
+    # measured as a winner; doctor alias alone is not. Do not turn a normal
+    # external skill with a reserved name off.
+    for name in NATIVE_RESERVED:
+        if name == 'checkup':
+            present = name in definitions or name in aliases
+        else:
+            present = name in definitions
+        if not present:
+            off.add(name)
+    return {'disableBundledSkills': True, 'syncClaudeAiSkills': False,
+            'syncClaudeAiPlugins': False, 'skillOverrides': {name: 'off' for name in sorted(off)}}
+
+
+def policy_digest(component_digest, namespace, policy):
+    component_digest = digest_value(component_digest, 'component_sha256')
+    payload = {'component_sha256': component_digest,
+               'loaded_commands': namespace['loaded_commands'],
+               'invocation_routes': namespace['invocation_routes'],
+               'invocation_names': namespace['invocation_names'], 'lookup_names': namespace['lookup_names'],
+               'model_invocation_names': namespace['model_invocation_names'], 'resolver_version': RESOLVER_VERSION,
+               'public_names': namespace['public_names'], 'fixed': policy}
+    return sha256(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode())
+
+
+def assert_fixed_policy(settings, policy):
+    """H50 reader の既検証 settings と、loop が追加する固定値の競合を拒否する。"""
+    if not isinstance(settings, dict):
+        raise Stop('host-settings の形が違う')
+    for source in [settings.get('user'), settings.get('cache'), *settings.get('managed', [])]:
+        if source is None:
+            continue
+        if not isinstance(source, dict):
+            raise Stop('host-settings の形が違う')
+        for key in ('disableBundledSkills', 'syncClaudeAiSkills', 'syncClaudeAiPlugins'):
+            if key in source and (type(source[key]) is not bool or source[key] != policy[key]):
+                raise Stop(f'固定する {key} と既存設定が競合している')
+        if 'skillOverrides' in source:
+            value = source['skillOverrides']
+            if not isinstance(value, dict):
+                raise Stop('固定する skillOverrides と既存設定が競合している')
+            for name, disabled in policy['skillOverrides'].items():
+                if name in value and value[name] != disabled:
+                    raise Stop(f'固定する skillOverrides.{name} と既存設定が競合している')
+
+
+def apply_user_skill_off(namespace, settings):
+    """保持 reader が返した利用者設定の off は user/model/public route からだけ外す。"""
+    disabled = set()
+    for source in [settings.get('user'), settings.get('cache'), *settings.get('managed', [])]:
+        overrides = source.get('skillOverrides') if isinstance(source, dict) else None
+        if overrides is None:
+            continue
+        if not isinstance(overrides, dict) or any(not isinstance(name, str) or value not in ('off', 'on')
+                                                  for name, value in overrides.items()):
+            raise Stop('保持した skillOverrides の形が違う')
+        disabled.update(name for name, value in overrides.items() if value == 'off')
+    result = dict(namespace)
+    result['invocation_routes'] = {name: dict(route, user=False, model=False) if name in disabled else dict(route)
+                                   for name, route in namespace['invocation_routes'].items()}
+    for key in ('invocation_names', 'model_invocation_names', 'public_names'):
+        result[key] = [name for name in namespace[key] if name not in disabled]
+    return result
+
+
+def plugin_agents(components):
+    components = component_manifests(components)
+    agents = [item for item in components if item['kind'].endswith('-agent') or
+              (item['kind'] == 'plugin' and item['relative'].startswith('agents/') and item['relative'].lower().endswith('.md'))]
+    for item in components:
+        if item['kind'] != 'plugin' or item['relative'] != '.claude-plugin/plugin.json':
+            continue
+        value = strict_json(item['raw'], 'plugin.json').get('agents')
+        if value is None:
+            continue
+        refs = [value] if isinstance(value, str) else value
+        if not isinstance(refs, list):
+            raise Unclear('plugin agents の参照の形が違う')
+        for ref in refs:
+            agents.extend(part for part in held_reference(components, item['root'], ref, directory=True)
+                          if part['relative'].lower().endswith('.md'))
+    return agents
+
+
+def agent_preloads(components, namespace):
+    known = set(namespace['lookup_names'])
+    for item in plugin_agents(components):
+        fields = component_fields(item['raw'])
+        value = fields.get('skills')
+        if value is None:
+            continue
+        if isinstance(value, list):
+            names = [scalar(name) for name in value]
+        elif value in ('', '[]', 'null', '~'):
+            names = []
+        elif value.startswith('[') and value.endswith(']'):
+            names = [scalar(name) for name in flow_items(value)]
+        else:
+            raise Unclear('agent preload skills の形を確定できない')
+        if any(not NAME.fullmatch(name) for name in names) or set(names) - known:
+            raise Unclear('agent preload skill が検査済みでない')
+
+
+def plugin_agent_only_paths(components):
+    """agent 専用の読込先だけに host の無視規則を適用する。
+
+    同じ bytes が複数 role で読まれる場合は、その全 role の条件を満たす必要がある。
+    namespace の勝敗や表示可否で security 検査を省かない。
+    """
+    expanded = component_manifests(components)
+    agents = {item['path'] for item in plugin_agents(components) if item['kind'] == 'plugin'}
+    if not agents:
+        return set()
+    commands_skills = set()
+    for item in expanded:
+        rel, kind = item['relative'], item['kind']
+        if not rel.lower().endswith('.md'):
+            continue
+        if kind.endswith('-command') or (kind.endswith('-skill') and len(rel.split('/')) == 2 and
+                                        rel.lower().endswith('/skill.md')) or \
+                (kind == 'plugin' and (rel == 'SKILL.md' or rel.startswith('commands/') or
+                                       (rel.startswith('skills/') and rel.lower().endswith('/skill.md')))):
+            commands_skills.add(item['path'])
+    for manifest in expanded:
+        if manifest['kind'] != 'plugin' or manifest['relative'] != '.claude-plugin/plugin.json':
+            continue
+        data = strict_json(manifest['raw'], 'plugin.json')
+        for role in ('commands', 'skills'):
+            value = data.get(role)
+            if value is None:
+                continue
+            if role == 'commands' and isinstance(value, dict):
+                for entry in value.values():
+                    if not isinstance(entry, dict):
+                        raise Unclear('plugin commands map の形が違う')
+                    if entry.get('source') is not None:
+                        commands_skills.update(part['path'] for part in held_reference(
+                            expanded, manifest['root'], entry['source']))
+                continue
+            refs = [value] if isinstance(value, str) else value
+            if not isinstance(refs, list):
+                raise Unclear('plugin component の参照の形が違う')
+            for ref in refs:
+                for part in held_reference(expanded, manifest['root'], ref, directory=True):
+                    rel = part['relative'].lower()
+                    if (role == 'commands' and rel.endswith('.md')) or \
+                            (role == 'skills' and (rel == 'skill.md' or rel.endswith('/skill.md'))):
+                        commands_skills.add(part['path'])
+    return agents - commands_skills
+
+
+def checked_component_security(components):
+    expanded = component_manifests(components)
+    agent_paths = plugin_agent_only_paths(components)
+    for item in expanded:
+        if item['kind'] == 'marketplace-manifest':
+            continue
+        rel = item['relative']
+        if rel == '.claude-plugin/plugin.json' or rel.endswith(MANIFEST_SUFFIX):
+            manifest_security(item, expanded)
+            manifest_grants(item['raw'])
+        elif rel.lower().endswith('.md') or rel.endswith('/hooks.json') or rel == 'hooks.json' or \
+                re.search(r'(?:^|/)(?:mods|modules)/[^/]+\.(?:[cm]?[jt]s|tsx?)\Z', rel):
+            component_security(item['raw'], rel, item['path'] in agent_paths)
+    strict_plugin_mcp(expanded)
+
+
+def component_policy(state_path, expected):
+    components = verified_components(state_path, expected)
+    checked_component_security(components)
+    namespace = component_namespace(components)
+    settings = verified_host_settings(state_path, expected)
+    namespace = apply_user_skill_off(namespace, settings)
+    agent_preloads(components, namespace)
+    fixed = fixed_host_policy(namespace)
+    assert_fixed_policy(settings, fixed)
+    namespace = apply_user_skill_off(namespace, {'user': fixed})
+    component_digest = verified_component_digest(state_path, expected)
+    return {'component_sha256': component_digest,
+            'policy_sha256': policy_digest(component_digest, namespace, fixed),
+            'namespace': namespace, 'fixed': fixed}
+
+
+def manifest_reference(item, components, ref):
+    if not isinstance(ref, str) or not manifest_paths_ok(ref):
+        raise Unclear('component manifest の参照が root 内相対パスでない')
+    prefix = item['relative'][:-len('.claude-plugin/plugin.json')]
+    while ref.startswith('./'):
+        ref = ref[2:]
+    return held_reference(components, item['root'], prefix + ref)
+
+
+def manifest_security(item, components):
+    data = strict_json(item['raw'], 'component manifest')
+    if not isinstance(data, dict):
+        raise Unclear('component manifest が対応表でない')
+    def hooks(value):
+        if value in (None, {}, [], ''):
+            return
+        refs = [value] if isinstance(value, str) else value
+        if not isinstance(refs, list) or not all(isinstance(ref, str) for ref in refs):
+            raise Unclear('component hooks に非空実行定義がある')
+        for ref in refs:
+            held = manifest_reference(item, components, ref)
+            if len(held) != 1:
+                raise Unclear('component hooks の参照を一意に解決できない')
+            value = strict_json(held[0]['raw'], 'component hooks')
+            if value not in (None, {}, [], {'hooks': {}}, {'hooks': []}):
+                raise Unclear('component hooks の参照先に非空実行定義がある')
+    def walk(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                name = normalized_yaml_key(key)
+                if name == 'hooks':
+                    hooks(child)
+                elif name == 'modules' and child not in (None, {}, [], ''):
+                    raise Unclear('component modules が空でない')
+                else:
+                    walk(child)
+        elif isinstance(value, list):
+            for child in value:
+                walk(child)
+    walk(data)
+
+
+def strict_plugin_mcp(components):
+    """MCP は実行せず、同一 root の保持済み JSON 参照だけを検査する。"""
+    manifests = [item for item in components if item['relative'] == '.claude-plugin/plugin.json' or
+                 item['relative'].endswith(MANIFEST_SUFFIX)]
+    covered = {item['root'] for item in manifests if item['relative'] == '.claude-plugin/plugin.json'}
+    # manifest 無しの plugin も default MCP の保持済み宣言は同じ検査を通す。
+    for item in components:
+        if item['kind'] == 'plugin' and item['root'] not in covered:
+            manifests.append(dict(item, relative='.claude-plugin/plugin.json', raw=b'{}'))
+            covered.add(item['root'])
+    for item in manifests:
+        data = strict_json(item['raw'], 'plugin.json')
+        seen = set()
+        def refs(value):
+            if value in (None, {}, []):
+                return
+            if isinstance(value, str):
+                reference(value)
+            elif isinstance(value, list) and all(isinstance(ref, str) for ref in value):
+                for ref in value:
+                    reference(ref)
+            elif isinstance(value, dict):
+                if set(value) == {'mcpServers'}:
+                    refs(value['mcpServers'])
+                    return
+                for server in value.values():
+                    if not isinstance(server, dict):
+                        raise Unclear('plugin MCP の server が対応表でない')
+                    for key in ('source', 'config'):
+                        if key in server:
+                            reference(server[key])
+            else:
+                raise Unclear('plugin MCP の形が違う')
+        def reference(ref):
+            if not isinstance(ref, str) or not ref.startswith('./') or ref in seen:
+                raise Unclear('plugin MCP の参照が root 内相対でないか循環している')
+            seen.add(ref)
+            held = manifest_reference(item, components, ref)
+            if len(held) != 1:
+                raise Unclear('plugin MCP の参照先が一意でない')
+            refs(strict_json(held[0]['raw'], 'plugin MCP'))
+        refs(data.get('mcpServers'))
+        prefix = item['relative'][:-len('.claude-plugin/plugin.json')]
+        defaults = [part for part in components if part['root'] == item['root'] and part['relative'] == prefix + '.mcp.json']
+        for part in defaults:
+            refs(strict_json(part['raw'], 'plugin MCP'))
+
+
+def component_policy_output(policy):
+    """loop に渡す固定 schema。component path・raw init・account 情報を混ぜない。"""
+    namespace = policy['namespace']
+    return {'version': 1, 'resolver_version': RESOLVER_VERSION, 'component_sha256': policy['component_sha256'],
+            'policy_sha256': policy['policy_sha256'], 'fixed': policy['fixed'],
+            'loaded_commands': namespace['loaded_commands'],
+            'invocation_routes': namespace['invocation_routes'],
+            'invocation_names': namespace['invocation_names'], 'lookup_names': namespace['lookup_names'],
+            'model_invocation_names': namespace['model_invocation_names'],
+            'public_names': namespace['public_names']}
+
+
+def sanitize_init(raw, expected_public):
+    """init の最小 schema を検証し、保存可能な名前だけを返す。raw は保存しない。"""
+    value = strict_json(raw, 'init')
+    if not isinstance(value, dict) or set(value) - {'type', 'subtype', 'skills'}:
+        raise Stop('init の形が違う')
+    if value.get('type') != 'init' or not isinstance(value.get('skills'), list):
+        raise Stop('init の形が違う')
+    names = []
+    for item in value['skills']:
+        name = item if isinstance(item, str) else None
+        if not isinstance(name, str) or not NAME.fullmatch(name) or name in names:
+            raise Stop('init の skill 名の形が違う')
+        names.append(name)
+    if set(names) != set(expected_public):
+        raise Stop('init の公開 skill 名が検査済み component と違う')
+    return {'init_schema': INIT_SCHEMA_VERSION, 'public_names': sorted(names)}
+
+
+def sanitize_supervisor(raw, expected_public):
+    """host stdout から、prove に必要な result と検査済み init 名だけを保存形へ縮約する。"""
+    value = strict_json(raw, 'supervisor')
+    stream = value if isinstance(value, list) else [value]
+    if not all(isinstance(item, dict) for item in stream):
+        raise Stop('supervisor の出力の形が違う')
+    init_items = [item for item in stream if item.get('type') == 'init' or
+                  (item.get('type') == 'system' and item.get('subtype') == 'init')]
+    results = [item for item in stream if item.get('type') == 'result']
+    if len(init_items) != 1 or len(results) != 1:
+        raise Stop('supervisor の init または result が一意でない')
+    init = sanitize_init(json.dumps({'type': 'init', 'skills': init_items[0].get('skills')},
+                                    ensure_ascii=True).encode(), expected_public)
+    result = results[0]
+    if type(result.get('is_error')) is not bool:
+        raise Stop('supervisor の result の形が違う')
+    clean = {'type': 'result', 'is_error': result['is_error']}
+    denials = result.get('permission_denials', [])
+    if not isinstance(denials, list):
+        raise Stop('supervisor の permission_denials の形が違う')
+    clean_denials = []
+    for denial in denials:
+        if not isinstance(denial, dict) or not isinstance(denial.get('tool_name'), str) or \
+                not isinstance(denial.get('tool_input'), dict):
+            raise Stop('supervisor の permission_denials の形が違う')
+        # probe_judge が使う Write と file_path のみ。host の補助情報や account/id は残さない。
+        if denial['tool_name'] != 'Write':
+            continue
+        tool_input = denial['tool_input']
+        if not isinstance(tool_input.get('file_path'), str):
+            raise Stop('supervisor の permission_denials の形が違う')
+        if denial['tool_name'] == 'Write':
+            clean_denials.append({'tool_name': 'Write', 'tool_input': {'file_path': tool_input['file_path']}})
+    clean['permission_denials'] = clean_denials
+    return {'init': init, 'result': clean}
+
+
+def read_bounded_stdin(limit=MAX_TEXT):
+    raw = sys.stdin.buffer.read(limit + 1)
+    if len(raw) > limit:
+        raise Stop('init の出力が読み取り上限を超える')
+    return raw
+
+
+SENSITIVE_COMPONENT_KEYS = frozenset(('hooks', 'mcpservers', 'permissionmode', 'modules'))
+
+
+def normalized_yaml_key(value):
+    return re.sub(r'[-_]', '', value).lower()
+
+
+def component_frontmatter_security(raw, label, allow_plugin_agent_mcp=False):
+    fields = component_fields(raw)
+    for key in ('hooks', 'modules', 'mcpservers', 'permissionmode'):
+        if key not in fields:
+            continue
+        value = fields[key]
+        if allow_plugin_agent_mcp and key in ('hooks', 'mcpservers', 'permissionmode'):
+            continue
+        if key != 'permissionmode' and value in ('', '{}', '[]', 'null', '~'):
+            continue
+        if key == 'permissionmode' and scalar(value) in ('default', 'manual', 'acceptEdits', 'plan', 'dontAsk'):
+            continue
+        raise Unclear('component の ' + key + ' が許可された空値または mode でない')
+
+
 def manifest_paths_ok(value):
     """マニフェストのパスの指定(文字列か文字列の列)が、installPath の中の相対パスだけか。"""
     paths = [value] if isinstance(value, str) else value
     if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
         return False
-    return all(p and not p.startswith('/') and '..' not in p.replace('\\', '/').split('/') for p in paths)
+    return all(p and not p.startswith('/') and '\\' not in p and '\x00' not in p and
+               '..' not in p.split('/') for p in paths)
+
+
+def marketplace_security(component):
+    """選択済み marketplace entry が保持した registry に一意に載ることを確かめる。"""
+    data = strict_json(component['raw'], 'marketplace.json')
+    selected = component.get('entry')
+    if not isinstance(data, dict) or not isinstance(data.get('plugins'), list) or not isinstance(selected, list) or not selected:
+        raise Unclear('選択 marketplace entry を解釈できない')
+    selected_plugins = set()
+    for item in selected:
+        if not isinstance(item, dict) or set(item) != {'plugin', 'entry'} or not isinstance(item['plugin'], str) or \
+                not isinstance(item['entry'], dict) or item['plugin'] in selected_plugins:
+            raise Unclear('選択 marketplace entry を解釈できない')
+        selected_plugins.add(item['plugin'])
+        canonical = json.dumps(item['entry'], ensure_ascii=True, sort_keys=True, separators=(',', ':'))
+        matches = [known for known in data['plugins'] if isinstance(known, dict) and
+                   json.dumps(known, ensure_ascii=True, sort_keys=True, separators=(',', ':')) == canonical]
+        if len(matches) != 1:
+            raise Unclear('選択 marketplace entry が一意でない')
+        source = item['entry'].get('source')
+        if source is not None and not manifest_paths_ok(source):
+            raise Unclear('marketplace source が相対パスでない')
+        if 'strict' in item['entry'] and not isinstance(item['entry']['strict'], bool):
+            raise Unclear('marketplace entry の strict が真偽値でない')
+        # 非空 inline 入口は参照解決を待たずに拒否する。
+        for key in ('hooks', 'modules'):
+            value = item['entry'].get(key)
+            if value not in (None, {}, [], '') and not (key == 'hooks' and manifest_paths_ok(value)):
+                raise Unclear('marketplace entry の実行入口が空でない')
+
+
+def component_security(raw, label, allow_plugin_agent_mcp=False):
+    """追加定義の実行入口を、値を展開・実行せず fail closed で判定する。"""
+    component_frontmatter_security(raw, label, allow_plugin_agent_mcp)
+    normalized_label = label.replace('\\', '/')
+    if normalized_label.endswith('/hooks.json') or normalized_label == 'hooks.json':
+        value = strict_json(raw, 'hooks.json')
+        if value not in ({}, [], None, {'hooks': {}}, {'hooks': []}):
+            raise Unclear('hooks.json が空でない')
+    if re.search(r'(?:^|/)(?:mods|modules)/[^/]+\.(?:[cm]?[jt]s|tsx?)\Z', normalized_label):
+        raise Unclear('component の mod module を実行しない')
+    if label.endswith('plugin.json'):
+        value = strict_json(raw, 'plugin.json')
+        if not isinstance(value, dict):
+            raise Unclear('plugin.json が対応表でない')
+        def entries(item, trail='plugin.json'):
+            if isinstance(item, dict):
+                for key, child in item.items():
+                    here = trail + '.' + str(key)
+                    normalized = normalized_yaml_key(str(key))
+                    if normalized in ('hooks', 'modules') and child not in (None, [], {}, ''):
+                        raise Unclear(f'{here} が空でない')
+                    if normalized == 'mcpservers' and not isinstance(child, (dict, list, type(None))):
+                        raise Unclear(f'{here} の形が違う')
+                    entries(child, here)
+            elif isinstance(item, list):
+                for number, child in enumerate(item):
+                    entries(child, trail + '[' + str(number) + ']')
+        entries(value)
 
 
 def manifest_grants(raw):
@@ -947,10 +1867,7 @@ def manifest_grants(raw):
     ホスト(2.1.289 を静的に読んだ)は、`commands` が対応表のとき、項目の `allowedTools` を `,` でつないで
     allowed-tools にし、インラインの `content` も frontmatter として読む。パスの指定は installPath の中だけを許す
     (外を指すと、控えにも検査にも入らない)。返り値は [(見出し, 規則の列)]。"""
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        raise Unclear('plugin.json を JSON として読めない') from None
+    data = strict_json(raw, 'plugin.json')
     if not isinstance(data, dict):
         raise Unclear('plugin.json が対応表でない')
     out = []
@@ -964,19 +1881,20 @@ def manifest_grants(raw):
             raise Unclear(f'plugin.json の {field} の形が違うか、installPath の外を指す')
         for name, item in value.items():
             if not isinstance(item, dict):
-                raise Unclear(f'plugin.json の commands の項目 {one_line(name, 60)} が対応表でない')
+                raise Unclear(f'plugin.json の commands の項目 が対応表でない')
             source = item.get('source')
             if source is not None and not manifest_paths_ok(source):
-                raise Unclear(f'plugin.json の commands の項目 {one_line(name, 60)} の source が installPath の外を指す')
+                raise Unclear(f'plugin.json の commands の項目 の source が installPath の外を指す')
             if 'allowedTools' in item:
                 tools = item['allowedTools']
                 if not isinstance(tools, list) or not all(isinstance(t, str) for t in tools):
-                    raise Unclear(f'plugin.json の commands の項目 {one_line(name, 60)} の allowedTools が文字列の列でない')
+                    raise Unclear(f'plugin.json の commands の項目 の allowedTools が文字列の列でない')
                 out.append((f'commands.{name}.allowedTools', split_both(','.join(tools))))
             if 'content' in item:
                 content = item['content']
                 if not isinstance(content, str):
-                    raise Unclear(f'plugin.json の commands の項目 {one_line(name, 60)} の content が文字列でない')
+                    raise Unclear(f'plugin.json の commands の項目 の content が文字列でない')
+                component_security(content.encode('utf-8'), 'inline-command.md')
                 rules = frontmatter_grants(content.encode('utf-8'))
                 if rules is not None:
                     out.append((f'commands.{name}.content', rules))
@@ -985,14 +1903,12 @@ def manifest_grants(raw):
 
 def grants(state_path, expected, user_settings, allowed_tools, classifier=False):
     value = load_state(state_path, expected)
-    entries = value['entries']
-    user_dirs = [d for d in value.get('specs', {}).get('user_directories', []) if isinstance(d, str)]
     allow = []
     for v in allowed_tools:
         try:
             allow += split_both(v)  # ホストは ' ' と ',' だけで区切る。タブ・改行を含む値は読み方が分かれる
         except Unclear:
-            raise Stop(f'--allowed-tools の値の切り方がホストと違う(タブ・改行・入れ子の括弧など): {one_line(v, 120)}') from None
+            raise Stop('--allowed-tools の値の切り方がホストと違う(タブ・改行・入れ子の括弧など)') from None
     settings = verified_host_settings(state_path, expected)
     if not os.path.isabs(user_settings) or user_settings != settings['user_settings']:
         raise Stop('利用者の設定のパスが保持した絶対パスと違う')
@@ -1004,30 +1920,34 @@ def grants(state_path, expected, user_settings, allowed_tools, classifier=False)
     copy = value.get('copy')
     files = problems = 0
     lines = []
-    for key in sorted(entries):
-        entry = entries[key]
-        # ホストは .md を大文字小文字を区別せずに読む。plugin のマニフェストも合成の元になる
-        manifest = key.endswith(MANIFEST_SUFFIX) or key == 'plugin/.claude-plugin/plugin.json'
-        if not (key.lower().endswith('.md') or manifest) or not isinstance(entry, list) or entry[:1] != ['file']:
-            continue
-        if key.startswith('plugin/') and isinstance(copy, str):
-            shown, raw = key, read_regular(copy + key[len('plugin'):], MAX_TEXT)
-        elif key.startswith('installed:'):
-            # 控えは有効な plugin の installPath ごとにだけ installed: の項目を作る(正規化した字面)ので、すべて調べる
-            shown = key[len('installed:'):]
-            raw = read_regular(shown, MAX_TEXT)
-        elif key.startswith('external:'):
-            shown = key[len('external:'):]
-            base = next((d for d in user_dirs if shown.startswith(d.rstrip('/') + '/')), None)
-            if base is None:
+    components = verified_components(state_path, expected)
+    # bundled plugin は snapshot が作った private copy を保持している。外部の
+    # installPath を再読取する旧経路は使わない。
+    if isinstance(copy, str):
+        for key, entry in value.get('entries', {}).items():
+            if not key.startswith('plugin/') or not isinstance(entry, list) or entry[:1] != ['file']:
                 continue
-            raw = read_logical(shown, entries, base.rstrip('/'))
-        else:
+            raw = read_regular(copy + key[len('plugin'):], MAX_TEXT)
+            if sha256(raw) != entry[2]:
+                raise Stop(f'控えた時から内容が変わった: {one_line(key, 300)}')
+            components.append({'key': key, 'kind': 'plugin', 'root': copy, 'relative': key[len('plugin/'):],
+                               'path': copy + key[len('plugin'):], 'raw': raw})
+    checked_component_security(components)
+    agent_paths = plugin_agent_only_paths(components)
+    if any('skills' in component_fields(item['raw']) for item in plugin_agents(components)):
+        agent_preloads(components, component_namespace(components))
+    for component in sorted(component_manifests(components), key=lambda item: item['key']):
+        shown, raw, relative = component['path'], component['raw'], component['relative']
+        # host は .md を大文字小文字を区別せずに読む。manifest は active
+        # marketplace に限り component reader が返す。
+        normalized_relative = relative.replace('\\', '/')
+        manifest = normalized_relative == '.claude-plugin/plugin.json' or normalized_relative.endswith(MANIFEST_SUFFIX)
+        if not (relative.lower().endswith('.md') or manifest):
             continue
-        if sha256(raw) != entry[2]:
-            raise Stop(f'控えた時から内容が変わった: {one_line(shown, 300)}')
         files += 1
         try:
+            if not manifest:
+                component_security(raw, relative, component['path'] in agent_paths)
             if manifest:
                 groups = manifest_grants(raw)
             else:
@@ -1036,13 +1956,12 @@ def grants(state_path, expected, user_settings, allowed_tools, classifier=False)
             found = [(label, judge_rules(rules, allow, classifier)) for label, rules in groups]
         except Unclear as exc:
             problems += 1
-            lines.append(f'{one_line(shown, 300)}: allowed-tools を解釈できない({exc})')
+            lines.append(f"kind={component['kind']}: allowed-tools を解釈できない")
             continue
         for label, wider in found:
-            where = f'{one_line(shown, 300)}{" の " + one_line(label, 80) if label else ""}'
             for rule in wider:
                 problems += 1
-                lines.append(f'{where}: allowed-tools の {one_line(rule, 120)} が許可リストより広い')
+                lines.append(f"kind={component['kind']}: allowed-tools が許可リストより広い")
     if problems:
         raise Stop('skill・command の allowed-tools が無人の周の権限を広げうる:\n' + '\n'.join(lines[:50]))
     return files
@@ -1057,20 +1976,33 @@ def main(argv=None):
     c = sub.add_parser('proof-get')
     for name in ('--store', '--identity', '--shape'):
         c.add_argument(name, required=True)
+    c.add_argument('--component-sha256')
+    c.add_argument('--policy-sha256')
     c = sub.add_parser('proof-match')
     for name in ('--store', '--identity', '--shape', '--version-file', '--help-file'):
         c.add_argument(name, required=True)
+    c.add_argument('--component-sha256', required=True)
+    c.add_argument('--policy-sha256', required=True)
     c = sub.add_parser('probe-judge')
     for name in ('--out', '--permlog', '--target'):
         c.add_argument(name, required=True)
     c = sub.add_parser('proof-write')
-    for name in ('--store', '--identity', '--shape', '--version-file', '--help-file', '--probe', '--plugin-version'):
+    for name in ('--store', '--identity', '--shape', '--version-file', '--help-file', '--probe', '--plugin-version',
+                 '--component-sha256', '--policy-sha256', '--init-evidence'):
         c.add_argument(name, required=True)
+    c.add_argument('--public-name', action='append', default=[])
+    c.add_argument('--resolver-version', required=True, type=int)
     c = sub.add_parser('grants')
     for name in ('--state', '--expect-sha256', '--user-settings'):
         c.add_argument(name, required=True)
     c.add_argument('--allowed-tools', action='append', default=[])
     c.add_argument('--classifier', action='store_true')
+    c = sub.add_parser('component-policy')
+    for name in ('--state', '--expect-sha256'):
+        c.add_argument(name, required=True)
+    c = sub.add_parser('init-sanitize')
+    for name in ('--state', '--expect-sha256'):
+        c.add_argument(name, required=True)
     a = p.parse_args(argv)
     try:
         if a.command == 'identity':
@@ -1078,10 +2010,12 @@ def main(argv=None):
         elif a.command == 'same':
             same(a.host, parse_identity(a.identity), a.hash)
         elif a.command == 'proof-get':
-            path, value = load_proof(a.store, parse_identity(a.identity), a.shape)
+            path, value = load_proof(a.store, parse_identity(a.identity), a.shape,
+                                     a.component_sha256, a.policy_sha256)
             print(path)
         elif a.command == 'proof-match':
-            path, value = proof_match(a.store, parse_identity(a.identity), a.shape, a.version_file, a.help_file)
+            path, value = proof_match(a.store, parse_identity(a.identity), a.shape, a.version_file, a.help_file,
+                                      a.component_sha256, a.policy_sha256)
             print(f"{path}\t{one_line(value.get('host_version', ''), 120)}\t{one_line(value['probe'].get('date', ''), 40)}")
         elif a.command == 'probe-judge':
             print(json.dumps(probe_judge(a.out, a.permlog, a.target), sort_keys=True))
@@ -1089,10 +2023,20 @@ def main(argv=None):
             probe = json.loads(a.probe)
             if not isinstance(probe, dict):
                 raise Stop('確認の結果の形が違う')
-            print(proof_write(a.store, parse_identity(a.identity), a.shape, a.version_file, a.help_file, probe, a.plugin_version))
+            init_evidence = strict_json(a.init_evidence.encode('utf-8'), 'init の縮約証拠')
+            print(proof_write(a.store, parse_identity(a.identity), a.shape, a.version_file, a.help_file, probe,
+                              a.plugin_version, a.component_sha256, a.policy_sha256, a.public_name,
+                              a.resolver_version, init_evidence))
         elif a.command == 'grants':
             files = grants(a.state, a.expect_sha256, a.user_settings, a.allowed_tools, a.classifier)
             print(f"files={files} yaml={'on' if yaml_loader() else 'off'}")
+        elif a.command == 'component-policy':
+            print(json.dumps(component_policy_output(component_policy(a.state, a.expect_sha256)),
+                             ensure_ascii=True, sort_keys=True))
+        elif a.command == 'init-sanitize':
+            policy = component_policy(a.state, a.expect_sha256)
+            print(json.dumps(sanitize_supervisor(read_bounded_stdin(), policy['namespace']['public_names']),
+                             ensure_ascii=True, sort_keys=True))
         return 0
     except Missing as exc:
         print(f'ERROR [host-check] 証明が無い: {exc}', file=sys.stderr)
