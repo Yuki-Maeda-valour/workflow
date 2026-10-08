@@ -23,7 +23,7 @@
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
-# 変異テスト(L・14 個): 対象の写しに sed で変異を 1 つ当て(対象側の目印 `# MUT:a`〜`# MUT:n`)、
+# 変異テスト(L・18 個): 対象の写しに sed で変異を 1 つ当て(対象側の目印 `# MUT:a`〜`# MUT:p` と `# MUT:q`)、
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
 # FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした変異は
 # それ自体を FAIL にする。変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
@@ -63,6 +63,8 @@ REAL_GIT="$(command -v git)"
 [ -n "$REAL_GIT" ] || { echo "ERROR: git が無い" >&2; exit 1; }
 REAL_CP="$(command -v cp)"
 [ -n "$REAL_CP" ] || { echo "ERROR: cp が無い" >&2; exit 1; }
+REAL_SHA256SUM="$(command -v sha256sum)"
+[ -n "$REAL_SHA256SUM" ] || { echo "ERROR: sha256sum が無い" >&2; exit 1; }
 
 REAL_HOME="${HOME:-}"
 if [ -z "$REAL_HOME" ] || [ ! -d "$REAL_HOME" ]; then
@@ -219,6 +221,16 @@ rune() {
   mark_timeout
   show "$@"
 }
+# HOME / XDG_CONFIG_HOME の未設定も検査する。空文字と同じ env row に畳み込まない。
+rune_unset_home_xdg() { # 残りは rune と同じ(VAR=値 … -- 引数)
+  local envs=()
+  while [ $# -gt 0 ] && [ "$1" != "--" ]; do envs[${#envs[@]}]="$1"; shift; done
+  shift
+  RC=0
+  guard env -u HOME -u XDG_CONFIG_HOME "${envs[@]}" bash "$TARGET" "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout
+  show "$@"
+}
 
 rc_is() { # 時間切れは「期待コードとの不一致」ではなく、外側タイムアウトと分かる形で出す
   if [ "$RC" = "$2" ]; then ok "$1"
@@ -294,8 +306,10 @@ flip() { case "$1" in *0) printf '%s1' "${1%?}" ;; *) printf '%s0' "${1%?}" ;; e
 STUBS="$WORK/stubs"
 TRACE="$WORK/trace.log"
 GITLOG="$WORK/gitcalls.log"
+HASHLOG="$WORK/hashcalls.log"
 : >"$TRACE"
 : >"$GITLOG"
+: >"$HASHLOG"
 # 実行されたら痕跡を書く汎用スタブ(fsmonitor・diff.external・フックに使う)。stdin は読まない。
 # 痕跡の置き場は環境変数ではなく埋め込みにする(環境が渡らずに「痕跡 0」になる偽陰性を避ける)
 cat >"$STUBS/trace.sh" <<EOF
@@ -322,6 +336,19 @@ printf '%s\n' "\$*" >>"$GITLOG"
 exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$STUBS/gitlog/git"
+# 設定本文の hash を始める前に単体上限で止めることを、渡された stdin の byte 数で観測する。
+mkdir -p "$STUBS/hashlog"
+cat >"$STUBS/hashlog/sha256sum" <<EOF
+#!/usr/bin/env bash
+tmp="\$(mktemp \"$WORK/hash-input.XXXXXX\")" || exit 1
+cat >"\$tmp" || { rm -f -- "\$tmp"; exit 1; }
+wc -c <"\$tmp" | tr -d ' ' >>"$HASHLOG"
+"$REAL_SHA256SUM" <"\$tmp"
+rc=\$?
+rm -f -- "\$tmp"
+exit "\$rc"
+EOF
+chmod +x "$STUBS/hashlog/sha256sum"
 # status だけを失敗させる git(5 要素の再取得の途中で git が想定外に失敗する状況を作る)
 mkdir -p "$STUBS/gitfail"
 cat >"$STUBS/gitfail/git" <<EOF
@@ -332,8 +359,23 @@ done
 exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$STUBS/gitfail/git"
+# config parser/effective-origin 出力を上限より 1 byte 多くする。writer 側は reader の閉鎖で止まり、
+# guard は主出力を 200 MiB より大きく書かずに internal で停止しなければならない。
+mkdir -p "$STUBS/gitlarge-parser" "$STUBS/gitlarge-effective"
+cat >"$STUBS/gitlarge-parser/git" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = --file ] && { head -c 209715201 /dev/zero; exit 0; }; done
+exec "$REAL_GIT" "\$@"
+EOF
+cat >"$STUBS/gitlarge-effective/git" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do [ "\$a" = --show-origin ] && { head -c 209715201 /dev/zero; exit 0; }; done
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUBS/gitlarge-parser/git" "$STUBS/gitlarge-effective/git"
 trace_n() { wc -l <"$TRACE" | tr -d ' '; }
 gitlog_n() { wc -l <"$GITLOG" | tr -d ' '; }
+hashlog_size_n() { grep -cx -- "$1" "$HASHLOG" || true; }
 
 # ════════════════════════ A 起動構文 ════════════════════════
 case_A1() {
@@ -518,7 +560,7 @@ case_B4() {
   ckeq "clean: 保護領域の直下のレイアウト(作業用の一時領域を残さない)" "$(ls -A "$STATE_DIR" | LC_ALL=C sort | tr '\n' ' ')" \
     'files manifest.tsv snapshot taskmd-body '
   ckeq "clean: snapshot のレイアウト" "$(ls "$STATE_DIR/snapshot" | LC_ALL=C sort | tr '\n' ' ')" \
-    '1-diff.bin 2-status.z 4-meta.txt 5-stash.txt config-origins.txt taskmd.txt '
+    '1-diff.bin 2-status.z 4-meta.txt 5-stash.txt 6-contexts.txt config-contexts.txt config-origins.txt taskmd.txt '
   ckt "clean: 4-meta.txt に head・index-tree・branch・hooks・config が在る" \
     ine "$STATE_DIR/snapshot/4-meta.txt" "^branch${TAB}refs/heads/main\$"
   ckt "clean: 4-meta.txt に refs 全体が在る" ine "$STATE_DIR/snapshot/4-meta.txt" "^ref${TAB}[0-9a-f]{40} refs/heads/main\$"
@@ -2120,6 +2162,15 @@ case_L() {
   mutant l "① から -c diff.autoRefreshIndex=false を外す" "B1" '/# MUT:l$/d'
   mutant m "保護領域の候補の .. の正規化を外す" "C9 C10" '/# MUT:m$/d'
   mutant n "origin 固有検査だけを外す" "M2" '/# MUT:n$/d'
+  mutant o "明示 GLOBAL root の候補化を外す" "M11" '/# MUT:o$/s/enqueue_config_path "\$GIT_CONFIG_GLOBAL"/true/'
+  mutant p "設定本文の累積読取上限を外す" "M23" '/# MUT:p$/d'
+  mutant r "実効Gitの予定読取予約を外す" "M24" '/# MUT:r$/d'
+  mutant w "隔離parserでHOMEをscratchへ置換する" "N11" '/# MUT:w$/c\  home_env=("HOME=$CONFIG_PARSE_CWD") # MUT:w'
+  mutant s "生成設定とmetadataの有限予約を外す" "N4" '/# MUT:s$/s/reserve_config_bytes "\$GENERATED_COST"/:/'
+  mutant u "明示子Gitの設定予約を外す" "N5" '/# MUT:u$/s/reserve_config_bytes "\${CTX_MAIN_COST\[\$1\]}"/:/'
+  mutant v "親内の暗黙子refs読取予約を外す" "N5" '/# MUT:v$/d'
+  mutant t "新selector rootの再登録停止を外す" "N2" '/# MUT:t$/d'
+  mutant q "再帰 include の解析を外す" "M7" '/# MUT:q$/s/parse_candidate_includes "\$CAND_LOGICAL" "\$CAND_HAD_LINK"/true/'
 }
 
 # ════════════════════════ M 開始時の設定 origin ════════════════════════
@@ -2219,16 +2270,29 @@ case_M4() {
   mkdir -p "$R/config/actual" "$R/config/alias"
   # symlink の中にある相対 include は、実体の親ではなく alias の親を基準に Git が解決する。
   printf '[include]\n path = next.inc\n' >"$R/config/actual/entry.inc"
+  printf '[include]\n path = lower.inc\n' >"$R/config/actual/dormant.inc"
   printf '[demo]\n value = ORIGIN_SECRET_219\n' >"$R/config/alias/next.inc"
+  printf '[demo]\n value = inactive-alias\n' >"$R/config/alias/lower.inc"
   printf '[demo]\n value = wrong-place\n' >"$R/config/actual/next.inc"
+  printf '[demo]\n value = inactive-wrong-place\n' >"$R/config/actual/lower.inc"
   ln -s ../actual/entry.inc "$R/config/alias/entry.inc"
+  ln -s ../actual/dormant.inc "$R/config/alias/dormant.inc"
   GIT "$R" config include.path ../config/alias/entry.inc
+  GIT "$R" config includeIf.onbranch:never.path ../config/alias/dormant.inc
   take "$R" task/t.md
   rc_is "相対 include + symlink + 多段: take" 0
   run compare "${ARGS[@]}" --run-rc 0
   rc_is "相対 include + symlink + 多段: 無変更成功" 0
   printf '[demo]\n value = changed\n' >"$R/config/alias/next.inc"
   origin_rejected "Git が読む alias 側の多段 include"
+  printf '[demo]\n value = ORIGIN_SECRET_219\n' >"$R/config/alias/next.inc"
+  run config-check "${ARGS[@]}"
+  rc_is "相対 include + symlink + 多段: 復元後の config-check" 0
+  out_line "相対 include + symlink + 多段: config-check CONFIG=same" 'CONFIG=same'
+  out_line "相対 include + symlink + 多段: config-check GIT_SKIPPED=no" 'GIT_SKIPPED=no'
+  ckeq "相対 include + symlink + 多段: config-check stderr 空" "$(wc -c <"$CASE_ERR")" 0
+  printf '[demo]\n value = inactive-changed\n' >"$R/config/alias/lower.inc"
+  origin_rejected "Git が読まない alias 側の相対 include"
 
   base_repo m4linked
   local main="$R" linked="$WORK/m4-linked"
@@ -2298,40 +2362,62 @@ case_M6() {
 case_M7() {
   CID=M7; TAG=""
   base_repo m7
-  mkdir -p "$STUBS/originbad"
-  cat >"$STUBS/originbad/git" <<EOF
-#!/usr/bin/env bash
-for arg in "\$@"; do
-  if [ "\$arg" = --name-only ]; then
-    case "\$ORIGIN_BAD_MODE" in
-      odd) printf 'file:.git/config\\0' ;;
-      partial) printf 'file:.git/config\\0core.bare\\0truncated' ;;
-      emptykey) printf 'file:.git/config\\0\\0' ;;
-      emptyorigin) printf '\\0core.bare\\0' ;;
-      empty) : ;;
-      unknown) printf 'blob:HEAD:config\\0core.bare\\0' ;;
-      error) printf 'ORIGIN_SECRET_219\\n' >&2; exit 1 ;;
-    esac
-    exit 0
-  fi
-done
-exec "$REAL_GIT" "\$@"
-EOF
-  chmod +x "$STUBS/originbad/git"
-  local mode before="$(nstates)"
-  for mode in odd partial emptykey emptyorigin empty unknown error; do
-    rune ORIGIN_BAD_MODE="$mode" PATH="$STUBS/originbad:$PATH" -- take --cwd "$R" --task-md task/t.md
-    rc_is "origin 列挙 $mode を成功扱いしない" 20
-    ckeq "origin 列挙 $mode: 作りかけを残さない" "$(nstates)" "$before"
-    ckf "origin 列挙 $mode: Git stderr 値を転記しない" inf "$CASE_ERR" ORIGIN_SECRET_219
-  done
-  rune GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.fsmonitor GIT_CONFIG_VALUE_0= -- take --cwd "$R" --task-md task/t.md
-  rc_is "利用者の同名 command-line origin を捨てない" 20
-  rune "GIT_CONFIG_PARAMETERS='core.fsmonitor='" -- take --cwd "$R" --task-md task/t.md
-  rc_is "PARAMETERS の同名 command-line origin を捨てない" 20
-  rune GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=private.token GIT_CONFIG_VALUE_0=ORIGIN_SECRET_219 -- take --cwd "$R" --task-md task/t.md
-  rc_is "未知 command-line key を捨てない" 20
-  ckf "command-line 由来の値を診断へ出さない" inf "$CASE_ERR" ORIGIN_SECRET_219
+  mkdir -p "$R/settings"
+  GIT "$R" config include.path ../settings/dormant.inc
+  take "$R" task/t.md
+  rc_is "欠落 include: take" 0
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "欠落 include: config-check は成功" 0
+  out_line "欠落 include: CONFIG=same" 'CONFIG=same'
+  out_line "欠落 include: 隔離Git使用" 'GIT_SKIPPED=no'
+  ckne "欠落 include: 隔離 Git を使用" "$(gitlog_n)" 0
+  printf '[core]\n fsmonitor = %s\n' "$STUBS/trace.sh" >"$R/settings/dormant.inc"
+  : >"$GITLOG"; : >"$TRACE"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "欠落 include の新設: config-check は33" 33
+  out_line "欠落 include の新設: config-changed" 'REASON=config-changed'
+  out_line "欠落 include の新設: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "欠落 include の新設: Git 0 回" "$(gitlog_n)" 0
+  ckeq "欠落 include の新設: 実行痕跡0" "$(trace_n)" 0
+
+  base_repo m7-inactive
+  mkdir -p "$R/settings"
+  printf '[include]\n path = lower.inc\n' >"$R/settings/dormant.inc"
+  printf '# comment only\n' >"$R/settings/lower.inc"
+  GIT "$R" config includeIf.onbranch:later.path ../settings/dormant.inc
+  take "$R" task/t.md
+  rc_is "不成立 include の下位候補: take" 0
+  printf '[core]\n fsmonitor = %s\n' "$STUBS/trace.sh" >"$R/settings/lower.inc"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "不成立 include の下位変更: config-check は33" 33
+  out_line "不成立 include の下位変更: config-changed" 'REASON=config-changed'
+  out_line "不成立 include の下位変更: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "不成立 include の下位変更: Git 0 回" "$(gitlog_n)" 0
+
+  base_repo m7-missing-parent
+  mkdir -p "$R/settings"
+  GIT "$R" config include.path ../settings/new/deeper.inc
+  take "$R" task/t.md
+  rc_is "欠落親: take" 0
+  mkdir "$R/settings-real"
+  ln -s ../settings-real "$R/settings/new"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "欠落親を symlink 化: config-check は33" 33
+  out_line "欠落親を symlink 化: config-changed" 'REASON=config-changed'
+  ckeq "欠落親を symlink 化: Git 0 回" "$(gitlog_n)" 0
+
+  base_repo m7-missing-parent-control
+  mkdir -p "$R/settings"
+  GIT "$R" config include.path ../settings/new/deeper.inc
+  take "$R" task/t.md
+  rc_is "欠落親の通常 directory 対照: take" 0
+  mkdir "$R/settings/new"
+  run config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "欠落親の通常 directory 対照: config-check は成功" 0
+  out_line "欠落親の通常 directory 対照: CONFIG=same" 'CONFIG=same'
 }
 case_M8() {
   CID=M8; TAG=""
@@ -2373,11 +2459,825 @@ case_M10() { # 同内容の通常ファイル再作成は許可し、内容変�
   mv "$R/settings/replacement.inc" "$R/settings/active.inc"
   origin_rejected "末端通常ファイル: 内容変更を伴う atomic replace"
 }
+case_M11() { # root の明示空と system の実選択を、実ホスト外の環境だけで確認する
+  CID=M11; TAG=""
+  local ehome="$WORK/root-home" exdg="$WORK/root-xdg" system="$WORK/root-system" global="$WORK/root-global" system_supported=0
+  mkdir -p "$ehome" "$exdg" "$system"
+
+  base_repo m11-empty
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+  rc_is "GLOBAL/SYSTEM 明示空: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "GLOBAL/SYSTEM 明示空: 不変なら成功" 0
+  out_line "GLOBAL/SYSTEM 明示空: CONFIG=same" 'CONFIG=same'
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "GLOBAL 明示空の設定/未設定変更: Git前に拒否" 33
+  out_line "GLOBAL 明示空の設定/未設定変更: Git未起動" 'GIT_SKIPPED=yes'
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m11-global
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" "GIT_CONFIG_GLOBAL=$global" GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+  rc_is "欠落の明示GLOBAL: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  printf '[core]\n fsmonitor = %s\n' "$STUBS/trace.sh" >"$global"
+  : >"$GITLOG"; : >"$TRACE"
+  rune "PATH=$STUBS/gitlog:$PATH" "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" "GIT_CONFIG_GLOBAL=$global" GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "欠落の明示GLOBAL新設: Git前に拒否" 33
+  out_line "欠落の明示GLOBAL新設: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "欠落の明示GLOBAL新設: Git 0 回" "$(gitlog_n)" 0
+  ckeq "欠落の明示GLOBAL新設: 実行痕跡0" "$(trace_n)" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m11-system
+  # 同じGitの機能をscratch環境で確かめ、未対応は契約どおり拒否をassertする。
+  if GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM=/dev/null GIT "$R" var GIT_CONFIG_SYSTEM >/dev/null 2>&1; then system_supported=1; fi
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_GLOBAL= "GIT_CONFIG_SYSTEM=$system/missing/../chosen.conf" GIT_CONFIG_NOSYSTEM=0 -- take --cwd "$R" --task-md task/t.md
+  if [ "$system_supported" -eq 0 ]; then
+    rc_is "system実選択取得が未対応: takeを拒否" 20
+    out_lacks "system実選択取得が未対応: stateを返さない" 'STATE_DIR='
+    return
+  fi
+  rc_is "system missing/../実選択: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_GLOBAL= "GIT_CONFIG_SYSTEM=$system/missing/../chosen.conf" GIT_CONFIG_NOSYSTEM=0 -- config-check "${ARGS[@]}"
+  rc_is "system missing/../実選択: 不変なら成功" 0
+  printf '[core]\n fsmonitor = %s\n' "$STUBS/trace.sh" >"$system/chosen.conf"
+  : >"$GITLOG"; : >"$TRACE"
+  rune "PATH=$STUBS/gitlog:$PATH" "XDG_STATE_HOME=$PROT" "HOME=$ehome" "XDG_CONFIG_HOME=$exdg" GIT_CONFIG_GLOBAL= "GIT_CONFIG_SYSTEM=$system/missing/../chosen.conf" GIT_CONFIG_NOSYSTEM=0 -- config-check "${ARGS[@]}"
+  rc_is "system 実選択leaf新設: Git前に拒否" 33
+  out_line "system 実選択leaf新設: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "system 実選択leaf新設: Git 0 回" "$(gitlog_n)" 0
+  ckeq "system 実選択leaf新設: 実行痕跡0" "$(trace_n)" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_M12() { # 同じ include key の重複は実値だけを数え、2,000 件まで受け入れる
+  CID=M12; TAG=""
+  local i
+  base_repo m12-normal
+  mkdir "$R/settings"
+  printf '# ordinary include\n' >"$R/settings/same.inc"
+  printf '[include]\n' >>"$R/.git/config"
+  for ((i=0; i<2000; i++)); do printf '\tpath = ../settings/same.inc\n' >>"$R/.git/config"; done
+  take "$R" task/t.md
+  rc_is "重複 key の実値 2,000 件: take" 0
+  run config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "重複 key の実値 2,000 件: config-check" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m12-over
+  mkdir "$R/settings"
+  printf '# ordinary include\n' >"$R/settings/same.inc"
+  printf '[include]\n' >>"$R/.git/config"
+  for ((i=0; i<2001; i++)); do printf '\tpath = ../settings/same.inc\n' >>"$R/.git/config"; done
+  take "$R" task/t.md
+  rc_is "重複 key の実値 2,001 件: take は内部停止" 20
+}
+case_M13() { # parser の異常と循環を安全に停止し、通常対照は通す
+  CID=M13; TAG=""
+  base_repo m13-normal
+  mkdir "$R/settings"
+  printf '# ordinary include\n' >"$R/settings/plain.inc"
+  GIT "$R" config include.path ../settings/plain.inc
+  take "$R" task/t.md
+  rc_is "parser 通常対照: take" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m13-invalid
+  printf '[include\n path = malformed\n' >>"$R/.git/config"
+  take "$R" task/t.md
+  rc_is "parser 構文異常: take は安全に縮退" 30
+
+  base_repo m13-cycle
+  mkdir "$R/settings"
+  printf '[include]\n path = b.inc\n' >"$R/settings/a.inc"
+  printf '[include]\n path = a.inc\n' >"$R/settings/b.inc"
+  GIT "$R" config include.path ../settings/a.inc
+  take "$R" task/t.md
+  rc_is "include 循環: take は安全に縮退" 30
+}
+case_M14() { # HOME/XDG の未設定と空を区別し、通常の fallback も候補に残す
+  CID=M14; TAG=""
+  local h="$WORK/m14-home" x="$WORK/m14-xdg"
+  mkdir -p "$h/.config/git" "$x/git"
+  : >"$h/.gitconfig"; : >"$h/.config/git/config"; : >"$x/git/config"
+
+  base_repo m14-empty
+  rune "XDG_STATE_HOME=$PROT" HOME= XDG_CONFIG_HOME= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+  rc_is "HOME/XDG とも空: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune "XDG_STATE_HOME=$PROT" HOME= XDG_CONFIG_HOME= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "HOME/XDG とも空: 同一環境" 0
+  rune_unset_home_xdg "XDG_STATE_HOME=$PROT" GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "HOME/XDG 空から未設定: 拒否" 33
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m14-home
+  rune "XDG_STATE_HOME=$PROT" "HOME=$h" XDG_CONFIG_HOME= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+  rc_is "HOME の fallback: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune "XDG_STATE_HOME=$PROT" "HOME=$h" XDG_CONFIG_HOME= GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "HOME の fallback: 同一環境" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m14-xdg
+  rune "XDG_STATE_HOME=$PROT" HOME= "XDG_CONFIG_HOME=$x" GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+  rc_is "XDG の fallback: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune "XDG_STATE_HOME=$PROT" HOME= "XDG_CONFIG_HOME=$x" GIT_CONFIG_GLOBAL= GIT_CONFIG_SYSTEM= -- config-check "${ARGS[@]}"
+  rc_is "XDG の fallback: 同一環境" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_M15() { # 非成立 include の有限な循環は収集でき、実効化される循環は Git が止める
+  CID=M15; TAG=""
+  base_repo m15-inactive-cycle
+  mkdir "$R/settings"
+  printf '[include]\n path = ../settings/b.inc\n' >"$R/settings/a.inc"
+  printf '[include]\n path = ../settings/../settings/a.inc\n' >"$R/settings/b.inc"
+  GIT "$R" config includeIf.onbranch:never.path ../settings/a.inc
+  take "$R" task/t.md
+  rc_is "非成立 include の有限 cycle: take" 0
+  run config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "非成立 include の有限 cycle: config-check" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_M16() { # config.worktree も root として Git 前に照合する
+  CID=M16; TAG=""
+  base_repo m16-worktree
+  printf '[demo]\n value = before\n' >"$R/.git/config.worktree"
+  take "$R" task/t.md
+  rc_is "config.worktree root: take" 0
+  printf '[demo]\n value = changed\n' >"$R/.git/config.worktree"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "config.worktree root の変更: config-check は33" 33
+  out_line "config.worktree root の変更: Git未起動" 'GIT_SKIPPED=yes'
+  ckeq "config.worktree root の変更: Git 0 回" "$(gitlog_n)" 0
+}
+case_M17() { # parser と実効 origin の出力は書込み中に 200 MiB を超えない
+  CID=M17; TAG=""
+  base_repo m17-parser
+  runp "$STUBS/gitlarge-parser" take --cwd "$R" --task-md task/t.md
+  rc_is "parser 出力 200 MiB 超: take は内部停止" 20
+  err_has "parser 出力 200 MiB 超: 値を診断へ出さない" '設定の出典を安全に収集・保存できない'
+
+  base_repo m17-effective
+  runp "$STUBS/gitlarge-effective" take --cwd "$R" --task-md task/t.md
+  rc_is "effective origin 出力 200 MiB 超: take は内部停止" 20
+  err_has "effective origin 出力 200 MiB 超: 値を診断へ出さない" '設定の出典を安全に収集・保存できない'
+}
+case_M18() { # dangling symlink の解決先で親だけ通常 directory 化しても、末端欠落は維持できる
+  CID=M18; TAG=""
+  base_repo m18-dangling-parent
+  mkdir "$R/settings"
+  ln -s "$R/target-parent/sub/config" "$R/settings/alias.inc"
+  GIT "$R" config --add include.path ../settings/alias.inc
+  take "$R" task/t.md
+  rc_is "dangling include: take" 0
+  mkdir -p "$R/target-parent/sub"
+  run config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "dangling の通常親新設・末端欠落: config-check は成功" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_M19() { # 非成立 include の symlink 経由の有限 cycle は同じ解決文脈で打ち切る
+  CID=M19; TAG=""
+  base_repo m19-inactive-symlink-cycle
+  mkdir "$R/settings"
+  printf '[include]\n path = again/a.inc\n' >"$R/settings/a.inc"
+  ln -s . "$R/settings/again"
+  GIT "$R" config includeIf.onbranch:never.path ../settings/a.inc
+  take "$R" task/t.md
+  rc_is "非成立 symlink cycle: take" 0
+  run cleanup --state "$STATE_DIR"
+
+  # 通常の自己参照も Git が読まない非成立条件なら同じく正常に収集できる。
+  rm "$R/settings/again"
+  printf '[include]\n path = a.inc\n' >"$R/settings/a.inc"
+  take "$R" task/t.md
+  rc_is "非成立の通常自己参照: take" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_M20() { # 相対 XDG_CONFIG_HOME は cwd と toplevel の両文脈で候補化する
+  CID=M20; TAG=""
+  base_repo m20-relative-xdg
+  mkdir -p "$WORK/relative-xdg/git"
+  printf '[demo]\n value = xdg-relative\n' >"$WORK/relative-xdg/git/config"
+  # このスイートの cwd は $WORK。GIT_CONFIG_GLOBAL を未設定にして Git 自身と同じ XDG root を読む。
+  RC=0
+  guard env -u GIT_CONFIG_GLOBAL "XDG_STATE_HOME=$PROT" "HOME=$WORK/home-m20" XDG_CONFIG_HOME=relative-xdg GIT_CONFIG_SYSTEM=/dev/null bash "$TARGET" take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout
+  show take
+  rc_is "相対 XDG_CONFIG_HOME: take" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  RC=0
+  guard env -u GIT_CONFIG_GLOBAL "XDG_STATE_HOME=$PROT" "HOME=$WORK/home-m20" XDG_CONFIG_HOME=relative-xdg GIT_CONFIG_SYSTEM=/dev/null bash "$TARGET" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout
+  show config-check
+  rc_is "相対 XDG_CONFIG_HOME: config-check" 0
+  run cleanup --state "$STATE_DIR"
+}
+
+case_M21() { # .git が開始時から directory symlink の通常構成も許し、差替えは Git 前に拒否する
+  CID=M21; TAG=""
+  base_repo m21-admin-link
+  mv "$R/.git" "$R/admin-real"
+  ln -s admin-real "$R/.git"
+  take "$R" task/t.md
+  rc_is ".git directory symlink: take 正常" 0
+  : >"$GITLOG"; : >"$TRACE"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"
+  rc_is ".git directory symlink: config-check 正常" 0
+  out_line ".git directory symlink: config-check CONFIG=same" 'CONFIG=same'
+  out_line ".git directory symlink: config-check GIT_SKIPPED=no" 'GIT_SKIPPED=no'
+  ckeq ".git directory symlink: config-check stderr 空" "$(wc -c <"$CASE_ERR")" 0
+  ckne ".git directory symlink: config-check の 隔離 Git を使用" "$(gitlog_n)" 0
+  : >"$GITLOG"; : >"$TRACE"
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
+  rc_is ".git directory symlink: compare 正常" 0
+  out_line ".git directory symlink: compare RESULT=normal" 'RESULT=normal'
+  ckeq ".git directory symlink: compare stderr 空" "$(wc -c <"$CASE_ERR")" 0
+  # 同じ内容の別 directory でも入口 link の字面/identityが変われば本文/Git前に止まる。
+  cp -a "$R/admin-real" "$R/admin-other"
+  rm "$R/.git"; ln -s admin-other "$R/.git"
+  origin_rejected ".git directory symlink 差替え"
+  run cleanup --state "$STATE_DIR"
+}
+case_M22() { # 同じ実体でも alias 親が異なれば、論理候補は両方を解析する
+  CID=M22; TAG=""
+  local order
+  for order in alias-first actual-first; do
+    base_repo "m22-$order"
+    mkdir -p "$R/config/actual" "$R/config/alias"
+    printf '[includeIf "onbranch:never"]\n path = next.inc\n' >"$R/config/actual/entry.inc"
+    printf '[core]\n editor = true\n' >"$R/config/alias/next.inc"
+    printf '[core]\n editor = true\n' >"$R/config/actual/next.inc"
+    ln -s "$R/config/actual/entry.inc" "$R/config/alias/entry.inc"
+    printf '[includeIf "onbranch:later"]\n path = %s\n' "$R/config/actual/entry.inc" >"$R/config/stage.inc"
+    case "$order" in
+      alias-first)
+        printf '[includeIf "onbranch:never"]\n path = %s\n[include]\n path = %s\n' "$R/config/alias/entry.inc" "$R/config/stage.inc" >>"$R/.git/config" ;;
+      actual-first)
+        printf '[include]\n path = %s\n[includeIf "onbranch:never"]\n path = %s\n' "$R/config/stage.inc" "$R/config/alias/entry.inc" >>"$R/.git/config" ;;
+    esac
+    take "$R" task/t.md
+    rc_is "絶対 symlink alias ($order): take" 0
+    run config-check "${ARGS[@]}"
+    rc_is "絶対 symlink alias ($order): config-check 正常" 0
+    out_line "絶対 symlink alias ($order): CONFIG=same" 'CONFIG=same'
+    out_line "絶対 symlink alias ($order): GIT_SKIPPED=no" 'GIT_SKIPPED=no'
+    ckeq "絶対 symlink alias ($order): config-check stderr 空" "$(wc -c <"$CASE_ERR")" 0
+    printf '[core]\n editor = false\n' >"$R/config/actual/next.inc"
+    origin_rejected "絶対 symlink alias ($order) の実体親の相対 include"
+    run cleanup --state "$STATE_DIR"
+  done
+}
+case_M23() { # 全文を読むたびに上限を数え、同 inode の別候補でも迂回できない
+  CID=M23; TAG=""
+  local bytes=$((12 * 1024 * 1024)) oversized=$((17 * 1024 * 1024)) i unsafe rc=0
+  base_repo m23-normal
+  mkdir "$R/settings"
+  { printf '#'; head -c "$((bytes - 2))" /dev/zero | tr '\000' '#'; printf '\n'; } >"$R/settings/entry.inc"
+  GIT "$R" config includeIf.onbranch:never.path ../settings/entry.inc
+  take "$R" task/t.md
+  rc_is "設定本文予算: 12 MiB の通常候補は take" 0
+  run config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "設定本文予算: 12 MiB の通常候補は config-check" 0
+  { printf '#'; head -c "$((oversized - 2))" /dev/zero | tr '\000' '#'; printf '\n'; } >"$R/settings/entry.inc"
+  : >"$GITLOG"; : >"$HASHLOG"
+  runp "$STUBS/hashlog:$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "設定本文予算: 17 MiB 候補の config-check は33" 33
+  ckeq "設定本文予算: 17 MiB 候補の config-check は Git 0 回" "$(gitlog_n)" 0
+  ckeq "設定本文予算: 17 MiB 候補の config-check は本文 hash 0 回" "$(hashlog_size_n "$oversized")" 0
+  : >"$GITLOG"; : >"$HASHLOG"
+  runp "$STUBS/hashlog:$STUBS/gitlog" compare --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP" --run-rc 0
+  rc_is "設定本文予算: 17 MiB 候補の compare は33" 33
+  ckeq "設定本文予算: 17 MiB 候補の compare は Git 0 回" "$(gitlog_n)" 0
+  ckeq "設定本文予算: 17 MiB 候補の compare は本文 hash 0 回" "$(hashlog_size_n "$oversized")" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo m23-hardlinks
+  mkdir "$R/settings"
+  printf 'settings/\n' >"$R/.gitignore"
+  GIT "$R" add .gitignore
+  GIT "$R" commit -qm 'ignore large config fixtures'
+  { printf '#'; head -c "$((bytes - 2))" /dev/zero | tr '\000' '#'; printf '\n'; } >"$R/settings/entry0.inc"
+  for ((i=1; i<20; i++)); do ln "$R/settings/entry0.inc" "$R/settings/entry$i.inc"; done
+  for ((i=0; i<20; i++)); do GIT "$R" config --add includeIf.onbranch:never.path "../settings/entry$i.inc"; done
+  take "$R" task/t.md
+  rc_is "設定本文予算: 同 inode 20 候補は内部停止" 20
+  err_has "設定本文予算: 値を診断へ出さない" '設定の出典を安全に収集・保存できない'
+
+  # 累積上限を外した旧版だけで作れる state を使い、compare/config-check 自身も 20 候補を
+  # 読む前に止めることを確認する。このスイートが変異 p を対象に動くと、ここで現行 TARGET
+  # も上限なしになるため、33 を返せず変異が検出される。
+  unsafe="$WORK/m23-no-budget.sh"
+  sed '/# MUT:p$/d' "$TARGET" >"$unsafe"
+  bash -n "$unsafe" || { ng "設定本文予算: 比較側 fixture の構文"; return; }
+  RC=0
+  guard_t "$T_SLOW" bash "$unsafe" take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show "旧版 fixture take"
+  rc_is "設定本文予算: 上限なし版だけが20候補の state を作れる" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP"
+  rc_is "設定本文予算: 累積超過 state の config-check は33" 33
+  ckeq "設定本文予算: 累積超過 state の config-check は Git 0 回" "$(gitlog_n)" 0
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" compare --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP" --run-rc 0
+  rc_is "設定本文予算: 累積超過 state の compare は33" 33
+  ckeq "設定本文予算: 累積超過 state の compare は Git 0 回" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+}
+
+case_M24() { # 実効Gitの内部include再読取と、その後の複数Git呼出も同じ予算に含める
+  CID=M24; TAG=""
+  local bytes=$((12 * 1024 * 1024)) i unsafe
+  base_repo m24-active
+  mkdir "$R/settings"
+  printf 'settings/\n' >"$R/.gitignore"
+  GIT "$R" add .gitignore
+  GIT "$R" commit -qm 'ignore large config fixture'
+  { printf '#'; head -c "$((bytes - 2))" /dev/zero | tr '\000' '#'; printf '\n'; } >"$R/settings/entry.inc"
+  for ((i=0; i<18; i++)); do GIT "$R" config --add include.path ../settings/entry.inc; done
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" take --cwd "$R" --task-md task/t.md
+  rc_is "実効設定予算: 同じ12 MiBを18回includeすると停止" 20
+  ckf "実効設定予算: 216 MiBを読む実効一覧Gitは起動しない" inf "$GITLOG" '--show-origin --name-only --includes --list'
+  err_has "実効設定予算: 設定値を診断へ出さない" '設定の出典を安全に収集・保存できない'
+
+  GIT "$R" config --unset-all include.path
+  GIT "$R" config include.path ../settings/entry.inc
+  run take --cwd "$R" --task-md task/t.md
+  rc_is "実効設定予算: 1 includeでも全Git読取の累積超過を止める" 20
+
+  # Git予約だけを外した対照からstateを作る。比較側は一度だけ予算を初期化し、
+  # Git無しの照合・隔離parser・実Gitの予定読取を同じ累積値へ足さなければならない。
+  unsafe="$WORK/m24-no-git-budget.sh"
+  sed '/# MUT:r$/d' "$TARGET" >"$unsafe"
+  RC=0
+  guard_t "$T_SLOW" bash "$unsafe" take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show "Git予約なしfixture take"
+  rc_is "実効設定予算: Git予約なし版は対照stateを作れる" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" compare --cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP" --run-rc 0
+  rc_is "実効設定予算: compareでも全Git予定読取の超過を止める" 33
+  out_line "実効設定予算: compareはretake-failed" 'REASON=retake-failed'
+  ckf "実効設定予算: compareは実repoのindex列挙より前に止まる" inf "$GITLOG" 'ls-files -s -z'
+  run cleanup --state "$STATE_DIR"
+
+  # 条件が不成立の大きな候補は保護するが、実Gitの予定読取には加えない。
+  GIT "$R" config --unset-all include.path
+  GIT "$R" config includeIf.onbranch:never.path ../settings/entry.inc
+  take "$R" task/t.md
+  rc_is "実効設定予算: 非成立12 MiBのtakeは通常成功" 0
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "実効設定予算: 非成立12 MiBのcompareも通常成功" 0
+  run cleanup --state "$STATE_DIR"
+
+  GIT "$R" config --unset-all includeIf.onbranch:never.path
+  GIT "$R" symbolic-ref refs/heads/alias refs/heads/main
+  GIT "$R" symbolic-ref HEAD refs/heads/alias
+  GIT "$R" config includeIf.onbranch:alias.path ../settings/entry.inc
+  take "$R" task/t.md
+  rc_is "実効設定予算: HEADの先の最終symbolic-refで不成立を判定する" 0
+  run compare "${ARGS[@]}" --run-rc 0
+  rc_is "実効設定予算: 最終symbolic-refのcompareも通常成功" 0
+  run cleanup --state "$STATE_DIR"
+
+  GIT "$R" config --unset-all includeIf.onbranch:alias.path
+  GIT "$R" config 'includeIf.hasconfig:remote.*.url:never.path' ../settings/entry.inc
+  run take --cwd "$R" --task-md task/t.md
+  rc_is "実効設定予算: falseのhasconfigもGit内部のURL収集読取に数える" 20
+
+  GIT "$R" config --unset-all 'includeIf.hasconfig:remote.*.url:never.path'
+  ln -s entry.inc "$R/settings/alias.inc"
+  GIT "$R" config include.path ../settings/alias.inc
+  run take --cwd "$R" --task-md task/t.md
+  rc_is "実効設定予算: 末端symlinkもtarget本文の12 MiBで数える" 20
+}
+
+case_M25() { # literal /dev/null は旧Gitでもsystem設定の実選択取得を必要としない
+  CID=M25; TAG=""
+  local flag index_before system_env=()
+  for flag in unset 0 false; do
+    base_repo "m25-$flag"
+    index_before="$(sha_of "$R/.git/index")"
+    if [ "$flag" = unset ]; then system_env=(-u GIT_CONFIG_NOSYSTEM)
+    else system_env=("GIT_CONFIG_NOSYSTEM=$flag"); fi
+    : >"$GITLOG"
+    rune "${system_env[@]}" "PATH=$STUBS/gitlog:$PATH" GIT_CONFIG_SYSTEM=/dev/null -- take --cwd "$R" --task-md task/t.md
+    rc_is "SYSTEM=/dev/null NOSYSTEM=$flag: take" 0
+    ckf "SYSTEM=/dev/null NOSYSTEM=$flag: system実選択取得なし" inf "$GITLOG" 'var GIT_CONFIG_SYSTEM'
+    STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+    ARGS=(--cwd "$R" --state "${STATE_DIR:-$PROT/dev-workflow/guard-none}" --manifest-sha256 "${MAN:-0}" --snapshot-sha256 "${SNAP:-0}")
+    : >"$GITLOG"
+    rune "${system_env[@]}" "PATH=$STUBS/gitlog:$PATH" GIT_CONFIG_SYSTEM=/dev/null -- config-check "${ARGS[@]}"
+    rc_is "SYSTEM=/dev/null NOSYSTEM=$flag: config-check" 0
+    ckne "SYSTEM=/dev/null NOSYSTEM=$flag: config-checkは隔離 Git を使用" "$(gitlog_n)" 0
+    rune "${system_env[@]}" "PATH=$STUBS/gitlog:$PATH" GIT_CONFIG_SYSTEM=/dev/null -- compare "${ARGS[@]}" --run-rc 0
+    rc_is "SYSTEM=/dev/null NOSYSTEM=$flag: compare" 0
+    out_line "SYSTEM=/dev/null NOSYSTEM=$flag: normal" 'RESULT=normal'
+    ckeq "SYSTEM=/dev/null NOSYSTEM=$flag: index不変" "$(sha_of "$R/.git/index")" "$index_before"
+    run cleanup --state "$STATE_DIR"
+  done
+}
+
+# ════════════════════════ N 隔離 selector・子リポジトリ・有限読取予約 ════════════════════════
+subrepo_fixture() { # $1=parent $2=相対path。ネットワークを使わずgitlinkを作る
+  local parent="$1" sub="$1/$2" oid
+  mkdir -p "$sub"
+  GIT "$sub" init -q -b main
+  GIT "$sub" config user.name Guard
+  GIT "$sub" config user.email guard@example.invalid
+  printf 'base\n' >"$sub/file.txt"
+  GIT "$sub" add file.txt; GIT "$sub" commit -qm initial
+  oid="$(GIT "$sub" rev-parse HEAD)"
+  GIT "$parent" update-index --add --cacheinfo "160000,$oid,$2"
+}
+selector_trace_stub() {
+  mkdir -p "$STUBS/selectorlog"
+  cat >"$STUBS/selectorlog/git" <<EOF
+#!/usr/bin/env bash
+printf '%s\\t%s\\n' "\${GIT_DIR:-ORIGINAL}" "\$*" >>"$GITLOG"
+exec "$REAL_GIT" "\$@"
+EOF
+  chmod +x "$STUBS/selectorlog/git"
+}
+selector_only() {
+  out_line "$1: 隔離Gitの使用を表示" 'GIT_SKIPPED=no'
+  ckne "$1: 隔離Gitの実行対照" "$(gitlog_n)" 0
+  ckf "$1: 元repo Gitなし" grep -q '^ORIGINAL' "$GITLOG"
+}
+case_N1() { # parentのdirty抑制後も、子のHEAD・diff・status・stage別OIDを保持する
+  CID=N1; TAG=""
+  base_repo n1
+  subrepo_fixture "$R" child
+  GIT "$R" commit -qm child
+  local sub="$R/child" idx
+  idx="$(sha_of "$sub/.git/index")"
+  take "$R" task/t.md; rc_is "子の通常take" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "子の無変更compare" 0
+  out_line "子の無変更: changeなし" 'WORKTREE_CHANGED=no'
+  ckeq "子indexの生bytesは不変" "$(sha_of "$sub/.git/index")" "$idx"
+  printf 'dirty\n' >"$sub/file.txt"
+  run compare "${ARGS[@]}" --run-rc 1; rc_is "子だけdirty: 引継ぎ" 31
+  out_has "子だけdirty: 明示snapshot" 'CHANGE=submodule'
+  run cleanup --state "$STATE_DIR"
+  printf 'stage-A\n' >"$sub/file.txt"; GIT "$sub" add file.txt
+  printf 'worktree\n' >"$sub/file.txt"
+  take "$R" task/t.md; rc_is "子MMのtake" 0
+  printf 'stage-B\n' >"$sub/file.txt"; GIT "$sub" add file.txt
+  printf 'worktree\n' >"$sub/file.txt"
+  run compare "${ARGS[@]}" --run-rc 1; rc_is "同じMM/diffでもstage OID変更: 引継ぎ" 31
+  out_has "子stage OID変更を検出" 'CHANGE=submodule'
+  run cleanup --state "$STATE_DIR"
+  GIT "$sub" add file.txt; GIT "$sub" commit -qm advanced
+  take "$R" task/t.md; rc_is "進んだ子HEADを再登録" 0
+  GIT "$sub" checkout -qb next
+  run config-check "${ARGS[@]}"; rc_is "子のbranch切替は設定不変" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "子branch切替後compare" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_N2() { # 新rootは隔離検査でretake、既知変更は全Git前に拒否する
+  CID=N2; TAG=""
+  selector_trace_stub
+  base_repo n2-new
+  take "$R" task/t.md; rc_is "新gitlink前take" 0
+  subrepo_fixture "$R" newchild
+  : >"$GITLOG"
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "新gitlinkは再登録必須" 33
+  selector_only "新gitlink"
+  run cleanup --state "$STATE_DIR"
+  take "$R" task/t.md; rc_is "新gitlinkの再登録" 0
+  run config-check "${ARGS[@]}"; rc_is "再登録後は成功" 0
+  printf '\n# changed\n' >>"$R/newchild/.git/config"
+  : >"$GITLOG"
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "既知子config変更は拒否" 33
+  out_line "既知子config変更はGitを省略" 'GIT_SKIPPED=yes'
+  ckeq "既知子config変更はGit 0回" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+  base_repo n2-regular
+  printf 'ordinary\n' >"$R/converted"; GIT "$R" add converted; GIT "$R" commit -qm ordinary
+  take "$R" task/t.md; rc_is "通常indexed fileのtake" 0
+  rm "$R/converted"; mkdir "$R/converted"
+  GIT "$R/converted" init -q -b main
+  : >"$GITLOG"
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "通常fileからnested repoも再登録必須" 33
+  selector_only "通常fileからnested repo"
+  run cleanup --state "$STATE_DIR"
+}
+case_N3() { # .gitmodulesはunmerged→worktree→stage0→HEADの順。blob変更も元Git前に止める
+  CID=N3; TAG=""
+  local oid old tree
+  selector_trace_stub
+  base_repo n3
+  subrepo_fixture "$R" child
+  printf '[submodule "child"]\npath = child\nurl = ./child\n' >"$R/.gitmodules"
+  GIT "$R" add .gitmodules; GIT "$R" commit -qm module
+  old="$(GIT "$R" rev-parse HEAD:.gitmodules)"
+  rm "$R/.gitmodules"
+  take "$R" task/t.md; rc_is "stage0 blobからtake" 0
+  : >"$GITLOG"
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "stage0 blobの再照合" 0
+  selector_only "stage0 blob"
+  printf '[submodule "child"]\npath = child\nurl = ./changed\n' >"$WORK/module-next"
+  oid="$(GIT "$R" hash-object -w "$WORK/module-next")"
+  GIT "$R" update-index --cacheinfo "100644,$oid,.gitmodules"
+  : >"$GITLOG"
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "blob選択OID変更は再登録" 33
+  selector_only "blob変更"
+  run cleanup --state "$STATE_DIR"
+  GIT "$R" update-index --force-remove .gitmodules
+  take "$R" task/t.md; rc_is "HEAD blobからtake" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "HEAD blobからcompare" 0
+  run cleanup --state "$STATE_DIR"
+  # 非空の壊れたworktree本文も、unmergedなら読み込まない。
+  printf 'not valid git config\n' >"$R/.gitmodules"
+  printf '100644 %s 1\t.gitmodules\n100644 %s 2\t.gitmodules\n100644 %s 3\t.gitmodules\n' "$old" "$old" "$oid" | GIT "$R" update-index --index-info
+  take "$R" task/t.md; rc_is "unmerged .gitmodulesは本文を解析せず既存縮退" 30
+  err_has "unmergedは通常の縮退理由" 'unmerged'
+}
+case_N4() { # 有限Fの算術を残額exact/+1で実行し、metadataの二重課金も検出する
+  CID=N4; TAG=""
+  local lib="$WORK/budget-functions.sh" rc
+  sed -n '/^CONFIG_LIMIT=/,/^# Git が実設定を読む前/p' "$TARGET" | sed '$d' >"$lib"
+  RC=0
+  bash -c 'source "$1"; CONFIG_READ_BYTES=$((CONFIG_LIMIT-53)); reserve_generated_config 1 5 1 && [ "$CONFIG_READ_BYTES" -eq "$CONFIG_LIMIT" ]' _ "$lib" || RC=$?
+  rc_is "F=16G+D+32Nの残額exactは成功(32Nは1回)" 0
+  RC=0
+  bash -c 'source "$1"; CONFIG_READ_BYTES=$((CONFIG_LIMIT-32)); reserve_generated_config 0 0 1 && [ "$CONFIG_READ_BYTES" -eq "$CONFIG_LIMIT" ]' _ "$lib" || RC=$?
+  rc_is "metadata単独: 残額32Bは成功" 0
+  RC=0
+  bash -c 'source "$1"; CONFIG_READ_BYTES=$((CONFIG_LIMIT-31)); reserve_generated_config 0 0 1' _ "$lib" || RC=$?
+  ckne "metadata単独: 残額31Bは拒否" "$RC" 0
+  RC=0
+  bash -c 'source "$1"; CONFIG_READ_BYTES=$((CONFIG_LIMIT-52)); reserve_generated_config 1 5 1' _ "$lib" || RC=$?
+  ckne "Fが残額+1byteなら予約前停止" "$RC" 0
+  RC=0
+  bash -c 'source "$1"; CONFIG_READ_BYTES=0; reserve_generated_config 0 0 0 && [ "$CONFIG_READ_BYTES" -eq 0 ] || exit 1; sat_config_mul 209715200 2000; [ "$SAT" -eq 209715201 ]' _ "$lib" || RC=$?
+  rc_is "ゼロFと大きな積の飽和" 0
+  RC=0
+  bash -c 'source "$1"; x=$(printf "%*s" 16777216 ""); write_generated_config "$2" "$x" && [ "$(wc -c <"$2")" -eq 16777216 ] || exit 1; ! write_generated_config "$2" "${x}x"' _ "$lib" "$WORK/generated-boundary" || RC=$?
+  rc_is "生成設定16MiB exactと+1byte拒否" 0
+}
+case_N5() { # 各子configの16G/3G予約を実Git開始前へ置く
+  CID=N5; TAG=""
+  local bytes=$((512 * 1024)) i
+  base_repo n5
+  for ((i=0; i<4; i++)); do subrepo_fixture "$R" "child$i"; done
+  GIT "$R" commit -qm children
+  for ((i=0; i<4; i++)); do
+    { printf '#'; head -c "$((bytes-2))" /dev/zero | tr '\000' '#'; printf '\n'; } >>"$R/child$i/.git/config"
+  done
+  run take --cwd "$R" --task-md task/t.md
+  rc_is "複数子の実設定読取総額で停止" 20
+  ckf "予算停止にstateなし" grep -q '^STATE_DIR=' "$CASE_OUT"
+}
+
+case_N6() { # nested/gitfile/linked/symlinkと相対globalの両cwdを保持する
+  CID=N6; TAG=""
+  local main child gd path idx
+  base_repo n6-nested
+  main="$R"
+  subrepo_fixture "$R" child; subrepo_fixture "$R/child" nested
+  GIT "$R/child" commit -qm nested
+  GIT "$R" add child; GIT "$R" commit -qm child
+  gd="$WORK/n6-child-admin"; mv "$R/child/.git" "$gd"
+  printf 'gitdir: %s\n' "$gd" >"$R/child/.git"
+  take "$R" task/t.md; rc_is "nestedとgitfileのtake" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "nestedとgitfileの通常compare" 0
+  printf 'nested changed\n' >"$R/child/nested/file.txt"
+  run compare "${ARGS[@]}" --run-rc 1; rc_is "nestedのdirtyを明示的に検出" 31
+  run cleanup --state "$STATE_DIR"
+  rm "$R/child/.git"; ln -s "$gd" "$R/child/.git"
+  take "$R" task/t.md; rc_is "子gitdir symlinkのtake" 0
+  run config-check "${ARGS[@]}"; rc_is "子gitdir symlinkのcheck" 0
+  run cleanup --state "$STATE_DIR"
+
+  base_repo n6-linked
+  subrepo_fixture "$R" child
+  GIT "$R/child" worktree add -q -b other "$R/linked"
+  GIT "$R" update-index --add --cacheinfo "160000,$(GIT "$R/linked" rev-parse HEAD),linked"
+  GIT "$R" commit -qm linked
+  take "$R" task/t.md; rc_is "linked childのtake" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "linked childのcompare" 0
+  run cleanup --state "$STATE_DIR"
+
+  printf '[demo]\nvalue = parent\n' >"$R/relative.cfg"
+  printf '[demo]\nvalue = child\n' >"$R/child/relative.cfg"
+  printf '[demo]\nvalue = linked\n' >"$R/linked/relative.cfg"
+  rune GIT_CONFIG_GLOBAL=relative.cfg -- take --cwd "$R" --task-md task/t.md
+  rc_is "相対globalは親と明示子のcwdでtake" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+  rune GIT_CONFIG_GLOBAL=relative.cfg -- config-check "${ARGS[@]}"; rc_is "相対globalの通常check" 0
+  printf '# changed\n' >>"$R/child/relative.cfg"
+  : >"$GITLOG"
+  rune "PATH=$STUBS/gitlog:$PATH" GIT_CONFIG_GLOBAL=relative.cfg -- config-check "${ARGS[@]}"
+  rc_is "子cwdの相対global変更は拒否" 33
+  ckeq "子cwdの相対global変更は全Git前" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+}
+case_N7() { # 未初期化の不在入口と、既知管理pathの削除/置換を区別する
+  CID=N7; TAG=""
+  local oid
+  base_repo n7-uninitialized
+  oid="$(GIT "$R" rev-parse HEAD)"
+  GIT "$R" update-index --add --cacheinfo "160000,$oid,absent"
+  printf '[submodule "absent"]\npath=absent\nurl=./absent\n' >"$R/.gitmodules"
+  GIT "$R" add .gitmodules; GIT "$R" commit -qm absent
+  take "$R" task/t.md; rc_is "未初期化submoduleのtake" 0
+  run config-check "${ARGS[@]}"; rc_is "未初期化の通常check" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "未初期化の通常compare" 0
+  mkdir "$R/absent"
+  run config-check "${ARGS[@]}"; rc_is "不在.gitの親directoryだけは許可" 0
+  GIT "$R/absent" init -q -b main
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "不在.gitの初期化は再登録" 33
+  ckeq "既知不在入口の新設はGit0" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+  base_repo n7-deleted
+  subrepo_fixture "$R" child; GIT "$R" commit -qm child
+  take "$R" task/t.md; rc_is "初期化済みtake" 0
+  mv "$R/child/.git" "$WORK/n7-held-admin"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "既知子.gitの削除は比較不能" 33
+  ckeq "既知子.gitの削除はGit0" "$(gitlog_n)" 0
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0; rc_is "既知子.gitの削除はcompareも33" 33
+  run cleanup --state "$STATE_DIR"
+}
+
+case_N8() { # indexの形式と、selector固有の資源上限を検査する
+  CID=N8; TAG=""
+  local version idx lib="$WORK/selector-boundary.sh"
+  for version in 2 3 4 split sparse; do
+    base_repo "n8-$version"
+    mkdir "$R/kept" "$R/other"
+    printf 'kept\n' >"$R/kept/a"; printf 'other\n' >"$R/other/b"
+    GIT "$R" add kept other; GIT "$R" commit -qm directories
+    case "$version" in
+      split) GIT "$R" update-index --split-index ;;
+      sparse) GIT "$R" sparse-checkout init --cone --sparse-index; GIT "$R" sparse-checkout set kept ;;
+      *) GIT "$R" update-index --index-version "$version" ;;
+    esac
+    idx="$(sha_of "$R/.git/index")"
+    take "$R" task/t.md; rc_is "index $version: take" 0
+    run config-check "${ARGS[@]}"; rc_is "index $version: check" 0
+    run compare "${ARGS[@]}" --run-rc 0; rc_is "index $version: compare" 0
+    ckeq "index $version: bytes不変" "$(sha_of "$R/.git/index")" "$idx"
+    printf 'added\n' >"$R/kept/new"; GIT "$R" add kept/new
+    run config-check "${ARGS[@]}"; rc_is "index $version: 通常git addは許可" 0
+    run cleanup --state "$STATE_DIR"
+  done
+  { sed -n '/^context_new()/,/^}/p' "$TARGET"; sed -n '/^selector_charge_copy()/,/^}/p' "$TARGET"; sed -n '/^selector_charge_path()/,/^}/p' "$TARGET"; } >"$lib"
+  RC=0
+  bash -c 'source "$1"; declare -A CTX_BY_WT=(); CTX_WT=(); context_new /r /g /g -1 1 || exit; for ((n=1;n<2000;n++)); do context_new "/r/$n" /g /g 0 1 || exit; done; [ "${#CTX_WT[@]}" -eq 2000 ] && ! context_new /overflow /g /g 0 1' _ "$lib" || RC=$?
+  rc_is "context 2000成功・2001拒否" 0
+  RC=0
+  bash -c 'source "$1"; declare -A CTX_BY_WT=(); CTX_WT=(); context_new /r /g /g -1 1 || exit; for ((n=1;n<=40;n++)); do context_new "/r/$n" /g /g "$((n-1))" 1 || exit; done; ! context_new /overflow /g /g 40 1' _ "$lib" || RC=$?
+  rc_is "context depth40成功・41拒否" 0
+  RC=0
+  bash -c 'source "$1"; CONFIG_LIMIT=209715200; SELECT_COPY_BYTES=0; selector_charge_copy 209715200 && ! selector_charge_copy 1 && [ "$SELECT_COPY_BYTES" -eq 209715200 ] || exit 1; SELECT_PATH_COUNT=0; for ((n=0;n<2000;n++)); do selector_charge_path || exit; done; ! selector_charge_path' _ "$lib" || RC=$?
+  rc_is "selectorコピー200MiB exact/+1・選択path2000/2001" 0
+}
+case_N9() { # loose/packed blobと16MiB超を、実体化呼出記録で確認する
+  CID=N9; TAG=""
+  local variant oid bytes=$((16*1024*1024+1))
+  for variant in loose packed; do
+    base_repo "n9-$variant"
+    printf '[demo]\nvalue=first\n' >"$R/.gitmodules"
+    GIT "$R" add .gitmodules; GIT "$R" commit -qm first
+    printf '[demo]\nvalue=second\n' >"$R/.gitmodules"
+    GIT "$R" add .gitmodules; GIT "$R" commit -qm second
+    oid="$(GIT "$R" rev-parse HEAD:.gitmodules)"
+    rm "$R/.gitmodules"
+    [ "$variant" != packed ] || GIT "$R" repack -adq
+    : >"$GITLOG"
+    runp "$STUBS/gitlog" take --cwd "$R" --task-md task/t.md
+    rc_is "$variant blobのtake" 0
+    ckeq "$variant blobは一度だけ実体化" "$(grep -c "cat-file blob $oid$" "$GITLOG" || :)" 1
+    STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"
+    run cleanup --state "$STATE_DIR"
+  done
+  base_repo n9-oversized
+  { printf '#'; head -c "$((bytes-2))" /dev/zero | tr '\000' '#'; printf '\n'; } >"$WORK/large-module"
+  oid="$(GIT "$R" hash-object -w "$WORK/large-module")"
+  GIT "$R" update-index --add --cacheinfo "100644,$oid,.gitmodules"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" take --cwd "$R" --task-md task/t.md
+  rc_is "16MiB+1 blobは停止" 20
+  ckt "16MiB+1 blobのmetadataは取得" grep -q "cat-file -s $oid$" "$GITLOG"
+  ckf "16MiB+1 blobは実体化しない" grep -q "cat-file blob $oid$" "$GITLOG"
+}
+
+case_N10() { # .gitmodules通常fileの変更・同内容source切替も候補検査が先に止める
+  CID=N10; TAG=""
+  base_repo n10
+  printf '[demo]\nvalue = stable\n' >"$R/.gitmodules"
+  GIT "$R" add .gitmodules; GIT "$R" commit -qm module
+  cp "$R/.gitmodules" "$WORK/n10-content"
+  take "$R" task/t.md; rc_is "worktree .gitmodulesのtake" 0
+  printf '[demo]\nvalue = changed\n' >"$R/.gitmodules"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "worktree .gitmodules本文変更は33" 33
+  ckeq "worktree .gitmodules本文変更はGit0" "$(gitlog_n)" 0
+  cp "$WORK/n10-content" "$R/.gitmodules"
+  run config-check "${ARGS[@]}"; rc_is "同内容の通常file復元は正常" 0
+  rm "$R/.gitmodules"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "同内容でもfile→blobは33" 33
+  ckeq "file→blobはGit0" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+  take "$R" task/t.md; rc_is "blobで再登録" 0
+  cp "$WORK/n10-content" "$R/.gitmodules"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "同内容でもblob→fileは33" 33
+  ckeq "blob→fileはGit0" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+}
+
+case_N11() { # ~/の実targetを候補化する。空・欠落・不成立でも変更を全Git前に止める
+  CID=N11; TAG=""
+  local mode leaf key
+  for mode in active empty missing inactive-file inactive-empty inactive-missing; do
+    base_repo "n11-$mode"
+    leaf="$HOME/n11-$mode.inc"
+    case "$mode" in
+      active|inactive-file) printf '[demo]\nvalue = stable\n' >"$leaf" ;;
+      empty|inactive-empty) : >"$leaf" ;;
+      missing|inactive-missing) rm -f "$leaf" ;;
+    esac
+    case "$mode" in inactive-*) key=includeIf.onbranch:never.path ;; *) key=include.path ;; esac
+    GIT "$R" config "$key" "~/n11-$mode.inc"
+    take "$R" task/t.md; rc_is "~/ $mode: take" 0
+    run config-check "${ARGS[@]}"; rc_is "~/ $mode: 通常check" 0
+    run compare "${ARGS[@]}" --run-rc 0; rc_is "~/ $mode: 通常compare" 0
+    printf '[demo]\nvalue = changed\n' >"$leaf"
+    : >"$GITLOG"
+    runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "~/ $mode: 実target変更check33" 33
+    out_line "~/ $mode: checkはGitを省略" 'GIT_SKIPPED=yes'
+    ckeq "~/ $mode: check Git0" "$(gitlog_n)" 0
+    origin_rejected "~/ $mode: 実target変更compare"
+    run cleanup --state "$STATE_DIR"
+  done
+}
+case_N12() { # HOME未設定/空と~userのGit自身のpath展開を維持する
+  CID=N12; TAG=""
+  local username expanded rel mode root_value
+  base_repo n12-user
+  mkdir "$R/settings"
+  printf '[demo]\nvalue = user\n' >"$R/settings/user.inc"
+  username="$(id -un)"
+  # accountのhomeを照会するだけで、その下の設定は開かない。実targetはscratch内へ戻す。
+  expanded="$(GIT "$R" -c "guard.home=~$username" config --type=path --get guard.home)"
+  ckt "~user展開の同Git対照は絶対path" test "${expanded#/}" != "$expanded"
+  rel="$(realpath --relative-to="$expanded" "$R/settings/user.inc")"
+  root_value="~$username/$rel"
+  GIT "$R" config include.path "$root_value"
+  for mode in set unset empty; do
+    case "$mode" in
+      set) run take --cwd "$R" --task-md task/t.md ;;
+      unset) rune_unset_home_xdg "XDG_STATE_HOME=$PROT" -- take --cwd "$R" --task-md task/t.md ;;
+      empty) rune "HOME=" "XDG_STATE_HOME=$PROT" -- take --cwd "$R" --task-md task/t.md ;;
+    esac
+    rc_is "~user HOME=$mode: take" 0
+    STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+    ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
+    case "$mode" in
+      set) run config-check "${ARGS[@]}" ;;
+      unset) rune_unset_home_xdg "XDG_STATE_HOME=$PROT" -- config-check "${ARGS[@]}" ;;
+      empty) rune "HOME=" "XDG_STATE_HOME=$PROT" -- config-check "${ARGS[@]}" ;;
+    esac
+    rc_is "~user HOME=$mode: check" 0
+    case "$mode" in
+      set) run compare "${ARGS[@]}" --run-rc 0 ;;
+      unset) rune_unset_home_xdg "XDG_STATE_HOME=$PROT" -- compare "${ARGS[@]}" --run-rc 0 ;;
+      empty) rune "HOME=" "XDG_STATE_HOME=$PROT" -- compare "${ARGS[@]}" --run-rc 0 ;;
+    esac
+    rc_is "~user HOME=$mode: compare" 0
+    run cleanup --state "$STATE_DIR"
+  done
+  # HOMEが空なら~/absolute-scratchは/absolute-scratchへ展開される。
+  GIT "$R" config include.path "~$R/settings/user.inc"
+  rune "HOME=" "XDG_STATE_HOME=$PROT" -- take --cwd "$R" --task-md task/t.md
+  rc_is "HOME空の~/は元Gitと同じ絶対target" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; run cleanup --state "$STATE_DIR"
+  # HOME未設定で~/はGit自身も展開不能。scratch HOMEへ代替せず停止する。
+  rune_unset_home_xdg "XDG_STATE_HOME=$PROT" -- take --cwd "$R" --task-md task/t.md
+  ckne "HOME未設定の~/を成功扱いしない" "$RC" 0
+}
 
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-J1 J2 J3 J4 J5 J6 J7 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 L"
+	J1 J2 J3 J4 J5 J6 J7 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0
