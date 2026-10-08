@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.24.8
+
+### 修正
+
+- 外部実装の開始前に、全設定 root と include/includeIf の空・コメントだけ・欠落・不成立の先も保持する。本文の変更や新設、親・リンクの差替えを Git の再取得前に検出する。通常の条件切替、同内容の通常ファイル再作成、欠落した親ディレクトリだけの新設は維持する。
+- `config-check` は既知設定を Git 無しで照合し、その後で隔離 Git により submodule と `.gitmodules` の使用先を確認する。成功時は `CONFIG=same`・`GIT_SKIPPED=no` を返す。既知の通常設定変更は exit 33・`GIT_SKIPPED=yes`。新 root・blob 不一致は元 repo の Git と `--precheck` より先に exit 33 で止め、隔離 Git を使った場合は `GIT_SKIPPED=no` とする。
+- 新規 submodule の設定 root は人の確認と `take` による再登録を必要とする。通常の `git add`・HEAD/branch の進行を維持し、既存 submodule の HEAD・stage 別 OID・diff・status を明示的に比べる。旧 state の設定検査は停止するが、手動回復と片付けは維持する。
+- 設定入力の単体 16 MiB・累積 200 MiB を読取前に予約する。Git 内部の再走査と子 repo、選択した `.gitmodules` 本文、生成設定を含める。候補・include 値・使用先・repo 文脈は各 2,000 件、リンクと repo 文脈の深さは各 40 段まで。正常な不成立先を含む回帰を追加した。
+- 隔離 parser でも `HOME` の設定有無と値を保ち、`~/`・`~user` と相対 include を同じ Git で展開する。Git 2.34.1 の明示 `GIT_CONFIG_SYSTEM=/dev/null` に不要な機能照会をしない。取得が必要な system パスを返せない場合の停止は維持する。
+- Linux の Ubuntu Git 2.34.1 と Git 2.51.0 のソースと隔離試験を根拠にする。初回の管理パス特定の信頼境界、同 UID の競合、全 object I/O と未知の Git 内部動作の非保証は残る。旧 bash 実体と macOS は今回の実測に含めない。[Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) は品質検証の停止・コピー保持を扱う別途検証。([Issue #230](https://github.com/Yuki-Maeda-valour/workflow/issues/230)、親 #77)
+
 ## v4.24.7
 
 ### 修正
