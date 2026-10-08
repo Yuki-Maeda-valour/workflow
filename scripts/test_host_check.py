@@ -606,10 +606,10 @@ class GrantsTests(Base):
                    '--user-settings', self.cfg / 'settings.json', *extra, env=self.env)
 
     def test_safe_user_skill_and_settings_allow(self):
-        self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read\n')
+        self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read(docs/**)\n')
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(git log *)']}}))
         self.skill(self.cfg / 'skills', 'git', 'allowed-tools: Bash(git log --oneline *)\n')
-        p = self.grants(self.boot(), '--allowed-tools', 'Read')
+        p = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertRegex(p.stdout, r'^files=\d+ yaml=(on|off)$')
 
@@ -686,15 +686,15 @@ class GrantsTests(Base):
                         {'content': '---\nallowed-tools: Bash\n---\nbody'}):
             with self.subTest(command=command):
                 self.market_fixture(command)
-                result = self.grants(self.boot(), '--allowed-tools', 'Read')
+                result = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
                 self.assertEqual(result.returncode, 20, result.stderr)
 
     def test_marketplace_map_only_names_reach_cli_and_inactive_is_ignored(self):
-        for command in ({'content': 'body', 'allowedTools': ['Read']}, {'source': './private/entry.md'}):
+        for command in ({'content': 'body', 'allowedTools': ['Read(docs/**)']}, {'source': './private/entry.md'}):
             with self.subTest(command=command):
                 self.market_fixture(command)
                 receipt = self.boot()
-                result = self.grants(receipt, '--allowed-tools', 'Read')
+                result = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
                 self.assertEqual(result.returncode, 0, result.stderr)
                 result = self.policy(receipt)
                 self.assertEqual(result.returncode, 0, result.stderr)
@@ -731,7 +731,7 @@ class GrantsTests(Base):
 
     def test_rejected_grant_diagnostics_do_not_disclose_rule_values(self):
         self.skill(self.cfg / 'skills', 'bad', 'allowed-tools: Bash(SECRET_SENTINEL)\n')
-        result = self.grants(self.boot(), '--allowed-tools', 'Read')
+        result = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(result.returncode, 20)
         self.assertNotIn('SECRET_SENTINEL', result.stderr)
         self.assertIn('kind=personal-skill', result.stderr)
@@ -785,7 +785,7 @@ class GrantsTests(Base):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.grants(receipt).returncode, 0)
         agent.write_text('---\nallowed-tools: Bash\n---\nbody')
-        self.assertEqual(self.grants(self.boot(), '--allowed-tools', 'Read').returncode, 20)
+        self.assertEqual(self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)').returncode, 20)
 
     def test_manifestless_plugin_default_mcp_references_are_held(self):
         plug = self.base / 'cache/p/1.0'
@@ -819,7 +819,7 @@ class GrantsTests(Base):
                 else:
                     path.write_bytes(previous)
         self.market_fixture({'content': 'body', 'allowedTools': ['Bash(SECRET)']})
-        result = self.grants(self.boot(), '--allowed-tools', 'Read')
+        result = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(result.returncode, 20)
         self.assertNotIn('SECRET', result.stderr)
 
@@ -917,7 +917,7 @@ class GrantsTests(Base):
                          'permissionMode: bypassPermissions\nskills: [dev-workflow:a]\n---\nbody')
         receipt = self.boot()
         self.assertEqual(self.policy(receipt).returncode, 0)
-        result = self.grants(receipt, '--allowed-tools', 'Read')
+        result = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(result.returncode, 0, result.stderr)
         agent.write_text('---\nskills: [unknown]\n---\nbody')
         result = self.policy(self.boot())
@@ -953,12 +953,12 @@ class GrantsTests(Base):
     def test_cli_values_split_like_the_host(self):
         self.skill(self.cfg / 'skills', 'push', 'allowed-tools: Bash(git push:*)\n')
         receipt = self.boot()
-        for value in ('Read\tBash', 'Read\nBash(git *)'):
+        for value in ('Read(docs/**)\tBash', 'Read(docs/**)\nBash(git *)'):
             with self.subTest(value=repr(value)):
                 p = self.grants(receipt, '--allowed-tools', value)
                 self.assertEqual(p.returncode, 20, p.stdout)
                 self.assertIn('--allowed-tools の値の切り方', p.stderr)
-        p = self.grants(receipt, '--allowed-tools', 'Read Bash(git push:*)')
+        p = self.grants(receipt, '--allowed-tools', 'Read(docs/**) Bash(git push:*)')
         self.assertEqual(p.returncode, 0, p.stderr)
 
     def test_settings_rules_with_spaces_do_not_widen(self):
@@ -986,12 +986,12 @@ class GrantsTests(Base):
             ({'name': 'p', 'commands': {'x': {'source': '/etc/x.md'}}}, 20, 'installPath の外'),
             ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'description': 'ok'}}}, 0, ''),
             ({'name': 'p', 'commands': ['./commands/x.md'], 'skills': './skills'}, 0, ''),
-            ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'allowedTools': ['Read']}}}, 0, ''),
+            ({'name': 'p', 'commands': {'x': {'source': './commands/x.md', 'allowedTools': ['Read(docs/**)']}}}, 0, ''),
         ]
         for manifest, rc, text in cases:
             with self.subTest(manifest=manifest):
                 self.manifest_plugin(manifest, ['x.md'])
-                p = self.grants(self.boot(), '--allowed-tools', 'Read')
+                p = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
                 self.assertEqual(p.returncode, rc, p.stderr)
                 self.assertIn(text, p.stderr)
 
@@ -1026,20 +1026,20 @@ class GrantsTests(Base):
 
     def test_canonical_install_link_first_check_and_recheck(self):
         clone = self.base / 'clone/skills'
-        target = self.skill(clone, 'do-task', 'allowed-tools: Read\n')
+        target = self.skill(clone, 'do-task', 'allowed-tools: Read(docs/**)\n')
         os.symlink(target, self.cfg / 'skills/do-task')
         receipt = self.boot()
-        self.assertEqual(self.grants(receipt, '--allowed-tools', 'Read').returncode, 0)
+        self.assertEqual(self.grants(receipt, '--allowed-tools', 'Read(docs/**)').returncode, 0)
         # 正規導入でも、許可を足す frontmatter なら止まる
         bad_target = self.skill(clone, 'evil', 'allowed-tools: Bash(rm *)\n')
         os.symlink(bad_target, self.cfg / 'skills/evil')
-        self.assertEqual(self.grants(self.boot(), '--allowed-tools', 'Read').returncode, 20)
+        self.assertEqual(self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)').returncode, 20)
         os.unlink(self.cfg / 'skills/evil')
         receipt = self.boot()
         # リンクの差し替え(字面の変更)は本文を読む前に拒否する
         os.unlink(self.cfg / 'skills/do-task')
         os.symlink(bad_target, self.cfg / 'skills/do-task')
-        p = self.grants(receipt, '--allowed-tools', 'Read')
+        p = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(p.returncode, 20)
         self.assertIn('component の実体', p.stderr)
         # 対象の実体の差し替え(字面は同じ)
@@ -1047,8 +1047,8 @@ class GrantsTests(Base):
         os.symlink(target, self.cfg / 'skills/do-task')
         receipt = self.boot()
         os.rename(target, self.base / 'moved')
-        self.skill(clone, 'do-task', 'allowed-tools: Read\n')
-        p = self.grants(receipt, '--allowed-tools', 'Read')
+        self.skill(clone, 'do-task', 'allowed-tools: Read(docs/**)\n')
+        p = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(p.returncode, 20)
         self.assertIn('component の実体', p.stderr)
 
@@ -1066,7 +1066,7 @@ class GrantsTests(Base):
         self.assertIn('保持値と一致しない', p.stderr)
 
     def test_install_link_identity_is_checked_before_reading(self):
-        target = self.skill(self.base / 'clone/skills', 'do-task', 'allowed-tools: Read\n')
+        target = self.skill(self.base / 'clone/skills', 'do-task', 'allowed-tools: Read(docs/**)\n')
         os.symlink(target, self.cfg / 'skills/do-task')
         receipt = self.boot()
         state = Path(receipt['state'])
@@ -1076,7 +1076,7 @@ class GrantsTests(Base):
         raw = (json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(',', ':')) + '\n').encode()
         state.chmod(0o600)
         state.write_bytes(raw)
-        p = run('grants', '--state', state, '--expect-sha256', HC.sha256(raw), '--allowed-tools', 'Read',
+        p = run('grants', '--state', state, '--expect-sha256', HC.sha256(raw), '--allowed-tools', 'Read(docs/**)',
                 '--user-settings', self.cfg / 'settings.json', env=self.env)
         self.assertEqual(p.returncode, 20)
         self.assertIn('component の実体', p.stderr)
@@ -1084,10 +1084,10 @@ class GrantsTests(Base):
     def test_odd_settings_shapes_stop_with_the_contract(self):
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': []}))
         p = self.grants(self.boot())
-        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.returncode, 20, p.stderr)
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': 'Bash'}}))
         p = self.grants(self.boot())
-        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(p.returncode, 20, p.stderr)
 
     def test_settings_changed_after_snapshot_stops(self):
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': []}}))
@@ -1101,7 +1101,7 @@ class GrantsTests(Base):
         """許可リストと grants は別に開かず、同じ検証済み reader を通る。"""
         (self.cfg / 'settings.json').write_text(json.dumps({
             'env': {'CLAUDE_CODE_SAFE_MODE': 'must-not-leak'},
-            'permissions': {'allow': ['Read']},
+            'permissions': {'allow': ['Read(docs/**)']},
         }))
         receipt = self.boot()
         allowlist = subprocess.run([sys.executable, '-B', str(GUARD), 'host-allowlist',
@@ -1116,7 +1116,7 @@ class GrantsTests(Base):
 
     def test_verified_reader_executes_held_bytes_and_hides_file_errors(self):
         from unittest import mock
-        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read']}}))
+        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read(docs/**)']}}))
         receipt = self.boot()
         guard = Path(receipt['guard'])
         held_guard = HC.read_regular(str(guard))
@@ -1156,7 +1156,7 @@ class GrantsTests(Base):
         self.assertNotIn('SECRET_SENTINEL', p.stderr)
 
     def test_grants_requires_the_held_absolute_user_settings_path(self):
-        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read']}}))
+        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read(docs/**)']}}))
         receipt = self.boot()
         p = run('grants', '--state', receipt['state'], '--expect-sha256', receipt['sha256'],
                 '--user-settings', 'settings.json', env=self.env)
@@ -1186,10 +1186,10 @@ class GrantsTests(Base):
         self.assertIn('modules', p.stderr)
 
     def test_skill_changed_after_snapshot_stops(self):
-        self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read\n')
+        self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read(docs/**)\n')
         receipt = self.boot()
         (self.cfg / 'skills/safe/SKILL.md').write_text('---\nname: safe\nallowed-tools: Bash\n---\n')
-        p = self.grants(receipt, '--allowed-tools', 'Read')
+        p = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(p.returncode, 20)
         self.assertIn('component の実体', p.stderr)
 
@@ -1199,7 +1199,7 @@ class GrantsTests(Base):
         def fifo():
             os.mkfifo(self.cfg / 'skills/f.md')
         def unreadable():
-            d = self.skill(self.cfg / 'skills', 'u', 'allowed-tools: Read\n')
+            d = self.skill(self.cfg / 'skills', 'u', 'allowed-tools: Read(docs/**)\n')
             (d / 'SKILL.md').chmod(0)
         def inner_link():
             d = self.skill(self.cfg / 'skills', 'l', '')
@@ -1530,6 +1530,236 @@ class ComponentPolicyTests(unittest.TestCase):
             with self.subTest(registry=registry), self.assertRaises(HC.Unclear):
                 HC.marketplace_security({'path': '/safe/marketplace.json', 'raw': json.dumps(registry).encode(),
                                          'entry': chosen})
+
+
+class DirectAllowTests(Base):
+    """H47: 直接許可と追加定義で同じ危険規則を拒否する。"""
+    def setUp(self):
+        Base.setUp(self)
+        self.root = self.base / 'plugin'
+        (self.root / '.claude-plugin').mkdir(parents=True)
+        (self.root / '.claude-plugin/plugin.json').write_text('{"name":"dev-workflow"}')
+        (self.root / 'skills/a').mkdir(parents=True)
+        (self.root / 'skills/a/SKILL.md').write_text('---\nname: a\ndescription: x\n---\n')
+        self.home = self.base / 'home'
+        self.cfg = self.home / '.claude'
+        (self.cfg / 'skills').mkdir(parents=True)
+        self.env = dict(os.environ, HOME=str(self.home), XDG_CONFIG_HOME=str(self.home / '.config'), GIT_CONFIG_NOSYSTEM='1')
+        for k in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'CLAUDE_CONFIG_DIR', 'ZDOTDIR', 'BASH_ENV', 'ENV'):
+            self.env.pop(k, None)
+        self.inventory = self.base / 'plugins.json'
+        self.inventory.write_text('[]')
+        self.n = 0
+
+    skill = GrantsTests.skill
+    grants = GrantsTests.grants
+
+    def boot(self, managed=None):
+        self.n += 1
+        args = [sys.executable, '-B', str(GUARD), 'bootstrap', '--root', str(self.root),
+                '--output', str(self.base / ('held' + str(self.n))), '--inventory', str(self.inventory)]
+        if managed is not None:
+            args += ['--managed-dir', str(managed)]
+        result = subprocess.run(args, text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_bare_cli_and_equal_component_are_rejected(self):
+        for tool in [name + suffix for name in ('Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'MultiEdit') for suffix in ('', '(*)')]:
+            with self.subTest(tool=tool):
+                self.skill(self.cfg / 'skills', 'unsafe', 'allowed-tools: ' + tool + '\n')
+                result = self.grants(self.boot(), '--allowed-tools', tool)
+                self.assertEqual(result.returncode, 20, result.stdout + result.stderr)
+
+    def test_bare_held_sources_rejected_despite_deny(self):
+        managed = self.base / 'managed'
+        (managed / 'managed-settings.d').mkdir(parents=True)
+        sources = [self.cfg / 'settings.json', self.cfg / 'remote-settings.json',
+                   managed / 'managed-settings.json', managed / 'managed-settings.d/a.json']
+        for path in sources:
+            for tool in [name + suffix for name in ('Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'MultiEdit') for suffix in ('', '(*)')]:
+                with self.subTest(source=path.name, tool=tool):
+                    path.write_text(json.dumps({'permissions': {'allow': [tool], 'deny': [tool], 'ask': [tool]}}))
+                    result = self.grants(self.boot(managed))
+                    self.assertEqual(result.returncode, 20, result.stdout + result.stderr)
+                    path.unlink()
+
+    def test_scoped_direct_and_availability_controls(self):
+        (self.cfg / 'agents').mkdir()
+        (self.cfg / 'agents/reader.md').write_text('---\nname: reader\ntools: Read, Grep, Glob\ndisallowedTools: Write\n---\n')
+        for rule in ('Read(/docs/**)', 'Edit(//permitted/**)', 'Glob(docs/**)', 'Grep(docs/**)',
+                     'Write(docs/**)', 'NotebookEdit(docs/**)', 'MultiEdit(docs/**)',
+                     'Bash(git log *)', 'mcp__srv__tool', 'FutureTool(value)', 'Read(docs/report$2026.txt)'):
+            with self.subTest(rule=rule):
+                result = self.grants(self.boot(), '--allowed-tools', rule)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+
+    def test_target_syntax_and_diagnostics(self):
+        bad = ['Read', 'Read(*)', 'Read (*)', 'Read( * )', 'Read()', 'Read( )', 'Read( docs/**)', 'Read(docs/** )', 'Read(docs/**',
+               'Read(docs/**))', 'Read((docs/**))', 'Read (docs/**)', 'Read\u00a0(docs/**)',
+               'Read(docs/\u2003x)', ' Read(docs/**)', 'Read(docs/**) ', 'Read(file_path:SECRET_H47)',
+               'Edit(new_string:SECRET_H47)', 'Grep(pattern:SECRET_H47)', 'Glob(path:SECRET_H47)']
+        for rule in bad:
+            for kind in ('cli', 'user', 'cache', 'managed', 'managed-drop-in', 'personal-skill', 'plugin'):
+                with self.subTest(rule=rule, kind=kind), self.assertRaises(HC.Unclear) as caught:
+                    HC.validate_direct_allow_rules([rule], kind)
+                self.assertNotIn('SECRET_H47', str(caught.exception))
+        for rule in ('Read(/docs/**)', 'Read(~/docs/**)', 'Read(//docs/**)', 'Read(docs/my file)', 'Read(report:2026.txt)',
+                     'Read(C:/docs/**)', 'Read(docs/report$2026.txt)',
+                     'Glob(docs/**)', 'Grep(docs/**)', 'Write(docs/**)', 'FutureTool(value)', 'Bash(git *)'):
+            self.assertEqual(HC.validate_direct_allow_rules([rule], 'cli'), [rule])
+
+    def test_settings_types_are_strict_at_all_sources(self):
+        managed = self.base / 'managed'; (managed / 'managed-settings.d').mkdir(parents=True)
+        sources = [self.cfg / 'settings.json', self.cfg / 'remote-settings.json',
+                   managed / 'managed-settings.json', managed / 'managed-settings.d/a.json']
+        bad = [{'permissions': value} for value in (None, [], 'SECRET_H47', 1)]
+        bad += [{'permissions': {'allow': value}} for value in (None, 'SECRET_H47', {}, [None], [1], [True])]
+        for path in sources:
+            for value in bad:
+                with self.subTest(source=path.name, value=value):
+                    path.write_text(json.dumps(value))
+                    receipt = self.boot(managed)
+                    result = run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+                    self.assertEqual(result.returncode, 20, result.stdout)
+                    self.assertNotIn('SECRET_H47', result.stderr + result.stdout)
+                    path.unlink()
+        for value in ({}, {'permissions': {}}, {'permissions': {'allow': []}}, {'permissions': {'deny': ['Read'], 'ask': ['Write']}}):
+            (self.cfg / 'settings.json').write_text(json.dumps(value))
+            result = self.grants(self.boot(managed))
+            self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_all_component_grant_routes_reject_bare(self):
+        # Validator runs before containment, including a parent's identical rule.
+        for kind in ('personal-skill', 'personal-command', 'personal-agent', 'enterprise-skill',
+                     'enterprise-command', 'enterprise-agent', 'plugin', 'marketplace-manifest'):
+            for tool in [name + suffix for name in ('Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'MultiEdit') for suffix in ('', '(*)')]:
+                with self.subTest(kind=kind, tool=tool):
+                    with self.assertRaises(HC.Unclear):
+                        HC.validate_direct_allow_rules([tool], kind)
+        # Actual expanded manifest routes retain allowedTools and inline frontmatter separately.
+        for route in ('allowedTools', 'content'):
+            for tool in [name + suffix for name in ('Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'MultiEdit') for suffix in ('', '(*)')]:
+                field = [tool] if route == 'allowedTools' else '---\nallowed-tools: ' + tool + '\n---\n'
+                (self.root / '.claude-plugin/plugin.json').write_text(json.dumps({'name': 'dev-workflow',
+                    'commands': {'inline': {route: field, 'content': field if route == 'content' else 'body'}}}))
+                result = self.grants(self.boot())
+                self.assertEqual(result.returncode, 20, result.stdout)
+                self.assertIn('allowed-tools', result.stderr)
+
+    def test_file_component_routes_and_scoped_controls(self):
+        managed = self.base / 'managed'
+        paths = [
+            self.cfg / 'skills/unsafe/SKILL.md', self.cfg / 'commands/unsafe.md', self.cfg / 'agents/unsafe.md',
+            managed / '.claude/skills/unsafe/SKILL.md', managed / '.claude/commands/unsafe.md',
+            managed / '.claude/agents/unsafe.md', self.root / 'skills/unsafe/SKILL.md',
+            self.root / 'commands/unsafe.md', self.root / 'agents/unsafe.md',
+        ]
+        for path in paths:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            for tool in HC.DIRECT_FILE_TOOLS:
+                for suffix in ('', '(*)'):
+                    with self.subTest(path=str(path.relative_to(self.base)), tool=tool, suffix=suffix):
+                        path.write_text('---\nallowed-tools: ' + tool + suffix + '\n---\nbody\n')
+                        result = self.grants(self.boot(managed))
+                        self.assertEqual(result.returncode, 20, result.stdout)
+                        self.assertIn('allowed-tools を解釈できない', result.stderr)
+            path.write_text('---\nallowed-tools: Read(docs/**), Glob(src/**), Grep(src/**)\n---\nbody\n')
+            result = self.grants(self.boot(managed), '--allowed-tools', 'Read(docs/**), Glob(src/**), Grep(src/**)')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            path.unlink()
+
+    def test_selected_marketplace_routes_reach_shared_validator(self):
+        for route in ('allowedTools', 'content', 'source'):
+            for tool in HC.DIRECT_FILE_TOOLS:
+                for suffix in ('', '(*)'):
+                    with self.subTest(route=route, tool=tool, suffix=suffix):
+                        rule = tool + suffix
+                        command = {'content': 'plain', 'allowedTools': [rule]} if route == 'allowedTools' else (
+                            {'content': '---\nallowed-tools: ' + rule + '\n---\nbody'} if route == 'content' else
+                            {'source': './private/entry.md'})
+                        market, installed = GrantsTests.market_fixture(self, command)
+                        if route == 'source':
+                            for root in (market / 'p', installed):
+                                (root / 'private/entry.md').write_text('---\nallowed-tools: ' + rule + '\n---\nbody')
+                        result = self.grants(self.boot())
+                        self.assertEqual(result.returncode, 20, result.stdout)
+                        self.assertIn('allowed-tools を解釈できない', result.stderr)
+        GrantsTests.market_fixture(self, {'content': 'body', 'allowedTools': ['Read(docs/**)']})
+        result = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_enterprise_command_namespace_security_and_digest(self):
+        managed = self.base / 'managed'
+        enterprise = managed / '.claude/commands/nested/one.md'
+        personal = self.cfg / 'commands/nested/one.md'
+        for path in (enterprise, personal):
+            path.parent.mkdir(parents=True)
+            path.write_text('---\nallowed-tools: Read(docs/**)\n---\n' + path.parent.parent.name)
+        def policy():
+            receipt = self.boot(managed)
+            result = self.grants(receipt, '--allowed-tools', 'Read(docs/**)')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return HC.component_policy_output(HC.component_policy(receipt['state'], receipt['sha256'], ['Read(docs/**)']))
+        first = policy()
+        self.assertEqual(first['loaded_commands']['nested:one']['kind'], 'enterprise-command')
+        self.assertIn('nested:one', first['lookup_names'])
+        self.assertIn('nested:one', first['invocation_names'])
+        self.assertNotIn('nested:one', first['public_names'])
+        self.assertEqual(first['policy_sha256'], policy()['policy_sha256'])
+        enterprise.write_text('---\nallowed-tools: Read(docs/**)\n---\nchanged')
+        self.assertNotEqual(first['policy_sha256'], policy()['policy_sha256'])
+        for field in ('hooks: {PreToolUse: [{command: SECRET_H47}]}', 'modules: [SECRET_H47]'):
+            enterprise.write_text('---\n' + field + '\n---\nbody')
+            receipt = self.boot(managed)
+            result = run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+            self.assertEqual(result.returncode, 20)
+            self.assertNotIn('SECRET_H47', result.stderr)
+        # A losing personal definition still undergoes grants validation.
+        enterprise.write_text('plain')
+        personal.write_text('---\nallowed-tools: Read\n---\nbody')
+        self.assertEqual(self.grants(self.boot(managed)).returncode, 20)
+
+    def test_policy_binds_cli_sources_presence_and_rule_version(self):
+        from unittest import mock
+        managed = self.base / 'managed'; (managed / 'managed-settings.d').mkdir(parents=True)
+        sources = [self.cfg / 'settings.json', self.cfg / 'remote-settings.json',
+                   managed / 'managed-settings.json', managed / 'managed-settings.d/a.json',
+                   managed / 'managed-settings.d/b.json']
+        def digest(cli=()):
+            receipt = self.boot(managed)
+            return HC.component_policy(receipt['state'], receipt['sha256'], cli)['policy_sha256']
+        baseline = digest()
+        self.assertEqual(baseline, digest())
+        first = digest(['Read(docs/**)'])
+        self.assertNotEqual(first, baseline)
+        self.assertNotEqual(first, digest(['Read(other/**)']))
+        self.assertEqual(digest(['Read(docs/**),Edit(src/**)']), digest(['Read(docs/**)', 'Edit(src/**)']))
+        with mock.patch.object(HC, 'ALLOW_RULE_VERSION', HC.ALLOW_RULE_VERSION + 1):
+            self.assertNotEqual(baseline, digest())
+        distinct = []
+        for path in sources:
+            path.write_text(json.dumps({'permissions': {'allow': ['Read(docs/**)']}}))
+            added = digest(); self.assertNotEqual(baseline, added); distinct.append(added)
+            path.write_text(json.dumps({'permissions': {'allow': ['Read(other/**)']}}))
+            self.assertNotEqual(added, digest())
+            path.unlink(); self.assertEqual(baseline, digest())
+        self.assertEqual(len(distinct), len(set(distinct)))
+
+    def test_managed_and_cache_bash_never_grant_user_skill(self):
+        managed = self.base / 'managed'; managed.mkdir()
+        for path in (managed / 'managed-settings.json', self.cfg / 'remote-settings.json'):
+            path.write_text(json.dumps({'permissions': {'allow': ['Bash(node:*)']}}))
+        self.skill(self.cfg / 'skills', 'script', 'allowed-tools: Bash(node:*)\n')
+        receipt = self.boot(managed)
+        self.assertEqual(self.grants(receipt).returncode, 20)
+        result = self.grants(receipt, '--allowed-tools', 'Bash(node:*)')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        guard = subprocess.run([sys.executable, '-B', str(GUARD), 'host-allowlist', '--state', receipt['state'],
+                                '--expect-sha256', receipt['sha256']], capture_output=True, text=True, env=self.env)
+        self.assertEqual(guard.returncode, 0, guard.stderr)
+        self.assertEqual(json.loads(guard.stdout), [])
 
 
 if __name__ == '__main__':

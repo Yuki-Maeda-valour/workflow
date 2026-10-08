@@ -1059,8 +1059,10 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
 # H46: 設定と定義は、補助CLIより前とactive一覧の確定後に同じreaderで検査する。
 component_check() {
   local err="${RUN_DIR:-$ENV_TEMP}/component-policy.err" rc=0
+  local args=() v
+  for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do args+=(--allowed-tools "$v"); done
   COMPONENT_POLICY="$("$PY_ABS" -I -B "$HOST_CHECK_PY" component-policy --state "$ENVIRONMENT_STATE" \
-    --expect-sha256 "$ENVIRONMENT_SHA" 2>"$err")" || rc=$?
+    --expect-sha256 "$ENVIRONMENT_SHA" "${args[@]}" 2>"$err")" || rc=$?
   if [ "$rc" -ne 0 ]; then
     cat "$err" >&2
     die 20 component-policy "有効な定義と固定設定を安全に検査できない"
@@ -1071,8 +1073,6 @@ component_check() {
   COMPONENT_RESOLVER="$(printf '%s' "$COMPONENT_POLICY" | py json-value resolver_version)" || die 20 component-policy "名前解決の版を読めない"
   HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" \
     "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA" "$FIXED_POLICY")" || die 20 component-policy "hook と固定設定を組み立てられない"
-  local args=() v
-  for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do args+=(--allowed-tools "$v"); done
   [ "$ALLOW_CLASSIFIER" -eq 0 ] || args+=(--classifier)
   err="${RUN_DIR:-$ENV_TEMP}/skill-grants.err"; rc=0
   GRANTS_OUT="$("$PY_ABS" -I -B "$HOST_CHECK_PY" grants --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
@@ -1708,8 +1708,8 @@ build_child_argv() {
 
 # H31: 証明に結び付ける起動の形。loop.sh が必ず足す隔離・権限・hook のフラグ(と権限のモード)を
 # build_child_argv と同じ並びで並べ、実行ごとに変わる値(プラグインのコピー・hook の設定)は置き換える。
-# 許可リスト・MCP の設定・--host-argv の上書き(model・effort など。host-argv.py の許可表)は、hook が呼ばれる
-# 仕組みに関わらないので入れない(変えても確かめ直さずに使える)
+# H47 の CLI 許可リストと保持設定の allow は initial-policy の要約へ束縛する。
+# MCP の設定・--host-argv の上書き(model・effort など。host-argv.py の許可表)は形へ含めない。
 build_child_shape() {
   local shape=("${ISOLATION[@]}" "$PLUGIN_DIR_FLAG" "<plugin>") template
   if [ "$ALLOW_CLASSIFIER" -eq 1 ]; then shape+=("${PERM_CLASSIFIER[@]}"); else shape+=("${PERM_EDITS[@]}"); fi
@@ -1778,6 +1778,8 @@ prove_host() {
   local dir target permlog nonce rc=0 child_rc child_to judged path timeout=600 probe_pid
   local sanitizer_pid sanitizer_rc=0 probe_stream pipe_in pipe_out init_evidence name
   local proof_names=()
+  local allow_args=() allow_value
+  for allow_value in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do allow_args+=(--allowed-tools "$allow_value"); done
   [ "$ITER_TIMEOUT" -ge "$timeout" ] || timeout="$ITER_TIMEOUT"
   dir="$(mktemp -d "$RUN_DIR/host-probe.XXXXXXXX")"
   mkdir "$dir/work" "$dir/outside"
@@ -1792,7 +1794,7 @@ prove_host() {
   # sanitizerとsupervisorをloopの別々の子にし、親終了時の回収を維持する。
   coproc H46_SANITIZER {
     exec "$PY_ABS" -I -B "$HOST_CHECK_PY" init-sanitize --state "$ENVIRONMENT_STATE" \
-      --expect-sha256 "$ENVIRONMENT_SHA" >"$dir/out.json" 2>"$dir/sanitize.err" 7>&-
+      --expect-sha256 "$ENVIRONMENT_SHA" "${allow_args[@]}" >"$dir/out.json" 2>"$dir/sanitize.err" 7>&-
   }
   sanitizer_pid="$H46_SANITIZER_PID"
   pipe_in="${H46_SANITIZER[1]}"; pipe_out="${H46_SANITIZER[0]}"
