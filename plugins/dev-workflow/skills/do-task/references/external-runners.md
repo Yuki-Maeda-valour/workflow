@@ -801,6 +801,11 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - **名前が literal な改行で終わるタスク MD**を、改行の無い同名ファイルと並べた構成で、退避・比較・復元が一貫して指定した方だけを対象にし(取り違えない)、パスが C 風引用の 1 行で出ること。
   - `--cwd` が toplevel の配下でも toplevel 全体を対象にし、**除外の錨が `<--cwd>/.claude/reviews/` である**こと(そこにログだけを足して非ゼロ終了 → 32。toplevel 直下に固定した実装は 31 に誤分類する)。
   - **`--cwd` の相対パス(`.` / `..`)でも同じ管理ルートとして扱う**こと、**`--cwd` にグロブ文字(`[` `]` `*`)を含む構成でも、除外が字面どおりに効き、グロブとして一致するだけの別ディレクトリを外さない**こと
+- **開始時の設定の出典ファイル**: 追跡済み・ignore 済みの include 先の値変更、削除、親・リンクの差替え、特殊型への変更を、Git 呼出し 0 回・exit 33 で拒否する。
+  - 多段 include、linked worktree、リンク経由の相対 include、日本語・空白・タブ・改行・引用符のパスが不変なら成功する。末端通常ファイルの同内容再作成と既存のブランチ削除も成功する。
+  - NUL 区切りの不正な対、未知の出典、利用者由来の command line 設定は収集失敗として止める。正規に収集した file origin 0 件は許可する。
+  - 新規の出典記録と診断に設定値を載せず、Git の stderr も転記しない。記録改変は snapshot のダイジェストで拒否する。
+  - 出典記録の無い旧 state は `compare` だけを `config-origin-missing` で止め、ほかのサブコマンドは従来どおり動くことを確かめる。
 - **git の状態を変えない**: stat だけ変わった追跡ファイル(同内容で書き直したもの)が在る repo で、`take` → `compare` の前後に `.git/index` のバイト列と `git status` が不変であること
 - **設定されたプログラムを実行しない**: `core.fsmonitor`・`diff.external`・hooks(`post-index-change`)の痕跡スタブを先に置いた repo で、`take` も、続く `compare`(hooks / config は不変なので git を打つ)も痕跡を残さないこと
 - **`take` の縮退**: 非 git・toplevel が `--cwd` を含まない・unmerged・保護領域を解決できない・上限超過(件数 / サイズ)・タスク MD がリンク切れ / ループ / ディレクトリ / 存在しない / 親ディレクトリが無い / 読めない(root では飛ばす)→ 30 と理由コード。
@@ -822,7 +827,8 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - `DOD=` が起動前の内容を指すこと
 - **`restore-taskmd`**: 外部がチェックを書き換えたタスク MD が起動前の内容に戻る(追跡済み・未追跡・symlink 経由)/ 復元先の親が symlink に差し替えられている → 33 `TOUCHED=none` で、リンク先の同名ファイルが無傷 / 復元先がディレクトリに置き換えられている → 33 `TOUCHED=none` / 削除の後でコピーだけが失敗する → 33 `TOUCHED=deleted` / 同名エントリの削除に失敗する(親ディレクトリが書き込み不可。root では飛ばす)→ 33 `TOUCHED=none` / **外部が消したタスク MD の復元**(復元先がもともと無いので削除を行わない)→ `TOUCHED=copied`
 - **`cleanup`**: 保護領域を消す / 保護領域の外のパス・symlink → 2 で何も消さない
-- **変異テスト**(13 変異。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す。
+- **変異テスト**(14 変異。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す。
+  - 設定の出典ファイルだけの検査を外す変異も含める。root の config は不変のまま include 先の値を変え、拒否を期待する回帰が失敗することを確かめる。
   - **変異の当たらなかった対照ケースが、写しでも PASS すること**(壊れ方が変異に固有であること)と、**目印が無い・置換が空振りした変異はそれ自体を FAIL にする**ことも見る
 
 各ケースは外側タイムアウト付き・stdin を `/dev/null` にして走るため、実装が壊れて待ち続けてもスイートは FAIL で終わる(stdin が開いたままの環境で実行しても結果は変わらない)。
@@ -911,7 +917,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 | サブコマンド | 行うこと | 終了コード(分岐に使うもの) | stdout のキー |
 |---|---|---|---|
 | `take` | 起動前のスナップショット(5 要素)・マニフェスト・退避・ダイジェストの算出 | **0** 成功 / **30** 縮退(stderr に `ERROR [<理由>]`。理由は `not-git` / `unmerged` / `no-protected-area` / `over-limit` / `taskmd` — 下の縮退 ①〜⑤ に対応する) | `STATE_DIR=` `MANIFEST_SHA256=` `SNAPSHOT_SHA256=` `ENTRIES=` `BYTES=` `UNREADABLE=`(読めなかったエントリ数。パスは stderr に `NOTE: unreadable <パス>`)`TASKMD_REAL=` |
-| `compare` | `--state` の検査 → ダイジェストの照合 → hooks / config の検査 → 5 要素の再取得と比較 → 結末の判定(§12-7) | **0** 正常終了 / **31** 引き継ぎ / **32** 縮退 / **33** 比較不能 | `RESULT=`(`normal` / `takeover` / `fallback` / `incomparable`)`WORKTREE_CHANGED=` `GITMETA_CHANGED=`(どちらも `yes` / `no` / `unknown`)、変化 1 件ごとに `CHANGE=<分類>\t<詳細>`、未追跡の変更には `BASE=<退避コピーのパス>\t<判定>`(判定は `ok` / `unverified`)。33 のときは `REASON=` と `GIT_SKIPPED=`(`yes` / `no`) |
+| `compare` | `--state` の検査 → ダイジェストの照合 → hooks / config(開始時の設定出典を含む)の検査 → 5 要素の再取得と比較 → 結末の判定(§12-7) | **0** 正常終了 / **31** 引き継ぎ / **32** 縮退 / **33** 比較不能 | `RESULT=`(`normal` / `takeover` / `fallback` / `incomparable`)`WORKTREE_CHANGED=` `GITMETA_CHANGED=`(どちらも `yes` / `no` / `unknown`)、変化 1 件ごとに `CHANGE=<分類>\t<詳細>`、未追跡の変更には `BASE=<退避コピーのパス>\t<判定>`(判定は `ok` / `unverified`)。33 のときは `REASON=` と `GIT_SKIPPED=`(`yes` / `no`) |
 | `taskmd-diff` | 起動前のタスク MD と現在のタスク MD の比較(チェック状態の更新と要件本文の変更を分ける) | **0** 変化なし、またはチェック状態の更新だけ / **34** 要件本文の変更 / **35** 選択パスと実体の対応の変化 / **33** 照合の失敗 | `TASKMD=`(`same` / `checks-only` / `body-changed` / `mapping-changed`)`DOD=<起動前のタスク MD のコピーのパス>`。33 のときは `REASON=` |
 | `restore-taskmd` | タスク MD の実体だけを起動前の内容へ戻す | **0** 成功 / **33** 照合・復元の失敗 | `RESTORED=`(`yes` / `no`)`TOUCHED=`(実ツリーに対して行ったこと: `none` / `copied` / `deleted` / `deleted+copied`。`copied` = 復元先がもともと無かったので、削除せずコピーだけを行った)。33 のときは `REASON=` |
 | `cleanup` | 保護領域の削除(保護領域の候補配下の `dev-workflow/guard-*` で、symlink でないときだけ消す) | **0** 成功(それ以外のパスは 2 で、何も消さない) | — |
@@ -926,7 +932,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - `--state`・`--manifest-sha256`・`--snapshot-sha256` には `take` の stdout の値を、`--run-rc` には `implement-agent.sh` の終了コードをそのまま渡す
 - **stdout は機械可読の `KEY=VALUE` 行**(値は 1 行)。パスの値は `diff-snapshot.sh` と同じ C 風引用で出す(改行・タブ・制御文字・引用符・バックスラッシュを含むときだけ引用する。外部が起動後に作った改行入りのパスも 1 行で報告するため)。診断は stderr の `NOTE:` / `ERROR [理由コード]`
 - **`CHANGE=` の分類と詳細**: `untracked-added` / `untracked-removed` / `untracked-changed` = パス(`untracked-removed` は「未追跡の対象集合から消えた」= 削除・追跡化・ignore 化。**タスク MD の実体〈マニフェストの `T` 行〉の変化もこの 3 分類で出し、そのときだけパスは toplevel 相対ではなく実体の絶対パス**)、`head` / `branch` / `index-tree` = `旧値 -> 新値`、`refs` / `stash` = 増えた・消えた・変わった行(ref 名が分かる形)、`tracked-diff` / `status` = 起動前の記録ファイルのパスと現在値の sha256、`hooks` / `config` = 変わったファイルのパス
-- **`REASON=` の値**: `compare` の 33 = `manifest-digest` / `snapshot-digest` / `state-missing` / `hooks-changed` / `config-changed` / `retake-failed`(`retake-failed` = 5 要素の再取得が想定外に失敗した)。
+- **`REASON=` の値**: `compare` の 33 = `manifest-digest` / `snapshot-digest` / `state-missing` / `hooks-changed` / `config-changed` / `config-origin-missing` / `retake-failed`(`retake-failed` = 5 要素の再取得が想定外に失敗した)。
   - **`GIT_SKIPPED=` は実際に git を呼んだかで決まる** — `retake-failed` 以外は git を 1 回も呼んでいないので `yes`、`retake-failed` は git を呼んだ後の失敗なら `no`、記録済みの toplevel へ移れず git を 1 回も呼べなかった場合は `yes`。
   - `taskmd-diff` の 33 = `digest`(保護領域の検査かダイジェストの照合に失敗した)/ `taskmd-body`(退避したタスク MD の実体照合に失敗した)の **2 値だけ**(実ツリーに触れないため、復元の段の理由は返らない)。
   - `restore-taskmd` の 33 = その 2 値に `dest-symlink` / `dest-dir` / `delete-failed` / `copy-failed` / `verify-failed`(復元のどの段で失敗したか)が加わる
@@ -961,10 +967,20 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - ディレクトリが無ければ `(無し)`、ディレクトリでなければ `(ディレクトリでない)` という値で記録し、失敗にしない(テンプレート無しで作った repo や、`core.hooksPath` を `/dev/null` に向けた構成のため。起動後にディレクトリが作られたら変化として検出する)
 - **config のダイジェスト**: `git rev-parse --git-path config` と `--git-path config.worktree` が指すファイルの生バイトの sha256(無いファイルは `(無し)`)。
   - **`config.worktree` は常に記録する**(`extensions.worktreeConfig` を立てれば main worktree でも有効なので、linked worktree に限らない)
+- **開始時の設定の出典ファイル(origin)**: 安全な前置き付きの `git config --null --show-origin --name-only --includes --list` が返す `file:` の出典も記録する。対象は、開始時にキーを提供したファイルだけ。
+  - NUL 区切りの origin/key の対を最後まで読み、空・奇数・途中切れの対や未知の出典は拒否する。command line 由来は前置き自身のキーの個数と順序に一致するものだけを受け入れる。
+  - 収集や保存の失敗は exit 20 とし、作りかけの保護領域を消す。取得失敗を空一覧にしない。正規に収集した file origin 0 件は許可する。
+  - `snapshot/config-origins.txt` に元の絶対パス、経路の各部分の種別・リンク字面・device/inode、実体の生バイトの sha256 を保存し、snapshot 全体のダイジェストに含める。
+  - 相対パスは toplevel 基準で保持する。リンクと `..` は経路の順に辿り、リンク内の相対 include を実体側の親へ解決し直さない。include の解決自体は Git の出典一覧を使う。
+  - 設定値を載せない対象は、新規の出典一覧・記録・診断。収集時の Git の stderr も転記しない。既存の生 diff と未追跡ファイルの退避は変更しない。
 - hooks と config の**実体パスも絶対パスで記録する**(`compare` が git を呼ばずに再計算するため。下記)。これらの取得(`symbolic-ref`・`for-each-ref`・`rev-parse --git-path`)は、設定されたプログラムを実行しない(実測)
 
-**hooks と config の検査は、内容を読む git より先に行う**: `compare` は、①`--state` の検査(保護領域の候補配下・0700・symlink でない)②ダイジェストの照合(下記「二重防御」)③**hooks と config のダイジェストの再計算**を終えるまで、**git を 1 回も呼ばない**(toplevel と hooks / config の実体パスは `take` が記録した値を使い、③ はファイルの読み取りだけで行う)。
+**hooks と config の検査は、内容を読む git より先に行う**: `compare` は、①`--state` の検査(保護領域の候補配下・0700・symlink でない)②ダイジェストの照合(下記「二重防御」)③**保存済みの設定出典の経路と内容の照合、hooks と config のダイジェストの再計算**を終えるまで、**git を 1 回も呼ばない**(toplevel と hooks / config の実体パスは `take` が記録した値を使い、③ はファイルの読み取りだけで行う)。
 - ③ で変わっていれば**比較不能**(`REASON=hooks-changed` / `config-changed`・`GIT_SKIPPED=yes`)として止まり、**以後の git を打たない** — 外部が config や hooks に仕込んだプログラムを、ホスト側の再取得がサンドボックスの外で実行してしまうためである。
+- 設定出典の検査は保存した経路だけを使い、Git で一覧を取り直さない。親ディレクトリとリンクは種別・識別子・リンク字面を比べ、変わった先の本文を読む前に拒否する。
+- 末端通常ファイルは種別・読取可能性・内容 hash で比べる。同内容の通常ファイルへの置換は許可する。Git の正常なブランチ削除も config を同内容で再作成するため、末端の識別子だけの変化は拒否理由にしない。
+- 削除・読取不可・特殊型への変更も `config-changed` で止める。出典記録の無い旧 state は `compare` だけを exit 33・`REASON=config-origin-missing`・`GIT_SKIPPED=yes` で止める。
+- 旧 state の `taskmd-diff`・`restore-taskmd`・`cleanup` は従来どおり使える。設定を自動復元したり、停止後の状態で基準を自動的に取り直したりはしない(再開は §12-5)。
 - **`taskmd-diff` と `restore-taskmd` は git を 1 回も呼ばない**(toplevel・除外の錨・hooks と config の実体パスは、いずれも保護領域の記録を使う)。
 - **hooks の実体が作業ツリー内の追跡ディレクトリ(`.husky/` 等)のとき、外部がそこを編集すると 33 に倒れる**(安全側。変更を確認してからの再開は §12-5)。
 
@@ -1004,11 +1020,14 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 - `take` が stdout に出す `MANIFEST_SHA256=`(`manifest.tsv` の sha256)と `SNAPSHOT_SHA256=`(`snapshot/` の各ファイルの「sha256 + ファイル名」を名前順に並べたものの sha256)がこれに当たり、呼び出し側は以後のサブコマンドに引数で毎回渡す。
 - **復元・比較の前にダイジェストを照合し、一致した場合のみマニフェストとスナップショットを信頼する**(`compare`・`taskmd-diff`・`restore-taskmd` のどれも、最初に保護領域のダイジェストを再計算して引数の値と照合する)。
 
-**ダイジェストが一致しなかったときは「比較不能」として扱う**(2026-09-17 決定 44。`compare` の exit 33 で、`REASON=manifest-digest` / `snapshot-digest`。**`--state` が検査を通らない `state-missing`、上の `hooks-changed` / `config-changed`、5 要素の再取得で git が想定外に失敗した `retake-failed` も、同じ比較不能に倒す**)。**この照合はマニフェスト全体とスナップショット本体に掛かるので、不一致から「どのエントリが改変されたか」は特定できず、下の実体照合のような「当該エントリのみスキップ」では処理できない**。したがって比較不能では:
+**ダイジェストが一致しなかったときは「比較不能」として扱う**(2026-09-17 決定 44。`compare` の exit 33 で、`REASON=manifest-digest` / `snapshot-digest`。**`--state` が検査を通らない `state-missing`、上の `hooks-changed` / `config-changed`、旧 state の出典記録欠落 `config-origin-missing`、5 要素の再取得で git が想定外に失敗した `retake-failed` も、同じ比較不能に倒す**)。**この照合はマニフェスト全体とスナップショット本体に掛かるので、不一致から「どのエントリが改変されたか」は特定できず、下の実体照合のような「当該エントリのみスキップ」では処理できない**。したがって比較不能では:
 
 - **①②③ の比較結果を「変化なし」と判定しない**(信頼できない基準で「変化なし」と判定すると、外部が書いた分を見落としたまま内蔵に切り替える)。
   - **変化の有無は「不明」として報告する**(`WORKTREE_CHANGED=unknown`。`GITMETA_CHANGED` は、`hooks-changed` / `config-changed` のときは `yes` — hooks と config は git メタで、変化が確定しているため — それ以外の比較不能では `unknown`)
-- **その基準での復元を一切行わない**(改変された退避物で実ツリーを上書きしうる)
+- **その基準での復元を一切行わない**(改変された退避物で実ツリーを上書きしうる)。
+  - 例外は `config-origin-missing` だけが理由の場合。既存 state の検査・全体ダイジェスト・`taskmd-body` の実体照合が通れば、人が変更を確認した後に `taskmd-diff`・`restore-taskmd` を手動で使える。
+  - `cleanup` は別の条件で動く。人が保護領域の削除を決めた後、保護領域の候補配下の `guard-*` で symlink ではないという既存の領域検査を通れば削除する。manifest・snapshot・`taskmd-body` の照合は行わない。
+  - この例外で不正な state や manifest・snapshot の不一致からの復元を許可しない。自動復元・自動の再取得・内蔵への自動の切り替えは禁止したままとし、`compare` は出典記録欠落で引き続き停止する。
 - **§12-7 の「比較不能」経路で引き継ぐ** — 保護領域とログのパスを提示し、**自動復元も、内蔵への自動の切り替えもせずに人の判断を仰ぐ**
 
 **一致した場合に限り**、下の実体照合へ進む。**実体照合の粒度はファイル単位**とし、**計算不能(リンク切れ等)は「突合不能」として当該エントリのみスキップして報告する**(全体中止にしない)。
@@ -1043,7 +1062,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
       - チェックマーク以外は一切正規化しない(空白・改行・順序の違いも、`[x]` / `[X]` 以外の字への書き換え〈`[-]` 等〉も本文の変更として拾う。**見逃すより止めるほうが安全**)
   - **正常終了でも、DoD として読むのは起動前のコピー**(外部が書いたタスク MD ではない)。`taskmd-diff` が stdout の `DOD=` にそのパスを出し、Phase 4 以降はこれを完了条件の基準として読む
   - **`taskmd-diff` は結末を問わず、復元より前に通す**(引き継ぎで `restore-taskmd` を先に行うと、外部による要件本文の書き換えが復元で消えて検出できない)。
-    - `compare` が比較不能(33)を返したときは実行しない — 基準が信頼できず、どのみち Phase 4 へ進まない。
+    - `compare` が比較不能(33)を返したときは自動では実行しない。`config-origin-missing` だけが理由の場合の手動操作は、§12-2 の例外条件に従う。自動で Phase 4 へ進まない。
     - **ただし、共通工程の ① に `GIT_CONFIG_COUNT` が出て ② を打たなかったとき(① `--precheck` の stdout に出た場合。§12-3 の 2 の例外。#81 決定 3)は実行する** — `taskmd-diff` は git を呼ばないので打てる。打たないと、タスク MD の真正性を確かめる手段を失う。結果(0・34・35・33 のどれでも)は比較不能の報告に添え、人の判断より前に自動で続行しない(共通工程の ①②③ は do-task の外部の手順の手順 5 の番号で、① `diff-snapshot.sh --precheck`・② `implement-guard.sh compare`・③ `implement-guard.sh taskmd-diff`。5 要素の ①〜⑤ とは別)
 - **元の選択パスと実体パスの対応も保持し、Phase 4 の前に同一実体を指すことを確認する**(2026-09-17 決定 50 の symlink 例外の続き)
   - **到達条件**: タスク MD が `task.md → A.md` のとき、外部がリンクを `B.md`(要件を減らした別ファイル)へ張り替えてソース変更を残す。**実体 A の退避物照合・復元先検査・復元はすべて成功する**が、後続へ元の `task.md` を渡すと**内蔵 implementer は B を DoD として読む**
@@ -1117,8 +1136,11 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - 残る経路は次のとおり
   - **R1**(実測): 承認済みの filter のコマンドが、外部の書ける作業ツリー内のファイルに依存する構成(リポジトリ内のスクリプトを呼ぶ等)。設定も属性も変わらないので、`--precheck` は 0 になる。そのうえで、**filter 対象のパスが stat 上変わったとき、または racily clean なとき**(index と同じ秒以降の mtime を持つ。作成と commit が同じ秒で済んだ直後など)、`take` の取得と `compare` の再取得の、5 要素の ①②(`diff`・`status`)が、その clean フィルタをホスト側(サンドボックスの外)で起動する(前置きは clean フィルタを止めず、`--precheck` が stdout に出す無効化の環境変数を `implement-guard.sh` は受け取らないため)。到達する脅威はホストでの任意コード実行。**§12-1 の条件 B で閉じる**(最後に承認した一覧に filter があれば、外部に解決しない)
   - **R2**(未調査): 標準の git-lfs の設定(`filter.lfs.*`)と属性は、事前検査が素通りさせる(`diff-snapshot.sh` の既定の lfs の扱い)。5 要素の ①② が `git-lfs clean` を起動する。#77 で扱う
-  - **R3**(未調査): 事前検査の検査対象外のキーを、リポジトリ内の include 先で足す経路。include 先に足された検査対象外のキーは `--precheck` を通る(実測: `core.hooksPath`・`core.sshCommand`)。#77 で扱う
-  - **`include.path` 経由で `core.hooksPath` を別のディレクトリへ付け替えられた場合、`.git/config` の生バイトは変わらないので、`compare` の hooks と config の検査(`config-changed`)では止まらない**。ただし **5 要素の ④ の再取得が hooks の実体パスを取り直すため、付け替え先への hook の設置は `CHANGE=hooks`・`GITMETA_CHANGED=yes` として検出される**(終了コードが 0 以外なら引き継ぎ。実測)。**hook 自体は前置きの `-c core.hooksPath=/dev/null` により実行されない。**
+  - **R3**(一部を #219 で検出): 開始時にキーを提供した設定出典へのキー追加や既存値変更は、保存した内容との比較で止める。`--precheck` の検査対象外のキーでも、出典の生バイトが変われば対象になる。
+    - 空・コメントだけ・欠落の include 先、非成立の条件付き include から新たに有効になる先、未知の設定 root の新設は、開始時の出典一覧だけでは守れない。これらは #77 の未解決として残す。
+    - 検査の間だけ変更して戻す競合や、検査器・保持値自体への攻撃の完全排除は保証しない。外部実装を停止してから比較し、OS による隔離が必要な範囲と区別する。
+  - 開始時にキーを提供した include 先で `core.hooksPath` が変われば、root の config が不変でも `config-changed` で止まる。開始時の出典一覧に無い先から設定が有効になる場合には、この保証を当てない。
+    - ④ の再取得まで進んだ場合、hooks の実体パスの変化は `CHANGE=hooks`・`GITMETA_CHANGED=yes` に出る。hook 自体は前置きの `-c core.hooksPath=/dev/null` で実行を止める。
 - (d)**保護領域そのものの改竄**(§12-4 の限界⑧ で「外部の書き込み範囲外」の前提が崩れた場合。ダイジェストの照合は改竄を検出するが、防ぎはしない)
 - (e)**ネストしたリポジトリ(マニフェストの種別「その他」)の内部の変化は検出しない** — ③ はそのディレクトリを 1 エントリとして記録するだけで、中へは入らない(5 要素の契約に由来する死角)
 - (f)**使い捨ての index に対する `write-tree` は、到達不能な tree オブジェクトを `.git/objects` に残す**(index・HEAD・refs・stash・config は変えない)。
@@ -1133,7 +1155,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 
 1. **委託プロンプトで `commit` / `stash` / `branch` / `reset` / `push` を禁止する**
 2. **外部 CLI を起動した後は、成否を問わず必ず 5 要素すべてを再取得して起動前と比較し、git メタ(④⑤)に変化があれば報告する**(**判定 3′・4′ の失敗経路も含む** — これらは外部 CLI をすでに起動済みだから。2026-09-17 決定 26。この共通工程を分岐の後に置くと、検出策が守るべきケースそのものをバイパスする)。**この再取得と比較は `implement-guard.sh compare` が実行し**、結末を終了コード(0 正常終了 / 31 引き継ぎ / 32 縮退 / 33 比較不能)で、変化を `CHANGE=` 行で返す(§12-2・§12-7)。
-   - **例外**: do-task の Phase 3 の共通工程で `diff-snapshot.sh --precheck` が 0 以外で止めた場合、共通工程の ① に `GIT_CONFIG_COUNT` が出て ② を打たなかった場合(① `--precheck` の stdout に出た場合。下記)、または `compare` の hooks / config の検査が先に止めた場合は、**再取得せず比較不能として扱い、①②③ は「変化なし」ではなく「不明」と報告する**(§12-2 の比較不能の規定。再取得のための git が、外部の残したリポジトリ設定のプログラムを実行してしまうため)
+   - **例外**: do-task の Phase 3 の共通工程で `diff-snapshot.sh --precheck` が 0 以外で止めた場合、共通工程の ① に `GIT_CONFIG_COUNT` が出て ② を打たなかった場合(① `--precheck` の stdout に出た場合。下記)、または `compare` の hooks / config の検査か旧 state の出典記録欠落で先に止めた場合は、**再取得せず比較不能として扱い、①②③ は「変化なし」ではなく「不明」と報告する**(§12-2 の比較不能の規定。再取得のための git が、外部の残したリポジトリ設定のプログラムを実行してしまうため)
    - **共通工程の ① の stdout に `GIT_CONFIG_COUNT` が出たら、② だけを打たない**(#81 決定 3。共通工程の ①②③ の番号は §12-2): `compare` の git は filter の無効化を受け取らないので、承認済みの filter がある状態で打つと、その filter をホスト側で起動するため(§12-1 の条件 B と同じ理由)。③ `taskmd-diff` は git を呼ばないので打つ(§12-2)。手順 5 の ① で承認し直した場合と、別のセッションで再開するときの ①(§12-2 の受け入れた限界 (a))に効く(承認した値は、次の ITER の手順 1 で条件 B として効く)
 
 **注意事項**: **機構に頼れない**(公式文書は既定の workspace-write でも `.git` を読み取り専用に保つと書くが、0.153.4 では未実測で、実効サンドボックスは設定で上書きされうる — §12-4 の限界⑧。`.git` の保護を指定する設定も無い — `sandbox_workspace_write` の項目は `exclude_slash_tmp` / `exclude_tmpdir_env_var` / `network_access` / `writable_roots` の 4 つのみ。2026-09-17 確認)ため**検出に倒す**。
@@ -1194,14 +1216,19 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - (b) **タスク MD の判断待ち**(`taskmd-diff` の 34・35・33、`restore-taskmd` の 33)— 必須要素 ① には `TASKMD=` / `REASON=` の値を、③ には `restore-taskmd` の `TOUCHED=` を書く
   - (c) **共通工程の ① に `GIT_CONFIG_COUNT` が出て ② を打たなかった場合**(① `--precheck` の stdout に出た場合。§12-3 の 2 の例外。#81 決定 3)— `compare` を実行していないので作業ツリーも git メタも「不明」で、必須要素 ① には `--precheck` の rc 0 と、stdout に `GIT_CONFIG_COUNT` が出たことを書き、③ `taskmd-diff` の結果(終了コードと `TASKMD=`)を添える。③ がどの値でも、人の判断より前に自動で続行しない
   - (d) **共通工程の ④(`reviews-dir.sh ensure --root <管理ルート>`)が 0 以外で止めた場合** — 置き場(`.claude`・`.claude/reviews`)が symlink か、通常のディレクトリでないか、作れない。必須要素 ① には ④ の終了コードと stderr を書き、①〜③ の結果(打ったものすべて。`CHANGE=`・`TASKMD=`)を添える。②③ が 0 でも、人の判断より前に自動で続行しない(置き場を差し替えたプロセスが残っているかもしれない — §12-6 の既知の限界)。再開の条件(必須要素 ⑥)は、人が置き場を実ディレクトリに戻し(symlink を消す。リンク先に書かれたものを見る)、④ を打ち直して 0 になること
-  - **再開の条件(必須要素 ⑥)のうち `hooks-changed` / `config-changed`**: ユーザーが変更(`CHANGE=hooks` / `CHANGE=config` に出るパス)を確認して元へ戻してから、同じ引数で `compare` を再実行する(戻さないまま再実行しても同じ 33 になる)
+  - **再開の条件(必須要素 ⑥)のうち `hooks-changed` / `config-changed`**: 人が変更(`CHANGE=hooks` / `CHANGE=config` のパス)を確認し、**git を打たずファイル操作で元へ戻してから**、同じ引数で `compare` を再実行する。
+    - 設定出典の親ディレクトリとリンクは、元の識別子も一致する必要がある。同内容で作り直すだけでは戻らない。元の親・リンクを戻せなければ、同じ state からは再開できない。
+    - 末端通常ファイルは、元と同じ内容・種別・読取可能性に戻せば、識別子が変わっていても比較できる。
+  - **`config-origin-missing`**: 旧 state に出典記録が無いため、同じ引数で再実行しても比較できない。タスク MD の確認・復元・保護領域の削除には既存サブコマンドを使える。
+  - 親・リンクを戻せない場合や出典記録が無い場合も、停止後の状態で `take` し直して自動続行しない。証拠を保持して人の判断を仰ぎ、新たな作業として開始するかを決める。
   - **再開の条件(必須要素 ⑥)のうち、① に `GIT_CONFIG_COUNT` が出て ② を打たなかった比較不能**(#81 決定 3。`hooks-changed` / `config-changed` と同じく、元へ戻してから打ち直す形):
     1. 人が、外部が足した設定・属性・hooks を、**git を打たずに**ファイルを読んで元へ戻す。
        - 何が足されたかは、手順 5 の ① の一覧と NOTE(`NOTE: 無効化して実行:` の `core.fsmonitor` / `core.hooksPath` と、`NOTE: promisor 構成:` の `extensions.partialclone` / `remote.<名>.promisor` を含む)、`.git/config`・include 先・`.gitattributes`・hooks のファイルで見る
     2. 手順 5 を ① から打ち直す
        - rc 22 なら、出た一覧を人が見て承認するかを決める(承認した値が最後に承認した値になる)
        - stderr の `NOTE: 無効化して実行:` か `NOTE: promisor 構成:` で始まる行(すべて)が、起動前の報告に出した手順 1 の `--precheck` の同じ行と一致することを確かめる。
-         - 違えば 1 に戻る(承認ダイジェストは `core.fsmonitor` / `core.hooksPath` などを含まず、② の config の検査も include 先を見ない〈`.git/config`・`config.worktree` の生バイトだけ〉。戻し忘れた `core.fsmonitor` は、この照合でしか分からない。`NOTE: 置換参照を無効化して実行` は照合しない — `refs/replace/*` は 1 の戻す対象〈設定・属性・hooks〉に無く、その変化は ② の `CHANGE=refs` に出る)
+         - 違えば 1 に戻る。承認ダイジェストは `core.fsmonitor` / `core.hooksPath` などを含まない。② は開始時の設定出典も検査するが、開始時の一覧に無い先を含む全経路を保証しないため、NOTE の確認を省略しない。
+         - `NOTE: 置換参照を無効化して実行` は照合しない。`refs/replace/*` は 1 の戻す対象〈設定・属性・hooks〉に無く、その変化は ② の `CHANGE=refs` に出る。
        - `GIT_CONFIG_COUNT` が出なくなり、NOTE も同じなら、② `compare` を打ち、0 / 31 / 32 なら ③ を打つ(33 なら比較不能として扱う。`REASON=hooks-changed` / `config-changed` なら、その再開の条件へ)。その結果(git メタの `CHANGE=` を含む)で、実ツリーを正として進めるか破棄するかを決める
        - `GIT_CONFIG_COUNT` がまだ出るなら、1 に戻る
     - ② は前置き・`--no-ext-diff --no-textconv`・hooks と config の検査を持つ。git メタ(HEAD・ブランチ・refs・stash)と、今回の外部が変えた分の切り分け(起動前の記録との比較)は ② が出す

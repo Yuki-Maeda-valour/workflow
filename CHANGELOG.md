@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.24.2
+
+### 修正
+
+- 外部実装が、開始時に読み込まれた include 先の既存設定値だけを変えても、`implement-guard.sh compare` が Git を呼ぶ前に停止するようにした。通常のブランチ削除や、同内容の通常ファイル再作成は従来どおり扱う([Issue #219](https://github.com/Yuki-Maeda-valour/workflow/issues/219))。
+- 出典記録の無い旧 state の `compare` は停止する。開始時の出典一覧に無い include 先などは、この修正で保護した範囲に含めない([Issue #77](https://github.com/Yuki-Maeda-valour/workflow/issues/77))。
+
 ## v4.24.1
 
 ### 変更
