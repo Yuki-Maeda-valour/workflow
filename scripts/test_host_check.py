@@ -779,6 +779,77 @@ class GrantsTests(Base):
         self.assertEqual(p.returncode, 20)
         self.assertIn('利用者の設定', p.stderr)
 
+    def test_host_allowlist_and_grants_reject_the_same_held_bad_setting(self):
+        """許可リストと grants は別に開かず、同じ検証済み reader を通る。"""
+        (self.cfg / 'settings.json').write_text(json.dumps({
+            'env': {'CLAUDE_CODE_SAFE_MODE': 'must-not-leak'},
+            'permissions': {'allow': ['Read']},
+        }))
+        receipt = self.boot()
+        allowlist = subprocess.run([sys.executable, '-B', str(GUARD), 'host-allowlist',
+                                    '--state', receipt['state'], '--expect-sha256', receipt['sha256']],
+                                   text=True, capture_output=True, env=self.env, timeout=30)
+        grants = self.grants(receipt)
+        for name, value in (('allowlist', allowlist), ('grants', grants)):
+            with self.subTest(consumer=name):
+                self.assertEqual(value.returncode, 20, value.stderr)
+                self.assertIn('host-settings', value.stderr)
+                self.assertNotIn('must-not-leak', value.stderr)
+
+    def test_verified_reader_executes_held_bytes_and_hides_file_errors(self):
+        from unittest import mock
+        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read']}}))
+        receipt = self.boot()
+        guard = Path(receipt['guard'])
+        held_guard = HC.read_regular(str(guard))
+        marker = self.base / 'reader-race-marker'
+        actual = HC.read_regular
+        changed = [False]
+        def read_then_replace(path, *args, **kwargs):
+            raw = actual(path, *args, **kwargs)
+            if str(path) == str(guard) and not changed[0]:
+                changed[0] = True
+                guard.write_text(f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\ndef read_host_settings(*a): return {{'user_settings':'/forged','user':{{}}}}\n")
+            return raw
+        with mock.patch.object(HC, 'read_regular', side_effect=read_then_replace):
+            value = HC.verified_host_settings(receipt['state'], receipt['sha256'])
+        self.assertTrue(changed[0])
+        self.assertEqual(value['user_settings'], str(self.cfg / 'settings.json'))
+        self.assertFalse(marker.exists())
+
+        # A valid cache for different source bytes must likewise be inert.
+        guard.write_bytes(held_guard)
+        import importlib._bootstrap_external as be
+        st = os.stat(guard)
+        evil = compile(f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n", str(guard), 'exec')
+        pyc = be._code_to_timestamp_pyc(evil, int(st.st_mtime), st.st_size)
+        cache = guard.parent / '__pycache__'; cache.mkdir()
+        (cache / f'environment-guard.{sys.implementation.cache_tag}.pyc').write_bytes(pyc)
+        value = HC.verified_host_settings(receipt['state'], receipt['sha256'])
+        self.assertEqual(value['user_settings'], str(self.cfg / 'settings.json'))
+        self.assertFalse(marker.exists())
+
+        # Unknown filesystem detail is not a grants diagnostic.
+        target = self.cfg / 'SECRET_SENTINEL_target'; target.write_text('{}')
+        (self.cfg / 'settings.json').unlink(); (self.cfg / 'settings.json').symlink_to(target.name)
+        receipt = self.boot(); target.unlink()
+        p = self.grants(receipt)
+        self.assertEqual(p.returncode, 20)
+        self.assertNotIn('SECRET_SENTINEL', p.stderr)
+
+    def test_grants_requires_the_held_absolute_user_settings_path(self):
+        (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read']}}))
+        receipt = self.boot()
+        p = run('grants', '--state', receipt['state'], '--expect-sha256', receipt['sha256'],
+                '--user-settings', 'settings.json', env=self.env)
+        self.assertEqual(p.returncode, 20)
+        self.assertIn('保持した絶対パス', p.stderr)
+        elsewhere = self.base / 'elsewhere'; elsewhere.mkdir()
+        p = subprocess.run([sys.executable, '-I', '-B', str(SCRIPT), 'grants', '--state', receipt['state'],
+                            '--expect-sha256', receipt['sha256'], '--user-settings', str(self.cfg/'settings.json')],
+                           cwd=elsewhere, text=True, capture_output=True, env=self.env, timeout=30)
+        self.assertEqual(p.returncode, 0, p.stderr)
+
     def test_skill_changed_after_snapshot_stops(self):
         self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read\n')
         receipt = self.boot()
@@ -823,15 +894,13 @@ class GrantsTests(Base):
 
 
 class SplitRulesParityTests(unittest.TestCase):
-    def test_same_as_loop_sh(self):
-        src = (ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/loop.sh').read_text(encoding='utf-8')
-        start = src.index('def split_rules(value):')
-        end = src.index('\n\n\n', start)
-        namespace = {}
-        exec(src[start:end], namespace)
+    def test_same_as_environment_guard(self):
+        spec = importlib.util.spec_from_file_location('environment_guard_rules', GUARD)
+        namespace = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(namespace)
         for value in ('Read, Grep', 'Bash(git add *) Read', 'Bash(a, b),Edit', '  ', 'Bash((x)) y'):
             with self.subTest(value=value):
-                self.assertEqual(HC.split_rules(value), namespace['split_rules'](value))
+                self.assertEqual(HC.split_rules(value), namespace.split_rules(value))
 
 
 if __name__ == '__main__':
