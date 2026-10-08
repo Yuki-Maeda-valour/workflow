@@ -1,5 +1,7 @@
 # 基準コミットの記録と代替基準
 
+Git 対象の内蔵 implementer へ渡す読取りは、Phase 3 の各委託直前に [implementation-git.md](implementation-git.md) の必要環境確認と `prepare` を通す。ここで export した設定を別の実行環境へ暗黙継承させず、新入口が毎回事前検査と無効化を再確認する。
+
 `loop.sh` の周(無人ループの 1 回分の実行)では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。
 
 **診断表示**: 改竄の疑いの各列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。表示から元の値は復元できないため、承認には出力された承認ダイジェストを使う。対象範囲と元データの保持は [external-runners.md §9-1](external-runners.md) を参照する。

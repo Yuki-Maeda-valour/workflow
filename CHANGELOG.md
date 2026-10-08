@@ -2,6 +2,12 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.25.0
+
+### 追加
+
+- 内蔵 implementer が Git を読むための `implementation-git.py` を追加した。承認済み filter の無効化、物理 root、承認値を照合値で束ね、状態・差分・履歴・ファイル一覧の5操作だけを別の子環境で実行する。初回、条件 B、再依頼、外部失敗後、M2 の引き継ぎで必要環境確認と新しい引き渡しを行う。品質コマンド内の Git、利用者環境全体、比較不能からの復帰は保証に含めない。([Issue #238](https://github.com/Yuki-Maeda-valour/workflow/issues/238))
+
 ## v4.24.9
 
 ### 修正
