@@ -15,7 +15,9 @@
 - 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 起動できる配置は、プラグインのルート(`loop.sh` の物理パスから 4 階層上 = `scripts/` から 3 階層上。`.claude-plugin/plugin.json` の `name` が `dev-workflow`)の下にあるときだけ。このリポジトリの clone・導入先のキャッシュ・setup.sh の `--link` の配置(物理パスで clone のルートに解決されて起動する)が当たる。setup.sh の `--copy` の配置は plugin.json を置かないので止まる
 - cron から呼ぶときは、利用者が持つこのリポジトリの clone のパスで呼ぶ。導入先のキャッシュは版ごとのパスで、プラグインを更新しても古い版が黙って走るため
-  - cron の環境は PATH が短いので、ホスト CLI・gh・品質ゲート(書式・型・テスト・ビルドの自動の検査)のコマンドが見える PATH を crontab に書く。`HOME`・`XDG_STATE_HOME`・`XDG_CONFIG_HOME` は手動の起動と揃える(揃わないと状態ディレクトリが別になり、ロックと止めの印〈人が消すまで無人ループを止める印のファイル〉が共有されない。`XDG_CONFIG_HOME` が違うと、手動で書いたホスト CLI の証明が見つからず止まる)。ループ用の設定ディレクトリ(`CLAUDE_CONFIG_DIR`)で起動するなら、cron にも同じ値を絶対パスで渡す(crontab の環境変数の行〈`名前=値`〉は `~` を展開しない)。hook のコマンドを包む環境変数(`CLAUDE_CODE_SHELL_PREFIX`)は外して起動する。非空なら起動前に止まる(§2)
+  - cron の環境は PATH が短いので、ホスト CLI・gh・品質ゲート(書式・型・テスト・ビルドの自動の検査)のコマンドが見える PATH を crontab に書く。`HOME`・`XDG_STATE_HOME`・`XDG_CONFIG_HOME` は手動の起動と揃える(揃わないと状態ディレクトリが別になり、ロックと止めの印〈人が消すまで無人ループを止める印のファイル〉が共有されない。`XDG_CONFIG_HOME` が違うと、手動で書いたホスト CLI の証明が見つからず止まる)。
+  - `HOME` は空でない絶対 NFC パス(NFC は、同じ文字を表す別の並びを一つの形にそろえる Unicode の正規化方式)にする。`CLAUDE_CONFIG_DIR` は未設定のときだけ `HOME/.claude` を使い、設定した空文字・相対パス・NFC でない値は受け付けない。先頭の `//` と `..` 成分は拒否し、内部の `//`・`./`・末尾の `/` は同じ物理パスへ正規化して受け付ける。`~` と環境変数の文字列は展開しない。ループ用の設定ディレクトリで起動するなら、cron にも同じ値を渡す。設定の `env` による読込先の変更は §9 で拒否する。
+  - hook のコマンドを包む環境変数(`CLAUDE_CODE_SHELL_PREFIX`)は外して起動する。非空なら起動前に止まる(§2)
 - `loop.sh` は自分のプラグインルートを、周のホスト CLI に必ず渡す(フラグは既定表)。導入済みの同名プラグインとの関係は §2 の 12
 
 ### 引数
@@ -95,7 +97,7 @@
 12. ホスト CLI の実在: 実行ファイルを `command -v` で絶対パスに解決する(無い・`/` で始まらなければ理由コード `host-cli-missing`。PATH に `.` などがあると、周でリポジトリの中の同名の実行ファイルが起動されうるため)。補助の CLI と周の子の両方に、その実体の realpath(下の「ホスト CLI の証明」で控えたもの)を使う。周の子の起動に使う `env`・`setsid` も絶対パスに解決する(`/` で始まらなければ `tool-missing`)。続けて、雛形のフラグの 2 段照合(argv とホストの `--help`)。`--host-argv` は先に 5 の許可表で検査済みであり、help の照合によって未知の引数や短い別名を許可へ戻さない。導入済みの同名プラグイン: ホスト CLI のプラグイン一覧(補助の CLI)で有効な `dev-workflow` を探し、在って版が `loop.sh` のプラグインの版と違えば止まる(更新か無効化を案内する)。一覧を解析できなければ止まる(黙って素通りしない)。同じ版なら続けて報告する
    - help の照合は、固定引数と導入版との互換性の診断に使う。上書きした argv では、5 の許可表で先に受理した値付きの長い引数について、help に必須値の表記があれば `=` 形式を追加で確かめる。許可表にない引数や短い別名を受理するためには使わない。
    - **ホスト CLI の証明(#107 H31。#193)**: 実行ファイルを一度も起動しないうちに、`host-check.py identity` で実体(realpath・dev・ino・size・mtime・ctime・内容の sha256)を控える。以後の補助の CLI・周の子・`--prove-host` の確認は、すべてその realpath で起動する。起動の直前に同じ実体かを照合する(補助の CLI と周の子の起動の直前は stat の値〈dev・inode・size・mtime・ctime〉、周を始める前〈周の途中の印を置く前〉と確認の前後は内容の sha256 まで)。違えば起動しない(周を始める前は exit 20・`host-proof` で、周の途中の印を残さない。補助の CLI では `ERROR [host-proof]` を出して、呼んだ検査の理由〈多くは `environment`〉で止まる。どちらも終わりの環境の照合が通らないので、選定中の worktree は「選定中」の lock のまま残して報告する。人が確かめて片付ける)
-   - 証明は、人が `--prove-host` で実 hook の拒否を確かめた記録。実体(realpath・dev・ino・size・sha256)と起動の形(`loop.sh` が足す隔離・権限・hook のフラグ、権限のモード、hook の設定の雛形の要約)の組ごとに 1 ファイルで、置き場は `${XDG_CONFIG_HOME:-$HOME/.config}/dev-workflow/loop/host-proofs/`(状態ディレクトリとは別)。許可リスト・MCP の設定・`--host-argv` の上書きの値は形に入れない。このため、許可リスト・利用者の設定・設定ディレクトリを変えても、証明は使い続けられる。証明は、ホスト CLI が hook を呼ぶ仕組みを確かめるもので、許可リストで許した呼び出しは hook に届かない。広げた分は証明の外になる(§4・#107 の H47。限界は §10)。`--allow-classifier` は今は拒否する(#107 の H48: 分類器の起動での許可の仲介の素通り)
+   - 証明は、人が `--prove-host` で実 hook の拒否を確かめた記録。実体(realpath・dev・ino・size・sha256)と起動の形(`loop.sh` が足す隔離・権限・hook のフラグ、権限のモード、hook の設定の雛形の要約)の組ごとに 1 ファイルで、置き場は `${XDG_CONFIG_HOME:-$HOME/.config}/dev-workflow/loop/host-proofs/`(状態ディレクトリとは別)。許可リスト・MCP の設定・`--host-argv` の上書きの値は形に入れない。このため、許可リスト・利用者の設定・設定ディレクトリを変えても、証明は使い続けられる。ただし、起動ごとに §9 のパス・設定の検査を通る。証明は、ホスト CLI が hook を呼ぶ仕組みを確かめるもので、許可リストで許した呼び出しは hook に届かない。広げた分は証明の外になる(§4・#107 の H47。限界は §10)。`--allow-classifier` は今は拒否する(#107 の H48: 分類器の起動での許可の仲介の素通り)
    - 証明が無い・形が違う・実体の値が違えば、ホスト CLI を起動せずに exit 20(`host-proof`)。ホスト CLI を更新したとき(native の導入〈ホスト CLI を単体の実行ファイルとして入れる導入〉の自動更新を含む)も同じで、人が `--prove-host` で確かめ直すまで使わない。`--prove-host` は打った時点の実体を信頼する(偽の実体は確認を装える)ので、人は先に、更新が正規のものかを確かめる。確かめ方の例: native の導入なら、実体が `~/.local/share/claude/versions/<版>` のファイルそのもので、その版が `--version` の値と同じこと。npm の導入なら、導入元のパッケージと版。報告に出る実体の sha256 を控えておく。`loop.sh` は実体の真正性を確かめない(配布元の checksum などで人が確かめる手段があるかは未確認)
    - `--version` と `--help` を補助の CLI で打ち、雛形のフラグの照合の後に、証明を取った時の出力の sha256 と照らす。違えば exit 20(`host-proof`)。公式文書は、hook の自動の読み込みを飛ばし、保存したログイン(OAuth・keychain)を読まない起動が、将来ヘッドレスの起動の既定になるとする(design §7-3)。その変化(help の説明の変化を含む)を、確かめ直すまで使わない。補助の CLI は端末の幅の変数(`COLUMNS`・`LINES`)を外して打つ
    - **`--prove-host`**: 13 の疎通の後に、使い捨てのディレクトリ(状態ディレクトリの下)を周の worktree に見立て、周の子と同じ argv・監督と、push 先の 2 つを除く同じ環境変数で 1 回だけ起動する。cwd の外の決まったパスへの `Write` を 1 回だけさせる。次の 3 つがそろったときだけ証明を書く: 許可の仲介の記録にその `Write` の拒否がある(hook が呼ばれた)・結果の拒否の欄に同じ `Write` がある・ファイルができていない。確認の前後で実体の sha256 も照らす。認証の失敗・hook が呼ばれない・書けた・試みない・時間切れ(既定 600 秒か周の上限の短い方)では書かずに exit 20。書いたら周を回さずに exit 0
@@ -107,7 +109,8 @@
 
 - 2 の直後に、ホストの読み込みを変える環境変数(`CLAUDE_CODE_SIMPLE`〈hook の自動の読み込みを飛ばし、保存したログイン(OAuth・keychain)を読まない起動に当たる〉・`CLAUDE_CODE_SAFE_MODE`〈hook などを読み込まない安全モード〉)が立っていれば、証明の形の外の起動になるので、ホスト CLI を起動せずに止まる(exit 20・`hooks-disabled`)。起動引数で渡す許可の仲介の hook がこの起動で動くかは未確認(事実と出典は design §7-3)
 - その直後に、起動時の環境の `CLAUDE_CODE_SHELL_PREFIX` が非空なら止まる(exit 20・`shell-prefix`)。この値は、hook のコマンドを別のプログラムで包む指定であり、許可の仲介を確かめた起動と形が違う。値は出さず、外してから起動するよう案内する。未設定と空文字は通す。`--dry-run` と `--prove-host` も同じ検査を通し、`--help` は引数の検査で先に終了する。
-- 12 の後・13 の疎通より前に(`--dry-run` でも)、許可の仲介の hook を無効にする設定(`disableAllHooks`・`allowManagedHooksOnly`)を確かめ、あれば止まる(exit 20・理由コード `hooks-disabled`。§9 の起動時の検査)。あわせて許可の仲介の許可リストを作る(§9)
+- 既知の設定入口を変える `CLAUDE_CODE_REMOTE_SETTINGS_PATH`・`CLAUDE_CODE_MANAGED_SETTINGS_PATH`・`CLAUDE_CODE_MOCK_REMOTE_SETTINGS` が起動時に非空なら、exit 20(`host-config-source`)で止まる。
+- 道具と配布元を確認した後、ホスト CLI を確認する前に、HOME と設定ディレクトリのパスを検査する。不正なら設定本文と補助のホスト CLI を読まず、exit 20(`host-config-path`)で止まる。既存の止めの印と `inflight` は設定本文を読む前に保全して停止する。印が無ければ利用者環境を控え、最初の補助のホスト CLI より前に §9 の設定を検査する。有効 plugin を控え直した後も同じ検査を行い、その利用者設定から許可リストを作る。通常・発見・`--dry-run`・`--prove-host` は共通の検査を通る。
 - 補助の CLI(`--version`・`--help`・プラグイン一覧・認証の確認)は、cwd を状態ディレクトリにして(リポジトリの設定を読ませない)、stdin を `/dev/null`・`setsid`・タイムアウト(`--net-timeout`)で打つ。`--host-argv` で置き換えたときは、置き換え後の実行ファイルで打つ
 - 追跡外のタスクの検査(決定録 2026-09-23 の決定 10)は、task_dir の解決に worktree が要るので、最初の周の §3 の 3a で行う(止まるときは worktree を消してから exit 20)。発見モードでは行わない(§11)
 - **origin の URL の検査**(両方のモード。10 の後・11 の `ls-remote` より前): 周の前提(unattended-mode.md §1 のタスクの周・discover-mode.md §4)と同じ検査を起動時に行い、食い違う構成で周を失敗させ続けないようにする。どの理由にも URL の字面を出さない(認証情報を含みうる。stderr は状態ディレクトリの `origin-repo.err` に置く)
@@ -169,6 +172,7 @@ Git の引用・継続行は Git 自身で解析し、include は自動で開か
 開始時の字面・リンクと対象の実体・対象の内容または配下の集合を保持する。設定ファイルの多段リンクは最大 40 段で打ち切る。
 再照合では字面と対象実体を本文読取前に比較する。リンク先の親と内部は nofollow で開き、配布コピー内部のリンクは許さない。
 存在しない既定設定と include 先も「無し」として保持し、追加を検出する。通常完走の後の新しい起動は、その時点を新たな信頼開始にするため、人の正常な設定更新を受け付ける。
+利用者設定に加え、設定ディレクトリの `remote-settings.json` も控える。設定の共通 reader は、控えた内容 hash・mode・不在と関係する最終ファイルリンクを照合し、照合した同じ bytes だけを解析する。設定本文は状態と診断へ保存しない。単独の利用者設定・管理設定本体・cache の保持済み最終ファイルリンクは、リンクの連鎖と対象が同じときに使える。親ディレクトリのリンクと管理 drop-in tree 内のリンクは拒否する。
 
 既知 shell の対象は HOME の profile/bash/zsh 起動ファイル、BASH_ENV/ENV/ZDOTDIR の指定先と system の起動設定。
 そこから呼ぶ任意の外部 script、credential helper の実体、PATH の全実行ファイル、OS/Python 標準ライブラリはこの集合に含めない。
@@ -414,6 +418,8 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 
 `loop.sh` の実 CLI での受け入れの手順の要点。一式(テスト用のリポジトリを組み立てるスクリプト・プローブ・結果を集めるスクリプト)は team-lead(作業を進め、結果を確かめる側の AI)が用意し、人が読んでから使う。合否は Issue #68 の完了条件 6、結果は Issue のコメント、実測した事実は design §7-3 に残す。
 
+- **H50 の実測**: Linux の Claude Code 2.1.293 で、正常設定の `--prove-host` は拒否 hook を確認して証明を作り、`--dry-run` も通った。利用者設定と `remote-settings.json` の `env` に `CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`・`CLAUDE_CODE_SHELL_PREFIX` をそれぞれ置いた計8件は、ホスト CLI を1回も起動せず exit 20(`host-settings`)で止まった。これは loop の起動前検査の観察であり、cache の値がホストへ適用されたことや許可の素通りが成立したことを示さない。個人プランの cache 非適用の観察を他プランへ一般化しない。結果は [Issue #229](https://github.com/Yuki-Maeda-valour/workflow/issues/229)。
+
 - **人が素の端末で行う**: ホストのセッションの中からはホストと同じ CLI を起動しない(design §5-5)。`loop.sh` もホストの中では止まる。GitHub には使い捨ての private リポジトリを 1 つ作り(作成と削除は人)、`$HOME` の下の隠しでない場所(`/tmp` でない)に clone する。merge の前に行う
 - **確かめる 6 件**: X(PR)・Y(`needs-user` で保留)・Z(無人の前提を欠いて失敗扱い)・W(承認後の本文の変更で保留)・R(基準行つきの再開)・T(時間切れと、切り離したプロセスの片付け。`origin` の無いローカルのリポジトリで行う)。周の中の改竄は実 CLI では決定的に起こせないので含めない(#67 の scratch の通し確認で確かめ済み。攻撃経路は #107)
 - **テスト用のリポジトリ**: init-project の gitignore の断片(状態ファイル 3 つ)を入れて commit しておく(§3 の 2a。無いと `--dry-run` も exit 20)
@@ -464,7 +470,7 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
   - 周の worktree の `.claude/reviews/` の下(`.claude/reviews/` そのものは `mkdir` の作成先としてだけ。削除・移動の対象にしない)
   - 周の worktree の `.claude/grasp.md`・`.claude/.understand-project-done`
   - `.claude/` そのものは入れない(① で先に作るので要らない)
-- **許可リスト**(hook が Bash のコマンドを照合する): `loop.sh` が起動時に、`--allowed-tools` の `Bash` の項目と、利用者の設定(`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`)の `permissions.allow` の `Bash` の項目を読んで直す(利用者の設定が読めなければ、そのことを起動時の報告に出して、その設定の項目を使わずに続ける)
+- **許可リスト**(hook が Bash のコマンドを照合する): `loop.sh` が起動時に、`--allowed-tools` の `Bash` の項目と、共通 reader で検査済みの利用者の `settings.json` の `permissions.allow` の `Bash` の項目を読んで直す。設定が読めないか不正なら、その項目だけを無視して続けず exit 20 で止める。設定ファイルの不在は許す。
   - `Bash` だけ = すべてのコマンド / 末尾の ` *` か `:*` = 単語の区切りでの接頭辞 / `*` を含まない = 完全一致(`Bash(npm run build)` は `npm run build --watch` に一致しない)/ ほかの形(途中の `*`・`Bash()`・`Bash( )`・`Bash(*)` など)= 使わない(起動時の報告に出す)。「すべて」になるのは `Bash` だけ(公式文書では `Bash(*)` は `Bash` と同じだが、許可の仲介は `Bash` だけを「すべて」とする)
   - 直すときは、`--allowed-tools` か利用者の設定の `permissions.allow` を直す(profile では受け付けない)
 - **判定の要点**(決定的。入力の `tool_name`・`tool_input`・`cwd` と環境変数だけで決める。細部は `loop-permission.py` と Issue #68 の D22)
@@ -518,9 +524,10 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 - **記録**: hook は呼ばれるたびに、1 呼び出し 1 行の JSON を記録のファイル(状態ディレクトリの `<実行 ID>/iter-<周の番号>.permlog`)に足す。項目は `time`・`tool_name`・`cwd`(入力の)・`decision`(`allow` / `deny`)・`kind`(deny の種類。`protected` = 保護パスの下で W の外への書き込みだけが理由 / `other` = それ以外)・`reason`・`subject`(対象のパスかコマンドの先頭 500 文字)。実測のため allow も記録する。周ごとに allow・deny の数と deny の行を朝の報告に写す(§7)
 - **`G1` の数え方**: 許可の仲介の記録は子が書ける参考記録なので、`G1` の保留は、拒否の記録の種類・欠落・順序にかかわらず、許可の拒否の保留の連続(§6)に数える(種類 `protected` だけの拒否も数える)。報告には種類を分けて出す
 - **hook が動いていない疑い**: `loop.sh` は自動では判定しない。周の報告の許可の仲介の行(allow・deny の件数)で、deny が 0 件なのに `G1` の保留がある周は、人が見て、hook が動いているかを確かめる(§7)。allow も 0 件で「許可の参考記録を読めない」の行が出るなら、hook が一度も呼ばれていない疑いが強い
-- **起動時の検査**(§2 の 12 の後・13 より前): 利用者の設定(`${CLAUDE_CONFIG_DIR:-~/.claude}/settings.json`)か管理者設定に `disableAllHooks: true`、管理者設定に `allowManagedHooksOnly: true` があれば止まる(exit 20・理由コード `hooks-disabled`。起動引数で渡す hook が動かず、周がすべて `G1` になるため)。見る設定のファイルが在って読めないときも止まる(許可リストの読み取りとは扱いが違う — 黙って素通りしない)
-  - 管理者設定の置き場は `/etc/claude-code/managed-settings.json` と `/etc/claude-code/managed-settings.d/*.json`(Linux の既定の置き場。実走で確かめる)
-  - 試験用のフック `DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR`(`loop-selftest.sh` が使う): その下の `managed-settings.json` と `managed-settings.d/*.json` を、見る管理者設定に足すだけ(既定の置き場は必ず見る。止める向きにしか効かない)
+- **起動時の検査**(§2 のホスト CLI を確認する前): 最初の補助のホスト CLI より前と、有効 plugin を控え直した後に、利用者の `settings.json`・`remote-settings.json`・Linux の `/etc/claude-code/managed-settings.json`・`managed-settings.d` の直下にある非隠しの小文字 `.json` を検査する。設定が存在しなければ通すが、読取不能・不正な UTF-8/JSON・object でない本文・全階層の重複キー・NaN/Infinity のリテラル・深さ制限超過は止める。`env` は object、各値は文字列とする。
+  - `env` の `CLAUDE_CONFIG_DIR`・`HOME`・`XDG_CONFIG_HOME`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`・`CLAUDE_CODE_SHELL_PREFIX` は、値を問わず存在すれば exit 20(`host-settings`)で止める。既知の設定入口を変える3つの環境変数は、起動時は非空、設定の `env` では存在するだけで exit 20(`host-config-source`)で止める。これら3つは配布実体の静的調査で確認した名前で、公式の対応フラグや現在有効な迂回手段とは扱わない。
+  - top-level の `policyHelper`・`policyHelpers` は値を問わず拒否し、helper は実行しない。利用者・管理設定・cache の `disableAllHooks: true` と、管理設定・cache の `allowManagedHooksOnly: true` は exit 20(`hooks-disabled`)で止める。設定値や例外本文は診断へ出さない。
+  - 試験用の `DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR`(`loop-selftest.sh` が使う): その下の `managed-settings.json` と `managed-settings.d/*.json` を、見る管理設定に足すだけ(既定の置き場は必ず見る。止める向きにしか効かない)
 - 効き方(保護パスの書き込みで hook が呼ばれること・リポジトリ側の設定を読ませない起動のもとで起動引数で渡す hook が効くこと・`reviews-dir.sh` が確認に回らないこと・利用者の側の hook と重なったときの挙動)は実走のプローブで確かめる(§8)
 
 ## 10. 受け入れる限界
@@ -546,11 +553,10 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
   - `--prove-host` は打った時点の実体を信頼する。実体が偽物なら、子の環境で受け取る記録の置き場に拒否の行を書き、結果の JSON を作って、確認を装える。確認の判定は、正規の実体が許可の仲介の hook を呼ぶことを確かめるもので、実体の真正性は確かめない
   - ホスト CLI を更新するたびと、`loop.sh` の起動の形(hook の設定の雛形など)が変わる版に上げたときに、人が `--prove-host` を打つ運用になる。native の導入は、版ごとの置き場(`~/.local/share/claude/versions/<版>`)に新しい版を置いてリンクを張り替える形と推測される(実ホストの確認は自動更新を止めて行ったので、更新の挙動は未確認)。その形なら、実行中のループは控えた版のまま続き、次の起動で証明を求める。同じ置き場の実体が書き換えられ・差し替えられ・消されたとき(npm の導入など)は、次の補助の CLI か周の子の起動の前に止まる。ループ用の環境では `DISABLE_AUTOUPDATER=1` で更新の時機を人が決めることを推奨する(事実と出典は design §7-3)
   - `--allow-classifier` の無人ループは起動しない(`loop.sh` が拒否する)。2.1.289 では、確認の `Write`(worktree の外)を分類器が許可の仲介の hook を通さずに許したため、証明を書けない(#107 の H48)
-  - ホスト CLI の環境変数の値自体は証明に結び付かない。`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`・`CLAUDE_CODE_SHELL_PREFIX` は、証明との照合によらず、§2 の 2 の直後に起動時の非空を拒否する。`CLAUDE_CODE_SHELL_PREFIX` は、hook のコマンドを別のプログラムで包む指定である。起動時の環境でこの値が非空なら、§2 の検査が状態・ロック・補助のホスト CLI・周・証明の保存より前に exit 20(`shell-prefix`)で止める。値は出さず、未設定と空文字は通す。包むプログラムが hook の代わりに判定を返しうることは公式説明からの推測であり、実ホストで許可を素通りできたことは測っていない。利用者・管理設定の `env` が後でこの値を加える経路はこの検査の外であり、#107 の H50 に残る。
-  - 設定ディレクトリの解き方と、設定の `env` の値も結び付かない(範囲の外。解き方の分析は #107 の H50)。成り立つ条件: `CLAUDE_CONFIG_DIR` が空・相対・NFC(Unicode の正規化の形の 1 つ。同じ文字を表す別の並び〈「が」1 文字と「か」+結合用の濁点〉を 1 つの形にそろえる)でない値か、それが無いときに `HOME` が相対か NFC でない値。または、利用者の設定・管理設定の `env` に `CLAUDE_CONFIG_DIR`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`・`CLAUDE_CODE_SHELL_PREFIX` がある。影響: `loop.sh` が検査した置き場・環境変数と、ホストが補助の CLI・周で使う値が食い違いうる。その結果、§4 で検査していない skill・command の `allowed-tools`・設定・hook の包み方で周が動き、許可の仲介を素通りしうる(未確認)。ホストの解き方は 2.1.289 を静的に読んだ(実ホストでは未確認)。公式文書は、設定の `env` の値をプロセスの環境に書くとし、`CLAUDE_CONFIG_DIR` をそこで設定できるとする(design §7-3)。この 4 つが読み込みの前に効くかは未確認。検出: 一部の形(`/` 以外から起動したときの相対の値・`~` で始まる値)は、環境の控えとの食い違いで止まる。claude.ai のログインなら、認証の確認でも止まりうる(推測)。すべては検出しない。運用: `CLAUDE_CONFIG_DIR` と `HOME` は空でない絶対パス(NFC)で渡し、設定の `env` にこれらの変数を置かない
-  - 許可リスト・利用者の設定・設定ディレクトリ(`CLAUDE_CONFIG_DIR`)・ログインは、証明に結び付かない。成り立つ条件: 証明の後に、道具の名だけの規則(`Write` など)を許可リストに足すと、その呼び出しは hook に届かない(#107 の H47)。検出できるのは、hook を止める設定(§9 の起動時の検査)と、skill の `allowed-tools`(§4)だけ。運用: これらを変えたら `--prove-host` を打ち直すことを勧める。打ち直しが止まっても、古い証明は残って使われ続けるので、人が変更を戻すか、証明のファイル(置き場は §2 の 12。ファイルのパスは起動時の報告の「ホスト CLI の実体」の行に出る)を退ける(次の起動から止まる。実行中のループは停止ファイル〈§6〉で次の周の前に止める。走っている周も止めるなら `loop.sh` に TERM を送る)
-  - 実ホストで行っていない確認(未確認): 1 回の起動の中でのリンクと対象の差し替え・npm(スクリプトの形)のホストの実体・証明を使った実際の周・同じ実体で `--help` の出力だけが変わる場合(単体の回帰と selftest だけ。実ホストでは版の違う実体に差し替えて止まることを見た)
-  - 実ホストで確かめたこと(2.1.289): hook を止める設定(`disableAllHooks`)があると、`--dry-run`・`--prove-host` が `hooks-disabled` で止まった
+  - ホスト CLI の環境変数の値と設定ディレクトリは証明に結び付かない。ただし、HOME と `CLAUDE_CONFIG_DIR` の起動条件、および控えたローカル設定の `env` と helper の検査は起動ごとに行う。H50 が防ぐのは、既知のパス解決の食い違い、検査する利用者・管理設定・cache が後置きする禁止キー、控え後に残るそれらの変更である。
+  - 正規の server 管理者は信頼範囲に残る。起動時・定期取得時の将来応答、cache に保存されない `-p` 用応答、その適用から次の照合までの作用は事前に固定も拒否もしない。cache の新設・変更は次の照合で止まるため、正当な更新でもループが止まる場合がある。同じ UID が検査間だけ改変して戻す競合は排除しない。macOS/Windows の管理設定は実装対象外で、WSL の Windows 管理設定継承も管理者信頼の範囲に残る。
+  - 許可リスト・利用者の設定・設定ディレクトリ(`CLAUDE_CONFIG_DIR`)・ログインは証明に結び付かない。道具名だけの規則で hook を通らない呼び出しが成立する H47、H46 の未検査の権限追加経路と同期の境界は、この変更では解消していない。H50 の設定検査・hook 停止の検査・skill の `allowed-tools` の検査は残る。変更後は `--prove-host` を打ち直すことを勧めるが、打ち直しが止まっても古い証明は残って使われ続ける。人が変更を戻すか、証明のファイルを退ける(次の起動から止まる。実行中のループは停止ファイル〈§6〉で次の周の前に止める。走っている周も止めるなら `loop.sh` に TERM を送る)。
+  - 実ホストで行っていない確認(未確認): 1 回の起動の中でのリンクと対象の差し替え・npm(スクリプトの形)のホストの実体・証明を使った実際の周・同じ実体で `--help` の出力だけが変わる場合(単体の回帰と selftest だけ。実ホストでは版の違う実体に差し替えて止まることを見た)。
 - skill・command の権限の追加の検査(§4。#107 H34)の限界
   - skill の frontmatter の `hooks`・plugin の `hooks/hooks.json`・利用者の skills の下の `.claude-plugin/plugin.json`(skill のフォルダを plugin として読む形)の hooks と MCP の宣言は調べない(マニフェストの `commands` の `allowedTools`・`content` は §4 で判定する)。`PreToolUse` の hook が allow を返すと、許可の判定と許可の仲介を飛ばしうる(利用者の側の hook と同じ型。#107 の H46)。運用: ループ用の設定ディレクトリには、hooks と MCP の宣言を人が確かめた plugin と skill だけを入れる
   - 企業向け(管理設定のディレクトリ)の skill は調べない(管理者の信頼の範囲)
