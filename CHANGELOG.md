@@ -2,6 +2,15 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.24.7
+
+### 修正
+
+- 無人ループは、Read・Grep・Glob・Write・Edit・NotebookEdit・旧 MultiEdit の道具名だけの allow と `Tool(*)`、対象 tool の空括弧・曖昧な構文・既知の入力欄を照合する形を拒否する。CLI・保持済みの user/managed/drop-in/cache 設定・追加定義へ同じ判定を適用し、初期段階で分かる異常は補助 CLI 前、有効 plugin 一覧の後に分かる異常はセッション前に止める。型違いを無視せず、deny/ask や同じ親規則で免除しない。
+- Read/Edit の明示 scope、検索道具を戻す scoped Glob/Grep、agent の利用可能ツール指定を維持する。検索の括弧をファイル許可範囲の保証にはせず、全操作が hook を通るとも扱わない。既存の Bash 許可リストは user と CLI だけから作る。
+- 許可判定版、CLI 規則、設定の出所ごとの allow を証明へ結び付けた。更新後は同じ引数・設定で `--prove-host` を取り直す。規則の追加・削除・scope 変更に対応する証明がなければ停止し、無変更の別 run では再利用する。
+- v4.24.6 で保持が漏れていた Linux 管理側の command root を追加した。正常な command の名前解決と公開条件を保ち、権限・hook と定義変更を検査する。固定 root の根拠はホスト実体の静的解析、回帰は追加 managed root の fixture であり、実 system 管理設定は変更していない。直接の利用者 hook、同 UID、未知の同名組込み、将来の正規 server 応答、他 OS の境界は残る。([Issue #231](https://github.com/Yuki-Maeda-valour/workflow/issues/231)・[Issue #232](https://github.com/Yuki-Maeda-valour/workflow/issues/232)、親 #107 の H46 追加修正・H47)
+
 ## v4.24.6
 
 ### 修正
