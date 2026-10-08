@@ -74,9 +74,9 @@ class EnvironmentGuardTests(unittest.TestCase):
     def test_reused_output_never_executes_previous_guard(self):
         self.bundle.mkdir(); (self.bundle/'environment-guard.py').write_text('raise SystemExit(0)')
         self.assertEqual(self.run_guard('bootstrap','--root',self.root,'--output',self.bundle).returncode,20)
-    def test_observation_gap_restore_limit(self):
+    def test_component_full_stat_rejects_restored_content(self):
         self.boot(); old=self.file.read_bytes(); self.file.write_text('changed'); self.file.write_bytes(old)
-        self.assertEqual(self.verify().returncode,0)
+        self.assertEqual(self.verify().returncode,20)
 
 if __name__ == '__main__': unittest.main()
 
@@ -89,6 +89,40 @@ class EnvironmentGuardMoreTests(unittest.TestCase):
         spec=importlib.util.spec_from_file_location('environment_guard', SCRIPT)
         mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
         return mod
+    def test_read_components_returns_held_bytes_and_stable_policy_digest(self):
+        skill = self.home / '.claude/skills/one'; skill.mkdir(parents=True)
+        (skill / 'SKILL.md').write_text('---\nname: one\n---\nbody')
+        receipt = self.boot(); mod = self.module()
+        got = mod.read_components(self.bundle / 'environment.json', receipt['sha256'])
+        self.assertTrue(any(x['kind'] == 'personal-skill' and x['raw'].endswith(b'body') for x in got))
+        digest = mod.component_policy_digest(self.bundle / 'environment.json', receipt['sha256'])
+        self.assertRegex(digest, r'^[0-9a-f]{64}$')
+        (skill / 'SKILL.md').write_text('changed')
+        with self.assertRaises(mod.Stop): mod.read_components(self.bundle / 'environment.json', receipt['sha256'])
+
+    def test_component_tree_follows_multihop_directory_link_and_rejects_cycle(self):
+        mod=self.module(); skills=self.home/'.claude/skills'; skills.mkdir(parents=True)
+        final=self.base/'final'; final.mkdir(); (final/'SKILL.md').write_text('ok')
+        middle=self.base/'middle'; middle.symlink_to(final, target_is_directory=True)
+        (skills/'linked').symlink_to(middle, target_is_directory=True)
+        entries={}; mod.component_tree(skills, 'personal-skill', mod.Budget(), entries)
+        self.assertIn('component:personal-skill:'+str(skills)+'/linked/SKILL.md', entries)
+        (skills/'cycle').symlink_to('cycle', target_is_directory=True)
+        with self.assertRaises(mod.Stop): mod.component_tree(skills, 'personal-skill', mod.Budget(), {})
+
+    def test_component_tree_allows_skill_install_link_but_not_agent_link(self):
+        mod = self.module(); entries = {}; budget = mod.Budget()
+        outside = self.base / 'outside'; (outside / 'SKILL.md').parent.mkdir(parents=True)
+        (outside / 'SKILL.md').write_text('safe')
+        skills = self.home / '.claude/skills'; skills.mkdir(parents=True)
+        os.symlink(outside, skills / 'installed', target_is_directory=True)
+        mod.component_tree(skills, 'personal-skill', budget, entries)
+        self.assertIn('@link:component:personal-skill:' + str(skills) + '/installed', entries)
+        agents = self.home / '.claude/agents'; agents.mkdir()
+        os.symlink(outside, agents / 'bad', target_is_directory=True)
+        with self.assertRaises(mod.Stop):
+            mod.component_tree(agents, 'personal-agent', mod.Budget(), {})
+
     def test_empty_directory_budget_and_file_budget(self):
         from unittest import mock
         mod=self.module()
@@ -997,3 +1031,503 @@ class EnvironmentDirectLauncherTests(unittest.TestCase):
             result=self.parent_command('profile',str(profile),env=env)
             self.assertEqual((result.returncode,result.stdout),(0,'max_iterations=3\n'),result.stderr)
             self.assertTrue(marker.exists())
+
+
+class ComponentDescriptorTests(unittest.TestCase):
+    """H46: 新 target を開く前の照合と、保持 bytes の契約を確認する。"""
+    setUp = EnvironmentGuardTests.setUp
+    run_guard = EnvironmentGuardTests.run_guard
+    boot = EnvironmentGuardTests.boot
+    verify = EnvironmentGuardTests.verify
+    module = EnvironmentGuardMoreTests.module
+    def component(self, kind='personal-skill'):
+        mod = self.module()
+        root = self.base / 'components'
+        root.mkdir()
+        return mod, root, kind
+
+    def capture(self, mod, root, kind, **kwargs):
+        entries, blobs = {}, {}
+        mod.component_tree(root, kind, mod.Budget(), entries, blobs=blobs, **kwargs)
+        return entries, blobs
+
+    def test_plain_scoped_skill_and_direct_scoped_agents(self):
+        for kind in ('personal-skill', 'enterprise-skill', 'personal-agent', 'enterprise-agent'):
+            with self.subTest(kind=kind):
+                root = self.base / kind
+                (root / 'scope/one').mkdir(parents=True)
+                name = 'SKILL.md' if kind.endswith('skill') else 'reader.md'
+                (root / 'scope/one' / name).write_text('plain')
+                (root / name).write_text('direct')
+                mod = self.module()
+                entries, blobs = self.capture(mod, root, kind)
+                again, held = self.capture(mod, root, kind, expected=entries)
+                self.assertEqual(again, entries)
+                self.assertEqual(set(held.values()), {b'plain', b'direct'})
+
+    def test_absolute_relative_multihop_intermediate_and_dotdot(self):
+        mod, root, kind = self.component()
+        target = self.base / 'physical/inside'
+        target.mkdir(parents=True)
+        (target / 'SKILL.md').write_text('safe')
+        (self.base / 'intermediate').symlink_to('physical', target_is_directory=True)
+        (self.base / 'mid').symlink_to('intermediate/inside', target_is_directory=True)
+        (root / 'absolute').symlink_to(target, target_is_directory=True)
+        (root / 'relative').symlink_to('../physical/inside', target_is_directory=True)
+        (root / 'multi').symlink_to('../mid', target_is_directory=True)
+        # ../ is relative to the physical directory reached by the intermediate link.
+        (root / 'ordered').symlink_to('../intermediate/inside/.././inside', target_is_directory=True)
+        entries, blobs = self.capture(mod, root, kind)
+        self.assertEqual(len(blobs), 4)
+        self.assertEqual(set(blobs.values()), {b'safe'})
+        self.assertEqual(self.capture(mod, root, kind, expected=entries)[0], entries)
+
+    def test_same_physical_target_reads_once_and_keeps_aliases(self):
+        from unittest import mock
+        mod, root, kind = self.component()
+        target = self.base / 'target'; target.mkdir()
+        (target / 'SKILL.md').write_text('safe')
+        for name in ('first', 'second'):
+            (root / name).symlink_to(target, target_is_directory=True)
+        with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+            entries, blobs = self.capture(mod, root, kind)
+        self.assertEqual(reader.call_count, 1)
+        self.assertEqual(len(blobs), 2)
+        self.assertEqual(sum(key.startswith('@link:component:') for key in entries), 2)
+
+    def test_cycles_dangling_and_41_links_are_not_missing(self):
+        for mode in ('cycle', 'dangling', 'long'):
+            with self.subTest(mode=mode):
+                mod = self.module(); root = self.base / mode; root.mkdir()
+                if mode == 'cycle':
+                    (root / 'one').symlink_to('two'); (root / 'two').symlink_to('one')
+                elif mode == 'dangling':
+                    (root / 'one').symlink_to('does-not-exist')
+                else:
+                    target = self.base / 'chain'; target.mkdir()
+                    for i in range(41):
+                        (target / str(i)).symlink_to(str(i + 1))
+                    (target / '41').mkdir()
+                    (root / 'one').symlink_to(target / '0')
+                with self.assertRaises(mod.Stop):
+                    self.capture(mod, root, 'personal-skill')
+
+    def test_fifo_socket_and_nested_links_are_rejected(self):
+        import socket
+        mod, root, kind = self.component()
+        bad = root / 'bad'
+        os.mkfifo(bad)
+        with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+        bad.unlink()
+        sock = socket.socket(socket.AF_UNIX); self.addCleanup(sock.close)
+        sock.bind(str(bad))
+        with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+        bad.unlink(); (root / 'one').mkdir(); (root / 'one/linked').symlink_to(self.base)
+        with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+
+    def test_all_replacements_stop_before_new_body_read(self):
+        from unittest import mock
+        for change in ('parent', 'root', 'link', 'middle', 'target', 'directory', 'file', 'mode', 'new-entry'):
+            with self.subTest(change=change):
+                mod = self.module(); top = self.base / change; top.mkdir()
+                root = top / 'skills'; root.mkdir()
+                target = top / 'target'; (target / 'nested').mkdir(parents=True)
+                file = target / 'nested/SKILL.md'; file.write_text('old')
+                mid = top / 'mid'; mid.symlink_to('target')
+                link = root / 'linked'; link.symlink_to('../mid')
+                entries, unused = self.capture(mod, root, 'personal-skill')
+                if change == 'parent':
+                    top.rename(self.base / (change + '-old')); (top / 'skills/new').mkdir(parents=True)
+                    (top / 'skills/new/SKILL.md').write_text('new')
+                elif change == 'root':
+                    root.rename(top / 'old-skills'); (root / 'new').mkdir(parents=True)
+                    (root / 'new/SKILL.md').write_text('new')
+                elif change in ('link', 'middle'):
+                    alt = top / 'alt'; alt.mkdir(); (alt / 'SKILL.md').write_text('new')
+                    changed = link if change == 'link' else mid
+                    changed.unlink(); changed.symlink_to(alt)
+                elif change == 'target':
+                    target.rename(top / 'old-target'); target.mkdir(); (target / 'SKILL.md').write_text('new')
+                elif change == 'directory':
+                    (target / 'nested').rename(target / 'old-nested'); (target / 'nested').mkdir()
+                    (target / 'nested/SKILL.md').write_text('new')
+                elif change == 'file':
+                    file.rename(top / 'old-file'); file.write_text('new')
+                elif change == 'mode':
+                    file.chmod(0o600)
+                else:
+                    (root / 'new').mkdir(); (root / 'new/SKILL.md').write_text('new')
+                with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+                    with self.assertRaises(mod.Stop):
+                        self.capture(mod, root, 'personal-skill', expected=entries)
+                    self.assertEqual(reader.call_count, 0)
+
+    def test_changed_link_target_directory_is_not_opened(self):
+        from unittest import mock
+        mod, root, kind = self.component()
+        target = self.base / 'target'; target.mkdir(); (target / 'SKILL.md').write_text('old')
+        (root / 'one').symlink_to(target)
+        entries, unused = self.capture(mod, root, kind)
+        target.rename(self.base / 'old'); target.mkdir(); (target / 'SKILL.md').write_text('new')
+        real_open, opened = mod.os.open, []
+        def watch(name, *args, **kwargs):
+            opened.append(str(name)); return real_open(name, *args, **kwargs)
+        with mock.patch.object(mod.os, 'open', side_effect=watch):
+            with self.assertRaises(mod.Stop): self.capture(mod, root, kind, expected=entries)
+        self.assertNotIn('target', opened)
+
+    def test_missing_root_and_entry_creation_reads_no_body(self):
+        from unittest import mock
+        mod = self.module(); root = self.base / 'missing/skills'
+        entries, unused = self.capture(mod, root, 'enterprise-skill')
+        (root / 'one').mkdir(parents=True); (root / 'one/SKILL.md').write_text('new')
+        with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+            with self.assertRaises(mod.Stop): self.capture(mod, root, 'enterprise-skill', expected=entries)
+            self.assertEqual(reader.call_count, 0)
+
+    def test_post_read_link_replacement_rejects_result(self):
+        from unittest import mock
+        mod, root, kind = self.component()
+        target = self.base / 'target'; target.mkdir(); (target / 'SKILL.md').write_text('old')
+        link = root / 'one'; link.symlink_to(target)
+        real_read = mod.read_at
+        def replace(*args, **kwargs):
+            result = real_read(*args, **kwargs)
+            link.unlink(); link.symlink_to('missing')
+            return result
+        with mock.patch.object(mod, 'read_at', side_effect=replace):
+            with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+
+    def test_byte_entry_and_time_budgets_cover_link_walk(self):
+        from unittest import mock
+        mod, root, kind = self.component()
+        (root / 'one').mkdir(); (root / 'one/SKILL.md').write_text('large')
+        for limit, value in (('MAX_FILE', 1), ('MAX_TOTAL', 1), ('MAX_ENTRIES', 1), ('MAX_SECONDS', -1)):
+            with self.subTest(limit=limit), mock.patch.object(mod, limit, value):
+                with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+
+    def test_bootstrap_multihop_and_additive_managed_roots(self):
+        skills = self.home / '.claude/skills'; skills.mkdir(parents=True)
+        target = self.base / 'target'; target.mkdir(); (target / 'SKILL.md').write_text('plain')
+        (self.base / 'middle').symlink_to(target); (skills / 'one').symlink_to(self.base / 'middle')
+        managed = self.base / 'managed'
+        (managed / '.claude/skills/group/one').mkdir(parents=True)
+        (managed / '.claude/skills/group/one/SKILL.md').write_text('enterprise')
+        (managed / '.claude/agents').mkdir(); (managed / '.claude/agents/read.md').write_text('agent')
+        self.boot('--managed-dir', managed)
+        mod = self.module(); state = json.loads((self.bundle / 'environment.json').read_text())
+        paths = {entry['path'] for entry in state['specs']['components']}
+        self.assertTrue({'/etc/claude-code/.claude/skills', '/etc/claude-code/.claude/agents'} <= paths)
+        self.assertIn(str(managed / '.claude/skills'), paths)
+        got = mod.read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertTrue(any(item['kind'] == 'enterprise-agent' and item['raw'] == b'agent' for item in got))
+        self.assertEqual(self.verify().returncode, 0)
+
+    def test_reader_uses_walker_bytes_and_rejects_old_descriptors(self):
+        from unittest import mock
+        skills = self.home / '.claude/skills/one'; skills.mkdir(parents=True)
+        (skills / 'SKILL.md').write_text('old')
+        self.boot(); mod = self.module()
+        original = mod.read_regular
+        def state_only(path, *args, **kwargs):
+            self.assertEqual(Path(path), self.bundle / 'environment.json')
+            return original(path, *args, **kwargs)
+        with mock.patch.object(mod, 'read_regular', side_effect=state_only):
+            held = mod.read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertTrue(any(item['raw'] == b'old' for item in held))
+        state = json.loads((self.bundle / 'environment.json').read_text()); state['specs'].pop('components')
+        raw = mod.dump(state); legacy = self.base / 'legacy-state'; legacy.write_bytes(raw)
+        with self.assertRaises(mod.Stop): mod.read_components(legacy, mod.sha(raw))
+
+    def test_policy_digest_excludes_all_runtime_identity(self):
+        skills = self.home / '.claude/skills'; skills.mkdir(parents=True)
+        target = self.base / 'target'; target.mkdir(); (target / 'SKILL.md').write_text('same')
+        link = skills / 'one'; link.symlink_to(target)
+        self.boot(); mod = self.module()
+        first = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        # 同じ論理sourceを同じ内容で作り直した別runでも証明digestは変わらない。
+        link.unlink(); link.symlink_to(target)
+        old = target / 'SKILL.md'; old.unlink(); old.write_text('same')
+        self.bundle = self.base / 'second-bundle'; self.boot()
+        self.assertEqual(first, mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256']))
+
+    def marketplace(self):
+        config = self.home / '.claude/plugins'; config.mkdir(parents=True)
+        market = self.base / 'market'; (market / '.claude-plugin').mkdir(parents=True)
+        plugin = market / 'active'; (plugin / '.claude-plugin').mkdir(parents=True)
+        (plugin / '.claude-plugin/plugin.json').write_text('{"name":"active"}')
+        (plugin / 'SKILL.md').write_text('active')
+        # inactive entry は危険な外部参照でも全tree走査の理由にしない。
+        entry = {'name': 'active', 'source': './active', 'commands': {'safe': {'content': 'safe'}}}
+        (market / '.claude-plugin/marketplace.json').write_text(json.dumps({'plugins': [entry,
+            {'name': 'inactive', 'source': '/outside', 'hooks': './fifo'}]}))
+        os.mkfifo(market / 'fifo')
+        (config / 'known_marketplaces.json').write_text(json.dumps({'market': {'installLocation': str(market)}}))
+        (config / 'installed_plugins.json').write_text(json.dumps({'version': 2, 'plugins': {
+            'active@market': [{'installPath': str(plugin), 'scope': 'user'}]}}))
+        inventory = self.base / 'inventory.json'
+        inventory.write_text(json.dumps([{'id': 'active@market', 'enabled': True,
+                                         'scope': 'user', 'installPath': str(plugin)},
+                                        {'id': 'inactive@market', 'enabled': False, 'installPath': '/outside'}]))
+        return config, market, plugin, inventory
+
+    def test_selected_marketplace_is_held_without_inactive_tree(self):
+        config, market, plugin, inventory = self.marketplace()
+        self.boot('--inventory', inventory)
+        mod = self.module()
+        components = mod.read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+        selected = [item for item in components if item['kind'] == 'marketplace-manifest']
+        self.assertEqual(len(selected), 1)
+        self.assertEqual(selected[0]['entry'][0]['plugin'], 'active@market')
+        self.assertTrue(any(item['raw'] == b'active' for item in components))
+        self.assertFalse(any(item['path'].endswith('fifo') for item in components))
+        self.assertEqual(self.verify().returncode, 0)
+
+    def test_marketplace_missing_ambiguous_and_external_sources_fail(self):
+        config, market, plugin, inventory = self.marketplace()
+        installed = config / 'installed_plugins.json'
+        original = installed.read_bytes()
+        installed.unlink()
+        self.assertEqual(self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle,
+                                        '--inventory', inventory).returncode, 20)
+        installed.write_bytes(original)
+        manifest = market / '.claude-plugin/marketplace.json'
+        for index, data in enumerate(({'plugins': []}, {'plugins': [
+                {'name': 'active', 'source': './active'}, {'name': 'active', 'source': './active'}]},
+                {'plugins': [{'name': 'active', 'source': '../outside'}]},
+                {'plugins': [{'name': 'active', 'source': './missing'}]})):
+            manifest.write_text(json.dumps(data))
+            self.assertEqual(self.run_guard('bootstrap', '--root', self.root, '--output', self.base / str(index),
+                                            '--inventory', inventory).returncode, 20)
+
+    def test_synced_and_local_inventory_do_not_need_marketplace_registry(self):
+        for scope, plugin_id in (('synced', 'one@sync'), ('user', 'one')):
+            root = self.base / scope; root.mkdir(); (root / 'SKILL.md').write_text('safe')
+            inventory = self.base / (scope + '.json')
+            inventory.write_text(json.dumps([{'id': plugin_id, 'scope': scope, 'installPath': str(root)}]))
+            self.bundle = self.base / (scope + '-bundle'); self.boot('--inventory', inventory)
+            components = self.module().read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+            self.assertTrue(any(item['kind'] == 'plugin' and item['root'] == str(root) for item in components))
+
+    def skills_dir_plugin(self, root):
+        plugin = root / 'folder'
+        (plugin / '.claude-plugin').mkdir(parents=True)
+        (plugin / '.claude-plugin/plugin.json').write_text('{"name":"local-name"}')
+        (plugin / 'SKILL.md').write_text('root skill')
+        (plugin / 'skills/nested').mkdir(parents=True)
+        (plugin / 'skills/nested/SKILL.md').write_text('nested skill')
+        return plugin
+
+    def test_skills_dir_inventory_merges_only_exact_held_root_and_manifest(self):
+        for scope in ('personal', 'enterprise'):
+            with self.subTest(scope=scope):
+                managed = self.base / ('managed-' + scope)
+                root = self.home / '.claude/skills' if scope == 'personal' else managed / '.claude/skills'
+                plugin = self.skills_dir_plugin(root)
+                inventory = self.base / (scope + '.json')
+                inventory.write_text(json.dumps([{'id':'local-name@skills-dir', 'scope':'user', 'installPath':str(plugin)}]))
+                self.bundle = self.base / (scope + '-bundle')
+                self.boot('--inventory', inventory, '--managed-dir', managed)
+                mod = self.module()
+                state = json.loads((self.bundle / 'environment.json').read_text())
+                self.assertEqual(state['inventory'][0]['id'], 'local-name@skills-dir')
+                self.assertFalse(any(item['kind'] == 'plugin' and item['path'] == str(plugin)
+                                     for item in state['specs']['components']))
+                components = mod.read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+                loaded = [item for item in components if item['path'].startswith(str(plugin) + '/')]
+                self.assertEqual(len(loaded), 3)
+                self.assertTrue(all(item['kind'] == scope + '-skill' for item in loaded))
+                self.assertEqual(self.verify().returncode, 0)
+
+    def test_skills_dir_rejects_unknown_ids_wrong_name_missing_manifest_and_outside(self):
+        root = self.home / '.claude/skills'
+        plugin = self.skills_dir_plugin(root)
+        outside = self.skills_dir_plugin(self.base / 'outside')
+        inventory = self.base / 'inventory.json'
+        for index, (plugin_id, path) in enumerate((('local-name@unknown', plugin),
+                ('wrong@skills-dir', plugin), ('local-name@skills-dir', outside),
+                ('local-name@skills-dir', plugin / 'skills/nested'), ('@skills-dir', plugin),
+                ('local-name@skills-dir', str(root) + '/escape/../folder'))):
+            inventory.write_text(json.dumps([{'id':plugin_id, 'scope':'user', 'installPath':str(path)}]))
+            got = self.run_guard('bootstrap', '--root', self.root, '--output', self.base / ('bad-' + str(index)),
+                                 '--inventory', inventory)
+            self.assertEqual(got.returncode, 20, (plugin_id, got.stderr))
+        (plugin / '.claude-plugin/plugin.json').unlink()
+        inventory.write_text(json.dumps([{'id':'local-name@skills-dir', 'scope':'user', 'installPath':str(plugin)}]))
+        self.assertEqual(self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle,
+                                       '--inventory', inventory).returncode, 20)
+
+    def test_skills_dir_outside_and_ambiguous_sources_are_rejected_without_opening_target(self):
+        from unittest import mock
+        mod = self.module(); root = self.home / '.claude/skills'; plugin = self.skills_dir_plugin(root)
+        entries, blobs = self.capture(mod, root, 'personal-skill')
+        descriptors = [{'kind':'personal-skill', 'path':str(root)}]
+        item = {'id':'local-name@skills-dir', 'scope':'user', 'installPath':str(self.base / 'outside')}
+        with mock.patch.object(mod, 'component_tree', side_effect=AssertionError('unexpected target read')):
+            with self.assertRaises(mod.Stop):
+                mod._component_inventory({'components':descriptors}, [item], mod.Budget(), entries, blobs)
+            item['installPath'] = str(plugin)
+            descriptors.append({'kind':'enterprise-skill', 'path':str(root)})
+            with self.assertRaises(mod.Stop):
+                mod._component_inventory({'components':descriptors}, [item], mod.Budget(), entries, blobs)
+
+    def test_skills_dir_installation_link_uses_held_chain_and_rejects_replacement(self):
+        from unittest import mock
+        mod = self.module(); root = self.home / '.claude/skills'; root.mkdir(parents=True)
+        target = self.skills_dir_plugin(self.base / 'target')
+        middle = self.base / 'middle'; middle.symlink_to(target)
+        (root / 'linked').symlink_to(middle)
+        inventory = self.base / 'inventory.json'
+        inventory.write_text(json.dumps([{'id':'local-name@skills-dir', 'scope':'user', 'installPath':str(root / 'linked')}]))
+        self.boot('--inventory', inventory)
+        self.assertEqual(self.verify().returncode, 0)
+        state = json.loads((self.bundle / 'environment.json').read_text())
+        replacement = self.skills_dir_plugin(self.base / 'replacement')
+        middle.unlink(); middle.symlink_to(replacement)
+        with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+            with self.assertRaises(mod.Stop): self.capture(mod, root, 'personal-skill', expected=state['entries'])
+            self.assertEqual(reader.call_count, 0)
+
+    def test_skills_dir_reordering_preserves_missing_descriptors_and_shared_budget(self):
+        from unittest import mock
+        mod = self.module(); root = self.home / '.claude/skills'; plugin = self.skills_dir_plugin(root)
+        missing = self.base / 'missing-skills'
+        specs = {'files':[], 'directories':[], 'configs':[], 'components':[
+            {'kind':'plugin', 'path':str(self.root)}, {'kind':'personal-skill', 'path':str(root)},
+            {'kind':'enterprise-skill', 'path':str(missing)}]}
+        inventory = [{'id':'local-name@skills-dir', 'scope':'user', 'installPath':str(plugin)}]
+        budget_ids = []; real_tree = mod.component_tree
+        def tree(*args, **kwargs):
+            budget_ids.append(id(args[2])); return real_tree(*args, **kwargs)
+        with mock.patch.object(mod, 'component_tree', side_effect=tree):
+            held = mod.snapshot(self.root, specs, inventory)
+        self.assertEqual(len(set(budget_ids)), 1)
+        self.assertEqual(held['component:enterprise-skill:' + str(missing)], ['missing'])
+        total = sum(path.stat().st_size for top in (self.root, root) for path in top.rglob('*') if path.is_file())
+        with mock.patch.object(mod, 'MAX_TOTAL', total - 1):
+            with self.assertRaises(mod.Stop): mod.snapshot(self.root, specs, inventory)
+
+    def test_legacy_state_verify_retains_previous_contract(self):
+        mod = self.module()
+        self.boot()
+        value = json.loads((self.bundle / 'environment.json').read_text())
+        value['specs'].pop('components')
+        value['entries'] = mod.snapshot(value['root'], value['specs'], value['inventory'])
+        raw = mod.dump(value); old = self.base / 'legacy'; old.write_bytes(raw)
+        self.assertEqual(mod.verify(old, mod.sha(raw))['version'], 3)
+        with self.assertRaises(mod.Stop): mod.read_components(old, mod.sha(raw))
+
+    def test_exactly_40_links_are_allowed(self):
+        mod, root, kind = self.component()
+        chain = self.base / 'chain'; chain.mkdir()
+        for i in range(39): (chain / str(i)).symlink_to(str(i + 1))
+        (chain / '39').mkdir(); (chain / '39/SKILL.md').write_text('safe')
+        (root / 'one').symlink_to(chain / '0')
+        entries, blobs = self.capture(mod, root, kind)
+        self.assertEqual(list(blobs.values()), [b'safe'])
+        self.assertEqual(sum(entry[:1] == ['link-step'] for entry in entries.values()), 40)
+
+    def test_legacy_comparison_reads_replacement_but_component_stops_first(self):
+        from unittest import mock
+        mod, root, kind = self.component()
+        (root / 'one').mkdir(); file = root / 'one/SKILL.md'; file.write_text('old')
+        legacy, held = {}, {}
+        mod.tree(root, 'legacy', mod.Budget(), legacy)
+        mod.component_tree(root, kind, mod.Budget(), held)
+        file.rename(self.base / 'old-file'); file.write_text('new')
+        with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+            changed = {}; mod.tree(root, 'legacy', mod.Budget(), changed, expected=legacy)
+            self.assertEqual(reader.call_count, 1)
+            self.assertNotEqual(changed, legacy)
+        with mock.patch.object(mod, 'read_at', wraps=mod.read_at) as reader:
+            with self.assertRaises(mod.Stop): mod.component_tree(root, kind, mod.Budget(), {}, expected=held)
+            self.assertEqual(reader.call_count, 0)
+
+    def test_unreadable_file_and_agent_install_link_rejected(self):
+        mod, root, kind = self.component('personal-agent')
+        file = root / 'reader.md'; file.write_text('plain'); file.chmod(0)
+        with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+        file.chmod(0o600); file.unlink(); file.symlink_to(self.file)
+        with self.assertRaises(mod.Stop): self.capture(mod, root, kind)
+
+    def test_registry_wrong_path_and_duplicate_active_id_rejected(self):
+        config, market, plugin, inventory = self.marketplace()
+        (config / 'installed_plugins.json').write_text(json.dumps({'plugins': {
+            'active@market': [{'installPath': '/wrong', 'scope': 'user'}]}}))
+        self.assertEqual(self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle,
+                                        '--inventory', inventory).returncode, 20)
+        raw = json.loads(inventory.read_text()); raw.append(raw[0]); inventory.write_text(json.dumps(raw))
+        self.assertEqual(self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle,
+                                        '--inventory', inventory).returncode, 20)
+
+    def test_two_selected_entries_share_manifest_without_losing_sources(self):
+        config, market, first, inventory = self.marketplace()
+        second = market / 'second'; second.mkdir(); (second / 'SKILL.md').write_text('second')
+        manifest = market / '.claude-plugin/marketplace.json'; data = json.loads(manifest.read_text())
+        data['plugins'].append({'name': 'second', 'source': './second'}); manifest.write_text(json.dumps(data))
+        installed = config / 'installed_plugins.json'; data = json.loads(installed.read_text())
+        data['plugins']['second@market'] = [{'installPath': str(second), 'scope': 'user'}]
+        installed.write_text(json.dumps(data))
+        data = json.loads(inventory.read_text()); data.append({'id': 'second@market', 'scope': 'user',
+                                                             'installPath': str(second)})
+        inventory.write_text(json.dumps(data)); self.boot('--inventory', inventory)
+        components = self.module().read_components(self.bundle / 'environment.json', self.receipt['sha256'])
+        selected = [item for item in components if item['kind'] == 'marketplace-manifest']
+        self.assertEqual(len(selected), 1)
+        self.assertEqual({item['plugin'] for item in selected[0]['entry']}, {'active@market', 'second@market'})
+        self.assertTrue(any(item['root'] == str(first) for item in components))
+        self.assertTrue(any(item['root'] == str(second) for item in components))
+
+    def test_missing_manifest_creation_before_return_is_rejected(self):
+        from unittest import mock
+        mod = self.module(); root = self.base / 'market'; root.mkdir()
+        manifest = root / 'marketplace.json'; original = mod._component_keep
+        def create_after_missing(key, value, entries, expected):
+            result = original(key, value, entries, expected)
+            if key.startswith('component:') and value == ['missing']:
+                manifest.write_text('{}')
+            return result
+        with mock.patch.object(mod, '_component_keep', side_effect=create_after_missing):
+            with self.assertRaises(mod.Stop):
+                self.capture(mod, manifest, 'marketplace-manifest')
+
+    def test_policy_digest_normalizes_only_workflow_run_copy_root(self):
+        import shutil
+        mod = self.module(); self.boot()
+        first = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        second_root = self.base / 'another-run/plugin'; shutil.copytree(self.root, second_root)
+        self.root = second_root; self.bundle = self.base / 'another-bundle'; self.boot()
+        second = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertEqual(first, second)
+        # 同一bytesでもactive installPathの変更は、実sourceの変更として保持する。
+        active = self.base / 'installed'; shutil.copytree(second_root, active)
+        inventory = self.base / 'active.json'
+        inventory.write_text(json.dumps([{'id': 'local', 'installPath': str(active)}]))
+        self.bundle = self.base / 'with-active'; self.boot('--inventory', inventory)
+        first = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        relocated = self.base / 'relocated'; shutil.copytree(active, relocated)
+        inventory.write_text(json.dumps([{'id': 'local', 'installPath': str(relocated)}]))
+        self.bundle = self.base / 'relocated-bundle'; self.boot('--inventory', inventory)
+        self.assertNotEqual(first, mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256']))
+
+
+    def test_policy_digest_ignores_missing_parent_location_but_tracks_component(self):
+        mod = self.module(); self.boot()
+        first = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        cfg = self.home / '.claude'; cfg.mkdir(); (cfg / 'settings.json').write_text('{}')
+        # 保持中のrunはmetadata変化として止まる。別run証明の内容だけを同値とする。
+        self.assertEqual(self.verify().returncode, 20)
+        self.bundle = self.base / 'parent-created'; self.boot()
+        second = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertEqual(first, second)
+        skills = cfg / 'skills'; skills.mkdir()
+        target = self.base / 'definition'; target.mkdir(); (target / 'SKILL.md').write_text('same')
+        (skills / 'one').symlink_to(target)
+        self.bundle = self.base / 'definition-created'; self.boot()
+        third = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertNotEqual(second, third)
+        (self.base / 'middle').symlink_to(target)
+        (skills / 'one').unlink(); (skills / 'one').symlink_to(self.base / 'middle')
+        self.bundle = self.base / 'route-changed'; self.boot()
+        fourth = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
+        self.assertNotEqual(third, fourth)

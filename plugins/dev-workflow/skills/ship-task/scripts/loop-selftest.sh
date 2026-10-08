@@ -238,6 +238,11 @@ cat >"$STUBBIN/claude" <<'STUB'
 REC="${SELFTEST_REC:?}"
 mkdir -p "$REC"
 me="$(basename "$0")"
+# auxはsessionと同じ固定設定を先頭へ渡す。元のaux記録の形式を維持する。
+if [ "${1:-}" = --settings ]; then
+  printf '%s\n' "${2:-}" >>"$REC/aux-settings.jsonl"
+  shift 2
+fi
 case "${1:-}" in --help|auth|plugin) env >"$REC/env-aux-${1}" ;; esac
 case "${1:-}" in
   --version) printf '%s --version\n' "$me" >>"$REC/aux.log"; echo "${SELFTEST_HOST_VERSION:-2.1.289 (stub)}"; exit 0 ;;
@@ -359,6 +364,34 @@ case "$prompt" in
     target="$(printf '%s' "$prompt" | sed -n 's/.*create the file \(.*\) with the content.*/\1/p')"
     settings=""; prev=""
     for a in "$@"; do [ "$prev" != --settings ] || settings="$a"; prev="$a"; done
+    # 実hostのverbose JSONと同じinit/resultの配列を返す。正常名は保持定義から作る。
+    probe_policy="$(python3 -I -B "$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/skills/ship-task/scripts/host-check.py" \
+      component-policy --state "$DEV_WORKFLOW_ENV_STATE" --expect-sha256 "$DEV_WORKFLOW_ENV_SHA256")" || exit 65
+    printf '%s\n' "$probe_policy" >"$REC/component-policy.json"
+    probe_names="$(printf '%s' "$probe_policy" | python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["public_names"]))')"
+    probe_output() {
+      python3 - "$target" "$1" "$probe_names" <<'PYPROBE'
+import json,os,sys
+path,mode,names=sys.argv[1:]
+names=json.loads(os.environ.get('SELFTEST_INIT_NAMES',names))
+init={'type':'system','subtype':'init','skills':names,
+      'account':{'id':'H46-RAW-ACCOUNT-SECRET'},'session_id':'H46-RAW-SESSION-SECRET'}
+result={'type':'result','subtype':'error' if mode=='autherr' else 'success',
+        'is_error':mode=='autherr','result':'DENIED' if mode=='deny' else mode,
+        'permission_denials':[{'tool_name':'Write','tool_use_id':'stub',
+                              'tool_input':{'file_path':path,'content':'probe'}}] if mode=='deny' else []}
+stream=[init,result]
+change=os.environ.get('SELFTEST_INIT_MODE')
+if change=='missing': stream=[result]
+elif change=='duplicate': stream=[init,init,result]
+elif change=='wrong-type': init['skills']={}
+elif change=='unknown': init['skills']=names+['unknown-native']
+elif change=='duplicate-name': init['skills']=['repeat','repeat']
+elif change=='missing-result': stream=[init]
+elif change=='large': init['account']={'id':'x'*(5*1024*1024)}
+print(json.dumps(stream))
+PYPROBE
+    }
     decision=deny
     case "${SELFTEST_PROBE_MODE:-hook}" in
       hook)
@@ -367,14 +400,14 @@ case "$prompt" in
           | sh -c "$cmd" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hookSpecificOutput"]["decision"]["behavior"])')"
         ;;
       allow) decision=allow ;;
-      autherr) echo '{"type":"result","subtype":"error","is_error":true,"result":"Not logged in (stub)","permission_denials":[]}'; exit 1 ;;
-      noattempt) echo '{"type":"result","subtype":"success","is_error":false,"result":"I will not write files.","permission_denials":[]}'; exit 0 ;;
+      autherr) probe_output autherr; exit 1 ;;
+      noattempt) probe_output noattempt; exit 0 ;;
     esac
     if [ "$decision" = allow ]; then
       printf 'dev-workflow host probe' >"$target"
-      echo '{"type":"result","subtype":"success","is_error":false,"result":"written","permission_denials":[]}'
+      probe_output written
     else
-      python3 -c 'import json,sys; print(json.dumps({"type":"result","subtype":"success","is_error":False,"result":"DENIED","permission_denials":[{"tool_name":"Write","tool_use_id":"stub","tool_input":{"file_path":sys.argv[1],"content":"dev-workflow host probe"}}]}))' "$target"
+      probe_output deny
     fi
     exit 0 ;;
   *--discover=*)
@@ -559,6 +592,15 @@ linger() { # TERM を無視して居座る(同じプロセスグループに孫�
 end() { printf -- '--- stub-end %s\n' "$name" >>"$REC/ssh.log"; }
 # 環境と参考ログの攻撃 fixture。helper は起動済みの親が検査する。
 case "${SELFTEST_ENV_ATTACK:-}" in
+  proof) python3 - "$SELFTEST_PROOF_PATH" <<'PY_PROOF'
+import json,sys
+path=sys.argv[1]
+value=json.load(open(path))
+value['component_sha256']='0'*64
+with open(path,'w') as out: json.dump(value,out)
+PY_PROOF
+    ;;
+  component) printf '\nchanged\n' >>"$SELFTEST_COMPONENT_PATH" ;;
   source) printf 'raise SystemExit(0)\n' >"$SELFTEST_PLUGIN_SOURCE/skills/create-task/scripts/resolve-task-dir.py" ;;
   skill) printf 'changed\n' >"$SELFTEST_PLUGIN_SOURCE/skills/ship-task/SKILL.md" ;;
   copy) printf 'raise SystemExit(0)\n' >"$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py" ;;
@@ -1043,9 +1085,30 @@ check "導入済みの版の違い(寛容さ: {\"plugins\": …} の形)でも�
 run_loop hs "SELFTEST_PLUGINS_FILE=$W/plugins-bad.json" -- --repo "$R" --dry-run
 check "plugin list --json を解析できないと止まる" 20 "$RC"
 has "解析できない: 理由" "$OUT" "[plugin-list]"
+# 通常marketplaceの保持registryと選択sourceを用意し、同内容の二重配置も検査する。
+cp -r "$PLUG/." "$W/cache/market/dev-workflow/$PLUGIN_VERSION/"
+mkdir -p "$W/cache/market/other/1/.claude-plugin" "$W/cache/market/.claude-plugin" "$W/home/.claude/plugins"
+printf '{"name":"other"}' >"$W/cache/market/other/1/.claude-plugin/plugin.json"
+python3 - "$W" "$PLUGIN_VERSION" <<'PYMARKET'
+import json,sys
+from pathlib import Path
+base,version=Path(sys.argv[1]),sys.argv[2]
+market=base/'cache/market'
+entries=[{'name':'dev-workflow','source':'./dev-workflow/'+version},{'name':'other','source':'./other/1'}]
+(market/'.claude-plugin/marketplace.json').write_text(json.dumps({'plugins':entries}))
+config=base/'home/.claude/plugins'
+(config/'known_marketplaces.json').write_text(json.dumps({'market':{'installLocation':str(market)}}))
+inventory=json.loads((base/'plugins-same.json').read_text())
+(config/'installed_plugins.json').write_text(json.dumps({'version':2,'plugins':{
+    item['id']:[{'scope':'user','installPath':item['installPath']}] for item in inventory}}))
+PYMARKET
+run_loop hs "SELFTEST_PLUGINS_FILE=$W/plugins-same.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 同内容の導入済みworkflowを含む証明" 0 "$RC"
 run_loop hs "SELFTEST_PLUGINS_FILE=$W/plugins-same.json" SELFTEST_PLUGINS_STDERR=1 -- --repo "$R" --dry-run
 check "同じ版なら続ける(stderr に警告があっても、一覧は stdout だけで解析する)" 0 "$RC"
 has "同じ版: 報告に出る" "$(report_of "$OUT")" "同じ版 $PLUGIN_VERSION"
+run_loop hs "SELFTEST_PLUGINS_FILE=$W/plugins-disabled.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 active集合を変更した証明を作り直す" 0 "$RC"
 run_loop hs "SELFTEST_PLUGINS_FILE=$W/plugins-disabled.json" -- --repo "$R" --dry-run
 check "無効の同名プラグインは版を問わない" 0 "$RC"
 # 疎通の失敗(--dry-run でないとき)
@@ -1282,6 +1345,11 @@ for memory_mode in implementation discover; do
       memory_args=(--discover=data-audit)
       memory_child=disc-data-audit
     fi
+    # H46 の証明は不在も含めた HOME 配下の定義 root に結び付く。別 HOME の証明は流用しない。
+    # 発見モードも起動の形は共通。--prove-host は --discover と併用せず、同じ環境で先に行う。
+    newrec "$memory_case-prove"
+    run_loop "$memory_case-prove" "${memory_env[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+    check "H32($memory_mode・親=$memory_parent): 同じ HOME の正規証明を取得" 0 "$RC"
     newrec "$memory_case-dry"
     run_loop "$memory_case-dry" "${memory_env[@]}" -- --repo "$R" --dry-run "${memory_args[@]}"
     check "H32($memory_mode・親=$memory_parent): dry-run が成功" 0 "$RC"
@@ -3434,6 +3502,8 @@ rm -rf "$SPACEPLUG"
 cp -r "$PLUG" "$SPACEPLUG"
 LOOP_BIN="$SPACEPLUG/skills/ship-task/scripts/loop.sh"
 mkdir -p "$W/tmp space"
+run_loop d22-proof "CLAUDE_CONFIG_DIR=$W/ccd" "TMPDIR=$W/tmp space" -- --repo "$R" --prove-host --allowed-tools 'Bash(git:*)' "${COMMON_ARGS[@]}"
+check "H46 別設定/空白配置の証明を作る" 0 "$RC"
 run_loop d22 "CLAUDE_CONFIG_DIR=$W/ccd" "TMPDIR=$W/tmp space" -- --repo "$R" --allowed-tools 'Bash(git:*)' "${COMMON_ARGS[@]}"
 LOOP_BIN="$LOOP"
 check "D22: 1 周回って終わる(プラグインルートに空白を含む配置)" 0 "$RC"
@@ -4440,6 +4510,8 @@ h34_skill() { # $1=置き場の skills $2=名 $3=frontmatter の行
 h34_cfg safe
 h34_skill "$H34CFG/skills" reader 'allowed-tools: Read'
 newrec h34-safe
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
 check "H34 許可リストに含まれる skill は通る" 0 "$RC"
 has "H34 通った: 報告" "$(latest_report h34)" "skill・command の allowed-tools: 検査したファイル(.md と plugin のマニフェスト)"
@@ -4449,7 +4521,9 @@ newrec h34-wide
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
 check "H34 権限を足す skill で止まる" 20 "$RC"
 has "H34 権限を足す skill: 理由" "$OUT" "[skill-grants]"
-has "H34 権限を足す skill: ファイルと規則を出す" "$OUT" "runner/SKILL.md: allowed-tools の Bash(node:*) が許可リストより広い"
+has "H34 権限を足す skill: 固定の種別と理由" "$OUT" "kind=personal-skill: allowed-tools が許可リストより広い"
+hasnt "H34 権限を足す skill: pathを表示しない" "$OUT" "runner/SKILL.md"
+hasnt "H34 権限を足す skill: ruleを表示しない" "$OUT" "Bash(node:*)"
 h34_cfg cmd
 mkdir -p "$H34CFG/commands"
 printf -- '---\nallowed-tools: Write\n---\n' >"$H34CFG/commands/w.md"
@@ -4457,28 +4531,38 @@ newrec h34-cmd
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
 check "H34 権限を足す command で止まる" 20 "$RC"
 has "H34 権限を足す command: 理由" "$OUT" "[skill-grants]"
-has "H34 権限を足す command: ファイルと規則" "$OUT" "commands/w.md: allowed-tools の Write が許可リストより広い"
+has "H34 権限を足す command: 固定の種別と理由" "$OUT" "kind=personal-command: allowed-tools が許可リストより広い"
+hasnt "H34 権限を足す command: pathを表示しない" "$OUT" "commands/w.md"
+hasnt "H34 権限を足す command: ruleを表示しない" "$OUT" "Write"
 # 有効な plugin の installPath(plugin 一覧の形は実物と同じ)
 h34_cfg plug
 mkdir -p "$W/h34plug/commands"
 printf -- '---\ndescription: x\nallowed-tools: Bash(node:*), AskUserQuestion\n---\n' >"$W/h34plug/commands/rescue.md"
-printf '[{"id":"codex@m","version":"1.0","scope":"user","enabled":true,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug.json"
+printf '[{"id":"codex","version":"1.0","scope":"user","enabled":true,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug.json"
 newrec h34-plug
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 active一覧前の設定の証明を作る" 0 "$RC"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" "SELFTEST_PLUGINS_FILE=$W/h34plug.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
 check "H34 有効な plugin の command で止まる" 20 "$RC"
-has "H34 plugin: ファイルを出す" "$OUT" "$W/h34plug/commands/rescue.md"
-printf '[{"id":"codex@m","version":"1.0","scope":"user","enabled":false,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug-off.json"
+has "H34 plugin: 固定の種別と理由" "$OUT" "kind=plugin: allowed-tools が許可リストより広い"
+hasnt "H34 plugin: pathを表示しない" "$OUT" "$W/h34plug/commands/rescue.md"
+hasnt "H34 plugin: ruleを表示しない" "$OUT" "Bash(node:*)"
+printf '[{"id":"codex","version":"1.0","scope":"user","enabled":false,"installPath":"%s"}]\n' "$W/h34plug" >"$W/h34plug-off.json"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" "SELFTEST_PLUGINS_FILE=$W/h34plug-off.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
 check "H34 無効の plugin は見ない" 0 "$RC"
 # 同じ exact は通り、許可リストに無ければ止まる(分類器の起動の包含は単体の回帰で確かめる。起動は H48 で止まる)
 h34_cfg exact
 h34_skill "$H34CFG/skills" status 'allowed-tools: Bash(git status)'
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools 'Bash(git status)' "${COMMON_ARGS[@]}"
+check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Bash(git status)' "${COMMON_ARGS[@]}"
 check "H34 同じ exact の skill は通る" 0 "$RC"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Bash(git status --short)' "${COMMON_ARGS[@]}"
 check "H34 違う exact では止まる" 20 "$RC"
 has "H34 違う exact: 理由" "$OUT" "[skill-grants]"
-has "H34 違う exact: ファイルと規則" "$OUT" "status/SKILL.md: allowed-tools の Bash(git status) が許可リストより広い"
+has "H34 違う exact: 固定の種別と理由" "$OUT" "kind=personal-skill: allowed-tools が許可リストより広い"
+hasnt "H34 違う exact: pathを表示しない" "$OUT" "status/SKILL.md"
+hasnt "H34 違う exact: ruleを表示しない" "$OUT" "Bash(git status)"
 # 正規導入(setup.sh --global の形のリンク)は通る。リンク先の frontmatter が権限を足せば止まる
 h34_cfg link
 mkdir -p "$W/h34clone/skills"
@@ -4486,6 +4570,8 @@ h34_skill "$W/h34clone/skills" do-task 'allowed-tools: Read'
 h34_skill "$W/h34clone/skills" evil 'allowed-tools: Bash(rm *)'
 ln -s "$W/h34clone/skills/do-task" "$H34CFG/skills/do-task"
 newrec h34-link
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools Read "${COMMON_ARGS[@]}"
+check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
 check "H34 正規導入のリンクは通る" 0 "$RC"
 ln -s "$W/h34clone/skills/evil" "$H34CFG/skills/evil"
@@ -4700,6 +4786,8 @@ newrepo h50-normal
 addtask pr-a 2026-01-01
 commit
 newrec h50-normal
+run_loop fixture "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --prove-host  "${COMMON_ARGS[@]}"
+check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
 run_loop h50-normal "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check "H50 正常設定: 通常" 0 "$RC"
 check "H50 正常設定: 通常はタスクを 1 件実行" pr-a "$(calls)"
@@ -4737,6 +4825,319 @@ hasnt "H50 help: 値を出さない" "$OUT" H50-secret
 f "H50 help: 状態を作らない" test -e "$W/state/h50-help"
 check "H50 help: host CLI を呼ばない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
 check "H50 help: 証明を変えない" "$H50_HELP_PROOF_BEFORE" "$(h50_proof_fingerprint)"
+fi
+
+# ════════════════ H46: component・固定設定・init証明 ════════════════
+if want h46; then
+newrepo h46
+addtask pr-a 2026-01-01
+commit
+H46CFG="$W/h46-config"
+H46MANAGED="$W/h46-managed"
+mkdir -p "$H46CFG/skills" "$H46CFG/agents" "$H46MANAGED/.claude/skills" "$H46MANAGED/.claude/agents"
+h46_early() { # componentが危険な間は、全入口で補助CLIさえ起動しない。
+  local label="$1" mode; shift
+  for mode in normal dry prove; do
+    newrec "h46-early-$label-$mode"
+    args=(--repo "$R" "${COMMON_ARGS[@]}")
+    case "$mode" in dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+    run_loop "h46-early-$label-$mode" "CLAUDE_CONFIG_DIR=$H46CFG" "$@" -- "${args[@]}"
+    check "H46 $label/$mode: 起動前拒否" 20 "$RC"
+    check "H46 $label/$mode: 補助CLI 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+    check "H46 $label/$mode: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  done
+}
+mkdir -p "$H46CFG/skills/one"
+printf -- '---\nhooks:\n  PreToolUse: [{command: unsafe}]\n---\nbody\n' >"$H46CFG/skills/one/SKILL.md"
+h46_early skill-hook
+rm -r "$H46CFG/skills/one"
+printf -- '---\npermissionMode: bypassPermissions\n---\nbody\n' >"$H46CFG/agents/unsafe.md"
+h46_early agent
+rm "$H46CFG/agents/unsafe.md"
+mkdir -p "$H46MANAGED/.claude/skills/one"
+printf -- '---\nallowed-tools: Bash\n---\nbody\n' >"$H46MANAGED/.claude/skills/one/SKILL.md"
+h46_early enterprise "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H46MANAGED"
+rm -r "$H46MANAGED/.claude/skills/one"
+printf '{"syncClaudeAiSkills":true}' >"$H46CFG/settings.json"
+h46_early fixed-conflict
+rm "$H46CFG/settings.json"
+
+# 正常のenterprise/personal skill・agent・導入リンクを同じproveに通す。
+mkdir -p "$H46CFG/skills/doctor" "$W/h46-target" "$H46MANAGED/.claude/skills/team/review"
+printf -- '---\nname: doctor\nuser-invocable: false\n---\nplain\n' >"$H46CFG/skills/doctor/SKILL.md"
+printf -- '---\nname: linked\n---\nplain\n' >"$W/h46-target/SKILL.md"
+ln -s "$W/h46-target" "$W/h46-middle"
+ln -s "$W/h46-middle" "$H46CFG/skills/linked"
+printf -- '---\nname: review\n---\nplain\n' >"$H46MANAGED/.claude/skills/team/review/SKILL.md"
+printf -- '---\nname: reader\ntools: Read, Grep, Glob\n---\nplain\n' >"$H46MANAGED/.claude/agents/reader.md"
+H46ENVS=("CLAUDE_CONFIG_DIR=$H46CFG" "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H46MANAGED")
+newrec h46-prove
+run_loop h46-prove "${H46ENVS[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 正常: prove" 0 "$RC"
+has "H46 proveだけverboseを足す" "$REC/argv-probe" --verbose
+H46PROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
+python3 - "$REC/argv-probe" "$H46PROOF" <<'PY' >"$W/h46-proof-check" 2>&1
+import json,sys
+args=open(sys.argv[1]).read().splitlines()
+settings=json.loads(args[args.index('--settings')+1])
+assert settings['disableBundledSkills'] is True
+assert settings['syncClaudeAiSkills'] is False and settings['syncClaudeAiPlugins'] is False
+assert 'doctor' not in settings['skillOverrides']
+assert settings['skillOverrides']['design']=='off'
+assert settings['hooks']['PermissionRequest'][0]['hooks'][0]['type']=='command'
+proof=json.load(open(sys.argv[2]))
+assert proof['component_sha256'] and proof['policy_sha256'] and proof['resolver_version']
+assert proof['public_names']==proof['init']['public_names']
+assert 'doctor' not in proof['public_names']
+print('OK')
+PY
+has "H46 条件付き停止・hook・init証拠を保持" "$W/h46-proof-check" OK
+python3 - "$REC/aux-settings.jsonl" "$REC/aux.log" <<'PY_AUX' >"$W/h46-aux-check" 2>&1
+import json,sys
+settings=[json.loads(line) for line in open(sys.argv[1])]
+assert len(settings)==len(open(sys.argv[2]).readlines()) and len(settings)>=4
+for value in settings:
+    assert value['disableBundledSkills'] is True
+    assert value['syncClaudeAiSkills'] is False and value['syncClaudeAiPlugins'] is False
+    assert value['skillOverrides']['design']=='off'
+    assert 'doctor' not in value['skillOverrides']
+print('OK')
+PY_AUX
+has "H46 全auxへ同期・組込み停止を渡す" "$W/h46-aux-check" OK
+f "H46 raw account/sessionを保存しない" grep -R -F H46-RAW- "$(state_dir h46-prove)" "$PROOF_DIR"
+newrec h46-dry
+run_loop h46-dry "${H46ENVS[@]}" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 別runコピーでも証明を再利用" 0 "$RC"
+check "H46 dry: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+newrec h46-normal
+run_loop h46-normal "${H46ENVS[@]}" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+check "H46 通常の周が動く" 0 "$RC"
+check "H46 通常の周はタスク1件を実行" pr-a "$(calls)"
+hasnt "H46 通常のargvへverboseを足さない" "$REC/argv-pr-a" --verbose
+has "H46 通常のoutput-formatを維持" "$REC/argv-pr-a" json
+# 新証明の必須欄が無い旧形式は、補助CLIより前に拒否する。
+cp "$H46PROOF" "$W/h46-proof-backup.json"
+for field in version component_sha256 policy_sha256 resolver_version init public_names; do
+  python3 - "$W/h46-proof-backup.json" "$H46PROOF" "$field" <<'PY_PROOF'
+import json,sys
+value=json.load(open(sys.argv[1]))
+if sys.argv[3]=='version': value['version']=1
+else: del value[sys.argv[3]]
+with open(sys.argv[2],'w') as out: json.dump(value,out)
+PY_PROOF
+  newrec "h46-proof-$field"
+  run_loop "h46-proof-$field" "${H46ENVS[@]}" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+  check "H46 証明の必須欄($field): 拒否" 20 "$RC"
+  check "H46 証明の必須欄($field): aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+  check "H46 証明の必須欄($field): session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+done
+cp "$W/h46-proof-backup.json" "$H46PROOF"
+printf '\nchanged\n' >>"$W/h46-target/SKILL.md"
+newrec h46-changed
+run_loop h46-changed "${H46ENVS[@]}" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 component変更で古い証明を拒否" 20 "$RC"
+check "H46 component変更: 補助CLI 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+
+# 不正initは縮約前に止め、既存証明を書き換えない。
+H46BEFORE="$(sha256sum "$H46PROOF")"
+for mode in missing duplicate wrong-type unknown duplicate-name missing-result large; do
+  newrec "h46-init-$mode"
+  run_loop "h46-init-$mode" "${H46ENVS[@]}" "SELFTEST_INIT_MODE=$mode" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "H46 不正init($mode)は証明を書かない" 20 "$RC"
+  check "H46 不正init($mode)は既存証明不変" "$H46BEFORE" "$(sha256sum "$H46PROOF")"
+  f "H46 不正init($mode)のrawを保存しない" grep -R -F H46-RAW- "$(state_dir "h46-init-$mode")"
+done
+
+# 有効pluginが必要な経路は一覧取得後、最初のsessionより前に拒否する。
+H46PLUGIN="$W/h46-active"
+mkdir -p "$H46PLUGIN/.claude-plugin" "$H46PLUGIN/hooks"
+printf '[{"id":"h46-local","scope":"user","enabled":true,"installPath":"%s"}]' "$H46PLUGIN" >"$W/h46-active.json"
+for kind in manifest-hook module default-hook; do
+  printf '{"name":"h46-local"}' >"$H46PLUGIN/.claude-plugin/plugin.json"
+  rm -f "$H46PLUGIN/hooks/hooks.json"
+  case "$kind" in
+    manifest-hook) printf '{"name":"h46-local","hooks":{"PreToolUse":[{"command":"unsafe"}]}}' >"$H46PLUGIN/.claude-plugin/plugin.json" ;;
+    module) printf '{"name":"h46-local","modules":["./run.js"]}' >"$H46PLUGIN/.claude-plugin/plugin.json" ;;
+    default-hook) printf '{"hooks":{"PreToolUse":[{"command":"unsafe"}]}}' >"$H46PLUGIN/hooks/hooks.json" ;;
+  esac
+  newrec "h46-active-$kind"
+  run_loop "h46-active-$kind" "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "H46 active $kind: 拒否" 20 "$RC"
+  has "H46 active $kind: 一覧を取得済み" "$REC/aux.log" 'plugin list'
+  check "H46 active $kind: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+done
+# 安全なactive定義も証明の要約に含み、一覧を取得してから内容変更を検出する。
+rm -f "$H46PLUGIN/hooks/hooks.json"
+printf '{"name":"h46-local"}' >"$H46PLUGIN/.claude-plugin/plugin.json"
+mkdir -p "$H46PLUGIN/skills/safe"
+printf -- '---\nname: safe\n---\nplain\n' >"$H46PLUGIN/skills/safe/SKILL.md"
+newrec h46-active-prove
+run_loop h46-active-prove "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 安全なactive定義: prove" 0 "$RC"
+newrec h46-active-dry
+run_loop h46-active-dry "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 安全なactive定義: 別runの証明一致" 0 "$RC"
+printf '\nchanged\n' >>"$H46PLUGIN/skills/safe/SKILL.md"
+newrec h46-active-changed
+run_loop h46-active-changed "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 active内容変更: 古い証明を拒否" 20 "$RC"
+has "H46 active内容変更: 一覧を取得済み" "$REC/aux.log" 'plugin list'
+check "H46 active内容変更: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+fi
+
+# ════════════════ H46: skill-folder pluginの擬似出所 ════════════════
+if want h46skillsdir; then
+newrepo h46skillsdir
+addtask pr-a 2026-01-01
+commit
+H46SCFG="$W/h46-skills-dir-config"
+H46SROOT="$H46SCFG/skills/local"
+mkdir -p "$H46SROOT/.claude-plugin" "$H46SROOT/skills/nested"
+printf 'root skill\n' >"$H46SROOT/SKILL.md"
+printf 'nested skill\n' >"$H46SROOT/skills/nested/SKILL.md"
+printf '{"name":"safe-plugin","mcpServers":{"safe":{"command":"must-not-start"}}}' >"$H46SROOT/.claude-plugin/plugin.json"
+printf '[{"id":"safe-plugin@skills-dir","scope":"user","enabled":true,"installPath":"%s"}]' "$H46SROOT" >"$W/h46-skills-dir.json"
+H46SENV=("CLAUDE_CONFIG_DIR=$H46SCFG" "SELFTEST_PLUGINS_FILE=$W/h46-skills-dir.json")
+newrec h46-skills-dir-prove
+run_loop h46-skills-dir-prove "${H46SENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 skills-dir: registry無しの正常prove" 0 "$RC"
+t "H46 skills-dir: personal rootとnested pluginの名前空間を保持" python3 - "$REC/component-policy.json" <<'PY_SKILLS_DIR'
+import json,sys
+policy=json.load(open(sys.argv[1]))
+assert policy['public_names'].count('local')==1
+assert policy['public_names'].count('safe-plugin:nested')==1
+assert 'safe-plugin:local' not in policy['public_names']
+assert 'local' in policy['loaded_commands'] and 'safe-plugin:nested' in policy['loaded_commands']
+PY_SKILLS_DIR
+has "H46 skills-dir: plugin MCPをstrict設定に制限" "$REC/argv-probe" --strict-mcp-config
+newrec h46-skills-dir-dry
+run_loop h46-skills-dir-dry "${H46SENV[@]}" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 skills-dir: 別runでも証明一致" 0 "$RC"
+newrec h46-skills-dir-normal
+run_loop h46-skills-dir-normal "${H46SENV[@]}" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+check "H46 skills-dir: 通常周" 0 "$RC"
+check "H46 skills-dir: 通常sessionを1件実行" pr-a "$(calls)"
+# 正規導入リンクにも、先に保持したlogical rootのmanifestで照合する。
+mv "$H46SROOT" "$W/h46-skills-dir-target"
+ln -s "$W/h46-skills-dir-target" "$W/h46-skills-dir-middle"
+ln -s "$W/h46-skills-dir-middle" "$H46SROOT"
+newrec h46-skills-dir-link
+run_loop h46-skills-dir-link "${H46SENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 skills-dir: 多段導入link正常" 0 "$RC"
+for bad in name outside unknown; do
+  case "$bad" in
+    name) id=wrong@skills-dir; path="$H46SROOT" ;;
+    outside) id=safe-plugin@skills-dir; path="$W/h46-skills-dir-target" ;;
+    unknown) id=safe-plugin@unknown; path="$H46SROOT" ;;
+  esac
+  printf '[{"id":"%s","scope":"user","enabled":true,"installPath":"%s"}]' "$id" "$path" >"$W/h46-skills-dir.json"
+  newrec "h46-skills-dir-$bad"
+  run_loop "h46-skills-dir-$bad" "${H46SENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "H46 skills-dir $bad: 不一致出所を拒否" 20 "$RC"
+  has "H46 skills-dir $bad: 一覧を取得済み" "$REC/aux.log" 'plugin list'
+  check "H46 skills-dir $bad: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+done
+fi
+
+# ════════════════ H46: 毎周の証明・component再照合 ════════════════
+if want h46recheck; then
+newrepo h46recheck
+addtask pr-a 2026-01-01
+addtask pr-b 2026-01-02
+commit
+newrec h46-recheck-prove
+run_loop h46-recheck-prove -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 毎周対照: prove" 0 "$RC"
+H46RPROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
+cp "$H46RPROOF" "$W/h46-recheck-proof.json"
+newrec h46-recheck
+run_loop h46-recheck SELFTEST_ENV_ATTACK=proof "SELFTEST_PROOF_PATH=$H46RPROOF" -- --repo "$R" "${COMMON_ARGS[@]}"
+check "H46 第1周で証明digest変更: 第2周前に停止" 20 "$RC"
+check "H46 第1周で証明digest変更: 次のsessionなし" pr-a "$(calls)"
+has "H46 第1周で証明digest変更: proof-matchを再実行" "$OUT" component_sha256
+cp "$W/h46-recheck-proof.json" "$H46RPROOF"
+
+newrepo h46component
+addtask pr-a 2026-01-01
+addtask pr-b 2026-01-02
+commit
+H46RCFG="$W/h46-recheck-config"
+mkdir -p "$H46RCFG/skills/plain"
+printf 'plain\n' >"$H46RCFG/skills/plain/SKILL.md"
+newrec h46-component-prove
+run_loop h46-component-prove "CLAUDE_CONFIG_DIR=$H46RCFG" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 component毎周対照: prove" 0 "$RC"
+newrec h46-component-recheck
+run_loop h46-component-recheck "CLAUDE_CONFIG_DIR=$H46RCFG" SELFTEST_ENV_ATTACK=component "SELFTEST_COMPONENT_PATH=$H46RCFG/skills/plain/SKILL.md" -- --repo "$R" "${COMMON_ARGS[@]}"
+check "H46 第1周で定義変更: 次の周を拒否" 10 "$RC"
+check "H46 第1周で定義変更: 次のsessionなし" pr-a "$(calls)"
+has "H46 第1周で定義変更: 保持照合で拒否" "$(report_of "$OUT")" 'plugin または利用者設定の照合に失敗'
+fi
+
+# ════════════════ H46: 選択marketplace entryの合成 ════════════════
+if want h46market; then
+newrepo h46market
+addtask pr-a 2026-01-01
+commit
+H46MCFG="$W/h46-market-config"
+H46MARKET="$W/h46-market"
+H46MINSTALL="$W/h46-market-installed"
+mkdir -p "$H46MCFG/plugins" "$H46MARKET/.claude-plugin" "$H46MARKET/mapped/.claude-plugin" "$H46MINSTALL/.claude-plugin"
+printf '{"name":"mapped"}' >"$H46MARKET/mapped/.claude-plugin/plugin.json"
+cp "$H46MARKET/mapped/.claude-plugin/plugin.json" "$H46MINSTALL/.claude-plugin/plugin.json"
+python3 - "$H46MCFG" "$H46MARKET" "$H46MINSTALL" "$W/h46-market-active.json" <<'PY_MARKET'
+import json,sys
+from pathlib import Path
+config,market,install,inventory=map(Path,sys.argv[1:])
+(config/'plugins/known_marketplaces.json').write_text(json.dumps({'m':{'installLocation':str(market)}}))
+(config/'plugins/installed_plugins.json').write_text(json.dumps({'plugins':{'mapped@m':[{'scope':'user','installPath':str(install)}]}}))
+inventory.write_text(json.dumps([{'id':'mapped@m','scope':'user','enabled':True,'version':'1','installPath':str(install)}]))
+PY_MARKET
+H46MENV=("CLAUDE_CONFIG_DIR=$H46MCFG" "SELFTEST_PLUGINS_FILE=$W/h46-market-active.json")
+mkdir -p "$H46MARKET/mapped/private" "$H46MINSTALL/private"
+printf 'plain\n' >"$H46MARKET/mapped/private/from-map.md"
+cp "$H46MARKET/mapped/private/from-map.md" "$H46MINSTALL/private/from-map.md"
+for mode in allowed-tools content safe source; do
+  python3 - "$H46MARKET/.claude-plugin/marketplace.json" "$mode" <<'PY_ENTRY'
+import json,sys
+command={'content':'plain'}
+if sys.argv[2]=='allowed-tools': command['allowedTools']=['Bash']
+if sys.argv[2]=='content': command['content']='---\nallowed-tools: Bash\n---\nplain'
+if sys.argv[2]=='source': command={'source':'./private/from-map.md'}
+entry={'name':'mapped','source':'./mapped','strict':False,'commands':{'hello':command}}
+# 選択していないentryの危険定義・不在sourceは実行対象にしない。
+inactive={'name':'inactive','source':'./absent','hooks':{'PreToolUse':[{'command':'unsafe'}]}}
+with open(sys.argv[1],'w') as out: json.dump({'plugins':[entry,inactive]},out)
+PY_ENTRY
+  newrec "h46-market-$mode"
+  run_loop "h46-market-$mode" "${H46MENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  if [ "$mode" = safe ] || [ "$mode" = source ]; then
+    check "H46 marketplace $mode: 安全mapと非選択entryの対照" 0 "$RC"
+    H46MPROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
+    # legacy commandはslash lookupにだけ残り、init.skillsには出ない(2.1.293実測)。
+    t "H46 marketplace $mode: map呼出名を保持しinit集合と分離" python3 - "$H46MPROOF" "$REC/component-policy.json" <<'PY_NAMES'
+import json,sys
+proof,policy=(json.load(open(path)) for path in sys.argv[1:])
+name='mapped:hello'
+assert name in policy['loaded_commands']
+assert name in policy['invocation_names'] and name in policy['lookup_names']
+assert policy['invocation_routes'][name]['user'] is True
+assert name not in policy['public_names']
+assert proof['public_names']==proof['init']['public_names']==policy['public_names']
+PY_NAMES
+    # 呼出可能名でもinitへ混ぜたら拒否し、直前の正常証明は上書きしない。
+    H46MPROOF_SHA="$(sha256sum "$H46MPROOF")"
+    H46EXTRA_INIT="$(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1]))["public_names"]+["mapped:hello"]))' "$H46MPROOF")"
+    newrec "h46-market-$mode-extra-init"
+    run_loop "h46-market-$mode-extra-init" "${H46MENV[@]}" "SELFTEST_INIT_NAMES=$H46EXTRA_INIT" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+    check "H46 marketplace $mode: legacy呼出名のinit混入を拒否" 20 "$RC"
+    check "H46 marketplace $mode: 正常証明を保持" "$H46MPROOF_SHA" "$(sha256sum "$H46MPROOF")"
+  else
+    check "H46 marketplace map $mode: 拒否" 20 "$RC"
+    has "H46 marketplace map $mode: 一覧を取得済み" "$REC/aux.log" 'plugin list'
+    check "H46 marketplace map $mode: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+  fi
+done
 fi
 
 # ════════════════ 後片付け ════════════════

@@ -253,6 +253,272 @@ def tree(path, key, budget, entries, blobs=None, optional=False, user_links=Fals
         entries[key] = ['missing']
 
 
+COMPONENT_KINDS = frozenset(('personal-skill', 'enterprise-skill', 'personal-command',
+                             'personal-agent', 'enterprise-agent', 'marketplace-manifest', 'plugin'))
+
+
+def _component_keep(key, value, entries, expected):
+    if expected is not None and expected.get(key) != value:
+        raise Stop('component の実体が開始時から変わった')
+    entries[key] = value
+
+
+@contextmanager
+def _component_directory(start_fd, parts, key, budget, entries, expected, links=False, optional=False):
+    """各要素を lstat→保持値比較→openat の順に解き、開いた親を最後まで保つ。"""
+    fds, checks, seen = [os.dup(start_fd)], [], set()
+    queue, index, link_count = list(parts), 0, 0
+    missing = False
+    try:
+        _component_keep('@origin:' + key, ['directory-stat', *directory_identity(os.fstat(fds[0]))],
+                        entries, expected)
+        while queue:
+            budget.tick(1)
+            name = queue.pop(0)
+            if name == '':
+                continue
+            fd = fds[-1]
+            trace = '@route:' + key + ':' + str(index)
+            index += 1
+            try:
+                before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if not optional or link_count:
+                    raise Stop('component の参照先が存在しない') from None
+                _component_keep(trace, ['missing', name], entries, expected)
+                checks.append((fd, name, None, None))
+                missing = True
+                break
+            held = ['directory-step', name, *directory_identity(before)]
+            text = None
+            if stat.S_ISLNK(before.st_mode):
+                if not links:
+                    raise Stop('component の親に導入リンクがある')
+                text = os.readlink(name, dir_fd=fd)
+                held = ['link-step', name, text, *directory_identity(before)]
+            _component_keep(trace, held, entries, expected)
+            checks.append((fd, name, directory_identity(before), text))
+            if text is not None:
+                mark = (before.st_dev, before.st_ino)
+                if mark in seen or link_count >= 40:
+                    raise Stop('component 導入リンクが循環しているか上限を超える')
+                seen.add(mark)
+                link_count += 1
+                # split preserves . and .. and their order across symlink expansion.
+                queue = text.split('/') + queue
+                if text.startswith('/'):
+                    rootfd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                    fds.append(rootfd)
+                    _component_keep('@absolute:' + trace, ['directory-stat', *directory_identity(os.fstat(rootfd))],
+                                    entries, expected)
+                continue
+            if not stat.S_ISDIR(before.st_mode):
+                raise Stop('component の参照先が通常ディレクトリでない')
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            fds.append(child)
+            if directory_identity(before) != directory_identity(os.fstat(child)):
+                raise Stop('component の親が open 時に変わった')
+        _component_keep('@route-end:' + key, ['missing' if missing else 'directory', index], entries, expected)
+        yield None if missing else fds[-1]
+        for fd, name, held, text in reversed(checks):
+            try:
+                current = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError:
+                if held is None:
+                    continue
+                raise Stop('component の親が検査中に消えた') from None
+            if held is None or directory_identity(current) != held or \
+                    (text is not None and os.readlink(name, dir_fd=fd) != text):
+                raise Stop('component の親または導入リンクが検査中に変わった')
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def _component_file(fd, name, key, budget, entries, expected, blobs):
+    st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+    meta = ['file-stat', *identity(st)]
+    _component_keep('@stat:' + key, meta, entries, expected)
+    if not stat.S_ISREG(st.st_mode) or not st.st_mode & 0o444:
+        raise Stop('component が読める通常ファイルでない')
+    # 同じ物理ファイルは一度だけ読む。論理 alias ごとの記録/照合は省略しない。
+    cache = getattr(budget, 'component_bytes', None)
+    if cache is None:
+        cache = budget.component_bytes = {}
+    cachekey = identity(st)
+    if cachekey in cache:
+        raw, mode = cache[cachekey]
+    else:
+        raw, mode = read_at(fd, name, budget, identity(st))
+        cache[cachekey] = (raw, mode)
+    if identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) != identity(st):
+        raise Stop('component が読取中に変わった')
+    _component_keep(key, ['file', mode, sha(raw)], entries, expected)
+    if blobs is not None:
+        blobs[key] = raw
+
+
+def _component_walk(fd, key, budget, entries, expected, blobs, installation_links=False, depth=0):
+    budget.tick(1)
+    if depth > 100:
+        raise Stop('component の深さが上限を超える')
+    before = os.fstat(fd)
+    _component_keep('@stat:' + key, ['directory-stat', *directory_identity(before)], entries, expected)
+    _component_keep(key, ['directory', stat.S_IMODE(before.st_mode)], entries, expected)
+    names = []
+    with os.scandir(fd) as scan:
+        for item in scan:
+            budget.tick(1)
+            names.append(item.name)
+    names.sort()
+    # 集合を本文より先に比較する。新設 entry の本文には一度も触れない。
+    _component_keep('@names:' + key, names, entries, expected)
+    for name in names:
+        childkey = key + '/' + name
+        st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        if stat.S_ISLNK(st.st_mode):
+            if not installation_links:
+                raise Stop('component に許可されない導入リンクがある')
+            text = os.readlink(name, dir_fd=fd)
+            _component_keep('@link:' + childkey,
+                            ['installation-link', text, *directory_identity(st)], entries, expected)
+            with _component_directory(fd, [name], childkey, budget, entries, expected, links=True) as child:
+                _component_walk(child, childkey, budget, entries, expected, blobs, depth=depth + 1)
+            if directory_identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) != directory_identity(st) or \
+                    os.readlink(name, dir_fd=fd) != text:
+                raise Stop('component の導入リンクが検査中に変わった')
+        elif stat.S_ISDIR(st.st_mode):
+            with _component_directory(fd, [name], childkey, budget, entries, expected) as child:
+                _component_walk(child, childkey, budget, entries, expected, blobs, depth=depth + 1)
+        elif stat.S_ISREG(st.st_mode):
+            _component_file(fd, name, childkey, budget, entries, expected, blobs)
+        else:
+            raise Stop('component に特殊ファイルがある')
+    if identity(before) != identity(os.fstat(fd)):
+        raise Stop('component の集合が検査中に変わった')
+
+
+def component_tree(path, kind, budget, entries, expected=None, blobs=None):
+    if kind not in COMPONENT_KINDS:
+        raise Stop('component の種別が不明')
+    path = str(absolute(path))
+    key = 'component:' + kind + ':' + path
+    rootfd = os.open('/', os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        # marketplace-manifest は一つの JSON だけを保持する。entry の他の
+        # plugin を含む marketplace tree 全体へ探索を広げない。
+        parts = path.split('/')[1:]
+        directory_parts = parts[:-1] if kind == 'marketplace-manifest' else parts
+        with _component_directory(rootfd, directory_parts, key, budget, entries, expected,
+                                  optional=True) as fd:
+            if fd is None:
+                if kind == 'plugin':
+                    raise Stop('component の plugin root が存在しない')
+                _component_keep(key, ['missing'], entries, expected)
+            elif kind == 'marketplace-manifest':
+                parent_before = os.fstat(fd)
+                try:
+                    os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    _component_keep(key, ['missing'], entries, expected)
+                    try:
+                        os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise Stop('component の不在 entry が検査中に新設された')
+                else:
+                    # missing -> regular は stat 比較の時点で拒否する。
+                    _component_file(fd, parts[-1], key, budget, entries, expected, blobs)
+                if identity(parent_before) != identity(os.fstat(fd)):
+                    raise Stop('component の集合が検査中に変わった')
+            else:
+                _component_walk(fd, key, budget, entries, expected, blobs,
+                                installation_links=kind in ('personal-skill', 'enterprise-skill'))
+    finally:
+        os.close(rootfd)
+    return key
+
+
+def _component_descriptors(value):
+    specs = value.get('specs', {})
+    components = specs.get('components')
+    if not isinstance(components, list) or not components:
+        raise Stop('component の保持記述子が無い')
+    seen = set()
+    for item in components:
+        if not isinstance(item, dict) or item.get('kind') not in COMPONENT_KINDS or \
+                not isinstance(item.get('path'), str) or not os.path.isabs(item['path']):
+            raise Stop('component の記述子が不正')
+        pair = item['kind'], item['path']
+        if pair in seen:
+            raise Stop('component の記述子が重複している')
+        seen.add(pair)
+    return components
+
+
+def component_policy_digest(state_path, expected_sha):
+    """run ごとの配布コピー位置/stat を除き、出所・リンク字面・内容を結ぶ。"""
+    value = load_verified(state_path, expected_sha)
+    components = _component_descriptors(value)
+    workflow = [item['path'] for item in components if item.get('source') == 'workflow']
+    if len(workflow) != 1:
+        raise Stop('配布物の component 記述子が一意でない')
+    rootkey = 'component:plugin:' + workflow[0]
+    root_routes = tuple('@route:component:' + item['kind'] + ':' + item['path'] + ':'
+                        for item in components)
+
+    def logical(key):
+        for prefix in ('', '@names:', '@link:'):
+            start = prefix + rootkey
+            if key == start or key.startswith(start + '/'):
+                return prefix + 'component:plugin:@workflow' + key[len(start):]
+        return key
+
+    kept = {}
+    for key, entry in value['entries'].items():
+        if key.startswith('component:') or key.startswith('@names:component:'):
+            kept[logical(key)] = entry
+        elif key.startswith('@link:component:'):
+            kept[logical(key)] = entry[:2]
+        elif key.startswith('@route:component:'):
+            # 論理root自身の絶対パスはdescriptorにある。rootに至る親の不在位置は
+            # 内容ではないので除く。導入linkのchild routeは引き続き全て保持する。
+            if key.startswith(root_routes) or key.startswith('@route:' + rootkey + '/'):
+                continue
+            kept[key] = entry[:3] if entry[0] == 'link-step' else entry[:2]
+    descriptors = [{**item, 'path': '@workflow'} if item.get('source') == 'workflow' else item
+                   for item in components]
+    # active installPath は実体の出所であり、runコピーの正規化対象にしない。
+    active = [{key: item[key] for key in ('id', 'installPath', 'scope', 'version') if key in item}
+              for item in value.get('inventory', [])]
+    return sha(dump({'descriptors': descriptors, 'entries': kept, 'active_sources': active}))
+
+
+def read_components(state_path, expected_sha):
+    """保持 SHA と記述子を照合し、同じ walker の同一 fd 由来 bytes を返す。"""
+    value = load_verified(state_path, expected_sha)
+    components = _component_descriptors(value)
+    entries, blobs, budget, result = {}, {}, Budget(), []
+    for item in components:
+        root, kind = item['path'], item['kind']
+        rootkey = component_tree(root, kind, budget, entries, value['entries'], blobs)
+        for key, raw in blobs.items():
+            if key != rootkey and not key.startswith(rootkey + '/'):
+                continue
+            relative = key[len(rootkey) + 1:] if key != rootkey else Path(root).name
+            result.append({'key': key, 'kind': kind, 'root': root, 'relative': relative,
+                           'path': root if key == rootkey else root + '/' + relative, 'raw': raw,
+                           **{k: item[k] for k in ('source', 'plugin', 'entry') if k in item}})
+    wanted = {k: v for k, v in value['entries'].items()
+              if k.startswith(('component:', '@stat:component:', '@names:component:',
+                               '@link:component:', '@route:component:', '@route-end:component:',
+                               '@origin:component:', '@absolute:@route:component:'))}
+    if entries != wanted:
+        raise Stop('component の保持集合が変わった')
+    return result
+
+
 def record(path, key, budget, entries, expected=None, depth=0, required=False, expected_identity=None):
     budget.tick(1)
     if depth > 40:
@@ -412,9 +678,13 @@ def default_specs():
         configs.append(absolute(os.environ.get('GIT_CONFIG_SYSTEM') or '/etc/gitconfig'))
     specs = {'files': list(map(str, files + shells)), 'configs': list(map(str, configs)),
             'directories': ['/etc/claude-code/managed-settings.d'],
-            'user_directories': list(map(str, [config / 'skills', config / 'commands'])),
+            'user_directories': [],
             'host_paths': paths,
-            'managed_roots': ['/etc/claude-code']}
+            'managed_roots': ['/etc/claude-code'],
+            'components': [
+              {'kind':'personal-skill','path':str(config / 'skills')}, {'kind':'personal-command','path':str(config / 'commands')},
+              {'kind':'personal-agent','path':str(config / 'agents')}, {'kind':'enterprise-skill','path':'/etc/claude-code/.claude/skills'},
+              {'kind':'enterprise-agent','path':'/etc/claude-code/.claude/agents'}]}
     # drop-in の記述子は snapshot 後に、その保持済み tree だけから作る。
     # ここで directory を列挙すると列挙と snapshot の間に新設された設定を
     # 記述子から外してしまうため、bootstrap では下で entries を渡す。
@@ -624,10 +894,11 @@ def host_allowlist(state_path, expected_sha, values):
 
 
 def plugin_inventory(raw):
-    value = json.loads(raw)
+    value = json.loads(raw, object_pairs_hook=_no_duplicate_object,
+                       parse_constant=lambda unused: (_ for _ in ()).throw(Stop('plugin 一覧の形式が不正')))
     if not isinstance(value, list):
         raise Stop('有効 plugin 一覧が配列でない')
-    active = []
+    active, ids = [], set()
     for item in value:
         if not isinstance(item, dict) or not isinstance(item.get('enabled', True), bool):
             raise Stop('plugin 一覧の項目が不正')
@@ -636,21 +907,144 @@ def plugin_inventory(raw):
         install = item.get('installPath')
         if not isinstance(install, str) or not Path(install).is_absolute():
             raise Stop('有効 plugin の installPath を解決できない')
+        plugin_id = item.get('id')
+        if not isinstance(plugin_id, str) or not plugin_id or plugin_id in ids:
+            raise Stop('有効 plugin の ID が一意でない')
+        ids.add(plugin_id)
         active.append(item)
     return sorted(active, key=lambda x: json.dumps(x, sort_keys=True))
 
 
+def _component_inventory(specs, inventory, budget, entries, blobs):
+    """保持済み registry から選択 entry だけを active installPath と結ぶ。"""
+    def add(item):
+        for old in specs['components']:
+            if (old['kind'], old['path']) == (item['kind'], item['path']):
+                if item.get('entry') != old.get('entry') or (old.get('plugin') and item.get('plugin')
+                        and old['plugin'] != item['plugin']):
+                    raise Stop('component の出所が曖昧')
+                return
+        specs['components'].append(item)
+
+    config = specs.get('host_paths', {}).get('config')
+    for item in inventory or []:
+        path = str(absolute(item['installPath']))
+        plugin = item.get('id')
+        if not isinstance(plugin, str) or not plugin:
+            raise Stop('component の plugin ID が不明')
+        if plugin.endswith('@skills-dir'):
+            name = plugin[:-len('@skills-dir')]
+            if not name or '@' in name or item['installPath'] != path:
+                raise Stop('component の skills-dir ID が不明')
+            # ホストがskill-folder pluginへ付ける擬似出所。registryの例外を
+            # IDだけでは認めず、先に保持したskillroot直下のmanifestへ結ぶ。
+            candidates = [descriptor for descriptor in specs['components']
+                          if descriptor['kind'] in ('personal-skill', 'enterprise-skill')
+                          and str(Path(path).parent) == descriptor['path']]
+            if len(candidates) != 1:
+                raise Stop('component の skills-dir 出所が一意でない')
+            descriptor = candidates[0]
+            manifest_key = 'component:' + descriptor['kind'] + ':' + path + '/.claude-plugin/plugin.json'
+            raw = blobs.get(manifest_key)
+            if raw is None or strict_settings(raw).get('name') != name:
+                raise Stop('component の skills-dir manifest が保持出所と一致しない')
+            # personal/enterprise descriptorがrootSKILL・nested plugin双方を
+            # 既に保持する。同じ実体をpluginとして追加して名前空間を二重にしない。
+            continue
+        add({'kind': 'plugin', 'path': path, 'plugin': plugin, 'source': item.get('scope', 'plugin')})
+        if item.get('scope') == 'synced' or '@' not in plugin:
+            continue
+        name, marketplace = plugin.rsplit('@', 1)
+        if not name or not marketplace or not config:
+            raise Stop('component の marketplace 出所が不明')
+        raw = blobs.get('external:' + str(Path(config) / 'plugins/known_marketplaces.json'))
+        if raw is None:
+            raise Stop('component の marketplace registry が無い')
+        known = strict_settings(raw)
+        source = known.get(marketplace)
+        if not isinstance(source, dict) or not isinstance(source.get('installLocation'), str) or \
+                not os.path.isabs(source['installLocation']):
+            raise Stop('component の marketplace 出所が不明')
+        location = str(absolute(source['installLocation']))
+        manifest = str(Path(location) / '.claude-plugin/marketplace.json')
+        key = component_tree(manifest, 'marketplace-manifest', budget, entries, blobs=blobs)
+        if key not in blobs:
+            raise Stop('component の marketplace manifest が無い')
+        data = strict_settings(blobs[key])
+        definitions = data.get('plugins')
+        if not isinstance(definitions, list):
+            raise Stop('component の marketplace entry が不明')
+        matches = [entry for entry in definitions if isinstance(entry, dict) and entry.get('name') == name]
+        if len(matches) != 1:
+            raise Stop('component の marketplace entry が一意でない')
+        entry = matches[0]
+        # 参照の意味は host-check が検査する。ローカル source 自身も保持し、
+        # active installPath と異なる source に置いた component を取りこぼさない。
+        declared = entry.get('source')
+        if not isinstance(declared, str) or not declared.startswith('./') or \
+                any(part == '..' for part in declared.split('/')):
+            raise Stop('component の marketplace source が root 内相対パスでない')
+        source_path = str(Path(location) / declared)
+        add({'kind': 'plugin', 'path': source_path, 'plugin': plugin, 'source': 'marketplace-source'})
+        # 一つの manifest から複数の選択 entry を保持するときはまとめる。
+        existing = next((old for old in specs['components']
+                         if old['kind'] == 'marketplace-manifest' and old['path'] == manifest), None)
+        selection = {'plugin': plugin, 'entry': entry}
+        if existing is None:
+            add({'kind': 'marketplace-manifest', 'path': manifest,
+                 'source': location, 'entry': [selection]})
+        elif selection not in existing['entry']:
+            existing['entry'].append(selection)
+        installed = blobs.get('external:' + str(Path(config) / 'plugins/installed_plugins.json'))
+        if installed is None:
+            raise Stop('component の installPath registry が無い')
+        registry = strict_settings(installed).get('plugins')
+        candidates = registry.get(plugin) if isinstance(registry, dict) else None
+        if not isinstance(candidates, list):
+            raise Stop('component の installPath registry が不明')
+        matches = [candidate for candidate in candidates if isinstance(candidate, dict)
+                   and candidate.get('installPath') == path
+                   and (not item.get('scope') or candidate.get('scope') == item['scope'])]
+        if len(matches) != 1:
+            raise Stop('component の installPath 出所が一意でない')
+
+
 def snapshot(root, specs, inventory=None, blobs=None, expected=None):
     budget, entries = Budget(), {}
+    blobs = {} if blobs is None else blobs
     root = absolute(root)
     # 全配布物を含める。scripts の sibling imports/source もこのコピーで閉じる。
-    tree(root, 'plugin', budget, entries, blobs)
+    if 'components' not in specs:
+        tree(root, 'plugin', budget, entries, blobs)
     for path in specs['files']:
-        record(path, 'external:' + path, budget, entries, expected)
+        raw = record(path, 'external:' + path, budget, entries, expected)
+        if raw is not None:
+            blobs['external:' + path] = raw
     for path in specs['directories']:
         tree(path, 'external:' + path, budget, entries, optional=True)
     for path in specs.get('user_directories', []):
         tree(path, 'external:' + path, budget, entries, optional=True, user_links=True, expected=expected)
+    def hold_components(components):
+        for component in components:
+            if not isinstance(component, dict) or not isinstance(component.get('kind'), str) or not isinstance(component.get('path'), str):
+                raise Stop('component の記述子が不正')
+            component_tree(component['path'], component['kind'], budget, entries, expected=expected, blobs=blobs)
+    # inventoryのskills-dirを、同じBudget/walkerで先に保持したbytesだけへ結ぶ。
+    held_count = len(specs.get('components', []))
+    hold_components(specs.get('components', []))
+    if 'components' in specs and expected is None:
+        _component_inventory(specs, inventory, budget, entries, blobs)
+        hold_components(specs['components'][held_count:])
+    if 'components' in specs:
+        rootkey = 'component:plugin:' + str(root)
+        if rootkey not in entries or entries[rootkey][0] != 'directory':
+            raise Stop('配布物の component 記述子が無い')
+        for key, entry in list(entries.items()):
+            if key == rootkey or key.startswith(rootkey + '/'):
+                legacy = 'plugin' + key[len(rootkey):]
+                entries[legacy] = entry
+                if key in blobs:
+                    blobs[legacy] = blobs[key]
     pending, seen = list(specs['configs']), set()
     while pending:
         budget.tick()
@@ -669,10 +1063,12 @@ def snapshot(root, specs, inventory=None, blobs=None, expected=None):
             raise Stop('保持済み Git 設定が変わったため参照先を読まず停止した')
         if raw is not None:
             pending.extend(includes(Path(path), raw, budget))
-    for item in inventory or []:
-        path = str(absolute(item['installPath']))
-        if path != str(root):
-            tree(path, 'installed:' + path, budget, entries)
+    # 古い state は従来どおり installed tree を照合する。
+    if 'components' not in specs:
+        for item in inventory or []:
+            path = str(absolute(item['installPath']))
+            if path != str(root):
+                tree(path, 'installed:' + path, budget, entries)
     return entries
 
 
@@ -711,13 +1107,17 @@ def bootstrap(a):
     specs = default_specs()
     specs['files'] += list(map(lambda x: str(absolute(x)), a.setting + a.shell))
     specs['configs'] += list(map(lambda x: str(absolute(x)), a.config))
-    specs['user_directories'] += [str(absolute(x)) for x in a.skills_dir]
+    specs['components'] += [{'kind': 'personal-skill', 'path': str(absolute(x))} for x in a.skills_dir]
+    specs['components'].append({'kind': 'plugin', 'path': str(root), 'source': 'workflow'})
     specs['directories'] += [str(absolute(x)) for x in a.settings_dir]
     for managed_root in a.managed_dir:
         managed_root = host_path(managed_root, '--managed-dir')
         specs['managed_roots'].append(managed_root)
         specs['files'].append(str(Path(managed_root) / 'managed-settings.json'))
         specs['directories'].append(str(Path(managed_root) / 'managed-settings.d'))
+        specs['components'] += [{'kind': 'enterprise-' + kind, 'path': str(Path(managed_root) / '.claude' / folder)}
+                                for kind, folder in (('skill', 'skills'), ('agent', 'agents'))]
+    specs['components'] = list({(item['kind'], item['path']): item for item in specs['components']}.values())
     inventory = plugin_inventory(read_regular(a.inventory)) if a.inventory else []
     blobs = {}
     entries = snapshot(root, specs, inventory, blobs)
