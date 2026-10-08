@@ -2880,6 +2880,8 @@ unset DEV_WORKFLOW_HOST_CLI
 for v in CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE; do
   [ -z "${!v:-}" ] || die 20 hooks-disabled "環境変数 $v が立っている(ホストが hook などの自動の読み込みを止め、証明を取った起動の形の外になる)。外してから起動する"
 done
+# H49: hook の起動を別のプログラムで包む指定は、許可の仲介を確かめた起動の形の外になるので受け付けない。
+[ -z "${CLAUDE_CODE_SHELL_PREFIX:-}" ] || die 20 shell-prefix "環境変数 CLAUDE_CODE_SHELL_PREFIX が立っている(hook の起動を別のプログラムで包む)。外してから起動する"
 # #107 H48: 分類器の自動承認では、許可の仲介の hook を通らずに worktree の外へ書けた(Claude Code 2.1.289 の実測)。
 # H31 の証明を書けない形なので、--allow-classifier の無人ループは起動しない(--prove-host・--dry-run を含む)
 [ "$ALLOW_CLASSIFIER" -eq 0 ] || die 20 classifier "--allow-classifier の無人ループは起動しない。分類器の自動承認では、許可の仲介の hook を通らずに worktree の外へ書けた(Claude Code 2.1.289 の実測。#107 の H48)。既定の編集の自動許可で起動する"
