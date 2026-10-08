@@ -141,7 +141,14 @@ def stop_group(process, grace):
         pass
     process.wait(timeout=2)
     deadline = time.monotonic() + 5
-    while group_exists(process.pid):
+    while True:
+        try:
+            if not group_exists(process.pid):
+                return
+        except PermissionError:
+            # macOS では reap 直後の signal 0 が一時的に EPERM になる。
+            # 不在とは扱わず、既存の期限内で ESRCH を確認するまで待つ。
+            pass
         if time.monotonic() >= deadline:
             raise RecoveryError("プロセス群の不在を確認できない")
         time.sleep(.02)
