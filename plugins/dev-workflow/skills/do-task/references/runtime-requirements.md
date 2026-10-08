@@ -4,6 +4,36 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 
 ## 実行環境
 
+- Git 対象の内蔵 implementer へ委託する前は、次の確認を独立した bash で実行する。`$1` は解決した do-task の `scripts` ディレクトリとする。PATH で選んだ同じ Python 実体を使う。エントリポイントと通常の Git は起動しない。
+
+<!-- implementation-git-runtime-check:start -->
+```bash
+implementation_scripts=$1
+implementation_python=$(command -v python3) || { echo 'ERROR: python3 が無い' >&2; exit 20; }
+"$implementation_python" -I -B - "$implementation_scripts" <<'PYTHON' || exit 20
+import argparse, ast, hashlib, json, os, pathlib, re, subprocess, sys
+if sys.version_info[0] != 3:
+    raise RuntimeError("Python 3 が必要")
+print("Python", sys.version.split()[0])
+root = pathlib.Path(sys.argv[1])
+for name in ("implementation-git.py", "diff-snapshot.sh"):
+    path = root / name
+    if not path.is_file() or not os.access(str(path), os.R_OK):
+        raise RuntimeError("依存ファイルを読めない: " + name)
+    source = path.read_text(encoding="utf-8")
+    if name.endswith(".py"):
+        ast.parse(source, filename=str(path))
+PYTHON
+```
+<!-- implementation-git-runtime-check:end -->
+
+  使う標準ライブラリが増えたら、この import 一覧も更新する。現在の `--precheck` は他の同梱 helper を呼ばないため、必須ファイルは上の2本とする。
+  `secret-profiles.py` は通常の snapshot の `--secret-profile-ref` 用であり、この入口の必要条件には含めない。事前検査は bash 経由で読むため実行ビットは要求しない。bash・GNU 道具は下記の既存確認も通す。
+  Python の不在・起動不能・import や構文確認の失敗、依存の不在・読込不能・起動不能では、理由を報告する。内蔵 implementer の起動・再依頼をせず停止する。
+  本文の照合にある「Python が無ければ報告して続行」の例外は適用しない。素の Git、shell での代行、外部実装への切り替えでは続行しない。環境の修復後に確認からやり直す。
+  `prepare` または `run` で後から必要環境の喪失が判明しても、その読取りは停止して委託元へ報告する。既に動く担当や子孫の自動停止を保証しない。
+  profile が無い場合・一部 skill だけの導入でも同じ条件とする。非 Git は既存の判定に従い、この要件を適用しない。引数と停止後の扱いは [implementation-git.md](implementation-git.md) を読む。
+
 - `diff-snapshot.sh` と `implement-guard.sh` は連想配列を使うため **bash 4.0 以上**が必要。`--help` と `--precheck` にも同じ要件がかかる。`command -v bash` と `bash --version` で、PATH から選ぶ実体と版を確認する。ログインシェルの版だけでは判断しない。
 - 本体の必要道具は GNU coreutils・GNU findutils・GNU grep。実行名 `realpath`・`readlink`・`sha256sum`・`sort`・`grep`・`find` などで PATH から選ぶ。特に `grep -z`・`sort -z` と、gitlink 検査の `find -mindepth/-maxdepth/-quit` が必要。導入しても別名や PATH の後ろにあれば選ばれないため、`command -v <実行名>` と `<実行名> --version` を記録する。
 - `diff-snapshot-selftest.sh` は bash 4.0 以上と GNU coreutils・GNU findutils・GNU grep が必要。冒頭で `sha256sum`・`touch -d`・`find -maxdepth/-quit`・`head -c`・`grep -z`・`sort -z` を検査し、不足は rc 2 / `ERROR [requirements]` で止まる。後で時刻固定が失敗しても rc 2 で停止する。必要道具の不足と、時刻を固定できても stat キャッシュの隠蔽を再現できない正当な fixture 不成立を区別する。
