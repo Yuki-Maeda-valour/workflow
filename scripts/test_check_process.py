@@ -323,6 +323,60 @@ class GroupIdentityTest(unittest.TestCase):
             with self.assertRaises(helper.RecoveryError):
                 helper.stop_group(process, .01)
 
+    def test_permission_error_after_reap_retries_until_absence(self):
+        helper = module()
+        events = []
+        process = mock.Mock(pid=42)
+        process.wait.side_effect = lambda **_: events.append('reap')
+        probes = iter([PermissionError(), None, ProcessLookupError()])
+        def send(pid, number):
+            events.append(number)
+            if number == 0:
+                error = next(probes)
+                if error is not None:
+                    raise error
+        with mock.patch.object(helper.os, 'killpg', side_effect=send), \
+             mock.patch.object(helper.time, 'sleep'), \
+             mock.patch.object(helper.time, 'monotonic', side_effect=[0, 1, 2]):
+            helper.stop_group(process, .01)
+        self.assertEqual([signal.SIGTERM, signal.SIGKILL, 'reap', 0, 0, 0], events)
+        process.wait.assert_called_once_with(timeout=2)
+        process.poll.assert_not_called()
+        process.communicate.assert_not_called()
+
+    def test_persistent_permission_error_after_reap_is_failure(self):
+        helper = module()
+        process = mock.Mock(pid=42)
+        def send(pid, number):
+            if number == 0:
+                raise PermissionError()
+        with mock.patch.object(helper.os, 'killpg', side_effect=send) as killpg, \
+             mock.patch.object(helper.time, 'sleep'), \
+             mock.patch.object(helper.time, 'monotonic', side_effect=[0, 1, 5]):
+            with self.assertRaisesRegex(helper.RecoveryError, 'プロセス群の不在を確認できない'):
+                helper.stop_group(process, .01)
+        self.assertEqual([mock.call(42, signal.SIGTERM), mock.call(42, signal.SIGKILL),
+                          mock.call(42, 0), mock.call(42, 0)], killpg.call_args_list)
+        process.wait.assert_called_once_with(timeout=2)
+
+    def test_permission_error_before_reap_is_not_retried(self):
+        for denied in (signal.SIGTERM, signal.SIGKILL):
+            with self.subTest(signal=denied):
+                helper = module()
+                process = mock.Mock(pid=42)
+                def send(pid, number):
+                    if number == denied:
+                        raise PermissionError()
+                with mock.patch.object(helper.os, 'killpg', side_effect=send) as killpg, \
+                     mock.patch.object(helper.time, 'sleep'):
+                    with self.assertRaises(PermissionError):
+                        helper.stop_group(process, .01)
+                expected = [mock.call(42, signal.SIGTERM)]
+                if denied == signal.SIGKILL:
+                    expected.append(mock.call(42, signal.SIGKILL))
+                self.assertEqual(expected, killpg.call_args_list)
+                process.wait.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
