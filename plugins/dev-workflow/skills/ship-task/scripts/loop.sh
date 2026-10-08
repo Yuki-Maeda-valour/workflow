@@ -757,114 +757,6 @@ def cmd_help_values(path):
         print(n)
 
 
-def split_rules(value):
-    # --allowedTools の値(カンマか空白の区切り。括弧の中の空白・カンマは区切らない)を規則に分ける
-    rules, cur, depth = [], "", 0
-    for ch in value:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth = max(0, depth - 1)
-        if depth == 0 and (ch == "," or ch.isspace()):
-            if cur:
-                rules.append(cur)
-            cur = ""
-            continue
-        cur += ch
-    if cur:
-        rules.append(cur)
-    return rules
-
-
-def bash_rule(rule):
-    # Bash の規則 → ("all" | "prefix" | "exact", 単語) か、使わない形なら None。Bash 以外は "skip"
-    if rule == "Bash":
-        return ("all", [])
-    if not (rule.startswith("Bash(") and rule.endswith(")")):
-        return "skip"
-    inner = rule[5:-1].strip()
-    # 「すべて」は `Bash` だけ(D22)。`Bash()`・`Bash( )`・`Bash(*)` は使わない形
-    if inner in ("", "*"):
-        return None
-    if inner.endswith(":*") and "*" not in inner[:-2]:
-        words = inner[:-2].split()
-        return ("prefix", words) if words else None
-    if inner.endswith(" *") and "*" not in inner[:-2]:
-        words = inner[:-2].split()
-        return ("prefix", words) if words else None
-    if "*" not in inner:
-        return ("exact", inner.split())
-    return None
-
-
-def cmd_allowlist(settings_path, *values):
-    # --allowed-tools の Bash の項目と、利用者の設定の permissions.allow の Bash の項目を、種類つきの JSON に直す(D22)。
-    # 出力: 1 行目に JSON、2 行目から「unused=<規則>」(使わない形)・「settings=<状態>」
-    sources = []
-    for v in values:
-        sources.extend(("--allowed-tools", r) for r in split_rules(v))
-    state = "無い"
-    if os.path.lexists(settings_path):
-        try:
-            data = json.load(open(settings_path, "rb"))
-            allow = ((data.get("permissions") or {}).get("allow") or []) if isinstance(data, dict) else []
-            if not isinstance(allow, list):
-                allow = []
-            sources.extend(("利用者の設定", r) for r in allow if isinstance(r, str))
-            state = "読んだ"
-        except (OSError, ValueError, AttributeError) as exc:
-            state = f"読めない({exc})"
-    out, unused, seen = [], [], set()
-    for origin, rule in sources:
-        got = bash_rule(rule.strip())
-        if got == "skip":
-            continue
-        if got is None:
-            unused.append(f"{rule}({origin})")
-            continue
-        key = (got[0], tuple(got[1]))
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append({"kind": got[0], "words": got[1]})
-    print(json.dumps(out, ensure_ascii=False))
-    for u in unused:
-        print("unused=" + one_line(u, 300))
-    print("settings=" + one_line(state, 300))
-
-
-def cmd_hookcheck(user_settings, *managed):
-    # hook を無効にする設定(D22 の起動時の検査)。止める理由を 1 行ずつ出す。読めない設定も止める理由にする
-    def load(path):
-        try:
-            data = json.load(open(path, "rb"))
-        except (OSError, ValueError) as exc:
-            return None, f"{path} を読めない({exc})"
-        return (data if isinstance(data, dict) else {}), None
-
-    reasons = []
-    if os.path.lexists(user_settings):
-        data, err = load(user_settings)
-        if err:
-            reasons.append(err)
-        elif data.get("disableAllHooks") is True:
-            reasons.append(f"{user_settings} に disableAllHooks: true")
-    for path in managed:
-        if not os.path.lexists(path):
-            continue
-        data, err = load(path)
-        if err:
-            reasons.append(err)
-            continue
-        if data.get("disableAllHooks") is True:
-            reasons.append(f"{path}(管理者設定)に disableAllHooks: true")
-        if data.get("allowManagedHooksOnly") is True:
-            reasons.append(f"{path}(管理者設定)に allowManagedHooksOnly: true")
-    for r in reasons:
-        print(one_line(r, 500))
-    sys.exit(1 if reasons else 0)
-
-
 def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha):
     # command 自体に保持した loader と hash を置き、改変された helper を先に実行しない。
     def quote(p):
@@ -1000,8 +892,8 @@ COMMANDS = {
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
     "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
-    "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values, "allowlist": cmd_allowlist,
-    "hookcheck": cmd_hookcheck, "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
+    "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values,
+    "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
     "origin-json": cmd_origin_json, "candiff": cmd_candiff,
 }
 try:
@@ -1101,6 +993,16 @@ take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクト�
 
 environment_call() {
   py environment-run "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$@"
+}
+host_settings_call() { # $1=host-settings | host-allowlist, 残り=reader の引数
+  local command="$1" err rc=0 code
+  shift
+  err="$(mktemp "$ENV_TEMP/host-settings.XXXXXXXX.err")" || die 20 host-settings "ホスト設定の診断先を作れない"
+  HOST_SETTINGS_REPLY="$(environment_call "$command" --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" "$@" 2>"$err")" || rc=$?
+  [ "$rc" -eq 0 ] && return 0
+  code="$(sed -n 's/^ERROR \[\(host-config-path\|host-settings\|host-config-source\|hooks-disabled\)\].*/\1/p' "$err" | head -n 1)"
+  case "$code" in host-config-path|host-settings|host-config-source|hooks-disabled) : ;; *) code=host-settings ;; esac
+  die 20 "$code" "ホスト設定を安全に検査できない"
 }
 verify_environment() {
   [ -n "${ENVIRONMENT_SHA:-}" ] || return 0
@@ -2880,6 +2782,9 @@ unset DEV_WORKFLOW_HOST_CLI
 for v in CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE; do
   [ -z "${!v:-}" ] || die 20 hooks-disabled "環境変数 $v が立っている(ホストが hook などの自動の読み込みを止め、証明を取った起動の形の外になる)。外してから起動する"
 done
+for v in CLAUDE_CODE_REMOTE_SETTINGS_PATH CLAUDE_CODE_MANAGED_SETTINGS_PATH CLAUDE_CODE_MOCK_REMOTE_SETTINGS; do
+  [ -z "${!v:-}" ] || die 20 host-config-source "環境変数 $v が立っている(ホストの設定入口を変える)。外してから起動する"
+done
 # H49: hook の起動を別のプログラムで包む指定は、許可の仲介を確かめた起動の形の外になるので受け付けない。
 [ -z "${CLAUDE_CODE_SHELL_PREFIX:-}" ] || die 20 shell-prefix "環境変数 CLAUDE_CODE_SHELL_PREFIX が立っている(hook の起動を別のプログラムで包む)。外してから起動する"
 # #107 H48: 分類器の自動承認では、許可の仲介の hook を通らずに worktree の外へ書けた(Claude Code 2.1.289 の実測)。
@@ -2898,6 +2803,10 @@ PLUGIN_ROOT="$(dirname -- "$(dirname -- "$(dirname -- "$(dirname -- "$SELF")")")
 ORIGINAL_PLUGIN_ROOT="$PLUGIN_ROOT"
 PY_ABS="$(command -v python3)"
 case "$PY_ABS" in /*) : ;; *) die 20 tool-missing "python3 を絶対パスに解決できない" ;; esac
+# 設定本文を読む前に、cwd に依存しない host 用の HOME/config だけを検査する。
+ENV_GUARD_PY="$PLUGIN_ROOT/skills/ship-task/scripts/environment-guard.py"
+HOST_PATHS_OUT="$(cd / && "$PY_ABS" -B "$ENV_GUARD_PY" host-paths)" \
+  || die 20 host-config-path "HOME または CLAUDE_CONFIG_DIR のパスが起動条件を満たさない"
 # 初回配布元の helper で管理入口と印だけを確認する。Git・利用者設定・
 # 保存した周の本文は読まない。未信頼の印から実行や信頼集合を復活させない。
 STATE_GIT_UNSAFE=1
@@ -2918,15 +2827,24 @@ print(s["markers"]["inflight"])
 [ "${EARLY_MARKERS[1]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容や利用者設定を読まず保存して停止する。人が設定・中断記録・残った子を確認するまで印を外して再開しない"
 [ "${EARLY_MARKERS[2]}" = absent ] || die 20 inflight-untrusted "周の途中の印は未信頼。利用者設定を読まず signal・削除・unlock・ref 更新をせず保全した"
 # 現在の配布元を起動時だけ信頼する。過去の STATE 内コードは実行しない。
-ENV_GUARD_PY="$PLUGIN_ROOT/skills/ship-task/scripts/environment-guard.py"
 ENV_TEMP="$(mktemp -d)" || die 20 environment "現在の実行のコピー先を作れない"
 ENV_BOOT_ARGS=()
 for f in ${MCP_CONFIGS[@]+"${MCP_CONFIGS[@]}"}; do ENV_BOOT_ARGS+=(--setting "$f"); done
+# selftest 用の管理設定ルートも、通常の管理設定と同じ記述子として保持する。
+if [ -n "${DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR:-}" ]; then
+  ENV_BOOT_ARGS+=(--managed-dir "$DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR")
+fi
 ENV_RECEIPT="$(cd / && "$PY_ABS" -B "$ENV_GUARD_PY" bootstrap --root "$ORIGINAL_PLUGIN_ROOT" --output "$ENV_TEMP/start" "${ENV_BOOT_ARGS[@]}")" \
   || die 20 environment "配布物・利用者環境を安全に控えられない"
 bind_environment "$ENV_RECEIPT"
 export PYTHONDONTWRITEBYTECODE=1
 verify_environment || die 20 environment "開始時の環境を照合できない"
+# 最初の host 補助呼出しより前に、保持した設定 bytes だけを検査する。stop-mark
+# の先行拒否後なので、未信頼の保存状態にある設定を読むことはない。
+host_settings_call host-settings
+HOST_SETTINGS_OUT="$HOST_SETTINGS_REPLY"
+USER_SETTINGS="$(printf '%s' "$HOST_SETTINGS_OUT" | py json-get user_settings)" \
+  || die 20 host-settings "保持した利用者設定のパスを読めない"
 PLUGIN_JSON="$PLUGIN_ROOT/.claude-plugin/plugin.json"
 PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読めない"
 PLUGIN_NAME="$(printf '%s\n' "$PJ" | sed -n 1p)"
@@ -3255,6 +3173,11 @@ verify_environment || die 20 environment "有効 plugin の控えの作成中に
 bind_environment "$ENV_RECEIPT"
 ENV_INVENTORY_READY=1
 verify_environment || die 20 environment "有効 plugin の一覧または実体が変わった"
+host_settings_call host-settings
+ACTIVE_HOST_SETTINGS_OUT="$HOST_SETTINGS_REPLY"
+ACTIVE_USER_SETTINGS="$(printf '%s' "$ACTIVE_HOST_SETTINGS_OUT" | py json-get user_settings)" \
+  || die 20 host-settings "active bootstrap 後の利用者設定のパスを読めない"
+[ "$ACTIVE_USER_SETTINGS" = "$USER_SETTINGS" ] || die 20 host-config-path "active bootstrap 後に利用者設定のパスが変わった"
 build_child_argv
 CHILD_ARGV[0]="$HOST_EXEC"
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
@@ -3262,25 +3185,15 @@ SHAPE_BEFORE="$HOST_SHAPE"
 build_child_shape
 [ "$HOST_SHAPE" = "$SHAPE_BEFORE" ] || die 20 host-proof "起動の形が証明の照合の後に変わった"
 
-# ── 許可の仲介(D22 ③)の起動時の検査と許可リスト ──
-# 利用者の設定か管理者設定(Linux の既定の置き場)に disableAllHooks: true、管理者設定に
-# allowManagedHooksOnly: true があれば、--settings の hook が動かず、周がすべて G1 になるので止まる
-USER_SETTINGS="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json"
-MANAGED_SETTINGS=(/etc/claude-code/managed-settings.json)
-for f in /etc/claude-code/managed-settings.d/*.json; do [ -e "$f" ] && MANAGED_SETTINGS+=("$f"); done
-# 試験用のフック(loop-selftest.sh が使う): 管理者設定の置き場を「足す」だけ(既定の置き場は必ず見る。止める向きにだけ効く)
-if [ -n "${DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR:-}" ]; then
-  MANAGED_SETTINGS+=("$DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR/managed-settings.json")
-  for f in "$DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR"/managed-settings.d/*.json; do [ -e "$f" ] && MANAGED_SETTINGS+=("$f"); done
-fi
-rc=0
-HOOKCHECK_OUT="$(py hookcheck "$USER_SETTINGS" "${MANAGED_SETTINGS[@]}")" || rc=$?
-[ "$rc" -eq 0 ] || die 20 hooks-disabled "許可の仲介の hook が動かない設定がある: $(printf '%s' "$HOOKCHECK_OUT" | tr '\n' ' ')"
-# 許可リスト: --allowed-tools の Bash の項目と、利用者の設定の permissions.allow の Bash の項目を種類つきの JSON に直す
-ALLOW_OUT="$(py allowlist "$USER_SETTINGS" ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"})"
+# ── 許可の仲介(D22 ③)の許可リスト ──
+# 設定の hook 可否は最初の aux より前の host-settings が検査済み。ここは同じ
+# 保持 reader が返した permissions.allow と引数だけを JSON へ直す。
+ALLOW_ARGS=()
+for v in ${ALLOWED_TOOLS[@]+"${ALLOWED_TOOLS[@]}"}; do ALLOW_ARGS+=(--allowed-tools "$v"); done
+host_settings_call host-allowlist "${ALLOW_ARGS[@]}"
+ALLOW_OUT="$HOST_SETTINGS_REPLY"
 ALLOW_JSON="$(printf '%s\n' "$ALLOW_OUT" | sed -n 1p)"
 ALLOW_UNUSED="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^unused=//p')"
-ALLOW_SETTINGS_STATE="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^settings=//p')"
 
 # ── H34: skill・command の frontmatter の allowed-tools が、許可リストより広い権限を足さないか ──
 # 対象は、控えた環境のうち --plugin-dir のコピー・有効な plugin の installPath・利用者の skills と commands の .md。
@@ -3366,7 +3279,7 @@ if [ -n "$LEADING" ]; then
   while IFS= read -r l; do rep "  - $l"; done <<<"$LEADING"
 fi
 rep "- MCP: $MCP_STATE"
-rep "- 許可の仲介(D22): hook $PERM_SCRIPT(python3: $PY_ABS)・許可リスト $ALLOW_JSON(利用者の設定 $USER_SETTINGS: $ALLOW_SETTINGS_STATE)"
+rep "- 許可の仲介(D22): hook $PERM_SCRIPT(python3: $PY_ABS)・許可リスト $ALLOW_JSON(利用者の設定 $USER_SETTINGS は保持した設定 reader で検査済み)"
 if [ -n "$ALLOW_UNUSED" ]; then
   rep "- 許可リストの規則のうち使わない形(途中の * など):"
   while IFS= read -r l; do rep "  - $l"; done <<<"$ALLOW_UNUSED"

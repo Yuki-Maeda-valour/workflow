@@ -24,6 +24,7 @@ import argparse
 import hashlib
 import json
 import os
+from pathlib import Path
 import re
 import stat
 import sys
@@ -895,35 +896,38 @@ def open_dir_chain_from(fd, names):
         raise
 
 
-def user_allow_rules(path, entries):
-    key = 'external:' + path
-    held = entries.get(key)
-    if held is None:
-        raise Stop('利用者の設定が環境の控えに無い')
-    if held == ['missing']:
-        if os.path.lexists(path):
-            raise Stop('控えた時に無かった利用者の設定がある')
-        return []
-    fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+def verified_host_settings(state_path, expected):
+    """state と同じ階層に保持した reader だけを import する。"""
+    value = load_state(state_path, expected)
+    if not isinstance(value.get('host_settings'), list) or not re.fullmatch('[0-9a-f]{64}', value.get('guard_sha256', '')):
+        raise Stop('host-settings の保持記述子が無い')
+    path = Path(state_path).parent / 'environment-guard.py'
+    raw = read_regular(str(path), MAX_TEXT)
+    if sha256(raw) != value['guard_sha256']:
+        raise Stop('host-settings の reader が保持値と違う')
     try:
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_TEXT:
-            raise Stop('利用者の設定が通常ファイルでない')
-        raw = os.read(fd, MAX_TEXT + 1)
-    finally:
-        os.close(fd)
-    if not isinstance(held, list) or len(held) != 3 or sha256(raw) != held[2]:
-        raise Stop('利用者の設定が控えた時と違う')
-    try:
-        data = json.loads(raw)
-    except ValueError:
-        raise Stop('利用者の設定の JSON を読めない') from None
-    permissions = data.get('permissions') if isinstance(data, dict) else None
-    allow = permissions.get('allow') if isinstance(permissions, dict) else None
-    if not isinstance(allow, list):
-        return []
-    # 字面のまま渡す(ホストは設定の規則を整えずに読むので、前後の空白がある規則は何も許さない。parse_rule で unknown)
-    return [r for r in allow if isinstance(r, str)]
+        # pathname を import し直さない。検証済み raw bytes 自身を実行するので、
+        # read 後の差替えや __pycache__ を reader として採用しない。
+        namespace = {'__name__': 'verified_environment_guard', '__file__': str(path)}
+        exec(compile(raw, str(path), 'exec'), namespace)
+        reader = namespace.get('read_host_settings')
+        if not callable(reader):
+            raise RuntimeError('reader')
+        return reader(state_path, expected)
+    except Exception as exc:
+        # コピー側の Stop は別クラスである。任意の OSError/JSON 例外や path を
+        # 含む本文を転記せず、契約にある固定理由だけを host-check 側へ渡す。
+        detail = str(exc)
+        fixed = {
+            '配布物または利用者環境が変わった': '配布物または利用者の設定の内容が変わった',
+            '導入リンクが開始時から変わった': '導入リンクが控えた時から変わった',
+            '導入リンクの対象が開始時から変わった': '導入リンクの対象が控えた時から変わった',
+            'host-config-path': 'host-config-path',
+            'host-settings': 'host-settings',
+            'host-config-source': 'host-config-source',
+            'hooks-disabled': 'hooks-disabled',
+        }
+        raise Stop(fixed.get(detail, 'host-settings の reader を検査できない')) from None
 
 
 MANIFEST_SUFFIX = '/.claude-plugin/plugin.json'
@@ -989,7 +993,14 @@ def grants(state_path, expected, user_settings, allowed_tools, classifier=False)
             allow += split_both(v)  # ホストは ' ' と ',' だけで区切る。タブ・改行を含む値は読み方が分かれる
         except Unclear:
             raise Stop(f'--allowed-tools の値の切り方がホストと違う(タブ・改行・入れ子の括弧など): {one_line(v, 120)}') from None
-    allow += user_allow_rules(os.path.abspath(user_settings), entries)
+    settings = verified_host_settings(state_path, expected)
+    if not os.path.isabs(user_settings) or user_settings != settings['user_settings']:
+        raise Stop('利用者の設定のパスが保持した絶対パスと違う')
+    permissions = settings['user'].get('permissions')
+    user_allow = permissions.get('allow') if isinstance(permissions, dict) else []
+    if isinstance(user_allow, list):
+        # 字面のまま渡す。ホストが解釈できない規則をここで正規化しない。
+        allow += [rule for rule in user_allow if isinstance(rule, str)]
     copy = value.get('copy')
     files = problems = 0
     lines = []

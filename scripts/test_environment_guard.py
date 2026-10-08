@@ -139,6 +139,314 @@ class EnvironmentGuardMoreTests(unittest.TestCase):
         # 保持値まで攻撃者の新しい値へ置き換えた呼出元は、新しい信頼開始と区別できない。
         self.assertEqual(self.verify().returncode,0)
 
+
+class HostSettingsTests(unittest.TestCase):
+    setUp = EnvironmentGuardTests.setUp
+    run_guard = EnvironmentGuardTests.run_guard
+    boot = EnvironmentGuardTests.boot
+
+    def settings_call(self, receipt=None, command='host-settings', *extra):
+        receipt = receipt or self.receipt
+        return self.run_guard(command, '--state', self.bundle/'environment.json',
+                              '--expect-sha256', receipt['sha256'], *extra)
+
+    def test_host_paths_are_absolute_nfc_and_cwd_independent(self):
+        mod = EnvironmentGuardMoreTests.module(self)
+        good = str(self.base / '日本語 space' / '.' / 'home')
+        self.assertEqual(mod.host_paths({'HOME': good, 'CLAUDE_CONFIG_DIR': good + '//.claude/'})['config'],
+                         str(Path(good) / '.claude'))
+        for env in ({}, {'HOME': ''}, {'HOME': 'relative'}, {'HOME': '/tmp/te\u0301st'},
+                    {'HOME': str(self.home), 'CLAUDE_CONFIG_DIR': ''},
+                    {'HOME': str(self.home), 'CLAUDE_CONFIG_DIR': '~/x'},
+                    {'HOME': str(self.home), 'CLAUDE_CONFIG_DIR': '//tmp/x'},
+                    {'HOME': str(self.home), 'CLAUDE_CONFIG_DIR': '/tmp/a/../b'}):
+            with self.subTest(env=env):
+                with self.assertRaises(mod.Stop):
+                    mod.host_paths(env)
+        p = self.run_guard('host-paths')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(json.loads(p.stdout)['user_settings'], str(self.home / '.claude/settings.json'))
+
+    def test_forbidden_setting_env_and_helpers_are_rejected_without_values(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        paths = [cfg/'settings.json', cfg/'remote-settings.json']
+        managed = self.base/'managed'; (managed/'managed-settings.d').mkdir(parents=True)
+        paths += [managed/'managed-settings.json', managed/'managed-settings.d'/'a.json']
+        forbidden = ('CLAUDE_CONFIG_DIR', 'HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CODE_SIMPLE',
+                     'CLAUDE_CODE_SAFE_MODE', 'CLAUDE_CODE_SHELL_PREFIX')
+        for path_index, path in enumerate(paths):
+            for key_index, key in enumerate(forbidden):
+                for value_index, value in enumerate(('', 0, False, None, 'H50-secret\n\x1b')):
+                    with self.subTest(path=path.name, key=key, value=repr(value)):
+                        for other in paths: other.unlink(missing_ok=True)
+                        path.write_text(json.dumps({'env': {key: value}}))
+                        self.bundle = self.base / f'forbidden-{path_index}-{key_index}-{value_index}'
+                        receipt = self.boot('--managed-dir', managed)
+                        p = self.settings_call(receipt)
+                        self.assertEqual(p.returncode, 20)
+                        self.assertEqual(p.stdout, '')
+                        self.assertIn('ERROR [host-settings]', p.stderr)
+                        self.assertNotIn('H50-secret', p.stderr)
+        for path_index, path in enumerate(paths):
+            for key in ('CLAUDE_CODE_REMOTE_SETTINGS_PATH', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+                        'CLAUDE_CODE_MOCK_REMOTE_SETTINGS', 'policyHelper', 'policyHelpers'):
+                with self.subTest(path=path.name, key=key):
+                    for other in paths: other.unlink(missing_ok=True)
+                    value = {'env': {key: 'H50-secret\n\x1b'}} if key.startswith(('CLAUDE_', 'HOME', 'XDG_')) else {key: 'H50-secret\n\x1b'}
+                    path.write_text(json.dumps(value))
+                    self.bundle = self.base / ('special-' + str(path_index) + key)
+                    receipt = self.boot('--managed-dir', managed)
+                    p = self.settings_call(receipt)
+                    self.assertEqual(p.returncode, 20)
+                    self.assertEqual(p.stdout, '')
+                    expected = 'host-config-source' if key.startswith('CLAUDE_CODE_') else 'host-settings'
+                    self.assertIn(f'ERROR [{expected}]', p.stderr)
+                    self.assertNotIn('H50-secret', p.stderr)
+
+    def test_strict_json_and_verified_allowlist(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        setting = cfg/'settings.json'
+        setting.write_text('{"env":{},"permissions":{"allow":["Bash(git status)"]}}')
+        self.boot()
+        p = self.settings_call(None, 'host-allowlist', '--allowed-tools', 'Read Bash(git status)')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn('"kind": "exact"', p.stdout)
+        bad = (b'{"env":{"A":"x","A":"y"}}', b'{"env":{"\\u0048OME":"x","HOME":"y"}}',
+               b'[]', b'{"env":[]}', b'{"env":null}', b'{"x":NaN}', b'{"x":Infinity}', b'\xff',
+               ('{"x":' * 102 + '0' + '}' * 102).encode())
+        for index, raw in enumerate(bad):
+            setting.write_bytes(raw)
+            self.bundle = self.base / f'strict-{index}'
+            self.boot()
+            p = self.settings_call()
+            self.assertEqual(p.returncode, 20)
+            self.assertEqual(p.stdout, '')
+
+    def test_setting_change_after_boot_is_rejected(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        setting = cfg/'settings.json'; setting.write_text('{}')
+        self.boot()
+        setting.write_text('{"permissions":{"allow":["Bash"]}}')
+        p = self.settings_call()
+        self.assertEqual(p.returncode, 20)
+
+    def test_reader_rechecks_bytes_mode_missing_and_link_after_verify(self):
+        """verify 後の持続変更も、parser に渡す前の held-entry 照合で止める。"""
+        from unittest import mock
+        mod = EnvironmentGuardMoreTests.module(self)
+        cfg = self.home / '.claude'; cfg.mkdir()
+        for name in ('bytes', 'mode', 'missing', 'link'):
+            with self.subTest(change=name):
+                setting = cfg / 'settings.json'; setting.unlink(missing_ok=True)
+                target = cfg / 'target.json'; target.unlink(missing_ok=True)
+                if name == 'link':
+                    target.write_text('{"permissions":{"allow":["Read"]}}')
+                    setting.symlink_to(target.name)
+                else:
+                    setting.write_text('{"permissions":{"allow":["Read"]}}')
+                self.bundle = self.base / ('recheck-' + name)
+                receipt = self.boot()
+                original = mod.verify
+                def change_after_verify(*args, **kwargs):
+                    held = original(*args, **kwargs)
+                    if name == 'bytes':
+                        setting.write_text('{"permissions":{"allow":["Bash"]}}')
+                    elif name == 'mode':
+                        setting.chmod(0o600)
+                    elif name == 'missing':
+                        setting.unlink()
+                    else:
+                        setting.unlink(); setting.symlink_to('other.json')
+                        (cfg / 'other.json').write_text('{}')
+                    return held
+                with mock.patch.object(mod, 'verify', side_effect=change_after_verify):
+                    with self.assertRaises(mod.Stop):
+                        mod.read_host_settings(self.bundle/'environment.json', receipt['sha256'])
+                setting.unlink(missing_ok=True); target.unlink(missing_ok=True); (cfg/'other.json').unlink(missing_ok=True)
+
+    def test_reader_rechecks_final_link_set_for_user_cache_and_managed(self):
+        """同bytesの通常file化や link 短縮も held link 集合との差で止める。"""
+        from unittest import mock
+        mod = EnvironmentGuardMoreTests.module(self)
+        cfg = self.home / '.claude'; cfg.mkdir()
+        managed = self.base / 'managed'; managed.mkdir()
+        raw = '{"permissions":{"allow":["Read"]}}'
+        for source in ('user', 'cache', 'managed'):
+            with self.subTest(source=source):
+                setting = {'user': cfg/'settings.json', 'cache': cfg/'remote-settings.json',
+                           'managed': managed/'managed-settings.json'}[source]
+                target = setting.with_name(setting.stem + '-target.json')
+                setting.unlink(missing_ok=True); target.unlink(missing_ok=True)
+                target.write_text(raw); setting.symlink_to(target.name)
+                self.bundle = self.base / ('final-link-' + source)
+                managed_args = ('--managed-dir', managed, '--managed-dir', managed) if source == 'managed' \
+                    else ('--managed-dir', managed)
+                receipt = self.boot(*managed_args)
+                try:
+                    # 対照: 最終 symlink は保持した bytes の reader で正常に通る。
+                    self.assertEqual(mod.read_host_settings(self.bundle/'environment.json', receipt['sha256'])['user_settings'],
+                                     str(cfg/'settings.json'))
+                    original = mod.verify
+                    def replace_after_verify(*args, **kwargs):
+                        held = original(*args, **kwargs)
+                        setting.unlink(); setting.write_text(raw)
+                        return held
+                    with mock.patch.object(mod, 'verify', side_effect=replace_after_verify):
+                        with self.assertRaises(mod.Stop):
+                            mod.read_host_settings(self.bundle/'environment.json', receipt['sha256'])
+                finally:
+                    setting.unlink(missing_ok=True); target.unlink(missing_ok=True)
+
+        # A two-link chain may not be shortened after verify either.
+        target = cfg/'target.json'; mid = cfg/'mid.json'; setting = cfg/'settings.json'
+        setting.unlink(missing_ok=True); mid.unlink(missing_ok=True); target.unlink(missing_ok=True)
+        target.write_text(raw); mid.symlink_to(target.name); setting.symlink_to(mid.name)
+        self.bundle = self.base / 'shortened-link'; receipt = self.boot('--managed-dir', managed)
+        original = mod.verify
+        def shorten_after_verify(*args, **kwargs):
+            held = original(*args, **kwargs)
+            mid.unlink(); mid.write_text(raw)
+            return held
+        with mock.patch.object(mod, 'verify', side_effect=shorten_after_verify):
+            with self.assertRaises(mod.Stop):
+                mod.read_host_settings(self.bundle/'environment.json', receipt['sha256'])
+
+    def test_parser_budget_and_unused_output_are_checked_after_parse(self):
+        from unittest import mock
+        mod = EnvironmentGuardMoreTests.module(self)
+        cfg = self.home / '.claude'; cfg.mkdir()
+        managed = self.base / 'managed'; dropins = managed / 'managed-settings.d'; dropins.mkdir(parents=True)
+        (dropins / 'last.json').write_text('{}')
+        receipt = self.boot('--managed-dir', managed)
+        original_budget, held = mod.Budget, []
+        class ProbeBudget(original_budget):
+            def __init__(self):
+                super().__init__(); held.append(self)
+        original_parse = mod.strict_settings
+        def expire_after_last_parse(raw):
+            value = original_parse(raw)
+            for budget in held: budget.deadline = 0
+            return value
+        with mock.patch.object(mod, 'Budget', ProbeBudget), \
+             mock.patch.object(mod, 'strict_settings', side_effect=expire_after_last_parse):
+            with self.assertRaises(mod.Stop):
+                mod.read_host_settings(self.bundle/'environment.json', receipt['sha256'])
+
+        (dropins / 'last.json').unlink()
+        (cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(a *\u001b\t\u007f)']}}))
+        self.bundle = self.base / 'unused-bundle'; self.boot('--managed-dir', managed)
+        p = self.settings_call(None, 'host-allowlist')
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn('unused=', p.stdout)
+        self.assertTrue(all(not (ord(ch) < 32 or ord(ch) == 127)
+                            for line in p.stdout.splitlines() for ch in line))
+
+    def test_host_setting_descriptors_are_paths_and_kinds_only(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        managed = self.base / 'managed'; (managed / 'managed-settings.d').mkdir(parents=True)
+        (managed / 'managed-settings.d' / 'a.json').write_text('{}')
+        self.boot('--managed-dir', managed)
+        state = json.loads((self.bundle / 'environment.json').read_text())
+        descriptors = state['host_settings']
+        self.assertTrue(all(set(item) == {'path', 'kind'} for item in descriptors))
+        self.assertIn({'path': str(managed / 'managed-settings.d/a.json'), 'kind': 'managed'}, descriptors)
+
+    def test_single_setting_symlink_is_supported_but_dropin_tree_symlink_is_rejected(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        target = cfg / 'actual.json'; target.write_text('{"permissions":{"allow":["Read"]}}')
+        (cfg / 'settings.json').symlink_to(target.name)
+        self.boot()
+        self.assertEqual(self.settings_call().returncode, 0)
+        # managed-settings.d is a tree under our control, so a link to a tree is
+        # never a host drop-in source even where one final user settings link is.
+        managed = self.base / 'managed'; managed.mkdir()
+        outside = self.base / 'outside'; outside.mkdir()
+        (managed / 'managed-settings.d').symlink_to(outside, target_is_directory=True)
+        self.bundle = self.base / 'dropin-link-bundle'
+        p = self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle,
+                           '--managed-dir', managed)
+        self.assertEqual(p.returncode, 20, p.stderr)
+
+    def test_settings_parent_swap_fifo_mode_and_budget_reject(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        setting = cfg / 'settings.json'; setting.write_text('{}')
+        receipt = self.boot()
+        old = self.home / 'old-config'; cfg.rename(old); cfg.mkdir()
+        (cfg / 'settings.json').write_text('{"env":{"CLAUDE_CODE_SAFE_MODE":"secret"}}')
+        p = self.settings_call(receipt)
+        self.assertEqual(p.returncode, 20)
+        self.assertNotIn('secret', p.stderr)
+
+        # Each bootstrap starts from a fresh path because rejected objects must
+        # not be re-used as a test fixture.
+        fifo_cfg = self.home / 'fifo-config'; fifo_cfg.mkdir()
+        os.mkfifo(fifo_cfg / 'settings.json')
+        self.bundle = self.base / 'fifo-bundle'
+        self.env['CLAUDE_CONFIG_DIR'] = str(fifo_cfg)
+        p = self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle)
+        self.assertEqual(p.returncode, 20, p.stderr)
+
+        mode_cfg = self.home / 'mode-config'; mode_cfg.mkdir()
+        mode_setting = mode_cfg / 'settings.json'; mode_setting.write_text('{}'); mode_setting.chmod(0o200)
+        self.bundle = self.base / 'mode-bundle'
+        self.env['CLAUDE_CONFIG_DIR'] = str(mode_cfg)
+        p = self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle)
+        self.assertEqual(p.returncode, 20, p.stderr)
+
+        large_cfg = self.home / 'large-config'; large_cfg.mkdir()
+        (large_cfg / 'settings.json').write_bytes(b'x' * (8 * 1024 * 1024 + 1))
+        self.bundle = self.base / 'large-bundle'
+        self.env['CLAUDE_CONFIG_DIR'] = str(large_cfg)
+        p = self.run_guard('bootstrap', '--root', self.root, '--output', self.bundle)
+        self.assertEqual(p.returncode, 20, p.stderr)
+
+    def test_managed_dropin_names_match_the_host_scope(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        managed = self.base / 'managed'; dropins = managed / 'managed-settings.d'
+        (dropins / 'nested').mkdir(parents=True)
+        ignored = (dropins / '.hidden.json', dropins / 'Alpha.JSON', dropins / 'nested' / 'inside.json')
+        for path in ignored:
+            path.write_text('{"env":{"CLAUDE_CONFIG_DIR":"must-not-read"}}')
+        self.boot('--managed-dir', managed)
+        self.assertEqual(self.settings_call().returncode, 0)
+        state = json.loads((self.bundle / 'environment.json').read_text())
+        descriptors = state['host_settings']
+        for path in ignored:
+            self.assertNotIn({'path': str(path), 'kind': 'managed'}, descriptors)
+        active = dropins / 'Alpha.json'
+        active.write_text('{"env":{"CLAUDE_CONFIG_DIR":"must-reject"}}')
+        self.bundle = self.base / 'managed-active-bundle'
+        self.boot('--managed-dir', managed)
+        self.assertEqual(self.settings_call().returncode, 20)
+
+    def test_new_managed_dropin_between_snapshot_and_descriptors_is_rejected(self):
+        """descriptor は保持 tree から作り、直後の verify で集合差を止める。"""
+        from types import SimpleNamespace
+        from unittest import mock
+        mod = EnvironmentGuardMoreTests.module(self)
+        managed = self.base / 'managed'; dropins = managed / 'managed-settings.d'
+        dropins.mkdir(parents=True)
+        late = dropins / 'new.json'
+        real_snapshot, raced = mod.snapshot, [False]
+
+        def snapshot_then_add(*args, **kwargs):
+            result = real_snapshot(*args, **kwargs)
+            if not raced[0]:
+                raced[0] = True
+                late.write_text('{"env":{"CLAUDE_CODE_SAFE_MODE":"1"}}')
+            return result
+
+        args = SimpleNamespace(root=str(self.root), output=str(self.bundle), inventory=None,
+                               setting=[], shell=[], config=[], skills_dir=[], settings_dir=[],
+                               managed_dir=[str(managed)])
+        with mock.patch.dict(os.environ, self.env, clear=True), \
+             mock.patch.object(mod, 'snapshot', side_effect=snapshot_then_add):
+            with self.assertRaises(mod.Stop):
+                mod.bootstrap(args)
+        self.assertTrue(raced[0])
+        self.assertTrue(late.exists())
+
+
 class EnvironmentUnattendedEntryDocumentationTests(unittest.TestCase):
     def test_update_doc_standalone_entry_binds_to_verified_copy_before_modes(self):
         skill = SCRIPT.parents[2] / 'update-doc/SKILL.md'

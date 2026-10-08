@@ -2,6 +2,12 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.24.5
+
+### 修正
+
+- 無人ループは、HOME と設定ディレクトリの不正な起動値を拒否し、利用者設定・Linux 管理設定・`remote-settings.json` を控えて最初の補助ホスト CLI より前に検査する。設定の `env` による読込先・hook の動作の後置き変更と `policyHelper` の入口を拒否する。許可リストと権限追加の検査も、同じ照合済み本文を使う。設定の不在・無関係な文字列の `env`・保持済みの単独最終リンクは受け入れる。将来の正規 server 応答は管理者の信頼範囲に残る。Linux で正常な `--prove-host`・`--dry-run` と、user/cache の 8 件の起動前拒否を確認した。([子 Issue #229](https://github.com/Yuki-Maeda-valour/workflow/issues/229)、親 #107 の H50)
+
 ## v4.24.4
 
 ### 修正

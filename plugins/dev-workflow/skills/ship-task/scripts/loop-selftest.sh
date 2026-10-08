@@ -4612,6 +4612,133 @@ for kind in unset empty nonempty; do
 done
 fi
 
+# ════════════════ H50: 設定ルートと設定 env(#229)════════════════
+if want h50; then
+newrepo h50
+addtask pr-a 2026-01-01
+commit
+H50CFG="$W/h50-config"
+H50MANAGED="$W/h50-managed"
+mkdir -p "$H50CFG" "$H50MANAGED/managed-settings.d"
+h50_proof_fingerprint() {
+  find "$PROOF_DIR" -type f -printf '%P\n' 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+    printf '%s ' "$f"; sha256sum "$PROOF_DIR/$f"
+  done | sha256sum
+}
+h50_repo_fingerprint() {
+  {
+    git -C "$R" rev-parse HEAD
+    git -C "$R" rev-parse 'HEAD^{tree}'
+    git -C "$R" for-each-ref --format='%(refname) %(objectname)'
+    git -C "$R" status --porcelain=v1 -z | sha256sum
+    find "$R" -path "$R/.git" -prune -o -type f -printf '%P\0' | LC_ALL=C sort -z | while IFS= read -r -d '' f; do
+      printf '%s ' "$f"; sha256sum "$R/$f"
+    done
+  } | sha256sum
+}
+h50_no_side_effects() { # $1=label $2=state $3=proof $4=repo
+  f "$1: 状態・ロック・報告を作らない" test -e "$W/state/$2"
+  check "$1: 補助の host CLI を呼ばない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+  check "$1: タスクを実行しない" "" "$(calls)"
+  check "$1: 子プロセスを残さない" "" "$(tagged_pids | tr '\n' ' ')"
+  check "$1: 既存証明を変えない" "$3" "$(h50_proof_fingerprint)"
+  check "$1: リポジトリの HEAD・ref・内容を変えない" "$4" "$(h50_repo_fingerprint)"
+}
+H50_PROOF_BEFORE="$(h50_proof_fingerprint)"
+H50_REPO_BEFORE="$(h50_repo_fingerprint)"
+h50_rejected() { # $1=名前, 残り=run_loop へ渡す環境
+  local name="$1" mode state; shift
+  for mode in normal discover dry prove; do
+    state="h50-$name-$mode"
+    newrec "$state"
+    args=(--repo "$R")
+    case "$mode" in
+      discover) args+=(--discover) ;;
+      dry) args+=(--dry-run) ;;
+      prove) args+=(--prove-host) ;;
+    esac
+    run_loop "$state" "CLAUDE_CONFIG_DIR=$H50CFG" "$@" -- "${args[@]}" "${COMMON_ARGS[@]}"
+    check "H50 $name/$mode: 終了コード" 20 "$RC"
+    h50_no_side_effects "H50 $name/$mode" "$state" "$H50_PROOF_BEFORE" "$H50_REPO_BEFORE"
+  done
+}
+h50_path_rejected() { # $1=名前, 残り=run_loop の環境
+  local name="$1" mode state; shift
+  for mode in normal discover dry prove; do
+    state="h50-path-$name-$mode"
+    newrec "$state"
+    args=(--repo "$R")
+    case "$mode" in discover) args+=(--discover) ;; dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+    run_loop "$state" "$@" -- "${args[@]}" "${COMMON_ARGS[@]}"
+    check "H50 path $name/$mode: 終了コード" 20 "$RC"
+    has "H50 path $name/$mode: 理由" "$OUT" "[host-config-path]"
+    h50_no_side_effects "H50 path $name/$mode" "$state" "$H50_PROOF_BEFORE" "$H50_REPO_BEFORE"
+  done
+}
+h50_path_rejected config-relative CLAUDE_CONFIG_DIR=relative
+h50_path_rejected config-empty CLAUDE_CONFIG_DIR=
+h50_path_rejected home-relative HOME=relative
+for key in CLAUDE_CONFIG_DIR HOME XDG_CONFIG_HOME CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE CLAUDE_CODE_SHELL_PREFIX; do
+  printf '{"env":{"%s":"H50-secret"}}' "$key" >"$H50CFG/settings.json"
+  h50_rejected "user-$key"
+done
+printf '{"policyHelper":"H50-secret"}' >"$H50CFG/settings.json"
+h50_rejected user-helper
+rm -f "$H50CFG/settings.json"
+for key in CLAUDE_CODE_REMOTE_SETTINGS_PATH CLAUDE_CODE_MANAGED_SETTINGS_PATH CLAUDE_CODE_MOCK_REMOTE_SETTINGS; do
+  h50_rejected "startup-$key" "$key=H50-secret"
+done
+printf '{"env":{"CLAUDE_CODE_SAFE_MODE":"H50-secret"}}' >"$H50MANAGED/managed-settings.d/a.json"
+h50_rejected managed-dropin "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H50MANAGED"
+rm -f "$H50MANAGED/managed-settings.d/a.json"
+printf '{"env":{"CLAUDE_CODE_SHELL_PREFIX":"H50-secret"}}' >"$H50CFG/remote-settings.json"
+h50_rejected cache
+rm -f "$H50CFG/remote-settings.json"
+# 正常設定は通常・発見・dry・prove の各入口で通す。通常は実際に 1 件を処理し、
+# prove は既存証明と別の状態で hook の確認をする。
+newrepo h50-normal
+addtask pr-a 2026-01-01
+commit
+newrec h50-normal
+run_loop h50-normal "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+check "H50 正常設定: 通常" 0 "$RC"
+check "H50 正常設定: 通常はタスクを 1 件実行" pr-a "$(calls)"
+newrepo h50-discover
+addtask pr-a 2026-01-01
+commit
+newrec h50-discover
+run_loop h50-discover "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --discover --max-iterations 1 "${COMMON_ARGS[@]}"
+check "H50 正常設定: 発見" 0 "$RC"
+newrepo h50-dry
+addtask pr-a 2026-01-01
+commit
+newrec h50-dry
+run_loop h50-dry "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H50 正常設定: --dry-run" 0 "$RC"
+newrepo h50-prove
+addtask pr-a 2026-01-01
+commit
+newrec h50-prove
+run_loop h50-prove "CLAUDE_CONFIG_DIR=$H50CFG" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H50 正常設定: --prove-host" 0 "$RC"
+has "H50 正常設定: 証明を書いた" "$OUT" "ホスト CLI の証明を書いた:"
+for key in CLAUDE_CODE_REMOTE_SETTINGS_PATH CLAUDE_CODE_MANAGED_SETTINGS_PATH CLAUDE_CODE_MOCK_REMOTE_SETTINGS; do
+  newrec "h50-empty-$key"
+  run_loop "h50-empty-$key" "CLAUDE_CONFIG_DIR=$H50CFG" "$key=" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+  check "H50 $key の空値: --dry-run" 0 "$RC"
+done
+newrec h50-help
+printf '{"env":{"CLAUDE_CONFIG_DIR":"H50-secret"}}' >"$H50CFG/settings.json"
+H50_HELP_PROOF_BEFORE="$(h50_proof_fingerprint)"
+run_loop h50-help "CLAUDE_CONFIG_DIR=$H50CFG" -- --help
+check "H50 help: 終了コード" 0 "$RC"
+has "H50 help: 使い方" "$OUT" "使い方:"
+hasnt "H50 help: 値を出さない" "$OUT" H50-secret
+f "H50 help: 状態を作らない" test -e "$W/state/h50-help"
+check "H50 help: host CLI を呼ばない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+check "H50 help: 証明を変えない" "$H50_HELP_PROOF_BEFORE" "$(h50_proof_fingerprint)"
+fi
+
 # ════════════════ 後片付け ════════════════
 # 短命のもの(git の後始末など)が消えるのを少し待ってから確かめる
 i=0

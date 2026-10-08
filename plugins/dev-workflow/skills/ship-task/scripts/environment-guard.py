@@ -14,6 +14,7 @@ import stat
 import subprocess
 import sys
 import time
+import unicodedata
 
 MAX_FILE = 8 * 1024 * 1024
 MAX_TOTAL = 64 * 1024 * 1024
@@ -75,6 +76,30 @@ def absolute(path):
     # resolve() により symlink を信頼済みのパスへ変換しない。
     value = Path(os.path.expanduser(str(path)))
     return value if value.is_absolute() else Path.cwd() / value
+
+
+def host_path(value, name):
+    """ホストが起動時に使うパスだけの、cwd に依らない解決。"""
+    if not isinstance(value, str) or not value or value.startswith(('~', '//')):
+        raise Stop('host-config-path')
+    if not os.path.isabs(value) or unicodedata.normalize('NFC', value) != value:
+        raise Stop('host-config-path')
+    if '..' in Path(value).parts:
+        raise Stop('host-config-path')
+    # /./・重複した /・末尾 / は同じ絶対位置として受け入れる。Path はここでだけ
+    # 字面を正規化し、設定を読む他の経路へ相対値を渡さない。
+    return str(Path(value))
+
+
+def host_paths(environ=None):
+    environ = os.environ if environ is None else environ
+    home = host_path(environ.get('HOME'), 'HOME')
+    if 'CLAUDE_CONFIG_DIR' in environ:
+        config = host_path(environ['CLAUDE_CONFIG_DIR'], 'CLAUDE_CONFIG_DIR')
+    else:
+        config = str(Path(home) / '.claude')
+    return {'home': home, 'config': config, 'user_settings': str(Path(config) / 'settings.json'),
+            'cache_settings': str(Path(config) / 'remote-settings.json')}
 
 
 @contextmanager
@@ -369,10 +394,11 @@ def includes(path, raw, budget=None):
 
 
 def default_specs():
-    home = absolute(os.environ['HOME'])
+    paths = host_paths()
+    home = Path(paths['home'])
     xdg = absolute(os.environ.get('XDG_CONFIG_HOME') or home / '.config')
-    config = absolute(os.environ.get('CLAUDE_CONFIG_DIR') or home / '.claude')
-    files = [config / 'settings.json', config / 'plugins/installed_plugins.json', config / 'plugins/known_marketplaces.json',
+    config = Path(paths['config'])
+    files = [Path(paths['user_settings']), Path(paths['cache_settings']), config / 'plugins/installed_plugins.json', config / 'plugins/known_marketplaces.json',
              Path('/etc/claude-code/managed-settings.json')]
     shells = [home / x for x in ('.profile', '.bash_profile', '.bash_login', '.bashrc', '.bash_aliases', '.bash_logout', '.zshenv', '.zprofile', '.zshrc', '.zlogin', '.zlogout')]
     shells += [Path('/etc/profile'), Path('/etc/bash.bashrc'), Path('/etc/zsh/zshenv')]
@@ -384,9 +410,217 @@ def default_specs():
     configs = [absolute(os.environ['GIT_CONFIG_GLOBAL'])] if os.environ.get('GIT_CONFIG_GLOBAL') else [home / '.gitconfig', xdg / 'git/config']
     if os.environ.get('GIT_CONFIG_NOSYSTEM') not in ('1', 'true', 'yes'):
         configs.append(absolute(os.environ.get('GIT_CONFIG_SYSTEM') or '/etc/gitconfig'))
-    return {'files': list(map(str, files + shells)), 'configs': list(map(str, configs)),
+    specs = {'files': list(map(str, files + shells)), 'configs': list(map(str, configs)),
             'directories': ['/etc/claude-code/managed-settings.d'],
-            'user_directories': list(map(str, [config / 'skills', config / 'commands']))}
+            'user_directories': list(map(str, [config / 'skills', config / 'commands'])),
+            'host_paths': paths,
+            'managed_roots': ['/etc/claude-code']}
+    # drop-in の記述子は snapshot 後に、その保持済み tree だけから作る。
+    # ここで directory を列挙すると列挙と snapshot の間に新設された設定を
+    # 記述子から外してしまうため、bootstrap では下で entries を渡す。
+    specs['host_settings'] = []
+    return specs
+
+
+FORBIDDEN_SETTINGS_ENV = frozenset((
+    'CLAUDE_CONFIG_DIR', 'HOME', 'XDG_CONFIG_HOME', 'CLAUDE_CODE_SIMPLE',
+    'CLAUDE_CODE_SAFE_MODE', 'CLAUDE_CODE_SHELL_PREFIX',
+))
+
+
+def _no_duplicate_object(pairs):
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise Stop('host-settings')
+        value[key] = item
+    return value
+
+
+def strict_settings(raw):
+    try:
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=_no_duplicate_object,
+                           parse_constant=lambda unused: (_ for _ in ()).throw(Stop('host-settings')))
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        raise Stop('host-settings') from None
+    if not isinstance(value, dict):
+        raise Stop('host-settings')
+    # JSON の decoder は object_pairs_hook を全階層へ適用する。深い object/array は
+    # 解析後も明示的に上限を設け、次の利用者設定への DoS を持ち込まない。
+    def walk(item, depth=0):
+        if depth > 100:
+            raise Stop('host-settings')
+        if isinstance(item, dict):
+            for child in item.values(): walk(child, depth + 1)
+        elif isinstance(item, list):
+            for child in item: walk(child, depth + 1)
+    walk(value)
+    return value
+
+
+def check_host_setting(value, managed=False):
+    if 'env' in value:
+        env = value['env']
+        if not isinstance(env, dict):
+            raise Stop('host-settings')
+        for key, item in env.items():
+            if key in FORBIDDEN_SETTINGS_ENV or key in (
+                    'CLAUDE_CODE_REMOTE_SETTINGS_PATH', 'CLAUDE_CODE_MANAGED_SETTINGS_PATH',
+                    'CLAUDE_CODE_MOCK_REMOTE_SETTINGS'):
+                raise Stop('host-settings' if key in FORBIDDEN_SETTINGS_ENV else 'host-config-source')
+            if not isinstance(item, str):
+                raise Stop('host-settings')
+    for key in ('policyHelper', 'policyHelpers'):
+        if key in value:
+            raise Stop('host-settings')
+    if value.get('disableAllHooks') is True:
+        raise Stop('hooks-disabled')
+    if managed and value.get('allowManagedHooksOnly') is True:
+        raise Stop('hooks-disabled')
+
+
+def host_settings_specs(specs, entries):
+    """保持済み entries からホストが読む設定の記述子を作る。"""
+    paths = specs.get('host_paths')
+    if not isinstance(paths, dict) or not all(isinstance(paths.get(k), str) for k in ('user_settings', 'cache_settings')):
+        raise Stop('host-settings')
+    roots = specs.get('managed_roots')
+    if not isinstance(roots, list) or not all(isinstance(root, str) and os.path.isabs(root) for root in roots):
+        raise Stop('host-settings')
+    result = [
+        {'path': paths['user_settings'], 'kind': 'user'},
+        {'path': paths['cache_settings'], 'kind': 'cache'},
+    ]
+    for root in roots:
+        result.append({'path': str(Path(root) / 'managed-settings.json'), 'kind': 'managed'})
+        directory = str(Path(root) / 'managed-settings.d')
+        prefix = 'external:' + directory + '/'
+        names = []
+        for key, held in entries.items():
+            if not key.startswith(prefix) or held[:1] != ['file']:
+                continue
+            name = key[len(prefix):]
+            # direct child だけを対象にする。拡張子の小文字性はホスト仕様どおり
+            # suffix に限り、Alpha.json は対象、Alpha.JSON は対象外である。
+            if '/' not in name and not name.startswith('.') and name.endswith('.json'):
+                names.append(name)
+        for name in sorted(names):
+            result.append({'path': str(Path(directory) / name), 'kind': 'managed'})
+    return result
+
+
+def read_host_settings(state_path, expected_sha):
+    """保持済みの設定だけを安全に読み、同じ process 内で object を返す。"""
+    value = verify(state_path, expected_sha)
+    desc = value.get('host_settings')
+    if not isinstance(desc, list):
+        raise Stop('host-settings')
+    entries = value['entries']
+    budget = Budget()
+    def related(table, key):
+        """この設定本文と、その最終 symlink の連鎖だけを取り出す。"""
+        result = {key}
+        for name in table:
+            if name.startswith('@file-link:') and name.split(':', 2)[-1] == key:
+                result.add(name)
+        return result
+    def load(item):
+        if not isinstance(item, dict) or set(item) != {'path', 'kind'} or not isinstance(item['path'], str):
+            raise Stop('host-settings')
+        path, kind = item['path'], item['kind']
+        if kind not in ('user', 'managed', 'cache'):
+            raise Stop('host-settings')
+        key = 'external:' + path
+        if key not in entries:
+            raise Stop('host-settings')
+        # descriptor ごとに fresh な記録を作る。累積した前回の link 記録で、
+        # 今回消えた最終 link を隠さない。
+        local = {}
+        raw = record(path, key, budget, local, entries)
+        # verify() と設定本文の再読取の間にも、同じ held entry 以外を採用しない。
+        # 通常ファイルの hash/mode、missing、最終 symlink とその target を含め、
+        # 関連する external と全 @file-link の集合を双方向で照合する。
+        # 同 bytes/mode の通常ファイルへの置換でも、消えた link entry を拒否する。
+        held_keys, local_keys = related(entries, key), related(local, key)
+        if held_keys != local_keys:
+            raise Stop('host-settings')
+        for local_key in local_keys:
+            if entries.get(local_key) != local.get(local_key):
+                raise Stop('host-settings')
+        if raw is None:
+            return kind, path, None
+        budget.tick()
+        item = strict_settings(raw)
+        budget.tick()
+        check_host_setting(item, kind != 'user')
+        budget.tick()
+        return kind, path, item
+    user, cache, cache_seen, checked = {}, None, False, 0
+    managed = []
+    user_path = None
+    for item in desc:
+        kind, path, value = load(item)
+        checked += 1
+        if kind == 'user':
+            if user_path is not None: raise Stop('host-settings')
+            user_path, user = path, value or {}
+        elif kind == 'cache':
+            if cache_seen: raise Stop('host-settings')
+            cache_seen = True
+            cache = value
+        elif value is not None:
+            managed.append(value)
+    if user_path is None:
+        raise Stop('host-settings')
+    return {'user_settings': user_path, 'user': user, 'cache': cache,
+            'managed': managed, 'checked': checked}
+
+
+def split_rules(value):
+    rules, current, depth = [], '', 0
+    for ch in value:
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth = max(0, depth - 1)
+        if depth == 0 and (ch == ',' or ch.isspace()):
+            if current: rules.append(current)
+            current = ''
+        else:
+            current += ch
+    if current: rules.append(current)
+    return rules
+
+
+def bash_rule(rule):
+    if rule == 'Bash': return ('all', [])
+    if not (rule.startswith('Bash(') and rule.endswith(')')): return 'skip'
+    inner = rule[5:-1].strip()
+    if inner in ('', '*'): return None
+    if inner.endswith(':*') and '*' not in inner[:-2]:
+        words = inner[:-2].split(); return ('prefix', words) if words else None
+    if inner.endswith(' *') and '*' not in inner[:-2]:
+        words = inner[:-2].split(); return ('prefix', words) if words else None
+    return ('exact', inner.split()) if '*' not in inner else None
+
+
+def host_allowlist(state_path, expected_sha, values):
+    settings = read_host_settings(state_path, expected_sha)
+    sources = [('--allowed-tools', rule) for value in values for rule in split_rules(value)]
+    permissions = settings['user'].get('permissions')
+    allow = permissions.get('allow') if isinstance(permissions, dict) else []
+    if isinstance(allow, list):
+        sources.extend(('利用者の設定', rule) for rule in allow if isinstance(rule, str))
+    out, unused, seen = [], [], set()
+    for origin, rule in sources:
+        got = bash_rule(rule.strip())
+        if got == 'skip': continue
+        if got is None:
+            unused.append(f'{rule}({origin})'); continue
+        key = (got[0], tuple(got[1]))
+        if key not in seen:
+            seen.add(key); out.append({'kind': got[0], 'words': got[1]})
+    return out, unused
 
 
 def plugin_inventory(raw):
@@ -479,9 +713,15 @@ def bootstrap(a):
     specs['configs'] += list(map(lambda x: str(absolute(x)), a.config))
     specs['user_directories'] += [str(absolute(x)) for x in a.skills_dir]
     specs['directories'] += [str(absolute(x)) for x in a.settings_dir]
+    for managed_root in a.managed_dir:
+        managed_root = host_path(managed_root, '--managed-dir')
+        specs['managed_roots'].append(managed_root)
+        specs['files'].append(str(Path(managed_root) / 'managed-settings.json'))
+        specs['directories'].append(str(Path(managed_root) / 'managed-settings.d'))
     inventory = plugin_inventory(read_regular(a.inventory)) if a.inventory else []
     blobs = {}
     entries = snapshot(root, specs, inventory, blobs)
+    specs['host_settings'] = host_settings_specs(specs, entries)
     # 既存の state/copy は開かず、新しいディレクトリだけ作る。
     with parent(output) as (fd, name):
         os.mkdir(name, 0o700, dir_fd=fd)
@@ -499,7 +739,8 @@ def bootstrap(a):
     guard = read_regular(Path(__file__))
     write_new(output / 'environment-guard.py', guard)
     value = {'version':3, 'root':str(root), 'copy':str(output / 'plugin'), 'specs':specs,
-             'inventory':inventory, 'entries':entries}
+             'host_settings':specs['host_settings'], 'inventory':inventory, 'entries':entries,
+             'guard_sha256':sha(guard)}
     raw = dump(value)
     write_new(output / 'environment.json', raw)
     verify(output / 'environment.json', sha(raw))
@@ -514,7 +755,7 @@ def main():
     boot.add_argument('--root', required=True)
     boot.add_argument('--output', required=True)
     boot.add_argument('--inventory')
-    for flag in ('setting','config','shell','skills-dir','settings-dir'):
+    for flag in ('setting','config','shell','skills-dir','settings-dir', 'managed-dir'):
         boot.add_argument('--'+flag, action='append', default=[])
     for cmd in ('verify','exec','read','hook'):
         child = sub.add_parser(cmd)
@@ -525,10 +766,29 @@ def main():
             child.add_argument('--path', required=True)
         if cmd == 'exec':
             child.add_argument('argv', nargs=argparse.REMAINDER)
+    child = sub.add_parser('host-settings')
+    child.add_argument('--state', required=True)
+    child.add_argument('--expect-sha256', required=True)
+    child = sub.add_parser('host-allowlist')
+    child.add_argument('--state', required=True)
+    child.add_argument('--expect-sha256', required=True)
+    child.add_argument('--allowed-tools', action='append', default=[])
+    sub.add_parser('host-paths')
     a = p.parse_args()
     try:
         if a.command == 'bootstrap':
             bootstrap(a)
+        elif a.command == 'host-paths':
+            print(json.dumps(host_paths(), ensure_ascii=True, separators=(',', ':')))
+        elif a.command == 'host-settings':
+            result = read_host_settings(a.state, a.expect_sha256)
+            print(json.dumps({'user_settings': result['user_settings'], 'checked': result['checked']},
+                             ensure_ascii=True, separators=(',', ':')))
+        elif a.command == 'host-allowlist':
+            rules, unused = host_allowlist(a.state, a.expect_sha256, a.allowed_tools)
+            print(json.dumps(rules, ensure_ascii=False))
+            for item in unused:
+                print('unused=' + re.sub(r'[\x00-\x1f\x7f]', ' ', item)[:300])
         else:
             value = verify(a.state, a.expect_sha256, a.current_inventory)
             if a.command != 'verify':
@@ -557,7 +817,11 @@ def main():
         return 0
     except (OSError, Stop, ValueError, KeyError, TypeError, RecursionError, subprocess.TimeoutExpired) as exc:
         detail = str(exc) if isinstance(exc, Stop) else '検査を完了できない (' + type(exc).__name__ + ')'
-        print('ERROR [environment-guard] ' + detail, file=sys.stderr)
+        if a.command in ('host-paths', 'host-settings', 'host-allowlist'):
+            code = detail if detail in ('host-config-path', 'host-settings', 'host-config-source', 'hooks-disabled') else 'host-settings'
+            print('ERROR [' + code + '] ホスト設定を安全に検査できない', file=sys.stderr)
+        else:
+            print('ERROR [environment-guard] ' + detail, file=sys.stderr)
         return 20
 
 
