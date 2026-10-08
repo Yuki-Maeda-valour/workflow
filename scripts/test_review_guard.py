@@ -155,6 +155,30 @@ class ReviewGuardTest(unittest.TestCase):
                    "--expect-state-sha256", sha, "--review-input", str(self.review),
                    "--exclude-ere", r"(^|/)[.]env($|[.])", expect=2)
 
+    def test_run_checks_inside_reviewed_code_does_not_create_bytecode(self):
+        # 配布コード自身が検査対象でも、外部の環境設定なしで run-checks が成功する。
+        original = SCRIPT
+        copied = self.repo / 'plugins/dev-workflow/skills/ship-task/scripts/review-guard.py'
+        shutil.copytree(original.parents[4], self.repo / 'plugins',
+                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        self.git('add', 'plugins')
+        self.git('commit', '-qm', 'guard fixture')
+        with mock.patch(__name__ + '.SCRIPT', copied):
+            # 今回の変更前から存在する task-digest 読込は準備工程だけで使う。
+            with mock.patch.dict(os.environ, {'PYTHONDONTWRITEBYTECODE': '1'}):
+                self.begin()
+                self.capture(prove=False)
+            self.assertFalse(list(self.repo.rglob('*.pyc')))
+            plan = self.root / 'checks.json'
+            plan.write_text(json.dumps({'commands': [{'name': 'pass', 'argv': [sys.executable, '-c', 'pass']}]}))
+            out = self.root / 'receipt.json'
+            with mock.patch.dict(os.environ):
+                os.environ.pop('PYTHONDONTWRITEBYTECODE', None)
+                self.guard(*self.context('run-checks'), '--checks-file', str(plan),
+                           '--expect-checks-sha256', self.digest(plan), '--out', str(out))
+            self.assertFalse(list(self.repo.rglob('*.pyc')))
+            self.assertEqual(0, json.loads(out.read_text())['results'][0]['exit_code'])
+
     def test_state_inside_reviews_does_not_change_review_set(self):
         reviews = self.repo / ".claude/reviews"
         reviews.mkdir(parents=True)
@@ -834,6 +858,223 @@ class ReviewGuardTest(unittest.TestCase):
         self.state_sha256 = next(line.split("=", 1)[1] for line in sealed.stdout.splitlines() if line.startswith("STATE_SHA256="))
         self.prove()
 
+
+
+@unittest.skipUnless(sys.platform.startswith("linux"), "Linux の所有関係と /proc を検査")
+class CheckLifecycleTest(unittest.TestCase):
+    """状態認証だけを置き換え、コピー・Git・品質起動・削除は実行する。"""
+    def setUp(self):
+        import ctypes
+        self.tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self.tmp.name)
+        source = Path(os.environ.get("REVIEW_GUARD_TEST_SCRIPT", SCRIPT))
+        spec = importlib.util.spec_from_file_location("lifecycle_guard", source)
+        self.guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.guard)
+        self.seed = self.root / "seed"
+        self.seed.write_text("fixture\n")
+        self.saved = {"worktree": [{"path": "seed", "kind": "file", "mode": "100644",
+                       "sha256": self.guard.sha256(self.seed.read_bytes())}],
+                      "commit_paths": ["seed"], "review_binding_sha256": "fixture"}
+        self.pids = []
+        if hasattr(self.guard, "check_process_module"):
+            self.process_helper = self.guard.check_process_module()
+        if sys.platform.startswith("linux"):
+            self.libc = ctypes.CDLL(None)
+            old = ctypes.c_int()
+            self.libc.prctl(37, ctypes.byref(old), 0, 0, 0)
+            self.old_subreaper = old.value
+            self.libc.prctl(36, 1, 0, 0, 0)
+
+    def tearDown(self):
+        import signal
+        for pid in self.pids:
+            try:
+                found, _ = os.waitpid(pid, os.WNOHANG)
+                if not found:
+                    os.kill(pid, signal.SIGKILL)
+                    os.waitpid(pid, 0)
+            except ChildProcessError:
+                pass
+        if hasattr(self, "libc"):
+            self.libc.prctl(36, self.old_subreaper, 0, 0, 0)
+        self.tmp.cleanup()
+
+    def invoke(self, codes, timeout=1):
+        import argparse
+        plan = self.root / "plan.json"
+        plan.write_text(json.dumps({"commands": [{"name": str(i), "argv": [sys.executable, "-c", code]}
+                                                for i, code in enumerate(codes)]}))
+        out = self.root / "receipt.json"
+        args = argparse.Namespace(checks_file=str(plan), expect_checks_sha256=self.guard.sha256(plan.read_bytes()),
+                                  timeout=timeout, out=str(out))
+        original_mkdtemp = tempfile.mkdtemp
+        def make_directory(suffix=None, prefix=None, dir=None):
+            return original_mkdtemp(suffix=suffix, prefix=prefix, dir=self.root)
+        with mock.patch.object(self.guard.tempfile, "mkdtemp", side_effect=make_directory), \
+             mock.patch.object(self.guard, "read_context", return_value=(self.root, self.saved, [])), \
+             mock.patch.object(self.guard, "check_current", return_value=True), \
+             mock.patch.object(self.guard, "public_path"), \
+             mock.patch.object(self.guard, "output_json", side_effect=lambda p, value, *_: p.write_text(json.dumps(value))):
+            return self.guard.run_checks(args)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux subreaper で試験の孫も回収")
+    def test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan(self):
+        import time
+        marker, pidfile, cleanfile, later = (self.root / x for x in ("marker", "pid", "clean", "later"))
+        child = f"import time; from pathlib import Path; cwd=Path.cwd(); time.sleep(1.4); Path({str(marker)!r}).write_text(str(cwd.exists()))"
+        code = f"""import subprocess,sys,time
+from pathlib import Path
+Path({str(cleanfile)!r}).write_text(str(Path.cwd()))
+p = subprocess.Popen([sys.executable, '-c', {child!r}], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+Path({str(pidfile)!r}).write_text(str(p.pid))
+time.sleep(3)
+"""
+        try:
+            rc = self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
+        finally:
+            if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
+        time.sleep(.8)
+        self.assertEqual(1, rc)
+        self.assertFalse(marker.exists(), "時間切れの子孫がコピー削除後も動いた")
+        self.assertFalse(later.exists(), "時間切れ後に後続コマンドを起動した")
+        self.assertFalse(Path(cleanfile.read_text()).exists())
+        self.assertEqual("timeout", json.loads((self.root / "receipt.json").read_text())["results"][0]["error"])
+
+
+    def test_normal_nonzero_preserves_output_and_no_overlap(self):
+        import hashlib
+        pidfile = self.root / "pid"
+        cleanfile = self.root / "clean"
+        command = f"""import subprocess,sys,time
+from pathlib import Path
+Path({str(cleanfile)!r}).write_text(str(Path.cwd()))
+p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(3)'])
+Path({str(pidfile)!r}).write_text(str(p.pid))
+print('output')
+raise SystemExit(7)
+"""
+        following = f"from pathlib import Path; assert Path('seed').exists(); assert not Path('/proc/' + Path({str(pidfile)!r}).read_text()).exists()"
+        try:
+            self.assertEqual(1, self.invoke([command, following]))
+        finally:
+            if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
+        results = json.loads((self.root / 'receipt.json').read_text())['results']
+        self.assertEqual([7, 0], [item['exit_code'] for item in results])
+        self.assertEqual(hashlib.sha256(b'output\n').hexdigest(), results[0]['stdout_sha256'])
+        self.assertFalse(Path(cleanfile.read_text()).exists())
+
+    def test_helper_import_restores_bytecode_setting_even_on_failure(self):
+        import importlib.machinery
+        for original in (False, True):
+            with mock.patch.object(sys, 'dont_write_bytecode', original):
+                self.guard.check_process_module()
+                self.assertIs(original, sys.dont_write_bytecode)
+                with mock.patch.object(importlib.machinery.SourceFileLoader, 'exec_module', side_effect=RuntimeError('fixture')):
+                    with self.assertRaises(RuntimeError):
+                        self.guard.check_process_module()
+                self.assertIs(original, sys.dont_write_bytecode)
+
+    def test_invalid_timeouts_rejected_before_context_or_process(self):
+        for timeout in (0, -1, True, float('inf'), 10 ** 400):
+            with self.subTest(timeout=str(timeout)[:30]), mock.patch.object(self.guard, 'read_context') as context:
+                with self.assertRaises(self.guard.GuardError):
+                    self.invoke(['raise AssertionError("must not start")'], timeout=timeout)
+                context.assert_not_called()
+        self.assertFalse(list(self.root.glob('review-guard-clean-*')))
+
+    def test_bad_or_missing_recovery_proof_retains_copy_and_stops(self):
+        for failure in (ValueError('bad JSON'), FileNotFoundError('missing'), self.process_helper.RecoveryError('unknown group')):
+            with self.subTest(failure=type(failure).__name__):
+                later = self.root / 'later'
+                with mock.patch.object(self.guard, 'check_process_module', return_value=self.process_helper), \
+                     mock.patch.object(self.process_helper, 'read_result', side_effect=failure):
+                    with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持'):
+                        self.invoke(['pass', f"from pathlib import Path; Path({str(later)!r}).touch()"])
+                self.assertFalse(later.exists())
+                self.assertFalse((self.root / 'receipt.json').exists())
+                copies = list(self.root.glob('review-guard-clean-*'))
+                self.assertTrue(copies)
+                self.assertTrue(all((copy / 'seed').exists() for copy in copies))
+
+    def test_stop_confirmation_failure_retains_copy(self):
+        with mock.patch.object(self.guard, 'check_process_module', return_value=self.process_helper), \
+             mock.patch.object(self.process_helper, 'run_command', side_effect=self.process_helper.RecoveryError('not absent')):
+            with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持'):
+                self.invoke(['pass', 'raise AssertionError("later")'])
+        self.assertTrue(list(self.root.glob('review-guard-clean-*')))
+        self.assertFalse((self.root / 'receipt.json').exists())
+
+    def test_parent_signals_keep_copy_even_after_successful_recovery(self):
+        import signal
+        import threading
+        import time
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            pidfile = self.root / ('signal-' + str(number))
+            cleanfile = self.root / ('clean-' + str(number))
+            later = self.root / 'later'
+            def interrupt():
+                end = time.monotonic() + 3
+                while time.monotonic() < end:
+                    if pidfile.exists() and pidfile.stat().st_size:
+                        os.kill(os.getpid(), number)
+                        return
+                    time.sleep(.01)
+            thread = threading.Thread(target=interrupt)
+            thread.start()
+            try:
+                code = f"import os,time; from pathlib import Path; Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(4)"
+                with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持'):
+                    self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
+            finally:
+                thread.join(4)
+                if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
+            self.assertFalse(thread.is_alive())
+            self.assertTrue(Path(cleanfile.read_text()).exists())
+            self.assertFalse(Path('/proc/' + pidfile.read_text()).exists())
+            self.assertFalse(later.exists())
+            self.assertFalse((self.root / 'receipt.json').exists())
+
+    def test_supervisor_death_retains_copy_without_receipt(self):
+        import signal
+        import threading
+        import time
+        pidfile, cleanfile, later = (self.root / name for name in ('orphan', 'clean', 'later'))
+        supervisor = []
+        original = subprocess.Popen
+        def launch(argv, *args, **kwargs):
+            process = original(argv, *args, **kwargs)
+            if '--linux' in argv:
+                supervisor.append(process.pid)
+            return process
+        def kill():
+            end = time.monotonic() + 3
+            while time.monotonic() < end:
+                if pidfile.exists() and pidfile.stat().st_size:
+                    os.kill(supervisor[0], signal.SIGKILL)
+                    return
+                time.sleep(.01)
+        thread = threading.Thread(target=kill)
+        thread.start()
+        try:
+            with mock.patch.object(self.guard, 'check_process_module', return_value=self.process_helper), \
+                 mock.patch.object(self.process_helper.subprocess, 'Popen', side_effect=launch):
+                code = f"import os,time; from pathlib import Path; Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(3)"
+                with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持'):
+                    self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
+        finally:
+            thread.join(4)
+            if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
+        self.assertTrue(Path(cleanfile.read_text()).exists())
+        self.assertFalse(later.exists())
+        self.assertFalse((self.root / 'receipt.json').exists())
+
+
+    def test_preparation_failure_without_launched_command_removes_copy(self):
+        with mock.patch.object(self.guard.subprocess, 'run', side_effect=subprocess.CalledProcessError(1, ['git'])):
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.invoke(['pass'])
+        self.assertFalse(list(self.root.glob('review-guard-clean-*')))
 
 
 if __name__ == "__main__":

@@ -9,6 +9,16 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 - `diff-snapshot-selftest.sh` は bash 4.0 以上と GNU coreutils・GNU findutils・GNU grep が必要。冒頭で `sha256sum`・`touch -d`・`find -maxdepth/-quit`・`head -c`・`grep -z`・`sort -z` を検査し、不足は rc 2 / `ERROR [requirements]` で止まる。後で時刻固定が失敗しても rc 2 で停止する。必要道具の不足と、時刻を固定できても stat キャッシュの隠蔽を再現できない正当な fixture 不成立を区別する。
 - 回帰一式の必要環境は **Linux と GNU 系ツール**。無人ループ `loop.sh` は **Linux・bash 4.4 以上**が必要で、`setsid`・`flock`・`/proc` を使う。詳しくは [../../ship-task/references/loop.md](../../ship-task/references/loop.md) を読む。
 
+## 品質コマンドの監督
+
+`review-guard.py run-checks` は、[check-process.py](../../ship-task/scripts/check-process.py) から品質コマンドを起動する。
+停止とコピー保持の手順は [review-protocol.md](review-protocol.md#品質コマンドの停止とコピーの保持)が正本。
+
+- **Linux**: `subreaper`(親が終了した子孫を引き取る仕組み)、`/proc`、`pidfd`(特定のプロセスを指す参照)が必要。Python の `os.pidfd_open`・`signal.pidfd_send_signal` を使う。専用プロセスで既存の [loop-supervisor.py](../../ship-task/scripts/loop-supervisor.py) を使い、子孫の終了と回収を確認する。必要な機構を使えなければ停止し、自動で他 POSIX の方式へ切り替えない。
+- **他の POSIX 環境**: 専用のプロセス群を停止し、その群の不在を確認する。群の番号を保持する親は、最後の停止信号まで回収しない。番号の再利用で別の処理を止めることを避ける。
+- 他 POSIX で `setsid` などにより群の外へ移った子孫は保証外。切離しを行う検証には、Linux の監督か OS の隔離を使う。Linux でも、同じ利用者権限による監督の改変などを完全に隔離するものではない。
+- Linux 上で他 POSIX の群方式を実行した回帰は通過した。これは macOS 実機の確認ではない。Python の追加パッケージは不要。
+
 ## パス解決の代替と限界
 
 - snapshot の `abs_maybe` は `realpath -m` → `readlink -f` → `cd -P` の順で試す。`cd -P` はディレクトリ専用で、通常ファイルや不存在の末尾には同じ結果を保証しない。ただし通常の出力親は `mkdir -p` の後に正規化するため、新規の親がこの差だけで失敗するとは限らない。
@@ -22,5 +32,8 @@ macOS 実機は未確認。Linux 上の Darwin スタブと bash 3.2 / 4.3 / 4.4
 1. 実機の OS 版、`command -v bash`・`bash --version`、GNU 道具の実行パスと版を記録し、PATH を選ぶ。
 2. scratch リポジトリで do-task の事前検査 → snapshot(新規出力親 1 階層・複数階層・既存 symlink 拒否) → guard の `take` / `compare` / `cleanup` を確認する。create-task の保存先 resolver と本文 digest も scratch で確認する。
 3. 標準 bash では do-task の bash 要件が明示されること、標準・導入 bash の両方で loop が Linux 専用エラー rc 20 となり、状態生成・git 操作・ホスト起動がないことを確認する。macOS 上で loop 本体や loop-selftest の成功は要求しない。
+4. 品質検証は Python の版も記録する。同じ scratch で [review-protocol.md](review-protocol.md#reviewcommit-照合) の `start` → `take` → `seal` → `run-checks` を行う。終了値 0 と 7 の計画で、終了値と出力の hash が保たれることを確認する。
+5. 次に、3 秒で自己終了する子を作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。`--timeout 1` で、元の群が消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子を残す場合も、次のコマンドと重複しないことを確かめる。
+6. 子の起動を確認してから、検証の親へ `TERM`・`INT`・`HUP` をそれぞれ送る。群の停止、コピー保持、後続未起動、終了値 2 を確かめる。試験で起動した処理は、失敗時も自分で終了・回収する。
 
 実機がなければ「実施不能(実機なし)／未確認」と記録し、上記の手順を引き継ぐ。
