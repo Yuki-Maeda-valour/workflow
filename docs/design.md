@@ -97,7 +97,7 @@
   - 1 晩・1 発見元ごとに PR を 1 本開き、人が見送りの印を付けるか消してから merge して、`候補_` を task_dir に入れる。発見元の候補モードは、task_dir の全状態のヘッダの指摘キーと照らして、既知の指摘を積まない(見送り = もう出さない / 消す = また出てよい)
   - data-audit の候補(未修正の脆弱性の場所)は、origin の push 先が非公開と確かめられたときだけ PR にする(確かめられなければ回さずに `候補なし`)。refactor の分析は公開でも回すが、セキュリティ由来の指摘は候補にしない
 
-**do-task の補助スクリプトと回帰の必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機で残す確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性を保証せず、今回の対応は必要環境の明示と起動前の診断に絞る([Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121))。
+**do-task の補助スクリプトと回帰の必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機の確認条件と再確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性は保証しない。必要環境の明示と起動前の診断は [Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121)、macOS 26.6.2 / arm64 の実測と制約は [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) に記録する。
 
 **診断表示のC1置換**: `diff-snapshot.sh` は、既存の表示用関数で UTF-8 の C1(U+0080〜U+009F)を `?` に置き換える。限界として残す案は、診断の表示を書き換える文字が残るため採用しなかった。既存の Bash 機能で表示用コピーだけを加工し、新しい依存を足さない。元データによる承認・比較と patch は保持する。対象の診断・NOTEと限界の正本は [external-runners.md §9-1](../plugins/dev-workflow/skills/do-task/references/external-runners.md)。決定と検証は [Issue #152](https://github.com/Yuki-Maeda-valour/workflow/issues/152)(親 #77 の H2)を参照する。
 
@@ -343,6 +343,7 @@ source、doc、未承認保留は別の phase。文書は実装 commit 後に別
 時間切れは計画を打ち切る。中断や停止確認の失敗ではコピーを保持する([Issue #220](https://github.com/Yuki-Maeda-valour/workflow/issues/220))。
 停止・回復手順は [review-protocol.md](../plugins/dev-workflow/skills/do-task/references/review-protocol.md#品質コマンドの停止とコピーの保持)、
 Linux と他 POSIX の必要機構・保証範囲は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#品質コマンドの監督)を正本とする。
+他 POSIX の不在確認で一時的な `EPERM` が返っても、不在とは扱わない。親の回収後は signal 0 だけで既存の 5 秒の期限内に再確認し、`ESRCH` の確認なしにコピーを削除しない。
 
 PR の検証欄は直接実行したコマンドの構造化結果と reviewer の直接返答から生成する。
 task/Issue 記録中の APPROVED は根拠にしない。外部本文を正本とする構成では、trusted caller が fresh な本文の控えと
@@ -494,7 +495,8 @@ done | sort -k2 -rn
 
 | 事実 | 出典 | 依存する節 |
 |---|---|---|
-| **シェルの必要環境(2026-10-06 実測)**: Linux 上の bash 3.2.0 / 4.3.0 では `shopt -s inherit_errexit` が失敗し、4.4.0 では成功。do-task の既存ガードは bash 4.0 以上。パス解決の代替だけでは GNU grep/coreutils の要件を吸収しない。macOS 実機は未確認 | [Issue #121 の実測・設計](https://github.com/Yuki-Maeda-valour/workflow/issues/121)(main `639fb15` を基準に GNU 配布ソースの bash 実体・Darwin スタブで測定) | 2、do-task の runtime-requirements.md、loop.md |
+| **シェルの必要環境(2026-10-06 実測)**: Linux 上の bash 3.2.0 / 4.3.0 では `shopt -s inherit_errexit` が失敗し、4.4.0 では成功。do-task の既存ガードは bash 4.0 以上。パス解決の代替だけでは GNU grep/coreutils の要件を吸収しない。macOS 実機の追加確認は #226 に分ける | [Issue #121 の実測・設計](https://github.com/Yuki-Maeda-valour/workflow/issues/121)(main `639fb15` を基準に GNU 配布ソースの bash 実体・Darwin スタブで測定) | 2、do-task の runtime-requirements.md、loop.md |
+| **macOS 実機(2026-10-09)**: macOS 26.6.2 / arm64、GNU 系ツールを選んで通常操作と元の群の停止を実測。停止直後の一時的な `EPERM` を検出した。物理パスと Apple Git の system 設定にも条件がある。群外へ移った子孫は保証外。修正後の再検証・独立レビューは Issue に記録し、初回成功を全環境の保証に広げない | [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) | 2、do-task の runtime-requirements.md、review-protocol.md |
 | Codex は `.agents/skills` / `$HOME/.agents/skills` / `/etc/codex/skills` から SKILL.md を読む。frontmatter は `name` + `description` 必須。agentskills.io の開標準に準拠 | [Build skills — ChatGPT/Codex 公式ドキュメント](https://learn.chatgpt.com/docs/build-skills) | 7-1 |
 | Cursor は `.cursor/skills/` または `.agents/skills/` から SKILL.md を読み、`/skill-name` で起動できる | [Cursor Agent Skills(learncursor.dev)](https://www.learncursor.dev/learn/cursor-agents/cursor-agent-skills) | 7-1 |
 | Codex は 2026-03-14 に subagents を GA(最大 8 並列・`~/.codex/agents/` の TOML・エージェントごとにモデル指定可) | [Use subagents and custom agents in Codex — Simon Willison](https://simonwillison.net/2026/Mar/16/codex-subagents/) | 7 |

@@ -30,7 +30,7 @@
 
 ## 導入方法
 
-do-task の補助スクリプトは bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 実機は未確認で、同文書に確認手順を残しています。
+do-task の補助スクリプトは bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
 ### A. plugin marketplace(推奨)
 
