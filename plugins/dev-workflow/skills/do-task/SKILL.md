@@ -46,6 +46,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 - 以下の各所には 1 行の分岐だけを置く。
 - `loop.sh` の周(無人ループの 1 回分の実行)では、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` の周の Bash の書き方」で打つ。
 
+- 下の前提に含む Git 調査より先に、環境の照合後、Phase 0 の「開始前の確認」を通す。
 - **前提**(候補の選択より前に検査する。満たさなければ失敗扱い): タスク MD のパスがある(D4)/
   - parent-child 構成でない(照合〈照らし合わせて確かめること〉をどのリポジトリで行うかが決まらないため)/
   - 検証のみモードでない(D3)/
@@ -143,6 +144,13 @@ except (Exception, SystemExit) as exc:
 <!-- environment-loader:end -->
 
 ## Phase 0: 前提と対象確定
+
+**開始前の確認**: ファイルシステムで管理ルートを固定し、権威参照ファイルと必要な契約を読む。
+[references/external-runners.md](references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
+- 対象タスク本文を完了条件として採用する前、対象 repo の Git 調査・事前検査より前に行う。検証のみ・内蔵・非 Git・Issue 本文などの非ファイルタスクでも省略しない。
+- 0/`none`、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
+- 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、`PENDING_LIST_SHA256` を `--acknowledged-list` へ渡せる。ログから復元しない。
+- この入口は Phase 0 だけ。Phase 3 の take 後・Phase 4・差戻し・内蔵への引継ぎでは再走査しない。同じ実行の反復で Phase 0 へ戻さない。
 
 最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、PATH 上の bash 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
 

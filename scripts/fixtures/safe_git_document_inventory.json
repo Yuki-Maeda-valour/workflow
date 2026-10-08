@@ -404,7 +404,7 @@
     },
     {
       "code": "git status",
-      "count": 1,
+      "count": 2,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     },

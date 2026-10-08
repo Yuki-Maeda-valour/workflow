@@ -4,6 +4,13 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 
 ## 実行環境
 
+- 開始前の `pending-implementation.py scan` は **Python 3.8 以上・POSIX** が必要。標準ライブラリだけを使う。非 Git・内蔵・検証のみ・profile なしでも適用する。
+  - `os.open`・`os.close`・`os.fstat`、`O_DIRECTORY`・`O_NOFOLLOW`・`O_CLOEXEC`、fd(開いたディレクトリを指す番号)を受ける `os.scandir` が必要。
+  - `os.stat` の `dir_fd` と `follow_symlinks=False`、`st_dev`・`st_ino`・`st_mode`・`st_uid`・`st_size`・`st_mtime_ns`・`st_ctime_ns`、`os.fsencode`・`os.fsdecode`・`time.monotonic` も必要。
+  - helper は起動時の機能検査と実利用時の未対応を 11/`scan-unavailable` にする。`listdir` や shell での代行へ切り替えない。
+  - Python 不在・helper 不在・起動不能・解釈失敗なら停止する。JSON を受け取れた扱いにせず、検査を省いて続行しない。引数・結果・人の確認の正本は [external-runners.md](external-runners.md) §12-9。
+  - Python 3.8 互換の構文・API を保つ。3.8 実機が無ければ未確認とし、別版での成功を実測としない。既存の macOS 実測はこの新しい helper の実機確認を含まない。
+
 - Git 対象の内蔵 implementer へ委託する前は、次の確認を独立した bash で実行する。`$1` は解決した do-task の `scripts` ディレクトリとする。PATH で選んだ同じ Python 実体を使う。エントリポイントと通常の Git は起動しない。
 
 <!-- implementation-git-runtime-check:start -->
