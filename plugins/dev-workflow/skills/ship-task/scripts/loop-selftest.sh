@@ -365,8 +365,13 @@ case "$prompt" in
     settings=""; prev=""
     for a in "$@"; do [ "$prev" != --settings ] || settings="$a"; prev="$a"; done
     # 実hostのverbose JSONと同じinit/resultの配列を返す。正常名は保持定義から作る。
+    probe_allow=(); probe_in_allow=0
+    for a in "$@"; do
+      case "$a" in --allowedTools) probe_in_allow=1; continue ;; -*) probe_in_allow=0 ;; esac
+      [ "$probe_in_allow" -eq 0 ] || probe_allow+=(--allowed-tools "$a")
+    done
     probe_policy="$(python3 -I -B "$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/skills/ship-task/scripts/host-check.py" \
-      component-policy --state "$DEV_WORKFLOW_ENV_STATE" --expect-sha256 "$DEV_WORKFLOW_ENV_SHA256")" || exit 65
+      component-policy --state "$DEV_WORKFLOW_ENV_STATE" --expect-sha256 "$DEV_WORKFLOW_ENV_SHA256" "${probe_allow[@]}")" || exit 65
     printf '%s\n' "$probe_policy" >"$REC/component-policy.json"
     probe_names="$(printf '%s' "$probe_policy" | python3 -c 'import json,sys;print(json.dumps(json.load(sys.stdin)["public_names"]))')"
     probe_output() {
@@ -600,6 +605,7 @@ value['component_sha256']='0'*64
 with open(path,'w') as out: json.dump(value,out)
 PY_PROOF
     ;;
+  allow) printf '{"permissions":{"allow":["Read(changed/**)"]}}\n' >"$SELFTEST_ALLOW_PATH" ;;
   component) printf '\nchanged\n' >>"$SELFTEST_COMPONENT_PATH" ;;
   source) printf 'raise SystemExit(0)\n' >"$SELFTEST_PLUGIN_SOURCE/skills/create-task/scripts/resolve-task-dir.py" ;;
   skill) printf 'changed\n' >"$SELFTEST_PLUGIN_SOURCE/skills/ship-task/SKILL.md" ;;
@@ -1035,12 +1041,12 @@ for tok in --dangerously-skip-permissions --allow-dangerously-skip-permissions=t
   check "全許可のフラグ('$tok'・--host-argv 経由)で止まる" 20 "$RC"
   has "全許可のフラグ('$tok'): 理由" "$OUT" "[host-argv]"
 done
-run_loop hs -- --repo "$R" --dry-run --allowed-tools Read --allowed-tools bypassPermissions
+run_loop hs -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' --allowed-tools bypassPermissions
 check "全許可のモードの値(--allowed-tools 経由)で止まる" 20 "$RC"
 has "全許可のモードの値(--allowed-tools): 理由" "$OUT" "[full-permission]"
 # --allowed-tools の値が - で始まれば使い方の誤り(フラグとして読まれるため)
 for tok in --dangerously-skip-permissions --permission-mode=bypassPermissions --permission-mode=auto -p; do
-  run_loop hs -- --repo "$R" --dry-run --allowed-tools Read --allowed-tools "$tok"
+  run_loop hs -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' --allowed-tools "$tok"
   check "--allowed-tools の値 '$tok'('-' で始まる)は使い方の誤り" 2 "$RC"
   has "--allowed-tools の値 '$tok': 理由" "$OUT" "[usage]"
 done
@@ -1426,16 +1432,20 @@ for i in "${!H28_GOOD[@]}"; do
   tok="${H28_GOOD[$i]}"
   args=()
   [ "$tok" = default ] || args=(--host-argv "$ALTBIN/claude-alt" --host-argv "$tok")
+  newrec "h28-good-proof-$i"
+  run_loop "h28-good-proof-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --prove-host \
+    "${args[@]}" --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
+  check "H28 '$tok': 同じ CLI 許可で証明" 0 "$RC"
   newrec "h28-good-$i"
   run_loop "h28-good-$i" SELFTEST_PARSE_ARGV=1 -- --repo "$R" --only "pr-h28-good-$i" \
-    "${args[@]}" --allowed-tools Read "${COMMON_ARGS[@]}"
+    "${args[@]}" --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
   check "H28 '$tok': 1 周回って終わる" 0 "$RC"
   check "H28 '$tok': 対象タスクを起動する" "pr-h28-good-$i" "$(calls)"
   check "H28 '$tok': 解析前の子起動記録が1行" 1 "$(wc -l <"$REC/child-starts.log" 2>/dev/null)"
   t "H28 '$tok': 許可リストと固定フラグの役割を保つ" python3 - "$REC/parsed.json" "$PLUG" "$tok" <<'PY'
 import json, sys
 p = json.load(open(sys.argv[1]))
-expected = {"allowedTools": ["Read"], "print": True, "output-format": "json",
+expected = {"allowedTools": ["Read(docs/**)"], "print": True, "output-format": "json",
             "setting-sources": "user", "strict-mcp-config": True,
             "permission-mode": "acceptEdits", "permission-prompts": "none"}
 assert all(p.get(key) == value for key, value in expected.items()), p
@@ -1470,7 +1480,11 @@ hasnt "--dry-run: 疎通(auth status)を打たない" "$REC/aux.log" "auth statu
 has "--dry-run: --help で照合する" "$REC/aux.log" "claude --help"
 has "--dry-run: plugin list で照合する" "$REC/aux.log" "claude plugin list --json"
 printf '{"mcpServers":{}}\n' >"$W/mcp.json"
-run_loop argv DEV_WORKFLOW_HOST_CLI= OLDPWD="$W/oldpwd-marker" -- --repo "$R" --only pr-argv --allowed-tools 'Bash(git:*)' --allowed-tools Read \
+newrec argv-proof
+run_loop argv-proof -- --repo "$R" --prove-host --allowed-tools 'Bash(git:*)' --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
+check "argv: 同じ CLI 許可で証明" 0 "$RC"
+newrec argv
+run_loop argv DEV_WORKFLOW_HOST_CLI= OLDPWD="$W/oldpwd-marker" -- --repo "$R" --only pr-argv --allowed-tools 'Bash(git:*)' --allowed-tools 'Read(docs/**)' \
   --mcp-config "$W/mcp.json" "${COMMON_ARGS[@]}"
 check "argv: 1 周回って終わる" 0 "$RC"
 A="$REC/argv-pr-argv"
@@ -1498,8 +1512,8 @@ t "argv: --plugin-dir <プラグインルート>" argv_has_seq --plugin-dir "$AR
 t "argv: --permission-mode acceptEdits" argv_has_seq --permission-mode acceptEdits
 t "argv: --permission-prompts none" argv_has_seq --permission-prompts none
 t "argv: --mcp-config <絶対パス>" argv_has_seq --mcp-config "$W/mcp.json"
-t "argv: --allowedTools <値>" argv_has_seq --allowedTools 'Bash(git:*)' Read
-t "argv: 許可リスト → MCP の設定 → 隔離・権限のフラグ(最後)の並び" argv_has_seq --allowedTools 'Bash(git:*)' Read \
+t "argv: --allowedTools <値>" argv_has_seq --allowedTools 'Bash(git:*)' 'Read(docs/**)'
+t "argv: 許可リスト → MCP の設定 → 隔離・権限のフラグ(最後)の並び" argv_has_seq --allowedTools 'Bash(git:*)' 'Read(docs/**)' \
   --mcp-config "$W/mcp.json" -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir "$ARGV_COPY" \
   --permission-mode acceptEdits --permission-prompts none
 t "argv: 権限のフラグの後に許可の仲介の --settings(argv の最後)" argv_has_seq --permission-prompts none --settings \
@@ -3496,7 +3510,7 @@ addtask hookcall-a
 commit
 newrec d22
 mkdir -p "$W/ccd"
-printf '{"permissions": {"allow": ["Bash(make test)", "Bash(git * main)", "Read"]}}\n' >"$W/ccd/settings.json"
+printf '{"permissions": {"allow": ["Bash(make test)", "Bash(git * main)", "Read(docs/**)"]}}\n' >"$W/ccd/settings.json"
 SPACEPLUG="$W/plug dir"
 rm -rf "$SPACEPLUG"
 cp -r "$PLUG" "$SPACEPLUG"
@@ -3535,15 +3549,21 @@ has "D22 ①: 理由" "$OUT" "[reviews-dir]"
 f "D22 ①: symlink の先に reviews を作らない" test -e "$W/d22sym-outside/reviews"
 # --dry-run は子の環境の 4 つも出す(d22 のリポジトリで打つ)
 R="$W/repos/d22"
+run_loop d22-proof "CLAUDE_CONFIG_DIR=$W/ccd" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H47 D22 表示: 同じ設定/CLIで証明" 0 "$RC"
 run_loop d22 "CLAUDE_CONFIG_DIR=$W/ccd" -- --repo "$R" --dry-run
 check "--dry-run(子の環境の表示): 終了コード 0" 0 "$RC"
 for v in WORKTREE PERMLOG PLUGIN_ROOT ALLOW; do has "--dry-run: DEV_WORKFLOW_LOOP_$v を出す" "$OUT" "DEV_WORKFLOW_LOOP_$v="; done
 hasnt "--dry-run: DEV_WORKFLOW_LOOP_TASKMD は出さない" "$OUT" "DEV_WORKFLOW_LOOP_TASKMD="
 # 許可リスト: 「すべて」は Bash だけ。Bash()・Bash( )・Bash(*) は使わない形として報告に出す
+run_loop d22-proof -- --repo "$R" --prove-host --allowed-tools 'Bash()' --allowed-tools 'Bash( )' --allowed-tools 'Bash(*)' "${COMMON_ARGS[@]}"
+check "H47 Bash未使用規則: 同じCLIで証明" 0 "$RC"
 run_loop d22 -- --repo "$R" --dry-run --allowed-tools 'Bash()' --allowed-tools 'Bash( )' --allowed-tools 'Bash(*)'
 check "許可リスト: Bash()・Bash( )・Bash(*) のとき起動する" 0 "$RC"
 check "許可リスト: Bash()・Bash( )・Bash(*) は all にならない(許可リストが空)" "  DEV_WORKFLOW_LOOP_ALLOW=[]" "$(grep '^  DEV_WORKFLOW_LOOP_ALLOW=' "$OUT")"
 for rule in 'Bash()' 'Bash( )' 'Bash(*)'; do has "許可リスト: $rule は使わない形として出る" "$OUT" "$rule(--allowed-tools)"; done
+run_loop d22-proof -- --repo "$R" --prove-host --allowed-tools Bash "${COMMON_ARGS[@]}"
+check "H47 Bash全体: 同じCLIで証明" 0 "$RC"
 run_loop d22 -- --repo "$R" --dry-run --allowed-tools Bash
 has "許可リスト: Bash だけは all" "$OUT" 'DEV_WORKFLOW_LOOP_ALLOW=[{"kind": "all", "words": []}]'
 # task_dir が保護パスの下(.claude/tasks)なら、最初の周の §3 の 3 で exit 20(選定の worktree を消してから)
@@ -4338,7 +4358,9 @@ for attack in source skill copy guard user global; do
   cp "$W/global-save" "$GIT_CONFIG_GLOBAL"
   if [ -e "$W/user-save" ]; then cp "$W/user-save" "$W/home/.claude/settings.json"; else rm -f "$W/home/.claude/settings.json"; fi
 done
-# 初回の正常完走と、起動間の設定更新は再利用コピーを使わず成功する。
+fi
+if want environment || want environment-normal; then
+# 起動間の設定更新は同じ環境で証明を取り直し、再利用コピーを使わず成功する。
 newrepo env-normal; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec env-normal
 run_loop env-normal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check '環境正常: 最初の周' 0 "$RC"
@@ -4346,10 +4368,27 @@ SD="$(state_dir env-normal)"
 printf 'raise SystemExit(77)\n' >"$SD/environment-guard.py"
 printf 'forged\n' >"$SD/environment.json"
 mkdir -p "$W/home/.claude"; printf '{}\n' >"$W/home/.claude/settings.json"
+ENV_NORMAL_REC="$REC"
+ENV_NORMAL_FORGED_SHA="$(sha256sum "$SD/environment-guard.py" "$SD/environment.json")"
+# H47 は設定の不在/存在も束縛する。旧証明の拒否と正常な再取得を分けて確認する。
+newrec env-normal-stale
+run_loop env-normal -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check '環境正常: 設定新設後の旧証明を拒否' 20 "$RC"
+has '環境正常: 設定新設後の拒否理由' "$OUT" '[host-proof]'
+check '環境正常: 旧証明拒否で補助CLIを呼ばない' "" "$(cat "$REC/aux.log" 2>/dev/null)"
+check '環境正常: 旧証明拒否で次のタスクを実行しない' "" "$(calls)"
+newrec env-normal-prove
+run_loop env-normal -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check '環境正常: 更新後の同じHOMEと設定で証明を作る' 0 "$RC"
+check '環境正常: 証明確認でタスクを実行しない' "" "$(calls)"
+REC="$ENV_NORMAL_REC"
 run_loop env-normal -- --repo "$R" "${COMMON_ARGS[@]}"
 check '環境正常: 起動間設定更新と旧STATE偽helperを再利用しない' 0 "$RC"
 check '環境正常: 次のタスクを実行' 'pr-a pr-b' "$(calls)"
+check '環境正常: 旧STATEの偽helperと状態を上書きせず保持' "$ENV_NORMAL_FORGED_SHA" "$(sha256sum "$SD/environment-guard.py" "$SD/environment.json")"
 rm -f "$W/home/.claude/settings.json"
+fi
+if want environment; then
 # 攻撃と正常保留の全てに同じブレーカーを適用する。
 for attack in fake delete duplicate reorder malformed truncated fifo symlink; do
   newrepo "log-$attack"; addtask holdg1-a 2026-01-01; addtask holdg1-b 2026-01-02; addtask pr-c 2026-01-03; commit; newrec "log-$attack"
@@ -4508,17 +4547,17 @@ h34_skill() { # $1=置き場の skills $2=名 $3=frontmatter の行
   printf -- '---\nname: %s\ndescription: h34\n%s\n---\nbody\n' "$2" "$3" >"$1/$2/SKILL.md"
 }
 h34_cfg safe
-h34_skill "$H34CFG/skills" reader 'allowed-tools: Read'
+h34_skill "$H34CFG/skills" reader 'allowed-tools: Read(docs/**)'
 newrec h34-safe
-run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
-run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H34 許可リストに含まれる skill は通る" 0 "$RC"
 has "H34 通った: 報告" "$(latest_report h34)" "skill・command の allowed-tools: 検査したファイル(.md と plugin のマニフェスト)"
 h34_cfg wide
 h34_skill "$H34CFG/skills" runner 'allowed-tools: Bash(node:*)'
 newrec h34-wide
-run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H34 権限を足す skill で止まる" 20 "$RC"
 has "H34 権限を足す skill: 理由" "$OUT" "[skill-grants]"
 has "H34 権限を足す skill: 固定の種別と理由" "$OUT" "kind=personal-skill: allowed-tools が許可リストより広い"
@@ -4531,7 +4570,7 @@ newrec h34-cmd
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
 check "H34 権限を足す command で止まる" 20 "$RC"
 has "H34 権限を足す command: 理由" "$OUT" "[skill-grants]"
-has "H34 権限を足す command: 固定の種別と理由" "$OUT" "kind=personal-command: allowed-tools が許可リストより広い"
+has "H34 権限を足す command: 固定の種別と理由" "$OUT" "kind=personal-command: allowed-tools を解釈できない"
 hasnt "H34 権限を足す command: pathを表示しない" "$OUT" "commands/w.md"
 hasnt "H34 権限を足す command: ruleを表示しない" "$OUT" "Write"
 # 有効な plugin の installPath(plugin 一覧の形は実物と同じ)
@@ -4566,16 +4605,16 @@ hasnt "H34 違う exact: ruleを表示しない" "$OUT" "Bash(git status)"
 # 正規導入(setup.sh --global の形のリンク)は通る。リンク先の frontmatter が権限を足せば止まる
 h34_cfg link
 mkdir -p "$W/h34clone/skills"
-h34_skill "$W/h34clone/skills" do-task 'allowed-tools: Read'
+h34_skill "$W/h34clone/skills" do-task 'allowed-tools: Read(docs/**)'
 h34_skill "$W/h34clone/skills" evil 'allowed-tools: Bash(rm *)'
 ln -s "$W/h34clone/skills/do-task" "$H34CFG/skills/do-task"
 newrec h34-link
-run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop fixture "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --prove-host --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H46 設定ごとの正常証明を先に作る" 0 "$RC"
-run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H34 正規導入のリンクは通る" 0 "$RC"
 ln -s "$W/h34clone/skills/evil" "$H34CFG/skills/evil"
-run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H34 正規導入でも権限を足すリンク先なら止まる" 20 "$RC"
 has "H34 リンク先: 理由" "$OUT" "[skill-grants]"
 # 特殊ファイル・内側のリンクは、検査の前に控えの段階で止まる
@@ -4585,9 +4624,9 @@ run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run "${COMMON_ARGS
 check "H34 FIFO で止まる" 20 "$RC"
 has "H34 FIFO: 理由" "$OUT" "[environment]"
 h34_cfg inner
-h34_skill "$H34CFG/skills" in 'allowed-tools: Read'
+h34_skill "$H34CFG/skills" in 'allowed-tools: Read(docs/**)'
 ln -s "$W/h34clone/skills/evil/SKILL.md" "$H34CFG/skills/in/other.md"
-run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
+run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
 check "H34 内側のリンクで止まる" 20 "$RC"
 has "H34 内側のリンク: 理由" "$OUT" "[environment]"
 fi
@@ -5138,6 +5177,193 @@ PY_NAMES
     check "H46 marketplace map $mode: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
   fi
 done
+fi
+
+# ════════════════ H47: 直接 allow と証明の束縛 ════════════════
+if want h47; then
+newrepo h47
+addtask pr-a
+commit
+H47CFG="$W/h47-config"; H47MANAGED="$W/h47-managed"
+mkdir -p "$H47CFG" "$H47MANAGED/managed-settings.d"
+H47ENV=("CLAUDE_CONFIG_DIR=$H47CFG" "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H47MANAGED")
+# 同じ bare deny/ask を置いても allow 自体の拒否を省かない。
+for tool in Read Grep Glob Write Edit NotebookEdit MultiEdit; do
+  for suffix in bare star; do
+    rule="$tool"; [ "$suffix" = bare ] || rule="$tool(*)"
+    for source in cli user; do
+      for mode in normal dry prove; do
+        label="h47-$tool-$suffix-$source-$mode"
+        args=(--repo "$R" "${COMMON_ARGS[@]}")
+        case "$mode" in dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+        if [ "$source" = cli ]; then
+          args+=(--allowed-tools "$rule")
+        else
+          printf '{"permissions":{"allow":["%s"],"deny":["%s"],"ask":["%s"]}}' "$rule" "$rule" "$rule" >"$H47CFG/settings.json"
+        fi
+        newrec "$label"
+        run_loop "$label" "${H47ENV[@]}" -- "${args[@]}"
+        check "H47 $label: 拒否" 20 "$RC"
+        check "H47 $label: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+        check "H47 $label: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+        rm -f "$H47CFG/settings.json"
+      done
+    done
+  done
+done
+for source in cache managed dropin; do
+  case "$source" in cache) path="$H47CFG/remote-settings.json" ;; managed) path="$H47MANAGED/managed-settings.json" ;; dropin) path="$H47MANAGED/managed-settings.d/one.json" ;; esac
+  for mode in normal dry prove; do
+    printf '{"permissions":{"allow":["Read(*)"]}}' >"$path"
+    args=(--repo "$R" "${COMMON_ARGS[@]}")
+    case "$mode" in dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+    newrec "h47-$source-$mode"
+    run_loop "h47-$source-$mode" "${H47ENV[@]}" -- "${args[@]}"
+    check "H47 $source/$mode: 拒否" 20 "$RC"
+    check "H47 $source/$mode: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+    check "H47 $source/$mode: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+    rm -f "$path"
+  done
+done
+for rule in 'Read (*)' 'Read( * )' 'Read(file_path:H47-secret)' 'Edit(new_string:H47-secret)' 'Read()' 'Read((docs/**))'; do
+  newrec h47-malformed
+  run_loop h47-malformed "${H47ENV[@]}" -- --repo "$R" --dry-run --allowed-tools "$rule" "${COMMON_ARGS[@]}"
+  check "H47 ambiguous: 拒否" 20 "$RC"
+  check "H47 ambiguous: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+  hasnt "H47 ambiguous: 入力値非露出" "$OUT" H47-secret
+done
+# active 一覧で初めて見つける plugin の全対象 tool も session 前に拒否する。
+H47ACTIVE="$W/h47-active"
+mkdir -p "$H47ACTIVE/.claude-plugin" "$H47ACTIVE/commands"
+printf '{"name":"h47-active"}' >"$H47ACTIVE/.claude-plugin/plugin.json"
+printf '[{"id":"h47-active","enabled":true,"installPath":"%s"}]' "$H47ACTIVE" >"$W/h47-active.json"
+for tool in Read Grep Glob Write Edit NotebookEdit MultiEdit; do
+  printf -- '---\nallowed-tools: %s(*)\n---\nbody\n' "$tool" >"$H47ACTIVE/commands/one.md"
+  newrec "h47-active-$tool"
+  run_loop "h47-active-$tool" "${H47ENV[@]}" "SELFTEST_PLUGINS_FILE=$W/h47-active.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "H47 active $tool: 拒否" 20 "$RC"
+  has "H47 active $tool: 一覧取得済み" "$REC/aux.log" 'plugin list'
+  check "H47 active $tool: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+done
+fi
+
+if want h47enterprise; then
+newrepo h47enterprise
+addtask pr-a
+commit
+H47ECFG="$W/h47-enterprise-config"; H47EROOT="$W/h47-enterprise-managed"
+mkdir -p "$H47ECFG/commands/nested" "$H47EROOT/.claude/commands/nested"
+H47ECOMMAND="$H47EROOT/.claude/commands/nested/one.md"
+H47EENV=("CLAUDE_CONFIG_DIR=$H47ECFG" "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H47EROOT")
+for tool in Read Grep Glob Write Edit NotebookEdit MultiEdit; do
+  for suffix in bare star; do
+    rule="$tool"; [ "$suffix" = bare ] || rule="$tool(*)"
+    printf -- '---\nallowed-tools: %s\n---\nbody\n' "$rule" >"$H47ECOMMAND"
+    for mode in normal dry prove; do
+      args=(--repo "$R" "${COMMON_ARGS[@]}")
+      case "$mode" in dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+      newrec "h47-enterprise-$tool-$suffix-$mode"
+      run_loop "h47-enterprise-$tool-$suffix-$mode" "${H47EENV[@]}" -- "${args[@]}"
+      check "H47 enterprise $tool/$suffix/$mode: 拒否" 20 "$RC"
+      check "H47 enterprise $tool/$suffix/$mode: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+      check "H47 enterprise $tool/$suffix/$mode: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+    done
+  done
+done
+printf -- '---\nhooks: {PreToolUse: [{command: SECRET_H47}]}\n---\nbody\n' >"$H47ECOMMAND"
+newrec h47-enterprise-hook
+run_loop h47-enterprise-hook "${H47EENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H47 enterprise hook: 拒否" 20 "$RC"
+check "H47 enterprise hook: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+hasnt "H47 enterprise hook: 値非露出" "$OUT" SECRET_H47
+printf -- '---\nallowed-tools: Read(docs/**)\n---\nenterprise\n' >"$H47ECOMMAND"
+printf 'personal\n' >"$H47ECFG/commands/nested/one.md"
+newrec h47-enterprise-proof
+run_loop h47-enterprise-proof "${H47EENV[@]}" -- --repo "$R" --prove-host --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
+check "H47 enterprise scoped: 正常prove" 0 "$RC"
+t "H47 enterprise: namespace優先とlegacy commandのinit非掲載" python3 - "$REC/component-policy.json" <<'PY_E_NAMES'
+import json,sys
+policy=json.load(open(sys.argv[1]))
+name='nested:one'
+assert policy['loaded_commands'][name]['kind']=='enterprise-command'
+assert name in policy['lookup_names'] and name in policy['invocation_names']
+assert name not in policy['public_names']
+PY_E_NAMES
+for mode in dry normal; do
+  args=(--repo "$R" --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}")
+  [ "$mode" != dry ] || args+=(--dry-run)
+  newrec "h47-enterprise-$mode"
+  run_loop "h47-enterprise-$mode" "${H47EENV[@]}" -- "${args[@]}"
+  check "H47 enterprise $mode: 別runの正常再利用" 0 "$RC"
+done
+printf '\nchanged\n' >>"$H47ECOMMAND"
+newrec h47-enterprise-changed
+run_loop h47-enterprise-changed "${H47EENV[@]}" -- --repo "$R" --dry-run --allowed-tools 'Read(docs/**)' "${COMMON_ARGS[@]}"
+check "H47 enterprise変更: 古い証明拒否" 20 "$RC"
+check "H47 enterprise変更: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+fi
+
+if want h47proof; then
+newrepo h47proof
+addtask pr-a
+commit
+H47PCFG="$W/h47-proof-config"; mkdir -p "$H47PCFG"
+H47PENV=("CLAUDE_CONFIG_DIR=$H47PCFG")
+H47ALLOW=(--allowed-tools 'Read(docs/**)' --allowed-tools 'Glob(src/**)' --allowed-tools 'Read(report:2026.txt)' --allowed-tools 'Read(docs/report$2026.txt)')
+newrec h47-proof
+run_loop h47-proof "${H47PENV[@]}" -- --repo "$R" --prove-host "${H47ALLOW[@]}" "${COMMON_ARGS[@]}"
+check "H47 scoped/colon: 正常証明" 0 "$RC"
+H47_BASELINE_PROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
+for mode in dry normal; do
+  newrec "h47-proof-$mode"
+  args=(--repo "$R" "${H47ALLOW[@]}" "${COMMON_ARGS[@]}")
+  [ "$mode" != dry ] || args+=(--dry-run)
+  run_loop "h47-proof-$mode" "${H47PENV[@]}" -- "${args[@]}"
+  check "H47 同じCLI別run/$mode: 証明を再利用" 0 "$RC"
+done
+# CLI list の追加・削除・スコープ変更は全て新しい証明を必要とする。
+for change in add remove scope; do
+  args=("${H47ALLOW[@]}")
+  case "$change" in add) args+=(--allowed-tools 'Edit(src/**)') ;; remove) args=() ;; scope) args=(--allowed-tools 'Read(other/**)') ;; esac
+  newrec "h47-proof-$change"
+  run_loop "h47-proof-$change" "${H47PENV[@]}" -- --repo "$R" --dry-run "${args[@]}" "${COMMON_ARGS[@]}"
+  check "H47 CLI $change: 古い証明拒否" 20 "$RC"
+  has "H47 CLI $change: 証明不一致" "$OUT" '[host-proof]'
+  check "H47 CLI $change: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+done
+printf '{"permissions":{"allow":["Read(notes/**)"]}}' >"$H47PCFG/settings.json"
+newrec h47-proof-settings-added
+run_loop h47-proof-settings-added "${H47PENV[@]}" -- --repo "$R" --dry-run "${H47ALLOW[@]}" "${COMMON_ARGS[@]}"
+check "H47 settings追加: 古い証明拒否" 20 "$RC"
+check "H47 settings追加: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+newrec h47-proof-settings
+run_loop h47-proof-settings "${H47PENV[@]}" -- --repo "$R" --prove-host "${H47ALLOW[@]}" "${COMMON_ARGS[@]}"
+check "H47 scoped settings: 正常証明" 0 "$RC"
+# 削除時は設定ありの証明だけを照合する。以前の正当な設定なし証明を試験から隔離する。
+mv "$H47_BASELINE_PROOF" "$W/h47-baseline-proof.json"
+for change in scope remove; do
+  if [ "$change" = scope ]; then
+    printf '{"permissions":{"allow":["Read(other/**)"]}}' >"$H47PCFG/settings.json"
+  else
+    rm -f "$H47PCFG/settings.json"
+  fi
+  newrec "h47-settings-$change"
+  run_loop "h47-settings-$change" "${H47PENV[@]}" -- --repo "$R" --dry-run "${H47ALLOW[@]}" "${COMMON_ARGS[@]}"
+  check "H47 settings $change: 古い証明拒否" 20 "$RC"
+  check "H47 settings $change: aux 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+done
+# 起動後の保持設定の変更を次の周へ持ち越さない。
+newrepo h47-recheck
+addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit
+printf '{"permissions":{"allow":["Read(notes/**)"]}}' >"$H47PCFG/settings.json"
+newrec h47-recheck-prove
+run_loop h47-recheck-prove "${H47PENV[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H47 recheck: 正常証明" 0 "$RC"
+newrec h47-recheck
+run_loop h47-recheck "${H47PENV[@]}" SELFTEST_ENV_ATTACK=allow "SELFTEST_ALLOW_PATH=$H47PCFG/settings.json" -- --repo "$R" "${COMMON_ARGS[@]}"
+check "H47 recheck: 設定変更で停止" 10 "$RC"
+has "H47 recheck: 保持設定の照合失敗" "$(report_of "$OUT")" 'plugin または利用者設定の照合に失敗'
+check "H47 recheck: 2周目を起動しない" pr-a "$(calls)"
 fi
 
 # ════════════════ 後片付け ════════════════

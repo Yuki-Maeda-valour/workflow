@@ -184,6 +184,45 @@ class HostSettingsTests(unittest.TestCase):
         return self.run_guard(command, '--state', self.bundle/'environment.json',
                               '--expect-sha256', receipt['sha256'], *extra)
 
+    def test_permission_sources_preserve_identity_presence_and_private_values(self):
+        mod = EnvironmentGuardMoreTests.module(self)
+        cfg = self.home / '.claude'; cfg.mkdir()
+        roots = [self.base / 'managed-one', self.base / 'managed-two']
+        for root in roots:
+            (root / 'managed-settings.d').mkdir(parents=True)
+            (root / 'managed-settings.d/a.json').write_text('{"permissions":{"allow":["Read(SECRET_H47/**)"]}}')
+        (cfg / 'settings.json').write_text('{"permissions":{"allow":["Bash(git status)"]}}')
+        receipt = self.boot('--managed-dir', roots[0], '--managed-dir', roots[1])
+        result = mod.read_host_settings(self.bundle / 'environment.json', receipt['sha256'])
+        sources = result['permission_sources']
+        self.assertEqual(len(sources), result['checked'])
+        self.assertEqual(len({item['source'] for item in sources}), len(sources))
+        self.assertEqual(sum(item['kind'] == 'managed-drop-in' for item in sources), 2)
+        self.assertFalse(next(item for item in sources if item['kind'] == 'cache')['present'])
+        self.assertEqual(result['user']['permissions']['allow'], ['Bash(git status)'])
+        self.assertEqual(len(result['managed']), 2)
+        cli = self.settings_call(receipt)
+        self.assertEqual(cli.returncode, 0, cli.stderr)
+        self.assertNotIn('SECRET_H47', cli.stdout + cli.stderr)
+        self.assertNotIn('permission_sources', cli.stdout)
+        self.bundle = self.base / 'next-run'
+        receipt = self.boot('--managed-dir', roots[0], '--managed-dir', roots[1])
+        self.assertEqual(sources, mod.read_host_settings(self.bundle / 'environment.json', receipt['sha256'])['permission_sources'])
+
+    def test_permission_reader_keeps_bash_conversion_cli_user_only(self):
+        cfg = self.home / '.claude'; cfg.mkdir()
+        managed = self.base / 'managed'; managed.mkdir()
+        (cfg / 'settings.json').write_text('{"permissions":{"allow":["Bash(git status)","Read(docs/**)"]}}')
+        (cfg / 'remote-settings.json').write_text('{"permissions":{"allow":["Bash(cachecmd:*)"]}}')
+        (managed / 'managed-settings.json').write_text('{"permissions":{"allow":["Bash(managedcmd:*)"]}}')
+        receipt = self.boot('--managed-dir', managed)
+        result = self.settings_call(receipt, 'host-allowlist', '--allowed-tools', 'Bash(cli:*)')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rules = json.loads(result.stdout.splitlines()[0])
+        self.assertEqual({tuple(item['words']) for item in rules}, {('git', 'status'), ('cli',)})
+        self.assertNotIn('cachecmd', result.stdout)
+        self.assertNotIn('managedcmd', result.stdout)
+
     def test_host_paths_are_absolute_nfc_and_cwd_independent(self):
         mod = EnvironmentGuardMoreTests.module(self)
         good = str(self.base / '日本語 space' / '.' / 'home')
@@ -1052,7 +1091,8 @@ class ComponentDescriptorTests(unittest.TestCase):
         return entries, blobs
 
     def test_plain_scoped_skill_and_direct_scoped_agents(self):
-        for kind in ('personal-skill', 'enterprise-skill', 'personal-agent', 'enterprise-agent'):
+        for kind in ('personal-skill', 'enterprise-skill', 'personal-agent', 'enterprise-agent',
+                     'personal-command', 'enterprise-command'):
             with self.subTest(kind=kind):
                 root = self.base / kind
                 (root / 'scope/one').mkdir(parents=True)
@@ -1214,14 +1254,29 @@ class ComponentDescriptorTests(unittest.TestCase):
         (managed / '.claude/skills/group/one').mkdir(parents=True)
         (managed / '.claude/skills/group/one/SKILL.md').write_text('enterprise')
         (managed / '.claude/agents').mkdir(); (managed / '.claude/agents/read.md').write_text('agent')
+        (managed / '.claude/commands/nested').mkdir(parents=True)
+        (managed / '.claude/commands/nested/read.md').write_text('command')
         self.boot('--managed-dir', managed)
         mod = self.module(); state = json.loads((self.bundle / 'environment.json').read_text())
         paths = {entry['path'] for entry in state['specs']['components']}
-        self.assertTrue({'/etc/claude-code/.claude/skills', '/etc/claude-code/.claude/agents'} <= paths)
+        self.assertTrue({'/etc/claude-code/.claude/skills', '/etc/claude-code/.claude/agents',
+                         '/etc/claude-code/.claude/commands'} <= paths)
         self.assertIn(str(managed / '.claude/skills'), paths)
         got = mod.read_components(self.bundle / 'environment.json', self.receipt['sha256'])
         self.assertTrue(any(item['kind'] == 'enterprise-agent' and item['raw'] == b'agent' for item in got))
+        self.assertTrue(any(item['kind'] == 'enterprise-command' and item['raw'] == b'command' and
+                            item['relative'] == 'nested/read.md' for item in got))
         self.assertEqual(self.verify().returncode, 0)
+
+    def test_missing_enterprise_commands_creation_is_rejected(self):
+        managed = self.base / 'managed'; managed.mkdir()
+        self.boot('--managed-dir', managed)
+        state = json.loads((self.bundle / 'environment.json').read_text())
+        root = managed / '.claude/commands'
+        self.assertEqual(state['entries']['component:enterprise-command:' + str(root)], ['missing'])
+        (root / 'nested').mkdir(parents=True)
+        (root / 'nested/one.md').write_text('new command')
+        self.assertEqual(self.verify().returncode, 20)
 
     def test_reader_uses_walker_bytes_and_rejects_old_descriptors(self):
         from unittest import mock

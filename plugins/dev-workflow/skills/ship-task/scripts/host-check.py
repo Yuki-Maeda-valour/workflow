@@ -794,6 +794,93 @@ SHELL_INPUT_FIELDS = frozenset(('command', 'description', 'timeout', 'run_in_bac
 # auto(分類器)の起動で、ホストが許可リストから外す広い規則の道具(permission-modes の auto の項。
 # もう 1 つの委託の道具は KNOWN_TOOLS に無いので、そもそも包含の根拠にならない)
 CLASSIFIER_DROPPED_TOOLS = ('Monitor',)
+ALLOW_RULE_VERSION = 1
+DIRECT_FILE_TOOLS = frozenset(('Read', 'Grep', 'Glob', 'Write', 'Edit', 'NotebookEdit', 'MultiEdit'))
+# 既知の入力欄だけを parameter matching と区別する。任意の identifier: を
+# 禁止すると report:2026.txt や drive の字面まで別の意味へ変えてしまう。
+FILE_INPUT_FIELDS = {
+    'Read': ('file_path', 'offset', 'limit', 'pages'),
+    'Edit': ('file_path', 'old_string', 'new_string', 'replace_all'),
+    'Write': ('file_path', 'content'),
+    'NotebookEdit': ('notebook_path', 'cell_id', 'new_source', 'cell_type', 'edit_mode'),
+    'MultiEdit': ('file_path', 'edits'),
+    'Glob': ('pattern', 'path'),
+    'Grep': ('pattern', 'path', 'glob', 'type', 'output_mode', 'multiline', 'head_limit',
+             'offset', 'context', 'A', 'B', 'C', 'i', 'n', '-A', '-B', '-C', '-i', '-n'),
+}
+ALLOW_SOURCE_KINDS = frozenset(('cli', 'user', 'cache', 'managed', 'managed-drop-in',
+                              'plugin', 'marketplace-manifest', 'personal-skill', 'personal-command',
+                              'personal-agent', 'enterprise-skill', 'enterprise-command', 'enterprise-agent'))
+
+
+def validate_direct_allow_rules(rules, source_kind):
+    """H47 の直接許可。包含 parser の unknown 全体を禁止する判定ではない。"""
+    kind = source_kind if source_kind in ALLOW_SOURCE_KINDS else 'component'
+    def stop():
+        raise Unclear(f'kind={kind}: 直接 allow の規則が危険か、形を確定できない')
+    if not isinstance(rules, list) or not all(isinstance(rule, str) for rule in rules):
+        stop()
+    for rule in rules:
+        head = re.match(r'\s*([A-Za-z][A-Za-z0-9_-]*)', rule)
+        if not head or head.group(1) not in DIRECT_FILE_TOOLS:
+            continue
+        match = RULE.fullmatch(rule)
+        if not match or rule != rule.strip() or rule.count('(') != 1 or rule.count(')') != 1:
+            stop()
+        spec = match.group(2)
+        if not spec or spec == '*' or spec != spec.strip() or any(
+                (ch.isspace() and ch != ' ') or ord(ch) < 32 or ord(ch) == 127 for ch in rule):
+            stop()
+        # parameter matching は allow の path 規則ではない。path 起点や字面は変換しない。
+        if ':' in spec and spec.split(':', 1)[0].strip() in FILE_INPUT_FIELDS[head.group(1)]:
+            stop()
+    return rules
+
+
+def permission_allow(settings, kind):
+    """不在だけを空として扱い、明示 null や壊れた型を無視しない。"""
+    if not isinstance(settings, dict):
+        raise Unclear(f'kind={kind}: permissions の形を確定できない')
+    permissions = settings.get('permissions', {})
+    if not isinstance(permissions, dict):
+        raise Unclear(f'kind={kind}: permissions の形を確定できない')
+    return validate_direct_allow_rules(permissions.get('allow', []), kind)
+
+
+def direct_allow_policy(settings, allowed_tools):
+    """全 source を検査し、証明には規則の値を置かず要約だけを渡す。"""
+    cli = []
+    try:
+        for value in allowed_tools:
+            cli.extend(split_both(value))
+    except (Unclear, TypeError):
+        raise Unclear('kind=cli: --allowed-tools の値の切り方を確定できない') from None
+    validate_direct_allow_rules(cli, 'cli')
+    sources = settings.get('permission_sources')
+    if not isinstance(sources, list) or not sources:
+        raise Stop('host-settings の許可 source が保持されていない')
+    seen, held, user = set(), [], []
+    for source in sources:
+        if not isinstance(source, dict) or set(source) != {'kind', 'source', 'present', 'settings'}:
+            raise Stop('host-settings の許可 source の形が違う')
+        kind, identity, present = source['kind'], source['source'], source['present']
+        if kind not in ('user', 'cache', 'managed', 'managed-drop-in') or type(present) is not bool \
+                or not isinstance(identity, str) or not re.fullmatch('[0-9a-f]{64}', identity) or identity in seen:
+            raise Stop('host-settings の許可 source の形が違う')
+        seen.add(identity)
+        if not present and source['settings'] is not None:
+            raise Stop('host-settings の許可 source の不在が違う')
+        rules = permission_allow(source['settings'], kind) if present else []
+        if kind == 'user':
+            user.extend(rules)
+        digest = sha256(json.dumps(rules, ensure_ascii=True, separators=(',', ':')).encode())
+        held.append({'kind': kind, 'source': identity, 'present': present, 'allow_sha256': digest})
+    if sum(source['kind'] == 'user' for source in sources) != 1:
+        raise Stop('host-settings の利用者 source が一意でない')
+    binding = {'version': ALLOW_RULE_VERSION,
+               'cli_sha256': sha256(json.dumps(cli, ensure_ascii=True, separators=(',', ':')).encode()),
+               'sources': sorted(held, key=lambda item: (item['kind'], item['source']))}
+    return binding, cli + user
 
 
 def known_tool(tool):
@@ -1438,14 +1525,14 @@ def fixed_host_policy(namespace):
             'syncClaudeAiPlugins': False, 'skillOverrides': {name: 'off' for name in sorted(off)}}
 
 
-def policy_digest(component_digest, namespace, policy):
+def policy_digest(component_digest, namespace, policy, direct_allow=None):
     component_digest = digest_value(component_digest, 'component_sha256')
     payload = {'component_sha256': component_digest,
                'loaded_commands': namespace['loaded_commands'],
                'invocation_routes': namespace['invocation_routes'],
                'invocation_names': namespace['invocation_names'], 'lookup_names': namespace['lookup_names'],
                'model_invocation_names': namespace['model_invocation_names'], 'resolver_version': RESOLVER_VERSION,
-               'public_names': namespace['public_names'], 'fixed': policy}
+               'public_names': namespace['public_names'], 'fixed': policy, 'direct_allow': direct_allow}
     return sha256(json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(',', ':')).encode())
 
 
@@ -1591,11 +1678,12 @@ def checked_component_security(components):
     strict_plugin_mcp(expanded)
 
 
-def component_policy(state_path, expected):
+def component_policy(state_path, expected, allowed_tools=()):
     components = verified_components(state_path, expected)
     checked_component_security(components)
     namespace = component_namespace(components)
     settings = verified_host_settings(state_path, expected)
+    direct_allow, _ = direct_allow_policy(settings, allowed_tools)
     namespace = apply_user_skill_off(namespace, settings)
     agent_preloads(components, namespace)
     fixed = fixed_host_policy(namespace)
@@ -1603,7 +1691,7 @@ def component_policy(state_path, expected):
     namespace = apply_user_skill_off(namespace, {'user': fixed})
     component_digest = verified_component_digest(state_path, expected)
     return {'component_sha256': component_digest,
-            'policy_sha256': policy_digest(component_digest, namespace, fixed),
+            'policy_sha256': policy_digest(component_digest, namespace, fixed, direct_allow),
             'namespace': namespace, 'fixed': fixed}
 
 
@@ -1903,20 +1991,10 @@ def manifest_grants(raw):
 
 def grants(state_path, expected, user_settings, allowed_tools, classifier=False):
     value = load_state(state_path, expected)
-    allow = []
-    for v in allowed_tools:
-        try:
-            allow += split_both(v)  # ホストは ' ' と ',' だけで区切る。タブ・改行を含む値は読み方が分かれる
-        except Unclear:
-            raise Stop('--allowed-tools の値の切り方がホストと違う(タブ・改行・入れ子の括弧など)') from None
     settings = verified_host_settings(state_path, expected)
     if not os.path.isabs(user_settings) or user_settings != settings['user_settings']:
         raise Stop('利用者の設定のパスが保持した絶対パスと違う')
-    permissions = settings['user'].get('permissions')
-    user_allow = permissions.get('allow') if isinstance(permissions, dict) else []
-    if isinstance(user_allow, list):
-        # 字面のまま渡す。ホストが解釈できない規則をここで正規化しない。
-        allow += [rule for rule in user_allow if isinstance(rule, str)]
+    _, allow = direct_allow_policy(settings, allowed_tools)
     copy = value.get('copy')
     files = problems = 0
     lines = []
@@ -1953,7 +2031,8 @@ def grants(state_path, expected, user_settings, allowed_tools, classifier=False)
             else:
                 rules = frontmatter_grants(raw)
                 groups = [] if rules is None else [('', rules)]
-            found = [(label, judge_rules(rules, allow, classifier)) for label, rules in groups]
+            found = [(label, judge_rules(validate_direct_allow_rules(rules, component['kind']), allow, classifier))
+                     for label, rules in groups]
         except Unclear as exc:
             problems += 1
             lines.append(f"kind={component['kind']}: allowed-tools を解釈できない")
@@ -1998,9 +2077,11 @@ def main(argv=None):
     c.add_argument('--allowed-tools', action='append', default=[])
     c.add_argument('--classifier', action='store_true')
     c = sub.add_parser('component-policy')
+    c.add_argument('--allowed-tools', action='append', default=[])
     for name in ('--state', '--expect-sha256'):
         c.add_argument(name, required=True)
     c = sub.add_parser('init-sanitize')
+    c.add_argument('--allowed-tools', action='append', default=[])
     for name in ('--state', '--expect-sha256'):
         c.add_argument(name, required=True)
     a = p.parse_args(argv)
@@ -2031,10 +2112,10 @@ def main(argv=None):
             files = grants(a.state, a.expect_sha256, a.user_settings, a.allowed_tools, a.classifier)
             print(f"files={files} yaml={'on' if yaml_loader() else 'off'}")
         elif a.command == 'component-policy':
-            print(json.dumps(component_policy_output(component_policy(a.state, a.expect_sha256)),
+            print(json.dumps(component_policy_output(component_policy(a.state, a.expect_sha256, a.allowed_tools)),
                              ensure_ascii=True, sort_keys=True))
         elif a.command == 'init-sanitize':
-            policy = component_policy(a.state, a.expect_sha256)
+            policy = component_policy(a.state, a.expect_sha256, a.allowed_tools)
             print(json.dumps(sanitize_supervisor(read_bounded_stdin(), policy['namespace']['public_names']),
                              ensure_ascii=True, sort_keys=True))
         return 0

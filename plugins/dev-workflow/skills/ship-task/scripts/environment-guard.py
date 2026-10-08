@@ -253,7 +253,7 @@ def tree(path, key, budget, entries, blobs=None, optional=False, user_links=Fals
         entries[key] = ['missing']
 
 
-COMPONENT_KINDS = frozenset(('personal-skill', 'enterprise-skill', 'personal-command',
+COMPONENT_KINDS = frozenset(('personal-skill', 'enterprise-skill', 'personal-command', 'enterprise-command',
                              'personal-agent', 'enterprise-agent', 'marketplace-manifest', 'plugin'))
 
 
@@ -684,7 +684,8 @@ def default_specs():
             'components': [
               {'kind':'personal-skill','path':str(config / 'skills')}, {'kind':'personal-command','path':str(config / 'commands')},
               {'kind':'personal-agent','path':str(config / 'agents')}, {'kind':'enterprise-skill','path':'/etc/claude-code/.claude/skills'},
-              {'kind':'enterprise-agent','path':'/etc/claude-code/.claude/agents'}]}
+              {'kind':'enterprise-agent','path':'/etc/claude-code/.claude/agents'},
+              {'kind':'enterprise-command','path':'/etc/claude-code/.claude/commands'}]}
     # drop-in の記述子は snapshot 後に、その保持済み tree だけから作る。
     # ここで directory を列挙すると列挙と snapshot の間に新設された設定を
     # 記述子から外してしまうため、bootstrap では下で entries を渡す。
@@ -826,11 +827,16 @@ def read_host_settings(state_path, expected_sha):
         budget.tick()
         return kind, path, item
     user, cache, cache_seen, checked = {}, None, False, 0
-    managed = []
+    managed, permission_sources = [], []
     user_path = None
     for item in desc:
         kind, path, value = load(item)
         checked += 1
+        # 元の設定値は同一 process 内だけで渡す。kind と論理 path の hash は
+        # 別 run でも同じで、複数の管理 root/drop-in を取り違えない。
+        source_kind = 'managed-drop-in' if kind == 'managed' and Path(path).parent.name == 'managed-settings.d' else kind
+        permission_sources.append({'kind': source_kind, 'source': sha(dump([source_kind, path])),
+                                   'present': value is not None, 'settings': value})
         if kind == 'user':
             if user_path is not None: raise Stop('host-settings')
             user_path, user = path, value or {}
@@ -843,7 +849,7 @@ def read_host_settings(state_path, expected_sha):
     if user_path is None:
         raise Stop('host-settings')
     return {'user_settings': user_path, 'user': user, 'cache': cache,
-            'managed': managed, 'checked': checked}
+            'managed': managed, 'checked': checked, 'permission_sources': permission_sources}
 
 
 def split_rules(value):
@@ -1116,7 +1122,7 @@ def bootstrap(a):
         specs['files'].append(str(Path(managed_root) / 'managed-settings.json'))
         specs['directories'].append(str(Path(managed_root) / 'managed-settings.d'))
         specs['components'] += [{'kind': 'enterprise-' + kind, 'path': str(Path(managed_root) / '.claude' / folder)}
-                                for kind, folder in (('skill', 'skills'), ('agent', 'agents'))]
+                                for kind, folder in (('skill', 'skills'), ('agent', 'agents'), ('command', 'commands'))]
     specs['components'] = list({(item['kind'], item['path']): item for item in specs['components']}.values())
     inventory = plugin_inventory(read_regular(a.inventory)) if a.inventory else []
     blobs = {}
