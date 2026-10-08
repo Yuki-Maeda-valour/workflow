@@ -898,7 +898,7 @@ newrec provefix
 PROOF_DIR="$W/home/.config/dev-workflow/loop/host-proofs"
 run_loop prove-default -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
 check "治具: スタブの証明を作れる(default)" 0 "$RC"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(host sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(host shell-prefix sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 治具: 上書きの実行ファイルの証明(H31)════════════════
@@ -4504,6 +4504,112 @@ ln -s "$W/h34clone/skills/evil/SKILL.md" "$H34CFG/skills/in/other.md"
 run_loop h34 "CLAUDE_CONFIG_DIR=$H34CFG" -- --repo "$R" --dry-run --allowed-tools Read "${COMMON_ARGS[@]}"
 check "H34 内側のリンクで止まる" 20 "$RC"
 has "H34 内側のリンク: 理由" "$OUT" "[environment]"
+fi
+
+# ════════════════ H49: 起動環境の shell prefix(#227) ════════════════
+if want shell-prefix; then
+# 既存の証明、対象リポジトリ、状態領域をそれぞれ固定して、拒否がホスト呼出し・状態生成より前であることを確かめる。
+h49_proof_fingerprint() {
+  find "$PROOF_DIR" -type f -printf '%P\n' 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do
+    printf '%s ' "$f"
+    sha256sum "$PROOF_DIR/$f"
+  done | sha256sum
+}
+h49_repo_fingerprint() {
+  {
+    git -C "$R" rev-parse HEAD
+    git -C "$R" rev-parse 'HEAD^{tree}'
+    git -C "$R" for-each-ref --format='%(refname) %(objectname)'
+    git -C "$R" status --porcelain=v1 -z | sha256sum
+    find "$R" -path "$R/.git" -prune -o -type f -printf '%P\0' | LC_ALL=C sort -z | while IFS= read -r -d '' f; do
+      printf '%s ' "$f"
+      sha256sum "$R/$f"
+    done
+  } | sha256sum
+}
+h49_no_side_effects() { # $1=ラベル $2=状態名 $3=証明の指紋 $4=リポジトリの指紋
+  f "$1: 状態・ロック・報告を作らない" test -e "$W/state/$2"
+  check "$1: ホストの補助呼出しをしない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+  check "$1: タスクを実行しない" "" "$(calls)"
+  check "$1: 既存証明を変えない" "$3" "$(h49_proof_fingerprint)"
+  check "$1: リポジトリの HEAD・ref・内容を変えない" "$4" "$(h49_repo_fingerprint)"
+}
+
+newrepo h49-reject
+addtask pr-a 2026-01-01
+commit
+H49_PROOF_BEFORE="$(h49_proof_fingerprint)"
+H49_REPO_BEFORE="$(h49_repo_fingerprint)"
+# `0`、空白、タブ、改行・CR・ESC を含む値も、空でなければ同じ起動時検査で拒否する。
+H49_VALUES=(ordinary 0 ' ' $'\t' $'line\ncarriage\rescape\e')
+for i in "${!H49_VALUES[@]}"; do
+  for mode in normal dry prove; do
+    state="h49-reject-$i-$mode"
+    newrec "$state"
+    args=(--repo "$R")
+    case "$mode" in dry) args+=(--dry-run) ;; prove) args+=(--prove-host) ;; esac
+    run_loop "$state" "CLAUDE_CODE_SHELL_PREFIX=${H49_VALUES[$i]}" -- "${args[@]}" "${COMMON_ARGS[@]}"
+    check "H49 非空($i/$mode): 終了コード" 20 "$RC"
+    has "H49 非空($i/$mode): 理由" "$OUT" "[shell-prefix]"
+    h49_no_side_effects "H49 非空($i/$mode)" "$state" "$H49_PROOF_BEFORE" "$H49_REPO_BEFORE"
+  done
+done
+# 診断は値を出さず、変数名と解除方法だけを伝える。制御文字を含む値も文字列として実行しない。
+H49_SECRET=$'H49-secret-value\nwith-tab\t-cr\r-and-escape\e'
+newrec h49-secret
+run_loop h49-secret "CLAUDE_CODE_SHELL_PREFIX=$H49_SECRET" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H49 診断: 終了コード" 20 "$RC"
+has "H49 診断: 変数名" "$OUT" "CLAUDE_CODE_SHELL_PREFIX"
+has "H49 診断: 外してから起動する案内" "$OUT" "外してから起動する"
+hasnt "H49 診断: 値を出さない" "$OUT" "$H49_SECRET"
+hasnt "H49 診断: タブを出さない" "$OUT" $'\t'
+hasnt "H49 診断: CR を出さない" "$OUT" $'\r'
+hasnt "H49 診断: ESC を出さない" "$OUT" $'\e'
+h49_no_side_effects "H49 診断" h49-secret "$H49_PROOF_BEFORE" "$H49_REPO_BEFORE"
+
+# 未設定と明示的な空文字は従来どおり通す。通常起動はタスク 1 件を実行する。
+for kind in unset empty; do
+  envs=()
+  [ "$kind" != empty ] || envs=(CLAUDE_CODE_SHELL_PREFIX=)
+  newrepo "h49-normal-$kind"
+  addtask pr-a 2026-01-01
+  commit
+  newrec "h49-normal-$kind"
+  run_loop "h49-normal-$kind" "${envs[@]}" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+  check "H49 $kind: 通常起動" 0 "$RC"
+  check "H49 $kind: タスクを 1 件実行" pr-a "$(calls)"
+
+  newrepo "h49-dry-$kind"
+  addtask pr-a 2026-01-01
+  commit
+  newrec "h49-dry-$kind"
+  run_loop "h49-dry-$kind" "${envs[@]}" -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+  check "H49 $kind: --dry-run" 0 "$RC"
+
+  newrepo "h49-prove-$kind"
+  addtask pr-a 2026-01-01
+  commit
+  newrec "h49-prove-$kind"
+  run_loop "h49-prove-$kind" "${envs[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "H49 $kind: --prove-host" 0 "$RC"
+  has "H49 $kind: 証明を書いた" "$OUT" "ホスト CLI の証明を書いた:"
+done
+
+# help は環境変数の検査より先に終了し、未設定・空・非空の全てで副作用を起こさない。
+for kind in unset empty nonempty; do
+  envs=()
+  case "$kind" in empty) envs=(CLAUDE_CODE_SHELL_PREFIX=) ;; nonempty) envs=(CLAUDE_CODE_SHELL_PREFIX=H49-help-secret) ;; esac
+  state="h49-help-$kind"
+  newrec "$state"
+  H49_HELP_PROOF_BEFORE="$(h49_proof_fingerprint)"
+  run_loop "$state" "${envs[@]}" -- --help
+  check "H49 help($kind): 終了コード" 0 "$RC"
+  has "H49 help($kind): 使い方" "$OUT" "使い方:"
+  if [ "$kind" = nonempty ]; then hasnt "H49 help($kind): 値を出さない" "$OUT" H49-help-secret; fi
+  f "H49 help($kind): 状態を作らない" test -e "$W/state/$state"
+  check "H49 help($kind): ホストを呼ばない" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+  check "H49 help($kind): 証明を変えない" "$H49_HELP_PROOF_BEFORE" "$(h49_proof_fingerprint)"
+done
 fi
 
 # ════════════════ 後片付け ════════════════
