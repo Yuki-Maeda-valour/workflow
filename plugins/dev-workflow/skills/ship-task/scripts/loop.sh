@@ -52,6 +52,10 @@ set -eEuo pipefail
 shopt -s inherit_errexit
 # export された CDPATH があると、素の `cd` が行き先を stdout へ出す。このスクリプトの `cd` はすべて明示パス
 unset CDPATH
+# 呼出元の値とexport属性を受け継がず、初回の信頼コピーだけを保持する。
+unset TASK_TEXT_CODE TASK_TEXT_HELD
+TASK_TEXT_CODE=""
+TASK_TEXT_HELD=0
 
 LOOP_START="$(date +%s)"
 TAB=$'\t'
@@ -244,13 +248,6 @@ net_git() { # $1=秒 残り=git の引数
 read -r -d '' PY_HELPER <<'PY' || true
 import difflib, hashlib, json, os, re, stat, subprocess, sys, unicodedata
 
-HOLD = re.compile(r"^- \*\*保留\*\*\(ship-task・[0-9]{4}-[0-9]{2}-[0-9]{2}\): ")
-HOLD_CODE = re.compile(r"^- \*\*保留\*\*\(ship-task・[0-9]{4}-[0-9]{2}-[0-9]{2}\): ([SDUG][0-9]+)")
-META = re.compile(r"^> \*\*無人実行\*\*: 可[ \t\r\v\f]*$")
-CREATED = re.compile(r"^> \*\*作成日\*\*: ([0-9]{4}-[0-9]{2}-[0-9]{2})")
-H2 = re.compile(r"^## ")
-RECORD = re.compile(r"^## 追加修正記録$")
-FENCE_OPEN = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 # unattended-mode.md §2 の 5 値のパターン(両モード共通。モードで取りえない値は判定で失敗にする — loop.md §5)
 OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
 PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
@@ -263,53 +260,6 @@ def fail(code, msg):
     sys.exit(code)
 
 
-def read_text(path):
-    data = sys.stdin.buffer.read() if path == "-" else open(path, "rb").read()
-    text = data.decode("utf-8", "replace")
-    if text.startswith("﻿"):
-        text = text[1:]
-    return text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
-
-
-def fence_flags(lines):
-    # task-template.md の記法の規約のコードフェンス(task-digest.py と同じ定義)
-    flags, closing = [], None
-    for line in lines:
-        if closing is None:
-            opened = FENCE_OPEN.match(line)
-            if opened:
-                marker = opened.group(1)
-                closing = re.compile(r"^ {0,3}" + re.escape(marker[0]) + "{" + str(len(marker)) + r",}[ \t]*$")
-            flags.append(bool(opened))
-            continue
-        flags.append(True)
-        if closing.match(line):
-            closing = None
-    return flags
-
-
-def headings(lines, fenced):
-    return [i for i, line in enumerate(lines) if not fenced[i] and H2.match(line)]
-
-
-def header_lines(lines):
-    fenced = fence_flags(lines)
-    hs = headings(lines, fenced)
-    end = hs[0] if hs else len(lines)
-    return [lines[i] for i in range(end) if not fenced[i]]
-
-
-def record_lines(lines):
-    # 追加修正記録の節(見出しの次の行から次の `## ` の見出しの前まで)の、フェンスの外の行
-    fenced = fence_flags(lines)
-    hs = headings(lines, fenced)
-    out = []
-    for start in (i for i in hs if RECORD.match(lines[i])):
-        end = next((i for i in hs if i > start), len(lines))
-        out.extend(lines[i] for i in range(start + 1, end) if not fenced[i])
-    return out
-
-
 def d21_problem(text, what):
     for ch in text:
         if ch.isspace() or unicodedata.category(ch) == "Cc":
@@ -320,27 +270,6 @@ def d21_problem(text, what):
         if comp.startswith("-"):
             return f"{what} に '-' で始まる要素がある"
     return None
-
-
-def cmd_taskinfo(path):
-    lines = read_text(path)
-    head = header_lines(lines)
-    meta = any(META.match(line) for line in head)
-    date = next((m.group(1) for m in (CREATED.match(line) for line in head) if m), "")
-    print(f"meta={1 if meta else 0}")
-    print(f"date={date}")
-
-
-def cmd_holdcount(path):
-    print(sum(1 for line in record_lines(read_text(path)) if HOLD.match(line)))
-
-
-def cmd_holdcode(path):
-    # 保留の行の照合パターンに一致する最後の行を先に選び、その行だけから対話点番号を取り出す(取り出せなければ空。
-    # 前の行の番号を返さない — 古い G1 の行が残っていても、最後の行で判定する)
-    holds = [line for line in record_lines(read_text(path)) if HOLD.match(line)]
-    m = HOLD_CODE.match(holds[-1]) if holds else None
-    print(m.group(1) if m else "")
 
 
 def cmd_d21(rel, name):
@@ -907,7 +836,6 @@ def cmd_environment_run(expected, path, *args):
 
 COMMANDS = {
     "environment-run": cmd_environment_run,
-    "taskinfo": cmd_taskinfo, "holdcount": cmd_holdcount, "holdcode": cmd_holdcode,
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
     "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
@@ -925,11 +853,16 @@ except Exception as exc:  # 想定外の失敗は 9(呼び出し側は「差分�
     sys.exit(9)
 PY
 py() {
-  local isolation=()
+  local isolation=() code="$PY_HELPER"
+  case "${1:-}" in
+    taskinfo|holdcount|holdcode)
+      [ "${TASK_TEXT_HELD:-0}" = 1 ] || die 20 environment "本文解析を保持していない"
+      code="$TASK_TEXT_CODE" ;;
+  esac
   # 固定検査と hook の組立は stdlib だけを使い、cwd/PYTHONPATH/user-site を探索しない。
   # profile の PyYAML など、ほかの補助処理の利用者 site は従来どおり使う。
   case "${1:-}" in environment-run|hook-settings) isolation=(-I) ;; esac
-  ( cd / && exec python3 "${isolation[@]}" -c "$PY_HELPER" "$@" 7>&- )
+  ( cd / && exec python3 "${isolation[@]}" -c "$code" "$@" 7>&- )
 }
 
 # ── 報告(状態ディレクトリの <実行 ID>/report.md。要約は stdout)──
@@ -1034,6 +967,29 @@ verify_environment() {
     environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" --current-inventory "$current" || { STATE_GIT_UNSAFE=1; return 1; }
   fi
 }
+hold_task_text() {
+  local candidate
+  # Bashへ格納する前にNUL等を拒否する。末尾改行も照合し、read失敗を隠さない。
+  candidate="$(environment_call read --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
+    --path skills/ship-task/scripts/loop-task-text.py | (cd / && "$PY_ABS" -I -c '
+import sys
+raw = sys.stdin.buffer.read()
+if not raw or b"\0" in raw:
+    sys.exit(20)
+try:
+    raw.decode("utf-8")
+except UnicodeError:
+    sys.exit(20)
+sys.stdout.buffer.write(raw)
+' 7>&-) && printf '.')" || die 20 environment "本文解析のコピーを読めない"
+  candidate="${candidate%.}"
+  if [ "$TASK_TEXT_HELD" = 1 ]; then
+    [ "$candidate" = "$TASK_TEXT_CODE" ] || die 20 environment "本文解析のコピーが初回と異なる"
+  else
+    TASK_TEXT_CODE="$candidate"
+    TASK_TEXT_HELD=1
+  fi
+}
 bind_environment() { # bootstrap の出力だけから保持する。過去の状態から復元しない。
   local receipt="$1"
   ENVIRONMENT_STATE="$(printf '%s' "$receipt" | py json-get state)"
@@ -1041,6 +997,7 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   TRUSTED_ENV_GUARD="$(printf '%s' "$receipt" | py json-get guard)"
   ENV_GUARD_SHA="$(printf '%s' "$receipt" | py json-get guard_sha256)"
   PLUGIN_ROOT="$(printf '%s' "$receipt" | py json-get plugin)"
+  hold_task_text
   RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
   PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
   ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"

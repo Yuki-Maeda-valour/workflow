@@ -2,6 +2,13 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.26.3
+
+### 変更
+
+- 無人ループのタスク本文解析(`taskinfo`・`holdcount`・`holdcode`)を `loop-task-text.py` へ分離した。解析結果と終了コード、作業ディレクトリ・stdin・FD7・利用者別のPython依存の扱いを保つ。
+- 初回の信頼コピーから解析コードを保持し、有効プラグインの一覧を取り込んだコピーでも同じ解析コードであることを確認する。読取失敗や不正なbytes、末尾改行を含む変更では停止する。([Issue #265](https://github.com/Yuki-Maeda-valour/workflow/issues/265))
+
 ## v4.26.1
 
 ### 変更
