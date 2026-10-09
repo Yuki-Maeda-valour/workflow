@@ -13,6 +13,8 @@ import os
 import re
 import runpy
 import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -939,6 +941,102 @@ class ValidateTest(unittest.TestCase):
         absolute_path = self.home / "private" / "notes"
         self.append_to_checked_file(str(absolute_path))
         self.assert_error(["ユーザー環境の絶対パス", str(self.home)])
+
+
+class YamlDependencyTest(unittest.TestCase):
+    """依存なし・壊れた依存でも検証成功へ切り替わらないことを確認する。"""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.repo = self.root / "repo"
+        shutil.copytree(SOURCE_REPO, self.repo, ignore=shutil.ignore_patterns(".git", "__pycache__"))
+        self.script = self.repo / "scripts/validate.py"
+        self.skill = self.repo / SKILLS_REL / "tool-check/SKILL.md"
+        self.original = self.skill.read_text(encoding="utf-8")
+
+    def malformed(self, line):
+        self.skill.write_text(self.original.replace("name: tool-check\n", "name: tool-check\n" + line + "\n", 1), encoding="utf-8")
+
+    def run_process(self, *, isolated=False, fake_yaml=None):
+        code = "import runpy,sys; "
+        args = []
+        if fake_yaml is not None:
+            package = self.root / "fake"
+            package.mkdir(exist_ok=True)
+            (package / "yaml.py").write_text(fake_yaml, encoding="utf-8")
+            code += "sys.path.insert(0, sys.argv[2]); "
+            args.append(str(package))
+        code += ("ns=runpy.run_path(sys.argv[1],run_name='validate_under_test'); "
+                 "print('MODULE_LOADED'); raise SystemExit(ns['main']())")
+        env = {k: v for k, v in os.environ.items() if k != PROJECT_NAMES_ENV}
+        return subprocess.run([sys.executable, *(['-I', '-S'] if isolated else []),
+                               '-c', code, str(self.script), *args],
+                              capture_output=True, text=True, env=env, timeout=60)
+
+    def assert_dependency_failure(self, result):
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn('MODULE_LOADED', result.stdout)
+        self.assertEqual(1, len([line for line in result.stdout.splitlines() if line.startswith('ERROR ')]), result.stdout)
+        self.assertIn('PyYAML', result.stdout)
+        self.assertIn('-m pip install -r', result.stdout)
+        self.assertIn('requirements-dev.txt', result.stdout)
+        self.assertIn('結果: ERROR 1 件 / WARN 0 件', result.stdout)
+        self.assertNotIn('Traceback', result.stderr)
+        self.assertNotIn('frontmatter に name がない', result.stdout)
+
+    def test_missing_dependency_rejects_normal_and_malformed_in_subprocess(self):
+        for line in (None, 'broken: [unclosed', 'broken: "unclosed', 'broken: {a: b'):
+            with self.subTest(line=line):
+                if line:
+                    self.malformed(line)
+                self.assert_dependency_failure(self.run_process(isolated=True))
+
+    def test_broken_import_and_api_reject_in_subprocess(self):
+        for fake in ("raise ImportError('yaml internal dependency unavailable')\n",
+                     "broken = [\n", "raise RuntimeError('yaml initialization failed')\n",
+                     "unrelated = 1\n", "safe_load = None\n"):
+            with self.subTest(fake=fake):
+                self.assert_dependency_failure(self.run_process(isolated=True, fake_yaml=fake))
+
+    def test_installed_yaml_accepts_normal_and_rejects_malformed(self):
+        result = self.run_process()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn('結果: ERROR 0 件 / WARN 0 件', result.stdout)
+        for line in ('broken: [unclosed', 'broken: "unclosed', 'broken: {a: b'):
+            with self.subTest(line=line):
+                self.malformed(line)
+                result = self.run_process()
+                self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                self.assertIn('frontmatter YAML パース失敗', result.stdout)
+
+    def test_direct_parser_rejects_missing_dependency(self):
+        with mock.patch.dict(sys.modules, {'yaml': None}):
+            ns = runpy.run_path(str(self.script), run_name='validate_under_test')
+            value = ns['parse_frontmatter']('---\nname: test\nbroken: [unclosed\n---\n', Path('fixture.md'))
+        self.assertEqual({}, value)
+        self.assertEqual(1, len(ns['ERRORS']))
+        self.assertIn('PyYAML', ns['ERRORS'][0])
+
+    def test_parser_import_error_never_falls_back(self):
+        import types
+        fake = types.SimpleNamespace(safe_load=mock.Mock(side_effect=ImportError('loader unavailable')))
+        with mock.patch.dict(sys.modules, {'yaml': fake}):
+            ns = runpy.run_path(str(self.script), run_name='validate_under_test')
+            value = ns['parse_frontmatter']('---\nname: test\n---\n', Path('fixture.md'))
+        self.assertEqual({}, value)
+        self.assertEqual(1, len(ns['ERRORS']))
+        self.assertIn('frontmatter YAML パース失敗', ns['ERRORS'][0])
+
+    def test_import_base_exception_is_not_swallowed(self):
+        for exception in ('KeyboardInterrupt', 'SystemExit(37)'):
+            with self.subTest(exception=exception):
+                result = self.run_process(isolated=True, fake_yaml='raise ' + exception + '\n')
+                self.assertNotEqual(0, result.returncode)
+                self.assertNotIn('PyYAML', result.stdout)
+                if exception.startswith('SystemExit'):
+                    self.assertEqual(37, result.returncode)
 
 
 if __name__ == "__main__":

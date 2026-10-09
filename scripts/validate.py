@@ -42,6 +42,7 @@
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 from typing import Optional
@@ -248,6 +249,23 @@ def _mask_code_fences(body: str) -> str:
     return "\n".join(out)
 
 
+def yaml_loader():
+    """検証に必須の parser を取得する。未導入・破損を成功へ読み替えない。"""
+    try:
+        import yaml  # type: ignore
+
+        loader = getattr(yaml, "safe_load", None)
+        if not callable(loader):
+            raise TypeError("yaml.safe_load が呼び出せない")
+        return loader
+    except Exception as exc:
+        command = (f"{shlex.quote(sys.executable)} -m pip install -r "
+                   f"{shlex.quote(str(REPO / 'requirements-dev.txt'))}")
+        ERRORS.append(f"PyYAML を利用できない（未導入または読込失敗）: {exc!r}。"
+                      f"検証用の依存を導入・修復してください: {command}")
+        return None
+
+
 def parse_frontmatter(text: str, path: Path):
     if not text.startswith("---"):
         ERRORS.append(f"{path}: frontmatter がない")
@@ -257,25 +275,14 @@ def parse_frontmatter(text: str, path: Path):
         ERRORS.append(f"{path}: frontmatter が閉じていない")
         return {}
     block = text[4:end]
+    loader = yaml_loader()
+    if loader is None:
+        return {}
     try:
-        import yaml  # type: ignore
-
-        data = yaml.safe_load(block) or {}
+        data = loader(block) or {}
         if not isinstance(data, dict):
             ERRORS.append(f"{path}: frontmatter が辞書でない")
             return {}
-        return data
-    except ImportError:
-        # PyYAML が無い環境向けの簡易パース(トップレベルの key: value のみ)
-        data = {}
-        current_key = None
-        for line in block.splitlines():
-            m = re.match(r"^([A-Za-z_-]+):\s*(.*)$", line)
-            if m:
-                current_key = m.group(1)
-                data[current_key] = m.group(2).strip().strip('"')
-            elif current_key and line.startswith(("  ", "\t")):
-                data[current_key] = str(data.get(current_key, "")) + " " + line.strip()
         return data
     except Exception as e:  # yaml parse error
         ERRORS.append(f"{path}: frontmatter YAML パース失敗: {e}")
@@ -700,15 +707,17 @@ def check_migration_allowlist_staleness():
 
 
 def main() -> int:
-    check_json_files()
-    check_skill_count_claims()
-    check_skills()
-    check_writing_rules_link()
-    check_line_length()
-    check_delegation_words()
-    check_host_cli_words()
-    check_delegation_map_invariant()
-    check_migration_allowlist_staleness()
+    # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
+    if yaml_loader() is not None:
+        check_json_files()
+        check_skill_count_claims()
+        check_skills()
+        check_writing_rules_link()
+        check_line_length()
+        check_delegation_words()
+        check_host_cli_words()
+        check_delegation_map_invariant()
+        check_migration_allowlist_staleness()
     skills = sorted(d.name for d in SKILLS_DIR.iterdir() if d.is_dir()) if SKILLS_DIR.exists() else []
     print(f"skills: {len(skills)} 件 — {', '.join(skills)}")
     for w in WARNS:
