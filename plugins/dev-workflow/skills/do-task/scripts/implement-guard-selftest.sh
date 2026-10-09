@@ -23,7 +23,7 @@
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
-# 変異テスト(L・18 個): 対象の写しに sed で変異を 1 つ当て(対象側の目印 `# MUT:a`〜`# MUT:p` と `# MUT:q`)、
+# 変異テスト(L・18 個): 対象の写しに sed で変異を 1 つ当て(e は復元 helper の階層検査を外す)(対象側の目印 `# MUT:a`〜`# MUT:p` と `# MUT:q`)、
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
 # FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした変異は
 # それ自体を FAIL にする。変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
@@ -205,12 +205,30 @@ show() {
   echo "--- stdout"; cat "$CASE_OUT"
   echo "--- stderr"; cat "$CASE_ERR"
 }
+# 配布する呼出手順と同じ監督関数を使い、正常な公開復元も検証する。
+python3 - "$SCRIPT_DIR/../references/runtime-requirements.md" >"$WORK/restore-supervision.sh" <<'PYCODE'
+from pathlib import Path
+import sys
+section = Path(sys.argv[1]).read_text().split('<!-- restore-taskmd-supervision:start -->', 1)[1]
+section = section.split('<!-- restore-taskmd-supervision:end -->', 1)[0]
+print(section.split('```bash\n', 1)[1].split('```', 1)[0])
+PYCODE
+[ $? -eq 0 ] || exit 1
+source "$WORK/restore-supervision.sh"
+invoke_target() {
+  if [ "${1:-}" = restore-taskmd ]; then
+    shift; LAST_T=330
+    restore_taskmd_supervised "$TARGET" "$@"
+  else
+    guard bash "$TARGET" "$@"
+  fi
+}
 # 対象の stdin は常に /dev/null(スイート自身の stdin が開いたままでも待たない)
-run() { RC=0; guard bash "$TARGET" "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?; mark_timeout; show "$@"; }
+run() { RC=0; invoke_target "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?; mark_timeout; show "$@"; }
 # 重い起動用(上限超過。変異版では退避まで進むので長めに待つ)
 run_slow() { RC=0; guard_t "$T_SLOW" bash "$TARGET" "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?; mark_timeout; show "$@"; }
 # PATH の先頭にスタブ置き場を足して起動する
-runp() { local p="$1"; shift; RC=0; guard env PATH="$p:$PATH" bash "$TARGET" "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?; mark_timeout; show "$@"; }
+runp() { local p="$1"; shift; RC=0; PATH="$p:$PATH" invoke_target "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?; mark_timeout; show "$@"; }
 # 環境変数を足して起動する: rune VAR=値 … -- 引数…
 rune() {
   local envs=()
@@ -324,6 +342,10 @@ cat >"$STUBS/cpfail/cp" <<EOF
 #!/usr/bin/env bash
 for a in "\$@"; do
   case "\$a" in taskmd-body|*/taskmd-body) exit 1 ;; esac
+  case "\$a" in /proc/self/fd/*|/dev/fd/*)
+    resolved=\$(readlink -- "\$a" 2>/dev/null || true)
+    case "\$resolved" in */taskmd-body) exit 1 ;; esac ;;
+  esac
 done
 exec "$REAL_CP" "\$@"
 EOF
@@ -1922,10 +1944,10 @@ case_I5() {
 }
 
 # ════════════════════════ J restore-taskmd ════════════════════════
-restored_ok() { # $1=説明 $2=復元先 [$3=期待する TOUCHED=(既定 deleted+copied。復元先がもともと
+restored_ok() { # $1=説明 $2=復元先 [$3=期待する TOUCHED=(既定 replaced。復元先がもともと
                 #  無い経路は copied — 消していないものを消したと報告しないこと自体が検査の対象なので、
                 #  どちらでも通る書き方にしない)](直前の run の結果を見る)
-  local touched="${3:-deleted+copied}"
+  local touched="${3:-replaced}"
   rc_is "$1: exit 0" 0
   out_line "$1: RESTORED=yes" 'RESTORED=yes'
   out_line "$1: TOUCHED=$touched" "TOUCHED=$touched"   # 行全体の一致なので別の値では通らない
@@ -2019,15 +2041,18 @@ case_J6() {
   base_repo j6
   take "$R" task/t.md
   printf '%s' "$TASK_BODY" | sed 's/\[ \]/[x]/' >"$R/task/t.md"
+  chmod 640 "$R/task/t.md"
+  local before_sha="$(sha_of "$R/task/t.md")" before_mode="$(stat -c %a "$R/task/t.md")"
   runp "$STUBS/cpfail" restore-taskmd "${ARGS[@]}"
-  rc_is "削除の後でコピーだけが失敗する → 33" 33
-  out_line "削除の後でコピーだけが失敗: RESTORED=no" 'RESTORED=no'
-  out_line "削除の後でコピーだけが失敗: TOUCHED=deleted(実ツリーは既に変わっている)" 'TOUCHED=deleted'
-  out_line "削除の後でコピーだけが失敗: REASON=copy-failed" 'REASON=copy-failed'
-  ckf "削除の後でコピーだけが失敗: 実ツリーの当該エントリは無くなっている" test -e "$R/task/t.md"
+  rc_is "準備コピーが失敗する → 33" 33
+  out_line "準備コピー失敗: RESTORED=no" 'RESTORED=no'
+  out_line "準備コピー失敗: TOUCHED=none" 'TOUCHED=none'
+  out_line "準備コピー失敗: REASON=copy-failed" 'REASON=copy-failed'
+  ckt "準備コピー失敗: 元エントリを保持" test -f "$R/task/t.md"
+  ckeq "準備コピー失敗: 元内容を保持" "$(sha_of "$R/task/t.md")" "$before_sha"
+  ckeq "準備コピー失敗: 元modeを保持" "$(stat -c %a "$R/task/t.md" 2>/dev/null || true)" "$before_mode"
   run restore-taskmd "${ARGS[@]}"
-  # 前の起動が消したままなので、再実行では削除を行わない
-  restored_ok "コピーの失敗の後、スタブなしで再実行すると戻る" "$R/task/t.md" copied
+  restored_ok "コピーの失敗の後、スタブなしで再実行すると戻る" "$R/task/t.md" replaced
 }
 
 case_J7() {
@@ -2036,16 +2061,128 @@ case_J7() {
   take "$R" task/t.md
   printf '%s' "$TASK_BODY" | sed 's/\[ \]/[x]/' >"$R/task/t.md"
   if [ "$IS_ROOT" -eq 1 ]; then
-    ok "同名エントリの削除に失敗する → 33 TOUCHED=none(root のため飛ばす — root は書き込み不可のディレクトリからも消せる)"
+    ok "復元専用領域の作成に失敗する → 33 TOUCHED=none(root のため飛ばす — root は書き込み不可のディレクトリにも作成できる)"
     return 0
   fi
   chmod 555 "$R/task"
   run restore-taskmd "${ARGS[@]}"
   chmod 755 "$R/task"
-  rc_is "同名エントリの削除に失敗する(親ディレクトリが書き込み不可)→ 33" 33
-  out_line "同名エントリの削除に失敗: TOUCHED=none" 'TOUCHED=none'
-  out_line "同名エントリの削除に失敗: REASON=delete-failed" 'REASON=delete-failed'
-  ckt "同名エントリの削除に失敗: 実ツリーのエントリは残る" test -f "$R/task/t.md"
+  rc_is "復元専用領域の作成に失敗する(親ディレクトリが書き込み不可)→ 33" 33
+  out_line "復元専用領域の作成に失敗: TOUCHED=none" 'TOUCHED=none'
+  out_line "復元専用領域の作成に失敗: REASON=prepare-failed" 'REASON=prepare-failed'
+  ckt "復元専用領域の作成に失敗: 実ツリーのエントリは残る" test -f "$R/task/t.md"
+}
+
+case_J8() {
+  CID=J8; TAG=""
+  base_repo j8
+  local parent="$WORK/"$'bytes-\377\n' selected="$R/task/selected.md"
+  local real="$parent/"$'file-\376.md'
+  mkdir -p -- "$parent"
+  printf '%s' "$TASK_BODY" >"$real"
+  chmod 640 "$real"
+  ln -s -- "$real" "$selected"
+  local link_before="$(readlink -- "$selected")" body_before="$(sha_of "$real")"
+  take "$R" "$selected"
+  rc_is "非UTF-8実名と改行親・選択symlink: take成功" 0
+  printf 'current\n' >"$real"
+  : >"$GITLOG"
+  runp "$STUBS/gitlog" restore-taskmd "${ARGS[@]}"
+  restored_ok "非UTF-8実名・選択symlink" "$real" replaced
+  ckeq "非UTF-8: 元bytesへ復元" "$(sha_of "$real")" "$body_before"
+  ckeq "非UTF-8: mode保存" "$(stat -c %a "$real")" 640
+  ckeq "非UTF-8: 選択リンク文字列不変" "$(readlink -- "$selected")" "$link_before"
+  ckeq "非UTF-8: Git呼出0" "$(gitlog_n)" 0
+  out_line "非UTF-8: 一時物回収済み" 'TEMP=removed'
+  ckeq "成功応答は3行で重複なし" "$(wc -l <"$CASE_OUT")" 3
+}
+
+case_J9() {
+  CID=J9; TAG=""
+  base_repo j9
+  take "$R" task/t.md
+  printf 'current\n' >"$R/task/t.md"
+  chmod 640 "$R/task/t.md"
+  local old_target="$TARGET" copy_dir="$WORK/missing-helper" before="$(sha_of "$R/task/t.md")"
+  mkdir "$copy_dir"
+  cp -- "$TARGET" "$copy_dir/implement-guard.sh"
+  TARGET="$copy_dir/implement-guard.sh"
+  run restore-taskmd "${ARGS[@]}"
+  rc_is "同梱helper不在 → 33" 33
+  out_line "同梱helper不在: runtime-unavailable" 'REASON=runtime-unavailable'
+  out_line "同梱helper不在: TEMP=none" 'TEMP=none'
+  out_line "同梱helper不在: TOUCHED=none" 'TOUCHED=none'
+  ckeq "同梱helper不在: 元bytes保持" "$(sha_of "$R/task/t.md")" "$before"
+  printf 'invalid python syntax ?\n' >"$copy_dir/restore-taskmd.py"
+  run restore-taskmd "${ARGS[@]}"
+  rc_is "同梱helper構文不正 → 33" 33
+  out_line "同梱helper構文不正: runtime-unavailable" 'REASON=runtime-unavailable'
+  ckeq "同梱helper構文不正: 元mode保持" "$(stat -c %a "$R/task/t.md")" 640
+  cp -- "$SCRIPT_DIR/restore-taskmd.py" "$copy_dir/restore-taskmd.py"
+  mkdir -p "$STUBS/pythonfail"
+  printf '#!/usr/bin/env bash\nexit 73\n' >"$STUBS/pythonfail/python3"
+  chmod +x "$STUBS/pythonfail/python3"
+  runp "$STUBS/pythonfail" restore-taskmd "${ARGS[@]}"
+  rc_is "Python起動不能 → 33" 33
+  out_line "Python起動不能: runtime-unavailable" 'REASON=runtime-unavailable'
+  ckeq "Python起動不能: 元bytes保持" "$(sha_of "$R/task/t.md")" "$before"
+  ckt "必要環境不足でも元state保持" test -f "$STATE_DIR/taskmd-body"
+  TARGET="$old_target"
+}
+
+case_J10() {
+  CID=J10; TAG=""
+  base_repo j10
+  take "$R" task/t.md
+  printf 'current\n' >"$R/task/t.md"
+  chmod 640 "$R/task/t.md"
+  local old_target="$TARGET" copy_dir="$WORK/exec-fixture" before="$(sha_of "$R/task/t.md")"
+  mkdir "$copy_dir" "$WORK/owned-unknown"
+  printf 'keep\n' >"$WORK/owned-unknown/sentinel"
+  # 現行の復元入口は一時物を作らない。所有根拠のない値を注入した写しは停止する。
+  sed "s@^  restore_exec_cleanup\$@  WORK='$WORK/owned-unknown'; restore_exec_cleanup@" "$TARGET" >"$copy_dir/implement-guard.sh"
+  cp -- "$SCRIPT_DIR/restore-taskmd.py" "$copy_dir/restore-taskmd.py"
+  TARGET="$copy_dir/implement-guard.sh"
+  run restore-taskmd "${ARGS[@]}"
+  rc_is "exec前の所有不明一時物: helperへ引き渡さず33" 33
+  out_line "所有不明一時物: cleanup-failed" 'REASON=cleanup-failed'
+  out_line "所有不明一時物: TEMP=unknown" 'TEMP=unknown'
+  out_line "所有不明一時物: TOUCHED=none" 'TOUCHED=none'
+  ckeq "所有不明一時物: 元bytes保持" "$(sha_of "$R/task/t.md")" "$before"
+  ckeq "所有不明一時物: sentinelを削除しない" "$(cat "$WORK/owned-unknown/sentinel")" keep
+  TARGET="$old_target"
+  mkdir "$STUBS/execfail" "$STUBS/preexec-signal" "$STUBS/exec-kill"
+  cat >"$STUBS/execfail/python3" <<'EOF'
+#!/usr/bin/env bash
+if [ "${3:-}" = -c ]; then rm -- "$0"; exit 0; fi
+exit 98
+EOF
+  cat >"$STUBS/preexec-signal/python3" <<'EOF'
+#!/usr/bin/env bash
+kill -TERM "$PPID"
+exit 0
+EOF
+  cat >"$STUBS/exec-kill/python3" <<'EOF'
+#!/usr/bin/env bash
+if [ "${3:-}" = -c ]; then exit 0; fi
+kill -KILL "$$"
+EOF
+  chmod +x "$STUBS/execfail/python3" "$STUBS/preexec-signal/python3" "$STUBS/exec-kill/python3"
+  runp "$STUBS/execfail" restore-taskmd "${ARGS[@]}"
+  rc_is "execそのものの失敗 → 33" 33
+  out_line "exec失敗: runtime-unavailable" 'REASON=runtime-unavailable'
+  ckeq "exec失敗: 最終応答は1回" "$(out_count '^RESTORED=')" 1
+  runp "$STUBS/preexec-signal" restore-taskmd "${ARGS[@]}"
+  rc_is "exec前に捕捉したTERM → 20" 20
+  out_line "exec前TERM: interrupted" 'REASON=interrupted'
+  out_line "exec前TERM: TOUCHED=none" 'TOUCHED=none'
+  ckeq "exec前TERM: 最終応答は1回" "$(out_count '^RESTORED=')" 1
+  runp "$STUBS/exec-kill" restore-taskmd "${ARGS[@]}"
+  ckeq "exec後KILLは非成功137" "$RC" 137
+  ckeq "exec後KILLは無応答: callerでunknownと扱う" "$(wc -c <"$CASE_OUT")" 0
+  ckeq "中断fixture: 元bytes保持" "$(sha_of "$R/task/t.md")" "$before"
+  ckeq "中断fixture: 元mode保持" "$(stat -c %a "$R/task/t.md")" 640
+  ckt "中断fixture: 元state保持" test -f "$STATE_DIR/taskmd-body"
 }
 
 # ════════════════════════ K cleanup ════════════════════════
@@ -2100,16 +2237,27 @@ mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed �
   shift
   for e in "$@"; do args[${#args[@]}]="-e"; args[${#args[@]}]="$e"; done
   sed "${args[@]}" "$TARGET" >"$o"
+  cp -- "$SCRIPT_DIR/restore-taskmd.py" "$(dirname -- "$o")/restore-taskmd.py"
 }
 mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区切り)残り=sed 式
   local id="$1" desc="$2" expect="$3" v out n c rc=0 only total per firsts t0="$SECONDS"
   shift 3
-  v="$WORK/mut/$id.sh"
+  mkdir -p "$WORK/mut/$id"
+  v="$WORK/mut/$id/guard.sh"
   out="$WORK/mut/$id.out"
-  n="$(grep -c -- "# MUT:$id\$" "$TARGET" || true)"
-  ckeq "変異($id) 目印 # MUT:$id が対象に 1 行だけ在る" "$n" 1
-  mkvariant "$v" "$@"
-  ckf "変異($id) sed が空振りしていない(写しが対象と違う)" cmp -s "$TARGET" "$v"
+  if [ "$id" = e ]; then
+    # 復元先の検査は helper へ移った。元の J4 が、階層検査を除いた写しを検出する。
+    cp -- "$TARGET" "$v"
+    sed -e 's/os\.O_NOFOLLOW/0/g' -e 's/self\.check_chains()/pass/g' \
+      "$SCRIPT_DIR/restore-taskmd.py" >"$WORK/mut/$id/restore-taskmd.py"
+    ckf "変異(e) helper の階層検査の無効化が空振りしない" cmp -s "$SCRIPT_DIR/restore-taskmd.py" "$WORK/mut/$id/restore-taskmd.py"
+    ckt "変異(e) helper が Python 構文検査を通る" python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$WORK/mut/$id/restore-taskmd.py"
+  else
+    n="$(grep -c -- "# MUT:$id\$" "$TARGET" || true)"
+    ckeq "変異($id) 目印 # MUT:$id が対象に 1 行だけ在る" "$n" 1
+    mkvariant "$v" "$@"
+    ckf "変異($id) sed が空振りしていない(写しが対象と違う)" cmp -s "$TARGET" "$v"
+  fi
   ckt "変異($id) 写しが bash -n を通る" bash -n "$v"
   only="$(printf '%s' "$expect" | tr ' ' ','),E1"
   guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$v" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
@@ -2146,13 +2294,13 @@ case_L() {
   local lb la
   mutant a "ダイジェスト照合を外す" "G1 G2 G3" '/# MUT:a$/d'
   mutant b "hooks / config の検査を git の再取得より後ろへ動かす" "G7" '/# MUT:b$/{h;d;}' '/# ANCHOR:retake$/G'
-  lb="$(grep -n -- '# MUT:b$' "$WORK/mut/b.sh" | cut -d: -f1 | head -n 1)"
-  la="$(grep -n -- '# ANCHOR:retake$' "$WORK/mut/b.sh" | cut -d: -f1 | head -n 1)"
+  lb="$(grep -n -- '# MUT:b$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
+  la="$(grep -n -- '# ANCHOR:retake$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
   if [ -n "$lb" ] && [ -n "$la" ] && [ "$lb" -eq "$((la + 1))" ]; then ok "変異(b) 検査の行が再取得の行の直後へ動いている(消えただけではない)"
   else ng "変異(b) 検査の行が再取得の行の直後へ動いている(検査: ${lb:-無し} 行 / 再取得: ${la:-無し} 行)"; fi
   mutant c "前置きの -c core.fsmonitor= を外す" "B3" '/# MUT:c$/d'
   mutant d "使い捨て index をやめる" "B5" '/# MUT:d$/s/GIT_INDEX_FILE="[^"]*" //'
-  mutant e "復元先の階層検査を外す" "J4" '/# MUT:e$/d'
+  mutant e "復元先の階層検査を外す" "J4"
   mutant f "正規化で [xX] 以外も潰す" "I4" '/# MUT:f$/s/\[xX\]/./'
   mutant g ".claude/reviews/ の除外をタスク MD より優先する" "E9" '/# MUT:g$/d'
   mutant h "unborn で空ツリーに切り替えない" "D1" '/# MUT:h$/d'
@@ -3277,7 +3425,7 @@ case_N12() { # HOME未設定/空と~userのGit自身のpath展開を維持する
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0

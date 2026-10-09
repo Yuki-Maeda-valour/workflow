@@ -91,20 +91,23 @@
 #     exit 33 のとき REASON=digest|taskmd-body
 #   restore-taskmd:
 #     RESTORED=yes|no
-#     TOUCHED=none|copied|deleted|deleted+copied
-#                               (実ツリーに対して行ったこと。「削除してから cp -a」なので、削除の後の
-#                                コピーの失敗時は実ツリーが既に変わっている。**復元先がもともと存在
-#                                しなければ削除を行わないので copied**)
-#     exit 33 のとき REASON=digest|taskmd-body|dest-symlink|dest-dir|delete-failed|copy-failed|verify-failed
+#     TOUCHED=none|copied|replaced|unknown
+#     TEMP=none|removed|retained|unknown
+#     REASON=<理由コード>(非成功時だけ)
+#     TEMP_PATH=<C 風引用した専用領域>(TEMP=retained のときだけ)
+#     既存対象は準備した通常ファイルで原子的に replaced。不在からの作成は copied。
+#     準備失敗は対象を保つ。公開後の失敗は変更済みと報告し、自動で戻さない。
+#     成功は exit 0 / RESTORED=yes / copied または replaced / TEMP=removed の全行一致。
+#     不正・欠落・重複した応答は caller が unknown と扱い、引継ぎを停止する。
 #   REASON(taskmd-diff・restore-taskmd)の意味:
 #     digest         保護領域の検査かダイジェスト照合に失敗した
-#     taskmd-body    退避したタスク MD の実体照合(種別・モード・sha256)に失敗した
-#     dest-symlink   復元先の親ディレクトリの実体パスが記録と一致しない(途中の階層が symlink に
-#                    差し替えられた・消えた)、または復元先そのものが symlink
-#     dest-dir       復元先がディレクトリに置き換えられている
-#     delete-failed  同名エントリの削除に失敗した(TOUCHED=none)
-#     copy-failed    cp -a に失敗した(TOUCHED=deleted。復元先がもともと無ければ none)
-#     verify-failed  復元後の sha256 が一致しない(TOUCHED=deleted+copied。同じく copied)
+#     taskmd-body    退避した本文の種類・モード・sha256 が記録と一致しない
+#     dest-symlink / dest-dir / dest-special  復元先が通常ファイルか不存在でない
+#     internal-argument / runtime-unavailable  内部引数・必要機能が不成立
+#     prepare-failed / copy-failed / replace-failed  準備・コピー・公開の失敗
+#     verify-failed / cleanup-failed  照合・自分の専用一時物の回収の失敗
+#     budget-exceeded / child-unreaped  有限予算・直接コピー子の回収の失敗
+#     interrupted    捕捉した TERM/INT/HUP(exit 20)。通常の復元失敗は exit 33
 #
 # 保護領域:
 #   解決順は `$XDG_STATE_HOME` → `$HOME/.local/state` → `$HOME/.cache`。解決後の実体パスが `/tmp`・
@@ -256,8 +259,9 @@ cleanup_tmp() {
   if [ -n "${NEW_STATE:-}" ] && [ "${TAKE_DONE:-0}" -eq 0 ]; then rm -rf -- "$NEW_STATE"; fi
 }
 on_signal() {
+  if [ "$SUB" = restore-taskmd ]; then trap '' TERM INT HUP; fi
   cleanup_tmp
-  if [ "$SUB" = restore-taskmd ]; then printf 'RESTORED=no\nTOUCHED=%s\n' "$TOUCHED_STATE"; fi
+  if [ "$SUB" = restore-taskmd ]; then printf 'RESTORED=no\nTOUCHED=%s\nTEMP=none\nREASON=interrupted\n' "$TOUCHED_STATE"; fi
   trap - EXIT
   exit 20
 }
@@ -2140,7 +2144,7 @@ state_fail() { # $1=manifest-digest|snapshot-digest|state-missing 残り=説明
     config-check) echo "ERROR [$reason] $*" >&2; printf 'RESULT=incomparable\nREASON=%s\nGIT_SKIPPED=yes\n' "$reason" ;;
     compare) echo "ERROR [$reason] $*" >&2; emit_incomparable "$reason" ;;
     taskmd-diff) echo "ERROR [digest] $*" >&2; printf 'REASON=digest\n' ;;
-    restore-taskmd) echo "ERROR [digest] $*" >&2; printf 'RESTORED=no\nTOUCHED=none\nREASON=digest\n' ;;
+    restore-taskmd) echo "ERROR [digest] $*" >&2; printf 'RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=digest\n' ;;
   esac
   trap - ERR
   exit 33
@@ -2653,45 +2657,67 @@ cmd_taskmd_diff() {
 }
 
 # ═════════════════════════ restore-taskmd ═════════════════════════
-restore_fail() { # $1=REASON 残り=説明
+restore_fail() { # $1=REASON 残り=説明。helper 起動前の結果だけを報告する
   local reason="$1"; shift
   echo "ERROR [$reason] $*" >&2
-  printf 'RESTORED=no\nTOUCHED=%s\nREASON=%s\n' "$TOUCHED_STATE" "$reason"
+  printf 'RESTORED=no\nTOUCHED=%s\nTEMP=%s\nREASON=%s\n' "$TOUCHED_STATE" "${RESTORE_TEMP_STATE:-none}" "$reason"
   trap - ERR
   exit 33
 }
-check_restore_dest() { # 復元先の検査(退避物の実体照合では防げない — 照合の対象は復元先の経路ではない)
-  local dest="$TASKMD_REAL" parent parent_now=""
-  split_path "$dest"
-  parent="$SP_DIR"
-  if abs_existing_dir "$parent"; then parent_now="$RP"; fi
-  if [ -z "$parent_now" ] || [ "$parent_now" != "$parent" ]; then
-    restore_fail dest-symlink "復元先の親ディレクトリの実体パスが記録と一致しない(途中の階層が symlink に差し替えられたか、消えた): $(path_field "$parent")"
+restore_exec_cleanup() {
+  # この入口は WORK / NEW_STATE を作らない。由来・作成時 inode を保持していない
+  # 非空値を名前だけで削除しない。将来の変更で所有物を増やす場合はここも更新する。
+  if [ -n "${WORK:-}" ] || [ -n "${NEW_STATE:-}" ]; then
+    trap - EXIT ERR TERM INT HUP
+    RESTORE_TEMP_STATE=unknown
+    restore_fail cleanup-failed "復元入口が所有を確認できない一時物を保持したため、引渡しを停止した"
   fi
-  if [ -L "$dest" ]; then restore_fail dest-symlink "復元先が symlink になっている: $(path_field "$dest")"; fi
-  if [ -d "$dest" ]; then restore_fail dest-dir "復元先がディレクトリに置き換えられている: $(path_field "$dest")"; fi
+  WORK=""; NEW_STATE=""
 }
 cmd_restore_taskmd() {
-  local h
+  local kind mode val pf extra python_path cp_path helper helper_dir
 
   resolve_tools
   init_excl
   open_state
   load_meta
-  if ! verify_taskmd_body; then restore_fail taskmd-body "退避したタスク MD が記録と一致しない(改変された退避物で実ツリーを上書きしない)"; fi
-  check_restore_dest # MUT:e
-  # 同名エントリを削除してから cp -a(種別衝突で cp が黙って別の場所へ入れるのを防ぐ)。
-  # **もともと存在しなければ削除しない** — TOUCHED= は「その時点までに実ツリーへ何をしたか」を
-  # 人へ伝える値なので、消していないものを消したと報告しない
-  if [ -e "$TASKMD_REAL" ] || [ -L "$TASKMD_REAL" ]; then
-    if ! rm -f -- "$TASKMD_REAL" 2>/dev/null; then restore_fail delete-failed "復元先の同名エントリを削除できない: $(path_field "$TASKMD_REAL")"; fi
-    TOUCHED_STATE="deleted"
+  # T 行の期待値だけを読む。退避本文は helper が同じ fd と有限予算で読む。
+  if ! IFS=$'\t' read -r kind mode val pf extra <"$STATE/manifest.tsv"; then
+    restore_fail taskmd-body "退避した本文の記録を読めない"
   fi
-  if ! cp -a -- "$STATE/taskmd-body" "$TASKMD_REAL" 2>/dev/null; then restore_fail copy-failed "退避コピーからの復元に失敗した(TOUCHED= が、その時点までに実ツリーへ行ったことを表す): $(path_field "$TASKMD_REAL")"; fi
-  if [ "$TOUCHED_STATE" = deleted ]; then TOUCHED_STATE="deleted+copied"; else TOUCHED_STATE="copied"; fi
-  h="$(sha256_file "$TASKMD_REAL" 2>/dev/null)" || h=""
-  if [ "$h" != "$T_SHA" ]; then restore_fail verify-failed "復元後の sha256 が記録と一致しない: $(path_field "$TASKMD_REAL")"; fi
-  printf 'RESTORED=yes\nTOUCHED=%s\n' "$TOUCHED_STATE"
+  if [ "$kind" != T ] || [ -n "$extra" ] || [[ ! "$mode" =~ ^[0-7]{1,4}$ ]] || [[ ! "$val" =~ ^[0-9a-f]{64}$ ]]; then
+    restore_fail taskmd-body "退避した本文の記録形式が不正"
+  fi
+  field_value "$pf"
+  T_MODE="$mode"; T_SHA="$val"; T_PATH="$UNQ"
+  [ "$T_PATH" = "$TASKMD_REAL" ] || restore_fail taskmd-body "退避した本文の実体パスが記録と一致しない"
+
+  python_path="$(command -v python3)" || restore_fail runtime-unavailable "復元に必要な Python 3 が無い"
+  real_path "$python_path" || restore_fail runtime-unavailable "Python 3 の実体を取得できない"
+  python_path="$RP"
+  cp_path="$(command -v cp)" || restore_fail runtime-unavailable "復元に必要な GNU cp が無い"
+  real_path "$cp_path" || restore_fail runtime-unavailable "cp の実体を取得できない"
+  cp_path="$RP"
+  [ -f "$python_path" ] && [ -x "$python_path" ] && [ -f "$cp_path" ] && [ -x "$cp_path" ] || restore_fail runtime-unavailable "必要な実行物を起動できない"
+  split_path "${BASH_SOURCE[0]}"
+  abs_existing_dir "$SP_DIR" || restore_fail runtime-unavailable "同梱 helper の場所を取得できない"
+  helper_dir="$RP"
+  helper="$helper_dir/restore-taskmd.py"
+  [ -f "$helper" ] && [ -r "$helper" ] && [ ! -L "$helper" ] || restore_fail runtime-unavailable "同梱 helper を読めない"
+  if ! "$python_path" -I -B -c 'import runpy,sys; runpy.run_path(sys.argv[1], run_name="restore_taskmd_check")' "$helper" >/dev/null 2>&1; then
+    restore_fail runtime-unavailable "Python の必要機能か同梱 helper を読み込めない"
+  fi
+  restore_exec_cleanup
+  # 成功した exec の後は helper だけが結果を所有する。失敗時だけ shell が報告する。
+  trap - EXIT ERR TERM INT HUP
+  shopt -s execfail
+  # 非対話 bash では if の中でも exec 失敗が errexit を発火する版がある。
+  # execfail と併せてこの引渡し区間だけ解除し、失敗は必ず固定形式へ変換する。
+  set +e
+  exec "$python_path" -I -B "$helper" restore --source "$STATE/taskmd-body" \
+      --destination "$TASKMD_REAL" --expected-mode "$T_MODE" --expected-sha256 "$T_SHA" --cp "$cp_path"
+  # 成功した exec はここへ戻らない。
+  restore_fail runtime-unavailable "復元 helper を起動できない"
 }
 
 # ═════════════════════════ cleanup ═════════════════════════

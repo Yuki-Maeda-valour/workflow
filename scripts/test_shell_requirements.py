@@ -148,5 +148,17 @@ class ShellRequirements(unittest.TestCase):
         self.os_failure(argument='--invalid-argument')
 
 
+class RestoreRequirements(unittest.TestCase):
+    def test_public_restore_runtime_failure_preserves_body_and_state(self):
+        # 実際の公開入口に、欠落helper・構文不正・起動不能Pythonを渡す。
+        test = ROOT / 'plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh'
+        result = subprocess.run([BASH, str(test), '--only', 'J9'],
+                                capture_output=True, text=True, timeout=90)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn('同梱helper不在', result.stdout)
+        self.assertIn('Python起動不能', result.stdout)
+        self.assertNotIn('FAIL  ', result.stdout)
+
+
 if __name__ == '__main__':
     unittest.main()

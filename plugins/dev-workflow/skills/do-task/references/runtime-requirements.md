@@ -46,6 +46,43 @@ PYTHON
 - `diff-snapshot-selftest.sh` は bash 4.0 以上と GNU coreutils・GNU findutils・GNU grep が必要。冒頭で `sha256sum`・`touch -d`・`find -maxdepth/-quit`・`head -c`・`grep -z`・`sort -z` を検査し、不足は rc 2 / `ERROR [requirements]` で止まる。後で時刻固定が失敗しても rc 2 で停止する。必要道具の不足と、時刻を固定できても stat キャッシュの隠蔽を再現できない正当な fixture 不成立を区別する。
 - 回帰一式の必要環境は **Linux と GNU 系ツール**。無人ループ `loop.sh` は **Linux・bash 4.4 以上**が必要で、`setsid`・`flock`・`/proc` を使う。詳しくは [../../ship-task/references/loop.md](../../ship-task/references/loop.md) を読む。
 
+## タスク本文の復元
+
+`implement-guard.sh restore-taskmd` は Python 3 と同梱 `restore-taskmd.py` を追加で必要とする。他のサブコマンドの要件は変えない。OS 名で拒否せず、次の機能を起動時と専用領域内の試験で確認する。
+
+- `os.O_DIRECTORY`・`O_NOFOLLOW`・`O_NONBLOCK`・`O_CLOEXEC`、`open`・`stat`・`mkdir`・`unlink`・`rmdir` の `dir_fd`、`stat` の `follow_symlinks=False`、`fstat`、`replace` の `src_dir_fd` / `dst_dir_fd`。
+- `subprocess.Popen` の `close_fds=True` / `pass_fds`、直接子の `poll` / `wait` / `terminate` / `kill`、`signal.pthread_sigmask` と TERM・INT・HUP、単調時計、`resource.RLIMIT_FSIZE` / `setrlimit`。
+- GNU `cp` の固定した実体。`--version` を8KiB・5秒で検査する。fd 別名は `/proc/self/fd`、次に `/dev/fd` を試す。開いた通常ファイルと同じ device/inode を指すことと、短いコピーの内容・mode・inode を確認する。 <!-- validate-allow: OS が提供する fd 別名を必要機能として明記するため -->
+- 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。対象親内の試験失敗も対象へ公開しない。一時物の残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
+- Linux の実測は Python 3.10.12。mode・同一所有者の uid/gid・ns mtime・利用可能な通常の user xattr・POSIX ACL を GNU `cp -a` と比較する。読取り後の atime 不変、特権属性、異なる所有者、SELinux 属性の新たな保証はしない。
+- macOS のこの新しい復元処理は実機未確認。下記の既存実測には含めない。実機では GNU cp・fd 別名・`dir_fd` の置換、正常復元と準備失敗時の無変更を追加確認する。Linux の別名切替試験は macOS の実測に数えない。
+- Python パッケージの追加はない。API の有無と実際の操作を検査し、不足は無変更で止める。構文・API の不要な版引上げはしない。
+
+公開入口全体は GNU `timeout` で必ず監督する。次の関数を呼出側で定義する。第1引数は同梱 `implement-guard.sh`、残りは既存の各引数とする。`timeout` が無ければ `gtimeout` を選ぶ。GNU 版・必要オプションを確認できなければ復元を起動しない。
+
+<!-- restore-taskmd-supervision:start -->
+```bash
+restore_taskmd_supervised() {
+  local supervisor banner probe guard_script
+  guard_script="$1"; shift
+  supervisor="$(type -P timeout)" || supervisor="$(type -P gtimeout)" || {
+    printf '%s\n' '復元を起動しない: GNU timeout が必要です。' >&2
+    return 125
+  }
+  banner="$("$supervisor" --version 2>/dev/null)" || return 125
+  case "$banner" in 'timeout (GNU coreutils)'*) ;; *) return 125 ;; esac
+  probe="$(type -P true)" || return 125
+  "$supervisor" --signal=TERM --kill-after=5s 1s "$probe" </dev/null >/dev/null 2>&1 || return 125
+  "$supervisor" --signal=TERM --kill-after=5s 330s bash "$guard_script" restore-taskmd "$@"
+}
+```
+<!-- restore-taskmd-supervision:end -->
+
+呼出しは `restore_taskmd_supervised <implement-guard.sh> --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>` とし、各値を独立した引数で渡す。shell 文字列へ組み立てず、`--foreground` を足さない。
+330秒後の TERM と追加5秒後の KILL は、今回起動したプロセス群だけを対象とする。保存 PID や他の利用者プロセスを探索しない。124・137・監督の失敗・欠落/不正な応答は `TOUCHED=unknown / TEMP=unknown` として止め、自動再実行や推測した一時物の削除をしない。通常の pipe 送出待ちも打ち切る。カーネル I/O が KILL でも終了しない場合は335秒以内の停止確認を保証せず、停止未確認として保持する。
+
+結果形式、300秒の作業予算、子の停止・回収、同じ UID の競合限界は [external-runners.md](external-runners.md) §12-2 が正本。
+
 ## 品質コマンドの監督
 
 `review-guard.py run-checks` は、[check-process.py](../../ship-task/scripts/check-process.py) から品質コマンドを起動する。
