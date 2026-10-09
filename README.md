@@ -185,6 +185,8 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 
 検証コマンドの一覧は [AGENTS.md](AGENTS.md) の検証節にあります。同じ一覧を 2 か所に置くと同期漏れが起きるため、このリポジトリでは `AGENTS.md` の 1 か所だけが持ちます。
 
+YAML構文の検証には、[requirements-dev.txt](requirements-dev.txt) の開発依存が必要です。未導入や読込失敗では検証を停止します。全回帰の環境条件と、検証器単体を新しい環境で確かめる手順は [AGENTS.mdの検証節](AGENTS.md#検証実装終了時に必ず実行) に従ってください。
+
 シェル回帰一式の必要環境は Linux と GNU 系ツールです。GNU コマンドの不足を確認する回帰も含みます。詳細は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) を参照してください。
 
 ホスト固有の検証コマンドは各ホストの指示ファイルにあります — Claude Code なら [.claude/rules/claude-code.md](.claude/rules/claude-code.md) です。

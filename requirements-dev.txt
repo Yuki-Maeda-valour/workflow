@@ -1,0 +1,2 @@
+# リポジトリ検証器の frontmatter YAML 構文検査に必要。
+PyYAML==6.0.3
