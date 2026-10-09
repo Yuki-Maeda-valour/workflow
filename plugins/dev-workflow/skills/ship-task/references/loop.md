@@ -10,7 +10,7 @@
 
 ## 1. 置き場所と起動
 
-- 本体は `ship-task/scripts/loop.sh`、回帰テストは `ship-task/scripts/loop-selftest.sh`。task_dir の解決は兄弟参照の `create-task/scripts/resolve-task-dir.py` を呼ぶ
+- 本体は `ship-task/scripts/loop.sh`、回帰テストは `ship-task/scripts/loop-selftest.sh`。task_dir の解決は兄弟参照の `create-task/scripts/resolve-task-dir.py` を呼ぶ。タスクのメタ情報と保留行の解析(`taskinfo`・`holdcount`・`holdcode`)は兄弟の `loop-task-text.py` が受け持つ
 - 人のシェル・cron から呼ぶ。skill ではない(決定録 2026-09-23 の決定 1)。ホストのセッションの中から起動されたら止まる(§2 の 2)
 - 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 起動できる配置は、プラグインのルート(`loop.sh` の物理パスから 4 階層上 = `scripts/` から 3 階層上。`.claude-plugin/plugin.json` の `name` が `dev-workflow`)の下にあるときだけ。このリポジトリの clone・導入先のキャッシュ・setup.sh の `--link` の配置(物理パスで clone のルートに解決されて起動する)が当たる。setup.sh の `--copy` の配置は plugin.json を置かないので止まる
@@ -164,6 +164,15 @@ Git 設定の解析は 1 呼出 3 秒、展開後の stdout も取得中に 8 Mi
 ホストへ渡す plugin と許可の仲介もコピーを使う。コピー作成後に元 helper を import/source しない。
 権限判定 hook の `command` には固定 loader と保持 hash を埋め込み、各要求で照合した guard の bytes を実行する。
 権限判定器も照合後に読んだ bytes の hash を確かめて実行し、検査失敗は明示的な `deny` を返す。
+
+`loop-task-text.py` は、初回のコピーを既存の `read` で照合して読み、親の未export変数(子の環境へ渡さない変数)に解析コードを保持する。
+有効プラグインの一覧を取り込んだ `active` のコピーを読む際は、末尾改行も含めて初回の解析コードと一致することを求める。
+読取失敗・空の解析コード・NUL・不正なUTF-8・初回との差は、終了コード20の `environment` で停止する。
+元配布元への読取に切り替えず、初回に保持した解析コードも更新しない。
+3コマンドは保持した解析コードを使い、各呼出時にはコードのファイルを読み直さない。解析対象のタスク本文は各呼出時に読む。
+起動は従来どおり作業ディレクトリ `/` の `python3 -c` とし、FD7を閉じ、stdinを解析入力へ渡す。
+解析には `-I` を追加せず、`PYTHONPATH` とuser-site(利用者別のPython依存)を維持する。
+保持前のbytes検査だけを固定の `-I` 付きPythonで行い、不正なbytesをBash変数への格納前に拒否する。
 
 監視対象は利用者の host 設定、有効 plugin の一覧と実体・選択された marketplace 項目、利用者と Linux 管理側の `skills`/`commands`/`agents`、管理者設定とその設定ディレクトリ、
 global/XDG/system の Git 設定と全 `include`/`includeIf` 先、既知の shell 設定、明示した MCP 設定。
