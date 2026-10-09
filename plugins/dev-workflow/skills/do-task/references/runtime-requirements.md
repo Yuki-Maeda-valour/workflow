@@ -55,7 +55,7 @@ PYTHON
 - GNU `cp` の固定した実体。`--version` を8KiB・5秒で検査する。fd 別名は `/proc/self/fd`、次に `/dev/fd` を試す。開いた通常ファイルと同じ device/inode を指すことと、短いコピーの内容・mode・inode を確認する。 <!-- validate-allow: OS が提供する fd 別名を必要機能として明記するため -->
 - 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。対象親内の試験失敗も対象へ公開しない。一時物の残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
 - Linux の実測は Python 3.10.12。mode・同一所有者の uid/gid・ns mtime・利用可能な通常の user xattr・POSIX ACL を GNU `cp -a` と比較する。読取り後の atime 不変、特権属性、異なる所有者、SELinux 属性の新たな保証はしない。
-- macOS のこの新しい復元処理は実機未確認。下記の既存実測には含めない。実機では GNU cp・fd 別名・`dir_fd` の置換、正常復元と準備失敗時の無変更を追加確認する。Linux の別名切替試験は macOS の実測に数えない。
+- macOS のこの新しい復元処理は実機未確認。下記の既存実測には含めない。実機では GNU `cp`・fd 別名・`dir_fd` の置換、正常復元と準備失敗時の無変更を追加確認する。Linux の別名切替試験は macOS の実測に数えない。
 - Python パッケージの追加はない。API の有無と実際の操作を検査し、不足は無変更で止める。構文・API の不要な版引上げはしない。
 
 公開入口全体は GNU `timeout` で必ず監督する。次の関数を呼出側で定義する。第1引数は同梱 `implement-guard.sh`、残りは既存の各引数とする。`timeout` が無ければ `gtimeout` を選ぶ。GNU 版・必要オプションを確認できなければ復元を起動しない。

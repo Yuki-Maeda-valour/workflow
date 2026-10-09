@@ -3,7 +3,7 @@
 # 仕様は ../references/external-runners.md の §12-2(作業ツリーとメタ状態の保護)・§12-3(外部の git
 # 操作への対処)・§12-7(引き継ぎの発火条件)。implement-agent.sh(外部 implementer の起動)と対で使う:
 # 起動の前に take、起動の後に compare → taskmd-diff →(引き継ぎなら)restore-taskmd、完了処理の後に
-# cleanup。呼び出し側は起動と、終了コードによる分岐だけを行う。
+# cleanup。呼び出し側は起動と、終了値・合法な応答の照合による分岐を行う。
 # diff-snapshot.sh(レビュー用の diff スナップショット)とは別物で、共通部分の切り出しもしていない
 # (external-runners.md §11 の 2026-09-17 決定 9。必要な部品は複製して持つ)。
 #
@@ -12,8 +12,13 @@
 #   bash implement-guard.sh config-check   --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
 #   bash implement-guard.sh compare        --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex> --run-rc <n>
 #   bash implement-guard.sh taskmd-diff    --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
-#   bash implement-guard.sh restore-taskmd --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
+#   restore_taskmd_supervised implement-guard.sh --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
 #   bash implement-guard.sh cleanup        --state <dir>
+#
+# 復元の前に ../references/runtime-requirements.md の「タスク本文の復元」にある
+# restore_taskmd_supervised 関数を呼出側で定義し、上の例で呼ぶ。関数を利用できなければ起動しない。
+# 関数は timeout、無ければ gtimeout の GNU 版・必要オプションを確認し、確認できなければ起動しない。
+# 公開入口全体を330秒 TERM・追加5秒 KILLで監督する。終了値と合法な応答を照合し、不明なら止める。
 #
 # サブコマンド:
 #   take            起動前のスナップショット(5 要素)と退避を保護領域に作る
