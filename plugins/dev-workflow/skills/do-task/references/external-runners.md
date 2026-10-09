@@ -825,7 +825,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - **退避物の実体照合**: 退避コピーの中身だけを変える → ダイジェストは一致したままなので**比較不能にはせず**、実ファイルに変更が無ければ 32、変更が在れば 31 で `BASE=` の判定が `unverified` になる(退避コピーの symlink の差し替え・退避コピーの消失も同じ)/ タスク MD の退避コピーを変える → `taskmd-diff`・`restore-taskmd` が 33 で実ツリーに触れない
 - **`taskmd-diff`**: 変化なし → `same` / チェックだけ更新(字下げ・`*`・`+` の箇条書きを含む)→ `checks-only` / **完了条件の書き換え**・行の追加 / 削除・空白だけの変更・`[x]` 以外の字への書き換え(`[-]`・`[a]`)→ 34 / symlink の張り替え・リンク切れ・通常ファイルへの置換 → 35。
   - `DOD=` が起動前の内容を指すこと
-- **`restore-taskmd`**: 外部がチェックを書き換えたタスク MD が起動前の内容に戻る(追跡済み・未追跡・symlink 経由)/ 復元先の親が symlink に差し替えられている → 33 `TOUCHED=none` で、リンク先の同名ファイルが無傷 / 復元先がディレクトリに置き換えられている → 33 `TOUCHED=none` / 削除の後でコピーだけが失敗する → 33 `TOUCHED=deleted` / 同名エントリの削除に失敗する(親ディレクトリが書き込み不可。root では飛ばす)→ 33 `TOUCHED=none` / **外部が消したタスク MD の復元**(復元先がもともと無いので削除を行わない)→ `TOUCHED=copied`
+- **`restore-taskmd`**: 追跡済み・未追跡・正当な選択リンク経由の本文が戻る。準備コピー失敗は 33 / `TOUCHED=none` で元内容・権限を保つ。親リンク・対象リンク・ディレクトリ・特殊ファイルは拒否する。不存在への作成は `copied`、既存対象の原子的置換は `replaced`。公開後の検証失敗・中断・後始末失敗も、対象と一時物の実際の状態を報告する。
 - **`cleanup`**: 保護領域を消す / 保護領域の外のパス・symlink → 2 で何も消さない
 - **変異テスト**(17 変異。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す / 明示 GLOBAL root の候補化を外す / 設定本文の累積読取上限を外す / 再帰 include の解析を外す。
   - 設定の出典ファイルだけの検査を外す変異も含める。root の config は不変のまま include 先の値を変え、拒否を期待する回帰が失敗することを確かめる。
@@ -900,7 +900,7 @@ do-task の **implementer** を外部 CLI に委託するための追加契約�
 
 ### 12-2. 作業ツリーとメタ状態の保護
 
-**この節の手順は `{do-task の}scripts/implement-guard.sh` が実行する。呼び出し側(skill)は起動と、終了コードによる分岐だけを行う**(決定的な処理を散文から毎回組み立てると守られない — design §7-2。この節は削除を伴う復元経路を含むので、即興の誤りがユーザーの未コミット作業を壊しうる)。
+**この節の手順は `{do-task の}scripts/implement-guard.sh` が実行する。呼び出し側(skill)は起動と、終了値・合法な応答の照合による分岐を行う**(決定的な処理を散文から毎回組み立てると守られない — design §7-2。この節は削除を伴う復元経路を含むので、即興の誤りがユーザーの未コミット作業を壊しうる)。
 - 以下の規定と理由はこのスクリプトの仕様であり、**どちらかを変えたら必ず両方を直し**、`implement-guard-selftest.sh` を実行する(§11)。
 - **スクリプトは git の状態を変えない**(index・HEAD・refs・stash・config に書かない)。
 - 実ツリーに書くのは `restore-taskmd` だけ。
@@ -911,7 +911,7 @@ bash {do-task の}scripts/implement-guard.sh take           --cwd <管理ルー�
 bash {do-task の}scripts/implement-guard.sh config-check   --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>
 bash {do-task の}scripts/implement-guard.sh compare        --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex> --run-rc <n>
 bash {do-task の}scripts/implement-guard.sh taskmd-diff    --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>
-bash {do-task の}scripts/implement-guard.sh restore-taskmd --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>
+restore_taskmd_supervised {do-task の}scripts/implement-guard.sh --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>
 bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領域>
 ```
 
@@ -921,7 +921,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 | `config-check` | 既知設定を Git 無しで照合し、隔離 Git で子の使用先・設定 blob を検査する | **0** 同一 / **33** 比較不能 | 0 のとき `CONFIG=same` `GIT_SKIPPED=no`。33 のとき `RESULT=incomparable` `REASON=config-changed|config-origin-missing`。`GIT_SKIPPED=yes` は全 Git 呼出 0 の場合だけ |
 | `compare` | `--state` の検査 → ダイジェストの照合 → hooks / config(開始時の設定出典を含む)の検査 → 5 要素の再取得と比較 → 結末の判定(§12-7) | **0** 正常終了 / **31** 引き継ぎ / **32** 縮退 / **33** 比較不能 | `RESULT=`(`normal` / `takeover` / `fallback` / `incomparable`)`WORKTREE_CHANGED=` `GITMETA_CHANGED=`(どちらも `yes` / `no` / `unknown`)、変化 1 件ごとに `CHANGE=<分類>\t<詳細>`、未追跡の変更には `BASE=<退避コピーのパス>\t<判定>`(判定は `ok` / `unverified`)。33 のときは `REASON=` と `GIT_SKIPPED=`(`yes` / `no`) |
 | `taskmd-diff` | 起動前のタスク MD と現在のタスク MD の比較(チェック状態の更新と要件本文の変更を分ける) | **0** 変化なし、またはチェック状態の更新だけ / **34** 要件本文の変更 / **35** 選択パスと実体の対応の変化 / **33** 照合の失敗 | `TASKMD=`(`same` / `checks-only` / `body-changed` / `mapping-changed`)`DOD=<起動前のタスク MD のコピーのパス>`。33 のときは `REASON=` |
-| `restore-taskmd` | タスク MD の実体だけを起動前の内容へ戻す | **0** 成功 / **33** 照合・復元の失敗 | `RESTORED=`(`yes` / `no`)`TOUCHED=`(実ツリーに対して行ったこと: `none` / `copied` / `deleted` / `deleted+copied`。`copied` = 復元先がもともと無かったので、削除せずコピーだけを行った)。33 のときは `REASON=` |
+| `restore-taskmd` | タスク MD の実体だけを起動前の内容へ戻す | **0** 成功 / **33** 検査・復元失敗 / **20** 捕捉した中断 | 下記「復元結果形式」の全行。`TOUCHED=none / copied / replaced / unknown`、`TEMP=none / removed / retained / unknown` |
 | `cleanup` | 保護領域の削除(保護領域の候補配下の `dev-workflow/guard-*` で、symlink でないときだけ消す) | **0** 成功(それ以外のパスは 2 で、何も消さない) | — |
 
 - **全サブコマンド共通**: **2** = `usage` / **20** = `internal`。
@@ -937,7 +937,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 - **`REASON=` の値**: `compare` の 33 = `manifest-digest` / `snapshot-digest` / `state-missing` / `hooks-changed` / `config-changed` / `config-origin-missing` / `retake-failed`(`retake-failed` = 5 要素の再取得が想定外に失敗した)。
   - **`GIT_SKIPPED=` は隔離 Git も含む実際の呼出で決まる** — 全 Git 呼出 0 の場合だけ `yes`。隔離検査後の新 root・blob 不一致・予約失敗は `config-changed` でも `no`。`retake-failed` も、それまでに隔離 Git または元 repo Git を呼んでいれば `no` とする。
   - `taskmd-diff` の 33 = `digest`(保護領域の検査かダイジェストの照合に失敗した)/ `taskmd-body`(退避したタスク MD の実体照合に失敗した)の **2 値だけ**(実ツリーに触れないため、復元の段の理由は返らない)。
-  - `restore-taskmd` の 33 = その 2 値に `dest-symlink` / `dest-dir` / `delete-failed` / `copy-failed` / `verify-failed`(復元のどの段で失敗したか)が加わる
+  - `restore-taskmd` の理由と結果の組合せは、下記「復元結果形式」に従う。先行削除をなくしたため `delete-failed` は出さない。
 
 **clean 要求は課さない**(2026-09-17 決定 12。ship-task は `/do-task` 完了後に commit するため、`/do-task` 起動時点で作業ツリーは必ず dirty であり、clean を要求すると常に空振りする)。
 
@@ -1058,7 +1058,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 **タスク MD は追跡状態・ignore 状態によらず必ず退避する(2026-09-17 決定 46)**: 退避の既定対象は「未追跡かつ非 ignore」なので(2026-09-17 決定 32)、**タスク MD が commit 済み(追跡済み)か `.gitignore` に含まれるプロジェクトでは退避されず、2026-09-17 決定 45 の自動復元が対象を持たない**。
 - したがって**タスク MD だけは既定対象の外でも必ず退避対象に加える**。
 - **退避に失敗したら起動前に内蔵 implementer に切り替える**(`take` の縮退 `taskmd`。コピー・ハッシュ・マニフェスト登録のどれが失敗しても、読めないエントリとして続行しない。理由を報告。起動してから「復元できない」と分かるのでは遅い — そのとき外部は既にチェックボックスを書き換えている)。
-- **起動後に照合・復元のいずれかが失敗した場合は自動で引き継がず、比較不能と同じく人の判断を仰ぐ**(`taskmd-diff`・`restore-taskmd` の exit 33。信頼できる DoD が無いまま内蔵に引き継ぐと、外部が書き換えたチェックリストを完了の定義として使うことになる)。
+- **起動後に照合・復元のいずれかが失敗した場合は自動で引き継がず、比較不能と同じく人の判断を仰ぐ**。`taskmd-diff` の 34・35・33 に加え、`restore-taskmd` は全ての非成功を含める。復元の終了値 0 と §12-2 の合法な成功応答の両方がそろった場合だけ引き継ぐ。中断の 20、失敗の 33、監督の 124・137、監督失敗、無応答・不正な応答・終了値との不一致でも停止する。応答から結果を確定できなければ、受領側で `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱う。復元を起動していないと確認できた場合は、未起動として区別する。信頼できる DoD が無いまま内蔵に引き継がない。報告は §12-5 の比較不能時の報告テンプレに従う。
 
 **自動復元の対象はタスク MD だけ(2026-09-17 決定 45)**: **退避の対象は未追跡・非 ignore のファイル全体だが(2026-09-17 決定 32)、自動で復元するのは「外部がチェックボックスを改変しうるタスク MD」に限る**。
 - **他の未追跡ファイルは退避コピーを基準に差分を識別して提示するだけで、復元しない**(`implement-guard.sh` が実ツリーへ書くサブコマンドは `restore-taskmd` だけで、他のエントリを復元するサブコマンドは設けない)。
@@ -1088,17 +1088,47 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 **差分提示にも実体照合を必須にする(2026-09-17 決定 47)**: 上の実体照合は 2026-09-17 決定 37 の時点では**復元の前提条件**としてだけ書かれていたが、**2026-09-17 決定 45 で「復元しないが差分は提示する」エントリが生まれたため、照合を通らないまま差分の基準に使われうる**(到達条件: マニフェストとスナップショット本体は無傷で、**退避コピーの実体だけが改変された**場合。全体ダイジェストは一致するので比較不能にもならず、**誤った変更内容が提示される**)。
 - したがって**退避コピーを差分の基準に使うときも実体照合を必須とし**、不一致のエントリでは「**変更の有無**(マニフェストのハッシュで判定できる)」と「**内容差分は提示不能**(基準が信頼できない)」を**分けて報告する**(`compare` の `BASE=` の判定が `unverified` のエントリがこれに当たる)。
 
-**復元(2026-09-17 決定 37)**: `restore-taskmd` が実行する(対象はタスク MD の実体だけ。2026-09-17 決定 45)。
-- **上の実体照合を通ったエントリについてのみ**、**実ツリー側の同名エントリを削除してから `cp -a`** する(照合を通らなかったエントリでは実ツリーに一切触れない)。
-- **失敗したエントリとスキップしたエントリを列挙して報告する**(種別衝突〈ファイル⇄ディレクトリ等〉で `cp -a` が黙って失敗することがあるため)。
-- スクリプトの順序は「ダイジェストの照合 → `taskmd-body` の実体照合 → 復元先の検査(下記)→ 同名エントリの削除 → `cp -a` → 復元後の sha256 の照合」で、**どの段で失敗したかを `REASON=` に、実ツリーへ既に行ったことを `TOUCHED=`(`none` / `copied` / `deleted` / `deleted+copied`)に出して 33 で止まる**(「削除してから `cp -a`」なので、コピーが失敗した時点で実ツリーは既に変わっている。2026-09-17 決定 49)。
-- **復元先がもともと存在しないときは削除を行わず、`TOUCHED=` は `copied` になる**(消していないのに `deleted` と報告しない)。
-- したがって `REASON=copy-failed` のときの `TOUCHED=` は `deleted`(復元先がもともと無ければ `none`)、`REASON=verify-failed` のときは `deleted+copied`(同じく `copied`)で、`REASON=delete-failed` は常に `none` である。
+**復元**: `restore-taskmd` が、記録したタスク MD の物理実体だけを戻す。準備後の原子的置換(名前を一度に切り替える操作)は [Issue #259](https://github.com/Yuki-Maeda-valour/workflow/issues/259) で導入した。
 
-- **エントリごとの復元直前に、復元先パスの各階層が symlink でないことを確認し、1 階層でも symlink なら当該エントリをスキップして報告する**(実ツリーには触れない)。
-  - 退避後に外部が親ディレクトリを別ディレクトリへのリンクへ置き換えると、「同名エントリを削除してから `cp -a`」が**リンク先の無関係な同名ファイルを削除・上書きする**ため。
-  - **退避物の実体照合では防げない** — 照合の対象は退避先であって復元先の経路ではない。
-  - **`restore-taskmd` は、実体パスの親ディレクトリの実体パス(`realpath`)が `take` の記録と一致すること(= 途中の階層に symlink が無い)と、復元先そのものが symlink でもディレクトリでもないことを確かめ、満たさなければ `TOUCHED=none` のまま 33(`REASON=dest-symlink` / `dest-dir`)で止まる**
+1. 呼出側は [runtime-requirements.md の復元監督](runtime-requirements.md#タスク本文の復元)を定義し、`restore_taskmd_supervised` で公開入口を起動する。GNU `timeout`、無ければ `gtimeout` を解決し、GNU 版・必要オプションを確認する。不足時は起動しない。固定 argv は `--signal=TERM --kill-after=5s 330s bash <implement-guard.sh> restore-taskmd <個別argv>`。`--foreground` や shell 文字列を使わない。shell が既存 state・manifest・snapshot の保持値を検査する。検証済み `T` 行の種類・mode・hash・実体パスを内部 helper `restore-taskmd.py` へ個別の引数で渡す。今のコピーから期待値を作り直さない。
+2. Python 3・同梱 helper・GNU `cp` を確認する。shell が所有する一時物があれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
+3. helper は親の各階層をリンクを辿らず開く。fd(開いたファイルやディレクトリを指す番号)を保持し、退避元を同じ fd で種類・mode・hash と比べる。FIFO・directory・symlink・不一致は公開前に止める。復元先は通常ファイルか不存在だけを許す。
+4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試験ファイルで確かめる。固定した GNU `cp -aL` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。選択パスや状態パスを `-L` で辿らない。
+5. コピー終了と直接子の回収後に、準備内容・mode・inode・元ファイルの変化を検査する。対象・親・準備名を再確認し、保持した親 fd に対して `os.replace` で公開する。準備・コピー・公開前検査の失敗時は元内容と権限、または不存在を保つ。
+6. 公開名と準備 fd の同一性・mode・hash を確認する。公開後に失敗しても自動で巻き戻さない。一時物は、自分が作って同一性を確認したものだけを回収する。元 state・`taskmd-body`・snapshot は残す。
+
+選択パスが正当な symlink なら、記録した物理実体だけを戻す。選択リンクと無関係なファイルは変更しない。旧 state の形式は維持する。
+
+**復元結果形式**:
+
+- stdout は次の順の LF 終端行だけ。空行、説明、未知・重複キーを許さず、全体で4MiB以下とする。途中経過、コピー出力、Python traceback は含めない。
+
+```text
+RESTORED=<yes|no>
+TOUCHED=<none|copied|replaced|unknown>
+TEMP=<none|removed|retained|unknown>
+REASON=<固定の理由コード>
+TEMP_PATH=<C風引用のパス>
+```
+
+- `REASON` 行は非成功時だけ。`TEMP_PATH` 行は `TEMP=retained` のときだけ。改行・非UTF-8名も、既存 `path_field` / `cquote` と同じバイト列を保持した1行の引用にする。内容や属性値は出さない。
+- 終了値0は `RESTORED=yes`、`TOUCHED=copied` または `replaced`、`TEMP=removed` の3行だけ。`copied` は不存在からの作成、`replaced` は既存対象の置換。`deleted` / `deleted+copied` は新処理では出さない。
+- 終了値33は `RESTORED=no` と理由を持つ。公開前失敗は `TOUCHED=none`、公開後失敗は `copied` / `replaced`。判定できなければ `unknown`。`none` は対象本体の無変更を表す。
+- 最終応答の確定前に捕捉した TERM・INT・HUP は終了値20、`RESTORED=no`、`REASON=interrupted`。対象の置換後に `none` へ戻さない。
+- 最終応答は、TERM・INT・HUP の mask 設定が成功した時点で確定する。それ以前の捕捉を反映してから1回だけ書き、flush する。設定が使えない・失敗した場合は有効な応答を出さず非ゼロ終了する。確定後の signal と送出後の mask 復元失敗は、確定済み応答と終了値を変えない。二度目の応答や traceback を出さない。KILL・送出失敗・途中切断は呼出側の無応答規則で扱う。
+- `TEMP=none` は未作成、`removed` は回収済み、`retained` は確認できた残存、`unknown` は判断不能。残存を確認できた場合だけ、その専用領域のパスを添える。コピー子を回収できなければ、一時物を保持して公開を止める。
+- 理由は `digest`、`taskmd-body`、`dest-symlink`、`dest-dir`、`dest-special`、`internal-argument`、`runtime-unavailable`、`prepare-failed`、`copy-failed`、`replace-failed`、`verify-failed`、`cleanup-failed`、`budget-exceeded`、`child-unreaped`、`interrupted`。`copy-failed` は準備コピーの失敗を指す。確定前に捕捉した signal の理由は `interrupted` を優先する。
+- 公開 shell の引数不正は従来の終了値2。内部引数の未知・重複・欠落・不正パス/mode/hash は33 / `internal-argument`、`TOUCHED=none`、`TEMP=none` で止まる。
+- 呼出側は終了値と全行の合法な組合せを確認する。監督の124/137・監督失敗・無応答・重複・不正・上限超過・終了値との不一致は、呼出側の観測として `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱い、自動引継ぎを止める。helper に2回目の結果を出させる指示ではない。残存パスを受領できなければパス不明と報告し、推測して消さない。
+
+**復元の予算と中断**:
+
+- 最初の退避元サイズを N として固定する。3回の hash 読取りは各64KiB以下の単位で、それぞれ N+1 バイト以内。短読・増加・device/inode/size/mode/mtime/ctime の変化を拒否する。読取りで変わる atime は比較対象にしない。
+- コピー子の `RLIMIT_FSIZE` は N。200MiB の固定上限を本文に転用しない。機能試験は16バイト以下で、本番 N=0 と別の制限を使う。
+- helper の作業は300秒。コピーの監督間隔は50ms以下。中断・期限切れでは直接子へ TERM、最大5秒、必要なら KILL と追加5秒で終了・回収を確認する。その後の一時物の回収は最大5秒。未回収なら後続公開をしない。
+- GNU `cp` の版確認は出力8KiB・5秒以内。コピーの標準入出力は捨て、入出力の2 fd だけを渡す。必要機能と実測範囲は [runtime-requirements.md](runtime-requirements.md) に従う。
+- helper の315秒予算と別に、呼出側の GNU `timeout` は shell の既存 state 検査を含む公開入口全体を330秒で TERM、追加5秒で KILL にする。通常のユーザー空間で335秒以内に打ち切り、読み手が止まった pipe も監督する。対象は今回のプロセス群だけ。保存 PID や他のプロセスは探索しない。カーネル I/O が返らず KILL でも終了しない場合は、この時間内の停止確認を保証せず、停止未確認として保持する。
+- 同じ UID による開いたディレクトリの移動、inode の書換え、最終確認後の名前の変更、検査器・保持値・結果の改変は完全には防げない。復元中は他の書込みを止める。別権限や OS による隔離が必要な運用とは区別する。名前の原子的置換は、停電後の永続化を保証しない。
 
 **保持と削除(2026-09-17 決定 37)**: 正常終了時は完了後に保護領域(退避先とスナップショット本体)を削除する。
 - 引き継ぎ時は報告後まで残し、パスを提示する。
@@ -1162,7 +1192,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 - (e)**ネストしたリポジトリ(マニフェストの種別「その他」)の内部の変化は検出しない** — ③ はそのディレクトリを 1 エントリとして記録するだけで、中へは入らない(5 要素の契約に由来する死角)
 - (f)**使い捨ての index に対する `write-tree` は、到達不能な tree オブジェクトを `.git/objects` に残す**(index・HEAD・refs・stash・config は変えない)。
   - 加えて、**refs と stash は linked worktree の間で共有される**ので、背景実行中に別の worktree(別セッション)で行われた作業が git メタの変化として混ざりうる(§12-4 の限界③ と同じく、比較はプロセスの主体を区別しない。`CHANGE=refs` の詳細に ref 名を出すので、人が見分ける)
-- (g)**`restore-taskmd` の TOCTOU**(復元先の検査と、同名エントリの削除の間の窓): 検査を通った後、削除・`cp -a` までの間に復元先の経路が置き換えられると、検査が防ぐはずの削除・上書きが起きうる。受け入れた限界とし、対策(rename 化・言語の移行)は同じ脅威モデルの継続的ハードニング #77 で扱う(#81 決定 5)
+- (g)**`restore-taskmd` の最終確認と置換の間の競合**: #259 で先行削除を除き、開いた親に結び付けた準備・公開へ変更した。同じ UID による開いたディレクトリの移動や、最後の確認後の変更を完全には防げない。復元中は他の書込みを止める。詳細は §12-2 の復元手順。
 
 ### 12-3. 外部の git 操作への対処
 
@@ -1228,9 +1258,9 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - 判定が止まった段階の並びは上記。
   - `prompt-too-large`(12)も、実装経路では起動前失敗として報告し、内蔵 implementer で続ける(打ち直さない。§10 の打ち直しはレビュー経路の規則)。判定が止まった段階と解決後の起動コマンドの欄は省き、`ERROR` の行が示すバイト数を書く(上の並びに、この判定の段階は無い。12 は解決後の起動コマンドをログに書く前に止まり、`--dry-run` でもコマンドを出さない)
 - **引き継ぎ時の報告テンプレ**: 残っていた変更(§12-2 のスナップショット差分。`compare` の `CHANGE=` / `BASE=`)・引き継ぎの有無・**スナップショットのパス**・**退避先のパス**(`take` の `STATE_DIR=` の配下の `snapshot/` と `files/`。対象は未追跡かつ非 ignore のファイル全体と、追跡状態によらず加えるタスク MD〈2026-09-17 決定 46〉。いずれも §12-2 の保護領域にある)・git メタ(HEAD / index / ブランチ名 / refs / stash)の変化の有無(`GITMETA_CHANGED=`)・**外部ランナー(レビューや実装に使う外部の AI のコマンド)のログファイルのパス**(必須要素)
-- **比較不能時の報告テンプレ(2026-09-17 決定 48)**: 2026-09-17 決定 44 の「比較不能」は縮退でも引き継ぎでもない第 3 の結末なので、上の 2 つとは別のテンプレを持つ。必須要素は ①**何が一致しなかったか**(マニフェスト全体 / スナップショット本体 / タスク MD の照合〈照らし合わせて確かめること〉・復元)②**そのために判定できなくなった要素**(①②③ の作業ツリー比較は「不明」、④⑤ の git メタは取得できていれば値を出す)③**以後の自動処理を停止したこと**、および**その時点までに実ツリーへ何をしたか** — 復元を試みたか / 試みたなら**削除とコピーのどちらまで成否が確定しているか** / **現在のタスク MD の状態**(元のまま・削除済み・復元済み)。**「自動復元を行っていない」と一律に報告してはならない**(2026-09-17 決定 49。復元は「削除してから `cp -a`」なので、**コピーが失敗した時点で実ツリーは既に変わっている**)④**保護領域とログのパス**⑤**ユーザーに求める判断**(退避コピーを信頼して復元するか / 実ツリーの現状を正として進めるか / 外部の成果を破棄するか)⑥**再開の条件**(判断が示された後に、どの手順から続けるか)。**判断待ちの間は保護領域を削除しない**(2026-09-17 決定 37 の「正常終了時は削除」は比較不能には掛からない)
+- **比較不能時の報告テンプレ(2026-09-17 決定 48)**: 2026-09-17 決定 44 の「比較不能」は縮退でも引き継ぎでもない第 3 の結末なので、上の 2 つとは別のテンプレを持つ。必須要素は ①**何が一致しなかったか**(マニフェスト全体 / スナップショット本体 / タスク MD の照合〈照らし合わせて確かめること〉・復元)②**そのために判定できなくなった要素**(①②③ の作業ツリー比較は「不明」、④⑤ の git メタは取得できていれば値を出す)③**以後の自動処理を停止したことと、復元を試みたか**。未起動と確認できた場合だけ「復元を行っていない」と報告する。起動した場合は、§12-2 の終了値と応答を照合し、`RESTORED`・`TOUCHED`・`TEMP` と失敗理由を示す。準備・コピー・公開前検査の失敗で `TOUCHED=none` なら、復元自身による対象の変更はない。`replaced` は既存対象の置換、`copied` は不存在からの作成を示す。公開後の失敗は変更済みとして報告し、自動で戻さない。無応答・不正な応答・終了値との不一致・監督の失敗は、受領側で `RESTORED=no / TOUCHED=unknown / TEMP=unknown` として止める。有効な `TEMP=retained` の応答では受領した `TEMP_PATH` も示す。**実際の操作を報告する方針(2026-09-17 決定 49)を維持し、復元の失敗を一律に「行っていない」と報告しない**。④**保護領域とログのパス**⑤**ユーザーに求める判断**(退避コピーを信頼して復元するか / 実ツリーの現状を正として進めるか / 外部の成果を破棄するか)⑥**再開の条件**(判断が示された後に、どの手順から続けるか)。**判断待ちの間は保護領域を削除しない**(2026-09-17 決定 37 の「正常終了時は削除」は比較不能には掛からない)
   - **このテンプレを使う場面は `compare` の 33 だけではない**(新しいテンプレは足さない): (a) **do-task の Phase 3 の共通工程で `implement-guard.sh config-check` または `diff-snapshot.sh --precheck` が 0 以外で止めた場合** — `compare` を実行していないので作業ツリーも git メタも「不明」で、必須要素 ① には、止まった `config-check` または `--precheck` の終了コードと stderr を書く
-  - (b) **タスク MD の判断待ち**(`taskmd-diff` の 34・35・33、`restore-taskmd` の 33)— 必須要素 ① には `TASKMD=` / `REASON=` の値を、③ には `restore-taskmd` の `TOUCHED=` を書く
+  - (b) **タスク MD の判断待ち**(`taskmd-diff` の 34・35・33、`restore-taskmd` の全非成功と受領側での結果不明)。復元の中断 20・失敗 33・監督の 124/137・監督失敗・無応答・不正な応答・終了値との不一致も含める。必須要素 ① には終了値と、確認できた `TASKMD=` / `REASON=` を書く。③ は上記の報告要素③に従い、`RESTORED`・`TOUCHED`・`TEMP`・失敗理由と、残存を示す有効な応答から受領した `TEMP_PATH` を報告する。応答から結果を確定できなければ受領側で unknown とし、欠けた値やパスを推測しない。復元が未起動と確認できた場合は、未起動として区別する。
   - (c) **共通工程の ② に `GIT_CONFIG_COUNT` が出て ③ を打たなかった場合**(② `--precheck` の stdout に出た場合。§12-3 の 2 の例外。#81 決定 3)— `compare` を実行していないので作業ツリーも git メタも「不明」で、必須要素 ① には `--precheck` の rc 0 と、stdout に `GIT_CONFIG_COUNT` が出たことを書き、④ `taskmd-diff` の結果(終了コードと `TASKMD=`)を添える。④ がどの値でも、人の判断より前に自動で続行しない
   - (d) **共通工程の ⑤(`reviews-dir.sh ensure --root <管理ルート>`)が 0 以外で止めた場合** — 置き場(`.claude`・`.claude/reviews`)が symlink か、通常のディレクトリでないか、作れない。必須要素 ① には ⑤ の終了コードと stderr を書き、①〜④ の結果(打ったものすべて。`CHANGE=`・`TASKMD=`)を添える。②〜④ が 0 でも、人の判断より前に自動で続行しない(置き場を差し替えたプロセスが残っているかもしれない — §12-6 の既知の限界)。再開の条件(必須要素 ⑥)は、人が置き場を実ディレクトリに戻し(symlink を消す。リンク先に書かれたものを見る)、⑤ を打ち直して 0 になること
   - **再開の条件(必須要素 ⑥)のうち `hooks-changed` / `config-changed`**: 人が変更(`CHANGE=hooks` / `CHANGE=config` のパス)を確認し、**git を打たずファイル操作で元へ戻してから**、同じ引数で `compare` を再実行する。

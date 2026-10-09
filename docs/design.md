@@ -479,6 +479,8 @@ done | sort -k2 -rn
 
 - **なぜオプトインか**: 既定でホスト外のプロセスを起動すると、課金・機密・実行権限の面で利用者の想定を超える。よって**宣言(`--runners` 引数 / profile の `features.runners` または `features.implementer`)が無ければ外部 CLI を探しに行かない**。既定の**レビュー編成**は §5-9 のままで、この節を足しても 1 ビットも変わらない
 - **なぜ起動をスクリプトに集約するか**: 判定(存在・自ホストか・読み取り専用・疎通)を skill 本文の散文に書くと守られない。決定的な処理は `do-task/scripts/` のスクリプト(経路ごとに 1 本: review-agent.sh / implement-agent.sh。実装経路では、起動の前後で作業ツリーと git メタを保護する処理 — スナップショット・退避・比較・タスク MD の復元 — も implement-guard.sh の 1 本に集約する。こちらは起動を行わない)に集約し、skill は薄いオーケストレーションに徹する(§6)
+- **タスク本文の復元(#259)**: `implement-guard.sh restore-taskmd` は既存 state を確認し、Python 3 の内部 helper `restore-taskmd.py` へ固定した期待値を渡す。元ファイルを先に消さず、同じ親の専用領域へ準備し、内容・権限・参照の検査後に原子的に置き換える。準備失敗時は元ファイルを保ち、公開後の失敗は変更済みと報告する。`TOUCHED`・`TEMP`・無応答時の停止、有限予算、残る同 UID の競合限界は [external-runners.md](../plugins/dev-workflow/skills/do-task/references/external-runners.md) §12-2 を正本とする。公開入口は GNU `timeout` の330秒 TERM・追加5秒 KILL で監督する。GNU `timeout` が無ければ公開入口を起動しない。必要な fd 機能・GNU `cp` を使えなければ対象を変えずに止める。旧 state・正当な選択リンク・通常の復元を維持する。macOS の新処理は実機未確認。
+
 - **開始時の設定候補と使用先の保護**: 実装前に、設定 root と全 `include` / `includeIf` 先を控える。空・コメントだけ・欠落・不成立の条件の先も含める。設定値がまだ効いていない経路を後から有効にして、検査をすり抜けることを防ぐ。親・リンクの差替えと持続する本文変更は、Git を一度も起動せず検出する。末端通常ファイルの同内容再作成は許可する。
   - **元の設定を読む前の検査**: 通常の設定候補を照合した後、隔離した同じ Git で index・HEAD tree・`.gitmodules` から使用先を調べる。新しい submodule の設定 root は自動採用せず、元 repo の Git と呼出側の `--precheck` より先に止める。人が変更を確認して `take` で再登録する。通常の `git add`・HEAD/branch の進行は設定変更とせず、既存 submodule の HEAD・stage 別 OID・diff・status の変化を引き続き検出する。
   - **結果の意味**: `config-check` の成功は隔離 Git を使うため `CONFIG=same`・`GIT_SKIPPED=no`。保持した通常設定の変更は exit 33・`GIT_SKIPPED=yes` で止める。隔離検査後の新 root や選択 blob の不一致は、元 repo の Git を起動せず exit 33・`GIT_SKIPPED=no` で止める。`compare` も同じ順序で再検査する。
