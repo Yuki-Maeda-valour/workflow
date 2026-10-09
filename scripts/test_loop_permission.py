@@ -655,6 +655,163 @@ class LoopPermissionSymlinkTest(unittest.TestCase):
         subprocess.run(["bash", "-c", request["tool_input"]["command"]], cwd=self.wt, check=True)
         self.assertEqual("h24\n", output.read_text())
 
+    def check_git_unchanged(self, command, reason=None, ctx=None):
+        """既存入口の結果と、呼出後の cwd・元の Word を確認する。"""
+        ctx = ctx or PERMISSION.Ctx(self.env, str(self.wt))
+        args = ([token[1] for token in PERMISSION.tokenize(command)]
+                if isinstance(command, str) else command)
+        original = [(word, word.chars[:], word.quoted[:], word.had_quote) for word in args]
+        cwd = ctx.cwd
+        try:
+            if reason is None:
+                self.assertIsNone(PERMISSION.check_git(ctx, args))
+            else:
+                with self.assertRaises(PERMISSION.Denied) as caught:
+                    PERMISSION.check_git(ctx, args)
+                self.assertEqual(("other", reason), (caught.exception.kind, caught.exception.reason))
+        finally:
+            self.assertEqual(cwd, ctx.cwd)
+            self.assertEqual(len(original), len(args))
+            for word, (before, chars, quoted, had_quote) in zip(args, original):
+                self.assertIs(before, word)
+                self.assertEqual((chars, quoted, had_quote), (word.chars, word.quoted, word.had_quote))
+        return ctx
+
+    def test_git_global_options_preserve_diagnostics_and_subcommand_boundary(self):
+        for command in (
+            "--no-pager --no-replace-objects --literal-pathspecs --no-literal-pathspecs status",
+            "-c core.hooksPath=/dev/null status", "-ccore.hooksPath=/dev/null status",
+        ):
+            with self.subTest(command=command):
+                self.check_git_unchanged(command)
+                self.expect("git " + command, "allow")
+        cases = (
+            ("", "Git の subcommand が無い"),
+            ("--no-pager", "Git の subcommand が無い"),
+            ("-c core.hooksPath=/dev/null", "Git の subcommand が無い"),
+            ("-c", "Git -c の key=value を受け付けない"),
+            ("-c invalid=value status", "Git -c の key=value を受け付けない"),
+            ("-cinvalid=value status", "Git -c の key=value を受け付けない"),
+            ("--config-env=x status", "Git --config-env を受け付けない"),
+            ("--config-env x status", "Git --config-env を受け付けない"),
+            ("--unknown status", "Git の global option を受け付けない: --unknown"),
+            ("branch --no-pager", "Git branch は --show-current だけ"),
+        )
+        for command, reason in cases:
+            with self.subTest(command=command):
+                self.check_git_unchanged(command, reason)
+
+    def test_git_chdir_is_sequential_and_applies_to_later_pathspecs(self):
+        os.symlink("../../.claude/settings.json", self.wt / "ordinary/deep/blocked")
+        (self.wt / "blocked").write_text("safe at original cwd")
+        (self.wt / "directory").mkdir()
+        (self.wt / "ordinary/deep/directory").write_text("file at changed cwd")
+        self.check_git_unchanged("-C ordinary -C deep add -- directory")
+        self.check_git_unchanged("-C ordinary -C deep add -- blocked",
+                                 "Git の pathspec が worktree の外か symlink")
+        self.check_git_unchanged("add -- directory", "Git のディレクトリ pathspec を受け付けない")
+        self.expect("git -C ordinary -C deep add -- blocked", "deny", "other")
+        self.check_git_unchanged("-C ordinary -C deep status")
+        self.check_git_unchanged("-C ordinary -C deep", "Git の subcommand が無い")
+
+    def test_git_chdir_target_forms_and_symlinks(self):
+        (self.wt / "literal*").mkdir()
+        outside = Path(self.tmp.name) / "outside"
+        outside.mkdir()
+        os.symlink("ordinary", self.wt / "inside-link")
+        os.symlink(str(outside), self.wt / "outside-link")
+        for command in ("-C inside-link -C deep status", "-C '' status", "-C 'literal*' status"):
+            with self.subTest(command=command):
+                self.check_git_unchanged(command)
+                self.expect("git " + command, "allow")
+        for target in ("outside-link", "missing", "safe.txt"):
+            self.check_git_unchanged(f"-C {target} status", "Git -C が worktree 内のディレクトリでない")
+        self.check_git_unchanged("-C ordinary -C", "Git -C の行き先が無い")
+        self.check_git_unchanged("-C ordinary -C literal* status", "Git -C のグロブを受け付けない")
+        self.check_git_unchanged("-Cordinary status", "Git -C の連結形を受け付けない")
+        self.check_git_unchanged("-C ordinary --unknown", "Git の global option を受け付けない: --unknown")
+
+    def test_git_chdir_tilde_uses_controlled_home_and_quote_state(self):
+        (self.wt / "~").mkdir()
+        def unquoted_args(target):
+            args = []
+            for text in ("-C", target, "status"):
+                word = PERMISSION.Word()
+                for char in text:
+                    word.add(char, False)
+                args.append(word)
+            return args
+
+        with mock.patch.dict(os.environ, {"HOME": str(self.wt / "ordinary")}):
+            self.check_git_unchanged(unquoted_args("~"))
+            self.check_git_unchanged(unquoted_args("~/deep"))
+            self.check_git_unchanged("-C '~' status")
+            self.check_git_unchanged(unquoted_args("~someone"), "~ の形を解けない: ~someone")
+            for target in ("~", "~/deep", "~someone"):
+                self.assertEqual(("deny", "other", "引用符の外の ~"), self.bash(f"git -C {target} status")[:3])
+        with mock.patch.dict(os.environ, {"HOME": ""}):
+            self.check_git_unchanged(unquoted_args("~"), "HOME が無いので ~ を解けない")
+
+    def test_git_chdir_restores_cwd_on_dependency_exception(self):
+        ctx = PERMISSION.Ctx(self.env, str(self.wt))
+        resolve = ctx.resolve
+        failure = RuntimeError("resolution failed")
+
+        def fail_after_chdir(word, tilde):
+            if word == "deep":
+                self.assertEqual(os.path.realpath(self.wt / "ordinary"), ctx.cwd)
+                raise failure
+            return resolve(word, tilde)
+
+        with mock.patch.object(ctx, "resolve", side_effect=fail_after_chdir):
+            with self.assertRaises(RuntimeError) as caught:
+                self.check_git_unchanged("-C ordinary -C deep status", ctx=ctx)
+            self.assertIs(failure, caught.exception)
+        with mock.patch.object(PERMISSION, "git_pathspec_safe", side_effect=failure):
+            with self.assertRaises(RuntimeError) as caught:
+                self.check_git_unchanged("-C ordinary add -- deep/file.txt", ctx=ctx)
+            self.assertIs(failure, caught.exception)
+
+    def test_git_outer_checks_keep_priority_over_global_option_errors(self):
+        self.env["allow"] = [{"kind": "all", "words": []}]
+        got = self.bash("git --unknown -C ../outside")
+        self.assertEqual(("deny", "other"), got[:2], got)
+        self.assertNotIn("global option", got[2])
+        self.assertIn("外", got[2])
+        got = self.bash("git -C literal* status")
+        self.assertEqual(("deny", "other", "引用符の外のグロブ: literal*"), got[:3])
+        got = self.bash("git > .claude/settings.json")
+        self.assertEqual(("deny", "protected"), got[:2], got)
+        self.assertNotIn("subcommand", got[2])
+        for command, reason in (("git --unknown status", "Git の global option を受け付けない: --unknown"),
+                                ("git unknown", "Git の subcommand を受け付けない: unknown")):
+            self.assertEqual(("deny", "other", reason), self.bash(command)[:3])
+
+    def test_git_push_requires_original_global_prefix_order_and_form(self):
+        self.env["DEV_WORKFLOW_LOOP_PUSH_REPO"] = "github.com/o/r"
+        self.env["DEV_WORKFLOW_LOOP_PUSH_REF"] = "refs/heads/task/normal"
+        prefix = ("--no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= "
+                  "-c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false "
+                  "-c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false "
+                  "-c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= "
+                  "-c filter.lfs.required=false")
+        suffix = " push --no-follow-tags --recurse-submodules=no origin refs/heads/task/normal:refs/heads/task/normal"
+        origin = {"origin": True, "same": True, "vcs": False, "repo": "github.com/o/r"}
+        result = subprocess.CompletedProcess([], 0, json.dumps(origin))
+        reason = "Git push は親が固定した safe prefix・origin・完全 refspec だけ"
+        with mock.patch.object(PERMISSION.subprocess, "run", return_value=result):
+            self.check_git_unchanged(prefix + suffix)
+            self.check_git_unchanged(prefix.replace("--no-pager --no-replace-objects",
+                                                    "--no-replace-objects --no-pager") + suffix, reason)
+            self.check_git_unchanged(prefix.replace("-c core.quotePath=false", "-ccore.quotePath=false") + suffix, reason)
+            self.check_git_unchanged("-C ordinary " + prefix + suffix, reason)
+        bad_origin = subprocess.CompletedProcess([], 0, "{}")
+        with mock.patch.object(PERMISSION.subprocess, "run", return_value=bad_origin):
+            self.check_git_unchanged("--no-pager" + suffix,
+                                     "Git push の現在の origin が親の固定リポジトリと一致しない")
+        del self.env["DEV_WORKFLOW_LOOP_PUSH_REPO"]
+        self.check_git_unchanged("--no-pager" + suffix, "Git push の親が固定した送信先が無い")
+
     def test_h35_git_command_internals_are_checked_before_an_all_rule(self):
         """An all-rule authorizes the tool name, never an unchecked subcommand."""
         self.env["allow"] = [{"kind": "all", "words": []}]
