@@ -2,6 +2,12 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.26.5
+
+### 変更
+
+- `loop-permission.py` のGit共通オプション解析を同じファイル内の関数へ分けた。`-C` による検査用の作業ディレクトリの変更と、呼出側で元へ戻す処理を維持する。引数・引用情報・拒否順序・`push` の比較規則は変えない。([Issue #270](https://github.com/Yuki-Maeda-valour/workflow/issues/270))
+
 ## v4.26.4
 
 ### 変更

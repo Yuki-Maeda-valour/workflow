@@ -940,43 +940,50 @@ def check_git_read_options(subcommand: str, rest: list[Word]) -> None:
         raise other(f"Git {subcommand} の option を受け付けない: {text[:100]}")
 
 
+def _check_git_global_options(ctx: Ctx, args: list[Word]) -> int:
+    """共通オプションを順に読み、変更先の cwd と元の引数上の位置を残す。"""
+    i = 0
+    while i < len(args):
+        text = args[i].text
+        if text in SAFE_GIT_GLOBALS:
+            i += 1
+        elif text == "-c":
+            if i + 1 >= len(args) or args[i + 1].text not in SAFE_GIT_CONFIGS:
+                raise other("Git -c の key=value を受け付けない")
+            i += 2
+        elif text.startswith("-c") and text != "-c":
+            if text[2:] not in SAFE_GIT_CONFIGS:
+                raise other("Git -c の key=value を受け付けない")
+            i += 1
+        elif text == "-C":
+            if i + 1 >= len(args):
+                raise other("Git -C の行き先が無い")
+            target = args[i + 1]
+            if target.glob():
+                raise other("Git -C のグロブを受け付けない")
+            target_path = os.path.realpath(ctx.resolve(target.text, target.tilde))
+            if not inside(target_path, ctx.wt) or not os.path.isdir(target_path):
+                raise other("Git -C が worktree 内のディレクトリでない")
+            ctx.cwd = target_path
+            i += 2
+        elif text.startswith("-C") and text != "-C":
+            raise other("Git -C の連結形を受け付けない")
+        elif text.startswith("--config-env"):
+            raise other("Git --config-env を受け付けない")
+        elif text.startswith("-"):
+            raise other(f"Git の global option を受け付けない: {text[:100]}")
+        else:
+            break
+    return i
+
+
 def check_git(ctx: Ctx, args: list[Word]) -> None:
     """Git の global option・subcommand・書き込み pathspec を先に限定する。"""
     if not args:
         raise other("Git の subcommand が無い")
-    i, original_cwd = 0, ctx.cwd
+    original_cwd = ctx.cwd
     try:
-        while i < len(args):
-            text = args[i].text
-            if text in SAFE_GIT_GLOBALS:
-                i += 1
-            elif text == "-c":
-                if i + 1 >= len(args) or args[i + 1].text not in SAFE_GIT_CONFIGS:
-                    raise other("Git -c の key=value を受け付けない")
-                i += 2
-            elif text.startswith("-c") and text != "-c":
-                if text[2:] not in SAFE_GIT_CONFIGS:
-                    raise other("Git -c の key=value を受け付けない")
-                i += 1
-            elif text == "-C":
-                if i + 1 >= len(args):
-                    raise other("Git -C の行き先が無い")
-                target = args[i + 1]
-                if target.glob():
-                    raise other("Git -C のグロブを受け付けない")
-                target_path = os.path.realpath(ctx.resolve(target.text, target.tilde))
-                if not inside(target_path, ctx.wt) or not os.path.isdir(target_path):
-                    raise other("Git -C が worktree 内のディレクトリでない")
-                ctx.cwd = target_path
-                i += 2
-            elif text.startswith("-C") and text != "-C":
-                raise other("Git -C の連結形を受け付けない")
-            elif text.startswith("--config-env"):
-                raise other("Git --config-env を受け付けない")
-            elif text.startswith("-"):
-                raise other(f"Git の global option を受け付けない: {text[:100]}")
-            else:
-                break
+        i = _check_git_global_options(ctx, args)
         if i >= len(args):
             raise other("Git の subcommand が無い")
         subcommand = args[i].text
