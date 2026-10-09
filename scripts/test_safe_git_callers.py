@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LOOP = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop.sh"
 SHIP_SCRIPTS = LOOP.parent
 CREATE_SCRIPTS = ROOT / "plugins/dev-workflow/skills/create-task/scripts"
+DO_TASK_SCRIPTS = ROOT / "plugins/dev-workflow/skills/do-task/scripts"
 PY_CALLERS = {
     "adoption": CREATE_SCRIPTS / "adopt-candidate.py",
     "publish": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py",
@@ -19,6 +20,7 @@ PY_CALLERS = {
     "digest": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py",
     "environment": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py",
     "permission": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py",
+    "implementation": DO_TASK_SCRIPTS / "implementation-git.py",
 }
 # Every direct Python Git caller under ship-task/scripts must be listed here or
 # in PY_GIT_EXCEPTIONS.  The review-guard exception creates an isolated, new
@@ -26,6 +28,7 @@ PY_CALLERS = {
 # caller cannot silently inherit that rationale.
 PY_GIT_EXCEPTIONS = {
     ROOT / "plugins/dev-workflow/skills/ship-task/scripts/review-guard.py": "fresh isolated review repository; GIT_* is removed and NOSYSTEM/GLOBAL=/dev/null are fixed",
+    ROOT / "plugins/dev-workflow/skills/do-task/scripts/secret-profiles.py": "immutable profile object reader with its own bounded Git wrapper",
 }
 DOCS = [
     ROOT / "plugins/dev-workflow/skills/do-task/SKILL.md",
@@ -196,7 +199,8 @@ class SafeGitCallersTest(unittest.TestCase):
                 self.assertTrue(all(has_safe_starred(call) for call in calls), ast.unparse(calls[0]))
 
     def test_each_direct_python_git_caller_is_registered_or_has_a_narrow_basis(self):
-        discovered=direct_python_git_callers(SHIP_SCRIPTS) | direct_python_git_callers(CREATE_SCRIPTS)
+        discovered=(direct_python_git_callers(SHIP_SCRIPTS) | direct_python_git_callers(CREATE_SCRIPTS)
+                    | direct_python_git_callers(DO_TASK_SCRIPTS))
         self.assertEqual(discovered, set(PY_CALLERS.values()) | set(PY_GIT_EXCEPTIONS))
         state=(SHIP_SCRIPTS / "loop-state.py").read_text(encoding="utf-8")
         self.assertIn('"--no-pager", "--no-replace-objects"', state)

@@ -1973,13 +1973,32 @@ check "最大周回数: 2 周で止まる" "pr-a pr-b" "$(calls)"
 has "最大周回数: 理由" "$OUT" "止まった理由: 最大周回数"
 
 newrepo budget
-addtask slow-a 2026-01-01; addtask slow-b 2026-01-02
+addtask pr-a 2026-01-01; addtask pr-b 2026-01-02
 commit
 newrec budget
-run_loop budget SELFTEST_SLOW=5 -- --repo "$R" --time-budget 10 --iteration-timeout 6 "${COMMON_ARGS[@]}"
+# このケースだけの時計。起動準備は何秒かかっても同じ論理時刻とし、
+# 初回のスタブが calls.log を記録した後だけ 1 秒進める。実時刻や sleep に依存しない。
+BUDGET_CLOCK_BIN="$W/budget-clock-bin"
+mkdir "$BUDGET_CLOCK_BIN"
+cat >"$BUDGET_CLOCK_BIN/date" <<'CLOCK'
+#!/usr/bin/env bash
+set -eu
+if [ "$#" -eq 1 ] && [ "$1" = +%s ]; then
+  if [ -s "${SELFTEST_REC:?}/calls.log" ]; then printf '%s\n' 1001
+  else printf '%s\n' 1000; fi
+else
+  exec "${SELFTEST_REAL_DATE:?}" "$@"
+fi
+CLOCK
+chmod +x "$BUDGET_CLOCK_BIN/date"
+# 初回の残り60は上限60と同じなので開始する。初回の後は残り59になり停止する。
+# max-iterations=2 は予算検査が壊れても試験を有界にする。停止理由は別に検査する。
+run_loop budget "PATH=$BUDGET_CLOCK_BIN:$STUBBIN:$SAFEBIN" "SELFTEST_REAL_DATE=$SAFEBIN/date" -- \
+  --repo "$R" --time-budget 60 --iteration-timeout 60 --max-iterations 2 "${COMMON_ARGS[@]}"
 check "時間予算: 終了コード 0" 0 "$RC"
-check "時間予算: 残りが周の上限より短ければ次の周を始めない" "slow-a" "$(calls)"
-has "時間予算: 理由" "$OUT" "止まった理由: 時間予算"
+check "時間予算: 初回だけ開始し、残りが上限より短い次の周は始めない" "pr-a" "$(calls)"
+has "時間予算: 初回は正常終了" "$(report_of "$OUT")" "- 判定: 正常(PR)"
+has "時間予算: 制御した境界で停止" "$OUT" "止まった理由: 時間予算(残り 59 秒 < 周の上限 60 秒)"
 
 newrepo stopf
 addtask stopfile-a 2026-01-01; addtask pr-b 2026-01-02
