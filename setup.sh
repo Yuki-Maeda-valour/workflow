@@ -86,11 +86,79 @@ case "$MODE" in
   *) usage; exit 2 ;;
 esac
 
+# Bash 3.2 の組込みだけで既存の親を物理パスにする。
+# 未作成の末尾は残すが、リンク切れや通常ファイルを親として扱わない。
+physical_directory() {
+  local probe="$1" suffix="" leaf
+  [[ "$probe" == /* ]] || probe="$PWD/$probe"
+  while [[ ! -d "$probe" ]]; do
+    if [[ -e "$probe" || -L "$probe" ]]; then
+      echo "ERROR: 導入パスを解決できません: $1" >&2
+      return 1
+    fi
+    leaf="${probe##*/}"
+    suffix="/$leaf$suffix"
+    probe="${probe%/*}"
+    [[ -n "$probe" ]] || probe="/"
+  done
+  # 最後の / を目印にし、改行で終わるディレクトリ名も保持する。
+  if ! PHYSICAL_DIR="$(cd -P -- "$probe" && printf '%s/' "$PWD")"; then
+    echo "ERROR: 導入パスを解決できません: $1" >&2
+    return 1
+  fi
+  PHYSICAL_DIR="${PHYSICAL_DIR%/}"
+  PHYSICAL_DIR="${PHYSICAL_DIR%/}$suffix"
+  [[ -n "$PHYSICAL_DIR" ]] || PHYSICAL_DIR="/"
+}
+
+within_directory() {
+  local ancestor="$1"
+  # cd -P でも大小文字を区別しない FS の綴りはそろわない。
+  # 未作成の末尾から既存の親まで戻り、名前でなく実体を比べる。
+  while :; do
+    [[ "$ancestor" -ef "$2" ]] && return 0
+    [[ "$ancestor" != / ]] || return 1
+    ancestor="${ancestor%/*}"
+    [[ -n "$ancestor" ]] || ancestor="/"
+  done
+}
+
+# 途中のスキルで危険が分かっても、それ以前の配置を変えない。
+# 親のリンクはたどる一方、rm が削除する最終リンクはたどらない。
+physical_directory "$SKILLS_SRC"
+SOURCE_ROOT="$PHYSICAL_DIR"
+physical_directory "$DEST"
+DEST_ROOT="$PHYSICAL_DIR"
+SOURCES=("$SKILLS_SRC"/*/)
+SOURCE_DIRS=("$SOURCE_ROOT")
+for src in "${SOURCES[@]}"; do
+  physical_directory "${src%/}"
+  SOURCE_DIRS+=("$PHYSICAL_DIR")
+done
+for source_dir in "${SOURCE_DIRS[@]}"; do
+  if within_directory "$DEST_ROOT" "$source_dir"; then
+    echo "ERROR: 導入先が配布元と重なっています: $DEST" >&2
+    exit 1
+  fi
+done
+for src in "${SOURCES[@]}"; do
+  name="$(basename "$src")"
+  dest="${DEST_ROOT%/}/$name"
+  if [[ -d "$dest" && ! -L "$dest" ]]; then
+    for source_dir in "${SOURCE_DIRS[@]}"; do
+      if within_directory "$source_dir" "$dest"; then
+        echo "ERROR: 導入先の削除で配布元が失われます: $dest" >&2
+        exit 1
+      fi
+    done
+  fi
+done
+
 mkdir -p "$DEST"
 installed=0
 skipped=0
 
-for src in "$SKILLS_SRC"/*/; do
+for src in "${SOURCES[@]}"; do
   name="$(basename "$src")"
   dest="$DEST/$name"
   if [[ -e "$dest" || -L "$dest" ]]; then
