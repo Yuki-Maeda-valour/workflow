@@ -376,5 +376,63 @@ class SecretProfilesTest(unittest.TestCase):
         self.assertNotIn("LEAK_PROFILE_CONTENT", done.stderr.decode())
 
 
+
+class DiagnosticProfileReuseTest(unittest.TestCase):
+    def test_backend_keeps_management_prefix_literal_and_returns_blob_identity(self):
+        helper = load_helper_module()
+        path = b'pkg[1]*/.claude/project-profile.yml'
+        raw = b'secret_paths: [private.txt]\n'
+        oid = 'a' * 40
+        calls = []
+        def backend(*args):
+            calls.append(args)
+            if args[0] == 'ls-tree': return b'100644 blob ' + oid.encode() + b'\t' + path + b'\0'
+            if args[1] == '-s': return str(len(raw)).encode() + b'\n'
+            return raw
+        self.assertEqual(helper.ref_profile_backend(backend, 'b'*40, path), (oid, raw))
+        self.assertEqual(calls[0], ('ls-tree', '-z', 'b'*40, '--', path))
+        self.assertEqual(calls[1:], [('cat-file', '-s', oid), ('cat-file', 'blob', oid)])
+
+    def test_backend_missing_profile_does_not_fetch_blob(self):
+        helper = load_helper_module(); calls = []
+        def backend(*args): calls.append(args); return b''
+        self.assertEqual(helper.ref_profile_backend(backend, 'b'*40, b'.claude/project-profile.yml'), (None, None))
+        self.assertEqual(len(calls), 1)
+
+    def test_backend_rejects_size_mismatch_and_unsafe_relative_path(self):
+        helper = load_helper_module(); path = b'.claude/project-profile.yml'
+        def backend(*args):
+            if args[0] == 'ls-tree': return b'100644 blob ' + b'a'*40 + b'\t' + path + b'\0'
+            if args[1] == '-s': return b'1\n'
+            return b'two'
+        with self.assertRaises(helper.ProfileError): helper.ref_profile_backend(backend, 'b'*40, path)
+        for bad in (b'../profile', b'/profile', b'a//profile', b'a/./profile'):
+            with self.subTest(path=bad):
+                with self.assertRaises(helper.ProfileError): helper.ref_profile_backend(backend, 'b'*40, bad)
+
+    def test_fd_profile_preserves_ownership_and_reports_metadata(self):
+        helper = load_helper_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / '.claude').mkdir()
+            profile = root / '.claude/project-profile.yml'; profile.write_bytes(b'secret_paths: []\n')
+            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                info = []
+                self.assertEqual(helper.current_profile_fd(fd, inspected=info.append), profile.read_bytes())
+                self.assertEqual(info[0].st_ino, profile.stat().st_ino)
+                self.assertEqual(os.fstat(fd).st_ino, root.stat().st_ino)
+            finally: os.close(fd)
+
+    def test_fd_profile_short_read_is_not_a_valid_empty_profile(self):
+        helper = load_helper_module()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp); (root / '.claude').mkdir()
+            (root / '.claude/project-profile.yml').write_bytes(b'secret_paths: [secret]\n')
+            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                with mock.patch.object(helper.os, 'read', return_value=b''):
+                    with self.assertRaises(helper.ProfileError): helper.current_profile_fd(fd)
+            finally: os.close(fd)
+
 if __name__ == "__main__":
     unittest.main()

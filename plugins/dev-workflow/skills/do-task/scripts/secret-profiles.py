@@ -83,6 +83,15 @@ def current_profile(root: Path) -> bytes | None:
     except OSError as exc:
         raise ProfileError(f"profile の親を安全に開けない: {exc.strerror}") from exc
     try:
+        return current_profile_fd(root_fd)
+    finally:
+        os.close(root_fd)
+
+
+def current_profile_fd(root_fd, check=lambda: None, inspected=None):
+    """保持したroot fdから固定profileを読む。所有fdは閉じない。"""
+    flags = os.O_RDONLY | os.O_NONBLOCK
+    try:
         try:
             profile_dir_fd = os.open(PROFILE_DIR, flags | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root_fd)
         except FileNotFoundError:
@@ -116,6 +125,7 @@ def current_profile(root: Path) -> bytes | None:
                 chunks: list[bytes] = []
                 size = 0
                 while True:
+                    check()
                     block = os.read(fd, 65536)
                     if not block:
                         break
@@ -124,10 +134,14 @@ def current_profile(root: Path) -> bytes | None:
                         raise ProfileError("現在の profile が読取中に上限 1 MiB を超えた")
                     chunks.append(block)
                 finished = os.fstat(fd)
-                if (finished.st_dev != after.st_dev or finished.st_ino != after.st_ino
+                if (size != after.st_size or finished.st_dev != after.st_dev or finished.st_ino != after.st_ino
                         or finished.st_size != after.st_size
-                        or finished.st_mtime_ns != after.st_mtime_ns):
+                        or finished.st_mtime_ns != after.st_mtime_ns
+                        or finished.st_ctime_ns != after.st_ctime_ns
+                        or finished.st_mode != after.st_mode):
                     raise ProfileError("現在の profile が読取中に変更された")
+                if inspected is not None:
+                    inspected(finished)
                 return b"".join(chunks)
             except OSError as exc:
                 raise ProfileError(f"現在の profile を読めない: {exc.strerror}") from exc
@@ -136,27 +150,39 @@ def current_profile(root: Path) -> bytes | None:
         finally:
             os.close(profile_dir_fd)
     finally:
-        os.close(root_fd)
+        check()
 
 
 def ref_profile(cwd: str, ref: str) -> bytes | None:
-    listed = git(cwd, "ls-tree", "-z", ref, "--", PROFILE_PATH)
+    _oid, raw = ref_profile_backend(lambda *args: git(cwd, *args), ref,
+                                    PROFILE_PATH.encode())
+    return raw
+
+
+def ref_profile_backend(backend, ref, profile_path):
+    """呼出側が固定したbackendとliteral repo相対pathでprofileだけを取得する。"""
+    if (not isinstance(profile_path, bytes) or not profile_path or profile_path.startswith(b"/")
+            or b"\0" in profile_path or any(x in (b"", b".", b"..") for x in profile_path.split(b"/"))):
+        raise ProfileError("profile の相対pathが不正")
+    listed = backend("ls-tree", "-z", ref, "--", profile_path)
     if not listed:
-        return None
-    record = listed[:-1]
-    meta, sep, name = record.partition(b"\t")
-    if not sep or name != PROFILE_PATH.encode():
+        return None, None
+    if not listed.endswith(b"\0") or listed.count(b"\0") != 1:
         raise ProfileError("基準 profile の形式を確認できない")
+    meta, sep, name = listed[:-1].partition(b"\t")
     fields = meta.split()
-    if len(fields) != 3 or fields[0] not in (b"100644", b"100755") or fields[1] != b"blob":
+    if (not sep or name != profile_path or len(fields) != 3
+            or fields[0] not in (b"100644", b"100755") or fields[1] != b"blob"
+            or not re.fullmatch(rb"(?:[0-9a-f]{40}|[0-9a-f]{64})", fields[2])):
         raise ProfileError("基準 profile が通常ファイルでない")
-    size = git(cwd, "cat-file", "-s", fields[2].decode("ascii")).strip()
-    try:
-        if int(size) > MAX_PROFILE_BYTES:
-            raise ProfileError("基準 profile が上限 1 MiB を超える")
-    except ValueError as exc:
-        raise ProfileError("基準 profile の大きさを確認できない") from exc
-    return git(cwd, "cat-file", "blob", fields[2].decode("ascii"))
+    oid = fields[2].decode("ascii")
+    size = backend("cat-file", "-s", oid).strip()
+    if not re.fullmatch(rb"[0-9]+", size) or len(size)>10 or int(size)>MAX_PROFILE_BYTES:
+        raise ProfileError("基準 profile の大きさを確認できない")
+    raw = backend("cat-file", "blob", oid)
+    if len(raw)!=int(size) or len(raw)>MAX_PROFILE_BYTES:
+        raise ProfileError("基準 profile の大きさが一致しない")
+    return oid, raw
 
 
 def paths_from_yaml(raw: bytes, source: str) -> list[str]:
