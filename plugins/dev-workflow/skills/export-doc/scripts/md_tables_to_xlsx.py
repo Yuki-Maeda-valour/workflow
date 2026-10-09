@@ -7,14 +7,17 @@
 - 1 表 1 シート。シート名は「文書名 + 直前の見出し」(Excel の 31 文字制約に収める)
 - openpyxl が無い環境では、出力名と同名のディレクトリへ CSV(BOM 付き UTF-8)で縮退出力する
 - 入力は読み取りのみ(変更しない)。同名出力は上書き(冪等)
+- --source-root <dir> で元の正本を保護する(繰返し可。省略時は入力の親)
+- 正本への出力・最終symlink・複数hardlink・特殊ファイルは書込前に拒否する
 - セル内の Markdown 装飾(**強調**・`コード`・[リンク](url)・<br>)はプレーンテキスト化する
 
-終了コード: 0 = 出力あり / 1 = 表が見つからない / 2 = 入力エラー
+終了コード: 0 = 出力あり / 1 = 表が見つからない / 2 = 入力エラー・出力先の拒否
 """
 
 import argparse
 import csv
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -94,18 +97,79 @@ def unique_sheet_name(name: str, used: set) -> str:
     return cand
 
 
-def write_csv_fallback(tables, out: Path) -> None:
+class OutputError(ValueError):
+    """出力前に判明した、正本または出力先を壊しうる配置。"""
+
+
+def physical_directory(path: Path) -> Path:
+    """既存の親を検査し、未作成の末尾だけを物理パスへ付加する。"""
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        if path == path.parent:
+            raise OutputError(f"出力先の親を解決できない: {path}")
+        return (physical_directory(path.parent) / path.name).resolve()
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)):
+        raise OutputError(f"出力先の親がディレクトリでない: {path}")
+    resolved = path.resolve(strict=True)
+    if not resolved.is_dir():
+        raise OutputError(f"出力先の親がディレクトリでない: {path}")
+    return resolved
+
+
+def output_paths(paths, *, inputs=(), source_roots=()) -> list[Path]:
+    """全件を変更前に検査する。同一利用者の並行差替えは保証対象外。"""
+    try:
+        input_paths = [Path(p) for p in inputs]
+        inputs = [p.resolve(strict=True) for p in input_paths]
+        roots = [Path(p).resolve(strict=True) for p in source_roots]
+        if not roots:
+            roots = [p.parent.resolve(strict=True) for p in input_paths]
+            roots.extend(p.parent for p in inputs)
+        if any(not root.is_dir() for root in roots):
+            raise OutputError("正本ディレクトリが通常のディレクトリでない")
+        checked = []
+        for path in paths:
+            path = Path(path).absolute()
+            dest = physical_directory(path.parent) / path.name
+            try:
+                info = dest.lstat()
+            except FileNotFoundError:
+                info = None
+            if info is not None:
+                if not stat.S_ISREG(info.st_mode):
+                    raise OutputError(f"出力先が通常ファイルでない（リンクも拒否）: {path}")
+                if info.st_nlink > 1:
+                    raise OutputError(f"出力先に複数のhardlinkがある: {path}")
+                if any(dest.samefile(p) for p in inputs):
+                    raise OutputError(f"出力先が入力ファイルと同じ: {path}")
+            for parent in dest.parents:
+                # samefile は macOS の大文字小文字等の別名も検出する。
+                if any(parent == root or (parent.exists() and parent.samefile(root)) for root in roots):
+                    raise OutputError(f"出力先が正本ディレクトリ内にある: {path}")
+            checked.append(dest)
+        return checked
+    except (OSError, RuntimeError) as exc:
+        raise OutputError(f"出力先または正本を解決できない: {exc}") from exc
+
+
+def write_csv_fallback(tables, out: Path, *, inputs=(), source_roots=()) -> None:
     outdir = out.with_suffix("")
-    outdir.mkdir(parents=True, exist_ok=True)
     used = set()
+    planned = []
     for hint, rows in tables:
         name = unique_sheet_name(hint, used)
-        with (outdir / f"{name}.csv").open("w", newline="", encoding="utf-8-sig") as fh:
+        planned.append((outdir / f"{name}.csv", rows))
+    checked = output_paths([path for path, _ in planned], inputs=inputs, source_roots=source_roots)
+    for path, (_, rows) in zip(checked, planned):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", newline="", encoding="utf-8-sig") as fh:
             csv.writer(fh).writerows(rows)
     print(f"FALLBACK openpyxl 未導入のため CSV で出力: {outdir}/ (pip install openpyxl で xlsx 化可)")
 
 
-def write_xlsx(tables, out: Path) -> None:
+def write_xlsx(tables, out: Path, *, inputs=(), source_roots=()) -> None:
+    checked_out, = output_paths([out], inputs=inputs, source_roots=source_roots)
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -128,8 +192,8 @@ def write_xlsx(tables, out: Path) -> None:
                 w = sum(2 if ord(ch) > 0x7F else 1 for ch in first_line)
                 width = max(width, min(w + 2, 60))
             ws.column_dimensions[get_column_letter(col)].width = width
-    out.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(out)
+    checked_out.parent.mkdir(parents=True, exist_ok=True)
+    wb.save(checked_out)
     print(f"OK {out} にシート {len(wb.sheetnames)} 件を出力")
 
 
@@ -137,16 +201,20 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("inputs", nargs="+", help="入力 Markdown ファイル")
     ap.add_argument("-o", "--output", required=True, help="出力 xlsx パス")
+    ap.add_argument("--source-root", action="append", default=[],
+                    help="保護する元の正本ディレクトリ（繰返し可。省略時は入力の親）")
     args = ap.parse_args()
 
     tables = []
     missing = []
+    inputs = []
     for p in args.inputs:
         path = Path(p)
         if not path.is_file():
             missing.append(p)
             continue
         tables += extract_tables(path.read_text(encoding="utf-8"), path.stem)
+        inputs.append(path)
     for p in missing:
         print(f"WARN 入力が存在しない: {p}", file=sys.stderr)
     if missing and not tables:
@@ -157,11 +225,15 @@ def main() -> int:
 
     out = Path(args.output)
     try:
-        import openpyxl  # noqa: F401
-    except ImportError:
-        write_csv_fallback(tables, out)
-        return 0
-    write_xlsx(tables, out)
+        try:
+            import openpyxl  # noqa: F401
+        except ImportError:
+            write_csv_fallback(tables, out, inputs=inputs, source_roots=args.source_root)
+        else:
+            write_xlsx(tables, out, inputs=inputs, source_roots=args.source_root)
+    except OutputError as exc:
+        print(f"ERROR 出力を拒否: {exc}", file=sys.stderr)
+        return 2
     return 0
 
 
