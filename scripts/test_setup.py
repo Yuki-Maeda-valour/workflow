@@ -1,4 +1,4 @@
-"""導入元を保護する事前検査。すべて使い捨ての配布元とホームで動かす。"""
+"""入力と導入元を確かめる事前検査。使い捨ての配布元とホームで動かす。"""
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -9,6 +9,8 @@ import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'setup.sh'
 BASH = os.environ.get('SETUP_TEST_BASH', shutil.which('bash'))
+PATH_MODES = ('--copy', '--link', '--agents-copy', '--agents')
+MODES = PATH_MODES + ('--global', '--agents-global', '--list')
 
 
 class SetupTests(unittest.TestCase):
@@ -31,12 +33,107 @@ class SetupTests(unittest.TestCase):
         self.env = dict(os.environ, HOME=str(self.home))
 
     def run_setup(self, mode='--copy', force=False, target=None):
-        args = [BASH, str(self.repo / 'setup.sh'), mode]
+        args = [mode]
         if mode not in ('--global', '--agents-global'):
             args.append(str(target or self.target))
         if force:
             args.append('--force')
-        return subprocess.run(args, env=self.env, capture_output=True, text=True, timeout=15)
+        return self.run_args(args)
+
+    def run_args(self, args):
+        return subprocess.run([BASH, str(self.repo / 'setup.sh'), *args], cwd=self.root,
+                              env=self.env, capture_output=True, text=True, timeout=15)
+
+    def argument_error(self, args, *diagnostics):
+        before = self.snapshot()
+        result = self.run_args(args)
+        self.assertEqual(before, self.snapshot(), result.stderr)
+        self.assertEqual(2, result.returncode, result.stderr)
+        self.assertIn('使い方:', result.stdout)
+        for diagnostic in diagnostics:
+            self.assertIn(diagnostic, result.stderr)
+
+    def test_required_paths_are_checked_before_consumption(self):
+        operands = [[], ['']] + [[flag] for flag in MODES + ('--force', '--help', '-h', '--unknown', '-')]
+        for mode in PATH_MODES:
+            for operand in operands:
+                with self.subTest(mode=mode, operand=operand):
+                    self.argument_error([mode, *operand], mode, 'プロジェクトパス')
+
+    def test_all_49_mode_pairs_are_rejected_before_any_install(self):
+        for first in MODES:
+            for second in MODES:
+                with self.subTest(first=first, second=second), self.fixture() as case:
+                    args = []
+                    for mode in (first, second):
+                        args.append(mode)
+                        if mode in PATH_MODES:
+                            args.append(str(case.target))
+                    case.argument_error(args, first, second)
+
+    def test_missing_path_precedes_duplicate_mode_diagnostic(self):
+        for mode in PATH_MODES:
+            with self.subTest(mode=mode):
+                self.argument_error(['--list', mode], mode, 'プロジェクトパス')
+
+    def test_unknown_extra_and_absent_arguments_do_not_write(self):
+        for args, diagnostics in (([], ()), (['--force'], ()),
+                                  (['--unknown'], ('--unknown',)),
+                                  (['--copy', str(self.target), 'extra'], ('extra',))):
+            with self.subTest(args=args):
+                self.argument_error(args, *diagnostics)
+
+    def test_help_stops_immediately_but_does_not_cancel_prior_errors(self):
+        for help_flag in ('-h', '--help'):
+            for prefix in ([], ['--force'], ['--list'], ['--copy', str(self.target)]):
+                with self.subTest(help=help_flag, prefix=prefix):
+                    before = self.snapshot()
+                    result = self.run_args([*prefix, help_flag, '--unknown'])
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertIn('使い方:', result.stdout)
+                    self.assertEqual('', result.stderr)
+                    self.assertEqual(before, self.snapshot())
+            self.argument_error(['--unknown', help_flag], '--unknown')
+            self.argument_error(['--copy', help_flag], '--copy', 'プロジェクトパス')
+            self.argument_error(['--list', '--global', help_flag], '--list', '--global')
+
+    def test_list_and_force_orders_only_list(self):
+        for args in (['--list'], ['--force', '--list'], ['--list', '--force']):
+            with self.subTest(args=args):
+                before = self.snapshot()
+                result = self.run_args(args)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('含まれる skills:', result.stdout)
+                self.assertIn('alpha', result.stdout)
+                self.assertIn('omega', result.stdout)
+                self.assertEqual(before, self.snapshot())
+
+    def test_project_paths_and_force_orders_remain_valid(self):
+        for mode in PATH_MODES:
+            for name in ('project with spaces', '日本語', '-project'):
+                for relative in (False, True):
+                    with self.subTest(mode=mode, name=name, relative=relative), self.fixture() as case:
+                        target = case.root / name
+                        target.mkdir()
+                        operand = './' + name if relative else str(target)
+                        for prefix, suffix in ((['--force'], []), ([], ['--force']),
+                                               (['--force', '--force'], ['--force'])):
+                            result = case.run_args([*prefix, mode, operand, *suffix])
+                            self.assertEqual(0, result.returncode, result.stderr)
+                            self.assertIn('2 件導入', result.stdout)
+                            destination = target / ('.agents' if 'agents' in mode else '.claude') / 'skills'
+                            for skill in ('alpha', 'omega'):
+                                self.assertEqual(skill + '\n', (destination / skill / 'SKILL.md').read_text())
+                                self.assertEqual('copy' not in mode, (destination / skill).is_symlink())
+
+    def test_nonexistent_project_remains_an_execution_error(self):
+        for mode in PATH_MODES:
+            with self.subTest(mode=mode):
+                before = self.snapshot()
+                result = self.run_args([mode, str(self.root / 'absent')])
+                self.assertEqual(1, result.returncode)
+                self.assertIn('存在しません', result.stderr)
+                self.assertEqual(before, self.snapshot())
 
     def snapshot(self):
         result = {}

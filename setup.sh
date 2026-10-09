@@ -23,6 +23,9 @@ usage() {
   --force    既存の同名 skill を上書き(既定: スキップして警告)
 
 注意:
+  - 導入モードと --list は、1 回にいずれか 1 つだけ指定する(同じ指定の反復も不可)
+  - --link / --copy / --agents / --agents-copy の直後には空でないパスが必要
+  - - で始まるパスは ./-project のように ./ を付けるか、絶対パスで指定する
   - <プロジェクトパス> は事前に存在している必要がある(存在しないとエラー終了する)
   - skill を 1 本だけ取り出す配置は非サポート。skill 間の兄弟参照
     (../do-task/... など)が解決できず、外部ランナー等の機能が無効化される
@@ -37,13 +40,28 @@ FORCE=0
 MODE=""
 TARGET=""
 
+select_mode() {
+  if [[ -n "$MODE" ]]; then
+    echo "ERROR: モードは 1 つだけ指定してください: --$MODE と $1" >&2
+    usage
+    exit 2
+  fi
+  MODE="${1#--}"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --link|--copy) MODE="${1#--}"; TARGET="${2:-}"; shift 2 ;;
-    --agents|--agents-copy) MODE="${1#--}"; TARGET="${2:-}"; shift 2 ;;
-    --global) MODE="global"; shift ;;
-    --agents-global) MODE="agents-global"; shift ;;
-    --list) MODE="list"; shift ;;
+    --link|--copy|--agents|--agents-copy)
+      if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
+        echo "ERROR: $1 の直後にプロジェクトパスが必要です" >&2
+        usage
+        exit 2
+      fi
+      select_mode "$1"
+      TARGET="$2"
+      shift 2
+      ;;
+    --global|--agents-global|--list) select_mode "$1"; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "不明な引数: $1" >&2; usage; exit 2 ;;
