@@ -1244,6 +1244,178 @@ class ComponentPolicyTests(unittest.TestCase):
                 'root': '/safe', 'relative': relative, 'path': '/safe/' + relative,
                 'raw': ('---\n' + frontmatter + '---\nbody\n').encode()}
 
+    def test_namespace_empty_and_mixed_complete_output_without_input_mutation(self):
+        import copy
+        import hashlib
+        self.assertEqual(HC.component_namespace([]), {
+            'definitions': [], 'loaded_commands': {}, 'invocation_routes': {},
+            'lookup_names': [], 'invocation_names': [], 'model_invocation_names': [], 'public_names': []})
+        skill = self.component('personal-skill', 'alpha/SKILL.md',
+                               'name: alternate\ndisable-model-invocation: true\n')
+        command = self.component('enterprise-command', 'tools/run.md', 'user-invocable: false\n')
+        items = [command, skill]
+        before = copy.deepcopy(items)
+        definitions = [
+            {'primary': 'alpha', 'alias': 'alternate', 'kind': 'personal-skill', 'loader': 'skill',
+             'path': '/safe/alpha/SKILL.md', 'public': True, 'model': False, 'plugin': None,
+             'content_sha256': hashlib.sha256(skill['raw']).hexdigest()},
+            {'primary': 'tools:run', 'alias': None, 'kind': 'enterprise-command', 'loader': 'command',
+             'path': '/safe/tools/run.md', 'public': False, 'model': True, 'plugin': None,
+             'content_sha256': hashlib.sha256(command['raw']).hexdigest()},
+        ]
+        expected = {
+            'definitions': definitions,
+            'loaded_commands': {item['primary']: {key: value for key, value in item.items() if key != 'path'}
+                                for item in definitions},
+            'invocation_routes': {
+                'alpha': {'target': 'alpha', 'user': True, 'model': False},
+                'alternate': {'target': 'alpha', 'user': True, 'model': False},
+                'tools:run': {'target': 'tools:run', 'user': False, 'model': True}},
+            'lookup_names': ['alpha', 'alternate', 'tools:run'],
+            'invocation_names': ['alpha', 'alternate'],
+            'model_invocation_names': ['tools:run'], 'public_names': ['alpha'],
+        }
+        result = HC.component_namespace(items)
+        self.assertEqual(result, expected)
+        self.assertEqual(list(result), list(expected))
+        self.assertEqual(list(result['loaded_commands']), ['alpha', 'tools:run'])
+        self.assertEqual(list(result['invocation_routes']), ['alpha', 'alternate', 'tools:run'])
+        self.assertEqual(items, before)
+
+    def test_equal_rank_equal_content_keeps_first_path_in_each_order(self):
+        first = self.component('personal-skill', 'same/SKILL.md')
+        second = dict(first, key='second', root='/other', path='/other/same/SKILL.md')
+        results = []
+        for items in ([first, second], [second, first]):
+            result = HC.component_namespace(items)
+            self.assertEqual(result['definitions'][0]['path'], items[0]['path'])
+            self.assertEqual(len(result['definitions']), 1)
+            results.append(result)
+        for key in results[0]:
+            if key != 'definitions':
+                self.assertEqual(results[0][key], results[1][key])
+        self.assertEqual(HC.policy_digest('a' * 64, results[0], HC.fixed_host_policy(results[0])),
+                         HC.policy_digest('a' * 64, results[1], HC.fixed_host_policy(results[1])))
+
+    def test_equal_rank_primary_and_alias_conflicts_keep_diagnostics(self):
+        original = self.component('personal-skill', 'same/SKILL.md')
+        for fm in ('description: different\n', 'name: alias\n', 'user-invocable: false\n',
+                   'disable-model-invocation: true\n'):
+            changed = self.component('personal-skill', 'same/SKILL.md', fm)
+            for items in ([original, changed], [changed, original]):
+                with self.subTest(fm=fm), self.assertRaises(HC.Unclear) as error:
+                    HC.component_namespace(items)
+                self.assertEqual(str(error.exception), '同じ主名の component の出所が競合している')
+        personal = self.component('personal-skill', 'p:same/SKILL.md')
+        plugin = dict(self.component('plugin', 'skills/same/SKILL.md'), plugin='p@m')
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([personal, plugin])
+        self.assertEqual(str(error.exception), '同じ主名の component の出所が競合している')
+        one = self.component('personal-skill', 'one/SKILL.md', 'name: shared\n')
+        two = self.component('personal-skill', 'two/SKILL.md', 'name: shared\n')
+        self.assertEqual(one['raw'], two['raw'])
+        for items in ([one, two], [two, one]):
+            with self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace(items)
+            self.assertEqual(str(error.exception), 'component の alias の出所が競合している')
+
+    def test_enterprise_command_beats_personal_skill_and_alias_rank_is_independent(self):
+        personal = self.component('personal-skill', 'same/SKILL.md', 'name: shared\n')
+        enterprise = self.component('enterprise-command', 'same.md', 'name: shared\n')
+        other = self.component('personal-skill', 'other/SKILL.md', 'name: shared\n')
+        for items in ([personal, enterprise, other], [other, enterprise, personal]):
+            result = HC.component_namespace(items)
+            self.assertEqual(result['loaded_commands']['same']['kind'], 'enterprise-command')
+            self.assertEqual(result['invocation_routes']['shared']['target'], 'same')
+            self.assertEqual(result['public_names'], ['other'])
+        hidden = self.component('personal-skill', 'shared/SKILL.md',
+                                'user-invocable: false\ndisable-model-invocation: true\n')
+        result = HC.component_namespace([enterprise, hidden])
+        self.assertEqual(result['invocation_routes']['shared'],
+                         {'target': 'shared', 'user': False, 'model': False})
+
+    def namespace_manifest(self, data):
+        return dict(self.component('plugin', '.claude-plugin/plugin.json'),
+                    plugin='p@m', raw=json.dumps(data).encode())
+
+    def test_manifest_source_content_and_reference_diagnostics(self):
+        source = dict(self.component('plugin', 'source.txt'), plugin='p@m', raw=b'body')
+        manifest = self.namespace_manifest({'name': 'p', 'commands': {
+            'run': {'source': './source.txt', 'content': 'body'}}})
+        self.assertEqual(HC.component_namespace([manifest, source])['lookup_names'], ['p:run'])
+        cases = [
+            ({'source': './source.txt', 'content': 'different'}, [source], 'command source と content が競合している'),
+            ({'content': 123}, [], 'command content が文字列でない'),
+            ({}, [], 'command の本文が無い'),
+            ({'source': './missing', 'content': 'body'}, [source], 'component の参照先が保持されていない'),
+            ({'source': './source.txt'}, [source, dict(source, key='another')], 'command source が一意でない'),
+        ]
+        for entry, refs, message in cases:
+            with self.subTest(entry=entry), self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace([self.namespace_manifest({'name': 'p', 'commands': {'run': entry}}), *refs])
+            self.assertEqual(str(error.exception), message)
+        empty = dict(self.namespace_manifest({'name': 'p', 'commands': './empty'}), held_directories=('empty',))
+        self.assertEqual(HC.component_namespace([empty])['lookup_names'], [])
+        missing = dict(empty, held_directories=())
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([missing])
+        self.assertEqual(str(error.exception), 'component の参照先が保持されていない')
+
+    def test_marketplace_source_is_not_named_but_remains_available_to_references(self):
+        manifest = self.namespace_manifest({'name': 'p', 'commands': {'run': {'source': './source.txt'}}})
+        source = dict(self.component('plugin', 'source.txt'), plugin='p@m', raw=b'body', source='marketplace-source')
+        excluded = dict(self.component('plugin', 'skills/excluded/SKILL.md'), plugin='p@m',
+                        namespace_source='marketplace-source')
+        result = HC.component_namespace([excluded, manifest, source])
+        self.assertEqual(result['lookup_names'], ['p:run'])
+        self.assertEqual(result['public_names'], [])
+
+    def test_manifest_validation_precedes_default_collection(self):
+        bad_skill = self.component('personal-skill', 'plain/SKILL.md', 'name: invalid name\n')
+        nonmapping = self.namespace_manifest([])
+        malformed = dict(nonmapping, raw=b'{')
+        # All JSON parsing precedes the mapping check and every default definition.
+        for items in ([bad_skill, nonmapping, malformed], [nonmapping, bad_skill, malformed]):
+            with self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace(items)
+            self.assertEqual(str(error.exception), 'plugin.json を JSON として読めない')
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([bad_skill, nonmapping])
+        self.assertEqual(str(error.exception), 'plugin manifest が対応表でない')
+        invalid_reference = self.namespace_manifest({'name': 'p', 'commands': {'run': {}}})
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([invalid_reference, bad_skill])
+        self.assertEqual(str(error.exception), 'component の name の形が違う')
+
+    def test_manifest_commands_then_skills_follow_manifest_input_order(self):
+        commands = self.namespace_manifest({'name': 'p', 'commands': {'run': {}}})
+        skills = self.namespace_manifest({'name': 'p', 'skills': 123})
+        for items, message in (([commands, skills], 'command の本文が無い'),
+                               ([skills, commands], 'plugin skills の形が違う')):
+            with self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace(items)
+            self.assertEqual(str(error.exception), message)
+        both = self.namespace_manifest({'name': 'p', 'skills': 123, 'commands': {'run': {}}})
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([both])
+        self.assertEqual(str(error.exception), 'command の本文が無い')
+        for entries, message in (({'first': {}, 'second': {'content': 123}}, 'command の本文が無い'),
+                                 ({'second': {'content': 123}, 'first': {}}, 'command content が文字列でない')):
+            with self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace([self.namespace_manifest({'name': 'p', 'commands': entries})])
+            self.assertEqual(str(error.exception), message)
+
+    def test_expansion_and_reserved_frontmatter_rejection_precede_exclusion(self):
+        invalid_manifest = self.component('personal-skill', 'folder/.claude-plugin/plugin.json')
+        invalid_manifest.update(raw=b'{', source='marketplace-source')
+        with self.assertRaises(HC.Unclear) as error:
+            HC.component_namespace([invalid_manifest])
+        self.assertEqual(str(error.exception), 'skill-folder plugin を JSON として読めない')
+        for relative in ('synced/SKILL.md', 'anthropic-skills/SKILL.md'):
+            with self.subTest(relative=relative), self.assertRaises(HC.Unclear) as error:
+                HC.component_namespace([self.component('personal-skill', relative, 'name: invalid name\n')])
+            self.assertEqual(str(error.exception), 'component の name の形が違う')
+
     def test_namespace_keeps_aliases_out_of_public_names_and_directory_wins(self):
         items = [
             self.component('personal-skill', 'alpha/SKILL.md', 'name: beta\n'),

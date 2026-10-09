@@ -1359,14 +1359,71 @@ def held_reference(components, root, source, directory=False):
     return matches
 
 
-def component_namespace(components):
-    """定義の優先順位、呼出先、初期化で表示する主名を別々に決める。"""
-    components = component_manifests(components)
-    namespace_components = [item for item in components if item.get('source') != 'marketplace-source' and item.get('namespace_source') != 'marketplace-source']
-    manifests = [(item, strict_json(item['raw'], 'plugin.json')) for item in namespace_components
-                 if item['relative'] == '.claude-plugin/plugin.json' and item['kind'] == 'plugin']
-    if any(not isinstance(data, dict) for _, data in manifests):
-        raise Unclear('plugin manifest が対応表でない')
+def _namespace_manifest_commands(components, manifest, data, add):
+    commands = data.get('commands')
+    if isinstance(commands, dict):
+        for name, entry in commands.items():
+            if not isinstance(name, str) or not isinstance(entry, dict):
+                raise Unclear('plugin commands map の形が違う')
+            source = entry.get('source')
+            content = entry.get('content')
+            bodies = []
+            if source is not None:
+                refs = held_reference(components, manifest['root'], source)
+                if len(refs) != 1:
+                    raise Unclear('command source が一意でない')
+                bodies.append(refs[0]['raw'])
+            if content is not None:
+                if not isinstance(content, str):
+                    raise Unclear('command content が文字列でない')
+                bodies.append(content.encode())
+            if not bodies:
+                raise Unclear('command の本文が無い')
+            # 合成優先順位が解決できない異内容は許可名へ推定追加しない。
+            if len(set(bodies)) != 1:
+                raise Unclear('command source と content が競合している')
+            add(manifest, name, 'command', bodies[0], alias=False)
+    elif commands is not None:
+        refs = [commands] if isinstance(commands, str) else commands
+        if not isinstance(refs, list):
+            raise Unclear('plugin commands の形が違う')
+        for source in refs:
+            held = held_reference(components, manifest['root'], source, directory=True)
+            relative = source
+            while relative.startswith('./'):
+                relative = relative[2:]
+            relative = relative.rstrip('/')
+            for item in held:
+                if item['relative'].lower().endswith('.md'):
+                    command_path = item['relative']
+                    if command_path == relative:
+                        primary = Path(command_path).stem
+                    else:
+                        primary = command_path[len(relative) + 1:] if relative else command_path
+                        primary = primary[:-3].replace('/', ':')
+                    add(item, primary, 'command')
+
+
+def _namespace_manifest_skills(components, manifest, data, add):
+    skills = data.get('skills')
+    if skills is not None:
+        refs = [skills] if isinstance(skills, str) else skills
+        if not isinstance(refs, list):
+            raise Unclear('plugin skills の形が違う')
+        for source in refs:
+            for item in held_reference(components, manifest['root'], source, directory=True):
+                if item['relative'].lower().endswith('/skill.md'):
+                    root_relative = source[2:] if source.startswith('./') else source
+                    direct = item['relative'] == root_relative.rstrip('/') + '/SKILL.md'
+                    folder = item['relative'].split('/')[-2]
+                    primary = component_frontmatter(item['raw'], item['path']).get('name', folder) if direct else folder
+                    add(item, primary, 'skill', alias=not direct)
+                elif item['relative'] == 'SKILL.md':
+                    primary = component_frontmatter(item['raw'], item['path']).get('name', Path(item['root']).name)
+                    add(item, primary, 'skill', alias=False)
+
+
+def _namespace_definitions(components, namespace_components, manifests):
     definitions = []
 
     def add(item, primary, kind, raw=None, alias=True):
@@ -1407,86 +1464,43 @@ def component_namespace(components):
             elif rel.startswith('commands/'):
                 add(item, rel[len('commands/'):-3].replace('/', ':'), 'command')
     for manifest, data in manifests:
-        commands = data.get('commands')
-        if isinstance(commands, dict):
-            for name, entry in commands.items():
-                if not isinstance(name, str) or not isinstance(entry, dict):
-                    raise Unclear('plugin commands map の形が違う')
-                source = entry.get('source')
-                content = entry.get('content')
-                bodies = []
-                if source is not None:
-                    refs = held_reference(components, manifest['root'], source)
-                    if len(refs) != 1:
-                        raise Unclear('command source が一意でない')
-                    bodies.append(refs[0]['raw'])
-                if content is not None:
-                    if not isinstance(content, str):
-                        raise Unclear('command content が文字列でない')
-                    bodies.append(content.encode())
-                if not bodies:
-                    raise Unclear('command の本文が無い')
-                # 合成優先順位が解決できない異内容は許可名へ推定追加しない。
-                if len(set(bodies)) != 1:
-                    raise Unclear('command source と content が競合している')
-                add(manifest, name, 'command', bodies[0], alias=False)
-        elif commands is not None:
-            refs = [commands] if isinstance(commands, str) else commands
-            if not isinstance(refs, list):
-                raise Unclear('plugin commands の形が違う')
-            for source in refs:
-                held = held_reference(components, manifest['root'], source, directory=True)
-                relative = source
-                while relative.startswith('./'):
-                    relative = relative[2:]
-                relative = relative.rstrip('/')
-                for item in held:
-                    if item['relative'].lower().endswith('.md'):
-                        command_path = item['relative']
-                        if command_path == relative:
-                            primary = Path(command_path).stem
-                        else:
-                            primary = command_path[len(relative) + 1:] if relative else command_path
-                            primary = primary[:-3].replace('/', ':')
-                        add(item, primary, 'command')
-        skills = data.get('skills')
-        if skills is not None:
-            refs = [skills] if isinstance(skills, str) else skills
-            if not isinstance(refs, list):
-                raise Unclear('plugin skills の形が違う')
-            for source in refs:
-                for item in held_reference(components, manifest['root'], source, directory=True):
-                    if item['relative'].lower().endswith('/skill.md'):
-                        root_relative = source[2:] if source.startswith('./') else source
-                        direct = item['relative'] == root_relative.rstrip('/') + '/SKILL.md'
-                        folder = item['relative'].split('/')[-2]
-                        primary = component_frontmatter(item['raw'], item['path']).get('name', folder) if direct else folder
-                        add(item, primary, 'skill', alias=not direct)
-                    elif item['relative'] == 'SKILL.md':
-                        primary = component_frontmatter(item['raw'], item['path']).get('name', Path(item['root']).name)
-                        add(item, primary, 'skill', alias=False)
+        _namespace_manifest_commands(components, manifest, data, add)
+        _namespace_manifest_skills(components, manifest, data, add)
+    return definitions
 
-    def rank(item):
-        return (2 if item['kind'].startswith('enterprise-') else 1, item['loader'] == 'skill')
+
+def _namespace_rank(item):
+    return (2 if item['kind'].startswith('enterprise-') else 1, item['loader'] == 'skill')
+
+
+def _namespace_winners(definitions):
     winners = {}
     for item in definitions:
         old = winners.get(item['primary'])
-        if old is None or rank(item) > rank(old):
+        if old is None or _namespace_rank(item) > _namespace_rank(old):
             winners[item['primary']] = item
-        elif rank(item) == rank(old):
+        elif _namespace_rank(item) == _namespace_rank(old):
             if all(old[key] == item[key] for key in ('content_sha256', 'plugin', 'public', 'model', 'alias')):
                 continue
             raise Unclear('同じ主名の component の出所が競合している')
+    return winners
+
+
+def _namespace_routes(winners):
     routes = dict(winners)
     for item in winners.values():
         alias = item['alias']
         if not alias or alias in winners:
             continue
         old = routes.get(alias)
-        if old is None or rank(item) > rank(old):
+        if old is None or _namespace_rank(item) > _namespace_rank(old):
             routes[alias] = item
-        elif rank(item) == rank(old) and old != item:
+        elif _namespace_rank(item) == _namespace_rank(old) and old != item:
             raise Unclear('component の alias の出所が競合している')
+    return routes
+
+
+def _namespace_output(winners, routes):
     loaded = {name: {key: item[key] for key in
                     ('primary', 'alias', 'kind', 'loader', 'plugin', 'content_sha256', 'public', 'model')}
               for name, item in sorted(winners.items())}
@@ -1499,6 +1513,20 @@ def component_namespace(components):
             # legacy command は slash_commands へ載る。init.skills の照合名へ
             # 加えず、保持済み定義と user/model の呼出先には残す。
             'public_names': sorted(name for name, item in winners.items() if item['public'] and item['loader'] == 'skill')}
+
+
+def component_namespace(components):
+    """定義の優先順位、呼出先、初期化で表示する主名を別々に決める。"""
+    components = component_manifests(components)
+    namespace_components = [item for item in components if item.get('source') != 'marketplace-source' and item.get('namespace_source') != 'marketplace-source']
+    manifests = [(item, strict_json(item['raw'], 'plugin.json')) for item in namespace_components
+                 if item['relative'] == '.claude-plugin/plugin.json' and item['kind'] == 'plugin']
+    if any(not isinstance(data, dict) for _, data in manifests):
+        raise Unclear('plugin manifest が対応表でない')
+    definitions = _namespace_definitions(components, namespace_components, manifests)
+    winners = _namespace_winners(definitions)
+    routes = _namespace_routes(winners)
+    return _namespace_output(winners, routes)
 
 
 def plugin_command_names(components):
