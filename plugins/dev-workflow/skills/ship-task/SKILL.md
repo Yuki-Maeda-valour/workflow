@@ -157,6 +157,9 @@ except (Exception, SystemExit) as exc:
      - 以後、周の中で控える値(同 §7)を失ったら失敗扱い(G4)
 3. **作業ツリーの清潔性**: do-task の Phase 0 の 3 と同じ字面の `git status`(前置き・`--no-literal-pathspecs`・`--porcelain=v1`・`--untracked-files=normal`・`--ignore-submodules=dirty`・状態ファイルを外す 4 つの pathspec)で確認する。
    - 無関係な未コミット変更が**あるときだけ**、PR にそれが混ざる旨を警告して続行可否を確認する(停止条件のまとめの表の行に当たるので、このときは必ず確認する。無ければ確認せずに進む)。無人では確認せず失敗扱い(S1)
+   - 安全な事前検査後、ブランチ判定・設計・実装前に今回の開始時 `S` を一度保持し、do-task へ渡す。取得と基準 `B` の区別は [base-commit.md](../do-task/references/base-commit.md) に従う。
+   - 既存作業ブランチの再利用では作成時 OID を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
+   - 承認済み再開は `resume-invocation` とし、以前から保持した追加指定も減らさない。親環境の5値の引継ぎは変更しない。
 4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。
    - `DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。
    - **デフォルトブランチにいるかは、現在のブランチ名(`git branch --show-current`)で判定する**(従来と同じ):
