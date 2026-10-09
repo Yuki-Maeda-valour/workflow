@@ -15,12 +15,12 @@ argument-hint: "[--task=<完了タスクMD> | --analyze-only | --memory-only | -
 - 親の保持値が無い単独の無人入口は、現在の配布元の `../ship-task/scripts/environment-guard.py` を `python3 -B` で一度だけ使う。`bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を渡す。
   - 使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先を動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へすべて渡す。追加の Git/shell 設定は `--config`・`--shell` へ渡す。
   - 一覧は正式な手段で確定した `installPath` 付き配列とする。取得不能なら失敗扱いにする。出力の `state`・`sha256`・`guard`・`guard_sha256`・`plugin` とコピーの plugin ルートを保持する。
-- **どちらの入口も、文書を読む前に照合する**。下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の文書を読む。
+- **どちらの入口も、文書を読む前に照合(照らし合わせて確かめること)する**。下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の文書を読む。
 - 以後の helper 実行・文書読取はコピーだけを使う。使用直前にも同じ hash と `verify` の照合を行い、元の helper を import/source しない。
   - 詳細・有効 plugin 一覧の再照合・子への継承は、コピー内の [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md) §0 に従う。
 
-固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
-Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・`PYTHONPATH`・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
 
 <!-- environment-loader:begin -->
 ```bash

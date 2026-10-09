@@ -8,10 +8,10 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
   - `os.open`・`os.close`・`os.fstat`、`O_DIRECTORY`・`O_NOFOLLOW`・`O_CLOEXEC`、fd(開いたディレクトリを指す番号)を受ける `os.scandir` が必要。
   - `os.stat` の `dir_fd` と `follow_symlinks=False`、`st_dev`・`st_ino`・`st_mode`・`st_uid`・`st_size`・`st_mtime_ns`・`st_ctime_ns`、`os.fsencode`・`os.fsdecode`・`time.monotonic` も必要。
   - helper は起動時の機能検査と実利用時の未対応を 11/`scan-unavailable` にする。`listdir` や shell での代行へ切り替えない。
-  - Python 不在・helper 不在・起動不能・解釈失敗なら停止する。JSON を受け取れた扱いにせず、検査を省いて続行しない。引数・結果・人の確認の正本は [external-runners.md](external-runners.md) §12-9。
+  - Python 不在・helper 不在・起動不能・解釈失敗なら停止する。JSON を受け取れた扱いにせず、検査を省いて続行しない。引数・結果・人の確認の正本(ほかが合わせる元)は [external-runners.md](external-runners.md) §12-9。
   - Python 3.8 互換の構文・API を保つ。3.8 実機が無ければ未確認とし、別版での成功を実測としない。既存の macOS 実測はこの新しい helper の実機確認を含まない。
 
-- Git 対象の内蔵 implementer へ委託する前は、次の確認を独立した bash で実行する。`$1` は解決した do-task の `scripts` ディレクトリとする。PATH で選んだ同じ Python 実体を使う。エントリポイントと通常の Git は起動しない。
+- Git 対象の内蔵 implementer(実装を受け持つ AI)へ委託(作業を別の AI に任せること)する前は、次の確認を独立した bash で実行する。`$1` は解決した do-task の `scripts` ディレクトリとする。PATH で選んだ同じ Python 実体を使う。エントリポイントと通常の Git は起動しない。
 
 <!-- implementation-git-runtime-check:start -->
 ```bash
@@ -37,7 +37,7 @@ PYTHON
   使う標準ライブラリが増えたら、この import 一覧も更新する。現在の `--precheck` は他の同梱 helper を呼ばないため、必須ファイルは上の2本とする。
   `secret-profiles.py` は通常の snapshot の `--secret-profile-ref` 用であり、この入口の必要条件には含めない。事前検査は bash 経由で読むため実行ビットは要求しない。bash・GNU 道具は下記の既存確認も通す。
   Python の不在・起動不能・import や構文確認の失敗、依存の不在・読込不能・起動不能では、理由を報告する。内蔵 implementer の起動・再依頼をせず停止する。
-  本文の照合にある「Python が無ければ報告して続行」の例外は適用しない。素の Git、shell での代行、外部実装への切り替えでは続行しない。環境の修復後に確認からやり直す。
+  本文の照合(照らし合わせて確かめること)にある「Python が無ければ報告して続行」の例外は適用しない。素の Git、shell での代行、外部実装への切り替えでは続行しない。環境の修復後に確認からやり直す。
   `prepare` または `run` で後から必要環境の喪失が判明しても、その読取りは停止して委託元へ報告する。既に動く担当や子孫の自動停止を保証しない。
   profile が無い場合・一部 skill だけの導入でも同じ条件とする。非 Git は既存の判定に従い、この要件を適用しない。引数と停止後の扱いは [implementation-git.md](implementation-git.md) を読む。
 
