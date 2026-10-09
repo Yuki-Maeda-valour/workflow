@@ -297,6 +297,7 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 - agent は、利用者・管理側の非空 MCP 宣言、`auto`・`bypassPermissions`・未知の権限モード、解決できない skill preload を拒否する。受け入れるモードは `default`・`manual`・`acceptEdits`・`plan`・`dontAsk`。plugin agent でホストが無視する項目の例外は、agent 専用と確認できた本文だけに適用し、同じ本文が skill・command としても読まれる場合には適用しない
 - plugin MCP の宣言と標準の設定ファイルは保持した同じ root 内で調べる。外部・未保持・循環・重複・不明型の参照は止める。宣言を検査できても、その MCP の起動許可にはしない。周の厳密な MCP 設定を維持する
 - 名前は、読み込む定義の対応表、呼出名と別名の解決先、利用者とモデルから呼べる名、初期応答に出る公開 skill 名に分ける。plugin の prefix、skill と command、管理側と利用者側の優先順位を解決する。出所・本文・公開条件が一致する重複だけを統合し、曖昧な衝突は止める。非公開の定義も権限検査と名前の占有から除かない。既存の `skillOverrides: off` を保持する
+- `host-check.py` の `component_namespace` は、定義の収集、主名の採用、別名の解決、返却値の構築を同じファイル内の関数で組み立てる。収集では、各宣言のcommandとskillの参照を処理する関数を分ける。保持した入力だけを使い、入力と検査順序、優先順位、診断、返却値を維持する。
 - `disableBundledSkills: true`、`syncClaudeAiSkills: false`、`syncClaudeAiPlugins: false` を固定する。値は真偽値に限り、`0`・`1`・文字列で代用しない。利用者設定・管理設定・cache の各保持元に競合値があれば拒否する
 - 既知の組込み名 `doctor`・`design`・`plugin-authoring`・`checkup` は、同名の外部定義が名前の解決で優先される場合を除き、`skillOverrides` で off にする。`checkup` は有効な別名の一致も扱い、他の3名は主名で判定する。非公開の外部定義も判定から落とさず、正当な同名定義を一律に無効化しない。ホストの観察事実と未知の同名組込みを見分けられない限界は design §7-3 と §10
 
