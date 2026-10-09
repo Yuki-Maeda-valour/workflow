@@ -35,8 +35,8 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 ## 無人モード(`--unattended`)
 
 /ship-task の無人モードが渡す(単独で呼んでもよい)。
-- **文書を読む前の入口**: 親の保持値が1つでも渡された入口は、state・sha256・guard・guard_sha256・plugin の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
-  下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の文書を読む。
+- **文書を読む前の入口**: 親の保持値が1つでも渡された入口は、`state`・`sha256`・`guard`・`guard_sha256`・`plugin` の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
+  下の固定本文で guard の保持hashと環境を照合(照らし合わせて確かめること)し、exit 0 のときだけコピー内の文書を読む。
 - 親の保持値が全て無い単独入口だけは、現在の配布元の `../ship-task/scripts/environment-guard.py` を `python3 -B` で一度使う。
   引数は `bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>`。
   使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
@@ -48,7 +48,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 
 - 下の前提に含む Git 調査より先に、環境の照合後、Phase 0 の「開始前の確認」を通す。
 - **前提**(候補の選択より前に検査する。満たさなければ失敗扱い): タスク MD のパスがある(D4)/
-  - parent-child 構成でない(照合〈照らし合わせて確かめること〉をどのリポジトリで行うかが決まらないため)/
+  - parent-child 構成でない(照合をどのリポジトリで行うかが決まらないため)/
   - 検証のみモードでない(D3)/
   - `{ship-task の}scripts/git-config-digest.py` があり、`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0(ローカルの git 設定のダイジェストを算出できる)
 - **止まるとき**は、理由を「保留」(このタスクに固有の、人の判断が要る)と「失敗扱い」(環境・ツールの異常・照合に通らない・`完了_` への改名後)に分けて返す。改名・commit はしない(ship-task が行う)
@@ -65,8 +65,8 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
   - 通らなければ失敗扱い(G2)
 - **反復の数え方**: Phase 5・5.5 からの差し戻し(相手に返して、やり直してもらうこと)も ITER を増やし、`--max-iter` の判断を仰ぐ点に数える(判断を仰ぐ点に届かないまま、時間切れまで回らないように)
 
-固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
-Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・`PYTHONPATH`・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
 
 <!-- environment-loader:begin -->
 ```bash
@@ -152,7 +152,7 @@ except (Exception, SystemExit) as exc:
 - 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、`PENDING_LIST_SHA256` を `--acknowledged-list` へ渡せる。ログから復元しない。
 - この入口は Phase 0 だけ。Phase 3 の take 後・Phase 4・差戻し・内蔵への引継ぎでは再走査しない。同じ実行の反復で Phase 0 へ戻さない。
 
-最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、PATH 上の bash 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
+最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、`PATH` 上の `bash` 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
 
 1. **管理ルートと対象タスク**: 本体 `root` へ移動する前に管理プロジェクトルートを固定する。
    - 引数のパスがあれば管理ルート相対として最優先し、profile の `task_dir` が不正でも保存先の再解決を行わない。
@@ -193,7 +193,7 @@ except (Exception, SystemExit) as exc:
    - (同じセッションの /ship-task が作った作業ブランチの例外も同書の条件 ⑤)。
    - 無人では『基準不明』を保留にする(git の失敗で基準不明になったときは失敗扱い — D8)。
    - 基準が決まったら、基準の sha と未追跡一覧の状態を控える値として保持する
-6. commit が続く周では、実装前に [review-protocol.md](references/review-protocol.md) の `review-guard.py start` を取り、開始 hash を保持する。タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
+6. commit が続く実行では、実装前に [review-protocol.md](references/review-protocol.md) の `review-guard.py start` を取り、開始 hash を保持する。タスク MD のチェックボックス総数を記録: `grep -cE '^\s*- \[[ xX]\]' {タスクMD}`
 7. **再開判定**(「続きをやって」対応): 次の**いずれか**に当たれば**再開モード**で入る —
    - (A) 手順 5 に入る前から、タスク MD のヘッダに基準コミット行があった(手順 5 は新規着手でも基準行を書くので、手順 5 の前に読んでおいた有無を使う)/
    - (B) タスク MD に `- [x]` がある /
@@ -345,8 +345,8 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
    - **exit 0 か 21 のときだけ Phase 4 の突合へ進む** — それ以外(2 / 4 / 20 / 22 と契約表に無いコード)は終了コードと stderr をそのまま報告して停止する(無人では失敗扱い — D10・D19)。
    - 対象が git リポジトリでないときは生成できないので、その旨を報告し、対象ファイルを直接読んで突合し、Phase 6 の独立レビューへは diff の代わりに『基準なし・非 git』の旨と対象ファイル表のパスを渡す(タスク MD に基準行があるのに git リポジトリでないと判定されたら、続行せず停止して報告する)。
    - 呼び出し引数の組み立て・`secret_paths` 要素の内容ガード・ダイジェスト不一致時の再実行・`- [x]` に対応する変更が見当たらないときの確認手順は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
-   - **commit が続く周では** snapshot 生成の前後を `review-guard.py take` と `seal` で挟む。
-   - snapshot・patch と同じ review 入力、除外 ERE、対象集合を固定する。seal 後の 3 hash と開示一覧を保持し、Phase 6 の reviewer へ渡す。
+   - **commit が続く実行では** snapshot 生成の前後を `review-guard.py take` と `seal` で挟む。
+   - snapshot・patch と同じ review 入力、除外 ERE、対象集合を固定する。`seal` 後の 3 hash と開示一覧を保持し、Phase 6 の reviewer へ渡す。
    - 機密除外・state・review 入力・照合不能時の停止は [references/diff-snapshot-call.md](references/diff-snapshot-call.md) が正本
 2. **チェックリスト突合**: `grep -cE '^\s*- \[(x|X)\]' {タスクMD}` の完了数と Phase 0 の総数を比較。未完了が残るのに完了報告されていないか。各 `- [x]` に対応する変更が diff に実在するか(**全件**。`- [x]` ごとに、対応する変更のパスか、diff を伴わない項目〈品質ゲートの実行など〉である旨を報告に並べる)
 3. **スコープ縮小 grep**: implementer の報告とタスク MD 追記に対して `grep -E '段階的に実施|後続タスク|今回はスコープ外|のみ作成|次回対応|一旦'` を実行。ヒットしたら設計時のスコープと突合し、縮小なら差し戻す
@@ -360,7 +360,7 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 
 ## Phase 5: 完了条件の再実行
 
-commit が続く周では、[review-protocol.md](references/review-protocol.md) の `run-checks` で必須 gate 全件を直接実行し、構造化結果と hash を保持する。
+commit が続く実行では、[review-protocol.md](references/review-protocol.md) の `run-checks` で必須 gate 全件を直接実行し、構造化結果と hash を保持する。
 clean checkout の検査を実行結果として使う。作業ツリー側でも検査して内容が変わった場合は、Phase 4 から対象を固定し直す。
 
 タスク MD のチェックリストにある品質ゲート(format / check / typecheck / test、必要なら build)を **team-lead 自身が実行**し、全て緑を確認する。ロジック変更を含むのにテストが 1 件も追加・更新されていない場合は妥当性を確認する。
@@ -416,10 +416,10 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 2. 独立レビュアーが 1 名以上いて全員 APPROVED であることを確認する。未承認なら完了状態・リネームへ進まず、中断記録に理由を残す(無人では保留として返す — D16)
 3. 改名先(対象タスク MD と同じディレクトリ。以下 `<dir>`)の `<dir>/完了_{タスク名}.md` が既に在れば(`[ -e ] || [ -L ]`)、追記・ステータス更新・改名のどれも行わず停止し、既存ファイルのパスを添えて報告する
    - (上書きも連番もしない — 素の `mv` は黙って上書きする。この停止ではタスク MD を変更しない — 中断時の追加修正記録への追記もしない。無人では失敗扱い — D17)
-4. **commit が続く周**は、この手順 4〜6 の代わりに [review-protocol.md](references/review-protocol.md) の attest→finalize→期待バイト適用を行う。
+4. **commit が続く実行**は、この手順 4〜6 の代わりに [review-protocol.md](references/review-protocol.md) の `attest`→`finalize`→期待バイト適用を行う。
    - 元のモードを保つファイル改名で index をまだ変えず、stage 前の照合を通す。記録の任意追記と `git mv` は使わない。
    - 以下の 4〜6 は commit が続かない単独実行だけ。外部本文の正本ではローカル MD を新設せず、同 reference の外部本文経路に従う。
-   **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は ../create-task/references/task-template.md の記法の規約):
+   **追加修正記録**をタスク MD の追加修正記録の節の中に追記する(`## ` の見出しを足して節の外に書かない — 再開判定と新規着手の判定は節の中だけを見る。節の範囲は `../create-task/references/task-template.md` の記法の規約):
    - 日付 / 使用スキル(do-task)/ 反復回数 / reviewer 結果(3 体なら内訳)/ 品質ゲート実行結果 / 特記事項
 5. ステータス行を `> **ステータス**: ✅ 完了({YYYY-MM-DD})` に更新
 6. 対象タスク MD と同じディレクトリ内で `進行中_{タスク名}.md` を `完了_{タスク名}.md` に改名する。
@@ -457,6 +457,6 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 
 ## Git の共通安全前置き
 
-read・index/worktree の変更・commit・network の全 Git 呼出は、base-commit.md の safe Git 前置きを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
+read・index/worktree の変更・commit・network の全 Git 呼出は、`base-commit.md` の safe Git 前置きを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
 
-filter を使う既存リポジトリは、前置きで一般化しない。base-commit.md の precheck が承認した filter だけを明示的に無効化してから実行する。
+filter を使う既存リポジトリは、前置きで一般化しない。`base-commit.md` の `precheck` が承認した filter だけを明示的に無効化してから実行する。

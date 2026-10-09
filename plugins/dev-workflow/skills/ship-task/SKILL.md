@@ -35,8 +35,8 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、同じ照合を行う。一覧はホストの正式な手段で確定した `installPath` 付き配列とし、取得不能なら失敗扱い。
 以後の helper 実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
 
-固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の bootstrap の保持値へ置き換える。本文への追加・変更はしない。
-Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
+Python の隔離起動(`-I`)で cwd・`PYTHONPATH`・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
 
 <!-- environment-loader:begin -->
 ```bash
@@ -268,8 +268,8 @@ except (Exception, SystemExit) as exc:
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
 - /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
-- 文書変更後は doc 用の開始 state から `take --phase doc`→snapshot→seal→review→run-checks→attest を行う。
-  task 改名なしで doc の stage/commit を照合する。実装 state は流用しない。詳細は review-protocol.md の「文書、保留、公開」。
+- 文書変更後は doc 用の開始 state から `take --phase doc`→snapshot→`seal`→review→`run-checks`→`attest` を行う。
+  task 改名なしで doc の stage/commit を照合する。実装 state は流用しない。詳細は `review-protocol.md` の「文書、保留、公開」。
 
 ## Phase 5: PR 作成
 
@@ -279,14 +279,14 @@ except (Exception, SystemExit) as exc:
 2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin へ渡す。
    作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で repository/head/base/SHA を照合してから成功にする(draft にしない。レビュアー・アサインは付けない)。
    - 本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。
-   - helper は reviews 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
+   - helper は `reviews` 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
 3. PR 本文には次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
    - **完了条件と確認結果**: タスク MD の確認手順と、/do-task の Phase 5.5 で実際に観察した事実(「実施不能」の確認手順は、その旨と理由を書き、手順を残課題へ転記する)
    - **書式・型・テスト・ビルドの自動の検査**: 実行したコマンドと結果
    - **レビュー**: 反復回数・レビュアー編成・最終判定
-   - **review/commit 照合**: push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。task 記録の APPROVED・実施済を採用しない
+   - **review/commit 照合**(レビューした内容と commit の照らし合わせ): push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。task 記録の APPROVED・実施済を採用しない
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user(人の判断が要る指摘)**(あれば)
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
@@ -302,7 +302,7 @@ except (Exception, SystemExit) as exc:
 - `--no-pr` のときも同様にコマンド列だけ示す。
 - 無人では結末 `縮退` で終える。
 - 無人のタスクの周では、PR の作成先を確かめられない(`repo` が null・`gh repo view` が通らない)ときも同じく push・PR を行わず、結末 `縮退` で終える。
-- `gh repo view` が許可の仲介に拒否されたとき(G1)と、push・PR 作成の失敗・拒否は失敗扱い(S7)。
+- `gh repo view` が許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)に拒否されたとき(G1)と、push・PR 作成の失敗・拒否は失敗扱い(S7)。
 
 ## 無人の周の commit と停止(`--unattended` のとき)
 
@@ -358,4 +358,7 @@ except (Exception, SystemExit) as exc:
 
 ## Git の共通安全前置き
 
-対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は base-commit.md の safe Git 前置きを付ける。品質確認は hook に依存させない。filter の例外は base-commit.md の precheck が許したものだけを明示無効化する。公開はこの規則に加えて publish-guard.py を通す。
+対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は `base-commit.md` の safe Git 前置きを付ける。
+- 品質確認は hook に依存させない。
+- filter の例外は `base-commit.md` の `precheck` が許したものだけを明示無効化する。
+- 公開はこの規則に加えて `publish-guard.py` を通す。

@@ -1,14 +1,14 @@
 # Phase 4 の diff スナップショット生成
 
-**無人の profile 集合**: `diff-snapshot.sh` には、基準と開始時の完全 OID をそれぞれ `--secret-profile-ref` として渡す。現在は作業ツリーの `.claude/project-profile.yml` を指し、OID ではない。スクリプトが既定 3 要素、作業ツリーの現在 profile、全参照の profile を決定的に和集合にする。caller は事前検査の後に helper が出した NUL 和集合を SHA-256 化し、その値を `--secret-profile-union-sha256` として同時に渡す。snapshot は profile を安全に再読取して同じ和集合を作り、digest が違えば停止する。これにより caller 側の EXCLUDE と snapshot 内部の除外集合が変化をまたいで食い違わない。開始時 OID は委託前に保持し、消失・短縮 OID・可変 ref・commit に解決できない参照は停止する。空ツリー OID だけは、そのリポジトリで計算した値との完全一致なら profile 無しとして続ける。profile の読取は事前検査の後だけに行い、現在ファイルと親を symlink・特殊ファイルにしない。open 前後と読取後の `fstat` が変われば停止する。profile が存在するときだけ PyYAML が必要で、不在なら標準ライブラリだけで既定 3 要素を使う。snapshot、内蔵レビュー、外部 patch、無人の commit 除外はこの同じ集合を使う。
+**無人の profile 集合**: `diff-snapshot.sh` には、基準と開始時の完全 OID をそれぞれ `--secret-profile-ref` として渡す。現在は作業ツリーの `.claude/project-profile.yml` を指し、OID ではない。スクリプトが既定 3 要素、作業ツリーの現在 profile、全参照の profile を決定的に和集合にする。caller は事前検査の後に helper が出した NUL 和集合を SHA-256 化し、その値を `--secret-profile-union-sha256` として同時に渡す。snapshot は profile を安全に再読取して同じ和集合を作り、digest が違えば停止する。これにより caller 側の `EXCLUDE` と snapshot 内部の除外集合が変化をまたいで食い違わない。開始時 OID は委託(作業を別の AI に任せること)の前に保持し、消失・短縮 OID・可変 ref・commit に解決できない参照は停止する。空ツリー OID だけは、そのリポジトリで計算した値との完全一致なら profile 無しとして続ける。profile の読取は事前検査の後だけに行い、現在ファイルと親を symlink・特殊ファイルにしない。`open` 前後と読取後の `fstat` が変われば停止する。profile が存在するときだけ PyYAML が必要で、不在なら標準ライブラリだけで既定 3 要素を使う。snapshot、内蔵レビュー、外部 patch、無人の commit 除外はこの同じ集合を使う。
 
 `bash {do-task の}scripts/diff-snapshot.sh --cwd <root> --base <基準commit> --out <出力> --secret-profile-ref <基準OID> --secret-profile-ref <開始時OID> --secret-profile-union-sha256 <caller が同じ NUL 和集合から計算した SHA-256>` の繰返し指定で集合を作る。通常の手動 snapshot は `--secret-profile-ref` を付けず、既存の `--exclude-glob` / `--exclude` の契約だけで動く。
 
 ## review/commit 照合の入力
 
-`ship-task` が commit する周では、snapshot と patch を生成する**前**に
+`ship-task` が commit する実行では、snapshot と patch を生成する**前**に
 `{ship-task の}scripts/review-guard.py take` を実行し、生成の**後**に `seal` を実行する。
-`seal --review-input` には内蔵 reviewer へ渡す snapshot と、外部 reviewer 用 patch の両方を渡す。
+`seal --review-input` には内蔵 reviewer(変更を確かめる AI)へ渡す snapshot と、外部 reviewer 用 patch の両方を渡す。
 生成中に対象集合が変われば `seal` は停止する。reviewer が実際に読むファイルと、guard が hash した
 入力を同じパスに固定する。
 
@@ -18,9 +18,9 @@
 - `take` と `seal` の `STATE_SHA256`、`seal` の `TARGET_SHA256`・`REVIEW_BINDING_SHA256` は session に保持する。
   state は `.claude/reviews/` の新規ディレクトリに置く。state と review の状態ファイルは
   review 対象集合には入れない。
-- 生成順序、全入口の precheck、結果の保持、stage/commit の mode、文書・保留・外部本文の経路は
+- 生成順序、全入口の `precheck`、結果の保持、stage/commit の mode、文書・保留・外部本文の経路は
   [review-protocol.md の review/commit 照合](review-protocol.md#reviewcommit-照合)に従う。
-- 開始の `start` は実装前、`take` は snapshot 前、`seal` は実入力の生成後。seal が返す hash に更新し、
+- 開始の `start` は実装前、`take` は snapshot 前、`seal` は実入力の生成後。`seal` が返す hash に更新し、
   `verify --mode pre-stage` に通った集合を reviewer へ渡す。開示一覧も省略しない。
 
 `loop.sh` の周(無人ループの 1 回分の実行)では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。

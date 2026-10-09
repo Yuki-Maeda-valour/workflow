@@ -15,7 +15,7 @@
 - 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 起動できる配置は、プラグインのルート(`loop.sh` の物理パスから 4 階層上 = `scripts/` から 3 階層上。`.claude-plugin/plugin.json` の `name` が `dev-workflow`)の下にあるときだけ。このリポジトリの clone・導入先のキャッシュ・setup.sh の `--link` の配置(物理パスで clone のルートに解決されて起動する)が当たる。setup.sh の `--copy` の配置は plugin.json を置かないので止まる
 - cron から呼ぶときは、利用者が持つこのリポジトリの clone のパスで呼ぶ。導入先のキャッシュは版ごとのパスで、プラグインを更新しても古い版が黙って走るため
-  - cron の環境は PATH が短いので、ホスト CLI・gh・品質ゲート(書式・型・テスト・ビルドの自動の検査)のコマンドが見える PATH を crontab に書く。`HOME`・`XDG_STATE_HOME`・`XDG_CONFIG_HOME` は手動の起動と揃える(揃わないと状態ディレクトリが別になり、ロックと止めの印〈人が消すまで無人ループを止める印のファイル〉が共有されない。`XDG_CONFIG_HOME` が違うと、手動で書いたホスト CLI の証明が見つからず止まる)。
+  - cron の環境は `PATH` が短いので、ホスト CLI・`gh`・品質ゲート(書式・型・テスト・ビルドの自動の検査)のコマンドが見える `PATH` を crontab に書く。`HOME`・`XDG_STATE_HOME`・`XDG_CONFIG_HOME` は手動の起動と揃える(揃わないと状態ディレクトリが別になり、ロックと止めの印〈人が消すまで無人ループを止める印のファイル〉が共有されない。`XDG_CONFIG_HOME` が違うと、手動で書いたホスト CLI の証明が見つからず止まる)。
   - `HOME` は空でない絶対 NFC パス(NFC は、同じ文字を表す別の並びを一つの形にそろえる Unicode の正規化方式)にする。`CLAUDE_CONFIG_DIR` は未設定のときだけ `HOME/.claude` を使い、設定した空文字・相対パス・NFC でない値は受け付けない。先頭の `//` と `..` 成分は拒否し、内部の `//`・`./`・末尾の `/` は同じ物理パスへ正規化して受け付ける。`~` と環境変数の文字列は展開しない。ループ用の設定ディレクトリで起動するなら、cron にも同じ値を渡す。設定の `env` による読込先の変更は §9 で拒否する。
   - hook のコマンドを包む環境変数(`CLAUDE_CODE_SHELL_PREFIX`)は外して起動する。非空なら起動前に止まる(§2)
 - `loop.sh` は自分のプラグインルートを、周のホスト CLI に必ず渡す(フラグは既定表)。導入済みの同名プラグインとの関係は §2 の 12
@@ -80,12 +80,12 @@
 
 1. 引数の検査(使い方の誤りは exit 2。`--mcp-config` のファイルが無いときを含む)
 2. ホストのセッションの中でない: [external-runners.md](../../do-task/references/external-runners.md) §3 判定 2 の環境変数の列のどれか 1 つでも立っていれば止まる。`DEV_WORKFLOW_HOST_CLI` は非空なら止まる向きに読む(判定 2 では「どのホストか」を知るための上書きだが、`loop.sh` には「ホストの中か」だけが要る)。判定はベストエフォートで、判定できないホストは素通りする(決定録 2026-09-23 の決定 12)。列が external-runners.md と一致することは `loop-selftest.sh` が照合(照らし合わせて確かめること)する
-3. 道具(OS・bash は最優先で検査済み): `setsid`・`flock`・`python3`・`timeout`・`realpath`・`stat` がある(無ければ理由コード `tool-missing`。`git` は前置きで確かめる。ホスト CLI の実在は 12)。初回の状態取得で system config の既定パスを使うときは、同じ `git` の `git var GIT_CONFIG_SYSTEM` が実パスを返せることも要る。返せなければ周を始めず、利用者が `GIT_CONFIG_SYSTEM` に実パスを明示してからやり直す。
-4. プラグインのルートと名前(§1)。兄弟の `host-argv.py`・`loop-supervisor.py`・`host-check.py`(12 のホスト CLI の証明と allowed-tools の検査)・`resolve-task-dir.py`・許可の仲介の `loop-permission.py`・`origin-repo.py`(10 の後の origin の URL の検査で打つ。周の skill も使う)・`git-config-digest.py`(周の skill がローカルの git 設定の照合に使う。`loop.sh` は打たない)が在る(無ければ理由コード `plugin-root`)。`python3` を絶対パスに解決する(`/` で始まらなければ `tool-missing`。許可の仲介の hook のコマンドに使う — §9)
+3. 道具(OS・`bash` は最優先で検査済み): `setsid`・`flock`・`python3`・`timeout`・`realpath`・`stat` がある(無ければ理由コード `tool-missing`。`git` は前置きで確かめる。ホスト CLI の実在は 12)。初回の状態取得で system config の既定パスを使うときは、同じ `git` の `git var GIT_CONFIG_SYSTEM` が実パスを返せることも要る。返せなければ周を始めず、利用者が `GIT_CONFIG_SYSTEM` に実パスを明示してからやり直す。
+4. プラグインのルートと名前(§1)。兄弟の `host-argv.py`・`loop-supervisor.py`・`host-check.py`(12 のホスト CLI の証明と `allowed-tools` の検査)・`resolve-task-dir.py`・許可の仲介の `loop-permission.py`・`origin-repo.py`(10 の後の origin の URL の検査で打つ。周の skill も使う)・`git-config-digest.py`(周の skill がローカルの git 設定の照合に使う。`loop.sh` は打たない)が在る(無ければ理由コード `plugin-root`)。`python3` を絶対パスに解決する(`/` で始まらなければ `tool-missing`。許可の仲介の hook のコマンドに使う — §9)
 5. `--host` が既定表にある。`host-argv.py` で既定または上書きの引数を検査する。実行ファイルの後ろは §1 の許可表だけを受け付ける。値は `=` で同じトークンに書く。`effort` は `low`・`medium`・`high`・`xhigh`・`max`、予算は非負の数、回数は正の整数に限る。継続・再開・遠隔実行・plugin 追加・hook 無効化を含む未知の引数、短い別名と束ね書き、重複、値の欠落は子の起動前に拒否する。この引数検査はホスト起動・認証・YAML 読取を行わない。隔離と判定に要る固定引数は従来どおり親が後ろに足す。
    - ホスト CLI へ渡す argv の順は、雛形か `--host-argv` のトークン → 許可リストの値(`--allowed-tools`。`-` で始まる値は使い方の誤り)→ MCP の設定 → 隔離と権限のフラグ(と、許可の仲介の hook を渡す設定を足す起動引数。§9)。隔離と権限のフラグを argv の最後に置く
    - 解決後の argv(`--allowed-tools` の値を含む)に全許可のフラグが無いこと
-6. **起動前の管理パス検査**: 最初の通常 Git・設定読取より先に、入力 `--repo` の `.git` と admin/common の対応、状態ディレクトリと中断印を Git 無し・nofollow・有界に確認する。入力 repo の**絶対 path**に対応する binding は比較専用で、値から任意の path をたどらない。物理 TOP は binding の別の保持値である。binding の不一致・未知の印・旧形式の中断情報は Git を起動せず exit 20 とし、`inflight` と `stop-mark` を保全する。`--local-env-vars` の能力照会も対象 repo の cwd や利用者の global/system 設定を読ませない
+6. **起動前の管理パス検査**: 最初の通常 Git・設定読取より先に、入力 `--repo` の `.git` と admin/common の対応、状態ディレクトリと中断印を Git 無し・nofollow・有界に確認する。入力 repo の**絶対 path**に対応する binding は比較専用で、値から任意の path をたどらない。物理 `TOP` は binding の別の保持値である。binding の不一致・未知の印・旧形式の中断情報は Git を起動せず exit 20 とし、`inflight` と `stop-mark` を保全する。`--local-env-vars` の能力照会も対象 repo の cwd や利用者の global/system 設定を読ませない
    - 通常の cold 検査と状態ディレクトリの安全な配置に通った後だけ、入力 repo の絶対 path と admin/common の対応を排他的に binding する。正常な reinit や管理ディレクトリ移転は、旧状態を人が確認した後で該当 binding を作り直す。別 repo の binding や中断印で正常な起動を止めない
    - 同じ利用者権限で binding と全中断記録を同時に改竄・削除することは防げない。成立条件・影響・検出できる範囲と必要な運用は §10 に従う
 6′. この検査に通った後、対象(`--repo`)が git の作業ツリーのトップで、bare でないことを Git で確かめる。`--repo` が linked worktree のときに 10 で比べる main の worktree も、ここで解決する(解決できなければ止まる)。人の作業場所の管理ディレクトリは `git rev-parse --path-format=absolute --git-dir` で求め、物理パスとして固定する。主 worktree では共有の管理ディレクトリと同じになる
@@ -94,14 +94,14 @@
 9. profile を読み、`features.loop` と `task_dir` を検査する(§1 の profile)。parent-child でない。PyYAML が要るときに無ければ止まる
 10. 実効値を決める(§1)。worktree の置き場(`--worktree-root` か既定)が人のチェックアウトの中にあれば止まる(置き場は `..` と既存の親の symlink を解いた物理パスで比べる。`--repo` が linked worktree のときは、main の worktree とも比べる)
 11. ローカルと origin の関係: `origin` があれば `git ls-remote origin refs/heads/<DEF_NAME>`(読み取りだけ。ネットワークの規則)で origin の sha を得る。同じか、ローカルが先行(origin の sha がローカルの祖先)なら続け、先行する commit を報告に列挙する(その commit は無人の周が開く PR に混ざる)。origin に `refs/heads/<DEF_NAME>` が無い・遅れ・分岐・判定できない(origin の sha がローカルに無い)なら止まる(exit 20)。`origin` が無ければ検査せずに報告する
-12. ホスト CLI の実在: 実行ファイルを `command -v` で絶対パスに解決する(無い・`/` で始まらなければ理由コード `host-cli-missing`。PATH に `.` などがあると、周でリポジトリの中の同名の実行ファイルが起動されうるため)。補助の CLI と周の子の両方に、その実体の realpath(下の「ホスト CLI の証明」で控えたもの)を使う。周の子の起動に使う `env`・`setsid` も絶対パスに解決する(`/` で始まらなければ `tool-missing`)。続けて、雛形のフラグの 2 段照合(argv とホストの `--help`)。`--host-argv` は先に 5 の許可表で検査済みであり、help の照合によって未知の引数や短い別名を許可へ戻さない。導入済みの同名プラグイン: ホスト CLI のプラグイン一覧(補助の CLI)で有効な `dev-workflow` を探し、在って版が `loop.sh` のプラグインの版と違えば止まる(更新か無効化を案内する)。一覧を解析できなければ止まる(黙って素通りしない)。同じ版なら続けて報告する
+12. ホスト CLI の実在: 実行ファイルを `command -v` で絶対パスに解決する(無い・`/` で始まらなければ理由コード `host-cli-missing`。`PATH` に `.` などがあると、周でリポジトリの中の同名の実行ファイルが起動されうるため)。補助の CLI と周の子の両方に、その実体の `realpath`(下の「ホスト CLI の証明」で控えたもの)を使う。周の子の起動に使う `env`・`setsid` も絶対パスに解決する(`/` で始まらなければ `tool-missing`)。続けて、雛形のフラグの 2 段照合(argv とホストの `--help`)。`--host-argv` は先に 5 の許可表で検査済みであり、help の照合によって未知の引数や短い別名を許可へ戻さない。導入済みの同名プラグイン: ホスト CLI のプラグイン一覧(補助の CLI)で有効な `dev-workflow` を探し、在って版が `loop.sh` のプラグインの版と違えば止まる(更新か無効化を案内する)。一覧を解析できなければ止まる(黙って素通りしない)。同じ版なら続けて報告する
    - help の照合は、固定引数と導入版との互換性の診断に使う。上書きした argv では、5 の許可表で先に受理した値付きの長い引数について、help に必須値の表記があれば `=` 形式を追加で確かめる。許可表にない引数や短い別名を受理するためには使わない。
-   - **ホスト CLI の証明(#107 H31。#193)**: 実行ファイルを一度も起動しないうちに、`host-check.py identity` で実体(realpath・dev・ino・size・mtime・ctime・内容の sha256)を控える。以後の補助の CLI・周の子・`--prove-host` の確認は、すべてその realpath で起動する。起動の直前に同じ実体かを照合する(補助の CLI と周の子の起動の直前は stat の値〈dev・inode・size・mtime・ctime〉、周を始める前〈周の途中の印を置く前〉と確認の前後は内容の sha256 まで)。違えば起動しない(周を始める前は exit 20・`host-proof` で、周の途中の印を残さない。補助の CLI では `ERROR [host-proof]` を出して、呼んだ検査の理由〈多くは `environment`〉で止まる。どちらも終わりの環境の照合が通らないので、選定中の worktree は「選定中」の lock のまま残して報告する。人が確かめて片付ける)
-   - 証明は、人が実 hook の拒否と初期応答の公開 skill 名を確かめた記録。実体(realpath・dev・ino・size・sha256)と起動の形(隔離・権限・hook・固定設定)の組ごとに1ファイルで、置き場は `${XDG_CONFIG_HOME:-$HOME/.config}/dev-workflow/loop/host-proofs/`。形式は version 2 とし、定義の要約(`component_sha256`)・固定設定・名前解決・許可規則の要約(`policy_sha256`)・名前解決の版・初期応答の形式と公開名を記録する。要約には論理的な出所・配置・リンクの字面と経路・本文を含める。許可規則の要約には、許可判定版、既存の区切り規則で解いた CLI 規則、保持済み設定の出所ごとの allow・出所の識別値・不在/存在を含める。規則値そのものを証明へ保存しない。配布コピーの実行ごとの置き場、inode・時刻、状態ファイルの場所は含めない。定義・設定・CLI 規則が変わらない別 run の配布コピーでは再利用できる。有効な導入先・定義・公開状態・allow・判定版が変わり、その値に対応する証明が無ければ取り直す。この版より前の policy の証明は使わない。MCP 設定・上書き引数・ログインの全体や、全操作の hook 通過を証明するものではない(§10)。
+   - **ホスト CLI の証明(#107 H31。#193)**: 実行ファイルを一度も起動しないうちに、`host-check.py identity` で実体(`realpath`・`dev`・`ino`・`size`・`mtime`・`ctime`・内容の `sha256`)を控える。以後の補助の CLI・周の子・`--prove-host` の確認は、すべてその `realpath` で起動する。起動の直前に同じ実体かを照合する(補助の CLI と周の子の起動の直前は `stat` の値〈dev・inode・size・mtime・ctime〉、周を始める前〈周の途中の印を置く前〉と確認の前後は内容の sha256 まで)。違えば起動しない(周を始める前は exit 20・`host-proof` で、周の途中の印を残さない。補助の CLI では `ERROR [host-proof]` を出して、呼んだ検査の理由〈多くは `environment`〉で止まる。どちらも終わりの環境の照合が通らないので、選定中の worktree は「選定中」の lock のまま残して報告する。人が確かめて片付ける)
+   - 証明は、人が実 hook の拒否と初期応答の公開 skill 名を確かめた記録。実体(`realpath`・`dev`・`ino`・`size`・`sha256`)と起動の形(隔離・権限・hook・固定設定)の組ごとに1ファイルで、置き場は `${XDG_CONFIG_HOME:-$HOME/.config}/dev-workflow/loop/host-proofs/`。形式は version 2 とし、定義の要約(`component_sha256`)・固定設定・名前解決・許可規則の要約(`policy_sha256`)・名前解決の版・初期応答の形式と公開名を記録する。要約には論理的な出所・配置・リンクの字面と経路・本文を含める。許可規則の要約には、許可判定版、既存の区切り規則で解いた CLI 規則、保持済み設定の出所ごとの allow・出所の識別値・不在/存在を含める。規則値そのものを証明へ保存しない。配布コピーの実行ごとの置き場、inode・時刻、状態ファイルの場所は含めない。定義・設定・CLI 規則が変わらない別 run の配布コピーでは再利用できる。有効な導入先・定義・公開状態・allow・判定版が変わり、その値に対応する証明が無ければ取り直す。この版より前の policy の証明は使わない。MCP 設定・上書き引数・ログインの全体や、全操作の hook 通過を証明するものではない(§10)。
    - 証明が無い・旧形式・必須項目の欠落・形や実体の値の不一致なら、ホスト CLI を起動せずに exit 20(`host-proof`)。ホスト CLI を更新したとき(native の導入〈ホスト CLI を単体の実行ファイルとして入れる導入〉の自動更新を含む)も同じで、人が `--prove-host` で確かめ直すまで使わない。`--prove-host` は打った時点の実体を信頼する(偽の実体は確認を装える)ので、人は先に、更新が正規のものかを確かめる。確かめ方の例: native の導入なら、実体が `~/.local/share/claude/versions/<版>` のファイルそのもので、その版が `--version` の値と同じこと。npm の導入なら、導入元のパッケージと版。報告に出る実体の sha256 を控えておく。`loop.sh` は実体の真正性を確かめない(配布元の checksum などで人が確かめる手段があるかは未確認)
    - 版・help と有効 plugin の一覧を補助 CLI で取得する。一覧から定義を控え直して検査した後、版・help の出力、定義と固定設定の要約を証明と照合する。不一致はセッション前に exit 20(`host-proof`)。初期段階は実体・起動の形と証明の形式を検査し、有効一覧を得る前の値で最終照合を済ませた扱いにしない。毎周の直前にも定義と固定設定を導出し直して照合する。補助 CLI は端末の幅の変数(`COLUMNS`・`LINES`)を外し、同じ固定設定を付けて起動する。
    - **`--prove-host`**: 13 の疎通の後、使い捨てのディレクトリを周の worktree に見立て、同じ監督・固定設定で1回だけ起動する。この確認だけ詳細な初期応答を出す設定を加える。stdout の生データはファイルに置かず、上限4 MiBのパイプ入力として検査し、必要な項目だけを残す。初期応答と結果が各1件あり、`skills` が重複のない文字列の配列で、算出した公開 skill 名と過不足なく一致することが必要。従来の command は権限検査と呼出名には残し、この集合からは外す。さらに、cwd 外の指定先への `Write` について、仲介の記録の拒否・結果の同じ拒否・ファイルの不在を確かめる。保存する応答から account・id・自由な本文などを除く。前後の実体と環境も照合する。欠落・不明形式・不一致・超過・認証失敗・拒否の不成立・時間切れ(既定600秒か周の上限の短い方)は証明を書かず exit 20。成功は証明を書いて exit 0 とし、周を回さない。失敗時に古い証明を自動削除することはない。
-   - `--allow-classifier` では、確認の `Write` を分類器が hook を通さずに許した(2.1.289 の実測。§8)。この形では証明を書けないので、`loop.sh` は `--allow-classifier` を §2 の 2 の直後に exit 20(`classifier`)で拒否する(確認が通るかに頼らない。auto を使えない起動では確認が手動のモードで通りうるため)
+   - `--allow-classifier` では、確認の `Write` を分類器が hook を通さずに許した(2.1.289 の実測。§8)。この形では証明を書けないので、`loop.sh` は `--allow-classifier` を §2 の 2 の直後に exit 20(`classifier`)で拒否する(確認が通るかに頼らない。`auto` を使えない起動では確認が手動のモードで通りうるため)
    - **追加定義と権限の検査(H34・H46・H47)**: 最初の補助 CLI より前と、有効 plugin の一覧を保持した後に、§4 の定義・設定と `allowed-tools` を検査する。前者で分かる異常はホストを起動せず、後者の異常はセッションを起動せず止める。`--dry-run`・`--prove-host` も同じ検査を通る。CLI と保持した全設定の直接 allow を共通判定に通し、初期段階で危険な規則や型違いが分かれば exit 20(`component-policy`)で補助 CLI 前に止める。追加定義の規則は包含判定より前に同じ判定へ通し、広い規則や解釈不能は exit 20(`skill-grants`)で止める。定義や固定設定の異常は exit 20(`component-policy`)。
 13. 疎通: 最初の周の前に、セッションを起動しない認証の確認(補助の CLI)を打つ。終了コード 0 を「通る」とし、それ以外は止まる(認証切れなどの全体に及ぶ失敗で、ブレーカーが働くまでの周のタスクが除外されないように)
 14. `refs/heads/<DEF_NAME>` の固定した sha を控える。共有の git ディレクトリの状態は各周の起動の直前に控える(§3 の 8)。印が無いときの、最後に照合に通った状態との差分は、ここで報告に出す(§4 の「次の起動」)
@@ -162,24 +162,24 @@ Git 設定の解析は 1 呼出 3 秒、展開後の stdout も取得中に 8 Mi
 照合器が改変された状態で自己検査する経路を避ける。各 helper の使用直前、子の起動直前、周の判定前、network Git の前に確認する。
 ネットワークへ出る §2 の 11 は、有効 plugin を確定する 12・認証確認の 13 の後に実行する。
 ホストへ渡す plugin と許可の仲介もコピーを使う。コピー作成後に元 helper を import/source しない。
-権限判定 hook の command には固定 loader と保持 hash を埋め込み、各要求で照合した guard の bytes を実行する。
-権限判定器も照合後に読んだ bytes の hash を確かめて実行し、検査失敗は明示的な deny を返す。
+権限判定 hook の `command` には固定 loader と保持 hash を埋め込み、各要求で照合した guard の bytes を実行する。
+権限判定器も照合後に読んだ bytes の hash を確かめて実行し、検査失敗は明示的な `deny` を返す。
 
-監視対象は利用者の host 設定、有効 plugin の一覧と実体・選択された marketplace 項目、利用者と Linux 管理側の skills/commands/agents、管理者設定とその設定ディレクトリ、
-global/XDG/system の Git 設定と全 include/includeIf 先、既知の shell 設定、明示した MCP 設定。
-Git の引用・継続行は Git 自身で解析し、include は自動で開かせず先に通常ファイルとして調べる。未成立の条件の include 先も控える。
-利用者・Linux 管理側の skills 直下のディレクトリへの導入リンクは、字面・途中の親とリンク・最終ディレクトリの実体を保持して辿る。
+監視対象は利用者の host 設定、有効 plugin の一覧と実体・選択された marketplace 項目、利用者と Linux 管理側の `skills`/`commands`/`agents`、管理者設定とその設定ディレクトリ、
+global/XDG/system の Git 設定と全 `include`/`includeIf` 先、既知の shell 設定、明示した MCP 設定。
+Git の引用・継続行は Git 自身で解析し、`include` は自動で開かせず先に通常ファイルとして調べる。未成立の条件の `include` 先も控える。
+利用者・Linux 管理側の `skills` 直下のディレクトリへの導入リンクは、字面・途中の親とリンク・最終ディレクトリの実体を保持して辿る。
 絶対・相対・多段・途中のディレクトリリンクを順に解決し、最大40回を超えるリンクと循環を拒否する。
 再照合では保持した実体を、新しい対象のディレクトリや本文を開く前に比べ、読取後にも照合する。
-commands・agents・配布コピーの内部リンクは許さない。設定・Git include・shell ファイルの通常リンクは各 reader の既存条件で扱う。
-存在しない既定設定と include 先も「無し」として保持し、追加を検出する。通常完走の後の新しい起動は、その時点を新たな信頼開始にするため、人の正常な設定更新を受け付ける。
+`commands`・`agents`・配布コピーの内部リンクは許さない。設定・Git `include`・shell ファイルの通常リンクは各 reader の既存条件で扱う。
+存在しない既定設定と `include` 先も「無し」として保持し、追加を検出する。通常完走の後の新しい起動は、その時点を新たな信頼開始にするため、人の正常な設定更新を受け付ける。
 利用者設定に加え、設定ディレクトリの `remote-settings.json` も控える。設定の共通 reader は、控えた内容 hash・mode・不在と関係する最終ファイルリンクを照合し、照合した同じ bytes だけを解析する。設定本文は状態と診断へ保存しない。単独の利用者設定・管理設定本体・cache の保持済み最終ファイルリンクは、リンクの連鎖と対象が同じときに使える。親ディレクトリのリンクと管理 drop-in tree 内のリンクは拒否する。
 
-既知 shell の対象は HOME の profile/bash/zsh 起動ファイル、BASH_ENV/ENV/ZDOTDIR の指定先と system の起動設定。
-そこから呼ぶ任意の外部 script、credential helper の実体、PATH の全実行ファイル、OS/Python 標準ライブラリはこの集合に含めない。
+既知 shell の対象は `HOME` の profile/bash/zsh 起動ファイル、`BASH_ENV`/`ENV`/`ZDOTDIR` の指定先と system の起動設定。
+そこから呼ぶ任意の外部 script、credential helper の実体、`PATH` の全実行ファイル、OS/Python 標準ライブラリはこの集合に含めない。
 起動時から改変されている配布物も判定できない。信頼できる配布元・実行環境で開始する。
 
-検査用コピーの起動は、親と3つの直接入口が保持する同じ固定本文で行う。 固定検査と hook の組立は Python の隔離起動(`-I`)で cwd・PYTHONPATH・利用者 site を探索しない。profile 読取など他の補助処理は従来どおり利用者 site の PyYAML を使える。親ディレクトリと末尾を nofollow で調べ、通常ファイルを1 MiB・15秒以内で読み、外部保持hashに一致したバイト列だけを実行する。未検査の参照文書や検査用コピーから、この固定本文を取得し直さない。
+検査用コピーの起動は、親と3つの直接入口が保持する同じ固定本文で行う。 固定検査と hook の組立は Python の隔離起動(`-I`)で cwd・`PYTHONPATH`・利用者 site を探索しない。profile 読取など他の補助処理は従来どおり利用者 site の PyYAML を使える。親ディレクトリと末尾を nofollow で調べ、通常ファイルを1 MiB・15秒以内で読み、外部保持hashに一致したバイト列だけを実行する。未検査の参照文書や検査用コピーから、この固定本文を取得し直さない。
 
 **同じ UID の限界**: コピーや控えだけの持続的な変更は外部保持 hash で拒否する。
 検査の間だけ変えて元へ戻す操作は、内容と mode が戻れば検出できない(回帰で実測)。
@@ -188,11 +188,11 @@ commands・agents・配布コピーの内部リンクは許さない。設定・
 影響は誤った検査結果や未検査コードの実行。乱数名・0600・コピーは隔離ではない。
 高い保証が必要なら、親/監査を別 UID に置き、OS の実行・書込隔離と外部監査を組み合わせる。
 
-`inflight/` の meta・base・checksum は同じ状態領域にある未信頼入力である。次の起動はそれだけを根拠に process へ signal を送らず、worktree/ref を変更・削除もしない。印と成果物を保全して停止し、人が所有者と残ったプロセスを確認する。正常に完走した現実行は親が保持した PID/PGID だけを片付けるため、この停止規則で後片付けを緩めない。
+`inflight/` の `meta`・`base`・`checksum` は同じ状態領域にある未信頼入力である。次の起動はそれだけを根拠に process へ signal を送らず、worktree/ref を変更・削除もしない。印と成果物を保全して停止し、人が所有者と残ったプロセスを確認する。正常に完走した現実行は親が保持した PID/PGID だけを片付けるため、この停止規則で後片付けを緩めない。
 
 終了時も、片付けや報告の Git を呼ぶ前に、親が保持した利用者環境を再照合する。拒否した場合は Git を再実行せず、保持した作業場所だけを報告する。通常終了の直前に変化を検出した場合も終了コード 20 で停止する。
 
-Permission hook の permlog は報告用で、制御判断の根拠にしない。G1 は deny の kind、行の欠落・順序・重複を問わず同じ連続回数として数え、通常の連続失敗と厳しい方で停止する。
+Permission hook の `permlog` は報告用で、制御判断の根拠にしない。G1 は `deny` の `kind`、行の欠落・順序・重複を問わず同じ連続回数として数え、通常の連続失敗と厳しい方で停止する。
 
 **起動**
 
@@ -212,7 +212,7 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
 - 許可リストはホストの利用者設定か起動引数だけで受け付け、profile では受け付けない
 - 保護パス(`.claude/`・`.git` など)への書き込みは、編集の自動許可でも許可リストでも通らず確認に回り、確認は自動で拒否になる。周の中の skill が状態ファイルに書く分だけを、許可の仲介(§9)で通す
 - 推奨: 許可リストはコマンド単位で列挙する。Bash の許可を、ship-task の無人の周が使うコマンド(git・gh・python3・bash〈同梱スクリプト〉・判定と照合〈test・echo・sha256sum。unattended-mode.md の「許可の仲介の構文」。echo は真偽と終了コードを出力に出すため〉・読み取り系〈grep・sed・awk・find・wc・ls・cat・head・tail・sort・diff など〉・対象の品質ゲートのコマンド)に限って列挙する。周の報告に `G1`(許可の拒否)の保留が出たら足す。値の書式と実走で使った値は design §7-3
-- 推奨: 検索のツール(Glob・Grep)が既定で無いホストでは、`--allowed-tools` の CLI 指定に、例えば `Glob(docs/**)` を足して検索道具を戻す。利用者設定の allow への追加では戻らない。括弧の内容は許可するファイル範囲を表さず、読む対象はホストと仲介の判定を受ける。scoped Grep も既存どおり受理するが、指定範囲の読取りを許可する規則として推奨しない。道具名だけの `Glob`・`Grep` と `Glob(*)`・`Grep(*)` は起動前に拒否する。cwd 内の既定読取、明示 scope の Read/Edit、仲介が許す plugin root の読取は維持する。ホストの観察と出典は design §7-3。
+- 推奨: 検索のツール(Glob・Grep)が既定で無いホストでは、`--allowed-tools` の CLI 指定に、例えば `Glob(docs/**)` を足して検索道具を戻す。利用者設定の `allow` への追加では戻らない。括弧の内容は許可するファイル範囲を表さず、読む対象はホストと仲介の判定を受ける。scoped Grep も既存どおり受理するが、指定範囲の読取りを許可する規則として推奨しない。道具名だけの `Glob`・`Grep` と `Glob(*)`・`Grep(*)` は起動前に拒否する。cwd 内の既定読取、明示 scope の Read/Edit、仲介が許す plugin root の読取は維持する。ホストの観察と出典は design §7-3。
 
 **隔離**
 
@@ -251,12 +251,12 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
   - 設定の規則は字面のまま使う。H47 対象 tool の前後空白や曖昧な形は、包含判定より前に拒否する。それ以外も、ホストの読み方と一致しない規則を包含の根拠にはしない。
 - 包含の判定: skill の各規則が、実効許可リストの規則と同値か狭いときだけ通す
   - 先に H47 の危険規則検査を通すため、対象7 tool の裸の規則や `Tool(*)` は、同じ親規則があっても包含の対象へ進まない。ほかの道具名だけの規則は同じ名だけの規則に、指定つきの規則(Bash 以外)は同じ道具名だけか同じ字面の規則に含める。
-  - Bash の規則には、字面どおりに一致する規則(exact)と、頭の語に一致する規則(prefix。`:*` と末尾の ` *` は同値)がある。exact は同じ exact にだけ含める(prefix は exec の包み・`find` の `-exec`/`-delete` を承認しないが、exact は承認できるため)。prefix は、同じ prefix か、語の単位で長い prefix だけを含める
+  - Bash の規則には、字面どおりに一致する規則(exact)と、頭の語に一致する規則(prefix。`:*` と末尾の ` *` は同値)がある。exact は同じ exact にだけ含める(prefix は `exec` の包み・`find` の `-exec`/`-delete` を承認しないが、exact は承認できるため)。prefix は、同じ prefix か、語の単位で長い prefix だけを含める
   - 許可リストに Bash の全体(`Bash`)があれば、Bash の exact・prefix の規則は新しい許可にならないので通す(分類器の起動を除く)
   - `--allow-classifier` の起動は今は拒否する(§2 の 12)。包含の判定では、ホストが広い規則を外すので、許可リストのシェルの規則(exact を含む)と `Monitor` を根拠にしない
 - 止める形
   - Bash の全体(`Bash`・`Bash(*)`)。許可リストに同じものがあっても止める
-  - 未知の道具(公式文書の組み込みの道具と `mcp__<server>__<tool>` の形のほか)。委託の道具(サブエージェントを束ねる道具とその返答の道具を含む)も、未知の道具と同じく止める
+  - 未知の道具(公式文書の組み込みの道具と `mcp__<server>__<tool>` の形のほか)。委託(作業を別の AI に任せること)の道具(サブエージェントを束ねる道具とその返答の道具を含む)も、未知の道具と同じく止める
   - 解釈できない形: シェルの記号・引用・`$`・途中の `*`・空白の崩れ・先頭の語が包み(`timeout`・`watch`・`find`・`xargs`・`env` など)か代入のもの・頭が入力の欄の名のもの(`Bash(description:*)` など)・括弧が 2 つ以上あるもの・単独の `/` で始まる path(定義した場所で起点が変わる)
   - 同じ規則の重複
 - frontmatter(ファイルの先頭の `---` で挟んだ設定)の読み方
@@ -294,9 +294,9 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
 **片付け**(時間切れのとき・周が終わったとき・`loop.sh` がシグナルを受けたとき。判定より前に必ず行う)
 
 1. `loop-supervisor.py` が Linux subreaper(孤児になった子孫を引き取る監督プロセス)になってから、ホストを新しいセッションで起動する。通常終了・時間切れ・TERM/INT/HUP・親の終了通知で、子孫の回収を行う。
-2. 監督は自分の直接の子だけを対象に、親 PID と開始時刻を pidfd(プロセスの実体を指す保持参照)の取得前後で照合して TERM/KILL を送る。子の終了で引き取った孫も同じ手順で回収する。環境の印・セッション・dumpable に依存しない。
-3. 親の loop も起動直後の監督の開始時刻を保持する。停止時は親 PID と開始時刻を照合し、pidfd に送る。整数 PID だけで signal を送らない。別 PID 実体への再利用と読取拒否を区別し、照合不能なら成功扱いにしない。
-4. 監督が `waitpid(-1)` の ECHILD(所有する子が残っていない)を確認してから結果を書く。loop は起動した監督の exit 0 と保持した nonce に合う結果の両方を要求する。高速で正常終了した監督は Bash の終了結果と記録で確認する。読取不能・強制終了・期限超過では、不在を推測せず止める。
+2. 監督は自分の直接の子だけを対象に、親 PID と開始時刻を `pidfd`(プロセスの実体を指す保持参照)の取得前後で照合して TERM/KILL を送る。子の終了で引き取った孫も同じ手順で回収する。環境の印・セッション・dumpable に依存しない。
+3. 親の loop も起動直後の監督の開始時刻を保持する。停止時は親 PID と開始時刻を照合し、`pidfd` に送る。整数 PID だけで signal を送らない。別 PID 実体への再利用と読取拒否を区別し、照合不能なら成功扱いにしない。
+4. 監督が `waitpid(-1)` の `ECHILD`(所有する子が残っていない)を確認してから結果を書く。loop は起動した監督の exit 0 と保持した nonce に合う結果の両方を要求する。高速で正常終了した監督は Bash の終了結果と記録で確認する。読取不能・強制終了・期限超過では、不在を推測せず止める。
 5. 回収対象への TERM の後、`--kill-grace` の猶予を経て KILL を送る。回収の上限を超えても判定や次の周へ進めない。selftest の `DEV_WORKFLOW_LOOP_TEST_LEFTOVER` は非空なら「残った」へ倒すだけで、安全側の停止を外さない。
 
 **残ったときの終わり方**(呼び出し側ごと)。どれも照合(下の「共有の状態の照合」)はしない — 残ったプロセスがまだ書き換えうるため。止めの印の理由に「残ったプロセス」と確認できない理由を書き、周の途中の印と worktree を残す(残ったプロセスと次の周を並行させず、周の識別子の記録を上書きさせないため)。
@@ -313,12 +313,12 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
 
 **共有の状態の照合**(片付けの直後、残りが無いとき。`loop.sh` の次の git〈§5 の `ls-remote` を含む〉より前)
 
-状態観察は共有の全 ref(参照先 OID と symref の指す先。未解決の loose symref も含む)と、各 linked worktree の private `HEAD`・private `refs/`、全 worktree(パス・HEAD・lock の理由)、開始時点にある各 worktree の index 生バイトと追跡・未追跡・ignored を含むファイル木を控える。新しく作った当該周の worktree だけは内容走査から外すが、他の既存 worktree は外さない。通常ファイルは `lstat`→`O_NOFOLLOW|O_NONBLOCK` の open→同一 fd の hash→`fstat` で観察し、symlink は字面、directory は構造、FIFO/socket/device は種別・mode・device 番号だけを記録する。祖先 directory は解決用の inode・型・mode だけを照合するため、無関係な sibling の追加による時刻変化は停止理由にしない。`secret_paths` は、worktree の物理 path ごとに開始時から保持した glob と現在安全に読んだ glob の和集合を使う。正常完走した別実行の間に人の worktree を移動したときは、その checkout 固有の Git 管理ディレクトリで和集合を引き継ぐ。周の途中で当該周以外の人の worktree が追加・移動したときは、profile や本文を読む前に停止する。後で profile から削除・縮小しても既に機密として扱った path を hash しない。内容を開かず path・種別・metadata だけにし、機密ディレクトリの子も列挙するため追加・削除・型・size・時刻の変化は検出する。通常ファイルを同じ ctime まで保ったまま変えられるとは主張しない。限界は、機密 symlink の**作業ツリー外**の target の内容だけを変え、symlink 自体の字面・metadata が変わらない場合である。target は開かないので検出しない。機密は別の保護領域で管理する。
+状態観察は共有の全 ref(参照先 OID と symref の指す先。未解決の loose symref も含む)と、各 linked worktree の private `HEAD`・private `refs/`、全 worktree(パス・HEAD・lock の理由)、開始時点にある各 worktree の index 生バイトと追跡・未追跡・ignored を含むファイル木を控える。新しく作った当該周の worktree だけは内容走査から外すが、他の既存 worktree は外さない。通常ファイルは `lstat`→`O_NOFOLLOW|O_NONBLOCK` の `open`→同一 fd の hash→`fstat` で観察し、symlink は字面、directory は構造、FIFO/socket/device は種別・mode・device 番号だけを記録する。祖先 directory は解決用の inode・型・mode だけを照合するため、無関係な sibling の追加による時刻変化は停止理由にしない。`secret_paths` は、worktree の物理 path ごとに開始時から保持した glob と現在安全に読んだ glob の和集合を使う。正常完走した別実行の間に人の worktree を移動したときは、その checkout 固有の Git 管理ディレクトリで和集合を引き継ぐ。周の途中で当該周以外の人の worktree が追加・移動したときは、profile や本文を読む前に停止する。後で profile から削除・縮小しても既に機密として扱った path を hash しない。内容を開かず path・種別・metadata だけにし、機密ディレクトリの子も列挙するため追加・削除・型・size・時刻の変化は検出する。通常ファイルを同じ `ctime` まで保ったまま変えられるとは主張しない。限界は、機密 symlink の**作業ツリー外**の target の内容だけを変え、symlink 自体の字面・metadata が変わらない場合である。target は開かないので検出しない。機密は別の保護領域で管理する。
 
-既定の上限は 100000 項目、通常ファイル合計 1 GiB、1 件 64 MiB、壁時計 60 秒である。Git の状態出力は保持する前に同じ合計上限で drain し、ディレクトリ名は項目上限を消費してから保持する。上限、到達する `include.path` と**有効な** `includeIf` の欠落・循環・読取不能・FIFO、または lstat/open/read の間の置換は検査不能として止まる。無効な `includeIf` の欠落は機械固有の通常設定として開かない。利用者だけが `loop.sh` の `--state-max-items`、`--state-max-bytes`、`--state-max-file-bytes`、`--state-max-seconds` で上限を広げられ、profile と子プロセスからは変えられない。旧形式の inflight は必須欄を現状で補完せず停止する。
+既定の上限は 100000 項目、通常ファイル合計 1 GiB、1 件 64 MiB、壁時計 60 秒である。Git の状態出力は保持する前に同じ合計上限で drain し、ディレクトリ名は項目上限を消費してから保持する。上限、到達する `include.path` と**有効な** `includeIf` の欠落・循環・読取不能・FIFO、または `lstat`/`open`/`read` の間の置換は検査不能として止まる。無効な `includeIf` の欠落は機械固有の通常設定として開かない。利用者だけが `loop.sh` の `--state-max-items`、`--state-max-bytes`、`--state-max-file-bytes`、`--state-max-seconds` で上限を広げられ、profile と子プロセスからは変えられない。旧形式の `inflight` は必須欄を現状で補完せず停止する。
 
-- profile と設定 origin は、親ディレクトリを fd で保持してから `lstat`・`open`・`fstat` を行う。親ディレクトリの差替え、通常ファイル以外、読取中の変更は内容を採用せず停止する。設定 origin の**leaf symlink**は初回と正常完走した別実行の新しい基準では許し、link の字面・metadata と通常ファイル target の実体・digest を記録する。同じ実行中または inflight 再開の後観測では、実効設定の include target を Git が follow する呼出しより前に、保持済み origin graph を **各既存 worktree の文脈**で fd 経由で検査し、worktree の `.git` と admin の `commondir` も保持した共有管理パスへ照合してから Git を呼ぶ。全保持 origin と、common・各 worktree の `config.worktree`、利用者/system の候補 root の不在を含む候補集合を、parser を起動しない第1段階で完全一致させる。存在する候補は link 種別・字面・metadata・本文 digest を照合し、不在だった候補の新設は本文を開かず停止する。第2段階の `--file --no-includes` parser は repository 外と利用者/system config を外した環境で保持 fd だけを読む。保持済み通常 source に新しい include が加わった場合も、その target を開く前に停止する。基準に無い origin は通常ファイルも link も開かない。link の差替え・新設と、保持済み origin の本文・metadata の変更は停止し、Git が新しい設定層を有効にする前に比較不能として扱う。正常完走した別実行の新しい基準では、同じ target の本文変更を hash の差分として記録する。設定はまず `--no-includes` で宣言だけを安全に解析する。`includeIf` の有効性は、引用値・`gitdir`/`onbranch`/`hasconfig` を独自実装せず、到達先を持たない marker 設定を Git 自身に評価させる。`onbranch` は保持した HEAD と共通 ref の symbolic-ref 連鎖を no-follow で解決した**最終 branch**を写した隔離 Git dir、`hasconfig` は保持済み remote URL と repository 外の marker で評価し、未検査 target を条件評価に読ませない。全通常 source と有効な非 `hasconfig` graph の remote URL を先に集めてから `hasconfig` を反復評価し、全有効到達先を no-follow で確定した後にだけ実効設定を読む。同じ inode の origin でも字面と親 directory の文脈を別 node として保持し、循環は同じ inode と親 directory の組だけで判定する。各 worktree で Git が解決した実効設定の digest と、origin の種別・metadata・通常ファイル digest を両方比べる。
-- state JSON も外部から書き換えられうる入力として扱う。比較時は parent fd から通常ファイルだけを `O_NOFOLLOW|O_NONBLOCK` で有界に読み、FIFO・symlink・不正 JSON・旧 schema は比較不能として停止する。出力は予測可能な `.tmp` 名を開かず、同じ parent fd 内の排他的な一時ファイルを fsync 後に置換する。
+- profile と設定 origin は、親ディレクトリを fd で保持してから `lstat`・`open`・`fstat` を行う。親ディレクトリの差替え、通常ファイル以外、読取中の変更は内容を採用せず停止する。設定 origin の**leaf symlink**は初回と正常完走した別実行の新しい基準では許し、link の字面・metadata と通常ファイル target の実体・digest を記録する。同じ実行中または `inflight` 再開の後観測では、実効設定の `include` target を Git が follow する呼出しより前に、保持済み origin graph を **各既存 worktree の文脈**で fd 経由で検査し、worktree の `.git` と admin の `commondir` も保持した共有管理パスへ照合してから Git を呼ぶ。全保持 origin と、common・各 worktree の `config.worktree`、利用者/system の候補 root の不在を含む候補集合を、parser を起動しない第1段階で完全一致させる。存在する候補は link 種別・字面・metadata・本文 digest を照合し、不在だった候補の新設は本文を開かず停止する。第2段階の `--file --no-includes` parser は repository 外と利用者/system config を外した環境で保持 fd だけを読む。保持済み通常 source に新しい `include` が加わった場合も、その target を開く前に停止する。基準に無い origin は通常ファイルも link も開かない。link の差替え・新設と、保持済み origin の本文・metadata の変更は停止し、Git が新しい設定層を有効にする前に比較不能として扱う。正常完走した別実行の新しい基準では、同じ target の本文変更を hash の差分として記録する。設定はまず `--no-includes` で宣言だけを安全に解析する。`includeIf` の有効性は、引用値・`gitdir`/`onbranch`/`hasconfig` を独自実装せず、到達先を持たない marker 設定を Git 自身に評価させる。`onbranch` は保持した HEAD と共通 ref の `symbolic-ref` 連鎖を no-follow で解決した**最終 branch**を写した隔離 Git dir、`hasconfig` は保持済み remote URL と repository 外の marker で評価し、未検査 target を条件評価に読ませない。全通常 source と有効な非 `hasconfig` graph の remote URL を先に集めてから `hasconfig` を反復評価し、全有効到達先を no-follow で確定した後にだけ実効設定を読む。同じ inode の origin でも字面と親 directory の文脈を別 node として保持し、循環は同じ inode と親 directory の組だけで判定する。各 worktree で Git が解決した実効設定の digest と、origin の種別・metadata・通常ファイル digest を両方比べる。
+- state JSON も外部から書き換えられうる入力として扱う。比較時は parent fd から通常ファイルだけを `O_NOFOLLOW|O_NONBLOCK` で有界に読み、FIFO・symlink・不正 JSON・旧 schema は比較不能として停止する。出力は予測可能な `.tmp` 名を開かず、同じ parent fd 内の排他的な一時ファイルを `fsync` 後に置換する。
 - 許す差は、当該周の worktree が保持した path と lock 理由のまま、`refs/heads/task/{名}` と HEAD が同一の commit へ進むこと、その commit と同じ OID の `refs/remotes/origin/task/{名}` が新設または進むことだけである。commit に伴う当該 worktree の clean index の生バイト変更もこの条件に限り許す。child が detached のまま commit したときは、その当該 worktree の限定差だけを判定器へ渡すが、正常の条件を満たせないので失敗として残す。他の ref、symref、worktree、index、ファイル、設定の差は名前の接頭辞だけで許さない。
 
 - 共有の git ディレクトリ(`git rev-parse --git-common-dir`)を、その周の起動の直前の控え(§3 の 8)と比べる
@@ -334,29 +334,29 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
   - 管理パスは起動時に固定した物理パスを使う。実行用 worktree の設定とは分けて保持する
   - `extensions.worktreeConfig` により親が当該周の新しい管理領域へ複製する設定は、保持した親と正確な管理パスに結び付くときだけ許す。親が正常に消した当該領域の設定だけは次の周の保持集合から外す。未知の設定・link・別 worktree の追加・削除は許さない
   - 利用者の設定は自動復元・削除しない
-- 設定の保持構造に差があれば、新しい値・新しい include 先を読まずに理由を分類して止める。通常の周では差分と証拠を残して exit 10、中断後の照合では止めの印を残して exit 20 とし、検査不能を成功や内部の失敗へ読み替えない
+- 設定の保持構造に差があれば、新しい値・新しい `include` 先を読まずに理由を分類して止める。通常の周では差分と証拠を残して exit 10、中断後の照合では止めの印を残して exit 20 とし、検査不能を成功や内部の失敗へ読み替えない
 - `refs/heads/<DEF_NAME>` が起動時に固定した sha のままか
 - 変わっていたら、差分を報告し、止めの印を置いて、§5 のネットワークの git を打たずに止まる(exit 10。§6)
 - この状態 snapshot では、周が共有の `config` に書くと分かったら許しを足さず、書かない手順に skill を直す。これは共有状態を観察する規則であり、子の commit・push の hook を放置する意味ではない。#190 の共通 safe Git 前置きは [loop.sh の `GIT_PRE`](../scripts/loop.sh)・[unattended-mode.md の手順](unattended-mode.md)・[publish-guard.py の `SAFE_GIT_PREFIX`](../scripts/publish-guard.py) で `core.hooksPath=/dev/null` を渡して hook を無効化する。品質は hook ではなく format ゲートで確認する(#107 H7)
 
 **状態ディレクトリ**
 
-- 場所: `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/loop/<識別子>/`(人のチェックアウトの外)。識別子は起動前 helper が nofollow で得た common 管理パスの物理値のハッシュであり、通常 Git を起動する前にも同じ場所を比較できる(同じリポジトリの別の worktree から起動しても同じ場所・同じロックになる)。入力 repo の**絶対 path**に結び付く binding は、この子ディレクトリではなく `STATE_BASE/.repo-bind-<その path の sha256>.json` に置く。symlink の別名は別のキーで、物理 TOP は binding の別の保持値である
+- 場所: `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/loop/<識別子>/`(人のチェックアウトの外)。識別子は起動前 helper が nofollow で得た common 管理パスの物理値のハッシュであり、通常 Git を起動する前にも同じ場所を比較できる(同じリポジトリの別の worktree から起動しても同じ場所・同じロックになる)。入力 repo の**絶対 path**に結び付く binding は、この子ディレクトリではなく `STATE_BASE/.repo-bind-<その path の sha256>.json` に置く。symlink の別名は別のキーで、物理 `TOP` は binding の別の保持値である
 - ロック(`flock`)で二重起動を防ぐ。子にはロックの fd を渡さない
 - 置くもの
   - 入力 repo の絶対 path と admin/common の対応を持つ binding。binding は cold 検査と状態配置の確認後にだけ `STATE_BASE` 直下へ排他的に作り、次の起動では比較専用に使う。現在の `.git` や `commondir` が差し替わって別の状態を選ぶ経路を許さない
   - 実行ごとの報告 `<実行 ID>/report.md` と、同じ `<実行 ID>/` の下の周のログ・`.claude/reviews` の写し(§5)
-  - 最後に照合に通った状態(期待した状態)`last-verified.json`。人の管理パスと設定も含む。周の照合に通った after-state の生バイトと sha256 を親が保持し、通常終了・TERM などの後でも新たな snapshot を基準にしない。親が実際に削除できた当該周の own worktree だけは、`worktrees`・`worktree_contents`・`worktree_configs`・`secret_patterns` の四集合からその絶対 path の1件ずつを派生状態へ外す。派生状態と最終観察を self-ref 例外なしで厳密比較し、比較中の保持・派生・最終観察の hash 変化も拒否する。成功した最終観察の生バイトだけを atomic に昇格し、食い違いを見つけた状態は残さない。未信頼の `inflight` を安全に再開する根拠には使わず、次の起動では環境 bootstrap 前に中断印を保全して拒否する
-  - 周の途中の印 `inflight/`(ディレクトリ): 周の起動の直前(§3 の 8 の後)に置く。中身は、周の識別子(`DEV_WORKFLOW_LOOP_ITER` の値)・タスクの {名}・§3 の 8 で控えた状態(人の管理パスと設定を含む)・その実行が固定したデフォルトブランチの名前と sha。**基準昇格段階**へ入った後は、上の状態昇格まで成功したときだけ消す。保持・派生・最終観察のいずれかが照合不能か書換えられたときは、`last-verified.json` を上書きせず、この印と証拠を残す。これより前の通常の周内照合で共有状態の差分(比較元の改変を含む)を見つけ、子の片付けが済んだときは、旧 `last-verified.json` を保ったまま stop-mark へ差分を移してこの印を消す
-  - 止めの印 `stop-mark.md`: **通常の共有状態の照合**で食い違いを見つけて止まったとき(シグナル・EXIT の trap の経路で差分があったときを含む)と、残ったプロセスを止められなかったときに、理由と差分とともに置く。置くとき、その周の片付けが済んでいれば周の途中の印を消す(止めの印が差分を持つので役目が終わる)。済んでいなければ周の途中の印を残す(人が所有者・残った子・成果物を独立に確認する必要があるため)。起動前の管理パス検査が拒否したときは、比較の前なので `inflight` も `stop-mark` も消さずに exit 20 とする
-- **昇格中のシグナル**: 通常周は判定後に own worktree の削除を始める前から、最終観察の厳密比較・`last-verified.json` の昇格・`inflight` の削除・active 状態の解除を1つの狭い完了区間で行う。TERM/HUP/INT の先着1件はこの区間だけ保留し、成功または stop-mark と旧基準・印の保全まで完了してから同じ終了処理へ渡す。比較・昇格が失敗した場合に signal より先に `inflight` や証拠を消さない
-- 中断印は人が独立に所有を確認してから扱う。印の場所と消し方は報告と ERROR の文言に出る(§7)
+  - 最後に照合に通った状態(期待した状態)`last-verified.json`。人の管理パスと設定も含む。周の照合に通った after-state の生バイトと sha256 を親が保持し、通常終了・TERM などの後でも新たな snapshot を基準にしない。親が実際に削除できた当該周の own worktree だけは、`worktrees`・`worktree_contents`・`worktree_configs`・`secret_patterns` の四集合からその絶対 path の1件ずつを派生状態へ外す。派生状態と最終観察を self-ref 例外なしで厳密比較し、比較中の保持・派生・最終観察の hash 変化も拒否する。成功した最終観察の生バイトだけを atomic に昇格し、食い違いを見つけた状態は残さない。未信頼の `inflight` を安全に再開する根拠には使わず、次の起動では環境 `bootstrap` 前に中断印を保全して拒否する
+  - 周の途中の印 `inflight/`(ディレクトリ): 周の起動の直前(§3 の 8 の後)に置く。中身は、周の識別子(`DEV_WORKFLOW_LOOP_ITER` の値)・タスクの {名}・§3 の 8 で控えた状態(人の管理パスと設定を含む)・その実行が固定したデフォルトブランチの名前と sha。**基準昇格段階**へ入った後は、上の状態昇格まで成功したときだけ消す。保持・派生・最終観察のいずれかが照合不能か書換えられたときは、`last-verified.json` を上書きせず、この印と証拠を残す。これより前の通常の周内照合で共有状態の差分(比較元の改変を含む)を見つけ、子の片付けが済んだときは、旧 `last-verified.json` を保ったまま `stop-mark` へ差分を移してこの印を消す
+  - 止めの印 `stop-mark.md`: **通常の共有の状態の照合**で食い違いを見つけて止まったとき(シグナル・EXIT の `trap` の経路で差分があったときを含む)と、残ったプロセスを止められなかったときに、理由と差分とともに置く。置くとき、その周の片付けが済んでいれば周の途中の印を消す(止めの印が差分を持つので役目が終わる)。済んでいなければ周の途中の印を残す(人が所有者・残った子・成果物を独立に確認する必要があるため)。起動前の管理パス検査が拒否したときは、比較の前なので `inflight` も `stop-mark` も消さずに exit 20 とする
+- **昇格中のシグナル**: 通常周は判定後に own worktree の削除を始める前から、最終観察の厳密比較・`last-verified.json` の昇格・`inflight` の削除・active 状態の解除を1つの狭い完了区間で行う。TERM/HUP/INT の先着1件はこの区間だけ保留し、成功または `stop-mark` と旧基準・印の保全まで完了してから同じ終了処理へ渡す。比較・昇格が失敗した場合に signal より先に `inflight` や証拠を消さない
+- 中断印は人が独立に所有を確認してから扱う。印の場所と消し方は報告と `ERROR` の文言に出る(§7)
 
 **次の起動**(§2 の 7。ロックの直後、デフォルトブランチの固定・profile の読み取り・ネットワークの git より前)
 
-- 止めの印または周の途中の印があれば exit 20。印の内容・checksum の一致を承認に使わず、signal・worktree 削除・unlock・ref 更新を行わない。
+- 止めの印または周の途中の印があれば exit 20。印の内容・`checksum` の一致を承認に使わず、signal・worktree 削除・unlock・ref 更新を行わない。
 - 旧版の控え、別 worktree からの再開、設定が変わっていない中断でも同じ。人が実行の所有者・残ったプロセス・成果物を独立に確認してから印を扱う。
-- 現在の supervisor が所有した子の不在を、保存 PID・印・checksum から補完しない。親または supervisor が SIGKILL された場合も、人が別の信頼領域から残存プロセスと共有状態を確認する。
+- 現在の supervisor が所有した子の不在を、保存 PID・印・`checksum` から補完しない。親または supervisor が SIGKILL された場合も、人が別の信頼領域から残存プロセスと共有状態を確認する。
 - どちらの印も無ければ、最後に照合に通った状態と今の状態を比べ、差分があれば報告に出して続ける(実行と実行の間の変化は人の操作でもありうるため)
   - 人の設定変更・起動元の変更・旧 `last-verified.json` の不足も同じ扱い。次に照合に通ったときだけ、新形式の状態を保存する
   - 起動元変更時は前の起動元の設定を再読しない。中断の無い実行間の比較を、前の起動元の未変更の保証には使わない
@@ -367,7 +367,7 @@ Permission hook の permlog は報告用で、制御判断の根拠にしない�
 
 無人の task 周の正常条件には、source と doc の各 `review-guard.py verify` が 0 であることを加える。
 周の report には検証担当が直接得た `REVIEW_BINDING_SHA256`、照合結果、ignore/ignored 未追跡の変化、
-品質コマンド・入口・test/selftest/検証器の変更一覧を残す。task MD の追加修正記録や reviewer 名だけから
+品質コマンド・入口・test/selftest/検証器の変更一覧を残す。task MD の追加修正記録や reviewer(変更を確かめる AI)名だけから
 APPROVED・実施済を再構成しない。guard の state と review input は `.claude/reviews/` の状態ファイルであり、
 review 対象集合へ含めない。
 
@@ -410,8 +410,8 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 
 - 周の前の確かめ方は、最大周回数 → 時間予算 → 停止ファイルの順。当たったものを報告の理由にする
 - 停止ファイルは止める向きにしか効かないので、リポジトリの中に置いてよい
-- 人の checkout 内の停止ファイルは、開始時に保持した**正確な** path が不在から空の通常ファイルになった場合だけ、共有状態の照合で許す。既定と `--stop-file` の指定は同じ規則であり、必要な新規親 directory はその leaf へ一意に続くものだけに限る。既存 file の変更、nonempty・link・特殊型、親の差替え、sibling、他の人の worktree と当該周の child worktree の同名 path は通常どおり差分として止める。周の前から停止ファイルが在る場合に child を起動しない規則は変えない
-- 連続失敗には §5 の失敗と G1 の保留を数える。ほかの正常終了で 0 に戻る。許可ログは参考表示だけで、偽 protected・削除・並べ替え・重複によって回数を減らさない。
+- 人の checkout 内の停止ファイルは、開始時に保持した**正確な** path が不在から空の通常ファイルになった場合だけ、共有の状態の照合で許す。既定と `--stop-file` の指定は同じ規則であり、必要な新規親 directory はその leaf へ一意に続くものだけに限る。既存 file の変更、nonempty・link・特殊型、親の差替え、sibling、他の人の worktree と当該周の child worktree の同名 path は通常どおり差分として止める。周の前から停止ファイルが在る場合に child を起動しない規則は変えない
+- 連続失敗には §5 の失敗と G1 の保留を数える。ほかの正常終了で 0 に戻る。許可ログは参考表示だけで、偽 `protected`・削除・並べ替え・重複によって回数を減らさない。
 - 周の途中の全体の失敗(認証切れなど)は、連続失敗か終了コード 30 で止まる
 
 **終了コード**
@@ -429,8 +429,8 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
 
 状態ディレクトリの `<実行 ID>/report.md` に書き、要約を stdout に出す。
 
-- 起動時: 実効値・対象の一覧・読み飛ばしたタスクと理由・作成日が無いタスク・origin の URL の検査の結果(§2。origin が無ければ、周は push しないこと)・先行する commit・MCP の有無・導入済みの同名プラグインの版・ホスト CLI の実体と証明・skill と command の allowed-tools の検査の件数・許可の仲介の許可リストのうち使わない形の項目(§9)・profile で無視したキー・残った worktree(過去の実行の分を含む)・前の実行との間の共有の状態の差分
-- 周ごと: タスク・結末・判定(§5)・PR の URL か保留の理由(対話点番号)・終了コード・所要時間・片付けの結果・共有の `config` の差分(照合に通った周は `無し`)・ホストの結果の拒否の欄(あれば。配列ならすべての結果の要素から — §5)・許可の仲介の記録(§9。参考表示。allow・deny の件数と種類、deny の行)・周のログのパス
+- 起動時: 実効値・対象の一覧・読み飛ばしたタスクと理由・作成日が無いタスク・origin の URL の検査の結果(§2。origin が無ければ、周は push しないこと)・先行する commit・MCP の有無・導入済みの同名プラグインの版・ホスト CLI の実体と証明・skill と command の `allowed-tools` の検査の件数・許可の仲介の許可リストのうち使わない形の項目(§9)・profile で無視したキー・残った worktree(過去の実行の分を含む)・前の実行との間の共有の状態の差分
+- 周ごと: タスク・結末・判定(§5)・PR の URL か保留の理由(対話点番号)・終了コード・所要時間・片付けの結果・共有の `config` の差分(照合に通った周は `無し`)・ホストの結果の拒否の欄(あれば。配列ならすべての結果の要素から — §5)・許可の仲介の記録(§9。参考表示。`allow`・`deny` の件数と種類、`deny` の行)・周のログのパス
 - 止まった理由(§6)と、共有の状態が変わったときはその差分。止めの印を置いたときは、印のパス・置いた理由と差分・消し方の定型(差分を確かめ、必要なら元に戻してから、印のファイル `stop-mark.md` を消す)。exit 20・10 の ERROR の文言にも同じ案内を載せる
 - 残った worktree(パス・lock の理由・その周の結末。過去の実行が残した分は「(過去の実行)」と、その実行の `report.md` のパスを示す)と、人の次の手順の定型(worktree を調べて消す: `git worktree unlock` → `git worktree remove`)。開始時・終了時とも同じ lock 理由の全件をパスごとに報告する。人は各 worktree を調べてから片付ける。既存の残存 worktree を自動では消さない
 - 保留のタスクを再び回す手順の定型(unattended-mode.md §5 の補足・§8): デフォルトブランチ側の MD を直し、作業ブランチを消すと再び拾われる。ブランチの消し方は `git branch -D task/{名}`、push 済みなら `git push origin --delete task/{名}`(手元の追跡用 ref も消える)、リモートを別の手段(GitHub の画面など)で消したときは `git branch -dr origin/task/{名}`。読み飛ばしの理由が `refs/remotes` の追跡用 ref のときは、報告にこの 1 行を添える
@@ -459,7 +459,7 @@ stdout の JSON は、利用者の設定(`verbose`)によっては結果 1 つ�
   4. `--dry-run --only <名>` で、そのタスクが対象の一覧に戻ったことを確かめる
   - 手順が通らないときは、ログを保存してから、使い捨てのリポジトリを組み立て直す。T2 の周が上限より前に終わって時間切れを見られなかったときも、周のログを保存してから時間切れ用のリポジトリを組み立て直し、値を下げてやり直す(同じリポジトリでは、作業ブランチか残った worktree があるので拾われない)
 - **実測が前提と食い違ったら**(疎通の返り方・リポジトリ側の skill などが読まれるか・周が共有の `config` に書かないこと・起動引数と設定の優先・許可の仲介の効き方): `loop.sh` か skill を直し、再レビューしてから merge する
-- **ホスト CLI の証明と allowed-tools(#193)**: ホスト CLI の写しを使い捨ての置き場に置き、専用の設定ディレクトリ(`CLAUDE_CONFIG_DIR`)に人がログインし、自動更新を止めて、`HOME`・状態ディレクトリ・証明の置き場を scratch へ向けて打つ。確かめること: 証明の無い実体・別の版の実体・同じ置き場の書き換えで、ホスト CLI を起動せずに止まる / 未ログインの `--prove-host` が認証の確認で止まる / `--prove-host` が実 hook の拒否を観測して証明を書き、`--dry-run` が通る / hook を渡さない起動と、hook の自動の読み込みを飛ばし、保存したログイン(OAuth・keychain)を読まない起動では、判定が証明を書かない / 権限を足す利用者の skill で起動前に止まる / 許可リストに含まれる skill と正規導入のリンクは通る。あわせて、skill の `allowed-tools` が同じターンで hook を通らずに効くこと(攻撃の成立)と、本番の許可の仲介のもとでの Skill の道具の扱いを、対照つきの直接の起動で記録する。結果と版は Issue #193 と design §7-3
+- **ホスト CLI の証明と `allowed-tools`(#193)**: ホスト CLI の写しを使い捨ての置き場に置き、専用の設定ディレクトリ(`CLAUDE_CONFIG_DIR`)に人がログインし、自動更新を止めて、`HOME`・状態ディレクトリ・証明の置き場を scratch へ向けて打つ。確かめること: 証明の無い実体・別の版の実体・同じ置き場の書き換えで、ホスト CLI を起動せずに止まる / 未ログインの `--prove-host` が認証の確認で止まる / `--prove-host` が実 hook の拒否を観測して証明を書き、`--dry-run` が通る / hook を渡さない起動と、hook の自動の読み込みを飛ばし、保存したログイン(OAuth・keychain)を読まない起動では、判定が証明を書かない / 権限を足す利用者の skill で起動前に止まる / 許可リストに含まれる skill と正規導入のリンクは通る。あわせて、skill の `allowed-tools` が同じターンで hook を通らずに効くこと(攻撃の成立)と、本番の許可の仲介のもとでの Skill の道具の扱いを、対照つきの直接の起動で記録する。結果と版は Issue #193 と design §7-3
 - **発見モードと実装モードを毎晩回す**: 1 回の実行はどちらかのモードだけ(§11)。状態ディレクトリのロックが共通なので、並べて起動せず、cron の 1 行に順に書く(例 `bash <clone>/…/loop.sh --repo <対象> --discover; bash <clone>/…/loop.sh --repo <対象>`)。発見モードの実走は §11
 
 ### 自動メモリの隔離試験(H32)
@@ -514,8 +514,8 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
     - ファイル操作のコマンド(`mkdir`・`touch`・`rm`・`rmdir`・`mv`・`cp`・`tee`)は、列挙したオプションだけを受け付け、書き込み先がすべて worktree の中で、保護パスの下なら W の中(プラグインルートには書かない)。保護パスの下の削除・移動の元は、W の通常ファイルか `.claude/reviews/` の下のディレクトリ(そのものは除く)。再帰の削除は、対象と削除される子孫がすべて既存の削除規則を満たす場合だけ許す。worktree 自体と、子孫を検査できない場合は拒否する(下の H26 の規則)
     - `sed` は出力だけを行う短い script だけを許す。read/write/execute を行う script と未知の script は拒否する。安全な in-place は既存の書き込み先検査に通し、`--sandbox` を付けた安全な script(数値または `$` の単一 address・範囲を含む `p`/`d`、または限定した `s`)は許す
     - `find` は `-print`・`-name`・`-path`・`-type` などの読み取りだけを許す。`-delete`・`-exec`・`-ok`・`-fprint`・`-fls` の各系統は拒否する。`awk` は固定の品質確認 script だけを許し、任意の program は拒否する
-    - `git` は固定の global option と `-c key=value`、列挙した subcommand・option だけを許す。基準確認の `rev-parse --verify --quiet`・`show --no-show-signature`・`ls-files --stage/--ignored`・`diff --no-relative`・`for-each-ref --format=`、origin の heads query と、`task/` 下の通常の Unicode 名を含む branch 作成は維持する。`--config-env`・未知の key・alias・外部 helper・共有状態を直接変える subcommand は拒否する。書き込み pathspec は通常ファイル 1 件だけを調べ、`.`・ディレクトリ・magic・glob・ファイル入力を拒否する。存在しない pathspec は index と HEAD tree の和集合が同じ通常ファイル 1 件に一致するときだけ復元を許す。status の読み取り用の除外 pathspec は維持する。`env` は `-S` を含む再解釈を安全に正規化できないため受け付けず、`command`・`bash -c` 経由の Git/GH 実行と path で隠した Git/GH は専用 grammar を迂回するため拒否する
-    - `gh` は `repo view`・`auth status`・数値の PR 番号による `pr view --json state`・`pr create` だけを許す。PR は `--body-file -` と、reviews 下の非 symlink の通常ファイル 1 件からの単一の `<` だけを stdin にできる。pipe・here document・他の stdin・未知 flag・`api`・設定変更は拒否する
+    - `git` は固定の global option と `-c key=value`、列挙した subcommand・option だけを許す。基準確認の `rev-parse --verify --quiet`・`show --no-show-signature`・`ls-files --stage/--ignored`・`diff --no-relative`・`for-each-ref --format=`、origin の heads query と、`task/` 下の通常の Unicode 名を含む branch 作成は維持する。`--config-env`・未知の key・alias・外部 helper・共有状態を直接変える subcommand は拒否する。書き込み pathspec は通常ファイル 1 件だけを調べ、`.`・ディレクトリ・magic・glob・ファイル入力を拒否する。存在しない pathspec は index と HEAD tree の和集合が同じ通常ファイル 1 件に一致するときだけ復元を許す。`status` の読み取り用の除外 pathspec は維持する。`env` は `-S` を含む再解釈を安全に正規化できないため受け付けず、`command`・`bash -c` 経由の Git/GH 実行と path で隠した Git/GH は専用 grammar を迂回するため拒否する
+    - `gh` は `repo view`・`auth status`・数値の PR 番号による `pr view --json state`・`pr create` だけを許す。PR は `--body-file -` と、`reviews` 下の非 symlink の通常ファイル 1 件からの単一の `<` だけを stdin にできる。pipe・here document・他の stdin・未知 flag・`api`・設定変更は拒否する
     - 上の専用検査を持つコマンドは、その閉じた grammar を通り、かつ許可リストの単語列にも一致するときだけ許す。それ以外の通常コマンドは、既存のパス検査と許可リスト照合を通す
     - リダイレクトの書き込み先は `/dev/null` か、worktree の中で保護パスの下なら W の中。読み込み元は worktree かプラグインルートの中
   - それ以外はすべて deny。判定できない入力(JSON が読めない・環境変数が無い)も deny。deny の `message` には、理由に続けて、「無人の周では打ち直さず、許可の拒否(G1)に従う」ことを固定の文で添える(unattended-mode.md の「許可の仲介の構文」。周の Bash は最初の呼び出しからその書き方で打つ)
@@ -548,7 +548,7 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
   - 対象の情報取得、子孫の列挙・情報取得に失敗した場合は `deny(other)`。走査中の消失も検査不能として拒否する。最初から無い通常対象への従来の許可は維持する。ファイルの内容は読まない。検査後の差し替えを防ぐ隔離や、任意プログラム内部の削除の検査は追加しない(§10)。
 - **記録**: hook は呼ばれるたびに、1 呼び出し 1 行の JSON を記録のファイル(状態ディレクトリの `<実行 ID>/iter-<周の番号>.permlog`)に足す。項目は `time`・`tool_name`・`cwd`(入力の)・`decision`(`allow` / `deny`)・`kind`(deny の種類。`protected` = 保護パスの下で W の外への書き込みだけが理由 / `other` = それ以外)・`reason`・`subject`(対象のパスかコマンドの先頭 500 文字)。実測のため allow も記録する。周ごとに allow・deny の数と deny の行を朝の報告に写す(§7)
 - **`G1` の数え方**: 許可の仲介の記録は子が書ける参考記録なので、`G1` の保留は、拒否の記録の種類・欠落・順序にかかわらず、許可の拒否の保留の連続(§6)に数える(種類 `protected` だけの拒否も数える)。報告には種類を分けて出す
-- **hook が動いていない疑い**: `loop.sh` は自動では判定しない。周の報告の許可の仲介の行(allow・deny の件数)で、deny が 0 件なのに `G1` の保留がある周は、人が見て、hook が動いているかを確かめる(§7)。allow も 0 件で「許可の参考記録を読めない」の行が出るなら、hook が一度も呼ばれていない疑いが強い
+- **hook が動いていない疑い**: `loop.sh` は自動では判定しない。周の報告の許可の仲介の行(`allow`・`deny` の件数)で、`deny` が 0 件なのに `G1` の保留がある周は、人が見て、hook が動いているかを確かめる(§7)。`allow` も 0 件で「許可の参考記録を読めない」の行が出るなら、hook が一度も呼ばれていない疑いが強い
 - **起動時の検査**(§2 のホスト CLI を確認する前): 最初の補助のホスト CLI より前と、有効 plugin を控え直した後に、利用者の `settings.json`・`remote-settings.json`・Linux の `/etc/claude-code/managed-settings.json`・`managed-settings.d` の直下にある非隠しの小文字 `.json` を検査する。設定が存在しなければ通すが、読取不能・不正な UTF-8/JSON・object でない本文・全階層の重複キー・NaN/Infinity のリテラル・深さ制限超過は止める。`env` は object、各値は文字列とする。
   - `env` の `CLAUDE_CONFIG_DIR`・`HOME`・`XDG_CONFIG_HOME`・`CLAUDE_CODE_SIMPLE`・`CLAUDE_CODE_SAFE_MODE`・`CLAUDE_CODE_SHELL_PREFIX` は、値を問わず存在すれば exit 20(`host-settings`)で止める。既知の設定入口を変える3つの環境変数は、起動時は非空、設定の `env` では存在するだけで exit 20(`host-config-source`)で止める。これら3つは配布実体の静的調査で確認した名前で、公式の対応フラグや現在有効な迂回手段とは扱わない。
   - top-level の `policyHelper`・`policyHelpers` は値を問わず拒否し、helper は実行しない。利用者・管理設定・cache の `disableAllHooks: true` と、管理設定・cache の `allowManagedHooksOnly: true` は exit 20(`hooks-disabled`)で止める。設定値や例外本文は診断へ出さない。
@@ -558,7 +558,7 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
 ## 10. 受け入れる限界
 
 - Linux 専用(`setsid`・`flock`・`/proc` を使う)。`inherit_errexit` を使うため bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
-- 片付けは監督の所有する子孫を、開始時刻・pidfd・waitpid で追跡する。印の削除・環境の変更・別セッション化は回収から外れる理由にならない。監督の強制終了や確認不能では、結果を成功として使わず止める
+- 片付けは監督の所有する子孫を、開始時刻・`pidfd`・`waitpid` で追跡する。印の削除・環境の変更・別セッション化は回収から外れる理由にならない。監督の強制終了や確認不能では、結果を成功として使わず止める
 - 許可リストは誤操作を減らす仕組みで、隔離ではない。python3・bash を許した時点で実質のコード実行になり、周は利用者の権限で、利用者が書ける場所ならどこでも書ける。
   - `loop.sh` は共有の Git 状態に加え、§4 の配布物・利用者設定・Git 設定・既知 shell 設定の持続的変更を照合する。列挙外のファイルと、検査間の復元や親の保持値への攻撃は保証しない。 開始時に在る全 worktree の通常 path は内容 hash、機密 path は本文を開かない metadata の比較を維持する。新しい設定 origin と未確認の active graph は本文を採用する前に停止する。
 - `--mcp-config` を渡さないと、周では MCP が使えない。MCP を前提にする工程(メモリの同期など)は各 skill の「無い場合」の経路で動く
@@ -567,14 +567,14 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
 - fetch と push の URL が別のリポジトリを指すか、`remote.origin.vcs` があれば、起動時に exit 20 で止まり(§2 の origin の URL の検査)、どちらのモードも回らない(発見モードでは refactor も回らない)
 - 次は `loop.sh` が見ない・塞がない(経路は #107 に記録する)
   - §4 の信頼集合に含まれない、リポジトリ外のファイルへの書き込み
-  - 子が共有状態の照合を通った**後**に行う書き込み。親は検証済み after-state の hash を保持し、実削除した own worktree の四集合だけを派生して最終観察と比べるため、その最終観察まで持続した変更を新しい基準へ取り込まない。ただし最終観察後から atomic な昇格までの同一権限の競合を完全には検出せず、すでに終えた周へ巻き戻しはしない
+  - 子が共有の状態の照合を通った**後**に行う書き込み。親は検証済み after-state の hash を保持し、実削除した own worktree の四集合だけを派生して最終観察と比べるため、その最終観察まで持続した変更を新しい基準へ取り込まない。ただし最終観察後から atomic な昇格までの同一権限の競合を完全には検出せず、すでに終えた周へ巻き戻しはしない
   - 監督自体を強制終了した後の子孫や、同 UID による親の保持値・実行物の改変。non-dumpable の子孫自体は所有関係で回収するが、監督が攻撃されても回収できるとは主張しない
-  - binding・`last-verified.json`・`inflight/`・stop-mark は同じ利用者の権限で書ける。no-follow の検査は管理入口・配置の差替えと旧形式を検出するが、内容の真正性を保証しない。scratch では `base.json` だけを現状 snapshot の形に置換すると、anchor・`last-verified.json`・meta が不変でも preflight が通ることを確認した。この結果だけで完全な再開が成功するとは主張しない。#192 は未信頼の `inflight` を環境 bootstrap 前に拒否して再開しないが、同じ利用者が binding と全 state を同時に削除・改竄すれば新規入力と区別できない。単独の書込み主体にし、reinit・移転・明示 rebind の前に人が旧 state と残った子を確認する
+  - binding・`last-verified.json`・`inflight/`・`stop-mark` は同じ利用者の権限で書ける。no-follow の検査は管理入口・配置の差替えと旧形式を検出するが、内容の真正性を保証しない。scratch では `base.json` だけを現状 snapshot の形に置換すると、anchor・`last-verified.json`・`meta` が不変でも `preflight` が通ることを確認した。この結果だけで完全な再開が成功するとは主張しない。#192 は未信頼の `inflight` を環境 `bootstrap` 前に拒否して再開しないが、同じ利用者が binding と全 state を同時に削除・改竄すれば新規入力と区別できない。単独の書込み主体にし、reinit・移転・明示 rebind の前に人が旧 state と残った子を確認する
 - ホスト CLI の証明(§2 の 12。#107 H31)の限界
   - 証明は署名ではない。同じ利用者の権限は、証明のファイルも実体も書き換えうる。検出できるのは、証明を取った後の更新・書き換え・差し替え(実体の値か出力が変わったもの)と、許可の仲介の hook が呼ばれない版(`--prove-host` が証明を書けない)
   - 結び付くのは入口のファイルだけ。shebang のスクリプト(先頭の行で、実行するプログラムを指定するスクリプト)の形のホスト(npm の導入など)では、interpreter(スクリプトを実行するプログラム)・同じパッケージのほかのファイル・`NODE_OPTIONS` などの環境は結び付かない(証明の `kind` に `script` と出る)。運用: ループには native の導入を使うか、interpreter とパッケージの置き場を人だけが書ける場所に置き、`NODE_OPTIONS` などを外して起動する。`kind` が `script` なら、それらを変えたときにも `--prove-host` を打ち直す
-  - サーバ側の機能の切り替えも結び付かない。成り立つ条件: ホストがサーバから機能の切り替えを受け取り、hook や許可の判定の挙動が変わる。影響: 実体・版・help が同じままでも、証明を取った時と挙動が違いうる(許可の仲介が呼ばれなくなるなど)。検出: `loop.sh` は自動では判定しない。周の報告の許可の仲介の行(allow・deny の件数。子が書ける参考表示)で、deny が 0 件なのに `G1` の保留がある周を、人が見て疑う(§9)。素通りで許可される向きは、この行でも見えないことがある。運用: 周の報告の許可の仲介の記録で、hook が呼ばれていることを人が見る。疑いが出たら `--prove-host` を打ち直す。打ち直しが止まっても古い証明は残って使われ続けるので、証明のファイル(パスは起動時の報告の「ホスト CLI の実体」の行)を退ける(次の起動から exit 20・`host-proof` で止まる)。証明と定義の要約は起動時と毎周の直前に照らすが、同じ実体での server 側の変化はそれだけでは見分けられない。疑わしい実行中のループは停止ファイル(§6)で次の周の前に止める。走っている周も止めるなら `loop.sh` に TERM を送る(128+シグナル番号で終わる。残るものは受けた時点で分かれる。§4 の「残ったときの終わり方」「シグナルと内部の失敗」「昇格中のシグナル」のとおり。人が報告を確かめて片付ける)
-  - 照合してから起動するまでの間の差し替え(同じ利用者の競合)は防げない。周の子は保持した realpath で起動し、周を始める前に内容の sha256 まで、起動の直前に stat の値で照らす。起動の直前(周の途中の印を置いた後)に環境の照合で止まったときは、ほかの環境の照合と同じく印と worktree が残り、人が確かめて片付ける
+  - サーバ側の機能の切り替えも結び付かない。成り立つ条件: ホストがサーバから機能の切り替えを受け取り、hook や許可の判定の挙動が変わる。影響: 実体・版・help が同じままでも、証明を取った時と挙動が違いうる(許可の仲介が呼ばれなくなるなど)。検出: `loop.sh` は自動では判定しない。周の報告の許可の仲介の行(`allow`・`deny` の件数。子が書ける参考表示)で、`deny` が 0 件なのに `G1` の保留がある周を、人が見て疑う(§9)。素通りで許可される向きは、この行でも見えないことがある。運用: 周の報告の許可の仲介の記録で、hook が呼ばれていることを人が見る。疑いが出たら `--prove-host` を打ち直す。打ち直しが止まっても古い証明は残って使われ続けるので、証明のファイル(パスは起動時の報告の「ホスト CLI の実体」の行)を退ける(次の起動から exit 20・`host-proof` で止まる)。証明と定義の要約は起動時と毎周の直前に照らすが、同じ実体での server 側の変化はそれだけでは見分けられない。疑わしい実行中のループは停止ファイル(§6)で次の周の前に止める。走っている周も止めるなら `loop.sh` に TERM を送る(128+シグナル番号で終わる。残るものは受けた時点で分かれる。§4 の「残ったときの終わり方」「シグナルと内部の失敗」「昇格中のシグナル」のとおり。人が報告を確かめて片付ける)
+  - 照合してから起動するまでの間の差し替え(同じ利用者の競合)は防げない。周の子は保持した `realpath` で起動し、周を始める前に内容の sha256 まで、起動の直前に `stat` の値で照らす。起動の直前(周の途中の印を置いた後)に環境の照合で止まったときは、ほかの環境の照合と同じく印と worktree が残り、人が確かめて片付ける
   - `--prove-host` は打った時点の実体を信頼する。実体が偽物なら、子の環境で受け取る記録の置き場に拒否の行を書き、結果の JSON を作って、確認を装える。確認の判定は、正規の実体が許可の仲介の hook を呼ぶことを確かめるもので、実体の真正性は確かめない
   - ホスト CLI を更新するたびと、`loop.sh` の起動の形(hook の設定の雛形など)が変わる版に上げたときに、人が `--prove-host` を打つ運用になる。native の導入は、版ごとの置き場(`~/.local/share/claude/versions/<版>`)に新しい版を置いてリンクを張り替える形と推測される(実ホストの確認は自動更新を止めて行ったので、更新の挙動は未確認)。その形なら、実行中のループは控えた版のまま続き、次の起動で証明を求める。同じ置き場の実体が書き換えられ・差し替えられ・消されたとき(npm の導入など)は、次の補助の CLI か周の子の起動の前に止まる。ループ用の環境では `DISABLE_AUTOUPDATER=1` で更新の時機を人が決めることを推奨する(事実と出典は design §7-3)
   - `--allow-classifier` の無人ループは起動しない(`loop.sh` が拒否する)。2.1.289 では、確認の `Write`(worktree の外)を分類器が許可の仲介の hook を通さずに許したため、証明を書けない(#107 の H48)
@@ -645,11 +645,11 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
 **1 周**(§4 の違いだけ)
 
 - プロンプト(stdin): `/dev-workflow:ship-task --discover=<発見元> --unattended`
-- 周の途中の印の meta: `name=候補-<発見元>-<先頭 12 桁>`・`rel=候補:<発見元>`・`mode=discover`・`source=<発見元>`。meta は中断の説明用であり、再起動時の操作やモード判定の根拠にしない
+- 周の途中の印の `meta`: `name=候補-<発見元>-<先頭 12 桁>`・`rel=候補:<発見元>`・`mode=discover`・`source=<発見元>`。`meta` は中断の説明用であり、再起動時の操作やモード判定の根拠にしない
 
 **判定と後片付け**(§5 の置き換え。材料は終了コード・結末の行・git の状態)
 
-- 共有状態の照合で、保持した exact ref と異なる遷移を見つけたときは、この判定より前に stop-mark を残して exit 10 とする。新しい Git 通信や PR の雛形は出さない。既に公開済みである可能性は人が確認するために報告へ残し、後段の候補なし・正常・失敗の coverage は、共有状態が正常な独立の対照で検証する。
+- 共有の状態の照合で、保持した exact ref と異なる遷移を見つけたときは、この判定より前に `stop-mark` を残して exit 10 とする。新しい Git 通信や PR の雛形は出さない。既に公開済みである可能性は人が確認するために報告へ残し、後段の候補なし・正常・失敗の coverage は、共有状態が正常な独立の対照で検証する。
 
 共通の条件 G(すべて満たす):
 
@@ -704,4 +704,4 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
 - 通常の子・別セッション・環境消去・non-dumpable・二重 fork・孤児は、監督の所有関係で回収する。同じ UID の無関係なプロセスを広く走査して停止しない。
 - 同じ UID が監督自体を KILL した場合、残存子孫の回収を保証しない。成功記録が無いため次の周へ進まず、途中の印と worktree を残す。親を KILL した場合は監督の親終了通知で回収を試みるが、再開の承認には使わない。
 - 同じ UID が親の保持値・実行物・結果記録まで書き換える、または観測の間で戻す攻撃を隔離する仕組みではない。結果の nonce だけを秘密や改竄不能な証明とは扱わない。任意コードを敵対的に実行する環境では、別 UID や OS の隔離と外部からの監査を使う。
-- 実ホストの PermissionRequest 動作と `allowed-tools` の権限確認は #193 で行った(§2 の 12・§4・§8)。#204 の引数・子孫の回帰成功で代替しない。
+- 実ホストの `PermissionRequest` 動作と `allowed-tools` の権限確認は #193 で行った(§2 の 12・§4・§8)。#204 の引数・子孫の回帰成功で代替しない。
