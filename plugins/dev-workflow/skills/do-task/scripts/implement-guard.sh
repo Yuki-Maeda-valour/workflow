@@ -167,6 +167,12 @@
 #   `incomparable`(hooks-changed / config-changed)で止まり、以後の git も打たない。
 #   出典記録の無い旧 state の compare は config-origin-missing・33。他サブコマンドは従来どおり。
 #   空/欠落/非成立 include と既知 root の新設も候補記録で照合する。
+#   Apple Git(`git version` が `git version X (Apple Git-N)` の形)は、system 設定が有効(GIT_CONFIG_NOSYSTEM が
+#   未設定か偽)のとき、GIT_CONFIG_SYSTEM の値に関係なく `<導入先>/share/git-core/gitconfig` を読む。take はこの
+#   ファイルを、`git --man-path` の値(`/…/share/man` の形だけ受け付け、末尾の `/share/man` を外したもの)から
+#   求めて保持候補にする(ファイルが無くても候補にする)。求められないときは終了値 20 で止める。
+#   保持候補に無い読込先を Git が読むときも終了値 20 で止め、原因の読込先(パスか出典の種類)と選べる
+#   実行条件を stderr に出す(設定の値・本文・Git の stderr は出さない)。
 #   初回管理パス特定前の設定と、検査中だけの並行変更は開始時信頼境界の外である。
 #   設定値を含まないのは新規出典記録と診断だけ。既存の生 diff・未追跡退避の範囲は変えない。
 #   taskmd-diff と restore-taskmd は git を呼ばない。
@@ -252,6 +258,9 @@ META_CHANGED=0
 FS_HOOKS_CHANGED=0
 FS_CONFIG_CHANGED=0
 COLLECT_ERR=""
+CONFIG_ORIGIN_ERR=""       # 設定の出典の収集の失敗の理由(unknown-file / unknown-kind / apple-layout / system-var。既定は空)
+CONFIG_UNKNOWN_ORIGIN=""   # unknown-file のパス・unknown-kind の出典の種類
+CONFIG_XCODE_SELECTED=""   # Apple Git の追加の system 設定のパス(候補にしたときだけ)
 COLLECT_UNMERGED=0
 ROW_KIND=""; ROW_MODE=""; ROW_VAL=""
 UNQ=""
@@ -279,6 +288,25 @@ usage() { sed -n '2,/^# --- end usage ---$/p' "$0" | sed '$d' >&2; }
 
 fail_usage() { echo "ERROR [usage] $*" >&2; trap - ERR; exit 2; }
 fail_internal() { echo "ERROR [internal] $*" >&2; trap - ERR; exit 20; }
+fail_config_origin() { # 設定の出典の収集の失敗(理由が控えてあるもの)。原因の読込先と選べる実行条件を出す。値・本文・Git の stderr は出さない
+  local detail=""
+  case "${CONFIG_ORIGIN_ERR:-}" in
+    unknown-file) detail="保持候補に無い設定ファイルを Git が読む: $(path_field "$CONFIG_UNKNOWN_ORIGIN")" ;;
+    unknown-kind) detail="保持候補に無い種類の出典を Git が使う: $(path_field "$CONFIG_UNKNOWN_ORIGIN")" ;;
+    apple-layout) detail="Apple Git の追加の system 設定の場所を確定できない(git --man-path の値が /…/share/man の形でない)" ;;
+    system-var) detail="Git が system 設定の場所を返さない(git var GIT_CONFIG_SYSTEM が失敗した)" ;;
+    *) detail="" ;;
+  esac
+  {
+    echo "ERROR [internal] 設定の出典を安全に収集・保存できない: $detail"
+    echo "NOTE: 選べる実行条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する"
+    echo "NOTE: 選べる実行条件 2: 設定の読込先をすべて保持候補にできる Git を PATH で選ぶ"
+    if [ "${CONFIG_ORIGIN_ERR:-}" = system-var ]; then
+      echo "NOTE: 選べる実行条件 3: /etc/gitconfig などの system 設定を読まなくてよいなら、take から cleanup までを同じ GIT_CONFIG_SYSTEM=/dev/null の環境で実行する"
+    fi
+  } >&2
+  trap - ERR; exit 20
+}
 arg_error() { echo "ERROR [usage] $*" >&2; usage; trap - ERR; exit 2; }
 degrade() { # $1=理由コード 残り=説明(take の縮退。作りかけの保護領域は EXIT で消える)
   local reason="$1"; shift
@@ -1008,6 +1036,7 @@ context_roots() { # $1=repo id $2=process cwd id。暗黙の子ref読取も別�
     if [ -n "${XDG_CONFIG_HOME:-}" ]; then context_env_root "$pair" "$cwd" "$XDG_CONFIG_HOME/git/config" || return 1
     elif [ -n "${HOME+x}" ]; then context_env_root "$pair" "$cwd" "$HOME/.config/git/config" || return 1; fi
   fi
+  context_env_root "$pair" "$cwd" "${CONFIG_XCODE_SELECTED:-}" || return 1 # MUT:y
   if [ "${CONFIG_SYSTEM_ENABLED:-0}" -eq 1 ]; then
     context_env_root "$pair" "$cwd" "$CONFIG_SYSTEM_SELECTED" || return 1
     context_env_root "$pair" "$cwd" "${GIT_CONFIG_SYSTEM:-}" || return 1
@@ -1686,7 +1715,8 @@ parse_candidate_includes() { # $1=通常ファイル $2=経路上の symlink 数
 }
 add_config_roots() {
   local v p common gitdir system rc=0 i count="${GIT_CONFIG_COUNT:-0}" bool=""
-  CONFIG_SYSTEM_ENABLED=0; CONFIG_SYSTEM_SELECTED=
+  local apple_re='^git version [^ ]+ \(Apple Git-[0-9]+(\.[0-9]+)*\)$' man_re='^/.+/share/man$'
+  CONFIG_SYSTEM_ENABLED=0; CONFIG_SYSTEM_SELECTED=; CONFIG_XCODE_SELECTED=
   for v in HOME XDG_CONFIG_HOME GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM GIT_CONFIG_NOSYSTEM GIT_CONFIG_COUNT GIT_CONFIG_PARAMETERS; do config_env_row "$v"; done
   case "$count" in ''|*[!0-9]*) return 1 ;; esac
   for ((i=0; i<count; i++)); do config_env_row "GIT_CONFIG_KEY_$i"; config_env_row "GIT_CONFIG_VALUE_$i"; done
@@ -1724,10 +1754,28 @@ add_config_roots() {
   fi
   if [ "$system" -eq 1 ] && [ "${GIT_CONFIG_SYSTEM:-}" != /dev/null ] && { [ -z "${GIT_CONFIG_SYSTEM+x}" ] || [ -n "$GIT_CONFIG_SYSTEM" ]; }; then
     rc=0; capture_path git "${GIT_PRE[@]}" -C "$TOP" var GIT_CONFIG_SYSTEM || rc=$?
-    [ "$rc" -eq 0 ] && [ -n "$CAP" ] || return 1
+    [ "$rc" -eq 0 ] && [ -n "$CAP" ] || { CONFIG_ORIGIN_ERR=system-var; return 1; }
     CONFIG_SYSTEM_ENABLED=1; CONFIG_SYSTEM_SELECTED="$CAP"
     [ "$CAP" = /dev/null ] || enqueue_config_path "$CAP" || return 1
     if [ -n "${GIT_CONFIG_SYSTEM:-}" ] && [ "$GIT_CONFIG_SYSTEM" != /dev/null ]; then enqueue_config_path "$GIT_CONFIG_SYSTEM" || return 1; fi
+  fi
+  # Apple Git は system 設定が有効なとき、GIT_CONFIG_SYSTEM の値に関係なく <導入先>/share/git-core/gitconfig を
+  # /etc/gitconfig より先に読む。Apple Git と判定できたときだけ、`git --man-path` から導入先を求めて候補にする。
+  # この 2 回の Git 呼び出しは候補の確定前なので、reserve_config_git の予約は要らない(git var と同じ扱い)
+  if [ "$system" -eq 1 ]; then
+    rc=0; capture_path git "${GIT_PRE[@]}" -C "$TOP" version || rc=$?
+    [ "$rc" -eq 0 ] || return 1
+    case "$CAP" in
+      *$'\n'*) : ;;
+      *)
+        if [[ $CAP =~ $apple_re ]]; then # MUT:z
+          rc=0; capture_path git "${GIT_PRE[@]}" -C "$TOP" --man-path || rc=$?
+          if [ "$rc" -ne 0 ]; then CONFIG_ORIGIN_ERR=apple-layout; return 1; fi
+          case "$CAP" in *$'\n'*) CONFIG_ORIGIN_ERR=apple-layout; return 1 ;; esac
+          [[ $CAP =~ $man_re ]] || { CONFIG_ORIGIN_ERR=apple-layout; return 1; }
+          CONFIG_XCODE_SELECTED="${CAP%/share/man}/share/git-core/gitconfig"; enqueue_config_path "$CONFIG_XCODE_SELECTED" || return 1 # MUT:x
+        fi ;;
+    esac
   fi
   if [ -n "${GIT_CONFIG:-}" ] && [ "$GIT_CONFIG" != /dev/null ]; then
     enqueue_config_path "$GIT_CONFIG" || return 1
@@ -1757,9 +1805,9 @@ verify_effective_origins() { # 全候補を控えた後に、実効 origin と s
         case "$p" in /*) : ;; *) p="$TOP/$p" ;; esac
         # Git は論理 candidate の綴り(.git の入口 link を含む)と、展開後の物理 origin の
         # いずれでも返しうる。前者は候補キュー、後者は candidate_walk 済みの実体集合で受ける。
-        { [ -n "${CONFIG_SEEN[":$p"]+x}" ] || [ -n "${CONFIG_ORIGIN_SEEN[":$p"]+x}" ]; } || return 1 ;;
+        { [ -n "${CONFIG_SEEN[":$p"]+x}" ] || [ -n "${CONFIG_ORIGIN_SEEN[":$p"]+x}" ]; } || { CONFIG_ORIGIN_ERR=unknown-file; CONFIG_UNKNOWN_ORIGIN="$p"; return 1; } ;;
       'command line:') seen_commands[${#seen_commands[@]}]="${key,,}" ;;
-      *) return 1 ;;
+      *) CONFIG_ORIGIN_ERR=unknown-kind; CONFIG_UNKNOWN_ORIGIN="${origin%%:*}"; return 1 ;;
     esac
   done 3<"$WORK/effective-origins.z"
   [ "$pair_count" -gt 0 ] || return 1
@@ -1770,6 +1818,7 @@ verify_effective_origins() { # 全候補を控えた後に、実効 origin と s
 }
 collect_config_origins() { # $1=保存先。root と全 include 候補を保存する
   local n=0 p kind
+  CONFIG_ORIGIN_ERR=""; CONFIG_UNKNOWN_ORIGIN=""
   # 論理候補の重複と、Git が返す物理 origin の許可集合は別物である。前者を物理実体で
   # 畳むと、同じ file を異なる alias 親で読む相対 include を取りこぼす。
   CONFIG_RECORD="$1"; init_config_graph
@@ -2293,6 +2342,7 @@ cmd_take() {
   CDPATH= cd -P -- "$TOP"
 
   if ! collect_config_origins "$NEW_STATE/snapshot/config-origins.txt"; then
+    if [ -n "$CONFIG_ORIGIN_ERR" ]; then fail_config_origin; fi
     fail_internal "設定の出典を安全に収集・保存できない"
   fi
 

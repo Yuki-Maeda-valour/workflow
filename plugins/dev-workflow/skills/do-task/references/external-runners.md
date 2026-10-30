@@ -806,6 +806,8 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - NUL 区切りの不正な対、未知の出典、利用者由来の command line 設定は収集失敗として止める。正規に収集した file origin 0 件は許可する。
   - 新規の出典記録と診断に設定値を載せず、Git の stderr も転記しない。記録改変は snapshot のダイジェストで拒否する。
   - 出典記録の無い旧 state は `compare` だけを `config-origin-missing` で止め、ほかのサブコマンドは従来どおり動くことを確かめる。
+  - Apple Git の追加の system 設定(ケース `M26`): 候補に入ること、`config-check` と `compare` が新設・内容変更・リンクへの差し替えを Git 0 回・終了値 33 で拒否すること、同内容の別 inode は通ること、`GIT_CONFIG_SYSTEM` が空・任意のファイルでも入ること、`GIT_CONFIG_NOSYSTEM` が真なら入らないこと、小数点を含む版(`137.1`)でも入ること、版の表示が Apple Git の形でなければ(本物の表示・後ろに文字がある・改行を含む・`Apple Git-` の後ろが空)`--man-path` を呼ばず候補に入れないこと、子リポジトリの文脈にも入ること、設定の値が出力に出ないことを確かめる。Apple Git でない環境では `git` を模すラッパで確かめ(候補に入ることと変化の検出まで)、Apple Git の Mac では本体を複製して導入先を変えた実機の分岐で、Git が実際に読むことまで確かめる。省いた側は `NOTE:` の行で示し、数えない。
+  - 未知の出典の診断(ケース `M27`、全環境): 未知の `file:` の出典・種類の分からない出典・Apple Git の導入先を確定できない(`git --man-path` の値が、空・相対パス・`/…/share/doc`・末尾が `/share/man/`・導入先が空になる `/share/man`・改行を含む値・コマンドの失敗のとき)・system 設定の場所を問い合わせられない、の 4 種類で、診断の行・パス・`NOTE:` の行が決めた字面で出ること、設定の値が出ないこと、保護領域を残さないこと、`GIT_CONFIG_SYSTEM=/dev/null` で通ることを確かめる。
 - **git の状態を変えない**: stat だけ変わった追跡ファイル(同内容で書き直したもの)が在る repo で、`take` → `compare` の前後に `.git/index` のバイト列と `git status` が不変であること
 - **設定されたプログラムを実行しない**: `core.fsmonitor`・`diff.external`・hooks(`post-index-change`)の痕跡スタブを先に置いた repo で、`take` も、続く `compare`(hooks / config は不変なので git を打つ)も痕跡を残さないこと
 - **`take` の縮退**: 非 git・toplevel が `--cwd` を含まない・unmerged・保護領域を解決できない・上限超過(件数 / サイズ)・タスク MD がリンク切れ / ループ / ディレクトリ / 存在しない / 親ディレクトリが無い / 読めない(root では飛ばす)→ 30 と理由コード。
@@ -827,9 +829,11 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - `DOD=` が起動前の内容を指すこと
 - **`restore-taskmd`**: 追跡済み・未追跡・正当な選択リンク経由の本文が戻る。準備コピー失敗は 33 / `TOUCHED=none` で元内容・権限を保つ。親リンク・対象リンク・ディレクトリ・特殊ファイルは拒否する。不存在への作成は `copied`、既存対象の原子的置換は `replaced`。公開後の検証失敗・中断・後始末失敗も、対象と一時物の実際の状態を報告する。
 - **`cleanup`**: 保護領域を消す / 保護領域の外のパス・symlink → 2 で何も消さない
-- **変異テスト**(17 変異。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す / 明示 GLOBAL root の候補化を外す / 設定本文の累積読取上限を外す / 再帰 include の解析を外す。
+- **変異テスト**(26 変異 = 目印のある 25 変異と、目印を持たない 1 変異〈復元先の階層検査を外す〉。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す / 明示 GLOBAL root の候補化を外す / 設定本文の累積読取上限を外す / 再帰 include の解析を外す / 実効 Git の予定読取予約を外す / 隔離 parser で `HOME` を scratch へ置換する / 生成設定と metadata の有限予約を外す / 明示子 Git の設定予約を外す / 親内の暗黙子 refs 読取予約を外す / 新 selector root の再登録停止を外す / Apple Git の追加の system 設定の候補化を外す(変異 `x`)/ 子の文脈の Apple Git の追加の system 設定の候補化を外す(変異 `y`)/ Apple Git の判定(`git version` の形の検査)を外す(変異 `z`)。
   - 設定の出典ファイルだけの検査を外す変異も含める。root の config は不変のまま include 先の値を変え、拒否を期待する回帰が失敗することを確かめる。
-  - **変異の当たらなかった対照ケースが、写しでも PASS すること**(壊れ方が変異に固有であること)と、**目印が無い・置換が空振りした変異はそれ自体を FAIL にする**ことも見る
+  - 変異 `x`・`y`・`z` は `M26` が落ちることを期待する。Apple Git の Mac では、対照 `E1` を `GIT_CONFIG_NOSYSTEM=1` で通し、`M26` の実機の分岐は system 設定を有効にして落とす。
+  - 変異の写しを作る `sed` は、BSD 版と GNU 版の両方で動く `s/.*/…/` の形にそろえ、`sed` が失敗した変異はそれ自体を FAIL にする(Mac の標準の `sed` は BSD 版で、`c\` の後に同じ行で文を続ける形を拒否するため)。
+  - **変異の当たらなかった対照ケースが、写しでも PASS すること**(壊れ方が変異に固有であること)と、**目印が無い・置換が空振りした・`sed` が失敗した変異はそれ自体を FAIL にする**ことも見る
 
 各ケースは外側タイムアウト付き・stdin を `/dev/null` にして走るため、実装が壊れて待ち続けてもスイートは FAIL で終わる(stdin が開いたままの環境で実行しても結果は変わらない)。
 - 代表的な 9 類型のケース名には固定のタグ `[類型:<名前>]` が付く(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス / 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
@@ -989,6 +993,8 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - 候補をすべて控えた後、安全な前置き付きの `git config --null --show-origin --name-only --includes --list` で、実効 `file:` 出典が収集済みの候補に対応することを検査する。
   - NUL 区切りの origin/key の対を最後まで読み、空・奇数・途中切れの対や未知の出典は拒否する。command line 由来は前置き自身のキーの個数と順序に一致するものだけを受け入れる。
   - 収集や保存の失敗は exit 20 とし、作りかけの保護領域を消す。取得失敗を空一覧にしない。正規に収集した file origin 0 件は許可する。
+  - Apple Git の追加の system 設定: system 設定が有効のとき、`git version` が `git version X (Apple Git-N)` の形なら、`git --man-path` の値(`/…/share/man` の形だけ受け付ける)から末尾の `/share/man` を外して導入先を求め、`<導入先>/share/git-core/gitconfig` を候補(`plan-root`)に入れる。ファイルが無くても入れ、`GIT_CONFIG_SYSTEM` の値には依存しない。`GIT_CONFIG_NOSYSTEM` が真なら入れない。子リポジトリの文脈にも同じパスを入れる。記録の形式(`config-origins-v3`・`config-contexts.txt`)と行の種類は変えない。条件と実機の確認範囲は [runtime-requirements.md](runtime-requirements.md#macos-の実測と再確認手順) が持つ。
+  - 未知の出典の診断: 候補に無い `file:` の出典、種類の分からない出典、Apple Git の導入先を確定できない、`git var GIT_CONFIG_SYSTEM` が失敗した、のときは、理由を控えて exit 20 の診断に出す。診断の 1 行目は `ERROR [internal] 設定の出典を安全に収集・保存できない: <原因>`(パスと出典の種類は C 風引用で出し、制御文字をそのまま出さない)。続けて `NOTE:` の行で、選べる実行条件(`take` から `cleanup` までを同じ `GIT_CONFIG_NOSYSTEM=1` の環境で実行する・設定の読込先をすべて保持候補にできる Git を選ぶ・`git var` が失敗したときだけ `GIT_CONFIG_SYSTEM=/dev/null` の環境で実行する)を出す。予算超過・構文・Git の起動失敗などは、今までどおり理由なしの 1 行だけ。縮退(終了値 30)の理由は増やさない。設定の値・本文と Git の stderr は出さない。
   - `snapshot/config-origins.txt` に、探索環境の hash、root と管理パス、元の絶対パス、経路の各部分の種別・リンク字面・device/inode、実体の生バイトの sha256 または欠落を保存する。snapshot 全体のダイジェストに含める。
   - 設定本文を読むたびに、単体 16 MiB・設定 reader 全体の累積 200 MiB を先に予約する。candidate の hash、前後確認、候補 parser、compare/config-check の再照合、root の digest と実効 Git の予定読取を同じ予算へ足す。同 inode の別 logical path も別に数え、親シェルで予約する。
   - parser と条件判定は、空 config の使い捨て bare リポジトリを `GIT_DIR` に指定する。`--type=path` の `~/` 展開のため、`HOME` の設定有無と値は元 Git と同じに保つ。system/global/command 設定は固定の無効値で隔離する。単に一時 cwd を使うだけでは、Git が親の実リポジトリを発見して設定を読み込むため不十分である。
@@ -1002,7 +1008,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - 相対 GLOBAL/SYSTEM は親 process と明示子 process の cwd ごとに保持する。`onbranch` が親 repo を参照する版と読取対象 repo を参照する版を覆うため、両文脈の上界を取る。設定候補・include 値は各 2,000、使用先・context は各 2,000、context 深さは 40 まで。selector のコピー量と出力量はそれぞれ独立した 200 MiB 上限を持つ。
   - `.gitmodules` は unmerged index を先に判定し、それ以外では worktree file → stage-0 blob → HEAD blob → 無しの順で選ぶ。blob は隔離 Git で type/size を確認して 16 MiB 以下だけを一度実体化し、復号本文・hash・parser を予約する。設定入力の 200 MiB は、pack 全体や非選択 delta base、ODB 全体の I/O 上限ではない。
   - 親と子の diff は `--submodule=short --ignore-submodules=dirty`、status は `--ignore-submodules=dirty` に固定し、暗黙の再帰子 process を抑える。代わりに `snapshot/6-contexts.txt` へ各子の HEAD、stage 別 OID、diff、status を保存する。同じ worktree と MM 表示のまま staged 内容だけが変わる場合も検出し、`CHANGE=submodule` で報告する。
-  - 初回のリポジトリ・管理パス特定は開始時設定を信頼する既存の境界であり、候補確定後の読取予算に含まれない。任意の Git 改変版や将来版の内部読取回数をこの係数だけで保証しない。
+  - 初回のリポジトリ・管理パス特定は開始時設定を信頼する既存の境界であり、候補確定後の読取予算に含まれない。この境界に、Apple Git の判定(`git version`)と導入先の取得(`git --man-path`)の 2 回の Git 呼び出しも含む(`compare`・`config-check` には足さない)。任意の Git 改変版や将来版の内部読取回数をこの係数だけで保証しない。
   - root の相対指定は cwd と toplevel の必要な文脈を保持する。リンクと `..` は経路の順に辿り、リンク内の相対 include を実体側の親へ解決し直さない。末端 symlink のサイズはリンク文字列ではなく、Git が読む target 本文のサイズで数える。
   - 設定値を載せない対象は、新規の出典一覧・記録・診断。収集時の Git の stderr も転記しない。既存の生 diff と未追跡ファイルの退避は変更しない。
 - hooks と config の**実体パスも絶対パスで記録する**(`compare` が git を呼ばずに再計算するため。下記)。これらの取得(`symbolic-ref`・`for-each-ref`・`rev-parse --git-path`)は、設定されたプログラムを実行しない(実測)

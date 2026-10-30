@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.28.2
+
+### 修正
+
+- `implement-guard.sh take` は、Apple Git で system 設定が有効なとき、`<導入先>/share/git-core/gitconfig` を保持候補(起動前に控えて、後で変化を照らす設定ファイルの一覧)に入れる。Mac で system 設定を外さずに `take → compare → cleanup` が通る。候補にするのは `git version` が Apple Git の形のときだけで、導入先は `git --man-path` から求める。`GIT_CONFIG_NOSYSTEM` が真なら入れず、利用者の設定は変えない。追加の設定の変更・新設・リンクへの差し替えは、Git を呼ぶ前に検出する。
+- 保持候補に無い読込先を Git が読むとき、終了値 20 の診断に原因(パスか出典の種類)と選べる実行条件を出す。Apple Git の導入先を確定できないときと、`git var GIT_CONFIG_SYSTEM` が失敗したときも同じ。設定の値は出さない。縮退(終了値 30)の理由は増やさない。
+- `implement-guard-selftest.sh` に、`git` を模すラッパとケース `M26`(Apple Git でない環境の模擬と、Apple Git の Mac の実機の分岐)・`M27`(診断)・変異 `x`・`y`・`z` を足した。`M26` には、版の表示が Apple Git の形でなければ `--man-path` を呼ばないことの確認も含む。変異の写しを作る `sed` を BSD 版でも動く形にし、`sed` の失敗を FAIL にした(Mac で変異 `w` の対照が落ちていた)。([Issue #241](https://github.com/Yuki-Maeda-valour/workflow/issues/241))
+
 ## v4.28.1
 
 ### 修正
