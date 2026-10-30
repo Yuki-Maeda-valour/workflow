@@ -2,6 +2,22 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.28.3
+
+### 追加
+
+- 品質コマンドの監督(`check-process.py`)と検証用コピーの削除・保持を、Mac の実プロセスで確かめる試験を回帰に足した。`scripts/test_check_process.py` と `scripts/test_review_guard.py` の 2 本で 92 件(Mac は成功 80・飛ばし 12、Linux は成功 79・飛ばし 13)。
+  - 実 CLI の `start → take → seal → run-checks` で、終了値 0 / 7 と出力の hash(内容から求めた固定長の値)を確かめる。親の終了・時間切れ・`TERM`・`INT`・`HUP` では、元のプロセス群の停止、後続のコマンドの起動の有無、コピーの削除と保持、無関係なプロセスの生存を確かめる。群の外へ移る子が保証外のままであることも、macOS で確かめる。
+  - Linux だけの仕組み(`subreaper`〈親が終了した子孫を引き取るプロセス〉・`pidfd`〈特定のプロセスを指す参照〉・`/proc`)を使う試験は `CheckProcessLinuxTest` に分けた。飛ばしの理由の頭を `Linux 専用: ` と `macOS 専用: ` で分け、OS ごとの数を数えられるようにした。
+  - 試験は一時領域の名前を物理パスに解決してから使う。Mac の標準の一時領域(親の `/var` がリンク)でも、`TMPDIR` を指定せずに通る。製品のリンクの親の拒否は変えず、拒否が残ることも試験で確かめる。
+  - 新しく足した試験と、Mac で動かす試験が起動する品質コマンドの子と孫は、3 秒以内に自分で終わる。試験が失敗しても、後始末は試験が起動したものだけを止めて回収する。
+- `runtime-requirements.md` に、Mac で回帰として回す手順・必要環境(Python 3・Git・`bash` 4.0 以上)・期待の件数・数え方を書いた。
+
+### 既知の制約
+
+- macOS で、群の全員が `TERM` で終わる品質コマンドが時間切れになると、`run-checks` は時間切れの結果ではなく回収の失敗(`Operation not permitted`)で止まる。検証の親が `TERM`・`INT`・`HUP` を受けたときも同じ。検証用コピーは保持する。別の Issue [#289](https://github.com/Yuki-Maeda-valour/workflow/issues/289) で直す。
+  - 今の挙動は、試験 2 件(`test_issue289_term_obeying_timeout_is_recovery_error`・`test_issue289_term_obeying_parent_signal_is_recovery_error`)でそのとおりに確かめている。#289 を直したら、正しい期待に替える。([Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239))
+
 ## v4.28.2
 
 ### 修正
