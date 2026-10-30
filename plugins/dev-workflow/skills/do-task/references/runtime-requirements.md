@@ -133,7 +133,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 追加の設定を正当に変えたときは、保護領域を `cleanup` で消してから `take` し直す。
   - 実機で確かめた構成(2026-10-30): macOS 26.6.2 / arm64、Git 2.54.0(Apple Git-157)。`xcode-select -p` は `/Library/Developer/CommandLineTools`。`/usr/bin/git` は実体を選んで起動する小さなプログラムで、実体は `/Library/Developer/CommandLineTools/usr/bin/git`。読込先は `/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig`。本体を別の場所 `P/bin/git` へ複製すると `P/share/git-core/gitconfig` を読み、`git --man-path` も `P/share/man` を返した。
   - 未確認の構成: Xcode.app の Git(この Mac に Xcode.app は無い)、Apple Git-157 以外の版、Intel(x86_64)の Mac。Git 2.42 より前の Apple Git も未確認。
-  - 保持候補に無い読込先を Git が読むとき、`take` は終了値 20 で止める。診断の 1 行目は `ERROR [internal] 設定の出典を安全に収集・保存できない: <原因>`。原因は、読込先のパス・出典の種類・Apple Git の導入先を確定できない・system 設定の場所を問い合わせられない、のどれか。続く `NOTE:` の行に、選べる実行条件を出す。設定の値・本文と Git の stderr は出さない。
+  - 保持候補に無い読込先を Git が読むとき、または Apple Git の導入先・system 設定の場所を求められないとき、`take` は終了値 20 で止める。診断の 1 行目は `ERROR [internal] 設定の出典を安全に収集・保存できない: <原因>`。原因は、読込先のパス・出典の種類・Apple Git の導入先を確定できない・system 設定の場所を問い合わせられない、のどれか。続く `NOTE:` の行に、選べる実行条件を出す。設定の値・本文と Git の stderr は出さない。
     - 条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、`take` から `cleanup` までを同じ `GIT_CONFIG_NOSYSTEM=1` の環境で実行する。
     - 条件 2: 設定の読込先をすべて保持候補にできる Git を `PATH` で選ぶ。
     - 条件 3(system 設定の場所を問い合わせられないときだけ): `/etc/gitconfig` などの system 設定を読まなくてよいなら、`take` から `cleanup` までを同じ `GIT_CONFIG_SYSTEM=/dev/null` の環境で実行する。
@@ -152,7 +152,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
       - Linux(Debian trixie・GNU coreutils 9.7): 書き込みの上限を付けた `cp -aL` が `SIGXFSZ` で止まり、38 行が落ちる。
       - `J8` は、非 UTF-8 の名前を APFS が作れないことも重なり、Mac では 2 行多い。
     - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになる。別の Issue [#286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で扱う。
-  - 修正前の Mac の FAIL 64 行のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
+  - 修正前の Mac の FAIL 64 行(スイートを `GIT_CONFIG_NOSYSTEM=1` で回した基準。system 設定を有効のままの修正前の実行は、Issue #241 の 2026-10-26 のコメントで FAIL 812 件)のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
 - 無人ループとシェル回帰一式は引き続き Linux 専用。Linux 上の Darwin スタブの成功や Linux 専用試験の skip は、macOS の成功根拠にしない。
 
 再確認は使い捨てリポジトリで次の順に行う。
