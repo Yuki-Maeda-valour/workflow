@@ -19,13 +19,13 @@
 # 期待終了コード: 0=成功 2=usage 20=internal 30=縮退(take) 31=引き継ぎ 32=縮退(compare)
 #                 33=比較不能・照合や復元の失敗 34=要件本文の変更 35=選択パスと実体の対応の変化
 #
-# ケース名の先頭はケース ID(A1〜K2・M1〜M10・L)。検出の類型に当たるケース名には固定のタグ
+# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N12・L)。検出の類型に当たるケース名には固定のタグ
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
-# 変異テスト(L・18 個): 対象の写しに sed で変異を 1 つ当て(e は復元 helper の階層検査を外す)(対象側の目印 `# MUT:a`〜`# MUT:p` と `# MUT:q`)、
+# 変異テスト(L・26 個 = 目印のある変異 25 個 + 目印を持たない e): 対象の写しに sed で変異を 1 つ当て(e は復元 helper の階層検査を外す)(対象側の目印 `# MUT:a`〜`# MUT:z`)、
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
-# FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした変異は
+# FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした・sed が失敗した変異は
 # それ自体を FAIL にする。変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
 #
 # 保護領域: 対象は保護領域を /tmp・$TMPDIR の外にしか作らない。成功ケースのために、実
@@ -61,6 +61,14 @@ done
 
 REAL_GIT="$(command -v git)"
 [ -n "$REAL_GIT" ] || { echo "ERROR: git が無い" >&2; exit 1; }
+# 本物の git が Apple Git か(本体と同じ規則: 改行なし・版の表示の形)。M26 の模擬と実機の分岐を分ける
+REAL_IS_APPLE=0
+APPLE_VERSION_RE='^git version [^ ]+ \(Apple Git-[0-9]+(\.[0-9]+)*\)$'
+REAL_VERSION_OUT="$("$REAL_GIT" version 2>/dev/null || true)"
+case "$REAL_VERSION_OUT" in
+  *$'\n'*) : ;;
+  *) if [[ $REAL_VERSION_OUT =~ $APPLE_VERSION_RE ]]; then REAL_IS_APPLE=1; fi ;;
+esac
 REAL_CP="$(command -v cp)"
 [ -n "$REAL_CP" ] || { echo "ERROR: cp が無い" >&2; exit 1; }
 REAL_SHA256SUM="$(command -v sha256sum)"
@@ -358,6 +366,69 @@ printf '%s\n' "\$*" >>"$GITLOG"
 exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$STUBS/gitlog/git"
+# Apple Git を模す git のラッパ(M26・M27)。呼び出しを記録してから、環境変数で挙動を変えて本物へ渡す。
+#   APPLE_REAL_GIT     非空なら、渡す先の git をそれにする(複製した本体を試すため。空なら埋め込んだ本物)
+#   APPLE_FAKE_VERSION 非空なら `version` に `git version <本物の版> (Apple Git-<値>)` を返す
+#   APPLE_VERSION_RAW  設定されていれば(空を含む)`version` にその値をそのまま出す(改行も含めて。APPLE_FAKE_VERSION より先)
+#   APPLE_PREFIX       非空なら `--man-path` に `<値>/share/man` を返す
+#   APPLE_MANPATH      設定されていれば(空を含む)`--man-path` にその値を返す(APPLE_PREFIX より先)
+#   APPLE_MANPATH_FAIL 非空なら `--man-path` を何も出さず終了値 1 にする(最優先)
+#   APPLE_VAR_FAIL     非空なら `var` を何も出さず終了値 1 にする(git var が無い古い Git の模擬)
+#   APPLE_INJECT       非空なら `--show-origin` の呼び出しだけ、GIT_CONFIG_NOSYSTEM を外し
+#                      GIT_CONFIG_SYSTEM=<値> にする(未知の読込先の模擬)
+#   APPLE_KIND_INJECT  非空なら `--show-origin` の出力の最初の出典を blob:0000 に置き換える
+#                      (種類の分からない出典の模擬)
+mkdir -p "$STUBS/applegit"
+cat >"$STUBS/applegit/git" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"$GITLOG"
+real="\${APPLE_REAL_GIT:-}"
+[ -n "\$real" ] || real="$REAL_GIT"
+args=("\$@")
+n=\${#args[@]}
+i=0
+first=""
+show_origin=0
+for a in "\$@"; do
+  if [ "\$a" = --show-origin ]; then show_origin=1; fi
+done
+while [ "\$i" -lt "\$n" ]; do
+  a="\${args[\$i]}"
+  case "\$a" in
+    -c|-C) i=\$((i + 2)) ;;
+    --man-path)
+      if [ -n "\${APPLE_MANPATH_FAIL:-}" ]; then exit 1; fi
+      if [ "\${APPLE_MANPATH+x}" = x ]; then printf '%s\n' "\$APPLE_MANPATH"; exit 0; fi
+      if [ -n "\${APPLE_PREFIX:-}" ]; then printf '%s\n' "\$APPLE_PREFIX/share/man"; exit 0; fi
+      break ;;
+    -*) i=\$((i + 1)) ;;
+    *) first="\$a"; break ;;
+  esac
+done
+if [ "\$first" = version ] && [ "\${APPLE_VERSION_RAW+x}" = x ]; then
+  printf '%s\n' "\$APPLE_VERSION_RAW"
+  exit 0
+fi
+if [ "\$first" = version ] && [ -n "\${APPLE_FAKE_VERSION:-}" ]; then
+  v="\$("\$real" version)" || exit 1
+  v="\${v#git version }"
+  v="\${v%% *}"
+  printf 'git version %s (Apple Git-%s)\n' "\$v" "\$APPLE_FAKE_VERSION"
+  exit 0
+fi
+if [ "\$first" = var ] && [ -n "\${APPLE_VAR_FAIL:-}" ]; then exit 1; fi
+if [ "\$show_origin" -eq 1 ]; then
+  envp=(env)
+  if [ -n "\${APPLE_INJECT:-}" ]; then envp=(env -u GIT_CONFIG_NOSYSTEM "GIT_CONFIG_SYSTEM=\$APPLE_INJECT"); fi
+  if [ -n "\${APPLE_KIND_INJECT:-}" ]; then
+    "\${envp[@]}" "\$real" "\$@" | python3 -c 'import sys; d = sys.stdin.buffer.read(); i = d.find(b"\\0"); sys.stdout.buffer.write(b"blob:0000" + (d[i:] if i >= 0 else b""))'
+    exit "\${PIPESTATUS[0]}"
+  fi
+  exec "\${envp[@]}" "\$real" "\$@"
+fi
+exec "\$real" "\$@"
+EOF
+chmod +x "$STUBS/applegit/git"
 # 設定本文の hash を始める前に単体上限で止めることを、渡された stdin の byte 数で観測する。
 mkdir -p "$STUBS/hashlog"
 cat >"$STUBS/hashlog/sha256sum" <<EOF
@@ -2232,12 +2303,13 @@ case_K2() {
 
 # ════════════════════════ L 変異テスト ════════════════════════
 MUT_TABLE=""
-mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed でまとめて当てる)
+MUT_EXTRA_ENV=()   # 変異の子スイートへ足す環境変数(NAME=値 の配列。既定は空)
+mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed でまとめて当てる)。sed が失敗したら 1
   local o="$1" e args=()
   shift
   for e in "$@"; do args[${#args[@]}]="-e"; args[${#args[@]}]="$e"; done
-  sed "${args[@]}" "$TARGET" >"$o"
-  cp -- "$SCRIPT_DIR/restore-taskmd.py" "$(dirname -- "$o")/restore-taskmd.py"
+  sed "${args[@]}" "$TARGET" >"$o" || return 1
+  cp -- "$SCRIPT_DIR/restore-taskmd.py" "$(dirname -- "$o")/restore-taskmd.py" || return 1
 }
 mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区切り)残り=sed 式
   local id="$1" desc="$2" expect="$3" v out n c rc=0 only total per firsts t0="$SECONDS"
@@ -2255,13 +2327,13 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
   else
     n="$(grep -c -- "# MUT:$id\$" "$TARGET" || true)"
     ckeq "変異($id) 目印 # MUT:$id が対象に 1 行だけ在る" "$n" 1
-    mkvariant "$v" "$@"
+    mkvariant "$v" "$@" || { ng "変異($id) sed が失敗しない"; return 0; }
     ckf "変異($id) sed が空振りしていない(写しが対象と違う)" cmp -s "$TARGET" "$v"
   fi
   ckt "変異($id) 写しが bash -n を通る" bash -n "$v"
   only="$(printf '%s' "$expect" | tr ' ' ','),E1"
   guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$v" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
-    bash "$SELF_PATH" --only "$only" </dev/null >"$out" 2>&1 || rc=$?
+    ${MUT_EXTRA_ENV[@]+"${MUT_EXTRA_ENV[@]}"} bash "$SELF_PATH" --only "$only" </dev/null >"$out" 2>&1 || rc=$?
   if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の子スイート → rc=$rc"; cat "$out"; fi
   # 子スイートが時間切れで落ちた非ゼロは「変異を検出した」ではない
   case "$rc" in
@@ -2313,12 +2385,22 @@ case_L() {
   mutant o "明示 GLOBAL root の候補化を外す" "M11" '/# MUT:o$/s/enqueue_config_path "\$GIT_CONFIG_GLOBAL"/true/'
   mutant p "設定本文の累積読取上限を外す" "M23" '/# MUT:p$/d'
   mutant r "実効Gitの予定読取予約を外す" "M24" '/# MUT:r$/d'
-  mutant w "隔離parserでHOMEをscratchへ置換する" "N11" '/# MUT:w$/c\  home_env=("HOME=$CONFIG_PARSE_CWD") # MUT:w'
+  mutant w "隔離parserでHOMEをscratchへ置換する" "N11" '/# MUT:w$/s/.*/  home_env=("HOME=$CONFIG_PARSE_CWD") # MUT:w/'
   mutant s "生成設定とmetadataの有限予約を外す" "N4" '/# MUT:s$/s/reserve_config_bytes "\$GENERATED_COST"/:/'
   mutant u "明示子Gitの設定予約を外す" "N5" '/# MUT:u$/s/reserve_config_bytes "\${CTX_MAIN_COST\[\$1\]}"/:/'
   mutant v "親内の暗黙子refs読取予約を外す" "N5" '/# MUT:v$/d'
   mutant t "新selector rootの再登録停止を外す" "N2" '/# MUT:t$/d'
   mutant q "再帰 include の解析を外す" "M7" '/# MUT:q$/s/parse_candidate_includes "\$CAND_LOGICAL" "\$CAND_HAD_LINK"/true/'
+  # x・y・z は M26 の検出力を見る。Apple Git の Mac では、対照 E1 を system 設定を外して通し、
+  # M26 の実機の分岐(-u GIT_CONFIG_NOSYSTEM)で落とす
+  if [ "$REAL_IS_APPLE" -eq 1 ]; then MUT_EXTRA_ENV=(GIT_CONFIG_NOSYSTEM=1); fi
+  mutant x "Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:x$/s/.*/      : # MUT:x/'
+  ckeq "変異(x) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:x$' "$WORK/mut/x/guard.sh" || true)" 1
+  mutant y "子の文脈の Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:y$/s/.*/  : # MUT:y/'
+  ckeq "変異(y) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:y$' "$WORK/mut/y/guard.sh" || true)" 1
+  mutant z "Apple Git の判定(git version の形の検査)を外す" "M26" '/# MUT:z$/s/.*/        if true; then # MUT:z/'
+  MUT_EXTRA_ENV=()
+  ckeq "変異(z) 写しの目印の行が if true; then だけになった" "$(grep -cE -- '^[[:space:]]*if true; then # MUT:z$' "$WORK/mut/z/guard.sh" || true)" 1
 }
 
 # ════════════════════════ M 開始時の設定 origin ════════════════════════
@@ -2958,6 +3040,7 @@ case_M24() { # 実効Gitの内部include再読取と、その後の複数Git呼�
   rc_is "実効設定予算: 同じ12 MiBを18回includeすると停止" 20
   ckf "実効設定予算: 216 MiBを読む実効一覧Gitは起動しない" inf "$GITLOG" '--show-origin --name-only --includes --list'
   err_has "実効設定予算: 設定値を診断へ出さない" '設定の出典を安全に収集・保存できない'
+  ckf "実効設定予算: 実行条件の NOTE を出さない" inf "$CASE_ERR" 'NOTE: 選べる実行条件'
 
   GIT "$R" config --unset-all include.path
   GIT "$R" config include.path ../settings/entry.inc
@@ -3035,6 +3118,335 @@ case_M25() { # literal /dev/null は旧Gitでもsystem設定の実選択取得�
     ckeq "SYSTEM=/dev/null NOSYSTEM=$flag: index不変" "$(sha_of "$R/.git/index")" "$index_before"
     run cleanup --state "$STATE_DIR"
   done
+}
+
+# ════════════════════════ M26・M27 Apple Git の追加の system 設定と、未知の読込先の診断 ════════════════════════
+# Apple Git は system 設定が有効なとき、<導入先>/share/git-core/gitconfig を /etc/gitconfig より先に読む。
+# 本体はこれを保持候補に入れる(Git version が Apple Git の形のときだけ)。
+# 模擬(M26 の前半)は Apple Git でない環境用。実機の分岐(M26 の後半)は Apple Git の Mac 用。
+# Linux の本物の git は <導入先>/share/git-core/gitconfig を読まないので、模擬で確かめるのは
+# 「候補に入ること」と「変化を検出すること」まで。実際に読むことは実機の分岐で確かめる。
+M26_TAKE_ENV=()   # take に渡す環境(NOSYSTEM の指定は含めない)
+M26_CHK_ENV=()    # config-check・compare に渡す環境(同上。Git の呼び出しを数えるラッパを先頭に置く)
+m26_state() { # take の結果から STATE_DIR と ARGS を整える
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
+  ARGS=(--cwd "$R" --state "${STATE_DIR:-$PROT/dev-workflow/guard-none}" --manifest-sha256 "${MAN:-0}" --snapshot-sha256 "${SNAP:-0}")
+}
+err_line() { if inx "$CASE_ERR" "$2"; then ok "$1"; else ng "$1(stderr に行が無い: $(flat "$2"))"; fi; }
+m26_secret_absent() { # $1=説明 $2=秘密の印
+  ckf "$1: 秘密の印が stdout に出ない" inf "$CASE_OUT" "$2"
+  ckf "$1: 秘密の印が stderr に出ない" inf "$CASE_ERR" "$2"
+}
+m26_suite() { # $1=ラベル $2=追加の設定のパス(M26_TAKE_ENV・M26_CHK_ENV を使う)
+  local lb="$1" cfg="$2" dir secret=M26_SECRET_241 before after
+  local ns=(-u GIT_CONFIG_NOSYSTEM) v
+  dir="${cfg%/*}"
+  rm -f -- "$cfg" "$dir/target.conf" 2>/dev/null || true
+
+  # 1 追加の設定が無いまま
+  base_repo "m26-$lb-1"
+  rune "${ns[@]}" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
+  rc_is "$lb 1 追加の設定なし: take" 0
+  m26_state
+  ckt "$lb 1: plan-root に追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$cfg"
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- config-check "${ARGS[@]}"
+  rc_is "$lb 1: config-check" 0
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "$lb 1: compare" 0
+  ckne "$lb 1: compare は Git を使った(対照)" "$(gitlog_n)" 0
+  ckf "$lb 1: config-check・compare は version と --man-path を呼ばない" grep -qE '(^| )(version|--man-path)( |$)' "$GITLOG"
+
+  # 2 追加の設定の新設(Git を呼ぶ前に拒否)
+  mkdir -p -- "$dir"
+  printf '[private]\n token = %s\n' "$secret" >"$cfg"
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- config-check "${ARGS[@]}"
+  rc_is "$lb 2 新設: config-check → 33" 33
+  out_line "$lb 2 新設: config-check の Git 未起動" 'GIT_SKIPPED=yes'
+  ckeq "$lb 2 新設: config-check の Git 0 回" "$(gitlog_n)" 0
+  m26_secret_absent "$lb 2 config-check" "$secret"
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "$lb 2 新設: compare → 33" 33
+  out_line "$lb 2 新設: REASON=config-changed" 'REASON=config-changed'
+  ckeq "$lb 2 新設: compare の Git 0 回" "$(gitlog_n)" 0
+  m26_secret_absent "$lb 2 compare" "$secret"
+  run cleanup --state "$STATE_DIR"
+  rc_is "$lb 2: cleanup" 0
+
+  # 3 追加の設定がある状態で take。同じ内容の作り直しは通り、内容の変更は止まる
+  base_repo "m26-$lb-3"
+  rune "${ns[@]}" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
+  rc_is "$lb 3 追加の設定あり: take" 0
+  m26_state
+  m26_secret_absent "$lb 3 take" "$secret"
+  ckt "$lb 3: plan-root に追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$cfg"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- config-check "${ARGS[@]}"
+  rc_is "$lb 3: config-check" 0
+  m26_secret_absent "$lb 3 config-check" "$secret"
+  before="$(ls -id "$cfg" | cut -d' ' -f1)"
+  cp -- "$cfg" "$cfg.new" && mv -f -- "$cfg.new" "$cfg"
+  after="$(ls -id "$cfg" | cut -d' ' -f1)"
+  ckne "$lb 3: 別 inode への置換を実施" "$before" "$after"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "$lb 3: 同内容の別 inode は compare → 0" 0
+  m26_secret_absent "$lb 3 compare" "$secret"
+  printf '[private]\n token = %s\n[other]\n changed = 1\n' "$secret" >"$cfg"
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- config-check "${ARGS[@]}"
+  rc_is "$lb 3: 内容変更は config-check → 33" 33
+  out_line "$lb 3 内容変更: config-check の Git 未起動" 'GIT_SKIPPED=yes'
+  ckeq "$lb 3 内容変更: config-check の Git 0 回" "$(gitlog_n)" 0
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "$lb 3: 内容変更は compare → 33" 33
+  out_line "$lb 3 内容変更: REASON=config-changed" 'REASON=config-changed'
+  ckeq "$lb 3 内容変更: Git 0 回" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+  rc_is "$lb 3: cleanup" 0
+
+  # 4 リンクへの差し替え
+  base_repo "m26-$lb-4"
+  printf '[private]\n token = %s\n' "$secret" >"$cfg"
+  rune "${ns[@]}" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
+  rc_is "$lb 4 リンク差替え: take" 0
+  m26_state
+  cp -- "$cfg" "$dir/target.conf"
+  rm -f -- "$cfg"
+  ln -s target.conf "$cfg"
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- config-check "${ARGS[@]}"
+  rc_is "$lb 4: リンクへの差し替えは config-check → 33" 33
+  out_line "$lb 4 リンク差替え: config-check の Git 未起動" 'GIT_SKIPPED=yes'
+  ckeq "$lb 4 リンク差替え: config-check の Git 0 回" "$(gitlog_n)" 0
+  : >"$GITLOG"
+  rune "${ns[@]}" ${M26_CHK_ENV[@]+"${M26_CHK_ENV[@]}"} -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "$lb 4: リンクへの差し替えは compare → 33" 33
+  out_line "$lb 4 リンク差替え: REASON=config-changed" 'REASON=config-changed'
+  ckeq "$lb 4 リンク差替え: Git 0 回" "$(gitlog_n)" 0
+  run cleanup --state "$STATE_DIR"
+  rc_is "$lb 4: cleanup" 0
+  rm -f -- "$cfg" "$dir/target.conf"
+
+  # 6 GIT_CONFIG_NOSYSTEM が真なら候補に入れない
+  for v in 1 true; do
+    base_repo "m26-$lb-6-$v"
+    rune "GIT_CONFIG_NOSYSTEM=$v" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
+    rc_is "$lb 6 NOSYSTEM=$v: take" 0
+    m26_state
+    ckf "$lb 6 NOSYSTEM=$v: 追加の設定の行が無い" inf "$STATE_DIR/snapshot/config-origins.txt" "$cfg"
+    run cleanup --state "$STATE_DIR"
+  done
+
+  # 9 子リポジトリの文脈にも入る
+  base_repo "m26-$lb-9"
+  subrepo_fixture "$R" child
+  GIT "$R" commit -qm child
+  rune "${ns[@]}" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
+  rc_is "$lb 9 子リポジトリ付き: take" 0
+  m26_state
+  ckt "$lb 9: 子の文脈 1:1 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:1${TAB}$cfg"
+  ckt "$lb 9: 子の文脈 1:0 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:0${TAB}$cfg"
+  run cleanup --state "$STATE_DIR"
+}
+m26_gate() { # 版の表示が Apple Git の形でなければ --man-path を呼ばず、候補に入れない(どの環境でも動く)
+  local gp="$WORK/m26-gate" lb raw have i=0 mp real_cfg
+  local labels=(a b c d e)
+  local raws=(UNSET 'git version 2.54.0 (Apple Git-157) extra' $'git version 2.54.0 (Apple Git-157)\nextra' 'git version 2.54.0 (Apple Git-)' $'git version 2.54.0\nx (Apple Git-157)')
+  for lb in "${labels[@]}"; do
+    raw="${raws[$i]}"; i=$((i + 1))
+    if [ "$lb" = a ] && [ "$REAL_IS_APPLE" -eq 1 ]; then
+      echo "NOTE: M26 版の判定 a: 本物の Git が Apple Git の形を返すため省略(b〜e で確かめる)"
+      continue
+    fi
+    base_repo "m26-gate-$lb"
+    : >"$GITLOG"
+    if [ "$raw" = UNSET ]; then
+      rune -u GIT_CONFIG_NOSYSTEM "PATH=$STUBS/applegit:$PATH" "APPLE_PREFIX=$gp" -- take --cwd "$R" --task-md task/t.md
+    else
+      rune -u GIT_CONFIG_NOSYSTEM "PATH=$STUBS/applegit:$PATH" "APPLE_PREFIX=$gp" "APPLE_VERSION_RAW=$raw" -- take --cwd "$R" --task-md task/t.md
+    fi
+    ckf "版の判定 $lb: --man-path を呼ばない" grep -qE '(^| )--man-path( |$)' "$GITLOG"
+    if [ "$REAL_IS_APPLE" -eq 0 ]; then
+      rc_is "版の判定 $lb: take" 0
+      m26_state
+      ckf "版の判定 $lb: 追加の設定の行が無い" inf "$STATE_DIR/snapshot/config-origins.txt" "$gp/share/git-core/gitconfig"
+      run cleanup --state "$STATE_DIR"
+    else
+      mp="$("$REAL_GIT" --man-path 2>/dev/null || true)"
+      real_cfg="${mp%/share/man}/share/git-core/gitconfig"
+      if [ -e "$real_cfg" ] || [ -L "$real_cfg" ]; then
+        rc_is "版の判定 $lb: 本物の追加の設定は未知のため take → 20" 20
+        err_line "版の判定 $lb: 本物の追加の設定のパスを未知として止める" "ERROR [internal] 設定の出典を安全に収集・保存できない: 保持候補に無い設定ファイルを Git が読む: $real_cfg"
+      else
+        rc_is "版の判定 $lb: 本物の追加の設定が無いので take → 0" 0
+        m26_state
+        ckf "版の判定 $lb: 追加の設定の行が無い" inf "$STATE_DIR/snapshot/config-origins.txt" "$gp/share/git-core/gitconfig"
+        run cleanup --state "$STATE_DIR"
+      fi
+    fi
+  done
+}
+case_M26() {
+  CID=M26; TAG=""
+  m26_gate
+  local ap="$WORK/m26-apple" cfg ns=(-u GIT_CONFIG_NOSYSTEM) sysfile="$WORK/m26-sysfile.conf" system_supported=0
+  local mp prefix src cl clcfg
+  cfg="$ap/share/git-core/gitconfig"
+  # ── 模擬(Apple Git でない環境)──
+  if [ "$REAL_IS_APPLE" -eq 1 ]; then
+    echo "NOTE: M26 模擬: 本物の Git が Apple Git のため省略(実機の分岐で確かめる)"
+  else
+    M26_TAKE_ENV=("PATH=$STUBS/applegit:$PATH" APPLE_FAKE_VERSION=999 "APPLE_PREFIX=$ap")
+    M26_CHK_ENV=("${M26_TAKE_ENV[@]}")
+    m26_suite sim "$cfg"
+    # 5 GIT_CONFIG_SYSTEM の値に関係なく入る
+    base_repo m26-sim-5a
+    rune "${ns[@]}" "${M26_TAKE_ENV[@]}" GIT_CONFIG_SYSTEM= -- take --cwd "$R" --task-md task/t.md
+    rc_is "sim 5 GIT_CONFIG_SYSTEM 空: take" 0
+    m26_state
+    ckt "sim 5 GIT_CONFIG_SYSTEM 空: 追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$cfg"
+    run cleanup --state "$STATE_DIR"
+    printf '[core]\n quotePath = true\n' >"$sysfile"
+    base_repo m26-sim-5b
+    if GIT_CONFIG_NOSYSTEM=0 GIT_CONFIG_SYSTEM=/dev/null GIT "$R" var GIT_CONFIG_SYSTEM >/dev/null 2>&1; then system_supported=1; fi
+    if [ "$system_supported" -eq 1 ]; then
+      rune "${ns[@]}" "${M26_TAKE_ENV[@]}" "GIT_CONFIG_SYSTEM=$sysfile" -- take --cwd "$R" --task-md task/t.md
+      rc_is "sim 5 GIT_CONFIG_SYSTEM=既存ファイル: take" 0
+      m26_state
+      ckt "sim 5 GIT_CONFIG_SYSTEM=既存ファイル: 追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$cfg"
+      ckt "sim 5 GIT_CONFIG_SYSTEM=既存ファイル: そのファイルの行もある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$sysfile"
+      run cleanup --state "$STATE_DIR"
+    else
+      echo "NOTE: M26 模擬 5: 本物の Git が git var GIT_CONFIG_SYSTEM に答えないため、GIT_CONFIG_SYSTEM=既存ファイルの確認を省略"
+    fi
+    # 7 小数点を含む版
+    base_repo m26-sim-7
+    rune "${ns[@]}" "${M26_TAKE_ENV[@]}" APPLE_FAKE_VERSION=137.1 -- take --cwd "$R" --task-md task/t.md
+    rc_is "sim 7 版 137.1: take" 0
+    m26_state
+    ckt "sim 7 版 137.1: 追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$cfg"
+    run cleanup --state "$STATE_DIR"
+    # 8 ラッパなし(本物の git)では入らない
+    base_repo m26-sim-8
+    rune "${ns[@]}" -- take --cwd "$R" --task-md task/t.md
+    rc_is "sim 8 ラッパなし: take" 0
+    m26_state
+    ckf "sim 8 ラッパなし: 追加の設定の行が無い" inf "$STATE_DIR/snapshot/config-origins.txt" "$cfg"
+    run cleanup --state "$STATE_DIR"
+  fi
+
+  # ── 実機の分岐(Apple Git の Mac)──
+  if [ "$REAL_IS_APPLE" -ne 1 ]; then
+    echo "NOTE: M26 実機: 本物の Git が Apple Git でないため省略"
+    return 0
+  fi
+  mp="$("$REAL_GIT" --man-path 2>/dev/null || true)"
+  if [[ ! $mp =~ ^/.+/share/man$ ]] || [[ $mp == *$'\n'* ]]; then ng "実機: git --man-path が /…/share/man の形"; return 0; fi
+  ok "実機: git --man-path が /…/share/man の形"
+  prefix="${mp%/share/man}"
+  # 本物のまま(system 設定を外さない)
+  base_repo m26-real
+  rune "${ns[@]}" -- take --cwd "$R" --task-md task/t.md
+  rc_is "実機: 本物の Apple Git で take" 0
+  m26_state
+  ckt "実機: plan-root に本物の追加の設定の行がある" inx "$STATE_DIR/snapshot/config-origins.txt" "plan-root${TAB}$prefix/share/git-core/gitconfig"
+  rune "${ns[@]}" -- config-check "${ARGS[@]}"
+  rc_is "実機: config-check" 0
+  rune "${ns[@]}" -- compare "${ARGS[@]}" --run-rc 0
+  rc_is "実機: compare" 0
+  run cleanup --state "$STATE_DIR"
+  rc_is "実機: cleanup" 0
+  # 本体を複製して、導入先を $WORK の中へ移す(複製は libexec を持たず、内蔵のサブコマンドだけ使える)
+  src="$prefix/bin/git"
+  cl="$WORK/m26-clone"
+  clcfg="$cl/share/git-core/gitconfig"
+  mkdir -p "$cl/bin"
+  if [ ! -f "$src" ] || [ -L "$src" ] || [ ! -x "$src" ]; then ng "実機: Git の本体($src)が実行できる通常ファイル"; return 0; fi
+  if ! cp -- "$src" "$cl/bin/git"; then ng "実機: Git の本体を複製できる"; return 0; fi
+  if ! "$cl/bin/git" version >/dev/null 2>&1; then ng "実機: 複製した Git が version を返す"; return 0; fi
+  ok "実機: Git の本体を複製できる"
+  mkdir -p "$cl/share/git-core"
+  printf '[private]\n token = x\n' >"$clcfg"
+  if env -u GIT_CONFIG_NOSYSTEM "$cl/bin/git" -C "$WORK" config --list --show-origin 2>/dev/null | grep -qF "file:$clcfg"; then ok "実機: 複製した Git が導入先の追加の設定を実際に読む"
+  else ng "実機: 複製した Git が導入先の追加の設定を実際に読む"; fi
+  rm -f -- "$clcfg"
+  M26_TAKE_ENV=("PATH=$cl/bin:$PATH")
+  M26_CHK_ENV=("PATH=$STUBS/applegit:$cl/bin:$PATH" "APPLE_REAL_GIT=$cl/bin/git")
+  m26_suite real "$clcfg"
+  M26_TAKE_ENV=(); M26_CHK_ENV=()
+}
+case_M27() { # 未知の読込先・Apple Git の導入先・system 設定の場所の問い合わせ失敗の診断(全環境)
+  CID=M27; TAG=""
+  local W=("PATH=$STUBS/applegit:$PATH") ns=(-u GIT_CONFIG_NOSYSTEM)
+  local lab inj="$WORK/m27-inject.conf" sysf="$WORK/m27-system.conf" secret=M27_SECRET_241 before val i head
+  local E1='ERROR [internal] 設定の出典を安全に収集・保存できない'
+  local N1='NOTE: 選べる実行条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する'
+  local N2='NOTE: 選べる実行条件 2: 設定の読込先をすべて保持候補にできる Git を PATH で選ぶ'
+  local N3='NOTE: 選べる実行条件 3: /etc/gitconfig などの system 設定を読まなくてよいなら、take から cleanup までを同じ GIT_CONFIG_SYSTEM=/dev/null の環境で実行する'
+  printf '[private]\n token = %s\n' "$secret" >"$inj"
+  printf '[core]\n quotePath = true\n' >"$sysf"
+
+  # 1 未知の file: の出典
+  base_repo m27-1
+  before="$(nstates)"
+  rune "${ns[@]}" "${W[@]}" "APPLE_INJECT=$inj" -- take --cwd "$R" --task-md task/t.md
+  rc_is "未知の file: の出典: take → 20" 20
+  err_line "未知の file: の出典: 診断の行" "$E1: 保持候補に無い設定ファイルを Git が読む: $inj"
+  err_line "未知の file: の出典: NOTE 1" "$N1"
+  err_line "未知の file: の出典: NOTE 2" "$N2"
+  ckf "未知の file: の出典: NOTE 3 は出ない" inf "$CASE_ERR" '選べる実行条件 3'
+  m26_secret_absent "未知の file: の出典" "$secret"
+  out_lacks "未知の file: の出典: STATE_DIR を出さない" 'STATE_DIR='
+  ckeq "未知の file: の出典: 保護領域を残さない" "$(nstates)" "$before"
+
+  # 2 種類の分からない出典
+  base_repo m27-2
+  before="$(nstates)"
+  rune "${ns[@]}" "${W[@]}" APPLE_KIND_INJECT=1 -- take --cwd "$R" --task-md task/t.md
+  rc_is "種類の分からない出典: take → 20" 20
+  err_line "種類の分からない出典: 診断の行" "$E1: 保持候補に無い種類の出典を Git が使う: blob"
+  err_line "種類の分からない出典: NOTE 1" "$N1"
+  err_line "種類の分からない出典: NOTE 2" "$N2"
+  ckf "種類の分からない出典: NOTE 3 は出ない" inf "$CASE_ERR" '選べる実行条件 3'
+  out_lacks "種類の分からない出典: STATE_DIR を出さない" 'STATE_DIR='
+  ckeq "種類の分からない出典: 保護領域を残さない" "$(nstates)" "$before"
+
+  # 3 Apple Git の導入先を確定できない
+  i=0
+  for val in '' 'relative/share/man' '/x/share/doc' '/x/share/man/' '/share/man' $'/a\n/x/share/man' FAIL; do
+    i=$((i + 1))
+    lab="${val//$'\n'/\\n}"
+    base_repo "m27-3-$i"
+    before="$(nstates)"
+    if [ "$val" = FAIL ]; then head=(APPLE_MANPATH_FAIL=1); else head=("APPLE_MANPATH=$val"); fi
+    rune "${ns[@]}" "${W[@]}" APPLE_FAKE_VERSION=999 "${head[@]}" -- take --cwd "$R" --task-md task/t.md
+    rc_is "導入先を確定できない(--man-path=${lab:-空}): take → 20" 20
+    err_line "導入先を確定できない(--man-path=${lab:-空}): 診断の行" "$E1: Apple Git の追加の system 設定の場所を確定できない(git --man-path の値が /…/share/man の形でない)"
+    err_line "導入先を確定できない(--man-path=${lab:-空}): NOTE 1" "$N1"
+    err_line "導入先を確定できない(--man-path=${lab:-空}): NOTE 2" "$N2"
+    ckf "導入先を確定できない(--man-path=${lab:-空}): NOTE 3 は出ない" inf "$CASE_ERR" '選べる実行条件 3'
+    out_lacks "導入先を確定できない(--man-path=${lab:-空}): STATE_DIR を出さない" 'STATE_DIR='
+    ckeq "導入先を確定できない(--man-path=${lab:-空}): 保護領域を残さない" "$(nstates)" "$before"
+  done
+
+  # 4 system 設定の場所を問い合わせられない(git var が無い古い Git の模擬)
+  base_repo m27-4
+  before="$(nstates)"
+  rune "${ns[@]}" "${W[@]}" APPLE_VAR_FAIL=1 "GIT_CONFIG_SYSTEM=$sysf" -- take --cwd "$R" --task-md task/t.md
+  rc_is "system 設定の場所を問い合わせられない: take → 20" 20
+  err_line "system 設定の場所を問い合わせられない: 診断の行" "$E1: Git が system 設定の場所を返さない(git var GIT_CONFIG_SYSTEM が失敗した)"
+  err_line "system 設定の場所を問い合わせられない: NOTE 1" "$N1"
+  err_line "system 設定の場所を問い合わせられない: NOTE 2" "$N2"
+  err_line "system 設定の場所を問い合わせられない: NOTE 3" "$N3"
+  out_lacks "system 設定の場所を問い合わせられない: STATE_DIR を出さない" 'STATE_DIR='
+  ckeq "system 設定の場所を問い合わせられない: 保護領域を残さない" "$(nstates)" "$before"
+  base_repo m27-4b
+  rune "${ns[@]}" "${W[@]}" APPLE_VAR_FAIL=1 GIT_CONFIG_SYSTEM=/dev/null -- take --cwd "$R" --task-md task/t.md
+  rc_is "選べる実行条件 3(GIT_CONFIG_SYSTEM=/dev/null): take → 0" 0
+  STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"
+  run cleanup --state "$STATE_DIR"
 }
 
 # ════════════════════════ N 隔離 selector・子リポジトリ・有限読取予約 ════════════════════════
@@ -3425,7 +3837,7 @@ case_N12() { # HOME未設定/空と~userのGit自身のpath展開を維持する
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0

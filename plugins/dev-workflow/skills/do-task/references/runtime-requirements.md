@@ -124,13 +124,41 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 - macOS では群の停止直後の不在確認が一時的に `EPERM` となり、直後に `ESRCH` へ変わる場合があった。旧実装はコピーを保持して停止した。初回の成功だけで安定動作と判断せず、修正後も下記の手順で再確認する。
 - `setsid` で群外へ移った子は、元の群の停止とコピー削除の後も動いた。群外の子孫と同じ利用者権限での完全な隔離は保証しない。
 - 入力・状態・一時領域には、親を含め symlink(別のパスを指すリンク)のない物理パスを選ぶ。macOS の `/var`・`/tmp` の別名は拒否される場合がある。`TMPDIR` も物理パスの書き込み可能なディレクトリに選ぶ。 <!-- validate-allow: macOS の標準パスにあるリンクの注意を説明するため -->
-- Apple Git の追加の system 設定が保持候補に入らない場合は、安全側に停止する。実機試験では子の環境だけに `GIT_CONFIG_NOSYSTEM=1` を指定すると通常操作が成功した。利用者の設定を変更せず、system 設定を外す影響を確認して実行環境を選ぶ。
+- Apple Git の追加の system 設定: `implement-guard.sh take` は、`git version` が Apple Git の形を返し、`git --man-path` から導入先を求められる Git では、system 設定を外さずに通る。([Issue #241](https://github.com/Yuki-Maeda-valour/workflow/issues/241))
+  - 仕組み: Apple Git は、system 設定が有効(`GIT_CONFIG_NOSYSTEM` が未設定か偽)のとき、`/etc/gitconfig` より先に `<Git の導入先>/share/git-core/gitconfig` を読む。`GIT_CONFIG_SYSTEM` の値(`/dev/null`・空・任意のファイル)には関係なく読む。
+  - 候補にする条件: `git version` の出力が `git version X (Apple Git-N)` の形(`N` は `137.1` のように小数点を含んでもよい)。`take` は `git --man-path` の値から末尾の `/share/man` を外して導入先を求め、その下の `share/git-core/gitconfig` を保持候補(起動前に控えて、後で変化を照らす設定ファイルの一覧)に入れる。ファイルが無くても入れる(後から作られたら検出するため)。
+  - 受け付ける `git --man-path` の値は、改行を含まず `/…/share/man` の形のものだけ。空・相対パス・末尾が `/share/man/`・導入先が空になる値・コマンドの失敗は、終了値 20 で止める。
+  - `GIT_CONFIG_NOSYSTEM` が真(`1`・`true` など)なら入れない。`GIT_CONFIG_NOSYSTEM`・`GIT_CONFIG_SYSTEM` と利用者の Git 設定は書き換えない。system 設定を自動で外すことも、未知の読込先を後から許可することもしない。
+  - 候補にした追加の設定は、ほかの候補と同じく、内容変更・新設・削除・リンクへの差し替えを、Git を呼ぶ前に検出する(`config-check` と `compare` は終了値 33)。
+  - 追加の設定を正当に変えたときは、保護領域を `cleanup` で消してから `take` し直す。
+  - 実機で確かめた構成(2026-10-30): macOS 26.6.2 / arm64、Git 2.54.0(Apple Git-157)。`xcode-select -p` は `/Library/Developer/CommandLineTools`。`/usr/bin/git` は実体を選んで起動する小さなプログラムで、実体は `/Library/Developer/CommandLineTools/usr/bin/git`。読込先は `/Library/Developer/CommandLineTools/usr/share/git-core/gitconfig`。本体を別の場所 `P/bin/git` へ複製すると `P/share/git-core/gitconfig` を読み、`git --man-path` も `P/share/man` を返した。
+  - 未確認の構成: Xcode.app の Git(この Mac に Xcode.app は無い)、Apple Git-157 以外の版、Intel(x86_64)の Mac。Git 2.42 より前の Apple Git も未確認。
+  - 保持候補に無い読込先を Git が読むとき、または Apple Git の導入先・system 設定の場所を求められないとき、`take` は終了値 20 で止める。診断の 1 行目は `ERROR [internal] 設定の出典を安全に収集・保存できない: <原因>`。原因は、読込先のパス・出典の種類・Apple Git の導入先を確定できない・system 設定の場所を問い合わせられない、のどれか。続く `NOTE:` の行に、選べる実行条件を出す。設定の値・本文と Git の stderr は出さない。
+    - 条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、`take` から `cleanup` までを同じ `GIT_CONFIG_NOSYSTEM=1` の環境で実行する。
+    - 条件 2: 設定の読込先をすべて保持候補にできる Git を `PATH` で選ぶ。
+    - 条件 3(system 設定の場所を問い合わせられないときだけ): `/etc/gitconfig` などの system 設定を読まなくてよいなら、`take` から `cleanup` までを同じ `GIT_CONFIG_SYSTEM=/dev/null` の環境で実行する。
+  - `git var GIT_CONFIG_SYSTEM` が無い Git(2.42 より前と推測。未確認)の Apple Git: system 設定を有効のまま既定の環境で `take` を通すことはできず、終了値 20 で止まる。`GIT_CONFIG_SYSTEM=/dev/null` を指定すれば通る。その場合も追加の設定は候補に入る(古い Apple Git の実機では未確認)。
+  - 限界: `take` のときに求めた場所だけを照らす。`take` の後に Git の実体を切り替える操作(`xcode-select`・`DEVELOPER_DIR`・`PATH` の変更)は検出しない。切り替えたときは `cleanup` してから `take` し直す。これは既存の `git var GIT_CONFIG_SYSTEM` と同じ限界。
+  - 追加の属性ファイル(`share/git-core/gitattributes`)は設定の出典に影響しないため扱わない。
+- `implement-guard-selftest.sh` を Mac で回す手順(2026-10-30 に確認):
+  - 環境: GNU coreutils・findutils・grep を `PATH` の先頭に置く。`sed` は BSD 版(`/usr/bin/sed`)のまま使える。`TMPDIR` は symlink を含まない物理パスにする。`GIT_CONFIG_NOSYSTEM` は指定せず、system 設定は有効のまま回す。
+  - 実機の分岐: ケース `M26` は、Apple Git の Mac では実機の分岐を動かし、Apple Git を模した分岐は `NOTE:` の行を出して省く(数えない)。Apple Git でない環境では逆になる。
+  - 結果: 下の「Mac の結果」に書く。シェル回帰一式の正式な必要環境は Linux のままで、Mac の結果は Linux の代わりにしない。
+- Mac の結果(Issue #241、2026-10-30、macOS 26.6.2 / arm64、Git 2.54.0〈Apple Git-157〉、Bash 5.3.20、GNU coreutils 9.12・findutils 4.11.0・grep 3.12、system 設定は有効のまま): FAIL 44 行(下の 2 群だけ)。PASS の件数と所要時間は Issue #241 の検証の記録に書く。
+  - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊した写しで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。
+  - 残る FAIL 44 行は、Apple Git の設定とは別の原因で、修正前から落ちていたもの。
+    - `restore-taskmd`(`J1`・`J2`・`J3`・`J6`・`J8`・`B10`・`B12`・`G7`・`M6` の 40 行): 別の Issue [#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で扱う(処理は [#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) が確かめる)。原因は環境で違う。
+      - Mac(GNU coreutils 9.12): `/proc` が無く、`/dev/fd` の別名で `cp: skipping file '/dev/fd/3', as it was replaced while being copied` になる。書き込みの上限の有無には関係しない。
+      - Linux(Debian trixie・GNU coreutils 9.7): 書き込みの上限を付けた `cp -aL` が `SIGXFSZ` で止まり、38 行が落ちる。
+      - `J8` は、非 UTF-8 の名前を APFS が作れないことも重なり、Mac では 2 行多い。
+    - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになる。別の Issue [#286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で扱う。
+  - 修正前の Mac の FAIL 64 行(スイートを `GIT_CONFIG_NOSYSTEM=1` で回した基準。system 設定を有効のままの修正前の実行は、Issue #241 の 2026-10-26 のコメントで FAIL 812 件)のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
 - 無人ループとシェル回帰一式は引き続き Linux 専用。Linux 上の Darwin スタブの成功や Linux 専用試験の skip は、macOS の成功根拠にしない。
 
 再確認は使い捨てリポジトリで次の順に行う。
 
 1. 実機の OS 版、`command -v bash`・`bash --version`、GNU 道具の実行パスと版を記録し、PATH を選ぶ。
-2. scratch リポジトリで do-task の事前検査 → snapshot(新規出力親 1 階層・複数階層・既存 symlink 拒否) → guard の `take` / `compare` / `cleanup` を確認する。create-task の保存先 resolver と本文 digest も scratch で確認する。
+2. scratch リポジトリで do-task の事前検査 → snapshot(新規出力親 1 階層・複数階層・既存 symlink 拒否) → guard の `take` / `compare` / `cleanup` を確認する。create-task の保存先 resolver と本文 digest も scratch で確認する。system 設定は有効のまま(`GIT_CONFIG_NOSYSTEM` を指定しない)で確かめ、`take` が終了値 0 で通ること、`snapshot/config-origins.txt` に Apple Git の追加の設定の行があることも見る。
 3. 標準 bash では do-task の bash 要件が明示されること、標準・導入 bash の両方で loop が Linux 専用エラー rc 20 となり、状態生成・git 操作・ホスト起動がないことを確認する。macOS 上で loop 本体や loop-selftest の成功は要求しない。
 4. 品質検証は Python の版も記録する。同じ scratch で [review-protocol.md](review-protocol.md#reviewcommit-照合) の `start` → `take` → `seal` → `run-checks` を行う。終了値 0 と 7 の計画で、終了値と出力の hash が保たれることを確認する。
 5. 次に、3 秒で自己終了する子を作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。`--timeout 1` で、元の群が消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子を残す場合も、次のコマンドと重複しないことを確かめる。
