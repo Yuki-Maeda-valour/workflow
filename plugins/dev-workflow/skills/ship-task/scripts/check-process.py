@@ -197,9 +197,13 @@ def posix_command(argv, cwd, env, timeout, grace, directory, stdout, stderr, sto
     except (OSError, ValueError, RecoveryError) as exc:
         problem = exc
     finally:
-        os.close(read_fd)
-        # この呼出しまで poll/wait/communicate をしない。異常終了も未回収で保持する。
-        stop_group(process, grace)
+        try:
+            # この呼出しまで poll/wait/communicate をしない。異常終了も未回収で保持する。
+            stop_group(process, grace)
+        finally:
+            # 読み口は群の停止を確かめるまで閉じない。先に閉じると、TERM で終わったコマンドの通知を
+            # anchor が書けずに終わり、群が回収前の終了済みだけになる(macOS はその群への KILL を EPERM で返す)。
+            os.close(read_fd)
     if problem:
         raise RecoveryError(str(problem)) from problem
     stop.check()

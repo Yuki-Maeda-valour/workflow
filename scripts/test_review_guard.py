@@ -1262,7 +1262,6 @@ class CheckLifecycleTest(unittest.TestCase):
              mock.patch.object(self.guard, "output_json", side_effect=lambda p, value, *_: p.write_text(json.dumps(value))):
             return self.guard.run_checks(args)
 
-    @unittest.skipUnless(LINUX, "Linux 専用: macOS では #289 に当たる。両 OS の形は兄弟を足した別の試験")
     def test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan(self):
         import time
         marker, pidfile, cleanfile, later = (self.root / x for x in ("marker", "pid", "clean", "later"))
@@ -1287,8 +1286,8 @@ time.sleep(3)
 
 
     def test_timeout_with_term_ignoring_sibling_stops_grandchild_before_checkout_removal(self):
-        # 922 行の試験に、親の別の子として「TERM を無視して 2.5 秒で自分で終わる兄弟」を足した形。両 OS で動かす。
-        # macOS では、KILL の時点で兄弟が生きているので #289 に当たらない。
+        # test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan に、親の別の子として「TERM を無視して 2.5 秒で自分で終わる兄弟」を足した形。両 OS で動かす。
+        # TERM を無視する兄弟が、群への KILL で止まることを確かめる。
         # Linux では、親は TERM で終わり、孫はすぐ引き取られて止まる。
         marker, grandfile, siblingfile, cleanfile, later = (self.root / x for x in ("marker", "grand", "sibling", "clean", "later"))
         natural = self.root / "sibling-natural"  # 兄弟が自然に終わる直前に書く印
@@ -1408,7 +1407,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
             thread = threading.Thread(target=interrupt)
             thread.start()
             try:
-                # TERM を無視させ、KILL の時点で群に生きた一員を残す(macOS で #289 の経路に当たらない)。
+                # TERM を無視させ、品質コマンドが群への KILL で止まることを確かめる。
                 code = f"import os,signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(2.5); Path({str(natural)!r}).write_text('natural')"
                 with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持') as caught:
                     self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
@@ -1477,7 +1476,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         return mock.patch.object(self.process_helper.subprocess, "Popen", side_effect=launch)
 
     def assert_retained(self, caught, expected, later, before):
-        # 検証用コピーを保持して止まり、意図した経路を通ったこと(#289 の経路ではないこと)を確かめる。
+        # 検証用コピーを保持して止まり、意図した経路を通ったこと(回収の失敗〈Operation not permitted〉の経路ではないこと)を確かめる。
         message = str(caught.exception)
         self.assertIn(expected, message)
         self.assertNotIn("Operation not permitted", message)
@@ -1510,7 +1509,8 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         thread = threading.Thread(target=kill)
         thread.start()
         try:
-            # 品質コマンドは TERM を無視して眠る(KILL の時点で群に生きた一員を残す)。
+            # 品質コマンドは TERM を無視して眠る(KILL の時点で群に生きた一員を残す)。anchor が失われた後に群の全員が
+            # TERM で終わると、macOS は群への KILL を EPERM で返し、診断の文が Operation not permitted に替わるため。
             code = f"import json, os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); {record(command)}; time.sleep(2.5); Path({str(natural)!r}).write_text('natural')"
             with mock.patch.object(self.guard, "check_process_module", return_value=self.process_helper), \
                  self.capture_anchor(anchors):
@@ -1529,7 +1529,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
 
     @unittest.skipUnless(DARWIN, "macOS 専用: POSIX 方式の anchor の通知を壊す")
     def test_missing_bad_or_mismatched_anchor_notice_retains_copy(self):
-        # 品質コマンドはすぐ終わる。通知を書いた後の anchor は生きているので #289 に当たらない。
+        # 品質コマンドはすぐ終わる。通知を書いた後の anchor は、群への KILL まで生きている。
         original = os.read
         cases = ((b"", "anchor が終了通知の前に失われた"),
                  (b"invalid json\n", "Expecting value"),

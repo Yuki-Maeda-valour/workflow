@@ -365,6 +365,24 @@ time.sleep({3 if timeout else .1})
             unrelated.kill()
             unrelated.wait()
 
+    def test_posix_term_obeying_command_keeps_anchor_until_kill(self):
+        # #289 の後始末の順を Linux でも確かめる。Linux は終了済みだけの群への KILL を拒まないので、#289 の症状は出ない。
+        # 代わりに anchor の終了値で順を確かめる。検証の親が通知の読み口を群の停止まで開いていれば、anchor は
+        # TERM で終わったコマンドの通知を書けて KILL で止まる。先に閉じる形では、通知を書けずに終了値 97 で終わる。
+        # grace は、先に閉じる形の anchor が KILL より先に終わるのに十分な長さにする。
+        # run_code はパスをコマンド行に入れないので、注釈に試験の領域のパスを入れる(ps の確認で見つかるように)。
+        anchors = []
+        original = subprocess.Popen
+        def launch(*args, **kwargs):
+            process = original(*args, **kwargs)
+            anchors.append(process)
+            return process
+        with mock.patch.object(self.helper.subprocess, 'Popen', side_effect=launch):
+            result = self.run_code(f"import time; time.sleep(3)  # {self.root}", timeout=.3, method='posix', grace=.5)
+        self.assertTrue(result['timed_out'])
+        self.assertEqual('original-process-group-only', result['recovery_scope'])
+        self.assertEqual(-signal.SIGKILL, anchors[0].returncode)
+
     def test_monitor_launch_failure_proves_no_command_started(self):
         for method in ('linux', 'posix'):
             with mock.patch.object(self.helper, 'launch_monitor', side_effect=self.helper.LaunchError):
@@ -662,36 +680,42 @@ class CheckProcessDarwinTest(unittest.TestCase):
         self.assertEqual(127, result['returncode'])
         self.assertEqual('no-command-started', result['recovery_scope'])
 
-    # #289 の固定の試験: 群の全員が TERM で終わると、回収前の終了済みの anchor だけが群に残り、
-    # macOS が SIGKILL を EPERM で返す。今の不具合の挙動を、そのとおりに確かめる。
-    # RecoveryError 以外の例外・文の違う RecoveryError・#289 が再現しない環境では失敗する。
+    # #289 の回帰の試験: 群の全員(品質コマンド)が TERM で終わっても、検証の親が通知の読み口を群の停止まで
+    # 開いているので、anchor は通知を書けて KILL まで残る。群への KILL が EPERM にならず、時間切れは時間切れ、
+    # 停止の信号は終了通知になる。読み口を先に閉じる形へ戻ると、anchor が通知を書けずに終わり、群が回収前の
+    # 終了済みの anchor だけになる。macOS は KILL を EPERM で返し、RecoveryError(Operation not permitted)で落ちる。
     # 製品の既定の grace(.2 秒)で回す。
-    def test_issue289_term_obeying_timeout_is_recovery_error(self):
-        # #289 を直したら、timed_out が真の期待に替える。
+    def test_issue289_term_obeying_timeout_is_timed_out(self):
         command = self.path('command')
         anchors, launch = self.capture_anchor()
-        with launch, self.assertRaises(self.helper.RecoveryError) as caught:
-            self.run_code(f"import json, os, time; from pathlib import Path; {record(command)}; time.sleep(3)",
-                          timeout=1, grace=.2)
-        self.assertIs(self.helper.RecoveryError, type(caught.exception))
-        self.assertIn('Operation not permitted', str(caught.exception))
+        code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(3, self.natural('command'))}"
+        with launch:
+            result = self.run_code(code, timeout=1, grace=.2)
+        self.assert_not_natural()
+        self.assertTrue(result['timed_out'])
+        self.assertEqual(-signal.SIGKILL, result['returncode'])
+        self.assertEqual('posix-process-group', result['recovery_method'])
         assert_absent_now(self.pid_of(command))
-        anchors[0].wait()
+        # anchor は KILL まで生きていた(読み口を先に閉じる形では、通知を書けずに終了値 97 で終わる)。
+        self.assertEqual(-signal.SIGKILL, anchors[0].returncode)
 
-    def test_issue289_term_obeying_parent_signal_is_recovery_error(self):
-        # #289 を直したら、Interrupted(終了通知 15 を受けた)の期待に替える。
-        # 期限は 10 秒にする(時間切れの経路で同じ文になって通るのを防ぐ)。信号を実際に送ったことも確かめる。
-        command = self.path('command')
-        anchors, launch = self.capture_anchor()
-        fired = self.when_recorded(command, send_self(signal.SIGTERM))
-        with launch, self.assertRaises(self.helper.RecoveryError) as caught:
-            self.run_code(f"import json, os, time; from pathlib import Path; {record(command)}; time.sleep(2.5)",
-                          timeout=10, grace=.2)
-        self.assertTrue(fired.is_set(), 'TERM を送っていない')
-        self.assertIs(self.helper.RecoveryError, type(caught.exception))
-        self.assertIn('Operation not permitted', str(caught.exception))
-        assert_absent_now(self.pid_of(command))
-        anchors[0].wait()
+    def test_issue289_term_obeying_parent_signal_is_interrupted(self):
+        # 期限は 10 秒にする(時間切れの経路で通らないように)。信号を実際に送ったことも確かめる。
+        for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            with self.subTest(signal=number.name):
+                command = self.path('command-' + number.name)
+                natural = self.natural('command-' + number.name)
+                anchors, launch = self.capture_anchor()
+                fired = self.when_recorded(command, send_self(number))
+                code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(2.5, natural)}"
+                with launch, self.assertRaisesRegex(self.helper.Interrupted, f'終了通知 {int(number)} を受けた') as caught:
+                    self.run_code(code, timeout=10, grace=.2)
+                self.assert_not_natural([natural])
+                self.assertTrue(fired.is_set(), f'{number.name} を送っていない')
+                self.assertNotIn('Operation not permitted', str(caught.exception))
+                assert_absent_now(self.pid_of(command))
+                # anchor は KILL まで生きていた。
+                self.assertEqual(-signal.SIGKILL, anchors[0].returncode)
 
 
 class GroupIdentityTest(unittest.TestCase):
