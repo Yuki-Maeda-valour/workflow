@@ -30,7 +30,7 @@
 
 ## 導入方法
 
-do-task の補助スクリプトは bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。macOS では、品質コマンド(lint やテストなど、検証で動かすコマンド)が時間切れになったときや、検証の処理が停止の信号を受けたときに、本来の時間切れ・中断の報告にならない既知の不具合があります([Issue #289](https://github.com/Yuki-Maeda-valour/workflow/issues/289))。止めた処理の終わりを確かめられない失敗として、検証用に作った作業ツリーの写しを残し、終了値 2 で止まります。条件と当たらない場合も同文書にあります。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
+do-task の補助スクリプトは bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
 ### A. plugin marketplace(推奨)
 
