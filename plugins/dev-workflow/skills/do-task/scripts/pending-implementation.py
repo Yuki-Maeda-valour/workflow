@@ -17,12 +17,26 @@ MAX_CANDIDATES = 128
 TIME_LIMIT_SECONDS = 5.0
 ROOT_IDS = ("xdg_state", "home_state", "home_cache")
 STAT_FIELDS = ("dev", "ino", "mode", "uid", "size", "mtime_ns", "ctime_ns")
+ROOT_DIGEST_KEYS = ("id", "input_path_bytes_hex", "resolved_path_bytes_hex",
+                    "status", "reason", "identity", "canonical_id")
+# list_sha256の入力へ写す候補の11項目。候補に項目が増えても、この名前だけを写す。
+LIST_CANDIDATE_KEYS = ("root_id", "path_bytes_hex", "name_bytes_hex", "kind", "dev", "ino",
+                       "mode", "uid", "size", "mtime_ns", "ctime_ns")
+# identity_sha256の入力へ写す候補の7項目。更新時刻・大きさ・権限は入れない。
+IDENTITY_CANDIDATE_KEYS = ("root_id", "path_bytes_hex", "name_bytes_hex", "kind", "dev", "ino", "uid")
+# identity_sha256の入力では、置き場のidentityから権限(mode)を外す。
+IDENTITY_ROOT_KEYS = ("dev", "ino", "uid")
 HELP = """使用方法:
   python3 pending-implementation.py scan --cwd <作業対象の管理ルート>
-      [--acknowledged-list <64桁の一覧確認値>]
+      [--acknowledged-list <64桁の一覧確認値>
+       | --acknowledged-identities <64桁の実体確認値>]
 
 保護記録らしい候補を3か所の直下から列挙します。候補の内部は読みません。
-一覧確認値は、人が全候補を具体的に確認した場合だけ渡してください。
+確認値は、人が全候補を具体的に確認した場合だけ渡してください。
+  --acknowledged-list: 一覧確認値(list_sha256)。更新時刻・大きさ・権限の変化でも変わります。
+  --acknowledged-identities: 実体確認値(identity_sha256)。全候補が今回と無関係と
+      人が答えた場合だけ使います。同じ実体の更新時刻・大きさ・権限の変化では変わりません。
+2つの確認値は同時に渡せません(終了値2)。
 保護記録の真正性や、処理の停止を証明する値ではありません。
 終了値: 0=候補なし/確認値一致、10=人の確認が必要、11=列挙不能、
         2=引数または作業対象の不正、20=想定外の失敗。
@@ -44,15 +58,33 @@ def canonical_json(value):
                       separators=(",", ":"), allow_nan=False)
 
 
-def list_digest(result):
-    root_keys = ("id", "input_path_bytes_hex", "resolved_path_bytes_hex",
-                 "status", "reason", "identity", "canonical_id")
-    payload = {"schema_version": 1, "cwd_bytes_hex": result["cwd_bytes_hex"],
-               "roots": [{key: root[key] for key in root_keys}
-                         for root in result["roots"]],
-               "candidates": [{key: value for key, value in item.items() if key != "path"}
-                              for item in result["candidates"]]}
+def payload_digest(payload):
     return hashlib.sha256(canonical_json(payload).encode("utf-8")).hexdigest()
+
+
+def list_digest(result):
+    # 入力の形(schema_version 1と候補の11項目)は、関連する記録の再開手順のために変えない。
+    payload = {"schema_version": 1, "cwd_bytes_hex": result["cwd_bytes_hex"],
+               "roots": [{key: root[key] for key in ROOT_DIGEST_KEYS}
+                         for root in result["roots"]],
+               "candidates": [{key: item[key] for key in LIST_CANDIDATE_KEYS}
+                              for item in result["candidates"]]}
+    return payload_digest(payload)
+
+
+def identity_digest(result):
+    # 人が全候補を無関係と答えたときだけ呼出側が使う。同じ実体の時刻・大きさ・権限では変わらない。
+    roots = []
+    for root in result["roots"]:
+        item = {key: root[key] for key in ROOT_DIGEST_KEYS}
+        if item["identity"] is not None:
+            item["identity"] = {key: item["identity"][key] for key in IDENTITY_ROOT_KEYS}
+        roots.append(item)
+    payload = {"schema_version": 1, "digest": "identity", "cwd_bytes_hex": result["cwd_bytes_hex"],
+               "roots": roots,
+               "candidates": [{key: item[key] for key in IDENTITY_CANDIDATE_KEYS}
+                              for item in result["candidates"]]}
+    return payload_digest(payload)
 
 
 def check_features():
@@ -334,7 +366,7 @@ def parse_arguments(argv):
     args = iter(argv[1:])
     for token in args:
         name, equal, value = token.partition("=")
-        if name not in ("--cwd", "--acknowledged-list") or name in values:
+        if name not in ("--cwd", "--acknowledged-list", "--acknowledged-identities") or name in values:
             raise ScanError("invalid-arguments", "不明または重複した引数があります。", exit_code=2)
         if not equal:
             value = next(args, None)
@@ -343,15 +375,22 @@ def parse_arguments(argv):
         values[name] = value
     if "--cwd" not in values:
         raise ScanError("invalid-arguments", "--cwdは必須です。", exit_code=2)
-    acknowledged = values.get("--acknowledged-list")
-    if acknowledged is not None and re.fullmatch(r"[0-9a-fA-F]{64}", acknowledged) is None:
-        raise ScanError("invalid-arguments", "一覧確認値は64桁のASCII hexで指定してください。", exit_code=2)
-    return values["--cwd"], acknowledged.lower() if acknowledged is not None else None
+    if "--acknowledged-list" in values and "--acknowledged-identities" in values:
+        raise ScanError("invalid-arguments", "2つの確認値は同時に指定できません。", exit_code=2)
+    acknowledged = {}
+    for name, kind in (("--acknowledged-list", "list"), ("--acknowledged-identities", "identity")):
+        value = values.get(name)
+        if value is None:
+            continue
+        if re.fullmatch(r"[0-9a-fA-F]{64}", value) is None:
+            raise ScanError("invalid-arguments", "確認値は64桁のASCII hexで指定してください。", exit_code=2)
+        acknowledged[kind] = value.lower()
+    return values["--cwd"], acknowledged
 
 
 def run(argv=None):
     """JSON出力前の結果と終了値を返す。永続状態は作らない。"""
-    result = {"schema_version": 1, "result": "internal", "cwd": None, "cwd_bytes_hex": None,
+    result = {"schema_version": 2, "result": "internal", "cwd": None, "cwd_bytes_hex": None,
               "complete": False, "roots": [], "candidates": [], "issues": []}
     try:
         cwd, acknowledged = parse_arguments(sys.argv[1:] if argv is None else argv)
@@ -375,13 +414,16 @@ def run(argv=None):
         result.update(cwd=os.fsdecode(resolved[0]), cwd_bytes_hex=resolved[0].hex())
         Scanner(result, budget).scan()
         result["candidates"].sort(key=lambda item: (ROOT_IDS.index(item["root_id"]), bytes.fromhex(item["name_bytes_hex"])))
-        digest = list_digest(result)
+        digests = {"list": list_digest(result), "identity": identity_digest(result)}
         budget.check()
-        if acknowledged is not None:
-            outcome = "acknowledged" if acknowledged == digest else "list-changed"
+        if acknowledged:
+            # parse_argumentsが2つの同時指定を拒むので、渡された確認値は1つだけ。
+            kind, value = next(iter(acknowledged.items()))
+            outcome = "acknowledged" if value == digests[kind] else "list-changed"
         else:
             outcome = "confirmation-required" if result["candidates"] else "none"
-        result.update(result=outcome, complete=True, list_sha256=digest)
+        result.update(result=outcome, complete=True, list_sha256=digests["list"],
+                      identity_sha256=digests["identity"])
         return (0 if outcome in ("none", "acknowledged") else 10), result
     except ScanError as exc:
         result["result"] = {2: "usage", 11: "scan-unavailable"}[exc.exit_code]

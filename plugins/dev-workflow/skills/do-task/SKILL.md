@@ -149,7 +149,10 @@ except (Exception, SystemExit) as exc:
 [references/external-runners.md](references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
 - 対象タスク本文を完了条件として採用する前、対象 repo の Git 調査・事前検査より前に行う。検証のみ・内蔵・非 Git・Issue 本文などの非ファイルタスクでも省略しない。
 - 0/`none`、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
-- 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、`PENDING_LIST_SHA256` を `--acknowledged-list` へ渡せる。ログから復元しない。
+- 確認値は 2 つあり、人の答えで選ぶ。2 つを同時に渡さない(§12-9-5)。
+  - 全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、`--acknowledged-identities` へ渡す。
+  - 1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、`--acknowledged-list` へ渡す。
+- 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、引き継いだ方の値を対応する引数へ渡せる。ログから復元しない。
 - この入口は Phase 0 だけ。Phase 3 の take 後・Phase 4・差戻し・内蔵への引継ぎでは再走査しない。同じ実行の反復で Phase 0 へ戻さない。
 
 最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、`PATH` 上の `bash` 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。

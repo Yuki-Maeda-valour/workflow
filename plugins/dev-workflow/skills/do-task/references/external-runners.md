@@ -1494,20 +1494,21 @@ bash {do-task の}scripts/implement-agent.sh --runner <名前> --prompt-file <�
 
 新しい do-task / ship-task の開始前に使う、停止専用の契約。現在の委託先や profile の有無によらず適用する。
 候補とは、外部実装の保護記録らしい名前を持つ項目のこと。helper は一覧を返す同梱の補助スクリプトを指す。
-一覧の確認値は、今回の一覧と人の回答を結び付ける値であり、保護記録が正しいことや処理の停止を証明しない。
+確認値(一覧確認値`list_sha256`と実体確認値`identity_sha256`)は、今回の一覧と人の回答を結び付ける値であり、保護記録が正しいことや処理の停止を証明しない。
 実装は [pending-implementation.py](../scripts/pending-implementation.py)、必要環境は [runtime-requirements.md](runtime-requirements.md)。
 
 #### 12-9-1. helperの公開契約
 
 ```text
-python3 pending-implementation.py scan --cwd <作業対象の管理ルート> [--acknowledged-list <64桁hex>]
+python3 pending-implementation.py scan --cwd <作業対象の管理ルート> [--acknowledged-list <64桁hex> | --acknowledged-identities <64桁hex>]
 ```
 
 - `--cwd`は必須です。Gitを使わず、存在するディレクトリの物理パスとして確かめます。
 - `--cwd`は一覧の確認を今回の作業対象へ結び付けるために使います。
 - 候補の所属を`--cwd`で自動的に絞りません。
 - `scan`以外の操作はありません。
-- `--acknowledged-list`は後述の人の確認があるときだけ、呼出側が渡します。
+- `--acknowledged-list`(一覧確認値)と`--acknowledged-identities`(実体確認値)は、後述の人の確認があるときだけ、呼出側が渡します。どちらを渡すかは§12-9-5の「確認値の使い分け」に従います。
+- 2つの確認値は同時に渡せません。同時に渡すと2/usageです。
 - 省略時は候補があれば必ず停止の結果を返します。
 - 結果はJSONをstdoutへ1件返します。表示に使う文字はJSONでエスケープします。
 - stderrは理由を示す短い診断です。候補内の本文は表示しません。
@@ -1529,24 +1530,25 @@ Python自体がない、helperが起動できない、JSONを出す前に解釈�
 | 終了値 | result | 意味 |
 |---|---|---|
 | 0 | `none` | 今回列挙できた置き場に候補がない。安全証明ではない |
-| 0 | `acknowledged` | 完全な一覧が、呼出側から受けた今回の一覧確認値と一致した |
+| 0 | `acknowledged` | 完全な一覧が、呼出側から受けた今回の確認値(一覧確認値か実体確認値の1つ)と一致した |
 | 10 | `confirmation-required` | 候補があり、人の確認値を渡していない |
-| 10 | `list-changed` | 確認値と今回の完全な一覧が一致しない。候補が減った場合も含む |
+| 10 | `list-changed` | 渡した確認値と今回の完全な一覧が一致しない。候補が減った場合も含む |
 | 11 | `scan-unavailable` | 列挙失敗、読取不能、有限上限超過、必要機構不足、途中の差替え |
-| 2 | `usage` | 引数やcwdの不正。起動元が修正するまで停止 |
+| 2 | `usage` | 引数やcwdの不正。2つの確認値の同時指定を含む。起動元が修正するまで停止 |
 | 20 | `internal` | 想定外の失敗。成功に読み替えない |
 
-JSONの必須キーは`schema_version:1`、`result`、`cwd`、`cwd_bytes_hex`、`complete`、`roots`、`candidates`、`issues`です。
-完全に取得できた一覧にだけ`list_sha256`を付けます。
-不完全な結果には`list_sha256`を付けず、`--acknowledged-list`があっても11です。
+JSONの必須キーは`schema_version:2`、`result`、`cwd`、`cwd_bytes_hex`、`complete`、`roots`、`candidates`、`issues`です。
+完全に取得できた一覧にだけ`list_sha256`と`identity_sha256`を付けます。
+不完全な結果には2つの確認値を付けず、確認値を渡していても11です。
 空の一覧へ古い確認値を渡した場合も、一致しなければ10です。
 呼出側は候補がなくなった事実を確認してから、確認値なしで改めて実行できます。
+schema_version 1からの変更は、完全な結果への`identity_sha256`の追加と、引数`--acknowledged-identities`の追加です。
 
-**schema_version 1の型と出力契約**:
+**schema_version 2の型と出力契約**:
 
 | 値 | 型・必須キー |
 |---|---|
-| トップレベル | `schema_version`は整数1、`result`は上表の文字列、`cwd`と`cwd_bytes_hex`は文字列またはnull、`complete`はboolean、`roots`・`candidates`・`issues`は配列。完全結果に限り`list_sha256`を追加する |
+| トップレベル | `schema_version`は整数2、`result`は上表の文字列、`cwd`と`cwd_bytes_hex`は文字列またはnull、`complete`はboolean、`roots`・`candidates`・`issues`は配列。完全結果に限り`list_sha256`と`identity_sha256`(どちらも小文字64桁hex)を追加する |
 | rootsの要素 | `id`、`input_path`、`input_path_bytes_hex`、`resolved_path`、`resolved_path_bytes_hex`、`status`、`reason`、`identity`、`canonical_id`を必須とする |
 | root.id | `xdg_state`、`home_state`、`home_cache`のいずれか。完全結果はこの順で3件。途中失敗はこの順の処理済み部分を返し、引数不正・必要機能不足など探索前の失敗は空配列 |
 | rootのパス4値 | 表示用文字列と元バイトの小文字hexを対にする。元の置き場を得られない場合はinputの対をnull、実体を確定できなければresolvedの対をnull。存在しない置き場でもinputの対は保持する |
@@ -1561,14 +1563,14 @@ issuesのcodeは`invalid-arguments`、`invalid-cwd`、`unsupported-python`、`un
 OS由来の詳細はmessageに置き、候補内の内容は入れません。codeの追加や必須キーの変更は公開契約の変更として文書・試験を同期します。
 
 - complete=trueとなるのは0/none、0/acknowledged、10/confirmation-required、10/list-changedだけです。これらのissuesは空配列です。
-- 2/usage、11/scan-unavailable、20/internalではcomplete=false、issuesは1件以上、list_sha256はありません。途中のroots/candidatesを返しても完全一覧とは扱いません。
+- 2/usage、11/scan-unavailable、20/internalではcomplete=false、issuesは1件以上、list_sha256とidentity_sha256はありません。途中のroots/candidatesを返しても完全一覧とは扱いません。
 - cwdを確定できなかった場合、cwdとcwd_bytes_hexは両方nullです。確定後に失敗した場合は確定値を保持します。
 - JSONの未知キー、重複キー、キー不足、型違い、結果と終了値の矛盾は、呼出側の文書契約で停止とします。実行可能なAI dispatcherによる保証とはしません。
 - stdoutは`json.dumps(..., ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False)`に改行1つを付けたASCII互換のUTF-8です。診断はstderrだけです。起動できた場合の引数エラーもargparse既定の非JSON終了へ流さず、このusage形式へ揃えます。
 - `scan --help`だけは日本語のusageをstdoutへ返して0です。走査結果ではなく、呼出側はhelpを成功したscanとして扱いません。
 - candidatesはrootの固定順、name_bytes_hexを元バイトへ戻した昇順で並べます。issuesはcode、rootの固定順（nullが先頭）、path_bytes_hex（nullが先頭）、messageの順です。
 
-たとえばcwd未確定の引数エラーは、`schema_version=1,result="usage",cwd=null,cwd_bytes_hex=null,complete=false,roots=[],candidates=[]`と`invalid-arguments`のissues 1件を持ち、確認値を持ちません。
+たとえばcwd未確定の引数エラーは、`schema_version=2,result="usage",cwd=null,cwd_bytes_hex=null,complete=false,roots=[],candidates=[]`と`invalid-arguments`のissues 1件を持ち、確認値を持ちません。
 
 #### 12-9-2. 場所と走査範囲
 
@@ -1613,24 +1615,55 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 不正なUTF-8や制御文字を含む名前も、JSONの安全な表現で区別します。
 値をコマンドとして評価しません。shellで実行できる復旧コマンドを候補から生成しません。
 
-#### 12-9-4. 一覧確認値の意味
+#### 12-9-4. 一覧確認値と実体確認値の意味
 
-`list_sha256`は、今回見た一覧を人の回答と結び付ける照合値です。
+確認値は2つあります。どちらも、今回見た一覧を人の回答と結び付ける照合値です。
 保護記録の真正性を示すmanifest/snapshotの保持hashとは別物です。
 
+- 一覧確認値`list_sha256`: 候補の更新時刻・大きさ・権限まで含めて計算します。関連する記録の再開手順の途中の変化も、人に見せ直すために使います。
+- 実体確認値`identity_sha256`: 候補の実体の番号(deviceとinode)・名前・種類・持ち主だけで計算します。人が全候補を「今回と無関係の記録である」と答えた場合だけ使います(§12-9-5の「確認値の使い分け」)。
+
+**一覧確認値の入力**:
+
 - hash入力は、キー`schema_version`、`cwd_bytes_hex`、`roots`、`candidates`だけを持つJSON objectです。schema_versionは整数1、cwd_bytes_hexは完全結果の物理cwdの元バイトです。
+  - この入力のschema_versionは、出力の`schema_version`(2)とは別の値です。入力の形はschema_version 1の出力のときから変えていません。
 - rootsの各要素から`id`、`input_path_bytes_hex`、`resolved_path_bytes_hex`、`status`、`reason`、`identity`、`canonical_id`だけをコピーします。§12-9-1の固定順3件を保ちます。同一実体への別綴りもrootsの別要素として含めます。
-- candidatesの各要素から、表示用`path`以外の全キーをコピーします。rootの固定順、名前の元バイト順を保ちます。
+- candidatesの各要素から、`root_id`、`path_bytes_hex`、`name_bytes_hex`、`kind`、`dev`、`ino`、`mode`、`uid`、`size`、`mtime_ns`、`ctime_ns`の11項目だけを、名前で選んでコピーします。
+  - 候補の要素に項目が増えても、この11項目のほかは入れません。rootの固定順、名前の元バイト順を保ちます。
+
+**実体確認値の入力**:
+
+- hash入力は、キー`schema_version`、`digest`、`cwd_bytes_hex`、`roots`、`candidates`だけを持つJSON objectです。schema_versionは整数1、digestは文字列`identity`、cwd_bytes_hexは一覧確認値と同じです。
+- rootsの各要素は、一覧確認値と同じ7項目をコピーします。
+  - ただし`identity`は`dev`・`ino`・`uid`の3キーだけにし、`mode`を外します。takeが置き場の権限を付け直しても、値を変えないためです。
+  - present以外の`identity`はnullのままです。
+- candidatesの各要素から、`root_id`、`path_bytes_hex`、`name_bytes_hex`、`kind`、`dev`、`ino`、`uid`の7項目だけをコピーします。`mode`・`size`・`mtime_ns`・`ctime_ns`は入れません。並び順は一覧確認値と同じです。
+- §12-9-5の「候補identity」(手動工程の前後で同じ候補かを人に示すための組)とは、項目が違います。
+  - 実体確認値は、候補の`uid`・`root_id`・`path_bytes_hex`と、rootsの7項目(元の綴り・状態・`mode`を外した置き場の`identity`)も含みます。
+  - 候補identityは、物理cwd、rootの`resolved_path_bytes_hex`・`dev`・`ino`、候補の`name_bytes_hex`・`dev`・`ino`・`kind`だけです。
+
+**2つの確認値に共通**:
+
 - 入力を`json.dumps(payload, ensure_ascii=True, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")`で符号化し、末尾改行を加えずSHA-256を計算します。出力は小文字64桁hexです。
-- 表示用パス、日本語診断、issues、result、complete、list_sha256自身はhashに入れません。不正UTF-8や制御文字を含むパスでも、元バイトのhexが照合の正本です。
+- 表示用パス、日本語診断、issues、result、complete、2つの確認値自身はhashに入れません。不正UTF-8や制御文字を含むパスでも、元バイトのhexが照合の正本です。
 - 現在時刻や実行ごとの乱数を含めず、同じ一覧なら同じ値になります。
 - guard内部の内容hashは含めません。内部内容を読んでいないことを明記します。
-- 同じ名前でも実体が変わった、新しい候補が増えた、候補が減った、置き場が変わった、cwdが変わった場合、確認値は変わります。
+- 同じ名前でも実体が変わった、新しい候補が増えた、候補が減った、置き場が変わった、cwdが変わった場合、どちらの確認値も変わります。
+- 一覧確認値は、候補の更新時刻・大きさ・権限の変化でも変わります。実体確認値は、同じ実体の更新時刻・大きさ・権限の変化では変わりません。
 - 候補内部が変わったことを検出する機能ではありません。後述の人の再開確認や既存の保護検査を置き換えません。
-- `--acknowledged-list`は厳密に64桁のASCII hex（0-9/a-f/A-F）だけを受け付け、比較前に小文字へ揃えます。空白や接頭辞は認めません。
+- `--acknowledged-list`と`--acknowledged-identities`は、厳密に64桁のASCII hex（0-9/a-f/A-F）だけを受け付け、比較前に小文字へ揃えます。空白や接頭辞は認めません。
 - helperが確認できるのは一覧の一致までです。人が回答したことと回答の意味は呼出側の責務です。
 - 確認値をprofile、タスク本文、ログ、候補のファイルから読み込む経路を設けません。
 - 新しい永続ファイルや許可台帳を作りません。
+
+**実体確認値の限界**:
+
+- 無関係と確認した記録を別のセッションが使い、更新時刻や大きさが変わっても、人に変化を見せ直しません。
+  - 受け入れる理由: 「無関係」は、記録の作り手と今回の作業の関係についての人の判断です。記録の更新時刻では変わりません。
+  - 更新時刻の変化は、処理の停止の証明にも、関係の証明にもなりません(停止の確認は#129の範囲)。
+- ファイルシステムが番号を使い回すと(inodeの再利用)、同じ名前で作り直したものを同じ候補とみなします。
+  - 設計のレビュー(2026-10-31)が、Ubuntu 22.04のコンテナ(overlayファイルシステム)で、`mkdir`・`rmdir`・`mkdir`が同じinodeになることを確かめました。
+- 関連する記録には一覧確認値を使うので、再開手順の途中の変化は今までどおり人に見せ直します。
 
 #### 12-9-5. 人へ止めるときの報告と回答条件
 
@@ -1640,7 +1673,7 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 2. 今回の作業対象と、全候補のパスと種類。
 3. それらの所属、未解決か、処理が止まったかは未確認であること。
 4. helperが実ツリー、Git、保護記録、実行中の処理へ意図的な書込み操作を行っていないこと。OSが読取りに伴い更新するatime等の不変までは保証しないこと。
-5. 一覧確認値と、次に必要な人の確認。
+5. 2つの確認値(`list_sha256`・`identity_sha256`)と、次に必要な人の確認。
 
 人には、候補ごとに次のいずれかを答えてもらいます。
 
@@ -1656,6 +1689,14 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - 候補が自分の正常終了後のcleanup待ちだと人が確認した場合、削除を強制しません。
 - 直接の再開対象なら、終了と既存の比較・タスク保護確認の結果を示してから続行できます。
 - どの候補についても停止が未確認の関連処理を、今回の変更が自動で続行させません。
+
+**確認値の使い分け**:
+
+- 全候補について、人が「今回と無関係の記録である」と答えた場合だけ、`identity_sha256`を`PENDING_IDENTITY_SHA256`として控えます。`--acknowledged-identities`に渡して再走査し、0の`acknowledged`だけで既存の開始手順へ戻ります。
+- 1件でも「以前の関連作業の記録である」と答えた場合は、今までどおり`list_sha256`を`PENDING_LIST_SHA256`として控え、`--acknowledged-list`で照合します。
+  - 再開手順の途中の更新時刻などの変化を、人に見せ直すためです。
+- 2つの確認値を同時に渡しません。helperは2/usageを返します。
+- 実体確認値で10の`list-changed`になったのは、候補が増えた・減った・別の実体に替わった・置き場やcwdが変わった場合などです。新しい一覧を人に示し、全候補の回答を取り直します。
 
 **関連する記録の再開手順**:
 
@@ -1684,11 +1725,11 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - 人が変化や結果の有効性を判断できない、一覧が繰り返し変わる、再走査が不完全な場合は停止を維持します。不要な工程反復で収束させようとしません。
 
 この回答を、失われた保護hashの新しい出典として使いません。
-一覧確認値と既存の2つの保持hashを、引数・報告・変数名で混ぜません。
+2つの確認値と既存の2つの保持hashを、引数・報告・変数名で混ぜません。2つの確認値どうしも混ぜません。
 
 #### 12-9-6. 入口と同じセッション内の扱い
 
-- 呼出側の名前は`PENDING_LIST_SHA256`とします。保護記録のhashとは別に保持します。
+- 呼出側の名前は、一覧確認値を`PENDING_LIST_SHA256`、実体確認値を`PENDING_IDENTITY_SHA256`とします。§12-9-5の使い分けで選んだ一方だけを控え、保護記録のhashとは別に保持します。
 - 無人入口の既存の環境照合とコピー利用を維持します。照合を通したコピーの契約と helper を使い、元の配布ファイルから先に scan しません。
 - 対象ルートをファイルシステムで確定し、AGENTSと必要な契約を読んだ後にscanします。
 - do-taskでは、対象タスク本文を完了条件として採用する前、Phase0のGit事前検査より前です。
@@ -1696,6 +1737,7 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - 既に親の無人ループが行った初期処理まで遡って止める保証はしません。今回開始するskillの作業前に止めます。
 - `--task`なしの新規ship-taskでも、管理ルートが決まればscanできます。タスク名の確定を待ちません。
 - 同じship-taskからdo-taskへ入るときはscanを再実行します。人が確認済みなら、同じcwdと一覧への確認値をセッション文脈から渡せます。
+  - どちらの確認値かを区別して引き継ぎ、対応する引数へ渡します(`PENDING_LIST_SHA256`は`--acknowledged-list`、`PENDING_IDENTITY_SHA256`は`--acknowledged-identities`)。同じ会話・同じ`--cwd`に限ります。
 - この段階では現在の外部implementerのtakeをまだ行っていないため、自分の新しいguardはありません。
 - scanはPhase0の入口だけです。Phase3のtake後、実行中、共通工程、Phase4、差戻し、内蔵への引継ぎに追加しません。
 - 同じ実行の反復はPhase0へ戻さないため、現在の自分のguardで誤停止しません。

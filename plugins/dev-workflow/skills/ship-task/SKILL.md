@@ -139,7 +139,10 @@ except (Exception, SystemExit) as exc:
 [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
 - 把握(understand-project を含む)・対象本文の採用・無人の前提の Git 調査・`git status`・ブランチ操作より前に行う。内蔵・非 Git・非ファイルタスクでも省略しない。
 - 0/`none`、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
-- do-task へ進むときは再走査させる。同じ会話・cwd・一覧への `PENDING_LIST_SHA256` だけ引き継ぐ。新しい呼出しや別チャットで過去の確認を自動復元しない。
+- 確認値は 2 つあり、人の答えで選ぶ。2 つを同時に渡さない(§12-9-5)。
+  - 全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、`--acknowledged-identities` へ渡す。
+  - 1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、`--acknowledged-list` へ渡す。
+- do-task へ進むときは再走査させる。同じ会話・cwd・一覧への確認値だけを、どちらの値かを区別して引き継ぐ。新しい呼出しや別チャットで過去の確認を自動復元しない。
 - 同じ実行の差戻しでは Phase 0 に戻さず、take 後や内蔵への引継ぎに走査を追加しない。親の無人ループが既に行った初期処理まで遡って止める保証はない。
 
 1. **把握**: `.claude/grasp.md` は参照索引として確認し、毎回、現在の profile・権威参照ファイル・関連文書・設定・対象領域と依存先を読む。前回の把握状況を理由に省略しない(深化は /create-task の Phase 0 に任せる)

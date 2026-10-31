@@ -24,8 +24,16 @@ ROOT_KEYS = {'id', 'input_path', 'input_path_bytes_hex', 'resolved_path',
 ROOT_HASH_KEYS = ROOT_KEYS - {'input_path', 'resolved_path'}
 CANDIDATE_KEYS = {'root_id', 'path', 'path_bytes_hex', 'name_bytes_hex', 'kind',
                   'dev', 'ino', 'mode', 'uid', 'size', 'mtime_ns', 'ctime_ns'}
+# list_sha256の入力へ写す候補の11項目。出力の候補に項目が増えても、この11項目だけを写す。
+LIST_CANDIDATE_KEYS = ('root_id', 'path_bytes_hex', 'name_bytes_hex', 'kind', 'dev', 'ino',
+                       'mode', 'uid', 'size', 'mtime_ns', 'ctime_ns')
+# identity_sha256の入力へ写す候補の7項目。更新時刻・大きさ・権限は入れない。
+IDENTITY_CANDIDATE_KEYS = ('root_id', 'path_bytes_hex', 'name_bytes_hex', 'kind', 'dev', 'ino', 'uid')
+# identity_sha256の入力では、置き場のidentityから権限(mode)を外す。
+IDENTITY_ROOT_KEYS = ('dev', 'ino', 'uid')
 TOP_KEYS = {'schema_version', 'result', 'cwd', 'cwd_bytes_hex', 'complete',
             'roots', 'candidates', 'issues'}
+DIGEST_KEYS = {'list_sha256', 'identity_sha256'}
 CODES = {'invalid-arguments', 'invalid-cwd', 'unsupported-python',
          'unsupported-platform', 'missing-feature', 'no-roots',
          'resolution-failed', 'not-directory', 'unreadable',
@@ -45,8 +53,46 @@ def expected_payload(result):
     # D4から独立に指定する。製品のhash用関数を期待値生成に使わない。
     return {'schema_version': 1, 'cwd_bytes_hex': result['cwd_bytes_hex'],
             'roots': [{key: root[key] for key in ROOT_HASH_KEYS} for root in result['roots']],
-            'candidates': [{key: item[key] for key in CANDIDATE_KEYS - {'path'}}
+            'candidates': [{key: item[key] for key in LIST_CANDIDATE_KEYS}
                            for item in result['candidates']]}
+
+
+def expected_identity_payload(result):
+    # 実体だけの確認値の入力。製品のhash用関数を期待値生成に使わない。
+    roots = []
+    for root in result['roots']:
+        item = {key: root[key] for key in ROOT_HASH_KEYS}
+        if item['identity'] is not None:
+            item['identity'] = {key: item['identity'][key] for key in IDENTITY_ROOT_KEYS}
+        roots.append(item)
+    return {'schema_version': 1, 'digest': 'identity', 'cwd_bytes_hex': result['cwd_bytes_hex'],
+            'roots': roots,
+            'candidates': [{key: item[key] for key in IDENTITY_CANDIDATE_KEYS}
+                           for item in result['candidates']]}
+
+
+def fixed_result():
+    # 確認値の入力を固定値で確かめるための結果。値はJSONに出る形だけを持つ。
+    roots = []
+    for root_id in ROOT_IDS:
+        roots.append({'id': root_id, 'input_path': None, 'input_path_bytes_hex': None,
+                      'resolved_path': None, 'resolved_path_bytes_hex': None,
+                      'status': 'skipped', 'reason': 'unset', 'identity': None, 'canonical_id': None})
+    roots[0].update(input_path='/state', input_path_bytes_hex='2f7374617465',
+                    resolved_path='/state', resolved_path_bytes_hex='2f7374617465',
+                    status='present', reason=None, identity={'dev': 7, 'ino': 11, 'mode': 16832, 'uid': 42},
+                    canonical_id='xdg_state')
+    roots[1].update(input_path='/alias', input_path_bytes_hex='2f616c696173',
+                    resolved_path='/state', resolved_path_bytes_hex='2f7374617465',
+                    status='present', reason=None, identity={'dev': 7, 'ino': 11, 'mode': 16832, 'uid': 42},
+                    canonical_id='xdg_state')
+    candidate = {'root_id': 'xdg_state', 'path': '/state/guard-x',
+                 'path_bytes_hex': '2f73746174652f67756172642d78', 'name_bytes_hex': '67756172642d78',
+                 'kind': 'directory', 'dev': 7, 'ino': 12, 'mode': 16832, 'uid': 42,
+                 'size': 4096, 'mtime_ns': 100, 'ctime_ns': 200}
+    return {'schema_version': 2, 'cwd': '/cwd', 'cwd_bytes_hex': '2f637764',
+            'complete': True, 'result': 'confirmation-required', 'roots': roots,
+            'candidates': [candidate], 'issues': []}
 
 
 class PendingFixture(unittest.TestCase):
@@ -71,9 +117,9 @@ class PendingFixture(unittest.TestCase):
     def check_schema(self, rc, result):
         self.assertIs(type(result), dict)
         complete = result['result'] in ('none', 'acknowledged', 'confirmation-required', 'list-changed')
-        self.assertEqual(set(result), TOP_KEYS | ({'list_sha256'} if complete else set()))
+        self.assertEqual(set(result), TOP_KEYS | (DIGEST_KEYS if complete else set()))
         self.assertIs(type(result['schema_version']), int)
-        self.assertEqual(result['schema_version'], 1)
+        self.assertEqual(result['schema_version'], 2)
         self.assertIs(type(result['complete']), bool)
         self.assertEqual(result['complete'], complete)
         self.assertEqual(rc, RESULTS[result['result']])
@@ -88,8 +134,11 @@ class PendingFixture(unittest.TestCase):
         if complete:
             self.assertEqual(len(result['roots']), 3)
             self.assertEqual(result['issues'], [])
-            self.assertRegex(result['list_sha256'], r'^[0-9a-f]{64}$')
+            for key in DIGEST_KEYS:
+                self.assertRegex(result[key], r'^[0-9a-f]{64}$')
             self.assertEqual(result['list_sha256'], hashlib.sha256(canonical(expected_payload(result))).hexdigest())
+            self.assertEqual(result['identity_sha256'],
+                             hashlib.sha256(canonical(expected_identity_payload(result))).hexdigest())
         else:
             self.assertGreater(len(result['issues']), 0)
         for root in result['roots']:
@@ -150,10 +199,12 @@ class PendingFixture(unittest.TestCase):
         self.check_schema(cp.returncode, result)
         return cp.returncode, result
 
-    def scan(self, expected, ack=None, **kwargs):
+    def scan(self, expected, ack=None, ack_identities=None, **kwargs):
         args = ['scan', '--cwd', str(kwargs.pop('cwd', self.cwd))]
         if ack is not None:
             args += ['--acknowledged-list', ack]
+        if ack_identities is not None:
+            args += ['--acknowledged-identities', ack_identities]
         rc, result = self.cli(args, **kwargs)
         self.assertEqual(result['result'], expected)
         return result
@@ -270,9 +321,114 @@ class PendingCLITests(PendingFixture):
         self.assertNotEqual(before['candidates'][0]['mtime_ns'], after['candidates'][0]['mtime_ns'])
         for key in ('dev', 'ino', 'kind', 'name_bytes_hex'):
             self.assertEqual(before['candidates'][0][key], after['candidates'][0][key])
+        self.assertEqual(before['identity_sha256'], after['identity_sha256'])
         self.scan('acknowledged', ack=after['list_sha256'])
         self.assertTrue(guard.is_dir())
         # 人の工程結果の意味はこのCLI試験では検証しない。
+
+    def test_identity_ack_ignores_time_size_and_mode_changes(self):
+        self.create_roots()
+        directory = self.roots[0] / 'guard-directory'
+        directory.mkdir()
+        regular = self.roots[1] / 'guard-file'
+        regular.write_bytes(b'before')
+        # 比較前だけ時刻と権限を決めておく。変化は通常の作成・削除・書込み・chmodに起こさせる。
+        for path, mode in ((self.roots[0], 0o755), (directory, 0o755), (regular, 0o644)):
+            path.chmod(mode)
+            os.utime(path, ns=(1000000000, 1000000000))
+        before = self.scan('confirmation-required')
+        # 1. 更新時刻だけの変化: list_sha256は今までどおり変わり、identity_sha256は変わらない。
+        child = directory / '.work-fixture'
+        child.mkdir()
+        child.rmdir()
+        timed = self.scan('acknowledged', ack_identities=before['identity_sha256'])
+        self.assertNotEqual(before['candidates'][0]['mtime_ns'], timed['candidates'][0]['mtime_ns'])
+        self.assertNotEqual(before['list_sha256'], timed['list_sha256'])
+        self.assertEqual(before['identity_sha256'], timed['identity_sha256'])
+        self.scan('list-changed', ack=before['list_sha256'])
+        # 2. 大きさと権限(置き場の権限を含む)の変化も、identity_sha256では同じ候補とみなす。
+        regular.write_bytes(b'after, longer than before')
+        directory.chmod(0o700)
+        regular.chmod(0o600)
+        self.roots[0].chmod(0o700)
+        after = self.scan('acknowledged', ack_identities=before['identity_sha256'])
+        self.scan('acknowledged', ack_identities=before['identity_sha256'].upper())
+        self.assertNotEqual(before['candidates'][1]['size'], after['candidates'][1]['size'])
+        for index in (0, 1):
+            self.assertNotEqual(before['candidates'][index]['mode'], after['candidates'][index]['mode'])
+            for key in IDENTITY_CANDIDATE_KEYS:
+                self.assertEqual(before['candidates'][index][key], after['candidates'][index][key])
+        self.assertNotEqual(before['roots'][0]['identity']['mode'], after['roots'][0]['identity']['mode'])
+        self.assertEqual(before['identity_sha256'], after['identity_sha256'])
+        self.scan('list-changed', ack=before['list_sha256'])
+        self.scan('list-changed', ack=timed['list_sha256'])
+        self.assertTrue(directory.is_dir())
+        self.assertEqual(regular.read_bytes(), b'after, longer than before')
+
+    def test_identity_ack_rejects_candidate_recreated_under_same_name(self):
+        self.create_roots()
+        guard = self.roots[0] / 'guard-moved'
+        guard.mkdir()
+        before = self.scan('confirmation-required')
+        # 消さずに置き場の外へ動かす。番号の使い回しで同じ番号にならないようにする。
+        guard.rename(self.base / 'moved-out')
+        guard.mkdir()
+        after = self.scan('list-changed', ack_identities=before['identity_sha256'])
+        self.assertNotEqual(before['candidates'][0]['ino'], after['candidates'][0]['ino'])
+        self.assertEqual(before['candidates'][0]['name_bytes_hex'], after['candidates'][0]['name_bytes_hex'])
+        self.assertNotEqual(before['identity_sha256'], after['identity_sha256'])
+        self.scan('list-changed', ack=before['list_sha256'])
+        self.scan('acknowledged', ack_identities=after['identity_sha256'])
+
+    def test_identity_ack_changes_with_cwd_name_kind_count_and_root(self):
+        self.create_roots()
+        guard = self.roots[0] / 'guard-one'
+        guard.mkdir()
+        initial = self.scan('confirmation-required')['identity_sha256']
+        self.scan('acknowledged', ack_identities=initial)
+        other = self.base / 'other-cwd'
+        other.mkdir()
+        self.scan('list-changed', ack_identities=initial, cwd=other)
+        guard.rename(self.roots[0] / 'guard-renamed')
+        renamed = self.scan('list-changed', ack_identities=initial)['identity_sha256']
+        (self.roots[0] / 'guard-added').mkdir()
+        added = self.scan('list-changed', ack_identities=renamed)['identity_sha256']
+        (self.roots[0] / 'guard-added').rmdir()
+        self.scan('list-changed', ack_identities=added)
+        self.scan('acknowledged', ack_identities=renamed)
+        alternate = self.base / 'new-xdg'
+        alternate.mkdir()
+        self.scan('list-changed', ack_identities=renamed, env=dict(self.env, XDG_STATE_HOME=str(alternate)))
+        (self.roots[0] / 'guard-renamed').rename(self.base / 'old-guard')
+        (self.roots[0] / 'guard-renamed').write_bytes(b'same name, other kind')
+        self.scan('list-changed', ack_identities=renamed)
+        (self.roots[0] / 'guard-renamed').unlink()
+        self.scan('list-changed', ack_identities=renamed)
+        self.scan('none')
+
+    def test_both_acknowledgements_are_usage_error(self):
+        self.create_roots()
+        (self.roots[0] / 'guard-both').mkdir()
+        first = self.scan('confirmation-required')
+        listed, identity = first['list_sha256'], first['identity_sha256']
+        cwd = str(self.cwd)
+        cases = [['scan', '--cwd', cwd, '--acknowledged-list', listed, '--acknowledged-identities', identity],
+                 ['scan', '--cwd', cwd, '--acknowledged-identities', identity, '--acknowledged-list', listed],
+                 ['scan', '--cwd=' + cwd, '--acknowledged-list=' + listed, '--acknowledged-identities=' + identity],
+                 ['scan', '--acknowledged-identities', identity, '--cwd', cwd, '--acknowledged-list', listed]]
+        for args in cases:
+            with self.subTest(args=args):
+                rc, result = self.cli(args)
+                self.assertEqual(rc, 2)
+                self.assertEqual(result['result'], 'usage')
+                self.assertEqual([i['code'] for i in result['issues']], ['invalid-arguments'])
+                self.assertEqual(result['roots'], [])
+                self.assertEqual(result['candidates'], [])
+        # 片方だけなら、どちらも今の一覧で続行できる。
+        self.scan('acknowledged', ack=listed)
+        self.scan('acknowledged', ack_identities=identity)
+        self.scan('list-changed', ack_identities=listed)
+        self.scan('list-changed', ack=identity)
 
     def test_internal_contents_and_fixture_metadata_unchanged(self):
         self.create_roots()
@@ -331,8 +487,11 @@ class PendingCLITests(PendingFixture):
                  ['scan', '--cwd', str(HELPER)]]
         cases += [['scan', '--cwd', str(self.cwd), arg] for arg in
                   ('--cleanup', '--resume', '--kill', '--trust-state', '--ignore-state', '--limit')]
-        cases += [['scan', '--cwd', str(self.cwd), '--acknowledged-list', value]
-                  for value in ('', '0' * 63, '0' * 65, ' ' + '0' * 64, '0x' + '0' * 64, 'ａ' * 64)]
+        for option in ('--acknowledged-list', '--acknowledged-identities'):
+            cases += [['scan', '--cwd', str(self.cwd), option, value]
+                      for value in ('', '0' * 63, '0' * 65, ' ' + '0' * 64, '0x' + '0' * 64, 'ａ' * 64)]
+            cases.append(['scan', '--cwd', str(self.cwd), option, '0' * 64, option, '0' * 64])
+            cases.append(['scan', '--cwd', str(self.cwd), option])
         for args in cases:
             with self.subTest(args=args):
                 rc, result = self.cli(args)
@@ -342,7 +501,8 @@ class PendingCLITests(PendingFixture):
                             env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
         self.assertEqual(cp.returncode, 0)
         self.assertRegex(cp.stdout.decode(), r'[^\x00-\x7f]')
-        self.assertIn('--cwd', cp.stdout.decode())
+        for option in ('--cwd', '--acknowledged-list', '--acknowledged-identities'):
+            self.assertIn(option, cp.stdout.decode())
         with self.assertRaises(json.JSONDecodeError):
             json.loads(cp.stdout)
 
@@ -469,40 +629,77 @@ class PendingBoundaryTests(PendingFixture):
         self.assertEqual(len(set(identities)), 2)
 
     def test_fixed_payload_hash_and_excluded_display_values(self):
-        roots = []
-        for root_id in ROOT_IDS:
-            roots.append({'id': root_id, 'input_path': None, 'input_path_bytes_hex': None,
-                          'resolved_path': None, 'resolved_path_bytes_hex': None,
-                          'status': 'skipped', 'reason': 'unset', 'identity': None, 'canonical_id': None})
-        roots[0].update(input_path='/state', input_path_bytes_hex='2f7374617465',
-                        resolved_path='/state', resolved_path_bytes_hex='2f7374617465',
-                        status='present', reason=None, identity={'dev': 7, 'ino': 11, 'mode': 16832, 'uid': 42},
-                        canonical_id='xdg_state')
-        roots[1].update(input_path='/alias', input_path_bytes_hex='2f616c696173',
-                        resolved_path='/state', resolved_path_bytes_hex='2f7374617465',
-                        status='present', reason=None, identity={'dev': 7, 'ino': 11, 'mode': 16832, 'uid': 42},
-                        canonical_id='xdg_state')
-        candidate = {'root_id': 'xdg_state', 'path': '/state/guard-x',
-                     'path_bytes_hex': '2f73746174652f67756172642d78', 'name_bytes_hex': '67756172642d78',
-                     'kind': 'directory', 'dev': 7, 'ino': 12, 'mode': 16832, 'uid': 42,
-                     'size': 4096, 'mtime_ns': 100, 'ctime_ns': 200}
-        result = {'schema_version': 1, 'cwd': '/cwd', 'cwd_bytes_hex': '2f637764',
-                  'complete': True, 'result': 'confirmation-required', 'roots': roots,
-                  'candidates': [candidate], 'issues': []}
+        result = fixed_result()
+        roots, candidate = result['roots'], result['candidates'][0]
         payload = expected_payload(result)
         self.assertEqual(set(payload), {'schema_version', 'cwd_bytes_hex', 'roots', 'candidates'})
+        self.assertEqual(payload['schema_version'], 1)
+        self.assertEqual(len(payload['candidates'][0]), 11)
         encoded = canonical(payload)
         self.assertNotEqual(encoded[-1:], b'\n')
         expected = hashlib.sha256(encoded).hexdigest()
+        # list_sha256の入力の形(schema_version 1と候補の11項目)を変えていないことを、固定値でも確かめる。
+        self.assertEqual(expected, 'c6846d4850a3703d5365dc73c53c70bb351d19a06aa118773f3816c1a929a990')
         self.assertEqual(self.module.list_digest(result), expected)
+        identity_payload = expected_identity_payload(result)
+        self.assertEqual(set(identity_payload), {'schema_version', 'digest', 'cwd_bytes_hex', 'roots', 'candidates'})
+        self.assertEqual((identity_payload['schema_version'], identity_payload['digest']), (1, 'identity'))
+        self.assertEqual(set(identity_payload['candidates'][0]), set(IDENTITY_CANDIDATE_KEYS))
+        self.assertEqual(set(identity_payload['roots'][0]['identity']), set(IDENTITY_ROOT_KEYS))
+        identity = hashlib.sha256(canonical(identity_payload)).hexdigest()
+        self.assertNotEqual(identity, expected)
+        self.assertEqual(self.module.identity_digest(result), identity)
         result.update(cwd='display changed', result='acknowledged', complete=False,
-                      issues=[{'message': '表示だけ'}], list_sha256='unused')
+                      issues=[{'message': '表示だけ'}], list_sha256='unused', identity_sha256='unused')
         roots[0]['input_path'] = '表示だけ'
         roots[0]['resolved_path'] = '表示だけ'
         candidate['path'] = '表示だけ'
         self.assertEqual(self.module.list_digest(result), expected)
+        self.assertEqual(self.module.identity_digest(result), identity)
+        # 更新時刻・大きさ・権限はlist_sha256だけを変え、identity_sha256を変えない。
+        for key, value in (('mtime_ns', 101), ('ctime_ns', 201), ('size', 4097), ('mode', 16832 | 0o077)):
+            with self.subTest(key=key):
+                changed = fixed_result()
+                changed['candidates'][0][key] = value
+                self.assertNotEqual(self.module.list_digest(changed), expected)
+                self.assertEqual(self.module.identity_digest(changed), identity)
+        changed = fixed_result()
+        for root in changed['roots'][:2]:
+            root['identity']['mode'] = 16832 | 0o077
+        self.assertNotEqual(self.module.list_digest(changed), expected)
+        self.assertEqual(self.module.identity_digest(changed), identity)
+        # 実体・名前・置き場・cwd・持ち主の違いは、どちらの確認値も変える。
+        for change in (lambda r: r['candidates'][0].update(ino=13), lambda r: r['candidates'][0].update(dev=8),
+                       lambda r: r['candidates'][0].update(uid=43), lambda r: r['candidates'][0].update(kind='file'),
+                       lambda r: r['candidates'][0].update(name_bytes_hex='67756172642d79'),
+                       lambda r: r['candidates'][0].update(path_bytes_hex='2f73746174652f67756172642d79'),
+                       lambda r: r['roots'][0]['identity'].update(ino=14),
+                       lambda r: r['roots'][0]['identity'].update(uid=43),
+                       lambda r: r.update(cwd_bytes_hex='2f637765'), lambda r: r.update(candidates=[])):
+            with self.subTest(change=change):
+                changed = fixed_result()
+                change(changed)
+                self.assertNotEqual(self.module.list_digest(changed), expected)
+                self.assertNotEqual(self.module.identity_digest(changed), identity)
         roots[1]['input_path_bytes_hex'] = '2f616c69617332'
         self.assertNotEqual(self.module.list_digest(result), expected)
+        self.assertNotEqual(self.module.identity_digest(result), identity)
+
+    def test_digests_ignore_candidate_keys_added_later(self):
+        # 段階2で候補に足すrelation・reason・ownerが、list_sha256の入力へ混ざらないこと。
+        result = fixed_result()
+        expected = hashlib.sha256(canonical(expected_payload(result))).hexdigest()
+        self.assertEqual(self.module.list_digest(result), expected)
+        result['candidates'][0].update(relation='other-project', reason=None,
+                                       owner={'top': '/a', 'top_bytes_hex': '2f61'}, unknown_later=1)
+        self.assertEqual(self.module.list_digest(result), expected)
+        # reasonは段階2でidentity_sha256の入力へ足すため、ここではrelationとownerだけを確かめる。
+        result = fixed_result()
+        identity = hashlib.sha256(canonical(expected_identity_payload(result))).hexdigest()
+        self.assertEqual(self.module.identity_digest(result), identity)
+        result['candidates'][0].update(relation='other-project', owner=None, unknown_later=1)
+        self.assertEqual(self.module.list_digest(result), expected)
+        self.assertEqual(self.module.identity_digest(result), identity)
 
     def test_root_changes_while_fd_is_held(self):
         original = os.fstat
@@ -564,6 +761,14 @@ class PendingDocumentContractTests(unittest.TestCase):
             self.assertLess(entry, text.index('1. **', phase))
             self.assertIn('10/11/2/20・不正 JSON・起動不能なら停止', text)
             self.assertIn('PENDING_LIST_SHA256', text)
+            # 確認値の使い分け: 全候補が無関係なら実体確認値、1件でも関連なら一覧確認値。
+            # 答えと値の組を1つの文字列で求め、組の入れ替えを検出する。
+            for term in ('全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、'
+                         '`--acknowledged-identities` へ渡す',
+                         '1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、'
+                         '`--acknowledged-list` へ渡す',
+                         '2 つを同時に渡さない'):
+                self.assertIn(term, text)
             self.assertIn('非 Git', text)
             self.assertIn('タスク本文', text)
             self.assertIn('環境', text[:phase])
@@ -582,10 +787,23 @@ class PendingDocumentContractTests(unittest.TestCase):
                     '以前の回答・工程結果を流用しません', '候補が消えた場合も自動承認しません',
                     '同じship-taskからdo-taskへ入るときはscanを再実行', 'ログやprofileから回答を復元せず',
                     '未知キー、重複キー、キー不足、型違い', '結果と終了値の矛盾', '起動不能として停止',
-                    '実行可能な skill dispatcher はない', 'AI が手順を守ることや OS による強制は保証しない']
+                    '実行可能な skill dispatcher はない', 'AI が手順を守ることや OS による強制は保証しない',
+                    # 段階1: 2つの確認値の使い分け・引き継ぎ・入力・限界。
+                    '--acknowledged-identities', 'PENDING_IDENTITY_SHA256', 'schema_version 2の型と出力契約',
+                    '2つの確認値は同時に渡せません',
+                    # 答えと値の組を1つの文字列で求め、組の入れ替えを検出する。
+                    '全候補について、人が「今回と無関係の記録である」と答えた場合だけ、'
+                    '`identity_sha256`を`PENDING_IDENTITY_SHA256`として控えます。`--acknowledged-identities`に渡して',
+                    '1件でも「以前の関連作業の記録である」と答えた場合は、今までどおり'
+                    '`list_sha256`を`PENDING_LIST_SHA256`として控え、`--acknowledged-list`で照合します',
+                    'どちらの確認値かを区別して引き継ぎ',
+                    '`mtime_ns`、`ctime_ns`の11項目', '`dev`、`ino`、`uid`の7項目',
+                    '同じ実体の更新時刻・大きさ・権限の変化では変わりません', 'inodeの再利用']
         for term in required:
             with self.subTest(term=term):
                 self.assertIn(term, contract)
+        # list_sha256の入力は、候補の項目を名前で決める(表示用path以外の全キーではない)。
+        self.assertNotIn('表示用`path`以外の全キー', contract)
         self.assertIn('Python 3.8', (SKILL / 'references/runtime-requirements.md').read_text())
 
 
