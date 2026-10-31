@@ -19,7 +19,7 @@
 # 期待終了コード: 0=成功 2=usage 20=internal 30=縮退(take) 31=引き継ぎ 32=縮退(compare)
 #                 33=比較不能・照合や復元の失敗 34=要件本文の変更 35=選択パスと実体の対応の変化
 #
-# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N12・L)。検出の類型に当たるケース名には固定のタグ
+# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N13・L)。検出の類型に当たるケース名には固定のタグ
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
@@ -3836,11 +3836,99 @@ case_N12() { # HOME未設定/空と~userのGit自身のpath展開を維持する
   rune_unset_home_xdg "XDG_STATE_HOME=$PROT" -- take --cwd "$R" --task-md task/t.md
   ckne "HOME未設定の~/を成功扱いしない" "$RC" 0
 }
+n13_bounded() { # $1=取り出した関数 $2=短い読み取りを起こす書き手 $3=結果の行に出す dd の名前 $4=選ばれるはずの dd のパス
+  local lib="$1" writer="$2" label="$3" want_dd="$4" count nbad bad got_dd desc
+  # 組み合わせの数: 上限 0 を除く 5 通り × 量 4 通り = 20 通りと、上限 0 の量 3 通り(上限−1 を除く)で 23 通り。
+  # 書き手 2 種を掛けて 46 通り。組み合わせを足すときは、この注釈と、この関数の 46(2 か所)を一緒に直す
+  desc="上限の境界(dd=$label): 組み合わせ 46 通りで大きさと終了値が期待どおり"
+  RC=0
+  guard_t "$T_RUN" bash -c '
+    lib="$1" work="$2" writer="$3"
+    source "$lib" || exit 3
+    resolve_stat; [ -n "$STAT_FLAVOR" ] || exit 3
+    WORK="$work"; CONFIG_PARSE_SEQ=13; GIT_PRE=(); TOP=.
+    git() { shift 2; "$@"; }   # 実効の分岐の「git -C . <引数>」を、引数の書き手に替える
+    echo "DD $(command -v dd)"
+    out="$work/n13-out"; n=0; nbad=0
+    for kind in head py; do
+      for limit in 0 1 65535 65536 65537 196613; do
+        for amount in $((limit - 1)) "$limit" $((limit + 1)) $((limit + 70000)); do
+          [ "$amount" -ge 0 ] || continue
+          if [ "$kind" = head ]; then w=(head -c "$amount" /dev/zero); else w=(python3 "$writer" "$amount"); fi
+          rc=0; bounded_config_stdout "$out" "$limit" effective "${w[@]}" || rc=$?
+          size="$(wc -c <"$out" | tr -d " ")"
+          n=$((n + 1))
+          if [ "$amount" -le "$limit" ]; then
+            [ "$rc" -eq 0 ] && [ "$size" -eq "$amount" ] && continue
+          else
+            [ "$rc" -ne 0 ] && [ "$size" -eq "$limit" ] && continue
+          fi
+          nbad=$((nbad + 1)); echo "NG $kind 上限=$limit 量=$amount rc=$rc 大きさ=$size"
+        done
+      done
+    done
+    echo "COUNT $n $nbad"
+  ' _ "$lib" "$WORK" "$writer" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show "N13 dd=$label"
+  got_dd="$(sed -n 's/^DD //p' "$CASE_OUT")"
+  count="$(sed -n 's/^COUNT \([0-9]*\) [0-9]*$/\1/p' "$CASE_OUT")"
+  nbad="$(sed -n 's/^COUNT [0-9]* \([0-9]*\)$/\1/p' "$CASE_OUT")"
+  bad="$(sed -n 's/^NG //p' "$CASE_OUT" | paste -sd ';' -)"
+  ckeq "上限の境界(dd=$label): 回した組み合わせの数" "$count" 46
+  if [ "$TIMED_OUT" -eq 1 ]; then
+    ng "$desc(**外側タイムアウト**: ${LAST_T:-?} 秒で打ち切られた〈rc=$RC〉)"
+  elif [ "$RC" -ne 0 ] || [ "$nbad" != 0 ] || [ -n "$bad" ] || [ "$got_dd" != "$want_dd" ]; then
+    ng "$desc(rc=$RC / 選ばれた dd: $(flat "$got_dd") / 食い違い ${nbad:-?} 件: $(flat "$bad"))"
+  else
+    ok "$desc"
+  fi
+}
+case_N13() { # bounded_config_stdout は短い読み取りでも上限を越えて写さず、超過を 0 以外で返す
+  CID=N13; TAG=""
+  local lib="$WORK/n13-bounded.sh" writer="$WORK/n13-writer.py" bindir="$WORK/n13-bin" name path_dd
+  # 対象から 3 関数を取り出して直接呼ぶ。M17 は終了値と診断の文しか見ないので、上限を越えて読む誤りを見つけられない
+  for name in resolve_stat stat_size bounded_config_stdout; do
+    awk "/^${name}\\(\\) \\{/,/^}/" "$TARGET"
+  done >"$lib"
+  ckeq "取り出したファイルに 3 関数の頭が 1 行ずつ" \
+    "$(grep -c -e '^resolve_stat() {' -- "$lib") $(grep -c -e '^stat_size() {' -- "$lib") $(grep -c -e '^bounded_config_stdout() {' -- "$lib")" "1 1 1"
+  # 短い読み取りを起こす書き手。大きさの違う小さな書き込みを繰り返し、os.write が一部しか書かなければ残りを書き直す
+  cat >"$writer" <<'PYCODE'
+import os
+import sys
+
+left = int(sys.argv[1])
+sizes = (1, 7, 4095, 4096, 4097, 65537)
+block = bytes(max(sizes))
+i = 0
+try:
+    while left > 0:
+        view = memoryview(block)[:min(sizes[i % len(sizes)], left)]
+        i += 1
+        while view:
+            n = os.write(1, view)
+            view = view[n:]
+            left -= n
+except BrokenPipeError:
+    sys.exit(1)
+PYCODE
+  # PATH で選ばれる dd で回す。/bin/dd がそれと別の実体なら、/bin/dd だけを置いたフォルダを PATH の先頭にして、もう一度回す
+  path_dd="$(command -v dd)"
+  n13_bounded "$lib" "$writer" "$path_dd" "$path_dd"
+  if [ ! -x /bin/dd ]; then
+    echo "NOTE: N13 /bin/dd が無いため、/bin/dd での回し直しを省く"
+  elif [ /bin/dd -ef "$path_dd" ]; then
+    echo "NOTE: N13 /bin/dd は PATH で選ばれる dd($path_dd)と同じ実体のため、/bin/dd での回し直しを省く"
+  else
+    mkdir -p -- "$bindir" && ln -sf /bin/dd "$bindir/dd"
+    PATH="$bindir:$PATH" n13_bounded "$lib" "$writer" /bin/dd "$bindir/dd"
+  fi
+}
 
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 L"
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0

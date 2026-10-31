@@ -1619,10 +1619,11 @@ bounded_effective_origins() { # 実効 origin も候補解析と同じ総量上�
   CONFIG_PARSE_BYTES=$((CONFIG_PARSE_BYTES + size))
   return "$rc"
 }
-bounded_config_stdout() { # $1=保存先 $2=正確な byte 上限 $3=isolated|effective 残り=git config 引数
+bounded_config_stdout() { # $1=保存先 $2=正確な byte 上限 $3=selector|isolated|effective 残り=git config 引数
   # `ulimit -f` は環境により 512/1024 byte block で、byte 上限に使えない。
-  # fifo から最大 64KiB ずつ、超過検知 1 byte を順に読む。主出力は上限を越えない。
-  local out="$1" limit="$2" mode="$3" fifo probe writer writer_rc=0 rc=0 before after chunk
+  # fifo から、1 回の dd で 64KiB のブロックを最大「残り ÷ 64KiB」個(残りが 64KiB 未満なら残りを 1 個)読む。
+  # 上限に達したら超過検知 1 byte を読む。主出力は上限を越えない。
+  local out="$1" limit="$2" mode="$3" fifo probe writer writer_rc=0 rc=0 before after chunk bs count
   shift 3
   fifo="$WORK/config-stream-$CONFIG_PARSE_SEQ-$$"; probe="$fifo-over"
   rm -f -- "$fifo" "$probe"; mkfifo "$fifo" || return 125
@@ -1638,13 +1639,16 @@ bounded_config_stdout() { # $1=保存先 $2=正確な byte 上限 $3=isolated|ef
   # FIFO を一度だけ開いた FD で続けて読む。dd ごとに開き直すと、短い出力では writer が先に閉じて
   # 次の open が待ち続ける。
   exec 6<"$fifo" || { kill "$writer" 2>/dev/null || :; wait "$writer" 2>/dev/null || :; rm -f -- "$fifo" "$probe"; return 125; }
-  # `iflag=fullblock` / `status=none` は GNU 固有なので使わない。1 回を最大 64KiB にして
-  # 実際に増えた byte 数で繰り返すと、pipe の短い read でも主出力は limit を越えない。
+  # `iflag=fullblock` / `status=none` は GNU 固有なので使わない。dd は短い read も 1 ブロックと数えるので、
+  # 1 回の dd が写すのは bs × count(残り以下)を越えない。実際に増えた byte 数で繰り返すと、pipe の短い read
+  # でも主出力は limit を越えない。1 回の dd で何度も読むので、read が短い pipe(Mac では 1 回が約 4KiB)でも
+  # dd の起動は少ない。
   while [ "$rc" -eq 0 ]; do
     before="$(stat_size "$out" 2>/dev/null)" || { rc=125; break; }
     [ "$before" -lt "$limit" ] || break
-    chunk=$((limit - before)); [ "$chunk" -le 65536 ] || chunk=65536
-    dd bs="$chunk" count=1 <&6 >>"$out" 2>/dev/null || { rc=125; break; }
+    chunk=$((limit - before))
+    if [ "$chunk" -ge 65536 ]; then bs=65536; count=$((chunk / 65536)); else bs="$chunk"; count=1; fi
+    dd bs="$bs" count="$count" <&6 >>"$out" 2>/dev/null || { rc=125; break; }
     after="$(stat_size "$out" 2>/dev/null)" || { rc=125; break; }
     [ "$after" -le "$limit" ] || { rc=125; break; }
     [ "$after" -gt "$before" ] || break
