@@ -66,10 +66,18 @@ PYTHON
 
 - `os.O_DIRECTORY`・`O_NOFOLLOW`・`O_NONBLOCK`・`O_CLOEXEC`、`open`・`stat`・`mkdir`・`unlink`・`rmdir` の `dir_fd`、`stat` の `follow_symlinks=False`、`fstat`、`replace` の `src_dir_fd` / `dst_dir_fd`。
 - `subprocess.Popen` の `close_fds=True` / `pass_fds`、直接子の `poll` / `wait` / `terminate` / `kill`、`signal.pthread_sigmask` と TERM・INT・HUP、単調時計、`resource.RLIMIT_FSIZE` / `setrlimit`。
-- GNU `cp` の固定した実体。`--version` を8KiB・5秒で検査する。fd 別名は `/proc/self/fd`、次に `/dev/fd` を試す。開いた通常ファイルと同じ device/inode を指すことと、短いコピーの内容・mode・inode を確認する。 <!-- validate-allow: OS が提供する fd 別名を必要機能として明記するため -->
-- 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。対象親内の試験失敗も対象へ公開しない。一時物の残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
+- GNU `cp` の固定した実体。GNU coreutils 8.30 以上が必要(`--reflink=never` を受け付ける版。coreutils の NEWS による)。`cp` には `--reflink=never`(複製の共有をしない指定)を渡す。`--version` を8KiB・5秒で検査する。fd 別名は `/proc/self/fd`、次に `/dev/fd` を試す。開いた通常ファイルと同じ device/inode を指すことと、短いコピーの内容・mode・inode を確認する。 <!-- validate-allow: OS が提供する fd 別名を必要機能として明記するため -->
+  - `--reflink=never` を渡す理由: GNU `cp` 9 系は、複製の共有を禁じないと、書き込みの上限(`RLIMIT_FSIZE`)の位置でカーネルのコピーを呼び、`SIGXFSZ`(書き込みの上限を越えたときの信号)で止まる。上限は緩めない。
+  - 確かめた版(2026-11-01、[Issue #285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で直した後): Linux の 8.32(Ubuntu 22.04)と 9.7(Debian trixie)で復元できる。macOS の 9.12 は `fd-copy-unavailable` で止まり、対象を変えない。
+  - 確かめていない版: Linux の 8.30・8.31・9.0〜9.6・9.8 以降と、8.30 より前。
+  - 8.30 より前の `cp` は `--reflink=never` を受け付けない(NEWS による)。そのときは、どの別名でも試しのコピーが失敗し、`fd-copy-unavailable` で止まる。
+    - この止まる動きは、`--reflink=never` を断って終了値 1 で終わる `cp` の代わりの実行物の試験(`scripts/test_restore_taskmd.py`)で確かめた。8.30 より前の実機では未確認。
+- 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。fd 別名を通した短いコピーが、どの別名でも成り立たなければ、対象を変えず `fd-copy-unavailable` で停止する。対象親内の試験失敗も対象へ公開しない。一時物の残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
 - Linux の実測は Python 3.10.12。mode・同一所有者の uid/gid・ns mtime・利用可能な通常の user xattr・POSIX ACL を GNU `cp -a` と比較する。読取り後の atime 不変、特権属性、異なる所有者、SELinux 属性の新たな保証はしない。
-- macOS のこの新しい復元処理は実機未確認。下記の既存実測には含めない。実機では GNU `cp`・fd 別名・`dir_fd` の置換、正常復元と準備失敗時の無変更を追加確認する。Linux の別名切替試験は macOS の実測に数えない。
+- macOS では、`/dev/fd/<番号>` を `stat` で調べた device 番号が、開いたファイル(`fstat`)と違う(inode は同じ)。
+  - 補助の `restore-taskmd.py` は、専用領域内の試験でこの食い違いを見つけ、`cp` を起動する前に `fd-copy-unavailable` で止まり、対象を変えない(#285 で直した後に Mac の実機で確認)。
+  - GNU `cp` を直接起動しても「コピー中に差し替えられた」と断る(`cp: skipping file '/dev/fd/3', as it was replaced while being copied`)。
+  - 通常のパスでのコピーへは戻さない。そのため、正常な復元は macOS では確かめられない。実機の確認の記録は [Issue #271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) に置く。Linux の別名切替試験は macOS の実測に数えない。
 - Python パッケージの追加はない。API の有無と実際の操作を検査し、不足は無変更で止める。構文・API の不要な版引上げはしない。
 
 公開入口全体は GNU `timeout` で必ず監督する。次の関数を呼出側で定義する。第1引数は同梱 `implement-guard.sh`、残りは既存の各引数とする。`timeout` が無ければ `gtimeout` を選ぶ。GNU 版・必要オプションを確認できなければ復元を起動しない。
@@ -174,9 +182,10 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 - Mac の結果(Issue #241、2026-10-30、macOS 26.6.2 / arm64、Git 2.54.0〈Apple Git-157〉、Bash 5.3.20、GNU coreutils 9.12・findutils 4.11.0・grep 3.12、system 設定は有効のまま): FAIL 44 行(下の 2 群だけ)。PASS の件数と所要時間は Issue #241 の検証の記録に書く。
   - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊した写しで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。
   - 残る FAIL 44 行は、Apple Git の設定とは別の原因で、修正前から落ちていたもの。
-    - `restore-taskmd`(`J1`・`J2`・`J3`・`J6`・`J8`・`B10`・`B12`・`G7`・`M6` の 40 行): 別の Issue [#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で扱う(処理は [#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) が確かめる)。原因は環境で違う。
-      - Mac(GNU coreutils 9.12): `/proc` が無く、`/dev/fd` の別名で `cp: skipping file '/dev/fd/3', as it was replaced while being copied` になる。書き込みの上限の有無には関係しない。
-      - Linux(Debian trixie・GNU coreutils 9.7): 書き込みの上限を付けた `cp -aL` が `SIGXFSZ` で止まり、38 行が落ちる。
+    - `restore-taskmd`(`J1`・`J2`・`J3`・`J6`・`J8`・`B10`・`B12`・`G7`・`M6` の 40 行): 2026-11-01 に [Issue #285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で Linux 側を直した。macOS は `fd-copy-unavailable` で止まるので、この 40 行は残る(macOS の扱いは [#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) が確かめる)。原因は環境で違う。
+      - Mac(GNU coreutils 9.12。直す前〈2026-10-30〉の記録): `/proc` が無く、`/dev/fd` の別名で `cp: skipping file '/dev/fd/3', as it was replaced while being copied` になる。書き込みの上限の有無には関係しない。
+        - この文言は `cp` を直接起動したときのもの。補助は直す前も、`cp` を起動する前の別名の確認(device 番号の食い違い)で止まっていた(終了値 33・`REASON=runtime-unavailable`)。
+      - Linux(Debian trixie・GNU coreutils 9.7。直す前〈2026-10-30〉の記録): 書き込みの上限を付けた `cp -aL` が `SIGXFSZ` で止まり、38 行が落ちる。直した後は、復元系のケース(`--only J1,…,J10,B10,B12,G7,M6`)の FAIL が 0 件になった(PASS 198 件)。
       - `J8` は、非 UTF-8 の名前を APFS が作れないことも重なり、Mac では 2 行多い。
     - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになっていた。
       - 2026-10-31 に [Issue #286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で直した。直した後の Mac の `M17` は 4 件 PASS で、3 回とも 3〜4 秒で終わった。直した後の Mac の FAIL は 40 行(`restore-taskmd` 系だけ)。

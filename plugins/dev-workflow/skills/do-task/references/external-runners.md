@@ -1115,7 +1115,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 1. 呼出側は [runtime-requirements.md の復元監督](runtime-requirements.md#タスク本文の復元)を定義し、`restore_taskmd_supervised` で公開入口を起動する。GNU `timeout`、無ければ `gtimeout` を解決し、GNU 版・必要オプションを確認する。不足時は起動しない。固定 argv は `--signal=TERM --kill-after=5s 330s bash <implement-guard.sh> restore-taskmd <個別argv>`。`--foreground` や shell 文字列を使わない。shell が既存 state・manifest・snapshot の保持値を検査する。検証済み `T` 行の種類・mode・hash・実体パスを内部 helper `restore-taskmd.py` へ個別の引数で渡す。今のコピーから期待値を作り直さない。
 2. Python 3・同梱 helper・GNU `cp` を確認する。shell が所有する一時物があれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
 3. helper は親の各階層をリンクを辿らず開く。fd(開いたファイルやディレクトリを指す番号)を保持し、退避元を同じ fd で種類・mode・hash と比べる。FIFO・directory・symlink・不一致は公開前に止める。復元先は通常ファイルか不存在だけを許す。
-4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試験ファイルで確かめる。固定した GNU `cp -aL` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。選択パスや状態パスを `-L` で辿らない。
+4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試験ファイルで確かめる。固定した GNU `cp -aL --reflink=never` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。`--reflink=never`(複製の共有をしない指定)は、GNU `cp` 9 系が書き込みの上限の位置で止まらないために渡す(必要な版は [runtime-requirements.md の「タスク本文の復元」](runtime-requirements.md#タスク本文の復元))。選択パスや状態パスを `-L` で辿らない。
 5. コピー終了と直接子の回収後に、準備内容・mode・inode・元ファイルの変化を検査する。対象・親・準備名を再確認し、保持した親 fd に対して `os.replace` で公開する。準備・コピー・公開前検査の失敗時は元内容と権限、または不存在を保つ。
 6. 公開名と準備 fd の同一性・mode・hash を確認する。公開後に失敗しても自動で巻き戻さない。一時物は、自分が作って同一性を確認したものだけを回収する。元 state・`taskmd-body`・snapshot は残す。
 
@@ -1139,7 +1139,7 @@ TEMP_PATH=<C風引用のパス>
 - 最終応答の確定前に捕捉した TERM・INT・HUP は終了値20、`RESTORED=no`、`REASON=interrupted`。対象の置換後に `none` へ戻さない。
 - 最終応答は、TERM・INT・HUP の mask 設定が成功した時点で確定する。それ以前の捕捉を反映してから1回だけ書き、flush する。設定が使えない・失敗した場合は有効な応答を出さず非ゼロ終了する。確定後の signal と送出後の mask 復元失敗は、確定済み応答と終了値を変えない。二度目の応答や traceback を出さない。KILL・送出失敗・途中切断は呼出側の無応答規則で扱う。
 - `TEMP=none` は未作成、`removed` は回収済み、`retained` は確認できた残存、`unknown` は判断不能。残存を確認できた場合だけ、その専用領域のパスを添える。コピー子を回収できなければ、一時物を保持して公開を止める。
-- 理由は `digest`、`taskmd-body`、`dest-symlink`、`dest-dir`、`dest-special`、`internal-argument`、`runtime-unavailable`、`prepare-failed`、`copy-failed`、`replace-failed`、`verify-failed`、`cleanup-failed`、`budget-exceeded`、`child-unreaped`、`interrupted`。`copy-failed` は準備コピーの失敗を指す。確定前に捕捉した signal の理由は `interrupted` を優先する。
+- 理由は `digest`、`taskmd-body`、`dest-symlink`、`dest-dir`、`dest-special`、`internal-argument`、`runtime-unavailable`、`fd-copy-unavailable`、`prepare-failed`、`copy-failed`、`replace-failed`、`verify-failed`、`cleanup-failed`、`budget-exceeded`、`child-unreaped`、`interrupted`。`copy-failed` は準備コピーの失敗を指す。`fd-copy-unavailable` は、手順 4 の短い試験ファイルのコピーが、どの fd 別名でも成り立たないことを指す(別名の確認・コピー・内容と mode と inode の確かめのどれかが不成立。macOS の `/dev/fd` など)。確定前に捕捉した signal の理由は `interrupted` を優先する。
 - 公開 shell の引数不正は従来の終了値2。内部引数の未知・重複・欠落・不正パス/mode/hash は33 / `internal-argument`、`TOUCHED=none`、`TEMP=none` で止まる。
 - 呼出側は終了値と全行の合法な組合せを確認する。監督の124/137・監督失敗・無応答・重複・不正・上限超過・終了値との不一致は、呼出側の観測として `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱い、自動引継ぎを止める。helper に2回目の結果を出させる指示ではない。残存パスを受領できなければパス不明と報告し、推測して消さない。
 

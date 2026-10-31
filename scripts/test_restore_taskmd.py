@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -106,8 +107,8 @@ class RestoreTests(unittest.TestCase):
             self.assertEqual(values[b'RESTORED'], b'no')
             expected_keys.append(b'REASON')
             self.assertIn(values[b'REASON'], tuple(x.encode() for x in (
-                'internal-argument', 'runtime-unavailable', 'taskmd-body', 'digest',
-                'dest-symlink', 'dest-dir', 'dest-special', 'prepare-failed', 'copy-failed',
+                'internal-argument', 'runtime-unavailable', 'fd-copy-unavailable', 'taskmd-body',
+                'digest', 'dest-symlink', 'dest-dir', 'dest-special', 'prepare-failed', 'copy-failed',
                 'replace-failed', 'verify-failed', 'cleanup-failed', 'budget-exceeded',
                 'child-unreaped', 'interrupted')))
             if rc == 20:
@@ -346,8 +347,71 @@ class RestoreTests(unittest.TestCase):
     def test_missing_fd_aliases_fails_without_publication(self):
         with mock.patch.object(restore, 'FD_ROOTS', ('/missing-fd-alias',)):
             rc, output = self.operation().run()
-        fields = self.fields(rc, output); self.assertEqual(fields[b'REASON'], b'runtime-unavailable')
+        fields = self.fields(rc, output); self.assertEqual(fields[b'REASON'], b'fd-copy-unavailable')
         self.assertEqual(fields[b'TEMP'], b'removed'); self.unchanged()
+
+    def run_with_probe_patch(self, op, target, attribute, side_effect):
+        # check_features は os の関数そのものを比べるので、差し替えは起動時の試しの間だけ効かせる。
+        actual = op.probe
+        def probe():
+            with mock.patch.object(target, attribute, side_effect=side_effect):
+                return actual()
+        with mock.patch.object(op, 'probe', side_effect=probe):
+            return op.run()
+
+    def assert_stopped_before_publication(self, rc, output, reason):
+        fields = self.fields(rc, output); self.assertEqual(rc, 33)
+        self.assertEqual(fields[b'REASON'], reason); self.assertEqual(fields[b'TOUCHED'], b'none')
+        self.assertEqual(fields[b'TEMP'], b'removed'); self.unchanged()
+        self.assertFalse(list(self.root.glob('.restore-taskmd-*')))
+
+    def test_fd_alias_device_mismatch_is_fd_copy_unavailable(self):
+        # macOS の /dev/fd の形(#285): stat は成功し、device 番号だけが開いたファイルと食い違う。
+        actual = os.stat
+        def shifted(path, *args, **kwargs):
+            info = actual(path, *args, **kwargs)
+            if isinstance(path, str) and path.startswith(('/proc/self/fd/', '/dev/fd/')):
+                return types.SimpleNamespace(st_dev=info.st_dev + 1, st_ino=info.st_ino, st_mode=info.st_mode)
+            return info
+        rc, output = self.run_with_probe_patch(self.operation(), restore.os, 'stat', shifted)
+        self.assert_stopped_before_publication(rc, output, b'fd-copy-unavailable')
+
+    def test_cp_launch_failure_in_probe_is_runtime_unavailable(self):
+        # cp を起動できないときは、次の別名へ進まず runtime-unavailable で止める(#285)。
+        actual = subprocess.Popen
+        def popen(argv, *args, **kwargs):
+            if argv[1:] == ['--version']: return actual(argv, *args, **kwargs)
+            raise OSError('fixture')
+        with mock.patch.object(restore.subprocess, 'Popen', side_effect=popen):
+            rc, output = self.operation().run()
+        self.assert_stopped_before_publication(rc, output, b'runtime-unavailable')
+
+    def test_probe_setup_failure_is_runtime_unavailable(self):
+        # 起動時の試しの準備の失敗は fd-copy-unavailable にしない(#285)。
+        actual = os.mkdir
+        def mkdir(name, *args, **kwargs):
+            if name == 'probe-directory': raise PermissionError('fixture')
+            return actual(name, *args, **kwargs)
+        rc, output = self.run_with_probe_patch(self.operation(), restore.os, 'mkdir', mkdir)
+        self.assert_stopped_before_publication(rc, output, b'runtime-unavailable')
+
+    def test_probe_rename_failure_is_runtime_unavailable(self):
+        # 確かめが通った後の改名の失敗は、次の別名へ進まず runtime-unavailable で止める(#285)。
+        actual = os.replace
+        def replace(source, destination, **kwargs):
+            if (source, destination) == ('probe-destination', 'probe-renamed'): raise PermissionError('fixture')
+            return actual(source, destination, **kwargs)
+        rc, output = self.run_with_probe_patch(self.operation(), restore.os, 'replace', replace)
+        self.assert_stopped_before_publication(rc, output, b'runtime-unavailable')
+
+    def test_probe_cleanup_unverified_entry_is_cleanup_failed(self):
+        # 試しの片付けで、消すものが自分の作ったものと同じか確かめられないときは、
+        # cleanup-failed のまま出し、次の別名へ進まない(#285)。削除そのものの失敗は対象外。
+        op = self.operation(); actual = op.stat_at
+        def stat_at(fd, name):
+            return None if name == 'probe-renamed' else actual(fd, name)
+        rc, output = self.run_with_probe_patch(op, op, 'stat_at', stat_at)
+        self.assert_stopped_before_publication(rc, output, b'cleanup-failed')
 
     def test_second_fd_alias_candidate_can_succeed(self):
         with mock.patch.object(restore, 'FD_ROOTS', ('/missing-fd-alias', '/proc/self/fd')):
@@ -466,6 +530,45 @@ class RestoreTests(unittest.TestCase):
                           "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
         rc, output = self.operation(cp=cp).run()
         self.fields(rc, output); self.assertEqual(rc, 0); self.restored()
+
+    def test_cp_receives_reflink_never_under_file_size_limit(self):
+        # GNU cp 9 系の形(#285): 複製の共有を禁じないと、書き込みの上限の位置で SIGXFSZ を受けて止まる。
+        # Python は起動時に SIGXFSZ を無視にするので、既定に戻してから自分へ送る。core は書かせない。
+        cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"
+                          "if '--reflink=never' not in sys.argv[1:]:\n"
+                          " resource.setrlimit(resource.RLIMIT_CORE,(0,0))\n"
+                          " signal.signal(signal.SIGXFSZ,signal.SIG_DFL);os.kill(os.getpid(),signal.SIGXFSZ);sys.exit(99)\n"
+                          "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
+        rc, output = self.operation(cp=cp).run()
+        self.fields(rc, output); self.assertEqual(rc, 0); self.restored()
+        self.assertFalse(list(self.root.glob('.restore-taskmd-*')))
+
+    def test_cp_rejecting_reflink_never_is_fd_copy_unavailable(self):
+        # 8.30 より前の GNU cp の形(#285): --reflink=never を受け付けず、試しのコピーが別名ごとに失敗する。
+        # 書き込みの上限の下で動くので、呼び出しは中身の無いファイルの名前で記録する。
+        calls = self.root / 'cp-calls'; calls.mkdir()
+        cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"
+                          "root=sys.argv[-2].rpartition('/')[0]\n"
+                          "open(os.path.join(" + repr(str(calls)) + ",'%d@%s@%s'%(os.getpid(),root.replace('/','_'),"
+                          "os.path.basename(os.readlink(sys.argv[-2])))),'x').close()\n"
+                          "if '--reflink=never' in sys.argv[1:]:\n"
+                          " sys.stderr.write(\"cp: invalid argument 'never' for '--reflink'\\n\");sys.exit(1)\n"
+                          "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
+        rc, output = self.operation(cp=cp).run()
+        self.assert_stopped_before_publication(rc, output, b'fd-copy-unavailable')
+        recorded = sorted(tuple(name.split('@')[1:]) for name in os.listdir(calls))
+        self.assertEqual(recorded, [('_dev_fd', 'probe-source'), ('_proc_self_fd', 'probe-source')])
+
+    def test_probe_copy_content_mismatch_is_fd_copy_unavailable(self):
+        # 試しのコピーの大きさと mode は合うが内容が違うときも、次の別名へ進み、最後は fd-copy-unavailable(#285)。
+        cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"
+                          "source,destination=sys.argv[-2:]\n"
+                          "if os.readlink(source).endswith('/probe-source'):\n"
+                          " fd=int(destination.rsplit('/',1)[1]);info=os.stat(source)\n"
+                          " os.pwrite(fd,b'X'*info.st_size,0);os.fchmod(fd,info.st_mode&0o7777);sys.exit(0)\n"
+                          "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
+        rc, output = self.operation(cp=cp).run()
+        self.assert_stopped_before_publication(rc, output, b'fd-copy-unavailable')
 
     def test_copy_over_initial_size_is_stopped_and_never_published(self):
         cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"

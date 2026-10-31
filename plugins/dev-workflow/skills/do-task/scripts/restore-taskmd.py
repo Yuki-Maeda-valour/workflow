@@ -322,7 +322,10 @@ class Restore:
             resource.setrlimit(resource.RLIMIT_FSIZE, (size, size))
         self.checkpoint('before-copy')
         try:
-            self.child = subprocess.Popen([self.cp, '-aL', '--', '%s/%d' % (fd_root, source),
+            # GNU cp 9 系は、複製の共有を禁じないと書き込みの上限の位置でカーネルのコピーを呼び、
+            # SIGXFSZ で止まる。上限を変えずに避けるため、複製の共有をしない指定を渡す(#285)。
+            self.child = subprocess.Popen([self.cp, '-aL', '--reflink=never', '--',
+                                           '%s/%d' % (fd_root, source),
                                            '%s/%d' % (fd_root, destination)],
                                           stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                           stderr=subprocess.DEVNULL, close_fds=True,
@@ -366,38 +369,45 @@ class Restore:
             if os.write(source, payload) != len(payload):
                 raise Failure('runtime-unavailable')
             os.fchmod(source, 0o640)
-            for fd_root in FD_ROOTS:
-                self.checkpoint('probe')
-                try:
-                    if not self.aliases_match(fd_root, self.source_fd, self.prepared_fd, source, destination):
-                        continue
-                    os.ftruncate(destination, 0)
-                    self.copy_file(source, destination, len(payload), fd_root)
-                    if self.child_unreaped:
-                        raise Failure('child-unreaped')
-                    os.lseek(destination, 0, os.SEEK_SET)
-                    info = os.fstat(destination)
-                    if os.read(destination, len(payload) + 1) != payload or stat.S_IMODE(info.st_mode) != 0o640:
-                        continue
-                    if identity(info) != self.entries['probe-destination']:
-                        continue
-                    os.replace('probe-destination', 'probe-renamed', src_dir_fd=self.temp_fd, dst_dir_fd=self.temp_fd)
-                    self.entries['probe-renamed'] = self.entries.pop('probe-destination')
-                    if identity(os.stat('probe-renamed', dir_fd=self.temp_fd, follow_symlinks=False)) != identity(info):
-                        raise Failure('runtime-unavailable')
-                    self.remove_entry('probe-renamed')
-                    self.remove_entry('probe-source')
-                    self.fd_root = fd_root
-                    return
-                except (OSError, ValueError, NotImplementedError):
-                    continue
-                except Failure as error:
-                    if error.reason in ('interrupted', 'budget-exceeded', 'child-unreaped') or self.child_unreaped:
-                        raise
-                    continue
         except (OSError, ValueError, NotImplementedError):
             raise Failure('runtime-unavailable')
-        raise Failure('runtime-unavailable')
+        # 次の別名へ進むのは、別名の確認・コピー・確かめが成り立たないときだけ(#285)。
+        for fd_root in FD_ROOTS:
+            self.checkpoint('probe')
+            try:
+                if not self.aliases_match(fd_root, self.source_fd, self.prepared_fd, source, destination):
+                    continue
+                os.ftruncate(destination, 0)
+                self.copy_file(source, destination, len(payload), fd_root)
+                if self.child_unreaped:
+                    raise Failure('child-unreaped')
+                os.lseek(destination, 0, os.SEEK_SET)
+                info = os.fstat(destination)
+                if os.read(destination, len(payload) + 1) != payload or stat.S_IMODE(info.st_mode) != 0o640:
+                    continue
+                if identity(info) != self.entries['probe-destination']:
+                    continue
+            except (OSError, ValueError, NotImplementedError):
+                continue
+            except Failure as error:
+                # cp を起動できない(runtime-unavailable)・中断・予算・子の回収の失敗は、ここで止める。
+                if error.reason != 'copy-failed' or self.child_unreaped:
+                    raise
+                continue
+            break
+        else:
+            raise Failure('fd-copy-unavailable')
+        # 確かめが通った後の改名と片付けの失敗は、次の別名へ回さない。
+        try:
+            os.replace('probe-destination', 'probe-renamed', src_dir_fd=self.temp_fd, dst_dir_fd=self.temp_fd)
+            self.entries['probe-renamed'] = self.entries.pop('probe-destination')
+            if identity(os.stat('probe-renamed', dir_fd=self.temp_fd, follow_symlinks=False)) != identity(info):
+                raise Failure('runtime-unavailable')
+            self.remove_entry('probe-renamed')
+            self.remove_entry('probe-source')
+        except (OSError, ValueError, NotImplementedError):
+            raise Failure('runtime-unavailable')
+        self.fd_root = fd_root
 
     def check_prepared_name(self):
         info = self.stat_at(self.temp_fd, 'prepared')

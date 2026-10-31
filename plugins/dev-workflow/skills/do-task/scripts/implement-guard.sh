@@ -109,6 +109,7 @@
 #     taskmd-body    退避した本文の種類・モード・sha256 が記録と一致しない
 #     dest-symlink / dest-dir / dest-special  復元先が通常ファイルか不存在でない
 #     internal-argument / runtime-unavailable  内部引数・必要機能が不成立
+#     fd-copy-unavailable  fd の別名を通した短いコピーが、起動時の試しでどの別名でも成り立たない(macOS の /dev/fd・8.30 より前の GNU cp など)
 #     prepare-failed / copy-failed / replace-failed  準備・コピー・公開の失敗
 #     verify-failed / cleanup-failed  照合・自分の専用一時物の回収の失敗
 #     budget-exceeded / child-unreaped  有限予算・直接コピー子の回収の失敗
