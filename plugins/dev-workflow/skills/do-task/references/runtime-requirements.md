@@ -178,7 +178,8 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
       - Mac(GNU coreutils 9.12): `/proc` が無く、`/dev/fd` の別名で `cp: skipping file '/dev/fd/3', as it was replaced while being copied` になる。書き込みの上限の有無には関係しない。
       - Linux(Debian trixie・GNU coreutils 9.7): 書き込みの上限を付けた `cp -aL` が `SIGXFSZ` で止まり、38 行が落ちる。
       - `J8` は、非 UTF-8 の名前を APFS が作れないことも重なり、Mac では 2 行多い。
-    - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになる。別の Issue [#286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で扱う。
+    - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになっていた。
+      - 2026-10-31 に [Issue #286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で直した。直した後の Mac の `M17` は 4 件 PASS で、3 回とも 3〜4 秒で終わった。直した後の Mac の FAIL は 40 行(`restore-taskmd` 系だけ)。
   - 修正前の Mac の FAIL 64 行(スイートを `GIT_CONFIG_NOSYSTEM=1` で回した基準。system 設定を有効のままの修正前の実行は、Issue #241 の 2026-10-26 のコメントで FAIL 812 件)のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
 - 品質コマンドの監督と検証用コピーの回帰を Mac で回す手順([Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239)):
   - 対象: `scripts/test_check_process.py` と `scripts/test_review_guard.py`。実プロセスと実 CLI(`start → take → seal → run-checks`)で、終了値 0 / 7 と出力の hash、親の終了・時間切れ・`TERM`・`INT`・`HUP`・群の外へ移る子、検証用コピーの削除と保持を確かめる。
