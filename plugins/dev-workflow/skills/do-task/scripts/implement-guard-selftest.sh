@@ -27,9 +27,11 @@
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
 # FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした・sed が失敗した変異は
 # それ自体を FAIL にする。目印を持たない変異 `e` も、写しを作る `cp`・`sed` が失敗したらそれ自体を FAIL にする。
-# 変異 `e` は、写しの `restore-taskmd.py`(タスク本文の復元の補助)が実行時に動かないときも PASS に見えうる
-# (対照の `E1` が復元の処理を使わないため。#296)。
-# 変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
+# 変異 `e` は、`J4` の「リンク先の同名ファイルが無傷」の行が落ちること(上書きが起きた証拠)も見る。
+# 対照の `J1`(正常な復元)が写しでも通ること(写しの `restore-taskmd.py` が実行時に動く証拠)も見る(#296 で直した)。
+# 元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない環境(macOS など)では、変異 `e` を `NOTE:` の行で省く。
+# 変異版でも対照ケースは PASS すること(壊れ方が変異に固有であること)も見る。対照は 2 つの形がある。
+# 全変異の `E1` は、変異の当たらないケース。変異 `e` の `J1` は、変異を当てた補助を通るが、結果の変わらないケース。
 #
 # 保護領域: 対象は保護領域を /tmp・$TMPDIR の外にしか作らない。成功ケースのために、実
 # `$HOME/.local/state/dev-workflow/` の下へ `selftest-guard-XXXXXX` を作って `XDG_STATE_HOME` を
@@ -2315,7 +2317,7 @@ mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed �
   cp -- "$SCRIPT_DIR/restore-taskmd.py" "$(dirname -- "$o")/restore-taskmd.py" || return 1
 }
 mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区切り)残り=sed 式
-  local id="$1" desc="$2" expect="$3" v out n c rc=0 only total per firsts t0="$SECONDS"
+  local id="$1" desc="$2" expect="$3" v out n c rc=0 only total per firsts t0="$SECONDS" pre prc=0
   shift 3
   mkdir -p "$WORK/mut/$id"
   v="$WORK/mut/$id/guard.sh"
@@ -2335,6 +2337,31 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
   fi
   ckt "変異($id) 写しが bash -n を通る" bash -n "$v"
   only="$(printf '%s' "$expect" | tr ' ' ','),E1"
+  if [ "$id" = e ]; then
+    # 前提: 元の対象で J1(正常な復元)が通ること。環境で復元が使えない(起動時の試しで
+    # REASON=fd-copy-unavailable。macOS など)ときだけ変異 e を省き、数えない。それ以外の崩れは FAIL(#296)
+    pre="$WORK/mut/$id-pre.out"
+    guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$TARGET" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
+      ${MUT_EXTRA_ENV[@]+"${MUT_EXTRA_ENV[@]}"} bash "$SELF_PATH" -v --only J1 </dev/null >"$pre" 2>&1 || prc=$?
+    if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の前提の子スイート(元の対象の J1)→ rc=$prc"; cat "$pre"; fi
+    case "$prc" in
+      124|137) ng "変異(e) 前提の子スイート(元の対象の J1)が外側タイムアウトしていない(rc=$prc)"; return 0 ;;
+      *) : ;;
+    esac
+    if [ "$prc" -eq 0 ] && grep -q -- '^PASS  J1 ' "$pre" && ! grep -q -- '^FAIL  J1 ' "$pre"; then
+      :
+    elif [ "$prc" -eq 1 ] && grep -q -- '^FAIL  J1 ' "$pre" && grep -qx -- 'REASON=fd-copy-unavailable' "$pre"; then
+      echo "NOTE: 変異(e) を省く: この環境では復元が起動時の試しで止まる(REASON=fd-copy-unavailable。macOS など。#285・#271)"
+      MUT_TABLE="$MUT_TABLE
+  (e) 復元先の階層検査を外す → 省いた(元の対象の J1: rc=1・REASON=fd-copy-unavailable)"
+      return 0
+    else
+      ng "変異(e) 前提: 元の対象で J1(正常な復元)が通る(rc=$prc)"
+      return 0
+    fi
+    # 対照に J1 を足す: 写しの helper が実行時に動くことを見る(E1 は復元の処理を使わない)
+    only="$only,J1"
+  fi
   guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$v" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
     ${MUT_EXTRA_ENV[@]+"${MUT_EXTRA_ENV[@]}"} bash "$SELF_PATH" --only "$only" </dev/null >"$out" 2>&1 || rc=$?
   if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の子スイート → rc=$rc"; cat "$out"; fi
@@ -2348,8 +2375,17 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
     if grep -q -- "^FAIL  $c " "$out"; then ok "変異($id) $desc: ケース $c が FAIL する"
     else ng "変異($id) $desc: ケース $c が FAIL する(FAIL の行が無い)"; fi
   done
+  if [ "$id" = e ]; then
+    # 理由の行だけの FAIL は、写しの helper が動かないときにも出る。上書きが起きたことまで見る
+    if grep -q -- '^FAIL  J4 復元先の親が symlink: リンク先の同名ファイルが無傷' "$out"; then ok "変異(e) 復元先の階層検査を外す: J4 のリンク先の上書きが起きる(無傷の行が FAIL する)"
+    else ng "変異(e) 復元先の階層検査を外す: J4 のリンク先の上書きが起きる(無傷の行が FAIL する)"; fi
+  fi
   if grep -q -- '^PASS  E1 ' "$out" && ! grep -q -- '^FAIL  E1 ' "$out"; then ok "変異($id) 対照ケース E1 は写しでも PASS する(壊れ方が変異に固有)"
   else ng "変異($id) 対照ケース E1 は写しでも PASS する"; fi
+  if [ "$id" = e ]; then
+    if grep -q -- '^PASS  J1 ' "$out" && ! grep -q -- '^FAIL  J1 ' "$out"; then ok "変異(e) 対照ケース J1(正常な復元)は写しでも PASS する(写しの補助が実行時に動く)"
+    else ng "変異(e) 対照ケース J1(正常な復元)は写しでも PASS する(写しの補助が実行時に動く)"; fi
+  fi
   # 表: ケース ID ごとの FAIL 件数と、各ケースで最初に FAIL した行(全文は -v で出る)
   total="$(grep -c -- '^FAIL  ' "$out" || true)"
   per=""
