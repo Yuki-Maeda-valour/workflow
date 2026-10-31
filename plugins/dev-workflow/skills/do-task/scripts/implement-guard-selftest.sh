@@ -26,7 +26,10 @@
 # 変異テスト(L・26 個 = 目印のある変異 25 個 + 目印を持たない e): 対象の写しに sed で変異を 1 つ当て(e は復元 helper の階層検査を外す)(対象側の目印 `# MUT:a`〜`# MUT:z`)、
 # `IMPLEMENT_GUARD=<写し>` でこのスイート自身を `--only <対応するケース>` で回す。**対応するケースが
 # FAIL し、スイートが非ゼロで終わること**が PASS の条件。目印が無い・sed が空振りした・sed が失敗した変異は
-# それ自体を FAIL にする。変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
+# それ自体を FAIL にする。目印を持たない変異 `e` も、写しを作る `cp`・`sed` が失敗したらそれ自体を FAIL にする。
+# 変異 `e` は、写しの `restore-taskmd.py`(タスク本文の復元の補助)が実行時に動かないときも PASS に見えうる
+# (対照の `E1` が復元の処理を使わないため。#296)。
+# 変異版でも対照ケース(E1)は PASS すること(壊れ方が変異に固有であること)も見る。
 #
 # 保護領域: 対象は保護領域を /tmp・$TMPDIR の外にしか作らない。成功ケースのために、実
 # `$HOME/.local/state/dev-workflow/` の下へ `selftest-guard-XXXXXX` を作って `XDG_STATE_HOME` を
@@ -2319,9 +2322,9 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
   out="$WORK/mut/$id.out"
   if [ "$id" = e ]; then
     # 復元先の検査は helper へ移った。元の J4 が、階層検査を除いた写しを検出する。
-    cp -- "$TARGET" "$v"
+    cp -- "$TARGET" "$v" || { ng "変異(e) cp が失敗しない"; return 0; }
     sed -e 's/os\.O_NOFOLLOW/0/g' -e 's/self\.check_chains()/pass/g' \
-      "$SCRIPT_DIR/restore-taskmd.py" >"$WORK/mut/$id/restore-taskmd.py"
+      "$SCRIPT_DIR/restore-taskmd.py" >"$WORK/mut/$id/restore-taskmd.py" || { ng "変異(e) sed が失敗しない"; return 0; }
     ckf "変異(e) helper の階層検査の無効化が空振りしない" cmp -s "$SCRIPT_DIR/restore-taskmd.py" "$WORK/mut/$id/restore-taskmd.py"
     ckt "変異(e) helper が Python 構文検査を通る" python3 -c 'import ast,sys; ast.parse(open(sys.argv[1]).read())' "$WORK/mut/$id/restore-taskmd.py"
   else
