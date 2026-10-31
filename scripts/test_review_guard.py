@@ -190,7 +190,8 @@ class GuardCliFixture:
         self.tmp.cleanup()
 
     def git(self, *args):
-        return subprocess.run(["git", *args], cwd=self.repo, check=True,
+        # commit が裏の保守処理(詰め直し)を起動し、試験の一時領域へ書き続けないようにする(#292)。
+        return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=self.repo, check=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     def guard(self, *args, expect=0):
@@ -359,6 +360,72 @@ class ReviewGuardTest(GuardCliFixture, unittest.TestCase):
                            '--expect-checks-sha256', self.digest(plan), '--out', str(out))
             self.assertFalse(list(self.repo.rglob('*.pyc')))
             self.assertEqual(0, json.loads(out.read_text())['results'][0]['exit_code'])
+
+    def test_run_checks_clean_copy_commit_starts_no_background_maintenance(self):
+        # 検証用コピーを作る commit が、Git の裏の保守処理(詰め直し)を起動しないことを確かめる(#292)。両 OS で動かす。
+        # 詰め直しは、1 つずつのファイルで置かれたオブジェクト(loose object)を 1 つのパックへまとめる処理。
+        # Git は loose object の数を .git/objects/17 の中の数で見積もる。17 に 28 個あれば、Git 2.34・2.51・2.54 のどれでも詰め直す。
+        seeds = []
+        for number in range(50000):
+            body = f"seed {number}\n".encode()
+            if hashlib.sha1(b"blob %d\0" % len(body) + body).hexdigest().startswith("17"):
+                seeds.append(number)
+                if len(seeds) == 28:
+                    break
+        self.assertEqual(28, len(seeds), "blob の名前が 17 で始まる中身が 28 個に届かない")
+        (self.repo / "seeds").mkdir()
+        for number in seeds:
+            (self.repo / f"seeds/{number}.txt").write_text(f"seed {number}\n", encoding="utf-8")
+        self.git("add", "seeds")
+        self.git("commit", "-qm", "seeds")
+        self.begin()
+        self.capture(prove=False)
+        # 品質コマンドは検証用コピーの .git/objects を見て、理由を検証用コピーの外のファイルに書く。
+        # 終了値 5: 起動の時点でパックがある。3: 前提の崩れ(17 が 28 個より少ない)。4: 見ている 3 秒の間に詰め直しが始まった。
+        reason = self.root / "maintenance-reason.txt"
+        code = """import re, sys, time
+from pathlib import Path
+objects = Path('.git/objects')
+def loose():
+    try:
+        return sum(1 for item in (objects / '17').iterdir() if re.fullmatch('[0-9a-f]{38}', item.name))
+    except FileNotFoundError:
+        return 0
+def packed():
+    return (objects / 'info/packs').exists() or any((objects / 'pack').glob('*.pack'))
+def stop(code, text):
+    Path(sys.argv[1]).write_text(text, encoding='utf-8')
+    sys.exit(code)
+start = loose()
+if packed():
+    stop(5, f'起動の時点でパックあり: 17 の数 {start}')
+if start < 28:
+    stop(3, f'前提の崩れ: 17 の数 {start}・パックなし')
+end = time.monotonic() + 3
+while time.monotonic() < end:
+    time.sleep(.05)
+    now, pack = loose(), packed()
+    if pack or now < start:
+        stop(4, f'見ている間に詰め直し: 17 の数 {start} から {now}・パック {pack}')
+"""
+        plan = self.root / "maintenance-plan.json"
+        plan.write_text(json.dumps({"commands": [{"name": "maintenance", "argv": [sys.executable, "-c", code, str(reason)]}]}))
+        out = self.root / "maintenance-receipt.json"
+        # 検証用コピーと出力の置き場を試験の領域に置き、削除を確かめる。
+        copies = self.root / "tmp"
+        copies.mkdir()
+        # self.guard は終了値を先に確かめるので使わない(落ちたときに、受領書と理由を失敗の文に入れるため)。
+        with mock.patch.dict(os.environ, {"TMPDIR": str(copies)}):
+            proc = subprocess.run([sys.executable, str(SCRIPT), *self.context("run-checks"), "--checks-file", str(plan),
+                                   "--expect-checks-sha256", self.digest(plan), "--out", str(out)],
+                                  text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        receipt = json.loads(out.read_text()) if out.exists() else None
+        detail = (f"受領書: {receipt}; 理由: {reason.read_text(encoding='utf-8') if reason.exists() else 'なし'}; "
+                  f"run-checks の標準エラー: {proc.stderr}")
+        self.assertIsNotNone(receipt, detail)
+        self.assertEqual(0, receipt["results"][0]["exit_code"], detail)
+        self.assertEqual(0, proc.returncode, proc.stdout + proc.stderr)
+        self.assertEqual([], list(copies.iterdir()))
 
     def test_state_inside_reviews_does_not_change_review_set(self):
         reviews = self.repo / ".claude/reviews"

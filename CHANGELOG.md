@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.28.5
+
+### 修正
+
+- `run-checks` が、検証用コピーの削除の `Directory not empty` で落ちなくなる。今までは、品質コマンドがすべて成功していても終了値 2 で止まり、受領書(結果の JSON)を書かず、検証用コピーが残ることがあった。([Issue #292](https://github.com/Yuki-Maeda-valour/workflow/issues/292))
+  - 原因: 検証用コピーを作る `git commit` が、Git の裏の保守処理(`git maintenance run --auto`)を起動していた。保守処理は親から離れて動き、1 つずつのファイルで置かれたオブジェクトを 1 つのパック(まとめたファイル)へ詰め直す。その書き込みが、検証用コピーの削除と重なった。Mac の Git 2.54 で確かめた。
+  - 直し方: その `git commit` に `-c maintenance.auto=false -c gc.auto=0` を渡し、保守処理を起動させない。設定はその 1 回の `git commit` にだけ効く。品質コマンドに渡す環境変数と、検証用コピーの `.git/config` は変えない。
+  - Linux の Git 2.51・2.34 でも、レビューした中身のオブジェクトが多いとき(全体でおよそ 7,000 個以上)に同じことが起きうる。同じ設定で防ぐ。
+  - 限界: 品質コマンドが自分で検証用コピーの中で `git commit` などを打つと、同じ保守処理が起きる。macOS など Linux 以外の POSIX では、プロセス群の外の子孫と同じく保証外。Git 2.29 より前の Git は未確認(`gc.auto=0` も渡す)。
+  - 試験: 詰め直しが必ず起きる中身で `run-checks` を回し、保守処理が検証用コピーへ書かないことを確かめる試験 `test_run_checks_clean_copy_commit_starts_no_background_maintenance` を足した。Mac と Linux の両方で動く。直す前の製品では、Mac(Git 2.54.0)と Linux の容器(Git 2.51.0)で各 3 回中 3 回落ちた。試験の準備の Git にも同じ設定を渡す。検証用コピーを作る Git の引数の固定の一覧に、2 つの設定を足した。2 本で 94 件(Mac は成功 82・飛ばし 12、Linux は成功 81・飛ばし 13)。
+
 ## v4.28.4
 
 ### 修正
