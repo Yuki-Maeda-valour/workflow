@@ -2,6 +2,37 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.28.8
+
+### 修正
+
+- `implement-guard.sh restore-taskmd`(外部の実装役が書き換えたタスク本文を、退避した本文へ戻すサブコマンド)が、GNU coreutils 9 系の Linux で必ず `REASON=runtime-unavailable`(終了値 33)で止まっていたのを直した。macOS では、使えない理由が分かる新しい理由コード `fd-copy-unavailable` で止まる。([Issue #285](https://github.com/Yuki-Maeda-valour/workflow/issues/285))
+  - fd の別名: 開いたファイルを番号で指すパス(`/proc/self/fd/<番号>`・`/dev/fd/<番号>`)。復元の補助 `restore-taskmd.py` は、コピーの元と先をこの別名で GNU `cp -aL` に渡す。
+  - 起動時の試し: 補助が本番のコピーの前に、専用領域で短いファイルを fd の別名で写してみる処理。
+  - 原因(Linux): 補助は `cp` を、書き込みの上限(`RLIMIT_FSIZE` = ファイルの大きさ)を付けて起動する。GNU cp 9.0 からは、複製の共有(reflink)を禁じていないと、カーネルのコピー(`copy_file_range`)を 0 が返るまで呼ぶ。最後の呼び出しは位置 = 上限で行われ、カーネルが `SIGXFSZ`(書き込みの上限を越えたときの信号)を送るので、`cp` が止まる。
+  - 原因(macOS): `/dev/fd/<番号>` を `stat` で調べた device 番号が、開いたファイル(`fstat`)と違う(i ノード番号は同じ)。補助は起動時の試しの別名の確認でこれを見つけ、`cp` を起動する前に止まる。GNU cp 9.12 を直接起動しても「コピー中に差し替えられた」と断る。
+  - 直し方:
+    - `cp` に `--reflink=never`(複製の共有をしない指定)を渡す。書き込みの上限は変えない。必要な GNU coreutils は 8.30 以上になった(`--reflink=never` を受け付ける版。NEWS による)。
+    - 起動時の試しで、どの fd の別名でも短いコピーが成り立たないときの理由を `fd-copy-unavailable` にした。`cp` を起動できない・試しの準備の失敗・確かめの後の改名の失敗は今までどおり `runtime-unavailable` で止める。試しの片付けで、消すものが自分の作ったものと同じか確かめられないときは `cleanup-failed` で止める。片付けの削除そのものの失敗は `runtime-unavailable` で止める。
+    - 確かめの後の改名と片付けを、別名ごとの試しの外へ出した。今までは、1 つ目の別名で片付けが失敗すると、次の別名で内部の誤り(`KeyError`)になり、`verify-failed` で終わっていた。
+    - 応答の行の形・ほかの理由コードの意味・通常のパスでのコピーへ戻さない決まりは変えない。
+  - 試験: `scripts/test_restore_taskmd.py` に 8 件を足し、fd の別名が無いときの期待を `fd-copy-unavailable` にした。
+    - 足した試験: macOS の形(別名の device 番号だけが食い違う)・GNU cp 9 系の形(`--reflink=never` が無ければ自分へ `SIGXFSZ` を送る、`cp` の代わりの実行物)・8.30 より前の GNU cp の形(`--reflink=never` を断って終了値 1 で終わる。試しのコピーの呼び出しが別名 2 つ分の 2 回であることも数える)・試しのコピーの内容の食い違い(大きさと mode は合う)・`cp` を起動できない・試しの準備の失敗・確かめの後の改名の失敗・試しの片付けで消すものが自分の作ったものと同じか確かめられない。
+    - 直す前の補助と組んだ写しで回した(Ubuntu 22.04 の容器・root 以外)。54 件のうち、6 件だけが落ちた。
+      - macOS の形・内容の食い違い・期待を替えた試験: `runtime-unavailable` で止まり、理由が違う。
+      - GNU cp 9 系の形: 試しが成り立たず、終了値 33 で止まり、復元できない。
+      - 8.30 より前の GNU cp の形: 直す前の補助は `--reflink=never` を渡さないので、本物の `cp` で復元できてしまう(終了値 0)。
+      - 片付けで同じか確かめられない: 次の別名で内部の誤りになり、`verify-failed` で終わる。
+      - ほかの 3 件(起動できない・準備・改名)は直す前も通り、理由の分け方が戻ったときに落ちる。
+    - わざと壊した写しで回した(同じ容器)。
+      - 試しのコピーの失敗(`copy-failed`)でも次の別名へ進まない写し: 8.30 より前の GNU cp の形の 1 件だけが落ちた(`copy-failed` で止まる)。
+      - 内容と mode の食い違いで次の別名へ進まず `verify-failed` で止める写し: 内容の食い違いの 1 件だけが落ちた。
+  - 実測:
+    - Debian trixie の容器(GNU coreutils 9.7・root 以外): `implement-guard-selftest.sh --only J1,J2,J3,J4,J5,J6,J7,J8,J9,J10,B10,B12,G7,M6` は、直す前 PASS 160・FAIL 38 件、直した後 PASS 198・FAIL 0 件。直した後の `scripts.test_restore_taskmd` は 54 件 OK。
+    - Ubuntu 22.04 の容器(GNU coreutils 8.32・root 以外): 直した後の `scripts.test_restore_taskmd` は 54 件 OK。
+    - Mac(macOS 26.6.2 / arm64・GNU coreutils 9.12): 実 CLI(`take` → タスク本文を書き換え → 監督の関数 `restore_taskmd_supervised` で `restore-taskmd`)は、終了値 33・`RESTORED=no`・`TOUCHED=none`・`TEMP=removed`・`REASON=fd-copy-unavailable`。タスク本文は書き換えた内容のまま(sha256 で確認)。直す前の補助では、同じ手順で `REASON=runtime-unavailable`。
+  - 限界: macOS では正常な復元はできない(fd の別名が使えず、通常のパスでのコピーへは戻さない)。Mac の自己試験の復元系の FAIL 40 行は残る。macOS の扱いは [Issue #271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) で確かめる。8.30 より前の GNU cp で `fd-copy-unavailable` で止まる動きは、`cp` の代わりの実行物の試験で確かめた。8.30 より前の実機では未確認。
+
 ## v4.28.7
 
 ### 修正
