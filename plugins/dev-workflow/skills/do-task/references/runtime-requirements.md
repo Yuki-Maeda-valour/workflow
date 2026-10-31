@@ -105,9 +105,23 @@ restore_taskmd_supervised() {
 - **Linux**: `subreaper`(親が終了した子孫を引き取る仕組み)、`/proc`、`pidfd`(特定のプロセスを指す参照)が必要。Python の `os.pidfd_open`・`signal.pidfd_send_signal` を使う。専用プロセスで既存の [loop-supervisor.py](../../ship-task/scripts/loop-supervisor.py) を使い、子孫の終了と回収を確認する。必要な機構を使えなければ停止し、自動で他 POSIX の方式へ切り替えない。
 - **他の POSIX 環境**: 専用のプロセス群を停止し、その群の不在を確認する。群の番号を保持する親は、最後の停止信号まで回収しない。番号の再利用で別の処理を止めることを避ける。
   - 親の回収後は signal 0 による確認だけを行う。`EPERM` は不在とせず、既存の 5 秒の期限内で再確認する。`ESRCH` だけを不在とし、期限内に確認できなければコピーを保持して止まる。
-  - 既知の制約([Issue #289](https://github.com/Yuki-Maeda-valour/workflow/issues/289)。直るまで): macOS で、群の全員が `TERM`(停止の信号)で終わる品質コマンドが時間切れになると、時間切れの結果にならない。検証の親が `TERM`・`INT`・`HUP` を受けたときも、終了通知にならない。どちらも回収の失敗(`品質プロセスの回収を確認できない: [Errno 1] Operation not permitted`)になり、コピーを保持して止まる。
-    - 原因: 群に残るのが回収前の終了済みの anchor(品質コマンドを起動し、群の停止まで残る補助プロセス)だけになり、macOS がその群への `SIGKILL` を `EPERM` で返す。
-    - 群に `TERM` を無視して生きている子がいれば、この経路に当たらない。
+  - 検証の親は、群の停止(最後の `SIGKILL`・anchor の回収・不在の確認)を終えるまで、anchor(品質コマンドを起動し、群の停止まで残る補助プロセス)の通知(anchor が品質コマンドの終了値を書いて知らせるパイプ)の読み口(読む側)を閉じない。
+    - anchor は、品質コマンドが `TERM`(停止の信号)で終わった後も、通知を書いて `SIGKILL` まで残る。
+    - 群の全員が `TERM` で終わっても、時間切れは時間切れになる。検証の親への `TERM`・`INT`・`HUP` は、停止の信号を受けた結果(`終了通知 N を受けた`)になる。([Issue #289](https://github.com/Yuki-Maeda-valour/workflow/issues/289) で直した)
+  - 限界: 次の 3 つの場合がある。どの場合も、`EPERM` を群の不在とは扱わない。
+    - anchor 自身が失われた(異常終了・外からの強制終了)後に、群の全員が `TERM` で終わる場合: macOS は群への `SIGKILL` を `EPERM` で返し、診断の文が `Operation not permitted` になる。コピーを保持して終了値 2 で止まる結果は変わらない。
+    - anchor の起動中(`TERM`・`INT`・`HUP` を受け流す処理を置く前。Python の起動中)に、検証の親が停止の信号を受ける場合: `TERM` で anchor 自身が終わり、同じく診断の文が `Operation not permitted` になる。終了値 2・コピー保持は、停止の信号の本来の結果と同じ。
+    - `TERM` から `SIGKILL` までの待ち(既定 0.2 秒)の間に、検証の親が強制終了される(`SIGKILL` など)場合: 群への `SIGKILL` が送られない。anchor と、`TERM` を無視した群の一員(品質コマンドやその子孫)が、親を失ったまま残る。
+      - anchor は `TERM`・`INT`・`HUP` では止まらない。
+      - 通常終了の経路でも、品質コマンドが自分で終わった後から `SIGKILL` までの間に検証の親が強制終了されると、同じことが起きる。
+      - 検証の親が終わるので、コピーは消えない。保持先も診断も表示されない。見つけ方と止め方は次のとおり。
+      - 残った anchor と群: anchor のコマンド行は `check-process.py` と `--anchor-fd` を含み、親は 1(launchd)。群の番号は anchor の番号と同じ。同じ群に、`TERM` を無視した品質コマンドやその子孫が残る場合がある。
+      - 残った処理は、群の番号ではなく、一員を 1 つずつ止める。`ps -axo pid,ppid,pgid,command` で、群の番号が anchor の番号と同じで、コマンド行がその検証のもの(anchor は `check-process.py` と `--anchor-fd` を含む。品質コマンドは計画のコマンド)であることを確かめてから、その番号へ `kill -KILL` を送る。anchor は `TERM`・`INT`・`HUP` では止まらない。
+      - 群の番号で送らない理由: anchor が通知を書き終えたかを外から確かめられず、確かめてから送るまでの間に anchor が終わって群の番号が再利用されうるため。
+      - 1 つずつ送る場合も、確かめてから送るまでの間に番号が再利用されうる(ほかの手動の停止と同じ限界)。
+      - 送った後に、その群の番号の一員が残っていないことを `ps` で確かめる。
+      - 消えなかったコピー: `TMPDIR` の下の `review-guard-clean-*`(検証用コピー)と `review-guard-checks-*`(出力の置き場)。その検証が起動した処理の停止を確かめてから消す。
+      - そのうえで、[review-protocol.md](review-protocol.md#品質コマンドの停止とコピーの保持) の「品質コマンドの停止とコピーの保持」に従い、検証を最初からやり直す。
 - 他 POSIX で `setsid` などにより群の外へ移った子孫は保証外。切離しを行う検証には、Linux の監督か OS の隔離を使う。Linux でも、同じ利用者権限による監督の改変などを完全に隔離するものではない。
 - Linux 上で他 POSIX の群方式を実行した回帰は通過した。これは macOS 実機の確認ではない。macOS 実機の回帰は、下の「macOS の実測と再確認手順」の回帰の手順で回す。Python の追加パッケージは不要。
 
@@ -169,9 +183,9 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 必要環境: Python 3・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
-  - 期待の件数(2 本の合計 92 件):
-    - macOS: `Ran 92 tests`、最後の行が `OK (skipped=12)`。飛ばし 12 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 9 件・`CheckLifecycleTest` 3 件)。成功 80 件。
-    - Linux: `Ran 92 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 79 件。
+  - 期待の件数(2 本の合計 93 件):
+    - macOS: `Ran 93 tests`、最後の行が `OK (skipped=12)`。飛ばし 12 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 10 件・`CheckLifecycleTest` 2 件)。成功 81 件。
+    - Linux: `Ran 93 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 80 件。
   - 所要時間の目安: 4〜5 分(2026-10-31、macOS 26.6.2 / arm64 の 4 回の実行で 250〜276 秒)。
   - 数え方:
     - `grep -c "skipped 'Linux 専用: " <scratch>/run.log` と `grep -c "skipped 'macOS 専用: " <scratch>/run.log` で、OS ごとの飛ばしを数える。
@@ -181,13 +195,14 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - `Linux 専用: ` の飛ばしを、Mac の成功の根拠にしない。
   - 試験の領域の名前(頭が `wf-proc-test-`)は、次のクラスの試験が起動するプロセス(実 CLI・anchor・品質コマンドとその子と孫・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
     - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `ReviewGuardTest` の `prove()` などが打つ `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
-  - 時間切れ・停止の信号・anchor の消失を確かめる試験は、群に `TERM` を無視する子を置く(#289 の経路に当たらないようにするため)。
-  - #289 の固定の試験 2 件(`CheckProcessDarwinTest` の `test_issue289_term_obeying_timeout_is_recovery_error`・`test_issue289_term_obeying_parent_signal_is_recovery_error`):
-    - 上の「品質コマンドの監督」の #289 の今の不具合の挙動(`RecoveryError` で、文に `Operation not permitted`)を、そのとおりに確かめる。
-    - 再現の実測(2026-10-31、macOS 26.6.2 / arm64、`run_command(..., method='posix')`): `grace=.05` で、`time.sleep(3)` を期限 0.3 秒で 3 回中 3 回。`TERM`・`INT`・`HUP` で各 1 回中 1 回。時間切れと停止の信号で 25 回中 25 回(CPU に 16 本の負荷をかけても 25 回中 25 回)。`grace` が 0.2 秒で 8 回中 8 回。
-    - #289 を直したら、2 件を正しい期待に替える(時間切れは `timed_out` が真、停止の信号は `Interrupted`)。
-    - #289 を直したら、`test_review_guard.py` の `test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan` の `Linux 専用: ` の印も外し、両 OS で動かす(Mac の実行が 1 件増える)。
-    - #289 が再現しない環境では、この 2 件が失敗する。そのときは #289 の状況を確かめる。
+  - anchor の消失を確かめる試験は、群に `TERM` を無視する子を置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後に群の全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
+  - 時間切れ・停止の信号を確かめる試験の、`TERM` を無視する子は、`SIGKILL` で止まることを確かめるために置く。
+  - #289 で直した不具合の回帰の試験(`CheckProcessDarwinTest` の `test_issue289_term_obeying_timeout_is_timed_out`・`test_issue289_term_obeying_parent_signal_is_interrupted`):
+    - 群の全員が `TERM` で終わる品質コマンドで、時間切れは `timed_out` が真になることを確かめる。検証の親への `TERM`・`INT`・`HUP` は `Interrupted`(`終了通知 N を受けた`)になることを確かめる。
+    - どちらも、anchor が `SIGKILL` まで残る(anchor の終了値が `-9`)ことを確かめる。
+    - 読み口を先に閉じる形(直す前)へ戻ると、回収の失敗(`Operation not permitted`)で落ちる。
+    - 直す前(v4.28.3)の再現の実測(2026-10-31、macOS 26.6.2 / arm64、`run_command(..., method='posix')`): `grace=.05` で、`time.sleep(3)` を期限 0.3 秒で 3 回中 3 回。`TERM`・`INT`・`HUP` で各 1 回中 1 回。時間切れと停止の信号で 25 回中 25 回(CPU に 16 本の負荷をかけても 25 回中 25 回)。`grace` が 0.2 秒で 8 回中 8 回。
+  - Linux の後始末の順の試験(`CheckProcessLinuxTest` の `test_posix_term_obeying_command_keeps_anchor_until_kill`): Linux は終了済みだけの群への `SIGKILL` を拒まないので、anchor の終了値で順を確かめる。直す前は 97、直した後は `-9`。
   - 結果は Issue #239 に記録する。
 - 無人ループとシェル回帰一式は引き続き Linux 専用。Linux 上の Darwin スタブの成功や Linux 専用試験の skip は、macOS の成功根拠にしない。
 
@@ -197,7 +212,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 2. scratch リポジトリで do-task の事前検査 → snapshot(新規出力親 1 階層・複数階層・既存 symlink 拒否) → guard の `take` / `compare` / `cleanup` を確認する。create-task の保存先 resolver と本文 digest も scratch で確認する。system 設定は有効のまま(`GIT_CONFIG_NOSYSTEM` を指定しない)で確かめ、`take` が終了値 0 で通ること、`snapshot/config-origins.txt` に Apple Git の追加の設定の行があることも見る。
 3. 標準 bash では do-task の bash 要件が明示されること、標準・導入 bash の両方で loop が Linux 専用エラー rc 20 となり、状態生成・git 操作・ホスト起動がないことを確認する。macOS 上で loop 本体や loop-selftest の成功は要求しない。
 4. 品質検証(手順 4〜6)は、上の「品質コマンドの監督と検証用コピーの回帰を Mac で回す手順」のコマンドで確かめられる。Python の版も記録する。手で行う確認は、回帰で足りないとき(新しい OS 版の初回など)の補助として残す。手で行うときは、同じ scratch で [review-protocol.md](review-protocol.md#reviewcommit-照合) の `start` → `take` → `seal` → `run-checks` を行う。終了値 0 と 7 の計画で、終了値と出力の hash が保たれることを確認する。
-5. 次に、3 秒で自己終了する子を作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。#289 が直るまでは、時間切れを確かめる品質コマンドに、`TERM` を無視する子を置く(群の全員が `TERM` で終わると #289 の経路に当たる)。`--timeout 1` で、元の群が消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子を残す場合も、次のコマンドと重複しないことを確かめる。
-6. 子の起動を確認してから、検証の親へ `TERM`・`INT`・`HUP` をそれぞれ送る。群の停止、コピー保持、後続未起動、終了値 2 を確かめる。#289 が直るまでは、ここでも `TERM` を無視する子を置く。試験で起動した処理は、失敗時も自分で終了・回収する。
+5. 次に、3 秒で自己終了する子を作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。`--timeout 1` で、元の群が消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子を残す場合も、次のコマンドと重複しないことを確かめる。
+6. 子の起動を確認してから、検証の親へ `TERM`・`INT`・`HUP` をそれぞれ送る。群の停止、コピー保持、後続未起動、終了値 2 を確かめる。試験で起動した処理は、失敗時も自分で終了・回収する。
 
 実機がなければ「実施不能(実機なし)／未確認」と記録し、上記の手順を引き継ぐ。

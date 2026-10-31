@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.28.4
+
+### 修正
+
+- macOS で、プロセス群の全員が `TERM`(停止の信号)で終わる品質コマンドの時間切れが、時間切れの結果になる。`run-checks` は終了値 1 と `error: timeout` の受領書を出し、検証用コピーを消す。検証の親が `TERM`・`INT`・`HUP` を受けたときも、停止の信号を受けた結果(`終了通知 N を受けた`。終了値 2・コピー保持)になる。今までは、どちらも回収の失敗(`Operation not permitted`)で止まっていた。([Issue #289](https://github.com/Yuki-Maeda-valour/workflow/issues/289))
+  - 直し方: 検証の親が、群の停止を確かめるまで、anchor(品質コマンドを起動し、群の停止まで残る補助プロセス)の通知(anchor が品質コマンドの終了値を書いて知らせるパイプ)の読み口(読む側)を閉じないようにした。anchor は `SIGKILL` まで残るので、macOS が群への `SIGKILL` を `EPERM`(権限が無いことを示す OS の応答)で返さなくなる。
+  - `SIGKILL` の `EPERM` を群の不在と読み替えない保証は変えない。
+  - 限界: anchor の起動中(`TERM`・`INT`・`HUP` を受け流す処理を置く前)の停止の信号と、anchor が失われた後に群の全員が `TERM` で終わる場合は、今までどおり診断の文が `Operation not permitted` になる(終了値 2・コピー保持)。
+  - 限界: 検証の親が `TERM` から `SIGKILL` までの待ち(既定 0.2 秒)の間に強制終了されると、anchor が残る。通常終了の経路にも、前から同じ間がある。見つけ方と止め方は `runtime-requirements.md` の「品質コマンドの監督」に書いた。
+  - 試験: #289 の固定の試験 2 件を正しい期待に替えた(名前も `test_issue289_term_obeying_timeout_is_timed_out`・`test_issue289_term_obeying_parent_signal_is_interrupted` に替えた)。Linux で後始末の順を確かめる試験 `test_posix_term_obeying_command_keeps_anchor_until_kill` を足した。`test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan` を両 OS で動かす。2 本で 93 件(Mac は成功 81・飛ばし 12、Linux は成功 80・飛ばし 13)。
+
 ## v4.28.3
 
 ### 追加
