@@ -123,6 +123,14 @@ restore_taskmd_supervised() {
       - 消えなかったコピー: `TMPDIR` の下の `review-guard-clean-*`(検証用コピー)と `review-guard-checks-*`(出力の置き場)。その検証が起動した処理の停止を確かめてから消す。
       - そのうえで、[review-protocol.md](review-protocol.md#品質コマンドの停止とコピーの保持) の「品質コマンドの停止とコピーの保持」に従い、検証を最初からやり直す。
 - 他 POSIX で `setsid` などにより群の外へ移った子孫は保証外。切離しを行う検証には、Linux の監督か OS の隔離を使う。Linux でも、同じ利用者権限による監督の改変などを完全に隔離するものではない。
+- 検証用コピーを作る `git commit` には `-c maintenance.auto=false -c gc.auto=0` を渡し、Git の裏の保守処理を起動させない。([Issue #292](https://github.com/Yuki-Maeda-valour/workflow/issues/292) で直した)
+  - 裏の保守処理: `git commit` が終わる前に起動する `git maintenance run --auto`(古い Git では `gc --auto`)。親から離れて動き続ける。
+  - 保守処理は、1 つずつのファイルで置かれたオブジェクト(loose object)を、1 つのパック(まとめたファイル)へ詰め直す。
+  - それまでは、保守処理が検証用コピーの `.git` へ書き、検証用コピーの削除が `Directory not empty` で落ちることがあった。`run-checks` は終了値 2 で止まり、受領書(結果の JSON)を書かず、検証用コピーが残った。Mac の Git 2.54 で確かめた。
+  - Linux の Git 2.51・2.34 でも、レビューした中身の loose object が多いとき(`.git/objects/17` に 28 個以上。全体でおよそ 7,000 個以上)に同じことが起きうる。同じ設定で防ぐ。
+  - 設定は引数で渡し、その 1 回の `git commit` にだけ効かせる。品質コマンドに渡す環境変数と、検証用コピーの `.git/config` は変えない。
+  - 限界: 品質コマンドが自分で検証用コピーの中で `git commit` などを打つと、同じ保守処理が起きる。macOS など Linux 以外の POSIX では、群の外の子孫と同じく保証外。Linux の監督は、親が終わった子孫として止める見込み(未確認)。
+  - 限界: Git 2.29 より前の Git は未確認(`gc.auto=0` も渡すが、動きは確かめていない)。
 - Linux 上で他 POSIX の群方式を実行した回帰は通過した。これは macOS 実機の確認ではない。macOS 実機の回帰は、下の「macOS の実測と再確認手順」の回帰の手順で回す。Python の追加パッケージは不要。
 
 ## パス解決の代替と限界
@@ -183,9 +191,9 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 必要環境: Python 3・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
-  - 期待の件数(2 本の合計 93 件):
-    - macOS: `Ran 93 tests`、最後の行が `OK (skipped=12)`。飛ばし 12 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 10 件・`CheckLifecycleTest` 2 件)。成功 81 件。
-    - Linux: `Ran 93 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 80 件。
+  - 期待の件数(2 本の合計 94 件):
+    - macOS: `Ran 94 tests`、最後の行が `OK (skipped=12)`。飛ばし 12 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 10 件・`CheckLifecycleTest` 2 件)。成功 82 件。
+    - Linux: `Ran 94 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 81 件。
   - 所要時間の目安: 4〜5 分(2026-10-31、macOS 26.6.2 / arm64 の 4 回の実行で 250〜276 秒)。
   - 数え方:
     - `grep -c "skipped 'Linux 専用: " <scratch>/run.log` と `grep -c "skipped 'macOS 専用: " <scratch>/run.log` で、OS ごとの飛ばしを数える。
@@ -194,7 +202,14 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - 最後の行の `failures=` は、落ちた `subTest` を 1 回ずつ数える。落ちたときは、`failures=` の数と、落ちた試験の名前と `subTest` の値の両方を記録する。
     - `Linux 専用: ` の飛ばしを、Mac の成功の根拠にしない。
   - 試験の領域の名前(頭が `wf-proc-test-`)は、次のクラスの試験が起動するプロセス(実 CLI・anchor・品質コマンドとその子と孫・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
-    - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `ReviewGuardTest` の `prove()` などが打つ `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
+    - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `prove()` など、製品の置き場(`check-process.py` のパス)・品質コマンドの引数・`TMPDIR` のどれにも試験の領域を使わない `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
+    - ただし、`ReviewGuardTest` の `test_cli_run_checks_keeps_exit_codes_and_output_hashes` と `test_run_checks_clean_copy_commit_starts_no_background_maintenance` の `run-checks` は、anchor(Linux では監督)と品質コマンドがこの確認で見つかる。
+      - この 2 件は、品質コマンドの引数に試験の領域のパスを渡し、`TMPDIR` も試験の領域に置く。
+      - anchor と Linux の監督のコマンド行は、品質コマンドの引数をそのまま含む。
+    - ただし、`ReviewGuardTest` の `test_run_checks_inside_reviewed_code_does_not_create_bytecode` の `run-checks` は、anchor(Linux では監督)だけがこの確認で見つかる。品質コマンドは見つからない。
+      - この試験は、製品を試験の領域へ写し、写した `review-guard.py` で `run-checks` を回す。
+      - `review-guard.py` は、自分と同じフォルダの `check-process.py` を使う。
+      - anchor と Linux の監督のコマンド行は、その `check-process.py` の絶対パスを含む。
   - anchor の消失を確かめる試験は、群に `TERM` を無視する子を置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後に群の全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
   - 時間切れ・停止の信号を確かめる試験の、`TERM` を無視する子は、`SIGKILL` で止まることを確かめるために置く。
   - #289 で直した不具合の回帰の試験(`CheckProcessDarwinTest` の `test_issue289_term_obeying_timeout_is_timed_out`・`test_issue289_term_obeying_parent_signal_is_interrupted`):
@@ -203,6 +218,18 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - 読み口を先に閉じる形(直す前)へ戻ると、回収の失敗(`Operation not permitted`)で落ちる。
     - 直す前(v4.28.3)の再現の実測(2026-10-31、macOS 26.6.2 / arm64、`run_command(..., method='posix')`): `grace=.05` で、`time.sleep(3)` を期限 0.3 秒で 3 回中 3 回。`TERM`・`INT`・`HUP` で各 1 回中 1 回。時間切れと停止の信号で 25 回中 25 回(CPU に 16 本の負荷をかけても 25 回中 25 回)。`grace` が 0.2 秒で 8 回中 8 回。
   - Linux の後始末の順の試験(`CheckProcessLinuxTest` の `test_posix_term_obeying_command_keeps_anchor_until_kill`): Linux は終了済みだけの群への `SIGKILL` を拒まないので、anchor の終了値で順を確かめる。直す前は 97、直した後は `-9`。
+  - #292 で直した不具合の回帰の試験(`ReviewGuardTest` の `test_run_checks_clean_copy_commit_starts_no_background_maintenance`):
+    - 詰め直しが必ず起きる中身で `run-checks` を回し、検証用コピーの `.git/objects` が変わらないことを確かめる。
+      - 中身は、blob(ファイルの中身のオブジェクト)の名前が `17` で始まるファイル 28 個。
+      - 品質コマンドが 3 秒の間、検証用コピーのパックの有無と `.git/objects/17` の数を見る。
+    - 受領書の終了値 0、`run-checks` の終了値 0、検証用コピーと出力の置き場が残らないことも確かめる。
+    - Mac と Linux の両方で動く(飛ばしの印を付けない)。
+    - 直す前(v4.28.4)は落ちる。落ちる理由は次のどれか。
+      - 受領書の終了値 5: 品質コマンドの起動の時点で、保守処理がもう詰め直していた。
+      - 受領書の終了値 4: 品質コマンドが見ている間に、詰め直しが始まった。
+      - `run-checks` の終了値 2: 検証用コピーの削除が `Directory not empty` で落ちた。
+    - 直す前の実測(2026-10-31): Mac(Git 2.54.0〈Apple Git-157〉)と Linux の容器(Ubuntu 22.04・Git 2.51.0)で各 3 回中 3 回、受領書の終了値 5 で落ちた。
+    - 受領書の終了値 3 は前提の崩れ(`.git/objects/17` が 28 個より少ない)。黙って通らない。
   - 結果は Issue #239 に記録する。
 - 無人ループとシェル回帰一式は引き続き Linux 専用。Linux 上の Darwin スタブの成功や Linux 専用試験の skip は、macOS の成功根拠にしない。
 

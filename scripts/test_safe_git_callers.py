@@ -216,7 +216,7 @@ class SafeGitCallersTest(unittest.TestCase):
             "['git', 'init', '-q', str(clean)]",
             "['git', '-C', str(clean), 'add', '-f', '--all']",
             "['git', '-C', str(clean), 'update-index', '--add', '--cacheinfo', '160000', item['oid'], item['path']]",
-            "['git', '-C', str(clean), '-c', 'user.name=review-guard', '-c', 'user.email=review-guard@example.invalid', '-c', 'core.hooksPath=/dev/null', 'commit', '-qm', 'reviewed tree']",
+            "['git', '-C', str(clean), '-c', 'user.name=review-guard', '-c', 'user.email=review-guard@example.invalid', '-c', 'core.hooksPath=/dev/null', '-c', 'maintenance.auto=false', '-c', 'gc.auto=0', 'commit', '-qm', 'reviewed tree']",
         })
         calls=git_subprocess_calls(isolated)
         self.assertEqual(git_call_inventory(calls), clean_expected)

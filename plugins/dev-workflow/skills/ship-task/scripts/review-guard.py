@@ -1092,8 +1092,11 @@ def run_checks(args: argparse.Namespace) -> int:
                 if item["kind"] == "gitlink" and item["path"] in saved["commit_paths"]:
                     subprocess.run(["git", "-C", str(clean), "update-index", "--add", "--cacheinfo", "160000", item["oid"], item["path"]],
                                    env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            # Git の commit は裏の保守処理(古い Git では gc --auto)を起動し、それが親から離れて検証用コピーへ書く。
+            # 検証用コピーの削除と重ならないように、この commit では起動させない(#292)。
             subprocess.run(["git", "-C", str(clean), "-c", "user.name=review-guard", "-c", "user.email=review-guard@example.invalid",
-                            "-c", "core.hooksPath=/dev/null", "commit", "-qm", "reviewed tree"], env=env, check=True,
+                            "-c", "core.hooksPath=/dev/null", "-c", "maintenance.auto=false", "-c", "gc.auto=0",
+                            "commit", "-qm", "reviewed tree"], env=env, check=True,
                            stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             for index, command in enumerate(commands):
                 stop.check()
