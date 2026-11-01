@@ -30,6 +30,7 @@
 # 変異 `e` は、`J4` の「リンク先の同名ファイルが無傷」の行が落ちること(上書きが起きた証拠)も見る。
 # 対照の `J1`(正常な復元)が写しでも通ること(写しの `restore-taskmd.py` が実行時に動く証拠)も見る(#296 で直した)。
 # 元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない環境(macOS など)では、変異 `e` を `NOTE:` の行で省く。
+# 変異 `b` は、`G7` の config-changed・hooks-changed の「git の呼び出しが 0 回」の行が落ちること(検査より先に Git を呼んだ証拠)も見る。`G7` の復元の行は、macOS では元の対象でも落ちるため(#300)。
 # 変異版でも対照ケースは PASS すること(壊れ方が変異に固有であること)も見る。対照は 2 つの形がある。
 # 全変異の `E1` は、変異の当たらないケース。変異 `e` の `J1` は、変異を当てた補助を通るが、結果の変わらないケース。
 #
@@ -2901,6 +2902,18 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
     # 理由の行だけの FAIL は、写しの helper が動かないときにも出る。上書きが起きたことまで見る
     if grep -q -- '^FAIL  J4 復元先の親が symlink: リンク先の同名ファイルが無傷' "$out"; then ok "変異(e) 復元先の階層検査を外す: J4 のリンク先の上書きが起きる(無傷の行が FAIL する)"
     else ng "変異(e) 復元先の階層検査を外す: J4 のリンク先の上書きが起きる(無傷の行が FAIL する)"; fi
+  fi
+  if [ "$id" = b ]; then
+    # G7 の FAIL の行は、環境で元の対象でも落ちることがある(macOS の restore-taskmd の行)。
+    # 検査より先に Git を呼んだ証拠(config・hooks の「git の呼び出しが 0 回」の行)まで見る(#300)。
+    # 行の名前は case_G7 の ckeq と字面を合わせる(変えたらここも直す)
+    for c in config-changed hooks-changed; do
+      if grep -q -- "^FAIL  G7 順序の検査($c): git の呼び出しが 0 回" "$out"; then
+        ok "変異(b) $desc: G7 の $c で検査より先に Git を呼ぶ(「git の呼び出しが 0 回」の行が FAIL する)"
+      else
+        ng "変異(b) $desc: G7 の $c で検査より先に Git を呼ぶ(「git の呼び出しが 0 回」の行が FAIL する)"
+      fi
+    done
   fi
   if grep -q -- '^PASS  E1 ' "$out" && ! grep -q -- '^FAIL  E1 ' "$out"; then ok "変異($id) 対照ケース E1 は写しでも PASS する(壊れ方が変異に固有)"
   else ng "変異($id) 対照ケース E1 は写しでも PASS する"; fi
