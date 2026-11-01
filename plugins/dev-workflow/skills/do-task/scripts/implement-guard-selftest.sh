@@ -4,7 +4,7 @@
 # 触れない(../references/external-runners.md §11 の 2026-09-17 決定 9)。
 #
 # 使い方:
-#   bash implement-guard-selftest.sh              # 全ケース(A〜K・M)+ 変異テスト(L)
+#   bash implement-guard-selftest.sh              # 全ケース(A〜K・M・N・P)+ 変異テスト(L)
 #   bash implement-guard-selftest.sh -v           # 各起動の終了コード・stdout・stderr も表示
 #   bash implement-guard-selftest.sh --only B1,G  # 指定したケースだけ(1 文字なら群の全体)。
 #                                                 # L を含めない限り変異テストは回さない
@@ -19,7 +19,7 @@
 # 期待終了コード: 0=成功 2=usage 20=internal 30=縮退(take) 31=引き継ぎ 32=縮退(compare)
 #                 33=比較不能・照合や復元の失敗 34=要件本文の変更 35=選択パスと実体の対応の変化
 #
-# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N13・L)。検出の類型に当たるケース名には固定のタグ
+# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N13・P1〜P9・L)。P は所属の印(記録の外の owner-*)。検出の類型に当たるケース名には固定のタグ
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
@@ -78,6 +78,8 @@ REAL_CP="$(command -v cp)"
 [ -n "$REAL_CP" ] || { echo "ERROR: cp が無い" >&2; exit 1; }
 REAL_SHA256SUM="$(command -v sha256sum)"
 [ -n "$REAL_SHA256SUM" ] || { echo "ERROR: sha256sum が無い" >&2; exit 1; }
+REAL_MKTEMP="$(command -v mktemp)"
+[ -n "$REAL_MKTEMP" ] || { echo "ERROR: mktemp が無い" >&2; exit 1; }
 
 REAL_HOME="${HOME:-}"
 if [ -z "$REAL_HOME" ] || [ ! -d "$REAL_HOME" ]; then
@@ -283,6 +285,11 @@ if stat -c %a -- / >/dev/null 2>&1; then mode_of() { stat -c %a -- "$1"; }
 else mode_of() { stat -f %Lp -- "$1"; }; fi
 size_of() { wc -c <"$1" | tr -d ' '; }
 nstates() { find "$PROT" -maxdepth 2 -name 'guard-*' 2>/dev/null | wc -l | tr -d ' '; }   # 保護領域の数
+nmarks() { find "$PROT" -maxdepth 2 -name 'owner-*' 2>/dev/null | wc -l | tr -d ' '; }    # 所属の印の数
+mark_of() { printf '%s/owner-%s' "${1%/*}" "${1##*/guard-}"; }   # $1=STATE_DIR → 所属の印のパス
+hex_of() { python3 -c 'import os, sys; sys.stdout.write(os.fsencode(sys.argv[1]).hex())' "$1"; }   # 元のバイトの小文字 16 進
+if stat -c '%d %i' -- / >/dev/null 2>&1; then id_of() { stat -c '%d %i' -- "$1"; }
+else id_of() { stat -f '%d %i' -- "$1"; }; fi                  # $1=パス(リンクを辿らない)→ 「device inode」(十進)
 
 # ── scratch リポジトリ ──
 # 準備・観測側の git も fsmonitor / フックを起動しない(痕跡の検査が観測側の発火で汚れないため)
@@ -636,8 +643,9 @@ case_B4() {
   s0="$(status_of "$R")"
   take "$R" "$R/task/t.md"      # --task-md は絶対パスでも受ける
   rc_is "clean: take が exit 0" 0
-  ckeq "clean: stdout は 7 キー" "$(cut -d= -f1 <"$CASE_OUT" | LC_ALL=C sort | tr '\n' ' ')" \
-    'BYTES ENTRIES MANIFEST_SHA256 SNAPSHOT_SHA256 STATE_DIR TASKMD_REAL UNREADABLE '
+  ckeq "clean: stdout は 8 キー" "$(cut -d= -f1 <"$CASE_OUT" | LC_ALL=C sort | tr '\n' ' ')" \
+    'BYTES ENTRIES MANIFEST_SHA256 OWNER_MARK SNAPSHOT_SHA256 STATE_DIR TASKMD_REAL UNREADABLE '
+  ckeq "clean: 8 行目が OWNER_MARK=yes(TASKMD_REAL の後)" "$(sed -n '8p' "$CASE_OUT")" 'OWNER_MARK=yes'
   out_re "clean: MANIFEST_SHA256 は 16 進 64 桁" '^MANIFEST_SHA256=[0-9a-f]{64}$'
   out_re "clean: SNAPSHOT_SHA256 は 16 進 64 桁" '^SNAPSHOT_SHA256=[0-9a-f]{64}$'
   out_line "clean: ENTRIES=0" 'ENTRIES=0'
@@ -2270,10 +2278,12 @@ case_K1() {
   n0="$(nstates)"
   take "$R" task/t.md
   ckeq "(前提)take が保護領域を 1 つ作る" "$(nstates)" "$((n0 + 1))"
+  ckt "(前提)take が所属の印を作る" test -f "$(mark_of "$STATE_DIR")"
   run cleanup --state "$STATE_DIR/"      # 末尾のスラッシュつきでも受ける
   rc_is "cleanup: exit 0" 0
   ckf "cleanup: 保護領域が消える" test -e "$STATE_DIR"
   ckeq "cleanup: 保護領域の数が元に戻る" "$(nstates)" "$n0"
+  ckf "cleanup: 所属の印も消える" test -e "$(mark_of "$STATE_DIR")"
   run cleanup --state "$STATE_DIR"
   rc_is "cleanup: 既に無い保護領域 → 2" 2
   run compare "${ARGS[@]}" --run-rc 0
@@ -2304,6 +2314,491 @@ case_K2() {
   ckt "保護領域の親そのもの: 何も消さない" test -f "$STATE_DIR/manifest.tsv"
   run cleanup --state "$STATE_DIR"
   rc_is "正しい --state なら消える → 0" 0
+}
+
+# ════════════════════════ P 所属の印 ════════════════════════
+# take は記録の外(同じ置き場)に owner-<記録の名前の guard- より後> を書く。開始前の確認
+# (pending-implementation.py)はこれを読み、別プロジェクトの記録を見分ける(external-runners.md §12-2・§12-9)。
+# 記録の名前を決めて印の名前を先に埋めるため、guard-XXXXXX の mktemp だけを決まった名前にするスタブを使う
+mkdir -p "$STUBS/fixedtmp"
+cat >"$STUBS/fixedtmp/mktemp" <<EOF
+#!/usr/bin/env bash
+last="\${*: -1}"
+case "\$last" in
+  */guard-XXXXXX)
+    p="\${last%XXXXXX}\${FIXED_GUARD_SUFFIX:-fixed}"
+    mkdir -m 700 -- "\$p" || exit 1
+    printf '%s\n' "\$p"
+    exit 0 ;;
+esac
+exec "$REAL_MKTEMP" "\$@"
+EOF
+chmod +x "$STUBS/fixedtmp/mktemp"
+# 印を書いた後の git status で止まる git(P4 の TERM)。release ができるまで最大 30 秒待つ
+mkdir -p "$STUBS/gitblock"
+cat >"$STUBS/gitblock/git" <<EOF
+#!/usr/bin/env bash
+case " \$* " in
+  *" status "*)
+    : >"$WORK/p4-blocked"
+    i=0
+    while [ ! -e "$WORK/p4-release" ] && [ "\$i" -lt 300 ]; do sleep 0.1; i=\$((i + 1)); done ;;
+esac
+exec "$REAL_GIT" "\$@"
+EOF
+chmod +x "$STUBS/gitblock/git"
+# 本物の link で印を作った直後に止まる link(P4 の link の直後の TERM)。release ができるまで最大 30 秒待つ
+REAL_LINK="$(command -v link || true)"
+mkdir -p "$STUBS/linkslow"
+cat >"$STUBS/linkslow/link" <<EOF
+#!/usr/bin/env bash
+"$REAL_LINK" "\$@"
+rc=\$?
+: >"$WORK/p4-linked"
+i=0
+while [ ! -e "$WORK/p4-link-release" ] && [ "\$i" -lt 300 ]; do sleep 0.1; i=\$((i + 1)); done
+exit "\$rc"
+EOF
+chmod +x "$STUBS/linkslow/link"
+# 本物の link の直後に、タスク MD の選択リンクの指す先を張り替える link(P5。印を書いた後にフォルダが変わる)
+mkdir -p "$STUBS/swaplink"
+cat >"$STUBS/swaplink/link" <<EOF
+#!/usr/bin/env bash
+"$REAL_LINK" "\$@"
+rc=\$?
+if [ -n "\${P5_SWAP_LINK:-}" ]; then ln -sfn -- "\$P5_SWAP_TARGET" "\$P5_SWAP_LINK"; fi
+exit "\$rc"
+EOF
+chmod +x "$STUBS/swaplink/link"
+# 置き場の直下の owner-* の削除だけを失敗させる rm(P5。印を消せない場合)
+REAL_RM="$(command -v rm)"
+mkdir -p "$STUBS/rmfail"
+cat >"$STUBS/rmfail/rm" <<EOF
+#!/usr/bin/env bash
+for a in "\$@"; do
+  case "\$a" in */dev-workflow/owner-*) : >"$WORK/p5-rm-refused"; exit 1 ;; esac
+done
+exec "$REAL_RM" "\$@"
+EOF
+chmod +x "$STUBS/rmfail/rm"
+# rmfail が owner-* の削除を断った後(P5)か、statlink が印を付けた後(P6)だけ、owner-* の属性の取得を失敗させる stat
+REAL_STAT="$(command -v stat)"
+mkdir -p "$STUBS/statfail"
+cat >"$STUBS/statfail/stat" <<EOF
+#!/usr/bin/env bash
+if [ -e "$WORK/p5-rm-refused" ] || [ -e "$WORK/p6-stat-fail" ]; then
+  for a in "\$@"; do
+    case "\$a" in */dev-workflow/owner-*) exit 1 ;; esac
+  done
+fi
+exec "$REAL_STAT" "\$@"
+EOF
+chmod +x "$STUBS/statfail/stat"
+# 本物の link で印を付けた直後に、タスク MD の選択リンクを作業ツリーの外へ張り替え、以後の owner-* の属性の取得を
+# 失敗させる link(P6。link の後の確かめで属性を取れない場合)
+mkdir -p "$STUBS/statlink"
+cat >"$STUBS/statlink/link" <<EOF
+#!/usr/bin/env bash
+"$REAL_LINK" "\$@"
+rc=\$?
+if [ -n "\${P6_SWAP_LINK:-}" ]; then ln -sfn -- "\$P6_SWAP_TARGET" "\$P6_SWAP_LINK"; fi
+: >"$WORK/p6-stat-fail"
+exit "\$rc"
+EOF
+chmod +x "$STUBS/statlink/link"
+# rmfail が owner-* の削除を断った後(p5-rm-refused が在る間)だけ、置き場の直下の owner-* に対する
+# 組み込みの [ -e ] と [ -L ] を偽にする関数(BASH_ENV で読ませる。P8。属性の取得だけが失敗する場合の模擬)
+cat >"$WORK/p8-env.sh" <<EOF
+[() {
+  local a="\${1:-}" b="\${2:-}" c="\${3:-}"
+  if [[ -e "$WORK/p5-rm-refused" ]]; then
+    if [[ ( \$a == -e || \$a == -L ) && \$b == */dev-workflow/owner-* ]]; then return 1; fi
+    if [[ \$a == '!' && ( \$b == -e || \$b == -L ) && \$c == */dev-workflow/owner-* ]]; then return 0; fi
+  fi
+  builtin [ "\$@"
+}
+EOF
+# 決めた文字列(P9_OD_FAIL)の 16 進の変換だけを失敗させる od(P9。tmpdir の変換だけの失敗)
+REAL_OD="$(command -v od)"
+mkdir -p "$STUBS/odfail"
+cat >"$STUBS/odfail/od" <<EOF
+#!/usr/bin/env bash
+data="\$(cat; printf x)"
+data="\${data%x}"
+if [ -n "\${P9_OD_FAIL:-}" ] && [ "\$data" = "\$P9_OD_FAIL" ]; then exit 1; fi
+printf '%s' "\$data" | "$REAL_OD" "\$@"
+EOF
+chmod +x "$STUBS/odfail/od"
+NOLINK=""
+mk_path_without_link() { # → NOLINK に、PATH の実行ファイルのうち link 以外への symlink を集めたフォルダ
+  NOLINK="$WORK/nolink"
+  [ -d "$NOLINK" ] && return 0
+  mkdir -p -- "$NOLINK"
+  local d f n IFS=:
+  for d in $PATH; do
+    [ -d "$d" ] || continue
+    for f in "$d"/*; do
+      n="${f##*/}"
+      [ "$n" = link ] && continue
+      if [ -e "$NOLINK/$n" ] || [ -L "$NOLINK/$n" ]; then continue; fi
+      [ -f "$f" ] && [ -x "$f" ] || continue
+      ln -s -- "$f" "$NOLINK/$n"
+    done
+  done
+}
+case_P1() {
+  CID=P1; TAG=""
+  local mark gid tid cid kid tmpdir_phys="" expect
+  base_repo p1
+  take "$R" task/t.md
+  rc_is "印: take が exit 0" 0
+  out_line "印: OWNER_MARK=yes" 'OWNER_MARK=yes'
+  mark="$(mark_of "$STATE_DIR")"
+  ckt "印: 記録と同じ置き場に owner-<記録の名前の guard- より後> が在る" test -f "$mark"
+  ckf "印: リンクでない" test -L "$mark"
+  case "${mark##*/}" in *guard-*) ng "印: 名前に guard- を含まない(実際: ${mark##*/})" ;; *) ok "印: 名前に guard- を含まない" ;; esac
+  ckeq "印: 0600" "$(mode_of "$mark" 2>/dev/null || true)" 600
+  ckeq "印: 13 行" "$(wc -l <"$mark" | tr -d ' ')" 13
+  gid="$(id_of "$STATE_DIR")"; tid="$(id_of "$R")"; cid="$(id_of "$R/.git")"; kid="$(id_of "$R/task")"
+  if [ -n "${TMPDIR:-}" ]; then tmpdir_phys="$(phys_dir "$TMPDIR" 2>/dev/null || true)"; fi
+  expect="version${TAB}1
+guard_dev${TAB}${gid% *}
+guard_ino${TAB}${gid#* }
+top${TAB}$(hex_of "$R")
+top_dev${TAB}${tid% *}
+top_ino${TAB}${tid#* }
+common${TAB}$(hex_of "$R/.git")
+common_dev${TAB}${cid% *}
+common_ino${TAB}${cid#* }
+taskdir${TAB}$(hex_of "$R/task")
+taskdir_dev${TAB}${kid% *}
+taskdir_ino${TAB}${kid#* }
+tmpdir${TAB}$(hex_of "$tmpdir_phys")"
+  ckeq "印: 中身(キーの順・パスの 16 進・番号は十進)" "$(cat "$mark")" "$expect"
+  ckeq "印: 記録の中に一時ファイルを残さない" "$(ls -A "$STATE_DIR" | LC_ALL=C sort | tr '\n' ' ')" \
+    'files manifest.tsv snapshot taskmd-body '
+  # 未設定の TMPDIR は空の値
+  rune -u TMPDIR -- take --cwd "$R" --task-md task/t.md
+  rc_is "印(TMPDIR 未設定): take が exit 0" 0
+  out_line "印(TMPDIR 未設定): OWNER_MARK=yes" 'OWNER_MARK=yes'
+  mark="$(mark_of "$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")")"
+  ckt "印(TMPDIR 未設定): tmpdir の値は空" inx "$mark" "tmpdir${TAB}"
+}
+case_P2() {
+  CID=P2; TAG=""
+  local base target
+  base_repo p2
+  base="$PROT_REAL/dev-workflow"
+  mkdir -p -- "$base"
+  # 印の名前にフォルダが在る: 何も作らずに OWNER_MARK=no で続ける。cleanup はそのフォルダを消さない
+  mkdir -- "$base/owner-p2dir"
+  printf 'keep\n' >"$base/owner-p2dir/keep.txt"
+  export FIXED_GUARD_SUFFIX=p2dir
+  runp "$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX
+  rc_is "印の名前にフォルダ: take が exit 0(止めない)" 0
+  out_line "印の名前にフォルダ: STATE_DIR は決めた名前" "STATE_DIR=$base/guard-p2dir"
+  out_line "印の名前にフォルダ: OWNER_MARK=no" 'OWNER_MARK=no'
+  err_has "印の名前にフォルダ: NOTE を出す" 'NOTE: 所属の印を書けない:'
+  ckeq "印の名前にフォルダ: フォルダの中に何も作らない" "$(ls -A "$base/owner-p2dir" | tr '\n' ' ')" 'keep.txt '
+  run cleanup --state "$base/guard-p2dir"
+  rc_is "印の名前にフォルダ: cleanup は exit 0" 0
+  ckf "印の名前にフォルダ: cleanup で記録が消える" test -e "$base/guard-p2dir"
+  ckt "印の名前にフォルダ: cleanup は自分の印でないフォルダを消さない" test -f "$base/owner-p2dir/keep.txt"
+  rm -rf -- "$base/owner-p2dir"
+  # 印の名前にフォルダを指すリンクが在る: リンク先に何も作らない
+  target="$WORK/p2-target"
+  mkdir -p -- "$target"
+  ln -s -- "$target" "$base/owner-p2lnk"
+  export FIXED_GUARD_SUFFIX=p2lnk
+  runp "$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX
+  rc_is "印の名前にフォルダを指すリンク: take が exit 0(止めない)" 0
+  out_line "印の名前にフォルダを指すリンク: OWNER_MARK=no" 'OWNER_MARK=no'
+  ckeq "印の名前にフォルダを指すリンク: リンク先に何も作らない" "$(ls -A "$target" | wc -l | tr -d ' ')" 0
+  ckt "印の名前にフォルダを指すリンク: リンクのまま" test -L "$base/owner-p2lnk"
+  run cleanup --state "$base/guard-p2lnk"
+  rc_is "印の名前にフォルダを指すリンク: cleanup は exit 0" 0
+  ckt "印の名前にフォルダを指すリンク: cleanup はリンクを消さない" test -L "$base/owner-p2lnk"
+  ckeq "印の名前にフォルダを指すリンク: cleanup の後もリンク先は空" "$(ls -A "$target" | wc -l | tr -d ' ')" 0
+  rm -f -- "$base/owner-p2lnk"
+  # 対照: 名前が空いていれば、同じスタブでも印を書く(OWNER_MARK=no の原因が名前の衝突であること)
+  export FIXED_GUARD_SUFFIX=p2ok
+  runp "$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX
+  rc_is "印の名前が空いている(対照): take が exit 0" 0
+  out_line "印の名前が空いている(対照): OWNER_MARK=yes" 'OWNER_MARK=yes'
+  ckt "印の名前が空いている(対照): 印が在る" test -f "$base/owner-p2ok"
+  run cleanup --state "$base/guard-p2ok"
+  rc_is "印の名前が空いている(対照): cleanup は exit 0" 0
+  ckf "印の名前が空いている(対照): cleanup で印も消える" test -e "$base/owner-p2ok"
+  # cleanup は印の guard_dev・guard_ino を記録の番号と照らし、違う印(この記録の印と確かめられないもの)を消さない
+  local key want
+  for key in guard_dev guard_ino; do
+    export FIXED_GUARD_SUFFIX="p2$key"
+    runp "$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+    unset FIXED_GUARD_SUFFIX
+    out_line "番号の違う印($key)(前提): OWNER_MARK=yes" 'OWNER_MARK=yes'
+    awk -F '\t' -v OFS='\t' -v k="$key" '$1 == k { $2 = $2 + 1 } { print }' "$base/owner-p2$key" >"$WORK/p2-mark.tmp"
+    cat "$WORK/p2-mark.tmp" >"$base/owner-p2$key"
+    want="$(id_of "$base/guard-p2$key")"
+    if [ "$key" = guard_dev ]; then want="${want% *}"; else want="${want#* }"; fi
+    ckf "番号の違う印($key)(前提): 中身の $key が記録の番号と違う" inx "$base/owner-p2$key" "$key${TAB}$want"
+    run cleanup --state "$base/guard-p2$key"
+    rc_is "番号の違う印($key): cleanup は exit 0" 0
+    ckf "番号の違う印($key): cleanup で記録は消える" test -e "$base/guard-p2$key"
+    ckt "番号の違う印($key): cleanup は印を消さない" test -f "$base/owner-p2$key"
+    err_has "番号の違う印($key): NOTE を出す" 'NOTE: 所属の印の名前に、この記録の印と確かめられないものが在る(消さない)'
+    rm -f -- "$base/owner-p2$key" "$WORK/p2-mark.tmp"
+  done
+}
+case_P3() {
+  CID=P3; TAG=""
+  local sd
+  base_repo p3
+  mk_path_without_link
+  ckf "link なし(前提): PATH から link を外せた" env PATH="$NOLINK" sh -c 'command -v link'
+  ckt "link なし(前提): git は残る" env PATH="$NOLINK" sh -c 'command -v git'
+  RC=0
+  PATH="$NOLINK" invoke_target take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show take --cwd "$R" --task-md task/t.md
+  rc_is "link なし: take が exit 0(止めない)" 0
+  out_line "link なし: OWNER_MARK=no" 'OWNER_MARK=no'
+  err_has "link なし: 理由の NOTE" 'NOTE: 所属の印を書けない: link が無い'
+  sd="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"
+  ckf "link なし: 印を作らない" test -e "$(mark_of "${sd:-$PROT/dev-workflow/guard-none}")"
+  run cleanup --state "${sd:-$PROT/dev-workflow/guard-none}"
+  rc_is "link なし: cleanup は exit 0" 0
+}
+case_P4() {
+  CID=P4; TAG=""
+  local n0 m0 pid i
+  # 印を書いた後の失敗: index がコンフリクト中 → 縮退。記録も印も残らない
+  base_repo p4a
+  mk_conflict
+  GIT "$R" merge other >/dev/null 2>&1 || true
+  n0="$(nstates)"; m0="$(nmarks)"
+  run take --cwd "$R" --task-md task/t.md
+  rc_is "印の後の失敗(unmerged): exit 30" 30
+  ckeq "印の後の失敗(unmerged): 記録が残らない" "$(nstates)" "$n0"
+  ckeq "印の後の失敗(unmerged): 印が残らない" "$(nmarks)" "$m0"
+  # 退避の上限超え
+  base_repo p4b
+  dd if=/dev/zero of="$R/big.bin" bs=1 count=0 seek=209715201 2>/dev/null
+  run_slow take --cwd "$R" --task-md task/t.md
+  rc_is "印の後の失敗(上限超え): exit 30" 30
+  ckeq "印の後の失敗(上限超え): 記録が残らない" "$(nstates)" "$n0"
+  ckeq "印の後の失敗(上限超え): 印が残らない" "$(nmarks)" "$m0"
+  # 印を書いた後に停止の信号(TERM)
+  base_repo p4c
+  rm -f -- "$WORK/p4-blocked" "$WORK/p4-release"
+  PATH="$STUBS/gitblock:$PATH" bash "$TARGET" take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" &
+  pid=$!
+  i=0
+  while [ ! -e "$WORK/p4-blocked" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+  ckt "TERM(前提): 印を書いた後の git status で止まっている" test -e "$WORK/p4-blocked"
+  ckeq "TERM(前提): 止まっている間は印が 1 つ増えている" "$(nmarks)" "$((m0 + 1))"
+  kill -TERM "$pid" 2>/dev/null || true
+  : >"$WORK/p4-release"
+  RC=0; wait "$pid" || RC=$?
+  TIMED_OUT=0; show take '(TERM)'
+  rc_is "TERM: exit 20" 20
+  ckeq "TERM: 記録が残らない" "$(nstates)" "$n0"
+  ckeq "TERM: 印が残らない" "$(nmarks)" "$m0"
+  rm -f -- "$WORK/p4-blocked" "$WORK/p4-release"
+  # link が印を作った直後(link から戻る前)に TERM
+  base_repo p4d
+  rm -f -- "$WORK/p4-linked" "$WORK/p4-link-release"
+  PATH="$STUBS/linkslow:$PATH" bash "$TARGET" take --cwd "$R" --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" &
+  pid=$!
+  i=0
+  while [ ! -e "$WORK/p4-linked" ] && [ "$i" -lt 600 ]; do sleep 0.1; i=$((i + 1)); done
+  ckt "link の直後の TERM(前提): link の中で止まっている" test -e "$WORK/p4-linked"
+  ckeq "link の直後の TERM(前提): 止まっている間は印が 1 つ増えている" "$(nmarks)" "$((m0 + 1))"
+  kill -TERM "$pid" 2>/dev/null || true
+  : >"$WORK/p4-link-release"
+  RC=0; wait "$pid" || RC=$?
+  TIMED_OUT=0; show take '(link の直後の TERM)'
+  rc_is "link の直後の TERM: exit 20" 20
+  ckeq "link の直後の TERM: 記録が残らない" "$(nstates)" "$n0"
+  ckeq "link の直後の TERM: 印が残らない" "$(nmarks)" "$m0"
+  rm -f -- "$WORK/p4-linked" "$WORK/p4-link-release"
+}
+case_P5() {
+  CID=P5; TAG=""
+  local n0 m0 base
+  base_repo p5
+  base="$PROT_REAL/dev-workflow"
+  mkdir -p -- "$base" "$R/taskA" "$R/taskB"
+  write_task "$R/taskA/t.md"
+  write_task "$R/taskB/t.md"
+  rm -f -- "$R/task/t.md"
+  ln -s -- "$R/taskA/t.md" "$R/task/t.md"
+  n0="$(nstates)"; m0="$(nmarks)"
+  # 対照: 印を書いた後にタスク MD の在るフォルダが変わる → 自分の印を消し、OWNER_MARK=no で続ける
+  export P5_SWAP_LINK="$R/task/t.md" P5_SWAP_TARGET="$R/taskB/t.md" FIXED_GUARD_SUFFIX=p5ok
+  runp "$STUBS/swaplink:$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX
+  rc_is "フォルダの変化(対照): take が exit 0" 0
+  out_line "フォルダの変化(対照): 指す先が張り替わった" "TASKMD_REAL=$R/taskB/t.md"
+  out_line "フォルダの変化(対照): OWNER_MARK=no" 'OWNER_MARK=no'
+  err_has "フォルダの変化(対照): NOTE を出す" 'NOTE: 所属の印を書けない: タスク MD の在るフォルダが、印を書いた後に変わった'
+  ckf "フォルダの変化(対照): 古い所属の印は残らない" test -e "$base/owner-p5ok"
+  run cleanup --state "$base/guard-p5ok"
+  rc_is "フォルダの変化(対照): cleanup は exit 0" 0
+  # 同じ変化で、印を消せない(置き場の直下の owner-* の削除だけを失敗させる)→ 終了値 20 で止め、外部委託を行わない
+  ln -sfn -- "$R/taskA/t.md" "$R/task/t.md"
+  export FIXED_GUARD_SUFFIX=p5ng
+  runp "$STUBS/swaplink:$STUBS/rmfail:$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX P5_SWAP_LINK P5_SWAP_TARGET
+  rc_is "印を消せない: take が exit 20" 20
+  err_has "印を消せない: ERROR を出す" 'ERROR [internal] 所属の印を消せない(タスク MD の在るフォルダが、印を書いた後に変わった'
+  ckeq "印を消せない: stdout に STATE_DIR を出さない" "$(out_count '^STATE_DIR=')" 0
+  ckeq "印を消せない: stdout に OWNER_MARK を出さない" "$(out_count '^OWNER_MARK=')" 0
+  ckeq "印を消せない: 記録が残らない" "$(nstates)" "$n0"
+  ckf "印を消せない: 記録 guard-p5ng が残らない" test -e "$base/guard-p5ng"
+  err_has "印を消せない: 残った印を NOTE で知らせる" 'NOTE: 所属の印を消せずに残った'
+  ckeq "印を消せない: 残った印は対応する記録の無い 1 つだけ" "$(nmarks)" "$((m0 + 1))"
+  rm -f -- "$base/owner-p5ng" "$WORK/p5-rm-refused"
+  # 同じ変化で、削除を断られた後に印の属性も取れない(消えたか確かめられない)→ 終了値 20 で止める
+  ln -sfn -- "$R/taskA/t.md" "$R/task/t.md"
+  export P5_SWAP_LINK="$R/task/t.md" P5_SWAP_TARGET="$R/taskB/t.md" FIXED_GUARD_SUFFIX=p5un
+  runp "$STUBS/swaplink:$STUBS/rmfail:$STUBS/statfail:$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX P5_SWAP_LINK P5_SWAP_TARGET
+  ckt "確かめられない(前提): rm が owner-* の削除を断った" test -e "$WORK/p5-rm-refused"
+  rc_is "確かめられない: take が exit 20" 20
+  err_has "確かめられない: ERROR を出す" 'ERROR [internal] 所属の印を消せたか確かめられない(タスク MD の在るフォルダが、印を書いた後に変わった'
+  ckeq "確かめられない: stdout に STATE_DIR を出さない" "$(out_count '^STATE_DIR=')" 0
+  ckeq "確かめられない: stdout に OWNER_MARK を出さない" "$(out_count '^OWNER_MARK=')" 0
+  ckeq "確かめられない: 記録が残らない" "$(nstates)" "$n0"
+  err_has "確かめられない: 残ったエントリを NOTE で知らせる" 'NOTE: 所属の印の名前に、自分の印と確かめられないエントリが残った'
+  ckeq "確かめられない: 残った印は対応する記録の無い 1 つだけ" "$(nmarks)" "$((m0 + 1))"
+  rm -f -- "$base/owner-p5un" "$WORK/p5-rm-refused"
+}
+case_P6() {
+  CID=P6; TAG=""
+  local n0 m0 base outside
+  base_repo p6
+  base="$PROT_REAL/dev-workflow"
+  outside="$WORK/p6-other-project/task"
+  mkdir -p -- "$base" "$R/taskA" "$outside"
+  write_task "$R/taskA/t.md"
+  write_task "$outside/t.md"
+  rm -f -- "$R/task/t.md"
+  ln -s -- "$R/taskA/t.md" "$R/task/t.md"
+  n0="$(nstates)"; m0="$(nmarks)"
+  rm -f -- "$WORK/p6-stat-fail"
+  # link の直後に、タスク MD を作業ツリーの外(別のプロジェクト)へ張り替え、印の属性も取れなくする。
+  # 書いた印を確かめられないので、古い所属の印を残したまま続けず、終了値 20 で止める(外部委託を行わない)
+  export P6_SWAP_LINK="$R/task/t.md" P6_SWAP_TARGET="$outside/t.md" FIXED_GUARD_SUFFIX=p6un
+  runp "$STUBS/statlink:$STUBS/statfail:$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX P6_SWAP_LINK P6_SWAP_TARGET
+  ckt "link の後に属性を取れない(前提): link が印を付けた" test -e "$WORK/p6-stat-fail"
+  ckt "link の後に属性を取れない(前提): タスク MD は作業ツリーの外を指す" test "$(readlink -- "$R/task/t.md")" = "$outside/t.md"
+  rc_is "link の後に属性を取れない: take が exit 20" 20
+  err_has "link の後に属性を取れない: ERROR を出す" 'ERROR [internal] 所属の印を消せたか確かめられない(書いた印を確かめられない'
+  ckeq "link の後に属性を取れない: stdout に STATE_DIR を出さない" "$(out_count '^STATE_DIR=')" 0
+  ckeq "link の後に属性を取れない: stdout に OWNER_MARK を出さない" "$(out_count '^OWNER_MARK=')" 0
+  ckeq "link の後に属性を取れない: 記録が残らない" "$(nstates)" "$n0"
+  err_has "link の後に属性を取れない: 残ったエントリを NOTE で知らせる" 'NOTE: 所属の印の名前に、自分の印と確かめられないエントリが残った'
+  ckeq "link の後に属性を取れない: 残った印は対応する記録の無い 1 つだけ" "$(nmarks)" "$((m0 + 1))"
+  rm -f -- "$base/owner-p6un" "$WORK/p6-stat-fail"
+  # 対照: 同じ張り替えでも属性を取れれば、印を書いた後のフォルダの変化として自分の印を消し、OWNER_MARK=no で続ける
+  ln -sfn -- "$R/taskA/t.md" "$R/task/t.md"
+  export P5_SWAP_LINK="$R/task/t.md" P5_SWAP_TARGET="$outside/t.md" FIXED_GUARD_SUFFIX=p6ok
+  runp "$STUBS/swaplink:$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX P5_SWAP_LINK P5_SWAP_TARGET
+  rc_is "属性を取れる(対照): take が exit 0" 0
+  out_line "属性を取れる(対照): OWNER_MARK=no" 'OWNER_MARK=no'
+  ckf "属性を取れる(対照): 古い所属の印は残らない" test -e "$base/owner-p6ok"
+  run cleanup --state "$base/guard-p6ok"
+  rc_is "属性を取れる(対照): cleanup は exit 0" 0
+}
+case_P7() {
+  CID=P7; TAG=""
+  local sd mark
+  base_repo p7
+  mkdir -p -- "$WORK/p7-launch/relative-tmp"
+  # 起動場所(p7-launch)と --cwd が違い、TMPDIR が相対パス: 外部の実装役は --cwd で起動するので指す先が変わる。
+  # 印を書かずに OWNER_MARK=no で続ける
+  RC=0
+  ( cd "$WORK/p7-launch" && TMPDIR=relative-tmp guard bash "$TARGET" take --cwd "$R" --task-md "$R/task/t.md" \
+      </dev/null >"$CASE_OUT" 2>"$CASE_ERR" ) || RC=$?
+  mark_timeout; show take '(相対の TMPDIR)'
+  rc_is "相対の TMPDIR: take が exit 0(止めない)" 0
+  out_line "相対の TMPDIR: OWNER_MARK=no" 'OWNER_MARK=no'
+  err_has "相対の TMPDIR: 理由の NOTE" 'NOTE: 所属の印を書けない: TMPDIR が相対パス'
+  sd="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"
+  ckf "相対の TMPDIR: 印を作らない" test -e "$(mark_of "${sd:-$PROT/dev-workflow/guard-none}")"
+  run cleanup --state "${sd:-$PROT/dev-workflow/guard-none}"
+  rc_is "相対の TMPDIR: cleanup は exit 0" 0
+  # 対照: 同じフォルダを絶対パスで渡せば印を書き、tmpdir はそのフォルダ
+  RC=0
+  ( cd "$WORK/p7-launch" && TMPDIR="$WORK/p7-launch/relative-tmp" guard bash "$TARGET" take --cwd "$R" --task-md "$R/task/t.md" \
+      </dev/null >"$CASE_OUT" 2>"$CASE_ERR" ) || RC=$?
+  mark_timeout; show take '(絶対の TMPDIR)'
+  rc_is "絶対の TMPDIR(対照): take が exit 0" 0
+  out_line "絶対の TMPDIR(対照): OWNER_MARK=yes" 'OWNER_MARK=yes'
+  mark="$(mark_of "$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")")"
+  ckt "絶対の TMPDIR(対照): tmpdir はそのフォルダ" inx "$mark" "tmpdir${TAB}$(hex_of "$WORK/p7-launch/relative-tmp")"
+}
+case_P8() {
+  CID=P8; TAG=""
+  local n0 m0 base
+  base_repo p8
+  base="$PROT_REAL/dev-workflow"
+  mkdir -p -- "$base" "$R/taskA" "$R/taskB"
+  write_task "$R/taskA/t.md"
+  write_task "$R/taskB/t.md"
+  rm -f -- "$R/task/t.md"
+  ln -s -- "$R/taskA/t.md" "$R/task/t.md"
+  n0="$(nstates)"; m0="$(nmarks)"
+  rm -f -- "$WORK/p5-rm-refused"
+  # 印を書いた後にフォルダが変わり、削除を断られた後は、親を検索できても印の [ -e ]・[ -L ] だけが偽になる。
+  # 「無い」と確かめられない(親の一覧には名前が在る)ので、控えを保ったまま終了値 20 で止める
+  rune BASH_ENV="$WORK/p8-env.sh" PATH="$STUBS/swaplink:$STUBS/rmfail:$STUBS/fixedtmp:$PATH" \
+    P5_SWAP_LINK="$R/task/t.md" P5_SWAP_TARGET="$R/taskB/t.md" FIXED_GUARD_SUFFIX=p8un -- take --cwd "$R" --task-md task/t.md
+  ckt "属性だけ取れない(前提): rm が owner-* の削除を断った" test -e "$WORK/p5-rm-refused"
+  ckt "属性だけ取れない(前提): 印は名前に残っている" test -f "$base/owner-p8un"
+  rc_is "属性だけ取れない: take が exit 20" 20
+  err_has "属性だけ取れない: ERROR を出す" 'ERROR [internal] 所属の印を消せたか確かめられない(タスク MD の在るフォルダが、印を書いた後に変わった'
+  ckeq "属性だけ取れない: stdout に STATE_DIR を出さない" "$(out_count '^STATE_DIR=')" 0
+  ckeq "属性だけ取れない: 記録が残らない" "$(nstates)" "$n0"
+  rm -f -- "$base/owner-p8un" "$WORK/p5-rm-refused"
+  # cleanup でも、印の [ -e ]・[ -L ] だけが偽のとき「印が無い」にせず、確かめられないとして終了値 20
+  ln -sfn -- "$R/taskA/t.md" "$R/task/t.md"
+  export FIXED_GUARD_SUFFIX=p8cl
+  runp "$STUBS/fixedtmp" take --cwd "$R" --task-md task/t.md
+  unset FIXED_GUARD_SUFFIX
+  out_line "cleanup で属性だけ取れない(前提): OWNER_MARK=yes" 'OWNER_MARK=yes'
+  : >"$WORK/p5-rm-refused"
+  rune BASH_ENV="$WORK/p8-env.sh" -- cleanup --state "$base/guard-p8cl"
+  rc_is "cleanup で属性だけ取れない: exit 20" 20
+  err_has "cleanup で属性だけ取れない: ERROR を出す" 'ERROR [internal] 保護領域は消したが、所属の印が残ったか確かめられない'
+  ckf "cleanup で属性だけ取れない: 記録は消える" test -e "$base/guard-p8cl"
+  ckt "cleanup で属性だけ取れない: 印は残る(消せたと言わない)" test -f "$base/owner-p8cl"
+  rm -f -- "$base/owner-p8cl" "$WORK/p5-rm-refused"
+  ckeq "属性だけ取れない: 試験の後に印が増えていない" "$(nmarks)" "$m0"
+}
+case_P9() {
+  CID=P9; TAG=""
+  local sd
+  base_repo p9
+  mkdir -p -- "$WORK/p9-tmp"
+  # tmpdir の 16 進の変換だけが失敗する: 空の tmpdir の印を公開せず、OWNER_MARK=no で続ける
+  rune TMPDIR="$WORK/p9-tmp" P9_OD_FAIL="$WORK/p9-tmp" PATH="$STUBS/odfail:$PATH" -- take --cwd "$R" --task-md task/t.md
+  rc_is "tmpdir の変換の失敗: take が exit 0(止めない)" 0
+  out_line "tmpdir の変換の失敗: OWNER_MARK=no" 'OWNER_MARK=no'
+  err_has "tmpdir の変換の失敗: 理由の NOTE" 'NOTE: 所属の印を書けない: パスを 16 進にできない'
+  sd="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"
+  ckf "tmpdir の変換の失敗: 印を作らない" test -e "$(mark_of "${sd:-$PROT/dev-workflow/guard-none}")"
+  run cleanup --state "${sd:-$PROT/dev-workflow/guard-none}"
+  rc_is "tmpdir の変換の失敗: cleanup は exit 0" 0
+  # 対照: 同じ od の代わりでも、失敗させる文字列が別なら印を書く
+  rune TMPDIR="$WORK/p9-tmp" P9_OD_FAIL="$WORK/p9-none" PATH="$STUBS/odfail:$PATH" -- take --cwd "$R" --task-md task/t.md
+  rc_is "変換が通る(対照): take が exit 0" 0
+  out_line "変換が通る(対照): OWNER_MARK=yes" 'OWNER_MARK=yes'
+  ckt "変換が通る(対照): tmpdir の値が入る" inx "$(mark_of "$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")")" "tmpdir${TAB}$(hex_of "$WORK/p9-tmp")"
 }
 
 # ════════════════════════ L 変異テスト ════════════════════════
@@ -3964,7 +4459,7 @@ PYCODE
 # ════════════════════════ 実行 ════════════════════════
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 L"
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 P1 P2 P3 P4 P5 P6 P7 P8 P9 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0

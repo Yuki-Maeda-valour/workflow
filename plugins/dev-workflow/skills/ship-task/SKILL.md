@@ -138,10 +138,14 @@ except (Exception, SystemExit) as exc:
 **開始前の確認**: ファイルシステムで管理ルートを固定し、権威参照ファイルと必要な契約を読む。タスク名や `--task` の有無を待たない。
 [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
 - 把握(understand-project を含む)・対象本文の採用・無人の前提の Git 調査・`git status`・ブランチ操作より前に行う。内蔵・非 Git・非ファイルタスクでも省略しない。
-- 0/`none`、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
+- 0/`none`・0/`other-projects-only`(別プロジェクトの記録だけ。無人でも同じ)、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
+  - 別プロジェクトの記録(take が記録の外に書く所属の印〈パスと番号だけのファイル〉で、別のプロジェクトと確かめた記録)は、会話の報告に記録の名前と `owner.top` を書く。
+  - Issue・PR・commit・ログには、別プロジェクトの記録の件数と記録の名前だけを書く。パスは書かない(他のプロジェクトの名前やホームのパスを載せない)。
+  - 止めたときの報告には、候補ごとの `reason` を書く。`overlap`・`overlap-unknown` は「機械は重なりを見つけた(確かめられなかった)」と分けて示す。
 - 確認値は 2 つあり、人の答えで選ぶ。2 つを同時に渡さない(§12-9-5)。
   - 全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、`--acknowledged-identities` へ渡す。
   - 1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、`--acknowledged-list` へ渡す。
+  - `reason` が `overlap` か `overlap-unknown` の候補が 1 件でもあれば、人が全候補を「今回と無関係」と答えても `list_sha256` を使う。
 - do-task へ進むときは再走査させる。同じ会話・cwd・一覧への確認値だけを、どちらの値かを区別して引き継ぐ。新しい呼出しや別チャットで過去の確認を自動復元しない。
 - 同じ実行の差戻しでは Phase 0 に戻さず、take 後や内蔵への引継ぎに走査を追加しない。親の無人ループが既に行った初期処理まで遡って止める保証はない。
 

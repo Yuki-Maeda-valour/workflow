@@ -6,6 +6,7 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 
 - 開始前の `pending-implementation.py scan` は **Python 3.8 以上・POSIX** が必要。標準ライブラリだけを使う。非 Git・内蔵・検証のみ・profile なしでも適用する。
   - `os.open`・`os.close`・`os.fstat`、`O_DIRECTORY`・`O_NOFOLLOW`・`O_CLOEXEC`、fd(開いたディレクトリを指す番号)を受ける `os.scandir` が必要。
+  - 所属の印・`.git` ファイル・`HEAD`・`commondir` を読むため、`os.read`・`O_NONBLOCK`(書き手を待たずに開く)と、`os.open` の `dir_fd` も必要。
   - `os.stat` の `dir_fd` と `follow_symlinks=False`、`st_dev`・`st_ino`・`st_mode`・`st_uid`・`st_size`・`st_mtime_ns`・`st_ctime_ns`、`os.fsencode`・`os.fsdecode`・`time.monotonic` も必要。
   - helper は起動時の機能検査と実利用時の未対応を 11/`scan-unavailable` にする。`listdir` や shell での代行へ切り替えない。
   - Python 不在・helper 不在・起動不能・解釈失敗なら停止する。JSON を受け取れた扱いにせず、検査を省いて続行しない。引数・結果・人の確認の正本(ほかが合わせる元)は [external-runners.md](external-runners.md) §12-9。
@@ -43,6 +44,7 @@ PYTHON
 
 - `diff-snapshot.sh` と `implement-guard.sh` は連想配列を使うため **bash 4.0 以上**が必要。`--help` と `--precheck` にも同じ要件がかかる。`command -v bash` と `bash --version` で、PATH から選ぶ実体と版を確認する。ログインシェルの版だけでは判断しない。
 - 本体の必要道具は GNU coreutils・GNU findutils・GNU grep。実行名 `realpath`・`readlink`・`sha256sum`・`sort`・`grep`・`find` などで PATH から選ぶ。特に `grep -z`・`sort -z` と、gitlink 検査の `find -mindepth/-maxdepth/-quit` が必要。導入しても別名や PATH の後ろにあれば選ばれないため、`command -v <実行名>` と `<実行名> --version` を記録する。
+  - `implement-guard.sh take` は、記録の外に所属の印を書くのに `link`(GNU coreutils・macOS の `/bin/link`)と `od` を PATH から選ぶ。無ければ印を書かず、`NOTE: 所属の印を書けない:` を出して `OWNER_MARK=no` で続ける。
 - `diff-snapshot-selftest.sh` は bash 4.0 以上と GNU coreutils・GNU findutils・GNU grep が必要。冒頭で `sha256sum`・`touch -d`・`find -maxdepth/-quit`・`head -c`・`grep -z`・`sort -z` を検査し、不足は rc 2 / `ERROR [requirements]` で止まる。後で時刻固定が失敗しても rc 2 で停止する。必要道具の不足と、時刻を固定できても stat キャッシュの隠蔽を再現できない正当な fixture 不成立を区別する。
 - 回帰一式の必要環境は **Linux と GNU 系ツール**。無人ループ `loop.sh` は **Linux・bash 4.4 以上**が必要で、`setsid`・`flock`・`/proc` を使う。詳しくは [../../ship-task/references/loop.md](../../ship-task/references/loop.md) を読む。
 
