@@ -181,6 +181,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 環境: GNU coreutils・findutils・grep を `PATH` の先頭に置く。`sed` は BSD 版(`/usr/bin/sed`)のまま使える。`TMPDIR` は symlink を含まない物理パスにする。`GIT_CONFIG_NOSYSTEM` は指定せず、system 設定は有効のまま回す。
   - 実機の分岐: ケース `M26` は、Apple Git の Mac では実機の分岐を動かし、Apple Git を模した分岐は `NOTE:` の行を出して省く(数えない)。Apple Git でない環境では逆になる。
     - 変異 `e`(わざと壊した写しで試験が落ちるかを見る試験のうち、復元の補助の階層検査を外すもの)は、元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない Mac では、`NOTE:` の行を出して省く(数えない。[#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296))。
+    - `J8`(非 UTF-8 の名前の復元)は、非 UTF-8 の名前を断るファイルシステム(APFS)では `NOTE:` の行を出して省く(数えない。[#301](https://github.com/Yuki-Maeda-valour/workflow/issues/301))。
   - 結果: 下の「Mac の結果」に書く。シェル回帰一式の正式な必要環境は Linux のままで、Mac の結果は Linux の代わりにしない。
 - Mac の結果(Issue #241、2026-10-30、macOS 26.6.2 / arm64、Git 2.54.0〈Apple Git-157〉、Bash 5.3.20、GNU coreutils 9.12・findutils 4.11.0・grep 3.12、system 設定は有効のまま): FAIL 44 行(下の 2 群だけ)。PASS の件数と所要時間は Issue #241 の検証の記録に書く。
   - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊した写しで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。
@@ -193,6 +194,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - `M17` の 4 行: 200 MiB の出力の試験が、外側の 90 秒で時間切れになっていた。
       - 2026-10-31 に [Issue #286](https://github.com/Yuki-Maeda-valour/workflow/issues/286) で直した。直した後の Mac の `M17` は 4 件 PASS で、3 回とも 3〜4 秒で終わった。直した後の Mac の FAIL は 40 行(`restore-taskmd` 系だけ)。
   - 修正前の Mac の FAIL 64 行(スイートを `GIT_CONFIG_NOSYSTEM=1` で回した基準。system 設定を有効のままの修正前の実行は、Issue #241 の 2026-10-26 のコメントで FAIL 812 件)のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
+  - 2026-11-02 に #301 で `J8` を省くようにした後の Mac の FAIL は 32 行(`B10` 2・`B12` 4・`G7` 1・`J1` 6・`J2` 8・`J3` 4・`J6` 5・`M6` 2)。`J8` の 8 行は数えない。その前は、前提が無いまま比べた 3 行(`元bytesへ復元`・`選択リンク文字列不変`・`Git呼出0`)が PASS になっていた。
 - 品質コマンドの監督と検証用コピーの回帰を Mac で回す手順([Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239)):
   - 対象: `scripts/test_check_process.py` と `scripts/test_review_guard.py`。実プロセスと実 CLI(`start → take → seal → run-checks`)で、終了値 0 / 7 と出力の hash、親の終了・時間切れ・`TERM`・`INT`・`HUP`・群の外へ移る子、検証用コピーの削除と保持を確かめる。
   - コマンド: リポジトリの最上位で次を実行する。`<scratch>` は記録を置く作業用のフォルダ。`-v` の結果は標準エラーに出るので、標準エラーもログへ送る。

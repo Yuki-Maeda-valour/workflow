@@ -33,6 +33,8 @@
 # 変異版でも対照ケースは PASS すること(壊れ方が変異に固有であること)も見る。対照は 2 つの形がある。
 # 全変異の `E1` は、変異の当たらないケース。変異 `e` の `J1` は、変異を当てた補助を通るが、結果の変わらないケース。
 #
+# 環境の都合で省くケース: 非 UTF-8 の名前を作れないファイルシステム(APFS など)では、`J8` を `NOTE:` の行で省く(#301)。
+#
 # 保護領域: 対象は保護領域を /tmp・$TMPDIR の外にしか作らない。成功ケースのために、実
 # `$HOME/.local/state/dev-workflow/` の下へ `selftest-guard-XXXXXX` を作って `XDG_STATE_HOME` を
 # そこへ向け、終了時(EXIT)に必ず消す。そこに既に在る他のファイルには触れない。
@@ -184,7 +186,10 @@ FAIL  $CID $TAG$1"; }
 ckt() { local d="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$d"; else ng "$d"; fi; }
 ckf() { local d="$1"; shift; if "$@" >/dev/null 2>&1; then ng "$d"; else ok "$d"; fi; }
 flat() { local s="${1//$'\n'/\\n}"; printf '%s' "${s//$'\t'/\\t}"; }   # 結果の 1 行を崩さない(改行・タブを見える形にする)
-ckeq() { if [ "$2" = "$3" ]; then ok "$1"; else ng "$1(実際: $(flat "$2") / 期待: $(flat "$3"))"; fi; }
+ckeq() { if [ -z "$2" ] && [ -z "$3" ]; then ng "$1(比べる値が両方とも空。空を期待する比べは ckeqe を使う)"
+  elif [ "$2" = "$3" ]; then ok "$1"; else ng "$1(実際: $(flat "$2") / 期待: $(flat "$3"))"; fi; }
+# 空どうしも一致とみなす比べ。空になるのが正しい値を比べるときだけ使う
+ckeqe() { if [ "$2" = "$3" ]; then ok "$1"; else ng "$1(実際: $(flat "$2") / 期待: $(flat "$3"))"; fi; }
 ckne() { if [ "$2" != "$3" ]; then ok "$1"; else ng "$1(実際: $(flat "$2"))"; fi; }
 inf() { grep -qF -e "$2" -- "$1"; }      # $1=ファイル $2=部分文字列(先頭が - でも安全)
 inx() { grep -qxF -e "$2" -- "$1"; }     # $1=ファイル $2=行全体
@@ -676,8 +681,8 @@ case_B4() {
   run compare "${ARGS[@]}" --run-rc 0
   rc_is "clean: compare が exit 0" 0
   s1="$(status_of "$R")"
-  ckeq "clean: git status が take・compare の前後で不変" "$s1" "$s0"
-  ckeq "clean: git status は空のまま" "$s1" ""
+  ckeqe "clean: git status が take・compare の前後で不変" "$s1" "$s0"
+  ckeqe "clean: git status は空のまま" "$s1" ""
   # --cwd は相対パスでも受ける(呼び出し側の cwd が管理ルートのとき)
   RC=0
   ( cd "$R" && guard bash "$TARGET" take --cwd . --task-md task/t.md </dev/null >"$CASE_OUT" 2>"$CASE_ERR" ) || RC=$?
@@ -2157,15 +2162,37 @@ case_J7() {
   ckt "復元専用領域の作成に失敗: 実ツリーのエントリは残る" test -f "$R/task/t.md"
 }
 
+# $1 の下に非 UTF-8 の名前のフォルダを作れるかを試す。ファイルシステムが EILSEQ で断るときだけ 0
+j8_names_rejected() {
+  python3 -I -c 'import errno, os, sys
+p = os.path.join(os.fsencode(sys.argv[1]), b"probe-\xff")
+try:
+    os.mkdir(p)
+except OSError as e:
+    sys.exit(0 if e.errno == errno.EILSEQ else 1)
+os.rmdir(p)
+sys.exit(1)' "$1"
+}
+
 case_J8() {
   CID=J8; TAG=""
   base_repo j8
   local parent="$WORK/"$'bytes-\377\n' selected="$R/task/selected.md"
   local real="$parent/"$'file-\376.md'
-  mkdir -p -- "$parent"
-  printf '%s' "$TASK_BODY" >"$real"
-  chmod 640 "$real"
-  ln -s -- "$real" "$selected"
+  {
+    mkdir -p -- "$parent"
+    printf '%s' "$TASK_BODY" >"$real"
+    chmod 640 "$real"
+    ln -s -- "$real" "$selected"
+  } 2>"$WORK/j8-setup.err"
+  if [ ! -f "$real" ] || [ ! -L "$selected" ]; then
+    if j8_names_rejected "$WORK"; then
+      echo "NOTE: J8 を省く: このファイルシステムは非 UTF-8 の名前を作れない(EILSEQ。macOS の APFS など。#301)"
+      return 0
+    fi
+    ng "非UTF-8: 前提(非UTF-8の実名・改行を含む親・選択symlink)を作れる($(head -c 300 "$WORK/j8-setup.err" | LC_ALL=C tr -c '[:print:]' '?'))"
+    return 0
+  fi
   local link_before="$(readlink -- "$selected")" body_before="$(sha_of "$real")"
   take "$R" "$selected"
   rc_is "非UTF-8実名と改行親・選択symlink: take成功" 0
