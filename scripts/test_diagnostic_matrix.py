@@ -1,5 +1,6 @@
 """#260: 公開CLIの正常操作・機密除外・保持値・生データの回帰。"""
 import base64
+import errno
 import hashlib
 import json
 import os
@@ -87,14 +88,21 @@ class DiagnosticMatrix(DiagnosticFixture):
 
     def test_literal_glob_magic_dash_and_non_utf8_paths(self):
         names = [b'*.txt', b':(glob)*', b'-leading', b'bad-\xff', '日本語.txt'.encode()]
+        uncreated = set()
         for name in names:
             path = os.fsencode(self.repo) + b'/' + name
-            with open(path, 'wb') as out:
-                out.write(b'raw-' + name)
+            try:
+                with open(path, 'wb') as out:
+                    out.write(b'raw-' + name)
+            except OSError as error:
+                if error.errno != errno.EILSEQ: raise
+                uncreated.add(name)
         self.commit()
         self.begin()
         for name in names:
             with self.subTest(path=name):
+                if name in uncreated:
+                    self.skipTest('このファイルシステムは非 UTF-8 の名前を作れない(EILSEQ。macOS の APFS など)')
                 result = self.observe('files', '--path', os.fsdecode(name))
                 self.assertEqual(set(self.records(result)), {name})
                 self.assertIsNone(self.records(result)[name]['endpoint']['sha256'])

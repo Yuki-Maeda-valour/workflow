@@ -27,6 +27,13 @@ def load(path):
     return module
 
 
+# macOS は fd に書いただけで F_GETFL に 0x10000 を立てる(利用者が設定する値ではない)。比べるときは除く
+WRITTEN_FLAG = 0x10000 if sys.platform == 'darwin' else 0
+
+def file_flags(fd):
+    return fcntl.fcntl(fd, fcntl.F_GETFL) & ~WRITTEN_FLAG
+
+
 # 公開CLIへ試験用引数や環境を追加せず、内部Budgetを直接構成する。
 DRIVER = '''
 import importlib.util,json,os,pathlib,signal,sys
@@ -61,7 +68,7 @@ class DiagnosticBudgetTests(unittest.TestCase):
         self.module = load(RUNTIME)
         self.temp = tempfile.TemporaryDirectory(prefix='diagnostic-budget-')
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
 
     def test_each_quantity_allows_boundary_and_rejects_one_more(self):
         m = self.module
@@ -234,7 +241,7 @@ class DiagnosticOutputTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='diagnostic-output-')
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.report = self.root / 'result.json'
 
     def args(self, *, seconds=3, size=100, code=0, phase='none'):
@@ -298,7 +305,7 @@ class DiagnosticOutputTests(unittest.TestCase):
                 received.extend(part)
             self.assertEqual(process.wait(timeout=12), 0)
             self.assertEqual(received, b'x'*(1024*1024)+b'\n')
-            self.assertEqual(fcntl.fcntl(writefd, fcntl.F_GETFL), original)
+            self.assertEqual(file_flags(writefd), original & ~WRITTEN_FLAG)
             self.assertEqual(process.stderr.read(), b'')
             self.result(0)
         finally:
@@ -321,7 +328,7 @@ class DiagnosticOutputTests(unittest.TestCase):
                     result = subprocess.run(self.args(seconds=.15, code=code), timeout=12, **streams)
                     self.assertEqual(result.returncode, 20)
                     self.assertLess(time.monotonic()-started, 11)
-                    self.assertEqual(fcntl.fcntl(writefd, fcntl.F_GETFL), original)
+                    self.assertEqual(file_flags(writefd), original & ~WRITTEN_FLAG)
                     self.result(20)
                 finally:
                     os.close(readfd); os.close(writefd)
@@ -366,7 +373,7 @@ class DiagnosticOutputTests(unittest.TestCase):
             flags = fcntl.fcntl(slave, fcntl.F_GETFL)
             result = subprocess.run(self.args(), stdout=slave, stderr=subprocess.PIPE, timeout=12)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(fcntl.fcntl(slave, fcntl.F_GETFL), flags)
+            self.assertEqual(file_flags(slave), flags & ~WRITTEN_FLAG)
             self.assertTrue(os.read(master, 4096).startswith(b'x'*100))
             self.result(0)
         finally:

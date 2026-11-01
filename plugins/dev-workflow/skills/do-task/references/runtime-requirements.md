@@ -54,6 +54,7 @@ PYTHON
 
 - 信頼する配布コピーの絶対パスへ `python3 -I` を使う。同梱モジュールも同じコピーの絶対パスから読み、作業場所や `PYTHONPATH` の同名ファイルを使わない。
 - Git は既存の安全用前置きと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
+  - 起動時に `grep --version` の最初の行が `(GNU grep)` を含むことを確かめ、違えば `runtime-unavailable`(終了値 20)で止まる(BSD grep は通さない。[#303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))。
 - `os.O_NOFOLLOW`・`O_DIRECTORY`・`O_NONBLOCK`、bytes の名前、`open/stat/readlink` の `dir_fd`、`fstat`、fd からのディレクトリ列挙、単調時計が必要。
 - `subprocess.Popen` と直接子の停止・回収、私有pipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
 - profile が1つでもあれば既存 `secret-profiles.py` と同じ PyYAML が必要。すべて不在なら PyYAML を要求しない。
@@ -247,6 +248,16 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - 受領書の終了値 3 は前提の崩れ(`.git/objects/17` が 28 個より少ない)。黙って通らない。
   - 結果は Issue #239 に記録する。
 - 無人ループとシェル回帰一式は引き続き Linux 専用。Linux 上の Darwin スタブの成功や Linux 専用試験の skip は、macOS の成功根拠にしない。
+- 読み取り専用の診断(`diagnostic-*.py`)の Python の試験を Mac で回す手順([Issue #303](https://github.com/Yuki-Maeda-valour/workflow/issues/303)):
+  - 対象: `scripts/test_diagnostic_*.py` と `scripts/test_secret_profiles.py`。
+  - コマンド: リポジトリの最上位で、discover の形(`python3 -m unittest discover -s scripts -t scripts -p <ファイル>`)で回す。
+    - dotted の形(`python3 -m unittest scripts.<名前>`)では、試験の補助 `diagnostic_test_support.py` を読み込めない。どの OS でも同じ。
+  - 環境:
+    - GNU grep を `PATH` の先頭に置く。無いと、診断を起動する試験の多くが `runtime-unavailable` で落ちる。
+    - `PATH` で選ばれる `bash` を 4.0 以上にする。試験の準備が `implement-guard.sh take` を起動するため。Mac 標準の `/bin/bash` 3.2 では落ちる。
+  - `TMPDIR` は、既定(`/var/folders/…`)でも、物理パスでも、長いパスでもよい。
+  - 非 UTF-8 の名前の小さな試し(`subTest`。1 つの試験の中の小さな試し)は、APFS(macOS のファイルシステム)が名前を作れないので省かれる。`-v` を付けて回すと、理由の文 `このファイルシステムは非 UTF-8 の名前を作れない(EILSEQ。macOS の APFS など)` が出る。
+  - これは試験の確かめで、上の「設定を戻さずに使う診断」の「新しい診断の macOS 実機は未確認」の確認には数えない。
 
 再確認は使い捨てリポジトリで次の順に行う。
 

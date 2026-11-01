@@ -85,6 +85,9 @@ with contextlib.ExitStack() as patches:
    patches.enter_context(mock.patch.object(os,'O_NOFOLLOW',None));del os.O_NOFOLLOW
   elif name=='mask':patches.enter_context(mock.patch.object(signal,'pthread_sigmask',None))
   elif name=='dirfd':patches.enter_context(mock.patch.object(os,'supports_dir_fd',set()))
+ elif phase=='non-gnu-grep':
+  original_which=m.R.shutil.which
+  patches.enter_context(mock.patch.object(m.R.shutil,'which',side_effect=lambda tool:target if tool=='grep' else original_which(tool)))
  rc=m.main(args)
 with original_builtin(report,'w') as out:json.dump({'rc':rc,'events':events},out)
 sys.exit(rc)
@@ -203,9 +206,16 @@ class DiagnosticIOBoundaries(DiagnosticFixture):
         before = inventory(self.repo), inventory(self.state), self.latest.read_bytes()
         args = ['extend-plan', *self.common, '--plan', self.latest, '--plan-sha256',
                 self.latest_hash, '--out', self.plan_dir / 'uncreated.json', 'refs']
-        for phase in ('missing-fd-scandir', 'missing-dirfd', 'missing-nofollow', 'missing-mask', 'missing-git', 'missing-grep'):
+        # GNU grep でない grep(--version の 1 行目が BSD grep の形)。製品は realpath で固定し PATH=os.defpath で起動するので、絶対パスの shebang にする
+        fake_grep = self.work / 'non-gnu-grep'
+        fake_grep.write_text('#!/bin/sh\n'
+            'if [ "$1" = --version ]; then echo "grep (BSD grep, GNU compatible) 2.6.0-FreeBSD"; exit 0; fi\n'
+            'exit 1\n')
+        fake_grep.chmod(0o755)
+        for phase in ('missing-fd-scandir', 'missing-dirfd', 'missing-nofollow', 'missing-mask', 'missing-git', 'missing-grep', 'non-gnu-grep'):
             with self.subTest(phase=phase):
-                result, _ = self.injected(phase, args)
+                if phase == 'non-gnu-grep': result, _ = self.injected(phase, args, target=fake_grep)
+                else: result, _ = self.injected(phase, args)
                 self.failure(result, 20, 'runtime-unavailable')
                 self.assertFalse((self.plan_dir / 'uncreated.json').exists())
                 self.assertEqual((inventory(self.repo), inventory(self.state), self.latest.read_bytes()), before)

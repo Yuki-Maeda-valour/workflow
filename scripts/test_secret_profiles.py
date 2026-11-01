@@ -17,6 +17,14 @@ SNAPSHOT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh"
 REVIEW_AGENT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/review-agent.sh"
 
 
+def bind_unix(sock, path):
+    # macOS の UNIX socket のパスの上限は 104 bytes。長い一時領域でも作れるように、置き場へ移って相対の名前で bind する
+    path = Path(path); previous = os.getcwd()
+    os.chdir(path.parent)
+    try: sock.bind(path.name)
+    finally: os.chdir(previous)
+
+
 def load_helper_module():
     spec = importlib.util.spec_from_file_location("secret_profiles_test_module", HELPER)
     assert spec is not None and spec.loader is not None
@@ -281,7 +289,7 @@ class SecretProfilesTest(unittest.TestCase):
         profile.parent.mkdir()
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.addCleanup(sock.close)
-        sock.bind(str(profile))
+        bind_unix(sock, profile)
         done = self.run_helper()
         self.assertEqual(20, done.returncode)
         profile.unlink()
