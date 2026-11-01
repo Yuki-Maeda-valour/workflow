@@ -1,4 +1,5 @@
 """#260: 開始出典・管理座標・profile・保持計画の実入口境界。"""
+import errno
 import hashlib
 import json
 import os
@@ -224,14 +225,27 @@ raise SystemExit(rc)
             prefix = 'refs/heads/'
             while size-len(prefix)>201: prefix += 'a'*200+'/'
             return prefix+'z'*(size-len(prefix))
+        packed_refs = self.repo/'.git/packed-refs'
         for size in (1024,1025):
             name = refname(size); path = self.repo/'.git'/name
-            path.parent.mkdir(parents=True,exist_ok=True); path.write_text(self.start_oid+'\n')
+            heads = self.repo/'.git/refs/heads'; before = sorted(os.listdir(heads))
+            packed = False
+            try:
+                path.parent.mkdir(parents=True,exist_ok=True); path.write_text(self.start_oid+'\n')
+            except OSError as error:
+                # macOS のパスの長さの上限(1024 bytes)で loose ref を作れないときだけ、packed-refs に書いて試す
+                if error.errno != errno.ENAMETOOLONG: raise
+                self.assertEqual(sorted(os.listdir(heads)), before)
+                packed = True
+                original = packed_refs.read_bytes() if packed_refs.exists() else None
+                packed_refs.write_bytes((original or b'')+('%s %s\n'%(self.start_oid,name)).encode())
             result = self.cli('extend-plan', *self.common, '--plan', self.latest,
                 '--plan-sha256', self.latest_hash, '--out', self.plan_dir/('ref-%d'%size), 'refs')
             if size==1024: self.success(result, 'plan-extended')
             else: self.failure(result, 23)
-            path.unlink()
+            if not packed: path.unlink()
+            elif original is None: packed_refs.unlink()
+            else: packed_refs.write_bytes(original)
         directory = self.repo/'.git/refs'
         for _ in range(40): directory /= 'd'; directory.mkdir()
         (directory/'leaf').write_text(self.start_oid+'\n')

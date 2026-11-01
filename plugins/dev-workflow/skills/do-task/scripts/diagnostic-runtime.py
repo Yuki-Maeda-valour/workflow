@@ -262,6 +262,9 @@ class Runtime:
         # 私有領域の固定入力だけで必要なGNU照合機能を確かめる。
         rc,out=self.process([self.grep,'-E','-z','-f',os.devnull],b'',env={'LC_ALL':'C','PATH':os.defpath})
         if rc not in (0,1): fail('runtime-unavailable')
+        # 文書の必要条件(GNU grep)と合わせる。BSD grep は式の意味が違いうるので通さない
+        rc,out=self.process([self.grep,'--version'],b'',env={'LC_ALL':'C','PATH':os.defpath})
+        if rc!=0 or b'(GNU grep)' not in out.split(b'\n',1)[0]: fail('runtime-unavailable')
     def reap(self,p):
         if p.poll() is not None: p.wait(); return
         if self.reap_deadline is None: self.reap_deadline=self.budget.clock()+10

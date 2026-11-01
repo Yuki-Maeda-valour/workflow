@@ -6,7 +6,7 @@ import socket
 import stat
 import unittest
 
-from diagnostic_test_support import DiagnosticFixture, inventory
+from diagnostic_test_support import DiagnosticFixture, bind_unix, inventory
 
 
 def decoded(value):
@@ -251,7 +251,7 @@ class DiagnosticViewEdges(DiagnosticFixture):
         self.begin()
         sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.addCleanup(sock.close)
-        sock.bind(str(self.repo / 'local.sock'))
+        bind_unix(sock, self.repo / 'local.sock')
         result = self.observe('files', '--path', 'local.sock', '--kind', 'all')
         record = self.records(result)[b'local.sock']
         self.endpoint_schema(record['endpoint'], reads_body=False)

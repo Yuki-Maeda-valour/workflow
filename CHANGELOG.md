@@ -2,6 +2,60 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.29.3
+
+### 変更
+
+- 読み取り専用の診断(`diagnostic-git.py` とその部品。元のファイルと Git の記録を変えずに、Git の状態を読む道具)は、GNU grep でない grep では、起動時に `runtime-unavailable`(終了値 20)で止まるようになった。GNU grep の環境では、結果は変わらない。([Issue #303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))
+  - 原因: 必要環境の文書(`runtime-requirements.md`)は GNU grep を求めている。一方で、製品の起動時の確かめは `grep -E -z -f /dev/null` の終了値だけを見ていた。このため、BSD grep(macOS の `/usr/bin/grep`)も通していた。
+    - 診断は、この grep で機密のパスを除く式を照らす。BSD grep は式の意味が GNU grep と違いうるので、除き方が変わりうる([#274](https://github.com/Yuki-Maeda-valour/workflow/issues/274) の比べでは、20 の式のうち 1 つが違った)。
+  - 直し方: `diagnostic-runtime.py` の起動時の確かめに、`grep --version` の最初の行が `(GNU grep)` を含むことを足した。違えば `runtime-unavailable` で止まる。
+    - 1 行目は、先頭一致でなく部分一致で見る。Homebrew の GNU grep は、実体の名前が `ggrep` なので `ggrep (GNU grep) 3.12` と出るため。
+    - BSD grep の 1 行目 `grep (BSD grep, GNU compatible) …` は `(GNU grep)` を含まない。
+    - 起動の仕方・時間の予算は、すぐ上の `-E -z -f` の確かめと同じ(`LC_ALL=C`・`PATH=os.defpath`)。
+  - 試験: `test_diagnostic_io_boundaries.py` の `test_v01_missing_runtime_apis_git_and_grep_stop_before_observation` の末尾に、試しの段 `non-gnu-grep` を足した(この試験は、道具の欠けを段ごとに試す)。
+    - 試験の中で偽の grep を作って渡す。`--version` には BSD grep の形の 1 行を出し、それ以外は何も出さずに終了値 1 を返す。
+    - ほかの段と同じく、終了値 20 で止まり、計画のファイル(`--out` に渡した出力先)を作らず、元のデータを変えないことを見る。
+  - 実測:
+    - Mac(macOS 26.6.2 / arm64・Python 3.14.4・Git 2.54.0〈Apple Git-157〉。GNU grep 3.12 を `PATH` の先頭に置いた): 直した後の試験と直す前の製品の組み合わせでは、段 `non-gnu-grep` だけが `AssertionError: 0 != 20` で落ちた(直す前の製品は、偽の grep のまま `extend-plan` を通した)。直した後は通った。
+    - Ubuntu 22.04 の容器(root 以外・Python 3.10.12・Git 2.51.0・GNU grep 3.7)でも同じで、直す前の製品では `0 != 20` で落ち、直した後は通った。
+  - 限界:
+    - GNU grep が `PATH` に無い Mac では、診断が `runtime-unavailable` で止まる(今までは BSD grep で動いた)。文書の必要条件どおりで、ほかの GNU 系ツール(Linux で標準の版のコマンド。GNU coreutils など)と同じ扱い。
+    - 1 行目に `(GNU grep)` を含まない古い GNU grep も断る。2.5.4〜2.10 は括弧なしで版を出していたと推測する(未確認)。
+    - `diff-snapshot.sh` など、ほかの道具の GNU grep の確かめは変えていない。
+
+### 修正
+
+- macOS で、読み取り専用の診断の Python の試験が、製品の不具合でなく環境の差で落ちていたのを直した。直した後は、Mac の既定の `TMPDIR` でも長い物理パス(symlink〈別のパスを指すリンク〉をたどった後の実体のパス)の `TMPDIR` でも、16 ファイルすべてが通る。([Issue #303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))
+  - 原因と直し方(どれも試験の側で吸収した。製品は変えていない。Linux で試す中身も変えていない):
+    - A. `F_GETFL`(開いたファイルの状態の値)の比べ: macOS は、fd(開いたファイルを指す番号)に書いただけで、`F_GETFL` の値に 0x10000 を立てる。`test_diagnostic_runtime.py` の比べ 3 組は、書く前と後の値をそのまま比べていたので落ちた(4 件)。
+      - macOS だけ 0x10000 を除いて比べる(`WRITTEN_FLAG`・`file_flags`)。Linux では 0 を除くので、比べる中身は変わらない。
+    - B. 1024 bytes の ref(Git の枝や印の名前): macOS のパスの長さの上限は 1024 bytes で、1024 bytes の loose ref(1 つの ref を 1 ファイルにした形)を絶対パスで作れない(`ENAMETOOLONG`。1 件)。
+      - `test_diagnostic_input_boundaries.py` は、loose ref を作るときに `ENAMETOOLONG` が出たときだけ、同じ名前を `.git/packed-refs`(ref をまとめて書く 1 ファイル)に書いて試す。ほかの `OSError` はそのまま落とす。
+      - 切り替える前に、`refs/heads` の直下に途中のフォルダが 1 つも無いことを確かめる。試した後は packed-refs を元のバイトに戻す(元が無ければ消す)。
+    - C. 非 UTF-8 の名前: APFS(macOS のファイルシステム)は、非 UTF-8 の名前のファイルを作れない(`EILSEQ`。1 件)。
+      - `test_diagnostic_matrix.py` は、作れなかった名前の小さな試し(`subTest`)だけを、理由の文 `このファイルシステムは非 UTF-8 の名前を作れない(EILSEQ。macOS の APFS など)` を出して省く。ほかの `OSError` はそのまま落とす。
+    - D. UNIX socket(同じ機械の中の通信の口)のパスの長さ: macOS の上限は 104 bytes で、長い `TMPDIR` では `bind` が失敗した(2 件。既定の `TMPDIR` では起きない)。
+      - `test_diagnostic_view_edges.py`・`test_secret_profiles.py` は、置き場へ一時的に移って相対の名前で `bind` する(`bind_unix`。`diagnostic_test_support.py` と `test_secret_profiles.py` の 2 か所に置いた)。
+    - E. `/var` の別名: 既定の `TMPDIR`(`/var/folders/…`)のままだと、`DiagnosticBudgetTests` の 4 試験(`subTest` を含め 8 件)が `NotADirectoryError` で落ちた。
+      - 製品の読み取りの部品は、symlink の親を通らない(意図した動き)。試験の `test_diagnostic_runtime.py` の 2 つのクラスだけが、一時領域を物理パスに直していなかった。
+      - `Path(…).resolve()` で物理パスに直した(`diagnostic_test_support.py` と同じ)。
+  - 回し方の注意: 診断の試験は discover の形(`python3 -m unittest discover -s scripts -t scripts -p <ファイル>`)で回す。
+    - dotted の形(`python3 -m unittest scripts.<名前>`)では、16 ファイル中 12 ファイルが `diagnostic_test_support` を読み込めない(どの OS でも同じ)。
+    - `diagnostic_test_support.py` の先頭の説明と、`runtime-requirements.md` の「## macOS の実測と再確認手順」に、この注意と Mac で回す手順を書いた。
+  - 実測:
+    - Mac(上と同じ環境)で、16 ファイルを discover の形で 1 本ずつ回した。
+      - 直す前: 既定の `TMPDIR` で 14 件(`test_diagnostic_runtime` の `FAILED (failures=4, errors=8)`・`input_boundaries` の 1 件・`matrix` の 1 件)が落ちた。物理パスの `TMPDIR` では 6 件、長い物理パスの `TMPDIR`(132 文字)では 8 件(`view_edges` と `secret_profiles` の `AF_UNIX path too long` を含む)が落ちた。
+      - 直した後: 既定の `TMPDIR` でも長い物理パスの `TMPDIR` でも、16 ファイルすべての最後の行が `OK`。省かれたのは、`matrix` の非 UTF-8 の名前の小さな試し 1 件と、前から省かれていた `secret_profiles` の device node の 1 件(作る権限が無い)だけ。
+      - 直した後の試験と直す前の製品(既定の `TMPDIR`): 落ちたのは段 `non-gnu-grep` の 1 件だけ。
+    - Ubuntu 22.04 の容器(上と同じ): `python3 -m unittest discover -s scripts -p 'test_*.py'` は、直す前も直した後も `Ran 1135 tests`・`OK (skipped=40)` で、省かれる数は変わらない(Linux では非 UTF-8 の名前の小さな試しも省かれない)。
+  - 限界:
+    - 0x10000 は、XNU(macOS のカーネル)の内部の印(書き込みがあった印)と推測する(未確認)。
+      - 除いても、製品がファイルの状態の値を変えたことは見逃さないと考える。設計レビューの Mac の実測では、`F_SETFL` で 0x10000 は立てられず、一度立つと消せなかった。`os.O_*` のどれも 0x10000 を含まない。
+    - Mac の B は packed-refs だけで試す。診断が loose と packed のどちらでも、同じ判定で名前の長さを見ることを前提にする。
+    - Mac では、非 UTF-8 の名前の小さな試しは省かれる(数えない)。
+    - これは試験の確かめで、診断の macOS 実機の確認(`runtime-requirements.md` の「新しい診断の macOS 実機は未確認」)には数えない。Python の回帰の正式な必要環境は Linux のまま。
+
 ## v4.29.2
 
 ### 修正

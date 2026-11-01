@@ -1,4 +1,8 @@
-"""#260: 本物の保護記録を使う、診断公開CLIの契約試験。"""
+"""#260: 本物の保護記録を使う、診断公開CLIの契約試験。
+
+この補助を使う試験は discover の形(`python3 -m unittest discover -s scripts -t scripts -p <ファイル>`)で回す。
+dotted の形(`python3 -m unittest scripts.<名前>`)では、この補助を読み込めない。
+"""
 import base64
 import hashlib
 import json
@@ -50,6 +54,14 @@ def inventory(root):
         else:
             raise AssertionError('通常fixtureに特殊fileがある: ' + str(path))
     return result
+
+
+def bind_unix(sock, path):
+    # macOS の UNIX socket のパスの上限は 104 bytes。長い一時領域でも作れるように、置き場へ移って相対の名前で bind する
+    path = Path(path); previous = os.getcwd()
+    os.chdir(path.parent)
+    try: sock.bind(path.name)
+    finally: os.chdir(previous)
 
 
 class DiagnosticFixture(unittest.TestCase):
