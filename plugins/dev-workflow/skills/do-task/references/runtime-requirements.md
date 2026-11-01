@@ -183,6 +183,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 実機の分岐: ケース `M26` は、Apple Git の Mac では実機の分岐を動かし、Apple Git を模した分岐は `NOTE:` の行を出して省く(数えない)。Apple Git でない環境では逆になる。
     - 変異 `e`(わざと壊した写しで試験が落ちるかを見る試験のうち、復元の補助の階層検査を外すもの)は、元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない Mac では、`NOTE:` の行を出して省く(数えない。[#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296))。
     - `J8`(非 UTF-8 の名前の復元)は、非 UTF-8 の名前を断るファイルシステム(APFS)では `NOTE:` の行を出して省く(数えない。[#301](https://github.com/Yuki-Maeda-valour/workflow/issues/301))。
+    - 変異 `b` は、Mac でも省かずに数える。`G7` の復元の行は元の対象でも落ちるので、`G7` の config-changed・hooks-changed の「git の呼び出しが 0 回」の 2 行が落ちることで見つけたと判定する([#300](https://github.com/Yuki-Maeda-valour/workflow/issues/300))。
   - 結果: 下の「Mac の結果」に書く。シェル回帰一式の正式な必要環境は Linux のままで、Mac の結果は Linux の代わりにしない。
 - Mac の結果(Issue #241、2026-10-30、macOS 26.6.2 / arm64、Git 2.54.0〈Apple Git-157〉、Bash 5.3.20、GNU coreutils 9.12・findutils 4.11.0・grep 3.12、system 設定は有効のまま): FAIL 44 行(下の 2 群だけ)。PASS の件数と所要時間は Issue #241 の検証の記録に書く。
   - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊した写しで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。

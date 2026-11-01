@@ -2,6 +2,37 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.29.4
+
+### 修正
+
+- macOS で、`implement-guard-selftest.sh`(実装を外部の AI に任せる前後の保護の自己試験)の変異 `b` が、期待するケース `G7` が変異を見つけていなくても PASS に見えていた穴を塞いだ。変異 `b` は、`G7` の config-changed・hooks-changed の「git の呼び出しが 0 回」の 2 行が落ちることも確かめる。製品(`implement-guard.sh`)は変えていない。([Issue #300](https://github.com/Yuki-Maeda-valour/workflow/issues/300))
+  - 変異テスト: 試験の対象の写しをわざと 1 か所壊して作り、対応するケースが落ちることを確かめる仕組み。変異 `b` は、hooks(Git が決まった操作のときに自動で動かす処理)・config(Git の設定)の検査を、Git による再取得より後ろへ動かす変異。
+  - 子スイート: 写しを対象にして、この自己試験を `--only <ケース>` で回し直したもの。変異 `b` では `--only G7,E1`。
+  - 原因:
+    - 変異 `b` の判定は、子スイートの出力に `FAIL  G7 ` で始まる行が 1 行でもあれば、変異を見つけたとしていた。
+    - macOS では、`G7` の `順序の検査(restore-taskmd): exit 0` の行が、元の対象(変異を当てない製品)でも落ちる。タスク本文の復元の補助が、起動時の試し(本番のコピーの前に、短いファイルを写してみる処理)で止まるため(`REASON=fd-copy-unavailable`。[#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285)・[#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271))。
+    - そのため、`G7` が検査の順序の変化を見つけなくても、この 1 行で変異 `b` が PASS になっていた。
+    - Linux では起きない(元の対象で `G7` は通る)。
+  - 直し方:
+    - `mutant` 関数に、変異 `b` だけの確かめを足した。子スイートの出力に `FAIL  G7 順序の検査(config-changed): git の呼び出しが 0 回` と `FAIL  G7 順序の検査(hooks-changed): git の呼び出しが 0 回` で始まる行があること(検査より先に Git を呼んだ証拠)を、1 行ずつ確かめる。無ければ FAIL にする。
+    - 確かめる行の名前は、`case_G7` の `ckeq` の行の名前と字面を合わせた(コードの注釈にも書いた)。名前が食い違ったときは、確かめが FAIL になる側に倒れる。
+    - 環境で省く形(`NOTE:` の行)は使わない。Mac でも変異 `b` を数える。
+    - 変異 `b` の壊し方・期待するケース `G7`・対照 `E1`(写しでも通るはずのケース)・ほかの 25 変異・`G7` の中身は変えていない。
+  - 試験の実測(2026-11-02):
+    - `case_L` を変異 `b` だけにした写し(`bonly.sh`)と、そこからさらに `G7` の「git の呼び出しが 0 回」の 2 行を確かめずに PASS にした写し(`weak.sh`)を作り、`--only L` で回した。`weak.sh` は子スイートも同じ写しを回すので、`G7` が変異 `b` を見つけられない状態になる。
+    - Mac(macOS 26.6.2 / arm64・bash 5.3.20・Git 2.54.0〈Apple Git-157〉。GNU coreutils 9.12・findutils 4.11.0・grep 3.12 を `PATH` の先頭に置き、`TMPDIR` を物理パスにした):
+      - 直した後の `bonly.sh` は、終了値 0・PASS 9 件 / FAIL 0 件。足した確かめの 2 行が PASS。
+      - `weak.sh` は、直す前は終了値 0・PASS 7 件 / FAIL 0 件(`ケース G7 が FAIL する` が restore-taskmd の行で PASS になる。これが穴)。直した後は終了値 1・PASS 7 件 / FAIL 2 件で、FAIL は足した確かめの 2 行。
+    - Ubuntu 22.04 の容器(root 以外・bash 5.1.16・Git 2.51.0):
+      - 直した後の `bonly.sh` は、終了値 0・PASS 9 件 / FAIL 0 件。
+      - `weak.sh` は、直す前は終了値 1・FAIL 2 件(`スイートが非ゼロで終わる(実際: 0)` と `ケース G7 が FAIL する(FAIL の行が無い)`)。直した後は終了値 1・FAIL 4 件(この 2 行と、足した確かめの 2 行)。
+    - Mac の全体は、直す前が終了値 1・PASS 1679 件 / FAIL 32 件(1381 秒)、直した後が終了値 1・PASS 1681 件 / FAIL 32 件(1410 秒)。FAIL の行の集合は同じで、新しく落ちた行は無い。FAIL は `B10` 2・`B12` 4・`G7` 1・`J1` 6・`J2` 8・`J3` 4・`J6` 5・`M6` 2 で、macOS の復元が起動時の試しで止まる既知の FAIL。変異 `b` の 9 行はすべて PASS。
+    - 容器の全体は、直した後が終了値 0・PASS 1731 件 / FAIL 0 件。直す前は PASS 1729 件 / FAIL 0 件で、変異 `b` の PASS が 2 行増えた。
+  - 限界:
+    - 元の対象でも config-changed・hooks-changed の「git の呼び出しが 0 回」の行が落ちる環境では、`--only L` の変異 `b` は、また PASS に見える(元の対象の結果と比べないため)。全体の実行なら、`G7` そのものの FAIL として見える。
+    - macOS の `G7` の restore-taskmd の行が落ちること自体は、直していない([#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285)・[#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271))。
+
 ## v4.29.3
 
 ### 変更
