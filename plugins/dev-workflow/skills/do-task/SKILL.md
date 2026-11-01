@@ -148,8 +148,15 @@ except (Exception, SystemExit) as exc:
 **開始前の確認**: ファイルシステムで管理ルートを固定し、権威参照ファイルと必要な契約を読む。
 [references/external-runners.md](references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
 - 対象タスク本文を完了条件として採用する前、対象 repo の Git 調査・事前検査より前に行う。検証のみ・内蔵・非 Git・Issue 本文などの非ファイルタスクでも省略しない。
-- 0/`none`、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
-- 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、`PENDING_LIST_SHA256` を `--acknowledged-list` へ渡せる。ログから復元しない。
+- 0/`none`・0/`other-projects-only`(別プロジェクトの記録だけ。無人でも同じ)、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
+  - 別プロジェクトの記録(take が記録の外に書く所属の印〈パスと番号だけのファイル〉で、別のプロジェクトと確かめた記録)は、会話の報告に記録の名前と `owner.top` を書く。
+  - Issue・PR・commit・ログには、別プロジェクトの記録の件数と記録の名前だけを書く。パスは書かない(他のプロジェクトの名前やホームのパスを載せない)。
+  - 止めたときの報告には、候補ごとの `reason` を書く。`overlap`・`overlap-unknown` は「機械は重なりを見つけた(確かめられなかった)」と分けて示す。
+- 確認値は 2 つあり、人の答えで選ぶ。2 つを同時に渡さない(§12-9-5)。
+  - 全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、`--acknowledged-identities` へ渡す。
+  - 1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、`--acknowledged-list` へ渡す。
+  - `reason` が `overlap` か `overlap-unknown` の候補が 1 件でもあれば、人が全候補を「今回と無関係」と答えても `list_sha256` を使う。
+- 同じ ship-task から入るときも再走査する。その会話で確認済みの同じ cwd と一覧に限り、引き継いだ方の値を対応する引数へ渡せる。ログから復元しない。
 - この入口は Phase 0 だけ。Phase 3 の take 後・Phase 4・差戻し・内蔵への引継ぎでは再走査しない。同じ実行の反復で Phase 0 へ戻さない。
 
 最初に [references/runtime-requirements.md](references/runtime-requirements.md) を読み、`PATH` 上の `bash` 4.0 以上と GNU 系の道具の実体・版を確認する。手順 3 の事前検査より前に適用する。
@@ -284,6 +291,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - 手順 1 の `--precheck` の stderr の `NOTE: 無効化して実行:` か `NOTE: promisor 構成:` で始まる行(すべて。無ければ「無し」。手順 6 の比較不能からの再開で照合に使う — §12-5 の ⑥)を出す。
    - 別のセッションで再開するときの手順も 1 行で指す(この値で手順 5 の共通工程を先に通す — §12-2 の受け入れた限界 (a))。
    - `UNREADABLE` が 0 でなければ、stderr の `NOTE: unreadable` のパスが検出の死角になったことを報告する。
+   - `OWNER_MARK=no` なら、「この記録は、ほかのセッションの開始前の確認で止まりうる」と報告に書く(理由は stderr の `NOTE: 所属の印を書けない:` の行。§12-2)。
    - **exit 30 は縮退** — stderr の理由コード(`not-git` / `unmerged` / `no-protected-area` / `over-limit` / `taskmd`)を報告し、外部委託を行わず内蔵 implementer で実装する。
    - `take` 成功後、[diagnostic-git.md](references/diagnostic-git.md) §2–3 の `plan` を全有効対象の親から子へ行う。`B`・`S`・任意のブランチ出典・追加除外の座標を渡す。
    - 2件目から最新の `--carry-plan` を渡す。全対象の指定が残った最新の計画パス/hashを親が保持し、起動前報告へ加えてから手順 4 へ進む。

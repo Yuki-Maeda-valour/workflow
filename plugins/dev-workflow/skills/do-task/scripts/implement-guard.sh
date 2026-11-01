@@ -21,11 +21,11 @@
 # 公開入口全体を330秒 TERM・追加5秒 KILLで監督する。終了値と合法な応答を照合し、不明なら止める。
 #
 # サブコマンド:
-#   take            起動前のスナップショット(5 要素)と退避を保護領域に作る
+#   take            起動前のスナップショット(5 要素)と退避を保護領域に作り、記録の外に所属の印を書く
 #   compare         起動後に 5 要素を取り直して比較し、結末(正常終了 / 引き継ぎ / 縮退 / 比較不能)を決める
 #   taskmd-diff     タスク MD の変化を「チェック状態の更新だけ」と「要件本文の変更」に分ける
 #   restore-taskmd  タスク MD だけを起動前の内容へ戻す(実ツリーに書くのはこのサブコマンドだけ)
-#   cleanup         保護領域を消す
+#   cleanup         保護領域を消し、その後に所属の印を消す
 #
 # 引数:
 #   --cwd <dir>              管理ルート。リポジトリの toplevel かその配下。toplevel は自前で解決し、
@@ -44,7 +44,11 @@
 #   0   成功(take: 作成した / config-check: 設定が同じ / compare: 正常終了 / taskmd-diff: 変化なしかチェック状態の更新だけ /
 #       restore-taskmd: 戻した / cleanup: 消した)
 #   2   usage(引数の不備。cleanup の --state が保護領域の guard-* でないときもここ — 何も消さない)
-#   20  internal(予期しない失敗。take は作りかけの保護領域を消す)
+#   20  internal(予期しない失敗。take は作りかけの保護領域と所属の印を消す。
+#       take は、印を書いた後に印を消す必要が出て〈タスク MD の在るフォルダが変わった・一時ファイルを消せない〉
+#       その印が消えたと確かめられないとき〈消せない・属性を取れない・自分の印でないエントリが在る〉もここ —
+#       外部委託を行わない。残った印は記録が無いので候補に数えない。
+#       cleanup は保護領域を消した後に所属の印を消せないときもここ — 消したことと残った印を stderr に出す)
 #   30  縮退(take のみ。外部委託を行わない)。stderr に `ERROR [<理由コード>] 説明`:
 #         not-git            --cwd が git リポジトリの中でない(解決した toplevel が --cwd を含まない場合も)
 #         unmerged           index がコンフリクト中
@@ -69,6 +73,8 @@
 #     ENTRIES=<未追跡エントリの件数>  BYTES=<退避対象の総バイト数>
 #     UNREADABLE=<読めなかったエントリ数。パスは stderr に `NOTE: unreadable <パス>`>
 #     TASKMD_REAL=<タスク MD の実体パス>
+#     OWNER_MARK=yes|no(所属の印を書けたか。no の理由は stderr の `NOTE: 所属の印を書けない: <理由>`。
+#                        no でも take は止めない。印の無い記録は、ほかのセッションの開始前の確認で止まりうる)
 #   compare:
 #     RESULT=normal|takeover|fallback|incomparable
 #     WORKTREE_CHANGED=yes|no|unknown   (①②③ の変化)
@@ -129,6 +135,19 @@
 #     taskmd-body          (タスク MD の実体のコピー。追跡済み・ignore 済み・リポジトリ外でも必ず)
 #   **追跡ファイルの差分と未追跡ファイルの平文複製が入る。** 消すのは cleanup だけ。
 #
+# 所属の印(記録の外。開始前の確認 pending-implementation.py が記録の中を開かずに読む):
+#   `<候補>/dev-workflow/owner-XXXXXX`(XXXXXX は記録の名前 guard-XXXXXX の後ろ)。0600 の通常ファイル。
+#   1 行 1 項目の `キー\t値`。パスは元のバイトの小文字 16 進、番号は十進:
+#     version(1)・guard_dev・guard_ino(記録の番号)・top・top_dev・top_ino(toplevel)・
+#     common・common_dev・common_ino(git の共通の置き場)・taskdir・taskdir_dev・taskdir_ino
+#     (タスク MD の実体の在るフォルダ)・tmpdir(take のときの $TMPDIR の物理パス。未設定なら空。相対パスなら印を書かない)
+#   中身は記録を作る前に求め、記録を作った直後に書く(.work に一時ファイル → link で名前を付ける →
+#   名前の番号を確かめて一時ファイルを消す)。64 KiB 以下。パスと番号だけで機密を含まない。
+#   求められない・書けない(名前に既にエントリが在る・link が無い など)ときは NOTE を出して続ける。
+#   link を呼んだ後は、名前にエントリが無いと確かめられたときだけ OWNER_MARK=no で続け、それ以外は終了値 20。
+#   take の失敗・シグナルでは記録と一緒に消す。cleanup は記録を消した後に消す(この記録の印と
+#   確かめられないもの〈フォルダ・リンク・番号の違う印〉は消さない)。
+#
 # マニフェスト(manifest.tsv):
 #   1 行 1 エントリのタブ区切り `種別\tモード\t値\tパス`。並びは LC_ALL=C のパス順。
 #     T  タスク MD の実体(必ず先頭行。値 = sha256、パス = 実体の絶対パス)
@@ -180,6 +199,7 @@
 #
 # 前提:
 #   bash 4.0 以上(連想配列を使う)。sha256 は `sha256sum` → `shasum` → `openssl` の順に探す。
+#   所属の印には PATH の `link`(GNU coreutils・macOS の /bin/link)と `od` を使う。無ければ印を書かずに続ける。
 # --- end usage ---
 set -eEuo pipefail
 export LC_ALL=C
@@ -253,6 +273,12 @@ TASKMD_REAL=""
 TASKMD_KIND=""
 TASKMD_REL=""       # 実体の toplevel 相対パス(リポジトリ外なら空)
 TASKMD_SEL_REL=""   # 選択パスの toplevel 相対パス(リポジトリ外なら空)
+OWNER_MARK=no       # take が所属の印を書けたか(stdout の 8 行目)
+OWNER_SKIP=""       # 印を書かない理由(空なら書く)
+OWNER_COMMON=""; OWNER_TASKDIR=""; OWNER_TMPDIR=""      # 印に書くパス(記録を作る前に求める)
+OWNER_TOP_ID=""; OWNER_COMMON_ID=""; OWNER_TASKDIR_ID=""  # 同じく「device:inode」
+NEW_MARK=""         # take が書く印の名前(完了するまでは失敗・シグナルで消す。link の前に控える)
+NEW_MARK_ID=""      # その印の「device:inode」(= 一時ファイルの番号。同じ番号の印だけを消す)
 CHANGES=()
 WT_CHANGED=0
 META_CHANGED=0
@@ -272,6 +298,18 @@ declare -A REPORTED=()
 cleanup_tmp() {
   if [ -n "${WORK:-}" ]; then rm -rf -- "$WORK"; fi
   if [ -n "${NEW_STATE:-}" ] && [ "${TAKE_DONE:-0}" -eq 0 ]; then rm -rf -- "$NEW_STATE"; fi
+  # 印は記録の後に消す(先に消すと、ほかのセッションの開始前の確認が印の無い記録を見る)。
+  # link の直後に信号を受けても消せるよう、名前と番号は link の前に控えてある。同じ番号の通常ファイル(自分の印)だけを消す。
+  # 自分の印と確かめられないもの(番号が違う・属性を取れない)は消さない。記録は消したので、残っても候補に数えない
+  if [ "${TAKE_DONE:-0}" -eq 0 ] && [ -n "${NEW_MARK:-}" ]; then
+    mark_state
+    if [ "$OWN_MARK_STATE" = own ]; then rm -f -- "$NEW_MARK" 2>/dev/null || true; mark_state; fi
+    case "$OWN_MARK_STATE" in
+      absent) : ;;
+      own) echo "NOTE: 所属の印を消せずに残った(対応する記録は消したので、開始前の確認の候補に数えない。機密を含まないので手で消してよい): $(path_field "$NEW_MARK")" >&2 ;;
+      *) echo "NOTE: 所属の印の名前に、自分の印と確かめられないエントリが残った(消さない。対応する記録は消したので、開始前の確認の候補に数えない): $(path_field "$NEW_MARK")" >&2 ;;
+    esac
+  fi
 }
 on_signal() {
   if [ "$SUB" = restore-taskmd ]; then trap '' TERM INT HUP; fi
@@ -2292,6 +2330,203 @@ verify_taskmd_body() { # マニフェストの T 行と taskmd-body を突き合
 T_MODE=""; T_SHA=""; T_PATH=""
 
 # ═════════════════════════ take ═════════════════════════
+# ── 所属の印(記録の外の owner-XXXXXX。external-runners.md §12-2・§12-9)──
+# 開始前の確認(pending-implementation.py)が、記録の中を開かずに別のプロジェクトの記録かを見分けるための印。
+# 中身はパスと番号だけで、機密を含まない。書けなくても take は止めない(OWNER_MARK=no と NOTE)。
+hex_bytes() { # $1=文字列 → 元のバイトの小文字 16 進(改行なし)
+  printf '%s' "$1" | od -An -v -tx1 | tr -d ' \n'
+}
+hex_into() { # $1=変数名 $2=文字列 → 0: 変換でき、元のバイト数の 2 倍の長さの小文字 16 進を $1 に入れた
+  # コマンド置換の失敗を外側の printf で隠さないよう、1 つずつ戻り値と形を確かめる(LC_ALL=C なので ${#2} はバイト数)
+  local out
+  out="$(hex_bytes "$2")" || return 1
+  [ "${#out}" -eq $(( ${#2} * 2 )) ] || return 1
+  [[ -z $out || $out =~ ^[0-9a-f]+$ ]] || return 1
+  printf -v "$1" '%s' "$out"
+}
+name_absent() { # $1=パス → 0: 親のフォルダの一覧を読めて、その名前が無いと確かめられた
+  # -e と -L が偽になるのは、エントリが無いときだけでなく、属性の取得の失敗(I/O エラーなど)のときもある。
+  # 親の一覧(readdir)で名前の有無を確かめる。名前はグロブとして安全な owner-<英数字など> に限る
+  local parent="${1%/*}" base="${1##*/}" listing
+  [ ! -e "$1" ] && [ ! -L "$1" ] || return 1
+  [[ $base =~ ^owner-[A-Za-z0-9._-]+$ ]] || return 1
+  listing="$(find "$parent" -mindepth 1 -maxdepth 1 -name "$base" -print 2>/dev/null)" || return 1
+  [ -z "$listing" ]
+}
+owner_skip() { [ -n "$OWNER_SKIP" ] || OWNER_SKIP="$1"; }
+owner_mark_of() { printf '%s/owner-%s' "${1%/*}" "${1##*/guard-}"; }   # $1=記録のパス → 印のパス
+prepare_owner_mark() { # 記録を作る前に、印に書くパスと番号を求める。求められなければ OWNER_SKIP に理由を入れる
+  local rc=0 p id_re='^[0-9]+:[0-9]+$'
+  OWNER_SKIP=""
+  if ! type -P link >/dev/null 2>&1; then owner_skip "link が無い"; return 0; fi
+  if ! type -P od >/dev/null 2>&1; then owner_skip "od が無い"; return 0; fi
+  # 共通の置き場(collect_config_origins と同じ前置き・同じ相対パスの解決)
+  capture_path git "${GIT_PRE[@]}" -C "$TOP" rev-parse --git-common-dir || rc=$?
+  if [ "$rc" -ne 0 ] || [ -z "$CAP" ]; then owner_skip "共通の置き場を求められない"; return 0; fi
+  case "$CAP" in /*) p="$CAP" ;; *) p="$TOP/$CAP" ;; esac
+  if ! abs_existing_dir "$p"; then owner_skip "共通の置き場の物理パスを求められない"; return 0; fi
+  OWNER_COMMON="$RP"
+  # タスク MD の在るフォルダ(実体のファイルではなく、その親のフォルダ)
+  p="$TASK_MD"
+  case "$p" in /*) : ;; *) p="$CWD_PHYS/$p" ;; esac
+  if [ ! -e "$p" ] || ! real_path "$p" || [ -z "$RP" ]; then owner_skip "タスク MD の在るフォルダを求められない"; return 0; fi
+  split_path "$RP"
+  if ! abs_existing_dir "$SP_DIR"; then owner_skip "タスク MD の在るフォルダを求められない"; return 0; fi
+  OWNER_TASKDIR="$RP"
+  # take のときの $TMPDIR(未設定・空なら値も空)
+  OWNER_TMPDIR=""
+  if [ -n "${TMPDIR:-}" ]; then
+    # 相対の TMPDIR は、外部の実装役の起動場所(--cwd)によって指す先が変わる。印には書かない(安全側)
+    case "$TMPDIR" in /*) : ;; *) owner_skip "TMPDIR が相対パス(外部の実装役の起動場所によって指す先が変わる)"; return 0 ;; esac
+    if [ -z "$EXCL_TMPDIR" ]; then owner_skip "TMPDIR の物理パスを求められない"; return 0; fi
+    OWNER_TMPDIR="$EXCL_TMPDIR"
+  fi
+  OWNER_TOP_ID="$(stat_identity "$TOP" 2>/dev/null)" || OWNER_TOP_ID=""
+  OWNER_COMMON_ID="$(stat_identity "$OWNER_COMMON" 2>/dev/null)" || OWNER_COMMON_ID=""
+  OWNER_TASKDIR_ID="$(stat_identity "$OWNER_TASKDIR" 2>/dev/null)" || OWNER_TASKDIR_ID=""
+  if [[ ! $OWNER_TOP_ID =~ $id_re ]] || [[ ! $OWNER_COMMON_ID =~ $id_re ]] || [[ ! $OWNER_TASKDIR_ID =~ $id_re ]]; then
+    owner_skip "フォルダの番号を求められない"
+  fi
+}
+mark_state() { # 控えた名前のエントリを 4 つに分けて OWN_MARK_STATE に入れる
+  #   absent  エントリが無いと確かめられた(-e と -L のどちらも偽で、親の一覧にもその名前が無い。name_absent)
+  #   own     控えた番号の通常ファイル(自分の印)
+  #   other   自分のものでないと確かめられた(リンク・通常ファイルでない・番号が違う)
+  #   unknown 確かめられない(属性を取れない・控えた番号が無い・親の一覧を読めない・一覧に名前が在るのに属性を取れない)
+  local id
+  OWN_MARK_STATE=unknown
+  [ -n "$NEW_MARK" ] || { OWN_MARK_STATE=absent; return 0; }
+  if [ ! -e "$NEW_MARK" ] && [ ! -L "$NEW_MARK" ]; then
+    if name_absent "$NEW_MARK"; then OWN_MARK_STATE=absent; fi
+    return 0
+  fi
+  if [ -L "$NEW_MARK" ] || [ ! -f "$NEW_MARK" ]; then OWN_MARK_STATE=other; return 0; fi
+  id="$(stat_identity "$NEW_MARK" 2>/dev/null)" || id=""
+  if [[ ! $id =~ ^[0-9]+:[0-9]+$ ]] || [[ ! ${NEW_MARK_ID:-} =~ ^[0-9]+:[0-9]+$ ]]; then return 0; fi
+  if [ "$id" = "$NEW_MARK_ID" ]; then OWN_MARK_STATE=own; else OWN_MARK_STATE=other; fi
+}
+OWN_MARK_STATE=""
+drop_owner_mark() { # $1=理由。自分の印を消して OWNER_MARK=no にする。消えたと確かめられなければ take を止める(終了値 20)
+  # 不変条件: 印を link で名前に付けた後(またはその可能性がある後)に控え(NEW_MARK・NEW_MARK_ID)を空にするのは、
+  # この関数の中で「名前にエントリが無い」と確かめられたときだけ。ほかの所では直接空にしない。
+  # link の前(印がまだ名前に付いていない)に控えを空にするのは構わない(write_owner_mark の手順 2 の前)。
+  # 古い所属を示す有効な印を残したまま続けると、開始前の確認が古い印を採りうる。
+  # 自分の印だけを消し、名前にエントリが無いと確かめてから控えを空にして続ける。それ以外は控えを保ったまま止め、
+  # 後始末(cleanup_tmp)にもう一度確かめさせる(外部の実装役は起動しない。記録は消すので、残った印は候補に数えない)。
+  #   own(消せなかった)・unknown(確かめられない): 古い印が残りうるので止める。
+  #   other(自分のものでないエントリが在る): 消さない。中身を確かめられないので、続けずに止める(安全側)。
+  mark_state
+  if [ "$OWN_MARK_STATE" = own ]; then rm -f -- "$NEW_MARK" 2>/dev/null || true; mark_state; fi
+  case "$OWN_MARK_STATE" in
+    absent) : ;;
+    own)
+      echo "ERROR [internal] 所属の印を消せない($1。外部委託を行わない): $(path_field "$NEW_MARK")" >&2
+      trap - ERR; exit 20 ;;
+    other)
+      echo "ERROR [internal] 所属の印の名前に、自分の印でないエントリが在る($1。消さない。外部委託を行わない): $(path_field "$NEW_MARK")" >&2
+      trap - ERR; exit 20 ;;
+    *)
+      echo "ERROR [internal] 所属の印を消せたか確かめられない($1。外部委託を行わない): $(path_field "$NEW_MARK")" >&2
+      trap - ERR; exit 20 ;;
+  esac
+  NEW_MARK=""; NEW_MARK_ID=""
+  OWNER_MARK=no
+  echo "NOTE: 所属の印を書けない: $1" >&2
+}
+write_owner_mark() { # 記録を作った直後に印を書く。書けなければ NOTE を出して OWNER_MARK=no で続ける
+  local mark tmp gid sz id_re='^[0-9]+:[0-9]+$' hex_top="" hex_common="" hex_taskdir="" hex_tmpdir=""
+  OWNER_MARK=no
+  if [ -n "$OWNER_SKIP" ]; then echo "NOTE: 所属の印を書けない: $OWNER_SKIP" >&2; return 0; fi
+  mark="$(owner_mark_of "$NEW_STATE")"
+  tmp="$WORK/owner-mark"
+  gid="$(stat_identity "$NEW_STATE" 2>/dev/null)" || gid=""
+  if [[ ! $gid =~ $id_re ]]; then echo "NOTE: 所属の印を書けない: 記録の番号を求められない" >&2; return 0; fi
+  # パスの 16 進は先に 1 つずつ変換して確かめる(失敗したら印を公開しない。tmpdir の失敗を空の値にしない)
+  if ! hex_into hex_top "$TOP" || ! hex_into hex_common "$OWNER_COMMON" \
+     || ! hex_into hex_taskdir "$OWNER_TASKDIR" || ! hex_into hex_tmpdir "$OWNER_TMPDIR"; then
+    echo "NOTE: 所属の印を書けない: パスを 16 進にできない" >&2
+    return 0
+  fi
+  # 1. 記録の中の作業用フォルダに一時ファイルとして書く(読む側は書きかけの印を見ない)
+  if ! {
+    printf 'version\t1\n'
+    printf 'guard_dev\t%s\nguard_ino\t%s\n' "${gid%%:*}" "${gid#*:}"
+    printf 'top\t%s\ntop_dev\t%s\ntop_ino\t%s\n' "$hex_top" "${OWNER_TOP_ID%%:*}" "${OWNER_TOP_ID#*:}"
+    printf 'common\t%s\ncommon_dev\t%s\ncommon_ino\t%s\n' "$hex_common" "${OWNER_COMMON_ID%%:*}" "${OWNER_COMMON_ID#*:}"
+    printf 'taskdir\t%s\ntaskdir_dev\t%s\ntaskdir_ino\t%s\n' "$hex_taskdir" "${OWNER_TASKDIR_ID%%:*}" "${OWNER_TASKDIR_ID#*:}"
+    printf 'tmpdir\t%s\n' "$hex_tmpdir"
+  } >"$tmp" 2>/dev/null || ! chmod 600 "$tmp" 2>/dev/null; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    echo "NOTE: 所属の印を書けない: 一時ファイルを書けない" >&2
+    return 0
+  fi
+  sz="$(stat_size "$tmp" 2>/dev/null)" || sz=""
+  case "$sz" in ''|*[!0-9]*) sz=65537 ;; esac
+  if [ "$sz" -gt 65536 ]; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    echo "NOTE: 所属の印を書けない: 64 KiB を超える" >&2
+    return 0
+  fi
+  # 2. 同じ中身に 2 つ目の名前を付ける。link は名前が既に在れば(フォルダ・リンクでも)何も作らずに失敗する。
+  #    ln は使わない(名前がフォルダかフォルダを指すリンクだと、その中に作って成功する)。
+  #    ここまでは link の前(印はまだ名前に付いていない)なので、書けないときは控えを空にしたまま戻ってよい。
+  #    名前に既にエントリが在れば、link を呼ばずに戻る(印の名前にフォルダ・リンクが在る場合。何も作らない)
+  if [ -e "$mark" ] || [ -L "$mark" ]; then
+    rm -f -- "$tmp" 2>/dev/null || true
+    echo "NOTE: 所属の印を書けない: 印の名前に既にエントリが在る: $(path_field "$mark")" >&2
+    return 0
+  fi
+  #    link の前に、名前と一時ファイルの番号を後始末用に控える(link の直後の信号でも、同じ番号の印だけを消せる)
+  NEW_MARK_ID="$(stat_identity "$tmp" 2>/dev/null)" || NEW_MARK_ID=""
+  if [[ ! $NEW_MARK_ID =~ $id_re ]]; then
+    NEW_MARK_ID=""
+    rm -f -- "$tmp" 2>/dev/null || true
+    echo "NOTE: 所属の印を書けない: 一時ファイルの番号を求められない" >&2
+    return 0
+  fi
+  NEW_MARK="$mark"
+  #    ここから先は印が名前に付いた(か、その可能性がある)ので、控えを空にするのは drop_owner_mark だけ
+  if ! "$(type -P link)" "$tmp" "$mark" >/dev/null 2>&1; then
+    # link の前に名前は空いていた。失敗しても印が付いた可能性があるので、無いと確かめられたときだけ続ける
+    # (間に自分のものでないエントリが現れた・確かめられないときは止める)
+    drop_owner_mark "印の名前を作れない"
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  # 3. 印の名前がリンクでない通常ファイルで、一時ファイルと同じ番号であることを確かめてから、一時ファイルを消す。
+  #    確かめられなければ、自分の印が残りうるので drop_owner_mark に任せる(無いと確かめられなければ止める)
+  if [ -L "$mark" ] || [ ! -f "$mark" ] || [ "$(stat_identity "$mark" 2>/dev/null || true)" != "$NEW_MARK_ID" ]; then
+    drop_owner_mark "書いた印を確かめられない"
+    rm -f -- "$tmp" 2>/dev/null || true
+    return 0
+  fi
+  if ! rm -f -- "$tmp" 2>/dev/null; then drop_owner_mark "一時ファイルを消せない"; return 0; fi
+  OWNER_MARK=yes
+}
+remove_owner_mark() { # $1=消した記録のパス $2=消す前の記録の「device:inode」(cleanup 用)
+  local mark
+  mark="$(owner_mark_of "$1")"
+  if [ ! -e "$mark" ] && [ ! -L "$mark" ]; then
+    if name_absent "$mark"; then return 0; fi   # 印が無い(古い版の記録・書けなかった)
+    # 属性を取れないのに一覧に名前が在る・一覧を読めない: 印が残ったか確かめられない
+    echo "ERROR [internal] 保護領域は消したが、所属の印が残ったか確かめられない(機密を含まないので手で消してよい): $(path_field "$mark")" >&2
+    trap - ERR
+    exit 20
+  fi
+  if [ -L "$mark" ] || [ ! -f "$mark" ] || [ -z "$2" ] \
+     || ! grep -qxF -e "guard_dev"$'\t'"${2%%:*}" -- "$mark" 2>/dev/null \
+     || ! grep -qxF -e "guard_ino"$'\t'"${2#*:}" -- "$mark" 2>/dev/null; then
+    echo "NOTE: 所属の印の名前に、この記録の印と確かめられないものが在る(消さない): $(path_field "$mark")" >&2
+    return 0
+  fi
+  if ! rm -f -- "$mark" 2>/dev/null || ! name_absent "$mark"; then
+    echo "ERROR [internal] 保護領域は消したが、所属の印を消せない(機密を含まないので手で消してよい): $(path_field "$mark")" >&2
+    trap - ERR
+    exit 20
+  fi
+  echo "NOTE: 所属の印を消した: $(path_field "$mark")" >&2
+}
+
 cmd_take() {
   local rc f sz n_ent=0 total=0 unreadable=0 t_kind t_sha t_mode pf man_sha snap_sha
 
@@ -2317,10 +2552,12 @@ cmd_take() {
 
   # 保護領域(以後の一時ファイルもこの中に置く)
   resolve_state_base
+  prepare_owner_mark   # 印の中身は記録の作成より前に求める
   NEW_STATE="$(mktemp -d "$STATE_BASE/guard-XXXXXX" 2>/dev/null)" || { NEW_STATE=""; degrade no-protected-area "保護領域にディレクトリを作れない: $STATE_BASE"; }
   chmod 700 "$NEW_STATE"
   WORK="$NEW_STATE/.work"
   mkdir -- "$WORK" "$NEW_STATE/snapshot" "$NEW_STATE/files"
+  write_owner_mark     # 記録を作った直後に印を書く(以後の失敗・シグナルでは記録と一緒に消す)
 
   # タスク MD の実体の確定(symlink なら辿る。2026-09-17 決定 50)
   local sel="$TASK_MD" parent base
@@ -2337,6 +2574,10 @@ cmd_take() {
   [ -n "$TASKMD_REAL" ] || degrade taskmd "タスク MD の実体パスを確定できない: $TASK_MD"
   if [ -L "$TASKMD_REAL" ] || [ ! -f "$TASKMD_REAL" ]; then degrade taskmd "タスク MD の実体が通常ファイルでない: $TASKMD_REAL"; fi
   [ -r "$TASKMD_REAL" ] || degrade taskmd "タスク MD の実体が読めない: $TASKMD_REAL"
+  if [ "$OWNER_MARK" = yes ]; then
+    split_path "$TASKMD_REAL"
+    if [ "$SP_DIR" != "$OWNER_TASKDIR" ]; then drop_owner_mark "タスク MD の在るフォルダが、印を書いた後に変わった"; fi
+  fi
   set_taskmd_rel
   {
     printf 'selected\t%s\n' "$(path_field "$TASKMD_SEL")"
@@ -2413,6 +2654,7 @@ cmd_take() {
   printf 'BYTES=%s\n' "$total"
   printf 'UNREADABLE=%s\n' "$unreadable"
   printf 'TASKMD_REAL=%s\n' "$(path_field "$TASKMD_REAL")"
+  printf 'OWNER_MARK=%s\n' "$OWNER_MARK"
   TAKE_DONE=1
 }
 
@@ -2782,12 +3024,17 @@ cmd_restore_taskmd() {
 
 # ═════════════════════════ cleanup ═════════════════════════
 cmd_cleanup() {
+  local gid=""
   init_excl
   if ! check_state_dir "$STATE_ARG"; then
     fail_usage "--state が保護領域の guard-* でない・無い・symlink(何も消していない): $(path_field "$STATE_ARG")"
   fi
+  # 印が自分の記録のものかを確かめるため、消す前に記録の番号を控える
+  resolve_stat
+  if [ -n "$STAT_FLAVOR" ]; then gid="$(stat_identity "$STATE" 2>/dev/null)" || gid=""; fi
   rm -rf -- "$STATE" || fail_internal "保護領域を消せない: $(path_field "$STATE")"
   echo "NOTE: 保護領域を消した: $(path_field "$STATE")" >&2
+  remove_owner_mark "$STATE" "$gid"   # 記録を消した後に印を消す
 }
 
 # ── 引数解析 ──

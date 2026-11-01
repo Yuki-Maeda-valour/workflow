@@ -116,7 +116,8 @@ class DiagnosticFixture(unittest.TestCase):
             fields[key] = value
         self.assertEqual(set(fields), {'STATE_DIR', 'MANIFEST_SHA256',
                                       'SNAPSHOT_SHA256', 'TASKMD_REAL', 'BYTES',
-                                      'ENTRIES', 'UNREADABLE'})
+                                      'ENTRIES', 'UNREADABLE', 'OWNER_MARK'})
+        self.assertIn(fields['OWNER_MARK'], ('yes', 'no'))
         for key in ('MANIFEST_SHA256', 'SNAPSHOT_SHA256'):
             self.assertRegex(fields[key], r'^[0-9a-f]{64}$')
         state = Path(fields['STATE_DIR'])
