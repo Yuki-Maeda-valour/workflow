@@ -2,6 +2,35 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.29.2
+
+### 修正
+
+- macOS で、`implement-guard-selftest.sh`(実装を外部の AI に任せる前後の保護の自己試験)のケース `J8` が、前提のファイルを作れないまま比べて PASS にしていた 3 行を出さなくなった。非 UTF-8 の名前を断るファイルシステム(macOS の APFS)では、`J8` を `NOTE:` の行で省く(数えない)。製品(`implement-guard.sh`・`restore-taskmd.py`)は変えていない。([Issue #301](https://github.com/Yuki-Maeda-valour/workflow/issues/301))
+  - ケース `J8`: 非 UTF-8 の名前(UTF-8 として読めないバイト列の名前)の実ファイルを、改行を含む親フォルダの中に作り、選択の symlink(別のパスを指すリンク)から指して、タスク MD の復元を試す。
+  - 原因:
+    - APFS は、非 UTF-8 の名前のファイルとフォルダを作れない(EILSEQ。名前のバイト列が不正という OS のエラーで、番号は 92)。`J8` の前提の `mkdir -p` が失敗し、実名のファイルが無いまま比べていた。
+    - `非UTF-8: 元bytesへ復元` は、`sha_of`(読めないファイルでは空を返す)の結果が前後とも空で、`ckeq` が一致と判定していた。
+    - `非UTF-8: 選択リンク文字列不変` と `非UTF-8: Git呼出0` は、`take` が失敗して何も変わらないので、同じ値のまま PASS になっていた。
+    - Linux では起きない(非 UTF-8 の名前のファイルを作れる)。
+  - 直し方:
+    - `J8` は、前提を作った直後に、実名のファイルと選択の symlink が在ることを確かめる。前提を作る 4 行の stderr(標準エラー)は `$WORK/j8-setup.err` に取る。
+    - 無いときは、`$WORK`(自己試験の作業用のフォルダ)の下に非 UTF-8 の名前のフォルダを作ってみる(`j8_names_rejected`)。EILSEQ で断られたときだけ、`NOTE: J8 を省く: …` の行を出してケースを省く。`J8` の結果の行は 1 行も出さない。
+    - ほかの理由で前提が無いときは、`FAIL  J8 非UTF-8: 前提(非UTF-8の実名・改行を含む親・選択symlink)を作れる(…)` を出してケースを終える。括弧の中は stderr の先頭 300 bytes で、表示できない文字(改行・タブ・生のバイトを含む)を `?` に替える(結果の行を UTF-8 として正しく保つ)。
+    - `ckeq` は、比べる 2 つの値がどちらも空なら FAIL にする(`比べる値が両方とも空。空を期待する比べは ckeqe を使う`)。空が正しい値の比べには、新しい関数 `ckeqe` を使う(今は `B4` の `git status` の 2 行だけ)。
+    - Linux の結果は変わらない(全行 PASS・行の数も同じ)。`J8` の行の名前も変えていない。
+  - 試験の実測(2026-11-02):
+    - Mac(macOS 26.6.2 / arm64・APFS・bash 5.3.20・Git 2.54.0〈Apple Git-157〉。GNU coreutils 9.12・findutils 4.11.0・grep 3.12 を `PATH` の先頭に置き、`TMPDIR` を物理パスにした): `--only J8` は終了値 0・NOTE の行が 1 行・`結果: PASS 0 件 / FAIL 0 件`。
+    - Mac の全体は PASS 1679 件 / FAIL 32 件(2967 秒)。FAIL は `B10` 2・`B12` 4・`G7` 1・`J1` 6・`J2` 8・`J3` 4・`J6` 5・`M6` 2 で、設計時の実測と同じ。直す前の 40 行から、`J8` の 8 行が消えた。残る 32 行は、macOS の復元が起動時の試しで止まる既知の FAIL([#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285)・[#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271))。
+    - Mac で前提の確かめを外した写し(`if false; then`)は、`FAIL  J8 非UTF-8: 元bytesへ復元(比べる値が両方とも空。空を期待する比べは ckeqe を使う)` を出し、終了値 1。
+    - Ubuntu 22.04 の容器(root 以外・bash 5.1.16・Git 2.51.0): `--only J8,B4` は終了値 0・PASS 39 件 / FAIL 0 件(`J8` は 11 行すべて PASS・NOTE なし)。全体は終了値 0・PASS 1729 件 / FAIL 0 件(648 秒)で、直す前と同じ件数。
+    - 同じ容器で、選択の symlink を作らない写しと、`mkdir -p` を `false` に替えた写しは、どちらも前提の FAIL の行を 1 行だけ出し、終了値 1・NOTE なし。後者の stdout は `iconv -f UTF-8 -t UTF-8` を通る。
+    - 空どうしの比べの洗い出し(設計時の 2026-11-01): `ckeq` に「両方とも空なら記録する」行を足した写しで全体を回すと、Mac は `B4` の 2 行と `J8` の 1 行、Linux は `B4` の 2 行だけだった。
+  - 限界:
+    - macOS では、`J8`(非 UTF-8 の名前の復元)を確かめない。Linux の結果で確かめる。
+    - `ckne` の実際の値が空のとき・`ckf` のコマンドが前提の欠落で失敗したときに PASS になる点と、`B4` の `status_of` が失敗して空になったときに `ckeqe` が一致とみなす点は、変えていない。
+    - `diff-snapshot-selftest.sh` の `ckeq` も、空どうしを一致とみなす(空を期待する比べが 3 か所)。この版では変えていない。
+
 ## v4.29.1
 
 ### 修正
