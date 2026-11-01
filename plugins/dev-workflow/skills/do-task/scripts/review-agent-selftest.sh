@@ -1413,8 +1413,8 @@ if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化よ
   ng "明示のログ(既存のエントリ): 初期化より前に die する形でも、リンク先の中身が変わらない"; cat "$D4_VICTIM" >&2; fi
 
 # ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
-# ケース名の接頭辞: 走行中の差し替え / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 / ログのパス /
-# 子に渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
+# ケース名の接頭辞: 走行中の差し替え / 差し替えの照合 / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 /
+# ログのパス / 子に渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
 # どれもスタブと制限した PATH で打ち、対象の一時領域($TMPDIR)はこのスイートの一時領域へ向ける。
 # FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
 # (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
@@ -1455,7 +1455,8 @@ k_run() { # 残り=引数。制限した PATH・このスイートの一時領�
 }
 
 # 本実行の間に、スクリプトが開いたログのパスを差し替えるスタブ(プローブは即答する)。
-# 差し替えた後は長く眠らない。中止のケース(SELFTEST_SWAP_HOLD=1)だけ、中止されるまで居座る(最長 60 秒)
+# 差し替えた後は長く眠らない。中止のケース(SELFTEST_SWAP_HOLD=1)だけ、中止されるまで居座る(最長 60 秒)。
+# SELFTEST_SWAP_MODE=none はパスを消さずに差し替えない。fdlink はパスを /dev/fd/7 を指す symlink に差し替える
 cat >"$WORK/bin/swaphold.sh" <<'EOF'
 #!/usr/bin/env bash
 i=0
@@ -1464,11 +1465,13 @@ EOF
 cat >"$WORK/bin/stub-swap.sh" <<EOF
 #!/usr/bin/env bash
 for a in "\$@"; do case "\$a" in *ping*) echo '{"verdict":"APPROVED","issues":[]}'; exit 0 ;; esac; done
-rm -f "\$SELFTEST_SWAP_LOG"
+if [ "\$SELFTEST_SWAP_MODE" != none ]; then rm -f "\$SELFTEST_SWAP_LOG"; fi
 case "\$SELFTEST_SWAP_MODE" in
   symlink)  "$REAL_LN" -s "\$SELFTEST_SWAP_VICTIM" "\$SELFTEST_SWAP_LOG" ;;
   hardlink) "$REAL_LN" "\$SELFTEST_SWAP_VICTIM" "\$SELFTEST_SWAP_LOG" ;;
   fifo)     "$REAL_MKFIFO" "\$SELFTEST_SWAP_LOG" ;;
+  fdlink)   "$REAL_LN" -s /dev/fd/7 "\$SELFTEST_SWAP_LOG" ;;
+  none)     : ;;
 esac
 echo '{"verdict":"APPROVED","issues":[]}'
 if [ "\${SELFTEST_SWAP_HOLD:-0}" = 1 ]; then
@@ -1557,6 +1560,108 @@ else
     ng "走行中の差し替え: (d) 中止: victim の中身が変わらない"; cat "$K_VICTIM" >&2; fi
 fi
 leak_cleanup
+
+# 差し替えの照合: 差し替えないときは、差し替えの NOTE を出さない。ログのパスを /dev/fd/7 を指す symlink に
+# 差し替えると、NOTE を出す(その symlink では [ /dev/fd/7 -ef <パス> ] が真になる)。
+# macOS は /dev/fd/7 を調べたデバイス番号が開いたファイルと違い、-ef がいつも偽になる。その形は、対象の
+# [ /dev/fd/7 -ef "$LOG_FILE" ] をすべて false に替えた写しで模す(写しは python3 の比べ直しの道を通る)。
+# 写しでは、差し替えないとき(本実行の間の中止を含む)は NOTE を出さない。symlink・ハードリンクの差し替えでは
+# NOTE を出し、victim を変えない。
+# os._exit(0) だけの encodings を PYTHONPATH に置いても、ハードリンクの差し替えで NOTE を出す(比べ直しを -I で
+# 起動するため。終了値は見ない。正規化の python3 も同じ影響を受けるため)。
+# python3 が無いときは確かめられないので、差し替えなくても NOTE を 1 行だけ出す
+kc_notes() { # $1=ケース名 $2=期待する差し替えの NOTE の行数(0 / 1 / + は 1 以上)
+  kc_n="$(grep -cF 'NOTE: ログのパスが走行中に差し替えられた:' "$CASE_ERR" 2>/dev/null)"
+  kc_ok=0
+  case "$2:$kc_n" in
+    0:0|1:1|+:[1-9]|+:[1-9][0-9]*) kc_ok=1 ;;
+  esac
+  if [ "$kc_ok" -eq 1 ]; then ok "$1"; else
+    ng "$1"; echo "--- $1: 差し替えの NOTE の行 ${kc_n:-(数えられない)}(期待 $2)" >&2; cat "$CASE_ERR" >&2; fi
+}
+kc_run() { # $1=ログの名前 $2=差し替えの形(空なら差し替えないスタブ) 残り=追加の環境変数
+  kc_log="$K_DIR/match-$1.md"; kc_mode="$2"; shift 2
+  kc_cmd="bash $STUB_OK --readonly-x"
+  K_EXTRA=("$@")
+  if [ -n "$kc_mode" ]; then
+    k_reset_victim
+    kc_cmd="$K_SWAP_CMD"
+    K_EXTRA=("SELFTEST_SWAP_MODE=$kc_mode" "SELFTEST_SWAP_LOG=$kc_log" "SELFTEST_SWAP_VICTIM=$K_VICTIM" "$@")
+  fi
+  k_run --runner stubrunner --command "$kc_cmd" --readonly-flag "--readonly-x" --prompt-file "$WORK/prompt.md" \
+    --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$kc_log"; rc=$?
+  K_EXTRA=()
+}
+kc_run none ""
+check "差し替えの照合: 差し替えない: 本実行まで通る" 0 "$rc"
+kc_notes "差し替えの照合: 差し替えない: stderr に差し替えの NOTE が無い" 0
+kc_run fdlink fdlink
+kc_notes "差し替えの照合: /dev/fd/7 を指す symlink: stderr に差し替えの NOTE が出る" +
+K_EF_TARGET="$K_DIR/ef-false.sh"
+sed 's#\[ /dev/fd/7 -ef "\$LOG_FILE" \]#false#g' "$TARGET" >"$K_EF_TARGET"
+kc_hits="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$TARGET")"
+kc_left="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$K_EF_TARGET")"
+if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
+  K_TARGET="$K_EF_TARGET"
+  kc_run ef-none ""
+  check "差し替えの照合: -ef が偽の写し: 差し替えない: 本実行まで通る" 0 "$rc"
+  kc_notes "差し替えの照合: -ef が偽の写し: 差し替えない: stderr に差し替えの NOTE が無い" 0
+  kc_run ef-symlink symlink
+  kc_notes "差し替えの照合: -ef が偽の写し: (a) symlink: stderr に差し替えの NOTE が出る" +
+  if k_victim_same; then ok "差し替えの照合: -ef が偽の写し: (a) symlink: victim の中身が変わらない"; else
+    ng "差し替えの照合: -ef が偽の写し: (a) symlink: victim の中身が変わらない"; cat "$K_VICTIM" >&2; fi
+  kc_run ef-hardlink hardlink
+  kc_notes "差し替えの照合: -ef が偽の写し: (b) ハードリンク: stderr に差し替えの NOTE が出る" +
+  if k_victim_same; then ok "差し替えの照合: -ef が偽の写し: (b) ハードリンク: victim の中身が変わらない"; else
+    ng "差し替えの照合: -ef が偽の写し: (b) ハードリンク: victim の中身が変わらない"; cat "$K_VICTIM" >&2; fi
+  # 起動の途中で読まれる encodings を、何もせずに終了値 0 で終わる形にする(-I の無い比べ直しは「同じ」を返す)
+  mkdir -p "$K_DIR/pysite/encodings"
+  printf '%s\n' 'import os; os._exit(0)' >"$K_DIR/pysite/encodings/__init__.py"
+  kc_run ef-pythonpath hardlink "PYTHONPATH=$K_DIR/pysite"
+  kc_notes "差し替えの照合: -ef が偽の写し: (b) ハードリンク: PYTHONPATH の encodings: stderr に差し替えの NOTE が出る" +
+  K_TARGET=""
+  # 中止: (d) と同じ打ち方で、差し替えずに居座るスタブの本実行の間に TERM を送る。
+  # 中止の処理は本実行の cwd とリダイレクトの下で走るが、比べ直しは同じファイルと見分ける
+  leak_cleanup
+  rm -f "$K_MARKER"
+  kc_log="$K_DIR/match-ef-term.md"
+  env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$K_SANDBOX" TMPDIR="$K_TMP" \
+    SELFTEST_SWAP_MODE=none SELFTEST_SWAP_LOG="$kc_log" SELFTEST_SWAP_VICTIM="$K_VICTIM" \
+    SELFTEST_SWAP_HOLD=1 SELFTEST_SWAP_MARKER="$K_MARKER" \
+    bash "$K_EF_TARGET" --runner stubrunner --command "$K_SWAP_CMD" --readonly-flag "--readonly-x" \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 45 --log-file "$kc_log" \
+    >"$CASE_OUT" 2>"$CASE_ERR" &
+  kc_pid=$!
+  waited=0
+  while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+  sleep 1
+  if [ ! -e "$K_MARKER" ]; then
+    ng "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
+    kill -9 "$kc_pid" 2>/dev/null; wait "$kc_pid" 2>/dev/null
+  else
+    kill -TERM "$kc_pid" 2>/dev/null
+    rc=0; wait "$kc_pid" || rc=$?
+    if grep -qE '^ERROR \[aborted\] ' "$CASE_ERR"; then
+      ok "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: stderr に ERROR [aborted] が出る"
+    else
+      ng "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: stderr に ERROR [aborted] が出る(実際 exit=$rc)"
+      cat "$CASE_ERR" >&2
+    fi
+    kc_notes "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: stderr に差し替えの NOTE が無い" 0
+  fi
+  leak_cleanup
+  # python3 が無い: 比べ直せないので、差し替えなくても NOTE を 1 行だけ出す
+  # (jq があれば jq で正規化し、無ければ生出力を返す。どちらも終了値 0)
+  K_TARGET="$K_EF_TARGET"
+  K_PATH="$WORK/sandbox-nopython"
+  kc_run ef-nopython ""
+  K_PATH="$K_SANDBOX"
+  K_TARGET=""
+  check "差し替えの照合: -ef が偽の写しで python3 が無い: 差し替えない: 本実行まで通る" 0 "$rc"
+  kc_notes "差し替えの照合: -ef が偽の写しで python3 が無い: 差し替えない: stderr に差し替えの NOTE が 1 行だけ出る" 1
+else
+  ng '差し替えの照合: 写しの治具([ /dev/fd/7 -ef "$LOG_FILE" ] を false に替える)が当たらない'
+fi
 
 # 既定名の置き場: 既定の置き場の iter1 に (a) FIFO (b) /dev/null を指す symlink を置く。
 # その番号の名前にエントリが在れば開かずに次の番号へ進むので、iter2 に通常ファイルのログを作って exit 0 で終わる

@@ -131,9 +131,15 @@ PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空で�
 exec 9>&1 8>&2
 # ログの fd(7)を開いたか。開く前は、ログに何も書かない。判定は fd の有無ではなくこのフラグで行う
 # (呼び出し側から継承した fd 7 や、環境の同名の変数に当たらないように)。
-# LOG_SWAP_NOTED は、走行中の差し替えの NOTE を 1 回だけ出すため
+# LOG_SWAP_NOTED は、走行中の差し替えの NOTE を 1 回だけ出すため。
+# LOG_EF_OK は、この環境で /dev/fd/7 の -ef が使えるか(ログを開いた直後に確かめ、使えれば 1 にする)。
+# LOG_SWAP_PY は、走行中の差し替えの比べ直しに使う python3。起動時に 1 回だけ決め、以後の PATH や cwd の変化に
+# 左右されない。中止の処理は cd "$CWD" の下でも走るので、絶対パスでなければ(関数・PATH の相対の要素など)空にする
 LOG_FD_OPEN=0
 LOG_SWAP_NOTED=0
+LOG_EF_OK=0
+LOG_SWAP_PY="$(command -v python3 2>/dev/null || true)"
+case "$LOG_SWAP_PY" in /*) : ;; *) LOG_SWAP_PY="" ;; esac
 
 cleanup() {
   if [ -n "$STATE_DIR" ]; then rm -rf "$STATE_DIR"; fi
@@ -156,12 +162,30 @@ log_block() { # $1=見出し $2=本文ファイル
   fi
 }
 
+# ログのパスが、開いたログ(fd 7)と同じファイルを指しているか。同じなら 0。
+# ログは通常ファイルとして作るので、パスが symlink なら差し替え(/dev/fd/7 を指す symlink は -ef が真になるため先に見る)。
+# 次に -ef で比べる。-ef が使える環境(LOG_EF_OK=1。Linux)では、それで決める。macOS は /dev/fd/7 を調べた
+# デバイス番号が開いたファイルと違い、-ef がいつも偽になるので、起動時に決めた python3 で、fd 7 の fstat と
+# パスの stat の (デバイス番号, i ノード番号) を比べ直す。-I -S で起動し、PYTHON* の環境変数・利用者の site・cwd・
+# site-packages(.pth を含む)を読まない。python3 が無い・比べ直せない(パスが無い・読めないなど)ときは 1(差し替えとみなす。見落とさない側)。
+# 比べ直しは何も出さず、stdin を待たない
+log_path_same() {
+  if [ -L "$LOG_FILE" ]; then return 1; fi
+  if [ /dev/fd/7 -ef "$LOG_FILE" ]; then return 0; fi
+  if [ "$LOG_EF_OK" -eq 1 ]; then return 1; fi
+  if [ -z "$LOG_SWAP_PY" ]; then return 1; fi
+  "$LOG_SWAP_PY" -I -S -c 'import os, sys
+a = os.fstat(7)
+b = os.stat(sys.argv[1])
+sys.exit(0 if (a.st_dev, a.st_ino) == (b.st_dev, b.st_ino) else 1)' "$LOG_FILE" </dev/null >/dev/null 2>&1
+}
+
 # 走行中の差し替えを知らせる。ログに結果を書く前ごとに呼ぶ(NOTE は失敗を意味せず、終了コード・結果に影響しない)。
 # 中止・想定外の失敗の処理は、本実行・プローブの `2>` のリダイレクトが効いたまま走るので、
 # 元の stderr(fd 8)に書く(`>&2` は一時ファイルへ行って消える)
 note_log_swap() {
   if [ "$LOG_FD_OPEN" -eq 1 ] && [ "$LOG_SWAP_NOTED" -eq 0 ]; then
-    if ! [ /dev/fd/7 -ef "$LOG_FILE" ]; then
+    if ! log_path_same; then
       echo "NOTE: ログのパスが走行中に差し替えられた: $LOG_FILE(このスクリプトは開いたファイルに書き続けた。パスの中身はこの実行のログとは限らない)" >&8
       LOG_SWAP_NOTED=1
     fi
@@ -751,6 +775,9 @@ case "$PROMPT_FILE" in /*) : ;;
   *) PROMPT_FILE="$(cd "$(dirname "$PROMPT_FILE")" && pwd -P)/$(basename "$PROMPT_FILE")" ;;
 esac
 # ログのパスが決まってから、ログへ書き始める
+# この環境で /dev/fd/7 の -ef が使えるかを、ログを開いた直後(外部ランナーを起動する前)に 1 回だけ確かめる。
+# 真なら(Linux)、以後は -ef だけで決め、python3 を起動しない
+if [ /dev/fd/7 -ef "$LOG_FILE" ]; then LOG_EF_OK=1; fi
 LOG_FD_OPEN=1
 echo "NOTE: ログ: $LOG_FILE" >&2
 

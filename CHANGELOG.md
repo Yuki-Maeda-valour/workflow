@@ -2,6 +2,36 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.29.1
+
+### 修正
+
+- macOS で `review-agent.sh`・`implement-agent.sh` が、ログのパスを差し替えていないのに毎回出していた `NOTE: ログのパスが走行中に差し替えられた` を出さなくなった。本当に差し替えられたときは、今までどおり出す。([Issue #295](https://github.com/Yuki-Maeda-valour/workflow/issues/295))
+  - 差し替えの検出: 開いたログ(fd 7。fd は開いたファイルを指す番号)と、ログのパスが今も同じファイルを指しているかを、ログに結果を書く前ごとに確かめる処理(`note_log_swap`)。
+  - 原因: 比べ方が `[ /dev/fd/7 -ef "$LOG_FILE" ]` だけだった。macOS では、`/dev/fd/7` を調べたデバイス番号(ファイルシステムの番号)が開いたファイルと違うので、`-ef` がいつも偽になる([#285](https://github.com/Yuki-Maeda-valour/workflow/issues/285)・[#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) と同じ原因)。NOTE が毎回出るので、本当の差し替えと見分けられなかった。
+  - 直し方:
+    - ログを開いた直後(外部ランナー〈レビューや実装に使う外部の AI のコマンド〉を起動する前)に、`-ef` が使える環境かを 1 回だけ確かめる。使える環境(Linux)では、以後も `-ef` だけで決め、`python3` を起動しない。
+    - 使えない環境(macOS)では、`-ef` が偽のときだけ、起動時に決めた `python3` で比べ直す。fd 7 の `fstat` とパスの `stat` のデバイス番号と i ノード番号(ファイルの番号)が同じなら、NOTE を出さない。
+    - 比べ直しの `python3` は、起動時の `PATH` で決めた絶対パスのときだけ使う。`-I -S` で起動し、`PYTHON*` の環境変数・利用者ごとの追加ライブラリ・cwd・site-packages(Python ごとの追加ライブラリの置き場)の影響を受けない。
+    - `python3` が無い・比べ直せない(パスが無い・読めないなど)ときは、今までどおり NOTE を出す(差し替えを見落とさない側)。
+    - ログのパスが symlink なら、比べる前に差し替えとみなす(ログは通常ファイルとして作るため)。今までは、ログのパスを `/dev/fd/7` を指す symlink に差し替えると `-ef` が真になり、Linux でも macOS でも NOTE が出なかった(直す前からあった抜け)。
+    - NOTE の文・出す回数(1 回だけ)・終了値・結果・ログの開き方・正規化の `python3` の探し方は変えていない。
+  - 試験: 自己試験 2 本(`review-agent-selftest.sh`・`implement-agent-selftest.sh`)に、`差し替えの照合:` の 14 行を同じ名前で足した。
+    - 差し替えないときに NOTE が出ないこと・ログのパスを `/dev/fd/7` を指す symlink に差し替えると NOTE が出ることを見る。
+    - macOS の形は、`[ /dev/fd/7 -ef "$LOG_FILE" ]` を `false` に替えた写しで模す(Linux でも比べ直しの道を通る)。写しで、差し替えないとき(本実行の間の中止を含む)は NOTE が出ず、symlink・ハードリンクの差し替えでは NOTE が出ることを見る。
+    - 写しで、`os._exit(0)` だけの `encodings` を `PYTHONPATH` に置いても、ハードリンクの差し替えで NOTE が出ることを見る(`-I` の効き目)。写しで `python3` が無いときは、差し替えなくても NOTE が 1 行だけ出ることを見る。
+    - `implement-agent-selftest.sh` の隔離した `PATH` に `python3` を足し、外した `safebin-nopython` を作った。差し替えのスタブ(試験で外部ランナーの代わりに起動するスクリプト)に、差し替えない形(`none`)と、`/dev/fd/7` を指す symlink に差し替える形(`fdlink`)を足した。
+  - 実測:
+    - Mac(macOS 26.6.2 / arm64・bash 5.3.20・Homebrew の Python 3.14.4。GNU coreutils 9.12 などを `PATH` の先頭に置いた): Issue の手順で、直す前は 2 本とも終了値 0 で NOTE が 1 行、直した後は 2 本とも終了値 0 で NOTE が 0 行。自己試験は、review が PASS 293 件 / FAIL 0 件、implement が PASS 298 件 / FAIL 0 件(直す前の基準は 279 件・284 件)。
+    - Ubuntu 22.04 の容器(root 以外・bash 5.1.16・Python 3.10.12)で、直す前の 2 本を対象にすると、FAIL は 2 本とも `差し替えの照合:` の 3 行だけ(`/dev/fd/7` を指す symlink で NOTE が出る・写しで差し替えないと NOTE が無い・写しの中止で NOTE が無い)。直した後は、review が PASS 293 件 / FAIL 0 件、implement が PASS 298 件 / FAIL 0 件。
+    - 同じ容器で、比べ直しの `-I` を外した写し(`-S` だけ)を対象にすると、FAIL は 2 本とも `PYTHONPATH の encodings` の 1 行だけ。
+  - 限界:
+    - `python3` が無い macOS では、今までどおり差し替えていなくても毎回の実行で NOTE が 1 回出る。Xcode のコマンドラインツールが無く、`/usr/bin/python3` が導入を促すだけの場合も、NOTE が出ると推測する(未確認)。導入を促す画面が開くかも未確認。
+    - macOS では、結果の行を書く直前に `python3` を 1 回起動する(1 回の実行でほぼ 1 回。NOTE を出した後は起動しない)。
+    - 最後の確かめ(結果の行を書く直前)の後の差し替えは見つけない(今までと同じ)。
+    - `PATH` の先頭が外部の書き込み範囲の中にある環境では、外部の実装役がその `python3` を差し替えて、macOS の NOTE を消しうる(推測)。同じ `PATH` なら `cat` なども差し替えられるので、もとからある弱さ。
+    - `-S` の効き目(site-packages の `.pth` を読まない)を見る常設の試験は足していない。仮想環境を作る治具が要るため。
+
 ## v4.29.0
 
 ### 変更
