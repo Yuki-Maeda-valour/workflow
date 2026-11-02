@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import unittest
 
@@ -88,6 +89,96 @@ class DiagnosticFormats(DiagnosticFixture):
         self.assertIn('sparse-not-materialized', result['warnings'])
         result = self.observe('show', '--path', 'out/file', '--format', 'blob')
         self.assertEqual(base64.b64decode(result['data']['bytes_b64']), b'out')
+
+    def _objects_state(self):
+        """#302: 元の.git/objectsの下の全通常fileを、相対名→(中身・mode・mtime)で控える。"""
+        objects = self.repo / '.git/objects'
+        state = {}
+        for path in sorted(objects.rglob('*')):
+            info = path.lstat()
+            if stat.S_ISREG(info.st_mode):
+                state[path.relative_to(objects).as_posix()] = (
+                    path.read_bytes(), stat.S_IMODE(info.st_mode), info.st_mtime_ns)
+        return state
+
+    def _run_four(self):
+        """#302: mtimeを古い固定値へそろえて控え、status・diff・files・showのrunの前後を返す。"""
+        # ctimeは試験から決まった値にそろえられないので、時刻はmtimeだけを比べる。
+        for path in (self.repo / '.git/objects').rglob('*'):
+            if stat.S_ISREG(path.lstat().st_mode):
+                os.utime(path, ns=(10**18, 10**18))
+        before = self._objects_state()
+        self.observe('status', '--under', '.')
+        self.observe('diff', '--under', '.', '--format', 'patch')
+        self.observe('files', '--under', '.')
+        self.observe('show', '--path', 'in/file', '--format', 'blob')
+        return before, self._objects_state()
+
+    def assert_objects_unchanged(self, before, after):
+        # 名前の集合(新しいobjectが無いこと)を先に比べ、次に中身とmodeを比べる。時刻は比べない(§8の例外)。
+        self.assertEqual(set(after), set(before))
+        self.assertEqual({k: v[:2] for k, v in after.items()}, {k: v[:2] for k, v in before.items()})
+
+    def commit_in_out(self):
+        for directory in ('in', 'out'):
+            (self.repo / directory).mkdir()
+            (self.repo / directory / 'file').write_text(directory)
+        self.commit()
+
+    def test_sparse_staged_run_writes_no_object(self):
+        self.commit_in_out()
+        self.git('sparse-checkout', 'init', '--cone', '--sparse-index')
+        self.git('sparse-checkout', 'set', 'in', 'task')
+        self.begin()
+        (self.repo / 'in/file').write_text('staged change\n')
+        self.git('add', 'in/file')
+        before, after = self._run_four()
+        self.assert_objects_unchanged(before, after)
+
+    def test_sparse_index_run_keeps_object_contents(self):
+        self.commit_in_out()
+        self.git('sparse-checkout', 'init', '--cone', '--sparse-index')
+        self.git('sparse-checkout', 'set', 'in')
+        (self.repo / 'in/file').write_text('unstaged change\n')
+        (self.repo / 'task').mkdir(exist_ok=True)
+        (self.repo / 'task/t.md').write_text('# sparse fixture\n- [ ] normal\n')
+        self.begin()
+        before, after = self._run_four()
+        self.assert_objects_unchanged(before, after)
+
+    def test_sparse_staged_packed_run_writes_no_object(self):
+        self.commit_in_out()
+        self.git('sparse-checkout', 'init', '--cone', '--sparse-index')
+        self.git('sparse-checkout', 'set', 'in', 'task')
+        self.begin()
+        self.git('gc', '--prune=now')
+        self.assertTrue(list((self.repo / '.git/objects/pack').glob('*.pack')))
+        (self.repo / 'in/file').write_text('staged change\n')
+        self.git('add', 'in/file')
+        before, after = self._run_four()
+        self.assert_objects_unchanged(before, after)
+
+    def test_non_sparse_run_keeps_object_times(self):
+        self.commit_in_out()
+        self.begin()
+        before, after = self._run_four()
+        self.assertEqual(after, before)
+
+    def test_six_level_alternates_chain_is_still_readable(self):
+        objects = self.repo / '.git/objects'
+        chain = [self.work / ('alternate-%d' % n) for n in range(1, 7)]
+        for store in chain:
+            (store / 'info').mkdir(parents=True)
+        # 元のobjectをすべて6段目へ移し、元→1段目→…→6段目とalternatesでつなぐ。
+        for path in list(objects.iterdir()):
+            if path.name != 'info':
+                shutil.move(str(path), str(chain[-1] / path.name))
+        for store, child in zip([objects, *chain[:-1]], chain):
+            (store / 'info/alternates').write_text(str(child) + '\n')
+        self.git('cat-file', '-e', 'HEAD:seed.txt')
+        self.begin()
+        result = self.observe('show', '--path', 'seed.txt', '--format', 'blob')
+        self.assertEqual(base64.b64decode(result['data']['bytes_b64']), b'public seed\n')
 
     def test_unmerged_index_reports_stages_but_head_worktree_comparison_works(self):
         self.begin()

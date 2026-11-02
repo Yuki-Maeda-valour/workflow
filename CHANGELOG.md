@@ -2,6 +2,60 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.29.5
+
+### 修正
+
+- 読み取り専用の診断(`diagnostic-git.py`)の `run` が、sparse index の repo で、元の `.git/objects` に新しい tree object を書いていたのを直した。展開で Git が新しく書く object は、診断の私有の領域の objects へ置く。([Issue #302](https://github.com/Yuki-Maeda-valour/workflow/issues/302))
+  - object: Git がファイルの中身(blob)・フォルダの中身の一覧(tree)などを記録したもの。`.git/objects` に、1 件ずつのファイル(loose)か、まとめたファイル(pack)で置く。
+  - stage: 変更を index に登録すること(`git add`)。
+  - sparse index: 作業ツリーに一部だけを展開するとき、展開しないフォルダを 1 つの項目(フォルダの項目)にまとめて持つ index の形式。
+  - 展開: フォルダの項目を、中の全ファイルの項目に戻すこと。Git は展開の後に、まとめの tree object を書こうとする。既に在れば、その object を持つファイルの更新時刻だけを新しくする。無ければ新しく書く。
+  - 私有の領域: 診断が元の repo を変えないために作る、自分だけの Git 管理領域(`diagnostic-private.py`)。
+  - alternates: 別の objects の置き場を「読むだけ」の参照として足す Git の仕組み(objects の置き場の `info/alternates` に、その置き場のパスを書く)。
+  - 原因:
+    - 私有の領域の Git 設定は固定値だけで、`index.sparse`・`core.sparseCheckout` と sparse-checkout の式のファイルが無い。その状態で Git が index を読むと(`ls-files`・`status --porcelain`)、sparse index を展開する。
+    - 診断は、元の objects をそのまま書き込める置き場(`GIT_OBJECT_DIRECTORY`)として渡していた。そのため、展開のときの tree object が元の objects に向かった。
+    - 変更を stage した repo では、まとめの tree が無いので、元の objects に新しい tree object が増えた。これは、元の repo へ書かない約束(`diagnostic-git.md` §8)に反する。
+    - 変更を stage していない repo では、既存の object を持つファイルの更新時刻が変わった(中身は同じ。[#274](https://github.com/Yuki-Maeda-valour/workflow/issues/274) の macOS 実機の検証で見つけた)。
+    - `run` はどの操作(status・diff・files・show)でも index を読むので、毎回起きた。sparse index でない repo では起きない。
+  - 直し方:
+    - 私有の領域の objects の置き場(今までは空)を `GIT_OBJECT_DIRECTORY` にした。元の objects は、その置き場の `info/alternates` に書いて読むだけにした。
+    - 元の objects が自分の alternates を持つときは、診断がたどった置き場をすべて 1 行ずつ書く。元の objects を 1 行だけ書く形では、元から 6 段つないだ置き場の object を Git が読めず、終了値 23 で止まる(Git がたどる段数に上限があるため)。
+    - 書く順は、診断がたどった順(`info/alternates` の行の順・深さ優先。Git と同じ)のまま元以外を書き、元の objects を最後に書く。元へ戻る参照が無い repo では、Git は今までと同じ深さ・同じ順で置き場をたどる。
+    - 元を先に書かない理由: 元から 6 段の連なりで、Git が起動のたびに stderr へ「nesting too deep」の行を出す。診断は子の stderr を合わせて 1 MiB までしか受けないので、多くのファイルを見る `run` が終了値 20 で止まる。設計レビューの実測では、約 550 bytes の置き場のパスと 800 ファイルの `status` で、元を先頭にした形は終了値 20、元を最後にした形と直す前は終了値 0・子の stderr 0 bytes だった。
+    - 名前で並べ替えた順も使わない。枝分かれのある連なりで、元から近いのに奥まで長い道を持つ置き場が先に来ると、Git が上限を超えて読みに行き、毎回エラーを出した(設計レビューの実測)。
+    - 行は Git の C 形式の引用(`"…"`。`\\`・`\"`・`\n` を戻す)で書く。パスに改行や `"` があっても 1 行に収まる。
+    - 私有の objects に書かれた object は、診断の終わりに私有の領域ごと消える(今までと同じ)。
+    - 診断の結果・終了値・元の objects の検査(たどった置き場を順に残す 1 行を除く)・呼び出し側の環境の検査は変えていない(元の alternates の連なりが 6 段までで、元へ戻る参照が無い repo。それ以外は下の限界)。
+  - 試験: `scripts/test_diagnostic_formats.py` に 5 件を足した(13 件 → 18 件)。
+    - stage した sparse index の repo で、status・diff・files・show の `run` の前後に、元の objects のファイルの名前・中身・mode が変わらないこと(新しい object が無いこと)。object を 1 件ずつのファイル(loose)で置いた場合と、`git gc --prune=now` で 1 つのファイル(pack)にまとめた場合の 2 件。
+    - stage していない sparse index の repo で、名前・中身・mode が変わらないこと(時刻の変化は許す)。
+    - sparse index でない repo で、名前・中身・mode・mtime がすべて変わらないこと。
+    - 元の object をすべて、元から 6 段つないだ alternates の置き場へ移した repo で、`show` が終了値 0 で正しい中身を返すこと。
+    - 時刻は mtime だけを比べる(ctime は試験から決まった値にそろえられないため)。
+  - 実測(Mac〈macOS 26.6.2 / arm64・Git 2.54.0〈Apple Git-157〉・Python 3.14.4〉と Ubuntu 22.04 の容器〈root 以外・Git 2.51.0・Python 3.10.12〉で同じ結果):
+    - 直した後は `test_diagnostic_formats.py` の 18 件が OK。
+    - 直した後の試験を直す前の製品と組んだ写しでは、stage した 2 件(loose・pack)だけが FAIL(名前の集合が違う。元の objects に新しい tree object が 2 件増えた)。ほかの 16 件は通った。
+    - 直した後に時刻が変わったファイル: stage した repo の loose で既存の 2 件、pack で pack のファイル 1 つ、stage していない repo で既存の loose 4 件、sparse index でない repo で 0 件。直す前も、新しい object の 2 件を除いて同じ数だった。
+    - わざと壊した写し(Mac):
+      - `run` の後に元の objects へ空の blob を 1 つ書く試験の写しでは、名前・中身を比べる 4 件がすべて FAIL。
+      - `run` の後に元の objects の 1 つの mtime を変える試験の写しでは、sparse index でない repo の 1 件だけが FAIL。
+      - 私有の `info/alternates` に元の objects を 1 行だけ書く製品の写しでは、6 段の試験が FAIL(終了値 23・`git-failed`)。
+  - 限界:
+    - sparse index の repo では、既存の object を持つファイル(loose か pack)の更新時刻(mtime・ctime)の更新が残る。元の repo が alternates を持つとき(`git clone --shared` など)は、その先の置き場(別の repo のこともある)のファイルの時刻も変わる(直す前も同じ)。
+    - 元の alternates の連なりが 7 段以上の repo では、私有の alternates に並べた置き場から奥の段も読めるようになり、診断が今まで止まった場面で止まらなくなりうる(推測)。このような repo は普通は無いので受け入れる。
+    - 元へ戻る alternates の参照がある repo(互いの置き場を参照する 2 つの repo など)では、元が主の置き場でないので、Git が起動のたびに「nesting too deep」を出しうる(設計レビューの実測。直す前の形は出さない)。多くのファイルを見る `run` が、子の stderr の上限で終了値 20 で止まりうる(推測)。まれな形なので受け入れる。
+    - 6 段の試験は 1 ファイルの `show` だけで、子の Git の stderr を見ない。そのため、元を先に書く誤りで子の stderr が増えることまでは見つけない。
+      - 子の stderr を記録する仮の `git` を置けば、1 件 2 秒ほどで見つけられる(実装のレビューで確かめた)。設計の範囲の外なので、この版では足していない。
+
+### 変更
+
+- `diagnostic-git.md` の約束に、sparse index の repo の時刻の例外を書いた。([Issue #302](https://github.com/Yuki-Maeda-valour/workflow/issues/302))
+  - §8: sparse index の repo では、Git が私有の領域で index を読むときに展開し、元の objects と、その alternates の連なりの置き場にある、既存の object を持つファイルの更新時刻を新しくすることがある。中身・mode・object の数は変えない。
+  - §12: 元の objects は私有の objects の `info/alternates` で読むだけにし、Git が書く object は私有の側へ置く。
+  - 時刻の更新まで止めない理由: sparse index かどうかの判定・index の読み方の変更・Git の版の分け(Git 2.34 は `ls-files --sparse` を知らず、終了値 129 で止まる。設計レビューの実測)が要るため。私有の領域に固定の sparse の設定と式を置く案は、設計レビューの実測で時刻の変化も 0 件にできたが、採らなかった。
+
 ## v4.29.4
 
 ### 修正
