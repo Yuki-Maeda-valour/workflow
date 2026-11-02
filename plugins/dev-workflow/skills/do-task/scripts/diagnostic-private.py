@@ -48,12 +48,20 @@ class Private:
             if context['backend']=='reftable': cfg+=b'refstorage = reftable\n'
         self.write(self.common+b'/config',cfg)
         self.objects=os.path.realpath(context['common']+b'/objects')
-        self.odb(self.objects,set(),0)
+        self.odb_seen={}; self.odb(self.objects,self.odb_seen,0)
+        # 元のobjectsは読むだけ(alternates)。展開などでGitが書くobjectは私有のobjectsへ置く。
+        # 元のalternatesの連なり(odbがたどったすべての置き場)も1行ずつ書き、Gitが読める段数を減らさない。
+        # odbがたどった順(Gitと同じ深さ優先)のまま書き、元は最後に書く。先に書いたり名前で並べ替えたりすると、
+        # 連なりによってはGitが毎回「nesting too deep」をstderrへ出し、子のstderrの上限を使う
+        self.private_objects=self.common+b'/objects'
+        def quote(p): return b'"'+p.replace(b'\\',b'\\\\').replace(b'"',b'\\"').replace(b'\n',b'\\n')+b'"\n'
+        chain=[p for p in self.odb_seen if p!=self.objects]+[self.objects]
+        self.write(self.private_objects+b'/info/alternates',b''.join(quote(p) for p in chain))
         self.env={'PATH':os.path.dirname(rt.git),'HOME':os.fsdecode(self.home),'LC_ALL':'C',
                   'GIT_CONFIG_NOSYSTEM':'1','GIT_CONFIG_SYSTEM':os.devnull,'GIT_CONFIG_GLOBAL':os.devnull,
                   'GIT_CONFIG_COUNT':'0','GIT_DIR':os.fsdecode(self.gd),'GIT_COMMON_DIR':os.fsdecode(self.common),
                   'GIT_INDEX_FILE':os.fsdecode(self.gd+b'/index'),'GIT_WORK_TREE':os.fsdecode(self.work),
-                  'GIT_OBJECT_DIRECTORY':os.fsdecode(self.objects),'GIT_OPTIONAL_LOCKS':'0','GIT_NO_LAZY_FETCH':'1',
+                  'GIT_OBJECT_DIRECTORY':os.fsdecode(self.private_objects),'GIT_OPTIONAL_LOCKS':'0','GIT_NO_LAZY_FETCH':'1',
                   'GIT_TERMINAL_PROMPT':'0','GIT_LITERAL_PATHSPECS':'1','GIT_ATTR_NOSYSTEM':'1'}
         rc,version=self.command('version',limit=4096)
         match=re.match(rb'git version ([0-9]+)\.([0-9]+)(?:\.|[ \n])',version)
@@ -88,7 +96,7 @@ class Private:
         if depth>40: R.fail('management-depth-limit')
         path=os.path.realpath(path)
         if path in seen: return
-        seen.add(path); fd=self.reader.directory(path); os.close(fd)
+        seen[path]=None; fd=self.reader.directory(path); os.close(fd)
         raw=self.reader.read(path+b'/info/alternates',16*R.MIB,missing=True)
         if raw:
             for line in raw.splitlines():

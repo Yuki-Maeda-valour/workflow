@@ -182,6 +182,9 @@ stdoutは完了時のJSON1件とLF。途中のGit出力を流さない。未知�
 
 元configをGitの起動設定として読まず、最初のGitから私有管理領域だけを使う。
 元repo・state・入力planへ書かず、atimeは内容変更と区別する。
+sparse index の repo では、Git が私有の領域で index を読むときに展開し、元の objects と、その alternates の連なりの置き場(別の repo のこともある)にある、既存の object を持つファイル(loose か pack)の更新時刻(mtime・ctime)を新しくすることがある。
+中身・mode・object の数は変えない。展開で Git が新しく書く object は、私有の objects へ置く(元の objects は alternates で読むだけ。§12)。
+時刻の更新まで止めるには、sparse index かどうかの判定・index の読み方の変更・Git の版の分けが要るので、例外として扱う。
 各fileと列挙集合の前後を検査するが、複数fileの原子的snapshotではない。
 同UIDの改変、検査間に戻される変更、元ODBの同時更新、任意子孫の完全停止は保証しない。
 SIGKILL・停電・カーネルI/O不帰還は期限内の自力回復を保証しない。
@@ -354,6 +357,7 @@ Gitのcwdと `GIT_WORK_TREE` は私有空ディレクトリ。元worktreeをGit�
 
 子環境は白紙から作り、私有HOME・空system/global設定・`GIT_CONFIG_NOSYSTEM`・`GIT_CONFIG_COUNT=0`、私有 `GIT_DIR/GIT_COMMON_DIR/GIT_INDEX_FILE` と固定のオブジェクト保存先を渡す。
 既存の安全用前置きを全Gitに適用し、日和見的更新・遅延取得・対話を止める。親のtrace・pager・名前空間・追加設定は暗黙継承しない。
+元の objects は私有の objects の `info/alternates` で読むだけにし、Git が書く object は私有の側へ置く。sparse index の repo の時刻の例外は §8。
 未保持の `GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES` 環境指定はunsupported。通常のfile alternatesは扱う。
 
 コピー対象の前後で種類・device/inode・mode・size・mtime/ctimeと内容hash、列挙集合を確認する。
