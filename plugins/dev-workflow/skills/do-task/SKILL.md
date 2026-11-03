@@ -245,7 +245,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 
 **implementer への委託プロンプトを準備する**(ここでは起動しない — **起動は下の「内蔵に解決されたとき」と「外部に解決されたとき」の手順 4 だけが行う**。無条件の起動命令をここに置くと、外部委託で必要な承認・スナップショット・退避を飛ばして起動しうる)。
 - **モデルは、内蔵に解決されたときに限り** profile の `implementer_model` に従う(**外部に解決されたときのモデルは [references/external-runners.md](references/external-runners.md) §12-6 の実装用既定表が正本**)。
-- implementer のようにモデルを指定する持ち場(委託先 1 体ごとの受け持ち)が 1 つだけのときの能力帯は軸 3。
+- implementer のようにモデルを指定する持ち場(委託先 1 体ごとの受け持ち)が 1 つだけのときの性能の段は軸 3。
 - **`name` は `implementer`**(**内蔵で実行するフル段階に限り**、以降の差し戻し・STATUS 問い合わせの宛先になる。**外部 implementer は宛先にならない** — 軸 5)。
 - 委託プロンプトに必ず含めるもの:
 
@@ -428,7 +428,7 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
 
-- reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では 3 体を単一メッセージで並列起動する(持ち場割り当ては §2(a)、能力帯の解決は軸 3)
+- reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では 3 体を単一メッセージで並列起動する(持ち場割り当ては §2(a)、性能の段の解決は軸 3)
   - `reviewer-internal`: セッションと同じモデル
   - `reviewer-strong`: 使える中で最も強いモデル
   - `reviewer-alt`: それとは別のモデル

@@ -113,7 +113,7 @@ python3 -m venv "$validation_venv"
 `test_shell_requirements.py` の旧 bash 境界は `SHELL_REQUIREMENTS_BASH_3_2`・`SHELL_REQUIREMENTS_BASH_4_3`・`SHELL_REQUIREMENTS_BASH_4_4` に各実体の絶対パスを渡して検証する。不在なら該当ケースを明示的に skip する(互換モードで代用しない)。bash の下限・起動順を変更するときは 3 版すべてで検証する。
 
 ```bash
-# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠〉)+ 配布メタの一括検証
+# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口〉)+ 配布メタの一括検証
 python3 scripts/validate.py   # 結果の行が ERROR 0・WARN 0 で合格(WARN も直す)
 python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりの写しの一致)
 

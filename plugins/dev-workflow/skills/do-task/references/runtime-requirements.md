@@ -56,11 +56,11 @@ PYTHON
 - Git は既存の安全用前置きと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
   - 起動時に `grep --version` の最初の行が `(GNU grep)` を含むことを確かめ、違えば `runtime-unavailable`(終了値 20)で止まる(BSD grep は通さない。[#303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))。
 - `os.O_NOFOLLOW`・`O_DIRECTORY`・`O_NONBLOCK`、bytes の名前、`open/stat/readlink` の `dir_fd`、`fstat`、fd からのディレクトリ列挙、単調時計が必要。
-- `subprocess.Popen` と直接子の停止・回収、私有pipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
+- `subprocess.Popen` と直接子の停止・回収、専用のpipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
 - profile が1つでもあれば既存 `secret-profiles.py` と同じ PyYAML が必要。すべて不在なら PyYAML を要求しない。
 - OS 名だけで拒否しない。新しい診断の macOS 実機は未確認であり、下記の既存実測には含めない。
 - 全操作300秒・Git/grep各30秒・直接子の TERM5秒＋KILL5秒・後始末5秒を使う。最終出力も残り時間に含む。GNU `timeout` は診断の新しい必須条件にしない。
-- 完成応答だけを直接子へ渡し、私有pipeを監督する。共有する stdout/stderr の flags は変更しない。無応答・非0・不正応答は結果不明として停止する。
+- 完成応答だけを直接子へ渡し、専用のpipeを監督する。共有する stdout/stderr の flags は変更しない。無応答・非0・不正応答は結果不明として停止する。
 - 通常の読み手停止は監督で打ち切る。OS の入出力が戻らない場合、同じ利用者権限での改変、元のオブジェクト保存先の同時更新、任意子孫の完全停止は保証しない。
 
 ## タスク本文の復元

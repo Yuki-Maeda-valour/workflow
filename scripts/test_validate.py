@@ -263,6 +263,50 @@ class ValidateTest(unittest.TestCase):
         )
         self.assert_error(["docs/design.md", "置き換える語", "'枡'"])
 
+    def test_replaced_word_noryokutai_is_error_with_guidance(self):
+        self.append_to_checked_file("能力帯の異なる2体", relpath=self.REPLACED_TARGET, prefix="")
+        self.assert_error(["置き換える語", "'能力帯'", "性能の段"])
+
+    def test_replaced_word_shiyu_and_sudoori_are_errors(self):
+        self.append_to_checked_file("私有の領域", relpath=self.REPLACED_TARGET, prefix="")
+        self.assert_error(["置き換える語", "'私有'", "専用の"])
+        self.append_to_checked_file("検査が素通りする", relpath="docs/design.md", prefix="")
+        self.assert_error(["docs/design.md", "置き換える語", "'素通り'"])
+
+    def assert_appended_line_flagged(self, text, needles, relpath=None, flagged=True):
+        """1 行を書き足し、**その行の番号の ERROR**(flagged=False なら ERROR 0)を確かめ、元の中身へ戻す。
+        subTest をまたいで前の行の ERROR が残り、後の判定を通してしまうのを防ぐ。"""
+        relpath = relpath or self.REPLACED_TARGET
+        target = self.repo / relpath
+        original = target.read_bytes()
+        try:
+            line_no = original.decode("utf-8").count("\n") + 2  # 書き足す前の改行の後ろの空行の次
+            self.append_to_checked_file(text, relpath=relpath, prefix="")
+            if flagged:
+                self.assert_error([f"{relpath}:{line_no}:", *needles])
+            else:
+                self.assert_clean()
+        finally:
+            target.write_bytes(original)
+
+    def test_replaced_word_fusagu_conjugations_are_errors(self):
+        for form in ("塞ぐ", "塞がない", "塞ぎます", "塞ぎ、", "塞いだ", "塞げる", "塞ごう"):
+            with self.subTest(form=form):
+                self.assert_appended_line_flagged(f"経路を{form}", ["置き換える語", "塞ぐ", "防ぐ"])
+
+    def test_replaced_word_fusagu_after_kanji_is_not_flagged(self):
+        for word in ("閉塞が起きる", "要塞がある", "梗塞が", "閉塞げ", "閉塞ぎ", "閉塞いだ", "閉塞ごう", "閉塞ぐ"):
+            with self.subTest(word=word):
+                self.assert_appended_line_flagged(f"{word}の説明", [], flagged=False)
+
+    def test_replaced_word_git_deguchi_is_error(self):
+        for text in ("git 出口の規律", "git の出口は ship-task", "Git 出口", "GIT の出口", "git出口", "gitの出口", "git  出口", "Git　出口", "git の 出口", "git　の　出口"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'git 出口'", "commit・push・PR"])
+
+    def test_plain_deguchi_alone_is_not_flagged(self):
+        self.assert_appended_line_flagged("非常口と出口の案内を書く", [], flagged=False)
+
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
     def test_v1_exemption_word_alone_does_not_exempt(self):
