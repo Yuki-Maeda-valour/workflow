@@ -35,6 +35,8 @@ do-task / ship-task の新しい開始では、対象タスク本文の採用と
                     決定事項を抽出 → 精査(裏取り・レビュー・確認)→ doc/(01/03/04/05/07)へ出典付き反映
                     (update-doc が「実コード→doc」なのに対しこちらは「人の決定→doc」。
                      実装が必要な決定・宿題は /create-task へチェーン提案)
+整理系(任意の時点): /cleanup = 作業の残り(worktree・作業用コンテナ・作業ファイル)を読み取りで棚卸しし、
+                    分類 → 承認 → `git worktree remove` で片付ける(方針は §5-26)
 出力系(任意の時点): /export-doc = doc/ をクライアント提出用に PDF / xlsx / HTML へ変換
                     (サニタイズ確認+機密検査。doc/ は不変。変換ツールは動的検出で縮退あり)
 無人運用(任意・既定オフ): loop.sh = 人のシェル / cron から起動する同梱スクリプト(skill ではない)。
@@ -57,6 +59,7 @@ do-task / ship-task の新しい開始では、対象タスク本文の採用と
 | reflect-decisions | 議事録・文字起こし・チャットログ等の原資料から決定事項を抽出し、精査(原文裏取り・レビュー・ユーザー確認)を経て doc/ へ出典付きで反映(決定と未決の峻別・矛盾は対比確認)。未決・宿題はタスク化候補として報告 | 原資料, doc/, profile | doc/ 01・03〜05・07(02・06 は対象外), doc/README.md(索引) |
 | discuss-spec | テーマ単位の壁打ちでユーザーと仕様を決める(論点分解 → 選択肢・推奨提示 → 1 論点ずつ合意)。結論を決定 / 暫定 / 未決 / 却下に峻別した決定録を生成し /reflect-decisions へチェーン | doc/, 実装コード, profile | 決定録(doc/minutes/ 等)のみ。doc/ は書かない |
 | export-doc | doc/ をクライアント提出用に PDF / xlsx / HTML へ変換。サニタイズ確認(地雷・管理タグ・内部記述)+機密検査+ Mermaid 画像化。ツールは動的検出・縮退あり | doc/, profile | export/(出力のみ。doc/ は不変) |
+| cleanup | 作業の残り(worktree・作業用コンテナ・作業ファイル)の棚卸しと片付け。読み取りで集め、「削除してよい / 確認が必要 / 残す」に分類し、承認を得て `git worktree remove`(`--force` なし)で消す。ブランチは消さない | `git worktree list`, コンテナ一覧, プロセスの作業ディレクトリ, 作業ファイル | 承認を得た worktree・コンテナ・ボリューム・作業ファイルの削除と、`git worktree prune` のみ |
 
 「書く」は各 skill の成果物。他の skill が工程の副産物として書く `.claude/` の状態ファイル(create-task などによる把握キャッシュ `grasp.md` の更新、update-doc などによる削除、`.claude/reviews/` の記録)は §5-18 の規律のもとで書き、この列には載せない(`grasp.md` を成果物とする understand-project と、レポートを成果物とする data-audit は載せる)
 
@@ -334,6 +337,14 @@ initialized_at: "YYYY-MM-DD"              # 初回導入日
     - **口調の正本の決め方**: 権威参照ファイルの「応答の書き方」節の口調の記述 → その節が「口調は「<ファイル>」の「<見出し>」の節に従う」の行で指す節 → 口調を決めた別の節、の順に見て、最初に決まったものに従う。どれでも決まらなければ、skill は口調を決めない(ほかの指示に口調の決まりがあればそれに従い、無ければ、です・ます)。口調の型(標準・報告調)は、init-project が「応答の書き方」節に書き込む
     - 各 SKILL.md の `## 原則` に、正本を指す 1 行を置く(§6)
     - 決定記録: [Issue #137](https://github.com/Yuki-Maeda-valour/workflow/issues/137)
+26. **worktree と作業用コンテナの扱い**: 1 つのエージェントの作業はリポジトリ本体で行う。worktree は、複数のエージェントが同じリポジトリを並行して触るときだけ作る(「作らない」にはしない。並行作業には隔離が要る)
+    - **置き場所**: `<repo>/.claude/worktrees/<名前>` の 1 系統にそろえる。リポジトリの隣や `/tmp` に作らない
+    - **片付け**: PR がマージされた worktree は、作った側が片付けるか、片付けの案内を出す。片付けは `git worktree remove <パス>`(`--force` なし)。`--force` なしでも、無視されたファイル(`.env`・ローカル DB・ビルド成果物)は消えるので、片付ける前に有無を確かめ、中を作業ディレクトリにしているプロセスがあれば消さない。案内にも同じ確かめを添え、確かめを含めて棚卸しするのが `/cleanup` である。ローカルのブランチもリモートのブランチも、ここでは消さない。worktree を片付けるときは、その中を作業ディレクトリにしているプロセスを先に報告する
+    - **置き場所の無視**: `.claude/worktrees/` は git が無視する(`.gitignore` か `.git/info/exclude`)。作る側は、作る前に `git check-ignore` で確かめる。無視されていなければ、対話では作業を始める前(基準コミットを控える前)に `.git/info/exclude` に足すか人に確かめる。無人では書かず、worktree を作らずリポジトリ本体で作業する(無人ループが周の中の `info/exclude` の変化を許さないため)。`/init-project` の `.gitignore` の整備の対象に含める
+    - **例外(この方針の対象外)**: 機構が作って自動で消す使い捨てのツリー。無人ループの周の worktree(既定の置き場は `<対象の親>/<名前>.loop`。理由は [loop.md §3](../plugins/dev-workflow/skills/ship-task/references/loop.md))と、外部レビューの一時ツリー([external-runners.md §9-1](../plugins/dev-workflow/skills/do-task/references/external-runners.md))。既存の記述は変えない
+    - **作業用コンテナ**: 現在、skill がコンテナを起こす記述は無い。今後 skill がコンテナを起こすときは、`--rm` を基本にし、残す必要があるときは `--label dev-workflow.task=<タスク>` を付けて持ち主が分かるようにする
+    - **導線**: ship-task の完了報告が、このタスクで作った worktree の片付けの案内を出す。まとめて棚卸しして消すのは `/cleanup`(読み取りで集める → 「削除してよい / 確認が必要 / 残す」に分類 → 承認 → `git worktree remove`。使用中のものと、ほかにコピーの無いものは個別に確認)
+    - 決定記録: [Issue #284](https://github.com/Yuki-Maeda-valour/workflow/issues/284)
 
 ### review と commit・検証根拠の固定
 

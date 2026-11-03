@@ -350,6 +350,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **8. `.gitignore` の整備と git init**
 - `templates/gitignore.snippet` を Read し、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。
   - 対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ `.claude/grasp.md`(把握キャッシュ)/ hook の state ファイル / `.env` 系(`!.env.example` は共有)/ `export/`(export-doc の出力)。
+  - 並行作業用の worktree の置き場 `.claude/worktrees/` も対象(design §5-26)。
 - `.env` 系が**既に git 管理されている**場合は、追記だけでは除外されないため警告し、対応(`git rm --cached` 等)はユーザーに委ねる。
 - `.git` が無い場合(新規): タスク運用(/do-task の diff スナップショット・/ship-task の commit と PR)が git 前提であることを伝え(完了時の改名だけは git が無くても `mv` で動く)、`git init` を提案する(不要と言われたら task 運用の制約を案内する)。
 

@@ -25,6 +25,11 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
+8. **worktree は並行作業のときだけ作る**(design §5-26)。
+   - 1 つのエージェントの作業はリポジトリ本体で行う。複数のエージェントが同じリポジトリを並行して触るときだけ、`<repo>/.claude/worktrees/<名前>` に作る。作る前に `git check-ignore -q .claude/worktrees/` で無視されているか確かめ、されていなければ次のとおりにする。
+     - 無人(`--unattended`)では `.git/info/exclude` に書かない。worktree を作らず、リポジトリ本体で作業する。
+     - 対話では、足すのは作業を始める前(基準コミットを控える前)に限る。足すか、人に確かめる。
+   - 無人ループの周の worktree は、機構が作って自動で消すので、この方針の対象外。
 
 ## 無人入口
 
@@ -302,6 +307,12 @@ except (Exception, SystemExit) as exc:
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
    - 実際の完了タスク MD へのリンク
 4. 完了報告に PR の URL を含める
+5. このタスクで worktree を作ったときは、完了報告に片付けの案内を出す(作っていなければ案内は不要)。
+   - PR のマージ後に消せる worktree のパスを並べる。
+   - 片付けのコマンドは `git worktree remove <パス>`(`--force` なし)。中を作業ディレクトリにしているプロセスがあれば、先に報告するよう添える。
+   - 消す前の確認も添える。無視されたファイル(`git -C <パス> status --porcelain --ignored` の `!!`)があればほかにコピーが無いので個別に確かめる。プロセスがあれば消さない。
+   - これらの確かめを含めて棚卸しするのが /cleanup である、と案内する。
+   - 無人の結末の行(unattended-mode.md §2)の書式は変えず、案内は結末の行より前に置く。
 
 **無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7):
 - PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→
@@ -353,11 +364,13 @@ except (Exception, SystemExit) as exc:
 - [ ] 作業ブランチを作ったら、Phase 0 の 4 の 4 項目を報告に残した(一覧が空でなければ PR 本文にも載せた)
 - [ ] 無人では、各 commit の手順の最初・直前・直後と push の直前の照合(git 設定のダイジェスト・origin の判定を含む)を通し、タスクの周の PR を `-R '<repo>'` で作り(作成先を確かめられなければ `縮退`)、結末の行を報告の最後に書いた
 - [ ] 発見の周(`--discover`)では、discover-mode.md §7 の表の時点ごとの照合を通し、`候補_` だけを commit し、結末の行を報告の最後に書いた(PR を開くのは、照合にすべて通ったときだけ)
+- [ ] このタスクで worktree を作ったときは、完了報告に PR マージ後の片付けの案内(`git worktree remove <パス>`、`--force` なし)を出した
 - [ ] マージしていない。レビュアーを自動アサインしていない
 
 ## 関連スキル
 
 - 内部で実行: /create-task(設計)→ /do-task(実装・検証)→ /update-doc --task(doc 同期)
+- 片付け: PR のマージ後の worktree などの棚卸しと削除は /cleanup
 - 前提: /understand-project(未把握なら Phase 0 で実施)
 - 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task {実際のタスクMDパス}` で Phase 3 から再開できる)
 - タスク MD が既にある場合: `--task=<タスク MD>` で Phase 2 から始める(設計レビュー済みの MD を、実装から PR まで回す)。実装だけなら /do-task から始める

@@ -592,18 +592,18 @@ class ValidateTest(unittest.TestCase):
         self.patch_json(
             MARKETPLACE_JSON,
             lambda d: d["plugins"][0].__setitem__(
-                "description", d["plugins"][0]["description"].replace("skills 12 種", "skills 99 種")
+                "description", d["plugins"][0]["description"].replace("skills 13 種", "skills 99 種")
             ),
         )
-        self.assert_error(["skill 件数の表記 99 件", "実数 12 件"])
+        self.assert_error(["skill 件数の表記 99 件", "実数 13 件"])
 
     def test_v6_plugin_json_skill_count_mismatch_is_error(self):
         # marketplace.json 側だけを壊すと、plugin.json 側の検査を消しても気づけない
         self.patch_json(
             PLUGIN_JSON,
-            lambda d: d.__setitem__("description", d["description"].replace("12 skills", "99 skills")),
+            lambda d: d.__setitem__("description", d["description"].replace("13 skills", "99 skills")),
         )
-        self.assert_error(["plugin.json", "skill 件数の表記 99 件", "実数 12 件"])
+        self.assert_error(["plugin.json", "skill 件数の表記 99 件", "実数 13 件"])
 
     def test_v6_all_versions_missing_is_error(self):
         # 3 箇所とも欠けていると set の要素数が 1 になり、空虚に「一致」して通ってしまう
