@@ -1,8 +1,8 @@
 # 権威参照ファイルの判定(import の判定・ドリフト判定)
 
-`AGENTS.md` と `CLAUDE.md` 系(`CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md`)の関係を扱う skill(init-project / understand-project / update-doc)は、この 1 本を兄弟参照して判定する(同じ判定を複写しない)。
+`AGENTS.md` と `CLAUDE.md` 系(`CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md`)の関係を扱う skill(init-project / understand-project / update-doc)は、この 1 本を兄弟参照して判定する(同じ判定をコピーしない)。
 
-Claude Code は Codex / Cursor と違い、既定設定では `AGENTS.md` を無条件には読まない — `CLAUDE.md` 系があると直読みが止まる。ここではこの最小限の前提だけを踏まえ、判定手順だけを書く(公式の挙動の詳細は design 側にあり、ここには複写しない)。
+Claude Code は Codex / Cursor と違い、既定設定では `AGENTS.md` を無条件には読まない — `CLAUDE.md` 系があると直読みが止まる。ここではこの最小限の前提だけを踏まえ、判定手順だけを書く(公式の挙動の詳細は design 側にあり、ここにはコピーしない)。
 
 ## (0) 基点
 

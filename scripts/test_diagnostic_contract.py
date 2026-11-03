@@ -52,7 +52,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
             self.assertIn(word, order)
 
     def test_changed_settings_use_separate_diagnostic_without_bypassing_resume(self):
-        route = section(self.ext, '設定を戻さずに調べる場合は', '**外部 / 内蔵 implementer の宛先識別**')
+        route = section(self.ext, '設定を戻さずに調べる場合は', '**外部 / 内蔵 implementer の名前での識別**')
         for word in ('子孫の停止', '`extend-plan` → 新計画の親保持・報告 → `run`',
                      '`run` 失敗でも最新計画を保持', '応答不明', '旧計画による反復',
                      '残存hashの再採用', '人の判断待ち', '通常復帰条件は短絡しない'):

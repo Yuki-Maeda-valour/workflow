@@ -167,7 +167,7 @@ except (Exception, SystemExit) as exc:
      - 1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
      - 最後に本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(exit 0 以外は失敗扱い)。
      - 以後、周の中で控える値(同 §7)を失ったら失敗扱い(G4)
-3. **作業ツリーの清潔性**: do-task の Phase 0 の 3 と同じ字面の `git status`(前置き・`--no-literal-pathspecs`・`--porcelain=v1`・`--untracked-files=normal`・`--ignore-submodules=dirty`・状態ファイルを外す 4 つの pathspec)で確認する。
+3. **作業ツリーの清潔性**: do-task の Phase 0 の 3 と同じ字面の `git status`(安全用のオプション・`--no-literal-pathspecs`・`--porcelain=v1`・`--untracked-files=normal`・`--ignore-submodules=dirty`・状態ファイルを外す 4 つの pathspec)で確認する。
    - 無関係な未コミット変更が**あるときだけ**、PR にそれが混ざる旨を警告して続行可否を確認する(停止条件のまとめの表の行に当たるので、このときは必ず確認する。無ければ確認せずに進む)。無人では確認せず失敗扱い(S1)
    - 安全な事前検査後、ブランチ判定・設計・実装前に今回の開始時 `S` を一度保持し、do-task へ渡す。取得と基準 `B` の区別は [base-commit.md](../do-task/references/base-commit.md) に従う。
    - 既存作業ブランチの再利用では作成時 OID を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
@@ -178,7 +178,7 @@ except (Exception, SystemExit) as exc:
    - `refs/remotes/origin/HEAD` を解決できたら(`git symbolic-ref --quiet refs/remotes/origin/HEAD`)、その名前(`DEF_NAME`)との一致だけで判定する。解決できなければ、`main` / `master` のどちらかであれば「いる」とする
    - (origin/HEAD が無く main と master が両方あるリポジトリで、master の上を作業ブランチと取り違えないため)。
    - `DEF_REF`・`DEF_NAME` は、この判定のほか、下の起点の確認・一覧の算出に使う。
-   - これらの git 呼び出しの前置きも base-commit.md と同じ
+   - これらの git 呼び出しの安全用のオプションも base-commit.md と同じ
    - `--branch` がある → 現在のブランチに関わらず、**ここで**その名前で作成して切り替える(`git switch -c <名前>`。従来どおり。無人は 2′ で `--branch` を禁じている)
    - `--branch` が無く、デフォルトブランチか detached HEAD にいる → 作業ブランチ `task/{タスク名}` を作る(`git switch -c task/{タスク名}`。無人では `git switch --no-track -c <作業ブランチ>` — 理由は references/unattended-mode.md §7)。
      - `--task` のときはタスク名(ファイル名の `{名}`)が決まっているので、**ここで作る**(Phase 2 より前)。それ以外は Phase 1 の後に作るので、ここでは判定だけ行う
@@ -264,7 +264,7 @@ except (Exception, SystemExit) as exc:
 - (`:(literal)` を欠くと、グロブ文字を含むタスク名が別のタスク MD に一致して巻き込む。
 - `git rm --cached` は、/do-task が `mv` で改名した追跡済みファイルの旧パスを index から外すためで、`git mv` 済みや未追跡なら何もしない。タスク MD は、未追跡だった場合は新規追加として、追跡済みだった場合はリネームとして commit に入る)。
 - 状態ファイル(do-task の Phase 0 の 3 が外す 4 つ)は stage しない。
-- commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(前置きつき)で index を見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。前置きつき)か残すかを確認する。
+- commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(安全用のオプションつき)で index を見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。安全用のオプションつき)か残すかを確認する。
 - `git commit -a`・パスを渡す `git commit` は使わず、stage を終えた index を commit する(無人では、下の「無人の周の commit と停止」の照合に従う)。
 - **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠 hash を保持する。
   最終 task は `finalize` の期待バイトで更新する。stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
@@ -334,7 +334,7 @@ except (Exception, SystemExit) as exc:
   - 照合するタスク MD のパスは commit の後のパス(実装 commit・doc commit は `完了_`、保留の commit は `保留_`)。
   - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の打ち直し)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
   - どれかに通らなければ失敗扱い(G2)。
-  - 時点ごとの表・コマンドの字面・除外対象・git の前置きは references/unattended-mode.md §7
+  - 時点ごとの表・コマンドの字面・除外対象・git の安全用のオプションは references/unattended-mode.md §7
 - **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
 - **結末**: 完了報告の最後に結末の行を書く(同 §2)
 - **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
@@ -379,9 +379,9 @@ except (Exception, SystemExit) as exc:
   - 発見元は /data-audit と /create-task --refactor の候補モード(`--candidates`)。
   - merge された `候補_` の採用は `/create-task <候補_ のパス>` で行い、その後の実装は `--task=<進行中_ のパス>` で回す
 
-## Git の共通安全前置き
+## Git の共通の安全用のオプション
 
-対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は `base-commit.md` の safe Git 前置きを付ける。
+対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は `base-commit.md` の Git の安全用のオプションを付ける。
 - 品質確認は hook に依存させない。
 - filter の例外は `base-commit.md` の `precheck` が許したものだけを明示無効化する。
 - 公開はこの規則に加えて `publish-guard.py` を通す。

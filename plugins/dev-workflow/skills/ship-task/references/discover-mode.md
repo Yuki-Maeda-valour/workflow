@@ -72,7 +72,7 @@ OWNER・REPO はそれぞれ 1 段で `[A-Za-z0-9._-]+`。ポートを明示し�
 | `accept-new` の User 保存先 | 先頭が `/dev/null` なら拒否する。`/dev/./null`・`//dev/null` など字面のパス正規化で同じになる形も拒否する。Global の保存先や User の 2 本目があっても救済しない。新しい鍵の保存先は User の先頭だけであるため |
 | User 保存先が単独の `none` | `accept-new` でも許す。OpenSSH は一覧を 0 本にし、未知鍵を拒否する。`/dev/null` と同一視しない。`none` と別の要素を並べた出力は拒否する |
 | `HostKeyAlias` | 未出力または `github.com`。`none` を含む別名・空値は拒否する |
-| `NoHostAuthenticationForLocalhost` | `no` / `false`。ローカル宛先でホスト鍵の検証を省く設定は拒否する |
+| `NoHostAuthenticationForLocalhost` | `no` / `false`。ローカルの接続先でホスト鍵の検証を省く設定は拒否する |
 
 - `hostname`・`port`・`stricthostkeychecking`・`userknownhostsfile`・`globalknownhostsfile`・`nohostauthenticationforlocalhost` の欠落・空値、これらと `hostkeyalias` の重複は拒否する。未知の設定キーや、無関係な繰り返し可能キーは判定しない。
 - `ssh -G` の起動失敗・非 0 終了・時間切れ・出力の復号失敗も拒否する。必須項目が無い出力を既定値で補わない。
@@ -112,7 +112,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 前提を満たした後・発見元を呼ぶ前に行う。refactor の周では行わない(refactor の候補モードはセキュリティ由来の指摘を候補にしないので、公開のリポジトリでも回す — candidate-mode.md)。data-audit の候補(未修正の脆弱性の場所と筋書き)は、origin が非公開と確かめられたときだけ PR にする。
 
 1. origin-repo.py の `origin` が偽なら、確かめずに続ける(push しないので、候補があれば結末は `縮退`。候補はローカルのブランチだけに残る)
-2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に写りうるため)
+2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に残りうるため)
 3. `gh repo view '<repo>' --json isPrivate -q .isPrivate` の出力がちょうど `true` なら続ける。`false`・エラー・それ以外の出力なら「確かめられない」
    - repo は引数で渡す。gh の既定のリポジトリの解決(`upstream` などのリモート・`GH_REPO`・`gh repo set-default`)に頼ると、確認の対象が push 先と食い違いうる。`HOST/OWNER/REPO` の形を受け付けることと、引数が `GH_REPO` より優先されることは実測した(design §7-3)
 4. 「確かめられない」ときは、発見元を呼ばずに、結末 `候補なし — data-audit: origin が非公開と確かめられないため回さなかった(<理由の要約>)` で終わる。何も書かず、ブランチも作らない(失敗扱いではない)
@@ -138,13 +138,13 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 - origin の判定と git 設定のダイジェストは、§4 の前提(工程 D1 の前。git 設定のダイジェストを先に)で取る
 - 最後に知る HEAD は、ブランチを作ったときに S0 にし、commit の直後の照合に通ったら、その HEAD に更新する
-- 照合の git 呼び出しには、[base-commit.md](../../do-task/references/base-commit.md) の前置き(`--no-pager --no-replace-objects` ほか)を付ける(unattended-mode.md §7 と同じ)
+- 照合の git 呼び出しには、[base-commit.md](../../do-task/references/base-commit.md) の安全用のオプション(`--no-pager --no-replace-objects` ほか)を付ける(unattended-mode.md §7 と同じ)
 
 **照合**: 1 つでも通らなければ失敗扱い(G2)。算出できない(helper の exit 1・2 など)も、通らないとみなす。
 
 | 時点 | 照合 |
 |---|---|
-| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、前置きが外さない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に打つ) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
+| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、安全用のオプションが無効にしない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に打つ) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
 | ブランチを作った直後 | 現在のブランチ = 作業ブランチ・`HEAD` = S0 |
 | stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で打つ |
@@ -170,7 +170,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 1. 発見ループの候補(見つけた改善案のうち、まだ採用していないもの)であること(merge すると task_dir〈設計書を置くフォルダ〉に `候補_` として入るが、実装はされない)
 2. 候補(見つけた改善案のうち、まだ採用していないもの)の一覧(ファイル・指摘 1 行・場所・深刻度と確度かスコア・指摘キー)
 3. 人がすること
-   - 要らない候補は、見送りの行を足すか、消してから merge する(消す = また出てよい / 見送り = もう出さない)。写して使える見送りの行の字面 `> **見送り**: YYYY-MM-DD — <理由>` を載せる(区切りは `—`)
+   - 要らない候補は、見送りの行を足すか、消してから merge する(消す = また出てよい / 見送り = もう出さない)。コピーして使える見送りの行の字面 `> **見送り**: YYYY-MM-DD — <理由>` を載せる(区切りは `—`)
    - 見送り・既知は、同じ観点群・同じ場所(refactor はファイル)の以後の指摘を、すべて止める
    - PR を閉じるだけだと、また出る
    - 手元で直すとき: 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — unattended-mode.md §9 ⑥)

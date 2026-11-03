@@ -16,7 +16,7 @@ argument-hint: "[タスクMDパス(省略時: 解決した保存先の進行中_
 3. **タスク MD が契約**。実装範囲の拡大・縮小は勝手に行わない。設計と実態がずれたらタスク MD を更新するか、ユーザーに確認する(対話では、内蔵 implementer の走行中は直さず、照らした後に直す — Phase 3)。無人ではタスク MD を更新せず保留(D1)
 4. **反復は仕組みで安全に**。レビュー・修正の反復は APPROVED まで続けるのが基本動作。`--max-iter`(既定 5)は安全弁で、到達したら状況を報告して指示を仰ぐ(無人では保留 — D2)
 5. **委託は役割語(AI の役割の名前)で行う**(`researcher`〈調べものを受け持つ AI〉 / `implementer` / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)。
-   - **起動時に `name` を必ず付ける**(完了後の再依頼・状態確認の宛先になる)。
+   - **起動時に `name` を必ず付ける**(完了後の再依頼・状態確認で送る相手の名前になる)。
    - ホスト自身と同じ CLI を Bash から起動しない(design §5-5)。
    - **調査・レビュー・検証は読み取り専用の委託、実装は編集を伴う委託**にする。
    - 無人(`--unattended`)では、どの役割(researcher・implementer・reviewer・checker)の委託でも、[unattended-mode.md](../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる
@@ -190,7 +190,7 @@ except (Exception, SystemExit) as exc:
    - 無人でも外部委託を解決せず内蔵に決まり、理由を報告する(D5)。
    - 契約の詳細は [references/external-runners.md](references/external-runners.md) §1(信頼モデル)・§12-1(実装経路の解決と判定)
 3. 先に [references/base-commit.md](references/base-commit.md) の事前検査(`--precheck`)を実行し、exit 0 のときだけ続行する(対象が git リポジトリでないときは行わない。無人では exit 22 でも承認を求めず失敗扱い — D6)。
-   - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の前置きを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で打つ。
+   - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で打つ。
    - サブモジュール内の未コミット変更(superproject の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外と同じ 4 つ。どの深さでも。未追跡・stage 済み・追跡済みの変更のどれも)は出ない。見るのは、それ以外の変更と gitlink の変更(ルートからの相対パスで出る)。
    - `[.]` は、無人の周の許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
    - `git status` を確認。
@@ -246,7 +246,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 **implementer への委託プロンプトを準備する**(ここでは起動しない — **起動は下の「内蔵に解決されたとき」と「外部に解決されたとき」の手順 4 だけが行う**。無条件の起動命令をここに置くと、外部委託で必要な承認・スナップショット・退避を飛ばして起動しうる)。
 - **モデルは、内蔵に解決されたときに限り** profile の `implementer_model` に従う(**外部に解決されたときのモデルは [references/external-runners.md](references/external-runners.md) §12-6 の実装用既定表が正本**)。
 - implementer のようにモデルを指定する持ち場(委託先 1 体ごとの受け持ち)が 1 つだけのときの性能の段は軸 3。
-- **`name` は `implementer`**(**内蔵で実行するフル段階に限り**、以降の差し戻し・STATUS 問い合わせの宛先になる。**外部 implementer は宛先にならない** — 軸 5)。
+- **`name` は `implementer`**(**内蔵で実行するフル段階に限り**、以降の差し戻し・STATUS 問い合わせで送る相手の名前になる。**外部 implementer は送る相手にならない** — 軸 5)。
 - 委託プロンプトに必ず含めるもの:
 
 - タスク MD の全文パスと「このタスク MD のチェックリストが完了の定義(DoD)である」こと
@@ -281,7 +281,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 - **滞在時間が長いため背景実行で起動する**(軸 2・§12-6)。
 
 1. **承認より先に判定する縮退**(無駄な承認要求を出さないために承認より前に置く。Phase 3 に入るたび〈ITER ごと〉にここで判定し、Phase 0 の結果として読まない。定義と判定表は §12-1): 次の順に当て、当たれば外部委託を行わず内蔵 implementer で実装し、理由を報告する —
-   - parent-child(管理ルート ≠ `root`)→ 条件 A: タスク MD がファイルでない(本文の写しを `--task-md` に渡さない)→ git でない(Phase 0 と同じ判定。事前検査を打たない)→ 条件 B: そのセッションで最後に承認した一覧に filter がある。
+   - parent-child(管理ルート ≠ `root`)→ 条件 A: タスク MD がファイルでない(本文のコピーを `--task-md` に渡さない)→ git でない(Phase 0 と同じ判定。事前検査を打たない)→ 条件 B: そのセッションで最後に承認した一覧に filter がある。
    - 条件 B は `bash {do-task の}scripts/diff-snapshot.sh --cwd <管理ルート> --precheck [--accept <最後に承認した値>]` を打ち直して判定する(stdout の受け方は base-commit.md の事前検査と同じ):
    - rc 0 で stdout に `GIT_CONFIG_COUNT` が出たら当たる / 出なければ次の手順へ /
    - rc 22 は Phase 0 と同じく人の承認を仰ぎ、承認されたらその値を最後に承認した値として打ち直す(承認されなければ停止)/ それ以外は終了コードと stderr を報告して停止する。
@@ -385,8 +385,8 @@ implementer の完了報告を受けたら、team-lead 自身が以下を機械�
 5. **契約整合**: スコープ外項目について「受理するが処理されない」不整合が生まれていないか実コードで確認する
 
 問題があれば implementer に差し戻す(ITER をインクリメント。差し戻しテンプレは references/review-protocol.md)。
-- **フル段階かつ内蔵 implementer のときは同じ宛先へ再依頼して `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。
-- **標準段階、および外部 implementer では**前回成果物のパスを含めた新規委託で代替する — **外部 implementer は段階を問わず宛先にならないため、差し戻しは毎回新規起動になり**(軸 5)、前回の diff とレビュー指摘を毎回渡し直す。
+- **フル段階かつ内蔵 implementer のときは同じ相手へ再依頼して `implementer` に直接戻す**(実装文脈が保たれ、再調査のやり直しが消える)。
+- **標準段階、および外部 implementer では**前回成果物のパスを含めた新規委託で代替する — **外部 implementer は段階を問わず送る相手にならないため、差し戻しは毎回新規起動になり**(軸 5)、前回の diff とレビュー指摘を毎回渡し直す。
 - **検証手順そのものは担い手によって変わらない**(変わるのは差し戻しの手段だけ)。
 
 ## Phase 5: 完了条件の再実行
@@ -458,9 +458,9 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 5. ステータス行を `> **ステータス**: ✅ 完了({YYYY-MM-DD})` に更新
 6. 対象タスク MD と同じディレクトリ内で `進行中_{タスク名}.md` を `完了_{タスク名}.md` に改名する。
    - 別の保存先へ移動しない。
-   - **手段はタスク MD が追跡済みかで分ける**(`<前置き>` は [references/base-commit.md](references/base-commit.md) が全 git 呼び出しに定めるオプション列 — `git` に続く `--no-pager` 以降。
+   - **手段はタスク MD が追跡済みかで分ける**(`<安全用のオプション>` は [references/base-commit.md](references/base-commit.md) が全 git 呼び出しに定めるオプション列 — `git` に続く `--no-pager` 以降。
    - 事前検査とその export は含まない。外部 implementer が残したローカル設定の `core.fsmonitor` やフックを起動しないため):
-   - `git -C <dir> <前置き> ls-files --error-unmatch -- ':(literal)進行中_{タスク名}.md'` が **rc 0**(追跡済み。stage 済みの新規を含む)→ `git -C <dir> <前置き> mv -- '進行中_{タスク名}.md' '完了_{タスク名}.md'`。
+   - `git -C <dir> <安全用のオプション> ls-files --error-unmatch -- ':(literal)進行中_{タスク名}.md'` が **rc 0**(追跡済み。stage 済みの新規を含む)→ `git -C <dir> <安全用のオプション> mv -- '進行中_{タスク名}.md' '完了_{タスク名}.md'`。
      - stage されるのはリネームだけで、commit はしない。
      - この `git mv` が失敗したとき(sparse-checkout の定義外など)は `mv` に切り替えず停止して報告する(追記とステータス更新は済んでいて、残るのは改名だけである旨を添える)
    - **それ以外** → `mv -- '<dir>/進行中_{タスク名}.md' '<dir>/完了_{タスク名}.md'`(rc 1 = 未追跡・ignore 済み。未追跡への `git mv` は `fatal: not under version control` で失敗する)。
@@ -489,8 +489,8 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 - 完了後: /update-doc --task(完了タスク駆動の差分同期)
 - 設計から PR まで通しで回す: /ship-task(このスキルを実装工程として内部で実行し、doc 同期と PR 作成まで続ける)
 
-## Git の共通安全前置き
+## Git の共通の安全用のオプション
 
-read・index/worktree の変更・commit・network の全 Git 呼出は、`base-commit.md` の safe Git 前置きを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
+read・index/worktree の変更・commit・network の全 Git 呼出は、`base-commit.md` の Git の安全用のオプションを付ける。hook、fsmonitor、署名、LFS filter を無効化し、品質確認は hook に委ねない。
 
-filter を使う既存リポジトリは、前置きで一般化しない。`base-commit.md` の `precheck` が承認した filter だけを明示的に無効化してから実行する。
+filter を使う既存リポジトリは、安全用のオプションで一般化しない。`base-commit.md` の `precheck` が承認した filter だけを明示的に無効化してから実行する。

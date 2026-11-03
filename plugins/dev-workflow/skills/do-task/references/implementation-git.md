@@ -66,7 +66,7 @@ filter 名を表示用 NOTE から組み立てず、`eval`、shell 展開、名�
 - path 以外の全オプションは1回限り。同じ値、`--name=value` と分離形の混在、cached フラグの重複も拒否する。
 - 未知の操作、書込み、`-c`、`--config-env`、`--output`、`--ext-diff`、`--textconv`、`--exec`、shell 文字列を受け付けない。汎用引数や command は無い。
 
-安全用の前置きは [base-commit.md](base-commit.md) の共通固定値と一致させる。status と diff は `--ignore-submodules=dirty`、diff と show は `--no-ext-diff --no-textconv --submodule=short --no-color`、log と show は `--no-show-signature --no-decorate --no-color` を強制する。利用者の引数から取り消せない。
+安全用のオプションは [base-commit.md](base-commit.md) の共通固定値と一致させる。status と diff は `--ignore-submodules=dirty`、diff と show は `--no-ext-diff --no-textconv --submodule=short --no-color`、log と show は `--no-show-signature --no-decorate --no-color` を強制する。利用者の引数から取り消せない。
 
 ## 出力・停止・限界
 
