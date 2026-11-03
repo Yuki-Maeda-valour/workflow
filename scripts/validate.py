@@ -35,7 +35,7 @@
      (表の行を除く)について、文字数から、200 字を超えるインラインのコード(1 行の中の
      `[^`]+`)の長さを引いた数が 200 を超えたら WARN にする。ファイル:行番号と文字数を出す。
      マーカーでは免除しない
- 11. 置き換える語(design.md §6): 「枡」「継承枠」を skill の文書(SKILLS_DIR 配下の *.md と
+ 11. 置き換える語(design.md §6): 「枡」「継承枠」「能力帯」「私有」「素通り」「塞ぐ」(塞が・塞ぎ・塞い・塞げ・塞ご。「閉塞」など前に漢字が付く語は除く)「git 出口」を skill の文書(SKILLS_DIR 配下の *.md と
      templates/ 配下)と docs/design.md から探し、見つけたら言い換え先を添えて ERROR にする。
      除外は `do-task/references/writing-for-people.md`(言い換え表)と、docs/design.md の
      「- **文書の中で置き換える語**」で始まる定義の行だけ。免除の印は効かない
@@ -710,17 +710,23 @@ def check_migration_allowlist_staleness():
             WARNS.append(f"{name}: 許容リストの skill に委託の語が無い")
 
 
-# 置き換える語(design.md §6)。(検出する語, 言い換え先)。「枡」は「固定枡」などの中でも見つける。
+# 置き換える語(design.md §6)。(検出する正規表現, 表示する語, 言い換え先)。
+# 「枡」は「固定枡」などの中でも見つける。「出口」は一般語なので「git 出口」「git の出口」だけを探す。
 _REPLACED_WORDS = (
-    ("継承枠", "「継承の持ち場」または「モデルを継承する持ち場」"),
-    ("枡", "「持ち場」"),
+    ("継承枠", "継承枠", "「継承の持ち場」または「モデルを継承する持ち場」"),
+    ("枡", "枡", "「持ち場」"),
+    ("能力帯", "能力帯", "「性能の段」"),
+    ("私有", "私有", "「専用の」"),
+    ("素通り", "素通り", "「見逃される」「検査をすり抜ける」など文脈に合う言い方"),
+    ("(?<![一-鿿])塞[ぐがぎげごい]", "塞ぐ(塞が・塞ぎ・塞い・塞げ・塞ご)", "「防ぐ」(経路が塞がるは「使えなくなる」、受理側を塞ぐは「受け付けないようにする」)"),
+    ("(?i)git[ \t　]*(?:の[ \t　]*)?出口", "git 出口", "「commit・push・PR の受け持ち」"),
 )
 _REPLACED_WORDS_DEFINITION_PREFIX = "- **文書の中で置き換える語**"
 _REPLACED_WORDS_EXEMPT = SKILLS_DIR / "do-task" / "references" / "writing-for-people.md"
 
 
 def check_replaced_words():
-    """design.md §6 の置き換える語(枡・継承枠)の検査。skill の文書と docs/design.md が対象。
+    """design.md §6 の置き換える語(枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口)の検査。skill の文書と docs/design.md が対象。
     言い換え表(writing-for-people.md)と、docs/design.md の定義の行だけを除く(免除の印は使わない)。"""
     targets = []
     if SKILLS_DIR.exists():
@@ -740,10 +746,10 @@ def check_replaced_words():
                 continue
             hits = []
             rest = line
-            for word, repl in _REPLACED_WORDS:
-                if word in rest:
+            for pattern, word, repl in _REPLACED_WORDS:
+                if re.search(pattern, rest):
                     hits.append(f"{word!r} -> {repl}")
-                    rest = rest.replace(word, "")
+                    rest = re.sub(pattern, "", rest)
             for h in hits:
                 ERRORS.append(f"{f.relative_to(REPO)}:{no}: 置き換える語 {h}(design.md §6)")
 

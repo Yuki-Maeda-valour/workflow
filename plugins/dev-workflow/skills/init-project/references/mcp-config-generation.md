@@ -51,7 +51,7 @@
 
 **反例(コメントだけがあるファイル。§1-1 との対称性)**: `# mcp_servers = {}` / `# [mcp_servers.example]` のように**コメント行にしか `mcp_servers` が現れないファイル**。**共通前提 1(コメント除外)を適用した後の内容に対してガードを判定する**ため、この適用後は該当する行が無くなり、**「id を宣言する行が 1 行も無い」側に落ちて既存 id なしとして追記できる**(実測: `tomllib` でもこの構成は `mcp_servers` キー自体が存在せず〈`NoneType`〉、§1-1 の「キーが存在しない → 既存 id なし」と**同じ結論**になり、経路間の対称性が保たれる。Codex の雛形にコメントアウトされた `mcp_servers` の例が含まれる現実的な入力を不要にブロックしないため)。
 
-**反例(空虚な真を塞がないと壊れる)**: `[mcp_servers]` の直後に `serena = { command = "uvx" }` があるだけの構成。子キー行を抜き出す規則が無いと `serena = {...}` の左辺は `mcp_servers` を含まないため抽出漏れし、`[mcp_servers]` 見出しだけが残って id 0 個の「全て見出し形(空虚に真)」と誤判定される。`[mcp_servers.chrome-devtools]` を追記すると `Cannot declare ('mcp_servers','chrome-devtools') twice` で壊れる。上記の「`[mcp_servers]` 配下のキー行も抜き出す」規則と「空虚な真の防止」の両方でこれを塞ぐ。 <!-- validate-allow: 生成手順の判定を説明する実例。代表エントリと同じ識別子で一貫させる -->
+**反例(空虚な真を防がないと壊れる)**: `[mcp_servers]` の直後に `serena = { command = "uvx" }` があるだけの構成。子キー行を抜き出す規則が無いと `serena = {...}` の左辺は `mcp_servers` を含まないため抽出漏れし、`[mcp_servers]` 見出しだけが残って id 0 個の「全て見出し形(空虚に真)」と誤判定される。`[mcp_servers.chrome-devtools]` を追記すると `Cannot declare ('mcp_servers','chrome-devtools') twice` で壊れる。上記の「`[mcp_servers]` 配下のキー行も抜き出す」規則と「空虚な真の防止」の両方でこれを防ぐ。 <!-- validate-allow: 生成手順の判定を説明する実例。代表エントリと同じ識別子で一貫させる -->
 
 **反例(共通前提 4 を落とすと不要な退避に倒れる)**: `[mcp_servers.serena]` の直後に `[mcp_servers.serena.env]` や `startup_timeout_sec = 30` があるだけの構成。`env` サブテーブルや付随キーは id の宣言記法に無関係なので、これらを「他記法」と数えて退避すると、serena 以外の新しい id(例: chrome-devtools)を追加できるはずなのに永久に追加できなくなる(1-5 が禁じる自家中毒と同型)。 <!-- validate-allow: 生成手順の判定を説明する実例。代表エントリと同じ識別子で一貫させる -->
 

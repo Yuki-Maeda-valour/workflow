@@ -67,7 +67,7 @@ python3 -I diagnostic-git.py run --cwd ROOT --state STATE --manifest-sha256 HEX 
 - `--context-start`: 独立タスクではない内包された子に限り、B/S/start-kind/branch-refの代わりに使う。
   - 親の必要な全policyをcarryで受け取り、子のcurrentとheld-headを保持する。親のOIDを子へ使い回さない。
 
-出力先は、保護記録とrepoの外にある私有0700親の下の新規ファイル。
+出力先は、保護記録とrepoの外にある専用の0700親の下の新規ファイル。
 通常ファイルを0600で排他的に作り、flush/fsyncと同じfdのhash照合後に成功応答を返す。
 既存ファイル・symlink・特殊ファイルへ上書きしない。
 
@@ -130,7 +130,7 @@ REVは `HEAD`、完全小文字commit OID、又は `refs/` から始まる完全
 - symlinkはtargetの文字列だけを読む。親symlinkを辿る選択は止める。
 - nested repoとsubmodule内部へ再帰しない。保持された子contextを別指定して診断する。
 - FIFO等はfilesでmetadataだけを返す。内容比較は止める。巨大な未追跡本文も名前一覧では読まない。
-- ignore・属性・filterを適用しない。rename検出も行わない。patchは私有の `a` / `b` だけから作る。
+- ignore・属性・filterを適用しない。rename検出も行わない。patchは専用の `a` / `b` だけから作る。
 - 有効な未解決symrefを `unresolved` として残す。stash refがあるのに履歴が欠ければ23/`incomplete-metadata`。
 
 ## 7. 応答と停止
@@ -174,16 +174,16 @@ stdoutは完了時のJSON1件とLF。途中のGit出力を流さない。未知�
 
 期限と量を各段階で共有し、出力や反復で再開始しない。管理2000件を作業木の件数へ転用しない。
 完成JSONと後検査・後始末の後、直接子1個だけが最終stdout又はstderrを書く。
-親は私有pipeと残り時間を監督する。継承stdout/stderrのflagsは変更しない。
+親は専用のpipeと残り時間を監督する。継承stdout/stderrのflagsは変更しない。
 送出子の終了0・全bytes送信後に短くsignalをmaskし、停止要求と期限を再確認して終了値を確定する。
 確定前の中断は20。確定後の中断やmask復元失敗で確定値を変えず、二度目の応答を出さない。
 送出失敗後に別writerや同期printで再報告しない。正当な大きい出力も残り予算内なら許す。
 診断にGNU `timeout` を追加要求しない。既存の復元監督関数は変更しない。
 
-元configをGitの起動設定として読まず、最初のGitから私有管理領域だけを使う。
+元configをGitの起動設定として読まず、最初のGitから専用の管理領域だけを使う。
 元repo・state・入力planへ書かず、atimeは内容変更と区別する。
-sparse index の repo では、Git が私有の領域で index を読むときに展開し、元の objects と、その alternates の連なりの置き場(別の repo のこともある)にある、既存の object を持つファイル(loose か pack)の更新時刻(mtime・ctime)を新しくすることがある。
-中身・mode・object の数は変えない。展開で Git が新しく書く object は、私有の objects へ置く(元の objects は alternates で読むだけ。§12)。
+sparse index の repo では、Git が専用の領域で index を読むときに展開し、元の objects と、その alternates の連なりの置き場(別の repo のこともある)にある、既存の object を持つファイル(loose か pack)の更新時刻(mtime・ctime)を新しくすることがある。
+中身・mode・object の数は変えない。展開で Git が新しく書く object は、専用の objects へ置く(元の objects は alternates で読むだけ。§12)。
 時刻の更新まで止めるには、sparse index かどうかの判定・index の読み方の変更・Git の版の分けが要るので、例外として扱う。
 各fileと列挙集合の前後を検査するが、複数fileの原子的snapshotではない。
 同UIDの改変、検査間に戻される変更、元ODBの同時更新、任意子孫の完全停止は保証しない。
@@ -332,18 +332,18 @@ statusの未解決index endpointはnullとし、各stageを残す。
 - refsのsymbolic無しはnull。解決済みは `resolution:"resolved"`、未解決symrefはOID nullと `unresolved`。有効な未解決参照を一覧から落とさない。循環・不正な参照・読取失敗は23。
 - stashesは固定 `reflog show --format=oneline --no-decorate --no-abbrev` の全bytes。参照があるのに必要履歴がなければ23/`incomplete-metadata`。失われた履歴の完全復元は保証しない。
 
-patchは私有の通常ファイル `a` / `b` に比較するbytesだけを置き、固定した `git diff --no-index --no-ext-diff --no-textconv --no-color --no-renames --unified=N -- a b` で作る。
+patchは専用の通常ファイル `a` / `b` に比較するbytesだけを置き、固定した `git diff --no-index --no-ext-diff --no-textconv --no-color --no-renames --unified=N -- a b` で作る。
 差分ありの終了1だけを正常とする。元pathはGitへ渡さず、応答のrecordで対応付ける。
 空fileの追加・削除、modeのみ、種類変更はrecordを正とする。binaryは通知とhash/sizeで示す。
 完全な適用可能patchや通常Gitとの表示一致を保証しない。
 
-## 12. 私有管理領域と対応形式
+## 12. 専用の管理領域と対応形式
 
 最初のGitより前に保持state・manifest/snapshot・`context-plan-v1`・入力計画をGit無しで検査する。
 現在の設定本文の変更だけで拒否しないが、別repoへ誘導する物理入口の変更は止める。
-私有0700領域へGit管理領域・空の作業場所・HOME・限定設定を作る。
+専用の0700領域へGit管理領域・空の作業場所・HOME・限定設定を作る。
 現在のconfig・config.worktree・hooks・includeはコピーせず、保持したSHA-1/SHA-256とfiles/reftableの形式と固定値だけを生成する。
-Gitのcwdと `GIT_WORK_TREE` は私有空ディレクトリ。元worktreeをGitへ渡さない。
+Gitのcwdと `GIT_WORK_TREE` は専用の空ディレクトリ。元worktreeをGitへ渡さない。
 
 | 管理データ | 保持する内容 |
 |---|---|
@@ -355,9 +355,9 @@ Gitのcwdと `GIT_WORK_TREE` は私有空ディレクトリ。元worktreeをGit�
 | stash | files形式はrefsとlogs、reftableはbackend内の履歴。履歴欠落を空成功にしない |
 | objects | 保持した物理位置と通常のfile alternates。全オブジェクトをコピーしない |
 
-子環境は白紙から作り、私有HOME・空system/global設定・`GIT_CONFIG_NOSYSTEM`・`GIT_CONFIG_COUNT=0`、私有 `GIT_DIR/GIT_COMMON_DIR/GIT_INDEX_FILE` と固定のオブジェクト保存先を渡す。
+子環境は白紙から作り、専用のHOME・空system/global設定・`GIT_CONFIG_NOSYSTEM`・`GIT_CONFIG_COUNT=0`、専用の `GIT_DIR/GIT_COMMON_DIR/GIT_INDEX_FILE` と固定のオブジェクト保存先を渡す。
 既存の安全用前置きを全Gitに適用し、日和見的更新・遅延取得・対話を止める。親のtrace・pager・名前空間・追加設定は暗黙継承しない。
-元の objects は私有の objects の `info/alternates` で読むだけにし、Git が書く object は私有の側へ置く。sparse index の repo の時刻の例外は §8。
+元の objects は専用の objects の `info/alternates` で読むだけにし、Git が書く object は専用の側へ置く。sparse index の repo の時刻の例外は §8。
 未保持の `GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES` 環境指定はunsupported。通常のfile alternatesは扱う。
 
 コピー対象の前後で種類・device/inode・mode・size・mtime/ctimeと内容hash、列挙集合を確認する。

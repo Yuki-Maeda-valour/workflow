@@ -69,7 +69,7 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 
 - ship-task は /do-task・/update-doc に `--unattended` を渡す
 - 発見の周では、ship-task は発見元(改善の候補を見つける skill)の候補モード(`/data-audit --candidates --unattended`・`/create-task --refactor --candidates --unattended`)を呼ぶ。候補モードは `候補_` を書いて結果の行を返すだけで、改名・commit・チェーンの提案をしない(手順と、人に確かめる場面の扱いの正本は [candidate-mode.md](../../create-task/references/candidate-mode.md))
-- 子の skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(git の出口は ship-task — design §5-20)
+- 子の skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(commit・push・PR の受け持ちは ship-task — design §5-20)
 - 子の skill を単独で `--unattended` で呼んでもよい。ただし、保留の改名・commit を行う者はいない
   - 対象のパスを必須にする(do-task はタスク MD のパス、update-doc は `--task`)。無ければ、候補の選択より前に失敗扱い(候補の確認で固まらないように)
   - do-task は、parent-child 構成でないことも前提にする(照合をどのリポジトリで行うかが決まらないため)。満たさなければ、候補の選択より前に失敗扱い
@@ -329,9 +329,9 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
 - **除外対象**: `secret_paths`(この項の和集合)にマッチするものと、`.claude/` の状態ファイル。状態ファイルは `diff-snapshot.sh` の既定除外と同じ集合(`.claude/reviews/`・`.claude/grasp.md`・`.claude/settings.local.json`・`.claude/.understand-project-done`)。追跡対象の設定(`.claude/project-profile.yml`・`.claude/rules/` など)は除外しない。`secret_paths` は、基準 B・開始時 S・現在の profile の `secret_paths` と既定 3 要素の和集合で読み、作業ツリーの profile の値だけで決めない。**B が未確定の開始前は S だけを保持して使い、B が確定した後は B+S を使う。発見の周は開始時 S0 を使う。現在 profile は各 commit と各照合の時点で安全に読み直す。** B と S は保持した完全 OID を `--secret-profile-ref` で snapshot に渡す。開始時は作業ブランチを作る前に保持する。現在 profile の安全な読取、空ツリー、PyYAML、不正な参照・要素の停止は [diff-snapshot-call.md](../../do-task/references/diff-snapshot-call.md) に従う。基準側にだけある要素も報告に列挙する。
 - 照合の理由
   - Phase 7 の前の照合は、Phase 5 の format ゲートなどが本文を変えたまま完了にしないため(単独で呼ばれた do-task には ship-task の commit 前の照合が無い)
-  - 基準行と HEAD の照合は、implementer が実装を commit して基準行をその commit へ進め、レビューの diff から実装を消す経路を塞ぐため
-  - ブランチの照合は、implementer が同じ sha で別ブランチへ切り替え、ship-task の commit を作業ブランチの外に入れる経路を塞ぐため
-  - git 設定のダイジェストと origin の判定の照合は、周の中で書き換えたローカルの git 設定(`remote.origin.push`・`remote.origin.pushurl`・`core.hooksPath` など)で、ship-task 自身の add・commit・push が別の送り先・別の ref・差し替えた hook に従う経路を、実行の前に塞ぐため。`loop.sh` の周の後の照合(`loop.md` §4)は push の後にしか見つけず、`loop.sh` を通さない起動には無い。do-task の Phase 4 の各回は、周の中の書き換えを最初に見つける時点。commit の手順の最初に設定を照合し、`git add`・`git mv`・`git status` を含む各 Git 呼出は共通前置きで hook・fsmonitor・署名を無効にする。commit 直前は `--expect` と `&&` の 1 行で再照合する。公開 helper はローカルの固定 ref/SHA、origin、設定ダイジェストの順で照合してから保持 SHA を送る。helper が起動する Git とローカル照合の子プロセスには 30 秒の打ち切りがある
+  - 基準行と HEAD の照合は、implementer が実装を commit して基準行をその commit へ進め、レビューの diff から実装を消す経路を防ぐため
+  - ブランチの照合は、implementer が同じ sha で別ブランチへ切り替え、ship-task の commit を作業ブランチの外に入れる経路を防ぐため
+  - git 設定のダイジェストと origin の判定の照合は、周の中で書き換えたローカルの git 設定(`remote.origin.push`・`remote.origin.pushurl`・`core.hooksPath` など)で、ship-task 自身の add・commit・push が別の送り先・別の ref・差し替えた hook に従う経路を、実行の前に防ぐため。`loop.sh` の周の後の照合(`loop.md` §4)は push の後にしか見つけず、`loop.sh` を通さない起動には無い。do-task の Phase 4 の各回は、周の中の書き換えを最初に見つける時点。commit の手順の最初に設定を照合し、`git add`・`git mv`・`git status` を含む各 Git 呼出は共通前置きで hook・fsmonitor・署名を無効にする。commit 直前は `--expect` と `&&` の 1 行で再照合する。公開 helper はローカルの固定 ref/SHA、origin、設定ダイジェストの順で照合してから保持 SHA を送る。helper が起動する Git とローカル照合の子プロセスには 30 秒の打ち切りがある
 - push は、すべての照合に通った後にだけ行う
 - 無人の push は、完全な refspec と `--no-follow-tags --recurse-submodules=no` で打ち、`-u` を付けない(字面は ship-task の Phase 5。発見の周は discover-mode.md §8)。完全な refspec と 2 つのフラグは、周の前からある設定(global・ローカル)の `remote.origin.push` の写像・`push.followTags`・`push.recurseSubmodules` で、送り先の ref と送る ref が変わらないようにするため(design §7-3)。周の中の書き換えは、git 設定のダイジェストの照合が捉える。`-u` を付けないのは、push が共有の `config` に項目(`branch.<作業ブランチ>.*`)を足さないようにするため(design §7-3)。無人の周は作業ブランチの追跡を使わない(PR は `--head` で作り、`loop.sh` は `ls-remote` と remote-tracking ref を見る)。`loop.sh` の周の後の照合(loop.md §4)は、共有の `config` への追加を許さない
 - 無人の作業ブランチは `git switch --no-track -c <作業ブランチ>` で作る(ship-task の Phase 0 の 4・discover-mode.md §6)。利用者の設定の `branch.autoSetupMerge`(`always`・`inherit`)で共有の `config` に項目が足され、git 設定のダイジェストの照合を誤って落とさないため
@@ -373,7 +373,7 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
   - `git-config-digest.py` 単独では、`include` の先の中身・`.git/hooks/` の中のファイル・相対の `core.hooksPath` の先(作業ツリー内の versioned な hook)の中身を照合しない。`loop.sh` の状態観察は別に、開始時に保持した既知の有効 config graph と hook の metadata・通常ファイル内容 hash を有界に再検査する。利用者側の global/XDG/system とその `include` 先は §0 の環境照合でも守る。
   - `git-config-digest.py` 単独では利用者の global・XDG の設定を照合しない。これらは §0 の環境照合で守る。無人の push の字面(§7)は、周の前からある global の `remote.origin.push`・`push.followTags`・`push.recurseSubmodules` の効き目を受けないが、`push.pushOption`・`credential.helper`・`http.*` の効き目は受ける。hook は共通前置きで無効にする。origin の判定の打ち直しが捉えるのは、URL の解決の変化だけ。
   - 配布元 helper とコピーは §0 で照合する。観測間だけ変えて戻す操作と、保持値自体への同じ UID の攻撃は検出保証外(`loop.md` §4)。
-  - Git の専用検査は `git config`・共有状態を変える subcommand と、固定の無人 push 以外の push 形式を拒否する。Python・Bash など任意プログラムを許可すると同じ利用者権限の範囲では回避できるので、照合は ship-task 自身の add・commit・push が書き換えられた設定に従う経路も塞ぐ。公開 helper は保持した origin 判定と固定 repository を照合し、送信後の remote SHA と作成 PR 自身の repository/head/base/SHA も確認する。
+  - Git の専用検査は `git config`・共有状態を変える subcommand と、固定の無人 push 以外の push 形式を拒否する。Python・Bash など任意プログラムを許可すると同じ利用者権限の範囲では回避できるので、照合は ship-task 自身の add・commit・push が書き換えられた設定に従う経路も防ぐ。公開 helper は保持した origin 判定と固定 repository を照合し、送信後の remote SHA と作成 PR 自身の repository/head/base/SHA も確認する。
   - 照合と実行の間の書き換え: commit は `--expect` と `&&` の 1 回の Bash、push は公開 helper 内の直前照合で間を縮めるが、間は無くならない。`loop.sh` の経路では、書き換えが周の終わりまで残れば、周の後の照合(`loop.md` §4)が捉える
   - 誤って失敗扱いになる構成: 周の中で git の設定を書くスクリプト(husky の prepare・`git lfs install --local` など。人のチェックアウトで先に打っておけば、同じ値の書き直しは項目の並びを変えない)/ 利用者の global に `worktree.useRelativePaths=true` があり、単独の起動で外部レビュアーの一時ツリー(外部のレビュアーに見せるために作る、ファイル一式の一時的な写し。external-runners.md §9-1)を初めて作るとき / 周の間に、人が同じリポジトリの共有の設定を変える操作(`git push -u`・追跡つきの `git switch`・`gh pr checkout` など)をしたとき
   - github の ssh の push 先は、origin の判定の `repo` が `ssh -G`(打ち切り 10 秒・`Match exec`)の結果で決まる。前提と push の直前のどちらか一方だけで `ssh -G` が時間切れになると、`repo` が null と値の間で変わり、正しい周が失敗扱いになる
