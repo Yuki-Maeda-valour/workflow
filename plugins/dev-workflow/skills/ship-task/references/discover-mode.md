@@ -99,7 +99,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
   - `.claude/reviews/x.md` は `.claude/reviews/` の下を表す名で、在らなくてよい
   - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する。symlink なら、`.claude`・`.claude/reviews` を実体のディレクトリにする(symlink を追跡から外す)ことを案内する
   - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しい周も失敗になる
-- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は `unattended-mode.md` §1)。値と、`origin-repo.py` の出力の 6 欄は守る値(§7。作業の途中で変わっていないかを確かめるために、最初に控える値)
+- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は `unattended-mode.md` §1)。値と、`origin-repo.py` の出力の 6 欄は控える値(§7。作業の途中で変わっていないかを確かめるための値)
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`(§3)が exit 0 で、`origin` が真なら次の 2 つを満たす。`origin` が偽なら満たしたとみなす(push しないので、候補があれば結末は `縮退`)
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
   - `same` が真(fetch と push の URL がそれぞれ 1 つで、同じリポジトリを指す)。偽なら、fetch と push の URL を揃える案内をする
@@ -132,9 +132,9 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
   3. 候補だけを stage して、1 commit する(§8。直前・直後の照合 — §7)
 - **Phase 5**: 照合(§7)→ push → PR(§8)
 
-## 7. 周の中で守る値と照合(改竄ガード)
+## 7. 周の中で控える値と照合(改竄ガード)
 
-**守る値**(セッション文脈に保持し、報告にも書く): 発見元・`task_dir`・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(`origin-repo.py` の出力の `origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`。`reason` は比べない。最後の値は送信時に解決する effective push URL の SHA-256 であり、URL と認証情報は保持・報告しない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見の周は、本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を持たない(タスク MD が無い)。
+**控える値**(セッション文脈に保持し、報告にも書く): 発見元・`task_dir`・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(`origin-repo.py` の出力の `origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`。`reason` は比べない。最後の値は送信時に解決する effective push URL の SHA-256 であり、URL と認証情報は保持・報告しない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見の周は、本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を持たない(タスク MD が無い)。
 
 - origin の判定と git 設定のダイジェストは、§4 の前提(工程 D1 の前。git 設定のダイジェストを先に)で取る
 - 最後に知る HEAD は、ブランチを作ったときに S0 にし、commit の直後の照合に通ったら、その HEAD に更新する
@@ -144,25 +144,25 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 | 時点 | 照合 |
 |---|---|
-| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、安全用のオプションが無効にしない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に打つ) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
+| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、安全用のオプションが無効にしない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に打つ) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
 | ブランチを作った直後 | 現在のブランチ = 作業ブランチ・`HEAD` = S0 |
-| stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
+| stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で打つ |
 | commit の直後 | `HEAD^{tree}` = 控えた tree・`git diff --name-status -z --no-renames S0 HEAD` が C の `A` だけ・`git rev-list --count S0..HEAD` = 1・C の各パスを `git show HEAD:./<パス> \| python3 {create-task の}scripts/candidate-keys.py --check --source=<S> -` で確かめる・現在のブランチ = 作業ブランチ・`git status --porcelain=v1 -z --untracked-files=all` が空 |
-| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` を打ち直して 6 欄が守る値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
+| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` を打ち直して 6 欄が控える値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
 
 - 表の `<S>` は発見元。「現在のブランチ」は `git symbolic-ref --quiet HEAD` で見る
-- 表の `<守る値>` は git 設定のダイジェストの値、`<管理ルート>` は管理ルートの絶対パス。`--expect` は exit 0 だけが通る(unattended-mode.md §7 と同じ)
+- 表の `<控える値>` は git 設定のダイジェストの値、`<管理ルート>` は管理ルートの絶対パス。`--expect` は exit 0 だけが通る(unattended-mode.md §7 と同じ)
 - 失敗扱いで報告に添えるもの(commit の直後の tree の不一致なら、控えた tree と `HEAD^{tree}` の差分)は unattended-mode.md §6
 
 ## 8. commit・push・PR
 
 - **stage**: C の各パスを `git add -- ':(literal)<パス>'` で足すだけ
-- **commit**: 1 本。メッセージは `git log --oneline -20` の流儀に合わせる(例 `chore: 発見の候補 — data-audit(3 件)`)。`Write` で `.claude/reviews/discover-<発見元>-msg.md` に置き、`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/discover-<発見元>-msg.md` の 1 回の Bash で渡す(§7 の commit の直前の照合の後。rc が 0 以外なら失敗扱い)
+- **commit**: 1 本。メッセージは `git log --oneline -20` の流儀に合わせる(例 `chore: 発見の候補 — data-audit(3 件)`)。`Write` で `.claude/reviews/discover-<発見元>-msg.md` に置き、`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値> && git commit -F .claude/reviews/discover-<発見元>-msg.md` の 1 回の Bash で渡す(§7 の commit の直前の照合の後。rc が 0 以外なら失敗扱い)
 - **公開**: origin があり、`--no-pr` でなければ、push の直前の照合(§7)の後に `publish-guard.py` へ保持したレビュー済み完全 SHA・固定 branch・設定 digest を渡す。helper だけが `<SHA>:refs/heads/<作業ブランチ>` を送信し、実際の送信先の remote SHA を照合する。`-u` は使わず、共有の `config` に項目を足さない。
-- **PR の前の確かめ**: `repo` が非 null で、`gh repo view '<R>' --json name -q .name` が rc 0 なら、通常モードを使う。呼出しは `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<R> --base=<デフォルトブランチ> --config-digest=<守る値> --body-file=.claude/reviews/discover-<発見元>-pr.md --title='候補: <発見元>(<N> 件)'`。返った PR の URL/番号/head/base を照合する。タイトルは `候補: <発見元>(<N> 件)`、draft・アサインは付けない。
+- **PR の前の確かめ**: `repo` が非 null で、`gh repo view '<R>' --json name -q .name` が rc 0 なら、通常モードを使う。呼出しは `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<R> --base=<デフォルトブランチ> --config-digest=<控える値> --body-file=.claude/reviews/discover-<発見元>-pr.md --title='候補: <発見元>(<N> 件)'`。返った PR の URL/番号/head/base を照合する。タイトルは `候補: <発見元>(<N> 件)`、draft・アサインは付けない。
   - `gh auth status` では決めない(複数のアカウントのどれかに問題があるだけで rc 1 になり、active なアカウントがリポジトリに触れるかも見ない)
-- **push だけのとき(結末 `縮退`)**: `repo` が null か、`gh repo view` が通らなければ、`python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --config-digest=<守る値> --push-only --push-url-digest=<保持した push_url_sha256>` を使う。このモードは保持した SHA・branch・設定 digest・URL digest を送信直前に照らし、URLをargvへ再入力せず origin 名で exact refspec を送った後に、同じ送信経路への `dry-run` の状態を照合する。`gh` と PR 本文を呼ばない。URL 本文と認証情報を報告しない。失敗・拒否は失敗扱い、成功は結末 `縮退` として push 済みを報告する。
+- **push だけのとき(結末 `縮退`)**: `repo` が null か、`gh repo view` が通らなければ、`python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --config-digest=<控える値> --push-only --push-url-digest=<保持した push_url_sha256>` を使う。このモードは保持した SHA・branch・設定 digest・URL digest を送信直前に照らし、URLをargvへ再入力せず origin 名で exact refspec を送った後に、同じ送信経路への `dry-run` の状態を照合する。`gh` と PR 本文を呼ばない。URL 本文と認証情報を報告しない。失敗・拒否は失敗扱い、成功は結末 `縮退` として push 済みを報告する。
 - **`縮退`**: origin が無い・`--no-pr`(どちらも push しない)/ `repo` が null・`gh repo view` が通らない(`push-only` で push する)。報告に、理由と push の有無を書く。手で PR を作るコマンドの雛形と、作らないときの消し方は、`loop.sh` の朝の報告に出る(`loop.md` の発見モード)
 
 **PR 本文**: 候補のファイルと、発見元の報告(`.claude/reviews/candidates-<発見元>.md`)からの転記だけ。推測で書かない。`Write` で `.claude/reviews/discover-<発見元>-pr.md` に置く。
@@ -182,7 +182,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 ## 9. 結末
 
-- 完了報告の最後に、結末の行 `無人の周の結果: <結末> — <詳細>` を書く(照合パターンは unattended-mode.md §2)
+- 完了報告の最後に、結果の行 `無人の周の結果: <結末> — <詳細>` を書く(照合パターンは unattended-mode.md §2)
 - 発見の周の結末は `PR`・`縮退`・`候補なし`・`失敗扱い` の 4 つ。`保留` は出さない
 - 詳細には、書き出し・既知・回帰の疑いの件数を入れる(例 `無人の周の結果: 候補なし — data-audit: 新しい候補 0 件(既知 2 件・回帰の疑い 0 件)`)。`PR` なら URL も入れる。refactor の周では、除外の件数を入れない
 

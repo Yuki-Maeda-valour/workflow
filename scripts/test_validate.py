@@ -251,10 +251,23 @@ class ValidateTest(unittest.TestCase):
         target.write_bytes(target.read_bytes() + b"\n\xff\xfe \xe6\x9e\xa1\n")
         self.assert_error(["置き換える語", "'枡'"])
 
+    def edit_definition_line(self, prefix, add="", new_prefix=None):
+        """docs/design.md の定義の行(行頭が prefix のちょうど 1 行)の末尾に add を足すか、行頭を new_prefix に
+        変える。その行の番号を返す(元の中身は setUp のコピーごと捨てる)。"""
+        target = self.repo / "docs" / "design.md"
+        lines = target.read_text(encoding="utf-8").split("\n")
+        found = [i for i, line in enumerate(lines) if line.startswith(prefix)]
+        self.assertEqual(1, len(found), found)
+        line = lines[found[0]] + add
+        if new_prefix is not None:
+            line = new_prefix + line[len(prefix):]
+        lines[found[0]] = line
+        target.write_text("\n".join(lines), encoding="utf-8")
+        return found[0] + 1
+
     def test_replaced_word_definition_line_in_design_is_exempt(self):
-        self.append_to_checked_file(
-            "- **文書の中で置き換える語**: 例として枡を書く", relpath="docs/design.md", prefix=""
-        )
+        # 「文書の中で置き換える語」の定義の行は、その行の組の語(枡・フル段階など)を除く
+        self.edit_definition_line("- **文書の中で置き換える語**", "例として枡・フル段階・結末の行を書く")
         self.assert_clean()
 
     def test_replaced_word_other_design_line_is_error(self):
@@ -348,6 +361,124 @@ class ValidateTest(unittest.TestCase):
         for text in ("以前置きました", "以前置き換えた", "直前置き場に置く", "事前置き換えの手順", "前置詞", "空白だけが前置される位置"):
             with self.subTest(text=text):
                 self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_words_of_316_are_errors(self):
+        # #316: やり取りの範囲の 3 つの環境の名前と、その判定・結果の行
+        cases = (
+            ("フル段階では同じ name へ再依頼する", "'フル段階'", "双方向でやり取りできる環境"),
+            ("標準段階では新規に起動する", "'標準段階'", "一方向だけの環境"),
+            ("最小段階では直列に進める", "'最小段階'", "別の AI を使えない環境"),
+            ("標準・最小段階では M1 を省略する", "'最小段階'", "別の AI を使えない環境"),
+            ("解決順・段階判定の手段", "'段階判定・実行段階'", "やり取りの範囲の判定"),
+            ("6. **実行段階の判定**", "'段階判定・実行段階'", "やり取りの範囲の判定"),
+            ("完了報告の最後に結末の行を書く", "'結末の行'", "結果の行"),
+            ("失敗(結末の行が無い)", "'結末の行'", "無人の周の結果"),
+        )
+        for text, word, guidance in cases:
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
+        self.assert_appended_line_flagged("17. **実行環境の段階判定と縮退プロトコル**", ["'段階判定・実行段階'"], relpath="docs/design.md")
+        self.assert_appended_line_flagged("    - **フル**(双方向の委託が可能な段階)。標準段階と同じ", ["'標準段階'"], relpath="docs/design.md")
+
+    def test_replaced_words_of_316_list_and_bold_names_are_errors(self):
+        # #316: 3 つの環境の古い名前の並び(「フル / 標準 / 最小」など)と太字の名前
+        list_needles = ["置き換える語", "'フル / 標準 / 最小(並び)'", "双方向でやり取りできる環境"]
+        bold_needles = ["置き換える語", "'**フル**・**標準**・**最小**(太字の名前)'", "一方向だけの環境"]
+        for text in ("フル / 標準 / 最小 のどれで走るか", "実行形態: {フル / 標準 / 最小(段階を下げたとき)}",
+                     "フル/標準", "標準・最小の環境", "標準／最小", "フル・最小"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, list_needles)
+        for text in ("    - **フル**(双方向の委託が可能な段階): ", "- **標準**: 委託は一方向", "**最小**(サブエージェント機構なし)"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, bold_needles)
+        self.assert_appended_line_flagged("    - **標準**(一方向の委託のみ)", ["'**フル**・**標準**・**最小**(太字の名前)'"],
+                                          relpath="docs/design.md")
+
+    def test_replaced_words_of_316_list_and_bold_lookalikes_are_not_flagged(self):
+        # 区切りの無い「標準」・ほかの意味の並び・太字の中のほかの語は探さない
+        for text in ("標準出力に出す", "標準の性能の段", "最上位 / 上位 / 標準", "報告調 / 標準 / プロジェクトの指示ファイルに口調を入れない",
+                     "標準・軽量のどちらで実行したか", "標準・導入 bash の両方", "{quick | 標準 | area:{名} | deep}",
+                     "モード: {フル / --quick / --layer=X}", "口調の型(標準・報告調)", "16. **図の標準**", "**標準ロジック**",
+                     "**最小構成**", "フルパス", "最小 / 最大"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_words_of_318_are_errors(self):
+        # #318: 置き換える語 4 語(名前・プレースホルダも探す)
+        cases = (
+            ("止めの印を置いて exit 20", "'止めの印'", "止める印"),
+            ("`--expect=<守る値>`", "'守る値'", "控える値"),
+            ("## 7. 周の中で守る値と照合(改竄ガード)", "'守る値'", "控える値"),
+            ("## 4. 対話点の表", "'対話点'", "人に確かめる場面"),
+            ("`<対話点番号で始まる理由>`", "'対話点'", "人に確かめる場面の番号"),
+            ("停止ではなく報告点であり", "'報告点'", "判断を仰ぐ点"),
+        )
+        for text, word, guidance in cases:
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
+        self.assert_appended_line_flagged("update-doc の報告点など", ["'報告点'"], relpath="docs/design.md")
+
+    def test_replaced_words_of_316_318_lookalikes_are_not_flagged(self):
+        # 「段階」だけ・「結末」だけ(結末の値・`- 結末: …` の行)と、新しい語は探さない
+        for text in ("段階を下げて続ける", "使えるのに下の段階で回さない", "実行の段階で決める", "段階的に実施", "第2段階で照合",
+                     "要求がまだ調査段階", "スコープ縮小を設計段階で殺す", "結末: `PR`", "- 結末: 縮退 — x", "結末の値",
+                     "結果の行を書く", "止める印を置く", "`--expect=<控える値>`", "人に確かめる場面の番号", "判断を仰ぐ点",
+                     "双方向でやり取りできる環境", "一方向だけの環境", "別の AI を使えない環境", "やり取りの範囲の判定",
+                     "フル監査", "最上位 / 上位 / 標準", "最小構成", "報告の点数", "対話の点"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_word_okikaeru_go_definition_line_in_design_is_exempt(self):
+        # 「置き換える語」の定義の行は、その行の 4 語(守る値・対話点・報告点・止めの印)を除く
+        self.edit_definition_line("- **置き換える語**", "例: 守る値・対話点番号・報告点・止めの印")
+        self.assert_clean()
+
+    def test_replaced_word_definition_line_does_not_exempt_other_group(self):
+        # 定義の行で除くのは、その行で定義する語の組だけ。ほかの組の語は、その行でも ERROR にする
+        cases = (
+            ("- **置き換える語**", "例: 枡", "'枡'"),
+            ("- **置き換える語**", "例: フル段階", "'フル段階'"),
+            ("- **置き換える語**", "例: 結末の行", "'結末の行'"),
+            ("- **文書の中で置き換える語**", "例: 守る値", "'守る値'"),
+            ("- **文書の中で置き換える語**", "例: 止めの印", "'止めの印'"),
+        )
+        for prefix, add, word in cases:
+            with self.subTest(prefix=prefix, add=add):
+                target = self.repo / "docs" / "design.md"
+                original = target.read_bytes()
+                try:
+                    no = self.edit_definition_line(prefix, add)
+                    self.assert_error([f"docs/design.md:{no}:", "置き換える語", word])
+                finally:
+                    target.write_bytes(original)
+
+    def test_replaced_word_definition_line_must_be_exactly_one(self):
+        # 定義の行は design にちょうど 1 行ずつ。2 行以上・0 行は ERROR にする
+        for prefix in ("- **置き換える語**", "- **文書の中で置き換える語**"):
+            target = self.repo / "docs" / "design.md"
+            original = target.read_bytes()
+            with self.subTest(prefix=prefix, count=2):
+                try:
+                    self.append_to_checked_file(f"{prefix}: 二つ目の定義", relpath="docs/design.md", prefix="")
+                    self.assert_error(["docs/design.md:", f"定義の行「{prefix}」が 2 行", "ちょうど 1 行"])
+                finally:
+                    target.write_bytes(original)
+            with self.subTest(prefix=prefix, count=0):
+                try:
+                    self.edit_definition_line(prefix, new_prefix="- **言い換えの定義**")
+                    self.assert_error(["docs/design.md:", f"定義の行「{prefix}」が 0 行", "ちょうど 1 行"])
+                finally:
+                    target.write_bytes(original)
+
+    def test_replaced_word_okikaeru_go_prefix_elsewhere_is_error(self):
+        # 行頭でない・字下げした・skill の文書の同じ字面は除かない
+        for relpath, text in (
+            ("docs/design.md", "  - **置き換える語**: 守る値"),
+            ("docs/design.md", "注: - **置き換える語**: 守る値"),
+            (self.REPLACED_TARGET, "- **置き換える語**: 守る値"),
+        ):
+            with self.subTest(relpath=relpath, text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'守る値'"], relpath=relpath)
 
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 

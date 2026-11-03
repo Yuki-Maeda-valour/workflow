@@ -58,8 +58,8 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 - 開始時の HEAD が、デフォルトブランチ(判定は ship-task の Phase 0 の 4)か detached HEAD である(作業ブランチの上なら満たさない)。detached HEAD なら、ローカルのデフォルトブランチの履歴の中にある(起点の確認。`git rev-list --count refs/heads/<DEF_NAME>..HEAD` が rc 0 で `0` を出す)。デフォルトブランチ(`DEF_REF`・`DEF_NAME`)は base-commit.md と同じ手順で求め、解決できなければ満たさない
 - タスク MD のヘッダにメタ行(`> **無人実行**: 可`)がある
 - タスク MD が git の追跡下にある
-- ローカルの git 設定のダイジェストを `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出でき(exit 0)、守る値(§7。作業の途中で変わっていないかを確かめるために、最初に控える値)として保持した。下の origin の URL の検査より先に打つ(設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため)
-- **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は `discover-mode.md` §4 の「origin の URL」と同じ。出力の 6 欄(`origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`)を、守る値の origin の判定(§7)として保持した
+- ローカルの git 設定のダイジェストを `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出でき(exit 0)、控える値(§7。作業の途中で変わっていないかを確かめるための値)として保持した。下の origin の URL の検査より先に打つ(設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため)
+- **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は `discover-mode.md` §4 の「origin の URL」と同じ。出力の 6 欄(`origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`)を、控える値の origin の判定(§7)として保持した
 - この文書と `task-digest.py`・`origin-repo.py`・`git-config-digest.py` と Python 3 がある
 - 本文ダイジェストを算出でき(exit 0)、R として保持した
 
@@ -93,7 +93,7 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 
 ## 3. 一般則
 
-対話点の表(§4。人に確かめる場面の表)に無い場面に使う。**原因で分ける**。
+人に確かめる場面の表(§4)に無い場面に使う。**原因で分ける**。
 
 - そのタスクに固有の、人の判断が要る点(仕様・設計のずれ・未収束のレビュー・基準の指定)→ 保留
 - 環境・リポジトリの状態・ツールの異常 → 失敗扱い。確認や承認を求める形で書かれた点も、これに当たれば失敗扱い(例: D6・D7・D10・D19)
@@ -160,9 +160,9 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 
 **外部の委託**: 外部 implementer は使わない(内蔵 implementer で走り、そのことを報告する — S2・D5)。確認が要る外部レビュアー(`secret_paths` があるときの確認・`--command` の明示承認)は起動せず、内蔵編成で続行して報告する(D15)。
 
-## 4. 対話点の表
+## 4. 人に確かめる場面の表
 
-ship-task・do-task・update-doc と、do-task の references(base-commit.md・diff-snapshot-call.md・external-runners.md・review-protocol.md)の人に確かめる場面のうち、無人の経路で実行されうるものを網羅する。発見元の候補モード(data-audit・create-task の `--candidates --unattended`)の人に確かめる場面は、[candidate-mode.md](../../create-task/references/candidate-mode.md) の置き換えの表が正本(この表には載せない)。
+ship-task・do-task・update-doc と、do-task の references(base-commit.md・diff-snapshot-call.md・external-runners.md・review-protocol.md)が人に確かめる場面のうち、無人の経路で実行されうるものを網羅する。発見元の候補モード(data-audit・create-task の `--candidates --unattended`)で人に確かめる場面は、[candidate-mode.md](../../create-task/references/candidate-mode.md) の置き換えの表が正本(この表には載せない)。
 
 | # | 場所 | 対話時 | 無人 |
 |---|---|---|---|
@@ -203,7 +203,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | G1 | どこでも | 許可の要る操作が拒否された | 保留のガードを満たせば保留、満たさなければ失敗扱い(§3)。発見の周と候補モードでは、常に失敗扱い(保留が無い) |
 | G2 | ship-task・do-task | 周の中の照合に通らない(本文ダイジェスト・基準行・未追跡一覧・HEAD・ブランチ・index・commit の後の中身・git 設定のダイジェスト〈`git-config-digest.py` の `--expect` が exit 0 でない〉・origin の判定。§7。発見の周は discover-mode.md §7 の表) | 失敗扱い(改竄ガード) |
 | G3 | ship-task Phase 0 | 無人の前提を欠く(§1。発見の周の前提は discover-mode.md §4) | 失敗扱い |
-| G4 | ship-task・do-task | 周の中で守る値(§7)を失った(文脈の圧縮など) | 失敗扱い。条件 ⑤ の例外が読む報告の値(ship-task Phase 0 の 4)も同時に失うので、D8 の保留より G4 を優先する |
+| G4 | ship-task・do-task | 周の中で控える値(§7)を失った(文脈の圧縮など) | 失敗扱い。条件 ⑤ の例外が読む報告の値(ship-task Phase 0 の 4)も同時に失うので、D8 の保留より G4 を優先する |
 
 **S5 の注**(do-task が返す分類)
 
@@ -221,7 +221,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 
 **ガード**: 手順 1 で、何も書き換える前にすべて確かめる。1 つでも満たさなければ、保留せず失敗扱いにする(作業ツリーと index はそのまま)。
 
-- git 設定のダイジェストが守る値のまま(`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0。§7 の commit の手順の最初の照合。ガードの最初に打つ)
+- git 設定のダイジェストが控える値のまま(`python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0。§7 の commit の手順の最初の照合。ガードの最初に打つ)
 - 現在のブランチが、この周で ship-task が作った作業ブランチである(`git symbolic-ref --quiet HEAD` = `refs/heads/<作業ブランチ>`)
 - HEAD = 最後に知る HEAD(§7)
 - タスク MD が `進行中_` である
@@ -234,7 +234,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 **手順**: 手順 2 以降の段で失敗しても失敗扱い。
 
 1. ガードをすべて確かめる
-2. 元の開始 state から `take --phase hold` を作る。`attest --hold-reason <対話点番号で始まる停止条件> --hold-next <人が次にすること>` で未承認根拠を固定する。
+2. 元の開始 state から `take --phase hold` を作る。`attest --hold-reason <人に確かめる場面の番号で始まる停止条件> --hold-next <人が次にすること>` で未承認根拠を固定する。
    `finalize --transition pending` が template と同じ保留の行を 1 行だけ生成する。自由な追記はしない。期待バイトと hash を保持する。
 3. 改名先不存在を再確認し、元モードを保って期待バイトを `保留_` のパスへ適用し、旧パスを除く。まだ index は変えない。
    `verify --mode pre-stage --task-transition pending` に期待バイト・根拠の保持値を渡す。全共通引数は `review-protocol.md` に従う。
@@ -281,7 +281,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
   - 保留のガードを満たさない場合
   - 保留の手順の途中の失敗
 
-## 7. 周の中で守る値と照合(改竄ガード)
+## 7. 周の中で控える値と照合(改竄ガード)
 
 ### review/commit 照合
 
@@ -297,9 +297,9 @@ task 改名時は全 mode に task 遷移・期待バイト・根拠の保持値
 ignore/ignored と品質入口の変更を開示し、直接実行した clean checkout の結果で確認する。
 PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task 記録から APPROVED・実施済を採用しない。
 
-この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の守る値と照合の表を使い、R を持たない(git の安全用のオプション・「push の直前」・除外対象は、この節と同じ)。
+この節はタスクの周の値と照合。発見の周は、[discover-mode.md](discover-mode.md) §7 の控える値と照合の表を使い、R を持たない(git の安全用のオプション・「push の直前」・除外対象は、この節と同じ)。
 
-**守る値**(セッション文脈に保持し、報告にも書く)
+**控える値**(セッション文脈に保持し、報告にも書く)
 
 | 値 | 取る者と時点 |
 |---|---|
@@ -316,13 +316,13 @@ PR の検証欄は `pr-evidence` の出力だけを使い、書換可能な task
 
 | 時点 | 照合すること |
 |---|---|
-| do-task の Phase 4 の各回(implementer から戻るたび)と、Phase 7 の手順 1 の前 | 本文ダイジェスト = R / git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` が exit 0(do-task の値) / 現在のブランチ = 保持した作業ブランチ / HEAD = do-task の開始時の HEAD(周の中で commit するのは ship-task だけ) / ヘッダの基準行 = 保持した基準 / 未追跡一覧が保持した状態のまま(「有り」ならファイルがあり sha256 が一致する。「無し」なら後から現れたファイルを使わない) |
-| ship-task の各 commit の手順の最初(実装 commit・doc commit・保留の commit。stage の前。保留の commit では §5 のガードの最初) | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 |
-| ship-task の各 commit の直前(実装 commit・doc commit・保留の commit) | 本文ダイジェスト = R / 現在のブランチ = 作業ブランチ / HEAD = 最後に知る HEAD / index に除外対象が無い(`git diff --cached --name-only -z --no-renames` で見る。stage 済みのものも commit に入るため)。通ったら、stage を終えた index の tree を `git write-tree` で控える。commit は `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値> && git commit -F .claude/reviews/<名>` の 1 回の Bash で打つ(メッセージのファイルは `Write` で置く — §3 の 10) |
+| do-task の Phase 4 の各回(implementer から戻るたび)と、Phase 7 の手順 1 の前 | 本文ダイジェスト = R / git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` が exit 0(do-task の値) / 現在のブランチ = 保持した作業ブランチ / HEAD = do-task の開始時の HEAD(周の中で commit するのは ship-task だけ) / ヘッダの基準行 = 保持した基準 / 未追跡一覧が保持した状態のまま(「有り」ならファイルがあり sha256 が一致する。「無し」なら後から現れたファイルを使わない) |
+| ship-task の各 commit の手順の最初(実装 commit・doc commit・保留の commit。stage の前。保留の commit では §5 のガードの最初) | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0 |
+| ship-task の各 commit の直前(実装 commit・doc commit・保留の commit) | 本文ダイジェスト = R / 現在のブランチ = 作業ブランチ / HEAD = 最後に知る HEAD / index に除外対象が無い(`git diff --cached --name-only -z --no-renames` で見る。stage 済みのものも commit に入るため)。通ったら、stage を終えた index の tree を `git write-tree` で控える。commit は `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値> && git commit -F .claude/reviews/<名>` の 1 回の Bash で打つ(メッセージのファイルは `Write` で置く — §3 の 10) |
 | ship-task の各 commit の直後 | `HEAD^{tree}` = 直前に控えた tree(commit の hook がソースや除外対象を書き換え・stage した場合を捉える)/ `git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> \| python3 <task-digest.py> -` = R(パスは commit の後のパス。実装 commit・doc commit は `完了_`、保留の commit は `保留_`。直前の照合は作業ツリーを読むので、index に別の本文が stage されていた場合を捉える)/ 現在のブランチ = 作業ブランチ。通らなければ、commit は残ったまま失敗扱い。通れば、最後に知る HEAD を更新する |
-| ship-task の push の直前(Phase 5 の PR の前の確かめの後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<守る値>` を単独で打ち、exit 0 ② origin の判定: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>` を打ち直し、exit 0 で 6 欄(`push_url_sha256`を含む)が守る値と一致 / `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ ③ push/PR は保持したレビュー済み SHA を `publish-guard.py` へ渡し、helper の直前 digest/origin 照合と exact refspec を使う |
+| ship-task の push の直前(Phase 5 の PR の前の確かめの後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0 ② origin の判定: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>` を打ち直し、exit 0 で 6 欄(`push_url_sha256`を含む)が控える値と一致 / `git rev-parse refs/heads/<作業ブランチ>` = 最後に知る HEAD / 現在のブランチ = 作業ブランチ ③ push/PR は保持したレビュー済み SHA を `publish-guard.py` へ渡し、helper の直前 digest/origin 照合と exact refspec を使う |
 
-- 表の `<守る値>` は、照らす者(ship-task・do-task)が自分で持つ git 設定のダイジェストの値。`<管理ルート>` は管理ルートの絶対パス(タスクの周では profile の `root` と同じ)。`git-config-digest.py` の `--expect` は exit 0(一致)だけが通る(1 = 不一致、2 = 算出できない)。commit は `--expect` と `&&` でつないだ 1 行にし、rc が 0 以外なら失敗扱い。公開は `publish-guard.py` が保持した origin 判定と設定ダイジェストを照合してから、レビュー済みの完全 SHA を送る。どちらも照合に通らなければ実行しない
+- 表の `<控える値>` は、照らす者(ship-task・do-task)が自分で持つ git 設定のダイジェストの値。`<管理ルート>` は管理ルートの絶対パス(タスクの周では profile の `root` と同じ)。`git-config-digest.py` の `--expect` は exit 0(一致)だけが通る(1 = 不一致、2 = 算出できない)。commit は `--expect` と `&&` でつないだ 1 行にし、rc が 0 以外なら失敗扱い。公開は `publish-guard.py` が保持した origin 判定と設定ダイジェストを照合してから、レビュー済みの完全 SHA を送る。どちらも照合に通らなければ実行しない
 - 照合・index・commit・公開の Git 呼び出しには、`base-commit.md` が定める Git の安全用のオプション(`--no-pager --no-replace-objects`、hook/fsmonitor/GPG/LFS filter の無効化)を付ける。品質確認は hook に委ねない。公開は `publish-guard.py` だけが行い、保持 SHA を source にした完全 refspec、origin/digest の直前照合、remote SHA と PR 実体照合を行う
 - **限界**: 同じ利用者権限の任意プログラムは hook の環境変数・helper・Git 設定を直接差し替え得る。hook は通常の子の `git push` を固定の送り先へ狭め、helper は送信直前と送信後を照合するが、同 UID の任意コードを隔離しない。レビュー済み SHA と公開結果は親が worktree 外で保持し、異常時は PR を自動で閉じず URL を人へ報告する。
   成立条件は子が同じ OS 利用者として任意プログラムを実行できること、影響は仲介外の Git/`gh` 実行である。Git の安全用のオプション・固定 SHA・remote/PR 照合が防ぐのは helper 自身の公開経路だけである。親は worktree 外の保持値とログを照合し、信頼できない実装を同 UID で実行しない運用にする。

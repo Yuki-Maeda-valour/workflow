@@ -30,7 +30,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **テンプレは Read → 置換 → Write。** テンプレートは本スキルの `templates/`(この SKILL.md と同階層)に置いてある。Read し、`{{PLACEHOLDER}}` を検出値に置換してから対象パスへ Write する。値が不明な箇所は「（〜を記述）」等のガイド文を残したまま出力してよい。
 - **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う。**
   - 役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)
-  - からホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)。
+  - からホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)。
 - **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
   - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
@@ -366,7 +366,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 1. **レビュアー編成**: 性能の段が違う 2〜3 体を単一メッセージで並列起動する(モデルを選べない環境では観点を分けた複数レビュアーで多様性を確保)。
    - 全員読み取り専用で、`reviewer-strong` / `reviewer-alt`(3 体目は `reviewer-alt2`)の `name` を付けて起動する。
-   - **フル段階(design §5-17)では、修正後の再レビューを同じ `name` へ再依頼する**(再スポーンしない)。
+   - **双方向でやり取りできる環境(design §5-17)では、修正後の再レビューを同じ `name` へ再依頼する**(再スポーンしない)。
    - **外部ランナー(レビューや実装に使う外部の AI のコマンド。宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。
      - 手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。
      - 参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する

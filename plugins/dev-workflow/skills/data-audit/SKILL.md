@@ -20,7 +20,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
 7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
 8. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
-   - ホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
+   - ホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
 9. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
@@ -37,7 +37,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=data-audit --unattended`)が呼ぶ。
 - 指摘を承認を待たずに task_dir の `候補_{名}.md` として書き出し、人に確かめる場面を出さない。
-- 引数・対話点と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本(ほかが合わせる元)は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、
+- 引数・人に確かめる場面と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本(ほかが合わせる元)は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、
 - 指摘キーの識別子と観点群は [references/checks.md](references/checks.md) の「候補モードの識別子と観点群」。
 - 以下の各所には 1 行の分岐だけを置く。
 
@@ -66,7 +66,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## Phase 2: 観点別並列スキャン
 
-**読み取り専用のエージェント**を**観点グループ別に単一メッセージで並列起動**する(design §5-13。各エージェントには下表の `name` 列を付ける。実行段階の判定と段階の下げ方は §5-17 に従う — フル段階では追加調査を同じ `name` へ再依頼し、最小段階では直列セルフスキャンに段階を下げて続ける):
+**読み取り専用のエージェント**を**観点グループ別に単一メッセージで並列起動**する(design §5-13。各エージェントには下表の `name` 列を付ける。やり取りの範囲の判定と段階の下げ方は §5-17 に従う — 双方向でやり取りできる環境では追加調査を同じ `name` へ再依頼し、別の AI を使えない環境では直列セルフスキャンに段階を下げて続ける):
 
 | エージェント | `name` | 担当観点(checks.md の節) | --quick |
 |---|---|---|---|
@@ -76,7 +76,8 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 | 取得効率スキャン | `scan-efficiency` | B5 過剰取得 / F4 過剰保持 / D4 インデックス / D5 巨大カラム | 省略 |
 
 **委託の解決(役割語 → 実行バックエンド)**: 上表の 4 体はいずれも読み取り専用の並列調査(`researcher` の観点別派生)である。
-- 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフスキャン+機械検証)に段階を下げて続け、そのことを報告する。
+- 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ここでは再掲しない)。
+  - 参照先が存在しない構成(skill を単体でコピーした部分導入)では、別の AI を使えない環境の進め方(直列セルフスキャン+機械検証)に段階を下げて続け、そのことを報告する。
 
 各エージェントへの指示に必ず含めること:
 - Phase 1 の境界一覧と機密フィールド辞書、checks.md の担当節(検出シグネチャ)
@@ -106,7 +107,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 # データ境界監査: {プロジェクト名}
 
 > 実行: {日付} / HEAD: {ハッシュ先頭 12 桁} / 層: {監査した層} / 母数: {境界の列挙数}
-> 実行形態: {フル / 標準 / 最小(段階を下げたとき)} / モード: {フル / --quick / --layer=X}
+> 実行形態: {双方向でやり取りできる環境 / 一方向だけの環境 / 別の AI を使えない環境(段階を下げたとき)} / モード: {フル / --quick / --layer=X}
 
 ## 指摘一覧(深刻度順)
 | # | 層 | 観点 | 場所 | 内容(1 行) | 深刻度 | 確度 |
@@ -142,7 +143,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 - [ ] 機密の値・認証情報を出力していない(フィールド名と場所のみ)
 - [ ] false positive の除去理由を記録した
 - [ ] 未監査の層・観点を理由付きで明記した(サイレントスキップしていない)
-- [ ] 実行形態(フル / 標準 / 最小)を報告に明記した
+- [ ] 実行形態(双方向でやり取りできる環境 / 一方向だけの環境 / 別の AI を使えない環境)を報告に明記した
 - [ ] 候補モード: 書き込みは `.claude/reviews/` と task_dir の新しい `候補_*.md` だけで、candidate-mode.md の最終ゲートを満たした
 
 ## 関連スキル

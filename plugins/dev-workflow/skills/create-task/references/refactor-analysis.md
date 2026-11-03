@@ -80,7 +80,7 @@ Grep(または Serena `search_for_pattern`)で探す。`doc/06_stack-notes.md` �
 
 ## 6. 候補モード(`--candidates`)
 
-`/create-task --refactor --candidates` の足切り・上限・単位と識別子・除外。手順(対話点の置き換え〈人に確かめる場面の扱いの置き換え〉・選定の並べ方・書き出し・結果の行)の正本(ほかが合わせる元)は [candidate-mode.md](candidate-mode.md)。調査は §1〜3 と、候補に要る調査(before メトリクス・path:line・doc/06 の該当)だけにする。§5 はタスク MD の中身なので、採用のときに適用する。
+`/create-task --refactor --candidates` の足切り・上限・単位と識別子・除外。手順(人に確かめる場面の扱いの置き換え・選定の並べ方・書き出し・結果の行)の正本(ほかが合わせる元)は [candidate-mode.md](candidate-mode.md)。調査は §1〜3 と、候補に要る調査(before メトリクス・path:line・doc/06 の該当)だけにする。§5 はタスク MD の中身なので、採用のときに適用する。
 
 - **足切り**: §1 の閾値を 1 つ以上超え、かつ §2 のスコアが 5 以上(初期値。実走で調整する)
 - **上限**: 既定 5(`--max-candidates=N` で変える)。並べ方と上限を超えた分の扱いは candidate-mode.md の「選定」

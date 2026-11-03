@@ -1166,7 +1166,7 @@ def attest(args: argparse.Namespace) -> int:
             raise GuardError("直接検証結果が揃っていないか失敗している")
     elif (reviews or not re.fullmatch(r"[SDUG][0-9]+[ :][^\r\n]+", args.hold_reason or "")
           or not args.hold_next or any(c in args.hold_next for c in "\r\n")):
-        raise GuardError("保留は承認返答を付けず対話点番号付きの理由と次の操作が必要")
+        raise GuardError("保留は承認返答を付けず、人に確かめる場面の番号で始まる理由と、次の操作が必要")
     result = {"kind": "review-evidence", "phase": saved["phase"], "review_binding_sha256": saved["review_binding_sha256"],
               "verdict": "UNAPPROVED" if saved["phase"] == "hold" else "APPROVED", "checks": checks,
               "checks_sha256": args.expect_checks_sha256, "reviews": reviews, "disclosures": saved["disclosures"],
