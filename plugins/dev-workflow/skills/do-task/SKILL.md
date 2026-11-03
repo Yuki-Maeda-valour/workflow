@@ -245,7 +245,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 
 **implementer への委託プロンプトを準備する**(ここでは起動しない — **起動は下の「内蔵に解決されたとき」と「外部に解決されたとき」の手順 4 だけが行う**。無条件の起動命令をここに置くと、外部委託で必要な承認・スナップショット・退避を飛ばして起動しうる)。
 - **モデルは、内蔵に解決されたときに限り** profile の `implementer_model` に従う(**外部に解決されたときのモデルは [references/external-runners.md](references/external-runners.md) §12-6 の実装用既定表が正本**)。
-- 単一枠の能力帯は軸 3。
+- implementer のようにモデルを指定する持ち場(委託先 1 体ごとの受け持ち)が 1 つだけのときの能力帯は軸 3。
 - **`name` は `implementer`**(**内蔵で実行するフル段階に限り**、以降の差し戻し・STATUS 問い合わせの宛先になる。**外部 implementer は宛先にならない** — 軸 5)。
 - 委託プロンプトに必ず含めるもの:
 
@@ -428,7 +428,10 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/
 
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
 
-- reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では `reviewer-internal` / `reviewer-strong` / `reviewer-alt` の 3 体を単一メッセージで並列起動する(枡割り当ては §2(a)、能力帯の解決は軸 3)
+- reviewer は実装に関与していない読み取り専用の委託を新規起動(1 体)。`--reviewers=3` では 3 体を単一メッセージで並列起動する(持ち場割り当ては §2(a)、能力帯の解決は軸 3)
+  - `reviewer-internal`: セッションと同じモデル
+  - `reviewer-strong`: 使える中で最も強いモデル
+  - `reviewer-alt`: それとは別のモデル
 - reviewer には diff・タスク MD・レビュー観点(6 カテゴリ: 機能保全 / 契約整合 / タスク充足 / テスト妥当性 / 規約 / セキュリティ・機密)を渡し、APPROVED または指摘リスト(JSON)を返させる
 - **team-lead が各指摘を実コードで裏取り(実際のコードやファイルを読んで確かめること)してトリアージ(指摘を扱いごとに振り分けること)**(valid / invalid / needs-user)。invalid は理由を記録。valid のみ修正へ
 - **外部ランナー(オプトイン)**: `--runners` または `features.runners` が**宣言されている場合に限り**、外部 CLI レビュアーを追加する。

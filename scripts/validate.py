@@ -12,7 +12,7 @@
   5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
      claude -p と、環境変数 WORKFLOW_PROJECT_NAMES に渡した周辺プロジェクト名
      (未設定なら 1 語も足さない)。行内に `<!-- validate-allow: 理由 -->` があれば
-     その行だけ免除する(8 でも効く。7 と委託の語の除外の不変条件では効かない)
+     その行だけ免除する(8 でも効く。7・11 と委託の語の除外の不変条件では効かない)
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の
      存在。fragment 付き・タイトル付きも検査し、コードフェンスの中は除外する
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
@@ -35,6 +35,10 @@
      (表の行を除く)について、文字数から、200 字を超えるインラインのコード(1 行の中の
      `[^`]+`)の長さを引いた数が 200 を超えたら WARN にする。ファイル:行番号と文字数を出す。
      マーカーでは免除しない
+ 11. 置き換える語(design.md §6): 「枡」「継承枠」を skill の文書(SKILLS_DIR 配下の *.md と
+     templates/ 配下)と docs/design.md から探し、見つけたら言い換え先を添えて ERROR にする。
+     除外は `do-task/references/writing-for-people.md`(言い換え表)と、docs/design.md の
+     「- **文書の中で置き換える語**」で始まる定義の行だけ。免除の印は効かない
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -706,6 +710,44 @@ def check_migration_allowlist_staleness():
             WARNS.append(f"{name}: 許容リストの skill に委託の語が無い")
 
 
+# 置き換える語(design.md §6)。(検出する語, 言い換え先)。「枡」は「固定枡」などの中でも見つける。
+_REPLACED_WORDS = (
+    ("継承枠", "「継承の持ち場」または「モデルを継承する持ち場」"),
+    ("枡", "「持ち場」"),
+)
+_REPLACED_WORDS_DEFINITION_PREFIX = "- **文書の中で置き換える語**"
+_REPLACED_WORDS_EXEMPT = SKILLS_DIR / "do-task" / "references" / "writing-for-people.md"
+
+
+def check_replaced_words():
+    """design.md §6 の置き換える語(枡・継承枠)の検査。skill の文書と docs/design.md が対象。
+    言い換え表(writing-for-people.md)と、docs/design.md の定義の行だけを除く(免除の印は使わない)。"""
+    targets = []
+    if SKILLS_DIR.exists():
+        for f in sorted(SKILLS_DIR.rglob("*")):
+            if not f.is_file() or f == _REPLACED_WORDS_EXEMPT:
+                continue
+            rel = f.relative_to(SKILLS_DIR).parts
+            if f.suffix == ".md" or (len(rel) > 2 and rel[1] == "templates"):
+                targets.append(f)
+    design = REPO / "docs" / "design.md"
+    if design.is_file():
+        targets.append(design)
+    for f in targets:
+        lines = f.read_text(encoding="utf-8", errors="replace").split("\n")
+        for no, line in enumerate(lines, 1):
+            if f == design and line.startswith(_REPLACED_WORDS_DEFINITION_PREFIX):
+                continue
+            hits = []
+            rest = line
+            for word, repl in _REPLACED_WORDS:
+                if word in rest:
+                    hits.append(f"{word!r} -> {repl}")
+                    rest = rest.replace(word, "")
+            for h in hits:
+                ERRORS.append(f"{f.relative_to(REPO)}:{no}: 置き換える語 {h}(design.md §6)")
+
+
 def main() -> int:
     # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
     if yaml_loader() is not None:
@@ -714,6 +756,7 @@ def main() -> int:
         check_skills()
         check_writing_rules_link()
         check_line_length()
+        check_replaced_words()
         check_delegation_words()
         check_host_cli_words()
         check_delegation_map_invariant()

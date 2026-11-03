@@ -205,6 +205,64 @@ class ValidateTest(unittest.TestCase):
         """壊していない写しは ERROR 0(各テストの「ERROR にならない」判定の土台)。"""
         self.assert_clean()
 
+    # ------------------------------------------------------- 置き換える語(枡・継承枠)
+
+    REPLACED_TARGET = "plugins/dev-workflow/skills/do-task/references/review-protocol.md"
+
+    def test_replaced_word_masu_is_error_with_guidance(self):
+        self.append_to_checked_file("固定枡の説明", relpath=self.REPLACED_TARGET, prefix="")
+        self.assert_error(["置き換える語", "'枡'", "持ち場"])
+
+    def test_replaced_word_keishoowaku_is_error_in_design(self):
+        self.append_to_checked_file("継承枠の説明", relpath="docs/design.md", prefix="")
+        self.assert_error(["docs/design.md", "置き換える語", "'継承枠'"])
+
+    def test_replaced_word_is_error_in_template(self):
+        self.append_to_checked_file(
+            "継承枠", relpath="plugins/dev-workflow/skills/init-project/templates/project-profile.yml.template"
+        )
+        self.assert_error(["置き換える語", "'継承枠'"])
+
+    def test_replaced_word_allowed_in_writing_for_people(self):
+        self.append_to_checked_file(
+            "枡 -> 持ち場",
+            relpath="plugins/dev-workflow/skills/do-task/references/writing-for-people.md",
+            prefix="",
+        )
+        self.assert_clean()
+
+    def test_replaced_word_marker_does_not_exempt_in_skill_docs(self):
+        # 免除の印は禁止パターン検査とホスト CLI 語検査の 2 つだけに効く
+        self.append_to_checked_file(
+            "枡 <!-- validate-allow: 置き換える語の定義の例示 -->", relpath=self.REPLACED_TARGET, prefix=""
+        )
+        self.assert_error(["置き換える語", "'枡'"])
+
+    def test_replaced_word_in_skill_md_is_error(self):
+        self.append_to_checked_file("枡", relpath="plugins/dev-workflow/skills/tool-check/SKILL.md", prefix="")
+        self.assert_error(["tool-check/SKILL.md", "置き換える語", "'枡'"])
+
+    def test_replaced_word_in_skill_scripts_is_not_scanned(self):
+        self.append_to_checked_file("枡", relpath="plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh")
+        self.assert_clean()
+
+    def test_replaced_word_in_non_utf8_file_is_still_found(self):
+        target = self.repo / self.REPLACED_TARGET
+        target.write_bytes(target.read_bytes() + b"\n\xff\xfe \xe6\x9e\xa1\n")
+        self.assert_error(["置き換える語", "'枡'"])
+
+    def test_replaced_word_definition_line_in_design_is_exempt(self):
+        self.append_to_checked_file(
+            "- **文書の中で置き換える語**: 例として枡を書く", relpath="docs/design.md", prefix=""
+        )
+        self.assert_clean()
+
+    def test_replaced_word_other_design_line_is_error(self):
+        self.append_to_checked_file(
+            "- 文書の中で置き換える語: 枡 <!-- validate-allow: 例示 -->", relpath="docs/design.md", prefix=""
+        )
+        self.assert_error(["docs/design.md", "置き換える語", "'枡'"])
+
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
     def test_v1_exemption_word_alone_does_not_exempt(self):
