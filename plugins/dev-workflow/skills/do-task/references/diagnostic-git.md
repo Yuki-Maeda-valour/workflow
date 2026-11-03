@@ -356,7 +356,7 @@ Gitのcwdと `GIT_WORK_TREE` は専用の空ディレクトリ。元worktreeをG
 | objects | 保持した物理位置と通常のfile alternates。全オブジェクトをコピーしない |
 
 子環境は白紙から作り、専用のHOME・空system/global設定・`GIT_CONFIG_NOSYSTEM`・`GIT_CONFIG_COUNT=0`、専用の `GIT_DIR/GIT_COMMON_DIR/GIT_INDEX_FILE` と固定のオブジェクト保存先を渡す。
-既存の安全用前置きを全Gitに適用し、日和見的更新・遅延取得・対話を止める。親のtrace・pager・名前空間・追加設定は暗黙継承しない。
+既存の安全用のオプションを全Gitに適用し、日和見的更新・遅延取得・対話を止める。親のtrace・pager・名前空間・追加設定は暗黙継承しない。
 元の objects は専用の objects の `info/alternates` で読むだけにし、Git が書く object は専用の側へ置く。sparse index の repo の時刻の例外は §8。
 未保持の `GIT_OBJECT_DIRECTORY/GIT_ALTERNATE_OBJECT_DIRECTORIES` 環境指定はunsupported。通常のfile alternatesは扱う。
 

@@ -7,13 +7,13 @@
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     },
     {
-      "code": "git -C <dir> <前置き> ls-files --error-unmatch -- ':(literal)進行中_{タスク名}.md'",
+      "code": "git -C <dir> <安全用のオプション> ls-files --error-unmatch -- ':(literal)進行中_{タスク名}.md'",
       "count": 1,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     },
     {
-      "code": "git -C <dir> <前置き> mv -- '進行中_{タスク名}.md' '完了_{タスク名}.md'",
+      "code": "git -C <dir> <安全用のオプション> mv -- '進行中_{タスク名}.md' '完了_{タスク名}.md'",
       "count": 1,
       "classification": "index/worktree",
       "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
@@ -81,19 +81,19 @@
       "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
     },
     {
-      "code": "git -C \"$TOP\" <前置き>",
+      "code": "git -C \"$TOP\" <安全用のオプション>",
       "count": 1,
       "classification": "setting-or-example",
       "basis": "設定照合または手順の説明例。実行可能な Git 呼出は共通 safe Git 前置きを適用し、危険な設定値は許可しない。"
     },
     {
-      "code": "git -C \"$TOP\" <前置き> rev-list --count refs/heads/<DEF_NAME>..<作成時の sha>",
+      "code": "git -C \"$TOP\" <安全用のオプション> rev-list --count refs/heads/<DEF_NAME>..<作成時の sha>",
       "count": 1,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     },
     {
-      "code": "git -C \"$TOP\" <前置き> rev-parse HEAD",
+      "code": "git -C \"$TOP\" <安全用のオプション> rev-parse HEAD",
       "count": 1,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"

@@ -21,7 +21,7 @@
 > | §6 出力契約・正規化 | レビュー専用 | 実装経路の成果物は diff であり正規化は適用しない。実装経路の出力は §12-8 |
 > | §7 ログ規約 | レビュー専用 | 実装経路のログは §12-8 |
 > | §8 編成規則 | **項目単位**(節単位で分類しない): 持ち場(委託先 1 体ごとの受け持ち)の置換可否など**編成規則の本体はレビュー専用** / **「並列性」「滞在時間」の 2 項目だけは共有** | implementer は持ち場が 1 つだけのため編成規則の対象外だが、**外部 CLI を背景実行で起動する規定と滞在時間の見積もりは実装経路も §8 の同名項目を使う**(既定値だけ §12-6 の実装用の値へ読み替える。実装経路の読み順 5) |
-> | §9-1 一時ツリー方式 | レビュー専用 | 実装経路は一時ツリー(外部のレビュアーに見せるために作る、ファイル一式の一時的な写し)を使わない(§12-4) |
+> | §9-1 一時ツリー方式 | レビュー専用 | 実装経路は一時ツリー(外部のレビュアーに見せるために作る、ファイル一式の一時的なコピー)を使わない(§12-4) |
 > | §9-2 残る限界 | 共有 | 限界⑤(ルールファイルの指示読み込み)は実装経路で悪化する(§12-4) |
 > | §9-3 secret_paths 提示・停止 | レビュー専用 | 実装経路は 2026-09-17 決定 8 により読み替える(§12-4) |
 > | §9-4 `codex review` を既定表に採らない理由 | レビュー専用(**実装経路は読み順 7 で参照する**) | 基準そのものはレビュー経路の既定表に対するものだが、**実装経路は「既定表に採らない基準の根拠」として読む**(§12-6 の実装用既定表へエントリを足すときの判断材料。実装経路側に基準を再定義しない) |
@@ -219,7 +219,7 @@ bash {do-task の}scripts/review-agent.sh --runner <名前> --prompt-file <パ�
 
 機構がプロンプト末尾で形式を指示し、応答を正規化する。指示に従わない散文は正規化では JSON にならず、抽出不能なら既存の `parse-failed`(10)で落とす。**構造化出力の保証はしない**(ランナー側の強制フラグは採用していない。§4 の確認状況欄を参照。レビュー専用)。
 
-**同期義務**(既定コマンド表 §4 と同型): `SCHEMA_BLOCK` は [review-protocol.md](review-protocol.md)「指摘 JSON 形式」の JSON 例とその「制約:」行の写しであり、6 カテゴリは同ファイルの「レビュー観点(6 カテゴリ)」見出しとも重なる(**3 箇所**: 観点見出し / 制約行 / `SCHEMA_BLOCK`)。
+**同期義務**(既定コマンド表 §4 と同型): `SCHEMA_BLOCK` は [review-protocol.md](review-protocol.md)「指摘 JSON 形式」の JSON 例とその「制約:」行のコピーであり、6 カテゴリは同ファイルの「レビュー観点(6 カテゴリ)」見出しとも重なる(**3 箇所**: 観点見出し / 制約行 / `SCHEMA_BLOCK`)。
 - **どれかを変えたら必ず 3 点を同時に直す。**
 - 同ファイル「外部ランナー」節の「出力形式の指示は review-agent.sh が付与する」の行もこの義務の対象(付与の主体を変えるときは併せて直す)。
 - `review-agent-selftest.sh` がキー集合・許容値(verdict / severity / category)の集合一致と観点見出しとの一致を照合するので、ずれると回帰テストが落ちる。
@@ -301,7 +301,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - `run_in_background` で起動する(推奨)か、`--probe-timeout` / `--run-timeout` を縮めて呼び出し側の timeout も明示的に伸ばす。
   - **実装経路は本実行の既定が長いぶんさらに伸びるため、背景実行が推奨ではなく前提になる**(実装経路の値と帰結は §12-6)。
   - **死活監視の reviewer(変更を確かめる AI)の目安(20 分。design §5-17・review-protocol.md の M1〜M4)は、この最大所要時間より長く保つ** —— 目安のほうが短いと、正常に走っている外部レビューを応答なしとみなして二重起動する
-- **外部ランナーは会話継続ができない**(`SendMessage` の宛先にならない)。再レビューは毎回新規起動になり、valid 修正後は起動した全レビュアーの APPROVED を得るまで再レビューする
+- **外部ランナーは会話継続ができない**(`SendMessage` の送る相手にならない)。再レビューは毎回新規起動になり、valid 修正後は起動した全レビュアーの APPROVED を得るまで再レビューする
 - レビュアー同士を会話させない原則は外部ランナーにも適用する(突合〈2 つを照らし合わせて食い違いを探すこと〉は team-lead)
 
 ## 9. 機密ガード(design §5-12 との優先関係)
@@ -344,20 +344,20 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    **縮退判定**(すべて `git -C "<手順 1 の --cwd と同じ値>"` で判定する — `-C` 無しはプロセスの cwd を見るので、管理ルートと本体ソースが別リポジトリの構成では管理ルートを判定してしまう):
 
    **(1) `rev-parse --show-toplevel` が失敗したとき**(`--cwd` は先に物理パスへ正規化する — `CDPATH= cd -P -- "<--cwd>" && pwd -P`、失敗したら停止。`CDPATH` があると素の `cd` は解決先を stdout に出して 2 行になり、`-` 始まりはオプションに化ける — 実測。相対のままだと祖先探索が `.` で止まらず一致比較も外れる): `--cwd` とその祖先に `.git`(ファイル・ディレクトリ・symlink — リンク切れも含め `[ -e ] || [ -L ]`。シェルで親へ辿って調べる)が無ければ非 git → 一時ツリー方式を使わず内蔵編成に切り替えて理由を報告する。ただし手順 1 の `--base` が `HEAD` 以外(基準行を持つ呼び出し元)なら非 git でも停止して報告する(基準行は git リポジトリだったときにしか書かれない)。`.git` が在るのに失敗する(未知の `extensions.*`・壊れた config・後から足した `core.bare=true` 等)ときは非 git と扱わず停止して報告する — `.git/config` の 1 行で外部レビューを外せないようにする([base-commit.md](base-commit.md) と同じ向き。報告は原因を断定せず `rev-parse` の stderr を添える — linked worktree の `worktrees/<名>/HEAD` 欠落など config 以外の失敗も同じ枝に入る)。
-   - 成功したときは、返った toplevel の物理パスが `--cwd` の物理パス(`pwd -P`)と一致しなければ停止して両者を報告する(管理ルートと本体ソースが別リポジトリの構成で本体側の `.git` を消すと成功して管理ルートを返し、本体側のソースが 1 件も渡らないまま進む — 実測。base-commit.md と同じ検査)。示すのは toplevel の一致だけで、`.git` ファイル / symlink が別リポジトリを指す構成(`gitdir: <親>/.git` の 30 バイト、または親の `.git` へのディレクトリ symlink)は通り、`worktree add --detach "$TREE" HEAD` が親の追跡内容を一時ツリーへ展開する — 実測。**これは防がない(限界)**: git ディレクトリの親ディレクトリ名(`worktrees` / `modules`)や `gitdir` ファイル・`core.worktree` の対応で見分ける検査は、階層サブモジュール(`.git/modules/libs/foo`)や `--separate-git-dir` の正当構成を止め、作業ツリー内に `modules/` を作る者や親の `.git/config` に `core.worktree` を書ける者には無力。`worktree add` 直後に一時ツリーへ展開される親の追跡内容は、パッチ(親の HEAD → 本体側の作業ツリー)の適用で一時ツリーからは消えるが削除 hunk としてパッチと snapshot に載る — implementer が親の追跡内容を作業ツリーへ写せる範囲と同じで新たな到達は無い(`secret_paths` は基準側と作業ツリーの profile の和集合で、既定 3 要素は常に掛かる)。基準行が sha なら do-task Phase 4 の手順 1 が exit 4 で止まる。
+   - 成功したときは、返った toplevel の物理パスが `--cwd` の物理パス(`pwd -P`)と一致しなければ停止して両者を報告する(管理ルートと本体ソースが別リポジトリの構成で本体側の `.git` を消すと成功して管理ルートを返し、本体側のソースが 1 件も渡らないまま進む — 実測。base-commit.md と同じ検査)。示すのは toplevel の一致だけで、`.git` ファイル / symlink が別リポジトリを指す構成(`gitdir: <親>/.git` の 30 バイト、または親の `.git` へのディレクトリ symlink)は通り、`worktree add --detach "$TREE" HEAD` が親の追跡内容を一時ツリーへ展開する — 実測。**これは防がない(限界)**: git ディレクトリの親ディレクトリ名(`worktrees` / `modules`)や `gitdir` ファイル・`core.worktree` の対応で見分ける検査は、階層サブモジュール(`.git/modules/libs/foo`)や `--separate-git-dir` の正当構成を止め、作業ツリー内に `modules/` を作る者や親の `.git/config` に `core.worktree` を書ける者には無力。`worktree add` 直後に一時ツリーへ展開される親の追跡内容は、パッチ(親の HEAD → 本体側の作業ツリー)の適用で一時ツリーからは消えるが削除 hunk としてパッチと snapshot に載る — implementer が親の追跡内容を作業ツリーへコピーできる範囲と同じで新たな到達は無い(`secret_paths` は基準側と作業ツリーの profile の和集合で、既定 3 要素は常に掛かる)。基準行が sha なら do-task Phase 4 の手順 1 が exit 4 で止まる。
 
-   **(2) `rev-parse --verify --quiet HEAD^{commit}` が失敗したとき**(rc 1。rc 128 など git 自体の失敗は停止): 手順 1 の `--base` が空ツリー(対象リポジトリで `hash-object -t tree /dev/null` によりその都度計算した値との文字列一致 — 定数で書かない。SHA-256 リポジトリでは値が違う)か `HEAD`(基準行の無い呼び出し元)なら、commit 0 の正当な状態として内蔵編成に切り替えて理由を報告する。`--base` が commit の sha なら、commit が在るのに HEAD が解決できない状態(全 ref の削除・HEAD の指す ref の破損・unborn branch への切替)として停止して報告する — 報告は原因を断定せず「`.git/` が書き換えられた疑い。hooks・config・ref を確認し、HEAD を commit の在る branch へ戻してから再実行(意図して orphan branch に切り替えたなら元の branch へ)」と添え、コマンドは案内しない(案内した素のコマンドはその者が置いたフックを走らせ、前置きを付けても `commit.gpgsign` + `gpg.program` は止まらない(設定した program が走る) — 実測)。ref・index・`logs/HEAD` の有無でも objects の走査でも判定しない(前者は消せば迂回でき、正当な初期化直後の状態を偽装と呼ぶ。後者は FIFO・alternates・改名した pack で戻らないか誤り、機構を足すほど攻撃面が増える — 実測)。
+   **(2) `rev-parse --verify --quiet HEAD^{commit}` が失敗したとき**(rc 1。rc 128 など git 自体の失敗は停止): 手順 1 の `--base` が空ツリー(対象リポジトリで `hash-object -t tree /dev/null` によりその都度計算した値との文字列一致 — 定数で書かない。SHA-256 リポジトリでは値が違う)か `HEAD`(基準行の無い呼び出し元)なら、commit 0 の正当な状態として内蔵編成に切り替えて理由を報告する。`--base` が commit の sha なら、commit が在るのに HEAD が解決できない状態(全 ref の削除・HEAD の指す ref の破損・unborn branch への切替)として停止して報告する — 報告は原因を断定せず「`.git/` が書き換えられた疑い。hooks・config・ref を確認し、HEAD を commit の在る branch へ戻してから再実行(意図して orphan branch に切り替えたなら元の branch へ)」と添え、コマンドは案内しない(案内した素のコマンドはその者が置いたフックを走らせ、安全用のオプションを付けても `commit.gpgsign` + `gpg.program` は止まらない(設定した program が走る) — 実測)。ref・index・`logs/HEAD` の有無でも objects の走査でも判定しない(前者は消せば迂回でき、正当な初期化直後の状態を偽装と呼ぶ。後者は FIFO・alternates・改名した pack で戻らないか誤り、機構を足すほど攻撃面が増える — 実測)。
    - **限界**: 空ツリー基準の do-task(commit 0 で着手して途中 commit したリポジトリ)と `--base HEAD` の呼び出し元では、ref を消せる者が外部レビューを外せる(内蔵レビューは残り、do-task では作業ツリーの内容が空ツリーとの差分としてすべて載り、`--base HEAD` の呼び出し元では内蔵レビューが実ファイルを読むので隠せず、機密漏洩・任意コードの実行・git 状態の書き換えのどれにも当たらない — 受け入れる)。
    - 内蔵への切り替えは外部レビューを消すので `worktree add --detach "$TREE" HEAD` の失敗だけでは内蔵に切り替えず、この判定を正本とする(事前検査の `read-tree HEAD` が先に rc 128 で止まる前に判定する)。
 
    **事前検査**(`worktree add` より前に置く。**検査するローカル config のキー集合は `scripts/diff-snapshot.sh` の改竄検出と同じ集合。変えるときは両方を直す**): `config --show-scope --includes --list -z` の scope `local` / `worktree` の行(1 設定 = NUL 終端のフィールド 2 つ。2 つずつ読んで 2 つ目を最初の `\n` でキーと値に分ける。キーは小文字化して照合)に `filter.` / `core.attributesfile` / `core.excludesfile` / `core.bigfilethreshold` / `diff.external` / `diff.*.textconv` / `diff.*.command` / `include.path` / `includeif.` があれば一時ツリーを作らず停止して報告する。
    - git が 2.45 未満のときの `extensions.partialclone` / `remote.<名>.promisor` もこの集合に入る(手順 0 が先に止めるので、ここでは到達しない — 手順 0 が判定を見送る `config` の失敗は、事前検査の先頭の同じ `config` も失敗させて停止する。`scripts/diff-snapshot.sh` の改竄検出と同じ集合に保つための明示)。
    - **`filter.lfs.*` は標準値 `clean = git-lfs clean -- %f` / `smudge = git-lfs smudge -- %f` / `process = git-lfs filter-process` / `required = true` に完全一致する場合だけ除く**(**この標準値は `scripts/diff-snapshot.sh` と同じ集合。変えるときは両方を直す**)。
-   - `core.pager` / `pager.` は前置きで無効化して依頼文に NOTE を出す(`core.hookspath` / `core.fsmonitor` は切り離しで断つので NOTE も不要)。
-   - `for-each-ref refs/replace/` が 1 件以上あれば停止せず、前置きの `--no-replace-objects` で無効化して依頼文に NOTE「置換参照を無効化して実行」を出す。
-   - **`core.fsmonitor` / hooks / `gpg.program` / alias 等「起動後に素のコマンドが元リポジトリの設定でコードを実行する」経路は、下の一時ツリーの切り離しでまとめて断つので、事前検査では停止対象にしない**(`diff.external` / `diff.*.textconv` / `diff.*.command` は切り離しでも断てるが、`scripts/diff-snapshot.sh` の停止対象と同じ集合に保つため停止側に残す。切り離す前に走る `worktree add` / `apply` は前置きの `--no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=` と LFS 無効化で守る)。
+   - `core.pager` / `pager.` は安全用のオプションで無効化して依頼文に NOTE を出す(`core.hookspath` / `core.fsmonitor` は切り離しで断つので NOTE も不要)。
+   - `for-each-ref refs/replace/` が 1 件以上あれば停止せず、安全用のオプションの `--no-replace-objects` で無効化して依頼文に NOTE「置換参照を無効化して実行」を出す。
+   - **`core.fsmonitor` / hooks / `gpg.program` / alias 等「起動後に素のコマンドが元リポジトリの設定でコードを実行する」経路は、下の一時ツリーの切り離しでまとめて断つので、事前検査では停止対象にしない**(`diff.external` / `diff.*.textconv` / `diff.*.command` は切り離しでも断てるが、`scripts/diff-snapshot.sh` の停止対象と同じ集合に保つため停止側に残す。切り離す前に走る `worktree add` / `apply` は安全用のオプションの `--no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor=` と LFS 無効化で守る)。
    - `rev-parse --path-format=absolute --git-path info/attributes`(相対形はサブディレクトリ実行で外れる)に、コメント行を除いた属性トークンとして `filter=…` / `working-tree-encoding=…` があれば停止(ファイルが無ければ通過。在るのに通常ファイルでない(`[ ! -f ]` か `[ -L ]`)なら読まずに停止 — FIFO に置換すると `grep` が待って終了コードに到達しない。`grep` の rc 2 以上は停止。`diff=` / `-diff` / `binary` は diff の見え方を変えるだけで checkout の内容を変えないので、ここでは見ない)。
-   - **HEAD 側の属性も checkout の前に、git 自身に解決させて検査する**: リポジトリ外の `mktemp -d` の中に決めた未存在パス(物理パスが `$TOP` 配下なら停止、検査後にディレクトリごと削除)を `GIT_INDEX_FILE` にして `-c core.splitIndex=false read-tree HEAD` で使い捨ての index を作り(rc が 0 でなければ停止。`-c core.splitIndex=false` が無いと、ローカル config の `core.splitIndex=true` でユーザーの git ディレクトリに `sharedindex.<sha>` が新規に作られる — `scripts/diff-snapshot.sh` の前置きと同じ理由)、`ls-tree -r -z --name-only HEAD` の全パスに `check-attr --cached --stdin -z filter working-tree-encoding ident` を掛け(出力だけを見ない — 空の index では `check-attr` が rc 128 で出力ゼロになり、出力だけ見る実装は通過する。実測)、作業ツリー側と同じ規則で停止する(`--cached` は index = HEAD の `.gitattributes`(全階層)と `.git/info/attributes`・global / system の属性ファイルを、**マクロ(`[attr]`)・否定・階層を含めて** checkout と同じ規則で解決する。HEAD の `.gitattributes` を文字列で走査する方式は global 属性ファイルのマクロ経由の `filter` を見落とし `worktree add` で smudge が実行される — 実測。`worktree add` が適用するのは HEAD 側の属性なので作業ツリーの属性検査だけでは見逃される。`ident` は checkout で `$Id$` を展開し一時ツリーの内容を HEAD の blob と食い違わせる)。
+   - **HEAD 側の属性も checkout の前に、git 自身に解決させて検査する**: リポジトリ外の `mktemp -d` の中に決めた未存在パス(物理パスが `$TOP` 配下なら停止、検査後にディレクトリごと削除)を `GIT_INDEX_FILE` にして `-c core.splitIndex=false read-tree HEAD` で使い捨ての index を作り(rc が 0 でなければ停止。`-c core.splitIndex=false` が無いと、ローカル config の `core.splitIndex=true` でユーザーの git ディレクトリに `sharedindex.<sha>` が新規に作られる — `scripts/diff-snapshot.sh` の安全用のオプションと同じ理由)、`ls-tree -r -z --name-only HEAD` の全パスに `check-attr --cached --stdin -z filter working-tree-encoding ident` を掛け(出力だけを見ない — 空の index では `check-attr` が rc 128 で出力ゼロになり、出力だけ見る実装は通過する。実測)、作業ツリー側と同じ規則で停止する(`--cached` は index = HEAD の `.gitattributes`(全階層)と `.git/info/attributes`・global / system の属性ファイルを、**マクロ(`[attr]`)・否定・階層を含めて** checkout と同じ規則で解決する。HEAD の `.gitattributes` を文字列で走査する方式は global 属性ファイルのマクロ経由の `filter` を見落とし `worktree add` で smudge が実行される — 実測。`worktree add` が適用するのは HEAD 側の属性なので作業ツリーの属性検査だけでは見逃される。`ident` は checkout で `$Id$` を展開し一時ツリーの内容を HEAD の blob と食い違わせる)。
    - 作業ツリー側は `ls-files -z` の全パスに `check-attr --stdin -z filter working-tree-encoding ident` を掛け、`filter` が `unspecified` / `unset` / `lfs`(ローカル config の `filter.lfs.*` が無いか標準値の場合に限る)以外、`working-tree-encoding` が `unspecified` / `unset` 以外、または `ident` が `unspecified` / `unset` 以外なら停止し、**`filter` の値が `unset` / `unspecified` のパスの有無を問わず無条件に**、全スコープに `filter.unset.*` / `filter.unspecified.*` が無いこと(`config --get-regexp '^filter\.(unset|unspecified)\.'` が rc 1 — 管理ルートと本体ソースが別リポジトリの構成では本体側の local スコープを読むため `-C "$TOP"` を付ける)も確かめる(`unspecified` は属性を指定していない全パスの値なので、「その値のパスがあるとき」という条件は実運用でほぼ常に真 — 条件を付けず、定義が 1 つでも在れば停止する。手順 1 のスクリプトは値と同じ名前の定義が在るパスだけを疑いに載せるが、ここは外部へ渡す経路なので名前の対応を見ずに止める)(**この属性規則は `scripts/diff-snapshot.sh` と同じ集合。変えるときは両方を直す**。対象は追跡パスだけにする — 未追跡は手順 2 が `cp` で生のバイト列のまま運ぶので属性が効かず、未追跡まで含めた判定は手順 1 のスクリプトが行って rc 22 で止める)(逆写像 smudge / clean は一時ツリーの status では検出できないので、checkout も filter も走る前の存在検査で止める)。
    - **この事前検査には、承認による続行(`--accept` に相当する経路)を設けない** — 1 件でも該当すれば、do-task Phase 4 の手順 1 をユーザー承認つきで通過していても、外部ランナーを起動せず内蔵編成に切り替えて理由を報告する(§9-7 と同じ扱い。リポジトリの内容を外部へ渡す経路は fail-closed のままにする)。
    - 手順 1 の呼び出しに含める `--accept` は do-task Phase 4 の手順 1 で承認済みのものをそのまま引き継ぐ(同じ生成物を再生成するため)。
@@ -388,7 +388,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    - 適用**後**に除去すると、`config/.env` を含むディレクトリを通常ファイル `config` に置換する変更で、除外済みパッチに `.env` の削除が無いため非空ディレクトリが残り適用に失敗する。
    - HEAD 基点の一時ツリーには追跡済みの機密ファイル(`.env.example` 等)や、パッチから除外した削除前の機密ファイルがそのまま残るため、これで手順 3 の機密検査が「追跡済み機密がある構成」でも通る。
 
-   **衝突検査 ② と手順 3 の間に、一時ツリーを元リポジトリから切り離す**: まず `REG=$(git -C "$TREE" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --absolute-git-dir)` で当該一時ツリーの登録ディレクトリ(元リポジトリの共通ディレクトリ — `git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --path-format=absolute --git-common-dir` — の `worktrees/<登録名>`。`$TOP` が linked worktree なら主リポジトリ側)を採取し、`[ -n "$REG" ]` と、その `worktrees/` の直下であることを検査して反したら停止する(空文字だと `rm -rf` も `[ ! -e ]` も空振りで合格する — 実測)(`basename "$TREE"` で推測しない — 同名 basename の worktree が既にあると、git のバージョンにより登録名が rename される(`<名>1` 等)か refuse され、`$TOP` 自身が linked worktree だと `.git` はファイルで basename が登録名から外れる。実測)→ `rm -f -- "$TREE/.git"`(linked worktree の `.git` はファイルで、元リポジトリの `worktrees/<名>` を指す)→ `rm -rf -- "$REG"`(失敗したら理由を報告して停止する。**`worktree prune` は使わない** — `$TOP` の全 stale 登録を刈り、ユーザーの無関係な linked worktree が一時的に不在だとその登録まで消す。実測)→ `init -q --template= "$TREE"` で空テンプレートの新しい独立リポジトリにする(commit は無い。**`init` の rc を検査する** — `rm` が失敗して `.git` ポインタが残ると `init` は rc 0 のまま linked worktree のままになり、切り離しの silent failure が fsmonitor / gpg 等の単一障害点になる。実測)→ **切り離しの成否を 3 条件で検証する**: (i) `[ -d "$TREE/.git" ]`(linked worktree のままなら `.git` はファイル)(ii) `git -C "$TREE" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --path-format=absolute --git-common-dir` を `realpath` で正規化した値が `$TREE` の物理パスの配下(**`--path-format=absolute` が要る** — 独立化後は相対値 `.git` を返し、素朴な前置き比較では正常経路を誤って止める。linked のままなら元リポジトリの共通ディレクトリ(`$TOP` が主リポジトリなら `$TOP/.git`)を返す。`--show-toplevel` は成功・失敗のどちらでも `$TREE` を返し判別できない — 実測)(iii) `[ ! -e "$REG" ]`(採取した登録ディレクトリが消えている)。
+   **衝突検査 ② と手順 3 の間に、一時ツリーを元リポジトリから切り離す**: まず `REG=$(git -C "$TREE" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --absolute-git-dir)` で当該一時ツリーの登録ディレクトリ(元リポジトリの共通ディレクトリ — `git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --path-format=absolute --git-common-dir` — の `worktrees/<登録名>`。`$TOP` が linked worktree なら主リポジトリ側)を採取し、`[ -n "$REG" ]` と、その `worktrees/` の直下であることを検査して反したら停止する(空文字だと `rm -rf` も `[ ! -e ]` も空振りで合格する — 実測)(`basename "$TREE"` で推測しない — 同名 basename の worktree が既にあると、git のバージョンにより登録名が rename される(`<名>1` 等)か refuse され、`$TOP` 自身が linked worktree だと `.git` はファイルで basename が登録名から外れる。実測)→ `rm -f -- "$TREE/.git"`(linked worktree の `.git` はファイルで、元リポジトリの `worktrees/<名>` を指す)→ `rm -rf -- "$REG"`(失敗したら理由を報告して停止する。**`worktree prune` は使わない** — `$TOP` の全 stale 登録を刈り、ユーザーの無関係な linked worktree が一時的に不在だとその登録まで消す。実測)→ `init -q --template= "$TREE"` で空テンプレートの新しい独立リポジトリにする(commit は無い。**`init` の rc を検査する** — `rm` が失敗して `.git` ポインタが残ると `init` は rc 0 のまま linked worktree のままになり、切り離しの silent failure が fsmonitor / gpg 等の単一障害点になる。実測)→ **切り離しの成否を 3 条件で検証する**: (i) `[ -d "$TREE/.git" ]`(linked worktree のままなら `.git` はファイル)(ii) `git -C "$TREE" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false rev-parse --path-format=absolute --git-common-dir` を `realpath` で正規化した値が `$TREE` の物理パスの配下(**`--path-format=absolute` が要る** — 独立化後は相対値 `.git` を返し、素朴な、先頭が一致するかの比較では正常経路を誤って止める。linked のままなら元リポジトリの共通ディレクトリ(`$TOP` が主リポジトリなら `$TOP/.git`)を返す。`--show-toplevel` は成功・失敗のどちらでも `$TREE` を返し判別できない — 実測)(iii) `[ ! -e "$REG" ]`(採取した登録ディレクトリが消えている)。
    - **local config の中身は検査しない** — 初期化が書く既定キーはプラットフォーム依存(macOS の `core.ignorecase` / `core.precomposeunicode`、reftable / sha256 環境の `extensions.refstorage` / `extensions.objectformat` 等)で、固定リストと照合すると正常な独立化を誤停止する。
    - silent failure(linked worktree のまま)は (i) と (ii) が確実に捕える(実測)。
    - 1 つでも反したら手順 3・起動へ進まず、当該一時ディレクトリと `$REG`(残っていれば)を消して停止し報告する → **`config core.hooksPath /dev/null` と `config core.fsmonitor ""` を設定する**(ユーザーの global config が相対値の `core.hooksPath` / `core.fsmonitor` を持つと、切り離し後の一時ツリーでもそれが `$TREE` 配下に解決され、HEAD に追跡させたフックが素の `status` で発火する — 実測)。
@@ -645,9 +645,9 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    - **列挙は一時ファイルへ保存して終了コードを検査し、`mkdir` / `cp` の失敗はその場で手順全体を停止する** — パイプの中の `while` では `exit` が外へ届かず、`cp` が容量不足で途中まで書いて失敗しても手順 3 の存在確認は通り、不完全な一時ツリーでレビューが始まる。
    - NUL 区切り + `IFS= read -r -d ''` で日本語・空白・先頭 `-` の名前も壊れない。
 
-   **コピーしなかった symlink・非通常ファイル・読めないファイル・追跡ファイルの別表記はレビュー依頼文に「一時ツリーに含めなかった未追跡」として 1 パス 1 行**(`<パス>` + タブ + 理由。パス列は手順 1 のスクリプトと同じ発火条件・エスケープ集合の C 風引用 — `$SKIPPED` は生バイトを NUL 区切り〈パス NUL 理由 NUL〉で持ち、依頼文へ写すときに引用する。`printf '%s(%s)\n'` のような生の 1 行書式は改行入りのパスで行が割れ偽のパスが混じる)で列挙する(snapshot 側にはリンク文字列だけが載る)。
-   - **snapshot の `## 含められなかった未追跡` の全行(理由 9 種すべて。手順 1 の rc を問わず)も同じ形で依頼文に写す** — `.git` という名前のエントリは列挙に出ないので `$SKIPPED` には載らず、snapshot からしか拾えない(行頭が `"` なら C 風引用を復号してから写す)。
-   - **同じパスが `$SKIPPED` と snapshot の両方に在れば snapshot の行だけを写す**(読めない・通常ファイルでない・別表記は同じ理由で両方に出、symlink は snapshot 側が `リンク切れ` 等の細かい理由になる — 1 パス 1 行。突き合わせは snapshot の行を復号した生バイトと `$SKIPPED` の生バイトで行う)。
+   **コピーしなかった symlink・非通常ファイル・読めないファイル・追跡ファイルの別表記はレビュー依頼文に「一時ツリーに含めなかった未追跡」として 1 パス 1 行**(`<パス>` + タブ + 理由。パス列は手順 1 のスクリプトと同じ発火条件・エスケープ集合の C 風引用 — `$SKIPPED` は生バイトを NUL 区切り〈パス NUL 理由 NUL〉で持ち、依頼文へ書くときに引用する。`printf '%s(%s)\n'` のような生の 1 行書式は改行入りのパスで行が割れ偽のパスが混じる)で列挙する(snapshot 側にはリンク文字列だけが載る)。
+   - **snapshot の `## 含められなかった未追跡` の全行(理由 9 種すべて。手順 1 の rc を問わず)も同じ形で依頼文に書く** — `.git` という名前のエントリは列挙に出ないので `$SKIPPED` には載らず、snapshot からしか拾えない(行頭が `"` なら C 風引用を復号してから書く)。
+   - **同じパスが `$SKIPPED` と snapshot の両方に在れば snapshot の行だけを書く**(読めない・通常ファイルでない・別表記は同じ理由で両方に出、symlink は snapshot 側が `リンク切れ` 等の細かい理由になる — 1 パス 1 行。突き合わせは snapshot の行を復号した生バイトと `$SKIPPED` の生バイトで行う)。
    - `$SKIPPED` は依頼文へ転記してから削除する — 未定義のままだと `>>""` が失敗して skip 一覧が黙って消える。
 
    **手順 3 の「レビュー対象の新規ファイルが一時ツリーに在る」検査は、未追跡のパスではコピー対象(読める通常ファイル)にだけ掛ける**(追跡済みのパスは下のとおり別に扱う)。読めないファイルは「依頼文に列挙されている」かつ「`.review-snapshot.md` の `## 含められなかった未追跡` に理由『読めない』で載っている」ことを検査し(ファイル自身の行が無いときは祖先ディレクトリの `<dir>/`(理由 `読めない`)の行で代える — 列挙されないので自身の行は無い)、除外されたファイルは snapshot の除外節に載っていることだけを検査する。
@@ -678,8 +678,8 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    - **`$TREE` の親ディレクトリの物理パスが `$TOP` の物理パスの配下なら起動しない**(`mktemp -d` は `TMPDIR` に従う。`TMPDIR` がリポジトリ内を指していると、手順 2 の未追跡の列挙が一時ツリー自身を拾う)。
 
    **この節の全 git 呼び出し** — 手順 0 の `version` / `config`、縮退判定の `rev-parse` / `hash-object`(空ツリー値をその都度計算)と `TOP` の解決の `rev-parse` / 基準側 profile を読む `show` / `worktree add` / `apply` / `ls-files` / `check-attr` / `ls-tree` / `read-tree` / `for-each-ref` / `hash-object` / `worktree remove`、切り離しの `rev-parse` / `init` / `config` — **に `--no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false` を付ける**。
-   - 欠く呼び出しが 1 つでも残ると、置換参照で差し替えた tree が一時ツリー・属性検査・基準側 profile に現れ、生バイト検査も置換 id 同士で一致するので、差し替えを見逃す。混在は属性検査と checkout が別の tree を見て fail-closed が逆転する — 実測(`worktree add` の 1 行と各リテラルも同じ前置き)。
-   - 検証は起動の出現数の一致で行うので、コードブロック内の文字列リテラル・行末コメントに語 `git` + 空白を書かず(報告文は「リポジトリでない」等と書き、コマンドを案内しない — 案内した素のコマンドはその者のフックを走らせ、前置きを付けても `commit.gpgsign` + `gpg.program` は止まらない(設定した program が走る))、`-C` の引数は `"$TOP"` / `"$TREE"` / 手順 1 の `--cwd` を入れた単純変数に限る(入れ子の `$(…)` は前置き側の式に当たらない)。
+   - 欠く呼び出しが 1 つでも残ると、置換参照で差し替えた tree が一時ツリー・属性検査・基準側 profile に現れ、生バイト検査も置換 id 同士で一致するので、差し替えを見逃す。混在は属性検査と checkout が別の tree を見て fail-closed が逆転する — 実測(`worktree add` の 1 行と各リテラルも同じ安全用のオプション)。
+   - 検証は起動の出現数の一致で行うので、コードブロック内の文字列リテラル・行末コメントに語 `git` + 空白を書かず(報告文は「リポジトリでない」等と書き、コマンドを案内しない — 案内した素のコマンドはその者のフックを走らせ、安全用のオプションを付けても `commit.gpgsign` + `gpg.program` は止まらない(設定した program が走る))、`-C` の引数は `"$TOP"` / `"$TREE"` / 手順 1 の `--cwd` を入れた単純変数に限る(入れ子の `$(…)` は、安全用のオプションを確かめる式に当たらない)。
    - `--no-pager` は、stdout が端末のときにローカル config の `core.pager` / `pager.<コマンド>` が任意コマンドとして起動されるのを防ぐ(実測: `core.hooksPath` の `post-checkout` が `worktree add` で発火して `.env` をツリー外へ複製し index を書き換える)。
 
    **どの停止点でも報告の前に一時ツリーを片付けてから抜ける**: 切り離しより前の停止(事前検査・生バイト検査・衝突検査 ①・手順 1・`apply`・手順 2・衝突検査 ②)では `git -C "$TOP" --no-pager --no-replace-objects -c core.hooksPath=/dev/null -c core.fsmonitor= -c core.ignoreCase=false worktree remove --force "$TREE"`(remove が失敗したら理由を報告し、`rm -rf -- "$TREE"` と、採取済みなら `rm -rf -- "$REG"` で当該 1 件だけ後始末する — `worktree prune` は使わない)、切り離しより後の停止(切り離しの検証失敗・手順 3)と**起動後の成功経路**では登録済み worktree ではないので `worktree remove` / `worktree prune` を使わず `rm -rf -- "$TREE"` と `rm -rf -- "$REG"`(残っていれば)で消す(切り離し後は `worktree remove` が `is not a working tree` で失敗し、`worktree prune` が無関係な worktree を巻き込むため)。いずれもユーザーの git 状態に一時ツリーの登録も他の worktree の登録も残さない。
@@ -706,13 +706,13 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 ```
 外部ランナー(レビューや実装に使う外部の AI のコマンド): {宣言された名前} — 使用不可
 - 理由: [{理由コード}] {説明}
-- 判定が止まった段階: 外部のレビュアーに見せる写し(作成不可・非 git) / 存在 / 自ホスト判定 / 読み取り専用 / 疎通
+- 判定が止まった段階: 外部のレビュアーに見せるコピー(作成不可・非 git) / 存在 / 自ホスト判定 / 読み取り専用 / 疎通
 - 解決後の起動コマンド: {コマンド}(既定表 / セッション内の明示指定)
 - 記録: {stderr の NOTE: ログ: のパス。その行が無ければこの欄を省く}
 → 内蔵編成({内蔵レビュアーの構成})に切り替えて続行した
 ```
 
-段階の並びは判定の順序どおりで、**先頭の「外部のレビュアーに見せる写し」だけが `review-agent.sh` 起動前の関門**(残り 4 段はスクリプト内の §3 の判定順序)。
+段階の並びは判定の順序どおりで、**先頭の「外部のレビュアーに見せるコピー」だけが `review-agent.sh` 起動前の関門**(残り 4 段はスクリプト内の §3 の判定順序)。
 
 一時ツリーを作れずに見送った場合は、**理由コード欄・「解決後の起動コマンド」欄・「記録」欄を省く**(例: `- 理由: 一時ツリーを作成できない(worktree 不可 / 非 git)`)。起動コマンドは解決前に見送るため未解決で、`review-agent.sh` を起動しないためログも生成されない(この経路の記録は skill 側の報告にのみ残す)。終了コードも存在しないので、§6 の終了コード表にも §3 の判定順序(4 段)にも追加しない。
 
@@ -730,7 +730,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - 旧置換へ戻す変異と各表示経路の置換を外す変異は、追加した回帰で検出する。
 
 - **gitlink 検査**: `diff-snapshot-selftest.sh` は、偽gitlink、隠しエントリ、FIFO、壊れた symlink、空白・glob・日本語・改行・先頭 `-`・TAB を含むパス、空・不存在・初期化済み submodule、祖先・symlink先の検索権限不足、列挙不能、除外・基準未追跡一覧・`--accept` による回避不可、診断のみとpatch非公開、index tree・生バイト不変を確認する。
-  - 検査を外す構文正常な写しが偽gitlinkを exit 0 で通し、正しい実装では対応ケースだけが exit 22 となる変異も確認する。
+  - 検査を外した、構文が正常なコピーが偽gitlinkを exit 0 で通し、正しい実装では対応ケースだけが exit 22 となる変異も確認する。
 
 - **gitlink の手動通し確認**: §9-1 の scratch 手順で、偽gitlinkが手順 1 を exit 22 で止め、手順 2・3と外部 CLI の起動マーカーが生じず、Phase 4 の既存生成物が不変であることを確認する。正当な submodule の gitlink 更新はpatch適用まで確認する。
 
@@ -752,14 +752,14 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - ログ採番: 既定のログ置き場が書き込み不可のとき、番号の衝突と区別して止まること(無限に再採番しない)。
   - リンク先の無い symlink は、番号の衝突として次の番号へ進むこと。
   - 明示した `--log-file` のパスに既存のエントリ(外のファイルを指す symlink・通常ファイル・リンク先の無い symlink・ディレクトリ)があれば、ログの初期化より前に `die` する経路を含めて usage(2)で止まり、リンク先と中身を変えないこと
-- **ログの書き込みと想定外の失敗**(§7。ケース名の接頭辞で示す): `走行中の差し替え:` 本実行の間にログのパスを外のファイルへの symlink・ハードリンク・FIFO に差し替えても、外のファイルの中身が変わらず、スクリプトが終わり、stderr に `NOTE: ログのパスが走行中に差し替えられた:` が出ること(差し替えの後に中止しても、`ERROR [aborted]` とこの NOTE が元の stderr に出ること)/ `差し替えの照合:` 差し替えないときは、stderr に差し替えの NOTE が出ないこと。ログのパスを `/dev/fd/7` を指す symlink に差し替えると、NOTE が出ること。`-ef` の判定を偽にした写し(macOS の `-ef` の不一致を模す)で、差し替えないときは NOTE が出ず(本実行の間に中止しても、`ERROR [aborted]` が出て NOTE は出ない)、symlink・ハードリンクの差し替えでは NOTE が出て、外のファイルの中身が変わらないこと。その写しで、`os._exit(0)` だけの `encodings` を `PYTHONPATH` に置いても、ハードリンクの差し替えで NOTE が出ること(比べ直しを `-I` で起動するため)。その写しで `python3` が無いときは、差し替えなくても NOTE が 1 行だけ出ること / `既定名の置き場:` 既定の置き場の iter1 が FIFO・`/dev/null` を指す symlink でも、それを飛ばして iter2 に通常ファイルのログを作り、exit 0 で終わり、iter1 を変えないこと / `ERR のログ:` ログを開いた後の想定外の失敗(`wc` だけを失敗させるスタブ)で、ログに `**結果**: ERROR [internal]` の行が残ること / `ERR の生出力:` 本実行の後の想定外の失敗で、ログに `生出力(想定外の失敗の時点まで)` の節が残り、stdout が空であること / `ERR の行数:` 置換(サブシェル)の中の失敗(代入の形の置換)でも、`ERROR [internal]` の行が 1 行だけ出ること / `ログのパス:` 既定名・明示のどちらでも、stderr の `NOTE: ログ:` のパスが実際のログと同じであること / `開く前の失敗:` ログを開く前の失敗(`--readonly-flag` の欠けの `no-readonly`)で、明示したパスにエントリを作らないこと / `子に渡す fd:` 外部 CLI がログの fd に書けないこと / `POSIX モード:` `POSIXLY_CORRECT` のある環境でも、置き場に書けない既定名で usage(2)が返ること(root では飛ばす)/ `/dev/fd の判定が偽:` 通常ファイルの判定を偽にした写しで、採番を繰り返さずに usage(2)で止まること(既定名・明示の `--log-file` の両方で打ち、`ERROR [usage] ` の行に置き場の語〈既定名は `既定のログ置き場`、明示は `--log-file の置き場`〉が出ること)。
+- **ログの書き込みと想定外の失敗**(§7。ケース名の接頭辞で示す): `走行中の差し替え:` 本実行の間にログのパスを外のファイルへの symlink・ハードリンク・FIFO に差し替えても、外のファイルの中身が変わらず、スクリプトが終わり、stderr に `NOTE: ログのパスが走行中に差し替えられた:` が出ること(差し替えの後に中止しても、`ERROR [aborted]` とこの NOTE が元の stderr に出ること)/ `差し替えの照合:` 差し替えないときは、stderr に差し替えの NOTE が出ないこと。ログのパスを `/dev/fd/7` を指す symlink に差し替えると、NOTE が出ること。`-ef` の判定を偽にしたコピー(macOS の `-ef` の不一致を模す)で、差し替えないときは NOTE が出ず(本実行の間に中止しても、`ERROR [aborted]` が出て NOTE は出ない)、symlink・ハードリンクの差し替えでは NOTE が出て、外のファイルの中身が変わらないこと。そのコピーで、`os._exit(0)` だけの `encodings` を `PYTHONPATH` に置いても、ハードリンクの差し替えで NOTE が出ること(比べ直しを `-I` で起動するため)。そのコピーで `python3` が無いときは、差し替えなくても NOTE が 1 行だけ出ること / `既定名の置き場:` 既定の置き場の iter1 が FIFO・`/dev/null` を指す symlink でも、それを飛ばして iter2 に通常ファイルのログを作り、exit 0 で終わり、iter1 を変えないこと / `ERR のログ:` ログを開いた後の想定外の失敗(`wc` だけを失敗させるスタブ)で、ログに `**結果**: ERROR [internal]` の行が残ること / `ERR の生出力:` 本実行の後の想定外の失敗で、ログに `生出力(想定外の失敗の時点まで)` の節が残り、stdout が空であること / `ERR の行数:` 置換(サブシェル)の中の失敗(代入の形の置換)でも、`ERROR [internal]` の行が 1 行だけ出ること / `ログのパス:` 既定名・明示のどちらでも、stderr の `NOTE: ログ:` のパスが実際のログと同じであること / `開く前の失敗:` ログを開く前の失敗(`--readonly-flag` の欠けの `no-readonly`)で、明示したパスにエントリを作らないこと / `子に渡す fd:` 外部 CLI がログの fd に書けないこと / `POSIX モード:` `POSIXLY_CORRECT` のある環境でも、置き場に書けない既定名で usage(2)が返ること(root では飛ばす)/ `/dev/fd の判定が偽:` 通常ファイルの判定を偽にしたコピーで、採番を繰り返さずに usage(2)で止まること(既定名・明示の `--log-file` の両方で打ち、`ERROR [usage] ` の行に置き場の語〈既定名は `既定のログ置き場`、明示は `--log-file の置き場`〉が出ること)。
   - FIFO のケースは `timeout -k` の外側タイムアウトで打ち(`timeout` が無い環境では飛ばす)、FIFO で待ち続ける実装は期待と違う終了コードで FAIL になる
 - **置き場の経路**(§7。ケース名の接頭辞 `置き場の経路:`): 起動時の cwd の `.claude/reviews` が外を指す symlink のとき・`.claude` が外を指す symlink のとき(どちらも既定名)/ 明示の `--log-file` の置き場の経路に symlink があるとき / `.claude/reviews` が基点そのものを指す symlink で明示の `--log-file` を渡したとき(基点の直下に書かない)/ 検査と作成の間に symlink が置かれたとき(PATH の先頭に置いた `mkdir` の包みが、作ろうとする置き場に先に外を指す symlink を置いてから本物の `mkdir` を呼ぶ)/ 検査の後・`cd` の前に差し替えられたとき(`BASH_ENV` で読み込ませた `cd` の関数が、置き場の階層へ入る呼び出しの前に 1 回だけ、その階層を外を指す symlink に差し替える。既定名で打つ)のどれでも、usage(2)で止まり、stderr に `ERROR [usage] ` の行が出て、リンク先が空で、ランナーを起動せず(スタブの副作用が無い)、`NOTE: ログ:` を出さないこと / 固定の後・開く前の差し替え(`BASH_ENV` で読み込ませた `pwd` の関数が、置き場の中で呼ばれた後に 1 回だけ、置き場を退かして外を指す symlink を置く。既定名で打つ)では、外に書かれず、ログが退かした置き場に書かれること / 基点の外の `--log-file`(`/tmp` の下など)は開けること / 相対の `--log-file` の `plain.md`・`./x.md`・`../x.md` が、起動時の cwd・その親に開けること / 起動場所と `--cwd` を分けたときの既定名は、起動場所の `.claude/reviews` に出ること / 置き場が在って書けないとき(`chmod 555`。root では飛ばす)は、既定名・明示の両方で usage(2)で止まり、stderr の `ERROR [usage] ` の行に置き場の語(既定名は `既定のログ置き場`、明示は `--log-file の置き場`)が出て、ランナーを起動しないこと / 明示の `--log-file` の `a/link/../x.md`(`a/link` は `b` を指す)は、語彙的に正規化した `a/x.md` で既存のエントリを見て、`a/x.md` が在れば `--log-file の置き場` の語で止まり、リンク先の側(`b/x.md`)にも書かないこと / `proj/x.md` が在っても、正規化した `a/x.md` に開くこと(exit 0・`NOTE: ログ:` が `a/x.md` を指す・`proj/x.md` の中身と大きさが変わらない・`b` の側に書かない)。
   - フックは、呼び出しの回数でなく対象で発火し(`cd` は最後の引数が置き場の階層名〈`./` を付けた形を含む〉のとき、`pwd` は `builtin pwd -P` が置き場の物理パスに等しいとき)、「1 回だけ」をファイルの印で数え、条件の外では元の `builtin cd`・`builtin pwd` を呼ぶだけで、失敗しうるコマンドは `|| true` にする(スクリプトの `set -eEu` と ERR trap の下で走り、スタブのランナーにも継承されるため)。
-  - 変異(固定の手順の `pwd -P` の照合の条件を真にした写し・置き場の中で相対名でなく物理パスで開く写し)で、それぞれ検査の後・`cd` の前の差し替えのケース・固定の後・開く前の差し替えのケースだけが落ちること。
-  - 早い既存検査を字面のパスに戻した写しで、(k2′) のケース(`proj/x.md` が在っても正規化した `a/x.md` に開く)だけが落ちること
+  - 変異(固定の手順の `pwd -P` の照合の条件を真にしたコピー・置き場の中で相対名でなく物理パスで開くコピー)で、それぞれ検査の後・`cd` の前の差し替えのケース・固定の後・開く前の差し替えのケースだけが落ちること。
+  - 早い既存検査を字面のパスに戻したコピーで、(k2′) のケース(`proj/x.md` が在っても正規化した `a/x.md` に開く)だけが落ちること
 - **プロンプトの大きさとログの置き場**(§6・§7。ケース名の接頭辞で示す): `大きさの判定の順序:` 大きすぎるプロンプトでは、`--command` の副作用のスタブも既定表のランナーのスタブも 1 回も起動されずに `prompt-too-large`(12)で終わり、`--dry-run` でも 12 で終わること / `置き場を作れない:` 明示した `--log-file` の置き場(`/dev/null/nested/…`)も既定の置き場(書けない cwd。root では飛ばす)も、作れなければ `usage`(2)で理由を返すこと / `開く前の ERR:` ログを開く前の想定外の失敗(`dirname` だけを失敗させるスタブ)で、`ERROR [internal]`(20)の行が 1 行だけ出て、ログを作らないこと
-- 分岐の網羅: ラッパー(`env` 等)越しの自ホスト判定 / プローブが空出力 / `--target`・`--cwd` の伝播 / `--model` の挿入 / `--名前=値` 形の読み取り専用照合 / `<bin> <sub> --help` でのヘルプ照合 / ヘルプ照合のタイムアウト / 想定外失敗の `ERROR [internal]`(exit 20)(本実行の stderr を一時ファイルへ向けている間に起きた想定外の失敗でも、`ERROR [internal]` が元の stderr に出ること。本実行の呼び出しから `|| rc=$?` を外した写しで確かめる)/ 正規化結果の形が壊れたときの `parse-failed`
+- 分岐の網羅: ラッパー(`env` 等)越しの自ホスト判定 / プローブが空出力 / `--target`・`--cwd` の伝播 / `--model` の挿入 / `--名前=値` 形の読み取り専用照合 / `<bin> <sub> --help` でのヘルプ照合 / ヘルプ照合のタイムアウト / 想定外失敗の `ERROR [internal]`(exit 20)(本実行の stderr を一時ファイルへ向けている間に起きた想定外の失敗でも、`ERROR [internal]` が元の stderr に出ること。本実行の呼び出しから `|| rc=$?` を外したコピーで確かめる)/ 正規化結果の形が壊れたときの `parse-failed`
 - プロンプト末尾へのスキーマ指示の付与と冪等(既存ブロックで終わる入力の除去 → 再付与・`--target` との順序・末尾空白(窓はブロック長 + 4096 文字)・長い末尾空白でも停滞しないこと・付与後に上限を超えると `prompt-too-large`・本文中の引用では抑止しないこと・付与の別がログに残ること)、および review-protocol.md の指摘 JSON 形式との同期(キー・許容値の集合一致)。
   - 付与を検証するスタブは「プロンプトが付与ブロック全体で終わるときだけ指摘 JSON を返す」ゲートなので、付与を壊すと `parse-failed` で落ちる(逆ケースをスタブ自身が内包する)
 
@@ -777,7 +777,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - 実装用の自己テストがスタブだけで検証するのは次のとおり:
 
 - 終了コードの契約(成功 / usage / not-found / self-host / **no-writemode** / probe-failed / probe-timeout / run-failed / run-timeout / prompt-too-large / internal)と、失敗時の `ERROR [理由コード]` 形式。
-  - **引き継ぎ専用の終了コードが無い**こと(§12-7)(本実行の stderr を一時ファイルへ向けている間に起きた想定外の失敗でも、`ERROR [internal]` が元の stderr に出ること。本実行の呼び出しから `|| rc=$?` を外した写しで確かめる)
+  - **引き継ぎ専用の終了コードが無い**こと(§12-7)(本実行の stderr を一時ファイルへ向けている間に起きた想定外の失敗でも、`ERROR [internal]` が元の stderr に出ること。本実行の呼び出しから `|| rc=$?` を外したコピーで確かめる)
 - **§12-8 の起動構文との一致**: 必須 3 引数(`--runner` / `--prompt-file` / `--cwd`)だけで動くこと・任意引数を全て同時に受理すること・**`--cwd` の省略と空が usage(exit 2)**であること・**`--command` / `--writeflag` 相当の引数が存在しない**(渡すと usage)こと
 - 信頼モデル: **実装用既定表に無いランナー名(§4 のレビュー用既定表にある名前を含む)を usage で拒否**し、拒否時に副作用が再現しないこと
 - 判定 3′(モード確立): ヘルプにフラグが無ければ `no-writemode`(11)で止まり、**エラー文に「読み取り専用」の語が混入していない**こと。`<bin> <sub> --help` 経路とヘルプ照合のタイムアウト経路
@@ -789,7 +789,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - ログ採番: 既定のログ置き場が書き込み不可のとき、無限に再採番せず止まること・中止時にプローブの生出力もログに残ること。
   - リンク先の無い symlink は、番号の衝突として次の番号へ進むこと。
   - 明示した `--log-file` のパスに既存のエントリ(外のファイルを指す symlink・通常ファイル・リンク先の無い symlink・ディレクトリ)があれば、ログの初期化より前に `die` する経路を含めて usage(2)で止まり、リンク先と中身を変えないこと
-- **ログの書き込みと想定外の失敗**(§12-8。ケース名の接頭辞は review 側と同じ): `走行中の差し替え:` 本実行の間にログのパスを外のファイルへの symlink・ハードリンク・FIFO に差し替えても、外のファイルの中身が変わらず、スクリプトがスタブどおりの終了コードで終わり、stderr に `NOTE: ログのパスが走行中に差し替えられた:` が出ること(差し替えの後に中止しても、`ERROR [aborted]` とこの NOTE が元の stderr に出ること)/ `差し替えの照合:` 差し替えないときは、stderr に差し替えの NOTE が出ないこと。ログのパスを `/dev/fd/7` を指す symlink に差し替えると、NOTE が出ること。`-ef` の判定を偽にした写し(macOS の `-ef` の不一致を模す)で、差し替えないときは NOTE が出ず(本実行の間に中止しても、`ERROR [aborted]` が出て NOTE は出ない)、symlink・ハードリンクの差し替えでは NOTE が出て、外のファイルの中身が変わらないこと。その写しで、`os._exit(0)` だけの `encodings` を `PYTHONPATH` に置いても、ハードリンクの差し替えで NOTE が出ること(比べ直しを `-I` で起動するため)。その写しで `python3` が無いときは、差し替えなくても NOTE が 1 行だけ出ること / `既定名の置き場:` 既定の置き場の iter1 が FIFO・`/dev/null` を指す symlink でも、それを飛ばして iter2 に通常ファイルのログを作り、exit 0 で終わり、iter1 を変えないこと / `ERR のログ:` ログを開いた後の想定外の失敗(`wc` だけを失敗させるスタブ)で、ログに `**結果**: ERROR [internal]` の行が残ること / `ERR の生出力:` 本実行の後の想定外の失敗で、ログに `生出力(想定外の失敗の時点まで)` の節が残り、stdout にスタブの生出力が出ること / `ERR の行数:` 置換(サブシェル)の中の失敗(代入の形の置換)でも、`ERROR [internal]` の行が 1 行だけ出ること / `ログのパス:` 既定名・明示のどちらでも、stderr の `NOTE: ログ:` のパスが実際のログと同じであること / `開く前の失敗:` ログを開く前の失敗(保護領域を解決できない `internal`)で、明示したパスにエントリを作らないこと / `子に渡す fd:` 外部 CLI がログの fd に書けないこと / `POSIX モード:` `POSIXLY_CORRECT` のある環境でも、置き場に書けない既定名で usage(2)が返ること(root では飛ばす)/ `/dev/fd の判定が偽:` 通常ファイルの判定を偽にした写しで、採番を繰り返さずに usage(2)で止まること(既定名・明示の `--log-file` の両方で打ち、`ERROR [usage] ` の行に置き場の語〈既定名は `既定のログ置き場`、明示は `--log-file の置き場`〉が出ること)。
+- **ログの書き込みと想定外の失敗**(§12-8。ケース名の接頭辞は review 側と同じ): `走行中の差し替え:` 本実行の間にログのパスを外のファイルへの symlink・ハードリンク・FIFO に差し替えても、外のファイルの中身が変わらず、スクリプトがスタブどおりの終了コードで終わり、stderr に `NOTE: ログのパスが走行中に差し替えられた:` が出ること(差し替えの後に中止しても、`ERROR [aborted]` とこの NOTE が元の stderr に出ること)/ `差し替えの照合:` 差し替えないときは、stderr に差し替えの NOTE が出ないこと。ログのパスを `/dev/fd/7` を指す symlink に差し替えると、NOTE が出ること。`-ef` の判定を偽にしたコピー(macOS の `-ef` の不一致を模す)で、差し替えないときは NOTE が出ず(本実行の間に中止しても、`ERROR [aborted]` が出て NOTE は出ない)、symlink・ハードリンクの差し替えでは NOTE が出て、外のファイルの中身が変わらないこと。そのコピーで、`os._exit(0)` だけの `encodings` を `PYTHONPATH` に置いても、ハードリンクの差し替えで NOTE が出ること(比べ直しを `-I` で起動するため)。そのコピーで `python3` が無いときは、差し替えなくても NOTE が 1 行だけ出ること / `既定名の置き場:` 既定の置き場の iter1 が FIFO・`/dev/null` を指す symlink でも、それを飛ばして iter2 に通常ファイルのログを作り、exit 0 で終わり、iter1 を変えないこと / `ERR のログ:` ログを開いた後の想定外の失敗(`wc` だけを失敗させるスタブ)で、ログに `**結果**: ERROR [internal]` の行が残ること / `ERR の生出力:` 本実行の後の想定外の失敗で、ログに `生出力(想定外の失敗の時点まで)` の節が残り、stdout にスタブの生出力が出ること / `ERR の行数:` 置換(サブシェル)の中の失敗(代入の形の置換)でも、`ERROR [internal]` の行が 1 行だけ出ること / `ログのパス:` 既定名・明示のどちらでも、stderr の `NOTE: ログ:` のパスが実際のログと同じであること / `開く前の失敗:` ログを開く前の失敗(保護領域を解決できない `internal`)で、明示したパスにエントリを作らないこと / `子に渡す fd:` 外部 CLI がログの fd に書けないこと / `POSIX モード:` `POSIXLY_CORRECT` のある環境でも、置き場に書けない既定名で usage(2)が返ること(root では飛ばす)/ `/dev/fd の判定が偽:` 通常ファイルの判定を偽にしたコピーで、採番を繰り返さずに usage(2)で止まること(既定名・明示の `--log-file` の両方で打ち、`ERROR [usage] ` の行に置き場の語〈既定名は `既定のログ置き場`、明示は `--log-file の置き場`〉が出ること)。
   - FIFO のケースは `timeout -k` の外側タイムアウトで打ち(`timeout` が無い環境では飛ばす)、FIFO で待ち続ける実装は期待と違う終了コードで FAIL になる。
   - これらのケース(`走行中の差し替え:`〜`/dev/fd の判定が偽:`)の保護領域は `$HOME/.local/state/dev-workflow/` の下の自己テスト専用のディレクトリに置き(`XDG_STATE_HOME` をそこへ向ける)、終了時に消す
 - **置き場の経路**(§12-8。ケース名の接頭辞・フックの作り方・変異は review 側と同じ): review 側と同じケース(起動場所と `--cwd` を分けたときの既定名〈I1 と同じ形〉・置き場が在って書けないとき・明示の `--log-file` の `..` を語彙的に解いた名前で既存のエントリを見て止まる / 開くときを含む)に加えて、`--dry-run` の既定名でも、起動時の cwd の `.claude/reviews` が外を指す symlink なら usage(2)で止まり、リンク先が空で、`NOTE: ログ:` を出さないこと / 明示の `--log-file` を `--cwd` の実体の中に渡し、その置き場の経路に symlink があるときも止まること(`--cwd` の実体も基点の候補)。
@@ -849,15 +849,15 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - 起動場所と `--cwd` が違い、`TMPDIR` が相対パスのときは、印を書かずに `OWNER_MARK=no` で続けること(絶対パスなら書く)。
   - 印の `[ -e ]`・`[ -L ]` だけが偽になる(親を検索できても属性の取得だけが失敗する)ときは、「無い」と扱わないこと。take は終了値 20、`cleanup` も終了値 20(印が残ったか確かめられない)。
   - `tmpdir` の 16 進の変換だけが失敗したときは、空の `tmpdir` の印を公開せず、`OWNER_MARK=no` で続けること。
-- **変異テスト**(26 変異 = 目印のある 25 変異と、目印を持たない 1 変異〈復元先の階層検査を外す〉。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 前置きの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの前置きを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す / 明示 GLOBAL root の候補化を外す / 設定本文の累積読取上限を外す / 再帰 include の解析を外す / 実効 Git の予定読取予約を外す / 隔離 parser で `HOME` を scratch へ置換する / 生成設定と metadata の有限予約を外す / 明示子 Git の設定予約を外す / 親内の暗黙子 refs 読取予約を外す / 新 selector root の再登録停止を外す / Apple Git の追加の system 設定の候補化を外す(変異 `x`)/ 子の文脈の Apple Git の追加の system 設定の候補化を外す(変異 `y`)/ Apple Git の判定(`git version` の形の検査)を外す(変異 `z`)。
+- **変異テスト**(26 変異 = 目印のある 25 変異と、目印を持たない 1 変異〈復元先の階層検査を外す〉。それぞれ対応するケースが FAIL し、スイートが非ゼロで終わる): ダイジェスト照合を外す / hooks・config の検査を git の再取得より後ろへ動かす / 安全用のオプションの `-c core.fsmonitor=` を外す / 使い捨て index をやめる / 復元先の階層検査を外す / 正規化で `[xX]` 以外も潰す / `.claude/reviews/` の除外をタスク MD より優先する / unborn で空ツリーに切り替えない / 上限検査を外す / hooks ディレクトリの解決に `-c core.hooksPath=/dev/null` つきの安全用のオプションを使う / タスク MD の退避の失敗を `u` で続行する / ① から `-c diff.autoRefreshIndex=false` を外す / 保護領域の候補の `..` の正規化を外す / 明示 GLOBAL root の候補化を外す / 設定本文の累積読取上限を外す / 再帰 include の解析を外す / 実効 Git の予定読取予約を外す / 隔離 parser で `HOME` を scratch へ置換する / 生成設定と metadata の有限予約を外す / 明示子 Git の設定予約を外す / 親内の暗黙子 refs 読取予約を外す / 新 selector root の再登録停止を外す / Apple Git の追加の system 設定の候補化を外す(変異 `x`)/ 子の文脈の Apple Git の追加の system 設定の候補化を外す(変異 `y`)/ Apple Git の判定(`git version` の形の検査)を外す(変異 `z`)。
   - 設定の出典ファイルだけの検査を外す変異も含める。root の config は不変のまま include 先の値を変え、拒否を期待する回帰が失敗することを確かめる。
   - 変異 `x`・`y`・`z` は `M26` が落ちることを期待する。Apple Git の Mac では、対照 `E1` を `GIT_CONFIG_NOSYSTEM=1` で通し、`M26` の実機の分岐は system 設定を有効にして落とす。
-  - 行を丸ごと置き換える変異(`w`・`x`・`y`・`z`)の写しを作る `sed` は、`c\` ではなく、BSD 版と GNU 版の両方で動く `s/.*/…/` の形にする(Mac の標準の `sed` は BSD 版で、`c\` の後に同じ行で文を続ける形を拒否するため)。目印のある 25 変異は、`sed` が失敗したらそれ自体を FAIL にする。目印を持たない変異 `e` も、写しを作る `cp`・`sed` が失敗したらそれ自体を FAIL にする([#287](https://github.com/Yuki-Maeda-valour/workflow/issues/287) で直した)。
-  - 変異 `e` は、`J4` の「リンク先の同名ファイルが無傷」の行が落ちること(上書きが起きた証拠)も見る。対照の `J1`(正常な復元)が写しでも通ること(写しの `restore-taskmd.py`〈タスク本文の復元の補助〉が実行時に動く証拠)も見る([#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296) で直した。今までの対照は、復元の処理を使わない `E1` だけだった)。
+  - 行を丸ごと置き換える変異(`w`・`x`・`y`・`z`)のコピーを作る `sed` は、`c\` ではなく、BSD 版と GNU 版の両方で動く `s/.*/…/` の形にする(Mac の標準の `sed` は BSD 版で、`c\` の後に同じ行で文を続ける形を拒否するため)。目印のある 25 変異は、`sed` が失敗したらそれ自体を FAIL にする。目印を持たない変異 `e` も、コピーを作る `cp`・`sed` が失敗したらそれ自体を FAIL にする([#287](https://github.com/Yuki-Maeda-valour/workflow/issues/287) で直した)。
+  - 変異 `e` は、`J4` の「リンク先の同名ファイルが無傷」の行が落ちること(上書きが起きた証拠)も見る。対照の `J1`(正常な復元)がわざと壊したコピーでも通ること(コピーの `restore-taskmd.py`〈タスク本文の復元の補助〉が実行時に動く証拠)も見る([#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296) で直した。今までの対照は、復元の処理を使わない `E1` だけだった)。
     - 元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない環境(macOS など)では、変異 `e` を `NOTE:` の行で省く(数えない)。
     - それ以外の理由で元の対象の `J1` が通らないときは FAIL にする。
   - 変異 `b` は、`G7` の config-changed・hooks-changed の「git の呼び出しが 0 回」の行が落ちること(検査より先に Git を呼んだ証拠)も見る。`G7` の復元の行は、macOS では元の対象でも落ちるので、`G7` の FAIL の行があるだけでは、見つけたと判定しない([#300](https://github.com/Yuki-Maeda-valour/workflow/issues/300))。
-  - **対照ケースが、写しでも PASS すること**(壊れ方が変異に固有であること)と、目印のある変異で**目印が無い・置換が空振りした・`sed` が失敗したときはそれ自体を FAIL にする**ことも見る
+  - **対照ケースが、わざと壊したコピーでも PASS すること**(壊れ方が変異に固有であること)と、目印のある変異で**目印が無い・置換が空振りした・`sed` が失敗したときはそれ自体を FAIL にする**ことも見る
     - 対照は 2 つの形がある。全変異の `E1` は、変異の当たらないケース。変異 `e` の `J1` は、変異を当てた補助を通るが、結果の変わらないケース。
 
 各ケースは外側タイムアウト付き・stdin を `/dev/null` にして走るため、実装が壊れて待ち続けてもスイートは FAIL で終わる(stdin が開いたままの環境で実行しても結果は変わらない)。
@@ -907,7 +907,7 @@ do-task の **implementer** を外部 CLI に委託するための追加契約�
 - **承認より先に判定する縮退(#81)**: parent-child のほかに、次の 3 つでも外部委託を行わず、**承認を求めずに**内蔵 implementer に切り替えて理由を報告する。
   - **判定は do-task の Phase 3 に入るたび(ITER ごと)に、外部の手順の手順 1 で行う**(判定の場所はそこだけ。Phase 0 の結果として読まない)。
   - 当てる順は §12-5 の段階の並び
-  - **条件 A: タスク MD がファイルでない**(#81 決定 2): do-task の Phase 0 の手順 1 で保持したタスク MD が、読める通常ファイルでない(課題管理システムの本文など)。**本文を書き出した写しを `--task-md` に渡さない**(写しを渡すと `take` は通るが、本物の完了条件は照合されない)。ファイルでないものが `--task-md` に渡ったときに `take` が exit 30 `[taskmd]` で内蔵に切り替える挙動(§12-2 の縮退 ⑤)も契約とする
+  - **条件 A: タスク MD がファイルでない**(#81 決定 2): do-task の Phase 0 の手順 1 で保持したタスク MD が、読める通常ファイルでない(課題管理システムの本文など)。**本文を書き出したコピーを `--task-md` に渡さない**(コピーを渡すと `take` は通るが、本物の完了条件は照合されない)。ファイルでないものが `--task-md` に渡ったときに `take` が exit 30 `[taskmd]` で内蔵に切り替える挙動(§12-2 の縮退 ⑤)も契約とする
   - **git でない**(#81 決定 3): 対象が git リポジトリでない(Phase 0 と同じ判定。base-commit.md)。**事前検査(`--precheck`)を打たずに**内蔵に切り替える(`take` の `not-git` と同じ結末を、承認より前に決める。`--precheck` は git でない対象では rc 2 で止まる)
   - **条件 B: そのセッションで最後に承認した一覧に filter がある**(#81 決定 3)。内蔵への切り替え後は、Git 対象なら [implementation-git.md](implementation-git.md) の必要環境確認と新しい `prepare` を委託直前に通し、入口・cwd・承認値・照合値を渡す。失敗時は内蔵を起動しない。
     - **最後に承認した一覧(値)**: そのセッションで最後にユーザーが承認したもの。**承認の場所は問わない**(do-task の Phase 0 の事前検査・Phase 3 の外部の手順の手順 1 と手順 5 の ②・Phase 4 の diff スナップショット)。承認のたびに、その値を最後に承認した値として持つ
@@ -988,7 +988,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 **clean 要求は課さない**(2026-09-17 決定 12。ship-task は `/do-task` 完了後に commit するため、`/do-task` 起動時点で作業ツリーは必ず dirty であり、clean を要求すると常に空振りする)。
 
 **スナップショット(5 要素。2026-09-17 決定 25)**: `take` が取り、`compare` が**同じ取り方で**再取得する。
-- **git の呼び出しにはすべて `diff-snapshot.sh` と同じ前置き(`core.fsmonitor`・`core.hooksPath` などを無効にする `-c` の並び)を付ける** — 素の `git status` / `git diff` は、リポジトリの config に設定されたプログラム(`core.fsmonitor`・`diff.external` 等)をホスト側で実行するため(実測)。
+- **git の呼び出しにはすべて `diff-snapshot.sh` と同じ安全用のオプション(`core.fsmonitor`・`core.hooksPath` などを無効にする `-c` の並び)を付ける** — 素の `git status` / `git diff` は、リポジトリの config に設定されたプログラム(`core.fsmonitor`・`diff.external` 等)をホスト側で実行するため(実測)。
 - オプションの細部はスクリプトが固定し、ここには理由のあるものだけを書く。
 
 1. `git diff --binary HEAD`(追跡分の未コミット差分)。
@@ -1011,13 +1011,13 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 - **ブランチ名**(`git symbolic-ref -q HEAD`。detached は `(detached)`)と **refs 全体**(`git for-each-ref --format='%(objectname) %(refname)'`)
 - **hooks のダイジェスト**: hooks ディレクトリの実体配下の全エントリの「種別・モード・sha256・名前」。
   - **git が実際に hook を探す場所を取る**(`core.hooksPath` が設定されていればその先、linked worktree では common dir 側。`.git/hooks` のリテラルにしない)。
-  - 解決は `git rev-parse --git-path hooks` で行い、**この 1 呼び出しだけは前置きから `-c core.hooksPath=/dev/null` を外す**(付けたままだと `/dev/null` が返り、hook の設置を永久に検出できない。実測。`rev-parse` は hook を起動しない)。
+  - 解決は `git rev-parse --git-path hooks` で行い、**この 1 呼び出しだけは安全用のオプションから `-c core.hooksPath=/dev/null` を外す**(付けたままだと `/dev/null` が返り、hook の設置を永久に検出できない。実測。`rev-parse` は hook を起動しない)。
   - ディレクトリが無ければ `(無し)`、ディレクトリでなければ `(ディレクトリでない)` という値で記録し、失敗にしない(テンプレート無しで作った repo や、`core.hooksPath` を `/dev/null` に向けた構成のため。起動後にディレクトリが作られたら変化として検出する)
 - **config のダイジェスト**: `git rev-parse --git-path config` と `--git-path config.worktree` が指すファイルの生バイトの sha256(無いファイルは `(無し)`)。
   - **`config.worktree` は常に記録する**(`extensions.worktreeConfig` を立てれば main worktree でも有効なので、linked worktree に限らない)
 - **開始時の設定 root と全 include 候補**: 空・コメントだけ・欠落のファイルと、不成立の条件の先も記録する。各通常ファイルを `--no-includes` で解析し、Git が展開した path を親の論理経路から再帰的に辿る。候補と include 値は各 2,000 件まで。
-  - 候補をすべて控えた後、安全な前置き付きの `git config --null --show-origin --name-only --includes --list` で、実効 `file:` 出典が収集済みの候補に対応することを検査する。
-  - NUL 区切りの origin/key の対を最後まで読み、空・奇数・途中切れの対や未知の出典は拒否する。command line 由来は前置き自身のキーの個数と順序に一致するものだけを受け入れる。
+  - 候補をすべて控えた後、安全用のオプション付きの `git config --null --show-origin --name-only --includes --list` で、実効 `file:` 出典が収集済みの候補に対応することを検査する。
+  - NUL 区切りの origin/key の対を最後まで読み、空・奇数・途中切れの対や未知の出典は拒否する。command line 由来は安全用のオプション自身のキーの個数と順序に一致するものだけを受け入れる。
   - 収集や保存の失敗は exit 20 とし、作りかけの保護領域を消す。取得失敗を空一覧にしない。正規に収集した file origin 0 件は許可する。
   - Apple Git の追加の system 設定: system 設定が有効のとき、`git version` が `git version X (Apple Git-N)` の形なら、`git --man-path` の値(`/…/share/man` の形だけ受け付ける)から末尾の `/share/man` を外して導入先を求め、`<導入先>/share/git-core/gitconfig` を候補(`plan-root`)に入れる。ファイルが無くても入れ、`GIT_CONFIG_SYSTEM` の値には依存しない。`GIT_CONFIG_NOSYSTEM` が真なら入れない。子リポジトリの文脈にも同じパスを入れる。記録の形式(`config-origins-v3`・`config-contexts.txt`)と行の種類は変えない。条件と実機の確認範囲は [runtime-requirements.md](runtime-requirements.md#macos-の実測と再確認手順) が持つ。
   - 未知の出典の診断: 候補に無い `file:` の出典、種類の分からない出典、Apple Git の導入先を確定できない、`git var GIT_CONFIG_SYSTEM` が失敗した、のときは、理由を控えて exit 20 の診断に出す。診断の 1 行目は `ERROR [internal] 設定の出典を安全に収集・保存できない: <原因>`(パスと出典の種類は C 風引用で出し、制御文字をそのまま出さない)。続けて `NOTE:` の行で、選べる実行条件(`take` から `cleanup` までを同じ `GIT_CONFIG_NOSYSTEM=1` の環境で実行する・設定の読込先をすべて保持候補にできる Git を選ぶ・`git var` が失敗したときだけ `GIT_CONFIG_SYSTEM=/dev/null` の環境で実行する)を出す。予算超過・構文・Git の起動失敗などは、今までどおり理由なしの 1 行だけ。縮退(終了値 30)の理由は増やさない。設定の値・本文と Git の stderr は出さない。
@@ -1077,7 +1077,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
   - 縮退・失敗・シグナルで終わるときは、作りかけの保護領域を消す
 - **所属の印(#291)**: `take` は、記録 `guard-XXXXXX` を作った直後に、同じ `dev-workflow/` に印 `owner-XXXXXX` を書く(`XXXXXX` は記録の名前の後ろ)。開始前の確認(§12-9)が、記録の中を開かずに別のプロジェクトの記録かを見分けるために使う。
   - 中身は記録の番号、toplevel・Git の共通の置き場・タスク MD の実体の在るフォルダの物理パスと番号、take のときの `$TMPDIR` の物理パス(未設定なら空)。パスと番号だけで、機密を含まない。形は §12-9-3。
-  - 中身は記録の作成より前に求める(共通の置き場は `git rev-parse --git-common-dir` を同じ前置きで呼んで求める)。
+  - 中身は記録の作成より前に求める(共通の置き場は `git rev-parse --git-common-dir` を同じ安全用のオプションを付けて呼んで求める)。
   - `$TMPDIR` が相対パスなら印を書かない(外部の実装役は `--cwd` で起動するので、take の起動場所を基準にすると指す先が変わる)。
   - パスの 16 進は書き出す前に 1 つずつ変換し、戻り値と長さを確かめる。失敗したら印を公開しない(`tmpdir` を空の値にしない)。
   - 書き方は 3 つの手順。記録の中の `.work` に一時ファイルとして書いて 0600 にする → `link` で印の名前を付ける → 名前の属性をリンクを辿らずに取り、一時ファイルと同じ番号の通常ファイルと確かめてから一時ファイルを消す。読む側は書きかけの印を見ない。
@@ -1252,19 +1252,19 @@ TEMP_PATH=<C風引用のパス>
     2. ① `config-check`。0 以外なら Git を呼ばず、人が設定候補を戻して確認する
     3. ② `--precheck`(`--accept` は、起動前の報告の ② のコマンド行の値。その後に承認し直して報告した値があれば、その値)。0 以外なら再開しない。stdout に `GIT_CONFIG_COUNT` が出たら ③ を打たず、④ だけを打って、人が判断する
     4. ③ `compare`。`--run-rc` は報告に残った `implement-agent.sh` の終了コードを使い、不明なら 1 を渡す。33 なら再開しない
-    5. ④ `taskmd-diff`。34・35・33 なら再開しない。0 なら、§12-9-5 の全候補の確認と新一覧の照合を通してから、今のタスク MD のまま /do-task で再開してよい。`DOD=` の写しは do-task に渡さない
+    5. ④ `taskmd-diff`。34・35・33 なら再開しない。0 なら、§12-9-5 の全候補の確認と新一覧の照合を通してから、今のタスク MD のまま /do-task で再開してよい。`DOD=` のコピーは do-task に渡さない
     6. 再開した do-task の完了処理の後に、報告の値で `cleanup --state` を打つ(人)
   - **保護領域のパスまで失ったとき**: 平文の複製が、保護領域の候補(`$XDG_STATE_HOME` → `$HOME/.local/state` → `$HOME/.cache`)の下の `dev-workflow/guard-*` に残るので、人が消す
 - (b)**タスク MD がファイルでない運用**(課題管理システムの本文など): 外部に解決しない(§12-1 の条件 A。#81 決定 2)
 - (c)**起動後の git がリポジトリ設定のプログラムを実行する経路の残り**(#81 決定 3 で実測に合わせて書き直した): 外部が足したもののうち、新しい filter・新しい `include.path` / `includeIf.*`・include 先に足された検査対象のキー(`filter.*` 等)・`filter` 属性(`lfs` を除く。R2)の適用先の追加は、共通工程の ② `--precheck` が exit 22 で止める(`working-tree-encoding`・`ident` 属性は、承認できない疑いとして止める。`.git/config`・`config.worktree` の生バイトの変化は、`compare` の hooks と config の検査でも止まる)。
   - `.gitattributes` に `diff=` などほかの属性を足しても `--precheck` を通るが、`compare` は `--no-textconv` で取るので textconv を起動しない(`.git/info/attributes` は、`filter=`・`diff=`・`-diff`・`binary`・`working-tree-encoding=` を含む行があると、ファイル全体が承認できる疑いとして exit 22 で止まる)。
   - 残る経路は次のとおり
-  - **R1**(実測): 承認済みの filter のコマンドが、外部の書ける作業ツリー内のファイルに依存する構成(リポジトリ内のスクリプトを呼ぶ等)。設定も属性も変わらないので、`--precheck` は 0 になる。そのうえで、**filter 対象のパスが stat 上変わったとき、または racily clean なとき**(index と同じ秒以降の mtime を持つ。作成と commit が同じ秒で済んだ直後など)、`take` の取得と `compare` の再取得の、5 要素の ①②(`diff`・`status`)が、その clean フィルタをホスト側(サンドボックスの外)で起動する(前置きは clean フィルタを止めず、`--precheck` が stdout に出す無効化の環境変数を `implement-guard.sh` は受け取らないため)。到達する脅威はホストでの任意コード実行。**§12-1 の条件 B で閉じる**(最後に承認した一覧に filter があれば、外部に解決しない)
+  - **R1**(実測): 承認済みの filter のコマンドが、外部の書ける作業ツリー内のファイルに依存する構成(リポジトリ内のスクリプトを呼ぶ等)。設定も属性も変わらないので、`--precheck` は 0 になる。そのうえで、**filter 対象のパスが stat 上変わったとき、または racily clean なとき**(index と同じ秒以降の mtime を持つ。作成と commit が同じ秒で済んだ直後など)、`take` の取得と `compare` の再取得の、5 要素の ①②(`diff`・`status`)が、その clean フィルタをホスト側(サンドボックスの外)で起動する(安全用のオプションは clean フィルタを止めず、`--precheck` が stdout に出す無効化の環境変数を `implement-guard.sh` は受け取らないため)。到達する脅威はホストでの任意コード実行。**§12-1 の条件 B で閉じる**(最後に承認した一覧に filter があれば、外部に解決しない)
   - **R2**(未調査): 標準の git-lfs の設定(`filter.lfs.*`)と属性は、事前検査が見逃す(`diff-snapshot.sh` の既定の lfs の扱い)。5 要素の ①② が `git-lfs clean` を起動する。#77 で扱う
   - **R3**: 開始時の root、空・コメントだけ・欠落の include 先、非成立の条件付き include の下位候補、設定探索環境を保存する。外部実装後の `config-check` が通常設定を Git 無しで比較し、その後に隔離 Git で使用先と blob を照合する。
     - 検査の間だけ変更して戻す競合や、検査器・保持値自体への攻撃の完全排除は保証しない。外部実装を停止してから比較し、OS による隔離が必要な範囲と区別する。
   - 開始時にキーを提供した include 先で `core.hooksPath` が変われば、root の config が不変でも `config-changed` で止まる。開始時の出典一覧に無い先から設定が有効になる場合には、この保証を当てない。
-    - ④ の再取得まで進んだ場合、hooks の実体パスの変化は `CHANGE=hooks`・`GITMETA_CHANGED=yes` に出る。hook 自体は前置きの `-c core.hooksPath=/dev/null` で実行を止める。
+    - ④ の再取得まで進んだ場合、hooks の実体パスの変化は `CHANGE=hooks`・`GITMETA_CHANGED=yes` に出る。hook 自体は安全用のオプションの `-c core.hooksPath=/dev/null` で実行を止める。
 - (d)**保護領域そのものの改竄**(§12-4 の限界⑧ で「外部の書き込み範囲外」の前提が崩れた場合。ダイジェストの照合は改竄を検出するが、防ぎはしない)
 - (e)**ネストしたリポジトリ(マニフェストの種別「その他」)の内部の変化は検出しない** — ③ はそのディレクトリを 1 エントリとして記録するだけで、中へは入らない(5 要素の契約に由来する死角)
 - (f)**使い捨ての index に対する `write-tree` は、到達不能な tree オブジェクトを `.git/objects` に残す**(index・HEAD・refs・stash・config は変えない)。
@@ -1355,12 +1355,12 @@ TEMP_PATH=<C風引用のパス>
         - `NOTE: 置換参照を無効化して実行` は照合しない。`refs/replace/*` は 1 の戻す対象〈設定・属性・hooks〉に無く、その変化は ③ の `CHANGE=refs` に出る。
        - `GIT_CONFIG_COUNT` が出なくなり、NOTE も同じなら、③ `compare` を打ち、0 / 31 / 32 なら ④ を打つ(33 なら比較不能として扱う。`REASON=hooks-changed` / `config-changed` なら、その再開の条件へ)。その結果(git メタの `CHANGE=` を含む)で、実ツリーを正として進めるか破棄するかを決める
        - `GIT_CONFIG_COUNT` がまだ出るなら、1 に戻る
-    - ③ は前置き・`--no-ext-diff --no-textconv`・hooks と config の検査を持つ。git メタ(HEAD・ブランチ・refs・stash)と、今回の外部が変えた分の切り分け(起動前の記録との比較)は ③ が出す
+    - ③ は安全用のオプション・`--no-ext-diff --no-textconv`・hooks と config の検査を持つ。git メタ(HEAD・ブランチ・refs・stash)と、今回の外部が変えた分の切り分け(起動前の記録との比較)は ③ が出す
     - 設定を戻さずに調べる場合は [diagnostic-git.md](diagnostic-git.md) の読取り専用入口だけを使う。人が元の処理と子孫の停止を確認し、保持値で `extend-plan` → 新計画の親保持・報告 → `run` と進む。
     - `run` 失敗でも最新計画を保持する。`extend-plan` の失敗・応答不明では旧計画による反復や残存hashの再採用をせず、人の証拠照合へ戻る。
     - 診断成功後も人の判断待ちへ戻る。設定を戻して `config-check` → `precheck` → `compare` → `taskmd-diff` を通す通常復帰条件は短絡しない。素の Git を代わりに打たない。
 
-**外部 / 内蔵 implementer の宛先識別**: 派生名は新設しない。**素の `implementer` のまま報告文で区別する**(既知の限界。§12-6 末尾)。
+**外部 / 内蔵 implementer の名前での識別**: 派生名は新設しない。**素の `implementer` のまま報告文で区別する**(既知の限界。§12-6 末尾)。
 
 ### 12-6. 実装用既定表と 3 層解決の値
 
@@ -1407,7 +1407,7 @@ TEMP_PATH=<C風引用のパス>
 - 走行中の問い合わせ・前提是正・中止(design §5-17 の軸 6)は外部 implementer に送達手段が無く成立しない
 - ジョブ管理(進捗の問い合わせ・中止の実装)は据え置き
 - ② MCP バックエンド(`codex mcp-server`)の評価は未実施
-- 外部 / 内蔵 implementer の宛先識別は無く、**素の `implementer` のまま報告文で区別する**(上記 §12-5 と同じ)
+- 外部 / 内蔵 implementer の名前での識別は無く、**素の `implementer` のまま報告文で区別する**(上記 §12-5 と同じ)
 - **team-lead の記録の名前は予測できる**: 外部 implementer は、team-lead が後で書く記録の名前(`{role}-{タスク名}-iter{ITER}.md`・`triage-…`・`recovery-…`・`diff-…`。ITER は置き場の最大 + 1 で、外部は置き場を読める)に、通常ファイル・ハードリンクを先に置ける。
   - ホストの書き込みツールの挙動(design §7-3 に記録)によっては、先に置かれた中身が Read で文脈に入る。外部の出力(差分・ログ)と同じく、信頼しないデータとして扱う。
   - 置き場そのものの差し替えは、起動の直前と共通工程の ⑤ の `reviews-dir.sh ensure`(do-task の外部の手順)と、記録を書く直前の同じ検査(各 skill)が止める

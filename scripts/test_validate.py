@@ -307,6 +307,48 @@ class ValidateTest(unittest.TestCase):
     def test_plain_deguchi_alone_is_not_flagged(self):
         self.assert_appended_line_flagged("非常口と出口の案内を書く", [], flagged=False)
 
+    def test_replaced_word_utsushi_forms_are_errors(self):
+        for text in ("一時的な写し", "写しを作る", "行を写す", "節は写さない", "写した先", "写して使う",
+                     "依頼文へ写せる", "写そうとする", "汎用知識の書き写し", "内容を複写しない", "複写を採らない",
+                     "丸写しする", "全文写しを渡す", "筆写する"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'写し(", "コピー"])
+        self.assert_appended_line_flagged("わざと壊した写しで", ["'写し("], relpath="docs/design.md")
+
+    def test_replaced_word_utsushi_lookalikes_are_not_flagged(self):
+        # 決まった漢字が前に付く語(描写・転写・模写・映写・試写・接写・活写・投写・連写・盗写・大写しなど)と、
+        # 写真・写像・写る は探さない。
+        # 前に漢字が付く語は「〜写す」「〜写し」などの形だけを探すので、名詞の「筆写」も探さない
+        for text in ("現状を描写する", "転写した", "模写する", "映写する", "試写する", "接写する",
+                     "活写する", "投写する", "連写する", "盗写する", "大写しにする",
+                     "写真を撮る", "写像を定義する", "記録に写りうる", "筆写の手間"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_word_atesaki_is_error(self):
+        for text in ("宛先として識別する", "宛先が失われる", "`ssh -G <宛先>`", "宛て先の名前"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'宛先'", "送る相手"])
+        self.assert_appended_line_flagged("宛先識別", ["'宛先'"], relpath="docs/design.md")
+
+    def test_replaced_word_atesaki_lookalikes_are_not_flagged(self):
+        for text in ("宛名を書く", "手紙を宛てる", "送り先と接続先"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_word_maeoki_is_error(self):
+        for text in ("Git の共通安全前置き", "safe Git 前置きを付ける", "`git -C <dir> <前置き> ls-files`",
+                     "前置きの mount", "予約語の前置き", "素朴な前置き比較"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'前置き'", "安全用のオプション"])
+        self.assert_appended_line_flagged("公開経路の安全前置き", ["'前置き'"], relpath="docs/design.md")
+
+    def test_replaced_word_maeoki_lookalikes_are_not_flagged(self):
+        # 「以前置き…」と、後ろが「置き換え」「置き場」になる形と、「前置詞」「前置される」は探さない
+        for text in ("以前置きました", "以前置き換えた", "直前置き場に置く", "事前置き換えの手順", "前置詞", "空白だけが前置される位置"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
     def test_v1_exemption_word_alone_does_not_exempt(self):

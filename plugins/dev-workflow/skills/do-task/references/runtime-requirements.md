@@ -53,7 +53,7 @@ PYTHON
 [diagnostic-git.md](diagnostic-git.md) の `diagnostic-git.py` は Python 3.10 以上・POSIX を必要とする。既存の内蔵5操作と開始前の候補走査の下限は変えない。
 
 - 信頼する配布コピーの絶対パスへ `python3 -I` を使う。同梱モジュールも同じコピーの絶対パスから読み、作業場所や `PYTHONPATH` の同名ファイルを使わない。
-- Git は既存の安全用前置きと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
+- Git は既存の安全用のオプションと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
   - 起動時に `grep --version` の最初の行が `(GNU grep)` を含むことを確かめ、違えば `runtime-unavailable`(終了値 20)で止まる(BSD grep は通さない。[#303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))。
 - `os.O_NOFOLLOW`・`O_DIRECTORY`・`O_NONBLOCK`、bytes の名前、`open/stat/readlink` の `dir_fd`、`fstat`、fd からのディレクトリ列挙、単調時計が必要。
 - `subprocess.Popen` と直接子の停止・回収、専用のpipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
@@ -181,12 +181,12 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 - `implement-guard-selftest.sh` を Mac で回す手順(2026-10-30 に確認):
   - 環境: GNU coreutils・findutils・grep を `PATH` の先頭に置く。`sed` は BSD 版(`/usr/bin/sed`)のまま使える。`TMPDIR` は symlink を含まない物理パスにする。`GIT_CONFIG_NOSYSTEM` は指定せず、system 設定は有効のまま回す。
   - 実機の分岐: ケース `M26` は、Apple Git の Mac では実機の分岐を動かし、Apple Git を模した分岐は `NOTE:` の行を出して省く(数えない)。Apple Git でない環境では逆になる。
-    - 変異 `e`(わざと壊した写しで試験が落ちるかを見る試験のうち、復元の補助の階層検査を外すもの)は、元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない Mac では、`NOTE:` の行を出して省く(数えない。[#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296))。
+    - 変異 `e`(わざと壊したコピーで試験が落ちるかを見る試験のうち、復元の補助の階層検査を外すもの)は、元の対象の `J1` が `REASON=fd-copy-unavailable` で通らない Mac では、`NOTE:` の行を出して省く(数えない。[#296](https://github.com/Yuki-Maeda-valour/workflow/issues/296))。
     - `J8`(非 UTF-8 の名前の復元)は、非 UTF-8 の名前を断るファイルシステム(APFS)では `NOTE:` の行を出して省く(数えない。[#301](https://github.com/Yuki-Maeda-valour/workflow/issues/301))。
     - 変異 `b` は、Mac でも省かずに数える。`G7` の復元の行は元の対象でも落ちるので、`G7` の config-changed・hooks-changed の「git の呼び出しが 0 回」の 2 行が落ちることで見つけたと判定する([#300](https://github.com/Yuki-Maeda-valour/workflow/issues/300))。
   - 結果: 下の「Mac の結果」に書く。シェル回帰一式の正式な必要環境は Linux のままで、Mac の結果は Linux の代わりにしない。
 - Mac の結果(Issue #241、2026-10-30、macOS 26.6.2 / arm64、Git 2.54.0〈Apple Git-157〉、Bash 5.3.20、GNU coreutils 9.12・findutils 4.11.0・grep 3.12、system 設定は有効のまま): FAIL 44 行(下の 2 群だけ)。PASS の件数と所要時間は Issue #241 の検証の記録に書く。
-  - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊した写しで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。
+  - `M11`・`M25`・`M26`・`M27` と、変異 `x`・`y`・`z`・`w`(わざと壊したコピーで試験が落ちるかを見る試験)の行に FAIL は無い。`M26` の実機の分岐は `NOTE:` ではなく PASS の行で動く。
   - 残る FAIL 44 行は、Apple Git の設定とは別の原因で、修正前から落ちていたもの。
     - `restore-taskmd`(`J1`・`J2`・`J3`・`J6`・`J8`・`B10`・`B12`・`G7`・`M6` の 40 行): 2026-11-01 に [Issue #285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で Linux 側を直した。macOS は `fd-copy-unavailable` で止まるので、この 40 行は残る(macOS の扱いは [#271](https://github.com/Yuki-Maeda-valour/workflow/issues/271) が確かめる)。原因は環境で違う。
       - Mac(GNU coreutils 9.12。直す前〈2026-10-30〉の記録): `/proc` が無く、`/dev/fd` の別名で `cp: skipping file '/dev/fd/3', as it was replaced while being copied` になる。書き込みの上限の有無には関係しない。
@@ -224,7 +224,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
       - この 2 件は、品質コマンドの引数に試験の領域のパスを渡し、`TMPDIR` も試験の領域に置く。
       - anchor と Linux の監督のコマンド行は、品質コマンドの引数をそのまま含む。
     - ただし、`ReviewGuardTest` の `test_run_checks_inside_reviewed_code_does_not_create_bytecode` の `run-checks` は、anchor(Linux では監督)だけがこの確認で見つかる。品質コマンドは見つからない。
-      - この試験は、製品を試験の領域へ写し、写した `review-guard.py` で `run-checks` を回す。
+      - この試験は、製品を試験の領域へコピーし、コピーした `review-guard.py` で `run-checks` を回す。
       - `review-guard.py` は、自分と同じフォルダの `check-process.py` を使う。
       - anchor と Linux の監督のコマンド行は、その `check-process.py` の絶対パスを含む。
   - anchor の消失を確かめる試験は、群に `TERM` を無視する子を置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後に群の全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
