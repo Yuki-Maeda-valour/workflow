@@ -441,6 +441,7 @@ class ValidateTest(unittest.TestCase):
             ("- **置き換える語**", "例: 結末の行", "'結末の行'"),
             ("- **文書の中で置き換える語**", "例: 守る値", "'守る値'"),
             ("- **文書の中で置き換える語**", "例: 止めの印", "'止めの印'"),
+            ("- **置き換える語**", "例: サイレント", "'サイレント'"),
         )
         for prefix, add, word in cases:
             with self.subTest(prefix=prefix, add=add):
@@ -479,6 +480,30 @@ class ValidateTest(unittest.TestCase):
         ):
             with self.subTest(relpath=relpath, text=text):
                 self.assert_appended_line_flagged(text, ["置き換える語", "'守る値'"], relpath=relpath)
+
+    def test_replaced_word_silent_is_error(self):
+        # #317: 「サイレント」(規則の名前・太字の項目名の中も探す)
+        for text in ("8. **報告(サイレント縮退禁止)**: どちらの担い手で実装したか", "7. **サイレントスキップ禁止**。",
+                     "明記した(サイレントスキップしていない)", "(サイレント切り捨て禁止)", "(サイレント無視禁止。design §7-2)",
+                     "サイレント続行も、無意味な確認も避ける", "引き継ぐ(サイレント禁止)", "サイレントに内蔵へ切り替える"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", "'サイレント'", "黙って"])
+        self.assert_appended_line_flagged("理由を報告に明記する(サイレント縮退禁止)", ["'サイレント'", "知らせずに"],
+                                          relpath="docs/design.md")
+        self.assert_appended_line_flagged("- [ ] 部分実施を報告に明記した(サイレントスキップ禁止)", ["'サイレント'"],
+                                          relpath="plugins/dev-workflow/skills/create-task/SKILL.md")
+
+    def test_replaced_word_silent_lookalikes_are_not_flagged(self):
+        # 新しい言い方と、「サイレン」・コマンドの英字のフラグは探さない
+        for text in ("黙って内蔵に切り替えない", "黙って代わりの手段に切り替えない", "黙って飛ばさない", "黙って切り捨てない",
+                     "黙って無視しない", "知らせずに続ける", "黙って生成をやめない", "サイレンが鳴る", "`curl --silent`"):
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, [], flagged=False)
+
+    def test_replaced_word_silent_definition_line_in_design_is_exempt(self):
+        # 「文書の中で置き換える語」の定義の行は、その行の組の語(サイレントを含む)を除く
+        self.edit_definition_line("- **文書の中で置き換える語**", "例: サイレント縮退禁止・サイレントスキップ禁止")
+        self.assert_clean()
 
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 

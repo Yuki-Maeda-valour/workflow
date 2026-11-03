@@ -18,7 +18,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 5. **修正しない**。提案 → ユーザーのトリアージ(指摘を扱いごとに振り分けること) → 承認分を /create-task へ。このスキル自身はコードに触れない
    - 例外: 候補モードでは、トリアージとチェーンの代わりに、選定の規則で機械的に選んだ指摘を `候補_` として書き出す。採用は人が /create-task で行う
 6. **ゼロ件も成果**。問題が無ければ「何を確認して健全だったか」を報告する(監査した事実に価値がある)
-7. **サイレントスキップ禁止**。監査しなかった層・観点は必ず「未監査+理由」を明記する
+7. **黙って飛ばさない**。監査しなかった層・観点は必ず「未監査+理由」を明記する
 8. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
    - ホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
 9. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
@@ -142,7 +142,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 - [ ] 全指摘に path:行 と実コードの裏取りがある(伝聞・推測の指摘が無い)
 - [ ] 機密の値・認証情報を出力していない(フィールド名と場所のみ)
 - [ ] false positive の除去理由を記録した
-- [ ] 未監査の層・観点を理由付きで明記した(サイレントスキップしていない)
+- [ ] 未監査の層・観点を理由付きで明記した(黙って飛ばしていない)
 - [ ] 実行形態(双方向でやり取りできる環境 / 一方向だけの環境 / 別の AI を使えない環境)を報告に明記した
 - [ ] 候補モード: 書き込みは `.claude/reviews/` と task_dir の新しい `候補_*.md` だけで、candidate-mode.md の最終ゲートを満たした
 
