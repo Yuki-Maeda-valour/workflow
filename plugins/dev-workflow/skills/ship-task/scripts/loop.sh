@@ -878,9 +878,9 @@ die() { # $1=終了コード $2=理由コード 残り=説明
 
 stop_mark_guide() {
   if [ "$STATE_GIT_UNSAFE" = 1 ] && [ -d "$INFLIGHT" ]; then
-    printf '止めの印: %s(未確認の設定・子・作業場所・中断記録を人が確認する。印だけを消しても再開しない)' "$STOP_MARK"
+    printf '止める印: %s(未確認の設定・子・作業場所・中断記録を人が確認する。印だけを消しても再開しない)' "$STOP_MARK"
   else
-    printf '止めの印: %s(差分を確かめ、必要なら元に戻してから、このファイルを消すと次の起動が続く)' "$STOP_MARK"
+    printf '止める印: %s(差分を確かめ、必要なら元に戻してから、このファイルを消すと次の起動が続く)' "$STOP_MARK"
   fi
 }
 
@@ -889,7 +889,7 @@ stop_mark_guide() {
 place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残すか
   local tmp="$STOP_MARK.tmp.$$"
   {
-    printf '# 無人ループの止めの印\n\n'
+    printf '# 無人ループの止める印\n\n'
     printf -- '- 置いた日時: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf -- '- 実行 ID: %s\n' "$RUN_ID"
     printf -- '- 理由: %s\n' "$1"
@@ -899,7 +899,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
     printf '\n## 消し方\n\n'
     if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" = 1 ]; then
       printf '設定・管理構造を確認できないため、子と中断記録(%s)を自動で片付けていない。\n' "$INFLIGHT"
-      printf '人が実際の子・作業場所・差分を確認して片付け、中断記録を証拠として退避する。その後で止めの印を外す。印だけを消しても再開しない。\n'
+      printf '人が実際の子・作業場所・差分を確認して片付け、中断記録を証拠として退避する。その後で止める印を外す。印だけを消しても再開しない。\n'
     else
       printf '差分を確かめ、必要なら元に戻してから、このファイルを消す: rm -- %q\n' "$STOP_MARK"
     fi
@@ -1347,7 +1347,7 @@ abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=�
   if [ -n "$CLEANUP_LEFT" ]; then
     # 残ったプロセスがまだ書き換えうるので照合しない。周の途中の印と worktree を残す
     place_stop_mark "残ったプロセス($1 の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
-    rep "- $1: 片付けで残ったプロセス: $CLEANUP_LEFT(照合はしない。止めの印と周の途中の印を残した)" 2>/dev/null || true
+    rep "- $1: 片付けで残ったプロセス: $CLEANUP_LEFT(照合はしない。止める印と周の途中の印を残した)" 2>/dev/null || true
     ABORT_CODE="$2"
     return 0
   fi
@@ -1360,7 +1360,7 @@ abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=�
   fi
   if [ -n "$VERIFY_DIFF" ]; then
     place_stop_mark "共有の状態の変化($1 の後の照合)" "$VERIFY_DIFF" 0
-    rep "- $1: 共有の状態の変化(止めの印を置いた)" "$VERIFY_DIFF" 2>/dev/null || true
+    rep "- $1: 共有の状態の変化(止める印を置いた)" "$VERIFY_DIFF" 2>/dev/null || true
     ABORT_CODE="$3"
   else
     [ "${#REMOVED_PARENT_WORKTREES[@]}" -eq 0 ] || worktree_state="worktree は親が削除済み"
@@ -1370,7 +1370,7 @@ abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=�
       ABORT_CODE="$4"
     else
       place_stop_mark "共有の状態の変化($1 の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
-      rep "- $1: 基準を昇格できない(止めの印と周の途中の印を残した)" "${SNAPSHOT_DIFF:-}" 2>/dev/null || true
+      rep "- $1: 基準を昇格できない(止める印と周の途中の印を残した)" "${SNAPSHOT_DIFF:-}" 2>/dev/null || true
       ABORT_CODE="$3"
     fi
   fi
@@ -1810,8 +1810,8 @@ handle_marks_at_start() {
     # inflight は同じ UID が書ける状態領域であり、そこだけの iter を
     # 根拠に signal を送らない。止めの印がある再開は人が確認する。
     [ ! -d "$INFLIGHT" ] || rep "- 周の途中の印は未信頼のため signal せず保全した($INFLIGHT)"
-    rep "- 止めの印は未信頼のため内容を実行・自動採用せず保全した: $STOP_MARK"
-    die 20 stop-mark "止めの印がある。$(stop_mark_guide)"
+    rep "- 止める印は未信頼のため内容を実行・自動採用せず保全した: $STOP_MARK"
+    die 20 stop-mark "止める印がある。$(stop_mark_guide)"
   fi
   if [ -e "$INFLIGHT" ] || [ -L "$INFLIGHT" ]; then
     die 20 inflight-untrusted "周の途中の印は未信頼($INFLIGHT)。signal・削除・unlock・ref 更新をせず保全した。人が所有者と成果物を確認する"
@@ -2226,7 +2226,7 @@ judge() { # $1=終了コード $2=時間切れか → JUDGE・JUDGE_OK・OUTCOME
   if [ "$timed_out" -eq 1 ]; then JUDGE="失敗(時間切れ)"; return 0; fi
   if [ "$rc" -ne 0 ]; then JUDGE="失敗(終了コード $rc)"; return 0; fi
   case "$res" in *json=ok*) : ;; *) JUDGE="失敗(JSON が読めない)"; return 0 ;; esac
-  if [ -z "$OUTCOME" ]; then JUDGE="失敗(結末の行が無い)"; return 0; fi
+  if [ -z "$OUTCOME" ]; then JUDGE="失敗(結果の行が無い)"; return 0; fi
   if [ "$OUTCOME" = 失敗扱い ]; then JUDGE="失敗(結末 失敗扱い)"; return 0; fi
   # 結末の行だけを信じず、git の状態と突き合わせる
   head="$(G -C "$ITER_WT" symbolic-ref --quiet HEAD 2>/dev/null || true)"
@@ -2266,7 +2266,7 @@ judge() { # $1=終了コード $2=時間切れか → JUDGE・JUDGE_OK・OUTCOME
       HOLD_CODE="$(G -C "$ITER_WT" cat-file blob "HEAD:$hold_rel" | py holdcode -)"
       JUDGE="正常(保留)"
       ;;
-    *) JUDGE="失敗(結末の行が読めない)"; return 0 ;;
+    *) JUDGE="失敗(結果の行が読めない)"; return 0 ;;
   esac
   JUDGE_OK=1
 }
@@ -2299,7 +2299,7 @@ judge_discover() { # $1=終了コード $2=時間切れか
   if [ "$timed_out" -eq 1 ]; then JUDGE="失敗(時間切れ)"; return 0; fi
   if [ "$rc" -ne 0 ]; then JUDGE="失敗(終了コード $rc)"; return 0; fi
   case "$res" in *json=ok*) : ;; *) JUDGE="失敗(JSON が読めない)"; return 0 ;; esac
-  if [ -z "$OUTCOME" ]; then JUDGE="失敗(結末の行が無い)"; return 0; fi
+  if [ -z "$OUTCOME" ]; then JUDGE="失敗(結果の行が無い)"; return 0; fi
   case "$OUTCOME" in
     失敗扱い) JUDGE="失敗(結末 失敗扱い)"; return 0 ;;
     保留) JUDGE="失敗(結末 保留 は発見の周では取りえない)"; return 0 ;;
@@ -2371,7 +2371,7 @@ judge_discover() { # $1=終了コード $2=時間切れか
       fi
       JUDGE="正常(候補なし)"
       ;;
-    *) JUDGE="失敗(結末の行が読めない)"; return 0 ;;
+    *) JUDGE="失敗(結果の行が読めない)"; return 0 ;;
   esac
   JUDGE_OK=1
 }
@@ -2658,7 +2658,7 @@ source=$ITER_SOURCE
   # §5 の判定と後片付け(発見モードは §11 の判定)
   if [ "$DISCOVER" -eq 1 ]; then judge_discover "$rc" "$timed_out"; else judge "$rc" "$timed_out"; fi
   rep "- 結末: ${OUTCOME:-(無し)}${DETAIL:+ — $DETAIL}" "- 判定: $JUDGE"
-  [ -z "$HOLD_CODE" ] || rep "- 保留の停止条件の対話点番号: $HOLD_CODE"
+  [ -z "$HOLD_CODE" ] || rep "- 保留の停止条件(人に確かめる場面の番号): $HOLD_CODE"
   [ -z "$DENIALS" ] || rep "- ホストの結果の拒否の欄: $DENIALS"
   if [ "$DISCOVER" -eq 1 ]; then
     DISC_RESULT[$ITER_SOURCE]="$JUDGE — 結末 ${OUTCOME:-(無し)}${DETAIL:+ — $DETAIL}"

@@ -16,7 +16,7 @@ argument-hint: "[--update | --security-only | --deps=<pkg1,pkg2>]"
 4. **コードは変更しない**。成果物はノートと索引追記のみ。問題が実在したら /create-task を提案する
 5. 機密ファイル(profile の `secret_paths`)は読まない
 6. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
-   - ホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
+   - ホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
@@ -56,7 +56,8 @@ argument-hint: "[--update | --security-only | --deps=<pkg1,pkg2>]"
 4. **この構成での定番ミス**: 公式セキュリティガイドから、このプロジェクト構成に関係するもの(認可チェック漏れ・入力検証・secrets の露出・SSRF/XSS 等)
 
 **委託の解決(役割語 → 実行バックエンド)**: 上の並列調査は `researcher`(読み取り中心の調査。Web 取得を伴う)への委託である。
-- 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ほかが合わせる元。ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では最小段階(直列セルフ調査)に段階を下げて続け、そのことを報告する。
+- 役割語の一覧・派生名の体系・属性軸・解決順は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本(ほかが合わせる元。ここでは再掲しない)。
+  - 参照先が存在しない構成(skill を単体でコピーした部分導入)では、別の AI を使えない環境の進め方(直列セルフ調査)に段階を下げて続け、そのことを報告する。
 
 各エージェントへの指示に含めること: **「読み取り専用。ファイルを編集しない」**(Web 取得のため編集可の種別で起動するため、読み取り専用は指示で担保する)、
 - 対象の依存名と**実バージョン**、

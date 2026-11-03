@@ -653,7 +653,7 @@ builtins.__import__ = blocked
             "条件 B": ext.split("**条件 B:",1)[1].split("\n",1)[0],
             "再依頼": protocol.split("Git 対象の同じ内蔵 implementer への再依頼",1)[1].split("\n",1)[0],
             "外部失敗後": ext.split("### 12-7. 引き継ぎの発火条件",1)[1].split("\n\n",2)[1],
-            "M2": protocol.split("- **M2 個別再委託**",1)[1].split("    - フル段階",1)[0],
+            "M2": protocol.split("- **M2 個別再委託**",1)[1].split("    - 双方向でやり取りできる環境",1)[0],
         }
         for name, section in sections.items():
             with self.subTest(route=name):

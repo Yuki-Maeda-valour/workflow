@@ -312,12 +312,12 @@ except (Exception, SystemExit) as exc:
    - 片付けのコマンドは `git worktree remove <パス>`(`--force` なし)。中を作業ディレクトリにしているプロセスがあれば、先に報告するよう添える。
    - 消す前の確認も添える。無視されたファイル(`git -C <パス> status --porcelain --ignored` の `!!`)があればほかにコピーが無いので個別に確かめる。プロセスがあれば消さない。
    - これらの確かめを含めて棚卸しするのが /cleanup である、と案内する。
-   - 無人の結末の行(unattended-mode.md §2)の書式は変えず、案内は結末の行より前に置く。
+   - 無人の結果の行(`無人の周の結果: …`。unattended-mode.md §2)の書式は変えず、案内は結果の行より前に置く。
 
 **無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7):
 - PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→
 - push の直前の照合 →
-- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<守る値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。helper は exact SHA refspec の push、remote SHA、作成した PR の URL/番号/head/base を順に照合する。無人では `--set-upstream` を付けない
+- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<控える値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。helper は exact SHA refspec の push、remote SHA、作成した PR の URL/番号/head/base を順に照合する。無人では `--set-upstream` を付けない
 
 **push・PR をしないとき**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(サイレントスキップ禁止)。
 - `--no-pr` のときも同様にコマンド列だけ示す。
@@ -336,7 +336,7 @@ except (Exception, SystemExit) as exc:
   - どれかに通らなければ失敗扱い(G2)。
   - 時点ごとの表・コマンドの字面・除外対象・git の安全用のオプションは references/unattended-mode.md §7
 - **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
-- **結末**: 完了報告の最後に結末の行を書く(同 §2)
+- **結末**: 完了報告の最後に結果の行を書く(同 §2)
 - **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
 
 ## 停止条件のまとめ
@@ -362,8 +362,8 @@ except (Exception, SystemExit) as exc:
 - [ ] PR 本文が [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の決まりに沿う(転記した決まった行は字面どおり)
 - [ ] push・PR をしなかったこと(gh 不在・PR を作らない指定など。無人では結末 `縮退`)があれば理由付きで明記した。実動確認が「実施不能」なら、理由と確認手順を PR の残課題(PR を開かなかったときは完了報告)に転記した
 - [ ] 作業ブランチを作ったら、Phase 0 の 4 の 4 項目を報告に残した(一覧が空でなければ PR 本文にも載せた)
-- [ ] 無人では、各 commit の手順の最初・直前・直後と push の直前の照合(git 設定のダイジェスト・origin の判定を含む)を通し、タスクの周の PR を `-R '<repo>'` で作り(作成先を確かめられなければ `縮退`)、結末の行を報告の最後に書いた
-- [ ] 発見の周(`--discover`)では、discover-mode.md §7 の表の時点ごとの照合を通し、`候補_` だけを commit し、結末の行を報告の最後に書いた(PR を開くのは、照合にすべて通ったときだけ)
+- [ ] 無人では、各 commit の手順の最初・直前・直後と push の直前の照合(git 設定のダイジェスト・origin の判定を含む)を通し、タスクの周の PR を `-R '<repo>'` で作り(作成先を確かめられなければ `縮退`)、結果の行を報告の最後に書いた
+- [ ] 発見の周(`--discover`)では、discover-mode.md §7 の表の時点ごとの照合を通し、`候補_` だけを commit し、結果の行を報告の最後に書いた(PR を開くのは、照合にすべて通ったときだけ)
 - [ ] このタスクで worktree を作ったときは、完了報告に PR マージ後の片付けの案内(`git worktree remove <パス>`、`--force` なし)を出した
 - [ ] マージしていない。レビュアーを自動アサインしていない
 

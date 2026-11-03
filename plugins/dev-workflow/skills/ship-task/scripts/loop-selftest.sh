@@ -920,7 +920,7 @@ subs = {
     "<作業ブランチ>": '"$SELFTEST_BRANCH"',
     "<repo>": "github.com/o/r",
     "<デフォルトブランチ>": "main",
-    "<守る値>": '"$SELFTEST_CONFIG_DIGEST"',
+    "<控える値>": '"$SELFTEST_CONFIG_DIGEST"',
     "<名>": "docpush-body.md",
     "<タスク名>": "docpush",
 }
@@ -1840,7 +1840,7 @@ judged degrade-j "正常(縮退)" removed
 judged hold-j "正常(保留)" removed
 t "判定(hold-j): 改名と保留の行が作業ブランチに commit されている" git -C "$R" cat-file -e "task/hold-j:docs/tasks/保留_hold-j.md"
 judged fail-j "失敗(結末 失敗扱い)" kept
-judged none-j "失敗(結末の行が無い)" kept
+judged none-j "失敗(結果の行が無い)" kept
 judged hang-j "失敗(時間切れ)" kept
 judged rcnz-j "失敗(終了コード 3)" kept
 judged prunpushed-j "失敗(食い違い: origin の task/prunpushed-j" kept
@@ -2769,7 +2769,7 @@ items = [
     ("照合つきの commit", "references/discover-mode.md", digest + r"git commit [^`]+"),
     ("PR の作成先の確かめ", "SKILL.md", r"gh repo view [^`]+"),
 ]
-subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<守る値>", "sha256:" + "0123456789abcdef" * 4),
+subs = [("{ship-task の}", st_dir), ("<管理ルート>", wt), ("<控える値>", "sha256:" + "0123456789abcdef" * 4),
         ("<保持したレビュー済み SHA>", "0123456789abcdef" * 4),
         ("<repo>", "github.com/o/r"), ("<デフォルトブランチ>", "main"), ("<タスク名>", "日本語のタスク"),
         ("<名>", "m.md"), ("<発見元>", "data-audit")]
@@ -2794,7 +2794,7 @@ for label, rel, pat in items:
     tmpl = hits[0]
     if label == "無人の公開 helper":
         required = ("--sha=<保持したレビュー済み SHA>", "--branch=<作業ブランチ>", "--repo=<repo>",
-                    "--base=<デフォルトブランチ>", "--config-digest=<守る値>", "--body-file=.claude/reviews/<名>")
+                    "--base=<デフォルトブランチ>", "--config-digest=<控える値>", "--body-file=.claude/reviews/<名>")
         tag = "無人の公開 helper(%s)が保持 SHA・固定 repo/base・digest・reviews 本文を渡し -u を付けない" % name
         if all(value in tmpl for value in required) and "--set-upstream" not in tmpl:
             print("YES\t%s\t-" % tag)
@@ -4054,7 +4054,7 @@ has "失敗の周(origin に今夜の名が無い): 報告" "$RP" "origin に ta
 disc_pair hold hold holdlast
 djudged data-audit "失敗(結末 保留 は発見の周では取りえない)" kept "保留"
 djudged refactor "失敗(結末 保留 は発見の周では取りえない)" kept "前に 候補なし・最後に 保留"
-has "結末の行の選び方(発見): 最後の行を読む" "$RP" "- 結末: 保留 — 最後"
+has "結果の行の選び方(発見): 最後の行を読む" "$RP" "- 結末: 保留 — 最後"
 disc_pair late late prunpushed
 djudged data-audit "正常(縮退)" kept "判定の後に未追跡が書かれた"
 has "発見の周(remove の拒否): 報告" "$RP" "消せなかったので残した"
@@ -4165,13 +4165,13 @@ else
   ng "発見の周の KILL(-u つきの push の後): 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
 
-# ── 結末の行の選び方(実装モード)・実装モードが 候補_ を拾わない・候補_ だけのディレクトリの検出 ──
+# ── 結果の行の選び方(実装モード)・実装モードが 候補_ を拾わない・候補_ だけのディレクトリの検出 ──
 newrepo dimpl
 addtask candlast-a
 commit
 newrec dimpl
 run_loop dimpl -- --repo "$R" "${COMMON_ARGS[@]}"
-has "結末の行の選び方(実装): 最後の行が 候補なし なら失敗" "$OUT" "docs/tasks/進行中_candlast-a.md → 失敗(結末の行が読めない)"
+has "結果の行の選び方(実装): 最後の行が 候補なし なら失敗" "$OUT" "docs/tasks/進行中_candlast-a.md → 失敗(結果の行が読めない)"
 newrepo dimpl2
 addtask pr-a
 printf '# c\n\n> **ステータス**: 候補\n> **無人実行**: 可\n> **発見元**: refactor\n> **指摘キー**: refactor:file:c.py\n\n## 指摘\n\nc\n' \

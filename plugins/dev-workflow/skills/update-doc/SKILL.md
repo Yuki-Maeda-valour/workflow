@@ -111,7 +111,7 @@ except (Exception, SystemExit) as exc:
 4. **コードは触らない**。このスキルの変更対象はドキュメント類のみ。コード品質ゲート(書式・型・テスト・ビルドの自動の検査)は実行不要(ドキュメントだけの変更のため)。ただしリンク検査は行う
 5. 機密ファイルの値をドキュメントに書かない(存在と用途だけ記す)
 6. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
-   - ホスト機構への解決(派生名・属性軸・解決順・段階判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
+   - ホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイルの「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
@@ -216,7 +216,7 @@ except (Exception, SystemExit) as exc:
      - 手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない
 2. team-lead(作業を進め、結果を確かめる側の AI)が各指摘を**実コードで裏取り**して valid / invalid / needs-user にトリアージ(指摘を扱いごとに振り分けること。盲信禁止、invalid は理由記録)
-3. valid を修正 → 再レビュー。**フル段階(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。送る相手が失われている場合のみ新規起動にフォールバックする
+3. valid を修正 → 再レビュー。**双方向でやり取りできる環境(design §5-17)では、修正後の再レビューを同じレビュアー名へ再依頼する**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる)。送る相手が失われている場合のみ新規起動にフォールバックする
 4. セーフティ(design §5-10): **収束条件は全 reviewer の APPROVED**。
    - 同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく判断を仰ぐ点**であり、状況を報告して判断を仰ぐ。
    - `--unattended` では判断を仰ぐ点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
