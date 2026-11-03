@@ -2,6 +2,35 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.30.0
+
+### 追加
+
+- 新しい skill `/cleanup` を足した。AI のセッションが作って残した worktree・作業用コンテナ・作業ファイルを、読み取りだけで棚卸しして片付ける。([Issue #284](https://github.com/Yuki-Maeda-valour/workflow/issues/284))
+  - worktree: 1 つのリポジトリに、本体とは別の作業フォルダを足す Git の仕組み。
+  - 集める項目: 各 worktree の未コミットの変更・未追跡・未 push のコミット・既定ブランチへの取り込み・PR の状態・中を作業ディレクトリにしているプロセス・最終使用日・ロック。
+  - 「削除してよい / 確認が必要 / 残す」に分け、承認を得てから `git worktree remove`(`--force` なし)で消す。
+  - ローカルのブランチもリモートのブランチも消さない。使用中のものは消さない。
+  - 未コミットの変更・未追跡がある worktree は、`--force` なしの `git worktree remove` が拒否するので、消せない(中身を退避するか手で消すよう案内するだけ)。
+  - ほかにコピーの無いもの(無視されたファイル・DB のボリューム)は、1 件ずつ確認する。
+  - コンテナの実行環境が無いときは、その節を省いて報告する。
+- ship-task の完了報告に、このタスクで作った worktree の片付けの案内を足した。PR のマージ後に消せる worktree と、`git worktree remove <パス>`(`--force` なし)を出す。worktree を作っていなければ出さない。
+
+### 変更
+
+- worktree の方針を `docs/design.md` §5-26 に書き、do-task・ship-task の原則に同じ内容を書いた。([Issue #284](https://github.com/Yuki-Maeda-valour/workflow/issues/284))
+  - 1 つのエージェントの作業はリポジトリ本体で行う。worktree は、複数のエージェントが同じリポジトリを並行して触るときだけ作る。
+  - 置き場所は `<repo>/.claude/worktrees/<名前>` の 1 系統にする。
+  - PR がマージされた worktree は、作った側が片付けるか、案内を出す。
+  - 対象外: 無人ループの周の worktree と、外部レビューの一時ツリー。機構が作って自動で消すため。
+  - 今後 skill が作業用コンテナを起こすときは、`--rm` を基本にし、残すときは `--label dev-workflow.task=<タスク>` を付ける。
+- `.claude/worktrees/` を git が無視する決まりを足した。
+  - 作る側(do-task・ship-task)は、作る前に `git check-ignore` で確かめ、無視されていなければ、対話では作業を始める前(基準コミットを控える前)に `.git/info/exclude` に足すか人に確かめる。
+  - 無人では `.git/info/exclude` に書かず、worktree を作らずに本体で作業する。
+  - このリポジトリの `.gitignore` と、`/init-project` の `.gitignore` の雛形に `.claude/worktrees/` を足した。
+- `/cleanup` の安全策: 無視されたファイルがある worktree は「確認が必要」、`dev-workflow-loop:` のロックは「残す」、消す直前に識別情報を取り直して照らす、detached HEAD・同名ブランチの過去の PR・既定ブランチ未設定を確認が必要に倒す。
+- skill の数が 12 から 13 になった。`plugin.json`・`marketplace.json`・`README.md`・`scripts/test_validate.py` の件数と、`docs/design.md` §2 の図と表を合わせた。
+
 ## v4.29.5
 
 ### 修正

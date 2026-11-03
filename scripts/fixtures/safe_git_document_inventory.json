@@ -47,6 +47,24 @@
       "count": 1,
       "classification": "read",
       "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git check-ignore -q .claude/worktrees/",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git worktree remove <パス>",
+      "count": 1,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git -C <パス> status --porcelain --ignored",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     }
   ],
   "plugins/dev-workflow/skills/do-task/references/base-commit.md": [
@@ -443,6 +461,24 @@
       "count": 1,
       "classification": "index/worktree",
       "basis": "index の tree を控える読取操作。実行時は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git check-ignore -q .claude/worktrees/",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
+    },
+    {
+      "code": "git worktree remove <パス>",
+      "count": 2,
+      "classification": "index/worktree",
+      "basis": "実行時は do-task / ship-task の共通 safe Git 前置きと filter 事前検査を適用する。"
+    },
+    {
+      "code": "git -C <パス> status --porcelain --ignored",
+      "count": 1,
+      "classification": "read",
+      "basis": "読取または手順の説明例。実行可能な Git 呼出は do-task / ship-task の共通 safe Git 前置きを適用する。"
     }
   ],
   "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md": [
