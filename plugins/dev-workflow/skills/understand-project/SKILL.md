@@ -136,7 +136,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {1〜3 行}
 
 ## 🏗️ アーキテクチャ / 🛠️ 技術スタック
-{スタック、DB/ORM、主要ライブラリ。出典(メモリ or 実測)を併記}
+{スタック、DB/ORM、主要ライブラリ。出典(プロジェクトのメモリ or 実測)を併記}
 
 ## 📁 構造
 {実測ディレクトリと役割。parent-child なら本体ルートを明示}
@@ -148,13 +148,13 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {dev / format / lint / typecheck / test / build。PM 込みの実行形}
 
 ## ✅ タスク完了条件
-{権威参照ファイル・メモリ・profile から解決した品質ゲート}
+{権威参照ファイル・プロジェクトのメモリ・profile から解決した品質ゲート}
 
 ## ⚠️ 絶対に忘れない事項
 {known_facts / 権威参照ファイルの禁止事項・地雷}
 
 ## ❗ 実コードとの矛盾(あれば)
-{「メモリでは X だが実コードは Y。実コードを優先」形式}
+{「プロジェクトのメモリでは X だが実コードは Y。実コードを優先」形式}
 
 ## 🔺 文書や設定と実際との食い違い(AI への指示をまとめたプロジェクトのファイルの判定は全モード。ほかは --deep 時)
 {Phase 4 の結果。/update-doc を提案}
@@ -163,7 +163,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {推奨: /create-task(新規タスク)、/update-doc(文書や設定と実際との食い違いあり)、Serena onboarding(未実施)}
 ```
 
-`--area` のときは該当領域の詳細(主要ファイル・データフロー・関連メモリ)に置き換える。
+`--area` のときは該当領域の詳細(主要ファイル・データフロー・関連するプロジェクトのメモリ)に置き換える。
 
 **分量規律**: --quick は各節 1〜3 行・全体 1 画面以内に圧縮する(書ききれない詳細は「未確認事項」に回す)。標準以上でも網羅より「次のアクションの判断に必要な密度」を優先する。
 
