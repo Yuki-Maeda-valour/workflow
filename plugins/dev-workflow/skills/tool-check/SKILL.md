@@ -50,6 +50,7 @@ format → lint → typecheck → test → build を、プロジェクトに実�
 - `--fix`: format/lint を修正モードで実行(`biome check --write` / `prettier --write` / `eslint --fix` / `ruff check --fix` + `ruff format` / `cargo fmt` / `pint`)。
   - 修正後に `git diff --stat` を提示し、**全ゲートを通常モードで再実行して緑を確認してから**報告する。
   - コード・設定・正本(ほかが合わせる元)文書を変更した場合は `reviewer`(変更を確かめる AI)を [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) に従って起動し独立レビューを実施する。できなければレビュー未完了を報告して修正完了として扱わない。
+  - 内蔵の委託の依頼文には、返答の先頭の 1 行に自分のモデルの名前と版を書かせる(`モデル: <名前と版>`。分からなければ `モデル: 未確認`)。報告に使う値の決まりは、解決表の「委託先の短い説明」
 - `--only=<gate>`: 指定ゲートのみ実行(`format`|`lint`|`typecheck`|`test`|`build`)。
 
 ## 5. モノレポ対応
@@ -74,6 +75,7 @@ format → lint → typecheck → test → build を、プロジェクトに実�
 
 - 失敗した検査は該当出力の **要点(エラー行)** を抜粋して示す(全ログは貼らない)。
 - 自動修正で解決しうる失敗は `--fix` を案内する。
+- `--fix` で独立レビューをしたときは、レビュー役のモデルの名前と版(自己申告の値。無ければ起動時の説明の値に「確認前」を付ける)と判定を書く。
 - 実在確認済みのコマンドだけを実行したか、最後に自己点検する。
 
 ## 関連

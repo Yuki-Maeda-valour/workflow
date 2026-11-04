@@ -81,7 +81,7 @@ secret_paths: [".env", ".env.*", ".dev.vars"]
 #   external_review: true                 # 互換項目。独立レビューは常に必須
 #   reviewer_count: 1                     # do-task のレビュアー数: 1 | 3
 #   review_models: [fable, opus, sonnet]  # レビューに使うモデル群(省略時: 環境で使える最上位から能力順に自動選定)
-#                             # 消費するのは「体数 − 継承の持ち場(委託先 1 体ごとの受け持ちのうち、セッションのモデルを使うもの)の数」だけで、余った要素は打ち切って報告される
+#                             # 消費するのは「体数 − 継承の持ち場(委託先 1 体ごとの受け持ちのうち、モデルを指定しないもの。ふつうはセッションのモデルで動く)の数」だけで、余った要素は打ち切って報告される
 #                             # (継承の持ち場あり 3 体なら先頭 2 要素、継承の持ち場なし 3 体なら 3 要素とも消費。
 #                             #  割り当て規則は do-task/references/delegation-map.md §2 (a))
 #   implementer: internal                 # internal(既定)| 既定表(external-runners.md §12-6)にある実装用
