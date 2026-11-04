@@ -880,6 +880,8 @@ _WORDING_ASCII = re.compile(r'[A-Za-z][A-Za-z-]*')
 _WORDING_ALIAS = re.compile(r'([^()]+)\(([^()]+)\)')
 # 語の直後のし・す・さ・せ・そは、動詞として使う形(縮退する・縮退して続ける など)。
 _WORDING_VERB = '[しすさせそ]'
+# リンク・文字参照・HTML の書き方の字。登録では拒み、本文で許す形の隣にあれば隠さない(検出する側に倒す)。
+_WORDING_MARKUP = r'[\[\]&<>]'
 
 
 def wording_targets():
@@ -1059,6 +1061,9 @@ def read_wording_exceptions(targets, terms):
                     literal_form = _wording_literal(form)
                     if _wording_bare_reduced(form):
                         raise ValueError(f'{name}: 縮退だけを許す形は不可')
+                    # 表示の字面が元の字面と変わる書き方は、隣の字を見る検査をすり抜けるので登録しない。
+                    if re.search(_WORDING_MARKUP, form):
+                        raise ValueError(f'{name}: 許す形にリンク・文字参照・HTML の書き方(`[` `]` `&` `<` `>`)は使えない: {form}')
                     # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
                     # 名前全体を含む形でも見る: short の呼び名の直後と、末尾が「縮退」の名前の直後。
                     verb_before = [re.escape(literal_name)] if literal_name.endswith('縮退') else []
@@ -1066,8 +1071,10 @@ def read_wording_exceptions(targets, terms):
                         verb_before.append(_wording_pattern(short_text))
                     if any(re.search(before + _WORDING_VERB, literal_form) for before in verb_before):
                         raise ValueError(f'{name}: 短い呼び名や名前の末尾の語を動詞で使う形は不可: {form}')
-                    if literal_name in literal_form:
-                        rest = literal_form.replace(literal_name, _WORDING_GAP)
+                    # 名前全体との一致にも数字の境目を当てる(32 縮退 が 132 縮退 に当たらない)。
+                    name_pattern = _wording_mark(literal_name)
+                    if re.search(name_pattern, literal_form):
+                        rest = re.sub(name_pattern, _WORDING_GAP, literal_form)
                     elif short is not None:
                         # 短い呼び名の形: 呼び名をちょうど 1 つと、印のどれかを含める。
                         short_pattern = _wording_pattern(short_text)
@@ -1244,19 +1251,31 @@ def _wording_explained(text, match, explanation):
 
 
 def _wording_form_pattern(form):
-    """本文で許す形を探す型。前後の境目は、登録の側の印の扱いと合わせる。"""
+    """本文で許す形を探す型。後ろの境目を見る(前の境目は _wording_form_starts_ok)。
+
+    Markdown の元の字面で隣の字を見る。強調・コードの印はいくつ挟んでも飛ばす。
+    リンク・文字参照・HTML の書き方が隣にあれば、表示の字面が分からないので隠さない。
+    """
     literal = _wording_literal(form)
     pattern = re.escape(form)
-    # 数字で始まる・終わる形は、外側が数字でない所だけを隠す(縮退の 32 が縮退の 320 に当たらない)。
-    # 強調・コードの印(2 字まで)を挟んだ数字も見る。
-    if re.match('[0-9]', literal):
-        pattern = r'(?<![0-9])(?<![0-9][*_`])(?<![0-9][*_`]{2})' + pattern
+    # 数字で終わる形は、後ろが数字でない所だけを隠す(縮退の 32 が縮退の 320 に当たらない)。
     if re.search('[0-9]$', literal):
-        pattern += r'(?![*_`]*[0-9])'
+        pattern += r'(?![*_`]*(?:[0-9]|' + _WORDING_MARKUP + '))'
     # 末尾が「縮退」の形は、直後に動詞の活用が続く所(縮退する など)を隠さない。
     if literal.endswith('縮退'):
-        pattern += r'(?![*_`]*[しすさせそ])'
+        pattern += r'(?![*_`]*(?:' + _WORDING_VERB + '|' + _WORDING_MARKUP + '))'
     return pattern
+
+
+def _wording_form_starts_ok(form, match):
+    """数字で始まる形は、前が数字でない所だけを隠す(32 縮退 が 132 縮退 に当たらない)。
+
+    前の強調・コードの印は字数によらず飛ばす。文字参照・HTML・リンクの終わり(`;` `>` `)` `]`)が前にあれば隠さない。
+    """
+    if not re.match('[0-9]', _wording_literal(form)):
+        return True
+    before = match.string[:match.start()].rstrip('*_`')
+    return not re.search(r'[0-9;>)\]]$', before)
 
 
 def check_wording():
@@ -1278,6 +1297,8 @@ def check_wording():
         forms = exceptions.get(rel, {})
         if forms:
             def exclude(match):
+                if not _wording_form_starts_ok(match[0], match):
+                    return match[0]
                 pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
                 return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
             body = re.sub('|'.join(_wording_form_pattern(form) for form in sorted(forms, key=len, reverse=True)),
