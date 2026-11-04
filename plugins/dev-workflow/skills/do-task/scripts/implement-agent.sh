@@ -28,7 +28,10 @@
 #                           profile の root(未設定なら管理ルート)を呼び出し側が渡す。
 #                           レビュー経路も必須だが渡すのは一時ツリー。実装経路は向きが反転し、
 #                           実リポジトリ(root)を渡す
-#   --model <名前>          ランナーへ渡すモデル名(省略・空はモデル指定フラグごと落とす)
+#   --model <名前>          ランナーへ渡すモデル名(省略・空はモデル指定フラグごと落とす)。
+#                           実行記録の「モデル」の行は、渡したときはその名前、渡さないときはプローブの出力から読めた名前
+#                           (読んだ所を添える。読めなければ「ランナー既定(未確認)」)。「CLI の版」の行もプローブの出力から読む
+#                           (読む形は実装用既定表。読んだ値は表示だけに使い、判定には使わない。external-runners.md §12-6・§12-8)
 #   --log-file <パス>       ログ出力先(既定 .claude/reviews/implementer-<runner>-iter<N>.md。起動時の cwd の下で、--cwd とは別)。
 #                           既にエントリが在るパスは usage(語彙的に正規化したパスで見る)。既定名は、その番号の名前にエントリ
 #                           (FIFO・symlink を含む)が在れば次の番号へ進む。
@@ -123,6 +126,8 @@ CHILD_PID=""    # 走行中の外部ランナー(またはその timeout ラッ�
 RAW_OUT=""      # 中止時に「得られた分の生出力」を流すために先に宣言しておく
 PROBE_OUT=""    # 同上(プローブ中の中止では RAW_OUT がまだ空で、こちらだけが手がかりになる)。
                 # set -u が効いているので、on_signal より前に宣言しないとハンドラ自体が壊れる
+PROBE_ERR=""    # プローブの標準エラー。モデル名と CLI の版を読む所(log_model_info)が、中止・失敗の処理からも見る
+MODEL_INFO_LOGGED=0  # 実行記録の「モデル」「CLI の版」の行を書いたか(1 回だけ書く)
 
 # シグナル処理・中止報告では、リダイレクト中でも必ず元の stdout / stderr へ出す。
 # 本実行中は stdout が RAW_OUT へ向いており、退避しないと `cat "$RAW_OUT"` が自分自身へ
@@ -192,9 +197,79 @@ note_log_swap() {
   fi
 }
 
+# 表示用の値を無害化する(diff-snapshot.sh の sanitize・cut200・disp_val と同じ扱い)。UTF-8 の C1(C2 80〜C2 9F)は
+# 2 バイトで 1 個の ?、C0・DEL は 1 個の ? に置き換え、200 文字で切る(文字の途中では切らない)。
+# 外部コマンドを使わない(制限した PATH でも、中止・想定外の失敗の処理の中でも、失敗しないようにする)。
+# review-agent.sh と同じ形(共通部分は切り出さない。external-runners.md §11 の 2026-09-17 決定 9)
+DISP=""
+disp_val() { # $1=値 → DISP
+  local LC_ALL=C s="$1" i=0 n=0 b len
+  s="${s//$'\xc2'[$'\x80'-$'\x9f']/?}"
+  s="${s//[[:cntrl:]]/?}"
+  DISP="$s"
+  while [ "$i" -lt "${#s}" ]; do
+    if [ "$n" -ge 200 ]; then DISP="${s:0:i}"; return 0; fi
+    b="${s:i:1}"
+    case "$b" in
+      [$'\xc2'-$'\xdf']) len=2 ;;
+      [$'\xe0'-$'\xef']) len=3 ;;
+      [$'\xf0'-$'\xf4']) len=4 ;;
+      *) len=1 ;;                    # ASCII と、単独で現れた継続バイトは 1 文字として数える
+    esac
+    i=$((i + len))
+    n=$((n + 1))
+  done
+}
+
+# プローブの出力から値を 1 つ読む(external-runners.md §12-6 の「プローブの出力から読む形」)。
+# 標準エラー → 標準出力の順に、それぞれ先頭 200 行を見て、最初に形(拡張正規表現)に合った行の 1 つ目の括弧を取る。
+# 読んだ値は実行記録の表示だけに使い、判定には使わない。表示する前に disp_val で無害化する。
+# $1=形(空なら読まない)→ PR_VAL(表示用の値。読めなければ空)・PR_SRC(読んだ所)
+PR_VAL=""; PR_SRC=""
+probe_read() {
+  local LC_ALL=C re="$1" f label line n
+  PR_VAL=""; PR_SRC=""
+  [ -n "$re" ] || return 0
+  for label in 標準エラー 標準出力; do
+    if [ "$label" = 標準エラー ]; then f="$PROBE_ERR"; else f="$PROBE_OUT"; fi
+    if [ -z "$f" ] || [ ! -f "$f" ] || [ ! -r "$f" ]; then continue; fi
+    n=0
+    while [ "$n" -lt 200 ]; do
+      line=""
+      IFS= read -r line || [ -n "$line" ] || break
+      n=$((n + 1))
+      if [[ $line =~ $re ]]; then
+        disp_val "${BASH_REMATCH[1]}"
+        PR_VAL="$DISP"; PR_SRC="プローブの$label"
+        return 0
+      fi
+    done <"$f" || true
+  done
+  return 0
+}
+
+# 実行記録に「モデル」と「CLI の版」の行を 1 回だけ書く(プローブの直後。プローブの前に終わるときは、結果の行の前)。
+# モデルは、--model を渡したときはその名前、渡さないときはプローブの出力から読めた名前(読んだ所を添える)、
+# 読めなければ「ランナー既定(未確認)」。CLI の版は、読めれば読んだ所を添え、読めなければ「未確認」
+log_model_info() {
+  if [ "$LOG_FD_OPEN" -ne 1 ] || [ "$MODEL_INFO_LOGGED" -eq 1 ]; then return 0; fi
+  MODEL_INFO_LOGGED=1
+  if [ -n "$MODEL" ]; then
+    mi_model="$MODEL(--model で指定)"
+  else
+    probe_read "$(default_probe_model_re "$RUNNER")"
+    if [ -n "$PR_VAL" ]; then mi_model="$PR_VAL(ランナー既定。${PR_SRC}から読んだ)"; else mi_model="ランナー既定(未確認)"; fi
+  fi
+  probe_read "$(default_probe_version_re "$RUNNER")"
+  if [ -n "$PR_VAL" ]; then mi_version="$PR_VAL(${PR_SRC}から読んだ)"; else mi_version="未確認"; fi
+  log_line "- モデル: $mi_model"
+  log_line "- CLI の版: $mi_version"
+}
+
 die() { # $1=終了コード $2=理由コード 残り=説明
   code="$1"; reason="$2"; shift 2
   note_log_swap
+  log_model_info
   log_line ""
   log_line "**結果**: ERROR [$reason] $*"
   echo "ERROR [$reason] $*" >&2
@@ -215,6 +290,7 @@ on_err() { # $1=終了コード $2=行番号
   echo "ERROR [internal] 予期しない失敗(終了コード $oe_code・行 $oe_line)" >&8 || true
   # ログへの書き込み(照合・節・結果行)は、LOG_FD_OPEN が 1 のときだけ行われる
   note_log_swap || true
+  log_model_info || true
   if [ -n "$PROBE_OUT" ] && [ -s "$PROBE_OUT" ]; then
     log_block "プローブ生出力(想定外の失敗の時点まで)" "$PROBE_OUT" || true
   fi
@@ -346,6 +422,22 @@ default_probe_flag() { # 「プローブ用の読み取り専用フラグ」列(
   esac
 }
 
+# 「プローブの出力から読む形」の列(拡張正規表現。1 つ目の括弧が値)。モデル名と CLI の版を、実行記録の表示のためだけに読む
+# (判定には使わない)。形を持たないランナーは何も出さず、記録は「未確認」になる。§12-6 の表と二重管理(selftest が照合する)
+default_probe_model_re() {
+  case "$1" in
+    codex) printf '%s' '^model: ([^[:space:]]+)' ;;
+    *) : ;;
+  esac
+}
+
+default_probe_version_re() {
+  case "$1" in
+    codex) printf '%s' '^OpenAI Codex v([0-9][0-9A-Za-z.+-]*)' ;;
+    *) : ;;
+  esac
+}
+
 # 既定表外は受け付ける経路そのものを持たない(レビュー経路との最大の差。§12-8)
 if ! default_command "$RUNNER" >/dev/null 2>&1; then
   fail_usage "ランナー '$RUNNER' は実装用既定表に無い(実装経路には既定表外を受け付ける経路が無い。external-runners.md §12-6 を参照)"
@@ -406,6 +498,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   trap - TERM HUP INT ERR
   if [ -n "$CHILD_PID" ]; then kill_tree "$CHILD_PID"; CHILD_PID=""; fi
   note_log_swap
+  log_model_info || true
   log_line ""
   log_line "**中止**: シグナル $os_sig を受信したため外部ランナーのプロセスグループと直接の子に終了のシグナルを送った(終了コード $os_code)"
   # 中止時点までに得られた生出力は残す(§12-8「失敗時は得られた分の生出力」。引き継ぎの手がかり)。
@@ -786,7 +879,6 @@ echo "NOTE: ログ: $LOG_FILE" >&2
   printf -- '- 実行日時: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
   printf -- '- ランナー: %s(実装用既定表: あり。既定表外を受け付ける経路は無い)\n' "$RUNNER"
   printf -- '- コマンド出所: 実装用既定表(上書き経路なし)\n'
-  printf -- '- モデル: %s\n' "${MODEL:-(ランナー既定)}"
   printf -- '- 書き込みフラグ(本実行): %s\n' "$WRITE_FLAG"
   printf -- '- プローブ用の読み取り専用フラグ(判定 4′): %s\n' "$PROBE_FLAG"
   printf -- '- 渡した --cwd(本実行の書き込み範囲): %s\n' "$CWD"
@@ -875,6 +967,7 @@ else
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
+  log_model_info
   log_line "- dry-run: 静的検査のみ(起動しない)"
   printf '%s\n' "$RESOLVED"
   exit 0
@@ -902,6 +995,8 @@ rc=0
 cd "$PROBE_CWD" || die 20 internal "プローブの cwd へ移動できない: $PROBE_CWD"
 run_timeout "$PROBE_TIMEOUT" "${CMD[@]}" </dev/null >"$PROBE_OUT" 2>"$PROBE_ERR" || rc=$?
 cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
+# モデル名と CLI の版は、プローブの成否によらず、得られた出力から読んで記録する(表示だけ。判定には使わない)
+log_model_info
 # 失敗経路でも「得られた分の生出力」を残して返す(§12-8 の出力契約。プローブの失敗は
 # 認証切れ・レート制限のことが多く、その理由は生出力側に出る)
 probe_fail() { # $1=終了コード $2=理由コード 残り=説明

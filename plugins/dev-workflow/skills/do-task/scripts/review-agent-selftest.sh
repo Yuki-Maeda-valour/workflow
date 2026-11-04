@@ -7,7 +7,8 @@
 #   REVIEW_AGENT=<パス> bash review-agent-selftest.sh   # 別の実装を対象にする(変異テスト用)
 #
 # 検証するのは「終了コードと出力の契約」「信頼モデルが破れないこと」「正規化 2 経路の一致」
-# 「プロンプト組み立て(スキーマ指示の付与と冪等)」「ログの置き場の固定(L 節: 置き場の経路)」。
+# 「プロンプト組み立て(スキーマ指示の付与と冪等)」「ログの置き場の固定(L 節: 置き場の経路)」
+# 「実行記録のモデル名と CLI の版(M 節。プローブの出力から読む形と、§4 の表との同期)」。
 # 期待終了コード: 0=成功 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #                 7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed 12=prompt-too-large
 #
@@ -2095,6 +2096,204 @@ if check "$lk3_name: 開ける" 0 "$rc"; then
     ng "$lk3_name: proj/x.md の中身と大きさが変わらない"; head -c 200 "$lk3/proj/x.md" >&2; fi
   if l_empty "$lk3/proj/b"; then ok "$lk3_name: b の側に書かない"; else
     ng "$lk3_name: b の側に書かない(残存: $(find "$lk3/proj/b" -mindepth 1 | head -3 | tr '\n' ' '))"; fi
+fi
+
+# ── M. 実行記録の「モデル」「CLI の版」の行(external-runners.md §4・§7)──
+# --model を渡したときはその名前、渡さないときはプローブの出力から読めた名前(読んだ所を添える)、読めなければ
+# 「ランナー既定(未確認)」。CLI の版も読めれば書く。読んだ値は表示だけに使い(終了コードを変えない)、制御文字は ? にする。
+# スタブの codex は、プローブ(ping を含む呼び出し)でだけ SELFTEST_MODEL_MODE に従ってヘッダの行を出す
+mkdir -p "$WORK/modelbin"
+cat >"$WORK/modelbin/codex" <<'EOF'
+#!/usr/bin/env bash
+for a in "$@"; do
+  if [ "$a" = "--help" ]; then echo '  -s, --sandbox <MODE>  (choices: "read-only", "workspace-write")'; exit 0; fi
+done
+probe=0
+for a in "$@"; do case "$a" in *ping*) probe=1 ;; esac; done
+if [ "$probe" -eq 1 ]; then
+  case "${SELFTEST_MODEL_MODE:-}" in
+    stderr) printf 'OpenAI Codex v9.8.7 (research preview)\n--------\nmodel: selftest-model-a\nprovider: selftest\n--------\n' >&2 ;;
+    stdout) printf 'OpenAI Codex v9.8.8\nmodel: selftest-model-b\n' ;;
+    ctrl)   printf 'OpenAI Codex v1.2.3\001\nmodel: bad\033[31mred\007bell\302\233csi\177del\r\n' >&2 ;;
+    long)   s=""; printf -v s '%300s' ''; printf 'model: %s\n' "${s// /x}" >&2 ;;
+    fail)   printf 'OpenAI Codex v9.8.9\nmodel: selftest-model-c\n' >&2; echo "認証が必要です" >&2; exit 7 ;;
+    both)   printf 'OpenAI Codex v1.1.1\nmodel: selftest-model-e\n' >&2; printf 'OpenAI Codex v2.2.2\nmodel: selftest-model-o\n' ;;
+    hang)   printf 'OpenAI Codex v3.3.3\nmodel: selftest-model-h\n' >&2; : >"$SELFTEST_MODEL_MARKER"; sleep 30 ;;
+  esac
+  echo pong
+  exit 0
+fi
+echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+# 既定表に無いランナー(--command)は読む形を持たない。出力にヘッダの行があっても「未確認」になることを見る
+cat >"$WORK/bin/stub-model-any.sh" <<'EOF'
+#!/usr/bin/env bash
+printf 'OpenAI Codex v7.7.7\nmodel: not-read\n' >&2
+echo '{"verdict":"APPROVED","issues":[]}'
+EOF
+chmod +x "$WORK/modelbin/codex" "$WORK/bin/stub-model-any.sh"
+
+m_run() { # $1=SELFTEST_MODEL_MODE $2=ログ 残り=追加の引数
+  mr_mode="$1"; mr_log="$2"; shift 2
+  rc=0
+  SELFTEST_MODEL_MODE="$mr_mode" PATH="$WORK/modelbin:$PATH" guard bash "$TARGET" --runner codex \
+    --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$mr_log" "$@" \
+    >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
+  return "$rc"
+}
+m_line() { # $1=ログ $2=行の頭 → 最初に合った行の、頭より後ろ
+  while IFS= read -r ml_l; do
+    case "$ml_l" in "$2"*) printf '%s' "${ml_l#"$2"}"; return 0 ;; esac
+  done <"$1"
+  return 1
+}
+m_expect() { # $1=ケース名 $2=ログ $3=行の頭 $4=期待する残り
+  me_got="$(m_line "$2" "$3")"
+  if [ "$me_got" = "$4" ]; then ok "$1"; else ng "$1(期待 '$4' / 実際 '$(printf '%s' "$me_got" | cat -v)')"; fi
+}
+m_once() { # $1=ケース名 $2=ログ。「モデル」「CLI の版」の行がそれぞれ 1 行だけ
+  mo_m="$(grep -c '^- モデル: ' "$2" 2>/dev/null)"; mo_v="$(grep -c '^- CLI の版: ' "$2" 2>/dev/null)"
+  if [ "$mo_m" = 1 ] && [ "$mo_v" = 1 ]; then ok "$1: モデルと CLI の版の行がそれぞれ 1 行"; else
+    ng "$1: モデルと CLI の版の行がそれぞれ 1 行(モデル ${mo_m:-0} 行 / CLI の版 ${mo_v:-0} 行)"; fi
+}
+
+# M1. 読めたとき(標準エラー)
+m_run stderr "$WORK/m1.md"; rc=$?
+if check "モデル名: 読めたとき(標準エラー)" 0 "$rc"; then
+  m_expect "モデル名: 読めたとき(標準エラー): モデルの行" "$WORK/m1.md" "- モデル: " "selftest-model-a(ランナー既定。プローブの標準エラーから読んだ)"
+  m_expect "モデル名: 読めたとき(標準エラー): CLI の版の行" "$WORK/m1.md" "- CLI の版: " "9.8.7(プローブの標準エラーから読んだ)"
+  m_once "モデル名: 読めたとき(標準エラー)" "$WORK/m1.md"
+fi
+# M2. 読めたとき(標準出力)。読んだ所が「標準出力」になる
+m_run stdout "$WORK/m2.md"; rc=$?
+if check "モデル名: 読めたとき(標準出力)" 0 "$rc"; then
+  m_expect "モデル名: 読めたとき(標準出力): モデルの行" "$WORK/m2.md" "- モデル: " "selftest-model-b(ランナー既定。プローブの標準出力から読んだ)"
+  m_expect "モデル名: 読めたとき(標準出力): CLI の版の行" "$WORK/m2.md" "- CLI の版: " "9.8.8(プローブの標準出力から読んだ)"
+fi
+# M3. 読めないとき(ヘッダの行が無い)
+m_run none "$WORK/m3.md"; rc=$?
+if check "モデル名: 読めないとき" 0 "$rc"; then
+  m_expect "モデル名: 読めないとき: モデルの行" "$WORK/m3.md" "- モデル: " "ランナー既定(未確認)"
+  m_expect "モデル名: 読めないとき: CLI の版の行" "$WORK/m3.md" "- CLI の版: " "未確認"
+  m_once "モデル名: 読めないとき" "$WORK/m3.md"
+fi
+# M4. 制御文字を含むとき: C0・DEL・C1(2 バイト)は 1 個の ? になり、ログに生の制御文字が残らない。終了コードは変わらない
+m_run ctrl "$WORK/m4.md"; rc=$?
+if check "モデル名: 制御文字を含むとき(判定に使わない)" 0 "$rc"; then
+  m_expect "モデル名: 制御文字を含むとき: モデルの行" "$WORK/m4.md" "- モデル: " "bad?[31mred?bell?csi?del(ランナー既定。プローブの標準エラーから読んだ)"
+  m_expect "モデル名: 制御文字を含むとき: CLI の版の行" "$WORK/m4.md" "- CLI の版: " "1.2.3(プローブの標準エラーから読んだ)"
+  if LC_ALL=C grep -q $'[\001-\010\013-\037\177]' "$WORK/m4.md" || LC_ALL=C grep -q $'\302[\200-\237]' "$WORK/m4.md"; then
+    ng "モデル名: 制御文字を含むとき: ログに生の制御文字(C0・DEL・C1)が無い"
+  else
+    ok "モデル名: 制御文字を含むとき: ログに生の制御文字(C0・DEL・C1)が無い"
+  fi
+fi
+# M5. --model を渡したとき: モデルはその名前。CLI の版はプローブの出力から読む
+m_run stderr "$WORK/m5.md" --model "sel-pick-1"; rc=$?
+if check "モデル名: --model を渡したとき" 0 "$rc"; then
+  m_expect "モデル名: --model を渡したとき: モデルの行" "$WORK/m5.md" "- モデル: " "sel-pick-1(--model で指定)"
+  m_expect "モデル名: --model を渡したとき: CLI の版の行" "$WORK/m5.md" "- CLI の版: " "9.8.7(プローブの標準エラーから読んだ)"
+  m_once "モデル名: --model を渡したとき" "$WORK/m5.md"
+fi
+# M6. 長い値は 200 文字で切る
+m_run long "$WORK/m6.md"; rc=$?
+if check "モデル名: 長い値" 0 "$rc"; then
+  printf -v m6_x '%200s' ''; m6_x="${m6_x// /x}"
+  m_expect "モデル名: 長い値: 200 文字で切る" "$WORK/m6.md" "- モデル: " "$m6_x(ランナー既定。プローブの標準エラーから読んだ)"
+fi
+# M7. プローブが失敗しても、得られた出力から読む(結果の行より前に 1 回だけ書く)
+m_run fail "$WORK/m7.md"; rc=$?
+if check "モデル名: プローブの失敗(probe-failed)" 6 "$rc"; then
+  m_expect "モデル名: プローブの失敗: モデルの行" "$WORK/m7.md" "- モデル: " "selftest-model-c(ランナー既定。プローブの標準エラーから読んだ)"
+  m_expect "モデル名: プローブの失敗: CLI の版の行" "$WORK/m7.md" "- CLI の版: " "9.8.9(プローブの標準エラーから読んだ)"
+  m_once "モデル名: プローブの失敗" "$WORK/m7.md"
+fi
+# M8. 既定表に無いランナー(--command)は読む形を持たない。出力にヘッダの行があっても「未確認」
+run_agent --runner stubmodel --command "bash $WORK/bin/stub-model-any.sh --readonly-x" --readonly-flag "--readonly-x" \
+  --prompt-file "$WORK/prompt.md" --probe-timeout 10 --run-timeout 20 --log-file "$WORK/m8.md"; rc=$?
+if check "モデル名: 読む形を持たないランナー" 0 "$rc"; then
+  m_expect "モデル名: 読む形を持たないランナー: モデルの行" "$WORK/m8.md" "- モデル: " "ランナー既定(未確認)"
+  m_expect "モデル名: 読む形を持たないランナー: CLI の版の行" "$WORK/m8.md" "- CLI の版: " "未確認"
+fi
+# M9. プローブの前に終わったとき(dry-run・未検出)も、結果の行より前に 1 回だけ書く
+m_run stderr "$WORK/m9.md" --dry-run --model "sel-pick-2"; rc=$?
+if check "モデル名: dry-run" 0 "$rc"; then
+  m_expect "モデル名: dry-run: モデルの行" "$WORK/m9.md" "- モデル: " "sel-pick-2(--model で指定)"
+  m_expect "モデル名: dry-run: CLI の版の行" "$WORK/m9.md" "- CLI の版: " "未確認"
+  m_once "モデル名: dry-run" "$WORK/m9.md"
+fi
+m_once "モデル名: 未検出(プローブの前に止まった。ケース 6 のログ)" "$WORK/log6.md"
+m9_model="$(grep -n '^- モデル: ' "$WORK/log6.md" | head -1 | cut -d: -f1)"
+m9_result="$(grep -n '^\*\*結果\*\*: ' "$WORK/log6.md" | head -1 | cut -d: -f1)"
+if [ -n "$m9_model" ] && [ -n "$m9_result" ] && [ "$m9_model" -lt "$m9_result" ]; then
+  ok "モデル名: 未検出: モデルの行が結果の行より前にある"
+else
+  ng "モデル名: 未検出: モデルの行が結果の行より前にある(モデル ${m9_model:-無し} 行目 / 結果 ${m9_result:-無し} 行目)"; fi
+m_expect "モデル名: 未検出: モデルの行" "$WORK/log6.md" "- モデル: " "ランナー既定(未確認)"
+
+m_before() { # $1=ケース名 $2=ログ $3=後に来る行(grep の正規表現)。「モデル」の行がその行より前にある
+  mb_m="$(grep -n '^- モデル: ' "$2" 2>/dev/null | head -1 | cut -d: -f1)"
+  mb_r="$(grep -n "$3" "$2" 2>/dev/null | head -1 | cut -d: -f1)"
+  if [ -n "$mb_m" ] && [ -n "$mb_r" ] && [ "$mb_m" -lt "$mb_r" ]; then ok "$1: モデルの行が後の行より前にある"; else
+    ng "$1: モデルの行が後の行より前にある(モデル ${mb_m:-無し} 行目 / 後の行 ${mb_r:-無し} 行目)"; fi
+}
+# M10. 標準エラーと標準出力の両方に違う値があるときは、標準エラーの値を読む(読む順を入れ替えると落ちる)
+m_run both "$WORK/m11.md"; rc=$?
+if check "モデル名: 両方に違う値" 0 "$rc"; then
+  m_expect "モデル名: 両方に違う値: 標準エラーのモデルを読む" "$WORK/m11.md" "- モデル: " "selftest-model-e(ランナー既定。プローブの標準エラーから読んだ)"
+  m_expect "モデル名: 両方に違う値: 標準エラーの版を読む" "$WORK/m11.md" "- CLI の版: " "1.1.1(プローブの標準エラーから読んだ)"
+fi
+# M11. プローブ中の中止(TERM。on_signal): 得られた出力から読み、中止の行より前に 1 回だけ書く
+M12_MARKER="$WORK/m12.started"; rm -f "$M12_MARKER"
+SELFTEST_MODEL_MODE=hang SELFTEST_MODEL_MARKER="$M12_MARKER" PATH="$WORK/modelbin:$PATH" bash "$TARGET" --runner codex \
+  --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 40 --run-timeout 20 --log-file "$WORK/m12.md" \
+  >"$CASE_OUT" 2>"$CASE_ERR" &
+m12_pid=$!
+m12_waited=0
+while [ ! -e "$M12_MARKER" ] && [ "$m12_waited" -lt 40 ]; do sleep 1; m12_waited=$((m12_waited + 1)); done
+sleep 1
+if [ ! -e "$M12_MARKER" ]; then
+  ng "モデル名: プローブ中の中止: プローブまで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
+  kill -9 "$m12_pid" 2>/dev/null; wait "$m12_pid" 2>/dev/null
+else
+  kill -TERM "$m12_pid" 2>/dev/null
+  rc=0; wait "$m12_pid" || rc=$?
+  if check "モデル名: プローブ中の中止(TERM)" 143 "$rc"; then
+    m_expect "モデル名: プローブ中の中止: モデルの行" "$WORK/m12.md" "- モデル: " "selftest-model-h(ランナー既定。プローブの標準エラーから読んだ)"
+    m_expect "モデル名: プローブ中の中止: CLI の版の行" "$WORK/m12.md" "- CLI の版: " "3.3.3(プローブの標準エラーから読んだ)"
+    m_once "モデル名: プローブ中の中止" "$WORK/m12.md"
+    m_before "モデル名: プローブ中の中止" "$WORK/m12.md" '^\*\*中止\*\*: '
+  fi
+fi
+# M12. 想定外の失敗(on_err。K 節の「ERR のログ」のログ): プローブの前の失敗でも、結果の行より前に 1 回だけ書く
+if [ -f "$K_DIR/err-log.md" ]; then
+  m_expect "モデル名: 想定外の失敗: モデルの行" "$K_DIR/err-log.md" "- モデル: " "ランナー既定(未確認)"
+  m_once "モデル名: 想定外の失敗" "$K_DIR/err-log.md"
+  m_before "モデル名: 想定外の失敗" "$K_DIR/err-log.md" '^\*\*結果\*\*: ERROR \[internal\]'
+else
+  ng "モデル名: 想定外の失敗: K 節の ERR のログが無い($K_DIR/err-log.md)"
+fi
+
+# M13. 仕様書 §4 の「プローブの出力から読む形」の列と、スクリプトの読む形(default_probe_model_re・default_probe_version_re)が一致する
+m_script_re() { # $1=関数名 $2=ランナー → その関数の case の値(無ければ空)
+  awk -v fn="$1" '$0 == fn"() {" {f=1; next} f && /^}/ {exit} f' "$TARGET" \
+    | sed -n "s/^ *$2) *printf '%s' '\\(.*\\)' ;;\$/\\1/p"
+}
+if [ -f "$DOC" ]; then
+  for r in cursor-agent gemini codex; do
+    m_cell="$(grep -E "^\| \`$r\` \|" "$DOC" | head -1 | awk -F'|' '{print $7}')"
+    [ -n "$m_cell" ] || { ng "読む形の同期: $r の列を仕様書から読めない"; continue; }
+    m_doc_m="$(printf '%s' "$m_cell" | sed -n 's/.*モデル `\([^`]*\)`.*/\1/p')"
+    m_doc_v="$(printf '%s' "$m_cell" | sed -n 's/.*CLI の版 `\([^`]*\)`.*/\1/p')"
+    m_scr_m="$(m_script_re default_probe_model_re "$r")"
+    m_scr_v="$(m_script_re default_probe_version_re "$r")"
+    if [ "$m_doc_m" = "$m_scr_m" ] && [ "$m_doc_v" = "$m_scr_v" ]; then ok "読む形の同期: $r"; else
+      ng "読む形の同期: $r(仕様書 モデル='$m_doc_m' 版='$m_doc_v' / 実装 モデル='$m_scr_m' 版='$m_scr_v')"; fi
+  done
+  if [ -n "$(m_script_re default_probe_model_re codex)" ]; then ok "読む形の同期: 実装から codex の形を取り出せる"; else
+    ng "読む形の同期: 実装から codex の形を取り出せる(関数の形が変わった)"; fi
+else
+  ng "読む形の同期: 仕様書 $DOC が見つからない"
 fi
 
 echo
