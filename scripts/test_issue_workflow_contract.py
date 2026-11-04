@@ -215,33 +215,88 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(self.shipping, "実装 commit の検証前に中断: <理由>",
                       "`/do-task --issue=<番号>` で検証をやり直す")
 
-    def test_suspension_after_verified_commit_keeps_completion_and_documents_resume(self):
+    def test_suspension_after_verified_commit_keeps_completion(self):
         common = self.completion.split("- `task_store: github-issue` の経路:", 1)[0]
         for stage in ("文書同期", "公開"):
             with self.subTest(stage=stage):
                 record = f"実装 commit <sha> は検証済み。{stage}で停止"
                 self.contains(common, record, "実装の完了を取り消さず受け付ける")
                 self.contains(self.shipping, record)
-        self.contains(self.shipping, "文書同期での停止報告には `/update-doc --task=#<番号>`",
-                      "Phase 5 を再開する手順", "過去の全文の保持値を黙って更新して")
-        table = section(self.ship, "## 停止条件のまとめ")
-        self.contains(table, "/update-doc --task=#<番号>", "実装 commit の検証前後を区別する",
-                      "公開の停止は契約 §6 の再確認を経て Phase 5 を再開")
         mode = section(self.doc, "## 2 つの実行モード")
         self.contains(mode, "実装 commit の検証前の中断では停止する",
                       "検証後の文書同期・公開の停止は完了を取り消さない")
 
+    def test_publication_retry_keeps_body_state_and_hashes_until_session_ends(self):
+        stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
+        self.contains(stop, "まず Issue へは書かず、会話で理由を報告する",
+                      "同じセッションでやり直せる間は、同じ state と保持値のまま Phase 5 をやり直してよい",
+                      "人がやめると決めたとき、またはセッションを終えるときだけ",
+                      "実装 commit <sha> は検証済み。公開で停止: <理由>",
+                      "本文・対象リポジトリ・commit の再確認は Phase 5 と同じ",
+                      "既に作成された PR を重複作成しない", "検査を省いて続けない")
+        table = section(self.ship, "## 停止条件のまとめ")
+        self.contains(table, "まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
+                      "同じ state と保持値で Phase 5 の再確認を通して再試行できる",
+                      "同じセッションで Issue に記録する前だけ")
+
+    def test_recorded_publication_stop_requires_manual_commands_and_saved_evidence(self):
+        resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
+        self.contains(resume, "検査つきの Phase 5 はやり直せない",
+                      "`--task` は Phase 2 から始まる入口", "Phase 4・5 から再開する入口ではない",
+                      "過去の全文の保持値を黙って更新して", "`pr-evidence` を更新後の Issue 本文から作り直さない",
+                      "人が手で打つ push・PR のコマンドの並びを示す",
+                      "§3・§5 で Issue 本文を取り直し、中断の追記とそれ以外の変更を確かめる",
+                      "`origin-repo.py` の `repo` と、保持した Issue の `repo` が同じ",
+                      "不一致・取得不能なら公開しない", "保持した `pr-evidence` の内容を PR の検証欄に使い",
+                      "`Closes #<番号>`", "Issue の記録から検証根拠を復元しない")
+        table = section(self.ship, "## 停止条件のまとめ")
+        self.contains(table, "記録を書いた後は検査つきの Phase 5 をやり直せない",
+                      "保持した `pr-evidence` と `Closes #<番号>`", "本文と対象リポジトリを確かめ直す手順")
+        self.assertNotIn("Phase 5 を再開する手順", self.shipping + table)
+
+    def test_recorded_document_stop_runs_update_doc_then_manual_commit_and_publication(self):
+        resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
+        self.contains(resume, "文書同期での停止報告には `/update-doc --task=#<番号>`",
+                      "単独の update-doc で文書を直す",
+                      "文書レビューが APPROVED になった後の commit と公開は、人が手で打つコマンドの並びを示す",
+                      "後から作る文書 commit を以前の検証根拠で検証済みとは扱わない")
+        table = section(self.ship, "## 停止条件のまとめ")
+        self.contains(table, "実装 commit の検証前後を区別する",
+                      "記録後の文書同期は `/update-doc --task=#<番号>`", "その後の commit・公開は手動のコマンド列を示す")
+
     def test_authority_completion_rejects_incomplete_even_with_approved_result(self):
         self.contains(self.authority_completion, "「完了」の部分一致で「未完了」の記録を受け付けない")
         instructions = (ROOT / "AGENTS.md").read_text()
-        self.contains(instructions, "`- <YYYY-MM-DD> 完了(…): 結果 APPROVED` の形で書く")
-        complete = "- 2026-11-04 完了(反復 5 回): 結果 APPROVED"
-        incomplete = "- 2026-11-04 未完了(反復 5 回): 結果 APPROVED"
-        # このプロジェクトの形は AGENTS.md の字面から組み立てる。部分一致への退行を対照で示す。
-        declared = re.search(r"`(- <YYYY-MM-DD>[^`]+)`", instructions).group(1)
-        pattern = re.escape(declared).replace(re.escape("<YYYY-MM-DD>"), r"\d{4}-\d{2}-\d{2}").replace("…", r"[^\n]*")
-        self.assertIsNotNone(re.fullmatch(pattern, complete))
-        self.assertIsNone(re.fullmatch(pattern, incomplete))
+        shape = "`- <YYYY-MM-DD> ` で始まり、「未完了」を含まず、「完了」と「結果 APPROVED」を含む行"
+        self.contains(instructions, shape)
+        self.contains(self.design, shape)
+        # 手順の条件を対照へ当てる。AGENTS.md の先頭の形を使い、必須語と除外語も別々に確かめる。
+        declared = re.search(r"`(- <YYYY-MM-DD> )`", instructions).group(1)
+        prefix = re.escape(declared).replace(re.escape("<YYYY-MM-DD>"), r"\d{4}-\d{2}-\d{2}")
+        pattern = prefix + r"(?![^\n]*未完了)(?=[^\n]*完了)(?=[^\n]*結果 APPROVED)[^\n]*"
+        accepted = [
+            "- 2026-11-04 完了(反復 5 回): 結果 APPROVED",
+            "- 2026-11-04 do-task 完了(反復 5 回): 結果 APPROVED",
+            "- 2026-11-04 前半を完了(反復 5 回): 結果 APPROVED。後半は別途",
+            "- 2026-11-04 後半を完了(反復 5 回): 結果 APPROVED",
+        ]
+        rejected = [
+            "- 2026-11-04 未完了(反復 5 回): 結果 APPROVED",
+            "- 2026-11-04 do-task 未完了(反復 5 回): 結果 APPROVED",
+            "- 2026-11-04 レビュー: 結果 APPROVED",
+            "- 2026-11-04 完了(反復 5 回): 結果 未完了",
+            "- 完了(反復 5 回): 結果 APPROVED",
+        ]
+        for line in accepted:
+            with self.subTest(accepted=line):
+                self.assertIsNotNone(re.fullmatch(pattern, line))
+                self.contains(self.design, f"`{line}`")
+        for line in rejected:
+            with self.subTest(rejected=line):
+                self.assertIsNone(re.fullmatch(pattern, line))
+        self.contains(self.authority_completion, "権威参照ファイルが定める形に一致する、節内の最後の該当記録で判定する")
+        records = accepted + rejected
+        self.assertEqual(accepted[-1], [line for line in records if re.fullmatch(pattern, line)][-1])
 
     def test_authority_must_define_its_own_completion_shape(self):
         self.contains(self.authority_completion, "権威参照ファイルも完了記録の形を定めていなければ、止めて人に形を確かめる",
@@ -263,7 +318,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
 
     def test_design_keeps_routes_separate_and_defers_profile_migration(self):
         policy = self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0]
-        self.contains(policy, "`github-issue.md` §6・§7 を使う", "`AGENTS.md` が定める `- <YYYY-MM-DD> 完了(…): 結果 APPROVED` の形",
+        self.contains(policy, "`github-issue.md` §6・§7 を使う", "`AGENTS.md` が定める形は、`- <YYYY-MM-DD> ` で始まり",
                       "ステータス行と使用スキル `do-task` の記載は必須にしない",
                       "`task_store: github-issue` では、template の完了ステータス行と do-task の完了記録が引き続き必須",
                       "権威参照ファイルによる Issue 運用でも停止する", "profile への移行と init-project の質問・雛形は3本目")
@@ -277,6 +332,11 @@ class IssueWorkflowContractTest(unittest.TestCase):
         pending = changelog.split("## (次の版)\n", 1)[1].split("\n## v", 1)[0]
         self.assertNotIn("未対応", pending)
         self.contains(pending, "ship-task", "update-doc", "create-task", "do-task")
+        self.contains(pending, "Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
+                      "人がやめると決めたとき・セッション終了時だけ Issue に記録する",
+                      "中断の記録を書いた後は、検査つきの Phase 5 をやり直せない",
+                      "文書同期は `/update-doc --task=#<番号>` で再開し、その後の commit・公開は手動のコマンド列を示す")
+        self.assertNotIn("止まった工程から再開できる", pending)
 
     def test_update_doc_rechecks_input_without_mutating_issue(self):
         self.contains(self.syncing, "preflight` と `snapshot --for-execution`", "--yes` でも本文採用の確認を省かない",
@@ -334,7 +394,9 @@ class ExternalBodyIntegrationTest(unittest.TestCase):
 
     def test_later_interruption_is_invisible_to_contract_digest(self):
         final = self.guard.final_bytes(self.saved, self.proof, "complete")
-        for record in ("- 2026-11-04 中断: commit の照合に失敗\n", "- **保留**: 公開に失敗\n"):
+        for record in ("- 2026-11-04 中断: commit の照合に失敗\n", "- **保留**: 公開に失敗\n",
+                       "- 実装 commit " + "a" * 40 + " は検証済み。文書同期で停止: 未承認\n",
+                       "- 実装 commit " + "a" * 40 + " は検証済み。公開で停止: push 失敗\n"):
             with self.subTest(record=record):
                 interrupted = final + record.encode()
                 self.assertEqual(self.guard.body_digest(interrupted), self.guard.body_digest(final))

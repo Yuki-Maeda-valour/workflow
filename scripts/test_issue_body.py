@@ -827,6 +827,37 @@ class IssueBodyTest(unittest.TestCase):
         self.assertEqual(1, self.calls().count(["issue", "create"]))
         self.assertFalse(self.snapshot.exists())
 
+    def test_create_rejects_unedited_author_different_from_viewer(self):
+        self.change_state(user={"login": "outsider"})
+        done = self.create(expected=1)
+        self.assertIn("作成後の作者または最終編集者が実行者と一致しない", done.stderr)
+        self.assertIn("重複作成しないでください", done.stderr)
+        self.assertEqual("", done.stdout)
+        self.assertFalse(self.snapshot.exists())
+        self.assertEqual(1, self.calls().count(["issue", "create"]))
+        self.assertIn(["api", "user"], self.calls(include_api=True))
+
+    def test_create_rejects_foreign_editor_when_author_matches_viewer(self):
+        self.change_state(author={"login": "outsider"}, user={"login": "outsider"},
+                          editor={"login": "operator"}, lastEditedAt="2026-11-04T01:02:03Z")
+        done = self.create(expected=1)
+        self.assertIn("作成後の作者または最終編集者が実行者と一致しない", done.stderr)
+        self.assertIn("重複作成しないでください", done.stderr)
+        self.assertEqual("", done.stdout)
+        self.assertFalse(self.snapshot.exists())
+        self.assertEqual(1, self.calls().count(["issue", "create"]))
+        self.assertIn(["api", "user"], self.calls(include_api=True))
+
+    def test_create_rejects_bot_author_even_when_viewer_has_same_login(self):
+        self.change_state(author={"login": "operator", "is_bot": True})
+        done = self.create(expected=1)
+        self.assertIn("作成後の作者または最終編集者が実行者と一致しない", done.stderr)
+        self.assertIn("重複作成しないでください", done.stderr)
+        self.assertEqual("", done.stdout)
+        self.assertFalse(self.snapshot.exists())
+        self.assertEqual(1, self.calls().count(["issue", "create"]))
+        self.assertIn(["api", "user"], self.calls(include_api=True))
+
     def test_check_checkbox_command_reports_counts_without_gh(self):
         value = self.take_snapshot()
         self.body.write_bytes(BODY.replace("- [ ]", "- [x]").encode())
