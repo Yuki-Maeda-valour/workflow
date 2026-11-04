@@ -58,6 +58,8 @@
 - YAML は PyYAML の `safe_load` で読む。profile が在って PyYAML が無ければ、起動時に止まる
 - **null(値が無い)**: `features`・`features.loop`・各キーが null のときは、キーが無いときと同じく既定値を使う(`loop:` の下をすべてコメントにした profile も起動できるように)
 - **起動時に止まる値**: YAML の構文エラー / `features` か `features.loop` が null でもマッピングでもない / null 以外で整数でない値(bool・小数・文字列を含む。PyYAML の `yes`・`true` は bool)/ 0 以下 / 999999999 を超える / 実効値で `time_budget` < `iteration_timeout`(1 周も回らない)
+- `task_store` は欠落・null・空文字を `file` とし、文字列の `file` / `github-issue` だけを受け付ける。不正な値は `profile-invalid`、`github-issue` は `task-store-unsupported` を示し、profile の検査で停止する。実装・発見のどちらも Issue 方式は扱わず、作業場所を作らない。
+  - `loop.sh` が置き場の判定で見るのは `task_store` だけ。`file` で権威参照ファイルが Issue を正本にする運用では、ほかの前提を満たせばループは起動するが、毎周の ship-task が `task-store-unsupported` で止まる。権威参照ファイルの運用はループ起動時には判定しない。
 - `task_dir` は [task-directory.md](../../create-task/references/task-directory.md) の「優先順位 2」の型の規則で検査し、文字列なら `resolve-task-dir.py --task-dir=<値>` で渡す(キーが無い・null なら渡さない)。不正なら同じ規則どおり止まる。値は §3 の文字の制限も満たすこと
 - `root` は `.` と `./` を parent-child でないとみなす。それ以外の文字列なら parent-child 構成として止まる(文字列でなければ不正な値)。キーが無い・null なら検査しない。ship-task の無人の前提と同じ
 

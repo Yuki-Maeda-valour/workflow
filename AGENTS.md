@@ -66,7 +66,7 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
+scripts/                            # 規約の検証器(validate.py)と回帰テスト(test_*.py。検証器・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
@@ -115,7 +115,7 @@ python3 -m venv "$validation_venv"
 ```bash
 # JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口・写し・宛先・前置き・フル段階・標準段階・最小段階・段階判定・実行段階・結末の行・フル / 標準 / 最小の並びと太字・サイレント・止めの印・守る値・対話点・報告点〉・番号だけの理由(結果の行・保留の行の例))+ 配布メタの一括検証
 python3 scripts/validate.py   # 結果の行が ERROR 0・WARN 0 で合格(WARN も直す)
-python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりのコピーの一致・完了報告の型)
+python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりのコピーの一致・完了報告の型)
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
 # —— 合否がリポジトリ外のデータで決まらないようにするため)。誤検出が出た語は渡さないか、
@@ -140,6 +140,7 @@ python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-wor
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/host-check.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/create-task/scripts/candidate-keys.py
+python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/create-task/scripts/resolve-task-store.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py
 python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("plugins/dev-workflow/skills/do-task/scripts").glob("*.py")]'   # 診断入口と内部モジュールを含む全構文
 bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
@@ -161,4 +162,5 @@ bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 
 - ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする
 - do-task の基準コミット行(書式は `> **基準コミット**: <sha>[ / 未追跡一覧: <sha256>]`。**書式の正本は do-task/SKILL.md Phase 0 の手順 5**)は対象 Issue 本文のヘッダ引用ブロックに追記する(全文置換前に取得した本文の中身と行数を検査する)
 - 設計レビューの行と do-task の検証結果の記録は、Issue 本文の末尾の `## 追加修正記録` 節(見出しはレベル 2)に置く(無ければ作る。設計レビューの行の書式は create-task/references/task-template.md の記法の規約)。基準コミット行と同じく、全文置換の前に取得した本文の中身と行数を検査する
+- 完了の記録は `## 追加修正記録` の節に、`- <YYYY-MM-DD> ` で始まり、「未完了」「中断」「停止」を含まず、「完了」と「結果 APPROVED」を含む行で書く(profile へ移すまでの暫定)。
 - 設計レビューの行の `本文` と、do-task の対話の本文の照合(委託の直前の控え・Phase 4 で照らす値)は、Issue 本文から算出する(`gh issue view <N> --json body -q .body | python3 plugins/dev-workflow/skills/create-task/scripts/task-digest.py -`)

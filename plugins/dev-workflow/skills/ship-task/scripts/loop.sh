@@ -310,6 +310,14 @@ def cmd_profile(path):
         data = {}
     if not isinstance(data, dict):
         fail(1, "profile の最上位がマッピングでない")
+    # resolve-task-store.py と同じ値の規則。起動時の固定した profile から判定する。
+    task_store = data.get("task_store")
+    if task_store is None or (isinstance(task_store, str) and task_store == ""):
+        task_store = "file"
+    if not isinstance(task_store, str) or task_store not in ("file", "github-issue"):
+        fail(1, "task_store は file または github-issue を指定する(無い・null・空文字は file)")
+    if task_store != "file":
+        fail(6, "無人ループと発見の周は task_store: github-issue に未対応。file のときだけ起動できる")
     root = data.get("root")
     if root is not None:
         if not isinstance(root, str):
@@ -3075,6 +3083,7 @@ if [ -n "$LS_TREE" ]; then
     3) die 20 no-pyyaml "profile があるのに PyYAML が無い(python3 -m pip install pyyaml などで入れる)" ;;
     4) die 20 parent-child "parent-child 構成では起動しない($(cat "$RUN_DIR/profile.err"))" ;;
     5) die 20 task-dir "$(cat "$RUN_DIR/profile.err")" ;;
+    6) die 20 task-store-unsupported "$(cat "$RUN_DIR/profile.err")" ;;
     *) die 20 profile-invalid "profile の値が不正: $(cat "$RUN_DIR/profile.err")" ;;
   esac
   while IFS= read -r line; do

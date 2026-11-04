@@ -257,6 +257,15 @@ class CompletionReportTest(unittest.TestCase):
                 self.assertIn("既存のタスクの記録か会話に内訳を残す", text)
         self.assertIn("手順 3 で本文に書いた場所を指す", report)
 
+    def test_ship_task_keeps_pre_push_issue_failure_details_in_conversation(self):
+        ship = self.skill("ship-task")
+        report = ship.split("\n4. 完了報告", 1)[1].split("\n5. ", 1)[0]
+        final_gate = ship.split("## 最終ゲート", 1)[1].split("\n## ", 1)[0]
+        for place, text in (("完了報告", report), ("最終ゲート", final_gate)):
+            with self.subTest(place=place):
+                self.assertIn("Issue 方式で push より前の公開失敗のときは、公開停止を記録するまで内訳を会話に残す(Issue には書かない)", text)
+                self.assertIn("記録の時点は Issue 方式の契約 §6 に従う", text)
+
     def test_terminal_protocols_stay_outside_the_copy_block(self):
         self.assertIn("枠の外に置く", self.report)
         self.assertIn("報告の最後の行のまま", self.report)
