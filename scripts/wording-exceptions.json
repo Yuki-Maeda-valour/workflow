@@ -1,0 +1,402 @@
+{
+  "version": 1,
+  "names": [
+    {
+      "name": "照合パターン",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/create-task/references/task-template.md",
+        "text": "照合パターン(方言は `grep -E` = POSIX 拡張正規表現)"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/references/candidate-mode.md",
+        "plugins/dev-workflow/skills/create-task/references/task-template.md",
+        "plugins/dev-workflow/skills/ship-task/SKILL.md",
+        "plugins/dev-workflow/skills/ship-task/references/discover-mode.md",
+        "plugins/dev-workflow/skills/ship-task/references/loop.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md"
+      ],
+      "forms": [
+        "照合パターン"
+      ],
+      "reason": "書式を読むパターンを指す項目名。通常の照合の手順は除かない。"
+    },
+    {
+      "name": "要バックエンド突合",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/data-audit/SKILL.md",
+        "text": "--layer=frontend 単独時は「要バックエンド突合」として報告する。"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/references/candidate-mode.md",
+        "plugins/dev-workflow/skills/data-audit/SKILL.md"
+      ],
+      "forms": [
+        "要バックエンド突合"
+      ],
+      "reason": "フロントエンドだけを調べた場合に出す、未判定の報告名。"
+    },
+    {
+      "name": "本文ダイジェスト",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/create-task/references/task-template.md",
+        "text": "- **本文ダイジェスト**(設計レビューの行の `本文` と、"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/references/task-template.md"
+      ],
+      "forms": [
+        "「本文ダイジェスト」",
+        "**本文ダイジェスト**"
+      ],
+      "reason": "定義の項目名と、その名前を引用して定義を指す箇所だけを除く。通常の本文ダイジェストの用例は数える。"
+    },
+    {
+      "name": "review/commit 照合",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "text": "## review/commit 照合"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/diff-snapshot-call.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/ship-task/SKILL.md",
+        "plugins/dev-workflow/skills/ship-task/references/loop.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md"
+      ],
+      "forms": [
+        "review/commit 照合"
+      ],
+      "reason": "レビューした内容とコミットの照らし合わせを定める節名。"
+    },
+    {
+      "name": "本文の照合",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/ship-task/SKILL.md",
+        "text": "6. **本文の照合**:"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/references/task-template.md",
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/do-task/references/runtime-requirements.md",
+        "plugins/dev-workflow/skills/ship-task/SKILL.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md"
+      ],
+      "forms": [
+        "本文の照合"
+      ],
+      "reason": "設計レビュー後の本文の一致を確かめる続行判定の項目名。対話の本文の照合を指す参照も同じ字面を保つ。"
+    },
+    {
+      "name": "一時ツリー方式",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "1. **一時ツリー方式(必須)**"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "一時ツリー方式"
+      ],
+      "reason": "外部レビュー用の一時コピーを作る手順の項目名。"
+    },
+    {
+      "name": "委託先の短い説明",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "text": "- **委託先の短い説明**(軸 4 の補足。"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/SKILL.md",
+        "plugins/dev-workflow/skills/create-task/references/task-template.md",
+        "plugins/dev-workflow/skills/data-audit/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/init-project/SKILL.md",
+        "plugins/dev-workflow/skills/reflect-decisions/SKILL.md",
+        "plugins/dev-workflow/skills/stack-research/SKILL.md",
+        "plugins/dev-workflow/skills/tool-check/SKILL.md",
+        "plugins/dev-workflow/skills/update-doc/SKILL.md"
+      ],
+      "forms": [
+        "委託先の短い説明"
+      ],
+      "reason": "起動時の説明に入れる内容を決める項目名。"
+    },
+    {
+      "name": "役割語の一覧",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "text": "## 1. 役割語の一覧"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/data-audit/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/stack-research/SKILL.md"
+      ],
+      "forms": [
+        "役割語の一覧"
+      ],
+      "reason": "役割の名前を列挙する節名。"
+    },
+    {
+      "name": "委託するサブエージェント",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
+        "text": "**委託するサブエージェント**:"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/SKILL.md",
+        "plugins/dev-workflow/skills/create-task/references/candidate-mode.md",
+        "plugins/dev-workflow/skills/data-audit/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/ship-task/references/discover-mode.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
+        "plugins/dev-workflow/skills/update-doc/SKILL.md"
+      ],
+      "forms": [
+        "委託するサブエージェント"
+      ],
+      "reason": "無人実行で別の AI へ渡す要点を定める項目名。"
+    },
+    {
+      "name": "周の Bash の書き方",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
+        "text": "**`loop.sh` の周の Bash の書き方**"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/create-task/references/candidate-mode.md",
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/base-commit.md",
+        "plugins/dev-workflow/skills/do-task/references/diff-snapshot-call.md",
+        "plugins/dev-workflow/skills/ship-task/references/discover-mode.md",
+        "plugins/dev-workflow/skills/ship-task/references/loop.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
+        "plugins/dev-workflow/skills/update-doc/SKILL.md"
+      ],
+      "forms": [
+        "周の Bash の書き方"
+      ],
+      "reason": "無人実行で使えるコマンドの書き方を定める項目名。"
+    },
+    {
+      "name": "team-lead トリアージ",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "text": "## team-lead トリアージ(必須)"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md",
+        "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md"
+      ],
+      "forms": [
+        "team-lead トリアージ"
+      ],
+      "reason": "レビューの指摘の扱いを決める節名。"
+    },
+    {
+      "name": "解決できないときの縮退",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "text": "## 6. 解決できないときの縮退"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/delegation-map.md",
+        "plugins/dev-workflow/skills/do-task/references/review-protocol.md"
+      ],
+      "forms": [
+        "解決できないときの縮退"
+      ],
+      "reason": "AI の仕組みを解決できない場合の振る舞いを定める節名。"
+    },
+    {
+      "name": "縮退判定",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**縮退判定**(すべて `git -C \"<手順 1 の --cwd と同じ値>\"` で判定する"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/base-commit.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "縮退判定"
+      ],
+      "reason": "一時ツリーを作る前に Git とコミットの有無を調べる手順名。"
+    },
+    {
+      "name": "承認より先に判定する縮退",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**承認より先に判定する縮退(#81)**"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "plugins/dev-workflow/skills/ship-task/SKILL.md"
+      ],
+      "forms": [
+        "承認より先に判定する縮退"
+      ],
+      "reason": "外部実装の承認を求める前に内蔵への切り替えを判定する項目名。"
+    },
+    {
+      "name": "縮退条件",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "実装経路の縮退条件は §12-1 の承認より前の判定"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/base-commit.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "縮退条件"
+      ],
+      "reason": "実装経路の承認前判定と take の終了値 30 の条件を指す名前。"
+    },
+    {
+      "name": "30 縮退",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**30** 縮退(stderr に `ERROR [<理由>]`。"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "**`take` の縮退**",
+        "**縮退後に保護領域が残らない**",
+        "exit 30 は縮退",
+        "**30** 縮退",
+        "縮退(終了値 30)",
+        "縮退・失敗・シグナル",
+        "`take` の縮退 `taskmd`",
+        "**縮退(2026-09-17 決定 29・32・34・49)**",
+        "下の縮退 ①〜⑤",
+        "§12-2 の縮退 ⑤",
+        "下の縮退 ②",
+        "下の縮退 ③",
+        "下の縮退 ④",
+        "呼び出し側の縮退③"
+      ],
+      "reason": "外部実装を起動する前に take が終了値 30 を返す状態名。その条件番号と後始末を指す箇所だけを、周囲の字面を含めて限定する。"
+    },
+    {
+      "name": "32 縮退",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**0** 正常終了 / **31** 引き継ぎ / **32** 縮退 / **33** 比較不能"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "**32** 縮退",
+        "32 縮退",
+        "32 = 縮退",
+        "縮退の 32",
+        "正常終了・引き継ぎ・縮退",
+        "「比較不能」は縮退でも引き継ぎでもない第 3 の結末",
+        "引き継ぎ / 縮退",
+        "「変化なし」→ 縮退"
+      ],
+      "reason": "外部実装後の compare が終了値 32 を返す状態名。終了値やほかの状態名と並ぶ箇所に限定し、通常の本文にある単独の語を除かない。"
+    },
+    {
+      "name": "正常(縮退)",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/ship-task/references/loop.md",
+        "text": "| 正常(縮退) | 終了コード 0 / 結末 `縮退`"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/ship-task/references/loop.md"
+      ],
+      "forms": [
+        "正常(縮退)"
+      ],
+      "reason": "無人ループの判定表で、作業とコミットを終えたが PR を作らなかった正常終了の行名。"
+    }
+  ],
+  "reports": [
+    {
+      "name": "実動確認",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/SKILL.md",
+        "text": "「実動確認(実際に動かして、変更どおりに動くかを見る確認): 実施不能({理由})」"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/SKILL.md"
+      ],
+      "forms": [
+        "「実動確認(実際に動かして、変更どおりに動くかを見る確認): 実施不能({理由})」"
+      ],
+      "reason": "確認を実行できないときに人へ出す表示の型。本文の初出とは別に説明を添える。"
+    },
+    {
+      "name": "互換形",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/init-project/SKILL.md",
+        "text": "互換形(AGENTS.md を読み込む行を持つ CLAUDE.md)で移行"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/init-project/SKILL.md"
+      ],
+      "forms": [
+        "互換形(AGENTS.md を読み込む行を持つ CLAUDE.md)で移行"
+      ],
+      "reason": "移行先を人に選んでもらう選択肢。本文の初出とは別に説明を添える。"
+    },
+    {
+      "name": "品質ゲート",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/ship-task/references/discover-mode.md",
+        "text": "「設計レビュー・品質ゲート(書式・型・テスト・ビルドの自動の検査)は、採用の後の /create-task・/do-task で行う」"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/ship-task/references/discover-mode.md"
+      ],
+      "forms": [
+        "「設計レビュー・品質ゲート(書式・型・テスト・ビルドの自動の検査)は、採用の後の /create-task・/do-task で行う」"
+      ],
+      "reason": "候補の PR 本文に載せる定型文。本文の初出とは別に説明を添える。"
+    },
+    {
+      "name": "外部ランナー",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**外部ランナー(レビューや実装に使う外部の AI のコマンド)のログファイルのパス**"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "**外部ランナー(レビューや実装に使う外部の AI のコマンド)のログファイルのパス**"
+      ],
+      "reason": "引き継ぎ時に人へ出す必須の報告項目。本文の初出とは別に説明を添える。"
+    },
+    {
+      "name": "照合",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "タスク MD の照合〈照らし合わせて確かめること〉・復元"
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "タスク MD の照合〈照らし合わせて確かめること〉・復元"
+      ],
+      "reason": "比較不能時に何が一致しなかったかを人へ示す報告項目。本文の初出とは別に説明を添える。"
+    }
+  ]
+}

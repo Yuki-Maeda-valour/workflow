@@ -86,10 +86,11 @@ setup.sh                            # plugin を使わない導入(コピー / s
 - 各 SKILL.md の `## 原則` の節に、人が読む文の書き方の正本 [`do-task/references/writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) を指す 1 行を、リンクの形で置く(**無いと `validate.py` が ERROR で落とす**。素の言及・節の外・コードフェンスの中は数えない)
 - skill 本文を変更するレビューでは「ホスト結合の混入」(役割語ではなくホスト機構名で委託を書いていないか)を観点に含める(design §6 が正本。対象範囲・許容リストとの関係はそちらを参照。詳細をここに列挙しない)
 - skill 本文と references を変更するレビューでは、SKILL.md と references の報告の型と、内部の言葉(27 語・置き換える語・「縮退」)と、その変更が書く文が [`writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) に沿うかも観点に含める(design §6 が正本)
+- 27 語の初出の言い換え・本文の言い換えの重複・名前でもコードでもない「縮退」は `validate.py` の検査 13〜15 が ERROR にする。名前と報告の型の除外は `scripts/wording-exceptions.json` に置く。名前を足すときは、定義・参照・一覧・検出する試験・検出しない試験を同じ変更で直す。範囲と数え方は design §6 に従う
 
 ## 検証(実装終了時に必ず実行)
 
-`validate.py` のYAML構文検査には、[requirements-dev.txt](requirements-dev.txt) の開発依存が必要です。未導入・読込失敗・必要な機能の欠落は、導入案内付きのERRORとなり、終了コード1で停止します。簡易な読み取りへ切り替えて合格にはしません。
+`validate.py` のYAML構文検査と、言葉の検査で Markdown を解釈する処理には、[requirements-dev.txt](requirements-dev.txt) の開発依存が必要です。未導入・読込失敗・必要な機能の欠落は、導入案内付きのERRORとなり、終了コード1で停止します。簡易な読み取りへ切り替えて合格にはしません。
 
 検証に使うPythonへ、次のコマンドで依存を導入します。導入と検証には同じPythonを使ってください。全回帰はLinux/GNUの通常Python環境で実行し、venv(Pythonの依存を分ける環境)を有効化しません。利用者別の依存を読む順序を確かめる回帰があるためです。
 

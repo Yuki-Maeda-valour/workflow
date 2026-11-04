@@ -1,2 +1,4 @@
 # リポジトリ検証器の frontmatter YAML 構文検査に必要。
 PyYAML==6.0.3
+# 言葉の検査で Markdown の見出し・リンク・コードを解釈する。
+markdown-it-py==3.0.0

@@ -12,7 +12,7 @@
   5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
      claude -p と、環境変数 WORKFLOW_PROJECT_NAMES に渡した周辺プロジェクト名
      (未設定なら 1 語も足さない)。行内に `<!-- validate-allow: 理由 -->` があれば
-     その行だけ免除する(8 でも効く。7・11・12 と委託の語の除外の不変条件では効かない)
+     その行だけ免除する(8 でも効く。7・11〜15 と委託の語の除外の不変条件では効かない)
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の
      存在。fragment 付き・タイトル付きも検査し、コードフェンスの中は除外する
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
@@ -57,6 +57,15 @@
      D・S・U・G・M・H の番号、決定 N、軸 N、①〜⑳・条件 ③、§N-N を対象にする。
      コードフェンス・インラインのコードも検査する。参照や手順の番号は検査しない。
      免除の印は効かない。scripts・決定録・CHANGELOG は対象にしない
+ 13. 27 語の初出の言い換え(design.md §6): 各 skill 直下の SKILL.md と references/**/*.md の
+     本文で、語を初めて出す所に決まった説明があること。語と説明は design §6 の表から読む。
+     表の欠落・重複・空欄・語数の誤りも ERROR。Markdown は markdown-it-py で解釈する。
+ 14. 同じファイルの本文で、同じ語の言い換えが 2 か所以上なら ERROR。
+ 15. 名前でもコードでもない「縮退」は ERROR。意味に合う言い換えかどうかはレビューする。
+     13〜15 の名前と報告の型の除外は scripts/wording-exceptions.json に限定する。
+     定義元・許す字面の実在、使うファイル、型・重複を検査する。免除の印は効かない。
+     除外文書は do-task/references/writing-for-people.md の正確なパスだけ。
+     templates・design 本文・README・決定録・スクリプトには広げない。
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -66,6 +75,8 @@ import os
 import re
 import shlex
 import sys
+from html import unescape
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
 
@@ -860,6 +871,327 @@ def check_number_only_reasons():
                     )
 
 
+# 検査 13〜15。語彙は design §6 の表だけに置く。名前と報告の型は JSON で限定する。
+_WORDING_EXEMPT = Path('do-task/references/writing-for-people.md')
+_WORDING_ROLES = {'team-lead', 'implementer', 'reviewer', 'checker', 'researcher'}
+_WORDING_GAP = '\ufffc'
+
+
+def wording_targets():
+    """skill 直下の SKILL.md と references の Markdown だけを列挙する。"""
+    return sorted(
+        f for f in SKILLS_DIR.rglob('*.md') if f.is_file()
+        and f.relative_to(SKILLS_DIR) != _WORDING_EXEMPT
+        and (len(f.relative_to(SKILLS_DIR).parts) == 2 and f.name == 'SKILL.md'
+             or len(f.relative_to(SKILLS_DIR).parts) >= 3
+             and f.relative_to(SKILLS_DIR).parts[1] == 'references')
+    )
+
+
+def read_wording_terms():
+    """27 語の表が一意で、全行が有効なときだけ語と言い換えを返す。"""
+    path = REPO / 'docs/design.md'
+    try:
+        body = path.read_text(encoding='utf-8')
+        sections = re.findall(r'^## 6\. [^\n]*\n(.*?)(?=^## |\Z)', body, re.M | re.S)
+        if len(sections) != 1:
+            raise ValueError('§6 はちょうど 1 節必要')
+        tables = re.findall(r'^\| 語 \| 言い換えの字面 \|\n\|[-| :]+\|\n((?:\|[^\n]*\|\n?)+)', sections[0], re.M)
+        if len(tables) != 1:
+            raise ValueError('表はちょうど 1 つ必要')
+        terms = {}
+        for row in tables[0].splitlines():
+            cells = [cell.strip() for cell in row.strip('|').split('|')]
+            if len(cells) != 2 or not all(cells):
+                raise ValueError('語と言い換えの空欄・列数の誤り')
+            word, explanation = cells
+            if word in terms or explanation in terms.values():
+                raise ValueError(f'語または言い換えの重複: {word}')
+            terms[word] = explanation
+        if len(terms) != 27:
+            raise ValueError(f'27 語必要(実際は {len(terms)} 語)')
+        return terms
+    except (OSError, UnicodeError, ValueError) as exc:
+        ERRORS.append(f'docs/design.md: 27 語の表が不正: {exc}')
+        return None
+
+
+def _wording_json_pairs(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f'JSON のキーの重複: {key}')
+        result[key] = value
+    return result
+
+
+def _wording_literal(text):
+    """一覧の字面を比較するときだけコードと強調の印を除く。"""
+    return text.replace('`', '').replace('*', '').replace('_', '')
+
+
+def _wording_bare_reduced(text):
+    # 括弧や引用符を付けただけの単独語も、名前として登録できない。
+    return _wording_literal(text).strip(' \t\r\n\'"「」『』〈〉《》【】（）()[]') == '縮退'
+
+
+def _wording_pattern(word):
+    if word == '差し戻し(差し戻す)':
+        return '差し戻[しす]'
+    if word in _WORDING_ROLES:
+        return rf'(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])'
+    return re.escape(word)
+
+
+def read_wording_exceptions(targets, terms):
+    """全ファイル免除や正規表現を受け付けず、実在する字面だけを許す。"""
+    path = REPO / 'scripts/wording-exceptions.json'
+    allowed = {f.relative_to(REPO).as_posix() for f in targets}
+    result = {}
+    try:
+        data = json.loads(path.read_text(encoding='utf-8'), object_pairs_hook=_wording_json_pairs)
+        if not isinstance(data, dict) or set(data) != {'version', 'names', 'reports'} or type(data['version']) is not int or data['version'] != 1:
+            raise ValueError('version: 1 と names・reports の配列が必要')
+        seen_names, seen_forms = set(), set()
+        for kind in ('names', 'reports'):
+            if not isinstance(data[kind], list):
+                raise ValueError(f'{kind} は配列が必要')
+            for entry in data[kind]:
+                if not isinstance(entry, dict) or set(entry) != {'name', 'definition', 'files', 'forms', 'reason'}:
+                    raise ValueError(f'{kind}: name・definition・files・forms・reason が必要')
+                for key in ('name', 'reason'):
+                    if not isinstance(entry[key], str) or not entry[key].strip():
+                        raise ValueError(f'{key} は空でない文字列が必要')
+                name = entry['name']
+                literal_name = _wording_literal(name)
+                if _wording_bare_reduced(name) or (kind, literal_name) in seen_names:
+                    raise ValueError(f'単独の縮退または名前の重複: {name}')
+                seen_names.add((kind, literal_name))
+                protected = [word for word in [*terms, '縮退']
+                             if re.search(_wording_pattern(word), literal_name)]
+                if not protected:
+                    raise ValueError(f'{name}: 名前は検査する語の全文を含める')
+                definition = entry['definition']
+                if not isinstance(definition, dict) or set(definition) != {'path', 'text'}:
+                    raise ValueError(f'{name}: 定義元の path・text が必要')
+                source = definition['path']
+                if (not isinstance(source, str) or not (
+                        source in allowed | {'plugins/dev-workflow/skills/do-task/references/writing-for-people.md'}
+                        or source.startswith('docs/') and Path(source).suffix == '.md')
+                        or '..' in Path(source).parts):
+                    raise ValueError(f'{name}: 定義元のパスが範囲外')
+                definition_path = REPO / source
+                if not definition_path.resolve().is_relative_to(REPO.resolve()):
+                    raise ValueError(f'{name}: 定義元がリポジトリの外')
+                literal = definition['text']
+                if not isinstance(literal, str) or not literal.strip() or literal not in definition_path.read_text(encoding='utf-8'):
+                    raise ValueError(f'{name}: 定義の字面が存在しない')
+                if literal_name not in _wording_literal(literal):
+                    raise ValueError(f'{name}: 定義に名前の字面がない')
+                for key in ('files', 'forms'):
+                    values = entry[key]
+                    if (not isinstance(values, list) or not values
+                            or any(not isinstance(v, str) or not v.strip() or '\n' in v or '\r' in v for v in values)
+                            or len(values) != len(set(values))):
+                        raise ValueError(f'{name}: {key} は空・改行・重複のない文字列の配列が必要')
+                if any(f not in allowed for f in entry['files']):
+                    raise ValueError(f'{name}: 使うファイルが検査の範囲外または存在しない')
+                contents = {f: (REPO / f).read_text(encoding='utf-8') for f in entry['files']}
+                for form in entry['forms']:
+                    literal_form = _wording_literal(form)
+                    if _wording_bare_reduced(form):
+                        raise ValueError(f'{name}: 縮退だけを許す形は不可')
+                    # 終了値の状態名だけは、番号を省いた既存の参照形も登録する。
+                    # 「縮退」全体を含む前後の文脈を必須とし、他の語は隠さない。
+                    status_name = literal_name in ('30 縮退', '32 縮退')
+                    if not (literal_name in literal_form or status_name and '縮退' in literal_form):
+                        raise ValueError(f'{name}: 許す形に名前の字面がない: {form}')
+                    covered = '縮退' if status_name else literal_name
+                    rest = literal_form.replace(covered, _WORDING_GAP)
+                    if (status_name and literal_form.count('縮退') != 1
+                            or any(re.search(_wording_pattern(word), rest) for word in [*terms, '縮退'])):
+                        raise ValueError(f'{name}: 許す形に名前以外の検査語がある: {form}')
+                    if not any(form in body for body in contents.values()):
+                        raise ValueError(f'{name}: 許す形が存在しない: {form}')
+                    for f in entry['files']:
+                        if (f, form) in seen_forms:
+                            raise ValueError(f'{name}: 許す形の重複: {f}: {form}')
+                        seen_forms.add((f, form))
+                        result.setdefault(f, {})[form] = protected
+        return result
+    except (OSError, UnicodeError, ValueError, TypeError) as exc:
+        ERRORS.append(f'scripts/wording-exceptions.json: 言葉の除外一覧が不正: {exc}')
+        return None
+
+
+def wording_markdown():
+    """Markdown の構文を解釈し、各 inline token に元の行を残す。"""
+    try:
+        from markdown_it import MarkdownIt
+        from markdown_it.parser_inline import _rules
+        md = MarkdownIt('commonmark')
+        # 強調の処理後に text を結合すると、改行をまたぐリンクの後の行番号を失う。
+        md.inline.ruler2.disable('fragments_join')
+        md.core.ruler.disable('text_join')
+
+        def located(rule):
+            def wrapped(state, silent):
+                start, count = state.pos, len(state.tokens)
+                if not rule(state, silent):
+                    return False
+                if not silent:
+                    if state.pending:
+                        state.pushPending()
+                    for token in state.tokens[count:]:
+                        token.meta.setdefault('wording_line', state.src.count('\n', 0, start))
+                        if token.type == 'code_inline':
+                            n = len(token.markup)
+                            token.meta.setdefault('wording_raw', state.src[start + n:state.pos - n])
+                return True
+            return wrapped
+
+        for name, rule in _rules:
+            md.inline.ruler.at(name, located(rule))
+        return md
+    except Exception as exc:
+        command = (f'{shlex.quote(sys.executable)} -m pip install -r '
+                   f'{shlex.quote(str(REPO / "requirements-dev.txt"))}')
+        ERRORS.append(f'Markdown の解析に必要な markdown-it-py を利用できない: {exc!r}。'
+                      f'検証用の依存を導入・修復してください: {command}')
+        return None
+
+
+def wording_body(body, md):
+    """本文の (行番号, 表示文字列) を返す。見出し・コード・リンク先は数えない。"""
+    # frontmatter は改行を残して除く。references でも同じ形だけを扱う。
+    body = re.sub(r'\A---[ \t]*\n.*?^(?:---|\.\.\.)[ \t]*(?:\n|$)',
+                  lambda m: '\n' * m[0].count('\n'), body, count=1, flags=re.M | re.S)
+    result = {}
+
+    def add_children(children, base):
+        for token in children:
+            line = base + token.meta.get('wording_line', 0)
+            if token.type == 'code_inline':
+                raw = token.meta['wording_raw']
+                text = raw if '\n' in raw else token.content if token.content in _WORDING_ROLES else _WORDING_GAP
+            elif token.type in ('text', 'text_special'):
+                # 文字参照の生成改行は、元ファイルの行を増やさず語の間を分ける。
+                text = token.content.replace('\n', _WORDING_GAP)
+            elif token.type == 'html_inline':
+                text = _WORDING_GAP if token.content.startswith('<!--') else ''
+            elif token.type == 'image':
+                # 画像の説明は本文。リンク先だけを除く。
+                add_children(token.children or [], line)
+                continue
+            else:
+                continue
+            for offset, part in enumerate(text.split('\n')):
+                result.setdefault(line + offset, []).append(part)
+
+    env = {}
+    tokens = md.parse(body, env)
+    heading = False
+    for token in tokens:
+        if token.type == 'heading_open':
+            heading = True
+        elif token.type == 'heading_close':
+            heading = False
+        elif token.type == 'inline' and not heading:
+            add_children(token.children or [], token.map[0] + 1)
+        elif token.type == 'html_block':
+            # 属性内の <!-- と本当のコメントを区別する。コメントの後半の本文は残す。
+            class BodyHTML(HTMLParser):
+                def handle_data(self, data):
+                    start = token.map[0] + self.getpos()[0]
+                    for offset, part in enumerate(data.split('\n')):
+                        result.setdefault(start + offset, []).append(part)
+
+                def handle_comment(self, data):
+                    start = token.map[0] + self.getpos()[0]
+                    result.setdefault(start, []).append(_WORDING_GAP)
+
+                def handle_entityref(self, name):
+                    self.handle_data(unescape(f'&{name};').replace('\n', _WORDING_GAP))
+
+                def handle_charref(self, name):
+                    self.handle_data(unescape(f'&#{name};').replace('\n', _WORDING_GAP))
+
+            parser = BodyHTML(convert_charrefs=False)
+            parser.feed(token.content)
+            parser.close()
+    return [(line, ''.join(parts)) for line, parts in sorted(result.items())]
+
+
+def _wording_close(text, start):
+    pairs = {'(': ')', '〈': '〉'}
+    stack = []
+    for pos in range(start, len(text)):
+        char = text[pos]
+        if char in pairs:
+            stack.append(pairs[char])
+        elif char in pairs.values():
+            if not stack or stack.pop() != char:
+                return None
+            if not stack:
+                return pos
+    return None
+
+
+def _wording_explained(text, match, explanation):
+    tail = re.match(r'[一-鿿々ァ-ヶーA-Za-z0-9]{0,8}([(〈])', text[match.end():])
+    if tail:
+        start = match.end() + tail.end() - 1
+        close = _wording_close(text, start)
+        if close is not None and text[start + 1:close].startswith(explanation):
+            return True
+    # 逆順は「説明(語)」だけ。間の空白・閉じ忘れ・種類違いは認めない。
+    if match.start() and text[match.start() - 1] in '(〈':
+        start = match.start() - 1
+        close = _wording_close(text, start)
+        if close == match.end() and text[:start].endswith(explanation):
+            return True
+    return False
+
+
+def check_wording():
+    """初出の説明・説明の重複・名前以外の縮退を ERROR にする。"""
+    terms = read_wording_terms()
+    targets = wording_targets()
+    if terms is None:
+        return
+    exceptions = read_wording_exceptions(targets, terms)
+    md = wording_markdown()
+    if exceptions is None or md is None:
+        return
+    for f in targets:
+        rel = f.relative_to(REPO).as_posix()
+        body = f.read_text(encoding='utf-8', errors='replace')
+        # 許す形の字面だけを隠す。後ろに足された本文や同じ行の別の語は残す。
+        forms = exceptions.get(rel, {})
+        if forms:
+            def exclude(match):
+                pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
+                return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
+            body = re.sub('|'.join(re.escape(form) for form in sorted(forms, key=len, reverse=True)),
+                          exclude, body)
+        lines = wording_body(body, md)
+        for word, explanation in terms.items():
+            pattern = _wording_pattern(word)
+            found = [(no, _wording_explained(line, m, explanation))
+                     for no, line in lines for m in re.finditer(pattern, line)]
+            if not found:
+                continue
+            explained = [no for no, ok in found if ok]
+            if not found[0][1]:
+                later = f'。説明のある行: {", ".join(map(str, explained))} 行' if explained else ''
+                ERRORS.append(f'{rel}:{found[0][0]}: 言い換えの初出 {word!r} -> ({explanation}){later}(design.md §6)')
+            for no in explained[1:]:
+                ERRORS.append(f'{rel}:{no}: 言い換えの重複 {word!r}。本文では 1 か所にする(最初の説明: {explained[0]} 行、design.md §6)')
+        for no, line in lines:
+            for _ in re.finditer('縮退', line):
+                ERRORS.append(f'{rel}:{no}: 名前でもコードでもない「縮退」。意味に合う言葉へ変える(design.md §6)')
+
+
 def main() -> int:
     # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
     if yaml_loader() is not None:
@@ -870,6 +1202,7 @@ def main() -> int:
         check_line_length()
         check_replaced_words()
         check_number_only_reasons()
+        check_wording()
         check_delegation_words()
         check_host_cli_words()
         check_delegation_map_invariant()
