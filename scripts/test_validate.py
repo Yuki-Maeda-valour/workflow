@@ -1864,6 +1864,16 @@ class WordingTest(unittest.TestCase):
                 self.write_exceptions(names=[entry])
                 self.assert_dictionary_error()
 
+    def test_one_character_status_name_is_not_a_mark(self):
+        # 定義の行の ` / ` の並びにある状態名でも、1 字なら印にできない。同じ行の 2 字以上の状態名は通る。
+        definition = "**32** 縮退 / 可 / 比較不能"
+        entry = self.short_entry("縮退と可", marks=("可",), definition=definition)
+        self.write_exceptions(names=[entry])
+        self.assertIn("印は", self.assert_dictionary_error()[0])
+        entry = self.short_entry("縮退と比較不能", marks=("比較不能",), definition=definition)
+        self.write_exceptions(names=[entry])
+        self.assert_wording(None, [])
+
     def test_short_marks_are_limited_to_numbers_circled_numbers_and_status_names(self):
         # 印は、数字だけの終了値の番号・①〜⑳・定義の行で **…** か ` / ` で区切った状態名(2 字以上)に限る。
         # 下の印はどれも定義の行に在るが、種類が違うので認めない(1 字の「の」で縮退を隠せないように)。
