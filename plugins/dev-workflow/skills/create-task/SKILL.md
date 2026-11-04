@@ -25,7 +25,7 @@ argument-hint: "<タスク内容の説明 | 候補_ のパス> [--issue=<番号>
 ## タスクの置き場
 
 採用・候補モード・Phase 0 の前に、[Issue 方式の契約](../do-task/references/github-issue.md) §1 で `task_store` を検査する。
-- `file`(既定)は下の手順。`github-issue`、または権威参照ファイルが Issue を正本にする場合は、同書 §2〜4 で対象・保存・報告を読み替える。どちらも `--issue=<番号>` を使える。
+- `file`(既定)は下の手順。`github-issue`、または権威参照ファイルが Issue を正本(ほかが合わせる元)にする場合は、同書 §2〜4 で対象・保存・報告を読み替える。どちらも `--issue=<番号>` を使える。
 - Issue 方式の候補モード・無人実行・候補ファイルの採用は、調査や書き込みを始めず理由を示して止める。
 
 ## オプション
@@ -45,7 +45,7 @@ argument-hint: "<タスク内容の説明 | 候補_ のパス> [--issue=<番号>
 
 無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=refactor --unattended`)が呼ぶ。
 - リファクタ分析の指摘を、承認を待たずに task_dir の `候補_{名}.md` として書き出し、人に確かめる場面を出さない。
-- 引数・人に確かめる場面と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本(ほかが合わせる元)は [references/candidate-mode.md](references/candidate-mode.md)、
+- 引数・人に確かめる場面と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本は [references/candidate-mode.md](references/candidate-mode.md)、
 - 足切り・上限・単位と識別子・セキュリティ由来の除外は [references/refactor-analysis.md](references/refactor-analysis.md) §6。
 - 以下の各所には 1 行の分岐だけを置く。
 

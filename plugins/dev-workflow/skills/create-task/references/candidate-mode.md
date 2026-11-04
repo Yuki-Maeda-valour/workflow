@@ -93,7 +93,7 @@
   - ok の条件: ヘッダに発見元の行がちょうど 1 行(`--source` があればその値と一致)・指摘キーの行がちょうど 1 行・無人実行のメタ行が無い・見送りの行と見送りの書式違いの行が無い・`## 追加修正記録` の見出しが無い・チェックボックス形の行(`^\s*- \[( |x|X)\]`。フェンスの中も)が無い
   - `code`: `source-count`(発見元の行が 1 行でない)・`source-mismatch`・`key-count`(指摘キーの行が 1 行でない)・`unattended-meta`・`skipped`(見送りの行)・`skipped-malformed`(見送りの書式違い)・`record-section`・`checkbox`・`unreadable`。`detail` は人向けの文で、判定に使わない。収集の `problems` も同じ形
   - exit 0 = ok / 1 = ok でない・読めない / 2 = 使い方の誤り
-  - commit した候補は `git show HEAD:./<パス> | python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> -` の形で確かめられる(許可の仲介の構文に収まる)
+  - commit した候補は `git show HEAD:./<パス> | python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> -` の形で確かめられる(許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉の構文に収まる)
 - 取り込む兄弟の script(`resolve-task-dir.py`・`task-digest.py`)より前に `sys.dont_write_bytecode` を立て、プラグインルートに `__pycache__` を作らない(周の Bash では `PYTHONDONTWRITEBYTECODE` を渡せない)
 
 ## 6. 結果の行
@@ -117,7 +117,7 @@
 
 - 周の Bash の書き方・委託するサブエージェントの要点・G1 は、unattended-mode.md のとおりに効く
 - data-audit の Phase 2 の委託と、create-task の refactor の researcher の委託にも、unattended-mode.md の「委託するサブエージェント」の項の要点を、要約し直さずに委託プロンプトへコピーする
-- 引用符の外のグロブで一覧を取る書き方は、許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)に拒否される。既知のキーは `candidate-keys.py` で集める
+- 引用符の外のグロブで一覧を取る書き方は、許可の仲介に拒否される。既知のキーは `candidate-keys.py` で集める
 - 許可の拒否(G1)は、候補モードでは常に失敗扱い(`保留_` にするタスク MD が無い)。書きかけの `候補_` は残す(worktree ごと残る)
 - **書き込みの範囲**: task_dir の新しい `候補_*.md` と、状態ファイル(`.claude/reviews/`・`.claude/grasp.md`)だけ。data-audit の原則 1 と create-task の原則 1 の例外
 - **許可の前提**: `候補_` の `Write` は、保護パスの外の worktree の中への書き込みなので、編集の自動許可で確認に回らず、許可の仲介の hook に届かない(実装モードで do-task がソースやタスク MD を書くのと同じ経路)。task_dir が保護パスの下なら、`loop.sh` が起動時に止める([../../ship-task/references/loop.md](../../ship-task/references/loop.md) §3 の 3)。確認に回る構成(`loop.sh` の `--allow-classifier` で分類器が確認に回したときなど)では、hook が W の外として拒否し、G1 で失敗扱いになる
