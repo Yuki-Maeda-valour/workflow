@@ -632,7 +632,7 @@ class ValidateTest(unittest.TestCase):
     def test_replaced_words_of_333_are_errors(self):
         cases = (
             ("各レビュー役のモデルの名前と版", "'レビュー役'", "レビュアー"),
-            ("外部の実装役は `--cwd` で起動する", "'実装役'", "implementer"),
+            ("外部の実装役は `--cwd` で起動する", "'実装役'", "実装担当"),
             ("レビュー役・まとめ役からの報告", "'まとめ役'", "team-lead"),
             ("検証役は新しく取得する", "'検証役'", "team-lead"),
             ("全回帰はLinux/GNUの通常Python環境で実行し", "'全回帰'", "全回帰テスト"),
@@ -661,9 +661,9 @@ class ValidateTest(unittest.TestCase):
     def test_replaced_words_of_333_lookalikes_are_not_flagged(self):
         # 新しい言い方・後ろが「テスト」の「全回帰」・決まった行 `- 検証器記録:`(「検証器」は探さない)
         lines = ("全回帰テストを流す", "全回帰テスト(回帰テストをすべて流すこと)", "各レビュアーのモデルの名前と版",
-                 "外部の implementer は `--cwd` で起動する", "実装を受け持つ AI", "レビュアーと team-lead からの報告",
+                 "外部の実装担当は `--cwd` で起動する", "実装を受け持つ AI", "レビュアーと team-lead からの報告",
                  "結果を確かめる側の AI", "回帰テストとして保存した", "テスト用の [Issue #331]", "自動メモリの無効化の実機での確認",
-                 "短い試しのファイル", "`AGENTS.md` を直接読めない環境", "決定と案をはっきり分ける", "一時ファイルの状態",
+                 "短い試しのファイル", "`AGENTS.md` を直接読めない環境", "決定と案をはっきり分ける", "一時ファイルやフォルダの状態",
                  "子プロセスとしての起動", "ファイルを持たないタスク", "段階移行と後戻りの防止", "§5 の記述を合わせる",
                  "要件定義書を書き起こす", "- 検証器記録: APPROVED / 根拠 sha256:<64桁> / review:<64桁>",
                  "`validate.py` の検査 11", "回帰の疑い", "役割語(AI の役割の名前)")
@@ -2387,6 +2387,43 @@ class WordingTest(unittest.TestCase):
         self.assertEqual(1, len(errors), errors)
         self.assertIn("markdown", errors[0].lower())
         self.assertIn("requirements-dev.txt", errors[0])
+
+
+class ReplacedWordsInWritingRulesTest(unittest.TestCase):
+    """#333: 検査 11 の置き換える語(validate.py の _REPLACED_WORDS)が、会話の決まりの言い換え表にも載っていること。
+
+    言い換えは _REPLACED_WORDS・design §6 の定義の行・言い換え表(writing-for-people.md の 4 節)の 3 か所にある。
+    検査 11 は文書しか見ないので、言い換え表だけ漏れると、その語が会話で使われる(#333 の「写し」)。
+    補足が「置き換える語」で始まる行の 1 列目か補足に、語の正規表現が当たることを確かめる。
+    """
+
+    @staticmethod
+    def replaced_word_rows(text):
+        """言い換え表の行のうち、補足が「置き換える語」で始まる行の (1 列目, 補足) を返す。
+        セルは、インラインのコードの外の `|` で分ける。"""
+        section = text.split("\n## 4. ", 1)[1].split("\n## 5. ", 1)[0]
+        rows = []
+        for line in section.split("\n"):
+            if not line.startswith("| ") or line.startswith("| 言葉 |"):
+                continue
+            cells = [cell.strip() for cell in re.split(r"\|(?=(?:[^`]*`[^`]*`)*[^`]*$)", line)[1:-1]]
+            if len(cells) == 3 and cells[2].startswith("置き換える語"):
+                rows.append((cells[0], cells[2]))
+        return rows
+
+    def test_every_replaced_word_is_in_the_writing_rules_table(self):
+        namespace = runpy.run_path(str(SOURCE_REPO / "scripts" / "validate.py"), run_name="validate_words")
+        words = namespace["_REPLACED_WORDS"]
+        self.assertTrue(words)
+        text = (SOURCE_REPO / SKILLS_REL / WRITING_RULES_REL).read_text(encoding="utf-8")
+        rows = self.replaced_word_rows(text)
+        self.assertTrue(rows, "言い換え表に、補足が「置き換える語」の行が無い")
+        for pattern, word, _guidance, _group in words:
+            with self.subTest(word=word):
+                self.assertTrue(
+                    any(re.search(pattern, term) or re.search(pattern, note) for term, note in rows),
+                    f"{word} が言い換え表(writing-for-people.md の 4 節)の「置き換える語」の行に無い",
+                )
 
 
 if __name__ == "__main__":

@@ -75,7 +75,7 @@ PYTHON
   - 確かめていない版: Linux の 8.30・8.31・9.0〜9.6・9.8 以降と、8.30 より前。
   - 8.30 より前の `cp` は `--reflink=never` を受け付けない(NEWS による)。そのときは、どの別名でも試しのコピーが失敗し、`fd-copy-unavailable` で止まる。
     - この止まる動きは、`--reflink=never` を断って終了値 1 で終わる `cp` の代わりの実行物のテスト(`scripts/test_restore_taskmd.py`)で確かめた。8.30 より前の実機では未確認。
-- 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。fd 別名を通した短いコピーが、どの別名でも成り立たなければ、対象を変えず `fd-copy-unavailable` で停止する。対象親内の試しの失敗も対象へ公開しない。一時ファイルの残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
+- 必須 API や実行物が無ければ、対象を変えず `runtime-unavailable` で停止する。fd 別名を通した短いコピーが、どの別名でも成り立たなければ、対象を変えず `fd-copy-unavailable` で停止する。対象親内の試しの失敗も対象へ公開しない。一時ファイルやフォルダの残存・回収状態は `TEMP` で報告する。通常のパスコピーへ戻さない。
 - Linux の実測は Python 3.10.12。mode・同一所有者の uid/gid・ns mtime・利用可能な通常の user xattr・POSIX ACL を GNU `cp -a` と比較する。読取り後の atime 不変、特権属性、異なる所有者、SELinux 属性の新たな保証はしない。
 - macOS では、`/dev/fd/<番号>` を `stat` で調べた device 番号が、開いたファイル(`fstat`)と違う(inode は同じ)。
   - 補助の `restore-taskmd.py` は、専用領域内の試しでこの食い違いを見つけ、`cp` を起動する前に `fd-copy-unavailable` で止まり、対象を変えない(#285 で直した後に Mac の実機で確認)。
@@ -104,7 +104,7 @@ restore_taskmd_supervised() {
 <!-- restore-taskmd-supervision:end -->
 
 呼出しは `restore_taskmd_supervised <implement-guard.sh> --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>` とし、各値を独立した引数で渡す。shell 文字列へ組み立てず、`--foreground` を足さない。
-330秒後の TERM と追加5秒後の KILL は、今回起動したプロセス群だけを対象とする。保存 PID や他の利用者プロセスを探索しない。124・137・監督の失敗・欠落/不正な応答は `TOUCHED=unknown / TEMP=unknown` として止め、自動再実行や推測した一時ファイルの削除をしない。通常の pipe 送出待ちも打ち切る。カーネル I/O が KILL でも終了しない場合は335秒以内の停止確認を保証せず、停止未確認として保持する。
+330秒後の TERM と追加5秒後の KILL は、今回起動したプロセス群だけを対象とする。保存 PID や他の利用者プロセスを探索しない。124・137・監督の失敗・欠落/不正な応答は `TOUCHED=unknown / TEMP=unknown` として止め、自動再実行や推測した一時ファイルやフォルダの削除をしない。通常の pipe 送出待ちも打ち切る。カーネル I/O が KILL でも終了しない場合は335秒以内の停止確認を保証せず、停止未確認として保持する。
 
 結果形式、300秒の作業予算、子の停止・回収、同じ UID の競合限界は [external-runners.md](external-runners.md) §12-2 が正本。
 

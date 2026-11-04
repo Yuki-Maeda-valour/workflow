@@ -154,7 +154,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_do_task_handoff_and_failed_finalization_do_not_commit(self):
         phase = section(self.ship, "## Phase 3: 実装(/do-task)")
         self.contains(phase, "/do-task --issue=<番号>", "保持した対象・R", "stage・commit・文書同期へ進まない")
-        self.contains(self.shipping, "外部の implementer への承認は求めず", "本文のコピーを `--task-md` に渡さない",
+        self.contains(self.shipping, "外部の実装担当への承認は求めず", "本文のコピーを `--task-md` に渡さない",
                       "finalize` の期待本文を共通の `update`", "新たな実装 commit は作らない")
 
     def test_commit_reads_external_body_instead_of_staging_a_task(self):
