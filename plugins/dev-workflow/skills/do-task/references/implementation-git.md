@@ -4,7 +4,7 @@
 
 ## 委託前の確認と引き渡し
 
-必要環境の正本(ほかが合わせる元)は [runtime-requirements.md](runtime-requirements.md) とする。Git 対象では、その実行可能な確認を委託直前に通す。Python 3・標準ライブラリ・構文・入口・事前検査・同梱依存が利用不能なら、内蔵担当を起動・再依頼せず停止する。本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる)の Python 不在の例外は適用しない。素の Git・shell での代行・外部実装への切り替えで続行しない。非 Git は既存判定と運用を維持する。
+必要環境の正本(ほかが合わせる元)は [runtime-requirements.md](runtime-requirements.md) とする。Git 対象では、その実行可能な確認を委託直前に通す。Python 3・標準ライブラリ・構文・入口・事前検査・同梱依存が利用不能なら、内蔵担当を起動・再依頼せず停止する。本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる)の Python 不在の例外は適用しない。補助スクリプトを通さない Git の直接の実行・shell での代行・外部実装への切り替えで続行しない。非 Git は既存判定と運用を維持する。
 
 公開する操作は次の2つだけである。`--help` は各操作の引数を表示する。
 
@@ -64,7 +64,7 @@ filter 名を表示用 NOTE から組み立てず、`eval`、shell 展開、名�
 - rev は1〜1024文字、先頭 `-`・NUL・改行を拒否。`rev-parse --verify --end-of-options <rev>^{commit}` で commit ID へ解決する。
 - path はルート相対リテラル。空・絶対パス・`..` 要素を拒否し、空白・日本語は許可する。4操作の path は反復でき、省略時は全体。`--` と `:(literal)` を強制し、大文字小文字もそのまま照合する。show の file は object 内のパスなので pathspec と区別する。
 - path 以外の全オプションは1回限り。同じ値、`--name=value` と分離形の混在、cached フラグの重複も拒否する。
-- 未知の操作、書込み、`-c`、`--config-env`、`--output`、`--ext-diff`、`--textconv`、`--exec`、shell 文字列を受け付けない。汎用引数や command は無い。
+- 未知の操作、書き込み、`-c`、`--config-env`、`--output`、`--ext-diff`、`--textconv`、`--exec`、shell 文字列を受け付けない。汎用引数や command は無い。
 
 安全用のオプションは [base-commit.md](base-commit.md) の共通固定値と一致させる。status と diff は `--ignore-submodules=dirty`、diff と show は `--no-ext-diff --no-textconv --submodule=short --no-color`、log と show は `--no-show-signature --no-decorate --no-color` を強制する。利用者の引数から取り消せない。
 
@@ -73,7 +73,7 @@ filter 名を表示用 NOTE から組み立てず、`eval`、shell 展開、名�
 - run の stdout は通常の Git 出力だけ。注意と失敗は stderr。prepare の失敗時は JSON を出さない。
 - rc は成功0、入力不正2、起動・解析・Git 失敗20、承認情報不一致または事前検査の拒否22。事前検査の2/20/22は維持し、未知の rc は20にして元の値を stderr に残す。
 - 待ち時間は事前検査120秒、内部確認と本体 Git は各30秒。時間切れを空出力の成功にしない。Git の失敗時は部分的な stdout があり得る。非0の結果を成功した観察として使わない。
-- 書込み・設定変更・ネットワーク取得、品質コマンド内の任意の Git は対象外。既存の snapshot・保護・完了条件を置き換えない。
+- 書き込み・設定変更・ネットワーク取得、品質コマンド内の任意の Git は対象外。既存の snapshot・保護・完了条件を置き換えない。
 - HOME・PATH・利用者環境全体の固定や隔離、未停止プロセスの終了、比較不能からの復帰、別セッション再開は保証しない。検査と読取りの間の設定変更の競合も排除しない。
 - 正式入口の利用は手順の義務であり、任意の直接 Git を OS の権限で封じない。正規 filter の無効化のテストを、LFS の追加調査や攻撃再現と扱わない。
 - 出力の機密除外は行わない。既存の機密ファイル除外と報告への値の混入禁止を維持する。無効化後は生の作業ツリーが見え、通常の filter 使用時と差分が変わり得る。

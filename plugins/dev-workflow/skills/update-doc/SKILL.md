@@ -227,7 +227,7 @@ except (Exception, SystemExit) as exc:
 
 1. **性能の段が違う複数レビュアーを単一メッセージで並列起動**する。各エージェントに `reviewer-strong` / `reviewer-alt`(3 体目以降は `reviewer-alt2` / `reviewer-alt3` …)の `name` を付ける。更新後のドキュメント一式と「合格基準」を渡し、指摘リスト JSON で返させる
    - 合格基準: 実コードとの整合 / 網羅性(今回の変更範囲)/ 古い情報の不在 / ドキュメント間の無矛盾 / **タグ・ADR・図・索引の整合** / フォーマット規約
-   - 無人(`--unattended`)では、[unattended-mode.md](../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる(「拒否されたら打ち直さずに報告する」は要点の最後の行。レビュアー以外に委託するときも同じ)
+   - 無人(`--unattended`)では、[unattended-mode.md](../ship-task/references/unattended-mode.md) の「委託するサブエージェント」の項の要点を、要約し直さずにそのまま委託プロンプトに入れる(「拒否されたら、もう一度実行せずに報告する」は要点の最後の行。レビュアー以外に委託するときも同じ)
    - **外部ランナー(宣言時のみ・オプトイン)**: `--runners=<名前,...>` または profile の `features.runners` が宣言されている場合に限り、外部 CLI レビュアーを追加する(宣言が無ければ内蔵編成のみで、外部 CLI を探しに行かない)。
      - 手順・判定・終了コード・機密ガードの契約は [../do-task/references/external-runners.md](../do-task/references/external-runners.md) が正本(ここでは再掲しない)。参照先が存在しない構成(skill を単体でコピーした部分導入)では外部ランナーを無効化して報告する
    - **委託の解決(役割語 → 実行バックエンド)**: 役割語の解決は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) が正本。解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、更新完了として扱わない

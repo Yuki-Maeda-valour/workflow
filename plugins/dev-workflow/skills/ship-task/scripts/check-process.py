@@ -150,7 +150,7 @@ def stop_group(process, grace):
             # 不在とは扱わず、既存の期限内で ESRCH を確認するまで待つ。
             pass
         if time.monotonic() >= deadline:
-            raise RecoveryError("プロセス群の不在を確認できない")
+            raise RecoveryError("プロセスグループの不在を確認できない")
         time.sleep(.02)
 
 
@@ -201,8 +201,8 @@ def posix_command(argv, cwd, env, timeout, grace, directory, stdout, stderr, sto
             # この呼出しまで poll/wait/communicate をしない。異常終了も未回収で保持する。
             stop_group(process, grace)
         finally:
-            # 読み口は群の停止を確かめるまで閉じない。先に閉じると、TERM で終わったコマンドの通知を
-            # anchor が書けずに終わり、群が回収前の終了済みだけになる(macOS はその群への KILL を EPERM で返す)。
+            # 読み口はプロセスグループの停止を確かめるまで閉じない。先に閉じると、TERM で終わったコマンドの通知を
+            # anchor が書けずに終わり、プロセスグループが回収前の終了済みだけになる(macOS はそのプロセスグループへの KILL を EPERM で返す)。
             os.close(read_fd)
     if problem:
         raise RecoveryError(str(problem)) from problem
@@ -260,7 +260,7 @@ def anchor(fd, nonce, argv):
         process = subprocess.Popen(argv, close_fds=True)
         rc = process.wait()
     except OSError:
-        rc = 127  # 実コマンドの起動失敗。anchor 自身は群の停止まで残る。
+        rc = 127  # 実コマンドの起動失敗。anchor 自身はプロセスグループの停止まで残る。
     os.write(fd, (json.dumps({'nonce': nonce, 'returncode': rc}) + '\n').encode())
     while True:
         signal.pause()

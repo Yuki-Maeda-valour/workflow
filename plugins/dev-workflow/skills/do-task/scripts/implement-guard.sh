@@ -191,7 +191,7 @@
 #   未設定か偽)のとき、GIT_CONFIG_SYSTEM の値に関係なく `<導入先>/share/git-core/gitconfig` を読む。take はこの
 #   ファイルを、`git --man-path` の値(`/…/share/man` の形だけ受け付け、末尾の `/share/man` を外したもの)から
 #   求めて保持候補にする(ファイルが無くても候補にする)。求められないときは終了値 20 で止める。
-#   保持候補に無い読込先を Git が読むときも終了値 20 で止め、原因の読込先(パスか出典の種類)と選べる
+#   保持候補に無い読み込み先を Git が読むときも終了値 20 で止め、原因の読み込み先(パスか出典の種類)と選べる
 #   実行条件を stderr に出す(設定の値・本文・Git の stderr は出さない)。
 #   初回管理パス特定前の設定と、検査中だけの並行変更は開始時信頼境界の外である。
 #   設定値を含まないのは新規出典記録と診断だけ。既存の生 diff・未追跡退避の範囲は変えない。
@@ -327,7 +327,7 @@ usage() { sed -n '2,/^# --- end usage ---$/p' "$0" | sed '$d' >&2; }
 
 fail_usage() { echo "ERROR [usage] $*" >&2; trap - ERR; exit 2; }
 fail_internal() { echo "ERROR [internal] $*" >&2; trap - ERR; exit 20; }
-fail_config_origin() { # 設定の出典の収集の失敗(理由が控えてあるもの)。原因の読込先と選べる実行条件を出す。値・本文・Git の stderr は出さない
+fail_config_origin() { # 設定の出典の収集の失敗(理由が控えてあるもの)。原因の読み込み先と選べる実行条件を出す。値・本文・Git の stderr は出さない
   local detail=""
   case "${CONFIG_ORIGIN_ERR:-}" in
     unknown-file) detail="保持候補に無い設定ファイルを Git が読む: $(path_field "$CONFIG_UNKNOWN_ORIGIN")" ;;
@@ -338,8 +338,8 @@ fail_config_origin() { # 設定の出典の収集の失敗(理由が控えてあ
   esac
   {
     echo "ERROR [internal] 設定の出典を安全に収集・保存できない: $detail"
-    echo "NOTE: 選べる実行条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する"
-    echo "NOTE: 選べる実行条件 2: 設定の読込先をすべて保持候補にできる Git を PATH で選ぶ"
+    echo "NOTE: 選べる実行条件 1: その読み込み先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する"
+    echo "NOTE: 選べる実行条件 2: 設定の読み込み先をすべて保持候補にできる Git を PATH で選ぶ"
     if [ "${CONFIG_ORIGIN_ERR:-}" = system-var ]; then
       echo "NOTE: 選べる実行条件 3: /etc/gitconfig などの system 設定を読まなくてよいなら、take から cleanup までを同じ GIT_CONFIG_SYSTEM=/dev/null の環境で実行する"
     fi
