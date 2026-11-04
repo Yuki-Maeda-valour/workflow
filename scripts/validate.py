@@ -1286,20 +1286,34 @@ def _wording_form_starts_ok(form, match):
     return not re.search(r'[0-9;>)\]]$', before)
 
 
-def _wording_quote_verb_follows(form, match):
-    """引用の中の許す形は、次の行の頭の > を読み飛ばし、同じ段落の続きの動詞を探す(design §6)。
+# 引用の行頭: 字下げ → 箇条書きの印(あれば)→ `>` と後ろの空白(0〜3 字)の並び。`>` の数が引用の深さ。
+_WORDING_QUOTE_LINE = re.compile(r'[ \t]*(?:(?:[-*+]|[0-9]+[.)])[ \t]+)*((?:>[ \t]{0,3})+)')
+# 次の行は箇条書きの印を許さない(印があれば別の項目)。
+_WORDING_QUOTE_NEXT = re.compile(r'[ \t]*((?:>[ \t]{0,3})+)')
 
-    許す形のある行が > で始まるときだけ見る。次の行の > は字下げ・空白・入れ子を含めて飛ばす。
-    > だけの行(引用の中の空行)は改行で止まり、引用の中の * の箇条書きは別の項目とみなす。
+
+def _wording_quote_verb_follows(form, match):
+    """引用の中の許す形は、同じか浅い深さの次の行の頭を読み飛ばし、同じ段落の続きの動詞を探す(design §6)。
+
+    許す形のある行が引用(箇条書きの項目の中の引用 `- > …`・`1. > …` も含む)のときだけ見る。
+    次の行の引用の深さ(`>` の数)が同じか浅いときは越える(浅い行は Markdown では印を省いた同じ段落の続き)。
+    深い行(新しい入れ子の引用が段落を区切る)・箇条書きの印がある行・`>` だけの行(引用の中の空行)・
+    引用の中の `*` の箇条書きは、別の段落・項目として越えない。
     """
     if not _wording_literal(form).endswith('縮退'):
         return False
     text = match.string
-    if not re.match(r'[ \t]*>', text[text.rfind('\n', 0, match.start()) + 1:match.start()]):
+    here = _WORDING_QUOTE_LINE.match(text, text.rfind('\n', 0, match.start()) + 1, match.start())
+    after = re.match(r'[*_`\t 　]*\r?\n', text[match.end():])
+    if not here or not after:
         return False
-    # 頭の > は全部飛ばす(一部だけ飛ばして残りの > を HTML の字と読まないように、後ろに > が無いことを確かめる)。
-    return bool(re.match(r'[*_`\t 　]*\r?\n[ \t]*(?:>[ \t]?)+(?![ \t]*>)(?![ \t]*\*[ \t])[*_`\t 　]*(?:'
-                         + _WORDING_VERB + '|' + _WORDING_MARKUP + ')', text[match.end():]))
+    following = _WORDING_QUOTE_NEXT.match(text, match.end() + after.end())
+    if not following or following[1].count('>') > here[1].count('>'):
+        return False
+    rest = text[following.end():]
+    if re.match(r'[ \t]*\*[ \t]', rest):
+        return False
+    return bool(re.match(r'[*_`\t 　]*(?:' + _WORDING_VERB + '|' + _WORDING_MARKUP + ')', rest))
 
 
 def check_wording():
