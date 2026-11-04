@@ -98,7 +98,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
     def test_plan_failure_keeps_evidence_and_is_excluded_from_normal_cleanup(self):
         failure_name = '診断計画の作成失敗'
         before = section(self.task, '3. **起動前のスナップショットと退避**', '4. **起動**')
-        task_cleanup = section(self.task, '8. **報告(サイレント縮退禁止)**', '比較不能の診断は')
+        task_cleanup = section(self.task, '8. **報告(黙って内蔵に切り替えない)**', '比較不能の診断は')
         ext_cleanup = section(self.ext, '**保持と削除(', '**縮退(')
         preparation = section(self.ref, '## 2.', '## 3.')
         external_preparation = section(self.ext, '### 12-1a.', '### 12-2.')
