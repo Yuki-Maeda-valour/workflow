@@ -958,6 +958,23 @@ def _wording_mark(mark):
     return rf'(?<![0-9]){re.escape(mark)}(?![0-9])'
 
 
+def _wording_status_names(line):
+    """定義の行の状態名: `**…**` に囲まれた語と、` / ` で区切った並びの各項目(先頭の番号を除く)。"""
+    names = {_wording_literal(bold).strip() for bold in re.findall(r'\*\*(.+?)\*\*', line)}
+    for cell in line.split('|'):
+        if ' / ' in cell:
+            names.update(re.sub(r'^[0-9]+\s*', '', _wording_literal(item).strip()).strip()
+                         for item in cell.split(' / '))
+    return names
+
+
+def _wording_mark_kind(mark, definition_line):
+    """印の種類を絞る: 数字だけの終了値の番号・①〜⑳・定義の行の状態名(2 字以上)。"""
+    if re.fullmatch('[0-9]+', mark) or re.fullmatch('[①-⑳]', mark):
+        return True
+    return len(mark) >= 2 and mark in _wording_status_names(definition_line)
+
+
 def read_wording_exceptions(targets, terms):
     """全ファイル免除や正規表現を受け付けず、実在する字面だけを許す。"""
     path = REPO / 'scripts/wording-exceptions.json'
@@ -1012,7 +1029,7 @@ def read_wording_exceptions(targets, terms):
                 short = entry.get('short')
                 if short is not None:
                     # 名前の字面を含まない許す形を、項目ごとに明示して認める(design §6)。
-                    # 短い呼び名は名前の中の検査語 1 つ。印は定義の行に在る字面(終了値の番号・ほかの状態名など)。
+                    # 短い呼び名は名前の中の検査語 1 つ。印は定義の行に在る終了値の番号・①〜⑳・状態名だけ。
                     if not isinstance(short, dict) or set(short) != {'text', 'marks'}:
                         raise ValueError(f'{name}: short は text・marks が必要')
                     short_text, marks = short['text'], short['marks']
@@ -1023,6 +1040,8 @@ def read_wording_exceptions(targets, terms):
                             or len(marks) != len(set(marks))):
                         raise ValueError(f'{name}: short の marks は空・改行・重複のない文字列の配列が必要')
                     for mark in marks:
+                        if not _wording_mark_kind(mark, definition_line):
+                            raise ValueError(f'{name}: 印は終了値の番号・①〜⑳・定義の行の状態名(2 字以上)に限る: {mark}')
                         if not re.search(_wording_mark(mark), _wording_literal(definition_line)):
                             raise ValueError(f'{name}: 印が定義の行に無い: {mark}')
                         if any(re.search(_wording_pattern(word), mark) for word in [*terms, '縮退']):
@@ -1040,16 +1059,20 @@ def read_wording_exceptions(targets, terms):
                     literal_form = _wording_literal(form)
                     if _wording_bare_reduced(form):
                         raise ValueError(f'{name}: 縮退だけを許す形は不可')
+                    # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
+                    # 名前全体を含む形でも見る: short の呼び名の直後と、末尾が「縮退」の名前の直後。
+                    verb_before = [re.escape(literal_name)] if literal_name.endswith('縮退') else []
+                    if short is not None:
+                        verb_before.append(_wording_pattern(short_text))
+                    if any(re.search(before + _WORDING_VERB, literal_form) for before in verb_before):
+                        raise ValueError(f'{name}: 短い呼び名や名前の末尾の語を動詞で使う形は不可: {form}')
                     if literal_name in literal_form:
                         rest = literal_form.replace(literal_name, _WORDING_GAP)
                     elif short is not None:
                         # 短い呼び名の形: 呼び名をちょうど 1 つと、印のどれかを含める。
-                        # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
                         short_pattern = _wording_pattern(short_text)
                         if len(re.findall(short_pattern, literal_form)) != 1:
                             raise ValueError(f'{name}: 短い呼び名をちょうど 1 つ含める: {form}')
-                        if re.search(short_pattern + _WORDING_VERB, literal_form):
-                            raise ValueError(f'{name}: 短い呼び名を動詞で使う形は不可: {form}')
                         if not any(re.search(_wording_mark(mark), literal_form) for mark in marks):
                             raise ValueError(f'{name}: 短い呼び名の形に印が無い: {form}')
                         rest = re.sub(short_pattern, _WORDING_GAP, literal_form)
@@ -1220,6 +1243,22 @@ def _wording_explained(text, match, explanation):
     return False
 
 
+def _wording_form_pattern(form):
+    """本文で許す形を探す型。前後の境目は、登録の側の印の扱いと合わせる。"""
+    literal = _wording_literal(form)
+    pattern = re.escape(form)
+    # 数字で始まる・終わる形は、外側が数字でない所だけを隠す(縮退の 32 が縮退の 320 に当たらない)。
+    # 強調・コードの印(2 字まで)を挟んだ数字も見る。
+    if re.match('[0-9]', literal):
+        pattern = r'(?<![0-9])(?<![0-9][*_`])(?<![0-9][*_`]{2})' + pattern
+    if re.search('[0-9]$', literal):
+        pattern += r'(?![*_`]*[0-9])'
+    # 末尾が「縮退」の形は、直後に動詞の活用が続く所(縮退する など)を隠さない。
+    if literal.endswith('縮退'):
+        pattern += r'(?![*_`]*[しすさせそ])'
+    return pattern
+
+
 def check_wording():
     """初出の説明・説明の重複・名前以外の縮退を ERROR にする。"""
     terms = read_wording_terms()
@@ -1241,10 +1280,8 @@ def check_wording():
             def exclude(match):
                 pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
                 return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
-            # 末尾が「縮退」の形は、本文で直後に動詞の活用が続く所(縮退する など)を隠さない。
-            body = re.sub('|'.join(
-                re.escape(form) + (r'(?![*_`]*[しすさせそ])' if _wording_literal(form).endswith('縮退') else '')
-                for form in sorted(forms, key=len, reverse=True)), exclude, body)
+            body = re.sub('|'.join(_wording_form_pattern(form) for form in sorted(forms, key=len, reverse=True)),
+                          exclude, body)
         lines = wording_body(body, md, roles)
         for word, explanation in terms.items():
             pattern = _wording_pattern(word)

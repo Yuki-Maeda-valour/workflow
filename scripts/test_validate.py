@@ -1856,6 +1856,48 @@ class WordingTest(unittest.TestCase):
                 self.write_exceptions(names=[entry])
                 self.assert_dictionary_error()
 
+    def test_short_marks_are_limited_to_numbers_circled_numbers_and_status_names(self):
+        # 印は、数字だけの終了値の番号・①〜⑳・定義の行で **…** か ` / ` で区切った状態名(2 字以上)に限る。
+        # 下の印はどれも定義の行に在るが、種類が違うので認めない(1 字の「の」で縮退を隠せないように)。
+        definition = "**32** 縮退 / **33** 比較不能 | ふつうの語の方言と正常終了の 3a ㉑"
+        for mark in ("の", "方言", "正常終了", "比較", "3a", "㉑"):
+            with self.subTest(mark=mark):
+                entry = self.short_entry(f"縮退と{mark}", marks=(mark,), definition=definition)
+                self.write_exceptions(names=[entry])
+                self.assertIn("印は", self.assert_dictionary_error()[0])
+        for definition, mark in (("**32** 縮退。次は **比較不能**", "比較不能"), ("**32** 縮退 ⑳", "⑳"),
+                                 ("**32** 縮退 / 120 / ほか", "120")):
+            with self.subTest(mark=mark):
+                entry = self.short_entry(f"縮退と{mark}", marks=(mark,), definition=definition)
+                self.write_exceptions(names=[entry])
+                self.assert_wording(None, [])
+
+    def test_verb_forms_are_rejected_even_when_the_form_has_the_whole_name(self):
+        # 名前全体を含む形でも、短い呼び名の直後の動詞の形は登録できない。
+        for form in ("32 縮退する", "**32** 縮退して続ける", "exit 32 は縮退せず"):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.short_entry(form)])
+                self.assertIn("動詞", self.assert_dictionary_error()[0])
+        # short の無い名前でも、末尾の「縮退」の直後の動詞の形は登録できない。
+        entry = self.name_entry("解決できないときの縮退", "解決できないときの縮退する")
+        self.write_exceptions(names=[entry])
+        self.assertIn("動詞", self.assert_dictionary_error()[0])
+
+    def test_body_forms_respect_digit_boundaries(self):
+        # 数字で始まる・終わる許す形は、本文でも外側が数字でない所だけを隠す(登録の印と同じ扱い)。
+        self.write_exceptions(names=[self.short_entry("縮退の 32")])
+        self.assert_wording("縮退の 32。\n", [])
+        for text in ("縮退の 320。\n", "縮退の 32**0**。\n", "縮退の 32`0`。\n"):
+            with self.subTest(text=text):
+                self.assert_wording(text, [(self.reduced_error, "縮退", 1)])
+        for form, texts in (("32 縮退", ("132 縮退。\n", "1**32 縮退**。\n")),
+                            ("**32** 縮退", ("1**32** 縮退。\n",))):
+            self.write_exceptions(names=[self.short_entry(form)])
+            self.assert_wording(f"{form}。\n", [])
+            for text in texts:
+                with self.subTest(text=text):
+                    self.assert_wording(text, [(self.reduced_error, "縮退", 1)])
+
     def test_short_name_forms_cannot_use_reduced_as_a_verb(self):
         # 名前の字面を含まない形でも、design §6 が書き換えを求める動詞の形は登録できない。
         for form in ("32 で縮退する", "縮退して続ける(32)", "exit 32 で縮退させる", "**縮退**せず 32"):
