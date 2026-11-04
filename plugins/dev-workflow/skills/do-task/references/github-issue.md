@@ -223,8 +223,16 @@ Issue の本文を正本(ほかが合わせる元)にする。コメントは契
   - 公開前に §3・§5 で Issue 本文を取り直し、中断の追記とそれ以外の変更を確かめる。公開する root の `origin-repo.py` の `repo` と、保持した Issue の `repo` が同じことも確かめ直す。不一致・取得不能なら公開しない。
   - 保持した `pr-evidence` の内容を PR の検証欄に使い、`Closes #<番号>` を含める。Issue の記録から検証根拠を復元しない。根拠を失った場合は検証済みとせず、再検証が必要と報告する。
   - 手動のコマンドにも Git の共通の安全用のオプションと公開先の固定を適用する。push 済み・PR 作成済みかを確かめてから、残った操作だけを示す。
+    - 「push 済み」は、リモートの `<ブランチ名>` の先頭が、保持したレビュー済みの `<SHA>` と一致することを指す。
+    - PR 作成のコマンドを示す直前に、Git の共通の安全用のオプションを付けて `git push --dry-run --porcelain --no-follow-tags --recurse-submodules=no origin <SHA>:refs/heads/<ブランチ名>` を実行する。`publish-guard.py` の `remote_checked` と同じ条件で確かめる。
+    - コマンドが成功し、標準出力のタブ区切りの行が1件だけで3列あり、1列目が `=`、2列目が `<SHA>:refs/heads/<ブランチ名>` と一致する場合だけ、push 済みとする。
+    - 不一致・確認不能なら PR 作成のコマンドを示さずに停止し、人に原因を確かめてもらう。
+    - PR が既に作成済みかを探すときも、下の作成後の照合と同じ条件を使う。作成済みなら重複作成せず、この照合を行う。
   - push と追跡設定が済んで PR の作成だけが失敗した場合は、push を繰り返さず、`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file - < <PR本文ファイル>` を示す。上の本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる。
-  - 作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で head・base・head の SHA が保持したレビュー済みの値と一致するかを確かめる。PR が既に作成済みなら重複作成せず、この照合を行う。不一致・取得失敗なら公開完了とは扱わない。
+  - 作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で、`publish-guard.py` の `created_pr_checked` と同じ項目を照らす。不一致・取得失敗なら公開完了とは扱わない。
+    - head と base のブランチ名(`head.ref`・`base.ref`)と head の SHA(`head.sha`)が、保持したレビュー済みの値と一致することを確かめる。
+    - head と base のリポジトリ(`head.repo.full_name`・`base.repo.full_name`)が `<owner>/<repo>` で、head の所有者(`head.repo.owner.login`)が `<owner>` であることを確かめる。
+    - PR の URL が `https://<host>/<owner>/<repo>/pull/<正の整数>` の形で1件だけあり、API の `html_url` と `number` がその URL と番号に一致することを確かめる。
 
 ## 7. update-doc の読み替え
 

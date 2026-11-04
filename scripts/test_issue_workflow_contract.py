@@ -277,10 +277,34 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file - < <PR本文ファイル>`",
                       "本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる",
                       "作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>`",
-                      "head・base・head の SHA が保持したレビュー済みの値と一致するかを確かめる",
-                      "PR が既に作成済みなら重複作成せず、この照合を行う",
+                      "head と base のブランチ名(`head.ref`・`base.ref`)と head の SHA(`head.sha`)が、保持したレビュー済みの値と一致する",
+                      "作成済みなら重複作成せず、この照合を行う",
                       "不一致・取得失敗なら公開完了とは扱わない")
         self.assertLess(resume.index("gh pr create -R"), resume.index("gh api --hostname"))
+
+    def test_manual_pr_command_requires_exact_remote_reviewed_sha(self):
+        resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
+        before_create = resume.split("`gh pr create -R", 1)[0]
+        self.contains(before_create,
+                      "「push 済み」は、リモートの `<ブランチ名>` の先頭が、保持したレビュー済みの `<SHA>` と一致すること",
+                      "PR 作成のコマンドを示す直前に、Git の共通の安全用のオプションを付けて",
+                      "`git push --dry-run --porcelain --no-follow-tags --recurse-submodules=no origin <SHA>:refs/heads/<ブランチ名>`",
+                      "`publish-guard.py` の `remote_checked` と同じ条件",
+                      "コマンドが成功し、標準出力のタブ区切りの行が1件だけで3列あり、1列目が `=`、2列目が `<SHA>:refs/heads/<ブランチ名>` と一致する場合だけ",
+                      "不一致・確認不能なら PR 作成のコマンドを示さずに停止し、人に原因を確かめてもらう")
+
+    def test_manual_pr_matching_checks_repositories_owner_url_and_number(self):
+        resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
+        before_create, after_create = resume.split("`gh pr create -R", 1)
+        self.contains(before_create,
+                      "PR が既に作成済みかを探すときも、下の作成後の照合と同じ条件を使う",
+                      "作成済みなら重複作成せず、この照合を行う")
+        self.contains(after_create,
+                      "`publish-guard.py` の `created_pr_checked` と同じ項目",
+                      "head と base のリポジトリ(`head.repo.full_name`・`base.repo.full_name`)が `<owner>/<repo>`",
+                      "head の所有者(`head.repo.owner.login`)が `<owner>`",
+                      "PR の URL が `https://<host>/<owner>/<repo>/pull/<正の整数>` の形で1件だけ",
+                      "API の `html_url` と `number` がその URL と番号に一致する")
 
     def test_documented_gh_body_file_commands_use_stdin(self):
         commands = []
@@ -393,8 +417,11 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない",
                       "公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す",
                       "`--body-file - < <PR本文ファイル>` で標準入力から本文を渡す",
-                      "作成後は `gh api` で head・base・head の SHA を保持したレビュー済みの値と比べる",
-                      "作成済みの PR は重複作成せず、同じ照合を行う",
+                      "リモートのブランチの先頭が保持したレビュー済みの SHA と一致することを確かめる",
+                      "不一致・確認不能なら PR 作成のコマンドを示さず止める",
+                      "作成後は `gh api` で head・base のブランチ名・head の SHA・両方のリポジトリ・head の所有者・PR の URL と番号を照らす",
+                      "作成済みの PR を探すときも同じ条件を使い、重複作成しない",
+                      "公開停止を記録するまで各工程の内訳を会話に残す",
                       "中断・停止・保留の記録は、完了の形に当たっても完了記録に数えない",
                       "中断の記録を書いた後は、検査つきの Phase 5 をやり直せない",
                       "文書同期は `/update-doc --task=#<番号>` で再開し、その後の commit・公開は手動のコマンド列を示す")
