@@ -38,7 +38,7 @@ Codex / Cursor / Claude Code はこのファイルを直接読む。
 ## Project Overview
 **{{PROJECT_NAME}}** — {{OVERVIEW}}
 
-詳細は下記「ドキュメント / メモリ参照」を参照する。
+詳細は下記「ドキュメント / プロジェクトのメモリ参照」を参照する。
 
 ## Quick Commands
 > パッケージマネージャは **{{PM}}**。
@@ -49,7 +49,7 @@ Codex / Cursor / Claude Code はこのファイルを直接読む。
 ## タスク完了時のチェック
 実装後は最低限 {{COMPLETION_CHECK}} を実行する。ロジック変更時はテスト、スキーマ変更時はマイグレーション生成も行う。詳細は正本ドキュメントを参照。
 
-## ドキュメント / メモリ参照
+## ドキュメント / プロジェクトのメモリ参照
 {{DOC_REFERENCES}}
 
 ## Task Execution Strategy
@@ -73,7 +73,7 @@ Codex / Cursor / Claude Code はこのファイルを直接読む。
 | `/understand-project` | 構造・技術スタック・規約を把握（読み取り専用） |
 | `/create-task` | タスク内容から構造化タスク MD を `{{TASK_DIR}}/` に作成（影響範囲調査込み） |
 | `/do-task` | タスク MD をサブエージェントで実装・検証・レビュー |
-| `/update-doc` | ドキュメント / メモリを実コードに同期 |
+| `/update-doc` | ドキュメント / プロジェクトのメモリを実コードに同期 |
 | `/tool-check` | ツールによる機械検査（format / lint / typecheck / test / build）を一括実行 |
 
 推奨フロー: `/understand-project` →（必要に応じて）`/create-task` → `/do-task` → `/update-doc`（実装後にドキュメント最新化）。

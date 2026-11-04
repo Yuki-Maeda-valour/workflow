@@ -287,6 +287,17 @@ class CompletionReportTest(unittest.TestCase):
             with self.subTest(skill=name):
                 self.assertRegex(self.skill(name), r"候補モードでは、完了報告の型を使わず|候補モードでも共通の枠は出さない")
 
+    def test_file_links_keep_fixed_lines_and_copy_block_out(self):
+        # 9 節(ファイルへのリンク)の「足さない所」と、8 節の枠の「リンク」の決まりを守る
+        links = section_lines(WRITING_RULES, lambda line: line == "## 9. ファイルへのリンク")
+        self.assertIsNotNone(links, "正本に `## 9. ファイルへのリンク` の見出しが無い")
+        parts = "\n".join(links).split("**足さない所**", 1)
+        self.assertEqual(2, len(parts), "9 節に「足さない所」が無い")
+        for phrase in ("5 節の (i) の行と一覧", "完了報告のコピー用の枠"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, parts[1])
+        self.assertIn("枠の「リンク」には PR・Issue の URL だけを書き", self.report)
+
     def test_short_reports_preserve_unknowns_failures_and_completion_requirements(self):
         for phrase in ("完了にできる条件と、止める条件は各 skill のまま変えない",
                        "名前や版を確かめられない場合は「未確認」",
