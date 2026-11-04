@@ -776,7 +776,7 @@ class GroupIdentityTest(unittest.TestCase):
         with mock.patch.object(helper.os, 'killpg', side_effect=send) as killpg, \
              mock.patch.object(helper.time, 'sleep'), \
              mock.patch.object(helper.time, 'monotonic', side_effect=[0, 1, 5]):
-            with self.assertRaisesRegex(helper.RecoveryError, 'プロセス群の不在を確認できない'):
+            with self.assertRaisesRegex(helper.RecoveryError, 'プロセスグループの不在を確認できない'):
                 helper.stop_group(process, .01)
         self.assertEqual([mock.call(42, signal.SIGTERM), mock.call(42, signal.SIGKILL),
                           mock.call(42, 0), mock.call(42, 0)], killpg.call_args_list)
