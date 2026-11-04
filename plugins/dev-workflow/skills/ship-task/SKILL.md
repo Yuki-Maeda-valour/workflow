@@ -1,6 +1,6 @@
 ---
 name: ship-task
-description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければ /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計の情報が欠ければ設計書だけ返し、品質ゲート赤・スコープ縮小・レビュー未収束では停止して PR を作らない。既存のタスク MD または Issue から回すときは --task、無人ループの周は --unattended(人に確かめる場面で止まらず、保留か失敗扱いに倒す)、発見ループの周は --discover=<発見元> --unattended(発見元が積んだ候補_ だけを PR にする)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
+description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければ /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計の情報が欠ければ設計書だけ返し、品質ゲート赤・スコープ縮小・レビュー未収束では停止して PR を作らない。既存のタスク MD または Issue から回すときは --task、無人ループの周は --unattended(人に確かめる場面で止まらず、保留か失敗扱いにする)、発見ループの周は --discover=<発見元> --unattended(発見元が積んだ候補_ だけを PR にする)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
 argument-hint: "<タスク内容の説明> | --task=<タスク MD | #番号 | Issue URL> [--unattended] [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>] | --discover=<発見元> --unattended [--no-pr]"
 ---
 
@@ -19,7 +19,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD | #番号 | Is
    - 発見の周(無人ループの 1 回分の実行。`--discover`)の「緑」は、[references/discover-mode.md](references/discover-mode.md) の照合(照らし合わせて確かめること)にすべて通ったこと(品質ゲート・レビュー・実動確認は、採用の後の /create-task・/do-task で行う。design §5-20 の例外)
 5. **git 操作の範囲を明示する**。ブランチ作成・commit・push・PR 作成はこのスキルの責務だが、マージはしない。レビュアーの自動アサインもしない
 6. **無人モードは正本(ほかが合わせる元)に従う**。
-   - `--unattended` のときは、人に確かめる場面で止まらず「自動で答える / 保留 / 失敗扱い」のどれかに倒す。
+   - `--unattended` のときは、人に確かめる場面で止まらず「自動で答える / 保留 / 失敗扱い」のどれかにする。
    - 人に確かめる場面ごとの扱い・保留の手順・周の中の照合・結末・限界は [references/unattended-mode.md](references/unattended-mode.md) が正本(以下の各所には 1 行の分岐だけを置く)。
    - 発見の周に固有の前提・工程・照合・結末は references/discover-mode.md が正本。
    - `--unattended` の入口では、現在の配布元を信頼の起点として環境の控えとコピーを作り、その後にコピー内の無人契約を読む。手順は下の「無人入口」。
@@ -256,7 +256,7 @@ Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) �
 判定結果(続行 / 停止 + 該当項目の番号と名前)を**必ず報告に残す**。停止時は「この情報が決まれば /ship-task を再開できる」形で不明点を列挙し、`/do-task {実際のタスクMDパス}` からの手動再開の導線も示す。
 Issue 方式の停止報告は、タスク MD のパスの代わりに Issue の URL と `/do-task --issue=<番号>` を示す。
 
-**無人では**、6 は R と照合する。1〜6 のどれかに当たったら保留にする(S4。1 は「実装の分岐を左右しない」と言い切れないヒットも保留に倒す。6 は `本文` が無い・`算出不能` のときも保留)。保留の手順は references/unattended-mode.md §5。
+**無人では**、6 は R と照合する。1〜6 のどれかに当たったら保留にする(S4。1 は「実装の分岐を左右しない」と言い切れないヒットも保留にする。6 は `本文` が無い・`算出不能` のときも保留)。保留の手順は references/unattended-mode.md §5。
 
 `--design-only` の場合はこの Phase を実行せず、設計書を返して終了する。
 
@@ -365,7 +365,7 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
   - commit のコマンドは、git 設定のダイジェストの `--expect` と `&&` でつないだ 1 行で打つ。
   - 直後に、`HEAD^{tree}` = 控えた tree・`git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> | python3 {create-task の}scripts/task-digest.py -` = R・現在のブランチ = 作業ブランチを確かめ、最後に知る HEAD を更新する。
   - 照合するタスク MD のパスは commit の後のパス(実装 commit・doc commit は `完了_`、保留の commit は `保留_`)。
-  - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の打ち直し)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
+  - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の再実行)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
   - どれかに通らなければ失敗扱い(G2)。
   - 時点ごとの表・コマンドの字面・除外対象・git の安全用のオプションは references/unattended-mode.md §7
 - **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
@@ -391,7 +391,7 @@ Issue 方式の停止報告は、実装 commit の検証前後を区別する。
 - push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない。`実装 commit <sha> は検証済み。公開で停止: <理由>` と Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す。
 - 記録後の文書同期は `/update-doc --task=#<番号>` を案内する。その後の commit・公開は手動のコマンド列を示す。公開だけ残った場合も、保持した `pr-evidence` と `Closes #<番号>` を使い、本文と対象リポジトリを確かめ直す手順を添える。
 
-無人では、「停止する」の各行を保留か失敗扱いに倒す(原因で分ける。references/unattended-mode.md §3・§4)。
+無人では、「停止する」の各行を保留か失敗扱いにする(原因で分ける。references/unattended-mode.md §3・§4)。
 
 ## 最終ゲート(完了報告前セルフチェック)
 

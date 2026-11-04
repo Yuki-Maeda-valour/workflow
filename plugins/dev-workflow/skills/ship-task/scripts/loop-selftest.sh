@@ -3279,7 +3279,7 @@ pa "④ (10) 従う: 終了コードはツールの結果で見る(bash -c 'exit
 pdk "④ (7) 外れる: 先頭が / のパターンはパスとして外を指す(grep -oE '/ 本文: …')" other Bash \
   "$(bash_in "grep -oE '/ 本文: (sha256:[0-9a-f]{16}|算出不能) / needs-user: ' docs/tasks/進行中_x.md > .claude/reviews/d.txt")"
 PALLOW=""
-# deny の message: 理由と固定の文(無人の周では打ち直さず G1 に従う)。allow には message が無い。PERMLOG の reason には
+# deny の message: 理由と固定の文(無人の周ではもう一度実行せず G1 に従う)。allow には message が無い。PERMLOG の reason には
 # 固定の文を入れない
 perm Bash "$(bash_in 'curl --version')"
 DMSG="$(decision_field message)"

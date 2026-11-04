@@ -127,7 +127,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(execution, "前回の実行用の取得に成功したとき", "人が本文を承認したとき",
                       "`--edits-since <保持した last_edited_at>`", "本文の設計レビュー行の日付からは決めない",
                       "保持値が無い新しい開始", "全履歴を調べる", "境界と同じ日時も含める",
-                      "承認待ちで停止した取得値や書込直後の結果で、前の境界を先に進めない")
+                      "承認待ちで停止した取得値や書き込みの直後の結果で、前の境界を先に進めない")
 
     def test_repeat_approval_shows_delta_and_intervening_editors(self):
         execution = section(self.contract, "## 5. do-task の読み替え")
@@ -137,8 +137,8 @@ class IssueWorkflowContractTest(unittest.TestCase):
 
     def test_post_write_receipt_defers_history_check_and_cannot_be_reused(self):
         update = section(self.contract, "## 3. 本文を取得して書き換える共通手順")
-        self.contains(update, "最終編集者と取得時の実行者が書込前の実行者と同じ場合だけ成功",
-                      "書込直後は編集履歴を取得・検査しない", "次の通常の `snapshot`",
+        self.contains(update, "最終編集者と取得時の実行者が書き込みの前の実行者と同じ場合だけ成功",
+                      "書き込みの直後は編集履歴を取得・検査しない", "次の通常の `snapshot`",
                       "`history_checked` は false", "更新用の控えに使わず")
 
     def test_repository_mismatch_is_checked_before_branch_and_again_before_push(self):

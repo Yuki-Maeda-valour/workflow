@@ -60,7 +60,7 @@ OWNER・REPO はそれぞれ 1 段で `[A-Za-z0-9._-]+`。ポートを明示し�
 
 **`repo`**(公開の確認と PR に使う push 先。許す形の列挙): push 側が次のどちらかのときだけ、push 側の形をそろえた値にする(OWNER・REPO の大小は字面のまま)。ほかは null。
 
-- https の形。ただし、TLS の検証を外していれば null(`git config --type=bool --get-urlmatch http.sslverify <push の URL>` が `false`、または環境変数 `GIT_SSL_NO_VERIFY` がある。設定が無い〈rc 1〉なら検証ありと読む)。https の送り先の正しさは、TLS の検証が担保するため
+- https の形。ただし、TLS の検証を外していれば null(`git config --type=bool --get-urlmatch http.sslverify <push の URL>` が `false`、または環境変数 `GIT_SSL_NO_VERIFY` がある。設定が無い〈rc 1〉なら検証ありと読む)。https の送り先の正しさは、TLS の検証が保証するため
 - scp か `ssh://` の形で、ユーザー名が `git`・HOST が `github.com`。さらに次をすべて満たす
   - ssh を上書きする設定が無い: 環境変数 `GIT_SSH_COMMAND`・`GIT_SSH` が無く、`git config --get core.sshCommand` が空
   - `ssh -G -- git@github.com`(タイムアウト 10 秒・stdin は `/dev/null`。引数は固定)の出力の `hostname` の行が `github.com`、`port` の行が `22`
@@ -152,7 +152,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 | stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
 | commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で打つ |
 | commit の直後 | `HEAD^{tree}` = 控えた tree・`git diff --name-status -z --no-renames S0 HEAD` が C の `A` だけ・`git rev-list --count S0..HEAD` = 1・C の各パスを `git show HEAD:./<パス> \| python3 {create-task の}scripts/candidate-keys.py --check --source=<S> -` で確かめる・現在のブランチ = 作業ブランチ・`git status --porcelain=v1 -z --untracked-files=all` が空 |
-| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` を打ち直して 6 欄が控える値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
+| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` をもう一度実行して 6 欄が控える値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
 
 - 表の `<S>` は発見元。「現在のブランチ」は `git symbolic-ref --quiet HEAD` で見る
 - 表の `<控える値>` は git 設定のダイジェストの値、`<管理ルート>` は管理ルートの絶対パス。`--expect` は exit 0 だけが通る(unattended-mode.md §7 と同じ)
@@ -209,7 +209,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - 公開の確認の後に公開に変えられた場合は、防げない。PR は、非公開のリポジトリの中に留まる前提。周の許可リストが `gh` を丸ごと許すと、周の中で公開に変える操作も通る(#107)
 - origin の push 先が §3 の許す形(https、または上書きの無い `git@github.com`)でないか、gh で isPrivate を読めないホストなら、data-audit の発見は回らない(毎晩 `候補なし` と報告する)。refactor は、PR を作らずに `縮退` になる(ssh の設定の別名・`ssh.github.com` の 443・ポートの明示・ローカルのパス・TLS の検証を外した構成など)。`縮退` で push したブランチを処理するまで、refactor は回らない
 - 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路と、ホスト鍵検証を外す H44 の構成を拒否するが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
-- ホスト鍵の判定は設定の検査だけで、接続成功や GitHub の鍵の所有を証明しない。known_hosts の内容・実体・書込可否、DNS の結果、鍵取得コマンドの出力、既存の共有接続は検査しない。通常の `accept-new` の初回受け入れと、通常パスへの保存失敗は SSH に任せる。`-G` のファイル一覧は引用符を保持しないため、空白入りパスを完全には復元しない。明示された先頭の `/dev/null` を保守的に判定し、symlink や別の破棄先は追わない
+- ホスト鍵の判定は設定の検査だけで、接続成功や GitHub の鍵の所有を証明しない。known_hosts の内容・実体・書き込めるか、DNS の結果、鍵取得コマンドの出力、既存の共有接続は検査しない。通常の `accept-new` の初回受け入れと、通常パスへの保存失敗は SSH に任せる。`-G` のファイル一覧は引用符を保持しないため、空白入りパスを完全には復元しない。明示された先頭の `/dev/null` を保守的に判定し、symlink や別の破棄先は追わない
 - ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)の限界は、unattended-mode.md §9 の ⑥ と同じ(include の先・hook の中身・global の設定を見ない・照合と実行の間の書き換え・誤って失敗扱いになる構成など)
 - fetch と push の URL が、字面から形をそろえた値で別のリポジトリか、`remote.origin.vcs` があれば、発見の周は前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
 - `/ship-task <候補_ のパス>`(説明として渡す)は、採用の入口として保証しない。採用は `/create-task <候補_ のパス>` で行ってから、`/ship-task --task=<進行中_ のパス>` を使う
