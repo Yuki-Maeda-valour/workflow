@@ -1,4 +1,7 @@
 # リポジトリ検証器の frontmatter YAML 構文検査に必要。
 PyYAML==6.0.3
 # 言葉の検査で Markdown の見出し・リンク・コードを解釈する。
+# 内部の API(markdown_it.parser_inline._rules)に頼るので、版を上げるときは scripts/test_validate.py の試験で確かめる。
 markdown-it-py==3.0.0
+# markdown-it-py が依存する。依存する側の版も固定する。
+mdurl==0.1.2

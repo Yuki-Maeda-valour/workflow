@@ -875,6 +875,8 @@ def check_number_only_reasons():
 _WORDING_EXEMPT = Path('do-task/references/writing-for-people.md')
 _WORDING_ROLES = {'team-lead', 'implementer', 'reviewer', 'checker', 'researcher'}
 _WORDING_GAP = '\ufffc'
+# 「縮退」の直後のし・す・さ・せ・そは、動詞として使う形(縮退する・縮退して続ける など)。
+_WORDING_REDUCED_VERB = re.compile('縮退[しすさせそ]')
 
 
 def wording_targets():
@@ -1003,9 +1005,12 @@ def read_wording_exceptions(targets, terms):
                         raise ValueError(f'{name}: 縮退だけを許す形は不可')
                     # 終了値の状態名だけは、番号を省いた既存の参照形も登録する。
                     # 「縮退」全体を含む前後の文脈を必須とし、他の語は隠さない。
+                    # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
                     status_name = literal_name in ('30 縮退', '32 縮退')
                     if not (literal_name in literal_form or status_name and '縮退' in literal_form):
                         raise ValueError(f'{name}: 許す形に名前の字面がない: {form}')
+                    if status_name and _WORDING_REDUCED_VERB.search(literal_form):
+                        raise ValueError(f'{name}: 状態名の許す形に、縮退を動詞で使う形は不可: {form}')
                     covered = '縮退' if status_name else literal_name
                     rest = literal_form.replace(covered, _WORDING_GAP)
                     if (status_name and literal_form.count('縮退') != 1
@@ -1116,10 +1121,31 @@ def wording_body(body, md):
                 def handle_charref(self, name):
                     self.handle_data(unescape(f'&#{name};').replace('\n', _WORDING_GAP))
 
+            content = token.content
+            cut = _wording_unclosed_comment(content)
+            if cut is not None:
+                # 閉じていないコメントの後ろを、こちらで空白に置き換える。
+                # close() がその後ろを本文として渡すかは Python の版で違うため、parser に任せない。
+                content = content[:cut] + _WORDING_GAP + re.sub(r'[^\n]', ' ', content[cut + 1:])
             parser = BodyHTML(convert_charrefs=False)
-            parser.feed(token.content)
+            parser.feed(content)
             parser.close()
     return [(line, ''.join(parts)) for line, parts in sorted(result.items())]
+
+
+def _wording_unclosed_comment(content):
+    """後ろに --> が無い <!-- のうち、タグの外にある最初の位置を返す。"""
+    end = content.rfind('-->')
+    start = content.find('<!--', end + 3 if end >= 0 else 0)
+    while start >= 0:
+        # 手前だけを読ませ、全部を読み終えたならタグの外(属性の値の中ではない)。
+        probe = HTMLParser(convert_charrefs=False)
+        probe.feed(content[:start])
+        line, column = probe.getpos()
+        if (line, column) == (content.count('\n', 0, start) + 1, start - content.rfind('\n', 0, start) - 1):
+            return start
+        start = content.find('<!--', start + 1)
+    return None
 
 
 def _wording_close(text, start):
@@ -1172,8 +1198,10 @@ def check_wording():
             def exclude(match):
                 pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
                 return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
-            body = re.sub('|'.join(re.escape(form) for form in sorted(forms, key=len, reverse=True)),
-                          exclude, body)
+            # 末尾が「縮退」の形は、本文で直後に動詞の活用が続く所(縮退する など)を隠さない。
+            body = re.sub('|'.join(
+                re.escape(form) + (r'(?![*_`]*[しすさせそ])' if _wording_literal(form).endswith('縮退') else '')
+                for form in sorted(forms, key=len, reverse=True)), exclude, body)
         lines = wording_body(body, md)
         for word, explanation in terms.items():
             pattern = _wording_pattern(word)

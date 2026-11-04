@@ -1586,7 +1586,8 @@ class WordingTest(unittest.TestCase):
             ("link-space", "[表示](<some path/照合>)\n", None),
             ("link-simple", "[表示](https://example.test/照合)\n", None),
             ("link-in-code", "`[照合](https://example.test)`\n", None),
-            ("frontmatter", "---\nname: 照合\n---\n本文。\n", None),
+            # 下線形式の見出しにならない形。frontmatter を除かないと、リストの項目として数える。
+            ("frontmatter", "---\ntags:\n- 照合\n---\n本文。\n", None),
             ("table", f"| 項目 |\n|---|\n| {explained} |\n", None),
         )
         self.assertEqual(37, len(cases))
@@ -1606,6 +1607,16 @@ class WordingTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_wording(text, [(self.first_error, "照合", line)])
 
+    def test_image_alt_text_is_body_and_frontmatter_is_not(self):
+        # 画像の説明は本文として数え、初出の言い換えにもなる。
+        self.assert_wording("![照合](image.png)\n", [(self.first_error, "照合", 1)])
+        self.assert_wording(f"![照合({self.explanation})](image.png)\n\n照合。\n", [])
+        # frontmatter は、見出しにならない形(リスト)でも数えない。行番号は元のまま。
+        self.assert_wording("---\ntags:\n- 照合\n---\n照合する。\n", [(self.first_error, "照合", 5)])
+        self.assert_wording(f"---\ntags:\n- 照合({self.explanation})\n---\n照合する。\n", [
+            (self.first_error, "照合", 5),
+        ])
+
     def test_empty_frontmatter_does_not_consume_later_horizontal_rule(self):
         for ending in ("---", "..."):
             with self.subTest(ending=ending):
@@ -1618,6 +1629,21 @@ class WordingTest(unittest.TestCase):
             (self.first_error, "照合", 1),
         ])
         self.assert_wording("<!-- コメント 照合\n", [])
+
+    def test_unclosed_comment_does_not_depend_on_parser_close(self):
+        import html.parser
+
+        def old_close(parser):
+            # 古い Python の close() は、閉じていないコメントの後ろを本文として渡す。
+            parser.handle_data(parser.rawdata)
+            parser.rawdata = ""
+
+        with mock.patch.object(html.parser.HTMLParser, "close", old_close):
+            self.assert_wording("<!-- コメント 照合\n", [])
+            self.assert_wording("<div>\n本文。<!-- コメント\n照合\n</div>\n", [])
+            self.assert_wording("<div>\n照合<!-- コメント\n</div>\n", [(self.first_error, "照合", 2)])
+            # 属性の値の中の <!-- はコメントの始まりではない。
+            self.assert_wording('<div title="<!--">照合</div>\n', [(self.first_error, "照合", 1)])
 
     def test_entity_newline_keeps_separate_visible_words_separate(self):
         self.assert_wording("照&#10;合\n", [])
@@ -1682,6 +1708,12 @@ class WordingTest(unittest.TestCase):
         ):
             with self.subTest(text=text):
                 self.assert_wording(text + "\n", [(self.first_error, "照合", 1)])
+
+    def test_explanation_must_open_the_bracket(self):
+        # 既にある括弧に入れるときは、その頭に置く(design §6 の添え方)。途中や後ろは数えない。
+        self.assert_wording(f"照合(補足。{self.explanation})。\n", [(self.first_error, "照合", 1)])
+        self.assert_wording(f"照合〈補足:{self.explanation}〉。\n", [(self.first_error, "照合", 1)])
+        self.assert_wording(f"照合({self.explanation}。補足)。\n", [])
 
     def test_missing_first_explanation_reports_later_explanation_line(self):
         errors = self.assert_wording(f"照合する。\n\n照合({self.explanation})。\n", [
@@ -1767,6 +1799,33 @@ class WordingTest(unittest.TestCase):
                 self.write(self.reference, "縮退\n")
                 self.assert_dictionary_error()
 
+    def test_status_name_forms_cannot_use_reduced_as_a_verb(self):
+        # 名前の字面を含まない状態名の形でも、design §6 が書き換えを求める動詞の形は登録できない。
+        for name in ("30 縮退", "32 縮退"):
+            for form in ("縮退する", "縮退して続ける", "exit 30 で縮退させる", "**縮退**せず"):
+                with self.subTest(name=name, form=form):
+                    self.write_exceptions(names=[self.name_entry(name, form)])
+                    errors = self.assert_dictionary_error()
+                    self.assertIn("動詞", errors[0])
+
+    def test_status_name_forms_need_exactly_one_reduced(self):
+        for name in ("30 縮退", "32 縮退"):
+            for form in ("縮退・縮退", "正常(縮退)の縮退"):
+                with self.subTest(name=name, form=form):
+                    self.write_exceptions(names=[self.name_entry(name, form)])
+                    errors = self.assert_dictionary_error()
+                    self.assertIn("名前以外の検査語", errors[0])
+
+    def test_registered_form_ending_in_reduced_does_not_hide_a_verb(self):
+        for name, form in (("30 縮退", "exit 30 は縮退"), ("30 縮退", "**30** 縮退"),
+                           ("解決できないときの縮退", "解決できないときの縮退")):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.name_entry(name, form)])
+                self.assert_wording(f"{form}。\n", [])
+                self.assert_wording(f"{form}(終了値)。\n", [])
+                for verb in ("する。", "して続ける。", "させる。", "**する**。"):
+                    self.assert_wording(f"{form}。\n{form}{verb}\n", [(self.reduced_error, "縮退", 2)])
+
     def test_report_explanations_are_excluded_but_body_still_needs_one(self):
         entry = self.name_entry("照合", f"**照合({self.explanation})**")
         entry["definition"]["text"] = f"照合({self.explanation})"
@@ -1791,6 +1850,8 @@ class WordingTest(unittest.TestCase):
             original.replace(row, ""),
             original.replace(row, row + row),
             original.replace(row, "| 照合 | |\n"),
+            # 別々の語に同じ言い換え。語数は 27 のまま。
+            original.replace("| 正本 | ほかが合わせる元 |", f"| 正本 | {self.explanation} |"),
         ):
             with self.subTest(design=design[-120:]):
                 path.write_text(design, encoding="utf-8")
@@ -1805,6 +1866,103 @@ class WordingTest(unittest.TestCase):
                 entry["definition"][field] = value
                 self.write_exceptions(names=[entry])
                 self.assert_dictionary_error()
+
+    def test_exception_form_must_exist_in_registered_files(self):
+        # 登録したファイルに無い字面は、許す形にできない。
+        for form in ("「照合パターン」の表", "照合パターン一覧"):
+            with self.subTest(form=form):
+                entry = self.name_entry()
+                entry["forms"].append(form)
+                self.write_exceptions(names=[entry])
+                errors = self.assert_dictionary_error()
+                self.assertIn("許す形が存在しない", errors[0])
+        # ほかのファイルにだけある字面も、登録したファイルに無ければ同じ。
+        entry = self.name_entry()
+        self.write(f"{SKILLS_REL}/wording-test/references/other.md", "「照合パターン」の表\n")
+        entry["forms"] = ["「照合パターン」の表"]
+        self.write_exceptions(names=[entry])
+        errors = self.assert_dictionary_error()
+        self.assertIn("許す形が存在しない", errors[0])
+
+    def test_same_form_cannot_be_registered_by_two_entries(self):
+        self.write("docs/wording-names.md", "# 照合パターン\n# 照合パターン表\n")
+        self.write(self.reference, "「照合パターン表」\n")
+
+        def entry(name):
+            return {
+                "name": name, "definition": {"path": "docs/wording-names.md", "text": name},
+                "files": [self.reference], "forms": ["「照合パターン表」"], "reason": "試験。",
+            }
+
+        for names, reports in (
+            ([entry("照合パターン"), entry("照合パターン表")], []),
+            ([entry("照合パターン表")], [entry("照合パターン表")]),
+        ):
+            with self.subTest(names=len(names), reports=len(reports)):
+                self.write_exceptions(names=names, reports=reports)
+                errors = self.assert_dictionary_error()
+                self.assertIn("許す形の重複", errors[0])
+        self.write_exceptions(names=[entry("照合パターン表")])
+        self.assert_wording(None, [])
+
+    def test_each_registered_form_hides_only_its_own_words(self):
+        """実際の一覧の、ファイルと許す形の組ごとに確かめる(名前を足す変更の試験)。
+
+        許す形だけなら検出しない。許す形の直後に守る語を言い換えなしで続けると検出する。
+        """
+        data = json.loads((SOURCE_REPO / self.exceptions).read_text(encoding="utf-8"))
+        design = (self.repo / "docs/design.md").read_text(encoding="utf-8")
+        table = design.split("| 語 | 言い換えの字面 |\n|---|---|\n", 1)[1].split("\n\n", 1)[0]
+        labels = {}
+        for row in table.splitlines():
+            label = row.strip("| ").split(" | ")[0]
+            for word in ("差し戻し", "差し戻す") if label == "差し戻し(差し戻す)" else (label,):
+                labels[word] = label
+        roles = {"team-lead", "implementer", "reviewer", "checker", "researcher"}
+
+        def protected(name):
+            literal = re.sub(r"[`*_]", "", name)
+            return [
+                word for word in [*labels, "縮退"]
+                if re.search(rf"(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])" if word in roles
+                             else re.escape(word), literal)
+            ]
+
+        namespace = runpy.run_path(str(self.repo / "scripts/validate.py"), run_name="wording_under_test")
+        pairs = 0
+        for kind in ("names", "reports"):
+            for entry in data[kind]:
+                words = protected(entry["name"])
+                self.assertTrue(words, entry["name"])
+                # 定義元は、検査しない docs/ に置き換える(定義の実在は ValidateTest の全体の検査で見る)。
+                self.write("docs/wording-names.md", entry["definition"]["text"] + "\n")
+                for relative in entry["files"]:
+                    for form in entry["forms"]:
+                        pairs += 1
+                        single = dict(entry, files=[relative], forms=[form], definition={
+                            "path": "docs/wording-names.md", "text": entry["definition"]["text"],
+                        })
+                        self.write_exceptions(**{kind: [single]})
+                        cases = [(f"{form}。\n", None)] + [(f"{form}{word}。\n", word) for word in words]
+                        for text, word in cases:
+                            with self.subTest(name=entry["name"], file=relative, form=form, word=word):
+                                shutil.rmtree(self.repo / SKILLS_REL, ignore_errors=True)
+                                self.write(relative, text)
+                                namespace["ERRORS"].clear()
+                                with contextlib.redirect_stdout(io.StringIO()):
+                                    namespace["check_wording"]()
+                                errors = list(namespace["ERRORS"])
+                                if word is None:
+                                    self.assertEqual([], errors)
+                                    continue
+                                self.assertEqual(1, len(errors), errors)
+                                kind_text = self.reduced_error if word == "縮退" else self.first_error
+                                self.assertIn(f"{relative}:1:", errors[0])
+                                self.assertIn(kind_text, errors[0])
+                                if word != "縮退":
+                                    self.assertIn(repr(labels[word]), errors[0])
+        # 一覧が空になって試験が何も確かめない、を防ぐ。
+        self.assertGreaterEqual(pairs, len(data["names"]) + len(data["reports"]))
 
     def test_exception_must_name_a_complete_defined_phrase(self):
         entry = self.name_entry("縮", "縮")
