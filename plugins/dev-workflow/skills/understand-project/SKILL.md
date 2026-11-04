@@ -124,7 +124,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 
 ## Phase 5: サマリー出力
 
-以下のテンプレートで報告する(検出できなかった節は省略):
+調査した内容の報告そのものが成果物なので、[../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」は使わない。以下のテンプレートで報告する(検出できなかった節は省略):
 
 ```markdown
 # プロジェクト把握: {プロジェクト名}
