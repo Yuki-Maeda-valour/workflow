@@ -134,6 +134,50 @@ class WritingRulesTest(unittest.TestCase):
     def test_repo_fixed_text_is_the_same_as_the_template(self):
         self.assertEqual(self.template_fixed(), self.repo_split()[0])
 
+    # ---------------------------------------------------------- 番号だけの呼び方
+
+    def test_number_rules_are_in_the_required_sections(self):
+        phrases_by_section = {
+            "## 4. ": (
+                "人に出す報告・質問・選択肢・Issue と PR の本文",
+                "番号が理由・判定・指摘そのものになるとき",
+                "「番号: 中身」の形で一言添える",
+                "G3: 無人の前提を欠く",
+                "S4: 承認の後に本文が変わった",
+                "S・D・U・G の中身は",
+                "その周で当たった理由を一言で書く",
+                "§4 の表の行を目安にする",
+                "S4 なら、当たった続行判定の項目の名前から書く",
+                "`6 本文の照合` → `承認の後に本文が変わった`",
+                "参照先を示すだけの番号",
+                "手順の本文・相互参照の番号は残してよい",
+            ),
+            "## 5. ": (
+                "保留の行の停止条件と、結果の行の理由を番号で示すときは",
+                "「番号: 中身」で書く",
+                "番号を先に置き",
+                "行頭・区切り・結末の値には何も足さない",
+            ),
+            "## 7. ": (
+                "選択肢に番号だけを書かない",
+                "「番号: 中身」で、選ぶ内容を一言添える",
+            ),
+        }
+        for heading, phrases in phrases_by_section.items():
+            lines = section_lines(WRITING_RULES, lambda line: line.startswith(heading))
+            self.assertIsNotNone(lines, f"{heading}の節が無い")
+            # 4 節は表の前、5 節は (i) の中に決まりを置く。
+            if heading == "## 4. ":
+                lines = lines[:next(i for i, line in enumerate(lines) if line.startswith("|"))]
+            elif heading == "## 5. ":
+                start = next(i for i, line in enumerate(lines) if line.startswith("- **(i)"))
+                end = next(i for i, line in enumerate(lines) if line.startswith("- **(ii)"))
+                lines = lines[start:end]
+            text = "\n".join(lines)
+            for phrase in phrases:
+                with self.subTest(section=heading, phrase=phrase):
+                    self.assertIn(phrase, text)
+
     # ------------------------------------------------------------------ 口調の部分
 
     def test_repo_tone_part_is_the_same_as_the_report_tone_template(self):
