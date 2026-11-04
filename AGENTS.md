@@ -156,11 +156,10 @@ bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 
 
 ## このリポジトリの Issue 運用
 
-- このリポジトリ自身の作業記録は GitHub Issue 本文・コメントに残し、ローカルのタスク成果物は新設しない。配布スキルの既定の task ファイル方式は変更しない
-- create-task の設計成果物は指定 Issue、do-task の対象も指定 Issue とする。未指定で複数候補なら選択を確認する
-- チェック状態・レビューには Issue 本文と diff を使い、完了リネームの代わりに検証結果を Issue へ記録する。中断時の `保留_` への改名も行わず、中断の理由を Issue に記録する。update-doc はその完了記録を入力にする
-- ship-task の commit にタスク MD は含めず、PR 本文に Issue をリンクする
-- do-task の基準コミット行(書式は `> **基準コミット**: <sha>[ / 未追跡一覧: <sha256>]`。**書式の正本は do-task/SKILL.md Phase 0 の手順 5**)は対象 Issue 本文のヘッダ引用ブロックに追記する(全文置換前に取得した本文の中身と行数を検査する)
-- 設計レビューの行と do-task の検証結果の記録は、Issue 本文の末尾の `## 追加修正記録` 節(見出しはレベル 2)に置く(無ければ作る。設計レビューの行の書式は create-task/references/task-template.md の記法の規約)。基準コミット行と同じく、全文置換の前に取得した本文の中身と行数を検査する
-- 完了の記録は `## 追加修正記録` の節に、`- <YYYY-MM-DD> ` で始まり、「未完了」「中断」「停止」を含まず、「完了」と「結果 APPROVED」を含む行で書く(profile へ移すまでの暫定)。
-- 設計レビューの行の `本文` と、do-task の対話の本文の照合(委託の直前の控え・Phase 4 で照らす値)は、Issue 本文から算出する(`gh issue view <N> --json body -q .body | python3 plugins/dev-workflow/skills/create-task/scripts/task-digest.py -`)
+- 置き場の設定は [`.claude/project-profile.yml`](.claude/project-profile.yml) の `task_store: github-issue` が正本です。手順は [Issue 方式の契約](plugins/dev-workflow/skills/do-task/references/github-issue.md) に従います。
+- この設定を読まない古い版でも、作業記録の正本は GitHub Issue 本文です。ローカルのタスク成果物は新設しません。
+- 古い版向けの完了記録の形を下に残します。現在の版では、Issue 方式の契約が定めるステータス行と完了記録が必須です。
+- 開いた Issue も、ヘッダに `> **ステータス**: 🚧 進行中` の行が1行必要です。無ければ ship-task は実装前に停止します。do-task を単独で完了しても、その後の update-doc が停止します。
+- 行が無ければ、コードフェンスの外の最初の `## ` より前に、上の1行を行頭から追加します。[`task-digest.py`](plugins/dev-workflow/skills/create-task/scripts/task-digest.py) は、この位置のステータス行を本文ダイジェスト(設計書の本文から計算した短い値)から除きます。
+- 既存の設計レビュー行と値が一致していた本文に、この1行だけを追加しても値は変わりません。設計レビュー行はそのまま使えます。Issue 本文の再取得と承認は、Issue 方式の契約に従って取り直します。
+- 完了の記録は `## 追加修正記録` の節に、`- <YYYY-MM-DD> ` で始まり、「未完了」「中断」「停止」を含まず、「完了」と「結果 APPROVED」を含む行で書く。

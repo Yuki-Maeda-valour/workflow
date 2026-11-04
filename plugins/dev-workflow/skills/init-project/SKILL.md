@@ -40,6 +40,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - 第 1 引数: 対象パス(省略時はカレントディレクトリ)。以降これを `<root>` と呼ぶ。
 - `--runners=<名前,...>`: Phase 3.5 の生成物レビューに外部 CLI レビュアーを追加する(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md)
 - `--yes`: Phase 2 の対話を省略し推奨既定で進める
+  - タスクの置き場は `file`。既存の有効な `task_store` は変えない。
   - (既定: Serena は検出結果に従う〈使用可能なら正本 serena・無ければ正本 docs〉・応答の口調は報告調〈権威参照ファイルに口調を決めた別の節があれば、そのまま残す〉・hook 無・agents 無・MCP は起点質問(`.mcp.json` / `.codex/config.toml` に設定する)を経ないため新規宣言はしない〈検出結果の案内のみ〉)。
   - **既存 `CLAUDE.md` の移行**(互換形から完成形へ / 未移行から完成形または互換形へ。**移行後の形の選択を含む**)と、**既存 profile に `mcp_servers` の宣言がある場合の 2 形式生成(`.mcp.json` / `.codex/config.toml`)**は、`--yes` でも省略せず明示承認を取る
   - (前者は既存ファイルの内容を動かすため・後者は解決後の宣言をユーザーに提示して実行に移すため。Phase 3-1・Phase 3-7)。
@@ -54,7 +55,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - ソースファイル数・`package.json` 等のマニフェスト有無・`.git` 有無を確認する。
 - マニフェストもソースもほぼ無い → **新規**(テンプレの雛形をそのまま出す)。コードがある → **既存**(検出値でテンプレを埋め、権威参照ファイルは差分提案に切り替える)。
 - profile に `workflow_version` が既にある → **再実行(アップデート)モード**: 現在の標準構成テンプレ一式と既存物を突合(2 つを照らし合わせて食い違いを探すこと)し、**新標準で増えた・変わった項目**を差分提案する
-  - (既存の記述・過去に回答済みの選択は変えない。**ただし profile の値に `{{...}}` が残る項目は「過去の選択」ではなく置換漏れとして扱い、再実行モードでも差分提案に含める** — Phase 3-2。`AGENTS.md` の `{{...}}` は Phase 1-4 のとおり意図的に残るので対象にしない)。
+  - 既存の記述・過去に回答済みの選択は変えない。profile の値に `{{...}}` が残る場合や YAML が読めない場合は、再実行でも Phase 1-5 で停止する。`AGENTS.md` の `{{...}}` は Phase 1-4 のとおり意図的に残るので対象にしない。
   - 完了時に `workflow_version` を現バージョンへ更新する。
 
 **2. 技術スタック・パッケージマネージャ**(design 3 層の「動的検出」)
@@ -75,6 +76,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 **5. 既存構成の有無**
 - `AGENTS.md` / `CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md` / `.claude/rules/` / `.claude/project-profile.yml` /
   - `.claude/settings.json` / `doc/`(または `docs/`)/ 状態名 MD を持つタスク候補 / `.serena/` / `.gitignore` / `README.md` の有無を控える。以降の「上書きしない」判断に使う。
+  - 状態名 MD を見つけたら、保存先ごとの件数を控える。Issue 方式へ切り替えるときの案内に使う。
 - **権威参照ファイルの状態を、ルートの `AGENTS.md` × `CLAUDE.md` の 4 通りに分類する**(design §3 の検出順): ① どちらも無い ② `AGENTS.md` のみ(完成形)③ `CLAUDE.md` のみ(未移行)④ 両方。
 - ④ のときは、**ルートの `CLAUDE.md` 自身**に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(1) import の判定」を当てる
   - (**(2) のドリフト〈文書や設定と実際との食い違い〉判定は使わない** — 使うと、import を持たない中身入りの `CLAUDE.md` と import を持つ `CLAUDE.local.md` がある構成まで互換形に分類してしまう)。
@@ -93,12 +95,9 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
     - import 行より上の節は skill が読まないので指す先にせず、Phase 2 の口調の質問と Phase 4 の一覧で示す
   - 当たる節が 2 つ以上あれば、同じ「6. 口調」の節が決める順で最初の節を使い、すべてを Phase 4 の一覧に書く
   - ほかの指示ファイル(`.claude/CLAUDE.md`・`CLAUDE.local.md`・`.claude/rules/` の下)の中は探さない。ホスト固有の指示ファイルは skill の読む範囲の外で(design §3)、個人のファイルはほかの人の環境に無いため。有無だけを上の一覧で控える
-- 既存の `.claude/project-profile.yml` の値に `{{...}}` が残っているときは(**判定はコメント行〈`#` 始まり〉を除いた値について行う** — 利用者が書き足したコメントに例示として現れても誤検知しないため。テンプレート由来のコメントには現れない〈テンプレート冒頭の注記〉)、
-  - **次の停止規則を判定する前に**、テンプレートの置換が完了していない可能性を、残っている項目名を挙げて報告する。
-  - **判定はファイルをテキストとして行う**(引用符の無い `{{...}}` は YAML としてパースできないため、パースを前提にすると最も典型的な置換漏れを検出できない)。
-  - 報告だけで停止はしない。
-  - 対処は Phase 3-2 の差分提案で埋める(`{{...}}` の項目は未設定項目として扱う)。
-  - ただし **`source_of_truth` 自体が `{{...}}` のときは次の停止規則で止まる**ので、その値だけは先に手で直すか、profile を退避してから再実行する必要があることを添える(再実行を促すだけでは報告と停止を繰り返す)。
+- 既存の `.claude/project-profile.yml` は、YAML として読む前にテキストで値の `{{...}}` を調べる。コメント行(`#` 始まり)の例示は除く(引用符の無い雛形の値は YAML として読めないため)。
+  - 値に `{{...}}` が残る場合は、項目名と直す場所を報告して停止する。`source_of_truth`・`task_store`・`task_dir` を含む全項目が対象で、Phase 3-2 の差分提案では埋めない。先に人が手で直してから再実行するよう案内する。
+  - `{{...}}` が無くても YAML が読めない場合は停止する。読めない理由と `.claude/project-profile.yml` を示し、先に人が手で直してから再実行するよう案内する。
 - 既存の `.claude/project-profile.yml` があり `source_of_truth` に値があるとき(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもなければ、
   - ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する(既定へフォールバック〈先の手段が使えないときに次の手段へ切り替えること〉しない。新規プロジェクト・profile なし・項目なし・値が空は対象外で、停止しない)。
 
@@ -112,13 +111,16 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - Phase 3 の profile 生成で `memory_map` の提案に使う。
 
 **8. タスク保存先の解決**
-- profile を生成する前に [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従い、`<root>` を管理プロジェクトルートとして保存先を解決する。
+- 先に [Issue 方式の契約](../do-task/references/github-issue.md) §1 で既存の `task_store` を検査する。不正なら停止する。値に `{{...}}` が残る場合や YAML が読めない場合も停止し、Phase 1-5 と同じく先に人が手で直してから再実行するよう案内する。
+- `gh` の有無と、`python3 {ship-task の}scripts/origin-repo.py --dir <root>` の `repo` が `github.com/` で始まるかを控える。検出不能・非 Git・origin なしも、質問の条件を満たさない。
+- **保存先の解決は Phase 2 の選択後、Phase 3 の生成前に行う**。`github-issue` なら解決・作成せず、`TASK_DIR` も使わない。`file` だけ次を行う。
+- [../create-task/references/task-directory.md](../create-task/references/task-directory.md) に従い、`<root>` を管理プロジェクトルートとして保存先を解決する。
   - 既存 profile の `task_dir` はホスト側で型を検証し、キー欠落・null は未指定として検出へ進む。
-  - 値に `{{...}}` が残る置換漏れは、正本の優先順位 2 にある init-project の例外に従い、未指定として検出へ進む(他の skill はこの値で停止する)。
+  - `task_dir` の値に `{{...}}` が残る場合も停止する。未指定として検出へ進まず、先に人が手で直してから再実行するよう案内する。
   - 型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは、生成を停止して直し方か選択を求める
-- 解決した相対パスを `TASK_DIR` として以降の profile・AGENTS.md・運用文書・`.gitkeep` で一貫して使う。既存 profile は上書きせず、不足する(または値に `{{...}}` が残る)`task_dir` の補完案を提示する
+- 解決した相対パスを `TASK_DIR` として以降の profile・AGENTS.md・運用文書・`.gitkeep` で一貫して使う。既存 profile は上書きせず、不足する `task_dir` の補完案を提示する
 
-検出結果(新規/既存・PM・スタック・構成・品質コマンド・既存物・タスク保存先・MCP)を短く提示してから Phase 2 へ進む。
+検出結果(新規/既存・PM・スタック・構成・品質コマンド・既存物・タスクの置き場の質問可否・MCP)を短く提示してから Phase 2 へ進む。
 
 ---
 
@@ -126,7 +128,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 `--yes` が指定されていればこの Phase を飛ばし、推奨既定を採用する。そうでなければ、検出・文脈から当てはまる質問を次の固定の順に並べ、ホストの質問の仕組み(選択肢を出して答えてもらう道具)で確認する。
 
-- **質問の固定の順**: 起点の質問(Serena)→ 応答の口調 → understand-project 強制 hook → specialist agents → ブラウザ分析 MCP → デザイン連携 MCP
+- **質問の固定の順**: 起点の質問(Serena)→ 応答の口調 → understand-project 強制 hook → specialist agents → ブラウザ分析 MCP → デザイン連携 MCP → タスクの置き場
 - **区切り方**: ホストの質問の仕組みが 1 回に受け付ける数ごとに区切り、続けて聞く。その数は、実行時にその仕組みの定義で確かめる(出典の記録は design §7-3)。数を確かめられないときは 1 回に 1 問ずつ聞く。質問の仕組みが無いホストでは、同じ順に文で 1 回にまとめて聞く
 - **選択肢**: 検出結果を踏まえて推奨を決め、先頭に置いて「(推奨)」と書く。各選択肢に、選ぶと何が起きるかを 1 行で添える
 
@@ -152,6 +154,14 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 | specialist agents 生成 | する(検出スタックに応じた雛形) / しない | しない(opt-in) |
 | ブラウザ分析 MCP(API・画面の実測分析を使う予定) | 使う / 使わない | 使わない(必要時に後から) |
 | デザイン連携 MCP(Figma 等を使うか) | 設定手順を案内 / スキップ | スキップ |
+| タスクの置き場(origin が GitHub で `gh` があるときだけ) | ファイル(推奨) / GitHub Issue | ファイル |
+
+**タスクの置き場の質問**: 「タスクの設計と作業記録をどこに置きますか?」と聞く。
+- Phase 1-8 の条件を満たすときだけ聞く。それ以外は聞かずに `file` にする。既存の明示値(`file` / `github-issue`)があれば質問せず保持し、条件不足でも `file` に切り替えず不足を報告する。
+- ファイル(推奨): 「設計書をプロジェクト内のファイルに保存する」。選ぶと `TASK_STORE=file`。
+- GitHub Issue: 「設計と作業記録を Issue 本文に保存する」。選ぶと `TASK_STORE=github-issue`。
+- Issue を選ぶと、利用時に認証と権限を確かめること、無人ループ・発見の実行・候補モードは使えないことも伝える。この初期設定では Issue を作成・更新しない。
+- Issue を選び、Phase 1-5 で状態名 MD を見つけていたら、件数と保存先を示す。それらは Issue 方式の create-task・do-task では読まれず、自動で移す仕組みも無いと伝える。ファイル方式のまま終えてから切り替えるか、手で Issue に移すよう案内する。
 
 **応答の口調の質問**(AI が人との会話で使う口調を決める。Phase 1-5 の結果で次のように分ける。どれも固定の順の同じ位置で聞く):
 
@@ -181,18 +191,21 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 - doc/ の構成は質問しない(規模に関わらず統一構成で生成する。Phase 3 参照)。
 - 正本が `serena` でも `.serena/` が無い場合は「初回に Serena の onboarding が必要」である旨を Phase 4 の案内に含める。
-- `has_code: false` のときは起点の質問(正本)と応答の口調の質問を尋ね、hook / agents / 品質関連・MCP は既定でスキップする。
+- `has_code: false` のときもタスクの置き場は同じ条件で聞く。起点の質問(正本)と応答の口調の質問を尋ね、hook / agents / 品質関連・MCP は既定でスキップする。
 
 ---
 
 ## Phase 3: 生成
 
-検出値と確認結果で以下を生成する。各テンプレは `templates/` から Read → `{{PLACEHOLDER}}` 置換 → Write。
+Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と確認結果で以下を生成する。各テンプレは `templates/` から Read → `{{PLACEHOLDER}}` 置換 → Write。
 
 **1. 権威参照ファイル(正本 `AGENTS.md`)**(`templates/AGENTS.md.template`)
 - **正本は `AGENTS.md`**。
   - 置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) /
-  - `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}` / `{{TASK_DIR}}` / `{{RESPONSE_STYLE}}`(下の「応答の書き方」節の項)。
+  - `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}` / `{{TASK_DIR}}` / `{{TASK_STORE_NOTICE}}` / `{{RESPONSE_STYLE}}`(下の「応答の書き方」節の項)。
+- `{{TASK_STORE_NOTICE}}` は `github-issue` のとき、次の1行に置換する。`file` なら行を消す。その直前の空行も消し、前後の空行が2つ並ばないようにする。既存ファイルには、同じ行が無いときだけ追記を提案する。
+  - タスクの置き場は GitHub Issue(`.claude/project-profile.yml` の `task_store`)。この設定を読まない古い版の skill では、ローカルのタスク MD を作らない。
+- `github-issue` の生成では、表の `/create-task` の用途を「設計書を GitHub Issue 本文に作成(影響範囲調査込み)」、`/do-task` を「Issue 本文を使って実装・検証・レビュー」に置換する。`TASK_DIR` は埋めない。
 - `{{DOC_REFERENCES}}` は正本で切り替える。serena → 主要メモリ名の箇条書き(`project_overview` / `code_style_conventions` / `suggested_commands` 等、存在は Phase 4 で onboarding 前提)。docs → 生成した `doc/` ファイルへのリンク箇条書き。
 - **`CLAUDE.md` は新規生成しない**(① ② のどちらでも作らない)。Claude Code 固有の指示は `.claude/rules/claude-code.md` に置く(内容を `AGENTS.md` へコピーしない)。
 - **サイズ**: 権威参照ファイルは最も厳しいホストの上限(Codex の `project_doc_max_bytes` 既定 32 KiB)に収まるよう薄く保つ。詳細は正本(メモリ / `doc/`)へ逃がす。
@@ -262,7 +275,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - **書き方の決まりのファイルに届かない**: 既存の指示ファイルがある分類(② ③ ④)では、「応答の書き方」節の追記を提案せず、届かないことを Phase 4 の一覧に書く(口調の節を見分けられないため)。① では判定が要らないので、口調の質問の答えで節を入れる
 
 **2. .claude/project-profile.yml**(`templates/project-profile.yml.template`)
-- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{TASK_DIR}}` / `{{HAS_CODE}}` /
+- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{TASK_STORE}}` / `{{TASK_DIR}}` / `{{HAS_CODE}}` /
   - `{{PACKAGE_MANAGER}}` / `{{SOURCE_OF_TRUTH}}` / `{{QUALITY_BLOCK}}` / `{{MCP_SERVERS_BLOCK}}` /
   - `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の version を Read して埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
 - Phase 1-7 で既存メモリを列挙した場合、推定した対応表を `memory_map` として有効化した形で提案する(確定は生成内容の提示時にユーザーが確認)。
@@ -277,12 +290,14 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
     - **これが壊れるのは `.claude/project-profile.yml` 自体**であり、影響は MCP 生成に留まらず**全 skill が profile を読めなくなる**(design §3 のフォールバックは「profile が無い」想定で「あるが壊れている」は想定外)。
     - **サーバー id も必ずシングルクォートで囲む**(`'yes'` / `'123'` のように)。
     - 囲まないと YAML が `yes` / `no` / `true` 等を bool、`123` のような数字列を int、`2026-09-10` のような日付形式を date と解釈し、id が文字列でなくなる(`[A-Za-z0-9_-]+` の charset 制約はこれらの語を排除しないため、id を引用しないと YAML 側で型が化ける)。
-- `{{TASK_DIR}}` は通常の YAML 文字列としてシングルクォートで囲み、値中の `'` は `''` に二重化する。
-  - 既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。**値に `{{...}}` が残る項目は未設定項目とみなして提案に含める**(置換漏れは検出値で埋められる。上書きではなく提案なので「既存を壊さない」原則は保つ)。
-  - **既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
+- `{{TASK_STORE}}` は選択した `file` / `github-issue` に置換する。`github-issue` の新規生成では `task_dir` の行とその直前のコメント行を消す。既存の `task_dir` は変えず、使わない。
+- `file` の `{{TASK_DIR}}` は通常の YAML 文字列としてシングルクォートで囲み、値中の `'` は `''` に二重化する。
+- 既存の profile があれば上書きせず、差分(検出で埋められる未設定項目)を提案する。値に `{{...}}` が残る場合や YAML が読めない場合は停止する。差分提案では埋めず、先に人が手で直してから再実行するよう案内する。
+- **既存 profile に `mcp_servers` の宣言(コメントでない)が既にある場合は上書きせず**、Phase 2 で新規承認された宣言のうち**無い id だけ**を追記する形で提案する。
 
 **3. doc/ 一式(規模に関わらず統一構成)**
 - `templates/doc/` の 7 テンプレートを `doc/` 直下へ生成する。置換は `{{PROJECT_NAME}}` / `{{DATE}}`(今日の日付) / `{{TECH_STACK}}`(02 のみ、検出スタックの箇条書き) / `{{TASK_DIR}}`(05 のみ、Phase 1-8 の解決値):
+- `github-issue` では、05 の「一時的な TODO は `{{TASK_DIR}}/` へ」を「一時的な TODO は GitHub Issue へ」に置換する。既存の文書は上書きせず、食い違う案内の修正を提案する。
 
 | ファイル | 内容 |
 |---|---|
@@ -299,6 +314,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - **既存の doc / docs があるファイルは上書きしない**(無いファイルだけ足す)。既存プロジェクトに別構成の doc がある場合は、統一構成への対応表を提示するに留める(移行は提案のみ)。
 
 **4. タスク保存先**
+- `github-issue` ではこの手順を行わず、タスク用ディレクトリ・`.gitkeep`・タスク MD を作らない。
 - Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`、発見ループの採用前の候補は `候補_`)。
 
 **5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
@@ -397,10 +413,12 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **2. 妥当性の自己確認**
 - `.claude/project-profile.yml` が最小構成(name / repo_layout / has_code / source_of_truth)を満たすか。
+  - `task_store` が選択した `file` / `github-issue` になっているか。既存の明示値を変えていないか。
   - `source_of_truth` に値がある場合、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれかであるか。
   - **コメント行(`#` 始まり)を除いた値に `{{...}}` が残っていないか**(この実行で生成・追記した分について。`source_of_truth` 以外の項目も見る。
   - profile のテンプレートは値を**意図的にプレースホルダのまま残さない**ので、値に 1 つでも残っていれば置換漏れ — `AGENTS.md` だけは Phase 1-4(品質コマンドの検出)のとおり、判定できない品質コマンドのプレースホルダを意図的に残す)。
 - `AGENTS.md` の `{{...}}` が置換済みか(意図的に残したガイド文以外にプレースホルダが残っていないか)。
+  - `{{TASK_STORE_NOTICE}}` が残らず、Issue の選択時は古い版への注意と表の用途が一致するか。既存のファイル用の案内も、上書きせず修正を提案したか。
   - 生成・追記提案した「応答の書き方」節に `{{RESPONSE_STYLE}}` が残っていれば、停止して報告する(意図的に残してよいガイド文に含めない)。
   - **どの分類でも**、最終状態に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」をかける
   - (ルートに `CLAUDE.md` が無くても、`.claude/CLAUDE.md` / `CLAUDE.local.md` があればドリフトになりうる)。
@@ -448,7 +466,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 - [ ] テンプレは `templates/` から Read し、値をハードコードせず置換して Write したか。
 - [ ] 既存の AGENTS.md / CLAUDE.md / `.claude/CLAUDE.md` / `CLAUDE.local.md` / `.claude/rules/` / profile / doc / settings.json / .mcp.json / .codex/config.toml / .gitignore / README を上書きせず、
-  - 差分提案・マージ(無い行・無いファイルのみ追加。profile の `{{...}}` が残る行の置き換えは差分提案として扱う)・append-only(`.codex/config.toml` は既存行に一切触れない。パース失敗時の復元だけが例外)で扱ったか。
+  - 差分提案・マージ(無い行・無いファイルのみ追加)・append-only(`.codex/config.toml` は既存行に一切触れない。パース失敗時の復元だけが例外)で扱ったか。
 - [ ] 新規生成・`AGENTS.md` のみのプロジェクトで `CLAUDE.md` を生成していないか。
 - [ ] 既存 `CLAUDE.md` を移行した場合、次をすべて満たしたか: symlink には import を書き足さず、**ルートの `AGENTS.md` への symlink の移行はリンクの削除だけに留め、それ以外の symlink でもリンク先のファイルを書き換えていない** /
   - 参照一覧を提示し明示承認を得た /
@@ -461,13 +479,12 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - 移動のみに留めた(未承認なら移行していないか)。
 - [ ] ソースコード・既存ドキュメントの中身を変更していないか(このスキルの成果物は構成ファイルの設置のみ)。
 - [ ] 生成物レビュー(Phase 3.5)を全レビュアー APPROVED まで実施したか(`APPROVED` に達しないまま完了報告していないか)。
-- [ ] 再実行モードでは、既存の記述・過去の選択を変えずに**新標準の差分と、profile に `{{...}}` が残る未設定項目だけ**を提案し、workflow_version を更新したか。
+- [ ] 再実行モードでは、既存の記述・過去の選択を変えずに新標準の差分だけを提案し、workflow_version を更新したか。
 - [ ] MCP は「宣言 → 承認 → 生成」の順で扱ったか。承認提示に生成先(`.mcp.json` / `.codex/config.toml`)を列挙したか(**既定は両方生成し**、ユーザーがその場でホスト単位の除外を申し出た場合のみ個別にスキップする)。不要な設定を押し付けていないか。
 - [ ] 生成した profile は他 skill のフォールバックを壊さない(最小構成が埋まっている・コメント行を除いた値に `{{...}}` が残っていない)か。
-- [ ] 既存 profile に `{{...}}` が残っていたとき、停止規則の判定より前に項目名を挙げて報告し、**報告自体では停止せず**(`source_of_truth` の値に `{{...}}` が残るときに次の停止規則で止まるのと、Phase 1-8 で保存先の解決がエラー〈置換漏れの名前の候補など〉になって止まるのは別)、
-  - `task_dir` の値に `{{...}}` が残るならそれを保存先に採用せず、`{{...}}` の項目を Phase 3-2 の差分提案に含めたか。
+- [ ] 既存 profile の値に `{{...}}` が残る場合や YAML が読めない場合は停止し、項目名または読めない理由を報告したか。差分提案では埋めず、先に人が手で直してから再実行するよう案内したか。
 - [ ] `source_of_truth` が有効な 3 値以外のまま、既定へフォールバックして続行していない
-- [ ] 解決したタスク保存先に `.gitkeep` を作り、profile・AGENTS.md・運用文書で同じパスを示し、命名規約(`進行中_` / `完了_`)を伝えたか。
+- [ ] `file` だけ保存先を解決し、`.gitkeep`・profile・AGENTS.md・運用文書で同じパスと命名規約を使ったか。`github-issue` ではタスク用フォルダや MD を作らず、各案内を Issue にそろえたか。
 - [ ] 生成物一覧と次ステップ(`/understand-project` からのサイクル)を日本語で提示したか。
 
 ## 関連 skill

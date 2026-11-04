@@ -116,6 +116,17 @@ class ValidateTest(unittest.TestCase):
         target.write_text(text, encoding="utf-8")
         return target
 
+    def test_repository_task_store_does_not_change_validation(self):
+        # 配布物の検査は利用先の設定に依存しない。コピー内だけで有無と値を変える。
+        profile = self.repo / ".claude/project-profile.yml"
+        profile.unlink(missing_ok=True)
+        expected = self.run_validator()
+        self.assertEqual(expected[0], 0, expected[1])
+        for value in ("file", "github-issue", "invalid"):
+            with self.subTest(task_store=value):
+                self.write_file(".claude/project-profile.yml", f"task_store: {value}\n")
+                self.assertEqual(self.run_validator(), expected)
+
     def write_skill_md(self, skill, total_lines, trailing_newline=True):
         """SKILL.md を frontmatter を残したまま**論理行数ちょうど**に作り替える。
         `## 原則` の見出しと書き方の正本を指す 1 行は残す(無いと原則の節の検査で ERROR になり、
