@@ -12,7 +12,7 @@
   5. 禁止パターン(design.md §5): 絶対パス・TeamCreate/TeamDelete・日付付きモデル ID・
      claude -p と、環境変数 WORKFLOW_PROJECT_NAMES に渡した周辺プロジェクト名
      (未設定なら 1 語も足さない)。行内に `<!-- validate-allow: 理由 -->` があれば
-     その行だけ免除する(8 でも効く。7・11 と委託の語の除外の不変条件では効かない)
+     その行だけ免除する(8 でも効く。7・11・12 と委託の語の除外の不変条件では効かない)
   6. SKILL.md と references/*.md 内の相対リンク(references/ scripts/ templates/ 兄弟 skill)の
      存在。fragment 付き・タイトル付きも検査し、コードフェンスの中は除外する
   7. 委託の語(design.md §7-7): 全 skill の skill 直下(画像を除く)・references/ 配下の
@@ -52,6 +52,11 @@
      その行で定義する語の組だけ(「- **置き換える語**」の行は止めの印・守る値・対話点・報告点、
      「- **文書の中で置き換える語**」の行はそのほかの語)。定義の行が design にちょうど 1 行ずつでなければ
      ERROR にする。免除の印は効かない
+ 12. 番号だけの理由(design.md §6): skill の文書(SKILLS_DIR 配下の *.md と templates/ 配下)、
+     docs/design.md・README.md の結果の行と保留の行の例で、理由・停止条件が番号だけなら ERROR。
+     D・S・U・G・M・H の番号、決定 N、軸 N、①〜⑳・条件 ③、§N-N を対象にする。
+     コードフェンス・インラインのコードも検査する。参照や手順の番号は検査しない。
+     免除の印は効かない。scripts・決定録・CHANGELOG は対象にしない
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
 """
@@ -821,6 +826,40 @@ def check_replaced_words():
                 ERRORS.append(f"{f.relative_to(REPO)}:{no}: 置き換える語 {h}(design.md §6)")
 
 
+# 結果の行・保留の行の理由欄だけを調べる。参照の番号へ検査を広げない(#314)。
+_REPORT_NUMBER = r"(?:[DSUGMH][0-9]+|(?:決定|軸)[ \t]*[0-9]+|(?:条件[ \t]*)?[①-⑳]|§[0-9]+(?:-[0-9]+)*)"
+_BARE_REPORT_REASON = (
+    re.compile(
+        r"無人の周の結果: (?:PR|縮退|保留|失敗扱い|候補なし) — "
+        rf"(?P<number>{_REPORT_NUMBER})(?:[ \t]*[:：])?[ \t]*(?=$|[`\"')）」』。、,*\]|]|<!--)"
+    ),
+    re.compile(
+        r"- \*\*保留\*\*\(ship-task・(?:[0-9]{4}-[0-9]{2}-[0-9]{2}|YYYY-MM-DD)\): "
+        rf"(?P<number>{_REPORT_NUMBER})(?:[ \t]*[:：])?"
+        r"(?:[ \t]+—(?:[ \t]|$)|[ \t]*(?=$|[`)]))"
+    ),
+)
+
+
+def check_number_only_reasons():
+    """人に出す定型行の例で、理由・停止条件を番号だけで済ませていないかを確かめる。"""
+    targets = []
+    if SKILLS_DIR.exists():
+        for f in sorted(SKILLS_DIR.rglob("*")):
+            rel = f.relative_to(SKILLS_DIR).parts
+            if f.is_file() and (f.suffix == ".md" or (len(rel) > 2 and rel[1] == "templates")):
+                targets.append(f)
+    targets.extend(f for f in (REPO / "docs" / "design.md", REPO / "README.md") if f.is_file())
+    for f in targets:
+        for no, line in enumerate(f.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
+            for pattern in _BARE_REPORT_REASON:
+                for match in pattern.finditer(line):
+                    ERRORS.append(
+                        f"{f.relative_to(REPO)}:{no}: 番号だけの理由 -> {match['number']!r}。"
+                        "結果の行の理由・保留の行の停止条件は「番号: 中身」で書く(design.md §6)"
+                    )
+
+
 def main() -> int:
     # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
     if yaml_loader() is not None:
@@ -830,6 +869,7 @@ def main() -> int:
         check_writing_rules_link()
         check_line_length()
         check_replaced_words()
+        check_number_only_reasons()
         check_delegation_words()
         check_host_cli_words()
         check_delegation_map_invariant()

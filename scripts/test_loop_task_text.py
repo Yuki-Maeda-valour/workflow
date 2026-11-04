@@ -80,6 +80,18 @@ class TaskTextTests(unittest.TestCase):
         self.check('holdcode', data.encode(), b'D2\n')
         self.check('holdcode', (data+hold+'番号なし\n').encode(), b'\n')
 
+    def test_hold_reason_with_colon_keeps_leading_code(self):
+        hold = '- **保留**(ship-task・2026-11-04): '
+        for reason, code in (
+            ('G1: 許可の要る操作が拒否された', b'G1\n'),
+            ('S4: 承認の後に本文が変わった', b'S4\n'),
+            ('G1 許可の拒否', b'G1\n'),  # 既存の空白区切りも読める
+        ):
+            with self.subTest(reason=reason):
+                data = ('## 追加修正記録\n' + hold + reason + ' — 人が確認する\n').encode()
+                self.check('holdcount', data, b'1\n')
+                self.check('holdcode', data, code)
+
     def test_fence_length_kind_indent_and_unclosed(self):
         hold = '- **保留**(ship-task・2026-10-09): G1 stop\n'
         for opening, closing in [('```', '```'), ('   ~~~~ info', '  ~~~~~'), ('````', '`````')]:
