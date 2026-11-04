@@ -17,6 +17,7 @@ argument-hint: "[--update | --security-only | --deps=<pkg1,pkg2>]"
 5. 機密ファイル(profile の `secret_paths`)は読まない
 6. **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う**。役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)から、
    - ホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れるエージェント種別・並列起動の手段はホスト = Claude Code での解決)
+   - 内蔵の委託の依頼文には、返答の先頭の 1 行に自分のモデルの名前と版を書かせる(`モデル: <名前と版>`。分からなければ `モデル: 未確認`)。報告に使う値の決まりは、解決表の「委託先の短い説明」
 7. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 
