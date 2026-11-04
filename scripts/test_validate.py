@@ -1968,6 +1968,23 @@ class WordingTest(unittest.TestCase):
                 self.write_exceptions(names=[self.short_entry(form)])
                 self.assertIn("動詞", self.assert_dictionary_error()[0])
 
+    def test_verb_check_stays_inside_the_same_paragraph_or_item(self):
+        # 改行は同じ段落・同じ項目の中の 1 つまで。別の段落・別の項目が「そ」などで始まっても動詞とみなさない。
+        self.write_exceptions(names=[self.short_entry("32 縮退")])
+        for text in ("- 終了値: 32 縮退\n\nその場合は内蔵に切り替える。\n",
+                     "* 終了値: 32 縮退\n* その後は内蔵に切り替える。\n",
+                     "32 縮退\n  \nその場合。\n", "- 32 縮退\n  - その場合。\n", "- 32 縮退\n  * その場合。\n",
+                     "1. 32 縮退\n2. そのあと。\n",
+                     "1. 32 縮退\n2) そのあと。\n", "+ 32 縮退\n+ する。\n", "32 縮退\n# その見出し\n",
+                     "32 縮退\n> その引用。\n"):
+            with self.subTest(text=text):
+                self.assert_wording(text, [])
+        # 同じ段落・同じ項目の中で 1 文を途中で改行した形は、これまでどおり検出する。
+        for text, line in (("32 縮退\nする。\n", 1), ("- 終了値: 32 縮退\n  して続ける。\n", 1),
+                           ("32 縮退\n**して**続ける。\n", 1), ("前の文。32 縮退 \n　そのまま続ける。\n", 1)):
+            with self.subTest(text=text):
+                self.assert_wording(text, [(self.reduced_error, "縮退", line)])
+
     def test_short_name_forms_cannot_use_reduced_as_a_verb(self):
         # 名前の字面を含まない形でも、design §6 が書き換えを求める動詞の形は登録できない。
         for form in ("32 で縮退する", "縮退して続ける(32)", "exit 32 で縮退させる", "**縮退**せず 32"):
