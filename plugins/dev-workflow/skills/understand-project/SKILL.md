@@ -136,7 +136,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {1〜3 行}
 
 ## 🏗️ アーキテクチャ / 🛠️ 技術スタック
-{スタック、DB/ORM、主要ライブラリ。出典(メモリ or 実測)を併記}
+{スタック、DB/ORM、主要ライブラリ。出典(プロジェクトのメモリ or 実測)を併記}
 
 ## 📁 構造
 {実測ディレクトリと役割。parent-child なら本体ルートを明示}
@@ -154,7 +154,7 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 {known_facts / 権威参照ファイルの禁止事項・地雷}
 
 ## ❗ 実コードとの矛盾(あれば)
-{「メモリでは X だが実コードは Y。実コードを優先」形式}
+{「プロジェクトのメモリでは X だが実コードは Y。実コードを優先」形式}
 
 ## 🔺 文書や設定と実際との食い違い(AI への指示をまとめたプロジェクトのファイルの判定は全モード。ほかは --deep 時)
 {Phase 4 の結果。/update-doc を提案}
