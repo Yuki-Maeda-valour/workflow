@@ -300,8 +300,10 @@ initialized_at: "YYYY-MM-DD"              # 初回導入日
    - 品質コマンドは profile または動的検出で決める。Issue 本文にしかないコマンドは、実行前に人に確かめる。
    - 新規 Issue の作成前は公開リポジトリだけ対象と題名を示して確認する。非公開なら作成後に報告する。公開へのセキュリティ修正の記載は既存 Issue の更新でも確認する。`gh` の不在・未認証・権限不足は停止し、ファイル方式へ切り替えない。
    - 実装役は共通スクリプトでチェックだけを更新する。検証役は新しく取得し、チェック以外の変更が無いことと各項目の実装を確かめる。Issue は非ファイルタスクなので、外部の実装役は使わない。
-   - 無人ループ・発見の周・候補モードはファイル方式だけ。`task_store` が `file` 以外なら開始時に理由を示して止める。この版の ship-task・update-doc も Issue 方式では未対応と示して止める。後続の変更でその2工程を実装し、その後に init-project の質問・雛形と本リポジトリの設定を切り替える。
-   - 決定記録: [Issue #320](https://github.com/Yuki-Maeda-valour/workflow/issues/320)(2026-11-04 の決定。1本目は土台と create-task・do-task)
+   - ship-task の対話は `--task=#<番号>` または Issue の URL を受け付ける。既定の作業ブランチ名は `task/issue-<番号>`。タスク MD を新設・stage せず、各工程で新しく取得した本文と保持値を比較する。PR と Issue の対象リポジトリの一致を確かめ、PR 本文に `Closes #<番号>` を書く。取得した記録を公開用の検証根拠として復元しない。
+   - update-doc の対話は Issue の完了ステータスと do-task の完了検証記録を確かめ、取得した本文から更新範囲を選ぶ。明示指定が無ければセッション内の完了 Issue を使い、無ければ番号を質問する。複数なら選んでもらう。全量監査も選べる。更新日時や close だけでは選ばない。詳細は Issue 方式の契約 §6〜7。
+   - 無人ループ・発見の周・候補モードはファイル方式だけ。`task_store` が `file` 以外なら開始時に理由を示して止める。ship-task・update-doc の `--unattended` も Issue 方式では停止する(権威参照ファイルによる Issue 運用を含む)。init-project の質問・雛形と本リポジトリの設定の切り替えは後続の変更で行う。
+   - 決定記録: [Issue #320](https://github.com/Yuki-Maeda-valour/workflow/issues/320)(2026-11-04 の決定。1本目は土台と create-task・do-task、2本目は ship-task・update-doc)
    - 決定記録: [Issue #48](https://github.com/Yuki-Maeda-valour/workflow/issues/48)
 2. **skill 名**: `update-doc`(update-docs は使わない)。旧 refact / refactor は `create-task --refactor` に統合(分析 → タスク化 → do-task で実行)
 3. **サブエージェントの起動**: 委託先を**送る相手として名前で識別できるようにする**(名前が無いと双方向連携の経路が使えなくなる)。起動 API・`name` の文字種規則・派生名の系統は解決表(軸 4・§2)が正本。名前での識別ができる環境では**双方向でやり取りできる環境として運用するのを既定とし**、できない環境では前提にせず §5-17 の縮退プロトコルに従う

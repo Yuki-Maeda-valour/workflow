@@ -1,7 +1,7 @@
 ---
 name: ship-task
-description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければ /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計の情報が欠ければ設計書だけ返し、品質ゲート赤・スコープ縮小・レビュー未収束では停止して PR を作らない。既存のタスク MD から回すときは --task、無人ループの周は --unattended(人に確かめる場面で止まらず、保留か失敗扱いに倒す)、発見ループの周は --discover=<発見元> --unattended(発見元が積んだ候補_ だけを PR にする)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
-argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended] [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>] | --discover=<発見元> --unattended [--no-pr]"
+description: タスクの設計から実装・ドキュメント同期・PR 作成までを 1 コマンドで一気通貫に実行する。「まるっとやって」「タスクを作って実装から PR まで一気に」「一気通貫でやって」「設計から PR まで通して」と言われたときに使う。/create-task で設計書を作り、要件に不明が残らなければ /do-task で実装・検証・レビュー、/update-doc --task で doc を同期し、作業ブランチで commit・push して PR を開く。設計の情報が欠ければ設計書だけ返し、品質ゲート赤・スコープ縮小・レビュー未収束では停止して PR を作らない。既存のタスク MD または Issue から回すときは --task、無人ループの周は --unattended(人に確かめる場面で止まらず、保留か失敗扱いに倒す)、発見ループの周は --discover=<発見元> --unattended(発見元が積んだ候補_ だけを PR にする)を使う。工程を個別に回したいときは各スキルを直接呼ぶ。
+argument-hint: "<タスク内容の説明> | --task=<タスク MD | #番号 | Issue URL> [--unattended] [--design-only] [--no-pr] [--branch=<名前>] [--refactor [対象]] [--compact] [--reviewers=1|3] [--runners=<名前,...>] | --discover=<発見元> --unattended [--no-pr]"
 ---
 
 # ship-task — 設計 → 実装 → doc 同期 → PR の一気通貫実行
@@ -34,8 +34,9 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
 ## タスクの置き場の検査
 
 対話は作業前、無人は環境の検査直後に [Issue 方式の契約](../do-task/references/github-issue.md) §1 で `task_store` を検査する。
-- `github-issue` は「Issue 方式は未対応。Issue の完了記録を使う後続工程はまだ実装していない」と示して停止する。全モードに当てる。
-- 不正な値も停止する。ファイル方式への切り替え、対象選択・書き込み・後続工程の起動は行わない。
+- 不正な値は停止する。ファイル方式へ切り替えて続けない。
+- `github-issue`、または権威参照ファイルが Issue を正本にする場合は、Issue 方式の契約 §6 で各 Phase を読み替える。ファイルの保存先は解決・作成しない。
+- Issue 方式の `--unattended` は `task-store-unsupported` と理由を示し、対象選択・本文取得・書き込みより前に失敗扱いで停止する。発見の周・候補モードも使わない。
 
 ## 無人入口
 
@@ -129,7 +130,7 @@ except (Exception, SystemExit) as exc:
 | オプション | 内容 |
 |---|---|
 | (なし) | 設計 → 実装 → doc 同期 → PR まで全工程 |
-| `--task=<タスク MD>` | 既存のタスク MD(管理ルート相対。`進行中_{名}.md` の通常ファイル)から始める。Phase 1 を飛ばし、Phase 0 で作業ブランチを作ってから Phase 2 へ進む。`--design-only`・`--refactor`・`--compact`・`--light` とは併用できない(create-task のための引数。指定されたら停止する) |
+| `--task=<タスク MD \| #番号 \| Issue URL>` | 既存の設計から始める。ファイル方式は管理ルート相対の `進行中_{名}.md` の通常ファイル。Issue 方式は `--task=#<番号>` または Issue の URL。Phase 1 を飛ばし、Phase 0 で作業ブランチを作ってから Phase 2 へ進む。`--design-only`・`--refactor`・`--compact`・`--light` とは併用できない(create-task のための引数。指定されたら停止する) |
 | `--unattended` | 無人モード(無人ループの 1 周)。`--task` か `--discover` が必須。前提・人に確かめる場面ごとの扱いは [references/unattended-mode.md](references/unattended-mode.md) |
 | `--discover=<発見元>` | 発見の周(無人ループの発見モードの 1 周)。発見元(改善の候補を見つける skill)の候補モードが書いた `候補_` だけを commit して PR を開く。`--unattended` と一緒にだけ受け付ける(無ければ停止する)。発見元の列・前提・併用しない引数・工程・照合・結末は [references/discover-mode.md](references/discover-mode.md) |
 | `--design-only` | Phase 1 のみ(= /create-task 単体と同じ)。設計書を返して終了 |
@@ -163,7 +164,8 @@ except (Exception, SystemExit) as exc:
 1. **把握**: `.claude/grasp.md` は参照索引として確認し、毎回、現在の profile・権威参照ファイル・関連文書・設定・対象領域と依存先を読む。前回の把握状況を理由に省略しない(深化は /create-task の Phase 0 に任せる)
 2. **profile 解決**: `.claude/project-profile.yml` から `root`・`quality`・`features` を得る(無ければ動的検出)
 2′. **入口と無人の前提**(`--task` / `--unattended` / `--discover` のとき。手順 3 より前に、何も書き換えずに検査する):
-   - `--task`: パスが管理ルート相対で、ファイル名が `進行中_{名}.md` の通常ファイルであること。併用できない引数(オプション表)が無いこと。満たさなければ停止する(無人では失敗扱い)
+   - `--task`: ファイル方式は、管理ルート相対の `進行中_{名}.md` の通常ファイルでなければ停止する(無人では失敗扱い)。Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) §6 の形式と併用引数だけを検査する。
+   - どちらも併用できない引数(オプション表)があれば停止する。Issue の対象リポジトリの確定と本文取得は手順3の事前検査後に行う。無人ではファイル方式だけを扱う。
    - `--discover`: `--unattended` が無ければ停止する(対話で発見するなら各発見元を直接呼ぶよう案内する)。
      - あれば、発見の周の前提(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど。一覧は references/discover-mode.md §4)を確かめ、1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
      - 以後の手順 3〜6 と Phase 1〜5 は、discover-mode.md の工程(公開の確認 → 工程 D1〜D3 → Phase 5)に差し替える
@@ -178,6 +180,7 @@ except (Exception, SystemExit) as exc:
    - 安全な事前検査後、ブランチ判定・設計・実装前に今回の開始時 `S` を一度保持し、do-task へ渡す。取得と基準 `B` の区別は [base-commit.md](../do-task/references/base-commit.md) に従う。
    - 既存作業ブランチの再利用では作成時 OID を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
    - 承認済み再開は `resume-invocation` とし、以前から保持した追加指定も減らさない。親環境の5値の引継ぎは変更しない。
+   - Issue 方式は安全な事前検査後、手順4のブランチ作成より前に `preflight` を通す。`--task` があれば `snapshot --for-execution` で本文を取得する。無ければ新規 Issue の取得は Phase 1 の作成後に行う(Issue 方式の契約 §6)。
 4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。
    - `DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。
    - **デフォルトブランチにいるかは、現在のブランチ名(`git branch --show-current`)で判定する**(従来と同じ):
@@ -187,7 +190,7 @@ except (Exception, SystemExit) as exc:
    - これらの git 呼び出しの安全用のオプションも base-commit.md と同じ
    - `--branch` がある → 現在のブランチに関わらず、**ここで**その名前で作成して切り替える(`git switch -c <名前>`。従来どおり。無人は 2′ で `--branch` を禁じている)
    - `--branch` が無く、デフォルトブランチか detached HEAD にいる → 作業ブランチ `task/{タスク名}` を作る(`git switch -c task/{タスク名}`。無人では `git switch --no-track -c <作業ブランチ>` — 理由は references/unattended-mode.md §7)。
-     - `--task` のときはタスク名(ファイル名の `{名}`)が決まっているので、**ここで作る**(Phase 2 より前)。それ以外は Phase 1 の後に作るので、ここでは判定だけ行う
+     - `--task` のときはタスク名(ファイル名の `{名}`、Issue 方式では `issue-<番号>`)が決まっているので、**ここで作る**(Phase 2 より前)。それ以外は Phase 1 の後に作るので、ここでは判定だけ行う
    - `--branch` が無く、既に作業ブランチにいる → そのまま使う(新規作成しない。`--task` のときも同じ)。無人では 2′ で失敗扱い済み
    - 作れなければ停止する(同名のブランチがある等。無人では失敗扱い)
    - **作ったら、次の 4 項目を報告に残す**(/do-task の新規着手の条件 ⑤ の例外が読む — base-commit.md): ブランチ名 /
@@ -199,9 +202,11 @@ except (Exception, SystemExit) as exc:
      - 無人では確かめず、報告と PR 本文に載せて続ける。
      - 起点の確認に失敗したときは一覧を出さない(do-task の『基準不明』の提示に任せ、同じ commit について 2 回問わない)
 5. リモートと `gh` の有無を先に確認しておく(`git remote` / `gh auth status`)。
+   - Issue 方式では Issue 方式の契約 §6 の `preflight` が必須。不在・未認証・権限不足なら開始前に停止する。以下の「Phase 5 で push・PR をしない」はファイル方式だけ。
    - 無い場合は Phase 5 で push・PR をせず、手で打つコマンド列を示すこと(無人では結末 `縮退`)を**この時点で報告**する(最後まで走ってから「PR を作れません」と言わない)。
    - 無人のタスクの周では、2′ で保持した origin の判定の `repo` が null なら、結末が `縮退` になる(push もしない)ことも、この時点で報告する(`gh repo view` による PR の作成先の確かめは Phase 5 で行う)
 6. **外部実装委託(作業を別の AI に任せること)の承認を先取りする**: profile によって実装の委託先が外部に解決される場合
+   - Issue 方式は非ファイルタスクなので、承認を求めず内蔵の実装役を使う([Issue 方式の契約](../do-task/references/github-issue.md) §5)。以下はファイル方式だけ。
    - (解決順・parent-child で内蔵に切り替えること・提示内容・保持と取り消しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12 に従う)、
    - **Phase 3 まで待たずにこの時点で承認を取る**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。
    - 承認はセッション内で 1 回の判断として保持され、Phase 3 の /do-task がそれを再利用するので**同じ承認を 2 回求めない**。
@@ -217,7 +222,8 @@ except (Exception, SystemExit) as exc:
 
 `--discover` のときは実行しない(references/discover-mode.md の工程 D1 で、発見元の候補モードを呼ぶ)。
 
-`--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。生成物は解決した保存先の `進行中_{タスク名}.md`。
+`--refactor` や `--light` 等の引数を渡して **/create-task をそのまま実行**する。ファイル方式の生成物は解決した保存先の `進行中_{タスク名}.md`。
+Issue 方式は設計を Issue 本文へ書き、返された `repo`・番号・URL を保持する。既定のブランチ名は `task/issue-<番号>`。以下のパス保持・改名の手順はファイル方式だけ。
 
 - 設計に必要な情報が不足している場合は、/create-task の規定どおり **質問で確認する**(推測で埋めない)
 - Phase 0 の 4 でまだ作っていない(デフォルトブランチか detached HEAD にいた)ときは、タスク名が確定したら作業ブランチを作成・切り替え(`git switch -c task/{タスク名}`)、Phase 0 の 4 の 4 項目の報告と一覧の確認(S8)を行う
@@ -231,6 +237,9 @@ except (Exception, SystemExit) as exc:
 
 設計書とその完了報告を機械的に検査し、**実装に進めるかを判定する**。以下のいずれかに該当したら Phase 3 へ進まず、設計書を成果物として返して終了する(理由と、判断に必要な情報を添える)。
 
+Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) §6 に従い、再取得した本文で6条件を判定する。
+承認済みの `task_digest` を R として保持する。行なし・`本文` なし・算出不能も停止する。下の6の「報告して続行」はファイル方式だけ。
+
 1. **要件不明の残存**: タスク MD に `grep -nE '未確定|要確認|要ヒアリング|TBD|ユーザー確認待ち|いずれか(を)?選択'` がヒットし、それが**実装の分岐を左右する**もの(仕様・値・対象範囲・期待挙動)である
    - 「実装時に判断」レベル(命名・内部構造・ログ文言など、どちらでも要件を満たす選択)は停止理由にしない
 2. **needs-user の残存**: タスク MD の追加修正記録の節の中の最後の設計レビューの行で、needs-user が `なし` でない(行の書式・節の範囲・照合パターンは [../create-task/references/task-template.md](../create-task/references/task-template.md) の記法の規約が正本)
@@ -241,6 +250,7 @@ except (Exception, SystemExit) as exc:
    - 行に `本文` が無い(v4.5.0 の書式)・`本文: 算出不能`・現在の値を算出できない(構造・スクリプトや Python が無い)ときは、その旨を報告して続行する
 
 判定結果(続行 / 停止 + 該当項目)を**必ず報告に残す**。停止時は「この情報が決まれば /ship-task を再開できる」形で不明点を列挙し、`/do-task {実際のタスクMDパス}` からの手動再開の導線も示す。
+Issue 方式の停止報告は、タスク MD のパスの代わりに Issue の URL と `/do-task --issue=<番号>` を示す。
 
 **無人では**、6 は R と照合する。1〜6 のどれかに当たったら保留にする(S4。1 は「実装の分岐を左右しない」と言い切れないヒットも保留に倒す。6 は `本文` が無い・`算出不能` のときも保留)。保留の手順は references/unattended-mode.md §5。
 
@@ -252,7 +262,8 @@ except (Exception, SystemExit) as exc:
 
 `--discover` のときは実行しない(実装は、採用の後の /do-task で行う)。
 
-実際のタスク MD パスを対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過。無人では `--unattended` も渡す)。ブランチは作成済みのため `--branch` は渡さない。
+ファイル方式は実際のタスク MD パスを対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過。無人では `--unattended` も渡す)。ブランチは作成済みのため `--branch` は渡さない。
+Issue 方式は `/do-task --issue=<番号>` を実行し、保持した対象・R を渡す。完了記録の書き込みと再取得に失敗したら、stage・commit・文書同期へ進まない(Issue 方式の契約 §6)。
 
 /do-task が以下で終わった場合は **Phase 4 へ進まず停止**する(実装 commit だけ残し、PR は作らない)。無人では、停止時に実装 commit だけ残すことはしない。do-task が返した分類に従い、保留か失敗扱いにする(S5):
 
@@ -262,7 +273,8 @@ except (Exception, SystemExit) as exc:
 - 実動確認が「結果待ち」(ユーザーの対応を待っている)
 - /do-task の Phase 7 の完了処理を終えていない(`完了_{タスク名}.md` が既に在って改名を停止した等)
 
-**commit(実装分)**: /do-task 完了後、ソースコードとタスク MD(`完了_` へのリネームを含む)を 1 commit にまとめる。
+**commit(実装分)**: /do-task 完了後、レビュー済みの変更を 1 commit にまとめる。Issue 方式はソース変更だけ。タスク MD を作らず、取得本文・JSON も stage しない。
+ファイル方式だけはタスク MD(`完了_` へのリネームを含む)も含め、次の stage と旧パスの削除を行う。
 - **タスク MD の stage**(上の停止条件に該当して改名が行われていないときは、タスク MD を stage しない — `完了_{タスク名}.md` が在っても、それは今回のタスクのものではない): `git add -- ':(literal)<完了_ のパス>'` を行う。
 - **rc 0 以外で終わったら**(保存先かその祖先ディレクトリが ignore 済み・sparse-checkout の定義外・commit 先のリポジトリの外 など)`git add -f` や `--sparse` で押し込まず、旧パスにも触れず、git のエラー出力を添えて「タスク MD を commit に含められなかった」と報告して続ける
 - (`git mv` で改名済みだった分は既に index に載っていて commit に入る)。
@@ -275,6 +287,7 @@ except (Exception, SystemExit) as exc:
 - **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠 hash を保持する。
   最終 task は `finalize` の期待バイトで更新する。stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
   task 遷移時は期待バイト・根拠の外部保持 hash を全照合に渡す。不一致・保持値欠落では commit・公開しない。
+- Issue 方式は Issue 方式の契約 §6 の外部本文経路を使う。各入口で再取得した本文と生本文の保持値を渡し、commit 後も R と期待本文を比較する。タスク MD を commit 内から読む処理に代用しない。
 - メッセージ規約はこのリポジトリの `git log --oneline -20` から推定して合わせる(Conventional Commits を使っていればそれに従う)。
 - 無人では、stage する集合を references/unattended-mode.md §5 の「無人の実装 commit・doc commit の集合」にし、下の「無人の周の commit と停止」の照合を通す。
 
@@ -284,7 +297,8 @@ except (Exception, SystemExit) as exc:
 
 文書を変更する前に、完了 task で doc 用の新しい `review-guard.py start` を取り、開始 hash を保持する。
 
-同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
+ファイル方式は同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
+Issue 方式は完了本文を取り直して検査し、doc 用の別 `start` を取ってから `/update-doc --task=#<番号>` を実行する。Issue 方式の契約 §6〜7 に従い、R と実装の検証済み生本文の保持値を引き継ぐ。
 
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
@@ -296,6 +310,8 @@ except (Exception, SystemExit) as exc:
 
 `--discover` のときは、下の 1〜3 の代わりに、references/discover-mode.md §7・§8 の照合 → push → PR(push 先に結び付けた `-R` つき)で行う。PR 本文・結末を `縮退` にする条件も同 §8。
 
+Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R・生本文の保持値を再比較する。公開用の `repo` と保持した Issue の `repo` が同じと確かめてから `publish-guard.py` へ渡す。不一致なら push 前に止める。
+
 1. push 先を origin の判定から固定し、保持したレビュー済み SHA を `publish-guard.py` へ渡す。対話は `--set-upstream` を付け、exact-SHA push と remote SHA 照合の後にだけ既存の `-u` 相当の追跡設定を記録する。
 2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin へ渡す。
    作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で repository/head/base/SHA を照合してから成功にする(draft にしない。レビュアー・アサインは付けない)。
@@ -304,7 +320,7 @@ except (Exception, SystemExit) as exc:
 3. PR 本文には次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
-   - **完了条件と確認結果**: タスク MD の確認手順と、/do-task の Phase 5.5 で実際に観察した事実(「実施不能」の確認手順は、その旨と理由を書き、手順を残課題へ転記する)
+   - **完了条件と確認結果**: タスク本文の確認手順と、/do-task の Phase 5.5 で実際に観察した事実(「実施不能」の確認手順は、その旨と理由を書き、手順を残課題へ転記する)
    - **書式・型・テスト・ビルドの自動の検査**: 実行したコマンドと結果
    - **実装を受け持った AI**: モデルの名前と版(内蔵は自己申告の値で、無ければ起動時の説明の値に「確認前」を付ける。外部はランナー名・CLI の版・モデル名で、実行記録の 2 行の値)
    - **レビュー**: 反復回数・レビュアー編成(各レビュアーのモデルの名前と版。外部ランナーはランナー名・CLI の版・モデル名)・最終判定
@@ -312,7 +328,7 @@ except (Exception, SystemExit) as exc:
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user(人の判断が要る指摘)**(あれば)
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
-   - 実際の完了タスク MD へのリンク
+   - ファイル方式は実際の完了タスク MD へのリンク。Issue 方式は `Closes #<番号>`
 4. 完了報告に PR の URL を含める
 5. このタスクで worktree を作ったときは、完了報告に片付けの案内を出す(作っていなければ案内は不要)。
    - PR のマージ後に消せる worktree のパスを並べる。
@@ -350,7 +366,7 @@ except (Exception, SystemExit) as exc:
 
 | 停止する | 停止しない(自動続行) |
 |---|---|
-| 要件不明が実装の分岐を左右する / needs-user 残存 / 設計レビュー未完了・本文の不一致 | 命名・内部構造など実装時判断で足りるもの / 設計レビューの行に `本文` が無い(報告して続行) |
+| 要件不明が実装の分岐を左右する / needs-user 残存 / 設計レビュー未完了・本文の不一致 / Issue 方式の本文算出不能・取得失敗 | 命名・内部構造など実装時判断で足りるもの / ファイル方式で設計レビューの行に `本文` が無い(報告して続行) |
 | 完了条件が検証不能 / 依存タスク未完 | 設計書のレビュー指摘が valid 反映済みで収束した |
 | 品質ゲート赤・スコープ縮小・レビュー未収束・完了処理の停止(改名先が既に在る等)・実動確認が「結果待ち」 | doc 同期の needs-user(PR の残課題に転記) |
 | タスク分割が必要と判定された | 実動確認が「実施済」か「実施不能」(実施不能は PR の残課題に転記) |
@@ -365,7 +381,8 @@ except (Exception, SystemExit) as exc:
 - [ ] Phase 2 の続行判定の結果(続行 / 停止 + 根拠)を明記した
 - [ ] 品質ゲートが緑で、実動確認が「実施済」か「実施不能」であることを確認してから PR を開いた(または開かなかった理由を書いた)
 - [ ] 実装 commit と doc commit を分けた
-- [ ] PR 本文の記述がすべてタスク MD・実行結果に裏付けられている(推測を書いていない)
+- [ ] PR 本文の記述がすべてタスク本文・実行結果に裏付けられている(推測を書いていない)
+- [ ] Issue 方式では各取得の対象・R・完了後の生本文を確かめ、タスク MD を作っていない。PR を開く場合は同じリポジトリを対象にし、`Closes #<番号>` を書いた
 - [ ] PR 本文が [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の決まりに沿う(転記した決まった行は字面どおり)
 - [ ] push・PR をしなかったこと(gh 不在・PR を作らない指定など。無人では結末 `縮退`)があれば理由付きで明記した。実動確認が「実施不能」なら、理由と確認手順を PR の残課題(PR を開かなかったときは完了報告)に転記した
 - [ ] 作業ブランチを作ったら、Phase 0 の 4 の 4 項目を報告に残した(一覧が空でなければ PR 本文にも載せた)
@@ -380,6 +397,7 @@ except (Exception, SystemExit) as exc:
 - 片付け: PR のマージ後の worktree などの棚卸しと削除は /cleanup
 - 前提: /understand-project(未把握なら Phase 0 で実施)
 - 工程を分けて回したい / 途中から再開したい: 各スキルを直接呼ぶ(`/do-task {実際のタスクMDパス}` で Phase 3 から再開できる)
+- 既存の Issue から始める場合: `--task=#<番号>` または Issue の URL を指定する(対話のみ)。
 - タスク MD が既にある場合: `--task=<タスク MD>` で Phase 2 から始める(設計レビュー済みの MD を、実装から PR まで回す)。実装だけなら /do-task から始める
 - 無人ループ: 外側の while は同梱の `scripts/loop.sh` が回し、周ごとに新しいセッションで `--task=<タスク MD> --unattended` を呼ぶ(人のシェル・cron から起動する。契約は [references/loop.md](references/loop.md))
 - 発見ループ: `scripts/loop.sh --discover` が、周ごとに `--discover=<発見元> --unattended` を呼ぶ(契約は references/discover-mode.md と loop.md の発見モード)。
