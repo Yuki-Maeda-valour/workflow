@@ -107,8 +107,8 @@ class InitTaskStoreTest(unittest.TestCase):
     def test_legacy_notice_is_conditional_and_existing_files_are_preserved(self):
         self.assertEqual(1, self.agents.count("{{TASK_STORE_NOTICE}}"))
         generation = section(self.generation, "**1. 権威参照ファイル", "**2. .claude/project-profile.yml**")
-        self.contains(generation, "`{{TASK_STORE_NOTICE}}` は `github-issue` のとき", "`file` なら行を消す",
-                      "その直前の空行も消し、前後の空行が2つ並ばないようにする",
+        self.contains(generation, "`{{TASK_STORE_NOTICE}}` は `github-issue` のとき", "`file` なら行だけを消す",
+                      "見出しと表の間の空行は1つ残す",
                       "既存ファイルには、同じ行が無いときだけ追記を提案する",
                       "タスクの置き場は GitHub Issue(`.claude/project-profile.yml` の `task_store`)",
                       "この設定を読まない古い版の skill では、ローカルのタスク MD を作らない")

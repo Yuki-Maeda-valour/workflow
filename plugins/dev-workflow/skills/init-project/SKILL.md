@@ -203,7 +203,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 - **正本は `AGENTS.md`**。
   - 置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) /
   - `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}` / `{{TASK_DIR}}` / `{{TASK_STORE_NOTICE}}` / `{{RESPONSE_STYLE}}`(下の「応答の書き方」節の項)。
-- `{{TASK_STORE_NOTICE}}` は `github-issue` のとき、次の1行に置換する。`file` なら行を消す。その直前の空行も消し、前後の空行が2つ並ばないようにする。既存ファイルには、同じ行が無いときだけ追記を提案する。
+- `{{TASK_STORE_NOTICE}}` は `github-issue` のとき、次の1行に置換する。`file` なら行だけを消す(見出しと表の間の空行は1つ残す)。既存ファイルには、同じ行が無いときだけ追記を提案する。
   - タスクの置き場は GitHub Issue(`.claude/project-profile.yml` の `task_store`)。この設定を読まない古い版の skill では、ローカルのタスク MD を作らない。
 - `github-issue` の生成では、表の `/create-task` の用途を「設計書を GitHub Issue 本文に作成(影響範囲調査込み)」、`/do-task` を「Issue 本文を使って実装・検証・レビュー」に置換する。`TASK_DIR` は埋めない。
 - `{{DOC_REFERENCES}}` は正本で切り替える。serena → 主要メモリ名の箇条書き(`project_overview` / `code_style_conventions` / `suggested_commands` 等、存在は Phase 4 で onboarding 前提)。docs → 生成した `doc/` ファイルへのリンク箇条書き。
