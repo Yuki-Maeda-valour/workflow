@@ -66,7 +66,7 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検証器(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、回帰テスト(test_*.py。検証器・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
@@ -86,13 +86,13 @@ setup.sh                            # plugin を使わない導入(コピー / s
 - 各 SKILL.md の `## 原則` の節に、人が読む文の書き方の正本 [`do-task/references/writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) を指す 1 行を、リンクの形で置く(**無いと `validate.py` が ERROR で落とす**。素の言及・節の外・コードフェンスの中は数えない)
 - skill 本文を変更するレビューでは「ホスト結合の混入」(役割語ではなくホスト機構名で委託を書いていないか)を観点に含める(design §6 が正本。対象範囲・許容リストとの関係はそちらを参照。詳細をここに列挙しない)
 - skill 本文と references を変更するレビューでは、SKILL.md と references の報告の型と、内部の言葉(27 語・置き換える語・「縮退」)と、その変更が書く文が [`writing-for-people.md`](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) に沿うかも観点に含める(design §6 が正本)
-- 27 語の初出の言い換え・本文の言い換えの重複・名前でもコードでもない「縮退」は `validate.py` の検査 13〜15 が ERROR にする。名前と報告の型の除外は `scripts/wording-exceptions.json` に置く。名前を足すときは、定義・参照・一覧・検出する試験・検出しない試験を同じ変更で直す。範囲と数え方は design §6 に従う
+- 27 語の初出の言い換え・本文の言い換えの重複・名前でもコードでもない「縮退」は `validate.py` の検査 13〜15 が ERROR にする。名前と報告の型の除外は `scripts/wording-exceptions.json` に置く。名前を足すときは、定義・参照・一覧・検出するテスト・検出しないテストを同じ変更で直す。範囲と数え方は design §6 に従う
 
 ## 検証(実装終了時に必ず実行)
 
 `validate.py` のYAML構文検査と、言葉の検査で Markdown を解釈する処理には、[requirements-dev.txt](requirements-dev.txt) の開発依存が必要です。未導入・読込失敗・必要な機能の欠落は、導入案内付きのERRORとなり、終了コード1で停止します。簡易な読み取りへ切り替えて合格にはしません。
 
-検証に使うPythonへ、次のコマンドで依存を導入します。導入と検証には同じPythonを使ってください。全回帰はLinux/GNUの通常Python環境で実行し、venv(Pythonの依存を分ける環境)を有効化しません。利用者別の依存を読む順序を確かめる回帰があるためです。
+検証に使うPythonへ、次のコマンドで依存を導入します。導入と検証には同じPythonを使ってください。全回帰テスト(回帰テストをすべて流すこと)はLinux/GNUの通常Python環境で実行し、venv(Pythonの依存を分ける環境)を有効化しません。利用者別の依存を読む順序を確かめる回帰があるためです。
 
 ```bash
 python3 -m pip install -r requirements-dev.txt
@@ -107,16 +107,16 @@ python3 -m venv "$validation_venv"
 "$validation_venv/bin/python" scripts/validate.py
 ```
 
-検証器自身はパッケージをインストールしません。一時環境を使い終えたら、自分が作成した環境だけを片付けてください。
+`validate.py` 自身はパッケージをインストールしません。一時環境を使い終えたら、自分が作成した環境だけを片付けてください。
 
 シェル回帰一式は **Linux と GNU 系ツール**で実行する。do-task の補助スクリプトは bash 4.0 以上、loop は Linux・bash 4.4 以上が必要。PATH の選択・パス解決の代替・macOS の未確認事項は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) を参照する。
 
 `test_shell_requirements.py` の旧 bash 境界は `SHELL_REQUIREMENTS_BASH_3_2`・`SHELL_REQUIREMENTS_BASH_4_3`・`SHELL_REQUIREMENTS_BASH_4_4` に各実体の絶対パスを渡して検証する。不在なら該当ケースを明示的に skip する(互換モードで代用しない)。bash の下限・起動順を変更するときは 3 版すべてで検証する。
 
 ```bash
-# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口・写し・宛先・前置き・フル段階・標準段階・最小段階・段階判定・実行段階・結末の行・フル / 標準 / 最小の並びと太字・サイレント・止めの印・守る値・対話点・報告点〉・番号だけの理由(結果の行・保留の行の例)・27 語の初出の言い換え・言い換えの重複・名前でもコードでもない縮退)+ 配布メタの一括検証
+# JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口・写し・宛先・前置き・フル段階・標準段階・最小段階・段階判定・実行段階・結末の行・フル / 標準 / 最小の並びと太字・サイレント・レビュー役・実装役・まとめ役・検証役・全回帰(後ろがテストの形を除く)・試験・直読み・峻別・一時物・子起動・非ファイルタスク・退行・追随・起票・止めの印・守る値・対話点・報告点〉・番号だけの理由(結果の行・保留の行の例)・27 語の初出の言い換え・言い換えの重複・名前でもコードでもない縮退)+ 配布メタの一括検証
 python3 scripts/validate.py   # 結果の行が ERROR 0・WARN 0 で合格(WARN も直す)
-python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(検証器・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりのコピーの一致・完了報告の型)
+python3 -m unittest discover -s scripts -p 'test_*.py'   # scripts/ の回帰テスト(validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりのコピーの一致・完了報告の型)
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
 # —— 合否がリポジトリ外のデータで決まらないようにするため)。誤検出が出た語は渡さないか、

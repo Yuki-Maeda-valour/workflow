@@ -1,6 +1,6 @@
 # checker 検証観点(create-task Phase 3)
 
-checker(設計書を点検する AI)はタスク MD を以下の観点で検証し、指摘を「対象箇所 / 問題 / 深刻度(blocker・major・minor)/ 提案」の形式で返す。
+checker(設計書を点検する AI)はタスク MD を以下の観点で検証し、指摘を「対象箇所 / 問題 / 深刻度(blocker〈重大。直すまで先へ進めない〉・major〈直すべき問題〉・minor〈軽微〉)/ 提案」の形式で返す。
 
 ## 1. 実コード整合
 

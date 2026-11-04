@@ -2,7 +2,7 @@
 
 `AGENTS.md` と `CLAUDE.md` 系(`CLAUDE.md` / `.claude/CLAUDE.md` / `CLAUDE.local.md`)の関係を扱う skill(init-project / understand-project / update-doc)は、この 1 本を兄弟参照して判定する(同じ判定をコピーしない)。
 
-Claude Code は Codex / Cursor と違い、既定設定では `AGENTS.md` を無条件には読まない — `CLAUDE.md` 系があると直読みが止まる。ここではこの最小限の前提だけを踏まえ、判定手順だけを書く(公式の挙動の詳細は design 側にあり、ここにはコピーしない)。
+Claude Code は Codex / Cursor と違い、既定設定では `AGENTS.md` を無条件には読まない — `CLAUDE.md` 系があると `AGENTS.md` を直接読まなくなる。ここではこの最小限の前提だけを踏まえ、判定手順だけを書く(公式の挙動の詳細は design 側にあり、ここにはコピーしない)。
 
 ## (0) 基点
 
@@ -40,5 +40,5 @@ Claude Code は Codex / Cursor と違い、既定設定では `AGENTS.md` を無
 - 間接 import(import 先のファイルの中にある import)は追わない。`CLAUDE.md` が別ファイル経由で `AGENTS.md` を読む構成は「import なし」と判定されうる。
 - `.claude/CLAUDE.md` の相対パス(`@../AGENTS.md`)は公式の記述からの導出であり、実測していない。
 - **他のファイルへの symlink をリンク自身の位置から解決して判定する基準も、公式の記述からの導出であり、実測していない**。
-- **上位階層の `CLAUDE.md` 系も直読みを止めるが、この判定は見ない((0))。上位にある構成では (2) が『正常』でも読まれていないことがある**。
+- **上位階層の `CLAUDE.md` 系も `AGENTS.md` の直接の読み込みを止めるが、この判定は見ない((0))。上位にある構成では (2) が『正常』でも読まれていないことがある**。
 - `.claude/rules/` はこの判定の対象外(読まない)。ホストが自動で読む指示ファイルであり、skill の読取り・同期の対象外(design §3・§7-4)。

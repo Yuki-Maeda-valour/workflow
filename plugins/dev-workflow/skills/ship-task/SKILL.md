@@ -150,7 +150,7 @@ except (Exception, SystemExit) as exc:
 
 **開始前の確認**: ファイルシステムで管理ルートを固定し、権威参照ファイルと必要な契約を読む。タスク名や `--task` の有無を待たない。
 [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
-- 把握(understand-project を含む)・対象本文の採用・無人の前提の Git 調査・`git status`・ブランチ操作より前に行う。内蔵・非 Git・非ファイルタスクでも省略しない。
+- 把握(understand-project を含む)・対象本文の採用・無人の前提の Git 調査・`git status`・ブランチ操作より前に行う。内蔵・非 Git・ファイルを持たないタスクでも省略しない。
 - 0/`none`・0/`other-projects-only`(別プロジェクトの記録だけ。無人でも同じ)、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
   - 別プロジェクトの記録(take が記録の外に書く所属の印〈パスと番号だけのファイル〉で、別のプロジェクトと確かめた記録)は、会話の報告に記録の名前と `owner.top` を書く。
   - Issue・PR・commit・ログには、別プロジェクトの記録の件数と記録の名前だけを書く。パスは書かない(他のプロジェクトの名前やホームのパスを載せない)。
@@ -209,11 +209,11 @@ except (Exception, SystemExit) as exc:
    - 無い場合は Phase 5 で push・PR をせず、手で打つコマンド列を示すこと(無人では結末 `縮退`)を**この時点で報告**する(最後まで走ってから「PR を作れません」と言わない)。
    - 無人のタスクの周では、2′ で保持した origin の判定の `repo` が null なら、結末が `縮退` になる(push もしない)ことも、この時点で報告する(`gh repo view` による PR の作成先の確かめは Phase 5 で行う)
 6. **外部実装委託(作業を別の AI に任せること)の承認を先取りする**: profile によって実装の委託先が外部に解決される場合
-   - Issue 方式は非ファイルタスクなので、承認を求めず内蔵の実装役を使う([Issue 方式の契約](../do-task/references/github-issue.md) §5)。以下はファイル方式だけ。
+   - Issue 方式はファイルを持たないタスクなので、承認を求めず内蔵の implementer(実装を受け持つ AI)を使う([Issue 方式の契約](../do-task/references/github-issue.md) §5)。以下はファイル方式だけ。
    - (解決順・parent-child で内蔵に切り替えること・提示内容・保持と取り消しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12 に従う)、
    - **Phase 3 まで待たずにこの時点で承認を取る**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。
    - 承認はセッション内で 1 回の判断として保持され、Phase 3 の /do-task がそれを再利用するので**同じ承認を 2 回求めない**。
-   - **承認が得られなくても停止しない** — 内蔵 implementer(実装を受け持つ AI)で走り切り、その旨を報告する(停止条件には加えない)。
+   - **承認が得られなくても停止しない** — 内蔵 implementer で走り切り、その旨を報告する(停止条件には加えない)。
    - **先取りした承認は、/do-task の Phase 3 の外部の手順の手順 1(承認より先に判定する縮退)で内蔵に切り替えたとき(条件 A: タスク MD がファイルでない・git でない・条件 B: 最後に承認した一覧に filter がある — external-runners.md §12-1)は使わず、そのことを報告する**
    - (先取りの承認は /do-task の事前検査より先にあるので、承認を取った後にこの切り替えに当たることがある)。
    - **このための引数は設けない**(承認は発話でのみ行う)。
