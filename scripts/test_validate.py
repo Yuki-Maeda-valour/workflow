@@ -1835,6 +1835,14 @@ class WordingTest(unittest.TestCase):
                 errors = self.assert_dictionary_error()
                 self.assertIn("名前の字面がない", errors[0])
 
+    def test_short_text_must_be_a_checked_word_in_the_name(self):
+        # 呼び名の数・印・動詞の判定はすべて通る形で、short の text の判定だけを確かめる。
+        # 「照合」は検査語だが、名前「32 縮退」には含まれない。
+        entry = self.short_entry("照合の 32")
+        entry["short"] = {"text": "照合", "marks": ["32"]}
+        self.write_exceptions(names=[entry])
+        self.assertIn("short の text は", self.assert_dictionary_error()[0])
+
     def test_short_field_is_validated(self):
         # 印は定義の字面がある行に在るものだけ。同じファイルの別の行に在っても認めない。
         entry = self.short_entry("縮退の 34", marks=("34",))
