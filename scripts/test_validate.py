@@ -212,6 +212,94 @@ class ValidateTest(unittest.TestCase):
         """壊していない写しは ERROR 0(各テストの「ERROR にならない」判定の土台)。"""
         self.assert_clean()
 
+    # ---------------------------------------------------------- 番号だけの理由
+
+    def test_number_only_outcome_reasons_are_errors(self):
+        for number in ("D1", "S4", "U2", "G3", "M4", "H39", "決定 51", "軸 3", "③", "条件 ③", "§12-2"):
+            with self.subTest(number=number):
+                self.assert_appended_line_flagged(
+                    f"無人の周の結果: 失敗扱い — {number}", ["番号だけの理由", repr(number), "番号: 中身"]
+                )
+
+    def test_number_only_hold_reason_is_error(self):
+        for date in ("2026-11-04", "YYYY-MM-DD"):
+            with self.subTest(date=date):
+                self.assert_appended_line_flagged(
+                    f"- **保留**(ship-task・{date}): G3 — 前提を確かめる",
+                    ["番号だけの理由", "'G3'"],
+                )
+
+    def test_number_only_outcome_before_punctuation_is_error(self):
+        for suffix in (")", "、", ",", "*", "]"):
+            with self.subTest(suffix=suffix):
+                self.assert_appended_line_flagged(
+                    f"(例: 無人の周の結果: 保留 — S4{suffix}",
+                    ["番号だけの理由", "'S4'"],
+                )
+
+    def test_number_only_hold_at_end_of_example_is_error(self):
+        for suffix in ("", "`", ")"):
+            with self.subTest(suffix=suffix):
+                self.assert_appended_line_flagged(
+                    f"- **保留**(ship-task・YYYY-MM-DD): S4{suffix}",
+                    ["番号だけの理由", "'S4'"],
+                )
+
+    def test_number_only_reasons_in_document_examples_are_errors(self):
+        cases = (
+            ("plugins/dev-workflow/skills/tool-check/SKILL.md", "無人の周の結果: 保留 — S4"),
+            (f"{SKILLS_REL}/{WRITING_RULES_REL}", "`無人の周の結果: 保留 — S4`"),
+            ("docs/design.md", "例: `無人の周の結果: 失敗扱い — G3`。"),
+            ("README.md", "| 例 | `無人の周の結果: 保留 — S4` |"),
+            (f"{SKILLS_REL}/init-project/templates/AGENTS.md.template",
+             "- **保留**(ship-task・YYYY-MM-DD): G1 — 許可を確かめる"),
+        )
+        for path, line in cases:
+            with self.subTest(path=path):
+                self.assert_appended_line_flagged(line, ["番号だけの理由"], relpath=path)
+
+    def test_number_only_reason_in_code_fence_is_error(self):
+        target = self.repo / self.REPLACED_TARGET
+        line_no = target.read_text(encoding="utf-8").count("\n") + 3
+        self.append_to_checked_file(
+            "```markdown\n無人の周の結果: 保留 — S4\n```", relpath=self.REPLACED_TARGET, prefix=""
+        )
+        self.assert_error([f"{self.REPLACED_TARGET}:{line_no}:", "番号だけの理由", "'S4'"])
+
+    def test_number_only_reason_with_empty_explanation_or_allow_marker_is_error(self):
+        for line in (
+            "無人の周の結果: 保留 — S4: ",
+            "- **保留**(ship-task・YYYY-MM-DD): G1: — 許可を確かめる",
+            "無人の周の結果: 保留 — S4 <!-- validate-allow: 例示 -->",
+        ):
+            with self.subTest(line=line):
+                self.assert_appended_line_flagged(line, ["番号だけの理由"])
+
+    def test_explained_reasons_and_reference_numbers_are_allowed(self):
+        for line in (
+            "無人の周の結果: 失敗扱い — G3: 無人の前提を欠く",
+            "`無人の周の結果: 保留 — S4: 承認の後に本文が変わった`",
+            "- **保留**(ship-task・2026-11-04): G1: 許可の要る操作が拒否された — 許可を確かめる",
+            "無人の周の結果: PR — https://example.invalid/pr/1",
+            "無人の周の結果: 保留 — <理由>",
+            "- **保留**(ship-task・YYYY-MM-DD): <停止条件> — <人が次にすること>",
+            "無人の周の結果: 失敗扱い — G3 無人の前提を欠く",
+            "(例: 無人の周の結果: 保留 — S4: 承認の後に本文が変わった)",
+            "`- **保留**(ship-task・YYYY-MM-DD): S4: 承認の後に本文が変わった`",
+            "- **保留**(ship-task・YYYY-MM-DD): S4 承認の後に本文が変わった",
+            "正本は loop.md §4。#107 の H48。手順は D1・S4・G3・M4・決定 51・軸 3・条件 ③・§12-2。",
+            "レビュー判定: APPROVED",
+        ):
+            with self.subTest(line=line):
+                self.assert_appended_line_flagged(line, [], flagged=False)
+
+    def test_number_only_reasons_outside_documents_are_not_scanned(self):
+        line = "無人の周の結果: 保留 — S4"
+        self.append_to_checked_file(line, relpath="plugins/dev-workflow/skills/ship-task/scripts/loop.sh")
+        self.append_to_checked_file(line, relpath="CHANGELOG.md", prefix="")
+        self.write_file("docs/minutes/example.md", line + "\n")
+        self.assert_clean()
+
     # ------------------------------------------------------- 置き換える語(枡・継承枠)
 
     REPLACED_TARGET = "plugins/dev-workflow/skills/do-task/references/review-protocol.md"

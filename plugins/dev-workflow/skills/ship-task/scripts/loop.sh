@@ -356,7 +356,7 @@ def cmd_profile(path):
             fail(1, f"task_dir が管理ルートの外を指す: {value}")
         problem = d21_problem(value, "task_dir")
         if problem:
-            fail(5, f"task_dir が D21 に外れる({problem}): {value!r}")
+            fail(5, f"task_dir がパスの文字の制限(loop.md §3)に外れる({problem}): {value!r}")
         print("task_dir=" + value)
 
 
@@ -819,7 +819,7 @@ def cmd_candiff(task_dir):
         if problem is None and name.startswith("-"):
             problem = "<名> が '-' で始まる"
         if problem:
-            fail(1, f"D21 に外れる — {problem}({shown})")
+            fail(1, f"パスの文字の制限(loop.md §3)に外れる — {problem}({shown})")
         paths.append(path)
     if not paths:
         fail(1, "候補の追加が無い")
@@ -1893,10 +1893,10 @@ skip_reason() { # $1=worktree $2=ファイル名 → 読み飛ばす理由(無�
   meta="$(printf '%s\n' "$info" | sed -n 's/^meta=//p')"
   if [ "$meta" != 1 ]; then printf '無人実行のメタ行が無い'; return 0; fi
   if ! py d21 "$rel" "$name" 2>"$RUN_DIR/d21.err" >/dev/null; then
-    printf 'パスの文字が D21 に外れる(%s)' "$(cat "$RUN_DIR/d21.err")"; return 0
+    printf 'パスの文字の制限(loop.md §3)に外れる(%s)' "$(cat "$RUN_DIR/d21.err")"; return 0
   fi
   if ! G -C "$TOP" check-ref-format --branch "task/$name" >/dev/null 2>&1; then
-    printf 'task/%s がブランチ名にならない(D21)' "$name"; return 0
+    printf 'task/%s がブランチ名にならない' "$name"; return 0
   fi
   if G -C "$TOP" show-ref --verify --quiet "refs/heads/task/$name"; then
     printf '作業ブランチ task/%s がローカルにある' "$name"; return 0
@@ -2002,7 +2002,7 @@ make_selection_worktree() {
   TASK_DIR="$(printf '%s' "$out" | py json-get task_dir)" || die 30 task-dir-helper "resolve-task-dir.py の出力を読めない"
   if ! py d21 "$TASK_DIR" 2>"$RUN_DIR/d21.err" >/dev/null; then
     remove_selection_worktree
-    die 20 task-dir "解決した task_dir が D21 に外れる($(cat "$RUN_DIR/d21.err")): $TASK_DIR"
+    die 20 task-dir "解決した task_dir がパスの文字の制限(loop.md §3)に外れる($(cat "$RUN_DIR/d21.err")): $TASK_DIR"
   fi
   # 保護パス(許可の仲介の hook と同じ列。.claude/worktrees の下を除く)の下の task_dir は止まる(無人の周の skill が
   # タスク MD を Bash の引数に渡す操作を、hook が拒否するため)。選定の worktree を消してから exit 20
@@ -2501,7 +2501,7 @@ remove_iteration_worktree() {
   else
     G -C "$TOP" worktree lock --reason "dev-workflow-loop: $ITER_REL" "$ITER_WT" >/dev/null 2>&1 || true
     WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $JUDGE(worktree を消せなかった。未追跡・未 commit が残った)"
-    rep "- worktree: 消せなかったので残した(未追跡・未 commit が残った。失敗には数えない — D4): $ITER_WT($(head -c 300 "$err" | tr '\n' ' '))"
+    rep "- worktree: 消せなかったので残した(未追跡・未 commit が残った。失敗には数えない): $ITER_WT($(head -c 300 "$err" | tr '\n' ' '))"
   fi
 }
 

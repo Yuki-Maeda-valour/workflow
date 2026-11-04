@@ -1654,9 +1654,9 @@ check "読み飛ばし: 終了コード 0" 0 "$RC"
 check "読み飛ばし: 候補だけを回す(ほかはスタブの -p を起動しない)" "pr-ok" "$(calls)"
 RP="$(report_of "$OUT")"
 has "読み飛ばし: メタ行なし" "$RP" "進行中_nometa.md: 無人実行のメタ行が無い"
-has "読み飛ばし: 空白(D21)" "$RP" "進行中_bad name.md: パスの文字が D21"
-has "読み飛ばし: \$( (D21)" "$RP" '進行中_x$(id).md: パスの文字が D21'
-has "読み飛ばし: 先頭の -(D21)" "$RP" "進行中_-lead.md: パスの文字が D21"
+has "読み飛ばし: 空白(D21)" "$RP" "進行中_bad name.md: パスの文字の制限(loop.md §3)に外れる"
+has "読み飛ばし: \$( (D21)" "$RP" '進行中_x$(id).md: パスの文字の制限(loop.md §3)に外れる'
+has "読み飛ばし: 先頭の -(D21)" "$RP" "進行中_-lead.md: パスの文字の制限(loop.md §3)に外れる"
 has "読み飛ばし: ローカルの task/{名}" "$RP" "進行中_localbr.md: 作業ブランチ task/localbr がローカルにある"
 has "読み飛ばし: リモートの task/{名}" "$RP" "進行中_remotebr.md: 作業ブランチ task/remotebr が origin にある"
 has "読み飛ばし: 追跡用の ref" "$RP" "進行中_trackref.md: 追跡用の ref refs/remotes/origin/task/trackref"
@@ -4037,7 +4037,7 @@ djudged data-audit "失敗(食い違い: task_dir の直下でない(docs/tasks/
 djudged refactor "失敗(食い違い: 名前が 候補_<名>.md でない(docs/tasks/memo-refactor.md)" kept "名前空間の外"
 disc_pair modify modify d21
 djudged data-audit "失敗(食い違い: 追加でない変更がある(M README.md)" kept "既存ファイルの書き換え"
-djudged refactor "失敗(食い違い: D21 に外れる" kept "D21 に外れる名"
+djudged refactor "失敗(食い違い: パスの文字の制限(loop.md §3)に外れる" kept "D21 に外れる名"
 disc_pair name emptyname mode
 djudged data-audit "失敗(食い違い: <名> が空" kept "名が空"
 djudged refactor "失敗(食い違い: モードが 100644 でない(100755" kept "モード"
@@ -4072,7 +4072,7 @@ has "発見の共有状態(remote OID): 一致しない理由" "$RP" "自分の 
 hasnt "発見の共有状態(remote OID): PR の雛形を出さない" "$RP" "gh pr create -R"
 disc_pair dashname none dashname
 djudged data-audit "正常(候補なし)" removed "D21 違反の前の正常な周"
-djudged refactor "失敗(食い違い: D21 に外れる — <名> が '-' で始まる" kept "名が - で始まる"
+djudged refactor "失敗(食い違い: パスの文字の制限(loop.md §3)に外れる — <名> が '-' で始まる" kept "名が - で始まる"
 disc_pair noneclean noneuntracked noneotherbranch
 djudged data-audit "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "候補なし で未追跡を残す"
 dshared refactor "候補なし で別のブランチに居る" "disc-data-audit disc-refactor"
