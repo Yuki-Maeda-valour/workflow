@@ -67,6 +67,9 @@ argument-hint: "[壁打ちしたいテーマ] [--doc=<番号> | --quick]"
 
 ## Phase 5: 反映チェーン
 
+完了報告は [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」に従う。
+- 枠は決定録の結果だけにし、決めたことと未決の件数を要約する。「詳しい記録」に決定録のパスを示す。下の反映の質問は枠の後に分ける。反映の結果は /reflect-decisions の完了報告に任せる。
+
 1. 「**/reflect-decisions で doc へ反映しますか?**」を質問で確認する
    - Yes → 決定録を入力にチェーン実行する(決定録は構造化済み・矛盾解消済みのため、精査は軽量に通ることが多い)
    - No → 決定録のパスと、後から `/reflect-decisions <決定録パス>` で反映できることを案内する

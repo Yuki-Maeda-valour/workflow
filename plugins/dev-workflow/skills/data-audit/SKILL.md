@@ -102,7 +102,8 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
-以下の様式で報告する:
+監査は指摘と根拠を示す報告そのものが成果物なので、[../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」は使わず、以下の様式で報告する。
+- 候補モードでも共通の枠は出さない。呼び出し元が読むパスの一覧と結果の行を、candidate-mode.md の並びで返す。
 
 ```markdown
 # データ境界監査: {プロジェクト名}
@@ -112,7 +113,9 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 > 委託先のモデル: {スキャンを受け持った AI ごとのモデルの名前と版(自己申告の値。無ければ起動時の説明の値に「確認前」を付ける)}
 
 ## 指摘一覧(深刻度順)
-| # | 層 | 観点 | 場所 | 内容(1 行) | 深刻度 | 確度 |
+| # | 層 | 観点(ID と名前) | 場所 | 内容(1 行) | 深刻度 | 確度 |
+|---|---|---|---|---|---|---|
+| {n} | {層} | {観点の ID と名前。例: B2 認証・認可の欠如} | {path}:{行} | {内容} | {深刻度} | {確度} |
 
 ### #{n} {タイトル}
 - **場所**: {path}:{行}

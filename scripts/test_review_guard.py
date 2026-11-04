@@ -972,6 +972,37 @@ while time.monotonic() < end:
         self.assertIn("UNAPPROVED", holds[0])
         self.assertNotIn("検証器記録", completed.read_text())
 
+    def test_hold_reason_with_ascii_colon_is_preserved_in_record(self):
+        self.begin()
+        self.capture(phase="hold")
+        reason = "S4: 承認の後に本文が変わった"
+        self.proof = self.root / "hold-proof.json"
+        self.guard(*self.context("attest"), "--hold-reason", reason,
+                   "--hold-next", "設計レビューをやり直す", "--out", str(self.proof))
+        self.proof_hash = self.digest(self.proof)
+        proof = json.loads(self.proof.read_text())
+        self.assertEqual(reason, proof["hold_reason"])
+        self.assertEqual("UNAPPROVED", proof["verdict"])
+        completed, expected = self.complete("pending")
+        self.verify("--task-transition", "pending", "--expected-task", str(expected))
+        holds = [line for line in completed.read_text().splitlines()
+                 if line.startswith("- **保留**(ship-task・")]
+        self.assertEqual(1, len(holds))
+        self.assertTrue(holds[0].startswith(
+            f"- **保留**(ship-task・{proof['record_date']}): {reason} — 設計レビューをやり直す / UNAPPROVED / "
+        ), holds[0])
+
+    def test_hold_reason_rejects_fullwidth_colon_and_parenthesis(self):
+        self.begin()
+        self.capture(phase="hold")
+        proof = self.root / "hold-proof.json"
+        for reason in ("S4：承認の後に本文が変わった", "S4(承認の後に本文が変わった)"):
+            with self.subTest(reason=reason):
+                result = self.guard(*self.context("attest"), "--hold-reason", reason,
+                                    "--hold-next", "設計レビューをやり直す", "--out", str(proof), expect=2)
+                self.assertIn("人に確かめる場面の番号で始まる理由", result.stderr)
+                self.assertFalse(proof.exists())
+
 
     def test_parent_child_task_root_preserves_normal_completion(self):
         parent = self.root / "parent"

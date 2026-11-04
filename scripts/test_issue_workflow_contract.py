@@ -381,14 +381,14 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.assertNotIn("この1本目では", policy)
         self.assertNotIn("未対応", policy)
 
-    def test_changelog_has_one_pending_release_with_final_behavior(self):
+    def test_changelog_issue_release_has_final_behavior(self):
         changelog = (ROOT / "CHANGELOG.md").read_text()
-        self.assertEqual(1, changelog.count("## (次の版)\n"))
-        self.assertNotIn("## (次の次の版)", changelog)
-        pending = changelog.split("## (次の版)\n", 1)[1].split("\n## v", 1)[0]
-        self.assertNotIn("未対応", pending)
-        self.contains(pending, "ship-task", "update-doc", "create-task", "do-task")
-        self.contains(pending, "push より前の失敗だけ、Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
+        self.assertEqual(1, changelog.count("## v4.37.0\n"))
+        self.assertLess(changelog.index("## v4.37.0\n"), changelog.index("## v4.36.0\n"))
+        release = changelog.split("## v4.37.0\n", 1)[1].split("\n## v", 1)[0]
+        self.assertNotIn("未対応", release)
+        self.contains(release, "ship-task", "update-doc", "create-task", "do-task")
+        self.contains(release, "push より前の失敗だけ、Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
                       "人がやめると決めたとき・セッション終了時だけ Issue に記録する",
                       "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない",
                       "公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す",
@@ -398,7 +398,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "中断・停止・保留の記録は、完了の形に当たっても完了記録に数えない",
                       "中断の記録を書いた後は、検査つきの Phase 5 をやり直せない",
                       "文書同期は `/update-doc --task=#<番号>` で再開し、その後の commit・公開は手動のコマンド列を示す")
-        self.assertNotIn("止まった工程から再開できる", pending)
+        self.assertNotIn("止まった工程から再開できる", release)
 
     def test_update_doc_rechecks_input_without_mutating_issue(self):
         self.contains(self.syncing, "preflight` と `snapshot --for-execution`", "--yes` でも本文採用の確認を省かない",
