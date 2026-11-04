@@ -226,18 +226,52 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(mode, "実装 commit の検証前の中断では停止する",
                       "検証後の文書同期・公開の停止は完了を取り消さない")
 
-    def test_publication_retry_keeps_body_state_and_hashes_until_session_ends(self):
+    def test_interruption_records_take_priority_over_any_completion_shape(self):
+        common = self.completion.split("- `task_store: github-issue` の経路:", 1)[0]
+        self.contains(common, "§6 の中断・停止の記録(`に中断:`・`で停止:` を含む行)と保留の記録は、",
+                      "完了の形に当たっても完了記録として数えず、中断として先に判定する")
+        self.assertLess(common.index("中断として先に判定する"), common.index("do-task の手順4の完了記録"))
+        self.assertLess(common.index("中断として先に判定する"), common.index("`finalize`"))
+
+    def test_publication_retry_before_push_keeps_body_state_and_hashes(self):
         stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
         self.contains(stop, "まず Issue へは書かず、会話で理由を報告する",
-                      "同じセッションでやり直せる間は、同じ state と保持値のまま Phase 5 をやり直してよい",
-                      "人がやめると決めたとき、またはセッションを終えるときだけ",
+                      "同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
+                      "同じセッションで Issue に記録する前に限る",
+                      "push より前の失敗では、人がやめると決めたとき、またはセッションを終えるときだけ",
                       "実装 commit <sha> は検証済み。公開で停止: <理由>",
                       "本文・対象リポジトリ・commit の再確認は Phase 5 と同じ",
-                      "既に作成された PR を重複作成しない", "検査を省いて続けない")
+                      "やり直す前に push・PR の成否を確かめ", "既に作成された PR を重複作成しない",
+                      "検査を省いて続けない")
         table = section(self.ship, "## 停止条件のまとめ")
-        self.contains(table, "まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
-                      "同じ state と保持値で Phase 5 の再確認を通して再試行できる",
-                      "同じセッションで Issue に記録する前だけ")
+        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の公開(push・PR)の失敗。"))
+        self.contains(row, "push より前の失敗は、まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
+                      "push・PR の成否を確かめ、push より前の失敗だけ、同じセッションで Issue に記録する前なら",
+                      "同じ state と保持値で Phase 5 の再確認を通して再試行できる")
+        report = table.split("Issue 方式の停止報告は", 1)[1]
+        self.contains(report, "やり直す前に push・PR の成否を確かめる",
+                      "同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
+                      "同じセッションで Issue に記録する前に限る")
+        self.assertNotIn("同じセッションでやり直せる間は", stop + table)
+
+    def test_post_push_pr_failure_records_stop_then_uses_manual_creation(self):
+        stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
+        self.contains(stop, "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
+                      "`--set-upstream` の追跡設定で git 設定のダイジェストが変わり",
+                      "`実装 commit <sha> は検証済み。公開で停止: <理由>` と記録してから、下の手動の PR 作成手順を示す")
+        resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
+        self.contains(resume, "push と追跡設定が済んで PR の作成だけが失敗した場合は、push を繰り返さず、",
+                      "`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file <PR本文ファイル>`",
+                      "本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる")
+        table = section(self.ship, "## 停止条件のまとめ")
+        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の push と追跡設定が済んで"))
+        self.contains(row, "PR の作成だけが失敗した場合。Phase 5 をやり直さず、公開停止を Issue に記録してから、",
+                      "手動の `gh pr create -R <repo> …` を示す")
+        report = table.split("Issue 方式の停止報告は", 1)[1]
+        self.contains(report, "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
+                      "`実装 commit <sha> は検証済み。公開で停止: <理由>` と記録してから、",
+                      "手動の `gh pr create -R <repo> …` を示す",
+                      "保持した `pr-evidence` と `Closes #<番号>`", "本文と対象リポジトリを確かめ直す手順")
 
     def test_recorded_publication_stop_requires_manual_commands_and_saved_evidence(self):
         resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
@@ -267,13 +301,13 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_authority_completion_rejects_incomplete_even_with_approved_result(self):
         self.contains(self.authority_completion, "「完了」の部分一致で「未完了」の記録を受け付けない")
         instructions = (ROOT / "AGENTS.md").read_text()
-        shape = "`- <YYYY-MM-DD> ` で始まり、「未完了」を含まず、「完了」と「結果 APPROVED」を含む行"
+        shape = "`- <YYYY-MM-DD> ` で始まり、「未完了」「中断」「停止」を含まず、「完了」と「結果 APPROVED」を含む行"
         self.contains(instructions, shape)
         self.contains(self.design, shape)
         # 手順の条件を対照へ当てる。AGENTS.md の先頭の形を使い、必須語と除外語も別々に確かめる。
         declared = re.search(r"`(- <YYYY-MM-DD> )`", instructions).group(1)
         prefix = re.escape(declared).replace(re.escape("<YYYY-MM-DD>"), r"\d{4}-\d{2}-\d{2}")
-        pattern = prefix + r"(?![^\n]*未完了)(?=[^\n]*完了)(?=[^\n]*結果 APPROVED)[^\n]*"
+        pattern = prefix + r"(?![^\n]*(?:未完了|中断|停止))(?=[^\n]*完了)(?=[^\n]*結果 APPROVED)[^\n]*"
         accepted = [
             "- 2026-11-04 完了(反復 5 回): 結果 APPROVED",
             "- 2026-11-04 do-task 完了(反復 5 回): 結果 APPROVED",
@@ -286,6 +320,8 @@ class IssueWorkflowContractTest(unittest.TestCase):
             "- 2026-11-04 レビュー: 結果 APPROVED",
             "- 2026-11-04 完了(反復 5 回): 結果 未完了",
             "- 完了(反復 5 回): 結果 APPROVED",
+            "- 2026-11-05 実装 commit の検証前に中断: 完了記録の適用後に commit の照合が不一致(実装レビューは結果 APPROVED)",
+            "- 2026-11-05 実装 commit " + "a" * 40 + " は検証済み。公開で停止: 完了記録の適用後に PR 作成が失敗(結果 APPROVED)",
         ]
         for line in accepted:
             with self.subTest(accepted=line):
@@ -332,8 +368,11 @@ class IssueWorkflowContractTest(unittest.TestCase):
         pending = changelog.split("## (次の版)\n", 1)[1].split("\n## v", 1)[0]
         self.assertNotIn("未対応", pending)
         self.contains(pending, "ship-task", "update-doc", "create-task", "do-task")
-        self.contains(pending, "Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
+        self.contains(pending, "push より前の失敗だけ、Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
                       "人がやめると決めたとき・セッション終了時だけ Issue に記録する",
+                      "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
+                      "公開停止を Issue に記録してから、手動の `gh pr create -R <repo> …` を示す",
+                      "中断・停止・保留の記録は、完了の形に当たっても完了記録に数えない",
                       "中断の記録を書いた後は、検査つきの Phase 5 をやり直せない",
                       "文書同期は `/update-doc --task=#<番号>` で再開し、その後の commit・公開は手動のコマンド列を示す")
         self.assertNotIn("止まった工程から再開できる", pending)
