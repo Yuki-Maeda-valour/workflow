@@ -160,7 +160,7 @@ except (Exception, SystemExit) as exc:
 
 **開始前の確認**: ファイルシステムで管理ルートを固定し、権威参照ファイルと必要な契約を読む。
 [references/external-runners.md](references/external-runners.md) §12-9 に従い、`python3 {do-task の}scripts/pending-implementation.py scan --cwd <管理ルート>` を実行する。
-- 対象タスク本文を完了条件として採用する前、対象 repo の Git 調査・事前検査より前に行う。検証のみ・内蔵・非 Git・Issue 本文などの非ファイルタスクでも省略しない。
+- 対象タスク本文を完了条件として採用する前、対象 repo の Git 調査・事前検査より前に行う。検証のみ・内蔵・非 Git・Issue 本文などのファイルを持たないタスクでも省略しない。
 - 0/`none`・0/`other-projects-only`(別プロジェクトの記録だけ。無人でも同じ)、または全候補への人の具体的な確認後の 0/`acknowledged` だけで続行する。10/11/2/20・不正 JSON・起動不能なら停止する。無人は失敗扱いとし、候補・タスク本文を変更しない。
   - 別プロジェクトの記録(take が記録の外に書く所属の印〈パスと番号だけのファイル〉で、別のプロジェクトと確かめた記録)は、会話の報告に記録の名前と `owner.top` を書く。
   - Issue・PR・commit・ログには、別プロジェクトの記録の件数と記録の名前だけを書く。パスは書かない(他のプロジェクトの名前やホームのパスを載せない)。
@@ -348,7 +348,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 7. **引き継ぎの手順**: ①**外部ランナーのログファイルのパスを内蔵 implementer へ必ず渡す**(何をどこまでやって、なぜ止まったかは diff より生出力に出る)
    - ②[復元監督](references/runtime-requirements.md#タスク本文の復元)の `restore_taskmd_supervised` で、**タスク MD だけを起動前へ戻す**。引数は手順 5 の ④ と同じ。外部のチェック状態は信用せず、**他の未追跡ファイルは復元しない**(手順 6 の引き継ぐ実装成果を消すため。2026-09-17 決定 45)。
    - 終了値と応答の全行を [external-runners.md](references/external-runners.md) §12-2 の復元結果形式で確かめる。0 と合法な成功応答の両方がそろったときだけ引き継ぐ。
-   - **非成功なら自動で引き継がず**、`TOUCHED`(対象への変更)・`TEMP`(一時物の状態)と、受領できた残存パスを添えて人の判断を仰ぐ。
+   - **非成功なら自動で引き継がず**、`TOUCHED`(対象への変更)・`TEMP`(一時ファイルやフォルダの状態)と、受領できた残存パスを添えて人の判断を仰ぐ。
    - 監督の124/137・監督失敗・応答なし・重複・不正・4MiB超過・終了値との不一致は、受領側で `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱う。残存パスを推測して削除しない。
    - ③**外部が改変・削除した他の未追跡ファイルは、手順 5 の `CHANGE=` と `BASE=` で差分を提示するだけに留める**(復元するかは内蔵 implementer とユーザーが判断する)
    - ④タイムアウトの kill は**書き込み途中のファイルを残しうる**
@@ -426,7 +426,7 @@ clean checkout の検査を実行結果として使う。作業ツリー側で�
 ## Phase 6: 独立レビュー
 
 Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合の hash、ignore/ignored 未追跡の差を reviewer の入力に含める。
-品質コマンドと入口・test/selftest/検証器の変更一覧も渡す。`APPROVED` は、その固定集合だけに対する返答として扱う。
+品質コマンドと入口・test/selftest/検証のスクリプトの変更一覧も渡す。`APPROVED` は、その固定集合だけに対する返答として扱う。
 改名・commit・PR の前の照合と保留の扱いは [references/review-protocol.md](references/review-protocol.md) が正本。
 
 [references/review-protocol.md](references/review-protocol.md) に従う。要点:
@@ -469,7 +469,7 @@ Issue 方式は [Issue 方式の契約](references/github-issue.md) §5「do-tas
      - rc が 0 でも 1 でもないとき(非 git・git の異常)は、追跡済みかを確かめられなかった旨と rc を完了報告に添える
 7. 完了報告は [references/writing-for-people.md](references/writing-for-people.md) の「8. 完了報告の型」に従う。途中で止まったときも同じ。`/ship-task` から呼ばれたときは枠を出さず、結果を返す。
    - 変更ファイル一覧・検査とレビューの内訳・確認手順ごとの状態と観察事実は、手順 4 の追加修正記録(commit が続く実行では `review-protocol.md` の記録)か会話に残す。枠では要約と場所を示し、失敗・未実施の理由と残課題は省かない。
-   - 「確かめたこと」に、実装を受け持った AI と各レビュー役のモデルの名前と版を書く(書き方は手順 4 と同じ)。
+   - 「確かめたこと」に、実装を受け持った AI と各レビュアーのモデルの名前と版を書く(書き方は手順 4 と同じ)。
    - 次の提案は枠の後に置く(`/update-doc --task=<完了_ のパス>` でドキュメント同期、コミットの提案 — **コミットはユーザーが求めた場合のみ**)。`/ship-task` から呼ばれたときは提案しない。
 
 中断する場合(ユーザー判断待ち・ブロッカー)は、

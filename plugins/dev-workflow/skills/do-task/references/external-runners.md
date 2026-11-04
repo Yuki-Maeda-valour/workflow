@@ -776,7 +776,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
   - 早い既存検査を字面のパスに戻したコピーで、(k2′) のケース(`proj/x.md` が在っても正規化した `a/x.md` に開く)だけが落ちること
 - **プロンプトの大きさとログの置き場**(§6・§7。ケース名の接頭辞で示す): `大きさの判定の順序:` 大きすぎるプロンプトでは、`--command` の副作用のスタブも既定表のランナーのスタブも 1 回も起動されずに `prompt-too-large`(12)で終わり、`--dry-run` でも 12 で終わること / `置き場を作れない:` 明示した `--log-file` の置き場(`/dev/null/nested/…`)も既定の置き場(書けない cwd。root では飛ばす)も、作れなければ `usage`(2)で理由を返すこと / `開く前の ERR:` ログを開く前の想定外の失敗(`dirname` だけを失敗させるスタブ)で、`ERROR [internal]`(20)の行が 1 行だけ出て、ログを作らないこと
 - 分岐の網羅: ラッパー(`env` 等)越しの自ホスト判定 / プローブが空出力 / `--target`・`--cwd` の伝播 / `--model` の挿入 / `--名前=値` 形の読み取り専用照合 / `<bin> <sub> --help` でのヘルプ照合 / ヘルプ照合のタイムアウト / 想定外失敗の `ERROR [internal]`(exit 20)(本実行の stderr を一時ファイルへ向けている間に起きた想定外の失敗でも、`ERROR [internal]` が元の stderr に出ること。本実行の呼び出しから `|| rc=$?` を外したコピーで確かめる)/ 正規化結果の形が壊れたときの `parse-failed`
-- プロンプト末尾へのスキーマ指示の付与と冪等(既存ブロックで終わる入力の除去 → 再付与・`--target` との順序・末尾空白(窓はブロック長 + 4096 文字)・長い末尾空白でも停滞しないこと・付与後に上限を超えると `prompt-too-large`・本文中の引用では抑止しないこと・付与の別がログに残ること)、および review-protocol.md の指摘 JSON 形式との同期(キー・許容値の集合一致)。
+- プロンプト末尾へのスキーマ指示の付与と冪等〈何度実行しても同じ結果になる〉(既存ブロックで終わる入力の除去 → 再付与・`--target` との順序・末尾空白(窓はブロック長 + 4096 文字)・長い末尾空白でも停滞しないこと・付与後に上限を超えると `prompt-too-large`・本文中の引用では抑止しないこと・付与の別がログに残ること)、および review-protocol.md の指摘 JSON 形式との同期(キー・許容値の集合一致)。
   - 付与を検証するスタブは「プロンプトが付与ブロック全体で終わるときだけ指摘 JSON を返す」ゲートなので、付与を壊すと `parse-failed` で落ちる(逆ケースをスタブ自身が内包する)
 - **実行記録のモデル名と CLI の版**(§4・§7。ケース名の接頭辞 `モデル名:`・`読む形の同期:`): プローブの出力から読めたとき(標準エラー・標準出力。読んだ所の字面が変わる)・読めないとき・制御文字(C0・DEL・C1)を含むとき(`?` に置き換わり、ログに生の制御文字が残らず、終了コードが変わらない)・`--model` を渡したとき・長い値(200 文字で切る)・プローブの失敗(得られた出力から読む)・読む形を持たないランナー(`--command`。出力にヘッダの行があっても「未確認」)・プローブの前に終わったとき(dry-run・未検出。結果の行より前に書く)・標準エラーと標準出力の両方に違う値があるとき(標準エラーの値を読む。読む順を入れ替えると落ちる)・プローブ中の中止(TERM。中止の行より前に書く)・想定外の失敗(`ERR のログ:` のログ。結果の行より前に書く)の、「モデル」「CLI の版」の行の字面と、それぞれ 1 行だけであること。
   - §4 の表の「プローブの出力から読む形」の列と、スクリプトの `default_probe_model_re`・`default_probe_version_re` の値が一致すること
@@ -786,7 +786,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 **§9-1 手順の通し確認(自己テストではなく手動の通し確認。`review-agent-selftest.sh` / `implement-agent-selftest.sh` のどちらも検証しない)**: scratch repo に次の構成を作り、§9-1 の手順を順に通して観察項目を確かめる。
 - 構成: 追跡済み `.env.example`・追跡済み `.env` の削除・新規ファイル・機密を指す未追跡 symlink・成果物の symlink・リンク切れの未追跡 symlink・`--pre-untracked` の一覧に載る(基準時点から存在する)symlink・`--max-untracked-bytes 0` で省略される未追跡 symlink・FIFO・改行入りの機密名(`secrets/a\nb.key`)・`config/.env` を含むディレクトリと通常ファイルの相互置換(staged と未追跡の両方。staged 版では置換後の `config` をレビュー対象の新規ファイルに含める)・stage 済みの新規 symlink `link.txt → new.ts`(`new.ts` も stage 済み)と `git add` の後でさらに変更した通常ファイル(どちらもレビュー対象の新規ファイルに含める)・グロブ文字を含む名前の未追跡 symlink `[a].ts` と追跡 `a.ts` の併存・HEAD に追跡された `.review-snapshot.md` / `.review-diff.patch` のツリー外 symlink・index にだけ stage した `.review-snapshot.md` / `.review-prompt.md` のツリー外 symlink・当たらないパッチ・存在しない `--base`・HEAD に追跡された既定除外ファイル(作業ツリーで削除した場合も)・`secret_paths: []` の profile(既定集合だけが除外される)・HEAD の tree を `secret_paths: []` の profile を含む別 tree に置換参照で差し替え、作業ツリーの profile も `[]`・未追跡 `secrets/x.key` を置いた repo・global 属性ファイルのマクロ `[attr]hidden filter=hide` と HEAD だけの `*.ts hidden`・基準行の無い呼び出し(`--base HEAD`。タスク MD も Phase 4 の生成物も無い)・管理ルートの HEAD が commit に解決できない parent-child(停止)・全 ref を消して commit 0 に見せかけた repo(基準行が commit の sha。内蔵に切り替えず停止)・子の `.git` を消した parent-child(停止)・`gitdir: <親>/.git` の `.git` ファイルを置いた子(通る — 限界)・階層サブモジュールと `--separate-git-dir` の `--cwd`(通る)・`.git` の無いディレクトリ(`--base HEAD` は内蔵に切り替え、基準行ありは停止)・`--base HEAD` で全 ref を消した repo(内蔵に切り替え — 限界)・基準行が空ツリーのまま途中 commit して全 ref を消した repo(内蔵に切り替え — 限界)・branch に attach した linked worktree で全 ref を消した repo(停止)・壊れた ref 値(`refs/heads/main` が非 sha)の repo(停止)・管理ルートを `git init` + `git add` だけにした parent-child(停止 — 前提)・管理ルートの config を壊した parent-child(停止)・`.git/info/attributes` を FIFO に置換した repo(読まずに停止)・ローカル config `core.filemode=false` + 追跡スクリプトの実行ビットだけの変更(パッチに mode 行)・ローカル config `core.ignoreCase=true` + 追跡 `Makefile` と未追跡 `makefile`(列挙される)・未追跡 `tools/.git/post.sh`(`## 含められなかった未追跡` に `tools/.git/` と NOTE)・`git init` + `git add` だけの repo(基準行は空ツリー。内蔵に切り替え。`--object-format=sha256` の変種も)・未知の `extensions.*` を config に足した repo(非 git と扱わず停止)・secret_paths が `tmp/` の profile・追跡差分が無く未追跡だけ(patch 0 バイト)・サブディレクトリ(`pkg/`)からの実行・非 ASCII 名・空白入り名・先頭 `-` の名前の新規ファイル(未作成ディレクトリ `-assets/` 配下を含む)・`cp` の失敗注入・parent-child 構成(管理ルートが git・子が独立 git)・`core.hooksPath` のフック・ローカル config の `core.pager`・逆写像 smudge/clean フィルタ・HEAD の `.gitattributes` にだけ `filter` 属性がある repo(作業ツリー / index の `.gitattributes` には無い)・`ident` 属性・`TMPDIR` をリポジトリ内に向けた環境・`assume-unchanged` を付けた追跡ファイル・ローカル config の `core.fsmonitor`(スタブ)と `gpg.program`(スタブ)+ 署名ヘッダ付きの HEAD・hooks ディレクトリの `post-index-change`(スタブ)・`b.ts filter=unset` + `GIT_CONFIG_GLOBAL` の `filter.unset.clean`(痕跡スタブ)・コメント行にだけ `filter=` を含む追跡 `.gitattributes`(`# filter=hide は使わない`)・`.claude/**` を secret_paths に含めた profile 変更・追跡済み symlink(リンク先あり・リンク切れ)・元リポジトリの `.env` とリポジトリ外のファイルを指す、stage しただけの symlink(リンク先が実在しないものを含む)・サブモジュール・LFS 管理下の追跡ファイル(`.gitattributes` の `filter=lfs` と、ローカル config の `filter.lfs.clean` / `smudge` / `required` の標準値。`git-lfs` が無い環境では、呼び出しを記録するスタブを PATH 先頭に置く)・`"` で始まる名前の追跡ファイル・global 設定の `core.autocrlf=true` と `eol=crlf` 属性の追跡ファイル・作業ツリーの profile で `secret_paths` を空配列に狭めた構成(基準側の profile には `secrets/` がある。値を入れた `.env.example` も置く)・読めない未追跡ファイル(`chmod 000`。root では飛ばす)・読めないディレクトリ `build/`(`chmod 111`。root では飛ばす)・追跡 `src/auth.ts` + ハードリンク `src/AUTH.ts`(同一 inode)・ローカル config `apply.whitespace=fix` + `core.whitespace=tab-in-indent` とタブで字下げした変更・追跡 symlink `link → target.txt` + ローカル config `core.symlinks=false`・profile `secret_paths: ["tmp/"]` + レビュー対象の未追跡 `tmp/out.ts`・promisor 構成(ローカル config の `extensions.partialClone`・`remote.origin.promisor`・痕跡を書く `remote.origin.uploadpack`)と、`version` にだけ 2.34 系の文字列を返す PATH 先頭の git スタブ(スタブを置かない変種と、オブジェクトを 1 個消した変種も)。
 - 観察項目: 手順 3 を通過(stage 済みの新規ファイル・新規 symlink・`git add` の後でさらに変更したファイルをレビュー対象に含めても停止せず、パッチが運んだ内容が作業ツリーと一致する。グロブ文字を含む名前の未追跡 symlink を追跡済みと取り違えて停止しない) / 一時ツリーのどのファイルにも機密の値が無い / `.claude/reviews/` 配下の未追跡(Phase 4 の手順 1 の `--out`)と HEAD 追跡の `.claude/reviews/old.md`・`.claude/settings.local.json` が一時ツリーに無い / 未追跡の symlink はどの種類も一時ツリーに無く依頼文に列挙され、snapshot では成果物の symlink が `## 未追跡ファイル`(リンク文字列の diff)、リンク切れが `## 含められなかった未追跡`、基準時点から存在するものが `## 基準時点から存在(対象外)`、総量上限のものが `## 内容を省略した未追跡` に理由付きで載る / FIFO は列挙されず処理が停止しない / ディレクトリ置換の構成では一時ツリーに通常ファイル `config` があり `.env` の値がどこにも無い / secret_paths `tmp/` で一時ディレクトリ名に反応せず停止しない / 検査 ①・② で停止しリンク先のツリー外ファイルが変わらない / 非空パッチの適用失敗で停止し、依頼文を置かず起動しない / 生成失敗(exit 4)で停止し、`.review-snapshot.md` が作られず起動しない / 手順 1 が改竄の疑い(rc 22)で停止しても、Phase 4 の手順 1 の生成物は変わらない / `TMPDIR` がリポジトリ内を指していると `worktree add` の前に停止する / patch 0 バイトでも ①・② が停止しない / サブディレクトリから実行してもルート直下と `pkg/sub/` の新規ファイルが同じ相対パスで一時ツリーに配置される / 非 ASCII・空白・先頭 `-` の名前の新規ファイルが同じ相対パス・内容で配置される / `cp` が途中で失敗すると手順 2 で停止し、依頼文を置かず起動しない / parent-child 構成では `$TOP` が手順 1 の `--cwd` の toplevel になり、列挙・cp・worktree add が子リポジトリ基準で揃う / フックは発火せず index が変わらない / `core.fsmonitor` / `post-index-change` / `gpg.program` を仕込んだ repo でも、切り離しの後に一時ツリーで素の `git status` / `git log` を実行すると痕跡が作られない / コメント行にだけ `filter=` を含む `.gitattributes` の repo は事前検査で停止しない / `filter` 属性・`ident` 属性のある repo は起動前に停止する / `filter=unset` と global の同名フィルタの repo も起動前に停止し痕跡が作られない / profile は除外されずパッチが当たる / 追跡済み symlink・サブモジュール・LFS 管理下のファイルがあっても生バイト検査で停止せず、変更していない LFS 管理下のファイルは一時ツリーでポインタのまま、変更したものはパッチが当たって作業ツリーと同じ実内容になる(`worktree add` から手順 3 まで `git-lfs smudge` が起動されない) / `"` で始まる名前の追跡ファイルがあっても生バイト検査が停止しない / global 設定が `core.autocrlf=true` で `eol=crlf` 属性の追跡ファイルがあっても生バイト検査が停止しない / stage しただけの追跡 symlink が元リポジトリの `.env` やリポジトリ外を指していると手順 3 で停止する / 作業ツリーの profile で `secret_paths` を狭めても `secrets/x.key` も値を入れた `.env.example` も snapshot にも一時ツリーにも出ない / 読めない未追跡で手順 1 が rc 21 を返しても手順 2 が停止せず、そのパスが依頼文に理由「読めない」で列挙される / `build/` が依頼文に理由「読めない」で載り `build/x.sh` で停止しない / ハードリンク `src/AUTH.ts` が一時ツリーに無く依頼文に理由『追跡ファイルの別表記(同一 inode)』で 1 行だけ載る / 一時ツリーのタブ字下げが作業ツリーと一致する / 一時ツリーの `link` が symlink である / レビュー対象の未追跡 `tmp/out.ts` が除外に当たっても手順 3 が停止せず、snapshot の `## 除外(機密)` に載り一時ツリーには無い / 基準行の無い呼び出しでは `--base HEAD` で両ファイルが生成され、設計ファイルが一時ツリーにあり `.env` が無く、依頼文に `--pre-untracked` 無しの NOTE が載る / 管理ルートの HEAD が解決できない parent-child では一時ツリーを作らず停止し、profile が無いだけなら続行して NOTE が載る / 全 ref を消して commit 0 に見せかけた repo(基準行が sha)では内蔵に切り替えず停止し、報告に git コマンドが載らない / 壊れた ref 値の repo でも停止する / 基準行が空ツリーのまま途中 commit して全 ref を消した repo では内蔵に切り替える(限界)/ 子の `.git` を消した parent-child では toplevel が `--cwd` と一致せず停止する / `gitdir:` で親を指す `.git` ファイルの子は通り、親の追跡内容は一時ツリーからはパッチ適用で消えるが削除 hunk としてパッチと snapshot に載る(限界)、階層サブモジュールと `--separate-git-dir` は止まらない / `.git` の無いディレクトリでは `--base HEAD` なら一時ツリーを作らず内蔵に切り替え、基準行ありなら停止する / `--base HEAD` で全 ref を消した repo は内蔵に切り替える(限界)/ linked worktree(attach)でも停止する / 管理ルートを `git init` + `git add` だけにした parent-child では停止する / 管理ルートの config を壊した parent-child では停止する / `.git/info/attributes` を FIFO にした repo では読まずに停止する / `core.filemode=false` でも実行ビットだけの変更が snapshot の stat と `.review-diff.patch` の mode 行に載る / `core.ignoreCase=true` でも `makefile` が snapshot と一時ツリーに載る / `tools/.git/post.sh` は `tools/.git/` として `## 含められなかった未追跡` と依頼文に載る / `git init` + `git add` だけの repo では停止せず内蔵に切り替えて理由が載る(SHA-256 の repo でも)/ 未知の `extensions.*` を足した repo では非 git と扱わず停止する / `.env.example` も一時ツリーに無い / 置換参照のある repo で一時ツリーの追跡ファイルが真の内容と一致し、`secrets/x.key` が一時ツリーに無く、依頼文に NOTE が載る / promisor 構成で git が 2.45 未満を名乗ると手順 0 で停止し、痕跡が作られず一時ツリーも作られない。2.45 以上では停止せず `.review-snapshot.md` の見出しに NOTE が載る。
-- 退行検出(機密漏洩・任意コードの実行・ユーザーの git 状態の書き換えに直結する 10 件): 手順 2 の symlink コピー禁止を外すと一時ツリーの `public.txt` に機密の値が現れ、通し確認の内容アサーション(一時ツリー全体を機密の値で `grep -r` する。手順 3 のパス検査では検出されない)が落ちる、検査 ② を省くと index にだけ stage した symlink 経由で cp がリンク先を上書きする、適用前除去を外すと手順 3 が `TREE_EXCLUDE` で停止する(`$EXCLUDE` だけの検査では止まらない)、symlink の解決先検査を外すと stage しただけの追跡 symlink 経由で元リポジトリの `.env` が一時ツリーから読める、`-c core.hooksPath=/dev/null` を外すと `post-checkout` フックが `worktree add` で実行されて外部ファイルが作られ元リポジトリの index が変わる、事前検査を外すと逆写像フィルタの smudge コマンドが `worktree add` で実行される、HEAD 側属性の検査と生バイト検査の両方を外すと HEAD にだけ `filter` 属性がある repo で内容が変換されたまま起動まで進む、切り離しを外すと一時ツリーで素の `git status` / `git log` を実行したときに元リポジトリの `core.fsmonitor` / `post-index-change` / `gpg.program` がこのホストで実行される、`--no-replace-objects` を外すと置換後の内容が配置されたまま起動まで進む、手順 0 の `export GIT_NO_LAZY_FETCH=1` を外すと、オブジェクトを 1 個消した promisor 構成の repo で、欠けたオブジェクトを読む git が `remote.origin.uploadpack` のコマンドをこのホストで実行する。
+- 守りを外したときの検出(機密漏洩・任意コードの実行・ユーザーの git 状態の書き換えに直結する 10 件): 手順 2 の symlink コピー禁止を外すと一時ツリーの `public.txt` に機密の値が現れ、通し確認の内容アサーション(一時ツリー全体を機密の値で `grep -r` する。手順 3 のパス検査では検出されない)が落ちる、検査 ② を省くと index にだけ stage した symlink 経由で cp がリンク先を上書きする、適用前除去を外すと手順 3 が `TREE_EXCLUDE` で停止する(`$EXCLUDE` だけの検査では止まらない)、symlink の解決先検査を外すと stage しただけの追跡 symlink 経由で元リポジトリの `.env` が一時ツリーから読める、`-c core.hooksPath=/dev/null` を外すと `post-checkout` フックが `worktree add` で実行されて外部ファイルが作られ元リポジトリの index が変わる、事前検査を外すと逆写像フィルタの smudge コマンドが `worktree add` で実行される、HEAD 側属性の検査と生バイト検査の両方を外すと HEAD にだけ `filter` 属性がある repo で内容が変換されたまま起動まで進む、切り離しを外すと一時ツリーで素の `git status` / `git log` を実行したときに元リポジトリの `core.fsmonitor` / `post-index-change` / `gpg.program` がこのホストで実行される、`--no-replace-objects` を外すと置換後の内容が配置されたまま起動まで進む、手順 0 の `export GIT_NO_LAZY_FETCH=1` を外すと、オブジェクトを 1 個消した promisor 構成の repo で、欠けたオブジェクトを読む git が `remote.origin.uploadpack` のコマンドをこのホストで実行する。
 - **§9-1 の手順を変更したときはこの通し確認を再実行する。**
 - **この通し確認の構成・観察項目を変えたときは §9-1 の手順も同時に直す。**
 
@@ -815,7 +815,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - **プロンプトの大きさ**(§12-8。ケース名の接頭辞は review 側と同じ): `大きさの判定の順序:` 大きすぎるプロンプトでは、外部 CLI のスタブの起動が 1 回も記録されずに `prompt-too-large`(12)で終わること
 - 残りの契約: **`--log-file` を省略した成功ケース(既定名の自動採番)**・空白や改行やグロブ文字を含むパス・`[ -d ]` は通るが `cd` できない `--cwd` の分類・中身の無いプロンプトファイルの拒否・**成果を残して失敗しても通常の失敗コードしか返さない**こと
 - **実行記録のモデル名と CLI の版**(§7・§12-6・§12-8。ケース名の接頭辞は review 側と同じ): 読めたとき(標準エラー・標準出力)・読めないとき・制御文字を含むとき・`--model` を渡したとき・長い値・プローブの失敗・dry-run・プローブの前の停止(未検出)・両方に違う値があるとき・プローブ中の中止(TERM)・想定外の失敗(E4 のログ)の、「モデル」「CLI の版」の行の字面と行数と、結果の行・中止の行との前後。§12-6 の表の「プローブの出力から読む形」の列とスクリプトの読む形の一致
-- **変異テスト**: 判定 3′ の argv 照合・ヘルプ照合・既定表の形の検査をそれぞれ無効化した版を作り、**無効化すると期待コードが出なくなる**ことを実測する(「PASS したから検査が働いている」とは言えないため)。2026-09-17 決定 40〜42 の 3 つの機構についても、それぞれを退行させた版で対応するケースだけが落ちることを確認してある
+- **変異テスト**: 判定 3′ の argv 照合・ヘルプ照合・既定表の形の検査をそれぞれ無効化した版を作り、**無効化すると期待コードが出なくなる**ことを実測する(「PASS したから検査が働いている」とは言えないため)。2026-09-17 決定 40〜42 の 3 つの機構についても、それぞれを無効にした版で対応するケースだけが落ちることを確認してある
 
 **実装委託の前後の保護を行う `scripts/implement-guard.sh`(§12-2)にも、別の自己テスト `bash {do-task の}scripts/implement-guard-selftest.sh` がある**(2026-09-17 決定 9 と同じく独立したスクリプトで、共通部分は切り出さずに複製してある)。
 - **`implement-guard.sh`、または §12-2・§12-3・§12-5・§12-7 を触ったときは必ず実行する。**
@@ -857,7 +857,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
 - **退避物の実体照合**: 退避コピーの中身だけを変える → ダイジェストは一致したままなので**比較不能にはせず**、実ファイルに変更が無ければ 32、変更が在れば 31 で `BASE=` の判定が `unverified` になる(退避コピーの symlink の差し替え・退避コピーの消失も同じ)/ タスク MD の退避コピーを変える → `taskmd-diff`・`restore-taskmd` が 33 で実ツリーに触れない
 - **`taskmd-diff`**: 変化なし → `same` / チェックだけ更新(字下げ・`*`・`+` の箇条書きを含む)→ `checks-only` / **完了条件の書き換え**・行の追加 / 削除・空白だけの変更・`[x]` 以外の字への書き換え(`[-]`・`[a]`)→ 34 / symlink の張り替え・リンク切れ・通常ファイルへの置換 → 35。
   - `DOD=` が起動前の内容を指すこと
-- **`restore-taskmd`**: 追跡済み・未追跡・正当な選択リンク経由の本文が戻る。準備コピー失敗は 33 / `TOUCHED=none` で元内容・権限を保つ。親リンク・対象リンク・ディレクトリ・特殊ファイルは拒否する。不存在への作成は `copied`、既存対象の原子的置換は `replaced`。公開後の検証失敗・中断・後始末失敗も、対象と一時物の実際の状態を報告する。
+- **`restore-taskmd`**: 追跡済み・未追跡・正当な選択リンク経由の本文が戻る。準備コピー失敗は 33 / `TOUCHED=none` で元内容・権限を保つ。親リンク・対象リンク・ディレクトリ・特殊ファイルは拒否する。不存在への作成は `copied`、既存対象の原子的置換は `replaced`。公開後の検証失敗・中断・後始末失敗も、対象と、一時ファイルやフォルダの実際の状態を報告する。
 - **`cleanup`**: 保護領域を消し、その後に所属の印も消す / 保護領域の外のパス・symlink → 2 で何も消さない
 - **所属の印**(ケース `P1`〜`P9`。§12-2・§12-9-3):
   - `take` が記録の外に `owner-*` を、決めた中身(キーの順・パスの 16 進・十進の番号)・0600 の通常ファイルで作り、記録の中に一時ファイルを残さないこと。`TMPDIR` が未設定なら `tmpdir` の値は空。
@@ -1097,7 +1097,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 - **所属の印(#291)**: `take` は、記録 `guard-XXXXXX` を作った直後に、同じ `dev-workflow/` に印 `owner-XXXXXX` を書く(`XXXXXX` は記録の名前の後ろ)。開始前の確認(§12-9)が、記録の中を開かずに別のプロジェクトの記録かを見分けるために使う。
   - 中身は記録の番号、toplevel・Git の共通の置き場・タスク MD の実体の在るフォルダの物理パスと番号、take のときの `$TMPDIR` の物理パス(未設定なら空)。パスと番号だけで、機密を含まない。形は §12-9-3。
   - 中身は記録の作成より前に求める(共通の置き場は `git rev-parse --git-common-dir` を同じ安全用のオプションを付けて呼んで求める)。
-  - `$TMPDIR` が相対パスなら印を書かない(外部の実装役は `--cwd` で起動するので、take の起動場所を基準にすると指す先が変わる)。
+  - `$TMPDIR` が相対パスなら印を書かない(外部の実装担当は `--cwd` で起動するので、take の起動場所を基準にすると指す先が変わる)。
   - パスの 16 進は書き出す前に 1 つずつ変換し、戻り値と長さを確かめる。失敗したら印を公開しない(`tmpdir` を空の値にしない)。
   - 書き方は 3 つの手順。記録の中の `.work` に一時ファイルとして書いて 0600 にする → `link` で印の名前を付ける → 名前の属性をリンクを辿らずに取り、一時ファイルと同じ番号の通常ファイルと確かめてから一時ファイルを消す。読む側は書きかけの印を見ない。
   - `link` は、名前が既に在れば(フォルダ・リンクでも)何も作らずに失敗する。`ln` は使わない(名前がフォルダかフォルダを指すリンクだと、その中に作って成功する)。
@@ -1173,11 +1173,11 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 **復元**: `restore-taskmd` が、記録したタスク MD の物理実体だけを戻す。準備後の原子的置換(名前を一度に切り替える操作)は [Issue #259](https://github.com/Yuki-Maeda-valour/workflow/issues/259) で導入した。
 
 1. 呼出側は [runtime-requirements.md の復元監督](runtime-requirements.md#タスク本文の復元)を定義し、`restore_taskmd_supervised` で公開入口を起動する。GNU `timeout`、無ければ `gtimeout` を解決し、GNU 版・必要オプションを確認する。不足時は起動しない。固定 argv は `--signal=TERM --kill-after=5s 330s bash <implement-guard.sh> restore-taskmd <個別argv>`。`--foreground` や shell 文字列を使わない。shell が既存 state・manifest・snapshot の保持値を検査する。検証済み `T` 行の種類・mode・hash・実体パスを内部 helper `restore-taskmd.py` へ個別の引数で渡す。今のコピーから期待値を作り直さない。
-2. Python 3・同梱 helper・GNU `cp` を確認する。shell が所有する一時物があれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
+2. Python 3・同梱 helper・GNU `cp` を確認する。shell が所有する一時ファイルやフォルダがあれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
 3. helper は親の各階層をリンクを辿らず開く。fd(開いたファイルやディレクトリを指す番号)を保持し、退避元を同じ fd で種類・mode・hash と比べる。FIFO・directory・symlink・不一致は公開前に止める。復元先は通常ファイルか不存在だけを許す。
-4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試験ファイルで確かめる。固定した GNU `cp -aL --reflink=never` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。`--reflink=never`(複製の共有をしない指定)は、GNU `cp` 9 系が書き込みの上限の位置で止まらないために渡す(必要な版は [runtime-requirements.md の「タスク本文の復元」](runtime-requirements.md#タスク本文の復元))。選択パスや状態パスを `-L` で辿らない。
+4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試しのファイルで確かめる。固定した GNU `cp -aL --reflink=never` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。`--reflink=never`(複製の共有をしない指定)は、GNU `cp` 9 系が書き込みの上限の位置で止まらないために渡す(必要な版は [runtime-requirements.md の「タスク本文の復元」](runtime-requirements.md#タスク本文の復元))。選択パスや状態パスを `-L` で辿らない。
 5. コピー終了と直接子の回収後に、準備内容・mode・inode・元ファイルの変化を検査する。対象・親・準備名を再確認し、保持した親 fd に対して `os.replace` で公開する。準備・コピー・公開前検査の失敗時は元内容と権限、または不存在を保つ。
-6. 公開名と準備 fd の同一性・mode・hash を確認する。公開後に失敗しても自動で巻き戻さない。一時物は、自分が作って同一性を確認したものだけを回収する。元 state・`taskmd-body`・snapshot は残す。
+6. 公開名と準備 fd の同一性・mode・hash を確認する。公開後に失敗しても自動で巻き戻さない。一時ファイルやフォルダは、自分が作って同一性を確認したものだけを回収する。元 state・`taskmd-body`・snapshot は残す。
 
 選択パスが正当な symlink なら、記録した物理実体だけを戻す。選択リンクと無関係なファイルは変更しない。旧 state の形式は維持する。
 
@@ -1198,16 +1198,16 @@ TEMP_PATH=<C風引用のパス>
 - 終了値33は `RESTORED=no` と理由を持つ。公開前失敗は `TOUCHED=none`、公開後失敗は `copied` / `replaced`。判定できなければ `unknown`。`none` は対象本体の無変更を表す。
 - 最終応答の確定前に捕捉した TERM・INT・HUP は終了値20、`RESTORED=no`、`REASON=interrupted`。対象の置換後に `none` へ戻さない。
 - 最終応答は、TERM・INT・HUP の mask 設定が成功した時点で確定する。それ以前の捕捉を反映してから1回だけ書き、flush する。設定が使えない・失敗した場合は有効な応答を出さず非ゼロ終了する。確定後の signal と送出後の mask 復元失敗は、確定済み応答と終了値を変えない。二度目の応答や traceback を出さない。KILL・送出失敗・途中切断は呼出側の無応答規則で扱う。
-- `TEMP=none` は未作成、`removed` は回収済み、`retained` は確認できた残存、`unknown` は判断不能。残存を確認できた場合だけ、その専用領域のパスを添える。コピー子を回収できなければ、一時物を保持して公開を止める。
-- 理由は `digest`、`taskmd-body`、`dest-symlink`、`dest-dir`、`dest-special`、`internal-argument`、`runtime-unavailable`、`fd-copy-unavailable`、`prepare-failed`、`copy-failed`、`replace-failed`、`verify-failed`、`cleanup-failed`、`budget-exceeded`、`child-unreaped`、`interrupted`。`copy-failed` は準備コピーの失敗を指す。`fd-copy-unavailable` は、手順 4 の短い試験ファイルのコピーが、どの fd 別名でも成り立たないことを指す(別名の確認・コピー・内容と mode と inode の確かめのどれかが不成立。macOS の `/dev/fd` など)。確定前に捕捉した signal の理由は `interrupted` を優先する。
+- `TEMP=none` は未作成、`removed` は回収済み、`retained` は確認できた残存、`unknown` は判断不能。残存を確認できた場合だけ、その専用領域のパスを添える。コピー子を回収できなければ、一時ファイルやフォルダを保持して公開を止める。
+- 理由は `digest`、`taskmd-body`、`dest-symlink`、`dest-dir`、`dest-special`、`internal-argument`、`runtime-unavailable`、`fd-copy-unavailable`、`prepare-failed`、`copy-failed`、`replace-failed`、`verify-failed`、`cleanup-failed`、`budget-exceeded`、`child-unreaped`、`interrupted`。`copy-failed` は準備コピーの失敗を指す。`fd-copy-unavailable` は、手順 4 の短い試しのファイルのコピーが、どの fd 別名でも成り立たないことを指す(別名の確認・コピー・内容と mode と inode の確かめのどれかが不成立。macOS の `/dev/fd` など)。確定前に捕捉した signal の理由は `interrupted` を優先する。
 - 公開 shell の引数不正は従来の終了値2。内部引数の未知・重複・欠落・不正パス/mode/hash は33 / `internal-argument`、`TOUCHED=none`、`TEMP=none` で止まる。
 - 呼出側は終了値と全行の合法な組合せを確認する。監督の124/137・監督失敗・無応答・重複・不正・上限超過・終了値との不一致は、呼出側の観測として `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱い、自動引継ぎを止める。helper に2回目の結果を出させる指示ではない。残存パスを受領できなければパス不明と報告し、推測して消さない。
 
 **復元の予算と中断**:
 
 - 最初の退避元サイズを N として固定する。3回の hash 読取りは各64KiB以下の単位で、それぞれ N+1 バイト以内。短読・増加・device/inode/size/mode/mtime/ctime の変化を拒否する。読取りで変わる atime は比較対象にしない。
-- コピー子の `RLIMIT_FSIZE` は N。200MiB の固定上限を本文に転用しない。機能試験は16バイト以下で、本番 N=0 と別の制限を使う。
-- helper の作業は300秒。コピーの監督間隔は50ms以下。中断・期限切れでは直接子へ TERM、最大5秒、必要なら KILL と追加5秒で終了・回収を確認する。その後の一時物の回収は最大5秒。未回収なら後続公開をしない。
+- コピー子の `RLIMIT_FSIZE` は N。200MiB の固定上限を本文に転用しない。機能の試しは16バイト以下で、本番 N=0 と別の制限を使う。
+- helper の作業は300秒。コピーの監督間隔は50ms以下。中断・期限切れでは直接子へ TERM、最大5秒、必要なら KILL と追加5秒で終了・回収を確認する。その後の一時ファイルやフォルダの回収は最大5秒。未回収なら後続公開をしない。
 - GNU `cp` の版確認は出力8KiB・5秒以内。コピーの標準入出力は捨て、入出力の2 fd だけを渡す。必要機能と実測範囲は [runtime-requirements.md](runtime-requirements.md) に従う。
 - helper の315秒予算と別に、呼出側の GNU `timeout` は shell の既存 state 検査を含む公開入口全体を330秒で TERM、追加5秒で KILL にする。通常のユーザー空間で335秒以内に打ち切り、読み手が止まった pipe も監督する。対象は今回のプロセス群だけ。保存 PID や他のプロセスは探索しない。カーネル I/O が返らず KILL でも終了しない場合は、この時間内の停止確認を保証せず、停止未確認として保持する。
 - 同じ UID による開いたディレクトリの移動、inode の書換え、最終確認後の名前の変更、検査器・保持値・結果の改変は完全には防げない。復元中は他の書込みを止める。別権限や OS による隔離が必要な運用とは区別する。名前の原子的置換は、停電後の永続化を保証しない。
@@ -1246,7 +1246,7 @@ TEMP_PATH=<C風引用のパス>
 **注意事項(porcelain の限界)**: `git status --porcelain` は**内容の変化を検出しない**(ファイル名と状態コードだけ。治具で md5 一致を実測)。配布スキルの既定のタスク MD(`task/進行中_*.md`)は**未追跡だが gitignore されていない**ため、③(マニフェスト)が無いと外部委託の主要な書き込み先が死角に入る。
 
 **注意事項(35a の前提)**: 保護領域の「外部の書き込み範囲外」という保証は、「書き込み範囲が実際に限定されていること」を前提にする。実効サンドボックスモードが argv とヘルプだけでは確定できない場合(§12-4 の限界⑧)、この前提自体が崩れうる。
-- 開始前の確認の、所属の印による別プロジェクトの記録の見分け(§12-9-3)も同じ前提に立つ。外部の実装役が `--cwd`・`/tmp`・`$TMPDIR` の外へ書けると、その分類は成り立たない。
+- 開始前の確認の、所属の印による別プロジェクトの記録の見分け(§12-9-3)も同じ前提に立つ。外部の実装担当が `--cwd`・`/tmp`・`$TMPDIR` の外へ書けると、その分類は成り立たない。
 - `implement-agent.sh` は起動時に `--sandbox workspace-write` を指定する。設定ファイルの `sandbox_mode` が広い値でも、この指定で作業フォルダの外(ホームフォルダ)への書き込みが拒否された(事実と出典は design §7-3)。
 - 確かめたのは `sandbox_mode` の上書きを防ぐことだけ。`sandbox_workspace_write.writable_roots`・管理された権限の設定・信頼済みのプロジェクトの設定で書き込み範囲が広がる道は残る(限界⑧のまま)。
 
@@ -1534,7 +1534,7 @@ bash {do-task の}scripts/implement-agent.sh --runner <名前> --prompt-file <�
 - **成否の判定は終了コードと `ERROR [理由コード]` 行だけで行い、stdout の内容では判定しない。** 「成果が残っているか」は stdout ではなく §12-7 の比較で判定する(スクリプトは git を呼ばないため単独では判定できない)
 - **「得られた分の生出力」は本実行の失敗だけでなくプローブの失敗・無応答にも掛かる**(プローブ失敗の理由〈認証切れ・レート制限〉は生出力側に出るため)
 - **`prompt-too-large`(12)は外部 CLI を 1 回も起動する前に判定する**(以前はプローブの後にあり、必ず落ちると分かっている実行のためにプローブ 1 回分を課金していた)
-- **実装用既定表そのものの形が壊れている場合は `internal`(20)**。`no-writemode`(11)は「ランナーの仕様が変わって書き込み範囲を確立できない」の意味なので、スクリプト側の退行に流用すると呼び出し側を誤誘導する
+- **実装用既定表そのものの形が壊れている場合は `internal`(20)**。`no-writemode`(11)は「ランナーの仕様が変わって書き込み範囲を確立できない」の意味なので、スクリプト側の不具合に流用すると呼び出し側を誤誘導する
 
 **中止(シグナル受信。2026-09-17 決定 41)**: 呼び出し側は背景実行するため、**中止操作は `TERM` としてこのスクリプトに届く**。スクリプトは走行中の外部ランナーの PID を保持し、**`TERM` / `HUP`(保険で `INT`)を捕捉して「プロセスグループと直接の子への終了のシグナル → 後始末 → 終了」**の経路を通る。
 
@@ -1651,7 +1651,7 @@ schema_version 1からの変更は次の7つです。
 | issuesの要素 | `code`（下記列挙）、`root_id`（3つのidまたはnull）、`path_bytes_hex`（小文字hexまたはnull）、`message`（日本語文字列）の4キー |
 
 issuesのcodeは`invalid-arguments`、`invalid-cwd`、`unsupported-python`、`unsupported-platform`、`missing-feature`、`no-roots`、`resolution-failed`、`not-directory`、`unreadable`、`changed-during-scan`、`entry-limit`、`candidate-limit`、`time-limit`、`internal-error`です。
-OS由来の詳細はmessageに置き、候補内の内容は入れません。codeの追加や必須キーの変更は公開契約の変更として文書・試験を同期します。
+OS由来の詳細はmessageに置き、候補内の内容は入れません。codeの追加や必須キーの変更は公開契約の変更として文書・テストを同期します。
 
 - complete=trueとなるのは0/none、0/other-projects-only、0/acknowledged、10/confirmation-required、10/list-changedだけです。これらのissuesは空配列です。
 - 2/usage、11/scan-unavailable、20/internalではcomplete=false、issuesは1件以上、list_sha256とidentity_sha256はありません。途中のroots/candidatesを返しても完全一覧とは扱いません。
@@ -1748,13 +1748,13 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 | 含む関係を確かめる途中で、祖先のフォルダを開けない・読めない・128階層を超える | 確認が要る | `overlap-unknown` |
 | 上のどれにも当たらない | 別プロジェクトの記録(`other-project`) | null |
 
-- 相手の範囲は、印に書いた最上位・共通の置き場・タスクMDの在るフォルダと、外部の実装役が書ける一時フォルダ(`/tmp`・`/private/tmp`・印に書いたtakeのときの`$TMPDIR`。在るものだけ)です。
+- 相手の範囲は、印に書いた最上位・共通の置き場・タスクMDの在るフォルダと、外部の実装担当が書ける一時フォルダ(`/tmp`・`/private/tmp`・印に書いたtakeのときの`$TMPDIR`。在るものだけ)です。
 - 含む関係は、相手の範囲の各フォルダ`a`と今回の範囲の各フォルダ`b`の組すべてで見ます。`a`とその祖先のどれかが`b`と同じ実体、または`b`とその祖先のどれかが`a`と同じ実体なら当たります。
   - 同じ実体かはdeviceとinodeで比べます(大文字と小文字の違う綴りでも同じと分かります)。
   - 祖先は、番号を確かめた後のフォルダを開いたfdから`..`を開いてたどります(途中をリンクに置き換えられても、今の本当の親をたどります)。
 - 走査中の変化: 印を読む前後で候補の番号・種類・持ち主を比べ、候補が変われば11です。印の変化は、その候補を「確認が要る」にします(11にしません)。
 - Gitでない作業では、印のある記録も全部「確認が要る」(`git-unavailable`)になります。今回の範囲をGitから決められないためです。
-- 一時フォルダ(`/tmp`など)の下の作業では、印のある記録も全部「確認が要る」(`overlap`)になります。外部の実装役が一時フォルダに書けるためです。
+- 一時フォルダ(`/tmp`など)の下の作業では、印のある記録も全部「確認が要る」(`overlap`)になります。外部の実装担当が一時フォルダに書けるためです。
 - 別プロジェクトの記録も128候補の上限に数えます。溜まると全員の開始前の確認が11で止まりうるので、記録を作ったセッションか人が`cleanup`で片付けます(今と同じ)。
 - 開始前の確認は、記録・印・作業ツリー・Gitに書き込みません。記録と印を消す・直す・比べることもしません。
 - 印・`.git`・`HEAD`・`commondir`の読み取り、`..`を開く処理、祖先をたどる処理で、必要な機能の実行時の未対応(`NotImplementedError`・`ENOSYS`・`ENOTSUP`・`EOPNOTSUPP`)が起きたら、上の表の理由にせず11/`scan-unavailable`(`missing-feature`)にします。確認値では解除できません(§12-9-1)。
@@ -1765,9 +1765,9 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - #291はこれを次の範囲で置き換えます: 記録の外の印で、上の表の条件をすべて満たしたものだけを、機械で「別プロジェクトの記録」とします。
 - #257の理由1(信頼できない記録の情報を止めない理由にしない)への答え:
   - 印は同じ利用者の権限で書けます。偽の印を置ける者は記録そのものを消すこともできるので、新しい弱さではありません。
-  - 外部の実装役は保護記録の置き場に書けない前提です(置き場はtakeが`/tmp`・`$TMPDIR`・作業ツリーの外に選びます。§12-2)。
+  - 外部の実装担当は保護記録の置き場に書けない前提です(置き場はtakeが`/tmp`・`$TMPDIR`・作業ツリーの外に選びます。§12-2)。
 - #257の理由2(読むものを増やさない)への答え: 新しく読むのは、印・今回の`.git`・`HEAD`・`commondir`・印に書いたパスとその祖先の属性です。どれも上限付きで、記録の中と設定の本文は読みません。
-- 前提: 外部の実装役は、許された範囲(`--cwd`・`/tmp`・`$TMPDIR`)の外へ書きません(§12-4、§12-2の注意事項〈35aの前提〉)。
+- 前提: 外部の実装担当は、許された範囲(`--cwd`・`/tmp`・`$TMPDIR`)の外へ書きません(§12-4、§12-2の注意事項〈35aの前提〉)。
   - `implement-agent.sh`は起動時に`--sandbox workspace-write`を指定します。設定ファイルの`sandbox_mode`が広い値でも、この指定で作業フォルダの外への書き込みが拒否されることを確かめています(design §7-3)。
   - 確かめたのは`sandbox_mode`の上書きを防ぐことだけです。`sandbox_workspace_write.writable_roots`・管理された権限の設定・信頼済みのプロジェクトの設定で書き込み範囲が広がる道は残ります(限界⑧のまま)。その場合、この自動の分類は成り立ちません(開始前の確認は相手の設定を読みません)。
 
@@ -1917,7 +1917,7 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - 新たなdo-task/ship-taskの呼出し、別チャット、保持文脈を失った再開では、以前の一覧確認を自動復元しません。
 - 自分のguardを示す`--ignore-state`や恒久的な除外は追加しません。
 - 明示的な検証のみの開始にも適用します。候補があれば、現物タスクを正本として検証を始めません。
-- 現在の委託先が内蔵、非Git、非ファイルタスクの場合もscanします。無関係な候補は人の具体的な確認で続行できます。
+- 現在の委託先が内蔵、非Git、ファイルを持たないタスクの場合もscanします。無関係な候補は人の具体的な確認で続行できます。
   - 非Gitの作業では、印のある記録も「確認が要る」(`git-unavailable`)になります。
 - 0/`other-projects-only`(別プロジェクトの記録だけ)でも続けます。無人でも同じです。
   - 会話の報告には、別プロジェクトの記録の名前と最上位(`owner.top`)を書きます。
@@ -1941,6 +1941,6 @@ OS由来の詳細はmessageに置き、候補内の内容は入れません。co
 - 4096件/128候補/5秒を超える場合も、上限を外す引数を作りません。人による置き場の確認後に再実行します。
 - stdoutが壊れたJSON、必須キー欠落、終了値とresult不一致なら、呼出側は止めます。
 
-**検証の境界**: helper の実 CLI は安全な試験用ファイルで検証する。人の回答の意味・停止・再開は現物の skill 文書と独立レビューで確認する。実行可能な skill dispatcher はない。架空の dispatcher や後続 stub を実ホストの停止・続行の証拠にしない。AI が手順を守ることや OS による強制は保証しない。
+**検証の境界**: helper の実 CLI は安全なテスト用のファイルで検証する。人の回答の意味・停止・再開は現物の skill 文書と独立レビューで確認する。実行可能な skill dispatcher はない。架空の dispatcher や後続 stub を実ホストの停止・続行の証拠にしない。AI が手順を守ることや OS による強制は保証しない。
 
 **検出の限界**: 別 PC、移動・削除された記録、以前と違う HOME/XDG_STATE_HOME は検出できない。同じ利用者権限による改変・走査間の競合・子孫の書込みを隔離しない。人の誤認や候補内部の変化を検出しない。候補なし・別プロジェクトの記録だけ・確認済みを、処理の停止証明や既存の保護検査の代わりにしない。所属の印の限界は §12-9-3 の「検出の限界(所属の印)」。

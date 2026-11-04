@@ -625,6 +625,78 @@ class ValidateTest(unittest.TestCase):
         self.edit_definition_line("- **文書の中で置き換える語**", "例: サイレント縮退禁止・サイレントスキップ禁止")
         self.assert_clean()
 
+    # #333: 会話で通じなかった言い方と、内部だけの造語
+    WORDS_OF_333 = ("レビュー役", "実装役", "まとめ役", "検証役", "全回帰", "試験", "直読み", "峻別", "一時物", "子起動",
+                    "非ファイルタスク", "退行", "追随", "起票")
+
+    def test_replaced_words_of_333_are_errors(self):
+        cases = (
+            ("各レビュー役のモデルの名前と版", "'レビュー役'", "レビュアー"),
+            ("外部の実装役は `--cwd` で起動する", "'実装役'", "実装担当"),
+            ("レビュー役・まとめ役からの報告", "'まとめ役'", "team-lead"),
+            ("検証役は新しく取得する", "'検証役'", "team-lead"),
+            ("全回帰はLinux/GNUの通常Python環境で実行し", "'全回帰'", "全回帰テスト"),
+            ("最後に全回帰", "'全回帰'", "回帰テストをすべて流すこと"),
+            ("回帰の試験として保存した", "'試験'", "テスト"),
+            ("### 自動メモリの隔離試験(H32)", "'試験'", "実機での確認"),
+            ("このリポジトリの試験用 [Issue #331]", "'試験'", "テスト用の Issue"),
+            ("> **直読みの確認**", "'直読み'", "直接読む"),
+            ("3. **決定と案の峻別**", "'峻別'", "はっきり分ける"),
+            ("`TEMP`(一時物の状態)", "'一時物'", "一時ファイル"),
+            ("共通の子起動の環境で指定する", "'子起動'", "子プロセスとしての起動"),
+            ("Issue は非ファイルタスクなので", "'非ファイルタスク'", "ファイルを持たないタスク"),
+            ("段階移行と退行防止", "'退行'", "後戻り"),
+            ("§5 の記述を追随させる", "'追随'", "合わせる"),
+            ("空の要件定義書を起票する", "'起票'", "書き起こす"),
+        )
+        for text, word, guidance in cases:
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
+        self.assert_appended_line_flagged("Linux / 2.1.289 の認証済み試験で", ["'試験'"], relpath="docs/design.md")
+        self.assert_appended_line_flagged(
+            "> **直読みできない環境で使うとき**", ["'直読み'"],
+            relpath="plugins/dev-workflow/skills/init-project/templates/AGENTS.md.template",
+        )
+
+    def test_replaced_words_of_333_lookalikes_are_not_flagged(self):
+        # 新しい言い方・後ろが「テスト」の「全回帰」・決まった行 `- 検証器記録:`(「検証器」は探さない)
+        lines = ("全回帰テストを流す", "全回帰テスト(回帰テストをすべて流すこと)", "各レビュアーのモデルの名前と版",
+                 "外部の実装担当は `--cwd` で起動する", "実装を受け持つ AI", "レビュアーと team-lead からの報告",
+                 "結果を確かめる側の AI", "回帰テストとして保存した", "テスト用の [Issue #331]", "自動メモリの無効化の実機での確認",
+                 "短い試しのファイル", "`AGENTS.md` を直接読めない環境", "決定と案をはっきり分ける", "一時ファイルやフォルダの状態",
+                 "子プロセスとしての起動", "ファイルを持たないタスク", "段階移行と後戻りの防止", "§5 の記述を合わせる",
+                 "要件定義書を書き起こす", "- 検証器記録: APPROVED / 根拠 sha256:<64桁> / review:<64桁>",
+                 "`validate.py` の検査 11", "回帰の疑い", "役割語(AI の役割の名前)")
+        target = self.repo / self.REPLACED_TARGET
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("\n" + "\n".join(lines) + "\n")
+        self.assert_clean()
+
+    def test_replaced_words_of_333_allowed_in_writing_for_people(self):
+        self.append_to_checked_file(
+            "| " + " | ".join(self.WORDS_OF_333) + " |",
+            relpath="plugins/dev-workflow/skills/do-task/references/writing-for-people.md",
+            prefix="",
+        )
+        self.assert_clean()
+
+    def test_replaced_words_of_333_definition_line_in_design_is_exempt(self):
+        # 「文書の中で置き換える語」の定義の行は、その行の組の語(#333 の語を含む)を除く
+        self.edit_definition_line("- **文書の中で置き換える語**", "例: " + "・".join(self.WORDS_OF_333))
+        self.assert_clean()
+
+    def test_replaced_words_of_333_are_not_exempt_on_the_other_definition_line(self):
+        # #333 の語は「文書の中で置き換える語」の組。「置き換える語」の定義の行では除かない
+        for word in self.WORDS_OF_333:
+            with self.subTest(word=word):
+                target = self.repo / "docs" / "design.md"
+                original = target.read_bytes()
+                try:
+                    no = self.edit_definition_line("- **置き換える語**", f"例: {word}")
+                    self.assert_error([f"docs/design.md:{no}:", "置き換える語", f"'{word}'"])
+                finally:
+                    target.write_bytes(original)
+
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
     def test_v1_exemption_word_alone_does_not_exempt(self):
@@ -2315,6 +2387,43 @@ class WordingTest(unittest.TestCase):
         self.assertEqual(1, len(errors), errors)
         self.assertIn("markdown", errors[0].lower())
         self.assertIn("requirements-dev.txt", errors[0])
+
+
+class ReplacedWordsInWritingRulesTest(unittest.TestCase):
+    """#333: 検査 11 の置き換える語(validate.py の _REPLACED_WORDS)が、会話の決まりの言い換え表にも載っていること。
+
+    言い換えは _REPLACED_WORDS・design §6 の定義の行・言い換え表(writing-for-people.md の 4 節)の 3 か所にある。
+    検査 11 は文書しか見ないので、言い換え表だけ漏れると、その語が会話で使われる(#333 の「写し」)。
+    補足が「置き換える語」で始まる行の 1 列目か補足に、語の正規表現が当たることを確かめる。
+    """
+
+    @staticmethod
+    def replaced_word_rows(text):
+        """言い換え表の行のうち、補足が「置き換える語」で始まる行の (1 列目, 補足) を返す。
+        セルは、インラインのコードの外の `|` で分ける。"""
+        section = text.split("\n## 4. ", 1)[1].split("\n## 5. ", 1)[0]
+        rows = []
+        for line in section.split("\n"):
+            if not line.startswith("| ") or line.startswith("| 言葉 |"):
+                continue
+            cells = [cell.strip() for cell in re.split(r"\|(?=(?:[^`]*`[^`]*`)*[^`]*$)", line)[1:-1]]
+            if len(cells) == 3 and cells[2].startswith("置き換える語"):
+                rows.append((cells[0], cells[2]))
+        return rows
+
+    def test_every_replaced_word_is_in_the_writing_rules_table(self):
+        namespace = runpy.run_path(str(SOURCE_REPO / "scripts" / "validate.py"), run_name="validate_words")
+        words = namespace["_REPLACED_WORDS"]
+        self.assertTrue(words)
+        text = (SOURCE_REPO / SKILLS_REL / WRITING_RULES_REL).read_text(encoding="utf-8")
+        rows = self.replaced_word_rows(text)
+        self.assertTrue(rows, "言い換え表に、補足が「置き換える語」の行が無い")
+        for pattern, word, _guidance, _group in words:
+            with self.subTest(word=word):
+                self.assertTrue(
+                    any(re.search(pattern, term) or re.search(pattern, note) for term, note in rows),
+                    f"{word} が言い換え表(writing-for-people.md の 4 節)の「置き換える語」の行に無い",
+                )
 
 
 if __name__ == "__main__":

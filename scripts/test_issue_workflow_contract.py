@@ -154,7 +154,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_do_task_handoff_and_failed_finalization_do_not_commit(self):
         phase = section(self.ship, "## Phase 3: 実装(/do-task)")
         self.contains(phase, "/do-task --issue=<番号>", "保持した対象・R", "stage・commit・文書同期へ進まない")
-        self.contains(self.shipping, "外部の実装役への承認は求めず", "本文のコピーを `--task-md` に渡さない",
+        self.contains(self.shipping, "外部の実装担当への承認は求めず", "本文のコピーを `--task-md` に渡さない",
                       "finalize` の期待本文を共通の `update`", "新たな実装 commit は作らない")
 
     def test_commit_reads_external_body_instead_of_staging_a_task(self):
@@ -434,7 +434,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         facts = self.design.split("### 7-3.", 1)[1].split("### 7-4.", 1)[0]
         permission = next(line for line in facts.splitlines()
                           if line.startswith("| **gh** の `repo view <repo> --json name,isPrivate,viewerPermission`"))
-        self.contains(permission, "2026-11-04・gh 2.103.3", "試験用 [Issue #331]", "まとめ役からの報告",
+        self.contains(permission, "2026-11-04・gh 2.103.3", "テスト用の [Issue #331]", "team-lead からの報告",
                       "`preflight`", "`github.com/Yuki-Maeda-valour/workflow`・公開・`ADMIN` を取得",
                       "公式本文の再確認は未確認")
         self.assertNotIn("実機確認は未確認", permission)
@@ -442,7 +442,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_github_write_measurement_records_observations_and_limits(self):
         facts = self.design.split("### 7-3.", 1)[1].split("### 7-4.", 1)[0]
         write = next(line for line in facts.splitlines() if line.startswith("| **gh** の `issue create/edit --body-file -`"))
-        self.contains(write, "2026-11-04・gh 2.103.3", "試験用 [Issue #331]", "まとめ役からの報告",
+        self.contains(write, "2026-11-04・gh 2.103.3", "テスト用の [Issue #331]", "team-lead からの報告",
                       "`create --approve-public`", "`snapshot --for-execution`", "`check-checkboxes`",
                       "`update --checkbox-only`", "`update`(追記)", "古い控えでの `update` は書かずに停止")
         self.assertNotIn("未確認", write)

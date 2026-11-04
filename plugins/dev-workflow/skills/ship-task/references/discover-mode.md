@@ -51,14 +51,14 @@ ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほか�
 - `ssh://[user@]HOST/OWNER/REPO[.git][/]`
 - scp の形 `[user@]HOST:OWNER/REPO[.git]`(HOST に `/` を含まず、パスが `/` で始まらない)
 
-OWNER・REPO はそれぞれ 1 段で `[A-Za-z0-9._-]+`。ポートを明示した形は読まない。読めた URL の直した値は `HOST/OWNER/REPO`(HOST は小文字。userinfo・`.git`・末尾の `/` を落とす)。
+OWNER・REPO はそれぞれ 1 段で `[A-Za-z0-9._-]+`。ポートを明示した形は読まない。読めた URL の形をそろえた値は `HOST/OWNER/REPO`(HOST は小文字。userinfo・`.git`・末尾の `/` を落とす)。
 
 **`same`**(fetch と push が同じリポジトリか。`loop.sh` の `ls-remote origin` は fetch 側を見るので、push 先と食い違わないように)
 
-- 両方が読めたら、直した値が一致するか。HOST が `github.com` のときは、OWNER・REPO も小文字にしてから比べる(GitHub は大小を区別しない)。ほかのホストは字面のまま(安全側)
+- 両方が読めたら、形をそろえた値が一致するか。HOST が `github.com` のときは、OWNER・REPO も小文字にしてから比べる(GitHub は大小を区別しない)。ほかのホストは字面のまま(安全側)
 - どちらかが読めなければ、2 つの URL の字面が一致するか
 
-**`repo`**(公開の確認と PR に使う push 先。許す形の列挙): push 側が次のどちらかのときだけ、push 側の直した値にする(OWNER・REPO の大小は字面のまま)。ほかは null。
+**`repo`**(公開の確認と PR に使う push 先。許す形の列挙): push 側が次のどちらかのときだけ、push 側の形をそろえた値にする(OWNER・REPO の大小は字面のまま)。ほかは null。
 
 - https の形。ただし、TLS の検証を外していれば null(`git config --type=bool --get-urlmatch http.sslverify <push の URL>` が `false`、または環境変数 `GIT_SSL_NO_VERIFY` がある。設定が無い〈rc 1〉なら検証ありと読む)。https の送り先の正しさは、TLS の検証が担保するため
 - scp か `ssh://` の形で、ユーザー名が `git`・HOST が `github.com`。さらに次をすべて満たす
@@ -211,6 +211,6 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路と、ホスト鍵検証を外す H44 の構成を拒否するが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
 - ホスト鍵の判定は設定の検査だけで、接続成功や GitHub の鍵の所有を証明しない。known_hosts の内容・実体・書込可否、DNS の結果、鍵取得コマンドの出力、既存の共有接続は検査しない。通常の `accept-new` の初回受け入れと、通常パスへの保存失敗は SSH に任せる。`-G` のファイル一覧は引用符を保持しないため、空白入りパスを完全には復元しない。明示された先頭の `/dev/null` を保守的に判定し、symlink や別の破棄先は追わない
 - ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)の限界は、unattended-mode.md §9 の ⑥ と同じ(include の先・hook の中身・global の設定を見ない・照合と実行の間の書き換え・誤って失敗扱いになる構成など)
-- fetch と push の URL が、字面から直した値で別のリポジトリか、`remote.origin.vcs` があれば、発見の周は前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
+- fetch と push の URL が、字面から形をそろえた値で別のリポジトリか、`remote.origin.vcs` があれば、発見の周は前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
 - `/ship-task <候補_ のパス>`(説明として渡す)は、採用の入口として保証しない。採用は `/create-task <候補_ のパス>` で行ってから、`/ship-task --task=<進行中_ のパス>` を使う
 - 周の外側の限界(未 merge の前夜の PR・squash や rebase で merge したブランチ・閉じた PR のブランチが、その発見元を止め続けること、ほかのアプリの書き込みなど)は loop.md §10
