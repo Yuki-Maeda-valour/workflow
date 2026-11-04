@@ -163,10 +163,17 @@ class ValidateTest(unittest.TestCase):
         target.write_text(text.replace(old, new), encoding="utf-8")
 
     def writing_rules_line_of(self, skill):
-        """写しの SKILL.md から、書き方の正本へのリンクを持つ行(行全体)を取る。"""
+        """SKILL.md の原則の節から、書き方の正本へのリンクを持つ行を取る。
+
+        完了報告の手順にも同じファイルへのリンクがある。検査 9 が対象にする
+        原則の節だけから、試験で置き換える行を選ぶ。
+        """
+        text = self.skill_md(skill).read_text(encoding="utf-8")
+        principles = re.search(r"^## 原則\n(.*?)(?=^## |\Z)", text, flags=re.M | re.S)
+        self.assertIsNotNone(principles, f"{skill}/SKILL.md に原則の節が無い")
         lines = [
             line
-            for line in self.skill_md(skill).read_text(encoding="utf-8").split("\n")
+            for line in principles.group(1).split("\n")
             if "writing-for-people.md](" in line
         ]
         self.assertEqual(1, len(lines), lines)

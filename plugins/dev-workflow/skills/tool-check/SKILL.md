@@ -62,7 +62,7 @@ format → lint → typecheck → test → build を、プロジェクトに実�
 
 ## 最終ゲート(出力)
 
-検査ごとに ✅/❌/skip のサマリー表を出す:
+検査結果の表そのものが成果物なので、[../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」は使わない。検査ごとに ✅/❌/skip のサマリー表を出す:
 
 | 検査 | コマンド | 結果 |
 |---|---|---|

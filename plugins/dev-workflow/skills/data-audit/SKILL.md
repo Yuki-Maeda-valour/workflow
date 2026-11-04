@@ -101,7 +101,8 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
-以下の様式で報告する:
+監査は指摘と根拠を示す報告そのものが成果物なので、[../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」は使わず、以下の様式で報告する。
+- 候補モードでも共通の枠は出さない。呼び出し元が読むパスの一覧と結果の行を、candidate-mode.md の並びで返す。
 
 ```markdown
 # データ境界監査: {プロジェクト名}
