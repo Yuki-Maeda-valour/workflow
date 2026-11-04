@@ -1968,6 +1968,20 @@ class WordingTest(unittest.TestCase):
                 self.write_exceptions(names=[self.short_entry(form)])
                 self.assertIn("動詞", self.assert_dictionary_error()[0])
 
+    def test_verbs_after_line_breaks_inside_a_quote_are_detected(self):
+        # 引用の中の許す形は、次の行の頭の >(字下げ・空白・入れ子を含む)を読み飛ばし、同じ段落の動詞を探す。
+        self.write_exceptions(names=[self.short_entry("32 縮退")])
+        for text in ("> 32 縮退\n> する。\n", "> 32 縮退\n> して続ける。\n",
+                     "  > 32 縮退\n  >   **する**。\n", "> > 32 縮退\n> > する。\n"):
+            with self.subTest(text=text):
+                self.assert_wording(text, [(self.reduced_error, "縮退", 1)])
+        # 引用の中の空行・引用の中の * の箇条書き・引用でない行の次の > の行は越えない。
+        for text in ("> 32 縮退\n>\n> その場合。\n", "> > 32 縮退\n> >\n> > その場合。\n",
+                     "32 縮退\n> その場合。\n", "> 32 縮退\n> * その場合。\n",
+                     "> 32 縮退\n>   * その場合。\n", "> 32 縮退\n> - その場合。\n"):
+            with self.subTest(text=text):
+                self.assert_wording(text, [])
+
     def test_verb_check_stays_inside_the_same_paragraph_or_item(self):
         # 改行は同じ段落・同じ項目の中の 1 つまで。別の段落・別の項目が「そ」などで始まっても動詞とみなさない。
         self.write_exceptions(names=[self.short_entry("32 縮退")])

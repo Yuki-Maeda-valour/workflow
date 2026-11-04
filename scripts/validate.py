@@ -1286,6 +1286,22 @@ def _wording_form_starts_ok(form, match):
     return not re.search(r'[0-9;>)\]]$', before)
 
 
+def _wording_quote_verb_follows(form, match):
+    """引用の中の許す形は、次の行の頭の > を読み飛ばし、同じ段落の続きの動詞を探す(design §6)。
+
+    許す形のある行が > で始まるときだけ見る。次の行の > は字下げ・空白・入れ子を含めて飛ばす。
+    > だけの行(引用の中の空行)は改行で止まり、引用の中の * の箇条書きは別の項目とみなす。
+    """
+    if not _wording_literal(form).endswith('縮退'):
+        return False
+    text = match.string
+    if not re.match(r'[ \t]*>', text[text.rfind('\n', 0, match.start()) + 1:match.start()]):
+        return False
+    # 頭の > は全部飛ばす(一部だけ飛ばして残りの > を HTML の字と読まないように、後ろに > が無いことを確かめる)。
+    return bool(re.match(r'[*_`\t 　]*\r?\n[ \t]*(?:>[ \t]?)+(?![ \t]*>)(?![ \t]*\*[ \t])[*_`\t 　]*(?:'
+                         + _WORDING_VERB + '|' + _WORDING_MARKUP + ')', text[match.end():]))
+
+
 def check_wording():
     """初出の説明・説明の重複・名前以外の縮退を ERROR にする。"""
     terms = read_wording_terms()
@@ -1305,7 +1321,7 @@ def check_wording():
         forms = exceptions.get(rel, {})
         if forms:
             def exclude(match):
-                if not _wording_form_starts_ok(match[0], match):
+                if not _wording_form_starts_ok(match[0], match) or _wording_quote_verb_follows(match[0], match):
                     return match[0]
                 pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
                 return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
