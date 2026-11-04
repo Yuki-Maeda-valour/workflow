@@ -235,7 +235,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
 
     def test_publication_retry_before_push_keeps_body_state_and_hashes(self):
         stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
-        self.contains(stop, "まず Issue へは書かず、会話で理由を報告する",
+        self.contains(stop, "push より前の失敗は、まず Issue へは書かず、会話で理由を報告する",
                       "同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
                       "同じセッションで Issue に記録する前に限る",
                       "push より前の失敗では、人がやめると決めたとき、またはセッションを終えるときだけ",
@@ -244,8 +244,8 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "やり直す前に push・PR の成否を確かめ", "既に作成された PR を重複作成しない",
                       "検査を省いて続けない")
         table = section(self.ship, "## 停止条件のまとめ")
-        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の公開(push・PR)の失敗。"))
-        self.contains(row, "push より前の失敗は、まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
+        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の push より前の公開失敗。"))
+        self.contains(row, "まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
                       "push・PR の成否を確かめ、push より前の失敗だけ、同じセッションで Issue に記録する前なら",
                       "同じ state と保持値で Phase 5 の再確認を通して再試行できる")
         report = table.split("Issue 方式の停止報告は", 1)[1]
@@ -254,24 +254,44 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "同じセッションで Issue に記録する前に限る")
         self.assertNotIn("同じセッションでやり直せる間は", stop + table)
 
-    def test_post_push_pr_failure_records_stop_then_uses_manual_creation(self):
+    def test_post_push_failures_record_stop_before_remaining_manual_operations(self):
         stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
-        self.contains(stop, "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
-                      "`--set-upstream` の追跡設定で git 設定のダイジェストが変わり",
-                      "`実装 commit <sha> は検証済み。公開で停止: <理由>` と記録してから、下の手動の PR 作成手順を示す")
+        table = section(self.ship, "## 停止条件のまとめ")
+        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の push 以後の失敗"))
+        report = table.split("Issue 方式の停止報告は", 1)[1]
+        stop_line = next(line for line in stop.splitlines() if line.startswith("  - push 以後の失敗"))
+        report_line = next(line for line in report.splitlines() if line.startswith("- push 以後の失敗"))
+        for text in (stop_line, row, report_line):
+            self.contains(text, "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)",
+                          "Phase 5 をやり直さ", "Issue に記録してから、push・PR の成否を確かめ、",
+                          "残った操作だけを手で打つ形で示す")
+            self.assertLess(text.index("Phase 5 をやり直さ"), text.index("Issue に記録してから"))
+        for text in (stop_line, report_line):
+            self.contains(text, "`実装 commit <sha> は検証済み。公開で停止: <理由>` と Issue に記録")
+        self.contains(stop, "`--set-upstream` の追跡設定で git 設定のダイジェストが変わり")
+        self.assertNotIn("公開(push・PR)で止まったときは、まず Issue へは書かず", stop)
+
+    def test_post_push_pr_failure_uses_stdin_and_checks_created_or_existing_pr(self):
         resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
         self.contains(resume, "push と追跡設定が済んで PR の作成だけが失敗した場合は、push を繰り返さず、",
-                      "`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file <PR本文ファイル>`",
-                      "本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる")
-        table = section(self.ship, "## 停止条件のまとめ")
-        row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の push と追跡設定が済んで"))
-        self.contains(row, "PR の作成だけが失敗した場合。Phase 5 をやり直さず、公開停止を Issue に記録してから、",
-                      "手動の `gh pr create -R <repo> …` を示す")
-        report = table.split("Issue 方式の停止報告は", 1)[1]
-        self.contains(report, "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
-                      "`実装 commit <sha> は検証済み。公開で停止: <理由>` と記録してから、",
-                      "手動の `gh pr create -R <repo> …` を示す",
-                      "保持した `pr-evidence` と `Closes #<番号>`", "本文と対象リポジトリを確かめ直す手順")
+                      "`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file - < <PR本文ファイル>`",
+                      "本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる",
+                      "作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>`",
+                      "head・base・head の SHA が保持したレビュー済みの値と一致するかを確かめる",
+                      "PR が既に作成済みなら重複作成せず、この照合を行う",
+                      "不一致・取得失敗なら公開完了とは扱わない")
+        self.assertLess(resume.index("gh pr create -R"), resume.index("gh api --hostname"))
+
+    def test_documented_gh_body_file_commands_use_stdin(self):
+        commands = []
+        for path in SKILLS.rglob("*.md"):
+            for command in re.findall(r"`(gh\b[^`\n]*)`", path.read_text()):
+                if "--body-file" in command:
+                    commands.append((path, command))
+        self.assertTrue(commands)
+        for path, command in commands:
+            with self.subTest(path=path.relative_to(ROOT), command=command):
+                self.assertRegex(command, r"--body-file\s+-(?:\s|$)")
 
     def test_recorded_publication_stop_requires_manual_commands_and_saved_evidence(self):
         resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
@@ -370,8 +390,11 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(pending, "ship-task", "update-doc", "create-task", "do-task")
         self.contains(pending, "push より前の失敗だけ、Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
                       "人がやめると決めたとき・セッション終了時だけ Issue に記録する",
-                      "push と追跡設定が済んで PR の作成だけが失敗した場合は、Phase 5 をやり直さない",
-                      "公開停止を Issue に記録してから、手動の `gh pr create -R <repo> …` を示す",
+                      "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない",
+                      "公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す",
+                      "`--body-file - < <PR本文ファイル>` で標準入力から本文を渡す",
+                      "作成後は `gh api` で head・base・head の SHA を保持したレビュー済みの値と比べる",
+                      "作成済みの PR は重複作成せず、同じ照合を行う",
                       "中断・停止・保留の記録は、完了の形に当たっても完了記録に数えない",
                       "中断の記録を書いた後は、検査つきの Phase 5 をやり直せない",
                       "文書同期は `/update-doc --task=#<番号>` で再開し、その後の commit・公開は手動のコマンド列を示す")
