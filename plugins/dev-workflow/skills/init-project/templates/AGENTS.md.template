@@ -66,6 +66,8 @@ Codex / Cursor / Claude Code はこのファイルを直接読む。
 - 委任してターンを終えるときは、再起動手段（前景の呼び出しを await / 完了通知が来る background task / heartbeat 予約）を必ず確保する。「待ちます」だけで終えるとセッションが停止する。
 
 ## AI ワークフロー（skills）
+{{TASK_STORE_NOTICE}}
+
 | skill | 用途 |
 |-------|------|
 | `/understand-project` | 構造・技術スタック・規約を把握（読み取り専用） |

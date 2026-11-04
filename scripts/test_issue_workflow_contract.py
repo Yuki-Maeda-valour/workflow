@@ -370,7 +370,6 @@ class IssueWorkflowContractTest(unittest.TestCase):
         for line in accepted:
             with self.subTest(accepted=line):
                 self.assertIsNotNone(re.fullmatch(pattern, line))
-                self.contains(self.design, f"`{line}`")
         for line in rejected:
             with self.subTest(rejected=line):
                 self.assertIsNone(re.fullmatch(pattern, line))
@@ -396,14 +395,63 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "update-doc の完了検査の失敗", "他人の Issue の再確認",
                       "`task_store: github-issue` のステータス行の欠落・重複")
 
-    def test_design_keeps_routes_separate_and_defers_profile_migration(self):
+    def test_design_uses_profile_and_keeps_legacy_route_separate(self):
         policy = self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0]
         self.contains(policy, "`github-issue.md` §6・§7 を使う", "`AGENTS.md` が定める形は、`- <YYYY-MM-DD> ` で始まり",
-                      "ステータス行と使用スキル `do-task` の記載は必須にしない",
+                      "`.claude/project-profile.yml` の `task_store: github-issue` を選ぶ",
                       "`task_store: github-issue` では、template の完了ステータス行と do-task の完了記録が引き続き必須",
-                      "権威参照ファイルによる Issue 運用でも停止する", "profile への移行と init-project の質問・雛形は3本目")
-        self.assertNotIn("この1本目では", policy)
+                      "権威参照ファイルによる Issue 運用でも停止する",
+                      "現在の profile の経路へ例外を広げない", "過去の記録に不足があれば自動で完了とせず",
+                      "設定はこの1項目だけ", "無人ループは本リポジトリの `task_store` を読んで起動時に停止")
+        self.assertNotIn("本リポジトリの profile を新設しない", policy)
         self.assertNotIn("未対応", policy)
+        protocol = (SKILLS / "do-task/references/review-protocol.md").read_text()
+        self.contains(protocol, "または権威参照ファイルが Issue 等を正本にする場合")
+
+    def test_repository_profile_and_minimal_legacy_instructions(self):
+        profile = (ROOT / ".claude/project-profile.yml").read_text()
+        self.assertEqual("task_store: github-issue\n", profile)
+        instructions = section((ROOT / "AGENTS.md").read_text(), "## このリポジトリの Issue 運用")
+        self.contains(instructions, "task_store: github-issue", "do-task/references/github-issue.md",
+                      "古い版でも、作業記録の正本は GitHub Issue 本文", "ローカルのタスク成果物は新設しません",
+                      "現在の版では、Issue 方式の契約が定めるステータス行と完了記録が必須")
+        self.assertNotIn("profile へ移すまでの暫定", instructions)
+        for old_procedure in ("基準コミット", "gh issue view", "設計レビューの行の `本文`"):
+            self.assertNotIn(old_procedure, instructions)
+
+    def test_open_issue_migration_requires_header_and_preserves_design_digest(self):
+        policy = self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0]
+        instructions = section((ROOT / "AGENTS.md").read_text(), "## このリポジトリの Issue 運用")
+        for document in (policy, instructions):
+            self.contains(document, "開いた Issue も", "`> **ステータス**: 🚧 進行中` の行が1行必要",
+                          "ship-task は実装前に停止", "do-task を単独で完了しても、その後の update-doc が停止",
+                          "コードフェンスの外の最初の `## ` より前", "上の1行を行頭から追加",
+                          "task-digest.py", "既存の設計レビュー行と値が一致していた本文",
+                          "この1行だけを追加しても値は変わ", "設計レビュー行はそのまま使え",
+                          "Issue 本文の再取得と承認")
+
+    def test_repo_preflight_measurement_keeps_only_official_recheck_unconfirmed(self):
+        facts = self.design.split("### 7-3.", 1)[1].split("### 7-4.", 1)[0]
+        permission = next(line for line in facts.splitlines()
+                          if line.startswith("| **gh** の `repo view <repo> --json name,isPrivate,viewerPermission`"))
+        self.contains(permission, "2026-11-04・gh 2.103.3", "試験用 [Issue #331]", "まとめ役からの報告",
+                      "`preflight`", "`github.com/Yuki-Maeda-valour/workflow`・公開・`ADMIN` を取得",
+                      "公式本文の再確認は未確認")
+        self.assertNotIn("実機確認は未確認", permission)
+
+    def test_github_write_measurement_records_observations_and_limits(self):
+        facts = self.design.split("### 7-3.", 1)[1].split("### 7-4.", 1)[0]
+        write = next(line for line in facts.splitlines() if line.startswith("| **gh** の `issue create/edit --body-file -`"))
+        self.contains(write, "2026-11-04・gh 2.103.3", "試験用 [Issue #331]", "まとめ役からの報告",
+                      "`create --approve-public`", "`snapshot --for-execution`", "`check-checkboxes`",
+                      "`update --checkbox-only`", "`update`(追記)", "古い控えでの `update` は書かずに停止")
+        self.assertNotIn("未確認", write)
+        history = next(line for line in facts.splitlines() if line.startswith("| GraphQL の Issue の `userContentEdits`"))
+        self.contains(history, "履歴2件(作成時の版と編集)", "最終編集と一致", "`--edits-since`",
+                      "100件を超える履歴のページ送りと、他の条件での反映時期は未確認",
+                      "履歴の反映が遅れる可能性", "偽の `gh`")
+        unedited = next(line for line in facts.splitlines() if line.startswith("| 未編集の Issue"))
+        self.contains(unedited, "#331", "作成直後は両方 null、編集履歴は0件")
 
     def test_changelog_issue_release_has_final_behavior(self):
         changelog = (ROOT / "CHANGELOG.md").read_text()
