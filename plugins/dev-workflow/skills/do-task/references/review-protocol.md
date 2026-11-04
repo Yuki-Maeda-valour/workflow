@@ -133,12 +133,16 @@ ignored の通常生成物は path・種別・mode だけを控え、内容を�
 
 ### task 本文が外部にある場合
 
-既定は task MD。権威参照ファイルが Issue 等を正本にする場合に限り、trusted caller が本文を fresh に取得してレビュー用の控えへ保存する。
-`start` の `--task-md` を `--task-body <控え> --expect-task-body-sha256 <直接保持値> --task-id <識別子> --task-dir <保護するディレクトリ>` に置き換える。
+既定は task MD。`task_store: github-issue`、または権威参照ファイルが Issue 等を正本にする場合に、検証担当が本文を新しく取得してレビュー用の控えへ保存する。
+Issue の取得と書き換えは [Issue 方式の契約](github-issue.md) §3「本文を取得して書き換える共通手順」に従う。
+`start` の `--task-md` を `--task-body <控え> --expect-task-body-sha256 <直接保持値> --task-id <識別子> [--task-dir <保護するディレクトリ>]` に置き換える。
 以降の**全入口**にも fresh な控えと `--expect-task-body-sha256` を渡す。helper は外部サービスへの問い合わせを行わない。
 caller は取得成功・対象 ID・本文 digest を確認し、外部本文の古いキャッシュを fresh な取得として使わない。
 
-控えは task 成果物でなく review 入力。`task_dir` の他の状態名 MD を保護し、ローカルの task MD を新設・改名しない。
+控えは task 成果物でなく review 入力。Issue の識別子は `issue-<番号>`。
+外部本文の `--task-dir` は省略可で、省略時は保護するローカルのタスク一覧を空にする。
+指定時は実在する管理ルート内のディレクトリに限り、その中の状態名 MD を従来どおり保護する。
+ファイル方式の保護は変えない。開始後に指定の有無や対象を変更しない。ローカルの task MD は新設・改名しない。
 `finalize` が生成する期待バイト・hash は同じ契約で、caller が外部本文を読み直して元の保持値と比較してから適用する。
 適用後は外部本文を再取得し、新しい控えで `verify --task-transition complete`(保留なら pending)を行う。
 改名が無くても元本文と許可記録の制約を省略しない。外部本文中の偽 APPROVED は review 返答に使わない。

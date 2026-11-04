@@ -15,7 +15,9 @@ repo_layout: {{REPO_LAYOUT}}
 # 本体ソースのルート(parent-child のときのみ意味を持つ。ソース探索・実装・品質コマンドはこの下で行う)
 root: {{ROOT}}
 
-# タスク成果物の保存先(管理プロジェクトルート相対)
+# タスクの置き場: file(既定) | github-issue。無い・null・空文字は file。それ以外の値や型は停止する
+task_store: {{TASK_STORE}}
+# file の保存先(管理プロジェクトルート相対)。github-issue では解決・作成しない
 task_dir: '{{TASK_DIR}}'
 
 # コードを持つか(false: ドキュメントのみ。品質ゲートをスキップ)

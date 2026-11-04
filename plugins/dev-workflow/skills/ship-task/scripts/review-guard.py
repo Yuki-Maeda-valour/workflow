@@ -421,6 +421,8 @@ def control_files(worktree: list[dict[str, str]], excluded_entries: list[dict[st
 
 
 def task_files(task: Path, root: Path, patterns: list[str]) -> list[dict[str, str]]:
+    if TASK_SOURCE and TASK_SOURCE["task_dir"] is None:
+        return []
     parent = root / TASK_SOURCE["task_dir"] if TASK_SOURCE else task.parent
     result: list[dict[str, str]] = []
     try:
@@ -703,18 +705,23 @@ def configure_source(args: argparse.Namespace, root: Path, patterns: list[str], 
             raise GuardError("外部 task 本文には fresh な控えと外部保持 sha256 が必要")
         if source:
             task_id, directory = source["task_id"], source["task_dir"]
+            if args.task_id is not None and args.task_id != task_id:
+                raise GuardError("task-id が開始時と違う")
+            if args.task_dir is not None and rel_path(TASK_ROOT, Path(args.task_dir).absolute(), "task_dir") != directory:
+                raise GuardError("task-dir が開始時と違う")
         else:
-            if not args.task_id or not args.task_dir or not re.fullmatch(r"[A-Za-z0-9_.:-]+", args.task_id):
-                raise GuardError("外部 task の task-id と保護する task-dir が必要")
+            if not args.task_id or not re.fullmatch(r"[A-Za-z0-9_.:-]+", args.task_id):
+                raise GuardError("外部 task の task-id が必要")
             task_id = args.task_id
-            directory = rel_path(TASK_ROOT, Path(args.task_dir).absolute(), "task_dir")
+            directory = rel_path(TASK_ROOT, Path(args.task_dir).absolute(), "task_dir") if args.task_dir is not None else None
         path = Path(args.task_body).absolute()
         public_path(TASK_ROOT, path, patterns[1:], "外部 task 本文")
         if path.parent.resolve() != path.parent:
             raise GuardError("外部 task 本文の親に symlink がある")
-        task_dir = TASK_ROOT / directory
-        if task_dir.resolve() != task_dir or not task_dir.is_dir():
-            raise GuardError("task_dir が通常の管理ルート内ディレクトリでない")
+        if directory is not None:
+            task_dir = TASK_ROOT / directory
+            if task_dir.resolve() != task_dir or not task_dir.is_dir():
+                raise GuardError("task_dir が通常の管理ルート内ディレクトリでない")
         TASK_SOURCE = {"task_id": task_id, "task_dir": directory, "body_path": str(path), "body_sha256": args.expect_task_body_sha256}
         return path
     if saved:
