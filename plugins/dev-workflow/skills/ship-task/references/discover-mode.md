@@ -10,6 +10,8 @@ ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほか�
 
 ## 1. 引数と最初の Read
 
+環境の検査後、調査・候補選択より前に [置き場の選択](../../do-task/references/github-issue.md) §1 を通す。`task_store` が `file` 以外なら `task-store-unsupported` を示して失敗扱いで停止する。
+
 - **無人専用**: `--discover=<発見元>` は `--unattended` と一緒にだけ受け付ける。`--unattended` が無ければ、何もせずに停止し、「対話で発見するなら各発見元を直接呼ぶ」と案内する
 - **発見元の列**: `data-audit`・`refactor`
   - `loop.sh` の `--discover` が受け付ける名は、この列と同じにする(`loop-selftest.sh` が照らす)。列の外の値は前提の欠け(§4)

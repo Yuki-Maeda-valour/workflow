@@ -3,6 +3,8 @@
 import json
 import hashlib
 import importlib.util
+import contextlib
+import io
 from unittest import mock
 import os
 import re
@@ -1105,6 +1107,150 @@ while time.monotonic() < end:
         sealed = self.guard(*self.context("seal"), "--review-input", str(self.review))
         self.state_sha256 = next(line.split("=", 1)[1] for line in sealed.stdout.splitlines() if line.startswith("STATE_SHA256="))
         self.prove()
+
+
+class ExternalTaskDirectoryTest(unittest.TestCase):
+    """Git 呼出しを差し替え、外部本文と task_dir の境界だけを検査する。"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="wf-external-task-")
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name).resolve()
+        self.repo = self.root / "repo"
+        self.repo.mkdir()
+        self.body = self.root / "issue.txt"
+        self.body.write_text("# task\n\n- [ ] work\n\n## 追加修正記録\n", encoding="utf-8")
+        self.state = self.root / "state"
+        self.start_state = self.root / "start"
+        spec = importlib.util.spec_from_file_location("review_guard_external_task", SCRIPT)
+        self.module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.module)
+        self.stack = contextlib.ExitStack()
+        self.addCleanup(self.stack.close)
+        for name, value in (("repo_root", self.repo), ("walk", ([], [])), ("git_index", ([], [])),
+                            ("tree", ([], [])), ("ignored", []), ("external_ignore", [])):
+            self.stack.enter_context(mock.patch.object(self.module, name, return_value=value))
+        self.stack.enter_context(mock.patch.object(self.module, "git", side_effect=self.git))
+
+    def git(self, root, *args, input_data=None, **kwargs):
+        if args == ("rev-parse", "HEAD"):
+            return b"a" * 40 + b"\n"
+        if args == ("ls-files", "-o", "--exclude-standard", "-z"):
+            return b""
+        if args == ("hash-object", "--stdin"):
+            return hashlib.sha1(input_data).hexdigest().encode() + b"\n"
+        raise AssertionError("試験で許していない Git 呼出し: " + repr(args))
+
+    def digest(self, path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+    def args(self, command, *extra, external=True):
+        values = [command, "--cwd", str(self.repo), "--state", str(self.start_state if command == "start" else self.state),
+                  "--exclude-ere", r"(^|/)private($|/)"]
+        if external:
+            values.extend(["--task-body", str(self.body), "--expect-task-body-sha256", self.digest(self.body)])
+            if command == "start":
+                values.extend(["--task-id", "issue-320"])
+        if command == "take":
+            values.extend(["--start-state", str(self.start_state), "--expect-start-sha256",
+                           self.digest(self.module.start_manifest(self.start_state))])
+        elif command != "start":
+            values.extend(["--expect-state-sha256", self.digest(self.module.state_file(self.state))])
+        return self.module.parser().parse_args([*values, *extra])
+
+    def call(self, command, *extra, external=True):
+        with contextlib.redirect_stdout(io.StringIO()):
+            return getattr(self.module, command)(self.args(command, *extra, external=external))
+
+    def test_without_directory_start_take_seal_complete_and_verify(self):
+        self.assertEqual(self.call("start"), 0)
+        started = json.loads(self.module.start_manifest(self.start_state).read_text())
+        self.assertEqual(started["task_source"], {"task_id": "issue-320", "task_dir": None})
+        self.assertEqual(started["task_files"], [])
+        self.assertEqual(self.call("take"), 0)
+        review = self.root / "review.txt"
+        review.write_text("review input\n", encoding="utf-8")
+        self.assertEqual(self.call("seal", "--review-input", str(review)), 0)
+        saved = self.module.load_state(self.state, self.digest(self.module.state_file(self.state)))
+        proof = self.root / "proof.json"
+        proof.write_text(json.dumps({"phase": "implementation", "review_binding_sha256": saved["review_binding_sha256"],
+                                    "verdict": "APPROVED", "record_date": "2026-11-04"}), encoding="utf-8")
+        evidence = ["--evidence", str(proof), "--expect-evidence-sha256", self.digest(proof)]
+        expected = self.root / "expected.txt"
+        self.assertEqual(self.call("finalize", "--transition", "complete", "--out", str(expected), *evidence), 0)
+        self.body.write_bytes(expected.read_bytes())
+        transition = ["--task-transition", "complete", "--expected-task", str(expected),
+                      "--expect-task-sha256", self.digest(expected), *evidence]
+        self.assertEqual(self.call("verify", *transition), 0)
+        self.assertEqual(self.call("verify", "--mode", "stage", *transition), 0)
+        self.assertEqual(list(self.repo.iterdir()), [])
+        self.body.write_bytes(self.body.read_bytes().replace(b"work", b"changed"))
+        self.assertEqual(self.call("verify", *transition), 1)
+
+    def test_existing_directory_keeps_other_task_protection(self):
+        directory = self.repo / "tasks"
+        directory.mkdir()
+        other = directory / "進行中_other.md"
+        other.write_text("before", encoding="utf-8")
+        self.call("start", "--task-dir", str(directory))
+        started = json.loads(self.module.start_manifest(self.start_state).read_text())
+        self.assertEqual(started["task_source"]["task_dir"], "tasks")
+        self.assertEqual(len(started["task_files"]), 1)
+        other.write_text("after", encoding="utf-8")
+        with self.assertRaisesRegex(self.module.GuardError, "対象外の状態名"):
+            self.call("take")
+
+    def test_explicit_directory_cannot_be_missing_or_linked(self):
+        outside = self.root / "outside"
+        outside.mkdir()
+        linked = self.repo / "linked"
+        linked.symlink_to(outside, target_is_directory=True)
+        for directory in (self.repo / "missing", linked, outside):
+            with self.subTest(directory=directory):
+                with self.assertRaises(self.module.GuardError):
+                    self.call("start", "--task-dir", str(directory))
+
+    def test_source_identity_cannot_change_after_start(self):
+        self.call("start")
+        directory = self.repo / "tasks"
+        directory.mkdir()
+        for arguments in (("--task-dir", str(directory)), ("--task-id", "issue-321")):
+            with self.subTest(arguments=arguments):
+                with self.assertRaisesRegex(self.module.GuardError, "開始時と違う"):
+                    self.call("take", *arguments)
+
+    def test_omitting_existing_directory_does_not_disable_its_validation(self):
+        directory = self.repo / "tasks"
+        directory.mkdir()
+        self.call("start", "--task-dir", str(directory))
+        directory.rmdir()
+        with self.assertRaisesRegex(self.module.GuardError, "task_dir"):
+            self.call("take")
+
+    def test_local_task_still_scans_sibling_tasks_without_task_dir_flag(self):
+        directory = self.repo / "tasks"
+        directory.mkdir()
+        task = directory / "進行中_local.md"
+        task.write_bytes(self.body.read_bytes())
+        other = directory / "完了_other.md"
+        other.write_text("before", encoding="utf-8")
+        self.call("start", "--task-md", str(task), external=False)
+        started = json.loads(self.module.start_manifest(self.start_state).read_text())
+        self.assertIsNone(started["task_source"])
+        self.assertEqual(len(started["task_files"]), 2)
+        other.write_text("after", encoding="utf-8")
+        with self.assertRaisesRegex(self.module.GuardError, "対象外の状態名"):
+            self.call("take", external=False)
+
+    def test_external_body_still_requires_id_and_matching_bytes(self):
+        args = self.args("start")
+        args.task_id = None
+        with self.assertRaisesRegex(self.module.GuardError, "task-id"):
+            self.module.start(args)
+        args = self.args("start")
+        args.expect_task_body_sha256 = "0" * 64
+        with self.assertRaisesRegex(self.module.GuardError, "sha256"):
+            self.module.start(args)
 
 
 @unittest.skipUnless(LINUX or DARWIN, "Linux・macOS 専用: 実 CLI で品質コマンドの停止と検証用コピーの扱いを検査")

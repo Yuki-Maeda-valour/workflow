@@ -1167,6 +1167,8 @@ profile_case "task_dir が文字列でない" 20 "[profile-invalid]" 'task_dir: 
 profile_case "task_dir が空" 20 "[profile-invalid]" 'task_dir: ""'
 profile_case "task_dir が絶対パス" 20 "[profile-invalid]" 'task_dir: /tmp/x'
 profile_case "task_dir の置換漏れ" 20 "[profile-invalid]" 'task_dir: "{{TASK_DIR}}"'
+profile_case "task_store が github-issue" 20 "[task-store-unsupported]" 'task_store: github-issue'
+profile_case "task_store が不正値" 20 "[profile-invalid]" 'task_store: x'
 profile_case "task_dir が D21 に外れる(空白)" 20 "[task-dir]" 'task_dir: "docs/my tasks"'
 profile_case "task_dir が D21 に外れる(先頭の -)" 20 "[task-dir]" 'task_dir: "-x/tasks"'
 profile_case "値の無い項目は既定値" 0 "" $'features:\n  loop:\n    max_iterations:\n  other: 1'

@@ -9,6 +9,8 @@
 
 ## 1. 引数
 
+調査・書き出しより前に [置き場の選択](../../do-task/references/github-issue.md) §1 を通す。`task_store` が `file` 以外なら `task-store-unsupported` を示して停止する。無人は失敗扱いとして返し、候補も Issue も書かない。
+
 - `/data-audit --candidates [--layer=…] [--quick] [--max-candidates=N] [--unattended]`
 - `/create-task --refactor [対象 | --area=…] --candidates [--max-candidates=N] [--unattended]`
 - `--candidates` を明示したときだけ動く。既定はオフ(profile のスイッチは作らない)

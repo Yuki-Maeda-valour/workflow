@@ -49,6 +49,8 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 
 ## 1. 前提と分担
 
+環境の検査後、対象を選ぶ前に [置き場の選択](../../do-task/references/github-issue.md) §1 を通す。`task_store` が `file` 以外なら `task-store-unsupported` を示して失敗扱いで停止する。単独の do-task・update-doc にも当てる。
+
 **前提**(ship-task の Phase 0。ブランチを作る前に、すべて検査する。1 つでも満たさなければ失敗扱い — G3。何も書き換えない)。タスクの周と発見の周で分ける。
 
 **タスクの周(`--task`)の前提**

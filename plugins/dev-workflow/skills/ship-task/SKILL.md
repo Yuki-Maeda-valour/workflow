@@ -31,6 +31,12 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD> [--unattended
      - 対話では、足すのは作業を始める前(基準コミットを控える前)に限る。足すか、人に確かめる。
    - 無人ループの周の worktree は、機構が作って自動で消すので、この方針の対象外。
 
+## タスクの置き場の検査
+
+対話は作業前、無人は環境の検査直後に [Issue 方式の契約](../do-task/references/github-issue.md) §1 で `task_store` を検査する。
+- `github-issue` は「Issue 方式は未対応。Issue の完了記録を使う後続工程はまだ実装していない」と示して停止する。全モードに当てる。
+- 不正な値も停止する。ファイル方式への切り替え、対象選択・書き込み・後続工程の起動は行わない。
+
 ## 無人入口
 
 親の保持値が1つでも渡された入口は、`DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
