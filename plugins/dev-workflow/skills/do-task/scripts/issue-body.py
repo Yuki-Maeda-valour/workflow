@@ -15,6 +15,7 @@ import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -26,10 +27,15 @@ SHA = re.compile(r"[0-9a-f]{64}\Z")
 CHECKBOX = re.compile(r"^([ \t]*)- \[([ xX])\](?=\s|$)")
 LOGIN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*(?:\[bot\])?\Z")
 EDIT_TIME = re.compile(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z\Z")
-ISSUE_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
+REVIEW_LINE = re.compile(r"^- \*\*設計レビュー\*\*\(create-task・(\d{4}-\d{2}-\d{2})\): (?:APPROVED|未収束|未完了) — ")
+ISSUE_QUERY = """query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
   repository(owner: $owner, name: $name) {
     issue(number: $number) {
       number title body author { login } editor { login } lastEditedAt
+      userContentEdits(first: 100, after: $cursor) {
+        nodes { editor { login } editedAt }
+        pageInfo { hasNextPage endCursor }
+      }
     }
   }
 }"""
@@ -37,6 +43,12 @@ ISSUE_QUERY = """query($owner: String!, $name: String!, $number: Int!) {
 
 class IssueError(Exception):
     pass
+
+
+class ExecutionError(IssueError):
+    def __init__(self, message: str, value: dict):
+        super().__init__(message)
+        self.value = value
 
 
 def helper(name: str, relative: str):
@@ -131,59 +143,146 @@ def fetch(repo: str, issue: int) -> dict:
     if (type(result.get("number")) is not int or result["number"] != issue
             or not isinstance(result.get("title"), str) or not isinstance(result.get("body"), str)):
         raise IssueError("Issue の番号・題名・本文を確認できない")
-    author = actor_login(result.get("author"))
+    author = actor_login(result.get("author"), cli_author=True)
+    author_is_bot = result["author"].get("is_bot", False)
+    if type(author_is_bot) is not bool:
+        raise IssueError("Issue の作者の種類を確認できない")
     viewer = actor_login(json_object(gh(repo, "api", "user")))
     _, owner, name = repo.split("/")
-    response = json_object(gh(repo, "api", "graphql", "-f", "query=" + ISSUE_QUERY,
-                              "-f", "owner=" + owner, "-f", "name=" + name,
-                              "-F", "number=" + str(issue)))
-    try:
-        edited = response["data"]["repository"]["issue"]
-        if (response.get("errors") or not isinstance(edited, dict)
-                or type(edited.get("number")) is not int
-                or any(edited.get(key) != result[key] for key in ("number", "title", "body"))
-                or actor_login(edited.get("author")) != author):
-            raise IssueError("Issue 本文と編集者の取得結果が一致しない。再取得して確認してください")
-        last_edited_at = edited["lastEditedAt"]
-        editor = None if edited["editor"] is None else actor_login(edited["editor"])
-    except (KeyError, TypeError) as exc:
-        raise IssueError("Issue の最終編集者を取得できない。実行せず人に確認してください") from exc
-    return snapshot(repo, issue, result["title"], result["body"], author, editor, last_edited_at, viewer)
+    edits, cursors = [], set()
+    cursor = None
+    first_edit = None
+    while True:
+        extra = [] if cursor is None else ["-f", "cursor=" + cursor]
+        response = json_object(gh(repo, "api", "graphql", "-f", "query=" + ISSUE_QUERY,
+                                  "-f", "owner=" + owner, "-f", "name=" + name,
+                                  "-F", "number=" + str(issue), *extra))
+        try:
+            edited = response["data"]["repository"]["issue"]
+            if (response.get("errors") or not isinstance(edited, dict)
+                    or type(edited.get("number")) is not int
+                    or any(edited.get(key) != result[key] for key in ("number", "title", "body"))
+                    or actor_login(edited.get("author")) != author.removeprefix("app/")):
+                raise IssueError("Issue 本文と編集者の取得結果が一致しない。再取得して確認してください")
+            last_edited_at = edited["lastEditedAt"]
+            editor = None if edited["editor"] is None else actor_login(edited["editor"])
+            if first_edit is None:
+                first_edit = (editor, last_edited_at)
+            elif first_edit != (editor, last_edited_at):
+                raise IssueError("編集履歴の取得中に最終編集者か日時が変わった。再取得してください")
+            history = edited["userContentEdits"]
+            nodes, page = history["nodes"], history["pageInfo"]
+            if not isinstance(nodes, list) or type(page["hasNextPage"]) is not bool:
+                raise IssueError("Issue の編集履歴を確認できない")
+            for node in nodes:
+                edits.append({"editor": actor_login(node["editor"]), "edited_at": node["editedAt"]})
+            if not page["hasNextPage"]:
+                break
+            cursor = page["endCursor"]
+            if not isinstance(cursor, str) or not cursor or cursor in cursors or not nodes:
+                raise IssueError("Issue の編集履歴を最後まで取得できない")
+            cursors.add(cursor)
+        except (KeyError, TypeError) as exc:
+            raise IssueError("Issue の編集者と編集履歴を取得できない。実行せず人に確認してください") from exc
+    return snapshot(repo, issue, result["title"], result["body"], author, author_is_bot,
+                    editor, last_edited_at, viewer, edits)
 
 
-def actor_login(actor: object) -> str:
+def actor_login(actor: object, *, cli_author: bool = False) -> str:
     login = actor.get("login") if isinstance(actor, dict) else None
-    if not isinstance(login, str) or not LOGIN.fullmatch(login):
+    checked = login
+    if (cli_author and isinstance(login, str) and login.startswith("app/")
+            and actor.get("is_bot") is True):
+        checked = login[4:]
+    if not isinstance(checked, str) or not LOGIN.fullmatch(checked):
         raise IssueError("Issue の作者・編集者または実行者を取得できない。実行せず人に確認してください")
     return login
 
 
+def edit_time(value: object) -> datetime:
+    if isinstance(value, str) and EDIT_TIME.fullmatch(value):
+        try:
+            return datetime.fromisoformat(value[:-1] + "+00:00")
+        except ValueError:
+            pass
+    raise IssueError("Issue の編集日時を確認できない。実行せず人に確認してください")
+
+
 def snapshot(repo: str, issue: int, title: str, body: str, author: str,
-             editor: str | None, last_edited_at: str | None, viewer: str) -> dict:
-    actor_login({"login": author})
+             author_is_bot: bool, editor: str | None, last_edited_at: str | None,
+             viewer: str, edits: list[dict]) -> dict:
+    if type(author_is_bot) is not bool:
+        raise IssueError("Issue の作者の種類を確認できない")
+    actor_login({"login": author, "is_bot": author_is_bot}, cli_author=True)
     actor_login({"login": viewer})
     if editor is not None:
         actor_login({"login": editor})
     # 未編集の Issue だけは editor と lastEditedAt がともに null になる。
-    if ((editor is None) != (last_edited_at is None)
-            or (last_edited_at is not None
-                and (not isinstance(last_edited_at, str) or not EDIT_TIME.fullmatch(last_edited_at)))):
+    if (editor is None) != (last_edited_at is None):
         raise IssueError("Issue の最終編集者と編集日時を確認できない。実行せず人に確認してください")
+    if not isinstance(edits, list):
+        raise IssueError("Issue の編集履歴を確認できない")
+    for edit in edits:
+        if not isinstance(edit, dict) or set(edit) != {"editor", "edited_at"}:
+            raise IssueError("Issue の編集履歴を確認できない")
+        actor_login({"login": edit["editor"]})
+        edit_time(edit["edited_at"])
+    if last_edited_at is None:
+        if edits:
+            raise IssueError("未編集の Issue に編集履歴がある")
+    else:
+        latest = edit_time(last_edited_at)
+        if (not edits or any(edit_time(e["edited_at"]) > latest for e in edits)
+                or not any(edit_time(e["edited_at"]) == latest
+                           and e["editor"].casefold() == editor.casefold() for e in edits)):
+            raise IssueError("Issue の最終編集と編集履歴が一致しない")
+    edits = sorted(edits, key=lambda e: (edit_time(e["edited_at"]), e["editor"]))
     return {
         "version": 1, "repo": repo, "issue": issue, "title": title, "body": body,
         "body_sha256": raw_sha(body), "task_digest": body_digest(body),
         "line_count": len(body.splitlines()),
-        "author": author, "editor": editor, "last_edited_at": last_edited_at, "viewer": viewer,
+        "author": author, "author_is_bot": author_is_bot,
+        "editor": editor, "last_edited_at": last_edited_at, "viewer": viewer, "edits": edits,
     }
+
+
+def review_since(body: str, last_edited_at: str | None) -> datetime | None:
+    """レビュー行は日付だけなので、その日になり得る最も早い UTC 時刻から調べる。"""
+    digest = helper("issue_review_fences", "create-task/scripts/task-digest.py")
+    lines = body.lstrip("\ufeff").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    try:
+        digest.body_lines(body)
+        fenced = digest._fence_flags(lines, require_closed=True, reject_unsupported_indent=True)
+        in_records, review_date = False, None
+        for line, in_fence in zip(lines, fenced):
+            if in_fence:
+                continue
+            line = line.rstrip(" \t")
+            if line.startswith("## "):
+                in_records = line == "## 追加修正記録"
+            match = REVIEW_LINE.match(line) if in_records else None
+            if match:
+                review_date = match[1]
+        if review_date is not None and last_edited_at is not None:
+            start = datetime.strptime(review_date, "%Y-%m-%d").replace(tzinfo=timezone.utc) - timedelta(hours=14)
+            if start <= edit_time(last_edited_at):
+                return start
+    except (digest.DigestError, ValueError, OverflowError):
+        pass
+    # 日付を確定できないときや未来の日付では、履歴を省略しない。
+    return None
 
 
 def check_execution(value: dict, approved_sha: str | None) -> None:
     if approved_sha is not None and approved_sha != value["body_sha256"]:
         raise IssueError("人が確認した本文と今回の本文が違う。実行せず確認を取り直してください")
     viewer = value["viewer"].casefold()
-    if (value["author"].casefold() != viewer
-            or (value["editor"] or value["author"]).casefold() != viewer) and approved_sha is None:
-        raise IssueError("Issue の作者または最終編集者が実行者と違う。実行せず、取得した本文と"
+    since = review_since(value["body"], value["last_edited_at"])
+    foreign_edit = any(e["editor"].casefold() != viewer
+                       and (since is None or edit_time(e["edited_at"]) >= since) for e in value["edits"])
+    if (value["author_is_bot"] or value["author"].casefold() != viewer
+            or foreign_edit) and approved_sha is None:
+        raise IssueError("Issue の作者または設計レビュー以降の編集者が実行者と違う。実行せず、取得した本文と"
                          "設計レビュー行の値を人に示して確認してください。"
                          "承認後だけ --approve-body-sha256 に確認した本文の body_sha256 を渡してください")
 
@@ -204,10 +303,11 @@ def read_snapshot(path: str, expected_sha: str) -> dict:
             or not isinstance(value.get("title"), str) or not isinstance(value.get("body"), str)
             or not SHA.fullmatch(expected_sha)):
         raise IssueError("本文の控えまたは期待する SHA-256 の形式が不正")
-    if not {"author", "editor", "last_edited_at", "viewer"} <= value.keys():
-        raise IssueError("本文の控えに作者・編集者・実行者がない。再取得してください")
+    if not {"author", "author_is_bot", "editor", "last_edited_at", "viewer", "edits"} <= value.keys():
+        raise IssueError("本文の控えに作者・編集者・実行者・編集履歴がない。再取得してください")
     fresh = snapshot(value["repo"], value["issue"], value["title"], value["body"],
-                     value["author"], value["editor"], value["last_edited_at"], value["viewer"])
+                     value["author"], value["author_is_bot"], value["editor"],
+                     value["last_edited_at"], value["viewer"], value["edits"])
     if (value != fresh or value["body_sha256"] != expected_sha
             or type(value.get("line_count")) is not int):
         raise IssueError("本文の控えが取得時の値と一致しない")
@@ -292,7 +392,7 @@ def run(args: argparse.Namespace) -> dict:
         public_security(permission(repo), args)
         current = fetch(repo, before["issue"])
         if any(current[key] != before[key] for key in
-               ("body", "author", "editor", "last_edited_at", "viewer")):
+               ("body", "author", "author_is_bot", "editor", "last_edited_at", "viewer", "edits")):
             raise IssueError("Issue 本文または作者・編集者・実行者が取得後に変わった。書かずに停止する")
         try:
             gh(repo, "issue", "edit", str(args.issue), "--body-file", "-", body=body)
@@ -319,7 +419,10 @@ def run(args: argparse.Namespace) -> dict:
         save_snapshot(args.out, result)
         save(args.body_out, result["body"].encode("utf-8"))
         if args.for_execution:
-            check_execution(result, args.approve_body_sha256)
+            try:
+                check_execution(result, args.approve_body_sha256)
+            except IssueError as exc:
+                raise ExecutionError(str(exc), result) from exc
     else:
         body = read_text(args.body_file)
         if not args.title.strip():
@@ -386,6 +489,9 @@ def main() -> int:
     try:
         result = run(args)
     except (IssueError, OSError, UnicodeError) as exc:
+        if isinstance(exc, ExecutionError):
+            print(json.dumps({key: value for key, value in exc.value.items() if key != "body"},
+                             ensure_ascii=False))
         if isinstance(exc, IssueError):
             message = str(exc)
         else:

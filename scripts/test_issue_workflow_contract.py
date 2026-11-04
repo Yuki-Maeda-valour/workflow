@@ -35,6 +35,11 @@ class IssueWorkflowContractTest(unittest.TestCase):
         cls.contract = (SKILLS / "do-task/references/github-issue.md").read_text()
         cls.shipping = section(cls.contract, "## 6. ship-task の読み替え")
         cls.syncing = section(cls.contract, "## 7. update-doc の読み替え")
+        cls.completion = cls.syncing.split("### 完了記録の形\n", 1)[1]
+        cls.template_completion, cls.authority_completion = cls.completion.split(
+            "- `task_store: github-issue` の経路: ", 1)[1].split(
+            "- 権威参照ファイルによる Issue 運用の経路: ", 1)
+        cls.design = (ROOT / "docs/design.md").read_text()
 
     def contains(self, text, *required):
         for value in required:
@@ -42,12 +47,31 @@ class IssueWorkflowContractTest(unittest.TestCase):
                 self.assertIn(value, text)
 
     def test_routing_keeps_authority_override_and_rejects_unattended_early(self):
-        for text in (self.ship, self.doc):
+        for text, route in ((self.ship, "§6 で各 Phase を読み替える"),
+                            (self.doc, "§7 で入力を選ぶ")):
             entrance = section(text, "## タスクの置き場の検査")
-            self.contains(entrance, "不正な値は停止", "権威参照ファイル", "Issue", "正本",
+            self.contains(entrance, "不正な値は停止する。ファイル方式へ切り替えて続けない",
+                          "`github-issue`、または権威参照ファイル", route,
                           "ファイルの保存先は解決・作成しない", "--unattended",
                           "task-store-unsupported", "対象選択・本文取得", "失敗扱いで停止")
             self.assertNotIn("Issue 方式は未対応", text)
+
+    def test_unattended_references_reject_authority_issue_before_work(self):
+        for path, heading, before in (
+                ("unattended-mode.md", "## 1. 前提と分担", "対象選択・本文取得・ブランチ作成・文書更新"),
+                ("discover-mode.md", "## 1. 引数と最初の Read", "調査・候補選択・本文取得・ブランチ作成・書き込み")):
+            with self.subTest(path=path):
+                text = section((SKILLS / "ship-task/references" / path).read_text(), heading)
+                self.contains(text, "`task_store` が `file` 以外なら `task-store-unsupported`",
+                              "`file` でも権威参照ファイル", "Issue を正本にする運用なら、",
+                              "`task-store-unsupported` で失敗扱いにする", "環境の検査直後、", before + "より前に止める")
+
+    def test_loop_only_detects_profile_store(self):
+        text = (SKILLS / "ship-task/references/loop.md").read_text()
+        profile = text.split("### profile(`features.loop`)と実効値\n", 1)[1].split("\n## ", 1)[0]
+        self.contains(profile, "`loop.sh` が置き場の判定で見るのは `task_store` だけ",
+                      "ループは起動するが、毎周の ship-task が `task-store-unsupported` で止まる",
+                      "権威参照ファイルの運用はループ起動時には判定しない")
 
     def test_issue_target_and_branch_are_bound_before_implementation(self):
         self.contains(self.shipping, "--task=#<番号>", "--task=<Issue の URL>", "正の整数",
@@ -73,6 +97,39 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(phase, "再取得した本文で6条件", "R として保持", "ファイル方式だけ")
         self.contains(self.shipping, "最後の設計レビュー行", "本文` が無い・行が無い・算出不能・不一致なら停止",
                       "close だけを完了の根拠にしない", "現在の本文から R を作り直すことはしない")
+
+    def test_template_status_is_required_before_implementation_but_not_authority(self):
+        phase = section(self.ship, "## Phase 2: 続行判定ゲート(唯一の自動停止判断)")
+        self.contains(phase, "`task_store: github-issue` はヘッダのステータス行もちょうど1つ必要",
+                      "欠落・重複なら実装前に設計の修正", "権威参照ファイルによる Issue 運用では必須にしない")
+        continuation = self.shipping.split("### 続行判定と実装\n", 1)[1].split("- Phase 3 は", 1)[0]
+        self.contains(continuation, "最初の `## ` より前に `> **ステータス**:` の行がちょうど1つ",
+                      "0行・重複なら実装の前に止め", "create-task で設計の書式を直す",
+                      "権威参照ファイルによる Issue 運用では、この行を必須にしない")
+
+    def test_foreign_issue_approval_count_matches_do_task_and_stop_table(self):
+        do_task = section(self.contract, "## 5. do-task の読み替え")
+        self.contains(do_task, "承認を自分の更新後の本文へ引き継がない", "最大 `2 + N` 回",
+                      "途中で実行用の再取得を追加した場合も、未承認の本文なら1回増える")
+        entrance = self.shipping.split("### 続行判定と実装\n", 1)[0]
+        self.contains(entrance, "Phase 0 で §5 の確認の回数と理由を予告する",
+                      "最大 `2 + N` 回", "最後のチェック更新後", "`finalize` 適用後の最初の入口",
+                      "本文が変わらなければ、同じ会話の承認値を渡して再確認を増やさない")
+        principle = section(self.ship, "## 原則").split("2. **既定は走り切る**", 1)[1].split("3. **", 1)[0]
+        self.contains(principle, "他人が作った Issue", "本文が変わった後の実行用の再取得", "Phase 0 で予告")
+        for heading in ("## Phase 0: 前提と作業ブランチ", "## 停止条件のまとめ"):
+            self.contains(section(self.ship, heading), "最大 `2 + N` 回", "最後のチェック更新後",
+                          "`finalize` 適用後", "未承認の本文ごとに1回増える")
+
+    def test_repository_mismatch_is_checked_before_branch_and_again_before_push(self):
+        phase = section(self.ship, "## Phase 0: 前提と作業ブランチ")
+        before_branch = phase.split("3. **作業ツリーの清潔性**:", 1)[1].split("4. **作業ブランチ**:", 1)[0]
+        for text in (before_branch, self.shipping.split("### 続行判定と実装\n", 1)[0]):
+            self.contains(text, "`--no-pr` を除き、`preflight` の直後・ブランチ作成の前",
+                          "公開する root", "`origin-repo.py`", "Issue の `repo` を比べる",
+                          "不一致・算出不能なら", "止めるか `--no-pr` で続けるかを質問で確かめ")
+        self.contains(self.shipping, "新規 Issue でも省略しない", "回答前はブランチ作成・設計・実装へ進まない",
+                      "Phase 5 の再確認も残す", "不一致・算出不能なら push より前に停止する")
 
     def test_do_task_handoff_and_failed_finalization_do_not_commit(self):
         phase = section(self.ship, "## Phase 3: 実装(/do-task)")
@@ -110,16 +167,59 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "既存の全量監査へ進む")
 
     def test_completion_requires_both_status_and_execution_record(self):
-        self.contains(self.syncing, "> **ステータス**: ✅ 完了(YYYY-MM-DD)", "ステータス行が1つ",
-                      "## 追加修正記録", "フェンス内の例・コメント・設計レビュー行・保留の行だけでは満たさない",
-                      "使用スキル `do-task`・品質確認結果・独立レビュー結果・実動確認の状態",
-                      "- 検証器記録: APPROVED / 根拠 sha256:<64桁> / review:<64桁>",
+        self.contains(self.template_completion, "> **ステータス**: ✅ 完了(YYYY-MM-DD)", "ステータス行が1つ",
+                      "do-task の手順4の完了記録か `finalize` の検証器記録のどちらか",
                       "ステータスか記録が欠ける・未完了・取得不能なら停止")
+        self.assertNotIn("ステータス行は必須にせず", self.template_completion)
+        self.assertNotIn("結果 APPROVED", self.template_completion)
+        self.contains(self.completion, "`## 追加修正記録` の節内の最後の完了記録を使う",
+                      "フェンス内の例・コメント・設計レビュー行・保留の行だけでは満たさない",
+                      "使用スキル `do-task`・品質確認結果・独立レビュー結果・実動確認の状態",
+                      "- 検証器記録: APPROVED / 根拠 sha256:<64桁> / review:<64桁>")
+
+    def test_authority_completion_accepts_existing_approved_line_without_status(self):
+        self.contains(self.authority_completion, "ステータス行は必須にせず、その運用が定める完了記録の形も受け付ける",
+                      "日付・「完了」・「結果 APPROVED」を含む行", "節内の最後の該当行で判定する",
+                      "`- 2026-11-04 完了(反復 5 回): 結果 APPROVED`",
+                      "この行だけでも受け付け、使用スキル `do-task` の記載は必須にしない",
+                      "`task_store: github-issue` の経路には、この例外を当てない",
+                      "do-task の手順4の完了記録と `finalize` の検証器記録を受け付ける")
+        mode = section(self.doc, "## 2 つの実行モード")
+        self.contains(mode, "`github-issue` は完了ステータスも必須", "権威参照ファイルの運用では、その運用の記録の形も受け付ける")
+
+    def test_later_suspension_invalidates_last_completion_for_both_routes(self):
+        common = self.completion.split("- `task_store: github-issue` の経路:", 1)[0]
+        self.contains(common, "最後の完了記録より後に中断・保留の記録があれば、完了と扱わず停止する",
+                      "`finalize` 適用後に commit の照合・commit・公開で失敗した記録も含む",
+                      "日付順に並べ替えず、節の中の記載順で判断する")
+
+    def test_completion_is_selected_by_record_shape_not_caller(self):
+        self.contains(self.completion, "単独実行か ship-task 経由かでは分けない")
+        self.assertNotIn("単独 do-task の記録は", self.syncing)
+        self.assertNotIn("ship-task 経由では", self.syncing)
+
+    def test_stopping_table_covers_issue_specific_failures(self):
+        table = section(self.ship, "## 停止条件のまとめ")
+        self.contains(table, "Issue 方式のリポジトリ不一致・算出不能", "完了後の本文と保持値の不一致",
+                      "update-doc の完了検査の失敗", "他人の Issue の再確認",
+                      "`task_store: github-issue` のステータス行の欠落・重複")
+
+    def test_design_keeps_routes_separate_and_defers_profile_migration(self):
+        policy = self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0]
+        self.contains(policy, "`github-issue.md` §6・§7 を使う", "日付・「完了」・「結果 APPROVED」を含む行",
+                      "ステータス行と使用スキル `do-task` の記載は必須にしない",
+                      "`task_store: github-issue` では、template の完了ステータス行と do-task の完了記録が引き続き必須",
+                      "権威参照ファイルによる Issue 運用でも停止する", "profile への移行と init-project の質問・雛形は3本目")
+        self.assertNotIn("この1本目では", policy)
+        self.assertNotIn("未対応", policy)
+        changelog = (ROOT / "CHANGELOG.md").read_text().split("## (次の次の版)\n", 1)[1].split("## (次の版)", 1)[0]
+        self.assertNotIn("版の数字は merge の順に付ける", changelog)
 
     def test_update_doc_rechecks_input_without_mutating_issue(self):
         self.contains(self.syncing, "preflight` と `snapshot --for-execution`", "--yes` でも本文採用の確認を省かない",
                       "文書の適用前・レビュー前・最終報告前", "全文の一致", "入力を黙って差し替えない",
-                      "Issue 本文・コメント・close・ラベルは変更しない", "レビュー判定:", "未完了")
+                      "Issue 本文・コメント・close・ラベルは変更しない",
+                      "入力の不備でレビュー前に止まった場合は `未完了` とする")
 
 
 class ExternalBodyIntegrationTest(unittest.TestCase):
@@ -151,6 +251,31 @@ class ExternalBodyIntegrationTest(unittest.TestCase):
         self.assertEqual(self.guard.body_digest(final), self.saved["task_body_digest"])
         self.assertNotEqual(self.guard.sha256(final), self.guard.sha256(self.body))
         self.assertEqual(self.guard.new_task_path(self.saved, "complete"), "@external:issue-320")
+
+    def test_finalize_without_status_preserves_authority_record_and_adds_proof(self):
+        legacy = "- 2026-11-04 完了(反復 5 回): 結果 APPROVED\n".encode()
+        body = self.body.replace("> **ステータス**: 🚧 進行中\n".encode(), b"") + legacy
+        saved = {**self.saved, "task_original": base64.b64encode(body).decode(),
+                 "task_body_digest": self.guard.body_digest(body)}
+        final = self.guard.final_bytes(saved, self.proof, "complete")
+        self.assertNotIn("> **ステータス**:".encode(), final)
+        self.assertIn(legacy, final)
+        self.assertRegex(final.decode(), r"\n- 検証器記録: APPROVED / 根拠 sha256:[a-f0-9]{64} / review:[a-f0-9]{64}\n")
+        self.assertEqual(self.guard.body_digest(final), saved["task_body_digest"])
+
+    def test_finalize_rejects_duplicate_header_status(self):
+        body = self.body.replace(b"\n\n## ", "\n> **ステータス**: 🚧 進行中\n\n## ".encode(), 1)
+        saved = {**self.saved, "task_original": base64.b64encode(body).decode()}
+        with self.assertRaisesRegex(self.guard.GuardError, "ステータス行が重複"):
+            self.guard.final_bytes(saved, self.proof, "complete")
+
+    def test_later_interruption_is_invisible_to_contract_digest(self):
+        final = self.guard.final_bytes(self.saved, self.proof, "complete")
+        for record in ("- 2026-11-04 中断: commit の照合に失敗\n", "- **保留**: 公開に失敗\n"):
+            with self.subTest(record=record):
+                interrupted = final + record.encode()
+                self.assertEqual(self.guard.body_digest(interrupted), self.guard.body_digest(final))
+                self.assertNotEqual(self.guard.sha256(interrupted), self.guard.sha256(final))
 
     def test_contract_digest_alone_cannot_detect_status_or_record_changes(self):
         final = self.guard.final_bytes(self.saved, self.proof, "complete")

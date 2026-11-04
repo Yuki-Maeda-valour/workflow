@@ -11,6 +11,7 @@ ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほか�
 ## 1. 引数と最初の Read
 
 環境の検査後、調査・候補選択より前に [置き場の選択](../../do-task/references/github-issue.md) §1 を通す。`task_store` が `file` 以外なら `task-store-unsupported` を示して失敗扱いで停止する。
+- `file` でも権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)が Issue を正本にする運用なら、`task-store-unsupported` で失敗扱いにする。環境の検査直後、調査・候補選択・本文取得・ブランチ作成・書き込みより前に止める。
 
 - **無人専用**: `--discover=<発見元>` は `--unattended` と一緒にだけ受け付ける。`--unattended` が無ければ、何もせずに停止し、「対話で発見するなら各発見元を直接呼ぶ」と案内する
 - **発見元の列**: `data-audit`・`refactor`

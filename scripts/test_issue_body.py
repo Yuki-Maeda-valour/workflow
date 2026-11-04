@@ -39,6 +39,7 @@ else:
 
 GH_STUB = r'''
 import json, os, pathlib, sys
+from datetime import datetime, timedelta
 path = pathlib.Path(os.environ["FAKE_STATE"])
 state = json.loads(path.read_text())
 args = sys.argv[1:]
@@ -94,10 +95,26 @@ elif args[:2] == ["api", "graphql"]:
     assert args[2] == "-f" and args[3].startswith("query=query(")
     assert "editor { login } lastEditedAt" in args[3]
     assert args[4:9] == ["-f", "owner=example", "-f", "name=project", "-F"]
-    assert args[9].startswith("number=") and len(args) == 10
+    assert "userContentEdits(first: 100, after: $cursor)" in args[3]
+    assert "nodes { editor { login } editedAt }" in args[3]
+    assert "pageInfo { hasNextPage endCursor }" in args[3]
+    assert args[9].startswith("number=") and len(args) in (10, 12)
+    if len(args) == 12:
+        assert args[10] == "-f" and args[11].startswith("cursor=")
+    cursor = args[11].split("=", 1)[1] if len(args) == 12 else "first"
+    author = state.get("author", {"login": "operator"})
+    if isinstance(author, dict) and author.get("is_bot") is True:
+        author = {"login": author["login"].removeprefix("app/")}
+    history = state.get("history", [] if state.get("lastEditedAt") is None else
+                        [{"editor": state.get("editor"), "editedAt": state["lastEditedAt"]}])
+    history_page = {"nodes": history, "pageInfo": {"hasNextPage": False, "endCursor": None}}
+    if "history_pages" in state:
+        history_page = state["history_pages"][cursor]
     response = {**issue_response(), "number": int(args[9].split("=")[1]),
-                "editor": state.get("editor"), "lastEditedAt": state.get("lastEditedAt")}
+                "author": author, "editor": state.get("editor"),
+                "lastEditedAt": state.get("lastEditedAt"), "userContentEdits": history_page}
     response.update(state.get("graphql_issue_fields", {}))
+    response.update(state.get("graphql_page_fields", {}).get(cursor, {}))
     for field in state.get("graphql_missing", []):
         response.pop(field, None)
     payload = {"data": {"repository": {"issue": response}}}
@@ -108,6 +125,12 @@ elif args[:2] == ["issue", "edit"]:
     if state.get("edit_fail"):
         sys.exit(1)
     state["body"] = stdin + ("競合" if state.get("post_mismatch") else "")
+    history = state.get("history", [] if state.get("lastEditedAt") is None else
+                        [{"editor": state.get("editor"), "editedAt": state["lastEditedAt"]}])
+    previous = state.get("lastEditedAt") or "2026-11-04T00:00:00Z"
+    state["lastEditedAt"] = (datetime.fromisoformat(previous[:-1]) + timedelta(seconds=1)).isoformat() + "Z"
+    state["editor"] = state.get("user", {"login": "operator"})
+    state["history"] = history + [{"editor": state["editor"], "editedAt": state["lastEditedAt"]}]
     if state.get("post_read_fail"):
         state["view_fail"] = True
     save()
@@ -177,6 +200,209 @@ class IssueBodyTest(unittest.TestCase):
     def calls(self, include_api=False):
         return [call["args"][:2] for call in self.state_value().get("calls", [])
                 if include_api or call["args"][0] != "api"]
+
+    def new_outputs(self):
+        self.snapshot.unlink(missing_ok=True)
+        self.body.unlink(missing_ok=True)
+
+    def reviewed_body(self, date="2026-11-04"):
+        return BODY + (f"- **設計レビュー**(create-task・{date}): APPROVED — checker: 指摘 0 / "
+                       f"反復 1 回 / 編成: reviewer / 本文: {ISSUE_BODY.body_digest(BODY)} / needs-user: なし\n")
+
+    def edit_history(self, entries, **kwargs):
+        history = [{"editor": {"login": login}, "editedAt": date} for login, date in entries]
+        self.change_state(editor=history[-1]["editor"], lastEditedAt=history[-1]["editedAt"],
+                          history=history, **kwargs)
+
+    def test_bot_author_requires_and_accepts_human_approval(self):
+        self.change_state(author={"is_bot": True, "login": "app/renovate"})
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                               "--out", self.snapshot, "--body-out", self.body,
+                               "--for-execution", expected=1)
+        value = json.loads(done.stdout)
+        self.assertEqual("app/renovate", value["author"])
+        self.assertTrue(value["author_is_bot"])
+        self.assertIn("設計レビュー行", done.stderr)
+        self.assertNotIn("body", value)
+        self.new_outputs()
+        self.take_snapshot("--for-execution", "--approve-body-sha256", value["body_sha256"])
+        self.assertNotIn(["issue", "edit"], self.calls())
+
+    def test_bot_cannot_be_treated_as_same_named_viewer(self):
+        for login in ("app/renovate", "renovate", "renovate[bot]"):
+            with self.subTest(login=login):
+                self.change_state(author={"is_bot": True, "login": login}, user={"login": "renovate"})
+                self.take_snapshot("--for-execution", expected=1)
+                self.new_outputs()
+
+    def test_app_author_requires_bot_marker_and_valid_name(self):
+        for author in ({"login": "app/renovate"}, {"login": "app/renovate", "is_bot": False},
+                       {"login": "app/renovate", "is_bot": "true"},
+                       {"login": "app/", "is_bot": True}, {"login": "app/a/b", "is_bot": True}):
+            with self.subTest(author=author):
+                self.change_state(author=author)
+                self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                                "--out", self.snapshot, "--body-out", self.body, expected=1)
+                self.assertFalse(self.snapshot.exists())
+
+    def test_bot_author_must_match_graphql_name(self):
+        self.change_state(author={"is_bot": True, "login": "app/renovate"},
+                          graphql_issue_fields={"author": {"login": "another-app"}})
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                               "--out", self.snapshot, "--body-out", self.body, expected=1)
+        self.assertIn("一致しない", done.stderr)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_execution_stop_outputs_approval_values_without_body(self):
+        self.change_state(author={"login": "outsider"})
+        for extra in ([], ["--approve-body-sha256", "0" * 64]):
+            with self.subTest(extra=extra):
+                done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                                       "--out", self.snapshot, "--body-out", self.body,
+                                       "--for-execution", *extra, expected=1)
+                result = json.loads(done.stdout)
+                self.assertEqual(ISSUE_BODY.raw_sha(BODY), result["body_sha256"])
+                self.assertEqual("outsider", result["author"])
+                self.assertIsNone(result["editor"])
+                self.assertEqual("operator", result["viewer"])
+                self.assertNotIn("body", result)
+                self.assertNotIn("# 設計", done.stdout)
+                self.assertEqual(BODY, self.body.read_text())
+                self.new_outputs()
+
+    def test_foreign_edit_followed_by_own_edit_still_requires_approval(self):
+        body = self.reviewed_body()
+        self.edit_history([("outsider", "2026-11-04T01:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
+                          body=body)
+        value = self.take_snapshot("--for-execution", expected=1)
+        self.assertEqual("operator", value["editor"])
+        self.assertEqual(2, len(value["edits"]))
+        self.new_outputs()
+        self.take_snapshot("--for-execution", "--approve-body-sha256", value["body_sha256"])
+
+    def test_history_before_last_review_day_does_not_require_approval(self):
+        self.edit_history([("outsider", "2026-11-02T12:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
+                          body=self.reviewed_body("2026-11-02") + self.reviewed_body().splitlines()[-1] + "\n")
+        self.take_snapshot("--for-execution")
+
+    def test_same_review_day_in_other_timezone_is_not_skipped(self):
+        self.edit_history([("outsider", "2026-11-03T10:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
+                          body=self.reviewed_body())
+        self.take_snapshot("--for-execution", expected=1)
+
+    def test_review_lines_outside_records_or_in_fences_do_not_skip_history(self):
+        line = self.reviewed_body().splitlines()[-1]
+        for body in (line + "\n" + BODY, BODY + "```\n" + line + "\n```\n",
+                     BODY + "## 別の節\n" + line + "\n"):
+            with self.subTest(body=body):
+                self.edit_history([("outsider", "2026-11-01T01:00:00Z"),
+                                   ("operator", "2026-11-04T02:00:00Z")], body=body)
+                self.take_snapshot("--for-execution", expected=1)
+                self.new_outputs()
+
+    def test_unusable_review_dates_check_all_history(self):
+        for date in ("2026-02-30", "2027-01-01", "0001-01-01"):
+            with self.subTest(date=date):
+                self.edit_history([("outsider", "2026-11-01T01:00:00Z"),
+                                   ("operator", "2026-11-04T02:00:00Z")], body=self.reviewed_body(date))
+                self.take_snapshot("--for-execution", expected=1)
+                self.new_outputs()
+
+    def test_history_pages_include_foreign_edits_on_later_pages(self):
+        self.edit_history([("outsider", "2026-11-04T01:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
+                          body=self.reviewed_body())
+        history = self.state_value()["history"]
+        self.change_state(history_pages={
+            "first": {"nodes": history[1:], "pageInfo": {"hasNextPage": True, "endCursor": "next"}},
+            "next": {"nodes": history[:1], "pageInfo": {"hasNextPage": False, "endCursor": None}},
+        })
+        self.take_snapshot("--for-execution", expected=1)
+        self.assertEqual(2, self.calls(include_api=True).count(["api", "graphql"]))
+        self.assertEqual(["-f", "cursor=next"], self.state_value()["calls"][-1]["args"][-2:])
+
+    def test_history_missing_or_malformed_cannot_be_overridden_by_approval(self):
+        original = self.state_value()
+        cases = [None, {}, {"nodes": None, "pageInfo": {"hasNextPage": False}},
+                 {"nodes": [], "pageInfo": {"hasNextPage": "false"}},
+                 {"nodes": [{"editor": None, "editedAt": "2026-11-04T00:00:00Z"}],
+                  "pageInfo": {"hasNextPage": False}},
+                 {"nodes": [{"editor": {"login": "operator"}, "editedAt": "2026-02-30T00:00:00Z"}],
+                  "pageInfo": {"hasNextPage": False}}]
+        for history in cases:
+            with self.subTest(history=history):
+                self.state.write_text(json.dumps({**original, "graphql_issue_fields": {"userContentEdits": history}}))
+                done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                                       "--out", self.snapshot, "--body-out", self.body, "--for-execution",
+                                       "--approve-body-sha256", ISSUE_BODY.raw_sha(BODY), expected=1)
+                self.assertFalse(self.snapshot.exists())
+                self.assertEqual("", done.stdout)
+        self.change_state(graphql_issue_fields={}, graphql_missing=["userContentEdits"])
+        self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                        "--out", self.snapshot, "--body-out", self.body, expected=1)
+
+    def test_history_pagination_must_finish(self):
+        node = {"editor": {"login": "operator"}, "editedAt": "2026-11-04T00:00:00Z"}
+        for cursor in (None, "", "first"):
+            with self.subTest(cursor=cursor):
+                self.change_state(history_pages={"first": {
+                    "nodes": [node], "pageInfo": {"hasNextPage": True, "endCursor": cursor}}})
+                done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                                       "--out", self.snapshot, "--body-out", self.body, expected=1)
+                self.assertIn("最後まで取得できない", done.stderr)
+                self.assertFalse(self.snapshot.exists())
+
+    def test_history_change_during_pagination_stops(self):
+        self.edit_history([("operator", "2026-11-04T00:00:00Z")])
+        history = self.state_value()["history"]
+        self.change_state(history_pages={
+            "first": {"nodes": history, "pageInfo": {"hasNextPage": True, "endCursor": "next"}},
+            "next": {"nodes": [], "pageInfo": {"hasNextPage": False}},
+        }, graphql_page_fields={"next": {"lastEditedAt": "2026-11-04T01:00:00Z"}})
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                               "--out", self.snapshot, "--body-out", self.body, expected=1)
+        self.assertIn("取得中", done.stderr)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_history_must_cover_latest_edit(self):
+        self.edit_history([("operator", "2026-11-04T02:00:00Z")])
+        for history in ([], [{"editor": {"login": "operator"}, "editedAt": "2026-11-04T01:00:00Z"}],
+                        [{"editor": {"login": "outsider"}, "editedAt": "2026-11-04T02:00:00Z"}]):
+            with self.subTest(history=history):
+                self.change_state(history=history)
+                done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                                       "--out", self.snapshot, "--body-out", self.body, expected=1)
+                self.assertIn("編集履歴が一致しない", done.stderr)
+                self.assertFalse(self.snapshot.exists())
+
+    def test_update_rechecks_history_even_with_same_last_editor_and_body(self):
+        self.edit_history([("operator", "2026-11-04T02:00:00Z")])
+        self.take_snapshot()
+        self.edit_history([("outsider", "2026-11-04T01:00:00Z"), ("operator", "2026-11-04T02:00:00Z")])
+        done = self.update(expected=1)
+        self.assertIn("取得後に変わった", done.stderr)
+        self.assertNotIn(["issue", "edit"], self.calls())
+
+    def test_own_updates_require_new_raw_body_approval(self):
+        for revised in (BODY.replace("# 設計\n", "# 設計\n> **基準コミット**: " + "a" * 40 + "\n"),
+                        BODY.replace("- [ ]", "- [x]"), BODY + "検証結果を追記\n"):
+            with self.subTest(revised=revised):
+                self.change_state(body=BODY, author={"login": "outsider"})
+                value = self.take_snapshot("--for-execution", "--approve-body-sha256", ISSUE_BODY.raw_sha(BODY))
+                self.body.write_text(revised)
+                result = json.loads(self.update("--expect-task-digest", value["task_digest"]).stdout)
+                self.assertEqual(value["task_digest"], result["task_digest"])
+                self.assertIsNotNone(result["last_edited_at"])
+                self.new_outputs()
+                self.take_snapshot("--for-execution", "--approve-body-sha256", value["body_sha256"], expected=1)
+                self.new_outputs()
+                self.take_snapshot("--for-execution", "--approve-body-sha256", ISSUE_BODY.raw_sha(revised))
+                self.new_outputs()
+
+    def test_same_body_approval_can_be_reused_without_new_confirmation(self):
+        self.change_state(author={"login": "outsider"})
+        for _ in range(2):
+            self.take_snapshot("--for-execution", "--approve-body-sha256", ISSUE_BODY.raw_sha(BODY))
+            self.new_outputs()
 
     def test_snapshot_preserves_raw_body_and_trailing_newlines(self):
         for body in ("", BODY.rstrip("\n"), BODY + "\n\n", BODY.replace("\n", "\r\n")):
