@@ -1955,6 +1955,19 @@ class WordingTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assert_wording(text, [(self.reduced_error, "縮退", 1)])
 
+    def test_verbs_after_spaces_or_line_breaks_are_not_hidden(self):
+        # 本文: 許す形の末尾の「縮退」の後に、空白・改行・全角空白を挟んで動詞が続く所も検出する。
+        self.write_exceptions(names=[self.short_entry("32 縮退")])
+        self.assert_wording("32 縮退 / 33 比較不能。\n32 縮退\n- 次の項目。\n", [])
+        for text in ("32 縮退 する。\n", "32 縮退\nする。\n", "32 縮退　する。\n", "32 縮退 **して**続ける。\n"):
+            with self.subTest(text=text):
+                self.assert_wording(text, [(self.reduced_error, "縮退", 1)])
+        # 登録: 空白・全角空白を挟んだ動詞の形も登録できない。
+        for form in ("32 縮退 する", "exit 32 は縮退　せず"):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.short_entry(form)])
+                self.assertIn("動詞", self.assert_dictionary_error()[0])
+
     def test_short_name_forms_cannot_use_reduced_as_a_verb(self):
         # 名前の字面を含まない形でも、design §6 が書き換えを求める動詞の形は登録できない。
         for form in ("32 で縮退する", "縮退して続ける(32)", "exit 32 で縮退させる", "**縮退**せず 32"):

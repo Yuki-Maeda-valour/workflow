@@ -1069,7 +1069,8 @@ def read_wording_exceptions(targets, terms):
                     verb_before = [re.escape(literal_name)] if literal_name.endswith('縮退') else []
                     if short is not None:
                         verb_before.append(_wording_pattern(short_text))
-                    if any(re.search(before + _WORDING_VERB, literal_form) for before in verb_before):
+                    # 空白・全角空白を挟んだ動詞(32 縮退 する)も同じに扱う。
+                    if any(re.search(before + r'[\s　]*' + _WORDING_VERB, literal_form) for before in verb_before):
                         raise ValueError(f'{name}: 短い呼び名や名前の末尾の語を動詞で使う形は不可: {form}')
                     # 名前全体との一致にも数字の境目を当てる(32 縮退 が 132 縮退 に当たらない)。
                     name_pattern = _wording_mark(literal_name)
@@ -1263,7 +1264,9 @@ def _wording_form_pattern(form):
         pattern += r'(?![*_`]*(?:[0-9]|' + _WORDING_MARKUP + '))'
     # 末尾が「縮退」の形は、直後に動詞の活用が続く所(縮退する など)を隠さない。
     if literal.endswith('縮退'):
-        pattern += r'(?![*_`]*(?:' + _WORDING_VERB + '|' + _WORDING_MARKUP + '))'
+        # 強調・コードの印に加え、空白・全角空白・改行を挟んだ動詞も見る(1 文を途中で改行する書き方)。
+        # 数字の先読みには足さない(32 0 は別の数のため)。
+        pattern += r'(?![*_`\s　]*(?:' + _WORDING_VERB + '|' + _WORDING_MARKUP + '))'
     return pattern
 
 
