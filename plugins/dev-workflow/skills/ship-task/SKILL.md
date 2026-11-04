@@ -182,7 +182,7 @@ except (Exception, SystemExit) as exc:
    - 既存作業ブランチの再利用では作成時 OID を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
    - 承認済み再開は `resume-invocation` とし、以前から保持した追加指定も減らさない。親環境の5値の引継ぎは変更しない。
    - Issue 方式は安全な事前検査後、手順4のブランチ作成より前に `preflight` を通す。`--task` があれば `snapshot --for-execution` で本文を取得する。無ければ新規 Issue の取得は Phase 1 の作成後に行う(Issue 方式の契約 §6)。
-   - `--no-pr` を除き、`preflight` の直後・ブランチ作成の前に、公開する root の `origin-repo.py` の `repo` と Issue の `repo` を比べる。不一致・算出不能なら PR を作れない理由を示し、止めるか `--no-pr` で続けるかを質問で確かめる。
+   - `--no-pr`・`--design-only` を除き、`preflight` の直後・ブランチ作成の前に、公開する root の `origin-repo.py` の `repo` と Issue の `repo` を比べる。不一致・算出不能なら PR を作れない理由を示し、止めるか `--no-pr` で続けるかを質問で確かめる。
    - 他人が作った Issue では、開始時・基準行の更新後の最初の依頼前・更新後の差し戻しで、最大 `2 + N` 回の確認が要ると予告する。最後のチェック更新後と `finalize` 適用後を含む追加の再取得も、未承認の本文ごとに1回増える(Issue 方式の契約 §5〜6)。
 4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。
    - `DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。
@@ -377,6 +377,8 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
 | タスク分割が必要と判定された | 実動確認が「実施済」か「実施不能」(実施不能は PR の残課題に転記) |
 | 無関係な未コミット変更がある(続行可否を確認) | — |
 | 先行する commit の一覧(S8)で「続行しない」と答えた | 一覧が空・比べられない(報告して続行) |
+
+Issue 方式の停止報告は、実装 commit の検証前後を区別する。検証前は `/do-task --issue=<番号>`、文書同期の停止は `/update-doc --task=#<番号>`、公開の停止は契約 §6 の再確認を経て Phase 5 を再開する手順を示す。
 
 無人では、「停止する」の各行を保留か失敗扱いに倒す(原因で分ける。references/unattended-mode.md §3・§4)。
 

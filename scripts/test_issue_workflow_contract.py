@@ -7,6 +7,7 @@ skill は実行手順そのものなので、入口・停止条件・工程間�
 import base64
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 from unittest import mock
 
@@ -121,11 +122,30 @@ class IssueWorkflowContractTest(unittest.TestCase):
             self.contains(section(self.ship, heading), "最大 `2 + N` 回", "最後のチェック更新後",
                           "`finalize` 適用後", "未承認の本文ごとに1回増える")
 
+    def test_execution_boundary_comes_from_success_or_human_approval_not_body_dates(self):
+        execution = section(self.contract, "## 5. do-task の読み替え")
+        self.contains(execution, "前回の実行用の取得に成功したとき", "人が本文を承認したとき",
+                      "`--edits-since <保持した last_edited_at>`", "本文の設計レビュー行の日付からは決めない",
+                      "保持値が無い新しい開始", "全履歴を調べる", "境界と同じ日時も含める",
+                      "承認待ちで停止した取得値や書込直後の結果で、前の境界を先に進めない")
+
+    def test_repeat_approval_shows_delta_and_intervening_editors(self):
+        execution = section(self.contract, "## 5. do-task の読み替え")
+        self.contains(execution, "2回目以降は、前に承認した本文との差分と、その間の編集者の一覧を示す",
+                      "その間の編集者が実行者だけであることを確かめて示す",
+                      "他人の編集があれば、その人と変更箇所を明記して採用を確認する")
+
+    def test_post_write_receipt_defers_history_check_and_cannot_be_reused(self):
+        update = section(self.contract, "## 3. 本文を取得して書き換える共通手順")
+        self.contains(update, "最終編集者と取得時の実行者が書込前の実行者と同じ場合だけ成功",
+                      "書込直後は編集履歴を取得・検査しない", "次の通常の `snapshot`",
+                      "`history_checked` は false", "更新用の控えに使わず")
+
     def test_repository_mismatch_is_checked_before_branch_and_again_before_push(self):
         phase = section(self.ship, "## Phase 0: 前提と作業ブランチ")
         before_branch = phase.split("3. **作業ツリーの清潔性**:", 1)[1].split("4. **作業ブランチ**:", 1)[0]
         for text in (before_branch, self.shipping.split("### 続行判定と実装\n", 1)[0]):
-            self.contains(text, "`--no-pr` を除き、`preflight` の直後・ブランチ作成の前",
+            self.contains(text, "`--no-pr`・`--design-only` を除き、`preflight` の直後・ブランチ作成の前",
                           "公開する root", "`origin-repo.py`", "Issue の `repo` を比べる",
                           "不一致・算出不能なら", "止めるか `--no-pr` で続けるかを質問で確かめ")
         self.contains(self.shipping, "新規 Issue でも省略しない", "回答前はブランチ作成・設計・実装へ進まない",
@@ -179,19 +199,56 @@ class IssueWorkflowContractTest(unittest.TestCase):
 
     def test_authority_completion_accepts_existing_approved_line_without_status(self):
         self.contains(self.authority_completion, "ステータス行は必須にせず、その運用が定める完了記録の形も受け付ける",
-                      "日付・「完了」・「結果 APPROVED」を含む行", "節内の最後の該当行で判定する",
-                      "`- 2026-11-04 完了(反復 5 回): 結果 APPROVED`",
-                      "この行だけでも受け付け、使用スキル `do-task` の記載は必須にしない",
+                      "権威参照ファイルが定める形に一致する、節内の最後の該当記録で判定する",
+                      "その形に使用スキルの指定が無ければ、`do-task` の記載は必須にしない",
                       "`task_store: github-issue` の経路には、この例外を当てない",
                       "do-task の手順4の完了記録と `finalize` の検証器記録を受け付ける")
         mode = section(self.doc, "## 2 つの実行モード")
         self.contains(mode, "`github-issue` は完了ステータスも必須", "権威参照ファイルの運用では、その運用の記録の形も受け付ける")
 
-    def test_later_suspension_invalidates_last_completion_for_both_routes(self):
+    def test_suspension_before_commit_verification_invalidates_completion(self):
         common = self.completion.split("- `task_store: github-issue` の経路:", 1)[0]
-        self.contains(common, "最後の完了記録より後に中断・保留の記録があれば、完了と扱わず停止する",
-                      "`finalize` 適用後に commit の照合・commit・公開で失敗した記録も含む",
-                      "日付順に並べ替えず、節の中の記載順で判断する")
+        self.contains(common, "実装 commit の検証より前に止まったものだけ、完了を取り消して停止する",
+                      "`finalize` 適用後の commit の照合・commit の失敗を含む",
+                      "日付順に並べ替えず、節の中の記載順で判断する",
+                      "中断・保留がどちらの時点か分からなければ止めて人に確かめる")
+        self.contains(self.shipping, "実装 commit の検証前に中断: <理由>",
+                      "`/do-task --issue=<番号>` で検証をやり直す")
+
+    def test_suspension_after_verified_commit_keeps_completion_and_documents_resume(self):
+        common = self.completion.split("- `task_store: github-issue` の経路:", 1)[0]
+        for stage in ("文書同期", "公開"):
+            with self.subTest(stage=stage):
+                record = f"実装 commit <sha> は検証済み。{stage}で停止"
+                self.contains(common, record, "実装の完了を取り消さず受け付ける")
+                self.contains(self.shipping, record)
+        self.contains(self.shipping, "文書同期での停止報告には `/update-doc --task=#<番号>`",
+                      "Phase 5 を再開する手順", "過去の全文の保持値を黙って更新して")
+        table = section(self.ship, "## 停止条件のまとめ")
+        self.contains(table, "/update-doc --task=#<番号>", "実装 commit の検証前後を区別する",
+                      "公開の停止は契約 §6 の再確認を経て Phase 5 を再開")
+        mode = section(self.doc, "## 2 つの実行モード")
+        self.contains(mode, "実装 commit の検証前の中断では停止する",
+                      "検証後の文書同期・公開の停止は完了を取り消さない")
+
+    def test_authority_completion_rejects_incomplete_even_with_approved_result(self):
+        self.contains(self.authority_completion, "「完了」の部分一致で「未完了」の記録を受け付けない")
+        instructions = (ROOT / "AGENTS.md").read_text()
+        self.contains(instructions, "`- <YYYY-MM-DD> 完了(…): 結果 APPROVED` の形で書く")
+        complete = "- 2026-11-04 完了(反復 5 回): 結果 APPROVED"
+        incomplete = "- 2026-11-04 未完了(反復 5 回): 結果 APPROVED"
+        # このプロジェクトの形は AGENTS.md の字面から組み立てる。部分一致への退行を対照で示す。
+        declared = re.search(r"`(- <YYYY-MM-DD>[^`]+)`", instructions).group(1)
+        pattern = re.escape(declared).replace(re.escape("<YYYY-MM-DD>"), r"\d{4}-\d{2}-\d{2}").replace("…", r"[^\n]*")
+        self.assertIsNotNone(re.fullmatch(pattern, complete))
+        self.assertIsNone(re.fullmatch(pattern, incomplete))
+
+    def test_authority_must_define_its_own_completion_shape(self):
+        self.contains(self.authority_completion, "権威参照ファイルも完了記録の形を定めていなければ、止めて人に形を確かめる",
+                      "配布文書の例からプロジェクトの形を補わない")
+        self.assertNotIn("2026-11-04 完了", self.contract)
+        self.contains(self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0],
+                      "例: `- 2026-11-04 完了(反復 5 回): 結果 APPROVED`")
 
     def test_completion_is_selected_by_record_shape_not_caller(self):
         self.contains(self.completion, "単独実行か ship-task 経由かでは分けない")
@@ -206,14 +263,20 @@ class IssueWorkflowContractTest(unittest.TestCase):
 
     def test_design_keeps_routes_separate_and_defers_profile_migration(self):
         policy = self.design.split("22. **リポジトリ自身の Issue 運用**:", 1)[1].split("\n23. ", 1)[0]
-        self.contains(policy, "`github-issue.md` §6・§7 を使う", "日付・「完了」・「結果 APPROVED」を含む行",
+        self.contains(policy, "`github-issue.md` §6・§7 を使う", "`AGENTS.md` が定める `- <YYYY-MM-DD> 完了(…): 結果 APPROVED` の形",
                       "ステータス行と使用スキル `do-task` の記載は必須にしない",
                       "`task_store: github-issue` では、template の完了ステータス行と do-task の完了記録が引き続き必須",
                       "権威参照ファイルによる Issue 運用でも停止する", "profile への移行と init-project の質問・雛形は3本目")
         self.assertNotIn("この1本目では", policy)
         self.assertNotIn("未対応", policy)
-        changelog = (ROOT / "CHANGELOG.md").read_text().split("## (次の次の版)\n", 1)[1].split("## (次の版)", 1)[0]
-        self.assertNotIn("版の数字は merge の順に付ける", changelog)
+
+    def test_changelog_has_one_pending_release_with_final_behavior(self):
+        changelog = (ROOT / "CHANGELOG.md").read_text()
+        self.assertEqual(1, changelog.count("## (次の版)\n"))
+        self.assertNotIn("## (次の次の版)", changelog)
+        pending = changelog.split("## (次の版)\n", 1)[1].split("\n## v", 1)[0]
+        self.assertNotIn("未対応", pending)
+        self.contains(pending, "ship-task", "update-doc", "create-task", "do-task")
 
     def test_update_doc_rechecks_input_without_mutating_issue(self):
         self.contains(self.syncing, "preflight` と `snapshot --for-execution`", "--yes` でも本文採用の確認を省かない",

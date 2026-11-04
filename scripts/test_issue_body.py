@@ -95,9 +95,11 @@ elif args[:2] == ["api", "graphql"]:
     assert args[2] == "-f" and args[3].startswith("query=query(")
     assert "editor { login } lastEditedAt" in args[3]
     assert args[4:9] == ["-f", "owner=example", "-f", "name=project", "-F"]
-    assert "userContentEdits(first: 100, after: $cursor)" in args[3]
-    assert "nodes { editor { login } editedAt }" in args[3]
-    assert "pageInfo { hasNextPage endCursor }" in args[3]
+    with_history = "userContentEdits" in args[3]
+    if with_history:
+        assert "userContentEdits(first: 100, after: $cursor)" in args[3]
+        assert "nodes { editor { login } editedAt }" in args[3]
+        assert "pageInfo { hasNextPage endCursor }" in args[3]
     assert args[9].startswith("number=") and len(args) in (10, 12)
     if len(args) == 12:
         assert args[10] == "-f" and args[11].startswith("cursor=")
@@ -108,7 +110,7 @@ elif args[:2] == ["api", "graphql"]:
     history = state.get("history", [] if state.get("lastEditedAt") is None else
                         [{"editor": state.get("editor"), "editedAt": state["lastEditedAt"]}])
     history_page = {"nodes": history, "pageInfo": {"hasNextPage": False, "endCursor": None}}
-    if "history_pages" in state:
+    if with_history and "history_pages" in state:
         history_page = state["history_pages"][cursor]
     response = {**issue_response(), "number": int(args[9].split("=")[1]),
                 "author": author, "editor": state.get("editor"),
@@ -129,8 +131,9 @@ elif args[:2] == ["issue", "edit"]:
                         [{"editor": state.get("editor"), "editedAt": state["lastEditedAt"]}])
     previous = state.get("lastEditedAt") or "2026-11-04T00:00:00Z"
     state["lastEditedAt"] = (datetime.fromisoformat(previous[:-1]) + timedelta(seconds=1)).isoformat() + "Z"
-    state["editor"] = state.get("user", {"login": "operator"})
-    state["history"] = history + [{"editor": state["editor"], "editedAt": state["lastEditedAt"]}]
+    state["editor"] = state.get("post_editor", state.get("user", {"login": "operator"}))
+    state["history"] = history if state.get("delayed_history") else history + [
+        {"editor": state["editor"], "editedAt": state["lastEditedAt"]}]
     if state.get("post_read_fail"):
         state["view_fail"] = True
     save()
@@ -173,7 +176,7 @@ class IssueBodyTest(unittest.TestCase):
 
     def run_script(self, *args, expected=0):
         done = subprocess.run([sys.executable, "-B", str(SCRIPT), *map(str, args)],
-                              env=self.env, capture_output=True, text=True, check=False)
+                              env=self.env, capture_output=True, text=True, check=False, timeout=10)
         self.assertEqual(expected, done.returncode, done.stderr)
         return done
 
@@ -245,6 +248,13 @@ class IssueBodyTest(unittest.TestCase):
                                 "--out", self.snapshot, "--body-out", self.body, expected=1)
                 self.assertFalse(self.snapshot.exists())
 
+    def test_app_author_without_bot_marker_rejects_even_when_graphql_name_matches(self):
+        self.change_state(author={"login": "app/renovate"},
+                          graphql_issue_fields={"author": {"login": "renovate"}})
+        self.run_script("snapshot", "--dir", self.base, "--issue", "320", "--out", self.snapshot,
+                        "--body-out", self.body, expected=1)
+        self.assertFalse(self.snapshot.exists())
+
     def test_bot_author_must_match_graphql_name(self):
         self.change_state(author={"is_bot": True, "login": "app/renovate"},
                           graphql_issue_fields={"author": {"login": "another-app"}})
@@ -280,10 +290,46 @@ class IssueBodyTest(unittest.TestCase):
         self.new_outputs()
         self.take_snapshot("--for-execution", "--approve-body-sha256", value["body_sha256"])
 
-    def test_history_before_last_review_day_does_not_require_approval(self):
+    def test_held_boundary_excludes_older_history(self):
         self.edit_history([("outsider", "2026-11-02T12:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
                           body=self.reviewed_body("2026-11-02") + self.reviewed_body().splitlines()[-1] + "\n")
-        self.take_snapshot("--for-execution")
+        self.take_snapshot("--for-execution", "--edits-since", "2026-11-03T00:00:00Z")
+
+    def test_forged_review_date_digest_and_subsequent_own_edit_cannot_hide_foreign_edit(self):
+        revised = BODY.replace("変更する", "別の処理を実行する")
+        digest = ISSUE_BODY.body_digest(revised)
+        revised += ("- **設計レビュー**(create-task・2026-11-04): APPROVED — checker: 指摘 0 / "
+                    f"反復 1 回 / 編成: reviewer / 本文: {digest} / needs-user: なし\n")
+        self.assertEqual(digest, ISSUE_BODY.body_digest(revised))
+        self.edit_history([("outsider", "2026-11-02T12:00:00Z"),
+                           ("operator", "2026-11-04T02:00:00Z")], body=revised)
+        for extra in ([], ["--edits-since", "2026-11-01T00:00:00Z"], ["--edits-since", "null"]):
+            with self.subTest(extra=extra):
+                self.take_snapshot("--for-execution", *extra, expected=1)
+                self.new_outputs()
+
+    def test_boundary_includes_foreign_edits_at_the_same_timestamp(self):
+        self.edit_history([("outsider", "2026-11-04T01:00:00Z"),
+                           ("operator", "2026-11-04T01:00:00Z")])
+        self.take_snapshot("--for-execution", "--edits-since", "2026-11-04T01:00:00Z", expected=1)
+
+    def test_invalid_or_future_boundary_cannot_be_overridden_by_approval(self):
+        self.edit_history([("operator", "2026-11-04T01:00:00Z")])
+        for boundary in ("", "bad", "2026-02-30T00:00:00Z", "2026-11-04T01:00:01Z"):
+            with self.subTest(boundary=boundary):
+                self.take_snapshot("--for-execution", "--edits-since", boundary,
+                                   "--approve-body-sha256", ISSUE_BODY.raw_sha(BODY), expected=1)
+                self.new_outputs()
+
+    def test_unedited_issue_accepts_null_boundary_and_rejects_timestamp(self):
+        self.take_snapshot("--for-execution", "--edits-since", "null")
+        self.new_outputs()
+        self.take_snapshot("--for-execution", "--edits-since", "2026-11-04T00:00:00Z", expected=1)
+
+    def test_boundary_without_execution_check_is_rejected_before_gh(self):
+        self.run_script("snapshot", "--dir", self.base, "--issue", "320", "--out", self.snapshot,
+                        "--body-out", self.body, "--edits-since", "2026-11-04T00:00:00Z", expected=1)
+        self.assertEqual([], self.calls(include_api=True))
 
     def test_same_review_day_in_other_timezone_is_not_skipped(self):
         self.edit_history([("outsider", "2026-11-03T10:00:00Z"), ("operator", "2026-11-04T02:00:00Z")],
@@ -361,6 +407,14 @@ class IssueBodyTest(unittest.TestCase):
         done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
                                "--out", self.snapshot, "--body-out", self.body, expected=1)
         self.assertIn("取得中", done.stderr)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_unedited_issue_rejects_nonempty_history(self):
+        self.change_state(editor=None, lastEditedAt=None, history=[
+            {"editor": {"login": "operator"}, "editedAt": "2026-11-04T00:00:00Z"}])
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320", "--out", self.snapshot,
+                               "--body-out", self.body, expected=1)
+        self.assertIn("未編集の Issue に編集履歴がある", done.stderr)
         self.assertFalse(self.snapshot.exists())
 
     def test_history_must_cover_latest_edit(self):
@@ -574,6 +628,46 @@ class IssueBodyTest(unittest.TestCase):
         done = self.update(expected=1)
         self.assertIn("書込後", done.stderr)
         self.assertEqual(1, self.calls().count(["issue", "edit"]))
+
+    def test_post_write_accepts_delayed_history_but_next_snapshot_rejects_it(self):
+        self.take_snapshot()
+        self.change_state(delayed_history=True)
+        result = json.loads(self.update().stdout)
+        self.assertFalse(result["history_checked"])
+        query = self.state_value()["calls"][-1]["args"][3]
+        self.assertNotIn("userContentEdits", query)
+        self.new_outputs()
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320", "--out", self.snapshot,
+                               "--body-out", self.body, expected=1)
+        self.assertIn("編集履歴が一致しない", done.stderr)
+
+    def test_post_write_rejects_foreign_editor_even_when_body_matches(self):
+        self.take_snapshot()
+        self.change_state(post_editor={"login": "outsider"})
+        done = self.update(expected=1)
+        self.assertIn("最終編集者が実行者と一致しない", done.stderr)
+        self.assertEqual(1, self.calls().count(["issue", "edit"]))
+        self.assertEqual(BODY, self.state_value()["body"])
+
+    def test_post_write_receipt_cannot_replace_a_checked_snapshot(self):
+        self.take_snapshot()
+        receipt = {**json.loads(self.update().stdout), "body": BODY}
+        self.snapshot.write_text(json.dumps(receipt))
+        calls = self.calls(include_api=True)
+        done = self.update(expected=1)
+        self.assertIn("snapshot で再取得", done.stderr)
+        self.assertEqual(calls, self.calls(include_api=True))
+
+    def test_create_receipt_is_unedited_and_requires_a_fresh_snapshot(self):
+        self.create()
+        receipt = json.loads(self.snapshot.read_text())
+        self.assertIsNone(receipt["editor"])
+        self.assertFalse(receipt["history_checked"])
+        self.assertNotIn("userContentEdits", self.state_value()["calls"][-1]["args"][3])
+        calls = self.calls(include_api=True)
+        done = self.update(issue=321, expected=1)
+        self.assertIn("snapshot で再取得", done.stderr)
+        self.assertEqual(calls, self.calls(include_api=True))
 
     def test_update_post_write_read_failure_stops_without_retry(self):
         self.take_snapshot()
