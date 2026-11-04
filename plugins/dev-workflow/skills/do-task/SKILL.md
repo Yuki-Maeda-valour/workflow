@@ -278,7 +278,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 
 無人では外部に解決しないので、この節は通らない(D5・D9)。
 
-**手順の詳細(スナップショットの 5 要素・マニフェスト・保護領域・退避・実体照合・復元・縮退条件・引き継ぎの発火条件)は [references/external-runners.md](references/external-runners.md) §12 が正本で、その手順は `{do-task の}scripts/implement-guard.sh` が実行する**。
+**手順の詳細(スナップショットの 5 要素・マニフェスト・保護領域・退避・実体照合・復元・内蔵に切り替える条件・引き継ぎの発火条件)は [references/external-runners.md](references/external-runners.md) §12 が正本で、その手順は `{do-task の}scripts/implement-guard.sh` が実行する**。
 - ここには順序と、終了コードによる分岐と、team-lead の義務だけを書く(同じ事実を 2 箇所に置かない)。
 - **どのサブコマンドも、下に書いた終了コード以外(2 / 20 / 表に無いコード)が返ったら、終了コードと stderr をそのまま報告して停止する**(「変化なし」や成功に読み替えない。保護領域は消さない)。
 - **滞在時間が長いため背景実行で起動する**(軸 2・§12-6)。

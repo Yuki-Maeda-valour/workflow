@@ -247,20 +247,50 @@
       "reason": "外部実装の承認を求める前に内蔵への切り替えを判定する項目名。"
     },
     {
-      "name": "縮退条件",
+      "name": "`take` の縮退",
       "definition": {
         "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
-        "text": "実装経路の縮退条件は §12-1 の承認より前の判定"
+        "text": "- **`take` の縮退**:"
       },
       "files": [
-        "plugins/dev-workflow/skills/do-task/SKILL.md",
-        "plugins/dev-workflow/skills/do-task/references/base-commit.md",
         "plugins/dev-workflow/skills/do-task/references/external-runners.md"
       ],
       "forms": [
-        "縮退条件"
+        "**`take` の縮退**",
+        "`take` の縮退 `taskmd`"
       ],
-      "reason": "実装経路の承認前判定と take の終了値 30 の条件を指す名前。"
+      "reason": "`take` が外部委託をやめて内蔵に切り替える場合を並べた試験の項目の名前。同じファイルが名前で指す。"
+    },
+    {
+      "name": "縮退(2026-09-17 決定 29・32・34・49)",
+      "definition": {
+        "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
+        "text": "**縮退(2026-09-17 決定 29・32・34・49)**:"
+      },
+      "short": {
+        "text": "縮退",
+        "marks": [
+          "①",
+          "②",
+          "③",
+          "④",
+          "⑤"
+        ]
+      },
+      "files": [
+        "plugins/dev-workflow/skills/do-task/references/external-runners.md"
+      ],
+      "forms": [
+        "**縮退(2026-09-17 決定 29・32・34・49)**",
+        "下の縮退 ①〜⑤",
+        "下の縮退 ②",
+        "下の縮退 ③",
+        "下の縮退 ④",
+        "下の縮退 ⑤",
+        "§12-2 の縮退 ⑤",
+        "呼び出し側の縮退③"
+      ],
+      "reason": "`take` が内蔵に切り替える 5 つの条件を決めた太字の名前。番号を付けた参照形(縮退 ②など)は、short の印(番号の印)を含む形だけを許す。"
     },
     {
       "name": "30 縮退",
@@ -268,33 +298,37 @@
         "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
         "text": "**30** 縮退(stderr に `ERROR [<理由>]`。"
       },
+      "short": {
+        "text": "縮退",
+        "marks": [
+          "30"
+        ]
+      },
       "files": [
         "plugins/dev-workflow/skills/do-task/SKILL.md",
         "plugins/dev-workflow/skills/do-task/references/external-runners.md"
       ],
       "forms": [
-        "**`take` の縮退**",
-        "**縮退後に保護領域が残らない**",
         "exit 30 は縮退",
         "**30** 縮退",
-        "縮退(終了値 30)",
-        "縮退・失敗・シグナル",
-        "`take` の縮退 `taskmd`",
-        "**縮退(2026-09-17 決定 29・32・34・49)**",
-        "下の縮退 ①〜⑤",
-        "§12-2 の縮退 ⑤",
-        "下の縮退 ②",
-        "下の縮退 ③",
-        "下の縮退 ④",
-        "呼び出し側の縮退③"
+        "縮退(終了値 30)"
       ],
-      "reason": "外部実装を起動する前に take が終了値 30 を返す状態名。その条件番号と後始末を指す箇所だけを、周囲の字面を含めて限定する。"
+      "reason": "`take` の終了値 30 の名前。番号を省いた参照形は、short の印(終了値の番号)を含む形だけを許す。"
     },
     {
       "name": "32 縮退",
       "definition": {
         "path": "plugins/dev-workflow/skills/do-task/references/external-runners.md",
         "text": "**0** 正常終了 / **31** 引き継ぎ / **32** 縮退 / **33** 比較不能"
+      },
+      "short": {
+        "text": "縮退",
+        "marks": [
+          "32",
+          "正常終了",
+          "引き継ぎ",
+          "比較不能"
+        ]
       },
       "files": [
         "plugins/dev-workflow/skills/do-task/SKILL.md",
@@ -307,10 +341,9 @@
         "縮退の 32",
         "正常終了・引き継ぎ・縮退",
         "「比較不能」は縮退でも引き継ぎでもない第 3 の結末",
-        "引き継ぎ / 縮退",
-        "「変化なし」→ 縮退"
+        "引き継ぎ / 縮退"
       ],
-      "reason": "外部実装後の compare が終了値 32 を返す状態名。終了値やほかの状態名と並ぶ箇所に限定し、通常の本文にある単独の語を除かない。"
+      "reason": "`compare` の終了値 32 の名前。番号を省いた参照形は、short の印(終了値の番号・同じ表のほかの状態名)を含む形だけを許す。"
     },
     {
       "name": "正常(縮退)",

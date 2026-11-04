@@ -873,10 +873,13 @@ def check_number_only_reasons():
 
 # 検査 13〜15。語彙は design §6 の表だけに置く。名前と報告の型は JSON で限定する。
 _WORDING_EXEMPT = Path('do-task/references/writing-for-people.md')
-_WORDING_ROLES = {'team-lead', 'implementer', 'reviewer', 'checker', 'researcher'}
 _WORDING_GAP = '\ufffc'
-# 「縮退」の直後のし・す・さ・せ・そは、動詞として使う形(縮退する・縮退して続ける など)。
-_WORDING_REDUCED_VERB = re.compile('縮退[しすさせそ]')
+# 表の語の形。英字と - だけの語は前後の英数字を見て数え、「X(Y)」の語は X と Y のどちらにも当てる。
+# 語そのものは表から読み、ここには持たない。
+_WORDING_ASCII = re.compile(r'[A-Za-z][A-Za-z-]*')
+_WORDING_ALIAS = re.compile(r'([^()]+)\(([^()]+)\)')
+# 語の直後のし・す・さ・せ・そは、動詞として使う形(縮退する・縮退して続ける など)。
+_WORDING_VERB = '[しすさせそ]'
 
 
 def wording_targets():
@@ -907,6 +910,8 @@ def read_wording_terms():
             if len(cells) != 2 or not all(cells):
                 raise ValueError('語と言い換えの空欄・列数の誤り')
             word, explanation = cells
+            if ('(' in word or ')' in word) and not _WORDING_ALIAS.fullmatch(word):
+                raise ValueError(f'括弧のある語は「X(Y)」の形にする: {word}')
             if word in terms or explanation in terms.values():
                 raise ValueError(f'語または言い換えの重複: {word}')
             terms[word] = explanation
@@ -938,11 +943,19 @@ def _wording_bare_reduced(text):
 
 
 def _wording_pattern(word):
-    if word == '差し戻し(差し戻す)':
-        return '差し戻[しす]'
-    if word in _WORDING_ROLES:
+    """表の字面から語の型を作る(語のコピーを持たない)。"""
+    alias = _WORDING_ALIAS.fullmatch(word)
+    if alias:
+        parts = sorted(alias.groups(), key=len, reverse=True)
+        return '(?:' + '|'.join(_wording_pattern(part.strip()) for part in parts) + ')'
+    if _WORDING_ASCII.fullmatch(word):
         return rf'(?<![A-Za-z0-9_-]){re.escape(word)}(?![A-Za-z0-9_-])'
     return re.escape(word)
+
+
+def _wording_mark(mark):
+    # 数字の印(終了値の番号)は、前後が数字でない所だけに当てる(32 が 332 に当たらない)。
+    return rf'(?<![0-9]){re.escape(mark)}(?![0-9])'
 
 
 def read_wording_exceptions(targets, terms):
@@ -959,8 +972,9 @@ def read_wording_exceptions(targets, terms):
             if not isinstance(data[kind], list):
                 raise ValueError(f'{kind} は配列が必要')
             for entry in data[kind]:
-                if not isinstance(entry, dict) or set(entry) != {'name', 'definition', 'files', 'forms', 'reason'}:
-                    raise ValueError(f'{kind}: name・definition・files・forms・reason が必要')
+                required = {'name', 'definition', 'files', 'forms', 'reason'}
+                if not isinstance(entry, dict) or not required <= set(entry) <= required | {'short'}:
+                    raise ValueError(f'{kind}: name・definition・files・forms・reason が必要(short は任意)')
                 for key in ('name', 'reason'):
                     if not isinstance(entry[key], str) or not entry[key].strip():
                         raise ValueError(f'{key} は空でない文字列が必要')
@@ -986,10 +1000,33 @@ def read_wording_exceptions(targets, terms):
                 if not definition_path.resolve().is_relative_to(REPO.resolve()):
                     raise ValueError(f'{name}: 定義元がリポジトリの外')
                 literal = definition['text']
-                if not isinstance(literal, str) or not literal.strip() or literal not in definition_path.read_text(encoding='utf-8'):
+                # 定義の実在は字面の部分一致で見る。見出し・太字かは見ない(限界。design §6)。
+                source_text = definition_path.read_text(encoding='utf-8')
+                if not isinstance(literal, str) or not literal.strip() or literal not in source_text:
                     raise ValueError(f'{name}: 定義の字面が存在しない')
                 if literal_name not in _wording_literal(literal):
                     raise ValueError(f'{name}: 定義に名前の字面がない')
+                start = source_text.index(literal)
+                end = source_text.find('\n', start + len(literal))
+                definition_line = source_text[source_text.rfind('\n', 0, start) + 1:None if end < 0 else end]
+                short = entry.get('short')
+                if short is not None:
+                    # 名前の字面を含まない許す形を、項目ごとに明示して認める(design §6)。
+                    # 短い呼び名は名前の中の検査語 1 つ。印は定義の行に在る字面(終了値の番号・ほかの状態名など)。
+                    if not isinstance(short, dict) or set(short) != {'text', 'marks'}:
+                        raise ValueError(f'{name}: short は text・marks が必要')
+                    short_text, marks = short['text'], short['marks']
+                    if short_text not in [*terms, '縮退'] or not re.search(_wording_pattern(short_text), literal_name):
+                        raise ValueError(f'{name}: short の text は、名前に含まれる検査語 1 つにする')
+                    if (not isinstance(marks, list) or not marks
+                            or any(not isinstance(m, str) or not m.strip() or '\n' in m or '\r' in m for m in marks)
+                            or len(marks) != len(set(marks))):
+                        raise ValueError(f'{name}: short の marks は空・改行・重複のない文字列の配列が必要')
+                    for mark in marks:
+                        if not re.search(_wording_mark(mark), _wording_literal(definition_line)):
+                            raise ValueError(f'{name}: 印が定義の行に無い: {mark}')
+                        if any(re.search(_wording_pattern(word), mark) for word in [*terms, '縮退']):
+                            raise ValueError(f'{name}: 印に検査語がある: {mark}')
                 for key in ('files', 'forms'):
                     values = entry[key]
                     if (not isinstance(values, list) or not values
@@ -1003,18 +1040,22 @@ def read_wording_exceptions(targets, terms):
                     literal_form = _wording_literal(form)
                     if _wording_bare_reduced(form):
                         raise ValueError(f'{name}: 縮退だけを許す形は不可')
-                    # 終了値の状態名だけは、番号を省いた既存の参照形も登録する。
-                    # 「縮退」全体を含む前後の文脈を必須とし、他の語は隠さない。
-                    # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
-                    status_name = literal_name in ('30 縮退', '32 縮退')
-                    if not (literal_name in literal_form or status_name and '縮退' in literal_form):
+                    if literal_name in literal_form:
+                        rest = literal_form.replace(literal_name, _WORDING_GAP)
+                    elif short is not None:
+                        # 短い呼び名の形: 呼び名をちょうど 1 つと、印のどれかを含める。
+                        # 動詞の使い方(縮退する・縮退して続ける)は design §6 が書き換えを求めるので登録しない。
+                        short_pattern = _wording_pattern(short_text)
+                        if len(re.findall(short_pattern, literal_form)) != 1:
+                            raise ValueError(f'{name}: 短い呼び名をちょうど 1 つ含める: {form}')
+                        if re.search(short_pattern + _WORDING_VERB, literal_form):
+                            raise ValueError(f'{name}: 短い呼び名を動詞で使う形は不可: {form}')
+                        if not any(re.search(_wording_mark(mark), literal_form) for mark in marks):
+                            raise ValueError(f'{name}: 短い呼び名の形に印が無い: {form}')
+                        rest = re.sub(short_pattern, _WORDING_GAP, literal_form)
+                    else:
                         raise ValueError(f'{name}: 許す形に名前の字面がない: {form}')
-                    if status_name and _WORDING_REDUCED_VERB.search(literal_form):
-                        raise ValueError(f'{name}: 状態名の許す形に、縮退を動詞で使う形は不可: {form}')
-                    covered = '縮退' if status_name else literal_name
-                    rest = literal_form.replace(covered, _WORDING_GAP)
-                    if (status_name and literal_form.count('縮退') != 1
-                            or any(re.search(_wording_pattern(word), rest) for word in [*terms, '縮退'])):
+                    if any(re.search(_wording_pattern(word), rest) for word in [*terms, '縮退']):
                         raise ValueError(f'{name}: 許す形に名前以外の検査語がある: {form}')
                     if not any(form in body for body in contents.values()):
                         raise ValueError(f'{name}: 許す形が存在しない: {form}')
@@ -1066,7 +1107,7 @@ def wording_markdown():
         return None
 
 
-def wording_body(body, md):
+def wording_body(body, md, roles):
     """本文の (行番号, 表示文字列) を返す。見出し・コード・リンク先は数えない。"""
     # frontmatter は改行を残して除く。references でも同じ形だけを扱う。
     body = re.sub(r'\A---[ \t]*\n.*?^(?:---|\.\.\.)[ \t]*(?:\n|$)',
@@ -1078,7 +1119,7 @@ def wording_body(body, md):
             line = base + token.meta.get('wording_line', 0)
             if token.type == 'code_inline':
                 raw = token.meta['wording_raw']
-                text = raw if '\n' in raw else token.content if token.content in _WORDING_ROLES else _WORDING_GAP
+                text = raw if '\n' in raw else token.content if token.content in roles else _WORDING_GAP
             elif token.type in ('text', 'text_special'):
                 # 文字参照の生成改行は、元ファイルの行を増やさず語の間を分ける。
                 text = token.content.replace('\n', _WORDING_GAP)
@@ -1189,6 +1230,8 @@ def check_wording():
     md = wording_markdown()
     if exceptions is None or md is None:
         return
+    # 英字の語は、その語だけのインラインのコードの中も数える(design §6)。語は表から導く。
+    roles = {word for word in terms if _WORDING_ASCII.fullmatch(word)}
     for f in targets:
         rel = f.relative_to(REPO).as_posix()
         body = f.read_text(encoding='utf-8', errors='replace')
@@ -1202,7 +1245,7 @@ def check_wording():
             body = re.sub('|'.join(
                 re.escape(form) + (r'(?![*_`]*[しすさせそ])' if _wording_literal(form).endswith('縮退') else '')
                 for form in sorted(forms, key=len, reverse=True)), exclude, body)
-        lines = wording_body(body, md)
+        lines = wording_body(body, md, roles)
         for word, explanation in terms.items():
             pattern = _wording_pattern(word)
             found = [(no, _wording_explained(line, m, explanation))

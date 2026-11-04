@@ -1544,7 +1544,9 @@ class WordingTest(unittest.TestCase):
         pairs = [line.strip("| ").split(" | ") for line in table.splitlines()]
         self.assertEqual(27, len(pairs))
         for label, explanation in pairs:
-            terms = ("差し戻し", "差し戻す") if label == "差し戻し(差し戻す)" else (label,)
+            # 「X(Y)」の語は X と Y の両方を確かめる(表の字面から分ける)。
+            alias = re.fullmatch(r"([^()]+)\(([^()]+)\)", label)
+            terms = alias.groups() if alias else (label,)
             for term in terms:
                 with self.subTest(term=term):
                     self.assert_wording(f"{term}({explanation})。\n", [])
@@ -1792,46 +1794,91 @@ class WordingTest(unittest.TestCase):
         self.write(other, "「照合パターン」を使う。\n")
         self.assert_wording("「照合パターン」を使う。\n", [(self.first_error, "照合", 1)], other)
 
-    def test_numbered_reduced_status_names_have_only_local_narrow_forms(self):
+    def short_entry(self, form, name="32 縮退", marks=("32", "比較不能"),
+                    definition="**0** 正常終了 / **32** 縮退 / **33** 比較不能"):
+        """short(短い呼び名と印)を明示した項目。名前の字面を含まない形を許す。"""
+        entry = self.name_entry(name, form)
+        self.write("docs/wording-names.md", definition + "\n")
+        entry["definition"]["text"] = definition
+        entry["short"] = {"text": "縮退", "marks": list(marks)}
+        return entry
+
+    def test_short_name_forms_are_local_and_need_a_mark(self):
         other = f"{SKILLS_REL}/wording-test/references/other.md"
-        for name in ("30 縮退", "32 縮退"):
+        entry = self.short_entry("縮退の 32")
+        self.write_exceptions(names=[entry])
+        self.assert_wording("状態は縮退の 32。\n", [])
+        self.assert_wording("状態は縮退の 32。縮退する。\n", [(self.reduced_error, "縮退", 1)])
+        self.write(other, "状態は縮退の 32。\n")
+        self.assert_wording("状態は縮退の 32。\n", [(self.reduced_error, "縮退", 1)], other)
+        (self.repo / other).unlink()
+        # 印(終了値の番号・同じ表のほかの状態名)の無い形は登録できない。数字の印は前後の数字を見る。
+        for form in ("正常(縮退)", "縮退の 332", "縮退の 320"):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.short_entry(form)])
+                errors = self.assert_dictionary_error()
+                self.assertIn("印が無い", errors[0])
+        self.write_exceptions(names=[self.short_entry("「比較不能」は縮退ではない")])
+        self.assert_wording(None, [])
+        entry = self.short_entry("縮退")
+        self.write_exceptions(names=[entry])
+        self.assert_dictionary_error()
+
+    def test_name_string_alone_does_not_allow_forms_without_the_name(self):
+        # 名前の字面(30 縮退・32 縮退)では分岐しない。short の無い項目は、許す形に名前を含める。
+        for name, form in (("30 縮退", "exit 30 は縮退"), ("32 縮退", "縮退の 32")):
             with self.subTest(name=name):
-                entry = self.name_entry(name, "正常(縮退)")
+                entry = self.name_entry(name, form)
+                self.write("docs/wording-names.md", f"**{name.split()[0]}** 縮退\n")
+                entry["definition"]["text"] = f"**{name.split()[0]}** 縮退"
                 self.write_exceptions(names=[entry])
-                self.assert_wording("状態は正常(縮退)。\n", [])
-                self.assert_wording("状態は正常(縮退)。縮退する。\n", [
-                    (self.reduced_error, "縮退", 1),
-                ])
-                path = self.write(other, "状態は正常(縮退)。\n")
-                self.assert_wording("状態は正常(縮退)。\n", [(self.reduced_error, "縮退", 1)], other)
-                path.unlink()
-                entry["forms"] = ["縮退"]
+                errors = self.assert_dictionary_error()
+                self.assertIn("名前の字面がない", errors[0])
+
+    def test_short_field_is_validated(self):
+        # 印は定義の字面がある行に在るものだけ。同じファイルの別の行に在っても認めない。
+        entry = self.short_entry("縮退の 34", marks=("34",))
+        self.write("docs/wording-names.md", entry["definition"]["text"] + "\n34 は別の行\n")
+        self.write_exceptions(names=[entry])
+        self.assertIn("印が定義の行に無い", self.assert_dictionary_error()[0])
+        # 印に検査語を入れて、ほかの語を隠すことはできない。
+        entry = self.short_entry("縮退と照合パターン", marks=("照合パターン",),
+                                 definition="**32** 縮退 / 照合パターン")
+        self.write_exceptions(names=[entry])
+        self.assertIn("印に検査語", self.assert_dictionary_error()[0])
+        for short in ("縮退", {"text": "縮退"}, {"text": "照合", "marks": ["32"]},
+                      {"text": "状態", "marks": ["32"]}, {"text": "縮退", "marks": []},
+                      {"text": "縮退", "marks": ["32", "32"]}, {"text": "縮退", "marks": "32"},
+                      {"text": "縮退", "marks": ["32"], "extra": 1}):
+            with self.subTest(short=short):
+                entry = self.short_entry("縮退の 32")
+                entry["short"] = short
                 self.write_exceptions(names=[entry])
-                self.write(self.reference, "縮退\n")
                 self.assert_dictionary_error()
 
-    def test_status_name_forms_cannot_use_reduced_as_a_verb(self):
-        # 名前の字面を含まない状態名の形でも、design §6 が書き換えを求める動詞の形は登録できない。
-        for name in ("30 縮退", "32 縮退"):
-            for form in ("縮退する", "縮退して続ける", "exit 30 で縮退させる", "**縮退**せず"):
-                with self.subTest(name=name, form=form):
-                    self.write_exceptions(names=[self.name_entry(name, form)])
-                    errors = self.assert_dictionary_error()
-                    self.assertIn("動詞", errors[0])
+    def test_short_name_forms_cannot_use_reduced_as_a_verb(self):
+        # 名前の字面を含まない形でも、design §6 が書き換えを求める動詞の形は登録できない。
+        for form in ("32 で縮退する", "縮退して続ける(32)", "exit 32 で縮退させる", "**縮退**せず 32"):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.short_entry(form)])
+                errors = self.assert_dictionary_error()
+                self.assertIn("動詞", errors[0])
 
-    def test_status_name_forms_need_exactly_one_reduced(self):
-        for name in ("30 縮退", "32 縮退"):
-            for form in ("縮退・縮退", "正常(縮退)の縮退"):
-                with self.subTest(name=name, form=form):
-                    self.write_exceptions(names=[self.name_entry(name, form)])
-                    errors = self.assert_dictionary_error()
-                    self.assertIn("名前以外の検査語", errors[0])
+    def test_short_name_forms_need_exactly_one_short_name(self):
+        for form in ("縮退・縮退(32)", "縮退の 32 と縮退"):
+            with self.subTest(form=form):
+                self.write_exceptions(names=[self.short_entry(form)])
+                errors = self.assert_dictionary_error()
+                self.assertIn("ちょうど 1 つ", errors[0])
 
     def test_registered_form_ending_in_reduced_does_not_hide_a_verb(self):
-        for name, form in (("30 縮退", "exit 30 は縮退"), ("30 縮退", "**30** 縮退"),
-                           ("解決できないときの縮退", "解決できないときの縮退")):
+        # 項目ごとに定義のファイルを書き直すので、使う直前に作る。
+        for make in (lambda: self.short_entry("exit 32 は縮退"), lambda: self.short_entry("**32** 縮退"),
+                     lambda: self.name_entry("解決できないときの縮退", "解決できないときの縮退")):
+            entry = make()
+            form = entry["forms"][0]
             with self.subTest(form=form):
-                self.write_exceptions(names=[self.name_entry(name, form)])
+                self.write_exceptions(names=[entry])
                 self.assert_wording(f"{form}。\n", [])
                 self.assert_wording(f"{form}(終了値)。\n", [])
                 for verb in ("する。", "して続ける。", "させる。", "**する**。"):
@@ -1863,12 +1910,49 @@ class WordingTest(unittest.TestCase):
             original.replace(row, "| 照合 | |\n"),
             # 別々の語に同じ言い換え。語数は 27 のまま。
             original.replace("| 正本 | ほかが合わせる元 |", f"| 正本 | {self.explanation} |"),
+            # 括弧のある語は「X(Y)」の形だけ。
+            original.replace("| 差し戻し(差し戻す) |", "| 差し戻し(差し戻す |"),
         ):
             with self.subTest(design=design[-120:]):
                 path.write_text(design, encoding="utf-8")
                 errors = self.check()
                 self.assertTrue(errors)
                 self.assertTrue(all("27 語の表" in error for error in errors), errors)
+
+    def test_word_shapes_come_from_the_design_table(self):
+        # 英字の語と「X(Y)」の語の数え方は、検査の中の語の一覧ではなく、表の字面から導く。
+        path = self.repo / "docs/design.md"
+        design = path.read_text(encoding="utf-8")
+        for old, new in (("| checker | 設計書を点検する AI |", "| inspector | 設計書を点検する AI |"),
+                         ("| 差し戻し(差し戻す) |", "| 取り下げ(取り下げる) |")):
+            self.assertEqual(1, design.count(old))
+            design = design.replace(old, new)
+        path.write_text(design, encoding="utf-8")
+        self.assert_wording("`inspector`。\n", [(self.first_error, "inspector", 1)])
+        self.assert_wording("xinspector inspector-x `run inspector`\n", [])
+        self.assert_wording("inspector(設計書を点検する AI)。\n", [])
+        self.assert_wording("`checker`。checker。差し戻す。\n", [])
+        self.assert_wording("取り下げる。\n", [(self.first_error, "取り下げ", 1)])
+        self.assert_wording("取り下げ。\n", [(self.first_error, "取り下げ", 1)])
+        self.assert_wording("取り下げる(相手に返して、やり直してもらうこと)。取り下げ。\n", [])
+
+    def test_definition_path_cannot_leave_through_dotdot_or_symlink(self):
+        # docs/../x.md は、解決した先がリポジトリの中でも、.. を含むので受け付けない。
+        self.write("x.md", "# 照合パターン\n")
+        entry = self.name_entry()
+        entry["definition"]["path"] = "docs/../x.md"
+        self.write_exceptions(names=[entry])
+        self.assertIn("定義元のパスが範囲外", self.assert_dictionary_error()[0])
+        # リポジトリの外を指す symlink は、解決した先で受け付けない。
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        target = Path(outside.name) / "names.md"
+        target.write_text("# 照合パターン\n", encoding="utf-8")
+        (self.repo / "docs/link.md").symlink_to(target)
+        entry = self.name_entry()
+        entry["definition"]["path"] = "docs/link.md"
+        self.write_exceptions(names=[entry])
+        self.assertIn("定義元がリポジトリの外", self.assert_dictionary_error()[0])
 
     def test_exception_definition_must_exist(self):
         for field, value in (("path", "docs/missing.md"), ("text", "存在しない定義")):
@@ -1927,9 +2011,11 @@ class WordingTest(unittest.TestCase):
         labels = {}
         for row in table.splitlines():
             label = row.strip("| ").split(" | ")[0]
-            for word in ("差し戻し", "差し戻す") if label == "差し戻し(差し戻す)" else (label,):
+            alias = re.fullmatch(r"([^()]+)\(([^()]+)\)", label)
+            for word in alias.groups() if alias else (label,):
                 labels[word] = label
-        roles = {"team-lead", "implementer", "reviewer", "checker", "researcher"}
+        # 英字の語は、表の字面から「英字と - だけの語」として導く。
+        roles = {word for word in labels if re.fullmatch(r"[A-Za-z][A-Za-z-]*", word)}
 
         def protected(name):
             literal = re.sub(r"[`*_]", "", name)
@@ -1946,7 +2032,10 @@ class WordingTest(unittest.TestCase):
                 words = protected(entry["name"])
                 self.assertTrue(words, entry["name"])
                 # 定義元は、検査しない docs/ に置き換える(定義の実在は ValidateTest の全体の検査で見る)。
-                self.write("docs/wording-names.md", entry["definition"]["text"] + "\n")
+                # short の印は定義の行で探すので、実際の定義元から定義のある行をそのまま使う。
+                source = (SOURCE_REPO / entry["definition"]["path"]).read_text(encoding="utf-8")
+                line = next(row for row in source.splitlines() if entry["definition"]["text"] in row)
+                self.write("docs/wording-names.md", line + "\n")
                 for relative in entry["files"]:
                     for form in entry["forms"]:
                         pairs += 1
