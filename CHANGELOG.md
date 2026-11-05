@@ -2,6 +2,16 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 変更
+
+- タスク本文の復元を受け持つ補助 `restore-taskmd.py` の `stop_child` で、同じ 4 行を 3 回くり返していた。この 4 行を `reap_if_exited(child)` にまとめた。4 行は、子のプロセス(この補助が起動した `cp`)が終わっていれば `wait` で回収し(終わったことを受け取り)、`self.child` を空にして `True` を返す処理。外から見た動き(子に送る合図の順序・`wait` を呼ぶ回数・戻り値・終了コード・応答)は変わらない。待つ長さと間隔を決める行(`until` の計算・`while` の条件・`time.sleep`)は変えていない。([Issue #348](https://github.com/Yuki-Maeda-valour/workflow/issues/348))
+  - `stop_child` は 28 行から 22 行になった。`reap_if_exited` は 6 行。
+  - 先に、今の動きを固定するテストを `scripts/test_restore_taskmd.py` に 9 件足した。偽の子で `stop_child` を直接呼び、子に呼ぶメソッドの並び・戻り値・`self.child` が空(`None`)か・`self.child_unreaped` の値を照らす。
+    - 待ちの間に回収する 2 件は、`STOP_SECONDS` を置き換えずに既定の値で流す。ほかの 7 件は 0 に置き換える。
+    - まとめる前の版でも全件が通ることを確かめた。
+
 ## v4.43.0
 
 ### 変更
