@@ -5,10 +5,12 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -17,6 +19,38 @@ SOURCE = ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/loop-startup.py'
 spec = importlib.util.spec_from_file_location('loop_startup_tested', SOURCE)
 startup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(startup)
+
+# シェルのテストの 1 通りの確かめ(run_case の 1 回)を待つ上限の秒数。混んだ機械では環境変数で延ばす。
+CASE_TIMEOUT_VAR = 'LOOP_STARTUP_CASE_TIMEOUT'
+CASE_TIMEOUT_DEFAULT = 300
+# 前置きの見張りは、上限で TERM を送り、その 10 秒後に KILL を送る(timeout -k 10)。外側はその後に止める。
+OUTER_MARGIN = 30
+TIMEOUT_MARK = '時間切れ: '
+# 背景の loop.sh(start_bg)が子を起動した印を待つ秒数。start_bg は背景の loop.sh を 150 秒で止めるので、
+# 印の後に止める合図を処理する時間を残して、それより短くする。
+START_WAIT = 100
+WAIT_STARTED = f'''
+wait_started() {{ # $1=起動の印のパス。現れなければ、時間切れの文を標準エラーに出す
+  wait_file "$1" {START_WAIT} && return 0
+  printf '{TIMEOUT_MARK}起動の印 %s が {START_WAIT} 秒待っても現れない。混んだ機械では流し直す\\n' "${{1##*/}}" >&2
+  return 1
+}}
+'''
+
+
+def case_timeout():
+    """1 通りの上限の秒数。環境変数が無いか空なら既定の値。"""
+    raw = os.environ.get(CASE_TIMEOUT_VAR, '')
+    if raw == '':
+        return CASE_TIMEOUT_DEFAULT
+    if not re.fullmatch(r'[1-9][0-9]*', raw):
+        raise ValueError(f'{CASE_TIMEOUT_VAR} は 1 以上の整数の秒数にする: {raw!r}')
+    return int(raw)
+
+
+def timeout_message(limit, elapsed):
+    return (f'{TIMEOUT_MARK}{limit} 秒の上限に当たった({elapsed:.0f} 秒で止められた)。'
+            f'混んだ機械では {CASE_TIMEOUT_VAR} で延ばすか、流し直す')
 
 
 class Watch:
@@ -209,6 +243,7 @@ class StartupTests(unittest.TestCase):
 class StartupShellTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        cls.timeout = case_timeout()
         cls.tmp = tempfile.TemporaryDirectory(prefix='loop-startup-shell-')
         cls.root = Path(cls.tmp.name)
         # 同時作業中の source を試験途中に読み直さない。
@@ -242,12 +277,31 @@ class StartupShellTests(unittest.TestCase):
                     prefix = prefix.replace(repr(str(self.plugin / 'skills/ship-task/scripts')),
                                             repr(str(plugin / 'skills/ship-task/scripts')))
                 script = tmp / 'case.sh'
-                script.write_text(prefix + '\n' + body + '\ncat "$OUT"\nprintf "\\nCASE_RC=%s\\n" "$RC"\nexit 0\n')
-                env = {**os.environ, 'SENTINEL': str(sentinel), 'LOOP_SELFTEST_TIMEOUT': '100'}
-                result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True, timeout=120)
-                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                self.assertIn('CASE_RC=' + str(expected), result.stdout, result.stdout + result.stderr)
-                self.assertEqual(watch.events(), b'', result.stdout + result.stderr)
+                script.write_text(prefix + '\n' + WAIT_STARTED + '\n' + body
+                                  + '\ncat "$OUT"\nprintf "\\nCASE_RC=%s\\n" "$RC"\nexit 0\n')
+                limit = self.timeout
+                env = {**os.environ, 'SENTINEL': str(sentinel), 'LOOP_SELFTEST_TIMEOUT': str(limit)}
+                started = time.monotonic()
+                try:
+                    result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True,
+                                            timeout=limit + OUTER_MARGIN)
+                except subprocess.TimeoutExpired as error:
+                    output = ''.join(part.decode(errors='replace') if isinstance(part, bytes) else part
+                                     for part in (error.stdout or '', error.stderr or ''))
+                    self.fail(timeout_message(limit + OUTER_MARGIN, time.monotonic() - started) + '\n' + output)
+                elapsed = time.monotonic() - started
+                output = result.stdout + result.stderr
+                if result.returncode != 0:
+                    # 見張りの TERM で止まれば 124。別のプロセスグループの子(loop.sh)を待っている間は
+                    # TERM を処理できず、10 秒後の KILL で見張り自身も止まる(-9)。
+                    if result.returncode in (124, 137, -9) and elapsed >= limit:
+                        self.fail(timeout_message(limit, elapsed) + '\n' + output)
+                    expired = [line for line in result.stderr.splitlines() if line.startswith(TIMEOUT_MARK)]
+                    if expired:
+                        self.fail(expired[0] + '\n' + output)
+                self.assertEqual(result.returncode, 0, output)
+                self.assertIn('CASE_RC=' + str(expected), result.stdout, output)
+                self.assertEqual(watch.events(), b'', output)
                 return result.stdout
             finally:
                 watch.close()
@@ -301,7 +355,7 @@ addtask longsleep-a 2026-01-01
 commit
 newrec restart
 start_bg restart -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
-wait_file "$REC/started-longsleep-a" 35 || { cat "$BG_OUT"; exit 72; }
+wait_started "$REC/started-longsleep-a" || { cat "$BG_OUT"; exit 72; }
 kill -KILL "$BG_PID"
 wait_bg
 ''' + mutation + '''
@@ -317,7 +371,7 @@ addtask sync-b 2026-01-02
 commit
 newrec unchanged
 start_bg unchanged -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
-wait_file "$REC/started-longsleep-a" 35 || { cat "$BG_OUT"; exit 72; }
+wait_started "$REC/started-longsleep-a" || { cat "$BG_OUT"; exit 72; }
 kill -KILL "$BG_PID"
 wait_bg
 SD="$(state_dir unchanged)"
@@ -376,7 +430,7 @@ STOP_ARGS=()
 STOP_PATH="$R/@STOP_REL@"
 [ @STOP_REL@ = .claude/loop.stop ] || STOP_ARGS=(--stop-file "$STOP_PATH")
 start_bg stop-restart -- --repo "$R" "${STOP_ARGS[@]}" "${COMMON_ARGS[@]}"
-wait_file "$REC/started-longsleep-a" 35 || { cat "$BG_OUT"; exit 72; }
+wait_started "$REC/started-longsleep-a" || { cat "$BG_OUT"; exit 72; }
 mkdir -p "$(dirname "$STOP_PATH")"
 : >"$STOP_PATH"
 kill -KILL "$BG_PID"
@@ -607,7 +661,7 @@ addtask sync-c 2026-01-03
 commit
 newrec term-next-child
 start_bg term-next-child -- --repo "$R" --max-iterations 3 "${COMMON_ARGS[@]}"
-wait_file "$REC/started-longsleep-b" 35 || { cat "$BG_OUT"; exit 91; }
+wait_started "$REC/started-longsleep-b" || { cat "$BG_OUT"; exit 91; }
 CHILD="$(cat "$REC/pid-longsleep-b")"
 kill -TERM "$BG_PID"
 wait_bg
