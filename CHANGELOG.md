@@ -2,6 +2,23 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.43.4
+
+### 変更
+
+- `pending-implementation.py`(作業を始める前に、保護記録〈実装を外部の AI に任せる前に、作業中のファイルを控えた記録〉の候補を調べる補助)の `run_detail` から、判定の部分を関数 `decide_outcome(result, acknowledged, digests)` に移した。判定は、候補と確認値(人が候補を確かめたことを示す値)から、結果の値・終了コード・注記(stderr〈標準エラー〉へ出す固定の文)を決める部分。外から見た動き(stdout〈標準出力〉の JSON・stderr の全体・終了コード・`run` と `run_detail` の戻り値)は変わらない。([Issue #350](https://github.com/Yuki-Maeda-valour/workflow/issues/350))
+  - `decide_outcome` は 22 行で、引数だけから結果を計算し、`result` を書き換えない。
+  - 移した文(判定の部分と `notes = []`)は、字下げと最後の `return` の形のほかは元のまま。先頭に説明の文(docstring)を 1 行足した。
+  - `run_detail` は 66 行から 48 行になった。`decide_outcome` の後に、その結果を `result` に書く。
+  - 先に、今の動きを固定するテスト(動きを自動で確かめるプログラム)を `scripts/test_pending_implementation.py` に 3 件足した。照らすのは次の 3 つ。分ける前の版でも全件が通ることを確かめた。
+    - 候補と確認値の 8 つの組での、結果の値・終了コード・stderr の全体。次の組を含む: 一致する `identity` の確認値と、重なり(候補の記録が、今回の作業の場所と重なること)のある候補が同時にあるときに、重なりが勝って `list-changed` になることと、別プロジェクトの注記が先で重なりの注記が後になる順序
+    - 確認値の計算の後に、走査全体の 5 秒の上限に達したときに、終了コード 11・結果の値 `scan-unavailable` になり、`complete` が偽で、`list_sha256`・`identity_sha256` が出ないこと(最後の時間の確かめが、確認値の計算の後で、結果の書き込みの前にあること)
+    - 判定の中で想定外の失敗が起きたときに、終了コード 20・結果の値 `internal` になること
+  - 分けた後に、`decide_outcome` を直接呼ぶテストを 1 件足した。照らすのは次の 3 つ。
+    - 確認値なしと 3 つの確認値での戻り値
+    - 呼ぶ間に `os.open`・`os.stat`・`os.scandir`・`builtins.open`・`time.monotonic` の 5 つを呼ばないこと(呼ばれたら落ちるものに置き換える)
+    - `result` を書き換えないことと、stdout と stderr に何も出さないこと
+
 ## v4.43.3
 
 ### 変更
