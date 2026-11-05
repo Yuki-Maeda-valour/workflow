@@ -184,7 +184,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
                      'GNU `timeout` は診断の新しい必須条件にしない'):
             self.assertIn(text, runtime)
         for text in ('完全なJSONが届いても終了コードが非0なら成功ではない',
-                     '継承stdout/stderrのflagsは変更しない', '二度目の応答を出さない',
+                     '受け継いだ stdout/stderr のフラグ(開き方の設定)は変更しない', '二度目の応答を出さない',
                      '正当な大きい出力', '通常pipeの読み手停止'):
             self.assertIn(text, self.ref)
         # 診断追加で復元側の既存監督関数を消さない。

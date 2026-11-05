@@ -171,7 +171,7 @@ except (Exception, SystemExit) as exc:
      - あれば、発見の周の前提(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど。一覧は references/discover-mode.md §4)を確かめ、1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
      - 以後の手順 3〜6 と Phase 1〜5 は、discover-mode.md の工程(公開の確認 → 工程 D1〜D3 → Phase 5)に差し替える
    - `--unattended`(`--discover` が無いとき): `--task` が無ければ失敗扱い。
-     - `--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD(取り出しているコミット)がデフォルトブランチか detached HEAD〈コミットを直接取り出した状態〉(ローカルのデフォルトブランチの履歴の中)・メタ行がある・
+     - `--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD(いま取り出しているブランチかコミット)がデフォルトブランチか detached HEAD〈コミットを直接取り出した状態〉(ローカルのデフォルトブランチの履歴の中)・メタ行がある・
      - タスク MD が git の追跡下にある・ローカルの git 設定のダイジェスト(`git-config-digest.py`)を算出できる・origin の URL(`origin-repo.py`)、を検査し、git 設定のダイジェストと origin の判定を控える値として保持する(一覧・順序と理由は references/unattended-mode.md §1)。
      - 1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
      - 最後に本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(終了コード 0 以外は失敗扱い)。

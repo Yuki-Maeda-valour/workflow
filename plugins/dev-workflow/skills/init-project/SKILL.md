@@ -217,7 +217,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 | ② `AGENTS.md` のみ(完成形) | `AGENTS.md` は上書きせず追記提案のみ。`CLAUDE.md` は足さない |
 | ③ `CLAUDE.md` のみ(未移行) | **上書きしない。** 下の移行フロー(未移行からの移行)で承認を得られたときだけ移行する。未承認なら移行せず、現行どおり `CLAUDE.md` への追記提案に留める(`AGENTS.md` を作らない) |
 | ④-互換形(import あり・symlink を含む) | `AGENTS.md` への追記提案 + 下の移行フロー(互換形からの移行)の提案 |
-| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは、その references の文書の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は参照先の文書の (3) で、ここでは指すだけにする) |
+| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは、下の `authority-file-drift.md` の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は同じ文書の (3) で、ここでは指すだけにする) |
 | ④-判定できない(references の文書に到達できない) | `AGENTS.md` への追記提案のみ。互換形からの移行も import 行の追加も提案しない(共通規則 (3) を当てられないため)。判定できない旨を Phase 4 の生成物一覧に残す |
 
 **互換形の `CLAUDE.md` は Cursor CLI にも読まれる**ため、他ホストで有害・無意味になる指示は書かない(design §7-4)。
@@ -317,19 +317,19 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 - `github-issue` ではこの手順を行わず、タスク用ディレクトリ・`.gitkeep`・タスク MD を作らない。
 - Phase 1-8 で確定した保存先に `.gitkeep` を作る(タスクファイルは `進行中_{名}.md` → 完了時に同じディレクトリの `完了_{名}.md` へ改名(追跡済みなら `git mv`、未追跡なら `mv`。手段の正本は /do-task の Phase 7)。中断は `中断_`、保留は `保留_`、発見ループの採用前の候補は `候補_`)。
 
-**5. `.claude/settings.json`(permissions 初期セット+ opt: understand-project 強制 hook)**
+**5. `.claude/settings.json`(permissions 初期セット+ 任意: understand-project 強制 hook)**
 - **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。
   - 追加する一覧を提示してから書き込む。
   - サイクル(/tool-check・/do-task)実行時の許可プロンプトを減らすのが目的。
 - **hook(選択されたときのみ)**: `templates/settings-hooks.json.template` を読んでマージ。
 - `.claude/settings.json` が無ければ新しく書く。**既存があれば壊さずマージ**: 既存 JSON を読み、`permissions.allow` 配列・`hooks.*` 配列に**無いエントリだけ**追記する。他のキーは一切変更しない。マージ結果全体を書く。
 
-**6.（opt）specialist agents**
+**6.（任意）specialist agents**
 - 選択されたときのみ。検出スタックに応じ 1〜3 体、`templates/specialist-agent.md.template` から `.claude/agents/<name>.md` を生成。
 - 置換: `{{AGENT_NAME}}`(kebab-case、例 `ui-specialist` / `backend-specialist` / `db-specialist`)/ `{{AGENT_TITLE}}` / `{{AGENT_DESCRIPTION}}`(担当を 1 行で)/ `{{ONE_LINE_ROLE}}`。
   - 担当範囲・技術スタック・実装ルールは検出結果で埋め、不明な行はガイド文を残す。
 
-**7.（opt）MCP サーバー設定の生成(`.mcp.json` / `.codex/config.toml`)**
+**7.（任意）MCP サーバー設定の生成(`.mcp.json` / `.codex/config.toml`)**
 
 同じツールにどの AI からも繋ぐための、**profile の `mcp_servers` 宣言駆動**の生成(design §7-6)。詳細手順は [references/mcp-config-generation.md](references/mcp-config-generation.md) に外出しし、ここでは流れと承認・報告義務を書く。
 
