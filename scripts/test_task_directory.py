@@ -250,7 +250,8 @@ class TaskDirectoryResolverTest(unittest.TestCase):
 
     def test_helper_runs_from_copied_skills_distribution(self):
         copied = Path(self.temp.name) / "installed-skills"
-        shutil.copytree(REPO_ROOT / "plugins/dev-workflow/skills", copied)
+        # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
+        shutil.copytree(REPO_ROOT / "plugins/dev-workflow/skills", copied, ignore=shutil.ignore_patterns("__pycache__"))
         resolver = copied / "create-task/scripts/resolve-task-dir.py"
         code, result = self.run_resolver(resolver=resolver)
         self.assertEqual(0, code)
