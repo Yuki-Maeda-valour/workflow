@@ -12,9 +12,12 @@
 - テストは、ファイルが違えば別のプロセスで動く。環境変数・カレントディレクトリ・
   読み込んだモジュールは、プロセスの間で共有しない。
 - 終了コード: 全部のプロセスが成功なら 0。失敗・エラー・読み込みの失敗・件数の食い違いが
-  1 つでもあれば 1。引数の誤りは 2。Ctrl-C(SIGINT)で止めたら 130、SIGTERM で止めたら 143。
+  1 つでもあれば 1。引数の誤りは 2。止めたときは 128 + シグナルの番号
+  (Ctrl-C の SIGINT は 130、SIGTERM は 143、端末を閉じたときなどの SIGHUP は 129)。
 - 止めたときは、まだ始めていないプロセスを始めず、動いているプロセスをその子ごと止める
   (各プロセスを別のプロセスグループで起動し、グループごとに止める)。
+  グループへは SIGINT・SIGTERM・SIGKILL の順に送る。SIGINT なら Python の子が後片付け
+  (一時フォルダを消すなど)をしてから終われる。
 - 失敗したプロセスの出力は、最後にまとめて表示する。
 """
 
@@ -170,20 +173,39 @@ class Children:
             self.running.discard(process)
 
     def stop_all(self, grace=5.0):
-        """新しく始めないようにし、動いている子をグループごと止める。止めた数を返す。"""
+        """新しく始めないようにし、動いている子をグループごと止める。止めた数を返す。
+
+        グループへ SIGINT・SIGTERM・SIGKILL の順に送り、それぞれの後で、グループ全体が消えるまで
+        最大 grace 秒待つ。次の合図は、まだ消えないグループにだけ送る。
+        - SIGINT から始める: Python の子は KeyboardInterrupt で終わり、一時フォルダなどを片付けられる
+          (SIGTERM では片付けずに終わる)。
+        - 直接の子が終わっても待ちを打ち切らない: グループの中の孫(入れ子の run-tests.py など)が、
+          別のグループで起動した自分の子を止めて回収する時間を残すため。
+        """
         with self.lock:
             self.stopped = True
             running = list(self.running)
-        for sig in (signal.SIGTERM, signal.SIGKILL):
-            for process in running:
-                try:
-                    os.killpg(process.pid, sig)
-                except (ProcessLookupError, PermissionError):
-                    pass
+        groups = [process.pid for process in running]
+        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
+            for pgid in groups:
+                if group_alive(pgid):
+                    try:
+                        os.killpg(pgid, sig)
+                    except (ProcessLookupError, PermissionError):
+                        pass
             deadline = time.monotonic() + grace
-            while time.monotonic() < deadline and any(process.poll() is None for process in running):
+            while time.monotonic() < deadline and any(group_alive(pgid) for pgid in groups):
                 time.sleep(0.05)
         return len(running)
+
+
+def group_alive(pgid):
+    """プロセスグループに、まだプロセスが残っていれば True(止められないものは待たない)。"""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
 
 
 def run_job(job, workdir, flags, children):
@@ -203,6 +225,11 @@ def run_job(job, workdir, flags, children):
     except (OSError, ValueError):
         data = None
     return job, process.returncode, output, elapsed, data
+
+
+# Ctrl-C(SIGINT。KeyboardInterrupt になる)のほかに受けて止めるシグナル。子は別のセッションにいるので、
+# 端末を閉じたときの SIGHUP は親だけに届く。親だけが終わって子が孤児にならないよう、受けて止める。
+INTERRUPT_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name))
 
 
 def raise_interrupt(signum, frame):
@@ -253,8 +280,9 @@ def main(argv=None):
     started = time.monotonic()
     results = []
     children = Children()
-    # SIGTERM も Ctrl-C と同じく止める(子を残して親だけが終わらないように)。
-    signal.signal(signal.SIGTERM, raise_interrupt)
+    # SIGTERM・SIGHUP も Ctrl-C と同じく止める(子を残して親だけが終わらないように)。
+    for sig in INTERRUPT_SIGNALS:
+        signal.signal(sig, raise_interrupt)
     print(f"{len(files)} ファイル・{len(jobs)} プロセスを、同時に {args.jobs} 個まで流す", flush=True)
     with tempfile.TemporaryDirectory(prefix="run-tests-") as workdir, \
             concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
@@ -269,10 +297,10 @@ def main(argv=None):
                 results.append((job, code, output, elapsed, data, ok))
         except KeyboardInterrupt as exc:
             # 待ち行列のジョブを捨て、動いているプロセスを止める。with を出るときは、止めたジョブだけを待つ。
-            signum = exc.args[0] if exc.args and exc.args[0] == signal.SIGTERM else signal.SIGINT
-            # 止めている間の 2 回目の Ctrl-C で、片付けが途中で切れないようにする。
-            signal.signal(signal.SIGINT, signal.SIG_IGN)
-            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            signum = exc.args[0] if exc.args and exc.args[0] in INTERRUPT_SIGNALS else signal.SIGINT
+            # 止めている間の 2 回目の合図で、片付けが途中で切れないようにする。
+            for sig in (signal.SIGINT, *INTERRUPT_SIGNALS):
+                signal.signal(sig, signal.SIG_IGN)
             dropped = sum(future.cancel() for future in futures)
             killed = children.stop_all()
             print(f"\n中断: 動いていた {killed} 個のプロセスを止め、まだ始めていない {dropped} 個を始めずに捨てた"
