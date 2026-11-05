@@ -2004,7 +2004,7 @@ class WordingTest(unittest.TestCase):
 
     def test_name_string_alone_does_not_allow_forms_without_the_name(self):
         # 名前の字面(30 縮退・32 縮退)では分岐しない。short の無い項目は、許す形に名前を含める。
-        for name, form in (("30 縮退", "exit 30 は縮退"), ("32 縮退", "縮退の 32")):
+        for name, form in (("30 縮退", "終了コード 30 は縮退"), ("32 縮退", "縮退の 32")):
             with self.subTest(name=name):
                 entry = self.name_entry(name, form)
                 self.write("docs/wording-names.md", f"**{name.split()[0]}** 縮退\n")

@@ -309,7 +309,7 @@
         "plugins/dev-workflow/skills/do-task/references/external-runners.md"
       ],
       "forms": [
-        "exit 30 は縮退",
+        "終了コード 30 は縮退",
         "**30** 縮退",
         "縮退(終了値 30)"
       ],

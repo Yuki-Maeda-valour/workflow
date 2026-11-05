@@ -72,15 +72,15 @@ class DiagnosticCallerContractTests(unittest.TestCase):
                      '全候補', 'acknowledged'):
             self.assertIn(word, route)
         old = section(self.ref, '## 9.', '## 10.')
-        for word in ('context欠落', '起動前計画なし', '22', '補完しない', '通常内蔵5読取り', '削除しない'):
+        for word in ('対象の情報(context)の欠落', '起動前計画なし', '22', '補完しない', '通常内蔵5読取り', '削除しない'):
             self.assertIn(word, old)
 
     def test_new_plan_is_kept_on_run_failure_and_unknown_extension_stops(self):
         flow = section(self.ref, '## 5.', '## 6.')
-        self.assertLess(flow.index('新しい計画のパスとhashを先に保持'), flow.index('`run` に渡す'))
+        self.assertLess(flow.index('新しい計画のパスとハッシュ値を先に保持'), flow.index('`run` に渡す'))
         for word in ('最新派生計画を保持', '古い計画へ戻らない',
                      '旧計画で `run` や `extend-plan` を反復せず', '人の証拠照合',
-                     'hashを取り直す', '自動で起動前計画を作り直す'):
+                     'ハッシュ値を取り直す', '自動で起動前計画を作り直す'):
             self.assertIn(word, flow)
         cleanup = section(self.ext, '診断用の最新計画パス/hashも', '**受け入れた限界**')
         for word in ('元の保護記録・入力計画・公開済み派生計画を削除しない',
@@ -117,7 +117,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
             self.assertNotIn('消さないのは比較不能とタスク MD の判断待ちだけ', text)
         for word in ('失敗・途絶・不正応答', 'PyYAML', '不正なprofile', '出力先の競合'):
             self.assertIn(word, preparation)
-        self.assertIn('残存ファイルからhashを取り直して採用しない', preparation)
+        self.assertIn('残存ファイルからハッシュ値を取り直して採用しない', preparation)
 
     def test_schema_and_each_variant_are_public_not_only_names(self):
         schema = section(self.ref, '## 10.', '## 11.')
@@ -183,7 +183,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
                      'すべて不在なら PyYAML を要求しない', 'macOS 実機は未確認',
                      'GNU `timeout` は診断の新しい必須条件にしない'):
             self.assertIn(text, runtime)
-        for text in ('完全なJSONが届いても終了値が非0なら成功ではない',
+        for text in ('完全なJSONが届いても終了コードが非0なら成功ではない',
                      '継承stdout/stderrのflagsは変更しない', '二度目の応答を出さない',
                      '正当な大きい出力', '通常pipeの読み手停止'):
             self.assertIn(text, self.ref)

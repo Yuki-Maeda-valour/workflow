@@ -27,7 +27,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
   - **確認を提示して応答を受け取れない実行(非対話)では生成せず、理由を報告する**(design §7-6・§5-9。判定は機械的な手段を持たない運用上の義務。手順は Phase 3-7)。
 - **構成の設置だけを行う。** 既存プロジェクトのソースコード・既存ドキュメントの中身の改善(リファクタ・修正・書き直し)には踏み込まない。気づいた改善点があっても報告に「後続候補」として列挙するに留め、実施は /understand-project → /stack-research → /create-task(リファクタは --refactor)→ /do-task のサイクルに委ねる。
 - **profile が無くても他 skill が動く。** ここで生成する `.claude/project-profile.yml` は各 skill の検出を助ける補助であり、必須ではない。最小限の検出値だけ埋める。
-- **テンプレは Read → 置換 → Write。** テンプレートは本スキルの `templates/`(この SKILL.md と同階層)に置いてある。Read し、`{{PLACEHOLDER}}` を検出値に置換してから対象パスへ Write する。値が不明な箇所は「（〜を記述）」等のガイド文を残したまま出力してよい。
+- **テンプレは読む → 置換 → 書く。** テンプレートは本スキルの `templates/`(この SKILL.md と同階層)に置いてある。読んで、`{{PLACEHOLDER}}` を検出値に置換してから対象パスへ書く。値が不明な箇所は「（〜を記述）」等のガイド文を残したまま出力してよい。
 - **委託(作業を別の AI に任せること)の解決は解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)に従う。**
   - 役割語(AI の役割の名前。`researcher`〈調べものを受け持つ AI〉 / `implementer`〈実装を受け持つ AI〉 / `reviewer`〈変更を確かめる AI〉 / `checker`〈設計書を点検する AI〉)
   - からホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [../do-task/references/delegation-map.md](../do-task/references/delegation-map.md) を参照する(本文に現れる API 名・モデルエイリアスはホスト = Claude Code での解決)。
@@ -65,7 +65,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - コード有無: マニフェストもソースも無ければ `has_code: false`(ドキュメントのみ。品質ゲート〈書式・型・テスト・ビルドの自動の検査〉をスキップ)。
 
 **3. リポジトリ構成**
-- `pnpm-workspace.yaml` / `package.json` の `workspaces` → **monorepo**。
+- `pnpm-workspace.yaml` / `package.json` の `workspaces` → **monorepo**(複数のパッケージを 1 つのリポジトリに置く構成)。
 - `<root>` 直下に `.git` が無く、子ディレクトリ側に本体の git / マニフェストがある(AI 管理リポジトリ下に本体が独立) → **parent-child**(`root` を本体側に向ける)。
 - どちらでもない → **single**。
 
@@ -81,7 +81,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 - ④ のときは、**ルートの `CLAUDE.md` 自身**に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(1) import の判定」を当てる
   - (**(2) のドリフト〈文書や設定と実際との食い違い〉判定は使わない** — 使うと、import を持たない中身入りの `CLAUDE.md` と import を持つ `CLAUDE.local.md` がある構成まで互換形に分類してしまう)。
   - import あり(symlink を含む)= 互換形、import なし = そうでない、に分ける。
-  - **参照先に到達できない構成(skill 単体のコピー)では、この分岐だけ「import の有無を判定できない」と報告する**(① 〜 ③ の分類は reference 無しで動く)。**この場合は追記提案だけを行い、互換形からの移行の提案とルートの `CLAUDE.md` への import 行の追加の提案は、どちらも見送る**
+  - **参照先に到達できない構成(skill 単体のコピー)では、この分岐だけ「import の有無を判定できない」と報告する**(① 〜 ③ の分類は references の文書が無くても動く)。**この場合は追記提案だけを行い、互換形からの移行の提案とルートの `CLAUDE.md` への import 行の追加の提案は、どちらも見送る**
   - (design §6。参照先に届かないときは、その機能を止めて報告する)。
 - ③ のときは、**他ツール・CI が `CLAUDE.md` を直接参照していないか**を調べて控える(Phase 3-1 の移行提案で提示する)。④-互換形のときも同様に調べる(互換形からの移行の提案に含める)。`grep -rn 'CLAUDE\.md' --exclude-dir=.git .` 相当で CI 設定・スクリプト・README・ドキュメント・エディタ設定を横断する。
 - **応答の口調を決めた節を調べる**(Phase 2 の口調の質問と、Phase 3-1 の「応答の書き方」節に使う)。
@@ -150,8 +150,8 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 | 決めること | 選択肢 | 既定(推奨) |
 |---|---|---|
 | 応答の口調(Phase 1-5 の結果で分ける。下の「応答の口調の質問」) | 報告調 / 標準 / プロジェクトの指示ファイルに口調を入れない | 報告調(口調を決めた別の節があれば、そのまま残す) |
-| understand-project 強制 hook | 導入する / しない | しない(opt-in) |
-| specialist agents 生成 | する(検出スタックに応じた雛形) / しない | しない(opt-in) |
+| understand-project 強制 hook | 導入する / しない | しない(選んだときだけ入れる) |
+| specialist agents 生成 | する(検出スタックに応じた雛形) / しない | しない(選んだときだけ作る) |
 | ブラウザ分析 MCP(API・画面の実測分析を使う予定) | 使う / 使わない | 使わない(必要時に後から) |
 | デザイン連携 MCP(Figma 等を使うか) | 設定手順を案内 / スキップ | スキップ |
 | タスクの置き場(origin が GitHub で `gh` があるときだけ) | ファイル(推奨) / GitHub Issue | ファイル |
@@ -197,11 +197,11 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 ## Phase 3: 生成
 
-Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と確認結果で以下を生成する。各テンプレは `templates/` から Read → `{{PLACEHOLDER}}` 置換 → Write。
+Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と確認結果で以下を生成する。各テンプレは `templates/` から読む → `{{PLACEHOLDER}}` 置換 → 書く。
 
 **1. 権威参照ファイル(正本 `AGENTS.md`)**(`templates/AGENTS.md.template`)
 - **正本は `AGENTS.md`**。
-  - 置換: `{{PROJECT_NAME}}`(ディレクトリ名 or 検出名) / `{{OVERVIEW}}`(検出できた概要 or ガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) /
+  - 置換: `{{PROJECT_NAME}}`(ディレクトリ名か検出名) / `{{OVERVIEW}}`(検出できた概要かガイド文) / `{{PM}}` / `{{COMMANDS}}`(検出した品質・開発コマンドを bash 行で) /
   - `{{COMPLETION_CHECK}}`(完了時に回す最小コマンド、例 `` `pnpm check` と `pnpm typecheck` ``) / `{{DOC_REFERENCES}}` / `{{TASK_DIR}}` / `{{TASK_STORE_NOTICE}}` / `{{RESPONSE_STYLE}}`(下の「応答の書き方」節の項)。
 - `{{TASK_STORE_NOTICE}}` は `github-issue` のとき、次の1行に置換する。`file` なら行だけを消す(見出しと表の間の空行は1つ残す)。既存ファイルには、同じ行が無いときだけ追記を提案する。
   - タスクの置き場は GitHub Issue(`.claude/project-profile.yml` の `task_store`)。この設定を読まない古い版の skill では、ローカルのタスク MD を作らない。
@@ -217,8 +217,8 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 | ② `AGENTS.md` のみ(完成形) | `AGENTS.md` は上書きせず追記提案のみ。`CLAUDE.md` は足さない |
 | ③ `CLAUDE.md` のみ(未移行) | **上書きしない。** 下の移行フロー(未移行からの移行)で承認を得られたときだけ移行する。未承認なら移行せず、現行どおり `CLAUDE.md` への追記提案に留める(`AGENTS.md` を作らない) |
 | ④-互換形(import あり・symlink を含む) | `AGENTS.md` への追記提案 + 下の移行フロー(互換形からの移行)の提案 |
-| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは reference の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は reference の (3) で、ここでは指すだけにする) |
-| ④-判定できない(reference に到達できない) | `AGENTS.md` への追記提案のみ。互換形からの移行も import 行の追加も提案しない(共通規則 (3) を当てられないため)。判定できない旨を Phase 4 の生成物一覧に残す |
+| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは、その references の文書の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は reference の (3) で、ここでは指すだけにする) |
+| ④-判定できない(references の文書に到達できない) | `AGENTS.md` への追記提案のみ。互換形からの移行も import 行の追加も提案しない(共通規則 (3) を当てられないため)。判定できない旨を Phase 4 の生成物一覧に残す |
 
 **互換形の `CLAUDE.md` は Cursor CLI にも読まれる**ため、他ホストで有害・無意味になる指示は書かない(design §7-4)。
 
@@ -229,10 +229,10 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   1. 他ツール・CI からの `CLAUDE.md` 参照の一覧(Phase 1-5 で調べたもの)。参照があれば「移行すると壊れる箇所」であり、参照側の更新が別途必要になることを明示する。
   2. **残る CLAUDE.md 系**(2026-09-21 決定 15): 移行後に残る CLAUDE.md 系
      - (`CLAUDE.local.md` / `.claude/CLAUDE.md` のうちルートに残るもの)に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の「(2) ドリフト判定」を当て、
-     - **削除後の最終状態がドリフトになるときだけ**、「(互換形から移すと削除後に / 未移行から完成形を選ぶと)この環境で `AGENTS.md` が読まれなくなる」と対処 2 つ(reference の (2) が示す import の追加・ユーザー設定の変更)を警告する。
+     - **削除後の最終状態がドリフトになるときだけ**、「(互換形から移すと削除後に / 未移行から完成形を選ぶと)この環境で `AGENTS.md` が読まれなくなる」と対処 2 つ(その references の文書の (2) が示す import の追加・ユーザー設定の変更)を警告する。
      - **残るファイルには書き込まない**。
      - **ドリフトにならない場合も、残る CLAUDE.md 系の一覧は提示する**。
-     - reference に到達できない構成では、残る CLAUDE.md 系が**存在することだけ**を示し、「import の有無は判定できない」と添えて、承認の判断を利用者に委ねる。
+     - その references の文書に到達できない構成では、残る CLAUDE.md 系が**存在することだけ**を示し、「import の有無は判定できない」と添えて、承認の判断を利用者に委ねる。
   3. **移行先の共有**: git 管理下で `.claude/rules/claude-code.md` が ignore 対象なら、「移行先は共有されない。`.gitignore` の見直しが要る」と示す(`.gitignore` の書き換えは提案に留める)。
   4. **移行内容**: どの記述がどこへ行くか。
      - `.claude/rules/claude-code.md` が既にあれば、既存の行に触れず末尾へ追記する形で含める。
@@ -255,7 +255,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   **未移行からの移行(完成形か互換形へ)**: 既定は**完成形**(記述を `AGENTS.md` へ移し `CLAUDE.md` を削除)。
   - **`AGENTS.md` を直接読めない環境で使う人がいる、または `CLAUDE.md` への外部参照があるときだけ**互換形を選べる(`templates/CLAUDE.md.template` の import 1 行に置き換える)。
   - 互換形が選ばれたら、どちらの条件に当たるかを回答として受け取り、Phase 4 の生成物一覧に理由として記録する。**どちらにも当たらなければ完成形を勧めて確認し直し、それでも当たらないときは互換形では移行しない**(選択肢を「完成形で移行 / 移行しない」に戻す)。
-  - **どちらの形でも Claude Code 固有の記述は `.claude/rules/claude-code.md` へ移す**(2026-09-21 決定 12)。振り分けは skill が案を作る。目安は「Claude Code の機構(スラッシュコマンド・hooks・設定ファイル・plugin など)に依存し、他ホストでは意味を持たない記述」。
+  - **どちらの形でも Claude Code 固有の記述は `.claude/rules/claude-code.md` へ移す**(2026-09-21 決定 12)。振り分けは skill が案を作る。目安は「Claude Code の機構(スラッシュコマンド・hooks・設定ファイル・プラグインなど)に依存し、他ホストでは意味を持たない記述」。
   - **判別に迷う記述は skill が行き先を決めず「保留」として示し、利用者に振り分けてもらう。保留が 1 件でも残る間は `CLAUDE.md` の削除・置換を実行しない**。
   - 保留の振り分けと互換形の理由の確認は、承認の質問と同じやりとりの中で行う。
 
@@ -263,7 +263,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 
 - **「応答の書き方」節**(雛形の `## 応答の書き方`。中身は、`CLAUDE.md` の移行〈互換形からと未移行からのどちらも〉があれば、移行を終えた後の最終状態で決める。ファイルと見出しも移行の後のものを使う。どの場合も既存の記述は書き換えない):
   - **「応答の書き方」節が無い**: 節を入れる(① は生成、② ③ ④ は追記提案)。`{{RESPONSE_STYLE}}` は次のとおり置き換える:
-    - Phase 1-5 でどちらの節も無かった: 選んだ型のファイル(報告調は `templates/response-tone/tone-report.md.template`、標準は `templates/response-tone/tone-standard.md.template`)を Read し、その中身で置き換える
+    - Phase 1-5 でどちらの節も無かった: 選んだ型のファイル(報告調は `templates/response-tone/tone-report.md.template`、標準は `templates/response-tone/tone-standard.md.template`)を読み、その中身で置き換える
     - 権威参照ファイルに口調を決めた別の節がある: 「口調は「<ファイル>」の「<見出し>」の節に従う」の 1 行で置き換える。
       - 「手で直す」を選んだときも同じ 1 行にし、選んだ型の中身は Phase 4 で示す(書き込まない)。
       - ④-import なしで `CLAUDE.md` の口調の節を指すときは、import 行の追加が承認され、その行を `CLAUDE.md` の 1 行目に入れたときだけ、この 1 行を書く
@@ -275,15 +275,15 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   - **書き方の決まりのファイルに届かない**: 既存の指示ファイルがある分類(② ③ ④)では、「応答の書き方」節の追記を提案せず、届かないことを Phase 4 の一覧に書く(口調の節を見分けられないため)。① では判定が要らないので、口調の質問の答えで節を入れる
 
 **2. .claude/project-profile.yml**(`templates/project-profile.yml.template`)
-- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(single・monorepo は `.`、parent-child は本体パス) / `{{TASK_STORE}}` / `{{TASK_DIR}}` / `{{HAS_CODE}}` /
+- 置換: `{{PROJECT_NAME}}` / `{{REPO_LAYOUT}}` / `{{ROOT}}`(`single`・`monorepo` は `.`、`parent-child` は本体パス) / `{{TASK_STORE}}` / `{{TASK_DIR}}` / `{{HAS_CODE}}` /
   - `{{PACKAGE_MANAGER}}` / `{{SOURCE_OF_TRUTH}}` / `{{QUALITY_BLOCK}}` / `{{MCP_SERVERS_BLOCK}}` /
-  - `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の version を Read して埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
+  - `{{WORKFLOW_VERSION}}`(このスキルが属するプラグインの `.claude-plugin/plugin.json` の `version` を読んで埋める。取得できない導入形態〈コピー導入等〉では管理メタ 2 行を省略) / `{{DATE}}`(今日の日付)。
 - Phase 1-7 で既存メモリを列挙した場合、推定した対応表を `memory_map` として有効化した形で提案する(確定は生成内容の提示時にユーザーが確認)。
 - `{{QUALITY_BLOCK}}` は検出した品質コマンドを 2 スペースインデントの `key: value` で列挙(例 `  format: pnpm format`)。build はロジック依存が薄いプロジェクトなら `build_optional: true` を添える。検出ゼロなら `{}` にして自動検出へ委ねる旨のコメントを残す。
 - **`{{MCP_SERVERS_BLOCK}}`**(参考実装: `{{QUALITY_BLOCK}}`)は Phase 2 の起点質問・ブラウザ分析の質問で承認された `mcp_servers` 宣言を埋め込む。
   - **承認された宣言が無い既定では、`features` ブロックと同じ全行コメントの例示**(`# mcp_servers:` 以下に `<id>: {command, args}` の書き方を示すコメント行)を出す。
   - **承認された宣言があれば、コメントではない有効な YAML** として `mcp_servers:` 以下に `<id>` ごとの `command` / `args` を書く。
-  - この置換の実行順序は Phase 3-7 の「1 回の実行内の順序」に従う(先に profile へ書き込み、その profile を Read して Phase 3-7 が 2 形式を生成する)。
+  - この置換の実行順序は Phase 3-7 の「1 回の実行内の順序」に従う(先に profile へ書き込み、その profile を読んで Phase 3-7 が 2 形式を生成する)。
   - **⚠ 注入する YAML の引用形**: **フロースタイルで、`command` / `args` の要素は必ずシングルクォート `'…'` で囲む**(例: `'serena': {command: 'uvx', args: ['--from', 'C:\path\mcp.exe']}`)。
     - 値に `'` が含まれる場合は `''` に二重化する。
     - **ダブルクォートは使わない** — YAML のダブルクォートは JSON と同様にエスケープ処理をするため、`C:\path\mcp.exe` のような Windows パスを含む宣言が `ScannerError` になる(シングルクォートはエスケープ処理をしないので `\` をそのまま持てる)。
@@ -321,8 +321,8 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 - **permissions 初期セット(常時)**: Phase 1 で検出した品質コマンド・db 系 scripts に対応する `permissions.allow` エントリを生成する(例: `Bash(pnpm check:*)` `Bash(pnpm test:*)` — **実在する scripts の実行形のみ**。推測でパターンを作らない)。
   - 追加する一覧を提示してから書き込む。
   - サイクル(/tool-check・/do-task)実行時の許可プロンプトを減らすのが目的。
-- **hook(選択されたときのみ)**: `templates/settings-hooks.json.template` を Read してマージ。
-- `.claude/settings.json` が無ければ新規 Write。**既存があれば壊さずマージ**: 既存 JSON を Read し、`permissions.allow` 配列・`hooks.*` 配列に**無いエントリだけ**追記する。他のキーは一切変更しない。マージ結果全体を Write する。
+- **hook(選択されたときのみ)**: `templates/settings-hooks.json.template` を読んでマージ。
+- `.claude/settings.json` が無ければ新しく書く。**既存があれば壊さずマージ**: 既存 JSON を読み、`permissions.allow` 配列・`hooks.*` 配列に**無いエントリだけ**追記する。他のキーは一切変更しない。マージ結果全体を書く。
 
 **6.（opt）specialist agents**
 - 選択されたときのみ。検出スタックに応じ 1〜3 体、`templates/specialist-agent.md.template` から `.claude/agents/<name>.md` を生成。
@@ -333,7 +333,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 
 同じツールにどの AI からも繋ぐための、**profile の `mcp_servers` 宣言駆動**の生成(design §7-6)。詳細手順は [references/mcp-config-generation.md](references/mcp-config-generation.md) に外出しし、ここでは流れと承認・報告義務を書く。
 
-- **入力と順序**(1 回の実行内): Phase 3-2 で提案・承認された宣言を profile に有効な形で書き込む → 本 Phase がその profile を Read して 2 形式を生成する。既存 profile がある場合は既存の `mcp_servers` を入力にする。**既存宣言が無く新規宣言もしない場合は、生成対象ゼロで正常終了する**(エラーにしない)。
+- **入力と順序**(1 回の実行内): Phase 3-2 で提案・承認された宣言を profile に有効な形で書き込む → 本 Phase がその profile を読んで 2 形式を生成する。既存 profile がある場合は既存の `mcp_servers` を入力にする。**既存宣言が無く新規宣言もしない場合は、生成対象ゼロで正常終了する**(エラーにしない)。
 - **代表エントリ**(Phase 2 の起点の質問とブラウザ分析の質問が profile へ提案する具体値。**コマンド・引数は変わりうるため、導入時に各公式ドキュメントの最新手順を確認**し、差異があればそちらを優先):
   - Serena(要 `uv`。無ければ提案せず導入手順の案内に切替):
     - `'serena': {command: 'uvx', args: ['--from', 'git+https://github.com/oraios/serena', 'serena', 'start-mcp-server', '--context', 'ide-assistant', '--project', '.']}`
@@ -348,7 +348,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   - `args` を省略した宣言では出力側でも `args` を出さない(空配列は `args: []` / `args = []`)。
 - **`uv` が無いときの代わりの手段**(Serena)は維持する: 宣言があっても実行ファイルが無ければ生成せず導入手順の案内に切替える。
 - **Figma 等 url 型**: `url` を受け付けないため宣言できず、**現状の「案内のみ」を維持**する(例: Figma デスクトップアプリで Dev Mode MCP Server を有効化 → 表示されたエンドポイントを `.mcp.json` に登録)。
-  - **この手編集エントリは宣言に載らないため `.codex/config.toml` へは展開されず、Claude Code 専用のまま残る**旨を案内に添える(design §7-6 の目的に対する既知の穴。`url` を受け付けられるようになれば別 issue で宣言化する)。
+  - **この手編集エントリは宣言に載らないため `.codex/config.toml` へは展開されず、Claude Code 専用のまま残る**旨を案内に添える(design §7-6 の目的に対する既知の穴。`url` を受け付けられるようになれば別の Issue で宣言化する)。
 - **承認(信頼モデルの明示的な例外。design §7-6)**: 生成に先立ち、解決後の宣言(サーバー名・`command`・`args`)と**生成先(`.mcp.json` / `.codex/config.toml` の両方のパス)を提示**して**ユーザーのセッション内明示承認**を得る。
   - **既定は 2 形式とも生成する**が、ユーザーがその場でホスト単位の除外を申し出た場合は該当ホストの生成だけをスキップする。
   - 「profile に書いてある = 承認済み」とは扱わず、**宣言が変わるたびに承認を取り直し、`--yes` でも省略しない**。
@@ -360,16 +360,16 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   - 「宣言が変わった」は生成対象ファイルの現在の内容と解決後の宣言の差分で判定する(別途の状態ファイルは作らない)。
   - 2 形式で結果が異なった場合はそれも報告する。
 - **`.codex/config.toml` の生成(新規)**: 形は `[mcp_servers.<id>]` + `command` + `args`(design §7-3)。
-  - **append-only**(既存行・コメント・キー順序に一切触れない。**全体 Write は行わない(パース失敗時の復元だけが例外。references §3)**)。
+  - **append-only**(既存行・コメント・キー順序に一切触れない。**全体を書き直さない(パース失敗時の復元だけが例外。references §3)**)。
   - **既存 id の判定と内容比較・退避条件・改行終端・生成後のパース検証とロールバック・貼り付け用スニペットの手順・恒久的な限界は** [references/mcp-config-generation.md](references/mcp-config-generation.md) **が正本**(同じ事実を 2 箇所に書かない。§7-2)。
 - **Codex のカスタムエージェント定義は生成しない**(2026-09-09 決定 11・design §7-6)。プロジェクトスコープで生成するのは `.codex/config.toml` の MCP のみ。
 
 **8. `.gitignore` の整備と git init**
-- `templates/gitignore.snippet` を Read し、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。
-  - 対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ `.claude/grasp.md`(把握キャッシュ)/ hook の state ファイル / `.env` 系(`!.env.example` は共有)/ `export/`(export-doc の出力)。
+- `templates/gitignore.snippet` を読み、**既存 `.gitignore` に無い行だけ**追記する(無ければ新規作成)。
+  - 対象: `.claude/settings.local.json` / `.claude/reviews/`(skill のレビューログ)/ `.claude/grasp.md`(把握キャッシュ)/ hook の状態ファイル / `.env` 系(`!.env.example` は共有)/ `export/`(export-doc の出力)。
   - 並行作業用の worktree の置き場 `.claude/worktrees/` も対象(design §5-26)。
 - `.env` 系が**既に git 管理されている**場合は、追記だけでは除外されないため警告し、対応(`git rm --cached` 等)はユーザーに委ねる。
-- `.git` が無い場合(新規): タスク運用(/do-task の diff スナップショット・/ship-task の commit と PR)が git 前提であることを伝え(完了時の改名だけは git が無くても `mv` で動く)、`git init` を提案する(不要と言われたら task 運用の制約を案内する)。
+- `.git` が無い場合(新規): タスク運用(/do-task の diff スナップショット・/ship-task の commit と PR)が git 前提であることを伝え(完了時の改名だけは git が無くても `mv` で動く)、`git init` を提案する(不要と言われたらタスク運用の制約を案内する)。
 
 **9.（新規プロジェクトのみ）プロジェクト README.md**
 - ルートに README.md が無い場合のみ、`templates/project-README.md.template` から生成する(doc/ への参照+開発コマンドの薄い雛形。置換: `{{PROJECT_NAME}}` / `{{OVERVIEW}}` / `{{COMMANDS}}`)。既存 README には触れない。
@@ -395,10 +395,10 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
    - **完全性と過不足**: プレースホルダの置換漏れ / 過剰生成 / 既存記述の破壊がないか
    - **規約**: 薄型の権威参照ファイル(32 KiB 以内)・機密値なし・タスク命名(`進行中_`/`完了_`)等の統一規約との整合
    - **`.codex/config.toml` の append-only**: TOML が有効な形か・既存セクションとコメントが保持されているか(生成した場合のみ)
-3. **トリアージ(指摘を扱いごとに振り分けること)**: 指摘は team-lead(作業を進め、結果を確かめる側の AI)が実ファイルで裏取りし、valid のみ修正に反映(盲信しない。false positive は理由を記録)。
+3. **トリアージ(指摘を扱いごとに振り分けること)**: 指摘は team-lead(作業を進め、結果を確かめる側の AI)が実ファイルで裏取りし、valid のみ修正に反映(盲信しない。誤検出は理由を記録)。
 4. **合格まで反復**: 全レビュアー APPROVED(valid 指摘 0)になるまで修正 → 再レビューを続ける。同一指摘が 2 回連続残存・5 ラウンド超過の場合は**勝手に打ち切らず**、状況を報告してユーザーの指示を仰ぐ(`APPROVED` に達しないまま完了報告しない)。
 5. 記録: `.claude/reviews/init-project-iter{N}.md`。
-   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <プロジェクトルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)。
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <プロジェクトルート>` を打ち、終了コード 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)。
 
 ---
 
@@ -407,7 +407,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 完了報告は [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」に従う。
 - 下の一覧と確認の内訳は会話に残し、枠では要約と、会話のどの見出しや表(例: 生成物一覧の表)に残したかを示す。残る設定・省いた確認・手で行う操作は「残っていること」と枠の後の依頼の段落に書く。下の必須の案内は省かない。
 
-**1. 生成物一覧を表として提示**する(パス / 新規作成 or 追記提案 / 概要)。パスには、書いたファイルと既存のファイルだけリンクを添える(writing-for-people.md の 9 節)。上書きを避けた既存物も「既存のため据え置き」と明示する。
+**1. 生成物一覧を表として提示**する(パス / 新規作成か追記提案か / 概要)。パスには、書いたファイルと既存のファイルだけリンクを添える(writing-for-people.md の 9 節)。上書きを避けた既存物も「既存のため据え置き」と明示する。
 - 口調の扱いも書く: 選んだ型 / 残した口調の節のファイルと見出し(当たった節が 2 つ以上あれば、すべて)/ Phase 2 の口調の質問に添える行 / 「手で直す」で選んだ型の中身 /
   - 口調の節が skill の読む範囲の外になったこと / 「口調は「…」の節に従う」の行の指す先が無いこと / 書き方の決まりのファイルに届かず、「応答の書き方」節の追記を提案しなかったこと(Phase 3-1 の「応答の書き方」節の項)
 
@@ -424,8 +424,8 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   - (ルートに `CLAUDE.md` が無くても、`.claude/CLAUDE.md` / `CLAUDE.local.md` があればドリフトになりうる)。
   - ドリフトなら注記し、対処 2 つを案内する。
   - **片方だけ import があるとき**(例: ④-import なしで import の追加が断られ、`CLAUDE.local.md` には import がある)は判定自体は正常を返すが、「この環境では `CLAUDE.local.md` の import 経由で読まれているが、ルートの `CLAUDE.md` には import が無い」のように両方を報告する。
-  - **reference に到達できない構成では、この検査を無効化して報告する**(design §6)。
-- hook をマージした場合、`.claude/settings.json` が有効な JSON か(必要なら再 Read で確認)。
+  - **その references の文書に到達できない構成では、この検査を無効化して報告する**(design §6)。
+- hook をマージした場合、`.claude/settings.json` が有効な JSON か(必要なら読み直して確認)。
 - `.mcp.json` を生成・マージした場合、有効な JSON で既存エントリが保持されているか。
 - `.codex/config.toml` を生成した場合、有効な TOML か(パース検証できた場合)・既存セクションとコメントが保持されているか。
 
@@ -457,14 +457,14 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
   - **既に `.mcp.json` / `.codex/config.toml` を持つリポジトリ(クローン直後)では、この skill の承認は介在せず、ホスト側のゲートだけが防御になる**(design §7-6。skill 側の承認とホスト側のゲートは互いの代替にならない)。
 - `AGENTS.md` の `{{...}}` プレースホルダと doc の「（…）」形式のガイド文が残る箇所は、`/understand-project` 後に実コードを根拠として埋めるとよい、と伝える。仕様がまだ固まっていない場合は `/discuss-spec` の壁打ちで決めながら埋められる(01 目的 → 03 要件 → 07 計画の順を案内)。
 - **最終状態に `AGENTS.md` があるとき**(①・②・④、および ③ で移行が承認されたとき)、**`AGENTS.md` を直接読むかの確認方法と互換形の作り方を案内する**(2026-09-21 決定 6)。
-  - 文面の正本は `templates/AGENTS.md.template` 冒頭であり、SKILL.md にはコピーしない — テンプレート冒頭の案内を Read して完了報告に転記する(**テンプレートを読むため**、`AGENTS.md` を書かない分類 ②・④ でも案内できる)。
+  - 文面の正本は `templates/AGENTS.md.template` 冒頭であり、SKILL.md にはコピーしない — テンプレート冒頭の案内を読んで完了報告に転記する(**テンプレートを読むため**、`AGENTS.md` を書かない分類 ②・④ でも案内できる)。
   - **③ で移行が未承認のときは案内せず、移行を見送った旨だけを残す**。
 
 ---
 
 ## 最終ゲート(出力前セルフチェック)
 
-- [ ] テンプレは `templates/` から Read し、値をハードコードせず置換して Write したか。
+- [ ] テンプレは `templates/` から読み、値をハードコードせず置換して書いたか。
 - [ ] 既存の AGENTS.md / CLAUDE.md / `.claude/CLAUDE.md` / `CLAUDE.local.md` / `.claude/rules/` / profile / doc / settings.json / .mcp.json / .codex/config.toml / .gitignore / README を上書きせず、
   - 差分提案・マージ(無い行・無いファイルのみ追加)・append-only(`.codex/config.toml` は既存行に一切触れない。パース失敗時の復元だけが例外)で扱ったか。
 - [ ] 新規生成・`AGENTS.md` のみのプロジェクトで `CLAUDE.md` を生成していないか。
