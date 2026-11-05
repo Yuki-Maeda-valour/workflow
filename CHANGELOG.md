@@ -19,6 +19,16 @@ v4.2.0 以前は commit 履歴を参照。
 - 文書の字面を照らすテスト(`test_diagnostic_contract.py` の 6 か所・`test_issue_workflow_contract.py` の 15 か所)を、新しい言い方に合わせた。照らす中身は弱めていない。
 - 言い換え表(`writing-for-people.md`)に、迷いやすい英語の行を 8 つ足した(stage・index・hash・exit N/rc N/終了値・snapshot・state・guard・helper。補足は「使わない言い方」。state の行には、`implement-guard.sh` の `take` が作る記録を「保護記録」と書くことも添えた)。
 
+## v4.42.1
+
+### 変更
+
+- 無人ループ `loop.sh` に埋め込んだ Python(`PY_HELPER`)から、使われていない 9 関数と 2 つのサブコマンド(`snapshot`・`compare`)を消した。2026-10-06 の #191 で `loop-state.py` の `snapshot`・`compare`(照合する範囲を広げたもの)に置き換わり、呼出しが無かった。外から見た動き(CLI・出力・終了コード・判定・実行の順序)は変わらない。([Issue #341](https://github.com/Yuki-Maeda-valour/workflow/issues/341))
+  - あわせて import の `difflib`・`hashlib`・`subprocess` を外し、消した処理を指していたコメント(`loop.sh` の見出しと `git-config-digest.py`)を直した。`loop.sh` は 3393 行から 3251 行に、埋込み Python は 613 行・31 関数から 471 行・22 関数になった。
+  - 登録したサブコマンドと実際の `py` の呼出しが一致することを確かめるテスト `scripts/test_loop_helper_commands.py` を足した。決まった書き方(`py` の後に名前を字面で書き、行頭か `$(`・`|`・`&&`・`;`・`then`・`do` などの直後に置く形)でない `py` の出現があれば落ちる。見落とすより、落ちる方を選んだ。二重引用符の中の文と、ヒアドキュメント(複数行の文章をコマンドへ渡す書き方)の中の決まった書き方は、呼出しとして数える(限界。テストで固定した)。
+  - `scripts/test_environment_guard.py` で、置く偽のモジュールに `json.py` を足した。`hashlib` を外した後も、`hook-settings` の隔離した起動(`-I`)が外れたことを見つけられるようにするため。
+  - `scripts/test_safe_git_callers.py` から、消した行にだけ当たっていた除外 2 つを消した。
+
 ## v4.42.0
 
 ### 変更

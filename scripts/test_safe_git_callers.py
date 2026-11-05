@@ -135,7 +135,7 @@ def shell_bare_calls(text: str) -> list[str]:
     result=[]
     for line in text.splitlines():
         s=line.strip()
-        if not s or s.startswith('#') or 'git "${GIT_PRE[@]}"' in s or 'subprocess.run' in s or s.startswith('git = ') or '"origin の' in s or '="(git ' in s:
+        if not s or s.startswith('#') or 'git "${GIT_PRE[@]}"' in s or '"origin の' in s or '="(git ' in s:
             continue
         # Quoted reports are prose. Everything else following a shell separator,
         # conditional, substitution, or a function body is an executable site.
