@@ -1587,3 +1587,109 @@ class ComponentDescriptorTests(unittest.TestCase):
         self.bundle = self.base / 'route-changed'; self.boot()
         fourth = mod.component_policy_digest(self.bundle / 'environment.json', self.receipt['sha256'])
         self.assertNotEqual(third, fourth)
+
+
+class CopyCommandCharacterizationTests(unittest.TestCase):
+    setUp = EnvironmentGuardTests.setUp
+    run_guard = EnvironmentGuardTests.run_guard
+    boot = EnvironmentGuardTests.boot
+
+    MISMATCH = '環境の控えが保持値と一致しない'
+    PERMISSION = 'skills/ship-task/scripts/loop-permission.py'
+
+    def copy_args(self, command, *args, sha=None):
+        return [command, '--state', str(self.bundle / 'environment.json'),
+                '--expect-sha256', sha or self.receipt['sha256'], *map(str, args)]
+
+    def guard(self, command, *args, sha=None):
+        p = self.run_guard(*self.copy_args(command, *args, sha=sha))
+        return p.returncode, p.stdout, p.stderr
+
+    def expect(self, got, want):
+        self.assertEqual(got, want)
+
+    def stop(self, command, *args, message, sha=None):
+        self.expect(self.guard(command, *args, sha=sha), (20, '', 'ERROR [environment-guard] ' + message + '\n'))
+
+    def put_permission(self, body):
+        script = self.root / self.PERMISSION
+        script.parent.mkdir(parents=True, exist_ok=True)
+        script.write_text(body)
+        return script
+
+    def test_success_output_and_return_values(self):
+        scripts = self.root / 'skills/x/scripts'
+        (scripts / 'data.bin').write_bytes(b'\x00\xffraw\n')
+        (scripts / 'code.py').write_text(
+            'import json, os, sys\n'
+            'print(json.dumps([sys.argv[1:], "-B" in sys.orig_argv, sys.flags.dont_write_bytecode,'
+            ' os.environ.get("PYTHONDONTWRITEBYTECODE")]))\n'
+            'raise SystemExit(7)\n')
+        (scripts / 'code.sh').write_text('printf "%s|" "$#" "$@"\nexit 5\n')
+        self.boot()
+        self.expect(self.guard('verify'), (0, '', ''))
+        p = subprocess.run([sys.executable, '-B', str(SCRIPT), *self.copy_args('read', '--path', 'skills/x/scripts/data.bin')],
+                           capture_output=True, env=self.env, timeout=10)
+        self.expect((p.returncode, p.stdout, p.stderr), (0, b'\x00\xffraw\n', b''))
+        self.expect(self.guard('exec', '--path', 'skills/x/scripts/code.py', '--', 'python3', 'a', 'b'),
+                    (7, '[["a", "b"], true, 1, "1"]\n', ''))
+        self.expect(self.guard('exec', '--path', 'skills/x/scripts/code.py', 'python3', 'c'),
+                    (7, '[["c"], true, 1, "1"]\n', ''))
+        self.expect(self.guard('exec', '--path', 'skills/x/scripts/code.sh', '--', 'bash', 'x y'),
+                    (5, '1|x y|', ''))
+
+    def test_stop_lines(self):
+        self.boot()
+        for path in ('/abs', 'skills/../x', ''):
+            with self.subTest(path=path):
+                self.stop('read', '--path', path, message='コピー内の相対パスが必要')
+        self.stop('read', '--path', 'skills/x/scripts', message='監視対象が読める通常ファイルでない')
+        self.stop('read', '--path', 'skills/x/scripts/missing.py', message='検査を完了できない (FileNotFoundError)')
+        helper = 'skills/x/scripts/helper.py'
+        self.stop('exec', '--path', helper, message='helper の実行形式は python3 または bash')
+        self.stop('exec', '--path', helper, '--', message='helper の実行形式は python3 または bash')
+        self.stop('exec', '--path', helper, '--', 'sh', message='helper の実行形式は python3 または bash')
+        self.stop('hook', '--path', helper, message='hook は固定の権限判定器だけを実行する')
+        self.stop('hook', '--path', self.PERMISSION, message='検査を完了できない (FileNotFoundError)')
+
+    def test_seam_order(self):
+        self.boot()
+        bad = 'f' * 64
+        self.stop('read', '--path', '/abs', sha=bad, message=self.MISMATCH)
+        self.stop('exec', '--path', '/abs', '--', 'sh', sha=bad, message=self.MISMATCH)
+        self.stop('hook', '--path', '../x', sha=bad, message=self.MISMATCH)
+        self.stop('hook', '--path', '/abs', message='コピー内の相対パスが必要')
+        self.stop('exec', '--path', '/abs', '--', 'sh', message='コピー内の相対パスが必要')
+        other = self.base / 'other'; other.mkdir(); (other / 'SKILL.md').write_text('normal')
+        inventory = self.base / 'plugins.json'
+        inventory.write_text(json.dumps([{'id': 'other', 'enabled': True, 'installPath': str(other)}]))
+        self.stop('read', '--current-inventory', inventory, '--path', '/abs', message='有効 plugin の一覧が変わった')
+        self.stop('hook', '--path', 'skills/x/scripts/missing.py', message='hook は固定の権限判定器だけを実行する')
+
+    def test_hook_runs_copy_in_same_process(self):
+        self.put_permission(
+            'import json, sys\nimport perm_sibling\n'
+            'print(json.dumps({"argv": sys.argv, "name": __name__, "file": __file__,'
+            ' "path0": sys.path[0], "sibling": perm_sibling.VALUE}))\n')
+        (self.root / 'skills/ship-task/scripts/perm_sibling.py').write_text('VALUE = "copy-sibling"\n')
+        self.boot()
+        copied = str(self.bundle / 'plugin' / self.PERMISSION)
+        code, out, err = self.guard('hook', '--path', self.PERMISSION)
+        self.assertEqual((code, err), (0, ''))
+        self.assertEqual(json.loads(out), {
+            'argv': [copied], 'name': '__main__', 'file': copied,
+            'path0': str(self.bundle / 'plugin/skills/ship-task/scripts'), 'sibling': 'copy-sibling'})
+
+    def test_hook_exceptions_are_caught_by_main(self):
+        cases = (
+            ('raise ValueError("H-secret")', (20, '', 'ERROR [environment-guard] 検査を完了できない (ValueError)\n')),
+            ('raise KeyError("H-secret")', (20, '', 'ERROR [environment-guard] 検査を完了できない (KeyError)\n')),
+            ('raise OSError("H-secret")', (20, '', 'ERROR [environment-guard] 検査を完了できない (OSError)\n')),
+            ('raise SystemExit(3)', (3, '', '')),
+        )
+        for number, (body, want) in enumerate(cases):
+            with self.subTest(body=body):
+                self.put_permission(body + '\n')
+                self.bundle = self.base / ('bundle-hook-%d' % number)
+                self.boot()
+                self.expect(self.guard('hook', '--path', self.PERMISSION), want)

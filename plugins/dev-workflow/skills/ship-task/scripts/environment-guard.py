@@ -1154,6 +1154,34 @@ def bootstrap(a):
                       'guard':str(output / 'environment-guard.py'), 'guard_sha256':sha(guard), 'plugin':str(output / 'plugin')}))
 
 
+def run_copy(a):
+    value = verify(a.state, a.expect_sha256, a.current_inventory)
+    if a.command != 'verify':
+        rel = Path(a.path)
+        if rel.is_absolute() or '..' in rel.parts or not rel.parts:
+            raise Stop('コピー内の相対パスが必要')
+        path = Path(value['copy']) / rel
+        if a.command == 'hook':
+            if a.path != 'skills/ship-task/scripts/loop-permission.py':
+                raise Stop('hook は固定の権限判定器だけを実行する')
+            raw = read_regular(path)
+            if sha(raw) != value['entries']['plugin/' + a.path][2]:
+                raise Stop('権限判定器が保持値と違う')
+            sys.path.insert(0, str(path.parent))
+            sys.argv = [str(path)]
+            exec(compile(raw, str(path), 'exec'), {'__name__':'__main__', '__file__':str(path)})
+        elif a.command == 'read':
+            sys.stdout.buffer.write(read_regular(path))
+        else:
+            argv = a.argv[1:] if a.argv[:1] == ['--'] else a.argv
+            if not argv or argv[0] not in ('python3','bash'):
+                raise Stop('helper の実行形式は python3 または bash')
+            env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
+            options = ['-B'] if argv[0] == 'python3' else []
+            return subprocess.run([argv[0], *options, str(path), *argv[1:]], env=env).returncode
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest='command', required=True)
@@ -1196,30 +1224,7 @@ def main():
             for item in unused:
                 print('unused=' + re.sub(r'[\x00-\x1f\x7f]', ' ', item)[:300])
         else:
-            value = verify(a.state, a.expect_sha256, a.current_inventory)
-            if a.command != 'verify':
-                rel = Path(a.path)
-                if rel.is_absolute() or '..' in rel.parts or not rel.parts:
-                    raise Stop('コピー内の相対パスが必要')
-                path = Path(value['copy']) / rel
-                if a.command == 'hook':
-                    if a.path != 'skills/ship-task/scripts/loop-permission.py':
-                        raise Stop('hook は固定の権限判定器だけを実行する')
-                    raw = read_regular(path)
-                    if sha(raw) != value['entries']['plugin/' + a.path][2]:
-                        raise Stop('権限判定器が保持値と違う')
-                    sys.path.insert(0, str(path.parent))
-                    sys.argv = [str(path)]
-                    exec(compile(raw, str(path), 'exec'), {'__name__':'__main__', '__file__':str(path)})
-                elif a.command == 'read':
-                    sys.stdout.buffer.write(read_regular(path))
-                else:
-                    argv = a.argv[1:] if a.argv[:1] == ['--'] else a.argv
-                    if not argv or argv[0] not in ('python3','bash'):
-                        raise Stop('helper の実行形式は python3 または bash')
-                    env = dict(os.environ, PYTHONDONTWRITEBYTECODE='1')
-                    options = ['-B'] if argv[0] == 'python3' else []
-                    return subprocess.run([argv[0], *options, str(path), *argv[1:]], env=env).returncode
+            return run_copy(a)
         return 0
     except (OSError, Stop, ValueError, KeyError, TypeError, RecursionError, subprocess.TimeoutExpired) as exc:
         detail = str(exc) if isinstance(exc, Stop) else '検査を完了できない (' + type(exc).__name__ + ')'
