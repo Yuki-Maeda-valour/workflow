@@ -739,6 +739,30 @@ def parse_arguments(argv):
     return values["--cwd"], acknowledged
 
 
+def decide_outcome(result, acknowledged, digests):
+    """候補と確認値から、(終了値, 結果の値, 注記の並び)を決める。入出力をせず、resultを書き換えない。"""
+    notes = []
+    confirm = confirmation_candidates(result)
+    if acknowledged:
+        # parse_argumentsが2つの同時指定を拒むので、渡された確認値は1つだけ。
+        kind, value = next(iter(acknowledged.items()))
+        if kind == "identity" and any(item["reason"] in OVERLAP_REASONS for item in confirm):
+            # 重なりを見つけた・確かめられなかった候補は、人が「無関係」と答えても実体の確認値で続行しない。
+            outcome = "list-changed"
+            notes.append(OVERLAP_LINE)
+        else:
+            outcome = "acknowledged" if value == digests[kind] else "list-changed"
+    elif confirm:
+        outcome = "confirmation-required"
+    else:
+        outcome = "other-projects-only" if result["candidates"] else "none"
+    others = len(result["candidates"]) - len(confirm)
+    if others:
+        notes.insert(0, "別プロジェクトの保護記録: " + str(others) + " 件。所属の印で別のプロジェクトと確かめたため、"
+                     "止めません(名前とパスはJSONにだけ出します)。")
+    return (0 if outcome in ("none", "other-projects-only", "acknowledged") else 10), outcome, notes
+
+
 def run(argv=None):
     """JSON出力前の結果と終了値を返す。永続状態は作らない。"""
     code, result, _ = run_detail(argv)
@@ -747,7 +771,6 @@ def run(argv=None):
 
 def run_detail(argv=None):
     """run と同じ結果に、標準エラーへ出す固定の注記(JSONには入れない)を足して返す。"""
-    notes = []
     result = {"schema_version": 2, "result": "internal", "cwd": None, "cwd_bytes_hex": None,
               "complete": False, "roots": [], "candidates": [], "issues": []}
     try:
@@ -774,27 +797,10 @@ def run_detail(argv=None):
         result["candidates"].sort(key=lambda item: (ROOT_IDS.index(item["root_id"]), bytes.fromhex(item["name_bytes_hex"])))
         digests = {"list": list_digest(result), "identity": identity_digest(result)}
         budget.check()
-        confirm = confirmation_candidates(result)
-        if acknowledged:
-            # parse_argumentsが2つの同時指定を拒むので、渡された確認値は1つだけ。
-            kind, value = next(iter(acknowledged.items()))
-            if kind == "identity" and any(item["reason"] in OVERLAP_REASONS for item in confirm):
-                # 重なりを見つけた・確かめられなかった候補は、人が「無関係」と答えても実体の確認値で続行しない。
-                outcome = "list-changed"
-                notes.append(OVERLAP_LINE)
-            else:
-                outcome = "acknowledged" if value == digests[kind] else "list-changed"
-        elif confirm:
-            outcome = "confirmation-required"
-        else:
-            outcome = "other-projects-only" if result["candidates"] else "none"
+        code, outcome, notes = decide_outcome(result, acknowledged, digests)
         result.update(result=outcome, complete=True, list_sha256=digests["list"],
                       identity_sha256=digests["identity"])
-        others = len(result["candidates"]) - len(confirm)
-        if others:
-            notes.insert(0, "別プロジェクトの保護記録: " + str(others) + " 件。所属の印で別のプロジェクトと確かめたため、"
-                         "止めません(名前とパスはJSONにだけ出します)。")
-        return (0 if outcome in ("none", "other-projects-only", "acknowledged") else 10), result, notes
+        return code, result, notes
     except ScanError as exc:
         result["result"] = {2: "usage", 11: "scan-unavailable"}[exc.exit_code]
         result["issues"].append(exc.issue)
