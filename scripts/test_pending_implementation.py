@@ -606,10 +606,25 @@ class OwnerFixture(PendingFixture):
         for temp in excluded:
             if base == temp or temp in base.parents:
                 self.skipTest('実HOMEの置き場が一時フォルダの下にあり、別プロジェクトの記録を作れない')
-        if not base.is_dir():
-            base.mkdir(parents=True, mode=0o700)
+        # 置き場は、同時に流す implement-agent・implement-guard の selftest も「無ければ作る・空なら消す」で扱う。
+        # 在ることを見てから中に作るまでの間に、ほかが空の置き場を消すことがあるので、そのときは作り直してやり直す。
+        made_base = False
+        for _ in range(5):
+            try:
+                base.mkdir(parents=True, mode=0o700)
+                made_base = True
+            except FileExistsError:
+                pass
+            try:
+                owned = tempfile.mkdtemp(prefix='selftest-pending-', dir=str(base))
+                break
+            except FileNotFoundError:
+                continue
+        else:
+            self.fail(f'{base} の中に専用のフォルダを作れない(5 回とも、作る前に置き場が消えた)')
+        if made_base:
             self.addCleanup(self.remove_if_empty, base)
-        self.owned = Path(tempfile.mkdtemp(prefix='selftest-pending-', dir=str(base))).resolve()
+        self.owned = Path(owned).resolve()
         self.addCleanup(self.remove_owned)
         for temp in excluded:
             self.assertNotIn(temp, self.owned.parents)

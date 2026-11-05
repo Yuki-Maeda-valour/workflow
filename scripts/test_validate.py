@@ -7,6 +7,7 @@
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -66,6 +67,35 @@ HOST_CLI_QUESTION_GUIDANCE = "delegation-map.md §8"
 HOST_CLI_OTHER_GUIDANCE = "external-runners.md へ移す"
 HOST_CLI_MCP_WORDS = ("claude-in-chrome", "chrome-devtools")
 
+# 言葉の検査が文書ごとに Markdown を解析する時間は、検証器を 1 回流す時間の約半分になる。
+# ValidateTest は検証器を 900 回ほど流し、そのたびに変えていない文書も解析し直す。
+# そこで同じプロセスの中では、同じ検証器のコードが同じ本文と語で解析した結果を使い回す。
+# 解析は入力ごとに必ず 1 回は本物が走る。検査の流れ・ERROR・WARN は使い回さないので、判定は変わらない。
+_WORDING_BODY_CACHE = {}
+_WORDING_BODY_CACHE_LIMIT = 256
+
+
+def reuse_wording_body(namespace, source):
+    """runpy で読んだ検証器の wording_body を、結果を使い回す形に差し替える。
+
+    `source` は検証器のコードのバイト列。コードが違えば(テストが validate.py を書き換えたときも)別の結果として扱う。
+    runpy.run_path が返す辞書はコピーなので、関数が実際に引く辞書(__globals__)を差し替える。
+    """
+    module_globals = namespace["main"].__globals__
+    real = module_globals["wording_body"]
+    digest = hashlib.sha256(source).hexdigest()
+
+    def wording_body(body, md, roles):
+        key = (digest, type(md), body, frozenset(roles))
+        lines = _WORDING_BODY_CACHE.get(key)
+        if lines is None:
+            if len(_WORDING_BODY_CACHE) >= _WORDING_BODY_CACHE_LIMIT:
+                _WORDING_BODY_CACHE.clear()
+            lines = _WORDING_BODY_CACHE[key] = tuple(real(body, md, roles))
+        return list(lines)
+
+    module_globals["wording_body"] = wording_body
+
 
 class ValidateTest(unittest.TestCase):
     def setUp(self):
@@ -101,6 +131,7 @@ class ValidateTest(unittest.TestCase):
             "pathlib.Path.home", return_value=self.home
         ):
             namespace = runpy.run_path(str(script), run_name="validate_under_test")
+        reuse_wording_body(namespace, script.read_bytes())
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             status = namespace["main"]()
@@ -236,6 +267,27 @@ class ValidateTest(unittest.TestCase):
     def test_wording_check_runs_in_full_validator(self):
         self.write_file(CHECKED_MD, "照合する。\n")
         self.assert_error([f"{CHECKED_MD}:1:", "言い換えの初出", "照合"])
+
+    def test_reused_wording_body_keeps_the_result(self):
+        """解析の結果を使い回しても、終了コード・ERROR・WARN・出力が変わらない(reuse_wording_body の前提)。"""
+        self.write_file(CHECKED_MD, "照合する。\n")
+        script = self.repo / "scripts" / "validate.py"
+
+        def run(reuse):
+            namespace = runpy.run_path(str(script), run_name="validate_under_test")
+            if reuse:
+                reuse_wording_body(namespace, script.read_bytes())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                status = namespace["main"]()
+            return status, list(namespace["ERRORS"]), list(namespace["WARNS"]), output.getvalue()
+
+        fresh = run(False)
+        self.assertTrue(any("言い換えの初出" in error for error in fresh[1]), fresh[1])
+        # 1 回目で結果を表に入れ、2 回目で表の結果を使う。
+        for attempt in ("表に入れる", "表から使う"):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(fresh, run(True))
 
     # ---------------------------------------------------------- 番号だけの理由
 
