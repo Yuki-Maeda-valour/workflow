@@ -2,6 +2,28 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.42.2
+
+### 変更
+
+- `implementation-git.py`(実装担当が Git の状態を読む入口)の `parse_input`(58 行)を、引数の受け付け方を組み立てる `build_parser()` と、`run` の引数を検査する `validate_run_args(args)` に分けた。外から見た動き(引数の受け付け方・誤りの文言・誤りが重なったときに出る文言・help の出力・終了コード)は変わらない。([Issue #346](https://github.com/Yuki-Maeda-valour/workflow/issues/346))
+  - `parse_input` は、文字の検査・解析・`prepare` か `run` と読取り操作の指定の確かめ・cwd(作業フォルダ)の解決・`prepare` ならそこで返すこと・検査の呼出しの順だけを持つ(11 行)。50 行を超える関数は 0 個になった。
+  - 先に、今の動きを固定するテスト `scripts/test_implementation_git_input.py` を足した。照らすのは次の 4 つ。分ける前の版でも全件が通ることを確かめた。
+    - 今まで確かめていなかった分岐
+    - Git を呼ぶ前に止まる引数の誤りの文言の字面(文字の検査〈UTF-8・NUL〉と、cwd を解決できない誤りは除く。argparse〈Python 標準の引数解析〉が作る誤りは、先頭の `ERROR [input] 引数が不正: ` まで)
+    - 誤りを 2 つ重ねたときにどちらが出るか(`run` の読取り操作の指定 → cwd の解決 → 検査の順を含む)
+    - help 8 種の出力
+
+## v4.42.1
+
+### 変更
+
+- 無人ループ `loop.sh` に埋め込んだ Python(`PY_HELPER`)から、使われていない 9 関数と 2 つのサブコマンド(`snapshot`・`compare`)を消した。2026-10-06 の #191 で `loop-state.py` の `snapshot`・`compare`(照合する範囲を広げたもの)に置き換わり、呼出しが無かった。外から見た動き(CLI・出力・終了コード・判定・実行の順序)は変わらない。([Issue #341](https://github.com/Yuki-Maeda-valour/workflow/issues/341))
+  - あわせて import の `difflib`・`hashlib`・`subprocess` を外し、消した処理を指していたコメント(`loop.sh` の見出しと `git-config-digest.py`)を直した。`loop.sh` は 3393 行から 3251 行に、埋込み Python は 613 行・31 関数から 471 行・22 関数になった。
+  - 登録したサブコマンドと実際の `py` の呼出しが一致することを確かめるテスト `scripts/test_loop_helper_commands.py` を足した。決まった書き方(`py` の後に名前を字面で書き、行頭か `$(`・`|`・`&&`・`;`・`then`・`do` などの直後に置く形)でない `py` の出現があれば落ちる。見落とすより、落ちる方を選んだ。二重引用符の中の文と、ヒアドキュメント(複数行の文章をコマンドへ渡す書き方)の中の決まった書き方は、呼出しとして数える(限界。テストで固定した)。
+  - `scripts/test_environment_guard.py` で、置く偽のモジュールに `json.py` を足した。`hashlib` を外した後も、`hook-settings` の隔離した起動(`-I`)が外れたことを見つけられるようにするため。
+  - `scripts/test_safe_git_callers.py` から、消した行にだけ当たっていた除外 2 つを消した。
+
 ## v4.42.0
 
 ### 変更

@@ -63,7 +63,7 @@ def locations(directory: str) -> tuple[str, str, str]:
 
 
 def entries(directory: str, path: str) -> list:
-    # loop.sh の snap_config と同じ読み方: include を辿らない項目の並び(同じ値の書き直しで変わらない)
+    # include を辿らない項目の並び(同じ値の書き直しで変わらない)
     out = git(directory, "config", "--file", path, "--no-includes", "--list", "-z")
     result = []
     for record in out.split(b"\0"):
