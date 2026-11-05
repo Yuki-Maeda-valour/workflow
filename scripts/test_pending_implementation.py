@@ -4,6 +4,7 @@ import builtins
 import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -1528,6 +1529,166 @@ class PendingBoundaryTests(PendingFixture):
                           and node.func.value.value.id == 'sys'
                           and node.func.value.attr in ('stdout', 'stderr'))}
         self.assertFalse(calls & forbidden, calls & forbidden)
+
+    # ---- 判定と、その前後の継ぎ目を固定する特性テスト(一時ホームだけを使う) ----
+    def make_top(self, top):
+        # git のコマンドを使わず、今回の範囲として読める最小の形を作る。
+        top = Path(top)
+        (top / '.git/objects').mkdir(parents=True, exist_ok=True)
+        (top / '.git/refs').mkdir(parents=True, exist_ok=True)
+        (top / 'task').mkdir(parents=True, exist_ok=True)
+        (top / '.git/HEAD').write_bytes(b'ref: refs/heads/main\n')
+        return top
+
+    def make_candidate(self, name, top=None, loop_tmpdir=False):
+        guard = self.roots[0] / ('guard-' + name)
+        guard.mkdir()
+        if top is None:
+            return guard
+        tmpdir = None
+        if loop_tmpdir:
+            tmpdir = self.base / ('loop-' + name)
+            tmpdir.symlink_to(tmpdir)  # 開くとELOOPになり、祖先をたどれない
+        mark = self.roots[0] / ('owner-' + name)
+        mark.write_bytes(mark_bytes(make_mark_values(guard, top, top / '.git', top / 'task', tmpdir)))
+        mark.chmod(0o600)
+        return guard
+
+    def make_kind(self, name, kind):
+        if kind == 'plain':
+            return self.make_candidate(name)
+        if kind == 'overlap':
+            return self.make_candidate(name, self.make_top(self.cwd))
+        top = self.make_top(self.base / ('top-' + name))
+        return self.make_candidate(name, top, loop_tmpdir=(kind == 'unknown'))
+
+    def reset_fixture(self):
+        for root in self.roots:
+            shutil.rmtree(root)
+            root.mkdir(parents=True)
+        for child in self.base.iterdir():
+            if child.name in ('cwd', 'home', 'xdg'):
+                continue
+            if child.is_symlink() or not child.is_dir():
+                child.unlink()
+            else:
+                shutil.rmtree(child)
+
+    def call_main(self, extra=(), patches=()):
+        self.make_top(self.cwd)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.dict(os.environ, self.env, clear=True))
+            stack.enter_context(mock.patch.object(self.module, 'TEMP_DIRS', ()))
+            for patch in patches:
+                stack.enter_context(patch)
+            stack.enter_context(contextlib.redirect_stdout(out))
+            stack.enter_context(contextlib.redirect_stderr(err))
+            rc = self.module.main(['scan', '--cwd', str(self.cwd)] + list(extra))
+        result = json.loads(out.getvalue())
+        self.assertEqual(out.getvalue().encode('ascii'), canonical(result) + b'\n')
+        self.check_schema(rc, result)
+        return rc, result, err.getvalue()
+
+    def test_main_outcome_exit_code_and_stderr_are_pinned(self):
+        other_note = lambda n: ('別プロジェクトの保護記録: ' + str(n) + ' 件。所属の印で別のプロジェクトと確かめたため、'
+                                '止めません(名前とパスはJSONにだけ出します)。\n')
+        confirm = '保護記録候補の一覧について、人の確認が必要です。\n'
+        overlap = OVERLAP_LINE + '\n'
+        cases = [
+            ('a', [], None, 'none', 0, ''),
+            ('b', [('a', 'other', None), ('b', 'other', None)], None, 'other-projects-only', 0, other_note(2)),
+            ('c', [('a', 'other', None), ('b', 'plain', 'no-mark')], None, 'confirmation-required', 10,
+             other_note(1) + confirm),
+            ('d', [('a', 'other', None), ('b', 'overlap', 'overlap')], 'identity', 'list-changed', 10,
+             other_note(1) + overlap + confirm),
+            ('e', [('a', 'other', None), ('b', 'overlap', 'overlap')], 'list', 'acknowledged', 0, other_note(1)),
+            ('f', [('a', 'other', None), ('b', 'plain', 'no-mark')], 'identity', 'acknowledged', 0, other_note(1)),
+            ('g', [('a', 'unknown', 'overlap-unknown')], 'identity', 'list-changed', 10, overlap + confirm),
+            ('h', [('a', 'plain', 'no-mark')], 'zeros', 'list-changed', 10, confirm),
+        ]
+        for label, candidates, ack, outcome, code, stderr in cases:
+            with self.subTest(case=label):
+                self.reset_fixture()
+                for name, kind, _ in candidates:
+                    self.make_kind(name, kind)
+                rc, first, _ = self.call_main()
+                self.assertEqual([c['reason'] for c in first['candidates']], [r for _, _, r in candidates])
+                extra = {None: [], 'list': ['--acknowledged-list', first['list_sha256']],
+                         'identity': ['--acknowledged-identities', first['identity_sha256']],
+                         'zeros': ['--acknowledged-identities', '0' * 64]}[ack]
+                rc, second, err = self.call_main(extra)
+                self.assertEqual((second['result'], rc, err), (outcome, code, stderr))
+                self.assertEqual((second['list_sha256'], second['identity_sha256']),
+                                 (first['list_sha256'], first['identity_sha256']))
+
+    def test_final_time_check_sits_between_digests_and_decision(self):
+        self.make_kind('other', 'other')
+        self.make_kind('plain', 'plain')
+        original = self.module.identity_digest
+        called = [False]
+
+        def spy(result):
+            value = original(result)
+            called[0] = True
+            return value
+        patches = [mock.patch.object(self.module, 'identity_digest', spy),
+                   mock.patch.object(self.module.time, 'monotonic', lambda: 6.0 if called[0] else 0.0)]
+        rc, result, err = self.call_main(patches=patches)
+        self.assertTrue(called[0])
+        self.assertEqual((rc, result['result'], result['complete']), (11, 'scan-unavailable', False))
+        self.assertNotIn('list_sha256', result)
+        self.assertNotIn('identity_sha256', result)
+        self.assertEqual(result['issues'], [{'code': 'time-limit', 'root_id': None, 'path_bytes_hex': None,
+                                             'message': '走査全体の5秒の上限に達しました。'}])
+        self.assertEqual([c['reason'] for c in result['candidates']], [None, 'no-mark'])
+        self.assertEqual([r['status'] for r in result['roots']], ['present'] * 3)
+        self.assertEqual(err, 'pending-implementation: time-limit 走査全体の5秒の上限に達しました。\n')
+
+    def test_unexpected_failure_in_decision_becomes_internal(self):
+        class Exploding:
+            def __contains__(self, item):
+                raise RuntimeError('fixture decision failure')
+        self.make_kind('other', 'other')
+        self.make_kind('overlap', 'overlap')
+        rc, result, err = self.call_main(['--acknowledged-identities', '0' * 64],
+                                         [mock.patch.object(self.module, 'OVERLAP_REASONS', Exploding())])
+        self.assertEqual((rc, result['result'], result['complete']), (20, 'internal', False))
+        self.assertNotIn('list_sha256', result)
+        self.assertNotIn('identity_sha256', result)
+        message = '想定外の失敗が起きました: RuntimeError'
+        self.assertEqual(result['issues'], [{'code': 'internal-error', 'root_id': None,
+                                             'path_bytes_hex': None, 'message': message}])
+        self.assertEqual(err, 'pending-implementation: internal-error ' + message + '\n')
+
+    def test_decide_outcome_is_pure_and_returns_exit_outcome_and_notes(self):
+        result = fixed_result()
+        overlap = dict(result['candidates'][0], name_bytes_hex='67756172642d79', reason='overlap')
+        other = dict(result['candidates'][0], name_bytes_hex='67756172642d7a', relation='other-project',
+                     reason=None)
+        result['candidates'] += [overlap, other]
+        digests = {'list': 'a' * 64, 'identity': 'b' * 64}
+        note = ('別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、'
+                '止めません(名前とパスはJSONにだけ出します)。')
+        cases = [({}, (10, 'confirmation-required', [note])),
+                 ({'identity': 'b' * 64}, (10, 'list-changed', [note, OVERLAP_LINE])),
+                 ({'list': 'a' * 64}, (0, 'acknowledged', [note])),
+                 ({'list': 'c' * 64}, (10, 'list-changed', [note]))]
+
+        def forbidden(*args, **kwargs):
+            raise AssertionError('decide_outcome must not touch files or the clock')
+        for acknowledged, expected in cases:
+            with self.subTest(acknowledged=acknowledged):
+                before = json.dumps(result, sort_keys=True)
+                out, err = io.StringIO(), io.StringIO()
+                with mock.patch.object(os, 'open', forbidden), mock.patch.object(os, 'stat', forbidden), \
+                     mock.patch.object(os, 'scandir', forbidden), mock.patch.object(builtins, 'open', forbidden), \
+                     mock.patch.object(self.module.time, 'monotonic', forbidden), \
+                     contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                    actual = self.module.decide_outcome(result, acknowledged, digests)
+                self.assertEqual(actual, expected)
+                self.assertEqual(json.dumps(result, sort_keys=True), before)
+                self.assertEqual((out.getvalue(), err.getvalue()), ('', ''))
 
 
 class PendingDocumentContractTests(unittest.TestCase):

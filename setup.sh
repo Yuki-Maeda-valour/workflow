@@ -36,15 +36,19 @@ usage() {
 EOF
 }
 
+usage_error() {
+  echo "$1" >&2
+  usage
+  exit 2
+}
+
 FORCE=0
 MODE=""
 TARGET=""
 
 select_mode() {
   if [[ -n "$MODE" ]]; then
-    echo "ERROR: モードは 1 つだけ指定してください: --$MODE と $1" >&2
-    usage
-    exit 2
+    usage_error "ERROR: モードは 1 つだけ指定してください: --$MODE と $1"
   fi
   MODE="${1#--}"
 }
@@ -53,9 +57,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --link|--copy|--agents|--agents-copy)
       if [[ $# -lt 2 || -z "${2:-}" || "${2:-}" == -* ]]; then
-        echo "ERROR: $1 の直後にプロジェクトパスが必要です" >&2
-        usage
-        exit 2
+        usage_error "ERROR: $1 の直後にプロジェクトパスが必要です"
       fi
       select_mode "$1"
       TARGET="$2"
@@ -64,7 +66,7 @@ while [[ $# -gt 0 ]]; do
     --global|--agents-global|--list) select_mode "$1"; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
-    *) echo "不明な引数: $1" >&2; usage; exit 2 ;;
+    *) usage_error "不明な引数: $1" ;;
   esac
 done
 
@@ -82,13 +84,13 @@ fi
 
 case "$MODE" in
   link|copy)
-    [[ -n "$TARGET" ]] || { echo "ERROR: プロジェクトパスを指定してください" >&2; usage; exit 2; }
+    [[ -n "$TARGET" ]] || usage_error "ERROR: プロジェクトパスを指定してください"
     [[ -d "$TARGET" ]] || { echo "ERROR: $TARGET が存在しません" >&2; exit 1; }
     DEST="$TARGET/.claude/skills"
     ;;
   agents|agents-copy)
     # Codex(.agents/skills)/ Cursor(.agents/skills or .cursor/skills)向けの配置
-    [[ -n "$TARGET" ]] || { echo "ERROR: プロジェクトパスを指定してください" >&2; usage; exit 2; }
+    [[ -n "$TARGET" ]] || usage_error "ERROR: プロジェクトパスを指定してください"
     [[ -d "$TARGET" ]] || { echo "ERROR: $TARGET が存在しません" >&2; exit 1; }
     DEST="$TARGET/.agents/skills"
     if [[ "$MODE" == "agents-copy" ]]; then MODE="copy"; else MODE="link"; fi
