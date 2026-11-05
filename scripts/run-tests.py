@@ -2,17 +2,19 @@
 """scripts/ の回帰テスト(test_*.py)を、ファイルごとに別のプロセスへ分けて並べて流す。
 
 使い方(リポジトリ直下で実行する):
-  python3 scripts/run-tests.py                          # 全件
-  python3 scripts/run-tests.py test_validate.py         # 関係するファイルだけ(複数可)
-  python3 scripts/run-tests.py -j 4                     # 同時に流すプロセスの数(既定は使える CPU の数の半分)
+  python3 -B scripts/run-tests.py                       # 全件
+  python3 -B scripts/run-tests.py test_validate.py      # 関係するファイルだけ(複数可)
+  python3 -B scripts/run-tests.py -j 4                  # 同時に流すプロセスの数(既定は使える CPU の数の半分)
 
 - 1 つのファイルを 1 つのプロセスで流す。重いファイル(SHARDS)は、テストを順番に配って
   複数のプロセスに分ける。各プロセスは `python3 -m unittest discover -s scripts -p <file>` と
-  同じ読み込み方をする。
+  同じ読み込み方をする。子のプロセスは、いつも -B(__pycache__ を書かない)で起動する。
 - テストは、ファイルが違えば別のプロセスで動く。環境変数・カレントディレクトリ・
   読み込んだモジュールは、プロセスの間で共有しない。
 - 終了コード: 全部のプロセスが成功なら 0。失敗・エラー・読み込みの失敗・件数の食い違いが
-  1 つでもあれば 1。引数の誤りは 2。
+  1 つでもあれば 1。引数の誤りは 2。Ctrl-C(SIGINT)で止めたら 130、SIGTERM で止めたら 143。
+- 止めたときは、まだ始めていないプロセスを始めず、動いているプロセスをその子ごと止める
+  (各プロセスを別のプロセスグループで起動し、グループごとに止める)。
 - 失敗したプロセスの出力は、最後にまとめて表示する。
 """
 
@@ -20,9 +22,11 @@ import argparse
 import concurrent.futures
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -139,20 +143,70 @@ def default_jobs():
     return max(1, cpus // 2)
 
 
-def run_job(job, workdir, flags):
+class Interrupted(Exception):
+    """止める合図を受けた後に、プロセスを始めようとした。"""
+
+
+class Children:
+    """動いている子のプロセス。止める合図の後は、新しく始めない。"""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.running = set()
+        self.stopped = False
+
+    def start(self, command):
+        with self.lock:
+            if self.stopped:
+                raise Interrupted()
+            # 別のプロセスグループで起動する(端末の Ctrl-C は親だけが受け、子はグループごと止める)。
+            process = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, errors="replace", start_new_session=True)
+            self.running.add(process)
+            return process
+
+    def finish(self, process):
+        with self.lock:
+            self.running.discard(process)
+
+    def stop_all(self, grace=5.0):
+        """新しく始めないようにし、動いている子をグループごと止める。止めた数を返す。"""
+        with self.lock:
+            self.stopped = True
+            running = list(self.running)
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            for process in running:
+                try:
+                    os.killpg(process.pid, sig)
+                except (ProcessLookupError, PermissionError):
+                    pass
+            deadline = time.monotonic() + grace
+            while time.monotonic() < deadline and any(process.poll() is None for process in running):
+                time.sleep(0.05)
+        return len(running)
+
+
+def run_job(job, workdir, flags, children):
     name, index, count = job
     report = Path(workdir) / f"{name}.{index}.json"
     command = [sys.executable, *flags, str(Path(__file__).resolve()),
                "--worker", name, "--shard", f"{index}/{count}", "--report", str(report)]
     started = time.monotonic()
-    completed = subprocess.run(command, cwd=REPO, stdout=subprocess.PIPE,
-                               stderr=subprocess.STDOUT, text=True, errors="replace")
+    process = children.start(command)
+    try:
+        output, _ = process.communicate()
+    finally:
+        children.finish(process)
     elapsed = time.monotonic() - started
     try:
         data = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = None
-    return job, completed.returncode, completed.stdout, elapsed, data
+    return job, process.returncode, output, elapsed, data
+
+
+def raise_interrupt(signum, frame):
+    raise KeyboardInterrupt(signum)
 
 
 def label(job):
@@ -187,21 +241,43 @@ def main(argv=None):
     jobs = [(name, index, SHARDS.get(name, 1)) for name in files for index in range(SHARDS.get(name, 1))]
     # 重いものから始める(全体の時間が最後に始めた重いファイルで延びないように)。
     jobs.sort(key=lambda job: (-WEIGHTS.get(job[0], 0) / job[2], job[0], job[1]))
-    # 子のプロセスにも、親と同じく __pycache__ を作らない指定を渡す。
-    flags = ["-B"] if sys.flags.dont_write_bytecode else []
+    # 子のプロセスは、親の -B の有無にかかわらず、いつも -B で起動する。
+    # -B が無いと、子が配布のコードを読み込むときに plugins/ の下へ __pycache__ を書く。
+    # 同時に動く別の子が配布の木を shutil.copytree で写すと、書きかけのファイルに当たって落ちうる。
+    # 環境変数(PYTHONDONTWRITEBYTECODE)にはしない。テストが起動するプロセスにまで効き、
+    # 「.pyc を作らない」ことを確かめるテストが意味を失うため。
+    # テストが起動する python(-B なし)は、今も plugins/ の下へ __pycache__ を書くことがある。
+    # そのため、配布の木を写すテストは __pycache__ を除いて写す。
+    flags = ["-B"]
 
     started = time.monotonic()
     results = []
+    children = Children()
+    # SIGTERM も Ctrl-C と同じく止める(子を残して親だけが終わらないように)。
+    signal.signal(signal.SIGTERM, raise_interrupt)
     print(f"{len(files)} ファイル・{len(jobs)} プロセスを、同時に {args.jobs} 個まで流す", flush=True)
     with tempfile.TemporaryDirectory(prefix="run-tests-") as workdir, \
             concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = [pool.submit(run_job, job, workdir, flags) for job in jobs]
-        for future in concurrent.futures.as_completed(futures):
-            job, code, output, elapsed, data = future.result()
-            ok = code == 0 and data is not None and data["ok"]
-            count = "件数不明" if data is None else f"{data['run']} 件"
-            print(f"{'ok  ' if ok else 'FAIL'} {elapsed:7.1f} 秒  {label(job)}  {count}", flush=True)
-            results.append((job, code, output, elapsed, data, ok))
+        futures = []
+        try:
+            futures.extend(pool.submit(run_job, job, workdir, flags, children) for job in jobs)
+            for future in concurrent.futures.as_completed(futures):
+                job, code, output, elapsed, data = future.result()
+                ok = code == 0 and data is not None and data["ok"]
+                count = "件数不明" if data is None else f"{data['run']} 件"
+                print(f"{'ok  ' if ok else 'FAIL'} {elapsed:7.1f} 秒  {label(job)}  {count}", flush=True)
+                results.append((job, code, output, elapsed, data, ok))
+        except KeyboardInterrupt as exc:
+            # 待ち行列のジョブを捨て、動いているプロセスを止める。with を出るときは、止めたジョブだけを待つ。
+            signum = exc.args[0] if exc.args and exc.args[0] == signal.SIGTERM else signal.SIGINT
+            # 止めている間の 2 回目の Ctrl-C で、片付けが途中で切れないようにする。
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+            signal.signal(signal.SIGTERM, signal.SIG_IGN)
+            dropped = sum(future.cancel() for future in futures)
+            killed = children.stop_all()
+            print(f"\n中断: 動いていた {killed} 個のプロセスを止め、まだ始めていない {dropped} 個を始めずに捨てた"
+                  f"(終わっていたのは {len(results)} 個)", flush=True)
+            return 128 + signum
 
     problems = []
     totals = dict.fromkeys(("run", "failures", "errors", "skipped", "expected_failures", "unexpected_successes"), 0)

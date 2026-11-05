@@ -213,7 +213,8 @@ class StartupShellTests(unittest.TestCase):
         cls.root = Path(cls.tmp.name)
         # 同時作業中の source を試験途中に読み直さない。
         cls.plugin = cls.root / 'plugin'
-        shutil.copytree(ROOT / 'plugins/dev-workflow', cls.plugin)
+        # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
+        shutil.copytree(ROOT / 'plugins/dev-workflow', cls.plugin, ignore=shutil.ignore_patterns('__pycache__'))
         scripts = cls.plugin / 'skills/ship-task/scripts'
         text = (scripts / 'loop-selftest.sh').read_text()
         cls.prefix = text.split('# LOOP_SELFTEST_ONLY=', 1)[0]

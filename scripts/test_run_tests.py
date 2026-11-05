@@ -2,10 +2,12 @@
 
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from pathlib import Path
 
@@ -75,6 +77,38 @@ class Many(unittest.TestCase):
 ''' + "".join(f"    def test_{index}(self):\n        pass\n\n" for index in range(7))
 
 
+# 自分と、自分が起動した孫のプロセスの pid を書いてから眠る(止めたときに両方が消えるかを見る)。
+SLOW = '''
+import os
+import subprocess
+import time
+import unittest
+
+class Slow(unittest.TestCase):
+    def test_sleep(self):
+        child = subprocess.Popen(["sleep", "60"])
+        marks = os.environ["RUN_TESTS_MARKS"]
+        name = os.path.join(marks, os.path.basename(__file__))
+        with open(name + ".tmp", "w", encoding="utf-8") as stream:
+            stream.write(f"{os.getpid()} {child.pid}\\n")
+        os.replace(name + ".tmp", name + ".pids")
+        time.sleep(60)
+'''
+
+
+def process_gone(pid):
+    """pid のプロセスが無いか、ゾンビ(親が回収する前の終わったプロセス)なら True。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    stat = Path(f"/proc/{pid}/stat")
+    try:
+        return stat.read_text().rsplit(")", 1)[1].split()[0] == "Z"
+    except (OSError, IndexError):
+        return False
+
+
 class RunTestsTest(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -111,6 +145,23 @@ class RunTestsTest(unittest.TestCase):
         self.assertNotIn("異常:", result.stdout)
         # 親に -B を付けたときは、子も __pycache__ を作らない。
         self.assertEqual([], list(self.root.rglob("__pycache__")))
+
+    def test_children_never_write_bytecode_even_without_parent_b(self):
+        # テストのファイルが scripts/ の下のモジュールを読み込んでも、子は .pyc を書かない。
+        (self.scripts / "helper_module.py").write_text("VALUE = 1\n", encoding="utf-8")
+        self.write_test("test_imports.py", '''
+import unittest
+import helper_module
+
+class Imports(unittest.TestCase):
+    def test_value(self):
+        self.assertEqual(1, helper_module.VALUE)
+''')
+        result = self.run_runner(flags=())
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("結果: 1 件 / 失敗 0 件", result.stdout)
+        self.assertEqual([], list(self.root.rglob("__pycache__")))
+        self.assertEqual([], list(self.root.rglob("*.pyc")))
 
     def test_failure_import_error_and_missing_report_exit_1(self):
         self.write_test("test_passing.py", PASSING)
@@ -159,6 +210,39 @@ class RunTestsTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
         self.assertIn("1 ファイル・1 プロセス", result.stdout)
         self.assertNotIn("test_failing.py", result.stdout)
+
+    def test_interrupt_stops_running_processes_and_skips_queued_ones(self):
+        for signum, code in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+            with self.subTest(signal=signum.name):
+                marks = self.root / f"marks-{signum.name}"
+                marks.mkdir()
+                for name in ("test_slow_a.py", "test_slow_b.py", "test_slow_c.py"):
+                    self.write_test(name, SLOW)
+                env = dict(os.environ, RUN_TESTS_MARKS=str(marks))
+                runner = subprocess.Popen([sys.executable, "-B", str(self.runner), "-j", "1"], cwd=self.root,
+                                          env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                try:
+                    deadline = time.monotonic() + 60
+                    while not list(marks.glob("*.pids")) and time.monotonic() < deadline:
+                        time.sleep(0.05)
+                    started = list(marks.glob("*.pids"))
+                    self.assertEqual(["test_slow_a.py.pids"], [path.name for path in started])
+                    pids = [int(pid) for pid in started[0].read_text(encoding="utf-8").split()]
+                    runner.send_signal(signum)
+                    output, _ = runner.communicate(timeout=60)
+                finally:
+                    if runner.poll() is None:
+                        runner.kill()
+                        runner.communicate()
+                self.assertEqual(code, runner.returncode, output)
+                self.assertIn("中断: 動いていた 1 個のプロセスを止め、まだ始めていない 2 個を始めずに捨てた", output)
+                self.assertNotIn("結果:", output)
+                # 待ち行列の 2 つは始まっていない。動いていたプロセスと、その孫も消えている。
+                self.assertEqual(["test_slow_a.py.pids"], [path.name for path in marks.glob("*.pids")])
+                deadline = time.monotonic() + 10
+                while not all(process_gone(pid) for pid in pids) and time.monotonic() < deadline:
+                    time.sleep(0.05)
+                self.assertTrue(all(process_gone(pid) for pid in pids), pids)
 
     def test_argument_errors_exit_2_without_running(self):
         self.write_test("test_many.py", MANY)

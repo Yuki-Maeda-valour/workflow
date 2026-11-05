@@ -514,7 +514,8 @@ class RealRepositoryTests(Harness):
     def test_mutation_removing_only_operation_environment_is_detected(self):
         self.verify_five()
         folder = self.root / "mutation"
-        shutil.copytree(SCRIPTS, folder)
+        # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
+        shutil.copytree(SCRIPTS, folder, ignore=shutil.ignore_patterns("__pycache__"))
         mutant = folder / SCRIPT.name
         source = mutant.read_text()
         old = "result = run_git(cwd, env, *command)"
