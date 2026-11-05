@@ -158,13 +158,14 @@ class Children:
         self.running = set()
         self.stopped = False
 
-    def start(self, command):
+    def start(self, command, env=None):
+        """env を渡すと、子の環境変数をそれにする(既定は親と同じ。run-loop-selftest.py が使う)。"""
         with self.lock:
             if self.stopped:
                 raise Interrupted()
             # 別のプロセスグループで起動する(端末の Ctrl-C は親だけが受け、子はグループごと止める)。
             process = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       text=True, errors="replace", start_new_session=True)
+                                       text=True, errors="replace", start_new_session=True, env=env)
             self.running.add(process)
             return process
 
