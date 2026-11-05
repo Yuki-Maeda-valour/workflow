@@ -146,6 +146,13 @@ class Restore:
             raise Failure('runtime-unavailable')
         self.check_version()
 
+    def reap_if_exited(self, child):
+        if child.poll() is None:
+            return False
+        child.wait()
+        self.child = None
+        return True
+
     def stop_child(self):
         child = self.child
         if self.child_unreaped:
@@ -153,9 +160,7 @@ class Restore:
         if child is None:
             return True
         for action in ('terminate', 'kill'):
-            if child.poll() is not None:
-                child.wait()
-                self.child = None
+            if self.reap_if_exited(child):
                 return True
             try:
                 getattr(child, action)()
@@ -163,14 +168,10 @@ class Restore:
                 pass
             until = time.monotonic() + STOP_SECONDS
             while time.monotonic() < until:
-                if child.poll() is not None:
-                    child.wait()
-                    self.child = None
+                if self.reap_if_exited(child):
                     return True
                 time.sleep(min(POLL_SECONDS, max(0, until - time.monotonic())))
-        if child.poll() is not None:
-            child.wait()
-            self.child = None
+        if self.reap_if_exited(child):
             return True
         self.child_unreaped = True
         return False
