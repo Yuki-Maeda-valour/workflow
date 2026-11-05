@@ -1,6 +1,9 @@
 """scripts/run-loop-selftest.py の回帰テスト。使い捨てのフォルダに置いた小さな偽の loop-selftest.sh で動かす。"""
 
+import concurrent.futures
+import contextlib
 import importlib.util
+import io
 import os
 import shutil
 import signal
@@ -10,6 +13,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -64,9 +68,12 @@ SLOW = r'''
 if want slow-{index}; then
 scratch="$(mktemp -d "$RUN_LOOP_SELFTEST_MARKS/scratch-{index}-XXXXXX")"
 echo "loop-selftest: 対象 fake(scratch $scratch)"
+# RUN_LOOP_SELFTEST_HOLD があれば、別のセッションの子が、その秒数だけ標準出力を開いたまま残る。
+holder=""
+if [ -n "${RUN_LOOP_SELFTEST_HOLD:-}" ]; then setsid sleep "$RUN_LOOP_SELFTEST_HOLD" & holder=$!; fi
 sleep 60 &
 child=$!
-printf '%s %s\n' "$$" "$child" >"$RUN_LOOP_SELFTEST_MARKS/slow-{index}.tmp"
+printf '%s %s %s\n' "$$" "$child" "$holder" >"$RUN_LOOP_SELFTEST_MARKS/slow-{index}.tmp"
 mv "$RUN_LOOP_SELFTEST_MARKS/slow-{index}.tmp" "$RUN_LOOP_SELFTEST_MARKS/slow-{index}.pids"
 wait "$child"
 ok "slow-{index}"
@@ -168,6 +175,7 @@ class RunLoopSelftestTest(unittest.TestCase):
 
     def test_layout_that_cannot_be_split_is_reported_before_running(self):
         outside = "最上位の `if want <節>; then` の外で want を呼んでいる"
+        top_else = "最上位の `if want delta; then` に else か elif がある"
         cases = {
             "2 つの節を見る": (SECTIONS + "if want alpha || want beta; then\nok x\nfi\n",
                                "`if want alpha || want beta` が、ちょうど 1 つのプロセスで流れない(単独の節の名前: alpha beta)"),
@@ -183,16 +191,48 @@ class RunLoopSelftestTest(unittest.TestCase):
             "行頭の入れ子": (SECTIONS.replace('ok "beta 1"\n', 'ok "beta 1"\nif want delta; then\nok x\nfi\n'), outside),
             "&& で呼ぶ": (SECTIONS + "want delta && ok x\n", outside),
             "文字列の続きの後で呼ぶ": (SECTIONS + 'x="a\nb" && want delta\n', outside),
+            "最上位の else": (SECTIONS + "if want delta; then\nok x\nelse\nok y\nfi\n", top_else),
+            "最上位の elif": (SECTIONS + "if want delta; then\nok x\nelif [ -n z ]; then\nok y\nfi\n", top_else),
+            "複数行の $( の中": (SECTIONS + "x=$(\nwant delta\n)\n", outside),
+            "複数行の $( の中の if": (SECTIONS + "x=$(\nif want delta; then echo; fi\n)\n", outside),
+            "複数行の <( の中": (SECTIONS + "cat <(\nwant delta\n) >/dev/null\n", outside),
+            "複数行のバッククォートの中": (SECTIONS + "x=`\nwant delta\n`\n", outside),
+            "文字列の続きの後の if": (SECTIONS + 'y=$(echo "a\nb" && if want delta; then :; fi)\n', outside),
+            "文字列の続きの後の !": (SECTIONS + 'x="a\nb" || ! want delta\n', outside),
+            "coproc": (SECTIONS + "coproc want delta\n", outside),
+            "trap": (SECTIONS + "trap 'want delta' EXIT\n", outside),
             "構文の誤り": (SECTIONS + "if want delta; then\n", "bash で構文を読めない"),
             "節が無い": ("\n", "`if want <節>; then` の行が無い"),
         }
         for name, (sections, reason) in cases.items():
             with self.subTest(case=name):
+                self.log.unlink(missing_ok=True)
                 self.write_selftest(sections)
                 result = self.run_runner()
                 self.assertEqual(1, result.returncode, result.stdout + result.stderr)
                 self.assertIn("異常: loop-selftest.sh の節を読めない: " + reason, result.stdout)
                 self.assertEqual([], self.ran())
+
+    def test_extra_closing_brace_stops_before_anything_runs(self):
+        # 余分な `}` で、読むために包んだ関数が途中で閉じると、後ろの行が読む段で実行されてしまう。
+        escaped = self.root / "escaped"
+        self.write_selftest(SECTIONS + f"}}\ntouch '{escaped}'\n")
+        result = self.run_runner()
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("異常: loop-selftest.sh の節を読めない: bash で構文を読めない", result.stdout)
+        self.assertFalse(escaped.exists())
+        self.assertEqual([], self.ran())
+
+    def test_bash_options_in_environment_do_not_change_reading(self):
+        # posix のモードの bash は、入れ子の関数を `function` を付けずに出す(want () が呼び出しに見える)。
+        self.write_selftest()
+        for name, value in (("POSIXLY_CORRECT", "1"), ("SHELLOPTS", "posix")):
+            with self.subTest(variable=name):
+                self.log.unlink(missing_ok=True)
+                result = self.run_runner(**{name: value})
+                self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+                self.assertIn("結果: PASS 8 件 / FAIL 0 件 / ", result.stdout)
+                self.assertEqual([",", "alpha", "beta", "gamma"], self.ran())
 
     def test_want_inside_heredoc_and_variables_is_not_a_call(self):
         # ヒアドキュメントの中の `want = ...`・`local want`・`$want` は、want の呼び出しではない。
@@ -292,6 +332,38 @@ if check_want a a; then ok "変数の want"; fi
             time.sleep(0.05)
         self.assertEqual([], [pid for pid in pids if not process_gone(pid)], pids)
 
+    def test_interrupt_waits_for_output_held_by_another_group(self):
+        # 別のセッションの子が標準出力を開いたまま残っても、閉じるまで待ってから、残った一時フォルダを出す。
+        marks = self.root / "marks"
+        marks.mkdir()
+        self.write_selftest(SLOW.replace("{index}", "0"))
+        env = dict(os.environ, RUN_LOOP_SELFTEST_LOG=str(self.log), RUN_LOOP_SELFTEST_MARKS=str(marks),
+                   RUN_LOOP_SELFTEST_HOLD="10")
+        runner = subprocess.Popen([sys.executable, "-B", str(self.runner), "-j", "1"], cwd=self.root, env=env,
+                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        pids = []
+        try:
+            deadline = time.monotonic() + 60
+            while not (marks / "slow-0.pids").exists() and time.monotonic() < deadline:
+                time.sleep(0.05)
+            pids = [int(pid) for pid in (marks / "slow-0.pids").read_text(encoding="utf-8").split()]
+            self.addCleanup(self.kill_leftovers, pids)
+            signalled = time.monotonic()
+            runner.send_signal(signal.SIGTERM)
+            output, _ = runner.communicate(timeout=60)
+            waited = time.monotonic() - signalled
+        finally:
+            if runner.poll() is None:
+                runner.kill()
+                runner.communicate()
+        self.assertEqual(143, runner.returncode, output)
+        self.assertEqual(3, len(pids), pids)
+        # 子が 10 秒眠る間は、出力が閉じない。閉じるまで待ってから表示する。
+        self.assertGreaterEqual(waited, 8, output)
+        scratches = list(marks.glob("scratch-0-*"))
+        self.assertEqual(1, len(scratches), scratches)
+        self.assertIn(f"残った一時フォルダ(slow-0。確かめてから消す): {scratches[0]}", output)
+
     @staticmethod
     def kill_leftovers(pids):
         """テストのための後片付け。検査の後に addCleanup で走り、残った子孫を止める。"""
@@ -303,17 +375,48 @@ if check_want a a; then ok "変数の want"; fi
                     pass
 
 
+def load_runner():
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("run_loop_selftest", RUNNER)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class LeftScratchesTest(unittest.TestCase):
+    def test_waits_without_time_limit_for_every_started_process(self):
+        # 最初の 2 秒で終わらないプロセスがあっても、時間で切らずに終わりを待ち、残った一時フォルダを返す。
+        module = load_runner()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        kept = Path(temporary.name) / "kept"
+        kept.mkdir()
+        removed = Path(temporary.name) / "removed"
+
+        def job(section, path, delay):
+            time.sleep(delay)
+            return section, 130, f"loop-selftest: 対象 x(scratch {path})\n", delay, None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(job, "late", kept, 4), pool.submit(job, "early", removed, 0)]
+            stream = io.StringIO()
+            with contextlib.redirect_stdout(stream):
+                left = module.left_scratches(futures)
+        self.assertEqual([("late", str(kept))], left)
+        self.assertIn("止めた 1 個のプロセスの出力が閉じるのを待つ", stream.getvalue())
+
+
 class RealSelftestTest(unittest.TestCase):
     """本物の loop-selftest.sh を、節に分けて流せる形のままにしておく(流しはしない)。"""
 
     def test_every_guard_runs_in_exactly_one_process(self):
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("run_loop_selftest", RUNNER)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_runner()
         data = module.SELFTEST.read_bytes()
         text = data.decode("utf-8")
         sections = module.read_sections(data)
+        # bash の読み方を変える環境変数があっても、同じに読める。
+        with mock.patch.dict(os.environ, {"POSIXLY_CORRECT": "1", "SHELLOPTS": "posix"}):
+            self.assertEqual(sections, module.read_sections(data))
         self.assertGreater(len(sections), 1)
         for name in sections:
             self.assertIn(f"\nif want {name}", text)

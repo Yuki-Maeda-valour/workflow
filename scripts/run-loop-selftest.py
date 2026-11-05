@@ -9,8 +9,11 @@
 
 - 節は、loop-selftest.sh の最上位の `if want <節>; then`(`if want <節> || want <別名>; then` も)。
   1 つの節を 1 つのプロセスで流す(`LOOP_SELFTEST_ONLY=<節>`)。ほかの環境変数は、そのまま各プロセスへ渡す。
-- 節の形は、流す前に bash 自身に読ませて確かめる(read_sections)。want を呼ぶのが、最上位の
-  `if want <節>; then` の行(行頭に 1 行で書いたもの)だけでないときは、流さずに止める。
+- 節の形は、流す前に bash 自身に読ませて確かめる(read_sections)。先に `bash -n` で読めることを確かめ、
+  それから関数で包んで定義だけし(実行はしない)、`declare -f` の出力を見る。want を呼ぶのが、最上位の
+  `if want <節>; then` の行(行頭に 1 行で書いたもの)だけでないとき、その if に else・elif があるときは、
+  流さずに止める。限界: 変数に入れた名前で呼ぶ(`f=want; $f x`)・実行中に組み立てた文字列を eval するなど、
+  書いた字面に `want <名前>` が出ない呼び方は見つけられない。
 - 節の外の確かめ(最初のスタブの証明と、最後の後片付けの確かめ)は、どのプロセスでも流れる。
   そこで、どの節も選ばないプロセス(`LOOP_SELFTEST_ONLY=,`)を 1 つ足して、その件数を測る。
   節の外の確かめが、どのプロセスでも同じ名前で PASS したときだけ、合計では 1 回分だけ数える
@@ -25,6 +28,7 @@
   `RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
   loop-selftest.sh の一時フォルダ(`mktemp -d` で作る。既定は /tmp/tmp.*)も、後片付けが走らずに残ることがある。
   止めたプロセスの出力にある一時フォルダのうち、残っているものは、中断の行の後に表示する。
+  表示の前に、始めた全部のプロセスの出力が閉じるのを、時間で切らずに待つ。
 """
 
 import argparse
@@ -66,11 +70,19 @@ GUARD = re.compile(r"^if (want [a-z0-9][a-z0-9-]*(?: \|\| want [a-z0-9][a-z0-9-]
 NAME = re.compile(r"want ([a-z0-9-]+)")
 INDENT = "    "
 # want をコマンドとして呼ぶ形(bash が整えたコードの行で探す)。`local want`・`want=`・`$want` は当たらない。
-CALL = re.compile(r"""(?:^|[;&|!({`]|\$\(|\b(?:if|elif|while|until|then|do|else|time|exec|command|builtin|eval|env|nohup|timeout)\s)"""
-                  r"""\s*\\?["']?want["']?(?=[\s;&|)`]|$)""")
-# 複数行の文字列の続きの行(bash が字下げし直さない行)では、演算子の後の want だけを探す
-# (ヒアドキュメントの中の Python の `want = ...` などを、呼び出しと数えないため)。
-TAIL_CALL = re.compile(r"""(?:&&|\|\||;|\||\$\(|`)\s*\\?["']?want["']?(?=[\s;&|)`]|$)""")
+# trap の文字列の中と、coproc で起動する形も数える(bash は `coproc want x` を `coproc COPROC want x` と出す)。
+CALL = re.compile(r"""(?:^|[;&|!({`]|\$\(|\b(?:if|elif|while|until|then|do|else|time|exec|command|builtin|eval|env|nohup"""
+                  r"""|timeout|trap)\s|\bcoproc\s+(?:[A-Za-z_]\w*\s+)?)\s*\\?["']?want["']?(?=[\s;&|)`]|$)""")
+# コードでない行(ヒアドキュメントの中身・複数行の文字列の続き・複数行の `$( … )`・`<( … )`・バッククォートの
+# 中身。bash 5.1 は、どれも書いたまま出す)では、行頭か演算子の後に来る `want <名前>` を探す。間に if・! などを
+# 挟んでもよい。後ろが `=` のもの(ヒアドキュメントの中の Python の `want = …`)は数えない。
+TAIL_CALL = re.compile(r"""(?:^|&&|\|\||;|\||\$\(|<\(|`)\s*(?:(?:if|elif|while|until|then|do|else|!|time|command|eval)\s+)*"""
+                       r"""\\?["']?want["']?[ \t]+[^\s=]""")
+TOP_ELSE = re.compile(r"(?:else|elif)\b")
+TOP_FI = re.compile(r"fi(?:$|[\s;])")
+# bash に読ませるときに外す環境変数。BASH_ENV・ENV は起動時に読んで実行するファイル、POSIXLY_CORRECT・SHELLOPTS・
+# BASHOPTS は読み方と出し方を変える(posix のモードでは、入れ子の関数を `function` を付けずに出す)。
+BASH_ENV_DROP = ("BASH_ENV", "ENV", "POSIXLY_CORRECT", "SHELLOPTS", "BASHOPTS")
 WRAPPER = "__run_loop_selftest_body"
 RESULT = re.compile(r"^結果: PASS (\d+) 件 / FAIL (\d+) 件$", re.M)
 PASSED = re.compile(r"^PASS  (.*)$", re.M)
@@ -89,14 +101,34 @@ def load_run_tests():
 run_tests = load_run_tests()
 
 
+def bash_env():
+    """bash に読ませるときの環境変数。読み方を変える変数と、起動時に実行される変数・関数を外す。"""
+    return {key: value for key, value in os.environ.items()
+            if key not in BASH_ENV_DROP and not key.startswith("BASH_FUNC_")}
+
+
+def syntax_check(data):
+    """包む前に、元のスクリプトを `bash -n`(読むだけで実行しない)に読ませる。
+
+    余分な `}` などで包んだ関数が途中で閉じると、その後ろの行が、定義だけのはずの段で実行される。
+    元のスクリプトが、警告も無く読めることを先に確かめて、それを防ぐ。
+    """
+    result = subprocess.run(["bash", "--norc", "--noprofile", "-n"], input=data, capture_output=True,
+                            env=bash_env(), timeout=120)
+    if result.returncode != 0 or result.stderr:
+        error = result.stderr.decode("utf-8", "replace").strip().splitlines()
+        raise ValueError(f"bash で構文を読めない({error[0] if error else f'終了コード {result.returncode}'})")
+
+
 def bash_listing(data, levels):
-    """スクリプト(バイト列)を levels 段の関数で包んで定義だけし(実行はしない)、bash が整えた本文の行を返す。"""
+    """スクリプト(バイト列)を levels 段の関数で包んで定義だけし(実行はしない)、bash が整えた本文の行を返す。
+
+    先に syntax_check で、元のスクリプトが読めることを確かめておく。
+    """
     head = b"".join(f"{WRAPPER}{index} () {{\n".encode() for index in range(levels))
     script = head + data + b"\n" + b"}\n" * levels + f"declare -f {WRAPPER}0\n".encode()
-    # BASH_ENV は、非対話の bash が最初に読んで実行するので外す。
-    env = {key: value for key, value in os.environ.items() if key != "BASH_ENV"}
     result = subprocess.run(["bash", "--norc", "--noprofile", "-s"], input=script, capture_output=True,
-                            env=env, timeout=120)
+                            env=bash_env(), timeout=120)
     lines = result.stdout.decode("utf-8", "replace").split("\n")
     if result.returncode != 0 or result.stderr or len(lines) < 2 * levels + 2:
         error = result.stderr.decode("utf-8", "replace").strip().splitlines()
@@ -111,6 +143,7 @@ def code_lines(data):
     包む段を 1 つ増やすと、コードの行は字下げが 4 つ深くなる。ヒアドキュメントの中身と、複数行の
     文字列の続きの行は、書いたまま変わらない。この差で 2 つを分ける。
     """
+    syntax_check(data)
     one, two = bash_listing(data, 1), bash_listing(data, 2)
     if len(one) != len(two):
         raise ValueError("bash の整えた行の数が、包む段によって違う")
@@ -138,13 +171,25 @@ def read_sections(data):
     text = data.decode("utf-8", "replace")
     written = [NAME.findall(match.group(1)) for match in map(GUARD.match, text.split("\n")) if match]
     blocks = []
+    in_guard = False
     for is_code, line in code_lines(data):
-        if is_code:
-            if line.startswith(INDENT) and GUARD.match(line[len(INDENT):]):
-                blocks.append(NAME.findall(line))
-            elif CALL.search(line):
+        if not is_code:
+            if TAIL_CALL.search(line):
                 raise ValueError(f"最上位の `if want <節>; then` の外で want を呼んでいる: {line.strip()[:100]}")
-        elif TAIL_CALL.search(line):
+            continue
+        # 字下げがちょうど 4 の行が、最上位の文。
+        top = line[len(INDENT):] if line.startswith(INDENT) and not line.startswith(INDENT + " ") else None
+        if top is not None and GUARD.match(top):
+            blocks.append(NAME.findall(top))
+            in_guard = True
+            continue
+        if top is not None and in_guard and TOP_ELSE.match(top):
+            # bash は elif を、else の中の if として出す。else の側は、選ばなかった全部のプロセスで流れる。
+            raise ValueError(f"最上位の `if want {' || want '.join(blocks[-1])}; then` に else か elif がある"
+                             f"(その側は、ほかの全部のプロセスで流れ、1 本で流すと流れない)")
+        if top is not None and TOP_FI.match(top):
+            in_guard = False
+        if CALL.search(line):
             raise ValueError(f"最上位の `if want <節>; then` の外で want を呼んでいる: {line.strip()[:100]}")
     if blocks != written:
         index = next((i for i, (a, b) in enumerate(zip(blocks, written)) if a != b), min(len(blocks), len(written)))
@@ -197,12 +242,20 @@ def run_job(section, children, log_dir):
     return section, process.returncode, output, elapsed, counts
 
 
-def left_scratches(futures, wait=30):
-    """止めたプロセスの出力にある一時フォルダのうち、まだ残っているものを (節, パス) の一覧で返す。"""
+def left_scratches(futures):
+    """止めたプロセスの出力にある一時フォルダのうち、まだ残っているものを (節, パス) の一覧で返す。
+
+    始めた全部のプロセスの出力が閉じるまで待つ(時間で切らない)。別のプロセスグループの子が標準出力を
+    開いたまま残ると、その子が終わるまで待つ(どのみち、スレッドを閉じるときにも待つ)。
+    """
     started = [future for future in futures if not future.cancelled()]
-    done, _ = concurrent.futures.wait(started, timeout=wait)
+    done, pending = concurrent.futures.wait(started, timeout=2)
+    if pending:
+        print(f"止めた {len(pending)} 個のプロセスの出力が閉じるのを待つ(別のプロセスグループの子が残っていると、"
+              f"RUN_TIMEOUT の秒数まで待つことがある)", flush=True)
+        concurrent.futures.wait(pending)
     left = []
-    for future in done:
+    for future in started:
         if future.exception() is not None:
             continue
         section, code, output, elapsed, counts = future.result()
