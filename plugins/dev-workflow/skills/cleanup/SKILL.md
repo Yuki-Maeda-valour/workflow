@@ -32,11 +32,11 @@ AI のセッションが作って残した worktree・作業用コンテナ・�
    - 未コミットの変更・未追跡・無視されたファイル: `git -C <パス> status --porcelain --ignored`
      - 無視されたファイル(`!!` の行)は、一覧と大きさ(`du -sh`)を表に載せる
    - 未 push のコミット: 追跡先があれば `git -C <パス> log @{upstream}..HEAD --oneline`。無ければ「追跡先なし」と書く
-   - 既定ブランチへの取り込み: `git merge-base --is-ancestor <HEAD> <既定ブランチ>` の終了値。squash merge は取り込み済みに見えないので、PR の状態も見る
+   - 既定ブランチへの取り込み: `git merge-base --is-ancestor <HEAD> <既定ブランチ>` の終了コード。squash merge(複数のコミットを 1 つにまとめた取り込み)は取り込み済みに見えないので、PR の状態も見る
    - PR の状態: `gh` があれば `gh pr list --head <ブランチ> --state all --json number,state,mergedAt,headRefOid,baseRefName`。無ければ「PR 状態は未確認」と書く
-     - 同名ブランチの過去の PR も返るので、PR の `headRefOid` が worktree の今の HEAD と一致するか(または HEAD が既定ブランチに取り込まれているか)を確かめる
+     - 同名ブランチの過去の PR も返るので、PR の `headRefOid` が worktree の今の HEAD(取り出しているコミット)と一致するか(または HEAD が既定ブランチに取り込まれているか)を確かめる
      - 対応が分からなければ「確認が必要」にする
-   - detached HEAD: ブランチ名が無いので PR の状態は「未確認」。`git branch -a --contains <HEAD>` で、どのブランチにも含まれないコミットがあれば「確認が必要」(消すと辿れなくなる)
+   - detached HEAD(ブランチではなくコミットを直接取り出した状態): ブランチ名が無いので PR の状態は「未確認」。`git branch -a --contains <HEAD>` で、どのブランチにも含まれないコミットがあれば「確認が必要」(消すと辿れなくなる)
    - ロック: `locked` の理由を読む。理由にプロセス番号があれば、生きているかを調べる
      - 主な判定は `/proc/<番号>` の有無。`kill -0` を使うなら、権限エラー(EPERM)は「生きている」と読む
      - 番号の再利用で誤判定しうるので、迷ったら生きていると判定する

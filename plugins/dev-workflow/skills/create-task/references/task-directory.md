@@ -13,11 +13,11 @@
 
 状態名と `task/{タスク名}` 形式のブランチ名はこの保存先から独立した規約である。既存タスクを別ディレクトリへ自動移動しない。
 
-`候補_` は発見ループが書く、設計書の手前の候補である。書式は [task-template.md](task-template.md) の記法の規約、書き出しは [candidate-mode.md](candidate-mode.md) が正本(ほかが合わせる元)。候補モードは必ずこの helper で解いた保存先に書く(新しい保存先を作るのは、状態名の MD が 1 つも無く既定の `docs/tasks` になるときだけ)。
+`候補_` は発見ループが書く、設計書の手前の候補である。書式は [task-template.md](task-template.md) の記法の規約、書き出しは [candidate-mode.md](candidate-mode.md) が正本(ほかが合わせる元)。候補モードは必ずこの補助スクリプトで解いた保存先に書く(新しい保存先を作るのは、状態名の MD が 1 つも無く既定の `docs/tasks` になるときだけ)。
 
 ## helper の使用
 
-profile をホスト側で読み、`task_dir` の型を検証してから、同梱の [`../scripts/resolve-task-dir.py`](../scripts/resolve-task-dir.py) を実行する。YAML は helper に渡さない。
+profile をホスト側で読み、`task_dir` の型を検証してから、同梱の [`../scripts/resolve-task-dir.py`](../scripts/resolve-task-dir.py) を実行する。YAML は補助スクリプトに渡さない。
 
 ```bash
 python3 <create-task-skill>/scripts/resolve-task-dir.py --project-root <管理ルート>
@@ -26,10 +26,10 @@ python3 <create-task-skill>/scripts/resolve-task-dir.py --project-root <管理�
 
 `--task-dir=<値>` の形なら、先頭が `-` の合法な相対パスもオプションと誤認されない。すべてのパスを引用する。JSON はデータとして解析し、シェル評価しない。
 
-- exit 0: `task_dir`（管理ルート相対）、`path`（絶対）、`source`（`profile` / `detected` / `default`）
-- exit 1: `error`。無効指定(置換漏れを含む。その名前のパスが既に在れば、中身を移してから消す案内を添える)、置換漏れの名前の候補、管理ルート・候補の読取り不能
-- exit 2: `error` とソート済み `candidates`。候補が複数
+- 終了コード 0: `task_dir`（管理ルート相対）、`path`（絶対）、`source`（`profile` / `detected` / `default`）
+- 終了コード 1: `error`。無効指定(置換漏れを含む。その名前のパスが既に在れば、中身を移してから消す案内を添える)、置換漏れの名前の候補、管理ルート・候補の読取り不能
+- 終了コード 2: `error` とソート済み `candidates`。候補が複数
 
-helper は読取り専用で、ディレクトリ作成・タスク本文の読取り・移動を行わない。指定ディレクトリが内部のシンボリックリンクなら実体が管理プロジェクト内にある場合だけ使え、返す `task_dir` と `path` はその実体へ正規化する。外部を指す場合はエラーにする。既定パスも同じ検証を通す。
+この補助スクリプトは読み取り専用で、ディレクトリ作成・タスク本文の読取り・移動を行わない。指定ディレクトリが内部のシンボリックリンクなら実体が管理プロジェクト内にある場合だけ使え、返す `task_dir` と `path` はその実体へ正規化する。外部を指す場合はエラーにする。既定パスも同じ検証を通す。
 
 Python が無い環境では、上の優先順位・探索深度・通常ファイルとシンボリックリンクの条件を同じまま読み取り専用で実施する。候補の複数検出や無効指定を既定値へフォールバックさせない。

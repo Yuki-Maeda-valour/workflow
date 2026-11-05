@@ -30,9 +30,9 @@ argument-hint: "[--quick | --area=<name> | --deep]"
 
 ## キャッシュ(.claude/grasp.md)
 
-- **参照だけに使う**: `.claude/grasp.md` は前回の要約・関連パス・未確認事項を知る索引であり、HEAD 一致・過去の把握レベル・dirty 状態を理由に早期終了しない。毎回 Phase 0 と、要求に応じた現在の対象領域・依存先を読む
+- **参照だけに使う**: `.claude/grasp.md` は前回の要約・関連パス・未確認事項を知る索引であり、HEAD(取り出しているコミット)の一致・過去の把握レベル・未コミットの変更がある状態(dirty)を理由に早期終了しない。毎回 Phase 0 と、要求に応じた現在の対象領域・依存先を読む
 - **累積しない**: 過去の把握レベルを累積して今回の読取り範囲を決めない。今回読んだ範囲・日時・未確認事項を独立して記録する
-- **実行末尾で更新**: Phase 5 のサマリー+メタ(今回読んだ範囲 / 日時 / 未確認事項)を `.claude/grasp.md` に Write する(gitignore 対象)
+- **実行末尾で更新**: Phase 5 のサマリー+メタ(今回読んだ範囲 / 日時 / 未確認事項)を `.claude/grasp.md` に書く(gitignore 対象)
 - **キャッシュの規律**(design §5-18): grasp.md が無くても動作は同一(再把握するだけ)。知識の正本(doc/ / メモリ / 権威参照ファイル)に無い情報をここに溜めない — 把握中の発見(ドリフト・地雷)は /update-doc での正本反映を促す
 
 ## Phase 0: コンテキスト源の解決
@@ -41,7 +41,7 @@ argument-hint: "[--quick | --area=<name> | --deep]"
 
 ### 0-1. プロジェクトプロファイル(あれば)
 
-`.claude/project-profile.yml` を Read。存在すれば以下を得る:
+`.claude/project-profile.yml` を読む。存在すれば以下を得る:
 - `repo_layout` / `root`: **parent-child 構成(AI 管理リポジトリの下に本体ソースが独立 git)の場合、本体ソースの探索・実装・品質コマンドは `root` 配下を対象にする**。管理ファイルやタスク保存先の基準は管理プロジェクトルートのまま
 - `has_code`: false ならコード分析をスキップし、ドキュメント構成の把握に切り替える
 - `memory_map` / `areas` / `quality` / `source_of_truth` / `known_facts_ref`
@@ -55,12 +55,12 @@ argument-hint: "[--quick | --area=<name> | --deep]"
 
 **検出順**(design §3): プロジェクトルートの `AGENTS.md` があればそれ → 無ければ `CLAUDE.md`(未移行)。**両方あれば `AGENTS.md` を正本**とし、`CLAUDE.md` は import 行より下のホスト固有の追記だけを補完として読む。
 
-Read して基本指示・Quick Commands・タスク完了条件・プロジェクト固有の禁止事項を把握する。モノレポでサブディレクトリに権威参照ファイルがある場合(`Glob: **/AGENTS.md` と `**/CLAUDE.md`、node_modules 除外)、作業対象に近いものも読む。
+読んで、基本指示・Quick Commands・タスク完了条件・プロジェクト固有の禁止事項を把握する。モノレポでサブディレクトリに権威参照ファイルがある場合(`Glob: **/AGENTS.md` と `**/CLAUDE.md`、node_modules 除外)、作業対象に近いものも読む。
 
 **ドリフト判定**:
-- 0-2 で `AGENTS.md` があり、[references/authority-file-drift.md](references/authority-file-drift.md) の「(0) が挙げる対象ファイル」のいずれかが存在するとき、**モードに関わらず**同 reference の「(2) ドリフト判定」を行い、
-- ドリフトなら『AI への指示をまとめたプロジェクトのファイルが読まれない構成』としてサマリーの「🔺 文書や設定と実際との食い違い」に載せ、reference の注記と対処を転記する(--deep 以外でも、気づいたら注記する)。
-- **reference に到達できない構成では、この検査を無効化して報告する**。
+- 0-2 で `AGENTS.md` があり、[references/authority-file-drift.md](references/authority-file-drift.md) の「(0) が挙げる対象ファイル」のいずれかが存在するとき、**モードに関わらず**同じ references の文書の「(2) ドリフト判定」を行い、
+- ドリフトなら『AI への指示をまとめたプロジェクトのファイルが読まれない構成』としてサマリーの「🔺 文書や設定と実際との食い違い」に載せ、その文書の注記と対処を転記する(--deep 以外でも、気づいたら注記する)。
+- **その references の文書に到達できない構成では、この検査を無効化して報告する**。
 
 ### 0-3. 知識の正本(Serena メモリ または doc/)
 
@@ -106,7 +106,7 @@ Read して基本指示・Quick Commands・タスク完了条件・プロジェ�
 
 ## Phase 3: 規約・設定の精読(--deep のみ)
 
-biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .editorconfig 等を存在検出して読み、インデント・クォート・strict 設定などの規約を抽出する。doc/ または docs/ があれば構成(ファイル名一覧と各役割)を把握する。
+biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .editorconfig 等を存在検出して読み、インデント・クォート・`strict` の設定などの規約を抽出する。doc/ または docs/ があれば構成(ファイル名一覧と各役割)を把握する。
 
 ## Phase 4: ドキュメントドリフト検出(--deep のみ)
 
@@ -114,9 +114,9 @@ biome.json / .prettierrc* / eslint.config.* / tsconfig.json / ruff.toml / .edito
 
 | 観点 | 方法 |
 |---|---|
-| 技術スタックの乖離 | メモリ記載のライブラリ/バージョン vs manifest 実物 |
-| コマンドの乖離 | 記載コマンド vs scripts 実在 |
-| 構造の乖離 | 記載ディレクトリ vs 実在 |
+| 技術スタックの乖離 | メモリ記載のライブラリ/バージョンと、マニフェストの実物 |
+| コマンドの乖離 | 記載コマンドと、実在する scripts |
+| 構造の乖離 | 記載ディレクトリと、実在するもの |
 | 参照切れ | 記載ファイルパスの存在確認 |
 | AI への指示をまとめたプロジェクトのファイルが読まれない構成 | [references/authority-file-drift.md](references/authority-file-drift.md) の「(2) ドリフト判定」に従う |
 
