@@ -242,11 +242,11 @@ net_git() { # $1=秒 残り=git の引数
   GIT_TERMINAL_PROMPT=0 run_detached "$secs" git "${GIT_PRE[@]}" "$@"
 }
 
-# ── Python の補助(YAML・JSON・スナップショット・/proc の走査)──
+# ── Python の補助(YAML・JSON・/proc の走査)──
 # cwd を / にして起動する(`-c` は cwd を import の探索先に入れるので、リポジトリの中の同名モジュールを拾わない)。
 # 渡すパスはすべて絶対パスにする。終了コード 9 は補助の想定外の失敗
 read -r -d '' PY_HELPER <<'PY' || true
-import difflib, hashlib, json, os, re, stat, subprocess, sys, unicodedata
+import json, os, re, stat, sys, unicodedata
 
 # unattended-mode.md §2 の 5 値のパターン(両モード共通。モードで取りえない値は判定で失敗にする — loop.md §5)
 OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
@@ -469,148 +469,6 @@ def cmd_result(path):
             denials[k] = vs
     if denials:
         print("denials=" + one_line(json.dumps(denials, ensure_ascii=False), 2000))
-
-
-def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for chunk in iter(lambda: fh.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-def fs_entry(full, rel):
-    st = os.lstat(full)
-    if stat.S_ISLNK(st.st_mode):
-        return [rel, "l", "", os.readlink(full)]
-    mode = oct(stat.S_IMODE(st.st_mode))
-    if stat.S_ISDIR(st.st_mode):
-        return [rel, "d", mode, ""]
-    if stat.S_ISREG(st.st_mode):
-        return [rel, "f", mode, sha256_file(full)]
-    return [rel, "o", oct(st.st_mode), ""]
-
-
-def snap_config(git, path):
-    if not os.path.lexists(path):
-        return {"state": "absent"}
-    proc = subprocess.run(git + ["config", "--file", path, "--no-includes", "--list", "-z"],
-                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    if proc.returncode != 0:
-        try:
-            digest = sha256_file(path)
-        except OSError:
-            digest = ""
-        return {"state": f"error:{proc.returncode}", "digest": digest}
-    entries = []
-    for rec in proc.stdout.split(b"\0"):
-        if rec == b"":
-            continue
-        key, sep, value = rec.partition(b"\n")
-        entries.append([key.decode("utf-8", "surrogateescape"),
-                        value.decode("utf-8", "surrogateescape") if sep else None])
-    return {"state": "ok", "entries": entries}
-
-
-def snap_hooks(path):
-    try:
-        st = os.lstat(path)
-    except FileNotFoundError:
-        return {"state": "absent"}
-    if stat.S_ISLNK(st.st_mode):
-        return {"state": "link", "target": os.readlink(path)}
-    if not stat.S_ISDIR(st.st_mode):
-        return {"state": "other", "mode": oct(st.st_mode)}
-    entries = []
-    for dirpath, dirnames, filenames in os.walk(path, followlinks=False):
-        dirnames.sort()
-        for name in dirnames + filenames:
-            full = os.path.join(dirpath, name)
-            entries.append(fs_entry(full, os.path.relpath(full, path)))
-    entries.sort()
-    return {"state": "dir", "mode": oct(stat.S_IMODE(st.st_mode)), "entries": entries}
-
-
-def snap_info(path):
-    entries = []
-    for name in ("exclude", "attributes", "sparse-checkout", "grafts"):
-        full = os.path.join(path, name)
-        if not os.path.lexists(full):
-            entries.append([name, "absent", "", ""])
-            continue
-        e = fs_entry(full, name)
-        e[2] = ""  # info/ はバイト列だけを比べる(モードは比べない)
-        entries.append(e)
-    return {"state": "ok", "entries": entries}
-
-
-def cmd_snapshot(out, common, repoadmin, wtadmin, *git):
-    git = list(git)
-    snap = {
-        # --repo の管理パスも保存する。別の worktree で中断後に起動したとき、
-        # 設定が同じでも、前の起動元を照合できたとは扱わない(H20)。
-        "repo:git-dir": {"state": "ok", "path": repoadmin},
-        "repo:config.worktree": snap_config(git, os.path.join(repoadmin, "config.worktree")),
-        "config": snap_config(git, os.path.join(common, "config")),
-        "config.worktree": snap_config(git, os.path.join(common, "config.worktree")),
-        "hooks": snap_hooks(os.path.join(common, "hooks")),
-        "info": snap_info(os.path.join(common, "info")),
-    }
-    if wtadmin != "-":
-        snap["wt:config.worktree"] = snap_config(git, os.path.join(wtadmin, "config.worktree"))
-    tmp = out + ".tmp"
-    with open(tmp, "w", encoding="ascii") as fh:
-        json.dump(snap, fh, ensure_ascii=True, sort_keys=True)
-    os.replace(tmp, out)
-
-
-def show(value):
-    return one_line(json.dumps(value, ensure_ascii=False), 300)
-
-
-def entry_text(key, value):
-    return key if value is None else f"{key}={value}"
-
-
-def cmd_compare(base_path, cur_path):
-    base = json.load(open(base_path, encoding="ascii"))
-    cur = json.load(open(cur_path, encoding="ascii"))
-    diffs = []
-    for key in sorted(set(base) | set(cur)):
-        bv, cv = base.get(key), cur.get(key)
-        if bv == cv:
-            continue
-        if key == "repo:git-dir":
-            reason = "保存済み状態に人の管理パスが無い" if bv is None else "人の管理パスが変わった"
-            diffs.append(f"{key}: {show(bv)} → {show(cv)} ({reason}。前の起動元の設定を確認する。未変更とは判定しない)")
-            continue
-        if key == "repo:config.worktree" and bv is None:
-            diffs.append(f"{key}: 保存済み状態に人の設定の控えが無い → {show(cv)}"
-                         " (前の起動元の設定を確認する。現在の設定で中断前の基準を補完しない)")
-            continue
-        if bv and cv and bv.get("state") == cv.get("state") and "entries" in bv and "entries" in cv:
-            be = [tuple(e) for e in bv["entries"]]
-            ce = [tuple(e) for e in cv["entries"]]
-            # config・config.worktree は項目の並びで比べ、追加・削除・値・並べ替えのどの変化も差分にする(D14・#134)
-            if key in ("config", "config.worktree", "wt:config.worktree", "repo:config.worktree"):
-                bl = [entry_text(*e) for e in be]
-                cl = [entry_text(*e) for e in ce]
-                for line in difflib.unified_diff(bl, cl, lineterm="", n=0):
-                    if not line.startswith(("---", "+++", "@@")):
-                        diffs.append(f"{key}: {one_line(line, 300)}")
-            else:
-                bset, cset = set(be), set(ce)
-                for e in sorted(bset - cset):
-                    diffs.append(f"{key}: - {show(list(e))}")
-                for e in sorted(cset - bset):
-                    diffs.append(f"{key}: + {show(list(e))}")
-            if bv.get("mode") != cv.get("mode"):
-                diffs.append(f"{key}: モード {bv.get('mode')} → {cv.get('mode')}")
-            continue
-        diffs.append(f"{key}: {show(bv)} → {show(cv)}")
-    for line in diffs:
-        print("差分: " + line)
-    sys.exit(1 if diffs else 0)
 
 
 def supervisor_identity(pid):
@@ -846,7 +704,7 @@ COMMANDS = {
     "environment-run": cmd_environment_run,
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
-    "plugins": cmd_plugins, "result": cmd_result, "snapshot": cmd_snapshot, "compare": cmd_compare,
+    "plugins": cmd_plugins, "result": cmd_result,
     "json-value": cmd_json_value, "init-names": cmd_init_names,
     "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values,
     "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,

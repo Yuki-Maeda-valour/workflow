@@ -1041,7 +1041,8 @@ class EnvironmentDirectLauncherTests(unittest.TestCase):
             marker=root/'untrusted-import'; guard=root/'guard.py'; guard.write_text('print("normal")\n')
             digest=hashlib.sha256(guard.read_bytes()).hexdigest()
             for directory in (cwd, extra):
-                (directory/'hashlib.py').write_text('from pathlib import Path\nPath('+repr(str(marker))+').write_text("executed")\n')
+                for module in ('hashlib.py','json.py'):
+                    (directory/module).write_text('from pathlib import Path\nPath('+repr(str(marker))+').write_text("executed")\n')
             env={**os.environ,'PYTHONPATH':str(extra)}
             for name,words in self.entries.items():
                 result=self.run_loader(guard,digest,code=words[4],cwd=cwd,env=env)
