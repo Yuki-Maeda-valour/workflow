@@ -2,6 +2,26 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 変更
+
+- `loop.sh`(無人ループ〈人がいなくても、タスク 1 件の実装か改善の候補探しを、1 回ずつ自動で回し続ける仕組み〉の本体)の埋め込み Python(`PY_HELPER`)から、子のプロセスが書いた出力を読む 3 つのサブコマンド `result`・`permlog`・`origin-json` を、新しいファイル `loop-child-output.py` に移した。外から見た動き(3 つのサブコマンドの stdout〈標準出力〉・stderr〈標準エラー〉・終了コードと、`loop.sh` の呼出し側の扱い)は変わらない。stderr が同じなのは、Python の警告の設定が既定のとき。([Issue #354](https://github.com/Yuki-Maeda-valour/workflow/issues/354))
+  - `result` は周(無人ループの 1 回分の実行)の結果の JSON を、`permlog` は許可の仲介(無人の実行で、操作を許すかどうかをその場で判定する仕組み)の記録を、`origin-json` は `origin-repo.py` の出力を読む。
+  - 動かし方は #265 の `loop-task-text.py` と同じにした。親の `loop.sh` は、開始時の信頼済みのコピー(起動時に作り、使う前に変えられていないかを確かめる、plugin のコピー)から中身を読んで変数に保持し、`py()` が `python3 -c` で動かす。
+  - `PYTHONWARNINGS=default` などで警告を出す設定のときは、`result` の stderr に出る `ResourceWarning` の行番号が変わる(`<string>:180` から `<string>:18`)。`loop.sh` は `result` の stderr を `2>/dev/null` で捨てるので、呼出し側の扱いは変わらない。
+  - 移した文(3 つの関数と `OUTCOME`・`one_line`)は、字下げも含めて元のまま。`one_line` は `PY_HELPER` のほかの関数も使うので、`PY_HELPER` にも残した。
+  - 信頼済みのコピーを読む処理を `read_held_copy` に分け、`hold_task_text` と新しい `hold_child_output` から呼ぶ。`hold_child_output` は、読めない・初回と違うときに、終了コード 20 で止まる。`py()` は、保持していないときに終了コード 20 で止まる。
+  - `PY_HELPER` は 471 行から 352 行に、`COMMANDS` の登録は 17 個から 14 個になった。`loop.sh` は 3251 行から 3153 行。`loop-child-output.py` は 143 行。
+  - 先に、今の動きを固定するテスト(動きを自動で確かめるプログラム)を、新しい `scripts/test_loop_child_output.py` に書いた。移す前の版でも全件が通ることを確かめた。
+    - 照らすのは、期待値の表の 59 行(サブコマンドと入力の組)での、終了コード・stdout の全体・stderr の全体。Python の版で変わりうる行は、先頭の固定部分だけを照らす。`PYTHONWARNINGS`・`PYTHONDEVMODE`・`PYTHONIOENCODING` は外して流す。
+    - 同じ表を、直接起動したときと、親の `py()` を通したときの 2 通りで照らす(テスト 5 件ずつ)。
+    - 表は、受ける例外の型(`result` の深い入れ子が終了コード 9・`origin-json` の UTF-8 でない入力が終了コード 1・`permlog` の無いファイルが終了コード 0)と、`permlog` が誤りの前に数えた件数と出力の順序を含む。
+  - 移した後に、保持と起動の条件を確かめるテストを 8 件足した。照らすのは、信頼済みのコピーから読むこと・初回と違う中身や末尾の改行の違いで止まること・空や NUL や UTF-8 でない中身を変数に入れる前に拒むこと・初めのコピーにファイルが無いときに止まること・保持していない中身を動かさないこと・変数を子の環境に渡さないこと・作業ディレクトリと FD7(ロックのファイル記述子)と stdin〈標準入力〉と `PYTHONPATH` と利用者別の Python の依存の扱い。
+  - `scripts/test_loop_helper_commands.py` は、呼出しの行き先を 3 つ(`PY_HELPER`・`loop-task-text.py`・`loop-child-output.py`)にした。行き先どうしで同じ名前が無いことを確かめるテストを 1 件足した(22 件から 23 件)。
+  - `scripts/test_loop_task_text.py` は、字面で切り出す範囲に、新しい初期化の 3 行と `read_held_copy`・`hold_child_output` を足し、偽のプラグインに `loop-child-output.py` を置いた。テストのメソッドと期待値は変えていない。`loop-selftest.sh` は、selftest(仕組みそのものが正しく動くかを確かめる、自動のテスト)が作る plugin に、新しいファイルをコピーする 1 行を足した。
+  - `ship-task/references/loop.md` の §1(兄弟のファイルの受け持ち)と §4(本文解析の保持の説明)と、`docs/design.md` の項目に、`loop-child-output.py` を足した。`docs/design.md` の項目名は「無人ループの本文と子の出力の解析」に変えた。
+
 ## v4.43.3
 
 ### 変更
