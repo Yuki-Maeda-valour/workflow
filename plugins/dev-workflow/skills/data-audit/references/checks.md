@@ -22,7 +22,7 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 ### バックエンド境界
 | 種類 | 検出シグネチャ例 |
 |---|---|
-| server actions | `"use server"` ディレクティブ(ファイル先頭 or 関数先頭) |
+| server actions | `"use server"` ディレクティブ(ファイル先頭か関数先頭) |
 | API ルート | `app/**/route.{ts,js}` / `pages/api/**`(Next.js)、`routes/*.php`(Laravel)、`urls.py`(Django)、`.get(` `.post(` 等のルーター呼び出し(Hono / Express / Fastify)、tRPC の `router({`、GraphQL の resolvers / typeDefs |
 | RPC・他 | gRPC の .proto、WebSocket ハンドラ、キュー・cron ハンドラ(外部入力を受けるもの) |
 
@@ -30,7 +30,7 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 | 種類 | 検出シグネチャ例 |
 |---|---|
 | スキーマ | `schema.prisma`、drizzle のテーブル定義、`schema.zmodel`(ZenStack)、`migrations/`、`supabase/`、Eloquent / Django の Model クラス |
-| クエリ呼び出し点 | ORM クライアントのメソッド呼び出し(findMany / findUnique / select / query / raw SQL) |
+| クエリ呼び出し点 | ORM クライアントのメソッド呼び出し(findMany / findUnique / select / query / 生の SQL) |
 
 ### フロント境界
 | 種類 | 検出シグネチャ例 |
@@ -60,11 +60,11 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 - **判定**: 機密・権限カラム(role, isAdmin 等)が書き込み可能 → **重大**に昇格。それ以外 → 高
 
 ### B5 過剰取得 — 中〜高
-- **何を探すか**: ①ループ内 await クエリ(N+1)②`take` / `limit` / pagination の無い一覧取得 ③不要に深い include / join 連鎖 ④一覧系 API での全カラム取得
+- **何を探すか**: ①ループ内 await クエリ(N+1)②`take` / `limit` / ページ分割の無い一覧取得 ③不要に深い `include` / `join` の連鎖 ④一覧系 API での全カラム取得
 - **判定**: 一覧・無限スクロール等の高頻度経路 → 高。管理画面等の低頻度経路 → 中
 
 ### B6 エラー・ログ露出 — 高
-- **何を探すか**: ①catch した error オブジェクトをそのままレスポンスへ(スタックトレース・SQL・内部パス)②リクエスト body・機密フィールドの console.log / logger 出力
+- **何を探すか**: ①catch したエラーオブジェクトをそのままレスポンスへ(スタックトレース・SQL・内部パス)②リクエスト body・機密フィールドの console.log / logger 出力
 - **判定**: 本番経路でスタックトレースが外部に出る → 高。ログへの機密出力 → 高(ログ基盤経由の二次漏えい)
 
 ### F1 機密のクライアント混入 — 重大
@@ -92,11 +92,11 @@ profile の `audit.sensitive_fields` が無い場合の既定。カラム名・�
 - **判定**: クライアントから直接 DB に触れる構成(BaaS)で RLS 無効テーブル → **重大**。サーバー経由のみなら B2 / B3 に還元して評価
 
 ### D3 論理削除の漏れ — 高
-- **何を探すか**: `deletedAt` / `isDeleted` カラムがあるのに、フィルタを通らないクエリ経路(ORM のグローバルフィルタ・default scope の有無も確認)
+- **何を探すか**: `deletedAt` / `isDeleted` カラムがあるのに、フィルターを通らないクエリ経路(ORM のグローバルフィルター・既定のスコープ〈default scope〉の有無も確認)
 - **判定**: 削除済みデータが一覧・詳細 API から見える → 高
 
 ### D4 インデックス欠如 — 中
-- **何を探すか**: コード中の where / orderBy / 検索で頻出するカラムと、スキーマの index 定義(`@@index` / `CREATE INDEX`)の突合
+- **何を探すか**: コード中の where / orderBy / 検索で頻出するカラムと、スキーマのインデックス定義(`@@index` / `CREATE INDEX`)の突合
 - **判定**: 高頻度経路の全件スキャン相当 → 中(データ量見込みを添えて報告)
 
 ### D5 巨大カラムの常時取得 — 中

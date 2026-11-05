@@ -2,7 +2,7 @@
 
 SKILL.md「テスタビリティ改善(このスキルの核)」の詳細版。思想は「テストを書く」のではなく「**テストが書きやすいコードにする**」。テスト未導入のプロジェクトでも、将来テストを足せる構造へ寄せることが目的。
 
-before/after は代表 3 手法(純粋関数抽出・副作用分離・Container/Presentational)を示す。コードは説明用の最小例であり、命名・配置・import 規約は各プロジェクトの実コードに合わせること。
+変更前と変更後(Before / After)の例は、代表 3 手法(純粋関数抽出・副作用分離・Container/Presentational)を示す。コードは説明用の最小例であり、命名・配置・import 規約は各プロジェクトの実コードに合わせること。
 
 ## 3 層分離原則(React 系)
 
@@ -24,10 +24,10 @@ before/after は代表 3 手法(純粋関数抽出・副作用分離・Container
 - 数値計算(進捗率、集計、割合、閾値判定)
 - バリデーション(入力値の検証)
 - データ変換(API レスポンス → 表示用データ)
-- フィルタ・ソート条件(配列操作ロジック)
+- フィルター・ソート条件(配列操作ロジック)
 - 複合条件(3 条件以上の &&/|| チェーン、三項連鎖、switch)
 
-**Before**
+**変更前**
 
 ```tsx
 function ContractCard({ contract }) {
@@ -39,7 +39,7 @@ function ContractCard({ contract }) {
 }
 ```
 
-**After**
+**変更後**
 
 ```tsx
 // lib/contracts.ts(純粋関数 → 単体テスト容易)
@@ -68,7 +68,7 @@ function ContractCard({ contract }) {
 
 コンポーネントが直接 API を呼ぶ・useEffect 内で複雑な処理をしている場合、副作用を Hook に切り出し、コンポーネントは「何を表示するか」に集中させる。純粋なデータ処理は lib へ。
 
-**Before**
+**変更前**
 
 ```tsx
 function DashboardContent() {
@@ -82,12 +82,12 @@ function DashboardContent() {
       setLoading(false)
     })()
   }, [])
-  // フィルタ・ソートもここに...
+  // フィルター・ソートもここに...
   return <div>...</div>
 }
 ```
 
-**After**
+**変更後**
 
 ```tsx
 // hooks/use-dashboard-stats.ts(副作用を隔離)
@@ -108,7 +108,7 @@ function DashboardContent() {
 
 表示用コンポーネントは必要データを props で受け取り、内部でデータ取得しない。任意のデータでレンダリングでき、スナップショット/Storybook 検証がしやすくなる。全コンポーネントに強制せず、複雑なデータ取得を持つ・同じ表示を別データソースで再利用したい場合に適用する。
 
-**Before / After**
+**変更前 / 変更後**
 
 ```tsx
 // Before: 内部でフック呼び出し → テスト時にモックが必要
@@ -136,7 +136,7 @@ any や曖昧な型は、テスト時にどんな値を渡すべきか不明確�
 - `any` → 具体型に置換
 - enum 的に使う `string` → ユニオン型
 - `object` → 具体的なインターフェース
-- optional の乱用 → 必須/任意を明確化
+- 省略できる項目(TypeScript の `?`)の乱用 → 必須/任意を明確化
 
 ```ts
 // Before

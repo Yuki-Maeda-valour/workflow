@@ -31,7 +31,7 @@
 | stack-research・reflect-decisions | 別の Issue で決める(案: `stack-research:{パッケージ}:{勧告 ID}`・`reflect-decisions:{原資料の相対パス}#{番号}`) | ― |
 
 - 例: `data-audit:authz:route:src/routes/orders.ts#ordersRouter:GET /:id` / `refactor:file:src/components/OrderForm.tsx`
-- **正規化**(書く前と比べる前に必ずかける): NFC・前後の空白を削る・連続する空白を 1 つに・パスは管理ルート相対で `/` 区切り・先頭の `./` を付けない・改行を入れない。METHOD は大文字。`candidate-keys.py` は、このうち NFC と空白の 2 つを機械でかけて返す
+- **正規化**(書く前と比べる前に必ずかける): NFC(Unicode の正規化の形の 1 つ)・前後の空白を削る・連続する空白を 1 つに・パスは管理ルート相対で `/` 区切り・先頭の `./` を付けない・改行を入れない。METHOD は大文字。`candidate-keys.py` は、このうち NFC と空白の 2 つを機械でかけて返す
 - **既知の判定**: 候補のキーが、task_dir のどれかの状態名 MD のヘッダの指摘キー(複数行ならそのどれか)と一致すれば既知。見る範囲は全状態(`候補_`〈見送りを含む〉・`進行中_`・`完了_`・`保留_`・`中断_`)
 - **回帰の疑い**: `完了_` のキーと一致したときは積まず、「完了した指摘がまた見つかった(回帰の疑い)」として報告と結果の行に件数を出す。ただし、同じキーが `完了_` と `完了_` 以外(採用で分割した残りの `進行中_` など)の両方にあるときは、回帰の疑いにしない(実装中の既知として数える)
 - **キーの意味の帰結**: 見送り・既知の候補は、同じ観点群・同じ場所(refactor はファイル)の以後の指摘を**すべて**止める。同じ場所に後から生まれた同じ群の新しい問題(同じ handler への別の IDOR・同じファイルの新しいリファクタの問題)も、候補にならない
@@ -54,7 +54,7 @@
 | create-task | Phase 1 の 1(入口ガード) | 調査を先に行う提案 | しない |
 | create-task | Phase 1 の 2(分解と種別) | 曖昧な点を質問で確かめる | 尋ねない。種別はリファクタ |
 | create-task | Phase 1 の 2(リファクタの候補) | スコア付きで示し、どれをタスク化するか確かめる | 尋ねない。refactor-analysis.md §6 の足切りと選定(§4)で機械的に選ぶ |
-| create-task | Phase 1 の 3・4(researcher〈調べものを受け持つ AI〉の調査) | 現状・類似実装・影響・doc/06・03・07 | refactor-analysis.md §1〜3 と、候補に要る調査(before メトリクス・path:line・doc/06 の該当)だけ。team-lead がメトリクスを測り直して裏を取る。無人では委託プロンプトに要点をコピーする(§7) |
+| create-task | Phase 1 の 3・4(researcher〈調べものを受け持つ AI〉の調査) | 現状・類似実装・影響・doc/06・03・07 | refactor-analysis.md §1〜3 と、候補に要る調査(変更前の計測値〈before メトリクス〉・path:line・doc/06 の該当)だけ。team-lead がメトリクスを測り直して裏を取る。無人では委託プロンプトに要点をコピーする(§7) |
 | create-task | Phase 1.5・2・3・4.5 | 影響範囲調査・タスク MD・checker(設計書を点検する AI)・設計レビュー | 行わない(採用のときに create-task の checker と設計レビューが必ず走る) |
 | create-task | 完了報告・一気通貫の提案 | 報告と `/ship-task` の提案 | 提案しない。結果の行(§6)を返す |
 
@@ -72,12 +72,12 @@
 
 ## 5. 書き出しの手順
 
-1. task_dir を helper で解く(`python3 {create-task の}scripts/resolve-task-dir.py`。[task-directory.md](task-directory.md))。exit 1・2 は停止(無人では失敗扱い)。ship-task から呼ばれたときも、同じ helper で解く
-2. `python3 {create-task の}scripts/candidate-keys.py --task-dir=<task_dir>` で、既知の指摘キーと名を集める。exit 0 以外は停止(無人では失敗扱い)
+1. task_dir を補助スクリプトで解く(`python3 {create-task の}scripts/resolve-task-dir.py`。[task-directory.md](task-directory.md))。終了コード 1・2 は停止(無人では失敗扱い)。ship-task から呼ばれたときも、同じ補助スクリプトで解く
+2. `python3 {create-task の}scripts/candidate-keys.py --task-dir=<task_dir>` で、既知の指摘キーと名を集める。終了コード 0 以外は停止(無人では失敗扱い)
 3. 指摘ごとにキーを正規化(§2)して、既知の集合と比べる。在れば書かず、報告にキー・既存のファイル・状態・見送りかを載せる(`完了_` なら回帰の疑い — §2)。同じ実行の中で重なったキーは、1 つにまとめる
 4. `git status --porcelain=v1 --untracked-files=all` を控える(git の作業ツリーでなければ task_dir の直下の一覧)。名の衝突を解いてから(task-template.md の「候補の書式」の名)、選定の順で上限まで `Write` する。書くのは新しい `候補_*.md` だけで、既存の状態名 MD は書き換えない
 5. 増えたのが task_dir の新しい `候補_*.md` だけかを、4 で控えたものと比べて確かめる。書いた各ファイルを `python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> <パス>` で確かめる。どちらかが通らなければ失敗扱い(書いたファイルは消さずに報告する)
-6. 報告を `.claude/reviews/candidates-<発見元>.md` に保存する(書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い)。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く): 書いた候補(見つけた改善案のうち、まだ採用していないもの)・既知として除いたキーと既存のファイル・上限超え・回帰の疑い・除外(誤検知の除去・セキュリティ由来の除外)と理由・走査の範囲・未監査と理由。書式は次のとおり(見出しの字面を変えない。loop.sh が状態ディレクトリにコピーし、人と実走の確かめが読む)
+6. 報告を `.claude/reviews/candidates-<発見元>.md` に保存する(書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら保存せずに停止して報告する(無人では失敗扱い)。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く): 書いた候補(見つけた改善案のうち、まだ採用していないもの)・既知として除いたキーと既存のファイル・上限超え・回帰の疑い・除外(誤検知の除去・セキュリティ由来の除外)と理由・走査の範囲・未監査と理由。書式は次のとおり(見出しの字面を変えない。loop.sh が状態ディレクトリにコピーし、人と実走の確かめが読む)
    - `## 書いた候補`: `` - `<キー>` — <パス> `` を 1 行に 1 つ
    - `## 既知として除いた指摘`: `` - `<キー>` — <既存のファイル>(<状態名>) `` を 1 行に 1 つ。見送りの候補なら末尾に ` 見送り`、回帰の疑いなら ` 回帰の疑い` を足す
    - `## 上限超え`・`## 除外`(理由つき)・`## 走査の範囲と未監査`: 同じく 1 行に 1 つ
@@ -85,16 +85,16 @@
 
 **`candidate-keys.py`**(読み取り専用。`{create-task の}scripts/`)
 
-- 収集: `--task-dir=<ディレクトリ>` → stdout に JSON `{"files": [{"file", "state", "name", "keys": [...], "skipped": <見送りの行の値 | null>, "problems": [...]}], "names": [...]}`
+- 収集: `--task-dir=<ディレクトリ>` → stdout(標準出力)に JSON `{"files": [{"file", "state", "name", "keys": [...], "skipped": <見送りの行の値 | null>, "problems": [...]}], "names": [...]}`
   - 対象は、直下の通常ファイル(symlink は除く)で、名が状態名の正規表現(`resolve-task-dir.py` の `STATE_FILE`)に全体一致するもの
-  - ヘッダの指摘キーの行と見送りの行を読む。見送りの書式違いの行があれば、そのファイルの `problems` に出す(exit は変えない)
-  - exit 0 = 成功 / 1 = 読めないファイルがある(UTF-8 として読めない・読み取りの失敗。そのファイルの `problems` に `unreadable`)/ 2 = 使い方の誤り(`--task-dir` が無い・ディレクトリでない)。ディレクトリが無いときは exit 0 で空の JSON(最初の候補)
-- 検査: `--check [--source=<発見元>] <パス | ->`(`-` は stdin)→ stdout に JSON `{"ok": <真偽>, "source": <発見元 | null>, "keys": [...], "problems": [{"code", "detail"}, ...]}`
+  - ヘッダの指摘キーの行と見送りの行を読む。見送りの書式違いの行があれば、そのファイルの `problems` に出す(終了コードは変えない)
+  - 終了コード 0 = 成功 / 1 = 読めないファイルがある(UTF-8 として読めない・読み取りの失敗。そのファイルの `problems` に `unreadable`)/ 2 = 使い方の誤り(`--task-dir` が無い・ディレクトリでない)。ディレクトリが無いときは終了コード 0 で空の JSON(最初の候補)
+- 検査: `--check [--source=<発見元>] <パス | ->`(`-` は stdin〈標準入力〉)→ stdout に JSON `{"ok": <真偽>, "source": <発見元 | null>, "keys": [...], "problems": [{"code", "detail"}, ...]}`
   - ok の条件: ヘッダに発見元の行がちょうど 1 行(`--source` があればその値と一致)・指摘キーの行がちょうど 1 行・無人実行のメタ行が無い・見送りの行と見送りの書式違いの行が無い・`## 追加修正記録` の見出しが無い・チェックボックス形の行(`^\s*- \[( |x|X)\]`。フェンスの中も)が無い
   - `code`: `source-count`(発見元の行が 1 行でない)・`source-mismatch`・`key-count`(指摘キーの行が 1 行でない)・`unattended-meta`・`skipped`(見送りの行)・`skipped-malformed`(見送りの書式違い)・`record-section`・`checkbox`・`unreadable`。`detail` は人向けの文で、判定に使わない。収集の `problems` も同じ形
-  - exit 0 = ok / 1 = ok でない・読めない / 2 = 使い方の誤り
+  - 終了コード 0 = ok / 1 = ok でない・読めない / 2 = 使い方の誤り
   - commit した候補は `git show HEAD:./<パス> | python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> -` の形で確かめられる(許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉の構文に収まる)
-- 取り込む兄弟の script(`resolve-task-dir.py`・`task-digest.py`)より前に `sys.dont_write_bytecode` を立て、プラグインルートに `__pycache__` を作らない(周の Bash では `PYTHONDONTWRITEBYTECODE` を渡せない)
+- 取り込む兄弟のスクリプト(`resolve-task-dir.py`・`task-digest.py`)より前に `sys.dont_write_bytecode` を立て、プラグインルートに `__pycache__` を作らない(周の Bash では `PYTHONDONTWRITEBYTECODE` を渡せない)
 
 ## 6. 結果の行
 

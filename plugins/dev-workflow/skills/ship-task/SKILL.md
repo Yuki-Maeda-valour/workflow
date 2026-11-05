@@ -42,14 +42,14 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD | #番号 | Is
 ## 無人入口
 
 親の保持値が1つでも渡された入口は、`DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` の5値を継承する。欠けていれば停止し、新しい控えに置き換えない。
-下の固定本文で guard の保持hashと環境を照合し、exit 0 のときだけコピー内の無人契約を読む。
+下の固定本文で、`environment-guard.py` のコピー(値 `guard`)の保持したハッシュ値と環境を照合し、終了コード 0 のときだけコピー内の無人契約を読む。
 親の保持値が全て無い単独入口だけは、現在の配布元の `scripts/environment-guard.py bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を `python3 -B` で一度実行する。
 使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
 返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、同じ照合を行う。一覧はホストの正式な手段で確定した `installPath` 付き配列とし、取得不能なら失敗扱い。
-以後の helper 実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
+以後の補助スクリプトの実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
 
 固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
-Python の隔離起動(`-I`)で cwd・`PYTHONPATH`・利用者 site の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持hashと一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
+Python の隔離起動(`-I`)で作業ディレクトリ・`PYTHONPATH`・利用者の site(追加ライブラリの置き場)の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持したハッシュ値と一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。
 
 <!-- environment-loader:begin -->
 ```bash
@@ -159,7 +159,7 @@ except (Exception, SystemExit) as exc:
   - 全候補が「今回と無関係」なら、`identity_sha256` を `PENDING_IDENTITY_SHA256` として控え、`--acknowledged-identities` へ渡す。
   - 1 件でも「以前の関連作業」なら、`list_sha256` を `PENDING_LIST_SHA256` として控え、`--acknowledged-list` へ渡す。
   - `reason` が `overlap` か `overlap-unknown` の候補が 1 件でもあれば、人が全候補を「今回と無関係」と答えても `list_sha256` を使う。
-- do-task へ進むときは再走査させる。同じ会話・cwd・一覧への確認値だけを、どちらの値かを区別して引き継ぐ。新しい呼出しや別チャットで過去の確認を自動復元しない。
+- do-task へ進むときは再走査させる。同じ会話・作業ディレクトリ・一覧への確認値だけを、どちらの値かを区別して引き継ぐ。新しい呼出しや別チャットで過去の確認を自動復元しない。
 - 同じ実行の差戻しでは Phase 0 に戻さず、take 後や内蔵への引継ぎに走査を追加しない。親の無人ループが既に行った初期処理まで遡って止める保証はない。
 
 1. **把握**: `.claude/grasp.md` は参照索引として確認し、毎回、現在の profile・権威参照ファイル・関連文書・設定・対象領域と依存先を読む。前回の把握状況を理由に省略しない(深化は /create-task の Phase 0 に任せる)
@@ -171,20 +171,20 @@ except (Exception, SystemExit) as exc:
      - あれば、発見の周の前提(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど。一覧は references/discover-mode.md §4)を確かめ、1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
      - 以後の手順 3〜6 と Phase 1〜5 は、discover-mode.md の工程(公開の確認 → 工程 D1〜D3 → Phase 5)に差し替える
    - `--unattended`(`--discover` が無いとき): `--task` が無ければ失敗扱い。
-     - `--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD がデフォルトブランチか detached HEAD(ローカルのデフォルトブランチの履歴の中)・メタ行がある・
+     - `--branch` が無い・parent-child 構成でない(管理ルート = `root`)・開始時の HEAD(いま取り出しているブランチかコミット)がデフォルトブランチか detached HEAD〈コミットを直接取り出した状態〉(ローカルのデフォルトブランチの履歴の中)・メタ行がある・
      - タスク MD が git の追跡下にある・ローカルの git 設定のダイジェスト(`git-config-digest.py`)を算出できる・origin の URL(`origin-repo.py`)、を検査し、git 設定のダイジェストと origin の判定を控える値として保持する(一覧・順序と理由は references/unattended-mode.md §1)。
      - 1 つでも欠けたら失敗扱い(G3。ブランチを作らない)。
-     - 最後に本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(exit 0 以外は失敗扱い)。
+     - 最後に本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出して保持する(終了コード 0 以外は失敗扱い)。
      - 以後、周の中で控える値(同 §7)を失ったら失敗扱い(G4)
 3. **作業ツリーの清潔性**: do-task の Phase 0 の 3 と同じ字面の `git status`(安全用のオプション・`--no-literal-pathspecs`・`--porcelain=v1`・`--untracked-files=normal`・`--ignore-submodules=dirty`・状態ファイルを外す 4 つの pathspec)で確認する。
    - 無関係な未コミット変更が**あるときだけ**、PR にそれが混ざる旨を警告して続行可否を確認する(停止条件のまとめの表の行に当たるので、このときは必ず確認する。無ければ確認せずに進む)。無人では確認せず失敗扱い(S1)
    - 安全な事前検査後、ブランチ判定・設計・実装前に今回の開始時 `S` を一度保持し、do-task へ渡す。取得と基準 `B` の区別は [base-commit.md](../do-task/references/base-commit.md) に従う。
-   - 既存作業ブランチの再利用では作成時 OID を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
+   - 既存作業ブランチの再利用では作成時の OID(コミットを指すハッシュ値)を要求せず `not-recorded` とする。今回作成して報告した OID だけを任意のブランチ出典として追加する。
    - 承認済み再開は `resume-invocation` とし、以前から保持した追加指定も減らさない。親環境の5値の引継ぎは変更しない。
    - Issue 方式は安全な事前検査後、手順4のブランチ作成より前に `preflight` を通す。`--task` があれば `snapshot --for-execution` で本文を取得する。無ければ新規 Issue の取得は Phase 1 の作成後に行う(Issue 方式の契約 §6)。
-   - `--no-pr`・`--design-only` を除き、`preflight` の直後・ブランチ作成の前に、公開する root の `origin-repo.py` の `repo` と Issue の `repo` を比べる。不一致・算出不能なら PR を作れない理由を示し、止めるか `--no-pr` で続けるかを質問で確かめる。
+   - `--no-pr`・`--design-only` を除き、`preflight` の直後・ブランチ作成の前に、公開するルートの `origin-repo.py` の `repo` と Issue の `repo` を比べる。不一致・算出不能なら PR を作れない理由を示し、止めるか `--no-pr` で続けるかを質問で確かめる。
    - 他人が作った Issue では、開始時・基準行の更新後の最初の依頼前・更新後の差し戻し(相手に返して、やり直してもらうこと)で、最大 `2 + N` 回の確認が要ると予告する。最後のチェック更新後と `finalize` 適用後を含む追加の再取得も、未承認の本文ごとに1回増える(Issue 方式の契約 §5〜6)。
-4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(rc 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。
+4. **作業ブランチ**: 現在のブランチを `git symbolic-ref --quiet HEAD` で見る(終了コード 1 = detached HEAD。detached HEAD では `git branch --show-current` が空になり、名前の照合では決まらない)。
    - `DEF_REF`・`DEF_NAME` は [../do-task/references/base-commit.md](../do-task/references/base-commit.md) と同じ手順で求める(`refs/remotes/origin/HEAD` → `refs/heads/main` → `refs/heads/master`)。
    - **デフォルトブランチにいるかは、現在のブランチ名(`git branch --show-current`)で判定する**(従来と同じ):
    - `refs/remotes/origin/HEAD` を解決できたら(`git symbolic-ref --quiet refs/remotes/origin/HEAD`)、その名前(`DEF_NAME`)との一致だけで判定する。解決できなければ、`main` / `master` のどちらかであれば「いる」とする
@@ -197,9 +197,9 @@ except (Exception, SystemExit) as exc:
    - `--branch` が無く、既に作業ブランチにいる → そのまま使う(新規作成しない。`--task` のときも同じ)。無人では 2′ で失敗扱い済み
    - 作れなければ停止する(同名のブランチがある等。無人では失敗扱い)
    - **作ったら、次の 4 項目を報告に残す**(/do-task の新規着手の条件 ⑤ の例外が読む — base-commit.md): ブランチ名 /
-     - 作成時の HEAD の sha /
-     - 起点の確認(その sha がローカルのデフォルトブランチの履歴の中にあるか。`git rev-list --count refs/heads/<DEF_NAME>..<sha>` が rc 0 で `0` を出せば「中にある」) /
-     - 起点が中にあるときだけ、`git rev-list refs/remotes/origin/<DEF_NAME>..<sha>` の一覧(レビュー差分の外で PR に入る commit。PR の base の remote-tracking ref と比べる。`refs/remotes/origin/<DEF_NAME>` が無ければ、比べられないことを報告する)
+     - 作成時の HEAD の sha(コミットのハッシュ値)/
+     - 起点の確認(その sha がローカルのデフォルトブランチの履歴の中にあるか。`git rev-list --count refs/heads/<DEF_NAME>..<sha>` が終了コード 0 で `0` を出せば「中にある」) /
+     - 起点が中にあるときだけ、`git rev-list refs/remotes/origin/<DEF_NAME>..<sha>` の一覧(レビュー差分の外で PR に入る commit。PR の取り込み先(base)のリモート追跡ブランチと比べる。`refs/remotes/origin/<DEF_NAME>` が無ければ、比べられないことを報告する)
    - **一覧の確認(S8)**: 一覧が空でなければ、base-commit.md の代替基準の候補の提示と同じ形式(`git log --no-show-signature --no-decorate --format='%H %s'`。同じ置換と上限)で示し、続行するかを確かめる。
      - 「続行しない」なら停止する。ブランチは残し、手動の再開(/do-task で基準を指定する、またはブランチを消して先行する commit を整理してからやり直す)と、このブランチには条件 ⑤ の例外を当てないことを報告に残す。
      - 無人では確かめず、報告と PR 本文に載せて続ける。
@@ -214,7 +214,7 @@ except (Exception, SystemExit) as exc:
    - **Phase 3 まで待たずにこの時点で承認を取る**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。
    - 承認はセッション内で 1 回の判断として保持され、Phase 3 の /do-task がそれを再利用するので**同じ承認を 2 回求めない**。
    - **承認が得られなくても停止しない** — 内蔵 implementer(実装を受け持つ AI)で走り切り、その旨を報告する(停止条件には加えない)。
-   - **先取りした承認は、/do-task の Phase 3 の外部の手順の手順 1(承認より先に判定する縮退)で内蔵に切り替えたとき(条件 A: タスク MD がファイルでない・git でない・条件 B: 最後に承認した一覧に filter がある — external-runners.md §12-1)は使わず、そのことを報告する**
+   - **先取りした承認は、/do-task の Phase 3 の外部の手順の手順 1(承認より先に判定する縮退)で内蔵に切り替えたとき(条件 A: タスク MD がファイルでない・git でない・条件 B: 最後に承認した一覧にフィルター(Git の読み書きの変換)がある — external-runners.md §12-1)は使わず、そのことを報告する**
    - (先取りの承認は /do-task の事前検査より先にあるので、承認を取った後にこの切り替えに当たることがある)。
    - **このための引数は設けない**(承認は発話でのみ行う)。
    - 無人では承認を求めず、内蔵 implementer で走り、そのことを報告する(S2)
@@ -267,7 +267,7 @@ Issue 方式の停止報告は、タスク MD のパスの代わりに Issue の
 `--discover` のときは実行しない(実装は、採用の後の /do-task で行う)。
 
 ファイル方式は実際のタスク MD パスを対象に **/do-task を実行**する(`--reviewers` / `--runners` 等は透過。無人では `--unattended` も渡す)。ブランチは作成済みのため `--branch` は渡さない。
-Issue 方式は `/do-task --issue=<番号>` を実行し、保持した対象・R を渡す。完了記録の書き込みと再取得に失敗したら、stage・commit・文書同期へ進まない(Issue 方式の契約 §6)。
+Issue 方式は `/do-task --issue=<番号>` を実行し、保持した対象・R を渡す。完了記録の書き込みと再取得に失敗したら、ステージ(commit する変更を選んで載せること)・commit・文書同期へ進まない(Issue 方式の契約 §6)。
 
 /do-task が以下で終わった場合は **Phase 4 へ進まず停止**する(実装 commit だけ残し、PR は作らない)。無人では、停止時に実装 commit だけ残すことはしない。do-task が返した分類に従い、保留か失敗扱いにする(S5):
 
@@ -277,29 +277,29 @@ Issue 方式は `/do-task --issue=<番号>` を実行し、保持した対象・
 - 実動確認が「結果待ち」(ユーザーの対応を待っている)
 - /do-task の Phase 7 の完了処理を終えていない(`完了_{タスク名}.md` が既に在って改名を停止した等)
 
-**commit(実装分)**: /do-task 完了後、レビュー済みの変更を 1 commit にまとめる。Issue 方式はソース変更だけ。タスク MD を作らず、取得本文・JSON も stage しない。
-ファイル方式だけはタスク MD(`完了_` へのリネームを含む)も含め、次の stage と旧パスの削除を行う。
-- **タスク MD の stage**(上の停止条件に該当して改名が行われていないときは、タスク MD を stage しない — `完了_{タスク名}.md` が在っても、それは今回のタスクのものではない): `git add -- ':(literal)<完了_ のパス>'` を行う。
-- **rc 0 以外で終わったら**(保存先かその祖先ディレクトリが ignore 済み・sparse-checkout の定義外・commit 先のリポジトリの外 など)`git add -f` や `--sparse` で押し込まず、旧パスにも触れず、git のエラー出力を添えて「タスク MD を commit に含められなかった」と報告して続ける
-- (`git mv` で改名済みだった分は既に index に載っていて commit に入る)。
-- **rc 0 なら**続けて、`進行中_` の旧パスが作業ツリーに無ければ(`[ ! -e ] && [ ! -L ]`)`git rm --cached --ignore-unmatch -- ':(literal)<進行中_ の旧パス>'` も行う
+**commit(実装分)**: /do-task 完了後、レビュー済みの変更を 1 commit にまとめる。Issue 方式はソース変更だけ。タスク MD を作らず、取得本文・JSON もステージしない。
+ファイル方式だけはタスク MD(`完了_` へのリネームを含む)も含め、次のステージと旧パスの削除を行う。
+- **タスク MD のステージ**(上の停止条件に該当して改名が行われていないときは、タスク MD をステージしない — `完了_{タスク名}.md` が在っても、それは今回のタスクのものではない): `git add -- ':(literal)<完了_ のパス>'` を行う。
+- **終了コード 0 以外で終わったら**(保存先かその祖先ディレクトリが ignore 済み・sparse-checkout の定義外・commit 先のリポジトリの外 など)`git add -f` や `--sparse` で押し込まず、旧パスにも触れず、git のエラー出力を添えて「タスク MD を commit に含められなかった」と報告して続ける
+- (`git mv` で改名済みだった分は既にインデックス(ステージした内容を置く所)に載っていて commit に入る)。
+- **終了コード 0 なら**続けて、`進行中_` の旧パスが作業ツリーに無ければ(`[ ! -e ] && [ ! -L ]`)`git rm --cached --ignore-unmatch -- ':(literal)<進行中_ の旧パス>'` も行う
 - (`:(literal)` を欠くと、グロブ文字を含むタスク名が別のタスク MD に一致して巻き込む。
-- `git rm --cached` は、/do-task が `mv` で改名した追跡済みファイルの旧パスを index から外すためで、`git mv` 済みや未追跡なら何もしない。タスク MD は、未追跡だった場合は新規追加として、追跡済みだった場合はリネームとして commit に入る)。
-- 状態ファイル(do-task の Phase 0 の 3 が外す 4 つ)は stage しない。
-- commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(安全用のオプションつき)で index を見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。安全用のオプションつき)か残すかを確認する。
-- `git commit -a`・パスを渡す `git commit` は使わず、stage を終えた index を commit する(無人では、下の「無人の周の commit と停止」の照合に従う)。
-- **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠 hash を保持する。
-  最終 task は `finalize` の期待バイトで更新する。stage 前は `verify --mode pre-stage`、stage 後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
-  task 遷移時は期待バイト・根拠の外部保持 hash を全照合に渡す。不一致・保持値欠落では commit・公開しない。
+- `git rm --cached` は、/do-task が `mv` で改名した追跡済みファイルの旧パスをインデックスから外すためで、`git mv` 済みや未追跡なら何もしない。タスク MD は、未追跡だった場合は新規追加として、追跡済みだった場合はリネームとして commit に入る)。
+- 状態ファイル(do-task の Phase 0 の 3 が外す 4 つ)はステージしない。
+- commit の直前に `git --no-literal-pathspecs diff --cached --name-only --no-relative -- ':(top,glob)**/[.]claude/reviews/**' ':(top,glob)**/[.]claude/grasp.md' ':(top,glob)**/[.]claude/settings.local.json' ':(top,glob)**/[.]claude/.understand-project-done'`(安全用のオプションつき)でインデックスを見て、出たら PR に入る旨を示して、外す(出た各パスをそのまま `git --no-literal-pathspecs restore --staged -- ':(top,literal)<パス>'` に入れて。安全用のオプションつき)か残すかを確認する。
+- `git commit -a`・パスを渡す `git commit` は使わず、ステージを終えたインデックスを commit する(無人では、下の「無人の周の commit と停止」の照合に従う)。
+- **review/commit 照合**: [review-protocol.md](../do-task/references/review-protocol.md) の順序で直接検証結果と reviewer 返答を `attest` し、根拠のハッシュ値を保持する。
+  最後のタスク MD は `finalize` の期待バイトで更新する。ステージ前は `verify --mode pre-stage`、ステージ後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
+  タスクの状態を移すとき(`--task-transition`)は、期待バイトと、外部に保持した根拠のハッシュ値をすべての照合に渡す。不一致・保持値欠落では commit・公開しない。
 - Issue 方式は Issue 方式の契約 §6 の外部本文経路を使う。各入口で再取得した本文と生本文の保持値を渡し、commit 後も R と期待本文を比較する。タスク MD を commit 内から読む処理に代用しない。
 - メッセージ規約はこのリポジトリの `git log --oneline -20` から推定して合わせる(Conventional Commits を使っていればそれに従う)。
-- 無人では、stage する集合を references/unattended-mode.md §5 の「無人の実装 commit・doc commit の集合」にし、下の「無人の周の commit と停止」の照合を通す。
+- 無人では、ステージする集合を references/unattended-mode.md §5 の「無人の実装 commit・doc commit の集合」にし、下の「無人の周の commit と停止」の照合を通す。
 
 ## Phase 4: ドキュメント同期(/update-doc --task)
 
 `--discover` のときは実行しない。
 
-文書を変更する前に、完了 task で doc 用の新しい `review-guard.py start` を取り、開始 hash を保持する。
+文書を変更する前に、完了したタスクで doc 用の新しい `review-guard.py start` を取り、開始のハッシュ値を保持する。
 
 ファイル方式は同じディレクトリで完了名へ変わった実際のタスク MD を入力に **/update-doc --task={実際の完了タスクMDパス} を実行**する(要件タグ昇格・ADR 追記・図・索引まで。`--runners` は透過。無人では `--unattended` も渡す)。
 Issue 方式は完了本文を取り直して検査し、doc 用の別 `start` を取ってから `/update-doc --task=#<番号>` を実行する。Issue 方式の契約 §6〜7 に従い、R と実装の検証済み生本文の保持値を引き継ぐ。
@@ -307,8 +307,8 @@ Issue 方式は完了本文を取り直して検査し、doc 用の別 `start` �
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
 - /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
-- 文書変更後は doc 用の開始 state から `take --phase doc`→snapshot→`seal`→review→`run-checks`→`attest` を行う。
-  task 改名なしで doc の stage/commit を照合する。実装 state は流用しない。詳細は `review-protocol.md` の「文書、保留、公開」。
+- 文書変更後は、doc 用の開始の状態の記録(`review-guard.py` の保存)から `take --phase doc`→スナップショット→`seal`→レビュー→`run-checks`→`attest` を行う。
+  タスクの改名なしで、doc のステージと commit を照合する。実装の状態の記録は流用しない。詳細は `review-protocol.md` の「文書、保留、公開」。
 
 ## Phase 5: PR 作成
 
@@ -316,12 +316,12 @@ Issue 方式は完了本文を取り直して検査し、doc 用の別 `start` �
 
 Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R・生本文の保持値を再比較する。公開用の `repo` と保持した Issue の `repo` が同じと確かめてから `publish-guard.py` へ渡す。不一致なら push 前に止める。
 
-1. push 先を origin の判定から固定し、保持したレビュー済み SHA を `publish-guard.py` へ渡す。対話は `--set-upstream` を付け、exact-SHA push と remote SHA 照合の後にだけ既存の `-u` 相当の追跡設定を記録する。
-2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin へ渡す。
-   作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` で repository/head/base/SHA を照合してから成功にする(draft にしない。レビュアー・アサインは付けない)。
+1. push 先を origin の判定から固定し、保持したレビュー済み SHA を `publish-guard.py` へ渡す。対話は `--set-upstream` を付け、SHA を完全に指定した push と、リモートの SHA の照合の後にだけ既存の `-u` 相当の追跡設定を記録する。
+2. `publish-guard.py` がレビュー済み本文を安全に一度だけ読み、`gh pr create -R {repo} --base {デフォルトブランチ} --head {ブランチ名} --body-file -` の stdin(標準入力)へ渡す。
+   作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>` でリポジトリ・PR の元(head)・取り込み先(base)・SHA を照合してから成功にする(下書き〈draft〉にしない。レビュアー・アサインは付けない)。
    - 本文はファイルで渡さない(snap 版の gh は `/tmp` と隠しディレクトリを読めない)。
-   - helper は `reviews` 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
-3. PR 本文は作成前に用意し、次を含める。目的・スコープは task 本文から、検証と review は直接取得して保持した根拠だけから作る:
+   - `publish-guard.py` は `reviews` 下の非 symlink の通常ファイルを自分で一度だけ読み、stdin に渡す。対話と無人の本文経路は同じで、どちらも `-R` を固定する。
+3. PR 本文は作成前に用意し、次を含める。目的・スコープはタスク本文から、検証とレビューは直接取得して保持した根拠だけから作る:
    - **概要**: タスクの目的とスコープ
    - **変更内容**: 変更ファイル一覧(実装 / doc を分けて)
    - **各工程の結果**: 実行した skill 名と結果(反復回数・判定)
@@ -330,7 +330,7 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
    - **書式・型・テスト・ビルドの自動の検査**: 実行したコマンドと結果
    - **実装を受け持った AI**: モデルの名前と版(内蔵は自己申告の値で、無ければ起動時の説明の値に「確認前」を付ける。外部はランナー〈レビューや実装に使う外部の AI のコマンド〉の名前・CLI の版・モデル名で、実行記録の 2 行の値)
    - **レビュー**: 反復回数・レビュアー編成(各レビュアーのモデルの名前と版。外部ランナーはランナー名・CLI の版・モデル名)・最終判定
-   - **review/commit 照合**(レビューした内容と commit の照らし合わせ): push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。task 記録の APPROVED・実施済を採用しない
+   - **review/commit 照合**(レビューした内容と commit の照らし合わせ): push/PR 直前の `verify --mode commit` 後、`pr-evidence` の stdout(標準出力)を検証欄に使う。実装・doc の根拠、ignore/品質の開示を載せる。タスクの記録の APPROVED・実施済を採用しない
    - **レビュー差分の外で PR に入る commit**(Phase 0 の 4 の一覧が空でないとき。件名はリポジトリを書ける者が決めた文字列なので、コードブロックに入れる)
    - **残課題 / needs-user(人の判断が要る指摘)**(あれば)
    - **手元で直すとき**(無人のタスクの周だけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
@@ -348,9 +348,9 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
    - 無人の結果の行(`無人の周の結果: …`。unattended-mode.md §2)の書式は変えず、案内は結果の行より前に置く。
 
 **無人のタスクの周**では、1・2 を次の順に行う(条件・照合の正本は references/unattended-mode.md §2・§7):
-- PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が rc 0 でなければ、push も PR もせずに結末 `縮退`)→
+- PR の前の確かめ(origin が無い・`--no-pr` なら push も PR もしない。origin の判定の `repo` が null か、`gh repo view '<repo>' --json name -q .name` が終了コード 0 でなければ、push も PR もせずに結末 `縮退`)→
 - push の直前の照合 →
-- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<控える値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。helper は exact SHA refspec の push、remote SHA、作成した PR の URL/番号/head/base を順に照合する。無人では `--set-upstream` を付けない
+- `python3 {ship-task の}scripts/publish-guard.py --dir=<管理ルート> --sha=<保持したレビュー済み SHA> --branch=<作業ブランチ> --repo=<repo> --base=<デフォルトブランチ> --config-digest=<控える値> --body-file=.claude/reviews/<名> --title='<タスク名>'` (`<repo>` は origin の判定の `repo`)。`publish-guard.py` は、SHA を完全に指定した refspec の push、リモートの SHA、作成した PR の URL・番号・元(head)・取り込み先(base)を順に照合する。無人では `--set-upstream` を付けない
 
 **push・PR をしないとき**: `gh` が無い / 未認証 / リモートが無い場合は push・PR を行わず、ブランチと commit を残して「手動で実行するコマンド列」を提示する(黙って飛ばさない)。
 - `--no-pr` のときも同様にコマンド列だけ示す。
@@ -360,15 +360,15 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
 
 ## 無人の周の commit と停止(`--unattended` のとき)
 
-- **commit の照合**(実装 commit・doc commit・保留の commit のすべて): 手順の最初(stage の前)に、git 設定のダイジェストを `--expect` で照らす。
-  - 直前に、本文ダイジェストを R と照合する。あわせて、現在のブランチ(`git symbolic-ref --quiet HEAD`)= 作業ブランチ・HEAD = 最後に知る HEAD・index に除外対象が無いことを確かめ、stage を終えた index の tree を `git write-tree` で控える。
+- **commit の照合**(実装 commit・doc commit・保留の commit のすべて): 手順の最初(ステージの前)に、git 設定のダイジェストを `--expect` で照らす。
+  - 直前に、本文ダイジェストを R と照合する。あわせて、現在のブランチ(`git symbolic-ref --quiet HEAD`)= 作業ブランチ・HEAD = 最後に知る HEAD・インデックスに除外対象が無いことを確かめ、ステージを終えたインデックスのツリーを `git write-tree` で控える。
   - commit のコマンドは、git 設定のダイジェストの `--expect` と `&&` でつないだ 1 行で打つ。
-  - 直後に、`HEAD^{tree}` = 控えた tree・`git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> | python3 {create-task の}scripts/task-digest.py -` = R・現在のブランチ = 作業ブランチを確かめ、最後に知る HEAD を更新する。
+  - 直後に、`HEAD^{tree}` = 控えたツリー・`git -C <管理ルート> show HEAD:./<タスク MD の管理ルート相対パス> | python3 {create-task の}scripts/task-digest.py -` = R・現在のブランチ = 作業ブランチを確かめ、最後に知る HEAD を更新する。
   - 照合するタスク MD のパスは commit の後のパス(実装 commit・doc commit は `完了_`、保留の commit は `保留_`)。
   - push の直前には、git 設定のダイジェスト(単独の `--expect`)と origin の判定(`origin-repo.py` の再実行)を照らし、`refs/heads/<作業ブランチ>` = 最後に知る HEAD と、現在のブランチ = 作業ブランチを確かめる(push は Phase 5 の `--expect` つきの 1 行)。
   - どれかに通らなければ失敗扱い(G2)。
   - 時点ごとの表・コマンドの字面・除外対象・git の安全用のオプションは references/unattended-mode.md §7
-- **停止**: 保留なら保留の手順(ガード → 未承認 state/根拠 → 期待バイト適用 → stage 照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
+- **停止**: 保留なら保留の手順(ガード → 未承認の状態の記録と根拠 → 期待バイト適用 → ステージの照合 → commit。同 §5)を行う。失敗扱いなら、止まった時点から改名・保留の行・commit・push をせずに止まる(止まる前にできたものは残る。同 §6)
 - **結末**: 完了報告の最後に結果の行を書く(同 §2)
 - **発見の周**(`--discover`): 照合は references/discover-mode.md §7 の表で行う(R を持たない)。止まるのは失敗扱いだけ(保留は無い)。結末は同 §9
 
@@ -378,7 +378,7 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
 |---|---|
 | 要件不明が実装の分岐を左右する / needs-user 残存 / 設計レビュー未完了・本文の不一致 / Issue 方式の本文算出不能・取得失敗 | 命名・内部構造など実装時判断で足りるもの / ファイル方式で設計レビューの行に `本文` が無い(報告して続行) |
 | Issue 方式のリポジトリ不一致・算出不能 / 完了後の本文と保持値の不一致 / update-doc の完了検査の失敗 / `task_store: github-issue` のステータス行の欠落・重複 / 他人の Issue の再確認(Phase 0・基準行更新後の最初の依頼前・更新後の差し戻しで最大 `2 + N` 回。最後のチェック更新後・`finalize` 適用後など追加の再取得も、未承認の本文ごとに1回増える。Issue 方式の契約 §5〜6) | 同じ会話で承認した本文が変わっていない再取得(承認値を渡して続行) |
-| Issue 方式の push より前の公開失敗。まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する | push・PR の成否を確かめ、push より前の失敗だけ、同じセッションで Issue に記録する前なら、同じ state と保持値で Phase 5 の再確認を通して再試行できる(契約 §6) |
+| Issue 方式の push より前の公開失敗。まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する | push・PR の成否を確かめ、push より前の失敗だけ、同じセッションで Issue に記録する前なら、同じ状態の記録と保持値で Phase 5 の再確認を通して再試行できる(契約 §6) |
 | Issue 方式の push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)。Phase 5 をやり直さず、公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す(契約 §6) | — |
 | 完了条件が検証不能 / 依存タスク未完 | 設計書のレビュー指摘が valid 反映済みで収束した |
 | 品質ゲート赤・スコープ縮小・レビュー未収束・完了処理の停止(改名先が既に在る等)・実動確認が「結果待ち」 | doc 同期の needs-user(PR の残課題に転記) |
@@ -387,7 +387,7 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
 | 先行する commit の一覧(S8)で「続行しない」と答えた | 一覧が空・比べられない(報告して続行) |
 
 Issue 方式の停止報告は、実装 commit の検証前後を区別する。検証前は `/do-task --issue=<番号>` を案内する。検証後は契約 §6 に従い、やり直す前に push・PR の成否を確かめる。
-- 同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ。同じセッションで Issue に記録する前に限る。この場合だけ公開停止の記録を遅らせる。記録を書いた後は検査つきの Phase 5 をやり直せない。
+- 同じ状態の記録と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ。同じセッションで Issue に記録する前に限る。この場合だけ公開停止の記録を遅らせる。記録を書いた後は検査つきの Phase 5 をやり直せない。
 - push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない。`実装 commit <sha> は検証済み。公開で停止: <理由>` と Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す。
 - 記録後の文書同期は `/update-doc --task=#<番号>` を案内する。その後の commit・公開は手動のコマンド列を示す。公開だけ残った場合も、保持した `pr-evidence` と `Closes #<番号>` を使い、本文と対象リポジトリを確かめ直す手順を添える。
 
@@ -428,7 +428,7 @@ Issue 方式で push より前の公開失敗のときは、公開停止を記�
 
 ## Git の共通の安全用のオプション
 
-対話・無人を問わず、read・index/worktree の変更・commit・network の Git 呼出は `base-commit.md` の Git の安全用のオプションを付ける。
+対話・無人を問わず、読み取り・インデックスと作業ツリーの変更・commit・ネットワークを使う Git 呼出は `base-commit.md` の Git の安全用のオプションを付ける。
 - 品質確認は hook に依存させない。
-- filter の例外は `base-commit.md` の `precheck` が許したものだけを明示無効化する。
+- フィルターの例外は `base-commit.md` の `precheck` が許したものだけを明示無効化する。
 - 公開はこの規則に加えて `publish-guard.py` を通す。

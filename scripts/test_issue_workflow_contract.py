@@ -97,7 +97,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         phase = section(self.ship, "## Phase 2: 続行判定ゲート(唯一の自動停止判断)")
         self.contains(phase, "再取得した本文で6条件", "R として保持", "ファイル方式だけ")
         self.contains(self.shipping, "最後の設計レビュー行", "本文` が無い・行が無い・算出不能・不一致なら停止",
-                      "close だけを完了の根拠にしない", "現在の本文から R を作り直すことはしない")
+                      "Issue が閉じていることだけを完了の根拠にしない", "現在の本文から R を作り直すことはしない")
 
     def test_template_status_is_required_before_implementation_but_not_authority(self):
         phase = section(self.ship, "## Phase 2: 続行判定ゲート(唯一の自動停止判断)")
@@ -146,20 +146,20 @@ class IssueWorkflowContractTest(unittest.TestCase):
         before_branch = phase.split("3. **作業ツリーの清潔性**:", 1)[1].split("4. **作業ブランチ**:", 1)[0]
         for text in (before_branch, self.shipping.split("### 続行判定と実装\n", 1)[0]):
             self.contains(text, "`--no-pr`・`--design-only` を除き、`preflight` の直後・ブランチ作成の前",
-                          "公開する root", "`origin-repo.py`", "Issue の `repo` を比べる",
+                          "公開するルート", "`origin-repo.py`", "Issue の `repo` を比べる",
                           "不一致・算出不能なら", "止めるか `--no-pr` で続けるかを質問で確かめ")
         self.contains(self.shipping, "新規 Issue でも省略しない", "回答前はブランチ作成・設計・実装へ進まない",
                       "Phase 5 の再確認も残す", "不一致・算出不能なら push より前に停止する")
 
     def test_do_task_handoff_and_failed_finalization_do_not_commit(self):
         phase = section(self.ship, "## Phase 3: 実装(/do-task)")
-        self.contains(phase, "/do-task --issue=<番号>", "保持した対象・R", "stage・commit・文書同期へ進まない")
+        self.contains(phase, "/do-task --issue=<番号>", "保持した対象・R", "ステージ(commit する変更を選んで載せること)・commit・文書同期へ進まない")
         self.contains(self.shipping, "外部の実装担当への承認は求めず", "本文のコピーを `--task-md` に渡さない",
                       "finalize` の期待本文を共通の `update`", "新たな実装 commit は作らない")
 
     def test_commit_reads_external_body_instead_of_staging_a_task(self):
         self.contains(self.shipping, "--task-id issue-<番号> --task-body <取得本文> --expect-task-body-sha256",
-                      "--task-dir` は省く", "タスク MD の stage・旧パスの削除を行わない",
+                      "--task-dir` は省く", "タスク MD のステージ・旧パスの削除を行わない",
                       "取得本文・取得JSON・期待本文も commit に含めない",
                       "EXPECTED_TASK_SHA256", "--task-transition complete",
                       "verify --mode pre-stage", "--mode stage", "--mode commit",
@@ -168,21 +168,21 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_document_phase_starts_after_implementation_with_its_own_state(self):
         phase = section(self.ship, "## Phase 4: ドキュメント同期(/update-doc --task)")
         self.contains(phase, "完了本文を取り直して検査", "別 `start`", "/update-doc --task=#<番号>")
-        self.contains(self.shipping, "doc 用の新しい `start`", "take --phase doc", "実装 state を流用せず",
-                      "task 遷移なし", "文書変更が無ければ doc commit は作らず",
+        self.contains(self.shipping, "doc 用の新しい `start`", "take --phase doc", "実装の状態の記録を流用せず",
+                      "`--task-transition` を付けずに", "文書変更が無ければ doc commit は作らず",
                       "未承認の文書を commit せず")
 
     def test_publication_binds_issue_repo_and_keeps_direct_evidence(self):
         phase = section(self.ship, "## Phase 5: PR 作成")
         self.contains(phase, "保持した Issue の `repo` が同じ", "不一致なら push 前に止める", "Closes #<番号>")
-        self.contains(self.shipping, "push・PR 直前にも Issue を取り直し", "管理ルートとソースの root が別",
+        self.contains(self.shipping, "push・PR 直前にも Issue を取り直し", "管理ルートとソースのルートが別",
                       "publish-guard.py --repo <repo>", "gh pr create -R <repo>",
                       "Issue の記録から検証結果やレビュー返答を復元しない")
 
     def test_update_doc_chooses_session_issue_or_asks_and_allows_audit(self):
         self.contains(self.syncing, "このセッションで do-task が完了にした Issue が1件なら使う",
                       "複数なら対象を質問", "番号または URL を質問", "全量監査も選べる",
-                      "更新日時・一覧の先頭・close の順から自動選択しない",
+                      "更新日時・一覧の先頭・閉じた順から自動選択しない",
                       "完了_*.md` は探さない", "--task` と `--analyze-only` は併用しない",
                       "既存の全量監査へ進む")
 
@@ -236,7 +236,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_publication_retry_before_push_keeps_body_state_and_hashes(self):
         stop = self.shipping.split("- 中断の記録は", 1)[1].split("### 中断の記録を書いた後の再開", 1)[0]
         self.contains(stop, "push より前の失敗は、まず Issue へは書かず、会話で理由を報告する",
-                      "同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
+                      "同じ状態の記録と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
                       "同じセッションで Issue に記録する前に限る",
                       "push より前の失敗では、人がやめると決めたとき、またはセッションを終えるときだけ",
                       "実装 commit <sha> は検証済み。公開で停止: <理由>",
@@ -247,10 +247,10 @@ class IssueWorkflowContractTest(unittest.TestCase):
         row = next(line for line in table.splitlines() if line.startswith("| Issue 方式の push より前の公開失敗。"))
         self.contains(row, "まず会話で報告し、人がやめると決めたとき・セッション終了時だけ Issue に記録する",
                       "push・PR の成否を確かめ、push より前の失敗だけ、同じセッションで Issue に記録する前なら",
-                      "同じ state と保持値で Phase 5 の再確認を通して再試行できる")
+                      "同じ状態の記録と保持値で Phase 5 の再確認を通して再試行できる")
         report = table.split("Issue 方式の停止報告は", 1)[1]
         self.contains(report, "やり直す前に push・PR の成否を確かめる",
-                      "同じ state と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
+                      "同じ状態の記録と保持値のまま Phase 5 をやり直せるのは、push より前の失敗だけ",
                       "同じセッションで Issue に記録する前に限る")
         self.assertNotIn("同じセッションでやり直せる間は", stop + table)
 
@@ -277,7 +277,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "`gh pr create -R <repo> --base <デフォルトブランチ> --head <ブランチ名> --title <題名> --body-file - < <PR本文ファイル>`",
                       "本文・対象リポジトリの再確認と、保持した `pr-evidence`・`Closes #<番号>` を含む PR 本文の準備を先に並べる",
                       "作成後は `gh api --hostname <host> repos/<owner>/<repo>/pulls/<番号>`",
-                      "head と base のブランチ名(`head.ref`・`base.ref`)と head の SHA(`head.sha`)が、保持したレビュー済みの値と一致する",
+                      "PR の元(head)と取り込み先(base)のブランチ名(`head.ref`・`base.ref`)と、元の SHA(`head.sha`)が、保持したレビュー済みの値と一致する",
                       "作成済みなら重複作成せず、この照合を行う",
                       "不一致・取得失敗なら公開完了とは扱わない")
         self.assertLess(resume.index("gh pr create -R"), resume.index("gh api --hostname"))
@@ -301,8 +301,8 @@ class IssueWorkflowContractTest(unittest.TestCase):
                       "作成済みなら重複作成せず、この照合を行う")
         self.contains(after_create,
                       "`publish-guard.py` の `created_pr_checked` と同じ項目",
-                      "head と base のリポジトリ(`head.repo.full_name`・`base.repo.full_name`)が `<owner>/<repo>`",
-                      "head の所有者(`head.repo.owner.login`)が `<owner>`",
+                      "元と取り込み先のリポジトリ(`head.repo.full_name`・`base.repo.full_name`)が `<owner>/<repo>`",
+                      "元の所有者(`head.repo.owner.login`)が `<owner>`",
                       "PR の URL が `https://<host>/<owner>/<repo>/pull/<正の整数>` の形で1件だけ",
                       "API の `html_url` と `number` がその URL と番号に一致する")
 
@@ -478,7 +478,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
     def test_update_doc_rechecks_input_without_mutating_issue(self):
         self.contains(self.syncing, "preflight` と `snapshot --for-execution`", "--yes` でも本文採用の確認を省かない",
                       "文書の適用前・レビュー前・最終報告前", "全文の一致", "入力を黙って差し替えない",
-                      "Issue 本文・コメント・close・ラベルは変更しない",
+                      "Issue 本文・コメント・ラベルは変更せず、Issue を閉じない",
                       "入力の不備でレビュー前に止まった場合は `未完了` とする")
 
 

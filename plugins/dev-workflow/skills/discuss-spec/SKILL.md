@@ -30,7 +30,7 @@ argument-hint: "[壁打ちしたいテーマ] [--doc=<番号> | --quick]"
 
 ## Phase 1: 現状把握(テーマ → 文脈)
 
-1. `.claude/project-profile.yml` があれば Read(`root` / `source_of_truth`)。
+1. `.claude/project-profile.yml` があれば読む(`root` / `source_of_truth`)。
    - `source_of_truth` に値があり(**空 = null・空文字 以外は、型を問わず「値がある」**)、有効な 3 値(`serena` / `docs` / `agents-md`)のいずれでもないときは、ここで停止して有効な 3 値と直す場所(`.claude/project-profile.yml`)を案内する
    - (既定へフォールバック〈先の手段が使えないときに次の手段へ切り替えること〉しない。profile が無い・項目が無い・値が空の場合の既定 serena は従来どおり)。
    - doc ディレクトリを検出(`doc/` → `docs/`)。

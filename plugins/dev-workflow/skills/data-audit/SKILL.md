@@ -93,12 +93,12 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## Phase 3: 裏取りとトリアージ準備
 
-1. team-lead(作業を進め、結果を確かめる側の AI。このセッション)が**全指摘を実コードで再確認**する(Read で該当箇所を開き、経路を追う)。エージェントの申告を鵜呑みにしない(design §5-9)
-2. false positive は除去し、**除去理由を記録**する
+1. team-lead(作業を進め、結果を確かめる側の AI。このセッション)が**全指摘を実コードで再確認**する(該当箇所を読み、経路を追う)。エージェントの申告を鵜呑みにしない(design §5-9)
+2. 誤検出(false positive)は除去し、**除去理由を記録**する
 3. 深刻度(重大 / 高 / 中)× 確度(確実 / 要確認)を確定し、同一根本原因の指摘を統合する(基準は checks.md「深刻度・確度の基準」)
    - 候補モードでは、統合は指摘キーの単位(同じ観点群・同じ識別子)の中だけで行う(checks.md の「候補モードの識別子と観点群」)
-4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した false positive と理由を含む)。
-   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した誤検出と理由を含む)。
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
@@ -146,7 +146,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 - [ ] コード・ドキュメント・設定を変更していない(書き込みは `.claude/reviews/` のみ)
 - [ ] 全指摘に path:行 と実コードの裏取りがある(伝聞・推測の指摘が無い)
 - [ ] 機密の値・認証情報を出力していない(フィールド名と場所のみ)
-- [ ] false positive の除去理由を記録した
+- [ ] 誤検出の除去理由を記録した
 - [ ] 未監査の層・観点を理由付きで明記した(黙って飛ばしていない)
 - [ ] 実行形態(双方向でやり取りできる環境 / 一方向だけの環境 / 別の AI を使えない環境)を報告に明記した
 - [ ] 候補モード: 書き込みは `.claude/reviews/` と task_dir の新しい `候補_*.md` だけで、candidate-mode.md の最終ゲートを満たした
