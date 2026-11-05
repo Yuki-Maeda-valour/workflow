@@ -29,13 +29,13 @@ PASS  $1"; }
 ng() { FAIL=$((FAIL + 1)); RESULTS="$RESULTS
 FAIL  $1"; }
 [ -z "${RUN_LOOP_SELFTEST_LOG:-}" ] || printf '%s\n' "${LOOP_SELFTEST_ONLY:-(空)}" >>"$RUN_LOOP_SELFTEST_LOG"
-ok "治具: 前"
+ok "準備: 前"
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
-ok "治具: want の後"
+ok "準備: want の後"
 '''
 
 TAIL = r'''
-ok "終わり"
+if [ "${LOOP_SELFTEST_ONLY:-}" = "${RUN_LOOP_SELFTEST_BREAK_OUTSIDE:-(なし)}" ]; then ng "終わり(落とした)"; else ok "終わり"; fi
 echo
 printf '%s\n' "$RESULTS"
 echo
@@ -62,6 +62,8 @@ fi
 # 自分(bash)と、自分が起動した子の pid を書いてから眠る(止めたときに両方が消えるかを見る)。
 SLOW = r'''
 if want slow-{index}; then
+scratch="$(mktemp -d "$RUN_LOOP_SELFTEST_MARKS/scratch-{index}-XXXXXX")"
+echo "loop-selftest: 対象 fake(scratch $scratch)"
 sleep 60 &
 child=$!
 printf '%s %s\n' "$$" "$child" >"$RUN_LOOP_SELFTEST_MARKS/slow-{index}.tmp"
@@ -165,20 +167,67 @@ class RunLoopSelftestTest(unittest.TestCase):
         self.assertEqual([",", "alpha", "beta", "empty", "gamma"], self.ran())
 
     def test_layout_that_cannot_be_split_is_reported_before_running(self):
+        outside = "最上位の `if want <節>; then` の外で want を呼んでいる"
         cases = {
-            "2 つの節を見る": SECTIONS + "if want alpha || want beta; then\nok x\nfi\n",
-            "単独の節が無い": SECTIONS + "if want only-a || want only-b; then\nok x\nfi\n",
-            "elif": SECTIONS + "if [ -n x ]; then\n:\nelif want beta; then\nok x\nfi\n",
-            "字下げした if": SECTIONS + "if want alpha; then\n  if want beta; then ok x; fi\nfi\n",
-            "節が無い": "\n",
+            "2 つの節を見る": (SECTIONS + "if want alpha || want beta; then\nok x\nfi\n",
+                               "`if want alpha || want beta` が、ちょうど 1 つのプロセスで流れない(単独の節の名前: alpha beta)"),
+            "単独の節が無い": (SECTIONS + "if want only-a || want only-b; then\nok x\nfi\n",
+                               "`if want only-a || want only-b` が、ちょうど 1 つのプロセスで流れない(単独の節の名前: 無し)"),
+            "elif": (SECTIONS + "if [ -n x ]; then\n:\nelif want beta; then\nok x\nfi\n", outside),
+            "字下げした if": (SECTIONS + "if want alpha; then\n  if want beta; then ok x; fi\nfi\n", outside),
+            "名前を引用符で囲む": (SECTIONS + 'if want "delta"; then\nok x\nfi\n', outside),
+            "名前を変数で渡す": (SECTIONS + 's=delta\nif want "$s"; then\nok x\nfi\n', outside),
+            "次の行の then": (SECTIONS + "if want delta\nthen\nok x\nfi\n",
+                              "5 番目の `if want` が、行頭に 1 行で書いた `if want <節>; then` と合わない"
+                              "(bash の読み: delta / 行頭の行: 無し)"),
+            "行頭の入れ子": (SECTIONS.replace('ok "beta 1"\n', 'ok "beta 1"\nif want delta; then\nok x\nfi\n'), outside),
+            "&& で呼ぶ": (SECTIONS + "want delta && ok x\n", outside),
+            "文字列の続きの後で呼ぶ": (SECTIONS + 'x="a\nb" && want delta\n', outside),
+            "構文の誤り": (SECTIONS + "if want delta; then\n", "bash で構文を読めない"),
+            "節が無い": ("\n", "`if want <節>; then` の行が無い"),
         }
-        for name, sections in cases.items():
+        for name, (sections, reason) in cases.items():
             with self.subTest(case=name):
                 self.write_selftest(sections)
                 result = self.run_runner()
                 self.assertEqual(1, result.returncode, result.stdout + result.stderr)
-                self.assertIn("異常: loop-selftest.sh の節を読めない: ", result.stdout)
+                self.assertIn("異常: loop-selftest.sh の節を読めない: " + reason, result.stdout)
                 self.assertEqual([], self.ran())
+
+    def test_want_inside_heredoc_and_variables_is_not_a_call(self):
+        # ヒアドキュメントの中の `want = ...`・`local want`・`$want` は、want の呼び出しではない。
+        self.write_selftest(SECTIONS + r'''
+check_want() { local want got; want="$1"; got="$2"; [ "$want" = "$got" ]; }
+python3 - <<'PY' >/dev/null
+want = 1
+print(want)
+PY
+if check_want a a; then ok "変数の want"; fi
+''')
+        self.assertEqual("結果: PASS 9 件 / FAIL 0 件", self.run_single())
+        result = self.run_runner()
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        self.assertIn("結果: PASS 9 件 / FAIL 0 件 / ", result.stdout)
+
+    def test_outside_check_failing_only_in_outside_process_stops_subtraction(self):
+        self.write_selftest()
+        result = self.run_runner(RUN_LOOP_SELFTEST_BREAK_OUTSIDE=",")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("異常: 節の外の確かめが、節の外だけのプロセスで落ちた(差し引けない)", result.stdout)
+        # 差し引きをやめる(合計の FAIL が負にならない)。最後の行は件数を出さない。
+        self.assertTrue(result.stdout.strip().splitlines()[-1].startswith("結果: 件数は不明(上の「異常:」を見る)/ "),
+                        result.stdout)
+        self.assertNotIn("FAIL -", result.stdout)
+
+    def test_outside_check_failing_only_in_one_section_process_stops_subtraction(self):
+        self.write_selftest()
+        result = self.run_runner(RUN_LOOP_SELFTEST_BREAK_OUTSIDE="beta")
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+        self.assertIn("異常: beta: 失敗(終了コード 1)", result.stdout)
+        self.assertIn("異常: beta: 節の外の確かめの結果が、節の外だけのプロセスと違う(差し引けない)", result.stdout)
+        self.assertIn("FAIL  終わり(落とした)", result.stdout)
+        self.assertTrue(result.stdout.strip().splitlines()[-1].startswith("結果: 件数は不明(上の「異常:」を見る)/ "),
+                        result.stdout)
 
     def test_only_named_sections_run(self):
         self.write_selftest()
@@ -234,6 +283,10 @@ class RunLoopSelftestTest(unittest.TestCase):
         self.assertNotIn("結果:", output)
         self.assertEqual([",", "slow-0"], self.ran())
         self.assertEqual(["slow-0.pids"], [path.name for path in marks.glob("*.pids")])
+        # 止めたプロセスの一時フォルダは、後片付けが走らずに残る。残っているものを表示する。
+        scratches = list(marks.glob("scratch-0-*"))
+        self.assertEqual(1, len(scratches), scratches)
+        self.assertIn(f"残った一時フォルダ(slow-0。確かめてから消す): {scratches[0]}", output)
         deadline = time.monotonic() + 15
         while not all(process_gone(pid) for pid in pids) and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -258,8 +311,9 @@ class RealSelftestTest(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("run_loop_selftest", RUNNER)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        text = module.SELFTEST.read_text(encoding="utf-8")
-        sections = module.read_sections(text)
+        data = module.SELFTEST.read_bytes()
+        text = data.decode("utf-8")
+        sections = module.read_sections(data)
         self.assertGreater(len(sections), 1)
         for name in sections:
             self.assertIn(f"\nif want {name}", text)
