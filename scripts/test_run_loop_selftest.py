@@ -201,6 +201,13 @@ class RunLoopSelftestTest(unittest.TestCase):
             "文字列の続きの後の !": (SECTIONS + 'x="a\nb" || ! want delta\n', outside),
             "coproc": (SECTIONS + "coproc want delta\n", outside),
             "trap": (SECTIONS + "trap 'want delta' EXIT\n", outside),
+            "環境変数を前に付ける": (SECTIONS + "X=1 want delta && ok y\n", outside),
+            "time -p": (SECTIONS + "time -p want delta\n", outside),
+            "trap --": (SECTIONS + "trap -- 'want delta' EXIT\n", outside),
+            "複数行の $( の中の { }": (SECTIONS + "x=$(\n{ want delta; }\n)\n", outside),
+            "複数行の $( の中の ( )": (SECTIONS + "x=$(\n(want delta)\n)\n", outside),
+            "複数行の $( の中の &": (SECTIONS + "x=$(\nsleep 0 & want delta\n)\n", outside),
+            "複数行の $( の中の case": (SECTIONS + "x=$(\ncase a in\na) want delta;;\nesac\n)\n", outside),
             "構文の誤り": (SECTIONS + "if want delta; then\n", "bash で構文を読めない"),
             "節が無い": ("\n", "`if want <節>; then` の行が無い"),
         }

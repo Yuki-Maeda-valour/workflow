@@ -148,7 +148,7 @@ bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      #
 bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   # 実装委託の前後の保護の回帰テスト(必須)
-LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.py   # 無人ループ(loop.sh)の回帰テスト(必須)。loop-selftest.sh を節ごとに分けて並べて流す
+LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.py   # 無人ループ(loop.sh)の回帰テスト(必須)。loop-selftest.sh を節ごとに分けて並べて流す
 ```
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。
@@ -174,9 +174,9 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.
 - 同時に流すのは、使える CPU の数の 4 分の 1 まで。数は `-j <数>` で変える。
   - 既定を小さくしているのは、`run-tests.py`(CPU の数の半分)と同時に流すため。足しても CPU の数を超えない。
   - 全回帰テストで `-j 6` にすると、全体は 143 秒短くなったが、2 つ落ちた(2026-11-05 の容器。16 CPU・load の平均 17.7)。
-    - judge の節: 17 個のタスクを 1 回で回す `loop.sh` の起動が `RUN_TIMEOUT=300` に当たった(`期待 0・実際 124`)。
+    - judge の節: 17 個のタスクを 1 回で回す `loop.sh` の起動が、そのときの値の `RUN_TIMEOUT=300` に当たった(`期待 0・実際 124`)。
     - `test_loop_startup.py` の 1 件: 片付けの途中で、git が裏で動かす保守の処理とファイルを取り合った。
-  - judge の節で `期待 0・実際 124` が出たら、`-j` を減らして流し直す。
+  - judge の節で `期待 0・実際 124` か `期待 0・実際 137` が出たら、`-j` を減らすか、`RUN_TIMEOUT` を延ばして流し直す。
 - 節の外の確かめ 3 件(最初のスタブの証明 2 件と、最後の後片付けの 1 件)は、どのプロセスでも流れる。
   - そのため、どの節も選ばないプロセスを 1 つ足して、その件数を測る。合計では 1 回分だけ数える。
   - 差し引くのは、節の外の確かめが、どのプロセスでも同じ名前で PASS したときだけ。
@@ -187,7 +187,7 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.
 - 次のときは「異常:」を出し、終了コード 1 で終わる。
   - 節の形を読めない。流す前に止まる。形は、bash 自身にファイルを読ませて確かめる(先に `bash -n` で読めることを確かめ、それから定義だけして、実行はしない)。
     - bash で読めない(構文の誤り・余分な `}` など)。
-    - want を、最上位の `if want <節>; then` の外で呼んでいる(`elif want`・入れ子の `if want`・`want <節> && …`・複数行の `$( … )` やバッククォートの中・`coproc want …`・`trap 'want …' …` など)。
+    - want を、最上位の `if want <節>; then` の外で呼んでいる(`elif want`・入れ子の `if want`・`want <節> && …`・`X=1 want …`・`time -p want …`・複数行の `$( … )` やバッククォートの中・`coproc want …`・`trap 'want …' …` など)。
     - 最上位の `if want <節>; then` に `else` か `elif` がある。その側は、ほかの全部のプロセスで流れ、1 本で流すと流れないため。
     - 最上位の `if want` が、行頭の 1 行の `if want <節>; then` の形でない(名前を引用符で囲む・変数で渡す・`then` を次の行に書く)。
     - どれかの所が、2 つのプロセスで流れるか、どのプロセスでも流れない形になっている(単独の節を 2 つ見る `if want <節> || want <節>` など)。
@@ -195,10 +195,13 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.
   - 節の確かめが 1 件も流れていない。
   - 節の外の確かめが、どれかのプロセスで落ちた。差し引きをやめ、最後の行は `結果: 件数は不明(上の「異常:」を見る)/ <秒> 秒` になる。
 - 失敗したプロセスの出力は、最後にまとめて出る。全部のプロセスの出力を残すときは `--log-dir <フォルダ>` を付ける。
-- 節を足すときは、行頭に `if want <節>; then` と書き、対の `fi` も行頭に置く。
+- 節を足すときは、次の決まりを守る。
+  - 行頭に `if want <節>; then` と 1 行で書き、対の `fi` も行頭に置く。名前は引用符で囲まない。
+  - 最上位の `if want <節>; then` の行のほかでは、want を呼ばない。その `if` に `else`・`elif` を付けない。
   - 節の中では、ほかの節が作った変数・関数・ファイルを使わない。分けて流すと、ほかの節は流れないため。
-  - 名前は引用符で囲まず、`then` も同じ行に書く。上の「節の形を読めない」の形は使わない。`run-loop-selftest.py` が流す前に止まる。
-  - 限界: 変数に入れた名前で呼ぶ(`f=want; $f <節>`)・実行中に組み立てた文字列を `eval` するなど、書いた字面に `want <名前>` が出ない呼び方は見つけられない。こう書かない。
+  - `run-loop-selftest.py` が流す前に止めるのは、上の「節の形を読めない」に挙げた形だけ。
+    - 正規表現で見るので、ほかにも見つけられない書き方がありうる(例: 変数に入れた名前で呼ぶ `f=want; $f <節>`・実行中に組み立てた文字列を `eval` する)。
+    - 止まらなくても、決まりを破れば件数が合わなくなる。決まりを守れば、どれも書かずに済む。
 - 限界: 止めたときに、`loop-selftest.sh` が別のプロセスグループで起動した子(`loop.sh` など)が、`RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
   - `loop-selftest.sh` の一時フォルダ(`mktemp -d` で作る。既定は `/tmp/tmp.*`)も、後片付けが走らずに残ることがある。
   - 残った一時フォルダは、中断の行の後に `残った一時フォルダ(<節>。確かめてから消す): <パス>` と出る。中を確かめてから消す。
@@ -210,24 +213,32 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.
    - `test_pending_implementation.py` と implement-agent・implement-guard の selftest は、この置き場を「無ければ作り、空なら消す」。
    - 置き場が無いまま同時に流すと、一方が消した直後に、他方が中に作れず落ちることがある(既知の取り合い。selftest の側は直していない)。
 2. 次の 6 つを同時に始める。
-   - `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.py`
+   - `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.py`
    - `python3 -B scripts/run-tests.py`
    - review-agent・implement-agent・diff-snapshot・implement-guard の selftest(上のコードの `bash …-selftest.sh` の 4 行)
 3. 6 つすべての終了コードが 0 なら合格。
 
-- `run-loop-selftest.py` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300` を付ける。ほかの負荷がある機械では、既定の時間切れ(1 つのプロセスで 1500 秒・`loop.sh` の 1 回の起動で 150 秒)に当たることがある。
-  - 下の時間は、どれもこの 2 つを付けて測った。
+- `run-loop-selftest.py` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600` を付ける。
+  - `LOOP_SELFTEST_TIMEOUT` は、1 つのプロセス(節 1 つ)の全体の上限の秒数。既定は 1500 秒。
+  - `RUN_TIMEOUT` は、止まった `loop.sh` を打ち切るまでの秒数(`loop.sh` の 1 回の起動ごと)。既定は 150 秒。
+    - `loop-selftest.sh` で `RUN_TIMEOUT` を使うのは、`timeout -k 5 "${RUN_TIMEOUT:-150}"` の 1 か所だけ。延ばしても、確かめる中身は変わらない。
+  - 600 にするのは、並べて流すと 1 つの節が遅くなるため。judge の節(17 個のタスクを 1 回の `loop.sh` で回す)は、300 秒を超えることがある。
+    - 2026-11-05 の容器で、`RUN_TIMEOUT=300` では judge の節が FAIL 19 件になった(`期待 0・実際 137`。300 秒の後の SIGKILL で止められた)。`RUN_TIMEOUT=600` では 6 つとも合格した(下の表の 2 回目と 3 回目)。
+  - 1 本で流す `bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` には、前から `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300` を付けてきた(下の表の「変える前」は、この値で測った)。
   - 既定の上限のままだと、混んだ機械では変更前の main でも、時間切れ(rc 124)や「判定」の群の FAIL 15 件になった(2026-11-05、別の作業で 1 本で流したときの実測)。
 - 2026-11-05 の容器での時間(ほかのコンテナが 0〜4 個動く中):
 
-| 流し方 | 全体 | unittest | loop-selftest | implement-guard-selftest(ほかの 4 本で最長) |
-|---|---|---|---|---|
-| 変える前: `run-tests.py` と、`bash loop-selftest.sh` を含む 5 本を同時に流す | 3847〜3980 秒 | 513〜525 秒 | 3847〜3980 秒 | 811 秒 |
-| 変えた後: 上の 6 つを同時に流す | 1335 秒 | 534 秒 | 1335 秒 | 880 秒 |
+| 流し方 | `RUN_TIMEOUT` | 全体 | unittest | loop-selftest | 結果 |
+|---|---|---|---|---|---|
+| 変える前: `run-tests.py` と、`bash loop-selftest.sh` を含む 5 本を同時に流す | 300 | 3847〜3980 秒 | 513〜525 秒 | 3847〜3980 秒 | すべて合格 |
+| 変えた後の 1 回目: 上の 6 つを同時に流す | 300 | 1335 秒 | 534 秒 | 1335 秒 | すべて合格 |
+| 変えた後の 2 回目: 同上 | 300 | 1481 秒 | 685 秒 | 1481 秒(judge の節は 634 秒) | judge の節が FAIL 19 件。ほかの 5 つは合格 |
+| 変えた後の 3 回目: 同上 | 600 | 1410 秒 | 595 秒 | 1409 秒 | すべて合格(loop-selftest は PASS 3546 件) |
 
+- implement-guard-selftest(ほかの 4 本で最長)は、変える前に 811 秒、変えた後の 1 回目に 880 秒だった。
 - 変えた後も、全体の時間は loop-selftest で決まる。
   - 節を 1 つずつ順に流した時間の和は 4065 秒(30 節の 4054 秒と、節の外だけのプロセスの 11 秒)。
-  - 4 つずつ並べると、各節が遅くなり、31 プロセスの時間の和は 5289 秒(1.3 倍)になった。全体は 1335 秒だった。
+  - 4 つずつ並べると、各節が遅くなる。1 回目は、31 プロセスの時間の和が 5289 秒(1.3 倍)になり、全体は 1335 秒だった。
   - 最も重い節は discover(順に流して 639 秒・並べて 904 秒)。次は breakers(437 秒)・judge(393 秒)・humanconfig(327 秒)。
   - `bash loop-selftest.sh` を 1 本で、ほかのテストと同時でなく流すと 3718 秒。
 
