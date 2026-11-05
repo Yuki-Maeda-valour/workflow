@@ -19,6 +19,18 @@ v4.2.0 以前は commit 履歴を参照。
 - 文書の字面を照らすテスト(`test_diagnostic_contract.py` の 6 か所・`test_issue_workflow_contract.py` の 15 か所)を、新しい言い方に合わせた。照らす中身は弱めていない。
 - 言い換え表(`writing-for-people.md`)に、迷いやすい英語の行を 8 つ足した(stage・index・hash・exit N/rc N/終了値・snapshot・state・guard・helper。補足は「使わない言い方」。state の行には、`implement-guard.sh` の `take` が作る記録を「保護記録」と書くことも添えた)。
 
+## v4.42.2
+
+### 変更
+
+- `implementation-git.py`(実装担当が Git の状態を読む入口)の `parse_input`(58 行)を、引数の受け付け方を組み立てる `build_parser()` と、`run` の引数を検査する `validate_run_args(args)` に分けた。外から見た動き(引数の受け付け方・誤りの文言・誤りが重なったときに出る文言・help の出力・終了コード)は変わらない。([Issue #346](https://github.com/Yuki-Maeda-valour/workflow/issues/346))
+  - `parse_input` は、文字の検査・解析・`prepare` か `run` と読取り操作の指定の確かめ・cwd(作業フォルダ)の解決・`prepare` ならそこで返すこと・検査の呼出しの順だけを持つ(11 行)。50 行を超える関数は 0 個になった。
+  - 先に、今の動きを固定するテスト `scripts/test_implementation_git_input.py` を足した。照らすのは次の 4 つ。分ける前の版でも全件が通ることを確かめた。
+    - 今まで確かめていなかった分岐
+    - Git を呼ぶ前に止まる引数の誤りの文言の字面(文字の検査〈UTF-8・NUL〉と、cwd を解決できない誤りは除く。argparse〈Python 標準の引数解析〉が作る誤りは、先頭の `ERROR [input] 引数が不正: ` まで)
+    - 誤りを 2 つ重ねたときにどちらが出るか(`run` の読取り操作の指定 → cwd の解決 → 検査の順を含む)
+    - help 8 種の出力
+
 ## v4.42.1
 
 ### 変更

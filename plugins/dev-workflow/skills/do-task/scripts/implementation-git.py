@@ -97,9 +97,7 @@ def option(parser, name, **kwargs):
     parser.add_argument(name, action=Once, **kwargs)
 
 
-def parse_input(argv):
-    for value in argv:
-        strict_text(value, "引数")
+def build_parser():
     parser = Parser(description="承認済みフィルターを無効化する、5操作専用の Git 読取り入口。")
     modes = parser.add_subparsers(dest="mode", title="入口")
     prepare = modes.add_parser("prepare", help="委託直前の確認と承認情報の JSON 出力")
@@ -131,12 +129,10 @@ def parse_input(argv):
     option(files, "--mode", dest="file_mode", choices=("tracked", "untracked"), default="tracked", help="対象（既定: tracked。untracked は ignore 済みを除く）")
     for entry in (status, diff, log, files):
         entry.add_argument("--path", action="append", default=[], help="ルート相対のリテラルパス。反復可能")
-    args = parser.parse_args(argv)
-    if args.mode is None or (args.mode == "run" and args.operation is None):
-        fail("ERROR [input] prepare または run と読取り操作を指定する", 2)
-    args.cwd = physical_cwd(args.cwd)
-    if args.mode == "prepare":
-        return args
+    return parser
+
+
+def validate_run_args(args):
     if not re.fullmatch(r"[a-f0-9]{64}", args.expect_context_sha256):
         fail("ERROR [input] expect-context-sha256 は小文字16進64桁が必要", 2)
     if args.operation == "diff":
@@ -154,6 +150,18 @@ def parse_input(argv):
         validate_path(path)
     if getattr(args, "file", None) is not None:
         validate_path(args.file)
+
+
+def parse_input(argv):
+    for value in argv:
+        strict_text(value, "引数")
+    args = build_parser().parse_args(argv)
+    if args.mode is None or (args.mode == "run" and args.operation is None):
+        fail("ERROR [input] prepare または run と読取り操作を指定する", 2)
+    args.cwd = physical_cwd(args.cwd)
+    if args.mode == "prepare":
+        return args
+    validate_run_args(args)
     return args
 
 
