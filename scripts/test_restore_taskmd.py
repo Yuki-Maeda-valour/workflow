@@ -1000,13 +1000,16 @@ class RestoreTests(unittest.TestCase):
         # テストは補助スクリプトが終わったのを確かめてから kill-gate を作る。
         # pid のファイルは別の名前に書いてから改名する。中身の無いファイルを読まないため。
         # 60 秒は、kill-gate が作られないときに偽の cp を終わらせる上限。
+        # 偽の cp は、テスト用の一時ディレクトリが消えたときも待つのをやめる。
+        # テストが落ちると、偽の cp が kill-gate を見る前に、後片付けが kill-gate を消すことがあるため。
         written = str(marker) + '.part'
         cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"
                           "if os.readlink(sys.argv[-2]).endswith('/taskmd-body'):\n"
                           " with open(" + repr(written) + ",'w') as f:f.write(str(os.getpid()))\n"
                           " os.replace(" + repr(written) + "," + repr(str(marker)) + ")\n"
                           " end=time.monotonic()+60\n"
-                          " while not os.path.exists(" + repr(str(gate)) + "):\n"
+                          " while not os.path.exists(" + repr(str(gate)) + ") and os.path.isdir("
+                          + repr(str(self.root)) + "):\n"
                           "  if time.monotonic()>=end: sys.exit(70)\n"
                           "  time.sleep(.01)\n"
                           " sys.exit(0)\n"
@@ -1034,6 +1037,9 @@ class RestoreTests(unittest.TestCase):
             if process is not None:
                 if process.poll() is None: process.kill()
                 process.communicate(timeout=3)
+            # pid が分からずに落ちた経路でも、偽の cp をすぐ終わらせる。
+            try: gate.touch()
+            except OSError: pass
             if pid is not None and not reaped:
                 try: os.kill(pid, signal.SIGKILL)
                 except ProcessLookupError: pass
