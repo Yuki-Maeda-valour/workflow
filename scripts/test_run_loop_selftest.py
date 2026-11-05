@@ -208,6 +208,10 @@ class RunLoopSelftestTest(unittest.TestCase):
             "複数行の $( の中の ( )": (SECTIONS + "x=$(\n(want delta)\n)\n", outside),
             "複数行の $( の中の &": (SECTIONS + "x=$(\nsleep 0 & want delta\n)\n", outside),
             "複数行の $( の中の case": (SECTIONS + "x=$(\ncase a in\na) want delta;;\nesac\n)\n", outside),
+            "複数行の $( の中の time -p": (SECTIONS + "x=$(\ntime -p want delta\n)\n", outside),
+            "複数行の $( の中の trap": (SECTIONS + "x=$(\ntrap 'want delta' EXIT\n)\n", outside),
+            "複数行の $( の中の coproc": (SECTIONS + "x=$(\ncoproc want delta\n)\n", outside),
+            "複数行の $( の中の X=1 time": (SECTIONS + "x=$(\nX=1 time want delta\n)\n", outside),
             "構文の誤り": (SECTIONS + "if want delta; then\n", "bash で構文を読めない"),
             "節が無い": ("\n", "`if want <節>; then` の行が無い"),
         }
@@ -340,7 +344,10 @@ if check_want a a; then ok "変数の want"; fi
         self.assertEqual([], [pid for pid in pids if not process_gone(pid)], pids)
 
     def test_interrupt_waits_for_output_held_by_another_group(self):
-        # 別のセッションの子が標準出力を開いたまま残っても、閉じるまで待ってから、残った一時フォルダを出す。
+        # 別のセッションの子が標準出力を開いたまま残っても、止めたときに、残った一時フォルダの行が出ることを確かめる。
+        # 待つ仕組み(left_scratches が時間で切らずに待つこと)の確かめは、LeftScratchesTest に任せる。
+        # この子は 10 秒で終わる。run-tests.py の stop_all が先に最大 15 秒待つので、left_scratches に来た時点で、
+        # プロセスはもう終わっている(left_scratches の待ちの道は通らない)。
         marks = self.root / "marks"
         marks.mkdir()
         self.write_selftest(SLOW.replace("{index}", "0"))
@@ -365,7 +372,7 @@ if check_want a a; then ok "変数の want"; fi
                 runner.communicate()
         self.assertEqual(143, runner.returncode, output)
         self.assertEqual(3, len(pids), pids)
-        # 子が 10 秒眠る間は、出力が閉じない。閉じるまで待ってから表示する。
+        # 子が 10 秒眠る間は、出力が閉じない。runner は、それより前には終わらない。
         self.assertGreaterEqual(waited, 8, output)
         scratches = list(marks.glob("scratch-0-*"))
         self.assertEqual(1, len(scratches), scratches)

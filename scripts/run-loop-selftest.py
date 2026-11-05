@@ -14,9 +14,12 @@
   `if want <節>; then` の行(行頭に 1 行で書いたもの)だけでないとき、その if に else・elif があるときは、
   流さずに止める。
 - 決まり: 節を足すときは、最上位の `if want <節>; then` の行のほかで want を呼ばない。
-  限界: 止めるのは、CALL・TAIL_CALL の正規表現が見つける形と、AGENTS.md に挙げた形だけ。正規表現で見るので、
-  ほかにも見つけられない書き方がありうる(例: 変数に入れた名前で呼ぶ `f=want; $f x`・実行中に組み立てた
-  文字列を eval する・値に空白を含む環境変数を前に付ける)。決まりを守れば、どれも書かずに済む。
+  限界: 止めるのは、正規表現(CALL・TAIL_CALL)が見つける形(AGENTS.md に挙げた形など)。正規表現で見るので、
+  - 見つけられない形がありうる(例: 変数に入れた名前で呼ぶ `f=want; $f x`・実行中に組み立てた文字列を eval する・
+    値に空白を含む環境変数を前に付ける)。決まりを守れば、どれも書かずに済む。
+  - 呼び出しでないのに止まる形がありうる(例: コードの行の `echo "(want delta)"`、ヒアドキュメントの中の
+    `we (want to) go`・`| want x |`・Python の `if want != got:`・`while want != 0:`)。
+    そのときは、言い回しか変数の名前を変える(Python の変数名は want 以外にする)。
 - 節の外の確かめ(最初のスタブの証明と、最後の後片付けの確かめ)は、どのプロセスでも流れる。
   そこで、どの節も選ばないプロセス(`LOOP_SELFTEST_ONLY=,`)を 1 つ足して、その件数を測る。
   節の外の確かめが、どのプロセスでも同じ名前で PASS したときだけ、合計では 1 回分だけ数える
@@ -72,18 +75,18 @@ WEIGHTS = {
 GUARD = re.compile(r"^if (want [a-z0-9][a-z0-9-]*(?: \|\| want [a-z0-9][a-z0-9-]*)*); then$")
 NAME = re.compile(r"want ([a-z0-9-]+)")
 INDENT = "    "
-# 環境変数を前に付けた形(`X=1 want …`)。値に空白を含む形は見ない(限界は docstring)。
-ASSIGNS = r"""(?:[A-Za-z_]\w*=\S*\s+)*"""
-# want をコマンドとして呼ぶ形(bash が整えたコードの行で探す)。`local want`・`want=`・`$want` は当たらない。
-# trap の文字列の中と、coproc で起動する形も数える(bash は `coproc want x` を `coproc COPROC want x` と出す)。
-CALL = re.compile(r"""(?:^|[;&|!({`]|\$\(|\b(?:if|elif|while|until|then|do|else|exec|command|builtin|eval|env|nohup"""
-                  r"""|timeout)\s|\btime(?:\s+-p)?\s|\btrap(?:\s+--)?\s|\bcoproc\s+(?:[A-Za-z_]\w*\s+)?)"""
-                  r"""\s*""" + ASSIGNS + r"""\\?["']?want["']?(?=[\s;&|)`]|$)""")
+# want の前に挟んでよいもの(CALL と TAIL_CALL で共通)。制御の語・コマンドを起動する語と、環境変数を前に付けた形
+# (`X=1 want …`。値に空白を含む形は見ない)。trap の文字列の中と、coproc で起動する形も数える
+# (bash は `coproc want x` を `coproc COPROC want x` と出す)。
+LEADS = (r"""(?:(?:if|elif|while|until|then|do|else|!|exec|command|builtin|eval|env|nohup|timeout|time(?:\s+-p)?"""
+         r"""|trap(?:\s+--)?|coproc(?:\s+[A-Za-z_]\w*)?|[A-Za-z_]\w*=\S*)\s+)*""")
+# want をコマンドとして呼ぶ形(bash が整えたコードの行で探す)。行頭か、演算子・括弧の後に来るもの。
+# `local want`・`want=`・`$want` は当たらない。
+CALL = re.compile(r"""(?:^|[;&|!({`]|\$\(|<\()\s*""" + LEADS + r"""\\?["']?want["']?(?=[\s;&|)`]|$)""")
 # コードでない行(ヒアドキュメントの中身・複数行の文字列の続き・複数行の `$( … )`・`<( … )`・バッククォートの
 # 中身。bash 5.1 は、どれも書いたまま出す)では、行頭か演算子・括弧の後(case の `)` も)に来る `want <名前>` を
-# 探す。間に if・! などを挟んでもよい。後ろが `=` のもの(ヒアドキュメントの中の Python の `want = …`)は数えない。
-TAIL_CALL = re.compile(r"""(?:^|[;&|({)]|\$\(|<\(|`)\s*(?:(?:if|elif|while|until|then|do|else|!|time|command|eval)\s+)*"""
-                       + ASSIGNS + r"""\\?["']?want["']?[ \t]+[^\s=]""")
+# 探す。後ろが `=` のもの(ヒアドキュメントの中の Python の `want = …`)は数えない。
+TAIL_CALL = re.compile(r"""(?:^|[;&|({)]|\$\(|<\(|`)\s*""" + LEADS + r"""\\?["']?want["']?[ \t]+[^\s=]""")
 TOP_ELSE = re.compile(r"(?:else|elif)\b")
 TOP_FI = re.compile(r"fi(?:$|[\s;])")
 # bash に読ませるときに外す環境変数。BASH_ENV・ENV は起動時に読んで実行するファイル、POSIXLY_CORRECT・SHELLOPTS・
