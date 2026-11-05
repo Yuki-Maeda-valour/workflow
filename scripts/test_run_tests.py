@@ -296,6 +296,7 @@ class Imports(unittest.TestCase):
                     started = list(marks.glob("*.pids"))
                     self.assertEqual(["test_slow_a.py.pids"], [path.name for path in started])
                     pids = [int(pid) for pid in started[0].read_text(encoding="utf-8").split()]
+                    self.addCleanup(self.kill_leftovers, pids)
                     runner.send_signal(signum)
                     output, _ = runner.communicate(timeout=60)
                 finally:
@@ -307,15 +308,32 @@ class Imports(unittest.TestCase):
                 self.assertNotIn("結果:", output)
                 # 待ち行列の 2 つは始まっていない。動いていたプロセスと、その孫も消えている。
                 self.assertEqual(["test_slow_a.py.pids"], [path.name for path in marks.glob("*.pids")])
-                deadline = time.monotonic() + 10
-                while not all(process_gone(pid) for pid in pids) and time.monotonic() < deadline:
-                    time.sleep(0.05)
-                self.assertTrue(all(process_gone(pid) for pid in pids), pids)
+                self.assertEqual([], self.survivors(pids), pids)
                 self.assertEqual([], sorted(path.name for path in temporary.iterdir()))
 
-    def interrupt_and_collect_pids(self, test_file, text, mark, signum=signal.SIGTERM):
-        """1 つのテストのファイルを流し、mark のファイルが出たら止める。終了コード・出力・pid を返す。
+    @staticmethod
+    def survivors(pids, wait=10):
+        """pids のうち、wait 秒待っても残っているものを返す(強制終了する前に記録する)。"""
+        deadline = time.monotonic() + wait
+        while not all(process_gone(pid) for pid in pids) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return [pid for pid in pids if not process_gone(pid)]
 
+    @staticmethod
+    def kill_leftovers(pids):
+        """テストのための後片付け。検査の後に addCleanup で走り、残った子孫を止める。"""
+        for pid in pids:
+            if not process_gone(pid):
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+    def interrupt_and_collect_pids(self, test_file, text, mark, signum=signal.SIGTERM):
+        """1 つのテストのファイルを流し、mark のファイルが出たら止める。
+
+        終了コード・出力・pid・止めた後も残った pid を返す。残った pid は、強制終了する前に記録する
+        (強制終了はテストの検査の後に addCleanup で行う。先に止めると、残りを隠してしまう)。
         止めた後に、一時フォルダの置き場(TMPDIR)が空であることも確かめる。
         """
         marks = self.root / "marks"
@@ -333,38 +351,36 @@ class Imports(unittest.TestCase):
                 time.sleep(0.05)
             self.assertTrue((marks / mark).exists(), "印のファイルが出ない")
             pids = [int(pid) for pid in (marks / mark).read_text(encoding="utf-8").split()]
+            self.addCleanup(self.kill_leftovers, pids)
             runner.send_signal(signum)
             output, _ = runner.communicate(timeout=60)
         finally:
             if runner.poll() is None:
                 runner.kill()
                 runner.communicate()
-            # 落ちたときに子孫を残さない(試すための後片付け)。
-            for pid in pids:
-                if not process_gone(pid):
-                    os.kill(pid, signal.SIGKILL)
+        left = self.survivors(pids)
         self.assertEqual([], sorted(path.name for path in temporary.iterdir()))
-        return runner.returncode, output, pids
+        return runner.returncode, output, pids, left
 
     def test_interrupt_waits_for_nested_runner_to_stop_its_own_group(self):
         started = time.monotonic()
-        code, output, pids = self.interrupt_and_collect_pids("test_nested.py", NESTED, "nested.pids",
-                                                             signum=signal.SIGHUP)
+        code, output, pids, left = self.interrupt_and_collect_pids("test_nested.py", NESTED, "nested.pids",
+                                                                   signum=signal.SIGHUP)
         # 子孫が眠る 60 秒より前に終わる(止めたのであって、眠りが終わるのを待ったのではない)。
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(129, code, output)
         self.assertIn("中断: 動いていた 1 個のプロセスを止め", output)
-        # 真ん中と、真ん中が別のグループで起動した子が、止めた直後に残っていない。
+        # 真ん中と、真ん中が別のグループで起動した子が、止めた後に残っていない。
         self.assertEqual(2, len(pids), pids)
-        self.assertEqual([], [pid for pid in pids if not process_gone(pid)], pids)
+        self.assertEqual([], left, pids)
 
     def test_interrupt_kills_descendants_that_ignore_sigint_and_sigterm(self):
         started = time.monotonic()
-        code, output, pids = self.interrupt_and_collect_pids("test_ignoring.py", IGNORING, "ignoring.pids",
-                                                             signum=signal.SIGINT)
+        code, output, pids, left = self.interrupt_and_collect_pids("test_ignoring.py", IGNORING, "ignoring.pids",
+                                                                   signum=signal.SIGINT)
         self.assertEqual(130, code, output)
         self.assertEqual(1, len(pids), pids)
-        self.assertEqual([], [pid for pid in pids if not process_gone(pid)], pids)
+        self.assertEqual([], left, pids)
         # SIGINT と SIGTERM を無視する子孫がいる間は、2 つの猶予(5 秒ずつ)を待ってから SIGKILL で止める。
         self.assertGreaterEqual(time.monotonic() - started, 10)
 

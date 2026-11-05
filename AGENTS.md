@@ -162,6 +162,7 @@ bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 
   - 数を増やしすぎると、`test_loop_startup.py` のテストが中の時間切れ(100 秒)で落ちる。落ちたら数を減らして流し直す。
 - 重いファイルは、その中のテストを複数のプロセスに分けて流す。分ける数は `run-tests.py` の `SHARDS` にある。
 - 失敗したプロセスの出力は、最後にまとめて出る。
+- 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に残ることがある。そのときは、残ったプロセスを pid を指定して止める。
 - 件数と結果は、1 つのプロセスで順に流す `python3 -m unittest discover -s scripts -p 'test_*.py'` と同じ。
 - テストのファイルを足すときは、ほかのテストと同じパスの一時フォルダ・ポートを使わない。`HOME` の下に作るときは、一意な名前のフォルダにする。同時に流すと取り合うため。
 - シェル回帰一式(`*-selftest.sh`)は、`run-tests.py` と同時に流してよい。
