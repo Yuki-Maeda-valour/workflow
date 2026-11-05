@@ -774,6 +774,7 @@ mkdir -p "$PLUG/.claude-plugin" "$PLUG/skills/ship-task/scripts" "$PLUG/skills/c
 cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
 cp "$SCRIPT_DIR/loop-task-text.py" "$PLUG/skills/ship-task/scripts/loop-task-text.py"
+cp "$SCRIPT_DIR/loop-child-output.py" "$PLUG/skills/ship-task/scripts/loop-child-output.py"
 cp "$SCRIPT_DIR/loop-state.py" "$PLUG/skills/ship-task/scripts/loop-state.py"
 cp "$SCRIPT_DIR/loop-startup.py" "$PLUG/skills/ship-task/scripts/loop-startup.py"
 cp "$PLUGIN_SRC/skills/create-task/scripts/resolve-task-dir.py" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"

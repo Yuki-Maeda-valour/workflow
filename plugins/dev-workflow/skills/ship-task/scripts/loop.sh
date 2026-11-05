@@ -56,6 +56,9 @@ unset CDPATH
 unset TASK_TEXT_CODE TASK_TEXT_HELD
 TASK_TEXT_CODE=""
 TASK_TEXT_HELD=0
+unset CHILD_OUTPUT_CODE CHILD_OUTPUT_HELD
+CHILD_OUTPUT_CODE=""
+CHILD_OUTPUT_HELD=0
 
 LOOP_START="$(date +%s)"
 TAB=$'\t'
@@ -246,10 +249,8 @@ net_git() { # $1=秒 残り=git の引数
 # cwd を / にして起動する(`-c` は cwd を import の探索先に入れるので、リポジトリの中の同名モジュールを拾わない)。
 # 渡すパスはすべて絶対パスにする。終了コード 9 は補助の想定外の失敗
 read -r -d '' PY_HELPER <<'PY' || true
-import json, os, re, stat, sys, unicodedata
+import json, os, re, sys, unicodedata
 
-# unattended-mode.md §2 の 5 値のパターン(両モード共通。モードで取りえない値は判定で失敗にする — loop.md §5)
-OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
 PLACEHOLDER = re.compile(r"\{\{[^{}]*\}\}")
 D21_BAD = set("$`;|&<>(){}[]*?!'\"\\#~^%")
 LOOP_KEYS = ("max_iterations", "max_consecutive_failures", "time_budget", "iteration_timeout")
@@ -424,53 +425,6 @@ def one_line(text, limit=500):
     return re.sub(r"[\x00-\x1f\x7f]", " ", text)[:limit]
 
 
-def cmd_result(path):
-    raw = open(path, "rb").read().decode("utf-8", "replace")
-    try:
-        obj = json.loads(raw)
-    except ValueError:
-        print("json=bad")
-        return
-    # --output-format json の出力は、結果の 1 つのオブジェクトか、全メッセージの配列(利用者の設定の verbose が
-    # 効いたとき。最後の要素が type: "result")。配列なら最後の type: "result" の要素を結果として読む。
-    # 拒否の欄は、配列ならすべての type: "result" の要素から順につなぐ(周の中でバックグラウンドに委託すると、
-    # result の要素がターンごとに出て、拒否はそのターンの要素にだけ載り、最後の要素の欄は空になる — 実測)
-    results = [obj]
-    if isinstance(obj, list):
-        results = [e for e in obj if isinstance(e, dict) and e.get("type") == "result"]
-        obj = results[-1] if results else None
-    if not isinstance(obj, dict):
-        print("json=bad")
-        return
-    print("json=ok")
-    text = obj.get("result") if isinstance(obj.get("result"), str) else ""
-    last = None
-    for line in text.split("\n"):
-        m = OUTCOME.match(line.rstrip("\r"))
-        if m:
-            last = m
-    if last:
-        print("outcome=" + last.group(1))
-        print("detail=" + one_line(last.group(2)))
-    # 拒否の鍵("denial" を含む鍵)ごとに、値を要素の順に集める。鍵を持つ要素が 1 つならその値のまま(オブジェクトの
-    # ときと同じ形)。複数なら、どれもリストのときはつないだリスト、そうでなければ値を順に並べたリストにする
-    collected = {}
-    for e in results:
-        for k, v in e.items():
-            if "denial" in str(k).lower():
-                collected.setdefault(k, []).append(v)
-    denials = {}
-    for k, vs in collected.items():
-        if len(vs) == 1:
-            denials[k] = vs[0]
-        elif all(isinstance(v, list) for v in vs):
-            denials[k] = [x for v in vs for x in v]
-        else:
-            denials[k] = vs
-    if denials:
-        print("denials=" + one_line(json.dumps(denials, ensure_ascii=False), 2000))
-
-
 def supervisor_identity(pid):
     # proc の PID は再利用される。親 PID と開始時刻を同じ read で照合する。
     fd = os.open(f"/proc/{pid}/stat", os.O_RDONLY | os.O_NOFOLLOW)
@@ -583,76 +537,6 @@ def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha, fi
     print(json.dumps(settings, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
 
 
-def cmd_permlog(path):
-    # 子が書ける参考表示。内容・欠落・エラーのどれも制御判断に使わない。
-    allow = deny = 0
-    kinds, lines = {}, []
-    issue = ''
-    fds = []
-    try:
-        fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY); fds.append(fd)
-        parts = os.path.abspath(path).split('/')[1:]
-        for name in parts[:-1]:
-            fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd); fds.append(fd)
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd); fds.append(fd)
-        st = os.fstat(fd)
-        if not stat.S_ISREG(st.st_mode) or st.st_size > 1048576:
-            raise ValueError('通常ファイルでないか読取上限を超える')
-        raw = b''
-        while len(raw) < st.st_size:
-            chunk = os.read(fd, min(65536, st.st_size - len(raw)))
-            if not chunk: raise ValueError('読取中に切り詰められた')
-            raw += chunk
-        after = os.fstat(fd)
-        if os.read(fd, 1) or (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_mtime_ns, after.st_ctime_ns) != (st.st_dev, st.st_ino, st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns):
-            raise ValueError('読取中に変わった')
-        if raw and not raw.endswith(b'\n'):
-            raise ValueError('末尾の行が途中で切れている')
-        records = raw.decode('utf-8').splitlines()
-        if len(records) > 10000: raise ValueError('行数上限を超える')
-        for raw_line in records:
-            e = json.loads(raw_line)
-            if not isinstance(e, dict) or e.get('decision') not in ('allow', 'deny'):
-                raise ValueError('行の形式が違う')
-            if e['decision'] == 'allow':
-                allow += 1
-            else:
-                deny += 1
-                kind = e.get('kind', 'other')
-                if not isinstance(kind, str): raise ValueError('kind が文字列でない')
-                kind = one_line(kind, 100)
-                kinds[kind] = kinds.get(kind, 0) + 1
-                if len(lines) < 100:
-                    lines.append(one_line(f"{e.get('tool_name')} [{kind}] {e.get('reason')} — {e.get('subject')}", 600))
-    except (OSError, ValueError, UnicodeError) as exc:
-        issue = one_line(str(exc), 300)
-    finally:
-        for fd in reversed(fds): os.close(fd)
-    print(f'allow={allow}')
-    print(f'deny={deny}')
-    print('kinds=' + ','.join(f'{k}:{v}' for k,v in sorted(kinds.items())))
-    if issue: print('reference-error=' + issue)
-    for line in lines: print('line=' + line)
-
-
-def cmd_origin_json():
-    # origin-repo.py の出力(discover-mode.md §3)を読む。欄が欠けるか型が違えば 1(URL の字面は出力に無い)
-    try:
-        data = json.loads(sys.stdin.buffer.read().decode("utf-8"))
-    except ValueError:
-        sys.exit(1)
-    if not isinstance(data, dict) or not all(isinstance(data.get(k), bool) for k in ("origin", "same", "vcs")):
-        sys.exit(1)
-    reason = data.get("reason")
-    repo = data.get("repo")
-    if repo is not None and not isinstance(repo, str):
-        sys.exit(1)
-    for key in ("origin", "same", "vcs"):
-        print(f"{key}={1 if data[key] else 0}")
-    print("reason=" + one_line(reason if isinstance(reason, str) else "", 300))
-    print("repo=" + (repo or ""))
-
-
 def cmd_candiff(task_dir):
     # 発見の周の差分(`git diff --no-renames --raw -z <固定した sha> HEAD`)を stdin で読む。全行が状態 A・モード 100644・
     # task_dir の直下の `候補_<名>.md`(<名> が空でない・D21)で 1 件以上なら、パスを 1 行ずつ出す。外れれば理由を出して 1
@@ -704,11 +588,11 @@ COMMANDS = {
     "environment-run": cmd_environment_run,
     "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
-    "plugins": cmd_plugins, "result": cmd_result,
+    "plugins": cmd_plugins,
     "json-value": cmd_json_value, "init-names": cmd_init_names,
     "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values,
-    "hook-settings": cmd_hook_settings, "permlog": cmd_permlog,
-    "origin-json": cmd_origin_json, "candiff": cmd_candiff,
+    "hook-settings": cmd_hook_settings,
+    "candiff": cmd_candiff,
 }
 try:
     COMMANDS[sys.argv[1]](*sys.argv[2:])
@@ -724,6 +608,9 @@ py() {
     taskinfo|holdcount|holdcode)
       [ "${TASK_TEXT_HELD:-0}" = 1 ] || die 20 environment "本文解析を保持していない"
       code="$TASK_TEXT_CODE" ;;
+    result|permlog|origin-json)
+      [ "${CHILD_OUTPUT_HELD:-0}" = 1 ] || die 20 environment "子の出力の解析を保持していない"
+      code="$CHILD_OUTPUT_CODE" ;;
   esac
   # 固定検査と hook の組立は stdlib だけを使い、cwd/PYTHONPATH/user-site を探索しない。
   # profile の PyYAML など、ほかの補助処理の利用者 site は従来どおり使う。
@@ -833,11 +720,10 @@ verify_environment() {
     environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" --current-inventory "$current" || { STATE_GIT_UNSAFE=1; return 1; }
   fi
 }
-hold_task_text() {
-  local candidate
+read_held_copy() {
   # Bashへ格納する前にNUL等を拒否する。末尾改行も照合し、read失敗を隠さない。
-  candidate="$(environment_call read --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
-    --path skills/ship-task/scripts/loop-task-text.py | (cd / && "$PY_ABS" -I -c '
+  environment_call read --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
+    --path "$1" | (cd / && "$PY_ABS" -I -c '
 import sys
 raw = sys.stdin.buffer.read()
 if not raw or b"\0" in raw:
@@ -847,13 +733,28 @@ try:
 except UnicodeError:
     sys.exit(20)
 sys.stdout.buffer.write(raw)
-' 7>&-) && printf '.')" || die 20 environment "本文解析のコピーを読めない"
+' 7>&-) && printf '.'
+}
+hold_task_text() {
+  local candidate
+  candidate="$(read_held_copy skills/ship-task/scripts/loop-task-text.py)" || die 20 environment "本文解析のコピーを読めない"
   candidate="${candidate%.}"
   if [ "$TASK_TEXT_HELD" = 1 ]; then
     [ "$candidate" = "$TASK_TEXT_CODE" ] || die 20 environment "本文解析のコピーが初回と異なる"
   else
     TASK_TEXT_CODE="$candidate"
     TASK_TEXT_HELD=1
+  fi
+}
+hold_child_output() {
+  local candidate
+  candidate="$(read_held_copy skills/ship-task/scripts/loop-child-output.py)" || die 20 environment "子の出力の解析のコピーを読めない"
+  candidate="${candidate%.}"
+  if [ "$CHILD_OUTPUT_HELD" = 1 ]; then
+    [ "$candidate" = "$CHILD_OUTPUT_CODE" ] || die 20 environment "子の出力の解析のコピーが初回と異なる"
+  else
+    CHILD_OUTPUT_CODE="$candidate"
+    CHILD_OUTPUT_HELD=1
   fi
 }
 bind_environment() { # bootstrap の出力だけから保持する。過去の状態から復元しない。
@@ -864,6 +765,7 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   ENV_GUARD_SHA="$(printf '%s' "$receipt" | py json-get guard_sha256)"
   PLUGIN_ROOT="$(printf '%s' "$receipt" | py json-get plugin)"
   hold_task_text
+  hold_child_output
   RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
   PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
   ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
