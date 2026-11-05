@@ -1802,7 +1802,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
              self.capture_anchor([]):
             with self.assertRaisesRegex(self.guard.GuardError, "検証用コピーを保持") as caught:
                 self.invoke(["pass", f"from pathlib import Path; Path({str(later)!r}).touch()"])
-        self.assert_retained(caught, "プロセス群の不在を確認できない", later, before)
+        self.assert_retained(caught, "プロセスグループの不在を確認できない", later, before)
 
 
 if __name__ == "__main__":

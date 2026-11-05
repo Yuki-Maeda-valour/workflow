@@ -88,10 +88,10 @@ GIT_DIRECT_STATE_COMMANDS = {
     "checkout-index", "remote", "tag",
 }
 
-# deny の message に理由へ続けて添える固定の文(D22 ③ (d))。無人の周では打ち直さず、unattended-mode.md の
+# deny の message に理由へ続けて添える固定の文(D22 ③ (d))。無人の周ではもう一度実行せず、unattended-mode.md の
 # 許可の拒否(G1)に従う(拒否されたら別の手段で回り込まない — 保留か失敗扱い)。判定の記録(PERMLOG)の reason には入れない
 DENY_NOTE = (
-    "loop.sh の許可の仲介が拒否した。無人の周では打ち直さず(別の手段で回り込まず)、"
+    "loop.sh の許可の仲介が拒否した。無人の周ではもう一度実行せず(別の手段で回り込まず)、"
     "unattended-mode.md の許可の拒否(G1)に従う"
 )
 

@@ -393,7 +393,7 @@ chmod +x "$STUBS/gitlog/git"
 #   APPLE_MANPATH_FAIL 非空なら `--man-path` を何も出さず終了値 1 にする(最優先)
 #   APPLE_VAR_FAIL     非空なら `var` を何も出さず終了値 1 にする(git var が無い古い Git の模擬)
 #   APPLE_INJECT       非空なら `--show-origin` の呼び出しだけ、GIT_CONFIG_NOSYSTEM を外し
-#                      GIT_CONFIG_SYSTEM=<値> にする(未知の読込先の模擬)
+#                      GIT_CONFIG_SYSTEM=<値> にする(未知の読み込み先の模擬)
 #   APPLE_KIND_INJECT  非空なら `--show-origin` の出力の最初の出典を blob:0000 に置き換える
 #                      (種類の分からない出典の模擬)
 mkdir -p "$STUBS/applegit"
@@ -3694,7 +3694,7 @@ case_M25() { # literal /dev/null は旧Gitでもsystem設定の実選択取得�
   done
 }
 
-# ════════════════════════ M26・M27 Apple Git の追加の system 設定と、未知の読込先の診断 ════════════════════════
+# ════════════════════════ M26・M27 Apple Git の追加の system 設定と、未知の読み込み先の診断 ════════════════════════
 # Apple Git は system 設定が有効なとき、<導入先>/share/git-core/gitconfig を /etc/gitconfig より先に読む。
 # 本体はこれを保持候補に入れる(Git version が Apple Git の形のときだけ)。
 # 模擬(M26 の前半)は Apple Git でない環境用。実機の分岐(M26 の後半)は Apple Git の Mac 用。
@@ -3951,13 +3951,13 @@ case_M26() {
   m26_suite real "$clcfg"
   M26_TAKE_ENV=(); M26_CHK_ENV=()
 }
-case_M27() { # 未知の読込先・Apple Git の導入先・system 設定の場所の問い合わせ失敗の診断(全環境)
+case_M27() { # 未知の読み込み先・Apple Git の導入先・system 設定の場所の問い合わせ失敗の診断(全環境)
   CID=M27; TAG=""
   local W=("PATH=$STUBS/applegit:$PATH") ns=(-u GIT_CONFIG_NOSYSTEM)
   local lab inj="$WORK/m27-inject.conf" sysf="$WORK/m27-system.conf" secret=M27_SECRET_241 before val i head
   local E1='ERROR [internal] 設定の出典を安全に収集・保存できない'
-  local N1='NOTE: 選べる実行条件 1: その読込先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する'
-  local N2='NOTE: 選べる実行条件 2: 設定の読込先をすべて保持候補にできる Git を PATH で選ぶ'
+  local N1='NOTE: 選べる実行条件 1: その読み込み先が system 設定として読まれるなら、system 設定を外す影響を確かめたうえで、take から cleanup までを同じ GIT_CONFIG_NOSYSTEM=1 の環境で実行する'
+  local N2='NOTE: 選べる実行条件 2: 設定の読み込み先をすべて保持候補にできる Git を PATH で選ぶ'
   local N3='NOTE: 選べる実行条件 3: /etc/gitconfig などの system 設定を読まなくてよいなら、take から cleanup までを同じ GIT_CONFIG_SYSTEM=/dev/null の環境で実行する'
   printf '[private]\n token = %s\n' "$secret" >"$inj"
   printf '[core]\n quotePath = true\n' >"$sysf"

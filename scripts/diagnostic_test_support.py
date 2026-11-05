@@ -106,10 +106,14 @@ class DiagnosticFixture(unittest.TestCase):
         (self.repo / 'task/t.md').write_text('# タスク\n\n- [ ] 通常の試験\n', encoding='utf-8')
 
     def git(self, *args):
+        # commit の後の自動の保守(git maintenance run --auto)を、裏で続けずに終えてから戻す。
+        # 裏で続くと、次の inventory() の途中で .git/objects/maintenance.lock が現れて消え、
+        # 負荷の高いときに FileNotFoundError で落ちる(並べて流すときに起きた)。
         return subprocess.run(
             [self.git_binary, '-c', 'user.name=fixture', '-c',
              'user.email=fixture@example.invalid', '-c', 'init.defaultBranch=main',
              '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null',
+             '-c', 'maintenance.autoDetach=false',
              '-C', str(self.repo), *args], env=self.env, cwd=self.work,
             stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=30)
 

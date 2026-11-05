@@ -7,6 +7,7 @@
 """
 
 import contextlib
+import hashlib
 import io
 import json
 import os
@@ -66,6 +67,35 @@ HOST_CLI_QUESTION_GUIDANCE = "delegation-map.md §8"
 HOST_CLI_OTHER_GUIDANCE = "external-runners.md へ移す"
 HOST_CLI_MCP_WORDS = ("claude-in-chrome", "chrome-devtools")
 
+# 言葉の検査が文書ごとに Markdown を解析する時間は、検証器を 1 回流す時間の約半分になる。
+# ValidateTest は検証器を 900 回ほど流し、そのたびに変えていない文書も解析し直す。
+# そこで同じプロセスの中では、同じ検証器のコードが同じ本文と語で解析した結果を使い回す。
+# 解析は入力ごとに必ず 1 回は本物が走る。検査の流れ・ERROR・WARN は使い回さないので、判定は変わらない。
+_WORDING_BODY_CACHE = {}
+_WORDING_BODY_CACHE_LIMIT = 256
+
+
+def reuse_wording_body(namespace, source):
+    """runpy で読んだ検証器の wording_body を、結果を使い回す形に差し替える。
+
+    `source` は検証器のコードのバイト列。コードが違えば(テストが validate.py を書き換えたときも)別の結果として扱う。
+    runpy.run_path が返す辞書はコピーなので、関数が実際に引く辞書(__globals__)を差し替える。
+    """
+    module_globals = namespace["main"].__globals__
+    real = module_globals["wording_body"]
+    digest = hashlib.sha256(source).hexdigest()
+
+    def wording_body(body, md, roles):
+        key = (digest, type(md), body, frozenset(roles))
+        lines = _WORDING_BODY_CACHE.get(key)
+        if lines is None:
+            if len(_WORDING_BODY_CACHE) >= _WORDING_BODY_CACHE_LIMIT:
+                _WORDING_BODY_CACHE.clear()
+            lines = _WORDING_BODY_CACHE[key] = tuple(real(body, md, roles))
+        return list(lines)
+
+    module_globals["wording_body"] = wording_body
+
 
 class ValidateTest(unittest.TestCase):
     def setUp(self):
@@ -101,6 +131,7 @@ class ValidateTest(unittest.TestCase):
             "pathlib.Path.home", return_value=self.home
         ):
             namespace = runpy.run_path(str(script), run_name="validate_under_test")
+        reuse_wording_body(namespace, script.read_bytes())
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
             status = namespace["main"]()
@@ -236,6 +267,27 @@ class ValidateTest(unittest.TestCase):
     def test_wording_check_runs_in_full_validator(self):
         self.write_file(CHECKED_MD, "照合する。\n")
         self.assert_error([f"{CHECKED_MD}:1:", "言い換えの初出", "照合"])
+
+    def test_reused_wording_body_keeps_the_result(self):
+        """解析の結果を使い回しても、終了コード・ERROR・WARN・出力が変わらない(reuse_wording_body の前提)。"""
+        self.write_file(CHECKED_MD, "照合する。\n")
+        script = self.repo / "scripts" / "validate.py"
+
+        def run(reuse):
+            namespace = runpy.run_path(str(script), run_name="validate_under_test")
+            if reuse:
+                reuse_wording_body(namespace, script.read_bytes())
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                status = namespace["main"]()
+            return status, list(namespace["ERRORS"]), list(namespace["WARNS"]), output.getvalue()
+
+        fresh = run(False)
+        self.assertTrue(any("言い換えの初出" in error for error in fresh[1]), fresh[1])
+        # 1 回目で結果を表に入れ、2 回目で表の結果を使う。
+        for attempt in ("表に入れる", "表から使う"):
+            with self.subTest(attempt=attempt):
+                self.assertEqual(fresh, run(True))
 
     # ---------------------------------------------------------- 番号だけの理由
 
@@ -697,6 +749,112 @@ class ValidateTest(unittest.TestCase):
                 finally:
                     target.write_bytes(original)
 
+    # #337: ふつうの語のうち、字面で分けられる言い方(書いた形, ERROR に出る語の表示)
+    WORDS_OF_337 = (
+        ("担保", "担保"),
+        ("保守側に倒す", "倒す・倒れる(〜に倒す・〜へ倒す・〜に倒れる)"),
+        ("素の `cd`", "素の"),
+        ("打ち直す", "打ち直す"),
+        ("読込先", "読込・書込"),
+        ("書込み", "読込・書込"),
+        ("陽性対照", "陽性対照・陰性対照・正常対照"),
+        ("陰性の対照", "陽性対照・陰性対照・正常対照"),
+        ("陽性の対照", "陽性対照・陰性対照・正常対照"),
+        ("正常の対照", "陽性対照・陰性対照・正常対照"),
+        ("どちらにも倒れない", "倒す・倒れる(〜に倒す・〜へ倒す・〜に倒れる)"),
+        ("保留には倒さない", "倒す・倒れる(〜に倒す・〜へ倒す・〜に倒れる)"),
+        ("正常対照", "陽性対照・陰性対照・正常対照"),
+    )
+
+    def test_replaced_words_of_337_are_errors(self):
+        # 直す前の文書にあった言い方
+        cases = (
+            ("checker 検証と外部レビューで品質を担保する。", "'担保'", "確かめる"),
+            ("読み取り専用は指示で担保する", "'担保'", "守らせる"),
+            ("迷ったら生きている側に倒す", "倒す・倒れる", "と判定する"),
+            ("保留か失敗扱いに倒す", "倒す・倒れる", "にする"),
+            ("「自動で答える / 保留 / 失敗扱い」のどれかに必ず倒す。", "倒す・倒れる", "にする"),
+            ("外部がそこを編集すると 33 に倒れる", "倒す・倒れる", "になる"),
+            ("据え置き + 報告という安全側にしか倒れない", "倒す・倒れる", "になる"),
+            ("常に一致して全部を除外側へ倒すため", "倒す・倒れる", "と見なす"),
+            ("ログが有るときだけ保守側〈『基準不明』〉に倒し、", "倒す・倒れる", "安全な側と判定する"),
+            ("止める側に倒した契約", "倒す・倒れる", "と判定する"),
+            ("どちらにも倒れない", "倒す・倒れる", "になる"),
+            ("迷っても保留には倒さない", "倒す・倒れる", "にする"),
+            ("安全側へは倒れない", "倒す・倒れる", "になる"),
+            ("安全側へも倒す", "倒す・倒れる", "にする"),
+            # 字どおりの意味でも検出する限界(design §6)。「に」「へ」の後に続く形は意味を見ずに見つける
+            ("椅子を後ろには倒さない", "倒す・倒れる", "にする"),
+            ("`CDPATH` があると素の `cd` は解決先を stdout に出す", "'素の'", "何が付いていないかを書く"),
+            ("| 1 体 | **素の `reviewer`**(持ち場名を付けない) |", "'素の'", "持ち場名を付けない"),
+            ("素の言及・節の外・コードフェンスの中は数えない", "'素の'", "リンクにしていない言及"),
+            ("- **人が素の端末で行う**", "'素の'", "何が付いていないかを書く"),
+            ("疑いが出たら `--prove-host` を打ち直す", "'打ち直す'", "もう一度実行する"),
+            ("拒否されたら打ち直さずに報告する", "'打ち直す'", "もう一度実行する"),
+            ("origin の判定(`origin-repo.py` の打ち直し)", "'打ち直す'", "再実行"),
+            ("未導入・読込失敗・必要な機能の欠落", "'読込・書込'", "読み込み"),
+            ("書込直後は編集履歴を取得・検査しない", "'読込・書込'", "書き込み"),
+            ("復元中は他の書込みを止める", "'読込・書込'", "送り仮名を省かない"),
+            ("陽性対照(隔離のフラグなし)では", "陽性対照・陰性対照・正常対照", "比べるための起動"),
+            ("- **陽性対照**(控えと本番の前)", "陽性対照・陰性対照・正常対照", "比べるための起動"),
+            ("- 公開の確認の陰性の対照(push 権の無い公開リポジトリ)", "陽性対照・陰性対照・正常対照", "拒否されるはずの構成"),
+            ("scratch 回帰で攻撃と正常対照を検証する", "陽性対照・陰性対照・正常対照", "止めてはいけない正常な例"),
+            ("陰性対照も置く", "陽性対照・陰性対照・正常対照", "比べるためのケース"),
+            ("隔離なしの陽性の対照で確かめる", "陽性対照・陰性対照・正常対照", "比べるための起動"),
+            ("攻撃と正常の対照を検証する", "陽性対照・陰性対照・正常対照", "止めてはいけない正常な例"),
+        )
+        for text, word, guidance in cases:
+            with self.subTest(text=text):
+                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
+        self.assert_appended_line_flagged("これが汎用性の担保。", ["'担保'"], relpath="docs/design.md")
+        self.assert_appended_line_flagged("探索を広げず、諦める側に倒す", ["倒す・倒れる"], relpath="docs/design.md")
+        self.assert_appended_line_flagged(
+            "# 設定の読込先", ["'読込・書込'"],
+            relpath="plugins/dev-workflow/skills/init-project/templates/project-profile.yml.template",
+        )
+
+    def test_replaced_words_of_337_lookalikes_are_not_flagged(self):
+        # 新しい言い方・前に漢字が付く「素の」・ふつうの意味の「倒す」・検査で探さない語(群・対照・変異・回帰)
+        lines = ("品質を確かめる", "読み取り専用は指示で守らせる", "`--mode ask` が保ったまま", "TLS の検証が保証する",
+                 "迷ったら生きていると判定する", "保留か失敗扱いにする", "33 になる", "安全な側の結果にしかならない",
+                 "成立すると見なす", "`CDPATH=` を付けない `cd`", "持ち場名を付けない `reviewer`", "リンクにしていない言及",
+                 "要素の数", "酸素の濃度", "平素の運用", "元素の記号", "画素の並び",
+                 "木を倒す", "木が倒れる", "面倒な手順", "圧倒的に速い", "共倒れになる", "打倒する",
+                 "嵐で木も倒れた", "古い木は倒れない", "壁をも倒す", "対照の表", "検査の結果と対照する",
+                 "もう一度実行する", "origin の判定の再実行", "コマンドを打つ", "打ち合わせの記録", "直す",
+                 "読み込みの失敗", "書き込みの直後", "読み取り専用", "比べるための起動", "止めてはいけない正常な例",
+                 "プロセスグループの停止", "観点群", "モデル群", "比較対照の表", "対照的な結果", "変異 `x` の行",
+                 "回帰テスト一式", "回帰の疑い", "回帰検知条件", "全回帰テスト")
+        target = self.repo / self.REPLACED_TARGET
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("\n" + "\n".join(lines) + "\n")
+        self.assert_clean()
+
+    def test_replaced_words_of_337_allowed_in_writing_for_people(self):
+        self.append_to_checked_file(
+            "| " + " | ".join(form for form, _ in self.WORDS_OF_337) + " |",
+            relpath="plugins/dev-workflow/skills/do-task/references/writing-for-people.md",
+            prefix="",
+        )
+        self.assert_clean()
+
+    def test_replaced_words_of_337_definition_line_in_design_is_exempt(self):
+        # 「文書の中で置き換える語」の定義の行は、その行の組の語(#337 の語を含む)を除く
+        self.edit_definition_line("- **文書の中で置き換える語**", "例: " + "・".join(form for form, _ in self.WORDS_OF_337))
+        self.assert_clean()
+
+    def test_replaced_words_of_337_are_not_exempt_on_the_other_definition_line(self):
+        # #337 の語は「文書の中で置き換える語」の組。「置き換える語」の定義の行では除かない
+        for form, word in self.WORDS_OF_337:
+            with self.subTest(form=form):
+                target = self.repo / "docs" / "design.md"
+                original = target.read_bytes()
+                try:
+                    no = self.edit_definition_line("- **置き換える語**", f"例: {form}")
+                    self.assert_error([f"docs/design.md:{no}:", "置き換える語", f"'{word}'"])
+                finally:
+                    target.write_bytes(original)
+
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
     def test_v1_exemption_word_alone_does_not_exempt(self):
@@ -891,7 +1049,7 @@ class ValidateTest(unittest.TestCase):
                 self.replace_in_skill_md("tool-check", f"{opening}\n{line}\n{closing}", line)
 
     def test_writing_link_plain_mention_is_error(self):
-        # リンクの形でない素の言及は数えない
+        # リンクの形でない言及は数えない
         line = self.writing_rules_line_of("tool-check")
         for mention in (
             "- writing-for-people.md に従う",

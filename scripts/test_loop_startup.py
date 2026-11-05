@@ -213,7 +213,8 @@ class StartupShellTests(unittest.TestCase):
         cls.root = Path(cls.tmp.name)
         # 同時作業中の source を試験途中に読み直さない。
         cls.plugin = cls.root / 'plugin'
-        shutil.copytree(ROOT / 'plugins/dev-workflow', cls.plugin)
+        # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
+        shutil.copytree(ROOT / 'plugins/dev-workflow', cls.plugin, ignore=shutil.ignore_patterns('__pycache__'))
         scripts = cls.plugin / 'skills/ship-task/scripts'
         text = (scripts / 'loop-selftest.sh').read_text()
         cls.prefix = text.split('# LOOP_SELFTEST_ONLY=', 1)[0]
@@ -552,22 +553,31 @@ run_loop term-removal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 [ ! -f "$SD/stop-mark.md" ] && [ ! -d "$SD/inflight" ] || { cat "$OUT"; exit 87; }
 """, 0, transform)
 
-    def test_all_signals_defer_every_own_removal_promotion_window(self):
-        codes = {"TERM": 143, "HUP": 129, "INT": 130}
+    # シグナルごとに 3 つのテストへ分ける(1 つで 9 通りを流すと約 5 分かかり、
+    # 並べて流すときに全体の時間を決めてしまうため。確かめる 9 通りは同じ)。
+    def test_all_signals_defer_every_own_removal_promotion_window_term(self):
+        self.assert_signal_defers_every_own_removal_promotion_window("TERM", 143)
+
+    def test_all_signals_defer_every_own_removal_promotion_window_hup(self):
+        self.assert_signal_defers_every_own_removal_promotion_window("HUP", 129)
+
+    def test_all_signals_defer_every_own_removal_promotion_window_int(self):
+        self.assert_signal_defers_every_own_removal_promotion_window("INT", 130)
+
+    def assert_signal_defers_every_own_removal_promotion_window(self, signal, code):
         points = {
             "removed-before-record": '    rep "- worktree: 消した"\n',
             "recorded-before-save": '    REMOVED_PARENT_WORKTREES+=("$ITER_WT")\n',
             "saved-before-cleanup": '  REMOVED_PARENT_WORKTREES=()\n',
         }
-        for signal, code in codes.items():
-            for phase, point in points.items():
-                with self.subTest(signal=signal, phase=phase):
-                    def transform(source, point=point, signal=signal):
-                        self.assertEqual(source.count(point), 1)
-                        injected = (point + '  [ "${ITER_COUNT:-}" != 2 ] || kill -'
-                                    + signal + ' "$$"\n')
-                        return source.replace(point, injected)
-                    body = """
+        for phase, point in points.items():
+            with self.subTest(signal=signal, phase=phase):
+                def transform(source, point=point, signal=signal):
+                    self.assertEqual(source.count(point), 1)
+                    injected = (point + '  [ "${ITER_COUNT:-}" != 2 ] || kill -'
+                                + signal + ' "$$"\n')
+                    return source.replace(point, injected)
+                body = """
 newrepo deferred-promotion
 addtask pr-a 2026-01-01
 addtask pr-b 2026-01-02
@@ -583,7 +593,7 @@ SD="$(state_dir deferred-promotion)"
 run_loop deferred-promotion -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 [ "$(calls)" = 'pr-a pr-b pr-c' ] || { cat "$OUT"; exit 105; }
 """.replace("@CODE@", str(code))
-                    self.run_case(body, 0, transform)
+                self.run_case(body, 0, transform)
 
     def test_term_during_next_child_does_not_reuse_a_prior_verified_state(self):
         # The first task establishes ITER_VERIFIED.  TERM while the second
