@@ -2,6 +2,19 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.43.1
+
+### 変更
+
+- `issue-body.py`(Issue 本文を読み書きする入口)の `run`(82 行)を、サブコマンドごとの `run_update`・`run_snapshot`・`run_create` に分けた。外から見た動き(引数・停止の文言・誤りが重なったときに出る文言・stdout〈標準出力〉の JSON・終了コード・`gh` を呼ぶ順序)は変わらない。([Issue #347](https://github.com/Yuki-Maeda-valour/workflow/issues/347))
+  - `run`(13 行)は、`update`・`check-checkboxes` なら `run_update` に渡して返す。それ以外は、origin〈既定の名前 `origin` で登録した、共有の置き場〉の解決・`preflight` なら権限の結果を返して終えること・出力先の検査をしてから振り分け、結果から本文を除く。
+  - 先に、今の動きを固定するテストを `scripts/test_issue_body.py` に 19 件足した。照らすのは次の 4 つ。分ける前の版でも全件が通ることを確かめた。
+    - `run` の中の 13 の停止の、stderr〈標準エラー〉の全体と、そこまでの `gh` の呼出し(`gh api` を除く。サブコマンドの組だけ)
+    - 誤りを 2 つ重ねたときにどちらが出るか(`update` は origin より先に控えを読むこと、`snapshot` は origin の解決 → 出力先の検査 → 各サブコマンドの検査の順、`create` は出力先の検査 → 各サブコマンドの検査の順を含む)
+    - `try` が受ける例外の型(`create` の `OSError`・`ValueError` と、`update` の `UnicodeError`)
+    - 成功したときの stdout の JSON のキーの集合(`body` が無いことを含む)
+  - そのため、テストの偽の `gh`(`GH_STUB`)に、足すだけの状態のキーを 3 つ設けた。キーが無いときの動きは変わらない。
+
 ## v4.43.0
 
 ### 変更
