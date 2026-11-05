@@ -624,6 +624,59 @@ class RestoreTests(unittest.TestCase):
         self.assertEqual(fields[b'TEMP'], b'retained'); self.assertEqual(fields[b'TOUCHED'], b'none')
         self.assertTrue((Path(op.temp_path) / 'prepared').exists()); self.unchanged()
 
+    def stop_child_trace(self, polls, stop_seconds=0, terminate_error=False, child_unreaped=False, with_child=True):
+        class Recorder:
+            def __init__(self): self.calls = []; self.polls = list(polls)
+            def poll(self):
+                self.calls.append('poll'); return self.polls.pop(0) if len(self.polls) > 1 else self.polls[0]
+            def wait(self): self.calls.append('wait')
+            def terminate(self):
+                self.calls.append('terminate')
+                if terminate_error: raise OSError('gone')
+            def kill(self): self.calls.append('kill')
+        child = Recorder(); op = self.operation()
+        if with_child: op.child = child
+        op.child_unreaped = child_unreaped
+        if stop_seconds is None:
+            result = op.stop_child()
+        else:
+            with mock.patch.object(restore, 'STOP_SECONDS', stop_seconds):
+                result = op.stop_child()
+        return child.calls, result, op.child is None, op.child_unreaped
+
+    def test_stop_child_without_child_returns_true(self):
+        self.assertEqual(self.stop_child_trace([None], with_child=False), ([], True, True, False))
+
+    def test_stop_child_unreaped_flag_returns_false_without_calls(self):
+        self.assertEqual(self.stop_child_trace([0], child_unreaped=True), ([], False, False, True))
+
+    def test_stop_child_already_exited_waits_once(self):
+        self.assertEqual(self.stop_child_trace([0]), (['poll', 'wait'], True, True, False))
+
+    def test_stop_child_exits_after_terminate_without_kill(self):
+        self.assertEqual(self.stop_child_trace([None, 0]),
+                         (['poll', 'terminate', 'poll', 'wait'], True, True, False))
+
+    def test_stop_child_exits_after_kill_reaped_by_final_check(self):
+        self.assertEqual(self.stop_child_trace([None, None, 0]),
+                         (['poll', 'terminate', 'poll', 'kill', 'poll', 'wait'], True, True, False))
+
+    def test_stop_child_never_exits_marks_unreaped(self):
+        self.assertEqual(self.stop_child_trace([None]),
+                         (['poll', 'terminate', 'poll', 'kill', 'poll'], False, False, True))
+
+    def test_stop_child_terminate_oserror_proceeds_to_kill(self):
+        self.assertEqual(self.stop_child_trace([None, None, 0], terminate_error=True),
+                         (['poll', 'terminate', 'poll', 'kill', 'poll', 'wait'], True, True, False))
+
+    def test_stop_child_reaps_during_wait_loop(self):
+        self.assertEqual(self.stop_child_trace([None, None, 0], stop_seconds=None),
+                         (['poll', 'terminate', 'poll', 'poll', 'wait'], True, True, False))
+
+    def test_stop_child_terminate_oserror_proceeds_to_wait_loop(self):
+        self.assertEqual(self.stop_child_trace([None, None, 0], stop_seconds=None, terminate_error=True),
+                         (['poll', 'terminate', 'poll', 'poll', 'wait'], True, True, False))
+
     def test_parent_swap_forces_unknown_temp_without_stale_path(self):
         parent = self.root / 'parent'; parent.mkdir()
         self.destination = parent / 'file'; self.destination.write_bytes(b'old')

@@ -135,6 +135,87 @@ class SetupTests(unittest.TestCase):
                 self.assertIn('存在しません', result.stderr)
                 self.assertEqual(before, self.snapshot())
 
+    def usage_text(self):
+        result = self.run_args(['--help'])
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual('', result.stderr)
+        self.assertTrue(result.stdout.startswith('使い方:\n'), result.stdout)
+        self.assertTrue(result.stdout.endswith('  /plugin install dev-workflow@valour-workflow\n'),
+                        result.stdout)
+        return result.stdout
+
+    def exact_error(self, args, stderr, returncode=2, with_usage=True):
+        usage = self.usage_text() if with_usage else ''
+        before = self.snapshot()
+        result = self.run_args(args)
+        self.assertEqual(before, self.snapshot(), result.stderr)
+        self.assertEqual((returncode, stderr, usage),
+                         (result.returncode, result.stderr, result.stdout))
+
+    def test_error_messages_are_exact(self):
+        path = str(self.target)
+        cases = [
+            (['--unknown'], '不明な引数: --unknown\n'),
+            (['x  *'], '不明な引数: x  *\n'),
+            (['--list', '--global'],
+             'ERROR: モードは 1 つだけ指定してください: --list と --global\n'),
+            (['--copy', path, '--copy', path],
+             'ERROR: モードは 1 つだけ指定してください: --copy と --copy\n'),
+            (['--agents-copy', path, '--list'],
+             'ERROR: モードは 1 つだけ指定してください: --agents-copy と --list\n'),
+            ([], ''),
+            (['--force'], ''),
+        ]
+        for mode in PATH_MODES:
+            cases.append(([mode], 'ERROR: %s の直後にプロジェクトパスが必要です\n' % mode))
+        for args, stderr in cases:
+            with self.subTest(args=args):
+                self.exact_error(args, stderr)
+
+    def test_overlapping_errors_report_the_first_one(self):
+        path = str(self.target)
+        missing = str(self.root / 'absent')
+        duplicate = 'ERROR: モードは 1 つだけ指定してください: --list と --global\n'
+        cases = [
+            (['--list', '--copy'], 'ERROR: --copy の直後にプロジェクトパスが必要です\n'),
+            (['--copy', path, '--copy'], 'ERROR: --copy の直後にプロジェクトパスが必要です\n'),
+            (['--unknown', '--list', '--global'], '不明な引数: --unknown\n'),
+            (['--list', '--global', '--unknown'], duplicate),
+            (['--copy', missing, '--unknown'], '不明な引数: --unknown\n'),
+        ]
+        for args, stderr in cases:
+            with self.subTest(args=args):
+                self.exact_error(args, stderr)
+
+    def test_missing_source_precedes_mode_check_only(self):
+        shutil.rmtree(self.source)
+        self.exact_error([], 'ERROR: %s が見つかりません\n' % self.source,
+                         returncode=1, with_usage=False)
+        result = self.run_args(['--unknown'])
+        self.assertEqual((2, '不明な引数: --unknown\n'), (result.returncode, result.stderr))
+        self.assertTrue(result.stdout.startswith('使い方:\n'), result.stdout)
+
+    def test_reason_is_printed_before_usage(self):
+        usage = self.usage_text()
+        result = subprocess.run([BASH, str(self.repo / 'setup.sh'), '--unknown'], cwd=self.root,
+                                env=self.env, text=True, timeout=15,
+                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        self.assertEqual((2, '不明な引数: --unknown\n' + usage), (result.returncode, result.stdout))
+
+    def test_usage_output_failure_stops_with_status_1(self):
+        for args, reason in ((['--unknown'], '不明な引数: --unknown\n'),
+                             (['--list', '--global'],
+                              'ERROR: モードは 1 つだけ指定してください: --list と --global\n'),
+                             (['--copy'], 'ERROR: --copy の直後にプロジェクトパスが必要です\n')):
+            with self.subTest(args=args):
+                result = subprocess.run(
+                    [BASH, '-c', 'exec >&-; exec "$@"', 'closed-stdout', BASH,
+                     str(self.repo / 'setup.sh'), *args],
+                    cwd=self.root, env=self.env, text=True, timeout=15,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.assertEqual(1, result.returncode, result.stderr)
+                self.assertTrue(result.stderr.startswith(reason), result.stderr)
+
     def snapshot(self):
         result = {}
         for directory, dirs, files in os.walk(self.root, followlinks=False):

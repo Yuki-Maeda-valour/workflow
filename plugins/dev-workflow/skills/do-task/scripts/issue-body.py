@@ -364,87 +364,101 @@ def save_snapshot(path: str, value: dict) -> None:
     save(path, (json.dumps(value, ensure_ascii=False) + "\n").encode("utf-8"))
 
 
+def run_update(args: argparse.Namespace) -> dict:
+    before = read_snapshot(args.snapshot, args.expect_body_sha256)
+    body = read_text(args.body_file)
+    if args.command == "check-checkboxes":
+        return check_checkboxes(before["body"], body)
+    if before["issue"] != args.issue:
+        raise IssueError("指定した Issue 番号と本文の控えの番号が違う")
+    check_digest(before, body, args.expect_task_digest)
+    if args.checkbox_only:
+        check_checkboxes(before["body"], body)
+    repo = resolve_repo(args.dir)
+    if before["repo"] != repo:
+        raise IssueError("origin のリポジトリが本文の取得時と違う")
+    public_security(permission(repo), args)
+    current = fetch(repo, before["issue"])
+    if any(current[key] != before[key] for key in
+           ("body", "author", "author_is_bot", "editor", "last_edited_at", "viewer", "edits")):
+        raise IssueError("Issue 本文または作者・編集者・実行者が取得後に変わった。書かずに停止する")
+    try:
+        gh(repo, "issue", "edit", str(args.issue), "--body-file", "-", body=body)
+        result = fetch(repo, args.issue, check_history=False)
+    except (IssueError, OSError, UnicodeError) as exc:
+        detail = f"({exc})" if isinstance(exc, IssueError) else ""
+        raise IssueError("Issue 書込を試みた後に失敗した。変更済みの可能性がある。"
+                         "本文を確認し、自動で再実行しないでください" + detail) from exc
+    if result["body"] != body:
+        raise IssueError("書込後の Issue 本文が意図した本文と一致しない。再書込せず確認してください")
+    if (result["viewer"].casefold() != before["viewer"].casefold()
+            or result["editor"] is None
+            or result["editor"].casefold() != before["viewer"].casefold()):
+        raise IssueError("書込後の最終編集者が実行者と一致しない。変更済みの可能性がある。再書込せず確認してください")
+    return {key: value for key, value in result.items() if key != "body"}
+
+
+def run_snapshot(args: argparse.Namespace, repo: str) -> dict:
+    if args.approve_body_sha256 is not None and not args.for_execution:
+        raise IssueError("--approve-body-sha256 は --for-execution と併せて指定してください")
+    if args.edits_since is not None and not args.for_execution:
+        raise IssueError("--edits-since は --for-execution と併せて指定してください")
+    output_available(args.body_out)
+    if Path(args.out).absolute() == Path(args.body_out).absolute():
+        raise IssueError("本文と控えの出力先が同じ")
+    result = fetch(repo, args.issue)
+    save_snapshot(args.out, result)
+    save(args.body_out, result["body"].encode("utf-8"))
+    if args.for_execution:
+        try:
+            check_execution(result, args.approve_body_sha256, args.edits_since)
+        except IssueError as exc:
+            raise ExecutionError(str(exc), result) from exc
+    return result
+
+
+def run_create(args: argparse.Namespace, repo: str) -> dict:
+    body = read_text(args.body_file)
+    if not args.title.strip():
+        raise IssueError("題名が空")
+    info = permission(repo)
+    if not info["isPrivate"] and not args.approve_public:
+        raise IssueError("公開 Issue の新規作成には対象と題名を示した承認が必要(--approve-public)")
+    public_security(info, args)
+    try:
+        raw = gh(repo, "issue", "create", "--title", args.title, "--body-file", "-", body=body)
+        url = urlsplit(raw.decode("utf-8").strip())
+        host, owner, name = repo.split("/")
+        match = re.fullmatch(r"/([^/]+)/([^/]+)/issues/([1-9][0-9]*)", url.path)
+        if (url.scheme != "https" or url.netloc.lower() != host.lower() or url.query or url.fragment
+                or not match or match[1].lower() != owner.lower() or match[2].lower() != name.lower()):
+            raise IssueError("作成した Issue の URL を確定できない")
+        result = fetch(repo, int(match[3]), check_history=False)
+        if result["body"] != body or result["title"] != args.title:
+            raise IssueError("作成後の題名または本文が一致しない")
+        last_actor = result["editor"] or result["author"]
+        if result["author_is_bot"] or last_actor.casefold() != result["viewer"].casefold():
+            raise IssueError("作成後の作者または最終編集者が実行者と一致しない")
+        save_snapshot(args.out, result)
+    except (IssueError, OSError, ValueError) as exc:
+        detail = f"({exc})" if isinstance(exc, IssueError) else ""
+        raise IssueError("Issue 作成を試みた後に失敗した。作成済みの可能性がある。"
+                         "対象を確認し、重複作成しないでください" + detail) from exc
+    return result
+
+
 def run(args: argparse.Namespace) -> dict:
     if args.command in {"update", "check-checkboxes"}:
-        before = read_snapshot(args.snapshot, args.expect_body_sha256)
-        body = read_text(args.body_file)
-        if args.command == "check-checkboxes":
-            return check_checkboxes(before["body"], body)
-        if before["issue"] != args.issue:
-            raise IssueError("指定した Issue 番号と本文の控えの番号が違う")
-        check_digest(before, body, args.expect_task_digest)
-        if args.checkbox_only:
-            check_checkboxes(before["body"], body)
-        repo = resolve_repo(args.dir)
-        if before["repo"] != repo:
-            raise IssueError("origin のリポジトリが本文の取得時と違う")
-        public_security(permission(repo), args)
-        current = fetch(repo, before["issue"])
-        if any(current[key] != before[key] for key in
-               ("body", "author", "author_is_bot", "editor", "last_edited_at", "viewer", "edits")):
-            raise IssueError("Issue 本文または作者・編集者・実行者が取得後に変わった。書かずに停止する")
-        try:
-            gh(repo, "issue", "edit", str(args.issue), "--body-file", "-", body=body)
-            result = fetch(repo, args.issue, check_history=False)
-        except (IssueError, OSError, UnicodeError) as exc:
-            detail = f"({exc})" if isinstance(exc, IssueError) else ""
-            raise IssueError("Issue 書込を試みた後に失敗した。変更済みの可能性がある。"
-                             "本文を確認し、自動で再実行しないでください" + detail) from exc
-        if result["body"] != body:
-            raise IssueError("書込後の Issue 本文が意図した本文と一致しない。再書込せず確認してください")
-        if (result["viewer"].casefold() != before["viewer"].casefold()
-                or result["editor"] is None
-                or result["editor"].casefold() != before["viewer"].casefold()):
-            raise IssueError("書込後の最終編集者が実行者と一致しない。変更済みの可能性がある。再書込せず確認してください")
-        return {key: value for key, value in result.items() if key != "body"}
+        return run_update(args)
 
     repo = resolve_repo(args.dir)
     if args.command == "preflight":
         return permission(repo)
     output_available(args.out)
     if args.command == "snapshot":
-        if args.approve_body_sha256 is not None and not args.for_execution:
-            raise IssueError("--approve-body-sha256 は --for-execution と併せて指定してください")
-        if args.edits_since is not None and not args.for_execution:
-            raise IssueError("--edits-since は --for-execution と併せて指定してください")
-        output_available(args.body_out)
-        if Path(args.out).absolute() == Path(args.body_out).absolute():
-            raise IssueError("本文と控えの出力先が同じ")
-        result = fetch(repo, args.issue)
-        save_snapshot(args.out, result)
-        save(args.body_out, result["body"].encode("utf-8"))
-        if args.for_execution:
-            try:
-                check_execution(result, args.approve_body_sha256, args.edits_since)
-            except IssueError as exc:
-                raise ExecutionError(str(exc), result) from exc
+        result = run_snapshot(args, repo)
     else:
-        body = read_text(args.body_file)
-        if not args.title.strip():
-            raise IssueError("題名が空")
-        info = permission(repo)
-        if not info["isPrivate"] and not args.approve_public:
-            raise IssueError("公開 Issue の新規作成には対象と題名を示した承認が必要(--approve-public)")
-        public_security(info, args)
-        try:
-            raw = gh(repo, "issue", "create", "--title", args.title, "--body-file", "-", body=body)
-            url = urlsplit(raw.decode("utf-8").strip())
-            host, owner, name = repo.split("/")
-            match = re.fullmatch(r"/([^/]+)/([^/]+)/issues/([1-9][0-9]*)", url.path)
-            if (url.scheme != "https" or url.netloc.lower() != host.lower() or url.query or url.fragment
-                    or not match or match[1].lower() != owner.lower() or match[2].lower() != name.lower()):
-                raise IssueError("作成した Issue の URL を確定できない")
-            result = fetch(repo, int(match[3]), check_history=False)
-            if result["body"] != body or result["title"] != args.title:
-                raise IssueError("作成後の題名または本文が一致しない")
-            last_actor = result["editor"] or result["author"]
-            if result["author_is_bot"] or last_actor.casefold() != result["viewer"].casefold():
-                raise IssueError("作成後の作者または最終編集者が実行者と一致しない")
-            save_snapshot(args.out, result)
-        except (IssueError, OSError, ValueError) as exc:
-            detail = f"({exc})" if isinstance(exc, IssueError) else ""
-            raise IssueError("Issue 作成を試みた後に失敗した。作成済みの可能性がある。"
-                             "対象を確認し、重複作成しないでください" + detail) from exc
+        result = run_create(args, repo)
     return {key: value for key, value in result.items() if key != "body"}
 
 

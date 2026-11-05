@@ -127,6 +127,8 @@ elif args[:2] == ["issue", "edit"]:
     if state.get("edit_fail"):
         sys.exit(1)
     state["body"] = stdin + ("競合" if state.get("post_mismatch") else "")
+    if state.get("post_surrogate"):
+        state["body"] += "\ud800"
     history = state.get("history", [] if state.get("lastEditedAt") is None else
                         [{"editor": state.get("editor"), "editedAt": state["lastEditedAt"]}])
     previous = state.get("lastEditedAt") or "2026-11-04T00:00:00Z"
@@ -142,7 +144,12 @@ elif args[:2] == ["issue", "create"]:
     state["title"] = args[3]
     state["body"] = stdin + ("競合" if state.get("post_mismatch") else "")
     save()
-    print(state.get("create_url", "https://github.com/example/project/issues/321"))
+    if state.get("create_touch"):
+        pathlib.Path(state["create_touch"]).write_text("先に作られた")
+    if state.get("create_raw"):
+        sys.stdout.buffer.write(b"\xff\n")
+    else:
+        print(state.get("create_url", "https://github.com/example/project/issues/321"))
 else:
     sys.exit(99)
 '''
@@ -901,6 +908,202 @@ class IssueBodyTest(unittest.TestCase):
         for body in ("```\n- [ ] 例\n", "    ```\n- [ ] 例\n    ```\n"):
             with self.subTest(body=body), self.assertRaises(ISSUE_BODY.IssueError):
                 ISSUE_BODY.check_checkboxes(body, body)
+
+
+    # ---- run の特性テスト(停止の文言の全体・継ぎ目の順序・成功の stdout) ----
+
+    GH_FAILED = "gh が失敗した(終了コード 1)。gh auth login の認証と対象の権限を確認してください"
+    WRITE_FAILED = "Issue 書込を試みた後に失敗した。変更済みの可能性がある。本文を確認し、自動で再実行しないでください"
+    CREATE_FAILED = "Issue 作成を試みた後に失敗した。作成済みの可能性がある。対象を確認し、重複作成しないでください"
+    OUTPUT_TAKEN = "出力先が既にあるか、親ディレクトリがない。新しい出力先を指定してください"
+    RECEIPT_KEYS = {"version", "repo", "issue", "title", "history_checked", "body_sha256", "task_digest",
+                    "line_count", "author", "author_is_bot", "editor", "last_edited_at", "viewer", "edits"}
+
+    def assert_stop(self, done, message):
+        self.assertEqual(f"停止: {message}\n", done.stderr)
+
+    def snapshot_args(self, *extra, directory=None):
+        return ("snapshot", "--dir", directory or self.base, "--issue", "320",
+                "--out", self.snapshot, "--body-out", self.body, *extra)
+
+    def test_run_update_issue_number_mismatch_message(self):
+        self.take_snapshot()
+        done = self.update(issue=321, expected=1)
+        self.assert_stop(done, "指定した Issue 番号と本文の控えの番号が違う")
+        self.assertEqual([["issue", "view"]], self.calls())
+
+    def test_run_update_origin_mismatch_message(self):
+        self.take_snapshot()
+        self.env["FAKE_ORIGIN"] = "https://github.com/example/elsewhere.git"
+        done = self.update(expected=1)
+        self.assert_stop(done, "origin のリポジトリが本文の取得時と違う")
+        self.assertEqual([["issue", "view"]], self.calls())
+
+    def test_run_update_changed_issue_message(self):
+        self.take_snapshot()
+        self.change_state(body=BODY + "他人の編集")
+        done = self.update(expected=1)
+        self.assert_stop(done, "Issue 本文または作者・編集者・実行者が取得後に変わった。書かずに停止する")
+        self.assertEqual([["issue", "view"], ["repo", "view"], ["issue", "view"]], self.calls())
+
+    def test_run_update_write_failure_messages(self):
+        for key, detail in (("edit_fail", f"({self.GH_FAILED})"), ("post_read_fail", f"({self.GH_FAILED})"),
+                            ("post_surrogate", "")):
+            with self.subTest(key=key):
+                self.state.write_text(json.dumps({"body": BODY}), encoding="utf-8")
+                self.new_outputs()
+                self.take_snapshot()
+                self.change_state(**{key: True})
+                done = self.update(expected=1)
+                self.assert_stop(done, self.WRITE_FAILED + detail)
+                self.assertEqual(1, self.calls().count(["issue", "edit"]))
+                written = [["issue", "view"], ["repo", "view"], ["issue", "view"], ["issue", "edit"]]
+                self.assertEqual(written if key == "edit_fail" else written + [["issue", "view"]], self.calls())
+
+    def test_run_update_post_write_mismatch_message(self):
+        self.take_snapshot()
+        self.change_state(post_mismatch=True)
+        done = self.update(expected=1)
+        self.assert_stop(done, "書込後の Issue 本文が意図した本文と一致しない。再書込せず確認してください")
+        self.assertEqual(1, self.calls().count(["issue", "edit"]))
+        self.assertEqual([["issue", "view"], ["repo", "view"], ["issue", "view"], ["issue", "edit"],
+                          ["issue", "view"]], self.calls())
+
+    def test_run_update_post_write_editor_message(self):
+        self.take_snapshot()
+        self.change_state(post_editor={"login": "outsider"})
+        done = self.update(expected=1)
+        self.assert_stop(done, "書込後の最終編集者が実行者と一致しない。変更済みの可能性がある。再書込せず確認してください")
+        self.assertEqual(1, self.calls().count(["issue", "edit"]))
+        self.assertEqual([["issue", "view"], ["repo", "view"], ["issue", "view"], ["issue", "edit"],
+                          ["issue", "view"]], self.calls())
+
+    def test_run_snapshot_option_pairing_messages(self):
+        for option, message in (
+                (("--approve-body-sha256", "0" * 64), "--approve-body-sha256 は --for-execution と併せて指定してください"),
+                (("--edits-since", "2026-11-04T00:00:00Z"), "--edits-since は --for-execution と併せて指定してください")):
+            with self.subTest(option=option[0]):
+                done = self.run_script(*self.snapshot_args(*option), expected=1)
+                self.assert_stop(done, message)
+                self.assertEqual([], self.calls())
+                self.assertFalse(self.snapshot.exists())
+
+    def test_run_snapshot_same_output_paths_message(self):
+        done = self.run_script("snapshot", "--dir", self.base, "--issue", "320",
+                               "--out", self.snapshot, "--body-out", self.snapshot, expected=1)
+        self.assert_stop(done, "本文と控えの出力先が同じ")
+        self.assertEqual([], self.calls())
+        self.assertFalse(self.snapshot.exists())
+
+    def test_run_snapshot_execution_check_failure_saves_files_and_prints_json(self):
+        self.change_state(author={"login": "someone"})
+        done = self.run_script(*self.snapshot_args("--for-execution"), expected=1)
+        self.assert_stop(done, "Issue の作者または確認対象の編集者が実行者と違う。実行せず、取得した本文と"
+                               "設計レビュー行の値を人に示して確認してください。"
+                               "承認後だけ --approve-body-sha256 に確認した本文の body_sha256 を渡してください")
+        value = json.loads(done.stdout)
+        self.assertEqual(self.RECEIPT_KEYS, set(value))
+        self.assertEqual("someone", value["author"])
+        saved = json.loads(self.snapshot.read_text(encoding="utf-8"))
+        self.assertEqual(BODY, saved["body"])
+        self.assertEqual(BODY, self.body.read_text(encoding="utf-8"))
+        self.assertEqual([["issue", "view"]], self.calls())
+
+    def test_run_create_empty_title_message(self):
+        self.body.write_bytes(BODY.encode())
+        done = self.run_script("create", "--dir", self.base, "--title", "  ",
+                               "--body-file", self.body, "--out", self.snapshot, expected=1)
+        self.assert_stop(done, "題名が空")
+        self.assertEqual([], self.calls())
+
+    def test_run_create_public_without_approval_message(self):
+        self.change_state(private=False)
+        done = self.create(expected=1)
+        self.assert_stop(done, "公開 Issue の新規作成には対象と題名を示した承認が必要(--approve-public)")
+        self.assertEqual([["repo", "view"]], self.calls())
+
+    def test_run_create_failure_messages(self):
+        created = [["repo", "view"], ["issue", "create"]]
+        fetched = created + [["issue", "view"]]
+        cases = (
+            ("url", {"create_url": "https://github.com/other/project/issues/321"},
+             "(作成した Issue の URL を確定できない)", created),
+            ("mismatch", {"post_mismatch": True}, "(作成後の題名または本文が一致しない)", fetched),
+            ("actor", {"user": {"login": "outsider"}}, "(作成後の作者または最終編集者が実行者と一致しない)", fetched),
+            ("view_fail", {"view_fail": True}, f"({self.GH_FAILED})", fetched),
+            ("not_utf8", {"create_raw": True}, "", created),
+            ("broken_url", {"create_url": "https://[github.com/example/project/issues/321"}, "", created),
+            ("out_taken", {"create_touch": str(self.snapshot)}, "", fetched),
+        )
+        for name, state, detail, calls in cases:
+            with self.subTest(name=name):
+                self.state.write_text(json.dumps({"body": BODY, **state}), encoding="utf-8")
+                self.snapshot.unlink(missing_ok=True)
+                done = self.create(expected=1)
+                self.assert_stop(done, self.CREATE_FAILED + detail)
+                self.assertEqual(calls, self.calls())
+                self.assertEqual("", done.stdout)
+
+    def test_run_seam_update_snapshot_checked_before_dir(self):
+        self.take_snapshot()
+        done = self.run_script("update", "--dir", self.body, "--snapshot", self.snapshot, "--issue", "320",
+                               "--body-file", self.body, "--expect-body-sha256", "0" * 64, expected=1)
+        self.assert_stop(done, "本文の控えが取得時の値と一致しない")
+        self.assertEqual([["issue", "view"]], self.calls())
+
+    def test_run_seam_update_issue_number_before_origin(self):
+        self.take_snapshot()
+        self.env["FAKE_ORIGIN"] = "https://github.com/example/elsewhere.git"
+        done = self.update(issue=321, expected=1)
+        self.assert_stop(done, "指定した Issue 番号と本文の控えの番号が違う")
+        self.assertEqual([["issue", "view"]], self.calls())
+
+    def test_run_seam_snapshot_dir_before_output(self):
+        self.snapshot.write_text("既にある", encoding="utf-8")
+        done = self.run_script(*self.snapshot_args(directory=self.snapshot), expected=1)
+        self.assert_stop(done, "--dir がディレクトリでない")
+        self.assertEqual([], self.calls())
+
+    def test_run_seam_snapshot_output_before_option_pairing(self):
+        for option in (("--edits-since", "2026-11-04T00:00:00Z"), ("--approve-body-sha256", "0" * 64)):
+            with self.subTest(option=option[0]):
+                self.snapshot.write_text("既にある", encoding="utf-8")
+                done = self.run_script(*self.snapshot_args(*option), expected=1)
+                self.assert_stop(done, self.OUTPUT_TAKEN)
+                self.assertEqual("既にある", self.snapshot.read_text(encoding="utf-8"))
+                self.assertEqual([], self.calls())
+
+    def test_run_seam_create_output_before_title_and_body_file(self):
+        self.snapshot.write_text("既にある", encoding="utf-8")
+        self.body.write_bytes(BODY.encode())
+        done = self.run_script("create", "--dir", self.base, "--title", "  ",
+                               "--body-file", self.body, "--out", self.snapshot, expected=1)
+        self.assert_stop(done, self.OUTPUT_TAKEN)
+        done = self.run_script("create", "--dir", self.base, "--title", "題名",
+                               "--body-file", self.base / "ない.md", "--out", self.snapshot, expected=1)
+        self.assert_stop(done, self.OUTPUT_TAKEN)
+        self.assertEqual([], self.calls())
+
+    def test_run_success_stdout_has_no_body_and_fixed_keys(self):
+        done = self.run_script(*self.snapshot_args())
+        self.assertEqual(self.RECEIPT_KEYS, set(json.loads(done.stdout)))
+        self.body.write_bytes(BODY.replace("- [ ]", "- [x]").encode())
+        done = self.update()
+        self.assertEqual(self.RECEIPT_KEYS, set(json.loads(done.stdout)))
+        self.snapshot.unlink()
+        self.body.unlink()
+        self.state.write_text(json.dumps({"body": BODY}), encoding="utf-8")
+        done = self.create()
+        self.assertEqual(self.RECEIPT_KEYS, set(json.loads(done.stdout)))
+
+    def test_run_checkbox_and_preflight_stdout_keys(self):
+        self.take_snapshot()
+        self.body.write_bytes(BODY.replace("- [ ]", "- [x]").encode())
+        done = self.run_script("check-checkboxes", "--snapshot", self.snapshot, "--body-file", self.body,
+                               "--expect-body-sha256", hashlib.sha256(BODY.encode()).hexdigest())
+        self.assertEqual({"changed", "total", "complete_before", "complete_after"}, set(json.loads(done.stdout)))
+        done = self.run_script("preflight", "--dir", self.base)
+        self.assertEqual({"repo", "isPrivate", "viewerPermission"}, set(json.loads(done.stdout)))
 
 
 if __name__ == "__main__":
