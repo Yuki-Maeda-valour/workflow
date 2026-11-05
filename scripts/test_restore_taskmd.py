@@ -994,11 +994,22 @@ class RestoreTests(unittest.TestCase):
         original = ctypes.c_int()
         self.assertEqual(libc.prctl(37, ctypes.byref(original), 0, 0, 0), 0)
         self.assertEqual(libc.prctl(36, 1, 0, 0, 0), 0)
-        marker = self.root / 'pid'
+        marker = self.root / 'pid'; gate = self.root / 'kill-gate'
+        # 偽の cp は、kill-gate ができるまで終わらない。決まった秒数だけ眠る形では、pid のファイルを見てから
+        # SIGKILL を送るまでに偽の cp が先に終わり、補助スクリプトが応答を書くことがある(#367)。
+        # テストは補助スクリプトが終わったのを確かめてから kill-gate を作る。
+        # pid のファイルは別の名前に書いてから改名する。中身の無いファイルを読まないため。
+        # 60 秒は、kill-gate が作られないときに偽の cp を終わらせる上限。
+        written = str(marker) + '.part'
         cp = self.cp_stub("if sys.argv[1:] == ['--version']:\n print('cp (GNU coreutils) fixture');sys.exit(0)\n"
                           "if os.readlink(sys.argv[-2]).endswith('/taskmd-body'):\n"
-                          " with open(" + repr(str(marker)) + ",'w') as f:f.write(str(os.getpid()))\n"
-                          " time.sleep(.5);sys.exit(0)\n"
+                          " with open(" + repr(written) + ",'w') as f:f.write(str(os.getpid()))\n"
+                          " os.replace(" + repr(written) + "," + repr(str(marker)) + ")\n"
+                          " end=time.monotonic()+60\n"
+                          " while not os.path.exists(" + repr(str(gate)) + "):\n"
+                          "  if time.monotonic()>=end: sys.exit(70)\n"
+                          "  time.sleep(.01)\n"
+                          " sys.exit(0)\n"
                           "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
         process = None; pid = None; reaped = False
         try:
@@ -1008,15 +1019,15 @@ class RestoreTests(unittest.TestCase):
             while not marker.exists() and time.monotonic() < deadline: time.sleep(.01)
             self.assertTrue(marker.exists()); pid = int(marker.read_text()); process.kill()
             stdout, stderr = process.communicate(timeout=3)
+            gate.touch()
             self.assertEqual(process.returncode, -signal.SIGKILL)
             self.assertEqual(stdout, b''); self.assertEqual(stderr, b'')
-            # caller 規則では無応答は unknown。短命な試験子を外側から回収する。
-            deadline = time.monotonic() + 3
-            while time.monotonic() < deadline:
-                got, status = os.waitpid(pid, os.WNOHANG)
-                if got == pid:
-                    reaped = True; self.assertEqual(status, 0); break
-                time.sleep(.01)
+            # caller 規則では無応答は unknown。kill-gate で終わらせた偽の cp を外側から回収する。
+            # 補助スクリプトが終わった時点で、偽の cp の親はこのテストのプロセスに替わっている。
+            # 偽の cp は 60 秒の上限で必ず終わるので、時間を区切らずに待つ。
+            got, status = os.waitpid(pid, 0)
+            if got == pid:
+                reaped = True; self.assertEqual(status, 0)
             self.assertTrue(reaped)
             self.unchanged(); self.assertTrue(list(self.root.glob('.restore-taskmd-*')))
         finally:
