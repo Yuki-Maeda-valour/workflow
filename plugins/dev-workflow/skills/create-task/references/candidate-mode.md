@@ -89,7 +89,7 @@
   - 対象は、直下の通常ファイル(symlink は除く)で、名が状態名の正規表現(`resolve-task-dir.py` の `STATE_FILE`)に全体一致するもの
   - ヘッダの指摘キーの行と見送りの行を読む。見送りの書式違いの行があれば、そのファイルの `problems` に出す(終了コードは変えない)
   - 終了コード 0 = 成功 / 1 = 読めないファイルがある(UTF-8 として読めない・読み取りの失敗。そのファイルの `problems` に `unreadable`)/ 2 = 使い方の誤り(`--task-dir` が無い・ディレクトリでない)。ディレクトリが無いときは終了コード 0 で空の JSON(最初の候補)
-- 検査: `--check [--source=<発見元>] <パス | ->`(`-` は stdin)→ stdout に JSON `{"ok": <真偽>, "source": <発見元 | null>, "keys": [...], "problems": [{"code", "detail"}, ...]}`
+- 検査: `--check [--source=<発見元>] <パス | ->`(`-` は stdin〈標準入力〉)→ stdout に JSON `{"ok": <真偽>, "source": <発見元 | null>, "keys": [...], "problems": [{"code", "detail"}, ...]}`
   - ok の条件: ヘッダに発見元の行がちょうど 1 行(`--source` があればその値と一致)・指摘キーの行がちょうど 1 行・無人実行のメタ行が無い・見送りの行と見送りの書式違いの行が無い・`## 追加修正記録` の見出しが無い・チェックボックス形の行(`^\s*- \[( |x|X)\]`。フェンスの中も)が無い
   - `code`: `source-count`(発見元の行が 1 行でない)・`source-mismatch`・`key-count`(指摘キーの行が 1 行でない)・`unattended-meta`・`skipped`(見送りの行)・`skipped-malformed`(見送りの書式違い)・`record-section`・`checkbox`・`unreadable`。`detail` は人向けの文で、判定に使わない。収集の `problems` も同じ形
   - 終了コード 0 = ok / 1 = ok でない・読めない / 2 = 使い方の誤り

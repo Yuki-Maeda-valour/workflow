@@ -69,7 +69,7 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
 - **控える値**(セッション文脈に保持し、報告にも書く): R = 本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる。Phase 0 で `python3 {create-task の}scripts/task-digest.py <タスク MD>` で算出。終了コード 0 以外は失敗扱い)/
   - 作業ブランチ(Phase 0 の手順 3 の後の `git symbolic-ref --quiet HEAD`。detached HEAD〈コミットを直接取り出した状態〉なら「無し」)/
   - git 設定のダイジェスト(Phase 0 の手順 3 の後〈`--branch` でブランチを作った後〉に `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出。終了コード 0 以外は失敗扱い。ship-task から呼ばれたときも自分で算出した値を持つ)/
-  - 開始時の HEAD /
+  - 開始時の HEAD(いま取り出しているコミット)/
   - 基準の sha(コミットのハッシュ値)と未追跡一覧の状態(Phase 0 の手順 5 で基準が決まったとき。再開で基準行を再利用したときも同じ)。
   - 失ったら失敗扱い(G4)。
   - ship-task を経ずに単独で呼ばれたときは、R を最後の設計レビューの行の `本文` とも照合し、不一致・行が無い・`本文` が無い・`算出不能` なら保留(承認後の本文の変更は人の判断。ship-task の S4 と同じ。単独なので、改名・commit は誰もしない)
@@ -194,7 +194,7 @@ except (Exception, SystemExit) as exc:
    - 契約の詳細は [references/external-runners.md](references/external-runners.md) §1(信頼モデル)・§12-1(実装経路の解決と判定)
 3. 先に [references/base-commit.md](references/base-commit.md) の事前検査(`--precheck`)を実行し、終了コード 0 のときだけ続行する(対象が git リポジトリでないときは行わない。無人では終了コード 22 でも承認を求めず失敗扱い — D6)。
    - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で打つ。
-   - サブモジュール内の未コミット変更(superproject の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外と同じ 4 つ。どの深さでも。未追跡・ステージ済み(commit する変更として載せたもの)・追跡済みの変更のどれも)は出ない。見るのは、それ以外の変更と gitlink の変更(ルートからの相対パスで出る)。
+   - サブモジュール内の未コミット変更(superproject〈親のリポジトリ〉の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外の 4 つ。どの深さでも。未追跡・ステージ済み〈commit 用に載せたもの〉・追跡済みのどれも)は出ない。見るのは、ほかの変更と gitlink〈サブモジュールのコミットを指す項目〉の変更(ルートからの相対パス)。
    - `[.]` は、無人の周の許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
    - `git status` を確認。
    - 未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する(無人では失敗扱い — D7)。
@@ -318,7 +318,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - こうして進めた ITER も `--max-iter` の判断を仰ぐ点に数える
 5. **共通工程(外部 CLI を起動した後は成功・失敗を問わず必ず通す。分岐より前に置く。モード確立・疎通の判定で落ちた経路も外部 CLI を起動済みなのでここを通る)**: 次の順に実行する(§12-2・§12-3)
    - ① `implement-guard.sh config-check --cwd <管理ルート> --state <STATE_DIR> --manifest-sha256 <値> --snapshot-sha256 <値>`。
-     - 既知設定は Git 無しで照合し、その後に隔離 Git で子リポジトリの使用先を検査する。成功時の `GIT_SKIPPED=no` はこの隔離検査を表す。新規 submodule(組み込んだ別のリポジトリ)の管理ルートは自動採用せず、33 で停止して再登録を必要とする(§12-2)。
+     - 既知設定は Git 無しで照合し、その後に隔離 Git で子リポジトリの使用先を検査する。成功時の `GIT_SKIPPED=no` はこの隔離検査を表す。新規 submodule(組み込んだ別のリポジトリ)のルートは自動採用せず、33 で停止して再登録を必要とする(§12-2)。
      - **終了コード 0 以外は、以後の Git を呼ぶ工程を実行せず、手順 6 の比較不能と同じに扱う**。保護領域を保持し、設定を自動で戻さない。
    - ② `bash {do-task の}scripts/diff-snapshot.sh --cwd <管理ルート> --precheck [--accept <最後に承認した値>]`(stdout の受け方は手順 1 と同じ)。
      - 外部が残したリポジトリ設定を、以後の git が実行する前に検査する。
@@ -347,7 +347,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - **正常終了**(③ が 0)→ 外部が書いた分の diff を提示して Phase 4 へ
 7. **引き継ぎの手順**: ①**外部ランナーのログファイルのパスを内蔵 implementer へ必ず渡す**(何をどこまでやって、なぜ止まったかは diff より生出力に出る)
    - ②[復元監督](references/runtime-requirements.md#タスク本文の復元)の `restore_taskmd_supervised` で、**タスク MD だけを起動前へ戻す**。引数は手順 5 の ④ と同じ。外部のチェック状態は信用せず、**他の未追跡ファイルは復元しない**(手順 6 の引き継ぐ実装成果を消すため。2026-09-17 決定 45)。
-   - 終了値と応答の全行を [external-runners.md](references/external-runners.md) §12-2 の復元結果形式で確かめる。0 と合法な成功応答の両方がそろったときだけ引き継ぐ。
+   - 終了コードと応答の全行を [external-runners.md](references/external-runners.md) §12-2 の復元結果形式で確かめる。0 と合法な成功応答の両方がそろったときだけ引き継ぐ。
    - **非成功なら自動で引き継がず**、`TOUCHED`(対象への変更)・`TEMP`(一時ファイルやフォルダの状態)と、受領できた残存パスを添えて人の判断を仰ぐ。
    - 監督の124/137・監督失敗・応答なし・重複・不正・4MiB超過・終了コードとの不一致は、受領側で `RESTORED=no / TOUCHED=unknown / TEMP=unknown` と扱う。残存パスを推測して削除しない。
    - ③**外部が改変・削除した他の未追跡ファイルは、手順 5 の `CHANGE=` と `BASE=` で差分を提示するだけに留める**(復元するかは内蔵 implementer とユーザーが判断する)
@@ -395,7 +395,7 @@ implementer の報告後、以下を検証する。Issue 方式は先に [Issue 
 ## Phase 5: 完了条件の再実行
 
 commit が続く実行では、[review-protocol.md](references/review-protocol.md) の `run-checks` で必須の品質ゲート全件を直接実行し、構造化結果とハッシュ値を保持する。
-変更の無いチェックアウト(clean checkout)での検査を実行結果として使う。作業ツリー側でも検査して内容が変わった場合は、Phase 4 から対象を固定し直す。
+機密・既存の未追跡・無視された生成物を持ち込まずに新しく作った作業ツリー(clean checkout)での検査を、実行結果として使う。作業ツリー側でも検査して内容が変わった場合は、Phase 4 から対象を固定し直す。
 
 ファイル方式はタスク MD のチェックリスト、Issue 方式は [Issue 方式の契約](references/github-issue.md) §5「do-task の読み替え」で確定した品質ゲートを **team-lead 自身が実行**し、全て緑を確認する。ロジック変更にテストの追加・更新が無い場合は妥当性を確認する。
 

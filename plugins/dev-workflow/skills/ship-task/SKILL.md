@@ -307,7 +307,7 @@ Issue 方式は完了本文を取り直して検査し、doc 用の別 `start` �
 - 更新の事前確認は自動続行のため `--yes` を渡す(内容は commit として差分に残り、PR で確認できる)
 - **commit(doc 分)**: doc / メモリの変更を実装とは別 commit にする(レビュー時に実装差分と分けて読めるようにする)。状態ファイルの扱いは実装 commit と同じ。無人では、照合は実装 commit と同じ。集合は references/unattended-mode.md §5 の doc commit の定義(update-doc が変えたファイル)
 - /update-doc の報告の `レビュー判定:` の行が `APPROVED` でない(`未収束`・`未完了`。無人の「未承認」)か、その行が無いなら Phase 5 へ進まず停止する。通常の `needs-user` は従来どおり PR 本文の残課題へ転記する。無人では失敗扱い(S6。`完了_` への改名後の停止は保留にしない)
-- 文書変更後は、doc 用の開始の状態の記録(`review-guard.py` の保存)から `take --phase doc`→`snapshot`→`seal`→`review`→`run-checks`→`attest` を行う。
+- 文書変更後は、doc 用の開始の状態の記録(`review-guard.py` の保存)から `take --phase doc`→スナップショット→`seal`→レビュー→`run-checks`→`attest` を行う。
   タスクの改名なしで、doc のステージと commit を照合する。実装の状態の記録は流用しない。詳細は `review-protocol.md` の「文書、保留、公開」。
 
 ## Phase 5: PR 作成

@@ -8,15 +8,16 @@ v4.2.0 以前は commit 履歴を参照。
 
 - 文書の中で英語のままだった語(コードの名前・決まった書式の外)を、日本語に直した。#202 と別のファイル 30 本(組 1)が対象。#202 と同じ 8 本は、#202 の扱いが決まってから直す。([Issue #224](https://github.com/Yuki-Maeda-valour/workflow/issues/224))
   - 決まった訳がある語は、Git・Python などの日本語の文書の訳にした: exit N・rc N → 終了コード N(79 か所)・stage → ステージする(32)・hash → ハッシュ値(31)・index → インデックス(24)・filter → フィルター(18)・ref → 参照・snapshot → スナップショット・plugin → プラグイン・patch → パッチ。
-  - 決まった訳が無い語は、ふつうの日本語にした: helper → 補助スクリプト(決まったスクリプトは `publish-guard.py` などの名前)・repo → リポジトリ・bytes → バイト列・cwd → 作業ディレクトリ・false positive → 誤検出・before / after → 変更前・変更後・migration → マイグレーション・vs → 「と」・or → 「か」。ホストの道具の名前を動詞に使った「Read し」「Write する」は「読む」「書く」にした(35 か所)。
-  - state は指す物で書き分けた: `review-guard.py` などが保存する記録は「状態の記録」、`diagnostic-git.md` の `STATE` は「保護記録」。guard は仕組みの名前で書いた(`environment-guard.py` のコピー)。`diagnostic-git.md` の policy は「除外の指定」にした。
+  - 決まった訳が無い語は、ふつうの日本語にした: helper → 補助スクリプト(決まったスクリプトは `publish-guard.py` などの名前)・repo → リポジトリ・bytes → バイト列・cwd → 作業ディレクトリ・false positive → 誤検出・before / after → 変更前と変更後・migration → マイグレーション・type → 種類・spike → 短い試作・spawn → 起動・vs → 「と」・or → 「か」。ホストの道具の名前を動詞に使った「Read し」「Write する」は「読む」「書く」にした(35 か所)。
+  - state は指す物で書き分けた: `review-guard.py` などが保存する記録は「状態の記録」、`diagnostic-git.md` の `STATE` は「保護記録」。guard は仕組みの名前で書いた(`environment-guard.py` のコピー)。`diagnostic-git.md` の policy は「除外の指定」、binding は「保護記録・管理ルートとの結び付け(`state_binding`・`management_binding`)」にした。
+  - `do-task/SKILL.md` の clean checkout は「機密・既存の未追跡・無視された生成物を持ち込まずに新しく作った作業ツリー(clean checkout)」と書いた(`run-checks` が作る一時リポジトリで、レビューした変更を含む)。
   - 英語が 4 語以上混ざる行は、意味を変えずに文を組み直した(多くは `diagnostic-git.md`)。`create-task/SKILL.md` の 1 行は、200 字を超えたので 2 つの項目に分けた。
   - Git や OS の専門語(HEAD・OID・stdout・submodule・detached HEAD・lockfile など)は英語のまま残し、ファイルごとに初めて出す所に説明を添えた。
   - 組 1 のファイルの中で、「フィルタ」を「フィルター」に、「終了値」を「終了コード」にそろえた。
-  - 直さなかった所: `update-doc/SKILL.md` の無人入口の文のうち、`test_environment_guard.py` が字面を照らす文(hash・helper・plugin。#341 と重なるため)/ 見出し / 決まった書式(`path:line`・`- 検証器記録:` の行)/ `doc`・`import`・`id` と品質ゲートの名前(`format`・`test`・`build`)・表示の値 `skip` / data-audit の欄の名前と指摘キーの種類の名前 / コマンドの字面(`/update-doc --task` など)。
-- 言葉の検査の除外の一覧(`scripts/wording-exceptions.json`)の許す形「exit 30 は縮退」を「終了コード 30 は縮退」にし、`test_validate.py` の同じ字面も直した。
+  - 直さなかった所: `update-doc/SKILL.md` の無人入口の文のうち、`test_environment_guard.py` が字面を照らす文(hash・helper・plugin。#341 と重なるため)/ 見出し(`task-directory.md` の「## helper の使用」・`risk-checks.md` の「migration 欠落」など。後の組でまとめて扱う)/ 決まった書式(`path:line`・`- 検証器記録:` の行)/ `doc`・`import`・`id` と品質ゲートの名前(`format`・`test`・`build`)・表示の値 `skip` / data-audit の欄の名前と指摘キーの種類の名前 / Serena のメモリのカテゴリの名前(`tech`・`structure` など)/ コマンドの字面(`/update-doc --task` など)。
+- 言葉の検査の除外の一覧(`scripts/wording-exceptions.json`)の許す形「exit 30 は縮退」を「終了コード 30 は縮退」にし、`test_validate.py` と設計書 §6 の例の同じ字面も直した。
 - 文書の字面を照らすテスト(`test_diagnostic_contract.py` の 5 か所・`test_issue_workflow_contract.py` の 15 か所)を、新しい言い方に合わせた。照らす中身は弱めていない。
-- 言い換え表(`writing-for-people.md`)に、迷いやすい英語の行を 8 つ足した(stage・index・hash・exit N/rc N/終了値・snapshot・state・guard・helper。補足は「使わない言い方」)。
+- 言い換え表(`writing-for-people.md`)に、迷いやすい英語の行を 8 つ足した(stage・index・hash・exit N/rc N/終了値・snapshot・state・guard・helper。補足は「使わない言い方」。state の行には、`implement-guard.sh` の `take` が作る記録を「保護記録」と書くことも添えた)。
 
 ## v4.42.0
 

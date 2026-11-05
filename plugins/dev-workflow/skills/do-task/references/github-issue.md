@@ -197,7 +197,7 @@ Issue の本文を正本(ほかが合わせる元)にする。コメントは契
 - Phase 4 は完了本文を取り直して §7 の条件を確認し、実装の期待本文と一致することも確かめる。その本文で doc 用の新しい `start` を取り、開始のハッシュ値を保持する。
   - `/update-doc --task=#<番号> --yes` を実行する。対象・R・実装の検証済み本文の保持値を渡す。`--runners` は既存どおり透過する。
   - 文書の変更前・レビュー前・文書 commit 前後にも再取得し、R と実装の検証済み生本文に一致することを確認する。ステータス・記録の変更も見逃さない。
-  - doc は別の状態の記録(`review-guard.py` の保存)で、`take --phase doc`→`snapshot`→`seal`→`review`→`run-checks`→`attest` とする。実装の状態の記録を流用せず、`--task-transition` を付けずに文書 commit を検証する。
+  - doc は別の状態の記録(`review-guard.py` の保存)で、`take --phase doc`→スナップショット→`seal`→レビュー→`run-checks`→`attest` とする。実装の状態の記録を流用せず、`--task-transition` を付けずに文書 commit を検証する。
   - 文書変更が無ければ doc commit は作らず、実装の状態の記録を最後の commit の検査に使う。更新未承認・本文不一致なら未承認の文書を commit せず、公開へ進まない。
 - Phase 5 の push・PR 直前にも Issue を取り直し、R と実装の検証済み生本文を確認する。最後の commit の状態の記録で `verify --mode commit` と `pr-evidence` を行う。
   - 公開するリポジトリの `origin-repo.py` の `repo` が、保持した Issue の `repo` と同じことを確かめる。管理ルートとソースのルートが別の場合も省略しない。

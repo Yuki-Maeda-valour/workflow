@@ -217,7 +217,7 @@ Phase 1-8 に従い `file` だけ保存先を解決してから、検出値と�
 | ② `AGENTS.md` のみ(完成形) | `AGENTS.md` は上書きせず追記提案のみ。`CLAUDE.md` は足さない |
 | ③ `CLAUDE.md` のみ(未移行) | **上書きしない。** 下の移行フロー(未移行からの移行)で承認を得られたときだけ移行する。未承認なら移行せず、現行どおり `CLAUDE.md` への追記提案に留める(`AGENTS.md` を作らない) |
 | ④-互換形(import あり・symlink を含む) | `AGENTS.md` への追記提案 + 下の移行フロー(互換形からの移行)の提案 |
-| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは、その references の文書の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は reference の (3) で、ここでは指すだけにする) |
+| ④-import なし | 現行どおり、**ルートの `CLAUDE.md` への import 行の追加を提案する**(承認すれば `CLAUDE.md` の 1 行目に書き込む。既存の記述がすべて import 行より下になり、skill の読む範囲に入る)。あわせてユーザー設定の変更(対処 2 つは、その references の文書の (2) を参照)を案内する。**互換形からの移行は提案しない**。提案の前に [../understand-project/references/authority-file-drift.md](../understand-project/references/authority-file-drift.md) の共通規則を当てる(**(3)① により `CLAUDE.md` 自体が symlink なら import を書き足さない。(3)② により `AGENTS.md` 自体が 3 種のいずれかへの symlink なら提案せず構成の報告に留める**。規則の正本は参照先の文書の (3) で、ここでは指すだけにする) |
 | ④-判定できない(references の文書に到達できない) | `AGENTS.md` への追記提案のみ。互換形からの移行も import 行の追加も提案しない(共通規則 (3) を当てられないため)。判定できない旨を Phase 4 の生成物一覧に残す |
 
 **互換形の `CLAUDE.md` は Cursor CLI にも読まれる**ため、他ホストで有害・無意味になる指示は書かない(design §7-4)。
