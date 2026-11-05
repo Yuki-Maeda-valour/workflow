@@ -274,14 +274,27 @@ class RestoreTests(unittest.TestCase):
     def test_signals_at_every_boundary_report_actual_change_once(self):
         before = ('start', 'before-prepare', 'probe', 'before-copy', 'copy', 'before-publish', 'publish-ready', 'replace')
         after = ('after-publish', 'after-verify', 'before-cleanup', 'before-response')
+        # copy の印は、子の cp が動いている間だけ通る。子が最初の poll() より先に終わると、1 度も通らない(#362)。
+        # copy の段階だけ偽の cp を使う。偽の cp は copy-gate ができるまで本物の cp に替わらない。
+        # テストは合図を立てた後に copy-gate を作る。copy-gate はふつう、子を起動した後に最初に copy の印を通るときに作られる。
+        # 60 秒は、copy-gate が作られないときに偽の cp を終わらせる上限。
+        gate = self.root / 'copy-gate'
+        held_cp = self.cp_stub("if sys.argv[1:] != ['--version']:\n"
+                               " end=time.monotonic()+60\n"
+                               " while not os.path.exists(" + repr(str(gate)) + "):\n"
+                               "  if time.monotonic()>=end: sys.exit(70)\n"
+                               "  time.sleep(.01)\n"
+                               "os.execv(" + repr(CP) + ", [" + repr(CP) + "]+sys.argv[1:])\n")
         for stage in before + after:
             for number in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 with self.subTest(stage=stage, number=number):
                     self.destination.write_bytes(self.before[0]); self.destination.chmod(self.before[1])
-                    op = self.operation(); actual = op.checkpoint; reached = []
+                    if gate.exists(): gate.unlink()
+                    op = self.operation(cp=held_cp if stage == 'copy' else CP); actual = op.checkpoint; reached = []
                     def checkpoint(current):
                         if current == stage and not reached:
                             reached.append(current); op.on_signal(number, None)
+                            if stage == 'copy': gate.touch()
                         actual(current)
                     with mock.patch.object(op, 'checkpoint', side_effect=checkpoint): rc, output = op.run()
                     self.assertTrue(reached); fields = self.fields(rc, output); self.assertEqual(rc, 20)
