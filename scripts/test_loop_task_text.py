@@ -26,13 +26,13 @@ def shell_function(name):
 
 def parent_shell():
     source = LOOP.read_text()
-    initialization = source.split('unset TASK_TEXT_CODE TASK_TEXT_HELD', 1)[1].split('TASK_TEXT_HELD=0', 1)[0]
-    return ('set -euo pipefail\nunset TASK_TEXT_CODE TASK_TEXT_HELD' + initialization + 'TASK_TEXT_HELD=0\n'
+    initialization = source.split('unset TASK_TEXT_CODE TASK_TEXT_HELD', 1)[1].split('CHILD_OUTPUT_HELD=0', 1)[0]
+    return ('set -euo pipefail\nunset TASK_TEXT_CODE TASK_TEXT_HELD' + initialization + 'CHILD_OUTPUT_HELD=0\n'
             + 'PY_HELPER=' + shlex.quote(embedded()) + '\n'
             + 'PY_ABS=' + shlex.quote(sys.executable) + '\n'
             + 'FIXED_POLICY="{}"\n'
             + 'die() { printf "ERROR [%s] %s\\n" "$2" "$3" >&2; exit "$1"; }\n'
-            + ''.join(shell_function(name) for name in ('py', 'environment_call', 'hold_task_text', 'bind_environment')))
+            + ''.join(shell_function(name) for name in ('py', 'environment_call', 'read_held_copy', 'hold_task_text', 'hold_child_output', 'bind_environment')))
 
 
 class TaskTextTests(unittest.TestCase):
@@ -135,6 +135,7 @@ class HeldTaskTextTests(unittest.TestCase):
         self.source = self.root / self.relative
         self.source.parent.mkdir(parents=True)
         self.source.write_bytes(PARSER.read_bytes())
+        self.source.with_name('loop-child-output.py').write_bytes((SCRIPTS / 'loop-child-output.py').read_bytes())
         (self.root / '.claude-plugin').mkdir()
         (self.root / '.claude-plugin/plugin.json').write_text('{}')
         for name in ('loop-permission', 'origin-repo', 'git-config-digest', 'loop-state',
