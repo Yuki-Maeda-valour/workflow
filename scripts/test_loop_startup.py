@@ -26,13 +26,30 @@ CASE_TIMEOUT_DEFAULT = 300
 # 前置きの見張りは、上限で TERM を送り、その 10 秒後に KILL を送る(timeout -k 10)。外側はその後に止める。
 OUTER_MARGIN = 30
 TIMEOUT_MARK = '時間切れ: '
+EARLY_EXIT_MARK = '背景の loop.sh が起動の印 '
 # 背景の loop.sh(start_bg)が子を起動した印を待つ秒数。start_bg は背景の loop.sh を 150 秒で止めるので、
 # 印の後に止める合図を処理する時間を残して、それより短くする。
 START_WAIT = 100
-WAIT_STARTED = f'''
-wait_started() {{ # $1=起動の印のパス。現れなければ、時間切れの文を標準エラーに出す
-  wait_file "$1" {START_WAIT} && return 0
-  printf '{TIMEOUT_MARK}起動の印 %s が {START_WAIT} 秒待っても現れない。混んだ機械では流し直す\\n' "${{1##*/}}" >&2
+
+
+def wait_started_function(seconds=START_WAIT):
+    """起動の印を待つ bash の関数 wait_started。印が現れれば 0 を返す。
+
+    背景の loop.sh(BG_PID)が印を作らずに終わったら、待ち切らずにすぐ、時間切れでない文を出して 1 を返す。
+    時間切れの文は、待ち切った時に背景の loop.sh がまだ動いているときだけ出す。
+    待つ時間は SECONDS(1 秒刻み)で数えるので、1 足して seconds 秒以上待つ。
+    """
+    return f'''
+wait_started() {{ # $1=起動の印のパス
+  local end=$((SECONDS + {seconds} + 1))
+  while [ ! -e "$1" ] && proc_alive "$BG_PID" && [ "$SECONDS" -lt "$end" ]; do sleep 0.1; done
+  [ -e "$1" ] && return 0
+  if ! proc_alive "$BG_PID"; then
+    wait_bg
+    printf '{EARLY_EXIT_MARK}%s の前に終わった(終了コード %s)\\n' "${{1##*/}}" "$BG_RC" >&2
+    return 1
+  fi
+  printf '{TIMEOUT_MARK}起動の印 %s が {seconds} 秒待っても現れない。混んだ機械では流し直す\\n' "${{1##*/}}" >&2
   return 1
 }}
 '''
@@ -277,10 +294,14 @@ class StartupShellTests(unittest.TestCase):
                     prefix = prefix.replace(repr(str(self.plugin / 'skills/ship-task/scripts')),
                                             repr(str(plugin / 'skills/ship-task/scripts')))
                 script = tmp / 'case.sh'
-                script.write_text(prefix + '\n' + WAIT_STARTED + '\n' + body
+                script.write_text(prefix + '\n' + wait_started_function() + '\n' + body
                                   + '\ncat "$OUT"\nprintf "\\nCASE_RC=%s\\n" "$RC"\nexit 0\n')
                 limit = self.timeout
                 env = {**os.environ, 'SENTINEL': str(sentinel), 'LOOP_SELFTEST_TIMEOUT': str(limit)}
+                # 1 回の loop.sh の上限(run_loop の RUN_TIMEOUT)を 1 通りの上限以上にして、見張りが先に
+                # 当たるようにする(時間切れの文を出すため)。環境の値がそれ以上なら、そのまま使う。
+                if not (re.fullmatch(r'[0-9]+', env.get('RUN_TIMEOUT', '')) and int(env['RUN_TIMEOUT']) >= limit):
+                    env['RUN_TIMEOUT'] = str(limit)
                 started = time.monotonic()
                 try:
                     result = subprocess.run(['bash', str(script)], env=env, capture_output=True, text=True,
@@ -296,9 +317,11 @@ class StartupShellTests(unittest.TestCase):
                     # TERM を処理できず、10 秒後の KILL で見張り自身も止まる(-9)。
                     if result.returncode in (124, 137, -9) and elapsed >= limit:
                         self.fail(timeout_message(limit, elapsed) + '\n' + output)
-                    expired = [line for line in result.stderr.splitlines() if line.startswith(TIMEOUT_MARK)]
-                    if expired:
-                        self.fail(expired[0] + '\n' + output)
+                    # wait_started の文(時間切れか、背景の loop.sh が先に終わったか)を先頭に出す。
+                    reasons = [line for line in result.stderr.splitlines()
+                               if line.startswith((TIMEOUT_MARK, EARLY_EXIT_MARK))]
+                    if reasons:
+                        self.fail(reasons[0] + '\n' + output)
                 self.assertEqual(result.returncode, 0, output)
                 self.assertIn('CASE_RC=' + str(expected), result.stdout, output)
                 self.assertEqual(watch.events(), b'', output)
@@ -674,6 +697,38 @@ SD="$(state_dir term-next-child)"
 run_loop term-next-child -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 [ "$(calls)" = 'sync-a longsleep-b sync-c' ] || { cat "$OUT"; exit 97; }
 """, 0)
+
+    def test_wait_started_tells_an_early_exit_from_a_timeout(self):
+        # 背景の loop.sh の代わりに、渡したコマンドを実行するだけの偽物を start_bg で起動する。
+        out = self.run_case('''
+printf 'exec "$@"\\n' >"$W/fake-loop.sh"
+LOOP_BIN="$W/fake-loop.sh"
+check_wait() { # $1=名前 → 返り値・かかった秒数・標準エラーの 1 行目
+  local start=$SECONDS rc
+  wait_started "$W/mark-$1" 2>"$W/err-$1"; rc=$?
+  printf 'WAIT %s rc=%s sec=%s %s\\n' "$1" "$rc" "$((SECONDS - start))" "$(head -n 1 "$W/err-$1")"
+}
+start_bg fake -- bash -c 'exit 3'
+check_wait early-exit
+start_bg fake -- touch "$W/mark-mark-then-exit"
+check_wait mark-then-exit
+wait_bg
+''' + wait_started_function(1) + '''
+start_bg fake -- sleep 60
+check_wait alive
+kill "$BG_PID"
+wait_bg
+OUT=/dev/null
+RC=0
+''', 0)
+        early = re.search(r'^WAIT early-exit rc=1 sec=([0-9]+) (.*)$', out, re.M)
+        self.assertIsNotNone(early, out)
+        self.assertEqual(early.group(2), EARLY_EXIT_MARK + 'mark-early-exit の前に終わった(終了コード 3)', out)
+        # 待ち切らずに返る(既定の 100 秒の半分より十分に短い)。
+        self.assertLess(int(early.group(1)), START_WAIT // 2, out)
+        self.assertRegex(out, r'(?m)^WAIT mark-then-exit rc=0 sec=[0-9]+ $')
+        self.assertRegex(out, r'(?m)^WAIT alive rc=1 sec=[0-9]+ ' + re.escape(
+            TIMEOUT_MARK + '起動の印 mark-alive が 1 秒待っても現れない。混んだ機械では流し直す') + '$')
 
     def test_normal_two_iterations_keep_reports(self):
         self.run_case('''
