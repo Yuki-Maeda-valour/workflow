@@ -188,7 +188,7 @@ Issue の本文を正本(ほかが合わせる元)にする。コメントは契
 - review/commit の全入口は [review-protocol.md](review-protocol.md#task-本文が外部にある場合) の外部本文経路を使う。
   - 毎回、§3 の `snapshot --for-execution` で新しく取得し、対象と R を比較してから `--task-id issue-<番号> --task-body <取得本文> --expect-task-body-sha256 <今回の保持値>` を渡す。
   - 他人が関与した場合は §5 の確認を通す。過去の控えの再利用や、現在の本文から R を作り直すことはしない。
-  - 保護するローカルのタスクディレクトリが無ければ `--task-dir` は省く。指定する場合の条件・管理ルートとソースのルートの分担は、同じ節(review-protocol.md)に従う。
+  - 保護するローカルのタスクディレクトリが無ければ `--task-dir` は省く。指定する場合の条件・管理ルートとソースのルートの分担は、同じ review-protocol.md に従う。
 - 実装 commit はレビュー済みのソース変更だけをステージする。タスク MD のステージ・旧パスの削除を行わない。取得本文・取得JSON・期待本文も commit に含めない。
   - `finalize` 後は、新しく取得した生本文を `EXPECTED_TASK_SHA256` と比較する。全 `verify` に `--task-transition complete`・期待本文・根拠とその保持値を渡す。
   - ステージ前は `verify --mode pre-stage`、ステージ後と commit 直前は `--mode stage`、commit 後は `--mode commit` を通す。
