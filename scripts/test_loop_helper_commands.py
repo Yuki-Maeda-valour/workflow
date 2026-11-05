@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'plugins/dev-workflow/skills/ship-task/scripts'
 LOOP = SCRIPTS / 'loop.sh'
 TASK_TEXT = SCRIPTS / 'loop-task-text.py'
+CHILD_OUTPUT = SCRIPTS / 'loop-child-output.py'
 PY_START = "read -r -d '' PY_HELPER <<'PY' || true\n"
 CASE = re.compile(r'case "\$\{1:-\}" in(.*?)\besac\b', re.S)
 COMMENT = re.compile(r'(?:^|[ \t])#')
@@ -35,14 +36,14 @@ def commands_keys(source):
     raise AssertionError('COMMANDS の辞書が見つからない')
 
 
-def route_names(function):
-    """py() の case の腕のうち、本文に TASK_TEXT_CODE を含む腕のパターンをすべて集める。"""
+def route_names(function, marker):
+    """py() の case の腕のうち、本文に marker(TASK_TEXT_CODE か CHILD_OUTPUT_CODE)を含む腕のパターンをすべて集める。"""
     names = set()
     for block in CASE.finditer(function):
-        if 'TASK_TEXT_CODE' not in block.group(1):
+        if marker not in block.group(1):
             continue
         for arm in block.group(1).split(';;'):
-            if 'TASK_TEXT_CODE' in arm and ')' in arm:
+            if marker in arm and ')' in arm:
                 names.update(n.strip() for n in arm.split(')', 1)[0].split('|') if n.strip())
     return names
 
@@ -90,17 +91,19 @@ def split_shell(text):
 
 
 def analyze(text):
-    """(PY_HELPER へ行く呼出し名の集合, loop-task-text.py へ行く呼出し名の集合, PY_HELPER の本文)。"""
+    """(PY_HELPER へ行く呼出し名の集合, loop-task-text.py へ行く集合, loop-child-output.py へ行く集合, PY_HELPER の本文)。"""
     shell, helper, function = split_loop(text)
-    routed = route_names(function)
+    task_routed = route_names(function, 'TASK_TEXT_CODE')
+    child_routed = route_names(function, 'CHILD_OUTPUT_CODE')
     calls, _ = scan_calls(shell)
-    return calls - routed, calls & routed, helper
+    return calls - task_routed - child_routed, calls & task_routed, calls & child_routed, helper
 
 
-def unregistered(text, task_source):
-    helper_calls, task_calls, helper = analyze(text)
+def unregistered(text, task_source, child_source):
+    helper_calls, task_calls, child_calls, helper = analyze(text)
     return (sorted(helper_calls - commands_keys(helper)),
-            sorted(task_calls - commands_keys(task_source)))
+            sorted(task_calls - commands_keys(task_source)),
+            sorted(child_calls - commands_keys(child_source)))
 
 
 class LoopHelperCommandsTest(unittest.TestCase):
@@ -108,37 +111,47 @@ class LoopHelperCommandsTest(unittest.TestCase):
     def setUpClass(cls):
         cls.text = LOOP.read_text(encoding='utf-8')
         cls.task_source = TASK_TEXT.read_text(encoding='utf-8')
+        cls.child_source = CHILD_OUTPUT.read_text(encoding='utf-8')
+
+    def unregistered(self, text):
+        return unregistered(text, self.task_source, self.child_source)
 
     def test_calls_are_found(self):
-        helper_calls, task_calls, _ = analyze(self.text)
+        helper_calls, task_calls, child_calls, _ = analyze(self.text)
         self.assertTrue(helper_calls)
         self.assertEqual(task_calls, {'taskinfo', 'holdcount', 'holdcode'})
+        self.assertEqual(child_calls, {'result', 'permlog', 'origin-json'})
 
     def test_every_call_has_a_registered_command(self):
-        self.assertEqual(unregistered(self.text, self.task_source), ([], []))
+        self.assertEqual(self.unregistered(self.text), ([], [], []))
 
     def test_every_registered_helper_command_is_called(self):
-        helper_calls, _, helper = analyze(self.text)
+        helper_calls, _, child_calls, helper = analyze(self.text)
         self.assertEqual(sorted(commands_keys(helper) - helper_calls), [])
+        self.assertEqual(sorted(commands_keys(self.child_source) - child_calls), [])
 
     def test_extraction_detects_unknown_helper_command(self):
         text = self.text + '\npy no-such-command "$x"\n'
-        self.assertEqual(unregistered(text, self.task_source)[0], ['no-such-command'])
+        self.assertEqual(self.unregistered(text)[0], ['no-such-command'])
 
     def test_extraction_detects_case_route_change(self):
         text = self.text.replace('taskinfo|holdcount|holdcode)', 'taskinfo|holdcount|holdcode|json-get)', 1)
         self.assertNotEqual(text, self.text)
-        self.assertEqual(unregistered(text, self.task_source)[1], ['json-get'])
+        self.assertEqual(self.unregistered(text)[1], ['json-get'])
+        text = self.text.replace('result|permlog|origin-json)', 'result|permlog|origin-json|json-get)', 1)
+        self.assertNotEqual(text, self.text)
+        self.assertEqual(self.unregistered(text)[2], ['json-get'])
 
     def test_extraction_detects_second_case_arm(self):
-        arm = 'code="$TASK_TEXT_CODE" ;;'
-        text = self.text.replace(arm, arm + '\n    json-get)\n      ' + arm, 1)
-        self.assertNotEqual(text, self.text)
-        self.assertEqual(unregistered(text, self.task_source)[1], ['json-get'])
+        for index, marker in ((1, 'TASK_TEXT_CODE'), (2, 'CHILD_OUTPUT_CODE')):
+            arm = 'code="$' + marker + '" ;;'
+            text = self.text.replace(arm, arm + '\n    json-get)\n      ' + arm, 1)
+            self.assertNotEqual(text, self.text)
+            self.assertEqual(self.unregistered(text)[index], ['json-get'])
 
     def test_extraction_ignores_comment_lines(self):
         text = self.text + '\n# py no-such-command\n'
-        self.assertEqual(unregistered(text, self.task_source), ([], []))
+        self.assertEqual(self.unregistered(text), ([], [], []))
 
     def test_scan_rejects_undecided_forms(self):
         # 決まった書き方でない出現は、見落とさず一覧に入れて落とす
@@ -175,7 +188,7 @@ class LoopHelperCommandsTest(unittest.TestCase):
         src = 'cat <<<text\npy no-such-command\n'
         self.assertEqual(scan_calls(src), ({'no-such-command'}, []))
         text = self.text + '\ncat <<<text\npy no-such-command\n'
-        self.assertEqual(unregistered(text, self.task_source)[0], ['no-such-command'])
+        self.assertEqual(self.unregistered(text)[0], ['no-such-command'])
 
     def test_unregistered_name_after_assignment_is_not_overlooked(self):
         text = self.text + '\nMODE=x py no-such-command\n'
@@ -185,21 +198,22 @@ class LoopHelperCommandsTest(unittest.TestCase):
     def test_one_line_function_and_arithmetic_shift(self):
         self.assertEqual(scan_calls('f() { py no-such-command; }\n'), ({'no-such-command'}, []))
         text = self.text + '\nf() { py no-such-command; }\n'
-        self.assertEqual(unregistered(text, self.task_source)[0], ['no-such-command'])
+        self.assertEqual(self.unregistered(text)[0], ['no-such-command'])
         text = self.text + '\npermlog_of() { py permlog "$1"; }\n'
-        self.assertEqual(unregistered(text, self.task_source), ([], []))
+        self.assertEqual(self.unregistered(text), ([], [], []))
         src = 'mask() { echo $(( 1 << 3 )); }\npy no-such-command\n'
         self.assertEqual(scan_calls(src), ({'no-such-command'}, []))
         text = self.text + '\n' + src
-        self.assertEqual(unregistered(text, self.task_source)[0], ['no-such-command'])
+        self.assertEqual(self.unregistered(text)[0], ['no-such-command'])
 
     def test_case_patterns_must_be_plain_names(self):
         function = split_loop(self.text)[2]
-        self.assertEqual(invalid_route_patterns(route_names(function)), [])
-        arm = 'code="$TASK_TEXT_CODE" ;;'
-        for pattern in ('json-*', 'json-?et', 'json-[g]et'):
-            text = self.text.replace(arm, arm + '\n    ' + pattern + ')\n      ' + arm, 1)
-            self.assertEqual(invalid_route_patterns(route_names(split_loop(text)[2])), [pattern])
+        for marker in ('TASK_TEXT_CODE', 'CHILD_OUTPUT_CODE'):
+            self.assertEqual(invalid_route_patterns(route_names(function, marker)), [])
+            arm = 'code="$' + marker + '" ;;'
+            for pattern in ('json-*', 'json-?et', 'json-[g]et'):
+                text = self.text.replace(arm, arm + '\n    ' + pattern + ')\n      ' + arm, 1)
+                self.assertEqual(invalid_route_patterns(route_names(split_loop(text)[2], marker)), [pattern])
 
     def test_known_limit_counts_quoted_and_heredoc_forms(self):
         # 限界: 数えてしまう形。今の挙動のまま固定する
@@ -253,8 +267,17 @@ class LoopHelperCommandsTest(unittest.TestCase):
                          '決まった書き方で書き直す(どうしても要るなら、このテストに例外の一覧を作って足す)')
 
     def test_current_call_set(self):
-        helper_calls, task_calls, _ = analyze(self.text)
-        self.assertEqual(len(helper_calls | task_calls), 20)
+        helper_calls, task_calls, child_calls, _ = analyze(self.text)
+        self.assertEqual(len(helper_calls | task_calls | child_calls), 20)
+
+    def test_route_arms_do_not_share_names(self):
+        # case は先の腕を選ぶので、2 つの腕に同じ名前があると後の腕に届かない
+        function = split_loop(self.text)[2]
+        task, child = route_names(function, 'TASK_TEXT_CODE'), route_names(function, 'CHILD_OUTPUT_CODE')
+        self.assertEqual(task & child, set())
+        helper_calls, task_calls, child_calls, _ = analyze(self.text)
+        self.assertEqual((helper_calls & task_calls, helper_calls & child_calls, task_calls & child_calls),
+                         (set(), set(), set()))
 
 
 if __name__ == '__main__':
