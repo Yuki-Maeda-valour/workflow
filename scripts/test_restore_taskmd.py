@@ -275,8 +275,9 @@ class RestoreTests(unittest.TestCase):
         before = ('start', 'before-prepare', 'probe', 'before-copy', 'copy', 'before-publish', 'publish-ready', 'replace')
         after = ('after-publish', 'after-verify', 'before-cleanup', 'before-response')
         # copy の印は、子の cp が動いている間だけ通る。子が最初の poll() より先に終わると、1 度も通らない(#362)。
-        # copy の段階だけ、印のファイルができるまで本物の cp に替わらない偽の cp を使い、合図の後に印を作る。
-        # 60 秒は、印が作られないときに偽の cp を終わらせる上限。印はふつう、子を起動した直後の poll() で作られる。
+        # copy の段階だけ偽の cp を使う。偽の cp は copy-gate ができるまで本物の cp に替わらない。
+        # テストは合図を立てた後に copy-gate を作る。copy-gate はふつう、子を起動した後に最初に copy の印を通るときに作られる。
+        # 60 秒は、copy-gate が作られないときに偽の cp を終わらせる上限。
         gate = self.root / 'copy-gate'
         held_cp = self.cp_stub("if sys.argv[1:] != ['--version']:\n"
                                " end=time.monotonic()+60\n"
