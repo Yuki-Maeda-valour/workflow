@@ -66,7 +66,7 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、回帰テストを並べて流すスクリプト(run-tests.py)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、回帰テストを並べて流すスクリプト(run-tests.py。loop-selftest.sh を節ごとに分けて流すのは run-loop-selftest.py)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
@@ -148,7 +148,7 @@ bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      #
 bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
 bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   # 実装委託の前後の保護の回帰テスト(必須)
-bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 無人ループ(loop.sh)の回帰テスト(必須)
+LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.py   # 無人ループ(loop.sh)の回帰テスト(必須)。loop-selftest.sh を節ごとに分けて並べて流す
 ```
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。
@@ -165,18 +165,59 @@ bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh           # 
 - 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に残ることがある。そのときは、残ったプロセスを pid を指定して止める。
 - 件数と結果は、1 つのプロセスで順に流す `python3 -m unittest discover -s scripts -p 'test_*.py'` と同じ。
 - テストのファイルを足すときは、ほかのテストと同じパスの一時フォルダ・ポートを使わない。`HOME` の下に作るときは、一意な名前のフォルダにする。同時に流すと取り合うため。
-- シェル回帰一式(`*-selftest.sh`)は、`run-tests.py` と同時に流してよい。
-  - 全回帰の時間は `loop-selftest.sh` で決まる。いちばん先に始める。
-  - `loop-selftest.sh` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300` を付ける。ほかの負荷がある機械では、既定の時間切れ(全体 1500 秒・1 回の起動 150 秒)に当たる。
-    - 下の時間は、どれもこの 2 つを付けて測った。
-    - 既定の上限のままだと、混んだ機械では変更前の main でも、時間切れ(rc 124)や「判定」の群の FAIL 15 件になった(2026-11-05、別の作業での実測)。
-  - 同時に流す前に、`mkdir -p ~/.local/state/dev-workflow` で置き場を作っておく。
-    - `test_pending_implementation.py` と implement-agent・implement-guard の selftest は、この置き場を「無ければ作り、空なら消す」。
-    - 置き場が無いまま同時に流すと、一方が消した直後に、他方が中に作れず落ちることがある(既知の取り合い。selftest の側は直していない)。
-  - 2026-11-05 の容器(ほかのコンテナが 1〜4 個動く中)の時間:
-    - `unittest discover` と 5 本を同時に流すと、全体 3821 秒(unittest 3088 秒)。
-    - `run-tests.py` と 5 本を同時に流すと、全体 3847 秒(unittest 513 秒)。
-    - どちらも全体の時間は `loop-selftest.sh` が決めた。`loop-selftest.sh` を単独で流すと 3718 秒。
+
+`loop-selftest.sh` は `scripts/run-loop-selftest.py` で、節ごとに分けて並べて流す。
+
+- 節は、`loop-selftest.sh` の行頭の `if want <節>; then` で始まるまとまり(2026-11-05 で 30 個)。1 つの節を 1 つのプロセスで流す(`LOOP_SELFTEST_ONLY=<節>`)。
+- 作業の途中は、変えた所に関係する節だけを流してよい。例: `python3 -B scripts/run-loop-selftest.py perm d22`
+  - 節の名前は `grep '^if want' plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` で見る。
+- 同時に流すのは、使える CPU の数の 4 分の 1 まで。数は `-j <数>` で変える。
+  - 既定を小さくしているのは、`run-tests.py`(CPU の数の半分)と同時に流すため。足しても CPU の数を超えない。
+  - 全回帰テストで `-j 6` にすると、全体は 143 秒短くなったが、2 つ落ちた(2026-11-05 の容器。16 CPU・load の平均 17.7)。
+    - judge の節: 17 個のタスクを 1 回で回す `loop.sh` の起動が `RUN_TIMEOUT=300` に当たった(`期待 0・実際 124`)。
+    - `test_loop_startup.py` の 1 件: 片付けの途中で、git が裏で動かす保守の処理とファイルを取り合った。
+  - judge の節で `期待 0・実際 124` が出たら、`-j` を減らして流し直す。
+- 節の外の確かめ 3 件(最初のスタブの証明 2 件と、最後の後片付けの 1 件)は、どのプロセスでも流れる。
+  - そのため、どの節も選ばないプロセスを 1 つ足して、その件数を測る。合計では 1 回分だけ数える。
+- 件数と結果は、1 本で流す `bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` と同じ。
+  - 2026-11-05 に容器で確かめた。節を 1 つずつ流した PASS の合計は 3547 件で、1 本で流したとき(3547〜3548 件)と同じ範囲だった。
+  - 確かめの名前の一覧も同じだった。違うのは「人の確認後に試験用の子を片付けた」の数だけだった。
+    - この確かめは、その時に生きている、テスト用に起動した子の数だけ出るので、1 本で流しても揺れる(1 本で 63〜64 件・分けて 62〜64 件)。
+- 次のときは「異常:」を出し、終了コード 1 で終わる。
+  - 節の形を読めない。どれかの所が、2 つのプロセスで流れるか、どのプロセスでも流れない形のとき。流す前に止まる。
+  - 結果の行(`結果: PASS <数> 件 / FAIL <数> 件`)が無い。時間切れ(終了コード 124)などのとき。
+  - 節の確かめが 1 件も流れていない。
+- 失敗したプロセスの出力は、最後にまとめて出る。全部のプロセスの出力を残すときは `--log-dir <フォルダ>` を付ける。
+- 節を足すときは、行頭に `if want <節>; then` と書き、対の `fi` も行頭に置く。
+  - 節の中では、ほかの節が作った変数・関数・ファイルを使わない。分けて流すと、ほかの節は流れないため。
+  - `elif want`・字下げした `if want`・単独の節を 2 つ見る `if want <節> || want <節>` は使わない。`run-loop-selftest.py` が流す前に止まる。
+- 限界: 止めたときに、`loop-selftest.sh` が別のプロセスグループで起動した子(`loop.sh` など)が、`RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
+
+全回帰テスト(merge の前)は、次の手順で流す。
+
+1. `mkdir -p ~/.local/state/dev-workflow` で置き場を作る。
+   - `test_pending_implementation.py` と implement-agent・implement-guard の selftest は、この置き場を「無ければ作り、空なら消す」。
+   - 置き場が無いまま同時に流すと、一方が消した直後に、他方が中に作れず落ちることがある(既知の取り合い。selftest の側は直していない)。
+2. 次の 6 つを同時に始める。
+   - `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300 python3 -B scripts/run-loop-selftest.py`
+   - `python3 -B scripts/run-tests.py`
+   - review-agent・implement-agent・diff-snapshot・implement-guard の selftest(上のコードの `bash …-selftest.sh` の 4 行)
+3. 6 つすべての終了コードが 0 なら合格。
+
+- `run-loop-selftest.py` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300` を付ける。ほかの負荷がある機械では、既定の時間切れ(1 つのプロセスで 1500 秒・`loop.sh` の 1 回の起動で 150 秒)に当たることがある。
+  - 下の時間は、どれもこの 2 つを付けて測った。
+  - 既定の上限のままだと、混んだ機械では変更前の main でも、時間切れ(rc 124)や「判定」の群の FAIL 15 件になった(2026-11-05、別の作業で 1 本で流したときの実測)。
+- 2026-11-05 の容器での時間(ほかのコンテナが 0〜4 個動く中):
+
+| 流し方 | 全体 | unittest | loop-selftest | implement-guard-selftest(ほかの 4 本で最長) |
+|---|---|---|---|---|
+| 変える前: `run-tests.py` と、`bash loop-selftest.sh` を含む 5 本を同時に流す | 3847〜3980 秒 | 513〜525 秒 | 3847〜3980 秒 | 811 秒 |
+| 変えた後: 上の 6 つを同時に流す | 1335 秒 | 534 秒 | 1335 秒 | 880 秒 |
+
+- 変えた後も、全体の時間は loop-selftest で決まる。
+  - 節を 1 つずつ順に流した時間の和は 4065 秒。4 つずつ並べると、各節が遅くなって時間の和は 5289 秒(1.3 倍)になり、全体は 1335 秒になった。
+  - 最も重い節は discover(順に流して 639 秒・並べて 904 秒)。次は breakers(437 秒)・judge(393 秒)・humanconfig(327 秒)。
+  - `bash loop-selftest.sh` を 1 本で、ほかのテストと同時でなく流すと 3718 秒。
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
 
