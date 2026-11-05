@@ -136,8 +136,9 @@ def resolve_files(names):
 def default_jobs():
     """使える CPU の数の半分(1 以上)。
 
-    CPU の数だけ並べると、test_loop_startup.py のテストが中の時間切れ(100 秒)に当たって落ちた
+    CPU の数だけ並べると、test_loop_startup.py のテストが中の時間切れ(当時 100 秒)に当たって落ちた
     (2026-11-05、8 コア 16 スレッドの作業機の容器。順に流すと 1 通り 33 秒ほどのテスト)。
+    この上限は #352 で既定 300 秒に延ばし、LOOP_STARTUP_CASE_TIMEOUT で変えられるようにした。
     """
     try:
         cpus = len(os.sched_getaffinity(0))

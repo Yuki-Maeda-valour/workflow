@@ -22,6 +22,38 @@ v4.2.0 以前は commit 履歴を参照。
   - `scripts/test_loop_task_text.py` は、字面で切り出す範囲に、新しい初期化の 3 行と `read_held_copy`・`hold_child_output` を足し、偽のプラグインに `loop-child-output.py` を置いた。テストのメソッドと期待値は変えていない。`loop-selftest.sh` は、selftest(仕組みそのものが正しく動くかを確かめる、自動のテスト)が作る plugin に、新しいファイルをコピーする 1 行を足した。
   - `ship-task/references/loop.md` の §1(兄弟のファイルの受け持ち)と §4(本文解析の保持の説明)と、`docs/design.md` の項目に、`loop-child-output.py` を足した。`docs/design.md` の項目名は「無人ループの本文と子の出力の解析」に変えた。
 
+## v4.43.5
+
+### 変更
+
+- `environment-guard.py`(無人の実行の入口で、配る plugin と利用者の環境を控え、使う直前に照合〈控えた値と今の値が一致するかの確かめ〉する補助)の `main`(75 行)から、`verify`・`exec`・`read`・`hook` の 4 つのサブコマンドの処理(24 行)を、同じファイルの関数 `run_copy(a)` に移した。4 つは、どれも先に照合をする。`exec`・`read`・`hook` は、その後に、控えたコピー(`bootstrap` が plugin の外に作る、plugin のコピー)の中のファイルを使う。外から見た動き(引数・stdout〈標準出力〉・stderr〈標準エラー〉の 1 行・終了コード・誤りが重なったときに出る文言)は変わらない。([Issue #351](https://github.com/Yuki-Maeda-valour/workflow/issues/351))
+  - 移した文は、字下げのほかは元のまま。`run_copy` の最後に `return 0` を足した。
+  - `main` は 75 行から 52 行になり、入れ子の深さ(字下げの段の数)は 5 段から 3 段になった。`run_copy` は 26 行・3 段。
+  - 引数の定義・振り分け・例外を受ける所(受ける型 7 つ・失敗の 1 行の文言・終了コード 20)は `main` に残した。`run_copy` は `main` の `try` の中から呼ぶ。
+  - 先に、今の動きを固定するテスト(動きを自動で確かめるプログラム)を `scripts/test_environment_guard.py` に 5 件足した。照らすのは次の 5 つ。分ける前の版でも全件が通ることを確かめた。
+    - 成功したときの出力と終了コード(`verify` は何も出さないこと・`read` が出すバイト列(ファイルの中身をそのまま出すこと)・`exec` が `python3` に `-B` と `PYTHONDONTWRITEBYTECODE=1` を付けること・`--` の有無・`bash` に渡す引数)
+    - 10 個の入力での、停止の 1 行(stderr の全体)
+    - 誤りを 2 つ重ねたときに、どちらの文言が出るか(照合が相対パスの検査・実行形式の検査・`hook` の固定パスの検査より先、`--current-inventory` を照合に渡すこと、相対パスの検査が `hook` の固定パスの検査と実行形式の検査より先、`hook` の固定パスの検査が本文の読み込みより先)
+    - `hook` が、コピーの中の判定器(操作を許すかどうかを決める `loop-permission.py`)を動かすときに、判定器から見える `sys.argv`・`__name__`・`__file__`・`sys.path` の先頭と、判定器の隣のモジュールを読み込めること
+    - 判定器が出した `ValueError`・`KeyError`・`OSError` が `main` に届いて、終了コード 20 になること(判定器を同じプロセスで動かすため)と、`SystemExit(3)` は受けずに終了コード 3 で終わること
+
+## v4.43.4
+
+### 変更
+
+- `pending-implementation.py`(作業を始める前に、保護記録〈実装を外部の AI に任せる前に、作業中のファイルを控えた記録〉の候補を調べる補助)の `run_detail` から、判定の部分を関数 `decide_outcome(result, acknowledged, digests)` に移した。判定は、候補と確認値(人が候補を確かめたことを示す値)から、結果の値・終了コード・注記(stderr〈標準エラー〉へ出す固定の文)を決める部分。外から見た動き(stdout〈標準出力〉の JSON・stderr の全体・終了コード・`run` と `run_detail` の戻り値)は変わらない。([Issue #350](https://github.com/Yuki-Maeda-valour/workflow/issues/350))
+  - `decide_outcome` は 22 行で、引数だけから結果を計算し、`result` を書き換えない。
+  - 移した文(判定の部分と `notes = []`)は、字下げと最後の `return` の形のほかは元のまま。先頭に説明の文(docstring)を 1 行足した。
+  - `run_detail` は 66 行から 48 行になった。`decide_outcome` の後に、その結果を `result` に書く。
+  - 先に、今の動きを固定するテスト(動きを自動で確かめるプログラム)を `scripts/test_pending_implementation.py` に 3 件足した。照らすのは次の 3 つ。分ける前の版でも全件が通ることを確かめた。
+    - 候補と確認値の 8 つの組での、結果の値・終了コード・stderr の全体。次の組を含む: 一致する `identity` の確認値と、重なり(候補の記録が、今回の作業の場所と重なること)のある候補が同時にあるときに、重なりが勝って `list-changed` になることと、別プロジェクトの注記が先で重なりの注記が後になる順序
+    - 確認値の計算の後に、走査全体の 5 秒の上限に達したときに、終了コード 11・結果の値 `scan-unavailable` になり、`complete` が偽で、`list_sha256`・`identity_sha256` が出ないこと(最後の時間の確かめが、確認値の計算の後で、結果の書き込みの前にあること)
+    - 判定の中で想定外の失敗が起きたときに、終了コード 20・結果の値 `internal` になること
+  - 分けた後に、`decide_outcome` を直接呼ぶテストを 1 件足した。照らすのは次の 3 つ。
+    - 確認値なしと 3 つの確認値での戻り値
+    - 呼ぶ間に `os.open`・`os.stat`・`os.scandir`・`builtins.open`・`time.monotonic` の 5 つを呼ばないこと(呼ばれたら落ちるものに置き換える)
+    - `result` を書き換えないことと、stdout と stderr に何も出さないこと
+
 ## v4.43.3
 
 ### 変更
