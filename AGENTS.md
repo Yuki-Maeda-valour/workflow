@@ -68,8 +68,9 @@
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、回帰テストを並べて流すスクリプト(run-tests.py。loop-selftest.sh を節ごとに分けて流すのは run-loop-selftest.py)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
+docs/testing.md                     # テストの流し方の詳しい説明と時間の記録(AGENTS.md の「検証」の節から指す)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
 .claude/rules/claude-code.md        # Claude Code 固有の指示(他ホストには無関係。commit して共有する)
 setup.sh                            # plugin を使わない導入(コピー / symlink)
@@ -118,7 +119,7 @@ python3 -m venv "$validation_venv"
 ```bash
 # JSON 構文 + frontmatter YAML + 規約(行数・必須フィールド・禁止パターン・委託の語・リンク・原則の節の書き方の正本へのリンク・行の長さ・置き換える語〈枡・継承枠・能力帯・私有・素通り・塞ぐ・git 出口・写し・宛先・前置き・フル段階・標準段階・最小段階・段階判定・実行段階・結末の行・フル / 標準 / 最小の並びと太字・サイレント・レビュー役・実装役・まとめ役・検証役・全回帰(後ろがテストの形を除く)・試験・直読み・峻別・一時物・子起動・非ファイルタスク・退行・追随・起票・担保・倒す(「に倒す」などの形)・素の(前に漢字の無い形)・打ち直す・読込・書込・陽性対照・陰性対照・正常対照(間に「の」が入る形も)・止めの印・守る値・対話点・報告点〉・番号だけの理由(結果の行・保留の行の例)・27 語の初出の言い換え・言い換えの重複・名前でもコードでもない縮退)+ 配布メタの一括検証
 python3 scripts/validate.py   # 結果の行が ERROR 0・WARN 0 で合格(WARN も直す)
-python3 -B scripts/run-tests.py   # scripts/ の回帰テストの全件。結果の行が「失敗 0 件 / エラー 0 件」で、終了コードが 0 なら合格(テストの中身: validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・書き方の決まりのコピーの一致・完了報告の型)
+python3 -B scripts/run-all.py   # 全回帰テスト(unittest と 5 本の selftest)の全部。最後の行が「結果: 合格 / <秒> 秒」で、終了コードが 0 なら合格。git が古い機械では bash scripts/run-all-container.sh
 
 # 任意: 周辺プロジェクト名の混入も見る(渡した名前だけを検査する。品質ゲートには含めない
 # —— 合否がリポジトリ外のデータで決まらないようにするため)。誤検出が出た語は渡さないか、
@@ -138,6 +139,7 @@ bash -n plugins/dev-workflow/skills/do-task/scripts/implement-guard.sh
 bash -n plugins/dev-workflow/skills/ship-task/scripts/loop.sh
 bash -n plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/reviews-dir.sh
+bash -n scripts/run-all-container.sh
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py   # 構文検査(__pycache__ を作らない)
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py
@@ -146,11 +148,7 @@ python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-wor
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/create-task/scripts/resolve-task-store.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py
 python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("plugins/dev-workflow/skills/do-task/scripts").glob("*.py")]'   # 診断入口と内部モジュールを含む全構文
-bash plugins/dev-workflow/skills/do-task/scripts/review-agent-selftest.sh      # レビュー委託の起動の回帰テスト(必須)
-bash plugins/dev-workflow/skills/do-task/scripts/implement-agent-selftest.sh   # 実装委託の起動の回帰テスト(必須)
-bash plugins/dev-workflow/skills/do-task/scripts/diff-snapshot-selftest.sh     # diff スナップショットの回帰テスト(必須)
-bash plugins/dev-workflow/skills/do-task/scripts/implement-guard-selftest.sh   # 実装委託の前後の保護の回帰テスト(必須)。`--list` で単位を出し、`--only <単位>` で単位ごとに流せる
-LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.py   # 無人ループ(loop.sh)の回帰テスト(必須)。loop-selftest.sh を節ごとに分けて並べて流す
+python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" scripts/run_units.py scripts/run-all.py scripts/run-tests.py scripts/run-loop-selftest.py
 ```
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。
@@ -162,133 +160,31 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.
 - `--check-units <単位,単位,...>`: 渡した単位が、全ケースをちょうど 1 回ずつ覆うかを見る(0 か 1 で終わる)。何も作らない。
 - 単位を足すときは、`MUT_IDS`(変異の記号)と `ALL_CASES`(ケース ID)を直す。`--list` が覆いを確かめ、崩れていれば終了コード 1 になる。
 
-回帰テスト(`scripts/test_*.py`)は `scripts/run-tests.py` で流す。
+全回帰テスト(merge の前)は、1 つのコマンドで流す。
 
-- 作業の途中は、変えたファイルに関係するテストのファイルだけを流す。例: `python3 -B scripts/run-tests.py test_validate.py test_writing_rules.py`
-  - 関係するテストのファイルは、`grep -l '<変えたファイルの名前>' scripts/test_*.py` で探す。
-- merge の前には、引数を付けずに全件を流す。
-- テストのファイルごとに別のプロセスを起動する。同時に流すのは、使える CPU の数の半分まで。数は `-j <数>` で変える。
-  - 数を増やしすぎるか、機械が混むと、`test_loop_startup.py` のテストが時間切れで落ちることがある。たいていは、失敗の文の先頭に `時間切れ:` が出る(出ないと分かっている 1 つは下に書いた。ほかに無いかは確かめていない)。
-    - `時間切れ: <秒> 秒の上限に当たった` は、1 通りの確かめ(`run_case` の 1 回)の上限に当たった。上限は既定で 300 秒。`LOOP_STARTUP_CASE_TIMEOUT=<秒>` を付けて延ばすか、数を減らして流し直す。
-      - 1 回の `loop.sh` の上限(`RUN_TIMEOUT`)は、1 通りの上限より短ければ、1 通りの上限と同じにする。先に 1 通りの上限に当たり、この文が出る。
-      - 止めた後に、別のプロセスグループの `loop.sh` が、渡した `RUN_TIMEOUT` の秒数より短い間、残ることがある。この秒数は、ふつうは 1 通りの上限と同じ。環境の `RUN_TIMEOUT` が上限より大きいとき(例: 600 を export している)は、その秒数になる。
-    - `時間切れ: 起動の印 <名前> が 100 秒待っても現れない` は、背景で起動した `loop.sh` が、100 秒たっても子を起動せず、まだ動いていた。
-      - この 100 秒は延ばせない。`loop-selftest.sh` が背景の `loop.sh` を 150 秒で止めるため、それより短くしている。
-      - ほかの重い処理が止まるのを待ってから流し直す。
-    - `背景の loop.sh が起動の印 <名前> の前に終わった(終了コード <数>)` は、時間切れではない。背景の `loop.sh` が、子を起動する前に終わった。流し直さずに、続く出力で理由を調べる。
-    - `時間切れ:` が出ない時間切れ: 背景の `loop.sh` が、子を起動した後に `loop-selftest.sh` の 150 秒(`start_bg`)で止められた。
-      - `test_term_during_next_child_does_not_reuse_a_prior_verified_state` の終了コード 92 になる(背景の `loop.sh` の終了コードが 143 でなく 137)。
-    - ほかにも短い上限がある。当たるかは未確認(出力が残っている回〈下の表の 7 回目の 13 件と、#224 の作業の全回帰テストの 5 件〉では当たっていない): `loop-selftest.sh` の `COMMON_ARGS` が `loop.sh` に渡す `--net-timeout 10` と、`test_loop_startup.py` の `wait_dead "$CHILD" 5`(`test_stop_file_with_inflight_requires_confirmation_then_stops_normally` の終了コード 79 と、`test_term_during_next_child_does_not_reuse_a_prior_verified_state` の終了コード 93)。
-- 重いファイルは、その中のテストを複数のプロセスに分けて流す。分ける数は `run-tests.py` の `SHARDS` にある。
-- 失敗したプロセスの出力は、最後にまとめて出る。
-- 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に残ることがある。そのときは、残ったプロセスを pid を指定して止める。
-- 件数と結果は、1 つのプロセスで順に流す `python3 -m unittest discover -s scripts -p 'test_*.py'` と同じ。
-- テストのファイルを足すときは、ほかのテストと同じパスの一時フォルダ・ポートを使わない。`HOME` の下に作るときは、一意な名前のフォルダにする。同時に流すと取り合うため。
-
-`loop-selftest.sh` は `scripts/run-loop-selftest.py` で、節ごとに分けて並べて流す。
-
-- 節は、`loop-selftest.sh` の最上位(ほかの `if` や関数の中でない所)に、行頭の 1 行で書いた `if want <節>; then` で始まるまとまり(2026-11-07 で 52 個。重かった 6 節を 28 節に分けた)。1 つの節を 1 つのプロセスで流す(`LOOP_SELFTEST_ONLY=<節>`)。
-- 作業の途中は、変えた所に関係する節だけを流してよい。例: `python3 -B scripts/run-loop-selftest.py perm d22`
-  - 節の名前は `grep '^if want' plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` で見る。
-- 同時に流すのは、使える CPU の数の 4 分の 1 まで。数は `-j <数>` で変える。
-  - 既定を小さくしているのは、`run-tests.py`(CPU の数の半分)と同時に流すため。足しても CPU の数を超えない。
-  - 全回帰テストで `-j 6` にすると、全体は 143 秒短くなったが、2 つ落ちた(2026-11-05 の容器。16 CPU・load の平均 17.7)。
-    - judge の節: 17 個のタスクを 1 回で回す `loop.sh` の起動が、そのときの値の `RUN_TIMEOUT=300` に当たった(`期待 0・実際 124`)。
-    - `test_loop_startup.py` の 1 件: 片付けの途中で、git が裏で動かす保守の処理とファイルを取り合った。
-  - judge の節(judge・judge-fail・judge-hang)で `期待 0・実際 124` か `期待 0・実際 137` が出たら、`-j` を減らすか、`RUN_TIMEOUT` を延ばして流し直す。
-- 節の外の確かめ 3 件(最初のスタブの証明 2 件と、最後の後片付けの 1 件)は、どのプロセスでも流れる。
-  - そのため、どの節も選ばないプロセスを 1 つ足して、その件数を測る。合計では 1 回分だけ数える。
-  - 差し引くのは、節の外の確かめが、どのプロセスでも同じ名前で PASS したときだけ。
-- 件数と結果は、1 本で流す `bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` と同じ。
-  - 2026-11-05 に容器で確かめた。PASS の件数は次のとおり。
-    - 1 本で流す: 3547〜3548 件。
-    - 節を 1 つずつ順に流す: 3547 件。
-    - 分けて並べて流す(下の表で loop-selftest が合格した 1・3・4・6・8 回目): 3546〜3547 件。
-  - 確かめの名前の一覧を 1 本で流したときと比べたのは、節を 1 つずつ順に流した回と、下の表の 1・6・8 回目。3・4 回目は件数だけを比べた(節ごとの出力を残していない)。
-  - 比べた回では、名前の一覧は同じだった。違うのは「人の確認後に試験用の子を片付けた」の数だけだった。
-    - この確かめは、その時に生きている、テスト用に起動した子の数だけ出るので、1 本で流しても揺れる(1 本で 63〜64 件・分けて 62〜63 件。`-j 6` で流した参考の回は 64 件)。
-  - 重かった 6 節を 28 節に分けた後(2026-11-07、容器)に、分ける前の 6 節と比べた。
-    - 28 節を 1 つずつ順に流した PASS は 976 件(節の外の 3 件は 1 回分)。分ける前の 6 節を同じ容器で流した PASS は 961 件。
-    - 確かめの名前の一覧を比べた(`pid <数字>` と、候補の名前の 12 桁の値は置き換えた)。差は、足した 14 件と、揺れる 1 件(上の「人の確認後に試験用の子を片付けた」)だけ。
-    - 足した 14 件は、judge の 17 個のタスクを 4 回の起動に分けたため。
-      - 4 件の確かめ(判定・人のチェックアウトの 2 件・報告に許した項目の一覧を出さない)が、増えた 3 回の起動の分で 12 件。
-      - 時間切れの周の後も次の周へ進むことを見るために足した、新しいタスク `fail-late-j` の判定の 2 件。
-    - 28 節を `LOOP_SELFTEST_ONLY` で選んで 1 本で流した(2026-11-07)。PASS 976 件 / FAIL 0 件。名前の一覧は、節ごとに流した和と同じだった。
-    - 分ける前の 6 節を 1 本で流した回(PASS 962 件)との差は、足した 14 件だけだった(この回は「人の確認後に試験用の子を片付けた」の数も同じ)。
-- 次のときは「異常:」を出し、終了コード 1 で終わる。
-  - 節の形を読めない。流す前に止まる。形は、bash 自身にファイルを読ませて確かめる(先に `bash -n` で読めることを確かめ、それから定義だけして、実行はしない)。
-    - bash で読めない(構文の誤り・余分な `}` など)。
-    - want を、最上位の `if want <節>; then` の外で呼んでいる(`elif want`・入れ子の `if want`・`want <節> && …`・`X=1 want …`・`time -p want …`・複数行の `$( … )` やバッククォートの中・`coproc want …`・`trap 'want …' …` など)。
-    - 最上位の `if want <節>; then` に `else` か `elif` がある。その側は、ほかの全部のプロセスで流れ、1 本で流すと流れないため。
-    - 最上位の `if want` が、行頭の 1 行の `if want <節>; then` の形でない(名前を引用符で囲む・変数で渡す・`then` を次の行に書く)。
-    - どれかの所が、2 つのプロセスで流れるか、どのプロセスでも流れない形になっている(単独の節を 2 つ見る `if want <節> || want <節>` など)。
-  - 結果の行(`結果: PASS <数> 件 / FAIL <数> 件`)が無い。時間切れ(終了コード 124)などのとき。
-  - 節の確かめが 1 件も流れていない。
-  - 節の外の確かめが、どれかのプロセスで落ちた。差し引きをやめ、最後の行は `結果: 件数は不明(上の「異常:」を見る)/ <秒> 秒` になる。
-- 失敗したプロセスの出力は、最後にまとめて出る。全部のプロセスの出力を残すときは `--log-dir <フォルダ>` を付ける。
-- 節を足すときは、次の決まりを守る。
-  - 行頭に `if want <節>; then` と 1 行で書き、対の `fi` も行頭に置く。名前は引用符で囲まない。
-  - 最上位の `if want <節>; then` の行のほかでは、want を呼ばない。その `if` に `else`・`elif` を付けない。
-  - 節の中では、ほかの節が作った変数・関数・ファイルを使わない。分けて流すと、ほかの節は流れないため。
-  - `run-loop-selftest.py` が流す前に止めるのは、正規表現が見つける形(上の「節の形を読めない」に挙げた形など)。
-    - 正規表現で見るので、見つけられない書き方もありうる(例: 変数に入れた名前で呼ぶ `f=want; $f <節>`・実行中に組み立てた文字列を `eval` する)。
-    - 止まらなくても、決まりを破れば件数が合わなくなる。決まりを守れば、どれも書かずに済む。
-    - 呼び出しでない文字列でも止まることがある(例: コードの行の `echo "(want delta)"`、ヒアドキュメントの中の `we (want to) go`・`| want x |`・Python の `if want != got:`・`while want != 0:`)。そのときは、言い回しか変数の名前を変える(Python の変数名は want 以外にする)。
-- 限界: 止めたときに、`loop-selftest.sh` が別のプロセスグループで起動した子(`loop.sh` など)が、`RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
-  - `loop-selftest.sh` の一時フォルダ(`mktemp -d` で作る。既定は `/tmp/tmp.*`)も、後片付けが走らずに残ることがある。
-  - 残った一時フォルダは、中断の行の後に `残った一時フォルダ(<節>。確かめてから消す): <パス>` と出る。中を確かめてから消す。
-  - この表示の前に、止めた全部のプロセスの出力が閉じるのを、時間で切らずに待つ。別のプロセスグループの子が標準出力を開いたまま残ると、その子が終わるまで待つ。
-
-全回帰テスト(merge の前)は、次の手順で流す。
-
-1. `mkdir -p ~/.local/state/dev-workflow` で置き場を作る。
-   - `test_pending_implementation.py` と implement-agent・implement-guard の selftest は、この置き場を「無ければ作り、空なら消す」。
-   - 置き場が無いまま同時に流すと、一方が消した直後に、他方が中に作れず落ちることがある(既知の取り合い。implement-guard の selftest は、置き場を作り直して 3 回まで試すようにした。implement-agent の selftest と `test_pending_implementation.py` は直していない)。
-2. 次の 6 つを同時に始める。
-   - `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.py`
-   - `python3 -B scripts/run-tests.py`
-   - review-agent・implement-agent・diff-snapshot・implement-guard の selftest(上のコードの `bash …-selftest.sh` の 4 行)
-3. 6 つすべての終了コードが 0 なら合格。
-4. 流す時点(PR を開く前)と、結果の PR の本文への書き方は、「PR の前の手順」の節に従う。
-
-- `run-loop-selftest.py` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600` を付ける。
-  - `LOOP_SELFTEST_TIMEOUT` は、1 つのプロセス(節 1 つ)の全体の上限の秒数。既定は 1500 秒。
-  - `RUN_TIMEOUT` は、止まった `loop.sh` を打ち切るまでの秒数(`loop.sh` の 1 回の起動ごと)。既定は 150 秒。
-    - `loop-selftest.sh` で `RUN_TIMEOUT` を使うのは、`timeout -k 5 "${RUN_TIMEOUT:-150}"` の 1 か所だけ。延ばしても、確かめる中身は変わらない。
-  - 600 にするのは、並べて流すと 1 つの節が遅くなるため。分ける前の judge の節(17 個のタスクを 1 回の `loop.sh` で回す)は、300 秒を超えることがあった。分けた後は、1 回の `loop.sh` の起動が 4 回に分かれ、1 回が短くなった(judge は 7 個・judge-fail は 6 個・judge-hang は 2 回で 2 個と 3 個。新しいタスクを 1 個足したので計 18 個)。
-    - 2026-11-05 の容器で、`RUN_TIMEOUT=300` では judge の節が FAIL 19 件になった(`期待 0・実際 137`。300 秒の後の SIGKILL で止められた。下の表の 2 回目)。
-    - `RUN_TIMEOUT=600` では 6 つとも合格した(下の表の 3・4・8 回目)。ただし、混んだ機械では 600 でも落ちることがある(5・7 回目と、表の下を見る)。
-  - 1 本で流す `bash plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` には、前から `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300` を付けてきた(下の表の「変える前」は、この値で測った)。
-  - 既定の上限のままだと、混んだ機械では変更前の main でも、時間切れ(rc 124)や「判定」の群の FAIL 15 件になった(2026-11-05、別の作業で 1 本で流したときの実測)。
-- 2026-11-05 の容器での時間。変えた後の回は、流した順に番号を付けた。「ほかのコンテナ」は、同じ機械で動いていた、ほかのセッションのコンテナの数で、いつ見た数かも書いた:
-
-| 流し方 | `RUN_TIMEOUT` | ほかのコンテナ | 全体 | unittest | loop-selftest | 結果 |
-|---|---|---|---|---|---|---|
-| 変える前: `run-tests.py` と、`bash loop-selftest.sh` を含む 5 本を同時に流す | 300 | 流している間に 30 秒ごとに見て 0〜2 個(3980 秒の回は未記録) | 3847〜3980 秒 | 513〜525 秒 | 3847〜3980 秒 | すべて合格 |
-| 変えた後の 1 回目: 上の 6 つを同時に流す | 300 | 流している間に 30 秒ごとに見て 0〜1 個 | 1335 秒 | 534 秒 | 1335 秒 | すべて合格(loop-selftest は PASS 3546 件) |
-| 変えた後の 2 回目: 同上 | 300 | 未記録 | 1481 秒 | 685 秒 | 1481 秒(judge の節は 634 秒) | judge の節が FAIL 19 件。ほかの 5 つは合格 |
-| 変えた後の 3 回目: 同上 | 600 | 未記録 | 1410 秒 | 595 秒 | 1409 秒 | すべて合格(loop-selftest は PASS 3546 件) |
-| 変えた後の 4 回目: 同上 | 600 | 未記録 | 1314 秒 | 588 秒 | 1312 秒 | すべて合格(loop-selftest は PASS 3547 件) |
-| 変えた後の 5 回目: 同上 | 600 | ほかのセッションの全回帰テストのコンテナが動いていた(数は未記録。load の平均 17) | 2060 秒 | 1074 秒 | 2059 秒 | 落ちた(表の下) |
-| 変えた後の 6 回目: 同上 | 600 | 始めた時 0 個 | 1511 秒 | 731 秒 | 1509 秒 | unittest の 1 件が落ちた(表の下)。loop-selftest は合格(PASS 3547 件) |
-| 変えた後の 7 回目: 同上 | 600 | 途中から 2 個(load の平均は最大 31) | 2832 秒 | 1065 秒 | 2830 秒 | 落ちた(表の下) |
-| 変えた後の 8 回目: 同上 | 600 | 始めた時 0 個 | 1475 秒 | 569 秒 | 1474 秒 | すべて合格(loop-selftest は PASS 3547 件) |
-
-- 混んだ機械では、`RUN_TIMEOUT=600` でも時間切れで落ちる。落ちたら、ほかの重い処理が止まるのを待ってから流し直す。
-  - 5 回目: judge でない humanconfig の節が FAIL 3 件。`test_loop_startup.py` が 19 件失敗し、`test_shell_requirements.py` が 1 件エラーになった。ほかの 4 本は合格。
-  - 7 回目: judge の節が FAIL 9 件(`期待 0・実際 124`。1 回の起動が `RUN_TIMEOUT=600` に当たった)。`test_loop_startup.py` が 13 件落ちた(12 件は中の時間切れ 100 秒の後の SIGKILL〈`-9`〉、1 件は終了コード 91)。
-  - `test_loop_startup.py` の落ち方を、出力が残っている回について Issue #352 で調べた。7 回目の 13 件と、#224 の作業の全回帰テストの 5 件は、どれも時間切れだった。5・6 回目は出力が残っておらず、理由は未確認。
-    - `-9` と終了コード 124 は、1 通りの確かめの上限(当時 100 秒)に当たった。#352 で既定を 300 秒に延ばし、`LOOP_STARTUP_CASE_TIMEOUT` で変えられるようにした。
-    - 終了コード 91 は、起動の印を待つ上限(当時 35 秒)に当たった。#352 で 100 秒に延ばした。
-- 6 回目は、loop-selftest は合格し、`test_loop_startup.py` の 1 件(HUP の場合)だけが落ちた。始めた時のほかのコンテナは 0 個、load の平均は 4.19。落ちた理由(時間切れかどうか)は未記録(unittest の出力を残していない)。
-
-- implement-guard-selftest(ほかの 4 本で最長)は、変える前に 811 秒、変えた後の 1 回目に 880 秒だった。
-- 変えた後も、全体の時間は loop-selftest で決まる。
-  - 節を 1 つずつ順に流した時間の和は 4065 秒(30 節の 4054 秒と、節の外だけのプロセスの 11 秒)。
-  - 4 つずつ並べると、各節が遅くなる。1 回目は、31 プロセスの時間の和が 5289 秒(1.3 倍)になり、全体は 1335 秒だった。
-  - 分ける前は、最も重い節は discover(順に流して 639 秒・並べて 904 秒)。次は breakers(437 秒)・judge(393 秒)・humanconfig(327 秒)。
-  - 分けた後(2026-11-07 に順に流して)は、最も重い節が discover-stop(150 秒)。28 節の和は約 2100〜2200 秒。同じ機械でほかのセッションも動いていたので、値は回ごとに揺れる(`WEIGHTS` のコメントを見る)。
-  - `bash loop-selftest.sh` を 1 本で、ほかのテストと同時でなく流すと 3718 秒。
+- `python3 -B scripts/run-all.py`
+  - 6 種類のテスト(unittest・loop-selftest・review-agent・implement-agent・diff-snapshot・implement-guard の selftest)を流す。共通の枠(同時に動かす数。既定は使える CPU の数)で重い順に流すのは 4 種(unittest・loop-selftest・implement-guard-selftest・diff-snapshot-selftest)。review-agent と implement-agent の selftest は、待ちが主なので枠を使わず、最初に始める。
+  - `~/.local/state/dev-workflow` が無ければ、自分で作る。
+- 2.36 より古い git(この作業機の 2.34.1 など)では、loop 系のテストが変更と関係なく落ちる。新しい git の容器で流す: `bash scripts/run-all-container.sh`
+  - 2.42 より古いと、`run-all.py` が警告を出す(製品の `loop.sh` が 2.42 以上の機能を使うため)。
+  - 全部が通ると確かめたのは 2.56.0。2.36〜2.55 で全部通るかは未確認。根拠は [docs/testing.md](docs/testing.md) の「git の版の警告の根拠」。
+  - 作業ツリーの変更を含めて流すときは `--worktree`、commit を流すときは `--commit <rev>`(既定は HEAD)。
+  - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前>` を付ける。
+- 合格の条件: 最後の行が `結果: 合格 / <秒> 秒` で、終了コードが 0。
+- 落ちたときは、`異常:` の行と、最後にまとめて出る失敗の出力を見る。
+- 時間切れが出たとき(混んだ機械で起きる)は、`-j <数>` を減らすか、ほかの重い処理が止まるのを待って流し直す。
+  - `時間切れ: <秒> 秒の上限に当たった` は、`LOOP_STARTUP_CASE_TIMEOUT=<秒>` で延ばせる(既定 300 秒)。
+  - judge の節の `期待 0・実際 124` か `期待 0・実際 137` は、`RUN_TIMEOUT=<秒>` で延ばせる(`run-all.py` は 600 秒を足す)。
+  - 容器の入口では、`LOOP_SELFTEST_TIMEOUT`・`RUN_TIMEOUT`・`LOOP_STARTUP_CASE_TIMEOUT` をホストで設定すれば、容器へ渡る(ほかの環境変数は渡らない)。
+  - 容器の入口で枠を減らすときは、`bash scripts/run-all-container.sh … -- -j <数>` と書く。
+- 止めた後に、別のプロセスグループの `loop.sh` などが残ることがある。そのときは、pid を指定して止める。
+  - `残った一時フォルダ(<節>。確かめてから消す): <パス>` の行が出たら、中を確かめてから消す。
+- 作業の途中は、変えた所に関係するものだけを流す。
+  - unittest: `python3 -B scripts/run-tests.py <テストのファイル>`(例: `test_validate.py`)。関係するファイルは `grep -l '<変えたファイルの名前>' scripts/test_*.py` で探す。
+  - loop-selftest: `python3 -B scripts/run-loop-selftest.py <節>`(例: `perm d22`)。節の名前は `grep '^if want' plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` で見る。
+  - 4 本の selftest: `bash plugins/dev-workflow/skills/do-task/scripts/<名前>-selftest.sh`(implement-guard は `--only <ケース>`。`--list` で単位を出し、変異は `--only L-<記号>` で 1 つずつ流せる)。
+- 流す時点(PR を開く前)と、結果の PR の本文への書き方は、「PR の前の手順」の節に従う。
+- 詳しい説明(単位・重み・容器・2 つのランナー・テストを足すときの決まり・時間の記録)は [docs/testing.md](docs/testing.md) にある。
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
 
@@ -555,14 +451,13 @@ EOF
 
 ### 4. 全回帰テストを流す
 
-- 全回帰テスト(「検証」の節の「全回帰テスト(merge の前)」の 6 つ)を、人が流す(人が行う手順。ship-task は流さない)。
-  - 流すのは、3 で確かめた先頭の commit の中身だけのフォルダ。`git archive <SHA>` で取り出し、`git init` と 1 回の commit をしたもの(`review-guard.py` の `run-checks` が作る検証用のコピーと同じ形)を使う。commit していない変更を混ぜない。
-  - git の版が古いと、変更と関係なく落ちるテストがある。新しい git の環境(容器など)で流す。
-  - 1 本ごとの上限は 3600 秒。「検証」の節の時間の表で最も長かった全体の 2832 秒(7 回目)より長くした。
-  - 上限は、それぞれのコマンドの前に `timeout 3600` を付けて効かせる。`run-loop-selftest.py` は、環境の変数を前に置くので、`LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 timeout 3600 python3 -B scripts/run-loop-selftest.py` と書く(`timeout` を変数の前に置くと、変数をコマンドと見なし、終了コード 127 で落ちる)。
-  - 終了コード 124 は、時間切れで落ちた本として、理由を書いて流し直す。
-  - 落ちた本は、理由を調べてから流し直してよい(時間切れなど。「検証」の節)。流し直したら、前の回の結果と理由を本文に残す。
-- 1 の最後の行が `不合格 ⓪:`(1 の続け方の 2 つの行は除く)でなく(取り込みで衝突したとき・`違う:` のとき・その 2 つの行のときは、2 で作業の差分の全体をレビューし直した後)、3 の最後の行が `合格:` で、6 本が終了コード 0 で、5 の記録の確かめ ④ の最後の行が `合格:` のときだけ、PR を開く。
+- 全回帰テスト(「検証」の節の `run-all.py`)を、人が流す(人が行う手順。ship-task は流さない)。
+  - `bash scripts/run-all-container.sh --commit <3 で確かめた先頭の SHA>` で流す。入口が `git archive <SHA>` で取り出し、`git init` と 1 回の commit をしたもの(`review-guard.py` の `run-checks` が作る検証用のコピーと同じ形)で流す。commit していない変更を混ぜない。
+  - 2.36 より古い git では、loop 系のテストが変更と関係なく落ちる(2.36〜2.55 で全部通るかは未確認。根拠は `docs/testing.md`)。入口は新しい git の容器で流す。
+  - 上限は 3600 秒(入口の `--timeout` の既定)。`docs/testing.md` の時間の記録で最も長かった全体の 2832 秒(2026-11-05 の 7 回目)より長くした。
+  - 終了コード 124 は、時間切れで落ちたこと。理由を書いて流し直す。
+  - 落ちたときは、理由を調べてから流し直してよい(時間切れなど。「検証」の節)。流し直すのは `run-all.py` の回(全部を流し直す)。流し直したら、前の回の結果と理由を本文に残す。
+- 1 の最後の行が `不合格 ⓪:`(1 の続け方の 2 つの行は除く)でなく(取り込みで衝突したとき・`違う:` のとき・その 2 つの行のときは、2 で作業の差分の全体をレビューし直した後)、3 の最後の行が `合格:` で、`run-all.py` が終了コード 0 で、5 の記録の確かめ ④ の最後の行が `合格:` のときだけ、PR を開く。
 
 ### 5. PR の本文の欄を書く
 
@@ -571,20 +466,18 @@ EOF
 ```text
 - 流した commit: `<SHA>`(取り込んだ main: `<SHA>`・版 <X.Y.Z>)
 - 流した環境: <`git --version` の出力> / <`python3 --version` の出力>
-- `run-loop-selftest.py`: 終了コード <数> / <最後の `結果:` の行>
-- `run-tests.py`: 終了コード <数> / <最後の `結果:` の行>
-- `review-agent-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
-- `implement-agent-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
-- `diff-snapshot-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
-- `implement-guard-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
+- `run-all.py`: 終了コード <数> / <最後の `結果:` の行>
+- 内訳: <`結果(` で始まる行>
 - 流し直し: なし
 ```
 
 - SHA は 40 桁で書く。
-- 「最後の `結果:` の行」の所には、そのコマンドが最後に出す、`結果:` で始まる行を、字面を変えずに書く。件数はこの行にあり、省かない。
-- 流し直したら、`- 流し直し: なし` の代わりに、回ごとに `- 流し直し <回>: <流し直した本の名前か「6 本」> — <理由>。前の回は <前の回の終了コードと結果の行>` の行を書く。
-  - 前の回に結果の行が出なかったとき(時間切れで止めたときなど。`run-tests.py` と `run-loop-selftest.py` は、止められると最後の `結果:` の行を出さない)は、`<前の回の終了コードと結果の行>` の所に `終了コード <数> / 結果の行なし(<理由>)` と書く。
-  - 最後に流した回の 6 本の行の件数は、省かない。
+- 終了コードは、容器の入口の終了コード(`run-all.py` と同じ。時間切れは 124)。
+- 「最後の `結果:` の行」の所には、`run-all.py` が最後に出す、`結果:` で始まる行を、字面を変えずに書く。
+- 「内訳」は、`run-all.py` が出す `結果(` で始まる 6 行を、出た順に 1 行ずつ `- 内訳: ` を付けて、字面を変えずに書く。件数はこの行にあり、省かない。
+- 流し直したら、`- 流し直し: なし` の代わりに、回ごとに `- 流し直し <回>: <理由>。前の回は <前の回の終了コードと結果の行>` の行を書く。
+  - 前の回に結果の行が出なかったとき(時間切れで止めたときなど。`run-all.py` は、止められると最後の `結果:` の行を出さない)は、`<前の回の終了コードと結果の行>` の所に `終了コード <数> / 結果の行なし(<理由>)` と書く。
+  - 最後に流した回の内訳の行の件数は、省かない。
 
 見出し `## レビュー差分の外で PR に入る commit` の欄に、次の行を書く。
 

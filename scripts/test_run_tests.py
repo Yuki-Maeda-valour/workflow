@@ -1,5 +1,6 @@
 """scripts/run-tests.py の回帰テスト。使い捨ての scripts/ に置いた小さなテストのファイルで動かす。"""
 
+import importlib.util
 import os
 import shutil
 import signal
@@ -13,6 +14,7 @@ from pathlib import Path
 
 
 RUNNER = Path(__file__).resolve().parent / "run-tests.py"
+RUN_UNITS = Path(__file__).resolve().parent / "run_units.py"
 
 PASSING = '''
 import unittest
@@ -183,13 +185,14 @@ class RunTestsTest(unittest.TestCase):
         self.scripts.mkdir()
         self.runner = self.scripts / "run-tests.py"
         shutil.copy2(RUNNER, self.runner)
+        shutil.copy2(RUN_UNITS, self.scripts / "run_units.py")
         self.log = self.root / "ran.txt"
 
     def write_test(self, name, text):
         (self.scripts / name).write_text(textwrap.dedent(text), encoding="utf-8")
 
     def set_shards(self, shards):
-        """写しの SHARDS を置き換える(本物の表は変えない)。"""
+        """コピーの SHARDS を置き換える(本物の表は変えない)。"""
         text = self.runner.read_text(encoding="utf-8")
         start = text.index("SHARDS = {")
         end = text.index("}\n", start) + 2
@@ -257,7 +260,7 @@ class Imports(unittest.TestCase):
         self.assertIn("結果: 7 件 / 失敗 0 件", result.stdout)
 
     def test_shard_count_mismatch_is_reported(self):
-        # 分けたプロセスが 1 つ欠けた状態(配った件数の合計が総数より少ない)を、写しで作る。
+        # 分けたプロセスが 1 つ欠けた状態(配った件数の合計が総数より少ない)を、コピーで作る。
         self.write_test("test_many.py", MANY)
         self.set_shards({"test_many.py": 3})
         text = self.runner.read_text(encoding="utf-8")
@@ -391,6 +394,37 @@ class Imports(unittest.TestCase):
                 result = self.run_runner(*args)
                 self.assertEqual(2, result.returncode, result.stdout + result.stderr)
                 self.assertFalse(self.log.exists())
+
+
+class UnitOrderTest(unittest.TestCase):
+    """単位の並べ方(重い順)。run-tests.py を読み込み、単位の順を見る。"""
+
+    @staticmethod
+    def load():
+        sys.dont_write_bytecode = True
+        spec = importlib.util.spec_from_file_location("run_tests_order", RUNNER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_unlisted_file_gets_default_weight_and_starts_before_lighter_ones(self):
+        module = self.load()
+        files = ["test_host_argv.py", "test_zzz_unlisted.py", "test_loop_startup.py", "test_validate.py"]
+        self.assertNotIn("test_zzz_unlisted.py", module.WEIGHTS)
+        units = module.build_units(module.make_jobs(files), "unused")
+        order = [unit.key for unit in module.run_units.slot_order(units)]
+        # 表に無いファイルは既定の 200 秒。軽い(1 秒の)ファイルより前、重いシャード(1 つ約 100 秒以下)より前に始まる。
+        self.assertEqual("unittest:test_zzz_unlisted.py", order[0])
+        self.assertEqual("unittest:test_host_argv.py", order[-1])
+        self.assertEqual(1 + 1 + 12 + 12, len(order))
+
+    def test_shard_weight_is_file_weight_divided_by_shard_count(self):
+        module = self.load()
+        units = module.build_units(module.make_jobs(["test_validate.py"]), "unused")
+        self.assertEqual(12, len(units))
+        self.assertEqual({module.WEIGHTS["test_validate.py"] / 12}, {unit.weight for unit in units})
+        self.assertEqual("unittest:test_validate.py[1/12]", units[0].key)
+        self.assertEqual("test_validate.py [1/12]", units[0].label)
 
 
 if __name__ == "__main__":
