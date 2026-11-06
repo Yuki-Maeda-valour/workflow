@@ -467,7 +467,7 @@ Issue 方式は [Issue 方式の契約](references/github-issue.md) §5「do-tas
      - この `git mv` が失敗したとき(sparse-checkout の定義外など)は `mv` に切り替えず停止して報告する(追記とステータス更新は済んでいて、残るのは改名だけである旨を添える)
    - **それ以外** → `mv -- '<dir>/進行中_{タスク名}.md' '<dir>/完了_{タスク名}.md'`(終了コード 1 = 未追跡・ignore 済み。未追跡への `git mv` は `fatal: not under version control` で失敗する)。
      - 終了コードが 0 でも 1 でもないとき(非 git・git の異常)は、追跡済みかを確かめられなかった旨と終了コードを完了報告に添える
-7. 完了報告は [references/writing-for-people.md](references/writing-for-people.md) の「8. 完了報告の型」に従う。途中で止まったときも同じ。`/ship-task` から呼ばれたときは枠を出さず、結果を返す。
+7. 完了報告は [references/writing-for-people.md](references/writing-for-people.md) の「8. 完了報告の型」に従う。途中で止まったときも同じ。`/ship-task` から呼ばれたときは枠を出さず、見出しの行も出さず、結果を返す。
    - 変更ファイル一覧・検査とレビューの内訳・確認手順ごとの状態と観察事実は、手順 4 の追加修正記録(commit が続く実行では `review-protocol.md` の記録)か会話に残す。枠では要約と場所を示し、失敗・未実施の理由と残課題は省かない。
    - 「確かめたこと」に、実装を受け持った AI と各レビュアーのモデルの名前と版を書く(書き方は手順 4 と同じ)。
    - 次の提案は枠の後に置く(`/update-doc --task=<完了_ のパス>` でドキュメント同期、コミットの提案 — **コミットはユーザーが求めた場合のみ**)。`/ship-task` から呼ばれたときは提案しない。

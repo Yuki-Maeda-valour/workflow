@@ -216,7 +216,7 @@ Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) �
 完了報告は [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」に従う。対象には設計の完了と書き、実装の完了と混同しない。
 - 実際のタスク MD パス・実装タスク数・レビュー反復回数・残る不確定点・次のステップ(`/do-task {実際のタスクMDパス}`)を各項目に含める。
 - 「確かめたこと」に、レビュアー・設計書を点検する AI・調べものを受け持つ AI ごとのモデルの名前と版を含める。
-- `/ship-task` から呼ばれたときは枠を出さず、続行判定に必要な結果と実際のパスを返す。
+- `/ship-task` から呼ばれたときは枠を出さず、見出しの行も出さず、続行判定に必要な結果と実際のパスを返す。
 
 **一気通貫の提案**: Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) §4「create-task の読み替え」で報告する。
 ファイル方式で、実装の分岐を左右する不確定点が残らず、依存タスクも解消されている場合は、完了報告の最後に「このまま実装 → doc 同期 → PR まで進めますか?(`/ship-task --task={実際のタスクMDパス}`)」を 1 行で提案する。
