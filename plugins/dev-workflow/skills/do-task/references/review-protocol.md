@@ -165,7 +165,7 @@ ignored の通常生成物は path・種別・mode だけを控え、内容を�
 - ship-task の Phase 4.5 で取り込むときは、次の順に行う。
   - 取り込みの前に、最後の commit の state で `verify --mode commit` と `pr-evidence` を行い、出力を保持する。
   - 取り込みの後は、HEAD(取り込みの commit か最後の commit)で別の `start` を取り、`take --phase doc`→snapshot→`seal`→(要るときは review)→`run-checks` を行う。
-  - review をしたときは、`attest`→stage→commit を doc と同じ mode で照合する。変わったファイルが無ければ空の commit(`--allow-empty`)にする。取り込みの commit の上に 1 つの commit を足すので、親がちょうど 1 つの照合のまま通る。
+  - review をしたときは、`attest`→stage→commit を doc と同じ mode で照合する。変わったファイルが無ければ空の commit(`--allow-empty`)にする。state の HEAD(取り込みの commit か最後の commit)の上に 1 つの commit を足すので、親がちょうど 1 つの commit を求める照合のまま通る。
   - ship-task の Phase 4.5 の `start` の HEAD は、取り込みの照合に通った M か、`integrate-guard.py commit` が作った M か、D でなければならない。
   - push 直前の照合は ship-task の references/integration.md §7 に従う。
 

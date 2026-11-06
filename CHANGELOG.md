@@ -2,6 +2,35 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 変更
+
+- `ship-task` に Phase 4.5「取り込みと品質ゲートの流し直し」を足した。対話で PR を開く前に、取り込み先(PR の base)の最新を作業ブランチに取り込み(merge)、品質ゲート(書式・型・テスト・ビルドの自動の検査)を流し直す。([Issue #373](https://github.com/Yuki-Maeda-valour/workflow/issues/373))
+  - 親 Issue #366 の 3 つ目の子。#371 で入った補助スクリプト `integrate-guard.py` と、#372 で入った手順の正本(元になる文書。ほかの文書はこれに合わせる)`references/integration.md` を、この版から `ship-task` が使う。
+  - `SKILL.md` に足した Phase 4.5 の手順(中身の正本は `integration.md`):
+    - 取り込みの前に、最後の commit の状態の記録(`review-guard.py` が保存する記録)で `verify --mode commit` と `pr-evidence` を行い、出力を保持する。
+    - `integrate-guard.py merge` で取り込む。rebase は使わない。
+    - 衝突したとき・取り込むとレビューした差分が変わるとき(`needs-review`)は、取り込みの commit を作り、レビューし直す。理由が `conflict` のときだけ、implementer(実装を受け持つ AI)に衝突を解かせる。
+    - 取り込んだ後の作業ツリーから、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「PR の前の手順」の節を読み、節の手順を書かれた順に行う。
+    - 品質ゲートは、取り込んだ後の設定から品質のコマンドを解決し直して、全件流す。取り込む commit が無く、節がファイルも検査のコマンドも持たず、機密のファイルの指定も増えず、節の履歴を読む確かめもレビューを求めないときは、同じ中身で流した最後の結果を使う。
+    - レビューをしたときは、レビューし直しと節の変更を 1 つの commit にする(変わったファイルが無ければ空の commit)。
+    - Phase 5 で公開する SHA(commit を指すハッシュ値)は、取り込みの後のレビューの commit、取り込みの commit、レビュー済みの最後の commit のうち、この順で最初にあるもの。push の直前の照合(照らし合わせて確かめること)は `integration.md` §7 のとおり。
+  - 行わないとき: `--unattended`・`--discover`・`--no-pr`・Phase 0 で push・PR をしないと決めたとき・parent-child(管理ルートと source のルートが別の構成)・`origin-repo.py` の `repo` が null のとき。理由を報告に書く。
+    - 無人のタスクの周(無人ループの 1 回分の実行)は、取り込んでいないことを PR 本文にも書く。許可の仲介(無人の実行で、操作を許すかどうかをその場で判定する仕組み)が、fetch と merge を拒否するため。
+    - 行わないときに「PR の前の手順」の節があれば、対話では PR を開かずに止める。無人のタスクの周は、節の手順を行っていないことを PR 本文に書き、merge の前に人が行う。
+  - 止まるとき(停止条件のまとめに足した):
+    - 衝突を解けない・印の無い衝突(衝突の印を書き込めない、バイナリなどのファイルの衝突)。
+    - 取り込みの後のレビューが未収束(レビューを繰り返しても、直す点が残った)・取り込みの後の品質ゲートが赤・節の確かめが落ちた。
+    - `integrate-guard.py` の失敗(事前検査で承認が要る設定が見つかった・fetch の失敗・名前のぶつかりなど)・機密の除外に当たるファイルを両方が変えた。
+    - 節に、`ship-task` が行えない手順(人が行う手順)が残る。PR を開かず、その手順と公開に要る値を報告する。
+  - `SKILL.md` のほかの所も合わせた: 原則 1・4・5、オプション表の `--no-pr`、Phase 5 の 1・3(PR 本文に「取り込み」の欄を足した)、最終ゲート。原則 5 と最終ゲートには、取り込み先への merge はしない(Phase 4.5 で取り込み先を作業ブランチへ merge するのは除く)と、向きを分けて書いた。
+  - references を合わせた:
+    - `do-task/references/review-protocol.md`: 取り込みの前後の照合の順序と、Phase 4.5 の `start` の HEAD。
+    - `do-task/references/github-issue.md`: `pr-evidence` を取り込みの前に取ること・Phase 4.5 で止まったときの扱い・その後の再開で使う SHA と `pr-evidence`。
+    - `ship-task/references/unattended-mode.md`: 人に確かめる場面の表に S14(Phase 4.5。無人の周では起きない)を足した。
+  - テスト(動きを自動で確かめるプログラム)`scripts/test_ship_integration_contract.py` に、`SKILL.md` とほかの references の字面を照らす 10 件を足した(3 件から 13 件)。
+
 ## v4.44.2
 
 ### 変更
