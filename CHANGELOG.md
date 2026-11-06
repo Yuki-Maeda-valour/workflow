@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.44.2
+
+### 変更
+
+- `ship-task` に、取り込みの手順の正本(元になる文書。ほかの文書はこれに合わせる)`references/integration.md` を足した。PR の前に取り込み先(PR の base)の最新を作業ブランチに取り込み、品質ゲート(書式・型・テスト・ビルドの自動の検査)を流し直す工程(Phase 4.5)の手順・`integrate-guard.py` の契約・止まったときの戻し方・限界を書く。([Issue #372](https://github.com/Yuki-Maeda-valour/workflow/issues/372))
+  - まだ、`ship-task/SKILL.md` からは指さない。`SKILL.md` に Phase 4.5 を足してこの文書を指す手順と、ほかの文書の更新は #373 で行う。
+  - テスト(動きを自動で確かめるプログラム)`scripts/test_ship_integration_contract.py`(文書の字面を照らす 3 件)を足した。`scripts/test_review_guard.py` に、取り込みの後の `review-guard.py` の経路を固定する 5 件を足した(100 件から 105 件)。`scripts/test_safe_git_callers.py` の `DOCS` に新しい文書を登録した。
+
 ## v4.44.1
 
 ### 変更
