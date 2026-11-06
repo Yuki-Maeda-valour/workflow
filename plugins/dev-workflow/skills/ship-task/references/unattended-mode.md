@@ -184,6 +184,7 @@ ship-task・do-task・update-doc と、do-task の references(base-commit.md・d
 | S11 | 発見の周の工程 D2(候補モードの返り値。discover-mode.md §7) | 起きない | 結果の行が `失敗扱い`・無い・照合に通らない → 失敗扱い(G2) |
 | S12 | 発見の周の工程 D3(候補 0 件。discover-mode.md §6) | 起きない | ブランチ・commit・PR を作らずに、結末 `候補なし` |
 | S13 | ship-task Phase 3・4 の commit の直前(index に状態ファイル) | PR に入る旨を示し、外すか残すかを確認 | 確認しない。§7 の照合(index に除外対象が無い)に通らなければ失敗扱い(G2) |
+| S14 | ship-task Phase 4.5(取り込み) | 衝突を解けない・取り込みの後のレビューが未収束・品質ゲートが赤なら停止する。判断を仰ぐ点は人に聞く | 起きない(無人の周は取り込みをしない) |
 | D1 | do-task 原則 3 | 設計と実態がずれたら、MD を更新するかユーザーに確認 | 保留(MD を更新しない) |
 | D2 | do-task 原則 4・Phase 6・review-protocol.md の「反復の終了条件とセーフティ」 | 判断を仰ぐ点(`--max-iter` 到達・同一指摘の 2 回連続残存)→ 判断を仰ぐ | 保留。Phase 5・5.5 からの差し戻しも数える(§3) |
 | D3 | do-task 検証のみモード | 修正に進むかはユーザーが決める | `--unattended` とは併用しない(失敗扱い) |

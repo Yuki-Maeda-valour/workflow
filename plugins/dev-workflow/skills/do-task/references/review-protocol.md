@@ -155,11 +155,19 @@ ignored の通常生成物は path・種別・mode だけを控え、内容を�
   `finalize` は template と同じ保留の行を 1 行だけ足し、UNAPPROVED と根拠を含める。
   `finalize --transition pending`、全 `verify` に `--task-transition pending` と期待バイト・根拠の保持値を渡し、同じ stage/commit 検査を通す。
   保留時に品質結果があれば `attest` に添付できるが、成功・承認とは表示しない。開始控えが無い場合は保存を成功扱いにしない。
-- push 直前と PR 作成直前は最後の commit の state で `verify --mode commit` をもう一度実行する。
+- Phase 4.5 の状態の記録も、取り込みの後の commit(P)も無いときは、push 直前と PR 作成直前は最後の commit の state で `verify --mode commit` をもう一度実行する。
   `pr-evidence` に同じ state・根拠・必要なら task 遷移引数を渡し、その stdout を検証欄に使う。`--mode commit` 以外は拒否する。
+  Phase 4.5 の状態の記録があって P が無いときは、ship-task の references/integration.md §7 のとおり、その記録の `verify --mode pre-stage` で照合する。
+  このときの検証欄には、ship-task の `references/integration.md` §3 の手順 1 で保持した `pr-evidence` を使う(その記録では `pr-evidence` を取らない)。
   実装の根拠欄は実装 commit 検査直後に生成して hash を保持し、doc の根拠欄と並べる。最終 doc の `start` HEAD は検証済み実装 HEAD でなければならない。
   PR には実コマンド・終了値・review 返答・binding・ignore/品質開示を載せる。task 記録から検証・APPROVED を復元しない。
   実動確認(実際に動かして、変更どおりに動くかを見る確認)の事実は検証担当が直接得て保持した結果だけを添え、実施不能は理由を示す。
+- ship-task の Phase 4.5 で取り込むときは、次の順に行う。
+  - 取り込みの前に、最後の commit の state で `verify --mode commit` と `pr-evidence` を行い、出力を保持する。
+  - 取り込みの後は、HEAD(取り込みの commit か最後の commit)で別の `start` を取り、`take --phase doc`→snapshot→`seal`→(要るときは review)→`run-checks` を行う。
+  - review をしたときは、`attest`→stage→commit を doc と同じ mode で照合する。変わったファイルが無ければ空の commit(`--allow-empty`)にする。state の HEAD(取り込みの commit か最後の commit)の上に 1 つの commit を足すので、親がちょうど 1 つの commit を求める照合のまま通る。
+  - ship-task の Phase 4.5 の `start` の HEAD は、取り込みの照合に通った M か、`integrate-guard.py commit` が作った M か、D でなければならない。
+  - push 直前の照合は ship-task の references/integration.md §7 に従う。
 
 ### 管理ルートと source の root が別の場合
 
