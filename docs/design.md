@@ -107,7 +107,7 @@ do-task / ship-task の新しい開始では、対象タスク本文の採用と
   - 1 晩・1 発見元ごとに PR を 1 本開き、人が見送りの印を付けるか消してから merge して、`候補_` を task_dir に入れる。発見元の候補モードは、task_dir の全状態のヘッダの指摘キーと照らして、既知の指摘を積まない(見送り = もう出さない / 消す = また出てよい)
   - data-audit の候補(未修正の脆弱性の場所)は、origin の push 先が非公開と確かめられたときだけ PR にする(確かめられなければ回さずに `候補なし`)。refactor の分析は公開でも回すが、セキュリティ由来の指摘は候補にしない
 
-**do-task の補助スクリプトと回帰テストの必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰テスト一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機の確認条件と再確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性は保証しない。必要環境の明示と起動前の診断は [Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121)、macOS 26.6.2 / arm64 の実測と制約は [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) に記録する。品質コマンドの監督と検証用コピーの扱いは、macOS で失敗 0 を期待する回帰テスト(`scripts/test_check_process.py`・`scripts/test_review_guard.py`。`Linux 専用: ` の 12 件は飛ばす)を持つ。この回帰テストは、`PATH` で選ばれる `bash` が 4.0 以上なら、GNU 系ツールなしで回せる。`implement-guard-selftest.sh` の Mac の実行は補助で、Linux の代わりにしない。回す手順と期待の件数は同じ `runtime-requirements.md`、結果は [Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239) に記録する。
+**do-task の補助スクリプトと回帰テストの必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰テスト一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機の確認条件と再確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性は保証しない。必要環境の明示と起動前の診断は [Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121)、macOS 26.6.2 / arm64 の実測と制約は [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) に記録する。品質コマンドの監督と検証用コピーの扱いは、macOS で失敗 0 を期待する回帰テスト(`scripts/test_check_process.py`・`scripts/test_review_guard.py`。`Linux 専用: ` のテストは飛ばす。飛ばす件数は `runtime-requirements.md` の「期待の件数」にある)を持つ。この回帰テストは、`PATH` で選ばれる `bash` が 4.0 以上なら、GNU 系ツールなしで回せる。`implement-guard-selftest.sh` の Mac の実行は補助で、Linux の代わりにしない。回す手順と期待の件数は同じ `runtime-requirements.md`、結果は [Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239) に記録する。
 
 **診断表示のC1置換**: `diff-snapshot.sh` は、既存の表示用関数で UTF-8 の C1(U+0080〜U+009F)を `?` に置き換える。限界として残す案は、診断の表示を書き換える文字が残るため採用しなかった。既存の Bash 機能で表示用コピーだけを加工し、新しい依存を足さない。元データによる承認・比較と patch は保持する。対象の診断・NOTEと限界の正本は [external-runners.md §9-1](../plugins/dev-workflow/skills/do-task/references/external-runners.md)。決定と検証は [Issue #152](https://github.com/Yuki-Maeda-valour/workflow/issues/152)(親 #77 の H2)を参照する。
 
@@ -393,6 +393,7 @@ source、doc、未承認保留は別の phase。文書は実装 commit 後に別
 
 品質コマンドは、起動した処理の停止を確認してから次へ進み、検証用コピーを削除する。
 時間切れは計画を打ち切る。中断や停止確認の失敗ではコピーを保持する([Issue #220](https://github.com/Yuki-Maeda-valour/workflow/issues/220))。
+落ちたコマンド(終了値が 0 以外か時間切れ)の出力は、末尾 1 MiB を、8 バイト以上の環境変数の値と検証用コピーの場所を決まった字に置き換えてから、結果の JSON の隣に残す([Issue #368](https://github.com/Yuki-Maeda-valour/workflow/issues/368))。
 停止・回復手順は [review-protocol.md](../plugins/dev-workflow/skills/do-task/references/review-protocol.md#品質コマンドの停止とコピーの保持)、
 Linux と他 POSIX の必要機構・保証範囲は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#品質コマンドの監督)を正本とする。
 他 POSIX の不在確認で一時的な `EPERM` が返っても、不在とは扱わない。親の回収後は signal 0 だけで既存の 5 秒の期限内に再確認し、`ESRCH` の確認なしにコピーを削除しない。

@@ -208,9 +208,11 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 必要環境: Python 3・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
-  - 期待の件数(2 本の合計 94 件):
-    - macOS: `Ran 94 tests`、最後の行が `OK (skipped=12)`。飛ばし 12 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 10 件・`CheckLifecycleTest` 2 件)。成功 82 件。
-    - Linux: `Ran 94 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 81 件。
+  - 期待の件数(2 本の合計 128 件。`test_review_guard.py` 100 件・`test_check_process.py` 28 件):
+    - macOS: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 11 件・`CheckLifecycleTest` 2 件)。成功 115 件。
+      - `skipUnless` の付け方から数えた値で、Mac では未確認。Mac で回したら実数に直す。
+    - Linux: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 115 件。
+      - 2026-11-06 に Linux(Git 2.34.1・Python 3.10.12)で回して確かめた。
   - 所要時間の目安: 4〜5 分(2026-10-31、macOS 26.6.2 / arm64 の 4 回の実行で 250〜276 秒)。
   - 数え方:
     - `grep -c "skipped 'Linux 専用: " <scratch>/run.log` と `grep -c "skipped 'macOS 専用: " <scratch>/run.log` で、OS ごとの飛ばしを数える。
@@ -220,13 +222,20 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - `Linux 専用: ` の飛ばしを、Mac の成功の根拠にしない。
   - テストの領域の名前(頭が `wf-proc-test-`)は、次のクラスのテストが起動するプロセス(実 CLI・anchor・品質コマンドとその子と孫・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
     - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `prove()` など、製品の置き場(`check-process.py` のパス)・品質コマンドの引数・`TMPDIR` のどれにもテストの領域を使わない `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
-    - ただし、`ReviewGuardTest` の `test_cli_run_checks_keeps_exit_codes_and_output_hashes` と `test_run_checks_clean_copy_commit_starts_no_background_maintenance` の `run-checks` は、anchor(Linux では監督)と品質コマンドがこの確認で見つかる。
-      - この 2 件は、品質コマンドの引数にテストの領域のパスを渡し、`TMPDIR` もテストの領域に置く。
-      - anchor と Linux の監督のコマンド行は、品質コマンドの引数をそのまま含む。
+    - ただし、`ReviewGuardTest` の次の 10 件の `run-checks` は、anchor(Linux では監督)と品質コマンドがこの確認で見つかる。
+      - `test_cli_run_checks_keeps_exit_codes_and_output_hashes`・`test_run_checks_clean_copy_commit_starts_no_background_maintenance`。
+      - #368 で足した 8 件: `test_run_checks_keeps_masked_output_of_failed_command_only`・`test_run_checks_keeps_last_mebibyte_from_a_line_start`・`test_run_checks_keeps_output_of_timed_out_command`・`test_hold_checks_keep_output_out_of_pr_evidence_and_task_record`・`test_run_checks_all_pass_keeps_receipt_shape_and_writes_no_output`・`test_run_checks_masks_real_path_of_copy_under_linked_tmpdir`・`test_run_checks_notice_lines_stay_one_line_each`・`test_run_checks_keeps_masked_output_within_one_mebibyte`。
+      - この 10 件は、品質コマンドの引数にテストの領域のパスを渡し、`TMPDIR` もテストの領域に置く。
+      - anchor と Linux の監督のコマンド行は、品質コマンドの引数をそのまま含む。Linux の監督のコマンド行は、出力の置き場(`TMPDIR` の下)の `--result` のパスも含む。
     - ただし、`ReviewGuardTest` の `test_run_checks_inside_reviewed_code_does_not_create_bytecode` の `run-checks` は、anchor(Linux では監督)だけがこの確認で見つかる。品質コマンドは見つからない。
       - このテストは、製品をテストの領域へコピーし、コピーした `review-guard.py` で `run-checks` を回す。
       - `review-guard.py` は、自分と同じフォルダの `check-process.py` を使う。
       - anchor と Linux の監督のコマンド行は、その `check-process.py` の絶対パスを含む。
+    - ただし、`ReviewGuardTest` の `test_run_checks_keeps_empty_output_of_command_that_cannot_start` の `run-checks` は、anchor(Linux では監督)だけがこの確認で見つかる。
+      - 品質コマンドは、テストの領域の中の無いパスなので起動しない。anchor と Linux の監督のコマンド行は、そのパスをそのまま含む。
+    - `ReviewGuardTest` の `test_run_checks_refuses_used_output_paths_before_running` の `run-checks` は、コマンドを流す前に止まるので、anchor も品質コマンドも起動しない。
+    - #368 で足したテストの並びは、Linux で 1 件ずつ回しながら確かめた(2026-11-06)。macOS の並びは未確認。
+      - 品質コマンドはすぐ終わるので、上の `ps` を繰り返すだけでは捕まえにくい(8 件中 2 件)。`/proc/<pid>/cmdline`(`ps` の `command` と同じ中身)を続けて読むと、8 件とも見つかった。
   - anchor の消失を確かめるテストは、プロセスグループに `TERM` を無視する子を置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後にプロセスグループの全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
   - 時間切れ・停止の信号を確かめるテストの、`TERM` を無視する子は、`SIGKILL` で止まることを確かめるために置く。
   - #289 で直した不具合の回帰テスト(`CheckProcessDarwinTest` の `test_issue289_term_obeying_timeout_is_timed_out`・`test_issue289_term_obeying_parent_signal_is_interrupted`):
