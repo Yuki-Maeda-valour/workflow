@@ -837,6 +837,220 @@ while time.monotonic() < end:
                            "--out", str(self.root / "bad-proof"), expect=2)
         self.assertIn("失敗", result.stderr)
 
+    # --- 落ちたコマンドの出力を残す(#368) ---
+    def kept_run(self, commands, env=None, out_name="receipt.json", timeout=None, expect=1, prepare=True):
+        # 計画を書き、TMPDIR を試験の領域に向け、umask を 022 にして run-checks を流す。TMPDIR の下は空に戻る。
+        if prepare and not self.state.exists():
+            self.begin()
+            self.capture(prove=False)
+        plan = self.root / "kept-plan.json"
+        plan.write_text(json.dumps({"commands": [{"name": name, "argv": argv} for name, argv in commands]}))
+        copies = self.root / "tmp"
+        copies.mkdir(exist_ok=True)
+        out = self.root / out_name
+        extra = ["--timeout", str(timeout)] if timeout else []
+        old = os.umask(0o022)
+        try:
+            with mock.patch.dict(os.environ, {"TMPDIR": str(copies), **(env or {})}):
+                proc = self.guard(*self.context("run-checks"), "--checks-file", str(plan),
+                                  "--expect-checks-sha256", self.digest(plan), "--out", str(out), *extra, expect=expect)
+        finally:
+            os.umask(old)
+        self.assertEqual([], list(copies.iterdir()))
+        return proc, out
+
+    def kept_notices(self, out, stream_indexes):
+        return [f"品質コマンドの出力を残した: {json.dumps(name, ensure_ascii=True)} {stream} "
+                f"{json.dumps(str(out.with_name(f'{out.name}.{index}.{stream}')), ensure_ascii=True)}"
+                for name, index in stream_indexes for stream in ("stdout", "stderr")]
+
+    def test_run_checks_keeps_masked_output_of_failed_command_only(self):
+        secret = "kept-secret-0123456789-abcdefghijklmnop"
+        self.assertEqual(39, len(secret))
+        cwdfile = self.root / "cwd.txt"
+        code = f"""import os, sys
+secret = os.environ['WF_KEPT_SECRET']
+open({str(cwdfile)!r}, 'w').write(os.getcwd())
+print('secret=' + secret)
+print('cwd=' + os.getcwd() + '/scripts/x.py')
+print('short=' + os.environ['WF_KEPT_SHORT'])
+print('eight=' + os.environ['WF_KEPT_EIGHT'])
+print('part=second-line-BBBB')
+print(' ' * 12)
+sys.stdout.write('token=' + secret[:20])
+print('err7', file=sys.stderr)
+print('secret=' + secret, file=sys.stderr)
+sys.exit(7)
+"""
+        env = {"WF_KEPT_SECRET": secret, "WF_KEPT_SHORT": "abcdefg", "WF_KEPT_EIGHT": "eight-8b",
+               "WF_KEPT_MULTI": "first-line-AAAA\nsecond-line-BBBB", "WF_KEPT_SPACES": " " * 12}
+        proc, out = self.kept_run([("pass", [sys.executable, "-c", "print('out0')", str(self.root)]),
+                                   ("fail", [sys.executable, "-c", code, str(self.root)])], env=env)
+        results = json.loads(out.read_text())["results"]
+        self.assertEqual({"name", "argv", "exit_code", "stdout_sha256", "stderr_sha256", "recovery_method", "recovery_scope"}, set(results[0]))
+        self.assertEqual({"name", "argv", "exit_code", "stdout_sha256", "stderr_sha256", "recovery_method", "recovery_scope", "kept_output"}, set(results[1]))
+        self.assertEqual([], list(self.root.glob("receipt.json.0.*")))
+        stdout_file = self.root / "receipt.json.1.stdout"
+        stderr_file = self.root / "receipt.json.1.stderr"
+        expected_out = ("secret=<環境変数 WF_KEPT_SECRET>\ncwd=<検証用コピー>/scripts/x.py\nshort=abcdefg\n"
+                        "eight=<環境変数 WF_KEPT_EIGHT>\npart=<環境変数 WF_KEPT_MULTI>\n" + " " * 12 +
+                        "\ntoken=<環境変数 WF_KEPT_SECRET>").encode()
+        self.assertEqual(expected_out, stdout_file.read_bytes())
+        self.assertEqual("err7\nsecret=<環境変数 WF_KEPT_SECRET>\n".encode(), stderr_file.read_bytes())
+        raw_out = (f"secret={secret}\ncwd={cwdfile.read_text()}/scripts/x.py\nshort=abcdefg\neight=eight-8b\n"
+                   f"part=second-line-BBBB\n{' ' * 12}\ntoken={secret[:20]}").encode()
+        raw_err = f"err7\nsecret={secret}\n".encode()
+        kept = results[1]["kept_output"]
+        self.assertEqual({"stdout", "stderr"}, set(kept))
+        for stream, path, raw, masked in (("stdout", stdout_file, raw_out, expected_out), ("stderr", stderr_file, raw_err, None)):
+            self.assertEqual(path.name, kept[stream]["file"])
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), kept[stream]["sha256"])
+            self.assertEqual(len(raw), kept[stream]["total_bytes"])
+            self.assertEqual(0, kept[stream]["kept_from_byte"])
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), results[1][stream + "_sha256"])
+            self.assertEqual(0o600, stat.S_IMODE(path.stat().st_mode))
+        self.assertEqual(self.kept_notices(out, [("fail", 1)]), proc.stderr.splitlines())
+        self.assertEqual(f"CHECKS_SHA256={hashlib.sha256(out.read_bytes()).hexdigest()}\n", proc.stdout)
+
+    def test_run_checks_keeps_last_mebibyte_from_a_line_start(self):
+        secret = "kept-secret-0123456789-abcdefghijklmnop"
+        code = f"""import os, sys
+secret = os.environ['WF_KEPT_SECRET']
+head = b'h' * 99 + b'\\n'
+middle = ('S=' + secret + '\\n').encode()
+rest = (b'r' * 99 + b'\\n') * 10485 + b'z' * 40 + b'\\n'
+sys.stdout.buffer.write(head + middle + rest)
+sys.exit(1)
+"""
+        proc, out = self.kept_run([("big", [sys.executable, "-c", code, str(self.root)])], env={"WF_KEPT_SECRET": secret})
+        rest = (b"r" * 99 + b"\n") * 10485 + b"z" * 40 + b"\n"
+        total = 100 + 42 + len(rest)
+        self.assertEqual(1048576 + 107, total)
+        kept = json.loads(out.read_text())["results"][0]["kept_output"]["stdout"]
+        data = (self.root / "receipt.json.0.stdout").read_bytes()
+        self.assertEqual(rest, data)
+        self.assertNotIn(secret[5:].encode(), data)
+        self.assertNotIn(b"<", data)
+        self.assertEqual(total, kept["total_bytes"])
+        self.assertEqual(142, kept["kept_from_byte"])
+
+    def test_run_checks_keeps_output_of_timed_out_command(self):
+        wait = ("import signal, sys, time; signal.signal(signal.SIGTERM, lambda *a: sys.exit(0)); "
+                "print('before-timeout', flush=True); time.sleep(30)")
+        later = self.root / "later-mark"
+        proc, out = self.kept_run([("wait", [sys.executable, "-c", wait, str(self.root)]),
+                                   ("later", [sys.executable, "-c", f"open({str(later)!r}, 'w').close()", str(self.root)])],
+                                  timeout=1)
+        results = json.loads(out.read_text())["results"]
+        self.assertEqual(1, len(results))
+        self.assertIsNone(results[0]["exit_code"])
+        self.assertEqual("timeout", results[0]["error"])
+        self.assertEqual(b"before-timeout\n", (self.root / "receipt.json.0.stdout").read_bytes())
+        self.assertFalse(later.exists())
+
+    def test_run_checks_refuses_used_output_paths_before_running(self):
+        self.begin()
+        self.capture(prove=False)
+        mark = self.root / "mark"
+        for used in ("used.json", "used.json.0.stdout", "used.json.0.stderr"):
+            with self.subTest(used=used):
+                (self.root / used).write_text("x")
+                proc, out = self.kept_run([("mark", [sys.executable, "-c", f"open({str(mark)!r}, 'w').close()", str(self.root)])],
+                                          out_name="used.json", expect=2, prepare=False)
+                self.assertIn("出力先は未使用のパスが必要", proc.stderr)
+                self.assertFalse(mark.exists())
+                (self.root / used).unlink()
+
+    def test_hold_checks_keep_output_out_of_pr_evidence_and_task_record(self):
+        self.begin()
+        (self.repo / "source.txt").write_text("unfinished work")
+        self.capture(phase="hold")
+        code = "print('KEPT-MARKER-' + '368'); raise SystemExit(3)"
+        proc, out = self.kept_run([("fail", [sys.executable, "-c", code, str(self.root)])], out_name="hold-checks.json", prepare=False)
+        marker = "KEPT-MARKER-368"
+        kept_file = self.root / "hold-checks.json.0.stdout"
+        self.assertEqual((marker + "\n").encode(), kept_file.read_bytes())
+        receipt = json.loads(out.read_text())
+        self.proof = self.root / "hold-evidence.json"
+        self.guard(*self.context("attest"), "--checks", str(out), "--expect-checks-sha256", self.digest(out),
+                   "--hold-reason", "D1 needs decision", "--hold-next", "要件を確認する", "--out", str(self.proof))
+        self.proof_hash = self.digest(self.proof)
+        self.assertEqual(receipt["results"][0]["kept_output"], json.loads(self.proof.read_text())["checks"]["results"][0]["kept_output"])
+        completed, expected = self.complete("pending")
+        self.verify("--task-transition", "pending", "--expected-task", str(expected))
+        self.git("add", "-A")
+        self.verify("--mode", "stage", "--task-transition", "pending", "--expected-task", str(expected))
+        self.git("commit", "-qm", "hold")
+        pr = self.guard(*self.context("pr-evidence"), "--evidence", str(self.proof), "--expect-evidence-sha256", self.proof_hash,
+                        "--task-transition", "pending", "--expected-task", str(expected),
+                        "--expect-task-sha256", self.expected_hash)
+        self.assertIn("exit=3", pr.stdout)
+        kept = receipt["results"][0]["kept_output"]
+        hidden = [marker, kept_file.name, "kept_output", kept["stdout"]["sha256"], kept["stderr"]["sha256"]]
+        for text in (pr.stdout, completed.read_text()):
+            for item in hidden:
+                self.assertNotIn(item, text)
+
+    def test_run_checks_all_pass_keeps_receipt_shape_and_writes_no_output(self):
+        proc, out = self.kept_run([("one", [sys.executable, "-c", "print('o1')", str(self.root)]),
+                                   ("two", [sys.executable, "-c", "import sys; print('e2', file=sys.stderr)", str(self.root)])],
+                                  out_name="pass-receipt.json", expect=0)
+        receipt = json.loads(out.read_text())
+        self.assertEqual({"kind", "review_binding_sha256", "clean_checkout", "plan_sha256", "results"}, set(receipt))
+        for item in receipt["results"]:
+            self.assertEqual({"name", "argv", "exit_code", "stdout_sha256", "stderr_sha256", "recovery_method", "recovery_scope"}, set(item))
+        self.assertEqual([], list(self.root.glob("pass-receipt.json.*")))
+        self.assertEqual("", proc.stderr)
+        self.assertEqual(f"CHECKS_SHA256={hashlib.sha256(out.read_bytes()).hexdigest()}\n", proc.stdout)
+
+    def test_run_checks_keeps_empty_output_of_command_that_cannot_start(self):
+        proc, out = self.kept_run([("absent", [str(self.root / "absent-command")])])
+        item = json.loads(out.read_text())["results"][0]
+        self.assertEqual(127, item["exit_code"])
+        empty = hashlib.sha256(b"").hexdigest()
+        for stream in ("stdout", "stderr"):
+            path = self.root / f"receipt.json.0.{stream}"
+            self.assertEqual({"file": path.name, "sha256": empty, "total_bytes": 0, "kept_from_byte": 0}, item["kept_output"][stream])
+            self.assertEqual(b"", path.read_bytes())
+
+    def test_run_checks_masks_real_path_of_copy_under_linked_tmpdir(self):
+        self.begin()
+        self.capture(prove=False)
+        real = self.root / "real-tmp"
+        real.mkdir()
+        (self.root / "link-tmp").symlink_to(real)
+        plan = self.root / "link-plan.json"
+        code = "import os; print('cwd=' + os.getcwd()); raise SystemExit(2)"
+        plan.write_text(json.dumps({"commands": [{"name": "cwd", "argv": [sys.executable, "-c", code, str(self.root)]}]}))
+        out = self.root / "link-receipt.json"
+        with mock.patch.dict(os.environ, {"TMPDIR": str(self.root / "link-tmp")}):
+            self.guard(*self.context("run-checks"), "--checks-file", str(plan), "--expect-checks-sha256", self.digest(plan),
+                       "--out", str(out), expect=1)
+        self.assertEqual("cwd=<検証用コピー>\n".encode(), (self.root / "link-receipt.json.0.stdout").read_bytes())
+        self.assertEqual([], list(real.iterdir()))
+
+    def test_run_checks_notice_lines_stay_one_line_each(self):
+        proc, out = self.kept_run([("fail", [sys.executable, "-c", "raise SystemExit(1)", str(self.root)])], out_name="new\nline.json")
+        self.assertEqual(self.kept_notices(out, [("fail", 0)]), proc.stderr.splitlines())
+        self.assertEqual(2, len(proc.stderr.splitlines()))
+        self.assertTrue(proc.stderr.endswith("\n") and proc.stderr.count("\n") == 2)
+        for stream in ("stdout", "stderr"):
+            self.assertTrue((self.root / f"new\nline.json.0.{stream}").exists())
+
+    def test_run_checks_keeps_masked_output_within_one_mebibyte(self):
+        name = "WF_KEPT_" + "N" * 504
+        self.assertEqual(512, len(name))
+        code = "import sys; sys.stdout.write('k8bytes!\\n' * 100000); sys.exit(1)"
+        proc, out = self.kept_run([("many", [sys.executable, "-c", code, str(self.root)])], env={name: "k8bytes!"})
+        line = f"<環境変数 {name}>\n".encode()
+        self.assertEqual(528, len(line))
+        data = (self.root / "receipt.json.0.stdout").read_bytes()
+        self.assertEqual(line * 1985, data)
+        self.assertEqual(1048080, len(data))
+        kept = json.loads(out.read_text())["results"][0]["kept_output"]["stdout"]
+        self.assertEqual(900000, kept["total_bytes"])
+        self.assertEqual(882135, kept["kept_from_byte"])
+
     def test_all_entrypoints_run_precheck_before_collecting_contents(self):
         self.take()
         (self.repo / ".gitattributes").write_text("*.txt filter=unsafe\n")
@@ -1411,6 +1625,7 @@ Path({str(later)!r}).write_text('absent')
             self.assertIn("検証用コピーを保持", stderr)
             self.assertRegex(stderr, f"終了通知 {int(number)} を受けた")
             self.assertIsNone(receipt)
+            self.assertEqual([], list(self.root.glob("receipt.json*")))
             self.assertTrue(copy.exists())
             self.assertFalse(later.exists())
             return
@@ -1418,6 +1633,7 @@ Path({str(later)!r}).write_text('absent')
             self.assertEqual(1, running.returncode, stderr)
             self.assertEqual(1, len(receipt["results"]))
             self.assertEqual("timeout", receipt["results"][0]["error"])
+            self.assertEqual("receipt.json.0.stdout", receipt["results"][0]["kept_output"]["stdout"]["file"])
             self.assertFalse(later.exists())
         else:
             self.assertEqual(0, running.returncode, stderr)
@@ -1488,7 +1704,7 @@ class CheckLifecycleTest(unittest.TestCase):
             self.tmp.cleanup()
         self.assertEqual([], left, "試験のプロセスが残った")
 
-    def invoke(self, codes, timeout=1):
+    def invoke(self, codes, timeout=1, current=None):
         import argparse
         plan = self.root / "plan.json"
         plan.write_text(json.dumps({"commands": [{"name": str(i), "argv": [sys.executable, "-c", code, str(self.root)]}
@@ -1499,11 +1715,15 @@ class CheckLifecycleTest(unittest.TestCase):
         original_mkdtemp = tempfile.mkdtemp
         def make_directory(suffix=None, prefix=None, dir=None):
             return original_mkdtemp(suffix=suffix, prefix=prefix, dir=self.root)
+        self.notices = io.StringIO()
+        check = {"return_value": True} if current is None else {"side_effect": current}
         with mock.patch.object(self.guard.tempfile, "mkdtemp", side_effect=make_directory), \
              mock.patch.object(self.guard, "read_context", return_value=(self.root, self.saved, [])), \
-             mock.patch.object(self.guard, "check_current", return_value=True), \
+             mock.patch.object(self.guard, "check_current", **check), \
              mock.patch.object(self.guard, "public_path"), \
-             mock.patch.object(self.guard, "output_json", side_effect=lambda p, value, *_: p.write_text(json.dumps(value))):
+             mock.patch.object(self.guard, "safe_output"), \
+             mock.patch.object(self.guard, "output_json", side_effect=lambda p, value, *_: p.write_text(json.dumps(value))), \
+             contextlib.redirect_stderr(self.notices):
             return self.guard.run_checks(args)
 
     def test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan(self):
@@ -1589,6 +1809,34 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         self.assertEqual([7, 0], [item['exit_code'] for item in results])
         self.assertEqual(hashlib.sha256(b'output\n').hexdigest(), results[0]['stdout_sha256'])
         self.assertFalse(Path(cleanfile.read_text()).exists())
+        self.assertEqual(b'output\n', (self.root / 'receipt.json.0.stdout').read_bytes())
+        self.assertNotIn('kept_output', results[1])
+        self.assertIn('品質コマンドの出力を残した', self.notices.getvalue())
+
+    def test_kept_output_is_written_only_after_the_set_is_unchanged(self):
+        with self.assertRaisesRegex(self.guard.GuardError, "品質実行中に集合が変わった"):
+            self.invoke(["raise SystemExit(5)"], current=[True, False])
+        self.assertEqual([], list(self.root.glob("receipt.json*")))
+
+    def test_kept_output_write_failure_writes_no_receipt(self):
+        with mock.patch.object(self.guard, "create_bytes", side_effect=self.guard.GuardError("injected")):
+            with self.assertRaisesRegex(self.guard.GuardError, "injected"):
+                self.invoke(["raise SystemExit(5)"])
+        self.assertFalse((self.root / "receipt.json").exists())
+
+    def test_retained_copy_writes_no_kept_output_even_after_a_failed_command(self):
+        real = self.process_helper.run_command
+        calls = []
+        def run(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 2:
+                raise self.process_helper.RecoveryError("not absent")
+            return real(*args, **kwargs)
+        with mock.patch.object(self.guard, "check_process_module", return_value=self.process_helper), \
+             mock.patch.object(self.process_helper, "run_command", side_effect=run):
+            with self.assertRaisesRegex(self.guard.GuardError, "検証用コピーを保持"):
+                self.invoke(["raise SystemExit(3)", "pass"])
+        self.assertEqual([], list(self.root.glob("receipt.json*")))
 
     def test_helper_import_restores_bytecode_setting_even_on_failure(self):
         import importlib.machinery
@@ -1803,6 +2051,99 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
             with self.assertRaisesRegex(self.guard.GuardError, "検証用コピーを保持") as caught:
                 self.invoke(["pass", f"from pathlib import Path; Path({str(later)!r}).touch()"])
         self.assert_retained(caught, "プロセスグループの不在を確認できない", later, before)
+
+
+class KeptOutputRuleTest(unittest.TestCase):
+    """残す出力の置き換えと切り方の規則。足した関数を直接呼ぶ。"""
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location("kept_output_guard", SCRIPT)
+        cls.guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.guard)
+
+    @staticmethod
+    def label(name):
+        return f"<環境変数 {name}>".encode()
+
+    def test_mask_table_uses_long_values_lines_and_copy_paths(self):
+        environ = {"B_SAME": "same-value-123", "A_SAME": "same-value-123", "SHORT": "1234567",
+                   "LINES": "line-one-aaaa\nline-two-bbbb\nxx", "SPACES": " " * 12,
+                   "F_PADDED": " \tpadded-value-1 \r"}
+        table = self.guard.mask_table(environ, [Path("/c1"), Path("/real/copy-2")])
+        copy = "<検証用コピー>".encode()
+        self.assertEqual({b"/c1": copy, b"/real/copy-2": copy,
+                          b"same-value-123": self.label("A_SAME"),
+                          b"line-one-aaaa\nline-two-bbbb\nxx": self.label("LINES"),
+                          b"line-one-aaaa": self.label("LINES"), b"line-two-bbbb": self.label("LINES"),
+                          b"padded-value-1": self.label("F_PADDED")}, table)
+        self.assertEqual("x= <環境変数 F_PADDED> .".encode(), self.guard.mask_output(b"x= padded-value-1 .", table))
+
+    def test_mask_output_prefers_longer_values_and_does_not_mask_tokens_again(self):
+        table = self.guard.mask_table({"LONGER": "/x/y/z/w/v/u", "PYTHONPATH": "/x/y/z/w/v", "VAR_NAME": "PYTHONPATH"}, [])
+        self.assertEqual("<環境変数 LONGER> <環境変数 PYTHONPATH> <環境変数 VAR_NAME>".encode(),
+                         self.guard.mask_output(b"/x/y/z/w/v/u /x/y/z/w/v PYTHONPATH", table))
+        self.assertEqual(b"anything", self.guard.mask_output(b"anything", {}))
+
+    def test_kept_part_starts_at_a_line_when_cut(self):
+        self.assertEqual((b"abc\ndef\n", 0), self.guard.kept_part(b"abc\ndef\n", 8, {}))
+        self.assertEqual((b"rest\n", 95), self.guard.kept_part(b"partial\nrest\n", 100, {}))
+        self.assertEqual((b"", 100), self.guard.kept_part(b"onlypartial", 100, {}))
+
+    def test_mask_output_covers_overlapping_values_and_a_cut_end(self):
+        table = self.guard.mask_table({"A_PREFIX": "abcdefgh", "SECRET": "efghSECRET-VALUE-123"}, [])
+        self.assertEqual("<環境変数 A_PREFIX><環境変数 SECRET> end".encode(),
+                         self.guard.mask_output(b"abcdefghSECRET-VALUE-123 end", table))
+        self.assertEqual("x <環境変数 SECRET>".encode(), self.guard.mask_output(b"x efghSECR", table))
+        self.assertEqual(b"x efghSEC", self.guard.mask_output(b"x efghSEC", table))
+
+    def test_kept_part_narrows_to_one_mebibyte_after_masking(self):
+        name = "WF_KEPT_" + "N" * 504
+        table = self.guard.mask_table({name: "k8bytes!"}, [])
+        self.assertEqual((b"", 1048576), self.guard.kept_part(b"k8bytes!" * 131072, 1048576, table))
+        data = b"k8bytes!\n" * 100000
+        line = self.label(name) + b"\n"
+        self.assertEqual((line * 1985, 882135), self.guard.kept_part(data, len(data), table))
+
+    def test_mask_table_keeps_newlines_out_of_tokens(self):
+        table = self.guard.mask_table({"A\nB": "nl-value"}, [])
+        self.assertEqual({b"nl-value": "<環境変数 A\\nB>".encode()}, table)
+        self.assertNotIn(b"\n", table[b"nl-value"])
+        data = b"nl-value\n" * 60000
+        kept, start = self.guard.kept_part(data, len(data), table)
+        self.assertEqual(table[b"nl-value"] + b"\n", kept[:20])
+        self.assertEqual((table[b"nl-value"] + b"\n") * 52428, kept)
+        self.assertEqual(1048560, len(kept))
+        self.assertEqual(68148, start)
+        self.assertEqual(b"\n"[0], data[start - 1])
+
+    def test_mask_output_covers_a_value_cut_at_the_start(self):
+        table = self.guard.mask_table({"PEM": "-----BEGIN-----\nAAAAAAAAAAAA\nBBBBBBBBBBBB\nTU4="}, [])
+        self.assertEqual("<環境変数 PEM>\nnext\n".encode(), self.guard.mask_output(b"BBBBBBBBBBBB\nTU4=\nnext\n", table))
+        self.assertEqual(b"TU4=\nnext\n", self.guard.mask_output(b"TU4=\nnext\n", table))
+
+    def test_mask_output_prefers_the_longest_fragment_across_values_at_the_end(self):
+        table = self.guard.mask_table({"A": "12345678abcdefghijklmnopqrstuvwx", "B": "SECRET-VALUE-12345678Z"}, [])
+        self.assertEqual(self.label("B"), self.guard.mask_output(b"SECRET-VALUE-12345678", table))
+
+    def test_mask_output_prefers_the_longest_fragment_across_values_at_the_start(self):
+        table = self.guard.mask_table({"A": "x" * 40 + "HELLOWOR", "B": "pre-HELLOWORLDSECRET123"}, [])
+        self.assertEqual(self.label("B") + b" rest\n", self.guard.mask_output(b"HELLOWORLDSECRET123 rest\n", table))
+
+    def test_kept_part_masks_a_cut_multiline_value_even_when_a_longer_value_competes(self):
+        table = self.guard.mask_table({"PEM": "AAAA\nBBBBBBBBBBBB\nTU4=", "LONG": "x" * 40 + "BBBBBBBB"}, [])
+        data = b"AAAA\nBBBBBBBBBBBB\nTU4=\nnext\n"
+        self.assertEqual(self.label("PEM") + b"\nnext\n", self.guard.kept_part(data, 10 ** 7, table)[0])
+
+    def test_kept_part_cuts_masked_output_at_its_own_line_starts(self):
+        a, b = "A_" + "N" * 510, "B_" + "N" * 510
+        value = "L0000000\nL0000001\nL0000002"
+        table = self.guard.mask_table({a: "k8bytes!", b: value}, [])
+        data = value.encode() * 2000 + b"\nFAIL\nk8bytes!\ndiagnostic\n"
+        self.assertEqual(52026, len(data))
+        kept, start = self.guard.kept_part(data, len(data), table)
+        self.assertEqual(b"FAIL\n" + self.label(a) + b"\ndiagnostic\n", kept)
+        self.assertEqual(544, len(kept))
+        self.assertEqual(52001, start)
 
 
 if __name__ == "__main__":
