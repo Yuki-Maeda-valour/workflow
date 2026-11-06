@@ -153,13 +153,6 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。
 
-`implement-guard-selftest.sh` は、単位ごとに流せる。
-
-- `--list`: `--only` に渡せる単位を、1 行に 1 つ出す(78 行。群 12・M のケース 27・N のケース 13・L の変異 26)。何も作らない。
-- `--only <単位>`: その単位だけを流す。変異は 1 つずつ流せる(`--only L-<記号>`)。
-- `--check-units <単位,単位,...>`: 渡した単位が、全ケースをちょうど 1 回ずつ覆うかを見る(0 か 1 で終わる)。何も作らない。
-- 単位を足すときは、`MUT_IDS`(変異の記号)と `ALL_CASES`(ケース ID)を直す。`--list` が覆いを確かめ、崩れていれば終了コード 1 になる。
-
 全回帰テスト(merge の前)は、1 つのコマンドで流す。
 
 - `python3 -B scripts/run-all.py`
