@@ -30,12 +30,22 @@ SECTION_HEADING = "## 応答の書き方"
 PLACEHOLDER = "{{RESPONSE_STYLE}}"
 ITEM_RE = re.compile(r"^\s*([1-8])\. (.*)$")
 
-# 固定の文に必ずある字面(優先順位・コミットメッセージ・用語集・字面を変えない行)
+# 口調(報告調)のマーカー 11 種。この順で口調の表に並ぶ
+MARKERS = ("是", "否", "告", "解", "答", "提案", "警告", "問", "依頼", "経過", "異常")
+MARKER_ALT = "|".join(MARKERS)
+# 句点で終わる旧い形の字面(Issue #382 の完了条件 1 の grep と同じ型)
+OLD_MARKER_RE = re.compile(rf"[「| `、]({MARKER_ALT})。")
+
+# 固定の文に必ずある字面(優先順位・コミットメッセージ・用語集・字面を変えない行・終わりの報告の見出し)
 REQUIRED_PHRASES = (
     "決まった書式 > 正確さ > 簡潔さ > 口調",
     "コミットメッセージとタイトルは",
     "用語集",
     "同じ行に何も足さない",
+    "`## 【<結果>】<対象>`",
+    "区切り線の前は空行にする",
+    "見出しの `【】` は段落の印ではない",
+    "skill が報告の形を決めているときは、skill の形に従う",
 )
 
 
@@ -185,6 +195,56 @@ class WritingRulesTest(unittest.TestCase):
         tone = strip_trailing_blank(TONE_REPORT.read_text(encoding="utf-8").split("\n"))
         self.assertEqual(tone, self.repo_split()[1])
 
+    def test_tone_table_uses_bracketed_markers_in_order(self):
+        tone = self.repo_split()[1]
+        rows = [
+            line for line in tone
+            if line.startswith("|")
+            and not line.startswith("| マーカー |")
+            and not re.fullmatch(r"\|(-+\|)+", line)
+        ]
+        self.assertEqual(
+            [f"【{m}】" for m in MARKERS],
+            [row.split("|")[1].strip() for row in rows],
+        )
+        text = "\n".join(tone)
+        self.assertNotRegex(text, rf"「({MARKER_ALT})。」")
+        self.assertNotRegex(text, rf"(?m)^\| ({MARKER_ALT})。 \|")
+        # 置き方の形の決まり(句点なし・太字にしない・本文は直後)と、太字の印が無いこと
+        for phrase in ("後ろに句点を付けない", "太字にしない", "本文は括弧の直後に続ける"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, text)
+        self.assertNotRegex(text, rf"\*\*【({MARKER_ALT})】\*\*")
+
+    def test_tone_section_regex_matches_new_and_old_markers(self):
+        # 6 節の「口調を決めた別の節」の手がかりの正規表現を、本文から取り出して使う
+        tone = "\n".join(section_lines(WRITING_RULES, lambda line: line.startswith("## 6. ")) or [])
+        found = re.findall(r"行頭がマーカー\(`([^`]+)`\)", tone)
+        self.assertEqual(1, len(found), "6 節に「行頭がマーカー(`…`)」の正規表現がちょうど 1 つない")
+        pattern = re.compile(found[0])
+        # 旧い形の見本は、Issue #382 の完了条件 1 の grep に当たらないよう、字面を 2 つに分けて書く
+        old_row = "| 告" "。 | 事実 |"
+        for line in ("| 【告】 | 事実 |", "- 【問】 進めますか", "【経過】待っています", old_row):
+            with self.subTest(match=line):
+                self.assertRegex(line, pattern)
+        # 行の途中の印には一致しない(`^` で行頭に限る)
+        for line in ("告げます。", "結論の文末に告げます。", "| 報告 | x |", "本文の途中に【告】がある", "結論は告" "。"):
+            with self.subTest(no_match=line):
+                self.assertNotRegex(line, pattern)
+
+    def test_shipped_files_have_no_old_markers(self):
+        # 句点で終わる旧い形の印が、配るファイルに戻らない
+        paths = [REPO_AGENTS, REPO / "README.md", WRITING_RULES, SKILLS_DIR / "init-project" / "SKILL.md"]
+        paths += sorted(p for p in (SKILLS_DIR / "init-project" / "templates").rglob("*") if p.is_file())
+        for path in paths:
+            with self.subTest(path=str(path.relative_to(REPO))):
+                hits = [
+                    f"{n}: {line}"
+                    for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                    if OLD_MARKER_RE.search(line)
+                ]
+                self.assertEqual([], hits)
+
 
 class CompletionReportTest(unittest.TestCase):
     """共有する報告の型と、呼び出し元が読む出力の境界を守る。"""
@@ -204,7 +264,8 @@ class CompletionReportTest(unittest.TestCase):
             ["完了", "変えたもの", "確かめたこと", "動かした確認", "残っていること", "詳しい記録", "リンク"],
             [line.split(":", 1)[0] for line in lines],
         )
-        self.assertNotRegex(blocks[0], r"(?m)^(是|否|告|解|答|提案|警告|問|依頼|経過|異常)。")
+        self.assertNotRegex(blocks[0], rf"(?m)^({MARKER_ALT})。")
+        self.assertNotRegex(blocks[0], rf"【({MARKER_ALT})】")
         for prefix in ("無人の周の結果:", "候補モードの結果:", "レビュー判定:"):
             self.assertNotIn(prefix, blocks[0])
         self.assertIn("未実施", blocks[0])
@@ -217,6 +278,8 @@ class CompletionReportTest(unittest.TestCase):
         self.assertRegex(scope, r"\| 完了報告のコピー用の枠.*\| 当てない。段落の印も付けない \|")
         self.assertIn("会話の口調を当てず、マーカーも付けない", tone)
         self.assertIn("枠の前のまとめと、後の依頼の段落", tone)
+        self.assertIn("見出しの次のまとめの段落を、応答の最初の要約の段落として扱う", tone)
+        self.assertIn("結果を示す字で、マーカーではない", tone)
 
     def test_every_skill_chooses_the_common_report_or_explains_its_exception(self):
         exceptions = {"cleanup", "data-audit", "tool-check", "understand-project"}
@@ -256,6 +319,34 @@ class CompletionReportTest(unittest.TestCase):
                 self.assertIn("発見の周と PR を作らなかったときは", text)
                 self.assertIn("既存のタスクの記録か会話に内訳を残す", text)
         self.assertIn("手順 3 で本文に書いた場所を指す", report)
+
+    def test_report_heading_rules(self):
+        # 8 節の、区切り線と見出しの行の決まり
+        for phrase in ("区切り線 `---` の行", "`## 【<結果>】<対象>`", "枠の「完了」欄と同じ値",
+                       "区切り線の前は空行にする", "印の形に依らない",
+                       "見出しの行も出さない", "見出しも最後に `/ship-task` が 1 回だけ置く",
+                       "区切り線と見出しの行も付けない", "見出しは報告に 1 回だけ置く"):
+            with self.subTest(phrase=phrase):
+                self.assertIn(phrase, self.report)
+
+    def test_report_section_is_not_cut_by_a_level_two_heading(self):
+        # section_lines は最初の `## ` の行で切るので、self.report だけでは切れたことに気づけない
+        lines = WRITING_RULES.read_text(encoding="utf-8").split("\n")
+        self.assertIn("## 8. 完了報告の型", lines)
+        self.assertIn("## 9. ファイルへのリンク", lines)
+        start = lines.index("## 8. 完了報告の型")
+        end = lines.index("## 9. ファイルへのリンク")
+        self.assertLess(start, end)
+        self.assertEqual([], [line for line in lines[start + 1 : end] if line.startswith("## ")])
+        self.assertIn("途中の質問や進捗の報告にはこの型を当てない", self.report)
+
+    def test_ship_task_and_children_place_the_heading_once(self):
+        ship = self.skill("ship-task")
+        self.assertIn("見出しの行も、最後にこの skill が 1 回だけ置く", ship)
+        self.assertIn("区切り線と見出しの行を 1 回だけ置いた", ship)
+        for name in ("create-task", "do-task", "update-doc"):
+            with self.subTest(skill=name):
+                self.assertIn("`/ship-task` から呼ばれたときは枠を出さず、見出しの行も出さず", self.skill(name))
 
     def test_ship_task_keeps_pre_push_issue_failure_details_in_conversation(self):
         ship = self.skill("ship-task")
