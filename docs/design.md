@@ -837,7 +837,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 ## 8. このリポジトリへの還元フロー
 
 1. 各プロジェクトで skill に改善を加えたら、プロジェクト固有部分を profile / 動的検出に置き換えた形でこのリポジトリに反映する
-2. `plugins/dev-workflow/` 配下を編集 → バージョンを plugin.json / marketplace.json で上げる → commit & push
+2. `plugins/dev-workflow/` 配下を編集して commit → main を取り込む → バージョンを plugin.json / marketplace.json で上げる(配るプラグインを変えた PR だけ)→ 全回帰テスト(回帰テストをすべて流すこと)を流す → PR を開く → merge。順序と、PR の本文に書く記録は、[AGENTS.md](../AGENTS.md) の「PR から merge までの順序」「PR の前の手順」の節が正本
 3. 各プロジェクトでは `/plugin` の更新(marketplace update)で新版を取得
 
 - 版の刻み: 後方互換な機能追加はマイナー、内部の移行・修正はパッチ、AI 非依存の到達点はメジャーで示す(委託の語の移行の版の刻み〈3.9.x → v4.0.0。2026-09-10 に到達〉は §7-7)
