@@ -334,12 +334,10 @@ PR を開く前に、merge する状態(main を取り込み、要るときは�
 
 main を取り込んだ後、PR を開く前に行う(順序は「PR から merge までの順序」の節)。PR を開いた後に main が進み、取り込み直したときも、同じことを行う。
 - 従うのは、取り込んだ後の作業ツリーにあるこの節(main がこの節を変えていたら、変えた後の決まり)。
-- 1・3・5 の確かめのコマンド(bash のコードブロック)は、#375 でこの節に足す。足すまでは、コマンドを流さず、次のとおり代える。
-  - 取り込んだ回は、衝突が無くても、2 で作業の差分の全体をレビューし直す(1 の ① の代わり)。
-  - 版と `CHANGELOG.md` の最初の見出しは、2 のレビューで見る(3 の代わり)。
-  - 記録の確かめ ④ の代わりに、`git <安全用のオプション> log --no-show-signature --no-decorate --format='%H %s' <先頭> ^origin/main ^<レビュー済み SHA(1 回目)>` の出力を欄に入れ、取り込みと PR の前の commit のほかが無いことを人が見る。
-  - 2 の機密の除外の行の「1 の出力の `機密の除外: ` の行の正規表現」の代わりに、1 の続け方(読めない profile で止まったとき)と同じ作り方の正規表現を使う(読めない commit が無ければ、ref の組から何も外さない)。
-  - PR の本文の取り込み・版の確かめ・記録の確かめの行には「確かめのコマンドなし(#375 の前)」と書く。4 の PR を開く条件のうち、1・3・5 の最後の行の条件は除く。
+- 3 つの確かめのコマンドは、最初の git の呼び出しより前に `GIT_NO_LAZY_FETCH=1` を設定する。欠けた git の物を自動で取りに行く構成(promisor)で、`remote.<名>.uploadpack` のコマンドが動かないようにするため。この変数は git 2.45 以上で効く([base-commit.md](plugins/dev-workflow/skills/do-task/references/base-commit.md))。
+  - 最初の git の呼び出しで、promisor の構成が無いことを、git の物を読まずに設定で確かめる(2.45 より古い git でも、物を読む前に止めるため)。あれば `不合格 ⓪:`。
+  - 次に、取り込み先の main(`origin/main`)の版の `diff-snapshot.sh` を一時フォルダに取り出し、`diff-snapshot.sh --cwd . --precheck` を流す。止まるか、出力があれば `不合格 ⓪:`。
+  - 作業ツリーの `diff-snapshot.sh` は、そのまま流さない。まだ確かめていない commit(`reviewed`・`checked`・`first`)のものも流さない。取り込みの後の作業ツリーと、取り込みの commit は、まだ確かめていない中身なので(取り込みや衝突の解き方で書き換わりうる)。merge 済みの main の版は、レビューと全回帰テストを通っている。
 
 ### 1. 取り込みを確かめる
 
@@ -347,8 +345,95 @@ main を取り込んだ後、PR を開く前に行う(順序は「PR から merg
 - 1 回目は、レビュー済み SHA(1 回目)。ふつうは文書の commit。文書の commit が無ければ実装の commit。状態の記録を取らずに作った PR は、取り込む前の作業ブランチの先頭。
 - やり直しでは、前の回に 2 で作った commit。前の回に 2 を行わなかったときは、前の回のレビュー済み SHA をそのまま使う(取り込みの commit は親が 2 つなので、⓪ で止まる)。
 
+```bash
+reviewed=<レビュー済み SHA> bash -s <<'EOF'
+set -o pipefail
+fail() { echo "不合格 $1"; exit 1; }
+g() { git --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false "$@"; }
+t=$(mktemp -d) || fail "⓪: 一時フォルダを作れない"
+trap 'rm -rf "$t"' EXIT
+export GIT_NO_LAZY_FETCH=1
+rc=0; g config --get-regexp '^(extensions\.partialclone|remote\..*\.promisor)$' > "$t/promisor" || rc=$?
+[ "$rc" = 1 ] || fail "⓪: 欠けた物を自動で取りに行く構成(promisor)があるか、git の設定を読めない"
+main=$(g rev-parse --verify origin/main) || fail "⓪: origin/main が無い"
+sd=plugins/dev-workflow/skills/do-task/scripts
+g cat-file blob "$main:$sd/diff-snapshot.sh" > "$t/ds.sh" || fail "⓪: main の diff-snapshot.sh を取れない"
+bash "$t/ds.sh" --cwd . --precheck > "$t/pre" || fail "⓪: diff-snapshot.sh --precheck が止めた(上の出力を読む)"
+[ ! -s "$t/pre" ] || fail "⓪: diff-snapshot.sh --precheck が、承認の要る構成を見つけた"
+take() { local name=$1; shift; "$@" > "$t/$name" || fail "⓪: 比べる中身を取れない($name)"; }
+reviewed=$(g rev-parse --verify "$reviewed^{commit}") || fail "⓪: レビュー済み SHA が commit でない"
+head=$(g rev-parse --verify HEAD) || fail "⓪: HEAD が無い"
+base=$(g merge-base "$reviewed" "$main") || fail "⓪: レビュー済み SHA と main の共通の祖先が無い"
+v=(plugins/dev-workflow/.claude-plugin/plugin.json .claude-plugin/marketplace.json)
+x=(":(exclude)${v[0]}" ":(exclude)${v[1]}" ":(exclude)CHANGELOG.md")
+work() { g diff --text --no-ext-diff --no-textconv --no-color --no-renames -U3 "$1" "$2" -- . "${x[@]}" | sed -E '/^index /d; s/^@@.*/@@/'; }
+nov() { g show "$1:$2" | sed -E '/^[[:space:]]*"version": "[0-9]+\.[0-9]+\.[0-9]+",?$/d'; }
+kind() { g ls-tree "$1" -- "$2" | cut -f1 | cut -d' ' -f1-2; }
+udiff() { diff -u "$1" "$2" | sed -E '1,2d; s/^@@.*/@@/'; local s=("${PIPESTATUS[@]}"); [ "${s[0]}" -le 1 ] && [ "${s[1]}" = 0 ]; }
+shift_of() { if [ "$(cat "$t/$1")" = "$(cat "$t/$2")" ]; then echo same; else echo "$(cat "$t/$1") -> $(cat "$t/$2")"; fi; }
+[ "$(g rev-list --parents -n 1 "$reviewed" | wc -w)" = 2 ] || fail "⓪: レビュー済み SHA が、親が 1 つの commit でない"
+g merge-base --is-ancestor "$reviewed" "$head" && g merge-base --is-ancestor "$main" "$head" \
+  || fail "⓪: 作業ブランチの先頭が、レビュー済み SHA か main を含まない"
+g cat-file blob "$main:$sd/secret-profiles.py" > "$t/sp.py" || fail "⓪: main の secret-profiles.py を取れない"
+g rev-list --first-parent --parents "$head" "^$main" > "$t/chain" || fail "⓪: 作業ブランチの commit の一覧を取れない"
+r=(--ref "$base" --ref "$reviewed" --ref "$main" --ref "$head")
+for c in $(cat "$t/chain"); do r+=(--ref "$c"); done
+python3 -B "$t/sp.py" --cwd . "${r[@]}" > "$t/sp" || fail "⓪: 機密のパスの集合を作れない"
+a=(); while IFS= read -r -d '' p; do a+=(--exclude-glob "$p"); done < "$t/sp"
+bash "$t/ds.sh" --print-exclude-ere "${a[@]}" > "$t/ere" || fail "⓪: 機密のパスの正規表現を作れない"
+echo "機密の除外: $(cat "$t/ere")"
+take p1 g diff --name-only -z --no-renames "$base" "$reviewed"; take p2 g diff --name-only -z --no-renames "$main" "$head"
+rc=0; cat "$t/p1" "$t/p2" | LC_ALL=C grep -Eiz -- "$(cat "$t/ere")" > "$t/hit" || rc=$?
+[ "$rc" = 1 ] || { tr '\n\0' '?\n' < "$t/hit"; fail "⓪: 機密のパス(上の行)に変更がある。中身を読まずに止めた"; }
+take w1 work "$base" "$reviewed"; take w2 work "$main" "$head"
+vl() { g show "$1:$2" | sed -n -E '/^[[:space:]]*"version": "[0-9]+\.[0-9]+\.[0-9]+",?$/p'; }
+vbad=
+for i in 0 1; do
+  for c in base reviewed main head; do take "n_${c}_$i" nov "${!c}" "${v[$i]}"; take "k_${c}_$i" kind "${!c}" "${v[$i]}"; take "vl_${c}_$i" vl "${!c}" "${v[$i]}"; done
+  if cmp -s "$t/vl_main_$i" "$t/vl_base_$i"; then from=reviewed; else from=main; fi
+  cmp -s "$t/vl_head_$i" "$t/vl_${from}_$i" || vbad=yes
+  take "m1_$i" udiff "$t/n_base_$i" "$t/n_reviewed_$i"; take "m2_$i" udiff "$t/n_main_$i" "$t/n_head_$i"
+  shift_of "k_base_$i" "k_reviewed_$i" > "$t/s1_$i"; shift_of "k_main_$i" "k_head_$i" > "$t/s2_$i"
+done
+for c in base reviewed main head; do take "c_$c" g show "${!c}:CHANGELOG.md"; take "kc_$c" kind "${!c}" CHANGELOG.md; done
+shift_of kc_base kc_reviewed > "$t/s1_c"; shift_of kc_main kc_head > "$t/s2_c"
+top() { awk '/^## /{n++} n == 1' "$t/c_$1" | sed -E 's/^## v[0-9]+\.[0-9]+\.[0-9]+$/## (次の版)/'; }
+rest() { awk '/^## /{n++} n != 1' "$t/c_$1"; }
+same() { cmp -s "$t/$1" "$t/$2"; }
+hbad=
+if ! same c_base c_reviewed && same vl_main_0 vl_base_0 && same vl_main_1 vl_base_1; then
+  [ "$(grep -m 1 '^## ' "$t/c_reviewed")" = "$(grep -m 1 '^## ' "$t/c_head")" ] || hbad=yes
+fi
+if same c_base c_reviewed; then
+  log() { same c_main c_head; }
+else
+  take top_r top reviewed; take top_h top head; take rest_r rest reviewed; take rest_h rest head
+  log() { same top_r top_h && same rest_r c_base && same rest_h c_main; }
+fi
+if same w1 w2 && same m1_0 m2_0 && same m1_1 m2_1 && same s1_0 s2_0 && same s1_1 s2_1 && same s1_c s2_c && [ -z "$vbad" ] && [ -z "$hbad" ] && log; then
+  echo "同じ: 取り込みの後も、レビューした作業の差分は同じ(レビュー済み $reviewed・先頭 $head・main $main)"
+else
+  [ -z "$vbad" ] || echo "取り込みの commit の版の行が、main の値ともレビュー済み SHA の値とも合わない(取り込みに版の変更が入った)"
+  [ -z "$hbad" ] || echo "main は版を変えていないのに、取り込みの commit で自分の節の見出しが変わった"
+  diff "$t/w1" "$t/w2"
+  echo "違う: 取り込みで、レビューした作業の差分が変わった。2 で作業の差分の全体をレビューし直す(レビュー済み $reviewed・先頭 $head・main $main)"
+  exit 2
+fi
+EOF
+```
+
 - ⓪ レビュー済み SHA が親の 1 つの commit で、作業ブランチの先頭が、レビュー済み SHA と main を含む。違えば、最後の行が `不合格 ⓪:` で、終了コードが 1。PR を開かず、人に知らせる(最後の行が、下の続け方の 2 つの行のどちらかと全体で同じときを除く)。
 - ① レビューした作業の差分(main から分かれた所からレビュー済み SHA まで)と、PR が main に足す作業の差分が同じか。同じなら最後の行が `同じ:` で終了コードが 0、違えば `違う:` で終了コードが 2。最後の行に、比べたレビュー済み SHA と先頭と main の SHA を出す。
+  - 作業の差分は、変わった行と、前後 3 行の文脈を比べる。`@@` の行は `@@` だけにして、行番号と関数の見出しは比べない。main が上の行を変えて行番号がずれても「同じ」になり、行が別の所へ動けば「違う」になる。`--text` を付けて、2 進のファイルも中身で比べる。
+  - git の設定(テキストへの変換・外部の diff・色・`diff.context`・名前の変更の検出)で結果が変わらないように、`--no-ext-diff --no-textconv --no-color --no-renames -U3` を付ける。
+  - 版の 2 つのファイルは、`"version"` の行を消してから比べる(版の行は回ごとに変わるため。作業が `"description"` などを変えたときは、その行を比べる)。
+  - 版の 3 行は、main が(main から分かれた所から)版を変えていれば main の値と、変えていなければレビュー済み SHA の値と同じかも見る。取り込みの commit に版の変更を混ぜると、「違う」になる。
+  - main が版を変えていないときは、自分の節の見出しも、レビュー済み SHA と同じかを見る(見出しの版を読み替えない)。取り込みの commit で見出しだけを次の版にしても、「違う」になる。
+  - 版の 2 つのファイルと `CHANGELOG.md` は、ファイルの種類と実行権限も、中身とは別に比べる(作業での変わり方と、PR での変わり方が同じか)。
+  - 比べる中身は、一時フォルダに取ってから比べる(`set -o pipefail`)。git が失敗して中身を取れなければ、空どうしを比べずに `不合格 ⓪:` で止まる。
+  - 機密のパスは、中身を取る前に除く。集合は、レビューに渡すスナップショットと同じ(既定の `.env`・`.env.*`・`.dev.vars` と、`.claude/project-profile.yml` の `secret_paths`。作業ツリーと、main から分かれた所・レビュー済み SHA・main・先頭と、先頭から first-parent でたどる commit のうち main に無いもの〈レビュー済み SHA の後の取り込みを含む〉と、その親すべて〈作業ブランチが main から分かれた所と、過去に取り込んだ main〉の profile の和集合)。やり直しの回も、前の回までの指定が集合から消えない(人が控える物は無い)。main の版から取り出した `secret-profiles.py` と `diff-snapshot.sh --print-exclude-ere` で作る。作業の差分か PR の差分で、このパスのどれかが変わっていれば、中身を読まずにパスだけを並べて `不合格 ⓪:` で止まる。使った正規表現は `機密の除外: ` の行に出す(2 のレビュー入力で使う)。
+  - `CHANGELOG.md` は、差分では比べない(先頭の節の見出しが、回ごとに変わるため)。
+  - レビュー済み SHA が `CHANGELOG.md` に節を足したときは、自分の節(最初の `## ` の節。見出しの版は `(次の版)` と見なす)がレビューしたときと同じで、ほかの所が取り込んだ main と同じことを確かめる。足していないとき(配るプラグインを変えない PR)は、`CHANGELOG.md` の全体が main と同じことを確かめる。
 - 取り込みで衝突したか、① が「違う」なら、2 のレビューに、作業の差分の全体を足す(レビューし直す)。
 - 最後の行が `不合格 ⓪: 機密のパス(上の行)に変更がある。中身を読まずに止めた` のときは、① の代わりに、2 で作業の差分の全体をレビューし直す(スナップショットは、機密のファイルをパスだけで出す)。3 の `<1 で確かめた先頭の SHA>` には、取り込みの commit(取り込まなかったときは、レビュー済み SHA の commit。つまり作業ブランチの先頭)を渡す。2 のレビュー入力では、1 の出力の `機密の除外: ` の行の正規表現も除く(2 の機密の除外の行)。最後の行が `不合格 ⓪: 機密のパスの集合を作れない`(作業ブランチの途中の commit の profile が読めない)ときも同じく進める。そのときは `機密の除外: ` の行が無いので、2 で取り出す main の skill 一式の `secret-profiles.py --cwd . --ref …` を、1 と同じ ref の組(`git <安全用のオプション> rev-list --first-parent --parents HEAD ^origin/main` が出す SHA・`origin/main`・`HEAD`・レビュー済み SHA・main から分かれた所)から読めない commit を外して流し、出た要素と、人が読んだその commit の `secret_paths` と、既定の `.env`・`.env.*`・`.dev.vars` を、1 つずつ `--exclude-glob` にして `diff-snapshot.sh --print-exclude-ere` に渡した正規表現を使う。ほかの `不合格 ⓪:`(`不合格 ⓪: 機密のパスの正規表現を作れない` を含む)は、PR を開かず、人に知らせる。
 - 最後の行の「先頭」の SHA を、3 で使うので控える。
@@ -381,6 +466,62 @@ main を取り込んだ後、PR を開く前に行う(順序は「PR から merg
 ### 3. 版を確かめる
 
 次のコマンドを、2 の後に(2 を行わなかったときは 1 の後に)、リポジトリの直下で流す。`<1 で確かめた先頭の SHA>` は、1 の最後の行の「先頭」の SHA(取り込んだときは取り込みの commit、取り込まなかったときはレビュー済み SHA)。最後の行が `合格:` で始まり、終了コードが 0 なら合格。
+
+```bash
+checked=<1 で確かめた先頭の SHA> bash -s <<'EOF'
+set -o pipefail
+fail() { echo "不合格 $1"; exit 1; }
+g() { git --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false "$@"; }
+t=$(mktemp -d) || fail "⓪: 一時フォルダを作れない"
+trap 'rm -rf "$t"' EXIT
+export GIT_NO_LAZY_FETCH=1
+rc=0; g config --get-regexp '^(extensions\.partialclone|remote\..*\.promisor)$' > "$t/promisor" || rc=$?
+[ "$rc" = 1 ] || fail "⓪: 欠けた物を自動で取りに行く構成(promisor)があるか、git の設定を読めない"
+main=$(g rev-parse --verify origin/main) || fail "⓪: origin/main が無い"
+sd=plugins/dev-workflow/skills/do-task/scripts
+g cat-file blob "$main:$sd/diff-snapshot.sh" > "$t/ds.sh" || fail "⓪: main の diff-snapshot.sh を取れない"
+bash "$t/ds.sh" --cwd . --precheck > "$t/pre" || fail "⓪: diff-snapshot.sh --precheck が止めた(上の出力を読む)"
+[ ! -s "$t/pre" ] || fail "⓪: diff-snapshot.sh --precheck が、承認の要る構成を見つけた"
+take() { local name=$1; shift; "$@" > "$t/$name" || fail "⓪: 比べる中身を取れない($name)"; }
+checked=$(g rev-parse --verify "$checked^{commit}") || fail "⓪: 1 で確かめた先頭が commit でない"
+head=$(g rev-parse --verify HEAD) || fail "⓪: HEAD が無い"
+g merge-base --is-ancestor "$main" "$head" || fail "⓪: 作業ブランチの先頭が main を含まない"
+[ "$head" = "$checked" ] || { [ "$(g rev-list --parents -n 1 "$head" | wc -w)" = 2 ] && [ "$(g rev-parse "$head^")" = "$checked" ]; } \
+  || fail "⓪: 作業ブランチの先頭が、1 で確かめた commit でも、その上の 1 つの commit でもない"
+v=(plugins/dev-workflow/.claude-plugin/plugin.json .claude-plugin/marketplace.json)
+nov() { g show "$1:$2" | sed -E '/^[[:space:]]*"version": "[0-9]+\.[0-9]+\.[0-9]+",?$/d'; }
+kind() { g ls-tree "$1" -- "$2" | cut -f1 | cut -d' ' -f1-2; }
+for c in main head; do
+  take "j_$c" g show "${!c}:${v[0]}"
+  take "c_$c" g show "${!c}:CHANGELOG.md"
+  take "kc_$c" kind "${!c}" CHANGELOG.md
+  for i in 0 1; do take "n_${c}_$i" nov "${!c}" "${v[$i]}"; take "k_${c}_$i" kind "${!c}" "${v[$i]}"; done
+done
+ver() { sed -n -E 's/^[[:space:]]*"version": "([0-9]+\.[0-9]+\.[0-9]+)",?$/\1/p' "$t/j_$1"; }
+old=$(ver main); new=$(ver head)
+[ -n "$old" ] && [ -n "$new" ] || fail "⓪: 版を読めない"
+take vd g diff --no-ext-diff --no-textconv --no-color -U0 "$main" "$head" -- "${v[@]}"
+lines=$(grep -E '^[-+][[:space:]]*"version": "' "$t/vd" | sed -E 's/^([-+])[[:space:]]*"version": "([0-9.]+)",?$/\1\2/' | LC_ALL=C sort | uniq -c | awk '{print $1, $2}')
+cmp -s "$t/k_main_0" "$t/k_head_0" && cmp -s "$t/k_main_1" "$t/k_head_1" && cmp -s "$t/kc_main" "$t/kc_head" \
+  || fail "②: 版のファイルか CHANGELOG.md の種類か実行権限が変わった"
+dist=no
+g diff --quiet --no-ext-diff --no-textconv "$main" "$head" -- plugins .claude-plugin/marketplace.json setup.sh ":(exclude)${v[0]}" ":(exclude)${v[1]}"
+case $? in 0) ;; 1) dist=yes ;; *) fail "⓪: 配るものの差を取れない" ;; esac
+cmp -s "$t/n_main_0" "$t/n_head_0" && cmp -s "$t/n_main_1" "$t/n_head_1" || dist=yes
+if [ "$dist" = no ]; then
+  [ -z "$lines" ] && [ "$old" = "$new" ] || fail "②: 配るプラグインを変えていないのに、版が変わった"
+  cmp -s "$t/c_main" "$t/c_head" || fail "③: 配るプラグインを変えていないのに、CHANGELOG.md が変わった"
+  echo "合格: 配るプラグインを変えていないので、版は $old のまま(先頭 $head・main $main)"
+  exit 0
+fi
+[ "$lines" = "$(printf '3 +%s\n3 -%s' "$new" "$old")" ] || fail "②: \"version\" の行の差が、main の版から新しい版への 3 行でない"
+awk -v o="$old" -v n="$new" 'BEGIN { split(o, a, "."); split(n, b, ".")
+  exit !((b[1] == a[1] && b[2] == a[2] && b[3] == a[3] + 1) || (b[1] == a[1] && b[2] == a[2] + 1 && b[3] == 0) \
+    || (b[1] == a[1] + 1 && b[2] == 0 && b[3] == 0)) }' || fail "③: 版 $new が、main の版 $old の次でない"
+[ "$(grep -m 1 '^## ' "$t/c_head")" = "## v$new" ] || fail "③: CHANGELOG.md の最初の見出しが ## v$new でない"
+echo "合格: 版 $old から $new(先頭 $head・main $main)"
+EOF
+```
 
 - ⓪ 作業ブランチの先頭が、1 で確かめた commit そのものか、その上の 1 つの commit(親が 1 つで、それが 1 で確かめた commit)。1 の後に別の commit が入っていれば不合格。
 - 配るプラグインを変えた PR かは、main から先頭までに、`plugins/` の下・`.claude-plugin/marketplace.json`・`setup.sh` が、`"version"` の行のほかで変わったかで決める。`.claude-plugin/` の中のほかのファイルだけを変えた PR は、配るプラグインを変えていない。
@@ -441,6 +582,36 @@ main を取り込んだ後、PR を開く前に行う(順序は「PR から merg
   - `<レビュー済み SHA(1 回目)>` は、初回の値から変えない。
   - `<PR の前の commit の SHA>` には、2 で作った commit の SHA を、回ごとにすべて空白で区切って並べる(無ければ空にする)。
   - `<3 で確かめた先頭の SHA>` には、最後の回の 3 の結果の行の「先頭」の SHA を渡す。全回帰テストを流す commit と、PR の元の SHA も、この先頭と同じにする。
+
+```bash
+first=<レビュー済み SHA(1 回目)> ps='<PR の前の commit の SHA>' last=<3 で確かめた先頭の SHA> bash -s <<'EOF'
+set -o pipefail
+fail() { echo "不合格 $1"; exit 1; }
+g() { git --no-pager --no-replace-objects -c core.quotePath=false -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false -c core.ignoreStat=false -c commit.gpgSign=false -c push.gpgSign=false -c filter.lfs.smudge= -c filter.lfs.clean= -c filter.lfs.process= -c filter.lfs.required=false "$@"; }
+t=$(mktemp -d) || fail "⓪: 一時フォルダを作れない"
+trap 'rm -rf "$t"' EXIT
+export GIT_NO_LAZY_FETCH=1
+rc=0; g config --get-regexp '^(extensions\.partialclone|remote\..*\.promisor)$' > "$t/promisor" || rc=$?
+[ "$rc" = 1 ] || fail "⓪: 欠けた物を自動で取りに行く構成(promisor)があるか、git の設定を読めない"
+main=$(g rev-parse --verify origin/main) || fail "④: origin/main が無い"
+sd=plugins/dev-workflow/skills/do-task/scripts
+g cat-file blob "$main:$sd/diff-snapshot.sh" > "$t/ds.sh" || fail "⓪: main の diff-snapshot.sh を取れない"
+bash "$t/ds.sh" --cwd . --precheck > "$t/pre" || fail "⓪: diff-snapshot.sh --precheck が止めた(上の出力を読む)"
+[ ! -s "$t/pre" ] || fail "⓪: diff-snapshot.sh --precheck が、承認の要る構成を見つけた"
+first=$(g rev-parse --verify "$first^{commit}") || fail "④: レビュー済み SHA(1 回目)が commit でない"
+last=$(g rev-parse --verify "$last^{commit}") || fail "④: 3 で確かめた先頭が commit でない"
+head=$(g rev-parse --verify HEAD) || fail "④: HEAD が無い"
+[ "$head" = "$last" ] || fail "④: 作業ブランチの先頭が、3 で確かめた先頭でない"
+g merge-base --is-ancestor "$first" "$head" || fail "④: 作業ブランチの先頭が、レビュー済み SHA(1 回目)を含まない"
+for p in $ps; do g rev-parse --verify "$p^{commit}" || echo "読めない SHA: $p"; done > "$t/want0" || fail "④: PR の前の commit の SHA を読めない"
+LC_ALL=C sort "$t/want0" > "$t/want"
+g rev-list --no-merges "$head" "^$main" "^$first" > "$t/got0" || fail "④: commit の一覧を取れない"
+LC_ALL=C sort "$t/got0" > "$t/got"
+g log --no-show-signature --no-decorate --format='%H %s' "$head" "^$main" "^$first" || fail "④: commit の一覧を取れない"
+cmp -s "$t/got" "$t/want" || fail "④: main にもレビュー済み SHA(1 回目)にも無い、取り込みでない commit が、PR の前の commit と同じでない"
+echo "合格: main にもレビュー済み SHA(1 回目)にも無い、取り込みでない commit は、PR の前の commit だけ(先頭 $head・main $main)"
+EOF
+```
 
 - ④ 作業ブランチの先頭が 3 で確かめた先頭と同じで、先頭から届く commit のうち、main(取り込んだ取り込み先)にもレビュー済み SHA(1 回目)にも届かない、取り込みでない commit が、2 で作った PR の前の commit とちょうど同じ。取り込みの 2 つ目の親の側にある commit も数える。1 の後に、レビューを通っていない commit を足したとき(別のブランチを取り込んで入れたときも)と、3 の後に別の取り込みや commit を足したときは不合格。
 - 不合格なら、PR を開かず、人に知らせる。
