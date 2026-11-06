@@ -190,12 +190,26 @@ class CheckProcessLinuxTest(unittest.TestCase):
         value.start()
         self.threads.append(value)
 
-    def run_code(self, code, timeout=2, method='linux', grace=.05):
+    def run_code(self, code, timeout=2, method='linux', grace=.05, **extra):
         control = self.root / ('control-' + str(time.monotonic_ns()))
         control.mkdir()
         with self.helper.StopSignals() as stop:
             return self.helper.run_command([sys.executable, '-c', code], self.root, os.environ.copy(),
-                                           timeout, control, stop, method=method, grace=grace)
+                                           timeout, control, stop, method=method, grace=grace, **extra)
+
+    def test_keep_returns_tail_and_size_only_when_requested(self):
+        code = "import sys; sys.stdout.write('a' * 2000 + 'b' * 1000); sys.stderr.write('err'); sys.exit(4)"
+        for method in ('linux', 'posix'):
+            with self.subTest(method=method):
+                kept = self.run_code(code, method=method, keep=1000)
+                self.assertEqual(4, kept['returncode'])
+                self.assertEqual(3000, kept['stdout_bytes'])
+                self.assertEqual(b'b' * 1000, kept['stdout_tail'])
+                self.assertEqual(3, kept['stderr_bytes'])
+                self.assertEqual(b'err', kept['stderr_tail'])
+                plain = self.run_code(code, method=method)
+                for key in ('stdout_bytes', 'stdout_tail', 'stderr_bytes', 'stderr_tail'):
+                    self.assertNotIn(key, plain)
 
     def remember(self, pidfile):
         if pidfile.exists():
@@ -410,20 +424,22 @@ class CheckProcessCommonTest(unittest.TestCase):
 
     def test_output_hash_has_a_fixed_size_when_a_writer_keeps_appending(self):
         import hashlib
-        path = self.root / 'growing'
-        with path.open('w+b') as stream:
-            stream.write(b'first')
-            stream.flush()
-            original = os.fstat
-            def before_read(fd):
-                info = original(fd)
-                with path.open('ab') as writer:
-                    writer.write(b'later')
-                return info
-            with mock.patch.object(self.helper.os, 'fstat', side_effect=before_read):
-                value = self.helper.digest_stream(stream)
-        self.assertEqual(hashlib.sha256(b'first').hexdigest(), value)
-
+        digest = hashlib.sha256(b'first').hexdigest()
+        for keep, tail in ((0, b''), (3, b'rst')):
+            with self.subTest(keep=keep):
+                path = self.root / f'growing-{keep}'
+                with path.open('w+b') as stream:
+                    stream.write(b'first')
+                    stream.flush()
+                    original = os.fstat
+                    def before_read(fd):
+                        info = original(fd)
+                        with path.open('ab') as writer:
+                            writer.write(b'later')
+                        return info
+                    with mock.patch.object(self.helper.os, 'fstat', side_effect=before_read):
+                        value = self.helper.measure_stream(stream, keep)
+                self.assertEqual((digest, 5, tail), value)
 
     def test_result_missing_malformed_types_and_special_files(self):
         path = self.root / 'result'

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import bisect
 import datetime
 import importlib.util
 import re
@@ -1045,6 +1046,109 @@ def check_process_module():
     return module
 
 
+KEEP_OUTPUT_BYTES = 1024 * 1024
+MASK_MIN_BYTES = 8
+
+
+def mask_table(environ, copies) -> dict[bytes, bytes]:
+    """置き換える値(前後を除いたバイト列)と、置き換えた後の字の表を作る。"""
+    table: dict[bytes, bytes] = {}
+    for path in copies:
+        table.setdefault(os.fsencode(str(path)), "<検証用コピー>".encode())
+    for name, value in sorted(environ.items()):
+        label = os.fsencode(name).replace(b"\n", b"\\n").replace(b"\r", b"\\r")
+        replacement = "<環境変数 ".encode() + label + b">"
+        raw = os.fsencode(value)
+        for part in [raw, *raw.split(b"\n")]:
+            part = part.strip(b" \t\r")
+            if len(part) >= MASK_MIN_BYTES:
+                table.setdefault(part, replacement)
+    return table
+
+
+def mask_parts(data: bytes, table: dict[bytes, bytes]) -> tuple[bytes, list[tuple[int, int]]]:
+    """値の出る所を重なりも含めて集め、1 回で置き換える。控えは (置き換えた後の始まり, 元の始まり)。"""
+    if not table:
+        return data, [(0, 0)]
+    found: list[tuple[int, int, bytes]] = []
+    for value, replacement in table.items():
+        position = data.find(value)
+        while position >= 0:
+            found.append((position, position + len(value), replacement))
+            position = data.find(value, position + 1)
+    # 残す範囲の先頭で切れた値(末尾の MASK_MIN_BYTES バイト以上)。値ごとに最も長く一致した断片を足す。
+    for value, replacement in table.items():
+        for size in range(len(value) - 1, MASK_MIN_BYTES - 1, -1):
+            if data.startswith(value[-size:]):
+                found.append((0, size, replacement))
+                break
+    # 末尾で途中まで出た値(先頭の MASK_MIN_BYTES バイト以上)。同じく値ごとに最長の断片。
+    for value, replacement in table.items():
+        for size in range(len(value) - 1, MASK_MIN_BYTES - 1, -1):
+            if data.endswith(value[:size]):
+                found.append((len(data) - size, len(data), replacement))
+                break
+    found.sort(key=lambda item: (item[0], -item[1]))
+    kept: list[tuple[int, int, bytes]] = []
+    farthest = -1
+    for start, end, replacement in found:
+        if end <= farthest:
+            continue
+        kept.append((start, end, replacement))
+        farthest = end
+    groups: list[list] = []
+    for start, end, replacement in kept:
+        if groups and start < groups[-1][1]:
+            groups[-1][1] = max(groups[-1][1], end)
+            if groups[-1][2][-1] != replacement:
+                groups[-1][2].append(replacement)
+        else:
+            groups.append([start, end, [replacement]])
+    pieces: list[bytes] = []
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    length = 0
+    for start, end, replacements in groups:
+        if start > cursor:
+            spans.append((length, cursor))
+            pieces.append(data[cursor:start])
+            length += start - cursor
+        joined = b"".join(replacements)
+        pieces.append(joined)
+        length += len(joined)
+        cursor = end
+    if cursor < len(data) or not spans:
+        spans.append((length, cursor))
+        pieces.append(data[cursor:])
+    return b"".join(pieces), spans
+
+
+def mask_output(data: bytes, table: dict[bytes, bytes]) -> bytes:
+    return mask_parts(data, table)[0]
+
+
+def kept_part(tail: bytes, total: int, table: dict[bytes, bytes]) -> tuple[bytes, int]:
+    """末尾を行の頭から取り、置き換えた後に 1 MiB 以内へ、その中の行の頭で狭める。"""
+    rest = tail
+    if total > len(tail):
+        newline = tail.find(b"\n")
+        rest = tail[newline + 1:] if newline >= 0 else b""
+    masked, spans = mask_parts(rest, table)
+    if len(masked) <= KEEP_OUTPUT_BYTES:
+        return masked, total - len(rest)
+    newline = masked.find(b"\n", len(masked) - KEEP_OUTPUT_BYTES - 1)
+    if newline < 0 or newline == len(masked) - 1:
+        return b"", total
+    # 置き換えた字は改行を含まない。切った改行は、置き換えなかった区間の中にある。
+    span = bisect.bisect_right([item[0] for item in spans], newline) - 1
+    original = spans[span][1] + newline - spans[span][0]
+    return masked[newline + 1:], total - (len(rest) - original - 1)
+
+
+def kept_path(out: Path, index: int, stream: str) -> Path:
+    return out.with_name(f"{out.name}.{index}.{stream}")
+
+
 def run_checks(args: argparse.Namespace) -> int:
     try:
         valid_timeout = type(args.timeout) is int and args.timeout > 0 and math.isfinite(float(args.timeout))
@@ -1060,7 +1164,13 @@ def run_checks(args: argparse.Namespace) -> int:
     commands = plan.get("commands")
     if not isinstance(commands, list) or not commands:
         raise GuardError("品質コマンド計画が空")
+    out = Path(args.out).absolute()
+    safe_output(out, root)
+    for index in range(len(commands)):
+        for stream in ("stdout", "stderr"):
+            safe_output(kept_path(out, index, stream), root)
     results = []
+    failed = []
     # 実リポジトリの index/config/hooks/ignore・既存未追跡・ignored 生成物を持ち込まない。
     helper = check_process_module()
     clean = Path(tempfile.mkdtemp(prefix="review-guard-clean-"))
@@ -1092,6 +1202,7 @@ def run_checks(args: argparse.Namespace) -> int:
             env["GIT_CONFIG_NOSYSTEM"] = "1"
             env["GIT_CONFIG_GLOBAL"] = os.devnull
             env["GIT_NO_LAZY_FETCH"] = "1"
+            table = mask_table(os.environ, dict.fromkeys([clean, Path(os.path.realpath(clean))]))
             subprocess.run(["git", "init", "-q", str(clean)], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             # 機密除外済みの実体だけ。clean checkout の git 依存 test 用に index と HEAD も作る。
             subprocess.run(["git", "-C", str(clean), "add", "-f", "--all"], env=env, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -1112,7 +1223,7 @@ def run_checks(args: argparse.Namespace) -> int:
                 record = control / str(index)
                 record.mkdir()
                 confirmed = False
-                outcome = helper.run_command(command["argv"], clean, env, args.timeout, record, stop)
+                outcome = helper.run_command(command["argv"], clean, env, args.timeout, record, stop, keep=KEEP_OUTPUT_BYTES)
                 confirmed = True
                 stop.check()
                 result = {"name": command["name"], "argv": command["argv"],
@@ -1122,6 +1233,8 @@ def run_checks(args: argparse.Namespace) -> int:
                 if outcome["timed_out"]:
                     result.update(exit_code=None, error="timeout")
                 results.append(result)
+                if outcome["timed_out"] or outcome["returncode"] != 0:
+                    failed.append((index, outcome))
                 if outcome["timed_out"]:
                     break
             stop.check()
@@ -1137,9 +1250,21 @@ def run_checks(args: argparse.Namespace) -> int:
             shutil.rmtree(control)
     if not check_current(args, saved, root, patterns):
         raise GuardError("品質実行中に集合が変わった")
+    for index, outcome in failed:
+        kept = {}
+        for stream in ("stdout", "stderr"):
+            data, start = kept_part(outcome[stream + "_tail"], outcome[stream + "_bytes"], table)
+            path = kept_path(out, index, stream)
+            safe_output(path, root)
+            create_bytes(path, data)
+            kept[stream] = {"file": path.name, "sha256": sha256(data),
+                            "total_bytes": outcome[stream + "_bytes"], "kept_from_byte": start}
+            print(f"品質コマンドの出力を残した: {json.dumps(results[index]['name'], ensure_ascii=True)} {stream} "
+                  f"{json.dumps(str(path), ensure_ascii=True)}", file=sys.stderr)
+        results[index]["kept_output"] = kept
     receipt = {"kind": "direct-checks", "review_binding_sha256": saved["review_binding_sha256"],
                "clean_checkout": True, "plan_sha256": args.expect_checks_sha256, "results": results}
-    output_json(Path(args.out).absolute(), receipt, root, "CHECKS")
+    output_json(out, receipt, root, "CHECKS")
     return 0 if all(item["exit_code"] == 0 for item in results) else 1
 
 
