@@ -212,22 +212,25 @@ def posix_command(argv, cwd, env, timeout, grace, directory, stdout, stderr, sto
             'recovery_scope': 'original-process-group-only'}
 
 
-def digest_stream(stream):
+def measure_stream(stream, keep=0):
     stream.flush()
     stream.seek(0)
     digest = hashlib.sha256()
     # 群外へ逃げた POSIX の書き手が追記しても、開始時の長さだけを読む。
-    remaining = os.fstat(stream.fileno()).st_size
+    size = remaining = os.fstat(stream.fileno()).st_size
+    tail = b''
     while remaining:
         part = stream.read(min(1024 * 1024, remaining))
         if not part:
             raise RecoveryError("停止後の品質出力が短くなった")
         digest.update(part)
+        if keep:
+            tail = (tail + part)[-keep:]
         remaining -= len(part)
-    return digest.hexdigest()
+    return digest.hexdigest(), size, tail
 
 
-def run_command(argv, cwd, env, timeout, directory, stop, *, grace=.2, method=None):
+def run_command(argv, cwd, env, timeout, directory, stop, *, grace=.2, method=None, keep=0):
     stop.check()
     if not math.isfinite(timeout) or timeout <= 0 or not math.isfinite(grace) or grace < 0:
         raise RecoveryError("監督の期限が不正")
@@ -244,8 +247,12 @@ def run_command(argv, cwd, env, timeout, directory, stop, *, grace=.2, method=No
                 result = {'clean': True, 'returncode': 127, 'timed_out': False, 'signal': 0,
                           'recovery_method': 'not-started', 'recovery_scope': 'no-command-started'}
             stop.check()
-            result['stdout_sha256'] = digest_stream(stdout)
-            result['stderr_sha256'] = digest_stream(stderr)
+            for name, stream in (('stdout', stdout), ('stderr', stderr)):
+                digest, size, tail = measure_stream(stream, keep)
+                result[name + '_sha256'] = digest
+                if keep:
+                    result[name + '_bytes'] = size
+                    result[name + '_tail'] = tail
             return result
     except (OSError, ValueError, OverflowError, subprocess.SubprocessError) as exc:
         raise RecoveryError("品質プロセスの回収を確認できない: " + str(exc)) from exc
