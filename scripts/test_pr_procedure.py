@@ -192,6 +192,13 @@ class ProcedureTextTest(unittest.TestCase):
             "この 2 つの節で打つ git のコマンドには、すべて Git の共通の安全用のオプション",
             "文書の変更が無く、文書の commit を作らなかったときは、実装の commit",
             "文書の commit を作ったときは、main を取り込む前に",
+            "ship-task の Phase 4.5 を行った回(状態の記録〈`integration.md` の手順 6〉がある回)は、送る直前の照合を、P があってもなくても `integration.md` §7 のとおりに行う",
+            "古い記録の `verify --mode commit` と `pr-evidence` はしない",
+            "`integrate-guard.py check`(`--sha=<M> --reviewed-sha=<D> --base-sha=<B> --exclude-ere=<今の列>`)が終了コード 0",
+            "P があれば、手順 6 の記録で `verify --mode commit`",
+            "`integrate-guard.py worktree` と、その記録の `verify --mode pre-stage`",
+            "Phase 4.5 を行わなかった回は、次のとおり",
+            "作らなかったら、4 の分かれ道のとおりに代える",
             "先頭がレビュー済み SHA(1 回目)なら、その状態の記録で `verify --mode commit` と `pr-evidence` を行う",
             "先頭が取り込みの commit なら、照合は通らない",
             # 3 回目のレビューで足した字面

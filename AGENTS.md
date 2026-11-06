@@ -302,10 +302,15 @@ PR を開く前に、merge する状態(main を取り込み、要るときは�
 3. 「PR の前の手順」の節を行う(取り込みの確かめ・版を上げてレビューに通す・版の確かめ・全回帰テスト・PR の本文の欄)。
 4. PR を開く。
    - `publish-guard.py` の `--sha` には、全回帰テストを流した commit(作業ブランチの先頭)の SHA を渡す。ふつうは、「PR の前の手順」の 2 で作る PR の前の commit(版を上げるか、作業の差分の全体をレビューし直して、レビューに通した commit)。
-   - [Issue 方式の契約](plugins/dev-workflow/skills/do-task/references/github-issue.md) §6 の、送る直前の `verify --mode commit` と `pr-evidence`(最後の commit の状態の記録で行う)は、PR の前の commit の状態の記録で行う。
-   - PR の前の commit が無いとき(「PR の前の手順」の 2 を行わなかった回)は、先頭で分ける。
-     - 先頭がレビュー済み SHA(1 回目)なら、その状態の記録で `verify --mode commit` と `pr-evidence` を行う。
-     - 先頭が取り込みの commit なら、照合は通らない。「PR の前の手順」の 1 の `同じ:` の行と、その先頭を `last` に渡して合格した記録の確かめ ④ の行で代え、本文の「レビュー差分の外で PR に入る commit」の欄に書く。
+   - ship-task の Phase 4.5 を行った回(状態の記録〈`integration.md` の手順 6〉がある回)は、送る直前の照合を、P があってもなくても `integration.md` §7 のとおりに行う。古い記録の `verify --mode commit` と `pr-evidence` はしない。
+     - `merged` の M があれば、`integrate-guard.py check`(`--sha=<M> --reviewed-sha=<D> --base-sha=<B> --exclude-ere=<今の列>`)が終了コード 0。
+     - P があれば、手順 6 の記録で `verify --mode commit`。
+     - P が無ければ、`integrate-guard.py worktree` と、その記録の `verify --mode pre-stage`。
+   - Phase 4.5 を行わなかった回は、次のとおり。
+     - [Issue 方式の契約](plugins/dev-workflow/skills/do-task/references/github-issue.md) §6 の、送る直前の `verify --mode commit` と `pr-evidence`(最後の commit の状態の記録で行う)は、PR の前の commit の状態の記録で行う。
+     - PR の前の commit が無いとき(「PR の前の手順」の 2 を行わなかった回)は、先頭で分ける。
+       - 先頭がレビュー済み SHA(1 回目)なら、その状態の記録で `verify --mode commit` と `pr-evidence` を行う。
+       - 先頭が取り込みの commit なら、照合は通らない。「PR の前の手順」の 1 の `同じ:` の行と、その先頭を `last` に渡して合格した記録の確かめ ④ の行で代え、本文の「レビュー差分の外で PR に入る commit」の欄に書く。
    - 先頭でない commit の SHA を渡すと、ブランチの先頭と一致しないので、送る前に止まる。
    - PR の本文は、ship-task の Phase 5 の 3 の欄に、「PR の前の手順」の 5 の欄を足して作る。
    - Issue 方式の公開の前の確かめ(Issue 本文を取り直して R と比べることと、`origin-repo.py` の `repo` と Issue の `repo` が同じかの確かめ)は、Issue 方式の契約 §6 のとおり行う。
@@ -314,7 +319,7 @@ PR を開く前に、merge する状態(main を取り込み、要るときは�
    - `git <安全用のオプション> merge-base --is-ancestor origin/main <その SHA>` が終了コード 0(PR を開いた後に、main が進んでいない)。
    - 2 つとも成り立てば、merge は `gh pr merge <番号> -R <リポジトリ> --merge --match-head-commit <全回帰テストを流した commit の SHA>` で行う。
 6. 5 のどちらかが成り立たなければ、merge しない。2 と 3 をやり直し、送り(push)、PR の本文を直してから、5 に戻る。
-   - 送る前に、「PR の前の手順」の 5 の記録の確かめ ④ を流し直し、4 と同じ確かめをする: Issue 方式の契約 §6 の確かめ(Issue 本文を取り直して R と比べる・`origin-repo.py` の `repo` と Issue の `repo` が同じか)と、最後の commit の照合(この回に PR の前の commit を作ったら、その状態の記録で `verify --mode commit` と `pr-evidence` をやり直す。作らなかったら、1 の `同じ:` の行で代える)。
+   - 送る前に、「PR の前の手順」の 5 の記録の確かめ ④ を流し直し、4 と同じ確かめをする: Issue 方式の契約 §6 の確かめ(Issue 本文を取り直して R と比べる・`origin-repo.py` の `repo` と Issue の `repo` が同じか)と、最後の commit の照合(この回に PR の前の commit を作ったら、その状態の記録で `verify --mode commit` と `pr-evidence` をやり直す。作らなかったら、4 の分かれ道のとおりに代える)。
    - 送るのは `python3 -B plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py --dir <ルート> --sha <全回帰テストを流した commit の SHA> --branch <ブランチ> --config-digest <控える値> --push-only --push-url-digest <origin-repo.py の push_url_sha256>`。`<控える値>` は、`git-config-digest.py --dir <ルート>` の出力。
    - 出力が `PUSH_ONLY` で終了コード 0 なら、送った SHA と、送った先のブランチの SHA が一致している(`publish-guard.py` が、SHA を指定して送り、送った後に確かめる)。
    - 書き直すのは「全回帰テスト(merge する状態)」と「レビュー差分の外で PR に入る commit」の 2 つの欄。「review/commit 照合(PR の前の変更)」の欄は、回ごとに足す。ほかの欄は変えない。
