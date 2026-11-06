@@ -1353,6 +1353,140 @@ sys.exit(1)
         self.state_sha256 = next(line.split("=", 1)[1] for line in sealed.stdout.splitlines() if line.startswith("STATE_SHA256="))
         self.prove()
 
+    # 取り込みの commit M の後の doc の経路(Phase 4.5)。review-guard.py は変えず、今の動きを固定する。
+    def merged_head(self, conflict=False):
+        # 完了_guard.md を commit した後、作業ブランチと別のブランチに 1 commit ずつ作り、--no-ff で M を作る。
+        # conflict なら同じ行を両方が変え、解いてから commit する。
+        completed = self.task.with_name("完了_guard.md")
+        self.task.rename(completed)
+        self.task = completed
+        self.git("add", "-A")
+        self.git("commit", "-qm", "completed base")
+        work = self.git("symbolic-ref", "--short", "HEAD").stdout.strip()
+        self.git("checkout", "-q", "-b", "side")
+        if conflict:
+            (self.repo / "source.txt").write_text("side\n", encoding="utf-8")
+        else:
+            (self.repo / "side.txt").write_text("from side\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "side")
+        self.side = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("checkout", "-q", work)
+        if conflict:
+            (self.repo / "source.txt").write_text("work\n", encoding="utf-8")
+        else:
+            (self.repo / "work.txt").write_text("from work\n", encoding="utf-8")
+        self.git("add", "-A")
+        self.git("commit", "-qm", "work")
+        if conflict:
+            merging = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "side"], cwd=self.repo,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            self.assertEqual(1, merging.returncode, merging.stdout + merging.stderr)
+            (self.repo / "source.txt").write_text("resolved\n", encoding="utf-8")
+            self.git("add", "source.txt")
+            self.git("commit", "-qm", "M")
+        else:
+            self.git("merge", "--no-ff", "--no-edit", "side")
+        self.merge_commit = self.git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(2, len(self.git("rev-list", "--parents", "-n", "1", "HEAD").stdout.split()) - 1)
+
+    def parents(self, rev="HEAD"):
+        return self.git("rev-list", "--parents", "-n", "1", rev).stdout.split()[1:]
+
+    def prove_with(self, code, columns=(r"(^|/)[.]env($|[.])",)):
+        # prove() と同じ流れ。品質のコマンドを 1 本差し替え、受領書の終了コードを返す。
+        eres = [item for ere in columns for item in ("--exclude-ere", ere)]
+        context = lambda command: [command, "--cwd", str(self.repo), "--state", str(self.state),
+                                   "--expect-state-sha256", self.state_sha256, *eres]
+        plan = self.root / "merged-plan.json"
+        plan.write_text(json.dumps({"commands": [{"name": "merged", "argv": [sys.executable, "-c", code]}]}))
+        checks = self.root / "merged-checks.json"
+        checks.unlink(missing_ok=True)
+        self.guard(*context("run-checks"), "--checks-file", str(plan), "--expect-checks-sha256", self.digest(plan),
+                   "--out", str(checks))
+        codes = [item["exit_code"] for item in json.loads(checks.read_text())["results"]]
+        manifest = json.loads((self.state / "manifest.json").read_text())
+        reply = self.root / "merged-reply.json"
+        reply.write_text(json.dumps({"reviewer": "reviewer", "verdict": "APPROVED", "issues": [],
+                                     "review_binding_sha256": manifest["review_binding_sha256"]}))
+        self.proof = self.root / "merged-evidence.json"
+        self.proof.unlink(missing_ok=True)
+        self.guard(*context("attest"), "--checks", str(checks), "--expect-checks-sha256", self.digest(checks),
+                   "--review-result", str(reply), "--expect-review-sha256", self.digest(reply), "--out", str(self.proof))
+        self.proof_hash = self.digest(self.proof)
+        return codes, context
+
+    def test_doc_path_checks_merged_tree_without_new_commit(self):
+        self.merged_head()
+        self.begin()
+        self.capture(phase="doc", prove=False)
+        codes, _ = self.prove_with("from pathlib import Path; assert Path('side.txt').exists() and Path('work.txt').exists()")
+        self.assertEqual([0], codes)
+        self.verify("--mode", "pre-stage")
+        self.assertEqual(self.merge_commit, self.git("rev-parse", "HEAD").stdout.strip())
+
+    def test_doc_path_commits_empty_review_after_resolved_merge(self):
+        self.merged_head(conflict=True)
+        self.begin()
+        self.capture(phase="doc")
+        self.git("commit", "-q", "--allow-empty", "-m", "P")
+        self.verify("--mode", "commit")
+        pr = self.guard(*self.context("pr-evidence"), "--evidence", str(self.proof),
+                        "--expect-evidence-sha256", self.proof_hash)
+        self.assertIn("APPROVED", pr.stdout)
+        self.assertEqual([self.merge_commit], self.parents())
+
+    def test_doc_path_commits_file_change_directly_on_merge(self):
+        self.merged_head()
+        self.begin()
+        (self.repo / "work.txt").write_text("changed by the step\n", encoding="utf-8")
+        self.capture(phase="doc")
+        self.git("add", "-A")
+        self.verify("--mode", "stage")
+        self.git("commit", "-qm", "P")
+        self.verify("--mode", "commit")
+        self.assertEqual([self.merge_commit], self.parents())
+
+    def test_doc_path_rejects_second_parent_after_review(self):
+        self.merged_head()
+        self.begin()
+        self.capture(phase="doc")
+        forged = self.git("commit-tree", "HEAD^{tree}", "-p", "HEAD", "-p", self.side, "-m", "forged").stdout.strip()
+        self.git("reset", "-q", "--hard", forged)
+        self.assertEqual(2, len(self.parents()))
+        self.verify("--mode", "commit", expect=1)
+
+    def test_doc_path_take_with_added_secret_keeps_it_out_of_checks(self):
+        # foo.txt は取り込みの前から追跡している(merged_head の最初の commit に入る)。start の HEAD は M。
+        (self.repo / "foo.txt").write_text("public\n", encoding="utf-8")
+        self.merged_head()
+        self.assertEqual(self.merge_commit, self.git("rev-parse", "HEAD").stdout.strip())
+        self.assertEqual(2, len(self.parents()))
+        self.begin()
+        # review-guard.py は profile を読まない。profile に足した機密の glob は、ERE の列の後ろへ足して渡す。
+        base, extra = r"(^|/)[.]env($|[.])", r"^foo[.]txt$"
+        (self.repo / "foo.txt").write_text("NEW SECRET\n", encoding="utf-8")
+        taken = self.guard("take", "--cwd", str(self.repo), "--state", str(self.state), "--task-md", str(self.task),
+                           "--start-state", str(self.start_state), "--expect-start-sha256", self.start_sha256,
+                           "--exclude-ere", base, "--exclude-ere", extra, "--phase", "doc")
+        self.state_sha256 = next(line.split("=", 1)[1] for line in taken.stdout.splitlines()
+                                 if line.startswith("STATE_SHA256="))
+        seal = ["seal", "--cwd", str(self.repo), "--state", str(self.state), "--expect-state-sha256", self.state_sha256,
+                "--review-input", str(self.review)]
+        self.guard(*seal, "--exclude-ere", base, expect=2)
+        sealed = self.guard(*seal, "--exclude-ere", base, "--exclude-ere", extra)
+        self.state_sha256 = next(line.split("=", 1)[1] for line in sealed.stdout.splitlines()
+                                 if line.startswith("STATE_SHA256="))
+        codes, _ = self.prove_with("from pathlib import Path; assert not Path('foo.txt').exists()", columns=(base, extra))
+        self.assertEqual([0], codes)
+        verify = ["verify", "--cwd", str(self.repo), "--state", str(self.state), "--expect-state-sha256", self.state_sha256,
+                  "--exclude-ere", base, "--exclude-ere", extra, "--evidence", str(self.proof),
+                  "--expect-evidence-sha256", self.proof_hash, "--mode", "stage"]
+        # 対照: foo.txt をステージする前は通る。次の expect=1 の理由は、機密のパスがステージされたことだけ。
+        self.guard(*verify)
+        self.git("add", "foo.txt")
+        self.guard(*verify, expect=1)
+
 
 class ExternalTaskDirectoryTest(unittest.TestCase):
     """Git 呼出しを差し替え、外部本文と task_dir の境界だけを検査する。"""

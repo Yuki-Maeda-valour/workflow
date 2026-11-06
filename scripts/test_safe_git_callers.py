@@ -38,6 +38,7 @@ DOCS = [
     ROOT / "plugins/dev-workflow/skills/ship-task/SKILL.md",
     ROOT / "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
     ROOT / "plugins/dev-workflow/skills/ship-task/references/discover-mode.md",
+    ROOT / "plugins/dev-workflow/skills/ship-task/references/integration.md",
 ]
 REQUIRED = ("core.fsmonitor=", "core.hooksPath=/dev/null", "commit.gpgSign=false", "push.gpgSign=false", "filter.lfs.clean=", "filter.lfs.process=")
 DOC_MANIFEST_PATH = ROOT / "scripts/fixtures/safe_git_document_inventory.json"
