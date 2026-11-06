@@ -4,7 +4,7 @@
 固定するもの:
   - 2 つの節の見出しと並び、「PR の前の手順」の 5 つの小見出し
   - 順序の 6 つの手順の並びと、配るプラグインだけ版を上げる決まり、git の安全用のオプション、送り方
-  - PR の本文の「全回帰テスト(merge する状態)」の欄の形(6 本の名前・終了コード・結果の行)
+  - PR の本文の「全回帰テスト(merge する状態)」の欄の形(1 つのコマンド `run-all.py`・終了コード・結果の行・内訳の行)
   - 版を上げる 3 つのファイルの 4 か所の数
   - docs/design.md §8 の手順 2 が、2 つの節を正本として指すこと
 
@@ -253,23 +253,18 @@ class ProcedureTextTest(unittest.TestCase):
                        "git push --dry-run", "`publish-guard.py` と同じ付け方"):
             self.assertNotIn(phrase, both, f"入れてはいけない字面: {phrase}")
 
-    def test_result_lines_name_the_full_regression_commands_in_order(self):
-        names = self.regression_command_names()
-        self.assertEqual(len(names), 6)
+    def test_result_lines_name_the_full_regression_command(self):
+        self.check_regression_commands()
         text_fences = [body for info, body in fences(self.before)
                        if info == "text" and any(line.startswith("- 流した commit:") for line in body)]
         self.assertEqual(len(text_fences), 1)
         body = text_fences[0]
-        self.assertEqual(len(body), 9)
+        self.assertEqual(len(body), 5)
         self.assertEqual(body[0], "- 流した commit: `<SHA>`(取り込んだ main: `<SHA>`・版 <X.Y.Z>)")
         self.assertEqual(body[1], "- 流した環境: <`git --version` の出力> / <`python3 --version` の出力>")
-        self.assertEqual(body[-1], "- 流し直し: なし")
-        written = []
-        for line in body:
-            match = re.match(r"^- `([^`]+)`: 終了コード <数> / <最後の `結果:` の行>$", line)
-            if match:
-                written.append(match.group(1))
-        self.assertEqual(written, names)
+        self.assertEqual(body[2], "- `run-all.py`: 終了コード <数> / <最後の `結果:` の行>")
+        self.assertEqual(body[3], "- 内訳: <`結果(` で始まる行>")
+        self.assertEqual(body[4], "- 流し直し: なし")
         both = self.both
         self.assertContainsAll(self.before, [
             "見出し `## 全回帰テスト(merge する状態)` の欄",
@@ -280,10 +275,10 @@ class ProcedureTextTest(unittest.TestCase):
             "`- 流し直し <回>: ",
             "人が流す(人が行う手順。ship-task は流さない)",
             "取り込んだ後の作業ツリーにあるこの節",
-            "1 本ごとの上限は 3600 秒",
+            "上限は 3600 秒(入口の `--timeout` の既定)",
             "上限は既定の 600 秒で足りる",
             "「最終 doc の `start` HEAD は検証済み実装 HEAD でなければならない」は、この 2 では、取り込みの commit",
-            "1 の最後の行が `不合格 ⓪:`(1 の続け方の 2 つの行は除く)でなく(取り込みで衝突したとき・`違う:` のとき・その 2 つの行のときは、2 で作業の差分の全体をレビューし直した後)、3 の最後の行が `合格:` で、6 本が終了コード 0 で、5 の記録の確かめ ④ の最後の行が `合格:` のときだけ、PR を開く",
+            "1 の最後の行が `不合格 ⓪:`(1 の続け方の 2 つの行は除く)でなく(取り込みで衝突したとき・`違う:` のとき・その 2 つの行のときは、2 で作業の差分の全体をレビューし直した後)、3 の最後の行が `合格:` で、`run-all.py` が終了コード 0 で、5 の記録の確かめ ④ の最後の行が `合格:` のときだけ、PR を開く",
             "2 の commit があるときだけ",
             "reset せずに人に知らせる",
             "節を消す変更を PR の前の commit として通し、記録の確かめ ④ の `ps` に入れる",
@@ -320,11 +315,13 @@ class ProcedureTextTest(unittest.TestCase):
             "`git diff` は、追跡していない新しいファイルを出さず",
             "`seal` → `verify --mode pre-stage` → レビュー",
             "§6(review/commit の全入口)のとおり、Issue 本文を取り直して R と比べてから",
-            "`LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 timeout 3600 python3 -B scripts/run-loop-selftest.py`",
+            "`bash scripts/run-all-container.sh --commit <3 で確かめた先頭の SHA>`",
             "頭に `P ` を付ける",
             "配るプラグインを変えない PR: ② 版が main と同じで、③ `CHANGELOG.md` が main と同じ",
-            "「検証」の節の時間の表",
-            "`timeout 3600`",
+            "`docs/testing.md` の時間の記録",
+            "全回帰テスト(「検証」の節の `run-all.py`)を、人が流す",
+            "`run-all.py` は、止められると最後の `結果:` の行を出さない",
+            "「内訳」は、`run-all.py` が出す `結果(` で始まる 6 行を、出た順に 1 行ずつ `- 内訳: ` を付けて、字面を変えずに書く",
         ])
         # #375 で足した字面(3 つの確かめのコマンドの説明)。1 つずつ数える
         for phrase in (
@@ -365,30 +362,15 @@ class ProcedureTextTest(unittest.TestCase):
                        "`git diff --binary origin/main`", "- 文書の commit: "):
             self.assertNotIn(phrase, both, f"入れてはいけない字面: {phrase}")
 
-    def regression_command_names(self):
-        """「検証」の節の手順 2 から、6 本の名前を行の順に集める。"""
+    def check_regression_commands(self):
+        """「検証」の節に、全回帰テストの 2 つのコマンドと、詳しい説明へのリンクがあることを確かめる。"""
         verify = self.verify
-        marker = "全回帰テスト(merge の前)は、次の手順で流す。"
-        self.assertIn(marker, verify)
-        lines = verify.split(marker, 1)[1].split("\n")
-        start = next(i for i, line in enumerate(lines) if re.match(r"^2\. 次の (\d+) つを同時に始める。", line))
-        count = int(re.match(r"^2\. 次の (\d+) つを同時に始める。", lines[start]).group(1))
-        names = []
-        for line in lines[start + 1:]:
-            if not line.startswith("   - "):
-                break
-            py = re.search(r"python3 -B scripts/([\w-]+\.py)", line)
-            if py:
-                names.append(py.group(1))
-                continue
-            selftest = re.match(r"^   - ([\w・-]+) の selftest\(", line)
-            if selftest:
-                for base in selftest.group(1).split("・"):
-                    names.append(f"{base}-selftest.sh")
-                    self.assertIn(
-                        f"bash plugins/dev-workflow/skills/do-task/scripts/{base}-selftest.sh", verify)
-        self.assertEqual(len(names), count)
-        return names
+        for command in ("python3 -B scripts/run-all.py", "bash scripts/run-all-container.sh"):
+            self.assertIn(command, verify)
+        self.assertIn("[docs/testing.md](docs/testing.md)", verify)
+        self.assertIn("最後の行が `結果: 合格 / <秒> 秒` で、終了コードが 0", verify)
+        # 時間の表は、docs/testing.md へ移した(AGENTS.md には置かない)。
+        self.assertNotIn("| 流し方 |", verify)
 
     def test_scripts_stop_lazy_fetch_before_reading_objects(self):
         """3 つのスクリプトのそれぞれで、GIT_NO_LAZY_FETCH と promisor の確かめが、git の物を読むより前にある。"""
