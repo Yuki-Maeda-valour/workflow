@@ -15,6 +15,7 @@ v4.2.0 以前は commit 履歴を参照。
   - `implement-guard-selftest.sh` に `--check-units <単位,単位,...>` を足した。渡した単位が、全ケースをちょうど 1 回ずつ覆うかを見る(0 か 1 で終わる)。
   - `implement-guard-selftest.sh` が、保護領域の置き場を同時に動く別のテストに消されても落ちないようにした。置き場を作り直して 3 回まで試す。
 - テスト `scripts/test_implement_guard_units.py` を足した(`--list`・`--check-units`・`--only L-<記号>` と、置き場の作り直し)。
+- `do-task/references/external-runners.md` の、`implement-guard-selftest.sh` の説明に、`--list`・`--check-units`・`--only L-<記号>` と置き場の作り直しを足した。
 
 ## v4.46.0
 
