@@ -2,6 +2,14 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.44.1
+
+### 変更
+
+- `ship-task` に補助スクリプト `integrate-guard.py` を足した。PR の前に、取り込み先(PR の base)の最新を作業ブランチに取り込み(merge)、取り込んだ後の差分がレビューした差分と同じかを機械で確かめるためのもの。衝突を解いた後の `git add` と commit も、このスクリプトが行う。サブコマンドは `merge`・`stage-resolved`・`commit`・`check`・`worktree`・`exclude`。([Issue #371](https://github.com/Yuki-Maeda-valour/workflow/issues/371))
+  - まだ、どの skill の手順からも呼ばない。手順の文書(`ship-task/references/integration.md`)は #372 で足す。`ship-task/SKILL.md` に Phase 4.5 を足してこのスクリプトを呼ぶ手順と、ほかの文書の更新は #373 で行う。
+  - テスト(動きを自動で確かめるプログラム)`scripts/test_integrate_guard.py`(119 件)を足し、`scripts/test_safe_git_callers.py` の `PY_CALLERS` に新しいファイルを登録した。
+
 ## v4.44.0
 
 ### 変更
