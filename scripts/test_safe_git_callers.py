@@ -15,6 +15,7 @@ DO_TASK_SCRIPTS = ROOT / "plugins/dev-workflow/skills/do-task/scripts"
 PY_CALLERS = {
     "adoption": CREATE_SCRIPTS / "adopt-candidate.py",
     "publish": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py",
+    "integrate": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/integrate-guard.py",
     "loop_state": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-state.py",
     "origin": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py",
     "digest": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py",
