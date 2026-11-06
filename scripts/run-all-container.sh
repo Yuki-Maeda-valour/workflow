@@ -13,6 +13,9 @@
 # - イメージは、Dockerfile と requirements-dev.txt の中身の sha256 の先頭 12 桁を名前に入れる
 #   (workflow-test:run-all-<12 桁>)。無ければ作る。`--image` を渡せば、そのイメージを使う(作らない)。
 # - 重みの記録は、ホストの ${XDG_CACHE_HOME:-~/.cache}/workflow-run-all を容器へ取り付けて、回をまたいで使う。
+# - ホストの環境変数のうち、LOOP_SELFTEST_TIMEOUT・RUN_TIMEOUT・LOOP_STARTUP_CASE_TIMEOUT の 3 つだけを、
+#   ホストで設定されているものに限って容器の run-all.py へ渡す(`docker run -e NAME`。値はコマンド行に出さない)。
+#   ほかの環境変数は渡さない。渡した名前は、`渡す環境変数: <名前の並び>`(無ければ `なし`)の行で出す。
 # - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前> bash scripts/run-all-container.sh …` で流す。
 #
 # 終了コード: 容器の中のコマンドの終了コード(時間切れは 124)。引数の誤りは 2。
@@ -121,6 +124,15 @@ if mkdir -p "$cache_dir" 2>/dev/null; then
 else
   echo "注意: 重みの記録のフォルダを作れない($cache_dir)。容器の中だけで記録する"
 fi
+# ホストの環境変数のうち、決まった 3 つだけを渡す(設定されているものだけ。値はコマンド行に出さない)。
+passed=()
+for name in LOOP_SELFTEST_TIMEOUT RUN_TIMEOUT LOOP_STARTUP_CASE_TIMEOUT; do
+  if [ -n "${!name+x}" ]; then
+    args+=(-e "$name")
+    passed+=("$name")
+  fi
+done
+echo "渡す環境変数: ${passed[*]:-なし}"
 run_args=("$@")
 if [ -n "$LOG_DIR" ]; then
   args+=(-v "$LOG_DIR:/home/tester/run-all-logs")

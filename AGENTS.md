@@ -156,9 +156,11 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 全回帰テスト(merge の前)は、1 つのコマンドで流す。
 
 - `python3 -B scripts/run-all.py`
-  - 6 種類のテスト(unittest・loop-selftest・review-agent・implement-agent・diff-snapshot・implement-guard の selftest)を、1 つの共通の枠(同時に動かす数。既定は使える CPU の数)で、重い順に流す。
+  - 6 種類のテスト(unittest・loop-selftest・review-agent・implement-agent・diff-snapshot・implement-guard の selftest)を流す。共通の枠(同時に動かす数。既定は使える CPU の数)で重い順に流すのは 4 種(unittest・loop-selftest・implement-guard-selftest・diff-snapshot-selftest)。review-agent と implement-agent の selftest は、待ちが主なので枠を使わず、最初に始める。
   - `~/.local/state/dev-workflow` が無ければ、自分で作る。
-- git が 2.42 より古い機械(この作業機の 2.34.1 など)では、変更と関係なく落ちるテストがある。新しい git の容器で流す: `bash scripts/run-all-container.sh`
+- 2.36 より古い git(この作業機の 2.34.1 など)では、loop 系のテストが変更と関係なく落ちる。新しい git の容器で流す: `bash scripts/run-all-container.sh`
+  - 2.42 より古いと、`run-all.py` が警告を出す(製品の `loop.sh` が 2.42 以上の機能を使うため)。
+  - 全部が通ると確かめたのは 2.56.0。2.36〜2.55 で全部通るかは未確認。根拠は [docs/testing.md](docs/testing.md) の「git の版の警告の根拠」。
   - 作業ツリーの変更を含めて流すときは `--worktree`、commit を流すときは `--commit <rev>`(既定は HEAD)。
   - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前>` を付ける。
 - 合格の条件: 最後の行が `結果: 合格 / <秒> 秒` で、終了コードが 0。
@@ -166,6 +168,8 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - 時間切れが出たとき(混んだ機械で起きる)は、`-j <数>` を減らすか、ほかの重い処理が止まるのを待って流し直す。
   - `時間切れ: <秒> 秒の上限に当たった` は、`LOOP_STARTUP_CASE_TIMEOUT=<秒>` で延ばせる(既定 300 秒)。
   - judge の節の `期待 0・実際 124` か `期待 0・実際 137` は、`RUN_TIMEOUT=<秒>` で延ばせる(`run-all.py` は 600 秒を足す)。
+  - 容器の入口では、`LOOP_SELFTEST_TIMEOUT`・`RUN_TIMEOUT`・`LOOP_STARTUP_CASE_TIMEOUT` をホストで設定すれば、容器へ渡る(ほかの環境変数は渡らない)。
+  - 容器の入口で枠を減らすときは、`bash scripts/run-all-container.sh … -- -j <数>` と書く。
 - 止めた後に、別のプロセスグループの `loop.sh` などが残ることがある。そのときは、pid を指定して止める。
   - `残った一時フォルダ(<節>。確かめてから消す): <パス>` の行が出たら、中を確かめてから消す。
 - 作業の途中は、変えた所に関係するものだけを流す。
@@ -442,7 +446,7 @@ EOF
 
 - 全回帰テスト(「検証」の節の `run-all.py`)を、人が流す(人が行う手順。ship-task は流さない)。
   - `bash scripts/run-all-container.sh --commit <3 で確かめた先頭の SHA>` で流す。入口が `git archive <SHA>` で取り出し、`git init` と 1 回の commit をしたもの(`review-guard.py` の `run-checks` が作る検証用のコピーと同じ形)で流す。commit していない変更を混ぜない。
-  - git の版が古いと、変更と関係なく落ちるテストがある。入口は新しい git の容器で流す。
+  - 2.36 より古い git では、loop 系のテストが変更と関係なく落ちる(2.36〜2.55 で全部通るかは未確認。根拠は `docs/testing.md`)。入口は新しい git の容器で流す。
   - 上限は 3600 秒(入口の `--timeout` の既定)。`docs/testing.md` の時間の記録で最も長かった全体の 2832 秒(2026-11-05 の 7 回目)より長くした。
   - 終了コード 124 は、時間切れで落ちたこと。理由を書いて流し直す。
   - 落ちたときは、理由を調べてから流し直してよい(時間切れなど。「検証」の節)。流し直すのは `run-all.py` の回(全部を流し直す)。流し直したら、前の回の結果と理由を本文に残す。

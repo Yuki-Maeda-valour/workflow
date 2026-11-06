@@ -26,9 +26,9 @@ python3 -B scripts/run-all.py --weights-file PATH  # 重みの記録の置き場
 python3 -B scripts/run-all.py --plan               # 流さずに、始める順を出して終わる
 ```
 
-- 終了コード: 合格なら 0。ほかは 1。引数の誤りは 2。止めたときは 128 + シグナルの番号(最後の `結果:` の行は出さない)。
+- 終了コード: 合格なら 0。ほかは 1。引数の誤りは 2。止めたときは 128 + シグナル(プロセスに止めるなどを伝える合図)の番号(最後の `結果:` の行は出さない)。
 - `--log-dir` のフォルダが無いときは、引数の誤り。止めた単位の出力も、出力が閉じた後に残す。
-- 環境変数は、そのまま各単位へ渡す。
+- `run-all.py` は、環境変数をそのまま各単位へ渡す(容器の入口の話は、下の「容器の入口」の節)。
   - loop-selftest の各プロセスには、環境に無いときだけ `LOOP_SELFTEST_TIMEOUT=6000`・`RUN_TIMEOUT=600` を足す。`LOOP_SELFTEST_ONLY` は節ごとに上書きする。
   - `LOOP_SELFTEST_PROGRESS` を妨げない。
 
@@ -36,7 +36,7 @@ python3 -B scripts/run-all.py --plan               # 流さずに、始める順
 
 | 部 | 単位 | 鍵(重みの記録の鍵) | 表示名 |
 |---|---|---|---|
-| unittest | `run-tests.py` の全ファイルとシャード | `unittest:<ファイル>`(分けたときは `unittest:<ファイル>[<番号>/<数>]`。番号は 1 から) | `unittest <ファイル>`(分けたときは `unittest <ファイル> [<番号>/<数>]`) |
+| unittest | `run-tests.py` の全ファイルとシャード(1 つのテストのファイルを分けた、別々に流す単位) | `unittest:<ファイル>`(分けたときは `unittest:<ファイル>[<番号>/<数>]`。番号は 1 から) | `unittest <ファイル>`(分けたときは `unittest <ファイル> [<番号>/<数>]`) |
 | loop-selftest | 全部の節と、節の外だけのプロセス | `loop:<節>`・`loop:(節の外だけ)` | `loop-selftest <節>`・`loop-selftest (節の外だけ)` |
 | implement-guard-selftest | 下の「implement-guard の分け方」の単位 | `implement-guard:<単位>`(1 本のときは `implement-guard`) | `implement-guard-selftest.sh --only <単位>`(1 本のときは `implement-guard-selftest.sh`) |
 | diff-snapshot-selftest | 1 本 | `diff-snapshot` | `diff-snapshot-selftest.sh` |
@@ -126,6 +126,9 @@ bash scripts/run-all-container.sh [--commit <rev> | --worktree] [--image <名前
   - 取り付け先の親の `/home/tester/.cache` は、イメージの中で `tester` の持ち物として作っておく(無いと、docker が root の持ち物で作り、`tester` は `~/.cache` に書けなくなる)。
 - `--log-dir <ホストのフォルダ>`: 容器の `/home/tester/run-all-logs` に取り付け、`run-all.py` に `--log-dir /home/tester/run-all-logs` を渡す。フォルダが無ければ引数の誤り。
 - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前> bash scripts/run-all-container.sh …` で流す。
+- 容器へ渡すホストの環境変数は、`LOOP_SELFTEST_TIMEOUT`・`RUN_TIMEOUT`・`LOOP_STARTUP_CASE_TIMEOUT` の 3 つだけ。
+  - ホストで設定されているものだけを、`docker run -e <名前>` で渡す(値はコマンド行に出さない)。ほかの環境変数は渡さない。
+  - 渡した名前を、容器の外で `渡す環境変数: <名前の並び>`(無ければ `渡す環境変数: なし`)の 1 行に出す。
 - 終了コードは、容器の中のコマンドの終了コード(時間切れは 124)。引数の誤りは 2。
 
 ## 2 つのランナー(部分だけ流すとき)
