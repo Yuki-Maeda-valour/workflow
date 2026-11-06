@@ -232,6 +232,7 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.
    - `python3 -B scripts/run-tests.py`
    - review-agent・implement-agent・diff-snapshot・implement-guard の selftest(上のコードの `bash …-selftest.sh` の 4 行)
 3. 6 つすべての終了コードが 0 なら合格。
+4. 流す時点(PR を開く前)と、結果の PR の本文への書き方は、「PR の前の手順」の節に従う。
 
 - `run-loop-selftest.py` には `LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600` を付ける。
   - `LOOP_SELFTEST_TIMEOUT` は、1 つのプロセス(節 1 つ)の全体の上限の秒数。既定は 1500 秒。
@@ -272,6 +273,176 @@ LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 python3 -B scripts/run-loop-selftest.
   - `bash loop-selftest.sh` を 1 本で、ほかのテストと同時でなく流すと 3718 秒。
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
+
+## PR から merge までの順序
+
+PR を開く前に、merge する状態(main を取り込み、要るときは版を上げた状態)で全回帰テストを流し、結果を PR の本文に書く。次の順に進める。
+
+- 版を上げ、`CHANGELOG.md` に節を足すのは、配るプラグイン(`plugins/` の下・`.claude-plugin/marketplace.json`・プラグインを使わない導入の `setup.sh`)を変えた PR だけ。変えない PR は、版も `CHANGELOG.md` も変えない(例: #344・#355・#363・#369)。
+- この 2 つの節で打つ git のコマンドには、すべて Git の共通の安全用のオプション([base-commit.md](plugins/dev-workflow/skills/do-task/references/base-commit.md)。`publish-guard.py` の `SAFE_GIT_PREFIX` と同じ並び)を付ける。下の `git <安全用のオプション> …` は、その意味。確かめのコマンドの中では、関数 `g` が付ける。
+- review-guard の状態の記録を取らずに作った PR(ship-task も do-task も使わずに作った PR。例: #339・#342・#363・#369)では、review-guard の手順(1 の `pr-evidence`・「PR の前の手順」の 2 の `start` から `pr-evidence` まで・順序の 4 と 6 の `verify --mode commit` と `pr-evidence`)を行わない。状態の記録を失った PR には当てない(人に知らせる)。
+  - `<レビュー済み SHA>`(1 回目)と記録の確かめの `first` には、取り込む前の作業ブランチの先頭を渡す。
+  - 版の変更(配るものを変えた PR)と、要るときの作業の差分の全体(衝突したときと、「PR の前の手順」の 1 が `違う:` のとき)は、ふつうのレビューに通す。ふつうのレビューは、`diff-snapshot.sh` の `--base HEAD` と `--base origin/main` のスナップショットをレビュアーに渡し、全員の判定を APPROVED にすること。`diff-snapshot.sh` は、「PR の前の手順」の 2 と同じく、main の版を取り出して流す。スナップショットには、profile(プロジェクトの設定ファイル。`.claude/project-profile.yml`)の `secret_paths`(無ければ既定の `.env`・`.env.*`・`.dev.vars`)を `--exclude-glob` で 1 つずつ渡す([diff-snapshot-call.md](plugins/dev-workflow/skills/do-task/references/diff-snapshot-call.md) のとおり)。
+  - 本文の review/commit 照合の欄には「状態の記録なし」と書き、並べてレビュアーのモデルの名前と版と判定を書く。レビューのために作った commit(版を上げる commit など)は、PR の前の commit として記録の確かめの `ps` に入れる。
+
+1. 実装の commit と文書の commit まで済ませる。
+   - 配るプラグインを変えた PR は、`CHANGELOG.md` の項目を `## (次の版)` の見出しの下に書く。版の数字は、まだ決めない。
+   - 最後にレビューを通した commit の SHA(コミットのハッシュ値)を、レビュー済み SHA(1 回目)として控える。ふつうは文書の commit。文書の変更が無く、文書の commit を作らなかったときは、実装の commit。
+   - 文書の commit を作ったときは、main を取り込む前に、その状態の記録で `review-guard.py` の `verify --mode commit` と `pr-evidence` を行い、標準出力を PR の本文の下書きに入れる。実装の分は、実装の commit の直後に取ったものを使う。
+   - 取り込んだ後は、HEAD の親と中身が変わるので、文書の状態の記録では `verify --mode commit` も `pr-evidence` も一致しない。
+   - 控えた値(状態の記録のハッシュ値など)を失ったら、`pr-evidence` を作り直さない。検証のやり直しが要ると、人に知らせる。
+2. main を取り込む。
+   - `git <安全用のオプション> fetch origin main` の後、`git <安全用のオプション> merge-base --is-ancestor origin/main HEAD` が終了コード 0 なら、取り込む物は無い。3 へ進む。
+   - そうでなければ、`git <安全用のオプション> merge --no-ff -m 'Merge main into <ブランチ> (#<番号>)' origin/main` で取り込む。
+   - 衝突したら、衝突したファイルの名前を控えてから(`git <安全用のオプション> diff --name-only --diff-filter=U`)、すべて解いて取り込む。
+   - `CHANGELOG.md` の先頭の衝突は、自分の節を、main の最新の版の節の上に置いて解く。main の節は変えない。
+   - 版の 2 つのファイルの `"version"` の行の衝突は、main の側の値を取って解く。前の回に版を付けた後に、main が別の版へ進んだときに起きる(例: #356 の 2 回目の取り込み)。版は「PR の前の手順」の 2 で付け直す。
+   - 衝突しなかったときは、git が作った取り込みの commit に手を加えない。
+   - 衝突を解いた所は、レビューを通っていない。だから、衝突したときは、「PR の前の手順」の 2 で、作業の差分の全体をレビューし直す。
+3. 「PR の前の手順」の節を行う(取り込みの確かめ・版を上げてレビューに通す・版の確かめ・全回帰テスト・PR の本文の欄)。
+4. PR を開く。
+   - `publish-guard.py` の `--sha` には、全回帰テストを流した commit(作業ブランチの先頭)の SHA を渡す。ふつうは、「PR の前の手順」の 2 で作る PR の前の commit(版を上げるか、作業の差分の全体をレビューし直して、レビューに通した commit)。
+   - [Issue 方式の契約](plugins/dev-workflow/skills/do-task/references/github-issue.md) §6 の、送る直前の `verify --mode commit` と `pr-evidence`(最後の commit の状態の記録で行う)は、PR の前の commit の状態の記録で行う。
+   - PR の前の commit が無いとき(「PR の前の手順」の 2 を行わなかった回)は、先頭で分ける。
+     - 先頭がレビュー済み SHA(1 回目)なら、その状態の記録で `verify --mode commit` と `pr-evidence` を行う。
+     - 先頭が取り込みの commit なら、照合は通らない。「PR の前の手順」の 1 の `同じ:` の行と、その先頭を `last` に渡して合格した記録の確かめ ④ の行で代え、本文の「レビュー差分の外で PR に入る commit」の欄に書く。
+   - 先頭でない commit の SHA を渡すと、ブランチの先頭と一致しないので、送る前に止まる。
+   - PR の本文は、ship-task の Phase 5 の 3 の欄に、「PR の前の手順」の 5 の欄を足して作る。
+   - Issue 方式の公開の前の確かめ(Issue 本文を取り直して R と比べることと、`origin-repo.py` の `repo` と Issue の `repo` が同じかの確かめ)は、Issue 方式の契約 §6 のとおり行う。
+5. merge の直前に `git <安全用のオプション> fetch origin main` をして、次の 2 つを確かめる。
+   - PR の元の SHA(`gh pr view <番号> -R <リポジトリ> --json headRefOid -q .headRefOid`)が、全回帰テストを流した commit(記録の確かめ ④ の `last`)と同じ。
+   - `git <安全用のオプション> merge-base --is-ancestor origin/main <その SHA>` が終了コード 0(PR を開いた後に、main が進んでいない)。
+   - 2 つとも成り立てば、merge は `gh pr merge <番号> -R <リポジトリ> --merge --match-head-commit <全回帰テストを流した commit の SHA>` で行う。
+6. 5 のどちらかが成り立たなければ、merge しない。2 と 3 をやり直し、送り(push)、PR の本文を直してから、5 に戻る。
+   - 送る前に、「PR の前の手順」の 5 の記録の確かめ ④ を流し直し、4 と同じ確かめをする: Issue 方式の契約 §6 の確かめ(Issue 本文を取り直して R と比べる・`origin-repo.py` の `repo` と Issue の `repo` が同じか)と、最後の commit の照合(この回に PR の前の commit を作ったら、その状態の記録で `verify --mode commit` と `pr-evidence` をやり直す。作らなかったら、1 の `同じ:` の行で代える)。
+   - 送るのは `python3 -B plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py --dir <ルート> --sha <全回帰テストを流した commit の SHA> --branch <ブランチ> --config-digest <控える値> --push-only --push-url-digest <origin-repo.py の push_url_sha256>`。`<控える値>` は、`git-config-digest.py --dir <ルート>` の出力。
+   - 出力が `PUSH_ONLY` で終了コード 0 なら、送った SHA と、送った先のブランチの SHA が一致している(`publish-guard.py` が、SHA を指定して送り、送った後に確かめる)。
+   - 書き直すのは「全回帰テスト(merge する状態)」と「レビュー差分の外で PR に入る commit」の 2 つの欄。「review/commit 照合(PR の前の変更)」の欄は、回ごとに足す。ほかの欄は変えない。
+   - 直した本文は、`gh pr edit <番号> -R <リポジトリ> --body-file -` に標準入力で渡す。
+
+- 2 つの PR を並べて進めるときは、版を上げる PR どうしは、どちらも main の版の次の版を付けて PR を開く。先に merge した PR が、その版を使う。後の PR は、5 で main が進んだと分かるので、6 で版を付け直す(例: #360 が 4.43.4 を使い、#361 は 4.43.5 になった)。
+- ship-task で進めるときは、その版の ship-task が、PR の前に main を取り込む工程(Phase 4.5)を持つかで分ける。
+  - 持つ版は、`--no-pr` を付けずに走らせる。ship-task は、取り込み・衝突の解決とレビューし直し・「PR の前の手順」の 1〜3 を行い、全回帰テスト(人が行う手順)の前で、PR を開かずに止まる。止まった後に、報告の値(公開する SHA・PR の本文の下書きのパス・保持した `pr-evidence`)を確かめ、「PR の前の手順」の 4・5 と、この節の 4 から後を手で行う。
+  - 持たない版は、`--no-pr` を付けて走らせる。止まった後に、1 の `pr-evidence` と、2 から後を、この節のとおり手で行う。
+
+## PR の前の手順
+
+main を取り込んだ後、PR を開く前に行う(順序は「PR から merge までの順序」の節)。PR を開いた後に main が進み、取り込み直したときも、同じことを行う。
+- 従うのは、取り込んだ後の作業ツリーにあるこの節(main がこの節を変えていたら、変えた後の決まり)。
+- 1・3・5 の確かめのコマンド(bash のコードブロック)は、#375 でこの節に足す。足すまでは、コマンドを流さず、次のとおり代える。
+  - 取り込んだ回は、衝突が無くても、2 で作業の差分の全体をレビューし直す(1 の ① の代わり)。
+  - 版と `CHANGELOG.md` の最初の見出しは、2 のレビューで見る(3 の代わり)。
+  - 記録の確かめ ④ の代わりに、`git <安全用のオプション> log --no-show-signature --no-decorate --format='%H %s' <先頭> ^origin/main ^<レビュー済み SHA(1 回目)>` の出力を欄に入れ、取り込みと PR の前の commit のほかが無いことを人が見る。
+  - 2 の機密の除外の行の「1 の出力の `機密の除外: ` の行の正規表現」の代わりに、1 の続け方(読めない profile で止まったとき)と同じ作り方の正規表現を使う(読めない commit が無ければ、ref の組から何も外さない)。
+  - PR の本文の取り込み・版の確かめ・記録の確かめの行には「確かめのコマンドなし(#375 の前)」と書く。4 の PR を開く条件のうち、1・3・5 の最後の行の条件は除く。
+
+### 1. 取り込みを確かめる
+
+次のコマンドを、作業ブランチを取り出したリポジトリの直下で流す。`<レビュー済み SHA>` は次のとおり。
+- 1 回目は、レビュー済み SHA(1 回目)。ふつうは文書の commit。文書の commit が無ければ実装の commit。状態の記録を取らずに作った PR は、取り込む前の作業ブランチの先頭。
+- やり直しでは、前の回に 2 で作った commit。前の回に 2 を行わなかったときは、前の回のレビュー済み SHA をそのまま使う(取り込みの commit は親が 2 つなので、⓪ で止まる)。
+
+- ⓪ レビュー済み SHA が親の 1 つの commit で、作業ブランチの先頭が、レビュー済み SHA と main を含む。違えば、最後の行が `不合格 ⓪:` で、終了コードが 1。PR を開かず、人に知らせる(最後の行が、下の続け方の 2 つの行のどちらかと全体で同じときを除く)。
+- ① レビューした作業の差分(main から分かれた所からレビュー済み SHA まで)と、PR が main に足す作業の差分が同じか。同じなら最後の行が `同じ:` で終了コードが 0、違えば `違う:` で終了コードが 2。最後の行に、比べたレビュー済み SHA と先頭と main の SHA を出す。
+- 取り込みで衝突したか、① が「違う」なら、2 のレビューに、作業の差分の全体を足す(レビューし直す)。
+- 最後の行が `不合格 ⓪: 機密のパス(上の行)に変更がある。中身を読まずに止めた` のときは、① の代わりに、2 で作業の差分の全体をレビューし直す(スナップショットは、機密のファイルをパスだけで出す)。3 の `<1 で確かめた先頭の SHA>` には、取り込みの commit(取り込まなかったときは、レビュー済み SHA の commit。つまり作業ブランチの先頭)を渡す。2 のレビュー入力では、1 の出力の `機密の除外: ` の行の正規表現も除く(2 の機密の除外の行)。最後の行が `不合格 ⓪: 機密のパスの集合を作れない`(作業ブランチの途中の commit の profile が読めない)ときも同じく進める。そのときは `機密の除外: ` の行が無いので、2 で取り出す main の skill 一式の `secret-profiles.py --cwd . --ref …` を、1 と同じ ref の組(`git <安全用のオプション> rev-list --first-parent --parents HEAD ^origin/main` が出す SHA・`origin/main`・`HEAD`・レビュー済み SHA・main から分かれた所)から読めない commit を外して流し、出た要素と、人が読んだその commit の `secret_paths` と、既定の `.env`・`.env.*`・`.dev.vars` を、1 つずつ `--exclude-glob` にして `diff-snapshot.sh --print-exclude-ere` に渡した正規表現を使う。ほかの `不合格 ⓪:`(`不合格 ⓪: 機密のパスの正規表現を作れない` を含む)は、PR を開かず、人に知らせる。
+- 最後の行の「先頭」の SHA を、3 で使うので控える。
+- レビュー済み SHA に、レビューを通っていない commit を渡しても、この確かめは見分けない。それは 5 の記録の確かめ ④ が止める。
+
+### 2. 版を上げて、レビューに通す
+
+版を上げる変更(と、1 で決めたときは作業の差分の全体)を、文書と同じ手順でレビューに通す。
+
+- 配るプラグインを変えた PR は、版を上げる。変えない PR は、版を変えない(取り込みで衝突したか、1 の ① が「違う」ときだけ、作業の差分の全体をレビューし直す)。
+- 版を変える前に、新しい `start` を取る。HEAD は、取り込みの commit(取り込まなかったときは、レビュー済み SHA の commit)。
+  - Issue 方式は、[Issue 方式の契約](plugins/dev-workflow/skills/do-task/references/github-issue.md) §6(review/commit の全入口)のとおり、Issue 本文を取り直して R と比べてから、外部の本文として渡す。
+  - review-protocol.md の「最終 doc の `start` HEAD は検証済み実装 HEAD でなければならない」は、この 2 では、取り込みの commit(取り込まなかったときは、レビュー済み SHA の commit)と読む。取り込みの commit は、1 の確かめと、要るときのレビューし直しで、レビューに結び付ける。
+- 版は、取り込んだ main の版の次にする。刻みは `docs/design.md` §8 に従う(後方互換な機能追加はマイナー、内部の移行・修正はパッチ)。
+- 変える所は 4 か所: `plugins/dev-workflow/.claude-plugin/plugin.json` の `"version"`(1 か所)・`.claude-plugin/marketplace.json` の `"version"`(2 か所)・`CHANGELOG.md` の自分の節の見出し(`## (次の版)` か、前の回に付けた `## v<版>` を、`## v<版>` にする)。
+- 作業ブランチの版が、もう main の版の次なら、版は変えない(main が版を上げずに進んだとき)。版の行がレビュー済み SHA の値と同じかは、1 の ① が確かめる。取り込みの commit だけが版を変えていれば ① が「違う」になるので、2 で、その版の変更を含む作業の差分の全体をレビューし直し、PR の前の commit を作る。
+- 順序は、`take --phase doc` → レビューに渡すファイルを作る → `seal` → `verify --mode pre-stage` → レビュー → `run-checks` → `attest` → ステージ → `verify --mode stage` → commit → `verify --mode commit` → `pr-evidence`。引数と細かい順序の正本は、[review-protocol.md](plugins/dev-workflow/skills/do-task/references/review-protocol.md) の「文書、保留、公開」の節。
+  - レビューに渡すファイルは、既存の diff スナップショットの手順([diff-snapshot-call.md](plugins/dev-workflow/skills/do-task/references/diff-snapshot-call.md))で作る。`git diff` は、追跡していない新しいファイルを出さず、機密の除外もしないので使わない。
+  - 2 で流すスクリプトは、作業ツリーのものを流さず、取り込み先の main の版を一時フォルダに取り出して流す(1 と同じ理由)。`review-guard.py` は、隣の `diff-snapshot.sh`・`check-process.py` と create-task の `task-digest.py` も読むので、skill の一式を取り出す。先に `export GIT_NO_LAZY_FETCH=1` を実行し、`git <安全用のオプション> config --get-regexp '^(extensions\.partialclone|remote\..*\.promisor)$'` が何も出さずに終了コード 1 で終わることを確かめてから、`d=$(mktemp -d) && git <安全用のオプション> archive origin/main plugins/dev-workflow/skills | tar -x -C "$d"` で取り出す。
+  - `start` から `pr-evidence` までの `review-guard.py` は、`python3 -B "$d/plugins/dev-workflow/skills/ship-task/scripts/review-guard.py"` で流す。順序の節の 4 と 6 で、取り込んだ後に流す `review-guard.py` も同じ。
+  - 版の変更: `bash "$d/plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh" --cwd . --base HEAD --out .claude/reviews/<名>-pr-before.md --exclude <take と同じ ERE>`。
+  - 1 で決めたときは、作業の差分の全体: 同じコマンドの `--base origin/main` で、`--out .claude/reviews/<名>-whole.md`。
+  - 機密の除外: 2 の `review-guard.py` のすべての入口に、1 の出力の `機密の除外: ` の行の正規表現を、もう 1 つの `--exclude-ere` として足す。両方のスナップショットにも `--exclude '<その正規表現>'` を足す。1 と同じ ref(作業ブランチの commit と、その親〈分かれた所と過去に取り込んだ main〉を含む)の profile から作った集合なので、共通の祖先の設定にだけ残る機密の指定も、やり直しの回で外れない。
+  - `run-checks` の計画には、`python3 -B scripts/validate.py` と、ホストのプラグイン検証(「検証」の節の最後の段落)を入れる。この 2 つだけなので、上限は既定の 600 秒で足りる。
+- レビュアーが全員 APPROVED なら、変えたファイルを `git <安全用のオプション> add` でステージし、`verify --mode stage` を通して、`git <安全用のオプション> commit` で 1 つの commit にする。メッセージは `chore: 版を <版> にする (#<番号>)`。この commit を、PR の前の commit と呼ぶ。
+- 版を変えず、作業の差分の全体だけをレビューし直したときは、`git <安全用のオプション> commit --allow-empty -m 'chore: 取り込みの後の作業の差分をレビューし直す (#<番号>)'` にする。review/commit 照合を、この commit に結び付けるため。
+- 版を変えず、レビューし直すことも要らないときは、2 を行わない。
+- commit の後に `verify --mode commit` と `pr-evidence` を行い、標準出力を、見出し `## review/commit 照合(PR の前の変更・<回> 回目)` の欄に入れる。
+
+### 3. 版を確かめる
+
+次のコマンドを、2 の後に(2 を行わなかったときは 1 の後に)、リポジトリの直下で流す。`<1 で確かめた先頭の SHA>` は、1 の最後の行の「先頭」の SHA(取り込んだときは取り込みの commit、取り込まなかったときはレビュー済み SHA)。最後の行が `合格:` で始まり、終了コードが 0 なら合格。
+
+- ⓪ 作業ブランチの先頭が、1 で確かめた commit そのものか、その上の 1 つの commit(親が 1 つで、それが 1 で確かめた commit)。1 の後に別の commit が入っていれば不合格。
+- 配るプラグインを変えた PR かは、main から先頭までに、`plugins/` の下・`.claude-plugin/marketplace.json`・`setup.sh` が、`"version"` の行のほかで変わったかで決める。`.claude-plugin/` の中のほかのファイルだけを変えた PR は、配るプラグインを変えていない。
+- 配るプラグインを変えた PR:
+  - ② main から作業ブランチの先頭までの `"version"` の行の差が、main の版から新しい版への 3 行(`plugin.json` 1 行・`marketplace.json` 2 行)。版の 2 つのファイルのほかの行は見ない(1 の ① と、2 のレビューで見る)。
+  - ③ 版が main の版の次で、`CHANGELOG.md` の最初の見出しがその版。
+- 配るプラグインを変えない PR: ② 版が main と同じで、③ `CHANGELOG.md` が main と同じ。
+- どちらの PR でも、版の 2 つのファイルと `CHANGELOG.md` の種類と実行権限が main と同じこと(②)。版や `CHANGELOG.md` を読めなければ `不合格 ⓪:`。
+- 不合格なら、PR を開かない。
+  - 2 の commit があるときだけ、まだ送っていないので、`git <安全用のオプション> reset --keep HEAD^` で外し、新しい `start` から 2 をやり直す。
+  - 2 を行わなかった回の ②③ の不合格と、⓪ の不合格は、reset せずに人に知らせる(外すと、取り込みの commit かレビュー済み SHA の commit を外してしまう)。ただし、次の場合を除く。
+  - 配るものを変えない PR が `CHANGELOG.md` に節を足していたとき(③)は、2 の手順(新しい `start` → スナップショット → レビュー → commit)で、節を消す変更を PR の前の commit として通し、記録の確かめ ④ の `ps` に入れる。それから 3 を流し直す。
+
+### 4. 全回帰テストを流す
+
+- 全回帰テスト(「検証」の節の「全回帰テスト(merge の前)」の 6 つ)を、人が流す(人が行う手順。ship-task は流さない)。
+  - 流すのは、3 で確かめた先頭の commit の中身だけのフォルダ。`git archive <SHA>` で取り出し、`git init` と 1 回の commit をしたもの(`review-guard.py` の `run-checks` が作る検証用のコピーと同じ形)を使う。commit していない変更を混ぜない。
+  - git の版が古いと、変更と関係なく落ちるテストがある。新しい git の環境(容器など)で流す。
+  - 1 本ごとの上限は 3600 秒。「検証」の節の時間の表で最も長かった全体の 2832 秒(7 回目)より長くした。
+  - 上限は、それぞれのコマンドの前に `timeout 3600` を付けて効かせる。`run-loop-selftest.py` は、環境の変数を前に置くので、`LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600 timeout 3600 python3 -B scripts/run-loop-selftest.py` と書く(`timeout` を変数の前に置くと、変数をコマンドと見なし、終了コード 127 で落ちる)。
+  - 終了コード 124 は、時間切れで落ちた本として、理由を書いて流し直す。
+  - 落ちた本は、理由を調べてから流し直してよい(時間切れなど。「検証」の節)。流し直したら、前の回の結果と理由を本文に残す。
+- 1 の最後の行が `不合格 ⓪:`(1 の続け方の 2 つの行は除く)でなく(取り込みで衝突したとき・`違う:` のとき・その 2 つの行のときは、2 で作業の差分の全体をレビューし直した後)、3 の最後の行が `合格:` で、6 本が終了コード 0 で、5 の記録の確かめ ④ の最後の行が `合格:` のときだけ、PR を開く。
+
+### 5. PR の本文の欄を書く
+
+見出し `## 全回帰テスト(merge する状態)` の欄に、次の行を書く。
+
+```text
+- 流した commit: `<SHA>`(取り込んだ main: `<SHA>`・版 <X.Y.Z>)
+- 流した環境: <`git --version` の出力> / <`python3 --version` の出力>
+- `run-loop-selftest.py`: 終了コード <数> / <最後の `結果:` の行>
+- `run-tests.py`: 終了コード <数> / <最後の `結果:` の行>
+- `review-agent-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
+- `implement-agent-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
+- `diff-snapshot-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
+- `implement-guard-selftest.sh`: 終了コード <数> / <最後の `結果:` の行>
+- 流し直し: なし
+```
+
+- SHA は 40 桁で書く。
+- 「最後の `結果:` の行」の所には、そのコマンドが最後に出す、`結果:` で始まる行を、字面を変えずに書く。件数はこの行にあり、省かない。
+- 流し直したら、`- 流し直し: なし` の代わりに、回ごとに `- 流し直し <回>: <流し直した本の名前か「6 本」> — <理由>。前の回は <前の回の終了コードと結果の行>` の行を書く。
+  - 前の回に結果の行が出なかったとき(時間切れで止めたときなど。`run-tests.py` と `run-loop-selftest.py` は、止められると最後の `結果:` の行を出さない)は、`<前の回の終了コードと結果の行>` の所に `終了コード <数> / 結果の行なし(<理由>)` と書く。
+  - 最後に流した回の 6 本の行の件数は、省かない。
+
+見出し `## レビュー差分の外で PR に入る commit` の欄に、次の行を書く。
+
+```text
+- レビュー済み SHA(1 回目): `<SHA>`
+- 取り込み <回>: main `<SHA>` / <1 のコマンドの最後の行> / 衝突: <なし | 衝突したファイルの名前> / レビューし直し: <しない | した>
+- 版の確かめ <回>: <3 のコマンドの最後の行>
+- 記録の確かめ: <下のコマンドの最後の行>
+```
+
+- 取り込みと版の確かめの行は、回ごとに 1 行ずつ書く。
+- 記録の確かめ ④: 次のコマンドを、PR を開く直前(と、6 で送る直前)に流す。最後の行が `合格:` で始まり、終了コードが 0 なら合格。
+  - `<レビュー済み SHA(1 回目)>` は、初回の値から変えない。
+  - `<PR の前の commit の SHA>` には、2 で作った commit の SHA を、回ごとにすべて空白で区切って並べる(無ければ空にする)。
+  - `<3 で確かめた先頭の SHA>` には、最後の回の 3 の結果の行の「先頭」の SHA を渡す。全回帰テストを流す commit と、PR の元の SHA も、この先頭と同じにする。
+
+- ④ 作業ブランチの先頭が 3 で確かめた先頭と同じで、先頭から届く commit のうち、main(取り込んだ取り込み先)にもレビュー済み SHA(1 回目)にも届かない、取り込みでない commit が、2 で作った PR の前の commit とちょうど同じ。取り込みの 2 つ目の親の側にある commit も数える。1 の後に、レビューを通っていない commit を足したとき(別のブランチを取り込んで入れたときも)と、3 の後に別の取り込みや commit を足したときは不合格。
+- 不合格なら、PR を開かず、人に知らせる。
+- コマンドが出す一覧(`git log --no-show-signature …` の出力。取り込みの commit も含む)を、欄の最後にコードブロックに入れて書く(件名は、リポジトリを書ける者が決めた文字列なので)。2 で作った commit の行は、頭に `P ` を付ける。
+- ship-task の Phase 0 の一覧(作業ブランチの起点より前の commit)があるときは、同じ欄に並べて書く。
+
+見出し `## review/commit 照合(PR の前の変更・<回> 回目)` の欄は、2 の commit を作った回だけ書く。文書の commit の欄(1)も、文書の commit を作ったときだけ書く。
 
 ## このリポジトリの Issue 運用
 
