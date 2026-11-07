@@ -19,23 +19,24 @@
   グループへは SIGINT・SIGTERM・SIGKILL の順に送る。SIGINT なら Python の子が後片付け
   (一時フォルダを消すなど)をしてから終われる。
 - 失敗したプロセスの出力は、最後にまとめて表示する。
+- 子の起動・止め方・並べ方・失敗の出力は、同じフォルダの run_units.py が持つ(run-loop-selftest.py・run-all.py と共通)。
 """
 
 import argparse
-import concurrent.futures
 import json
-import os
-import signal
-import subprocess
 import sys
 import tempfile
-import threading
 import time
 import unittest
 from pathlib import Path
 
+# 子のプロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
+sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import run_units  # noqa: E402
 
 # 重いファイルを分けるプロセスの数と、先に始める順の重み(秒)。
 # 値は、順に流したときの 1 ファイルの時間(2026-11-05、Ubuntu 22.04 の容器・git 2.56.0・Python 3.10.12・16 CPU)。
@@ -51,31 +52,66 @@ SHARDS = {
     "test_host_check.py": 2,
 }
 
-# 載っていないファイルは軽いものとして、後に回す。
+# 先に始める順の重み(秒)。値は、ファイルごとのプロセスの時間の和(2026-11-06、Ubuntu 22.04 の容器・git 2.56.0・
+# Python 3.10.12・16 CPU。6 本を同時に流した全回帰テストの中での測定。0 秒のものは 1)。
+# 分けたファイルの 1 プロセスの重みは「ファイルの重み ÷ 分ける数」。
+# 載っていないファイルは、既定の 200 秒(run_units.DEFAULT_WEIGHT)で、早めに始める。
 WEIGHTS = {
-    "test_validate.py": 1142,
-    "test_loop_startup.py": 711,
-    "test_review_guard.py": 98,
-    "test_implementation_git.py": 75,
-    "test_host_check.py": 56,
-    "test_diagnostic_matrix.py": 52,
-    "test_diagnostic_submodules.py": 41,
-    "test_diagnostic_review_regressions.py": 36,
-    "test_shell_requirements.py": 34,
-    "test_diagnostic_formats.py": 34,
-    "test_git_config_digest.py": 32,
-    "test_diagnostic_input_boundaries.py": 29,
-    "test_restore_taskmd.py": 27,
-    "test_task_digest.py": 26,
-    "test_issue_body.py": 25,
-    "test_environment_guard.py": 22,
-    "test_diagnostic_protection.py": 18,
-    "test_loop_state.py": 18,
-    "test_diagnostic_view_edges.py": 14,
-    "test_diagnostic_publication.py": 12,
-    "test_diagnostic_io_boundaries.py": 11,
-    "test_loop_task_text.py": 11,
-    "test_pending_implementation.py": 10,
+    "test_loop_startup.py": 1214,
+    "test_validate.py": 951,
+    "test_review_guard.py": 254,
+    "test_implementation_git.py": 216,
+    "test_diagnostic_matrix.py": 119,
+    "test_host_check.py": 114,
+    "test_integrate_guard.py": 91,
+    "test_diagnostic_submodules.py": 82,
+    "test_shell_requirements.py": 78,
+    "test_diagnostic_review_regressions.py": 69,
+    "test_diagnostic_formats.py": 63,
+    "test_issue_body.py": 54,
+    "test_task_digest.py": 50,
+    "test_diagnostic_input_boundaries.py": 47,
+    "test_environment_guard.py": 44,
+    "test_run_loop_selftest.py": 39,
+    "test_git_config_digest.py": 36,
+    "test_run_tests.py": 32,
+    "test_pr_procedure.py": 29,
+    "test_diagnostic_protection.py": 27,
+    "test_loop_state.py": 26,
+    "test_restore_taskmd.py": 25,
+    "test_diagnostic_view_edges.py": 19,
+    "test_diagnostic_io_boundaries.py": 16,
+    "test_diagnostic_publication.py": 16,
+    "test_loop_task_text.py": 13,
+    "test_pending_implementation.py": 13,
+    "test_diagnostic_contexts.py": 10,
+    "test_diagnostic_state.py": 10,
+    "test_diagnostic_runtime.py": 9,
+    "test_loop_child_output.py": 9,
+    "test_candidate_keys.py": 7,
+    "test_origin_repo.py": 7,
+    "test_implementation_git_input.py": 6,
+    "test_publish_guard.py": 6,
+    "test_check_process.py": 5,
+    "test_loop_permission.py": 4,
+    "test_setup.py": 4,
+    "test_adopt_candidate.py": 2,
+    "test_loop_supervisor.py": 2,
+    "test_secret_profiles.py": 2,
+    "test_task_directory.py": 2,
+    "test_task_store.py": 2,
+    "test_diagnostic_contract.py": 1,
+    "test_diagnostic_git.py": 1,
+    "test_diagnostic_reftable.py": 1,
+    "test_diff_snapshot_profile_union.py": 1,
+    "test_export_doc.py": 1,
+    "test_host_argv.py": 1,
+    "test_init_task_store.py": 1,
+    "test_issue_workflow_contract.py": 1,
+    "test_loop_helper_commands.py": 1,
+    "test_safe_git_callers.py": 1,
+    "test_ship_integration_contract.py": 1,
+    "test_writing_rules.py": 1,
 }
 
 
@@ -140,110 +176,102 @@ def default_jobs():
     (2026-11-05、8 コア 16 スレッドの作業機の容器。順に流すと 1 通り 33 秒ほどのテスト)。
     この上限は #352 で既定 300 秒に延ばし、LOOP_STARTUP_CASE_TIMEOUT で変えられるようにした。
     """
-    try:
-        cpus = len(os.sched_getaffinity(0))
-    except AttributeError:
-        cpus = os.cpu_count() or 1
-    return max(1, cpus // 2)
-
-
-class Interrupted(Exception):
-    """止める合図を受けた後に、プロセスを始めようとした。"""
-
-
-class Children:
-    """動いている子のプロセス。止める合図の後は、新しく始めない。"""
-
-    def __init__(self):
-        self.lock = threading.Lock()
-        self.running = set()
-        self.stopped = False
-
-    def start(self, command, env=None):
-        """env を渡すと、子の環境変数をそれにする(既定は親と同じ。run-loop-selftest.py が使う)。"""
-        with self.lock:
-            if self.stopped:
-                raise Interrupted()
-            # 別のプロセスグループで起動する(端末の Ctrl-C は親だけが受け、子はグループごと止める)。
-            process = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                       text=True, errors="replace", start_new_session=True, env=env)
-            self.running.add(process)
-            return process
-
-    def finish(self, process):
-        with self.lock:
-            self.running.discard(process)
-
-    def stop_all(self, grace=5.0):
-        """新しく始めないようにし、動いている子をグループごと止める。止めた数を返す。
-
-        グループへ SIGINT・SIGTERM・SIGKILL の順に送り、それぞれの後で、グループ全体が消えるまで
-        最大 grace 秒待つ。次の合図は、まだ消えないグループにだけ送る。
-        - SIGINT から始める: Python の子は KeyboardInterrupt で終わり、一時フォルダなどを片付けられる
-          (SIGTERM では片付けずに終わる)。
-        - 直接の子が終わっても待ちを打ち切らない: グループの中の孫(入れ子の run-tests.py など)が、
-          別のグループで起動した自分の子を止めて回収する時間を残すため。
-        - 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に
-          残ることがある。そのときは、残ったプロセスを pid を指定して止める(別のセッションの子孫を
-          追う仕組みは入れていない)。
-        """
-        with self.lock:
-            self.stopped = True
-            running = list(self.running)
-        groups = [process.pid for process in running]
-        for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGKILL):
-            for pgid in groups:
-                if group_alive(pgid):
-                    try:
-                        os.killpg(pgid, sig)
-                    except (ProcessLookupError, PermissionError):
-                        pass
-            deadline = time.monotonic() + grace
-            while time.monotonic() < deadline and any(group_alive(pgid) for pgid in groups):
-                time.sleep(0.05)
-        return len(running)
-
-
-def group_alive(pgid):
-    """プロセスグループに、まだプロセスが残っていれば True(止められないものは待たない)。"""
-    try:
-        os.killpg(pgid, 0)
-    except (ProcessLookupError, PermissionError):
-        return False
-    return True
+    return max(1, run_units.cpu_count() // 2)
 
 
 def run_job(job, workdir, flags, children):
+    """1 つのジョブ(ファイル・シャードの番号・数)を流し、(job, 終了コード, 出力, 秒, 報告) を返す。"""
     name, index, count = job
     report = Path(workdir) / f"{name}.{index}.json"
     command = [sys.executable, *flags, str(Path(__file__).resolve()),
                "--worker", name, "--shard", f"{index}/{count}", "--report", str(report)]
-    started = time.monotonic()
-    process = children.start(command)
-    try:
-        output, _ = process.communicate()
-    finally:
-        children.finish(process)
-    elapsed = time.monotonic() - started
+    code, output, elapsed = run_units.run_command(children, command)
     try:
         data = json.loads(report.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         data = None
-    return job, process.returncode, output, elapsed, data
-
-
-# Ctrl-C(SIGINT。KeyboardInterrupt になる)のほかに受けて止めるシグナル。子は別のセッションにいるので、
-# 端末を閉じたときの SIGHUP は親だけに届く。親だけが終わって子が孤児にならないよう、受けて止める。
-INTERRUPT_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name))
-
-
-def raise_interrupt(signum, frame):
-    raise KeyboardInterrupt(signum)
+    return job, code, output, elapsed, data
 
 
 def label(job):
     name, index, count = job
     return name if count == 1 else f"{name} [{index + 1}/{count}]"
+
+
+def key_of(job):
+    """重みの記録の鍵。分けたときは番号(1 から)と数を付ける。"""
+    name, index, count = job
+    return f"unittest:{name}" if count == 1 else f"unittest:{name}[{index + 1}/{count}]"
+
+
+def make_jobs(files):
+    return [(name, index, SHARDS.get(name, 1)) for name in files for index in range(SHARDS.get(name, 1))]
+
+
+def job_ok(result):
+    job, code, output, elapsed, data = result
+    return code == 0 and data is not None and data["ok"]
+
+
+def describe(result):
+    """進み具合の行の後半(件数)と成否。"""
+    data = result[4]
+    return ("件数不明" if data is None else f"{data['run']} 件"), job_ok(result)
+
+
+# 子のプロセスは、親の -B の有無にかかわらず、いつも -B で起動する。
+# -B が無いと、子が配布のコードを読み込むときに plugins/ の下へ __pycache__ を書く。
+# 同時に動く別の子が配布の木を shutil.copytree でコピーすると、書きかけのファイルに当たって落ちうる。
+# 環境変数(PYTHONDONTWRITEBYTECODE)にはしない。テストが起動するプロセスにまで効き、
+# 「.pyc を作らない」ことを確かめるテストが意味を失うため。
+# テストが起動する python(-B なし)は、今も plugins/ の下へ __pycache__ を書くことがある。
+# そのため、配布の木をコピーするテストは __pycache__ を除いてコピーする。
+CHILD_FLAGS = ["-B"]
+
+
+def build_units(jobs, workdir, flags=CHILD_FLAGS):
+    """ジョブから単位を作る。重みは、表の「ファイルの重み ÷ 分ける数」(表に無ければ None)。"""
+    units = []
+    for job in jobs:
+        weight = WEIGHTS.get(job[0])
+        weight = None if weight is None else weight / job[2]
+        units.append(run_units.Unit(
+            key=key_of(job), label=f"{label(job)}", in_slot=True, weight=weight, table_weight=weight,
+            source="既定" if weight is None else "表",
+            run=lambda children, job=job: run_job(job, workdir, flags, children),
+            describe=describe))
+    return units
+
+
+def summarize(results):
+    """結果の一覧から (problems, 件数の合計) を作る。分けたファイルは、配った件数の合計が総数と同じかを照らす。"""
+    problems = []
+    totals = dict.fromkeys(("run", "failures", "errors", "skipped", "expected_failures", "unexpected_successes"), 0)
+    by_file = {}
+    for result in results:
+        job, code, output, elapsed, data = result
+        if data is None:
+            problems.append(f"{label(job)}: 結果の報告が無い(終了コード {code})")
+        else:
+            for key in totals:
+                totals[key] += data[key]
+            by_file.setdefault(job[0], []).append(data)
+        if not job_ok(result):
+            problems.append(f"{label(job)}: 失敗(終了コード {code})")
+    # 分けたファイルは、全部のプロセスが同じ総数を見て、配った件数の合計が総数と同じことを確かめる。
+    for name, reports in by_file.items():
+        expected = SHARDS.get(name, 1)
+        totals_seen = {data["total"] for data in reports}
+        chosen = sum(data["chosen"] for data in reports)
+        if len(reports) != expected or len(totals_seen) != 1 or chosen != totals_seen.pop():
+            problems.append(f"{name}: 分けたプロセスの件数が合わない")
+    return problems, totals
+
+
+def failures_of(results):
+    """失敗したジョブの (表示名, 終了コード, 出力) の一覧(ファイル・シャードの順)。"""
+    failed = [result for result in results if not job_ok(result)]
+    return [(label(result[0]), result[1], result[2]) for result in sorted(failed, key=lambda item: item[0])]
 
 
 def main(argv=None):
@@ -270,72 +298,17 @@ def main(argv=None):
     except ValueError as exc:
         parser.error(str(exc))
 
-    jobs = [(name, index, SHARDS.get(name, 1)) for name in files for index in range(SHARDS.get(name, 1))]
-    # 重いものから始める(全体の時間が最後に始めた重いファイルで延びないように)。
-    jobs.sort(key=lambda job: (-WEIGHTS.get(job[0], 0) / job[2], job[0], job[1]))
-    # 子のプロセスは、親の -B の有無にかかわらず、いつも -B で起動する。
-    # -B が無いと、子が配布のコードを読み込むときに plugins/ の下へ __pycache__ を書く。
-    # 同時に動く別の子が配布の木を shutil.copytree で写すと、書きかけのファイルに当たって落ちうる。
-    # 環境変数(PYTHONDONTWRITEBYTECODE)にはしない。テストが起動するプロセスにまで効き、
-    # 「.pyc を作らない」ことを確かめるテストが意味を失うため。
-    # テストが起動する python(-B なし)は、今も plugins/ の下へ __pycache__ を書くことがある。
-    # そのため、配布の木を写すテストは __pycache__ を除いて写す。
-    flags = ["-B"]
-
+    jobs = make_jobs(files)
     started = time.monotonic()
-    results = []
-    children = Children()
-    # SIGTERM・SIGHUP も Ctrl-C と同じく止める(子を残して親だけが終わらないように)。
-    for sig in INTERRUPT_SIGNALS:
-        signal.signal(sig, raise_interrupt)
     print(f"{len(files)} ファイル・{len(jobs)} プロセスを、同時に {args.jobs} 個まで流す", flush=True)
-    with tempfile.TemporaryDirectory(prefix="run-tests-") as workdir, \
-            concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = []
-        try:
-            futures.extend(pool.submit(run_job, job, workdir, flags, children) for job in jobs)
-            for future in concurrent.futures.as_completed(futures):
-                job, code, output, elapsed, data = future.result()
-                ok = code == 0 and data is not None and data["ok"]
-                count = "件数不明" if data is None else f"{data['run']} 件"
-                print(f"{'ok  ' if ok else 'FAIL'} {elapsed:7.1f} 秒  {label(job)}  {count}", flush=True)
-                results.append((job, code, output, elapsed, data, ok))
-        except KeyboardInterrupt as exc:
-            # 待ち行列のジョブを捨て、動いているプロセスを止める。with を出るときは、止めたジョブだけを待つ。
-            signum = exc.args[0] if exc.args and exc.args[0] in INTERRUPT_SIGNALS else signal.SIGINT
-            # 止めている間の 2 回目の合図で、片付けが途中で切れないようにする。
-            for sig in (signal.SIGINT, *INTERRUPT_SIGNALS):
-                signal.signal(sig, signal.SIG_IGN)
-            dropped = sum(future.cancel() for future in futures)
-            killed = children.stop_all()
-            print(f"\n中断: 動いていた {killed} 個のプロセスを止め、まだ始めていない {dropped} 個を始めずに捨てた"
-                  f"(終わっていたのは {len(results)} 個)", flush=True)
-            return 128 + signum
+    with tempfile.TemporaryDirectory(prefix="run-tests-") as workdir:
+        # 重いものから始める(全体の時間が最後に始めた重いファイルで延びないように)。
+        results, code = run_units.run_units(build_units(jobs, workdir), args.jobs)
+    if code is not None:
+        return code
 
-    problems = []
-    totals = dict.fromkeys(("run", "failures", "errors", "skipped", "expected_failures", "unexpected_successes"), 0)
-    by_file = {}
-    for job, code, output, elapsed, data, ok in results:
-        if data is None:
-            problems.append(f"{label(job)}: 結果の報告が無い(終了コード {code})")
-        else:
-            for key in totals:
-                totals[key] += data[key]
-            by_file.setdefault(job[0], []).append(data)
-        if not ok:
-            problems.append(f"{label(job)}: 失敗(終了コード {code})")
-    # 分けたファイルは、全部のプロセスが同じ総数を見て、配った件数の合計が総数と同じことを確かめる。
-    for name, reports in by_file.items():
-        expected = SHARDS.get(name, 1)
-        totals_seen = {data["total"] for data in reports}
-        chosen = sum(data["chosen"] for data in reports)
-        if len(reports) != expected or len(totals_seen) != 1 or chosen != totals_seen.pop():
-            problems.append(f"{name}: 分けたプロセスの件数が合わない")
-
-    failed = [item for item in results if not item[5]]
-    for job, code, output, elapsed, data, ok in sorted(failed, key=lambda item: item[0]):
-        print(f"\n===== {label(job)}(終了コード {code})=====")
-        print(output.rstrip())
+    problems, totals = summarize(results)
+    run_units.print_failures(failures_of(results))
     elapsed = time.monotonic() - started
     print()
     for problem in problems:
