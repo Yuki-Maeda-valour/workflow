@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""無人ループの子の出力(result・permlog・origin-json)の解析。親は信頼コピーの本文を保持して -c で動かす。"""
+"""無人ループで `loop.sh` が起動した CLI の出力(result・permlog・origin-json)の解析。親は信頼コピーの本文を保持して -c で動かす。"""
 import json
 import os
 import re
@@ -7,7 +7,7 @@ import stat
 import sys
 
 # unattended-mode.md §2 の 5 値のパターン(両モード共通。モードで取りえない値は判定で失敗にする — loop.md §5)
-OUTCOME = re.compile(r"^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
+OUTCOME = re.compile(r"^無人のイテレーションの結果: (PR|縮退|保留|失敗扱い|候補なし) — (.*)$")
 
 
 def one_line(text, limit=500):
@@ -23,7 +23,7 @@ def cmd_result(path):
         return
     # --output-format json の出力は、結果の 1 つのオブジェクトか、全メッセージの配列(利用者の設定の verbose が
     # 効いたとき。最後の要素が type: "result")。配列なら最後の type: "result" の要素を結果として読む。
-    # 拒否の欄は、配列ならすべての type: "result" の要素から順につなぐ(周の中でバックグラウンドに委託すると、
+    # 拒否の欄は、配列ならすべての type: "result" の要素から順につなぐ(イテレーションの中でバックグラウンドに委託すると、
     # result の要素がターンごとに出て、拒否はそのターンの要素にだけ載り、最後の要素の欄は空になる — 実測)
     results = [obj]
     if isinstance(obj, list):
@@ -62,7 +62,7 @@ def cmd_result(path):
 
 
 def cmd_permlog(path):
-    # 子が書ける参考表示。内容・欠落・エラーのどれも制御判断に使わない。
+    # `loop.sh` が起動した CLI が書ける参考表示。内容・欠落・エラーのどれも制御判断に使わない。
     allow = deny = 0
     kinds, lines = {}, []
     issue = ''

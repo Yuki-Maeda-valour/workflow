@@ -469,7 +469,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
      rm -f -- "$PROFILE_GLOBS"
      SNAPSHOT_PROFILE_REFS=(--secret-profile-ref "$B" --secret-profile-ref "$S")
      SNAPSHOT_PROFILE_UNION_ARG=(--secret-profile-union-sha256 "$PROFILE_UNION_SHA256")
-   elif [ "<無人の発見周>" = true ]; then
+   elif [ "<無人の発見のイテレーション>" = true ]; then
      PROFILE_GLOBS=$(mktemp)
      python3 {do-task の}scripts/secret-profiles.py --cwd "$TOP" --ref "$S0" >"$PROFILE_GLOBS" || { rm -f -- "$PROFILE_GLOBS"; echo "開始時の機密指定を読めない"; exit 1; }
      while IFS= read -r -d '' g; do PROFILE_GLOB_ARGS+=(--exclude-glob "$g"); done <"$PROFILE_GLOBS"
@@ -624,7 +624,7 @@ design §5-14 の記録(`{role}-{タスク名}-iter{N}.md`。タスク文脈を�
    **無人の do-task と update-doc は、基準 B が確定した後に開始時 S と B を、上の `PROFILE_GLOB_ARGS` と `SNAPSHOT_PROFILE_REFS` の両方へ渡す。**
    - helper の NUL 出力を消す前に SHA-256 を取り、`SNAPSHOT_PROFILE_UNION_ARG` も snapshot に渡す。
    - snapshot が再読取した和集合の digest が違えば停止する。`EXCLUDE`、snapshot/patch、適用前除去、未追跡のコピー除外、手順 3 の最終検査は同じ集合を使う。
-   - B が未確定の開始前は S だけを渡す。発見の周(無人ループの 1 回分の実行)は S0 だけを渡す。手動の呼び出しは S を足さず、従来の caller が得た集合を使う。保持値を失ったときは、現在の profile や HEAD から復元せず停止する。
+   - B が未確定の開始前は S だけを渡す。発見のイテレーション(無人ループの 1 回分の実行)は S0 だけを渡す。手動の呼び出しは S を足さず、従来の caller が得た集合を使う。保持値を失ったときは、現在の profile や HEAD から復元せず停止する。
 
    **手順 1 は、do-task Phase 4 の手順 1 と同一の引数一式を使う。**
    - `--out` だけを `--out "$TREE/.review-snapshot.md"` に替える。`--patch-out "$TREE/.review-diff.patch" --patch-base HEAD` を足し、1 回だけ呼ぶ。

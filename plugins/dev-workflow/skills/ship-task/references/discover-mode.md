@@ -1,11 +1,11 @@
-# 発見の周(`/ship-task --discover=<発見元> --unattended`)
+# 発見のイテレーション(`/ship-task --discover=<発見元> --unattended`)
 
-ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほかが合わせる元)。発見の周は、発見元(改善の候補を見つける skill)の候補モードが task_dir に書いた `候補_` だけを 1 commit にして、PR を開く。設計・実装・品質ゲート(書式・型・テスト・ビルドの自動の検査)・レビューは行わない(採用の後の /create-task・/do-task で行う)。
+ship-task の発見のイテレーション(無人ループの 1 回分の実行)の正本(ほかが合わせる元)。発見のイテレーションは、発見元(改善の候補を見つける skill)の候補モードが task_dir に書いた `候補_` だけを 1 commit にして、PR を開く。設計・実装・品質ゲート(書式・型・テスト・ビルドの自動の検査)・レビューは行わない(採用の後の /create-task・/do-task で行う)。
 
-- 無人モードの一般(一般則・G1〜G4・`loop.sh` の周の Bash の書き方・委託するサブエージェントの要点・失敗扱いの止まり方)は [unattended-mode.md](unattended-mode.md) が正本。この文書は、発見の周に固有の前提・工程・照合(照らし合わせて確かめること)・結末だけを定める
+- 無人モードの一般(一般則・G1〜G4・`loop.sh` のイテレーションの Bash の書き方・委託するサブエージェントの要点・失敗扱いの止まり方)は [unattended-mode.md](unattended-mode.md) が正本。この文書は、発見のイテレーションに固有の前提・工程・照合(照らし合わせて確かめること)・結末だけを定める
 - 候補モード(発見元の側の手順・結果の行・報告)と指摘キーの正本は [../../create-task/references/candidate-mode.md](../../create-task/references/candidate-mode.md)。
   - `候補_` の書式は [../../create-task/references/task-template.md](../../create-task/references/task-template.md) の記法の規約
-- 周の外側(発見元の選定・読み飛ばし・判定・朝の報告)は [loop.md](loop.md) の「発見モード」
+- イテレーションの外側(発見元の選定・読み飛ばし・判定・朝の報告)は [loop.md](loop.md) の「発見モード」
 - 要点は design §2「無人ループ」。決定の経緯は決定録 2026-09-23(#66)と Issue #69
 
 ## 1. 引数と最初の Read
@@ -23,14 +23,14 @@ ship-task の発見の周(無人ループの 1 回分の実行)の正本(ほか�
 ## 2. 作業ブランチの名
 
 - `task/候補-<発見元>-<S0 の先頭 12 桁>`(例 `task/候補-data-audit-819fcc33d0c0`)。S0 は開始時の HEAD の sha(§4)
-- ブランチ名の規約(`task/...`)に収まる。S0 は周の worktree の起点(`loop.sh` が固定したデフォルトブランチの sha)なので、`loop.sh` はこの名を前もって知っていて、判定で照らせる
+- ブランチ名の規約(`task/...`)に収まる。S0 はイテレーションの worktree の起点(`loop.sh` が固定したデフォルトブランチの sha)なので、`loop.sh` はこの名を前もって知っていて、判定で照らせる
 - 一意になる理由: 候補の PR を merge(merge commit・squash・rebase のどれでも)すると、デフォルトブランチが進み、次の晩の S0 が変わる。今夜の名のブランチが既にある発見元と、未 merge の候補のブランチがある発見元は、`loop.sh` が回さない(loop.md の発見モード)
 - 同名のローカルのブランチがあれば、前提の欠け(§4)
-- タスク名は `候補-` で始めない(create-task の命名)ので、実装の周の `task/{名}` と重ならない
+- タスク名は `候補-` で始めない(create-task の命名)ので、実装のイテレーションの `task/{名}` と重ならない
 
 ## 3. origin の URL の読み方(`origin-repo.py`)
 
-`python3 {ship-task の}scripts/origin-repo.py --dir=<ディレクトリ>` は、origin の URL を読んで、公開の確認と PR に使える push 先を決める。読み取り専用(git と `ssh -G` を打つが、何も書かない)。`loop.sh` の起動時(実装モード・発見モードとも。loop.md §2)と、発見の周の前提(§4)・公開の確認(§5)・push の直前(§7)・PR(§8)、タスクの周の前提と push の直前(unattended-mode.md §1・§7)で使う。
+`python3 {ship-task の}scripts/origin-repo.py --dir=<ディレクトリ>` は、origin の URL を読んで、公開の確認と PR に使える push 先を決める。読み取り専用(git と `ssh -G` を打つが、何も書かない)。`loop.sh` の起動時(実装モード・発見モードとも。loop.md §2)と、発見のイテレーションの前提(§4)・公開の確認(§5)・push の直前(§7)・PR(§8)、タスクのイテレーションの前提と push の直前(unattended-mode.md §1・§7)で使う。
 
 - 出力: stdout に JSON `{"origin": <真偽>, "same": <真偽>, "repo": <"HOST/OWNER/REPO" | null>, "form": <"https" | "ssh" | "scp" | "other" | null>, "vcs": <真偽>, "reason": <文>}`
 - 終了コード: 0 = 判定できた(JSON を読む)/ 2 = 使い方の誤り(`--dir` が無い・ディレクトリでない)・git が失敗した
@@ -94,14 +94,14 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 
 - 併用しない引数が無い: `--task`・`--branch`・`--design-only`・`--refactor`・`--compact`・`--light`・`--no-review`・`--reviewers`・`--runners`・`--max-iter`(`--no-pr` は許す。そのときの結末は `縮退`)
 - 発見元が §1 の列にある
-- parent-child 構成でない(管理ルート = profile の `root`。タスクの周と同じ — unattended-mode.md §1)
-- 開始時の HEAD が、デフォルトブランチか detached HEAD で、ローカルのデフォルトブランチの履歴の中にある(判定と起点の確認は、タスクの周と同じ — unattended-mode.md §1)。S0 = 開始時の HEAD の sha と、開始時の ref(`git symbolic-ref --quiet HEAD` の値か、detached HEAD)を控える
+- parent-child 構成でない(管理ルート = profile の `root`。タスクのイテレーションと同じ — unattended-mode.md §1)
+- 開始時の HEAD が、デフォルトブランチか detached HEAD で、ローカルのデフォルトブランチの履歴の中にある(判定と起点の確認は、タスクのイテレーションと同じ — unattended-mode.md §1)。S0 = 開始時の HEAD の sha と、開始時の ref(`git symbolic-ref --quiet HEAD` の値か、detached HEAD)を控える
 - 作業ツリーが清潔(ship-task の Phase 0 の 3 と同じ。無人では S1)
 - **状態ファイルが ignore されていて、追跡されていない**: `.claude/reviews/x.md`・`.claude/grasp.md`・`.claude/.understand-project-done` の 3 つを、それぞれ `git check-ignore -q -- <パス>` で確かめ、rc 1 のもの(ignore されていない。追跡済みも 1)が無い。`.claude` か `.claude/reviews` が symlink なら欠け(この層には置き場の検査が無い)。そのほかの 0 と 1 以外(サブモジュールの中など)は判定できないので数えない(loop.md §3 の 2a と同じ。2a では symlink は 2b で止まる)
   - `--no-index` を付けない(付けると、追跡済みのファイルも ignore 済みと答える)
   - `.claude/reviews/x.md` は `.claude/reviews/` の下を表す名で、在らなくてよい
   - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する。symlink なら、`.claude`・`.claude/reviews` を実体のディレクトリにする(symlink を追跡から外す)ことを案内する
-  - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しい周も失敗になる
+  - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しいイテレーションも失敗になる
 - **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は `unattended-mode.md` §1)。値と、`origin-repo.py` の出力の 6 欄は控える値(§7。作業の途中で変わっていないかを確かめるための値)
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`(§3)が exit 0 で、`origin` が真なら次の 2 つを満たす。`origin` が偽なら満たしたとみなす(push しないので、候補があれば結末は `縮退`)
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
@@ -110,9 +110,9 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 - **task_dir**: helper(`resolve-task-dir.py`)で解決できる(exit 1・2 は欠け)。保護パスの下でない(列は unattended-mode.md の「委託するサブエージェント」の項)。`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない。`git check-ignore --no-index -q -- '<task_dir>/候補_x.md'` が rc 1(ignore 済みの場所では commit できない)
 - 同名の作業ブランチ(§2)がローカルに無い
 
-## 5. 公開の確認(data-audit の周だけ)
+## 5. 公開の確認(data-audit のイテレーションだけ)
 
-前提を満たした後・発見元を呼ぶ前に行う。refactor の周では行わない(refactor の候補モードはセキュリティ由来の指摘を候補にしないので、公開のリポジトリでも回す — candidate-mode.md)。data-audit の候補(未修正の脆弱性の場所と筋書き)は、origin が非公開と確かめられたときだけ PR にする。
+前提を満たした後・発見元を呼ぶ前に行う。refactor のイテレーションでは行わない(refactor の候補モードはセキュリティ由来の指摘を候補にしないので、公開のリポジトリでも回す — candidate-mode.md)。data-audit の候補(未修正の脆弱性の場所と筋書き)は、origin が非公開と確かめられたときだけ PR にする。
 
 1. origin-repo.py の `origin` が偽なら、確かめずに続ける(push しないので、候補があれば結末は `縮退`。候補はローカルのブランチだけに残る)
 2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に残りうるため)
@@ -121,7 +121,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 4. 「確かめられない」ときは、発見元を呼ばずに、結末 `候補なし — data-audit: origin が非公開と確かめられないため回さなかった(<理由の要約>)` で終わる。何も書かず、ブランチも作らない(失敗扱いではない)
 5. PR は `gh pr create -R '<repo>'` で作る(§8)
 
-- 許可の拒否(G1)で git・gh が打てないときは、「確かめられない」ではなく失敗扱い(発見の周の G1 は常に失敗扱い — §9)
+- 許可の拒否(G1)で git・gh が打てないときは、「確かめられない」ではなく失敗扱い(発見のイテレーションの G1 は常に失敗扱い — §9)
 
 ## 6. 工程
 
@@ -135,9 +135,9 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
   3. 候補だけを stage して、1 commit する(§8。直前・直後の照合 — §7)
 - **Phase 5**: 照合(§7)→ push → PR(§8)
 
-## 7. 周の中で控える値と照合(改竄ガード)
+## 7. イテレーションの中で控える値と照合(改竄ガード)
 
-**控える値**(セッション文脈に保持し、報告にも書く): 発見元・`task_dir`・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(`origin-repo.py` の出力の `origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`。`reason` は比べない。最後の値は送信時に解決する effective push URL の SHA-256 であり、URL と認証情報は保持・報告しない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見の周は、本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を持たない(タスク MD が無い)。
+**控える値**(セッション文脈に保持し、報告にも書く): 発見元・`task_dir`・S0・開始時の ref・候補の集合 C・作業ブランチ名・最後に知る HEAD・控えた tree・origin の判定(`origin-repo.py` の出力の `origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`。`reason` は比べない。最後の値は送信時に解決する effective push URL の SHA-256 であり、URL と認証情報は保持・報告しない)・git 設定のダイジェスト(`git-config-digest.py` の出力)。値を失ったら失敗扱い(G4)。発見のイテレーションは、本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる) R を持たない(タスク MD が無い)。
 
 - origin の判定と git 設定のダイジェストは、§4 の前提(工程 D1 の前。git 設定のダイジェストを先に)で取る
 - 最後に知る HEAD は、ブランチを作ったときに S0 にし、commit の直後の照合に通ったら、その HEAD に更新する
@@ -185,13 +185,13 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 ## 9. 結末
 
-- 完了報告の最後に、結果の行 `無人の周の結果: <結末> — <詳細>` を書く(照合パターンは unattended-mode.md §2)
-- 発見の周の結末は `PR`・`縮退`・`候補なし`・`失敗扱い` の 4 つ。`保留` は出さない
-- 詳細には、書き出し・既知・回帰の疑いの件数を入れる(例 `無人の周の結果: 候補なし — data-audit: 新しい候補 0 件(既知 2 件・回帰の疑い 0 件)`)。`PR` なら URL も入れる。refactor の周では、除外の件数を入れない
+- 完了報告の最後に、結果の行 `無人のイテレーションの結果: <結末> — <詳細>` を書く(照合パターンは unattended-mode.md §2)
+- 発見のイテレーションの結末は `PR`・`縮退`・`候補なし`・`失敗扱い` の 4 つ。`保留` は出さない
+- 詳細には、書き出し・既知・回帰の疑いの件数を入れる(例 `無人のイテレーションの結果: 候補なし — data-audit: 新しい候補 0 件(既知 2 件・回帰の疑い 0 件)`)。`PR` なら URL も入れる。refactor のイテレーションでは、除外の件数を入れない
 
 **保留は無い**
 
-- 発見の周には改名の先が無く、人の判断は PR の上で行う
+- 発見のイテレーションには改名の先が無く、人の判断は PR の上で行う
 - 許可の拒否(G1)は、常に失敗扱い(保留のガードを満たしえない)。`loop.sh` では、連続失敗のブレーカーで止まる
 
 **失敗扱いで残るもの**(止まり方は unattended-mode.md §6。どれも worktree は残り、`loop.sh` が以後その発見元を回さない)
@@ -201,16 +201,16 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 - ブランチの作成の後・commit の前: ブランチと候補
 - commit の後(照合・push・PR の失敗): ブランチと commit。push の後に PR の作成で失敗したときは、origin にもブランチが残る
 
-**原則 4 の読み替え**: 発見の周の「緑」は、§7 の照合にすべて通ったこと。品質ゲート・レビュー・実動確認(実際に動かして、変更どおりに動くかを見る確認)は、採用の後の /create-task・/do-task で行う(実装を含まない候補の PR への、design §5-20 の例外)。
+**原則 4 の読み替え**: 発見のイテレーションの「緑」は、§7 の照合にすべて通ったこと。品質ゲート・レビュー・実動確認(実際に動かして、変更どおりに動くかを見る確認)は、採用の後の /create-task・/do-task で行う(実装を含まない候補の PR への、design §5-20 の例外)。
 
 ## 10. 受け入れる限界
 
 - 候補の中身の正しさ・機密の値の混入・候補の文面に仕込まれた指示は、機構では守らない。人が PR で読み、採用のときに create-task が実コードで裏取り(実際のコードやファイルを読んで確かめること)する(candidate-mode.md の限界)
-- 公開の確認の後に公開に変えられた場合は、防げない。PR は、非公開のリポジトリの中に留まる前提。周の許可リストが `gh` を丸ごと許すと、周の中で公開に変える操作も通る(#107)
+- 公開の確認の後に公開に変えられた場合は、防げない。PR は、非公開のリポジトリの中に留まる前提。イテレーションの許可リストが `gh` を丸ごと許すと、イテレーションの中で公開に変える操作も通る(#107)
 - origin の push 先が §3 の許す形(https、または上書きの無い `git@github.com`)でないか、gh で isPrivate を読めないホストなら、data-audit の発見は回らない(毎晩 `候補なし` と報告する)。refactor は、PR を作らずに `縮退` になる(ssh の設定の別名・`ssh.github.com` の 443・ポートの明示・ローカルのパス・TLS の検証を外した構成など)。`縮退` で push したブランチを処理するまで、refactor は回らない
 - 利用者の git・ssh の設定は信頼の範囲。§3 は、送り先を URL の字面から離す主な経路と、ホスト鍵検証を外す H44 の構成を拒否するが、網羅はしない。`ssh -G` は、利用者の ssh の設定の `Match exec` を実行しうる
 - ホスト鍵の判定は設定の検査だけで、接続成功や GitHub の鍵の所有を証明しない。known_hosts の内容・実体・書き込めるか、DNS の結果、鍵取得コマンドの出力、既存の共有接続は検査しない。通常の `accept-new` の初回受け入れと、通常パスへの保存失敗は SSH に任せる。`-G` のファイル一覧は引用符を保持しないため、空白入りパスを完全には復元しない。明示された先頭の `/dev/null` を保守的に判定し、symlink や別の破棄先は追わない
 - ローカルの git 設定の照合(§7 の git 設定のダイジェストと origin の判定)の限界は、unattended-mode.md §9 の ⑥ と同じ(include の先・hook の中身・global の設定を見ない・照合と実行の間の書き換え・誤って失敗扱いになる構成など)
-- fetch と push の URL が、字面から形をそろえた値で別のリポジトリか、`remote.origin.vcs` があれば、発見の周は前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
+- fetch と push の URL が、字面から形をそろえた値で別のリポジトリか、`remote.origin.vcs` があれば、発見のイテレーションは前提で失敗扱いになる(`loop.sh` は起動時に exit 20 で止まる。refactor も回らない)
 - `/ship-task <候補_ のパス>`(説明として渡す)は、採用の入口として保証しない。採用は `/create-task <候補_ のパス>` で行ってから、`/ship-task --task=<進行中_ のパス>` を使う
-- 周の外側の限界(未 merge の前夜の PR・squash や rebase で merge したブランチ・閉じた PR のブランチが、その発見元を止め続けること、ほかのアプリの書き込みなど)は loop.md §10
+- イテレーションの外側の限界(未 merge の前夜の PR・squash や rebase で merge したブランチ・閉じた PR のブランチが、その発見元を止め続けること、ほかのアプリの書き込みなど)は loop.md §10

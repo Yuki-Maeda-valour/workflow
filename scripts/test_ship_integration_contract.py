@@ -118,7 +118,7 @@ class ShipIntegrationContractTest(unittest.TestCase):
     def test_phase_45_section_has_required_terms(self):
         body = section(self.skill(), "## Phase 4.5: 取り込みと品質ゲートの流し直し")
         self.contains(
-            body, "[references/integration.md](references/integration.md)", "無人のタスクの周",
+            body, "[references/integration.md](references/integration.md)", "無人のタスクのイテレーション",
             "--discover", "--no-pr", "parent-child", "origin-repo.py",
             "python3 {ship-task の}scripts/integrate-guard.py merge", "rebase は使わない",
             "needs-review", "stage-resolved", "integrate-guard.py commit", "take --phase doc",

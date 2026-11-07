@@ -1,4 +1,4 @@
-"""子のプロセスの出力を読む 3 つの補助(result・permlog・origin-json)の入出力を固定する。"""
+"""`loop.sh` が起動した CLI の出力を読む 3 つの補助(result・permlog・origin-json)の入出力を固定する。"""
 import json
 import os
 import shlex
@@ -72,7 +72,7 @@ def _perm_rows(*rows):
 
 DEEP = b'[' * 100000 + b']' * 100000
 ALLOW = {'decision': 'allow'}
-OUTCOME_PREFIX = '無人の周の結果: '
+OUTCOME_PREFIX = '無人のイテレーションの結果: '
 
 BUILD['result-empty'] = _file(b'')
 BUILD['result-truncated'] = _file(b'{"a":')
@@ -86,6 +86,9 @@ BUILD['result-nonstring'] = _json_file({'result': 5})
 BUILD['result-three-lines'] = _json_file({'result': (
     OUTCOME_PREFIX + '保留 — a\r\n' + OUTCOME_PREFIX + 'PR — b\x01c\r\n  ' + OUTCOME_PREFIX + '縮退 — z')})
 BUILD['result-unknown-outcome'] = _json_file({'result': OUTCOME_PREFIX + '成功 — a'})
+# 古い字面の結果の行は読まない(書く側と読む側は、いつも同じ版のプラグインから来る)。
+# 古い字面の字は、ソースに残さないようにエスケープで書く。
+BUILD['result-old-prefix'] = _json_file({'result': 'x\n無人の\u5468の結果: PR — x'})
 BUILD['result-array3'] = _json_file([
     {'type': 'result', 'permission_denials': [1]},
     {'type': 'result', 'permission_denials': [2], 'Other_Denial': 'z', 'result': OUTCOME_PREFIX + 'PR — 2'},
@@ -184,6 +187,7 @@ TABLE = [
     ('result: nonstring', 'result', 'result-nonstring', '全体', (0, 'json=ok\n', '')),
     ('result: three-lines', 'result', 'result-three-lines', '全体', (0, 'json=ok\noutcome=PR\ndetail=b c\n', '')),
     ('result: unknown-outcome', 'result', 'result-unknown-outcome', '全体', (0, 'json=ok\n', '')),
+    ('result: old-prefix', 'result', 'result-old-prefix', '全体', (0, 'json=ok\n', '')),
     ('result: array3', 'result', 'result-array3', '全体', (0, 'json=ok\noutcome=PR\ndetail=2\ndenials={"permission_denials": [1, 2], "Other_Denial": "z"}\n', '')),
     ('result: mixed-denials', 'result', 'result-mixed-denials', '全体', (0, 'json=ok\ndenials={"permission_denials": [[1], "s"]}\n', '')),
     ('result: long', 'result', 'result-long', '全体', (0, 'json=ok\noutcome=PR\ndetail=' + 'あ' * 500 + '\ndenials=' + ('{"permission_denials": ["' + 'x' * 3000 + '"]}')[:2000] + '\n', '')),
@@ -378,7 +382,7 @@ class HeldChildOutputTests(unittest.TestCase):
                 body += self.bind(active) + 'echo must-not-run\n'
                 result = self.run_shell(body)
                 self.assertEqual((result.returncode, result.stdout), (20, b''), result.stderr)
-                self.assertIn('ERROR [environment] 子の出力の解析のコピーが初回と異なる'.encode(), result.stderr)
+                self.assertIn('ERROR [environment] loop.sh が起動した CLI の出力の解析のコピーが初回と異なる'.encode(), result.stderr)
                 self.assertEqual(held.read_bytes(), CHILD.read_bytes())
 
     def test_invalid_source_bytes_rejected_before_shell_conversion(self):
@@ -388,21 +392,21 @@ class HeldChildOutputTests(unittest.TestCase):
                 receipt = self.boot()
                 result = self.run_shell(self.bind(receipt) + 'echo must-not-run\n')
                 self.assertEqual((result.returncode, result.stdout), (20, b''), result.stderr)
-                self.assertIn('ERROR [environment] 子の出力の解析のコピーを読めない'.encode(), result.stderr)
+                self.assertIn('ERROR [environment] loop.sh が起動した CLI の出力の解析のコピーを読めない'.encode(), result.stderr)
                 self.assertNotIn(b'ignored null byte', result.stderr)
 
     def test_missing_file_in_initial_bundle_is_rejected(self):
         self.source.unlink()
         result = self.run_shell(self.bind(self.boot()) + 'echo must-not-run\n')
         self.assertEqual((result.returncode, result.stdout), (20, b''), result.stderr)
-        self.assertIn('ERROR [environment] 子の出力の解析のコピーを読めない'.encode(), result.stderr)
+        self.assertIn('ERROR [environment] loop.sh が起動した CLI の出力の解析のコピーを読めない'.encode(), result.stderr)
 
     def test_unheld_code_is_not_run(self):
         for command in ('result /nonexistent', 'permlog /nonexistent', 'origin-json'):
             with self.subTest(command=command):
                 result = self.run_shell('py ' + command + '\necho must-not-run\n')
                 self.assertEqual((result.returncode, result.stdout), (20, b''), result.stderr)
-                self.assertIn('ERROR [environment] 子の出力の解析を保持していない'.encode(), result.stderr)
+                self.assertIn('ERROR [environment] loop.sh が起動した CLI の出力の解析を保持していない'.encode(), result.stderr)
 
     def test_exported_values_are_reset_and_not_exported_again(self):
         receipt = self.boot()

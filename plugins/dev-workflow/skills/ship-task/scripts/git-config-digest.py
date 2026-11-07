@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Digest the local git configuration that ship-task's add, commit and push follow.
 
-The contract is ship-task/references/unattended-mode.md (周の中で控える値と照合).
+The contract is ship-task/references/unattended-mode.md (イテレーションの中で控える値と照合).
 Read-only: this script runs git but writes nothing. It never prints configuration
 values, because they may carry credentials (URLs).
 """

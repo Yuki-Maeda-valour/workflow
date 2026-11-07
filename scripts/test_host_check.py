@@ -561,7 +561,7 @@ class InclusionTests(unittest.TestCase):
                 self.assertEqual(self.wider([rule], allow), [rule])
 
     def test_delegation_tools_always_stop(self):
-        # 委託の道具は既知の道具の集合に入れない(無人の周で skill が委託の権限を足すことは常に止める)
+        # 委託の道具は既知の道具の集合に入れない(無人のイテレーションで skill が委託の権限を足すことは常に止める)
         for tool in ('Agent', 'SendMessage', 'ListAgents', 'Task', 'Workflow', 'SubagentHandback'):
             with self.subTest(tool=tool):
                 self.assertEqual(self.wider([tool], [tool]), [tool])
