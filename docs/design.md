@@ -852,6 +852,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
   - v4 の最後の版の commit に git の tag を付け、「Python の最速系」(Python 版を速くし終えた最後の版)として残す。
   - 利用者の要件は v5.0.0 で変わる。python3・PyYAML が要らなくなる。Linux カーネル 5.6 以上・macOS 11 以上が要る。
   - なぜ移行の途中で既定を切り替えないか: v4 の途中で、利用者の要件(python3・PyYAML・bash・OS の版)を変えないため。
+    - 例外: python3 の下限だけは、v4 の途中の #433 で 3.10 にそろえた(2026-11-07 に利用者が決めた)。理由は 2 つ。製品の一部(`diagnostic-*.py` など)が、既に 3.10 以上を要していた。テストの容器の Python が 3.10 で、下限の版でテストを流すため([Issue #433](https://github.com/Yuki-Maeda-valour/workflow/issues/433)。根拠は [testing.md](testing.md) の「Python の版の決まりの根拠」)。
   - なぜ v5.0.0 を移行の完了にするか: §7-7 の「完了をメジャーで示す」に合わせるため。
   - 却下: 「最初に Rust 版を配る版を v5.0.0 にする」。利用者が最初に挙げた案。v5.0.0 を移行の完了の節目にするため、採らなかった。
 

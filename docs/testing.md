@@ -128,6 +128,8 @@ python3 -B scripts/run-all.py --reuse-file PATH    # 使い回しの記録の置
 - この条件では、新しい版ほど遅かった。全回帰テストは python3 を約 6.8 万回起動し、CPU 時間の 69% を使う。新しい版は 1 回の起動が重いと推測される(作り方の違いの分は未確認)。
 - 3.10 以外の版で流すと、3.11 以降にしか無い構文や API(`except*`・`tomllib`・`typing.Self`・`datetime.UTC` など)を使っても落ちず、見逃す。だから `run-all.py` は `注意:` を出す。PR の前は Python 3.10 の容器(`bash scripts/run-all-container.sh`)で流す。
 - 3.10 より古い版で `run-all.py` 自体が起動できるかは、確かめていない。起動できない版では、警告の行より前に止まりうる。
+- 新しい版(3.11〜3.14)で無くなった標準ライブラリは、使っていなかった(2026-11-07 に 1 回だけ点検した。対象は commit d14a734 の `plugins/`・`scripts/`・`setup.sh` で、シェルと文書に埋め込んだ Python も含む)。探したのは、無くなったモジュールの import(`distutils`・`imp`・`asyncore` など 25 個)・無くなった API(`assertEquals`・`SafeConfigParser`・`ast.Num` など)・非推奨のもの(`datetime.utcnow`・`pkg_resources` など)で、どれも 0 件だった。
+- 新しい版で動かすこと(テスト)は、確かめていない。この点検を繰り返す検査(テスト・`validate.py` の検査)は足していない。
 
 ### 結果の使い回し(`--reuse`)
 
