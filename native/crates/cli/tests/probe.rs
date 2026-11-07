@@ -130,7 +130,7 @@ impl Fixture {
 
     fn execute(&self, mut command: Command) -> Output {
         let before = snapshot(&self.0);
-        let output = command
+        command
             .current_dir(self.0.join("work"))
             .env_clear()
             .env("PATH", self.0.join("bin"))
@@ -139,9 +139,21 @@ impl Fixture {
             .env("GIT_DIR", self.0.join("missing-git"))
             .env("DEV_WORKFLOW_SOURCE_INPUT_SHA256", "not-the-build-hash")
             .env("DEV_WORKFLOW_RUSTC", "not-the-build-compiler")
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
+            .stdin(Stdio::null());
+        // コピーした実行ファイルを起動するテストでは、並列のほかのテストが fork した子が、
+        // 書き込みの fd を exec までの間だけ持つことがある。そのときの ETXTBSY だけを、少しの間やり直す。
+        let mut attempts = 0;
+        let output = loop {
+            match command.output() {
+                Err(error)
+                    if error.kind() == std::io::ErrorKind::ExecutableFileBusy && attempts < 50 =>
+                {
+                    attempts += 1;
+                    std::thread::sleep(std::time::Duration::from_millis(20));
+                }
+                result => break result.unwrap(),
+            }
+        };
         assert_eq!(snapshot(&self.0), before, "実行でファイルが変わりました");
         output
     }
@@ -379,10 +391,21 @@ fn self_sha256_uses_current_exe_with_non_utf8_symlink_and_false_argv_zero() {
     use std::os::unix::{ffi::OsStringExt, fs::symlink, process::CommandExt};
 
     let fixture = Fixture::new();
-    let link = fixture
+    let mut link = fixture
         .0
         .join(OsString::from_vec(b"executable-\xff".to_vec()));
-    symlink(binary(), &link).unwrap();
+    if let Err(error) = symlink(binary(), &link) {
+        // macOS の EILSEQ(Illegal byte sequence)の値。
+        const MACOS_EILSEQ: i32 = 92;
+        // macOS の APFS は、UTF-8 でない名前を EILSEQ で拒む。そこでは UTF-8 の名前のリンクで確かめる
+        // (argv[0] を偽る確かめは残る)。ほかの失敗はそのまま落とす。
+        assert!(
+            cfg!(target_os = "macos") && error.raw_os_error() == Some(MACOS_EILSEQ),
+            "リンクを作れない: {error}"
+        );
+        link = fixture.0.join("executable-link");
+        symlink(binary(), &link).unwrap();
+    }
     let decoy = fixture.0.join("work/argv-zero");
     fs::write(&decoy, b"this is not the executable").unwrap();
     let mut command = Command::new(link);
