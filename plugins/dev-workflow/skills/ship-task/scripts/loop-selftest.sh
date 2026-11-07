@@ -2341,6 +2341,64 @@ check "未信頼 meta: 記録は不変" "$BEFORE_META" "$(sha256sum <"$SD/inflig
 kill -KILL -- "-$MANUAL" 2>/dev/null || true
 wait "$MANUAL" 2>/dev/null || true
 
+# supervisor が応答しない(SIGSTOP)とき、loop.sh は TERM の後、名目(猶予 2 秒 + 7 秒)より早く KILL を送らない。
+newrepo kstopped
+addtask longsleep-a 2026-01-01; addtask pr-b 2026-01-02
+commit
+newrec kstopped
+start_bg kstopped -- --repo "$R" "${COMMON_ARGS[@]}"
+if wait_file "$REC/started-longsleep-a" 30; then
+  kst_child="$(cat "$REC/pid-longsleep-a")"
+  kst_sup="$(python3 - "$kst_child" <<'PID'
+import sys
+raw=open('/proc/'+sys.argv[1]+'/stat','rb').read()
+print(int(raw[raw.rindex(b')')+2:].split()[1]))
+PID
+)"
+  kill -STOP "$kst_sup"
+  # 止まりきる前に TERM が届くと監督が終わって確かめが空振りするので、State が T になるまで待つ
+  kst_i=0; kst_state=""
+  while [ "$kst_i" -lt 50 ]; do
+    kst_state=""
+    while IFS=$':\t ' read -r kst_k kst_v _; do
+      if [ "$kst_k" = State ]; then kst_state="$kst_v"; break; fi
+    done 2>/dev/null <"/proc/$kst_sup/status"
+    [ "$kst_state" != T ] || break
+    sleep 0.1; kst_i=$((kst_i + 1))
+  done
+  kst_a=""; kst_b=""
+  kill -TERM "$BG_PID"
+  kst_i=0
+  while [ "$kst_i" -lt 600 ]; do
+    read -r kst_t1 _ </proc/uptime
+    kst_state=""; kst_pnd=""
+    while IFS=$':\t ' read -r kst_k kst_v _; do
+      case "$kst_k" in State) kst_state="$kst_v" ;; ShdPnd) kst_pnd="$kst_v" ;; esac
+    done 2>/dev/null <"/proc/$kst_sup/status"
+    read -r kst_t2 _ </proc/uptime
+    [ -n "$kst_state" ] && [ "$kst_state" != Z ] || break
+    if [ -z "$kst_a" ] && [ -n "$kst_pnd" ] && [ $(( 16#$kst_pnd >> 14 & 1 )) -eq 1 ]; then kst_a="$kst_t2"; fi
+    if [ "$kst_state" = T ]; then kst_b="$kst_t1"; fi
+    sleep 0.1; kst_i=$((kst_i + 1))
+  done
+  wait_bg
+  check "監督が応答しない: loop は 143 で終わる" 143 "$BG_RC"
+  SD="$(state_dir kstopped)"
+  has "監督が応答しない: 不在証明が無い" "$SD/stop-mark.md" "不在証明"
+  t "監督が応答しない: 周の途中の印を残す" test -d "$SD/inflight"
+  hasnt "監督が応答しない: 次の周へ進まない" "$REC/calls.log" "pr-b"
+  if [ -n "$kst_a" ] && [ -n "$kst_b" ]; then
+    kst_gap=$(( 10#${kst_b/./} - 10#${kst_a/./} ))
+    if [ "$kst_gap" -ge 700 ]; then ok "監督が応答しない: TERM から KILL まで 7.0 秒以上"; else ng "監督が応答しない: TERM から KILL まで 7.0 秒以上(実際 ${kst_gap} 百分秒)"; fi
+  else
+    ng "監督が応答しない: TERM から KILL までを測れない(a='$kst_a' b='$kst_b')"
+  fi
+  kill -KILL -- "-$kst_child" 2>/dev/null || true
+  for p in $(cat "$REC/spawned-longsleep-a" 2>/dev/null); do kill -KILL -- "-$p" 2>/dev/null || kill -KILL "$p" 2>/dev/null || true; done
+else
+  ng "監督が応答しない: 周が始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
+fi
+
 fi
 
 # ════════════════ シグナル・内部の失敗と残り(試験用のフック)════════════════
