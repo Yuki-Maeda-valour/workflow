@@ -54,7 +54,7 @@ class UnitsTest(unittest.TestCase):
     def test_list_prints_every_unit_once(self):
         self.assertEqual(0, self.listed.returncode, self.listed.stderr)
         self.assertEqual("", self.listed.stderr)
-        self.assertEqual(78, len(self.units))
+        self.assertEqual(79, len(self.units))
         self.assertEqual(len(self.units), len(set(self.units)))
         for unit in self.units:
             self.assertRegex(unit, r"^[A-Za-z0-9-]+$")
@@ -63,7 +63,7 @@ class UnitsTest(unittest.TestCase):
         groups = [u for u in self.units if re.fullmatch(r"[A-Z]", u)]
         self.assertEqual(12, len(groups))
         self.assertEqual(27, len([u for u in self.units if re.fullmatch(r"M[0-9]+", u)]))
-        self.assertEqual(13, len([u for u in self.units if re.fullmatch(r"N[0-9]+", u)]))
+        self.assertEqual(14, len([u for u in self.units if re.fullmatch(r"N[0-9]+", u)]))
         self.assertEqual(26, len([u for u in self.units if u.startswith("L-")]))
 
     def test_mutant_units_match_the_marks_in_the_target(self):
