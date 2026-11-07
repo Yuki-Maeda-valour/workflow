@@ -62,16 +62,27 @@ NO_SECTION = ","
 OUTSIDE = "(節の外だけ)"
 OUTSIDE_LOG = "_outside.log"
 
-# 先に始める順の重み(秒)。値は、節を 1 つずつ順に流したときの時間を秒に丸めたもの
-# (2026-11-05、Ubuntu 22.04 の容器・git 2.56.0・16 CPU。LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300)。
-# 測った時間の和は、30 節で 4054.3 秒。節の外だけのプロセス(10.8 秒)を足すと 4065.1 秒。
-# 丸めたので、下の値の和は 4056 になる。載っていない節は、既定の 200 秒(run_units.DEFAULT_WEIGHT)で早めに始める。
+# 先に始める順の重み(秒)。値は、節を 1 つずつ順に流したときの時間を秒に丸めたもの。
+# - 2026-11-07 に測った 28 節(#386 で、重かった 6 節を分けた節): Ubuntu 22.04 の容器・git 2.56.0・CPU 4 つ
+#   (そのうち使えるのは約 3 つ)・-j 1(LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600)。同じ機械でほかのセッションも動いていたので、
+#   値は回ごとに揺れる(environment-log2 は 84〜158 秒・discover-stop は 150〜205 秒)。
+#   28 節の最初の回の和は 2234.5 秒。節の外だけのプロセスは 6.5 秒。
+#   discover-stop・environment-log・environment-log2 は、ほかの節より後に 1 回ずつ測り直し、小さいほうの値を入れた
+#   (最初の回は 149.5・131.8・158.3 秒。測り直しは 205.4・104.6・83.8 秒)。入れた後の 28 節の和は 2135 秒・最長は 150 秒(discover-stop)。
+# - 変えていない 24 節の値は、2026-11-05 の値のまま(Ubuntu 22.04 の容器・git 2.56.0・16 CPU・RUN_TIMEOUT=300)。
+#   測った条件が違うので、2 つの群の値を直接は比べない。
+# 載っていない節は、既定の 200 秒(run_units.DEFAULT_WEIGHT)で早めに始める。
 WEIGHTS = {
-    "discover": 639, "breakers": 437, "judge": 393, "humanconfig": 327, "environment": 276, "stops": 251,
-    "memory": 166, "host": 147, "h28": 133, "h47": 118, "d22": 115, "h46": 114, "h50": 93, "h47enterprise": 81,
-    "kill": 77, "hooks": 72, "locked": 70, "argv": 66, "h47proof": 62, "signals": 57, "shell-prefix": 56,
-    "perm": 52, "h46skillsdir": 44, "h46recheck": 41, "order": 39, "between": 37, "h46market": 36, "skip": 28,
-    "link": 18, "sync": 11,
+    "memory": 166, "discover-stop": 150, "host": 147, "humanconfig-between": 137, "h28": 133,
+    "discover-judge4": 124, "humanconfig-restart": 124, "humanconfig-clean": 121, "h47": 118, "d22": 115,
+    "h46": 114, "discover-judge3": 111, "environment-log": 105, "h50": 93, "discover-judge2": 90,
+    "discover-judge": 89, "stops-repo": 86, "environment-log2": 84, "h47enterprise": 81, "kill": 77,
+    "stops": 74, "hooks": 72, "environment": 71, "locked": 70, "discover-state": 69, "judge-array": 68,
+    "argv": 66, "breakers-normal": 65, "breakers-g1": 64, "judge": 63, "h47proof": 62, "breakers": 61,
+    "breakers-shared2": 58, "signals": 57, "shell-prefix": 56, "judge-hang": 55, "perm": 52,
+    "breakers-reset": 49, "judge-fail": 47, "h46skillsdir": 44, "humanconfig": 41, "h46recheck": 41,
+    "discover": 40, "order": 39, "between": 37, "breakers-shared": 36, "h46market": 36, "judge-git": 30,
+    "skip": 28, "judge-profile": 23, "link": 18, "sync": 11,
 }
 
 # 分ける単位にする形。最上位に、1 行で書く。
