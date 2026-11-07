@@ -1128,11 +1128,14 @@ cleanup_iteration() {
     fi
     while [ "$waited" -lt "$(((KILL_GRACE + 9) * 10))" ]; do
       control_rc=0
-      py supervisor-control alive "$CHILD_PID" "$$" "$CHILD_START" || control_rc=$?
-      [ "$control_rc" -ne 3 ] || break
-      if [ "$control_rc" -ne 0 ]; then
-        CLEANUP_LEFT="supervisor の生存を照合できない"
-        return
+      # 生存の確かめ(Python)は 1 秒に 1 回・最後の刻み・/proc/<pid> が消えた時だけ行う
+      if [ $((waited % 10)) -eq 0 ] || [ "$waited" -eq "$(((KILL_GRACE + 9) * 10 - 1))" ] || [ ! -d "/proc/$CHILD_PID" ]; then
+        py supervisor-control alive "$CHILD_PID" "$$" "$CHILD_START" || control_rc=$?
+        [ "$control_rc" -ne 3 ] || break
+        if [ "$control_rc" -ne 0 ]; then
+          CLEANUP_LEFT="supervisor の生存を照合できない"
+          return
+        fi
       fi
       if [ "$waited" -eq "$(((KILL_GRACE + 7) * 10))" ]; then
         control_rc=0
@@ -1142,7 +1145,10 @@ cleanup_iteration() {
           return
         fi
       fi
-      "$PY_ABS" -c 'import time; time.sleep(.1)' || break
+      # ふだんは nap(PATH の sleep)で待つ。失敗したときだけ Python の待ちで代える(PATH の sleep が壊れた環境でも
+      # KILL まで進めるため。hooks の節の内部の失敗の確かめがこの経路を通る)。command -p sleep は bash が覚えた
+      # 場所を先に使い、PATH=/usr/bin:/bin sleep は sleep がその 2 つに無い環境で毎回失敗するので使わない。
+      nap 0.1 || "$PY_ABS" -c 'import time; time.sleep(.1)' || break
       waited=$((waited + 1))
     done
     if [ "$control_rc" -ne 3 ]; then
@@ -2547,19 +2553,27 @@ source=$ITER_SOURCE
   CHILD_START=""
   ITER_PGID="$pid"
   timed_out=0
-  local control_rc=0
+  local control_rc=0 slept_ms=0 since_ms=1000 step_ms step_s
   CHILD_START="$(py supervisor-control capture "$pid" "$$")" || control_rc=$?
   if [ "$control_rc" -ne 0 ] && [ "$control_rc" -ne 3 ]; then
     timed_out=1
   else
     while [ "$control_rc" -eq 0 ]; do
-      control_rc=0
-      py supervisor-control alive "$pid" "$$" "$CHILD_START" || control_rc=$?
-      [ "$control_rc" -ne 3 ] || break
-      if [ "$control_rc" -ne 0 ]; then timed_out=1; break; fi
-      now="$(date +%s)"
-      if [ $((now - start)) -ge "$((ITER_TIMEOUT + KILL_GRACE + 7))" ]; then timed_out=1; break; fi
-      nap 1
+      # Python の確かめと時間切れの判定は約 1 秒に 1 回と /proc/<pid> が消えた時だけ。間は組み込みで見て、待つ間隔は 0.05〜1 秒で伸ばす
+      if [ "$since_ms" -ge 1000 ] || [ ! -d "/proc/$pid" ]; then
+        control_rc=0
+        py supervisor-control alive "$pid" "$$" "$CHILD_START" || control_rc=$?
+        [ "$control_rc" -ne 3 ] || break
+        if [ "$control_rc" -ne 0 ]; then timed_out=1; break; fi
+        now="$(date +%s)"
+        if [ $((now - start)) -ge "$((ITER_TIMEOUT + KILL_GRACE + 7))" ]; then timed_out=1; break; fi
+        since_ms=0
+      fi
+      step_ms=$((slept_ms / 4)); [ "$step_ms" -ge 50 ] || step_ms=50; [ "$step_ms" -le 1000 ] || step_ms=1000
+      [ "$step_ms" -le $((1000 - since_ms)) ] || step_ms=$((1000 - since_ms))
+      printf -v step_s '%d.%03d' $((step_ms / 1000)) $((step_ms % 1000))
+      nap "$step_s"
+      slept_ms=$((slept_ms + step_ms)); since_ms=$((since_ms + step_ms))
     done
   fi
   rc=0
