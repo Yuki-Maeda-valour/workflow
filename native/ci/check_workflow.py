@@ -32,6 +32,9 @@ POLICY_COMMAND = "python3 -B native/ci/check_workflow.py"
 SCRIPT_COMMAND = re.compile(
     r"python3 -B native/ci/[a-z_]+\.py(?: (?:[a-zA-Z0-9_./-]+|'\$\{\{ matrix\.platform \}\}'))*"
 )
+# 段階 0b(#443)の配布の確かめ。配布 commit の浅い clone で、配った入口を起動する。
+# native/ の外に置く(native/ はソース入力なので、0b では変えない)。この 1 行の字面だけを許す。
+DIST_LAUNCH_COMMAND = "python3 -B scripts/check_dist_launch.py --root ."
 
 
 def check_document(document):
@@ -121,8 +124,10 @@ def check_document(document):
                 problems.append(f"{name}: step には run か uses のどちらか 1 つが必要です")
             if "run" in step:
                 command = step["run"]
-                if not isinstance(command, str) or not SCRIPT_COMMAND.fullmatch(command):
-                    problems.append(f"{name}: run は native/ci/ のスクリプトを 1 本呼ぶだけにしてください")
+                if not isinstance(command, str) or not (
+                        SCRIPT_COMMAND.fullmatch(command) or command == DIST_LAUNCH_COMMAND):
+                    problems.append(f"{name}: run は native/ci/ のスクリプトを 1 本呼ぶか、"
+                                    f"配布の確かめ({DIST_LAUNCH_COMMAND})を呼ぶだけにしてください")
             if "uses" not in step:
                 if "with" in step:
                     problems.append(f"{name}: with は Action だけに指定できます")
