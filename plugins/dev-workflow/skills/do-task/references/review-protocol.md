@@ -150,7 +150,7 @@ ignored の通常生成物は path・種別・mode だけを控え、内容を�
   実装 state を doc stage に流用しない。doc 変更が無ければ新しい commit は作らない。
 - review 前に保留が必要になった場合も、元の開始 state から `take --phase hold` で未承認保存集合を作る。
   この phase は `seal`・APPROVED への昇格を許さない。`attest --hold-reason <人に確かめる場面の番号で始まる理由> --hold-next <人が次にすること> --out <根拠 JSON>` は `UNAPPROVED` を返す。
-  理由は「番号: 中身」で書く(例: `S4: 承認の後に本文が変わった`)。中身は、その周(無人ループの 1 回分の実行)で当たった理由を一言で書く。
+  理由は「番号: 中身」で書く(例: `S4: 承認の後に本文が変わった`)。中身は、そのイテレーション(無人ループの 1 回分の実行)で当たった理由を一言で書く。
   [unattended-mode.md](../../ship-task/references/unattended-mode.md) §4 の表の行を目安にする。S4 なら、当たった続行判定の項目の名前から書く(例: `6 本文の照合` → `承認の後に本文が変わった`)。
   `finalize` は template と同じ保留の行を 1 行だけ足し、UNAPPROVED と根拠を含める。
   `finalize --transition pending`、全 `verify` に `--task-transition pending` と期待バイト・根拠の保持値を渡し、同じ stage/commit 検査を通す。

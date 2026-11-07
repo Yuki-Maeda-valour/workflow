@@ -164,7 +164,7 @@ def remote_checked(directory: str, branch: str, held_sha: str) -> None:
 def set_tracking(directory: str, branch: str) -> None:
     """The interactive equivalent of -u, after the exact-SHA push succeeded."""
     if os.environ.get("DEV_WORKFLOW_LOOP_ITER"):
-        raise Failed("無人の周では追跡設定を変更できない")
+        raise Failed("無人のイテレーションでは追跡設定を変更できない")
     # `push -u origin <branch>` records these same two local values.  The
     # branch was already syntactically checked, and no remote URL is accepted.
     git(directory, "config", "--local", "--replace-all", f"branch.{branch}.remote", "origin")

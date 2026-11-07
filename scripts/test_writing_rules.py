@@ -156,7 +156,7 @@ class WritingRulesTest(unittest.TestCase):
                 "G3: 無人の前提を欠く",
                 "S4: 承認の後に本文が変わった",
                 "S・D・U・G の中身は",
-                "その周で当たった理由を一言で書く",
+                "そのイテレーションで当たった理由を一言で書く",
                 "§4 の表の行を目安にする",
                 "S4 なら、当たった続行判定の項目の名前から書く",
                 "`6 本文の照合` → `承認の後に本文が変わった`",
@@ -266,7 +266,7 @@ class CompletionReportTest(unittest.TestCase):
         )
         self.assertNotRegex(blocks[0], rf"(?m)^({MARKER_ALT})。")
         self.assertNotRegex(blocks[0], rf"【({MARKER_ALT})】")
-        for prefix in ("無人の周の結果:", "候補モードの結果:", "レビュー判定:"):
+        for prefix in ("無人のイテレーションの結果:", "候補モードの結果:", "レビュー判定:"):
             self.assertNotIn(prefix, blocks[0])
         self.assertIn("未実施", blocks[0])
         self.assertIn("理由", blocks[0])
@@ -316,7 +316,7 @@ class CompletionReportTest(unittest.TestCase):
         for text in (report, final_gate, self.report):
             with self.subTest(text=text):
                 self.assertIn("作成後は本文を書き換えない", text)
-                self.assertIn("発見の周と PR を作らなかったときは", text)
+                self.assertIn("発見のイテレーションと PR を作らなかったときは", text)
                 self.assertIn("既存のタスクの記録か会話に内訳を残す", text)
         self.assertIn("手順 3 で本文に書いた場所を指す", report)
 
@@ -362,8 +362,8 @@ class CompletionReportTest(unittest.TestCase):
         self.assertIn("報告の最後の行のまま", self.report)
         self.assertIn("決まった一覧と結果の行が続く出力", self.report)
         unattended = (SKILLS_DIR / "ship-task/references/unattended-mode.md").read_text(encoding="utf-8")
-        self.assertIn("`無人の周の結果: <結末> — <理由か URL>`", unattended)
-        self.assertIn("`^無人の周の結果: (PR|縮退|保留|失敗扱い|候補なし) — `", unattended)
+        self.assertIn("`無人のイテレーションの結果: <結末> — <理由か URL>`", unattended)
+        self.assertIn("`^無人のイテレーションの結果: (PR|縮退|保留|失敗扱い|候補なし) — `", unattended)
         update = self.skill("update-doc")
         self.assertIn("`レビュー判定: <APPROVED | 未収束 | 未完了>`", update)
         self.assertIn("判定の行は省かず", update)

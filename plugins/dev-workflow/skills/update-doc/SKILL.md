@@ -11,7 +11,7 @@ argument-hint: "[--task=<完了タスクMD | #番号 | Issue URL> | --analyze-on
 `--unattended` の入口では、原則・モード判定・補助スクリプトの参照・対象文書の読取より先に、親の保持値を検査する。親の保持値が無い単独入口だけが、現在の配布元から新しい控えと検査用コピーを作る。
 
 - 親が `state`・`sha256`・`guard`・`guard_sha256` とコピーの plugin ルートを渡したときは、5 値を継承する。1値でも渡されていれば親ありとして扱う。1 つでも無い、hash が違う、または `verify` が失敗したときは停止する。新しい `bootstrap` で成功へ置き換えない。
-  - `loop.sh` の子は、親の `DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` を、この親の保持値として使う。
+  - `loop.sh` が起動した CLI は、親の `DEV_WORKFLOW_ENV_STATE`・`DEV_WORKFLOW_ENV_SHA256`・`DEV_WORKFLOW_ENV_GUARD`・`DEV_WORKFLOW_ENV_GUARD_SHA256`・`DEV_WORKFLOW_LOOP_PLUGIN_ROOT` を、この親の保持値として使う。
 - 親の保持値が無い単独の無人入口は、現在の配布元の `../ship-task/scripts/environment-guard.py` を `python3 -B` で一度だけ使う。`bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を渡す。
   - 使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先を動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へすべて渡す。追加の Git/shell 設定は `--config`・`--shell` へ渡す。
   - 一覧は正式な手段で確定した `installPath` 付き配列とする。取得不能なら失敗扱いにする。出力の `state`・`sha256`・`guard`・`guard_sha256`・`plugin` とコピーの plugin ルートを保持する。
@@ -161,7 +161,7 @@ except (Exception, SystemExit) as exc:
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
-| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。判断を仰ぐ点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` の周(無人ループの 1 回分の実行)では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` の周の Bash の書き方」で打つ |
+| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。判断を仰ぐ点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` のイテレーション(無人ループの 1 回分の実行)では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` のイテレーションの Bash の書き方」で打つ |
 
 ## Phase 1: 入力と現状把握
 

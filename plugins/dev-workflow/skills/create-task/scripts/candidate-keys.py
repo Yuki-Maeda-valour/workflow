@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import sys
 
-# プラグインルート(周の worktree の外)に __pycache__ を作らない。周の Bash では
+# プラグインルート(イテレーションの worktree の外)に __pycache__ を作らない。イテレーションの Bash では
 # PYTHONDONTWRITEBYTECODE を渡せないので、兄弟の script を取り込む前にここで止める
 sys.dont_write_bytecode = True
 

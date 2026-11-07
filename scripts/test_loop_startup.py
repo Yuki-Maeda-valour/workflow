@@ -28,7 +28,7 @@ CASE_TIMEOUT_DEFAULT = 300
 OUTER_MARGIN = 30
 TIMEOUT_MARK = '時間切れ: '
 EARLY_EXIT_MARK = '背景の loop.sh が起動の印 '
-# 背景の loop.sh(start_bg)が子を起動した印を待つ秒数。start_bg は背景の loop.sh を 150 秒で止めるので、
+# 背景の loop.sh(start_bg)が CLI のスタブを起動した印を待つ秒数。start_bg は背景の loop.sh を 150 秒で止めるので、
 # 印の後に止める合図を処理する時間を残して、それより短くする。
 START_WAIT = 100
 
@@ -450,7 +450,7 @@ run_loop early-stop-diagnostic @LATE_ARGS@ -- --repo "$R" --max-iterations 1 "${
 [ -L "$SD/stop-mark.md" ] || exit 122
 """.replace('@MUTATION@', mutation).replace('@LATE_ARGS@', late_args), 20, transform)
                 self.assertIn('stop-mark.md', out)
-                self.assertIn('人が設定・中断記録・残った子を確認するまで印を外して再開しない', out)
+                self.assertIn('人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない', out)
 
     def test_stop_file_with_inflight_requires_confirmation_then_stops_normally(self):
         for rel in ('.claude/loop.stop', 'custom.stop', 'new/control/stop'):
@@ -787,7 +787,7 @@ git -C "$R" worktree list --porcelain -z | tr '\\0' '\\n' | grep -qx 'locked dev
 ''', 0, transform)
 
 
-    # ── 1 回の起動で 2 回照合する(verify_environment_pair)の、周の中での振る舞い ──
+    # ── 1 回の起動で 2 回照合する(verify_environment_pair)の、イテレーションの中での振る舞い ──
     def aux_action(self, action):
         """aux() の先頭に action(有効 plugin の一覧の確定後だけ)を差し込む変換。"""
         def transform(source):

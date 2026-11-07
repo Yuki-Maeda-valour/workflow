@@ -768,7 +768,7 @@ def parse_frontmatter_lines(text):
 RULE = re.compile(r'([A-Za-z][A-Za-z0-9_-]*)(?:\((.*)\))?', re.S)
 # 組み込みの道具の名(公式文書 tools-reference の表。2026-10-07 確認)。これと mcp__<server>__<tool> の形の
 # ほかは未知の道具として、許可リストの字面と同じでも安全とみなさない。表のうち、作業を別の AI に任せる道具
-# (委託の道具・サブエージェントを束ねる道具・その返答の道具)は入れない — skill が無人の周で委託の権限を足すことは、知らない道具と同じく常に止める
+# (委託の道具・サブエージェントを束ねる道具・その返答の道具)は入れない — skill が無人のイテレーションで委託の権限を足すことは、知らない道具と同じく常に止める
 KNOWN_TOOLS = frozenset((
     'Artifact', 'AskUserQuestion', 'Bash', 'CronCreate', 'CronDelete', 'CronList', 'Edit',
     'EndConversation', 'EnterPlanMode', 'EnterWorktree', 'ExitPlanMode', 'ExitWorktree', 'Glob', 'Grep',
@@ -2070,7 +2070,7 @@ def grants(state_path, expected, user_settings, allowed_tools, classifier=False)
                 problems += 1
                 lines.append(f"kind={component['kind']}: allowed-tools が許可リストより広い")
     if problems:
-        raise Stop('skill・command の allowed-tools が無人の周の権限を広げうる:\n' + '\n'.join(lines[:50]))
+        raise Stop('skill・command の allowed-tools が無人のイテレーションの権限を広げうる:\n' + '\n'.join(lines[:50]))
     return files
 
 

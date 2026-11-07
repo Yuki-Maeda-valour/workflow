@@ -4,7 +4,7 @@
 
 - `候補_` の書式・メタ行の照合パターン・採用の引き継ぎの正本は [task-template.md](task-template.md) の記法の規約。採用の経路の手順は [../SKILL.md](../SKILL.md) の「採用の経路」
 - 識別子の定義は発見元の側に置く: data-audit は [../../data-audit/references/checks.md](../../data-audit/references/checks.md) の「候補モードの識別子と観点群」、refactor は [refactor-analysis.md](refactor-analysis.md) §6
-- 無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=<発見元> --unattended`)が候補モードを呼ぶ。周の照合(照らし合わせて確かめること)・commit・PR は [../../ship-task/references/discover-mode.md](../../ship-task/references/discover-mode.md)
+- 無人ループの発見のイテレーション(無人ループの 1 回分の実行。`/ship-task --discover=<発見元> --unattended`)が候補モードを呼ぶ。イテレーションの照合(照らし合わせて確かめること)・commit・PR は [../../ship-task/references/discover-mode.md](../../ship-task/references/discover-mode.md)
 - `--candidates` を付けなければ、この文書は使わない(既存の「承認 → /create-task チェーン」のまま)
 
 ## 1. 引数
@@ -38,7 +38,7 @@
 
 ## 3. 人に確かめる場面と工程の置き換え
 
-無人の周で人に確かめる場面の表([../../ship-task/references/unattended-mode.md](../../ship-task/references/unattended-mode.md) §4)からは、この表を指す。候補モードでは、`--unattended` の有無に関わらず、この表のとおりに振る舞う。
+無人のイテレーションで人に確かめる場面の表([../../ship-task/references/unattended-mode.md](../../ship-task/references/unattended-mode.md) §4)からは、この表を指す。候補モードでは、`--unattended` の有無に関わらず、この表のとおりに振る舞う。
 
 | 発見元 | 場所 | 対話(既定) | 候補モード |
 |---|---|---|---|
@@ -94,7 +94,7 @@
   - `code`: `source-count`(発見元の行が 1 行でない)・`source-mismatch`・`key-count`(指摘キーの行が 1 行でない)・`unattended-meta`・`skipped`(見送りの行)・`skipped-malformed`(見送りの書式違い)・`record-section`・`checkbox`・`unreadable`。`detail` は人向けの文で、判定に使わない。収集の `problems` も同じ形
   - 終了コード 0 = ok / 1 = ok でない・読めない / 2 = 使い方の誤り
   - commit した候補は `git show HEAD:./<パス> | python3 {create-task の}scripts/candidate-keys.py --check --source=<発見元> -` の形で確かめられる(許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉の構文に収まる)
-- 取り込む兄弟のスクリプト(`resolve-task-dir.py`・`task-digest.py`)より前に `sys.dont_write_bytecode` を立て、プラグインルートに `__pycache__` を作らない(周の Bash では `PYTHONDONTWRITEBYTECODE` を渡せない)
+- 取り込む兄弟のスクリプト(`resolve-task-dir.py`・`task-digest.py`)より前に `sys.dont_write_bytecode` を立て、プラグインルートに `__pycache__` を作らない(イテレーションの Bash では `PYTHONDONTWRITEBYTECODE` を渡せない)
 
 ## 6. 結果の行
 
@@ -111,11 +111,11 @@
 - 一覧: 書いたパスを 1 行に 1 つ(管理ルート相対。ほかの文字を足さない)、結果の行の直前に空行を挟まずに並べる。要約などを書くときは、一覧の前に置き、空行で区切る
 - `候補なし` = 書き出し 0(既知だけのときも含む)。`失敗扱い` = 停止した(対話でも無人でも)。N は書き終えた候補の数で、書きかけの `候補_` は残す
 - M は既知として書かなかった指摘の数(回帰の疑いを含む)。R はそのうち回帰の疑いの数。K は上限を超えて書かなかった数。E は除外(誤検知の除去とセキュリティ由来の除外)の数
-- refactor の E は、公開の PR 本文と結果の行(`無人の周の結果: …`)に載せない(discover-mode.md)。内訳はローカルの報告(§5 の 6)だけに置く
+- refactor の E は、公開の PR 本文と結果の行(`無人のイテレーションの結果: …`)に載せない(discover-mode.md)。内訳はローカルの報告(§5 の 6)だけに置く
 
 ## 7. 無人(`--unattended`)と許可の前提
 
-- 周の Bash の書き方・委託するサブエージェントの要点・G1 は、unattended-mode.md のとおりに効く
+- イテレーションの Bash の書き方・委託するサブエージェントの要点・G1 は、unattended-mode.md のとおりに効く
 - data-audit の Phase 2 の委託と、create-task の refactor の researcher の委託にも、unattended-mode.md の「委託するサブエージェント」の項の要点を、要約し直さずに委託プロンプトへコピーする
 - 引用符の外のグロブで一覧を取る書き方は、許可の仲介に拒否される。既知のキーは `candidate-keys.py` で集める
 - 許可の拒否(G1)は、候補モードでは常に失敗扱い(`保留_` にするタスク MD が無い)。書きかけの `候補_` は残す(worktree ごと残る)

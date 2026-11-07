@@ -69,7 +69,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         text = (SKILLS / "ship-task/references/loop.md").read_text()
         profile = text.split("### profile(`features.loop`)と実効値\n", 1)[1].split("\n## ", 1)[0]
         self.contains(profile, "`loop.sh` が置き場の判定で見るのは `task_store` だけ",
-                      "ループは起動するが、毎周の ship-task が `task-store-unsupported` で止まる",
+                      "ループは起動するが、各イテレーションの ship-task が `task-store-unsupported` で止まる",
                       "権威参照ファイルの運用はループ起動時には判定しない")
 
     def test_issue_target_and_branch_are_bound_before_implementation(self):
@@ -447,7 +447,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         history = next(line for line in facts.splitlines() if line.startswith("| GraphQL の Issue の `userContentEdits`"))
         self.contains(history, "履歴2件(作成時の版と編集)", "最終編集と一致", "`--edits-since`",
                       "100件を超える履歴のページ送りと、他の条件での反映時期は未確認",
-                      "履歴の反映が遅れる可能性", "偽の `gh`")
+                      "履歴の反映が遅れる可能性", "`gh` のモック")
         unedited = next(line for line in facts.splitlines() if line.startswith("| 未編集の Issue"))
         self.contains(unedited, "#331", "作成直後は両方 null、編集履歴は0件")
 
