@@ -31,7 +31,7 @@
 
 ## 導入方法
 
-do-task の補助スクリプトは bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
+do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
 プラグインを入れた後と、版を上げた後の最初の起動で、使う道具(git・bash・python3 など)の版の表が出ます。足りない道具があれば、直し方も出ます(起動は止めません)。2 回目の起動からは出ません。手で確かめるには `sh plugins/dev-workflow/hooks/tool-versions.sh` を流します。道具と最低の版の一覧は、[必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) の「道具の最低の版と、確かめる時」にあります。
 

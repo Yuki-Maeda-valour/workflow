@@ -191,7 +191,8 @@ class ToolVersionsTests(unittest.TestCase):
         result = self.run_script(path=self.tools(python3="#!/bin/sh\ncase $1 in --version) printf 'Python 3.12.3\\n' ;; *) exit 1 ;; esac\n"))
         self.row(result.stdout, 'PyYAML', '-', '-', '無い(条件つき)')
         result = self.run_script(path=self.tools(python3=None))
-        self.row(result.stdout, 'python3', '-', '3.8 以上', '無い')
+        self.row(result.stdout, 'python3', '-', '3.10 以上', '無い')
+        self.assertEqual(1, result.stdout.count('| python3 |'), result.stdout)
         self.row(result.stdout, 'PyYAML', '-', '-', '無い(python3 が無い)(条件つき)')
 
     def test_runs_without_bash_and_python3(self):
@@ -225,8 +226,11 @@ class ToolVersionsTests(unittest.TestCase):
                 self.assertEqual(0, result.returncode, result.stderr)
                 self.row(result.stdout, 'git', found, '2.42 以上', verdict)
         result = self.run_script(path=self.tools(python3="#!/bin/sh\ncase $1 in --version) printf 'Python 3.9.18\\n' ;; -B) printf '6.0.3' ;; esac\n"))
-        self.row(result.stdout, 'python3', '3.9.18', '3.8 以上', '足りる')
-        self.row(result.stdout, 'python3', '3.9.18', '3.10 以上', '足りない(条件つき)')
+        self.row(result.stdout, 'python3', '3.9.18', '3.10 以上', '足りない')
+        # python3 の行は 1 つだけ(必須の 3.10)。不足は必須の 1 件で、条件つきは 0 件。
+        self.assertEqual(1, result.stdout.count('| python3 |'), result.stdout)
+        self.assertIn('足りない道具が 1 件あります。止めずに続けます。直し方:', result.stdout)
+        self.assertIn('- python3(補助スクリプト全般と診断): Python 3.10 以上を入れ、', result.stdout)
 
     def test_loop_iteration_does_nothing(self):
         result = self.run_script('--session-start', DEV_WORKFLOW_LOOP_ITER='run-1-1')

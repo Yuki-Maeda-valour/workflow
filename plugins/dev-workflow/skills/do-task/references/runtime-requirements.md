@@ -13,8 +13,7 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 | git | 2.42 | 必須 | 全体。2.42 は無人ループと外部の実装担当 |
 | bash | 4.0 | 必須 | do-task の補助スクリプト |
 | bash | 4.4 | 条件つき | 無人ループ(loop.sh) |
-| python3 | 3.8 | 必須 | 補助スクリプト全般 |
-| python3 | 3.10 | 条件つき | 設定を戻さずに使う診断(diagnostic-git.py) |
+| python3 | 3.10 | 必須 | 補助スクリプト全般と診断 |
 | PyYAML | - | 条件つき | profile(.claude/project-profile.yml)があるとき |
 | jq | 1.5 | 任意 | python3 が無いときだけ、外部のレビュアーの出力を読む |
 | GNU coreutils | - | 必須 | 補助スクリプト全般 |
@@ -42,13 +41,13 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 
 ## 実行環境
 
-- 開始前の `pending-implementation.py scan` は **Python 3.8 以上・POSIX** が必要。標準ライブラリだけを使う。非 Git・内蔵・検証のみ・profile なしでも適用する。
+- 開始前の `pending-implementation.py scan` は **Python 3.10 以上・POSIX** が必要。標準ライブラリだけを使う。非 Git・内蔵・検証のみ・profile なしでも適用する。
   - `os.open`・`os.close`・`os.fstat`、`O_DIRECTORY`・`O_NOFOLLOW`・`O_CLOEXEC`、fd(開いたディレクトリを指す番号)を受ける `os.scandir` が必要。
   - 所属の印・`.git` ファイル・`HEAD`・`commondir` を読むため、`os.read`・`O_NONBLOCK`(書き手を待たずに開く)と、`os.open` の `dir_fd` も必要。
   - `os.stat` の `dir_fd` と `follow_symlinks=False`、`st_dev`・`st_ino`・`st_mode`・`st_uid`・`st_size`・`st_mtime_ns`・`st_ctime_ns`、`os.fsencode`・`os.fsdecode`・`time.monotonic` も必要。
   - helper は起動時の機能検査と実利用時の未対応を 11/`scan-unavailable` にする。`listdir` や shell での代行へ切り替えない。
   - Python 不在・helper 不在・起動不能・解釈失敗なら停止する。JSON を受け取れた扱いにせず、検査を省いて続行しない。引数・結果・人の確認の正本(ほかが合わせる元)は [external-runners.md](external-runners.md) §12-9。
-  - Python 3.8 互換の構文・API を保つ。3.8 実機が無ければ未確認とし、別版での成功を実測としない。既存の macOS 実測はこの新しい helper の実機確認を含まない。
+  - 3.10 で動く構文・API だけを使い、3.11 以降にしか無いもの(`except*`・`tomllib`・`typing.Self`・`datetime.UTC` など)を使わない。テストの容器(3.10.12)で全回帰テストを流して確かめる。既存の macOS 実測はこの新しい helper の実機確認を含まない。
 
 - Git 対象の内蔵 implementer(実装を受け持つ AI)へ委託(作業を別の AI に任せること)する前は、次の確認を独立した bash で実行する。`$1` は解決した do-task の `scripts` ディレクトリとする。PATH で選んだ同じ Python 実体を使う。エントリポイントと通常の Git は起動しない。
 
@@ -58,8 +57,8 @@ implementation_scripts=$1
 implementation_python=$(command -v python3) || { echo 'ERROR: python3 が無い' >&2; exit 20; }
 "$implementation_python" -I -B - "$implementation_scripts" <<'PYTHON' || exit 20
 import argparse, ast, hashlib, json, os, pathlib, re, subprocess, sys
-if sys.version_info[0] != 3:
-    raise RuntimeError("Python 3 が必要")
+if sys.version_info < (3, 10):
+    raise RuntimeError("Python 3.10 以上が必要")
 print("Python", sys.version.split()[0])
 root = pathlib.Path(sys.argv[1])
 for name in ("implementation-git.py", "diff-snapshot.sh"):
@@ -88,7 +87,7 @@ PYTHON
 
 ## 設定を戻さずに使う診断
 
-[diagnostic-git.md](diagnostic-git.md) の `diagnostic-git.py` は Python 3.10 以上・POSIX を必要とする。既存の内蔵5操作と開始前の候補走査の下限は変えない。
+[diagnostic-git.md](diagnostic-git.md) の `diagnostic-git.py` は Python 3.10 以上・POSIX を必要とする。ほかの補助スクリプトと同じ下限(上の「実行環境」)。
 
 - 信頼する配布コピーの絶対パスへ `python3 -I` を使う。同梱モジュールも同じコピーの絶対パスから読み、作業場所や `PYTHONPATH` の同名ファイルを使わない。
 - Git は既存の安全用のオプションと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
@@ -103,7 +102,7 @@ PYTHON
 
 ## タスク本文の復元
 
-`implement-guard.sh restore-taskmd` は Python 3 と同梱 `restore-taskmd.py` を追加で必要とする。他のサブコマンドの要件は変えない。OS 名で拒否せず、次の機能を起動時と専用領域内の試しで確認する。
+`implement-guard.sh restore-taskmd` は Python 3.10 以上と同梱 `restore-taskmd.py` を追加で必要とする。他のサブコマンドの要件は変えない。OS 名で拒否せず、次の機能を起動時と専用領域内の試しで確認する。
 
 - `os.O_DIRECTORY`・`O_NOFOLLOW`・`O_NONBLOCK`・`O_CLOEXEC`、`open`・`stat`・`mkdir`・`unlink`・`rmdir` の `dir_fd`、`stat` の `follow_symlinks=False`、`fstat`、`replace` の `src_dir_fd` / `dst_dir_fd`。
 - `subprocess.Popen` の `close_fds=True` / `pass_fds`、直接の子プロセスの `poll` / `wait` / `terminate` / `kill`、`signal.pthread_sigmask` と TERM・INT・HUP、単調時計、`resource.RLIMIT_FSIZE` / `setrlimit`。
@@ -243,7 +242,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     python3 -m unittest -v scripts.test_check_process scripts.test_review_guard 2>&1 | tee <scratch>/run.log
     ```
 
-  - 必要環境: Python 3・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
+  - 必要環境: Python 3.10 以上・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
   - 期待の件数(2 本の合計 128 件。`test_review_guard.py` 100 件・`test_check_process.py` 28 件):

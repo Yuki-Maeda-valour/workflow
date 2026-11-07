@@ -29,7 +29,7 @@ Issue の本文を正本(ほかが合わせる元)にする。コメントは契
 
 ## 2. 対象と書き込み前の確認
 
-- Python 3 と `gh` が必要。兄弟の `origin-repo.py` と `task-digest.py` も必要。
+- Python 3.10 以上と `gh` が必要。兄弟の `origin-repo.py` と `task-digest.py` も必要。
 - `{do-task の}scripts/issue-body.py` を使う。外部への取得・更新の各コマンドに `--dir <管理ルート>` を渡す。
   - `origin-repo.py` の `repo` で対象を決める。本体ソースの `root` へ移る前の管理ルートを使う。
   - `repo` が決まらないとき、origin が無いとき、fetch と push の対象が違うときは止める。任意のリポジトリへ切り替えない。
