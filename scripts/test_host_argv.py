@@ -1,17 +1,16 @@
 """純粋な host argv 検査。ホスト起動・認証・PyYAML に依存しない。"""
-import importlib.util
 from pathlib import Path
 import subprocess
 import sys
 import unittest
 
+from support_load import load_script
+
 SCRIPT = Path(__file__).resolve().parents[1] / 'plugins/dev-workflow/skills/ship-task/scripts/host-argv.py'
 
 class HostArgvTest(unittest.TestCase):
     def setUp(self):
-        spec = importlib.util.spec_from_file_location('host_argv', SCRIPT)
-        self.module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.module)
+        self.module = load_script(SCRIPT, 'host_argv')
 
     def test_normal(self):
         self.module.validate_argv(['host', '--model=model', '--effort=high', '--max-budget-usd=1.5', '--max-turns=4', '--name=normal', '--verbose'])

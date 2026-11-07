@@ -3,7 +3,6 @@ import ast
 import builtins
 import contextlib
 import hashlib
-import importlib.util
 import io
 import json
 import os
@@ -17,6 +16,10 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+
+import support_git
+from support_cli import run_python
+from support_load import load_script
 
 REPO = Path(__file__).resolve().parents[1]
 SKILL = REPO / 'plugins/dev-workflow/skills/do-task'
@@ -233,9 +236,8 @@ class PendingFixture(unittest.TestCase):
 
     def cli(self, args=None, env=None, cwd=None):
         args = ['scan', '--cwd', str(cwd or self.cwd)] if args is None else args
-        cp = subprocess.run([sys.executable, '-I', '-B', str(HELPER)] + args,
-                            env=self.env if env is None else env, cwd=str(self.base),
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=12)
+        cp = run_python(str(HELPER), *args, flags=('-I', '-B'), env=self.env if env is None else env,
+                        cwd=str(self.base), timeout=12, text=False, stdin=None)
         raw = cp.stdout
         self.last_stderr = cp.stderr
         self.assertTrue(raw.isascii(), raw)
@@ -544,7 +546,7 @@ class PendingCLITests(PendingFixture):
                 self.assertEqual(rc, 2)
                 self.assertEqual(result['result'], 'usage')
         cp = subprocess.run([sys.executable, '-I', '-B', str(HELPER), 'scan', '--help'],
-                            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
         self.assertEqual(cp.returncode, 0)
         self.assertRegex(cp.stdout.decode(), r'[^\x00-\x7f]')
         for option in ('--cwd', '--acknowledged-list', '--acknowledged-identities'):
@@ -658,11 +660,10 @@ class OwnerFixture(PendingFixture):
         shutil.rmtree(str(self.owned), ignore_errors=True)
 
     def git(self, cwd, *args, check=True, env=None):
-        return subprocess.run(['git', '-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main',
-                               '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null',
-                               '-c', 'protocol.file.allow=always', '-C', str(cwd), *args],
-                              env=self.env if env is None else env, stdin=subprocess.DEVNULL,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=check, timeout=60)
+        return support_git.git(*args, env=self.env if env is None else env, check=check, text=False, timeout=60,
+                               options=('-c', 'user.name=t', '-c', 'user.email=t@t', '-c', 'init.defaultBranch=main',
+                                        '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null',
+                                        '-c', 'protocol.file.allow=always', '-C', str(cwd)))
 
     def make_repo(self, relative, parent=None):
         path = (parent or self.repos) / relative
@@ -1101,9 +1102,7 @@ class PendingOwnerTests(OwnerFixture):
 class PendingBoundaryTests(PendingFixture):
     def setUp(self):
         super().setUp()
-        spec = importlib.util.spec_from_file_location('pending_contract_helper', HELPER)
-        self.module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.module)
+        self.module = load_script(HELPER, 'pending_contract_helper')
         self.create_roots()
 
     def run_unit(self, expected, code=None):
@@ -1305,9 +1304,9 @@ class PendingBoundaryTests(PendingFixture):
         #   tmp-open: /tmpを開くos.open(temp_chain)
         #   parent-open: `..`を開くos.open(chain)。cwdをGitの最上位にして、resolve_scopeが上へたどらないようにする
         import errno
-        subprocess.run(['git', '-c', 'init.defaultBranch=main', 'init', '-q', str(self.cwd)],
-                       env=dict(self.env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull),
-                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True, timeout=60)
+        support_git.git('-c', 'init.defaultBranch=main', 'init', '-q', str(self.cwd),
+                        env=dict(self.env, GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull),
+                        text=False, timeout=60)
         self.assertTrue((self.cwd / '.git/HEAD').is_file())
         guard = self.roots[0] / 'guard-g'
         guard.mkdir()

@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 import unittest
 
+import support_git
+
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SNAPSHOT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh"
@@ -35,8 +37,7 @@ class ProfileUnionHandoffTests(unittest.TestCase):
         self.tmp.cleanup()
 
     def git(self, *args: str) -> subprocess.CompletedProcess[bytes]:
-        return subprocess.run(["git", "-C", str(self.repo), *args], check=True,
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return support_git.git(*args, options=("-C", str(self.repo)), text=False)
 
     def initial_union(self) -> tuple[list[str], str]:
         head = self.git("rev-parse", "HEAD").stdout.decode().strip()

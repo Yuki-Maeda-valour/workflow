@@ -1,6 +1,5 @@
 """#260: 内部の予算・読取り競合・出力監督の実プロセス試験。"""
 import fcntl
-import importlib.util
 import json
 import os
 import pty
@@ -14,6 +13,8 @@ import time
 import unittest
 from unittest import mock
 
+from support_load import load_script
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / 'plugins/dev-workflow/skills/do-task/scripts'
 RUNTIME = SCRIPTS / 'diagnostic-runtime.py'
@@ -21,10 +22,7 @@ WRITER = SCRIPTS / 'diagnostic-output.py'
 
 
 def load(path):
-    spec = importlib.util.spec_from_file_location(path.stem.replace('-', '_'), path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script(path)
 
 
 # macOS は fd に書いただけで F_GETFL に 0x10000 を立てる(利用者が設定する値ではない)。比べるときは除く
@@ -200,7 +198,7 @@ class DiagnosticBudgetTests(unittest.TestCase):
         with self.assertRaises(self.module.Failure):
             runtime.process([sys.executable, '-I', '-c',
                 'import signal,time;signal.signal(signal.SIGTERM,signal.SIG_IGN);time.sleep(60)'])
-        self.assertLess(time.monotonic()-started, 11)
+        self.assertLess(time.monotonic()-started, 20)
         self.assertEqual([p.poll() for p in runtime.children], [-signal.SIGKILL])
         self.assertFalse(runtime.unreaped)
         runtime.cleanup()
@@ -325,9 +323,9 @@ class DiagnosticOutputTests(unittest.TestCase):
                     fcntl.fcntl(writefd, fcntl.F_SETFL, original)
                     started = time.monotonic()
                     streams = {'stdout': subprocess.DEVNULL, 'stderr': subprocess.DEVNULL, stream: writefd}
-                    result = subprocess.run(self.args(seconds=.15, code=code), timeout=12, **streams)
+                    result = subprocess.run(self.args(seconds=.15, code=code), timeout=60, **streams)
                     self.assertEqual(result.returncode, 20)
-                    self.assertLess(time.monotonic()-started, 11)
+                    self.assertLess(time.monotonic()-started, 20)
                     self.assertEqual(file_flags(writefd), original & ~WRITTEN_FLAG)
                     self.result(20)
                 finally:

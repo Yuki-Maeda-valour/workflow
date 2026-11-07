@@ -2,7 +2,6 @@
 
 実物のホスト CLI は起動しない。実 hook の効き方の確認は loop.sh --prove-host の実動確認で行う。
 """
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,6 +12,9 @@ import tempfile
 import time
 import unittest
 
+from support_cli import call_main, run_python
+from support_load import load_script
+
 sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,18 +24,56 @@ SKILLS = ROOT / 'plugins/dev-workflow/skills'
 
 
 def load():
-    spec = importlib.util.spec_from_file_location('host_check', SCRIPT)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script(SCRIPT, 'host_check')
 
 
 HC = load()
 
 
 def run(*args, env=None):
-    return subprocess.run([sys.executable, '-I', '-B', str(SCRIPT), *map(str, args)],
-                          text=True, capture_output=True, env=env, timeout=60)
+    """host-check を子プロセスで起動する(CLI の接続を確かめるテスト用)。"""
+    return run_python(str(SCRIPT), *map(str, args), flags=('-I', '-B'), env=env, timeout=60, stdin=None)
+
+
+# CLI として同じプロセスで呼ぶための読み込み。テストが差し替える HC とは別に持ち、差し替えを CLI に持ち込まない
+HC_CLI = load_script(SCRIPT, 'host_check_cli')
+GUARD_CLI = load_script(GUARD, 'environment_guard_cli')
+
+YAML_WHERE = 'try:\n    import yaml\nexcept ImportError:\n    print(\'-\')\nelse:\n    print(yaml.__file__)\n'
+
+
+def yaml_where_here():
+    try:
+        import yaml
+    except ImportError:
+        return '-'
+    return yaml.__file__
+
+
+def yaml_where_isolated():
+    done = run_python('-c', YAML_WHERE, flags=('-I', '-B'), timeout=60)
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+# host-check は -I で起動される。-I の子とこのプロセスで、任意で読む yaml の場所が同じときだけ同じプロセスで呼ぶ
+# (違えば、判定が変わりうるので子プロセスで流す)。ファイルの読み込みのときに 1 回だけ調べる
+IN_PROCESS = yaml_where_here() == yaml_where_isolated()
+
+
+def call(*args, env=None):
+    """host-check の main を同じプロセスで呼ぶ(中の判定だけを確かめるテスト用)。"""
+    argv = list(map(str, args))
+    if not IN_PROCESS:
+        return run(*argv, env=env)
+    return call_main(lambda: HC_CLI.main(argv), str(SCRIPT), argv, env=dict(os.environ if env is None else env))
+
+
+def guard(*args, env=None):
+    """environment-guard の main を同じプロセスで呼ぶ(固定データの控えを作るだけ)。結果はテストの間で使い回さない。"""
+    argv = list(map(str, args))
+    if not IN_PROCESS:
+        return run_python(str(GUARD), *argv, flags=('-B',), env=env, timeout=30, stdin=None)
+    return call_main(GUARD_CLI.main, str(GUARD), argv, env=dict(os.environ if env is None else env))
 
 
 class Base(unittest.TestCase):
@@ -569,6 +609,8 @@ class InclusionTests(unittest.TestCase):
 
 class GrantsTests(Base):
     """environment-guard の控えに結び付けた検査。正規導入リンク・installPath・設定の許可リスト。"""
+    # 判定だけを確かめる呼び出しは同じプロセスで呼ぶ。CLI の接続を確かめるテストだけ、最初の行で self.via = run にする
+    via = staticmethod(call)
 
     def setUp(self):
         super().setUp()
@@ -596,16 +638,16 @@ class GrantsTests(Base):
     def boot(self):
         self.n += 1
         out = self.base / f'bundle{self.n}'
-        p = subprocess.run([sys.executable, '-B', str(GUARD), 'bootstrap', '--root', str(self.root), '--output', str(out),
-                            '--inventory', str(self.inventory)], text=True, capture_output=True, env=self.env, timeout=30)
+        p = guard('bootstrap', '--root', self.root, '--output', out, '--inventory', self.inventory, env=self.env)
         self.assertEqual(p.returncode, 0, p.stderr)
         return json.loads(p.stdout)
 
     def grants(self, receipt, *extra):
-        return run('grants', '--state', receipt['state'], '--expect-sha256', receipt['sha256'],
-                   '--user-settings', self.cfg / 'settings.json', *extra, env=self.env)
+        return self.via('grants', '--state', receipt['state'], '--expect-sha256', receipt['sha256'],
+                        '--user-settings', self.cfg / 'settings.json', *extra, env=self.env)
 
     def test_safe_user_skill_and_settings_allow(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         self.skill(self.cfg / 'skills', 'safe', 'allowed-tools: Read(docs/**)\n')
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Bash(git log *)']}}))
         self.skill(self.cfg / 'skills', 'git', 'allowed-tools: Bash(git log --oneline *)\n')
@@ -679,7 +721,7 @@ class GrantsTests(Base):
         return market, installed
 
     def policy(self, receipt):
-        return run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+        return self.via('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
 
     def test_marketplace_map_only_grants_reach_cli(self):
         for command in ({'content': 'body', 'allowedTools': ['Bash']},
@@ -730,6 +772,7 @@ class GrantsTests(Base):
         self.assertEqual(self.policy(self.boot()).returncode, 20)
 
     def test_rejected_grant_diagnostics_do_not_disclose_rule_values(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         self.skill(self.cfg / 'skills', 'bad', 'allowed-tools: Bash(SECRET_SENTINEL)\n')
         result = self.grants(self.boot(), '--allowed-tools', 'Read(docs/**)')
         self.assertEqual(result.returncode, 20)
@@ -753,6 +796,7 @@ class GrantsTests(Base):
         self.assertEqual(self.policy(self.boot()).returncode, 20)
 
     def test_skill_folder_plugin_has_personal_root_and_plugin_inner_namespace(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         folder = self.skill(self.cfg / 'skills', 'container', '')
         (folder / 'SKILL.md').write_text('---\nname: root-alias\n---\nroot body')
         (folder / '.claude-plugin').mkdir()
@@ -951,6 +995,7 @@ class GrantsTests(Base):
         self.assertIn('allowed-tools', p.stderr)
 
     def test_cli_values_split_like_the_host(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         self.skill(self.cfg / 'skills', 'push', 'allowed-tools: Bash(git push:*)\n')
         receipt = self.boot()
         for value in ('Read(docs/**)\tBash', 'Read(docs/**)\nBash(git *)'):
@@ -1054,8 +1099,8 @@ class GrantsTests(Base):
 
     def test_state_must_match_the_held_digest(self):
         receipt = self.boot()
-        p = run('grants', '--state', receipt['state'], '--expect-sha256', '0' * 64,
-                '--user-settings', self.cfg / 'settings.json', env=self.env)
+        p = self.via('grants', '--state', receipt['state'], '--expect-sha256', '0' * 64,
+                     '--user-settings', self.cfg / 'settings.json', env=self.env)
         self.assertEqual(p.returncode, 20)
         self.assertIn('保持値と一致しない', p.stderr)
         state = Path(receipt['state'])
@@ -1076,8 +1121,8 @@ class GrantsTests(Base):
         raw = (json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(',', ':')) + '\n').encode()
         state.chmod(0o600)
         state.write_bytes(raw)
-        p = run('grants', '--state', state, '--expect-sha256', HC.sha256(raw), '--allowed-tools', 'Read(docs/**)',
-                '--user-settings', self.cfg / 'settings.json', env=self.env)
+        p = self.via('grants', '--state', state, '--expect-sha256', HC.sha256(raw), '--allowed-tools', 'Read(docs/**)',
+                     '--user-settings', self.cfg / 'settings.json', env=self.env)
         self.assertEqual(p.returncode, 20)
         self.assertIn('component の実体', p.stderr)
 
@@ -1099,6 +1144,7 @@ class GrantsTests(Base):
 
     def test_host_allowlist_and_grants_reject_the_same_held_bad_setting(self):
         """許可リストと grants は別に開かず、同じ検証済み reader を通る。"""
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         (self.cfg / 'settings.json').write_text(json.dumps({
             'env': {'CLAUDE_CODE_SAFE_MODE': 'must-not-leak'},
             'permissions': {'allow': ['Read(docs/**)']},
@@ -1156,6 +1202,7 @@ class GrantsTests(Base):
         self.assertNotIn('SECRET_SENTINEL', p.stderr)
 
     def test_grants_requires_the_held_absolute_user_settings_path(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         (self.cfg / 'settings.json').write_text(json.dumps({'permissions': {'allow': ['Read(docs/**)']}}))
         receipt = self.boot()
         p = run('grants', '--state', receipt['state'], '--expect-sha256', receipt['sha256'],
@@ -1194,6 +1241,7 @@ class GrantsTests(Base):
         self.assertIn('component の実体', p.stderr)
 
     def test_special_files_and_links_are_rejected_before_judging(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         # environment-guard が控えの段階で止める(黙って通さない)
         cases = {}
         def fifo():
@@ -1230,9 +1278,7 @@ class GrantsTests(Base):
 
 class SplitRulesParityTests(unittest.TestCase):
     def test_same_as_environment_guard(self):
-        spec = importlib.util.spec_from_file_location('environment_guard_rules', GUARD)
-        namespace = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(namespace)
+        namespace = load_script(GUARD, 'environment_guard_rules')
         for value in ('Read, Grep', 'Bash(git add *) Read', 'Bash(a, b),Edit', '  ', 'Bash((x)) y'):
             with self.subTest(value=value):
                 self.assertEqual(HC.split_rules(value), namespace.split_rules(value))
@@ -1723,16 +1769,17 @@ class DirectAllowTests(Base):
         self.inventory.write_text('[]')
         self.n = 0
 
+    via = staticmethod(call)  # GrantsTests と同じ。CLI の接続を確かめるテストだけ self.via = run にする
     skill = GrantsTests.skill
     grants = GrantsTests.grants
 
     def boot(self, managed=None):
         self.n += 1
-        args = [sys.executable, '-B', str(GUARD), 'bootstrap', '--root', str(self.root),
-                '--output', str(self.base / ('held' + str(self.n))), '--inventory', str(self.inventory)]
+        args = ['bootstrap', '--root', self.root, '--output', self.base / ('held' + str(self.n)),
+                '--inventory', self.inventory]
         if managed is not None:
-            args += ['--managed-dir', str(managed)]
-        result = subprocess.run(args, text=True, capture_output=True, env=self.env, timeout=30)
+            args += ['--managed-dir', managed]
+        result = guard(*args, env=self.env)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
 
@@ -1793,7 +1840,7 @@ class DirectAllowTests(Base):
                 with self.subTest(source=path.name, value=value):
                     path.write_text(json.dumps(value))
                     receipt = self.boot(managed)
-                    result = run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+                    result = self.via('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
                     self.assertEqual(result.returncode, 20, result.stdout)
                     self.assertNotIn('SECRET_H47', result.stderr + result.stdout)
                     path.unlink()
@@ -1885,7 +1932,7 @@ class DirectAllowTests(Base):
         for field in ('hooks: {PreToolUse: [{command: SECRET_H47}]}', 'modules: [SECRET_H47]'):
             enterprise.write_text('---\n' + field + '\n---\nbody')
             receipt = self.boot(managed)
-            result = run('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
+            result = self.via('component-policy', '--state', receipt['state'], '--expect-sha256', receipt['sha256'], env=self.env)
             self.assertEqual(result.returncode, 20)
             self.assertNotIn('SECRET_H47', result.stderr)
         # A losing personal definition still undergoes grants validation.
@@ -1920,6 +1967,7 @@ class DirectAllowTests(Base):
         self.assertEqual(len(distinct), len(set(distinct)))
 
     def test_managed_and_cache_bash_never_grant_user_skill(self):
+        self.via = run  # CLI の接続を確かめる(子プロセスで流す)
         managed = self.base / 'managed'; managed.mkdir()
         for path in (managed / 'managed-settings.json', self.cfg / 'remote-settings.json'):
             path.write_text(json.dumps({'permissions': {'allow': ['Bash(node:*)']}}))

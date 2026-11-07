@@ -3,12 +3,14 @@
 import os
 import stat
 import subprocess
-import sys
 import tempfile
 import unittest
-import importlib.util
 from pathlib import Path
 from unittest import mock
+
+import support_git
+from support_cli import run_python
+from support_load import load_script
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,11 +28,7 @@ def bind_unix(sock, path):
 
 
 def load_helper_module():
-    spec = importlib.util.spec_from_file_location("secret_profiles_test_module", HELPER)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script(HELPER, "secret_profiles_test_module")
 
 
 class SecretProfilesTest(unittest.TestCase):
@@ -45,8 +43,7 @@ class SecretProfilesTest(unittest.TestCase):
         self.git("-c", "user.name=t", "-c", "user.email=t", "commit", "--allow-empty", "-qm", "init")
 
     def git(self, *args, cwd=None):
-        return subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env,
-                              check=True, stdin=subprocess.DEVNULL, capture_output=True)
+        return support_git.git(*args, cwd=cwd or self.repo, env=self.env, text=False)
 
     def commit(self, message):
         self.git("add", "-A")
@@ -54,12 +51,8 @@ class SecretProfilesTest(unittest.TestCase):
         return self.git("rev-parse", "HEAD").stdout.decode().strip()
 
     def run_helper(self, *args, no_site=False):
-        command = [sys.executable]
-        if no_site:
-            command.append("-S")
-        command.extend([str(HELPER), "--cwd", str(self.repo), *args])
-        return subprocess.run(command, env=self.env, stdin=subprocess.DEVNULL,
-                              capture_output=True)
+        return run_python(str(HELPER), "--cwd", str(self.repo), *args,
+                          flags=("-S",) if no_site else (), env=self.env, text=False)
 
     def items(self, done):
         self.assertEqual(0, done.returncode, done.stderr.decode())

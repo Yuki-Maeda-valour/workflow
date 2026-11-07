@@ -14,17 +14,20 @@ import os
 import re
 import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+import support_git
+from support_cli import run_python
 
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/integrate-guard.py"
 SNAPSHOT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh"
 ERE = r"(^|/)[.]env($|[.])"
-NEUTRAL = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-c", "maintenance.auto=false", "-c", "gc.auto=0")
+# 保守を止める 2 つ(maintenance.auto・gc.auto)は support_git.QUIET に任せる
+NEUTRAL = ("-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=")
 HOOKS = ("pre-merge-commit", "post-merge", "pre-commit", "prepare-commit-msg", "commit-msg", "post-commit")
 UNTRACK = object()  # commit_work: stop tracking the path but keep the file
 F_LINES = [f"line{n:02d}" for n in range(1, 31)]
@@ -82,8 +85,8 @@ class Base(unittest.TestCase):
         stub.chmod(0o755)
 
     def git(self, *args: str, cwd: Path | None = None, check: bool = True, env: dict | None = None) -> subprocess.CompletedProcess:
-        proc = subprocess.run([self.real_git, *NEUTRAL, *args], cwd=cwd or self.wt, text=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env={**os.environ, **(env or {})})
+        proc = support_git.git(*args, cwd=cwd or self.wt, env={**os.environ, **(env or {})}, check=False,
+                               binary=self.real_git, options=NEUTRAL, stdin=None)
         if check and proc.returncode:
             raise AssertionError(f"git {args}: {proc.stderr}")
         return proc
@@ -134,8 +137,8 @@ class Base(unittest.TestCase):
         monitor = self.root / "monitor"
         monitor.write_text(f"#!/bin/sh\ntouch {self.markers / 'fsmonitor'}\nprintf '%s\\n' 2\nprintf '%s\\n' token\n", encoding="utf-8")
         monitor.chmod(0o755)
-        subprocess.run([self.real_git, "config", "core.hooksPath", str(hooks)], cwd=self.wt, check=True)
-        subprocess.run([self.real_git, "config", "core.fsmonitor", str(monitor)], cwd=self.wt, check=True)
+        support_git.git("config", "core.hooksPath", str(hooks), cwd=self.wt, binary=self.real_git, text=False, stdin=None)
+        support_git.git("config", "core.fsmonitor", str(monitor), cwd=self.wt, binary=self.real_git, text=False, stdin=None)
 
     def commit_work(self, changes: dict, message: str = "work") -> str:
         for path, content in changes.items():
@@ -199,8 +202,7 @@ class Base(unittest.TestCase):
 
     def guard(self, argv: list[str], *, env: dict | None = None, timeout: int = 120) -> Run:
         full_env = {**os.environ, "PATH": f"{self.fakebin}:{os.environ['PATH']}", **(env or {})}
-        proc = subprocess.run([sys.executable, "-B", str(GUARD), *argv], text=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, env=full_env, timeout=timeout)
+        proc = run_python(str(GUARD), *argv, flags=("-B",), env=full_env, timeout=timeout, stdin=None)
         return Run(proc)
 
     def margs(self, *, sha: str | None = None, branch: str = "task/x", base: str = "main", repo: str = "github.com/o/r",
@@ -1268,7 +1270,7 @@ class PromisorTest(Base):
         for key, value in (("core.repositoryformatversion", "1"), ("extensions.partialClone", "origin"),
                            ("remote.origin.promisor", "true"), ("remote.origin.url", str(self.root / "nosuchremote")),
                            ("remote.origin.uploadpack", f"sh {self.up}")):
-            subprocess.run([self.real_git, "config", key, value], cwd=self.wt, check=True)
+            support_git.git("config", key, value, cwd=self.wt, binary=self.real_git, text=False, stdin=None)
         # without the pre-check the configuration would run uploadpack on a lazy fetch
         env = {**os.environ, "PATH": f"{self.promisor_bin}:{os.environ['PATH']}"}
         subprocess.run(["git", "cat-file", "-p", blob], cwd=self.wt, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)

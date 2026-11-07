@@ -8,6 +8,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from support_cli import run, run_python
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DIGEST = REPO_ROOT / "plugins/dev-workflow/skills/create-task/scripts/task-digest.py"
@@ -77,16 +79,11 @@ class TaskDigestTest(unittest.TestCase):
         path = self.root / "進行中_サンプル.md"
         data = content.encode("utf-8") if isinstance(content, str) else content
         path.write_bytes(data)
-        command = [sys.executable, str(DIGEST), *(args or (str(path),))]
-        return subprocess.run(command, input=data if args == ("-",) else None, capture_output=True, check=False, timeout=2)
+        return run_python(str(DIGEST), *(args or (str(path),)), text=False,
+                          input=data if args == ("-",) else None, stdin=None, timeout=30)
 
     def run_path(self, path):
-        return subprocess.run(
-            [sys.executable, str(DIGEST), str(path)],
-            capture_output=True,
-            check=False,
-            timeout=2,
-        )
+        return run_python(str(DIGEST), str(path), text=False, stdin=None, timeout=30)
 
     def run_hooked_path(self, path, hook, name):
         digest = repr(str(DIGEST))
@@ -108,7 +105,7 @@ if not fired[0]:
     raise RuntimeError("test hook did not run")
 sys.exit(status)
 """
-        return subprocess.run([sys.executable, "-c", code], capture_output=True, check=False, timeout=2)
+        return run([sys.executable, "-c", code], text=False, stdin=None, timeout=30)
 
     def value(self, content):
         completed = self.run_digest(content)

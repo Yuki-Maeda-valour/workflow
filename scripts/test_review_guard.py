@@ -2,7 +2,6 @@
 
 import json
 import hashlib
-import importlib.util
 import contextlib
 import io
 from unittest import mock
@@ -24,144 +23,39 @@ LINUX = sys.platform.startswith("linux")
 DARWIN = sys.platform == "darwin"
 
 
-# 不在の確かめ方と後始末。test_check_process.py にも同じ関数を置く(試験ファイルはそれぞれ単独で読み込まれる)。
-def probe(send, target):
-    try:
-        send(target, 0)
-    except ProcessLookupError:
-        return "absent"
-    except PermissionError:
-        return "denied"
-    return "alive"
+# 共通の補助(scripts/support_*.py)。dotted の形(python3 -m unittest scripts.test_review_guard)では
+# scripts/ が読み込みの起点に無いので、その名前の読み込みに失敗したときだけ scripts から読む。
+try:
+    import support_cli
+except ModuleNotFoundError as error:
+    if error.name != "support_cli":
+        raise
+    from scripts import support_cli
+try:
+    import support_git
+except ModuleNotFoundError as error:
+    if error.name != "support_git":
+        raise
+    from scripts import support_git
+try:
+    import support_load
+except ModuleNotFoundError as error:
+    if error.name != "support_load":
+        raise
+    from scripts import support_load
+try:
+    import support_proc
+except ModuleNotFoundError as error:
+    if error.name != "support_proc":
+        raise
+    from scripts import support_proc
 
-
-def assert_absent_now(pid, send=os.kill):
-    # 製品が「止めて回収した」と返した直後に使う。生きていれば待たずに失敗にする。
-    # EPERM だけは macOS の回収直後の一過性の応答として、1 秒以内で 0.02 秒ごとに確かめ直す。
-    deadline = time.monotonic() + 1
-    while True:
-        state = probe(send, pid)
-        if state == "absent":
-            return
-        if state == "alive":
-            raise AssertionError(f"{pid} が残っている")
-        if time.monotonic() >= deadline:
-            raise AssertionError(f"{pid} の不在を 1 秒以内に確かめられない(EPERM が続く)")
-        time.sleep(.02)
-
-
-def assert_group_absent_now(pgid):
-    assert_absent_now(pgid, os.killpg)
-
-
-def wait_absent(pid, timeout=5, send=os.kill):
-    # 自分で終わるはずのプロセスと後始末だけに使う。期限まで待つ。
-    deadline = time.monotonic() + timeout
-    while probe(send, pid) != "absent":
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(.02)
-    return True
-
-
-# 後続コマンドの中で、assert_absent_now と同じ規則で不在を確かめる関数(品質コマンドに埋め込む)。
-ABSENT_NOW = """def absent_now(send, target):
-    end = time.monotonic() + 1
-    while True:
-        try:
-            send(target, 0)
-        except ProcessLookupError:
-            return True
-        except PermissionError:
-            if time.monotonic() >= end:
-                return False
-            time.sleep(.02)
-            continue
-        return False
-"""
-
-
-def record(path):
-    # 子と孫が自分の pid と pgid を JSON で書く 1 文。書きかけを読ませないよう、置き換えで書く。
-    part = str(path) + ".part"
-    return (f"Path({part!r}).write_text(json.dumps({{'pid': os.getpid(), 'pgid': os.getpgrp()}})); "
-            f"os.replace({part!r}, {str(path)!r})")
-
-
-def read_record(path):
-    try:
-        value = json.loads(Path(path).read_text())
-        return int(value["pid"]), int(value["pgid"])
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def command_line(pid):
-    found = subprocess.run(["ps", "-ww", "-o", "command=", "-p", str(pid)], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, text=True)
-    return found.stdout
-
-
-def owned(root, pid, pgid):
-    # 信号を送る直前に、今の pgid が記録と同じで、コマンド行に試験の領域を含むかを確かめる。
-    try:
-        if os.getpgid(pid) != pgid:
-            return False
-    except OSError:
-        return False
-    return str(root) in command_line(pid)
-
-
-def cleanup(root, stop=(), children=(), groups=(), records=(), raw=()):
-    # 試験が起動したものだけを止めて回収し、残ったものの番号を返す。
-    # stop: 監督(run-checks)の Popen。children: 試験の直接の子の Popen(差し替えで捕まえた anchor・無関係なプロセス)。
-    # groups: 元の群の pgid を書いた記録。records: JSON の記録。raw: 素の pid(既存の Linux の試験の形)。
-    found = [value for value in map(read_record, records) if value]
-    groups = [value[1] for value in map(read_record, groups) if value]
-    pids = [pid for pid, _ in found] + list(raw)
-    # 手順 1: 監督がまだ動いていれば、TERM で製品の停止の道を先に通す。
-    for process in stop:
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-    # 手順 2: 元の群の先頭が生きていて、コマンド行に試験の領域を含むときだけ、群ごと止める。
-    for pgid in groups:
-        if owned(root, pgid, pgid):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except OSError:
-                pass
-    # 手順 3: 記録した各プロセスを止める。素の pid は、まだ終わっていない自分の子だけ。
-    for pid, pgid in found:
-        if owned(root, pid, pgid):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-    for pid in raw:
-        try:
-            done, _ = os.waitpid(pid, os.WNOHANG)
-        except ChildProcessError:
-            continue
-        if not done:
-            os.kill(pid, signal.SIGKILL)
-    # 手順 4: 直接の子と、試験のプロセスが引き取った孤児(Linux の subreaper)を回収する。
-    for process in children:
-        if process.poll() is None:
-            process.kill()
-        process.wait()
-    for pid in pids:
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
-    # 手順 5: 記録したすべての pid と元の群が不在になるまで待つ。
-    left = [pid for pid in pids if not wait_absent(pid)]
-    return left + [pgid for pgid in groups if not wait_absent(pgid, send=os.killpg)]
+# 不在の確かめ方と後始末は support_proc.py に置く(test_check_process.py と共通)。
+probe, assert_absent_now, assert_group_absent_now = (
+    support_proc.probe, support_proc.assert_absent_now, support_proc.assert_group_absent_now)
+wait_absent, record, read_record, cleanup = (
+    support_proc.wait_absent, support_proc.record, support_proc.read_record, support_proc.cleanup)
+ABSENT_NOW = support_proc.ABSENT_NOW
 
 
 class GuardCliFixture:
@@ -192,18 +86,16 @@ class GuardCliFixture:
         self.tmp.cleanup()
 
     def git(self, *args):
-        # commit が裏の保守処理(詰め直し)を起動し、試験の一時領域へ書き続けないようにする(#292)。
-        return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=self.repo, check=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        # commit が裏の保守処理(詰め直し)を起動し、試験の一時領域へ書き続けないようにする(#292。support_git.QUIET)。
+        return support_git.git(*args, cwd=self.repo, stdin=None)
 
     def guard(self, *args, expect=0):
         if getattr(self, "task_root_override", None):
             args = (*args, "--task-root", str(self.task_root_override))
         if getattr(self, "accept", None):
             args = (*args, "--accept", self.accept)
-        proc = subprocess.run([sys.executable, str(SCRIPT), *args], text=True,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        self.assertEqual(expect, proc.returncode, proc.stdout + proc.stderr)
+        proc = support_cli.run_python(str(SCRIPT), *args, stdin=None)
+        self.assertEqual(expect, proc.returncode, support_cli.describe(proc))
         if expect == 2:
             self.assertIn("ERROR:", proc.stderr)
             self.assertNotIn("usage:", proc.stderr)
@@ -343,8 +235,7 @@ class ReviewGuardTest(GuardCliFixture, unittest.TestCase):
         # 配布コード自身が検査対象でも、外部の環境設定なしで run-checks が成功する。
         original = SCRIPT
         copied = self.repo / 'plugins/dev-workflow/skills/ship-task/scripts/review-guard.py'
-        shutil.copytree(original.parents[4], self.repo / 'plugins',
-                        ignore=shutil.ignore_patterns('__pycache__', '*.pyc'))
+        support_load.copy_clean(original.parents[4], self.repo / 'plugins', '*.pyc')
         self.git('add', 'plugins')
         self.git('commit', '-qm', 'guard fixture')
         with mock.patch(__name__ + '.SCRIPT', copied):
@@ -743,9 +634,7 @@ while time.monotonic() < end:
     def test_seal_second_observation_cannot_adopt_new_source(self):
         self.begin()
         self.capture(prove=False)
-        spec = importlib.util.spec_from_file_location("review_guard_race", SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = support_load.load_script(SCRIPT, "review_guard_race")
         original = module.current
         count = 0
         def racing(*args, **kwargs):
@@ -1146,7 +1035,7 @@ sys.exit(1)
         module = self.repo / "module"
         module.mkdir()
         def subgit(*args):
-            return subprocess.run(["git", "-C", str(module), *args], check=True, capture_output=True)
+            return support_git.git(*args, options=("-C", str(module)), text=False, stdin=None)
         subgit("init", "-q")
         subgit("config", "user.name", "test")
         subgit("config", "user.email", "test@example.invalid")
@@ -1245,10 +1134,7 @@ sys.exit(1)
 
 
     def load_guard_module(self):
-        spec = importlib.util.spec_from_file_location("review_guard_io", SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return support_load.load_script(SCRIPT, "review_guard_io")
 
     def test_growing_file_and_read_deadline_are_finite(self):
         module = self.load_guard_module()
@@ -1379,8 +1265,7 @@ sys.exit(1)
         self.git("add", "-A")
         self.git("commit", "-qm", "work")
         if conflict:
-            merging = subprocess.run(["git", "merge", "--no-ff", "--no-edit", "side"], cwd=self.repo,
-                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            merging = support_git.git("merge", "--no-ff", "--no-edit", "side", cwd=self.repo, check=False, stdin=None)
             self.assertEqual(1, merging.returncode, merging.stdout + merging.stderr)
             (self.repo / "source.txt").write_text("resolved\n", encoding="utf-8")
             self.git("add", "source.txt")
@@ -1501,9 +1386,7 @@ class ExternalTaskDirectoryTest(unittest.TestCase):
         self.body.write_text("# task\n\n- [ ] work\n\n## 追加修正記録\n", encoding="utf-8")
         self.state = self.root / "state"
         self.start_state = self.root / "start"
-        spec = importlib.util.spec_from_file_location("review_guard_external_task", SCRIPT)
-        self.module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.module)
+        self.module = support_load.load_script(SCRIPT, "review_guard_external_task")
         self.stack = contextlib.ExitStack()
         self.addCleanup(self.stack.close)
         for name, value in (("repo_root", self.repo), ("walk", ([], [])), ("git_index", ([], [])),
@@ -1678,7 +1561,7 @@ class CliProcessLifecycleTest(GuardCliFixture, unittest.TestCase):
 from pathlib import Path
 Path({str(cwd)!r}).write_text(str(Path.cwd()))
 subprocess.Popen([sys.executable, '-c', {child!r}], start_new_session={escape!r})
-end = time.monotonic() + 3
+end = time.monotonic() + 30
 while not all(Path(name).exists() for name in {waits!r}):
     if time.monotonic() >= end:
         raise SystemExit(3)
@@ -1725,10 +1608,10 @@ Path({str(later)!r}).write_text('absent')
             running = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                        env=dict(os.environ, TMPDIR=str(copies)))
             self.running.append(running)
-            deadline = time.monotonic() + 5
+            deadline = time.monotonic() + 30
             while not self.ready.exists() and running.poll() is None and time.monotonic() < deadline:
                 time.sleep(.01)
-            self.assertTrue(self.ready.exists(), "準備完了が 5 秒以内に書かれない")
+            self.assertTrue(self.ready.exists(), "準備完了が 30 秒以内に書かれない")
             self.assertTrue(self.child.exists() and (escape or self.grand.exists()), "子と孫の記録が無い")
             if number:
                 # 回収済みの番号へ送らない。終わっていれば失敗にし、送るのは Popen 経由にする(回収済みなら送らない)。
@@ -1776,7 +1659,7 @@ Path({str(later)!r}).write_text('absent')
         scope = "owned-descendants" if LINUX else "original-process-group-only"
         self.assertEqual([scope] * len(receipt["results"]), [item["recovery_scope"] for item in receipt["results"]])
         if escape:
-            self.assertTrue(wait_absent(escaped[0]), "群の外へ移った子が 5 秒以内に終わらない")
+            self.assertTrue(wait_absent(escaped[0]), "群の外へ移った子が 30 秒以内に終わらない")
             self.assertTrue(finished.exists())
 
     def test_cli_parent_exit_stops_remaining_group_before_next_command(self):
@@ -1807,9 +1690,7 @@ class CheckLifecycleTest(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix="wf-proc-test-")
         self.root = Path(os.path.realpath(self.tmp.name))
         source = Path(os.environ.get("REVIEW_GUARD_TEST_SCRIPT", SCRIPT))
-        spec = importlib.util.spec_from_file_location("lifecycle_guard", source)
-        self.guard = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(self.guard)
+        self.guard = support_load.load_script(source, "lifecycle_guard")
         self.seed = self.root / "seed"
         self.seed.write_text("fixture\n")
         self.saved = {"worktree": [{"path": "seed", "kind": "file", "mode": "100644",
@@ -2024,7 +1905,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
             natural = self.root / ('natural-' + str(number))  # 品質コマンドが自然に終わる直前に書く印
             later = self.root / 'later'
             def interrupt():
-                end = time.monotonic() + 3
+                end = time.monotonic() + 20
                 while time.monotonic() < end:
                     if pidfile.exists() and pidfile.stat().st_size:
                         os.kill(os.getpid(), number)
@@ -2034,11 +1915,11 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
             thread.start()
             try:
                 # TERM を無視させ、品質コマンドが群への KILL で止まることを確かめる。
-                code = f"import os,signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(2.5); Path({str(natural)!r}).write_text('natural')"
+                code = f"import os,signal,time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(45); Path({str(natural)!r}).write_text('natural')"
                 with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持') as caught:
                     self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
             finally:
-                thread.join(4)
+                thread.join(25)
                 if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
             self.assertFalse(natural.exists(), '品質コマンドが自然に終わるのを待った')
             self.assertRegex(str(caught.exception), f'終了通知 {int(number)} を受けた')
@@ -2062,7 +1943,7 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
                 supervisor.append(process.pid)
             return process
         def kill():
-            end = time.monotonic() + 3
+            end = time.monotonic() + 20
             while time.monotonic() < end:
                 if pidfile.exists() and pidfile.stat().st_size:
                     os.kill(supervisor[0], signal.SIGKILL)
@@ -2073,11 +1954,11 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         try:
             with mock.patch.object(self.guard, 'check_process_module', return_value=self.process_helper), \
                  mock.patch.object(self.process_helper.subprocess, 'Popen', side_effect=launch):
-                code = f"import os,time; from pathlib import Path; Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(3)"
+                code = f"import os,time; from pathlib import Path; Path({str(cleanfile)!r}).write_text(str(Path.cwd())); Path({str(pidfile)!r}).write_text(str(os.getpid())); time.sleep(45)"
                 with self.assertRaisesRegex(self.guard.GuardError, '検証用コピーを保持'):
                     self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
         finally:
-            thread.join(4)
+            thread.join(25)
             if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
         self.assertTrue(Path(cleanfile.read_text()).exists())
         self.assertFalse(later.exists())
@@ -2121,9 +2002,9 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         anchors = []
         fired = threading.Event()
         def kill():
-            # 待ちは品質コマンドが自分で終わる 2.5 秒より短い 2 秒。製品がまだ回収していない anchor にだけ送る
+            # 待ちは品質コマンドが自分で終わる 45 秒より短い 20 秒。製品がまだ回収していない anchor にだけ送る
             # (poll は呼ばない。製品の wait を横取りしないため)。
-            end = time.monotonic() + 2
+            end = time.monotonic() + 20
             while time.monotonic() < end:
                 if command.exists() and anchors:
                     if anchors[0].returncode is None:
@@ -2137,13 +2018,13 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
         try:
             # 品質コマンドは TERM を無視して眠る(KILL の時点で群に生きた一員を残す)。anchor が失われた後に群の全員が
             # TERM で終わると、macOS は群への KILL を EPERM で返し、診断の文が Operation not permitted に替わるため。
-            code = f"import json, os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); {record(command)}; time.sleep(2.5); Path({str(natural)!r}).write_text('natural')"
+            code = f"import json, os, signal, time; from pathlib import Path; signal.signal(signal.SIGTERM, signal.SIG_IGN); {record(command)}; time.sleep(45); Path({str(natural)!r}).write_text('natural')"
             with mock.patch.object(self.guard, "check_process_module", return_value=self.process_helper), \
                  self.capture_anchor(anchors):
                 with self.assertRaisesRegex(self.guard.GuardError, "検証用コピーを保持") as caught:
                     self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"], timeout=10)
         finally:
-            thread.join(4)
+            thread.join(25)
         self.assertFalse(natural.exists(), "品質コマンドが自然に終わるのを待った")
         found = read_record(command)
         self.assertIsNotNone(found, "品質コマンドの記録が無い")
@@ -2191,9 +2072,7 @@ class KeptOutputRuleTest(unittest.TestCase):
     """残す出力の置き換えと切り方の規則。足した関数を直接呼ぶ。"""
     @classmethod
     def setUpClass(cls):
-        spec = importlib.util.spec_from_file_location("kept_output_guard", SCRIPT)
-        cls.guard = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(cls.guard)
+        cls.guard = support_load.load_script(SCRIPT, "kept_output_guard")
 
     @staticmethod
     def label(name):

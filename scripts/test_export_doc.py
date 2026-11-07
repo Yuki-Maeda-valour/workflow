@@ -9,16 +9,15 @@ import tempfile
 import unittest
 from unittest import mock
 
+from support_load import load_script
+
 SCRIPT = Path(__file__).resolve().parents[1] / 'plugins/dev-workflow/skills/export-doc/scripts/md_tables_to_xlsx.py'
 HAS_OPENPYXL = importlib.util.find_spec('openpyxl') is not None
 TABLE = '# Heading\n\n| Name | Value |\n| --- | --- |\n| 日本語 | **bold** |\n'
 
 
 def module():
-    spec = importlib.util.spec_from_file_location('export_tables', SCRIPT)
-    helper = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(helper)
-    return helper
+    return load_script(SCRIPT, 'export_tables')
 
 
 class ExportDocTest(unittest.TestCase):

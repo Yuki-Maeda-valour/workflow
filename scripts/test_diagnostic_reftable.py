@@ -3,7 +3,6 @@
 書式の根拠: Git Documentation/technical/reftable.adoc のheader/ref/footer。
 製品の符号化関数を期待値の生成に使わず、Gitの形式変換も使わない。
 """
-import importlib.util
 import os
 from pathlib import Path
 import tempfile
@@ -11,13 +10,13 @@ import unittest
 import zlib
 from unittest import mock
 
+from support_load import load_script
+
 SCRIPTS = Path(__file__).resolve().parents[1] / 'plugins/dev-workflow/skills/do-task/scripts'
 
 
 def module(name):
-    spec = importlib.util.spec_from_file_location(name.replace('-', '_'), SCRIPTS / (name + '.py'))
-    value = importlib.util.module_from_spec(spec); spec.loader.exec_module(value)
-    return value
+    return load_script(SCRIPTS / (name + '.py'), name.replace('-', '_'))
 
 
 def uint(value, size):

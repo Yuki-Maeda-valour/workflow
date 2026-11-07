@@ -2,6 +2,9 @@
 
 この補助を使う試験は discover の形(`python3 -m unittest discover -s scripts -t scripts -p <ファイル>`)で回す。
 dotted の形(`python3 -m unittest scripts.<名前>`)では、この補助を読み込めない。
+
+共通の補助との分担(#388): 診断の固定データ(準備のリポジトリ・保護記録・CLI の照合)はこのファイルに置く。
+git の実行は support_git(保守を止める設定もそこにある)を使う。
 """
 import base64
 import hashlib
@@ -14,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+
+import support_git
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -106,16 +111,14 @@ class DiagnosticFixture(unittest.TestCase):
         (self.repo / 'task/t.md').write_text('# タスク\n\n- [ ] 通常の試験\n', encoding='utf-8')
 
     def git(self, *args):
-        # commit の後の自動の保守(git maintenance run --auto)を、裏で続けずに終えてから戻す。
+        # commit の後の自動の保守(git maintenance run --auto)を、support_git.QUIET で始めさせない。
         # 裏で続くと、次の inventory() の途中で .git/objects/maintenance.lock が現れて消え、
         # 負荷の高いときに FileNotFoundError で落ちる(並べて流すときに起きた)。
-        return subprocess.run(
-            [self.git_binary, '-c', 'user.name=fixture', '-c',
-             'user.email=fixture@example.invalid', '-c', 'init.defaultBranch=main',
-             '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null',
-             '-c', 'maintenance.autoDetach=false',
-             '-C', str(self.repo), *args], env=self.env, cwd=self.work,
-            stdin=subprocess.DEVNULL, capture_output=True, check=True, timeout=30)
+        return support_git.git(
+            *args, env=self.env, cwd=self.work, text=False, timeout=30, binary=self.git_binary,
+            options=('-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+                     '-c', 'init.defaultBranch=main', '-c', 'core.fsmonitor=',
+                     '-c', 'core.hooksPath=/dev/null', '-C', str(self.repo)))
 
     def take(self):
         before = inventory(self.repo)

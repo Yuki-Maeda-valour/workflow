@@ -8,11 +8,15 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import support_git
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "plugins/dev-workflow/skills/ship-task/scripts/git-config-digest.py"
 
 GIT_TIMEOUT = 10  # スクリプトが git の子プロセスを打ち切る秒数
+QUICK_TIMEOUT = 1  # 戻らない git の試験だけ、打ち切りをこの秒数にした製品のコピーで流す
+PRODUCT_TIMEOUT = re.compile(r"^GIT_TIMEOUT = ([0-9]+(?:[.][0-9]+)?)$", re.M)  # 製品の打ち切りの秒数を定める行
 MARGIN = 30  # 打ち切りの後に待つ余裕。これを過ぎたらプロセスグループごと止めて落とす
 DIGEST = re.compile(r"\Asha256:[0-9a-f]{64}\n\Z")
 SECRET = "SECRETTOKEN"
@@ -48,9 +52,7 @@ class GitConfigDigestTest(unittest.TestCase):
 
     # ── 道具 ──
     def git(self, *args, cwd=None):
-        done = subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, check=True,
-                              stdin=subprocess.DEVNULL, capture_output=True, text=True)
-        return done.stdout
+        return support_git.git(*args, cwd=cwd or self.repo, env=self.env).stdout
 
     def git_path(self, name, cwd=None):
         return Path(self.git("rev-parse", "--path-format=absolute", "--git-path", name, cwd=cwd).strip())
@@ -78,9 +80,9 @@ class GitConfigDigestTest(unittest.TestCase):
                 continue
             os.close(fd)
 
-    def run_raw(self, args):
+    def run_raw(self, args, script=SCRIPT):
         # 試験自体が戻らなくならないように: 別のセッションで起動し、時間切れならプロセスグループごと止める
-        proc = subprocess.Popen([sys.executable, str(SCRIPT), *args], env=self.env,
+        proc = subprocess.Popen([sys.executable, str(script), *args], env=self.env,
                                 stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
@@ -95,8 +97,23 @@ class GitConfigDigestTest(unittest.TestCase):
             self.fail(f"{GIT_TIMEOUT + MARGIN} 秒で終わらない(git の打ち切りが効いていない)")
         return subprocess.CompletedProcess(args, proc.returncode, out, err)
 
-    def run_script(self, *args, directory=None):
-        return self.run_raw([f"--dir={directory or self.repo}", *args])
+    def run_script(self, *args, directory=None, script=SCRIPT):
+        return self.run_raw([f"--dir={directory or self.repo}", *args], script=script)
+
+    def quick_script(self):
+        # 製品は変えない。打ち切りの秒数を定める 1 行だけを替えたコピーを一時領域に置く
+        # (このスクリプトは兄弟のファイルを読まず、__file__ にも頼らない)
+        source = SCRIPT.read_text(encoding="utf-8")
+        found = PRODUCT_TIMEOUT.findall(source)
+        self.assertEqual(1, len(found), found)
+        # 製品の打ち切りが、見張り(GIT_TIMEOUT + MARGIN)の元にした秒数を超えないこと。
+        # コピーで流しても、製品のままなら見張りの中で打ち切られることを確かめる力を保つ
+        self.assertLessEqual(float(found[0]), GIT_TIMEOUT)
+        folder = self.base / "quick"
+        folder.mkdir()
+        copy = folder / SCRIPT.name
+        copy.write_text(PRODUCT_TIMEOUT.sub(f"GIT_TIMEOUT = {QUICK_TIMEOUT}", source), encoding="utf-8")
+        return copy
 
     def digest(self, directory=None):
         done = self.run_script(directory=directory)
@@ -105,7 +122,7 @@ class GitConfigDigestTest(unittest.TestCase):
         return done.stdout.strip()
 
     def assert_times_out(self, directory=None):
-        done = self.run_script(directory=directory)
+        done = self.run_script(directory=directory, script=self.quick_script())
         self.assertEqual(2, done.returncode, done.stderr)
         self.assertEqual("", done.stdout)
         self.assertIn("時間切れ", done.stderr)

@@ -1,6 +1,5 @@
 """#260: 計画の保存は全対象の作業木・管理領域・保護記録の外だけ。"""
 import hashlib
-import importlib.util
 import os
 from pathlib import Path
 import stat
@@ -9,13 +8,11 @@ from types import SimpleNamespace
 import unittest
 
 from diagnostic_test_support import DIAGNOSTIC, DiagnosticFixture, inventory
+from support_load import load_script
 
 
 def entry():
-    spec = importlib.util.spec_from_file_location('diagnostic_publication_entry', DIAGNOSTIC)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    return load_script(DIAGNOSTIC, 'diagnostic_publication_entry')
 
 
 class PublicationBoundaries(unittest.TestCase):
