@@ -13,15 +13,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static NEXT: AtomicUsize = AtomicUsize::new(0);
 
 fn binary() -> PathBuf {
-    // Cargo が integration test と一緒に作る実行ファイルを使う。
-    // sh のビルド用 wrapper は名前にハイフンのある環境変数を保持しないため、
-    // CARGO_BIN_EXE_dev-workflow ではなく実行中のテストの出力先から求める。
-    let test = std::env::current_exe().unwrap();
-    let deps = test.parent().unwrap();
-    assert_eq!(deps.file_name().unwrap(), "deps");
-    deps.parent()
-        .unwrap()
-        .join(format!("dev-workflow{}", std::env::consts::EXE_SUFFIX))
+    PathBuf::from(env!("CARGO_BIN_EXE_dev-workflow"))
 }
 
 #[derive(Debug, PartialEq, Eq)]

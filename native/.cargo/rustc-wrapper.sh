@@ -1,5 +1,6 @@
-#!/bin/sh
+#!/usr/bin/env bash
 # 絶対パスをビルドする機械によらない名前に置き換える。
+# Cargo が渡す、名前にハイフンを含む環境変数も子へ引き継ぐ。
 set -eu
 
 native_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)

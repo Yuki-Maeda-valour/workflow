@@ -21,6 +21,7 @@ from support_load import load_script
 
 SOURCE_REPO = Path(__file__).resolve().parent.parent
 VALIDATE = load_script(SOURCE_REPO / "scripts/validate.py", "native_validate")
+MAKE_DIST = load_script(SOURCE_REPO / "native/ci/make_dist.py", "native_make_dist")
 # 検査器の定数を参照せず、配布する一覧をテスト側でも固定する。
 BINARIES = ("linux-x86_64/dev-workflow", "linux-arm64/dev-workflow", "macos-universal/dev-workflow")
 FILES = (*BINARIES, "SHA256SUMS", "build-info.json", "launch.sh")
@@ -117,6 +118,16 @@ class NativeBundleTest(NativeBundleFixture):
         self.assertEqual(sum(p.is_file() for p in self.bundle.rglob("*")), 5)
         self.assertEqual(self.check("artifact"), [])
         self.assert_problem("launch.sh")
+
+    def test_make_dist_uses_the_actual_artifact_contract(self):
+        metadata = json.loads((self.bundle / "build-info.json").read_text())
+        del metadata["artifacts"]
+        output = self.root / "artifact"
+        MAKE_DIST.make_dist([self.bundle / name for name in BINARIES], metadata, output)
+        self.assertEqual(VALIDATE.check_native_bundle(output, "artifact"), [])
+        self.assertEqual(sum(path.is_file() for path in output.rglob("*")), 5)
+        self.assertTrue(any("launch.sh" in problem
+                            for problem in VALIDATE.check_native_bundle(output, "distribution")))
 
     def test_artifact_rejects_launcher(self):
         self.assert_problem("余分", "artifact")

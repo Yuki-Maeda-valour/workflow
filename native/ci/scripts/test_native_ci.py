@@ -1,4 +1,4 @@
-"""CI の単体テスト。実バイナリや他 Task の完成を前提にしない。"""
+"""CI の単体・結合テスト。配布物の検査と実行補助はリポジトリの実装を使う。"""
 
 import copy
 import hashlib
@@ -136,27 +136,27 @@ class MakeDistTests(TempCase):
         self.metadata = {
             "schema_version": 1, "source_commit": "a" * 40,
             "source_input_sha256": "b" * 64, "cargo_lock_sha256": "c" * 64,
-            "rustc": "rustc 1.99.1 (test)", "targets": {},
+            "rustc": "rustc 1.99.1 (test)",
+            "targets": {
+                "x86_64-unknown-linux-musl": {"linker": "GNU ld", "sdk": "musl 1.2.5"},
+                "aarch64-unknown-linux-musl": {"linker": "GNU ld", "sdk": "musl 1.2.5"},
+                "x86_64-apple-darwin": {"linker": "Apple ld", "sdk": "15.0"},
+                "aarch64-apple-darwin": {"linker": "Apple ld", "sdk": "15.0"},
+            },
             "ci": {"run_id": "1", "run_url": "https://github.com/example/repo/actions/runs/1"},
         }
         self.output = self.root / "dist"
-        self.checker = mock.Mock(return_value=[])
-        patch = mock.patch.object(make_dist, "load_bundle_checker", return_value=self.checker)
-        patch.start()
-        self.addCleanup(patch.stop)
+        self.checker = make_dist.load_bundle_checker()
 
     def test_three_fake_binaries_become_five_files(self):
-        inspected = []
-
-        def check(path, mode):
-            inspected.append((mode, sorted(str(p.relative_to(path)) for p in path.rglob("*") if p.is_file())))
-            return []
-
-        self.checker.side_effect = check
         make_dist.make_dist(self.binaries, self.metadata, self.output)
         expected_names = sorted([*make_dist.BINARY_PATHS, "SHA256SUMS", "build-info.json"])
-        self.assertEqual(inspected, [("artifact", expected_names)])
+        self.assertEqual(sorted(p.relative_to(self.output).as_posix()
+                                for p in self.output.rglob("*") if p.is_file()), expected_names)
+        self.assertEqual(self.checker(self.output, "artifact"), [])
+        self.assertTrue(any("launch.sh" in problem for problem in self.checker(self.output, "distribution")))
         info = make_dist.read_json(self.output / "build-info.json")
+        self.assertEqual({key: value for key, value in info.items() if key != "artifacts"}, self.metadata)
         expected = []
         for source, relative in zip(self.binaries, make_dist.BINARY_PATHS):
             self.assertEqual((self.output / relative).read_bytes(), source.read_bytes())
@@ -168,8 +168,14 @@ class MakeDistTests(TempCase):
         self.assertFalse((self.output / "launch.sh").exists())
 
     def test_failed_bundle_check_does_not_publish(self):
-        self.checker.return_value = ["壊れた ELF"]
-        with self.assertRaisesRegex(ValueError, "壊れた ELF"):
+        self.binaries[0].write_bytes(elf(183))
+        with self.assertRaisesRegex(ValueError, "ELF"):
+            make_dist.make_dist(self.binaries, self.metadata, self.output)
+        self.assertFalse(self.output.exists())
+
+    def test_incomplete_metadata_does_not_publish(self):
+        self.metadata["targets"] = {}
+        with self.assertRaisesRegex(ValueError, "targets"):
             make_dist.make_dist(self.binaries, self.metadata, self.output)
         self.assertFalse(self.output.exists())
 
@@ -371,7 +377,68 @@ class ProbeTests(TempCase):
             check_probe.check_probe(self.support, self.root)
 
 
+class ProbeSupportIntegrationTests(TempCase):
+    def setUp(self):
+        super().setUp()
+        source_hash.git(self.root, "init", "--quiet")
+        self.write("native/Cargo.toml", b'version = "0.1.0"\n')
+        source_hash.git(self.root, "add", "--", "native/Cargo.toml")
+        self.info = {
+            "schema_version": 1, "ok": True,
+            "os": {"Linux": "linux", "Darwin": "macos"}[check_probe.platform.system()],
+            "arch": {"x86_64": "x86_64", "arm64": "aarch64", "aarch64": "aarch64"}[check_probe.platform.machine()],
+            "native_version": "0.1.0", "source_input_sha256": source_hash.source_input_hash(self.root),
+            "rustc": "rustc 1.99.1 (test)",
+        }
+        self.binary = self.write("probe", (
+            f"#!{sys.executable}\n"
+            "import hashlib, json, sys\nfrom pathlib import Path\n"
+            f"info = {self.info!r}\n"
+            "args = sys.argv[1:]\n"
+            "if args == ['probe', '--json']:\n    print(json.dumps(info))\n"
+            "elif args == ['probe', '--self-sha256']:\n"
+            "    print(hashlib.sha256(Path(__file__).read_bytes()).hexdigest())\n"
+            "elif args == ['--version']:\n"
+            "    print('dev-workflow 0.1.0 (source_input_sha256: ' + info['source_input_sha256'] + ')')\n"
+            "elif args == ['--help']:\n    print('--version\\n--help\\nprobe --json\\nprobe --self-sha256')\n"
+            "else:\n    print('invalid arguments', file=sys.stderr)\n    sys.exit(2)\n"
+        ).encode(), 0o755)
+        self.support = check_probe.load_support()
+
+    def test_actual_support_runs_probe_and_snapshots(self):
+        with mock.patch.dict(os.environ, {"DEV_WORKFLOW_TEST_NATIVE_BINARY": str(self.binary)}):
+            self.assertEqual(check_probe.check_probe(self.support, self.root), self.info)
+
+    def test_actual_support_detects_side_effects(self):
+        with self.binary.open("a") as output:
+            output.write("Path('created').write_text('side effect')\n")
+        with mock.patch.dict(os.environ, {"DEV_WORKFLOW_TEST_NATIVE_BINARY": str(self.binary)}):
+            with self.assertRaisesRegex(ValueError, "作業フォルダ"):
+                check_probe.check_probe(self.support, self.root)
+
+    def test_cli_without_binary_fails_with_actual_support(self):
+        env = dict(os.environ)
+        env.pop("DEV_WORKFLOW_TEST_NATIVE_BINARY", None)
+        result = subprocess.run([sys.executable, "-B", check_probe.__file__], env=env,
+                                capture_output=True, timeout=10)
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stdout, b"")
+        self.assertIn("DEV_WORKFLOW_TEST_NATIVE_BINARY が未設定", result.stderr.decode())
+
+
 class BuildTests(TempCase):
+    def test_wrapper_preserves_cargo_binary_environment_and_remaps_paths(self):
+        binary = str(self.root / "dev-workflow")
+        result = subprocess.run(
+            [source_hash.ROOT / "native/.cargo/rustc-wrapper.sh", sys.executable, "-c",
+             "import json, os, sys; print(json.dumps([os.environ['CARGO_BIN_EXE_dev-workflow'], sys.argv[1:]]))"],
+            env={**os.environ, "CARGO_BIN_EXE_dev-workflow": binary, "CARGO_TARGET_DIR": str(self.root)},
+            check=True, capture_output=True, text=True, timeout=10,
+        )
+        inherited, arguments = json.loads(result.stdout)
+        self.assertEqual(inherited, binary)
+        self.assertIn(f"--remap-path-prefix={self.root}=/target", arguments)
+
     def test_external_settings_cannot_override_source_inputs(self):
         for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS", "CARGO_PROFILE_RELEASE_OPT_LEVEL", "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER"):
             with mock.patch.dict(os.environ, {name: "test"}, clear=True), self.assertRaises(ValueError):

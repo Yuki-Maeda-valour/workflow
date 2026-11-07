@@ -19,7 +19,7 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 
 - `prepare`: Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
 - `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。今回作った 2 本を `check_probe.py` で検査します。
-- `reproduce`: 2 回のビルドと比較だけを行います。`probe` とその補助が未結合の段階でも使えます。
+- `reproduce`: 2 回のビルドと比較だけを行います。実行の確認には、作った実行ファイルを指定して `check_probe.py` を使います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py` を行います。署名し直しません。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
@@ -78,8 +78,9 @@ tar の取り出しではファイル名と数を限定します。リンクや�
 - `check_probe.py` は `scripts/support_native.py` の `require_native_binary()`・`run_command()`・`snapshot_tree()` を使います。
   実行ファイルの指定が無い場合は失敗します。
   ソース入力の独立した計算値、実行 CPU、自己ハッシュ、出力、終了コード、作業フォルダの無変更を確かめます。
-- この 2 つの依存が未結合の作業ツリーでは、単体テストが補助をモックに置き換えます。
-  実物を使う結合確認を済ませたとは扱いません。
+- 配布物のテストは、偽の ELF・Mach-O を材料に組み立て、実際の `validate.py` の関数で検査します。
+  実行補助との結合テストは、テスト用の実行ファイルを実際の `support_native.py` で起動します。
+  Rust の実行ファイルの確認は、各ビルドの後に `check_probe.py` で行います。
 
 単体テストは担当範囲の中に置いています。次のどちらでも実行できます。
 リポジトリ直下の `scripts/test_*.py` への自動収集とは別に、CI の最初の job が必ず実行します。

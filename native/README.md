@@ -1,9 +1,12 @@
 # Rust の土台と共有の約束
 
-このフォルダは Issue #442 の Task 1.1 の開発用ソースです。
+このフォルダは Issue #442 の開発用ソースです。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
-現時点の `probe` は標準エラーに `dev-workflow: 未実装` と改行を書き、終了 1 を返します。
-Task 2.1 が `probe.rs` の中身と専用のテストを追加します。
+`probe --json` は実行環境とビルド情報を JSON で返します。
+`probe --self-sha256` は自己の実行ファイル全体の SHA256 を返します。
+どちらも末尾改行付きの標準出力と終了 0 を返します。
+不正な引数は終了 2、自己のファイルを読めない場合などの実行時エラーは終了 1 です。
+実行時に外部コマンド・ネットワーク・設定ファイルを使わず、状態ファイルを作りません。
 
 ## 部品とコマンドの登録
 
@@ -107,6 +110,7 @@ cargo build --release --locked --target x86_64-unknown-linux-musl
 release の設定は `codegen-units=1`・`opt-level=3`・`lto="fat"`・`strip="symbols"`・`debug=0`・`incremental=false` です。
 panic の設定は既定のままです。Linux のリンカーは Rust の musl 向けの既定を使います。
 `.cargo/config.toml` と `.cargo/rustc-wrapper.sh` がソース・依存・出力先の絶対パスを固定名へ置き換えます。
+wrapper は bash 3.2 以上で動きます。Cargo が渡す `CARGO_BIN_EXE_dev-workflow` もコンパイラへ引き継ぎます。
 CI(変更ごとの自動検査)から `RUSTFLAGS` や最適化設定を渡す必要はありません。
 外部の設定や環境変数でビルドの設定を上書きしないでください。
 再現性の比較は同じ道具と設定を使い、別々の空の `CARGO_TARGET_DIR` で作った最終実行ファイルに `cmp` を使います。
