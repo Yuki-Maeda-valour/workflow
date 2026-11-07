@@ -16,7 +16,8 @@ flowchart LR
 
 ## Rust の開発と検査(段階 0a)
 
-Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))は開発用の土台だけで、利用者へ配る入口はまだ無い。CI(変更を送るたびに自動で検査する仕組み)も、この検査を行う。
+Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))で開発用の土台を作り、段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から入口と実行ファイル 3 本を同梱する。CI(変更を送るたびに自動で検査する仕組み)も、このソースの検査を続ける。
+利用者向けの試し方と必要環境は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
 
 ### Rust 1.99.1 の導入と外部の出力先
 
@@ -33,8 +34,9 @@ Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([I
 
 - コマンドの一覧は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)にある。書式・clippy・Rust テスト、CI の定義と補助、配布物と比較の補助のテストをすべて流す。
 - `native/ci/build.py test` は `native/ci/scripts/test_native_ci.py` を流す。Rust のビルドをせず、CI の補助を検査する。
-- `scripts/test_native_distribution.py` と `scripts/test_support_native.py` は、既存の `scripts/run-all.py` にも自動で集められる。実行ファイルはテスト用の作り物を使うため、Cargo を要しない。
-- 実物の検査は、今回のソースから作った実行ファイルを `DEV_WORKFLOW_TEST_NATIVE_BINARY` に指定し、`native/ci/check_probe.py` で流す。
+- `scripts/test_native_distribution.py` と `scripts/test_support_native.py` は、既存の `scripts/run-all.py` にも自動で集められる。形式や比較の補助の検査にはテスト用の作り物を使う。
+- 段階 0b では配布物を必須にし、`scripts/test_native_launch.py` で実際の配布物も起動する。これらの検査に Cargo は不要だが、配布物 3 本の欠落は失敗にする。
+- 今回のソースから作った実行ファイルの検査は、`DEV_WORKFLOW_TEST_NATIVE_BINARY` にその実体を指定し、`native/ci/check_probe.py` で流す。配布した版の起動確認とは分ける。
   - 未設定・空文字・不在・実行不能は失敗にする。検査を飛ばさず、配布済みの実行ファイルへも切り替えない。
   - `--version`・`--help`・`probe --json`・`probe --self-sha256` の出力と終了コードを確かめる。不正な引数の拒否、実行 CPU、自己の SHA256(内容の違いを確かめるための値)、作業フォルダの無変更も確かめる。
   - `source_input_hash.py` で現在のソース入力を独立に計算し、`probe --json` の `source_input_sha256` と比べる。
@@ -66,7 +68,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 各処理はソース取得の直後にこの検査を流す。PR のソース SHA とリポジトリを明示し、`persist-credentials: false` を付ける。
   - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
   - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
-- CI は成果物までを作り、PR 作成や push はしない。配布への取り込みは段階 0b で人が行う。
+- CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
 
 ### ビルド入力の記録
 
@@ -76,7 +78,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - `build-info.json` にソースの commit、入力と `Cargo.lock` の SHA256、Rust の版、対象ごとの道具と設定、CI の実行番号と URL、3 本の相対パスと SHA256 を残す。
   - `targets` には Cargo・リンカー(部品を実行ファイルにまとめる道具)・musl・Xcode・SDK(OS 用の開発道具一式)などの版を記録する。`signing` には Mac の署名設定と道具の情報を残す。
   - OS のラベルだけで道具が固定されたとは扱わない。ソース・依存・Rust の記録が違う成果物は組み合わせない。
-- `validate.py` は配布物の内部の一致を検査し、現在の開発ソースとの一致は要求しない。段階 0b では `source_input_hash.py` を使い、取り込む 3 本とビルド元の入力を比べる。
+- `validate.py` は配布物の内部の一致を検査し、現在の開発ソースとの一致は要求しない。配布へ取り込むときは `source_input_hash.py` を使い、取り込む 3 本とビルド元の入力を比べる。
 
 ### 旧版と Rust 版の差分テストの補助
 

@@ -5,7 +5,8 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 ## 道具の最低の版と、確かめる時
 
 道具と最低の版は、プラグインの [`hooks/tool-requirements.tsv`](../../../hooks/tool-requirements.tsv) に 1 つにまとめてある。確かめのスクリプトはこの一覧を読む。下の表は、この一覧のコピーで、`scripts/test_tool_versions.py` が一覧と同じかを確かめる。
-プラグインを使わない導入(`setup.sh`)では skill だけを置くので、一覧と確かめのスクリプトは、このリポジトリの `plugins/dev-workflow/hooks/` にある。
+プラグインを使わない導入(`setup.sh`)では、skills と共通実行ファイルの `bin/dev-workflow/` を置く。
+hook は配置しないので、一覧と確かめのスクリプトは、このリポジトリの `plugins/dev-workflow/hooks/` にある。
 
 <!-- tool-requirements:start -->
 | 道具 | 最低の版 | 区分 | 使う所 |
@@ -38,6 +39,91 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
   - reftable のリポジトリ: 2.45。
   - sparse-checkout で、作業ツリーに無いファイルがあるリポジトリ: 2.41(`git sparse-checkout check-rules`)。足りなくても止まらず、承認が要るだけ。
 - PyYAML の版は問わない。使う `safe_load`・`compose`・`SafeLoader`・`MappingNode`・`SequenceNode` は、PyYAML 3.10 にもある。
+
+## Rust 版を試す条件(段階 0b)
+
+Rust 版は、起動とビルド情報を確かめるための試用である。既存の skill は Python・bash の旧版を使う。
+Python 3.10 以上・PyYAML・bash など、上の条件は引き続き適用する。利用者による Rust・Cargo の導入は不要である。
+
+### 設定と終了コード
+
+配布した `bin/dev-workflow/launch.sh` を `sh` で起動する。選択に使う設定は環境変数 `DEV_WORKFLOW_ENGINE` だけである。
+
+| 設定・状況 | 入口の動き |
+|---|---|
+| 未設定・`legacy` | 旧版を選ぶ。段階 0 の入口には旧版のコマンドが無いため、`ERROR [legacy-unavailable]` と Rust 指定の案内を標準エラーへ出して終了 2 |
+| `rust` | OS・CPU・配布物を検査し、選んだ 1 本を起動する |
+| 空文字・ほかの値 | `ERROR [engine]` を標準エラーへ出して終了 2。未設定とは区別する |
+| 対応外・OS の版が下限未満・検査不能・配布物の欠落や不正・ハッシュ不一致 | 理由を標準エラーへ出して終了 1。実行ファイルを起動しない |
+| Rust 起動後 | Rust の出力と終了コードをそのまま返す。不明なコマンド・不正な引数は終了 2 |
+
+- `probe` に旧版は無い。入口の `--version`・`--help` も未設定・`legacy` では終了 2 になる。
+- 起動前に止まるとき、標準出力は空である。Rust が失敗しても旧版を自動で実行しない。
+- profile から選択を読まない。任意の実行ファイルを指定する設定も無い。テスト専用の `DEV_WORKFLOW_TEST_NATIVE_BINARY` は入口から読まない。
+
+### OS・CPU とハッシュの道具
+
+| OS と最低の版 | `uname -m` の値 | `bin/dev-workflow/` 内で選ぶ実行ファイル | 第一候補の道具 |
+|---|---|---|---|
+| Linux カーネル 5.6 以上 | `x86_64` | `linux-x86_64/dev-workflow` | `sha256sum` |
+| Linux カーネル 5.6 以上 | `aarch64`・`arm64` | `linux-arm64/dev-workflow` | `sha256sum` |
+| macOS 11 以上 | `x86_64`・`arm64` | `macos-universal/dev-workflow` | `shasum -a 256` |
+
+- Mac の 1 本は universal(Intel と Apple Silicon の両方で動く形)である。Windows と、表に無い OS・CPU は使えない。
+- 入口は POSIX sh(共通の仕様に従う `sh`)と `uname`・`awk`・`wc` を使う。Mac では `sw_vers` も使う。この入口だけのために GNU 系ツールを加える必要は無い。
+- OS の版は Linux で `uname -r`、Mac で `sw_vers -productVersion` から読む。読めない場合も終了 1 で止める。
+- SHA256(ファイルの内容の違いを確かめるための値)は、表の道具が無いときだけ `openssl dgst -sha256` で計算する。両方とも無ければ止める。
+- 選んだ道具の計算失敗や不正な出力でも止める。失敗後に別の道具へ切り替えない。
+- `SHA256SUMS` は固定の 3 行を検査する。各行は小文字の 16 進数 64 桁・半角空白 2 個・表の相対パスで、表の順に並ぶ。改行は LF で、末尾にも改行を置く。
+- 起動時に内容のハッシュを計算するのは、選んだ 1 本だけである。通常ファイルで実行権限を持ち、一覧とハッシュが一致した場合だけ起動する。
+- setup のリンク方式では `bin/dev-workflow` 自体がリンクでもよい。その物理的な位置を基準にする。その下の `SHA256SUMS`・3 種類の OS と CPU のフォルダ・実行ファイルにリンクがあれば止める。
+- 入口はファイルを作らず、ネットワークへ接続しない。利用者の作業フォルダ・引数の区切り・標準入出力を保って起動する。
+- `build-info.json` を含む一組全体の形式・権限・容量・ハッシュ・記録の検査は、配布時の `validate.py` が行う。
+- SHA256 は破損の検出に使う。配布者の身元は証明しない。同じ利用者権限で、検査後から起動までに内容を差し替える操作を完全には防がない。
+
+### setup の配置と更新
+
+`setup.sh` は、skills と同じ設定フォルダの `bin/dev-workflow/` に、入口・3 本・`SHA256SUMS`・`build-info.json` を一緒に置く。
+
+| モード | skills の配置先 | 共通実行ファイルの配置先 | 方式 |
+|---|---|---|---|
+| `--link <プロジェクト>`・`--copy <プロジェクト>` | `<プロジェクト>/.claude/skills/` | `<プロジェクト>/.claude/bin/dev-workflow/` | `--link` はリンク、`--copy` はコピー |
+| `--global` | `~/.claude/skills/` | `~/.claude/bin/dev-workflow/` | リンク |
+| `--agents <プロジェクト>`・`--agents-copy <プロジェクト>` | `<プロジェクト>/.agents/skills/` | `<プロジェクト>/.agents/bin/dev-workflow/` | `--agents` はリンク、`--agents-copy` はコピー |
+| `--agents-global` | `~/.agents/skills/` | `~/.agents/bin/dev-workflow/` | リンク |
+
+- リンク方式は同じ配布元を指す。コピー方式は実行権限を保ち、元のリポジトリを取り出したフォルダを消しても使える。
+- 書き込み前に、skills と bin の配置先を全件検査する。配布元と重なる配置や、削除すると配布元を失う配置は拒否する。他の `bin/` の中身は変えない。
+- `--force` なしでは、既存の内容・権限が一致するか、同じ配布元へのリンクなら残す。違う版が混ざる場合は、何も変えず終了 1 になる。
+- 各 skill と `bin/dev-workflow` の末尾のリンク切れは、`--force` で置き換えられる。配置先の親フォルダのリンク切れは、`--force` でも拒否する。
+- `--force` は管理対象の skills と `bin/dev-workflow/` をそろえて上書きする。更新前に、自分で変えた管理対象を控える。
+- `--list` は一覧を出すだけで、ファイルを作らない。配布元に `bin/dev-workflow/` が無い旧版では、その旨を出して skills だけを置く。
+
+### 導入先での試し方
+
+`installed_plugin` に実際のプラグイン導入先を入れる。導入方法はリポジトリの `README.md` にある。
+setup の場合は、上の表の設定フォルダ(`.claude` または `.agents`)を入れる。
+
+```sh
+installed_plugin='<実際の導入先>'
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --version
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --help
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --json
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --self-sha256
+```
+
+- 4 コマンドとも終了 0 になることを確かめる。`--version` の値は Rust 実行ファイル内部の版で、配布プラグインの版とは別である。
+- `probe --json` の `ok` が `true` で、`os`・`arch` が実行した環境と一致することを確かめる。
+- `source_input_sha256`・`rustc` を `build-info.json` と比べる。`probe --self-sha256` の値は、選ばれた 1 本の `SHA256SUMS` の値と比べる。
+- 成功しても、旧版との同等性や OS の保護機能を確かめたことにはならない。無人ループは引き続き Linux 専用である。
+- 配布した版の確認状況は `README.md` の「Rust 版を試す(段階 0b)」に記す。CI(変更を送るたびに自動で検査する仕組み)での起動、実機でのプラグイン導入、最低 OS での確認は分けて記録する。
+
+### 失敗したときに戻す手順
+
+1. Rust の試用を止める場合は `unset DEV_WORKFLOW_ENGINE`、または `export DEV_WORKFLOW_ENGINE=legacy` を実行し、既存の skill を使う。`probe` は旧版に無いので、終了 2 のままである。
+2. 配布物の欠落・ハッシュ不一致・実行権限の欠落なら、確認済みの一組を再導入する。検査を省略したり、壊れたファイルに合わせてハッシュ一覧を書き換えたりしない。
+3. setup で入れ直す前に、上書きする管理対象だけを控える。同じ配布元から元の導入モードに `--force` を付け、skills と `bin/dev-workflow/` を同じ版にそろえる。他の `bin/` は削除しない。
+4. 親フォルダのリンク切れなら、その配置を直してから導入をやり直す。Mac の隔離属性(ダウンロードしたファイルに macOS が付ける印)が理由で起動できない場合は、属性を削除して合格にせず、未確認として記録する。
 
 ## 実行環境
 
