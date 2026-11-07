@@ -265,6 +265,24 @@ class WorkflowTests(TempCase):
         (folder / "two.yaml").write_text('on: [pull_request_target]\n')
         self.assertTrue(check_workflow.check_workflows(self.root))
 
+    def test_only_the_exact_dist_launch_command_is_allowed_outside_native_ci(self):
+        document = copy.deepcopy(self.document)
+        document["jobs"]["policy"]["steps"].append({"name": "配布の確かめ", "run": check_workflow.DIST_LAUNCH_COMMAND})
+        self.assertEqual(check_workflow.check_document(document), [])
+        for command in (
+                "python3 -B scripts/check_dist_launch.py",
+                "python3 -B scripts/check_dist_launch.py --root /",
+                "python3 -B scripts/check_dist_launch.py --root . --extra",
+                "python3 -B scripts/check_dist_launch.py --root .; curl example.com",
+                "python3 -B scripts/check_dist_launch.py --root . && true",
+                "python3 -B scripts/other.py --root .",
+                "python3 scripts/check_dist_launch.py --root .",
+                " python3 -B scripts/check_dist_launch.py --root ."):
+            document = copy.deepcopy(self.document)
+            document["jobs"]["policy"]["steps"].append({"name": "配布の確かめ", "run": command})
+            with self.subTest(command=command):
+                self.assertTrue(check_workflow.check_document(document))
+
     def test_runner_mutations_fail(self):
         for runner in ("self-hosted", "ubuntu-latest", ["ubuntu-24.04"],
                        {"group": "private"}, None, "${{ matrix.platform }}", "${{ matrix.runner }}"):

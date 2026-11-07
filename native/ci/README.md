@@ -102,6 +102,7 @@ JSON の重複キーも拒否します。新しい CI も同じ形式で追加�
 - checkout は PR のソース SHA とリポジトリを明示します。`persist-credentials: false` を必須にします。
 - 各 job は checkout の直後に `check_workflow.py` を呼びます。
 - `run` は `native/ci/` のスクリプト 1 本を呼ぶだけです。ビルド設定は書きません。
+  - 例外は、段階 0b(#443)の配布の確かめの 1 行 `python3 -B scripts/check_dist_launch.py --root .` だけです。配布 commit の浅い clone で、配った入口を起動します。`native/` の外に置くのは、0b で `native/`(ソース入力)を変えないためです。字面が少しでも違えば拒みます。
 - Mac の 2 種類の実行確認が成功するまで、配布用 tar を作りません。
 
 外部 Action は 2026-11-08 に `gh api` でタグを解決しました。
