@@ -216,6 +216,41 @@ class TimeoutDescendantsTest(TemporaryScripts):
         self.assertEqual(0, self.libc.prctl(36, 1, 0, 0, 0))
         self.addCleanup(self.libc.prctl, 36, old.value, 0, 0, 0)
 
+    def test_detached_descendant_cannot_hold_output_pipes_open_indefinitely(self):
+        parent_record = self.root / 'parent.json'
+        child_record = self.root / 'detached.json'
+        script = self.script(f'''
+            import json, os, signal, time
+            from pathlib import Path
+            signal.signal(signal.SIGTERM, lambda *args: os.write(2, b'term\\x00'))
+            {support_proc.record(parent_record)}
+            if os.fork() == 0:
+                os.setsid()
+                {support_proc.record(child_record)}
+                os.write(1, b'detached\\xff')
+                # 修正前でも有限時間で戻り、時間の検査で失敗する。
+                time.sleep(8)
+                os._exit(0)
+            time.sleep(60)
+        ''')
+        try:
+            started = time.monotonic()
+            result = support_native.run_command([script], cwd=self.root, timeout=1)
+            elapsed = time.monotonic() - started
+            self.assertLess(elapsed, 5, f'パイプ待ちが長すぎる: {elapsed:.2f} 秒')
+            self.assertEqual(support_native.RunResult(
+                -signal.SIGKILL, b'detached\xff', b'term\x00', True), result)
+            parent_pid, parent_pgid = support_proc.read_record(parent_record)
+            child_pid, child_pgid = support_proc.read_record(child_record)
+            self.assertNotEqual(parent_pgid, child_pgid)
+            support_proc.assert_absent_now(parent_pid)
+            with self.assertRaises(ChildProcessError):
+                os.waitpid(parent_pid, os.WNOHANG)
+            # 別グループの孫は動いたままでも呼び出しが戻る。
+            self.assertEqual((0, 0), os.waitpid(child_pid, os.WNOHANG))
+        finally:
+            self.assertEqual([], support_proc.cleanup(self.root, records=[parent_record, child_record]))
+
     def test_timeout_kills_descendant_even_if_parent_exits_or_pipes_close(self):
         for exit_parent, close_pipes in ((False, False), (True, False), (False, True)):
             with self.subTest(exit_parent=exit_parent, close_pipes=close_pipes):

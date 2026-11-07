@@ -93,6 +93,7 @@ import stat
 import struct
 import subprocess
 import sys
+import time
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -438,7 +439,37 @@ _NATIVE_SAFE_GIT = (
 )
 
 
-def _native_git_modes(path, expected, problems):
+class _NativeBudgetExceeded(Exception):
+    """配布物の走査を、残りの検査も含めて中断する。"""
+
+
+class _NativeBudget:
+    def __init__(self):
+        self.deadline = time.monotonic() + 15
+        self.entries = 0
+        self.extras = 0
+
+    def remaining(self):
+        seconds = self.deadline - time.monotonic()
+        if seconds <= 0:
+            raise _NativeBudgetExceeded("配布物の検査が 15 秒の上限に達した")
+        return seconds
+
+    def entry(self):
+        self.remaining()
+        self.entries += 1
+        if self.entries > 10_000:
+            raise _NativeBudgetExceeded("配布物の検査が 10,000 項目の上限を超えた")
+
+    def extra(self, message, problems):
+        self.extras += 1
+        if self.extras <= 20:
+            problems.append(message)
+        elif self.extras == 21:
+            problems.append("余分な項目の報告は 20 件まで。残りの名前は省略する")
+
+
+def _native_git_modes(path, expected, problems, budget):
     """このリポジトリ内だけ index のモードを調べる。成果物の一時領域は対象外。"""
     try:
         relative = path.relative_to(REPO)
@@ -453,39 +484,51 @@ def _native_git_modes(path, expected, problems):
             ["git", "-C", str(REPO), *_NATIVE_SAFE_GIT, "--literal-pathspecs",
              "ls-files", "--stage", "-z", "--", relative.as_posix()],
             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            env=env, timeout=15, check=True,
+            env=env, timeout=budget.remaining(), check=True,
         )
+        budget.remaining()
         entries = {}
-        for record in result.stdout.split(b"\0"):
-            if not record:
-                continue
+        for match in re.finditer(rb"[^\0]+", result.stdout):
+            budget.entry()
+            record = match.group()
             metadata, filename = record.split(b"\t", 1)
             mode, _oid, stage = metadata.decode("ascii").split()
             name = Path(os.fsdecode(filename)).relative_to(relative).as_posix()
             if stage != "0" or name in entries:
                 problems.append(f"{name}: Git の記録が未解決または重複している")
-            entries[name] = mode
+            if name in expected:
+                entries[name] = mode
+            else:
+                budget.extra(f"{name}: Git の記録に余分な項目がある", problems)
         for name, executable in expected.items():
             mode = "100755" if executable else "100644"
             if entries.get(name) != mode:
                 problems.append(f"{name}: Git のモードは {mode} が必要(実際: {entries.get(name)!r})")
-        for name in sorted(entries.keys() - expected.keys()):
-            problems.append(f"{name}: Git の記録に余分な項目がある")
+    except subprocess.TimeoutExpired as exc:
+        raise _NativeBudgetExceeded("Git のモードを読み取れない: 配布物の検査が 15 秒の上限に達した") from exc
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         problems.append(f"Git のモードを読み取れない: {exc}")
 
 
-def _native_files(path, expected, problems):
+def _native_files(path, expected, problems, budget):
     """固定の木だけを nofollow で読む。FIFO・リンク・上限超過は開く前にも拒否する。"""
     contents = {}
     directories = {str(Path(name).parent) for name in expected if "/" in name}
 
     def visit(directory_fd, prefix):
         names = {name[len(prefix):].split("/", 1)[0] for name in expected if name.startswith(prefix)}
-        actual = set(os.listdir(directory_fd))
-        for name in sorted(actual - names):
-            problems.append(f"{prefix}{name}: 余分な項目がある")
+        actual = set()
+        budget.remaining()
+        with os.scandir(directory_fd) as items:
+            for item in items:
+                budget.entry()
+                if item.name in names:
+                    actual.add(item.name)
+                else:
+                    budget.extra(f"{prefix}{item.name}: 余分な項目がある", problems)
+        budget.remaining()
         for name in sorted(names):
+            budget.remaining()
             relative = prefix + name
             if name not in actual:
                 problems.append(f"{relative}: 存在しない")
@@ -520,7 +563,9 @@ def _native_files(path, expected, problems):
                 chunks = []
                 total = 0
                 while total <= _NATIVE_LIMIT:
+                    budget.remaining()
                     chunk = os.read(child_fd, min(65536, _NATIVE_LIMIT + 1 - total))
+                    budget.remaining()
                     if not chunk:
                         break
                     chunks.append(chunk)
@@ -542,8 +587,10 @@ def _native_files(path, expected, problems):
         # 配布フォルダより上の、リポジトリ内のリンクも拒否する。
         if path.is_relative_to(REPO):
             for parent in reversed(path.relative_to(REPO).parents):
+                budget.remaining()
                 if stat.S_ISLNK((REPO / parent).lstat().st_mode):
                     raise ValueError(f"{parent}: シンボリックリンクは禁止")
+        budget.remaining()
         directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         visit(directory_fd, "")
     except (OSError, ValueError) as exc:
@@ -694,6 +741,7 @@ def check_native_bundle(path: Path, mode: str) -> list[str]:
     artifact は CI の 5 ファイル、distribution は launch.sh を加えた 6 ファイル。
     このリポジトリ内では Git のモードも調べる。外の一時領域では実行ビットを調べる。
     現在の native/ のソースとは比較しない。ファイルと権限は変更しない。
+    項目は順に読み、10,000 項目・15 秒で打ち切る。余分な項目の名前は 20 件まで報告する。
     """
     if mode not in ("artifact", "distribution"):
         return [f"検査の mode が不正: {mode!r}"]
@@ -703,26 +751,32 @@ def check_native_bundle(path: Path, mode: str) -> list[str]:
     expected.update({"SHA256SUMS": False, "build-info.json": False})
     if mode == "distribution":
         expected["launch.sh"] = True
-    contents = _native_files(path, expected, problems)
-    _native_git_modes(path, expected, problems)
-    hashes = {}
-    for name in _NATIVE_BINARIES:
-        if name in contents:
-            data = contents[name]
-            hashes[name] = hashlib.sha256(data).hexdigest()
-            _native_binary_format(name, data, problems)
-    if "SHA256SUMS" in contents:
-        pattern = b"".join(rb"[0-9a-f]{64}  " + re.escape(name.encode()) + b"\n"
-                           for name in _NATIVE_BINARIES)
-        data = contents["SHA256SUMS"]
-        if re.fullmatch(pattern, data) is None:
-            problems.append("SHA256SUMS: 固定の 3 行・小文字 SHA256・空白 2 個・LF の形でない")
-        else:
-            for name, line in zip(_NATIVE_BINARIES, data.splitlines()):
-                if name in hashes and line[:64].decode("ascii") != hashes[name]:
-                    problems.append(f"SHA256SUMS: {name} の SHA256 が成果物と一致しない")
-    if "build-info.json" in contents:
-        _native_build_info(contents["build-info.json"], hashes, problems)
+    budget = _NativeBudget()
+    try:
+        contents = _native_files(path, expected, problems, budget)
+        _native_git_modes(path, expected, problems, budget)
+        hashes = {}
+        for name in _NATIVE_BINARIES:
+            budget.remaining()
+            if name in contents:
+                data = contents[name]
+                hashes[name] = hashlib.sha256(data).hexdigest()
+                _native_binary_format(name, data, problems)
+        if "SHA256SUMS" in contents:
+            pattern = b"".join(rb"[0-9a-f]{64}  " + re.escape(name.encode()) + b"\n"
+                               for name in _NATIVE_BINARIES)
+            data = contents["SHA256SUMS"]
+            if re.fullmatch(pattern, data) is None:
+                problems.append("SHA256SUMS: 固定の 3 行・小文字 SHA256・空白 2 個・LF の形でない")
+            else:
+                for name, line in zip(_NATIVE_BINARIES, data.splitlines()):
+                    if name in hashes and line[:64].decode("ascii") != hashes[name]:
+                        problems.append(f"SHA256SUMS: {name} の SHA256 が成果物と一致しない")
+        if "build-info.json" in contents:
+            _native_build_info(contents["build-info.json"], hashes, problems)
+        budget.remaining()
+    except _NativeBudgetExceeded as exc:
+        problems.append(str(exc))
     return problems
 
 

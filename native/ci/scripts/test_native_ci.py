@@ -265,6 +265,109 @@ class WorkflowTests(TempCase):
         (folder / "two.yaml").write_text('on: [pull_request_target]\n')
         self.assertTrue(check_workflow.check_workflows(self.root))
 
+    def test_runner_mutations_fail(self):
+        for runner in ("self-hosted", "ubuntu-latest", ["ubuntu-24.04"],
+                       {"group": "private"}, None, "${{ matrix.platform }}", "${{ matrix.runner }}"):
+            document = copy.deepcopy(self.document)
+            document["jobs"]["policy"]["runs-on"] = runner
+            with self.subTest(runner=runner):
+                self.assertTrue(check_workflow.check_document(document))
+        for mutation in (
+                lambda j: j.pop("runs-on"),
+                lambda j: j.pop("strategy"),
+                lambda j: j.update(strategy=None),
+                lambda j: j["strategy"]["matrix"]["include"][0].update(runner="self-hosted"),
+                lambda j: j["strategy"]["matrix"]["include"][0].update(platform="unknown", runner=None),
+                lambda j: j["strategy"]["matrix"].update(runner=["self-hosted"]),
+                lambda j: j["strategy"]["matrix"].update(include=[])):
+            document = copy.deepcopy(self.document)
+            mutation(document["jobs"]["build"])
+            with self.subTest(mutation=mutation):
+                self.assertTrue(check_workflow.check_document(document))
+        for runner in ("ubuntu-24.04", "ubuntu-24.04-arm", "macos-15-intel", "macos-15"):
+            document = copy.deepcopy(self.document)
+            document["jobs"]["policy"]["runs-on"] = runner
+            self.assertEqual(check_workflow.check_document(document), [])
+
+    def test_unknown_top_job_and_strategy_keys_fail(self):
+        for scope, key in ((scope, key) for scope in ("top", "job")
+                           for key in ("environment", "outputs", "concurrency", "future-setting")):
+            document = copy.deepcopy(self.document)
+            target = document if scope == "top" else document["jobs"]["build"]
+            target[key] = {}
+            with self.subTest(scope=scope, key=key):
+                self.assertTrue(check_workflow.check_document(document))
+        document = copy.deepcopy(self.document)
+        document["jobs"]["build"]["strategy"]["future-setting"] = True
+        self.assertTrue(check_workflow.check_document(document))
+
+    def test_action_input_mutations_fail(self):
+        cases = {
+            "actions/checkout": {"ssh-key": "private-key", "submodules": True,
+                                 "fetch-depth": 0, "token": "literal", "path": "other"},
+            "actions/upload-artifact": {"overwrite": True, "include-hidden-files": True},
+            "actions/download-artifact": {"repository": "other/repo", "run-id": 123,
+                                          "github-token": "literal"},
+        }
+        for action, mutations in cases.items():
+            for key, value in {**mutations, "future-setting": True}.items():
+                document = copy.deepcopy(self.document)
+                step = next(step for job in document["jobs"].values() for step in job["steps"]
+                            if step.get("uses", "").startswith(action + "@"))
+                step.setdefault("with", {})[key] = value
+                with self.subTest(action=action, key=key):
+                    self.assertTrue(check_workflow.check_document(document))
+            for settings in ([], None, "name=test"):
+                document = copy.deepcopy(self.document)
+                step = next(step for job in document["jobs"].values() for step in job["steps"]
+                            if step.get("uses", "").startswith(action + "@"))
+                step["with"] = settings
+                with self.subTest(action=action, settings=settings):
+                    self.assertTrue(check_workflow.check_document(document))
+        for depth in (-1, 2, True, "1", None, "${{ matrix.platform }}"):
+            document = copy.deepcopy(self.document)
+            document["jobs"]["policy"]["steps"][0]["with"]["fetch-depth"] = depth
+            with self.subTest(depth=depth):
+                self.assertTrue(check_workflow.check_document(document))
+
+    def test_event_value_mutations_fail(self):
+        for event in ("pull_request", "push", "workflow_dispatch"):
+            for value in ({"tags": ["*"]}, {"branches": ["main"]}, {"paths": ["native/**"]},
+                          {"types": ["closed"]}, {"inputs": {}}, {"future-setting": {}},
+                          [], "", True):
+                document = copy.deepcopy(self.document)
+                document["on"][event] = value
+                with self.subTest(event=event, value=value):
+                    self.assertTrue(check_workflow.check_document(document))
+            document = copy.deepcopy(self.document)
+            document["on"][event] = None
+            self.assertEqual(check_workflow.check_document(document), [])
+
+    def test_second_workflow_can_check_distribution_from_shallow_checkout(self):
+        document = copy.deepcopy(self.document)
+        document["name"] = "Distribution check"
+        job = document["jobs"]["policy"]
+        document["jobs"] = {"distribution-check": job}
+        job["steps"][0]["with"]["fetch-depth"] = 1
+        # 入口の実行は 0b のスクリプトに置く。ここでは呼び出しの形だけを検査する。
+        job["steps"][2]["run"] = "python3 -B native/ci/check_distribution.py"
+        folder = self.root / ".github/workflows"
+        folder.mkdir(parents=True)
+        make_dist.write_json(folder / "native.yml", self.document)
+        make_dist.write_json(folder / "dist-check.yml", document)
+        self.assertEqual(check_workflow.check_workflows(self.root), [])
+        for mutate in (
+                lambda d: d["jobs"]["distribution-check"].update(**{"runs-on": "self-hosted"}),
+                lambda d: d.update(concurrency="group"),
+                lambda d: d["jobs"]["distribution-check"]["steps"][0]["with"].update(submodules=True),
+                lambda d: d["on"]["push"].update(tags=["*"])):
+            changed = copy.deepcopy(document)
+            mutate(changed)
+            make_dist.write_json(folder / "dist-check.yml", changed)
+            problems = check_workflow.check_workflows(self.root)
+            self.assertTrue(problems)
+            self.assertTrue(all(problem.startswith("dist-check.yml:") for problem in problems))
+
     def test_duplicates_or_empty_directory_are_not_success(self):
         self.assertTrue(check_workflow.check_workflows(self.root))
         self.write(".github/workflows/a.yml", b'{"permissions":{},"permissions":{"contents":"read"}}')

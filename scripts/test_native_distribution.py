@@ -13,6 +13,7 @@ import shutil
 import struct
 import subprocess
 import tempfile
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -103,6 +104,107 @@ class NativeBundleFixture(unittest.TestCase):
     def assert_problem(self, text, mode="distribution"):
         problems = self.check(mode)
         self.assertTrue(any(text in item for item in problems), problems)
+
+
+class NativeBudgetTest(NativeBundleFixture):
+    def test_entry_limit_stops_streaming_scan_and_bounds_extra_reports(self):
+        consumed = 0
+        closed = False
+
+        def entries():
+            nonlocal consumed
+            for index in range(20_000):
+                consumed += 1
+                yield SimpleNamespace(name=f'extra-{index}')
+
+        @contextlib.contextmanager
+        def scan(_fd):
+            nonlocal closed
+            try:
+                yield entries()
+            finally:
+                closed = True
+
+        with mock.patch.object(VALIDATE.os, 'scandir', scan), \
+                mock.patch.object(VALIDATE.time, 'monotonic', return_value=0), \
+                mock.patch.object(VALIDATE, '_native_git_modes') as git_modes:
+            problems = self.check()
+        self.assertTrue(any('10,000 項目' in problem for problem in problems), problems)
+        self.assertEqual(consumed, 10_001)
+        self.assertTrue(closed)
+        self.assertEqual(sum('extra-' in problem for problem in problems), 20)
+        self.assertTrue(any('残りの名前は省略' in problem for problem in problems))
+        self.assertLessEqual(len(problems), 22)
+        git_modes.assert_not_called()
+
+    def test_time_limit_stops_scan_before_entry_limit(self):
+        now = 10
+        consumed = 0
+
+        def entries():
+            nonlocal now, consumed
+            for index in range(100):
+                consumed += 1
+                now = 10 + index * 5
+                yield SimpleNamespace(name=f'extra-{index}')
+
+        with mock.patch.object(VALIDATE.os, 'scandir', return_value=contextlib.nullcontext(entries())), \
+                mock.patch.object(VALIDATE.time, 'monotonic', side_effect=lambda: now), \
+                mock.patch.object(VALIDATE, '_native_git_modes') as git_modes:
+            problems = self.check()
+        self.assertTrue(any('15 秒' in problem for problem in problems), problems)
+        self.assertEqual(consumed, 4)
+        git_modes.assert_not_called()
+
+    def test_time_limit_also_covers_reading_files(self):
+        now = 0
+        read = os.read
+
+        def delayed_read(*args):
+            nonlocal now
+            data = read(*args)
+            now = 15
+            return data
+
+        with mock.patch.object(VALIDATE.os, 'read', side_effect=delayed_read), \
+                mock.patch.object(VALIDATE.time, 'monotonic', side_effect=lambda: now), \
+                mock.patch.object(VALIDATE, '_native_git_modes') as git_modes:
+            problems = self.check()
+        self.assertTrue(any('15 秒' in problem for problem in problems), problems)
+        git_modes.assert_not_called()
+
+    def test_exactly_ten_thousand_entries_does_not_exceed_count_limit(self):
+        items = (SimpleNamespace(name=f'extra-{index}') for index in range(10_000))
+        with mock.patch.object(VALIDATE.os, 'scandir', return_value=contextlib.nullcontext(items)), \
+                mock.patch.object(VALIDATE.time, 'monotonic', return_value=0), \
+                mock.patch.object(VALIDATE, '_native_git_modes'):
+            problems = self.check()
+        self.assertFalse(any('10,000 項目' in problem for problem in problems), problems)
+        self.assertEqual(sum('extra-' in problem for problem in problems), 20)
+
+    def test_entry_budget_is_shared_by_directories(self):
+        scandir = os.scandir
+        consumed = 0
+
+        @contextlib.contextmanager
+        def scan(fd):
+            def entries():
+                nonlocal consumed
+                with scandir(fd) as real_entries:
+                    for item in real_entries:
+                        consumed += 1
+                        yield item
+                for index in range(6_000):
+                    consumed += 1
+                    yield SimpleNamespace(name=f'extra-{index}')
+            yield entries()
+
+        with mock.patch.object(VALIDATE.os, 'scandir', scan), \
+                mock.patch.object(VALIDATE.time, 'monotonic', return_value=0):
+            problems = self.check()
+        self.assertTrue(any('10,000 項目' in problem for problem in problems), problems)
+        self.assertEqual(consumed, 10_001)
+        self.assertEqual(sum('extra-' in problem for problem in problems), 20)
 
 
 class NativeBundleTest(NativeBundleFixture):

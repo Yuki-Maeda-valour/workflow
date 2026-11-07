@@ -72,6 +72,21 @@ def _signal_group(process, number):
         pass
 
 
+def _drain_after_kill(process):
+    """群を止めた後もパイプの EOF を待ち続けず、直接の子だけを回収する。"""
+    try:
+        return process.communicate(timeout=1)
+    except subprocess.TimeoutExpired as error:
+        # communicate の再試行で得る output/stderr は、最初から読めた分の全体。
+        stdout, stderr = error.output or b'', error.stderr or b''
+        for stream in (process.stdin, process.stdout, process.stderr):
+            if stream is not None:
+                stream.close()
+        process.kill()
+        process.wait()
+        return stdout, stderr
+
+
 def run_command(argv, *, cwd, env=None, input=None, timeout=60) -> RunResult:
     """POSIX の別プロセスグループで argv を起動し、RunResult を返す。
 
@@ -79,7 +94,8 @@ def run_command(argv, *, cwd, env=None, input=None, timeout=60) -> RunResult:
     辞書は環境全体を置き換える(空の辞書も有効)。input は bytes か None(None は EOF)。
     終了コードが非 0 でも結果を返す。起動不能は OSError をそのまま投げる。
     timeout は秒数(None は無制限)。時間切れなら群へ TERM を送り、最大 1 秒の後に KILL を送る。
-    群を止め、パイプを読み切り、直接の子を wait で回収してから timed_out=True を返す。
+    KILL 後の読み取りも最大 1 秒。終わらなければパイプを閉じ、読めた分だけを返す。
+    直接の子を wait で回収してから timed_out=True を返す。
     孫以降はその親か OS が回収する。呼び出し側が Linux の subreaper(孤児を引き取る処理)なら、
     引き取った子の wait は呼び出し側が行う。群を抜けた子は停止の対象外。
     正常終了時の背景プロセスの残存は、呼び出し側が既存の補助で確かめる。
@@ -109,11 +125,11 @@ def run_command(argv, *, cwd, env=None, input=None, timeout=60) -> RunResult:
                     pass
                 # パイプを閉じた子も止めるため、communicate が終わった場合も群へ送る。
                 _signal_group(process, signal.SIGKILL)
-                stdout, stderr = process.communicate()
+                stdout, stderr = _drain_after_kill(process)
             return RunResult(process.returncode, stdout, stderr, timed_out)
         except BaseException:
             _signal_group(process, signal.SIGKILL)
-            process.communicate()
+            _drain_after_kill(process)
             raise
 
 

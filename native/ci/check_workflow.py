@@ -16,6 +16,13 @@ VERIFIED_ACTIONS = {
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
     "actions/download-artifact": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
 }
+ACTION_INPUTS = {
+    "actions/checkout": {"repository", "ref", "persist-credentials", "fetch-depth"},
+    "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
+    "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
+}
+TOP_KEYS = {"name", "on", "permissions", "jobs"}
+JOB_KEYS = {"needs", "strategy", "runs-on", "timeout-minutes", "steps"}
 SOURCE_REF = "${{ github.event.pull_request.head.sha || github.sha }}"
 SOURCE_REPO = "${{ github.event.pull_request.head.repo.full_name || github.repository }}"
 ALLOWED_EXPRESSIONS = {SOURCE_REF, SOURCE_REPO, "${{ matrix.platform }}", "${{ matrix.runner }}", "${{ runner.temp }}"}
@@ -31,9 +38,13 @@ def check_document(document):
     if not isinstance(document, dict):
         return ["ワークフローは object が必要です"]
     problems = []
+    if set(document) - TOP_KEYS:
+        problems.append("トップの設定は name・on・permissions・jobs に限ります")
     events = document.get("on")
     if not isinstance(events, dict) or set(events) != {"pull_request", "push", "workflow_dispatch"}:
         problems.append("イベントは pull_request・push・workflow_dispatch の 3 つに限ります")
+    elif any(value != {} and value is not None for value in events.values()):
+        problems.append("イベントの設定は空の object または null に限ります")
     if document.get("permissions") != {"contents": "read"}:
         problems.append("permissions は contents: read に限ります")
 
@@ -66,16 +77,30 @@ def check_document(document):
         if not isinstance(job, dict) or "uses" in job:
             problems.append(f"{name}: 再利用ワークフローは検査対象外です")
             continue
+        if set(job) - JOB_KEYS:
+            problems.append(f"{name}: job の設定は needs・strategy・runs-on・timeout-minutes・steps に限ります")
         strategy = job.get("strategy")
-        if strategy is not None:
+        valid_matrix = False
+        if "strategy" in job:
+            if not isinstance(strategy, dict) or set(strategy) - {"fail-fast", "matrix"}:
+                problems.append(f"{name}: strategy の設定は fail-fast・matrix に限ります")
+            if isinstance(strategy, dict) and "fail-fast" in strategy and not isinstance(strategy["fail-fast"], bool):
+                problems.append(f"{name}: fail-fast は boolean が必要です")
             matrix = strategy.get("matrix") if isinstance(strategy, dict) else None
             rows = matrix.get("include") if isinstance(matrix, dict) else None
             if not isinstance(rows, list) or not rows or set(matrix) != {"include"}:
                 problems.append(f"{name}: matrix は確認済みの機械の include 一覧に限ります")
             elif any(not isinstance(row, dict) or set(row) != {"platform", "runner"}
                      or not isinstance(row.get("platform"), str)
-                     or RUNNERS.get(row["platform"]) != row["runner"] for row in rows):
+                     or row["platform"] not in RUNNERS
+                     or RUNNERS[row["platform"]] != row["runner"] for row in rows):
                 problems.append(f"{name}: matrix の対象名と機械が確認済みの組ではありません")
+            else:
+                valid_matrix = True
+        runner = job.get("runs-on")
+        if not isinstance(runner, str) or not (
+                runner in RUNNERS.values() or (runner == "${{ matrix.runner }}" and valid_matrix)):
+            problems.append(f"{name}: runs-on は確認済みの GitHub の機械か、その matrix.runner に限ります")
         steps = job.get("steps")
         if not isinstance(steps, list) or len(steps) < 2:
             problems.append(f"{name}: checkout と最初の検査がありません")
@@ -99,6 +124,8 @@ def check_document(document):
                 if not isinstance(command, str) or not SCRIPT_COMMAND.fullmatch(command):
                     problems.append(f"{name}: run は native/ci/ のスクリプトを 1 本呼ぶだけにしてください")
             if "uses" not in step:
+                if "with" in step:
+                    problems.append(f"{name}: with は Action だけに指定できます")
                 continue
             uses = step["uses"]
             match = re.fullmatch(r"([a-zA-Z0-9_.-]+/[a-zA-Z0-9_./-]+)@([0-9a-f]{40})", str(uses))
@@ -110,11 +137,16 @@ def check_document(document):
                 problems.append(f"{name}: キャッシュの Action は使えません")
             if VERIFIED_ACTIONS.get(action) != sha:
                 problems.append(f"{name}: commit と action.yml の確認記録がない Action です: {uses}")
+            settings = step.get("with", {})
+            if not isinstance(settings, dict):
+                problems.append(f"{name}: {action} の with は object が必要です")
+                continue
+            if set(settings) - ACTION_INPUTS.get(action, set()):
+                problems.append(f"{name}: {action} の with に許可していないキーがあります")
             if action == "actions/checkout":
-                settings = step.get("with", {})
-                if not isinstance(settings, dict):
-                    problems.append(f"{name}: checkout の設定が不正です")
-                    continue
+                # 0b の浅い clone は 1 だけを許す。履歴全体や式での指定は不要。
+                if "fetch-depth" in settings and (type(settings["fetch-depth"]) is not int or settings["fetch-depth"] != 1):
+                    problems.append(f"{name}: fetch-depth は整数の 1 だけ指定できます")
                 if settings.get("persist-credentials") is not False:
                     problems.append(f"{name}: persist-credentials: false が必要です")
                 if settings.get("ref") != SOURCE_REF or settings.get("repository") != SOURCE_REPO:

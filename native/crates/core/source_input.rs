@@ -193,6 +193,7 @@ mod tests {
                 NEXT.fetch_add(1, Ordering::Relaxed)
             ));
             fs::create_dir(&root).unwrap();
+            let root = root.canonicalize().unwrap();
             fs::create_dir_all(root.join("native/crates/core")).unwrap();
             git(&root, &["init", "--quiet"]).unwrap();
             Self(root)
@@ -258,6 +259,26 @@ mod tests {
         git(&fixture.0, &["rm", "--cached", "native/a"]).unwrap();
         fixture.track("native/b", b"same");
         assert_ne!(fixture.input().sha256().unwrap(), before);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_tmpdir_preserves_root_and_index_comparisons() {
+        let fixture = Fixture::new();
+        let alias = fixture.0.join("tmp-link");
+        std::os::unix::fs::symlink(&fixture.0, &alias).unwrap();
+        // 子だけの環境を変え、並列のテストには TMPDIR の変更を見せない。
+        let output = Command::new(std::env::current_exe().unwrap())
+            .env("TMPDIR", alias)
+            .args([
+                "--exact",
+                "source_input::tests::outside_native_and_untracked_files_do_not_change_the_hash",
+                "--test-threads=1",
+            ])
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stdout).contains("1 passed"));
     }
 
     #[test]
