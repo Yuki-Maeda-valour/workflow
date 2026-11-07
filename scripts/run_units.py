@@ -1,7 +1,7 @@
 """テストの流し方の共通の処理。run-tests.py・run-loop-selftest.py・run-all.py が読み込んで使う。
 
-- 子のプロセスの起動と止め方(Children)・止める合図の受け方(INTERRUPT_SIGNALS・raise_interrupt)。
-- 単位(Unit): 1 つの子のプロセスで流す仕事。枠の内(同時に流す数を数える)と枠の外(数えず、最初に始める)がある。
+- 子プロセスの起動と止め方(Children)・止める合図の受け方(INTERRUPT_SIGNALS・raise_interrupt)。
+- 単位(Unit): 1 つの子プロセスで流す仕事。枠の内(同時に流す数を数える)と枠の外(数えず、最初に始める)がある。
 - run_units: 枠の外を先に始め、枠の単位を重い順に流す。終わるたびに 1 行を出す。止めたときの決まりもここに持つ。
 - 重みの決め方(weight_of)と、重みの記録の読み書き(run-all.py だけが使う)。
 - 結果の使い回しの記録の読み書き(load_reuse・save_reuse。run-all.py だけが使う)。
@@ -51,7 +51,7 @@ class Interrupted(Exception):
 
 
 class Children:
-    """動いている子のプロセス。止める合図の後は、新しく始めない。"""
+    """動いている子プロセス。止める合図の後は、新しく始めない。"""
 
     def __init__(self):
         self.lock = threading.Lock()
@@ -59,11 +59,11 @@ class Children:
         self.stopped = False
 
     def start(self, command, env=None):
-        """env を渡すと、子の環境変数をそれにする(既定は親と同じ)。"""
+        """env を渡すと、子プロセスの環境変数をそれにする(既定は親と同じ)。"""
         with self.lock:
             if self.stopped:
                 raise Interrupted()
-            # 別のプロセスグループで起動する(端末の Ctrl-C は親だけが受け、子はグループごと止める)。
+            # 別のプロセスグループで起動する(端末の Ctrl-C は親だけが受け、子プロセスはグループごと止める)。
             process = subprocess.Popen(command, cwd=REPO, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                        text=True, errors="replace", start_new_session=True, env=env)
             self.running.add(process)
@@ -74,14 +74,14 @@ class Children:
             self.running.discard(process)
 
     def stop_all(self, grace=5.0):
-        """新しく始めないようにし、動いている子をグループごと止める。止めた数を返す。
+        """新しく始めないようにし、動いている子プロセスをグループごと止める。止めた数を返す。
 
         グループへ SIGINT・SIGTERM・SIGKILL の順に送り、それぞれの後で、グループ全体が消えるまで
         最大 grace 秒待つ。次の合図は、まだ消えないグループにだけ送る。
-        - SIGINT から始める: Python の子は KeyboardInterrupt で終わり、一時フォルダなどを片付けられる
+        - SIGINT から始める: Python の子プロセスは KeyboardInterrupt で終わり、一時フォルダなどを片付けられる
           (SIGTERM では片付けずに終わる)。
-        - 直接の子が終わっても待ちを打ち切らない: グループの中の孫(入れ子の run-tests.py など)が、
-          別のグループで起動した自分の子を止めて回収する時間を残すため。
+        - 直接の子プロセスが終わっても待ちを打ち切らない: グループの中の孫プロセス(入れ子の run-tests.py など)が、
+          別のグループで起動した自分の子プロセスを止めて回収する時間を残すため。
         - 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に
           残ることがある。そのときは、残ったプロセスを pid を指定して止める(別のセッションの子孫を
           追う仕組みは入れていない)。
@@ -112,8 +112,8 @@ def group_alive(pgid):
     return True
 
 
-# Ctrl-C(SIGINT。KeyboardInterrupt になる)のほかに受けて止めるシグナル。子は別のセッションにいるので、
-# 端末を閉じたときの SIGHUP は親だけに届く。親だけが終わって子が孤児にならないよう、受けて止める。
+# Ctrl-C(SIGINT。KeyboardInterrupt になる)のほかに受けて止めるシグナル。子プロセスは別のセッションにいるので、
+# 端末を閉じたときの SIGHUP は親だけに届く。親だけが終わって子プロセスが孤児にならないよう、受けて止める。
 INTERRUPT_SIGNALS = tuple(getattr(signal, name) for name in ("SIGTERM", "SIGHUP") if hasattr(signal, name))
 
 
@@ -122,7 +122,7 @@ def raise_interrupt(signum, frame):
 
 
 def run_command(children, command, env=None):
-    """子のプロセスを 1 つ流し、(終了コード, 出力, 秒) を返す。"""
+    """子プロセスを 1 つ流し、(終了コード, 出力, 秒) を返す。"""
     started = time.monotonic()
     process = children.start(command, env=env)
     try:
@@ -134,7 +134,7 @@ def run_command(children, command, env=None):
 
 @dataclass
 class Unit:
-    """1 つの子のプロセスで流す仕事。
+    """1 つの子プロセスで流す仕事。
 
     - key: 重みの記録の鍵。
     - label: 進み具合の行と、失敗の見出しに出す名前。
@@ -197,7 +197,7 @@ def run_units(units, jobs, log_dir=None, on_interrupt=None):
     slot = slot_order(units)
     elapsed_of = {}
     children = Children()
-    # SIGTERM・SIGHUP も Ctrl-C と同じく止める(子を残して親だけが終わらないように)。
+    # SIGTERM・SIGHUP も Ctrl-C と同じく止める(子プロセスを残して親だけが終わらないように)。
     for sig in INTERRUPT_SIGNALS:
         signal.signal(sig, raise_interrupt)
 

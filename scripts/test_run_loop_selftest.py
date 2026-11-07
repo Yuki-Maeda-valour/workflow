@@ -63,12 +63,12 @@ ok "gamma 共有"
 fi
 '''
 
-# 自分(bash)と、自分が起動した子の pid を書いてから眠る(止めたときに両方が消えるかを見る)。
+# 自分(bash)と、自分が起動した子プロセスの pid を書いてから眠る(止めたときに両方が消えるかを見る)。
 SLOW = r'''
 if want slow-{index}; then
 scratch="$(mktemp -d "$RUN_LOOP_SELFTEST_MARKS/scratch-{index}-XXXXXX")"
 echo "loop-selftest: 対象 fake(scratch $scratch)"
-# RUN_LOOP_SELFTEST_HOLD があれば、別のセッションの子が、その秒数だけ標準出力を開いたまま残る。
+# RUN_LOOP_SELFTEST_HOLD があれば、別のセッションの子プロセスが、その秒数だけ標準出力を開いたまま残る。
 holder=""
 if [ -n "${RUN_LOOP_SELFTEST_HOLD:-}" ]; then setsid sleep "$RUN_LOOP_SELFTEST_HOLD" & holder=$!; fi
 sleep 60 &
@@ -344,9 +344,9 @@ if check_want a a; then ok "変数の want"; fi
         self.assertEqual([], [pid for pid in pids if not process_gone(pid)], pids)
 
     def test_interrupt_waits_for_output_held_by_another_group(self):
-        # 別のセッションの子が標準出力を開いたまま残っても、止めたときに、残った一時フォルダの行が出ることを確かめる。
+        # 別のセッションの子プロセスが標準出力を開いたまま残っても、止めたときに、残った一時フォルダの行が出ることを確かめる。
         # 待つ仕組み(left_scratches が時間で切らずに待つこと)の確かめは、LeftScratchesTest に任せる。
-        # この子は 10 秒で終わる。run_units.py の stop_all が先に最大 15 秒待つので、left_scratches に来た時点で、
+        # この子プロセスは 10 秒で終わる。run_units.py の stop_all が先に最大 15 秒待つので、left_scratches に来た時点で、
         # プロセスはもう終わっている(left_scratches の待ちの道は通らない)。
         marks = self.root / "marks"
         marks.mkdir()
@@ -372,7 +372,7 @@ if check_want a a; then ok "変数の want"; fi
                 runner.communicate()
         self.assertEqual(143, runner.returncode, output)
         self.assertEqual(3, len(pids), pids)
-        # 子が 10 秒眠る間は、出力が閉じない。runner は、それより前には終わらない。
+        # 子プロセスが 10 秒眠る間は、出力が閉じない。runner は、それより前には終わらない。
         self.assertGreaterEqual(waited, 8, output)
         scratches = list(marks.glob("scratch-0-*"))
         self.assertEqual(1, len(scratches), scratches)

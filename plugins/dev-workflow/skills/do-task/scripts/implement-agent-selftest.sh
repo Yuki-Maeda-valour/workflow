@@ -11,7 +11,7 @@
 # 検証するのは「終了コードと出力の契約(§12-8)」「信頼モデルが破れないこと(既定表外・上書き引数を
 # 受け付けないこと)」「プローブと本実行のモード・cwd の分離(§12-1 の判定 4′)」
 # 「実装用既定表(§12-6)と実装の同期」、および**書き込み権限が付いて初めて要る機構**
-# (2026-09-17 決定 40〜42: シグナル中止で子を残さない / 生出力を本実行から偽造されない / 自ホスト判定が
+# (2026-09-17 決定 40〜42: シグナル中止で子プロセスを残さない / 生出力を本実行から偽造されない / 自ホスト判定が
 # 指標を隠さない)、「ログの置き場の固定(L 節: 置き場の経路)」、「実行記録のモデル名と CLI の版(M 節。
 # プローブの出力から読む形と、§12-6 の表との同期)」。**出力の正規化は実装経路に無いので検証しない。**
 #
@@ -307,7 +307,7 @@ exec bash "$WORK/bin/hangproc.sh"
 EOF
 
 # 9) スクリプト自身へのシグナル(2026-09-17 決定 41)。本実行に入ったことを marker で知らせてから、
-#    TERM を無視して居座る子へ exec で化ける。「script を撃つと子も死ぬか」を測る治具
+#    TERM を無視して居座る子プロセスへ exec で化ける。「script を撃つと子プロセスも死ぬか」を測る治具
 cat >"$WORK/bin/runproc.sh" <<'EOF'
 #!/usr/bin/env bash
 trap '' TERM
@@ -1055,9 +1055,9 @@ STUB_DIR="$WORK/pathbin"
 
 # ── H. 書き込み権限が付くことで初めて要る機構(2026-09-17 決定 40〜42)──
 
-# H1. 2026-09-17 決定 41: スクリプト自身への TERM / HUP / INT で、走行中の外部 CLI の子を道連れにする。
+# H1. 2026-09-17 決定 41: スクリプト自身への TERM / HUP / INT で、走行中の外部 CLI の子プロセスを道連れにする。
 #     呼び出し側は §12-6 の帰結として背景実行するので、中止操作は**シグナルとして届く**。
-#     子が生き残ると、書き込みモードのまま走るプロセスの傍らで §12-3 の再取得・比較を行うことになる
+#     子プロセスが生き残ると、書き込みモードのまま走るプロセスの傍らで §12-3 の再取得・比較を行うことになる
 leak_cleanup; wait_gone leak_count 10; wait_gone sig_leak_count 10
 STUB_DIR="$WORK/sigstub"
 # INT は「保険」。**非対話 shell の非同期ジョブは SIGINT を SIG_IGN で受け継ぎ、bash は
@@ -1112,8 +1112,8 @@ for spec in "TERM:143:timeout" "HUP:129:timeout" "INT:130:timeout" "TERM:143:fal
   wait_gone sig_leak_count 5
   if [ "$rc" -eq "$want" ]; then ok "中止($h1_label): 終了コード $want で終わる"; else
     ng "中止($h1_label): 終了コード $want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
-  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($h1_label): 外部ランナーの子を残さない"; else
-    ng "中止($h1_label): 外部ランナーの子を残さない(残存 $(sig_leak_count) 件)"; leak_cleanup; fi
+  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($h1_label): 外部ランナーの子プロセスを残さない"; else
+    ng "中止($h1_label): 外部ランナーの子プロセスを残さない(残存 $(sig_leak_count) 件)"; leak_cleanup; fi
   if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then ok "中止($h1_label): stderr が ERROR [理由コード] 形式"; else
     ng "中止($h1_label): stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2; fi
   if grep -qF '**中止**' "$h1_log"; then ok "中止($h1_label): ログに中止が残る"; else
@@ -1481,7 +1481,7 @@ STUB_DIR="$WORK/pathbin"
 
 # ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
 # ケース名の接頭辞: 走行中の差し替え / 差し替えの照合 / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 /
-# ログのパス / 子に渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は J5 の前提の位置にある)。
+# ログのパス / 子プロセスに渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は J5 の前提の位置にある)。
 # どれもスタブと制限した PATH で打ち、対象の保護領域は selftest 専用の置き場($PROT)へ向ける。
 # FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
 # (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
@@ -1861,7 +1861,7 @@ k_logpath_case() { # $1=ラベル $2=起動する場所 $3=実際のログのパ
 k_logpath_case "既定名" "$K_DIR/logpath-default" "$K_DIR/logpath-default/.claude/reviews/implementer-codex-iter1.md"
 k_logpath_case "明示(相対パス)" "$K_DIR/logpath-explicit" "$K_DIR/logpath-explicit/rel/explicit.md" --log-file "rel/explicit.md"
 
-# 子に渡す fd: 外部 CLI(ヘルプ照合・プローブ・本実行)にログの fd を渡さない。スタブは fd 7 が開いていれば
+# 子プロセスに渡す fd: 外部 CLI(ヘルプ照合・プローブ・本実行)にログの fd を渡さない。スタブは fd 7 が開いていれば
 # 偽の行を書く(パスで開き直す実装では fd 7 が無いので、この形の差は変異でだけ現れる)
 STUB_DIR="$WORK/fdbin"
 EXTRA_ENV=("${K_ENV[@]}")
@@ -1869,11 +1869,11 @@ run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
   --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/fd.md"; rc=$?
 EXTRA_ENV=()
 STUB_DIR="$WORK/pathbin"
-check "子に渡す fd: 本実行まで通る" 0 "$rc"
+check "子プロセスに渡す fd: 本実行まで通る" 0 "$rc"
 if [ -s "$K_DIR/fd.md" ] && ! grep -qF 'FORGED' "$K_DIR/fd.md"; then
-  ok "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"
+  ok "子プロセスに渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"
 else
-  ng "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"; cat "$K_DIR/fd.md" >&2 2>/dev/null
+  ng "子プロセスに渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"; cat "$K_DIR/fd.md" >&2 2>/dev/null
 fi
 
 # POSIX モード: POSIXLY_CORRECT の環境でも、特殊組み込みのリダイレクトの失敗でシェルが終わらず、

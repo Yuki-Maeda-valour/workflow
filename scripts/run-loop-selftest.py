@@ -30,7 +30,7 @@
 - 終了コード: run-tests.py と同じ。全部のプロセスが成功なら 0。FAIL・結果の行の欠け・件数の食い違い・
   節を読めないことが 1 つでもあれば 1。引数の誤りは 2。止めたときは 128 + シグナルの番号。
 - 止め方・失敗したプロセスの出力の出し方も run-tests.py と同じ(同じフォルダの run_units.py の仕組みを使う)。
-- 限界: 止めたときに、loop-selftest.sh が別のプロセスグループで起動した子(loop.sh など)が、
+- 限界: 止めたときに、loop-selftest.sh が別のプロセスグループで起動した子プロセス(loop.sh など)が、
   `RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
   loop-selftest.sh の一時フォルダ(`mktemp -d` で作る。既定は /tmp/tmp.*)も、後片付けが走らずに残ることがある。
   止めたプロセスの出力にある一時フォルダのうち、残っているものは、中断の行の後に表示する。
@@ -47,7 +47,7 @@ import sys
 import time
 from pathlib import Path
 
-# 子のプロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
+# 子プロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
 sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent
@@ -292,13 +292,13 @@ def build_units(sections, log_dir=None, outside_weight=float("inf"), defaults=No
 def left_scratches(futures):
     """止めたプロセスの出力にある一時フォルダのうち、まだ残っているものを (節, パス) の一覧で返す。
 
-    始めた全部のプロセスの出力が閉じるまで待つ(時間で切らない)。別のプロセスグループの子が標準出力を
-    開いたまま残ると、その子が終わるまで待つ(どのみち、スレッドを閉じるときにも待つ)。
+    始めた全部のプロセスの出力が閉じるまで待つ(時間で切らない)。別のプロセスグループの子プロセスが標準出力を
+    開いたまま残ると、その子プロセスが終わるまで待つ(どのみち、スレッドを閉じるときにも待つ)。
     """
     started = [future for future in futures if not future.cancelled()]
     done, pending = concurrent.futures.wait(started, timeout=2)
     if pending:
-        print(f"止めた {len(pending)} 個のプロセスの出力が閉じるのを待つ(別のプロセスグループの子が残っていると、"
+        print(f"止めた {len(pending)} 個のプロセスの出力が閉じるのを待つ(別のプロセスグループの子プロセスが残っていると、"
               f"RUN_TIMEOUT の秒数まで待つことがある)", flush=True)
         concurrent.futures.wait(pending)
     left = []

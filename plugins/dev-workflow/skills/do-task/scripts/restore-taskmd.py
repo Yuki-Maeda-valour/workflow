@@ -391,7 +391,7 @@ class Restore:
             except (OSError, ValueError, NotImplementedError):
                 continue
             except Failure as error:
-                # cp を起動できない(runtime-unavailable)・中断・予算・子の回収の失敗は、ここで止める。
+                # cp を起動できない(runtime-unavailable)・中断・予算・子プロセスの回収の失敗は、ここで止める。
                 if error.reason != 'copy-failed' or self.child_unreaped:
                     raise
                 continue

@@ -8,18 +8,18 @@
 
 - 1 つのファイルを 1 つのプロセスで流す。重いファイル(SHARDS)は、テストを順番に配って
   複数のプロセスに分ける。各プロセスは `python3 -m unittest discover -s scripts -p <file>` と
-  同じ読み込み方をする。子のプロセスは、いつも -B(__pycache__ を書かない)で起動する。
+  同じ読み込み方をする。子プロセスは、いつも -B(__pycache__ を書かない)で起動する。
 - テストは、ファイルが違えば別のプロセスで動く。環境変数・カレントディレクトリ・
   読み込んだモジュールは、プロセスの間で共有しない。
 - 終了コード: 全部のプロセスが成功なら 0。失敗・エラー・読み込みの失敗・件数の食い違いが
   1 つでもあれば 1。引数の誤りは 2。止めたときは 128 + シグナルの番号
   (Ctrl-C の SIGINT は 130、SIGTERM は 143、端末を閉じたときなどの SIGHUP は 129)。
-- 止めたときは、まだ始めていないプロセスを始めず、動いているプロセスをその子ごと止める
+- 止めたときは、まだ始めていないプロセスを始めず、動いているプロセスをその子プロセスごと止める
   (各プロセスを別のプロセスグループで起動し、グループごとに止める)。
-  グループへは SIGINT・SIGTERM・SIGKILL の順に送る。SIGINT なら Python の子が後片付け
+  グループへは SIGINT・SIGTERM・SIGKILL の順に送る。SIGINT なら Python の子プロセスが後片付け
   (一時フォルダを消すなど)をしてから終われる。
 - 失敗したプロセスの出力は、最後にまとめて表示する。
-- 子の起動・止め方・並べ方・失敗の出力は、同じフォルダの run_units.py が持つ(run-loop-selftest.py・run-all.py と共通)。
+- 子プロセスの起動・止め方・並べ方・失敗の出力は、同じフォルダの run_units.py が持つ(run-loop-selftest.py・run-all.py と共通)。
 """
 
 import argparse
@@ -30,7 +30,7 @@ import time
 import unittest
 from pathlib import Path
 
-# 子のプロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
+# 子プロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
 sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent
@@ -219,9 +219,9 @@ def describe(result):
     return ("件数不明" if data is None else f"{data['run']} 件"), job_ok(result)
 
 
-# 子のプロセスは、親の -B の有無にかかわらず、いつも -B で起動する。
-# -B が無いと、子が配布のコードを読み込むときに plugins/ の下へ __pycache__ を書く。
-# 同時に動く別の子が配布の木を shutil.copytree でコピーすると、書きかけのファイルに当たって落ちうる。
+# 子プロセスは、親の -B の有無にかかわらず、いつも -B で起動する。
+# -B が無いと、子プロセスが配布のコードを読み込むときに plugins/ の下へ __pycache__ を書く。
+# 同時に動く別の子プロセスが配布の木を shutil.copytree でコピーすると、書きかけのファイルに当たって落ちうる。
 # 環境変数(PYTHONDONTWRITEBYTECODE)にはしない。テストが起動するプロセスにまで効き、
 # 「.pyc を作らない」ことを確かめるテストが意味を失うため。
 # テストが起動する python(-B なし)は、今も plugins/ の下へ __pycache__ を書くことがある。
