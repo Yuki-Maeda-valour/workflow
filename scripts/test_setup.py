@@ -108,7 +108,42 @@ class SetupTests(unittest.TestCase):
                 self.assertIn('含まれる skills:', result.stdout)
                 self.assertIn('alpha', result.stdout)
                 self.assertIn('omega', result.stdout)
+                self.assertNotIn('道具の版', result.stdout)
                 self.assertEqual(before, self.snapshot())
+
+    def tool_check(self, script=None):
+        """配布元に、道具の版の確かめ(hooks/)と plugin.json を置く。script を渡せば、確かめのスクリプトを差し替える。"""
+        plugin = SCRIPT.parent / 'plugins/dev-workflow'
+        hooks = self.repo / 'plugins/dev-workflow/hooks'
+        hooks.mkdir(parents=True, exist_ok=True)
+        for name in ('tool-versions.sh', 'tool-requirements.tsv'):
+            shutil.copy2(plugin / 'hooks' / name, hooks / name)
+        if script is not None:
+            (hooks / 'tool-versions.sh').write_text(script)
+        manifest = self.repo / 'plugins/dev-workflow/.claude-plugin'
+        manifest.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(plugin / '.claude-plugin/plugin.json', manifest / 'plugin.json')
+
+    def test_tool_versions_table_at_the_end(self):
+        self.tool_check()
+        for mode in ('--copy', '--agents'):
+            with self.subTest(mode=mode):
+                result = self.run_setup(mode, force=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('2 件導入', result.stdout)
+                self.assertIn('が使う道具の版:', result.stdout)
+                self.assertIn('| 道具 | 見つけた版 | 要る版 | 結果 | 使う所 |', result.stdout)
+                self.assertLess(result.stdout.index('2 件導入'), result.stdout.index('が使う道具の版:'))
+        self.assertFalse((self.home / '.local/state').exists())
+
+    def test_tool_versions_failure_or_absence_keeps_exit_code(self):
+        result = self.run_setup('--copy')
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('NOTE: 道具の版を確かめるスクリプトが無いので、確かめませんでした:', result.stdout)
+        self.tool_check(script='echo broken >&2\nexit 3\n')
+        result = self.run_setup('--copy', force=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('NOTE: 道具の版を確かめられませんでした(終了コード 3)。', result.stdout)
 
     def test_project_paths_and_force_orders_remain_valid(self):
         for mode in PATH_MODES:

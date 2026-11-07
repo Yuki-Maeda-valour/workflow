@@ -14,6 +14,23 @@ v4.2.0 以前は commit 履歴を参照。
   - テストの名前を変えた。「子に渡す fd: …」→「子プロセスに渡す fd: …」、「外部ランナーの子を残さない」→「外部ランナーの子プロセスを残さない」、変異の名前(`u`・`v`・`y`)→「下のリポジトリで明示的に起動する Git の設定予約を外す」など(`external-runners.md` の一覧と同じ字面)。変異の記号と件数(26 通り)は変えない。
   - 変えなかったもの: 置き換える語「子起動」の定義と検査・TOML の入れ子の表の「子テーブル」「子キー」・`test_task_digest.py` の「子の項目」(別の意味。14 行)、「親」、コードの識別子・引数・環境変数・ファイルの名前・JSON のキー。
 
+## v4.48.0
+
+### 追加
+
+- プラグインが使う道具(git・bash・python3・PyYAML・jq・GNU の道具など)の版を、プラグインを入れた後と版を上げた後の最初の起動で確かめ、表で知らせるようにした。足りない道具があれば、直し方を示す。起動は止めない。([Issue #431](https://github.com/Yuki-Maeda-valour/workflow/issues/431))
+  - Claude Code には、プラグインの導入・更新の時に動く仕組みが無い(公式文書。2026-11-07 確認)。だから、プラグインの `SessionStart` の hook(`plugins/dev-workflow/hooks/hooks.json`)が、前に確かめた版と違う最初の起動のときだけ確かめる。2 回目の起動からは何も出さない。
+  - 道具と最低の版の一覧を `plugins/dev-workflow/hooks/tool-requirements.tsv` にまとめた(正本)。確かめのスクリプト(`hooks/tool-versions.sh`。POSIX の `sh`)と、`runtime-requirements.md` の表が、同じ一覧を使う。
+  - git の最低の版は 2.42(`git var GIT_CONFIG_SYSTEM`。外部の実装担当と無人ループが使う)。PyYAML は版を問わない。jq(任意)は 1.5 以上。
+  - `setup.sh` も、導入の最後に同じ表を出す。終了コードは変えない。
+  - 手で確かめるには `sh <プラグインのルート>/hooks/tool-versions.sh`。前に確かめた版は `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/tool-versions/checked-version` に残す。
+
+### 変更
+
+- 無人ループ(`loop.sh`)の起動の前の確かめ(`host-check.py`)に、例外を 1 つ足した。dev-workflow 自身の決まった字面の `hooks/hooks.json` だけを、空でない hook の拒否から外す。ほかのプラグインの hook と、中身が違う `hooks.json` は、今までどおり止める(条件は `loop.md` §4)。
+  - 配るプラグインの中身が変わるので、この版に上げた後は、無人ループの `--prove-host` を取り直す。
+  - hook は、無人ループのセッション(`DEV_WORKFLOW_LOOP_ITER` が空でない)では何もしない。
+
 ## v4.47.0
 
 ### 変更

@@ -67,8 +67,9 @@
 .claude-plugin/marketplace.json     # マーケットプレイス定義
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
+├── hooks/                         # 使う道具の版の確かめ(SessionStart の hook の hooks.json・確かめの tool-versions.sh・道具と最低の版の一覧 tool-requirements.tsv。#431)
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。診断のテストの準備は diagnostic_test_support.py)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。診断のテストの準備は diagnostic_test_support.py)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/testing.md                     # テストの流し方の詳しい説明と時間の記録(AGENTS.md の「検証」の節から指す)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
@@ -131,6 +132,7 @@ WORKFLOW_PROJECT_NAMES=$(find ~/dev -maxdepth 1 -mindepth 1 -type d -name '[!.]*
 
 # シェルスクリプトを触ったとき
 bash -n setup.sh
+sh -n plugins/dev-workflow/hooks/tool-versions.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/review-agent.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/implement-agent.sh
 bash -n plugins/dev-workflow/skills/do-task/scripts/diff-snapshot.sh
@@ -176,6 +178,8 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
   - unittest: `python3 -B scripts/run-tests.py <テストのファイル>`(例: `test_validate.py`)。関係するファイルは `grep -l '<変えたファイルの名前>' scripts/test_*.py` で探す。
   - loop-selftest: `python3 -B scripts/run-loop-selftest.py <節>`(例: `perm d22`)。節の名前は `grep '^if want' plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` で見る。
   - 4 本の selftest: `bash plugins/dev-workflow/skills/do-task/scripts/<名前>-selftest.sh`(implement-guard は `--only <ケース>`。`--list` で単位を出し、変異は `--only L-<記号>` で 1 つずつ流せる)。
+  - 全回帰テストの流し直し: `bash scripts/run-all-container.sh --worktree -- --reuse` で、入力が前の合格と同じ単位の結果を使い回せる(容器の中だけ)。
+    - PR の前と merge の前には使わない。1 個以上を使い回して合格した回は、最後の行が `結果: 合格(<数> 個の単位は使い回した)/ <秒> 秒` になり、合格の条件に当たらない。
 - 流す時点(PR を開く前)と、結果の PR の本文への書き方は、「PR の前の手順」の節に従う。
 - 詳しい説明(単位・重み・容器・2 つのランナー・テストを足すときの決まり・時間の記録)は [docs/testing.md](docs/testing.md) にある。
 

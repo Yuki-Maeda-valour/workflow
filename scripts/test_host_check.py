@@ -5,6 +5,7 @@
 import json
 import os
 from pathlib import Path
+import shutil
 import stat
 import subprocess
 import sys
@@ -761,6 +762,97 @@ class GrantsTests(Base):
         result = self.policy(self.boot())
         self.assertEqual(result.returncode, 20)
         self.assertNotIn('SECRET_COMMAND', result.stderr)
+
+    def own_hooks(self, root, name='dev-workflow'):
+        """配るプラグインの hooks/(SessionStart の hook と確かめのスクリプトと一覧)を写す(#431)。"""
+        (root / 'hooks').mkdir(parents=True, exist_ok=True)
+        for source in sorted((ROOT / 'plugins/dev-workflow/hooks').iterdir()):
+            (root / 'hooks' / source.name).write_bytes(source.read_bytes())
+        (root / '.claude-plugin').mkdir(parents=True, exist_ok=True)
+        (root / '.claude-plugin/plugin.json').write_text(json.dumps({'name': name}))
+
+    def installed(self, root):
+        self.inventory.write_text(json.dumps([{'id': 'dev-workflow', 'version': '1.0', 'enabled': True,
+                                               'installPath': str(root)}]))
+
+    def test_own_fixed_session_start_hook_is_allowed(self):
+        self.own_hooks(self.root)
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+        # 導入済みのコピー(同じ hooks/ を持つ dev-workflow)も通す
+        plug = self.base / 'cache/valour-workflow/dev-workflow/1.0'
+        self.own_hooks(plug)
+        self.installed(plug)
+        receipt = self.boot()
+        result = self.policy(receipt)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.grants(receipt).returncode, 0)
+
+    def test_own_hook_with_other_bytes_stops(self):
+        self.own_hooks(self.root)
+        hooks = self.root / 'hooks/hooks.json'
+        for changed in (hooks.read_bytes() + b'\n', hooks.read_bytes().replace(b'"timeout": 30', b'"timeout": 31'),
+                        b'{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"SECRET_COMMAND"}]}]}}'):
+            with self.subTest(changed=changed[-20:]):
+                hooks.write_bytes(changed)
+                result = self.policy(self.boot())
+                self.assertEqual(result.returncode, 20)
+                self.assertNotIn('SECRET_COMMAND', result.stderr)
+
+    def test_fixed_hook_in_another_plugin_stops(self):
+        self.own_hooks(self.root)
+        plug = self.base / 'cache/other/1.0'
+        cases = {
+            'name': lambda: self.own_hooks(plug, name='other'),
+            'extra-file': lambda: (self.own_hooks(plug), (plug / 'hooks/extra.sh').write_text('echo extra\n')),
+            'script': lambda: (self.own_hooks(plug), (plug / 'hooks/tool-versions.sh').write_text('echo other\n')),
+            'list': lambda: (self.own_hooks(plug), (plug / 'hooks/tool-requirements.tsv').write_text('# x\n')),
+            'no-manifest': lambda: (self.own_hooks(plug), (plug / '.claude-plugin/plugin.json').unlink()),
+        }
+        for label, make in cases.items():
+            with self.subTest(case=label):
+                shutil.rmtree(plug, ignore_errors=True)
+                make()
+                self.installed(plug)
+                result = self.policy(self.boot())
+                self.assertEqual(result.returncode, 20, result.stderr)
+
+    def test_own_root_without_the_hook_gives_no_exception(self):
+        plug = self.base / 'cache/valour-workflow/dev-workflow/1.0'
+        self.own_hooks(plug)
+        self.installed(plug)
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
+        # loop.sh 自身の root でも、別の名前なら通さない
+        shutil.rmtree(plug)
+        self.inventory.write_text('[]')
+        self.own_hooks(self.root, name='other')
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
+
+    def test_exemptions_need_one_workflow_root_and_skip_skill_folder_plugins(self):
+        hooks = {'hooks/' + path.name: path.read_bytes() for path in (ROOT / 'plugins/dev-workflow/hooks').iterdir()}
+
+        def plugin(root, source=None, name='dev-workflow'):
+            files = dict(hooks, **{'.claude-plugin/plugin.json': json.dumps({'name': name}).encode()})
+            return [dict({'key': 'component:plugin:%s/%s' % (root, rel), 'kind': 'plugin', 'root': root,
+                          'relative': rel, 'path': '%s/%s' % (root, rel), 'raw': raw},
+                         **({'source': source} if source else {})) for rel, raw in files.items()]
+
+        def keys(*roots):
+            return frozenset('component:plugin:%s/hooks/hooks.json' % root for root in roots)
+
+        own, copy = plugin('/w', 'workflow'), plugin('/c')
+        self.assertEqual(keys('/w', '/c'), HC.workflow_hook_exemptions(own + copy))
+        self.assertEqual(frozenset(), HC.workflow_hook_exemptions(copy))
+        self.assertEqual(frozenset(), HC.workflow_hook_exemptions(own + plugin('/w2', 'workflow') + copy))
+        self.assertEqual(keys('/w'), HC.workflow_hook_exemptions(own + plugin('/s', 'skill-folder-plugin')))
+        self.assertEqual(keys('/w'), HC.workflow_hook_exemptions(own + plugin('/o', name='other')))
+
+    def test_fixed_hook_bytes_elsewhere_stop(self):
+        self.own_hooks(self.root)
+        (self.root / 'skills/a/hooks.json').write_bytes((self.root / 'hooks/hooks.json').read_bytes())
+        self.assertEqual(self.policy(self.boot()).returncode, 20)
 
     def test_empty_declared_skill_directory_is_normal_and_absent_is_rejected(self):
         (self.root / 'empty-skills').mkdir()

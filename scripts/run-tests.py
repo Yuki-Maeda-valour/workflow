@@ -230,7 +230,10 @@ CHILD_FLAGS = ["-B"]
 
 
 def build_units(jobs, workdir, flags=CHILD_FLAGS):
-    """ジョブから単位を作る。重みは、表の「ファイルの重み ÷ 分ける数」(表に無ければ None)。"""
+    """ジョブから単位を作る。重みは、表の「ファイルの重み ÷ 分ける数」(表に無ければ None)。
+
+    ident はジョブ(結果の組の先頭の値)、entry は流すテストのファイル(run-all.py の使い回しが使う)。
+    """
     units = []
     for job in jobs:
         weight = WEIGHTS.get(job[0])
@@ -239,7 +242,7 @@ def build_units(jobs, workdir, flags=CHILD_FLAGS):
             key=key_of(job), label=f"{label(job)}", in_slot=True, weight=weight, table_weight=weight,
             source="既定" if weight is None else "表",
             run=lambda children, job=job: run_job(job, workdir, flags, children),
-            describe=describe))
+            describe=describe, ident=job, entry=f"scripts/{job[0]}"))
     return units
 
 
