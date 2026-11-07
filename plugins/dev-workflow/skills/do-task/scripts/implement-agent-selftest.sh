@@ -53,35 +53,68 @@ prot_cleanup() {
   if [ "$MADE_PROT_BASE" -eq 1 ]; then rmdir -- "$PROT_BASE" 2>/dev/null || true; fi
 }
 trap 'leak_cleanup; rm -rf "$WORK"; prot_cleanup' EXIT
-mkdir -p "$WORK/proj" "$WORK/bin" "$WORK/safebin" "$WORK/safebin-nopython" "$WORK/target" "$WORK/record" "$WORK/empty"
+mkdir -p "$WORK/proj" "$WORK/bin" "$WORK/safebin" "$WORK/safebin-nopython" "$WORK/safebin-notimeout" "$WORK/target" "$WORK/record" "$WORK/empty"
 cd "$WORK/proj"
 
 PASS=0
 FAIL=0
-RESULTS=""
+RESULTS=()
 
-ok()   { PASS=$((PASS + 1)); RESULTS="$RESULTS
-PASS  $1"; }
-ng()   { FAIL=$((FAIL + 1)); RESULTS="$RESULTS
-FAIL  $1"; }
+ok()   { PASS=$((PASS + 1)); RESULTS+=("PASS  $1"); }
+ng()   { FAIL=$((FAIL + 1)); RESULTS+=("FAIL  $1"); }
+
+# ── 猶予を短くしたコピー ──
+# 製品の KILL_GRACE=5(TERM の後、強制終了までの猶予)は固定値で、外から変えられない。中止・タイムアウトで
+# 5 秒ずつ待つケースは、その行だけを 1 にしたコピーで流す(製品は変えない)。本物の値で流すのは $TARGET のまま
+# (TERM 無視スタブのタイムアウトの 1 件)。sed は -i を使わず、リダイレクトで作る(BSD sed のため)。
+# 置き換えが 1 か所だけ当たったかを先に確かめ、当たらなければ ng を出して本物で続ける
+SHORT_TARGET="$WORK/short-grace.sh"
+sed 's/^KILL_GRACE=5\([[:space:]]\)/KILL_GRACE=1\1/' "$TARGET" >"$SHORT_TARGET"
+if [ "$(grep -c '^KILL_GRACE=1[[:space:]]' "$SHORT_TARGET")" -eq 1 ] \
+  && [ "$(grep -c '^KILL_GRACE=5[[:space:]]' "$SHORT_TARGET")" -eq 0 ] \
+  && [ "$(diff "$TARGET" "$SHORT_TARGET" | grep -c '^>')" -eq 1 ] \
+  && [ "$(diff "$TARGET" "$SHORT_TARGET" | grep -c '^<')" -eq 1 ]; then
+  ok "短い猶予のコピー: KILL_GRACE の行だけを 1 にした"
+else
+  ng "短い猶予のコピー: KILL_GRACE の行だけを 1 にできない(本物の猶予 5 秒で続ける)"
+  SHORT_TARGET="$TARGET"
+fi
 
 # ── 制限 PATH(実機の CLI が絶対に見えないようにする)──
 # python3 は、ログのパスの差し替えの比べ直し(-ef が使えない環境。macOS)に使う。
 # safebin-nopython は python3 を外した形(K 節の「差し替えの照合:」で使う)
+# safebin-notimeout は timeout・gtimeout を外した形(timeout を使わない代わりの経路のケースで使う)
+# true は、製品が `timeout -k 1 1 true` で timeout が動くかを確かめるために要る(無いと、timeout を
+# 使わない代わりの経路(1 秒ごとに生存を見る)に落ちて、1 回の起動が約 3 秒かかる)。
+# 実体のパスは type -P で探す(true は bash の組み込みで、command -v は名前 true だけを返し、
+# 自分を指す壊れたリンクになるため。type -P は組み込みを飛ばして PATH の実体だけを返す)
 make_sandbox() { # $1=出力ディレクトリ 残り=除外するコマンド名
   sb="$1"; shift
   rm -f "$sb"/*
-  for c in bash sh cat grep date dirname basename mkdir chmod sed awk sleep rm mktemp cut wc tr head env ls pkill ps python3 timeout gtimeout; do
+  for c in bash sh cat grep date dirname basename mkdir chmod sed awk sleep rm mktemp cut wc tr head env ls pkill ps python3 timeout gtimeout true; do
     skip=0
     for x in "$@"; do [ "$c" = "$x" ] && skip=1; done
     [ "$skip" -eq 1 ] && continue
-    src="$(command -v "$c" 2>/dev/null)" || continue
+    src="$(type -P "$c" 2>/dev/null)" || continue
     [ -n "$src" ] && ln -sf "$src" "$sb/$c"
   done
 }
 make_sandbox "$WORK/safebin"
 make_sandbox "$WORK/safebin-nopython" python3
+make_sandbox "$WORK/safebin-notimeout" timeout gtimeout
 SAFEPATH="$WORK/safebin"
+
+# 制限した PATH で timeout が使えること(製品と同じ順: timeout、無ければ gtimeout で `-k 1 1 true` が通る)
+TMO_STATE="$(PATH="$WORK/safebin"
+  st=none
+  if command -v timeout >/dev/null 2>&1; then st=ng; timeout -k 1 1 true >/dev/null 2>&1 && st=ok; fi
+  if [ "$st" != ok ] && command -v gtimeout >/dev/null 2>&1; then st=ng; gtimeout -k 1 1 true >/dev/null 2>&1 && st=ok; fi
+  echo "$st")"
+case "$TMO_STATE" in
+  ok)   ok "制限した PATH で timeout が使える" ;;
+  none) ok "制限した PATH で timeout が使える(timeout・gtimeout が無い環境のため飛ばす)" ;;
+  *)    ng "制限した PATH で timeout が使える(timeout -k 1 1 true が終了コード 0 にならない。製品が代わりの経路に落ちる)" ;;
+esac
 
 PROMPT="$WORK/prompt.md"
 echo "タスク MD に従って実装してください" >"$PROMPT"
@@ -370,6 +403,16 @@ leak_cleanup() {
     ps -eo pid,args 2>/dev/null | awk -v s="bash $WORK/bin/$s.sh" '$0 ~ "[0-9] "s {print $1}' \
       | while read -r p; do kill -9 "$p" 2>/dev/null; done
   done
+}
+# 数を出す関数($1)が 0 を出すまで、0.1 秒ごとに見て待つ($2=上限。0.1 秒の単位の整数。0.5 秒は 5・2 秒は 20)。
+# 0 になれば 0、上限まで 0 にならなければ 1 を返す(固定の sleep の代わり。数は一度 0 になれば戻らない)
+wait_gone() {
+  wg_i=0
+  while [ "$wg_i" -lt "$2" ]; do
+    [ "$("$1")" -eq 0 ] && return 0
+    sleep 0.1; wg_i=$((wg_i + 1))
+  done
+  [ "$("$1")" -eq 0 ]
 }
 
 # selftest 専用の保護領域を作る(K 節で $XDG_STATE_HOME をここへ向ける)
@@ -828,8 +871,8 @@ else
   cat "$CASE_ERR" >&2 2>/dev/null || true
 fi
 
-# E5. TERM を無視するプロセスでもタイムアウトが成立し、残骸を残さない
-leak_cleanup; sleep 1
+# E5. TERM を無視するプロセスでもタイムアウトが成立し、残骸を残さない(timeout 経路。本物の猶予 5 秒)
+leak_cleanup; wait_gone leak_count 10
 STUB_DIR="$WORK/termignore"
 start=$(date +%s)
 run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
@@ -837,9 +880,26 @@ run_agent --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
 elapsed=$(( $(date +%s) - start ))
 if [ "$rc" -eq 7 ] && [ "$elapsed" -lt 30 ]; then ok "TERM 無視スタブでもタイムアウト成立 (exit=$rc / ${elapsed}s)"; else
   ng "TERM 無視スタブでもタイムアウト成立 (期待 exit=7 かつ 30 秒未満 / 実際 exit=$rc ${elapsed}s)"; fi
-sleep 2
+wait_gone leak_count 20
 if [ "$(leak_count)" -eq 0 ]; then ok "タイムアウト後にプロセスを残さない"; else
   ng "タイムアウト後にプロセスを残さない(残存 $(leak_count) 件)"; leak_cleanup; fi
+
+# E5-fb. 代わりの経路(timeout・gtimeout が無い環境)でも、TERM を無視するプロセスでタイムアウトが成立し、
+#        残骸を残さない。制限した PATH に true の実体を足したので、ほかのケースは timeout の経路を通る。
+#        この経路は、ここと H1 の fallback の回で確かめる。猶予を 1 秒にしたコピーで流す
+leak_cleanup; wait_gone leak_count 10
+STUB_DIR="$WORK/termignore"
+SAFEPATH="$WORK/safebin-notimeout"
+start=$(date +%s)
+run_mutant "$SHORT_TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  --probe-timeout 2 --log-file "$WORK/log-e5fb.md"; rc=$?
+elapsed=$(( $(date +%s) - start ))
+SAFEPATH="$WORK/safebin"
+if [ "$rc" -eq 7 ] && [ "$elapsed" -lt 30 ]; then ok "フォールバック経路でもタイムアウト成立 (exit=$rc / ${elapsed}s)"; else
+  ng "フォールバック経路でもタイムアウト成立 (期待 exit=7 かつ 30 秒未満 / 実際 exit=$rc ${elapsed}s)"; fi
+wait_gone leak_count 5
+if [ "$(leak_count)" -eq 0 ]; then ok "タイムアウト後にプロセスを残さない(フォールバック経路)"; else
+  ng "タイムアウト後にプロセスを残さない(フォールバック経路・残存 $(leak_count) 件)"; leak_cleanup; fi
 
 # ── F. --dry-run と実装用既定表(§12-6)の同期 ──
 
@@ -998,7 +1058,7 @@ STUB_DIR="$WORK/pathbin"
 # H1. 2026-09-17 決定 41: スクリプト自身への TERM / HUP / INT で、走行中の外部 CLI の子を道連れにする。
 #     呼び出し側は §12-6 の帰結として背景実行するので、中止操作は**シグナルとして届く**。
 #     子が生き残ると、書き込みモードのまま走るプロセスの傍らで §12-3 の再取得・比較を行うことになる
-leak_cleanup; sleep 1
+leak_cleanup; wait_gone leak_count 10; wait_gone sig_leak_count 10
 STUB_DIR="$WORK/sigstub"
 # INT は「保険」。**非対話 shell の非同期ジョブは SIGINT を SIG_IGN で受け継ぎ、bash は
 # 「起動時に無視されていたシグナル」には trap を張れない**(POSIX の規定)。つまり INT が
@@ -1007,19 +1067,23 @@ STUB_DIR="$WORK/sigstub"
 cat >"$WORK/bin/inttrap.sh" <<'EOF'
 #!/usr/bin/env bash
 trap 'exit 130' INT
-sleep 10 &
-wait $!
+kill -INT $$
 exit 0
 EOF
 chmod +x "$WORK/bin/inttrap.sh"
+# 背景で起動し(起動した時の INT の扱いを、本番の起動と同じにする)、自分に INT を送らせる。
+# 時間に頼らず、終了コード 130 なら受け取れる・ほかなら受け取れない
 bash "$WORK/bin/inttrap.sh" & int_probe_pid=$!
-sleep 1; kill -INT "$int_probe_pid" 2>/dev/null
 int_probe_rc=0; wait "$int_probe_pid" || int_probe_rc=$?
-kill -9 "$int_probe_pid" 2>/dev/null
 INT_TRAPPABLE=0
 [ "$int_probe_rc" -eq 130 ] && INT_TRAPPABLE=1
-for spec in "TERM:143" "HUP:129" "INT:130"; do
-  sig="${spec%%:*}"; want="${spec##*:}"
+# 並びの 3 つ目は経路: timeout は timeout の経路、fallback は timeout・gtimeout を外した PATH(代わりの経路)。
+# INT は代わりの経路では流さない
+for spec in "TERM:143:timeout" "HUP:129:timeout" "INT:130:timeout" "TERM:143:fallback" "HUP:129:fallback"; do
+  sig="${spec%%:*}"; h1_rest="${spec#*:}"; want="${h1_rest%%:*}"; h1_path="${h1_rest##*:}"
+  h1_label="$sig"; SAFEPATH="$WORK/safebin"
+  if [ "$h1_path" = fallback ]; then h1_label="$sig-fallback"; SAFEPATH="$WORK/safebin-notimeout"; fi
+  h1_log="$WORK/log-h1-$h1_label.md"
   if [ "$sig" = "INT" ] && [ "$INT_TRAPPABLE" -eq 0 ]; then
     ok "中止(INT): この起動文脈では SIGINT が SIG_IGN で継承され trap を張れないため飛ばす(bash の制約。TERM / HUP が本線)"
     continue
@@ -1029,15 +1093,15 @@ for spec in "TERM:143" "HUP:129" "INT:130"; do
   while IFS= read -r e; do rs_env[${#rs_env[@]}]="$e"; done <<<"$(agent_env)"
   # --run-timeout は「シグナルが効かなかったとき、いつまでも待たずに FAIL に落ちる」ための保険。
   # 正常な経路ではタイムアウト前にシグナルで止まる
-  env "${rs_env[@]}" bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
-    --probe-timeout 10 --run-timeout 45 --log-file "$WORK/log-h1-$sig.md" \
+  env "${rs_env[@]}" bash "$SHORT_TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+    --probe-timeout 10 --run-timeout 45 --log-file "$h1_log" \
     >"$CASE_OUT" 2>"$CASE_ERR" &
   agent_pid=$!
   waited=0
-  while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+  while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done
   sleep 1
   if [ ! -e "$RUN_MARKER" ]; then
-    ng "中止($sig): 本実行まで到達しない(治具の失敗)"
+    ng "中止($h1_label): 本実行まで到達しない(治具の失敗)"
     kill -9 "$agent_pid" 2>/dev/null
     wait "$agent_pid" 2>/dev/null
     leak_cleanup
@@ -1045,24 +1109,25 @@ for spec in "TERM:143" "HUP:129" "INT:130"; do
   fi
   kill -"$sig" "$agent_pid" 2>/dev/null
   rc=0; wait "$agent_pid" || rc=$?
-  sleep 2
-  if [ "$rc" -eq "$want" ]; then ok "中止($sig): 終了コード $want で終わる"; else
-    ng "中止($sig): 終了コード $want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
-  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($sig): 外部ランナーの子を残さない"; else
-    ng "中止($sig): 外部ランナーの子を残さない(残存 $(sig_leak_count) 件)"; leak_cleanup; fi
-  if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then ok "中止($sig): stderr が ERROR [理由コード] 形式"; else
-    ng "中止($sig): stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2; fi
-  if grep -qF '**中止**' "$WORK/log-h1-$sig.md"; then ok "中止($sig): ログに中止が残る"; else
-    ng "中止($sig): ログに中止が残る"; fi
-  if grep -qF '途中まで書いた' "$CASE_OUT"; then ok "中止($sig): 中止時点までの生出力を stdout に流す"; else
-    ng "中止($sig): 中止時点までの生出力を stdout に流す"; cat "$CASE_OUT" >&2; fi
+  wait_gone sig_leak_count 5
+  if [ "$rc" -eq "$want" ]; then ok "中止($h1_label): 終了コード $want で終わる"; else
+    ng "中止($h1_label): 終了コード $want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
+  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($h1_label): 外部ランナーの子を残さない"; else
+    ng "中止($h1_label): 外部ランナーの子を残さない(残存 $(sig_leak_count) 件)"; leak_cleanup; fi
+  if grep -qE '^ERROR \[[a-z-]+\] ' "$CASE_ERR"; then ok "中止($h1_label): stderr が ERROR [理由コード] 形式"; else
+    ng "中止($h1_label): stderr が ERROR [理由コード] 形式"; cat "$CASE_ERR" >&2; fi
+  if grep -qF '**中止**' "$h1_log"; then ok "中止($h1_label): ログに中止が残る"; else
+    ng "中止($h1_label): ログに中止が残る"; fi
+  if grep -qF '途中まで書いた' "$CASE_OUT"; then ok "中止($h1_label): 中止時点までの生出力を stdout に流す"; else
+    ng "中止($h1_label): 中止時点までの生出力を stdout に流す"; cat "$CASE_OUT" >&2; fi
   # プローブの生出力も残す。プローブ成功時は probe_fail を通らずログに出ないので、
   # このラベルが在れば中止ハンドラが書いたものだと分かる(プローブ中の中止では
   # 本実行の生出力がまだ空で、こちらだけが引き継ぎの手がかりになる)
-  if grep -qF 'プローブ生出力(中止時点まで)' "$WORK/log-h1-$sig.md"; then
-    ok "中止($sig): プローブの生出力もログに残る"; else
-    ng "中止($sig): プローブの生出力もログに残る"; fi
+  if grep -qF 'プローブ生出力(中止時点まで)' "$h1_log"; then
+    ok "中止($h1_label): プローブの生出力もログに残る"; else
+    ng "中止($h1_label): プローブの生出力もログに残る"; fi
 done
+SAFEPATH="$WORK/safebin"
 leak_cleanup
 
 # H2. 2026-09-17 決定 40: 本実行の出力を受ける scratch は「外部の書き込み範囲外」の保護領域にある。
@@ -1541,11 +1606,11 @@ rs_env=()
 while IFS= read -r e; do rs_env[${#rs_env[@]}]="$e"; done <<<"$(agent_env)"
 env "${rs_env[@]}" "${K_ENV[@]}" "SELFTEST_SWAP_MODE=symlink" "SELFTEST_SWAP_LOG=$kd_log" \
   "SELFTEST_SWAP_VICTIM=$K_VICTIM" "SELFTEST_SWAP_HOLD=1" \
-  bash "$TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
+  bash "$SHORT_TARGET" --runner codex --prompt-file "$PROMPT" --cwd "$CWD_TARGET" \
   --probe-timeout 10 --run-timeout 45 --log-file "$kd_log" >"$CASE_OUT" 2>"$CASE_ERR" &
 kd_pid=$!
 waited=0
-while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done
 sleep 1
 if [ ! -e "$RUN_MARKER" ]; then
   ng "走行中の差し替え: (d) 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -1609,7 +1674,7 @@ check "差し替えの照合: 差し替えない: 本実行まで通る" 0 "$rc"
 kc_notes "差し替えの照合: 差し替えない: stderr に差し替えの NOTE が無い" 0
 kc_run product fdlink fdlink
 kc_notes "差し替えの照合: /dev/fd/7 を指す symlink: stderr に差し替えの NOTE が出る" +
-sed 's#\[ /dev/fd/7 -ef "\$LOG_FILE" \]#false#g' "$TARGET" >"$K_EF_TARGET"
+sed 's#\[ /dev/fd/7 -ef "\$LOG_FILE" \]#false#g' "$SHORT_TARGET" >"$K_EF_TARGET"
 kc_hits="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$TARGET")"
 kc_left="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$K_EF_TARGET")"
 if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
@@ -1643,7 +1708,7 @@ if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
     --probe-timeout 10 --run-timeout 45 --log-file "$kc_log" >"$CASE_OUT" 2>"$CASE_ERR" &
   kc_pid=$!
   waited=0
-  while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+  while [ ! -e "$RUN_MARKER" ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done
   sleep 1
   if [ ! -e "$RUN_MARKER" ]; then
     ng "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -2290,13 +2355,13 @@ M11_MARKER="$WORK/m11.started"; rm -f "$M11_MARKER"
 STUB_DIR="$WORK/modelstub"
 rs_env=()
 while IFS= read -r e; do rs_env[${#rs_env[@]}]="$e"; done <<<"$(agent_env)"
-env "${rs_env[@]}" SELFTEST_MODEL_MODE=hang SELFTEST_MODEL_MARKER="$M11_MARKER" bash "$TARGET" --runner codex \
+env "${rs_env[@]}" SELFTEST_MODEL_MODE=hang SELFTEST_MODEL_MARKER="$M11_MARKER" bash "$SHORT_TARGET" --runner codex \
   --prompt-file "$PROMPT" --cwd "$CWD_TARGET" --probe-timeout 40 --run-timeout 20 --log-file "$WORK/log-m11.md" \
   >"$CASE_OUT" 2>"$CASE_ERR" &
 m11_pid=$!
 STUB_DIR="$WORK/pathbin"
 m11_waited=0
-while [ ! -e "$M11_MARKER" ] && [ "$m11_waited" -lt 40 ]; do sleep 1; m11_waited=$((m11_waited + 1)); done
+while [ ! -e "$M11_MARKER" ] && [ "$m11_waited" -lt 400 ]; do sleep 0.1; m11_waited=$((m11_waited + 1)); done
 sleep 1
 if [ ! -e "$M11_MARKER" ]; then
   ng "モデル名: プローブ中の中止: プローブまで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -2347,7 +2412,8 @@ else
 fi
 
 echo
-printf '%s\n' "$RESULTS"
+echo
+[ "${#RESULTS[@]}" -eq 0 ] || printf '%s\n' "${RESULTS[@]}"
 echo
 echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件"
 [ "$FAIL" -eq 0 ]
