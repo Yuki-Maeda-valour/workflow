@@ -190,7 +190,13 @@ class NativeLaunchMockTest(unittest.TestCase):
                 self.assertEqual(base64.b64decode(record["stdin"]), kwargs.get("data", b""))
 
     def test_posix_syntax_and_executable_mode(self):
-        self.assertEqual(stat.S_IMODE(LAUNCH.stat().st_mode), 0o755)
+        # 作業ツリーのモードは取り出した機械の umask で変わる(002 なら 0775)。git は実行ビットだけを持つので、
+        # 実行できることと、git の上のモードが 100755 であることを確かめる。
+        self.assertEqual(stat.S_IMODE(LAUNCH.stat().st_mode) & 0o111, 0o111)
+        tracked = subprocess.run(['git', '-C', str(LAUNCH.parent), 'ls-files', '-s', '--', LAUNCH.name],
+                                 capture_output=True, text=True, timeout=10)
+        if tracked.returncode == 0 and tracked.stdout:
+            self.assertTrue(tracked.stdout.startswith('100755 '), tracked.stdout)
         for name, shell in self.shells:
             with self.subTest(shell=name):
                 result = subprocess.run([*shell, "-n", str(LAUNCH)], capture_output=True, timeout=10)
