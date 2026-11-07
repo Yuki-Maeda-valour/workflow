@@ -8,6 +8,11 @@
 #   bash implement-guard-selftest.sh -v           # 各起動の終了コード・stdout・stderr も表示
 #   bash implement-guard-selftest.sh --only B1,G  # 指定したケースだけ(1 文字なら群の全体)。
 #                                                 # L を含めない限り変異テストは回さない
+#   bash implement-guard-selftest.sh --only L-a   # 変異 1 つだけ(L-<記号>。記号は --list に出る)
+#   bash implement-guard-selftest.sh --list       # 単位(--only に渡せる値)を 1 行に 1 つ出す。何も作らない。
+#                                                 # M・N はケースごと、L は変異ごと、ほかは群ごと(78 行)
+#   bash implement-guard-selftest.sh --check-units A,B1,...   # 渡した単位が全ケースをちょうど 1 回ずつ覆うかを見る
+#                                                 # (0=覆う / 1=覆わない。何も作らない)
 #   IMPLEMENT_GUARD=<パス> bash implement-guard-selftest.sh   # 別の実装を対象にする(変異テスト用)
 #
 # 全起動に外側タイムアウトを掛ける(既定 90 秒・重い起動 180 秒)。正常時は待たないので所要は変わらない。
@@ -55,15 +60,97 @@ TARGET="${IMPLEMENT_GUARD:-$SCRIPT_DIR/implement-guard.sh}"
 case "$TARGET" in /*) : ;; *) TARGET="$PWD/$TARGET" ;; esac
 VERBOSE=0
 ONLY=""
+ONLY_GIVEN=0
+LIST=0
+CHECK_UNITS=""
+CHECK_UNITS_GIVEN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -v) VERBOSE=1; shift ;;
     --only)
       [ $# -ge 2 ] || { echo "ERROR: --only に値が必要" >&2; exit 1; }
-      ONLY="$2"; shift 2 ;;
+      ONLY="$2"; ONLY_GIVEN=1; shift 2 ;;
+    --list) LIST=1; shift ;;
+    --check-units)
+      [ $# -ge 2 ] || { echo "ERROR: --check-units に値が必要" >&2; exit 1; }
+      CHECK_UNITS="$2"; CHECK_UNITS_GIVEN=1; shift 2 ;;
     *) echo "ERROR: 不明な引数: $1" >&2; exit 1 ;;
   esac
 done
+
+# ── 単位(--only に渡せる値)。--list・--check-units は、ここで何も作らずに答える ──
+# 変異の記号。case_L が mutant を呼ぶ順のまま(--only L で流す順を変えない。--list の L の行もこの順)
+MUT_IDS="a b c d e f g h i j k l m n o p r w s u v t q x y z"
+ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
+E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 P1 P2 P3 P4 P5 P6 P7 P8 P9 L"
+id_matches() { # $1=--only の値 1 つ $2=ケース ID → 0 なら、その値でそのケースが流れる(1 文字は群の全体、それ以外は完全一致)
+  [ "$1" = "$2" ] && return 0
+  [ "${#1}" -eq 1 ] && [ "$1" != L ] && [ "${2:0:1}" = "$1" ] && return 0
+  return 1
+}
+# 単位の一覧(1 行に 1 つ)。M と N はケースごと(群のままだと長いため)、L は変異ごとの L-<記号>、ほかは群の 1 文字
+unit_list() {
+  local c g m seen=" "
+  for c in $ALL_CASES; do
+    [ "$c" = L ] && continue
+    g="${c:0:1}"
+    case "$g" in
+      M|N) printf '%s\n' "$c" ;;
+      *) case "$seen" in *" $g "*) : ;; *) printf '%s\n' "$g"; seen="$seen$g " ;; esac ;;
+    esac
+  done
+  for m in $MUT_IDS; do printf 'L-%s\n' "$m"; done
+}
+# 覆いの確かめ: $1=単位(空白区切り)を --only に渡したとき、L 以外の全ケース ID と全変異が、ちょうど 1 回ずつ流れるか。
+# 足りない ID・重なる ID・知らない単位を標準エラーに出し、崩れていれば 1
+check_units() {
+  local u c m n missing="" dup="" unknown="" known
+  for u in $1; do
+    known=0
+    for c in $ALL_CASES; do
+      [ "$c" = L ] && continue
+      if id_matches "$u" "$c"; then known=1; fi
+    done
+    if [ "$u" = L ]; then known=1; fi
+    case "$u" in L-?*) case " $MUT_IDS " in *" ${u#L-} "*) known=1 ;; esac ;; esac
+    if [ "$known" -eq 0 ]; then unknown="$unknown $u"; fi
+  done
+  for c in $ALL_CASES; do
+    [ "$c" = L ] && continue
+    n=0
+    for u in $1; do if id_matches "$u" "$c"; then n=$((n + 1)); fi; done
+    if [ "$n" -eq 0 ]; then missing="$missing $c"; elif [ "$n" -gt 1 ]; then dup="$dup $c"; fi
+  done
+  for m in $MUT_IDS; do
+    n=0
+    for u in $1; do if [ "$u" = L ] || [ "$u" = "L-$m" ]; then n=$((n + 1)); fi; done
+    if [ "$n" -eq 0 ]; then missing="$missing L-$m"; elif [ "$n" -gt 1 ]; then dup="$dup L-$m"; fi
+  done
+  if [ -n "$missing$dup$unknown" ]; then
+    [ -z "$missing" ] || echo "ERROR: 単位が覆っていない ID:$missing" >&2
+    [ -z "$dup" ] || echo "ERROR: 単位が重なっている ID:$dup" >&2
+    [ -z "$unknown" ] || echo "ERROR: 知らない単位:$unknown" >&2
+    return 1
+  fi
+  return 0
+}
+if [ "$LIST" -eq 1 ]; then
+  if [ "$VERBOSE" -eq 1 ] || [ "$ONLY_GIVEN" -eq 1 ] || [ "$CHECK_UNITS_GIVEN" -eq 1 ]; then
+    echo "ERROR: --list はほかの引数と一緒に渡せない" >&2; exit 1
+  fi
+  UNITS="$(unit_list)"
+  check_units "$UNITS" || exit 1
+  printf '%s\n' "$UNITS"
+  exit 0
+fi
+if [ "$CHECK_UNITS_GIVEN" -eq 1 ]; then
+  if [ "$VERBOSE" -eq 1 ] || [ "$ONLY_GIVEN" -eq 1 ]; then
+    echo "ERROR: --check-units は -v・--only と一緒に渡せない" >&2; exit 1
+  fi
+  check_units "${CHECK_UNITS//,/ }" || exit 1
+  exit 0
+fi
 
 [ -f "$TARGET" ] || { echo "ERROR: $TARGET が無い" >&2; exit 1; }
 
@@ -138,13 +225,22 @@ if [ -n "${IMPLEMENT_GUARD_SELFTEST_PROT:-}" ]; then
   [ -d "$IMPLEMENT_GUARD_SELFTEST_PROT" ] || { echo "ERROR: 借りる保護領域が無い" >&2; exit 1; }
   PROT="$IMPLEMENT_GUARD_SELFTEST_PROT"
 else
-  if [ ! -d "$PROT_BASE" ]; then
-    mkdir -p -- "$PROT_BASE" || { echo "ERROR: $PROT_BASE を作れない" >&2; exit 1; }
-    MADE_BASE=1
-    chmod 700 -- "$PROT_BASE" 2>/dev/null || true
-  fi
+  # 置き場が無ければ作る(作ったなら、終わりに空なら消す)。同時に動く別のスイートが、置き場を消した直後に
+  # mktemp が落ちることがあるので、置き場を作り直して 3 回まで試す
   OWN_PROT=1
-  PROT="$(mktemp -d "$PROT_BASE/selftest-guard-XXXXXX")" || { PROT=""; echo "ERROR: selftest 用の保護領域を作れない" >&2; exit 1; }
+  PROT=""
+  MKTEMP_ERR=""
+  for _attempt in 1 2 3; do
+    if [ ! -d "$PROT_BASE" ]; then
+      mkdir -p -- "$PROT_BASE" || { echo "ERROR: $PROT_BASE を作れない" >&2; exit 1; }
+      MADE_BASE=1
+      chmod 700 -- "$PROT_BASE" 2>/dev/null || true
+    fi
+    if PROT="$(mktemp -d "$PROT_BASE/selftest-guard-XXXXXX" 2>"$WORK/mktemp.err")"; then break; fi
+    PROT=""
+    MKTEMP_ERR="$(cat "$WORK/mktemp.err" 2>/dev/null)"   # 最後の試みの標準エラー(原因を見せる)
+  done
+  [ -n "$PROT" ] || { echo "ERROR: selftest 用の保護領域を作れない" >&2; [ -z "$MKTEMP_ERR" ] || echo "mktemp: $MKTEMP_ERR" >&2; exit 1; }
 fi
 PROT_REAL="$(phys_dir "$PROT")"
 [ -n "$PROT_REAL" ] || { echo "ERROR: 保護領域の物理パスを解決できない" >&2; exit 1; }
@@ -2837,7 +2933,23 @@ mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed �
   sed "${args[@]}" "$TARGET" >"$o" || return 1
   cp -- "$SCRIPT_DIR/restore-taskmd.py" "$(dirname -- "$o")/restore-taskmd.py" || return 1
 }
+# 変異を選んだか(--only が無い・L がある・L-<記号> がある、のときだけ真)
+sel_mut() { # $1=記号
+  local id
+  [ -n "$ONLY" ] || return 0
+  for id in ${ONLY//,/ }; do
+    if [ "$id" = L ] || [ "$id" = "L-$1" ]; then return 0; fi
+  done
+  return 1
+}
+MUT_RAN=" "   # mutant が流れた記号(case_L の終わりで、選んだ変異が全部流れたかを見る)
 mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区切り)残り=sed 式
+  case " $MUT_IDS " in
+    *" $1 "*) : ;;
+    *) ng "変異($1) 記号が MUT_IDS に無い"; return 0 ;;
+  esac
+  sel_mut "$1" || return 0
+  MUT_RAN="$MUT_RAN$1 "
   local id="$1" desc="$2" expect="$3" v out n c rc=0 only total per firsts t0="$SECONDS" pre prc=0
   shift 3
   mkdir -p "$WORK/mut/$id"
@@ -2938,10 +3050,12 @@ case_L() {
   local lb la
   mutant a "ダイジェスト照合を外す" "G1 G2 G3" '/# MUT:a$/d'
   mutant b "hooks / config の検査を git の再取得より後ろへ動かす" "G7" '/# MUT:b$/{h;d;}' '/# ANCHOR:retake$/G'
-  lb="$(grep -n -- '# MUT:b$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
-  la="$(grep -n -- '# ANCHOR:retake$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
-  if [ -n "$lb" ] && [ -n "$la" ] && [ "$lb" -eq "$((la + 1))" ]; then ok "変異(b) 検査の行が再取得の行の直後へ動いている(消えただけではない)"
-  else ng "変異(b) 検査の行が再取得の行の直後へ動いている(検査: ${lb:-無し} 行 / 再取得: ${la:-無し} 行)"; fi
+  if sel_mut b; then
+    lb="$(grep -n -- '# MUT:b$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
+    la="$(grep -n -- '# ANCHOR:retake$' "$WORK/mut/b/guard.sh" | cut -d: -f1 | head -n 1)"
+    if [ -n "$lb" ] && [ -n "$la" ] && [ "$lb" -eq "$((la + 1))" ]; then ok "変異(b) 検査の行が再取得の行の直後へ動いている(消えただけではない)"
+    else ng "変異(b) 検査の行が再取得の行の直後へ動いている(検査: ${lb:-無し} 行 / 再取得: ${la:-無し} 行)"; fi
+  fi
   mutant c "前置きの -c core.fsmonitor= を外す" "B3" '/# MUT:c$/d'
   mutant d "使い捨て index をやめる" "B5" '/# MUT:d$/s/GIT_INDEX_FILE="[^"]*" //'
   mutant e "復元先の階層検査を外す" "J4"
@@ -2965,14 +3079,21 @@ case_L() {
   mutant q "再帰 include の解析を外す" "M7" '/# MUT:q$/s/parse_candidate_includes "\$CAND_LOGICAL" "\$CAND_HAD_LINK"/true/'
   # x・y・z は M26 の検出力を見る。Apple Git の Mac では、対照 E1 を system 設定を外して通し、
   # M26 の実機の分岐(-u GIT_CONFIG_NOSYSTEM)で落とす
-  if [ "$REAL_IS_APPLE" -eq 1 ]; then MUT_EXTRA_ENV=(GIT_CONFIG_NOSYSTEM=1); fi
+  if [ "$REAL_IS_APPLE" -eq 1 ] && { sel_mut x || sel_mut y || sel_mut z; }; then MUT_EXTRA_ENV=(GIT_CONFIG_NOSYSTEM=1); fi
   mutant x "Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:x$/s/.*/      : # MUT:x/'
-  ckeq "変異(x) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:x$' "$WORK/mut/x/guard.sh" || true)" 1
+  if sel_mut x; then ckeq "変異(x) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:x$' "$WORK/mut/x/guard.sh" || true)" 1; fi
   mutant y "子の文脈の Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:y$/s/.*/  : # MUT:y/'
-  ckeq "変異(y) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:y$' "$WORK/mut/y/guard.sh" || true)" 1
+  if sel_mut y; then ckeq "変異(y) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:y$' "$WORK/mut/y/guard.sh" || true)" 1; fi
   mutant z "Apple Git の判定(git version の形の検査)を外す" "M26" '/# MUT:z$/s/.*/        if true; then # MUT:z/'
   MUT_EXTRA_ENV=()
-  ckeq "変異(z) 写しの目印の行が if true; then だけになった" "$(grep -cE -- '^[[:space:]]*if true; then # MUT:z$' "$WORK/mut/z/guard.sh" || true)" 1
+  if sel_mut z; then ckeq "変異(z) 写しの目印の行が if true; then だけになった" "$(grep -cE -- '^[[:space:]]*if true; then # MUT:z$' "$WORK/mut/z/guard.sh" || true)" 1; fi
+  # 選んだ変異のうち、mutant が流れなかったもの(MUT_IDS にあるのに、上で呼んでいない記号)は FAIL にする
+  local m
+  for m in $MUT_IDS; do
+    if sel_mut "$m"; then
+      case "$MUT_RAN" in *" $m "*) : ;; *) ng "変異($m) case_L が mutant を呼んでいない" ;; esac
+    fi
+  done
 }
 
 # ════════════════════════ M 開始時の設定 origin ════════════════════════
@@ -4495,15 +4616,12 @@ PYCODE
 }
 
 # ════════════════════════ 実行 ════════════════════════
-ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
-E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 P1 P2 P3 P4 P5 P6 P7 P8 P9 L"
 want() { # $1=ケース ID → 0 なら実行する(--only の 1 文字は群の全体、それ以外は完全一致)
   local id
   [ -n "$ONLY" ] || return 0
   for id in ${ONLY//,/ }; do
-    if [ "$id" = "$1" ]; then return 0; fi
-    if [ "${#id}" -eq 1 ] && [ "$id" != L ] && [ "${1:0:1}" = "$id" ]; then return 0; fi
+    if id_matches "$id" "$1"; then return 0; fi
+    case "$id" in L-?*) [ "$1" = L ] && return 0 ;; esac   # L-<記号> は変異 1 つ。case_L を呼ぶ(選ぶのは sel_mut)
   done
   return 1
 }
@@ -4513,6 +4631,7 @@ if [ -n "$ONLY" ]; then
     for c in $ALL_CASES; do
       if [ "$id" = "$c" ] || { [ "${#id}" -eq 1 ] && [ "${c:0:1}" = "$id" ]; }; then hit=1; fi
     done
+    case "$id" in L-?*) case " $MUT_IDS " in *" ${id#L-} "*) hit=1 ;; esac ;; esac
     [ "$hit" -eq 1 ] || { echo "ERROR: --only のケース ID が無い: $id" >&2; exit 1; }
   done
 fi

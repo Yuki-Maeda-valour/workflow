@@ -29,7 +29,7 @@
   自分の確かめを 1 件以上流したか(節の名前が合わずに何も流れなかったのでないか)を確かめる。
 - 終了コード: run-tests.py と同じ。全部のプロセスが成功なら 0。FAIL・結果の行の欠け・件数の食い違い・
   節を読めないことが 1 つでもあれば 1。引数の誤りは 2。止めたときは 128 + シグナルの番号。
-- 止め方・失敗したプロセスの出力の出し方も run-tests.py と同じ(その仕組みを読み込んで使う)。
+- 止め方・失敗したプロセスの出力の出し方も run-tests.py と同じ(同じフォルダの run_units.py の仕組みを使う)。
 - 限界: 止めたときに、loop-selftest.sh が別のプロセスグループで起動した子(loop.sh など)が、
   `RUN_TIMEOUT` の秒数まで残ることがある。そのときは、残ったプロセスを pid を指定して止める。
   loop-selftest.sh の一時フォルダ(`mktemp -d` で作る。既定は /tmp/tmp.*)も、後片付けが走らずに残ることがある。
@@ -40,17 +40,20 @@
 import argparse
 import collections
 import concurrent.futures
-import importlib.util
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+# 子のプロセスの起動・止め方・並べ方は run_units.py に持たせる(読み込む前に、__pycache__ を書かないようにする)。
+sys.dont_write_bytecode = True
 SCRIPTS = Path(__file__).resolve().parent
 REPO = SCRIPTS.parent
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+import run_units  # noqa: E402
 SELFTEST = REPO / "plugins" / "dev-workflow" / "skills" / "ship-task" / "scripts" / "loop-selftest.sh"
 
 # どの節にも当たらない LOOP_SELFTEST_ONLY の値。loop-selftest.sh の want() は「,<節>,」を探すので、
@@ -59,16 +62,27 @@ NO_SECTION = ","
 OUTSIDE = "(節の外だけ)"
 OUTSIDE_LOG = "_outside.log"
 
-# 先に始める順の重み(秒)。値は、節を 1 つずつ順に流したときの時間を秒に丸めたもの
-# (2026-11-05、Ubuntu 22.04 の容器・git 2.56.0・16 CPU。LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=300)。
-# 測った時間の和は、30 節で 4054.3 秒。節の外だけのプロセス(10.8 秒)を足すと 4065.1 秒。
-# 丸めたので、下の値の和は 4056 になる。載っていない節は軽いものとして、後に回す。
+# 先に始める順の重み(秒)。値は、節を 1 つずつ順に流したときの時間を秒に丸めたもの。
+# - 2026-11-07 に測った 28 節(#386 で、重かった 6 節を分けた節): Ubuntu 22.04 の容器・git 2.56.0・CPU 4 つ
+#   (そのうち使えるのは約 3 つ)・-j 1(LOOP_SELFTEST_TIMEOUT=6000 RUN_TIMEOUT=600)。同じ機械でほかのセッションも動いていたので、
+#   値は回ごとに揺れる(environment-log2 は 84〜158 秒・discover-stop は 150〜205 秒)。
+#   28 節の最初の回の和は 2234.5 秒。節の外だけのプロセスは 6.5 秒。
+#   discover-stop・environment-log・environment-log2 は、ほかの節より後に 1 回ずつ測り直し、小さいほうの値を入れた
+#   (最初の回は 149.5・131.8・158.3 秒。測り直しは 205.4・104.6・83.8 秒)。入れた後の 28 節の和は 2135 秒・最長は 150 秒(discover-stop)。
+# - 変えていない 24 節の値は、2026-11-05 の値のまま(Ubuntu 22.04 の容器・git 2.56.0・16 CPU・RUN_TIMEOUT=300)。
+#   測った条件が違うので、2 つの群の値を直接は比べない。
+# 載っていない節は、既定の 200 秒(run_units.DEFAULT_WEIGHT)で早めに始める。
 WEIGHTS = {
-    "discover": 639, "breakers": 437, "judge": 393, "humanconfig": 327, "environment": 276, "stops": 251,
-    "memory": 166, "host": 147, "h28": 133, "h47": 118, "d22": 115, "h46": 114, "h50": 93, "h47enterprise": 81,
-    "kill": 77, "hooks": 72, "locked": 70, "argv": 66, "h47proof": 62, "signals": 57, "shell-prefix": 56,
-    "perm": 52, "h46skillsdir": 44, "h46recheck": 41, "order": 39, "between": 37, "h46market": 36, "skip": 28,
-    "link": 18, "sync": 11,
+    "memory": 166, "discover-stop": 150, "host": 147, "humanconfig-between": 137, "h28": 133,
+    "discover-judge4": 124, "humanconfig-restart": 124, "humanconfig-clean": 121, "h47": 118, "d22": 115,
+    "h46": 114, "discover-judge3": 111, "environment-log": 105, "h50": 93, "discover-judge2": 90,
+    "discover-judge": 89, "stops-repo": 86, "environment-log2": 84, "h47enterprise": 81, "kill": 77,
+    "stops": 74, "hooks": 72, "environment": 71, "locked": 70, "discover-state": 69, "judge-array": 68,
+    "argv": 66, "breakers-normal": 65, "breakers-g1": 64, "judge": 63, "h47proof": 62, "breakers": 61,
+    "breakers-shared2": 58, "signals": 57, "shell-prefix": 56, "judge-hang": 55, "perm": 52,
+    "breakers-reset": 49, "judge-fail": 47, "h46skillsdir": 44, "humanconfig": 41, "h46recheck": 41,
+    "discover": 40, "order": 39, "between": 37, "breakers-shared": 36, "h46market": 36, "judge-git": 30,
+    "skip": 28, "judge-profile": 23, "link": 18, "sync": 11,
 }
 
 # 分ける単位にする形。最上位に、1 行で書く。
@@ -96,18 +110,6 @@ WRAPPER = "__run_loop_selftest_body"
 RESULT = re.compile(r"^結果: PASS (\d+) 件 / FAIL (\d+) 件$", re.M)
 PASSED = re.compile(r"^PASS  (.*)$", re.M)
 SCRATCH = re.compile(r"^loop-selftest: 対象 .*\(scratch (.+)\)$", re.M)
-
-
-def load_run_tests():
-    """同じフォルダの run-tests.py を読み込む(止め方と、並べる数の既定の計算を同じにするため)。"""
-    sys.dont_write_bytecode = True
-    spec = importlib.util.spec_from_file_location("run_tests", SCRIPTS / "run-tests.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-run_tests = load_run_tests()
 
 
 def bash_env():
@@ -226,29 +228,62 @@ def default_jobs():
     全回帰テストでは、run-tests.py(既定は CPU の数の半分)と同時に流す。足して CPU の数を超えないようにする
     (混んだ機械では、loop.sh を起動するテストが中の時間切れに当たる)。
     """
-    return max(1, run_tests.default_jobs() // 2)
+    return max(1, run_units.cpu_count() // 4)
 
 
 def label(section):
     return OUTSIDE if section is None else section
 
 
-def run_job(section, children, log_dir):
-    env = dict(os.environ, LOOP_SELFTEST_ONLY=NO_SECTION if section is None else section)
-    started = time.monotonic()
+def key_of(section):
+    """重みの記録の鍵(run-all.py と同じ)。"""
+    return "loop:(節の外だけ)" if section is None else f"loop:{section}"
+
+
+def run_job(section, children, log_dir, defaults=None):
+    """1 つの節(None は節の外だけ)を流し、(節, 終了コード, 出力, 秒, 件数) を返す。件数は (PASS, FAIL) か None。
+
+    defaults は、環境に無いときだけ足す環境変数(run-all.py が LOOP_SELFTEST_TIMEOUT などを渡す)。
+    """
+    env = dict(defaults or {})
+    env.update(os.environ)
+    env["LOOP_SELFTEST_ONLY"] = NO_SECTION if section is None else section
     # -v: FAIL の項目に、loop.sh の出力の末尾を添える(成功した項目の出力は変わらない)。
-    process = children.start(["bash", str(SELFTEST), "-v"], env=env)
-    try:
-        output, _ = process.communicate()
-    finally:
-        children.finish(process)
-    elapsed = time.monotonic() - started
+    code, output, elapsed = run_units.run_command(children, ["bash", str(SELFTEST), "-v"], env=env)
     if log_dir is not None:
         name = OUTSIDE_LOG if section is None else f"{section}.log"
         (log_dir / name).write_text(output, encoding="utf-8")
     found = RESULT.findall(output)
     counts = (int(found[-1][0]), int(found[-1][1])) if found else None
-    return section, process.returncode, output, elapsed, counts
+    return section, code, output, elapsed, counts
+
+
+def job_ok(result):
+    section, code, output, elapsed, counts = result
+    return code == 0 and counts is not None and counts[1] == 0
+
+
+def describe(result):
+    """進み具合の行の後半(件数)と成否。"""
+    counts = result[4]
+    return ("結果の行が無い" if counts is None else f"PASS {counts[0]} 件 / FAIL {counts[1]} 件"), job_ok(result)
+
+
+def build_units(sections, log_dir=None, outside_weight=float("inf"), defaults=None):
+    """節(と節の外だけ)から単位を作る。節の外だけの単位を、最初に並べる。
+
+    重みは、表の値(載っていない節は既定の 200 秒)。節の外だけの単位は outside_weight(既定は最も重い。
+    単独で流すときは、今どおり最初に始める)。run-all.py は、表の値(14 秒)を渡す。
+    """
+    units = [run_units.Unit(
+        key=key_of(None), label=label(None), in_slot=True, weight=outside_weight, table_weight=outside_weight,
+        run=lambda children: run_job(None, children, log_dir, defaults), describe=describe)]
+    for section in sections:
+        weight = WEIGHTS.get(section)
+        units.append(run_units.Unit(
+            key=key_of(section), label=label(section), in_slot=True, weight=weight, table_weight=weight,
+            run=lambda children, section=section: run_job(section, children, log_dir, defaults), describe=describe))
+    return units
 
 
 def left_scratches(futures):
@@ -301,6 +336,37 @@ def totals(results, problems):
     return (total_pass, total_fail, *outside_counts) if known else None
 
 
+def problems_of(results):
+    """結果の一覧から、(problems, 失敗した結果の一覧, 件数の合計) を作る。合計は totals の結果(None なら不明)。"""
+    problems = []
+    failed = []
+    for item in results:
+        section, code, output, elapsed, counts = item
+        if counts is None:
+            problems.append(f"{label(section)}: 結果の行が無い(終了コード {code})")
+        elif code != 0 or counts[1] != 0:
+            problems.append(f"{label(section)}: 失敗(終了コード {code})")
+        else:
+            continue
+        failed.append(item)
+    total = totals(results, problems)
+    return problems, failed, total
+
+
+def result_lines(total, elapsed):
+    """合計の行を作る。total は totals の結果(None なら不明)。"""
+    if total is None:
+        return [f"結果: 件数は不明(上の「異常:」を見る)/ {elapsed:.1f} 秒"]
+    return [f"節の外の確かめ(PASS {total[2]} 件 / FAIL {total[3]} 件)は、どのプロセスでも流れる。合計では 1 回分だけ数えた",
+            f"結果: PASS {total[0]} 件 / FAIL {total[1]} 件 / {elapsed:.1f} 秒"]
+
+
+def interrupt_report(started):
+    """止めたとき、始めた単位のうち、残った一時フォルダを表示する。"""
+    for section, path in left_scratches([future for _, future in started]):
+        print(f"残った一時フォルダ({label(section)}。確かめてから消す): {path}", flush=True)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="loop-selftest.sh を節ごとに分けて、並べて流す。")
     parser.add_argument("sections", nargs="*", help="流す節(既定は全部の節)")
@@ -325,62 +391,24 @@ def main(argv=None):
         chosen = list(dict.fromkeys(args.sections))
     else:
         chosen = sections
-    # 節の外だけのプロセスを最初に始め、残りは重い節から始める。
-    jobs = [None] + sorted(chosen, key=lambda name: (-WEIGHTS.get(name, 0), sections.index(name)))
+    # 節の外だけのプロセスを最初に始め、残りは重い節から始める(並べ方は run_units が決める。表に無い節は既定の重み)。
+    units = build_units(sorted(chosen, key=sections.index), args.log_dir)
 
     started = time.monotonic()
-    results = []
-    children = run_tests.Children()
-    for sig in run_tests.INTERRUPT_SIGNALS:
-        signal.signal(sig, run_tests.raise_interrupt)
-    print(f"loop-selftest.sh の {len(chosen)} 節を、{len(jobs)} 個のプロセスに分けて、同時に {args.jobs} 個まで流す",
+    print(f"loop-selftest.sh の {len(chosen)} 節を、{len(units)} 個のプロセスに分けて、同時に {args.jobs} 個まで流す",
           flush=True)
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        futures = []
-        try:
-            futures.extend(pool.submit(run_job, section, children, args.log_dir) for section in jobs)
-            for future in concurrent.futures.as_completed(futures):
-                section, code, output, elapsed, counts = future.result()
-                ok = code == 0 and counts is not None and counts[1] == 0
-                shown = "結果の行が無い" if counts is None else f"PASS {counts[0]} 件 / FAIL {counts[1]} 件"
-                print(f"{'ok  ' if ok else 'FAIL'} {elapsed:7.1f} 秒  {label(section)}  {shown}", flush=True)
-                results.append((section, code, output, elapsed, counts))
-        except KeyboardInterrupt as exc:
-            signum = exc.args[0] if exc.args and exc.args[0] in run_tests.INTERRUPT_SIGNALS else signal.SIGINT
-            for sig in (signal.SIGINT, *run_tests.INTERRUPT_SIGNALS):
-                signal.signal(sig, signal.SIG_IGN)
-            dropped = sum(future.cancel() for future in futures)
-            killed = children.stop_all()
-            print(f"\n中断: 動いていた {killed} 個のプロセスを止め、まだ始めていない {dropped} 個を始めずに捨てた"
-                  f"(終わっていたのは {len(results)} 個)", flush=True)
-            for section, path in left_scratches(futures):
-                print(f"残った一時フォルダ({label(section)}。確かめてから消す): {path}", flush=True)
-            return 128 + signum
+    results, code = run_units.run_units(units, args.jobs, on_interrupt=interrupt_report)
+    if code is not None:
+        return code
 
-    problems = []
-    failed = []
-    for item in results:
-        section, code, output, elapsed, counts = item
-        if counts is None:
-            problems.append(f"{label(section)}: 結果の行が無い(終了コード {code})")
-        elif code != 0 or counts[1] != 0:
-            problems.append(f"{label(section)}: 失敗(終了コード {code})")
-        else:
-            continue
-        failed.append(item)
-    total = totals(results, problems)
-    for section, code, output, elapsed, counts in sorted(failed, key=lambda item: jobs.index(item[0])):
-        print(f"\n===== {label(section)}(終了コード {code})=====")
-        print(output.rstrip())
+    problems, failed, total = problems_of(results)
+    run_units.print_failures([(label(item[0]), item[1], item[2]) for item in failed])
     elapsed = time.monotonic() - started
     print()
     for problem in problems:
         print(f"異常: {problem}")
-    if total is None:
-        print(f"結果: 件数は不明(上の「異常:」を見る)/ {elapsed:.1f} 秒")
-    else:
-        print(f"節の外の確かめ(PASS {total[2]} 件 / FAIL {total[3]} 件)は、どのプロセスでも流れる。合計では 1 回分だけ数えた")
-        print(f"結果: PASS {total[0]} 件 / FAIL {total[1]} 件 / {elapsed:.1f} 秒")
+    for line in result_lines(total, elapsed):
+        print(line)
     return 1 if problems else 0
 
 
