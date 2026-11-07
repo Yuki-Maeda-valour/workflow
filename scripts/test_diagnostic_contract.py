@@ -57,7 +57,7 @@ class DiagnosticCallerContractTests(unittest.TestCase):
                      '`run` 失敗でも最新計画を保持', '応答不明', '旧計画による反復',
                      '残存hashの再採用', '人の判断待ち', '通常復帰条件は短絡しない'):
             self.assertIn(word, route)
-        self.assertNotIn('戻さないまま人が git を打つ手順は定めない', self.ext)
+        self.assertNotIn('戻さないまま人が git を実行する手順は定めない', self.ext)
         # 通常の復帰工程と復元の有限監督を削って新入口へ置換していない。
         for word in ('① `config-check`', '② `--precheck`', '③ `compare`', '④ `taskmd-diff`',
                      'restore_taskmd_supervised', 'TOUCHED=unknown / TEMP=unknown'):

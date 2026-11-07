@@ -874,9 +874,9 @@ run_loop pair-term -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 
     def test_helper_cli_failure_keeps_the_same_stderr_and_stops(self):
         def transform(source):
-            point = '  if ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を打つ直前に'
+            point = '  if ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を実行する直前に'
             self.assertEqual(source.count(point), 1)
-            return source.replace(point, '  if { [ "${ENV_INVENTORY_READY:-0}" -eq 1 ] && [ "${SELFTEST_AUX_ACTION:-}" = 1 ]; } || ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を打つ直前に')
+            return source.replace(point, '  if { [ "${ENV_INVENTORY_READY:-0}" -eq 1 ] && [ "${SELFTEST_AUX_ACTION:-}" = 1 ]; } || ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を実行する直前に')
         out = self.run_case("""
 newrepo pair-aux-fail
 addtask sync-a 2026-01-01
@@ -885,7 +885,7 @@ newrec pair-aux-fail
 run_loop pair-aux-fail "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 [ "$(calls)" = "" ] || { cat "$OUT"; exit 139; }
 """, 20, transform)
-        self.assertIn('ERROR [host-proof] 補助の CLI を打つ直前に、ホスト CLI の実体が控えた時と違う', out)
+        self.assertIn('ERROR [host-proof] 補助の CLI を実行する直前に、ホスト CLI の実体が控えた時と違う', out)
         self.assertNotIn('Broken pipe', out)
         self.assertNotIn('execute_coproc', out)
 

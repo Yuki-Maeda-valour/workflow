@@ -330,7 +330,7 @@ class GitConfigDigestTest(unittest.TestCase):
         self.git("config", "remote.origin.pushurl", url)
         self.digest()
         outputs = [self.run_script(), self.run_script("--expect=sha256:" + "0" * 64)]
-        # git の失敗: 読めない config.worktree(拡張が無いので、読むのはスクリプトが打つ git だけ)
+        # git の失敗: 読めない config.worktree(拡張が無いので、読むのはスクリプトが実行する git だけ)
         self.git_path("config.worktree").write_text(f'[remote "origin"]\n\tpushurl = "{url}\n',
                                                      encoding="utf-8")
         failed = self.run_script()

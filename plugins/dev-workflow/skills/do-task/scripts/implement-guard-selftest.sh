@@ -726,7 +726,7 @@ case_B3() { # 変異 (c) の検出先
   rc_is "定常状態(仕込みは take の前): take が exit 0" 0
   ckeq "定常状態: take は設定されたプログラムを実行しない(痕跡 0)" "$(trace_n)" 0
   run compare "${ARGS[@]}" --run-rc 0
-  rc_is "定常状態: config・hooks は不変なので compare は git を打って exit 0" 0
+  rc_is "定常状態: config・hooks は不変なので compare は git を実行して exit 0" 0
   out_line "定常状態: RESULT=normal" 'RESULT=normal'
   ckeq "定常状態: compare は設定されたプログラムを実行しない(痕跡 0)" "$(trace_n)" 0
   # 対照: 前置きなしの git なら痕跡スタブは動く(「痕跡 0」が空振りでないこと)
@@ -1916,7 +1916,7 @@ case_G6() {
 case_G7() { # 変異 (b) の検出先
   CID=G7; TAG=""
   e_repo g7c
-  # 対照: 変化が無ければ compare は git を打つ(ラッパが呼び出しを記録できていること)
+  # 対照: 変化が無ければ compare は git を実行する(ラッパが呼び出しを記録できていること)
   : >"$GITLOG"
   runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0
   rc_is "順序の検査(対照): 変化なしの compare は exit 0" 0
@@ -1962,7 +1962,7 @@ case_G8() {
   rc_is "再取得の途中で git が失敗する(status が rc 128)→ 33" 33
   out_line "再取得の途中で git が失敗: RESULT=incomparable" 'RESULT=incomparable'
   out_line "再取得の途中で git が失敗: REASON=retake-failed" 'REASON=retake-failed'
-  out_line "再取得の途中で git が失敗: GIT_SKIPPED=no(git を打った後の失敗)" 'GIT_SKIPPED=no'
+  out_line "再取得の途中で git が失敗: GIT_SKIPPED=no(git を実行した後の失敗)" 'GIT_SKIPPED=no'
   out_line "再取得の途中で git が失敗: WORKTREE_CHANGED=unknown(縮退の 32 にしない)" 'WORKTREE_CHANGED=unknown'
   out_line "再取得の途中で git が失敗: GITMETA_CHANGED=unknown" 'GITMETA_CHANGED=unknown'
   run compare "${ARGS[@]}" --run-rc 1

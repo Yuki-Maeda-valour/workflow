@@ -9,13 +9,13 @@
 #   LOOP_PERMISSION=<パス> / REVIEWS_DIR_SH=<パス>   # 許可の仲介の hook・reviews-dir.sh を差し替える(同上)
 #
 # 安全策:
-#   - ホスト CLI はスタブ(PATH の先頭の `claude`)だけを使う。loop.sh を打つ前に毎回、渡す PATH で
+#   - ホスト CLI はスタブ(PATH の先頭の `claude`)だけを使う。loop.sh を実行する前に毎回、渡す PATH で
 #     `command -v claude` がスタブを指す(か、どこにも無い)ことを確かめ、違えば全体を中止する
 #   - loop.sh は `env -i` で起動する(CLAUDECODE などのホストの指標と DEV_WORKFLOW_HOST_CLI を外す。
-#     判定そのものを確かめる項目だけ、指標を足して打つ)。HOME・XDG_STATE_HOME・GIT_CONFIG_GLOBAL・
+#     判定そのものを確かめる項目だけ、指標を足して実行する)。HOME・XDG_STATE_HOME・GIT_CONFIG_GLOBAL・
 #     GIT_CONFIG_SYSTEM は scratch へ向ける。PATH は scratch の制限 PATH(核のコマンドの symlink)とスタブだけ
 #   - リモートは scratch の bare リポジトリ。ssh のスタブ(GIT_SSH_COMMAND)がローカルで git-upload-pack /
-#     git-receive-pack を起動し、呼び出しを記録する(ネットワークの git が打たれたかをこれで見る)
+#     git-receive-pack を起動し、呼び出しを記録する(ネットワークの git が実行されたかをこれで見る)
 #   - 全体を timeout で包む。scratch と XDG_STATE_HOME の下のものは終わったら消す。印つきのプロセスが
 #     残っていないことも確かめる
 #
@@ -182,7 +182,7 @@ esac
 STUB
 chmod +x "$DP_GH/gh"
 
-# origin-repo.py には canonical HTTPS のまま読ませる。公開 helper と loop.sh が実際に打つ
+# origin-repo.py には canonical HTTPS のまま読ませる。公開 helper と loop.sh が実際に実行する
 # push / ls-remote だけを scratch bare remote へ写し、network 実行を伴う通常経路を保つ。
 DP_GIT="$W/docpush-git"
 mkdir -p "$DP_GIT"
@@ -566,7 +566,7 @@ else:
 print(json.dumps(out, ensure_ascii=False))' "$1"
 }
 branch() { g checkout -q -b "task/$name"; }
-# 受け取った --settings の JSON から許可の仲介の hook のコマンドを取り出し、ホスト CLI と同じく sh で打つ
+# 受け取った --settings の JSON から許可の仲介の hook のコマンドを取り出し、ホスト CLI と同じく sh で実行する
 hookcall() { # $1=tool_name $2=tool_input の JSON
   local settings="" prev="" a cmd input
   for a in "${ARGV_ALL[@]}"; do [ "$prev" = --settings ] && settings="$a"; prev="$a"; done
@@ -576,7 +576,7 @@ hookcall() { # $1=tool_name $2=tool_input の JSON
   printf '\n' >>"$REC/hookout-$name"
 }
 done_commit() { g mv "$md" "$tdir/完了_$name.md"; echo "impl $name" >"impl-$name.txt"; g add "impl-$name.txt"; g commit -q -m "impl $name"; }
-# push の後の gc は、SELFTEST_PUSH_GC が空でないときだけ打つ(成功したらタスク名を $REC/gc.log に足す)。毎回は打たない
+# push の後の gc は、SELFTEST_PUSH_GC が空でないときだけ実行する(成功したらタスク名を $REC/gc.log に足す)。毎回は実行しない
 push_gc() { [ -n "${SELFTEST_PUSH_GC:-}" ] && g gc -q && printf '%s\n' "$name" >>"$REC/gc.log"; return 0; }
 push() { g push -q origin "task/$name"; push_gc; }
 pushu() { g push -q -u origin "task/$name"; push_gc; }   # 共有の config に branch.task/{名}.* を書く push(照合で止まる)
@@ -673,7 +673,7 @@ case "$beh" in
   cfgpushremote) branch; done_commit; push; g config "branch.task/$name.pushRemote" evil; result "無人のイテレーションの結果: PR — x" ;;
   cfgremote) branch; done_commit; push; g config "branch.task/$name.remote" other; result "無人のイテレーションの結果: PR — x" ;;
   pushu) branch; done_commit; pushu; result "無人のイテレーションの結果: PR — https://example.invalid/pr/$name" ;;
-  docpush) # 文書の無人公開 helper(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を gh stub まで打つ。
+  docpush) # 文書の無人公開 helper(SELFTEST_PUSH_CMD。プレースホルダは治具が置き換える)を gh stub まで実行する。
            branch; done_commit; git config --get branch.autoSetupRebase >"$REC/asr-$name" 2>&3
            mkdir -p .claude/reviews; printf 'review fixture\n' >.claude/reviews/docpush-body.md
            SELFTEST_BRANCH="task/$name" SELFTEST_HELD_SHA="$(git rev-parse HEAD)"
@@ -753,7 +753,7 @@ chmod +x "$W/failsleepbin/sleep"
 echo 'raise ImportError("blocked by loop-selftest")' >"$W/noyaml/yaml.py"
 
 # remove の拒否の正常対照。FIFO や生き残りの子孫に同期を依存させない。
-# この包みは、late の場面を打つ disc_pair の起動だけで PATH の先頭に置く。ほかの起動は、
+# この包みは、late の場面を実行する disc_pair の起動だけで PATH の先頭に置く。ほかの起動は、
 # $SAFEBIN の git を直接使う(文書の push を確かめる起動〈docpush。breakers-normal 節の中〉は、
 # 専用の包み $DP_GIT/git を使う)。
 LATEBIN="$W/latebin"
@@ -777,7 +777,7 @@ exec "$REAL_GIT" "\$@"
 EOF
 chmod +x "$LATEBIN/git"
 
-# ── scratch のプラグイン(対象の loop.sh を置く。変異版もここに写して打つ)──
+# ── scratch のプラグイン(対象の loop.sh を置く。変異版もここに写して実行する)──
 PLUG="$W/plugin"
 mkdir -p "$PLUG/.claude-plugin" "$PLUG/skills/ship-task/scripts" "$PLUG/skills/create-task/scripts"
 cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
@@ -796,7 +796,7 @@ cp "$SCRIPT_DIR/publish-guard.py" "$PLUG/skills/ship-task/scripts/publish-guard.
 LOOP="$PLUG/skills/ship-task/scripts/loop.sh"
 PLUGIN_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$PLUG/.claude-plugin/plugin.json")"
 
-# ── loop.sh の起動(env -i。打つ前に PATH の claude がスタブであることを確かめる)──
+# ── loop.sh の起動(env -i。実行する前に PATH の claude がスタブであることを確かめる)──
 guard_path() { # $1=PATH
   local found
   found="$(cd "$W/cwd" && env -i PATH="$1" bash -c 'command -v claude' 2>/dev/null || true)"
@@ -993,7 +993,7 @@ echo "loop-selftest: 対象 $TARGET(scratch $W)"
 
 # ════════════════ 治具: スタブのホスト CLI の証明(H31。以後の起動の前提)════════════════
 # loop.sh は証明(実 hook の拒否を確かめた記録)の無いホスト CLI を起動しない。スタブは --settings の hook を
-# 実際に呼んで判定に従うので、--prove-host を通常どおり打って証明を作る(scripts/test_loop_startup.py も
+# 実際に呼んで判定に従うので、--prove-host を通常どおり実行して証明を作る(scripts/test_loop_startup.py も
 # この前半を使う)。旧実装(--prove-host が無い)と比べるときも続けられるよう、失敗は記録だけにする
 newrepo provefix
 newrec provefix
@@ -1546,7 +1546,7 @@ DRY_COPY="$(sed -n 's/.*--plugin-dir \([^ ]*\) --permission-mode.*/\1/p' "$OUT" 
 t "--dry-run: コピーの状態控えがある" test -f "${DRY_COPY%/plugin}/environment.json"
 has "--dry-run: 解決後の argv が出る(実行ファイルは絶対パス)" "$OUT" "解決後の argv: $STUBBIN/claude -p --output-format json --setting-sources user --strict-mcp-config --plugin-dir $DRY_COPY --permission-mode acceptEdits --permission-prompts none"  # <!-- validate-allow: loop.sh --dry-run が出す解決後の argv の文字列を照合する(起動はしない) -->
 has "--dry-run: 対象の一覧が出る" "$OUT" "docs/tasks/進行中_pr-argv.md"
-hasnt "--dry-run: 疎通(auth status)を打たない" "$REC/aux.log" "auth status"
+hasnt "--dry-run: 疎通(auth status)を実行しない" "$REC/aux.log" "auth status"
 has "--dry-run: --help で照合する" "$REC/aux.log" "claude --help"
 has "--dry-run: plugin list で照合する" "$REC/aux.log" "claude plugin list --json"
 printf '{"mcpServers":{}}\n' >"$W/mcp.json"
@@ -1608,17 +1608,17 @@ has "起動した CLI の環境: イテレーションの印がある" "$REC/env
 f "起動した CLI の環境: DEV_WORKFLOW_HOST_CLI を外す" grep -q '^DEV_WORKFLOW_HOST_CLI=' "$REC/env-pr-argv"
 f "起動した CLI の環境: OLDPWD を外す(OLDPWD を立てて起動しても、loop.sh の cd の後でも渡らない)" grep -q '^OLDPWD=' "$REC/env-pr-argv"
 case "$(cat "$REC/cwd-pr-argv" 2>/dev/null)" in "$R.loop/"*) ok "起動した CLI の cwd は使い捨ての worktree" ;; *) ng "起動した CLI の cwd は使い捨ての worktree($(cat "$REC/cwd-pr-argv" 2>/dev/null))" ;; esac
-# --host-argv で置き換えても、隔離のフラグは後ろに載り、補助の CLI も上書き後の実行ファイルで打たれる
+# --host-argv で置き換えても、隔離のフラグは後ろに載り、補助の CLI も上書き後の実行ファイルで実行される
 : >"$REC/aux.log"
 run_loop argv -- --repo "$R" --only pr-second --host-argv "$ALTBIN/claude-alt" --host-argv --model=m1 "${COMMON_ARGS[@]}"
 check "--host-argv: イテレーションを 1 回回って終わる" 0 "$RC"
 A="$REC/argv-pr-second"
 check "--host-argv: 実行ファイルが置き換わる" "$ALTBIN/claude-alt" "$(head -1 "$A" 2>/dev/null)"
 t "--host-argv: 前置きのフラグの後ろに隔離のフラグが載る" argv_has_seq --model=m1 -p --output-format json --setting-sources user --strict-mcp-config
-has "--host-argv: --help も上書き後で打つ" "$REC/aux.log" "claude-alt --help"
-has "--host-argv: plugin list も上書き後で打つ" "$REC/aux.log" "claude-alt plugin list --json"
-has "--host-argv: auth status も上書き後で打つ" "$REC/aux.log" "claude-alt auth status"
-f "--host-argv: 既定の実行ファイルで補助の CLI を打たない" grep -q '^claude ' "$REC/aux.log"
+has "--host-argv: --help も上書き後で実行する" "$REC/aux.log" "claude-alt --help"
+has "--host-argv: plugin list も上書き後で実行する" "$REC/aux.log" "claude-alt plugin list --json"
+has "--host-argv: auth status も上書き後で実行する" "$REC/aux.log" "claude-alt auth status"
+f "--host-argv: 既定の実行ファイルで補助の CLI を実行しない" grep -q '^claude ' "$REC/aux.log"
 # PATH に `.` があっても、実行ファイルは起動時に絶対パスへ解決する(イテレーションの cwd〈worktree〉の中の claude を起動しない)
 newrepo dotpath
 addtask pr-a
@@ -2194,13 +2194,13 @@ addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; addtask hold-c 2026-01-03
 commit
 newrec normal
 run_loop normal SELFTEST_PUSH_GC=1 -- --repo "$R" "${COMMON_ARGS[@]}"
-check "正常なイテレーションで止まらない: push と gc を打っても次のイテレーションへ進む" 0 "$RC"
-check "正常なイテレーションで止まらない: スタブが push の後に gc を打った" "pr-a pr-b" "$(tr '\n' ' ' <"$REC/gc.log" 2>/dev/null | sed 's/ $//')"
+check "正常なイテレーションで止まらない: push と gc を実行しても次のイテレーションへ進む" 0 "$RC"
+check "正常なイテレーションで止まらない: スタブが push の後に gc を実行した" "pr-a pr-b" "$(tr '\n' ' ' <"$REC/gc.log" 2>/dev/null | sed 's/ $//')"
 check "この時点までに gc.log があるのは、SELFTEST_PUSH_GC を渡した normal のイテレーションだけ" "$W/rec/normal/gc.log" "$(find "$W/rec" -name gc.log)"
 check "正常なイテレーションで止まらない: PR → PR → 保留" "pr-a pr-b hold-c" "$(calls)"
 has "正常なイテレーションで止まらない: キューが空で終わる" "$OUT" "止まった理由: キューが空"
 check "正常なイテレーション: 共有の config に branch.task/pr-a.* が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/pr-a\.' 2>/dev/null)"
-# 文書の無人公開 helper(SKILL.md の字面)を、利用者の設定の branch.autoSetupRebase = always のもとで打つイテレーション:
+# 文書の無人公開 helper(SKILL.md の字面)を、利用者の設定の branch.autoSetupRebase = always のもとで実行するイテレーション:
 # 共有の config に branch.* を書かず、照合に通って次のイテレーションへ進む。設定はこのイテレーションだけ GIT_CONFIG_SYSTEM で渡す(治具の
 # identity・init.defaultBranch・gc.auto は global の $W/gitconfig にしか無いので GIT_CONFIG_GLOBAL は差し替えない。
 # 共有の $W/gitconfig は書き換えない)
@@ -2233,7 +2233,7 @@ esac
 
 fi
 
-# 共有の git ディレクトリの変化(イテレーションの後に照合して止まる。§5 のネットワークの git を打たない)
+# 共有の git ディレクトリの変化(イテレーションの後に照合して止まる。§5 のネットワークの git を実行しない)
 shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
   newrepo "sh-$1"
   G -C "$R" config selftest.a 1
@@ -2250,9 +2250,9 @@ shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
   has "共有の状態($2): 理由" "$OUT" "[shared-state]"
   check "共有の状態($2): 次のイテレーションへ進まない" "$1-a" "$(calls)"
   if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q 'git-upload-pack'; then
-    ng "共有の状態($2): §5 のネットワークの git(ls-remote)を打たない"
+    ng "共有の状態($2): §5 のネットワークの git(ls-remote)を実行しない"
   else
-    ok "共有の状態($2): §5 のネットワークの git(ls-remote)を打たない"
+    ok "共有の状態($2): §5 のネットワークの git(ls-remote)を実行しない"
   fi
   t "共有の状態($2): 止めの印を置く" test -f "$(state_dir "sh-$1")/stop-mark.md"
 }
@@ -2307,7 +2307,7 @@ if wait_file "$REC/started-longsleep-a" 30; then
 else
   ng "HUP: イテレーションが始まらない"; kill -KILL "$BG_PID" 2>/dev/null; wait_bg
 fi
-# イテレーションの中で共有の config を変えてから TERM → 差分を報告・止めの印 → 次の起動は ls-remote を打たずに 20 →
+# イテレーションの中で共有の config を変えてから TERM → 差分を報告・止めの印 → 次の起動は ls-remote を実行せずに 20 →
 # 印を消すと、最後に照合に通った状態との差分を報告して続ける
 newrepo sigcfg
 addtask pr-a 2026-01-01; addtask cfgsleep-b 2026-01-02; addtask pr-c 2026-01-03
@@ -2325,7 +2325,7 @@ if wait_file "$REC/started-cfgsleep-b" 30; then
   run_loop sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
   check "止めの印: 次の起動は 20" 20 "$RC"
   has "止めの印: 理由と消し方" "$OUT" "stop-mark.md"
-  f "止めの印: ネットワークの git(ls-remote)を打たない" grep -q 'git-upload-pack' "$REC/ssh.log"
+  f "止めの印: ネットワークの git(ls-remote)を実行しない" grep -q 'git-upload-pack' "$REC/ssh.log"
   rm -f "$SD/stop-mark.md"
   run_loop sigcfg -- --repo "$R" "${COMMON_ARGS[@]}"
   check "止めの印を消すと続く" 0 "$RC"
@@ -3561,9 +3561,9 @@ fi
 
 # reviews-dir の移植性: 公開は rename(2)(python3 の os.replace、無ければ mv -f -T)、sha256 は
 # sha256sum → shasum -a 256 → openssl dgst -sha256 の順。道具を選んだ PATH(reviews-dir.sh と git が使う道具の
-# symlink だけを並べた scratch の bin)で打ち、外す道具は置かない。BSD の mv を模すラッパは、-f・-i・-n・-v・-h・--
+# symlink だけを並べた scratch の bin)で実行し、外す道具は置かない。BSD の mv を模すラッパは、-f・-i・-n・-v・-h・--
 # 以外の - で始まる引数(-T・--help など)を illegal option と exit 64 で拒み、ほかは本物の mv に渡す。
-# 競合のケースは、git ls-files の直後に公開先を差し替える git のラッパで打つ(② の検査の後の置き換え)
+# 競合のケースは、git ls-files の直後に公開先を差し替える git のラッパで実行する(② の検査の後の置き換え)
 RDP="$W/rdp"
 rm -rf "$RDP"
 mkdir -p "$RDP/outside"
@@ -3754,7 +3754,7 @@ run_loop d22sym -- --repo "$R" --dry-run
 check "D22 ①: イテレーションの worktree の .claude が symlink なら 30" 30 "$RC"
 has "D22 ①: 理由" "$OUT" "[reviews-dir]"
 f "D22 ①: symlink の先に reviews を作らない" test -e "$W/d22sym-outside/reviews"
-# --dry-run は、起動する CLI の環境の 4 つも出す(d22 のリポジトリで打つ)
+# --dry-run は、起動する CLI の環境の 4 つも出す(d22 のリポジトリで実行する)
 R="$W/repos/d22"
 run_loop d22-proof "CLAUDE_CONFIG_DIR=$W/ccd" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
 check "H47 D22 表示: 同じ設定/CLIで証明" 0 "$RC"
@@ -3942,14 +3942,14 @@ for m in 発見 実装; do
   if [ "$m" = 発見 ]; then run_loop dvcs -- --repo "$R" --dry-run --discover; else run_loop dvcs -- --repo "$R" --dry-run; fi
   check "${m}モード: remote.origin.vcs があれば 20" 20 "$RC"
   has "${m}モード: remote.origin.vcs: 理由は origin-vcs" "$OUT" "[origin-vcs]"
-  f "${m}モード: remote.origin.vcs: ls-remote を打たない(vcs のヘルパーが起動されない)" test -e "$REC/vcs.log"
+  f "${m}モード: remote.origin.vcs: ls-remote を実行しない(vcs のヘルパーが起動されない)" test -e "$REC/vcs.log"
 done
-# 陽性対照: 同じ構成・loop.sh と同じ環境で ls-remote を直接打つと、vcs のヘルパーが起動される(上の「起動されない」が
+# 陽性対照: 同じ構成・loop.sh と同じ環境で ls-remote を直接実行すると、vcs のヘルパーが起動される(上の「起動されない」が
 # スタブに届かないことによる空振りでない)
 newrec dvcs-対照
 build_env dvcs
 ( cd "$W/cwd" && exec env -i "${ENV_ARGS[@]}" git -C "$R" ls-remote origin ) >/dev/null 2>&1
-t "前提: remote.origin.vcs の構成で ls-remote を打つと vcs のヘルパーが起動される(陽性対照)" test -e "$REC/vcs.log"
+t "前提: remote.origin.vcs の構成で ls-remote を実行すると vcs のヘルパーが起動される(陽性対照)" test -e "$REC/vcs.log"
 # origin-repo.py の失敗(exit 2・例外・読めない出力)と、兄弟の origin-repo.py・git-config-digest.py が無いとき(plugin-root)
 newdisc dor
 newrec dor
@@ -4164,7 +4164,7 @@ disc_pair() { # $1=名 $2=data-audit の振る舞い $3=refactor の振る舞い
   newdisc "dp-$name" "$org"
   newrec "dp-$name"
   D12="$(git -C "$R" rev-parse main | cut -c1-12)"
-  # late の場面を打つ起動だけ、remove の拒否の包み($LATEBIN/git)を PATH の先頭に置く。
+  # late の場面を実行する起動だけ、remove の拒否の包み($LATEBIN/git)を PATH の先頭に置く。
   case " $da $rf " in *" late "*) path=("PATH=$LATEBIN:$STUBBIN:$SAFEBIN") ;; esac
   run_loop "dp-$name" ${path[@]+"${path[@]}"} "SELFTEST_DISC_DA=$da" "SELFTEST_DISC_RF=$rf" -- --repo "$R" --discover "${DA_ARGS[@]}" "$@"
   RP="$(report_of "$OUT")"
@@ -4461,9 +4461,9 @@ for action in add delete value reorder inactive; do
   has "H20 $HC_NAME: 報告に保持済み設定の構造差分" "$(report_of "$OUT")" '保持済み config'
   hasnt "H20 $HC_NAME: 変更後の設定値を出さない" "$SD/stop-mark.md" selftest.human
   if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then
-    ng "H20 $HC_NAME: 後続ネットワークを打たない"
+    ng "H20 $HC_NAME: 後続のネットワークの git を実行しない"
   else
-    ok "H20 $HC_NAME: 後続ネットワークを打たない"
+    ok "H20 $HC_NAME: 後続のネットワークの git を実行しない"
   fi
   hc_preserved "$change"
 done
@@ -4510,7 +4510,7 @@ for action in add delete value unchanged absent switch legacy term; do
     run_loop "$HC_NAME" -- --repo "$HC_REPO" "${COMMON_ARGS[@]}"
     check "H20 TERM: 停止印がある再起動は20" 20 "$RC"
     has "H20 TERM: 再起動の理由" "$OUT" '[stop-mark]'
-    f "H20 TERM: 再起動後にネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+    f "H20 TERM: 再起動後にネットワークの git を実行しない" grep -q git-upload-pack "$REC/ssh.log"
     check "H20 TERM: 再起動後も次のタスクへ進まない" longsleep-a "$(calls)"
     continue
   fi
@@ -4529,7 +4529,7 @@ for action in add delete value unchanged absent switch legacy term; do
   has "H20 $HC_NAME: 理由" "$OUT" '[inflight-untrusted]'
   check "H20 $HC_NAME: 次のタスクへ進まない" longsleep-a "$(calls)"
   t "H20 $HC_NAME: 中断印を保全" test -d "$SD/inflight"
-  f "H20 $HC_NAME: 後続ネットワークを打たない" grep -q git-upload-pack "$REC/ssh.log"
+  f "H20 $HC_NAME: 後続のネットワークの git を実行しない" grep -q git-upload-pack "$REC/ssh.log"
   t "H20 $HC_NAME: 未確認のプロセスを保全する" proc_alive "$CHILD"
   t "H20 $HC_NAME: 中断記録を保全する" cmp -s "$REC/held-meta" "$SD/inflight/meta"
   t "H20 $HC_NAME: 比較基準を保全する" cmp -s "$REC/held-base.json" "$SD/inflight/base.json"
@@ -4661,7 +4661,7 @@ newrec h31-normal
 run_loop h31 -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
 check "H31 正常: 証明があれば --dry-run が通る" 0 "$RC"
 has "H31 正常: 報告に実体と証明が出る" "$(latest_report h31)" "ホスト CLI の実体: $STUBBIN/claude"
-has "H31 正常: --version を打つ" "$REC/aux.log" "claude --version"
+has "H31 正常: --version を実行する" "$REC/aux.log" "claude --version"
 # 証明が無い実体は、一度も起動せずに止まる
 h31_copy fresh
 newrec h31-fresh
@@ -4731,7 +4731,7 @@ for how in rewrite replace; do
   check "H31 $how: 止まる" 20 "$RC"
   has "H31 $how: 理由" "$OUT" "[host-proof]"
   f "H31 $how: 置き換わった実体を起動しない" test -e "$REC/replaced-ran"
-  hasnt "H31 $how: 補助の CLI も打たない" "$REC/aux.log" "$how"
+  hasnt "H31 $how: 補助の CLI も実行しない" "$REC/aux.log" "$how"
 done
 # 対照: 置き換わった実体が起動されれば印が残る(上の検査が空でないこと)
 ( cd "$W/cwd" && env -i PATH="$STUBBIN:$SAFEBIN" SELFTEST_REC="$REC" SELFTEST_HELP_FILE="$W/help.txt" "$H31BIN/replace" --version ) >/dev/null 2>&1

@@ -58,7 +58,7 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
 - 以後の補助スクリプトの呼出・文書読取はコピーだけを使い、毎回直前に照合する。詳細はコピー内の無人契約 §0 に従う。
 - 人に確かめる場面ごとの扱い(D1〜D19)・イテレーションの中で控える値と照合の表・限界の正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)。
 - 以下の各所には 1 行の分岐だけを置く。
-- `loop.sh` のイテレーションでは、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` のイテレーションの Bash の書き方」で打つ。
+- `loop.sh` のイテレーションでは、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに実行せず、unattended-mode.md の「`loop.sh` のイテレーションの Bash の書き方」で実行する。
 - 下の前提に含む Git 調査より先に、環境の照合後、Phase 0 の「開始前の確認」を通す。
 - **前提**(候補の選択より前に検査する。満たさなければ失敗扱い): タスク MD のパスがある(D4)/
   - parent-child 構成でない(照合をどのリポジトリで行うかが決まらないため)/
@@ -193,7 +193,7 @@ except (Exception, SystemExit) as exc:
    - 無人でも外部委託を解決せず内蔵に決まり、理由を報告する(D5)。
    - 契約の詳細は [references/external-runners.md](references/external-runners.md) §1(信頼モデル)・§12-1(実装経路の解決と判定)
 3. 先に [references/base-commit.md](references/base-commit.md) の事前検査(`--precheck`)を実行し、終了コード 0 のときだけ続行する(対象が git リポジトリでないときは行わない。無人では終了コード 22 でも承認を求めず失敗扱い — D6)。
-   - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で打つ。
+   - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で実行する。
    - サブモジュール内の未コミット変更(superproject〈親のリポジトリ〉の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外の 4 つ。どの深さでも。未追跡・ステージ済み〈commit 用に載せたもの〉・追跡済みのどれも)は出ない。見るのは、ほかの変更と gitlink〈サブモジュールのコミットを指す項目〉の変更(ルートからの相対パス)。
    - `[.]` は、無人のイテレーションの許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
    - `git status` を確認。
@@ -284,7 +284,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 - **滞在時間が長いため背景実行で起動する**(軸 2・§12-6)。
 
 1. **承認より先に判定する縮退**(無駄な承認要求を出さないために承認より前に置く。Phase 3 に入るたび〈ITER ごと〉にここで判定し、Phase 0 の結果として読まない。定義と判定表は §12-1): 次の順に当て、当たれば外部委託を行わず内蔵 implementer で実装し、理由を報告する —
-   - parent-child(管理ルート ≠ `root`)→ 条件 A: タスク MD がファイルでない(本文のコピーを `--task-md` に渡さない)→ git でない(Phase 0 と同じ判定。事前検査を打たない)→ 条件 B: そのセッションで最後に承認した一覧にフィルター(Git の読み書きの変換)がある。
+   - parent-child(管理ルート ≠ `root`)→ 条件 A: タスク MD がファイルでない(本文のコピーを `--task-md` に渡さない)→ git でない(Phase 0 と同じ判定。事前検査を実行しない)→ 条件 B: そのセッションで最後に承認した一覧にフィルター(Git の読み書きの変換)がある。
    - 条件 B は `bash {do-task の}scripts/diff-snapshot.sh --cwd <管理ルート> --precheck [--accept <最後に承認した値>]` をもう一度実行して判定する(stdout〈標準出力〉の受け方は base-commit.md の事前検査と同じ):
    - 終了コード 0 で stdout に `GIT_CONFIG_COUNT` が出たら当たる / 出なければ次の手順へ /
    - 終了コード 22 は Phase 0 と同じく人の承認を仰ぎ、承認されたらその値を最後に承認した値としてもう一度実行する(承認されなければ停止)/ それ以外は終了コードと stderr を報告して停止する。
@@ -294,7 +294,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - **承認・拒否ともセッション内で 1 回の判断として保持し、取り消しは保持中の判断を破棄して未判断に戻す**(次の委託時に再度承認を求める)。
    - **解決後の起動内容、または `secret_paths` にマッチするファイル集合が変わったら取り直す**。
    - 承認が得られなければ内蔵 implementer で実装し、理由を報告する。
-   - **`--dry-run` を打つ直前に** `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打つ(終了コード 0 以外なら、外部を起動せず・内蔵 implementer に切り替えず・置き場に記録を書かずに、停止して報告する。手順 6 の比較不能から人の判断で外部をもう一度起動するときも同じ)。
+   - **`--dry-run` を実行する直前に** `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行する(終了コード 0 以外なら、外部を起動せず・内蔵 implementer に切り替えず・置き場に記録を書かずに、停止して報告する。手順 6 の比較不能から人の判断で外部をもう一度起動するときも同じ)。
    - `--dry-run` が終了コード 2 で、stderr の `ERROR [usage] ` の行に `既定のログ置き場` か `--log-file の置き場` を含むとき(置き場の経路が symlink か差し替えられた・置き場を作れない・書けない・名前に既にエントリが在る。ランナーは起動していない)も、同じく停止して報告する
    - (手順 6 の「外部 CLI を起動する前の失敗」に入れず、内蔵に切り替えない — §12-7)
 3. **起動前のスナップショットと退避**: `bash {do-task の}scripts/implement-guard.sh take --cwd <管理ルート> --task-md <タスク MD>` を実行する。
@@ -312,7 +312,7 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - **変更の無い状態(clean)は要求しない**(変更が残ったまま委託する)
 4. **起動**: 上の共通項目に加えて、委託プロンプトで **`commit` / `stash` / `branch` / `reset` / `push` を禁止**して起動する(§12-3。機構に頼れないため、禁止と実行後の検証の 2 段で対処する)。
    - 本実行には `--log-file <管理ルート>/.claude/reviews/implementer-{ランナー}-{TASK_NAME}-iter{ITER}.md` を渡す(ITER は do-task の反復番号)。
-   - 本実行の直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら手順 2 と同じく停止して報告する(外部を起動しない・内蔵に切り替えない・置き場に記録を書かない)。
+   - 本実行の直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、終了コード 0 以外なら手順 2 と同じく停止して報告する(外部を起動しない・内蔵に切り替えない・置き場に記録を書かない)。
    - `implement-agent.sh` が終了コード 2 で、stderr の `ERROR [usage] ` の行に `既定のログ置き場` か `--log-file の置き場` を含むとき(置き場の経路が symlink か差し替えられた・置き場を作れない・書けない・名前に既にエントリが在る。ランナーは起動していない)も、同じく停止して報告し、内蔵に切り替えない(§12-7)。
    - **外部 implementer の起動は ITER ごとに 1 回**で、同じ ITER で既に外部を起動していれば(Phase 5・5.5 からの差し戻しや、手順 6 の比較不能から人の判断でもう一度起動するとき)、ITER を 1 つ進めてから起動する(同じ名前のログが在ると、`implement-agent.sh` は使い方の誤り〈終了コード 2〉で止まる — §12-8)。
    - こうして進めた ITER も `--max-iter` の判断を仰ぐ点に数える
@@ -323,22 +323,22 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
    - ② `bash {do-task の}scripts/diff-snapshot.sh --cwd <管理ルート> --precheck [--accept <最後に承認した値>]`(stdout の受け方は手順 1 と同じ)。
      - 外部が残したリポジトリ設定を、以後の git が実行する前に検査する。
      - **終了コード 0 以外は ③④を実行せず、手順 6 の比較不能と同じに扱う**(理由に終了コードと stderr を添える)。そこから人が一覧を承認し直したときは、その値が最後に承認した値になり、**① `config-check` から順にもう一度実行する**。
-     - **② の stdout に `GIT_CONFIG_COUNT` が出たら(承認し直した値でもう一度実行したときを含む)、③ だけを打たない**(④ は git を呼ばないので打つ)。手順 6 の比較不能として人の判断へ回す(`compare` の git はフィルターの無効化を受け取らないため — §12-3 の 2)
+     - **② の stdout に `GIT_CONFIG_COUNT` が出たら(承認し直した値でもう一度実行したときを含む)、③ だけを実行しない**(④ は git を呼ばないので実行する)。手順 6 の比較不能として人の判断へ回す(`compare` の git はフィルターの無効化を受け取らないため — §12-3 の 2)
    - ③ `implement-guard.sh compare --cwd <管理ルート> --state <STATE_DIR> --manifest-sha256 <値> --snapshot-sha256 <値> --run-rc <implement-agent.sh の終了コード>`。
      - **終了コードが結末を決める — 0 正常終了 / 31 引き継ぎ / 32 縮退 / 33 比較不能**。
      - stdout の `CHANGE=` を報告に出し(**git メタの変化は必ず報告する**)、外部が書いた分の diff を提示する。
      - 未追跡の変更は `BASE=` の退避コピーを基準にし、`unverified` のエントリは「**変更の有無**」と「**内容差分は提示不能**」を分けて報告する(2026-09-17 決定 47)。
      - `STATE_DIR` とダイジェストを失ったら、**このセッションのユーザーの発話からだけ**受け取る(保護領域から算出し直さず、ログ・一時ファイル・外部の出力からも拾わない — §12-2 の受け入れた限界 (a))。得られなければ手順 6 の比較不能
-   - ④ ③ が 0 / 31 / 32 のとき、または ② に `GIT_CONFIG_COUNT` が出て ③ を打たなかったとき、`implement-guard.sh taskmd-diff`(`--cwd`・`--state`・2 つのダイジェストは ③ と同じ)。
+   - ④ ③ が 0 / 31 / 32 のとき、または ② に `GIT_CONFIG_COUNT` が出て ③ を実行しなかったとき、`implement-guard.sh taskmd-diff`(`--cwd`・`--state`・2 つのダイジェストは ③ と同じ)。
      - **結末を問わず、復元より前に通す**(復元の後では、外部による要件本文の書き換えが消えて検出できない)。
-     - ③ を打たなかったときは、結果(終了コードと `TASKMD=`)を手順 6 の比較不能の報告に添え、どの値でも自動で続行しない。
+     - ③ を実行しなかったときは、結果(終了コードと `TASKMD=`)を手順 6 の比較不能の報告に添え、どの値でも自動で続行しない。
      - それ以外で **0** なら stdout の `DOD=`(起動前のタスク MD のコピー)を Phase 4 以降の完了条件の基準にする。**34(要件本文の変更)・35(選択パスと実体の対応の変化)・33(照合の失敗)**は手順 6 の「タスク MD の判断待ち」へ
-   - ⑤ ①〜④ のどれを打ったか・その結果によらず(① が 0 以外で ②〜④ を打たなかったときも)、`bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打つ。
+   - ⑤ ①〜④ のどれを実行したか・その結果によらず(① が 0 以外で ②〜④ を実行しなかったときも)、`bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行する。
      - **終了コード 0 以外は手順 6 の比較不能に入れる**(理由に終了コードと stderr を添える。置き場そのものの差し替えは `compare` に出ず、起動の直前の検査とこの ⑤ が見る — §12-2)
 6. **分岐**(発火条件は §12-7。上から順に当てる):
    - **外部 CLI を起動する前の失敗**(承認が得られない・parent-child・条件 A・条件 B・未検出・自ホストと同一・プロンプトが大きすぎる(12))→ **エラーとして報告し、内蔵 implementer で続行**する。
      - 置き場の理由の停止(手順 2・4 の置き場の検査が 0 以外・`implement-agent.sh` の置き場の理由の終了コード 2)はここに入れず、内蔵に切り替えずに停止して報告する
-   - **比較不能**(手順 5 の ①か②が 0 以外、② に `GIT_CONFIG_COUNT` が出て ③ を打たなかった、③ が 33、または ⑤ が 0 以外。③ を打たなかったときは ④ の結果を報告に添え、④ がどの値でも自動で続行しない。⑤ が 0 以外のときは ①〜④ の結果を添え、どの値でも自動で続行しない)→
+   - **比較不能**(手順 5 の ①か②が 0 以外、② に `GIT_CONFIG_COUNT` が出て ③ を実行しなかった、③ が 33、または ⑤ が 0 以外。③ を実行しなかったときは ④ の結果を報告に添え、④ がどの値でも自動で続行しない。⑤ が 0 以外のときは ①〜④ の結果を添え、どの値でも自動で続行しない)→
      - **終了コードを問わず、自動復元も、内蔵への自動の切り替えも行わず**、保護領域とログのパスを提示して**人の判断を仰ぐ**。
      - **「変化なし」と読み替えて内蔵に切り替えない**(外部が書いた分を見落としたまま内蔵に最初からやり直させる最悪の経路になる)
    - **タスク MD の判断待ち**(手順 5 の ④ が 34・35・33)→ **③ の結末を問わず、復元も引き継ぎも Phase 4 への続行も行わず**、何が変わったか(stdout の `TASKMD=`)と保護領域のパスを提示して**人の判断を仰ぐ**(要件本文の変更は、ユーザーの承認なしに起きてはならない)
@@ -442,7 +442,7 @@ Phase 4 で固定した `REVIEW_BINDING_SHA256`、対象集合のハッシュ値
 - **委託の解決(役割語 → 実行バックエンド)**: 解決表に到達できない、または独立レビュアーを起動できない場合はレビュー未完了を報告し、完了承認・後続公開へ進めない
 - **収束条件は全 reviewer の APPROVED**。そこに至るまで Phase 3〜6 を反復し、コストを理由に打ち切らない(design §5-10)。同一指摘 2 回連続残存・`--max-iter`(既定 5)到達は**停止点ではなく判断を仰ぐ点**で、状況を報告してユーザーの判断を仰ぐ(無人では保留 — D2。needs-user も保留 — D13)
 - 記録: `.claude/reviews/{role}-{TASK_NAME}-iter{ITER}.md`。
-  - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら記録を書かずに停止して報告する(トリアージ・リカバリの記録も同じ — references/review-protocol.md)
+  - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、終了コード 0 以外なら記録を書かずに停止して報告する(トリアージ・リカバリの記録も同じ — references/review-protocol.md)
 
 ## Phase 7: 完了処理
 

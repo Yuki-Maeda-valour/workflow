@@ -289,7 +289,7 @@ caller は取得成功・対象 ID・本文 digest を確認し、外部本文�
 reviewer の指摘を**盲信して自動反映しない**。各指摘を実コードで裏取り(実際のコードやファイルを読んで確かめること)して分類する:
 
 - **valid**: 実コードで問題を確認できた → implementer(実装を受け持つ AI)への差し戻し(相手に返して、やり直してもらうこと)に含める
-- **invalid**(false positive): 実コードでは問題ない → 理由を記録して却下(`.claude/reviews/triage-{TASK_NAME}-iter{ITER}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する)
+- **invalid**(false positive): 実コードでは問題ない → 理由を記録して却下(`.claude/reviews/triage-{TASK_NAME}-iter{ITER}.md`。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、exit 0 以外なら記録を書かずに停止して報告する)
 - **needs-user**: 仕様判断が必要 → ユーザーに確認(無人〈`--unattended`〉では保留 — [../../ship-task/references/unattended-mode.md](../../ship-task/references/unattended-mode.md) の D13)
 
 minor のみが残った場合の扱い: 過剰修正で新たな問題を作るリスクと天秤にかけ、修正せず「残課題」として報告する選択を許す(その判断を記録する)。
@@ -342,4 +342,4 @@ Git 対象の同じ内蔵 implementer への再依頼では、[implementation-gi
 - **M3 環境調査**: 再委託も失敗する場合、git 状態・ロックファイル・依存の破損を確認する(環境要因の切り分け)
 - **M4 エスカレーション**: M1〜M3 で回復しない場合、状況・試したこと・選択肢を整理してユーザーに報告する(無人では失敗扱い — unattended-mode.md の D14)
 
-各リカバリは `.claude/reviews/recovery-{TASK_NAME}.md` に記録する(何が起き、どう回復したか)。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、exit 0 以外なら記録を書かずに停止して報告する。
+各リカバリは `.claude/reviews/recovery-{TASK_NAME}.md` に記録する(何が起き、どう回復したか)。書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、exit 0 以外なら記録を書かずに停止して報告する。

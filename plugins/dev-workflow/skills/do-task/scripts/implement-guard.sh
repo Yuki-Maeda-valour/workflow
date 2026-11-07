@@ -184,7 +184,7 @@
 # 設定されたプログラムを実行しない:
 #   compare は、保護領域の検査 → ダイジェスト照合 → **hooks と config の検査(記録済みの実体パスからの
 #   ファイル読み取りだけ)** を終えるまで git を 1 回も呼ばない。hooks か config が変わっていたら
-#   `incomparable`(hooks-changed / config-changed)で止まり、以後の git も打たない。
+#   `incomparable`(hooks-changed / config-changed)で止まり、以後の git も実行しない。
 #   出典記録の無い旧 state の compare は config-origin-missing・33。他サブコマンドは従来どおり。
 #   空/欠落/非成立 include と既知 root の新設も候補記録で照合する。
 #   Apple Git(`git version` が `git version X (Apple Git-N)` の形)は、system 設定が有効(GIT_CONFIG_NOSYSTEM が
@@ -2705,10 +2705,10 @@ check_hooks_config() { # 通常設定とhooksをGit0で照合し、その後に�
   fi
   diff_fs_meta "$WORK/fsmeta.old" "$WORK/fsmeta.new"
   if [ "$FS_HOOKS_CHANGED" -eq 1 ]; then
-    echo "ERROR [hooks-changed] hooks が起動前から変わっている(以後の git を打たない)" >&2
+    echo "ERROR [hooks-changed] hooks が起動前から変わっている(以後の git を実行しない)" >&2
     emit_incomparable hooks-changed
   fi
-  echo "ERROR [config-changed] リポジトリの config が起動前から変わっている(以後の git を打たない)" >&2
+  echo "ERROR [config-changed] リポジトリの config が起動前から変わっている(以後の git を実行しない)" >&2
   emit_incomparable config-changed
 }
 cmd_config_check() {
@@ -2725,7 +2725,7 @@ cmd_config_check() {
     trap - ERR; exit 33
   fi
   if [ "$config_rc" -ne 0 ]; then
-    echo 'ERROR [config-changed] 起動前の設定候補が変わっている(以後の git を打たない)' >&2
+    echo 'ERROR [config-changed] 起動前の設定候補が変わっている(以後の git を実行しない)' >&2
     printf 'RESULT=incomparable\nREASON=config-changed\nGIT_SKIPPED=yes\n'
     printf 'CHANGE=config\t%s\n' "$(path_field "${ORIGIN_CHANGED:-unknown}")"
     trap - ERR; exit 33
