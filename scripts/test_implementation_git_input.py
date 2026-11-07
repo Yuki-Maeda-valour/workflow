@@ -5,10 +5,10 @@ help の期待値は Python 3.10.12・COLUMNS=80 で取った。
 """
 import os
 from pathlib import Path
-import subprocess
-import sys
 import tempfile
 import unittest
+
+from support_cli import run_python
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/implementation-git.py"
@@ -49,9 +49,7 @@ class InputCharacterization(unittest.TestCase):
 
     def call(self, *args):
         env = dict(os.environ, COLUMNS="80")
-        return subprocess.run([sys.executable, "-B", str(SCRIPT), *args], env=env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, stdin=subprocess.DEVNULL, timeout=60)
+        return run_python(str(SCRIPT), *args, flags=("-B",), env=env, timeout=60)
 
     def run_args(self, *rest, cwd=None, digest=HASH):
         return ["run", "--cwd", self.dir if cwd is None else cwd,

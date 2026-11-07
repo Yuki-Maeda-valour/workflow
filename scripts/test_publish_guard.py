@@ -11,6 +11,9 @@ import subprocess
 import tempfile
 import unittest
 
+import support_git
+from support_cli import run
+
 
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = ROOT / "plugins/dev-workflow/skills/ship-task/scripts/publish-guard.py"
@@ -65,8 +68,7 @@ class PublishGuardTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args: str, cwd: Path) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([self.real_git, *args], cwd=cwd, text=True, stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE, check=True)
+        return support_git.git(*args, cwd=cwd, binary=self.real_git, stdin=None)
 
     def make_git_stub(self) -> None:
         # origin-repo.py must see the canonical public identity, while the
@@ -148,7 +150,7 @@ class PublishGuardTest(unittest.TestCase):
                      "--body-file", str(self.body.relative_to(self.wt)), "--title", "title"]
         if upstream:
             argv.append("--set-upstream")
-        return subprocess.run(argv, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
+        return run(argv, env=env, stdin=None)
 
     def test_bare_remote_normal_exact_sha_and_no_local_helpers(self) -> None:
         result = self.guard()

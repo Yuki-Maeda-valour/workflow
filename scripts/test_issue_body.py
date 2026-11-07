@@ -1,7 +1,6 @@
 """Issue 本文の取得・競合停止・書込確認。git と gh は PATH 上の偽物だけを使う。"""
 
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,12 +9,13 @@ import sys
 import tempfile
 import unittest
 
+from support_cli import describe, run_python
+from support_load import load_script
+
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "plugins/dev-workflow/skills/do-task/scripts/issue-body.py"
-SPEC = importlib.util.spec_from_file_location("issue_body", SCRIPT)
-ISSUE_BODY = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(ISSUE_BODY)
+ISSUE_BODY = load_script(SCRIPT, "issue_body")
 BODY = "# 設計\n\n## 実装\n- [ ] 変更する\n- [x] 済み\n\n## 追加修正記録\n"
 REPO = "github.com/example/project"
 
@@ -182,9 +182,9 @@ class IssueBodyTest(unittest.TestCase):
         self.state.write_text(json.dumps(state), encoding="utf-8")
 
     def run_script(self, *args, expected=0):
-        done = subprocess.run([sys.executable, "-B", str(SCRIPT), *map(str, args)],
-                              env=self.env, capture_output=True, text=True, check=False, timeout=10)
-        self.assertEqual(expected, done.returncode, done.stderr)
+        done = run_python(str(SCRIPT), *map(str, args), flags=("-B",),
+                          env=self.env, timeout=10, stdin=None)
+        self.assertEqual(expected, done.returncode, describe(done))
         return done
 
     def take_snapshot(self, *extra, expected=0):

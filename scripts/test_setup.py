@@ -7,6 +7,8 @@ import subprocess
 import tempfile
 import unittest
 
+from support_cli import run
+
 SCRIPT = Path(__file__).resolve().parents[1] / 'setup.sh'
 BASH = os.environ.get('SETUP_TEST_BASH', shutil.which('bash'))
 PATH_MODES = ('--copy', '--link', '--agents-copy', '--agents')
@@ -41,8 +43,8 @@ class SetupTests(unittest.TestCase):
         return self.run_args(args)
 
     def run_args(self, args):
-        return subprocess.run([BASH, str(self.repo / 'setup.sh'), *args], cwd=self.root,
-                              env=self.env, capture_output=True, text=True, timeout=15)
+        return run([BASH, str(self.repo / 'setup.sh'), *args], cwd=self.root,
+                   env=self.env, timeout=15, stdin=None)
 
     def argument_error(self, args, *diagnostics):
         before = self.snapshot()

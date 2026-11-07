@@ -165,6 +165,14 @@ bash scripts/run-all-container.sh [--commit <rev> | --worktree] [--image <名前
 - 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に残ることがある。そのときは、残ったプロセスを pid を指定して止める。
 - 件数と結果は、1 つのプロセスで順に流す `python3 -m unittest discover -s scripts -p 'test_*.py'` と同じ。
 - テストのファイルを足すときは、ほかのテストと同じパスの一時フォルダ・ポートを使わない。`HOME` の下に作るときは、一意な名前のフォルダにする。同時に流すと取り合うため。
+- テストの共通の処理は、`scripts/` の `support_*.py`(共通の補助)を使う(#388)。名前を `test_` で始めないので、discover は拾わない。
+  - `support_git.py`: テストが git を流す関数。git の自動の保守(`maintenance`・`gc`)を止めて流す。
+  - `support_load.py`: 製品のスクリプトの読み込み(`__pycache__` を書かない)と、`__pycache__` を除いたコピー。
+  - `support_cli.py`: CLI(コマンドとして起動する入口)の実行・確かめが外れたときの文・同じプロセスでの `main` の呼び出し。
+  - `support_proc.py`: プロセスの不在の確かめと片付け。
+  - 診断のテストの準備は `diagnostic_test_support.py`(共通の補助とは別のファイル)。
+  - dotted の形(`python3 -m unittest scripts.<名前>`)では、`import support_*` が失敗する。`diagnostic_test_support.py` も同じく読み込めない。
+  - dotted の形で流す手順がある `test_check_process.py`・`test_review_guard.py` だけ、失敗したときに `from scripts import support_*` で読み込み直す。
 
 ### run-loop-selftest.py(loop-selftest)
 

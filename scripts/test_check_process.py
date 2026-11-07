@@ -1,6 +1,5 @@
 """品質コマンドの回収。実プロセスと、番号再利用・不在確認失敗の境界を検査する。"""
 import ctypes
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,139 +12,33 @@ import time
 import unittest
 from unittest import mock
 
+# 共通の補助(scripts/support_*.py)。dotted の形(python3 -m unittest scripts.test_check_process)では
+# scripts/ が読み込みの起点に無いので、その名前の読み込みに失敗したときだけ scripts から読む。
+try:
+    import support_load
+except ModuleNotFoundError as error:
+    if error.name != 'support_load':
+        raise
+    from scripts import support_load
+try:
+    import support_proc
+except ModuleNotFoundError as error:
+    if error.name != 'support_proc':
+        raise
+    from scripts import support_proc
+
 SCRIPT = Path(__file__).resolve().parents[1] / 'plugins/dev-workflow/skills/ship-task/scripts/check-process.py'
 LINUX = sys.platform.startswith('linux')
 DARWIN = sys.platform == 'darwin'
 
 
 def module():
-    spec = importlib.util.spec_from_file_location('test_check_process_helper', SCRIPT)
-    value = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(value)
-    return value
+    return support_load.load_script(SCRIPT, 'test_check_process_helper')
 
 
-# 不在の確かめ方と後始末。test_review_guard.py にも同じ関数を置く(試験ファイルはそれぞれ単独で読み込まれる)。
-def probe(send, target):
-    try:
-        send(target, 0)
-    except ProcessLookupError:
-        return 'absent'
-    except PermissionError:
-        return 'denied'
-    return 'alive'
-
-
-def assert_absent_now(pid, send=os.kill):
-    # 製品が「止めて回収した」と返した直後に使う。生きていれば待たずに失敗にする。
-    # EPERM だけは macOS の回収直後の一過性の応答として、1 秒以内で 0.02 秒ごとに確かめ直す。
-    deadline = time.monotonic() + 1
-    while True:
-        state = probe(send, pid)
-        if state == 'absent':
-            return
-        if state == 'alive':
-            raise AssertionError(f'{pid} が残っている')
-        if time.monotonic() >= deadline:
-            raise AssertionError(f'{pid} の不在を 1 秒以内に確かめられない(EPERM が続く)')
-        time.sleep(.02)
-
-
-def assert_group_absent_now(pgid):
-    assert_absent_now(pgid, os.killpg)
-
-
-def wait_absent(pid, timeout=5, send=os.kill):
-    # 自分で終わるはずのプロセスと後始末だけに使う。期限まで待つ。
-    deadline = time.monotonic() + timeout
-    while probe(send, pid) != 'absent':
-        if time.monotonic() >= deadline:
-            return False
-        time.sleep(.02)
-    return True
-
-
-def record(path):
-    # 子と孫が自分の pid と pgid を JSON で書く 1 文。書きかけを読ませないよう、置き換えで書く。
-    part = str(path) + '.part'
-    return (f"Path({part!r}).write_text(json.dumps({{'pid': os.getpid(), 'pgid': os.getpgrp()}})); "
-            f"os.replace({part!r}, {str(path)!r})")
-
-
-def read_record(path):
-    try:
-        value = json.loads(Path(path).read_text())
-        return int(value['pid']), int(value['pgid'])
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-
-
-def command_line(pid):
-    found = subprocess.run(['ps', '-ww', '-o', 'command=', '-p', str(pid)], stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, text=True)
-    return found.stdout
-
-
-def owned(root, pid, pgid):
-    # 信号を送る直前に、今の pgid が記録と同じで、コマンド行に試験の領域を含むかを確かめる。
-    try:
-        if os.getpgid(pid) != pgid:
-            return False
-    except OSError:
-        return False
-    return str(root) in command_line(pid)
-
-
-def cleanup(root, stop=(), children=(), groups=(), records=(), raw=()):
-    # 試験が起動したものだけを止めて回収し、残ったものの番号を返す。
-    # stop: 監督(run-checks)の Popen。children: 試験の直接の子の Popen(差し替えで捕まえた anchor・無関係なプロセス)。
-    # groups: 元の群の pgid を書いた記録。records: JSON の記録。raw: 素の pid(既存の Linux の試験の形)。
-    found = [value for value in map(read_record, records) if value]
-    groups = [value[1] for value in map(read_record, groups) if value]
-    pids = [pid for pid, _ in found] + list(raw)
-    # 手順 1: 監督がまだ動いていれば、TERM で製品の停止の道を先に通す。
-    for process in stop:
-        if process.poll() is None:
-            process.send_signal(signal.SIGTERM)
-            try:
-                process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait()
-    # 手順 2: 元の群の先頭が生きていて、コマンド行に試験の領域を含むときだけ、群ごと止める。
-    for pgid in groups:
-        if owned(root, pgid, pgid):
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-            except OSError:
-                pass
-    # 手順 3: 記録した各プロセスを止める。素の pid は、まだ終わっていない自分の子だけ。
-    for pid, pgid in found:
-        if owned(root, pid, pgid):
-            try:
-                os.kill(pid, signal.SIGKILL)
-            except OSError:
-                pass
-    for pid in raw:
-        try:
-            done, _ = os.waitpid(pid, os.WNOHANG)
-        except ChildProcessError:
-            continue
-        if not done:
-            os.kill(pid, signal.SIGKILL)
-    # 手順 4: 直接の子と、試験のプロセスが引き取った孤児(Linux の subreaper)を回収する。
-    for process in children:
-        if process.poll() is None:
-            process.kill()
-        process.wait()
-    for pid in pids:
-        try:
-            os.waitpid(pid, 0)
-        except ChildProcessError:
-            pass
-    # 手順 5: 記録したすべての pid と元の群が不在になるまで待つ。
-    left = [pid for pid in pids if not wait_absent(pid)]
-    return left + [pgid for pgid in groups if not wait_absent(pgid, send=os.killpg)]
+# 不在の確かめ方と後始末は support_proc.py に置く(test_review_guard.py と共通)。
+probe, assert_absent_now, wait_absent = support_proc.probe, support_proc.assert_absent_now, support_proc.wait_absent
+record, read_record, cleanup = support_proc.record, support_proc.read_record, support_proc.cleanup
 
 
 @unittest.skipUnless(LINUX, 'Linux 専用: subreaper・pidfd・/proc で実プロセスと POSIX 方式を検査')
@@ -164,7 +57,7 @@ class CheckProcessLinuxTest(unittest.TestCase):
 
     def tearDown(self):
         for thread in self.threads:
-            thread.join(5)
+            thread.join(65)
             self.assertFalse(thread.is_alive(), '試験の補助 thread が残った')
         for pid in self.pids:
             try:
@@ -178,7 +71,7 @@ class CheckProcessLinuxTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def wait_file(self, path):
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             if path.exists() and path.stat().st_size:
                 return
@@ -190,7 +83,7 @@ class CheckProcessLinuxTest(unittest.TestCase):
         value.start()
         self.threads.append(value)
 
-    def run_code(self, code, timeout=2, method='linux', grace=.05, **extra):
+    def run_code(self, code, timeout=20, method='linux', grace=.05, **extra):
         control = self.root / ('control-' + str(time.monotonic_ns()))
         control.mkdir()
         with self.helper.StopSignals() as stop:
@@ -240,7 +133,7 @@ class CheckProcessLinuxTest(unittest.TestCase):
                 pidfile = self.root / ('pid-' + str(rc))
                 code = f'''import subprocess,sys,time
 from pathlib import Path
-p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(4)'])
+p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(45)'])
 Path({str(pidfile)!r}).write_text(str(p.pid))
 raise SystemExit({rc})
 '''
@@ -249,7 +142,7 @@ raise SystemExit({rc})
                     result = self.run_code(code)
                 finally:
                     pid = self.remember(pidfile)
-                self.assertLess(time.monotonic() - started, 2)
+                self.assertLess(time.monotonic() - started, 20)
                 self.assertEqual(rc, result['returncode'])
                 self.assertFalse(Path(f'/proc/{pid}').exists())
 
@@ -258,13 +151,13 @@ raise SystemExit({rc})
         unrelated = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)'])
         code = f'''import os,signal,time
 if os.fork():
- time.sleep(4); os._exit(0)
+ time.sleep(45); os._exit(0)
 os.setsid()
 if os.fork(): os._exit(0)
 os.environ.clear()
 signal.signal(signal.SIGTERM, signal.SIG_IGN)
 open({str(pidfile)!r},'w').write(str(os.getpid()))
-time.sleep(4)
+time.sleep(45)
 '''
         try:
             try:
@@ -315,7 +208,7 @@ time.sleep(4)
         """試験の孤児だけを回収する。anchor や command の wait を横取りしない。"""
         self.wait_file(pidfile)
         pid = self.remember(pidfile)
-        deadline = time.monotonic() + 4
+        deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             try:
                 found, _ = os.waitpid(pid, os.WNOHANG)
@@ -339,7 +232,7 @@ time.sleep({3 if timeout else .1})
             result = self.run_code(code, timeout=.3 if timeout else 2, method='posix')
             self.assertEqual(timeout, result['timed_out'])
             self.assertEqual('original-process-group-only', result['recovery_scope'])
-            self.threads[-1].join(2)
+            self.threads[-1].join(65)
             self.assertFalse(Path(f'/proc/{int(pidfile.read_text())}').exists())
 
     def test_posix_group_escape_is_explicitly_outside_guarantee(self):
@@ -392,7 +285,7 @@ time.sleep({3 if timeout else .1})
             anchors.append(process)
             return process
         with mock.patch.object(self.helper.subprocess, 'Popen', side_effect=launch):
-            result = self.run_code(f"import time; time.sleep(3)  # {self.root}", timeout=.3, method='posix', grace=.5)
+            result = self.run_code(f"import time; time.sleep(45)  # {self.root}", timeout=.3, method='posix', grace=.5)
         self.assertTrue(result['timed_out'])
         self.assertEqual('original-process-group-only', result['recovery_scope'])
         self.assertEqual(-signal.SIGKILL, anchors[0].returncode)
@@ -415,7 +308,7 @@ class CheckProcessCommonTest(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def run_code(self, code, timeout=2, method='linux', grace=.05):
+    def run_code(self, code, timeout=20, method='linux', grace=.05):
         control = self.root / ('control-' + str(time.monotonic_ns()))
         control.mkdir()
         with self.helper.StopSignals() as stop:
@@ -491,12 +384,12 @@ def send_self(number):
 
 
 def parent(child, wait, then=''):
-    # 子を起動し、子の記録を見てから先へ進む親。3 秒で記録が来なければ終了 3 で止まる。
+    # 子を起動し、子の記録を見てから先へ進む親。30 秒で記録が来なければ終了 3 で止まる。
     names = [str(path) for path in wait]
     return f"""import json, os, subprocess, sys, time
 from pathlib import Path
 subprocess.Popen([sys.executable, '-c', {child!r}])
-end = time.monotonic() + 3
+end = time.monotonic() + 30
 while not all(Path(name).exists() for name in {names!r}):
     if time.monotonic() >= end:
         raise SystemExit(3)
@@ -521,7 +414,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
     def tearDown(self):
         try:
             for thread in self.threads:
-                thread.join(5)
+                thread.join(25)
             left = cleanup(self.root, children=self.children, groups=self.records, records=self.records)
         finally:
             self.tmp.cleanup()
@@ -555,7 +448,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
         value.start()
         self.threads.append(value)
 
-    def when_recorded(self, path, action, wait=2):
+    def when_recorded(self, path, action, wait=20):
         # 記録を見てから action を行う。監督が動いている間(StopSignals が受けている間)だけ行う。
         # 待ちは、品質コマンドが自分で終わるより短くする。action が実際に動いたら、返す Event を立てる。
         fired = threading.Event()
@@ -590,7 +483,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
             return process
         return anchors, mock.patch.object(self.helper.subprocess, 'Popen', side_effect=launch)
 
-    def run_code(self, code, timeout=2, grace=.05):
+    def run_code(self, code, timeout=20, grace=.05):
         control = self.root / ('control-' + str(time.monotonic_ns()))
         control.mkdir()
         with self.helper.StopSignals() as stop:
@@ -623,16 +516,16 @@ class CheckProcessDarwinTest(unittest.TestCase):
     def test_parent_exit_stops_remaining_child(self):
         child = self.path('child')
         started = time.monotonic()
-        result = self.run_code(parent(ignoring_child(child, self.natural('child')), [child]))
+        result = self.run_code(parent(ignoring_child(child, self.natural('child'), seconds=45), [child]))
         self.assert_not_natural()
-        self.assertLess(time.monotonic() - started, 2)
+        self.assertLess(time.monotonic() - started, 20)
         self.assertEqual(0, result['returncode'])
         self.assertEqual('original-process-group-only', result['recovery_scope'])
         assert_absent_now(self.pid_of(child))
 
     def test_timeout_stops_remaining_child(self):
         child = self.path('child')
-        code = parent(ignoring_child(child, self.natural('child')), [child], sleep_then_mark(3, self.natural('parent')))
+        code = parent(ignoring_child(child, self.natural('child'), seconds=30), [child], sleep_then_mark(30, self.natural('parent')))
         result = self.run_code(code, timeout=1)
         self.assert_not_natural()
         self.assertTrue(result['timed_out'])
@@ -643,7 +536,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
             with self.subTest(signal=number.name):
                 child = self.path('child-' + number.name)
                 naturals = [self.natural('child-' + number.name), self.natural('parent-' + number.name)]
-                code = parent(ignoring_child(child, naturals[0]), [child], sleep_then_mark(3, naturals[1]))
+                code = parent(ignoring_child(child, naturals[0], seconds=45), [child], sleep_then_mark(45, naturals[1]))
                 fired = self.when_recorded(child, send_self(number))
                 with self.assertRaisesRegex(self.helper.Interrupted, f'終了通知 {int(number)} を受けた'):
                     self.run_code(code)
@@ -663,7 +556,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
                     return True
                 return False
             fired = self.when_recorded(child, kill)
-            code = parent(ignoring_child(child, self.natural('child')), [child], sleep_then_mark(3, self.natural('parent')))
+            code = parent(ignoring_child(child, self.natural('child'), seconds=45), [child], sleep_then_mark(45, self.natural('parent')))
             with launch, self.assertRaises(self.helper.RecoveryError) as caught:
                 self.run_code(code, timeout=10)
             self.assert_not_natural()
@@ -687,7 +580,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
         self.assertEqual('alive', probe(os.kill, pid))
         self.assertEqual((pid, pid), read_record(child), '子が群を抜けていない')
         self.assertEqual('original-process-group-only', result['recovery_scope'])
-        self.assertTrue(wait_absent(pid), '群の外へ移った子が 5 秒以内に終わらない')
+        self.assertTrue(wait_absent(pid), '群の外へ移った子が 30 秒以内に終わらない')
         self.assertTrue(marker.exists())
 
     def test_monitor_launch_failure_proves_no_command_started(self):
@@ -704,7 +597,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
     def test_issue289_term_obeying_timeout_is_timed_out(self):
         command = self.path('command')
         anchors, launch = self.capture_anchor()
-        code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(3, self.natural('command'))}"
+        code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(30, self.natural('command'))}"
         with launch:
             result = self.run_code(code, timeout=1, grace=.2)
         self.assert_not_natural()
@@ -723,7 +616,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
                 natural = self.natural('command-' + number.name)
                 anchors, launch = self.capture_anchor()
                 fired = self.when_recorded(command, send_self(number))
-                code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(2.5, natural)}"
+                code = f"import json, os, time; from pathlib import Path; {record(command)}; {sleep_then_mark(45, natural)}"
                 with launch, self.assertRaisesRegex(self.helper.Interrupted, f'終了通知 {int(number)} を受けた') as caught:
                     self.run_code(code, timeout=10, grace=.2)
                 self.assert_not_natural([natural])

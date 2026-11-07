@@ -1,6 +1,5 @@
 """候補採用の正式入口の回帰。"""
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -10,6 +9,9 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+
+import support_git
+from support_load import load_script
 
 sys.dont_write_bytecode = True
 
@@ -28,6 +30,9 @@ class AdoptionTest(unittest.TestCase):
 
     def tearDown(self):
         self.tmp.cleanup()
+
+    def git(self, *args):
+        return support_git.git(*args, options=('-C', str(self.root)), text=False, stdin=None)
 
     def run_adopt(self, marker='', *extra):
         env = dict(os.environ, DEV_WORKFLOW_LOOP_ITER=marker)
@@ -116,9 +121,7 @@ class AdoptionTest(unittest.TestCase):
             self.assertTrue(self.source.exists())
 
     def test_marker_appearing_before_rename_stops(self):
-        spec = importlib.util.spec_from_file_location('adoption_test', SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, 'adoption_test')
         real_validate = module.validate_candidate
         def changed(*args, **kwargs):
             value = real_validate(*args, **kwargs)
@@ -131,54 +134,46 @@ class AdoptionTest(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def test_tracked_normal_stages_rename(self):
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True).stdout
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         result = self.run_adopt()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn(self.dest.name.encode(), git('ls-files', '-z'))
-        self.assertNotIn(self.source.name.encode(), git('ls-files', '-z'))
+        self.assertIn(self.dest.name.encode(), self.git('ls-files', '-z').stdout)
+        self.assertNotIn(self.source.name.encode(), self.git('ls-files', '-z').stdout)
 
     def test_tracked_unstaged_candidate_edit_keeps_held_index_blob(self):
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True)
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         indexed = self.source.read_bytes()
         self.source.write_bytes(indexed + '未 stage の追記\n'.encode())
         self.digest = hashlib.sha256(self.source.read_bytes()).hexdigest()
         result = self.run_adopt()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(indexed + '未 stage の追記\n'.encode(), self.dest.read_bytes())
-        self.assertEqual(indexed, git('show', ':' + self.dest.name).stdout)
+        self.assertEqual(indexed, self.git('show', ':' + self.dest.name).stdout)
 
     def test_tracked_partially_staged_candidate_edit_keeps_held_index_blob(self):
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True)
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         indexed = self.source.read_bytes() + 'stage した追記\n'.encode()
         self.source.write_bytes(indexed)
-        git('add', '--', self.source.name)
+        self.git('add', '--', self.source.name)
         current = indexed + '未 stage の追記\n'.encode()
         self.source.write_bytes(current)
         self.digest = hashlib.sha256(current).hexdigest()
         result = self.run_adopt()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual(current, self.dest.read_bytes())
-        self.assertEqual(indexed, git('show', ':' + self.dest.name).stdout)
+        self.assertEqual(indexed, self.git('show', ':' + self.dest.name).stdout)
 
     def test_tracked_replacement_before_git_mv_stops_with_staged_residue(self):
         """git mv が読む直前の差替えを成功や自動 rollback に読み替えない。"""
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True)
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         held = self.source.read_bytes()
         module = self.module('adoption_tracked_late_replacement')
         real_root_run = module.root_run
@@ -199,18 +194,16 @@ class AdoptionTest(unittest.TestCase):
         self.assertTrue(replaced)
         self.assertFalse(self.source.exists())
         self.assertEqual('third party replacement', self.dest.read_text())
-        staged = git('diff', '--cached', '--name-status', '-z').stdout
+        staged = self.git('diff', '--cached', '--name-status', '-z').stdout
         self.assertIn(b'R100\0', staged)
         self.assertIn(os.fsencode(self.dest.name), staged)
-        self.assertEqual(held, git('show', ':' + self.dest.name).stdout)
+        self.assertEqual(held, self.git('show', ':' + self.dest.name).stdout)
 
     def test_tracked_index_replacement_after_git_mv_stops_with_staged_residue(self):
         """作業ツリーを戻しても、第三者が差し替えた stage を許可しない。"""
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True)
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         held = self.source.read_bytes()
         module = self.module('adoption_tracked_index_replacement')
         real_root_run = module.root_run
@@ -222,7 +215,7 @@ class AdoptionTest(unittest.TestCase):
             if not replaced and 'mv' in argv and result.returncode == 0:
                 replaced = True
                 self.dest.write_text('third party staged replacement')
-                git('add', '--', self.dest.name)
+                self.git('add', '--', self.dest.name)
                 self.dest.write_bytes(held)
             return result
 
@@ -232,23 +225,21 @@ class AdoptionTest(unittest.TestCase):
         self.assertTrue(replaced)
         self.assertFalse(self.source.exists())
         self.assertEqual(held, self.dest.read_bytes())
-        self.assertEqual(b'third party staged replacement', git('show', ':' + self.dest.name).stdout)
+        self.assertEqual(b'third party staged replacement', self.git('show', ':' + self.dest.name).stdout)
 
     def test_precheck_tamper_stops_tracked_rename(self):
         """採用 helper は candidate-keys 後にも snapshot の拒否を通す。"""
-        def git(*args):
-            return subprocess.run(['git', '-C', str(self.root), *args], check=True, capture_output=True)
-        git('init', '-q')
-        git('add', '--', self.source.name)
-        git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
+        self.git('init', '-q')
+        self.git('add', '--', self.source.name)
+        self.git('-c', 'user.name=test', '-c', 'user.email=test@example.invalid', 'commit', '-qm', 'base')
         # diff-snapshot の --precheck は任意 filter を改竄候補として exit 22 にする。
-        git('config', '--local', 'filter.untrusted.clean', 'cat')
+        self.git('config', '--local', 'filter.untrusted.clean', 'cat')
         result = self.run_adopt()
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('事前検査', result.stderr)
         self.assertTrue(self.source.is_file())
         self.assertFalse(self.dest.exists())
-        self.assertIn(self.source.name.encode(), git('ls-files', '-z').stdout)
+        self.assertIn(self.source.name.encode(), self.git('ls-files', '-z').stdout)
 
     def test_symlink_fifo_parent_refused(self):
         self.source.unlink()
@@ -259,9 +250,7 @@ class AdoptionTest(unittest.TestCase):
         self.assertEqual(self.run_adopt().returncode, 2)
 
     def test_change_while_reading_stops_before_rename(self):
-        spec = importlib.util.spec_from_file_location('adoption_read_race', SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, 'adoption_read_race')
         real_read = module.os.read
         changed = False
 
@@ -280,10 +269,7 @@ class AdoptionTest(unittest.TestCase):
         self.assertFalse(self.dest.exists())
 
     def module(self, name='adoption_portable'):
-        spec = importlib.util.spec_from_file_location(name, SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        return load_script(SCRIPT, name)
 
     def test_forced_posix_fallback_normal(self):
         module = self.module()
@@ -370,10 +356,10 @@ m.adopt(root, source, None, digest)
                 time.sleep(.02)
             self.assertTrue(marker.exists(), 'fallback did not reach its post-link window')
             self.assertTrue(self.dest.exists(), 'fallback did not create destination before signal')
-            proc.kill(); proc.wait(timeout=5)
+            proc.kill(); proc.wait(timeout=30)
         finally:
             if proc.poll() is None:
-                proc.kill(); proc.wait(timeout=5)
+                proc.kill(); proc.wait(timeout=30)
         self.assertTrue(self.source.exists())
         self.assertTrue(self.dest.exists())
         self.assertEqual(os.stat(self.source).st_ino, os.stat(self.dest).st_ino)

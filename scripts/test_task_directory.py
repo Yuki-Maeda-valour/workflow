@@ -1,11 +1,12 @@
 import json
 import os
 import shutil
-import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+from support_cli import run_python
+from support_load import copy_clean
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -22,10 +23,8 @@ class TaskDirectoryResolverTest(unittest.TestCase):
         self.temp.cleanup()
 
     def run_resolver(self, task_dir=None, resolver=RESOLVER):
-        command = [sys.executable, str(resolver), "--project-root", str(self.root)]
-        if task_dir is not None:
-            command.append(f"--task-dir={task_dir}")
-        completed = subprocess.run(command, text=True, capture_output=True, check=False)
+        extra = [] if task_dir is None else [f"--task-dir={task_dir}"]
+        completed = run_python(str(resolver), "--project-root", str(self.root), *extra, stdin=None)
         return completed.returncode, json.loads(completed.stdout)
 
     def state_file(self, directory, name="進行中_作業.md"):
@@ -251,7 +250,7 @@ class TaskDirectoryResolverTest(unittest.TestCase):
     def test_helper_runs_from_copied_skills_distribution(self):
         copied = Path(self.temp.name) / "installed-skills"
         # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
-        shutil.copytree(REPO_ROOT / "plugins/dev-workflow/skills", copied, ignore=shutil.ignore_patterns("__pycache__"))
+        copy_clean(REPO_ROOT / "plugins/dev-workflow/skills", copied)
         resolver = copied / "create-task/scripts/resolve-task-dir.py"
         code, result = self.run_resolver(resolver=resolver)
         self.assertEqual(0, code)

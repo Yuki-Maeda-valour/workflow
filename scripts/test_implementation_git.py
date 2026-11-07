@@ -3,7 +3,6 @@
 試験入力の承認は実際の利用者の承認ではない。AI の起動は測定しない。
 """
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -14,6 +13,10 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+
+import support_git
+from support_cli import run_python
+from support_load import copy_clean, load_script
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "plugins/dev-workflow/skills/do-task/scripts"
@@ -149,9 +152,7 @@ class Harness(unittest.TestCase):
     def call(self, *args, env=None, script=None):
         child = dict(self.env)
         child.update(env or {})
-        return subprocess.run([sys.executable, "-B", str(script or self.script), *args],
-                              env=child, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True, timeout=12)
+        return run_python(str(script or self.script), *args, flags=("-B",), env=child, timeout=12, stdin=None)
 
     def prepare(self, accept=None, cwd=None):
         args = ["prepare", "--cwd", str(cwd or self.repo)]
@@ -378,9 +379,7 @@ class StubContractTests(Harness):
             self.clear()
             self.assert_stopped(self.call("run", "--cwd", str(self.repo),
                                          "--expect-context-sha256", value, "status"), 2, no_git=True)
-        spec = importlib.util.spec_from_file_location("implementation_git_test_module", SCRIPT)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, "implementation_git_test_module")
         for value in ("HEAD\0other", "\ud800", "\udcff"):
             with self.subTest(value=repr(value)), mock.patch.object(module, "precheck") as pre:
                 with self.assertRaises(module.Failure) as caught:
@@ -476,8 +475,7 @@ class RealRepositoryTests(Harness):
         self.accept = self.approval()
 
     def git(self, *args):
-        return subprocess.run([self.real_git, "-C", str(self.repo), *SAFE, *args],
-                              env=self.env, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        return support_git.git(*args, env=self.env, binary=self.real_git, options=("-C", str(self.repo), *SAFE), stdin=None)
 
     def approval(self):
         r = self.call("prepare", "--cwd", str(self.repo))
@@ -515,7 +513,7 @@ class RealRepositoryTests(Harness):
         self.verify_five()
         folder = self.root / "mutation"
         # __pycache__ は写さない。並べて流すと、別のテストが起動した python が書きかけの .pyc を置いていることがある。
-        shutil.copytree(SCRIPTS, folder, ignore=shutil.ignore_patterns("__pycache__"))
+        copy_clean(SCRIPTS, folder)
         mutant = folder / SCRIPT.name
         source = mutant.read_text()
         old = "result = run_git(cwd, env, *command)"
@@ -536,6 +534,13 @@ class RealRepositoryTests(Harness):
         self.assertEqual(self.read_op(new, "status").returncode, 0)
 
     def test_literal_paths_all_environment_variants_and_repeat(self):
+        # この件は記録を読まず、終了コードと本物の git の出力だけを確かめる。記録用の偽の git(git 1 回ごとに
+        # python が起動する)を PATH から外し、CLI と事前検査に本物の git を直に呼ばせる。
+        # 記録を確かめる処理を足すときは、偽の git を戻す(末尾の空の確かめが気づかせる)。
+        self.env["PATH"] = os.pathsep.join(
+            folder for folder in self.env["PATH"].split(os.pathsep) if folder != str(self.bin))
+        self.assertEqual(shutil.which("git", path=self.env["PATH"]), self.real_git)
+        self.clear()
         p = self.prepare(self.accept)
         for name in self.names:
             for setting in ({}, *({k:"1"} for k in PATH_ENV), {k:"1" for k in PATH_ENV}):
@@ -555,6 +560,7 @@ class RealRepositoryTests(Harness):
                 self.assertIn("Case.txt", r.stdout)
         self.assertEqual(self.read_op(p, "show", "--file", "link").stdout, "normal.txt")
         self.assertEqual(self.read_op(p, "show", "--file", "dir").returncode, 20)
+        self.assertEqual(self.events(), [])  # 記録用の偽の git を一度も通っていない
 
     def test_index_bytes_stat_refs_and_tracked_files_unchanged(self):
         p = self.prepare(self.accept)

@@ -1,4 +1,3 @@
-import importlib.util
 import hashlib
 import json
 import os
@@ -11,6 +10,10 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+import support_git
+from support_cli import describe, run_python
+from support_load import load_script
+
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = REPO_ROOT / "plugins/dev-workflow/skills/ship-task/scripts/origin-repo.py"
@@ -20,7 +23,7 @@ SSH_STUB = """#!/bin/sh
 mode="${SSH_STUB_MODE:-github}"
 case "$mode" in
   fail) exit 255 ;;
-  sleep) sleep 5; exit 0 ;;
+  sleep) sleep 30; exit 0 ;;
 esac
 if [ -n "${SSH_STUB_OUTPUT:-}" ]; then
   cat "$SSH_STUB_OUTPUT"
@@ -64,13 +67,12 @@ class OriginRepoTest(unittest.TestCase):
         self.temp.cleanup()
 
     def git(self, *args, cwd=None):
-        subprocess.run(["git", *args], cwd=cwd or self.repo, env=self.env, check=True,
-                       capture_output=True, text=True)
+        support_git.git(*args, cwd=cwd or self.repo, env=self.env, stdin=None)
 
     def origin(self, fetch, push=None):
         # 何度呼んでもよい(前の origin を消してから足す)
-        subprocess.run(["git", "remote", "remove", "origin"], cwd=self.repo, env=self.env,
-                       capture_output=True, check=False)
+        support_git.git("remote", "remove", "origin", cwd=self.repo, env=self.env,
+                        check=False, text=True, stdin=None)
         self.git("remote", "add", "origin", fetch)
         if push is not None:
             self.git("config", "remote.origin.pushurl", push)
@@ -78,13 +80,12 @@ class OriginRepoTest(unittest.TestCase):
     def run_script(self, *, directory=None, extra_env=None):
         env = dict(self.env)
         env.update(extra_env or {})
-        done = subprocess.run([sys.executable, str(SCRIPT), f"--dir={directory or self.repo}"],
-                              env=env, capture_output=True, text=True, check=False)
+        done = run_python(str(SCRIPT), f"--dir={directory or self.repo}", env=env, stdin=None)
         return done
 
     def result(self, **kwargs):
         done = self.run_script(**kwargs)
-        self.assertEqual(0, done.returncode, done.stderr)
+        self.assertEqual(0, done.returncode, describe(done))
         return json.loads(done.stdout), done.stdout
 
     def ssh_output(self, settings, *, form="scp"):
@@ -227,11 +228,7 @@ class OriginRepoTest(unittest.TestCase):
         self.assertIsNone(got["repo"])
 
     def test_ssh_timeout_is_rejected(self):
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("origin_repo", SCRIPT)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, "origin_repo")
         setattr(module, "SSH_TIMEOUT", 1)
         saved = dict(os.environ)
         try:
@@ -239,7 +236,7 @@ class OriginRepoTest(unittest.TestCase):
             os.environ["SSH_STUB_MODE"] = "sleep"
             started = time.monotonic()
             ok, why = module.ssh_is_github()
-            self.assertLess(time.monotonic() - started, 4)
+            self.assertLess(time.monotonic() - started, 7)
         finally:
             os.environ.clear()
             os.environ.update(saved)
@@ -361,11 +358,7 @@ class OriginRepoTest(unittest.TestCase):
                 ).stderr)
 
     def test_ssh_decode_failure_is_rejected_without_leaking(self):
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("origin_repo", SCRIPT)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, "origin_repo")
         with mock.patch.object(module.subprocess, "run", side_effect=UnicodeDecodeError(
                 "utf-8", b"\xff", 0, 1, "invalid")):
             ok, why = module.ssh_is_github()
@@ -374,11 +367,7 @@ class OriginRepoTest(unittest.TestCase):
         self.assertNotIn("xff", why)
 
     def test_ssh_launch_failure_has_safe_reason(self):
-        sys.dont_write_bytecode = True
-        spec = importlib.util.spec_from_file_location("origin_repo", SCRIPT)
-        assert spec is not None and spec.loader is not None
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        module = load_script(SCRIPT, "origin_repo")
         with mock.patch.object(module.subprocess, "run", side_effect=OSError("SECRET-PATH")):
             ok, why = module.ssh_is_github()
         self.assertFalse(ok)

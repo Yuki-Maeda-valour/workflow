@@ -1,12 +1,12 @@
 import json
 import os
-import shutil
-import subprocess
-import sys
 import tempfile
 import unicodedata
 import unittest
 from pathlib import Path
+
+from support_cli import run_python
+from support_load import copy_clean
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -42,13 +42,7 @@ class CandidateKeysTest(unittest.TestCase):
         self.temp.cleanup()
 
     def run_script(self, *args, stdin=None, script=SCRIPT, env=None):
-        completed = subprocess.run(
-            [sys.executable, str(script), *args],
-            input=stdin,
-            capture_output=True,
-            check=False,
-            env=env,
-        )
+        completed = run_python(str(script), *args, text=False, input=stdin, stdin=None, env=env)
         return completed.returncode, completed.stdout.decode("utf-8"), completed.stderr.decode("utf-8")
 
     def collect(self, task_dir=None):
@@ -315,14 +309,14 @@ class CandidateKeysTest(unittest.TestCase):
     def test_does_not_write_bytecode_into_scripts(self):
         env = {key: value for key, value in os.environ.items() if key not in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX")}
         copied = Path(self.temp.name) / "scripts"
-        shutil.copytree(SCRIPTS, copied, ignore=shutil.ignore_patterns("__pycache__"))
+        copy_clean(SCRIPTS, copied)
         code, _, _ = self.run_script(f"--task-dir={self.dir}", script=copied / "candidate-keys.py", env=env)
         self.assertEqual(0, code)
         self.assertFalse((copied / "__pycache__").exists())
 
         # 対照: 同じ環境で sys.dont_write_bytecode を外した写しは __pycache__ を作る(この検査が空振りしない)
         control = Path(self.temp.name) / "control"
-        shutil.copytree(SCRIPTS, control, ignore=shutil.ignore_patterns("__pycache__"))
+        copy_clean(SCRIPTS, control)
         source = (control / "candidate-keys.py").read_text(encoding="utf-8")
         self.assertEqual(1, source.count("sys.dont_write_bytecode = True\n"))
         (control / "candidate-keys.py").write_text(source.replace("sys.dont_write_bytecode = True\n", ""), encoding="utf-8")

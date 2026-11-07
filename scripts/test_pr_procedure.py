@@ -19,6 +19,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
+import support_git
+from support_cli import run
+
 
 REPO = Path(__file__).resolve().parent.parent
 AGENTS = REPO / "AGENTS.md"
@@ -463,8 +466,7 @@ class ScratchRepo(unittest.TestCase):
         self.tmp.cleanup()
 
     def git(self, *args, check=True):
-        return subprocess.run(["git", "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args], cwd=self.repo,
-                              env=self.env, check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        return support_git.git(*args, cwd=self.repo, env=self.env, check=check, stdin=None)
 
     def write(self, path, text):
         target = self.repo / path
@@ -591,8 +593,7 @@ class ScratchRepo(unittest.TestCase):
             env["reviewed"] = reviewed
         if checked is not None:
             env["checked"] = checked
-        done = subprocess.run(["bash", "-s"], input=script, cwd=self.repo, text=True, env=env,
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        done = run(["bash", "-s"], input=script, cwd=self.repo, env=env)
         return done.returncode, done.stdout, done.stderr
 
     def normal(self, **kwargs):
