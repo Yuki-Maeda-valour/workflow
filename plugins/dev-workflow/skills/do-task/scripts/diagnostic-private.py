@@ -52,7 +52,7 @@ class Private:
         # 元のobjectsは読むだけ(alternates)。展開などでGitが書くobjectは私有のobjectsへ置く。
         # 元のalternatesの連なり(odbがたどったすべての置き場)も1行ずつ書き、Gitが読める段数を減らさない。
         # odbがたどった順(Gitと同じ深さ優先)のまま書き、元は最後に書く。先に書いたり名前で並べ替えたりすると、
-        # 連なりによってはGitが毎回「nesting too deep」をstderrへ出し、子のstderrの上限を使う
+        # 連なりによってはGitが毎回「nesting too deep」をstderrへ出し、子プロセスのstderrの上限を使う
         self.private_objects=self.common+b'/objects'
         def quote(p): return b'"'+p.replace(b'\\',b'\\\\').replace(b'"',b'\\"').replace(b'\n',b'\\n')+b'"\n'
         chain=[p for p in self.odb_seen if p!=self.objects]+[self.objects]

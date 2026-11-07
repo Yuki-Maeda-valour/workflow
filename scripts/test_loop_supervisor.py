@@ -38,14 +38,14 @@ class SupervisorTest(unittest.TestCase):
             if path.exists() and path.stat().st_size:
                 return
             time.sleep(.02)
-        self.fail('子の起動を確認できない')
+        self.fail('子プロセスの起動を確認できない')
 
     def assert_gone(self, pid):
         for _ in range(100):
             if not Path(f'/proc/{pid}').exists():
                 return
             time.sleep(.01)
-        self.fail(f'子 {pid} が残った')
+        self.fail(f'子プロセス {pid} が残った')
 
     def test_runtime_check_and_unavailable_pidfd_are_explicit(self):
         proc = subprocess.run([sys.executable, str(SCRIPT), '--check'], capture_output=True, timeout=3)

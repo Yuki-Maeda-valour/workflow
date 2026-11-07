@@ -1,4 +1,4 @@
-"""#260: 起動前計画の親子引継ぎと既存除外の単調な追加。"""
+"""#260: 起動前計画の親のリポジトリから下のリポジトリへの引継ぎと既存除外の単調な追加。"""
 import base64
 import hashlib
 import json
@@ -53,7 +53,7 @@ class DiagnosticContexts(DiagnosticFixture):
         self.assertIn(b'public.txt', self.records(result))
         self.profile(['child/late-secret'])
         (child / 'late-secret').write_text('later-protected')
-        self.observe('refs')  # 子を準備するときにも祖先の追加を保持する。
+        self.observe('refs')  # 下のリポジトリを準備するときにも祖先の追加を保持する。
         self.profile([])
         self.common[-1] = '0'
         self.observe('refs')

@@ -79,7 +79,7 @@ class Many(unittest.TestCase):
 ''' + "".join(f"    def test_{index}(self):\n        pass\n\n" for index in range(7))
 
 
-# 自分と、自分が起動した孫のプロセスの pid を書いてから眠る(止めたときに両方が消えるかを見る)。
+# 自分と、自分が起動した孫プロセスの pid を書いてから眠る(止めたときに両方が消えるかを見る)。
 SLOW = '''
 import os
 import subprocess
@@ -89,7 +89,7 @@ import unittest
 
 class Slow(unittest.TestCase):
     def test_sleep(self):
-        # 後片付けで消える一時フォルダ(止め方が SIGINT なら、子は終わる前に消せる)。
+        # 後片付けで消える一時フォルダ(止め方が SIGINT なら、子プロセスは終わる前に消せる)。
         self.held = tempfile.TemporaryDirectory(prefix="held-")
         self.addCleanup(self.held.cleanup)
         child = subprocess.Popen(["sleep", "60"])
@@ -102,9 +102,9 @@ class Slow(unittest.TestCase):
 '''
 
 
-# 入れ子の実行: テストが「真ん中」のプロセスを同じグループで起動し、真ん中は自分の子を別のグループで起動する。
-# 真ん中は SIGINT・SIGTERM・SIGHUP のどれを受けても、少し後片付けをしてから自分の子を止めて回収し、終わる
-# (入れ子の run-tests.py と同じ形)。外側が真ん中を途中で SIGKILL すると、別のグループの子が残る。
+# 入れ子の実行: テストが「真ん中」のプロセスを同じグループで起動し、真ん中は自分の子プロセスを別のグループで起動する。
+# 真ん中は SIGINT・SIGTERM・SIGHUP のどれを受けても、少し後片付けをしてから自分の子プロセスを止めて回収し、終わる
+# (入れ子の run-tests.py と同じ形)。外側が真ん中を途中で SIGKILL すると、別のグループの子プロセスが残る。
 MIDDLE = r"""
 import os, signal, subprocess, sys, time
 child = subprocess.Popen(["sleep", "60"], start_new_session=True,
@@ -211,11 +211,11 @@ class RunTestsTest(unittest.TestCase):
         self.assertIn("2 ファイル・2 プロセス", result.stdout)
         self.assertIn("結果: 5 件 / 失敗 0 件 / エラー 0 件 / skip 1 件", result.stdout)
         self.assertNotIn("異常:", result.stdout)
-        # 親に -B を付けたときは、子も __pycache__ を作らない。
+        # 親に -B を付けたときは、子プロセスも __pycache__ を作らない。
         self.assertEqual([], list(self.root.rglob("__pycache__")))
 
     def test_children_never_write_bytecode_even_without_parent_b(self):
-        # テストのファイルが scripts/ の下のモジュールを読み込んでも、子は .pyc を書かない。
+        # テストのファイルが scripts/ の下のモジュールを読み込んでも、子プロセスは .pyc を書かない。
         (self.scripts / "helper_module.py").write_text("VALUE = 1\n", encoding="utf-8")
         self.write_test("test_imports.py", '''
 import unittest
@@ -284,7 +284,7 @@ class Imports(unittest.TestCase):
             with self.subTest(signal=signum.name):
                 marks = self.root / f"marks-{signum.name}"
                 marks.mkdir()
-                # 親の run-tests-* と、子の held-* の置き場。止めた後に空なら、どちらも片付いている。
+                # 親の run-tests-* と、子プロセスの held-* の置き場。止めた後に空なら、どちらも片付いている。
                 temporary = self.root / f"tmp-{signum.name}"
                 temporary.mkdir()
                 for name in ("test_slow_a.py", "test_slow_b.py", "test_slow_c.py"):
@@ -309,7 +309,7 @@ class Imports(unittest.TestCase):
                 self.assertEqual(code, runner.returncode, output)
                 self.assertIn("中断: 動いていた 1 個のプロセスを止め、まだ始めていない 2 個を始めずに捨てた", output)
                 self.assertNotIn("結果:", output)
-                # 待ち行列の 2 つは始まっていない。動いていたプロセスと、その孫も消えている。
+                # 待ち行列の 2 つは始まっていない。動いていたプロセスと、その孫プロセスも消えている。
                 self.assertEqual(["test_slow_a.py.pids"], [path.name for path in marks.glob("*.pids")])
                 self.assertEqual([], self.survivors(pids), pids)
                 self.assertEqual([], sorted(path.name for path in temporary.iterdir()))
@@ -373,7 +373,7 @@ class Imports(unittest.TestCase):
         self.assertLess(time.monotonic() - started, 30)
         self.assertEqual(129, code, output)
         self.assertIn("中断: 動いていた 1 個のプロセスを止め", output)
-        # 真ん中と、真ん中が別のグループで起動した子が、止めた後に残っていない。
+        # 真ん中と、真ん中が別のグループで起動した子プロセスが、止めた後に残っていない。
         self.assertEqual(2, len(pids), pids)
         self.assertEqual([], left, pids)
 

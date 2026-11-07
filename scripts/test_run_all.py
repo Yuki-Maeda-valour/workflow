@@ -146,7 +146,7 @@ echo "結果: PASS {passed} 件 / FAIL 0 件"
 '''
 
 
-# 枠の外の偽の selftest。RUN_ALL_HANG_OUTSIDE があると、自分と子の pid を書いて眠る(止めたときの確かめ)。
+# 枠の外の偽の selftest。RUN_ALL_HANG_OUTSIDE があると、自分と子プロセスの pid を書いて眠る(止めたときの確かめ)。
 OUTSIDE_HANG = r'''
 if [ -n "${RUN_ALL_HANG_OUTSIDE:-}" ]; then
   sleep 60 &
@@ -302,7 +302,7 @@ class RunAllTest(unittest.TestCase):
         self.assertIn("unittest test_a.py  3 件", out)
         self.assertIn("loop-selftest (節の外だけ)  PASS 3 件 / FAIL 0 件", out)
         self.assertIn("implement-guard-selftest.sh --only L-a  PASS 1 件 / FAIL 0 件", out)
-        # 子の環境に、無いときだけ上限が入る(loop の各プロセス)。
+        # 子プロセスの環境に、無いときだけ上限が入る(loop の各プロセス)。
         self.assertEqual([], list(self.root.rglob("__pycache__")))
 
     def test_loop_environment_defaults_are_added_only_when_missing(self):

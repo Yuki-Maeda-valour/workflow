@@ -1,4 +1,4 @@
-"""原子的復元の公開結果と、実ファイル・fd・子の回収を検査する。"""
+"""原子的復元の公開結果と、実ファイル・fd・子プロセスの回収を検査する。"""
 import hashlib
 import os
 from pathlib import Path
@@ -273,9 +273,9 @@ class RestoreTests(unittest.TestCase):
     def test_signals_at_every_boundary_report_actual_change_once(self):
         before = ('start', 'before-prepare', 'probe', 'before-copy', 'copy', 'before-publish', 'publish-ready', 'replace')
         after = ('after-publish', 'after-verify', 'before-cleanup', 'before-response')
-        # copy の印は、子の cp が動いている間だけ通る。子が最初の poll() より先に終わると、1 度も通らない(#362)。
+        # copy の印は、子プロセスの cp が動いている間だけ通る。子プロセスが最初の poll() より先に終わると、1 度も通らない(#362)。
         # copy の段階だけ偽の cp を使う。偽の cp は copy-gate ができるまで本物の cp に替わらない。
-        # テストは合図を立てた後に copy-gate を作る。copy-gate はふつう、子を起動した後に最初に copy の印を通るときに作られる。
+        # テストは合図を立てた後に copy-gate を作る。copy-gate はふつう、子プロセスを起動した後に最初に copy の印を通るときに作られる。
         # 60 秒は、copy-gate が作られないときに偽の cp を終わらせる上限。
         gate = self.root / 'copy-gate'
         held_cp = self.cp_stub("if sys.argv[1:] != ['--version']:\n"
@@ -987,7 +987,7 @@ class RestoreTests(unittest.TestCase):
                         except ProcessLookupError: pass
 
     def test_public_helper_kill_has_no_claim_of_unchanged_or_success(self):
-        # この試験プロセスだけを orphan の回収担当にし、fixture 子を必ず wait する。
+        # この試験プロセスだけを orphan の回収担当にし、fixture の子プロセスを必ず wait する。
         import ctypes
         libc = ctypes.CDLL(None, use_errno=True)
         original = ctypes.c_int()

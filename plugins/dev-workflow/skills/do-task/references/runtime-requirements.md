@@ -56,11 +56,11 @@ PYTHON
 - Git は既存の安全用のオプションと版要件、GNU `grep` は `-E -z -f` と `LC_ALL=C` が必要。実体を固定する。
   - 起動時に `grep --version` の最初の行が `(GNU grep)` を含むことを確かめ、違えば `runtime-unavailable`(終了値 20)で止まる(BSD grep は通さない。[#303](https://github.com/Yuki-Maeda-valour/workflow/issues/303))。
 - `os.O_NOFOLLOW`・`O_DIRECTORY`・`O_NONBLOCK`、bytes の名前、`open/stat/readlink` の `dir_fd`、`fstat`、fd からのディレクトリ列挙、単調時計が必要。
-- `subprocess.Popen` と直接子の停止・回収、専用のpipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
+- `subprocess.Popen` と直接の子プロセスの停止・回収、専用のpipeの有限送受信、`signal.pthread_sigmask` と TERM・INT・HUP が必要。Git より前に存在と専用領域の正常操作を検査し、不足は元データを変えず終了20で止める。
 - profile が1つでもあれば既存 `secret-profiles.py` と同じ PyYAML が必要。すべて不在なら PyYAML を要求しない。
 - OS 名だけで拒否しない。新しい診断の macOS 実機は未確認であり、下記の既存実測には含めない。
-- 全操作300秒・Git/grep各30秒・直接子の TERM5秒＋KILL5秒・後始末5秒を使う。最終出力も残り時間に含む。GNU `timeout` は診断の新しい必須条件にしない。
-- 完成応答だけを直接子へ渡し、専用のpipeを監督する。共有する stdout/stderr の flags は変更しない。無応答・非0・不正応答は結果不明として停止する。
+- 全操作300秒・Git/grep各30秒・直接の子プロセスの TERM5秒＋KILL5秒・後始末5秒を使う。最終出力も残り時間に含む。GNU `timeout` は診断の新しい必須条件にしない。
+- 完成応答だけを直接の子プロセスへ渡し、専用のpipeを監督する。共有する stdout/stderr の flags は変更しない。無応答・非0・不正応答は結果不明として停止する。
 - 通常の読み手停止は監督で打ち切る。OS の入出力が戻らない場合、同じ利用者権限での改変、元のオブジェクト保存先の同時更新、任意子孫の完全停止は保証しない。
 
 ## タスク本文の復元
@@ -68,7 +68,7 @@ PYTHON
 `implement-guard.sh restore-taskmd` は Python 3 と同梱 `restore-taskmd.py` を追加で必要とする。他のサブコマンドの要件は変えない。OS 名で拒否せず、次の機能を起動時と専用領域内の試しで確認する。
 
 - `os.O_DIRECTORY`・`O_NOFOLLOW`・`O_NONBLOCK`・`O_CLOEXEC`、`open`・`stat`・`mkdir`・`unlink`・`rmdir` の `dir_fd`、`stat` の `follow_symlinks=False`、`fstat`、`replace` の `src_dir_fd` / `dst_dir_fd`。
-- `subprocess.Popen` の `close_fds=True` / `pass_fds`、直接子の `poll` / `wait` / `terminate` / `kill`、`signal.pthread_sigmask` と TERM・INT・HUP、単調時計、`resource.RLIMIT_FSIZE` / `setrlimit`。
+- `subprocess.Popen` の `close_fds=True` / `pass_fds`、直接の子プロセスの `poll` / `wait` / `terminate` / `kill`、`signal.pthread_sigmask` と TERM・INT・HUP、単調時計、`resource.RLIMIT_FSIZE` / `setrlimit`。
 - GNU `cp` の固定した実体。GNU coreutils 8.30 以上が必要(`--reflink=never` を受け付ける版。coreutils の NEWS による)。`cp` には `--reflink=never`(複製の共有をしない指定)を渡す。`--version` を8KiB・5秒で検査する。fd 別名は `/proc/self/fd`、次に `/dev/fd` を試す。開いた通常ファイルと同じ device/inode を指すことと、短いコピーの内容・mode・inode を確認する。 <!-- validate-allow: OS が提供する fd 別名を必要機能として明記するため -->
   - `--reflink=never` を渡す理由: GNU `cp` 9 系は、複製の共有を禁じないと、書き込みの上限(`RLIMIT_FSIZE`)の位置でカーネルのコピーを呼び、`SIGXFSZ`(書き込みの上限を越えたときの信号)で止まる。上限は緩めない。
   - 確かめた版(2026-11-01、[Issue #285](https://github.com/Yuki-Maeda-valour/workflow/issues/285) で直した後): Linux の 8.32(Ubuntu 22.04)と 9.7(Debian trixie)で復元できる。macOS の 9.12 は `fd-copy-unavailable` で止まり、対象を変えない。
@@ -106,7 +106,7 @@ restore_taskmd_supervised() {
 呼出しは `restore_taskmd_supervised <implement-guard.sh> --cwd <管理ルート> --state <保護領域> --manifest-sha256 <hex> --snapshot-sha256 <hex>` とし、各値を独立した引数で渡す。shell 文字列へ組み立てず、`--foreground` を足さない。
 330秒後の TERM と追加5秒後の KILL は、今回起動したプロセスグループ(信号をまとめて送れるプロセスの集まり。`--foreground` を付けない GNU `timeout` が作るもの)だけを対象とする。保存 PID や他の利用者プロセスを探索しない。124・137・監督の失敗・欠落/不正な応答は `TOUCHED=unknown / TEMP=unknown` として止め、自動再実行や推測した一時ファイルやフォルダの削除をしない。通常の pipe 送出待ちも打ち切る。カーネル I/O が KILL でも終了しない場合は335秒以内の停止確認を保証せず、停止未確認として保持する。
 
-結果形式、300秒の作業予算、子の停止・回収、同じ UID の競合限界は [external-runners.md](external-runners.md) §12-2 が正本。
+結果形式、300秒の作業予算、子プロセスの停止・回収、同じ UID の競合限界は [external-runners.md](external-runners.md) §12-2 が正本。
 
 ## 品質コマンドの監督
 
@@ -158,7 +158,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 
 - 通常の終了値 0 / 7 と出力の hash、残った元のプロセスグループの停止、無関係な処理の生存を実測した。
 - macOS ではプロセスグループの停止直後の不在確認が一時的に `EPERM` となり、直後に `ESRCH` へ変わる場合があった。旧実装はコピーを保持して停止した。初回の成功だけで安定動作と判断せず、修正後も下記の手順で再確認する。
-- `setsid` でプロセスグループの外へ移った子は、元のプロセスグループの停止とコピー削除の後も動いた。プロセスグループの外の子孫と同じ利用者権限での完全な隔離は保証しない。
+- `setsid` でプロセスグループの外へ移った子プロセスは、元のプロセスグループの停止とコピー削除の後も動いた。プロセスグループの外の子孫と同じ利用者権限での完全な隔離は保証しない。
 - 入力・状態・一時領域には、親を含め symlink(別のパスを指すリンク)のない物理パスを選ぶ。macOS の `/var`・`/tmp` の別名は拒否される場合がある。 <!-- validate-allow: macOS の標準パスにあるリンクの注意を説明するため -->
   - 手で確かめるときは、今までどおり `TMPDIR` も物理パスの書き込み可能なディレクトリに選ぶ。
   - 下の「品質コマンドの監督と検証用コピーの回帰テストを Mac で回す手順」のテストは、一時領域の名前を自分で物理パスに解決して使う。`TMPDIR` の指定は要らない。製品のリンクの親の拒否は変えない。
@@ -198,7 +198,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 修正前の Mac の FAIL 64 行(スイートを `GIT_CONFIG_NOSYSTEM=1` で回した基準。system 設定を有効のままの修正前の実行は、Issue #241 の 2026-10-26 のコメントで FAIL 812 件)のうち、`M11`・`M25` の 19 行と変異 `w` の 1 行(BSD 版の `sed` が原因)が直り、新しく落ちた行は無い。
   - 2026-11-02 に #301 で `J8` を省くようにした後の Mac の FAIL は 32 行(`B10` 2・`B12` 4・`G7` 1・`J1` 6・`J2` 8・`J3` 4・`J6` 5・`M6` 2)。`J8` の 8 行は数えない。その前は、前提が無いまま比べた 3 行(`元bytesへ復元`・`選択リンク文字列不変`・`Git呼出0`)が PASS になっていた。
 - 品質コマンドの監督と検証用コピーの回帰テストを Mac で回す手順([Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239)):
-  - 対象: `scripts/test_check_process.py` と `scripts/test_review_guard.py`。実プロセスと実 CLI(`start → take → seal → run-checks`)で、終了値 0 / 7 と出力の hash、親の終了・時間切れ・`TERM`・`INT`・`HUP`・プロセスグループの外へ移る子、検証用コピーの削除と保持を確かめる。
+  - 対象: `scripts/test_check_process.py` と `scripts/test_review_guard.py`。実プロセスと実 CLI(`start → take → seal → run-checks`)で、終了値 0 / 7 と出力の hash、親の終了・時間切れ・`TERM`・`INT`・`HUP`・プロセスグループの外へ移る子プロセス、検証用コピーの削除と保持を確かめる。
   - コマンド: リポジトリの最上位で次を実行する。`<scratch>` は記録を置く作業用のフォルダ。`-v` の結果は標準エラーに出るので、標準エラーもログへ送る。
 
     ```bash
@@ -220,7 +220,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - 1 件のテストの中で複数の通り方(`TERM`・`INT`・`HUP` など)を順に回すものは、1 件と数える。
     - 最後の行の `failures=` は、落ちた `subTest` を 1 回ずつ数える。落ちたときは、`failures=` の数と、落ちたテストの名前と `subTest` の値の両方を記録する。
     - `Linux 専用: ` の飛ばしを、Mac の成功の根拠にしない。
-  - テストの領域の名前(頭が `wf-proc-test-`)は、次のクラスのテストが起動するプロセス(実 CLI・anchor・品質コマンドとその子と孫・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
+  - テストの領域の名前(頭が `wf-proc-test-`)は、次のクラスのテストが起動するプロセス(実 CLI・anchor・品質コマンドとその子プロセスと孫プロセス・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
     - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `prove()` など、製品の置き場(`check-process.py` のパス)・品質コマンドの引数・`TMPDIR` のどれにもテストの領域を使わない `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
     - ただし、`ReviewGuardTest` の次の 10 件の `run-checks` は、anchor(Linux では監督)と品質コマンドがこの確認で見つかる。
       - `test_cli_run_checks_keeps_exit_codes_and_output_hashes`・`test_run_checks_clean_copy_commit_starts_no_background_maintenance`。
@@ -236,8 +236,8 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - `ReviewGuardTest` の `test_run_checks_refuses_used_output_paths_before_running` の `run-checks` は、コマンドを流す前に止まるので、anchor も品質コマンドも起動しない。
     - #368 で足したテストの並びは、Linux で 1 件ずつ回しながら確かめた(2026-11-06)。macOS の並びは未確認。
       - 品質コマンドはすぐ終わるので、上の `ps` を繰り返すだけでは捕まえにくい(8 件中 2 件)。`/proc/<pid>/cmdline`(`ps` の `command` と同じ中身)を続けて読むと、8 件とも見つかった。
-  - anchor の消失を確かめるテストは、プロセスグループに `TERM` を無視する子を置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後にプロセスグループの全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
-  - 時間切れ・停止の信号を確かめるテストの、`TERM` を無視する子は、`SIGKILL` で止まることを確かめるために置く。
+  - anchor の消失を確かめるテストは、プロセスグループに `TERM` を無視する子プロセスを置く。上の「品質コマンドの監督」の限界のとおり、anchor が失われた後にプロセスグループの全員が `TERM` で終わると、診断の文が `Operation not permitted` に替わるため。
+  - 時間切れ・停止の信号を確かめるテストの、`TERM` を無視する子プロセスは、`SIGKILL` で止まることを確かめるために置く。
   - #289 で直した不具合の回帰テスト(`CheckProcessDarwinTest` の `test_issue289_term_obeying_timeout_is_timed_out`・`test_issue289_term_obeying_parent_signal_is_interrupted`):
     - プロセスグループの全員が `TERM` で終わる品質コマンドで、時間切れは `timed_out` が真になることを確かめる。検証の親への `TERM`・`INT`・`HUP` は `Interrupted`(`終了通知 N を受けた`)になることを確かめる。
     - どちらも、anchor が `SIGKILL` まで残る(anchor の終了値が `-9`)ことを確かめる。
@@ -275,7 +275,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
 2. scratch リポジトリで do-task の事前検査 → snapshot(新規出力親 1 階層・複数階層・既存 symlink 拒否) → guard の `take` / `compare` / `cleanup` を確認する。create-task の保存先 resolver と本文 digest も scratch で確認する。system 設定は有効のまま(`GIT_CONFIG_NOSYSTEM` を指定しない)で確かめ、`take` が終了値 0 で通ること、`snapshot/config-origins.txt` に Apple Git の追加の設定の行があることも見る。
 3. 標準 bash では do-task の bash 要件が明示されること、標準・導入 bash の両方で loop が Linux 専用エラー rc 20 となり、状態生成・git 操作・ホスト起動がないことを確認する。macOS 上で loop 本体や loop-selftest の成功は要求しない。
 4. 品質検証(手順 4〜6)は、上の「品質コマンドの監督と検証用コピーの回帰テストを Mac で回す手順」のコマンドで確かめられる。Python の版も記録する。手で行う確認は、回帰テストで足りないとき(新しい OS 版の初回など)の補助として残す。手で行うときは、同じ scratch で [review-protocol.md](review-protocol.md#reviewcommit-照合) の `start` → `take` → `seal` → `run-checks` を行う。終了値 0 と 7 の計画で、終了値と出力の hash が保たれることを確認する。
-5. 次に、3 秒で自己終了する子を作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。`--timeout 1` で、元のプロセスグループが消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子を残す場合も、次のコマンドと重複しないことを確かめる。
-6. 子の起動を確認してから、検証の親へ `TERM`・`INT`・`HUP` をそれぞれ送る。プロセスグループの停止、コピー保持、後続未起動、終了値 2 を確かめる。この確認で起動した処理は、失敗時も自分で終了・回収する。
+5. 次に、3 秒で自己終了する子プロセスを作る品質コマンドと、外側の scratch に印を書く後続コマンドを計画へ入れる。`--timeout 1` で、元のプロセスグループが消えてから戻ること、後続の印が無いこと、コピーが削除されることを確認する。通常終了した親が子プロセスを残す場合も、次のコマンドと重複しないことを確かめる。
+6. 子プロセスの起動を確認してから、検証の親へ `TERM`・`INT`・`HUP` をそれぞれ送る。プロセスグループの停止、コピー保持、後続未起動、終了値 2 を確かめる。この確認で起動した処理は、失敗時も自分で終了・回収する。
 
 実機がなければ「実施不能(実機なし)／未確認」と記録し、上記の手順を引き継ぐ。

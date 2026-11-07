@@ -365,7 +365,7 @@ class CheckProcessCommonTest(unittest.TestCase):
 
 
 def ignoring_child(path, natural, seconds=3):
-    # TERM を無視し、記録を書いて眠り、自分で終わる子。自然に終わる直前に、自然終了の印を書く。
+    # TERM を無視し、記録を書いて眠り、自分で終わる子プロセス。自然に終わる直前に、自然終了の印を書く。
     return ("import json, os, signal, time; from pathlib import Path; "
             f"signal.signal(signal.SIGTERM, signal.SIG_IGN); {record(path)}; {sleep_then_mark(seconds, natural)}")
 
@@ -384,7 +384,7 @@ def send_self(number):
 
 
 def parent(child, wait, then=''):
-    # 子を起動し、子の記録を見てから先へ進む親。30 秒で記録が来なければ終了 3 で止まる。
+    # 子プロセスを起動し、子プロセスの記録を見てから先へ進む親。30 秒で記録が来なければ終了 3 で止まる。
     names = [str(path) for path in wait]
     return f"""import json, os, subprocess, sys, time
 from pathlib import Path
@@ -422,7 +422,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
         self.assertEqual([], left, '試験のプロセスが残った')
 
     def path(self, name):
-        # 記録ファイルの場所。後始末は、子の記録の pgid を元の群として扱う(群を抜けた子は自分の群)。
+        # 記録ファイルの場所。後始末は、子プロセスの記録の pgid を元の群として扱う(群を抜けた子プロセスは自分の群)。
         value = self.root / name
         self.records.append(value)
         return value
@@ -465,7 +465,7 @@ class CheckProcessDarwinTest(unittest.TestCase):
         return fired
 
     def unrelated(self):
-        # 試験の直接の子として別の群で起動する無関係なプロセス。試験が必ず止めて回収する。
+        # 試験の直接の子プロセスとして別の群で起動する無関係なプロセス。試験が必ず止めて回収する。
         process = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)', str(self.root)],
                                    start_new_session=True)
         self.children.append(process)
@@ -578,9 +578,9 @@ class CheckProcessDarwinTest(unittest.TestCase):
         result = self.run_code(parent(code, [child]))
         pid = self.pid_of(child)
         self.assertEqual('alive', probe(os.kill, pid))
-        self.assertEqual((pid, pid), read_record(child), '子が群を抜けていない')
+        self.assertEqual((pid, pid), read_record(child), '子プロセスが群を抜けていない')
         self.assertEqual('original-process-group-only', result['recovery_scope'])
-        self.assertTrue(wait_absent(pid), '群の外へ移った子が 30 秒以内に終わらない')
+        self.assertTrue(wait_absent(pid), '群の外へ移った子プロセスが 30 秒以内に終わらない')
         self.assertTrue(marker.exists())
 
     def test_monitor_launch_failure_proves_no_command_started(self):

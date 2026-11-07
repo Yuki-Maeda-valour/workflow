@@ -322,9 +322,9 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 **片付け**(時間切れのとき・イテレーションが終わったとき・`loop.sh` がシグナルを受けたとき。判定より前に必ず行う)
 
 1. `loop-supervisor.py` が Linux subreaper(孤児になった子孫を引き取る監督プロセス)になってから、ホストを新しいセッションで起動する。通常終了・時間切れ・TERM/INT/HUP・親の終了通知で、子孫の回収を行う。
-2. 監督は自分の直接の子だけを対象に、親 PID と開始時刻を `pidfd`(プロセスの実体を指す保持参照)の取得前後で照合して TERM/KILL を送る。子の終了で引き取った孫も同じ手順で回収する。環境の印・セッション・dumpable に依存しない。
+2. 監督は自分の直接の子プロセスだけを対象に、親 PID と開始時刻を `pidfd`(プロセスの実体を指す保持参照)の取得前後で照合して TERM/KILL を送る。子プロセスの終了で引き取った孫プロセスも同じ手順で回収する。環境の印・セッション・dumpable に依存しない。
 3. 親の loop も起動直後の監督の開始時刻を保持する。停止時は親 PID と開始時刻を照合し、`pidfd` に送る。整数 PID だけで signal を送らない。別 PID 実体への再利用と読取拒否を区別し、照合不能なら成功扱いにしない。
-4. 監督が `waitpid(-1)` の `ECHILD`(所有する子が残っていない)を確認してから結果を書く。loop は起動した監督の exit 0 と保持した nonce に合う結果の両方を要求する。高速で正常終了した監督は Bash の終了結果と記録で確認する。読取不能・強制終了・期限超過では、不在を推測せず止める。
+4. 監督が `waitpid(-1)` の `ECHILD`(所有する子プロセスが残っていない)を確認してから結果を書く。loop は起動した監督の exit 0 と保持した nonce に合う結果の両方を要求する。高速で正常終了した監督は Bash の終了結果と記録で確認する。読取不能・強制終了・期限超過では、不在を推測せず止める。
 5. 回収対象への TERM の後、`--kill-grace` の猶予を経て KILL を送る。回収の上限を超えても判定や次のイテレーションへ進めない。selftest の `DEV_WORKFLOW_LOOP_TEST_LEFTOVER` は非空なら「残った」と判定するだけで、安全側の停止を外さない。
 
 **残ったときの終わり方**(呼び出し側ごと)。どれも照合(下の「共有の状態の照合」)はしない — 残ったプロセスがまだ書き換えうるため。止める印の理由に「残ったプロセス」と確認できない理由を書き、イテレーションの途中の印と worktree を残す(残ったプロセスと次のイテレーションを並行させず、イテレーションの識別子の記録を上書きさせないため)。
@@ -341,7 +341,7 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 
 **共有の状態の照合**(片付けの直後、残りが無いとき。`loop.sh` の次の git〈§5 の `ls-remote` を含む〉より前)
 
-状態観察は共有の全 ref(参照先 OID と symref の指す先。未解決の loose symref も含む)と、各 linked worktree の private `HEAD`・private `refs/`、全 worktree(パス・HEAD・lock の理由)、開始時点にある各 worktree の index 生バイトと追跡・未追跡・ignored を含むファイル木を控える。新しく作ったそのイテレーションの worktree だけは内容走査から外すが、他の既存 worktree は外さない。通常ファイルは `lstat`→`O_NOFOLLOW|O_NONBLOCK` の `open`→同一 fd の hash→`fstat` で観察し、symlink は字面、directory は構造、FIFO/socket/device は種別・mode・device 番号だけを記録する。祖先 directory は解決用の inode・型・mode だけを照合するため、無関係な sibling の追加による時刻変化は停止理由にしない。`secret_paths` は、worktree の物理 path ごとに開始時から保持した glob と現在安全に読んだ glob の和集合を使う。正常完走した別実行の間に人の worktree を移動したときは、その checkout 固有の Git 管理ディレクトリで和集合を引き継ぐ。イテレーションの途中でそのイテレーション以外の人の worktree が追加・移動したときは、profile や本文を読む前に停止する。後で profile から削除・縮小しても既に機密として扱った path を hash しない。内容を開かず path・種別・metadata だけにし、機密ディレクトリの子も列挙するため追加・削除・型・size・時刻の変化は検出する。通常ファイルを同じ `ctime` まで保ったまま変えられるとは主張しない。限界は、機密 symlink の**作業ツリー外**の target の内容だけを変え、symlink 自体の字面・metadata が変わらない場合である。target は開かないので検出しない。機密は別の保護領域で管理する。
+状態観察は共有の全 ref(参照先 OID と symref の指す先。未解決の loose symref も含む)と、各 linked worktree の private `HEAD`・private `refs/`、全 worktree(パス・HEAD・lock の理由)、開始時点にある各 worktree の index 生バイトと追跡・未追跡・ignored を含むファイル木を控える。新しく作ったそのイテレーションの worktree だけは内容走査から外すが、他の既存 worktree は外さない。通常ファイルは `lstat`→`O_NOFOLLOW|O_NONBLOCK` の `open`→同一 fd の hash→`fstat` で観察し、symlink は字面、directory は構造、FIFO/socket/device は種別・mode・device 番号だけを記録する。祖先 directory は解決用の inode・型・mode だけを照合するため、無関係な sibling の追加による時刻変化は停止理由にしない。`secret_paths` は、worktree の物理 path ごとに開始時から保持した glob と現在安全に読んだ glob の和集合を使う。正常完走した別実行の間に人の worktree を移動したときは、その checkout 固有の Git 管理ディレクトリで和集合を引き継ぐ。イテレーションの途中でそのイテレーション以外の人の worktree が追加・移動したときは、profile や本文を読む前に停止する。後で profile から削除・縮小しても既に機密として扱った path を hash しない。内容を開かず path・種別・metadata だけにし、機密ディレクトリの下の項目も列挙するため追加・削除・型・size・時刻の変化は検出する。通常ファイルを同じ `ctime` まで保ったまま変えられるとは主張しない。限界は、機密 symlink の**作業ツリー外**の target の内容だけを変え、symlink 自体の字面・metadata が変わらない場合である。target は開かないので検出しない。機密は別の保護領域で管理する。
 
 既定の上限は 100000 項目、通常ファイル合計 1 GiB、1 件 64 MiB、壁時計 60 秒である。Git の状態出力は保持する前に同じ合計上限で drain し、ディレクトリ名は項目上限を消費してから保持する。上限、到達する `include.path` と**有効な** `includeIf` の欠落・循環・読取不能・FIFO、または `lstat`/`open`/`read` の間の置換は検査不能として止まる。無効な `includeIf` の欠落は機械固有の通常設定として開かない。利用者だけが `loop.sh` の `--state-max-items`、`--state-max-bytes`、`--state-max-file-bytes`、`--state-max-seconds` で上限を広げられ、profile と子プロセスからは変えられない。旧形式の `inflight` は必須欄を現状で補完せず停止する。
 
@@ -369,7 +369,7 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 
 **状態ディレクトリ**
 
-- 場所: `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/loop/<識別子>/`(人のチェックアウトの外)。識別子は起動前 helper が nofollow で得た common 管理パスの物理値のハッシュであり、通常 Git を起動する前にも同じ場所を比較できる(同じリポジトリの別の worktree から起動しても同じ場所・同じロックになる)。入力 repo の**絶対 path**に結び付く binding は、この子ディレクトリではなく `STATE_BASE/.repo-bind-<その path の sha256>.json` に置く。symlink の別名は別のキーで、物理 `TOP` は binding の別の保持値である
+- 場所: `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/loop/<識別子>/`(人のチェックアウトの外)。識別子は起動前 helper が nofollow で得た common 管理パスの物理値のハッシュであり、通常 Git を起動する前にも同じ場所を比較できる(同じリポジトリの別の worktree から起動しても同じ場所・同じロックになる)。入力 repo の**絶対 path**に結び付く binding は、この下のディレクトリではなく `STATE_BASE/.repo-bind-<その path の sha256>.json` に置く。symlink の別名は別のキーで、物理 `TOP` は binding の別の保持値である
 - ロック(`flock`)で二重起動を防ぐ。`loop.sh` が起動した CLI にはロックの fd を渡さない
 - 置くもの
   - 入力 repo の絶対 path と admin/common の対応を持つ binding。binding は cold 検査と状態配置の確認後にだけ `STATE_BASE` 直下へ排他的に作り、次の起動では比較専用に使う。現在の `.git` や `commondir` が差し替わって別の状態を選ぶ経路を許さない
@@ -384,7 +384,7 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 
 - 止める印またはイテレーションの途中の印があれば exit 20。印の内容・`checksum` の一致を承認に使わず、signal・worktree 削除・unlock・ref 更新を行わない。
 - 旧版の控え、別 worktree からの再開、設定が変わっていない中断でも同じ。人が実行の所有者・残ったプロセス・成果物を独立に確認してから印を扱う。
-- 現在の supervisor が所有した子の不在を、保存 PID・印・`checksum` から補完しない。親または supervisor が SIGKILL された場合も、人が別の信頼領域から残存プロセスと共有状態を確認する。
+- 現在の supervisor が所有した子プロセスの不在を、保存 PID・印・`checksum` から補完しない。親または supervisor が SIGKILL された場合も、人が別の信頼領域から残存プロセスと共有状態を確認する。
 - どちらの印も無ければ、最後に照合に通った状態と今の状態を比べ、差分があれば報告に出して続ける(実行と実行の間の変化は人の操作でもありうるため)
   - 人の設定変更・起動元の変更・旧 `last-verified.json` の不足も同じ扱い。次に照合に通ったときだけ、新形式の状態を保存する
   - 起動元変更時は前の起動元の設定を再読しない。中断の無い実行間の比較を、前の起動元の未変更の保証には使わない
@@ -730,7 +730,7 @@ H47 の起動前検査は危険な直接 allow を拒否するもので、すべ
 ### 子孫の監督と引数検査の保証範囲(#204)
 
 - loop は従来どおり Linux 専用である。監督には Linux subreaper・`/proc`・Python の `os.pidfd_open` と `signal.pidfd_send_signal` が必要である。必要な機構を使えない場合は、`loop.sh` は CLI を起動しない。引数だけの `host-argv.py` は標準ライブラリだけで動き、PyYAML や認証を追加で要求しない。
-- 通常の子・別セッション・環境消去・non-dumpable・二重 fork・孤児は、監督の所有関係で回収する。同じ UID の無関係なプロセスを広く走査して停止しない。
+- 通常の子プロセス・別セッション・環境消去・non-dumpable・二重 fork・孤児は、監督の所有関係で回収する。同じ UID の無関係なプロセスを広く走査して停止しない。
 - 同じ UID が監督自体を KILL した場合、残存子孫の回収を保証しない。成功記録が無いため次のイテレーションへ進まず、途中の印と worktree を残す。親を KILL した場合は監督の親終了通知で回収を試みるが、再開の承認には使わない。
 - 同じ UID が親の保持値・実行物・結果記録まで書き換える、または観測の間で戻す攻撃を隔離する仕組みではない。結果の nonce だけを秘密や改竄不能な証明とは扱わない。任意コードを敵対的に実行する環境では、別 UID や OS の隔離と外部からの監査を使う。
 - 実ホストの `PermissionRequest` 動作と `allowed-tools` の権限確認は #193 で行った(§2 の 12・§4・§8)。#204 の引数・子孫の回帰テストの成功で代替しない。
