@@ -271,22 +271,33 @@ class StartupShellTests(unittest.TestCase):
         scripts = cls.plugin / 'skills/ship-task/scripts'
         text = (scripts / 'loop-selftest.sh').read_text()
         cls.prefix = text.split('# LOOP_SELFTEST_ONLY=', 1)[0]
+        # 証明づくり(loop.sh を 1 回起動する)の手前で切った版。loop.sh を起動しないケースだけが使う。
+        proof_mark = '治具: スタブのホスト CLI の証明'
+        if cls.prefix.count(proof_mark) != 1:
+            raise RuntimeError('共通の準備に証明づくりの目印がちょうど 1 つ無い')
+        cls.prefix_no_proof = cls.prefix.split(proof_mark, 1)[0]
         line = next(line for line in cls.prefix.splitlines() if line.startswith('SCRIPT_DIR='))
-        cls.prefix = cls.prefix.replace(line, 'SCRIPT_DIR=' + repr(str(scripts)))
-        cls.prefix = cls.prefix.replace('g config selftest.added yes;', '''printf '\\n[include]\\n\\tpath = %s\\n' "$SELFTEST_SECRET" >>"$SELFTEST_COMMON/config";''')
-        # 同じ物理 cwd からの起動でも早期 local-env-vars 照会を検査する。
-        cls.prefix = cls.prefix.replace('( cd "$W/cwd" && exec env', '( cd "${STARTUP_CWD:-$W/cwd}" && exec env')
+        old_cwd = '( cd "$W/cwd" && exec env'
+        new_cwd = '( cd "${STARTUP_CWD:-$W/cwd}" && exec env'
+        old_cfg = 'g config selftest.added yes;'
+        new_cfg = '''printf '\\n[include]\\n\\tpath = %s\\n' "$SELFTEST_SECRET" >>"$SELFTEST_COMMON/config";'''
+        script_dir = 'SCRIPT_DIR=' + repr(str(scripts))
+        # どちらの版にも同じ置き換えを掛ける。同じ物理 cwd からの起動でも早期 local-env-vars 照会を検査する。
+        for name in ('prefix', 'prefix_no_proof'):
+            part = getattr(cls, name).replace(line, script_dir)
+            part = part.replace(old_cfg, new_cfg).replace(old_cwd, new_cwd)
+            setattr(cls, name, part)
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
-    def run_case(self, body, expected, transform=None):
+    def run_case(self, body, expected, transform=None, proof=True):
         with tempfile.TemporaryDirectory(dir=self.root) as tmp:
             tmp = Path(tmp)
             sentinel = tmp / 'secret-config'
             sentinel.write_text('[test]\n value = harmless\n')
             watch = Watch(sentinel)
             try:
-                prefix = self.prefix
+                prefix = self.prefix if proof else self.prefix_no_proof
                 if transform is not None:
                     plugin = tmp / 'instrumented-plugin'
                     shutil.copytree(self.plugin, plugin)
@@ -721,7 +732,7 @@ kill "$BG_PID"
 wait_bg
 OUT=/dev/null
 RC=0
-''', 0)
+''', 0, proof=False)
         early = re.search(r'^WAIT early-exit rc=1 sec=([0-9]+) (.*)$', out, re.M)
         self.assertIsNotNone(early, out)
         self.assertEqual(early.group(2), EARLY_EXIT_MARK + 'mark-early-exit の前に終わった(終了コード 3)', out)
