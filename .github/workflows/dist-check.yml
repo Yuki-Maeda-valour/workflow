@@ -1,0 +1,56 @@
+{
+  "name": "Distribution launch",
+  "on": {
+    "pull_request": {},
+    "push": {},
+    "workflow_dispatch": {}
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "launch": {
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "platform": "linux-arm64",
+              "runner": "ubuntu-24.04-arm"
+            },
+            {
+              "platform": "macos-x86_64",
+              "runner": "macos-15-intel"
+            },
+            {
+              "platform": "macos-arm64",
+              "runner": "macos-15"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 10,
+      "steps": [
+        {
+          "name": "配布 SHA を浅く取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false,
+            "fetch-depth": 1
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "配布した入口を起動して検査",
+          "run": "python3 -B scripts/check_dist_launch.py --root ."
+        }
+      ]
+    }
+  }
+}
