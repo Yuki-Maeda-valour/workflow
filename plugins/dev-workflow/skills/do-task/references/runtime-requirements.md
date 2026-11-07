@@ -2,6 +2,43 @@
 
 Phase 0 の事前検査より前に、使用するシェルと道具を確認する。profile の有無によらず適用する。
 
+## 道具の最低の版と、確かめる時
+
+道具と最低の版は、プラグインの [`hooks/tool-requirements.tsv`](../../../hooks/tool-requirements.tsv) に 1 つにまとめてある。確かめのスクリプトはこの一覧を読む。下の表は、この一覧のコピーで、`scripts/test_tool_versions.py` が一覧と同じかを確かめる。
+
+<!-- tool-requirements:start -->
+| 道具 | 最低の版 | 区分 | 使う所 |
+|---|---|---|---|
+| git | 2.42 | 必須 | 全体。2.42 は無人ループと外部の実装担当 |
+| bash | 4.0 | 必須 | do-task の補助スクリプト |
+| bash | 4.4 | 条件つき | 無人ループ(loop.sh) |
+| python3 | 3.8 | 必須 | 補助スクリプト全般 |
+| python3 | 3.10 | 条件つき | 設定を戻さずに使う診断(diagnostic-git.py) |
+| PyYAML | - | 条件つき | profile(.claude/project-profile.yml)があるとき |
+| jq | 1.5 | 任意 | python3 が無いときだけ、外部のレビュアーの出力を読む |
+| GNU coreutils | - | 必須 | 補助スクリプト全般 |
+| GNU coreutils | 8.30 | 条件つき | タスク本文の復元(restore-taskmd) |
+| GNU findutils | - | 必須 | 補助スクリプト全般 |
+| GNU grep | - | 必須 | 補助スクリプト全般と診断 |
+| flock・setsid | - | 条件つき | 無人ループ(Linux だけ) |
+<!-- tool-requirements:end -->
+
+- `-` は、版を問わないこと。GNU の道具は、GNU の版であることだけを確かめる(`--version` の最初の行に `(GNU <パッケージ>)` がある)。
+- 区分: `必須` は誰でも要る。`条件つき` は、使う所の条件に当たる人だけ要る。`任意` は、無くても代わりの道がある(無くても足りない数に数えない)。
+- 確かめる時:
+  - プラグインを入れた後と、版を上げた後の、最初の起動。プラグインの `SessionStart` の hook(`hooks/hooks.json`)が、`hooks/tool-versions.sh --session-start` を呼ぶ。2 回目の起動からは確かめない。
+  - 前に確かめた版は `${XDG_STATE_HOME:-$HOME/.local/state}/dev-workflow/tool-versions/checked-version` に残す。消すと、次の起動で確かめ直す。
+  - `setup.sh`(プラグインを使わない導入)は、導入の最後に確かめる。
+  - 手で確かめるには、`sh <プラグインのルート>/hooks/tool-versions.sh` を流す。
+  - 無人ループのセッション(`DEV_WORKFLOW_LOOP_ITER` が空でない)では、確かめない。
+- 足りないときは、表の下に直し方が出る。起動は止めない。各 skill の使う直前の確かめ(この文書の下の節)は、今までどおり動く。
+- git の 2.42 の根拠は、`git var GIT_CONFIG_SYSTEM`(2.42 で足された)。外部の実装担当の `implement-guard.sh take` と、無人ループの起動時の控えが使う。`GIT_CONFIG_NOSYSTEM=1` か `GIT_CONFIG_SYSTEM=/dev/null` で流すときは呼ばない。ほかに、無人ループは `git worktree list --porcelain -z`(2.36)を使う。根拠の原文は [#431](https://github.com/Yuki-Maeda-valour/workflow/issues/431)。
+- 一覧の行にしない、条件つきの git の版:
+  - 部分クローン(欠けた git の物を自動で取りに行く構成。promisor)のリポジトリ: 2.45(`GIT_NO_LAZY_FETCH`)。2.45 より古いと、`diff-snapshot.sh` が終了コード 22 で止める([base-commit.md](base-commit.md))。
+  - reftable のリポジトリ: 2.45。
+  - sparse-checkout で、作業ツリーに無いファイルがあるリポジトリ: 2.41(`git sparse-checkout check-rules`)。足りなくても止まらず、承認が要るだけ。
+- PyYAML の版は問わない。使う `safe_load`・`compose`・`SafeLoader`・`MappingNode`・`SequenceNode` は、PyYAML 3.10 にもある。
+
 ## 実行環境
 
 - 開始前の `pending-implementation.py scan` は **Python 3.8 以上・POSIX** が必要。標準ライブラリだけを使う。非 Git・内蔵・検証のみ・profile なしでも適用する。

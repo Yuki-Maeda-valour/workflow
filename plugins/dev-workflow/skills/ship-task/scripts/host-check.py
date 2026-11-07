@@ -1084,6 +1084,32 @@ def verified_host_settings(state_path, expected):
 
 MANIFEST_SUFFIX = '/.claude-plugin/plugin.json'
 
+# 配るプラグイン(dev-workflow)自身の SessionStart の hook(#431。loop.md §4)。
+# plugin の root の hooks/hooks.json が、このバイト列とちょうど同じときだけ、空でない hook の拒否から外す。
+# 字面を変えるときは plugins/dev-workflow/hooks/hooks.json も同じに直す(test_tool_versions.py が照らす)。
+WORKFLOW_PLUGIN_NAME = 'dev-workflow'
+WORKFLOW_HOOKS_DIR = 'hooks/'
+WORKFLOW_HOOKS_RELATIVE = 'hooks/hooks.json'
+WORKFLOW_HOOKS_JSON = '\n'.join((
+    '{',
+    '\t"description": "dev-workflow が使う道具の版を、プラグインを入れた後と版を上げた後の最初の起動で確かめて知らせる(止めない)",',
+    '\t"hooks": {',
+    '\t\t"SessionStart": [',
+    '\t\t\t{',
+    '\t\t\t\t"hooks": [',
+    '\t\t\t\t\t{',
+    '\t\t\t\t\t\t"type": "command",',
+    '\t\t\t\t\t\t"command": "sh \\"${CLAUDE_PLUGIN_ROOT}/hooks/tool-versions.sh\\" --session-start",',
+    '\t\t\t\t\t\t"timeout": 30',
+    '\t\t\t\t\t}',
+    '\t\t\t\t]',
+    '\t\t\t}',
+    '\t\t]',
+    '\t}',
+    '}',
+    '',
+)).encode('utf-8')
+
 
 def strict_json(raw, label):
     """重複した object key を受け入れず JSON を読む。
@@ -1690,9 +1716,52 @@ def plugin_agent_only_paths(components):
     return agents - commands_skills
 
 
+def workflow_hook_exemptions(expanded):
+    """空でない hook の拒否から外す hooks.json の component の鍵を返す(#431。条件の正本は loop.md §4)。
+
+    外すのは、次のすべてが成り立つ plugin の root の hooks/hooks.json だけ。
+    ① skill-folder plugin でなく、中身が WORKFLOW_HOOKS_JSON とバイトで同じ。② 同じ root の plugin.json の name が dev-workflow。
+    ③ 同じ root の hooks/ の下のファイルの集合と中身が、loop.sh 自身のプラグイン(source が workflow の
+    ただ 1 つの root)の hooks/ の下と同じで、その root の hooks/hooks.json も WORKFLOW_HOOKS_JSON と同じ。
+    loop.sh は自分のプラグインのスクリプトをもともと信頼して動かすので、信頼する範囲は広がらない。
+    """
+    workflow_roots = {item['root'] for item in expanded
+                      if item['kind'] == 'plugin' and item.get('source') == 'workflow'}
+    if len(workflow_roots) != 1:  # 比べる相手が決まらなければ、例外を作らない
+        return frozenset()
+
+    def hook_files(root):
+        return {item['relative']: item['raw'] for item in expanded
+                if item['kind'] == 'plugin' and item['root'] == root
+                and item['relative'].startswith(WORKFLOW_HOOKS_DIR)}
+
+    own = hook_files(next(iter(workflow_roots)))
+    if own.get(WORKFLOW_HOOKS_RELATIVE) != WORKFLOW_HOOKS_JSON:
+        return frozenset()
+    exempt = set()
+    for item in expanded:
+        if item['kind'] != 'plugin' or item.get('source') == 'skill-folder-plugin' or \
+                item['relative'] != WORKFLOW_HOOKS_RELATIVE or item['raw'] != WORKFLOW_HOOKS_JSON or \
+                hook_files(item['root']) != own:
+            continue
+        manifests = [other['raw'] for other in expanded
+                     if other['kind'] == 'plugin' and other['root'] == item['root']
+                     and other['relative'] == '.claude-plugin/plugin.json']
+        if len(manifests) != 1:
+            continue
+        try:
+            manifest = strict_json(manifests[0], 'plugin.json')
+        except Unclear:
+            continue
+        if isinstance(manifest, dict) and manifest.get('name') == WORKFLOW_PLUGIN_NAME:
+            exempt.add(item['key'])
+    return frozenset(exempt)
+
+
 def checked_component_security(components):
     expanded = component_manifests(components)
     agent_paths = plugin_agent_only_paths(components)
+    exempt = workflow_hook_exemptions(expanded)
     for item in expanded:
         if item['kind'] == 'marketplace-manifest':
             continue
@@ -1702,6 +1771,8 @@ def checked_component_security(components):
             manifest_grants(item['raw'])
         elif rel.lower().endswith('.md') or rel.endswith('/hooks.json') or rel == 'hooks.json' or \
                 re.search(r'(?:^|/)(?:mods|modules)/[^/]+\.(?:[cm]?[jt]s|tsx?)\Z', rel):
+            if item['key'] in exempt:
+                continue
             component_security(item['raw'], rel, item['path'] in agent_paths)
     strict_plugin_mcp(expanded)
 

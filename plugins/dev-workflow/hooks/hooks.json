@@ -1,0 +1,16 @@
+{
+	"description": "dev-workflow が使う道具の版を、プラグインを入れた後と版を上げた後の最初の起動で確かめて知らせる(止めない)",
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "sh \"${CLAUDE_PLUGIN_ROOT}/hooks/tool-versions.sh\" --session-start",
+						"timeout": 30
+					}
+				]
+			}
+		]
+	}
+}

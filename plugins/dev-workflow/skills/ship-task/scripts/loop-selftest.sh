@@ -5266,6 +5266,31 @@ run_loop h46-active-changed "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo
 check "H46 active内容変更: 古い証明を拒否" 20 "$RC"
 has "H46 active内容変更: 一覧を取得済み" "$REC/aux.log" 'plugin list'
 check "H46 active内容変更: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+# #431: loop.sh 自身のプラグインの、決まった字面の SessionStart の hook だけは通す(loop.md §4)。
+# 同じ hooks/ を写したほかのプラグインと、字面の違う hooks.json は、今までどおり止める。
+rm -rf "$H46PLUGIN/skills/safe"
+mkdir -p "$PLUG/hooks"
+cp "$PLUGIN_SRC/hooks/hooks.json" "$PLUGIN_SRC/hooks/tool-versions.sh" "$PLUGIN_SRC/hooks/tool-requirements.tsv" "$PLUG/hooks/"
+newrec h46-own-hook
+run_loop h46-own-hook -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 自身の決まった hook: prove" 0 "$RC"
+newrec h46-own-hook-dry
+run_loop h46-own-hook-dry -- --repo "$R" --dry-run "${COMMON_ARGS[@]}"
+check "H46 自身の決まった hook: 別runの証明一致" 0 "$RC"
+cp "$PLUG/hooks/hooks.json" "$PLUG/hooks/tool-versions.sh" "$PLUG/hooks/tool-requirements.tsv" "$H46PLUGIN/hooks/"
+newrec h46-own-hook-copy
+run_loop h46-own-hook-copy "SELFTEST_PLUGINS_FILE=$W/h46-active.json" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 自身の hook を写したほかのplugin: 拒否" 20 "$RC"
+has "H46 自身の hook を写したほかのplugin: 一覧を取得済み" "$REC/aux.log" 'plugin list'
+check "H46 自身の hook を写したほかのplugin: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+rm -f "$H46PLUGIN/hooks/hooks.json" "$H46PLUGIN/hooks/tool-versions.sh" "$H46PLUGIN/hooks/tool-requirements.tsv"
+printf '\n' >>"$PLUG/hooks/hooks.json"
+newrec h46-own-hook-changed
+run_loop h46-own-hook-changed -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+check "H46 自身の hook の字面が違う: 拒否" 20 "$RC"
+check "H46 自身の hook の字面が違う: 補助CLI 0件" "" "$(cat "$REC/aux.log" 2>/dev/null)"
+check "H46 自身の hook の字面が違う: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
+rm -rf "$PLUG/hooks"
 fi
 
 # ════════════════ H46: skill-folder pluginの擬似出所 ════════════════

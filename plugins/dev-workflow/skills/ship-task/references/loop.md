@@ -312,6 +312,13 @@ Permission hook の `permlog` は報告用で、制御判断の根拠にしな�
 - Linux 管理側の command root は v4.24.7 で保持対象へ追加した。固定の置き場は design §7-3 に記す。追加 managed root の `commands/` も同じ検査・名前解決・証明へ含める。正常な command は受け入れ、非空の hook や危険な許可規則は他の追加定義と同じく拒否する。従来の command は呼出名に残し、初期応答の公開 skill 集合には含めない。
 - marketplace の registry と有効一覧から、選択された項目・source・導入先を一意に結ぶ。欠落・複数候補・不一致は推測せず止める。同期由来の `scope=synced` と marketplace のないローカル plugin は、それぞれ明示された条件で扱う。`@skills-dir` は保持済みの利用者・管理側 skills の直下の配置と manifest 名が一致するときだけ同じ定義へ統合する。未知の `@` 出所をこの例外で通さない
 - skill・command・利用者と管理側の agent の非空の hook、plugin の非空の hook と `modules` は拒否する。空の容器は許すが、型や参照を確定できなければ止める。plugin hook の参照先も同じ保持 root 内に限る
+  - 例外は 1 つだけ: dev-workflow 自身の `SessionStart` の hook(使う道具の版を確かめて知らせる。#431)。plugin の root の `hooks/hooks.json` が、次のすべてを満たすときだけ通す(`host-check.py` の `workflow_hook_exemptions`)。
+    - 中身が、`host-check.py` の `WORKFLOW_HOOKS_JSON` とバイトで同じ(`sh "${CLAUDE_PLUGIN_ROOT}/hooks/tool-versions.sh" --session-start` を呼ぶだけ)。
+    - 同じ root の `.claude-plugin/plugin.json` の `name` が `dev-workflow`。
+    - 同じ root の `hooks/` の下のファイルの集合と中身が、`loop.sh` 自身のプラグインの `hooks/` の下と同じ。`loop.sh` 自身のプラグインの `hooks/hooks.json` も、同じ字面。
+  - `loop.sh` 自身のプラグイン(`source: workflow`)が 1 つに決まらないとき(0 個か 2 個以上)は、比べる相手が決まらないので、例外は 1 つも作らない。
+  - ほかのプラグインの hook・中身が違う `hooks.json`・`plugin.json` の `hooks` の鍵・marketplace の項目の `hooks`・root の `hooks/` のほかの場所の `hooks.json` は、今までどおり拒否する。skill-folder plugin の中の `hooks.json` も、利用者の skill としても調べるので拒否する。
+  - この hook は、版を確かめて知らせるだけ。`DEV_WORKFLOW_LOOP_ITER` が空でないセッション(イテレーションと `--prove-host`)では、何もせずに終わる。`loop.sh` は自分のプラグインのスクリプトをもともと信頼して動かすので、信頼する範囲は広がらない。
 - agent は、利用者・管理側の非空 MCP 宣言、`auto`・`bypassPermissions`・未知の権限モード、解決できない skill preload を拒否する。受け入れるモードは `default`・`manual`・`acceptEdits`・`plan`・`dontAsk`。plugin agent でホストが無視する項目の例外は、agent 専用と確認できた本文だけに適用し、同じ本文が skill・command としても読まれる場合には適用しない
 - plugin MCP の宣言と標準の設定ファイルは保持した同じ root 内で調べる。外部・未保持・循環・重複・不明型の参照は止める。宣言を検査できても、その MCP の起動許可にはしない。イテレーションの厳密な MCP 設定を維持する
 - 名前は、読み込む定義の対応表、呼出名と別名の解決先、利用者とモデルから呼べる名、初期応答に出る公開 skill 名に分ける。plugin の prefix、skill と command、管理側と利用者側の優先順位を解決する。出所・本文・公開条件が一致する重複だけを統合し、曖昧な衝突は止める。非公開の定義も権限検査と名前の占有から除かない。既存の `skillOverrides: off` を保持する

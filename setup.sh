@@ -208,3 +208,12 @@ if [[ "$DEST" == */.agents/skills ]]; then
 else
   echo "次のステップ: 対象プロジェクトの Claude Code で /init-project を実行して標準構成を生成してください。"
 fi
+
+# 使う道具の版を確かめて、表で知らせる(止めない。道具と最低の版は plugins/dev-workflow/hooks/tool-requirements.tsv)。
+TOOL_CHECK="$REPO_DIR/plugins/dev-workflow/hooks/tool-versions.sh"
+echo
+if [[ -f "$TOOL_CHECK" ]]; then
+  sh "$TOOL_CHECK" || echo "NOTE: 道具の版を確かめられませんでした(終了コード $?)。手で確かめるには: sh \"$TOOL_CHECK\""
+else
+  echo "NOTE: 道具の版を確かめるスクリプトが無いので、確かめませんでした: $TOOL_CHECK"
+fi
