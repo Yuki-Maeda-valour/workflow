@@ -175,13 +175,11 @@ IS_ROOT=0
 TAB=$'\t'
 PASS=0
 FAIL=0
-RESULTS=""
+RESULTS=()
 CID=""      # 実行中のケース ID(ケース名の先頭に付く)
 TAG=""      # 実行中のケースの類型タグ
-ok() { PASS=$((PASS + 1)); RESULTS="$RESULTS
-PASS  $CID $TAG$1"; }
-ng() { FAIL=$((FAIL + 1)); RESULTS="$RESULTS
-FAIL  $CID $TAG$1"; }
+ok() { PASS=$((PASS + 1)); RESULTS+=("PASS  $CID $TAG$1"); }
+ng() { FAIL=$((FAIL + 1)); RESULTS+=("FAIL  $CID $TAG$1"); }
 
 # ── 汎用アサーション ──
 ckt() { local d="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$d"; else ng "$d"; fi; }
@@ -4524,7 +4522,8 @@ for c in $ALL_CASES; do
 done
 
 echo
-printf '%s\n' "$RESULTS"
+echo
+[ "${#RESULTS[@]}" -eq 0 ] || printf '%s\n' "${RESULTS[@]}"
 if [ -n "$MUT_TABLE" ]; then
   echo
   echo "変異テスト(変異ごとに、写しを対象にした子スイートで FAIL したケース):"

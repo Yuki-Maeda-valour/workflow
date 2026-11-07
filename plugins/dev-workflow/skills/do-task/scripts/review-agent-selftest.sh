@@ -34,14 +34,12 @@ cd "$WORK/proj"
 
 PASS=0
 FAIL=0
-RESULTS=""
+RESULTS=()
 # 自ホスト判定を試験内で固定する(実行環境が Claude Code / Codex のどちらでも同じ結果にする)
 export DEV_WORKFLOW_HOST_CLI="selftest-host"
 
-ok()   { PASS=$((PASS + 1)); RESULTS="$RESULTS
-PASS  $1"; }
-ng()   { FAIL=$((FAIL + 1)); RESULTS="$RESULTS
-FAIL  $1"; }
+ok()   { PASS=$((PASS + 1)); RESULTS+=("PASS  $1"); }
+ng()   { FAIL=$((FAIL + 1)); RESULTS+=("FAIL  $1"); }
 
 # ── スタブ群 ──
 STUB_OK="$WORK/bin/stub-ok.sh"
@@ -118,7 +116,7 @@ SCHEMA_SRC="$SCRIPT_DIR/review-agent.sh"
 SCHEMA_FILE="$WORK/schema-block.txt"
 SCHEMA_HEAD='## 出力形式(review-agent.sh が付与)'
 sed -n "/^SCHEMA_BLOCK=\"\$(cat <<'SCHEMA_EOF'$/,/^SCHEMA_EOF$/p" "$SCHEMA_SRC" | sed '1d;$d' >"$SCHEMA_FILE"
-bail() { ng "$1"; printf '%s\n' "$RESULTS"; echo; echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件(SCHEMA_BLOCK を抽出できないため中断)"; exit 1; }
+bail() { ng "$1"; echo; printf '%s\n' "${RESULTS[@]}"; echo; echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件(SCHEMA_BLOCK を抽出できないため中断)"; exit 1; }
 [ -s "$SCHEMA_FILE" ] || bail "SCHEMA_BLOCK の抽出: 原本 $SCHEMA_SRC から定義本文を抽出できない(両端アンカーの行が無い)"
 [ "$(head -n 1 "$SCHEMA_FILE")" = "$SCHEMA_HEAD" ] || bail "SCHEMA_BLOCK の抽出: 先頭行が見出し '$SCHEMA_HEAD' でない(実際: $(head -n 1 "$SCHEMA_FILE"))"
 case "$(tail -n 1 "$SCHEMA_FILE")" in
@@ -128,6 +126,24 @@ esac
 ok "SCHEMA_BLOCK の抽出: 原本から両端アンカーで定義本文を取得($(wc -l <"$SCHEMA_FILE" | tr -d ' ') 行)"
 SCHEMA_BLOCK_TEXT="$(cat "$SCHEMA_FILE")"   # $(…) は末尾の改行だけを落とすので review-agent.sh の値と一致する
 export SELFTEST_SCHEMA_FILE="$SCHEMA_FILE"
+
+# ── 猶予を短くしたコピー ──
+# (SCHEMA_BLOCK を抽出できないときの中断の出力を変えないよう、その抽出の後に置く)
+# 製品の KILL_GRACE=5(TERM の後、強制終了までの猶予)は固定値で、外から変えられない。中止・タイムアウトで
+# 5 秒ずつ待つケースは、その行だけを 1 にしたコピーで流す(製品は変えない)。本物の値で流すのは $TARGET のまま
+# (TERM 無視スタブのタイムアウトの 1 件)。sed は -i を使わず、リダイレクトで作る(BSD sed のため)。
+# 置き換えが 1 か所だけ当たったかを先に確かめ、当たらなければ ng を出して本物で続ける
+SHORT_TARGET="$WORK/short-grace.sh"
+sed 's/^KILL_GRACE=5\([[:space:]]\)/KILL_GRACE=1\1/' "$TARGET" >"$SHORT_TARGET"
+if [ "$(grep -c '^KILL_GRACE=1[[:space:]]' "$SHORT_TARGET")" -eq 1 ] \
+  && [ "$(grep -c '^KILL_GRACE=5[[:space:]]' "$SHORT_TARGET")" -eq 0 ] \
+  && [ "$(diff "$TARGET" "$SHORT_TARGET" | grep -c '^>')" -eq 1 ] \
+  && [ "$(diff "$TARGET" "$SHORT_TARGET" | grep -c '^<')" -eq 1 ]; then
+  ok "短い猶予のコピー: KILL_GRACE の行だけを 1 にした"
+else
+  ng "短い猶予のコピー: KILL_GRACE の行だけを 1 にできない(本物の猶予 5 秒で続ける)"
+  SHORT_TARGET="$TARGET"
+fi
 schema_head_count() { grep -oF -- "$SCHEMA_HEAD" "$1" | wc -l | tr -d ' '; }   # grep -c は行数なので使わない
 
 # スキーマ指示のゲートスタブ: 最後の引数が付与ブロック全体(見出し〜末尾行)で終わるときだけ指摘 JSON を
@@ -253,19 +269,35 @@ EXPECT_APPROVED_JSON='{
 }'
 
 # 制限付き PATH(sandbox)を作る。$2 以降を除外する
+# true は、製品が `timeout -k 1 1 true` で timeout が動くかを確かめるために要る(無いと、timeout を
+# 使わない代わりの経路(1 秒ごとに生存を見る)に落ちて、1 回の起動が約 3 秒かかる)。
+# 実体のパスは type -P で探す(true は bash の組み込みで、command -v は名前 true だけを返し、
+# 自分を指す壊れたリンクになるため。type -P は組み込みを飛ばして PATH の実体だけを返す)
 make_sandbox() { # $1=出力ディレクトリ 残り=除外するコマンド名
   sb="$1"; shift
   rm -f "$sb"/*
-  for c in bash sh cat grep date dirname basename mkdir sed awk sleep rm mktemp cut wc tr head env ls pkill ps jq python3 timeout gtimeout; do
+  for c in bash sh cat grep date dirname basename mkdir sed awk sleep rm mktemp cut wc tr head env ls pkill ps jq python3 timeout gtimeout true; do
     skip=0
     for x in "$@"; do [ "$c" = "$x" ] && skip=1; done
     [ "$skip" -eq 1 ] && continue
-    src="$(command -v "$c" 2>/dev/null)" || continue
+    src="$(type -P "$c" 2>/dev/null)" || continue
     [ -n "$src" ] && ln -sf "$src" "$sb/$c"
   done
 }
 make_sandbox "$WORK/sandbox-nopython" python3
 make_sandbox "$WORK/sandbox-notimeout" timeout gtimeout
+
+# 制限した PATH で timeout が使えること(製品と同じ順: timeout、無ければ gtimeout で `-k 1 1 true` が通る)
+TMO_STATE="$(PATH="$WORK/sandbox-nopython"
+  st=none
+  if command -v timeout >/dev/null 2>&1; then st=ng; timeout -k 1 1 true >/dev/null 2>&1 && st=ok; fi
+  if [ "$st" != ok ] && command -v gtimeout >/dev/null 2>&1; then st=ng; gtimeout -k 1 1 true >/dev/null 2>&1 && st=ok; fi
+  echo "$st")"
+case "$TMO_STATE" in
+  ok)   ok "制限した PATH で timeout が使える" ;;
+  none) ok "制限した PATH で timeout が使える(timeout・gtimeout が無い環境のため飛ばす)" ;;
+  *)    ng "制限した PATH で timeout が使える(timeout -k 1 1 true が終了コード 0 にならない。製品が代わりの経路に落ちる)" ;;
+esac
 
 leak_count() { ps -eo args 2>/dev/null | grep -c "^bash $WORK/bin/hangproc.sh"; }
 leak_cleanup() {
@@ -273,6 +305,16 @@ leak_cleanup() {
     ps -eo pid,args 2>/dev/null | awk -v s="bash $WORK/bin/$s.sh" '$0 ~ "[0-9] "s {print $1}' \
       | while read -r p; do kill -9 "$p" 2>/dev/null; done
   done
+}
+# 数を出す関数($1)が 0 を出すまで、0.1 秒ごとに見て待つ($2=上限。0.1 秒の単位の整数。0.5 秒は 5・2 秒は 20)。
+# 0 になれば 0、上限まで 0 にならなければ 1 を返す(固定の sleep の代わり。数は一度 0 になれば戻らない)
+wait_gone() {
+  wg_i=0
+  while [ "$wg_i" -lt "$2" ]; do
+    [ "$("$1")" -eq 0 ] && return 0
+    sleep 0.1; wg_i=$((wg_i + 1))
+  done
+  [ "$("$1")" -eq 0 ]
 }
 
 CASE_OUT="$WORK/case.out"
@@ -405,14 +447,14 @@ check "信頼モデル: 既定表ランナーへの --readonly-flag を拒否" 2
 if [ -e "$SIDEEFFECT" ]; then ng "PoC 非再現(--readonly-flag 経路で副作用が起きない)"; else ok "PoC 非再現(--readonly-flag 経路で副作用が起きない)"; fi
 
 # 12. TERM を無視するスタブでもタイムアウトが成立し、プロセスを残さない(timeout -k 経路)
-leak_cleanup; sleep 1
+leak_cleanup; wait_gone leak_count 10
 start=$(date +%s)
 run_agent --runner stubrunner --command "bash $WORK/bin/hangproc.sh --readonly-x" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --probe-timeout 2 --log-file "$WORK/log12.md"; rc=$?
 elapsed=$(( $(date +%s) - start ))
 if [ "$rc" -eq 7 ] && [ "$elapsed" -lt 20 ]; then ok "TERM 無視スタブでもタイムアウト成立 (exit=$rc / ${elapsed}s)"; else
   ng "TERM 無視スタブでもタイムアウト成立 (期待 exit=7 かつ 20 秒未満 / 実際 exit=$rc ${elapsed}s)"; fi
-sleep 2
+wait_gone leak_count 20
 if [ "$(leak_count)" -eq 0 ]; then ok "タイムアウト後にプロセスを残さない(timeout 経路)"; else
   ng "タイムアウト後にプロセスを残さない(timeout 経路・残存 $(leak_count) 件)"; leak_cleanup; fi
 
@@ -589,16 +631,16 @@ else
 fi
 
 # 27. フォールバック経路(timeout / gtimeout が無い)でもタイムアウトが成立し、プロセスを残さない
-leak_cleanup; sleep 1
+leak_cleanup; wait_gone leak_count 10
 start=$(date +%s)
 rc=0
 guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-notimeout" \
-  bash "$TARGET" --runner stubrunner --command "bash $WORK/bin/hangproc.sh --readonly-x" --readonly-flag "--readonly-x" \
+  bash "$SHORT_TARGET" --runner stubrunner --command "bash $WORK/bin/hangproc.sh --readonly-x" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --probe-timeout 3 --log-file "$WORK/log27fb.md" --cwd "$WORK" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 elapsed=$(( $(date +%s) - start ))
 if [ "$rc" -eq 7 ] && [ "$elapsed" -lt 25 ]; then ok "フォールバック経路でもタイムアウト成立 (exit=$rc / ${elapsed}s)"; else
   ng "フォールバック経路でもタイムアウト成立 (期待 exit=7 かつ 25 秒未満 / 実際 exit=$rc ${elapsed}s)"; fi
-sleep 2
+wait_gone leak_count 5
 if [ "$(leak_count)" -eq 0 ]; then ok "タイムアウト後にプロセスを残さない(フォールバック経路)"; else
   ng "タイムアウト後にプロセスを残さない(フォールバック経路・残存 $(leak_count) 件)"; leak_cleanup; fi
 
@@ -1287,19 +1329,19 @@ sig_case() {
   fi
   if [ "$sc_path" = fallback ]; then
     ( cd "$sc_logcwd" && exec env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" \
-        PATH="$WORK/sandbox-notimeout" bash "$TARGET" --runner stubrunner \
+        PATH="$WORK/sandbox-notimeout" bash "$SHORT_TARGET" --runner stubrunner \
         --command "bash $SIGDIR/stub.sh --readonly-x" --readonly-flag "--readonly-x" \
         --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 60 \
         ${sc_logargs[@]+"${sc_logargs[@]}"} ) >"$CASE_OUT" 2>"$CASE_ERR" &
   else
-    ( cd "$sc_logcwd" && exec bash "$TARGET" --runner stubrunner \
+    ( cd "$sc_logcwd" && exec bash "$SHORT_TARGET" --runner stubrunner \
         --command "bash $SIGDIR/stub.sh --readonly-x" --readonly-flag "--readonly-x" \
         --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 60 \
         ${sc_logargs[@]+"${sc_logargs[@]}"} ) >"$CASE_OUT" 2>"$CASE_ERR" &
   fi
   sig_pid=$!
   waited=0
-  while [ ! -e "$SIGDIR/started" ] && [ "$waited" -lt 40 ]; do sleep 1; waited=$((waited + 1)); done
+  while [ ! -e "$SIGDIR/started" ] && [ "$waited" -lt 400 ]; do sleep 0.1; waited=$((waited + 1)); done
   sleep 1
   if [ ! -e "$SIGDIR/started" ]; then
     ng "中止($sc_label): 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -1307,7 +1349,7 @@ sig_case() {
   fi
   kill -"$sc_sig" "$sig_pid" 2>/dev/null
   rc=0; wait "$sig_pid" || rc=$?
-  sleep 2
+  wait_gone sig_leak_count 5
   if [ "$rc" -eq "$sc_want" ]; then ok "中止($sc_label): 終了コード $sc_want で終わる"; else
     ng "中止($sc_label): 終了コード $sc_want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
   if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($sc_label): 外部ランナーの子を残さない"; else
@@ -1537,12 +1579,12 @@ kd_log="$K_DIR/swap-term.md"
 env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$K_SANDBOX" TMPDIR="$K_TMP" \
   SELFTEST_SWAP_MODE=symlink SELFTEST_SWAP_LOG="$kd_log" SELFTEST_SWAP_VICTIM="$K_VICTIM" \
   SELFTEST_SWAP_HOLD=1 SELFTEST_SWAP_MARKER="$K_MARKER" \
-  bash "$TARGET" --runner stubrunner --command "$K_SWAP_CMD" --readonly-flag "--readonly-x" \
+  bash "$SHORT_TARGET" --runner stubrunner --command "$K_SWAP_CMD" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 45 --log-file "$kd_log" \
   >"$CASE_OUT" 2>"$CASE_ERR" &
 kd_pid=$!
 waited=0
-while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done
 sleep 1
 if [ ! -e "$K_MARKER" ]; then
   ng "走行中の差し替え: (d) 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -1599,7 +1641,7 @@ kc_notes "差し替えの照合: 差し替えない: stderr に差し替えの N
 kc_run fdlink fdlink
 kc_notes "差し替えの照合: /dev/fd/7 を指す symlink: stderr に差し替えの NOTE が出る" +
 K_EF_TARGET="$K_DIR/ef-false.sh"
-sed 's#\[ /dev/fd/7 -ef "\$LOG_FILE" \]#false#g' "$TARGET" >"$K_EF_TARGET"
+sed 's#\[ /dev/fd/7 -ef "\$LOG_FILE" \]#false#g' "$SHORT_TARGET" >"$K_EF_TARGET"
 kc_hits="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$TARGET")"
 kc_left="$(grep -cF '[ /dev/fd/7 -ef "$LOG_FILE" ]' "$K_EF_TARGET")"
 if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
@@ -1634,7 +1676,7 @@ if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
     >"$CASE_OUT" 2>"$CASE_ERR" &
   kc_pid=$!
   waited=0
-  while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 60 ]; do sleep 1; waited=$((waited + 1)); done
+  while [ ! -e "$K_MARKER" ] && [ "$waited" -lt 600 ]; do sleep 0.1; waited=$((waited + 1)); done
   sleep 1
   if [ ! -e "$K_MARKER" ]; then
     ng "差し替えの照合: -ef が偽の写し: 差し替えない: 中止: 本実行まで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -2245,12 +2287,12 @@ if check "モデル名: 両方に違う値" 0 "$rc"; then
 fi
 # M11. プローブ中の中止(TERM。on_signal): 得られた出力から読み、中止の行より前に 1 回だけ書く
 M12_MARKER="$WORK/m12.started"; rm -f "$M12_MARKER"
-SELFTEST_MODEL_MODE=hang SELFTEST_MODEL_MARKER="$M12_MARKER" PATH="$WORK/modelbin:$PATH" bash "$TARGET" --runner codex \
+SELFTEST_MODEL_MODE=hang SELFTEST_MODEL_MARKER="$M12_MARKER" PATH="$WORK/modelbin:$PATH" bash "$SHORT_TARGET" --runner codex \
   --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 40 --run-timeout 20 --log-file "$WORK/m12.md" \
   >"$CASE_OUT" 2>"$CASE_ERR" &
 m12_pid=$!
 m12_waited=0
-while [ ! -e "$M12_MARKER" ] && [ "$m12_waited" -lt 40 ]; do sleep 1; m12_waited=$((m12_waited + 1)); done
+while [ ! -e "$M12_MARKER" ] && [ "$m12_waited" -lt 400 ]; do sleep 0.1; m12_waited=$((m12_waited + 1)); done
 sleep 1
 if [ ! -e "$M12_MARKER" ]; then
   ng "モデル名: プローブ中の中止: プローブまで到達しない(治具の失敗)"; cat "$CASE_ERR" >&2
@@ -2297,7 +2339,8 @@ else
 fi
 
 echo
-printf '%s\n' "$RESULTS"
+echo
+[ "${#RESULTS[@]}" -eq 0 ] || printf '%s\n' "${RESULTS[@]}"
 echo
 echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件"
 [ "$FAIL" -eq 0 ]

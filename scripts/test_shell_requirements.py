@@ -114,10 +114,20 @@ class ShellRequirements(unittest.TestCase):
         real_touch = shutil.which('touch')
         # 能力検査は通し、scratch リポジトリの時刻固定だけを失敗させる。
         self.stub('touch', f'case "$*" in *src/auth.ts*) exit 64 ;; esac\nexec {real_touch} "$@"\n')
-        result = self.run_script(SELFTEST, timeout=180)
+        result = self.run_script(SELFTEST, '--only', 'c32', timeout=60)
         self.assertEqual(result.returncode, 2, result.stderr)
         self.assertIn('touch -d の時刻固定に失敗', result.stderr)
         self.assertNotIn('隠蔽を再現できない環境のため飛ばす', result.stdout)
+
+    def test_r3_only_rejects_bad_arguments(self):
+        # 頭の検査の後・節の前で止まるので速い。受け付けない --only は、終了コード 1 で ERROR: を出す
+        for args in (('--only', 'nosuch'), ('--only', ''), ('--only', ','), ('--only', 'c32,'), ('--only', 'c32\nnosuch'),
+                     ('--only',), ('--only', 'c32', '--only', 'others')):
+            with self.subTest(args=args):
+                result = self.run_script(SELFTEST, *args)
+                self.assertEqual(result.returncode, 1, result.stderr)
+                self.assertIn('ERROR:', result.stderr)
+                self.assertNotIn('PASS', result.stdout)
 
     def test_r3_old_selftest_bash(self):
         result = self.run_script(SELFTEST, bash=self.old_bash('3.2'))
