@@ -753,8 +753,13 @@ chmod +x "$W/failsleepbin/sleep"
 echo 'raise ImportError("blocked by loop-selftest")' >"$W/noyaml/yaml.py"
 
 # remove の拒否の正常対照。FIFO や生き残りの子孫に同期を依存させない。
+# この包みは、late の場面を打つ disc_pair の起動だけで PATH の先頭に置く。ほかの起動は、
+# $SAFEBIN の git を直接使う(文書の push を確かめる起動〈docpush。breakers-normal 節の中〉は、
+# 専用の包み $DP_GIT/git を使う)。
+LATEBIN="$W/latebin"
+mkdir -p "$LATEBIN"
 REAL_GIT="$(command -v git)"
-cat >"$STUBBIN/git" <<EOF
+cat >"$LATEBIN/git" <<EOF
 #!/usr/bin/env bash
 saw=0
 for arg in "\$@"; do
@@ -770,7 +775,7 @@ if [ "\$saw" = 2 ] && [ -f "\${SELFTEST_REC:-}/late-target" ]; then
 fi
 exec "$REAL_GIT" "\$@"
 EOF
-chmod +x "$STUBBIN/git"
+chmod +x "$LATEBIN/git"
 
 # ── scratch のプラグイン(対象の loop.sh を置く。変異版もここに写して打つ)──
 PLUG="$W/plugin"
@@ -4154,12 +4159,14 @@ fi
 # ── 判定の各場合と worktree の扱い(1 回の実行で data-audit・refactor の 2 周)──
 DA_ARGS=(--max-consecutive-failures 50 "${COMMON_ARGS[@]}")
 disc_pair() { # $1=名 $2=data-audit の振る舞い $3=refactor の振る舞い [$4=noorigin] 残り=loop.sh の追加の引数
-  local name="$1" da="$2" rf="$3" org="${4:-}"
+  local name="$1" da="$2" rf="$3" org="${4:-}" path=()
   shift 4 2>/dev/null || shift $#
   newdisc "dp-$name" "$org"
   newrec "dp-$name"
   D12="$(git -C "$R" rev-parse main | cut -c1-12)"
-  run_loop "dp-$name" "SELFTEST_DISC_DA=$da" "SELFTEST_DISC_RF=$rf" -- --repo "$R" --discover "${DA_ARGS[@]}" "$@"
+  # late の場面を打つ起動だけ、remove の拒否の包み($LATEBIN/git)を PATH の先頭に置く。
+  case " $da $rf " in *" late "*) path=("PATH=$LATEBIN:$STUBBIN:$SAFEBIN") ;; esac
+  run_loop "dp-$name" ${path[@]+"${path[@]}"} "SELFTEST_DISC_DA=$da" "SELFTEST_DISC_RF=$rf" -- --repo "$R" --discover "${DA_ARGS[@]}" "$@"
   RP="$(report_of "$OUT")"
 }
 djudged() { # $1=発見元 $2=判定(先頭一致) $3=removed|kept $4=振る舞い
