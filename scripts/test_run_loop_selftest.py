@@ -21,7 +21,7 @@ RUNNER = SCRIPTS / "run-loop-selftest.py"
 RUN_UNITS = SCRIPTS / "run_units.py"
 SELFTEST_PATH = Path("plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh")
 
-# 偽の loop-selftest.sh。本物と同じ形で、節の外の確かめ(前に 2 件・後に 1 件)と、節の確かめを数える。
+# 偽の loop-selftest.sh。本物と同じ形で、節の外の確かめ(前に 2 件・後に 1 件。件数は本物と結び付けない)と、節の確かめを数える。
 # 流れたときの LOOP_SELFTEST_ONLY を、環境変数で渡したファイルへ 1 行ずつ足す。
 HEAD = r'''#!/usr/bin/env bash
 set -uo pipefail
