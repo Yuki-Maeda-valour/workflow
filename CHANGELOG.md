@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 変更
+
+- 無人ループの回帰テスト(`loop-selftest.sh`・`test_loop_startup.py`)で、確かめの前の準備を減らして速くした。各節の確かめの中身は変えない。([Issue #389](https://github.com/Yuki-Maeda-valour/workflow/issues/389))
+  - 上書きの実行ファイル(`claude-alt`)の証明を、それを渡す 3 つの節(stops・h28・argv)の最初だけで作る。ほかのプロセスでは作らない。
+  - `newrepo` の origin(送り先のリポジトリ)つきの形を、1 回作った雛形のコピーにした。コピーの後に index(ステージした内容を置く所)の stat の情報(ファイルの大きさ・時刻・識別番号)を取り直す。
+  - スタブの push のたびの `git gc` をやめた。gc は、breakers の正常な周(`SELFTEST_PUSH_GC` を渡す)と文書の push だけで打つ。
+  - `test_loop_startup.py` の、`loop.sh` を起動しない 1 ケースは、共通の準備のうち証明づくりを流さない。
+  - 既定の証明は、プロセスやケースをまたいで使い回さない。証明は一時フォルダのパスと `loop.sh` の中身に結び付き、使い回すと照合で落ちるため。
+
 ## v4.46.0
 
 ### 変更

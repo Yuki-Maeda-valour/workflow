@@ -574,8 +574,10 @@ hookcall() { # $1=tool_name $2=tool_input の JSON
   printf '\n' >>"$REC/hookout-$name"
 }
 done_commit() { g mv "$md" "$tdir/完了_$name.md"; echo "impl $name" >"impl-$name.txt"; g add "impl-$name.txt"; g commit -q -m "impl $name"; }
-push() { g push -q origin "task/$name"; g gc -q; }
-pushu() { g push -q -u origin "task/$name"; g gc -q; }   # 共有の config に branch.task/{名}.* を書く push(照合で止まる)
+# push の後の gc は、SELFTEST_PUSH_GC が空でないときだけ打つ(成功したらタスク名を $REC/gc.log に足す)。毎回は打たない
+push_gc() { [ -n "${SELFTEST_PUSH_GC:-}" ] && g gc -q && printf '%s\n' "$name" >>"$REC/gc.log"; return 0; }
+push() { g push -q origin "task/$name"; push_gc; }
+pushu() { g push -q -u origin "task/$name"; push_gc; }   # 共有の config に branch.task/{名}.* を書く push(照合で止まる)
 hold_commit() { # $1=停止条件(空なら保留の行を足さない)
   if [ -n "$1" ]; then
     printf -- '- **保留**(ship-task・2026-09-24): %s — 本文を直し、/create-task で設計レビューをやり直す\n' "$1" >>"$md"
@@ -855,21 +857,61 @@ state_dir() { # $1=状態名 → 状態ディレクトリ(1 つだけのはず)
 newrec() { REC="$W/rec/$1"; rm -rf "$REC"; mkdir -p "$REC"; }
 G() { git "$@" >/dev/null 2>&1; }
 # newrepo <名> [noorigin] → R(作業ツリー)・B(bare のリモート)。状態ファイル 3 つ(loop.md §3 の 2a)を ignore する
+# origin つきの形は、最初の 1 回に作った雛形($W/newrepo-template)のコピー。noorigin は毎回作る
+newrepo_template() {
+  local T="$W/newrepo-template"
+  [ -e "$T/.done" ] && return 0
+  rm -rf "$T"; mkdir -p "$T"
+  R="$T/work"; B="$T/remote.git"
+  # 作成が成功し、雛形がそろったときだけ印を置く(途中で失敗した雛形を使わない)
+  if newrepo_build "template" origin \
+     && git -C "$T/work" show-ref --verify -q refs/heads/main \
+     && git -C "$T/work" show-ref --verify -q refs/remotes/origin/main \
+     && git -C "$T/remote.git" show-ref --verify -q refs/heads/main \
+     && [ "$(git -C "$T/work" symbolic-ref refs/remotes/origin/HEAD 2>/dev/null)" = refs/remotes/origin/main ]; then
+    touch "$T/.done"
+  else
+    ng "治具: newrepo の雛形を作れる"
+    return 1
+  fi
+}
 newrepo() {
+  if [ "${2:-}" != noorigin ]; then
+    local T="$W/newrepo-template"
+    R="$W/repos/$1"
+    B="$W/repos/$1.remote.git"
+    if newrepo_template \
+       && R="$W/repos/$1" && B="$W/repos/$1.remote.git" \
+       && rm -rf "$R" "$B" "$R.loop" \
+       && cp -a "$T/work" "$R" \
+       && cp -a "$T/remote.git" "$B" \
+       && git -C "$R" remote set-url origin "sshstub:$B" \
+       && git -C "$R" update-index -q --refresh; then
+      return 0
+    fi
+    ng "治具: newrepo $1 を雛形から作れる"
+    return 1
+  fi
   R="$W/repos/$1"
   B="$W/repos/$1.remote.git"
   rm -rf "$R" "$B" "$R.loop"
-  git init -q -b main "$R"
-  printf '*.ignored\n.claude/reviews\n.claude/grasp.md\n.claude/.understand-project-done\n' >"$R/.gitignore"
-  echo "# $1" >"$R/README.md"
-  mkdir -p "$R/docs/tasks"
-  G -C "$R" add -A
-  G -C "$R" commit -q -m init
+  newrepo_build "$1" noorigin
+}
+# newrepo_build <名> <origin|noorigin>: R に作業ツリーを作る(origin つきなら B に bare も作る)。どれかが失敗したら 1 を返す
+newrepo_build() {
+  git init -q -b main "$R" \
+    && printf '*.ignored\n.claude/reviews\n.claude/grasp.md\n.claude/.understand-project-done\n' >"$R/.gitignore" \
+    && echo "# $1" >"$R/README.md" \
+    && mkdir -p "$R/docs/tasks" \
+    && G -C "$R" add -A \
+    && G -C "$R" commit -q -m init \
+    || return 1
   if [ "${2:-}" != noorigin ]; then
-    git init -q --bare -b main "$B"
-    G -C "$R" remote add origin "sshstub:$B"
-    SELFTEST_REC="$W/rec/setup" G -C "$R" push -q -u origin main
-    G -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    git init -q --bare -b main "$B" \
+      && G -C "$R" remote add origin "sshstub:$B" \
+      && SELFTEST_REC="$W/rec/setup" G -C "$R" push -q -u origin main \
+      && G -C "$R" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main \
+      || return 1
   fi
 }
 # addtask <名> [作成日|-] [meta 1|0] [task_dir] [追加修正記録に足す行]
@@ -952,8 +994,16 @@ check "治具: スタブの証明を作れる(default)" 0 "$RC"
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 治具: 上書きの実行ファイルの証明(H31)════════════════
-run_loop prove-alt -- --repo "$R" --prove-host --host-argv "$ALTBIN/claude-alt" "${COMMON_ARGS[@]}"
-check "治具: スタブの証明を作れる(alt)" 0 "$RC"
+# prove_alt <節の名前>: claude-alt を --host-argv で loop.sh に渡す節は、その節の最初に呼ぶ(今は stops・h28・argv)。
+# 節の外で作ると、使わない節のプロセスでも作る。節の中から呼ぶ関数が、プロセスの中で初回だけ作る形にすると、
+# 1 本で流したときは 1 件・節ごとに分けると 3 件になり合わない。そのため、呼ぶ節ごとに作る。関数の中では want を呼ばない
+prove_alt() {
+  local saved_rec="$REC"
+  newrec "prove-alt-$1"
+  run_loop "prove-alt-$1" -- --repo "$W/repos/provefix" --prove-host --host-argv "$ALTBIN/claude-alt" "${COMMON_ARGS[@]}"
+  check "治具: スタブの証明を作れる(alt)" 0 "$RC"
+  REC="$saved_rec"
+}
 
 # ════════════════ 同期: 判定 2 の環境変数の列(D7)════════════════
 # 文書の §3 判定 2 の項目(その行と下位の行)から、バッククォートで囲んだ大文字の環境変数名だけを取り出す
@@ -972,6 +1022,7 @@ fi
 
 # ════════════════ 起動時に止まる ════════════════
 if want stops; then
+prove_alt stops
 newrepo stops
 addtask pr-a 2026-01-01
 commit
@@ -1391,6 +1442,7 @@ fi
 
 # ════════════════ H28: 短い値付きフラグ ════════════════
 if want h28; then
+prove_alt h28
 # スタブの陽性対照。-p が値になると、解析失敗でも起動記録を必ず残す。
 for swallowed in -p --allowedTools; do
   newrec "h28-control-${swallowed#-}"
@@ -1467,6 +1519,7 @@ fi
 
 # ════════════════ --dry-run・argv ════════════════
 if want argv; then
+prove_alt argv
 newrepo argv
 addtask pr-argv 2026-01-01
 addtask pr-second 2026-01-02
@@ -2074,8 +2127,10 @@ newrepo normal
 addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; addtask hold-c 2026-01-03
 commit
 newrec normal
-run_loop normal -- --repo "$R" "${COMMON_ARGS[@]}"
+run_loop normal SELFTEST_PUSH_GC=1 -- --repo "$R" "${COMMON_ARGS[@]}"
 check "正常な周で止まらない: push と gc を打っても次の周へ進む" 0 "$RC"
+check "正常な周で止まらない: スタブが push の後に gc を打った" "pr-a pr-b" "$(tr '\n' ' ' <"$REC/gc.log" 2>/dev/null | sed 's/ $//')"
+check "この時点までに gc.log があるのは、SELFTEST_PUSH_GC を渡した normal の周だけ" "$W/rec/normal/gc.log" "$(find "$W/rec" -name gc.log)"
 check "正常な周で止まらない: PR → PR → 保留" "pr-a pr-b hold-c" "$(calls)"
 has "正常な周で止まらない: キューが空で終わる" "$OUT" "止まった理由: キューが空"
 check "正常な周: 共有の config に branch.task/pr-a.* が無い" "" "$(git config --file "$R/.git/config" --get-regexp '^branch\.task/pr-a\.' 2>/dev/null)"
