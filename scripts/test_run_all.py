@@ -1,11 +1,18 @@
-"""scripts/run-all.py(と scripts/run_units.py)の回帰テスト。
+"""scripts/run-all.py(と scripts/run_units.py・scripts/run-all-container.sh)の回帰テスト。
 
 使い捨てのフォルダに、ランナーのコピーと、小さな偽の部(test_*.py 2 つ・偽の loop-selftest.sh・偽の selftest 4 本)を
 置いて、サブプロセスで流す。HOME・XDG_CACHE_HOME・TMPDIR は、使い捨てのフォルダに向ける
-(本物の重みの記録・置き場には触れない)。
+(本物の重みの記録・使い回しの記録・置き場には触れない)。
+- RunAllTest: 既定の回(RUN_ALL_IMAGE を除いて流すので、使い回しの記録を読み書きしない)。
+- RunAllReuseTest: 結果の使い回し(--reuse)。容器の中と同じく、正しい形の RUN_ALL_IMAGE を渡して流す。
+- RunUnitsTest・RunUnitsReuseTest・RunAllScopeTest: 関数を直接呼ぶ。
+- RunAllContainerTest: 容器の入口(docker のモックを PATH の先頭に置く。本物の docker は起動しない)。
 """
 
+import contextlib
+import datetime
 import importlib.util
+import io
 import json
 import os
 import re
@@ -19,6 +26,8 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+
+import support_git
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -254,7 +263,7 @@ class RunAllTest(unittest.TestCase):
         env = dict(os.environ, HOME=str(self.home), XDG_CACHE_HOME=str(self.cache), TMPDIR=str(self.tmp),
                    RUN_ALL_MARKS=str(self.marks), RUN_LOOP_SELFTEST_LOG=str(self.root / "loop.log"),
                    FAKE_GUARD_LOG=str(self.root / "guard.log"))
-        for name in ("LOOP_SELFTEST_ONLY", "LOOP_SELFTEST_TIMEOUT", "RUN_TIMEOUT", "XDG_STATE_HOME"):
+        for name in ("LOOP_SELFTEST_ONLY", "LOOP_SELFTEST_TIMEOUT", "RUN_TIMEOUT", "XDG_STATE_HOME", "RUN_ALL_IMAGE"):
             env.pop(name, None)
         env.update(extra)
         return env
@@ -642,6 +651,849 @@ class RunUnitsTest(unittest.TestCase):
 
     def test_missing_record_is_empty_without_warning(self):
         self.assertEqual({}, self.module.load_weights(self.path))
+
+
+
+# ---- 結果の使い回し(--reuse) ----
+
+# 容器の中と同じ、正しい形のイメージ(<名前>@sha256:<64 桁>)。
+IMAGE = "test@sha256:" + "0" * 64
+OTHER_IMAGE = "test@sha256:" + "1" * 64
+
+# モックの部の単位が始まるたびに、印のフォルダの started.log に 1 行を書く(単位のプロセスの数を数える)。
+MARK_PY = """
+import os as _os
+_marks = _os.environ.get("RUN_ALL_MARKS")
+if _marks:
+    with open(_os.path.join(_marks, "started.log"), "a", encoding="utf-8") as _stream:
+        _stream.write(__name__ + "\\n")
+"""
+MARK_SH = 'printf "%s\\n" "$(basename "$0") ${LOOP_SELFTEST_ONLY:-} ${2:-}" >>"$RUN_ALL_MARKS/started.log"\n'
+
+# 分けて流す unittest(run-tests.py の SHARDS で 2 つに分ける名前)。テスト 3 件。
+THREE = """
+import unittest
+
+class Three(unittest.TestCase):
+    def test_1(self):
+        pass
+
+    def test_2(self):
+        pass
+
+    def test_3(self):
+        pass
+"""
+
+# モックの diff-snapshot-selftest.sh の仕掛け(印のフォルダの中の印のファイルで、一度だけ働く。鍵に入るものは変えない)。
+DIFF_HOOKS = r"""
+if [ -e "$RUN_ALL_MARKS/fail-once" ]; then rm -f "$RUN_ALL_MARKS/fail-once"; echo "結果: PASS 0 件 / FAIL 1 件"; exit 1; fi
+if [ -e "$RUN_ALL_MARKS/touch-plugins" ]; then rm -f "$RUN_ALL_MARKS/touch-plugins"; echo "書き換えた" >>plugins/dev-workflow/notes.md; fi
+if [ -e "$RUN_ALL_MARKS/write-pycache" ]; then
+  rm -f "$RUN_ALL_MARKS/write-pycache"
+  mkdir -p plugins/dev-workflow/__pycache__
+  echo pyc >plugins/dev-workflow/__pycache__/m.cpython-310.pyc
+fi
+"""
+
+# 作業場所(リポジトリ直下)で python3 を起動して json を読み込む節。直下の json.py の FAIL が 0 でなければ落ちる。
+LOOP_SHADOW = r"""
+if want shadow; then
+if python3 -B -c 'import json, sys; sys.exit(getattr(json, "FAIL", 0))'; then ok "shadow"; else ng "shadow"; fi
+fi
+"""
+
+# scripts/ の直下に置く json.py。ランナーが読み込むので、標準の json を読み込み直して、そのまま使わせる。
+SHADOW_JSON = """
+import os
+import sys
+
+_here = os.path.dirname(os.path.abspath(__file__))
+del sys.modules[__name__]
+_saved = sys.path[:]
+sys.path[:] = [entry for entry in sys.path if os.path.abspath(entry or ".") != _here]
+try:
+    import json as _real
+finally:
+    sys.path[:] = _saved
+sys.modules[__name__] = _real
+"""
+
+NOTES = "plugins/dev-workflow/notes.md"
+UNITTEST_LABELS = frozenset({"unittest test_a.py", "unittest test_b.py", "unittest test_host_check.py [1/2]",
+                             "unittest test_host_check.py [2/2]"})
+BASH_LABELS = frozenset({
+    "loop-selftest (節の外だけ)", "loop-selftest alpha", "loop-selftest beta",
+    *(f"implement-guard-selftest.sh --only {name}" for name in ("A", "B", "M1", "M2", "L-a", "L-b", "L-c")),
+    "diff-snapshot-selftest.sh", "review-agent-selftest.sh", "implement-agent-selftest.sh"})
+ALL_LABELS = UNITTEST_LABELS | BASH_LABELS
+PROGRESS = re.compile(r"^(?:ok  |FAIL) +\d+\.\d 秒  (.+?)  ", re.M)
+REUSED = re.compile(r"^使い回し +\d+\.\d 秒  (.+?)  ", re.M)
+
+
+class RunAllReuseTest(unittest.TestCase):
+    """容器の中(正しい形の RUN_ALL_IMAGE)での、結果の使い回しと記録。"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        # 記録や印のファイルが入力の一覧に入らないように、リポジトリと、ほかのフォルダを分ける。
+        self.root = self.base / "repo"
+        self.scripts = self.root / "scripts"
+        self.scripts.mkdir(parents=True)
+        for name in RUNNERS:
+            shutil.copy2(SCRIPTS / name, self.scripts / name)
+        self.home = self.base / "home"
+        self.cache = self.base / "cache"
+        self.tmp = self.base / "tmp"
+        self.marks = self.base / "marks"
+        for folder in (self.home, self.cache, self.tmp, self.marks):
+            folder.mkdir()
+        self.results = self.cache / "workflow-run-all" / "results.json"
+        self.write_test("test_a.py", PASSING)
+        self.write_test("test_b.py", OTHER)
+        self.write_test("test_host_check.py", THREE)
+        self.write_loop()
+        self.write(GUARD, GUARD_UNIVERSE.replace(LOCK_SH, MARK_SH + LOCK_SH, 1).replace("%(all_cases)s",
+                                                                                          ALL_CASES_STANDARD))
+        self.write(AGENT, selftest(4, MARK_SH, lock=False))
+        self.write(REVIEW, selftest(3, MARK_SH, lock=False))
+        self.write(DIFF, selftest(5, MARK_SH + DIFF_HOOKS))
+        self.write(NOTES, "メモ\n")
+        self.write("docs/x.md", "文書\n")
+
+    # ---- 土台 ----
+
+    def write(self, relative, text):
+        path = self.root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+
+    def append(self, relative, text):
+        with open(self.root / relative, "a", encoding="utf-8") as stream:
+            stream.write(text)
+
+    def write_test(self, name, text):
+        (self.scripts / name).write_text(MARK_PY + textwrap.dedent(text), encoding="utf-8")
+
+    def write_loop(self, sections=LOOP_SECTIONS):
+        head = LOOP_HEAD.replace('ok "準備: 前"\n', MARK_SH + 'ok "準備: 前"\n', 1)
+        self.write(LOOP, head + sections + LOOP_TAIL)
+
+    def env(self, **extra):
+        """決まった環境変数だけで流す(テストを流す機械の環境変数で、鍵が変わらないように)。None は除く。"""
+        env = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(self.home), "XDG_CACHE_HOME": str(self.cache),
+               "TMPDIR": str(self.tmp), "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "RUN_ALL_MARKS": str(self.marks),
+               "RUN_ALL_IMAGE": IMAGE}
+        for name, value in extra.items():
+            if value is None:
+                env.pop(name, None)
+            else:
+                env[name] = value
+        return env
+
+    def run_all(self, *args, umask=-1, **extra):
+        return subprocess.run([sys.executable, "-B", str(self.scripts / "run-all.py"), "-j", "8", *args],
+                              cwd=self.root, capture_output=True, text=True, env=self.env(**extra), timeout=180,
+                              umask=umask)
+
+    def run_ok(self, *args, **extra):
+        result = self.run_all(*args, **extra)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return result.stdout
+
+    def started(self):
+        """単位のプロセスが始まった数(モックの部が書いた印の行の数)。"""
+        path = self.marks / "started.log"
+        return len(path.read_text(encoding="utf-8").splitlines()) if path.exists() else 0
+
+    def rerun(self, fresh, reason=None, code=0, *args, **extra):
+        """--reuse で流し、新しく流した単位の表示名の集合が fresh で、残りを使い回したことを確かめる。"""
+        before = self.started()
+        result = self.run_all("--reuse", *args, **extra)
+        out = result.stdout
+        self.assertEqual(code, result.returncode, out + result.stderr)
+        self.assertEqual(set(fresh), set(PROGRESS.findall(out)), out)
+        self.assertEqual(len(fresh), self.started() - before, out)
+        labels = self.labels if hasattr(self, "labels") else ALL_LABELS
+        self.assertEqual(set(labels) - set(fresh), set(REUSED.findall(out)), out)
+        self.assertIn(f"使い回し: 入力が前の合格と同じ {len(labels) - len(fresh)} 個の単位は流さない"
+                      f"(新しく流すのは {len(fresh)} 個)", out)
+        if reason is not None:
+            self.assertIn(f"新しく流す理由: {reason}\n", out)
+        return out
+
+    @staticmethod
+    def result_lines(out):
+        return [line for line in out.splitlines() if line.startswith("結果(")]
+
+    def record(self):
+        return json.loads(self.results.read_text(encoding="utf-8"))
+
+    def edit_record(self, key, change):
+        """記録の中の、単位の鍵 key のいちばん新しい記録を change で書き換える(input はそのまま)。"""
+        data = self.record()
+        change(data["units"][key][0])
+        self.results.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    def plan_reasons(self):
+        result = self.run_all("--plan", "--reuse")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        return next((line for line in result.stdout.splitlines() if line.startswith("新しく流す理由: ")), None)
+
+    # ---- 既定の回 ----
+
+    def test_default_run_is_unchanged_and_records_results(self):
+        out = self.run_ok()
+        self.assertEqual(17, self.started())
+        self.assertFalse([line for line in out.splitlines() if line.startswith("使い回し")], out)
+        self.assertNotIn("使い回せない", out)
+        self.assertIn("17 個の単位を、同時に 8 個まで流す(枠の外: review-agent-selftest.sh・implement-agent-selftest.sh)", out)
+        self.assertRegex(out.strip().splitlines()[-1], r"^結果: 合格 / \d+\.\d 秒$")
+        self.assertEqual(17, len(self.record()["units"]))
+        self.run_ok()
+        self.assertEqual(34, self.started())
+
+    def test_first_reuse_runs_everything_because_no_record(self):
+        out = self.run_ok("--reuse")
+        self.assertEqual(17, self.started())
+        self.assertIn("使い回し: 入力が前の合格と同じ 0 個の単位は流さない(新しく流すのは 17 個)", out)
+        self.assertIn("新しく流す理由: 記録が無い 17 個\n", out)
+        self.assertIn("使い回した単位: 0 個 / 新しく流した単位: 17 個", out)
+        self.assertRegex(out.strip().splitlines()[-1], r"^結果: 合格 / \d+\.\d 秒$")
+
+    def test_second_reuse_starts_no_unit_and_keeps_the_counts(self):
+        first = self.run_ok("--reuse")
+        count = self.started()
+        second = self.run_ok("--reuse")
+        self.assertEqual(count, self.started(), second)
+        self.assertIn("使い回し: 入力が前の合格と同じ 17 個の単位は流さない(新しく流すのは 0 個)", second)
+        self.assertNotIn("新しく流す理由:", second)
+        self.assertIn("0 個の単位を、同時に 8 個まで流す(枠の外: なし)", second)
+        self.assertEqual(set(ALL_LABELS), set(REUSED.findall(second)))
+        self.assertRegex(second, r"(?m)^使い回し +\d+\.\d 秒  implement-guard-selftest.sh --only L-a  PASS 1 件 / FAIL 0 件$")
+        self.assertRegex(second, r"(?m)^使い回し +\d+\.\d 秒  unittest test_host_check.py \[2/2\]  1 件$")
+        self.assertEqual(6, len(self.result_lines(first)))
+        self.assertEqual(self.result_lines(first), self.result_lines(second))
+        lines = second.strip().splitlines()
+        self.assertEqual("使い回した単位: 17 個 / 新しく流した単位: 0 個", lines[-8])
+        self.assertRegex(lines[-1], r"^結果: 合格\(17 個の単位は使い回した\)/ \d+\.\d 秒$")
+
+    def test_host_and_unknown_image_neither_reuse_nor_record(self):
+        for image, reason in ((None, "ホストで流しているので、使い回さない"), ("不明", "容器のイメージの ID が分からない"),
+                              ("test@sha256:" + "0" * 63, "容器のイメージの ID が分からない")):
+            with self.subTest(image=image):
+                before = self.started()
+                out = self.run_ok("--reuse", RUN_ALL_IMAGE=image)
+                self.assertEqual(17, self.started() - before)
+                self.assertIn(f"注意: 使い回せない({reason})。全部の単位を新しく流す", out)
+                self.assertNotIn("使い回し:", out)
+                self.assertRegex(out.strip().splitlines()[-1], r"^結果: 合格 / \d+\.\d 秒$")
+                default = self.run_ok(RUN_ALL_IMAGE=image)
+                self.assertNotIn("使い回", default)
+                self.assertFalse(self.results.exists())
+
+    # ---- 1 文字の変更ごとに流れる単位 ----
+
+    def test_change_in_a_test_file_runs_only_unittest(self):
+        self.run_ok("--reuse")
+        self.append("scripts/test_b.py", "#")
+        self.rerun(UNITTEST_LABELS, "入力のファイルが違う 4 個")
+
+    def test_change_in_docs_runs_only_unittest(self):
+        self.run_ok("--reuse")
+        self.append("docs/x.md", "!")
+        self.rerun(UNITTEST_LABELS, "入力のファイルが違う 4 個")
+
+    def test_change_under_plugins_runs_everything(self):
+        self.run_ok("--reuse")
+        self.append(NOTES, "!")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_adding_or_changing_the_dockerfile_runs_everything(self):
+        self.run_ok("--reuse")
+        self.write("scripts/container/Dockerfile", "FROM ubuntu:22.04\n")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+        self.append("scripts/container/Dockerfile", "#")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_permission_only_changes_run_the_units_that_hold_the_file(self):
+        self.run_ok("--reuse")
+        path = self.root / "docs" / "x.md"
+        path.chmod(path.stat().st_mode | stat.S_IXUSR)
+        self.rerun(UNITTEST_LABELS, "入力のファイルが違う 4 個")
+        (self.root / "docs").chmod(0o700)
+        self.rerun(UNITTEST_LABELS, "入力のファイルが違う 4 個")
+        (self.root / NOTES).chmod(0o444)
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_git_folders_are_not_in_the_inventory(self):
+        # 容器の入口は、流すたびに git init と commit をする(.git の中身は毎回変わる)。
+        self.write(".git/HEAD", "ref: refs/heads/main\n")
+        self.write("plugins/dev-workflow/.git", "gitdir: ../../.git/modules/x\n")
+        self.run_ok("--reuse")
+        self.append(".git/HEAD", "!")
+        self.append("plugins/dev-workflow/.git", "!")
+        self.write(".git/objects/aa/bb", "物\n")
+        self.rerun(set())
+
+    def test_empty_directory_under_plugins_runs_everything(self):
+        self.run_ok("--reuse")
+        (self.root / "plugins/dev-workflow/skills/empty-probe").mkdir(parents=True)
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_modules_that_can_shadow_the_standard_library_run_everything(self):
+        self.run_ok("--reuse")
+        self.write("json.py", "FAIL = 0\n")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+        self.write("scripts/json.py", SHADOW_JSON)
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+        self.write("json/__init__.py", "")
+        self.write("json/decoder.py", "VALUE = 1\n")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+        self.append("json/decoder.py", "#")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_shadow_module_in_the_working_folder_changes_the_loop_result(self):
+        self.write_loop(LOOP_SECTIONS + LOOP_SHADOW)
+        self.write("json.py", "FAIL = 0\n")
+        self.labels = ALL_LABELS | {"loop-selftest shadow"}
+        self.run_ok("--reuse")
+        self.rerun(set())
+        self.write("json.py", "FAIL = 1\n")
+        out = self.rerun(self.labels, "入力のファイルが違う 18 個", 1)
+        self.assertRegex(out, r"(?m)^FAIL +\d+\.\d 秒  loop-selftest shadow  PASS \d+ 件 / FAIL 1 件$")
+
+    def test_ignored_file_runs_only_unittest(self):
+        self.write(".gitignore", ".claude/reviews/\n")
+        self.write(".claude/reviews/x.md", "控え\n")
+        self.run_ok("--reuse")
+        self.append(".claude/reviews/x.md", "!")
+        self.rerun(UNITTEST_LABELS, "入力のファイルが違う 4 個")
+
+    def test_ignored_untracked_test_file_is_in_the_scope(self):
+        self.write(".gitignore", "scripts/test_ignored.py\n")
+        self.write_test("test_ignored.py", OTHER)
+        self.labels = ALL_LABELS | {"unittest test_ignored.py"}
+        self.run_ok("--reuse")
+        self.rerun(set())
+        self.write_test("test_ignored.py", FAILING)
+        out = self.rerun(UNITTEST_LABELS | {"unittest test_ignored.py"}, "入力のファイルが違う 5 個", 1)
+        self.assertIn("異常: test_ignored.py: 失敗(終了コード 1)", out)
+
+    def test_link_inside_the_same_part_follows_the_target(self):
+        os.symlink("notes.md", self.root / "plugins/dev-workflow/link.md")
+        self.run_ok("--reuse")
+        self.rerun(set())
+        self.append(NOTES, "!")
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    def test_links_out_of_the_part_make_the_scope_undetermined(self):
+        self.run_ok("--reuse")
+        outside = self.base / "outside.txt"
+        outside.write_text("外\n", encoding="utf-8")
+        cases = (("to-docs.md", "../../docs/x.md", "範囲が決まらない 13 個・入力のファイルが違う 4 個"),
+                 ("to-outside.md", str(outside), "範囲が決まらない 17 個"),
+                 ("to-folder", "../../docs", "範囲が決まらない 17 個"))
+        for name, target, reasons in cases:
+            with self.subTest(name=name):
+                link = self.root / "plugins/dev-workflow" / name
+                os.symlink(target, link)
+                try:
+                    self.assertEqual(f"新しく流す理由: {reasons}", self.plan_reasons())
+                finally:
+                    link.unlink()
+        self.assertIsNone(self.plan_reasons())
+
+    def test_top_level_link_to_a_package_outside_the_repository_makes_the_scope_undetermined(self):
+        self.run_ok("--reuse")
+        package = self.base / "outside-package" / "json"
+        package.mkdir(parents=True)
+        (package / "__init__.py").write_text("FAIL = 1\n", encoding="utf-8")
+        # 作業場所の import json が、リポジトリの外のパッケージを読みうる。bash の単位も使い回さない。
+        os.symlink(package, self.root / "json")
+        self.rerun(ALL_LABELS, "範囲が決まらない 17 個")
+
+    def test_pycache_before_the_run_stops_reuse_but_one_written_during_the_run_is_ignored(self):
+        (self.marks / "write-pycache").touch()
+        self.run_ok("--reuse")
+        self.assertTrue((self.root / "plugins/dev-workflow/__pycache__").is_dir())
+        self.assertEqual(17, len(self.record()["units"]))
+        before = self.started()
+        out = self.run_ok("--reuse")
+        self.assertEqual(17, self.started() - before)
+        self.assertIn("注意: 使い回せない(流す前に __pycache__ がある(plugins/dev-workflow/__pycache__))。"
+                      "全部の単位を新しく流す", out)
+        self.assertNotIn("使い回し:", out)
+
+    # ---- 鍵のほかの要素 ----
+
+    def test_environment_variables_are_in_the_key_except_the_skipped_names(self):
+        self.run_ok("--reuse")
+        self.rerun(ALL_LABELS, "環境変数が違う 17 個", 0, REUSE_PROBE="1")
+        self.rerun(set(), None, 0, PWD="/elsewhere", HOSTNAME="other-container")
+
+    def test_tool_versions_are_in_the_key(self):
+        bindir = self.base / "bin"
+        bindir.mkdir()
+        real = shutil.which("git")
+
+        def fake_git(version):
+            script = bindir / "git"
+            script.write_text(f'#!/bin/sh\nif [ "$1" = "--version" ]; then echo "git version {version}"; exit 0; fi\n'
+                              f'exec "{real}" "$@"\n', encoding="utf-8")
+            script.chmod(0o755)
+
+        path = f"{bindir}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
+        fake_git("2.56.0")
+        self.run_ok("--reuse", PATH=path, umask=0o022)
+        fake_git("2.56.1")
+        self.rerun(ALL_LABELS, "道具の版が違う 17 個", 0, PATH=path, umask=0o022)
+        self.rerun(ALL_LABELS, "道具の版が違う 17 個", 0, PATH=path, umask=0o022, RUN_ALL_IMAGE=OTHER_IMAGE)
+        self.rerun(ALL_LABELS, "道具の版が違う 17 個", 0, PATH=path, umask=0o077)
+        self.rerun(set(), None, 0, PATH=path, umask=0o022)
+
+    # ---- 失敗を使い回さない ----
+
+    def test_failure_is_never_reused(self):
+        self.write_test("test_fail.py", FAILING)
+        self.labels = ALL_LABELS | {"unittest test_fail.py"}
+        result = self.run_all("--reuse")
+        self.assertEqual(1, result.returncode, result.stdout)
+        self.assertIn("異常: test_fail.py: 失敗(終了コード 1)", result.stdout)
+        self.rerun({"unittest test_fail.py"}, "前の回が失敗 1 個", 1)
+
+    def test_later_failure_with_the_same_input_hides_the_earlier_pass(self):
+        self.run_ok("--reuse")
+        (self.marks / "fail-once").touch()
+        failed = self.run_all()
+        self.assertEqual(1, failed.returncode, failed.stdout)
+        self.assertIn("異常: diff-snapshot-selftest.sh: 失敗(終了コード 1)", failed.stdout)
+        self.rerun({"diff-snapshot-selftest.sh"}, "前の回が失敗 1 個")
+
+    def test_units_whose_input_changed_during_the_run_are_not_recorded(self):
+        self.run_ok()
+        self.append(NOTES, "!")
+        changed = (self.root / NOTES).read_text(encoding="utf-8")
+        # 流している間に、モックの selftest が plugins/ の下のファイルを書き換える。流し終えた後に元の中身へ戻す。
+        (self.marks / "touch-plugins").touch()
+        self.run_ok()
+        self.assertNotEqual(changed, (self.root / NOTES).read_text(encoding="utf-8"))
+        self.write(NOTES, changed)
+        self.assertEqual({1}, {len(items) for items in self.record()["units"].values()})
+        # 流す前の中身で記録していれば、ここで使い回してしまう。
+        self.rerun(ALL_LABELS, "入力のファイルが違う 17 個")
+
+    # ---- 使い回した結果を含めた集計 ----
+
+    def test_reused_and_fresh_shards_are_counted_together(self):
+        first = self.run_ok("--reuse")
+        data = self.record()
+        del data["units"]["unittest:test_host_check.py[1/2]"]
+        self.results.write_text(json.dumps(data), encoding="utf-8")
+        out = self.rerun({"unittest test_host_check.py [1/2]"}, "記録が無い 1 個")
+        self.assertNotIn("異常:", out)
+        self.assertEqual(self.result_lines(first), self.result_lines(out))
+
+    def test_reused_records_still_go_through_the_count_checks(self):
+        module = load_run_units()
+
+        def shard_total(record):
+            record["extra"]["total"] = 4
+
+        def outside_name(record):
+            output = module.unpack_output(record["output"]).replace("PASS  準備: 前", "PASS  準備: 別")
+            record["output"] = module.pack_output(output)
+
+        def zero_checks(record):
+            record["extra"] = [0, 0]
+
+        cases = (("unittest:test_host_check.py[2/2]", shard_total, "異常: test_host_check.py: 分けたプロセスの件数が合わない"),
+                 ("loop:alpha", outside_name, "異常: alpha: 節の外の確かめの結果が、節の外だけのプロセスと違う(差し引けない)"),
+                 ("implement-guard:A", zero_checks,
+                  "異常: implement-guard-selftest.sh --only A: 確かめが 1 件も流れていない(単位の名前が合わなかった)"))
+        self.run_ok("--reuse")
+        saved = self.results.read_bytes()
+        for key, change, problem in cases:
+            with self.subTest(key=key):
+                self.results.write_bytes(saved)
+                self.edit_record(key, change)
+                out = self.rerun(set(), None, 1)
+                self.assertIn(problem, out)
+                self.assertRegex(out.strip().splitlines()[-1], r"^結果: 不合格")
+
+    def test_broken_record_warns_runs_everything_and_is_rewritten(self):
+        self.results.parent.mkdir(parents=True)
+        self.results.write_text("これは JSON ではない", encoding="utf-8")
+        out = self.rerun(ALL_LABELS, "記録が無い 17 個")
+        self.assertIn(f"注意: 使い回しの記録を読めない({self.results}: ", out)
+        self.assertIn("。全部の単位を新しく流す", out)
+        data = self.record()
+        self.assertEqual(1, data["version"])
+        self.assertEqual(17, len(data["units"]))
+
+    def test_plan_with_reuse_lists_only_fresh_units_and_starts_nothing(self):
+        self.run_ok("--reuse")
+        self.append("scripts/test_b.py", "#")
+        saved = self.results.read_bytes()
+        before = self.started()
+        result = self.run_all("--plan", "--reuse")
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        self.assertEqual("計画: 枠の単位 4 個を、同時に 8 個まで流す(ほかに枠の外 0 個)", lines[0])
+        self.assertIn("使い回し: 入力が前の合格と同じ 13 個の単位は流さない(新しく流すのは 4 個)", lines)
+        self.assertIn("新しく流す理由: 入力のファイルが違う 4 個", lines)
+        self.assertEqual(set(BASH_LABELS), {line[len("使い回し  "):] for line in lines if line.startswith("使い回し  ")})
+        planned = [re.match(r"^\s*\d+  +[\d.]+ 秒  (?:記録|表|既定)  (.*)$", line) for line in lines]
+        self.assertEqual(set(UNITTEST_LABELS), {match.group(1) for match in planned if match})
+        self.assertFalse([line for line in lines if line.startswith("枠の外  ")])
+        self.assertEqual(before, self.started())
+        self.assertEqual(saved, self.results.read_bytes())
+
+    def test_interrupted_run_writes_no_record(self):
+        self.write_loop(LOOP_SECTIONS + LOOP_SLOW)
+        runner = subprocess.Popen([sys.executable, "-B", str(self.scripts / "run-all.py"), "-j", "8", "--reuse"],
+                                  cwd=self.root, env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                  text=True)
+        try:
+            deadline = time.monotonic() + 90
+            while time.monotonic() < deadline and not (self.marks / "slow.pids").exists():
+                time.sleep(0.05)
+            self.assertTrue((self.marks / "slow.pids").exists(), "slow.pids が出ない")
+            pids = [int(pid) for pid in (self.marks / "slow.pids").read_text(encoding="utf-8").split()]
+            self.addCleanup(RunAllTest.kill_leftovers, pids)
+            runner.send_signal(signal.SIGTERM)
+            output, _ = runner.communicate(timeout=90)
+        finally:
+            if runner.poll() is None:
+                runner.kill()
+                runner.communicate()
+        self.assertEqual(143, runner.returncode, output)
+        self.assertNotIn("結果:", output)
+        self.assertFalse(self.results.exists())
+
+
+def record_of(module, digest, ok=True, at=None, **extra):
+    """関数のテストに使う 1 つの記録。digest は input(と tools・env・files)に入れる 1 文字。"""
+    item = {"input": digest * 64, "tools": "a" * 64, "env": "b" * 64, "files": "c" * 64, "ok": ok, "seconds": 1.5,
+            "at": at or module.utc_now(), "code": 0 if ok else 1, "extra": [1, 0] if ok else [0, 1],
+            "output": module.pack_output("PASS  x\n") if ok else ""}
+    item.update(extra)
+    return item
+
+
+def iso(seconds_from_now):
+    """今から seconds_from_now 秒ずらした時刻(UTC の ISO 8601)。"""
+    moment = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=seconds_from_now)
+    return moment.isoformat(timespec="microseconds")
+
+
+# 錠を持ったまま待つプロセス(順序を決めた 2 つのプロセスの確かめの、先に錠を取る側)。
+HOLDER = r"""
+import fcntl, json, os, sys, time
+path, lock, ready, go, record = sys.argv[1:6]
+descriptor = os.open(lock, os.O_RDONLY | os.O_CREAT, 0o666)
+fcntl.flock(descriptor, fcntl.LOCK_EX)
+with open(path, "w", encoding="utf-8") as stream:
+    json.dump({"version": 1, "units": {"k": [json.loads(record)]}}, stream)
+open(ready, "w").close()
+deadline = time.monotonic() + 60
+while not os.path.exists(go) and time.monotonic() < deadline:
+    time.sleep(0.02)
+os.close(descriptor)
+"""
+
+# save_reuse を 1 回呼ぶプロセス(後から書く側)。
+WRITER = r"""
+import importlib.util, json, sys
+sys.dont_write_bytecode = True
+spec = importlib.util.spec_from_file_location("run_units_writer", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+module.save_reuse(sys.argv[2], [("k", json.loads(sys.argv[3]))], False)
+"""
+
+
+class RunUnitsReuseTest(unittest.TestCase):
+    """使い回しの記録の読み書き(run_units.py の load_reuse・save_reuse を直接呼ぶ)。"""
+
+    def setUp(self):
+        self.module = load_run_units()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.folder = Path(temporary.name)
+        self.path = self.folder / "sub" / "results.json"
+
+    def save(self, entries, failed=False):
+        stream = io.StringIO()
+        with contextlib.redirect_stdout(stream):
+            written = self.module.save_reuse(self.path, entries, failed)
+        return written, stream.getvalue()
+
+    def load(self):
+        notes = []
+        return self.module.load_reuse(self.path, notes), notes
+
+    def test_keeps_eight_per_key_newest_first_and_drops_malformed_records(self):
+        entries = [("k", record_of(self.module, digit, at=iso(-100 + index)))
+                   for index, digit in enumerate("0123456789")]
+        self.assertTrue(self.save(entries)[0])
+        records, notes = self.load()
+        self.assertEqual([], notes)
+        self.assertEqual([digit * 64 for digit in "98765432"], [item["input"] for item in records["k"]])
+        data = json.loads(self.path.read_text(encoding="utf-8"))
+        data["units"]["k"].append({"input": "x"})
+        data["units"]["k"].append(dict(data["units"]["k"][0], code=True))
+        self.path.write_text(json.dumps(data), encoding="utf-8")
+        records, notes = self.load()
+        self.assertEqual([], notes)
+        self.assertEqual(8, len(records["k"]))
+        for text in ("[]", json.dumps({"version": 2, "units": {}}), json.dumps({"version": 1, "units": {"k": {}}})):
+            with self.subTest(text=text):
+                self.path.write_text(text, encoding="utf-8")
+                records, notes = self.load()
+                self.assertEqual({}, records)
+                self.assertEqual(1, len(notes), notes)
+                self.assertIn("注意: 使い回しの記録を読めない(", notes[0])
+
+    def test_newest_finish_time_wins_for_the_same_input(self):
+        # 回 A が古い合格を読んだ後に、回 B が同じ input の新しい失敗を書き、その後に A が古い合格を書く。
+        old_pass = record_of(self.module, "1", ok=True, at=iso(-20))
+        new_fail = record_of(self.module, "1", ok=False, at=iso(-10))
+        self.assertEqual(({}, []), self.load())
+        self.assertTrue(self.save([("k", new_fail)], failed=True)[0])
+        self.assertTrue(self.save([("k", old_pass)])[0])
+        records, _ = self.load()
+        self.assertEqual([False], [item["ok"] for item in records["k"]])
+
+    def test_writer_waits_for_the_lock_and_reads_again_before_writing(self):
+        self.path.parent.mkdir(parents=True)
+        ready = self.folder / "ready"
+        go = self.folder / "go"
+        first = record_of(self.module, "1", at=iso(-10))
+        second = record_of(self.module, "2", at=iso(-5))
+        holder = subprocess.Popen([sys.executable, "-B", "-c", HOLDER, str(self.path),
+                                   str(self.module.reuse_lock_path(self.path)), str(ready), str(go), json.dumps(first)])
+        self.addCleanup(holder.kill)
+        deadline = time.monotonic() + 30
+        while not ready.exists() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        self.assertTrue(ready.exists())
+        writer = subprocess.Popen([sys.executable, "-B", "-c", WRITER, str(SCRIPTS / "run_units.py"), str(self.path),
+                                   json.dumps(second)])
+        self.addCleanup(writer.kill)
+        time.sleep(0.5)
+        self.assertIsNone(writer.poll(), "錠を持つ間に書いた")
+        go.touch()
+        self.assertEqual(0, writer.wait(timeout=30))
+        self.assertEqual(0, holder.wait(timeout=30))
+        records, _ = self.load()
+        self.assertEqual({"1" * 64, "2" * 64}, {item["input"] for item in records["k"]})
+
+    def test_unopenable_lock_is_a_note_for_both_reading_and_writing(self):
+        self.assertTrue(self.save([("k", record_of(self.module, "1"))])[0])
+        saved = self.path.read_bytes()
+        lock = self.module.reuse_lock_path(self.path)
+        lock.unlink()
+        os.symlink(lock.name, lock)
+        written, out = self.save([("k", record_of(self.module, "2"))])
+        self.assertFalse(written)
+        self.assertIn(f"注意: 使い回しの記録を書けない({self.path}: ", out)
+        self.assertIn("。今回の結果は記録しない", out)
+        self.assertEqual(saved, self.path.read_bytes())
+        records, notes = self.load()
+        self.assertEqual({}, records)
+        self.assertEqual(1, len(notes), notes)
+        self.assertIn(f"注意: 使い回しの記録を読めない({self.path}: ", notes[0])
+
+    def test_void_mark_hides_records_that_finished_before_it(self):
+        # 回 A の単位が合格して終わった後に、回 B の同じ input の単位が落ち、B は記録を書けずに印を作る。
+        a_pass = record_of(self.module, "1", at=iso(-30))
+        self.path.mkdir(parents=True)
+        written, out = self.save([("k", record_of(self.module, "1", ok=False, at=iso(-20)))], failed=True)
+        self.assertFalse(written)
+        self.assertIn("注意: 使い回しの記録を書けない(", out)
+        self.assertTrue(self.module.reuse_void_path(self.path).exists())
+        self.path.rmdir()
+        # その後に A が古い合格を書いても、次の読み込みは返さない。
+        self.assertTrue(self.save([("k", a_pass)])[0])
+        self.assertEqual(({}, []), self.load())
+        # 印より後に終わった記録は返す。
+        later = record_of(self.module, "2", at=iso(30))
+        self.assertTrue(self.save([("k", later)])[0])
+        records, _ = self.load()
+        self.assertEqual(["2" * 64], [item["input"] for item in records["k"]])
+
+    @unittest.skipIf(os.geteuid() == 0, "root は権限の無いフォルダも調べられる")
+    def test_folder_that_cannot_be_searched_is_a_note_for_reading(self):
+        self.assertTrue(self.save([("k", record_of(self.module, "1"))])[0])
+        # 記録のフォルダ(sub)の親を調べる権限を外す。
+        mode = self.folder.stat().st_mode
+        self.folder.chmod(0)
+        self.addCleanup(self.folder.chmod, mode)
+        records, notes = self.load()
+        self.assertEqual({}, records)
+        self.assertEqual(1, len(notes), notes)
+        self.assertIn(f"注意: 使い回しの記録を読めない({self.path}: ", notes[0])
+        self.assertIn("。全部の単位を新しく流す", notes[0])
+
+    def test_void_mark_that_cannot_be_made_is_a_note(self):
+        self.path.mkdir(parents=True)
+        self.module.reuse_void_path(self.path).mkdir()
+        written, out = self.save([("k", record_of(self.module, "1", ok=False))], failed=True)
+        self.assertFalse(written)
+        self.assertIn(f"注意: 使い回しの記録を無効にできない({self.path}: ", out)
+        self.assertIn("。次の --reuse の回の前に、記録のファイルを消す", out)
+
+
+def load_run_all():
+    sys.dont_write_bytecode = True
+    spec = importlib.util.spec_from_file_location("run_all_under_test", SCRIPTS / "run-all.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+class RunAllScopeTest(unittest.TestCase):
+    """単位の範囲(run-all.py の unit_files を直接呼ぶ)。"""
+
+    def test_units_without_a_rule_or_with_entry_outside_the_scope_have_no_scope(self):
+        module = load_run_all()
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        tree = Path(temporary.name)
+        for relative in ("plugins/x.sh", "docs/x.md", "scripts/run-all.py"):
+            (tree / relative).parent.mkdir(parents=True, exist_ok=True)
+            (tree / relative).write_text("x\n", encoding="utf-8")
+        context, reason = module.file_context(tree)
+        self.assertIsNone(reason)
+
+        def files(key, entry):
+            unit = module.run_units.Unit(key=key, label=key, run=None, describe=None, entry=entry)
+            return module.unit_files(unit, context)
+
+        self.assertIsNone(files("other:x", "plugins/x.sh"))
+        self.assertIsNone(files("loop:a", "docs/x.md"))
+        self.assertIsNone(files("loop:a", "plugins/missing.sh"))
+        self.assertIsNone(files("loop:a", None))
+        self.assertEqual(["runner", "top", "plugins"], [part for part, _ in files("loop:a", "plugins/x.sh")])
+        self.assertEqual(["all"], [part for part, _ in files("unittest:test_x.py", "docs/x.md")])
+        self.assertEqual((None, "範囲が決まらない"), module.reuse_of(None, None, []))
+
+
+# ---- 容器の入口(docker のモック) ----
+
+FIRST_ID = "sha256:" + "a" * 64
+SECOND_ID = "sha256:" + "b" * 64
+
+# docker のモック: 引数を 1 行の JSON で記録する。`image inspect --format` には、最初は FIRST_ID、2 回目からは
+# SECOND_ID を返す(名前が別のイメージを指すようになった形)。DOCKER_MOCK_ID=fail なら失敗する。
+# `run` は標準入力を読み捨てて 0 で終わる。
+DOCKER_MOCK = r"""
+import json, os, sys
+args = sys.argv[1:]
+log = os.environ["DOCKER_MOCK_LOG"]
+calls = []
+if os.path.exists(log):
+    with open(log, encoding="utf-8") as stream:
+        calls = [json.loads(line) for line in stream]
+with open(log, "a", encoding="utf-8") as stream:
+    stream.write(json.dumps(args, ensure_ascii=False) + "\n")
+if args[:2] == ["image", "inspect"]:
+    if "--format" in args:
+        if os.environ.get("DOCKER_MOCK_ID") == "fail":
+            sys.exit(1)
+        seen = [call for call in calls if call[:2] == ["image", "inspect"] and "--format" in call]
+        print("%s" if not seen else "%s")
+    sys.exit(0)
+if args[:1] == ["run"]:
+    sys.stdin.buffer.read()
+sys.exit(0)
+""" % (FIRST_ID, SECOND_ID)
+
+
+class RunAllContainerTest(unittest.TestCase):
+    """容器の入口が、イメージの ID で起動し、RUN_ALL_IMAGE を渡すこと(本物の docker は起動しない)。"""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.repo = self.base / "repo"
+        (self.repo / "scripts" / "container").mkdir(parents=True)
+        shutil.copy2(SCRIPTS / "run-all-container.sh", self.repo / "scripts" / "run-all-container.sh")
+        (self.repo / "scripts" / "container" / "Dockerfile").write_text("FROM scratch\n", encoding="utf-8")
+        (self.repo / "requirements-dev.txt").write_text("PyYAML\n", encoding="utf-8")
+        identity = ("-c", "user.name=test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false")
+        support_git.git("init", "-q", cwd=self.repo)
+        support_git.git("add", "-A", cwd=self.repo)
+        support_git.git("commit", "-qm", "init", cwd=self.repo, options=identity)
+        bindir = self.base / "bin"
+        bindir.mkdir()
+        docker = bindir / "docker"
+        docker.write_text(f"#!{sys.executable} -B\n" + DOCKER_MOCK, encoding="utf-8")
+        docker.chmod(0o755)
+        self.log = self.base / "docker.log"
+        self.path = f"{bindir}{os.pathsep}{os.environ.get('PATH', os.defpath)}"
+
+    def run_entry(self, *args, **extra):
+        env = dict(os.environ, PATH=self.path, HOME=str(self.base / "home"), XDG_CACHE_HOME=str(self.base / "cache"),
+                   DOCKER_MOCK_LOG=str(self.log))
+        for name in ("LOOP_SELFTEST_TIMEOUT", "RUN_TIMEOUT", "LOOP_STARTUP_CASE_TIMEOUT", "RUN_ALL_IMAGE",
+                     "DOCKER_MOCK_ID", "DOCKER_CONTEXT", "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"):
+            env.pop(name, None)
+        env.update(extra)
+        result = subprocess.run(["bash", str(self.repo / "scripts" / "run-all-container.sh"), *args], cwd=self.repo,
+                                capture_output=True, text=True, env=env, timeout=120)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        calls = [json.loads(line) for line in self.log.read_text(encoding="utf-8").splitlines()]
+        runs = [call for call in calls if call[:1] == ["run"]]
+        self.assertEqual(1, len(runs), calls)
+        run = runs[0]
+        at = next(index for index in range(len(run) - 1) if run[index:index + 2] == ["bash", "-c"])
+        passed = [run[index + 1] for index in range(at - 1) if run[index] == "-e"]
+        name = next(line for line in result.stdout.splitlines() if line.startswith("イメージ: "))[len("イメージ: "):]
+        return result.stdout, run[at - 1], passed, name, run
+
+    def test_runs_by_the_image_id_and_passes_it_to_the_runner(self):
+        out, target, passed, name, _ = self.run_entry()
+        self.assertRegex(name, r"^workflow-test:run-all-[0-9a-f]{12}$")
+        self.assertEqual(FIRST_ID, target)
+        self.assertIn(f"RUN_ALL_IMAGE={name}@{FIRST_ID}", passed)
+        self.assertIn(f"イメージの ID: {FIRST_ID}", out.splitlines())
+        self.assertNotIn("注意:", out)
+
+    def test_keeps_the_first_id_even_if_the_name_moves_after_inspect(self):
+        out, target, passed, name, run = self.run_entry("--worktree")
+        self.assertEqual(FIRST_ID, target)
+        self.assertNotIn(name, run)
+        self.assertFalse([arg for arg in run if SECOND_ID in arg], run)
+        self.assertIn(f"RUN_ALL_IMAGE={name}@{FIRST_ID}", passed)
+
+    def test_unreadable_id_runs_by_name_and_passes_unknown(self):
+        out, target, passed, name, _ = self.run_entry(DOCKER_MOCK_ID="fail")
+        self.assertEqual(name, target)
+        self.assertIn("RUN_ALL_IMAGE=不明", passed)
+        self.assertIn("注意: イメージの ID を読めない。容器の中では結果を使い回さない", out.splitlines())
+        self.assertNotIn("イメージの ID: ", out)
+
+    def test_given_image_passes_unknown_even_if_the_id_is_readable(self):
+        out, target, passed, name, _ = self.run_entry("--image", "other/image:tag")
+        self.assertEqual("other/image:tag", name)
+        self.assertEqual(FIRST_ID, target)
+        self.assertIn("RUN_ALL_IMAGE=不明", passed)
+        self.assertIn("注意: --image を渡したので、容器の中では結果を使い回さない", out.splitlines())
+        self.assertNotIn("イメージの ID: ", out)
+
+    def test_passed_variables_line_counts_only_the_three_host_variables(self):
+        out, _, passed, name, _ = self.run_entry()
+        self.assertIn("渡す環境変数: なし", out.splitlines())
+        self.log.unlink()
+        out, _, passed, name, _ = self.run_entry(RUN_TIMEOUT="5", RUN_ALL_IMAGE="host-value")
+        self.assertIn("渡す環境変数: RUN_TIMEOUT", out.splitlines())
+        self.assertEqual(sorted([f"RUN_ALL_IMAGE={name}@{FIRST_ID}", "RUN_TIMEOUT"]), sorted(passed))
 
 
 if __name__ == "__main__":

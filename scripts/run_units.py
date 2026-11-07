@@ -4,21 +4,27 @@
 - 単位(Unit): 1 つの子のプロセスで流す仕事。枠の内(同時に流す数を数える)と枠の外(数えず、最初に始める)がある。
 - run_units: 枠の外を先に始め、枠の単位を重い順に流す。終わるたびに 1 行を出す。止めたときの決まりもここに持つ。
 - 重みの決め方(weight_of)と、重みの記録の読み書き(run-all.py だけが使う)。
+- 結果の使い回しの記録の読み書き(load_reuse・save_reuse。run-all.py だけが使う)。
 - 失敗した単位の出力をまとめて出す関数(print_failures)。
 
 このファイルを読み込む側は、読み込む前に sys.dont_write_bytecode = True にする(scripts/ の下に __pycache__ を作らない)。
 """
 
+import base64
 import concurrent.futures
 import contextlib
+import datetime
+import fcntl
 import json
 import math
 import os
+import re
 import signal
 import subprocess
 import tempfile
 import threading
 import time
+import zlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -140,6 +146,10 @@ class Unit:
     - run(children): 単位を流して結果を返す。結果の形は、単位を作った側が決める。
     - describe(result): 結果から、進み具合の行の後半(件数)と成否 (text, ok) を作る。
     - output_of(result): 結果から、ログに残す出力を取り出す(log_name があるときだけ使う)。
+    - ident: 結果の組 (先頭の値, 終了コード, 出力, 秒, 件数) の先頭の値。run-all.py が、使い回した結果を
+      組み立て直すのに使う(unittest はジョブ、loop は節の名前〈節の外だけは None〉、4 本の selftest は鍵)。
+    - entry: 単位が起動するファイルの、リポジトリ直下からの相対パス(None なら分からない)。run-all.py が、
+      使い回しの範囲の中にあるかを確かめる。
     """
 
     key: str
@@ -152,6 +162,8 @@ class Unit:
     table_weight: Optional[float] = None
     log_name: Optional[str] = None
     output_of: Optional[Callable[[Any], str]] = None
+    ident: Any = None
+    entry: Optional[str] = None
 
 
 def effective_weight(unit):
@@ -324,3 +336,224 @@ def save_weights(path, record, times):
         if temporary is not None:
             with contextlib.suppress(OSError):
                 os.unlink(temporary)
+
+
+# ---- 結果の使い回しの記録 ----
+
+REUSE_VERSION = 1
+# 1 つの単位の鍵あたりに残す記録の数(終わった時刻の新しい順)。
+REUSE_KEEP = 8
+# 記録の 4 つのハッシュ値(どれも sha256 の 64 桁の 16 進)。
+REUSE_DIGESTS = ("input", "tools", "env", "files")
+HEX64 = re.compile(r"[0-9a-f]{64}")
+EPOCH = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+# 無効の印と比べるときの余裕(マイクロ秒)。ファイルの更新時刻は、時計より数ミリ秒前に丸められることがある。
+# 印の直前に終わった記録を確実に捨てるため、印の更新時刻の 1 秒後までに終わった記録も捨てる(捨てる側に寄せる)。
+VOID_MARGIN = 1_000_000
+
+
+def reuse_lock_path(path):
+    """使い回しの記録の錠のファイル(同じフォルダの <名前>.lock)。"""
+    path = Path(path)
+    return path.with_name(path.name + ".lock")
+
+
+def reuse_void_path(path):
+    """使い回しの記録の無効の印(同じフォルダの <名前>.void。中身は空で、更新時刻だけを使う)。"""
+    path = Path(path)
+    return path.with_name(path.name + ".void")
+
+
+def utc_now():
+    """今の時刻(UTC の ISO 8601。マイクロ秒まで)。記録の at(単位が終わった時刻)に使う。"""
+    return datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="microseconds")
+
+
+def micros_of(at):
+    """ISO 8601 の時刻を、1970 年からのマイクロ秒(整数)にする。時差の無い形は ValueError。"""
+    moment = datetime.datetime.fromisoformat(at)
+    if moment.tzinfo is None:
+        raise ValueError(f"時差の無い時刻: {at}")
+    return (moment - EPOCH) // datetime.timedelta(microseconds=1)
+
+
+def pack_output(text):
+    """単位の出力を、zlib で縮めて base64 にした文字列にする(記録の output)。"""
+    return base64.b64encode(zlib.compress(text.encode("utf-8", "replace"), 6)).decode("ascii")
+
+
+def unpack_output(data):
+    """pack_output の逆。壊れていれば ValueError。"""
+    try:
+        return zlib.decompress(base64.b64decode(data.encode("ascii"), validate=True)).decode("utf-8")
+    except zlib.error as exc:
+        raise ValueError(f"出力を戻せない({exc})") from exc
+
+
+def _valid_reuse_record(item):
+    """1 つの記録の形が正しいか。"""
+    if not isinstance(item, dict):
+        return False
+    if not all(isinstance(item.get(name), str) and HEX64.fullmatch(item[name]) for name in REUSE_DIGESTS):
+        return False
+    code = item.get("code")
+    if not isinstance(item.get("ok"), bool) or not _valid_seconds(item.get("seconds")) \
+            or not isinstance(code, int) or isinstance(code, bool):
+        return False
+    extra = item.get("extra")
+    if extra is not None and not isinstance(extra, (list, dict)):
+        return False
+    if not isinstance(item.get("output"), str) or not isinstance(item.get("at"), str):
+        return False
+    try:
+        micros_of(item["at"])
+    except (ValueError, TypeError, OverflowError):
+        return False
+    return True
+
+
+def _parse_reuse(data):
+    """記録のファイルの中身(バイト列)を、単位の鍵 → 記録の一覧にする。形の違う記録は 1 つずつ捨てる。
+
+    全体の形(version・units)が違えば ValueError。
+    """
+    parsed = json.loads(data.decode("utf-8"))
+    if not isinstance(parsed, dict) or parsed.get("version") != REUSE_VERSION:
+        raise ValueError("version が合わない")
+    units = parsed.get("units")
+    if not isinstance(units, dict) or not all(isinstance(key, str) and isinstance(items, list)
+                                              for key, items in units.items()):
+        raise ValueError("units の形が違う")
+    return {key: [item for item in items if _valid_reuse_record(item)] for key, items in units.items()}
+
+
+def _void_micros(path):
+    """無効の印の更新時刻(マイクロ秒)。印が無ければ None。調べられなければ OSError。"""
+    try:
+        return os.stat(reuse_void_path(path)).st_mtime_ns // 1000
+    except FileNotFoundError:
+        return None
+
+
+def _tidy(units, void):
+    """記録を減らす: 無効の印より前に終わった記録を捨て、同じ input は at のいちばん新しい 1 つだけを残し、
+    1 つの単位の鍵あたり at の新しい順に REUSE_KEEP 個までにする。同じ at なら失敗を残す。"""
+    tidy = {}
+    for key, items in units.items():
+        newest = {}
+        for item in items:
+            at = micros_of(item["at"])
+            if void is not None and at <= void + VOID_MARGIN:
+                continue
+            kept = newest.get(item["input"])
+            if kept is None or at > kept[0] or (at == kept[0] and not item["ok"]):
+                newest[item["input"]] = (at, item)
+        ordered = [item for _, item in sorted(newest.values(), key=lambda pair: -pair[0])][:REUSE_KEEP]
+        if ordered:
+            tidy[key] = ordered
+    return tidy
+
+
+@contextlib.contextmanager
+def _locked(path, mode):
+    """記録の錠(<名前>.lock)を fcntl.flock で取る。取れるまで待つ。持つのは with の中だけ。
+
+    錠は、持ったプロセスが終われば外れる。開けない・取れないときは OSError。
+    """
+    descriptor = os.open(reuse_lock_path(path), os.O_RDONLY | os.O_CREAT | os.O_CLOEXEC, 0o666)
+    try:
+        fcntl.flock(descriptor, mode)
+        yield
+    finally:
+        os.close(descriptor)
+
+
+def load_reuse(path, notes):
+    """使い回しの記録(単位の鍵 → 記録の一覧。at の新しい順)を読む。
+
+    - 共有の錠を取ってから読む。無効の印より前に終わった記録と、形の違う記録は捨てる。
+    - 記録のファイルが無ければ空(注意を出さない)。
+    - 錠を開けない・取れない・読めない・形が違うときは、注意の行を notes に足して空を返す。
+    """
+    path = Path(path)
+
+    def warn(reason):
+        notes.append(f"注意: 使い回しの記録を読めない({path}: {reason})。全部の単位を新しく流す")
+        return {}
+
+    try:
+        # 記録のファイルが無ければ、錠を開けずに空を返す(下の FileNotFoundError・NotADirectoryError)。
+        # 親のフォルダを調べる権限が無いときなどの OSError は、注意を出して空を返す。
+        os.lstat(path)
+        with _locked(path, fcntl.LOCK_SH):
+            data = path.read_bytes()
+            void = _void_micros(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return {}
+    except OSError as exc:
+        return warn(exc)
+    try:
+        return _tidy(_parse_reuse(data), void)
+    except (ValueError, TypeError, OverflowError, RecursionError) as exc:
+        return warn(exc)
+
+
+def _mark_void(path):
+    """無効の印を作るか、更新時刻を今にする。作れなければ OSError。"""
+    void = reuse_void_path(path)
+    descriptor = os.open(void, os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, 0o666)
+    os.close(descriptor)
+    os.utime(void)
+
+
+def save_reuse(path, entries, failed):
+    """今回の記録 entries((単位の鍵, 記録) の一覧)を、使い回しの記録に足す。書けたら True。
+
+    - 排他の錠を取ってから読み直し、今回の記録を足し、同じフォルダの一時ファイルに書いて os.replace で
+      置き換えてから、錠を外す。錠を持たずに、記録のファイルを書く・消す・置き換えることはしない
+      (同時に書いたほかの回の新しい失敗を消し、古い合格を戻しうるため)。
+    - 読み直した記録が壊れていれば、捨てて、今回の記録だけで書き直す。
+    - 減らし方は _tidy(同じ input は at のいちばん新しい 1 つ・鍵あたり REUSE_KEEP 個・無効の印より前は捨てる)。
+    - 書けないときは、注意を出して続ける(合否に効かせない)。failed(今回落ちた単位がある)が真なら、
+      無効の印を作るか、更新時刻を今にする(記録のファイルを書き換えないので、錠は要らない)。
+      今回より前に終わった記録は、だれが後から書いても使われなくなる。印も作れなければ、注意を出す。
+    """
+    path = Path(path)
+    temporary = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _locked(path, fcntl.LOCK_EX):
+            try:
+                data = path.read_bytes()
+            except FileNotFoundError:
+                data = None
+            void = _void_micros(path)
+            units = {}
+            if data is not None:
+                try:
+                    units = _parse_reuse(data)
+                except (ValueError, TypeError, OverflowError, RecursionError):
+                    units = {}
+            for key, record in entries:
+                units.setdefault(key, []).append(record)
+            units = _tidy(units, void)
+            descriptor, temporary = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=path.parent)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                json.dump({"version": REUSE_VERSION, "units": units}, stream, ensure_ascii=False, sort_keys=True)
+                stream.write("\n")
+            os.replace(temporary, path)
+            temporary = None
+        return True
+    except (OSError, ValueError) as exc:
+        print(f"注意: 使い回しの記録を書けない({path}: {exc})。今回の結果は記録しない", flush=True)
+    finally:
+        if temporary is not None:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary)
+    if failed:
+        try:
+            _mark_void(path)
+        except OSError as exc:
+            print(f"注意: 使い回しの記録を無効にできない({path}: {exc})。次の --reuse の回の前に、記録のファイルを消す",
+                  flush=True)
+    return False
