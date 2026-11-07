@@ -1,10 +1,11 @@
-"""起動入口を隔離した PATH と偽の実行ファイルで検査する。実際の配布物は使わない。"""
+"""起動入口をモックとリポジトリ内の実際の配布物で別々に検査する。"""
 
 import base64
 import hashlib
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import signal
 import stat
@@ -545,6 +546,86 @@ class NativeLaunchMockTest(unittest.TestCase):
                  for path in self.root.rglob("*") if path.is_file() and not path.is_symlink()
                  and path not in (self.log, self.native_log)}
         self.assertEqual(before, after)
+
+
+class NativeDistributionLaunchTests(unittest.TestCase):
+    """配布した 3 本を必須にし、実行中の OS と CPU の 1 本を入口から起動する。"""
+
+    def test_repository_distribution_runs_all_four_commands(self):
+        bundle = LAUNCH.parent
+        required = (*BINARIES, "launch.sh", "SHA256SUMS", "build-info.json")
+        missing = [name for name in required if not (bundle / name).is_file()]
+        self.assertEqual(missing, [], f"配布物が欠けています: {missing}")
+        for name in required:
+            path = bundle / name
+            self.assertFalse(path.is_symlink(), name)
+            self.assertFalse(path.parent.is_symlink(), name)
+            executable = name in (*BINARIES, "launch.sh")
+            self.assertEqual(bool(path.stat().st_mode & 0o111), executable, name)
+            if executable:
+                self.assertTrue(os.access(path, os.X_OK), name)
+
+        expected_os = {"Linux": "linux", "Darwin": "macos"}.get(platform.system())
+        expected_arch = {"x86_64": "x86_64", "aarch64": "aarch64", "arm64": "aarch64"}.get(platform.machine())
+        self.assertIsNotNone(expected_os, "検査対象でない OS です")
+        self.assertIsNotNone(expected_arch, "検査対象でない CPU です")
+        selected = ("macos-universal/dev-workflow" if expected_os == "macos" else
+                    "linux-x86_64/dev-workflow" if expected_arch == "x86_64" else
+                    "linux-arm64/dev-workflow")
+        hashes = {name: hashlib.sha256((bundle / name).read_bytes()).hexdigest() for name in BINARIES}
+        self.assertEqual((bundle / "SHA256SUMS").read_bytes(),
+                         "".join(f"{hashes[name]}  {name}\n" for name in BINARIES).encode())
+        metadata = json.loads((bundle / "build-info.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["schema_version"], 1)
+        self.assertCountEqual(metadata["artifacts"],
+                              [{"path": name, "sha256": hashes[name]} for name in BINARIES])
+
+        def snapshot(root):
+            return {path.relative_to(root).as_posix():
+                    (stat.S_IMODE(path.stat().st_mode),
+                     hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None)
+                    for path in root.rglob("*")}
+
+        before_bundle = snapshot(bundle)
+        with tempfile.TemporaryDirectory(prefix="native-distribution-launch-") as temporary:
+            cwd = Path(temporary)
+            (cwd / "unchanged").write_bytes(b"before\0\n")
+            before_cwd = snapshot(cwd)
+            env = dict(os.environ, DEV_WORKFLOW_ENGINE="rust")
+            outputs = {}
+            for args in (("--version",), ("--help",), ("probe", "--json"), ("probe", "--self-sha256")):
+                with self.subTest(args=args):
+                    result = subprocess.run(["sh", str(LAUNCH), *args], cwd=cwd, env=env,
+                                            stdin=subprocess.DEVNULL, capture_output=True, timeout=15)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, b"")
+                    self.assertEqual(snapshot(cwd), before_cwd)
+                    self.assertEqual(snapshot(bundle), before_bundle)
+                    outputs[args] = result.stdout
+            self.assertEqual(len(outputs), 4, "4 コマンドすべての成功が必要です")
+
+        raw = outputs[("probe", "--json")]
+        self.assertTrue(raw.endswith(b"\n"))
+        self.assertEqual(raw.count(b"\n"), 1)
+        info = json.loads(raw)
+        self.assertEqual(set(info), {"schema_version", "ok", "os", "arch", "native_version",
+                                     "source_input_sha256", "rustc"})
+        self.assertIs(type(info["schema_version"]), int)
+        self.assertEqual(info["schema_version"], 1)
+        self.assertIs(info["ok"], True)
+        self.assertEqual((info["os"], info["arch"]), (expected_os, expected_arch))
+        self.assertEqual(info["source_input_sha256"], metadata["source_input_sha256"])
+        self.assertRegex(info["source_input_sha256"], r"\A[0-9a-f]{64}\Z")
+        self.assertEqual(info["rustc"], metadata["rustc"])
+        self.assertRegex(info["rustc"], r"\Arustc [^\r\n]+\Z")
+        self.assertRegex(info["native_version"], r"\A\d+\.\d+\.\d+\Z")
+        expected_version = (f"dev-workflow {info['native_version']} "
+                            f"(source_input_sha256: {info['source_input_sha256']})\n").encode()
+        self.assertEqual(outputs[("--version",)], expected_version)
+        self.assertTrue(outputs[("--help",)].endswith(b"\n"))
+        for command in (b"--version", b"--help", b"probe --json", b"probe --self-sha256"):
+            self.assertIn(command, outputs[("--help",)])
+        self.assertEqual(outputs[("probe", "--self-sha256")], hashes[selected].encode() + b"\n")
 
 
 if __name__ == "__main__":

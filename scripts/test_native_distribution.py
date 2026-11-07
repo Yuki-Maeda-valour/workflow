@@ -12,6 +12,7 @@ import shlex
 import shutil
 import struct
 import subprocess
+import sys
 import tempfile
 from types import SimpleNamespace
 import unittest
@@ -636,11 +637,16 @@ class NativeMainTest(unittest.TestCase):
             status = self.validator.main()
         return status, output.getvalue()
 
-    def test_absent_distribution_adds_no_warning(self):
+    def test_absent_distribution_is_an_error_and_exits_one(self):
+        # 配布後も、コピーから明示的に削除して欠落を検査する。
+        shutil.rmtree(self.root / DISTRIBUTION)
         self.assertFalse((self.root / DISTRIBUTION).exists())
-        status, output = self.run_main()
-        self.assertEqual(status, 0, output)
-        self.assertIn("結果: ERROR 0 件 / WARN 0 件", output)
+        result = subprocess.run([sys.executable, "-B", "scripts/validate.py"],
+                                cwd=self.root, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(f"ERROR {DISTRIBUTION}: 配布フォルダが存在しない", result.stdout)
+        self.assertIn("結果: ERROR 1 件 / WARN 0 件", result.stdout)
+        self.assertEqual(result.stderr, "")
 
     def test_main_accepts_valid_distribution_and_calls_after_json(self):
         make_bundle(self.root / DISTRIBUTION)
@@ -669,6 +675,8 @@ class NativeMainTest(unittest.TestCase):
         for relative in (Path("plugins/dev-workflow/bin"), DISTRIBUTION):
             with self.subTest(relative=relative):
                 target = self.root / relative
+                if target.is_dir():
+                    shutil.rmtree(target)
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.symlink_to(self.root / "missing", target_is_directory=True)
                 self.validator.ERRORS.clear()
