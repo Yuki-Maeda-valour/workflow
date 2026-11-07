@@ -12,7 +12,12 @@
 #   `timeout <秒> python3 -B scripts/run-all.py <引数>` を流す。`--timeout 0` なら timeout を付けない(既定 3600)。
 # - イメージは、Dockerfile と requirements-dev.txt の中身の sha256 の先頭 12 桁を名前に入れる
 #   (workflow-test:run-all-<12 桁>)。無ければ作る。`--image` を渡せば、そのイメージを使う(作らない)。
-# - 重みの記録は、ホストの ${XDG_CACHE_HOME:-~/.cache}/workflow-run-all を容器へ取り付けて、回をまたいで使う。
+# - イメージの ID(`docker image inspect --format '{{.Id}}'`)を読み、`イメージの ID: <ID>` を出して、名前でなく ID で
+#   容器を起動する。容器の run-all.py へ `RUN_ALL_IMAGE=<名前>@<ID>` を渡す(結果の使い回しの鍵に入る)。
+#   ID を読めないときと、`--image` を渡したときは、`RUN_ALL_IMAGE=不明` を渡し、注意の行を出す(容器の中では
+#   結果を使い回さない)。`--image` のときも、ID を読めれば ID で起動する。
+# - 作業の途中に、入力が前の合格と同じ単位の結果を使い回すときは `-- --reuse` を付ける(PR の前と merge の前には付けない)。
+# - 重みの記録と使い回しの記録は、ホストの ${XDG_CACHE_HOME:-~/.cache}/workflow-run-all を容器へ取り付けて、回をまたいで使う。
 # - ホストの環境変数のうち、LOOP_SELFTEST_TIMEOUT・RUN_TIMEOUT・LOOP_STARTUP_CASE_TIMEOUT の 3 つだけを、
 #   ホストで設定されているものに限って容器の run-all.py へ渡す(`docker run -e NAME`。値はコマンド行に出さない)。
 #   ほかの環境変数は渡さない。渡した名前は、`渡す環境変数: <名前の並び>`(無ければ `なし`)の行で出す。
@@ -36,6 +41,7 @@ die_usage() {
 MODE=""
 REV="HEAD"
 IMAGE=""
+IMAGE_GIVEN=""
 CPUSET=""
 NAME=""
 TIMEOUT=3600
@@ -51,7 +57,7 @@ while [ $# -gt 0 ]; do
       MODE=worktree; shift ;;
     --image)
       [ $# -ge 2 ] || die_usage "--image に値が必要"
-      IMAGE="$2"; shift 2 ;;
+      IMAGE="$2"; IMAGE_GIVEN=1; shift 2 ;;
     --cpuset-cpus)
       [ $# -ge 2 ] || die_usage "--cpuset-cpus に値が必要"
       CPUSET="$2"; shift 2 ;;
@@ -99,6 +105,27 @@ if [ -z "$IMAGE" ]; then
 fi
 echo "イメージ: $IMAGE"
 
+# イメージの ID: 名前が途中で別のイメージを指しても、鍵に入れた ID のイメージで流すため、ID で起動する。
+# 入口が作らないイメージ(--image)は、環境変数などの中身を入口が決めないので、使い回さない
+# (例: イメージの環境変数が、取り付けた記録のフォルダの中のファイルを指しうる)。
+run_image="$IMAGE"
+image_id="$(docker image inspect --format '{{.Id}}' "$IMAGE" 2>/dev/null)" || image_id=""
+if [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+  run_image="$image_id"
+else
+  image_id=""
+fi
+if [ -n "$IMAGE_GIVEN" ]; then
+  echo "注意: --image を渡したので、容器の中では結果を使い回さない"
+  image_env="RUN_ALL_IMAGE=不明"
+elif [ -n "$image_id" ]; then
+  echo "イメージの ID: $image_id"
+  image_env="RUN_ALL_IMAGE=$IMAGE@$image_id"
+else
+  echo "注意: イメージの ID を読めない。容器の中では結果を使い回さない"
+  image_env="RUN_ALL_IMAGE=不明"
+fi
+
 # 容器へ渡す中身(tar)を標準出力へ出す。
 emit_archive() {
   if [ "$MODE" = commit ]; then
@@ -116,8 +143,10 @@ emit_archive() {
 args=(--rm -i --init --tmpfs /tmp:rw,exec,nosuid,nodev,size=16g)
 [ -z "$CPUSET" ] || args+=(--cpuset-cpus "$CPUSET")
 [ -z "$NAME" ] || args+=(--name "$NAME")
+# 入口が自分で決めて渡す値(ホストの環境変数ではない。`渡す環境変数:` の行には数えない)。
+args+=(-e "$image_env")
 
-# 重みの記録: ホストのフォルダを取り付ける(作れなければ、容器の中だけで記録する)。
+# 重みの記録と使い回しの記録: ホストのフォルダを取り付ける(作れなければ、容器の中だけで記録する)。
 cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/workflow-run-all"
 if mkdir -p "$cache_dir" 2>/dev/null; then
   args+=(-v "$cache_dir:/home/tester/.cache/workflow-run-all")
@@ -173,7 +202,7 @@ SCRIPT
 
 # 中身を作る側の失敗を見逃さないように、両方の終了コードを取る。
 set +e
-emit_archive | docker run "${args[@]}" "$IMAGE" bash -c "$INNER" run-all "$TIMEOUT" ${run_args[@]+"${run_args[@]}"}
+emit_archive | docker run "${args[@]}" "$run_image" bash -c "$INNER" run-all "$TIMEOUT" ${run_args[@]+"${run_args[@]}"}
 codes=("${PIPESTATUS[@]}")
 set -e
 container="${codes[$((${#codes[@]} - 1))]}"

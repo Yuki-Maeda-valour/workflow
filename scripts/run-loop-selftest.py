@@ -274,15 +274,18 @@ def build_units(sections, log_dir=None, outside_weight=float("inf"), defaults=No
 
     重みは、表の値(載っていない節は既定の 200 秒)。節の外だけの単位は outside_weight(既定は最も重い。
     単独で流すときは、今どおり最初に始める)。run-all.py は、表の値(14 秒)を渡す。
+    ident は節の名前(節の外だけは None)、entry は loop-selftest.sh(run-all.py の使い回しが使う)。
     """
+    entry = SELFTEST.relative_to(REPO).as_posix()
     units = [run_units.Unit(
         key=key_of(None), label=label(None), in_slot=True, weight=outside_weight, table_weight=outside_weight,
-        run=lambda children: run_job(None, children, log_dir, defaults), describe=describe)]
+        run=lambda children: run_job(None, children, log_dir, defaults), describe=describe, ident=None, entry=entry)]
     for section in sections:
         weight = WEIGHTS.get(section)
         units.append(run_units.Unit(
             key=key_of(section), label=label(section), in_slot=True, weight=weight, table_weight=weight,
-            run=lambda children, section=section: run_job(section, children, log_dir, defaults), describe=describe))
+            run=lambda children, section=section: run_job(section, children, log_dir, defaults), describe=describe,
+            ident=section, entry=entry))
     return units
 
 
