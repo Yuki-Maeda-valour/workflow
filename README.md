@@ -31,6 +31,8 @@
 
 ## 導入方法
 
+Rust 版は段階 0a の開発用ソースだけで、利用者向けの入口は未配布です。現在の導入に Rust は不要です。成果物と入口の配布は段階 0b で始め、v4 の次のマイナーへ上げます。
+
 do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
 プラグインを入れた後と、版を上げた後の最初の起動で、使う道具(git・bash・python3 など)の版の表が出ます。足りない道具があれば、直し方も出ます(起動は止めません)。2 回目の起動からは出ません。手で確かめるには `sh plugins/dev-workflow/hooks/tool-versions.sh` を流します。道具と最低の版の一覧は、[必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) の「道具の最低の版と、確かめる時」にあります。
@@ -189,6 +191,13 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 各プロジェクトで skill を改善したら、固有部分を profile / 動的検出(実行時に、ファイルなどからプロジェクトの事実を調べること)に置き換えて `plugins/dev-workflow/` に反映 → バージョンを上げて commit → 各プロジェクトで更新を取得。詳細は [docs/design.md §8](docs/design.md)。
 
 このリポジトリ自身では作業記録を GitHub Issue に残し、ローカルのタスク成果物を新設しない。これは配布スキルの task ファイル方式には影響しない。
+
+## Rust の開発(段階 0a)
+
+- 開発用ソースは `native/`、CI(変更を送るたびに自動で検査する仕組み)は `.github/workflows/native.yml` にあります。Rust `1.99.1` の導入と外部のビルド先は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)、必須コマンドは [AGENTS.md](AGENTS.md#rust-の検査段階-0a) にあります。
+- CI は Linux x86_64・Linux arm64・Mac Intel・Mac Apple Silicon の 4 種類で検査します。Linux 2 本と、Mac の両 CPU で動く 1 本を成果物にします。2 回のビルドの比較、入力の記録、旧版と Rust 版を比べるテストの補助は [docs/testing.md](docs/testing.md) に記しています。
+- 段階 0a は配るプラグイン・版・`CHANGELOG.md` を変えません。`DEV_WORKFLOW_ENGINE` は決めた方針であり、切り替える入口は段階 0b で配ります。未設定・`legacy` は旧版、`rust` は Rust 版、空文字・ほかの値は誤りとします。
+- 切り替えを profile から読まず、自動で旧版へ戻しません。製品の実行ファイル指定用の環境変数は作りません。実装と配布を分ける決定、今後使う YAML・OS の部品の候補は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定) にあります。
 
 ## 検証
 
