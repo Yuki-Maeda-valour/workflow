@@ -5,6 +5,7 @@ Phase 0 の事前検査より前に、使用するシェルと道具を確認す
 ## 道具の最低の版と、確かめる時
 
 道具と最低の版は、プラグインの [`hooks/tool-requirements.tsv`](../../../hooks/tool-requirements.tsv) に 1 つにまとめてある。確かめのスクリプトはこの一覧を読む。下の表は、この一覧のコピーで、`scripts/test_tool_versions.py` が一覧と同じかを確かめる。
+プラグインを使わない導入(`setup.sh`)では skill だけを置くので、一覧と確かめのスクリプトは、このリポジトリの `plugins/dev-workflow/hooks/` にある。
 
 <!-- tool-requirements:start -->
 | 道具 | 最低の版 | 区分 | 使う所 |
