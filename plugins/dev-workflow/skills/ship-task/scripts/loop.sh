@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 無人ループ(dev-workflow)。無人実行のメタ行がある `進行中_` を 1 件ずつ、周ごとの使い捨ての worktree と
+# 無人ループ(dev-workflow)。無人実行のメタ行がある `進行中_` を 1 件ずつ、イテレーションごとの使い捨ての worktree と
 # 新しいヘッドレスのセッションで /ship-task の無人モードに回す。人のシェル・cron から呼ぶ(skill ではない)。
-# `--discover` では、発見元を 1 周ずつ /ship-task の発見の周に回して `候補_` を積む(loop.md §11)。
+# `--discover` では、発見元を 1 つずつ /ship-task の発見のイテレーションに回して `候補_` を積む(loop.md §11)。
 # **契約(既定値と意味・停止条件・終了コード・報告・限界・実走の手順)の正本は ../references/loop.md**。
 # ここには引数と必要環境を書く。Linux・bash 4.4 以上が必要(setsid・flock・/proc を使う)。
 #
@@ -18,15 +18,15 @@
 #   --prove-host                     ホスト CLI の実体で許可の仲介の hook が効くことを実際に確かめ、証明を書いて終わる
 #   --allowed-tools <値>             ホスト CLI に渡す許可リスト。繰り返し可
 #   --allow-classifier               分類器による自動承認(今は起動しない。#107 の H48)
-#   --mcp-config <ファイル>          周に渡す MCP の設定。繰り返し可
-#   --max-iterations <N>             最大周回数
+#   --mcp-config <ファイル>          イテレーションに渡す MCP の設定。繰り返し可
+#   --max-iterations <N>             最大イテレーション数
 #   --max-consecutive-failures <N>   連続失敗の上限
 #   --time-budget <秒>               ループ全体の時間予算
-#   --iteration-timeout <秒>         周の時間上限
+#   --iteration-timeout <秒>         イテレーションの時間上限
 #   --kill-grace <秒>                片付けの TERM → KILL の猶予
 #   --net-timeout <秒>               ネットワークに出うる git と補助の CLI のタイムアウト
 #   --stop-file <パス>               停止ファイル
-#   --worktree-root <ディレクトリ>   周の worktree を作る場所
+#   --worktree-root <ディレクトリ>   イテレーションの worktree を作る場所
 #   --state-max-items <N>            状態観察の項目上限(既定 100000)
 #   --state-max-bytes <N>            状態観察の通常ファイル総読取上限(既定 1 GiB)
 #   --state-max-file-bytes <N>       状態観察の通常ファイル1件上限(既定 64 MiB)
@@ -64,7 +64,7 @@ LOOP_START="$(date +%s)"
 TAB=$'\t'
 
 # ── 状態(シグナル・EXIT の trap が読むので、最初に宣言する)──
-# ロックの fd は 7 に固定する(子・補助の CLI・ネットワークの git には `7>&-` で渡さない — D18)
+# ロックの fd は 7 に固定する(イテレーションで起動する CLI・補助の CLI・ネットワークの git には `7>&-` で渡さない — D18)
 EXPLICIT_EXIT=0   # finish / die・usage を通って終わるとき 1(EXIT の trap は内部の失敗だけを扱う)
 ERR_LINE=""
 REPORT=""
@@ -80,10 +80,10 @@ STOP_MARK=""
 INFLIGHT=""
 LAST_VERIFIED=""
 FRESH_CONFIG_BASELINE=0 # 正常完走した別実行間の config link は新しい基準として受け直す
-SEL_WT=""         # 選定中の worktree(周を起動する前。終わるときに消す)
+SEL_WT=""         # 選定中の worktree(イテレーションを起動する前。終わるときに消す)
 SEL_TASK_DIR=""
 TASK_DIR=""
-ITER_ACTIVE=0     # 周の途中(周の途中の印を置いてから、片付けと照合が済むまで)
+ITER_ACTIVE=0     # イテレーションの途中(イテレーションの途中の印を置いてから、片付けと照合が済むまで)
 ITER_SEQ=""
 ITER_ID=""
 ITER_PGID=""
@@ -122,10 +122,10 @@ CANDIDATES=()
 declare -A LOCKED_REASON=()  # worktree のパス → lock の理由(同じ理由の全件を保持)
 declare -A SKIP_REPORTED=()
 declare -A TRACKING_SEEN=()   # 追跡用の ref で読み飛ばしたタスク(名前で重複を除く)
-declare -A WT_OUTCOME=()      # この実行で残した worktree → その周の結末(判定)
+declare -A WT_OUTCOME=()      # この実行で残した worktree → そのイテレーションの結末(判定)
 # 発見モード(loop.md §11)
-ITER_SOURCE=""    # 周の発見元
-ITER_TITLE=""     # 報告の周の見出し(実装モードは ITER_REL と同じ)
+ITER_SOURCE=""    # イテレーションの発見元
+ITER_TITLE=""     # 報告のイテレーションの見出し(実装モードは ITER_REL と同じ)
 ITER_PROMPT=""
 ITER_META_EXTRA=""
 DISC_PATHS=""     # 判定で読んだ候補のパス(改行区切り)
@@ -133,9 +133,9 @@ DISC_PUSHED=""    # 正常(縮退)の判定で見た push の有無(yes = origin
 DISC_ORIGIN_DIFF=0  # 縮退の判定で、origin の今夜の名のブランチが判定した HEAD と違った
 DISC_QUEUE=()     # この選定で回せる発見元(引数の順)
 DISC_REFS=()      # 「<sha><TAB><ref>」。origin の分は ref を「origin:refs/heads/…」にする
-DISC_DEGRADED=()  # 縮退で終わった周の「<発見元><TAB><ブランチ><TAB><push の有無>」
+DISC_DEGRADED=()  # 縮退で終わったイテレーションの「<発見元><TAB><ブランチ><TAB><push の有無>」
 declare -A DISC_DONE=()       # この実行で回した発見元
-declare -A DISC_RESULT=()     # 発見元 → その周の判定と結末
+declare -A DISC_RESULT=()     # 発見元 → そのイテレーションの判定と結末
 declare -A DISC_SKIP=()       # 発見元 → 読み飛ばしの理由
 declare -A DISC_CLEAN=()      # 発見元 → 片付けの定型(改行区切り)
 declare -A DISC_SEEN=()
@@ -165,7 +165,7 @@ STATE_MAX_SECONDS=60
 DISCOVER=0          # 発見モード(--discover)
 PROVE_HOST=0        # --prove-host(実 hook の確認と証明の書き込みだけを行う)
 FIXED_POLICY='{}' # component検査後の同期・組込み停止。active再bindでも保持する
-HOST_EXEC=""        # 確かめたホスト CLI の実体(realpath)。補助の CLI・周の子・確認はすべてこれで起動する
+HOST_EXEC=""        # 確かめたホスト CLI の実体(realpath)。補助の CLI・イテレーションで起動する CLI・確認はすべてこれで起動する
 HOST_IDENTITY=""    # その実体の値(realpath・dev・ino・size・mtime・ctime・sha256 の JSON)
 HOST_STAT=""        # その実体の stat の値(補助の CLI ごとの軽い照合に使う)
 HOST_SHAPE=""       # 証明に結び付ける起動の形(loop.sh が足すフラグ。可変の値は置き換える)
@@ -335,7 +335,7 @@ def cmd_profile(path):
     if not isinstance(task_store, str) or task_store not in ("file", "github-issue"):
         fail(1, "task_store は file または github-issue を指定する(無い・null・空文字は file)")
     if task_store != "file":
-        fail(6, "無人ループと発見の周は task_store: github-issue に未対応。file のときだけ起動できる")
+        fail(6, "無人ループと発見のイテレーションは task_store: github-issue に未対応。file のときだけ起動できる")
     root = data.get("root")
     if root is not None:
         if not isinstance(root, str):
@@ -581,7 +581,7 @@ def cmd_hook_settings(python_bin, script, guard_sha, guard, state, state_sha, fi
 
 
 def cmd_candiff(task_dir):
-    # 発見の周の差分(`git diff --no-renames --raw -z <固定した sha> HEAD`)を stdin で読む。全行が状態 A・モード 100644・
+    # 発見のイテレーションの差分(`git diff --no-renames --raw -z <固定した sha> HEAD`)を stdin で読む。全行が状態 A・モード 100644・
     # task_dir の直下の `候補_<名>.md`(<名> が空でない・D21)で 1 件以上なら、パスを 1 行ずつ出す。外れれば理由を出して 1
     parts = sys.stdin.buffer.read().split(b"\0")
     if parts and parts[-1] == b"":
@@ -652,7 +652,7 @@ py() {
       [ "${TASK_TEXT_HELD:-0}" = 1 ] || die 20 environment "本文解析を保持していない"
       code="$TASK_TEXT_CODE" ;;
     result|permlog|origin-json)
-      [ "${CHILD_OUTPUT_HELD:-0}" = 1 ] || die 20 environment "子の出力の解析を保持していない"
+      [ "${CHILD_OUTPUT_HELD:-0}" = 1 ] || die 20 environment "loop.sh が起動した CLI の出力の解析を保持していない"
       code="$CHILD_OUTPUT_CODE" ;;
   esac
   # 固定検査と hook の組立は stdlib だけを使い、cwd/PYTHONPATH/user-site を探索しない。
@@ -674,33 +674,33 @@ die() { # $1=終了コード $2=理由コード 残り=説明
 
 stop_mark_guide() {
   if [ "$STATE_GIT_UNSAFE" = 1 ] && [ -d "$INFLIGHT" ]; then
-    printf '止める印: %s(未確認の設定・子・作業場所・中断記録を人が確認する。印だけを消しても再開しない)' "$STOP_MARK"
+    printf '止める印: %s(未確認の設定・イテレーションのプロセス・作業場所・中断記録を人が確認する。印だけを消しても再開しない)' "$STOP_MARK"
   else
     printf '止める印: %s(差分を確かめ、必要なら元に戻してから、このファイルを消すと次の起動が続く)' "$STOP_MARK"
   fi
 }
 
-# 止めの印を置く。$3=1 なら周の途中の印を残す(片付けが済んでいないとき。止めの印を消した後の起動で、
-# 外部から確認して再開する)。0 なら周の途中の印を消す(止めの印が差分を持つので役目が終わる)
-place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残すか
+# 止めの印を置く。$3=1 ならイテレーションの途中の印を残す(片付けが済んでいないとき。止めの印を消した後の起動で、
+# 外部から確認して再開する)。0 ならイテレーションの途中の印を消す(止めの印が差分を持つので役目が終わる)
+place_stop_mark() { # $1=理由 $2=差分(複数行) $3=イテレーションの途中の印を残すか
   local tmp="$STOP_MARK.tmp.$$"
   {
     printf '# 無人ループの止める印\n\n'
     printf -- '- 置いた日時: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf -- '- 実行 ID: %s\n' "$RUN_ID"
     printf -- '- 理由: %s\n' "$1"
-    [ -z "$ITER_ID" ] || printf -- '- 周: %s(%s)\n' "$ITER_ID" "$ITER_REL"
+    [ -z "$ITER_ID" ] || printf -- '- イテレーション: %s(%s)\n' "$ITER_ID" "$ITER_REL"
     printf '\n## 差分\n\n'
     if [ -n "$2" ]; then printf '%s\n' "$2"; else printf '(無し)\n'; fi
     printf '\n## 消し方\n\n'
     if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" = 1 ]; then
-      printf '設定・管理構造を確認できないため、子と中断記録(%s)を自動で片付けていない。\n' "$INFLIGHT"
-      printf '人が実際の子・作業場所・差分を確認して片付け、中断記録を証拠として退避する。その後で止める印を外す。印だけを消しても再開しない。\n'
+      printf '設定・管理構造を確認できないため、イテレーションのプロセスと中断記録(%s)を自動で片付けていない。\n' "$INFLIGHT"
+      printf '人が実際のプロセス・作業場所・差分を確認して片付け、中断記録を証拠として退避する。その後で止める印を外す。印だけを消しても再開しない。\n'
     else
       printf '差分を確かめ、必要なら元に戻してから、このファイルを消す: rm -- %q\n' "$STOP_MARK"
     fi
     if [ "$3" = 1 ] && [ "$STATE_GIT_UNSAFE" != 1 ]; then
-      printf '周の途中の印(%s)は残す。別の信頼領域から子の不在と共有状態を確認するまで再開しない\n' "$INFLIGHT"
+      printf 'イテレーションの途中の印(%s)は残す。別の信頼領域から、イテレーションのプロセスが残っていないことと共有状態を確認するまで再開しない\n' "$INFLIGHT"
     fi
   } >"$tmp"
   mv -f -- "$tmp" "$STOP_MARK"
@@ -708,7 +708,7 @@ place_stop_mark() { # $1=理由 $2=差分(複数行) $3=周の途中の印を残
   if [ "$3" != 1 ]; then rm -rf -- "$INFLIGHT"; fi
 }
 
-take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか $5=親削除記録を使わない
+take_snapshot() { # $1=出力 $2=そのイテレーションの worktree の管理ディレクトリ(無ければ -) $3=保持済みstate $4=別実行間のconfig基準を更新するか $5=親削除記録を使わない
   local own=() prior=() fresh=() control=() removed=() directory path rc=0 err
   SNAPSHOT_DIFF=""
   verify_environment || die 20 environment "状態観察 helper の直前に環境が変わった"
@@ -730,7 +730,7 @@ take_snapshot() { # $1=出力 $2=その周の worktree の管理ディレクト�
   if [ "$rc" -ne 0 ]; then
     STATE_GIT_UNSAFE=1
     if grep -qE 'config|origin|git-dir|commondir|HEAD|worktree' "$err" 2>/dev/null; then
-      SNAPSHOT_DIFF="差分: 保持済み config または worktree の構造が周の途中で変わった(内容は出さない)"
+      SNAPSHOT_DIFF="差分: 保持済み config または worktree の構造がイテレーションの途中で変わった(内容は出さない)"
     else
       SNAPSHOT_DIFF="差分: 今の状態を安全に控えられない(照合できない)"
     fi
@@ -823,10 +823,10 @@ hold_task_text() {
 }
 hold_child_output() {
   local candidate
-  candidate="$(read_held_copy skills/ship-task/scripts/loop-child-output.py)" || die 20 environment "子の出力の解析のコピーを読めない"
+  candidate="$(read_held_copy skills/ship-task/scripts/loop-child-output.py)" || die 20 environment "loop.sh が起動した CLI の出力の解析のコピーを読めない"
   candidate="${candidate%.}"
   if [ "$CHILD_OUTPUT_HELD" = 1 ]; then
-    [ "$candidate" = "$CHILD_OUTPUT_CODE" ] || die 20 environment "子の出力の解析のコピーが初回と異なる"
+    [ "$candidate" = "$CHILD_OUTPUT_CODE" ] || die 20 environment "loop.sh が起動した CLI の出力の解析のコピーが初回と異なる"
   else
     CHILD_OUTPUT_CODE="$candidate"
     CHILD_OUTPUT_HELD=1
@@ -1108,11 +1108,11 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
     SNAPSHOT_DIFF="差分: 照合済みの状態を最後に照合に通った状態へ安全に昇格できない"
     return 1
   fi
-  # 削除の許可はこの照合で消費する。次の周や別の控えへ引き継がない。
+  # 削除の許可はこの照合で消費する。次のイテレーションや別の控えへ引き継がない。
   REMOVED_PARENT_WORKTREES=()
 }
 
-# 周の supervisor を止め、waitpid による不在証明を確かめる。
+# イテレーションの supervisor を止め、waitpid による不在証明を確かめる。
 cleanup_iteration() {
   local waited=0 result control_rc=0
   CLEANUP_LEFT=""
@@ -1171,7 +1171,7 @@ cleanup_iteration() {
   if [ -n "${DEV_WORKFLOW_LOOP_TEST_LEFTOVER:-}" ]; then CLEANUP_LEFT="(試験用のフック)"; fi
 }
 
-# 照合(D14・D8): 周の起動の直前の控えと、今の共有の git ディレクトリの状態・refs/heads/<DEF> を比べる。
+# 照合(D14・D8): イテレーションの起動の直前の控えと、今の共有の git ディレクトリの状態・refs/heads/<DEF> を比べる。
 # 差分は VERIFY_DIFF に入れる(共有の config への追加を含め、どの変化も差分)
 verify_iteration() {
   local cur="$RUN_DIR/iter-$ITER_SEQ.after.json" cur_sha="" out="" rc=0 now
@@ -1182,10 +1182,10 @@ verify_iteration() {
     VERIFY_DIFF="差分: plugin または利用者設定の照合に失敗した"
     return 0
   fi
-  # 比べる元が周の起動の直前に取ったままか(食い違えば、共有の状態の変化と同じく止める)
+  # 比べる元がイテレーションの起動の直前に取ったままか(食い違えば、共有の状態の変化と同じく止める)
   if [ -z "$ITER_BASE_SHA" ] || [ "$(state_digest "$ITER_BASE" || true)" != "$ITER_BASE_SHA" ]; then
     STATE_GIT_UNSAFE=1
-    VERIFY_DIFF="差分: 比べる元($ITER_BASE)が周の起動の直前に取ったものと違う(書き換えられた)"
+    VERIFY_DIFF="差分: 比べる元($ITER_BASE)がイテレーションの起動の直前に取ったものと違う(書き換えられた)"
     return 0
   fi
   if ! take_snapshot "$cur" "$ITER_WTADMIN" "$ITER_BASE"; then
@@ -1240,16 +1240,16 @@ verify_iteration() {
   fi
 }
 
-# 周の途中で終わるとき(シグナル・EXIT の trap)の手順: 片付け → 照合 → 印 → 報告。
+# イテレーションの途中で終わるとき(シグナル・EXIT の trap)の手順: 片付け → 照合 → 印 → 報告。
 # ABORT_CODE に終了コードを入れる(このシェルで呼ぶ。$( ) の中で呼ばない)
 abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=差分があるときのコード $4=どちらも無いときのコード
   local worktree_state="worktree は残す"
-  [ -z "$ITER_WT" ] || WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $1 で止まった(判定していない)"
+  [ -z "$ITER_WT" ] || WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: $1 で止まった(判定していない)"
   cleanup_iteration
   if [ -n "$CLEANUP_LEFT" ]; then
-    # 残ったプロセスがまだ書き換えうるので照合しない。周の途中の印と worktree を残す
+    # 残ったプロセスがまだ書き換えうるので照合しない。イテレーションの途中の印と worktree を残す
     place_stop_mark "残ったプロセス($1 の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
-    rep "- $1: 片付けで残ったプロセス: $CLEANUP_LEFT(照合はしない。止める印と周の途中の印を残した)" 2>/dev/null || true
+    rep "- $1: 片付けで残ったプロセス: $CLEANUP_LEFT(照合はしない。止める印とイテレーションの途中の印を残した)" 2>/dev/null || true
     ABORT_CODE="$2"
     return 0
   fi
@@ -1268,11 +1268,11 @@ abort_iteration() { # $1=きっかけ $2=残りがあるときのコード $3=�
     [ "${#REMOVED_PARENT_WORKTREES[@]}" -eq 0 ] || worktree_state="worktree は親が削除済み"
     if save_last_verified "$ITER_VERIFIED" "$ITER_VERIFIED_SHA"; then
       rm -rf -- "$INFLIGHT"
-      rep "- $1: 子を片付けた。照合に通った($worktree_state)" 2>/dev/null || true
+      rep "- $1: イテレーションのプロセスを片付けた。照合に通った($worktree_state)" 2>/dev/null || true
       ABORT_CODE="$4"
     else
       place_stop_mark "共有の状態の変化($1 の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
-      rep "- $1: 基準を昇格できない(止める印と周の途中の印を残した)" "${SNAPSHOT_DIFF:-}" 2>/dev/null || true
+      rep "- $1: 基準を昇格できない(止める印とイテレーションの途中の印を残した)" "${SNAPSHOT_DIFF:-}" 2>/dev/null || true
       ABORT_CODE="$3"
     fi
   fi
@@ -1318,8 +1318,8 @@ format_worktree_paths() {
   done
 }
 
-# 残った worktree のその周の結末。この実行の分は判定を、過去の実行の分は「(過去の実行)」とその実行の
-# report.md を示す(worktree の名前は <実行 ID>-<周の番号>)
+# 残った worktree のそのイテレーションの結末。この実行の分は判定を、過去の実行の分は「(過去の実行)」とその実行の
+# report.md を示す(worktree の名前は <実行 ID>-<イテレーションの番号>)
 describe_left_wt() { # $1=worktree のパス
   local base run rp
   if [ -n "${WT_OUTCOME[$1]:-}" ]; then printf '%s' "${WT_OUTCOME[$1]}"; return 0; fi
@@ -1349,7 +1349,7 @@ report_left_worktrees() {
     for path in "${!WT_OUTCOME[@]}"; do
       rep "- $path — ${WT_OUTCOME[$path]}"
     done
-    [ -z "$ITER_WT" ] || rep "- 中断した周の保持パス: $ITER_WT"
+    [ -z "$ITER_WT" ] || rep "- 中断したイテレーションの保持パス: $ITER_WT"
     [ -z "$SEL_WT" ] || rep "- 選定中の保持パス: $SEL_WT(自動削除していない)"
     rep "" "人の次の手順: 変更された設定と保持した作業場所を確認する。push・PR が既に作成されている可能性も外部から確認し、未確認の内容を merge しない。"
     return 0
@@ -1561,7 +1561,7 @@ build_child_argv() {
   CHILD_ARGV+=("${ISOLATION[@]}" "$PLUGIN_DIR_FLAG" "$PLUGIN_ROOT")
   if [ "$ALLOW_CLASSIFIER" -eq 1 ]; then CHILD_ARGV+=("${PERM_CLASSIFIER[@]}"); else CHILD_ARGV+=("${PERM_EDITS[@]}"); fi
   CHILD_ARGV+=("${PERM_PROMPTS[@]}")
-  # 許可の仲介の hook(D22 ③)。ファイルにしない(周が書き換えられないように)。argv の最後
+  # 許可の仲介の hook(D22 ③)。ファイルにしない(イテレーションが書き換えられないように)。argv の最後
   CHILD_ARGV+=("$SETTINGS_FLAG" "$HOOK_SETTINGS")
 }
 
@@ -1630,7 +1630,7 @@ aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <s
 }
 
 # ── H31: 実 hook の確認(--prove-host)──
-# 周の子と同じ argv・環境変数・監督で、使い捨てのディレクトリから 1 回だけ起動する。cwd の外の決まったパスへ
+# イテレーションで起動する CLI と同じ argv・環境変数・監督で、使い捨てのディレクトリから 1 回だけ起動する。cwd の外の決まったパスへ
 # Write を 1 回させ、許可の仲介の hook が呼ばれて拒否したこと(判定の記録・結果の拒否の欄・ファイルが無いこと)を
 # 確かめたときだけ、実体・版・help・起動の形と結び付けた証明を書く
 prove_host() {
@@ -1678,17 +1678,17 @@ prove_host() {
   exec {probe_stream}>&-
   wait "$probe_pid" || rc=$?
   wait "$sanitizer_pid" || sanitizer_rc=$?
-  [ "$rc" -eq 0 ] || die 20 host-proof "実 hook の確認の子の回収を確かめられない(監督の終了コード $rc。$dir)"
+  [ "$rc" -eq 0 ] || die 20 host-proof "実 hook の確認のために起動したプロセスの回収を確かめられない(監督の終了コード $rc。$dir)"
   read -r child_rc child_to < <(py supervisor-result "$dir/supervisor.json" "$nonce") \
     || die 20 host-proof "実 hook の確認の監督の結果が保持値と違う($dir)"
-  [ "$child_rc" -eq 0 ] && [ "$child_to" -eq 0 ] || die 20 host-proof "実 hook の確認の子が失敗または時間切れになった。証明は書かない"
+  [ "$child_rc" -eq 0 ] && [ "$child_to" -eq 0 ] || die 20 host-proof "実 hook の確認のために起動した CLI が失敗または時間切れになった。証明は書かない"
   [ "$sanitizer_rc" -eq 0 ] || die 20 host-proof "init と結果を安全に縮約できない。証明は書かない"
   host_same --hash || die 20 host-proof "実 hook の確認の前後で、ホスト CLI の実体が変わった"
   verify_environment || die 20 environment "実 hook の確認の後に環境が変わった"
   rc=0
   judged="$("$PY_ABS" -I -B "$HOST_CHECK_PY" probe-judge --out "$dir/out.json" --permlog "$permlog" --target "$target" 2>"$dir/judge.err")" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    die 20 host-proof "実 hook の確認に通らない: $(head -c 400 "$dir/judge.err" | tr '\n' ' ')(子の終了コード $child_rc・時間切れ $child_to。記録: $dir)。証明は書かない"
+    die 20 host-proof "実 hook の確認に通らない: $(head -c 400 "$dir/judge.err" | tr '\n' ' ')(確認のために起動した CLI の終了コード $child_rc・時間切れ $child_to。記録: $dir)。証明は書かない"
   fi
   init_evidence="$(py json-value init <"$dir/out.json")" || die 20 host-proof "init の証拠を読めない"
   while IFS= read -r name; do [ -z "$name" ] || proof_names+=(--public-name "$name"); done \
@@ -1699,7 +1699,7 @@ prove_host() {
     --component-sha256 "$COMPONENT_SHA" --policy-sha256 "$POLICY_SHA" --resolver-version "$COMPONENT_RESOLVER" \
     --init-evidence "$init_evidence" "${proof_names[@]}" 2>"$dir/write.err")" || rc=$?
   [ "$rc" -eq 0 ] || die 20 host-proof "証明を書けない: $(head -c 300 "$dir/write.err" | tr '\n' ' ')"
-  rep "- 判定: 許可の仲介の hook が確認の Write を拒否した(子の終了コード $child_rc)" "- 証明: $path"
+  rep "- 判定: 許可の仲介の hook が確認の Write を拒否した(確認のために起動した CLI の終了コード $child_rc)" "- 証明: $path"
   say "ホスト CLI の証明を書いた: $path"
   finish 0 "--prove-host(許可の仲介の hook が実際に効くことを確かめ、証明を書いた)"
 }
@@ -1707,16 +1707,16 @@ prove_host() {
 # ── 次の起動(§4。ロックの直後、デフォルトブランチの固定・profile の読み取り・ネットワークの git より前)──
 handle_marks_at_start() {
   local out rc now cur diff cur_sha base_sha
-  # 止めの印があれば、人が差分を確かめて消すまで起動しない。周の途中の印もあれば、先にその周のプロセスを止める
+  # 止めの印があれば、人が差分を確かめて消すまで起動しない。イテレーションの途中の印もあれば、先にそのイテレーションのプロセスを止める
   if [ -e "$STOP_MARK" ] || [ -L "$STOP_MARK" ]; then
     # inflight は同じ UID が書ける状態領域であり、そこだけの iter を
     # 根拠に signal を送らない。止めの印がある再開は人が確認する。
-    [ ! -d "$INFLIGHT" ] || rep "- 周の途中の印は未信頼のため signal せず保全した($INFLIGHT)"
+    [ ! -d "$INFLIGHT" ] || rep "- イテレーションの途中の印は未信頼のため signal せず保全した($INFLIGHT)"
     rep "- 止める印は未信頼のため内容を実行・自動採用せず保全した: $STOP_MARK"
     die 20 stop-mark "止める印がある。$(stop_mark_guide)"
   fi
   if [ -e "$INFLIGHT" ] || [ -L "$INFLIGHT" ]; then
-    die 20 inflight-untrusted "周の途中の印は未信頼($INFLIGHT)。signal・削除・unlock・ref 更新をせず保全した。人が所有者と成果物を確認する"
+    die 20 inflight-untrusted "イテレーションの途中の印は未信頼($INFLIGHT)。signal・削除・unlock・ref 更新をせず保全した。人が所有者と成果物を確認する"
   fi
   # どちらの印も無ければ、最後に照合に通った状態と比べて、差分は報告に出して続ける
   # (実行と実行の間の変化は人の操作でもありうるため)
@@ -1750,7 +1750,7 @@ has_meta() { # $1=ファイル(- なら stdin)
   return 1
 }
 
-# 追跡外のタスクの検査(2026-09-23 決定 10。最初の周の 3a)。人のチェックアウトを読むだけで、index を書き換えうる
+# 追跡外のタスクの検査(2026-09-23 決定 10。最初のイテレーションの 3a)。人のチェックアウトを読むだけで、index を書き換えうる
 # git status は使わない。固定した sha の tree に無いか、その blob のヘッダにメタ行が無ければ止まる
 check_untracked_tasks() {
   local dir="$TOP/$TASK_DIR" p f rel bad=() typ
@@ -1826,7 +1826,7 @@ skip_reason() { # $1=worktree $2=ファイル名 → SKIP_REASON=読み飛ばす
   fi
   find_locked_worktrees "dev-workflow-loop: $rel" locked_paths
   if [ "${#locked_paths[@]}" -gt 0 ]; then
-    printf -v SKIP_REASON '前の周が残した worktree がある(%s)' "$(format_worktree_paths "${locked_paths[@]}")"; return 0
+    printf -v SKIP_REASON '前のイテレーションが残した worktree がある(%s)' "$(format_worktree_paths "${locked_paths[@]}")"; return 0
   fi
   if [ -e "$wt/$TASK_DIR/完了_$name.md" ] || [ -L "$wt/$TASK_DIR/完了_$name.md" ] \
      || [ -e "$wt/$TASK_DIR/保留_$name.md" ] || [ -L "$wt/$TASK_DIR/保留_$name.md" ]; then
@@ -1840,17 +1840,17 @@ skip_reason() { # $1=worktree $2=ファイル名 → SKIP_REASON=読み飛ばす
   return 0
 }
 
-# D22 ①: 周の worktree の .claude/・.claude/reviews/ を、base-commit.md ① と同じ検査で作る(階層ごとに
+# D22 ①: イテレーションの worktree の .claude/・.claude/reviews/ を、base-commit.md ① と同じ検査で作る(階層ごとに
 # 「検査 → 無ければ作成」。symlink なら止める・無ければ -p なしの mkdir・在って通常のディレクトリでなければ止める)。
 # loop.sh の書き込みは許可の外。止まるときは終了コード 30
-prepare_reviews_dir() { # $1=周の worktree
+prepare_reviews_dir() { # $1=イテレーションの worktree
   local d
   for d in "$1/.claude" "$1/.claude/reviews"; do
-    if [ -L "$d" ]; then die 30 reviews-dir "周の worktree の $d が symlink(辿らずに止まる)"; fi
+    if [ -L "$d" ]; then die 30 reviews-dir "イテレーションの worktree の $d が symlink(辿らずに止まる)"; fi
     if [ ! -e "$d" ]; then
-      mkdir -- "$d" || die 30 reviews-dir "周の worktree に $d を作れない"
+      mkdir -- "$d" || die 30 reviews-dir "イテレーションの worktree に $d を作れない"
     elif [ ! -d "$d" ]; then
-      die 30 reviews-dir "周の worktree の $d が通常のディレクトリでない"
+      die 30 reviews-dir "イテレーションの worktree の $d が通常のディレクトリでない"
     fi
   done
 }
@@ -1863,9 +1863,9 @@ D21_LINES=()
 SKIP_REASON=""
 SKIP_DATE=""
 
-# 無人ループの前提(loop.md §3 の 2a): 状態ファイル 3 つが周の worktree で ignore されていて、追跡されていない。
+# 無人ループの前提(loop.md §3 の 2a): 状態ファイル 3 つがイテレーションの worktree で ignore されていて、追跡されていない。
 # `.claude/reviews/` を作る前に確かめる。`--no-index` を付けない(付けると追跡済みのファイルも ignore 済みと答える)
-check_state_ignored() { # $1=周の worktree
+check_state_ignored() { # $1=イテレーションの worktree
   local p rc bad=() tracked=()
   for p in .claude/reviews/x.md .claude/grasp.md .claude/.understand-project-done; do
     rc=0
@@ -1879,7 +1879,7 @@ check_state_ignored() { # $1=周の worktree
   [ "${#bad[@]}" -gt 0 ] || return 0
   rep "" "## 状態ファイルが ignore されていない(起動時に止まった)" ""
   for p in "${bad[@]}"; do rep "- $p"; done
-  rep "" "無人ループは、状態ファイル 3 つが ignore されていて追跡されていないことを前提にする(周の中で書かれた状態ファイルが未追跡か未 commit の変更として残ると、周の worktree を消せずに残る。発見モードでは、判定が未追跡・未 commit の無いことを求めるので、正しい周も失敗になる)。.gitignore に次を足して commit する(init-project の gitignore の断片と同じ):" "" \
+  rep "" "無人ループは、状態ファイル 3 つが ignore されていて追跡されていないことを前提にする(イテレーションの中で書かれた状態ファイルが未追跡か未 commit の変更として残ると、イテレーションの worktree を消せずに残る。発見モードでは、判定が未追跡・未 commit の無いことを求めるので、正しいイテレーションも失敗になる)。.gitignore に次を足して commit する(init-project の gitignore の断片と同じ):" "" \
     '```' ".claude/reviews/" ".claude/grasp.md" ".claude/.understand-project-done" '```'
   if [ "${#tracked[@]}" -gt 0 ]; then
     rep "" "追跡済みのものは、索引から外して commit する:"
@@ -1895,7 +1895,7 @@ make_selection_worktree() {
   SEQ=$((SEQ + 1))
   wt="$WT_ROOT/$RUN_ID-$SEQ"
   mkdir -p "$WT_ROOT"
-  # 2. 固定した sha から周の worktree を作る(前置き・ネットワークの規則つき)
+  # 2. 固定した sha からイテレーションの worktree を作る(前置き・ネットワークの規則つき)
   rc=0
   net_git "$WORKTREE_ADD_TIMEOUT" -C "$TOP" worktree add --detach --lock --reason "dev-workflow-loop: 選定中" "$wt" "$DEF_SHA" \
     >>"$RUN_DIR/worktree.log" 2>&1 || rc=$?
@@ -1920,14 +1920,14 @@ make_selection_worktree() {
     remove_selection_worktree
     die 20 task-dir "解決した task_dir がパスの文字の制限(loop.md §3)に外れる($(cat "$RUN_DIR/d21.err")): $TASK_DIR"
   fi
-  # 保護パス(許可の仲介の hook と同じ列。.claude/worktrees の下を除く)の下の task_dir は止まる(無人の周の skill が
+  # 保護パス(許可の仲介の hook と同じ列。.claude/worktrees の下を除く)の下の task_dir は止まる(無人のイテレーションの skill が
   # タスク MD を Bash の引数に渡す操作を、hook が拒否するため)。選定の worktree を消してから exit 20
   rc=0
   verify_environment || die 20 environment "保護パス検査の直前に環境が変わった"
   ( cd / && exec "$PY_ABS" -B "$PERM_SCRIPT" --is-protected "$TASK_DIR" 7>&- ) || rc=$?
   case "$rc" in
     0) remove_selection_worktree
-       die 20 task-dir "解決した task_dir が保護パスの下にある: $TASK_DIR(無人の周ではタスク MD を扱えない。task_dir を保護パスの外へ移す)" ;;
+       die 20 task-dir "解決した task_dir が保護パスの下にある: $TASK_DIR(無人のイテレーションではタスク MD を扱えない。task_dir を保護パスの外へ移す)" ;;
     1) : ;;
     *) die 30 internal "task_dir が保護パスの下かを判定できない(終了コード $rc)" ;;
   esac
@@ -1938,7 +1938,7 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
   local wt out rc p f name reason line lines=() date ref
   make_selection_worktree
   wt="$SEL_WT"
-  # 3a(最初の周だけ)
+  # 3a(最初のイテレーションだけ)
   if [ "$FIRST_SELECTION" -eq 1 ]; then check_untracked_tasks; fi
   # 4. 候補
   REMOTE_TASKS=()
@@ -2063,10 +2063,10 @@ discover_skip() { # $1=発見元
     SKIP_CLEAN="$(printf '%s\n' "${cmds[@]}")"
     return 0
   fi
-  # ④ 失敗の周が残した除外の印
+  # ④ 失敗のイテレーションが残した除外の印
   find_locked_worktrees "dev-workflow-loop: 候補:$s" locked_paths
   if [ "${#locked_paths[@]}" -gt 0 ]; then
-    SKIP_WHY="前の周が残した worktree がある($(format_worktree_paths "${locked_paths[@]}"))"
+    SKIP_WHY="前のイテレーションが残した worktree がある($(format_worktree_paths "${locked_paths[@]}"))"
     for path in "${locked_paths[@]}"; do
       printf -v quoted_path '%q' "$path"
       cmds+=("git worktree unlock $quoted_path → git worktree remove $quoted_path(調べてから)")
@@ -2098,7 +2098,7 @@ select_discover() { # 選定中の worktree を作り、DISC_QUEUE(回せる発�
   NEW_SKIPS=()
   DISC_QUEUE=()
   for s in "${DISCOVER_SOURCES[@]}"; do
-    [ -z "${DISC_DONE[$s]:-}" ] || continue   # ① この実行で回した(周の報告にあるので、読み飛ばしには出さない)
+    [ -z "${DISC_DONE[$s]:-}" ] || continue   # ① この実行で回した(イテレーションの報告にあるので、読み飛ばしには出さない)
     discover_skip "$s"
     if [ -n "$SKIP_WHY" ]; then
       note_skip "$s" "$SKIP_WHY"
@@ -2138,13 +2138,13 @@ origin_branch_sha() { # $1=ブランチ(refs/heads/ の後ろ)
   return 0
 }
 
-# ── §6: 周の前の停止条件(最大周回数 → 時間予算 → 停止ファイル)──
+# ── §6: イテレーションの前の停止条件(最大イテレーション数 → 時間予算 → 停止ファイル)──
 check_stop_before_iteration() {
   local now remaining
-  if [ "$ITER_COUNT" -ge "$MAX_ITER" ]; then finish 0 "最大周回数($MAX_ITER)に達した"; fi
+  if [ "$ITER_COUNT" -ge "$MAX_ITER" ]; then finish 0 "最大イテレーション数($MAX_ITER)に達した"; fi
   now="$(date +%s)"
   remaining=$((BUDGET - (now - LOOP_START)))
-  if [ "$remaining" -lt "$ITER_TIMEOUT" ]; then finish 0 "時間予算(残り ${remaining} 秒 < 周の上限 ${ITER_TIMEOUT} 秒)"; fi
+  if [ "$remaining" -lt "$ITER_TIMEOUT" ]; then finish 0 "時間予算(残り ${remaining} 秒 < イテレーションの上限 ${ITER_TIMEOUT} 秒)"; fi
   if [ -e "$STOP_FILE" ] || [ -L "$STOP_FILE" ]; then finish 0 "停止ファイルがある($STOP_FILE)"; fi
 }
 
@@ -2210,7 +2210,7 @@ judge() { # $1=終了コード $2=時間切れか → JUDGE・JUDGE_OK・OUTCOME
   JUDGE_OK=1
 }
 
-# 周の worktree に未追跡・未 commit が無い(ignore 済みは除く)→ 0。あるか、読めなければ 1(ITER_WT_DIRTY に最初の項目)
+# イテレーションの worktree に未追跡・未 commit が無い(ignore 済みは除く)→ 0。あるか、読めなければ 1(ITER_WT_DIRTY に最初の項目)
 iter_wt_clean() {
   local f="$RUN_DIR/iter-$ITER_SEQ.status"
   ITER_WT_DIRTY=""
@@ -2223,7 +2223,7 @@ iter_wt_clean() {
   return 1
 }
 
-# 発見の周の判定(loop.md §11)。材料は終了コード・結末の行・git の状態 → JUDGE・JUDGE_OK・OUTCOME・DETAIL・DISC_PATHS
+# 発見のイテレーションの判定(loop.md §11)。材料は終了コード・結末の行・git の状態 → JUDGE・JUDGE_OK・OUTCOME・DETAIL・DISC_PATHS
 judge_discover() { # $1=終了コード $2=時間切れか
   local rc="$1" timed_out="$2" res line head parents count out lsha branch="task/$ITER_NAME"
   JUDGE=""; JUDGE_OK=0; OUTCOME=""; DETAIL=""; HOLD_CODE=""; DENIALS=""; DISC_PATHS=""; DISC_PUSHED=""; DISC_ORIGIN_DIFF=0
@@ -2241,7 +2241,7 @@ judge_discover() { # $1=終了コード $2=時間切れか
   if [ -z "$OUTCOME" ]; then JUDGE="失敗(結果の行が無い)"; return 0; fi
   case "$OUTCOME" in
     失敗扱い) JUDGE="失敗(結末 失敗扱い)"; return 0 ;;
-    保留) JUDGE="失敗(結末 保留 は発見の周では取りえない)"; return 0 ;;
+    保留) JUDGE="失敗(結末 保留 は発見のイテレーションでは取りえない)"; return 0 ;;
     PR|縮退)
       # 共通の条件 G: 今夜の名のブランチの上で、固定した sha の上に 1 commit・task_dir の直下の新しい 候補_ だけ・清潔
       head="$(G -C "$ITER_WT" symbolic-ref --quiet HEAD 2>/dev/null || true)"
@@ -2315,7 +2315,7 @@ judge_discover() { # $1=終了コード $2=時間切れか
   JUDGE_OK=1
 }
 
-# 発見の周の判定の後の報告(候補・報告の写し・縮退の手順・失敗の周の PR の可能性)。worktree の後片付けの後に呼ぶ
+# 発見のイテレーションの判定の後の報告(候補・報告の写し・縮退の手順・失敗のイテレーションの PR の可能性)。worktree の後片付けの後に呼ぶ
 discover_after_iteration() {
   local branch="task/$ITER_NAME" s="$ITER_SOURCE" rv p pushed="" found=0
   rv="$RUN_DIR/iter-$ITER_SEQ-reviews"
@@ -2325,7 +2325,7 @@ discover_after_iteration() {
     [ -f "$p" ] || continue
     rep "- data-audit の監査の報告: $p"; found=1
   done
-  [ "$found" -eq 1 ] || rep "- 候補モードの報告: 見つからない(周の中で書かれなかったか、写せなかった)"
+  [ "$found" -eq 1 ] || rep "- 候補モードの報告: 見つからない(イテレーションの中で書かれなかったか、写せなかった)"
   if [ "$JUDGE" = "正常(縮退)" ]; then
     pushed="$DISC_PUSHED"   # 判定の ls-remote で見た(origin のブランチ = 判定した HEAD なら yes)
     DISC_DEGRADED+=("$s$TAB$branch$TAB$pushed")
@@ -2348,7 +2348,7 @@ discover_after_iteration() {
     rep "- origin の $branch が判定した中身(HEAD)と違う: PR を作らずに消す(\`git push origin --delete $branch\`)。開いた PR があれば merge せずに閉じる"
   fi
   if [ "$JUDGE_OK" -ne 1 ] && [ "$HAS_ORIGIN" -eq 1 ]; then
-    # 失敗の周: 理由を問わず、origin に今夜の名のブランチがあるかを 1 回の ls-remote で確かめる(失敗しても止めない)
+    # 失敗のイテレーション: 理由を問わず、origin に今夜の名のブランチがあるかを 1 回の ls-remote で確かめる(失敗しても止めない)
     if origin_branch_sha "$branch"; then
       if [ -n "$ORIGIN_BRANCH_SHA" ]; then
         rep "- origin に $branch がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す(\`git push origin --delete $branch\`)"
@@ -2377,12 +2377,12 @@ report_discover_end() {
     fi
   done
   if [ "${#DISC_DEGRADED[@]}" -gt 0 ]; then
-    rep "" "## 縮退の周のブランチ(処理するまで、その発見元は回らない)" ""
+    rep "" "## 縮退のイテレーションのブランチ(処理するまで、その発見元は回らない)" ""
     for line in "${DISC_DEGRADED[@]}"; do
       IFS="$TAB" read -r f b p <<<"$line"
       case "$p" in
-        yes) rep "- $f: $b(push 済み。PR を手で作るか、消す — 周の報告の手順)" ;;
-        *) rep "- $f: $b(push していない。ローカルのブランチを merge するか、消す — 周の報告の手順)" ;;
+        yes) rep "- $f: $b(push 済み。PR を手で作るか、消す — イテレーションの報告の手順)" ;;
+        *) rep "- $f: $b(push していない。ローカルのブランチを merge するか、消す — イテレーションの報告の手順)" ;;
       esac
     done
   fi
@@ -2391,10 +2391,10 @@ report_discover_end() {
     "- squash・rebase で merge したとき: ブランチの sha がデフォルトブランチの祖先にならないので、消すまで、その発見元は回らない(\`git branch -D task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`。手元の追跡用の ref が残れば \`git branch -dr origin/task/候補-<発見元>-<sha>\`)" \
     "- PR を閉じたとき(merge しない): 上と同じく、消すまで、その発見元は回らない。候補は task_dir に入らないので、同じ指摘がまた出うる" \
     "- 採用: merge して pull した後に、人が対話で \`/create-task <候補_ のパス>\` を打つ(見送りの行がある候補は止まる)" \
-    "- 失敗の周が残した worktree(lock の理由 \`dev-workflow-loop: 候補:<発見元>\`)は、調べてから消すまで、その発見元は回らない"
+    "- 失敗のイテレーションが残した worktree(lock の理由 \`dev-workflow-loop: 候補:<発見元>\`)は、調べてから消すまで、その発見元は回らない"
 }
 
-# 許可の仲介の判定の記録(PERMLOG)を読み、周ごとの deny を報告に写す → PERM_DENY・PERM_KINDS
+# 許可の仲介の判定の記録(PERMLOG)を読み、イテレーションごとの deny を報告に写す → PERM_DENY・PERM_KINDS
 read_permlog() {
   local out line
   PERM_ALLOW=0; PERM_DENY=0; PERM_KINDS=""
@@ -2415,7 +2415,7 @@ read_permlog() {
   fi
 }
 
-# 正常の周の後片付け: .claude/reviews を写す → unlock → remove(--force なし)。拒否されたら残して lock し直す
+# 正常のイテレーションの後片付け: .claude/reviews を写す → unlock → remove(--force なし)。拒否されたら残して lock し直す
 remove_iteration_worktree() {
   local rv="$ITER_WT/.claude/reviews" size err="$RUN_DIR/iter-$ITER_SEQ.remove.err"
   if [ -d "$rv" ] && [ ! -L "$rv" ]; then
@@ -2423,7 +2423,7 @@ remove_iteration_worktree() {
     if [ -z "$size" ]; then
       rep "- .claude/reviews: 大きさを測れないので写さない"
     elif [ "$size" -le "$REVIEWS_COPY_LIMIT" ]; then
-      # symlink はたどらずに写す(cp -a は symlink を symlink のまま写す)。写しに失敗しても周は止めない
+      # symlink はたどらずに写す(cp -a は symlink を symlink のまま写す)。写しに失敗してもイテレーションは止めない
       if cp -a -- "$rv" "$RUN_DIR/iter-$ITER_SEQ-reviews" 2>"$RUN_DIR/iter-$ITER_SEQ-reviews.err"; then
         rep "- .claude/reviews を写した: $RUN_DIR/iter-$ITER_SEQ-reviews"
       else
@@ -2439,12 +2439,12 @@ remove_iteration_worktree() {
     REMOVED_PARENT_WORKTREES+=("$ITER_WT")
   else
     G -C "$TOP" worktree lock --reason "dev-workflow-loop: $ITER_REL" "$ITER_WT" >/dev/null 2>&1 || true
-    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $JUDGE(worktree を消せなかった。未追跡・未 commit が残った)"
+    WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: $JUDGE(worktree を消せなかった。未追跡・未 commit が残った)"
     rep "- worktree: 消せなかったので残した(未追跡・未 commit が残った。失敗には数えない): $ITER_WT($(head -c 300 "$err" | tr '\n' ' '))"
   fi
 }
 
-# ── §4: 1 周 ──
+# ── §4: 1 回のイテレーション ──
 ITER_COUNT=0
 CONSEC_FAIL=0
 CONSEC_G1=0
@@ -2469,10 +2469,10 @@ source=$ITER_SOURCE
     ITER_PROMPT="/dev-workflow:ship-task --task=$ITER_REL --unattended"
     ITER_META_EXTRA=""
   fi
-  # H31: 周の worktree の lock を付け替え、周の途中の印を置く前に、ホスト CLI の実体を内容の sha256 まで照らす
-  # (止まっても周の途中の印は残らない。終わりの環境の照合も実体の違いで通らないので、選定中の worktree は
+  # H31: イテレーションの worktree の lock を付け替え、イテレーションの途中の印を置く前に、ホスト CLI の実体を内容の sha256 まで照らす
+  # (止まってもイテレーションの途中の印は残らない。終わりの環境の照合も実体の違いで通らないので、選定中の worktree は
   # 「選定中」の lock のまま残して報告する。この後の起動の直前は、環境の照合の中の stat で照らす)
-  host_same --hash || die 20 host-proof "周を始める前に、ホスト CLI の実体($HOST_EXEC)が確かめた時と違う(更新・書き換え・差し替え)。$PROVE_HINT"
+  host_same --hash || die 20 host-proof "イテレーションを始める前に、ホスト CLI の実体($HOST_EXEC)が確かめた時と違う(更新・書き換え・差し替え)。$PROVE_HINT"
   recheck_component_proof
   ITER_WT="$SEL_WT"
   ITER_SEQ="$SEQ"
@@ -2484,29 +2484,29 @@ source=$ITER_SOURCE
   SEL_WT=""
   ITER_WTADMIN="$(G -C "$ITER_WT" rev-parse --path-format=absolute --git-dir)"
   ITER_PERMLOG="$RUN_DIR/iter-$ITER_SEQ.permlog"   # 許可の仲介の判定の記録(D22 ③。hook が 1 行ずつ足す)
-  # 8. 共有の git ディレクトリの状態を控える(周の後の照合の比べる元。周ごとに取り直す)
+  # 8. 共有の git ディレクトリの状態を控える(イテレーションの後の照合の比べる元。イテレーションごとに取り直す)
   ITER_BASE="$RUN_DIR/iter-$ITER_SEQ.base.json"
-  # 初回には保存済み state は無い。存在した周だけ、開始時からの
+  # 初回には保存済み state は無い。存在したイテレーションだけ、開始時からの
   # secret_paths の和を引き継ぐ(初回に未作成パスを補助へ渡さない)。
   if [ -f "$LAST_VERIFIED" ]; then
     if ! take_snapshot "$ITER_BASE" "$ITER_WTADMIN" "$LAST_VERIFIED" "$FRESH_CONFIG_BASELINE"; then
-      die 20 state-snapshot "周の開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
+      die 20 state-snapshot "イテレーションの開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
     fi
   else
     if ! take_snapshot "$ITER_BASE" "$ITER_WTADMIN"; then
-      die 20 state-snapshot "周の開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
+      die 20 state-snapshot "イテレーションの開始直前の状態を安全に控えられない。${SNAPSHOT_DIFF:-状態を控えられない}"
     fi
   fi
   FRESH_CONFIG_BASELINE=0
-  # 比べる元の sha256 をシェルの変数に持つ(周の中で状態ディレクトリのファイルを書き換えられても気づく)
+  # 比べる元の sha256 をシェルの変数に持つ(イテレーションの中で状態ディレクトリのファイルを書き換えられても気づく)
   if ! ITER_BASE_SHA="$(state_digest "$ITER_BASE")"; then
     # The digest rejection itself means that a later finish/report Git call
     # must not reload a config graph changed alongside this state pathname.
     STATE_GIT_UNSAFE=1
-    die 20 state-snapshot "周の開始直前の状態を安全に保持できない"
+    die 20 state-snapshot "イテレーションの開始直前の状態を安全に保持できない"
   fi
-  verify_environment || die 20 environment "子の起動直前に plugin または利用者設定が変わった"
-  # 周の途中の印(周の起動の直前に置く)
+  verify_environment || die 20 environment "イテレーションの CLI を起動する直前に plugin または利用者設定が変わった"
+  # イテレーションの途中の印(イテレーションの起動の直前に置く)
   rm -rf -- "$STATE/inflight.tmp"
   mkdir "$STATE/inflight.tmp"
   cp -- "$ITER_BASE" "$STATE/inflight.tmp/base.json"
@@ -2522,14 +2522,14 @@ source=$ITER_SOURCE
   ITER_VERIFIED_SHA=""
   VERIFY_DIFF=""
   ITER_ACTIVE=1
-  rep "" "### 周 $ITER_COUNT: $ITER_TITLE" "" "- 周の識別子: $ITER_ID" "- worktree: $ITER_WT"
+  rep "" "### イテレーション $ITER_COUNT: $ITER_TITLE" "" "- イテレーションの識別子: $ITER_ID" "- worktree: $ITER_WT"
   [ "$DISCOVER" -eq 0 ] || rep "- 今夜の名のブランチ: task/$ITER_NAME"
   printf '%s\n' "$ITER_PROMPT" >"$RUN_DIR/iter-$ITER_SEQ.prompt"
   start="$(date +%s)"
-  # 子: supervisor が別セッションで起動し、子孫を回収する。DEV_WORKFLOW_HOST_CLI を外し、
-  # 周の印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
-  # OLDPWD も外す(直前の cd で worktree の外を指す。周の中の `cd -` の行き先にさせない)
-  # H32: 自動メモリは周の子だけで無効にする。親の値や利用者の設定・既存メモリは変更しない。
+  # イテレーションで起動する CLI: supervisor が別セッションで起動し、子孫を回収する。DEV_WORKFLOW_HOST_CLI を外し、
+  # イテレーションの印を付け、ロックの fd を閉じる。プロンプトは stdin、出力はファイルへ(パイプにしない)。
+  # OLDPWD も外す(直前の cd で worktree の外を指す。イテレーションの中の `cd -` の行き先にさせない)
+  # H32: 自動メモリは、イテレーションで起動する CLI だけで無効にする。親の値や利用者の設定・既存メモリは変更しない。
   SUPERVISOR_RESULT="$RUN_DIR/iter-$ITER_SEQ.supervisor.json"
   SUPERVISOR_NONCE="$("$PY_ABS" -c 'import secrets; print(secrets.token_hex(32))')"
   SUPERVISOR_RC=97
@@ -2578,28 +2578,28 @@ source=$ITER_SOURCE
   fi
   rc=0
   if [ "$timed_out" -eq 0 ]; then SUPERVISOR_RC=0; wait "$pid" || SUPERVISOR_RC=$?; CHILD_PID=""; CHILD_START=""; fi
-  # 片付け(時間切れでも正常に終わっても、判定より前に必ず行う)。止めた子についての bash の通知
-  # (「Killed」など)は周のログへ向ける
+  # 片付け(時間切れでも正常に終わっても、判定より前に必ず行う)。止めたプロセスについての bash の通知
+  # (「Killed」など)はイテレーションのログへ向ける
   cleanup_iteration 2>>"$RUN_DIR/iter-$ITER_SEQ.err"
   dur=$(( $(date +%s) - start ))
   if [ "$timed_out" -eq 1 ]; then rep "- 終了コード: 時間切れ(${ITER_TIMEOUT} 秒)"; else rep "- 終了コード: $rc"; fi
   rep "- 所要時間: ${dur} 秒" "- ログ: $RUN_DIR/iter-$ITER_SEQ.out・$RUN_DIR/iter-$ITER_SEQ.err"
   if [ -n "$CLEANUP_LEFT" ]; then
-    # 残ったプロセスがまだ書き換えうるので、照合も判定もせず、次の周へ進まない
-    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: 片付けで残ったプロセスがあり止まった(判定していない)"
-    place_stop_mark "残ったプロセス(周 $ITER_ID の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
-    rep "- 片付け: 残ったプロセス $CLEANUP_LEFT(照合・判定をせずに止まる。周の途中の印と worktree を残す)"
-    die 10 leftover "周 $ITER_ID の片付けでプロセスが残った($CLEANUP_LEFT)。$(stop_mark_guide)"
+    # 残ったプロセスがまだ書き換えうるので、照合も判定もせず、次のイテレーションへ進まない
+    WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: 片付けで残ったプロセスがあり止まった(判定していない)"
+    place_stop_mark "残ったプロセス(イテレーション $ITER_ID の片付けで止められなかった: $CLEANUP_LEFT)" "" 1
+    rep "- 片付け: 残ったプロセス $CLEANUP_LEFT(照合・判定をせずに止まる。イテレーションの途中の印と worktree を残す)"
+    die 10 leftover "イテレーション $ITER_ID の片付けでプロセスが残った($CLEANUP_LEFT)。$(stop_mark_guide)"
   fi
   rep "- 片付け: 残ったプロセスは無い"
   # 照合(D14・D8)。§5 のネットワークの git より前
   verify_iteration
   if [ -n "$VERIFY_DIFF" ]; then
-    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: 共有の状態の変化で止まった(判定していない)"
-    place_stop_mark "共有の状態の変化(周 $ITER_ID の後の照合)" "$VERIFY_DIFF" 0
+    WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: 共有の状態の変化で止まった(判定していない)"
+    place_stop_mark "共有の状態の変化(イテレーション $ITER_ID の後の照合)" "$VERIFY_DIFF" 0
     ITER_ACTIVE=0
     rep "- 共有の状態の変化:" "$VERIFY_DIFF"
-    die 10 shared-state "周 $ITER_ID の後に共有の git の状態が変わった。$(stop_mark_guide)"
+    die 10 shared-state "イテレーション $ITER_ID の後に共有の git の状態が変わった。$(stop_mark_guide)"
   fi
   rep "- 共有の config の差分: 無し"
   # §5 の判定と後片付け(発見モードは §11 の判定)
@@ -2625,37 +2625,37 @@ source=$ITER_SOURCE
     fi
     if [ "$OUTCOME" = 保留 ]; then HELD_NAMES+=("$ITER_NAME"); fi
   else
-    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: $JUDGE"
+    WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: $JUDGE"
     rep "- worktree: 残した(lock の理由: dev-workflow-loop: $ITER_REL)"
     CONSEC_FAIL=$((CONSEC_FAIL + 1))
   fi
-  # A normal PR/候補なしの周では own worktree を先に消してから基準を更新する。
-  # 消した admin の config.worktree/origin を次の周の preflight へ残すと、
+  # A normal PR/候補なしのイテレーションでは own worktree を先に消してから基準を更新する。
+  # 消した admin の config.worktree/origin を次のイテレーションの preflight へ残すと、
   # Git が正しく作成・削除したものまで未検査の欠落として止まってしまう。
   # 残した worktree はここでなお観察され、次の起動でも厳密に照合される。
   if ! save_last_verified "$ITER_VERIFIED" "$ITER_VERIFIED_SHA"; then
-    WT_OUTCOME[$ITER_WT]="周 $ITER_COUNT: 基準を昇格できず止まった"
-    place_stop_mark "共有の状態の変化(周 $ITER_ID の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
+    WT_OUTCOME[$ITER_WT]="イテレーション $ITER_COUNT: 基準を昇格できず止まった"
+    place_stop_mark "共有の状態の変化(イテレーション $ITER_ID の後の基準昇格)" "${SNAPSHOT_DIFF:-差分: 最後に照合に通った状態を更新できない}" 1
     rep "- 基準を昇格できない:" "${SNAPSHOT_DIFF:-}"
     ITER_ACTIVE=0
     end_promotion_critical
-    die 10 shared-state "周 $ITER_ID の後の状態を基準へ昇格できない。$(stop_mark_guide)"
+    die 10 shared-state "イテレーション $ITER_ID の後の状態を基準へ昇格できない。$(stop_mark_guide)"
   fi
   rm -rf -- "$INFLIGHT"
   ITER_ACTIVE=0
   end_promotion_critical
   [ "$DISCOVER" -eq 0 ] || discover_after_iteration
   if [ "$JUDGE_OK" -eq 1 ] && [ "$OUTCOME" = 保留 ] && [ "$HOLD_CODE" = G1 ]; then
-    # PERMLOG は子が書ける参考記録であり、種類・欠落・削除・順序で
+    # PERMLOG は、イテレーションで起動した CLI が書ける参考記録であり、種類・欠落・削除・順序で
     # ブレーカーを緩めない。protected だけの deny も同じ G1 と数える。
     CONSEC_G1=$((CONSEC_G1 + 1))
     rep "- G1 の保留: 拒否記録の種類にかかわらず連続 $CONSEC_G1 回として数える"
   else
     CONSEC_G1=0
   fi
-  say "周 $ITER_COUNT: $ITER_TITLE → $JUDGE"
+  say "イテレーション $ITER_COUNT: $ITER_TITLE → $JUDGE"
   ITER_ID=""; ITER_PGID=""
-  # §6: 周の後の停止条件
+  # §6: イテレーションの後の停止条件
   if [ "$CONSEC_FAIL" -ge "$MAX_FAIL" ]; then die 10 consecutive-failures "連続失敗($CONSEC_FAIL 回)"; fi
   if [ "$CONSEC_G1" -ge "$MAX_G1_HOLDS" ]; then
     die 10 g1-holds "許可の拒否(G1)の保留が $CONSEC_G1 回続いた(許可リストを見直す)"
@@ -2731,7 +2731,7 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$HOST" ] || fail_usage "--host が空"
 if [ "$PROVE_HOST" -eq 1 ]; then
-  # 実 hook の確認だけを行う。周の選定・発見と混ぜない
+  # 実 hook の確認だけを行う。イテレーションの選定・発見と混ぜない
   [ "$DRY_RUN" -eq 0 ] || fail_usage "--prove-host と --dry-run は併用できない(--prove-host はセッションを 1 回起動する)"
   [ "$DISCOVER" -eq 0 ] || fail_usage "--prove-host と --discover は併用できない"
   [ "${#ONLY[@]}" -eq 0 ] || fail_usage "--prove-host と --only は併用できない"
@@ -2763,7 +2763,7 @@ i=0
 while [ "$i" -lt "${#MCP_CONFIGS[@]}" ]; do
   f="${MCP_CONFIGS[$i]}"
   { [ -n "$f" ] && [ -f "$f" ]; } || fail_usage "--mcp-config のファイルが無い: '$f'"
-  # 周の cwd は worktree なので、絶対パスにして渡す
+  # イテレーションの cwd は worktree なので、絶対パスにして渡す
   MCP_CONFIGS[$i]="$(cd -P -- "$(dirname -- "$f")" && pwd -P)/$(basename -- "$f")"
   i=$((i + 1))
 done
@@ -2773,10 +2773,10 @@ done
 
 # ── §2 の 2: ホストのセッションの中でない(D7)──
 check_host_session
-# 子のホスト CLI には渡さない(D7)
+# イテレーションで起動するホスト CLI には渡さない(D7)
 unset DEV_WORKFLOW_HOST_CLI
 # H31: ホストの読み込みを変える環境変数(--bare 相当の CLAUDE_CODE_SIMPLE・CLAUDE_CODE_SAFE_MODE)が立っていれば、
-# hook の自動の読み込みと認証が変わり、証明を取った起動の形の外になるので起動しない(子へ持ち越さない)
+# hook の自動の読み込みと認証が変わり、証明を取った起動の形の外になるので起動しない(イテレーションで起動する CLI へ持ち越さない)
 for v in CLAUDE_CODE_SIMPLE CLAUDE_CODE_SAFE_MODE; do
   [ -z "${!v:-}" ] || die 20 hooks-disabled "環境変数 $v が立っている(ホストが hook などの自動の読み込みを止め、証明を取った起動の形の外になる)。外してから起動する"
 done
@@ -2806,13 +2806,13 @@ ENV_GUARD_PY="$PLUGIN_ROOT/skills/ship-task/scripts/environment-guard.py"
 HOST_PATHS_OUT="$(cd / && "$PY_ABS" -B "$ENV_GUARD_PY" host-paths)" \
   || die 20 host-config-path "HOME または CLAUDE_CONFIG_DIR のパスが起動条件を満たさない"
 # 初回配布元の helper で管理入口と印だけを確認する。Git・利用者設定・
-# 保存した周の本文は読まない。未信頼の印から実行や信頼集合を復活させない。
+# 保存したイテレーションの本文は読まない。未信頼の印から実行や信頼集合を復活させない。
 STATE_GIT_UNSAFE=1
 REPO="${REPO:-$PWD}"
 STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow/loop"
 LOOP_STARTUP_PY="$ORIGINAL_PLUGIN_ROOT/skills/ship-task/scripts/loop-startup.py"
 EARLY_STARTUP="$("$PY_ABS" -B "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
-  || die 20 startup-state "環境を読む前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+  || die 20 startup-state "環境を読む前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない"
 mapfile -t EARLY_MARKERS < <(printf '%s' "$EARLY_STARTUP" | "$PY_ABS" -c '
 import json,sys
 s=json.load(sys.stdin)
@@ -2822,8 +2822,8 @@ print(s["markers"]["inflight"])
 ')
 [ "${#EARLY_MARKERS[@]}" -eq 3 ] || die 20 startup-state "起動先の印を読めない"
 [ "${EARLY_MARKERS[0]}" != True ] || die 20 locked "同じリポジトリの loop.sh が動いている(既存のロック)"
-[ "${EARLY_MARKERS[1]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容や利用者設定を読まず保存して停止する。人が設定・中断記録・残った子を確認するまで印を外して再開しない"
-[ "${EARLY_MARKERS[2]}" = absent ] || die 20 inflight-untrusted "周の途中の印は未信頼。利用者設定を読まず signal・削除・unlock・ref 更新をせず保全した"
+[ "${EARLY_MARKERS[1]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容や利用者設定を読まず保存して停止する。人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない"
+[ "${EARLY_MARKERS[2]}" = absent ] || die 20 inflight-untrusted "イテレーションの途中の印は未信頼。利用者設定を読まず signal・削除・unlock・ref 更新をせず保全した"
 # 現在の配布元を起動時だけ信頼する。過去の STATE 内コードは実行しない。
 ENV_TEMP="$(mktemp -d)" || die 20 environment "現在の実行のコピー先を作れない"
 ENV_BOOT_ARGS=()
@@ -2883,7 +2883,7 @@ STATE_BASE="${XDG_STATE_HOME:-${HOME:?HOME が無い}/.local/state}/dev-workflow
 STATE_GIT_UNSAFE=1
 verify_environment || die 20 environment "起動先確認 helper の直前に環境が変わった"
 STARTUP_JSON="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
-  || die 20 startup-state "Git を使う前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+  || die 20 startup-state "Git を使う前の起動先確認に失敗した。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない"
 mapfile -d '' -t STARTUP_FIELDS < <(printf '%s' "$STARTUP_JSON" | "$PY_ABS" -c '
 import json,sys
 s=json.load(sys.stdin)
@@ -2929,7 +2929,7 @@ if [ "${STARTUP_FIELDS[5]}" = True ]; then
   prepare_startup_state
   verify_environment || die 20 environment "中断印の再観察前に環境が変わった"
   STARTUP_LATEST="$("$PY_ABS" "$LOOP_STARTUP_PY" --repo "$REPO" --state-base "$STATE_BASE")" \
-    || die 20 startup-state "ロック取得後に起動先の対応を確認できない。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残った子を確認するまで印を外して再開しない"
+    || die 20 startup-state "ロック取得後に起動先の対応を確認できない。保存状態の stop-mark.md・inflight を含め、人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない"
   mapfile -d '' -t STARTUP_MARKERS < <(printf '%s' "$STARTUP_LATEST" | "$PY_ABS" -c '
 import json,sys
 s=json.load(sys.stdin)
@@ -2942,8 +2942,8 @@ for k in ("inflight","stop_mark"):
 fi
 if [ "$STARTUP_MARKED" -eq 1 ]; then
   [ "${STARTUP_FIELDS[9]}" != True ] || die 20 locked "同じリポジトリの loop.sh が動いている(既存のロック)"
-  [ "${STARTUP_FIELDS[8]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容と成果物を保全した。人が設定・中断記録・残った子を確認するまで印を外して再開しない"
-  die 20 inflight-untrusted "周の途中の印は未信頼。signal・削除・unlock・ref 更新をせず保全した"
+  [ "${STARTUP_FIELDS[8]}" = absent ] || die 20 stop-mark "stop-mark.md は未信頼。内容と成果物を保全した。人が設定・中断記録・残ったプロセスを確認するまで印を外して再開しない"
+  die 20 inflight-untrusted "イテレーションの途中の印は未信頼。signal・削除・unlock・ref 更新をせず保全した"
 fi
 # 中断記録が無い起動だけが通常 Git へ進む。
 G -C "$REPO_PHYS" rev-parse --git-dir >/dev/null 2>&1 || die 20 not-git "git リポジトリでない: $REPO_PHYS"
@@ -3001,7 +3001,7 @@ G -C "$TOP" show-ref --verify --quiet "refs/heads/$DEF_NAME" \
 DEF_SHA="$(G -C "$TOP" rev-parse --verify "refs/heads/$DEF_NAME^{commit}")"
 
 # ── §2 の 9: profile(D1・D2・D15・D21)──
-# 固定した sha の commit から読む(周の worktree と同じ中身。人の作業ツリーの未 commit の変更に左右されない)
+# 固定した sha の commit から読む(イテレーションの worktree と同じ中身。人の作業ツリーの未 commit の変更に左右されない)
 PROFILE_PATH=.claude/project-profile.yml
 P_MAX_ITER=""; P_MAX_FAIL=""; P_BUDGET=""; P_ITER_TIMEOUT=""; P_UNKNOWN=""
 TASK_DIR_SET=0; TASK_DIR_VALUE=""; PROFILE_STATE="無し(全項目を既定値で解決)"
@@ -3049,7 +3049,7 @@ read -r MAX_FAIL MAX_FAIL_SRC <<<"$(effective "$DEF_MAX_FAIL" "$ARG_MAX_FAIL" "$
 read -r BUDGET BUDGET_SRC <<<"$(effective "$DEF_BUDGET" "$ARG_BUDGET" "$P_BUDGET")"
 read -r ITER_TIMEOUT ITER_TIMEOUT_SRC <<<"$(effective "$DEF_ITER_TIMEOUT" "$ARG_ITER_TIMEOUT" "$P_ITER_TIMEOUT")"
 [ "$BUDGET" -ge "$ITER_TIMEOUT" ] \
-  || die 20 budget "実効値で time_budget($BUDGET)< iteration_timeout($ITER_TIMEOUT)。1 周も回らない"
+  || die 20 budget "実効値で time_budget($BUDGET)< iteration_timeout($ITER_TIMEOUT)。イテレーションが 1 回も回らない"
 
 WT_ROOT="${WT_ROOT:-$(dirname -- "$TOP")/$(basename -- "$TOP").loop}"
 # `..` と既存の親の symlink を物理パスへ正規化してから、人のチェックアウト(物理パス)と比べる
@@ -3079,13 +3079,13 @@ if [ "$O_ORIGIN" = 1 ]; then
 elif [ "$DISCOVER" -eq 1 ]; then
   ORIGIN_URL_STATE="origin が無い(push しないので、候補があれば結末は 縮退)"
 else
-  ORIGIN_URL_STATE="origin が無い(周は push しないので、結末は 縮退)"
+  ORIGIN_URL_STATE="origin が無い(イテレーションは push しないので、結末は 縮退)"
 fi
 
 # ── §2 の 12: ホスト CLI の実在と雛形のフラグの 2 段照合(argv と --help)・導入済みの同名プラグインの版(D11)──
 command -v "$HOST_BIN" >/dev/null 2>&1 || die 20 host-cli-missing "ホスト CLI '$HOST_BIN' が PATH に無い"
-# 実行ファイルを起動時に絶対パスへ解決し、補助の CLI と周の子の両方に使う(PATH に `.` などの相対の要素が
-# あると、周の cwd〈worktree〉の中の同名のファイルが起動されうる)
+# 実行ファイルを起動時に絶対パスへ解決し、補助の CLI と、イテレーションで起動する CLI の両方に使う(PATH に `.` などの相対の要素が
+# あると、イテレーションの cwd〈worktree〉の中の同名のファイルが起動されうる)
 HOST_BIN_ABS="$(command -v "$HOST_BIN")"
 case "$HOST_BIN_ABS" in
   /*) : ;;
@@ -3119,7 +3119,7 @@ if [ "$PROVE_HOST" -eq 0 ]; then
     *) die 20 host-proof "$(head -c 400 "$RUN_DIR/host-proof.err" | tr '\n' ' ')。ホスト CLI を起動せずに止まる。$PROVE_HINT" ;;
   esac
 fi
-# 周の子の起動に使う env・setsid も、周の cwd に左右されないよう絶対パスにしておく
+# イテレーションで CLI を起動するのに使う env・setsid も、イテレーションの cwd に左右されないよう絶対パスにしておく
 ENV_BIN="$(command -v env)"
 SETSID_BIN="$(command -v setsid)"
 for t in "$ENV_BIN" "$SETSID_BIN"; do
@@ -3236,11 +3236,11 @@ else
 fi
 
 
-# ── §2 の 14・15: 起動時の報告(DEF の sha は上で固定した。共有の状態は各周の起動の直前に控える)──
+# ── §2 の 14・15: 起動時の報告(DEF の sha は上で固定した。共有の状態は各イテレーションの起動の直前に控える)──
 if [ "${#MCP_CONFIGS[@]}" -gt 0 ]; then
   MCP_STATE="渡す(${MCP_CONFIGS[*]})"
 else
-  MCP_STATE="渡さない(周では MCP が使えない。MCP を使う手順は「無い場合」の経路になる)"
+  MCP_STATE="渡さない(イテレーションでは MCP が使えない。MCP を使う手順は「無い場合」の経路になる)"
 fi
 if [ "$DISCOVER" -eq 1 ]; then
   DISCOVER_LIST="$(IFS=,; printf '%s' "${DISCOVER_SOURCES[*]}")"
@@ -3253,9 +3253,9 @@ rep "- 解決後の argv: $RESOLVED_ARGV" "- プロンプトは stdin で渡す"
 rep "- 実効値: max_iterations=$MAX_ITER($MAX_ITER_SRC) max_consecutive_failures=$MAX_FAIL($MAX_FAIL_SRC) time_budget=$BUDGET($BUDGET_SRC) iteration_timeout=$ITER_TIMEOUT($ITER_TIMEOUT_SRC) kill_grace=$KILL_GRACE net_timeout=$NET_TIMEOUT"
 rep "- profile: $PROFILE_STATE"
 [ -z "$P_UNKNOWN" ] || rep "- features.loop の未知のキーは無視した: $P_UNKNOWN"
-rep "- デフォルトブランチ: $DEF_NAME @ $DEF_SHA(周はこの sha から worktree を作る)" "- origin: $ORIGIN_STATE"
+rep "- デフォルトブランチ: $DEF_NAME @ $DEF_SHA(イテレーションはこの sha から worktree を作る)" "- origin: $ORIGIN_STATE"
 if [ -n "$LEADING" ]; then
-  rep "- 先行する commit(無人の周の PR に混ざる):"
+  rep "- 先行する commit(無人のイテレーションの PR に混ざる):"
   while IFS= read -r l; do rep "  - $l"; done <<<"$LEADING"
 fi
 rep "- MCP: $MCP_STATE"
@@ -3278,10 +3278,10 @@ for path in "${!LOCKED_REASON[@]}"; do
 done
 say "解決後の argv: $RESOLVED_ARGV"
 if [ "$DRY_RUN" -eq 1 ]; then
-  # 実走のプローブで使う、周の子の環境(D22。周の worktree とその周の値は仮の値)
-  say "周の子の環境(D22。<…> は周ごとの値):" \
-    "  DEV_WORKFLOW_LOOP_WORKTREE=<周の worktree の物理パス($WT_ROOT/<実行 ID>-<周の番号>)>" \
-    "  DEV_WORKFLOW_LOOP_PERMLOG=<状態ディレクトリの周の記録($STATE/<実行 ID>/iter-<周の番号>.permlog)>" \
+  # 実走のプローブで使う、イテレーションで起動する CLI の環境(D22。イテレーションの worktree とそのイテレーションの値は仮の値)
+  say "イテレーションで起動する CLI の環境(D22。<…> はイテレーションごとの値):" \
+    "  DEV_WORKFLOW_LOOP_WORKTREE=<イテレーションの worktree の物理パス($WT_ROOT/<実行 ID>-<イテレーションの番号>)>" \
+    "  DEV_WORKFLOW_LOOP_PERMLOG=<状態ディレクトリのイテレーションの記録($STATE/<実行 ID>/iter-<イテレーションの番号>.permlog)>" \
     "  DEV_WORKFLOW_LOOP_PLUGIN_ROOT=$PLUGIN_ROOT" \
     "  DEV_WORKFLOW_LOOP_ALLOW=$ALLOW_JSON" \
     "  CLAUDE_CODE_DISABLE_AUTO_MEMORY=1"

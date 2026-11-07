@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""無人ループ(loop.sh)の許可の仲介。PermissionRequest の hook として、周のホスト CLI から呼ばれる。
+"""無人ループ(loop.sh)の許可の仲介。PermissionRequest の hook として、イテレーションのホスト CLI から呼ばれる。
 
 契約の正本は ../references/loop.md(設計は Issue #68 の D22 ③)。loop.sh が `--settings` の JSON 文字列で
-この hook を渡し、周の子の環境に次の 4 つを付ける:
+この hook を渡し、イテレーションで起動する CLI の環境に次の 4 つを付ける:
 
-  DEV_WORKFLOW_LOOP_WORKTREE    周の worktree の物理パス
+  DEV_WORKFLOW_LOOP_WORKTREE    イテレーションの worktree の物理パス
   DEV_WORKFLOW_LOOP_PERMLOG     判定の記録のファイル(1 呼び出し 1 行の JSON を足す)
   DEV_WORKFLOW_LOOP_PLUGIN_ROOT プラグインルートの物理パス
   DEV_WORKFLOW_LOOP_ALLOW       許可リスト(種類つきの JSON 配列 [{"kind": "all"|"prefix"|"exact", "words": [...]}])
@@ -12,7 +12,7 @@
 stdin の JSON(tool_name・tool_input・cwd)を読み、stdout に
 {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "allow"|"deny", ...}}}
 を返す(終了コードは常に 0)。判定は決定的で、入力と環境変数(とパスの解決に要るファイルシステム)だけで決める。
-許すのは、周の worktree の中の決まった状態ファイル(W)への書き込みと、限定の構文で読める Bash だけ。
+許すのは、イテレーションの worktree の中の決まった状態ファイル(W)への書き込みと、限定の構文で読める Bash だけ。
 Bash の `cd` は、`CDPATH= cd -P -- <P> && pwd -P` と、先頭の前置き `CDPATH= cd -P -- <P> && <続き>`(続きを <P> で
 判定する。<P> は worktree の中のディレクトリ。続きの最初の `||`・`;` より後ろは <P> と入力の cwd の両方で判定する)の
 2 つの形だけを受け付ける。追跡できない `pushd`・`popd`、ラッパー経由の移動、引用のない予約語の前置きは拒否する。
@@ -88,10 +88,10 @@ GIT_DIRECT_STATE_COMMANDS = {
     "checkout-index", "remote", "tag",
 }
 
-# deny の message に理由へ続けて添える固定の文(D22 ③ (d))。無人の周ではもう一度実行せず、unattended-mode.md の
+# deny の message に理由へ続けて添える固定の文(D22 ③ (d))。無人のイテレーションではもう一度実行せず、unattended-mode.md の
 # 許可の拒否(G1)に従う(拒否されたら別の手段で回り込まない — 保留か失敗扱い)。判定の記録(PERMLOG)の reason には入れない
 DENY_NOTE = (
-    "loop.sh の許可の仲介が拒否した。無人の周ではもう一度実行せず(別の手段で回り込まず)、"
+    "loop.sh の許可の仲介が拒否した。無人のイテレーションではもう一度実行せず(別の手段で回り込まず)、"
     "unattended-mode.md の許可の拒否(G1)に従う"
 )
 
@@ -197,7 +197,7 @@ class Ctx:
         if allow_devnull and (loc == "/dev/null" or full == "/dev/null"):
             return
         if not (inside(loc, self.wt) and inside(full, self.wt)):
-            raise other(f"{what}が周の worktree の外: {path[:200]}")
+            raise other(f"{what}がイテレーションの worktree の外: {path[:200]}")
         self.mark_write(loc)
         for target in dict.fromkeys((loc, full)):
             rel = self.rel(target)
@@ -249,18 +249,18 @@ class Ctx:
         # 最終リンクの末尾 `/` の意味を解く前にも、削除するリンク自体は worktree の中でなければならない。
         # check_path_word は plugin_root の読取りを許すため、ここで従来の削除元の範囲を保つ。
         if not inside(loc, self.wt) or (not link and not inside(full, self.wt)):
-            raise other(f"{what}が周の worktree の外: {path[:200]}")
+            raise other(f"{what}がイテレーションの worktree の外: {path[:200]}")
         # `rm -r link/` は link 自体でなくリンク先を再帰削除する。末尾 `/` の場合だけ、最終リンクを
         # たどった場所を対象にする。`rm link` の H36 の契約は変えない。
         follows_final_link = recursive and path.endswith("/") and path.rstrip("/") != ""
         if follows_final_link and link:
             if not inside(full, self.wt):
-                raise other(f"{what}が周の worktree の外: {path[:200]}")
+                raise other(f"{what}がイテレーションの worktree の外: {path[:200]}")
             self.mark_write(loc)  # check_path_word が記録したリンク自体の非書き込み判定を打ち消す
             loc, full, link = full, full, False
         self.mark_write(loc)
         if recursive and loc == self.wt:
-            raise other(f"{what}が周の worktree 自体: {path[:200]}")
+            raise other(f"{what}がイテレーションの worktree 自体: {path[:200]}")
         target_stat = None
         try:
             target_stat = os.lstat(loc) if not link else None
@@ -283,7 +283,7 @@ class Ctx:
         ok_loc = inside(loc, self.wt) or inside(loc, self.pr)
         ok_full = inside(full, self.wt) or inside(full, self.pr)
         if not (ok_loc and ok_full):
-            raise other(f"パスが周の worktree とプラグインルートの外: {path[:200]}")
+            raise other(f"パスがイテレーションの worktree とプラグインルートの外: {path[:200]}")
         # nonwrite_hits のキーは常に元の loc にする。書き込み先でもある loc は
         # mark_write で除かれ、rm・mv の元は引き続き check_remove が判定する。
         rel = self.rel(loc)
@@ -898,7 +898,7 @@ def task_branch_safe(name: str) -> bool:
 
 
 def check_git_read_options(subcommand: str, rest: list[Word]) -> None:
-    """無人の周で実際に必要な、読み取り Git の option だけを列挙する。"""
+    """無人のイテレーションで実際に必要な、読み取り Git の option だけを列挙する。"""
     common = {"--"}
     allowed = {
         "status": common | {"--short", "--branch", "--porcelain=v1", "--untracked-files=normal",
@@ -1119,7 +1119,7 @@ def check_git(ctx: Ctx, args: list[Word]) -> None:
             review_input(ctx, rest[1])
             return
         if subcommand == "push":
-            # 親が worktree の外で固定した宛先だけを、完全な refspec で送る。子の
+            # 親が worktree の外で固定した宛先だけを、完全な refspec で送る。loop.sh が起動した CLI の
             # 任意の設定注入を避けるため global options もこの safe prefix に一致する。
             repo = ctx.env.get("DEV_WORKFLOW_LOOP_PUSH_REPO", "")
             ref = ctx.env.get("DEV_WORKFLOW_LOOP_PUSH_REF", "")
@@ -1244,7 +1244,7 @@ def is_cd_form(ctx: Ctx, cmds: list[dict], ops: list[str]) -> bool:
 def cd_prefix_target(ctx: Ctx, cmds: list[dict], ops: list[str]) -> str | None:
     """cd の前置き: 最初のコマンドが決まった形の `CDPATH= cd -P -- <P>`(代入は `CDPATH=` の 1 つだけ・語は
     `cd -P -- <P>` の 4 つ・リダイレクト無し・<P> はグロブでなく `-` で始まらず `~` を含まない)で、次の区切りが `&&`、
-    続きのコマンドに cd が無いとき、<P> の物理パスを返す。<P> は周の worktree の中の、在るディレクトリに限る
+    続きのコマンドに cd が無いとき、<P> の物理パスを返す。<P> はイテレーションの worktree の中の、在るディレクトリに限る
     (プラグインルートは不可)。前置きの形でなければ None(呼び出し側が「決まった形でない cd」で拒否する)。
     `-` で始まる <P> を拒否するのは、`cd -P -- -` が `--` の後でも $OLDPWD へ移るため。`~` を含む <P> を拒否する
     のは、bash が展開する `~`(先頭・代入の形の `=`・`:` の直後)としない `~`(引用された文字が続く)をここで写すと
@@ -1384,7 +1384,7 @@ def check_sensitive_wrappers(words: list[Word]) -> None:
 def decide_bash(ctx: Ctx, command: str, env: dict) -> None:
     cwd_phys = os.path.realpath(ctx.cwd)
     if not inside(cwd_phys, ctx.wt):
-        raise other(f"入力の cwd が周の worktree の外: {ctx.cwd[:200]}")
+        raise other(f"入力の cwd がイテレーションの worktree の外: {ctx.cwd[:200]}")
     ctx.cwd = cwd_phys
     toks = tokenize(command)
     cmds, ops = parse(toks)
@@ -1521,7 +1521,7 @@ def check_cmds(ctx: Ctx, cmds: list[dict]) -> None:
                 loc, full, _ = locate(path)
                 if not (loc == "/dev/null" or ((inside(loc, ctx.wt) or inside(loc, ctx.pr))
                                                and (inside(full, ctx.wt) or inside(full, ctx.pr)))):
-                    raise other(f"読み込み元が周の worktree とプラグインルートの外: {target.text[:200]}")
+                    raise other(f"読み込み元がイテレーションの worktree とプラグインルートの外: {target.text[:200]}")
             else:
                 ctx.check_write(path, "リダイレクトの先", allow_devnull=True)
         if not words:
@@ -1593,7 +1593,7 @@ def decide(inp: dict, env: dict) -> tuple[str, str | None, str, str]:
             # (a) 対象が W の中なら allow(保護パスの外の worktree の中への書き込みも、ここでは許さない)
             loc, full, link = locate(ctx.resolve(target, False))
             if not (inside(loc, ctx.wt) and inside(full, ctx.wt)):
-                raise other(f"{tool} の対象が周の worktree の外: {target[:200]}")
+                raise other(f"{tool} の対象がイテレーションの worktree の外: {target[:200]}")
             rel = ctx.rel(loc)
             if link or not ctx.in_w(rel):
                 if is_protected(rel):

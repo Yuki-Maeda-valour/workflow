@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Git を起動せず、現在の worktree と既存の中断印の場所を解決する。
 
-設定、include、中断した周の JSON/meta は読まない。返却値は現在の管理構造の
+設定、include、中断したイテレーションの JSON/meta は読まない。返却値は現在の管理構造の
 観察であり、中断記録を信頼したり、同 UID の改竄を隔離する証明ではない。
 """
 from __future__ import annotations
@@ -253,7 +253,7 @@ def resolve(repo, state_base):
                 inflight_fd = observation.directory(os.path.join(state_path, "inflight"))
                 for name in ("meta", "base.json"):
                     if kind(observation.entry(inflight_fd, name)) != "file":
-                        raise Stop("周の途中の印が通常ファイルを持たない")
+                        raise Stop("イテレーションの途中の印が通常ファイルを持たない")
         if markers["inflight"] not in ("absent", "directory") or markers["stop_mark"] not in ("absent", "file"):
             raise Stop("中断印の種類を安全に確認できない")
         observation.check()
@@ -318,7 +318,7 @@ def main():
         else:
             result = resolve(args.repo, args.state_base)
         if args.reject_inflight and result["markers"]["inflight"] != "absent":
-            raise Stop("未信頼の周の途中の印がある。内容を使わず人の確認まで保存する")
+            raise Stop("未信頼のイテレーションの途中の印がある。内容を使わず人の確認まで保存する")
         print(json.dumps(result, ensure_ascii=True))
         return 0
     except (Stop, OSError, ValueError) as exc:

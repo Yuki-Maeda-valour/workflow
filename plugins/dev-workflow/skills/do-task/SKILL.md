@@ -29,12 +29,12 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
 9. **worktree は並行作業のときだけ作る**(design §5-26)。
    - 1 つのエージェントの作業はリポジトリ本体で行う。複数のエージェントが同じリポジトリを並行して触るときだけ、`<repo>/.claude/worktrees/<名前>` に作る。リポジトリの隣や `/tmp` には作らない。
    - 作る前に `git check-ignore -q .claude/worktrees/` で無視されているか確かめる。無視されていなければ、次のとおりにする。
-     - 無人(`--unattended`)では `.git/info/exclude` に書かない(無人ループは周〈無人ループの 1 回分の実行〉の中の変化を許さない)。worktree を作らず、リポジトリ本体で作業する。
+     - 無人(`--unattended`)では `.git/info/exclude` に書かない(無人ループはイテレーション〈無人ループの 1 回分の実行〉の中の変化を許さない)。worktree を作らず、リポジトリ本体で作業する。
      - 対話では、足すのは作業を始める前(基準コミット〈作業を始めた時点のコミット〉を控える前)に限る。足すか、人に確かめる。
    - PR がマージされた worktree は、作った側が `git worktree remove <パス>`(`--force` なし)で片付けるか、案内を出す。中を作業ディレクトリにしているプロセスを先に報告する。
    - 案内には消す前の確認を添える。無視されたファイル(`git -C <パス> status --porcelain --ignored` の `!!`)があればほかにコピーが無いので個別に確かめる。プロセスがあれば消さない。
    - これらの確かめを含めて棚卸しするのが /cleanup である。
-   - 無人ループの周の worktree と外部レビューの一時ツリー(外部のレビュアーに見せるために作る、ファイル一式の一時的なコピー)は、機構が作って自動で消すので、この方針の対象外。
+   - 無人ループのイテレーションの worktree と外部レビューの一時ツリー(外部のレビュアーに見せるために作る、ファイル一式の一時的なコピー)は、機構が作って自動で消すので、この方針の対象外。
 
 ## タスクの置き場
 
@@ -56,9 +56,9 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
   使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
   一覧は正式な手段で確定した `installPath` 付き配列。取得不能なら失敗扱い。返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、上と同じ照合を行う。
 - 以後の補助スクリプトの呼出・文書読取はコピーだけを使い、毎回直前に照合する。詳細はコピー内の無人契約 §0 に従う。
-- 人に確かめる場面ごとの扱い(D1〜D19)・周の中で控える値と照合の表・限界の正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)。
+- 人に確かめる場面ごとの扱い(D1〜D19)・イテレーションの中で控える値と照合の表・限界の正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md)。
 - 以下の各所には 1 行の分岐だけを置く。
-- `loop.sh` の周では、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` の周の Bash の書き方」で打つ。
+- `loop.sh` のイテレーションでは、この skill と references(base-commit.md・diff-snapshot-call.md など)の `$` を含むコマンドの例を字面どおりに打たず、unattended-mode.md の「`loop.sh` のイテレーションの Bash の書き方」で打つ。
 - 下の前提に含む Git 調査より先に、環境の照合後、Phase 0 の「開始前の確認」を通す。
 - **前提**(候補の選択より前に検査する。満たさなければ失敗扱い): タスク MD のパスがある(D4)/
   - parent-child 構成でない(照合をどのリポジトリで行うかが決まらないため)/
@@ -195,7 +195,7 @@ except (Exception, SystemExit) as exc:
 3. 先に [references/base-commit.md](references/base-commit.md) の事前検査(`--precheck`)を実行し、終了コード 0 のときだけ続行する(対象が git リポジトリでないときは行わない。無人では終了コード 22 でも承認を求めず失敗扱い — D6)。
    - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で打つ。
    - サブモジュール内の未コミット変更(superproject〈親のリポジトリ〉の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外の 4 つ。どの深さでも。未追跡・ステージ済み〈commit 用に載せたもの〉・追跡済みのどれも)は出ない。見るのは、ほかの変更と gitlink〈サブモジュールのコミットを指す項目〉の変更(ルートからの相対パス)。
-   - `[.]` は、無人の周の許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
+   - `[.]` は、無人のイテレーションの許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
    - `git status` を確認。
    - 未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する(無人では失敗扱い — D7)。
    - 安全な事前検査後、ブランチ処理・実装前に今回の開始時 `S` を一度保持する。[diagnostic-git.md](references/diagnostic-git.md) §2 の順とする。
@@ -260,8 +260,8 @@ researcher に、タスク MD の対象ファイル群の現状・既存パタ�
 - 返答の先頭の 1 行に、自分のモデルの名前と版を書くこと(`モデル: <名前と版>`。分からなければ `モデル: 未確認`)。内蔵の implementer だけに求め、外部 implementer のモデルは実行記録から取る
 - 機密ファイル(`secret_paths`)を読まない・報告に値を含めないこと(**外部 implementer にはこの指示に保証が無く、明示承認〈references/external-runners.md §12-4〉が唯一の防御である**)
 - `.claude/grasp.md`(あれば)のパス — 前回要約と参照索引として使う。ただし現在の対象ファイル・依存先・規約を読むこと
-- タスク MD はチェックボックスの更新だけにし、本文を変えない(無人では、変えると周が失敗扱いになる)
-- 無人では次も含める: 「`commit` / `stash` / `branch` / `reset` / `push` / `config`(`git config` で設定を書く)をしない(すると周が失敗扱いになる)」。あわせて原則 5 の無人の項に従う
+- タスク MD はチェックボックスの更新だけにし、本文を変えない(無人では、変えるとイテレーションが失敗扱いになる)
+- 無人では次も含める: 「`commit` / `stash` / `branch` / `reset` / `push` / `config`(`git config` で設定を書く)をしない(するとイテレーションが失敗扱いになる)」。あわせて原則 5 の無人の項に従う
 
 実装の委託先は Phase 0 の解決結果に従う。
 - **内蔵に解決されたとき**(宣言なし / 既定表外の名前 / parent-child / 承認を拒否済み / 条件 A・B〈下の手順 1 で ITER ごとに判定する〉/ 無人)は、

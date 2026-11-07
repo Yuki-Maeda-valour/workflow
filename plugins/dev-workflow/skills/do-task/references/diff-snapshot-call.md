@@ -23,7 +23,7 @@
 - 開始の `start` は実装前、`take` は snapshot 前、`seal` は実入力の生成後。`seal` が返す hash に更新し、
   `verify --mode pre-stage` に通った集合を reviewer へ渡す。開示一覧も省略しない。
 
-`loop.sh` の周(無人ループの 1 回分の実行)では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` の周の Bash の書き方」で打つ。
+`loop.sh` のイテレーション(無人ループの 1 回分の実行)では、この文書の `$` を含むコマンドの例を字面どおりに打たず、[unattended-mode.md](../../ship-task/references/unattended-mode.md) の「`loop.sh` のイテレーションの Bash の書き方」で打つ。
 
 **診断表示と元データ**: 改竄の疑いの各列、承認済み項目・filter 名・`pager.*` 無効化の NOTE、promisor 設定の診断・NOTEは、ASCII 制御文字と UTF-8 の C1(U+0080〜U+009F)を各1個の `?` に置き換える。承認ダイジェスト、filter 無効化用の NUL 終端トークン、比較する内容と patch は元のバイト列を保つ。表示後の文字列を承認や比較に使わない。対象範囲と限界は [external-runners.md §9-1](external-runners.md) を参照する。
 

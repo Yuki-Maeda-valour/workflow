@@ -10,7 +10,7 @@
 #                                                 # L を含めない限り変異テストは回さない
 #   bash implement-guard-selftest.sh --only L-a   # 変異 1 つだけ(L-<記号>。記号は --list に出る)
 #   bash implement-guard-selftest.sh --list       # 単位(--only に渡せる値)を 1 行に 1 つ出す。何も作らない。
-#                                                 # M・N はケースごと、L は変異ごと、ほかは群ごと(78 行)
+#                                                 # M・N はケースごと、L は変異ごと、ほかは群ごと(79 行)
 #   bash implement-guard-selftest.sh --check-units A,B1,...   # 渡した単位が全ケースをちょうど 1 回ずつ覆うかを見る
 #                                                 # (0=覆う / 1=覆わない。何も作らない)
 #   IMPLEMENT_GUARD=<パス> bash implement-guard-selftest.sh   # 別の実装を対象にする(変異テスト用)
@@ -24,7 +24,7 @@
 # 期待終了コード: 0=成功 2=usage 20=internal 30=縮退(take) 31=引き継ぎ 32=縮退(compare)
 #                 33=比較不能・照合や復元の失敗 34=要件本文の変更 35=選択パスと実体の対応の変化
 #
-# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N13・P1〜P9・L)。P は所属の印(記録の外の owner-*)。検出の類型に当たるケース名には固定のタグ
+# ケース名の先頭はケース ID(A1〜K2・M1〜M27・N1〜N14・P1〜P9・L)。P は所属の印(記録の外の owner-*)。検出の類型に当たるケース名には固定のタグ
 # `[類型:<名前>]` が入る(内容変更 / 完了条件書き換え / 削除 / symlink差し替え / 日本語パス /
 # 空白入りパス / unbornHEAD / stash / 別ブランチ切替)。
 #
@@ -83,7 +83,7 @@ done
 MUT_IDS="a b c d e f g h i j k l m n o p r w s u v t q x y z"
 ALL_CASES="A1 A2 A3 A4 A5 B1 B2 B3 B4 B5 B6 B7 B8 B9 B10 B11 B12 C1 C2 C3 C4 C5 C6 C7 C8 C9 C10 D1 D2 D3 D4 D5 D6
 E1 E2 E3 E4 E5 E6 E7 E8 E9 E10 F1 F2 F3 F4 F5 F6 G1 G2 G3 G4 G5 G6 G7 G8 H1 H2 I1 I2 I3 I4 I5
-	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 P1 P2 P3 P4 P5 P6 P7 P8 P9 L"
+	J1 J2 J3 J4 J5 J6 J7 J8 J9 J10 K1 K2 M1 M2 M3 M4 M5 M6 M7 M8 M9 M10 M11 M12 M13 M14 M15 M16 M17 M18 M19 M20 M21 M22 M23 M24 M25 M26 M27 N1 N2 N3 N4 N5 N6 N7 N8 N9 N10 N11 N12 N13 N14 P1 P2 P3 P4 P5 P6 P7 P8 P9 L"
 id_matches() { # $1=--only の値 1 つ $2=ケース ID → 0 なら、その値でそのケースが流れる(1 文字は群の全体、それ以外は完全一致)
   [ "$1" = "$2" ] && return 0
   [ "${#1}" -eq 1 ] && [ "$1" != L ] && [ "${2:0:1}" = "$1" ] && return 0
@@ -4530,7 +4530,7 @@ n13_bounded() { # $1=取り出した関数 $2=短い読み取りを起こす書�
   local lib="$1" writer="$2" label="$3" want_dd="$4" count nbad bad got_dd desc
   # 組み合わせの数: 上限 0 を除く 5 通り × 量 4 通り = 20 通りと、上限 0 の量 3 通り(上限−1 を除く)で 23 通り。
   # 書き手 2 種を掛けて 46 通り。組み合わせを足すときは、この注釈と、この関数の 46(2 か所)を一緒に直す
-  desc="上限の境界(dd=$label): 組み合わせ 46 通りで大きさと終了値が期待どおり"
+  desc="上限の境界(dd=$label): 組み合わせ 46 通りで大きさ・終了値・BOUNDED_SIZE が期待どおり"
   RC=0
   guard_t "$T_RUN" bash -c '
     lib="$1" work="$2" writer="$3"
@@ -4545,15 +4545,19 @@ n13_bounded() { # $1=取り出した関数 $2=短い読み取りを起こす書�
         for amount in $((limit - 1)) "$limit" $((limit + 1)) $((limit + 70000)); do
           [ "$amount" -ge 0 ] || continue
           if [ "$kind" = head ]; then w=(head -c "$amount" /dev/zero); else w=(python3 "$writer" "$amount"); fi
+          # BOUNDED_SIZE は、空でなければ保存先の実際の大きさと同じ。終了値 0 なら空でない(前の値 999 を残さない)
+          BOUNDED_SIZE=999
           rc=0; bounded_config_stdout "$out" "$limit" effective "${w[@]}" || rc=$?
           size="$(wc -c <"$out" | tr -d " ")"
           n=$((n + 1))
-          if [ "$amount" -le "$limit" ]; then
-            [ "$rc" -eq 0 ] && [ "$size" -eq "$amount" ] && continue
-          else
-            [ "$rc" -ne 0 ] && [ "$size" -eq "$limit" ] && continue
+          if { [ -z "$BOUNDED_SIZE" ] || [ "$BOUNDED_SIZE" = "$size" ]; } && { [ "$rc" -ne 0 ] || [ -n "$BOUNDED_SIZE" ]; }; then
+            if [ "$amount" -le "$limit" ]; then
+              [ "$rc" -eq 0 ] && [ "$size" -eq "$amount" ] && continue
+            else
+              [ "$rc" -ne 0 ] && [ "$size" -eq "$limit" ] && continue
+            fi
           fi
-          nbad=$((nbad + 1)); echo "NG $kind 上限=$limit 量=$amount rc=$rc 大きさ=$size"
+          nbad=$((nbad + 1)); echo "NG $kind 上限=$limit 量=$amount rc=$rc 大きさ=$size BOUNDED_SIZE=[$BOUNDED_SIZE]"
         done
       done
     done
@@ -4573,15 +4577,67 @@ n13_bounded() { # $1=取り出した関数 $2=短い読み取りを起こす書�
     ok "$desc"
   fi
 }
+n13_paths() { # $1=取り出した 3 関数 $2=取り出した bounded_config_parse → 失敗の経路と呼び出し元が、前の呼び出しの BOUNDED_SIZE を使わない
+  local lib="$1" plib="$2" p
+  RC=0
+  guard_t "$T_RUN" bash -c '
+    lib="$1" plib="$2" work="$3"
+    source "$lib" || exit 3
+    source "$plib" || exit 3
+    resolve_stat; [ -n "$STAT_FLAVOR" ] || exit 3
+    WORK="$work"; CONFIG_PARSE_SEQ=13; GIT_PRE=(); TOP=.; GIT_USED=0; CONFIG_PARSE_BYTES=0
+    git() { shift 2; "$@"; }            # 実効の分岐の「git -C . <引数>」を、引数の書き手に替える
+    isolated_config_git() { "$@"; }     # 隔離の分岐(bounded_config_parse が使う)も、引数の書き手に替える
+    out="$work/n13-path-out"; nodir="$work/n13-no-such-dir"
+    # 失敗の経路 4 つ。どれも、同じシェルで前に成功した呼び出しが BOUNDED_SIZE に 5 を入れた後に流す
+    for p in mkfifo out stat dd; do
+      (
+        prc=0; bounded_config_stdout "$out" 100 effective head -c 5 /dev/zero || prc=$?
+        pbs="$BOUNDED_SIZE"; dest="$out"
+        case "$p" in
+          mkfifo) WORK="$nodir" ;;              # mkfifo が失敗する
+          out) dest="$nodir/out" ;;             # 保存先を作れない
+          stat) stat_size() { return 1; } ;;    # 保存先の大きさを取れない
+          dd) dd() { return 1; } ;;             # dd が保存先へ書けない
+        esac
+        rc=0; bounded_config_stdout "$dest" 100 effective head -c 5 /dev/zero || rc=$?
+        echo "FP $p 前=$prc/$pbs 後=$rc/[$BOUNDED_SIZE]"
+      )
+    done
+    # 呼び出し元: 成功では、保存先の大きさだけ CONFIG_PARSE_BYTES が増える
+    rc=0; bounded_config_parse "$out" head -c 1234 /dev/zero || rc=$?
+    echo "CALLER ok rc=$rc 足した=$CONFIG_PARSE_BYTES 大きさ=$(wc -c <"$out" | tr -d " ")"
+    # 早い return の後は、前の呼び出しの大きさ(1234)ではなく、保存先の 7 byte を足す
+    printf 1234567 >"$work/n13-seven"; base="$CONFIG_PARSE_BYTES"
+    ( WORK="$nodir"; rc=0; bounded_config_parse "$work/n13-seven" head -c 3 /dev/zero || rc=$?
+      echo "CALLER early rc=$rc 足した=$((CONFIG_PARSE_BYTES - base))" )
+  ' _ "$lib" "$plib" "$WORK" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show "N13 失敗の経路と呼び出し元"
+  rc_is "失敗の経路と呼び出し元の確かめが最後まで動いた" 0
+  for p in mkfifo out stat dd; do
+    ckeq "失敗の経路($p): 前の成功の後でも、終了値 125 で BOUNDED_SIZE が空" \
+      "$(sed -n "s/^FP $p //p" "$CASE_OUT")" "前=0/5 後=125/[]"
+  done
+  ckeq "呼び出し元(bounded_config_parse)の成功: 保存先の大きさだけ CONFIG_PARSE_BYTES が増える" \
+    "$(sed -n 's/^CALLER ok //p' "$CASE_OUT")" "rc=0 足した=1234 大きさ=1234"
+  ckeq "呼び出し元(bounded_config_parse)の早い失敗: 前の呼び出しの大きさを使わず、保存先の 7 byte を足す" \
+    "$(sed -n 's/^CALLER early //p' "$CASE_OUT")" "rc=125 足した=7"
+}
 case_N13() { # bounded_config_stdout は短い読み取りでも上限を越えて写さず、超過を 0 以外で返す
   CID=N13; TAG=""
-  local lib="$WORK/n13-bounded.sh" writer="$WORK/n13-writer.py" bindir="$WORK/n13-bin" name path_dd
+  local lib="$WORK/n13-bounded.sh" plib="$WORK/n13-parse.sh" writer="$WORK/n13-writer.py" bindir="$WORK/n13-bin" name path_dd
+  # 3 つの呼び出し元(selector_git・bounded_config_parse・bounded_effective_origins)が BOUNDED_SIZE を使う行(同じ字面)
+  local caller_line='  if [ -n "$BOUNDED_SIZE" ]; then size="$BOUNDED_SIZE"; else size="$(stat_size "$out" 2>/dev/null)" || return 125; fi'
   # 対象から 3 関数を取り出して直接呼ぶ。M17 は終了値と診断の文しか見ないので、上限を越えて読む誤りを見つけられない
   for name in resolve_stat stat_size bounded_config_stdout; do
     awk "/^${name}\\(\\) \\{/,/^}/" "$TARGET"
   done >"$lib"
   ckeq "取り出したファイルに 3 関数の頭が 1 行ずつ" \
     "$(grep -c -e '^resolve_stat() {' -- "$lib") $(grep -c -e '^stat_size() {' -- "$lib") $(grep -c -e '^bounded_config_stdout() {' -- "$lib")" "1 1 1"
+  # 呼び出し元の確かめには bounded_config_parse も取り出す(3 関数のファイルには混ぜない)
+  awk "/^bounded_config_parse\\(\\) \\{/,/^}/" "$TARGET" >"$plib"
+  ckeq "取り出したファイルに bounded_config_parse の頭が 1 行" "$(grep -c -e '^bounded_config_parse() {' -- "$plib")" 1
+  ckeq "3 つの呼び出し元が、同じ字面の行で BOUNDED_SIZE を使う" "$(grep -cxF -e "$caller_line" -- "$TARGET")" 3
   # 短い読み取りを起こす書き手。大きさの違う小さな書き込みを繰り返し、os.write が一部しか書かなければ残りを書き直す
   cat >"$writer" <<'PYCODE'
 import os
@@ -4605,6 +4661,7 @@ PYCODE
   # PATH で選ばれる dd で回す。/bin/dd がそれと別の実体なら、/bin/dd だけを置いたフォルダを PATH の先頭にして、もう一度回す
   path_dd="$(command -v dd)"
   n13_bounded "$lib" "$writer" "$path_dd" "$path_dd"
+  n13_paths "$lib" "$plib"
   if [ ! -x /bin/dd ]; then
     echo "NOTE: N13 /bin/dd が無いため、/bin/dd での回し直しを省く"
   elif [ /bin/dd -ef "$path_dd" ]; then
@@ -4613,6 +4670,148 @@ PYCODE
     mkdir -p -- "$bindir" && ln -sf /bin/dd "$bindir/dd"
     PATH="$bindir:$PATH" n13_bounded "$lib" "$writer" /bin/dd "$bindir/dd"
   fi
+}
+n14_run() { # $1=PATH の頭に足すフォルダ(空なら足さない) $2=SHA_CMD $3=呼び方 残り=引数 → RC・CASE_OUT・CASE_ERR
+  local pre="$1"
+  shift
+  RC=0
+  PATH="$pre$PATH" guard_t "$T_RUN" bash "$WORK/n14-run.sh" "$WORK/n14-sha.sh" "$@" </dev/null >"$CASE_OUT" 2>"$CASE_ERR" || RC=$?
+  mark_timeout; show "N14 $*"
+}
+n14_avail() { # $1=sha256sum|shasum|openssl → 0 なら、その道具がこの環境で動く
+  case "$1" in
+    sha256sum) command -v sha256sum >/dev/null 2>&1 && sha256sum </dev/null >/dev/null 2>&1 ;;
+    shasum) command -v shasum >/dev/null 2>&1 && shasum -a 256 </dev/null >/dev/null 2>&1 ;;
+    openssl) command -v openssl >/dev/null 2>&1 && openssl dgst -sha256 </dev/null >/dev/null 2>&1 ;;
+    *) return 1 ;;
+  esac
+}
+n14_errs() { grep -e '^ERROR \[internal\]' -- "$CASE_ERR" | sed -n 's/.*終了コード \([0-9]*\).*/\1/p' | paste -sd ' ' -; }   # ERROR [internal] の行の終了コード(順に)
+case_N14() { # sha256 の補助は、3 形式(sha256sum・shasum・openssl)とも 16 進だけを出し、道具の終了コードと出力をそのまま通す
+  CID=N14; TAG=""
+  local lib="$WORK/n14-sha.sh" d="$WORK/n14" name fmt sc pre label t h exp_file exp_stdin exp_str real got
+  local files=() strs=() fmts=()
+  # 対象から 6 関数を取り出して直接呼ぶ。sha256_str は 1 行で閉じる関数なので、awk の範囲(次の行頭の } まで)ではなく、grep で 1 行だけ取り出す
+  { for name in resolve_sha_cmd sha256_hex_field sha256_hex_after sha256_file sha256_stdin; do
+      awk "/^${name}\\(\\) \\{/,/^}/" "$TARGET"
+    done
+    grep -e '^sha256_str() {' -- "$TARGET"
+  } >"$lib"
+  ckeq "取り出したファイルに 6 関数の頭が 1 行ずつ" \
+    "$(for name in resolve_sha_cmd sha256_hex_field sha256_hex_after sha256_file sha256_stdin sha256_str; do grep -c -e "^${name}() {" -- "$lib"; done | paste -sd ' ' -)" \
+    "1 1 1 1 1 1"
+  # 対象と同じ枠組み(set -eEuo pipefail と、対象と同じ形の ERR の罠)で、取り出した関数を呼ぶ
+  cat >"$WORK/n14-run.sh" <<'EOF'
+set -eEuo pipefail
+trap 'ec=$?; echo "ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)" >&2; exit 20' ERR
+source "$1"
+SHA_CMD="$2"; mode="$3"; shift 3
+case "$mode" in
+  each) # 引数=ファイル… -- 文字列…。呼び出しごとに、終了値と 16 進を 1 行に出す
+    files=(); while [ "$1" != -- ]; do files+=("$1"); shift; done; shift
+    for f in "${files[@]}"; do rc=0; h="$(sha256_file "$f")" || rc=$?; printf 'file %s %s\n' "$rc" "$h"; done
+    for f in "${files[@]}"; do rc=0; h="$(sha256_stdin <"$f")" || rc=$?; printf 'stdin %s %s\n' "$rc" "$h"; done
+    for s in "$@"; do rc=0; h="$(sha256_str "$s")" || rc=$?; printf 'str %s %s\n' "$rc" "$h"; done ;;
+  fail-file) rc=0; h="$(sha256_file "$1")" || rc=$?; printf 'rc=%s h=[%s]\n' "$rc" "$h" ;;
+  fail-both)
+    rc=0; h="$(sha256_file "$1")" || rc=$?; printf 'file rc=%s h=[%s]\n' "$rc" "$h"
+    rc=0; h="$(sha256_stdin <"$1")" || rc=$?; printf 'stdin rc=%s h=[%s]\n' "$rc" "$h" ;;
+  trap-file) h="$(sha256_file "$1")"; printf 'h=[%s]\n' "$h" ;;              # || なしの代入(ERR の罠が動く)
+  trap-env) printf 'env\t%s\n' "$(sha256_str abc)"; echo after ;;          # config_env_row と同じ形
+  select) PATH="$1"; resolve_sha_cmd; printf 'SHA_CMD=[%s]\n' "$SHA_CMD" ;;
+esac
+EOF
+  # 入力: 空・abc・NUL と CR と LF を含む・70000 byte・空白を含む名前のファイルと、文字列 4 つ(abc・空・改行を含む・-n)
+  mkdir -p -- "$d"
+  : >"$d/empty"
+  printf 'abc' >"$d/abc"
+  printf 'a b\n\0c\r\n' >"$d/bin"
+  python3 -c 'import sys; sys.stdout.buffer.write(bytes(i % 251 for i in range(70000)))' >"$d/big"
+  printf 'x\n' >"$d/sp ace"
+  files=("$d/empty" "$d/abc" "$d/bin" "$d/big" "$d/sp ace")
+  strs=(abc "" $'x\ny\n' -n)
+  ckeq "70000 byte のファイルを作れた" "$(size_of "$d/big")" 70000
+  # 期待する値は、テストの側の sha256sum で求める
+  exp_file=""; exp_stdin=""; exp_str=""
+  for t in "${files[@]}"; do
+    h="$("$REAL_SHA256SUM" <"$t")"; exp_file="$exp_file${exp_file:+$'\n'}0 ${h%% *}"
+  done
+  exp_stdin="$exp_file"
+  for t in "${strs[@]}"; do
+    h="$(printf '%s' "$t" | "$REAL_SHA256SUM")"; exp_str="$exp_str${exp_str:+$'\n'}0 ${h%% *}"
+  done
+  # スタブ: OpenSSL 1.1・LibreSSL の書式(`(stdin)= <16 進>`)の openssl と、3 つの名前で同じ動きの失敗のスタブ 2 種
+  mkdir -p -- "$d/ssl11" "$d/fail23" "$d/partial"
+  cat >"$d/ssl11/openssl" <<EOF
+#!/usr/bin/env bash
+h="\$("$REAL_SHA256SUM")" || exit \$?
+printf '(stdin)= %s\n' "\${h%% *}"
+EOF
+  for t in sha256sum shasum openssl; do
+    printf '#!/usr/bin/env bash\ncat >/dev/null\nexit 23\n' >"$d/fail23/$t"
+    printf '#!/usr/bin/env bash\ncat >/dev/null\nprintf %s\nexit 23\n' "'deadbeef  -\\n'" >"$d/partial/$t"
+  done
+  printf '#!/usr/bin/env bash\ncat >/dev/null\nprintf %s\nexit 23\n' "'SHA2-256(stdin)= deadbeef\\n'" >"$d/partial/openssl"
+  chmod +x -- "$d/ssl11/openssl" "$d/fail23/"* "$d/partial/"*
+  # この環境で動く形式(無いものは NOTE: の行で省く)
+  for sc in sha256sum shasum openssl; do
+    if n14_avail "$sc"; then fmts+=("$sc"); else echo "NOTE: N14 $sc が無い(か動かない)ため、SHA_CMD=$sc の確かめを省く"; fi
+  done
+  # 形式ごとに、3 関数が期待する 16 進を出し、終了値が 0
+  for fmt in "${fmts[@]}" openssl-ssl11; do
+    sc="$fmt"; pre=""; label="SHA_CMD=$fmt"
+    if [ "$fmt" = openssl-ssl11 ]; then sc=openssl; pre="$d/ssl11:"; label="SHA_CMD=openssl(OpenSSL 1.1・LibreSSL の書式のスタブ)"; fi
+    n14_run "$pre" "$sc" each "${files[@]}" -- "${strs[@]}"
+    rc_is "$label: 呼び出しが最後まで動いた" 0
+    ckeq "$label: sha256_file が 5 つのファイルで終了値 0 と期待する 16 進" "$(sed -n 's/^file //p' "$CASE_OUT")" "$exp_file"
+    ckeq "$label: sha256_stdin が 5 つの入力で終了値 0 と期待する 16 進" "$(sed -n 's/^stdin //p' "$CASE_OUT")" "$exp_stdin"
+    ckeq "$label: sha256_str が 4 つの文字列で終了値 0 と期待する 16 進" "$(sed -n 's/^str //p' "$CASE_OUT")" "$exp_str"
+  done
+  # 失敗の形: 無いファイルは、3 形式とも終了値が 0 でなく、標準出力が空
+  for sc in "${fmts[@]}"; do
+    n14_run "" "$sc" fail-file "$d/missing"
+    got="$(cat "$CASE_OUT")"
+    case "$got" in
+      "rc=0 "*|"") ng "SHA_CMD=$sc: 無いファイルで終了値が 0 でなく、標準出力が空(実際: $(flat "$got"))" ;;
+      "rc="*" h=[]") ok "SHA_CMD=$sc: 無いファイルで終了値が 0 でなく、標準出力が空" ;;
+      *) ng "SHA_CMD=$sc: 無いファイルで終了値が 0 でなく、標準出力が空(実際: $(flat "$got"))" ;;
+    esac
+  done
+  # ディレクトリは sha256sum だけで見る(shasum は空の入力として読み、終了値 0 で空の入力のハッシュを出す。製品は変えない)
+  n14_run "" sha256sum fail-file "$d"
+  got="$(cat "$CASE_OUT")"
+  case "$got" in
+    "rc=0 "*|"") ng "SHA_CMD=sha256sum: ディレクトリで終了値が 0 でなく、標準出力が空(実際: $(flat "$got"))" ;;
+    "rc="*" h=[]") ok "SHA_CMD=sha256sum: ディレクトリで終了値が 0 でなく、標準出力が空" ;;
+    *) ng "SHA_CMD=sha256sum: ディレクトリで終了値が 0 でなく、標準出力が空(実際: $(flat "$got"))" ;;
+  esac
+  # 道具の終了コードと出力をそのまま通す(何も出さずに 23 / 出してから 23)
+  for sc in sha256sum shasum openssl; do
+    n14_run "$d/fail23:" "$sc" fail-both "$d/abc"
+    ckeq "SHA_CMD=$sc: 道具が何も出さずに 23 で終わると、終了値 23 で標準出力が空" \
+      "$(cat "$CASE_OUT")" "file rc=23 h=[]"$'\n'"stdin rc=23 h=[]"
+    n14_run "$d/partial:" "$sc" fail-both "$d/abc"
+    ckeq "SHA_CMD=$sc: 道具が出してから 23 で終わると、終了値 23 で標準出力が deadbeef" \
+      "$(cat "$CASE_OUT")" "file rc=23 h=[deadbeef]"$'\n'"stdin rc=23 h=[deadbeef]"
+  done
+  # ERR の罠が動く呼び方(SHA_CMD=sha256sum)
+  n14_run "" sha256sum trap-file "$d/missing"
+  ckeq "ERR の罠: 無いファイルを || なしで代入すると、終了値 20・ERROR [internal] の終了コードが順に 1 と 20・標準出力が空" \
+    "$RC / $(n14_errs) / $(cat "$CASE_OUT")" "20 / 1 20 / "
+  n14_run "$d/fail23:" sha256sum trap-env
+  ckeq "ERR の罠: 23 で終わる道具の下の printf の引数(config_env_row の形)は、終了値 0・ERROR [internal] の終了コードが順に 23 と 20・後の行も出る" \
+    "$RC / $(n14_errs) / $(cat "$CASE_OUT")" "0 / 23 20 / env$TAB"$'\n'"after"
+  # 選び方: PATH を 1 つのフォルダに絞り、実体へのシンボリックリンクだけを置く
+  for sc in shasum openssl; do
+    real="$(command -v "$sc" 2>/dev/null || true)"
+    if [ -z "$real" ]; then echo "NOTE: N14 $sc が無いため、PATH に $sc だけを置いた選び方の確かめを省く"; continue; fi
+    mkdir -p -- "$d/only-$sc" && ln -sf -- "$real" "$d/only-$sc/$sc"
+    n14_run "" sha256sum select "$d/only-$sc"
+    ckeq "選び方: PATH に $sc だけなら SHA_CMD=$sc" "$(cat "$CASE_OUT")" "SHA_CMD=[$sc]"
+  done
+  mkdir -p -- "$d/only-none"
+  n14_run "" sha256sum select "$d/only-none"
+  ckeq "選び方: PATH にどれも無ければ SHA_CMD は空" "$(cat "$CASE_OUT")" "SHA_CMD=[]"
 }
 
 # ════════════════════════ 実行 ════════════════════════

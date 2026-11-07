@@ -165,10 +165,10 @@
       "reason": "無人実行で別の AI へ渡す要点を定める項目名。"
     },
     {
-      "name": "周の Bash の書き方",
+      "name": "イテレーションの Bash の書き方",
       "definition": {
         "path": "plugins/dev-workflow/skills/ship-task/references/unattended-mode.md",
-        "text": "**`loop.sh` の周の Bash の書き方**"
+        "text": "**`loop.sh` のイテレーションの Bash の書き方**"
       },
       "files": [
         "plugins/dev-workflow/skills/create-task/references/candidate-mode.md",
@@ -181,7 +181,7 @@
         "plugins/dev-workflow/skills/update-doc/SKILL.md"
       ],
       "forms": [
-        "周の Bash の書き方"
+        "イテレーションの Bash の書き方"
       ],
       "reason": "無人実行で使えるコマンドの書き方を定める項目名。"
     },

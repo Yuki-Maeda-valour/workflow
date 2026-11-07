@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Linux の subreaper で、一周の子孫を最後の waitpid まで所有して回収する。"""
+"""Linux の subreaper で、1 回のイテレーションで起動したプロセス(子孫を含む)を、最後の waitpid まで所有して回収する。"""
 import argparse
 import ctypes
 import errno

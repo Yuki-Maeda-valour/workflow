@@ -36,7 +36,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 
 ## 候補モード(`--candidates`)
 
-無人ループの発見の周(無人ループの 1 回分の実行。`/ship-task --discover=data-audit --unattended`)が呼ぶ。
+無人ループの発見のイテレーション(無人ループの 1 回分の実行。`/ship-task --discover=data-audit --unattended`)が呼ぶ。
 - 指摘を承認を待たずに task_dir の `候補_{名}.md` として書き出し、人に確かめる場面を出さない。
 - 引数・人に確かめる場面と工程の置き換え・選定・書き出し・結果の行・無人・限界の正本(ほかが合わせる元)は [../create-task/references/candidate-mode.md](../create-task/references/candidate-mode.md)、
 - 指摘キーの識別子と観点群は [references/checks.md](references/checks.md) の「候補モードの識別子と観点群」。

@@ -365,7 +365,7 @@ def stop_control_from_args(args: argparse.Namespace, prior: dict[str, Any] | Non
     if prior is not None and not fresh:
         held = prior.get("stop_control")
         if held != descriptor:
-            raise Stop("停止ファイルの基準が周の途中で変わった")
+            raise Stop("停止ファイルの基準がイテレーションの途中で変わった")
         return descriptor
 
     # Only an absent leaf can establish a baseline.  Walk the already-existing
@@ -774,7 +774,7 @@ def safe_config_file(top: str, path: str, budget: Budget,
         else:
             observed = {"path": "config:" + path, **target_entry}
         if require_exact and observed != expected:
-            raise Stop("保持済み config が周の途中で変わった")
+            raise Stop("保持済み config がイテレーションの途中で変わった")
         if link_before is not None:
             now = os.stat(name, dir_fd=parent, follow_symlinks=False)
             if not same(link_before, now) or os.readlink(name, dir_fd=parent) != link_target:
@@ -1161,18 +1161,18 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
         # present file still has no basis and must not reach ordinary Git
         # setup.
         if not allow_new_worktree_root or missing != {own_root}:
-            raise Stop("config 候補が周の途中で変わった")
+            raise Stop("config 候補がイテレーションの途中で変わった")
         if not os.path.lexists(own_root[1]):
             paths = [key for key in paths if key != own_root]
         else:
             if not copy_source_git_dir:
-                raise Stop("config 候補が周の途中で変わった")
+                raise Stop("config 候補がイテレーションの途中で変わった")
             source_admin = os.path.abspath(copy_source_git_dir)
             source_kind = "common" if source_admin == os.path.abspath(common) else "worktree"
             source_key = (source_kind, os.path.abspath(os.path.join(source_admin, "config.worktree")))
             copied_from = expected.get(source_key)
             if not isinstance(copied_from, dict) or copied_from.get("state") != "present":
-                raise Stop("config 候補が周の途中で変わった")
+                raise Stop("config 候補がイテレーションの途中で変わった")
             source = copied_from.get("entry")
             if not isinstance(source, dict):
                 raise Stop("保存済み config の形式を読めない")
@@ -1182,7 +1182,7 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
             try:
                 fd, before = open_regular_path(own_root[1], budget)
             except Stop:
-                raise Stop("config 候補が周の途中で変わった") from None
+                raise Stop("config 候補がイテレーションの途中で変わった") from None
             try:
                 raw = read_open_regular(fd, before, budget)
             finally:
@@ -1192,7 +1192,7 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
                     or source_file.get("kind") != "file"
                     or source_file.get("sha256") != hashlib.sha256(raw).hexdigest()
                     or source_file.get("meta", {}).get("mode") != meta(before).get("mode")):
-                raise Stop("config 候補が周の途中で変わった")
+                raise Stop("config 候補がイテレーションの途中で変わった")
             added_origins[own_root[1]] = {"path": "config:" + own_root[1], "kind": "file",
                                           "meta": meta(before), "sha256": hashlib.sha256(raw).hexdigest()}
             # This root has no prior candidate record: it was just created by
@@ -1206,17 +1206,17 @@ def preflight_config_candidates(top: str, common: str, git_dir: str,
             if exists:
                 # In particular, do not follow a newly created symlink to
                 # decide its digest: Git setup has not yet been invoked.
-                raise Stop("config 候補が周の途中で変わった")
+                raise Stop("config 候補がイテレーションの途中で変わった")
             continue
         if not exists:
-            raise Stop("config 候補が周の途中で変わった")
+            raise Stop("config 候補がイテレーションの途中で変わった")
         # Present candidates may themselves be leaf links.  Give their held
         # record to the no-parser read so a retarget is rejected before its
         # target bytes are opened.
         item, _ = safe_config_file(top, path, budget, {path: saved["entry"]},
                                    require_exact=True, parse=False)
         if {"kind": kind, "path": path, "state": "present", "entry": item} != saved:
-            raise Stop("config 候補が周の途中で変わった")
+            raise Stop("config 候補がイテレーションの途中で変わった")
     return added_origins
 
 def config_snapshot(top: str, common: str, budget: Budget,
@@ -1848,7 +1848,7 @@ def snapshot(args: argparse.Namespace) -> None:
             if path not in old_paths and os.path.realpath(path) != own:
                 # A moved/added human checkout can otherwise lose its path-keyed
                 # secret union before its profile or files are observed.
-                raise Stop("人の worktree が周の途中で追加または移動した")
+                raise Stop("人の worktree がイテレーションの途中で追加または移動した")
     # includeIf.onbranch/gitdir is evaluated in the worktree that will later
     # run rev-parse/index/config.  Preflight each such context first: a target
     # inactive at TOP can be active in a human or the loop's own checkout.

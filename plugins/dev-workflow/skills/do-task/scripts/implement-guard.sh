@@ -262,6 +262,7 @@ STATE_TRIED=""
 NEW_STATE=""        # take が作成中の保護領域(完了するまでは失敗・シグナルで消す)
 TAKE_DONE=0
 WORK=""             # スクリプト自身の一時領域(保護領域の中に置く。/tmp は外部から書ける)
+BOUNDED_SIZE=""     # bounded_config_stdout が最後に見た保存先の大きさ(繰り返しを終わりの条件で抜けたときだけ入る)
 SHA_CMD=""
 STAT_FLAVOR=""
 EXCL_TMP=""
@@ -370,19 +371,29 @@ resolve_sha_cmd() {
   elif command -v openssl >/dev/null 2>&1; then SHA_CMD=openssl
   else SHA_CMD=""; fi
 }
+# 16 進の取り出し(外部のプログラムを起動しない。パイプの後ろに置き、前の道具の終了コードと出力をそのまま流す)
+sha256_hex_field() { # stdin の各行の、最初の空白より前を stdout へ(cut -d' ' -f1 と同じ)
+  local line
+  while IFS= read -r line || [ -n "$line" ]; do printf '%s\n' "${line%% *}"; done
+}
+sha256_hex_after() { # stdin の各行の、最後の `=` か空白より後を stdout へ(sed 's/.*[= ]//' と同じ。末尾に改行の無い行には改行を足さない)
+  local line
+  while IFS= read -r line; do printf '%s\n' "${line##*[= ]}"; done
+  [ -z "$line" ] || printf '%s' "${line##*[= ]}"
+}
 sha256_file() { # $1=ファイル → 16 進を stdout へ
   case "$SHA_CMD" in
-    sha256sum) sha256sum <"$1" | cut -d' ' -f1 ;;
-    shasum) shasum -a 256 <"$1" | cut -d' ' -f1 ;;
-    openssl) openssl dgst -sha256 <"$1" | sed 's/.*[= ]//' ;;
+    sha256sum) sha256sum <"$1" | sha256_hex_field ;;
+    shasum) shasum -a 256 <"$1" | sha256_hex_field ;;
+    openssl) openssl dgst -sha256 <"$1" | sha256_hex_after ;;
     *) return 1 ;;
   esac
 }
 sha256_stdin() { # stdin → 16 進を stdout へ(一時ファイルを作らない)
   case "$SHA_CMD" in
-    sha256sum) sha256sum | cut -d' ' -f1 ;;
-    shasum) shasum -a 256 | cut -d' ' -f1 ;;
-    openssl) openssl dgst -sha256 | sed 's/.*[= ]//' ;;
+    sha256sum) sha256sum | sha256_hex_field ;;
+    shasum) shasum -a 256 | sha256_hex_field ;;
+    openssl) openssl dgst -sha256 | sha256_hex_after ;;
     *) return 1 ;;
   esac
 }
@@ -1002,7 +1013,7 @@ selector_git() { # 出力は独立した200MiB枠。Fだけをここで1回予�
   remaining=$((CONFIG_LIMIT - SELECT_OUTPUT_BYTES)); [ "$remaining" -ge 0 ] || return 125
   GIT_USED=1
   bounded_config_stdout "$out" "$remaining" selector "$@" || rc=$?
-  size="$(stat_size "$out" 2>/dev/null)" || return 125
+  if [ -n "$BOUNDED_SIZE" ]; then size="$BOUNDED_SIZE"; else size="$(stat_size "$out" 2>/dev/null)" || return 125; fi
   [ "$size" -le "$remaining" ] || return 125
   SELECT_OUTPUT_BYTES=$((SELECT_OUTPUT_BYTES + size))
   return "$rc"
@@ -1642,7 +1653,7 @@ bounded_config_parse() { # $1=stdout 保存先、残り=git config の引数。�
   [ "$remaining" -gt 0 ] || return 125
   GIT_USED=1
   bounded_config_stdout "$out" "$remaining" isolated "$@" || rc=$?
-  size="$(stat_size "$out" 2>/dev/null)" || return 125
+  if [ -n "$BOUNDED_SIZE" ]; then size="$BOUNDED_SIZE"; else size="$(stat_size "$out" 2>/dev/null)" || return 125; fi
   [ "$size" -le "$remaining" ] || return 125
   CONFIG_PARSE_BYTES=$((CONFIG_PARSE_BYTES + size))
   return "$rc"
@@ -1653,7 +1664,7 @@ bounded_effective_origins() { # 実効 origin も候補解析と同じ総量上�
   remaining=$((200 * 1024 * 1024 - CONFIG_PARSE_BYTES))
   [ "$remaining" -gt 0 ] || return 125
   bounded_config_stdout "$out" "$remaining" effective config --null --show-origin --name-only --includes --list || rc=$?
-  size="$(stat_size "$out" 2>/dev/null)" || return 125
+  if [ -n "$BOUNDED_SIZE" ]; then size="$BOUNDED_SIZE"; else size="$(stat_size "$out" 2>/dev/null)" || return 125; fi
   [ "$size" -le "$remaining" ] || return 125
   CONFIG_PARSE_BYTES=$((CONFIG_PARSE_BYTES + size))
   return "$rc"
@@ -1663,6 +1674,7 @@ bounded_config_stdout() { # $1=保存先 $2=正確な byte 上限 $3=selector|is
   # fifo から、1 回の dd で 64KiB のブロックを最大「残り ÷ 64KiB」個(残りが 64KiB 未満なら残りを 1 個)読む。
   # 上限に達したら超過検知 1 byte を読む。主出力は上限を越えない。
   local out="$1" limit="$2" mode="$3" fifo probe writer writer_rc=0 rc=0 before after chunk bs count
+  BOUNDED_SIZE=""
   shift 3
   fifo="$WORK/config-stream-$CONFIG_PARSE_SEQ-$$"; probe="$fifo-over"
   rm -f -- "$fifo" "$probe"; mkfifo "$fifo" || return 125
@@ -1682,15 +1694,18 @@ bounded_config_stdout() { # $1=保存先 $2=正確な byte 上限 $3=selector|is
   # 1 回の dd が写すのは bs × count(残り以下)を越えない。実際に増えた byte 数で繰り返すと、pipe の短い read
   # でも主出力は limit を越えない。1 回の dd で何度も読むので、read が短い pipe(Mac では 1 回が約 4KiB)でも
   # dd の起動は少ない。
+  # 保存先はこの関数の dd のほかに書く者がいない(保護領域の中の一時領域)ので、直前の after を次の before と、
+  # 呼び出し元が使う大きさ(BOUNDED_SIZE)にする。stat_size の起動は最初の 1 回と、dd の後ごとに 1 回。
+  before="$(stat_size "$out" 2>/dev/null)" || rc=125
   while [ "$rc" -eq 0 ]; do
-    before="$(stat_size "$out" 2>/dev/null)" || { rc=125; break; }
-    [ "$before" -lt "$limit" ] || break
+    [ "$before" -lt "$limit" ] || { BOUNDED_SIZE="$before"; break; }
     chunk=$((limit - before))
     if [ "$chunk" -ge 65536 ]; then bs=65536; count=$((chunk / 65536)); else bs="$chunk"; count=1; fi
     dd bs="$bs" count="$count" <&6 >>"$out" 2>/dev/null || { rc=125; break; }
     after="$(stat_size "$out" 2>/dev/null)" || { rc=125; break; }
     [ "$after" -le "$limit" ] || { rc=125; break; }
-    [ "$after" -gt "$before" ] || break
+    [ "$after" -gt "$before" ] || { BOUNDED_SIZE="$after"; break; }
+    before="$after"
   done
   if [ "$rc" -eq 0 ]; then dd bs=1 count=1 <&6 >"$probe" 2>/dev/null || rc=125; fi
   exec 6<&-

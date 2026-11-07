@@ -315,7 +315,7 @@ class ValidateTest(unittest.TestCase):
         """表を渡しても、終了コード・ERROR・WARN・出力が変わらない。2 回目は 5 つの検査とも表から使う。"""
         self.write_file(CHECKED_MD, "照合する。\n")  # 言葉の初出
         self.append_to_checked_file("固定枡の説明", relpath=self.REPLACED_TARGET, prefix="")  # 置き換える語
-        self.append_to_checked_file("無人の周の結果: 保留 — S4", relpath=self.REPLACED_TARGET, prefix="")  # 番号だけの理由
+        self.append_to_checked_file("無人のイテレーションの結果: 保留 — S4", relpath=self.REPLACED_TARGET, prefix="")  # 番号だけの理由
         self.write_file(f"{SKILLS_REL}/tool-check/references/host-cli-test.md", "# t\n\ngemini を使う\n")  # ホスト CLI 語
         self.write_file(f"{SKILLS_REL}/tool-check/references/delegation-test.md", "# t\n\nAgentに任せる\n")  # 委託の語
 
@@ -431,7 +431,7 @@ class ValidateTest(unittest.TestCase):
 
     def test_number_only_outcome_reasons_are_errors(self):
         self.assert_line_cases([
-            flagged_line(f"無人の周の結果: 失敗扱い — {number}", "番号だけの理由", repr(number), "番号: 中身")
+            flagged_line(f"無人のイテレーションの結果: 失敗扱い — {number}", "番号だけの理由", repr(number), "番号: 中身")
             for number in ("D1", "S4", "U2", "G3", "M4", "H39", "決定 51", "軸 3", "③", "条件 ③", "§12-2")
         ])
 
@@ -443,7 +443,7 @@ class ValidateTest(unittest.TestCase):
 
     def test_number_only_outcome_before_punctuation_is_error(self):
         self.assert_line_cases([
-            flagged_line(f"(例: 無人の周の結果: 保留 — S4{suffix}", "番号だけの理由", "'S4'")
+            flagged_line(f"(例: 無人のイテレーションの結果: 保留 — S4{suffix}", "番号だけの理由", "'S4'")
             for suffix in (")", "、", ",", "*", "]")
         ])
 
@@ -455,10 +455,10 @@ class ValidateTest(unittest.TestCase):
 
     def test_number_only_reasons_in_document_examples_are_errors(self):
         cases = (
-            ("plugins/dev-workflow/skills/tool-check/SKILL.md", "無人の周の結果: 保留 — S4"),
-            (f"{SKILLS_REL}/{WRITING_RULES_REL}", "`無人の周の結果: 保留 — S4`"),
-            ("docs/design.md", "例: `無人の周の結果: 失敗扱い — G3`。"),
-            ("README.md", "| 例 | `無人の周の結果: 保留 — S4` |"),
+            ("plugins/dev-workflow/skills/tool-check/SKILL.md", "無人のイテレーションの結果: 保留 — S4"),
+            (f"{SKILLS_REL}/{WRITING_RULES_REL}", "`無人のイテレーションの結果: 保留 — S4`"),
+            ("docs/design.md", "例: `無人のイテレーションの結果: 失敗扱い — G3`。"),
+            ("README.md", "| 例 | `無人のイテレーションの結果: 保留 — S4` |"),
             (f"{SKILLS_REL}/init-project/templates/AGENTS.md.template",
              "- **保留**(ship-task・YYYY-MM-DD): G1 — 許可を確かめる"),
         )
@@ -468,7 +468,7 @@ class ValidateTest(unittest.TestCase):
         target = self.repo / self.REPLACED_TARGET
         line_no = target.read_text(encoding="utf-8").count("\n") + 3
         self.append_to_checked_file(
-            "```markdown\n無人の周の結果: 保留 — S4\n```", relpath=self.REPLACED_TARGET, prefix=""
+            "```markdown\n無人のイテレーションの結果: 保留 — S4\n```", relpath=self.REPLACED_TARGET, prefix=""
         )
         self.assert_error([f"{self.REPLACED_TARGET}:{line_no}:", "番号だけの理由", "'S4'"])
 
@@ -476,9 +476,9 @@ class ValidateTest(unittest.TestCase):
         self.assert_line_cases([
             flagged_line(line, "番号だけの理由")
             for line in (
-                "無人の周の結果: 保留 — S4: ",
+                "無人のイテレーションの結果: 保留 — S4: ",
                 "- **保留**(ship-task・YYYY-MM-DD): G1: — 許可を確かめる",
-                "無人の周の結果: 保留 — S4 <!-- validate-allow: 例示 -->",
+                "無人のイテレーションの結果: 保留 — S4 <!-- validate-allow: 例示 -->",
             )
         ])
 
@@ -486,14 +486,14 @@ class ValidateTest(unittest.TestCase):
         self.assert_line_cases([
             clean_line(line)
             for line in (
-                "無人の周の結果: 失敗扱い — G3: 無人の前提を欠く",
-                "`無人の周の結果: 保留 — S4: 承認の後に本文が変わった`",
+                "無人のイテレーションの結果: 失敗扱い — G3: 無人の前提を欠く",
+                "`無人のイテレーションの結果: 保留 — S4: 承認の後に本文が変わった`",
                 "- **保留**(ship-task・2026-11-04): G1: 許可の要る操作が拒否された — 許可を確かめる",
-                "無人の周の結果: PR — https://example.invalid/pr/1",
-                "無人の周の結果: 保留 — <理由>",
+                "無人のイテレーションの結果: PR — https://example.invalid/pr/1",
+                "無人のイテレーションの結果: 保留 — <理由>",
                 "- **保留**(ship-task・YYYY-MM-DD): <停止条件> — <人が次にすること>",
-                "無人の周の結果: 失敗扱い — G3 無人の前提を欠く",
-                "(例: 無人の周の結果: 保留 — S4: 承認の後に本文が変わった)",
+                "無人のイテレーションの結果: 失敗扱い — G3 無人の前提を欠く",
+                "(例: 無人のイテレーションの結果: 保留 — S4: 承認の後に本文が変わった)",
                 "`- **保留**(ship-task・YYYY-MM-DD): S4: 承認の後に本文が変わった`",
                 "- **保留**(ship-task・YYYY-MM-DD): S4 承認の後に本文が変わった",
                 "正本は loop.md §4。#107 の H48。手順は D1・S4・G3・M4・決定 51・軸 3・条件 ③・§12-2。",
@@ -502,7 +502,7 @@ class ValidateTest(unittest.TestCase):
         ])
 
     def test_number_only_reasons_outside_documents_are_not_scanned(self):
-        line = "無人の周の結果: 保留 — S4"
+        line = "無人のイテレーションの結果: 保留 — S4"
         self.append_to_checked_file(line, relpath="plugins/dev-workflow/skills/ship-task/scripts/loop.sh")
         self.append_to_checked_file(line, relpath="CHANGELOG.md", prefix="")
         self.write_file("docs/minutes/example.md", line + "\n")
@@ -732,7 +732,7 @@ class ValidateTest(unittest.TestCase):
             ("解決順・段階判定の手段", "'段階判定・実行段階'", "やり取りの範囲の判定"),
             ("6. **実行段階の判定**", "'段階判定・実行段階'", "やり取りの範囲の判定"),
             ("完了報告の最後に結末の行を書く", "'結末の行'", "結果の行"),
-            ("失敗(結末の行が無い)", "'結末の行'", "無人の周の結果"),
+            ("失敗(結末の行が無い)", "'結末の行'", "無人のイテレーションの結果"),
         )
         self.assert_line_cases(
             [flagged_line(text, "置き換える語", word, guidance) for text, word, guidance in cases]
@@ -771,7 +771,7 @@ class ValidateTest(unittest.TestCase):
         cases = (
             ("止めの印を置いて exit 20", "'止めの印'", "止める印"),
             ("`--expect=<守る値>`", "'守る値'", "控える値"),
-            ("## 7. 周の中で守る値と照合(改竄ガード)", "'守る値'", "控える値"),
+            ("## 7. イテレーションの中で守る値と照合(改竄ガード)", "'守る値'", "控える値"),
             ("## 4. 対話点の表", "'対話点'", "人に確かめる場面"),
             ("`<対話点番号で始まる理由>`", "'対話点'", "人に確かめる場面の番号"),
             ("停止ではなく報告点であり", "'報告点'", "判断を仰ぐ点"),
