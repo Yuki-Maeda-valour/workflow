@@ -161,7 +161,7 @@ except (Exception, SystemExit) as exc:
 | `--runners=<名前,...>` | 外部 CLI をレビュアーとして追加(オプトイン。既定は内蔵のみ)。→ [../do-task/references/external-runners.md](../do-task/references/external-runners.md) |
 | `--yes` | 更新内容の事前確認をスキップ(差分提示 → 即適用) |
 | `--max-review=<N>` | レビュー反復の上限(既定: 無制限+セーフティ) |
-| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。判断を仰ぐ点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` のイテレーション(無人ループの 1 回分の実行)では、この skill の `$` を含むコマンドの例を字面どおりに打たず、同書の「`loop.sh` のイテレーションの Bash の書き方」で打つ |
+| `--unattended` | 無人モード(/ship-task の無人モードが渡す)。`--yes` を含む。`--task` が無ければ、候補の選択より前に失敗扱いにする。判断を仰ぐ点では止まり「未承認」(レビュー判定が `APPROVED` でない)で返す(U1・U2。正本は [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md))。`loop.sh` のイテレーション(無人ループの 1 回分の実行)では、この skill の `$` を含むコマンドの例を字面どおりに実行せず、同書の「`loop.sh` のイテレーションの Bash の書き方」で実行する |
 
 ## Phase 1: 入力と現状把握
 
@@ -237,7 +237,7 @@ except (Exception, SystemExit) as exc:
    - 同一指摘 2 回連続残存 → ユーザー確認 / 5 ラウンド超え → トークンコスト警告 / `--max-review` 到達 → いずれも**停止ではなく判断を仰ぐ点**であり、状況を報告して判断を仰ぐ。
    - `--unattended` では判断を仰ぐ点で止まり、「未承認」(レビュー判定が `APPROVED` でない)で返す(U2。/ship-task は失敗扱いにする)
 5. 記録: `.claude/reviews/update-doc-iter{N}.md`。
-   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、終了コード 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 
 ## Phase 6: 最終チェック
 

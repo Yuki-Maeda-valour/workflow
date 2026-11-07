@@ -190,7 +190,7 @@ Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) �
    - **双方向でやり取りできる環境では、修正後の再レビューを同じレビュアー(同じ名前の送る相手)へ差し戻す**(再スポーンしない — 前回のレビュー文脈が保たれ、差分だけを見て判定できる。design §5-17)。送る相手が失われている場合のみ新規起動にフォールバック(先の手段が使えないときに次の手段へ切り替えること)する。
    - **判断を仰ぐ点(停止点ではない)**: 同一指摘が 2 回連続残存・5 ラウンド超えは、状況(残る指摘・反復回数・想定コスト)を報告してユーザーの判断を仰ぐ
 4. レビュー記録を `.claude/reviews/create-task-{タスク名}-iter{N}.md` に保存する。
-   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を打ち、終了コード 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+   - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、終了コード 0 以外なら記録を書かずに停止して報告する(do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
 5. **設計レビューの行を残す**: 結末を問わず(`APPROVED` / `未収束` / `未完了`)、タスク MD の追加修正記録の節の末尾に設計レビューの行を 1 行足す。
    - 書式・判定の語・節の範囲は [references/task-template.md](references/task-template.md) の記法の規約が正本。
    - ship-task の Phase 2 と別のセッションの工程はこの行で判定する(`.claude/reviews/` のログはキャッシュで、別の worktree・別の PC には無い — design §5-18 ①)。

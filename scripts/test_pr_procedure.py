@@ -215,7 +215,7 @@ class ProcedureTextTest(unittest.TestCase):
             # 配るプラグインだけ版を上げる決まり
             "配るプラグイン(`plugins/` の下・`.claude-plugin/marketplace.json`・プラグインを使わない導入の `setup.sh`)を変えた PR だけ",
             "変えない PR は、版も `CHANGELOG.md` も変えない",
-            # 手で打つ git と送り方
+            # 手で実行する git と送り方
             "Git の共通の安全用のオプション",
             "`git <安全用のオプション> merge --no-ff",
             "`gh pr merge <番号> -R <リポジトリ> --merge --match-head-commit <全回帰テストを流した commit の SHA>`",
@@ -227,7 +227,7 @@ class ProcedureTextTest(unittest.TestCase):
             # 2 回目のレビューで足した字面
             "`git <安全用のオプション> diff --name-only --diff-filter=U`",
             "`git <安全用のオプション> merge-base --is-ancestor origin/main HEAD`",
-            "この 2 つの節で打つ git のコマンドには、すべて Git の共通の安全用のオプション",
+            "この 2 つの節で実行する git のコマンドには、すべて Git の共通の安全用のオプション",
             "文書の変更が無く、文書の commit を作らなかったときは、実装の commit",
             "文書の commit を作ったときは、main を取り込む前に",
             "ship-task の Phase 4.5 を行った回(状態の記録〈`integration.md` の手順 6〉がある回)は、送る直前の照合を、P があってもなくても `integration.md` §7 のとおりに行う",

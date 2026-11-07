@@ -30,7 +30,7 @@ ship-task の発見のイテレーション(無人ループの 1 回分の実行
 
 ## 3. origin の URL の読み方(`origin-repo.py`)
 
-`python3 {ship-task の}scripts/origin-repo.py --dir=<ディレクトリ>` は、origin の URL を読んで、公開の確認と PR に使える push 先を決める。読み取り専用(git と `ssh -G` を打つが、何も書かない)。`loop.sh` の起動時(実装モード・発見モードとも。loop.md §2)と、発見のイテレーションの前提(§4)・公開の確認(§5)・push の直前(§7)・PR(§8)、タスクのイテレーションの前提と push の直前(unattended-mode.md §1・§7)で使う。
+`python3 {ship-task の}scripts/origin-repo.py --dir=<ディレクトリ>` は、origin の URL を読んで、公開の確認と PR に使える push 先を決める。読み取り専用(git と `ssh -G` を実行するが、何も書かない)。`loop.sh` の起動時(実装モード・発見モードとも。loop.md §2)と、発見のイテレーションの前提(§4)・公開の確認(§5)・push の直前(§7)・PR(§8)、タスクのイテレーションの前提と push の直前(unattended-mode.md §1・§7)で使う。
 
 - 出力: stdout に JSON `{"origin": <真偽>, "same": <真偽>, "repo": <"HOST/OWNER/REPO" | null>, "form": <"https" | "ssh" | "scp" | "other" | null>, "vcs": <真偽>, "reason": <文>}`
 - 終了コード: 0 = 判定できた(JSON を読む)/ 2 = 使い方の誤り(`--dir` が無い・ディレクトリでない)・git が失敗した
@@ -102,7 +102,7 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
   - `.claude/reviews/x.md` は `.claude/reviews/` の下を表す名で、在らなくてよい
   - 外れたら、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を案内する。symlink なら、`.claude`・`.claude/reviews` を実体のディレクトリにする(symlink を追跡から外す)ことを案内する
   - 理由: 照合(§7)と `loop.sh` の判定は「未追跡・未 commit が無い」を求めるので、状態ファイルが ignore されていないと、正しいイテレーションも失敗になる
-- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に打つ(理由は `unattended-mode.md` §1)。値と、`origin-repo.py` の出力の 6 欄は控える値(§7。作業の途中で変わっていないかを確かめるための値)
+- **ローカルの git 設定のダイジェスト**: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` が exit 0。下の origin の URL の検査より先に実行する(理由は `unattended-mode.md` §1)。値と、`origin-repo.py` の出力の 6 欄は控える値(§7。作業の途中で変わっていないかを確かめるための値)
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`(§3)が exit 0 で、`origin` が真なら次の 2 つを満たす。`origin` が偽なら満たしたとみなす(push しないので、候補があれば結末は `縮退`)
   - `vcs` が偽。真なら、欠けの理由を `remote.origin.vcs`(設定を外す案内)にする。fetch と push の食い違いの理由にしない(`loop.sh` の理由コード `origin-vcs` と揃える)
   - `same` が真(fetch と push の URL がそれぞれ 1 つで、同じリポジトリを指す)。偽なら、fetch と push の URL を揃える案内をする
@@ -115,13 +115,13 @@ ship-task の Phase 0 の 2′ で、ブランチを作る前に、何も書き�
 前提を満たした後・発見元を呼ぶ前に行う。refactor のイテレーションでは行わない(refactor の候補モードはセキュリティ由来の指摘を候補にしないので、公開のリポジトリでも回す — candidate-mode.md)。data-audit の候補(未修正の脆弱性の場所と筋書き)は、origin が非公開と確かめられたときだけ PR にする。
 
 1. origin-repo.py の `origin` が偽なら、確かめずに続ける(push しないので、候補があれば結末は `縮退`。候補はローカルのブランチだけに残る)
-2. `repo` が null なら「確かめられない」。gh を打たない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に残りうるため)
+2. `repo` が null なら「確かめられない」。gh を実行しない(ローカルのパスは許可の仲介〈無人の実行で、操作を許すかをその場で判定する仕組み〉に拒否され、G1 で失敗扱いになるため。URL の字面を渡すと、認証情報が記録に残りうるため)
 3. `gh repo view '<repo>' --json isPrivate -q .isPrivate` の出力がちょうど `true` なら続ける。`false`・エラー・それ以外の出力なら「確かめられない」
    - repo は引数で渡す。gh の既定のリポジトリの解決(`upstream` などのリモート・`GH_REPO`・`gh repo set-default`)に頼ると、確認の対象が push 先と食い違いうる。`HOST/OWNER/REPO` の形を受け付けることと、引数が `GH_REPO` より優先されることは実測した(design §7-3)
 4. 「確かめられない」ときは、発見元を呼ばずに、結末 `候補なし — data-audit: origin が非公開と確かめられないため回さなかった(<理由の要約>)` で終わる。何も書かず、ブランチも作らない(失敗扱いではない)
 5. PR は `gh pr create -R '<repo>'` で作る(§8)
 
-- 許可の拒否(G1)で git・gh が打てないときは、「確かめられない」ではなく失敗扱い(発見のイテレーションの G1 は常に失敗扱い — §9)
+- 許可の拒否(G1)で git・gh が実行できないときは、「確かめられない」ではなく失敗扱い(発見のイテレーションの G1 は常に失敗扱い — §9)
 
 ## 6. 工程
 
@@ -147,12 +147,12 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
 
 | 時点 | 照合 |
 |---|---|
-| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、安全用のオプションが無効にしない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に打つ) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
+| 工程 D2(発見元から戻った直後) | ① git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で実行し、exit 0(書き換えた設定に git が従う前〈照合の `git status` でも、安全用のオプションが無効にしない `filter.<名>.clean` などのコマンドが動く前〉に止めるため。この行の最初に実行する) ② HEAD の ref が開始時のまま・`HEAD` = S0 ③ index が空(`git diff --cached --name-only -z` が空) ④ `git status --porcelain=v1 -z --untracked-files=all` の項目が、すべて `?? <task_dir>/候補_<名>.md`(状態ファイルは ignore 済みか、サブモジュールの中なので出ない) ⑤ ④ の候補の集合 C = 発見元が返した一覧で、結果の行の種類と件数が C と合う(`書き出し` なら N = C の件数で 1 以上、`候補なし` なら C が空。`失敗扱い` か、結果の行が無ければ失敗扱い) ⑥ C の各ファイル: 通常ファイルで symlink でない・`{名}` が空でなく、`-` で始まらず、[loop.md](loop.md) §3 の文字の制限と `git check-ref-format --branch 'task/{名}'` を満たす・同じディレクトリに同じ `{名}` の別の状態名の MD が無い・`python3 {create-task の}scripts/candidate-keys.py --check --source=<S> <パス>` が exit 0・`secret_paths`(unattended-mode.md §7 の除外対象の和集合)に当たらない |
 | ブランチを作った直後 | 現在のブランチ = 作業ブランチ・`HEAD` = S0 |
-| stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で打ち、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に打つ)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
-| commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で打つ |
+| stage の直前 | git 設定のダイジェスト: `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート> --expect=<控える値>` を単独で実行し、exit 0(`git add` で差し替えた hook が動く前に止めるため。この行の最初に実行する)・現在のブランチ = 作業ブランチ・`HEAD` = S0・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `??` だけ(工程 D2 の後に増えていない) |
+| commit の直前(stage の後) | 現在のブランチ = 作業ブランチ・`HEAD` = 最後に知る HEAD・`git diff --cached --name-status -z --no-renames` が C の `A` だけ・`git status --porcelain=v1 -z --untracked-files=all` の項目が、ちょうど C の `A `(未追跡と、stage していない変更が無い)。通ったら `git write-tree` を控える。commit は §8 の `--expect` つきの 1 行で実行する |
 | commit の直後 | `HEAD^{tree}` = 控えた tree・`git diff --name-status -z --no-renames S0 HEAD` が C の `A` だけ・`git rev-list --count S0..HEAD` = 1・C の各パスを `git show HEAD:./<パス> \| python3 {create-task の}scripts/candidate-keys.py --check --source=<S> -` で確かめる・現在のブランチ = 作業ブランチ・`git status --porcelain=v1 -z --untracked-files=all` が空 |
-| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` をもう一度実行して 6 欄が控える値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で打つ) |
+| push の直前 | unattended-mode.md §7 の「push の直前」と同じ(① git 設定のダイジェストを単独の `--expect` で照らす ② `origin-repo.py` をもう一度実行して 6 欄が控える値と一致・`refs/heads/<作業ブランチ>` = 最後に知る HEAD・現在のブランチ = 作業ブランチ ③ push/PR は §8 の `publish-guard.py` で実行する) |
 
 - 表の `<S>` は発見元。「現在のブランチ」は `git symbolic-ref --quiet HEAD` で見る
 - 表の `<控える値>` は git 設定のダイジェストの値、`<管理ルート>` は管理ルートの絶対パス。`--expect` は exit 0 だけが通る(unattended-mode.md §7 と同じ)
@@ -176,7 +176,7 @@ ship-task の Phase 0 の 1(把握)・2(profile 解決)は、そのまま行う�
    - 要らない候補は、見送りの行を足すか、消してから merge する(消す = また出てよい / 見送り = もう出さない)。コピーして使える見送りの行の字面 `> **見送り**: YYYY-MM-DD — <理由>` を載せる(区切りは `—`)
    - 見送り・既知は、同じ観点群・同じ場所(refactor はファイル)の以後の指摘を、すべて止める
    - PR を閉じるだけだと、また出る
-   - 手元で直すとき: 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で打つ(追跡を付ける操作はループが動いていないときに限る — unattended-mode.md §9 ⑥)
+   - 手元で直すとき: 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で実行する(追跡を付ける操作はループが動いていないときに限る — unattended-mode.md §9 ⑥)
    - merge して pull した後に、作業ブランチを消す
    - 採用は、merge の後に `/create-task <候補_ のパス>`
 4. 走査の範囲・未監査と理由・既知として除いた件数・回帰の疑い。data-audit の PR だけ、除外(誤検知の除去)の件数も載せる。refactor の PR には除外の件数を出さない(公開の PR で、未修正のセキュリティの問題があることを知らせないため — candidate-mode.md)

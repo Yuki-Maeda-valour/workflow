@@ -1017,7 +1017,7 @@ class ValidateTest(unittest.TestCase):
                  "要素の数", "酸素の濃度", "平素の運用", "元素の記号", "画素の並び",
                  "木を倒す", "木が倒れる", "面倒な手順", "圧倒的に速い", "共倒れになる", "打倒する",
                  "嵐で木も倒れた", "古い木は倒れない", "壁をも倒す", "対照の表", "検査の結果と対照する",
-                 "もう一度実行する", "origin の判定の再実行", "コマンドを打つ", "打ち合わせの記録", "直す",
+                 "もう一度実行する", "origin の判定の再実行", "コマンドを実行する", "打ち合わせの記録", "直す",
                  "読み込みの失敗", "書き込みの直後", "読み取り専用", "比べるための起動", "止めてはいけない正常な例",
                  "プロセスグループの停止", "観点群", "モデル群", "比較対照の表", "対照的な結果", "変異 `x` の行",
                  "回帰テスト一式", "回帰の疑い", "回帰検知条件", "全回帰テスト")
@@ -1050,6 +1050,74 @@ class ValidateTest(unittest.TestCase):
                     self.assert_error([f"docs/design.md:{no}:", "置き換える語", f"'{word}'"])
                 finally:
                     target.write_bytes(original)
+
+    # #426: コマンドを実行する意味の「打つ」(書いた形)。ERROR に出る語の表示は WORD_OF_426
+    WORDS_OF_426 = ("打つ", "打ち、", "打たない", "打たなかった", "打たず", "打った", "打って", "打てる", "打たせる", "打たれた", "打ち方", "打とう")
+    WORD_OF_426 = "打つ(打た・打ち・打っ・打て・打と)"
+    DESIGN_OF_426 = "docs/design.md"
+    TEMPLATE_OF_426 = "plugins/dev-workflow/skills/init-project/templates/project-profile.yml.template"
+
+    def test_replaced_words_of_426_are_errors(self):
+        # 直す前の文書にあった言い方(SKILL.md・design・雛形のそれぞれで 1 つ以上)
+        word = f"'{self.WORD_OF_426}'"
+        texts = (
+            "コマンドを打つ", "`--prove-host` を打ち、終了コードを見る", "以後の git を打たない", "③ を打たなかったとき",
+            "字面どおりに打たず", "手で打った", "`cd` を 1 文で打ってから", "git・gh が打てないとき",
+            "拒否されるべき操作を順に打たせる", "ネットワークの git が打たれたか", "同じ打ち方で", "あらかじめ打つ",
+            "もう一度打とう",
+        )
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", word, "実行する") for text in texts]
+            + [
+                flagged_line("ユーザーが打つ引数がある skill", word, relpath=self.DESIGN_OF_426),
+                flagged_line("引数を打って確かめる", word, relpath=self.DESIGN_OF_426),
+                flagged_line("# 手順を打つ", word, relpath=self.TEMPLATE_OF_426),
+            ]
+        )
+
+    def test_replaced_words_of_426_lookalikes_are_not_flagged(self):
+        # 新しい言い方と、別の語(打ち切る・打ち消す・打ち合わせ・壁打ち・抜き打ち・決め打ち・打ち返す・打倒・打開)
+        lines = ("コマンドを実行する", "途中で打ち切る", "打ち切りを持たない", "反対の値で打ち消す", "打ち合わせの記録",
+                 "壁打ちで決める", "壁打ち相手", "抜き打ちで数件", "バージョンを決め打ちしない", "推奨案を打ち返す",
+                 "打倒する", "打開する", "もう一度実行する")
+        target = self.repo / self.REPLACED_TARGET
+        with target.open("a", encoding="utf-8") as stream:
+            stream.write("\n" + "\n".join(lines) + "\n")
+        self.assert_clean()
+
+    def test_replaced_words_of_426_allowed_in_writing_for_people(self):
+        self.append_to_checked_file(
+            "| " + " | ".join(self.WORDS_OF_426) + " |",
+            relpath="plugins/dev-workflow/skills/do-task/references/writing-for-people.md",
+            prefix="",
+        )
+        self.assert_clean()
+
+    def test_replaced_words_of_426_definition_line_in_design_is_exempt(self):
+        # 「文書の中で置き換える語」の定義の行は、その行の組の語(#426 の語を含む)を除く
+        self.edit_definition_line("- **文書の中で置き換える語**", "例: " + "・".join(self.WORDS_OF_426))
+        self.assert_clean()
+
+    def test_replaced_words_of_426_are_not_exempt_on_the_other_definition_line(self):
+        # #426 の語は「文書の中で置き換える語」の組。「置き換える語」の定義の行では除かない
+        target = self.repo / "docs" / "design.md"
+        original = target.read_bytes()
+        try:
+            no = self.edit_definition_line("- **置き換える語**", "例: " + "・".join(self.WORDS_OF_426))
+            self.assert_error([f"docs/design.md:{no}:", "置き換える語", f"'{self.WORD_OF_426}'"])
+        finally:
+            target.write_bytes(original)
+
+    def test_replaced_words_of_426_do_not_overlap_with_the_word_of_337(self):
+        # 「打ち直す」は #337 の組だけが見つける(1 つの語で ERROR が 1 行)
+        target = self.repo / self.REPLACED_TARGET
+        line_no = target.read_bytes().decode("utf-8").count("\n") + 2
+        self.append_to_checked_file("拒否されたら打ち直さずに報告する", relpath=self.REPLACED_TARGET, prefix="")
+        _, errors, _ = self.run_validator()
+        mine = [e for e in errors if f"{self.REPLACED_TARGET}:{line_no}:" in e]
+        self.assertEqual(1, len(mine), mine)
+        self.assertIn("'打ち直す'", mine[0])
+        self.assertNotIn(self.WORD_OF_426, mine[0])
 
     # ----------------------------------------------- V1: 禁止パターンの免除マーカー
 
@@ -1342,7 +1410,7 @@ class ValidateTest(unittest.TestCase):
     def test_line_length_long_inline_code_alone_passes(self):
         # 200 字を超えるインラインのコード(コマンドの字面)は分けられないので数えない
         code = "`" + "a" * 250 + "`"
-        for line in (code, "- " + code, "- 次を打つ: " + code, f"- {code} と {code}"):
+        for line in (code, "- " + code, "- 次を実行する: " + code, f"- {code} と {code}"):
             with self.subTest(line=line[:8]):
                 self.write_length_body([line])
                 self.assertEqual([], self.line_length_warns())

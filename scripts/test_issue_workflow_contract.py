@@ -262,7 +262,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         for text in (stop_line, row, report_line):
             self.contains(text, "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)",
                           "Phase 5 をやり直さ", "Issue に記録してから、push・PR の成否を確かめ、",
-                          "残った操作だけを手で打つ形で示す")
+                          "残った操作だけを手で実行する形で示す")
             self.assertLess(text.index("Phase 5 をやり直さ"), text.index("Issue に記録してから"))
         for text in (stop_line, report_line):
             self.contains(text, "`実装 commit <sha> は検証済み。公開で停止: <理由>` と Issue に記録")
@@ -320,7 +320,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(resume, "検査つきの Phase 5 はやり直せない",
                       "`--task` は Phase 2 から始まる入口", "Phase 4・5 から再開する入口ではない",
                       "過去の全文の保持値を黙って更新して", "`pr-evidence` を更新後の Issue 本文から作り直さない",
-                      "人が手で打つ push・PR のコマンドの並びを示す",
+                      "人が手で実行する push・PR のコマンドの並びを示す",
                       "§3・§5 で Issue 本文を取り直し、中断の追記とそれ以外の変更を確かめる",
                       "`origin-repo.py` の `repo` と、保持した Issue の `repo` が同じ",
                       "不一致・取得不能なら公開しない", "保持した `pr-evidence` の内容を PR の検証欄に使い",
@@ -334,7 +334,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         resume = self.shipping.split("### 中断の記録を書いた後の再開\n", 1)[1]
         self.contains(resume, "文書同期での停止報告には `/update-doc --task=#<番号>`",
                       "単独の update-doc で文書を直す",
-                      "文書レビューが APPROVED になった後の commit と公開は、人が手で打つコマンドの並びを示す",
+                      "文書レビューが APPROVED になった後の commit と公開は、人が手で実行するコマンドの並びを示す",
                       "後から作る文書 commit を以前の検証根拠で検証済みとは扱わない")
         table = section(self.ship, "## 停止条件のまとめ")
         self.contains(table, "実装 commit の検証前後を区別する",
@@ -461,7 +461,7 @@ class IssueWorkflowContractTest(unittest.TestCase):
         self.contains(release, "push より前の失敗だけ、Issue に記録する前は、同じセッションの state と保持値で公開をやり直せる",
                       "人がやめると決めたとき・セッション終了時だけ Issue に記録する",
                       "push 以後の失敗(SHA の照合・追跡設定・PR 作成・作成後の照合)では、Phase 5 をやり直さない",
-                      "公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打つ形で示す",
+                      "公開停止を Issue に記録してから、push・PR の成否を確かめ、残った操作だけを手で打" "つ形で示す",  # CHANGELOG.md の v4.37.0 の節(過去の記録。直さない)の字面。旧い言い方のまま照らす
                       "`--body-file - < <PR本文ファイル>` で標準入力から本文を渡す",
                       "リモートのブランチの先頭が保持したレビュー済みの SHA と一致することを確かめる",
                       "不一致・確認不能なら PR 作成のコマンドを示さず止める",

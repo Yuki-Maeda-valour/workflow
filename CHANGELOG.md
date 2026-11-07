@@ -2,6 +2,17 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.51.0
+
+### 変更
+
+- コマンドを実行する意味の「打つ」(打たず・打って・打った なども)を「実行する」に言い換えた(37 ファイル・216 行。`CHANGELOG.md` の過去の節と `docs/minutes/` は直さない)。([#426](https://github.com/Yuki-Maeda-valour/workflow/issues/426))
+  - 文書・製品のスクリプトの注釈・自己テストと回帰テストの名前と注釈を言い換えた。人が引数を書く意味は「入力する」(`docs/design.md`)、文を指す所は「行う」(`validate.py`)にした。
+  - 利用者に見える文が変わった: `ERROR [host-proof] 補助の CLI を実行する直前に、…`(`loop.sh`)、`(以後の git を実行しない)`(`implement-guard.sh` の `hooks-changed`・`config-changed`)、外部ランナー実行記録の「読み取り専用モードで実行する」(`implement-agent.sh`)、朝の報告の行と `--prove-host` の案内。`ERROR [...]` の接頭辞と理由の名前は変えていない。
+  - `validate.py` の検査 11(置き換える語)に「打つ」を足した。言い換え表(`writing-for-people.md`)・`docs/design.md` の定義の行・`AGENTS.md` の語の並びにも足した。検出のテストを `test_validate.py` に足した。
+  - 変えなかったもの: 「打ち切る」「打ち消す」「打ち合わせ」「壁打ち」「抜き打ち」「決め打ち」「打ち返す」「打倒」と、「打ち直す」の定義と検査。
+  - `test_issue_workflow_contract.py` の 1 行は、`CHANGELOG.md` の過去の節(v4.37.0)の字面を照らすので、旧い言い方のまま残した(文字列を 2 つに分け、行の末尾に理由を書いた)。
+
 ## v4.50.0
 
 ### 変更

@@ -177,7 +177,7 @@ restore_taskmd_supervised() {
   - それまでは、保守処理が検証用コピーの `.git` へ書き、検証用コピーの削除が `Directory not empty` で落ちることがあった。`run-checks` は終了値 2 で止まり、受領書(結果の JSON)を書かず、検証用コピーが残った。Mac の Git 2.54 で確かめた。
   - Linux の Git 2.51・2.34 でも、レビューした中身の loose object が多いとき(`.git/objects/17` に 28 個以上。全体でおよそ 7,000 個以上)に同じことが起きうる。同じ設定で防ぐ。
   - 設定は引数で渡し、その 1 回の `git commit` にだけ効かせる。品質コマンドに渡す環境変数と、検証用コピーの `.git/config` は変えない。
-  - 限界: 品質コマンドが自分で検証用コピーの中で `git commit` などを打つと、同じ保守処理が起きる。macOS など Linux 以外の POSIX では、プロセスグループの外の子孫と同じく保証外。Linux の監督は、親が終わった子孫として止める見込み(未確認)。
+  - 限界: 品質コマンドが自分で検証用コピーの中で `git commit` などを実行すると、同じ保守処理が起きる。macOS など Linux 以外の POSIX では、プロセスグループの外の子孫と同じく保証外。Linux の監督は、親が終わった子孫として止める見込み(未確認)。
   - 限界: Git 2.29 より前の Git は未確認(`gc.auto=0` も渡すが、動きは確かめていない)。
 - Linux 上で他 POSIX のプロセスグループ方式を実行した回帰テストは通過した。これは macOS 実機の確認ではない。macOS 実機の回帰テストは、下の「macOS の実測と再確認手順」の回帰テストの手順で回す。Python の追加パッケージは不要。
 
@@ -257,7 +257,7 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
     - 1 件のテストの中で複数の通り方(`TERM`・`INT`・`HUP` など)を順に回すものは、1 件と数える。
     - 最後の行の `failures=` は、落ちた `subTest` を 1 回ずつ数える。落ちたときは、`failures=` の数と、落ちたテストの名前と `subTest` の値の両方を記録する。
     - `Linux 専用: ` の飛ばしを、Mac の成功の根拠にしない。
-  - テストの領域の名前(頭が `wf-proc-test-`)は、次のクラスのテストが起動するプロセス(実 CLI・anchor・品質コマンドとその子プロセスと孫プロセス・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を打ち、出力が無いことを確かめる。
+  - テストの領域の名前(頭が `wf-proc-test-`)は、次のクラスのテストが起動するプロセス(実 CLI・anchor・品質コマンドとその子プロセスと孫プロセス・無関係なプロセス)のコマンド行に入る: `CliProcessLifecycleTest`・`CheckLifecycleTest`・`CheckProcessDarwinTest`・`CheckProcessCommonTest`。実行の後に `ps -axww -o pid=,pgid=,command= | grep -F wf-proc-test- | grep -v grep` を実行し、出力が無いことを確かめる。
     - 次のプロセスのコマンド行には入らないので、この確認では見つからない: `prove()` など、製品の置き場(`check-process.py` のパス)・品質コマンドの引数・`TMPDIR` のどれにもテストの領域を使わない `run-checks` が起動する anchor と品質コマンド、製品が中で短く起動する `grep`。
     - ただし、`ReviewGuardTest` の次の 10 件の `run-checks` は、anchor(Linux では監督)と品質コマンドがこの確認で見つかる。
       - `test_cli_run_checks_keeps_exit_codes_and_output_hashes`・`test_run_checks_clean_copy_commit_starts_no_background_maintenance`。

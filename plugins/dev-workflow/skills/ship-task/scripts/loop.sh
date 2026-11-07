@@ -222,7 +222,7 @@ inside_checkout() { under "$1" "$TOP" || under "$1" "$MAIN_WT"; }
 
 G() { git "${GIT_PRE[@]}" "$@"; }
 
-# 待ち。ロックの fd を閉じて打つ(loop.sh が KILL されたとき、残った sleep がロックを握り続けないように)
+# 待ち。ロックの fd を閉じて実行する(loop.sh が KILL されたとき、残った sleep がロックを握り続けないように)
 nap() { sleep "$1" 7>&-; }
 
 # 別セッションで起動して、終わったらそのセッションのプロセスグループの残りを止める(時間切れで git が
@@ -757,7 +757,7 @@ host_settings_call() { # $1=host-settings | host-allowlist, 残り=reader の引
 # を同じ順で行う。guard は 1 回目の照合の後に verified を出し、親の go を待って 2 回目の照合をし、最後に自分の本体を
 # 控えた hash で照らし直す(本体は照合の木の外にあり、今までは 2 回目の起動の読み込み器が見つけていた)。
 # 前面のサブシェルの中で動かす: シグナルの trap(昇格の途中は記録だけして戻る。P14)はサブシェルが終わるまで走らないので、
-# 親で wait している間に trap が走って wait が 143 を返すことが無い。照合のパイプ(coproc)は補助 CLI を打つサブシェルの
+# 親で wait している間に trap が走って wait が 143 を返すことが無い。照合のパイプ(coproc)は補助 CLI を実行するサブシェルの
 # 中で閉じ切って渡さない(関数の呼び出しに付けるリダイレクトは、元に戻すための複製を残すので使わない)
 verify_environment_pair() { # $1=一覧のファイル(補助 CLI だけが書く)
   local current="$1" pair_pid pair_r pair_w line="" aux_rc=1 write_rc=1 wait_rc=0
@@ -1613,18 +1613,18 @@ scan_full_permission() {
 
 quote_argv() { local out="" a; for a in "$@"; do out="$out $(printf '%q' "$a")"; done; printf '%s' "${out# }"; }
 
-# 補助の CLI(--version・--help・auth status・plugin list)。上書き後の実行ファイルで、cwd を状態ディレクトリにして打つ
+# 補助の CLI(--version・--help・auth status・plugin list)。上書き後の実行ファイルで、cwd を状態ディレクトリにして実行する
 # (リポジトリの設定を読ませない)。セッションは起動しない
 # stdout と stderr は別のファイルへ向ける(警告が stderr に出ても、一覧の解析は stdout だけで行う)。
-# 実行ファイルは起動時に控えた実体(HOST_EXEC。H31)を使い、打つたびに同じ実体かを照合する
+# 実行ファイルは起動時に控えた実体(HOST_EXEC。H31)を使い、実行するたびに同じ実体かを照合する
 aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <stdout のファイル>.err)
   local out="$1"
   shift
   if ! host_same; then
-    echo "ERROR [host-proof] 補助の CLI を打つ直前に、ホスト CLI の実体が控えた時と違う(${HOST_EXEC:-未確認})" >&2
+    echo "ERROR [host-proof] 補助の CLI を実行する直前に、ホスト CLI の実体が控えた時と違う(${HOST_EXEC:-未確認})" >&2
     return 1
   fi
-  # 端末の幅の変数で --help の折り返しが変わらないよう、外して打つ(証明の help の照合を安定させる)
+  # 端末の幅の変数で --help の折り返しが変わらないよう、外して実行する(証明の help の照合を安定させる)
   # (env を挟まない。env は `=` を含むパスを代入として読み、控えた実体を起動しないことがある)
   ( cd "$STATE" && unset COLUMNS LINES && run_detached "$NET_TIMEOUT" "$HOST_EXEC" "$SETTINGS_FLAG" "$FIXED_POLICY" "$@" >"$out" 2>"$out.err" )
 }
@@ -2390,7 +2390,7 @@ report_discover_end() {
   rep "- merge commit で merge して pull した後: 作業ブランチを消す(\`git branch -d task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`)。デフォルトブランチの祖先になるので、消す前でも読み飛ばしには数えない" \
     "- squash・rebase で merge したとき: ブランチの sha がデフォルトブランチの祖先にならないので、消すまで、その発見元は回らない(\`git branch -D task/候補-<発見元>-<sha>\`・\`git push origin --delete task/候補-<発見元>-<sha>\`。手元の追跡用の ref が残れば \`git branch -dr origin/task/候補-<発見元>-<sha>\`)" \
     "- PR を閉じたとき(merge しない): 上と同じく、消すまで、その発見元は回らない。候補は task_dir に入らないので、同じ指摘がまた出うる" \
-    "- 採用: merge して pull した後に、人が対話で \`/create-task <候補_ のパス>\` を打つ(見送りの行がある候補は止まる)" \
+    "- 採用: merge して pull した後に、人が対話で \`/create-task <候補_ のパス>\` を実行する(見送りの行がある候補は止まる)" \
     "- 失敗のイテレーションが残した worktree(lock の理由 \`dev-workflow-loop: 候補:<発見元>\`)は、調べてから消すまで、その発見元は回らない"
 }
 
@@ -3107,7 +3107,7 @@ PROOF_STORE="$(realpath -m -- "$PROOF_STORE/dev-workflow/loop/host-proofs")"
 CHILD_ARGV[0]="$HOST_EXEC"
 RESOLVED_ARGV="$(quote_argv "${CHILD_ARGV[@]}")"
 build_child_shape
-PROVE_HINT="ホスト CLI の更新が正規のもの(版・導入元・置き場)かを人が確かめてから、同じ引数(--repo・--host-argv・--allowed-tools・--mcp-config)に --prove-host を足して 1 回打ち、許可の仲介の hook が実際に効くことを確かめてから起動する(--prove-host は打った時点の実体を信頼する)"
+PROVE_HINT="ホスト CLI の更新が正規のもの(版・導入元・置き場)かを人が確かめてから、同じ引数(--repo・--host-argv・--allowed-tools・--mcp-config)に --prove-host を足して 1 回実行し、許可の仲介の hook が実際に効くことを確かめてから起動する(--prove-host は実行した時点の実体を信頼する)"
 if [ "$PROVE_HOST" -eq 0 ]; then
   verify_environment || die 20 environment "ホスト CLI の証明を読む直前に環境が変わった"
   rc=0
@@ -3195,7 +3195,7 @@ ALLOW_UNUSED="$(printf '%s\n' "$ALLOW_OUT" | sed -n 's/^unused=//p')"
 # active component の全出所が確定した時点で、証明の必須digestを照合する。
 [ "$PROVE_HOST" -eq 1 ] || match_component_proof
 
-# ── §2 の 13: 疎通(D10。--dry-run では打たない)──
+# ── §2 の 13: 疎通(D10。--dry-run では実行しない)──
 if [ "$DRY_RUN" -eq 0 ]; then
   rc=0
   aux "$RUN_DIR/auth.txt" "${AUX_AUTH[@]}" || rc=$?

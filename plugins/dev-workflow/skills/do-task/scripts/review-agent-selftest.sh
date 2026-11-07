@@ -12,7 +12,7 @@
 # 期待終了コード: 0=成功 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #                 7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed 12=prompt-too-large
 #
-# K 節(ログの fd)のケースは、制限した PATH で打ち、対象の一時領域($TMPDIR の下の mktemp -d)を
+# K 節(ログの fd)のケースは、制限した PATH で実行し、対象の一時領域($TMPDIR の下の mktemp -d)を
 # このスイートの一時領域へ向ける(FIFO のケースが KILL で終わって対象の後始末が走らなくても、
 # 系の一時領域に残らないように)。
 #
@@ -497,7 +497,7 @@ run_agent --runner stubrunner --command "bash $WORK/bin/stub-sideeffect.sh --rea
 check "大きさの判定の順序: --command のランナー: prompt-too-large" 12 "$rc"
 if [ -e "$SIDEEFFECT" ]; then ng "大きさの判定の順序: --command のランナー: スタブを起動しない"; else
   ok "大きさの判定の順序: --command のランナー: スタブを起動しない"; fi
-# (b) 既定表のランナー: 起動のたびに 1 行を記録するスタブで、起動が 0 回(ヘルプ照合もプローブも打たない)
+# (b) 既定表のランナー: 起動のたびに 1 行を記録するスタブで、起動が 0 回(ヘルプ照合もプローブも実行しない)
 mkdir -p "$WORK/sizebin"
 cat >"$WORK/sizebin/cursor-agent" <<EOF
 #!/usr/bin/env bash
@@ -1031,7 +1031,7 @@ fi
 # 既定のログ置き場が**書き込み不可**のとき、番号の衝突と区別して止める。
 # noclobber の採番は「作成に失敗したら次の番号へ」なので、権限不足まで再試行の対象に
 # すると**無限ループ**する(実測: 外側の timeout で exit=124 になる)。
-# スタブのランナー(stubrunner)で打つ(--runner codex だと、制限しない PATH の実機の codex まで
+# スタブのランナー(stubrunner)で実行する(--runner codex だと、制限しない PATH の実機の codex まで
 # 進みうるため)。chmod 555 は root には効かないので、E4c(implement-agent-selftest.sh)と同じく
 # root では飛ばす旨を ok で出す。
 if [ "$(id -u)" -ne 0 ]; then
@@ -1370,7 +1370,7 @@ sig_cleanup
 
 # 明示した --log-file のパスに既存のエントリが在れば、何も書かずに usage(2)で止まる。
 # 呼び出し側がログの名前を決めると、前に動いた外部ランナーが、その名前に外のファイルを指す
-# symlink やハードリンクを先に置ける。スタブのランナー(起動されたら痕跡を残す)と制限した PATH で打つ
+# symlink やハードリンクを先に置ける。スタブのランナー(起動されたら痕跡を残す)と制限した PATH で実行する
 mkdir -p "$WORK/sandbox-d4"
 make_sandbox "$WORK/sandbox-d4"
 D4_DIR="$WORK/d4"
@@ -1379,7 +1379,7 @@ D4_VICTIM="$D4_DIR/outside/victim.txt"
 D4_VICTIM_TEXT="外のファイルの中身(書き換えられてはならない)"
 d4_reset_victim() { printf '%s\n' "$D4_VICTIM_TEXT" >"$D4_VICTIM"; }
 d4_victim_same() { [ "$(cat "$D4_VICTIM" 2>/dev/null)" = "$D4_VICTIM_TEXT" ]; }
-d4_run() { # 残り=引数。制限した PATH で打つ
+d4_run() { # 残り=引数。制限した PATH で実行する
   rc=0
   guard env -i HOME="$HOME" DEV_WORKFLOW_HOST_CLI="selftest-host" PATH="$WORK/sandbox-d4" \
     SELFTEST_SIDEEFFECT="$SIDEEFFECT" bash "$TARGET" --cwd "$WORK" "$@" >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
@@ -1458,8 +1458,8 @@ if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化よ
 # ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
 # ケース名の接頭辞: 走行中の差し替え / 差し替えの照合 / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 /
 # ログのパス / 子プロセスに渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
-# どれもスタブと制限した PATH で打ち、対象の一時領域($TMPDIR)はこのスイートの一時領域へ向ける。
-# FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
+# どれもスタブと制限した PATH で実行し、対象の一時領域($TMPDIR)はこのスイートの一時領域へ向ける。
+# FIFO のケースは guard(TERM の後に KILL まで行う)で実行し、外側の時間を K_FIFO_TIMEOUT に縮める
 # (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
 # timeout か mkfifo が無い環境では、FIFO のケースを飛ばす(待ち続けて selftest が終わらないのを避ける)
 K_DIR="$WORK/k"
@@ -1469,7 +1469,7 @@ K_SANDBOX="$WORK/sandbox-k"
 K_TMP="$K_DIR/tmp"
 K_PATH="$K_SANDBOX"   # k_run の PATH(ケースごとにスタブのディレクトリを先頭に足す)
 K_TARGET=""           # 空なら $TARGET
-K_CWD=""              # 空ならスイートの cwd で打つ
+K_CWD=""              # 空ならスイートの cwd で実行する
 K_EXTRA=()            # 追加の環境変数(`VAR=値` の並び)
 K_FIFO_TIMEOUT=30
 K_PREV_TIMEOUT="$OUTER_TIMEOUT"
@@ -1481,7 +1481,7 @@ K_VICTIM="$K_DIR/victim.txt"
 K_VICTIM_TEXT="外のファイルの中身(書き換えられてはならない)"
 k_reset_victim() { printf '%s\n' "$K_VICTIM_TEXT" >"$K_VICTIM"; }
 k_victim_same() { [ "$(cat "$K_VICTIM" 2>/dev/null)" = "$K_VICTIM_TEXT" ]; }
-k_run() { # 残り=引数。制限した PATH・このスイートの一時領域の TMPDIR で、guard を付けて打つ
+k_run() { # 残り=引数。制限した PATH・このスイートの一時領域の TMPDIR で、guard を付けて実行する
   rc=0
   kr_target="${K_TARGET:-$TARGET}"
   if [ -n "$K_CWD" ]; then
@@ -1663,7 +1663,7 @@ if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
   kc_run ef-pythonpath hardlink "PYTHONPATH=$K_DIR/pysite"
   kc_notes "差し替えの照合: -ef が偽の写し: (b) ハードリンク: PYTHONPATH の encodings: stderr に差し替えの NOTE が出る" +
   K_TARGET=""
-  # 中止: (d) と同じ打ち方で、差し替えずに居座るスタブの本実行の間に TERM を送る。
+  # 中止: (d) と同じ実行の仕方で、差し替えずに居座るスタブの本実行の間に TERM を送る。
   # 中止の処理は本実行の cwd とリダイレクトの下で走るが、比べ直しは同じファイルと見分ける
   leak_cleanup
   rm -f "$K_MARKER"
@@ -1853,7 +1853,7 @@ else
   ok "POSIX モード: 置き場に書けない既定名は usage で止まる(root のため飛ばす)"
 fi
 
-# /dev/fd の判定が偽: 写しで `[ -f /dev/fd/7 ]` を false に替え、既定名で打つ。開いたものを通常ファイルと
+# /dev/fd の判定が偽: 写しで `[ -f /dev/fd/7 ]` を false に替え、既定名で実行する。開いたものを通常ファイルと
 # 確かめられないときは、既定名でも次の番号へ進まずに止まる(採番を繰り返して空のファイルを作り続けない)
 K_DEVFD_TARGET="$K_DIR/devfd-false.sh"
 sed 's#\[ -f /dev/fd/7 \]#false#g' "$TARGET" >"$K_DEVFD_TARGET"
@@ -1905,8 +1905,8 @@ fi
 # (d) は PATH の先頭に置いた mkdir の包み(K 節の wcbin と同じ置き方)で、検査と作成の間の差し替えを起こす。
 # (f)・(g) は BASH_ENV で読み込ませた cd・pwd の関数で、検査と cd の間・固定と開く間の差し替えを決定的に起こす
 # (対象で発火する・ファイルの印で 1 回だけ・条件の外では builtin を呼ぶだけ・対象の set -eEu と ERR trap の下で失敗しない)。
-# 明示の --log-file では接頭辞の照合のサブシェルの pwd -P で先に発火するので、(f)・(g) は既定名で打つ。
-# どれも k_run(制限した PATH・env -i)で打つ
+# 明示の --log-file では接頭辞の照合のサブシェルの pwd -P で先に発火するので、(f)・(g) は既定名で実行する。
+# どれも k_run(制限した PATH・env -i)で実行する
 L_DIR="$K_DIR/place"
 rm -rf "$L_DIR"; mkdir -p "$L_DIR"
 L_CWD="$L_DIR/cwd"; mkdir -p "$L_CWD"
@@ -1916,7 +1916,7 @@ REAL_RMDIR="$(command -v rmdir)"
 REAL_MV="$(command -v mv)"
 L_CMD="bash $WORK/bin/stub-sideeffect.sh --readonly-x"
 L_EXTRA=()
-l_run() { # $1=起動する場所 $2=--cwd 残り=追加の引数。副作用のスタブで打つ(起動したら $SIDEEFFECT が残る)
+l_run() { # $1=起動する場所 $2=--cwd 残り=追加の引数。副作用のスタブで実行する(起動したら $SIDEEFFECT が残る)
   lr_cwd="$1"; lr_runcwd="$2"; shift 2
   rm -f "$SIDEEFFECT"
   K_CWD="$lr_cwd"

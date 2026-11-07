@@ -1288,7 +1288,7 @@ STUB_DIR="$WORK/pathbin"
 # 既定のログ置き場が**書き込み不可**のとき、番号の衝突と区別して止める。
 # noclobber の採番は「作成に失敗したら次の番号へ」なので、権限不足まで再試行の対象に
 # すると**無限ループ**する(実測: 外側の timeout で exit=124 になる)。
-# run_script / AGENT_CWD の制限 PATH で打つ(制限しない PATH で直接 bash を起動すると、root
+# run_script / AGENT_CWD の制限 PATH で実行する(制限しない PATH で直接 bash を起動すると、root
 # では採番を抜けて実機の codex まで進みうるため)。chmod 555 は root には効かないので、E4c と
 # 同じく root では飛ばす旨を ok で出す。
 if [ "$(id -u)" -ne 0 ]; then
@@ -1482,8 +1482,8 @@ STUB_DIR="$WORK/pathbin"
 # ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
 # ケース名の接頭辞: 走行中の差し替え / 差し替えの照合 / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 /
 # ログのパス / 子プロセスに渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は J5 の前提の位置にある)。
-# どれもスタブと制限した PATH で打ち、対象の保護領域は selftest 専用の置き場($PROT)へ向ける。
-# FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
+# どれもスタブと制限した PATH で実行し、対象の保護領域は selftest 専用の置き場($PROT)へ向ける。
+# FIFO のケースは guard(TERM の後に KILL まで行う)で実行し、外側の時間を K_FIFO_TIMEOUT に縮める
 # (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
 # timeout か mkfifo が無い環境では、FIFO のケースを飛ばす(待ち続けて selftest が終わらないのを避ける)
 K_DIR="$WORK/k"
@@ -1694,7 +1694,7 @@ if [ "$kc_hits" -ge 1 ] && [ "$kc_left" -eq 0 ]; then
   printf '%s\n' 'import os; os._exit(0)' >"$K_DIR/pysite/encodings/__init__.py"
   kc_run copy ef-pythonpath hardlink "PYTHONPATH=$K_DIR/pysite"
   kc_notes "差し替えの照合: -ef が偽の写し: (b) ハードリンク: PYTHONPATH の encodings: stderr に差し替えの NOTE が出る" +
-  # 中止: (d) と同じ打ち方で、差し替えずに居座るスタブの本実行の間に TERM を送る。
+  # 中止: (d) と同じ実行の仕方で、差し替えずに居座るスタブの本実行の間に TERM を送る。
   # 中止の処理は本実行の cwd(cd "$CWD")とリダイレクトの下で走るが、比べ直しは同じファイルと見分ける
   leak_cleanup
   rm -f "$RUN_MARKER"
@@ -1897,7 +1897,7 @@ else
   ok "POSIX モード: 置き場に書けない既定名は usage で止まる(root のため飛ばす)"
 fi
 
-# /dev/fd の判定が偽: 写しで `[ -f /dev/fd/7 ]` を false に替え、既定名で打つ。開いたものを通常ファイルと
+# /dev/fd の判定が偽: 写しで `[ -f /dev/fd/7 ]` を false に替え、既定名で実行する。開いたものを通常ファイルと
 # 確かめられないときは、既定名でも次の番号へ進まずに止まる(採番を繰り返して空のファイルを作り続けない)
 K_DEVFD_TARGET="$K_DIR/devfd-false.sh"
 sed 's#\[ -f /dev/fd/7 \]#false#g' "$TARGET" >"$K_DEVFD_TARGET"
@@ -1952,7 +1952,7 @@ STUB_DIR="$WORK/pathbin"
 # (d) は STUB_DIR(PATH の先頭。E4 の e4-stubdir と同じ置き方)に置いた mkdir の包みで、検査と作成の間の差し替えを起こす。
 # (f)・(g) は BASH_ENV で読み込ませた cd・pwd の関数で、検査と cd の間・固定と開く間の差し替えを決定的に起こす
 # (対象で発火する・ファイルの印で 1 回だけ・条件の外では builtin を呼ぶだけ・対象の set -eEu と ERR trap の下で失敗しない)。
-# 明示の --log-file では接頭辞の照合のサブシェルの pwd -P で先に発火するので、(f)・(g) は既定名で打つ。
+# 明示の --log-file では接頭辞の照合のサブシェルの pwd -P で先に発火するので、(f)・(g) は既定名で実行する。
 # 保護領域は K 節と同じく $PROT へ向ける
 L_DIR="$K_DIR/place"
 rm -rf "$L_DIR"; mkdir -p "$L_DIR"
@@ -1962,7 +1962,7 @@ REAL_RMDIR="$(command -v rmdir)"
 REAL_MV="$(command -v mv)"
 L_STUBDIR="$WORK/evilbin"
 L_EXTRA=()
-l_run() { # $1=起動する場所 $2=--cwd 残り=追加の引数。既定は副作用のスタブ(evilbin)で打つ(起動したら $SIDEEFFECT が残る)
+l_run() { # $1=起動する場所 $2=--cwd 残り=追加の引数。既定は副作用のスタブ(evilbin)で実行する(起動したら $SIDEEFFECT が残る)
   lr_cwd="$1"; lr_runcwd="$2"; shift 2
   rm -f "$SIDEEFFECT"
   STUB_DIR="$L_STUBDIR"
@@ -2094,7 +2094,7 @@ if [ -e "$L_MARK" ]; then ok "$lf_name: フックが発火した(cd の最後の
 l_assert_stopped "$lf_name" "$rc" "既定のログ置き場" "$lf/out"
 
 # (g) 固定の後・開く前の差し替え: pwd の関数が、置き場の中で呼ばれた後に、置き場を退かして外を指す symlink を置く。
-#     相対名で開くので、ログは退かした置き場に書かれ、外には書かれない(本実行まで通るスタブで打つ)
+#     相対名で開くので、ログは退かした置き場に書かれ、外には書かれない(本実行まで通るスタブで実行する)
 lg="$L_DIR/g"; mkdir -p "$lg/proj/.claude/reviews" "$lg/out"
 lg_phys="$(cd "$lg/proj" && pwd -P)"
 l_make_hook "$lg/hook.sh" pwd reviews "$lg_phys/.claude/reviews" "$lg/out"

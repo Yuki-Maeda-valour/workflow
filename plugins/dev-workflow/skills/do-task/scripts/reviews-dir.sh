@@ -22,7 +22,7 @@
 #             (tool-missing)。止まるときは stderr に "ERROR [理由コード] 説明"。
 #             止まったときは何も公開しない(一時ファイルは消す)
 #
-# git は base-commit.md と同じ前置きで打ち、GIT_NO_LAZY_FETCH=1 を自分で付ける。呼び出し側が渡した
+# git は base-commit.md と同じ前置きで実行し、GIT_NO_LAZY_FETCH=1 を自分で付ける。呼び出し側が渡した
 # 承認済みのフィルタを無効にする GIT_CONFIG_COUNT・GIT_CONFIG_KEY_<n>・GIT_CONFIG_VALUE_<n> は外さない。
 # --- end usage ---
 set -eEuo pipefail
