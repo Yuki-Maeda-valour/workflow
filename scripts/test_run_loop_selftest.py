@@ -18,7 +18,7 @@ from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent
 RUNNER = SCRIPTS / "run-loop-selftest.py"
-RUN_TESTS = SCRIPTS / "run-tests.py"
+RUN_UNITS = SCRIPTS / "run_units.py"
 SELFTEST_PATH = Path("plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh")
 
 # 偽の loop-selftest.sh。本物と同じ形で、節の外の確かめ(前に 2 件・後に 1 件。件数は本物と結び付けない)と、節の確かめを数える。
@@ -102,7 +102,7 @@ class RunLoopSelftestTest(unittest.TestCase):
         scripts.mkdir()
         self.runner = scripts / "run-loop-selftest.py"
         shutil.copy2(RUNNER, self.runner)
-        shutil.copy2(RUN_TESTS, scripts / "run-tests.py")
+        shutil.copy2(RUN_UNITS, scripts / "run_units.py")
         self.selftest = self.root / SELFTEST_PATH
         self.selftest.parent.mkdir(parents=True)
         self.log = self.root / "ran.txt"
@@ -346,7 +346,7 @@ if check_want a a; then ok "変数の want"; fi
     def test_interrupt_waits_for_output_held_by_another_group(self):
         # 別のセッションの子が標準出力を開いたまま残っても、止めたときに、残った一時フォルダの行が出ることを確かめる。
         # 待つ仕組み(left_scratches が時間で切らずに待つこと)の確かめは、LeftScratchesTest に任せる。
-        # この子は 10 秒で終わる。run-tests.py の stop_all が先に最大 15 秒待つので、left_scratches に来た時点で、
+        # この子は 10 秒で終わる。run_units.py の stop_all が先に最大 15 秒待つので、left_scratches に来た時点で、
         # プロセスはもう終わっている(left_scratches の待ちの道は通らない)。
         marks = self.root / "marks"
         marks.mkdir()

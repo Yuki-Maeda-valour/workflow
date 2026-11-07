@@ -74,8 +74,13 @@
      templates・design 本文・README・決定録・スクリプトには広げない。
 
 終了コード: ERROR があれば 1。WARN のみなら 0。
+
+使い回し: 同じプロセスで何度も流す呼び出し元は、main(file_results=<表>) で共有の表を渡すと、
+11・12・13〜15・委託の語・ホスト CLI 語のファイルごとの結果を、その 1 回の実行の間だけ使い回せる。
+表を渡さない CLI の stdout と終了コードは変わらない。
 """
 
+import hashlib
 import json
 import os
 import re
@@ -91,6 +96,35 @@ SKILLS_DIR = REPO / "plugins" / "dev-workflow" / "skills"
 
 ERRORS: list[str] = []
 WARNS: list[str] = []
+
+# ファイルごとの検査の結果を使い回す表(同じプロセスの中だけ)。
+# キーは (検査器のコードのダイジェスト, 検査の名前, リポジトリ相対のパス, 本文のダイジェスト, 結果を左右するほかの入力)。
+# 値は、その検査がそのファイルについて足した ERRORS と WARNS。
+# 既定は None(使い回さない)。表は main(file_results=<表>) で渡した 1 回の実行の間だけ使い、抜けるときに前の値へ戻す。
+# CLI・表を渡さない main()・検査の関数の直接の呼び出しは、表を引かず・入れず・キーも作らない(今と同じ処理)。
+# 表を渡しても、1 回の実行では同じ検査が同じファイルを 2 回は見ないので、表に当たるのは 2 回目以降の実行だけ。
+_FILE_RESULTS: Optional[dict] = None
+_VALIDATOR_SHA256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+
+
+def _reuse_file_result(check, f, text, inputs, run):
+    """1 つのファイルについての検査 `run()` の結果を、表から使うか、流して表に入れる。
+
+    `run()` は `text` と `inputs` だけから ERRORS・WARNS へ足す(ファイルを読み直さない・ほかのファイルを見ない)。
+    """
+    if _FILE_RESULTS is None:
+        run()
+        return
+    key = (_VALIDATOR_SHA256, check, f.relative_to(REPO).as_posix(),
+           hashlib.sha256(text.encode("utf-8", "surrogatepass")).digest(), inputs)
+    hit = _FILE_RESULTS.get(key)
+    if hit is not None:
+        ERRORS.extend(hit[0])
+        WARNS.extend(hit[1])
+        return
+    errors, warns = len(ERRORS), len(WARNS)
+    run()
+    _FILE_RESULTS[key] = (tuple(ERRORS[errors:]), tuple(WARNS[warns:]))
 
 # 画像拡張子(禁止パターン検査・委託の語検査の両方が走査から除外する)
 _IMAGE_EXTS = {".png", ".jpg"}
@@ -644,10 +678,14 @@ def check_delegation_words():
             if not _is_delegation_target(f):
                 continue
             body = f.read_text(encoding="utf-8", errors="replace")
-            for pat in _DELEGATION_WORDS:
-                for m in re.finditer(pat, body):
-                    line = body.count("\n", 0, m.start()) + 1
-                    ERRORS.append(f"{f.relative_to(REPO)}:{line}: 委託の語 -> {m.group(0)!r}")
+            _reuse_file_result("delegation_words", f, body, (), lambda: _delegation_words_in(f, body))
+
+
+def _delegation_words_in(f, body):
+    for pat in _DELEGATION_WORDS:
+        for m in re.finditer(pat, body):
+            line = body.count("\n", 0, m.start()) + 1
+            ERRORS.append(f"{f.relative_to(REPO)}:{line}: 委託の語 -> {m.group(0)!r}")
 
 
 def _in_host_cli_scope(f: Path) -> bool:
@@ -688,22 +726,26 @@ def check_host_cli_words():
             if not _in_host_cli_scope(f):
                 continue
             body = f.read_text(encoding="utf-8", errors="replace")
-            body_lines = body.splitlines()
-            for pat in _HOST_CLI_WORDS:
-                guidance = (
-                    _HOST_CLI_QUESTION_GUIDANCE if pat in _HOST_CLI_QUESTION_WORDS
-                    else _HOST_CLI_GUIDANCE
-                )
-                for m in re.finditer(pat, body, flags=re.IGNORECASE):
-                    line = body.count("\n", 0, m.start()) + 1
-                    # 正当に具体名を持つ行だけ、明示マーカーで免除する(design.md §5-24)。
-                    # ファイルごと除外にしないのは、その先で新しく混入しても捕まらなくなるため。
-                    if _has_allow_marker(body_lines[line - 1] if line <= len(body_lines) else ""):
-                        continue
-                    ERRORS.append(
-                        f"{f.relative_to(REPO)}:{line}: ホスト固有の CLI 語 -> {m.group(0)!r}"
-                        + guidance
-                    )
+            _reuse_file_result("host_cli_words", f, body, (), lambda: _host_cli_words_in(f, body))
+
+
+def _host_cli_words_in(f, body):
+    body_lines = body.splitlines()
+    for pat in _HOST_CLI_WORDS:
+        guidance = (
+            _HOST_CLI_QUESTION_GUIDANCE if pat in _HOST_CLI_QUESTION_WORDS
+            else _HOST_CLI_GUIDANCE
+        )
+        for m in re.finditer(pat, body, flags=re.IGNORECASE):
+            line = body.count("\n", 0, m.start()) + 1
+            # 正当に具体名を持つ行だけ、明示マーカーで免除する(design.md §5-24)。
+            # ファイルごと除外にしないのは、その先で新しく混入しても捕まらなくなるため。
+            if _has_allow_marker(body_lines[line - 1] if line <= len(body_lines) else ""):
+                continue
+            ERRORS.append(
+                f"{f.relative_to(REPO)}:{line}: ホスト固有の CLI 語 -> {m.group(0)!r}"
+                + guidance
+            )
 
 
 def check_delegation_map_invariant():
@@ -854,32 +896,37 @@ def check_replaced_words():
     if design.is_file():
         targets.append(design)
     for f in targets:
-        lines = f.read_text(encoding="utf-8", errors="replace").split("\n")
-        if f == design:
-            for prefix in _REPLACED_WORDS_DEFINITION_PREFIXES:
-                found = [no for no, line in enumerate(lines, 1) if line.startswith(prefix)]
-                if len(found) != 1:
-                    where = "・".join(str(no) for no in found) or "なし"
-                    ERRORS.append(
-                        f"{f.relative_to(REPO)}: 置き換える語の定義の行「{prefix}」が {len(found)} 行(行: {where})。"
-                        "ちょうど 1 行にする(design.md §6)"
-                    )
-        for no, line in enumerate(lines, 1):
-            own = None
-            if f == design:
-                own = next((p for p in _REPLACED_WORDS_DEFINITION_PREFIXES if line.startswith(p)), None)
-            hits = []
-            rest = line
-            for pattern, word, repl, group in _REPLACED_WORDS:
-                if group == own:
-                    # 定義の行では、その行で定義する語だけを除く(ほかの組の語は探す)
-                    rest = re.sub(pattern, "", rest)
-                    continue
-                if re.search(pattern, rest):
-                    hits.append(f"{word!r} -> {repl}")
-                    rest = re.sub(pattern, "", rest)
-            for h in hits:
-                ERRORS.append(f"{f.relative_to(REPO)}:{no}: 置き換える語 {h}(design.md §6)")
+        text = f.read_text(encoding="utf-8", errors="replace")
+        _reuse_file_result("replaced_words", f, text, (), lambda: _replaced_words_in(f, text, f == design))
+
+
+def _replaced_words_in(f, text, is_design):
+    lines = text.split("\n")
+    if is_design:
+        for prefix in _REPLACED_WORDS_DEFINITION_PREFIXES:
+            found = [no for no, line in enumerate(lines, 1) if line.startswith(prefix)]
+            if len(found) != 1:
+                where = "・".join(str(no) for no in found) or "なし"
+                ERRORS.append(
+                    f"{f.relative_to(REPO)}: 置き換える語の定義の行「{prefix}」が {len(found)} 行(行: {where})。"
+                    "ちょうど 1 行にする(design.md §6)"
+                )
+    for no, line in enumerate(lines, 1):
+        own = None
+        if is_design:
+            own = next((p for p in _REPLACED_WORDS_DEFINITION_PREFIXES if line.startswith(p)), None)
+        hits = []
+        rest = line
+        for pattern, word, repl, group in _REPLACED_WORDS:
+            if group == own:
+                # 定義の行では、その行で定義する語だけを除く(ほかの組の語は探す)
+                rest = re.sub(pattern, "", rest)
+                continue
+            if re.search(pattern, rest):
+                hits.append(f"{word!r} -> {repl}")
+                rest = re.sub(pattern, "", rest)
+        for h in hits:
+            ERRORS.append(f"{f.relative_to(REPO)}:{no}: 置き換える語 {h}(design.md §6)")
 
 
 # 結果の行・保留の行の理由欄だけを調べる。参照の番号へ検査を広げない(#314)。
@@ -907,13 +954,18 @@ def check_number_only_reasons():
                 targets.append(f)
     targets.extend(f for f in (REPO / "docs" / "design.md", REPO / "README.md") if f.is_file())
     for f in targets:
-        for no, line in enumerate(f.read_text(encoding="utf-8", errors="replace").split("\n"), 1):
-            for pattern in _BARE_REPORT_REASON:
-                for match in pattern.finditer(line):
-                    ERRORS.append(
-                        f"{f.relative_to(REPO)}:{no}: 番号だけの理由 -> {match['number']!r}。"
-                        "結果の行の理由・保留の行の停止条件は「番号: 中身」で書く(design.md §6)"
-                    )
+        text = f.read_text(encoding="utf-8", errors="replace")
+        _reuse_file_result("number_only_reasons", f, text, (), lambda: _number_only_reasons_in(f, text))
+
+
+def _number_only_reasons_in(f, text):
+    for no, line in enumerate(text.split("\n"), 1):
+        for pattern in _BARE_REPORT_REASON:
+            for match in pattern.finditer(line):
+                ERRORS.append(
+                    f"{f.relative_to(REPO)}:{no}: 番号だけの理由 -> {match['number']!r}。"
+                    "結果の行の理由・保留の行の停止条件は「番号: 中身」で書く(design.md §6)"
+                )
 
 
 # 検査 13〜15。語彙は design §6 の表だけに置く。名前と報告の型は JSON で限定する。
@@ -1374,37 +1426,58 @@ def check_wording():
     # 英字の語は、その語だけのインラインのコードの中も数える(design §6)。語は表から導く。
     roles = {word for word in terms if _WORDING_ASCII.fullmatch(word)}
     for f in targets:
-        rel = f.relative_to(REPO).as_posix()
         body = f.read_text(encoding='utf-8', errors='replace')
-        # 許す形の字面だけを隠す。後ろに足された本文や同じ行の別の語は残す。
-        forms = exceptions.get(rel, {})
-        if forms:
-            def exclude(match):
-                if not _wording_form_starts_ok(match[0], match) or _wording_quote_verb_follows(match[0], match):
-                    return match[0]
-                pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
-                return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
-            body = re.sub('|'.join(_wording_form_pattern(form) for form in sorted(forms, key=len, reverse=True)),
-                          exclude, body)
-        lines = wording_body(body, md, roles)
-        for word, explanation in terms.items():
-            pattern = _wording_pattern(word)
-            found = [(no, _wording_explained(line, m, explanation))
-                     for no, line in lines for m in re.finditer(pattern, line)]
-            if not found:
-                continue
-            explained = [no for no, ok in found if ok]
-            if not found[0][1]:
-                later = f'。説明のある行: {", ".join(map(str, explained))} 行' if explained else ''
-                ERRORS.append(f'{rel}:{found[0][0]}: 言い換えの初出 {word!r} -> ({explanation}){later}(design.md §6)')
-            for no in explained[1:]:
-                ERRORS.append(f'{rel}:{no}: 言い換えの重複 {word!r}。本文では 1 か所にする(最初の説明: {explained[0]} 行、design.md §6)')
-        for no, line in lines:
-            for _ in re.finditer('縮退', line):
-                ERRORS.append(f'{rel}:{no}: 名前でもコードでもない「縮退」。意味に合う言葉へ変える(design.md §6)')
+        forms = exceptions.get(f.relative_to(REPO).as_posix(), {})
+        # 結果を左右する入力: 語と言い換え・このファイルの許す形と隠す語・Markdown の解析器・英字の語
+        inputs = (tuple(terms.items()), tuple((form, tuple(words)) for form, words in forms.items()),
+                  type(md), tuple(sorted(roles)))
+        _reuse_file_result('wording', f, body, inputs,
+                           lambda: _wording_in(f, body, terms, forms, md, roles))
 
 
-def main() -> int:
+def _wording_in(f, body, terms, forms, md, roles):
+    rel = f.relative_to(REPO).as_posix()
+    # 許す形の字面だけを隠す。後ろに足された本文や同じ行の別の語は残す。
+    if forms:
+        def exclude(match):
+            if not _wording_form_starts_ok(match[0], match) or _wording_quote_verb_follows(match[0], match):
+                return match[0]
+            pattern = '|'.join(_wording_pattern(word) for word in forms[match[0]])
+            return re.sub(pattern, lambda m: _WORDING_GAP * len(m[0]), match[0])
+        body = re.sub('|'.join(_wording_form_pattern(form) for form in sorted(forms, key=len, reverse=True)),
+                      exclude, body)
+    lines = wording_body(body, md, roles)
+    for word, explanation in terms.items():
+        pattern = _wording_pattern(word)
+        found = [(no, _wording_explained(line, m, explanation))
+                 for no, line in lines for m in re.finditer(pattern, line)]
+        if not found:
+            continue
+        explained = [no for no, ok in found if ok]
+        if not found[0][1]:
+            later = f'。説明のある行: {", ".join(map(str, explained))} 行' if explained else ''
+            ERRORS.append(f'{rel}:{found[0][0]}: 言い換えの初出 {word!r} -> ({explanation}){later}(design.md §6)')
+        for no in explained[1:]:
+            ERRORS.append(f'{rel}:{no}: 言い換えの重複 {word!r}。本文では 1 か所にする(最初の説明: {explained[0]} 行、design.md §6)')
+    for no, line in lines:
+        for _ in re.finditer('縮退', line):
+            ERRORS.append(f'{rel}:{no}: 名前でもコードでもない「縮退」。意味に合う言葉へ変える(design.md §6)')
+
+
+def main(*, file_results=None) -> int:
+    # 同じプロセスで何度も流す呼び出し元は、共有の表を渡して、ファイルごとの検査の結果を使い回す。
+    # 表は、この呼び出しの間だけ使い、抜けるとき(例外のときも)に前の値へ戻す。
+    global _FILE_RESULTS
+    previous = _FILE_RESULTS
+    # 表を渡さない呼び出しは、外の表(表を入れた実行の中の main())を引き継がず、使い回さない。
+    _FILE_RESULTS = file_results
+    try:
+        return _main()
+    finally:
+        _FILE_RESULTS = previous
+
+
+def _main() -> int:
     # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
     if yaml_loader() is not None:
         check_json_files()
