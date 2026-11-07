@@ -20,6 +20,11 @@ BINARY_PATHS = ('linux-x86_64/dev-workflow', 'linux-arm64/dev-workflow',
                 'macos-universal/dev-workflow')
 
 
+
+def _identity(st):
+    """置き直されていないかを比べる値。読んだ時刻(atime)は含めない。"""
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
 class SetupTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -514,11 +519,12 @@ class SetupTests(unittest.TestCase):
                             leaf.symlink_to(os.path.relpath(source, leaf.parent), target_is_directory=True)
                         else:
                             shutil.copytree(source, leaf)
-                        before = leaf.lstat()
+                        # 読んだ時刻(atime)は、setup.sh が中身を読むと変わるので比べない。
+                        before = _identity(leaf.lstat())
                         result = case.run_setup(mode=mode)
                         self.assertEqual(0, result.returncode, result.stderr)
                         self.assertIn('2 件導入 / 1 件スキップ', result.stdout)
-                        self.assertEqual(before, leaf.lstat())
+                        self.assertEqual(before, _identity(leaf.lstat()))
                         self.assertEqual('alpha\n', (case.destination() / 'alpha/SKILL.md').read_text())
                         self.assertTrue((case.destination().parent / 'bin/dev-workflow/launch.sh').is_file())
 
