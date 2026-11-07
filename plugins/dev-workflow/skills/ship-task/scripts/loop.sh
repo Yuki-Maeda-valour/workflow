@@ -1650,7 +1650,7 @@ prove_host() {
   host_same --hash || die 20 host-proof "実 hook の確認の直前に、ホスト CLI の実体が控えた時と違う"
   nonce="$("$PY_ABS" -c 'import secrets; print(secrets.token_hex(32))')"
   # raw stdout は匿名pipeだけを通す。縮約済みのinit/resultだけを保存する。
-  # sanitizerとsupervisorをloopの別々の子にし、親終了時の回収を維持する。
+  # sanitizerとsupervisorをloopの別々の子プロセスにし、親終了時の回収を維持する。
   coproc H46_SANITIZER {
     exec "$PY_ABS" -I -B "$HOST_CHECK_PY" init-sanitize --state "$ENVIRONMENT_STATE" \
       --expect-sha256 "$ENVIRONMENT_SHA" "${allow_args[@]}" >"$dir/out.json" 2>"$dir/sanitize.err" 7>&-
@@ -2857,7 +2857,7 @@ INITIAL_POLICY_SHA="$POLICY_SHA"
 INITIAL_FIXED_POLICY="$FIXED_POLICY"
 
 verify_environment || die 20 environment "監督機構の診断直前に環境が変わった"
-"$PY_ABS" "$SUPERVISOR" --check || die 20 supervisor-runtime "子の監督に必要な Linux subreaper・pidfd を使えない"
+"$PY_ABS" "$SUPERVISOR" --check || die 20 supervisor-runtime "子プロセスの監督に必要な Linux subreaper・pidfd を使えない"
 
 # ── §2 の 5: 既定表・--host-argv(D20)・全許可のフラグ(#68 の決定 3)──
 load_host_table "$HOST"

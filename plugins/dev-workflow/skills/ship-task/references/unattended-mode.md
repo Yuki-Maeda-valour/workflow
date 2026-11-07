@@ -4,7 +4,7 @@ ship-task の無人モードの正本(ほかが合わせる元)。無人モー�
 
 - 本文ダイジェスト(本文から計算した短い値。本文が変わると値も変わる)・設計レビューの行の `本文`・保留の行・メタ行の書式と照合パターンの正本は [../../create-task/references/task-template.md](../../create-task/references/task-template.md) の記法の規約。算出は `python3 {create-task の}scripts/task-digest.py <パス | ->`
 - `--unattended` を宣言しなければ、この文書は使わない(人に確かめる場面では従来どおり止まる)。ship-task の Phase 2 の 6(本文の照合)と、do-task の新規着手の条件 ⑤ の例外(同じセッションの ship-task が作ったばかりの作業ブランチでは、⑤ を満たしたとみなす。①〜④ はそのまま問う。S8 の一覧の確認で「続行しない」と答えたブランチには当てない)は、対話にも効く。正本はそれぞれ ship-task の本文と [../../do-task/references/base-commit.md](../../do-task/references/base-commit.md)
-- 無人ループ(`loop.sh`)全体の設計は design §2。この文書は、イテレーション(無人ループの 1 回分の実行)の中の ship-task とその子の skill の振る舞いだけを定める
+- 無人ループ(`loop.sh`)全体の設計は design §2。この文書は、イテレーション(無人ループの 1 回分の実行)の中の ship-task と、ship-task が呼ぶ skill の振る舞いだけを定める
 - 発見のイテレーション(`--discover`)に固有の前提・工程・照合(照らし合わせて確かめること)・結末の正本は [discover-mode.md](discover-mode.md)。この文書の一般則(§3)・G1〜G4・イテレーションの Bash の書き方・委託するサブエージェントの要点は、発見のイテレーションにもそのまま効く
 
 ## 0. 最初に配布物と実行環境を控える
@@ -43,7 +43,7 @@ loop の許可の仲介(無人の実行で、操作を許すかをその場で�
 loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文書>` と
 `exec --path <plugin相対helper> -- python3 <引数...>`(shell は `bash`)も使える。
 どちらも `--state` と `--expect-sha256` が必須で、同じ固定本文に渡す guard の引数を `read` または `exec` にする。`loop.sh` が起動した CLI は上の `verify` 固定形だけを使う。
-子の skill と委託先へ保持値・コピーのルート・使用直前の手順をそのまま引き継ぐ。元パスの文書を先に読ませない。
+ship-task が呼ぶ skill と委託先へ保持値・コピーのルート・使用直前の手順をそのまま引き継ぐ。元パスの文書を先に読ませない。
 
 監視する集合・上限・同じ UID に対する限界は [loop.md](loop.md) §4 が正本。
 
@@ -68,12 +68,12 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 
 **発見のイテレーション(`--discover`)の前提**: 正本は [discover-mode.md](discover-mode.md) §4(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど)。parent-child 構成でないことと、開始時の HEAD の条件は、タスクのイテレーションと同じ。発見のイテレーションは本文ダイジェスト R を持たない
 
-**子の skill との分担**
+**ship-task が呼ぶ skill との分担**
 
 - ship-task は /do-task・/update-doc に `--unattended` を渡す
 - 発見のイテレーションでは、ship-task は発見元(改善の候補を見つける skill)の候補モード(`/data-audit --candidates --unattended`・`/create-task --refactor --candidates --unattended`)を呼ぶ。候補モードは `候補_` を書いて結果の行を返すだけで、改名・commit・チェーンの提案をしない(手順と、人に確かめる場面の扱いの正本は [candidate-mode.md](../../create-task/references/candidate-mode.md))
-- 子の skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(commit・push・PR の受け持ちは ship-task — design §5-20)
-- 子の skill を単独で `--unattended` で呼んでもよい。ただし、保留の改名・commit を行う者はいない
+- ship-task が呼ぶ skill は、止まるときに理由を「保留」と「失敗扱い」に分けて返す。改名・commit はしない(commit・push・PR の受け持ちは ship-task — design §5-20)
+- ship-task が呼ぶ skill を単独で `--unattended` で呼んでもよい。ただし、保留の改名・commit を行う者はいない
   - 対象のパスを必須にする(do-task はタスク MD のパス、update-doc は `--task`)。無ければ、候補の選択より前に失敗扱い(候補の確認で固まらないように)
   - do-task は、parent-child 構成でないことも前提にする(照合をどのリポジトリで行うかが決まらないため)。満たさなければ、候補の選択より前に失敗扱い
   - do-task は、R を最後の設計レビューの行の `本文` とも照合する(ship-task の Phase 2 を経ていないため)。不一致・行が無い・`本文` が無い・`算出不能` なら保留(理由は S4 と同じ — 承認後の本文の変更は人の判断。単独なので、改名・commit は誰もしない)

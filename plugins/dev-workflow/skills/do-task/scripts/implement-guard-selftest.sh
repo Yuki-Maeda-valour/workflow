@@ -45,8 +45,8 @@
 # `$HOME/.local/state/dev-workflow/` の下へ `selftest-guard-XXXXXX` を作って `XDG_STATE_HOME` を
 # そこへ向け、終了時(EXIT)に必ず消す。そこに既に在る他のファイルには触れない。
 #
-# (変異テストの子スイートは、親が作った保護領域を `IMPLEMENT_GUARD_SELFTEST_PROT` で借りる。子は作らず・
-# 消さないので、子が強制終了されても実 `$HOME` に残骸が出ない。この変数は内部用で、手では設定しない。)
+# (変異テストの子プロセスで流すスイートは、親が作った保護領域を `IMPLEMENT_GUARD_SELFTEST_PROT` で借りる。子プロセスは作らず・
+# 消さないので、子プロセスが強制終了されても実 `$HOME` に残骸が出ない。この変数は内部用で、手では設定しない。)
 #
 # 前提: bash 4.0 以上(対象のスクリプトが連想配列を使う)。git は PATH にあるもの。
 #
@@ -215,8 +215,8 @@ cd "$WORK" || exit 1
 [ -n "$WORK" ] && [ "$PWD" = "$WORK" ] || { echo "ERROR: scratch へ移動できない" >&2; exit 1; }
 mkdir -p "$WORK/home" "$WORK/xdg" "$WORK/stubs" "$WORK/mut"
 
-# 保護領域。変異テストの子として起動されたときは、親が作ったものを借りる(子は作らず・消さない。
-# 子が強制終了されても実 $HOME に残骸が出ないように)
+# 保護領域。変異テストの子プロセスとして起動されたときは、親が作ったものを借りる(子プロセスは作らず・消さない。
+# 子プロセスが強制終了されても実 $HOME に残骸が出ないように)
 if [ -n "${IMPLEMENT_GUARD_SELFTEST_PROT:-}" ]; then
   case "$IMPLEMENT_GUARD_SELFTEST_PROT" in
     */dev-workflow/selftest-guard-?*) : ;;
@@ -302,7 +302,7 @@ elif command -v gtimeout >/dev/null 2>&1; then GUARD_BIN=gtimeout; fi
 # 「internal エラー」に見える。時間切れは timeout の 124(KILL まで要ったときは 137)で見分ける
 T_RUN=90         # 通常の起動
 T_SLOW=180       # 重い起動(上限超過の検査。2000 件・200 MiB を数える)
-T_MUT=360        # 変異の子スイート(ケース数件ぶん)
+T_MUT=360        # 変異の子プロセスで流すスイート(ケース数件ぶん)
 LAST_T=""
 TIMED_OUT=0      # 直前の起動が外側タイムアウトで落ちたか
 guard() { LAST_T="$T_RUN"; if [ -n "$GUARD_BIN" ]; then "$GUARD_BIN" -k 5 "$T_RUN" "$@"; else "$@"; fi; }
@@ -2925,7 +2925,7 @@ case_P9() {
 
 # ════════════════════════ L 変異テスト ════════════════════════
 MUT_TABLE=""
-MUT_EXTRA_ENV=()   # 変異の子スイートへ足す環境変数(NAME=値 の配列。既定は空)
+MUT_EXTRA_ENV=()   # 変異の子プロセスで流すスイートへ足す環境変数(NAME=値 の配列。既定は空)
 mkvariant() { # $1=出力パス 残り=sed 式(対象の写しに 1 回の sed でまとめて当てる)。sed が失敗したら 1
   local o="$1" e args=()
   shift
@@ -2976,9 +2976,9 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
     pre="$WORK/mut/$id-pre.out"
     guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$TARGET" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
       ${MUT_EXTRA_ENV[@]+"${MUT_EXTRA_ENV[@]}"} bash "$SELF_PATH" -v --only J1 </dev/null >"$pre" 2>&1 || prc=$?
-    if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の前提の子スイート(元の対象の J1)→ rc=$prc"; cat "$pre"; fi
+    if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の前提の子プロセスで流すスイート(元の対象の J1)→ rc=$prc"; cat "$pre"; fi
     case "$prc" in
-      124|137) ng "変異(e) 前提の子スイート(元の対象の J1)が外側タイムアウトしていない(rc=$prc)"; return 0 ;;
+      124|137) ng "変異(e) 前提の子プロセスで流すスイート(元の対象の J1)が外側タイムアウトしていない(rc=$prc)"; return 0 ;;
       *) : ;;
     esac
     if [ "$prc" -eq 0 ] && grep -q -- '^PASS  J1 ' "$pre" && ! grep -q -- '^FAIL  J1 ' "$pre"; then
@@ -2997,10 +2997,10 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
   fi
   guard_t "$T_MUT" env HOME="$REAL_HOME" IMPLEMENT_GUARD="$v" IMPLEMENT_GUARD_SELFTEST_PROT="$PROT" \
     ${MUT_EXTRA_ENV[@]+"${MUT_EXTRA_ENV[@]}"} bash "$SELF_PATH" --only "$only" </dev/null >"$out" 2>&1 || rc=$?
-  if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の子スイート → rc=$rc"; cat "$out"; fi
-  # 子スイートが時間切れで落ちた非ゼロは「変異を検出した」ではない
+  if [ "$VERBOSE" -eq 1 ]; then echo "=== [L] 変異($id) の子プロセスで流すスイート → rc=$rc"; cat "$out"; fi
+  # 子プロセスで流すスイートが時間切れで落ちた非ゼロは「変異を検出した」ではない
   case "$rc" in
-    124|137) ng "変異($id) $desc: 子スイートが外側タイムアウトしていない(rc=$rc・$T_MUT 秒で打ち切られた。実行が遅い可能性)" ;;
+    124|137) ng "変異($id) $desc: 子プロセスで流すスイートが外側タイムアウトしていない(rc=$rc・$T_MUT 秒で打ち切られた。実行が遅い可能性)" ;;
     *) : ;;
   esac
   ckne "変異($id) $desc: スイートが非ゼロで終わる" "$rc" 0
@@ -3042,7 +3042,7 @@ mutant() { # $1=記号 $2=説明 $3=FAIL を期待するケース ID(空白区�
   done
   MUT_TABLE="$MUT_TABLE
   ($id) $desc
-      → 子スイートの終了コード $rc / FAIL $total 件(${per# })/ $((SECONDS - t0)) 秒${firsts:-
+      → 子プロセスで流すスイートの終了コード $rc / FAIL $total 件(${per# })/ $((SECONDS - t0)) 秒${firsts:-
       (FAIL したケースなし)}"
 }
 case_L() {
@@ -3073,8 +3073,8 @@ case_L() {
   mutant r "実効Gitの予定読取予約を外す" "M24" '/# MUT:r$/d'
   mutant w "隔離parserでHOMEをscratchへ置換する" "N11" '/# MUT:w$/s/.*/  home_env=("HOME=$CONFIG_PARSE_CWD") # MUT:w/'
   mutant s "生成設定とmetadataの有限予約を外す" "N4" '/# MUT:s$/s/reserve_config_bytes "\$GENERATED_COST"/:/'
-  mutant u "明示子Gitの設定予約を外す" "N5" '/# MUT:u$/s/reserve_config_bytes "\${CTX_MAIN_COST\[\$1\]}"/:/'
-  mutant v "親内の暗黙子refs読取予約を外す" "N5" '/# MUT:v$/d'
+  mutant u "下のリポジトリで明示的に起動する Git の設定予約を外す" "N5" '/# MUT:u$/s/reserve_config_bytes "\${CTX_MAIN_COST\[\$1\]}"/:/'
+  mutant v "親のリポジトリの中で下のリポジトリの refs を暗黙に読む予約を外す" "N5" '/# MUT:v$/d'
   mutant t "新selector rootの再登録停止を外す" "N2" '/# MUT:t$/d'
   mutant q "再帰 include の解析を外す" "M7" '/# MUT:q$/s/parse_candidate_includes "\$CAND_LOGICAL" "\$CAND_HAD_LINK"/true/'
   # x・y・z は M26 の検出力を見る。Apple Git の Mac では、対照 E1 を system 設定を外して通し、
@@ -3082,7 +3082,7 @@ case_L() {
   if [ "$REAL_IS_APPLE" -eq 1 ] && { sel_mut x || sel_mut y || sel_mut z; }; then MUT_EXTRA_ENV=(GIT_CONFIG_NOSYSTEM=1); fi
   mutant x "Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:x$/s/.*/      : # MUT:x/'
   if sel_mut x; then ckeq "変異(x) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:x$' "$WORK/mut/x/guard.sh" || true)" 1; fi
-  mutant y "子の文脈の Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:y$/s/.*/  : # MUT:y/'
+  mutant y "下のリポジトリの文脈の Apple Git の追加の system 設定の候補化を外す" "M26" '/# MUT:y$/s/.*/  : # MUT:y/'
   if sel_mut y; then ckeq "変異(y) 写しの目印の行が : だけになった" "$(grep -cE -- '^[[:space:]]*: # MUT:y$' "$WORK/mut/y/guard.sh" || true)" 1; fi
   mutant z "Apple Git の判定(git version の形の検査)を外す" "M26" '/# MUT:z$/s/.*/        if true; then # MUT:z/'
   MUT_EXTRA_ENV=()
@@ -3932,15 +3932,15 @@ m26_suite() { # $1=ラベル $2=追加の設定のパス(M26_TAKE_ENV・M26_CHK_
     run cleanup --state "$STATE_DIR"
   done
 
-  # 9 子リポジトリの文脈にも入る
+  # 9 下のリポジトリの文脈にも入る
   base_repo "m26-$lb-9"
   subrepo_fixture "$R" child
   GIT "$R" commit -qm child
   rune "${ns[@]}" ${M26_TAKE_ENV[@]+"${M26_TAKE_ENV[@]}"} -- take --cwd "$R" --task-md task/t.md
-  rc_is "$lb 9 子リポジトリ付き: take" 0
+  rc_is "$lb 9 下のリポジトリ付き: take" 0
   m26_state
-  ckt "$lb 9: 子の文脈 1:1 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:1${TAB}$cfg"
-  ckt "$lb 9: 子の文脈 1:0 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:0${TAB}$cfg"
+  ckt "$lb 9: 下のリポジトリの文脈 1:1 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:1${TAB}$cfg"
+  ckt "$lb 9: 下のリポジトリの文脈 1:0 の root 行に追加の設定がある" inx "$STATE_DIR/snapshot/config-contexts.txt" "root${TAB}1:0${TAB}$cfg"
   run cleanup --state "$STATE_DIR"
 }
 m26_gate() { # 版の表示が Apple Git の形でなければ --man-path を呼ばず、候補に入れない(どの環境でも動く)
@@ -4142,7 +4142,7 @@ case_M27() { # 未知の読み込み先・Apple Git の導入先・system 設定
   run cleanup --state "$STATE_DIR"
 }
 
-# ════════════════════════ N 隔離 selector・子リポジトリ・有限読取予約 ════════════════════════
+# ════════════════════════ N 隔離 selector・下のリポジトリ・有限読取予約 ════════════════════════
 subrepo_fixture() { # $1=parent $2=相対path。ネットワークを使わずgitlinkを作る
   local parent="$1" sub="$1/$2" oid
   mkdir -p "$sub"
@@ -4168,34 +4168,34 @@ selector_only() {
   ckne "$1: 隔離Gitの実行対照" "$(gitlog_n)" 0
   ckf "$1: 元repo Gitなし" grep -q '^ORIGINAL' "$GITLOG"
 }
-case_N1() { # parentのdirty抑制後も、子のHEAD・diff・status・stage別OIDを保持する
+case_N1() { # parentのdirty抑制後も、下のリポジトリのHEAD・diff・status・stage別OIDを保持する
   CID=N1; TAG=""
   base_repo n1
   subrepo_fixture "$R" child
   GIT "$R" commit -qm child
   local sub="$R/child" idx
   idx="$(sha_of "$sub/.git/index")"
-  take "$R" task/t.md; rc_is "子の通常take" 0
-  run compare "${ARGS[@]}" --run-rc 0; rc_is "子の無変更compare" 0
-  out_line "子の無変更: changeなし" 'WORKTREE_CHANGED=no'
-  ckeq "子indexの生bytesは不変" "$(sha_of "$sub/.git/index")" "$idx"
+  take "$R" task/t.md; rc_is "下のリポジトリの通常take" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "下のリポジトリの無変更compare" 0
+  out_line "下のリポジトリの無変更: changeなし" 'WORKTREE_CHANGED=no'
+  ckeq "下のリポジトリのindexの生bytesは不変" "$(sha_of "$sub/.git/index")" "$idx"
   printf 'dirty\n' >"$sub/file.txt"
-  run compare "${ARGS[@]}" --run-rc 1; rc_is "子だけdirty: 引継ぎ" 31
-  out_has "子だけdirty: 明示snapshot" 'CHANGE=submodule'
+  run compare "${ARGS[@]}" --run-rc 1; rc_is "下のリポジトリだけdirty: 引継ぎ" 31
+  out_has "下のリポジトリだけdirty: 明示snapshot" 'CHANGE=submodule'
   run cleanup --state "$STATE_DIR"
   printf 'stage-A\n' >"$sub/file.txt"; GIT "$sub" add file.txt
   printf 'worktree\n' >"$sub/file.txt"
-  take "$R" task/t.md; rc_is "子MMのtake" 0
+  take "$R" task/t.md; rc_is "下のリポジトリMMのtake" 0
   printf 'stage-B\n' >"$sub/file.txt"; GIT "$sub" add file.txt
   printf 'worktree\n' >"$sub/file.txt"
   run compare "${ARGS[@]}" --run-rc 1; rc_is "同じMM/diffでもstage OID変更: 引継ぎ" 31
-  out_has "子stage OID変更を検出" 'CHANGE=submodule'
+  out_has "下のリポジトリのstage OID変更を検出" 'CHANGE=submodule'
   run cleanup --state "$STATE_DIR"
   GIT "$sub" add file.txt; GIT "$sub" commit -qm advanced
-  take "$R" task/t.md; rc_is "進んだ子HEADを再登録" 0
+  take "$R" task/t.md; rc_is "進んだ下のリポジトリのHEADを再登録" 0
   GIT "$sub" checkout -qb next
-  run config-check "${ARGS[@]}"; rc_is "子のbranch切替は設定不変" 0
-  run compare "${ARGS[@]}" --run-rc 0; rc_is "子branch切替後compare" 0
+  run config-check "${ARGS[@]}"; rc_is "下のリポジトリのbranch切替は設定不変" 0
+  run compare "${ARGS[@]}" --run-rc 0; rc_is "下のリポジトリのbranch切替後compare" 0
   run cleanup --state "$STATE_DIR"
 }
 case_N2() { # 新rootは隔離検査でretake、既知変更は全Git前に拒否する
@@ -4212,9 +4212,9 @@ case_N2() { # 新rootは隔離検査でretake、既知変更は全Git前に拒�
   run config-check "${ARGS[@]}"; rc_is "再登録後は成功" 0
   printf '\n# changed\n' >>"$R/newchild/.git/config"
   : >"$GITLOG"
-  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "既知子config変更は拒否" 33
-  out_line "既知子config変更はGitを省略" 'GIT_SKIPPED=yes'
-  ckeq "既知子config変更はGit 0回" "$(gitlog_n)" 0
+  runp "$STUBS/selectorlog" config-check "${ARGS[@]}"; rc_is "既知の下のリポジトリのconfig変更は拒否" 33
+  out_line "既知の下のリポジトリのconfig変更はGitを省略" 'GIT_SKIPPED=yes'
+  ckeq "既知の下のリポジトリのconfig変更はGit 0回" "$(gitlog_n)" 0
   run cleanup --state "$STATE_DIR"
   base_repo n2-regular
   printf 'ordinary\n' >"$R/converted"; GIT "$R" add converted; GIT "$R" commit -qm ordinary
@@ -4280,7 +4280,7 @@ case_N4() { # 有限Fの算術を残額exact/+1で実行し、metadataの二重�
   bash -c 'source "$1"; x=$(printf "%*s" 16777216 ""); write_generated_config "$2" "$x" && [ "$(wc -c <"$2")" -eq 16777216 ] || exit 1; ! write_generated_config "$2" "${x}x"' _ "$lib" "$WORK/generated-boundary" || RC=$?
   rc_is "生成設定16MiB exactと+1byte拒否" 0
 }
-case_N5() { # 各子configの16G/3G予約を実Git開始前へ置く
+case_N5() { # 各下のリポジトリのconfigの16G/3G予約を実Git開始前へ置く
   CID=N5; TAG=""
   local bytes=$((512 * 1024)) i
   base_repo n5
@@ -4290,7 +4290,7 @@ case_N5() { # 各子configの16G/3G予約を実Git開始前へ置く
     { printf '#'; head -c "$((bytes-2))" /dev/zero | tr '\000' '#'; printf '\n'; } >>"$R/child$i/.git/config"
   done
   run take --cwd "$R" --task-md task/t.md
-  rc_is "複数子の実設定読取総額で停止" 20
+  rc_is "複数の下のリポジトリの実設定読取総額で停止" 20
   ckf "予算停止にstateなし" grep -q '^STATE_DIR=' "$CASE_OUT"
 }
 
@@ -4310,8 +4310,8 @@ case_N6() { # nested/gitfile/linked/symlinkと相対globalの両cwdを保持す�
   run compare "${ARGS[@]}" --run-rc 1; rc_is "nestedのdirtyを明示的に検出" 31
   run cleanup --state "$STATE_DIR"
   rm "$R/child/.git"; ln -s "$gd" "$R/child/.git"
-  take "$R" task/t.md; rc_is "子gitdir symlinkのtake" 0
-  run config-check "${ARGS[@]}"; rc_is "子gitdir symlinkのcheck" 0
+  take "$R" task/t.md; rc_is "下のリポジトリのgitdir symlinkのtake" 0
+  run config-check "${ARGS[@]}"; rc_is "下のリポジトリのgitdir symlinkのcheck" 0
   run cleanup --state "$STATE_DIR"
 
   base_repo n6-linked
@@ -4327,15 +4327,15 @@ case_N6() { # nested/gitfile/linked/symlinkと相対globalの両cwdを保持す�
   printf '[demo]\nvalue = child\n' >"$R/child/relative.cfg"
   printf '[demo]\nvalue = linked\n' >"$R/linked/relative.cfg"
   rune GIT_CONFIG_GLOBAL=relative.cfg -- take --cwd "$R" --task-md task/t.md
-  rc_is "相対globalは親と明示子のcwdでtake" 0
+  rc_is "相対globalは親のリポジトリと、下のリポジトリで明示的に起動する Git の子プロセスの cwdでtake" 0
   STATE_DIR="$(sed -n 's/^STATE_DIR=//p' "$CASE_OUT")"; MAN="$(sed -n 's/^MANIFEST_SHA256=//p' "$CASE_OUT")"; SNAP="$(sed -n 's/^SNAPSHOT_SHA256=//p' "$CASE_OUT")"
   ARGS=(--cwd "$R" --state "$STATE_DIR" --manifest-sha256 "$MAN" --snapshot-sha256 "$SNAP")
   rune GIT_CONFIG_GLOBAL=relative.cfg -- config-check "${ARGS[@]}"; rc_is "相対globalの通常check" 0
   printf '# changed\n' >>"$R/child/relative.cfg"
   : >"$GITLOG"
   rune "PATH=$STUBS/gitlog:$PATH" GIT_CONFIG_GLOBAL=relative.cfg -- config-check "${ARGS[@]}"
-  rc_is "子cwdの相対global変更は拒否" 33
-  ckeq "子cwdの相対global変更は全Git前" "$(gitlog_n)" 0
+  rc_is "下のリポジトリのcwdの相対global変更は拒否" 33
+  ckeq "下のリポジトリのcwdの相対global変更は全Git前" "$(gitlog_n)" 0
   run cleanup --state "$STATE_DIR"
 }
 case_N7() { # 未初期化の不在入口と、既知管理pathの削除/置換を区別する
@@ -4361,9 +4361,9 @@ case_N7() { # 未初期化の不在入口と、既知管理pathの削除/置換�
   take "$R" task/t.md; rc_is "初期化済みtake" 0
   mv "$R/child/.git" "$WORK/n7-held-admin"
   : >"$GITLOG"
-  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "既知子.gitの削除は比較不能" 33
-  ckeq "既知子.gitの削除はGit0" "$(gitlog_n)" 0
-  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0; rc_is "既知子.gitの削除はcompareも33" 33
+  runp "$STUBS/gitlog" config-check "${ARGS[@]}"; rc_is "既知の下のリポジトリの.gitの削除は比較不能" 33
+  ckeq "既知の下のリポジトリの.gitの削除はGit0" "$(gitlog_n)" 0
+  runp "$STUBS/gitlog" compare "${ARGS[@]}" --run-rc 0; rc_is "既知の下のリポジトリの.gitの削除はcompareも33" 33
   run cleanup --state "$STATE_DIR"
 }
 
@@ -4844,7 +4844,7 @@ echo
 [ "${#RESULTS[@]}" -eq 0 ] || printf '%s\n' "${RESULTS[@]}"
 if [ -n "$MUT_TABLE" ]; then
   echo
-  echo "変異テスト(変異ごとに、写しを対象にした子スイートで FAIL したケース):"
+  echo "変異テスト(変異ごとに、写しを対象にした子プロセスで流すスイートで FAIL したケース):"
   printf '%s\n' "$MUT_TABLE"
 fi
 echo

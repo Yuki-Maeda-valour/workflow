@@ -62,7 +62,7 @@ class DiagnosticSubmodules(DiagnosticFixture):
 
     def test_actual_submodule_unmerged_modules_source(self):
         self.real_submodule()
-        # root index未解決は既存takeが停止する。正常rootの子で形式を生成する。
+        # root index未解決は既存takeが停止する。正常rootの下のリポジトリで形式を生成する。
         child = self.repo / 'child'
         (child / '.gitmodules').write_text('')
         self.git('-C', str(child), 'add', '--', '.gitmodules')
@@ -143,7 +143,7 @@ class DiagnosticSubmodules(DiagnosticFixture):
         (self.repo / 'seed.txt').write_bytes(b'public changed\n')
         result = self.observe('diff', '--path', 'seed.txt', '--format', 'patch')
         self.assertIn(b'public changed', base64.b64decode(self.records(result)[b'seed.txt']['patch_b64']))
-        # object間比較は子内部を観測せず、親gitlink追加をOIDで示す。
+        # object間比較は下のリポジトリの内部を観測せず、親gitlink追加をOIDで示す。
         result = self.observe('diff', '--left', self.base_oid, '--right', 'HEAD', '--path', 'child')
         self.assertEqual(self.records(result)[b'child']['right']['kind'], 'gitlink')
         self.assertEqual(self.records(result)[b'child']['right']['oid'], self.start_oid)

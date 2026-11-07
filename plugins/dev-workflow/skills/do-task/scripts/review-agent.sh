@@ -58,7 +58,7 @@
 # 終了コード: 2=usage 3=not-found 4=self-host 5=no-readonly 6=probe-failed
 #             7=probe-timeout 8=run-failed 9=run-timeout 10=parse-failed
 #             12=prompt-too-large 20=internal 128+N=aborted(シグナル N で中止。走行中の外部ランナーのプロセスグループと
-#             直接の子に終了のシグナルを送る。止まったことは確かめない)
+#             直接の子プロセスに終了のシグナルを送る。止まったことは確かめない)
 #
 # 空文字の扱い: --model "" / --target "" / --cwd "" / --log-file "" は「省略」として扱う
 #               (--cwd は必須なので、空は usage(2)になる)。
@@ -72,7 +72,7 @@
 # --- end usage ---
 # POSIX モード(環境の POSIXLY_CORRECT・bash --posix)では、特殊組み込み(exec・:)のリダイレクトの失敗で、
 # if の中でも非対話シェルが終わる。ログを開けないときに止まり方を選べるように、bash の既定の意味で動かす。
-# bash は `set +o posix` で環境の `POSIXLY_CORRECT` を外すので、外部 CLI と子のコマンドにもこの変数は渡らない
+# bash は `set +o posix` で環境の `POSIXLY_CORRECT` を外すので、外部 CLI と子プロセスのコマンドにもこの変数は渡らない
 set +o posix
 set -eEuo pipefail
 # export された CDPATH があると、素の `cd` が行き先を stdout へ出す(パスの正規化が 2 行に化け、
@@ -461,7 +461,7 @@ elif command -v gtimeout >/dev/null 2>&1 && gtimeout -k 1 1 true >/dev/null 2>&1
 fi
 kill_tree() { # $1=pid。TERM → KILL_GRACE 秒 → KILL(timeout -k と同じ振る舞い)
   # フォールバック経路では monitor モードで起動するため pid == プロセスグループ ID。
-  # いずれかが空振りしても、グループ・直接の子・本体のどれかに届くように 3 方向へ送る(送信の失敗は無視し、
+  # いずれかが空振りしても、グループ・直接の子プロセス・本体のどれかに届くように 3 方向へ送る(送信の失敗は無視し、
   # 止まったことは確かめない。setsid などでグループを抜けた子孫には届かない)
   kt_pid="$1"
   kill -TERM "-$kt_pid" 2>/dev/null || true
@@ -480,8 +480,8 @@ run_timeout() { # $1=秒 残り=コマンド
   if [ -n "$TIMEOUT_BIN" ]; then
     rt_rc=0
     # **前景で待たずに背景 + wait にする**。前景実行だと bash はシグナルの trap を
-    # 子の終了後にしか走らせず、子を道連れにできない(implement-agent.sh と同じ形)。
-    # 退避した 8/9 とログの fd 7 は子へ渡さない(外部ランナーに余計な fd を継承させない。
+    # 子プロセスの終了後にしか走らせず、子プロセスを道連れにできない(implement-agent.sh と同じ形)。
+    # 退避した 8/9 とログの fd 7 は子プロセスへ渡さない(外部ランナーに余計な fd を継承させない。
     # ログの fd を渡すと、外部ランナーがログに偽の行を書ける)
     "$TIMEOUT_BIN" -k "$KILL_GRACE" "$rt_secs" "$@" 7>&- 8>&- 9>&- &
     CHILD_PID=$!
@@ -628,7 +628,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   note_log_swap
   log_model_info || true
   log_line ""
-  log_line "**中止**: シグナル $os_sig を受信したため外部ランナーのプロセスグループと直接の子に終了のシグナルを送った(終了コード $os_code)"
+  log_line "**中止**: シグナル $os_sig を受信したため外部ランナーのプロセスグループと直接の子プロセスに終了のシグナルを送った(終了コード $os_code)"
   # 中止時点までに得られた生出力は残す(引き継ぎの手がかり)。
   # プローブ中の中止では RAW_OUT がまだ空なので、プローブの生出力だけが手がかりになる
   if [ -n "$PROBE_OUT" ] && [ -s "$PROBE_OUT" ]; then
@@ -637,7 +637,7 @@ on_signal() { # $1=シグナル名 $2=終了コード(128 + シグナル番号)
   if [ -n "$RAW_OUT" ] && [ -s "$RAW_OUT" ]; then
     log_block "生出力(中止時点まで)" "$RAW_OUT"
   fi
-  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーのプロセスグループと直接の子に終了のシグナルを送った)" >&8
+  echo "ERROR [aborted] シグナル $os_sig を受信したため中止した(外部ランナーのプロセスグループと直接の子プロセスに終了のシグナルを送った)" >&8
   exit "$os_code"   # EXIT trap が一時領域を後始末する
 }
 # 非対話 shell の非同期ジョブは SIGINT を無視するため、INT は「保険」として捕捉する
@@ -779,7 +779,7 @@ fi
 # 起動時の cwd へ戻る(cd -P で戻すと相対パスの表示が変わるので、戻った先の物理パスの照合だけを行う)
 cd "$ORIG_PWD" || die 20 internal "元の作業ディレクトリへ戻れない: $ORIG_PWD"
 [ "$(pwd -P)" = "$PHYS_PWD" ] || die 20 internal "元の作業ディレクトリへ戻った先が起動時の物理パスと一致しない: $ORIG_PWD(実体: $(pwd -P)。起動時: $PHYS_PWD)"
-# 本実行とプローブは cd してから起動する(子 PID を掴むためサブシェルを使えない)。相対パスのままだと、
+# 本実行とプローブは cd してから起動する(子プロセスの PID を掴むためサブシェルを使えない)。相対パスのままだと、
 # cd の後にプロンプトを一時ツリー基準で探して見失うので、先に絶対パスへ正規化する(implement-agent.sh と同じ形)。
 # ログのパスは、基点の中なら固定した置き場の物理パス、基点の外なら語彙的に正規化した絶対パスで、
 # 走行中の差し替えの照合はこのパスと比べる

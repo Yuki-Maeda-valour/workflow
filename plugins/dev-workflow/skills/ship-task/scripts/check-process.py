@@ -36,7 +36,7 @@ def launch_monitor(*args, **kwargs):
     try:
         return subprocess.Popen(*args, **kwargs)
     except OSError as exc:
-        # Popen が返らない起動失敗では、作成途中の直子も Popen が wait する。
+        # Popen が返らない起動失敗では、作成途中の直接の子プロセスも Popen が wait する。
         raise LaunchError() from exc
 
 
@@ -296,7 +296,7 @@ def linux_worker(args, argv):
             result = supervisor.supervise(argv, args.timeout, args.grace)
         except LaunchFailure:
             if not supervisor.reap({}):
-                raise RecoveryError("起動失敗後に子の不在を確認できない")
+                raise RecoveryError("起動失敗後に子プロセスの不在を確認できない")
             result = {'clean': True, 'returncode': 127, 'timed_out': False, 'signal': supervisor.STOP}
         result['nonce'] = args.nonce
         raw = (json.dumps(result) + '\n').encode()

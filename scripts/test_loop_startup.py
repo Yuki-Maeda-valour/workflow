@@ -325,7 +325,7 @@ class StartupShellTests(unittest.TestCase):
                 elapsed = time.monotonic() - started
                 output = result.stdout + result.stderr
                 if result.returncode != 0:
-                    # 見張りの TERM で止まれば 124。別のプロセスグループの子(loop.sh)を待っている間は
+                    # 見張りの TERM で止まれば 124。別のプロセスグループの子プロセス(loop.sh)を待っている間は
                     # TERM を処理できず、10 秒後の KILL で見張り自身も止まる(-9)。
                     if result.returncode in (124, 137, -9) and elapsed >= limit:
                         self.fail(timeout_message(limit, elapsed) + '\n' + output)
