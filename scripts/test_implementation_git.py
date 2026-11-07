@@ -635,6 +635,11 @@ builtins.__import__ = blocked
         r = check()
         self.assertEqual(r.returncode, 20)
         self.assertIn("ImportError", r.stderr)
+        # 版が 3.9 に見える python3(sys.version_info を書き換えてから標準入力を実行する)は通さない。
+        py.write_text("#!" + sys.executable + "\nimport sys\nsys.version_info = (3, 9, 18, 'final', 0)\nexec(sys.stdin.read())\n")
+        r = check()
+        self.assertEqual(r.returncode, 20)
+        self.assertIn("Python 3.10 以上が必要", r.stderr)
         py.unlink()
         py.symlink_to(sys.executable)
         self.assertFalse((folder / "secret-profiles.py").exists())

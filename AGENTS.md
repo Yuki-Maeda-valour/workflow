@@ -113,7 +113,7 @@ python3 -m venv "$validation_venv"
 
 `validate.py` 自身はパッケージをインストールしません。一時環境を使い終えたら、自分が作成した環境だけを片付けてください。
 
-シェルの回帰テスト一式は **Linux と GNU 系ツール**で実行する。do-task の補助スクリプトは bash 4.0 以上、loop は Linux・bash 4.4 以上が必要。PATH の選択・パス解決の代替・macOS の未確認事項は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) を参照する。
+シェルの回帰テスト一式は **Linux と GNU 系ツール**で実行する。do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上、loop は Linux・bash 4.4 以上が必要。PATH の選択・パス解決の代替・macOS の未確認事項は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) を参照する。
 
 `test_shell_requirements.py` の旧 bash 境界は `SHELL_REQUIREMENTS_BASH_3_2`・`SHELL_REQUIREMENTS_BASH_4_3`・`SHELL_REQUIREMENTS_BASH_4_4` に各実体の絶対パスを渡して検証する。不在なら該当ケースを明示的に skip する(互換モードで代用しない)。bash の下限・起動順を変更するときは 3 版すべてで検証する。
 
@@ -165,6 +165,9 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
   - 全部が通ると確かめたのは 2.56.0。2.36〜2.55 で全部通るかは未確認。根拠は [docs/testing.md](docs/testing.md) の「git の版の警告の根拠」。
   - 作業ツリーの変更を含めて流すときは `--worktree`、commit を流すときは `--commit <rev>`(既定は HEAD)。
   - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前>` を付ける。
+- Python の版: 製品の下限とテストの容器の版は、どちらも 3.10。
+  - 3.10 より古いと `run-all.py` が警告を出し、3.10 以外(3.11 以降)なら注意を出す。どちらも止めない。
+  - 根拠は [docs/testing.md](docs/testing.md) の「Python の版の決まりの根拠」。
 - 合格の条件: 最後の行が `結果: 合格 / <秒> 秒` で、終了コードが 0。
 - 落ちたときは、`異常:` の行と、最後にまとめて出る失敗の出力を見る。
 - 時間切れが出たとき(混んだ機械で起きる)は、`-j <数>` を減らすか、ほかの重い処理が止まるのを待って流し直す。

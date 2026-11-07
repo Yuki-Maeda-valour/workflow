@@ -1136,8 +1136,9 @@ class PendingBoundaryTests(PendingFixture):
                      'fsencode', 'fsdecode'):
             with self.subTest(attr=attr), mock.patch.object(os, attr, None):
                 self.run_unit('scan-unavailable', 'missing-feature')
-        with mock.patch.object(self.module.sys, 'version_info', (3, 7)):
-            self.run_unit('scan-unavailable', 'unsupported-python')
+        for version in ((3, 7), (3, 9, 18)):
+            with self.subTest(version=version), mock.patch.object(self.module.sys, 'version_info', version):
+                self.run_unit('scan-unavailable', 'unsupported-python')
         with mock.patch.object(os, 'name', 'nt'):
             self.run_unit('scan-unavailable', 'unsupported-platform')
 
@@ -1512,15 +1513,15 @@ class PendingBoundaryTests(PendingFixture):
         with mock.patch.object(self.module.time, 'monotonic', None):
             self.run_unit('scan-unavailable', 'missing-feature')
 
-    def test_python38_syntax_and_no_process_or_write_entry(self):
+    def test_python310_syntax_and_no_process_or_write_entry(self):
         source = HELPER.read_text(encoding='utf-8')
-        tree = ast.parse(source, feature_version=(3, 8))
+        tree = ast.parse(source, feature_version=(3, 10))
         imports = {n.name.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.Import) for n in node.names}
         imports |= {node.module.split('.')[0] for node in ast.walk(tree) if isinstance(node, ast.ImportFrom) and node.module}
         self.assertFalse(imports & {'subprocess', 'multiprocessing', 'pty'})
         forbidden = {'system', 'popen', 'spawn', 'fork', 'execve', 'kill', 'write', 'write_bytes',
                      'write_text', 'mkdir', 'makedirs', 'rename', 'replace', 'unlink', 'remove', 'rmdir',
-                     'chmod', 'chown', 'utime', 'listdir', 'is_relative_to'}
+                     'chmod', 'chown', 'utime', 'listdir'}
         calls = {node.func.attr for node in ast.walk(tree) if isinstance(node, ast.Call)
                  and isinstance(node.func, ast.Attribute)
                  and not (node.func.attr == 'write' and isinstance(node.func.value, ast.Attribute)
@@ -1759,7 +1760,9 @@ class PendingDocumentContractTests(unittest.TestCase):
                 self.assertIn(term, contract)
         # list_sha256の入力は、候補の項目を名前で決める(表示用path以外の全キーではない)。
         self.assertNotIn('表示用`path`以外の全キー', contract)
-        self.assertIn('Python 3.8', (SKILL / 'references/runtime-requirements.md').read_text())
+        runtime = (SKILL / 'references/runtime-requirements.md').read_text()
+        self.assertIn('Python 3.10', runtime)
+        self.assertNotIn('Python 3.8', runtime)
 
 
 if __name__ == '__main__':

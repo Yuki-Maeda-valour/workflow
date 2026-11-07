@@ -5,7 +5,7 @@
 (本物の重みの記録・使い回しの記録・置き場には触れない)。
 - RunAllTest: 既定の回(RUN_ALL_IMAGE を除いて流すので、使い回しの記録を読み書きしない)。
 - RunAllReuseTest: 結果の使い回し(--reuse)。容器の中と同じく、正しい形の RUN_ALL_IMAGE を渡して流す。
-- RunUnitsTest・RunUnitsReuseTest・RunAllScopeTest: 関数を直接呼ぶ。
+- RunUnitsTest・RunUnitsReuseTest・RunAllScopeTest・RunAllPythonLinesTest: 関数を直接呼ぶ。
 - RunAllContainerTest: 容器の入口(docker のモックを PATH の先頭に置く。本物の docker は起動しない)。
 """
 
@@ -26,6 +26,7 @@ import textwrap
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import support_git
 
@@ -538,7 +539,64 @@ class RunAllTest(unittest.TestCase):
         new = self.run_all("--plan", PATH=self.fake_git("2.56.0"))
         self.assertIn("git: git version 2.56.0", new.stdout)
         self.assertNotIn("警告:", new.stdout)
-        self.assertNotIn("注意:", new.stdout)
+        # Python の注意は、テストを流す Python が 3.11 以降なら出る。ここでは git の注意だけを照らす。
+        self.assertNotIn("注意: git", new.stdout)
+
+    # ---- Python の版 ----
+
+    def run_as_python(self, version, *args, **extra):
+        """run-all.py のプロセスの中だけ、sys.version_info と sys.version を version に見せて流す。
+        単位は本物の sys.executable で流れる。"""
+        code = ("import runpy, sys; sys.version_info = %r; sys.version = %r; p = sys.argv[1]; sys.argv = sys.argv[1:]; "
+                "runpy.run_path(p, run_name='__main__')" % (version + ("final", 0), "%d.%d.%d (fake)" % version))
+        return self.run_all(*args, flags=("-B", "-c", code), **extra)
+
+    def test_old_python_warns_at_start_and_end(self):
+        path = self.fake_git("2.56.0")
+        result = self.run_as_python((3, 9, 18), "-j", "4", PATH=path)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        warnings = [index for index, line in enumerate(lines) if line.startswith("警告: python 3.9.18 は 3.10 より古い。")]
+        self.assertEqual(2, len(warnings), result.stdout)
+        # python: の行は git: の行のすぐ後にある。
+        self.assertEqual(lines.index("git: git version 2.56.0") + 1, lines.index("python: 3.9.18 (fake)"), result.stdout)
+        self.assertIn("Python 3.10 の容器(bash scripts/run-all-container.sh)で流す", lines[warnings[0]])
+        progress = [index for index, line in enumerate(lines) if line.startswith(("ok  ", "FAIL"))]
+        # 始めの警告は最初の単位の前に、最後の警告は最後の単位の後で、部ごとの結果の行(6 行)と最後の行の前に出る。
+        self.assertLess(warnings[0], min(progress))
+        self.assertGreater(warnings[1], max(progress))
+        self.assertEqual(len(lines) - 8, warnings[1], result.stdout)
+        self.assertRegex(lines[-1], r"^結果: 合格 / \d+\.\d 秒$")
+        plan = self.run_as_python((3, 9, 18), "--plan", PATH=path)
+        self.assertEqual(0, plan.returncode, plan.stdout + plan.stderr)
+        planned = [line for line in plan.stdout.splitlines() if line.startswith("警告: python 3.9.18 は 3.10 より古い。")]
+        self.assertEqual(2, len(planned), plan.stdout)
+        # --plan は、最後の単位の行の後にもう一度出す。
+        self.assertTrue(plan.stdout.splitlines()[-1].startswith("警告: python 3.9.18 は 3.10 より古い。"), plan.stdout)
+
+    def test_new_python_notes_once_at_start(self):
+        path = self.fake_git("2.56.0")
+        result = self.run_as_python((3, 12, 3), "-j", "4", PATH=path)
+        self.assertEqual(0, result.returncode, result.stdout + result.stderr)
+        lines = result.stdout.splitlines()
+        noted = [index for index, line in enumerate(lines) if line.startswith("注意: python 3.12.3 は下限の 3.10 と違う。")]
+        self.assertEqual(1, len(noted), result.stdout)
+        self.assertIn("PR の前は Python 3.10 の容器(bash scripts/run-all-container.sh)で流す", lines[noted[0]])
+        progress = [index for index, line in enumerate(lines) if line.startswith(("ok  ", "FAIL"))]
+        self.assertLess(noted[0], min(progress))
+        self.assertEqual(lines.index("git: git version 2.56.0") + 1, lines.index("python: 3.12.3 (fake)"), result.stdout)
+        self.assertNotIn("警告:", result.stdout)
+        plan = self.run_as_python((3, 12, 3), "--plan", PATH=path)
+        self.assertEqual(0, plan.returncode, plan.stdout + plan.stderr)
+        self.assertEqual(1, plan.stdout.count("注意: python 3.12.3 は下限の 3.10 と違う。"), plan.stdout)
+
+    def test_python_310_adds_only_the_version_line(self):
+        plan = self.run_as_python((3, 10, 12), "--plan", PATH=self.fake_git("2.56.0"))
+        self.assertEqual(0, plan.returncode, plan.stdout + plan.stderr)
+        lines = plan.stdout.splitlines()
+        self.assertEqual(lines.index("git: git version 2.56.0") + 1, lines.index("python: 3.10.12 (fake)"), plan.stdout)
+        self.assertNotIn("警告: python", plan.stdout)
+        self.assertNotIn("注意: python", plan.stdout)
 
     # ---- 枠の数 ----
 
@@ -1381,6 +1439,47 @@ class RunAllScopeTest(unittest.TestCase):
         self.assertEqual(["runner", "top", "plugins"], [part for part, _ in files("loop:a", "plugins/x.sh")])
         self.assertEqual(["all"], [part for part, _ in files("unittest:test_x.py", "docs/x.md")])
         self.assertEqual((None, "範囲が決まらない"), module.reuse_of(None, None, []))
+
+
+class RunAllPythonLinesTest(unittest.TestCase):
+    """Python の版の行(run-all.py の python_lines を直接呼ぶ。sys.version_info と sys.version を差し替える)。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.module = load_run_all()
+
+    def lines_of(self, info, text=None):
+        if text is None:
+            text = "%d.%d.%d (main, Aug 31 2026, 10:18:17) [GCC 11.4.0]" % info
+        with mock.patch.object(self.module.sys, "version_info", info + ("final", 0)), \
+                mock.patch.object(self.module.sys, "version", text):
+            return self.module.python_lines()
+
+    def test_310_has_only_the_version_line(self):
+        self.assertEqual(["python: 3.10.12 (main, Aug 31 2026, 10:18:17) [GCC 11.4.0]"], self.lines_of((3, 10, 12)))
+
+    def test_older_than_310_warns_with_the_version(self):
+        for info in ((3, 9, 18), (3, 8, 10)):
+            version = "%d.%d.%d" % info
+            with self.subTest(version=version):
+                lines = self.lines_of(info)
+                self.assertEqual(2, len(lines), lines)
+                self.assertEqual(f"python: {version} (main, Aug 31 2026, 10:18:17) [GCC 11.4.0]", lines[0])
+                self.assertTrue(lines[1].startswith(f"警告: python {version} は 3.10 より古い。"), lines[1])
+                self.assertTrue(lines[1].endswith("Python 3.10 の容器(bash scripts/run-all-container.sh)で流す"), lines[1])
+
+    def test_newer_than_310_notes_with_the_version(self):
+        for info in ((3, 11, 9), (3, 12, 3)):
+            version = "%d.%d.%d" % info
+            with self.subTest(version=version):
+                lines = self.lines_of(info)
+                self.assertEqual(2, len(lines), lines)
+                self.assertTrue(lines[1].startswith(f"注意: python {version} は下限の 3.10 と違う。"), lines[1])
+                self.assertIn("3.11 以降にしか無い構文や API を使っても、この版では落ちない。", lines[1])
+
+    def test_only_the_first_line_of_a_multiline_version(self):
+        lines = self.lines_of((3, 10, 12), "3.10.12 (main, Aug 31 2026)\n[GCC 11.4.0]")
+        self.assertEqual(["python: 3.10.12 (main, Aug 31 2026)"], lines)
 
 
 # ---- 容器の入口(docker のモック) ----

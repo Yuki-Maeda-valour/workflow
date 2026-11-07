@@ -247,6 +247,21 @@ def git_lines():
     return lines
 
 
+def python_lines():
+    """流している Python の版を読み、出す行(`python: …` と、警告・注意)を返す。下限は 3.10(製品とテストの容器)。"""
+    # sys.version_info は添字で読む(テストが組に差し替えるため)。
+    info = sys.version_info
+    version = ".".join(str(part) for part in info[:3])
+    lines = [f"python: {sys.version.splitlines()[0]}"]
+    if (info[0], info[1]) < (3, 10):
+        lines.append(f"警告: python {version} は 3.10 より古い。製品とテストは 3.10 以上を使い、古い版では変更と関係なく落ちうる。"
+                     f"Python 3.10 の容器(bash scripts/run-all-container.sh)で流す")
+    elif (info[0], info[1]) != (3, 10):
+        lines.append(f"注意: python {version} は下限の 3.10 と違う。3.11 以降にしか無い構文や API を使っても、この版では落ちない。"
+                     f"PR の前は Python 3.10 の容器(bash scripts/run-all-container.sh)で流す")
+    return lines
+
+
 # ---- 集計 ----
 
 def group_of(unit):
@@ -669,7 +684,7 @@ def main(argv=None):
     started = time.monotonic()
     if not args.plan:
         ensure_state_dir()
-    notes = git_lines()
+    notes = git_lines() + python_lines()
     warnings = [line for line in notes if line.startswith("警告:")]
     # 鍵の材料(入力の一覧など)は、単位を組み立てる前に 1 回だけ取る。既定の回も記録するので、--reuse の無い
     # --plan の回のほかは、いつも取る。取れないとき、--reuse の無い回は何も出さない。

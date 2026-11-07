@@ -8,7 +8,7 @@
 - 新プロジェクト開始時に `/plugin marketplace add` 一発で全 skills を導入できるようにする
 - 各プロジェクトで育った改善をここに還元し、全プロジェクトへ配布する
 
-do-task / ship-task の新しい開始では、対象タスク本文の採用と対象 Git 操作より前に、外部実装の保護記録らしい候補を有限に列挙する。記録の外の所属の印(take が書く、パスと番号だけのファイル)で、別のプロジェクトの記録と確かめられた候補では止めない。それ以外の候補があれば停止し、全件を人が具体的に確認した同じ一覧だけで続行する(全件が無関係なら実体の確認値、関連する記録があるか重なりのある候補があれば一覧の確認値で照合する。#291)。Python 3.8 以上と必要な POSIX 機能が無い場合も停止する。詳細の唯一の正本は [external-runners.md](../plugins/dev-workflow/skills/do-task/references/external-runners.md) §12-9。候補内部・保持hashを読み直さず、比較・復元・削除・プロセス停止を自動実行しない。印の真正性や子孫の停止を証明せず、候補なし・別プロジェクトの記録だけ・一覧一致も安全証明ではない。
+do-task / ship-task の新しい開始では、対象タスク本文の採用と対象 Git 操作より前に、外部実装の保護記録らしい候補を有限に列挙する。記録の外の所属の印(take が書く、パスと番号だけのファイル)で、別のプロジェクトの記録と確かめられた候補では止めない。それ以外の候補があれば停止し、全件を人が具体的に確認した同じ一覧だけで続行する(全件が無関係なら実体の確認値、関連する記録があるか重なりのある候補があれば一覧の確認値で照合する。#291)。Python 3.10 以上と必要な POSIX 機能が無い場合も停止する。詳細の唯一の正本は [external-runners.md](../plugins/dev-workflow/skills/do-task/references/external-runners.md) §12-9。候補内部・保持hashを読み直さず、比較・復元・削除・プロセス停止を自動実行しない。印の真正性や子孫の停止を証明せず、候補なし・別プロジェクトの記録だけ・一覧一致も安全証明ではない。
 
 内蔵 implementer が Git の状態を読むときは、do-task の専用読取り入口で、承認済み filter の無効化設定・物理 root・承認値を束ねて渡す。入口は5種類の読取りだけを扱い、毎回の事前検査、無効化の実効値、委託元から渡された照合値を確認する。品質コマンド内の Git、利用者環境全体、未停止プロセス、外部実装の比較不能からの復帰はこの責務に含めない。
 
@@ -107,7 +107,7 @@ do-task / ship-task の新しい開始では、対象タスク本文の採用と
   - 1 晩・1 発見元ごとに PR を 1 本開き、人が見送りの印を付けるか消してから merge して、`候補_` を task_dir に入れる。発見元の候補モードは、task_dir の全状態のヘッダの指摘キーと照らして、既知の指摘を積まない(見送り = もう出さない / 消す = また出てよい)
   - data-audit の候補(未修正の脆弱性の場所)は、origin の push 先が非公開と確かめられたときだけ PR にする(確かめられなければ回さずに `候補なし`)。refactor の分析は公開でも回すが、セキュリティ由来の指摘は候補にしない
 
-**do-task の補助スクリプトと回帰テストの必要環境**: do-task は Phase 0 の事前検査から bash 4.0 以上・GNU 系ツールを使う。回帰テスト一式は Linux と GNU 系ツールを前提とする。PATH の確認・パス解決の代替の限界・macOS 実機の確認条件と再確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性は保証しない。必要環境の明示と起動前の診断は [Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121)、macOS 26.6.2 / arm64 の実測と制約は [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) に記録する。品質コマンドの監督と検証用コピーの扱いは、macOS で失敗 0 を期待する回帰テスト(`scripts/test_check_process.py`・`scripts/test_review_guard.py`。`Linux 専用: ` のテストは飛ばす。飛ばす件数は `runtime-requirements.md` の「期待の件数」にある)を持つ。この回帰テストは、`PATH` で選ばれる `bash` が 4.0 以上なら、GNU 系ツールなしで回せる。`implement-guard-selftest.sh` の Mac の実行は補助で、Linux の代わりにしない。回す手順と期待の件数は同じ `runtime-requirements.md`、結果は [Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239) に記録する。
+**do-task の補助スクリプトと回帰テストの必要環境**: do-task は Phase 0 の事前検査から Python 3.10 以上・bash 4.0 以上・GNU 系ツールを使う。回帰テスト一式は Linux と GNU 系ツールを前提とし、テストの容器の Python は製品の下限と同じ 3.10 にする([Issue #433](https://github.com/Yuki-Maeda-valour/workflow/issues/433)。根拠は [testing.md](testing.md) の「Python の版の決まりの根拠」)。PATH の確認・パス解決の代替の限界・macOS 実機の確認条件と再確認手順の正本は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md)。bash の導入だけで BSD 環境の互換性は保証しない。必要環境の明示と起動前の診断は [Issue #121](https://github.com/Yuki-Maeda-valour/workflow/issues/121)、macOS 26.6.2 / arm64 の実測と制約は [Issue #226](https://github.com/Yuki-Maeda-valour/workflow/issues/226) に記録する。品質コマンドの監督と検証用コピーの扱いは、macOS で失敗 0 を期待する回帰テスト(`scripts/test_check_process.py`・`scripts/test_review_guard.py`。`Linux 専用: ` のテストは飛ばす。飛ばす件数は `runtime-requirements.md` の「期待の件数」にある)を持つ。この回帰テストは、`PATH` で選ばれる `bash` が 4.0 以上なら、GNU 系ツールなしで回せる。`implement-guard-selftest.sh` の Mac の実行は補助で、Linux の代わりにしない。回す手順と期待の件数は同じ `runtime-requirements.md`、結果は [Issue #239](https://github.com/Yuki-Maeda-valour/workflow/issues/239) に記録する。
 
 **診断表示のC1置換**: `diff-snapshot.sh` は、既存の表示用関数で UTF-8 の C1(U+0080〜U+009F)を `?` に置き換える。限界として残す案は、診断の表示を書き換える文字が残るため採用しなかった。既存の Bash 機能で表示用コピーだけを加工し、新しい依存を足さない。元データによる承認・比較と patch は保持する。対象の診断・NOTEと限界の正本は [external-runners.md §9-1](../plugins/dev-workflow/skills/do-task/references/external-runners.md)。決定と検証は [Issue #152](https://github.com/Yuki-Maeda-valour/workflow/issues/152)(親 #77 の H2)を参照する。
 
@@ -852,6 +852,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
   - v4 の最後の版の commit に git の tag を付け、「Python の最速系」(Python 版を速くし終えた最後の版)として残す。
   - 利用者の要件は v5.0.0 で変わる。python3・PyYAML が要らなくなる。Linux カーネル 5.6 以上・macOS 11 以上が要る。
   - なぜ移行の途中で既定を切り替えないか: v4 の途中で、利用者の要件(python3・PyYAML・bash・OS の版)を変えないため。
+    - 例外: python3 の下限だけは、v4 の途中の #433 で 3.10 にそろえた(2026-11-07 に利用者が決めた)。理由は 2 つ。製品の一部(`diagnostic-*.py` など)が、既に 3.10 以上を要していた。テストの容器の Python が 3.10 で、下限の版でテストを流すため([Issue #433](https://github.com/Yuki-Maeda-valour/workflow/issues/433)。根拠は [testing.md](testing.md) の「Python の版の決まりの根拠」)。
   - なぜ v5.0.0 を移行の完了にするか: §7-7 の「完了をメジャーで示す」に合わせるため。
   - 却下: 「最初に Rust 版を配る版を v5.0.0 にする」。利用者が最初に挙げた案。v5.0.0 を移行の完了の節目にするため、採らなかった。
 
