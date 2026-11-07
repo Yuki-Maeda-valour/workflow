@@ -282,6 +282,8 @@ PY
     echo "logged in (stub)"; exit "${SELFTEST_AUTH_RC:-0}" ;;
   plugin)
     printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"
+    # 補助 CLI に渡った fd(照合のパイプなど)を記録する。試験が、0〜2 とこのスクリプト自身の fd(255)以外が無いことを確かめる
+    ls -1 "/proc/$$/fd" >>"$REC/aux-fds.log" 2>/dev/null || true
     # 出力は SELFTEST_PLUGINS_FILE の中身。試験データは実物の形(#68 の実走で測った — design §7-3。トップは配列で、
     # 要素は id〈<名>@<marketplace>〉・version・scope・enabled・installPath・installedAt・lastUpdated。name は無い)で書く。
     # name の形と {"plugins": …} の形は、loop.sh の読み方の寛容さの試験として 1 つずつ渡す
@@ -893,6 +895,9 @@ commit() { # [push しないなら localonly]
   fi
 }
 calls() { cat "$REC/calls.log" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
+# 補助 CLI のスタブが記録した fd(この試験の REC の aux-fds.log)のうち、0〜2 とスクリプト自身の fd(255)以外
+aux_fds_extra() { sort -u "$REC/aux-fds.log" 2>/dev/null | grep -vxE '0|1|2|255' | tr '\n' ' ' | sed 's/ $//' || true; }
+aux_fds_recorded() { if [ -s "$REC/aux-fds.log" ]; then echo yes; else echo no; fi; }
 locked_reason_of() { # $1=相対パス → その理由で locked の worktree があれば 0(-z でないと理由が引用される)
   git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -qxF "locked dev-workflow-loop: $1"
 }
@@ -4470,6 +4475,10 @@ if want environment || want environment-normal; then
 newrepo env-normal; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec env-normal
 run_loop env-normal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check '環境正常: 最初の周' 0 "$RC"
+check '環境正常: 補助 CLI のスタブが fd を記録した' yes "$(aux_fds_recorded)"
+check '環境正常: 補助 CLI に照合のパイプなどの余分な fd が渡らない' "" "$(aux_fds_extra)"
+hasnt '環境正常: 標準エラーに coproc の警告が出ない' "$OUT" execute_coproc
+hasnt '環境正常: 標準エラーに壊れたパイプの書き込みエラーが出ない' "$OUT" 'Broken pipe'
 SD="$(state_dir env-normal)"
 printf 'raise SystemExit(77)\n' >"$SD/environment-guard.py"
 printf 'forged\n' >"$SD/environment.json"
@@ -5024,6 +5033,7 @@ H46ENVS=("CLAUDE_CONFIG_DIR=$H46CFG" "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H46MAN
 newrec h46-prove
 run_loop h46-prove "${H46ENVS[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
 check "H46 正常: prove" 0 "$RC"
+hasnt "H46 正常: prove の標準エラーに coproc の警告が出ない" "$OUT" execute_coproc
 has "H46 proveだけverboseを足す" "$REC/argv-probe" --verbose
 H46PROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
 python3 - "$REC/argv-probe" "$H46PROOF" <<'PY' >"$W/h46-proof-check" 2>&1
@@ -5062,6 +5072,9 @@ check "H46 dry: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
 newrec h46-normal
 run_loop h46-normal "${H46ENVS[@]}" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check "H46 通常の周が動く" 0 "$RC"
+check "H46 通常の周: 補助 CLI のスタブが fd を記録した" yes "$(aux_fds_recorded)"
+check "H46 通常の周: 補助 CLI に照合のパイプなどの余分な fd が渡らない" "" "$(aux_fds_extra)"
+hasnt "H46 通常の周: 標準エラーに coproc の警告が出ない" "$OUT" execute_coproc
 check "H46 通常の周はタスク1件を実行" pr-a "$(calls)"
 hasnt "H46 通常のargvへverboseを足さない" "$REC/argv-pr-a" --verbose
 has "H46 通常のoutput-formatを維持" "$REC/argv-pr-a" json

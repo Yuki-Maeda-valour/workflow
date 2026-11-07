@@ -1153,6 +1153,105 @@ class LoopStateTest(unittest.TestCase):
         finally:
             LOOP_STATE.os.read = original_read
 
+    def digests(self, *names: str, **limits: int) -> subprocess.CompletedProcess[bytes]:
+        args = ["python3", str(SCRIPT), "state-digests"]
+        for name in names: args += ["--state", str(self.root.parent / name)]
+        for key, value in limits.items(): args += ["--" + key.replace("_", "-"), str(value)]
+        return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+
+    def test_state_digests_prints_each_digest_in_input_order(self) -> None:
+        import hashlib
+        raws = {"first-state": b'{"a":1}\n', "second-state": b"other bytes"}
+        for name, raw in raws.items(): (self.root.parent / name).write_bytes(raw)
+        want = [hashlib.sha256(raws[name]).hexdigest() for name in ("first-state", "second-state")]
+        both = self.digests("first-state", "second-state")
+        self.assertEqual((0, b""), (both.returncode, both.stderr))
+        self.assertEqual(want, both.stdout.decode().splitlines())
+        self.assertTrue(both.stdout.endswith(b"\n"))
+        swapped = self.digests("second-state", "first-state")
+        self.assertEqual(want[::-1], swapped.stdout.decode().splitlines())
+        # 同じパスを 2 回渡すと、同じ値が 2 行出る
+        twice = self.digests("first-state", "first-state")
+        self.assertEqual([want[0], want[0]], twice.stdout.decode().splitlines())
+        # 既存の state-digest と同じ値
+        single = self.digest("first-state")
+        self.assertEqual(want[0], single.stdout.decode().strip())
+
+    def test_state_digests_marks_unreadable_files_with_a_dash_and_exits_20(self) -> None:
+        good = self.root.parent / "good-state"; good.write_bytes(b"good")
+        secret = self.root.parent / "digests-secret"; secret.write_text("SECRET-SENTINEL-must-not-be-read")
+        os.symlink(secret, self.root.parent / "digests-link")
+        import hashlib
+        digest = hashlib.sha256(b"good").hexdigest()
+        for names, lines in ((("digests-link", "good-state"), ["-", digest]),
+                             (("good-state", "digests-link"), [digest, "-"]),
+                             (("digests-link", "missing-state"), ["-", "-"])):
+            with self.subTest(names=names):
+                got = self.digests(*names)
+                self.assertEqual(20, got.returncode)
+                self.assertEqual(lines, got.stdout.decode().splitlines())
+                self.assertTrue(got.stderr.decode().startswith("ERROR [loop-state] "), got.stderr)
+                self.assertNotIn(b"SECRET-SENTINEL", got.stdout + got.stderr)
+        # 全部読み終えてから出す: 最初のファイルが読めなくても、2 つ目は読んで出す
+        fifo = self.root.parent / "digests.fifo"; os.mkfifo(fifo)
+        got = self.digests("digests.fifo", "good-state")
+        self.assertEqual((20, ["-", digest]), (got.returncode, got.stdout.decode().splitlines()))
+        parent_link = self.root.parent / "digests-parent-link"; os.symlink(self.root.parent, parent_link)
+        self.assertEqual(20, self.digests("digests-parent-link/good-state").returncode)
+
+    def test_state_digests_takes_a_fresh_budget_per_file_and_rejects_bad_limits(self) -> None:
+        (self.root.parent / "one").write_bytes(b"a" * 60); (self.root.parent / "two").write_bytes(b"b" * 60)
+        # 合計 100 の予算でも、ファイルごとに新しく取るので 60 + 60 は通る
+        self.assertEqual(0, self.digests("one", "two", max_bytes=100).returncode)
+        self.assertEqual(20, self.digests("one", "two", max_bytes=50).returncode)
+        self.assertEqual(20, self.digests("one", "two", max_items=0).returncode)
+        self.assertNotEqual(0, subprocess.run(["python3", str(SCRIPT), "state-digests"], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode)
+
+    def test_state_digests_continues_after_oserror_in_open_or_read_and_hides_the_detail(self) -> None:
+        import hashlib, io, sys, errno
+        from contextlib import redirect_stdout, redirect_stderr
+        for name, raw in (("os-one", b"first"), ("os-two", b"second")): (self.root.parent / name).write_bytes(raw)
+        digest = {name: hashlib.sha256(raw).hexdigest() for name, raw in (("os-one", b"first"), ("os-two", b"second"))}
+        paths = [str(self.root.parent / n) for n in ("os-one", "os-two")]
+        def run() -> tuple[int, list[str], str]:
+            out, err = io.StringIO(), io.StringIO()
+            argv = ["loop-state.py", "state-digests", "--state", paths[0], "--state", paths[1]]
+            with mock.patch("sys.argv", argv), redirect_stdout(out), redirect_stderr(err):
+                rc = LOOP_STATE.main()
+            return rc, out.getvalue().splitlines(), err.getvalue()
+        # open の失敗(権限 000)を 1 つ目・2 つ目に
+        if os.geteuid() != 0:
+            for index in (0, 1):
+                with self.subTest(failure="open", index=index):
+                    target = pathlib.Path(paths[index]); target.chmod(0)
+                    try: rc, lines, err = run()
+                    finally: target.chmod(0o644)
+                    want = [digest["os-one"], digest["os-two"]]; want[index] = "-"
+                    self.assertEqual((20, want), (rc, lines))
+                    self.assertEqual("ERROR [loop-state] 状態を読めない\n", err)
+                    self.assertNotIn("os-", err)
+        # read の失敗(EIO)を 1 つ目・2 つ目に
+        real_digest = LOOP_STATE.state_digest
+        for index in (0, 1):
+            with self.subTest(failure="read", index=index):
+                def flaky(path, *limits, _i=index):
+                    if path == paths[_i]: raise OSError(errno.EIO, "SECRET-DETAIL " + path)
+                    return real_digest(path, *limits)
+                with mock.patch.object(LOOP_STATE, "state_digest", flaky):
+                    rc, lines, err = run()
+                want = [digest["os-one"], digest["os-two"]]; want[index] = "-"
+                self.assertEqual((20, want), (rc, lines))
+                self.assertEqual("ERROR [loop-state] 状態を読めない\n", err)
+
+    def test_state_digest_command_is_unchanged_by_state_digests(self) -> None:
+        raw = b"unchanged"; (self.root.parent / "single").write_bytes(raw)
+        import hashlib
+        got = self.digest("single")
+        self.assertEqual((0, hashlib.sha256(raw).hexdigest() + "\n", b""), (got.returncode, got.stdout.decode(), got.stderr))
+        two = subprocess.run(["python3", str(SCRIPT), "state-digest", "--state", str(self.root.parent / "single"),
+                              "--state", str(self.root.parent / "single")], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.assertEqual(hashlib.sha256(raw).hexdigest() + "\n", two.stdout.decode())
+
     def test_read_growth_and_lstat_open_replacement_fail_closed(self) -> None:
         target = self.root / "growth"; target.write_bytes(b"a" * 8)
         before = os.lstat(target); original_read = LOOP_STATE.os.read; changed = False
