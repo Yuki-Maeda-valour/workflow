@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "source_commit": "e74af2db646a7989a1014340f500f70347e5a34b",
+  "source_input_sha256": "78b3990f790888566adbfacdbf14ad2cf1d296862d5c7cc8982e8b0cba7da7fb",
+  "cargo_lock_sha256": "56e9fddd70e2d0df59ce1a254a044c082c6f5ce9b4d2b2efd521b413628f598a",
+  "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
+  "targets": {
+    "x86_64-unknown-linux-musl": {
+      "target": "x86_64-unknown-linux-musl",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "rustc_verbose": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1",
+      "source_date_epoch": "0",
+      "cargo_manifest": "[workspace]\nmembers = [\"crates/cli\", \"crates/core\", \"crates/platform\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.99.1\"\npublish = false\n\n[workspace.dependencies]\ndev-workflow-core = { path = \"crates/core\" }\ndev-workflow-platform = { path = \"crates/platform\" }\nserde = { version = \"1.0.228\", features = [\"derive\"] }\nserde_json = \"1.0.145\"\nsha2 = \"0.10.9\"\n\n[profile.release]\ncodegen-units = 1\nopt-level = 3\nlto = \"fat\"\nstrip = \"symbols\"\ndebug = 0\nincremental = false\n",
+      "cargo_config": "[build]\nrustc-wrapper = \".cargo/rustc-wrapper.sh\"\nrustflags = [\"--remap-path-prefix=.=/dev-workflow/native\"]\n",
+      "path_remapping": "native/.cargo/config.toml + native/.cargo/rustc-wrapper.sh",
+      "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty.",
+      "linker_sha256": "e9ceb054c12207970f2726dfc07e9a66b411602748628baf27399f02a9bbb31b",
+      "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+      "musl": {
+        "version": "1.2.5",
+        "provider": "rust-std 1.99.1",
+        "source": "https://github.com/rust-lang/rust/tree/1.99.1/src/ci/docker/scripts",
+        "files": {
+          "Scrt1.o": "cfb5b001408261d562d809eea6af636cf7ac10a233895a611ef79bbe4f8c60de",
+          "crt1.o": "03c4111a1bc81580c7388e4227a889cebe978faa46c965bbdde4f2d8de1fc3a2",
+          "crtbegin.o": "297960e338581a38bbfcbee45169a847bcdc5527ccaf68abe95b72b3b0856bed",
+          "crtbeginS.o": "297960e338581a38bbfcbee45169a847bcdc5527ccaf68abe95b72b3b0856bed",
+          "crtend.o": "0d11009c048ae289cdf184d726b767debc2972321e143838d28d7b6802b69c7c",
+          "crtendS.o": "0d11009c048ae289cdf184d726b767debc2972321e143838d28d7b6802b69c7c",
+          "crti.o": "5343749d306ea3578a4ae5c796be362100273f3314cec283be621bbe4a8ec720",
+          "crtn.o": "794abd4b28db5de5f993b1445460d90fa3191cc9556a8b8881d5d34a5e8dfa87",
+          "libc.a": "e699c64b0c6b427d89ad5bf767bf78beb30c19930c5dedff635951636e8f9f70",
+          "libunwind.a": "18ad5e6b1b383da0f07b64e94f68f20021412490d38835e99268569a03c7f449",
+          "rcrt1.o": "7998a49f23b463b1bf59aecd8fde59df5d0f0bf819d1272d92c6f00ae81fc429"
+        }
+      },
+      "sdk": "Rust の musl 向け標準ライブラリに付属",
+      "linking": "Rust の既定の self-contained 静的リンク。C の追加依存なし"
+    },
+    "aarch64-unknown-linux-musl": {
+      "target": "aarch64-unknown-linux-musl",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "rustc_verbose": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-unknown-linux-gnu\nrelease: 1.99.1\nLLVM version: 23.1.1",
+      "source_date_epoch": "0",
+      "cargo_manifest": "[workspace]\nmembers = [\"crates/cli\", \"crates/core\", \"crates/platform\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.99.1\"\npublish = false\n\n[workspace.dependencies]\ndev-workflow-core = { path = \"crates/core\" }\ndev-workflow-platform = { path = \"crates/platform\" }\nserde = { version = \"1.0.228\", features = [\"derive\"] }\nserde_json = \"1.0.145\"\nsha2 = \"0.10.9\"\n\n[profile.release]\ncodegen-units = 1\nopt-level = 3\nlto = \"fat\"\nstrip = \"symbols\"\ndebug = 0\nincremental = false\n",
+      "cargo_config": "[build]\nrustc-wrapper = \".cargo/rustc-wrapper.sh\"\nrustflags = [\"--remap-path-prefix=.=/dev-workflow/native\"]\n",
+      "path_remapping": "native/.cargo/config.toml + native/.cargo/rustc-wrapper.sh",
+      "linker": "GNU ld (GNU Binutils for Ubuntu) 2.42\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) a later version.\nThis program has absolutely no warranty.",
+      "linker_sha256": "1e4d3369b76845fa8e099b83513bf28f6f722e046f9b2cde1378c9e27f96d19c",
+      "cc": "cc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0\nCopyright (C) 2023 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.",
+      "musl": {
+        "version": "1.2.5",
+        "provider": "rust-std 1.99.1",
+        "source": "https://github.com/rust-lang/rust/tree/1.99.1/src/ci/docker/scripts",
+        "files": {
+          "Scrt1.o": "8bb3021de91cbf0132042a13851deec579519b3b4644ad5f1c6ddbb4ff3be4ef",
+          "crt1.o": "2c8595cff75b182ad59c0278d5f81bed2cf1e51b5bf9324db52142c89dd6479f",
+          "crtbegin.o": "522c4ac7628b80df407f1873be18b6b9b398db5be7f9f5586835cdfd189f6a9e",
+          "crtbeginS.o": "522c4ac7628b80df407f1873be18b6b9b398db5be7f9f5586835cdfd189f6a9e",
+          "crtend.o": "9fd9518f8a0ba537a77c5d5c638ec30efa388a9458c21ad84f5607c535547adb",
+          "crtendS.o": "9fd9518f8a0ba537a77c5d5c638ec30efa388a9458c21ad84f5607c535547adb",
+          "crti.o": "b49a67e2e36eed4836023fc26ff9da617e2020a2317aadfeb7971e4cbe612bf7",
+          "crtn.o": "b2f52a98df83f38814f34f7477aeb629d5e1fb1c1379ef2739cad91ab9ab8734",
+          "libc.a": "b03473b6f1efb72f700f561b4407a88885b37e0edb5cdb2a64de0df5499e813f",
+          "libunwind.a": "3ff5dcd17b4fe703ac91edf8ed0434ffa66c9ccd33701e940cfb8daab1dfda23",
+          "rcrt1.o": "e65dadc816775ab1d8d915f7f6fc4baa5080c1bea633b4372ff73e3b7b2df81c"
+        }
+      },
+      "sdk": "Rust の musl 向け標準ライブラリに付属",
+      "linking": "Rust の既定の self-contained 静的リンク。C の追加依存なし"
+    },
+    "x86_64-apple-darwin": {
+      "target": "x86_64-apple-darwin",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "rustc_verbose": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: x86_64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.1",
+      "source_date_epoch": "0",
+      "cargo_manifest": "[workspace]\nmembers = [\"crates/cli\", \"crates/core\", \"crates/platform\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.99.1\"\npublish = false\n\n[workspace.dependencies]\ndev-workflow-core = { path = \"crates/core\" }\ndev-workflow-platform = { path = \"crates/platform\" }\nserde = { version = \"1.0.228\", features = [\"derive\"] }\nserde_json = \"1.0.145\"\nsha2 = \"0.10.9\"\n\n[profile.release]\ncodegen-units = 1\nopt-level = 3\nlto = \"fat\"\nstrip = \"symbols\"\ndebug = 0\nincremental = false\n",
+      "cargo_config": "[build]\nrustc-wrapper = \".cargo/rustc-wrapper.sh\"\nrustflags = [\"--remap-path-prefix=.=/dev-workflow/native\"]\n",
+      "path_remapping": "native/.cargo/config.toml + native/.cargo/rustc-wrapper.sh",
+      "linker": "{\n\t\"version\": \"1167.5\",\n\t\"architectures\": [\n\t\t\"armv6\",\n\t\t\"armv7\",\n\t\t\"armv7s\",\n\t\t\"arm64\",\n\t\t\"arm64e\",\n\t\t\"arm64_32\",\n\t\t\"i386\",\n\t\t\"x86_64\",\n\t\t\"x86_64h\",\n\t\t\"armv6m\",\n\t\t\"armv7k\",\n\t\t\"armv7m\",\n\t\t\"armv7em\"\n\t],\n\t\"lto\": {\n\t\t\"runtime_api_version\": 29,\n\t\t\"static_api_version\": 29,\n\t\t\"version_string\": \"LLVM version 17.0.0\"\n\t},\n\t\"tapi\": {\n\t\t\"version\": \"17.0.0\",\n\t\t\"version_string\": \"Apple TAPI version 17.0.0 (tapi-1700.0.3.5)\"\n\t}\n}",
+      "clang": "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: x86_64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+      "xcode": "Xcode 16.4\nBuild version 16F6",
+      "sdk": "15.5",
+      "sdk_build": "24F74",
+      "deployment_target": "11.0",
+      "zero_ar_date": "1"
+    },
+    "aarch64-apple-darwin": {
+      "target": "aarch64-apple-darwin",
+      "cargo": "cargo 1.99.1 (5f94df478 2026-08-27)",
+      "rustc_verbose": "rustc 1.99.1 (58cf8f9c3 2026-10-13)\nbinary: rustc\ncommit-hash: 58cf8f9c35b355199727627d07ae34a4e2846d67\ncommit-date: 2026-10-13\nhost: aarch64-apple-darwin\nrelease: 1.99.1\nLLVM version: 23.1.1",
+      "source_date_epoch": "0",
+      "cargo_manifest": "[workspace]\nmembers = [\"crates/cli\", \"crates/core\", \"crates/platform\"]\nresolver = \"3\"\n\n[workspace.package]\nversion = \"0.1.0\"\nedition = \"2024\"\nrust-version = \"1.99.1\"\npublish = false\n\n[workspace.dependencies]\ndev-workflow-core = { path = \"crates/core\" }\ndev-workflow-platform = { path = \"crates/platform\" }\nserde = { version = \"1.0.228\", features = [\"derive\"] }\nserde_json = \"1.0.145\"\nsha2 = \"0.10.9\"\n\n[profile.release]\ncodegen-units = 1\nopt-level = 3\nlto = \"fat\"\nstrip = \"symbols\"\ndebug = 0\nincremental = false\n",
+      "cargo_config": "[build]\nrustc-wrapper = \".cargo/rustc-wrapper.sh\"\nrustflags = [\"--remap-path-prefix=.=/dev-workflow/native\"]\n",
+      "path_remapping": "native/.cargo/config.toml + native/.cargo/rustc-wrapper.sh",
+      "linker": "{\n\t\"version\": \"1167.5\",\n\t\"architectures\": [\n\t\t\"armv6\",\n\t\t\"armv7\",\n\t\t\"armv7s\",\n\t\t\"arm64\",\n\t\t\"arm64e\",\n\t\t\"arm64_32\",\n\t\t\"i386\",\n\t\t\"x86_64\",\n\t\t\"x86_64h\",\n\t\t\"armv6m\",\n\t\t\"armv7k\",\n\t\t\"armv7m\",\n\t\t\"armv7em\"\n\t],\n\t\"lto\": {\n\t\t\"runtime_api_version\": 29,\n\t\t\"static_api_version\": 29,\n\t\t\"version_string\": \"LLVM version 17.0.0\"\n\t},\n\t\"tapi\": {\n\t\t\"version\": \"17.0.0\",\n\t\t\"version_string\": \"Apple TAPI version 17.0.0 (tapi-1700.0.3.5)\"\n\t}\n}",
+      "clang": "Apple clang version 17.0.0 (clang-1700.0.13.5)\nTarget: arm64-apple-darwin24.6.0\nThread model: posix\nInstalledDir: /Applications/Xcode_16.4.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+      "xcode": "Xcode 16.4\nBuild version 16F6",
+      "sdk": "15.5",
+      "sdk_build": "24F74",
+      "deployment_target": "11.0",
+      "zero_ar_date": "1"
+    }
+  },
+  "signing": {
+    "identifier": "org.dev-workflow.native",
+    "timestamp": "none",
+    "identity": "ad-hoc",
+    "codesign_sha256": "1cdff754c0405ff031983ade8791ad0835777ae5787957d8d63090da0e159f88",
+    "macos": "ProductName:\t\tmacOS\nProductVersion:\t\t15.8.2\nBuildVersion:\t\t24H232",
+    "xcode": "Xcode 16.4\nBuild version 16F6"
+  },
+  "ci": {
+    "run_id": "42418213015",
+    "run_url": "https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42418213015"
+  },
+  "artifacts": [
+    {
+      "path": "linux-x86_64/dev-workflow",
+      "sha256": "7fc896becd1eb3416fbc1edf08066789e343563e5c927e251755d1b27f444ea8"
+    },
+    {
+      "path": "linux-arm64/dev-workflow",
+      "sha256": "59f250ac5d3880e9a62ac3e8fdb0c7fd1de99eb916880fedfc1cca3176e38306"
+    },
+    {
+      "path": "macos-universal/dev-workflow",
+      "sha256": "168c397a5174c9192120ec1ac13b5be55d7df8756bfd9ec45c94068d685408f7"
+    }
+  ]
+}
