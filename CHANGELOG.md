@@ -17,6 +17,21 @@ v4.2.0 以前は commit 履歴を参照。
 - 時間(容器で、改善前と改善後を同時に流した): 3 タスクの 3 周の起動 1 回が 25.3 秒 → 19.4 秒。照合の補助の起動は 187 回 → 93 回、Python を起動する補助の関数 `py` の呼び出しは 306 回 → 173 回。
 - テストを足した: `scripts/test_environment_guard.py`(1 回の起動での 2 回の照合・Git の設定の省略)・`scripts/test_loop_state.py`(`state-digests`)・`scripts/test_loop_startup.py`(ホスト CLI が動いている間の照合の補助の本体の書き換え・昇格の途中のシグナル・まとめた digest の書き換え)・`scripts/test_loop_helper_commands.py`(`d21-list`・`json-fields`)・`loop-selftest.sh`(ホスト CLI に渡る fd〈開いたファイルやパイプを識別する番号〉)。
 
+## v4.46.1
+
+### 変更
+
+- 回帰テストの重い単位を分け、並べて流せる粒度にした。1 つの単位が長いと、並べる数を増やしても全体が速くならないため。確かめる中身は減らしていない。([Issue #386](https://github.com/Yuki-Maeda-valour/workflow/issues/386))
+  - `loop-selftest.sh` の重い 6 節(discover・breakers・judge・humanconfig・environment・stops)を、互いに独立した 28 節に分けた。節は 30 個から 52 個になった。`run-loop-selftest.py` の重みの表(`WEIGHTS`)も、分けた節に合わせた。
+  - judge の節は、17 個のタスクを 1 回の `loop.sh` で回していた。これを 4 回の起動に分けた。1 回の起動が短くなり、負荷で `RUN_TIMEOUT` に当たりにくくなる。
+    - 周の時間の上限(`--iteration-timeout`)は、わざと止まらない子(hang)の起動にだけ渡す。値は 4 秒から 10 秒にした。
+    - 時間切れの周の後も次の周へ進むことを見るために、軽い子のタスク `fail-late-j` を足した。確かめの名前は 14 件増えた(4 件の確かめが 3 回分で 12 件と、`fail-late-j` の 2 件)。
+  - `implement-guard-selftest.sh` に `--list` を足した。`--only` に渡せる単位を、1 行に 1 つ出す(78 行。群・M と N のケース・L の変異)。変異テストは、変異 1 つずつ(`--only L-<記号>`)でも流せる。
+  - `implement-guard-selftest.sh` に `--check-units <単位,単位,...>` を足した。渡した単位が、全ケースをちょうど 1 回ずつ覆うかを見る(0 か 1 で終わる)。
+  - `implement-guard-selftest.sh` が、保護領域の置き場を同時に動く別のテストに消されても落ちないようにした。置き場を作り直して 3 回まで試す。
+- テスト `scripts/test_implement_guard_units.py` を足した(`--list`・`--check-units`・`--only L-<記号>` と、置き場の作り直し)。
+- `do-task/references/external-runners.md` の、`implement-guard-selftest.sh` の説明に、`--list`・`--check-units`・`--only L-<記号>` と置き場の作り直しを足した。
+
 ## v4.46.0
 
 ### 変更
