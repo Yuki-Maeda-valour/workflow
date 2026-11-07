@@ -69,7 +69,9 @@ plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
 ├── hooks/                         # 使う道具の版の確かめ(SessionStart の hook の hooks.json・確かめの tool-versions.sh・道具と最低の版の一覧 tool-requirements.tsv。#431)
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。診断のテストの準備は diagnostic_test_support.py)
+native/                             # Rust 1.99.1 の開発用ソース(Cargo.toml・Cargo.lock・rust-toolchain.toml・crates/{cli,core,platform}・.cargo/ のビルド設定・ci/ のビルドと検査)
+.github/workflows/                  # native.yml。4 種類の機械で Rust を検査し、配布前の成果物を作る CI(変更を送るたびに自動で検査する仕組み)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/testing.md                     # テストの流し方の詳しい説明と時間の記録(AGENTS.md の「検証」の節から指す)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
@@ -188,11 +190,40 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 
 本体にプラグイン検証コマンドを持つホストでは、それも実行する(コマンドはホスト固有のため、各ホスト固有の指示ファイル側に追記する。Claude Code は `.claude/rules/claude-code.md`)。
 
+### Rust の検査(段階 0a)
+
+- Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
+- ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
+- 下のコマンドはリポジトリ直下から実行する。後半のビルドと `check_probe.py` は Linux x86_64 用。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
+
+```bash
+rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
+python3 -B native/ci/check_workflow.py
+python3 -B native/ci/build.py test
+python3 -B -m unittest discover -s scripts -p 'test_native_distribution.py'
+python3 -B -m unittest discover -s scripts -p 'test_support_native.py'
+
+# Linux x86_64 で、今回のソースから作った実行ファイルを検査する
+rustup target add --toolchain 1.99.1 x86_64-unknown-linux-musl
+(cd native && cargo build --release --locked --target x86_64-unknown-linux-musl)
+DEV_WORKFLOW_TEST_NATIVE_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/dev-workflow" \
+  python3 -B native/ci/check_probe.py
+python3 -B native/ci/source_input_hash.py --root .
+```
+
+- Rust の書式・clippy(よくある誤りの検査)・テストは、4 種類の CI でもすべて必須。Linux 2 本と署名後の Mac 1 本は、別々の空の出力先から 2 回作り、バイト列が同じかを確かめる。
+- `DEV_WORKFLOW_TEST_NATIVE_BINARY` はテスト専用。未設定・空文字・不在・実行不能なら失敗にする。配布済みの実行ファイルへ切り替えない。
+- `scripts/run-all.py` は新しい `scripts/test_*.py` も集める。Cargo と `native/ci/` の検査は別に流す。`run-all-container.sh` へ Cargo や外部ビルドの指定は追加しない。
+- 検査後は、自分が作った外部の出力先だけを片付ける。差分テストの補助とビルド情報の説明は [docs/testing.md](docs/testing.md) にある。
+
 ## PR から merge までの順序
 
 PR を開く前に、merge する状態(main を取り込み、要るときは版を上げた状態)で全回帰テストを流し、結果を PR の本文に書く。次の順に進める。
 
 - 版を上げ、`CHANGELOG.md` に節を足すのは、配るプラグイン(`plugins/` の下・`.claude-plugin/marketplace.json`・プラグインを使わない導入の `setup.sh`)を変えた PR だけ。変えない PR は、版も `CHANGELOG.md` も変えない(例: #344・#355・#363・#369)。
+- Rust 移行の段階 0a(#442)は実装の PR。配るプラグイン・版・`CHANGELOG.md` を変えない。段階 0b は成果物と入口を配り、v4 の次のマイナーへ上げる。2026-11-08 の決定と出典は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定)。
 - この 2 つの節で実行する git のコマンドには、すべて Git の共通の安全用のオプション([base-commit.md](plugins/dev-workflow/skills/do-task/references/base-commit.md)。`publish-guard.py` の `SAFE_GIT_PREFIX` と同じ並び)を付ける。下の `git <安全用のオプション> …` は、その意味。確かめのコマンドの中では、関数 `g` が付ける。
 - review-guard の状態の記録を取らずに作った PR(ship-task も do-task も使わずに作った PR。例: #339・#342・#363・#369)では、review-guard の手順(1 の `pr-evidence`・「PR の前の手順」の 2 の `start` から `pr-evidence` まで・順序の 4 と 6 の `verify --mode commit` と `pr-evidence`)を行わない。状態の記録を失った PR には当てない(人に知らせる)。
   - `<レビュー済み SHA>`(1 回目)と記録の確かめの `first` には、取り込む前の作業ブランチの先頭を渡す。

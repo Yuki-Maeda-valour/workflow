@@ -1,0 +1,256 @@
+{
+  "name": "Native",
+  "on": {
+    "pull_request": {},
+    "push": {},
+    "workflow_dispatch": {}
+  },
+  "permissions": {
+    "contents": "read"
+  },
+  "jobs": {
+    "policy": {
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 10,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "CI のスクリプトをテスト",
+          "run": "python3 -B native/ci/build.py test"
+        }
+      ]
+    },
+    "build": {
+      "needs": "policy",
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "platform": "linux-x86_64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "platform": "linux-arm64",
+              "runner": "ubuntu-24.04-arm"
+            },
+            {
+              "platform": "macos-x86_64",
+              "runner": "macos-15-intel"
+            },
+            {
+              "platform": "macos-arm64",
+              "runner": "macos-15"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 40,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "Rust を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'"
+        },
+        {
+          "name": "検査と 2 回のビルド",
+          "run": "python3 -B native/ci/build.py build --platform '${{ matrix.platform }}'"
+        },
+        {
+          "name": "tar を保存",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "native-build-${{ matrix.platform }}",
+            "path": "${{ runner.temp }}/native-ci/${{ matrix.platform }}.tar",
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "combine": {
+      "needs": "build",
+      "runs-on": "macos-15",
+      "timeout-minutes": 15,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "Rust を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform macos-arm64"
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "pattern": "native-build-macos-*",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "2 回分の Mac を結合・署名・比較",
+          "run": "python3 -B native/ci/build.py combine"
+        },
+        {
+          "name": "tar を保存",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "native-universal",
+            "path": "${{ runner.temp }}/native-ci/macos-universal.tar",
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    },
+    "verify-universal": {
+      "needs": "combine",
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "platform": "macos-x86_64",
+              "runner": "macos-15-intel"
+            },
+            {
+              "platform": "macos-arm64",
+              "runner": "macos-15"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 15,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "Rust を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'"
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "name": "native-universal",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "署名後の同じファイルを起動",
+          "run": "python3 -B native/ci/build.py verify-universal"
+        }
+      ]
+    },
+    "distribution": {
+      "needs": [
+        "build",
+        "combine",
+        "verify-universal"
+      ],
+      "runs-on": "ubuntu-24.04",
+      "timeout-minutes": 15,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "Rust を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform linux-x86_64"
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "pattern": "native-build-linux-*",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "name": "native-universal",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "5 ファイルを検査して tar にする",
+          "run": "python3 -B native/ci/build.py package"
+        },
+        {
+          "name": "tar を保存",
+          "uses": "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
+          "with": {
+            "name": "native-dist",
+            "path": "${{ runner.temp }}/native-ci/native-dist.tar",
+            "if-no-files-found": "error",
+            "retention-days": 7
+          }
+        }
+      ]
+    }
+  }
+}

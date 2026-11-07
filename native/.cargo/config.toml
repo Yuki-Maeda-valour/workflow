@@ -1,0 +1,3 @@
+[build]
+rustc-wrapper = ".cargo/rustc-wrapper.sh"
+rustflags = ["--remap-path-prefix=.=/dev-workflow/native"]

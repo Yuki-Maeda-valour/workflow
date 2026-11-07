@@ -14,6 +14,88 @@ flowchart LR
   RC[run-all-container.sh] --> RA
 ```
 
+## Rust の開発と検査(段階 0a)
+
+Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))は開発用の土台だけで、利用者へ配る入口はまだ無い。CI(変更を送るたびに自動で検査する仕組み)も、この検査を行う。
+
+### Rust 1.99.1 の導入と外部の出力先
+
+- `rustup`(Rust の版を入れて管理する道具)が無ければ、[Rust 公式の導入手順](https://rust-lang.org/tools/install/)で開発者が導入する。利用者への自動導入は加えない。
+- [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)に、`rustup toolchain install 1.99.1` と、必要な `rustfmt`・`clippy` を入れるコマンドを置く。`native/rust-toolchain.toml` が使う版を選ぶため、全体の既定の版は変えなくてよい。
+- Rust のビルドと依存の管理には Cargo を使う。依存の版を固定する `native/Cargo.lock` を共有し、ビルド・clippy(よくある誤りの検査)・テストに `--locked` を付ける。
+- `CARGO_TARGET_DIR` は、リポジトリの外の空のフォルダにする。`mktemp -d` で作る例は `AGENTS.md` にある。`TMPDIR` を変えている場合も、作られる場所がリポジトリの外か確かめる。
+- `native/target/` は無視する設定だが、通常の出力先には使わない。既存テストがコピーしたり走査したりする対象へ、ビルドの生成物を混ぜないため。
+- `native/` の新しいソースは、Git の追跡対象に加えてからビルドする。入力の計算は Git の一覧を使う。Git が無い・一覧が取れない・空の場合はビルドを止める。
+- `native/ci/build.py` は `CARGO_TARGET_DIR` を使い、未設定なら `RUNNER_TEMP/native-ci` を使う。どちらも指定が無ければ止める。リポジトリ内の出力先も拒否する。
+- `RUSTFLAGS` などでビルド設定を上書きしない。最適化と絶対パスの置き換えは `native/Cargo.toml`・`native/.cargo/`、CI の設定は `native/ci/` に置く。
+
+### 必須の検査と実行ファイルの指定
+
+- コマンドの一覧は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)にある。書式・clippy・Rust テスト、CI の定義と補助、配布物と比較の補助のテストをすべて流す。
+- `native/ci/build.py test` は `native/ci/scripts/test_native_ci.py` を流す。Rust のビルドをせず、CI の補助を検査する。
+- `scripts/test_native_distribution.py` と `scripts/test_support_native.py` は、既存の `scripts/run-all.py` にも自動で集められる。実行ファイルはテスト用の作り物を使うため、Cargo を要しない。
+- 実物の検査は、今回のソースから作った実行ファイルを `DEV_WORKFLOW_TEST_NATIVE_BINARY` に指定し、`native/ci/check_probe.py` で流す。
+  - 未設定・空文字・不在・実行不能は失敗にする。検査を飛ばさず、配布済みの実行ファイルへも切り替えない。
+  - `--version`・`--help`・`probe --json`・`probe --self-sha256` の出力と終了コードを確かめる。不正な引数の拒否、実行 CPU、自己の SHA256(内容の違いを確かめるための値)、作業フォルダの無変更も確かめる。
+  - `source_input_hash.py` で現在のソース入力を独立に計算し、`probe --json` の `source_input_sha256` と比べる。
+- `run-all.py` は Cargo と `native/ci/` の検査を実行しない。`run-all-container.sh` も Cargo や外部ビルドの環境変数を渡さない。Mac で Linux 専用の全回帰テストを流さない。
+
+### 4 種類の CI と成果物
+
+CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
+
+| 機械 | `build.py --platform` の値 | Rust の対象名 | 最終ファイル |
+|---|---|---|---|
+| `ubuntu-24.04` | `linux-x86_64` | `x86_64-unknown-linux-musl` | `linux-x86_64/dev-workflow` |
+| `ubuntu-24.04-arm` | `linux-arm64` | `aarch64-unknown-linux-musl` | `linux-arm64/dev-workflow` |
+| `macos-15-intel` | `macos-x86_64` | `x86_64-apple-darwin` | `macos-universal/dev-workflow` に結合 |
+| `macos-15` | `macos-arm64` | `aarch64-apple-darwin` | 同上 |
+
+- 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
+- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを入れる。`build --platform <表の値>` は必須検査、2 回のビルド、今回作った各実行ファイルの `check_probe.py` による検査を行う。
+- 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked --target <Rust の対象名>`。
+- Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
+  - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
+- Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
+  - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
+  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡して起動する。署名し直さない。
+- `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
+- 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
+- `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
+  - イベントは `pull_request`・`push`・`workflow_dispatch`。権限は `contents: read` だけ。
+  - 各処理はソース取得の直後にこの検査を流す。PR のソース SHA とリポジトリを明示し、`persist-credentials: false` を付ける。
+  - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
+  - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
+- CI は成果物までを作り、PR 作成や push はしない。配布への取り込みは段階 0b で人が行う。
+
+### ビルド入力の記録
+
+- `native/crates/core/build.rs` がソース入力の SHA256 と Rust の版を埋め込む。実行時に Git や外部コマンドを起動して情報を求めない。
+- 入力は `native/` の追跡ファイルだけ。相対パス・Git のモード・作業中の本文をパス順に計算する。生成物と `native/` の外の変更は含めない。計算するバイト列の形は [native/README.md の「ソース入力の SHA256」](../native/README.md#ソース入力の-sha256)にある。
+- commit の SHA・時刻・CI の実行番号を実行ファイルへ埋め込まない。時刻の設定は `SOURCE_DATE_EPOCH=0`、Mac は `ZERO_AR_DATE=1` も使う。絶対パスは `native/.cargo/` の設定で固定名へ置き換える。
+- `build-info.json` にソースの commit、入力と `Cargo.lock` の SHA256、Rust の版、対象ごとの道具と設定、CI の実行番号と URL、3 本の相対パスと SHA256 を残す。
+  - `targets` には Cargo・リンカー(部品を実行ファイルにまとめる道具)・musl・Xcode・SDK(OS 用の開発道具一式)などの版を記録する。`signing` には Mac の署名設定と道具の情報を残す。
+  - OS のラベルだけで道具が固定されたとは扱わない。ソース・依存・Rust の記録が違う成果物は組み合わせない。
+- `validate.py` は配布物の内部の一致を検査し、現在の開発ソースとの一致は要求しない。段階 0b では `source_input_hash.py` を使い、取り込む 3 本とビルド元の入力を比べる。
+
+### 旧版と Rust 版の差分テストの補助
+
+`scripts/support_native.py` は標準ライブラリだけを使う。ほかの `support_*.py` を読み込まず、呼び出し側が必要な補助を組み合わせる。
+
+| 関数 | 使い方と確かめる内容 |
+|---|---|
+| `require_native_binary()` | `DEV_WORKFLOW_TEST_NATIVE_BINARY` の実行可能な通常ファイルを求める。指定の不備は失敗にする |
+| `run_command(argv, cwd=..., env=..., input=..., timeout=...)` | 引数の配列で起動する。終了コード・標準出力と標準エラーのバイト列・時間切れを返す |
+| `snapshot_tree(path)` | 相対パスごとに種類・権限・内容の SHA256 を記録する。リンク先へは進まない |
+| `compare_runs(legacy_argv, native_argv, initial_tree=..., work_dir=...)` | 同じ初期状態を 2 つのフォルダへコピーし、旧版と Rust 版の結果とファイルの変化を比べる |
+
+- `compare_runs()` の `work_dir` は、まだ存在しない、`initial_tree` の外の場所を渡す。戻り値の `legacy_cwd`・`native_cwd` は検査のために残り、呼び出し側が片付ける。
+- 比べるのは終了コード、出力のバイト列、ファイルの作成・変更・削除、実行権限を含む権限。`allow_differences` は、この比較だけで差を認める項目名と判定関数を指定する。
+- 時刻や絶対パスを出力全体から一括で消さない。時間切れを許される差にしない。
+- 時間切れでは、同じプロセスグループ(信号をまとめて送れるプロセスの集まり)へ終了信号を送り、直接の子を回収する。グループを抜けた子は停止の対象外。孫以降の回収は、その親か OS が受け持つ。
+- Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。
+- `probe` に旧版は無い。補助のテストと `check_probe.py` が通っても、旧版との同等性を確認したとは扱わない。
+
 ## 全回帰テストのコマンド(run-all.py)
 
 使い方(リポジトリ直下で実行する):
@@ -323,6 +405,7 @@ bash scripts/run-all-container.sh [--commit <rev> | --worktree] [--image <名前
   - `support_load.py`: 製品のスクリプトの読み込み(`__pycache__` を書かない)と、`__pycache__` を除いたコピー。
   - `support_cli.py`: CLI(コマンドとして起動する入口)の実行・確かめが外れたときの文・同じプロセスでの `main` の呼び出し。
   - `support_proc.py`: プロセスの不在の確かめと片付け。
+  - `support_native.py`: 旧版と Rust 版の出力・終了コード・ファイルの比較。使い方は上の「旧版と Rust 版の差分テストの補助」にある。
   - 診断のテストの準備は `diagnostic_test_support.py`(共通の補助とは別のファイル)。
   - dotted の形(`python3 -m unittest scripts.<名前>`)では、`import support_*` が失敗する。`diagnostic_test_support.py` も同じく読み込めない。
   - dotted の形で流す手順がある `test_check_process.py`・`test_review_guard.py` だけ、失敗したときに `from scripts import support_*` で読み込み直す。
