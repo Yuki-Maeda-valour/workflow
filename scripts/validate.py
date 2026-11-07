@@ -89,11 +89,15 @@ import json
 import os
 import re
 import shlex
+import stat
+import struct
+import subprocess
 import sys
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlsplit
 
 REPO = Path(__file__).resolve().parent.parent
 SKILLS_DIR = REPO / "plugins" / "dev-workflow" / "skills"
@@ -409,6 +413,335 @@ def check_json_files():
                     ERRORS.append(f"marketplace.json plugins[{pl.get('name')}].source が実在しない -> {src}")
         except Exception:
             pass
+
+
+_NATIVE_BINARIES = (
+    "linux-x86_64/dev-workflow",
+    "linux-arm64/dev-workflow",
+    "macos-universal/dev-workflow",
+)
+_NATIVE_LIMIT = 8 * 1024 * 1024
+_NATIVE_REL = Path("plugins/dev-workflow/bin/dev-workflow")
+_NATIVE_TARGETS = (
+    "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
+    "x86_64-apple-darwin", "aarch64-apple-darwin",
+)
+# base-commit.md / publish-guard.py と同じ安全用のオプション。
+_NATIVE_SAFE_GIT = (
+    "--no-pager", "--no-replace-objects",
+    "-c", "core.quotePath=false", "-c", "core.fsmonitor=",
+    "-c", "core.hooksPath=/dev/null", "-c", "core.ignoreCase=false",
+    "-c", "core.splitIndex=false", "-c", "core.ignoreStat=false",
+    "-c", "commit.gpgSign=false", "-c", "push.gpgSign=false",
+    "-c", "filter.lfs.smudge=", "-c", "filter.lfs.clean=",
+    "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false",
+)
+
+
+def _native_git_modes(path, expected, problems):
+    """このリポジトリ内だけ index のモードを調べる。成果物の一時領域は対象外。"""
+    try:
+        relative = path.relative_to(REPO)
+    except ValueError:
+        return
+    if not os.path.lexists(REPO / ".git"):
+        return
+    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env.update(GIT_NO_LAZY_FETCH="1", GIT_OPTIONAL_LOCKS="0")
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(REPO), *_NATIVE_SAFE_GIT, "--literal-pathspecs",
+             "ls-files", "--stage", "-z", "--", relative.as_posix()],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            env=env, timeout=15, check=True,
+        )
+        entries = {}
+        for record in result.stdout.split(b"\0"):
+            if not record:
+                continue
+            metadata, filename = record.split(b"\t", 1)
+            mode, _oid, stage = metadata.decode("ascii").split()
+            name = Path(os.fsdecode(filename)).relative_to(relative).as_posix()
+            if stage != "0" or name in entries:
+                problems.append(f"{name}: Git の記録が未解決または重複している")
+            entries[name] = mode
+        for name, executable in expected.items():
+            mode = "100755" if executable else "100644"
+            if entries.get(name) != mode:
+                problems.append(f"{name}: Git のモードは {mode} が必要(実際: {entries.get(name)!r})")
+        for name in sorted(entries.keys() - expected.keys()):
+            problems.append(f"{name}: Git の記録に余分な項目がある")
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        problems.append(f"Git のモードを読み取れない: {exc}")
+
+
+def _native_files(path, expected, problems):
+    """固定の木だけを nofollow で読む。FIFO・リンク・上限超過は開く前にも拒否する。"""
+    contents = {}
+    directories = {str(Path(name).parent) for name in expected if "/" in name}
+
+    def visit(directory_fd, prefix):
+        names = {name[len(prefix):].split("/", 1)[0] for name in expected if name.startswith(prefix)}
+        actual = set(os.listdir(directory_fd))
+        for name in sorted(actual - names):
+            problems.append(f"{prefix}{name}: 余分な項目がある")
+        for name in sorted(names):
+            relative = prefix + name
+            if name not in actual:
+                problems.append(f"{relative}: 存在しない")
+                continue
+            child_fd = None
+            try:
+                before = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+                is_directory = relative in directories
+                if stat.S_ISLNK(before.st_mode):
+                    raise ValueError("シンボリックリンクは禁止")
+                if is_directory:
+                    if not stat.S_ISDIR(before.st_mode):
+                        raise ValueError("通常のフォルダでない")
+                    child_fd = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                       dir_fd=directory_fd)
+                    visit(child_fd, relative + "/")
+                    continue
+                if not stat.S_ISREG(before.st_mode):
+                    raise ValueError("通常ファイルでない")
+                if before.st_nlink != 1:
+                    raise ValueError("ハードリンクは禁止")
+                if before.st_size > _NATIVE_LIMIT:
+                    raise ValueError("8 MiB を超えている")
+                child_fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                   dir_fd=directory_fd)
+                current = os.fstat(child_fd)
+                if (current.st_dev, current.st_ino, current.st_mode, current.st_nlink, current.st_size) != (
+                        before.st_dev, before.st_ino, before.st_mode, before.st_nlink, before.st_size):
+                    raise ValueError("読み取り前にファイルが変わった")
+                if bool(current.st_mode & 0o111) != expected[relative]:
+                    problems.append(f"{relative}: 実行ビットが不正")
+                chunks = []
+                total = 0
+                while total <= _NATIVE_LIMIT:
+                    chunk = os.read(child_fd, min(65536, _NATIVE_LIMIT + 1 - total))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    total += len(chunk)
+                if total > _NATIVE_LIMIT:
+                    raise ValueError("8 MiB を超えている")
+                data = b"".join(chunks)
+                if data.startswith(b"version https://git-lfs.github.com/spec/v1"):
+                    raise ValueError("Git LFS のポインタは禁止")
+                contents[relative] = data
+            except (OSError, ValueError) as exc:
+                problems.append(f"{relative}: {exc}")
+            finally:
+                if child_fd is not None:
+                    os.close(child_fd)
+
+    directory_fd = None
+    try:
+        # 配布フォルダより上の、リポジトリ内のリンクも拒否する。
+        if path.is_relative_to(REPO):
+            for parent in reversed(path.relative_to(REPO).parents):
+                if stat.S_ISLNK((REPO / parent).lstat().st_mode):
+                    raise ValueError(f"{parent}: シンボリックリンクは禁止")
+        directory_fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        visit(directory_fd, "")
+    except (OSError, ValueError) as exc:
+        problems.append(f"{path}: 配布フォルダを読み取れない: {exc}")
+    finally:
+        if directory_fd is not None:
+            os.close(directory_fd)
+    return contents
+
+
+def _native_binary_format(name, data, problems):
+    """ELF と universal Mach-O のヘッダを読む。静的リンク・署名・起動は CI の責務。"""
+    if name.startswith("linux-"):
+        machine = 62 if name == _NATIVE_BINARIES[0] else 183
+        if (len(data) < 64 or data[:7] != b"\x7fELF\x02\x01\x01"
+                or struct.unpack_from("<H", data, 18)[0] != machine):
+            problems.append(f"{name}: 対象 CPU の 64-bit little-endian ELF でない")
+        return
+    # fat_header / fat_arch(_64)。CPU 一覧だけの偽装を避け、各 slice のヘッダも読む。
+    formats = {b"\xca\xfe\xba\xbe": (">", "IIIII"), b"\xbe\xba\xfe\xca": ("<", "IIIII"),
+               b"\xca\xfe\xba\xbf": (">", "IIQQII"), b"\xbf\xba\xfe\xca": ("<", "IIQQII")}
+    try:
+        if len(data) < 8 or data[:4] not in formats:
+            raise ValueError("universal Mach-O でない")
+        endian, fields = formats[data[:4]]
+        count = struct.unpack_from(endian + "I", data, 4)[0]
+        entry_size = struct.calcsize(endian + fields)
+        table_end = 8 + count * entry_size
+        if count != 2 or table_end > len(data):
+            raise ValueError("Mach-O の CPU は x86_64 と arm64 の 2 つが必要")
+        cpus, ranges = set(), []
+        for index in range(count):
+            cpu, subtype, offset, size, align, *reserved = struct.unpack_from(
+                endian + fields, data, 8 + index * entry_size)
+            if cpu not in (0x01000007, 0x0100000c) or cpu in cpus:
+                raise ValueError("Mach-O の CPU が不正または重複")
+            if (size < 32 or offset < table_end or offset + size > len(data)
+                    or align > 31 or offset % (1 << align) or any(reserved)
+                    or any(offset < end and start < offset + size for start, end in ranges)):
+                raise ValueError("Mach-O の CPU ごとの範囲が不正")
+            if (data[offset:offset + 4] != b"\xcf\xfa\xed\xfe"
+                    or struct.unpack_from("<II", data, offset + 4) != (cpu, subtype)):
+                raise ValueError("Mach-O の中身と CPU の一覧が一致しない")
+            cpus.add(cpu)
+            ranges.append((offset, offset + size))
+    except (ValueError, struct.error) as exc:
+        problems.append(f"{name}: {exc}")
+
+
+def _native_build_info(raw, hashes, problems):
+    """build-info.json v1: targets[target]={linker,sdk}, ci={run_id,run_url},
+    artifacts=[{path,sha256}, ...]。Linux の sdk は null を認める。
+    追加の道具の版などは許すが、全階層で重複キーと JSON 外の定数は拒否する。
+    """
+    def error(message):
+        problems.append(f"build-info.json: {message}")
+
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"重複キー: {key}")
+            result[key] = value
+        return result
+
+    def invalid_constant(value):
+        raise ValueError(f"JSON に使えない値: {value}")
+
+    def text(value):
+        return isinstance(value, str) and bool(value.strip())
+
+    def sha256(value):
+        return isinstance(value, str) and re.fullmatch(r"[0-9a-f]{64}", value) is not None
+
+    try:
+        data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique, parse_constant=invalid_constant)
+    except (UnicodeError, ValueError, RecursionError) as exc:
+        error(f"JSON を読み取れない: {exc}")
+        return
+    if not isinstance(data, dict):
+        error("JSON の最上位はオブジェクトが必要")
+        return
+    for key in ("schema_version", "source_commit", "source_input_sha256", "cargo_lock_sha256",
+                "rustc", "targets", "ci", "artifacts"):
+        if key not in data:
+            error(f"必須キー {key} がない")
+    if type(data.get("schema_version")) is not int or data["schema_version"] != 1:
+        error("schema_version は整数の 1 が必要")
+    commit = data.get("source_commit")
+    if not isinstance(commit, str) or re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit) is None:
+        error("source_commit は完全な小文字の Git SHA が必要")
+    for key in ("source_input_sha256", "cargo_lock_sha256"):
+        if not sha256(data.get(key)):
+            error(f"{key} は小文字の SHA256 が必要")
+    if not text(data.get("rustc")):
+        error("rustc は空でない文字列が必要")
+    targets = data.get("targets")
+    if not isinstance(targets, dict) or set(targets) != set(_NATIVE_TARGETS):
+        error("targets は固定の 4 対象が必要")
+    if isinstance(targets, dict):
+        for target in _NATIVE_TARGETS:
+            settings = targets.get(target)
+            if not isinstance(settings, dict) or not text(settings.get("linker")):
+                error(f"targets.{target}.linker は空でない文字列が必要")
+            if (not isinstance(settings, dict) or "sdk" not in settings
+                    or not (text(settings["sdk"]) or (target.endswith("linux-musl") and settings["sdk"] is None))):
+                error(f"targets.{target}.sdk がないか不正")
+    ci = data.get("ci")
+    if not isinstance(ci, dict):
+        error("ci は run_id と run_url を持つオブジェクトが必要")
+    else:
+        run_id = ci.get("run_id")
+        if not ((type(run_id) is int and run_id > 0)
+                or (isinstance(run_id, str) and re.fullmatch(r"[1-9][0-9]*", run_id))):
+            error("ci.run_id は正の実行番号が必要")
+        try:
+            url = urlsplit(ci.get("run_url") if isinstance(ci.get("run_url"), str) else "")
+            if url.scheme != "https" or not url.hostname or url.username or url.password:
+                raise ValueError("https の絶対 URL が必要")
+        except ValueError:
+            error("ci.run_url は https の絶対 URL が必要")
+    artifacts = data.get("artifacts")
+    if not isinstance(artifacts, list):
+        error("artifacts は 3 成果物の配列が必要")
+        return
+    seen = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict):
+            error("artifacts の項目は path と sha256 を持つオブジェクトが必要")
+            continue
+        path = artifact.get("path")
+        if not isinstance(path, str) or path not in _NATIVE_BINARIES or path in seen:
+            error(f"artifacts の path が不正または重複: {path!r}")
+            continue
+        seen.add(path)
+        value = artifact.get("sha256")
+        if not sha256(value):
+            error(f"artifacts の {path} の sha256 が不正")
+        elif path in hashes and hashes[path] != value:
+            error(f"artifacts の {path} の SHA256 が成果物と一致しない")
+    if seen != set(_NATIVE_BINARIES) or len(artifacts) != 3:
+        error("artifacts は固定の 3 成果物がちょうど 1 個ずつ必要")
+
+
+def check_native_bundle(path: Path, mode: str) -> list[str]:
+    """未確認の配布物を実行せずに検査し、問題の文を返す(空なら合格)。
+
+    artifact は CI の 5 ファイル、distribution は launch.sh を加えた 6 ファイル。
+    このリポジトリ内では Git のモードも調べる。外の一時領域では実行ビットを調べる。
+    現在の native/ のソースとは比較しない。ファイルと権限は変更しない。
+    """
+    if mode not in ("artifact", "distribution"):
+        return [f"検査の mode が不正: {mode!r}"]
+    path = Path(os.path.abspath(path))
+    problems = []
+    expected = {name: True for name in _NATIVE_BINARIES}
+    expected.update({"SHA256SUMS": False, "build-info.json": False})
+    if mode == "distribution":
+        expected["launch.sh"] = True
+    contents = _native_files(path, expected, problems)
+    _native_git_modes(path, expected, problems)
+    hashes = {}
+    for name in _NATIVE_BINARIES:
+        if name in contents:
+            data = contents[name]
+            hashes[name] = hashlib.sha256(data).hexdigest()
+            _native_binary_format(name, data, problems)
+    if "SHA256SUMS" in contents:
+        pattern = b"".join(rb"[0-9a-f]{64}  " + re.escape(name.encode()) + b"\n"
+                           for name in _NATIVE_BINARIES)
+        data = contents["SHA256SUMS"]
+        if re.fullmatch(pattern, data) is None:
+            problems.append("SHA256SUMS: 固定の 3 行・小文字 SHA256・空白 2 個・LF の形でない")
+        else:
+            for name, line in zip(_NATIVE_BINARIES, data.splitlines()):
+                if name in hashes and line[:64].decode("ascii") != hashes[name]:
+                    problems.append(f"SHA256SUMS: {name} の SHA256 が成果物と一致しない")
+    if "build-info.json" in contents:
+        _native_build_info(contents["build-info.json"], hashes, problems)
+    return problems
+
+
+def check_native_distribution():
+    """未配布なら無出力。リンク切れを『未配布』として見逃さない。"""
+    path = REPO
+    for part in _NATIVE_REL.parts:
+        path /= part
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            return
+        except OSError as exc:
+            ERRORS.append(f"{path}: 配布フォルダを読み取れない: {exc}")
+            return
+        if not stat.S_ISDIR(mode):
+            ERRORS.append(f"{path}: 配布フォルダはリンクでない通常のフォルダが必要")
+            return
+    ERRORS.extend(f"{_NATIVE_REL}: {problem}" for problem in check_native_bundle(path, "distribution"))
 
 
 def check_skill_count_claims():
@@ -1488,6 +1821,7 @@ def _main() -> int:
     # 文書ごとの必須項目不足にせず、検証環境の失敗を1回だけ報告する。
     if yaml_loader() is not None:
         check_json_files()
+        check_native_distribution()
         check_skill_count_claims()
         check_skills()
         check_writing_rules_link()
