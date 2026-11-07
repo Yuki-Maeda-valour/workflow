@@ -451,7 +451,7 @@ PYPROBE
     dcommit() { g commit -q -m "候補 $src"; }
     dpush() { g push -q origin "$br"; }
     dpushu() { g push -q -u origin "$br"; }   # 共有の config に branch.<作業ブランチ>.* を書く push(照合で止まる)
-    dlinger() { # TERM を無視して居座る(同じプロセスグループに孫、別セッションに印つきの子孫も置く)
+    dlinger() { # TERM を無視して居座る(同じプロセスグループに孫プロセス、別セッションに印つきの子孫も置く)
       bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
       echo $! >>"$REC/spawned-$rn"
       setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
@@ -590,7 +590,7 @@ spawn_marked() { # イテレーションの印を持ち TERM を無視する子�
   setsid bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
   echo $! >>"$REC/spawned-$name"
 }
-linger() { # TERM を無視して居座る(同じプロセスグループに孫も置く)
+linger() { # TERM を無視して居座る(同じプロセスグループに孫プロセスも置く)
   bash -c 'trap "" TERM; while :; do sleep 1; done' </dev/null >/dev/null 2>&1 &
   echo $! >>"$REC/spawned-$name"
   spawn_marked
@@ -1363,7 +1363,7 @@ if wait_file "$REC/started-longsleep-a" 30; then
   wait_bg
   check "シグナル TERM で 143" 143 "$BG_RC"
   for p in $(cat "$REC/pid-longsleep-a" "$REC/spawned-longsleep-a" 2>/dev/null); do
-    if wait_dead "$p" 5; then ok "TERM: 子と子孫が片付く(pid $p)"; else ng "TERM: 子と子孫が片付く(pid $p が残った)"; fi
+    if wait_dead "$p" 5; then ok "TERM: 子プロセスと子孫が片付く(pid $p)"; else ng "TERM: 子プロセスと子孫が片付く(pid $p が残った)"; fi
   done
   t "TERM: worktree が残る(除外の印)" locked_reason_of "docs/tasks/進行中_longsleep-a.md"
   SD="$(state_dir dup)"
@@ -1971,11 +1971,11 @@ newrec jhang
 judge_run jhang "(時間切れ)" --iteration-timeout 10
 judged hang-j "失敗(時間切れ)" kept
 judged fail-late-j "失敗(結末 失敗扱い)" kept
-# 片付け: 時間切れで TERM を無視する孫と、setsid で別セッションにした印つきの子孫まで打ち切られる
+# 片付け: 時間切れで TERM を無視する孫プロセスと、setsid で別セッションにした印つきの子孫まで打ち切られる
 for p in $(cat "$REC/pid-hang-j" "$REC/spawned-hang-j" 2>/dev/null); do
   if wait_dead "$p" 3; then ok "片付け(時間切れ): pid $p が止まる"; else ng "片付け(時間切れ): pid $p が止まる"; fi
 done
-check "片付け(時間切れ): 孫と別セッションの子孫を記録した" 2 "$(wc -l <"$REC/spawned-hang-j" 2>/dev/null | tr -d ' ')"
+check "片付け(時間切れ): 孫プロセスと別セッションの子孫を記録した" 2 "$(wc -l <"$REC/spawned-hang-j" 2>/dev/null | tr -d ' ')"
 # leak-j(印つきの子孫が残る)・degrade-j・ignored-j。イテレーションの時間の上限は既定のまま
 newrepo jmisc
 addtask leak-j 2026-01-01

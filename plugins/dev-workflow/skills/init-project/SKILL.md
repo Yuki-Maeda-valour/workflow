@@ -66,7 +66,7 @@ argument-hint: "[対象パス] [--yes] [--runners=<名前,...>]"
 
 **3. リポジトリ構成**
 - `pnpm-workspace.yaml` / `package.json` の `workspaces` → **monorepo**(複数のパッケージを 1 つのリポジトリに置く構成)。
-- `<root>` 直下に `.git` が無く、子ディレクトリ側に本体の git / マニフェストがある(AI 管理リポジトリ下に本体が独立) → **parent-child**(`root` を本体側に向ける)。
+- `<root>` 直下に `.git` が無く、下のディレクトリ側に本体の git / マニフェストがある(AI 管理リポジトリ下に本体が独立) → **parent-child**(`root` を本体側に向ける)。
 - どちらでもない → **single**。
 
 **4. 品質コマンド**

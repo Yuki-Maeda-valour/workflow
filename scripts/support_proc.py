@@ -81,7 +81,7 @@ ABSENT_NOW = '''def absent_now(send, target):
 
 
 def record(path):
-    # 子と孫が自分の pid と pgid を JSON で書く 1 文。書きかけを読ませないよう、置き換えで書く。
+    # 子プロセスと孫プロセスが自分の pid と pgid を JSON で書く 1 文。書きかけを読ませないよう、置き換えで書く。
     part = str(path) + '.part'
     return (f"Path({part!r}).write_text(json.dumps({{'pid': os.getpid(), 'pgid': os.getpgrp()}})); "
             f"os.replace({part!r}, {str(path)!r})")
@@ -113,7 +113,7 @@ def owned(root, pid, pgid):
 
 def cleanup(root, stop=(), children=(), groups=(), records=(), raw=()):
     # 試験が起動したものだけを止めて回収し、残ったものの番号を返す。
-    # stop: 監督(run-checks)の Popen。children: 試験の直接の子の Popen(差し替えで捕まえた anchor・無関係なプロセス)。
+    # stop: 監督(run-checks)の Popen。children: 試験の直接の子プロセスの Popen(差し替えで捕まえた anchor・無関係なプロセス)。
     # groups: 元の群の pgid を書いた記録。records: JSON の記録。raw: 素の pid(既存の Linux の試験の形)。
     found = [value for value in map(read_record, records) if value]
     groups = [value[1] for value in map(read_record, groups) if value]
@@ -134,7 +134,7 @@ def cleanup(root, stop=(), children=(), groups=(), records=(), raw=()):
                 os.killpg(pgid, signal.SIGKILL)
             except OSError:
                 pass
-    # 手順 3: 記録した各プロセスを止める。素の pid は、まだ終わっていない自分の子だけ。
+    # 手順 3: 記録した各プロセスを止める。素の pid は、まだ終わっていない自分の子プロセスだけ。
     for pid, pgid in found:
         if owned(root, pid, pgid):
             try:
@@ -148,7 +148,7 @@ def cleanup(root, stop=(), children=(), groups=(), records=(), raw=()):
             continue
         if not done:
             os.kill(pid, signal.SIGKILL)
-    # 手順 4: 直接の子と、試験のプロセスが引き取った孤児(Linux の subreaper)を回収する。
+    # 手順 4: 直接の子プロセスと、試験のプロセスが引き取った孤児(Linux の subreaper)を回収する。
     for process in children:
         if process.poll() is None:
             process.kill()

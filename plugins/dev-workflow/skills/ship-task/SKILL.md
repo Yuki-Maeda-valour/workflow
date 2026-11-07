@@ -49,7 +49,7 @@ argument-hint: "<タスク内容の説明> | --task=<タスク MD | #番号 | Is
 親の保持値が全て無い単独入口だけは、現在の配布元の `scripts/environment-guard.py bootstrap --root <pluginルート> --output <外部の新規ディレクトリ> --inventory <有効plugin一覧JSON>` を `python3 -B` で一度実行する。
 使用ホストの設定ファイル・設定ディレクトリ・skill/command の保存先も動的に解決し、`--setting`・`--settings-dir`・`--skills-dir` へ渡す。
 返る `state`・`sha256`・`guard`・`guard_sha256`・`plugin` を保持し、同じ照合を行う。一覧はホストの正式な手段で確定した `installPath` 付き配列とし、取得不能なら失敗扱い。
-以後の補助スクリプトの実行・文書読取は、毎回照合してからコピーを使う。詳細と子への継承はコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
+以後の補助スクリプトの実行・文書読取は、毎回照合してからコピーを使う。詳細と、ship-task が呼ぶ skill へ引き継ぐことはコピー内の [references/unattended-mode.md](references/unattended-mode.md) §0 に従う。
 
 固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
 Python の隔離起動(`-I`)で作業ディレクトリ・`PYTHONPATH`・利用者の site(追加ライブラリの置き場)の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持したハッシュ値と一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。

@@ -41,7 +41,7 @@ def identity(pid):
 
 
 def own_children():
-    # 環境・dumpable・セッションに依存しない。自分の直接の子だけを見る。
+    # 環境・dumpable・セッションに依存しない。自分の直接の子プロセスだけを見る。
     path = Path(f'/proc/self/task/{os.getpid()}/children')
     return [int(value) for value in path.read_text().split()]
 
@@ -51,12 +51,12 @@ def signal_owned(number):
         try:
             before = identity(pid)
             if before[0] != os.getpid():
-                raise RuntimeError('子の所有関係が変わった')
+                raise RuntimeError('子プロセスの所有関係が変わった')
             fd = os.pidfd_open(pid)
             try:
                 after = identity(pid)
                 if before != after:
-                    raise RuntimeError('子の starttime が変わった')
+                    raise RuntimeError('子プロセスの starttime が変わった')
                 signal.pidfd_send_signal(fd, number)
             finally:
                 os.close(fd)
@@ -95,13 +95,13 @@ def supervise(argv, timeout, grace):
             timed_out = True
             break
         time.sleep(.02)
-    # 生きている親を止めると、その子はここへ reparent される。二重 fork も同じ。
+    # 生きている親を止めると、その子プロセスはここへ reparent される。二重 fork も同じ。
     term_end = time.monotonic() + grace
     hard_end = term_end + 5
     while not reap(statuses):
         signal_owned(signal.SIGTERM if time.monotonic() < term_end else signal.SIGKILL)
         if time.monotonic() >= hard_end:
-            raise RuntimeError('子の不在を期限内に証明できない')
+            raise RuntimeError('子プロセスの不在を期限内に証明できない')
         time.sleep(.02)
     process.returncode = statuses[process.pid]
     return {'clean': True, 'returncode': process.returncode, 'timed_out': timed_out, 'signal': STOP}
@@ -117,7 +117,7 @@ def main():
             finally:
                 os.close(fd)
         except (OSError, ValueError, RuntimeError):
-            print('子の監督に必要な Linux subreaper・pidfd を使えない', file=sys.stderr)
+            print('子プロセスの監督に必要な Linux subreaper・pidfd を使えない', file=sys.stderr)
             return 97
         return 0
     parser = argparse.ArgumentParser(description=__doc__)
@@ -143,7 +143,7 @@ def main():
         finally:
             os.close(fd)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-        print(f'子の回収を確認できない: {exc}', file=sys.stderr)
+        print(f'子プロセスの回収を確認できない: {exc}', file=sys.stderr)
         return 97
     return 0
 

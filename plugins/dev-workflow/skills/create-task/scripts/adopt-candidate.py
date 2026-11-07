@@ -86,7 +86,7 @@ def validate_candidate(data, digest):
 
 
 def root_run(root_fd, argv, env, timeout):
-    """/proc の cwd 表現を使わず、保持済み root fd だけから子の cwd を決める。"""
+    """/proc の cwd 表現を使わず、保持済み root fd だけから子プロセスの cwd を決める。"""
     def enter_root():
         os.fchdir(root_fd)
     return subprocess.run(argv, cwd='/', pass_fds=(root_fd,), preexec_fn=enter_root,

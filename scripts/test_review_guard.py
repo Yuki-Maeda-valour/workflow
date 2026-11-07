@@ -1518,7 +1518,7 @@ class ExternalTaskDirectoryTest(unittest.TestCase):
 @unittest.skipUnless(LINUX or DARWIN, "Linux・macOS 専用: 実 CLI で品質コマンドの停止と検証用コピーの扱いを検査")
 class CliProcessLifecycleTest(GuardCliFixture, unittest.TestCase):
     # 状態の認証を置き換えない。start → take → seal を実 CLI で行い、run-checks を子プロセスで起動する。
-    life = 3  # 子と孫が自分で終わるまでの秒数
+    life = 3  # 子プロセスと孫プロセスが自分で終わるまでの秒数
 
     def setUp(self):
         super().setUp()
@@ -1527,7 +1527,7 @@ class CliProcessLifecycleTest(GuardCliFixture, unittest.TestCase):
         self.ready = self.root / "ready"
         self.child = self.root / "child"
         self.grand = self.root / "grand"
-        # 製品に止められるはずの親・子・孫が、自然に終わる直前に書く印。製品が戻った直後に無いことを確かめる。
+        # 製品に止められるはずの親・子プロセス・孫プロセスが、自然に終わる直前に書く印。製品が戻った直後に無いことを確かめる。
         self.naturals = [self.root / (name + "-natural") for name in ("parent", "child", "grand")]
 
     def tearDown(self):
@@ -1539,8 +1539,8 @@ class CliProcessLifecycleTest(GuardCliFixture, unittest.TestCase):
         self.assertEqual([], left, "試験のプロセスが残った")
 
     def plan(self, escape, wait_after_ready):
-        # 1 つ目(対象): 作業フォルダを記録し、TERM を無視する子と孫を起動する。子と孫の記録を見てから準備完了を書く。
-        # 群外化では、子を別の群で起動する(孫なし)。子は life 秒後に印を書いて終わる。
+        # 1 つ目(対象): 作業フォルダを記録し、TERM を無視する子プロセスと孫プロセスを起動する。子プロセスと孫プロセスの記録を見てから準備完了を書く。
+        # 群外化では、子プロセスを別の群で起動する(孫プロセスなし)。子プロセスは life 秒後に印を書いて終わる。
         cwd, later, finished = (self.root / name for name in ("cwd", "later", "finished"))
         if escape:
             child = ("import json, os, time; from pathlib import Path; "
@@ -1569,7 +1569,7 @@ while not all(Path(name).exists() for name in {waits!r}):
 {record(self.ready)}
 {finish}
 """
-        # 2 つ目(後続): 元の群と、元の群にいた子と孫の不在を確かめてから印を書く。確かめられなければ終了 1。
+        # 2 つ目(後続): 元の群と、元の群にいた子プロセスと孫プロセスの不在を確かめてから印を書く。確かめられなければ終了 1。
         following = f"""import json, os, time
 from pathlib import Path
 {ABSENT_NOW}
@@ -1612,7 +1612,7 @@ Path({str(later)!r}).write_text('absent')
             while not self.ready.exists() and running.poll() is None and time.monotonic() < deadline:
                 time.sleep(.01)
             self.assertTrue(self.ready.exists(), "準備完了が 30 秒以内に書かれない")
-            self.assertTrue(self.child.exists() and (escape or self.grand.exists()), "子と孫の記録が無い")
+            self.assertTrue(self.child.exists() and (escape or self.grand.exists()), "子プロセスと孫プロセスの記録が無い")
             if number:
                 # 回収済みの番号へ送らない。終わっていれば失敗にし、送るのは Popen 経由にする(回収済みなら送らない)。
                 self.assertIsNone(running.poll(), "run-checks が信号を送る前に終わった")
@@ -1621,11 +1621,11 @@ Path({str(later)!r}).write_text('absent')
             self.assertEqual([], [path.name for path in self.naturals if path.exists()], "止めずに自然に終わるのを待った")
             pgid = read_record(self.ready)[1]
             if escape:
-                # 群の外へ移った子は保証外。戻った時点で生きている。
+                # 群の外へ移った子プロセスは保証外。戻った時点で生きている。
                 escaped = read_record(self.child)
                 self.assertNotEqual(pgid, escaped[1])
                 self.assertEqual("alive", probe(os.kill, escaped[0]))
-            # 戻った直後に、元の群と、元の群にいた子と孫の不在を確かめる。
+            # 戻った直後に、元の群と、元の群にいた子プロセスと孫プロセスの不在を確かめる。
             assert_group_absent_now(pgid)
             for path in (self.child, self.grand):
                 found = read_record(path)
@@ -1659,7 +1659,7 @@ Path({str(later)!r}).write_text('absent')
         scope = "owned-descendants" if LINUX else "original-process-group-only"
         self.assertEqual([scope] * len(receipt["results"]), [item["recovery_scope"] for item in receipt["results"]])
         if escape:
-            self.assertTrue(wait_absent(escaped[0]), "群の外へ移った子が 30 秒以内に終わらない")
+            self.assertTrue(wait_absent(escaped[0]), "群の外へ移った子プロセスが 30 秒以内に終わらない")
             self.assertTrue(finished.exists())
 
     def test_cli_parent_exit_stops_remaining_group_before_next_command(self):
@@ -1677,7 +1677,7 @@ Path({str(later)!r}).write_text('absent')
     def test_cli_hup_keeps_copy_and_stops_group(self):
         self.run_case("signal", signal.SIGHUP)
 
-    @unittest.skipUnless(DARWIN, "macOS 専用: 群の外へ移る子は POSIX 方式の保証外。Linux の監督は方式が違う")
+    @unittest.skipUnless(DARWIN, "macOS 専用: 群の外へ移る子プロセスは POSIX 方式の保証外。Linux の監督は方式が違う")
     def test_cli_group_escape_is_outside_guarantee(self):
         self.run_case("escape")
 
@@ -1709,7 +1709,7 @@ class CheckLifecycleTest(unittest.TestCase):
             self.libc.prctl(36, 1, 0, 0, 0)
 
     def tearDown(self):
-        # 素の pid の記録は自分の子だけ、JSON の記録は pgid とコマンド行を確かめてから止める。
+        # 素の pid の記録は自分の子プロセスだけ、JSON の記録は pgid とコマンド行を確かめてから止める。
         # Linux では、試験のプロセスが引き取った孤児も回収する(回収しないと zombie にも kill(pid, 0) が成功する)。
         try:
             left = cleanup(self.root, children=self.children, groups=self.records, records=self.records, raw=self.pids)
@@ -1765,9 +1765,9 @@ time.sleep(3)
 
 
     def test_timeout_with_term_ignoring_sibling_stops_grandchild_before_checkout_removal(self):
-        # test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan に、親の別の子として「TERM を無視して 2.5 秒で自分で終わる兄弟」を足した形。両 OS で動かす。
+        # test_timeout_reaps_grandchild_before_checkout_removal_and_stops_plan に、親の別の子プロセスとして「TERM を無視して 2.5 秒で自分で終わる兄弟」を足した形。両 OS で動かす。
         # TERM を無視する兄弟が、群への KILL で止まることを確かめる。
-        # Linux では、親は TERM で終わり、孫はすぐ引き取られて止まる。
+        # Linux では、親は TERM で終わり、孫プロセスはすぐ引き取られて止まる。
         marker, grandfile, siblingfile, cleanfile, later = (self.root / x for x in ("marker", "grand", "sibling", "clean", "later"))
         natural = self.root / "sibling-natural"  # 兄弟が自然に終わる直前に書く印
         self.records += [grandfile, siblingfile]
@@ -1781,7 +1781,7 @@ subprocess.Popen([sys.executable, '-c', {sibling!r}], stdout=subprocess.DEVNULL,
 time.sleep(3)
 """
         rc = self.invoke([code, f"from pathlib import Path; Path({str(later)!r}).touch()"])
-        # 戻った直後に、兄弟が自然に終わっていないこと(製品が止めたこと)と、孫と兄弟の不在を確かめる。
+        # 戻った直後に、兄弟が自然に終わっていないこと(製品が止めたこと)と、孫プロセスと兄弟の不在を確かめる。
         self.assertFalse(natural.exists(), "兄弟が自然に終わるのを待った")
         for path in (grandfile, siblingfile):
             found = read_record(path)
@@ -1798,7 +1798,7 @@ time.sleep(3)
         import hashlib
         pidfile = self.root / "pid"
         cleanfile = self.root / "clean"
-        natural = self.root / "natural"  # 子が自然に終わる直前に書く印
+        natural = self.root / "natural"  # 子プロセスが自然に終わる直前に書く印
         child = f"import time; from pathlib import Path; time.sleep(3); Path({str(natural)!r}).write_text('natural')"
         command = f"""import subprocess,sys,time
 from pathlib import Path
@@ -1816,8 +1816,8 @@ assert absent_now(os.kill, int(Path({str(pidfile)!r}).read_text()))
 """
         try:
             self.assertEqual(1, self.invoke([command, following]))
-            # 戻った直後に、子が自然に終わっていないこと(製品が止めたこと)を確かめる。
-            self.assertFalse(natural.exists(), "子が自然に終わるのを待った")
+            # 戻った直後に、子プロセスが自然に終わっていないこと(製品が止めたこと)を確かめる。
+            self.assertFalse(natural.exists(), "子プロセスが自然に終わるのを待った")
         finally:
             if pidfile.exists(): self.pids.append(int(pidfile.read_text()))
         results = json.loads((self.root / 'receipt.json').read_text())['results']

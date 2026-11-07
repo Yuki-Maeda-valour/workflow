@@ -117,7 +117,7 @@ class Observer:
         self.excluded.update(self.matcher.excluded(names))
         if worktree:
             self.warnings.add('ignore-not-applied')
-            # .gitの有無や子の実体化に依存せず、indexのgitlinkで止める。
+            # .gitの有無や下のリポジトリの実体化に依存せず、indexのgitlinkで止める。
             selected=direct+[R.unb64(n) for n in self.o.get('under_b64',[])]
             for path in self.index:
                 self.rt.budget.check()

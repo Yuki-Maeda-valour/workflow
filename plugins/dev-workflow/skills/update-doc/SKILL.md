@@ -17,7 +17,7 @@ argument-hint: "[--task=<完了タスクMD | #番号 | Issue URL> | --analyze-on
   - 一覧は正式な手段で確定した `installPath` 付き配列とする。取得不能なら失敗扱いにする。出力の `state`・`sha256`・`guard`・`guard_sha256`・`plugin` とコピーの plugin ルートを保持する。
 - **どちらの入口も、文書を読む前に照合(照らし合わせて確かめること)する**。下の固定本文で、`environment-guard.py` のコピー(値 `guard`)の保持したハッシュ値と環境を照合し、終了コード 0 のときだけコピー内の文書を読む。
 - 以後の helper 実行・文書読取はコピーだけを使う。使用直前にも同じ hash と `verify` の照合を行い、元の helper を import/source しない。
-  - 詳細・有効なプラグインの一覧の再照合・子への継承は、コピー内の [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md) §0 に従う。
+  - 詳細・有効なプラグインの一覧の再照合・update-doc が作業を任せる AI へ引き継ぐことは、コピー内の [../ship-task/references/unattended-mode.md](../ship-task/references/unattended-mode.md) §0 に従う。
 
 固定本文はこの入口を信頼して読み込んだ時点の字面を保持し、別ファイルから読み直さない。下の4つの値だけを親または今回の `bootstrap` の保持値へ置き換える。本文への追加・変更はしない。
 Python の隔離起動(`-I`)で作業ディレクトリ・`PYTHONPATH`・利用者の site(追加ライブラリの置き場)の同名モジュールを読まない。親ディレクトリと末尾をリンクを辿らず開き、通常ファイルを1 MiB・15秒以内で読み、保持したハッシュ値と一致した同じバイト列だけを実行する。拒否時は終了コード20で停止する。

@@ -365,7 +365,7 @@ m.adopt(root, source, None, digest)
         self.assertEqual(os.stat(self.source).st_ino, os.stat(self.dest).st_ino)
 
     def test_same_uid_can_remove_marker_documented_limit(self):
-        # 親がイテレーションの印を渡しても、同じ利用者の子プログラムは消して helper を起動できる。
+        # 親がイテレーションの印を渡しても、同じ利用者の子プロセスは消して helper を起動できる。
         # 正式入口の検査を OS の隔離とは扱わない。
         bypass = (
             'import os, subprocess, sys; '

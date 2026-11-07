@@ -56,7 +56,7 @@ def yaml_where_isolated():
     return done.stdout.strip() if done.returncode == 0 else None
 
 
-# host-check は -I で起動される。-I の子とこのプロセスで、任意で読む yaml の場所が同じときだけ同じプロセスで呼ぶ
+# host-check は -I で起動される。-I の子プロセスとこのプロセスで、任意で読む yaml の場所が同じときだけ同じプロセスで呼ぶ
 # (違えば、判定が変わりうるので子プロセスで流す)。ファイルの読み込みのときに 1 回だけ調べる
 IN_PROCESS = yaml_where_here() == yaml_where_isolated()
 

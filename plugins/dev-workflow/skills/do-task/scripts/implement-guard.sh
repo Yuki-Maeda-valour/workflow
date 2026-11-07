@@ -118,7 +118,7 @@
 #     fd-copy-unavailable  fd の別名を通した短いコピーが、起動時の試しでどの別名でも成り立たない(macOS の /dev/fd・8.30 より前の GNU cp など)
 #     prepare-failed / copy-failed / replace-failed  準備・コピー・公開の失敗
 #     verify-failed / cleanup-failed  照合・自分の専用一時物の回収の失敗
-#     budget-exceeded / child-unreaped  有限予算・直接コピー子の回収の失敗
+#     budget-exceeded / child-unreaped  有限予算・コピーを行う直接の子プロセスの回収の失敗
 #     interrupted    捕捉した TERM/INT/HUP(exit 20)。通常の復元失敗は exit 33
 #
 # 保護領域:
@@ -130,7 +130,7 @@
 #   `<候補>/dev-workflow/guard-XXXXXX/` を 0700 で作る。レイアウト:
 #     snapshot/1-diff.bin  snapshot/2-status.z  snapshot/4-meta.txt  snapshot/5-stash.txt
 #     snapshot/taskmd.txt(選択パス・実体パス・種別)、snapshot/config-origins.txt(設定候補の記録)
-#     snapshot/config-contexts.txt(使用先・設定blob)、snapshot/6-contexts.txt(子のHEAD/index/diff/status)
+#     snapshot/config-contexts.txt(使用先・設定blob)、snapshot/6-contexts.txt(下のリポジトリのHEAD/index/diff/status)
 #     manifest.tsv         files/<toplevel 相対パス>(退避コピー)
 #     taskmd-body          (タスク MD の実体のコピー。追跡済み・ignore 済み・リポジトリ外でも必ず)
 #   **追跡ファイルの差分と未追跡ファイルの平文複製が入る。** 消すのは cleanup だけ。
@@ -723,7 +723,7 @@ reserve_config_read() { # $1=これから本文を読む通常 file。親シェ�
 # 通常候補 hash/probe/parser・root digest -> reserve_config_read(1本文/操作)
 # 選択blob -> metadataはF内32N、実体化/転送/hash/parserは4M
 # 私有設定root・marker・depth -> F=16Ggen+Dgen+32N(本実装の非Git本文読取Dgenは0)
-# 実repo各Git -> 16Gmain+Σ3Gchild+2M(F=0)、子形式検証は子refs無しの16G
+# 実repo各Git -> 16Gmain+Σ3Gchild+2M(F=0)、下のリポジトリの形式の検証は下のリポジトリのrefs無しの16G
 # index/refコピーとselector出力 -> 独立した各200MiB。設定本文とは重ねない。
 CONFIG_LIMIT=$((200 * 1024 * 1024))
 CONFIG_FILE_LIMIT=$((16 * 1024 * 1024))
@@ -1074,7 +1074,7 @@ context_env_root() { # 相対環境pathはそのGit processのcwdへ結び付け
   case "$p" in /*) : ;; *) p="$cwd/$p" ;; esac
   context_root "$pair" "$p"
 }
-context_roots() { # $1=repo id $2=process cwd id。暗黙の子ref読取も別文脈にする
+context_roots() { # $1=repo id $2=process cwd id。暗黙の下のリポジトリのrefs読取も別文脈にする
   local id="$1" owner="$2" pair="$1:$2" cwd="${CTX_WT[$2]}" gd="${CTX_GD[$1]}" common="${CTX_COMMON[$1]}"
   context_root "$pair" "$gd/config" || return 1
   context_root "$pair" "$gd/config.worktree" || return 1
@@ -1368,7 +1368,7 @@ context_validate_formats() { # 成功cacheの3G式を使う前に単一repoのse
   local id
   for ((id=1; id<${#CTX_WT[@]}; id++)); do
     [ -n "${CTX_GD[$id]}" ] && [ -d "${CTX_GD[$id]}" ] || continue
-    # このrev-parseは子refsを触らない。親builtin用の3G項を付けず16Gだけ予約する。
+    # このrev-parseは下のリポジトリのrefsを触らない。親builtin用の3G項を付けず16Gだけ予約する。
     sat_config_add "${CTX_PAIR_COST["$id:$id"]:-0}" "${CTX_PAIR_COST["$id:${CTX_PARENT[$id]}"]:-0}" || return 1
     sat_config_mul "$SAT" 16 || return 1
     reserve_config_bytes "$SAT" || return 1
@@ -1401,12 +1401,12 @@ check_context_plan() { # 既知通常設定は呼出前にGit0で照合済み。
   # config-checkは元repo Gitを起動しない。形式検証はtake時に済み、通常設定は不変。
   return 0
 }
-context_real_git() { # 子repoのODB環境は親から持ち込まない
+context_real_git() { # 下のリポジトリのODB環境は親から持ち込まない
   local id="$1"; shift
   env -u GIT_OBJECT_DIRECTORY -u GIT_ALTERNATE_OBJECT_DIRECTORIES \
     git "${GIT_PRE[@]}" -C "${CTX_WT[$id]}" "$@"
 }
-collect_context_snapshots() { # 親から隠したdirty情報を子自身の観測で補う
+collect_context_snapshots() { # 親から隠したdirty情報を下のリポジトリ自身の観測で補う
   local out="$1" id base rc file hash part
   : >"$out/6-contexts.txt" || return 1
   for ((id=1; id<${#CTX_WT[@]}; id++)); do
@@ -2169,7 +2169,7 @@ collect_git() { # $1=出力先ディレクトリ $2=take|compare → 0 / 1(COLLE
     1) printf 'stash 無し\n' >"$out/5-stash.txt" || { COLLECT_ERR="5-stash.txt を書けない"; return 1; } ;;
     *) COLLECT_ERR="rev-parse refs/stash が失敗した(rc=$rc)"; return 1 ;;
   esac
-  collect_context_snapshots "$out" || { COLLECT_ERR="子リポジトリの状態を取得できない"; return 1; }
+  collect_context_snapshots "$out" || { COLLECT_ERR="下のリポジトリの状態を取得できない"; return 1; }
   return 0
 }
 
@@ -2884,7 +2884,7 @@ cmd_compare() {
   WORK="$(mktemp -d "$STATE/.work-XXXXXX")" || fail_internal "保護領域に一時ディレクトリを作れない"
   load_meta
   check_hooks_config # MUT:b
-  # ④ 元repo Gitによる5要素と、明示した子の状態の再取得
+  # ④ 元repo Gitによる5要素と、明示した下のリポジトリの状態の再取得
   retake_elements # ANCHOR:retake
 
   # ①② は記録ファイルとのバイト比較

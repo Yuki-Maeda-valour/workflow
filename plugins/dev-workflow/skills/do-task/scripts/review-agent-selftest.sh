@@ -1291,8 +1291,8 @@ rc=0
     --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 ) >"$CASE_OUT" 2>"$CASE_ERR" || rc=$?
 check "相対の TMPDIR: 成功する" 0 "$rc"
 
-# 中止(TERM / HUP): スクリプト自身へのシグナルで、走行中の外部 CLI の子を道連れにする。
-# 呼び出し側は背景実行するので、中止操作はシグナルとして届く。子が生き残ると、
+# 中止(TERM / HUP): スクリプト自身へのシグナルで、走行中の外部 CLI の子プロセスを道連れにする。
+# 呼び出し側は背景実行するので、中止操作はシグナルとして届く。子プロセスが生き残ると、
 # 読み取り専用のはずのプロセスが残り続ける(implement-agent.sh には既にある保護)。
 SIGDIR="$WORK/sig"; mkdir -p "$SIGDIR"
 cat >"$SIGDIR/runproc.sh" <<'SH'
@@ -1303,7 +1303,7 @@ SH
 chmod +x "$SIGDIR/runproc.sh"
 cat >"$SIGDIR/stub.sh" <<SH
 #!/usr/bin/env bash
-# プローブ(末尾引数に ping を含む)は即答し、本実行だけ子を残して待つ。
+# プローブ(末尾引数に ping を含む)は即答し、本実行だけ子プロセスを残して待つ。
 # 読み取り専用フラグはプローブにも本実行にも付くので、フラグの有無では見分けられない
 for a in "\$@"; do case "\$a" in *ping*) echo '{"verdict":"APPROVED","issues":[]}'; exit 0 ;; esac; done
 : >"$SIGDIR/started"   # touch はサンドボックスの PATH に無いことがあるので組み込みで作る
@@ -1352,8 +1352,8 @@ sig_case() {
   wait_gone sig_leak_count 5
   if [ "$rc" -eq "$sc_want" ]; then ok "中止($sc_label): 終了コード $sc_want で終わる"; else
     ng "中止($sc_label): 終了コード $sc_want で終わる(実際 exit=$rc)"; cat "$CASE_ERR" >&2; fi
-  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($sc_label): 外部ランナーの子を残さない"; else
-    ng "中止($sc_label): 外部ランナーの子を残さない(残存 $(sig_leak_count) 件)"; sig_cleanup; fi
+  if [ "$(sig_leak_count)" -eq 0 ]; then ok "中止($sc_label): 外部ランナーの子プロセスを残さない"; else
+    ng "中止($sc_label): 外部ランナーの子プロセスを残さない(残存 $(sig_leak_count) 件)"; sig_cleanup; fi
   # ERROR 行は元の stderr に出る(本実行の stderr を受ける一時ファイルへ消えない)
   if grep -qE '^ERROR \[aborted\] ' "$CASE_ERR"; then ok "中止($sc_label): stderr に ERROR [aborted] が出る"; else
     ng "中止($sc_label): stderr に ERROR [aborted] が出る"; cat "$CASE_ERR" >&2; fi
@@ -1362,7 +1362,7 @@ sig_case() {
 }
 sig_case TERM TERM 143 timeout abs
 sig_case HUP HUP 129 timeout abs
-# timeout / gtimeout が無い環境(macOS 既定)の代替経路でも子を道連れにする
+# timeout / gtimeout が無い環境(macOS 既定)の代替経路でも子プロセスを道連れにする
 sig_case TERM-fallback TERM 143 fallback abs
 # 既定のログ置き場(相対パス)で中止しても、cd 先の一時ツリー基準で見失わない
 sig_case TERM-defaultlog TERM 143 timeout default
@@ -1457,7 +1457,7 @@ if d4_victim_same; then ok "明示のログ(既存のエントリ): 初期化よ
 
 # ── K. ログは作るときに 1 回だけ開き、以後はその fd に書く ──
 # ケース名の接頭辞: 走行中の差し替え / 差し替えの照合 / 既定名の置き場 / ERR のログ / ERR の生出力 / ERR の行数 /
-# ログのパス / 子に渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
+# ログのパス / 子プロセスに渡す fd / POSIX モード / /dev/fd の判定が偽(「開く前の失敗:」は 1 つ前の節の前提の位置にある)。
 # どれもスタブと制限した PATH で打ち、対象の一時領域($TMPDIR)はこのスイートの一時領域へ向ける。
 # FIFO のケースは guard(TERM の後に KILL まで行う)で打ち、外側の時間を K_FIFO_TIMEOUT に縮める
 # (パスで開き直す実装は、TERM の後も中止の処理が FIFO を開き直して待つので、KILL まで終わらない)。
@@ -1821,15 +1821,15 @@ k_logpath_case() { # $1=ラベル $2=起動する場所 $3=実際のログのパ
 k_logpath_case "既定名" "$K_DIR/logpath-default" "$K_DIR/logpath-default/.claude/reviews/reviewer-stubrunner-iter1.md"
 k_logpath_case "明示(相対パス)" "$K_DIR/logpath-explicit" "$K_DIR/logpath-explicit/rel/explicit.md" --log-file "rel/explicit.md"
 
-# 子に渡す fd: 外部 CLI(プローブ・本実行)にログの fd を渡さない。スタブは fd 7 が開いていれば
+# 子プロセスに渡す fd: 外部 CLI(プローブ・本実行)にログの fd を渡さない。スタブは fd 7 が開いていれば
 # 偽の行を書く(パスで開き直す実装では fd 7 が無いので、この形の差は変異でだけ現れる)
 k_run --runner stubrunner --command "bash $WORK/bin/stub-fd.sh --readonly-x" --readonly-flag "--readonly-x" \
   --prompt-file "$WORK/prompt.md" --cwd "$WORK" --probe-timeout 10 --run-timeout 20 --log-file "$K_DIR/fd.md"; rc=$?
-check "子に渡す fd: 本実行まで通る" 0 "$rc"
+check "子プロセスに渡す fd: 本実行まで通る" 0 "$rc"
 if [ -s "$K_DIR/fd.md" ] && ! grep -qF 'FORGED' "$K_DIR/fd.md"; then
-  ok "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"
+  ok "子プロセスに渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"
 else
-  ng "子に渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"; cat "$K_DIR/fd.md" >&2 2>/dev/null
+  ng "子プロセスに渡す fd: 外部 CLI がログの fd に書けない(ログに FORGED が無い)"; cat "$K_DIR/fd.md" >&2 2>/dev/null
 fi
 
 # POSIX モード: POSIXLY_CORRECT の環境でも、特殊組み込みのリダイレクトの失敗でシェルが終わらず、

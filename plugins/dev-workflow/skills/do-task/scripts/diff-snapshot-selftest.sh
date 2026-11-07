@@ -522,7 +522,7 @@ reset_out
 run --cwd "$R" --precheck
 ckeq "④‴H1 TAB を含む gitlink: --precheck exit 22" "$RC" 22
 
-# 隠しエントリ、空の子ディレクトリ、FIFO、壊れた symlink だけでも、対象ディレクトリ自体は
+# 隠しエントリ、空の下のディレクトリ、FIFO、壊れた symlink だけでも、対象ディレクトリ自体は
 # 非空である。検査は内容を読まないので、FIFO で待たず壊れたリンクも辿らない。
 for kind in hidden childdir fifo brokenlink; do
   base_repo "c04h1_$kind"
