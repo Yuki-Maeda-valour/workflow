@@ -24,30 +24,41 @@ BINARIES = (
 )
 
 # 外の道具を呼ばず、受け取った引数・標準入力と起動順を記録する。
+# OS と CPU の取得は固定の引数だけなので、シェルの組み込みだけで返す。
+# 各起動で 3 回呼ばれるここで、Python の起動と import を繰り返さない。
+MOCK_IDENTITY = r'''
+name=${0##*/}
+case $name in
+    uname) invalid=90 ;;
+    sw_vers) invalid=91 ;;
+    *) exit 93 ;;
+esac
+[ "$#" -eq 1 ] || exit "$invalid"
+case $name/$1 in
+    uname/-s) value=$MOCK_OS; status=${MOCK_OS_STATUS:-0} ;;
+    uname/-m) value=$MOCK_CPU; status=${MOCK_CPU_STATUS:-0} ;;
+    uname/-r) value=$MOCK_RELEASE; status=${MOCK_RELEASE_STATUS:-0} ;;
+    sw_vers/-productVersion) value=$MOCK_MACOS; status=${MOCK_MACOS_STATUS:-0} ;;
+    *) exit "$invalid" ;;
+esac
+printf '{"tool":"%s","args":["%s"],"input_sha256":"%s"}\n' \
+    "$name" "$1" '@EMPTY_SHA256@' >> "$MOCK_LOG"
+printf '%s\n' "$value"
+exit "$status"
+'''.replace("@EMPTY_SHA256@", hashlib.sha256(b"").hexdigest())
+
 MOCK_TOOL = r'''
 import hashlib
 import json
 import os
-from pathlib import Path
 import sys
 
-name = Path(sys.argv[0]).name
+name = os.path.basename(sys.argv[0])
 args = sys.argv[1:]
-data = sys.stdin.buffer.read() if name in ("sha256sum", "shasum", "openssl") else b""
+data = sys.stdin.buffer.read()
 with open(os.environ["MOCK_LOG"], "a", encoding="utf-8") as stream:
     stream.write(json.dumps({"tool": name, "args": args,
                              "input_sha256": hashlib.sha256(data).hexdigest()}) + "\n")
-if name == "uname":
-    key = {"-s": "OS", "-m": "CPU", "-r": "RELEASE"}.get(args[0]) if len(args) == 1 else None
-    if key is None:
-        sys.exit(90)
-    print(os.environ["MOCK_" + key])
-    sys.exit(int(os.environ.get("MOCK_" + key + "_STATUS", "0")))
-if name == "sw_vers":
-    if args != ["-productVersion"]:
-        sys.exit(91)
-    print(os.environ["MOCK_MACOS"])
-    sys.exit(int(os.environ.get("MOCK_MACOS_STATUS", "0")))
 expected_args = {"sha256sum": [], "shasum": ["-a", "256"],
                  "openssl": ["dgst", "-sha256"]}[name]
 if args != expected_args:
@@ -118,7 +129,9 @@ class NativeLaunchMockTest(unittest.TestCase):
             executable = shutil.which(name)
             self.assertIsNotNone(executable, name)
             (self.tools / name).symlink_to(executable)
-        for name in ("uname", "sw_vers", "sha256sum", "shasum", "openssl"):
+        for name in ("uname", "sw_vers"):
+            self.write_executable(self.tools / name, MOCK_IDENTITY, interpreter=self.shells[0][1][0])
+        for name in ("sha256sum", "shasum", "openssl"):
             self.write_executable(self.tools / name, MOCK_TOOL)
         for name in BINARIES:
             target = self.bundle / name
@@ -135,8 +148,10 @@ class NativeLaunchMockTest(unittest.TestCase):
             "MOCK_NATIVE_LOG": str(self.native_log),
         }
 
-    def write_executable(self, path, body):
-        path.write_text(f"#!{sys.executable}\n" + body, encoding="utf-8")
+    def write_executable(self, path, body, *, interpreter=None):
+        # 偽の道具は標準ライブラリだけを使う。site の初期化も毎回省く。
+        interpreter = interpreter or f"{sys.executable} -S"
+        path.write_text(f"#!{interpreter}\n" + body, encoding="utf-8")
         path.chmod(0o755)
 
     def write_manifest(self):
@@ -190,9 +205,9 @@ class NativeLaunchMockTest(unittest.TestCase):
                 self.assertEqual(base64.b64decode(record["stdin"]), kwargs.get("data", b""))
 
     def test_posix_syntax_and_executable_mode(self):
-        # 作業ツリーのモードは取り出した機械の umask で変わる(002 なら 0775)。git は実行ビットだけを持つので、
-        # 実行できることと、git の上のモードが 100755 であることを確かめる。
-        self.assertEqual(stat.S_IMODE(LAUNCH.stat().st_mode) & 0o111, 0o111)
+        # 作業ツリーのモードは umask で変わる(002 なら 0775、077 なら 0700)。
+        # 持ち主の実行ビットと、git の上のモードが 100755 であることを確かめる。
+        self.assertTrue(LAUNCH.stat().st_mode & stat.S_IXUSR)
         tracked = subprocess.run(['git', '-C', str(LAUNCH.parent), 'ls-files', '-s', '--', LAUNCH.name],
                                  capture_output=True, text=True, timeout=10)
         if tracked.returncode == 0 and tracked.stdout:

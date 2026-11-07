@@ -20,10 +20,10 @@ BINARY_PATHS = ('linux-x86_64/dev-workflow', 'linux-arm64/dev-workflow',
                 'macos-universal/dev-workflow')
 
 
-
 def _identity(st):
     """置き直されていないかを比べる値。読んだ時刻(atime)は含めない。"""
     return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
 
 class SetupTests(unittest.TestCase):
     def setUp(self):
@@ -482,6 +482,7 @@ class SetupTests(unittest.TestCase):
             with self.subTest(mode=mode), self.fixture() as case:
                 scripts = case.source / 'alpha/scripts'
                 scripts.mkdir(mode=0o751)
+                scripts.chmod(0o751)
                 executable = scripts / 'run.sh'
                 executable.write_text('#!/bin/sh\nexit 0\n')
                 executable.chmod(0o751)
