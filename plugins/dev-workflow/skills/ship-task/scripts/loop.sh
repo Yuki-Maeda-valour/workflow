@@ -273,7 +273,7 @@ def d21_problem(text, what):
     return None
 
 
-def cmd_d21(rel, name):
+def d21_check(rel, name):
     problem = d21_problem(rel, "パス")
     if problem is None and name is not None:
         if name == "":
@@ -282,8 +282,25 @@ def cmd_d21(rel, name):
             problem = "タスク名が '-' で始まる"
         else:
             problem = d21_problem(name, "タスク名")
+    return problem
+
+
+def cmd_d21(rel, name):
+    problem = d21_check(rel, name)
     if problem:
         fail(1, problem)
+
+
+def cmd_d21_list():
+    # stdin の NUL 区切りの「パス・名」の組ごとに、`ok` か `ng<TAB><理由>` を 1 行出す(理由は d21 の標準エラーと同じ字面)
+    parts = sys.stdin.buffer.read().split(b"\0")
+    if parts and parts[-1] == b"":
+        parts.pop()
+    if len(parts) % 2:
+        fail(1, "d21-list の入力が組になっていない")
+    for i in range(0, len(parts), 2):
+        problem = d21_check(parts[i].decode("utf-8", "surrogateescape"), parts[i + 1].decode("utf-8", "surrogateescape"))
+        print("ok" if not problem else "ng\t" + problem)
 
 
 def cmd_plugin_json(path):
@@ -495,6 +512,32 @@ def cmd_json_value(key):
     print(json.dumps(json.load(sys.stdin)[key], ensure_ascii=True, sort_keys=True, separators=(",", ":")))
 
 
+def cmd_json_fields(*specs):
+    # 1 つの JSON(stdin)から複数の値を 1 回で取り出す。get:<キー> は json-get と同じ検査、value:<キー> は json-value と同じ出し方。
+    # 値ごとに末尾の改行をすべて落とし、NUL を付けて出す。NUL を含む値と、最初に失敗した欄から後は出さずに 0 以外で終わる
+    try:
+        data = json.load(sys.stdin)
+    except ValueError:
+        sys.exit(1)
+    out = sys.stdout.buffer
+    for spec in specs:
+        kind, _, key = spec.partition(":")
+        if kind == "get":
+            try:
+                value = data[key]
+            except (KeyError, TypeError):
+                sys.exit(1)
+            if not isinstance(value, str):
+                sys.exit(1)
+        elif kind == "value":
+            value = json.dumps(data[key], ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        else:
+            fail(1, f"json-fields の欄の指定が不正: {spec}")
+        if "\0" in value:
+            sys.exit(1)
+        out.write(value.rstrip("\n").encode("utf-8") + b"\0")
+
+
 def cmd_init_names():
     value = json.load(sys.stdin)
     if not isinstance(value, dict) or not isinstance(value.get("public_names"), list):
@@ -586,10 +629,10 @@ def cmd_environment_run(expected, path, *args):
 
 COMMANDS = {
     "environment-run": cmd_environment_run,
-    "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None),
+    "d21": lambda rel, *name: cmd_d21(rel, name[0] if name else None), "d21-list": cmd_d21_list,
     "plugin-json": cmd_plugin_json, "profile": cmd_profile, "help-check": cmd_help_check,
     "plugins": cmd_plugins,
-    "json-value": cmd_json_value, "init-names": cmd_init_names,
+    "json-value": cmd_json_value, "json-fields": cmd_json_fields, "init-names": cmd_init_names,
     "supervisor-control": cmd_supervisor_control, "supervisor-result": cmd_supervisor_result, "json-get": cmd_json_get, "help-values": cmd_help_values,
     "hook-settings": cmd_hook_settings,
     "candiff": cmd_candiff,
@@ -710,15 +753,47 @@ host_settings_call() { # $1=host-settings | host-allowlist, 残り=reader の引
   case "$code" in host-config-path|host-settings|host-config-source|hooks-disabled) : ;; *) code=host-settings ;; esac
   die 20 "$code" "ホスト設定を安全に検査できない"
 }
+# 有効 plugin の一覧を確定した後の照合: guard を 1 回だけ起動し、その中で「一覧なしの照合 → 補助 CLI → 一覧つきの照合」
+# を同じ順で行う。guard は 1 回目の照合の後に verified を出し、親の go を待って 2 回目の照合をし、最後に自分の本体を
+# 控えた hash で照らし直す(本体は照合の木の外にあり、今までは 2 回目の起動の読み込み器が見つけていた)。
+# 前面のサブシェルの中で動かす: シグナルの trap(昇格の途中は記録だけして戻る。P14)はサブシェルが終わるまで走らないので、
+# 親で wait している間に trap が走って wait が 143 を返すことが無い。照合のパイプ(coproc)は補助 CLI を打つサブシェルの
+# 中で閉じ切って渡さない(関数の呼び出しに付けるリダイレクトは、元に戻すための複製を残すので使わない)
+verify_environment_pair() { # $1=一覧のファイル(補助 CLI だけが書く)
+  local current="$1" pair_pid pair_r pair_w line="" aux_rc=1 write_rc=1 wait_rc=0
+  coproc ENV_PAIR {
+    exec 7>&-
+    environment_call verify-pair --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" \
+      --current-inventory "$current" --guard-sha256 "$ENV_GUARD_SHA" --go-timeout "$((NET_TIMEOUT + 60))"
+  }
+  pair_pid="${ENV_PAIR_PID-}"; pair_r="${ENV_PAIR[0]-}"; pair_w="${ENV_PAIR[1]-}"
+  if [ -z "$pair_pid" ] || [ -z "$pair_r" ] || [ -z "$pair_w" ]; then exit 1; fi
+  IFS= read -r -u "$pair_r" line || line=""
+  if [ "$line" = verified ]; then
+    ( exec {pair_r}<&- {pair_w}>&-; aux "$current" "${AUX_PLUGINS[@]}" ) && aux_rc=0 || aux_rc=$?
+  fi
+  # guard が先に終わっていても、親が SIGPIPE で止まらないようにする(書けなかったことは write_rc で見る)
+  trap '' PIPE
+  if [ "$line" = verified ] && [ "$aux_rc" -eq 0 ]; then
+    { printf 'go\n' >&"$pair_w"; } 2>/dev/null && write_rc=0 || write_rc=$?
+  else
+    { printf 'stop\n' >&"$pair_w"; } 2>/dev/null || true
+  fi
+  trap - PIPE
+  wait "$pair_pid" || wait_rc=$?
+  if [ "$line" = verified ] && [ "$aux_rc" -eq 0 ] && [ "$write_rc" -eq 0 ] && [ "$wait_rc" -eq 0 ]; then exit 0; fi
+  exit 1
+}
 verify_environment() {
   [ -n "${ENVIRONMENT_SHA:-}" ] || return 0
-  environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" || { STATE_GIT_UNSAFE=1; return 1; }
-  if [ "${ENV_INVENTORY_READY:-0}" -eq 1 ]; then
-    local current
-    current="$(mktemp "$ENV_TEMP/plugins-current.XXXXXXXX")" || { STATE_GIT_UNSAFE=1; return 1; }
-    aux "$current" "${AUX_PLUGINS[@]}" || { STATE_GIT_UNSAFE=1; return 1; }
-    environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" --current-inventory "$current" || { STATE_GIT_UNSAFE=1; return 1; }
+  if [ "${ENV_INVENTORY_READY:-0}" -ne 1 ]; then
+    environment_call verify --state "$ENVIRONMENT_STATE" --expect-sha256 "$ENVIRONMENT_SHA" || { STATE_GIT_UNSAFE=1; return 1; }
+    return 0
   fi
+  local current pair_rc=0
+  current="$(mktemp "$ENV_TEMP/plugins-current.XXXXXXXX")" || { STATE_GIT_UNSAFE=1; return 1; }
+  ( verify_environment_pair "$current" ) || pair_rc=$?
+  [ "$pair_rc" -eq 0 ] || { STATE_GIT_UNSAFE=1; return 1; }
 }
 read_held_copy() {
   # Bashへ格納する前にNUL等を拒否する。末尾改行も照合し、read失敗を隠さない。
@@ -757,13 +832,35 @@ hold_child_output() {
     CHILD_OUTPUT_HELD=1
   fi
 }
+# 1 つの JSON から複数の値を 1 回の起動で取り出し、全部がそろったときだけ変数へ入れる(一部だけ入れない。
+# ENVIRONMENT_SHA が空のまま進むと照合が見逃される)。$1=JSON 残り=<変数名>=get:<キー>|value:<キー>
+# (get は json-get と同じ検査、value は json-value と同じ出し方)。足りなければ何も入れずに 1 を返し、
+# 足りない最初の欄の番号(1 から)を JSON_FIELDS_BAD に入れる。plan_stop_control と同じ形で受ける
+# (NUL 区切りを $(...) で受けると区切りが消え、mapfile < <(...) だけでは終了コードが取れない)
+json_fields_into() {
+  local json="$1" spec specs=() fields=() fd pid rc=0 i=0
+  shift
+  JSON_FIELDS_BAD=1
+  for spec in "$@"; do specs+=("${spec#*=}"); done
+  exec {fd}< <(printf '%s' "$json" | py json-fields "${specs[@]}")
+  pid=$!
+  mapfile -d '' -u "$fd" -t fields
+  wait "$pid" || rc=$?
+  exec {fd}<&-
+  if [ "$rc" -ne 0 ] || [ "${#fields[@]}" -ne "$#" ]; then
+    JSON_FIELDS_BAD=$(( ${#fields[@]} + 1 ))
+    if [ "$JSON_FIELDS_BAD" -gt "$#" ]; then JSON_FIELDS_BAD="$#"; fi
+    return 1
+  fi
+  for spec in "$@"; do
+    printf -v "${spec%%=*}" '%s' "${fields[$i]}"
+    i=$((i + 1))
+  done
+}
 bind_environment() { # bootstrap の出力だけから保持する。過去の状態から復元しない。
   local receipt="$1"
-  ENVIRONMENT_STATE="$(printf '%s' "$receipt" | py json-get state)"
-  ENVIRONMENT_SHA="$(printf '%s' "$receipt" | py json-get sha256)"
-  TRUSTED_ENV_GUARD="$(printf '%s' "$receipt" | py json-get guard)"
-  ENV_GUARD_SHA="$(printf '%s' "$receipt" | py json-get guard_sha256)"
-  PLUGIN_ROOT="$(printf '%s' "$receipt" | py json-get plugin)"
+  json_fields_into "$receipt" ENVIRONMENT_STATE=get:state ENVIRONMENT_SHA=get:sha256 TRUSTED_ENV_GUARD=get:guard \
+    ENV_GUARD_SHA=get:guard_sha256 PLUGIN_ROOT=get:plugin
   hold_task_text
   hold_child_output
   RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
@@ -792,10 +889,10 @@ component_check() {
     cat "$err" >&2
     die 20 component-policy "有効な定義と固定設定を安全に検査できない"
   fi
-  COMPONENT_SHA="$(printf '%s' "$COMPONENT_POLICY" | py json-get component_sha256)" || die 20 component-policy "定義の保持値が不正"
-  POLICY_SHA="$(printf '%s' "$COMPONENT_POLICY" | py json-get policy_sha256)" || die 20 component-policy "固定設定の保持値が不正"
-  FIXED_POLICY="$(printf '%s' "$COMPONENT_POLICY" | py json-value fixed)" || die 20 component-policy "固定設定を読めない"
-  COMPONENT_RESOLVER="$(printf '%s' "$COMPONENT_POLICY" | py json-value resolver_version)" || die 20 component-policy "名前解決の版を読めない"
+  local field_errors=("定義の保持値が不正" "固定設定の保持値が不正" "固定設定を読めない" "名前解決の版を読めない")
+  json_fields_into "$COMPONENT_POLICY" COMPONENT_SHA=get:component_sha256 POLICY_SHA=get:policy_sha256 \
+    FIXED_POLICY=value:fixed COMPONENT_RESOLVER=value:resolver_version \
+    || die 20 component-policy "${field_errors[$((JSON_FIELDS_BAD - 1))]}"
   HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" \
     "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA" "$FIXED_POLICY")" || die 20 component-policy "hook と固定設定を組み立てられない"
   [ "$ALLOW_CLASSIFIER" -eq 0 ] || args+=(--classifier)
@@ -840,6 +937,35 @@ state_digest() { # $1=parent-held state pathname
     --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")" || return 1
   if [[ ! "$value" =~ ^[0-9a-f]{64}$ ]]; then return 1; fi
   printf '%s\n' "$value"
+}
+
+# 隣り合う 2 つの状態の digest を、1 回の照合と 1 回の loop-state.py の起動で取る。使うのは、次の補助の前に今までどおり
+# 照合がある組だけ(次の操作の前に照合が無い組をまとめると、照合から使用までの窓が広がる)。結果は DIGEST1・DIGEST2
+# (読めなかった方・使えない組は空)。読めなかった方を個別の起動でやり直さない(元に戻された後なら通ってしまい、失敗が成功になる)。
+# 照合の失敗で立てた STATE_GIT_UNSAFE=1 は親のシェルに残る($(...) の中で呼んでいた state_digest より、止まる側に厳しい)。
+# 出力は plan_stop_control と同じ形で受け(末尾の空行も落とさない)、終了コードと実際の行数を厳密に確かめる
+state_digest_pair() { # $1,$2=parent-held state pathname
+  local rc=0 lines=() d1 d2 hex='^[0-9a-f]{64}$' fd pid
+  DIGEST1=""; DIGEST2=""
+  verify_environment || return 1
+  exec {fd}< <("$PY_ABS" "$LOOP_STATE_PY" state-digests --state "$1" --state "$2" \
+    --max-items "$STATE_MAX_ITEMS" --max-bytes "$STATE_MAX_BYTES" \
+    --max-file-bytes "$STATE_MAX_FILE_BYTES" --max-seconds "$STATE_MAX_SECONDS")
+  pid=$!
+  mapfile -t -u "$fd" lines
+  wait "$pid" || rc=$?
+  exec {fd}<&-
+  [ "${#lines[@]}" -eq 2 ] || return 1
+  d1="${lines[0]}"; d2="${lines[1]}"
+  case "$rc" in
+    0) [[ "$d1" =~ $hex ]] && [[ "$d2" =~ $hex ]] || return 1 ;;
+    20) { [[ "$d1" =~ $hex ]] || [ "$d1" = - ]; } && { [[ "$d2" =~ $hex ]] || [ "$d2" = - ]; } \
+          && { [ "$d1" = - ] || [ "$d2" = - ]; } || return 1 ;;
+    *) return 1 ;;
+  esac
+  if [ "$d1" != - ]; then DIGEST1="$d1"; fi
+  if [ "$d2" != - ]; then DIGEST2="$d2"; fi
+  return 0
 }
 
 # 止止ファイルは状態観察の一部であり、任意パスの除外ではない。人の checkout の
@@ -924,7 +1050,8 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
       return 1
     fi
   fi
-  expected_sha="$(state_digest "$expected" || true)"
+  state_digest_pair "$expected" "$verified" || true
+  expected_sha="$DIGEST1"
   if [ -z "$expected_sha" ]; then
     STATE_GIT_UNSAFE=1
     SNAPSHOT_DIFF="差分: 検証済みの期待状態を保持できない"
@@ -932,7 +1059,7 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
   fi
   # The verified source is parent-held.  Check it again after the helper has
   # consumed it, before observing the post-removal repository once.
-  now_sha="$(state_digest "$verified" || true)"
+  now_sha="$DIGEST2"
   if [ -z "$now_sha" ] || [ "$now_sha" != "$verified_sha" ]; then
     STATE_GIT_UNSAFE=1
     SNAPSHOT_DIFF="差分: 検証済みの状態が基準の作成中に書き換わったため最後に照合に通った状態を更新しない"
@@ -942,13 +1069,14 @@ save_last_verified() { # $1=verify済み生state $2=verify時のsha256。照合�
   # expected already incorporates the only permitted parent removal.  Do not
   # pass that removal into snapshot again: it must remain a strict comparison.
   if ! take_snapshot "$observed" - "$expected" 0 1; then return 1; fi
-  observed_sha="$(state_digest "$observed" || true)"
+  state_digest_pair "$observed" "$verified" || true
+  observed_sha="$DIGEST1"
   if [ -z "$observed_sha" ]; then
     STATE_GIT_UNSAFE=1
     SNAPSHOT_DIFF="差分: 最終観察の状態を保持できない"
     return 1
   fi
-  now_sha="$(state_digest "$verified" || true)"
+  now_sha="$DIGEST2"
   if [ -z "$now_sha" ] || [ "$now_sha" != "$verified_sha" ]; then
     STATE_GIT_UNSAFE=1
     SNAPSHOT_DIFF="差分: 検証済みの状態が最終観察中に書き換わったため最後に照合に通った状態を更新しない"
@@ -1657,47 +1785,57 @@ note_skip() { # $1=相対パス $2=理由(同じ組は 1 回だけ報告する)
   NEW_SKIPS+=("$1: $2")
 }
 
-skip_reason() { # $1=worktree $2=ファイル名 → 読み飛ばす理由(無ければ空)
-  local wt="$1" f="$2" p name rel info meta ref r o hit locked_paths=()
+skip_reason() { # $1=worktree $2=ファイル名 → SKIP_REASON=読み飛ばす理由(無ければ空)・SKIP_DATE=本文の作成日(親のシェルで素の文として呼ぶ)
+  local wt="$1" f="$2" p name rel info meta ref r o hit k line locked_paths=()
   p="$wt/$TASK_DIR/$f"
   name="${f#進行中_}"
   name="${name%.md}"
   rel="$(join_rel "$TASK_DIR" "$f")"
+  SKIP_REASON=""
+  SKIP_DATE=""
   info="$(py taskinfo "$p")"
   meta="$(printf '%s\n' "$info" | sed -n 's/^meta=//p')"
-  if [ "$meta" != 1 ]; then printf '無人実行のメタ行が無い'; return 0; fi
-  if ! py d21 "$rel" "$name" 2>"$RUN_DIR/d21.err" >/dev/null; then
-    printf 'パスの文字の制限(loop.md §3)に外れる(%s)' "$(cat "$RUN_DIR/d21.err")"; return 0
-  fi
+  SKIP_DATE="$(printf '%s\n' "$info" | sed -n 's/^date=//p')"
+  if [ "$meta" != 1 ]; then SKIP_REASON='無人実行のメタ行が無い'; return 0; fi
+  # パスの文字の検査(D21)は、select_task が候補ぜんぶを 1 回の起動で済ませた結果を引く
+  line=""
+  for k in "${!D21_FILES[@]}"; do
+    if [ "${D21_FILES[$k]}" = "$f" ]; then line="${D21_LINES[$k]}"; break; fi
+  done
+  case "$line" in
+    ok) : ;;
+    "ng$TAB"*) printf -v SKIP_REASON 'パスの文字の制限(loop.md §3)に外れる(%s)' "${line#"ng$TAB"}"; return 0 ;;
+    *) die 30 internal "パスの文字の検査の結果を引けない: $f" ;;
+  esac
   if ! G -C "$TOP" check-ref-format --branch "task/$name" >/dev/null 2>&1; then
-    printf 'task/%s がブランチ名にならない' "$name"; return 0
+    printf -v SKIP_REASON 'task/%s がブランチ名にならない' "$name"; return 0
   fi
   if G -C "$TOP" show-ref --verify --quiet "refs/heads/task/$name"; then
-    printf '作業ブランチ task/%s がローカルにある' "$name"; return 0
+    printf -v SKIP_REASON '作業ブランチ task/%s がローカルにある' "$name"; return 0
   fi
   r=""
   while IFS= read -r ref; do
     case "$ref" in refs/remotes/*/task/"$name") r="$ref"; break ;; esac
   done <"$RUN_DIR/remote-refs.txt"
   if [ -n "$r" ]; then
-    printf '追跡用の ref %s がある(リモートを別の手段で消したときは `git branch -dr %s`)' "$r" "${r#refs/remotes/}"
+    printf -v SKIP_REASON '追跡用の ref %s がある(リモートを別の手段で消したときは `git branch -dr %s`)' "$r" "${r#refs/remotes/}"
     return 0
   fi
   if [ -n "${REMOTE_TASKS[$name]:-}" ]; then
-    printf '作業ブランチ task/%s が origin にある' "$name"; return 0
+    printf -v SKIP_REASON '作業ブランチ task/%s が origin にある' "$name"; return 0
   fi
   find_locked_worktrees "dev-workflow-loop: $rel" locked_paths
   if [ "${#locked_paths[@]}" -gt 0 ]; then
-    printf '前の周が残した worktree がある(%s)' "$(format_worktree_paths "${locked_paths[@]}")"; return 0
+    printf -v SKIP_REASON '前の周が残した worktree がある(%s)' "$(format_worktree_paths "${locked_paths[@]}")"; return 0
   fi
   if [ -e "$wt/$TASK_DIR/完了_$name.md" ] || [ -L "$wt/$TASK_DIR/完了_$name.md" ] \
      || [ -e "$wt/$TASK_DIR/保留_$name.md" ] || [ -L "$wt/$TASK_DIR/保留_$name.md" ]; then
-    printf '同じ task_dir に 完了_%s.md か 保留_%s.md がある' "$name" "$name"; return 0
+    printf -v SKIP_REASON '同じ task_dir に 完了_%s.md か 保留_%s.md がある' "$name" "$name"; return 0
   fi
   if [ "${#ONLY[@]}" -gt 0 ]; then
     hit=0
     for o in "${ONLY[@]}"; do [ "$o" != "$name" ] || hit=1; done
-    if [ "$hit" -eq 0 ]; then printf -- '--only の外'; return 0; fi
+    if [ "$hit" -eq 0 ]; then printf -v SKIP_REASON -- '--only の外'; return 0; fi
   fi
   return 0
 }
@@ -1720,6 +1858,10 @@ prepare_reviews_dir() { # $1=周の worktree
 SEQ=0
 FIRST_SELECTION=1
 declare -A REMOTE_TASKS=()
+D21_FILES=()     # 選定で通常ファイルだった候補のファイル名と、d21-list の結果の行(同じ添字)
+D21_LINES=()
+SKIP_REASON=""
+SKIP_DATE=""
 
 # 無人ループの前提(loop.md §3 の 2a): 状態ファイル 3 つが周の worktree で ignore されていて、追跡されていない。
 # `.claude/reviews/` を作る前に確かめる。`--no-index` を付けない(付けると追跡済みのファイルも ignore 済みと答える)
@@ -1812,6 +1954,28 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
   G -C "$TOP" for-each-ref --format='%(refname)' refs/remotes/ >"$RUN_DIR/remote-refs.txt"
   SKIPS=()
   NEW_SKIPS=()
+  # パスの文字の検査(D21)は、通常ファイルの候補ぜんぶを 1 回の起動で済ませる(文字列だけの検査で、ファイルは読まない)。
+  # 本文の解析(taskinfo)は、このあと候補ごとに、通常ファイルの確かめの直後に行う
+  D21_FILES=()
+  D21_LINES=()
+  local d21_in=()
+  for p in "$wt/$TASK_DIR"/進行中_*.md; do
+    [ -f "$p" ] && [ ! -L "$p" ] || continue
+    f="${p##*/}"
+    name="${f#進行中_}"
+    name="${name%.md}"
+    D21_FILES+=("$f")
+    d21_in+=("$(join_rel "$TASK_DIR" "$f")" "$name")
+  done
+  if [ "${#D21_FILES[@]}" -gt 0 ]; then
+    rc=0
+    out="$(printf '%s\0' "${d21_in[@]}" | py d21-list)" || rc=$?
+    mapfile -t D21_LINES <<<"$out"
+    [ "$rc" -eq 0 ] && [ "${#D21_LINES[@]}" -eq "${#D21_FILES[@]}" ] || die 30 internal "パスの文字の検査を完了できない(終了コード $rc)"
+    for line in "${D21_LINES[@]}"; do
+      case "$line" in ok|"ng$TAB"*) : ;; *) die 30 internal "パスの文字の検査の出力が不正" ;; esac
+    done
+  fi
   for p in "$wt/$TASK_DIR"/進行中_*.md; do
     [ -e "$p" ] || [ -L "$p" ] || continue   # glob が何にも一致しなかった
     f="${p##*/}"
@@ -1822,7 +1986,8 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
       note_skip "$(join_rel "$TASK_DIR" "$f")" "通常ファイルでない(symlink など)"
       continue
     fi
-    reason="$(skip_reason "$wt" "$f")"
+    skip_reason "$wt" "$f"
+    reason="$SKIP_REASON"
     if [ -n "$reason" ]; then
       note_skip "$(join_rel "$TASK_DIR" "$f")" "$reason"
       case "$reason" in
@@ -1832,7 +1997,7 @@ select_task() { # 選定中の worktree を作り、CANDIDATES を並べる
       esac
       continue
     fi
-    date="$(py taskinfo "$p" | sed -n 's/^date=//p')"
+    date="$SKIP_DATE"
     # 5. 並び: 作成日の古い順 → 同じ日はファイル名順 → 作成日なしは最後にファイル名順(C ロケール)
     # 空の欄を作らない(タブは IFS の空白なので、read で空の欄が詰められる)
     if [ -n "$date" ]; then lines+=("0$TAB$date$TAB$f$TAB$name"); else lines+=("1$TAB-$TAB$f$TAB$name"); fi
@@ -2932,9 +3097,8 @@ verify_environment || die 20 environment "ホスト CLI の実体を控える直
 rc=0
 HOST_IDENTITY="$("$PY_ABS" -I -B "$HOST_CHECK_PY" identity --host "$HOST_BIN_ABS" 2>"$RUN_DIR/host-identity.err")" || rc=$?
 [ "$rc" -eq 0 ] || die 20 host-proof "ホスト CLI の実体を控えられない($(head -c 300 "$RUN_DIR/host-identity.err" | tr '\n' ' '))"
-HOST_EXEC="$(printf '%s' "$HOST_IDENTITY" | py json-get realpath)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
-HOST_SHA="$(printf '%s' "$HOST_IDENTITY" | py json-get sha256)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
-HOST_KIND="$(printf '%s' "$HOST_IDENTITY" | py json-get kind)" || die 20 host-proof "ホスト CLI の実体の値を読めない"
+json_fields_into "$HOST_IDENTITY" HOST_EXEC=get:realpath HOST_SHA=get:sha256 HOST_KIND=get:kind \
+  || die 20 host-proof "ホスト CLI の実体の値を読めない"
 # stat の値は、内容の sha256 まで照らす照合の前に控える(控えた後に変わっていれば、続く照合で止まる)
 HOST_STAT="$(host_stat)" || die 20 host-proof "ホスト CLI の実体の stat を控えられない"
 host_same --hash || die 20 host-proof "ホスト CLI の実体を控える間に変わった"

@@ -7,7 +7,6 @@
 """
 
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -19,6 +18,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import NamedTuple
 from unittest import mock
 
 
@@ -67,34 +67,46 @@ HOST_CLI_QUESTION_GUIDANCE = "delegation-map.md §8"
 HOST_CLI_OTHER_GUIDANCE = "external-runners.md へ移す"
 HOST_CLI_MCP_WORDS = ("claude-in-chrome", "chrome-devtools")
 
-# 言葉の検査が文書ごとに Markdown を解析する時間は、検証器を 1 回流す時間の約半分になる。
-# ValidateTest は検証器を 900 回ほど流し、そのたびに変えていない文書も解析し直す。
-# そこで同じプロセスの中では、同じ検証器のコードが同じ本文と語で解析した結果を使い回す。
-# 解析は入力ごとに必ず 1 回は本物が走る。検査の流れ・ERROR・WARN は使い回さないので、判定は変わらない。
-_WORDING_BODY_CACHE = {}
-_WORDING_BODY_CACHE_LIMIT = 256
+# ValidateTest は検証器を何百回も流し、そのたびに変えていない文書も検査し直す(1 回 0.6〜1.2 秒)。
+# そこで main(file_results=_FILE_RESULTS) に共有の表を渡し、ファイルごとの検査の結果をテストの間で使い回す。
+# 表のキーに検証器のコードの sha256・検査の名前・相対パス・本文の sha256・ほかの入力が入るので、
+# テストが validate.py や本文を書き換えれば別の結果として扱われる。表を渡すのはこの ValidateTest だけで、
+# WordingTest などの直接の呼び出しと表を渡さない main() は使い回さない。
+_FILE_RESULTS = {}
 
 
-def reuse_wording_body(namespace, source):
-    """runpy で読んだ検証器の wording_body を、結果を使い回す形に差し替える。
+class LineCase(NamedTuple):
+    """行に閉じた検査の 1 ケース。`flagged` なら、`needles` のすべてを含む ERROR がその行に出る。"""
 
-    `source` は検証器のコードのバイト列。コードが違えば(テストが validate.py を書き換えたときも)別の結果として扱う。
-    runpy.run_path が返す辞書はコピーなので、関数が実際に引く辞書(__globals__)を差し替える。
-    """
-    module_globals = namespace["main"].__globals__
-    real = module_globals["wording_body"]
-    digest = hashlib.sha256(source).hexdigest()
+    text: str
+    flagged: bool
+    needles: tuple = ()
+    relpath: str = ""  # 空なら ValidateTest.REPLACED_TARGET
 
-    def wording_body(body, md, roles):
-        key = (digest, type(md), body, frozenset(roles))
-        lines = _WORDING_BODY_CACHE.get(key)
-        if lines is None:
-            if len(_WORDING_BODY_CACHE) >= _WORDING_BODY_CACHE_LIMIT:
-                _WORDING_BODY_CACHE.clear()
-            lines = _WORDING_BODY_CACHE[key] = tuple(real(body, md, roles))
-        return list(lines)
 
-    module_globals["wording_body"] = wording_body
+def flagged_line(text, *needles, relpath=""):
+    return LineCase(text, True, needles, relpath)
+
+
+def clean_line(text, relpath=""):
+    return LineCase(text, False, (), relpath)
+
+
+class HostCliCase(NamedTuple):
+    """ホスト CLI 語の 1 ケース。`before` は書く行の前に置く行(免除の印だけの行など)。
+    `needles` は、検出するときにその行の ERROR が含む字面(空なら件数だけを見る)。"""
+
+    text: str
+    detected: bool
+    relpath: str = CHECKED_MD
+    before: tuple = ()
+    needles: tuple = ()
+
+
+# ホスト CLI 語のケースの間に置く区切りの行。空白でも `---` でもない(空白だけだと `codex\s+exec` が
+# ケースの行をまたいで一致し、`---` は Markdown の見出しや区切りになる)。
+HOST_CLI_CASE_SEPARATOR = "・"
+HOST_CLI_HEADER = "# t\n委託(作業を別の AI に任せること)。\n"
 
 
 class ValidateTest(unittest.TestCase):
@@ -131,10 +143,9 @@ class ValidateTest(unittest.TestCase):
             "pathlib.Path.home", return_value=self.home
         ):
             namespace = runpy.run_path(str(script), run_name="validate_under_test")
-        reuse_wording_body(namespace, script.read_bytes())
         output = io.StringIO()
         with contextlib.redirect_stdout(output):
-            status = namespace["main"]()
+            status = namespace["main"](file_results=_FILE_RESULTS)
         return status, namespace, output.getvalue()
 
     def append_to_checked_file(self, text, relpath=CHECKED_PY, prefix="# "):
@@ -268,59 +279,179 @@ class ValidateTest(unittest.TestCase):
         self.write_file(CHECKED_MD, "照合する。\n")
         self.assert_error([f"{CHECKED_MD}:1:", "言い換えの初出", "照合"])
 
-    def test_reused_wording_body_keeps_the_result(self):
-        """解析の結果を使い回しても、終了コード・ERROR・WARN・出力が変わらない(reuse_wording_body の前提)。"""
-        self.write_file(CHECKED_MD, "照合する。\n")
+    # ファイルごとの検査(1 ファイル分の関数)の名前。validate.py の `_reuse_file_result` を通る 5 つ。
+    FILE_CHECK_FUNCTIONS = (
+        "_wording_in", "_replaced_words_in", "_host_cli_words_in", "_number_only_reasons_in", "_delegation_words_in",
+    )
+
+    def run_main_counting(self, file_results=None):
+        """写しの validate.py を読み直して main() を流し、(status, ERRORS, WARNS, stdout) と、
+        1 ファイル分の関数ごとの呼ばれた回数を返す。`file_results` が None なら表を渡さない。
+
+        runpy.run_path が返す辞書はコピーなので、検査が実際に引く辞書(main.__globals__)の関数を差し替える。"""
         script = self.repo / "scripts" / "validate.py"
+        namespace = runpy.run_path(str(script), run_name="validate_under_test")
+        module_globals = namespace["main"].__globals__
+        counts = dict.fromkeys(self.FILE_CHECK_FUNCTIONS, 0)
 
-        def run(reuse):
-            namespace = runpy.run_path(str(script), run_name="validate_under_test")
-            if reuse:
-                reuse_wording_body(namespace, script.read_bytes())
-            output = io.StringIO()
-            with contextlib.redirect_stdout(output):
+        def counting(name, real):
+            def wrapper(*args, **kwargs):
+                counts[name] += 1
+                return real(*args, **kwargs)
+
+            return wrapper
+
+        for name in self.FILE_CHECK_FUNCTIONS:
+            module_globals[name] = counting(name, module_globals[name])
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            if file_results is None:
                 status = namespace["main"]()
-            return status, list(namespace["ERRORS"]), list(namespace["WARNS"]), output.getvalue()
+            else:
+                status = namespace["main"](file_results=file_results)
+        return (status, list(namespace["ERRORS"]), list(namespace["WARNS"]), output.getvalue()), counts
 
-        fresh = run(False)
-        self.assertTrue(any("言い換えの初出" in error for error in fresh[1]), fresh[1])
-        # 1 回目で結果を表に入れ、2 回目で表の結果を使う。
-        for attempt in ("表に入れる", "表から使う"):
-            with self.subTest(attempt=attempt):
-                self.assertEqual(fresh, run(True))
+    def test_reused_file_results_keep_the_result(self):
+        """表を渡しても、終了コード・ERROR・WARN・出力が変わらない。2 回目は 5 つの検査とも表から使う。"""
+        self.write_file(CHECKED_MD, "照合する。\n")  # 言葉の初出
+        self.append_to_checked_file("固定枡の説明", relpath=self.REPLACED_TARGET, prefix="")  # 置き換える語
+        self.append_to_checked_file("無人の周の結果: 保留 — S4", relpath=self.REPLACED_TARGET, prefix="")  # 番号だけの理由
+        self.write_file(f"{SKILLS_REL}/tool-check/references/host-cli-test.md", "# t\n\ngemini を使う\n")  # ホスト CLI 語
+        self.write_file(f"{SKILLS_REL}/tool-check/references/delegation-test.md", "# t\n\nAgentに任せる\n")  # 委託の語
+
+        fresh, _ = self.run_main_counting()
+        for kind in ("言い換えの初出", "置き換える語", "番号だけの理由", "ホスト固有の CLI 語", "委託の語"):
+            self.assertTrue(any(kind in error for error in fresh[1]), (kind, fresh[1]))
+
+        table = {}
+        first, first_counts = self.run_main_counting(table)  # 表に入れる
+        second, second_counts = self.run_main_counting(table)  # 表から使う
+        for name in self.FILE_CHECK_FUNCTIONS:
+            with self.subTest(function=name):
+                # 数える仕組みが効いていること(1 回目は流す)と、2 回目は 1 回も流さないこと
+                self.assertGreaterEqual(first_counts[name], 1, first_counts)
+                self.assertEqual(0, second_counts[name], second_counts)
+        self.assertEqual(fresh, first)
+        self.assertEqual(fresh, second)
+
+        with self.subTest(case="表を入れた実行の中の main()(引数なし)は外の表を使わない"):
+            script = self.repo / "scripts" / "validate.py"
+            namespace = runpy.run_path(str(script), run_name="validate_under_test")
+            module_globals = namespace["main"].__globals__
+            counts = dict.fromkeys(self.FILE_CHECK_FUNCTIONS, 0)
+
+            def counting(name, real):
+                def wrapper(*args, **kwargs):
+                    counts[name] += 1
+                    return real(*args, **kwargs)
+
+                return wrapper
+
+            for name in self.FILE_CHECK_FUNCTIONS:
+                module_globals[name] = counting(name, module_globals[name])
+            outer = dict(table)
+            module_globals["_FILE_RESULTS"] = outer
+            with contextlib.redirect_stdout(io.StringIO()):
+                namespace["main"]()
+            for name in self.FILE_CHECK_FUNCTIONS:
+                self.assertGreaterEqual(counts[name], 1, counts)
+            self.assertEqual(table, outer)  # 入れた表は増えない
+            self.assertIs(outer, module_globals["_FILE_RESULTS"])  # 流した後に元の値へ戻る
+
+    def test_reused_file_results_follow_every_input(self):
+        """表を温めた後に、本文・27 語の表・許す形の一覧・検査器のコードのどれを変えても、使い回しが古い結果を返さない。"""
+        script = "scripts/validate.py"
+        design = "docs/design.md"
+        table = {}
+
+        def check(paths, mutate, needles, prepare=lambda: None):
+            """`paths` のファイルは、確かめた後に元のバイト列へ戻す(次の subTest に前の変更を持ち越さない)。"""
+            originals = {path: (self.repo / path).read_bytes() for path in paths}
+            try:
+                prepare()
+                self.run_main_counting(table)  # 変える前の結果で表を温める
+                warm, _ = self.run_main_counting(table)
+                mutate()
+                shared, _ = self.run_main_counting(table)
+                plain, _ = self.run_main_counting()
+                self.assertEqual(plain, shared)
+                self.assertNotEqual(warm[1:], shared[1:])
+                self.assertTrue(
+                    any(all(needle in error for needle in needles) for error in shared[1]), (needles, shared[1])
+                )
+                return shared
+            finally:
+                for path, data in originals.items():
+                    (self.repo / path).write_bytes(data)
+
+        def replace_text(relpath, old, new):
+            target = self.repo / relpath
+            text = target.read_text(encoding="utf-8")
+            self.assertEqual(1, text.count(old), (relpath, old))
+            target.write_text(text.replace(old, new), encoding="utf-8")
+
+        with self.subTest(input="ファイルの本文"):
+            check(
+                [self.REPLACED_TARGET],
+                lambda: self.append_to_checked_file("固定枡の説明", relpath=self.REPLACED_TARGET, prefix=""),
+                [f"{self.REPLACED_TARGET}:", "置き換える語", "'枡'"],
+            )
+        with self.subTest(input="27 語の表の言い換え"):
+            check(
+                [design],
+                lambda: replace_text(design, "| 照合 | 照らし合わせて確かめること |", "| 照合 | 照らし合わせて確かめる作業 |"),
+                ["言い換えの初出", "'照合'"],
+            )
+        with self.subTest(input="除外一覧の許す形"):
+            def drop_form():
+                path = "scripts/wording-exceptions.json"
+                data = json.loads((self.repo / path).read_text(encoding="utf-8"))
+                entry = next(item for item in data["names"] if item["name"] == "30 縮退")
+                self.assertGreaterEqual(len(entry["forms"]), 2)  # 1 つしか持たない項目から消すと、一覧が不正になる
+                entry["forms"].remove("終了コード 30 は縮退")
+                (self.repo / path).write_text(
+                    json.dumps(data, ensure_ascii=False, indent="\t") + "\n", encoding="utf-8"
+                )
+
+            shared = check(
+                ["scripts/wording-exceptions.json"], drop_form,
+                ["do-task/SKILL.md:", "名前でもコードでもない「縮退」"],
+            )
+            self.assertFalse(any("言葉の除外一覧が不正" in error for error in shared[1]), shared[1])
+        with self.subTest(input="検査器のコード"):
+            # 本文は、先に置き換える語を足して温めた状態のまま変えない(本文を変えると本文の sha256 でキーが変わる)
+            check(
+                [script, self.REPLACED_TARGET],
+                lambda: replace_text(script, '("枡", "枡", "「持ち場」", _DOC)', '("枡", "枡", "「別の持ち場」", _DOC)'),
+                [f"{self.REPLACED_TARGET}:", "置き換える語", "「別の持ち場」"],
+                prepare=lambda: self.append_to_checked_file("固定枡の説明", relpath=self.REPLACED_TARGET, prefix=""),
+            )
 
     # ---------------------------------------------------------- 番号だけの理由
 
     def test_number_only_outcome_reasons_are_errors(self):
-        for number in ("D1", "S4", "U2", "G3", "M4", "H39", "決定 51", "軸 3", "③", "条件 ③", "§12-2"):
-            with self.subTest(number=number):
-                self.assert_appended_line_flagged(
-                    f"無人の周の結果: 失敗扱い — {number}", ["番号だけの理由", repr(number), "番号: 中身"]
-                )
+        self.assert_line_cases([
+            flagged_line(f"無人の周の結果: 失敗扱い — {number}", "番号だけの理由", repr(number), "番号: 中身")
+            for number in ("D1", "S4", "U2", "G3", "M4", "H39", "決定 51", "軸 3", "③", "条件 ③", "§12-2")
+        ])
 
     def test_number_only_hold_reason_is_error(self):
-        for date in ("2026-11-04", "YYYY-MM-DD"):
-            with self.subTest(date=date):
-                self.assert_appended_line_flagged(
-                    f"- **保留**(ship-task・{date}): G3 — 前提を確かめる",
-                    ["番号だけの理由", "'G3'"],
-                )
+        self.assert_line_cases([
+            flagged_line(f"- **保留**(ship-task・{date}): G3 — 前提を確かめる", "番号だけの理由", "'G3'")
+            for date in ("2026-11-04", "YYYY-MM-DD")
+        ])
 
     def test_number_only_outcome_before_punctuation_is_error(self):
-        for suffix in (")", "、", ",", "*", "]"):
-            with self.subTest(suffix=suffix):
-                self.assert_appended_line_flagged(
-                    f"(例: 無人の周の結果: 保留 — S4{suffix}",
-                    ["番号だけの理由", "'S4'"],
-                )
+        self.assert_line_cases([
+            flagged_line(f"(例: 無人の周の結果: 保留 — S4{suffix}", "番号だけの理由", "'S4'")
+            for suffix in (")", "、", ",", "*", "]")
+        ])
 
     def test_number_only_hold_at_end_of_example_is_error(self):
-        for suffix in ("", "`", ")"):
-            with self.subTest(suffix=suffix):
-                self.assert_appended_line_flagged(
-                    f"- **保留**(ship-task・YYYY-MM-DD): S4{suffix}",
-                    ["番号だけの理由", "'S4'"],
-                )
+        self.assert_line_cases([
+            flagged_line(f"- **保留**(ship-task・YYYY-MM-DD): S4{suffix}", "番号だけの理由", "'S4'")
+            for suffix in ("", "`", ")")
+        ])
 
     def test_number_only_reasons_in_document_examples_are_errors(self):
         cases = (
@@ -331,9 +462,7 @@ class ValidateTest(unittest.TestCase):
             (f"{SKILLS_REL}/init-project/templates/AGENTS.md.template",
              "- **保留**(ship-task・YYYY-MM-DD): G1 — 許可を確かめる"),
         )
-        for path, line in cases:
-            with self.subTest(path=path):
-                self.assert_appended_line_flagged(line, ["番号だけの理由"], relpath=path)
+        self.assert_line_cases([flagged_line(line, "番号だけの理由", relpath=path) for path, line in cases])
 
     def test_number_only_reason_in_code_fence_is_error(self):
         target = self.repo / self.REPLACED_TARGET
@@ -344,31 +473,33 @@ class ValidateTest(unittest.TestCase):
         self.assert_error([f"{self.REPLACED_TARGET}:{line_no}:", "番号だけの理由", "'S4'"])
 
     def test_number_only_reason_with_empty_explanation_or_allow_marker_is_error(self):
-        for line in (
-            "無人の周の結果: 保留 — S4: ",
-            "- **保留**(ship-task・YYYY-MM-DD): G1: — 許可を確かめる",
-            "無人の周の結果: 保留 — S4 <!-- validate-allow: 例示 -->",
-        ):
-            with self.subTest(line=line):
-                self.assert_appended_line_flagged(line, ["番号だけの理由"])
+        self.assert_line_cases([
+            flagged_line(line, "番号だけの理由")
+            for line in (
+                "無人の周の結果: 保留 — S4: ",
+                "- **保留**(ship-task・YYYY-MM-DD): G1: — 許可を確かめる",
+                "無人の周の結果: 保留 — S4 <!-- validate-allow: 例示 -->",
+            )
+        ])
 
     def test_explained_reasons_and_reference_numbers_are_allowed(self):
-        for line in (
-            "無人の周の結果: 失敗扱い — G3: 無人の前提を欠く",
-            "`無人の周の結果: 保留 — S4: 承認の後に本文が変わった`",
-            "- **保留**(ship-task・2026-11-04): G1: 許可の要る操作が拒否された — 許可を確かめる",
-            "無人の周の結果: PR — https://example.invalid/pr/1",
-            "無人の周の結果: 保留 — <理由>",
-            "- **保留**(ship-task・YYYY-MM-DD): <停止条件> — <人が次にすること>",
-            "無人の周の結果: 失敗扱い — G3 無人の前提を欠く",
-            "(例: 無人の周の結果: 保留 — S4: 承認の後に本文が変わった)",
-            "`- **保留**(ship-task・YYYY-MM-DD): S4: 承認の後に本文が変わった`",
-            "- **保留**(ship-task・YYYY-MM-DD): S4 承認の後に本文が変わった",
-            "正本は loop.md §4。#107 の H48。手順は D1・S4・G3・M4・決定 51・軸 3・条件 ③・§12-2。",
-            "レビュー判定: APPROVED",
-        ):
-            with self.subTest(line=line):
-                self.assert_appended_line_flagged(line, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(line)
+            for line in (
+                "無人の周の結果: 失敗扱い — G3: 無人の前提を欠く",
+                "`無人の周の結果: 保留 — S4: 承認の後に本文が変わった`",
+                "- **保留**(ship-task・2026-11-04): G1: 許可の要る操作が拒否された — 許可を確かめる",
+                "無人の周の結果: PR — https://example.invalid/pr/1",
+                "無人の周の結果: 保留 — <理由>",
+                "- **保留**(ship-task・YYYY-MM-DD): <停止条件> — <人が次にすること>",
+                "無人の周の結果: 失敗扱い — G3 無人の前提を欠く",
+                "(例: 無人の周の結果: 保留 — S4: 承認の後に本文が変わった)",
+                "`- **保留**(ship-task・YYYY-MM-DD): S4: 承認の後に本文が変わった`",
+                "- **保留**(ship-task・YYYY-MM-DD): S4 承認の後に本文が変わった",
+                "正本は loop.md §4。#107 の H48。手順は D1・S4・G3・M4・決定 51・軸 3・条件 ③・§12-2。",
+                "レビュー判定: APPROVED",
+            )
+        ])
 
     def test_number_only_reasons_outside_documents_are_not_scanned(self):
         line = "無人の周の結果: 保留 — S4"
@@ -453,10 +584,10 @@ class ValidateTest(unittest.TestCase):
         self.assert_error(["置き換える語", "'能力帯'", "性能の段"])
 
     def test_replaced_word_shiyu_and_sudoori_are_errors(self):
-        self.append_to_checked_file("私有の領域", relpath=self.REPLACED_TARGET, prefix="")
-        self.assert_error(["置き換える語", "'私有'", "専用の"])
-        self.append_to_checked_file("検査が素通りする", relpath="docs/design.md", prefix="")
-        self.assert_error(["docs/design.md", "置き換える語", "'素通り'"])
+        self.assert_line_cases([
+            flagged_line("私有の領域", "置き換える語", "'私有'", "専用の"),
+            flagged_line("検査が素通りする", "docs/design.md", "置き換える語", "'素通り'", relpath="docs/design.md"),
+        ])
 
     def assert_appended_line_flagged(self, text, needles, relpath=None, flagged=True):
         """1 行を書き足し、**その行の番号の ERROR**(flagged=False なら ERROR 0)を確かめ、元の中身へ戻す。
@@ -474,65 +605,122 @@ class ValidateTest(unittest.TestCase):
         finally:
             target.write_bytes(original)
 
+    def assert_line_cases(self, cases):
+        """行に閉じた検査(置き換える語・番号だけの理由)の複数ケースを、1 回の検査器の実行で確かめる。
+
+        ファイルごとに、末尾へ 1 ケース 1 行で足す(ケースの行の間は空行で隔てる)。流す前に、書いた後のファイルを
+        読み直し、各ケースの行番号の行がケースの字面と同じことを確かめる(ケースを落とす・上書きする誤りを見つける)。
+        検出するケースは「`<ファイル>:<行>:` と字面のすべてを含む ERROR が 1 つ以上ある」、検出しないケースは
+        「`<ファイル>:<行>:` で始まる ERROR が 1 つも無い」。検出するケースを含む列は status 1、
+        検出しないケースだけの列は status 0・ERRORS が空。足したファイルは、終わりに元のバイト列へ戻す
+        (新しく作ったファイルは消す)。"""
+        groups = {}
+        for case in cases:
+            self.assertNotIn("\n", case.text)
+            groups.setdefault(case.relpath or self.REPLACED_TARGET, []).append(case)
+        originals = {}
+        for relpath in groups:
+            target = self.repo / relpath
+            originals[relpath] = target.read_bytes() if target.exists() else None
+        try:
+            placed = []
+            for relpath, group in groups.items():
+                original = (originals[relpath] or b"").decode("utf-8")
+                # 書き足す前の改行の後ろの空行の次(assert_appended_line_flagged と同じ数え方)
+                first = original.count("\n") + 2
+                self.write_file(relpath, original + "\n" + "\n\n".join(case.text for case in group) + "\n")
+                written = (self.repo / relpath).read_text(encoding="utf-8").split("\n")
+                for index, case in enumerate(group):
+                    line_no = first + 2 * index
+                    self.assertEqual(case.text, written[line_no - 1], (relpath, line_no))
+                    placed.append((case, relpath, line_no))
+            status, errors, _ = self.run_validator()
+            for case, relpath, line_no in placed:
+                with self.subTest(relpath=relpath, line=line_no, text=case.text):
+                    prefix = f"{relpath}:{line_no}:"
+                    mine = [error for error in errors if error.startswith(prefix)]
+                    if case.flagged:
+                        self.assertTrue(any(all(n in error for n in case.needles) for error in mine), mine)
+                    else:
+                        self.assertEqual([], [error for error in errors if error.startswith(prefix)])
+            if any(case.flagged for case in cases):
+                self.assertEqual(1, status, errors)
+            else:
+                self.assertEqual(0, status, errors)
+                self.assertEqual([], errors)
+        finally:
+            for relpath, original in originals.items():
+                target = self.repo / relpath
+                if original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_bytes(original)
+
     def test_replaced_word_fusagu_conjugations_are_errors(self):
-        for form in ("塞ぐ", "塞がない", "塞ぎます", "塞ぎ、", "塞いだ", "塞げる", "塞ごう"):
-            with self.subTest(form=form):
-                self.assert_appended_line_flagged(f"経路を{form}", ["置き換える語", "塞ぐ", "防ぐ"])
+        self.assert_line_cases([
+            flagged_line(f"経路を{form}", "置き換える語", "塞ぐ", "防ぐ")
+            for form in ("塞ぐ", "塞がない", "塞ぎます", "塞ぎ、", "塞いだ", "塞げる", "塞ごう")
+        ])
 
     def test_replaced_word_fusagu_after_kanji_is_not_flagged(self):
-        for word in ("閉塞が起きる", "要塞がある", "梗塞が", "閉塞げ", "閉塞ぎ", "閉塞いだ", "閉塞ごう", "閉塞ぐ"):
-            with self.subTest(word=word):
-                self.assert_appended_line_flagged(f"{word}の説明", [], flagged=False)
+        self.assert_line_cases([
+            clean_line(f"{word}の説明")
+            for word in ("閉塞が起きる", "要塞がある", "梗塞が", "閉塞げ", "閉塞ぎ", "閉塞いだ", "閉塞ごう", "閉塞ぐ")
+        ])
 
     def test_replaced_word_git_deguchi_is_error(self):
-        for text in ("git 出口の規律", "git の出口は ship-task", "Git 出口", "GIT の出口", "git出口", "gitの出口", "git  出口", "Git　出口", "git の 出口", "git　の　出口"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'git 出口'", "commit・push・PR"])
+        self.assert_line_cases([
+            flagged_line(text, "置き換える語", "'git 出口'", "commit・push・PR")
+            for text in ("git 出口の規律", "git の出口は ship-task", "Git 出口", "GIT の出口", "git出口", "gitの出口", "git  出口", "Git　出口", "git の 出口", "git　の　出口")
+        ])
 
     def test_plain_deguchi_alone_is_not_flagged(self):
         self.assert_appended_line_flagged("非常口と出口の案内を書く", [], flagged=False)
 
     def test_replaced_word_utsushi_forms_are_errors(self):
-        for text in ("一時的な写し", "写しを作る", "行を写す", "節は写さない", "写した先", "写して使う",
-                     "依頼文へ写せる", "写そうとする", "汎用知識の書き写し", "内容を複写しない", "複写を採らない",
-                     "丸写しする", "全文写しを渡す", "筆写する"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'写し(", "コピー"])
-        self.assert_appended_line_flagged("わざと壊した写しで", ["'写し("], relpath="docs/design.md")
+        texts = ("一時的な写し", "写しを作る", "行を写す", "節は写さない", "写した先", "写して使う",
+                 "依頼文へ写せる", "写そうとする", "汎用知識の書き写し", "内容を複写しない", "複写を採らない",
+                 "丸写しする", "全文写しを渡す", "筆写する")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", "'写し(", "コピー") for text in texts]
+            + [flagged_line("わざと壊した写しで", "'写し(", relpath="docs/design.md")]
+        )
 
     def test_replaced_word_utsushi_lookalikes_are_not_flagged(self):
         # 決まった漢字が前に付く語(描写・転写・模写・映写・試写・接写・活写・投写・連写・盗写・大写しなど)と、
         # 写真・写像・写る は探さない。
         # 前に漢字が付く語は「〜写す」「〜写し」などの形だけを探すので、名詞の「筆写」も探さない
-        for text in ("現状を描写する", "転写した", "模写する", "映写する", "試写する", "接写する",
-                     "活写する", "投写する", "連写する", "盗写する", "大写しにする",
-                     "写真を撮る", "写像を定義する", "記録に写りうる", "筆写の手間"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(text)
+            for text in ("現状を描写する", "転写した", "模写する", "映写する", "試写する", "接写する",
+                         "活写する", "投写する", "連写する", "盗写する", "大写しにする",
+                         "写真を撮る", "写像を定義する", "記録に写りうる", "筆写の手間")
+        ])
 
     def test_replaced_word_atesaki_is_error(self):
-        for text in ("宛先として識別する", "宛先が失われる", "`ssh -G <宛先>`", "宛て先の名前"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'宛先'", "送る相手"])
-        self.assert_appended_line_flagged("宛先識別", ["'宛先'"], relpath="docs/design.md")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", "'宛先'", "送る相手")
+             for text in ("宛先として識別する", "宛先が失われる", "`ssh -G <宛先>`", "宛て先の名前")]
+            + [flagged_line("宛先識別", "'宛先'", relpath="docs/design.md")]
+        )
 
     def test_replaced_word_atesaki_lookalikes_are_not_flagged(self):
-        for text in ("宛名を書く", "手紙を宛てる", "送り先と接続先"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([clean_line(text) for text in ("宛名を書く", "手紙を宛てる", "送り先と接続先")])
 
     def test_replaced_word_maeoki_is_error(self):
-        for text in ("Git の共通安全前置き", "safe Git 前置きを付ける", "`git -C <dir> <前置き> ls-files`",
-                     "前置きの mount", "予約語の前置き", "素朴な前置き比較"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'前置き'", "安全用のオプション"])
-        self.assert_appended_line_flagged("公開経路の安全前置き", ["'前置き'"], relpath="docs/design.md")
+        texts = ("Git の共通安全前置き", "safe Git 前置きを付ける", "`git -C <dir> <前置き> ls-files`",
+                 "前置きの mount", "予約語の前置き", "素朴な前置き比較")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", "'前置き'", "安全用のオプション") for text in texts]
+            + [flagged_line("公開経路の安全前置き", "'前置き'", relpath="docs/design.md")]
+        )
 
     def test_replaced_word_maeoki_lookalikes_are_not_flagged(self):
         # 「以前置き…」と、後ろが「置き換え」「置き場」になる形と、「前置詞」「前置される」は探さない
-        for text in ("以前置きました", "以前置き換えた", "直前置き場に置く", "事前置き換えの手順", "前置詞", "空白だけが前置される位置"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(text)
+            for text in ("以前置きました", "以前置き換えた", "直前置き場に置く", "事前置き換えの手順", "前置詞", "空白だけが前置される位置")
+        ])
 
     def test_replaced_words_of_316_are_errors(self):
         # #316: やり取りの範囲の 3 つの環境の名前と、その判定・結果の行
@@ -546,34 +734,37 @@ class ValidateTest(unittest.TestCase):
             ("完了報告の最後に結末の行を書く", "'結末の行'", "結果の行"),
             ("失敗(結末の行が無い)", "'結末の行'", "無人の周の結果"),
         )
-        for text, word, guidance in cases:
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
-        self.assert_appended_line_flagged("17. **実行環境の段階判定と縮退プロトコル**", ["'段階判定・実行段階'"], relpath="docs/design.md")
-        self.assert_appended_line_flagged("    - **フル**(双方向の委託が可能な段階)。標準段階と同じ", ["'標準段階'"], relpath="docs/design.md")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", word, guidance) for text, word, guidance in cases]
+            + [
+                flagged_line("17. **実行環境の段階判定と縮退プロトコル**", "'段階判定・実行段階'", relpath="docs/design.md"),
+                flagged_line("    - **フル**(双方向の委託が可能な段階)。標準段階と同じ", "'標準段階'", relpath="docs/design.md"),
+            ]
+        )
 
     def test_replaced_words_of_316_list_and_bold_names_are_errors(self):
         # #316: 3 つの環境の古い名前の並び(「フル / 標準 / 最小」など)と太字の名前
-        list_needles = ["置き換える語", "'フル / 標準 / 最小(並び)'", "双方向でやり取りできる環境"]
-        bold_needles = ["置き換える語", "'**フル**・**標準**・**最小**(太字の名前)'", "一方向だけの環境"]
-        for text in ("フル / 標準 / 最小 のどれで走るか", "実行形態: {フル / 標準 / 最小(段階を下げたとき)}",
-                     "フル/標準", "標準・最小の環境", "標準／最小", "フル・最小"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, list_needles)
-        for text in ("    - **フル**(双方向の委託が可能な段階): ", "- **標準**: 委託は一方向", "**最小**(サブエージェント機構なし)"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, bold_needles)
-        self.assert_appended_line_flagged("    - **標準**(一方向の委託のみ)", ["'**フル**・**標準**・**最小**(太字の名前)'"],
-                                          relpath="docs/design.md")
+        list_needles = ("置き換える語", "'フル / 標準 / 最小(並び)'", "双方向でやり取りできる環境")
+        bold_needles = ("置き換える語", "'**フル**・**標準**・**最小**(太字の名前)'", "一方向だけの環境")
+        list_texts = ("フル / 標準 / 最小 のどれで走るか", "実行形態: {フル / 標準 / 最小(段階を下げたとき)}",
+                      "フル/標準", "標準・最小の環境", "標準／最小", "フル・最小")
+        bold_texts = ("    - **フル**(双方向の委託が可能な段階): ", "- **標準**: 委託は一方向", "**最小**(サブエージェント機構なし)")
+        self.assert_line_cases(
+            [flagged_line(text, *list_needles) for text in list_texts]
+            + [flagged_line(text, *bold_needles) for text in bold_texts]
+            + [flagged_line("    - **標準**(一方向の委託のみ)", "'**フル**・**標準**・**最小**(太字の名前)'",
+                            relpath="docs/design.md")]
+        )
 
     def test_replaced_words_of_316_list_and_bold_lookalikes_are_not_flagged(self):
         # 区切りの無い「標準」・ほかの意味の並び・太字の中のほかの語は探さない
-        for text in ("標準出力に出す", "標準の性能の段", "最上位 / 上位 / 標準", "報告調 / 標準 / プロジェクトの指示ファイルに口調を入れない",
-                     "標準・軽量のどちらで実行したか", "標準・導入 bash の両方", "{quick | 標準 | area:{名} | deep}",
-                     "モード: {フル / --quick / --layer=X}", "口調の型(標準・報告調)", "16. **図の標準**", "**標準ロジック**",
-                     "**最小構成**", "フルパス", "最小 / 最大"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(text)
+            for text in ("標準出力に出す", "標準の性能の段", "最上位 / 上位 / 標準", "報告調 / 標準 / プロジェクトの指示ファイルに口調を入れない",
+                         "標準・軽量のどちらで実行したか", "標準・導入 bash の両方", "{quick | 標準 | area:{名} | deep}",
+                         "モード: {フル / --quick / --layer=X}", "口調の型(標準・報告調)", "16. **図の標準**", "**標準ロジック**",
+                         "**最小構成**", "フルパス", "最小 / 最大")
+        ])
 
     def test_replaced_words_of_318_are_errors(self):
         # #318: 置き換える語 4 語(名前・プレースホルダも探す)
@@ -585,20 +776,21 @@ class ValidateTest(unittest.TestCase):
             ("`<対話点番号で始まる理由>`", "'対話点'", "人に確かめる場面の番号"),
             ("停止ではなく報告点であり", "'報告点'", "判断を仰ぐ点"),
         )
-        for text, word, guidance in cases:
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
-        self.assert_appended_line_flagged("update-doc の報告点など", ["'報告点'"], relpath="docs/design.md")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", word, guidance) for text, word, guidance in cases]
+            + [flagged_line("update-doc の報告点など", "'報告点'", relpath="docs/design.md")]
+        )
 
     def test_replaced_words_of_316_318_lookalikes_are_not_flagged(self):
         # 「段階」だけ・「結末」だけ(結末の値・`- 結末: …` の行)と、新しい語は探さない
-        for text in ("段階を下げて続ける", "使えるのに下の段階で回さない", "実行の段階で決める", "段階的に実施", "第2段階で照合",
-                     "要求がまだ調査段階", "スコープ縮小を設計段階で殺す", "結末: `PR`", "- 結末: `縮退` — x", "結末の値",
-                     "結果の行を書く", "止める印を置く", "`--expect=<控える値>`", "人に確かめる場面の番号", "判断を仰ぐ点",
-                     "双方向でやり取りできる環境", "一方向だけの環境", "別の AI を使えない環境", "やり取りの範囲の判定",
-                     "フル監査", "最上位 / 上位 / 標準", "最小構成", "報告の点数", "対話の点"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(text)
+            for text in ("段階を下げて続ける", "使えるのに下の段階で回さない", "実行の段階で決める", "段階的に実施", "第2段階で照合",
+                         "要求がまだ調査段階", "スコープ縮小を設計段階で殺す", "結末: `PR`", "- 結末: `縮退` — x", "結末の値",
+                         "結果の行を書く", "止める印を置く", "`--expect=<控える値>`", "人に確かめる場面の番号", "判断を仰ぐ点",
+                         "双方向でやり取りできる環境", "一方向だけの環境", "別の AI を使えない環境", "やり取りの範囲の判定",
+                         "フル監査", "最上位 / 上位 / 標準", "最小構成", "報告の点数", "対話の点")
+        ])
 
     def test_replaced_word_okikaeru_go_definition_line_in_design_is_exempt(self):
         # 「置き換える語」の定義の行は、その行の 4 語(守る値・対話点・報告点・止めの印)を除く
@@ -645,32 +837,36 @@ class ValidateTest(unittest.TestCase):
 
     def test_replaced_word_okikaeru_go_prefix_elsewhere_is_error(self):
         # 行頭でない・字下げした・skill の文書の同じ字面は除かない
-        for relpath, text in (
-            ("docs/design.md", "  - **置き換える語**: 守る値"),
-            ("docs/design.md", "注: - **置き換える語**: 守る値"),
-            (self.REPLACED_TARGET, "- **置き換える語**: 守る値"),
-        ):
-            with self.subTest(relpath=relpath, text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'守る値'"], relpath=relpath)
+        self.assert_line_cases([
+            flagged_line(text, "置き換える語", "'守る値'", relpath=relpath)
+            for relpath, text in (
+                ("docs/design.md", "  - **置き換える語**: 守る値"),
+                ("docs/design.md", "注: - **置き換える語**: 守る値"),
+                (self.REPLACED_TARGET, "- **置き換える語**: 守る値"),
+            )
+        ])
 
     def test_replaced_word_silent_is_error(self):
         # #317: 「サイレント」(規則の名前・太字の項目名の中も探す)
-        for text in ("8. **報告(サイレント縮退禁止)**: どちらの担い手で実装したか", "7. **サイレントスキップ禁止**。",
-                     "明記した(サイレントスキップしていない)", "(サイレント切り捨て禁止)", "(サイレント無視禁止。design §7-2)",
-                     "サイレント続行も、無意味な確認も避ける", "引き継ぐ(サイレント禁止)", "サイレントに内蔵へ切り替える"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", "'サイレント'", "黙って"])
-        self.assert_appended_line_flagged("理由を報告に明記する(サイレント縮退禁止)", ["'サイレント'", "知らせずに"],
-                                          relpath="docs/design.md")
-        self.assert_appended_line_flagged("- [ ] 部分実施を報告に明記した(サイレントスキップ禁止)", ["'サイレント'"],
-                                          relpath="plugins/dev-workflow/skills/create-task/SKILL.md")
+        texts = ("8. **報告(サイレント縮退禁止)**: どちらの担い手で実装したか", "7. **サイレントスキップ禁止**。",
+                 "明記した(サイレントスキップしていない)", "(サイレント切り捨て禁止)", "(サイレント無視禁止。design §7-2)",
+                 "サイレント続行も、無意味な確認も避ける", "引き継ぐ(サイレント禁止)", "サイレントに内蔵へ切り替える")
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", "'サイレント'", "黙って") for text in texts]
+            + [
+                flagged_line("理由を報告に明記する(サイレント縮退禁止)", "'サイレント'", "知らせずに", relpath="docs/design.md"),
+                flagged_line("- [ ] 部分実施を報告に明記した(サイレントスキップ禁止)", "'サイレント'",
+                             relpath="plugins/dev-workflow/skills/create-task/SKILL.md"),
+            ]
+        )
 
     def test_replaced_word_silent_lookalikes_are_not_flagged(self):
         # 新しい言い方と、「サイレン」・コマンドの英字のフラグは探さない
-        for text in ("黙って内蔵に切り替えない", "黙って代わりの手段に切り替えない", "黙って飛ばさない", "黙って切り捨てない",
-                     "黙って無視しない", "知らせずに続ける", "黙って生成をやめない", "サイレンが鳴る", "`curl --silent`"):
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, [], flagged=False)
+        self.assert_line_cases([
+            clean_line(text)
+            for text in ("黙って内蔵に切り替えない", "黙って代わりの手段に切り替えない", "黙って飛ばさない", "黙って切り捨てない",
+                         "黙って無視しない", "知らせずに続ける", "黙って生成をやめない", "サイレンが鳴る", "`curl --silent`")
+        ])
 
     def test_replaced_word_silent_definition_line_in_design_is_exempt(self):
         # 「文書の中で置き換える語」の定義の行は、その行の組の語(サイレントを含む)を除く
@@ -701,13 +897,13 @@ class ValidateTest(unittest.TestCase):
             ("§5 の記述を追随させる", "'追随'", "合わせる"),
             ("空の要件定義書を起票する", "'起票'", "書き起こす"),
         )
-        for text, word, guidance in cases:
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
-        self.assert_appended_line_flagged("Linux / 2.1.289 の認証済み試験で", ["'試験'"], relpath="docs/design.md")
-        self.assert_appended_line_flagged(
-            "> **直読みできない環境で使うとき**", ["'直読み'"],
-            relpath="plugins/dev-workflow/skills/init-project/templates/AGENTS.md.template",
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", word, guidance) for text, word, guidance in cases]
+            + [
+                flagged_line("Linux / 2.1.289 の認証済み試験で", "'試験'", relpath="docs/design.md"),
+                flagged_line("> **直読みできない環境で使うとき**", "'直読み'",
+                             relpath="plugins/dev-workflow/skills/init-project/templates/AGENTS.md.template"),
+            ]
         )
 
     def test_replaced_words_of_333_lookalikes_are_not_flagged(self):
@@ -803,14 +999,14 @@ class ValidateTest(unittest.TestCase):
             ("隔離なしの陽性の対照で確かめる", "陽性対照・陰性対照・正常対照", "比べるための起動"),
             ("攻撃と正常の対照を検証する", "陽性対照・陰性対照・正常対照", "止めてはいけない正常な例"),
         )
-        for text, word, guidance in cases:
-            with self.subTest(text=text):
-                self.assert_appended_line_flagged(text, ["置き換える語", word, guidance])
-        self.assert_appended_line_flagged("これが汎用性の担保。", ["'担保'"], relpath="docs/design.md")
-        self.assert_appended_line_flagged("探索を広げず、諦める側に倒す", ["倒す・倒れる"], relpath="docs/design.md")
-        self.assert_appended_line_flagged(
-            "# 設定の読込先", ["'読込・書込'"],
-            relpath="plugins/dev-workflow/skills/init-project/templates/project-profile.yml.template",
+        self.assert_line_cases(
+            [flagged_line(text, "置き換える語", word, guidance) for text, word, guidance in cases]
+            + [
+                flagged_line("これが汎用性の担保。", "'担保'", relpath="docs/design.md"),
+                flagged_line("探索を広げず、諦める側に倒す", "倒す・倒れる", relpath="docs/design.md"),
+                flagged_line("# 設定の読込先", "'読込・書込'",
+                             relpath="plugins/dev-workflow/skills/init-project/templates/project-profile.yml.template"),
+            ]
         )
 
     def test_replaced_words_of_337_lookalikes_are_not_flagged(self):
@@ -1333,55 +1529,59 @@ class ValidateTest(unittest.TestCase):
             ("N4", "x-codex-rescue-y", False),
             ("P4", "chrome-devtools-mcp", True),
         )
-        for case, text, detected in cases:
-            with self.subTest(case=case, text=text):
-                self.assert_host_cli_result(text, detected)
+        self.assert_host_cli_cases([HostCliCase(text, detected) for _, text, detected in cases])
 
     def test_host_cli_all_words_and_boundaries(self):
+        cases = []
         for word in HOST_CLI_BOUNDED_WORDS + HOST_CLI_MCP_WORDS:
-            cases = (
+            for text in (
                 word, word[0].upper() + word[1:], f"設定は{word}で", f"{word}で", f"設定は{word}",
                 f" {word} ", f"、{word}。", f"'{word}'", f'"{word}"',
                 f"/{word}/", f".{word}.", f"@{word}@",
-            )
-            for text in cases:
-                with self.subTest(word=word, text=text):
-                    self.assert_host_cli_result(text, True)
+            ):
+                cases.append(HostCliCase(text, True))
+        self.assert_host_cli_cases(cases)
 
     def test_host_cli_ascii_adjacent_left_is_not_detected(self):
-        for word in HOST_CLI_BOUNDED_WORDS:
-            for adjacent in ("x", "Z", "2", "_", "-"):
-                with self.subTest(word=word, adjacent=adjacent):
-                    self.assert_host_cli_result(adjacent + word, False)
+        self.assert_host_cli_cases([
+            HostCliCase(adjacent + word, False)
+            for word in HOST_CLI_BOUNDED_WORDS
+            for adjacent in ("x", "Z", "2", "_", "-")
+        ])
 
     def test_host_cli_ascii_adjacent_right_is_not_detected(self):
-        for word in HOST_CLI_BOUNDED_WORDS:
-            for adjacent in ("x", "Z", "2", "_", "-"):
-                with self.subTest(word=word, adjacent=adjacent):
-                    self.assert_host_cli_result(word + adjacent, False)
+        self.assert_host_cli_cases([
+            HostCliCase(word + adjacent, False)
+            for word in HOST_CLI_BOUNDED_WORDS
+            for adjacent in ("x", "Z", "2", "_", "-")
+        ])
 
     def test_host_cli_non_ascii_adjacent_is_detected(self):
-        # IGNORECASE の [A-Z] は İ / ı / ſ / K にも一致するが、境界は ASCII だけ。
-        for word in HOST_CLI_BOUNDED_WORDS:
-            for adjacent in ("に", "é", "İ", "ı", "ſ", "K"):
-                for text in (adjacent + word, word + adjacent):
-                    with self.subTest(word=word, text=text):
-                        self.assert_host_cli_result(text, True)
+        # IGNORECASE の [A-Z] は İ / ı / ſ / K にも一致するが、境界は ASCII だけ。
+        self.assert_host_cli_cases([
+            HostCliCase(text, True)
+            for word in HOST_CLI_BOUNDED_WORDS
+            for adjacent in ("に", "é", "İ", "ı", "ſ", "\u212a")  # 最後はケルビン記号
+            for text in (adjacent + word, word + adjacent)
+        ])
 
     def test_host_cli_mcp_derivatives_are_detected(self):
-        for text in (
+        derivatives = (
             "chrome-devtools-mcp@latest", "CHROME-DEVTOOLS-MCPに接続",
             "claude-in-chrome-helper", "my-chrome-devtools-wrapper",
-        ):
-            with self.subTest(text=text):
-                self.assert_host_cli_result(text, True)
+        )
         # MCP は左右とも境界なし。片側だけの派生も独立に固定する。
-        for word in HOST_CLI_MCP_WORDS:
-            for adjacent in ("x", "2", "_", "-"):
-                for text in (adjacent + word, word + adjacent):
-                    with self.subTest(text=text):
-                        hits = self.assert_host_cli_result(text, True)
-                        self.assertIn(repr(word), hits[0])
+        sided = [
+            (word, text)
+            for word in HOST_CLI_MCP_WORDS
+            for adjacent in ("x", "2", "_", "-")
+            for text in (adjacent + word, word + adjacent)
+        ]
+        cases = [HostCliCase(text, True) for text in derivatives] + [HostCliCase(text, True) for _, text in sided]
+        result = self.assert_host_cli_cases(cases)
+        for (word, text), hits in zip(sided, list(result.values())[len(derivatives):]):
+            with self.subTest(text=text):
+                self.assertIn(repr(word), hits[0])
 
     def test_host_cli_commands_keep_unicode_whitespace(self):
         for command in ("exec", "review", "mcp"):
@@ -1395,24 +1595,24 @@ class ValidateTest(unittest.TestCase):
         self.assert_host_cli_result(f"codex\nexecで委託 {marker}", True)
 
     def test_host_cli_marker_reason_and_mcp_derivatives(self):
+        reason = "<!-- validate-allow: 生成する設定の識別子 -->"
+        cases = []
         for word in ("gemini", "chrome-devtools-mcp", "claude-in-chrome-helper"):
             for marker, detected in (
-                ("<!-- validate-allow: 生成する設定の識別子 -->", False),
+                (reason, False),
                 ("<!-- validate-allow -->", True),
                 ("<!-- validate-allow: -->", True),
                 ("<!-- validate-allow:   -->", True),
             ):
-                with self.subTest(word=word, marker=marker):
-                    self.assert_host_cli_result(f"{word} {marker}", detected)
-            with self.subTest(word=word, marker="別行"):
-                self.assert_host_cli_result(
-                    f"<!-- validate-allow: 生成する設定の識別子 -->\n{word}", True, line=4
-                )
+                cases.append(HostCliCase(f"{word} {marker}", detected))
+            # 免除の印だけの行の次の行に語を置く。語の行で検出される
+            cases.append(HostCliCase(word, True, before=(reason,)))
+        self.assert_host_cli_cases(cases)
 
     def test_host_cli_product_names_and_config_path_are_not_detected(self):
-        for text in ("Codex", "Cursor", "Claude Code", "read-only", ".codex/config.toml"):
-            with self.subTest(text=text):
-                self.assert_host_cli_result(text, False)
+        self.assert_host_cli_cases([
+            HostCliCase(text, False) for text in ("Codex", "Cursor", "Claude Code", "read-only", ".codex/config.toml")
+        ])
 
     def test_host_cli_scan_scope(self):
         cases = (
@@ -1428,18 +1628,76 @@ class ValidateTest(unittest.TestCase):
             ("do-task/references/delegation-map.md", False),
             ("do-task/references/external-runners.md", False),
         )
-        for path, detected in cases:
-            with self.subTest(path=path):
-                relpath = f"{SKILLS_REL}/{path}"
+        self.assert_host_cli_cases([HostCliCase("gemini", detected, f"{SKILLS_REL}/{path}") for path, detected in cases])
+
+    def assert_host_cli_cases(self, cases):
+        """ホスト CLI 語の複数ケースを、1 回の検査器の実行で確かめる。
+
+        ファイルごとに、既存の文書なら元の本文の後ろへ、無ければ見出しと説明の 2 行(`# t`・`委託(…)。`。
+        用例の「委託」は先に説明する)の後ろへ、1 ケースずつ置く。ケースの間は空白でない区切りの行で隔てる。
+        流す前に、書いた後のファイルを読み直し、各ケースの行番号の行がケースの字面と同じことを確かめる。
+        1 回だけ流して次を見る: ERRORS がすべてホスト CLI 語である / ケースの行ごとの件数が、検出するなら 1・
+        しないなら 0 / ホスト CLI 語の ERROR の総数が、検出するケースの数と同じ(ケースの行の外に当たりが無い)/
+        検出するケースが 1 つでもあれば status 1、無ければ 0。
+
+        返り値は「(ファイル, ケースの行の番号) → その行の ERROR の一覧」の辞書で、渡されたケースの順に並ぶ
+        (ファイルが入り混じる列でも `zip(cases, result.items())` で組にできる)。ERROR は語の順に並び、行の順ではないので、
+        `hits[0]` ではなく、必ずケースの行の一覧に対して確かめる。"""
+        groups = {}
+        for position, case in enumerate(cases):
+            self.assertNotIn("\n", case.text)
+            groups.setdefault(case.relpath, []).append((position, case))
+        originals = {}
+        for relpath in groups:
+            target = self.repo / relpath
+            originals[relpath] = target.read_bytes() if target.exists() else None
+        try:
+            placed = []
+            for relpath, group in groups.items():
+                lines = []
+                numbers = []
+                for index, (_, case) in enumerate(group):
+                    if index:
+                        lines.append(HOST_CLI_CASE_SEPARATOR)
+                    lines.extend(case.before)
+                    numbers.append(len(lines))
+                    lines.append(case.text)
+                if originals[relpath] is None:
+                    first = HOST_CLI_HEADER.count("\n") + 1
+                    content = HOST_CLI_HEADER + "\n".join(lines) + "\n"
+                else:
+                    original = originals[relpath].decode("utf-8")
+                    first = original.count("\n") + 2
+                    content = original + "\n" + "\n".join(lines) + "\n"
+                self.write_file(relpath, content)
+                written = (self.repo / relpath).read_text(encoding="utf-8").split("\n")
+                for (position, case), offset in zip(group, numbers):
+                    line_no = first + offset
+                    self.assertEqual(case.text, written[line_no - 1], (relpath, line_no))
+                    placed.append((position, case, relpath, line_no))
+            placed.sort(key=lambda item: item[0])  # 返り値を、ファイルごとの並びでなく渡されたケースの順にする
+            status, errors, _ = self.run_validator()
+            hits = [error for error in errors if "ホスト固有の CLI 語" in error]
+            self.assertEqual(hits, errors, errors)
+            result = {}
+            for _, case, relpath, line_no in placed:
+                mine = [error for error in errors if error.startswith(f"{relpath}:{line_no}:")]
+                result[(relpath, line_no)] = mine
+                with self.subTest(relpath=relpath, line=line_no, text=case.text):
+                    self.assertEqual(int(case.detected), len(mine), mine)
+                    for error in mine:
+                        for needle in case.needles:
+                            self.assertIn(needle, error)
+            self.assertEqual(sum(case.detected for case in cases), len(hits), errors)
+            self.assertEqual(int(any(case.detected for case in cases)), status, errors)
+            return result
+        finally:
+            for relpath, original in originals.items():
                 target = self.repo / relpath
-                original = target.read_bytes() if target.exists() else None
-                try:
-                    self.assert_host_cli_result("gemini", detected, relpath=relpath, keep_body=original is not None)
-                finally:
-                    if original is None:
-                        target.unlink()
-                    else:
-                        target.write_bytes(original)
+                if original is None:
+                    target.unlink(missing_ok=True)
+                else:
+                    target.write_bytes(original)
 
     def assert_host_cli_question_guidance(self, hit):
         """質問の道具名と引数名の ERROR は、案内が解決表の質問の節を指し、ほかの語の案内を持たない。"""
@@ -1447,48 +1705,50 @@ class ValidateTest(unittest.TestCase):
         self.assertNotIn(HOST_CLI_OTHER_GUIDANCE, hit)
 
     def test_host_cli_question_guidance(self):
-        for word in HOST_CLI_QUESTION_WORDS:
-            with self.subTest(word=word):
-                hits = self.assert_host_cli_result(word, True)
-                # 文の頭の字面は、ほかの語と同じ。括弧の中の案内だけが違う
-                self.assertTrue(
-                    hits[0].startswith(f"{CHECKED_MD}:3: ホスト固有の CLI 語 -> {word!r}("), hits
-                )
-                self.assert_host_cli_question_guidance(hits[0])
         # 対照: ほかの語の案内は external-runners.md を指し、解決表の質問の節を指さない
-        with self.subTest(word="gemini"):
-            hits = self.assert_host_cli_result("gemini", True)
-            self.assertIn(HOST_CLI_OTHER_GUIDANCE, hits[0])
-            self.assertNotIn("§8", hits[0])
+        words = HOST_CLI_QUESTION_WORDS + ("gemini",)
+        result = self.assert_host_cli_cases([HostCliCase(word, True) for word in words])
+        for word, ((relpath, line_no), hits) in zip(words, result.items()):
+            with self.subTest(word=word):
+                self.assertEqual(1, len(hits), hits)
+                if word == "gemini":
+                    self.assertIn(HOST_CLI_OTHER_GUIDANCE, hits[0])
+                    self.assertNotIn("§8", hits[0])
+                else:
+                    # 文の頭の字面は、ほかの語と同じ。括弧の中の案内だけが違う
+                    self.assertTrue(hits[0].startswith(f"{relpath}:{line_no}: ホスト固有の CLI 語 -> {word!r}("), hits)
+                    self.assert_host_cli_question_guidance(hits[0])
 
     def test_host_cli_question_case_variants(self):
         # 末尾の変種は s をロングエス(ſ)にした形。大小無視の照合では s に一致するが、
         # 字面の lower() では s に戻らない —— 案内を字面から選ぶと、ほかの語の案内になる
-        for text in (
+        texts = (
             "askuserquestion", "ASKUSERQUESTION", "multiselect", "MULTISELECT", "MultiSelect",
             "AſkUserQueſtion",
-        ):
+        )
+        result = self.assert_host_cli_cases([HostCliCase(text, True) for text in texts])
+        for text, hits in zip(texts, result.values()):
             with self.subTest(text=text):
-                hits = self.assert_host_cli_result(text, True)
                 self.assertIn(repr(text), hits[0])
                 self.assert_host_cli_question_guidance(hits[0])
 
     def test_host_cli_question_marker(self):
         reason = "<!-- validate-allow: 質問の道具の名前を例として示す -->"
+        cases = []
         for word in HOST_CLI_QUESTION_WORDS:
             for marker, detected in (
                 (reason, False),
                 ("<!-- validate-allow -->", True),
                 ("<!-- validate-allow: -->", True),
             ):
-                with self.subTest(word=word, marker=marker):
-                    hits = self.assert_host_cli_result(f"{word} {marker}", detected)
-                    if detected:
-                        self.assert_host_cli_question_guidance(hits[0])
+                cases.append(HostCliCase(f"{word} {marker}", detected))
             # マーカーは、その行だけに効く
-            with self.subTest(word=word, marker="別行"):
-                hits = self.assert_host_cli_result(f"{reason}\n{word}", True, line=4)
-                self.assert_host_cli_question_guidance(hits[0])
+            cases.append(HostCliCase(word, True, before=(reason,)))
+        result = self.assert_host_cli_cases(cases)
+        for case, hits in zip(cases, result.values()):
+            if case.detected:
+                with self.subTest(text=case.text):
+                    self.assert_host_cli_question_guidance(hits[0])
 
     def test_host_cli_question_scope(self):
         cases = (
@@ -1498,38 +1758,31 @@ class ValidateTest(unittest.TestCase):
             ("do-task/references/delegation-map.md", False),
             ("do-task/references/external-runners.md", False),
         )
-        for word in HOST_CLI_QUESTION_WORDS:
-            for path, detected in cases:
-                with self.subTest(word=word, path=path):
-                    relpath = f"{SKILLS_REL}/{path}"
-                    target = self.repo / relpath
-                    original = target.read_bytes() if target.exists() else None
-                    try:
-                        self.assert_host_cli_result(word, detected, relpath=relpath, keep_body=original is not None)
-                    finally:
-                        if original is None:
-                            target.unlink()
-                        else:
-                            target.write_bytes(original)
+        self.assert_host_cli_cases([
+            HostCliCase(word, detected, f"{SKILLS_REL}/{path}")
+            for word in HOST_CLI_QUESTION_WORDS
+            for path, detected in cases
+        ])
 
     def test_host_cli_question_adjacent(self):
         # 日本語の直結は検出し、英字が続く別の語は検出しない
-        for text, detected in (
-            ("AskUserQuestionで", True),
-            ("multiSelectで", True),
-            ("AskUserQuestions", False),
-            ("multiSelected", False),
-        ):
-            with self.subTest(text=text):
-                self.assert_host_cli_result(text, detected)
+        self.assert_host_cli_cases([
+            HostCliCase(text, detected)
+            for text, detected in (
+                ("AskUserQuestionで", True),
+                ("multiSelectで", True),
+                ("AskUserQuestions", False),
+                ("multiSelected", False),
+            )
+        ])
 
     def test_host_cli_words_are_detected(self):
         # 書き先は references/*.md に固定する —— CHECKED_PY は scripts/ 配下で
         # _in_host_cli_scope() の対象外なので、そこに書くと ERROR 0 になり空虚に真になる
-        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
-            with self.subTest(word=word):
-                self.write_file(CHECKED_MD, f"# t\n\n{word} を使う\n")
-                self.assert_error(["ホスト固有の CLI 語", word])
+        words = ("run_in_background", "claude-in-chrome", "chrome-devtools")
+        self.assert_host_cli_cases([
+            HostCliCase(f"{word} を使う", True, needles=("ホスト固有の CLI 語", word)) for word in words
+        ])
 
     def test_host_cli_words_are_not_detected_in_scripts_dir(self):
         # 上のテストの「書き先を固定する」理由を固定する(scripts/ は対象外)
@@ -1538,13 +1791,10 @@ class ValidateTest(unittest.TestCase):
         self.assert_clean()
 
     def test_host_cli_words_are_exempted_by_marker(self):
-        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
-            with self.subTest(word=word):
-                self.write_file(
-                    CHECKED_MD,
-                    f"# t\n\n{word} を使う <!-- validate-allow: 生成する設定の識別子 -->\n",
-                )
-                self.assert_clean()
+        self.assert_host_cli_cases([
+            HostCliCase(f"{word} を使う <!-- validate-allow: 生成する設定の識別子 -->", False)
+            for word in ("run_in_background", "claude-in-chrome", "chrome-devtools")
+        ])
 
     def test_host_cli_marker_exempts_only_its_own_line(self):
         # 免除は**その行だけ**に効く。ファイル単位にすると、一度マーカーを置いた
@@ -1562,10 +1812,11 @@ class ValidateTest(unittest.TestCase):
         self.assertEqual(1, len(hits), hits)
 
     def test_host_cli_marker_without_reason_does_not_exempt(self):
-        for word in ("run_in_background", "claude-in-chrome", "chrome-devtools"):
-            with self.subTest(word=word):
-                self.write_file(CHECKED_MD, f"# t\n\n{word} を使う <!-- validate-allow -->\n")
-                self.assert_error(["ホスト固有の CLI 語", word])
+        words = ("run_in_background", "claude-in-chrome", "chrome-devtools")
+        self.assert_host_cli_cases([
+            HostCliCase(f"{word} を使う <!-- validate-allow -->", True, needles=("ホスト固有の CLI 語", word))
+            for word in words
+        ])
 
     def test_marker_does_not_exempt_delegation_words(self):
         # マーカーが効くのは禁止パターン検査とホスト CLI 語検査の 2 つだけ。

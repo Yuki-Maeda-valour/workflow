@@ -2131,6 +2131,10 @@ def main() -> int:
     digest.add_argument("--state", required=True)
     digest.add_argument("--max-items", type=int, default=100000); digest.add_argument("--max-bytes", type=int, default=1073741824)
     digest.add_argument("--max-file-bytes", type=int, default=67108864); digest.add_argument("--max-seconds", type=int, default=60)
+    digests = sub.add_parser("state-digests")
+    digests.add_argument("--state", action="append", required=True)
+    digests.add_argument("--max-items", type=int, default=100000); digests.add_argument("--max-bytes", type=int, default=1073741824)
+    digests.add_argument("--max-file-bytes", type=int, default=67108864); digests.add_argument("--max-seconds", type=int, default=60)
     cmp = sub.add_parser("compare"); cmp.add_argument("--before", required=True); cmp.add_argument("--after", required=True)
     cmp.add_argument("--self-worktree", default=""); cmp.add_argument("--self-ref", default="")
     cmp.add_argument("--max-items", type=int, default=100000); cmp.add_argument("--max-bytes", type=int, default=1073741824)
@@ -2164,6 +2168,26 @@ def main() -> int:
             if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
                 raise Stop("状態観察の上限は正の整数でなければならない")
             print(state_digest(args.state, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds))
+            return 0
+        if args.command == "state-digests":
+            if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
+                raise Stop("状態観察の上限は正の整数でなければならない")
+            # 入力の順に 1 ファイルずつ(ファイルごとに予算を新しく取る)読み、全部読み終えてから出す。
+            # 読めないファイルは - を出し、最初の失敗の理由を標準エラーに出して終了コード 20 にする。
+            lines, failure = [], None
+            for path in args.state:
+                try:
+                    lines.append(state_digest(path, args.max_items, args.max_bytes, args.max_file_bytes, args.max_seconds))
+                except Stop as exc:
+                    lines.append("-")
+                    failure = failure or exc
+                except OSError:
+                    # PermissionError など。例外の引数(パス)は診断に出さず、固定の文にする
+                    lines.append("-")
+                    failure = failure or Stop("状態を読めない")
+            sys.stdout.write("".join(line + "\n" for line in lines))
+            if failure is not None:
+                raise failure
             return 0
         if any(getattr(args, x) <= 0 for x in ("max_items", "max_bytes", "max_file_bytes", "max_seconds")):
             raise Stop("状態観察の上限は正の整数でなければならない")

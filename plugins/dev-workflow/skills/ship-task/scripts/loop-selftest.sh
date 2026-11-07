@@ -282,6 +282,8 @@ PY
     echo "logged in (stub)"; exit "${SELFTEST_AUTH_RC:-0}" ;;
   plugin)
     printf '%s %s\n' "$me" "$*" >>"$REC/aux.log"
+    # 補助 CLI に渡った fd(照合のパイプなど)を記録する。試験が、0〜2 とこのスクリプト自身の fd(255)以外が無いことを確かめる
+    ls -1 "/proc/$$/fd" >>"$REC/aux-fds.log" 2>/dev/null || true
     # 出力は SELFTEST_PLUGINS_FILE の中身。試験データは実物の形(#68 の実走で測った — design §7-3。トップは配列で、
     # 要素は id〈<名>@<marketplace>〉・version・scope・enabled・installPath・installedAt・lastUpdated。name は無い)で書く。
     # name の形と {"plugins": …} の形は、loop.sh の読み方の寛容さの試験として 1 つずつ渡す
@@ -893,6 +895,9 @@ commit() { # [push しないなら localonly]
   fi
 }
 calls() { cat "$REC/calls.log" 2>/dev/null | tr '\n' ' ' | sed 's/ $//'; }
+# 補助 CLI のスタブが記録した fd(この試験の REC の aux-fds.log)のうち、0〜2 とスクリプト自身の fd(255)以外
+aux_fds_extra() { sort -u "$REC/aux-fds.log" 2>/dev/null | grep -vxE '0|1|2|255' | tr '\n' ' ' | sed 's/ $//' || true; }
+aux_fds_recorded() { if [ -s "$REC/aux-fds.log" ]; then echo yes; else echo no; fi; }
 locked_reason_of() { # $1=相対パス → その理由で locked の worktree があれば 0(-z でないと理由が引用される)
   git -C "$R" worktree list --porcelain -z | tr '\0' '\n' | grep -qxF "locked dev-workflow-loop: $1"
 }
@@ -948,7 +953,7 @@ newrec provefix
 PROOF_DIR="$W/home/.config/dev-workflow/loop/host-proofs"
 run_loop prove-default -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
 check "治具: スタブの証明を作れる(default)" 0 "$RC"
-# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(host shell-prefix sync stops link argv h28 memory order skip locked judge breakers signals kill hooks perm d22 between discover)
+# LOOP_SELFTEST_ONLY=<節,節,...> で節を絞れる(節の名前は `grep '^if want' loop-selftest.sh` で見る)
 want() { [ -z "${LOOP_SELFTEST_ONLY:-}" ] && return 0; case ",$LOOP_SELFTEST_ONLY," in *",$1,"*) return 0 ;; esac; return 1; }
 
 # ════════════════ 治具: 上書きの実行ファイルの証明(H31)════════════════
@@ -1125,6 +1130,9 @@ run_loop hs SELFTEST_AUTH_RC=1 -- --repo "$R" "${COMMON_ARGS[@]}"
 check "疎通(auth status)の失敗で止まる" 20 "$RC"
 has "疎通の失敗: 理由" "$OUT" "[auth]"
 check "疎通の失敗: -p を起動しない" "" "$(calls)"
+fi
+if want stops-repo; then
+newrec stops-repo
 # ローカルのデフォルトブランチが無い
 newrepo nodef
 G -C "$R" checkout -q -b trunk
@@ -1813,22 +1821,7 @@ done
 fi
 
 # ════════════════ 判定・片付け・人のチェックアウト ════════════════
-if want judge; then
-newrepo judge
-for n in pr degrade hold fail none hang rcnz prunpushed both untracked ignored reviews symreviews badjson leak badreviews; do addtask "$n-j"; done
-addtask holdnoline-j - 1 docs/tasks "- **保留**(ship-task・2026-01-02): S4 古い保留の行 — 本文を直す"
-commit
-newrec judge
-echo human >"$R/human-untracked.txt"
-echo changed >>"$R/README.md"
-idx_before="$(sha256sum "$R/.git/index" | cut -d' ' -f1)"
-st_before="$(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --short)"
-run_loop judge -- --repo "$R" --max-iterations 50 --max-consecutive-failures 50 --iteration-timeout 4 "${COMMON_ARGS[@]}"
-idx_after="$(sha256sum "$R/.git/index" | cut -d' ' -f1)"
-st_after="$(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --short)"
-check "判定: 全周を回ってキューが空で終わる" 0 "$RC"
-check "人のチェックアウト: git status --short が変わらない" "$st_before" "$st_after"
-check "人のチェックアウト: .git/index のバイト列が変わらない" "$idx_before" "$idx_after"
+# judged / judge_run: 呼ばれるまで何もしない関数の定義だけ(節の外。judge の 4 節で使う)
 judged() { # $1=名 $2=判定 $3=worktree(removed|kept)
   local rel="docs/tasks/進行中_$1.md"
   has "判定($1): $2" "$OUT" "$rel → $2"
@@ -1838,25 +1831,41 @@ judged() { # $1=名 $2=判定 $3=worktree(removed|kept)
     f "判定($1): worktree を消す" locked_reason_of "$rel"
   fi
 }
+# judge_run <状態名> <名前の添え字> [loop.sh の追加の引数 ...]: R の repo で loop.sh を 1 回回し、RP に報告を入れる。
+# 人のチェックアウトを汚してから回し、汚れが変わらないことと、報告に許した項目の一覧が出ないことを見る。
+# newrepo・addtask・commit・newrec は呼ぶ側が先に済ませる
+judge_run() {
+  local state="$1" sfx="$2" idx_before idx_after st_before st_after
+  shift 2
+  echo human >"$R/human-untracked.txt"
+  echo changed >>"$R/README.md"
+  idx_before="$(sha256sum "$R/.git/index" | cut -d' ' -f1)"
+  st_before="$(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --short)"
+  run_loop "$state" -- --repo "$R" --max-iterations 50 --max-consecutive-failures 50 "$@" "${COMMON_ARGS[@]}"
+  idx_after="$(sha256sum "$R/.git/index" | cut -d' ' -f1)"
+  st_after="$(GIT_OPTIONAL_LOCKS=0 git -C "$R" status --short)"
+  check "判定$sfx: 全周を回ってキューが空で終わる" 0 "$RC"
+  check "人のチェックアウト$sfx: git status --short が変わらない" "$st_before" "$st_after"
+  check "人のチェックアウト$sfx: .git/index のバイト列が変わらない" "$idx_before" "$idx_after"
+  RP="$(report_of "$OUT")"
+  hasnt "判定$sfx: 報告に許した項目の一覧を出さない" "$RP" "許した"
+}
+# 17 個のタスクを 4 回の起動(judge・judge-fail・judge-hang の 2 回)に分けて回す。
+# 先頭に回すタスク(rcnz・hang・leak)には作成日を付ける(作成日のあるタスクが先に回る。loop.md §3)
+if want judge; then
+newrepo judge
+for n in badreviews fail hold pr reviews symreviews untracked; do addtask "$n-j"; done
+commit
+newrec judge
+judge_run judge ""
 judged pr-j "正常(PR)" removed
-judged degrade-j "正常(縮退)" removed
 judged hold-j "正常(保留)" removed
 t "判定(hold-j): 改名と保留の行が作業ブランチに commit されている" git -C "$R" cat-file -e "task/hold-j:docs/tasks/保留_hold-j.md"
 judged fail-j "失敗(結末 失敗扱い)" kept
-judged none-j "失敗(結果の行が無い)" kept
-judged hang-j "失敗(時間切れ)" kept
-judged rcnz-j "失敗(終了コード 3)" kept
-judged prunpushed-j "失敗(食い違い: origin の task/prunpushed-j" kept
-judged both-j "失敗(食い違い: HEAD の tree に docs/tasks/進行中_both-j.md が残っている)" kept
-judged holdnoline-j "失敗(食い違い: 保留の行が 1 行増えていない" kept
 judged untracked-j "正常(PR)" kept
-judged ignored-j "正常(PR)" removed
 judged reviews-j "正常(PR)" removed
 judged symreviews-j "正常(PR)" removed
-judged badjson-j "失敗(JSON が読めない)" kept
-judged leak-j "正常(PR)" removed
 judged badreviews-j "正常(PR)" removed
-RP="$(report_of "$OUT")"
 RD="$(dirname "$RP")"
 cp_ok=0; cp_sym=0
 for d in "$RD"/iter-*-reviews; do
@@ -1867,16 +1876,7 @@ done
 check "判定: .claude/reviews(実体)を状態ディレクトリへ写す" 1 "$cp_ok"
 check "判定: .claude/reviews が symlink のときは写さない" 0 "$cp_sym"
 has "判定: 未追跡が残った周は worktree を残して報告する" "$RP" "消せなかったので残した"
-# 片付け: 時間切れで TERM を無視する孫と、setsid で別セッションにした印つきの子孫まで打ち切られる
-for p in $(cat "$REC/pid-hang-j" "$REC/spawned-hang-j" 2>/dev/null); do
-  if wait_dead "$p" 3; then ok "片付け(時間切れ): pid $p が止まる"; else ng "片付け(時間切れ): pid $p が止まる"; fi
-done
-check "片付け(時間切れ): 孫と別セッションの子孫を記録した" 2 "$(wc -l <"$REC/spawned-hang-j" 2>/dev/null | tr -d ' ')"
-for p in $(cat "$REC/spawned-leak-j" 2>/dev/null); do
-  if wait_dead "$p" 3; then ok "片付け(正常な周): 印つきの残りのプロセスが止まる"; else ng "片付け(正常な周): 印つきの残りのプロセスが止まる(pid $p)"; fi
-done
 has "判定: 照合に通った周は共有の config の差分が無いことを報告に出す" "$RP" "- 共有の config の差分: 無し"
-hasnt "判定: 報告に許した項目の一覧を出さない" "$RP" "許した"
 has "判定: .claude/reviews を写せなくても止めずに報告して続ける" "$RP" ".claude/reviews を写せなかった"
 # 報告の「残った worktree」に、その周の結末を添える(この実行の分)・過去の実行の分は報告のパスを示す
 has "残った worktree: この実行の分はその周の結末を添える" "$RP" "(lock の理由: dev-workflow-loop: docs/tasks/進行中_fail-j.md)— 結末: 周 "
@@ -1884,6 +1884,56 @@ has "残った worktree: 結末の判定" "$RP" "失敗(結末 失敗扱い)"
 has "残った worktree: 消せなかった周の結末" "$RP" "worktree を消せなかった"
 run_loop judge -- --repo "$R" --dry-run
 has "残った worktree: 過去の実行の分は(過去の実行)とその実行の報告を示す" "$(report_of "$OUT")" "(過去の実行)結末はその実行の報告を見る: $RP"
+fi
+
+if want judge-fail; then
+newrepo jfail
+addtask rcnz-j 2026-01-01
+for n in badjson both none prunpushed; do addtask "$n-j"; done
+addtask holdnoline-j - 1 docs/tasks "- **保留**(ship-task・2026-01-02): S4 古い保留の行 — 本文を直す"
+commit
+newrec jfail
+judge_run jfail "(失敗の種類)"
+judged rcnz-j "失敗(終了コード 3)" kept
+judged badjson-j "失敗(JSON が読めない)" kept
+judged both-j "失敗(食い違い: HEAD の tree に docs/tasks/進行中_both-j.md が残っている)" kept
+judged holdnoline-j "失敗(食い違い: 保留の行が 1 行増えていない" kept
+judged none-j "失敗(結果の行が無い)" kept
+judged prunpushed-j "失敗(食い違い: origin の task/prunpushed-j" kept
+fi
+
+if want judge-hang; then
+# hang-j(時間切れ)の後ろに fail-late-j を続け、時間切れの周の後も次の周へ進むことを見る。
+# 周の時間の上限は、この起動にだけ渡す。fail-late-j の子は失敗扱いを返すだけの軽いもの
+newrepo jhang
+addtask hang-j 2026-01-01
+addtask fail-late-j
+commit
+newrec jhang
+judge_run jhang "(時間切れ)" --iteration-timeout 10
+judged hang-j "失敗(時間切れ)" kept
+judged fail-late-j "失敗(結末 失敗扱い)" kept
+# 片付け: 時間切れで TERM を無視する孫と、setsid で別セッションにした印つきの子孫まで打ち切られる
+for p in $(cat "$REC/pid-hang-j" "$REC/spawned-hang-j" 2>/dev/null); do
+  if wait_dead "$p" 3; then ok "片付け(時間切れ): pid $p が止まる"; else ng "片付け(時間切れ): pid $p が止まる"; fi
+done
+check "片付け(時間切れ): 孫と別セッションの子孫を記録した" 2 "$(wc -l <"$REC/spawned-hang-j" 2>/dev/null | tr -d ' ')"
+# leak-j(印つきの子孫が残る)・degrade-j・ignored-j。周の時間の上限は既定のまま
+newrepo jmisc
+addtask leak-j 2026-01-01
+addtask degrade-j; addtask ignored-j
+commit
+newrec jmisc
+judge_run jmisc "(縮退・ignored・leak)"
+judged leak-j "正常(PR)" removed
+judged degrade-j "正常(縮退)" removed
+judged ignored-j "正常(PR)" removed
+for p in $(cat "$REC/spawned-leak-j" 2>/dev/null); do
+  if wait_dead "$p" 3; then ok "片付け(正常な周): 印つきの残りのプロセスが止まる"; else ng "片付け(正常な周): 印つきの残りのプロセスが止まる(pid $p)"; fi
+done
+fi
+
+if want judge-git; then
 # §5 の git の照合(HEAD が task/{名}・HEAD の tree の 完了_・保留_)
 newrepo xjudge
 for n in nobranch nodone; do addtask "$n-j"; done
@@ -1900,7 +1950,9 @@ newrec xjudge2
 run_loop xjudge2 -- --repo "$R" "${COMMON_ARGS[@]}"
 check "判定(holdnofile-j): キューが空で終わる" 0 "$RC"
 has "判定(holdnofile-j): HEAD の tree に 保留_ が無い" "$OUT" "docs/tasks/進行中_holdnofile-j.md → 失敗(食い違い: HEAD の tree に docs/tasks/保留_holdnofile-j.md が無い)"
+fi
 
+if want judge-array; then
 # 出力が全メッセージの配列の形(利用者の設定の verbose が効いたとき)でも、最後の type: "result" の要素で同じ判定になる
 newrepo jarray
 for n in pr hold fail; do addtask "$n-arr"; done
@@ -1935,6 +1987,9 @@ check "配列の形(3): 全周を回ってキューが空で終わる" 0 "$RC"
 has "配列の形: 結果の要素が複数でも、結末は最後の result の要素から読む(PR)" "$OUT" "docs/tasks/進行中_pr-bg.md → 正常(PR)"
 has "配列の形: 結果の要素が複数でも、結末は最後の result の要素から読む(保留)" "$OUT" "docs/tasks/進行中_hold-bg.md → 正常(保留)"
 has "配列の形: 最後の result の拒否の欄が空でも、前の result の要素の拒否を写す" "$(report_of "$OUT")" "stub-denied-bg"
+fi
+
+if want judge-profile; then
 # 人の作業ツリーの未 commit の profile が効かない(D1)+ 締める向き(profile が小さい)
 newrepo d1
 mkdir -p "$R/.claude"
@@ -2026,6 +2081,8 @@ run_loop cfail -- --repo "$R" "${COMMON_ARGS[@]}"
 check "連続失敗: 終了コード 10" 10 "$RC"
 has "連続失敗: 理由" "$OUT" "[consecutive-failures]"
 check "連続失敗: 失敗の周の後に次のタスクのスタブが起動され、2 回で止まる" "fail-a fail-b" "$(calls)"
+fi
+if want breakers-reset; then
 newrepo cfail2
 addtask fail-a 2026-01-01; addtask pr-b 2026-01-02; addtask fail-c 2026-01-03; addtask pr-d 2026-01-04
 commit
@@ -2042,6 +2099,8 @@ run_loop g1 -- --repo "$R" "${COMMON_ARGS[@]}"
 check "G1 の保留の連続: 終了コード 10(G1 …・G1: … の両方を数える)" 10 "$RC"
 has "G1 の保留の連続: 理由" "$OUT" "[consecutive-failures]"
 check "G1 の保留の連続: 2 回で止まる" "holdg1-a holdg1c-b" "$(calls)"
+fi
+if want breakers-g1; then
 newrepo g1b
 addtask holdg1-a 2026-01-01
 addtask holdold-b 2026-01-02 1 docs/tasks "- **保留**(ship-task・2026-01-01): G1 古い許可の拒否 — 許可リストを見直す"
@@ -2061,6 +2120,8 @@ newrec g1d
 run_loop g1d -- --repo "$R" "${COMMON_ARGS[@]}"
 check "G1 の取り出し: 最後の保留の行に番号が無ければ、古い G1 の行があっても G1 に数えない" 0 "$RC"
 check "G1 の取り出し: 番号の無い最新の行で連続が 0 に戻り全周を回る" "holdg1-a holdnocode-b holdg1-c pr-d" "$(calls)"
+fi
+if want breakers-normal; then
 newrepo g1c
 addtask holds4-a 2026-01-01; addtask holds4-b 2026-01-02; addtask pr-c 2026-01-03
 commit
@@ -2110,6 +2171,8 @@ case "$DP_CMD" in
   *) ng "文書の push(autoSetupRebase = always): SKILL.md から無人の push を取り出す(${DP_CMD#NG })" ;;
 esac
 
+fi
+
 # 共有の git ディレクトリの変化(周の後に照合して止まる。§5 のネットワークの git を打たない)
 shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
   newrepo "sh-$1"
@@ -2133,6 +2196,7 @@ shared_case() { # $1=振る舞い $2=ラベル [$3=準備]
   fi
   t "共有の状態($2): 止めの印を置く" test -f "$(state_dir "sh-$1")/stop-mark.md"
 }
+if want breakers-shared; then
 shared_case cfgadd "config に項目を足す"
 shared_case cfgpushremote "branch.task/{名}.pushRemote を足す"
 shared_case cfgremote "branch.task/{名}.remote の値が origin でない"
@@ -2140,6 +2204,8 @@ shared_case pushu "-u つきの push が branch.task/{名}.remote・.merge を�
 has "共有の状態(-u つきの push): 設定の 構造差分を報告する" "$(report_of "$OUT")" "保持済み config または worktree の構造が周の途中で変わった"
 hasnt "共有の状態(-u つきの push): 設定値を報告しない" "$(report_of "$OUT")" "branch.task/pushu-a.merge"
 shared_case cfgreorder "既存の項目の並べ替え"
+fi
+if want breakers-shared2; then
 shared_case hookchmod "hooks の既存のファイルに実行権を付ける"
 shared_case infoexclude "info/exclude"
 shared_case wtconfig "その周の worktree の config.worktree"
@@ -3736,6 +3802,7 @@ PY
 )"
 if [ -z "$DISC_DIFF" ]; then ok "同期: 発見元の列が discover-mode.md と一致する(順も)"
 else ng "同期: 発見元の列が discover-mode.md と一致する(順も)($DISC_DIFF)"; fi
+fi
 
 # newdisc <名> [noorigin] → R・B。状態ファイル 3 つを ignore し、task_dir(docs/tasks)に既存の 候補_old.md を置く
 newdisc() {
@@ -3758,6 +3825,7 @@ sys.exit(0 if any(toks[i:i + len(want)] == want for i in range(len(toks))) else 
 PY
 }
 
+if want discover; then
 # ── 引数(使い方の誤りは exit 2)・--dry-run・プロンプト ──
 newdisc dargs
 newrec dargs
@@ -3877,6 +3945,8 @@ newrec orepn
 run_loop orepn -- --repo "$R" --dry-run
 check "実装モード: origin が無い構成で起動する" 0 "$RC"
 has "実装モード: 報告に origin の URL の行(origin が無い)" "$(report_of "$OUT")" "- origin の URL: origin が無い(周は push しないので、結末は 縮退)"
+fi
+if want discover-state; then
 # 状態ファイルが ignore されていない / .claude/grasp.md が追跡済み(worktree を消して 20)
 newrepo dign
 printf '*.ignored\n.claude/reviews\n' >"$R/.gitignore"   # .claude/grasp.md・.claude/.understand-project-done を ignore しない土台
@@ -4024,6 +4094,8 @@ dskip_run
 check "読み飛ばし(発見): lock の理由がちょうど 候補:<発見元> の worktree" "data-audit " "$(dqueue)"
 has "読み飛ばし(発見): lock: 理由" "$OUT" "refactor: 前の周が残した worktree がある($W/repos/dskip-lock)"
 
+fi
+
 # ── 判定の各場合と worktree の扱い(1 回の実行で data-audit・refactor の 2 周)──
 DA_ARGS=(--max-consecutive-failures 50 "${COMMON_ARGS[@]}")
 disc_pair() { # $1=名 $2=data-audit の振る舞い $3=refactor の振る舞い [$4=noorigin] 残り=loop.sh の追加の引数
@@ -4053,6 +4125,7 @@ dshared() { # $1=停止した発見元 $2=振る舞い $3=起動済みの発見�
   check "発見の共有状態($2): 次の発見元を起動しない" "$3" "$(calls)"
   t "発見の共有状態($2): 止めの印を保持" test -f "$(dirname "$(dirname "$RP")")/stop-mark.md"
 }
+if want discover-judge; then
 disc_pair pr pr degrade
 check "発見の周(pr・degrade): キューが空で終わる" 0 "$RC"
 check "発見の周: 発見元を列の順に 1 回ずつ回す" "disc-data-audit disc-refactor" "$(calls)"
@@ -4093,6 +4166,8 @@ hasnt "発見の周(縮退・origin 無し): PR の雛形を出さない" "$RP" 
 disc_pair inprog inprog modcand
 djudged data-audit "失敗(食い違い: 名前が 候補_<名>.md でない(docs/tasks/進行中_data-audit-a.md)" kept "進行中_ を足す"
 djudged refactor "失敗(食い違い: 追加でない変更がある(M docs/tasks/候補_old.md)" kept "既存の 候補_ を書き換える"
+fi
+if want discover-judge2; then
 disc_pair nested nested outside
 djudged data-audit "失敗(食い違い: task_dir の直下でない(docs/tasks/sub/候補_data-audit-a.md)" kept "入れ子"
 djudged refactor "失敗(食い違い: 名前が 候補_<名>.md でない(docs/tasks/memo-refactor.md)" kept "名前空間の外"
@@ -4105,6 +4180,8 @@ djudged refactor "失敗(食い違い: モードが 100644 でない(100755" kep
 disc_pair commits twocommits untracked
 djudged data-audit "失敗(食い違い: HEAD が固定した sha の上の 1 commit でない" kept "2 commit"
 djudged refactor "失敗(食い違い: 作業ツリーに未追跡か未 commit が残った" kept "未追跡の残り"
+fi
+if want discover-judge3; then
 disc_pair branch otherbranch fail
 dshared data-audit "今夜の名でないブランチ" "disc-data-audit"
 # 前の共有状態違反では未起動になる後段も、独立した正常共有状態で判定する。
@@ -4127,6 +4204,8 @@ disc_pair pushfail none pushfail
 djudged data-audit "正常(候補なし)" removed "push 後の失敗扱いの前の正常な周"
 djudged refactor "失敗(結末 失敗扱い)" kept "push の後の失敗扱い"
 has "失敗の周: PR が開いている可能性(失敗扱い)" "$RP" "origin に task/候補-refactor-$D12 がある: PR が開いている可能性がある。merge せずに閉じ、ブランチを消す"
+fi
+if want discover-judge4; then
 disc_pair pushdiff pushdiff dashname
 dshared data-audit "push した中身と異なる HEAD" "disc-data-audit"
 has "発見の共有状態(remote OID): 一致しない理由" "$RP" "自分の remote-tracking ref の期待状態に一致しない"
@@ -4148,6 +4227,8 @@ djudged refactor "正常(候補なし)" removed "時間切れの後の周"
 for p in $(cat "$REC/pid-disc-data-audit" "$REC/spawned-disc-data-audit" 2>/dev/null); do
   if wait_dead "$p" 3; then ok "発見の周(時間切れ): pid $p が止まる"; else ng "発見の周(時間切れ): pid $p が止まる"; fi
 done
+fi
+if want discover-stop; then
 # 連続失敗・同じ実行で 2 度回さない・共有の config の変化
 newdisc dcf
 newrec dcf
@@ -4257,7 +4338,7 @@ has "候補_ だけのディレクトリが task_dir に検出される" "$OUT" 
 fi
 
 # ════════════════ 人の linked worktree の設定(H20)════════════════
-if want humanconfig; then
+# hc_*: 呼ばれるまで何もしない関数の定義だけ(節の外。humanconfig の 4 節で使う)
 hc_setup() { # $1=名 $2=最初のタスク $3=初期設定 $4=main|linked [$5=拡張]
   HC_NAME="hc-$1"
   newrepo "$HC_NAME"
@@ -4303,6 +4384,7 @@ d.pop("repo_admin", None)
 json.dump(d, open(p, "w"))
 PY
 }
+if want humanconfig; then
 # 通常終了。拡張なしで後から置かれたファイルと、順序だけの変更も見る。
 for action in add delete value reorder inactive; do
   initial=present; extension=on; change="$action"
@@ -4323,6 +4405,8 @@ for action in add delete value reorder inactive; do
   fi
   hc_preserved "$change"
 done
+fi
+if want humanconfig-clean; then
 # 設定あり/なし・主/linked の変更なしはどれも 2 周を完了する。
 for location in main linked; do
   for initial in absent present; do
@@ -4334,6 +4418,8 @@ for location in main linked; do
     check "H20 $HC_NAME: 設定に書かない" "$HC_BEFORE" "$(hc_fingerprint)"
   done
 done
+fi
+if want humanconfig-restart; then
 # 中断後の追加/削除/値変更、無変更、起動元変更、旧形式。TERM も同じ照合を通す。
 for action in add delete value unchanged absent switch legacy term; do
   initial=present
@@ -4393,6 +4479,8 @@ for action in add delete value unchanged absent switch legacy term; do
   fi
   check "H20 $HC_NAME: 人の設定を変更しない" "$HC_BEFORE" "$(hc_fingerprint)"
 done
+fi
+if want humanconfig-between; then
 # 正常実行間は既存どおり報告だけで続く。旧形式を黙って無視しない。
 for action in value switch legacy; do
   hc_setup "between-$action" pr present linked
@@ -4445,6 +4533,10 @@ if want environment || want environment-normal; then
 newrepo env-normal; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec env-normal
 run_loop env-normal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check '環境正常: 最初の周' 0 "$RC"
+check '環境正常: 補助 CLI のスタブが fd を記録した' yes "$(aux_fds_recorded)"
+check '環境正常: 補助 CLI に照合のパイプなどの余分な fd が渡らない' "" "$(aux_fds_extra)"
+hasnt '環境正常: 標準エラーに coproc の警告が出ない' "$OUT" execute_coproc
+hasnt '環境正常: 標準エラーに壊れたパイプの書き込みエラーが出ない' "$OUT" 'Broken pipe'
 SD="$(state_dir env-normal)"
 printf 'raise SystemExit(77)\n' >"$SD/environment-guard.py"
 printf 'forged\n' >"$SD/environment.json"
@@ -4469,16 +4561,21 @@ check '環境正常: 次のタスクを実行' 'pr-a pr-b' "$(calls)"
 check '環境正常: 旧STATEの偽helperと状態を上書きせず保持' "$ENV_NORMAL_FORGED_SHA" "$(sha256sum "$SD/environment-guard.py" "$SD/environment.json")"
 rm -f "$W/home/.claude/settings.json"
 fi
-if want environment; then
-# 攻撃と正常保留の全てに同じブレーカーを適用する。
-for attack in fake delete duplicate reorder malformed truncated fifo symlink; do
+# log_attack <攻撃>: 攻撃と正常保留の全てに同じブレーカーを適用する(参考ログの攻撃 1 回分。呼ばれるまで何もしない)
+log_attack() {
+  local attack="$1"
   newrepo "log-$attack"; addtask holdg1-a 2026-01-01; addtask holdg1-b 2026-01-02; addtask pr-c 2026-01-03; commit; newrec "log-$attack"
   printf unchanged >"$W/outside-log"
   run_loop "log-$attack" "SELFTEST_ENV_ATTACK=$attack" "SELFTEST_LOG_OUTSIDE=$W/outside-log" -- --repo "$R" --max-consecutive-failures 50 "${COMMON_ARGS[@]}"
   check "参考ログ($attack):2回で10" 10 "$RC"
   check "参考ログ($attack):計数を緩めない" 'holdg1-a holdg1-b' "$(calls)"
   check "参考ログ($attack):外部ファイル不変" unchanged "$(cat "$W/outside-log")"
-done
+}
+if want environment-log; then
+for attack in fake delete duplicate reorder; do log_attack "$attack"; done
+fi
+if want environment-log2; then
+for attack in malformed truncated fifo symlink; do log_attack "$attack"; done
 newrepo log-stricter; addtask holdg1-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec log-stricter
 run_loop log-stricter SELFTEST_ENV_ATTACK=fake -- --repo "$R" --max-consecutive-failures 1 "${COMMON_ARGS[@]}"
 check 'G1: 通常ブレーカー1が厳しければ1回で10' 10 "$RC"
@@ -4994,6 +5091,7 @@ H46ENVS=("CLAUDE_CONFIG_DIR=$H46CFG" "DEV_WORKFLOW_LOOP_TEST_MANAGED_DIR=$H46MAN
 newrec h46-prove
 run_loop h46-prove "${H46ENVS[@]}" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
 check "H46 正常: prove" 0 "$RC"
+hasnt "H46 正常: prove の標準エラーに coproc の警告が出ない" "$OUT" execute_coproc
 has "H46 proveだけverboseを足す" "$REC/argv-probe" --verbose
 H46PROOF="$(sed -n 's/^ホスト CLI の証明を書いた: //p' "$OUT" | tail -1)"
 python3 - "$REC/argv-probe" "$H46PROOF" <<'PY' >"$W/h46-proof-check" 2>&1
@@ -5032,6 +5130,9 @@ check "H46 dry: session 0件" "" "$(cat "$REC/child-starts.log" 2>/dev/null)"
 newrec h46-normal
 run_loop h46-normal "${H46ENVS[@]}" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
 check "H46 通常の周が動く" 0 "$RC"
+check "H46 通常の周: 補助 CLI のスタブが fd を記録した" yes "$(aux_fds_recorded)"
+check "H46 通常の周: 補助 CLI に照合のパイプなどの余分な fd が渡らない" "" "$(aux_fds_extra)"
+hasnt "H46 通常の周: 標準エラーに coproc の警告が出ない" "$OUT" execute_coproc
 check "H46 通常の周はタスク1件を実行" pr-a "$(calls)"
 hasnt "H46 通常のargvへverboseを足さない" "$REC/argv-pr-a" --verbose
 has "H46 通常のoutput-formatを維持" "$REC/argv-pr-a" json

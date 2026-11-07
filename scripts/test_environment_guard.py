@@ -916,6 +916,270 @@ class EnvironmentConfigPrereadTests(unittest.TestCase):
         self.assertEqual(self.verify().returncode, 0)
         self.assertEqual(self.verify().returncode, 0)
 
+class VerifyPairTests(unittest.TestCase):
+    """verify-pair: 1 回の起動で 2 回照合する(1 回目 → verified → go → 一覧つきの 2 回目 → 本体の照らし直し)。"""
+    setUp = EnvironmentGuardTests.setUp
+    run_guard = EnvironmentGuardTests.run_guard
+    boot = EnvironmentGuardTests.boot
+
+    @classmethod
+    def setUpClass(cls):
+        import ast
+        loop = SCRIPT.with_name('loop.sh').read_text()
+        line = next(line for line in loop.splitlines() if line.startswith('ENVIRONMENT_LOADER = '))
+        cls.loader = ast.literal_eval(line.split(' = ', 1)[1])
+
+    def inventory(self):
+        path = self.base / 'plugins-current.json'
+        path.write_text('[]')
+        return path
+
+    def start(self, *, via_loader=False, inventory=None, go_timeout=20, guard_sha=None, state_sha=None):
+        args = ['verify-pair', '--state', str(self.bundle / 'environment.json'),
+                '--expect-sha256', state_sha or self.receipt['sha256'],
+                '--current-inventory', str(inventory or self.inventory()),
+                '--guard-sha256', guard_sha or self.receipt['guard_sha256'], '--go-timeout', str(go_timeout)]
+        if via_loader:
+            command = [sys.executable, '-I', '-B', '-c', self.loader, self.receipt['guard_sha256'], self.receipt['guard'], *args]
+        else:
+            command = [sys.executable, '-B', str(SCRIPT), *args]
+        proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=self.env, cwd='/')
+        self.addCleanup(self.reap, proc)
+        return proc
+
+    @staticmethod
+    def reap(proc):
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+        for stream in (proc.stdin, proc.stdout, proc.stderr):
+            if stream and not stream.closed:
+                try:
+                    stream.close()
+                except OSError:
+                    pass
+
+    def finish(self, proc, data=None, timeout=20):
+        """data を送って閉じ、(終了コード, stdout, stderr) を返す。"""
+        try:
+            if data:
+                proc.stdin.write(data)
+                proc.stdin.flush()
+        except BrokenPipeError:
+            pass
+        try:
+            proc.stdin.close()
+        except BrokenPipeError:
+            pass
+        rc = proc.wait(timeout=timeout)
+        return rc, proc.stdout.read().decode(), proc.stderr.read().decode()
+
+    def verified(self, proc):
+        self.assertEqual(proc.stdout.readline(), b'verified\n')
+
+    def test_go_after_verified_succeeds_with_nothing_on_stderr(self):
+        self.boot()
+        for via_loader in (False, True):
+            with self.subTest(via_loader=via_loader):
+                proc = self.start(via_loader=via_loader)
+                self.verified(proc)
+                self.assertEqual(self.finish(proc, b'go\n'), (0, '', ''))
+
+    def test_go_arriving_in_pieces_still_proceeds(self):
+        import time
+        self.boot()
+        proc = self.start()
+        self.verified(proc)
+        for piece in (b'g', b'o', b'\n'):
+            proc.stdin.write(piece)
+            proc.stdin.flush()
+            time.sleep(0.2)
+        self.assertEqual(self.finish(proc), (0, '', ''))
+
+    def test_stop_eof_wrong_word_and_unterminated_go_exit_20_silently(self):
+        self.boot()
+        for label, data in (('stop', b'stop\n'), ('eof', b''), ('gx', b'gx\n'), ('go-no-newline', b'go'),
+                            ('go-space', b'go '), ('xyz', b'xyz\n')):
+            with self.subTest(label=label):
+                proc = self.start()
+                self.verified(proc)
+                self.assertEqual(self.finish(proc, data), (20, '', ''))
+
+    def test_stop_through_loader_adds_no_false_diagnostic(self):
+        # SystemExit だと読み込み器が「保持した検査用コピーを安全に実行できない」を足す。os._exit(20) なら何も足さない
+        self.boot()
+        proc = self.start(via_loader=True)
+        self.verified(proc)
+        self.assertEqual(self.finish(proc, b'stop\n'), (20, '', ''))
+
+    def test_waiting_for_go_has_a_time_limit(self):
+        import time
+        self.boot()
+        proc = self.start(go_timeout=1)
+        self.verified(proc)
+        began = time.monotonic()
+        self.assertEqual(proc.wait(timeout=20), 20)
+        self.assertLess(time.monotonic() - began, 15)
+        self.assertEqual(proc.stderr.read(), b'')
+
+    def test_first_failure_never_prints_verified(self):
+        self.boot()
+        self.file.write_text('print("changed")\n')
+        proc = self.start()
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out), (20, ''))
+        self.assertEqual(err, 'ERROR [environment-guard] component の実体が開始時から変わった\n')
+
+    def test_second_check_compares_the_inventory(self):
+        other = self.base / 'other'
+        other.mkdir()
+        (other / 'SKILL.md').write_text('normal')
+        listed = self.base / 'plugins.json'
+        listed.write_text(json.dumps([{'id': 'other', 'enabled': True, 'installPath': str(other)}]))
+        self.boot('--inventory', listed)
+        proc = self.start(inventory=listed)
+        self.verified(proc)
+        self.assertEqual(self.finish(proc, b'go\n'), (0, '', ''))
+        changed = self.base / 'plugins-changed.json'
+        changed.write_text('[]')
+        proc = self.start(inventory=changed)
+        self.verified(proc)
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out, err), (20, '', 'ERROR [environment-guard] 有効 plugin の一覧が変わった\n'))
+
+    def test_second_check_reads_the_state_again_and_sees_a_change_between(self):
+        self.boot()
+        proc = self.start()
+        self.verified(proc)
+        self.file.write_text('print("changed between the two checks")\n')
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out, err), (20, '', 'ERROR [environment-guard] component の実体が開始時から変わった\n'))
+        self.file.write_text('print("normal")\n')
+        # 控えそのものを替えても、2 回目が読み直して保持値と照らす
+        self.bundle = self.base / 'bundle2'
+        self.boot()
+        proc = self.start()
+        self.verified(proc)
+        state = self.bundle / 'environment.json'
+        state.write_text(state.read_text() + ' ')
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out, err), (20, '', 'ERROR [environment-guard] 環境の控えが保持値と一致しない\n'))
+
+    def test_guard_body_rewritten_between_the_checks_is_found(self):
+        self.boot()
+        proc = self.start(via_loader=True)
+        self.verified(proc)
+        guard = Path(self.receipt['guard'])
+        guard.write_bytes(guard.read_bytes() + b'\n# rewritten after load\n')
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out), (20, ''))
+        self.assertIn('guard 本体が保持値と違う', err)
+
+    def test_a_different_guard_hash_is_rejected_after_go(self):
+        self.boot()
+        proc = self.start(guard_sha='0' * 64)
+        self.verified(proc)
+        rc, out, err = self.finish(proc, b'go\n')
+        self.assertEqual((rc, out, err), (20, '', 'ERROR [environment-guard] guard 本体が保持値と違う\n'))
+
+    def test_bad_arguments_are_rejected_before_any_check(self):
+        self.boot()
+        for guard_sha, timeout in (('xyz', 5), (self.receipt['guard_sha256'], 0)):
+            with self.subTest(guard_sha=guard_sha, timeout=timeout):
+                proc = self.start(guard_sha=guard_sha, go_timeout=timeout)
+                rc, out, err = self.finish(proc, b'go\n')
+                self.assertEqual((rc, out), (20, ''))
+                self.assertTrue(err.startswith('ERROR [environment-guard] '), err)
+
+    def test_existing_verify_is_unchanged(self):
+        self.boot()
+        p = self.run_guard('verify', '--state', self.bundle / 'environment.json', '--expect-sha256', self.receipt['sha256'])
+        self.assertEqual((p.returncode, p.stdout, p.stderr), (0, '', ''))
+
+
+class GitConfigIncludeSkipTests(unittest.TestCase):
+    """照合のとき、控えと同じバイト列で include の字面が無い Git の設定には git を起動しない。"""
+    setUp = EnvironmentGuardTests.setUp
+    run_guard = EnvironmentGuardTests.run_guard
+    boot = EnvironmentGuardTests.boot
+    verify = EnvironmentGuardTests.verify
+    module = EnvironmentGuardMoreTests.module
+
+    def parse_calls(self, mod, action):
+        from unittest import mock
+        with mock.patch.object(mod, 'includes', wraps=mod.includes) as spy:
+            result = action()
+        return result, [call.args[0].name for call in spy.call_args_list]
+
+    def held(self, mod):
+        value = json.loads((self.bundle / 'environment.json').read_text())
+        return value, self.receipt['sha256']
+
+    def test_no_include_means_no_git_start_on_verify_but_always_on_bootstrap_snapshot(self):
+        (self.home / '.gitconfig').write_text('[user]\n name = plain\n[core]\n editor = vi\n')
+        self.boot()
+        mod = self.module()
+        value, sha = self.held(mod)
+        _, verified = self.parse_calls(mod, lambda: mod.verify(self.bundle / 'environment.json', sha))
+        self.assertEqual(verified, [])
+        # 起動時の控え(expected が無い)は、include が無くても必ず git で解析する
+        _, started = self.parse_calls(mod, lambda: mod.snapshot(value['root'], value['specs'], value['inventory'], {}))
+        self.assertIn('.gitconfig', started)
+
+    def test_include_spellings_still_reach_git_and_follow_the_target(self):
+        spellings = {
+            'mixed-case': '[InClUdE]\n path = target\n',
+            'includeif': '[includeIf "gitdir:/nowhere/"]\n path = target\n',
+            'quoted-continued': '[include]\n path = "tar\\\nget"\n',
+            'upper-includeif': '[INCLUDEIF "gitdir/i:/NOWHERE/"]\n path = target\n',
+        }
+        for label, text in spellings.items():
+            with self.subTest(label=label):
+                self.setUp()
+                try:
+                    (self.home / 'target').write_text('[user]\n name = one\n')
+                    (self.home / '.gitconfig').write_text(text)
+                    self.boot()
+                    mod = self.module()
+                    _, sha = self.held(mod)
+                    _, calls = self.parse_calls(mod, lambda: mod.verify(self.bundle / 'environment.json', sha))
+                    self.assertIn('.gitconfig', calls)
+                    self.assertEqual(self.verify().returncode, 0)
+                    (self.home / 'target').write_text('[user]\n name = two\n')
+                    self.assertEqual(self.verify().returncode, 20)
+                finally:
+                    self.doCleanups()
+
+    def test_include_word_without_a_destination_is_parsed_and_stays_normal(self):
+        texts = ('# include nothing here\n[user]\n name = x\n',
+                 '[user]\n name = include\n',
+                 '[include]\n',
+                 '[include]\n path = absent-file\n')
+        for text in texts:
+            with self.subTest(text=text):
+                self.setUp()
+                try:
+                    (self.home / '.gitconfig').write_text(text)
+                    self.boot()
+                    mod = self.module()
+                    _, sha = self.held(mod)
+                    _, calls = self.parse_calls(mod, lambda: mod.verify(self.bundle / 'environment.json', sha))
+                    self.assertIn('.gitconfig', calls)
+                    self.assertEqual(self.verify().returncode, 0)
+                finally:
+                    self.doCleanups()
+
+    def test_changed_config_gives_the_same_result_with_or_without_include(self):
+        (self.home / '.gitconfig').write_text('[user]\n name = plain\n')
+        self.boot()
+        self.assertEqual(self.verify().returncode, 0)
+        (self.home / '.gitconfig').write_text('[user]\n name = changed\n')
+        self.assertEqual(self.verify().returncode, 20)
+        (self.home / '.gitconfig').write_text('[user]\n name = plain\n[include]\n path = new\n')
+        self.assertEqual(self.verify().returncode, 20)
+
+
 class EnvironmentDirectLauncherTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
