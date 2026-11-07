@@ -1185,7 +1185,7 @@ bash {do-task の}scripts/implement-guard.sh cleanup        --state <保護領�
 **復元**: `restore-taskmd` が、記録したタスク MD の物理実体だけを戻す。準備後の原子的置換(名前を一度に切り替える操作)は [Issue #259](https://github.com/Yuki-Maeda-valour/workflow/issues/259) で導入した。
 
 1. 呼出側は [runtime-requirements.md の復元監督](runtime-requirements.md#タスク本文の復元)を定義し、`restore_taskmd_supervised` で公開入口を起動する。GNU `timeout`、無ければ `gtimeout` を解決し、GNU 版・必要オプションを確認する。不足時は起動しない。固定 argv は `--signal=TERM --kill-after=5s 330s bash <implement-guard.sh> restore-taskmd <個別argv>`。`--foreground` や shell 文字列を使わない。shell が既存 state・manifest・snapshot の保持値を検査する。検証済み `T` 行の種類・mode・hash・実体パスを内部 helper `restore-taskmd.py` へ個別の引数で渡す。今のコピーから期待値を作り直さない。
-2. Python 3・同梱 helper・GNU `cp` を確認する。shell が所有する一時ファイルやフォルダがあれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
+2. Python 3.10 以上・同梱 helper・GNU `cp` を確認する。shell が所有する一時ファイルやフォルダがあれば、同一性を確かめて回収する。失敗時は helper を起動しない。shell は `exec` で helper に置き換わり、以後の結果は helper だけが1回出す。
 3. helper は親の各階層をリンクを辿らず開く。fd(開いたファイルやディレクトリを指す番号)を保持し、退避元を同じ fd で種類・mode・hash と比べる。FIFO・directory・symlink・不一致は公開前に止める。復元先は通常ファイルか不存在だけを許す。
 4. 対象と同じ親の中に mode 0700 の専用領域を排他的に作る。必要機能を非機密の短い試しのファイルで確かめる。固定した GNU `cp -aL --reflink=never` へ、通常ファイルと検査した入出力の fd 別名だけを渡す。`--reflink=never`(複製の共有をしない指定)は、GNU `cp` 9 系が書き込みの上限の位置で止まらないために渡す(必要な版は [runtime-requirements.md の「タスク本文の復元」](runtime-requirements.md#タスク本文の復元))。選択パスや状態パスを `-L` で辿らない。
 5. コピー終了と直接子の回収後に、準備内容・mode・inode・元ファイルの変化を検査する。対象・親・準備名を再確認し、保持した親 fd に対して `os.replace` で公開する。準備・コピー・公開前検査の失敗時は元内容と権限、または不存在を保つ。
@@ -1593,12 +1593,12 @@ python3 pending-implementation.py scan --cwd <作業対象の管理ルート> [-
 - stderrは理由を示す短い診断です。候補内の本文は表示しません。
   - 別プロジェクトの記録は、件数だけを1行で出します。名前とパスはJSONにだけ出します。
   - 重なりのある候補に実体確認値を渡したときは、固定の1行「重なりのある候補があるため、identity の確認値では続行できません。list_sha256 で確認してください。」を出します。
-- Python 3.8以上と、下記のPOSIXファイル機能を使います。追加パッケージは不要です。
+- Python 3.10以上と、下記のPOSIXファイル機能を使います。追加パッケージは不要です。
 - 必要機能やhelperがない場合、呼出側は検査を省略して進まず停止します。
 
 本helperのために、既存Python経路より新しい版の構文やライブラリを不要に採用しません。
-Python 3.8で構文解釈できるソースとし、3.9以降の型注釈記法、`Path.is_relative_to`、`realpath(strict=...)`等に依存しません。
-起動時に`sys.version_info >= (3, 8)`、`os.name == "posix"`と、次を検査します。
+Python 3.10で構文解釈できるソースとし、3.11以降にしか無い構文やAPI(`except*`、`tomllib`、`typing.Self`、`datetime.UTC`等)に依存しません。
+起動時に`sys.version_info >= (3, 10)`、`os.name == "posix"`と、次を検査します。
 
 - `os.open`(`dir_fd`を含む。`os.open in os.supports_dir_fd`)、`os.close`、`os.fstat`、`os.read`と`O_DIRECTORY`・`O_NOFOLLOW`・`O_CLOEXEC`・`O_NONBLOCK`。印・`.git`ファイル・`HEAD`・`commondir`は、書き手を待たない`O_NONBLOCK`で開く。
 - ディレクトリfdを渡す`os.scandir`（`os.scandir in os.supports_fd`）。一覧全件を先にメモリへ読む`listdir`への代替はしない。

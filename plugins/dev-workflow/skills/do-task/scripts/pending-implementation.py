@@ -110,8 +110,8 @@ def identity_digest(result):
 
 
 def check_features():
-    if sys.version_info < (3, 8):
-        raise ScanError("unsupported-python", "Python 3.8以上が必要です。")
+    if sys.version_info < (3, 10):
+        raise ScanError("unsupported-python", "Python 3.10以上が必要です。")
     if os.name != "posix":
         raise ScanError("unsupported-platform", "POSIXのファイル機能が必要です。")
     names = ("open", "close", "fstat", "stat", "scandir", "readlink", "read",

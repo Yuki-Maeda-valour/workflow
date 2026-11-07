@@ -2,6 +2,19 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 変更
+
+- 必要な Python を 3.10 以上にした。前は場所で違った(3.8 以上・3.10 以上・「Python 3 が必要」)。テストの容器の Python 3.10.12 と同じ版になる。3.11 以降は、測ると遅くなったので採らない(根拠は `docs/testing.md` の「Python の版の決まりの根拠」)。([Issue #433](https://github.com/Yuki-Maeda-valour/workflow/issues/433))
+  - 既に版で止めている所は、版の数字と文だけを変えた。終了コードと出力の形は変えない。
+    - 開始前の候補走査(`pending-implementation.py scan`): `Python 3.10以上が必要です。`(終了コード 11・`unsupported-python`)。
+    - 内蔵の実装担当に任せる前の確かめ(`runtime-requirements.md` のコードブロック): `Python 3.10 以上が必要`(終了コード 20)。
+  - 道具の一覧(`plugins/dev-workflow/hooks/tool-requirements.tsv`)の python3 の行を、必須の 1 行(3.10 以上・補助スクリプト全般と診断)にした。前の条件つきの行(診断の 3.10)は、必須の行と同じ版になるので消した。一覧の形と、確かめのスクリプト(`tool-versions.sh`)の動きは変えない。
+  - 文書の下限(`runtime-requirements.md`・`external-runners.md`・`github-issue.md`・`unattended-mode.md`・`implementation-git.md`・`docs/design.md`・`README.md`)も 3.10 以上にした。3.8 で構文解釈できる形にする決まりは、3.10 で動く形にする決まり(3.11 以降にしか無い構文や API を使わない)にした。
+  - 新しく止める所は足していない。3.10 より古い Python は、セッションの始めの道具の版の確かめ(`tool-versions.sh`)が表で知らせる。
+- テストの流し方: `scripts/run-all.py` が、始めに `git:` の行の後に `python: <版>` の行を出すようにした(配るものではない)。3.10 より古いと `警告:`(最後の結果の行の前にもう一度出す)、3.10 以外(3.11 以降)なら `注意:` を出す。どちらも止めず、終了コードは変えない。
+
 ## v4.48.0
 
 ### 追加

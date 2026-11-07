@@ -63,7 +63,7 @@ loop なしでは、同じ検査を組み込んだ `read --path <plugin相対文
 - タスク MD が git の追跡下にある
 - ローカルの git 設定のダイジェストを `python3 {ship-task の}scripts/git-config-digest.py --dir=<管理ルート>` で算出でき(exit 0)、控える値(§7。作業の途中で変わっていないかを確かめるための値)として保持した。下の origin の URL の検査より先に打つ(設定ファイルが FIFO などで git が戻らない構成で、git の打ち切りを持たない `origin-repo.py` を先に打たないため)
 - **origin の URL**: `python3 {ship-task の}scripts/origin-repo.py --dir=<管理ルート>`([discover-mode.md](discover-mode.md) §3)が exit 0 で、`origin` が真なら `vcs` が偽・`same` が真。`origin` が偽なら満たしたとみなす(push しないので、結末は `縮退`)。欠けの理由と案内は `discover-mode.md` §4 の「origin の URL」と同じ。出力の 6 欄(`origin`・`same`・`vcs`・`repo`・`form`・`push_url_sha256`)を、控える値の origin の判定(§7)として保持した
-- この文書と `task-digest.py`・`origin-repo.py`・`git-config-digest.py` と Python 3 がある
+- この文書と `task-digest.py`・`origin-repo.py`・`git-config-digest.py` と Python 3.10 以上がある
 - 本文ダイジェストを算出でき(exit 0)、R として保持した
 
 **発見のイテレーション(`--discover`)の前提**: 正本は [discover-mode.md](discover-mode.md) §4(併用しない引数・状態ファイルの ignore・origin の URL・task_dir・同名の作業ブランチなど)。parent-child 構成でないことと、開始時の HEAD の条件は、タスクのイテレーションと同じ。発見のイテレーションは本文ダイジェスト R を持たない

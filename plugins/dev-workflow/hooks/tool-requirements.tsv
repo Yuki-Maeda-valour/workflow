@@ -10,8 +10,7 @@
 git	version:git	2.42	必須	全体。2.42 は無人ループと外部の実装担当	Ubuntu: sudo add-apt-repository ppa:git-core/ppa の後に sudo apt install git。macOS: brew install git
 bash	version:bash	4.0	必須	do-task の補助スクリプト	macOS: brew install bash で入れ、PATH の前に置く
 bash	version:bash	4.4	条件つき	無人ループ(loop.sh)	Linux の bash を 4.4 以上にする
-python3	version:python3	3.8	必須	補助スクリプト全般	Ubuntu: sudo apt install python3。macOS: brew install python
-python3	version:python3	3.10	条件つき	設定を戻さずに使う診断(diagnostic-git.py)	Python 3.10 以上を入れ、PATH の前に置く
+python3	version:python3	3.10	必須	補助スクリプト全般と診断	Python 3.10 以上を入れ、PATH の前に置く(Ubuntu 22.04 の python3 は 3.10)。macOS: brew install python
 PyYAML	python-module:yaml	-	条件つき	profile(.claude/project-profile.yml)があるとき	python3 -m pip install --user PyYAML(PATH の python3 に入れる)
 jq	version:jq	1.5	任意	python3 が無いときだけ、外部のレビュアーの出力を読む	Ubuntu: sudo apt install jq。macOS: brew install jq
 GNU coreutils	gnu:coreutils:realpath,readlink,sha256sum,sort,stat,timeout	-	必須	補助スクリプト全般	macOS: brew install coreutils で入れ、gnubin を PATH の前に置く

@@ -165,6 +165,9 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
   - 全部が通ると確かめたのは 2.56.0。2.36〜2.55 で全部通るかは未確認。根拠は [docs/testing.md](docs/testing.md) の「git の版の警告の根拠」。
   - 作業ツリーの変更を含めて流すときは `--worktree`、commit を流すときは `--commit <rev>`(既定は HEAD)。
   - docker の既定の context が違う機械では、`DOCKER_CONTEXT=<名前>` を付ける。
+- Python の版: 製品の下限とテストの容器の版は、どちらも 3.10。
+  - 3.10 より古いと `run-all.py` が警告を出し、3.10 以外(3.11 以降)なら注意を出す。どちらも止めない。
+  - 根拠は [docs/testing.md](docs/testing.md) の「Python の版の決まりの根拠」。
 - 合格の条件: 最後の行が `結果: 合格 / <秒> 秒` で、終了コードが 0。
 - 落ちたときは、`異常:` の行と、最後にまとめて出る失敗の出力を見る。
 - 時間切れが出たとき(混んだ機械で起きる)は、`-j <数>` を減らすか、ほかの重い処理が止まるのを待って流し直す。
