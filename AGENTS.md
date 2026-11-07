@@ -175,7 +175,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - 作業の途中は、変えた所に関係するものだけを流す。
   - unittest: `python3 -B scripts/run-tests.py <テストのファイル>`(例: `test_validate.py`)。関係するファイルは `grep -l '<変えたファイルの名前>' scripts/test_*.py` で探す。
   - loop-selftest: `python3 -B scripts/run-loop-selftest.py <節>`(例: `perm d22`)。節の名前は `grep '^if want' plugins/dev-workflow/skills/ship-task/scripts/loop-selftest.sh` で見る。
-  - 4 本の selftest: `bash plugins/dev-workflow/skills/do-task/scripts/<名前>-selftest.sh`(implement-guard は `--only <ケース>`)。
+  - 4 本の selftest: `bash plugins/dev-workflow/skills/do-task/scripts/<名前>-selftest.sh`(implement-guard は `--only <ケース>`。`--list` で単位を出し、変異は `--only L-<記号>` で 1 つずつ流せる)。
 - 流す時点(PR を開く前)と、結果の PR の本文への書き方は、「PR の前の手順」の節に従う。
 - 詳しい説明(単位・重み・容器・2 つのランナー・テストを足すときの決まり・時間の記録)は [docs/testing.md](docs/testing.md) にある。
 

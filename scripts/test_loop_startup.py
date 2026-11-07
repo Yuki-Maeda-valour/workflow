@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -270,22 +271,33 @@ class StartupShellTests(unittest.TestCase):
         scripts = cls.plugin / 'skills/ship-task/scripts'
         text = (scripts / 'loop-selftest.sh').read_text()
         cls.prefix = text.split('# LOOP_SELFTEST_ONLY=', 1)[0]
+        # 証明づくり(loop.sh を 1 回起動する)の手前で切った版。loop.sh を起動しないケースだけが使う。
+        proof_mark = '治具: スタブのホスト CLI の証明'
+        if cls.prefix.count(proof_mark) != 1:
+            raise RuntimeError('共通の準備に証明づくりの目印がちょうど 1 つ無い')
+        cls.prefix_no_proof = cls.prefix.split(proof_mark, 1)[0]
         line = next(line for line in cls.prefix.splitlines() if line.startswith('SCRIPT_DIR='))
-        cls.prefix = cls.prefix.replace(line, 'SCRIPT_DIR=' + repr(str(scripts)))
-        cls.prefix = cls.prefix.replace('g config selftest.added yes;', '''printf '\\n[include]\\n\\tpath = %s\\n' "$SELFTEST_SECRET" >>"$SELFTEST_COMMON/config";''')
-        # 同じ物理 cwd からの起動でも早期 local-env-vars 照会を検査する。
-        cls.prefix = cls.prefix.replace('( cd "$W/cwd" && exec env', '( cd "${STARTUP_CWD:-$W/cwd}" && exec env')
+        old_cwd = '( cd "$W/cwd" && exec env'
+        new_cwd = '( cd "${STARTUP_CWD:-$W/cwd}" && exec env'
+        old_cfg = 'g config selftest.added yes;'
+        new_cfg = '''printf '\\n[include]\\n\\tpath = %s\\n' "$SELFTEST_SECRET" >>"$SELFTEST_COMMON/config";'''
+        script_dir = 'SCRIPT_DIR=' + repr(str(scripts))
+        # どちらの版にも同じ置き換えを掛ける。同じ物理 cwd からの起動でも早期 local-env-vars 照会を検査する。
+        for name in ('prefix', 'prefix_no_proof'):
+            part = getattr(cls, name).replace(line, script_dir)
+            part = part.replace(old_cfg, new_cfg).replace(old_cwd, new_cwd)
+            setattr(cls, name, part)
     @classmethod
     def tearDownClass(cls):
         cls.tmp.cleanup()
-    def run_case(self, body, expected, transform=None):
+    def run_case(self, body, expected, transform=None, proof=True):
         with tempfile.TemporaryDirectory(dir=self.root) as tmp:
             tmp = Path(tmp)
             sentinel = tmp / 'secret-config'
             sentinel.write_text('[test]\n value = harmless\n')
             watch = Watch(sentinel)
             try:
-                prefix = self.prefix
+                prefix = self.prefix if proof else self.prefix_no_proof
                 if transform is not None:
                     plugin = tmp / 'instrumented-plugin'
                     shutil.copytree(self.plugin, plugin)
@@ -720,7 +732,7 @@ kill "$BG_PID"
 wait_bg
 OUT=/dev/null
 RC=0
-''', 0)
+''', 0, proof=False)
         early = re.search(r'^WAIT early-exit rc=1 sec=([0-9]+) (.*)$', out, re.M)
         self.assertIsNotNone(early, out)
         self.assertEqual(early.group(2), EARLY_EXIT_MARK + 'mark-early-exit の前に終わった(終了コード 3)', out)
@@ -773,6 +785,348 @@ run_loop untracked-normal "SELFTEST_INDEX_CAPTURE=$REC" -- --repo "$R" --max-ite
 cmp -s "$REC/before" "$REC/after" || { cat "$OUT"; exit 122; }
 git -C "$R" worktree list --porcelain -z | tr '\\0' '\\n' | grep -qx 'locked dev-workflow-loop: docs/tasks/進行中_untracked-a.md' || { cat "$OUT"; exit 123; }
 ''', 0, transform)
+
+
+    # ── 1 回の起動で 2 回照合する(verify_environment_pair)の、周の中での振る舞い ──
+    def aux_action(self, action):
+        """aux() の先頭に action(有効 plugin の一覧の確定後だけ)を差し込む変換。"""
+        def transform(source):
+            point = 'aux() { # $1=stdout のファイル 残り=補助の CLI の引数(stderr は <stdout のファイル>.err)\n  local out="$1"\n'
+            self.assertEqual(source.count(point), 1)
+            # 最初のスタブの証明(--prove-host の起動)には効かせない: 試験の run_loop が SELFTEST_AUX_ACTION=1 を渡したときだけ動かす
+            return source.replace(point, point + '  if [ "${ENV_INVENTORY_READY:-0}" -eq 1 ] && [ "${SELFTEST_AUX_ACTION:-}" = 1 ]; then\n' + action + '\n  fi\n')
+        return transform
+
+    def test_guard_body_rewritten_during_the_helper_cli_stops_before_any_child(self):
+        action = ('    if [ ! -e "$ENV_TEMP/mutated" ]; then : >"$ENV_TEMP/mutated"; '
+                  'printf "\\n# rewritten while the helper CLI runs\\n" >>"$TRUSTED_ENV_GUARD"; fi')
+        out = self.run_case("""
+newrepo pair-guard-body
+addtask sync-a 2026-01-01
+commit
+newrec pair-guard-body
+run_loop pair-guard-body "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$(calls)" = "" ] || { cat "$OUT"; exit 131; }
+""", 20, self.aux_action(action))
+        self.assertIn('environment', out)
+
+    def test_plugin_copy_rewritten_during_the_helper_cli_stops_before_any_child(self):
+        action = ('    if [ ! -e "$ENV_TEMP/mutated" ]; then : >"$ENV_TEMP/mutated"; '
+                  'printf "\\n# rewritten while the helper CLI runs\\n" >>"$PLUGIN_ROOT/skills/ship-task/scripts/loop-state.py"; fi')
+        self.run_case("""
+newrepo pair-copy
+addtask sync-a 2026-01-01
+commit
+newrec pair-copy
+run_loop pair-copy "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$(calls)" = "" ] || { cat "$OUT"; exit 132; }
+""", 20, self.aux_action(action))
+
+    def test_guard_body_rewritten_during_the_helper_cli_in_finish_is_environment_changed(self):
+        def transform(source):
+            point = '  local code="$1" why="$2" n\n  trap - TERM HUP INT\n'
+            self.assertEqual(source.count(point), 1)
+            source = source.replace(point, point + '  SELFTEST_IN_FINISH=1\n')
+            return self.aux_action(
+                '    if [ "${SELFTEST_IN_FINISH:-}" = 1 ] && [ ! -e "$ENV_TEMP/mutated" ]; then : >"$ENV_TEMP/mutated"; '
+                'printf "\\n# rewritten while the helper CLI runs\\n" >>"$TRUSTED_ENV_GUARD"; fi')(source)
+        out = self.run_case("""
+newrepo pair-finish
+addtask sync-a 2026-01-01
+commit
+newrec pair-finish
+run_loop pair-finish "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+""", 20, transform)
+        self.assertIn('environment-changed', out)
+
+    def test_killing_the_guard_midway_stops_for_a_fixed_reason_not_sigpipe(self):
+        action = ('    if [ ! -e "$ENV_TEMP/killed" ]; then : >"$ENV_TEMP/killed"; '
+                  'pkill -KILL -P "$pair_pid" || true; kill -KILL "$pair_pid" 2>/dev/null || true; sleep 0.3; fi')
+        out = self.run_case("""
+newrepo pair-kill
+addtask sync-a 2026-01-01
+commit
+newrec pair-kill
+run_loop pair-kill "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$(calls)" = "" ] || { cat "$OUT"; exit 133; }
+""", 20, self.aux_action(action))
+        self.assertIn('environment', out)
+
+    def test_term_to_loop_sh_only_during_the_helper_cli_in_promotion_is_deferred(self):
+        action = ('    if [ "$PROMOTION_CRITICAL" = 1 ] && [ "${ITER_COUNT:-}" = 2 ] && [ ! -e "$ENV_TEMP/term-sent" ]; then '
+                  ': >"$ENV_TEMP/term-sent"; kill -TERM "$$"; fi')
+        self.run_case("""
+newrepo pair-term
+addtask pr-a 2026-01-01
+addtask pr-b 2026-01-02
+addtask pr-c 2026-01-03
+commit
+newrec pair-term
+run_loop pair-term "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 3 "${COMMON_ARGS[@]}"
+[ "$RC" = 143 ] || { cat "$OUT"; exit 134; }
+SD="$(state_dir pair-term)"
+[ "$(calls)" = 'pr-a pr-b' ] || { cat "$OUT"; exit 135; }
+[ ! -e "$SD/stop-mark.md" ] && [ ! -d "$SD/inflight" ] || { cat "$OUT"; exit 136; }
+[ -s "$SD/last-verified.json" ] || exit 137
+run_loop pair-term -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$(calls)" = 'pr-a pr-b pr-c' ] || { cat "$OUT"; exit 138; }
+""", 0, self.aux_action(action))
+
+    def test_helper_cli_failure_keeps_the_same_stderr_and_stops(self):
+        def transform(source):
+            point = '  if ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を打つ直前に'
+            self.assertEqual(source.count(point), 1)
+            return source.replace(point, '  if { [ "${ENV_INVENTORY_READY:-0}" -eq 1 ] && [ "${SELFTEST_AUX_ACTION:-}" = 1 ]; } || ! host_same; then\n    echo "ERROR [host-proof] 補助の CLI を打つ直前に')
+        out = self.run_case("""
+newrepo pair-aux-fail
+addtask sync-a 2026-01-01
+commit
+newrec pair-aux-fail
+run_loop pair-aux-fail "SELFTEST_AUX_ACTION=1" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ "$(calls)" = "" ] || { cat "$OUT"; exit 139; }
+""", 20, transform)
+        self.assertIn('ERROR [host-proof] 補助の CLI を打つ直前に、ホスト CLI の実体が控えた時と違う', out)
+        self.assertNotIn('Broken pipe', out)
+        self.assertNotIn('execute_coproc', out)
+
+    # ── 隣り合う digest の組(state_digest_pair)──
+    def digest_pair_case(self, label, expected_message, point, action):
+        def transform(source):
+            self.assertEqual(source.count(point), 1)
+            return source.replace(point, '  if [ "$ITER_COUNT" = 1 ]; then\n' + action + '\n  fi\n' + point)
+        self.run_case("""
+newrepo @LABEL@
+addtask pr-a 2026-01-01
+addtask pr-b 2026-01-02
+commit
+newrec @LABEL@
+run_loop @LABEL@ "SELFTEST_SECRET=$SENTINEL" -- --repo "$R" --max-iterations 2 "${COMMON_ARGS[@]}"
+SD="$(state_dir @LABEL@)"
+[ "$RC" = 10 ] || { cat "$OUT"; exit 141; }
+[ "$(calls)" = pr-a ] || { cat "$OUT"; exit 142; }
+[ -f "$SD/stop-mark.md" ] || { cat "$OUT"; exit 143; }
+grep -rqF -- '@MESSAGE@' "$SD" || { cat "$OUT"; exit 144; }
+""".replace('@LABEL@', label).replace('@MESSAGE@', expected_message), 10, transform)
+
+    PAIR_FIRST = '  state_digest_pair "$expected" "$verified" || true\n'
+    PAIR_SECOND = '  state_digest_pair "$observed" "$verified" || true\n'
+
+    def test_each_digest_of_the_first_pair_replaced_by_a_link_stops_with_its_own_wording(self):
+        self.digest_pair_case('pair1-expected', '検証済みの期待状態を保持できない', self.PAIR_FIRST,
+                              '    rm -f -- "$expected"\n    ln -s -- "$SELFTEST_SECRET" "$expected"')
+        self.digest_pair_case('pair1-verified', '検証済みの状態が基準の作成中に書き換わった', self.PAIR_FIRST,
+                              '    rm -f -- "$verified"\n    ln -s -- "$SELFTEST_SECRET" "$verified"')
+
+    def test_each_digest_of_the_second_pair_replaced_by_a_link_stops_with_its_own_wording(self):
+        self.digest_pair_case('pair2-observed', '最終観察の状態を保持できない', self.PAIR_SECOND,
+                              '    rm -f -- "$observed"\n    ln -s -- "$SELFTEST_SECRET" "$observed"')
+        self.digest_pair_case('pair2-verified', '検証済みの状態が最終観察中に書き換わった', self.PAIR_SECOND,
+                              '    rm -f -- "$verified"\n    ln -s -- "$SELFTEST_SECRET" "$verified"')
+
+    def test_unreadable_digest_files_stop_with_the_same_wording_as_links(self):
+        if os.geteuid() == 0:
+            self.skipTest('root では権限 000 でも読めるので確かめられない')
+        self.digest_pair_case('pair1-expected-denied', '検証済みの期待状態を保持できない', self.PAIR_FIRST,
+                              '    chmod 000 "$expected"')
+        self.digest_pair_case('pair1-verified-denied', '検証済みの状態が基準の作成中に書き換わった', self.PAIR_FIRST,
+                              '    chmod 000 "$verified"')
+        self.digest_pair_case('pair2-observed-denied', '最終観察の状態を保持できない', self.PAIR_SECOND,
+                              '    chmod 000 "$observed"')
+        self.digest_pair_case('pair2-verified-denied', '検証済みの状態が最終観察中に書き換わった', self.PAIR_SECOND,
+                              '    chmod 000 "$verified"')
+
+    def test_rewriting_loop_state_copy_before_the_pair_digest_is_stopped_by_the_check(self):
+        for label, point in (('pair1-code', self.PAIR_FIRST), ('pair2-code', self.PAIR_SECOND)):
+            with self.subTest(pair=label):
+                def transform(source, point=point):
+                    self.assertEqual(source.count(point), 1)
+                    action = """  if [ "$ITER_COUNT" = 1 ]; then
+  cat >"$LOOP_STATE_PY" <<'PY_DIGEST'
+import os
+with open(os.environ['SELFTEST_ATTACK_MARKER'], 'w') as stream:
+    stream.write('executed')
+print('0' * 64)
+PY_DIGEST
+  fi
+"""
+                    return source.replace(point, action + point)
+                self.run_case("""
+newrepo @LABEL@
+addtask pr-a 2026-01-01
+commit
+newrec @LABEL@
+run_loop @LABEL@ "SELFTEST_ATTACK_MARKER=$REC/digest-executed" -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"
+[ ! -e "$REC/digest-executed" ] || { cat "$OUT"; exit 145; }
+[ "$RC" = 10 ] || { cat "$OUT"; exit 146; }
+grep -qF 'ERROR [environment-guard] 信頼コピーが変わった' "$OUT" || { cat "$OUT"; exit 147; }
+""".replace('@LABEL@', label), 10, transform)
+
+
+class StateDigestPairTests(unittest.TestCase):
+    """state_digest_pair が、補助の出力と終了コードの組み合わせのうち、使える組だけを使う。"""
+    HEX_A, HEX_B = 'a' * 64, 'b' * 64
+
+    @classmethod
+    def setUpClass(cls):
+        text = (ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/loop.sh').read_text()
+        cls.function = 'state_digest_pair() {' + text.split('state_digest_pair() {', 1)[1].split('\n}\n', 1)[0] + '\n}\n'
+        cls.tmp = tempfile.TemporaryDirectory(prefix='state-digest-pair-')
+        cls.helper = Path(cls.tmp.name) / 'fake-loop-state.py'
+        cls.helper.write_text('import os, sys\n'
+                              'open(os.environ["CALLS"], "a").write(" ".join(sys.argv[1:]) + "\\n")\n'
+                              'sys.stdout.write(os.environ["FAKE_OUT"].replace("|", "\\n"))\n'
+                              'sys.exit(int(os.environ["FAKE_RC"]))\n')
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def run_pair(self, output, rc, verify_ok=True):
+        calls = Path(self.tmp.name) / 'calls'
+        calls.unlink(missing_ok=True)
+        shell = ('set -euo pipefail\n'
+                 f'PY_ABS={shlex.quote(sys.executable)}\nLOOP_STATE_PY={shlex.quote(str(self.helper))}\n'
+                 'STATE_MAX_ITEMS=1 STATE_MAX_BYTES=2 STATE_MAX_FILE_BYTES=3 STATE_MAX_SECONDS=4\nSTATE_GIT_UNSAFE=0\n'
+                 + ('verify_environment() { return 0; }\n' if verify_ok else 'verify_environment() { STATE_GIT_UNSAFE=1; return 1; }\n')
+                 + self.function +
+                 'rc=0; state_digest_pair /x/one /x/two || rc=$?\n'
+                 'printf "rc=%s [%s] [%s] unsafe=%s" "$rc" "$DIGEST1" "$DIGEST2" "$STATE_GIT_UNSAFE"\n')
+        got = subprocess.run(['bash', '-c', shell], capture_output=True, text=True, timeout=30,
+                             env={**os.environ, 'FAKE_OUT': output, 'FAKE_RC': str(rc), 'CALLS': str(calls)})
+        self.assertEqual(got.returncode, 0, got.stderr)
+        started = calls.read_text().splitlines() if calls.exists() else []
+        return got.stdout, started
+
+    def test_usable_outputs(self):
+        a, b = self.HEX_A, self.HEX_B
+        for output, rc, want in ((f'{a}|{b}', 0, f'rc=0 [{a}] [{b}] unsafe=0'),
+                                 (f'-|{b}', 20, f'rc=0 [] [{b}] unsafe=0'),
+                                 (f'{a}|-', 20, f'rc=0 [{a}] [] unsafe=0'),
+                                 (f'-|-', 20, 'rc=0 [] [] unsafe=0'),
+                                 (f'{a}|{b}|', 0, f'rc=0 [{a}] [{b}] unsafe=0')):
+            with self.subTest(output=output, rc=rc):
+                got, calls = self.run_pair(output, rc)
+                self.assertEqual(got, want)
+                # 1 回の起動だけ(読めなかった方を個別の起動でやり直さない)。上限の引数は渡る
+                self.assertEqual(calls, ['state-digests --state /x/one --state /x/two --max-items 1 --max-bytes 2 '
+                                         '--max-file-bytes 3 --max-seconds 4'])
+
+    def test_unusable_outputs_leave_both_empty(self):
+        a, b = self.HEX_A, self.HEX_B
+        cases = ((f'{a}|{b}', 1), (f'{a}|{b}', 20), (f'{a}|{b}', 9), (f'{a}|{b}', 2), (f'-|{b}', 0), (f'{a}|-', 0), ('-|-', 0),
+                 (f'-|{b}', 1), (f'{a}', 0), (f'{a}|{b}|{a}', 0), ('', 0), ('', 20), (f'{a}|{b[:63]}', 0),
+                 (f'{a}|{b.upper()}', 0), (f'{a}|zz', 0), (f'{a}| {b}', 0), (f'{a}||{b}', 0), (f'-|x', 20), (f'x|-', 20),
+                 (f'{a}|{b}||', 0), (f'{a}|{b}|||', 0), (f'{a}|{b}||', 20), (f'-|{b}||', 20))
+        for output, rc in cases:
+            with self.subTest(output=output, rc=rc):
+                got, calls = self.run_pair(output, rc)
+                self.assertRegex(got, r'^rc=1 \[\] \[\] unsafe=0$')
+                self.assertEqual(len(calls), 1)
+
+    def test_environment_failure_runs_no_helper(self):
+        got, calls = self.run_pair(f'{self.HEX_A}|{self.HEX_B}', 0, verify_ok=False)
+        self.assertEqual((got, calls), ('rc=1 [] [] unsafe=1', []))
+
+
+class PairShellVersionTests(unittest.TestCase):
+    """verify_environment_pair を、本物の関数の字面のまま、偽の guard と偽の補助 CLI で動かす小さな確かめ。
+
+    host の bash に加えて、環境変数 SHELL_REQUIREMENTS_BASH_4_4・SHELL_REQUIREMENTS_BASH_5_2 に絶対パスがあれば、
+    その bash でも流す(coproc の fd がサブシェルで閉じること・スカラーの変数へ写した fd を閉じ切る形・wait の終了コード)。"""
+    HARNESS = r"""
+set -eEuo pipefail
+shopt -s inherit_errexit
+ENVIRONMENT_STATE=state ENVIRONMENT_SHA=held ENV_GUARD_SHA=guard NET_TIMEOUT=10
+AUX_PLUGINS=(plugin list)
+LOCK_FD_TEST=1
+environment_call() { # 偽の guard: verify-pair の約束(verified → go を待つ → 終了コード)だけを真似る
+  local line
+  case "${FAKE_GUARD:-ok}" in
+    first-fails) exit 20 ;;
+    sigpipe-bait) printf 'verified\n'; exit 20 ;;
+    killed) printf 'verified\n'; kill -KILL "$BASHPID" ;;
+  esac
+  printf 'verified\n'
+  IFS= read -r line || exit 20
+  [ "$line" = go ] || { echo "guard got $line" >>"$LOG"; exit 20; }
+  echo "guard got go" >>"$LOG"
+  exit "${FAKE_GUARD_RC:-0}"
+}
+aux() { # 偽の補助 CLI: 開いている fd を記録する
+  ls -1 "/proc/$BASHPID/fd" >"$LOG.fds"
+  case "${FAKE_AUX:-ok}" in
+    ok) return 0 ;;
+    fail) return 1 ;;
+    slow) sleep 0.4; return 0 ;;
+  esac
+}
+@FUNCTION@
+rc=0
+( verify_environment_pair /tmp/inventory-unused ) || rc=$?
+echo "rc=$rc"
+"""
+
+    @classmethod
+    def setUpClass(cls):
+        text = (ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/loop.sh').read_text()
+        function = 'verify_environment_pair() {' + text.split('verify_environment_pair() {', 1)[1].split('\n}\n', 1)[0] + '\n}\n'
+        cls.script = cls.HARNESS.replace('@FUNCTION@', function)
+        cls.bashes = [shutil.which('bash')]
+        cls.missing = []
+        for name in ('SHELL_REQUIREMENTS_BASH_4_4', 'SHELL_REQUIREMENTS_BASH_5_2'):
+            if os.environ.get(name):
+                cls.bashes.append(os.environ[name])
+            else:
+                cls.missing.append(name)
+
+    def test_old_bash_versions_are_checked_when_their_paths_are_given(self):
+        # host の bash の確かめは、ほかのテストが常に流す。実体の無い版だけを、理由つきで skip する(成功扱いにしない)
+        for name in ('SHELL_REQUIREMENTS_BASH_4_4', 'SHELL_REQUIREMENTS_BASH_5_2'):
+            with self.subTest(version=name):
+                if name in self.missing:
+                    self.skipTest('環境変数 ' + name + ' に bash の実体の絶対パスが無い。この版は未確認')
+                result, log, fds = self.run_pair(os.environ[name])
+                self.assertEqual((result.stdout.strip(), result.stderr), ('rc=0', ''))
+
+    def run_pair(self, bash, **env):
+        with tempfile.TemporaryDirectory(prefix='pair-shell-') as tmp:
+            log = Path(tmp) / 'log'
+            result = subprocess.run([bash, '-c', self.script], capture_output=True, text=True, timeout=60,
+                                    env={**os.environ, 'LOG': str(log), **env})
+            fds = (Path(str(log) + '.fds').read_text().split() if Path(str(log) + '.fds').exists() else None)
+            return result, (log.read_text() if log.exists() else ''), fds
+
+    def test_success_passes_no_extra_fd_to_the_helper_cli(self):
+        for bash in self.bashes:
+            with self.subTest(bash=bash):
+                result, log, fds = self.run_pair(bash)
+                self.assertEqual((result.stdout.strip(), result.stderr), ('rc=0', ''), bash)
+                self.assertIn('guard got go', log)
+                self.assertIsNotNone(fds)
+                self.assertEqual(sorted(set(fds) - {'0', '1', '2', '255'}), [], (bash, fds))
+
+    def test_failures_all_return_1_and_the_guard_gets_stop_when_the_helper_cli_fails(self):
+        cases = (({'FAKE_AUX': 'fail'}, 'guard got stop'),
+                 ({'FAKE_GUARD_RC': '20'}, 'guard got go'),
+                 ({'FAKE_GUARD_RC': '3'}, 'guard got go'),
+                 ({'FAKE_GUARD': 'first-fails'}, ''))
+        for bash in self.bashes:
+            for env, logged in cases:
+                with self.subTest(bash=bash, env=env):
+                    result, log, fds = self.run_pair(bash, **env)
+                    self.assertEqual((result.stdout.strip(), result.stderr), ('rc=1', ''), (bash, result.stderr))
+                    self.assertIn(logged, log)
+
+    def test_a_guard_that_is_gone_does_not_stop_the_parent_with_sigpipe(self):
+        for bash in self.bashes:
+            with self.subTest(bash=bash):
+                result, log, fds = self.run_pair(bash, FAKE_GUARD='sigpipe-bait', FAKE_AUX='slow')
+                self.assertEqual(result.stdout.strip(), 'rc=1', (bash, result.stderr))
+                self.assertNotIn('Broken pipe', result.stderr)
+                self.assertNotEqual(result.returncode, 141)
+                result, log, fds = self.run_pair(bash, FAKE_GUARD='killed', FAKE_AUX='slow')
+                self.assertEqual(result.stdout.strip(), 'rc=1', (bash, result.stderr))
+                self.assertNotIn('Broken pipe', result.stderr)
 
 
 if __name__ == '__main__':

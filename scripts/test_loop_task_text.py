@@ -32,7 +32,7 @@ def parent_shell():
             + 'PY_ABS=' + shlex.quote(sys.executable) + '\n'
             + 'FIXED_POLICY="{}"\n'
             + 'die() { printf "ERROR [%s] %s\\n" "$2" "$3" >&2; exit "$1"; }\n'
-            + ''.join(shell_function(name) for name in ('py', 'environment_call', 'read_held_copy', 'hold_task_text', 'hold_child_output', 'bind_environment')))
+            + ''.join(shell_function(name) for name in ('py', 'environment_call', 'read_held_copy', 'hold_task_text', 'hold_child_output', 'json_fields_into', 'bind_environment')))
 
 
 class TaskTextTests(unittest.TestCase):

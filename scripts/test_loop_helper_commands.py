@@ -1,6 +1,10 @@
 """loop.sh の `py <名前>` の呼出しと、補助の COMMANDS の登録が一致することを静的に確かめる。"""
 import ast
+import os
 import re
+import shlex
+import subprocess
+import sys
 import unittest
 from pathlib import Path
 
@@ -268,7 +272,7 @@ class LoopHelperCommandsTest(unittest.TestCase):
 
     def test_current_call_set(self):
         helper_calls, task_calls, child_calls, _ = analyze(self.text)
-        self.assertEqual(len(helper_calls | task_calls | child_calls), 20)
+        self.assertEqual(len(helper_calls | task_calls | child_calls), 22)
 
     def test_route_arms_do_not_share_names(self):
         # case は先の腕を選ぶので、2 つの腕に同じ名前があると後の腕に届かない
@@ -278,6 +282,149 @@ class LoopHelperCommandsTest(unittest.TestCase):
         helper_calls, task_calls, child_calls, _ = analyze(self.text)
         self.assertEqual((helper_calls & task_calls, helper_calls & child_calls, task_calls & child_calls),
                          (set(), set(), set()))
+
+
+def function_source(text, name):
+    """loop.sh の関数 name の本文(`name() {` から、行頭の `}` まで)。"""
+    return name + '() {' + text.split(name + '() {', 1)[1].split('\n}\n', 1)[0] + '\n}\n'
+
+
+class SelectionAndFieldsHelperTest(unittest.TestCase):
+    """d21-list・json-fields と、select_task・json_fields_into の使い方。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.text = LOOP.read_text(encoding='utf-8')
+        cls.helper = split_loop(cls.text)[1]
+
+    def helper_run(self, *args, stdin=b'', env=None):
+        return subprocess.run(['python3', '-c', self.helper, *args], input=stdin, capture_output=True, cwd='/',
+                              env={**os.environ, 'PYTHONUTF8': '1', **(env or {})}, timeout=20)
+
+    # ── d21-list ──
+    D21_CASES = [
+        ('docs/進行中_a.md', '進行中_a'), ('docs/進行中_a b.md', 'a b'), ('docs/進行中_a$b.md', 'a$b'),
+        ('docs/進行中_a\tb.md', 'a\tb'), ('docs/進行中_a\nb.md', 'a\nb'), ('docs/進行中_a\x01.md', 'a\x01'),
+        ('-docs/進行中_a.md', 'a'), ('docs/-x/進行中_a.md', 'a'), ('進行中_.md', ''), ('進行中_-a.md', '-a'),
+        ('docs/進行中_a.md', 'a;b'), ('docs/進行中_a.md', "a'b"), ('docs/進行中_a.md', 'a#b'), ('docs/進行中_a.md', 'a~b'),
+        ('docs/進行中_\udcff.md', '\udcff'), ('.', 'x'), ('', 'x'),
+    ]
+
+    def test_d21_list_matches_py_d21_for_every_case(self):
+        pairs = [(rel.encode('utf-8', 'surrogateescape'), name.encode('utf-8', 'surrogateescape')) for rel, name in self.D21_CASES]
+        listed = self.helper_run('d21-list', stdin=b''.join(rel + b'\0' + name + b'\0' for rel, name in pairs))
+        self.assertEqual((listed.returncode, listed.stderr), (0, b''))
+        lines = listed.stdout.decode().split('\n')
+        self.assertEqual(lines.pop(), '')
+        self.assertEqual(len(lines), len(pairs))
+        saw_ok = saw_ng = False
+        for (rel, name), line in zip(pairs, lines):
+            single = subprocess.run(['python3', '-c', self.helper, 'd21', rel, name], capture_output=True, cwd='/',
+                                    env={**os.environ, 'PYTHONUTF8': '1'}, timeout=20)
+            if single.returncode == 0:
+                self.assertEqual(line, 'ok', (rel, name))
+                saw_ok = True
+            else:
+                self.assertEqual(single.returncode, 1)
+                self.assertEqual(line, 'ng\t' + single.stderr.decode('utf-8', 'surrogateescape').rstrip('\n'), (rel, name))
+                saw_ng = True
+        self.assertTrue(saw_ok and saw_ng)
+
+    def test_d21_list_reasons_are_the_known_wordings(self):
+        got = self.helper_run('d21-list', stdin='x y\0a\0-d/x\0a\0ok.md\0-n\0ok.md\0\0'.encode()).stdout.decode().split('\n')
+        self.assertEqual(got[:5], ['ng\tパス に空白か制御文字がある', "ng\tパス に '-' で始まる要素がある",
+                                   "ng\tタスク名が '-' で始まる", 'ng\tタスク名が空', ''])
+
+    def test_d21_list_rejects_an_input_that_is_not_in_pairs_and_prints_nothing_for_none(self):
+        odd = self.helper_run('d21-list', stdin=b'a\0b\0c\0')
+        self.assertEqual((odd.returncode, odd.stdout), (1, b''))
+        none = self.helper_run('d21-list', stdin=b'')
+        self.assertEqual((none.returncode, none.stdout, none.stderr), (0, b'', b''))
+
+    def test_py_d21_is_unchanged(self):
+        ok = self.helper_run('d21', 'docs/進行中_a.md', 'a')
+        self.assertEqual((ok.returncode, ok.stdout, ok.stderr), (0, b'', b''))
+        ng = self.helper_run('d21', 'docs/a b', 'a')
+        self.assertEqual((ng.returncode, ng.stderr), (1, 'パス に空白か制御文字がある\n'.encode()))
+        self.assertEqual(self.helper_run('d21', 'docs').returncode, 0)
+
+    # ── json-fields ──
+    def fields(self, text, *specs):
+        got = self.helper_run('json-fields', *specs, stdin=text.encode())
+        return got.returncode, got.stdout
+
+    def test_json_fields_get_and_value_outputs_nul_separated_values(self):
+        text = '{"a":"x","b":"line\\n\\n","c":{"z":1,"y":[true,null]},"d":"","e":3}'
+        self.assertEqual(self.fields(text, 'get:a', 'get:b', 'value:c', 'get:d', 'value:e'),
+                         (0, b'x\0line\0{"y":[true,null],"z":1}\0\0' + b'3\0'))
+
+    def test_json_fields_stop_at_the_first_failing_field(self):
+        text = '{"a":"x","n":3,"b":"y"}'
+        for specs, want_out in ((('get:a', 'get:missing', 'get:b'), b'x\0'),
+                                (('get:a', 'get:n', 'get:b'), b'x\0'),
+                                (('get:a', 'value:missing', 'get:b'), b'x\0'),
+                                (('get:missing', 'get:a'), b'')):
+            with self.subTest(specs=specs):
+                rc, out = self.fields(text, *specs)
+                self.assertNotEqual(rc, 0)
+                self.assertEqual(out, want_out)
+        self.assertEqual(self.fields('{"a":"x\\u0000y","b":"z"}', 'get:b', 'get:a')[1], b'z\0')
+        self.assertNotEqual(self.fields('{"a":"x\\u0000y"}', 'get:a')[0], 0)
+        self.assertNotEqual(self.fields('not json', 'get:a')[0], 0)
+        self.assertNotEqual(self.fields('["a"]', 'get:a')[0], 0)
+        self.assertNotEqual(self.fields('{"a":"x"}', 'frob:a')[0], 0)
+
+    def test_json_fields_values_equal_json_get_and_json_value(self):
+        text = '{"state":"/s","fixed":{"b":[1,2],"a":"é"},"resolver_version":7}'
+        for spec, command, key in (('get:state', 'json-get', 'state'), ('value:fixed', 'json-value', 'fixed'),
+                                   ('value:resolver_version', 'json-value', 'resolver_version')):
+            single = self.helper_run(command, key, stdin=text.encode())
+            self.assertEqual(self.fields(text, spec), (0, single.stdout.rstrip(b'\n') + b'\0'))
+
+    # ── json_fields_into(bash)──
+    def run_into(self, json_text, *specs):
+        shell = ('set -euo pipefail\nPY_HELPER=' + shlex.quote(self.helper) + '\n'
+                 + function_source(self.text, 'py') + function_source(self.text, 'json_fields_into')
+                 + 'A=old; B=old; C=old\n'
+                 + 'if json_fields_into "$JSON" ' + ' '.join(specs) + '; then echo ok; else echo "ng $JSON_FIELDS_BAD"; fi\n'
+                 + 'printf "[%s][%s][%s]" "$A" "$B" "$C"\n')
+        got = subprocess.run(['bash', '-c', shell], capture_output=True, text=True, env={**os.environ, 'JSON': json_text}, timeout=30)
+        self.assertEqual(got.returncode, 0, got.stderr)
+        return got.stdout
+
+    def test_json_fields_into_sets_all_values_only_when_every_field_arrives(self):
+        text = '{"a":"one","b":"two\\n","c":{"k":[1]}}'
+        self.assertEqual(self.run_into(text, 'A=get:a', 'B=get:b', 'C=value:c'), 'ok\n[one][two][{"k":[1]}]')
+        self.assertEqual(self.run_into('{"a":"one","c":3}', 'A=get:a', 'B=get:b', 'C=value:c'), 'ng 2\n[old][old][old]')
+        self.assertEqual(self.run_into('{"a":"one","b":"two"}', 'A=get:a', 'B=get:b', 'C=value:c'), 'ng 3\n[old][old][old]')
+        self.assertEqual(self.run_into('{"b":"two"}', 'A=get:a', 'B=get:b'), 'ng 1\n[old][old][old]')
+        self.assertEqual(self.run_into('{"a":3,"b":"two"}', 'A=get:a', 'B=get:b'), 'ng 1\n[old][old][old]')
+        self.assertEqual(self.run_into('{"a":"x\\u0000y","b":"two"}', 'A=get:a', 'B=get:b'), 'ng 1\n[old][old][old]')
+        self.assertEqual(self.run_into('{"a":"","b":"two"}', 'A=get:a', 'B=get:b'), 'ok\n[][two][old]')
+        self.assertEqual(self.run_into('broken', 'A=get:a', 'B=get:b'), 'ng 1\n[old][old][old]')
+
+    def test_each_caller_keeps_its_own_failure_wording(self):
+        component = function_source(self.text, 'component_check')
+        for wording in ('定義の保持値が不正', '固定設定の保持値が不正', '固定設定を読めない', '名前解決の版を読めない'):
+            self.assertIn(wording, component)
+        self.assertIn('json_fields_into "$HOST_IDENTITY" HOST_EXEC=get:realpath HOST_SHA=get:sha256 HOST_KIND=get:kind', self.text)
+        self.assertIn('ホスト CLI の実体の値を読めない', self.text)
+        bind = function_source(self.text, 'bind_environment')
+        self.assertIn('json_fields_into "$receipt"', bind)
+        self.assertNotIn('py json-get', bind)
+
+    # ── select_task / skip_reason の呼び方 ──
+    def test_select_task_calls_skip_reason_as_a_plain_statement(self):
+        select = function_source(self.text, 'select_task')
+        calls = [line for line in select.split('\n') if 'skip_reason' in line and not line.lstrip().startswith('#')]
+        self.assertEqual([line.strip() for line in calls], ['skip_reason "$wt" "$f"'])
+        self.assertNotIn('$(skip_reason', self.text)
+        self.assertNotIn('py taskinfo', select)
+        self.assertEqual(select.count('py d21-list'), 1)
+        skip = function_source(self.text, 'skip_reason')
+        self.assertEqual(skip.count('py taskinfo'), 1)
+        self.assertNotIn('py d21 ', skip)
+        self.assertIn('die 30 internal', skip)
 
 
 if __name__ == '__main__':

@@ -4,6 +4,7 @@
 # 使い方:
 #   bash diff-snapshot-selftest.sh            # 全ケース実行
 #   bash diff-snapshot-selftest.sh -v         # 各ケースの出力も表示
+#   bash diff-snapshot-selftest.sh --only c32,others   # 節を選ぶ(c32=㉜ の節 / others=㉜ 以外のすべての節)
 #   DIFF_SNAPSHOT=<パス> bash diff-snapshot-selftest.sh   # 別の実装を対象にする(変異テスト用)
 #
 # 検証するのは「終了コードと出力の契約」「機密が漏れないこと」「改竄で実装内容を隠せないこと」
@@ -46,7 +47,37 @@ SCRIPT_DIR="$(dirname -- "$SELF_PATH")"
 TARGET="${DIFF_SNAPSHOT:-$SCRIPT_DIR/diff-snapshot.sh}"
 case "$TARGET" in /*) : ;; *) TARGET="$PWD/$TARGET" ;; esac
 VERBOSE=0
-[ "${1:-}" = "-v" ] && VERBOSE=1
+ONLY=""; ONLY_SET=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -v) VERBOSE=1; shift ;;
+    --only)
+      [ "$ONLY_SET" -eq 0 ] || { echo "ERROR: --only は 1 回だけ指定できる" >&2; exit 1; }
+      [ $# -ge 2 ] || { echo "ERROR: --only に値が必要" >&2; exit 1; }
+      ONLY_SET=1; ONLY="$2"; shift 2 ;;
+    *) echo "ERROR: 不明な引数: $1" >&2; exit 1 ;;
+  esac
+done
+if [ "$ONLY_SET" -eq 1 ]; then
+  case "$ONLY" in
+    *[!a-z0-9,]*) echo "ERROR: --only の値に使えない文字がある(英小文字・数字・カンマだけ): '$ONLY'" >&2; exit 1 ;;
+    ""|,*|*,|*,,*) echo "ERROR: --only の値が空、または空の名前を含む: '$ONLY'" >&2; exit 1 ;;
+  esac
+  IFS=, read -r -a ONLY_NAMES <<<"$ONLY"
+  for only_name in "${ONLY_NAMES[@]}"; do
+    case "$only_name" in
+      c32|others) : ;;
+      *) echo "ERROR: --only の名前が不明: '$only_name'(c32・others のどれか)" >&2; exit 1 ;;
+    esac
+  done
+  unset only_name
+fi
+want() { # $1=節の名前 → 0 なら流す(--only が無ければ常に流す)
+  [ "$ONLY_SET" -eq 0 ] && return 0
+  case ",$ONLY," in *",$1,"*) return 0 ;; esac
+  return 1
+}
+SECTION_OTHERS_1=0; SECTION_C32=0; SECTION_OTHERS_2=0   # 各ブロックが最後まで流れたかの印
 
 [ -f "$TARGET" ] || { echo "ERROR: $TARGET が無い" >&2; exit 1; }
 
@@ -81,11 +112,9 @@ IS_ROOT=0
 
 PASS=0
 FAIL=0
-RESULTS=""
-ok() { PASS=$((PASS + 1)); RESULTS="$RESULTS
-PASS  $1"; }
-ng() { FAIL=$((FAIL + 1)); RESULTS="$RESULTS
-FAIL  $1"; }
+RESULTS=()
+ok() { PASS=$((PASS + 1)); RESULTS+=("PASS  $1"); }
+ng() { FAIL=$((FAIL + 1)); RESULTS+=("FAIL  $1"); }
 
 # ── 汎用アサーション ──
 ckt() { local d="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$d"; else ng "$d"; fi; }
@@ -305,6 +334,7 @@ base_repo() { # $1=$WORK 配下の名前 → R と B を設定する
   B="$(GIT "$R" rev-parse HEAD)"
 }
 
+if want others; then
 # ── ① 新規ファイルのみ ──
 base_repo c01
 printf 'export const x = 1;\n' >"$R/new.ts"
@@ -3108,6 +3138,9 @@ unset SELFTEST_LFS_TRACE
 
 TB=$(printf '\t')
 
+SECTION_OTHERS_1=1
+fi
+if want c32; then
 # ── ㉜ stat キャッシュによる隠蔽 ──
 sha_file() { sha256sum -- "$1" | cut -d' ' -f1; }
 C32_FIXED='@1000000000'
@@ -3178,6 +3211,9 @@ secf "$OUT" "追跡差分"
 ckt "㉜ 通常の変更は本文に出る" inf "$SECF" '+A2'
 ckf "㉜ 定義外の skip-worktree が削除として本文に出ない" inf "$SECF" 'hidden/h01.txt'
 
+SECTION_C32=1
+fi
+if want others; then
 # ── ㉝ 一時ディレクトリがリポジトリ内 ──
 base_repo c33
 printf 'NEWBODY\n' >"$R/new.txt"
@@ -3968,11 +4004,19 @@ reset_out
 run --cwd "$R" --base "$B" --out "$OUT" --exclude-glob '.env.*' --exclude-exception-glob '.env.example'
 ckeq "例外なし: 除外を外すオプションは存在しない(usage エラー)" "$RC" 2
 
+SECTION_OTHERS_2=1
+fi
 unset SELFTEST_GITLOG
 unset SELFTEST_TRACE
 
+# 節の中の展開の誤りで、その節の残りが黙って飛ばされていないか(選んだ節は最後まで流れたか)
+if want others && [ "$SECTION_OTHERS_1" -ne 1 ]; then ng "others(前半)の節が最後まで流れなかった"; fi
+if want c32 && [ "$SECTION_C32" -ne 1 ]; then ng "c32 の節が最後まで流れなかった"; fi
+if want others && [ "$SECTION_OTHERS_2" -ne 1 ]; then ng "others(後半)の節が最後まで流れなかった"; fi
+
 echo
-printf '%s\n' "$RESULTS"
+echo
+[ "${#RESULTS[@]}" -eq 0 ] || printf '%s\n' "${RESULTS[@]}"
 echo
 echo "結果: PASS ${PASS} 件 / FAIL ${FAIL} 件"
 [ "$FAIL" -eq 0 ]

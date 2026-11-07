@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import select
 import selectors
 import stat
 import subprocess
@@ -1068,7 +1069,11 @@ def snapshot(root, specs, inventory=None, blobs=None, expected=None):
         if expected is not None and entries[key] != expected[key]:
             raise Stop('保持済み Git 設定が変わったため参照先を読まず停止した')
         if raw is not None:
-            pending.extend(includes(Path(path), raw, budget))
+            # 照合のとき(expected がある)は、上で控えと同じバイト列だと確かめてある。起動時に Git が解析できた
+            # そのバイト列に include の字面が無ければ、行き先は作れない(節の名前は字面で、大文字小文字だけ
+            # を同じに扱う)ので、git を起動しない。起動時の控え(expected が無い)は必ず git で解析する。
+            if expected is None or b'include' in raw.lower():
+                pending.extend(includes(Path(path), raw, budget))
     # 古い state は従来どおり installed tree を照合する。
     if 'components' not in specs:
         for item in inventory or []:
@@ -1102,6 +1107,36 @@ def verify(state, expected, current_inventory=None):
     if copied != wanted:
         raise Stop('信頼コピーが変わった')
     return value
+
+
+def run_pair(a):
+    """1 回の起動で 2 回照合する。1 回目(一覧なし)→ verified → 親の go → 一覧つきの 2 回目 → 自分の本体の照らし直し。
+
+    stop・違う語・EOF・時間切れは、何も出さずに os._exit(20) で終える(SystemExit を投げると、固定の読み込み器が
+    事実と違う「保持した検査用コピーを安全に実行できない」を足す)。"""
+    if not re.fullmatch('[a-f0-9]{64}', a.guard_sha256 or ''):
+        raise Stop('guard 本体の SHA-256 が必要')
+    if a.go_timeout <= 0:
+        raise Stop('go の待ち時間は正の整数でなければならない')
+    verify(a.state, a.expect_sha256)
+    sys.stdout.write('verified\n')
+    sys.stdout.flush()
+    deadline, got = time.monotonic() + a.go_timeout, b''
+    while len(got) < 3:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([0], [], [], remaining)[0]:
+            os._exit(20)
+        chunk = os.read(0, 3 - len(got))
+        if not chunk:
+            os._exit(20)
+        got += chunk
+    if got != b'go\n':
+        os._exit(20)
+    verify(a.state, a.expect_sha256, a.current_inventory)
+    # 本体(コピーの木の外)は 2 回目の読み込み器の hash の照合を通らないので、ここで控えた hash と照らす。
+    if sha(read_regular(Path(__file__))) != a.guard_sha256:
+        raise Stop('guard 本体が保持値と違う')
+    return 0
 
 
 def bootstrap(a):
@@ -1200,6 +1235,12 @@ def main():
             child.add_argument('--path', required=True)
         if cmd == 'exec':
             child.add_argument('argv', nargs=argparse.REMAINDER)
+    child = sub.add_parser('verify-pair')
+    child.add_argument('--state', required=True)
+    child.add_argument('--expect-sha256', required=True)
+    child.add_argument('--current-inventory', required=True)
+    child.add_argument('--guard-sha256', required=True)
+    child.add_argument('--go-timeout', type=int, required=True)
     child = sub.add_parser('host-settings')
     child.add_argument('--state', required=True)
     child.add_argument('--expect-sha256', required=True)
@@ -1212,6 +1253,8 @@ def main():
     try:
         if a.command == 'bootstrap':
             bootstrap(a)
+        elif a.command == 'verify-pair':
+            return run_pair(a)
         elif a.command == 'host-paths':
             print(json.dumps(host_paths(), ensure_ascii=True, separators=(',', ':')))
         elif a.command == 'host-settings':
