@@ -80,7 +80,8 @@ tar の取り出しではファイル名と数を限定します。リンクや�
   実行ファイルの指定が無い場合は失敗します。
   ソース入力の独立した計算値、実行 CPU、自己ハッシュ、出力、終了コード、作業フォルダの無変更を確かめます。
 - `check_resolve_task_dir.py` は、旧 Python 版と今回作った版の出力・終了値・ファイルの無変更を比較します。実行ファイルの指定が無い・不正な場合や、Python 3.10 系でない場合は終了 1 です。
-  通常利用者での権限検査と、承認済みの `0400` のエラー表示の差は [検査手順](../../docs/testing.md#タスク保存先の比較段階-1a)に従います。
+  通常利用者での権限検査と、承認済みの `0400`・非 UTF-8 出力の差は [検査手順](../../docs/testing.md#タスク保存先の比較段階-1a)に従います。
+  非 UTF-8 は `utf-8:strict` と `utf-8:surrogateescape` の専用ケースで検査し、通常の比較の条件を維持します。
 - 配布物のテストは、偽の ELF・Mach-O を材料に組み立て、実際の `validate.py` の関数で検査します。
   実行補助との結合テストは、テスト用の実行ファイルを実際の `support_native.py` で起動します。
   Rust の実行ファイルの確認は、各ビルドの後に `check_probe.py` と `check_resolve_task_dir.py` で行います。
@@ -92,6 +93,10 @@ tar の取り出しではファイル名と数を限定します。リンクや�
 python3 -B native/ci/build.py test
 (cd native/ci && python3 -B -m unittest discover -s scripts -p 'test_native_ci.py')
 ```
+
+非 UTF-8 の専用ケースをまとめて確かめるテスト内だけで、`PYTHONNODEBUGRANGES=1` を指定します。
+Python 3.11 以降の子プロセスでも、例外表示の位置の印を抑え、Python 3.10 と同じ表示を検査するためです。
+設定値もテストで確かめます。実バイナリの比較を Python 3.10 系に限る条件は変えません。
 
 ## ワークフローの検査
 

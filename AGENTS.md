@@ -223,7 +223,7 @@ python3 -B native/ci/source_input_hash.py --root .
 
 - Rust の書式・clippy(よくある誤りの検査)・テストは、4 種類の CI でもすべて必須。Linux 2 本と署名後の Mac 1 本は、別々の空の出力先から 2 回作り、バイト列が同じかを確かめる。
 - `DEV_WORKFLOW_TEST_NATIVE_BINARY` はテスト専用。未設定・空文字・不在・実行不能なら失敗にする。配布済みの実行ファイルへ切り替えない。
-- `check_resolve_task_dir.py` は、4 種類の各ビルドの 2 本と、署名後の Mac の両 CPU で実行する。権限による旧版との表示の差と、ファイルの無変更の検査は [docs/testing.md](docs/testing.md#タスク保存先の比較段階-1a) に従う。
+- `check_resolve_task_dir.py` は、4 種類の各ビルドの 2 本と、署名後の Mac の両 CPU で実行する。権限と非 UTF-8 出力による旧版との差、ファイルの無変更の検査は [docs/testing.md](docs/testing.md#タスク保存先の比較段階-1a) に従う。
 - `scripts/run-all.py` は新しい `scripts/test_*.py` も集める。Cargo と `native/ci/` の検査は別に流す。`run-all-container.sh` へ Cargo や外部ビルドの指定は追加しない。
 - 検査後は、自分が作った外部の出力先だけを片付ける。差分テストの補助とビルド情報の説明は [docs/testing.md](docs/testing.md) にある。
 

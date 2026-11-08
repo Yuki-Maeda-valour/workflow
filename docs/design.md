@@ -883,8 +883,12 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 
 - `dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]` は、旧版の `resolve-task-dir.py` と同じ優先順位で保存先を読み取りだけで解決する。引数・出力・終了値の元になる約束は [task-directory.md](../plugins/dev-workflow/skills/create-task/references/task-directory.md) にある。
 - 成功は JSON の標準出力と終了 0、解決失敗は JSON の標準出力と終了 1、候補複数は JSON の標準出力と終了 2 を返す。これらの標準エラーは空にする。引数の誤りは、旧版の `argparse` と同じ順序で検査する。
-- 一覧は読めても子の情報を取得する権限がない場合だけ、旧版との出力の差を認める。旧版は未処理の `PermissionError` を標準エラーへ出し、標準出力は空で終了 1 になる。Rust は同じ対象の権限エラーを JSON の標準出力へ出し、標準エラーは空で終了 1 になる。
-  - 利用者が 2026-11-08 に承認した差である。子を持つ管理ルートを `0400` にした専用ケースで検査する。通常の一致判定には混ぜず、ほかのエラーの完全一致を保つ。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
+- 一覧は読めても子の情報を取得する権限がない場合は、旧版との出力の差を認める。旧版は未処理の `PermissionError` を標準エラーへ出し、標準出力は空で終了 1 になる。Rust は同じ対象の権限エラーを JSON の標準出力へ出し、標準エラーは空で終了 1 になる。
+  - 利用者が 2026-11-08 に承認した差である。子を持つ管理ルートを `0400` にした専用ケースで検査する。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
+- 非 UTF-8 のパスが出力に含まれ、旧版の標準出力が `utf-8:strict` の場合にも差を認める。旧版は `main` の JSON 出力時に未処理の `UnicodeEncodeError` を標準エラーへ出し、標準出力は空で終了 1 になる。
+  - Rust は元のバイトを保持した標準出力と、解決結果の終了値を返す。標準エラーは空にする。旧 Python と Rust 本体を変更せず、この出力を維持する。
+  - 利用者が 2026-11-09 に承認した差である。`utf-8:strict` と `utf-8:surrogateescape` の専用ケースで検査する。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
+- 権限と非 UTF-8 の専用ケースは、通常の一致判定に混ぜない。通常の比較で認める差は、実行名の表示と独立コピーの絶対ルートだけである。ほかの出力と終了値の完全一致を保つ。
 - 比較は Python 3.10 系と通常利用者で実行する。Linux 2 種類・Mac 2 種類の CI は Python 3.10.11 を使う。実行前後のファイルが変わらないことも確かめる。詳しい検査は [testing.md](testing.md#タスク保存先の比較段階-1a) にある。
 - 旧 Python 版、各 skill と `loop.sh` の呼び出し、配布物、プラグインの版と `CHANGELOG.md` は変えない。段階 1b 以降は未完了である。
 

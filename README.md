@@ -256,7 +256,7 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 - 開発用ソースは `native/`、CI(変更を送るたびに自動で検査する仕組み)は `.github/workflows/native.yml` にあります。Rust `1.99.1` の導入と外部のビルド先は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)、必須コマンドは [AGENTS.md](AGENTS.md#rust-の検査段階-0a) にあります。
 - CI は Linux x86_64・Linux arm64・Mac Intel・Mac Apple Silicon の 4 種類で検査します。Linux 2 本と、Mac の両 CPU で動く 1 本を成果物にします。2 回のビルドの比較、入力の記録、旧版と Rust 版を比べるテストの補助は [docs/testing.md](docs/testing.md) に記しています。
 - 段階 0a では開発用の土台を作りました。段階 0b では、そのビルド手順で作った 3 本と入口 `bin/dev-workflow/launch.sh` を同梱しています。設定値と試し方は上の「Rust 版を試す(段階 0b)」にあります。
-- 段階 1a(#448)では、ソースに `resolve-task-dir` と旧版との比較を追加しました。比較は Python 3.10 系と通常利用者で実行します。CI の比較用 Python は 3.10.11 です。条件と、権限によるエラー表示の差は [検査手順](docs/testing.md#タスク保存先の比較段階-1a)にあります。
+- 段階 1a(#448)では、ソースに `resolve-task-dir` と旧版との比較を追加しました。比較は Python 3.10 系と通常利用者で実行します。CI の比較用 Python は 3.10.11 です。条件と、権限・非 UTF-8 出力による旧版との差は [検査手順](docs/testing.md#タスク保存先の比較段階-1a)にあります。
 - 新コマンドの配布と利用者の呼び出し変更は、後続の段階 1b で行います。段階 1b 以降は未完了です。
 - 切り替えを profile から読まず、自動で旧版へ戻しません。製品の実行ファイル指定用の環境変数は作りません。実装と配布を分ける決定、今後使う YAML・OS の部品の候補は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定) にあります。
 
