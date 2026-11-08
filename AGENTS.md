@@ -67,12 +67,12 @@
 .claude-plugin/marketplace.json     # マーケットプレイス定義
 plugins/dev-workflow/
 ├── .claude-plugin/plugin.json      # プラグイン定義
-├── bin/dev-workflow/               # Rust 試用の入口 launch.sh・Linux 2 本・Mac 共通 1 本・SHA256SUMS・build-info.json(段階 0b。#443)
+├── bin/dev-workflow/               # 共通の入口 launch.sh・Linux 2 本・Mac 共通 1 本・SHA256SUMS・build-info.json(段階 1b。#450)
 ├── hooks/                         # 使う道具の版の確かめ(SessionStart の hook の hooks.json・確かめの tool-versions.sh・道具と最低の版の一覧 tool-requirements.tsv。#431)
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
 native/                             # Rust 1.99.1 の開発用ソース(Cargo.toml・Cargo.lock・rust-toolchain.toml・crates/{cli,core,platform}・.cargo/ のビルド設定・ci/ のビルドと検査)
-.github/workflows/                  # native.yml。4 種類の機械で Rust を検査し、配布前の成果物を作る CI(変更を送るたびに自動で検査する仕組み)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
+.github/workflows/                  # native.yml(4 種類の機械のビルド)と dist-check.yml(配布入口の起動)の CI(変更を送るたびに自動で検査する仕組み)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py。配布入口は check_dist_launch.py、専用設定先への実導入は check_plugin_install.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/testing.md                     # テストの流し方の詳しい説明と時間の記録(AGENTS.md の「検証」の節から指す)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
@@ -194,8 +194,8 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 
 ### Rust の検査(段階 0a)
 
-- 段階 0a で作ったソースとビルドの検査は、段階 0b の配布後も続ける。配布した入口・3 本の試し方と必要環境は [runtime-requirements.md](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。利用者には Rust・Cargo の導入を求めない。
-- 段階 1a(#448)の `resolve-task-dir` は開発用ソースだけにある。配布物と既存の skill の呼び出しは段階 0b のままで、段階 1b 以降は未完了である。
+- 段階 0a で作ったソースとビルドの検査は、段階 0b の配布後も続ける。配布した入口・3 本の試し方と必要環境は [runtime-requirements.md](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にある。利用者には Rust・Cargo の導入を求めない。
+- 段階 1b(#450)では、段階 1a(#448)の `resolve-task-dir` を配布し、対象の skill と `loop.sh` を共通入口へつなぐ。未設定・`legacy` は旧 Python、`rust` だけ Rust を使う。配布と専用設定先への実導入の検査は [docs/testing.md](docs/testing.md#段階-1b-の配布と導入の検査) に従う。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
@@ -232,7 +232,7 @@ python3 -B native/ci/source_input_hash.py --root .
 PR を開く前に、merge する状態(main を取り込み、要るときは版を上げた状態)で全回帰テストを流し、結果を PR の本文に書く。次の順に進める。
 
 - 版を上げ、`CHANGELOG.md` に節を足すのは、配るプラグイン(`plugins/` の下・`.claude-plugin/marketplace.json`・プラグインを使わない導入の `setup.sh`)を変えた PR だけ。変えない PR は、版も `CHANGELOG.md` も変えない(例: #344・#355・#363・#369)。
-- Rust 移行の段階 0a(#442)では開発用の土台を作り、配るプラグイン・版・`CHANGELOG.md` は変えなかった。段階 0b(#443)は成果物と入口を同梱するため、main 取り込み後の v4 の次のマイナーへ上げる。2026-11-08 の決定と出典は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定)。
+- Rust 移行の段階 0a(#442)と 1a(#448)は開発用ソースの変更なので、版と `CHANGELOG.md` は変えなかった。段階 0b(#443)と 1b(#450)は配る物を変えるため、main 取り込み後の v4 の次のマイナーへ上げる。2026-11-08 の決定と出典は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定)。
 - この 2 つの節で実行する git のコマンドには、すべて Git の共通の安全用のオプション([base-commit.md](plugins/dev-workflow/skills/do-task/references/base-commit.md)。`publish-guard.py` の `SAFE_GIT_PREFIX` と同じ並び)を付ける。下の `git <安全用のオプション> …` は、その意味。確かめのコマンドの中では、関数 `g` が付ける。
 - review-guard の状態の記録を取らずに作った PR(ship-task も do-task も使わずに作った PR。例: #339・#342・#363・#369)では、review-guard の手順(1 の `pr-evidence`・「PR の前の手順」の 2 の `start` から `pr-evidence` まで・順序の 4 と 6 の `verify --mode commit` と `pr-evidence`)を行わない。状態の記録を失った PR には当てない(人に知らせる)。
   - `<レビュー済み SHA>`(1 回目)と記録の確かめの `first` には、取り込む前の作業ブランチの先頭を渡す。

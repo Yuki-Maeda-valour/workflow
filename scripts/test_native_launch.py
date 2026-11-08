@@ -242,6 +242,93 @@ class NativeLaunchMockTest(unittest.TestCase):
                         result = self.run_launch(self.shells[0][1], args)
                         self.assertIn(b"DEV_WORKFLOW_ENGINE=rust", result.stderr)
 
+    def prepare_legacy(self):
+        legacy = self.bundle.parent.parent / "skills/create-task/scripts/resolve-task-dir.py"
+        legacy.parent.mkdir(parents=True, exist_ok=True)
+        legacy.write_text(MOCK_NATIVE.replace('"target": str(Path(sys.argv[0]).parent.name)',
+                                             '"target": "legacy"'), encoding="utf-8")
+        python = self.tools / "python3"
+        python.symlink_to(sys.executable)
+        self.env["MOCK_ECHO_ARGS"] = "1"
+        return legacy
+
+    def test_legacy_preserves_arguments_streams_cwd_pid_and_uses_no_rust_tools(self):
+        self.prepare_legacy()
+        args = ("", "日本語", "two words", "-leading", "--help", "a\nb")
+        data = b"stdin\x00\xff\n"
+        for entry in self.bundle.iterdir():
+            if entry != self.launch:
+                shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
+        for entry in self.tools.iterdir():
+            if entry.name != "python3":
+                entry.unlink()
+        installed = self.cwd / "link"
+        installed.symlink_to(self.bundle, target_is_directory=True)
+        for engine in (None, "legacy"):
+            self.env.pop("DEV_WORKFLOW_ENGINE", None)
+            if engine is not None:
+                self.env["DEV_WORKFLOW_ENGINE"] = engine
+            for name, shell in self.shells:
+                with self.subTest(engine=engine, shell=name):
+                    result = self.run_launch(shell, ("resolve-task-dir", *args), launch=installed / "launch.sh", data=data)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, b"")
+                    record = json.loads(result.stdout)
+                    self.assertEqual(record["argv"], list(args))
+                    self.assertEqual(record["target"], "legacy")
+                    self.assertEqual(record["cwd"], str(self.cwd))
+                    self.assertEqual(record["pid"], self.last_pid)
+                    self.assertEqual(base64.b64decode(record["stdin"]), data)
+                    self.assertEqual(self.calls(), [])
+        self.assertFalse(list(legacy for legacy in self.root.rglob("__pycache__")))
+
+    def test_legacy_missing_script_or_python_fails_before_start(self):
+        legacy = self.prepare_legacy()
+        self.env["DEV_WORKFLOW_ENGINE"] = "legacy"
+        legacy.unlink()
+        self.assert_rejected(1, "legacy-script", ("resolve-task-dir",))
+        legacy.write_text("raise AssertionError('must not run')\n")
+        (self.tools / "python3").unlink()
+        self.assert_rejected(1, "python", ("resolve-task-dir",))
+        self.assertEqual(self.calls(), [])
+
+    def test_legacy_failure_and_signal_are_returned_without_restart(self):
+        self.prepare_legacy()
+        self.env["DEV_WORKFLOW_ENGINE"] = "legacy"
+        for status in (1, 2, 23, 127):
+            self.env["MOCK_NATIVE_STATUS"] = str(status)
+            for name, shell in self.shells:
+                with self.subTest(status=status, shell=name):
+                    result = self.run_launch(shell, ("resolve-task-dir",))
+                    self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                     (status, b"native stdout\n", b"native stderr\n"))
+                    self.assertEqual(self.calls(), [])
+        self.env.pop("MOCK_NATIVE_STATUS")
+        self.env["MOCK_NATIVE_SIGNAL"] = str(int(signal.SIGTERM))
+        for name, shell in self.shells:
+            result = self.run_launch(shell, ("resolve-task-dir",))
+            self.assertEqual((result.returncode, result.stdout, result.stderr), (-signal.SIGTERM, b"", b""))
+
+    def test_resolver_engine_selection_and_rust_failure_never_runs_python(self):
+        legacy = self.prepare_legacy()
+        legacy.write_text("raise AssertionError('legacy must not run')\n")
+        for engine, status in (("rust", 23), ("", 2), ("unknown", 2)):
+            self.env["DEV_WORKFLOW_ENGINE"] = engine
+            self.env["MOCK_NATIVE_STATUS"] = "23"
+            for name, shell in self.shells:
+                result = self.run_launch(shell, ("resolve-task-dir", "--task-dir=-日本 語"))
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertNotIn(b"AssertionError", result.stderr)
+                if engine == "rust":
+                    self.assertEqual(json.loads(self.native_log.read_text())["argv"],
+                                     ["resolve-task-dir", "--task-dir=-日本 語"])
+                else:
+                    self.assertEqual(result.stdout, b"")
+        self.env["DEV_WORKFLOW_ENGINE"] = "rust"
+        (self.bundle / BINARIES[0]).unlink()
+        self.assert_rejected(1, "binary", ("resolve-task-dir",))
+
+
     def test_all_supported_os_cpu_pairs_and_commands(self):
         for os_name, cpu, target in (("Linux", "x86_64", "linux-x86_64"),
                                      ("Linux", "aarch64", "linux-arm64"),
