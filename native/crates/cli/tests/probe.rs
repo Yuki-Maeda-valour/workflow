@@ -214,7 +214,7 @@ fn help_lists_all_four_invocations() {
     let output = Fixture::new().run(&["--help"]);
     assert_eq!(
         success(&output),
-        "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n".as_bytes()
+        "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n  dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]\n".as_bytes()
     );
 }
 

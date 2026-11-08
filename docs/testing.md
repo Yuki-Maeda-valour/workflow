@@ -18,6 +18,7 @@ flowchart LR
 
 Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))で開発用の土台を作り、段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から入口と実行ファイル 3 本を同梱する。CI(変更を送るたびに自動で検査する仕組み)も、このソースの検査を続ける。
 利用者向けの試し方と必要環境は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
+段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))の `resolve-task-dir` は開発用ソースだけにある。配布した段階 0b の入口には含まれない。
 
 ### Rust 1.99.1 の導入と外部の出力先
 
@@ -36,9 +37,10 @@ Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([I
 - `native/ci/build.py test` は `native/ci/scripts/test_native_ci.py` を流す。Rust のビルドをせず、CI の補助を検査する。
 - `scripts/test_native_distribution.py` と `scripts/test_support_native.py` は、既存の `scripts/run-all.py` にも自動で集められる。形式や比較の補助の検査にはテスト用の作り物を使う。
 - 段階 0b では配布物を必須にし、`scripts/test_native_launch.py` で実際の配布物も起動する。これらの検査に Cargo は不要だが、配布物 3 本の欠落は失敗にする。
-- 今回のソースから作った実行ファイルの検査は、`DEV_WORKFLOW_TEST_NATIVE_BINARY` にその実体を指定し、`native/ci/check_probe.py` で流す。配布した版の起動確認とは分ける。
+- 今回のソースから作った実行ファイルの検査は、`DEV_WORKFLOW_TEST_NATIVE_BINARY` にその実体を指定し、`native/ci/check_probe.py` と `native/ci/check_resolve_task_dir.py` で流す。配布した版の起動確認とは分ける。
   - 未設定・空文字・不在・実行不能は失敗にする。検査を飛ばさず、配布済みの実行ファイルへも切り替えない。
-  - `--version`・`--help`・`probe --json`・`probe --self-sha256` の出力と終了コードを確かめる。不正な引数の拒否、実行 CPU、自己の SHA256(内容の違いを確かめるための値)、作業フォルダの無変更も確かめる。
+  - `check_probe.py` は `--version`・`--help`・`probe --json`・`probe --self-sha256` の出力と終了コードを確かめる。不正な引数の拒否、実行 CPU、自己の SHA256(内容の違いを確かめるための値)、作業フォルダの無変更も確かめる。
+  - `check_resolve_task_dir.py` は、下の「タスク保存先の比較(段階 1a)」の条件で旧版と比べる。
   - `source_input_hash.py` で現在のソース入力を独立に計算し、`probe --json` の `source_input_sha256` と比べる。
 - `run-all.py` は Cargo と `native/ci/` の検査を実行しない。`run-all-container.sh` も Cargo や外部ビルドの環境変数を渡さない。Mac で Linux 専用の全回帰テストを流さない。
 
@@ -54,13 +56,14 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 | `macos-15` | `macos-arm64` | `aarch64-apple-darwin` | 同上 |
 
 - 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
-- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを入れる。`build --platform <表の値>` は必須検査、2 回のビルド、今回作った各実行ファイルの `check_probe.py` による検査を行う。
+- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを入れる。`build --platform <表の値>` は必須検査、2 回のビルド、今回作った各実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査を行う。
+- 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked --target <Rust の対象名>`。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
-  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡して起動する。署名し直さない。
+  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。
 - `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
 - 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
 - `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
@@ -97,6 +100,27 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - 時間切れでは、同じプロセスグループ(信号をまとめて送れるプロセスの集まり)へ終了信号を送り、直接の子を回収する。グループを抜けた子は停止の対象外。孫以降の回収は、その親か OS が受け持つ。
 - Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。
 - `probe` に旧版は無い。補助のテストと `check_probe.py` が通っても、旧版との同等性を確認したとは扱わない。
+
+### タスク保存先の比較(段階 1a)
+
+- `native/ci/check_resolve_task_dir.py` は Python 3.10 系で実行する。別の版では終了 1 になる。実際に使ったパッチ版を合格の行に出す。CI の比較用の版は 3.10.11 に固定する。
+- `scripts/test_task_directory.py` の旧版の 29 件は維持する。専用の比較入口は引数、候補の順序、リンク、非 UTF-8 と制御文字、権限の境界を追加で確かめる。
+- 通常の比較では、標準出力・標準エラーのバイト列と終了コードを比べる。旧版の `sys.argv[0]` の表示名だけを `dev-workflow resolve-task-dir` にそろえる。独立コピーの絶対ルート以外は出力から取り除かず、ヘルプの折返しも比較する。
+- 実行後の 2 つのコピーが互いに同じだけでなく、初期状態とも同じことを確かめる。内容・種類・権限・リンクを含む。
+- 権限の検査は root 以外の通常利用者で行う。root では終了 1 になり、合格にも skip にもしない。実行直後の種類と制限中の権限、元に戻した後の全体が変わらないことを確かめる。
+- 一覧を読めても子の情報を取得できない権限条件では、[design.md の承認済みの差](design.md#タスク保存先の解決段階-1a)を専用ケースで確かめる。子を持つ管理ルートを `0400` にし、旧版の未処理の `PermissionError`・`errno.EACCES`・対象パスと、Rust の JSON のキー・文言・対象パスを検査する。両版とも終了 1 だが、旧版は標準エラー、Rust は標準出力へ出す。反対側の出力は空にする。
+- 非 UTF-8 の出力も、同じ設計書に記した承認済みの差を専用ケースで確かめる。通常の比較の条件と `scripts/support_native.py` の `compare_runs` は変えない。
+  - 両版の子プロセスへ、`PYTHONIOENCODING=utf-8:strict` と `PYTHONIOENCODING=utf-8:surrogateescape` をそれぞれ指定する。
+  - 旧版の実際の `sys.stdout.encoding` と `sys.stdout.errors` を検査する。モジュールの読み込み・引数・作業フォルダ・環境・Python の起動オプションは、旧版の本実行と同じにする。
+  - `strict` の旧版は、独立に組み立てた期待 JSON 文字列から `UnicodeEncodeError` を求める。`encoding`・対象文字・位置・`reason` を含む例外文と、`main` の JSON 出力箇所を含む呼び出し経路の全文を一致させる。候補複数の場合は、その前に出る既知の `ResolutionError` も含む。標準出力は空、終了値は 1 を必須とする。
+  - Rust の標準出力は、解決処理を呼ばずに作る独立した期待バイト列と完全一致させる。元のバイトの保持・解決結果の終了値・空の標準エラーを検査する。
+  - `surrogateescape` では、独立コピーの絶対ルートの差だけを除き、両版の出力バイト・標準エラー・終了値を完全一致させる。旧版の出力も独立した期待バイト列で確かめる。
+  - 両モードで初期状態と各コピーの実行前後を比べ、内容・種類・権限・リンクが変わらないことを確かめる。
+- 生バイトの明示値 `x\xff` は、すべての対象 OS で両モードの検査を必須にする。非 UTF-8 の実在ルートと候補名も両モードで検査する。
+  - Mac の APFS が実在名の作成を `EILSEQ` で拒む場合だけ、その理由を出力して実在ルートと候補名の検査を省く。明示値の検査は省かない。名前の作成以外の失敗や、別の OS・エラーは省略理由にしない。
+  - 引数解析の非 UTF-8 エラーは、通常の完全一致の比較を続ける。
+- `native/ci/scripts/test_native_ci.py` は、専用判定が別の例外・発生箇所・出力先・終了値・期待バイトの変化を拒否することを確かめる。実際の出力設定の違いとファイルの変更も拒否する。通常の比較が同じ旧版の例外を許さないことも検査する。
+- この比較は `run-all.py` に含めない。今回作った実行ファイルを指定し、Rust の検査として別に流す。
 
 ### Git 設定の観測を移行へ引き継ぐテスト(#283)
 

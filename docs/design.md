@@ -861,6 +861,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - PR(変更を本流へ取り込む前に確かめてもらう依頼)を、実装の PR と配る PR に分ける。段階 2〜4 は並列に進める。出典は [Issue #400 の「進め方」の節](https://github.com/Yuki-Maeda-valour/workflow/issues/400)(2026-11-08)。
 - 段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))では、`native/`・`.github/workflows/`・検査の補助を作った。`plugins/`・`.claude-plugin/marketplace.json`・`setup.sh` は変えず、版と `CHANGELOG.md` も変えなかった。
 - 段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から、実行ファイル 3 本と入口を同梱する。人が CI(変更を送るたびに自動で検査する仕組み)の成果物を取り込む。配布を開始する版は、main 取り込み後の v4 の次のマイナーとする。
+- 段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))では、開発用ソースに `resolve-task-dir` と旧版との比較を追加する。配布物は段階 0b のままである。新コマンドの配布と呼び出しの変更は、後続の段階 1b で行う。
 - 利用者向けに Rust を自動導入する処理は加えない。v4 の利用者の Python・PyYAML・bash の要件と既存の呼び出し方は維持する。
 - [Issue #283](https://github.com/Yuki-Maeda-valour/workflow/issues/283)は、段階 2 で Git 設定の観測を比べるための入力と性質を固定する。廃止済みの #246・#282 の分割計画は再開しない。
   - 製品と既存の拒否条件は変えず、読み取り順序、処理量と時間の上限、変更の再検査、返す値のテストを追加する。
@@ -877,9 +878,22 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 
 - 切り替えは profile(プロジェクトの設定ファイル)から読まない。Rust 版が使えないときも、自動で旧版へ戻さない。
 - 製品の実行ファイルのパスを指定する環境変数は作らない。`DEV_WORKFLOW_TEST_NATIVE_BINARY` は、ソースから作った実行ファイルを検査するためだけに使う。
-- Rust 実行ファイルが持つコマンドは `--version`・`--help`・`probe --json`・`probe --self-sha256`。Rust 実行ファイル自体は Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
+- 配布済みの段階 0b の実行ファイルが持つコマンドは `--version`・`--help`・`probe --json`・`probe --self-sha256`。Rust 実行ファイル自体は Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
 - sh の入口は OS・CPU・最低 OS と、選んだ 1 本のハッシュを外部の道具で検査してから起動する。条件と試し方は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
 - `probe` に旧版は無い。入口の `--version`・`--help` も、未設定・`legacy` では終了 2 になる。試しのコマンドが通っても、旧版との同等性や OS の保護機能を確認したとは扱わない。
+
+### タスク保存先の解決(段階 1a)
+
+- `dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]` は、旧版の `resolve-task-dir.py` と同じ優先順位で保存先を読み取りだけで解決する。引数・出力・終了値の元になる約束は [task-directory.md](../plugins/dev-workflow/skills/create-task/references/task-directory.md) にある。
+- 成功は JSON の標準出力と終了 0、解決失敗は JSON の標準出力と終了 1、候補複数は JSON の標準出力と終了 2 を返す。これらの標準エラーは空にする。引数の誤りは、旧版の `argparse` と同じ順序で検査する。
+- 一覧は読めても子の情報を取得する権限がない場合は、旧版との出力の差を認める。旧版は未処理の `PermissionError` を標準エラーへ出し、標準出力は空で終了 1 になる。Rust は同じ対象の権限エラーを JSON の標準出力へ出し、標準エラーは空で終了 1 になる。
+  - 利用者が 2026-11-08 に承認した差である。子を持つ管理ルートを `0400` にした専用ケースで検査する。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
+- 非 UTF-8 のパスが出力に含まれ、旧版の標準出力が `utf-8:strict` の場合にも差を認める。旧版は `main` の JSON 出力時に未処理の `UnicodeEncodeError` を標準エラーへ出し、標準出力は空で終了 1 になる。
+  - Rust は元のバイトを保持した標準出力と、解決結果の終了値を返す。標準エラーは空にする。旧 Python と Rust 本体を変更せず、この出力を維持する。
+  - 利用者が 2026-11-09 に承認した差である。`utf-8:strict` と `utf-8:surrogateescape` の専用ケースで検査する。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
+- 権限と非 UTF-8 の専用ケースは、通常の一致判定に混ぜない。通常の比較で認める差は、実行名の表示と独立コピーの絶対ルートだけである。ほかの出力と終了値の完全一致を保つ。
+- 比較は Python 3.10 系と通常利用者で実行する。Linux 2 種類・Mac 2 種類の CI は Python 3.10.11 を使う。実行前後のファイルが変わらないことも確かめる。詳しい検査は [testing.md](testing.md#タスク保存先の比較段階-1a) にある。
+- 旧 Python 版、各 skill と `loop.sh` の呼び出し、配布物、プラグインの版と `CHANGELOG.md` は変えない。段階 1b 以降は未完了である。
 
 ### Rust の構成とビルド入力(段階 0a)
 

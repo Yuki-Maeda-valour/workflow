@@ -195,9 +195,11 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 ### Rust の検査(段階 0a)
 
 - 段階 0a で作ったソースとビルドの検査は、段階 0b の配布後も続ける。配布した入口・3 本の試し方と必要環境は [runtime-requirements.md](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。利用者には Rust・Cargo の導入を求めない。
+- 段階 1a(#448)の `resolve-task-dir` は開発用ソースだけにある。配布物と既存の skill の呼び出しは段階 0b のままで、段階 1b 以降は未完了である。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
-- 下のコマンドはリポジトリ直下から実行する。後半のビルドと `check_probe.py` は Linux x86_64 用。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
+- 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
+- `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
@@ -205,6 +207,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
 (cd native && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
 python3 -B native/ci/check_workflow.py
 python3 -B native/ci/build.py test
+python3 -B -m unittest discover -s scripts -p 'test_task_directory.py'
 python3 -B -m unittest discover -s scripts -p 'test_native_distribution.py'
 python3 -B -m unittest discover -s scripts -p 'test_support_native.py'
 
@@ -213,11 +216,14 @@ rustup target add --toolchain 1.99.1 x86_64-unknown-linux-musl
 (cd native && cargo build --release --locked --target x86_64-unknown-linux-musl)
 DEV_WORKFLOW_TEST_NATIVE_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/dev-workflow" \
   python3 -B native/ci/check_probe.py
+DEV_WORKFLOW_TEST_NATIVE_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/dev-workflow" \
+  python3 -B native/ci/check_resolve_task_dir.py
 python3 -B native/ci/source_input_hash.py --root .
 ```
 
 - Rust の書式・clippy(よくある誤りの検査)・テストは、4 種類の CI でもすべて必須。Linux 2 本と署名後の Mac 1 本は、別々の空の出力先から 2 回作り、バイト列が同じかを確かめる。
 - `DEV_WORKFLOW_TEST_NATIVE_BINARY` はテスト専用。未設定・空文字・不在・実行不能なら失敗にする。配布済みの実行ファイルへ切り替えない。
+- `check_resolve_task_dir.py` は、4 種類の各ビルドの 2 本と、署名後の Mac の両 CPU で実行する。権限と非 UTF-8 出力による旧版との差、ファイルの無変更の検査は [docs/testing.md](docs/testing.md#タスク保存先の比較段階-1a) に従う。
 - `scripts/run-all.py` は新しい `scripts/test_*.py` も集める。Cargo と `native/ci/` の検査は別に流す。`run-all-container.sh` へ Cargo や外部ビルドの指定は追加しない。
 - 検査後は、自分が作った外部の出力先だけを片付ける。差分テストの補助とビルド情報の説明は [docs/testing.md](docs/testing.md) にある。
 
