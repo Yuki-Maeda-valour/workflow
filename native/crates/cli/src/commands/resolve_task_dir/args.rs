@@ -168,7 +168,7 @@ fn error(message: &[u8]) -> CommandOutput {
             message,
             b"\n",
         ])),
-        code: ExitCode::Usage,
+        code: ExitCode::USAGE,
     }
 }
 

@@ -1,8 +1,8 @@
 # Rust の土台と共有の約束
 
-このフォルダは段階 0a(#442)の土台と、段階 1a(#448)の開発用ソースです。
-`resolve-task-dir` は段階 1a で追加しました。段階 0b の実行ファイルには含まれません。
-現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-0b) を参照してください。
+このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力を実装しています。
+`resolve-task-dir` は段階 1b で配布済みです。C0aは開発用ソースだけにあり、配布物と呼び出し元は切り替えていません。
+現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
 `probe --self-sha256` は自己の実行ファイル全体の SHA256 を返します。
@@ -24,14 +24,15 @@
 ## 部品とコマンドの登録
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
-- `crates/core`: 終了コード・出力処理・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。段階 0 では処理を持ちません。
+- `crates/core`: 終了コード・入出力処理・ビルド情報を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0aでも処理を追加していません。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
-`Command` は `name: &'static str` と `run: fn(&[OsString]) -> CommandResult` を持ちます。
-関数へ渡す引数にはコマンド名を含めません。`probe` と `resolve-task-dir` は登録済みです。
+`Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
+関数へ渡す引数にはコマンド名を含めません。同じ実行期間の入出力も渡します。
+登録済みの `probe` と `resolve-task-dir` は、短い変換関数から既存の本体を呼びます。
 `resolve-task-dir` は `commands/resolve_task_dir/` に置きます。今後の機能も `commands/<名前>/mod.rs` に追加します。
 `probe.rs` は段階 0 の試しのコマンドとして単独ファイルに置きます。
 
@@ -39,25 +40,43 @@
 引数なし、未知のコマンド、ほかの引数を伴う全体のオプションは終了 2 です。
 コマンド固有の引数検査は各関数が受け持ちます。
 
-## 終了コードと出力
+## 終了コードと入出力(C0a)
 
 `dev_workflow_core` は次の型と関数を公開します。
 
 | 名前 | 約束 |
 |---|---|
-| `ExitCode` | `Success = 0`、`Runtime = 1`、`Usage = 2` |
-| `CommandOutput` | 完成した `stdout: Vec<u8>`・`stderr: Vec<u8>` と `code: ExitCode`。`stdout(...)` は標準出力と終了 0 を作る |
-| `CommandResult` | `Result<CommandOutput, CommandError>`。`Ok` でも終了 1・2 と完成した出力を返せる |
+| `ExitCode` | `new(u8)` と `as_u8()` で0〜255を保持・返却する。`SUCCESS`・`RUNTIME`・`USAGE` は0・1・2 |
+| `CommandOutput` | 最終の `stdout: Vec<u8>`・`stderr: Vec<u8>` と `code: ExitCode`。`stdout(...)` は標準出力と終了0を作る |
+| `CommandResult` | `Result<CommandOutput, CommandError>`。`Ok` でも任意のu8終了値と最終出力を返せる |
 | `CommandError` | `Runtime(String)` と `Usage(String)`。`runtime(...)`・`usage(...)` で作れる |
+| `CommandIo::read_input(&mut [u8])` | 指定バッファへ1回だけ読み、`io::Result<usize>` を返す。先読み・再試行・文字変換をしない |
+| `CommandIo::write_stdout(&[u8])`・`write_stderr(&[u8])` | 生バイトを `write_all` し、同じ出力先の `flush` 成功後に `Ok(())` を返す |
+| `execute(command)` | 実際の標準入出力を借用し、`execute_to` を呼ぶ。CLIが使う入口 |
+| `execute_to(input, stdout, stderr, command)` | `&mut dyn Read` と2本の `&mut dyn Write` を借用する。処理へ `&mut CommandIo` を渡し、最終の `ExitCode` を返す |
 | `emit(result)` | 標準出力・標準エラーへ書き、`ExitCode` を返す |
 | `emit_to(result, stdout, stderr)` | 書き込み先を指定する同じ処理。テストにも使う |
 
-- 各関数は出力前に処理を終えます。`CommandOutput` のバイト列には接頭辞や改行を追加しません。
+```text
+main -> execute -> 登録表の関数(args, io)
+                    |-- 途中出力 -> flush -> 入力待ち
+                    `-- CommandResult -> emit_to -> ExitCode
+```
+
+- `CommandIo` は借用した入出力だけを使います。ファイルやプロセスは開きません。
+- 入力の短読・EOF・エラーはそのまま返します。`Interrupted` も再試行しません。入力エラーを保持して終了1にせず、コマンドが終了値を選びます。
+- 途中出力は呼出順に行います。別パイプの読取り側が観測する順序までは保証しません。最終出力は既存の標準出力→標準エラーの順です。
+- `CommandOutput` のバイト列には接頭辞や改行を追加しません。無出力の停止や固定の文言も、そのまま表せます。
 - `CommandError` は標準エラーへ `dev-workflow: <理由>\n` の形で書きます。
 - `resolve-task-dir` の解決失敗は `CommandOutput` で JSON の標準出力を返します。既存の `probe` の出力と終了値は変えません。
 - 書き込みと `flush` はどちらも確認します。`BrokenPipe` も終了 1 です。
-- 標準出力の書き込み失敗は標準エラーへ理由を出します。既に書けたバイト列は取り消せません。
-- 標準エラーにも書けないときは終了 1 だけを返します。追加の出力や panic は起こしません。
+- 最初の出力失敗を保持します。後続の通常出力は書込みも `flush` もせずエラーを返します。コマンドが失敗を無視しても、実行入口は最終出力を止めて終了1にします。
+- 標準出力の失敗では、標準エラーへ `dev-workflow: 標準出力に書けません: <理由>\n` を一度だけ試みます。標準エラーの失敗では追加診断を出しません。既に出たバイト列は取り消せません。
+- 数値の終了値をシグナル終了と同一視しません。シグナル変換、時間や処理量の上限、ファイル保護、子プロセス監督はC0aに含みません。失敗を無視したコマンドの強制中断もしません。
+
+C0bのファイル保護と上限、続くC0cの子プロセス監督は未着手です。
+分割と依存順は [設計の記録](../docs/design.md#共通の終了値と入出力c0a)、実プロセスでの確認は [検査手順](../docs/testing.md#共通の終了値と入出力の検査c0a)にあります。
+#448の権限・非UTF-8出力の差は、保存先の専用比較だけに適用します。
 
 `build_info` の定数は `NATIVE_VERSION`・`SOURCE_INPUT_SHA256`・`RUSTC` です。
 `RUSTC` は `rustc --version` の末尾改行を除いた値です。
@@ -109,7 +128,7 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json` だけです。
-共有の `Cargo.toml`・`Cargo.lock`・登録の表・core の公開する型を変えるときは Task 1.1 の担当へ返してください。
+共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
 次のコマンドは `native/` で実行します。
 新しいソースは先に Git の追跡へ加える必要があります。空の一覧ではビルドしません。

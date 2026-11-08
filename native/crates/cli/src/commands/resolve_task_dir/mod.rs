@@ -254,10 +254,10 @@ pub fn run(arguments: &[OsString]) -> CommandResult {
             let (start, code) = if let Some(candidates) = error.candidates {
                 (
                     concat(&[b"{\"candidates\": ", &array(&candidates), b", "]),
-                    ExitCode::Usage,
+                    ExitCode::USAGE,
                 )
             } else {
-                (b"{".to_vec(), ExitCode::Runtime)
+                (b"{".to_vec(), ExitCode::RUNTIME)
             };
             CommandOutput {
                 stdout: concat(&[&start, b"\"error\": ", &json(&error.message), b"}\n"]),
