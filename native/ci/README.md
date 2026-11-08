@@ -1,11 +1,12 @@
 # ビルドと CI の入口
 
-このフォルダは Issue #442 の Task 2.2 を受け持ちます。
+このフォルダは Rust のビルドと検査を受け持ちます。段階 1a(#448)からタスク保存先の旧版との比較も行います。
 配るプラグインは変更しません。最後に作る `native-dist.tar` は入口を含まない 5 ファイルです。
 
 ## コマンド
 
 リポジトリ直下から実行します。Python 3.10 以上と標準ライブラリだけを使います。
+旧版との比較を含む `build`・`reproduce`・`verify-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `CARGO_TARGET_DIR` にはリポジトリの外のフォルダを指定してください。
 CI では `RUNNER_TEMP/native-ci` が既定です。`CARGO_HOME` は呼び出し側の値を保ちます。
 
@@ -18,10 +19,10 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 ```
 
 - `prepare`: Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
-- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。今回作った 2 本を `check_probe.py` で検査します。
-- `reproduce`: 2 回のビルドと比較だけを行います。実行の確認には、作った実行ファイルを指定して `check_probe.py` を使います。
+- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。今回作った 2 本を、それぞれ `check_probe.py` と `check_resolve_task_dir.py` で検査します。
+- `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、その 2 本の上記の検査を行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
-- `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py` を行います。署名し直しません。
+- `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
 
 Linux で指定する名前は `linux-x86_64`・`linux-arm64` です。
@@ -78,9 +79,12 @@ tar の取り出しではファイル名と数を限定します。リンクや�
 - `check_probe.py` は `scripts/support_native.py` の `require_native_binary()`・`run_command()`・`snapshot_tree()` を使います。
   実行ファイルの指定が無い場合は失敗します。
   ソース入力の独立した計算値、実行 CPU、自己ハッシュ、出力、終了コード、作業フォルダの無変更を確かめます。
+- `check_resolve_task_dir.py` は、旧 Python 版と今回作った版の出力・終了値・ファイルの無変更を比較します。実行ファイルの指定が無い・不正な場合や、Python 3.10 系でない場合は終了 1 です。
+  通常利用者での権限検査と、承認済みの `0400`・非 UTF-8 出力の差は [検査手順](../../docs/testing.md#タスク保存先の比較段階-1a)に従います。
+  非 UTF-8 は `utf-8:strict` と `utf-8:surrogateescape` の専用ケースで検査し、通常の比較の条件を維持します。
 - 配布物のテストは、偽の ELF・Mach-O を材料に組み立て、実際の `validate.py` の関数で検査します。
   実行補助との結合テストは、テスト用の実行ファイルを実際の `support_native.py` で起動します。
-  Rust の実行ファイルの確認は、各ビルドの後に `check_probe.py` で行います。
+  Rust の実行ファイルの確認は、各ビルドの後に `check_probe.py` と `check_resolve_task_dir.py` で行います。
 
 単体テストは担当範囲の中に置いています。次のどちらでも実行できます。
 リポジトリ直下の `scripts/test_*.py` への自動収集とは別に、CI の最初の job が必ず実行します。
@@ -89,6 +93,10 @@ tar の取り出しではファイル名と数を限定します。リンクや�
 python3 -B native/ci/build.py test
 (cd native/ci && python3 -B -m unittest discover -s scripts -p 'test_native_ci.py')
 ```
+
+非 UTF-8 の専用ケースをまとめて確かめるテスト内だけで、`PYTHONNODEBUGRANGES=1` を指定します。
+Python 3.11 以降の子プロセスでも、例外表示の位置の印を抑え、Python 3.10 と同じ表示を検査するためです。
+設定値もテストで確かめます。実バイナリの比較を Python 3.10 系に限る条件は変えません。
 
 ## ワークフローの検査
 
@@ -101,6 +109,7 @@ JSON の重複キーも拒否します。新しい CI も同じ形式で追加�
 - 権限は `contents: read` だけです。秘密情報・書き込み権限・キャッシュを渡しません。
 - checkout は PR のソース SHA とリポジトリを明示します。`persist-credentials: false` を必須にします。
 - 各 job は checkout の直後に `check_workflow.py` を呼びます。
+- 旧版との比較を行う工程は、その検査の後、比較の前に `actions/setup-python` で Python 3.10.11 を用意します。指定は `python-version` だけとし、キャッシュは追加しません。
 - `run` は `native/ci/` のスクリプト 1 本を呼ぶだけです。ビルド設定は書きません。
   - 例外は、段階 0b(#443)の配布の確かめの 1 行 `python3 -B scripts/check_dist_launch.py --root .` だけです。配布 commit の浅い clone で、配った入口を起動します。`native/` の外に置くのは、0b で `native/`(ソース入力)を変えないためです。字面が少しでも違えば拒みます。
 - Mac の 2 種類の実行確認が成功するまで、配布用 tar を作りません。
@@ -113,7 +122,11 @@ JSON の重複キーも拒否します。新しい CI も同じ形式で追加�
 | `actions/checkout` | `v4` | `11d5960a326750d5838078e36cf38b85af677262` |
 | `actions/upload-artifact` | `v4` | `ea165f8d65b6e75b540449e92b4886f43607fa02` |
 | `actions/download-artifact` | `v4` | `d3f86a106a0bac45b974a628896c90dbdf5c8093` |
+| `actions/setup-python` | `v7.1.0` | `6d4fd22b20465ccc0f7354476588e8df7c9ca0e0` |
 
-確認に使う API は `repos/actions/<名前>/commits/v4`、`repos/actions/<名前>/commits/<SHA>`、
+Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versions/releases/tag/3.10.11-11114431484)に Linux 24.04 の x64・arm64 と Darwin の x64・arm64 がそろいます。
+製品の Python 3.10 以上という下限は変えません。
+
+確認に使う API は `repos/actions/<名前>/commits/<タグ>`、`repos/actions/<名前>/commits/<SHA>`、
 `repos/actions/<名前>/contents/action.yml?ref=<SHA>` です。
 更新するときは 3 つを確認してから `check_workflow.py` の記録とワークフローを同時に変えます。

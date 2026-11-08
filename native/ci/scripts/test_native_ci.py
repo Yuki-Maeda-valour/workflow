@@ -1,10 +1,13 @@
 """CI の単体・結合テスト。配布物の検査と実行補助はリポジトリの実装を使う。"""
 
 import copy
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
+import stat
 import struct
 import subprocess
 import sys
@@ -19,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import binary_tools
 import build
 import check_probe
+import check_resolve_task_dir
 import check_workflow
 import make_dist
 import source_input_hash as source_hash
@@ -650,6 +654,401 @@ class BuildTests(TempCase):
         self.assertEqual(len(signed), 2)
         output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
+
+
+class ResolveTaskDirTests(TempCase):
+    def test_python_version_and_binary_selection_are_mandatory(self):
+        support = SimpleNamespace(require_native_binary=mock.Mock(side_effect=ValueError("missing binary")))
+        for version in ((3, 9), (3, 11), (3, 12)):
+            with mock.patch.object(check_resolve_task_dir.sys, "version_info", version), self.assertRaisesRegex(ValueError, "Python 3.10"):
+                check_resolve_task_dir.check_resolve_task_dir(support)
+        support.require_native_binary.assert_not_called()
+        with mock.patch.object(check_resolve_task_dir.sys, "version_info", (3, 10)), self.assertRaisesRegex(ValueError, "missing binary"):
+            check_resolve_task_dir.check_resolve_task_dir(support)
+
+    def test_comparison_requires_both_trees_to_equal_the_initial_tree(self):
+        comparison = SimpleNamespace(matches=True, legacy=SimpleNamespace(returncode=0),
+                                     before={"before": 1}, legacy_tree={}, native_tree={})
+        support = SimpleNamespace(compare_runs=mock.Mock(return_value=comparison))
+        with self.assertRaisesRegex(ValueError, "初期のファイル"):
+            check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+        comparison.legacy_tree = comparison.native_tree = comparison.before
+        check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+        comparison.matches = False
+        comparison.differences = ("stdout",)
+        comparison.native = "native-result"
+        with self.assertRaisesRegex(ValueError, "不一致"):
+            check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+
+    def test_root_does_not_pass_permission_cases(self):
+        for check in (check_resolve_task_dir.permission_cases, check_resolve_task_dir.permission_child_metadata_case):
+            with mock.patch.object(check_resolve_task_dir.os, "geteuid", return_value=0), self.assertRaisesRegex(ValueError, "通常利用者"):
+                check(None, self.root / "binary", self.root)
+
+    def native_non_utf8_result(self, argv, **kwargs):
+        # 本体も検査対象の期待値生成も呼ばず、固定した 3 入力の JSON バイトを作る。
+        root = os.fsencode(Path(kwargs["cwd"]).resolve())
+        if argv[-1] == b"--task-dir=x\xff":
+            output = b'{"path": "' + root + b'/x\xff", "source": "profile", "task_dir": "x\xff"}\n'
+            code = 0
+        elif argv[-1] == b"\xff":
+            output = b'{"path": "' + root + b'/\xff/docs/tasks", "source": "default", "task_dir": "docs/tasks"}\n'
+            code = 0
+        else:
+            output = (b'{"candidates": ["\xff", "' + "\ue000".encode() + b'", "' + "\U00010000".encode()
+                      + b'"], "error": "' + "タスクディレクトリの候補が複数あります。task_dir を明示してください".encode() + b'"}\n')
+            code = 2
+        return SimpleNamespace(returncode=code, stdout=output, stderr=b"", timed_out=False)
+
+    def non_utf8_support(self, mutate=None):
+        actual = check_probe.load_support()
+
+        def command(argv, **kwargs):
+            old = argv[0] == sys.executable
+            result = actual.run_command(argv, **kwargs) if old else self.native_non_utf8_result(argv, **kwargs)
+            result = SimpleNamespace(**vars(result))
+            if mutate:
+                mutate(argv, kwargs, result)
+            return result
+
+        return SimpleNamespace(snapshot_tree=actual.snapshot_tree, run_command=mock.Mock(side_effect=command))
+
+    def test_non_utf8_both_modes_use_actual_legacy_and_independent_native_bytes(self):
+        support = self.non_utf8_support()
+        # policy の新しい Python でも、子の traceback 表示を比較元の 3.10 と同じ形にする。
+        with mock.patch.dict(os.environ, {"PYTHONNODEBUGRANGES": "1"}):
+            total = check_resolve_task_dir.non_utf8_cases(support, self.root / "binary", self.root)
+        self.assertIn(total, (2, 6))  # APFS の実在名の拒否だけは、明示値の 2 件を必須にする。
+        if total == 2:
+            self.assertEqual(check_resolve_task_dir.platform.system(), "Darwin")
+        calls = support.run_command.call_args_list
+        self.assertEqual(len(calls), total * 3)
+        for probe, legacy, native in zip(calls[::3], calls[1::3], calls[2::3]):
+            self.assertEqual(probe.kwargs, legacy.kwargs)
+            self.assertEqual(probe.args[0][:3], legacy.args[0][:3])
+            self.assertEqual(probe.args[0][4:], legacy.args[0][4:])
+            self.assertIn("sys.stdout.encoding, sys.stdout.errors", probe.args[0][3])
+            self.assertEqual(legacy.kwargs["env"], native.kwargs["env"])
+            self.assertEqual(legacy.kwargs["env"]["PYTHONNODEBUGRANGES"], "1")
+        self.assertEqual({call.kwargs["env"]["PYTHONIOENCODING"] for call in calls},
+                         {"utf-8:strict", "utf-8:surrogateescape"})
+
+    def test_non_utf8_rejects_wrong_exceptions_results_streams_and_expected_bytes(self):
+        for mode in ("strict", "surrogateescape"):
+            work = self.root / mode
+            work.mkdir()
+            initial = work / "initial"
+            initial.mkdir()
+            support = self.non_utf8_support()
+            check_resolve_task_dir.check_non_utf8_case(support, self.root / "binary", initial, work / "valid", "explicit", mode)
+            calls = support.run_command.call_args_list
+            old = check_probe.load_support().run_command(*calls[1].args, **calls[1].kwargs)
+            new = self.native_non_utf8_result(*calls[2].args, **calls[2].kwargs)
+            old = SimpleNamespace(**vars(old))
+            folders = [work / "valid" / side for side in ("legacy", "native")]
+            payloads = [check_resolve_task_dir.non_utf8_expectation("explicit", folder)[1] for folder in folders]
+            mutations = [("old-timeout", "old", "timed_out", True), ("new-timeout", "new", "timed_out", True),
+                         ("old-code", "old", "returncode", 2), ("new-code", "new", "returncode", 1),
+                         ("new-stderr", "new", "stderr", b"diagnostic"),
+                         ("new-stdout", "new", "stdout", new.stdout.replace(b"\xff", b"?")),
+                         ("new-space", "new", "stdout", new.stdout.replace(b'": ', b'":'))]
+            if mode == "strict":
+                self.assertIn(b"UnicodeEncodeError:", old.stderr)
+                for label, before, after in (
+                    ("type", b"UnicodeEncodeError:", b"ValueError:"),
+                    ("encoding", b"'utf-8'", b"'ascii'"),
+                    ("character", b"\\udcff", b"\\udcfe"),
+                    ("reason", b"surrogates not allowed", b"invalid start byte"),
+                    ("function", b"in main\n", b"in resolve\n"),
+                    ("statement", b"json.dumps(result,", b"json.dumps(payload,"),
+                    ("source", os.fsencode(check_resolve_task_dir.LEGACY), b"other.py"),
+                ):
+                    altered = old.stderr.replace(before, after)
+                    self.assertNotEqual(altered, old.stderr)
+                    mutations.append((label, "old", "stderr", altered))
+                position = re.sub(rb"in position [0-9]+:", b"in position 0:", old.stderr)
+                line = re.sub(rb", line [0-9]+, in main", b", line 1, in main", old.stderr)
+                self.assertNotEqual(position, old.stderr)
+                self.assertNotEqual(line, old.stderr)
+                mutations.extend([("position", "old", "stderr", position), ("line", "old", "stderr", line),
+                                  ("extra-exception", "old", "stderr", b"RuntimeError: unexpected\n" + old.stderr),
+                                  ("old-stdout", "old", "stdout", b"unexpected"),
+                                  ("old-success", "old", "returncode", 0)])
+            else:
+                mutations.extend([("old-stderr", "old", "stderr", b"diagnostic"),
+                                  ("old-stdout", "old", "stdout", old.stdout.replace(b"\xff", b"?")),
+                                  ("old-code-one", "old", "returncode", 1)])
+            for name, side, field, value in mutations:
+                changed_old, changed_new = copy.copy(old), copy.copy(new)
+                setattr(changed_old if side == "old" else changed_new, field, value)
+                with self.subTest(mode=mode, mutation=name), self.assertRaises(ValueError):
+                    check_resolve_task_dir.check_non_utf8_results(changed_old, changed_new, mode=mode,
+                                                                 payloads=payloads, code=0, folders=folders)
+            if mode == "surrogateescape":
+                old.stdout = old.stdout.replace(b"\xff", b"?")
+                new.stdout = new.stdout.replace(b"\xff", b"?")
+                with self.assertRaises(ValueError):
+                    check_resolve_task_dir.check_non_utf8_results(old, new, mode=mode, payloads=payloads, code=0, folders=folders)
+
+    def test_non_utf8_candidate_context_and_resolution_exit_code_are_exact(self):
+        folders = [self.root / side for side in ("legacy", "native")]
+        for folder in folders:
+            folder.mkdir()
+        payloads = [check_resolve_task_dir.non_utf8_expectation("candidates", folder)[1] for folder in folders]
+        # 候補名を作れない APFS でも、専用判定の拒否検査は省かない。
+        old = SimpleNamespace(returncode=1, stdout=b"", timed_out=False,
+                              stderr=check_resolve_task_dir.strict_exception(payloads[0], 2))
+        new = self.native_non_utf8_result(["binary", "resolve-task-dir", "--project-root", "."], cwd=folders[1])
+        check_resolve_task_dir.check_non_utf8_results(old, new, mode="strict", payloads=payloads, code=2, folders=folders)
+        for before, after in ((b"legacy_task_dir.ResolutionError:", b"RuntimeError:"),
+                              (b"in resolve\n", b"in unrelated\n"),
+                              (b"json.dumps(payload,", b"json.dumps(result,")):
+            changed = copy.copy(old)
+            changed.stderr = old.stderr.replace(before, after)
+            self.assertNotEqual(changed.stderr, old.stderr)
+            with self.subTest(before=before), self.assertRaises(ValueError):
+                check_resolve_task_dir.check_non_utf8_results(changed, new, mode="strict", payloads=payloads, code=2, folders=folders)
+        for code in (0, 1):
+            changed = copy.copy(new)
+            changed.returncode = code
+            with self.subTest(code=code), self.assertRaises(ValueError):
+                check_resolve_task_dir.check_non_utf8_results(old, changed, mode="strict", payloads=payloads, code=2, folders=folders)
+
+    def test_non_utf8_requires_actual_stdout_settings_and_unchanged_trees(self):
+        for mode in ("strict", "surrogateescape"):
+            for mutation in ("encoding", "errors", "probe-code", "probe-stderr", "probe-timeout", "old-content", "new-content", "mode", "link", "kind"):
+                work = self.root / (mode + "-" + mutation)
+                work.mkdir()
+                initial = work / "initial"
+                initial.mkdir()
+                (initial / "unchanged").write_bytes(b"original")
+                (initial / "unchanged").chmod(0o644)
+                (initial / "link").symlink_to("unchanged")
+
+                def mutate(argv, kwargs, result):
+                    old = argv[0] == sys.executable
+                    probe = old and "sys.stdout.encoding, sys.stdout.errors" in argv[3]
+                    folder = kwargs["cwd"]
+                    if probe:
+                        if mutation == "encoding":
+                            result.stdout = result.stdout.replace(b"utf-8", b"ascii")
+                        elif mutation == "errors":
+                            result.stdout = result.stdout.replace(mode.encode(), b"replace")
+                        elif mutation == "probe-code":
+                            result.returncode = 1
+                        elif mutation == "probe-stderr":
+                            result.stderr = b"diagnostic"
+                        elif mutation == "probe-timeout":
+                            result.timed_out = True
+                    elif (mutation == "old-content" and old) or (mutation == "new-content" and not old):
+                        (folder / "unchanged").write_bytes(b"changed")
+                    elif mutation == "mode":
+                        (folder / "unchanged").chmod(0o600)
+                    elif mutation == "link":
+                        (folder / "link").unlink()
+                        (folder / "link").symlink_to("absent")
+                    elif mutation == "kind":
+                        (folder / "unchanged").unlink()
+                        (folder / "unchanged").mkdir()
+
+                with self.subTest(mode=mode, mutation=mutation), self.assertRaises(ValueError):
+                    check_resolve_task_dir.check_non_utf8_case(self.non_utf8_support(mutate), self.root / "binary",
+                                                              initial, work / "case", "explicit", mode)
+
+    def test_non_utf8_only_skips_name_creation_eilseq_on_mac(self):
+        for system, error, skipped in (("Darwin", errno.EILSEQ, True), ("Darwin", errno.EACCES, False),
+                                       ("Linux", errno.EILSEQ, False)):
+            work = self.root / (system + str(error))
+            work.mkdir()
+
+            def state(root, directory):
+                if directory == os.fsdecode(b"\xff"):
+                    raise OSError(error, "name creation failed")
+
+            with mock.patch.object(check_resolve_task_dir.platform, "system", return_value=system), \
+                    mock.patch.object(check_resolve_task_dir, "state", side_effect=state), \
+                    mock.patch.object(check_resolve_task_dir, "check_non_utf8_case") as check, \
+                    mock.patch("builtins.print") as report:
+                if skipped:
+                    self.assertEqual(check_resolve_task_dir.non_utf8_cases(None, self.root / "binary", work), 2)
+                    self.assertIn("EILSEQ", report.call_args.args[0])
+                else:
+                    with self.assertRaises(OSError):
+                        check_resolve_task_dir.non_utf8_cases(None, self.root / "binary", work)
+                    report.assert_not_called()
+                self.assertEqual([(call.args[-2], call.args[-1]) for call in check.call_args_list],
+                                 [("explicit", "strict"), ("explicit", "surrogateescape")])
+        work = self.root / "execution-error"
+        work.mkdir()
+        with mock.patch.object(check_resolve_task_dir.platform, "system", return_value="Darwin"), \
+                mock.patch.object(check_resolve_task_dir, "state"), \
+                mock.patch.object(check_resolve_task_dir, "check_non_utf8_case", side_effect=[None, None, OSError(errno.EILSEQ, "execution failed")]), \
+                self.assertRaises(OSError):
+            check_resolve_task_dir.non_utf8_cases(None, self.root / "binary", work)
+
+    def test_normal_comparison_rejects_the_same_strict_output_difference(self):
+        actual = check_probe.load_support()
+        initial = self.root / "initial"
+        initial.mkdir()
+        original_run = actual.run_command
+
+        def command(argv, **kwargs):
+            if argv[0] == sys.executable:
+                return original_run(argv, **kwargs)
+            return self.native_non_utf8_result(argv, **kwargs)
+
+        with mock.patch.dict(os.environ, {"PYTHONIOENCODING": "utf-8:strict"}), \
+                mock.patch.object(actual, "run_command", side_effect=command), self.assertRaisesRegex(ValueError, "不一致"):
+            check_resolve_task_dir.check_case(actual, self.root / "binary", initial, self.root / "case",
+                                              ["--project-root", ".", b"--task-dir=x\xff"], 0)
+        self.assertNotIn("non-utf8-explicit", [case[0] for case in check_resolve_task_dir.cases()])
+        self.assertIn((["--project-root=.", b"--unknown\xff"], 2), list(check_resolve_task_dir.parser_cases()))
+
+    @unittest.skipIf(os.geteuid() == 0, "0400 の権限拒否は通常利用者が必須。実バイナリの比較では root を失敗にする")
+    def test_child_metadata_permission_checks_each_output_exactly_and_restores_the_tree(self):
+        actual_support = check_probe.load_support()
+        for mutation in (None, "type", "errno", "path", "old-stdout", "json-key", "json-space", "new-stderr", "timeout", "code", "mode", "content"):
+            parent = self.root / (mutation or "valid")
+            parent.mkdir()
+
+            def command(argv, **kwargs):
+                folder = Path(argv[-1])
+                self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o400)
+                self.assertNotEqual(kwargs["cwd"], folder)
+                target = folder.resolve(strict=True) / "child"
+                error = str(PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target)))
+                old = argv[0] == sys.executable
+                result = SimpleNamespace(returncode=1, stdout=b"", stderr=b"", timed_out=False)
+                if old:
+                    result.stderr = ("Traceback (most recent call last):\n  test frame\nPermissionError: " + error + "\n").encode()
+                    if mutation == "type":
+                        result.stderr = result.stderr.replace(b"PermissionError:", b"FileNotFoundError:")
+                    elif mutation == "errno":
+                        result.stderr = result.stderr.replace(f"[Errno {errno.EACCES}]".encode(), b"[Errno 2]")
+                    elif mutation == "path":
+                        result.stderr = result.stderr.replace(os.fsencode(target), os.fsencode(target) + b"-wrong")
+                    elif mutation == "old-stdout":
+                        result.stdout = b"unexpected output"
+                    elif mutation == "mode":
+                        folder.chmod(0o500)
+                    elif mutation == "content":
+                        folder.chmod(0o700)
+                        (folder / "child/進行中_作業.md").write_bytes(b"changed")
+                        folder.chmod(0o400)
+                else:
+                    result.stdout = (json.dumps({"error": error}, ensure_ascii=False, sort_keys=True) + "\n").encode()
+                    if mutation == "json-key":
+                        result.stdout = result.stdout.replace(b'"error"', b'"other"')
+                    elif mutation == "json-space":
+                        result.stdout = result.stdout.replace(b'": ', b'":')
+                    elif mutation == "new-stderr":
+                        result.stderr = b"unexpected diagnostic"
+                    elif mutation == "timeout":
+                        result.timed_out = True
+                    elif mutation == "code":
+                        result.returncode = 2
+                return result
+
+            support = SimpleNamespace(snapshot_tree=actual_support.snapshot_tree,
+                                      run_command=mock.Mock(side_effect=command))
+            with self.subTest(mutation=mutation):
+                if mutation is None:
+                    check_resolve_task_dir.permission_child_metadata_case(support, self.root / "binary", parent)
+                    self.assertEqual(support.run_command.call_count, 2)
+                else:
+                    with self.assertRaises(ValueError):
+                        check_resolve_task_dir.permission_child_metadata_case(support, self.root / "binary", parent)
+                for side in ("legacy", "native"):
+                    folder = parent / ("permission-child-metadata-" + side)
+                    initial = parent / "permission-initial-child-metadata"
+                    self.assertEqual(stat.S_IMODE(folder.stat().st_mode), stat.S_IMODE(initial.stat().st_mode))
+
+    def test_main_returns_failure_for_version_missing_binary_and_comparison_errors(self):
+        for error in (ValueError("Python 3.10"), ValueError("missing binary"), ValueError("comparison differs")):
+            with mock.patch.object(check_resolve_task_dir, "check_resolve_task_dir", side_effect=error):
+                self.assertEqual(check_resolve_task_dir.main(), 1)
+
+    def test_actual_cli_rejects_missing_empty_absent_and_non_executable_binary(self):
+        path = self.write("not-executable", b"not an executable", 0o644)
+        for value in (None, "", str(self.root / "absent"), str(path)):
+            environment = dict(os.environ)
+            if value is None:
+                environment.pop("DEV_WORKFLOW_TEST_NATIVE_BINARY", None)
+            else:
+                environment["DEV_WORKFLOW_TEST_NATIVE_BINARY"] = value
+            result = subprocess.run([sys.executable, "-B", check_resolve_task_dir.__file__], env=environment,
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, b"")
+            self.assertTrue(result.stderr.startswith(b"ERROR:"))
+
+
+class ResolveTaskDirConnectionTests(TempCase):
+    def test_probe_runs_both_required_checks_with_the_same_binary_and_python(self):
+        binary = self.root / "binary"
+        with mock.patch.object(build, "run") as run:
+            build.probe(binary)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_probe.py"],
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_resolve_task_dir.py"]])
+        self.assertTrue(all(call.kwargs["env"]["DEV_WORKFLOW_TEST_NATIVE_BINARY"] == str(binary)
+                            for call in run.call_args_list))
+        with mock.patch.object(build, "run", side_effect=[None, subprocess.CalledProcessError(1, "comparison")]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.probe(binary)
+
+    def test_build_and_reproduce_check_each_of_the_two_binaries_for_all_four_platforms(self):
+        for command in ("build", "reproduce"):
+            for target in build.TARGETS:
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", target]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "quality"), \
+                        mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "pack_tar"), \
+                        mock.patch.object(build, "probe") as probe:
+                    self.assertEqual(build.main(), 0)
+                    self.assertEqual(probe.call_args_list, [mock.call(self.root / "1/dev-workflow"), mock.call(self.root / "2/dev-workflow")])
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", target]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "quality"), \
+                        mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "probe", side_effect=subprocess.CalledProcessError(1, "comparison")):
+                    self.assertEqual(build.main(), 1)
+
+    def test_signed_universal_binary_runs_both_checks_and_propagates_failure(self):
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", return_value="arm64 x86_64"), \
+                mock.patch.object(build, "probe") as probe:
+            build.verify_universal(self.root, self.root)
+            probe.assert_called_once_with(self.root / "dev-workflow")
+            probe.side_effect = subprocess.CalledProcessError(1, "comparison")
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.verify_universal(self.root, self.root)
+
+    def test_workflow_requires_fixed_python_after_the_initial_policy_check(self):
+        document = json.loads((source_hash.ROOT / ".github/workflows/native.yml").read_text())
+        for job in ("build", "verify-universal"):
+            steps = document["jobs"][job]["steps"]
+            python_step = steps[2]
+            self.assertEqual(python_step["uses"], "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0")
+            self.assertEqual(python_step["with"], {"python-version": "3.10.11"})
+            for mutation in ("remove", "late", "early", "version", "cache", "tag"):
+                changed = copy.deepcopy(document)
+                altered = changed["jobs"][job]["steps"]
+                if mutation == "remove":
+                    altered.pop(2)
+                elif mutation == "late":
+                    altered.append(altered.pop(2))
+                elif mutation == "early":
+                    altered.insert(1, altered.pop(2))
+                elif mutation == "version":
+                    altered[2]["with"]["python-version"] = "3.11"
+                elif mutation == "cache":
+                    altered[2]["with"]["cache"] = "pip"
+                elif mutation == "tag":
+                    altered[2]["uses"] = "actions/setup-python@v7"
+                with self.subTest(job=job, mutation=mutation):
+                    self.assertTrue(check_workflow.check_document(changed))
 
 
 if __name__ == "__main__":

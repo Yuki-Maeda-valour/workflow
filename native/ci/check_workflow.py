@@ -12,11 +12,13 @@ from source_input_hash import ROOT
 
 # 2026-11-08、gh api のタグの解決・commit・action.yml で確認した。
 VERIFIED_ACTIONS = {
+    "actions/setup-python": "6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
     "actions/checkout": "11d5960a326750d5838078e36cf38b85af677262",
     "actions/upload-artifact": "ea165f8d65b6e75b540449e92b4886f43607fa02",
     "actions/download-artifact": "d3f86a106a0bac45b974a628896c90dbdf5c8093",
 }
 ACTION_INPUTS = {
+    "actions/setup-python": {"python-version"},
     "actions/checkout": {"repository", "ref", "persist-credentials", "fetch-depth"},
     "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
     "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
@@ -112,6 +114,13 @@ def check_document(document):
             problems.append(f"{name}: 最初に checkout が必要です")
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
+        comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
+                              and isinstance(step.get("run"), str) and re.match(
+                                  r"python3 -B native/ci/build\.py (?:build|reproduce|verify-universal)(?: |$)", step["run"])]
+        python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
+                          and str(step.get("uses", "")).startswith("actions/setup-python@")]
+        if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
+            problems.append(f"{name}: 比較の前、checkout 直後の検査の後に Python 3.10.11 が必要です")
         for index, step in enumerate(steps):
             if not isinstance(step, dict):
                 problems.append(f"{name}: step は object が必要です")
@@ -148,6 +157,8 @@ def check_document(document):
                 continue
             if set(settings) - ACTION_INPUTS.get(action, set()):
                 problems.append(f"{name}: {action} の with に許可していないキーがあります")
+            if action == "actions/setup-python" and settings != {"python-version": "3.10.11"}:
+                problems.append(f"{name}: 比較用 Python は 3.10.11 だけ指定してください")
             if action == "actions/checkout":
                 # 0b の浅い clone は 1 だけを許す。履歴全体や式での指定は不要。
                 if "fetch-depth" in settings and (type(settings["fetch-depth"]) is not int or settings["fetch-depth"] != 1):

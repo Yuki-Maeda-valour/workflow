@@ -74,6 +74,13 @@
           "run": "python3 -B native/ci/check_workflow.py"
         },
         {
+          "name": "比較用の Python 3.10.11 を用意",
+          "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+          "with": {
+            "python-version": "3.10.11"
+          }
+        },
+        {
           "name": "Rust を用意",
           "run": "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'"
         },
@@ -172,6 +179,13 @@
         {
           "name": "ワークフローを検査",
           "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "比較用の Python 3.10.11 を用意",
+          "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+          "with": {
+            "python-version": "3.10.11"
+          }
         },
         {
           "name": "Rust を用意",
