@@ -865,6 +865,9 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - 段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))では、開発用ソースに `resolve-task-dir` と旧版との比較を追加した。この段階では配布物を変えなかった。
 - 段階 1b([Issue #450](https://github.com/Yuki-Maeda-valour/workflow/issues/450))では、新コマンドを含む 3 本と検査情報を取り込み、対象の skill と `loop.sh` を共通入口へつなぐ。配布元のソースと、入口を含む公開する SHA の検査は分ける。出所と検査手順は [testing.md](testing.md#段階-1b-の配布と導入の検査) に記す。
 - 利用者向けに Rust を自動導入する処理は加えない。v4 の利用者の Python・PyYAML・bash の要件と既存の呼び出し方は維持する。
+- [Issue #283](https://github.com/Yuki-Maeda-valour/workflow/issues/283)は、段階 2 で Git 設定の観測を比べるための入力と性質を固定する。廃止済みの #246・#282 の分割計画は再開しない。
+  - 製品と既存の拒否条件は変えず、読み取り順序、処理量と時間の上限、変更の再検査、返す値のテストを追加する。
+  - Python 内部だけの観察と、移行時に引き継ぐ性質は分ける。Rust 版との比較は未実施である。既存テストとの対応と、不具合を入れた独立コピーの確認方法は [testing.md](testing.md#git-設定の観測を移行へ引き継ぐテスト283) に置く。
 
 `DEV_WORKFLOW_ENGINE` は、段階 0b から同梱する `bin/dev-workflow/launch.sh` が読む。段階 1b では保存先の解決をこの入口へ通す。既定は旧 Python のまま維持する。
 

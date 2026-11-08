@@ -183,6 +183,77 @@ python3 -B scripts/check_plugin_install.py --root .
 | Linux カーネル 5.6・macOS 11 の最低 OS | 実機では未確認。入口の版の判定と、現在の CI 環境での検査とは分ける |
 | 公開する最終 commit の Native CI・Distribution launch・全回帰テスト | この時点では未実行。配布元 CI の成功を代わりに使わない |
 
+### Git 設定の観測を移行へ引き継ぐテスト(#283)
+
+[Issue #283](https://github.com/Yuki-Maeda-valour/workflow/issues/283)は、[Rust 移行計画 #400](https://github.com/Yuki-Maeda-valour/workflow/issues/400)の段階 2 に渡す入力と性質を固定する。
+製品の `loop-state.py` は変えない。廃止済みの #246・#282 の分割計画は再開しない。
+Rust 版の実装と比較は、この確認に含まない。
+
+- `scripts/test_loop_state.py` の既存 `LoopStateTest` の 57 メソッドは維持する。
+- 新しい `ConfigSnapshotContractTest` の 8 メソッドは、実物の Git とファイルを使う。
+- 新規分は Git の初期化前から `HOME`・`XDG_CONFIG_HOME`・global 設定を一時フォルダへ向け、system 設定を無効にする。継承した `GIT_*` を外す。
+- 環境、時計、包んだ関数は、例外が起きても元へ戻す。既存クラスの準備や期待値は変えない。
+
+| 確かめる性質 | 既存の確認 | 追加する確認(`test_config_snapshot_` から始まるメソッド) |
+|---|---|---|
+| 保存済みの設定を通常 Git より前に拒否 | `test_held_global_config_link_is_checked_before_normal_git_discovery` と、保存済み候補・管理先・各作業場所の事前検査 | 同じ入力は増やさない |
+| 根と有効な include を実効 Git より先に読む | 通常 include、条件付き include、同じ実体と別親の正常例 | `orders_reads_conditions_rechecks_and_candidates`。必要な前後関係と、全出典の再検査後に候補を調べる順序 |
+| 後方の local remote で条件が有効になる | `test_hasconfig_uses_later_local_remote_and_boolean_without_value_is_normal` | `drains_nested_hasconfig_queue`。global → A → B と、処理中に増えた条件も末尾まで読むこと |
+| 循環を実効 Git より前に拒否 | 同じ実体でも別の親なら循環としない正常例 | `rejects_normal_and_deferred_cycles_before_effective_git`。通常 include と、遅れて有効になる条件の循環 |
+| 処理量の上限 | refs、Git 出力、フォルダ列挙、全体の項目・総量・1 ファイル上限 | `passes_same_budget_through_every_phase` と `keeps_callers_item_and_byte_consumption`。同じ `Budget` と事前消費の維持 |
+| 時間の上限 | 制限値を渡す既存の実行 | `keeps_callers_deadline_at_late_phases`。実効 Git の直前・直後・候補の直前で、呼出し元の期限を超えれば拒否 |
+| 読み取り後の変更 | 設定リンクの差替え、実行間の基準更新、読み取り中の変更 | `rejects_origin_change_after_effective_git`。実効 Git の直後に include を変えると拒否 |
+| 返す値 | スナップショットの安定性と出典を含むこと | `returns_exact_values_and_ordered_candidates`。3 項目、実効設定の SHA256、出典のパス順、候補の種類・存在/不在・順序 |
+
+追加した順序の確認は `config_snapshot` の中に限る。
+保存済み状態を使うときは、その前に候補と出典を照らし合わせる。
+`snapshot` 全体の最初の Git と、`config_snapshot` の根の取得を混同しない。
+
+- SHA256 の期待値は、包んだ元の Git が返した生バイトから独立に計算する。製品の返却値から正解を作らない。
+- 処理量の境界は同じ一時入力で実測する。固定した一時パスの長さや機械ごとのバイト数は期待にしない。
+- 期限の検査は製品が参照する時計だけを差し替える。Git やテスト実行側の時計は変えず、長い待機もしない。
+- 再検査の対象は候補の根に含まれない include とする。再検査を外した不具合を、最後の候補検査が偶然拒否しないようにする。
+- 静的な循環を最初から置くと、Git 自身が `--no-includes` や `--file` の起動準備で先に拒否する。
+  - Python 内部の循環判定には、既知の include を `safe_config_file` が読む間だけ実ファイルへ循環の辺を書く。
+  - 元の関数が保持したファイル記述子(開いた実体への参照)から解析した直後に、`finally` で元の入力へ戻す。返る行や製品の辞書は加工しない。
+  - 次の Git は非循環の実ファイルを読み、製品は実際に解析した辺から循環を検出する。循環を外した同じファイル構成は成功する。
+  - 循環の検査を外すと、実効 Git の呼出しへ到達した時点でテストを失敗にする。後の再検査の不一致は、この検出の根拠にしない。
+
+#### 独立コピーに不具合を入れる確認
+
+```bash
+python3 -B scripts/run-tests.py test_loop_state.py
+python3 -B scripts/check_loop_state_mutations.py
+```
+
+`check_loop_state_mutations.py` は元の新規 8 件と無変更コピーの成功を確かめる。
+続いて、元と書込みを共有しない新しいコピーを作り、次の 7 種類・10 件を 1 件ずつ検査する。
+
+| 種類 | コピーへ入れる不具合 | 必須の失敗理由 |
+|---|---|---|
+| 順序 | 実効 Git を探索より前へ移す | `CONFIG_ORDER`。有効な出典の読取より先に実効 Git が始まった |
+| 待ち行列 | 開始時の要素数だけで処理を終える | `CONFIG_QUEUE`。B が実効出典に現れたのに事前検査されなかった |
+| 共有上限 | 途中で `Budget` を新しく作る | `CONFIG_BUDGET_ID`。呼出し元の入れ物ではなくなった |
+| 期限 | 途中で期限を 60 秒延ばす | `CONFIG_DEADLINE`。期限超過なのに拒否されなかった |
+| 循環 | 遅れて有効になった辺の循環検査を削る | `CONFIG_CYCLE`。実効 Git の呼出しへ到達した |
+| 再検査 | 実効 Git 後の出典の再検査を削る | `CONFIG_RECHECK`。変更後なのに拒否されなかった |
+| 返す値(4 件) | キー変更、SHA256 変更、出典の逆順、不在候補を存在へ変更 | `CONFIG_KEYS`・`CONFIG_DIGEST`・`CONFIG_ORIGINS_ORDER`・`CONFIG_CANDIDATES` の各検査失敗 |
+
+- 差替え場所は 1 か所に限る。0 か所や複数なら止める。
+- テスト名、検査失敗の印、実行件数、終了コードを確認する。構文エラー、読み込み失敗、検査の省略、時間切れは成功と数えない。
+- 各行の JSON に、元とコピーの SHA256、テストの SHA256、失敗した検査、終了コード、所要時間を残す。
+- 最後に元の製品の内容とモード、テストの内容が不変かを確かめる。一時コピーは処理を終えたら片付ける。
+- この入口は開発者が明示して実行する。`run-all.py` による新規 8 件の通常実行とは分ける。
+
+#### 段階 2 で使う範囲
+
+- 同じ include 構成、条件、変更の時点と、成功値・拒否・外部から指定した処理量と時間の上限を引き継ぐ。
+- Python の関数名、オブジェクトの同一性、工程別の消費数、循環を投入する内部の時点は、Python 内部だけの観察である。Rust へ同じ構成を要求しない。
+- 独立コピーでは絶対パス、`dev`・`ino`・時刻が異なる。実効 Git の出力に出典パスを含むため、`effective_sha256` も単純一致できない。
+- 比較時は同じ入力場所を使うか、値ごとに根拠がある対応を設計する。出力全体の一括正規化や広い差分許可で、安全の確認を消さない。
+- 今回の成功だけで Rust 版との同等性を確認したとは扱わない。
+- #448 側と全回帰テストを同時に流さない。公開前は管理担当が実行権を確認し、確認済みの commit を指定して全回帰テストを流す。
+
 ## 全回帰テストのコマンド(run-all.py)
 
 使い方(リポジトリ直下で実行する):
