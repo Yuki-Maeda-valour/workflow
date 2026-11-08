@@ -1,15 +1,140 @@
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
+import shutil
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
+from unittest import mock
 
 sys.dont_write_bytecode = True
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py'
+
+
+class NativeDistributionEnvironmentTests(unittest.TestCase):
+    """配布全体と設定を、変更していない容量・項目数・時間の上限で保持する。"""
+
+    def test_full_distribution_is_retained_and_binary_changes_are_rejected(self):
+        from test_native_distribution import BINARIES, make_bundle
+
+        with tempfile.TemporaryDirectory(prefix='native-environment-') as temporary:
+            base = Path(temporary)
+            root = base / 'plugin'
+            source = SCRIPT.parents[3]
+            shutil.copytree(source, root, symlinks=True)
+            distribution = root / 'bin/dev-workflow'
+            artifact_kind = 'repository'
+            if not all((distribution / name).is_file() for name in BINARIES):
+                # Task 2.1 より前でも検査できる。ELF・Mach-O の頭を持つ偽の組を使い、起動しない。
+                # 不完全な実物と混ぜず、3 本とメタ情報を一組として置く。入口は配布元のまま。
+                fixture = make_bundle(base / 'fixture', distribution=False)
+                distribution.mkdir(parents=True, exist_ok=True)
+                for name in (*BINARIES, 'SHA256SUMS', 'build-info.json'):
+                    target = distribution / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(fixture / name, target)
+                artifact_kind = 'fixture'
+
+            home = base / 'home'
+            (home / '.claude').mkdir(parents=True)
+            settings = home / '.claude/settings.json'
+            settings.write_text('{}\n', encoding='utf-8')
+            config = home / '.gitconfig'
+            config.write_text('[user]\nname = native-environment-test\n', encoding='utf-8')
+            env = dict(os.environ, HOME=str(home), XDG_CONFIG_HOME=str(home / '.config'), GIT_CONFIG_NOSYSTEM='1')
+            for name in ('GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM', 'CLAUDE_CONFIG_DIR', 'ZDOTDIR', 'BASH_ENV', 'ENV'):
+                env.pop(name, None)
+
+            def run(*args):
+                started = time.monotonic()
+                result = subprocess.run([sys.executable, '-B', str(SCRIPT), *map(str, args)],
+                                        cwd=base, env=env, capture_output=True, text=True, timeout=15)
+                elapsed = time.monotonic() - started
+                self.assertLess(elapsed, 15)
+                return result, elapsed
+
+            spec = importlib.util.spec_from_file_location('native_environment_guard', SCRIPT)
+            guard = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(guard)
+            self.assertEqual((guard.MAX_FILE, guard.MAX_TOTAL, guard.MAX_ENTRIES, guard.MAX_SECONDS),
+                             (8 * 1024 * 1024, 64 * 1024 * 1024, 10_000, 15.0))
+            paths = list(root.rglob('*'))
+            file_bytes = {path.relative_to(root).as_posix(): path.stat().st_size
+                          for path in paths if path.is_file()}
+            self.assertLessEqual(max(file_bytes.values()), 8 * 1024 * 1024)
+            plugin_bytes = sum(file_bytes.values())
+            self.assertLessEqual(plugin_bytes, 64 * 1024 * 1024)
+            self.assertLessEqual(len(paths), 10_000)
+            bundle = base / 'retained'
+            boot, bootstrap_seconds = run('bootstrap', '--root', root, '--output', bundle)
+            self.assertEqual(boot.returncode, 0, boot.stderr)
+            receipt = json.loads(boot.stdout)
+            state = bundle / 'environment.json'
+            verify_args = ('verify', '--state', state, '--expect-sha256', receipt['sha256'])
+            verified, verify_seconds = run(*verify_args)
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+            held = json.loads(state.read_text(encoding='utf-8'))
+            for name in BINARIES:
+                relative = 'bin/dev-workflow/' + name
+                raw = (root / relative).read_bytes()
+                mode = stat.S_IMODE((root / relative).stat().st_mode)
+                self.assertTrue(mode & 0o111, name)
+                expected = ['file', mode, hashlib.sha256(raw).hexdigest()]
+                self.assertEqual(held['entries']['plugin/' + relative], expected)
+                self.assertEqual(held['entries']['component:plugin:' + str(root / relative)][:3], expected)
+                copied = bundle / 'plugin' / relative
+                self.assertEqual(copied.read_bytes(), raw)
+                self.assertEqual(stat.S_IMODE(copied.stat().st_mode), mode)
+            for path in (settings, config):
+                self.assertEqual(held['entries']['external:' + str(path)][0], 'file')
+
+            # コピー名の別名を二重計上せず、設定も含む実際の Budget を計測する。
+            budget = guard.Budget()
+            with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(guard, 'Budget', return_value=budget):
+                current = guard.snapshot(root, held['specs'], held['inventory'], expected=held['entries'])
+            self.assertEqual(current, held['entries'])
+            self.assertGreaterEqual(budget.bytes, plugin_bytes + settings.stat().st_size + config.stat().st_size)
+            self.assertLessEqual(budget.bytes, 64 * 1024 * 1024)
+            self.assertLessEqual(budget.entries, 10_000)
+
+            # 保持元と保持コピーの両方で、容量を変えない 1 バイトの変更も拒否する。
+            rejected_seconds = {}
+            for label in ('source', 'copy'):
+                with self.subTest(changed=label):
+                    top = root if label == 'source' else bundle / 'plugin'
+                    changed = top / 'bin/dev-workflow' / BINARIES[0]
+                    original = changed.read_bytes()
+                    changed.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+                    rejected, elapsed = run(*verify_args)
+                    self.assertEqual(rejected.returncode, 20, rejected.stdout + rejected.stderr)
+                    rejected_seconds[label] = elapsed
+                    changed.write_bytes(original)
+                    # 保持元の情報も再確認するため、次は独立した保持コピーで検査する。
+                    if label == 'source':
+                        bundle = base / 'retained-again'
+                        reboot, _ = run('bootstrap', '--root', root, '--output', bundle)
+                        self.assertEqual(reboot.returncode, 0, reboot.stderr)
+                        receipt = json.loads(reboot.stdout)
+                        verify_args = ('verify', '--state', bundle / 'environment.json',
+                                       '--expect-sha256', receipt['sha256'])
+
+            print('native environment: ' + json.dumps({
+                'artifacts': artifact_kind,
+                'distribution_file_bytes': {name: file_bytes['bin/dev-workflow/' + name]
+                                            for name in (*BINARIES, 'launch.sh', 'SHA256SUMS', 'build-info.json')},
+                'max_file_bytes': max(file_bytes.values()), 'plugin_bytes': plugin_bytes,
+                'plugin_entries': len(paths), 'budget_bytes_with_settings': budget.bytes,
+                'budget_entries_with_settings': budget.entries, 'retained_entries': len(held['entries']),
+                'bootstrap_seconds': round(bootstrap_seconds, 6), 'verify_seconds': round(verify_seconds, 6),
+                'changed_verify_seconds': {key: round(value, 6) for key, value in rejected_seconds.items()},
+            }, sort_keys=True))
+
 
 class EnvironmentGuardTests(unittest.TestCase):
     def setUp(self):

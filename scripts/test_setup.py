@@ -1,8 +1,10 @@
 """入力と導入元を確かめる事前検査。使い捨ての配布元とホームで動かす。"""
 import os
 from contextlib import contextmanager
+import hashlib
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -13,6 +15,14 @@ SCRIPT = Path(__file__).resolve().parents[1] / 'setup.sh'
 BASH = os.environ.get('SETUP_TEST_BASH', shutil.which('bash'))
 PATH_MODES = ('--copy', '--link', '--agents-copy', '--agents')
 MODES = PATH_MODES + ('--global', '--agents-global', '--list')
+INSTALL_MODES = PATH_MODES + ('--global', '--agents-global')
+BINARY_PATHS = ('linux-x86_64/dev-workflow', 'linux-arm64/dev-workflow',
+                'macos-universal/dev-workflow')
+
+
+def _identity(st):
+    """置き直されていないかを比べる値。読んだ時刻(atime)は含めない。"""
+    return (st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
 
 
 class SetupTests(unittest.TestCase):
@@ -28,11 +38,52 @@ class SetupTests(unittest.TestCase):
             directory = self.source / name
             directory.mkdir(parents=True)
             (directory / 'SKILL.md').write_text(name + '\n')
+        self.make_bundle()
         self.target = self.root / 'project'
         self.target.mkdir()
         self.home = self.root / 'home'
         self.home.mkdir()
         self.env = dict(os.environ, HOME=str(self.home))
+
+    @property
+    def bundle(self):
+        return self.repo / 'plugins/dev-workflow/bin/dev-workflow'
+
+    def make_bundle(self):
+        """実際の配布物が無い段階でも、導入の配置と権限を検査できる一組。"""
+        self.bundle.mkdir(parents=True)
+        launch = self.bundle / 'launch.sh'
+        launch.write_text('#!/bin/sh\n'
+                          'root=$(CDPATH= cd -P -- "$(dirname "$0")" && pwd) || exit 1\n'
+                          'exec "$root/linux-x86_64/dev-workflow" "$@"\n')
+        launch.chmod(0o755)
+        sums = []
+        for name in BINARY_PATHS:
+            binary = self.bundle / name
+            binary.parent.mkdir()
+            binary.write_text('#!/bin/sh\nprintf "fixture\\n%s\\n" "$PWD"\n'
+                              'printf "%s\\n" "$@"\n')
+            binary.chmod(0o755)
+            sums.append(hashlib.sha256(binary.read_bytes()).hexdigest() + '  ' + name + '\n')
+        (self.bundle / 'SHA256SUMS').write_text(''.join(sums))
+        (self.bundle / 'build-info.json').write_text('{"fixture": true}\n')
+        for name in ('SHA256SUMS', 'build-info.json'):
+            (self.bundle / name).chmod(0o644)
+
+    def destination(self, mode='--copy', target=None):
+        host = '.agents' if 'agents' in mode else '.claude'
+        return (self.home if 'global' in mode else target or self.target) / host / 'skills'
+
+    def assert_bundle(self, destination, linked):
+        installed = destination.parent / 'bin/dev-workflow'
+        self.assertEqual(linked, installed.is_symlink())
+        if linked:
+            self.assertTrue(installed.samefile(self.bundle))
+        for path in self.bundle.rglob('*'):
+            actual = installed / path.relative_to(self.bundle)
+            self.assertEqual(stat.S_IMODE(path.stat().st_mode), stat.S_IMODE(actual.stat().st_mode))
+            if path.is_file():
+                self.assertEqual(path.read_bytes(), actual.read_bytes())
 
     def run_setup(self, mode='--copy', force=False, target=None):
         args = [mode]
@@ -108,6 +159,7 @@ class SetupTests(unittest.TestCase):
                 self.assertIn('含まれる skills:', result.stdout)
                 self.assertIn('alpha', result.stdout)
                 self.assertIn('omega', result.stdout)
+                self.assertIn('bin/dev-workflow/', result.stdout)
                 self.assertNotIn('道具の版', result.stdout)
                 self.assertEqual(before, self.snapshot())
 
@@ -130,10 +182,10 @@ class SetupTests(unittest.TestCase):
             with self.subTest(mode=mode):
                 result = self.run_setup(mode, force=True)
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assertIn('2 件導入', result.stdout)
+                self.assertIn('3 件導入', result.stdout)
                 self.assertIn('が使う道具の版:', result.stdout)
                 self.assertIn('| 道具 | 見つけた版 | 要る版 | 結果 | 使う所 |', result.stdout)
-                self.assertLess(result.stdout.index('2 件導入'), result.stdout.index('が使う道具の版:'))
+                self.assertLess(result.stdout.index('3 件導入'), result.stdout.index('が使う道具の版:'))
         self.assertFalse((self.home / '.local/state').exists())
 
     def test_tool_versions_failure_or_absence_keeps_exit_code(self):
@@ -157,11 +209,12 @@ class SetupTests(unittest.TestCase):
                                                (['--force', '--force'], ['--force'])):
                             result = case.run_args([*prefix, mode, operand, *suffix])
                             self.assertEqual(0, result.returncode, result.stderr)
-                            self.assertIn('2 件導入', result.stdout)
+                            self.assertIn('3 件導入', result.stdout)
                             destination = target / ('.agents' if 'agents' in mode else '.claude') / 'skills'
                             for skill in ('alpha', 'omega'):
                                 self.assertEqual(skill + '\n', (destination / skill / 'SKILL.md').read_text())
                                 self.assertEqual('copy' not in mode, (destination / skill).is_symlink())
+                            case.assert_bundle(destination, linked='copy' not in mode)
 
     def test_nonexistent_project_remains_an_execution_error(self):
         for mode in PATH_MODES:
@@ -259,8 +312,9 @@ class SetupTests(unittest.TestCase):
             for name in dirs + files:
                 path = Path(directory) / name
                 rel = str(path.relative_to(self.root))
+                mode = stat.S_IMODE(path.lstat().st_mode)
                 result[rel] = ('link', os.readlink(path)) if path.is_symlink() else (
-                    ('dir',) if path.is_dir() else ('file', path.read_bytes()))
+                    ('dir', mode) if path.is_dir() else ('file', mode, path.read_bytes()))
         return result
 
     def test_parent_link_to_source_is_rejected_without_changes(self):
@@ -285,8 +339,9 @@ class SetupTests(unittest.TestCase):
         before = self.snapshot()
         result = self.run_setup(**kwargs)
         self.assertEqual(before, self.snapshot(), result.stderr)
-        self.assertNotEqual(0, result.returncode, result.stdout)
+        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
         self.assertIn('ERROR', result.stderr)
+        return result
 
     def test_same_physical_source_and_internal_destination_without_force(self):
         for force in (False, True):
@@ -302,7 +357,7 @@ class SetupTests(unittest.TestCase):
                 case.rejected_unchanged(force=force, target=inside)
 
     def test_all_six_modes_reject_source_parent_links_with_or_without_force(self):
-        for mode in ('--copy', '--link', '--agents-copy', '--agents', '--global', '--agents-global'):
+        for mode in INSTALL_MODES:
             for force in (False, True):
                 with self.subTest(mode=mode, force=force), self.fixture() as case:
                     host = '.agents' if 'agents' in mode else '.claude'
@@ -325,7 +380,7 @@ class SetupTests(unittest.TestCase):
                 case.rejected_unchanged(force=force)
 
     def test_all_six_modes_install_skip_and_force(self):
-        for mode in ('--copy', '--link', '--agents-copy', '--agents', '--global', '--agents-global'):
+        for mode in INSTALL_MODES:
             with self.subTest(mode=mode), self.fixture() as case:
                 host = '.agents' if 'agents' in mode else '.claude'
                 destination = (case.home if 'global' in mode else case.target) / host / 'skills'
@@ -334,14 +389,15 @@ class SetupTests(unittest.TestCase):
                 for name in ('alpha', 'omega'):
                     self.assertEqual(name + '\n', (destination / name / 'SKILL.md').read_text())
                     self.assertEqual('copy' not in mode, (destination / name).is_symlink())
+                case.assert_bundle(destination, linked='copy' not in mode)
                 before = case.snapshot()
                 result = case.run_setup(mode=mode)
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assertIn('2 件スキップ', result.stdout)
+                self.assertIn('3 件スキップ', result.stdout)
                 self.assertEqual(before, case.snapshot())
                 result = case.run_setup(mode=mode, force=True)
                 self.assertEqual(0, result.returncode, result.stderr)
-                self.assertIn('2 件導入', result.stdout)
+                self.assertIn('3 件導入', result.stdout)
                 self.assertEqual(before, case.snapshot())
 
     def test_safe_parent_link_spaces_and_uncreated_parent(self):
@@ -354,6 +410,7 @@ class SetupTests(unittest.TestCase):
         result = self.run_setup()
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual('alpha\n', (safe / 'skills/alpha/SKILL.md').read_text())
+        self.assert_bundle(safe / 'skills', linked=False)
 
     def test_final_link_is_not_followed_even_if_dangling_or_points_to_source_parent(self):
         for dangling in (False, True):
@@ -362,8 +419,8 @@ class SetupTests(unittest.TestCase):
                 destination.mkdir(parents=True)
                 leaf = destination / 'alpha'
                 leaf.symlink_to(case.root / 'missing' if dangling else case.repo, target_is_directory=True)
-                result = case.run_setup()
-                self.assertEqual(0, result.returncode, result.stderr)
+                result = case.rejected_unchanged()
+                self.assertIn('--force', result.stderr)
                 self.assertTrue(leaf.is_symlink())
                 self.assertEqual('alpha\n', (case.source / 'alpha/SKILL.md').read_text())
                 result = case.run_setup(force=True)
@@ -388,6 +445,295 @@ class SetupTests(unittest.TestCase):
         result = self.run_setup(target=target)
         self.assertEqual(0, result.returncode, result.stderr)
         self.assertEqual('alpha\n', (target / '.claude/skills/alpha/SKILL.md').read_text())
+
+    def test_bundle_absent_installs_only_skills_in_all_modes(self):
+        for mode in INSTALL_MODES:
+            with self.subTest(mode=mode), self.fixture() as case:
+                shutil.rmtree(case.bundle.parent)
+                destination = case.destination(mode)
+                for force in (False, True):
+                    result = case.run_setup(mode=mode, force=force)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertIn('配布元に bin/dev-workflow/ がありません', result.stdout)
+                    self.assertIn('skills だけを置きます', result.stdout)
+                    self.assertIn('2 件導入', result.stdout)
+                    self.assertFalse((destination.parent / 'bin').exists())
+                    for name in ('alpha', 'omega'):
+                        self.assertEqual(name + '\n', (destination / name / 'SKILL.md').read_text())
+                        self.assertEqual('copy' not in mode, (destination / name).is_symlink())
+                before = case.snapshot()
+                result = case.run_args(['--list'])
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('配布元に bin/dev-workflow/ がありません', result.stdout)
+                self.assertEqual(before, case.snapshot())
+
+    def test_bundle_absent_does_not_touch_existing_bin(self):
+        result = self.run_setup()
+        self.assertEqual(0, result.returncode, result.stderr)
+        installed = self.destination().parent / 'bin/dev-workflow'
+        (installed / 'local-file').write_text('keep\n')
+        shutil.rmtree(self.bundle)
+        result = self.run_setup(force=True)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertEqual('keep\n', (installed / 'local-file').read_text())
+
+    def test_copy_preserves_modes_under_umask_and_runs_without_checkout(self):
+        for mode in ('--copy', '--agents-copy'):
+            with self.subTest(mode=mode), self.fixture() as case:
+                scripts = case.source / 'alpha/scripts'
+                scripts.mkdir(mode=0o751)
+                scripts.chmod(0o751)
+                executable = scripts / 'run.sh'
+                executable.write_text('#!/bin/sh\nexit 0\n')
+                executable.chmod(0o751)
+                result = run([BASH, '-c', 'umask 077; exec "$@"', 'setup', BASH,
+                              str(case.repo / 'setup.sh'), mode, str(case.target)],
+                             cwd=case.root, env=case.env, timeout=15, stdin=None)
+                self.assertEqual(0, result.returncode, result.stderr)
+                destination = case.destination(mode)
+                case.assert_bundle(destination, linked=False)
+                for path in (scripts, executable):
+                    self.assertEqual(0o751, stat.S_IMODE(
+                        (destination / path.relative_to(case.source)).stat().st_mode))
+                # 権限の違いを検出する比較でも、直前に置いたコピーが同じと分かること。
+                result = case.run_setup(mode=mode)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('3 件スキップ', result.stdout)
+                shutil.rmtree(case.repo)
+                launch = destination.parent / 'bin/dev-workflow/launch.sh'
+                result = run([str(launch), 'probe', '日本語 空白', '', '*'], cwd=case.target,
+                             env=case.env, timeout=15, stdin=None)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertEqual(['fixture', str(case.target), 'probe', '日本語 空白', '', '*'],
+                                 result.stdout.splitlines())
+
+    def test_matching_partial_install_can_be_completed_in_either_mode(self):
+        for mode in ('--copy', '--link'):
+            for existing_link in (False, True):
+                for existing_name in ('omega', 'bin/dev-workflow'):
+                    with self.subTest(mode=mode, link=existing_link, name=existing_name), self.fixture() as case:
+                        source = case.bundle if existing_name.startswith('bin/') else case.source / existing_name
+                        leaf = (case.destination().parent / existing_name if existing_name.startswith('bin/')
+                                else case.destination() / existing_name)
+                        leaf.parent.mkdir(parents=True)
+                        if existing_link:
+                            leaf.symlink_to(os.path.relpath(source, leaf.parent), target_is_directory=True)
+                        else:
+                            shutil.copytree(source, leaf)
+                        # 読んだ時刻(atime)は、setup.sh が中身を読むと変わるので比べない。
+                        before = _identity(leaf.lstat())
+                        result = case.run_setup(mode=mode)
+                        self.assertEqual(0, result.returncode, result.stderr)
+                        self.assertIn('2 件導入 / 1 件スキップ', result.stdout)
+                        self.assertEqual(before, _identity(leaf.lstat()))
+                        self.assertEqual('alpha\n', (case.destination() / 'alpha/SKILL.md').read_text())
+                        self.assertTrue((case.destination().parent / 'bin/dev-workflow/launch.sh').is_file())
+
+    def test_different_content_modes_and_entries_reject_partial_install(self):
+        changes = ('content', 'file-mode', 'directory-mode', 'missing', 'extra-hidden', 'type', 'link')
+        for name in ('omega', 'bin/dev-workflow'):
+            for change in changes:
+                with self.subTest(name=name, change=change), self.fixture() as case:
+                    source = case.bundle if name.startswith('bin/') else case.source / name
+                    leaf = (case.destination().parent / name if name.startswith('bin/')
+                            else case.destination() / name)
+                    shutil.copytree(source, leaf)
+                    file = leaf / ('launch.sh' if name.startswith('bin/') else 'SKILL.md')
+                    if change == 'content':
+                        # 長さと時刻が同じでも本文を読む(時刻だけで同一と見なさない)。
+                        before = file.stat()
+                        file.write_bytes(b'x' * before.st_size)
+                        os.utime(file, ns=(before.st_atime_ns, before.st_mtime_ns))
+                    elif change == 'file-mode':
+                        file.chmod(stat.S_IMODE(file.stat().st_mode) ^ stat.S_IXUSR)
+                    elif change == 'directory-mode':
+                        leaf.chmod(stat.S_IMODE(leaf.stat().st_mode) ^ stat.S_IXGRP)
+                    elif change == 'extra-hidden':
+                        (leaf / '.local').write_text('extra\n')
+                    else:
+                        file.unlink()
+                        if change == 'type':
+                            file.mkdir()
+                        elif change == 'link':
+                            file.symlink_to(source / file.name)
+                    result = case.rejected_unchanged()
+                    self.assertIn('--force', result.stderr)
+                    self.assertFalse((case.destination() / 'alpha').exists())
+
+    def test_internal_symlinks_are_compared_without_following_them(self):
+        source = self.source / 'omega'
+        (source / 'alias').symlink_to('SKILL.md')
+        (source / 'missing').symlink_to('absent')
+        result = self.run_setup()
+        self.assertEqual(0, result.returncode, result.stderr)
+        result = self.run_setup()
+        self.assertEqual(0, result.returncode, result.stderr)
+        installed = self.destination() / 'omega/alias'
+        installed.unlink()
+        installed.symlink_to(source / 'SKILL.md')
+        self.rejected_unchanged()
+
+    def test_force_updates_skills_and_bundle_together_in_all_modes(self):
+        for mode in INSTALL_MODES:
+            with self.subTest(mode=mode), self.fixture() as case:
+                destination = case.destination(mode)
+                # 旧版のコピーを先に置き、導入方式も変更できることを確かめる。
+                for name in ('alpha', 'omega'):
+                    shutil.copytree(case.source / name, destination / name)
+                shutil.copytree(case.bundle, destination.parent / 'bin/dev-workflow')
+                (case.source / 'alpha/SKILL.md').write_text('new alpha\n')
+                (case.bundle / 'build-info.json').write_text('{"fixture": "new"}\n')
+                case.rejected_unchanged(mode=mode)
+                result = case.run_setup(mode=mode, force=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertIn('3 件導入', result.stdout)
+                self.assertEqual('new alpha\n', (destination / 'alpha/SKILL.md').read_text())
+                case.assert_bundle(destination, linked='copy' not in mode)
+
+    def test_broken_managed_leaves_require_force_in_all_modes(self):
+        for mode in INSTALL_MODES:
+            for name in ('omega', 'bin/dev-workflow'):
+                with self.subTest(mode=mode, name=name), self.fixture() as case:
+                    destination = case.destination(mode)
+                    leaf = (destination.parent / name if name.startswith('bin/') else destination / name)
+                    leaf.parent.mkdir(parents=True)
+                    leaf.symlink_to(case.root / 'moved-checkout', target_is_directory=True)
+                    result = case.rejected_unchanged(mode=mode)
+                    self.assertIn('リンク切れ', result.stderr)
+                    self.assertIn('--force', result.stderr)
+                    result = case.run_setup(mode=mode, force=True)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual('omega\n', (destination / 'omega/SKILL.md').read_text())
+                    case.assert_bundle(destination, linked='copy' not in mode)
+
+    def test_broken_or_invalid_skill_and_bin_parents_never_allow_force(self):
+        for name in ('skills', 'bin'):
+            for kind in ('broken', 'cycle', 'file'):
+                for force in (False, True):
+                    with self.subTest(name=name, kind=kind, force=force), self.fixture() as case:
+                        parent = case.destination().parent / name
+                        parent.parent.mkdir()
+                        if kind == 'file':
+                            parent.write_text('keep\n')
+                        else:
+                            parent.symlink_to(case.root / 'missing' if kind == 'broken' else parent)
+                        case.rejected_unchanged(force=force)
+
+    def test_other_bin_entries_are_preserved_in_all_modes(self):
+        for mode in INSTALL_MODES:
+            with self.subTest(mode=mode), self.fixture() as case:
+                parent = case.destination(mode).parent / 'bin'
+                (parent / 'other-tool').mkdir(parents=True)
+                (parent / 'other-tool/data').write_text('keep\n')
+                (parent / 'another-link').symlink_to(case.root / 'absent')
+                executable = parent / 'other-command'
+                executable.write_text('keep executable\n')
+                executable.chmod(0o751)
+                for force in (False, True):
+                    result = case.run_setup(mode=mode, force=force)
+                    self.assertEqual(0, result.returncode, result.stderr)
+                    self.assertEqual('keep\n', (parent / 'other-tool/data').read_text())
+                    self.assertEqual(str(case.root / 'absent'), os.readlink(parent / 'another-link'))
+                    self.assertEqual('keep executable\n', executable.read_text())
+                    self.assertEqual(0o751, stat.S_IMODE(executable.stat().st_mode))
+
+    def test_bin_and_skill_source_overlaps_reject_before_all_writes(self):
+        for mode in INSTALL_MODES:
+            for force in (False, True):
+                for parent_name, source_name in (('bin', 'bin'), ('bin', 'skill'), ('skills', 'bin')):
+                    with self.subTest(mode=mode, force=force, parent=parent_name, source=source_name), self.fixture() as case:
+                        parent = case.destination(mode).parent / parent_name
+                        parent.parent.mkdir()
+                        source = case.bundle if source_name == 'bin' else case.source / 'alpha'
+                        parent.symlink_to(source, target_is_directory=True)
+                        case.rejected_unchanged(mode=mode, force=force)
+
+    def test_bin_destination_containing_checkout_rejects_before_skills_change(self):
+        for force in (False, True):
+            with self.subTest(force=force), self.fixture() as case:
+                destination = case.destination()
+                (destination / 'alpha').mkdir(parents=True)
+                (destination / 'alpha/existing').write_text('keep\n')
+                bin_dest = destination.parent / 'bin/dev-workflow'
+                bin_dest.mkdir(parents=True)
+                moved = bin_dest / 'checkout'
+                shutil.move(str(case.repo), moved)
+                case.repo = moved
+                case.source = moved / 'plugins/dev-workflow/skills'
+                case.rejected_unchanged(force=force)
+
+    def test_parent_links_between_managed_destinations_are_rejected(self):
+        for force in (False, True):
+            with self.subTest(force=force), self.fixture() as case:
+                destination = case.destination()
+                (destination / 'omega').mkdir(parents=True)
+                (destination.parent / 'bin').symlink_to(destination / 'omega', target_is_directory=True)
+                case.rejected_unchanged(force=force)
+
+    def test_same_managed_destination_is_rejected_even_when_not_yet_created(self):
+        for force in (False, True):
+            with self.subTest(force=force), self.fixture() as case:
+                skill = case.source / 'dev-workflow'
+                skill.mkdir()
+                (skill / 'SKILL.md').write_text('dev-workflow\n')
+                destination = case.destination()
+                destination.mkdir(parents=True)
+                (destination.parent / 'bin').symlink_to(destination, target_is_directory=True)
+                case.rejected_unchanged(force=force)
+
+    @unittest.skipIf(os.geteuid() == 0, 'root は権限不足を再現できない')
+    def test_permission_errors_are_detected_before_any_install(self):
+        for force in (False, True):
+            for kind in ('bin-parent', 'bin-destination', 'source-file'):
+                with self.subTest(force=force, kind=kind), self.fixture() as case:
+                    if kind == 'bin-parent':
+                        path = case.destination().parent / 'bin'
+                        path.mkdir(parents=True)
+                        permissions = 0o500
+                    elif kind == 'bin-destination':
+                        path = case.destination().parent / 'bin/dev-workflow'
+                        shutil.copytree(case.bundle, path)
+                        permissions = 0o500
+                    else:
+                        path = case.bundle / 'launch.sh'
+                        permissions = 0o000
+                    previous = stat.S_IMODE(path.stat().st_mode)
+                    # 本文を読めないファイルもあるため、この例だけ手で変更なしを確認する。
+                    path.chmod(permissions)
+                    try:
+                        result = case.run_setup(force=force)
+                        self.assertEqual(1, result.returncode, result.stdout + result.stderr)
+                        self.assertIn('ERROR', result.stderr)
+                        self.assertFalse(case.destination().exists())
+                        self.assertEqual(permissions, stat.S_IMODE(path.stat().st_mode))
+                    finally:
+                        path.chmod(previous)
+
+    def test_broken_or_file_bundle_source_is_not_treated_as_absent(self):
+        for kind in ('broken', 'file'):
+            with self.subTest(kind=kind), self.fixture() as case:
+                shutil.rmtree(case.bundle)
+                if kind == 'file':
+                    case.bundle.write_text('invalid\n')
+                else:
+                    case.bundle.symlink_to(case.root / 'absent', target_is_directory=True)
+                case.rejected_unchanged()
+
+    def test_wrong_source_link_requires_force_even_with_matching_content(self):
+        for name in ('omega', 'bin/dev-workflow'):
+            with self.subTest(name=name), self.fixture() as case:
+                source = case.bundle if name.startswith('bin/') else case.source / name
+                other = case.root / 'other-checkout'
+                shutil.copytree(source, other)
+                leaf = (case.destination().parent / name if name.startswith('bin/')
+                        else case.destination() / name)
+                leaf.parent.mkdir(parents=True)
+                leaf.symlink_to(other, target_is_directory=True)
+                case.rejected_unchanged()
+                result = case.run_setup(force=True)
+                self.assertEqual(0, result.returncode, result.stderr)
+                self.assertFalse(leaf.is_symlink())
+                self.assertTrue(other.is_dir())
 
     def case_alias(self, path):
         alias = self.root / str(path.relative_to(self.root)).upper()

@@ -2,6 +2,23 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## v4.52.0
+
+### 追加
+
+- Rust 版を試す実行ファイル 3 本と、起動する入口 `bin/dev-workflow/launch.sh` を同梱する。Linux x86_64・arm64 と、Mac の Intel・Apple Silicon を対象とする。([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))
+  - `DEV_WORKFLOW_ENGINE=rust` を指定したときだけ起動する。Linux カーネル 5.6 以上・macOS 11 以上を求め、選んだ 1 本の SHA256(内容の違いを確かめるための値)を検査する。
+  - 試せるのは `--version`・`--help`・`probe --json`・`probe --self-sha256`。未設定・`legacy` は旧版を選ぶが、`probe` などの旧版は無いため、入口は終了 2 になる。空文字・ほかの値も設定エラーで終了 2 になる。
+  - 既存の skill は旧版を使う。Python・PyYAML・bash の要件を維持し、利用者への Rust・Cargo の導入は加えない。Rust の失敗後に旧版を自動で実行しない。
+
+### 変更
+
+- `setup.sh` が skills と同じ設定フォルダの `bin/dev-workflow/` に共通実行ファイルも置くようにする。6 つの導入モードで、skills と同じ方式のリンクか、実行権限を保つコピーを使う。他の `bin/` の中身は変えない。([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))
+  - `--force` なしで既存の skill を残すと版が混ざる場合は、何も変えず終了 1 で止める。以前は既存を飛ばして導入を続け、終了 0 になっていた。
+  - skills と `bin/dev-workflow/` の配置先を、書き込み前に全件検査する。既存の内容・権限が同じか、同じ配布元へのリンクなら残す。
+  - `--force` では管理対象の skills と `bin/dev-workflow/` をそろえて更新する。末尾のリンク切れも置き換えられるが、親フォルダのリンク切れは拒否する。
+- 設定値・必要な OS と道具・導入先での試し方・失敗後の戻し方を、`README.md` と `runtime-requirements.md` に追加する。
+
 ## v4.51.0
 
 ### 変更

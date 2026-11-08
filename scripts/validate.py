@@ -781,13 +781,14 @@ def check_native_bundle(path: Path, mode: str) -> list[str]:
 
 
 def check_native_distribution():
-    """未配布なら無出力。リンク切れを『未配布』として見逃さない。"""
+    """配布物を必須にし、親フォルダの欠落やリンク切れも拒否する。"""
     path = REPO
     for part in _NATIVE_REL.parts:
         path /= part
         try:
             mode = path.lstat().st_mode
         except FileNotFoundError:
+            ERRORS.append(f"{_NATIVE_REL}: 配布フォルダが存在しない: {path}")
             return
         except OSError as exc:
             ERRORS.append(f"{path}: 配布フォルダを読み取れない: {exc}")

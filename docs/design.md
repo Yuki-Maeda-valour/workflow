@@ -848,7 +848,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - 版の刻み: 後方互換な機能追加はマイナー、内部の移行・修正はパッチ、AI 非依存の到達点はメジャーで示す(委託の語の移行の版の刻み〈3.9.x → v4.0.0。2026-09-10 に到達〉は §7-7)
 - Rust への移行の版の刻み(2026-11-07 に利用者が決めた。計画は [Issue #400](https://github.com/Yuki-Maeda-valour/workflow/issues/400)):
   - 移行の完了は v5.0.0 で示す。v5.0.0 は #400 の段階 7 で出す。段階 7 では、既定を Rust 版に切り替え、製品の Python 版と bash 版を外す。
-  - v4 の間(v4.x)は、利用者の既定を Python・bash の旧版のままにする。Rust 版を選ぶ環境変数は `DEV_WORKFLOW_ENGINE` に決めた(2026-11-08。値の扱いは下の節)。入口は段階 0b で配る。段階 0a の時点では未配布。段階 0〜6 の配布は、v4 のマイナーかパッチで出す。
+  - v4 の間(v4.x)は、利用者の既定を Python・bash の旧版のままにする。Rust 版を選ぶ環境変数は `DEV_WORKFLOW_ENGINE` に決めた(2026-11-08。値の扱いは下の節)。段階 0b から試用の入口と実行ファイルを同梱する。段階 0〜6 の配布は、v4 のマイナーかパッチで出す。
   - v4 の最後の版の commit に git の tag を付け、「Python の最速系」(Python 版を速くし終えた最後の版)として残す。
   - 利用者の要件は v5.0.0 で変わる。python3・PyYAML が要らなくなる。Linux カーネル 5.6 以上・macOS 11 以上が要る。
   - なぜ移行の途中で既定を切り替えないか: v4 の途中で、利用者の要件(python3・PyYAML・bash・OS の版)を変えないため。
@@ -859,23 +859,24 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 ### Rust 移行の実装と配布(2026-11-08 決定)
 
 - PR(変更を本流へ取り込む前に確かめてもらう依頼)を、実装の PR と配る PR に分ける。段階 2〜4 は並列に進める。出典は [Issue #400 の「進め方」の節](https://github.com/Yuki-Maeda-valour/workflow/issues/400)(2026-11-08)。
-- 段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))では、`native/`・`.github/workflows/`・検査の補助を作る。`plugins/`・`.claude-plugin/marketplace.json`・`setup.sh` は変えない。版と `CHANGELOG.md` も変えない。
-- 段階 0b は、0a を本流へ取り込んだ後に始める。人が CI(変更を送るたびに自動で検査する仕組み)の成果物を取り込み、入口と一緒に配る。配布を開始する版は v4 の次のマイナーとする。
+- 段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))では、`native/`・`.github/workflows/`・検査の補助を作った。`plugins/`・`.claude-plugin/marketplace.json`・`setup.sh` は変えず、版と `CHANGELOG.md` も変えなかった。
+- 段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から、実行ファイル 3 本と入口を同梱する。人が CI(変更を送るたびに自動で検査する仕組み)の成果物を取り込む。配布を開始する版は、main 取り込み後の v4 の次のマイナーとする。
 - 利用者向けに Rust を自動導入する処理は加えない。v4 の利用者の Python・PyYAML・bash の要件と既存の呼び出し方は維持する。
 
-`DEV_WORKFLOW_ENGINE` は、0b で配る入口の**決めた方針**である。0a では入口を配っておらず、この環境変数による製品の切り替えはまだ使えない。
+`DEV_WORKFLOW_ENGINE` は、段階 0b から同梱する `bin/dev-workflow/launch.sh` が読む。既存の skill の呼び出しは旧版のまま維持する。
 
 | 値 | 0b の入口で選ぶ動作 |
 |---|---|
-| 未設定 | Python・bash の旧版 |
-| `legacy` | Python・bash の旧版 |
+| 未設定 | 旧版を選ぶ。段階 0 の入口には旧版のコマンドが無いため終了 2 |
+| `legacy` | 未設定と同じ |
 | `rust` | Rust 版 |
-| 空文字・ほかの値 | 設定の誤りとして止める |
+| 空文字・ほかの値 | 設定の誤りとして終了 2 |
 
 - 切り替えは profile(プロジェクトの設定ファイル)から読まない。Rust 版が使えないときも、自動で旧版へ戻さない。
 - 製品の実行ファイルのパスを指定する環境変数は作らない。`DEV_WORKFLOW_TEST_NATIVE_BINARY` は、ソースから作った実行ファイルを検査するためだけに使う。
-- 0a の実行ファイルが持つ入口は `--version`・`--help`・`probe --json`・`probe --self-sha256`。実行時に Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
-- `probe` に旧版は無い。試しのコマンドが通っても、旧版との同等性や OS の保護機能を確認したとは扱わない。
+- Rust 実行ファイルが持つコマンドは `--version`・`--help`・`probe --json`・`probe --self-sha256`。Rust 実行ファイル自体は Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
+- sh の入口は OS・CPU・最低 OS と、選んだ 1 本のハッシュを外部の道具で検査してから起動する。条件と試し方は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
+- `probe` に旧版は無い。入口の `--version`・`--help` も、未設定・`legacy` では終了 2 になる。試しのコマンドが通っても、旧版との同等性や OS の保護機能を確認したとは扱わない。
 
 ### Rust の構成とビルド入力(段階 0a)
 
@@ -892,9 +893,9 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - `build-info.json` は `schema_version`・`source_commit`・`source_input_sha256`・`cargo_lock_sha256`・`rustc` を持つ。`targets` に対象ごとの道具と設定、`ci` に実行番号と URL、`artifacts` に 3 本の相対パスと SHA256 を記録する。
 - `native/ci/make_dist.py` は、3 本と `SHA256SUMS`・`build-info.json` の 5 ファイルを作る。`scripts/validate.py` の `check_native_bundle(path, "artifact")` に通してから、CI が `native-dist.tar` にまとめる。
 - 0b の配布物は `plugins/dev-workflow/bin/dev-workflow/` に置き、`launch.sh` を足した 6 ファイルとする。`check_native_bundle(path, "distribution")` は実行せずに形式・権限・容量・ハッシュ・記録の一致を検査する。
-  - 0a のように配布フォルダが無いとき、`check_native_distribution()` は警告も出さない。配布フォルダがあれば、不足やリンクの異常も ERROR にする。
-  - 検査は配布物の内部の一致だけを求める。開発中の `native/` と古い配布物の違いは不正にしない。0b で取り込むときは `source_input_hash.py` を使い、ビルド元の入力と 3 本を比べる。
-  - 静的な形式検査だけで、入口の動作を確認したとは扱わない。`launch.sh` の実行テストは 0b が受け持つ。
+  - 0b から配布フォルダを必須にする。`check_native_distribution()` は、フォルダの欠落・一組の不足・リンクの異常を ERROR にする。
+  - 検査は配布物の内部の一致だけを求める。開発中の `native/` と古い配布物の違いは不正にしない。配布へ取り込むときは `source_input_hash.py` を使い、ビルド元の入力と 3 本を比べる。
+  - 静的な形式検査だけで、入口の動作を確認したとは扱わない。0b では `launch.sh` の実行テストと、配布した版の導入確認も行う。
 
 ### Rust で使う部品の候補(段階 0 では依存に加えない)
 

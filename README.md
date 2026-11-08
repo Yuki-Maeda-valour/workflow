@@ -31,7 +31,7 @@
 
 ## 導入方法
 
-Rust 版は段階 0a の開発用ソースだけで、利用者向けの入口は未配布です。現在の導入に Rust は不要です。成果物と入口の配布は段階 0b で始め、v4 の次のマイナーへ上げます。
+Rust 版を試す実行ファイル 3 本と、起動する入口 `bin/dev-workflow/launch.sh` を同梱しています。利用者による Rust・Cargo の導入は不要です。既存の skill は引き続き Python・bash の旧版を使います。試し方は下の「Rust 版を試す(段階 0b)」にあります。
 
 do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
@@ -55,7 +55,7 @@ do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上と GNU 
 
 ### B. setup.sh(プロジェクト単位のコピー / symlink〈別の場所にあるファイルやフォルダを指す、目印のファイル〉)
 
-プラグインを使わず、対象プロジェクトの `.claude/skills/` に直接置く方式。導入の最後に、使う道具の版の表を出します。
+プラグインを使わず、対象プロジェクトの `.claude/skills/` と `.claude/bin/dev-workflow/` に直接置く方式です。導入の最後に、使う道具の版の表を出します。
 
 ```bash
 cd ~/dev/workflow
@@ -64,6 +64,10 @@ cd ~/dev/workflow
 ./setup.sh --global                      # ~/.claude/skills に symlink(全プロジェクト共通)
 ```
 
+共通実行ファイルは、skills と同じ設定フォルダの `bin/dev-workflow/` に置きます。
+`--global` では `~/.claude/bin/dev-workflow/` です。
+リンク方式は同じ配布元を指します。コピー方式は実行権限を保ち、元のリポジトリのフォルダが無くても起動できます。
+
 各導入モードと `--list` は、1 回にいずれか 1 つだけ指定します。同じモードの反復もエラーです。
 `--link`・`--copy`・`--agents`・`--agents-copy` の直後には、空でないプロジェクトパスが必要です。
 `-` で始まるパスは `./-project` のように `./` を付けるか、絶対パスで指定してください。
@@ -71,7 +75,13 @@ cd ~/dev/workflow
 `--force` はモードの前後どちらでも指定できます。
 
 導入先が配布元の中にある場合や、上書きで配布元まで削除する配置は、変更前にエラーで止まります。
-親フォルダのリンクも解決して全スキルを先に確認します。別の安全な置場へのリンクや、導入済みの最終リンクの置換は維持します。
+親フォルダのリンクも解決して、全 skills と `bin/dev-workflow/` を先に確認します。
+`--force` なしでは、配布元と同じ内容・権限か、同じ配布元へのリンクなら残します。
+異なる版が混ざる場合は、何も変えず終了 1 になります。
+各 skill と `bin/dev-workflow` の末尾のリンク切れは、`--force` で置き換えられます。
+親フォルダのリンク切れは、`--force` でも拒否します。
+`--force` は管理対象の skills と `bin/dev-workflow/` をそろえて上書きします。他の `bin/` の中身は変えません。
+`--list` は一覧だけを出します。配布元に `bin/dev-workflow/` が無い旧版では、その旨を出して skills だけを置きます。
 導入中は配置を別の処理から変更しないでください。同時の差し替えを完全に防ぐものではありません。
 
 ### C. 新プロジェクトの立ち上げ(導入後)
@@ -94,6 +104,10 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
 ./setup.sh --agents-copy ~/dev/新プロジェクト     # 同じ場所にコピー(独自改変する場合)
 ./setup.sh --agents-global                       # ~/.agents/skills に symlink(全プロジェクト共通)
 ```
+
+共通実行ファイルも `.agents/bin/dev-workflow/` へ同じ方式で置きます。
+`--agents-global` では `~/.agents/bin/dev-workflow/` です。
+更新と `--force` の条件は上の B と同じです。
 
 - **読み込み先の出典(確認日 2026-09-08)**: Codex は `.agents/skills`(リポジトリ)/ `$HOME/.agents/skills`(ユーザー)/ `/etc/codex/skills`(管理者)から読み、frontmatter(ファイルの頭に置く、`---` の行で挟んだ設定の欄)は `name` + `description` が必須 —
   - [Build skills(ChatGPT/Codex 公式)](https://learn.chatgpt.com/docs/build-skills)。
@@ -126,6 +140,50 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
   - 既定表エントリと skill 本文の配線(skill の手順から、外部のコマンドなどの仕組みを実際に呼ぶようにつなぐこと)は **v4.2.0 で完了**しており、宣言すれば実際に外部で実装される(判定・作業ツリー保護〈外部の AI が実装する前後で、作業中のファイルを控えて守る仕組み〉・内蔵に切り替えること・引き継ぎは上記の契約が正本)。
   - 旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。
   - レビューのベンダー横断(別の会社の AI にもレビューさせること)が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
+
+### E. Rust 版を試す(段階 0b)
+
+`DEV_WORKFLOW_ENGINE=rust` を指定したときだけ、配布した Rust 版を起動します。
+既存の Python・PyYAML・bash の要件は変わりません。
+
+- 設定が未設定・`legacy` なら旧版を選びます。`probe` に旧版は無いため、入口は `ERROR [legacy-unavailable]` を出して終了 2 になります。入口の `--version`・`--help` も同じです。
+- 空文字・ほかの値は `ERROR [engine]` を出して終了 2 になります。設定を profile から読まず、Rust の失敗後に旧版を自動で実行しません。
+- 試せる環境は Linux カーネル 5.6 以上の x86_64・arm64 と、macOS 11 以上の Intel・Apple Silicon です。Mac は両 CPU で動く 1 本を使います。Windows は対象外です。
+- ハッシュ(SHA256。内容の違いを確かめるための値)は、Linux では `sha256sum`、Mac では `shasum -a 256` を使います。その道具が無いときだけ `openssl dgst -sha256` を使います。
+- 道具が無い・計算できない・配布物が壊れている・OS の条件を満たさない場合は、起動せず終了 1 になります。ハッシュは破損の検出用です。配布者の身元や、同じ利用者権限による検査後の差し替えを防ぐ保証はありません。
+
+プラグイン導入では `claude plugin list --json` で実際の導入先を確認し、`installed_plugin` に入れます。
+setup では `.claude` または `.agents` の設定フォルダを入れます。
+
+```sh
+installed_plugin='<実際の導入先>'
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --version
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --help
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --json
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --self-sha256
+```
+
+4 コマンドとも終了 0 になり、`probe --json` の環境・ビルド情報と、自己ハッシュが配布の記録に一致することを確かめます。
+`--version` が返す内部の版は、プラグインの版とは別です。
+比べる項目と詳しい条件は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にあります。
+
+試用を止めるには `unset DEV_WORKFLOW_ENGINE`、または `export DEV_WORKFLOW_ENGINE=legacy` を実行し、既存の skill を使います。
+`probe` は旧版に無いので、終了 2 のままです。
+壊れた配布物は、検査を省かず確認済みの一組を再導入します。
+setup の更新前には上書きする管理対象を控え、元のモードに `--force` を付けて skills と `bin/dev-workflow/` を同じ版にそろえます。他の `bin/` は削除しません。
+Mac の隔離属性(ダウンロードしたファイルに macOS が付ける印)で止まった場合は、属性を消して合格にしません。
+
+配布版の確認状況(2026-11-08 時点)は次のとおりです。
+0a の成果物と、0b で配布する版の導入結果は分けて扱います。
+確かめた配布 commit は `b3aeeda`(ビルド元 `e74af2d`)です。
+
+| 確認する環境と方法 | 0b の結果 |
+|---|---|
+| Linux x86_64 の実際のプラグイン導入先 | 確認済み。Ubuntu 22.04・カーネル 6.8・Claude Code 2.1.319 で、使い捨ての設定フォルダに導入した。導入先の入口で 4 つのコマンドが終了 0、`SHA256SUMS` が一致、未設定は終了 2。ネットワークを切っても起動した |
+| Linux arm64・Mac Intel・Mac Apple Silicon の自動検査で、配布 commit の浅い clone(最新の状態だけを取る複製)から起動 | 確認済み。GitHub Actions の `Distribution launch`(run 42418929988)で、3 種類とも成功した |
+| Mac Apple Silicon の実機でプラグインを導入 | 未確認。利用者が後日、実機で行う。結果が出るまで、#443 と #400 の段階 0 は完了にしない |
+| Mac Intel の実機でプラグインを導入 | 未確認。実機が無いため、自動検査での起動と分けて記録する |
+| 最低 OS の Linux 5.6・macOS 11 の実機 | 未確認。新しい OS の自動検査の成功だけでは確認済みとしない |
 
 ## 無人ループ(`loop.sh`。任意・既定オフ)
 
@@ -196,7 +254,7 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 
 - 開発用ソースは `native/`、CI(変更を送るたびに自動で検査する仕組み)は `.github/workflows/native.yml` にあります。Rust `1.99.1` の導入と外部のビルド先は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)、必須コマンドは [AGENTS.md](AGENTS.md#rust-の検査段階-0a) にあります。
 - CI は Linux x86_64・Linux arm64・Mac Intel・Mac Apple Silicon の 4 種類で検査します。Linux 2 本と、Mac の両 CPU で動く 1 本を成果物にします。2 回のビルドの比較、入力の記録、旧版と Rust 版を比べるテストの補助は [docs/testing.md](docs/testing.md) に記しています。
-- 段階 0a は配るプラグイン・版・`CHANGELOG.md` を変えません。`DEV_WORKFLOW_ENGINE` は決めた方針であり、切り替える入口は段階 0b で配ります。未設定・`legacy` は旧版、`rust` は Rust 版、空文字・ほかの値は誤りとします。
+- 段階 0a では開発用の土台を作りました。段階 0b では、そのビルド手順で作業ブランチのソースから 3 本を作り直し、入口 `bin/dev-workflow/launch.sh` と同梱します。設定値と試し方は上の「Rust 版を試す(段階 0b)」にあります。
 - 切り替えを profile から読まず、自動で旧版へ戻しません。製品の実行ファイル指定用の環境変数は作りません。実装と配布を分ける決定、今後使う YAML・OS の部品の候補は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定) にあります。
 
 ## 検証
