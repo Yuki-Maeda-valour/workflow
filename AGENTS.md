@@ -196,6 +196,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 
 - 段階 0a で作ったソースとビルドの検査は、段階 0b の配布後も続ける。配布した入口・3 本の試し方と必要環境は [runtime-requirements.md](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にある。利用者には Rust・Cargo の導入を求めない。
 - 段階 1b(#450)では、段階 1a(#448)の `resolve-task-dir` を配布し、対象の skill と `loop.sh` を共通入口へつなぐ。未設定・`legacy` は旧 Python、`rust` だけ Rust を使う。配布と専用設定先への実導入の検査は [docs/testing.md](docs/testing.md#段階-1b-の配布と導入の検査) に従う。
+- C0a(#453)の終了値と途中の入出力は開発用ソースだけに実装済み。配布は段階 1b のまま。C0b・C0c は未着手。契約は [docs/design.md](docs/design.md#共通の終了値と入出力c0a)、検査は [docs/testing.md](docs/testing.md#共通の終了値と入出力の検査c0a) にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
