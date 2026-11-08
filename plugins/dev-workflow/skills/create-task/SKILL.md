@@ -100,7 +100,7 @@ argument-hint: "<タスク内容の説明 | 候補_ のパス> [--issue=<番号>
    - 判定は今回実際に読んだ範囲で行い、`.claude/grasp.md` は参照索引に留める。
    - ここで読んだ範囲・日時・未確認事項を grasp.md に更新する
 3. **管理ルートと保存先を解決する**。Issue 方式は [Issue 方式の契約](../do-task/references/github-issue.md) §2「対象と書き込み前の確認」で対象を確定し、以下のディレクトリの処理を通らない。
-   - [references/task-directory.md](references/task-directory.md) に従い、profile の `task_dir` の型をホスト側で検証してから、補助スクリプト(`resolve-task-dir.py`)を使う。
+   - [references/task-directory.md](references/task-directory.md) に従い、profile の `task_dir` の型をホスト側で検証してから、同じ配布の共通入口(`bin/dev-workflow/launch.sh resolve-task-dir`)を使う。
    - 型の検証に失敗したとき、または保存先の解決がエラー(無効指定・置換漏れの名前の候補・複数候補など)になったときは作成せず停止する。
    - 確定したディレクトリが無ければここで作成し、既存タスクとの重複をその直下で確認する
    - 候補モードでは、書き出しの手順で解く(→ candidate-mode.md)。採用の経路では解決し直さず、候補のあるディレクトリを使う(task-directory.md の優先順位 1)

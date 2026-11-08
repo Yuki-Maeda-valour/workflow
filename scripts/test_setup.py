@@ -2,6 +2,7 @@
 import os
 from contextlib import contextmanager
 import hashlib
+import json
 from pathlib import Path
 import shutil
 import stat
@@ -105,6 +106,37 @@ class SetupTests(unittest.TestCase):
         self.assertIn('使い方:', result.stdout)
         for diagnostic in diagnostics:
             self.assertIn(diagnostic, result.stderr)
+
+    def test_actual_distribution_resolves_after_all_six_install_modes(self):
+        for mode in INSTALL_MODES:
+            with self.subTest(mode=mode), self.fixture() as case:
+                shutil.rmtree(case.bundle)
+                real = SCRIPT.parent / 'plugins/dev-workflow'
+                shutil.copytree(real / 'bin/dev-workflow', case.bundle)
+                shutil.copytree(real / 'skills/create-task', case.source / 'create-task')
+                installed = case.destination(mode).parent / 'bin/dev-workflow'
+                result = case.run_setup(mode=mode)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                linked = mode not in ('--copy', '--agents-copy')
+                case.assert_bundle(case.destination(mode), linked)
+                if not linked:
+                    case.repo.rename(case.root / 'moved-distribution')
+                else:
+                    self.assertEqual(installed.resolve(), case.bundle.resolve())
+                for engine in (None, 'legacy', 'rust'):
+                    env = dict(case.env)
+                    env.pop('DEV_WORKFLOW_ENGINE', None)
+                    if engine is not None:
+                        env['DEV_WORKFLOW_ENGINE'] = engine
+                    before = sorted(case.target.rglob('*'))
+                    result = subprocess.run([str(installed / 'launch.sh'), 'resolve-task-dir',
+                                             '--project-root', str(case.target)], cwd='/', env=env,
+                                            capture_output=True, timeout=15)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(result.stderr, b'')
+                    self.assertEqual(json.loads(result.stdout), {'task_dir': 'docs/tasks',
+                                     'path': str(case.target / 'docs/tasks'), 'source': 'default'})
+                    self.assertEqual(sorted(case.target.rglob('*')), before)
 
     def test_required_paths_are_checked_before_consumption(self):
         operands = [[], ['']] + [[flag] for flag in MODES + ('--force', '--help', '-h', '--unknown', '-')]

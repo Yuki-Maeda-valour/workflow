@@ -17,12 +17,16 @@
 
 ## helper の使用
 
-profile をホスト側で読み、`task_dir` の型を検証してから、同梱の [`../scripts/resolve-task-dir.py`](../scripts/resolve-task-dir.py) を実行する。YAML は補助スクリプトに渡さない。
+profile をホスト側で読み、`task_dir` の型を検証してから、同じ配布の共通入口 `bin/dev-workflow/launch.sh resolve-task-dir` を実行する。YAML は補助スクリプトに渡さない。
 
 ```bash
-python3 <create-task-skill>/scripts/resolve-task-dir.py --project-root <管理ルート>
-python3 <create-task-skill>/scripts/resolve-task-dir.py --project-root <管理ルート> --task-dir=<profileの文字列>
+sh "<プラグインルート>/bin/dev-workflow/launch.sh" resolve-task-dir --project-root <管理ルート>
+sh "<プラグインルート>/bin/dev-workflow/launch.sh" resolve-task-dir --project-root <管理ルート> --task-dir=<profileの文字列>
 ```
+
+- プラグインルートは、使っている create-task skill と同じ配布のルートとする。setup のコピーでは配置先、リンクでは物理的な配布元を使う。
+- `DEV_WORKFLOW_ENGINE` は未設定・`legacy` で同梱の旧 Python、`rust` だけで Rust を使う。空文字・未知の値は終了 2 で止める。
+- Rust の失敗や不正入力では旧版や手作業へ切り替えない。旧版のコマンドは引き続き [`../scripts/resolve-task-dir.py`](../scripts/resolve-task-dir.py) を使う。
 
 `--task-dir=<値>` の形なら、先頭が `-` の合法な相対パスもオプションと誤認されない。すべてのパスを引用する。JSON はデータとして解析し、シェル評価しない。
 
@@ -32,4 +36,4 @@ python3 <create-task-skill>/scripts/resolve-task-dir.py --project-root <管理�
 
 この補助スクリプトは読み取り専用で、ディレクトリ作成・タスク本文の読取り・移動を行わない。指定ディレクトリが内部のシンボリックリンクなら実体が管理プロジェクト内にある場合だけ使え、返す `task_dir` と `path` はその実体へ正規化する。外部を指す場合はエラーにする。既定パスも同じ検証を通す。
 
-Python が無い環境では、上の優先順位・探索深度・通常ファイルとシンボリックリンクの条件を同じまま読み取り専用で実施する。候補の複数検出や無効指定を既定値へフォールバックさせない。
+`DEV_WORKFLOW_ENGINE` が未設定または `legacy` で Python が無い環境だけは、上の優先順位・探索深度・通常ファイルとシンボリックリンクの条件を同じまま読み取り専用で実施する。候補の複数検出や無効指定を既定値へフォールバックさせない。

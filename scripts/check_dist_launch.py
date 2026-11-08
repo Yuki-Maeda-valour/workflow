@@ -11,6 +11,7 @@ import re
 import stat
 import subprocess
 import sys
+import tempfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,10 +101,73 @@ def read_probe(raw, expected_os, expected_arch):
     return info
 
 
+def input_snapshot(root):
+    """読取時刻を除く構造・権限・内容・更新時刻を比較する。"""
+    result = {}
+    for path in [root, *sorted(root.rglob("*"))]:
+        info = path.lstat()
+        kind = stat.S_IFMT(info.st_mode)
+        data = path.read_bytes() if stat.S_ISREG(info.st_mode) else os.readlink(path) if path.is_symlink() else None
+        result[path.relative_to(root).as_posix()] = (kind, stat.S_IMODE(info.st_mode), info.st_mtime_ns, data)
+    return result
+
+
+def check_resolve_launch(launch, *, cwd, env):
+    """版差に依存しない 5 入力を、独立した空の管理ルートで検査する。"""
+    count = 0
+    with tempfile.TemporaryDirectory(prefix="dist-resolve-") as temporary:
+        temporary_root = Path(temporary).resolve(strict=True)
+        for engine in (None, "legacy", "rust"):
+            selected_env = dict(env)
+            selected_env.pop("DEV_WORKFLOW_ENGINE", None)
+            if engine is not None:
+                selected_env["DEV_WORKFLOW_ENGINE"] = engine
+            for scenario in ("default", "explicit", "one", "multiple", "invalid"):
+                root = temporary_root / f"{engine}-{scenario}"
+                root.mkdir()
+                args = ["resolve-task-dir", "--project-root", str(root)]
+                code, selected, source = 0, "docs/tasks", "default"
+                if scenario == "explicit":
+                    selected, source = "-日本語 のタスク", "profile"
+                    args.append("--task-dir=" + selected)
+                if scenario in ("one", "multiple"):
+                    selected, source = "docs/work", "detected"
+                    paths = (selected,) if scenario == "one" else ("z-tasks", selected)
+                    for relative in paths:
+                        directory = root / relative
+                        directory.mkdir(parents=True)
+                        (directory / "進行中_確認.md").write_text("本文は読まない\n", encoding="utf-8")
+                expected = {"task_dir": selected, "path": str(root / selected), "source": source}
+                if scenario == "multiple":
+                    code = 2
+                    expected = {"error": "タスクディレクトリの候補が複数あります。task_dir を明示してください",
+                                "candidates": ["docs/work", "z-tasks"]}
+                if scenario == "invalid":
+                    code = 1
+                    args.append("--task-dir=")
+                    expected = {"error": "task_dir は空文字にできません"}
+                before = input_snapshot(root)
+                result = run([str(launch), *args], cwd=cwd, env=selected_env, code=code)
+                if input_snapshot(root) != before:
+                    raise ValueError(f"保存先解決が入力を変更しました: {engine}/{scenario}")
+                expected_bytes = (json.dumps(expected, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8")
+                if result.stdout != expected_bytes or result.stderr:
+                    raise ValueError(f"保存先解決の JSON・出力先が不正です: {engine}/{scenario}")
+                count += 1
+    return count
+
+
 def check_dist_launch(root=ROOT):
     root = Path(root).resolve(strict=True)
+    return check_plugin_launch(root / "plugins/dev-workflow", cwd=root)
+
+
+def check_plugin_launch(plugin_root, *, cwd=None):
+    """plugin の実際の導入先を検査する。リポジトリのルートとは区別する。"""
+    plugin_root = Path(plugin_root).resolve(strict=True)
+    root = Path(cwd).resolve(strict=True) if cwd is not None else plugin_root
     expected_os, expected_arch, relative = host_target()
-    bundle = root / BUNDLE
+    bundle = plugin_root / "bin/dev-workflow"
     launch, binary = bundle / "launch.sh", bundle / relative
     require_file(launch, executable=True)
     if binary.parent.is_symlink():
@@ -145,7 +209,8 @@ def check_dist_launch(root=ROOT):
             result = run([str(launch), *args], cwd=root, env=legacy_env, code=2)
             if result.stdout or b"ERROR [legacy-unavailable]" not in result.stderr or b"DEV_WORKFLOW_ENGINE=rust" not in result.stderr:
                 raise ValueError(f"未設定・legacy の出力が不正です: {engine}: {' '.join(args)}")
-    return {**info, "binary": relative, "self_sha256": expected_hash}
+    resolve_cases = check_resolve_launch(launch, cwd=root, env=env)
+    return {**info, "binary": relative, "self_sha256": expected_hash, "resolve_cases": resolve_cases}
 
 
 def main(argv=None):
@@ -158,6 +223,7 @@ def main(argv=None):
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
     print(f"配布入口: 合格 ({info['os']} / {info['arch']})")
+    print(f"保存先解決: {info['resolve_cases']} 件合格")
     print(f"SHA256: {info['self_sha256']}  {info['binary']}")
     return 0
 

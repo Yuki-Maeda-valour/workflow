@@ -1,12 +1,12 @@
 #!/bin/sh
-# 段階 0 の入口。設定と配布物を確かめた後、選んだ 1 本だけを起動する。
+# 共通の入口。設定と配布物を確かめた後、選んだ 1 本だけを起動する。
 
 fail() {
     printf 'ERROR [%s] %s\n' "$1" "$2" >&2
     exit "$3"
 }
 
-# 未設定と空文字は別の設定として扱う。旧版では外部の道具を使わない。
+# 未設定と空文字は別の設定として扱う。旧版では Rust 用の道具を使わない。
 if [ "${DEV_WORKFLOW_ENGINE+x}" != x ]; then
     engine=legacy
 else
@@ -14,11 +14,30 @@ else
 fi
 case $engine in
     legacy)
-        fail legacy-unavailable '段階 0 の入口には旧版のコマンドがありません。試用には DEV_WORKFLOW_ENGINE=rust を指定してください。' 2
+        [ "${1-}" = resolve-task-dir ] ||
+            fail legacy-unavailable '旧版の未登録コマンドです。試用には DEV_WORKFLOW_ENGINE=rust を指定してください。' 2
         ;;
     rust) ;;
     *) fail engine 'DEV_WORKFLOW_ENGINE は未設定・legacy・rust のいずれかにしてください。' 2 ;;
 esac
+
+# cd は子のシェルで行い、呼び出した人の作業場所と CDPATH を変えない。
+case $0 in
+    */*) parent=${0%/*}; [ -n "$parent" ] || parent=/ ;;
+    *) parent=. ;;
+esac
+case $parent in /*) ;; *) parent=./$parent ;; esac
+bundle=$(CDPATH='' cd -P "$parent" 2>/dev/null && pwd -P) ||
+    fail location '入口の物理的な位置を読み取れません。' 1
+
+if [ "$engine" = legacy ]; then
+    legacy=$bundle/../../skills/create-task/scripts/resolve-task-dir.py
+    [ -f "$legacy" ] && [ -r "$legacy" ] ||
+        fail legacy-script '旧版のスクリプトが無いか、読み取れません。' 1
+    command -v python3 >/dev/null 2>&1 || fail python 'python3 がありません。' 1
+    shift
+    exec python3 -B "$legacy" "$@"
+fi
 
 os=$(uname -s 2>/dev/null) || fail platform 'OS を読み取れません。' 1
 cpu=$(uname -m 2>/dev/null) || fail platform 'CPU を読み取れません。' 1
@@ -51,15 +70,6 @@ if ! printf '%s\n' "$version" | LC_ALL=C awk -v os="$os" '
 ' 2>/dev/null; then
     fail os-version 'OS の版を確認できないか、下限未満です。Linux 5.6 以上・macOS 11 以上が必要です。' 1
 fi
-
-# cd は子のシェルで行い、呼び出した人の作業場所と CDPATH を変えない。
-case $0 in
-    */*) parent=${0%/*}; [ -n "$parent" ] || parent=/ ;;
-    *) parent=. ;;
-esac
-case $parent in /*) ;; *) parent=./$parent ;; esac
-bundle=$(CDPATH='' cd -P "$parent" 2>/dev/null && pwd -P) ||
-    fail location '入口の物理的な位置を読み取れません。' 1
 
 checksums=$bundle/SHA256SUMS
 if [ -L "$checksums" ] || [ ! -f "$checksums" ] || [ ! -r "$checksums" ]; then

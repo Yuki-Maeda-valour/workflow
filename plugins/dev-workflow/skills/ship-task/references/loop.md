@@ -10,7 +10,7 @@
 
 ## 1. 置き場所と起動
 
-- 本体は `ship-task/scripts/loop.sh`、回帰テストは `ship-task/scripts/loop-selftest.sh`。task_dir の解決は兄弟参照の `create-task/scripts/resolve-task-dir.py` を呼ぶ。タスクのメタ情報と保留行の解析(`taskinfo`・`holdcount`・`holdcode`)は兄弟の `loop-task-text.py` が受け持つ。`loop.sh` が起動した CLI が書いた出力の解析(イテレーションの結果の JSON を読む `result`・許可の仲介の記録を読む `permlog`・`origin-repo.py` の出力を読む `origin-json`)は兄弟の `loop-child-output.py` が受け持つ
+- 本体は `ship-task/scripts/loop.sh`、回帰テストは `ship-task/scripts/loop-selftest.sh`。task_dir の解決は保持したプラグインの `bin/dev-workflow/launch.sh resolve-task-dir` を呼ぶ。タスクのメタ情報と保留行の解析(`taskinfo`・`holdcount`・`holdcode`)は兄弟の `loop-task-text.py` が受け持つ。`loop.sh` が起動した CLI が書いた出力の解析(イテレーションの結果の JSON を読む `result`・許可の仲介の記録を読む `permlog`・`origin-repo.py` の出力を読む `origin-json`)は兄弟の `loop-child-output.py` が受け持つ
 - 人のシェル・cron から呼ぶ。skill ではない(決定録 2026-09-23 の決定 1)。ホストのセッションの中から起動されたら止まる(§2 の 2)
 - 対応する OS は Linux だけ(`setsid`・`flock`・`/proc` を使う)。bash 4.4 以上が必要。ほかの OS・古い bash では初期化前に止まる
 - 起動できる配置は、プラグインのルート(`loop.sh` の物理パスから 4 階層上 = `scripts/` から 3 階層上。`.claude-plugin/plugin.json` の `name` が `dev-workflow`)の下にあるときだけ。このリポジトリの clone・導入先のキャッシュ・setup.sh の `--link` の配置(物理パスで clone のルートに解決されて起動する)が当たる。setup.sh の `--copy` の配置は plugin.json を置かないので止まる
@@ -60,7 +60,7 @@
 - **起動時に止まる値**: YAML の構文エラー / `features` か `features.loop` が null でもマッピングでもない / null 以外で整数でない値(bool・小数・文字列を含む。PyYAML の `yes`・`true` は bool)/ 0 以下 / 999999999 を超える / 実効値で `time_budget` < `iteration_timeout`(イテレーションが 1 回も回らない)
 - `task_store` は欠落・null・空文字を `file` とし、文字列の `file` / `github-issue` だけを受け付ける。不正な値は `profile-invalid`、`github-issue` は `task-store-unsupported` を示し、profile の検査で停止する。実装・発見のどちらも Issue 方式は扱わず、作業場所を作らない。
   - `loop.sh` が置き場の判定で見るのは `task_store` だけ。`file` で権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)が Issue を正本にする運用では、ほかの前提を満たせばループは起動するが、各イテレーションの ship-task が `task-store-unsupported` で止まる。権威参照ファイルの運用はループ起動時には判定しない。
-- `task_dir` は [task-directory.md](../../create-task/references/task-directory.md) の「優先順位 2」の型の規則で検査し、文字列なら `resolve-task-dir.py --task-dir=<値>` で渡す(キーが無い・null なら渡さない)。不正なら同じ規則どおり止まる。値は §3 の文字の制限も満たすこと
+- `task_dir` は [task-directory.md](../../create-task/references/task-directory.md) の「優先順位 2」の型の規則で検査し、文字列なら `launch.sh resolve-task-dir --task-dir=<値>` で渡す(キーが無い・null なら渡さない)。不正なら同じ規則どおり止まる。値は §3 の文字の制限も満たすこと
 - `root` は `.` と `./` を parent-child でないとみなす。それ以外の文字列なら parent-child 構成として止まる(文字列でなければ不正な値)。キーが無い・null なら検査しない。ship-task の無人の前提と同じ
 
 ## 2. 起動と前提の検査
@@ -83,7 +83,7 @@
 1. 引数の検査(使い方の誤りは exit 2。`--mcp-config` のファイルが無いときを含む)
 2. ホストのセッションの中でない: [external-runners.md](../../do-task/references/external-runners.md) §3 判定 2 の環境変数の列のどれか 1 つでも立っていれば止まる。`DEV_WORKFLOW_HOST_CLI` は非空なら止まる向きに読む(判定 2 では「どのホストか」を知るための上書きだが、`loop.sh` には「ホストの中か」だけが要る)。判定はベストエフォートで、判定できないホストでは確認が働かない(決定録 2026-09-23 の決定 12)。列が external-runners.md と一致することは `loop-selftest.sh` が照合(照らし合わせて確かめること)する
 3. 道具(OS・`bash` は最優先で検査済み): `setsid`・`flock`・`python3`・`timeout`・`realpath`・`stat` がある(無ければ理由コード `tool-missing`。`git` は下準備で確かめる。ホスト CLI の実在は 12)。初回の状態取得で system config の既定パスを使うときは、同じ `git` の `git var GIT_CONFIG_SYSTEM` が実パスを返せることも要る。返せなければイテレーションを始めず、利用者が `GIT_CONFIG_SYSTEM` に実パスを明示してからやり直す。
-4. プラグインのルートと名前(§1)。兄弟の `host-argv.py`・`loop-supervisor.py`・`host-check.py`(12 のホスト CLI の証明と `allowed-tools` の検査)・`resolve-task-dir.py`・許可の仲介の `loop-permission.py`・`origin-repo.py`(10 の後の origin の URL の検査で実行する。イテレーションの skill も使う)・`git-config-digest.py`(イテレーションの skill がローカルの git 設定の照合に使う。`loop.sh` は実行しない)が在る(無ければ理由コード `plugin-root`)。`python3` を絶対パスに解決する(`/` で始まらなければ `tool-missing`。許可の仲介の hook のコマンドに使う — §9)
+4. プラグインのルートと名前(§1)。兄弟の `host-argv.py`・`loop-supervisor.py`・`host-check.py`(12 のホスト CLI の証明と `allowed-tools` の検査)・共通入口 `bin/dev-workflow/launch.sh` と旧版 `create-task/scripts/resolve-task-dir.py`・許可の仲介の `loop-permission.py`・`origin-repo.py`(10 の後の origin の URL の検査で実行する。イテレーションの skill も使う)・`git-config-digest.py`(イテレーションの skill がローカルの git 設定の照合に使う。`loop.sh` は実行しない)が在る(無ければ理由コード `plugin-root`)。`python3` を絶対パスに解決する(`/` で始まらなければ `tool-missing`。許可の仲介の hook のコマンドに使う — §9)
 5. `--host` が既定表にある。`host-argv.py` で既定または上書きの引数を検査する。実行ファイルの後ろは §1 の許可表だけを受け付ける。値は `=` で同じトークンに書く。`effort` は `low`・`medium`・`high`・`xhigh`・`max`、予算は非負の数、回数は正の整数に限る。継続・再開・遠隔実行・plugin 追加・hook 無効化を含む未知の引数、短い別名と束ね書き、重複、値の欠落は、`loop.sh` が CLI を起動する前に拒否する。この引数検査はホスト起動・認証・YAML 読取を行わない。隔離と判定に要る固定引数は従来どおり親が後ろに足す。
    - ホスト CLI へ渡す argv の順は、雛形か `--host-argv` のトークン → 許可リストの値(`--allowed-tools`。`-` で始まる値は使い方の誤り)→ MCP の設定 → 隔離と権限のフラグ(と、許可の仲介の hook を渡す設定を足す起動引数。§9)。隔離と権限のフラグを argv の最後に置く
    - 解決後の argv(`--allowed-tools` の値を含む)に全許可のフラグが無いこと
@@ -129,7 +129,7 @@
    - `<worktree-root>` の既定は `<対象の親ディレクトリ>/<対象の名前>.loop`。人のチェックアウトの外に作るので、人の `git status` は変わらない。隠しディレクトリにしないのは、snap 版の gh が隠しディレクトリを読めないため
    - 2a. 状態ファイルの前提(実装モードと発見モードで同じ): イテレーションの worktree で `.claude/reviews/x.md`・`.claude/grasp.md`・`.claude/.understand-project-done` を 1 つずつ `git check-ignore -q` で確かめる(`--no-index` を付けない — 付けると、追跡済みのファイルも ignore 済みと答える)。rc 1(ignore されていない。追跡済みも 1)のものがあれば、worktree を消して exit 20(理由コード `state-not-ignored`)。報告に、gitignore の断片(init-project が入れるもの)と、追跡済みなら `git rm --cached` を出す。rc が 0 と 1 以外(symlink の先・サブモジュールの中など、判定できないもの)は数えず、後の段に任せる(symlink は 2b で止まる。サブモジュールは止まらない)。理由: イテレーションの中で書かれた状態ファイル(利用者の設定に UserPromptSubmit の hook があればそれが書く `.understand-project-done`・do-task・update-doc の記録)が未追跡か未 commit の変更として残ると、イテレーションの worktree を消せずに残る(§5 の消す手順)。発見モードでは、判定が未追跡・未 commit の無いことを求めるので、正しいイテレーションも失敗になる
    - 2b. worktree の `.claude/`・`.claude/reviews/` を §9 の ① のとおり作る(止まるときは終了コード 30・理由コード `reviews-dir`)
-3. worktree の中で `resolve-task-dir.py --project-root <worktree> [--task-dir=<値>]` を呼び、task_dir(管理ルート相対)を得る(exit 1・2 は終了コード 30)。検出で決まった task_dir が文字の制限(下)に外れるか、保護パスの下にあれば(例 `.claude/tasks`。保護パスの判定は許可の仲介の hook と同じ列 — §9)、worktree を消して exit 20(理由コード `task-dir`)
+3. 使用直前に保持した環境を確認し、作業場所 `/` から保持済みの `bin/dev-workflow/launch.sh resolve-task-dir --project-root <worktree> [--task-dir=<値>]` を fd 7 を閉じて呼び、task_dir(管理ルート相対)を得る(解決失敗は終了コード 30)。検出で決まった task_dir が文字の制限(下)に外れるか、保護パスの下にあれば(例 `.claude/tasks`。保護パスの判定は許可の仲介の hook と同じ列 — §9)、worktree を消して exit 20(理由コード `task-dir`)
    - 3a(最初のイテレーションだけ): 人のチェックアウトの同じ相対パスにある `進行中_*.md` のうち、通常ファイル(`[ -f ] && [ ! -L ]`)でヘッダにメタ行があるものが、固定した sha の tree に無いか、固定した sha の blob のヘッダにメタ行が無ければ(メタ行だけ未 commit)、一覧を出し、worktree を消して止まる(exit 20)。検出し直さない。index を書き換えうる `git status` は使わない
 4. 候補: task_dir の `進行中_*.md` のうち、次をすべて満たすもの。読み飛ばしたタスクは、理由つきで報告に出す
    - 通常ファイル(symlink でない)。外れたものは理由つきで読み飛ばす

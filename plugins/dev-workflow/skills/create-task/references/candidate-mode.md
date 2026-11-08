@@ -72,7 +72,7 @@
 
 ## 5. 書き出しの手順
 
-1. task_dir を補助スクリプトで解く(`python3 {create-task の}scripts/resolve-task-dir.py`。[task-directory.md](task-directory.md))。終了コード 1・2 は停止(無人では失敗扱い)。ship-task から呼ばれたときも、同じ補助スクリプトで解く
+1. task_dir を共通入口で解く(`sh <プラグインルート>/bin/dev-workflow/launch.sh resolve-task-dir`。[task-directory.md](task-directory.md))。終了コード 1・2 は停止(無人では失敗扱い)。ship-task から呼ばれたときも、同じ共通入口で解く
 2. `python3 {create-task の}scripts/candidate-keys.py --task-dir=<task_dir>` で、既知の指摘キーと名を集める。終了コード 0 以外は停止(無人では失敗扱い)
 3. 指摘ごとにキーを正規化(§2)して、既知の集合と比べる。在れば書かず、報告にキー・既存のファイル・状態・見送りかを載せる(`完了_` なら回帰の疑い — §2)。同じ実行の中で重なったキーは、1 つにまとめる
 4. `git status --porcelain=v1 --untracked-files=all` を控える(git の作業ツリーでなければ task_dir の直下の一覧)。名の衝突を解いてから(task-template.md の「候補の書式」の名)、選定の順で上限まで `Write` する。書くのは新しい `候補_*.md` だけで、既存の状態名 MD は書き換えない

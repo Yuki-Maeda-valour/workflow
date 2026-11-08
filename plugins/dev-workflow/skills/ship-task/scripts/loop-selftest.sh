@@ -611,6 +611,8 @@ PY_PROOF
     ;;
   allow) printf '{"permissions":{"allow":["Read(changed/**)"]}}\n' >"$SELFTEST_ALLOW_PATH" ;;
   component) printf '\nchanged\n' >>"$SELFTEST_COMPONENT_PATH" ;;
+  launch-source) printf '# changed\n' >>"$SELFTEST_PLUGIN_SOURCE/bin/dev-workflow/launch.sh" ;;
+  launch-copy) printf '# changed\n' >>"$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/bin/dev-workflow/launch.sh" ;;
   source) printf 'raise SystemExit(0)\n' >"$SELFTEST_PLUGIN_SOURCE/skills/create-task/scripts/resolve-task-dir.py" ;;
   skill) printf 'changed\n' >"$SELFTEST_PLUGIN_SOURCE/skills/ship-task/SKILL.md" ;;
   copy) printf 'raise SystemExit(0)\n' >"$DEV_WORKFLOW_LOOP_PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py" ;;
@@ -782,6 +784,8 @@ PLUG="$W/plugin"
 mkdir -p "$PLUG/.claude-plugin" "$PLUG/skills/ship-task/scripts" "$PLUG/skills/create-task/scripts"
 cp "$PLUGIN_SRC/.claude-plugin/plugin.json" "$PLUG/.claude-plugin/plugin.json"
 cp "$TARGET" "$PLUG/skills/ship-task/scripts/loop.sh"
+mkdir -p "$PLUG/bin"
+cp -a "$PLUGIN_SRC/bin/dev-workflow" "$PLUG/bin/dev-workflow"
 cp "$SCRIPT_DIR/loop-task-text.py" "$PLUG/skills/ship-task/scripts/loop-task-text.py"
 cp "$SCRIPT_DIR/loop-child-output.py" "$PLUG/skills/ship-task/scripts/loop-child-output.py"
 cp "$SCRIPT_DIR/loop-state.py" "$PLUG/skills/ship-task/scripts/loop-state.py"
@@ -4574,9 +4578,10 @@ fi
 
 # ════════════════ 配布物・利用者環境・参考ログ(#192) ════════════════
 if want environment; then
-for attack in source skill copy guard user global; do
+for attack in source skill copy guard user global launch-source launch-copy; do
   newrepo "env-$attack"; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec "env-$attack"
   cp "$PLUG/skills/create-task/scripts/resolve-task-dir.py" "$W/resolver-save"
+  cp "$PLUG/bin/dev-workflow/launch.sh" "$W/launch-save"
   cp "$GIT_CONFIG_GLOBAL" "$W/global-save"
   if [ -e "$W/home/.claude/settings.json" ]; then cp "$W/home/.claude/settings.json" "$W/user-save"; else rm -f "$W/user-save"; fi
   run_loop "env-$attack" "SELFTEST_ENV_ATTACK=$attack" "SELFTEST_PLUGIN_SOURCE=$PLUG" -- --repo "$R" "${COMMON_ARGS[@]}"
@@ -4585,12 +4590,56 @@ for attack in source skill copy guard user global; do
   has "環境改変($attack): 環境の照合失敗" "$(report_of "$OUT")" 'plugin または利用者設定の照合に失敗'
   if sed -n '/^--- stub-end/,$p' "$REC/ssh.log" | grep -q git-upload-pack; then ng "環境改変($attack): 後続networkなし"; else ok "環境改変($attack): 後続networkなし"; fi
   cp "$W/resolver-save" "$PLUG/skills/create-task/scripts/resolve-task-dir.py"
+  cp "$W/launch-save" "$PLUG/bin/dev-workflow/launch.sh"
   rm -f "$PLUG/skills/ship-task/SKILL.md"
   cp "$W/global-save" "$GIT_CONFIG_GLOBAL"
   if [ -e "$W/user-save" ]; then cp "$W/user-save" "$W/home/.claude/settings.json"; else rm -f "$W/home/.claude/settings.json"; fi
 done
 fi
 if want environment || want environment-normal; then
+# 実配布物を含む保持コピーの入口だけを使う。観察用の 1 行は保持前に追加する。
+cp "$PLUG/bin/dev-workflow/launch.sh" "$W/launch-original"
+python3 - "$PLUG/bin/dev-workflow/launch.sh" <<'PY_LAUNCH'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+line = 'printf "%s|%s|%s|%s\\n" "$0" "${DEV_WORKFLOW_ENGINE-unset}" "$PWD" "$([ -e /proc/$$/fd/7 ] && printf open || printf closed)" >> "$SELFTEST_RESOLVER_LOG"\n'
+p.write_text(s.replace('#!/bin/sh\n', '#!/bin/sh\n' + line, 1))
+PY_LAUNCH
+for engine in legacy rust; do
+  newrepo "resolver-$engine"; addtask pr-a 2026-01-01; commit; newrec "resolver-$engine"
+  RESOLVE_LOG="$W/resolver-$engine.log"
+  run_loop "resolver-$engine" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$RESOLVE_LOG" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "保存先($engine): 変更後の模擬プラグインで証明を作る" 0 "$RC"
+  run_loop "resolver-$engine" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$RESOLVE_LOG" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "保存先($engine): 成功" 0 "$RC"
+  check "保存先($engine): タスクを実行" pr-a "$(calls)"
+  has "保存先($engine): 版と作業場所と閉じた fd" "$RESOLVE_LOG" "|$engine|/|closed"
+  hasnt "保存先($engine): 元の配布物を直接使わない" "$RESOLVE_LOG" "$PLUG/bin/dev-workflow/launch.sh"
+  has "保存先($engine): 保持コピーの入口を使う" "$RESOLVE_LOG" '/plugin/bin/dev-workflow/launch.sh'
+done
+for engine in legacy rust; do
+  newrepo "resolver-failure-$engine"; addtask pr-a 2026-01-01
+  mkdir -p "$R/.claude"
+  printf 'task_dir: README.md\n' >"$R/.claude/project-profile.yml"
+  commit; newrec "resolver-failure-$engine"
+  run_loop "resolver-failure-$engine" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$W/resolver-failure.log" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "保存先($engine): 不正な保存先の検査用証明" 0 "$RC"
+  run_loop "resolver-failure-$engine" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$W/resolver-failure.log" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "保存先($engine): 解決失敗で終了 30" 30 "$RC"
+  check "保存先($engine): 解決失敗でタスク未実行" "" "$(calls)"
+  has "保存先($engine): 解決失敗の理由" "$OUT" '[task-dir-helper]'
+done
+for engine in '' unknown; do
+  newrepo "resolver-bad-${engine:-empty}"; addtask pr-a 2026-01-01; commit; newrec "resolver-bad-${engine:-empty}"
+  run_loop "resolver-bad-${engine:-empty}" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$W/resolver-bad.log" -- --repo "$R" --prove-host "${COMMON_ARGS[@]}"
+  check "保存先(不正な設定 $engine): 変更後の模擬プラグインで証明を作る" 0 "$RC"
+  run_loop "resolver-bad-${engine:-empty}" "DEV_WORKFLOW_ENGINE=$engine" "SELFTEST_RESOLVER_LOG=$W/resolver-bad.log" -- --repo "$R" "${COMMON_ARGS[@]}"
+  check "保存先(不正な設定 $engine): 終了 30" 30 "$RC"
+  check "保存先(不正な設定 $engine): タスク未実行" "" "$(calls)"
+  has "保存先(不正な設定 $engine): 解決失敗" "$OUT" '[task-dir-helper]'
+done
+cp "$W/launch-original" "$PLUG/bin/dev-workflow/launch.sh"
 # 起動間の設定更新は同じ環境で証明を取り直し、再利用コピーを使わず成功する。
 newrepo env-normal; addtask pr-a 2026-01-01; addtask pr-b 2026-01-02; commit; newrec env-normal
 run_loop env-normal -- --repo "$R" --max-iterations 1 "${COMMON_ARGS[@]}"

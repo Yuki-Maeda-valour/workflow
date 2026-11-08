@@ -369,7 +369,7 @@ def cmd_profile(path):
         print("unknown=" + ",".join(re.sub(r"[\x00-\x1f\x7f]", "?", k) for k in unknown))
     if "task_dir" in data and data["task_dir"] is not None:
         value = data["task_dir"]
-        # task-directory.md の「優先順位 2」の型の規則(残りは resolve-task-dir.py が worktree の中で検査する)
+        # task-directory.md の「優先順位 2」の型の規則(残りは保存先の解決コマンドが worktree の中で検査する)
         if not isinstance(value, str):
             fail(1, f"task_dir が文字列でない: {value!r}")
         if value == "":
@@ -863,7 +863,8 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
     ENV_GUARD_SHA=get:guard_sha256 PLUGIN_ROOT=get:plugin
   hold_task_text
   hold_child_output
-  RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
+  RESOLVER="$PLUGIN_ROOT/bin/dev-workflow/launch.sh"
+  LEGACY_RESOLVER="$PLUGIN_ROOT/skills/create-task/scripts/resolve-task-dir.py"
   PERM_SCRIPT="$PLUGIN_ROOT/skills/ship-task/scripts/loop-permission.py"
   ORIGIN_REPO_PY="$PLUGIN_ROOT/skills/ship-task/scripts/origin-repo.py"
   GIT_CONFIG_DIGEST_PY="$PLUGIN_ROOT/skills/ship-task/scripts/git-config-digest.py"
@@ -872,7 +873,7 @@ bind_environment() { # bootstrap の出力だけから保持する。過去の�
   HOST_ARGV_PY="$PLUGIN_ROOT/skills/ship-task/scripts/host-argv.py"
   SUPERVISOR="$PLUGIN_ROOT/skills/ship-task/scripts/loop-supervisor.py"
   HOST_CHECK_PY="$PLUGIN_ROOT/skills/ship-task/scripts/host-check.py"
-  for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
+  for f in "$RESOLVER" "$LEGACY_RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
     [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
   done
   HOOK_SETTINGS="$(py hook-settings "$PY_ABS" "$PERM_SCRIPT" "$ENV_GUARD_SHA" "$TRUSTED_ENV_GUARD" "$ENVIRONMENT_STATE" "$ENVIRONMENT_SHA" "$FIXED_POLICY")"
@@ -1909,13 +1910,13 @@ make_selection_worktree() {
   rc=0
   if [ "$TASK_DIR_SET" -eq 1 ]; then
     verify_environment || die 20 environment "resolver の直前に環境が変わった"
-    out="$(cd / && python3 -B "$RESOLVER" --project-root "$wt" --task-dir="$TASK_DIR_VALUE" 7>&-)" || rc=$?
+    out="$(cd / && "$RESOLVER" resolve-task-dir --project-root "$wt" --task-dir="$TASK_DIR_VALUE" 7>&-)" || rc=$?
   else
     verify_environment || die 20 environment "resolver の直前に環境が変わった"
-    out="$(cd / && python3 -B "$RESOLVER" --project-root "$wt" 7>&-)" || rc=$?
+    out="$(cd / && "$RESOLVER" resolve-task-dir --project-root "$wt" 7>&-)" || rc=$?
   fi
-  [ "$rc" -eq 0 ] || die 30 task-dir-helper "task_dir を解決できない(resolve-task-dir.py の終了コード $rc: $(printf '%s' "$out" | head -c 300))"
-  TASK_DIR="$(printf '%s' "$out" | py json-get task_dir)" || die 30 task-dir-helper "resolve-task-dir.py の出力を読めない"
+  [ "$rc" -eq 0 ] || die 30 task-dir-helper "task_dir を解決できない(launch.sh resolve-task-dir の終了コード $rc: $(printf '%s' "$out" | head -c 300))"
+  TASK_DIR="$(printf '%s' "$out" | py json-get task_dir)" || die 30 task-dir-helper "launch.sh resolve-task-dir の出力を読めない"
   if ! py d21 "$TASK_DIR" 2>"$RUN_DIR/d21.err" >/dev/null; then
     remove_selection_worktree
     die 20 task-dir "解決した task_dir がパスの文字の制限(loop.md §3)に外れる($(cat "$RUN_DIR/d21.err")): $TASK_DIR"
@@ -2848,7 +2849,7 @@ PJ="$(py plugin-json "$PLUGIN_JSON")" || die 20 plugin-root "plugin.json を読�
 PLUGIN_NAME="$(printf '%s\n' "$PJ" | sed -n 1p)"
 PLUGIN_VERSION="$(printf '%s\n' "$PJ" | sed -n 2p)"
 [ "$PLUGIN_NAME" = dev-workflow ] || die 20 plugin-root "プラグインの名前が dev-workflow でない"
-for f in "$RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
+for f in "$RESOLVER" "$LEGACY_RESOLVER" "$PERM_SCRIPT" "$ORIGIN_REPO_PY" "$GIT_CONFIG_DIGEST_PY" "$LOOP_STATE_PY" "$LOOP_STARTUP_PY" "$HOST_ARGV_PY" "$SUPERVISOR" "$HOST_CHECK_PY"; do
   [ -f "$f" ] || die 20 plugin-root "${f##*/} が無い: $f"
 done
 

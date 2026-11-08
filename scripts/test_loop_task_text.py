@@ -144,6 +144,10 @@ class HeldTaskTextTests(unittest.TestCase):
         resolver = self.root / 'skills/create-task/scripts/resolve-task-dir.py'
         resolver.parent.mkdir(parents=True)
         resolver.write_text('# fixture\n')
+        launch = self.root / 'bin/dev-workflow/launch.sh'
+        launch.parent.mkdir(parents=True)
+        launch.write_text('#!/bin/sh\nexit 0\n')
+        launch.chmod(0o755)
         self.sequence = 0
 
     def boot(self, root=None):

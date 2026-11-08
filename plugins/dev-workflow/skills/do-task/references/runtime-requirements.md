@@ -40,9 +40,9 @@ hook は配置しないので、一覧と確かめのスクリプトは、この
   - sparse-checkout で、作業ツリーに無いファイルがあるリポジトリ: 2.41(`git sparse-checkout check-rules`)。足りなくても止まらず、承認が要るだけ。
 - PyYAML の版は問わない。使う `safe_load`・`compose`・`SafeLoader`・`MappingNode`・`SequenceNode` は、PyYAML 3.10 にもある。
 
-## Rust 版を試す条件(段階 0b)
+## Rust 版を試す条件(段階 1b)
 
-Rust 版は、起動とビルド情報を確かめるための試用である。既存の skill は Python・bash の旧版を使う。
+Rust 版は、保存先の解決と起動・ビルド情報を確かめるための試用である。保存先の解決は共通入口を使い、未設定では旧 Python を使う。
 Python 3.10 以上・PyYAML・bash など、上の条件は引き続き適用する。利用者による Rust・Cargo の導入は不要である。
 
 ### 設定と終了コード
@@ -51,12 +51,14 @@ Python 3.10 以上・PyYAML・bash など、上の条件は引き続き適用す
 
 | 設定・状況 | 入口の動き |
 |---|---|
-| 未設定・`legacy` | 旧版を選ぶ。段階 0 の入口には旧版のコマンドが無いため、`ERROR [legacy-unavailable]` と Rust 指定の案内を標準エラーへ出して終了 2 |
+| 未設定・`legacy` | `resolve-task-dir` は同梱の旧 Python を起動する。未登録コマンドは `ERROR [legacy-unavailable]` と Rust 指定の案内を標準エラーへ出して終了 2 |
 | `rust` | OS・CPU・配布物を検査し、選んだ 1 本を起動する |
 | 空文字・ほかの値 | `ERROR [engine]` を標準エラーへ出して終了 2。未設定とは区別する |
 | 対応外・OS の版が下限未満・検査不能・配布物の欠落や不正・ハッシュ不一致 | 理由を標準エラーへ出して終了 1。実行ファイルを起動しない |
 | Rust 起動後 | Rust の出力と終了コードをそのまま返す。不明なコマンド・不正な引数は終了 2 |
 
+- 旧版の `resolve-task-dir` は Python だけを必要とし、Rust 用の OS・CPU・ハッシュ道具や配布バイナリを検査しない。Python または旧スクリプトが無ければ終了 1 で止める。
+- `resolve-task-dir --help` と解決後の出力・終了値は選んだ実装からそのまま返す。保存先の契約は [task-directory.md](../../create-task/references/task-directory.md) に従う。
 - `probe` に旧版は無い。入口の `--version`・`--help` も未設定・`legacy` では終了 2 になる。
 - 起動前に止まるとき、標準出力は空である。Rust が失敗しても旧版を自動で実行しない。
 - profile から選択を読まない。任意の実行ファイルを指定する設定も無い。テスト専用の `DEV_WORKFLOW_TEST_NATIVE_BINARY` は入口から読まない。
@@ -106,17 +108,20 @@ setup の場合は、上の表の設定フォルダ(`.claude` または `.agents
 
 ```sh
 installed_plugin='<実際の導入先>'
+DEV_WORKFLOW_ENGINE=legacy sh "$installed_plugin/bin/dev-workflow/launch.sh" resolve-task-dir --project-root "<管理ルート>"
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" resolve-task-dir --project-root "<管理ルート>"
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --version
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --help
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --json
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --self-sha256
 ```
 
-- 4 コマンドとも終了 0 になることを確かめる。`--version` の値は Rust 実行ファイル内部の版で、配布プラグインの版とは別である。
+- 保存先解決は既定の `docs/tasks` などを返すだけで作成しない。
+- 後半の 4 コマンドとも終了 0 になることを確かめる。`--version` の値は Rust 実行ファイル内部の版で、配布プラグインの版とは別である。
 - `probe --json` の `ok` が `true` で、`os`・`arch` が実行した環境と一致することを確かめる。
 - `source_input_sha256`・`rustc` を `build-info.json` と比べる。`probe --self-sha256` の値は、選ばれた 1 本の `SHA256SUMS` の値と比べる。
 - 成功しても、旧版との同等性や OS の保護機能を確かめたことにはならない。無人ループは引き続き Linux 専用である。
-- 配布した版の確認状況は `README.md` の「Rust 版を試す(段階 0b)」に記す。CI(変更を送るたびに自動で検査する仕組み)での起動、実機でのプラグイン導入、最低 OS での確認は分けて記録する。
+- 配布した版の確認状況は `README.md` の「Rust 版を試す(段階 1b)」に記す。CI(変更を送るたびに自動で検査する仕組み)での起動、実機でのプラグイン導入、最低 OS での確認は分けて記録する。
 
 ### 失敗したときに戻す手順
 

@@ -21,7 +21,7 @@ class NativeDistributionEnvironmentTests(unittest.TestCase):
     """配布全体と設定を、変更していない容量・項目数・時間の上限で保持する。"""
 
     def test_full_distribution_is_retained_and_binary_changes_are_rejected(self):
-        from test_native_distribution import BINARIES, make_bundle
+        from test_native_distribution import BINARIES
 
         with tempfile.TemporaryDirectory(prefix='native-environment-') as temporary:
             base = Path(temporary)
@@ -30,16 +30,8 @@ class NativeDistributionEnvironmentTests(unittest.TestCase):
             shutil.copytree(source, root, symlinks=True)
             distribution = root / 'bin/dev-workflow'
             artifact_kind = 'repository'
-            if not all((distribution / name).is_file() for name in BINARIES):
-                # Task 2.1 より前でも検査できる。ELF・Mach-O の頭を持つ偽の組を使い、起動しない。
-                # 不完全な実物と混ぜず、3 本とメタ情報を一組として置く。入口は配布元のまま。
-                fixture = make_bundle(base / 'fixture', distribution=False)
-                distribution.mkdir(parents=True, exist_ok=True)
-                for name in (*BINARIES, 'SHA256SUMS', 'build-info.json'):
-                    target = distribution / name
-                    target.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy2(fixture / name, target)
-                artifact_kind = 'fixture'
+            self.assertTrue(all((distribution / name).is_file() for name in BINARIES),
+                            '配布物の欠落を模擬の組で代替しない')
 
             home = base / 'home'
             (home / '.claude').mkdir(parents=True)
@@ -103,26 +95,30 @@ class NativeDistributionEnvironmentTests(unittest.TestCase):
             self.assertLessEqual(budget.bytes, 64 * 1024 * 1024)
             self.assertLessEqual(budget.entries, 10_000)
 
-            # 保持元と保持コピーの両方で、容量を変えない 1 バイトの変更も拒否する。
+            # 実行前に一致した保持コピーの共通入口を、両版で実行する。
+            from check_dist_launch import check_plugin_launch
+            self.assertEqual(check_plugin_launch(bundle / 'plugin')['resolve_cases'], 15)
             rejected_seconds = {}
-            for label in ('source', 'copy'):
-                with self.subTest(changed=label):
+            for index, (label, relative) in enumerate(
+                    (label, relative) for label in ('source', 'copy') for relative in (
+                        'bin/dev-workflow/' + BINARIES[0], 'bin/dev-workflow/launch.sh',
+                        'skills/create-task/scripts/resolve-task-dir.py')):
+                with self.subTest(changed=label, path=relative):
                     top = root if label == 'source' else bundle / 'plugin'
-                    changed = top / 'bin/dev-workflow' / BINARIES[0]
+                    changed = top / relative
                     original = changed.read_bytes()
                     changed.write_bytes(bytes([original[0] ^ 1]) + original[1:])
                     rejected, elapsed = run(*verify_args)
                     self.assertEqual(rejected.returncode, 20, rejected.stdout + rejected.stderr)
-                    rejected_seconds[label] = elapsed
+                    rejected_seconds[label + ':' + relative] = elapsed
                     changed.write_bytes(original)
-                    # 保持元の情報も再確認するため、次は独立した保持コピーで検査する。
-                    if label == 'source':
-                        bundle = base / 'retained-again'
-                        reboot, _ = run('bootstrap', '--root', root, '--output', bundle)
-                        self.assertEqual(reboot.returncode, 0, reboot.stderr)
-                        receipt = json.loads(reboot.stdout)
-                        verify_args = ('verify', '--state', bundle / 'environment.json',
-                                       '--expect-sha256', receipt['sha256'])
+                    # 復元も変更として扱うので、次は独立した保持コピーで検査する。
+                    bundle = base / ('retained-again-' + str(index))
+                    reboot, _ = run('bootstrap', '--root', root, '--output', bundle)
+                    self.assertEqual(reboot.returncode, 0, reboot.stderr)
+                    receipt = json.loads(reboot.stdout)
+                    verify_args = ('verify', '--state', bundle / 'environment.json',
+                                   '--expect-sha256', receipt['sha256'])
 
             print('native environment: ' + json.dumps({
                 'artifacts': artifact_kind,

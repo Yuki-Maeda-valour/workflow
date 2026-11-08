@@ -67,6 +67,10 @@ class DistLaunchTest(unittest.TestCase):
     def write_launch(self):
         lines = ["#!/bin/sh", "set -eu",
                  "printf '%s|%s|%s\\n' \"${DEV_WORKFLOW_ENGINE-unset}\" \"$*\" \"$PWD\" >> " + shlex.quote(str(self.log)),
+                 'if [ "${1-}" = resolve-task-dir ]; then',
+                 '  shift',
+                 '  exec ' + shlex.quote(sys.executable) + ' -B ' + shlex.quote(str(checker.ROOT / "plugins/dev-workflow/skills/create-task/scripts/resolve-task-dir.py")) + ' "$@"',
+                 'fi',
                  'case "${DEV_WORKFLOW_ENGINE-unset}:$*" in']
         for (engine, args), (status, stdout, stderr) in self.responses.items():
             lines.extend([
@@ -114,11 +118,41 @@ class DistLaunchTest(unittest.TestCase):
                 result = self.run_check(machine=machine)
                 self.assertEqual(result["self_sha256"], self.hashes[relative])
                 self.assertEqual(result["binary"], relative)
-                self.assertEqual(self.log.read_text().splitlines(), [
+                self.assertEqual(self.log.read_text().splitlines()[:12], [
                     f"{engine}|{' '.join(args)}|{self.root.resolve()}"
                     for engine in ("rust", "unset", "legacy") for args in checker.COMMANDS
                 ])
+                resolver_calls = self.log.read_text().splitlines()[12:]
+                self.assertEqual(len(resolver_calls), 15)
+                for engine in ("unset", "legacy", "rust"):
+                    self.assertEqual(sum(line.startswith(engine + "|resolve-task-dir ") for line in resolver_calls), 5)
+                self.assertEqual(result["resolve_cases"], 15)
                 self.assertFalse(self.tool_log.exists())
+
+    def test_resolver_rejects_each_engine_scenario_wrong_status_output_or_mutation(self):
+        real_run = checker.run
+        for engine in (None, "legacy", "rust"):
+            for scenario in ("default", "explicit", "one", "multiple", "invalid"):
+                for mutation in ("status", "stdout", "stderr", "write"):
+                    def altered(command, *, cwd, env, code=0):
+                        if len(command) > 1 and command[1] == "resolve-task-dir" and env.get("DEV_WORKFLOW_ENGINE") == engine:
+                            root = Path(command[3])
+                            if root.name.endswith("-" + scenario):
+                                if mutation == "status":
+                                    failed = subprocess.CompletedProcess(command, code + 7, b"", b"failed")
+                                    with mock.patch.object(checker.subprocess, "run", return_value=failed):
+                                        return real_run(command, cwd=cwd, env=env, code=code)
+                                result = real_run(command, cwd=cwd, env=env, code=code)
+                                if mutation == "stdout":
+                                    result.stdout = b"{}\n"
+                                elif mutation == "stderr":
+                                    result.stderr = b"unexpected\n"
+                                else:
+                                    (root / "created").mkdir()
+                                return result
+                        return real_run(command, cwd=cwd, env=env, code=code)
+                    with self.subTest(engine=engine, scenario=scenario, mutation=mutation), mock.patch.object(checker, "run", side_effect=altered):
+                        self.assert_rejected("終了コード|保存先解決")
 
     def test_both_macs_check_the_same_universal_file(self):
         self.mac_tools()
@@ -311,6 +345,24 @@ class DistLaunchTest(unittest.TestCase):
         with contextlib.redirect_stderr(errors):
             self.assertEqual(checker.main(["--root", str(self.root / "missing")]), 1)
         self.assertIn("ERROR:", errors.getvalue())
+
+
+class RealDistLaunchTest(unittest.TestCase):
+    def test_real_distribution_resolves_all_cases_with_symlink_tmpdir(self):
+        with tempfile.TemporaryDirectory(prefix="dist-linked-tmp-") as temporary:
+            base = Path(temporary).resolve(strict=True)
+            real = base / "実際の一時領域"
+            real.mkdir()
+            linked = base / "一時領域へのリンク"
+            linked.symlink_to(real, target_is_directory=True)
+            with mock.patch.dict(os.environ, {"TMPDIR": str(linked)}), \
+                    mock.patch.object(tempfile, "tempdir", None):
+                self.assertEqual(tempfile.gettempdir(), str(linked))
+                count = checker.check_resolve_launch(checker.ROOT / checker.BUNDLE / "launch.sh",
+                                                     cwd=base, env=os.environ)
+            self.assertEqual(count, 15)
+            self.assertEqual(list(real.iterdir()), [])
+            self.assertTrue(linked.is_symlink())
 
 
 class DistWorkflowTest(unittest.TestCase):
