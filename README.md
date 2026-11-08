@@ -31,7 +31,7 @@
 
 ## 導入方法
 
-Rust 版を試す実行ファイル 3 本と、起動する入口 `bin/dev-workflow/launch.sh` を同梱しています。利用者による Rust・Cargo の導入は不要です。既存の skill は引き続き Python・bash の旧版を使います。試し方は下の「Rust 版を試す(段階 0b)」にあります。
+Rust 版を試す実行ファイル 3 本と、起動する入口 `bin/dev-workflow/launch.sh` を同梱しています。利用者による Rust・Cargo の導入は不要です。保存先の解決は共通入口を使い、未設定では旧 Python、`DEV_WORKFLOW_ENGINE=rust` のときだけ Rust を使います。ほかの機能は旧版を使います。試し方は下の「Rust 版を試す(段階 1b)」にあります。
 
 do-task の補助スクリプトは Python 3.10 以上・bash 4.0 以上と GNU 系ツール(Linux で標準の版のコマンド)を使います。実行前に [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md) で PATH(コマンドを探しに行くフォルダの並びを持つ設定)上の実体を確認してください。macOS 26.6.2 / arm64 で実機検証を行いました。必要な GNU 系ツール・物理パス・Git 設定の条件と、停止直後の不在確認の注意は同文書を参照してください。ほかの macOS 版や BSD コマンド全般の互換性は保証しません。無人ループは Linux 専用です。
 
@@ -141,32 +141,38 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
   - 旧値 `cursor` は既定表の名前ではない(既定表の名は `cursor-agent`)ため既定表外として扱われる。
   - レビューのベンダー横断(別の会社の AI にもレビューさせること)が目的だった場合は `features.runners` へ移行する(ベンダー横断は runners を宣言したときのみ有効)
 
-### E. Rust 版を試す(段階 0b)
+<a id="e-rust-版を試す段階-0b"></a>
+
+### E. Rust 版を試す(段階 1b)
 
 `DEV_WORKFLOW_ENGINE=rust` を指定したときだけ、配布した Rust 版を起動します。
 既存の Python・PyYAML・bash の要件は変わりません。
-段階 1a の `resolve-task-dir` は開発用ソースだけにあり、配布した入口にはまだ含まれません。
+段階 1b([Issue #450](https://github.com/Yuki-Maeda-valour/workflow/issues/450))では、段階 1a の `resolve-task-dir` を配布し、対象の skill と `loop.sh` から共通入口を呼びます。
 
-- 設定が未設定・`legacy` なら旧版を選びます。`probe` に旧版は無いため、入口は `ERROR [legacy-unavailable]` を出して終了 2 になります。入口の `--version`・`--help` も同じです。
+- 設定が未設定・`legacy` なら、`resolve-task-dir` は同梱の旧 Python を使います。この経路では Rust の配布物・OS の下限・ハッシュ道具を検査しません。Python または旧スクリプトが無ければ終了 1 になります。
+- `probe` に旧版は無いため、未設定・`legacy` では `ERROR [legacy-unavailable]` を出して終了 2 になります。入口全体の `--version`・`--help` も同じです。`resolve-task-dir --help` は選んだ実装へ渡します。
 - 空文字・ほかの値は `ERROR [engine]` を出して終了 2 になります。設定を profile から読まず、Rust の失敗後に旧版を自動で実行しません。
 - 試せる環境は Linux カーネル 5.6 以上の x86_64・arm64 と、macOS 11 以上の Intel・Apple Silicon です。Mac は両 CPU で動く 1 本を使います。Windows は対象外です。
 - ハッシュ(SHA256。内容の違いを確かめるための値)は、Linux では `sha256sum`、Mac では `shasum -a 256` を使います。その道具が無いときだけ `openssl dgst -sha256` を使います。
-- 道具が無い・計算できない・配布物が壊れている・OS の条件を満たさない場合は、起動せず終了 1 になります。ハッシュは破損の検出用です。配布者の身元や、同じ利用者権限による検査後の差し替えを防ぐ保証はありません。
+- Rust の選択で、道具が無い・計算できない・配布物が壊れている・OS の条件を満たさない場合は、起動せず終了 1 になります。ハッシュは破損の検出用です。配布者の身元や、同じ利用者権限による検査後の差し替えを防ぐ保証はありません。
 
 プラグイン導入では `claude plugin list --json` で実際の導入先を確認し、`installed_plugin` に入れます。
 setup では `.claude` または `.agents` の設定フォルダを入れます。
 
 ```sh
 installed_plugin='<実際の導入先>'
+DEV_WORKFLOW_ENGINE=legacy sh "$installed_plugin/bin/dev-workflow/launch.sh" resolve-task-dir --project-root "<管理ルート>"
+DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" resolve-task-dir --project-root "<管理ルート>"
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --version
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" --help
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --json
 DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe --self-sha256
 ```
 
-4 コマンドとも終了 0 になり、`probe --json` の環境・ビルド情報と、自己ハッシュが配布の記録に一致することを確かめます。
+保存先の解決は JSON を返すだけで、ディレクトリを作りません。引数・作業場所・標準入出力・終了値は選んだ実装からそのまま返します。
+後半の 4 コマンドとも終了 0 になり、`probe --json` の環境・ビルド情報と、自己ハッシュが配布の記録に一致することを確かめます。
 `--version` が返す内部の版は、プラグインの版とは別です。
-比べる項目と詳しい条件は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にあります。
+比べる項目と詳しい条件は [必要環境と確認手順](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にあります。
 
 試用を止めるには `unset DEV_WORKFLOW_ENGINE`、または `export DEV_WORKFLOW_ENGINE=legacy` を実行し、既存の skill を使います。
 `probe` は旧版に無いので、終了 2 のままです。
@@ -174,7 +180,19 @@ DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe
 setup の更新前には上書きする管理対象を控え、元のモードに `--force` を付けて skills と `bin/dev-workflow/` を同じ版にそろえます。他の `bin/` は削除しません。
 Mac の隔離属性(ダウンロードしたファイルに macOS が付ける印)で止まった場合は、属性を消して合格にしません。
 
-配布版の確認状況(2026-11-08 時点)は次のとおりです。
+段階 1b の確認状況(2026-11-09、実装 commit `b613108953be65dc02de2491a2dbe3f9b3d0df27` 時点)は次のとおりです。
+
+| 確認する環境と方法 | 1b の結果 |
+|---|---|
+| Linux x86_64 の実際のプラグイン導入先 | 確認済み。レビュー対象から作った独立した検証用 commit `4e9cf1f9442534e33e70db3da68851e220a210e2` を導入元とし、専用の `CLAUDE_CONFIG_DIR` に導入した。149 項目の内容・権限が一致し、保存先解決 15 件と試しの 4 コマンドが合格。通常の設定先は変更していない |
+| ビルド元の Linux 2 種類・Mac 2 種類 | 確認済み。[Native run 42503942205](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42503942205) の全 9 job が成功。再ビルドの一致と、署名後の同じ Mac 共通ファイルの両 CPU 実行を含む |
+| 公開する最終 SHA の Native・Distribution launch・全回帰テスト | 未実施。実装時の成功と分け、公開前とマージ前に確認する |
+| Mac 実機への今回のプラグイン再導入 | 未確認。下の 0b の実測を今回の確認として扱わない |
+| 最低 OS の Linux 5.6・macOS 11 の実機 | 未確認。新しい OS の CI 成功だけでは確認済みとしない |
+
+成果物の出所・ソース情報・検査手順は [段階 1b の配布と導入の検査](docs/testing.md#段階-1b-の配布と導入の検査) に記しています。
+
+以下は段階 0b の確認記録(2026-11-08 時点)です。
 0a の成果物と、0b で配布する版の導入結果は分けて扱います。
 確かめた配布 commit は、Linux と自動検査が `b3aeeda`、Mac の実機が `aa3350a` です(配る 3 本は同じ。ビルド元 `e74af2d`)。
 
@@ -255,9 +273,9 @@ PATH=/home/<利用者>/.local/bin:/snap/bin:/usr/local/bin:/usr/bin:/bin
 
 - 開発用ソースは `native/`、CI(変更を送るたびに自動で検査する仕組み)は `.github/workflows/native.yml` にあります。Rust `1.99.1` の導入と外部のビルド先は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)、必須コマンドは [AGENTS.md](AGENTS.md#rust-の検査段階-0a) にあります。
 - CI は Linux x86_64・Linux arm64・Mac Intel・Mac Apple Silicon の 4 種類で検査します。Linux 2 本と、Mac の両 CPU で動く 1 本を成果物にします。2 回のビルドの比較、入力の記録、旧版と Rust 版を比べるテストの補助は [docs/testing.md](docs/testing.md) に記しています。
-- 段階 0a では開発用の土台を作りました。段階 0b では、そのビルド手順で作った 3 本と入口 `bin/dev-workflow/launch.sh` を同梱しています。設定値と試し方は上の「Rust 版を試す(段階 0b)」にあります。
+- 段階 0a では開発用の土台を作りました。段階 0b では、そのビルド手順で作った 3 本と入口 `bin/dev-workflow/launch.sh` を同梱しています。設定値と試し方は上の「Rust 版を試す(段階 1b)」にあります。
 - 段階 1a(#448)では、ソースに `resolve-task-dir` と旧版との比較を追加しました。比較は Python 3.10 系と通常利用者で実行します。CI の比較用 Python は 3.10.11 です。条件と、権限・非 UTF-8 出力による旧版との差は [検査手順](docs/testing.md#タスク保存先の比較段階-1a)にあります。
-- 新コマンドの配布と利用者の呼び出し変更は、後続の段階 1b で行います。段階 1b 以降は未完了です。
+- 段階 1b(#450)では、新コマンドを配布し、対象の skill と `loop.sh` を共通入口へつなぎました。公開する最終 SHA の検査とマージは未完了です。段階 2 以降の実装には着手していません。
 - 切り替えを profile から読まず、自動で旧版へ戻しません。製品の実行ファイル指定用の環境変数は作りません。実装と配布を分ける決定、今後使う YAML・OS の部品の候補は [docs/design.md](docs/design.md#rust-移行の実装と配布2026-11-08-決定) にあります。
 
 ## 検証

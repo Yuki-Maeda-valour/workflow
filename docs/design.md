@@ -440,6 +440,7 @@ permlog は参考表示だけとし、G1 は全種類を通常失敗と G1 連�
 - 実行可能な重い処理・決定的処理は `scripts/` に外出しして skill は薄いオーケストレーションに徹する(冪等〈何度実行しても同じ結果になる〉に作る)
 - **共有アセット(複数 skill が使うスクリプト・references)は所有 skill の配下に置き、他 skill からは兄弟参照 `../<所有 skill>/...` で解決する**。プラグインルート(`plugins/dev-workflow/scripts/` 等)には置かない — setup.sh 経由の `.claude/skills` 配置でも `.agents/skills` 配置でもプラグインルートが存在せず、3 配布形態のうち 2 つで消えるため。プラグインルートを指す環境変数にも依存しない(ホスト依存になり §7 と両立しない)。兄弟参照は**全 skill が同じ親ディレクトリへ一括配置されていること**を前提とする。skill を 1 本だけ取り出す部分導入など解決できない構成では、**当該機能を無効化して報告する**(探索を広げず、その機能をあきらめる)
   - 例外: プラグインの hook(`plugins/dev-workflow/hooks/`。使う道具の版を確かめて知らせる。#431)は skill の資産ではなく、プラグインとして導入したときだけ動く部品なので、プラグインルートに置く。skill はこれに頼らない。`setup.sh` の導入では、hook の代わりに `setup.sh` が導入の最後に同じ確かめを流す
+  - 例外: 共通の起動入口と Rust の配布物だけは `plugins/dev-workflow/bin/dev-workflow/` に置く。段階 0b(#443)から `setup.sh` も skills の兄弟の `bin/dev-workflow/` へ同じ版を一括配置するため、コピー・リンク・プラグインの導入で失われない。段階 1b(#450)の保存先解決は、使っている skill と同じ配布の入口を使う。リンク導入は物理的な配布元、コピー導入は配置先を基準にする。任意の共有スクリプトへこの例外を広げず、環境変数でプラグインの場所を指定しない。
 - プロジェクト固有の事実(パス・コマンド・スタック名・メモリ名)を本文に書かない(§3 の 3 層で解決)
 - 冒頭に「原則」、末尾に「最終ゲート」(出力・完了前セルフチェック)を置く
 - 関連 skill への導線(前提 skill / 後続 skill)を必ず書く
@@ -694,7 +695,7 @@ done | sort -k2 -rn
 | **Git の設定読取**: Linux の Git 2.51.0 と Ubuntu Git 2.34.1(package `1:2.34.1-1ubuntu1.17`)で、固定した builtin の設定再走査・setup・下のリポジトリの refs の読取経路をソースで調べ、隔離した環境での回帰テストと syscall の読取観察を照合した。2.51 の `hasconfig` は remote URL の収集時に最終不成立の先も読み、下のリポジトリの `onbranch` も版によって参照文脈が異なるため、最終的に有効な出典だけの計数では足りない。`implement-guard.sh` は下のリポジトリと生成設定も起動ごとに予約する。12 MiB の不成立 `onbranch` 先や不成立循環、既存 submodule の通常操作を、止めてはいけない正常な例に含めた。2.34.1 は設定パスを返す `git var` が使えないため、取得が必要な既定/非空 system 設定は失敗側に止める。無効化の `GIT_CONFIG_NOSYSTEM`、明示空とリテラル `/dev/null` はこの機能を求めない。確認した版と入力以外の全 Git 版・改変版や全 object I/O の保証に広げない | [Issue #230](https://github.com/Yuki-Maeda-valour/workflow/issues/230)(承認設計・Git ソース調査・Linux の隔離した環境での回帰テスト。最終の独立検証結果は同 Issue の記録を参照) | 7-2・external-runners.md §12-2 |
 | **git** の push の `-u` と共有の `config`: linked worktree から `-u` なしの完全な refspec の push(`git push --no-follow-tags --recurse-submodules=no origin 'refs/heads/task/x:refs/heads/task/x'`)を実行すると、global の設定に `branch.autoSetupRebase`(`always`・`remote`・`local`・`never`)か、`push.autoSetupRemote=true` と `push.default=current` があっても(`always` とこの 2 つを併せても)、共有の `config` に `branch.*` を書かなかった。origin の `refs/heads/task/x` と remote-tracking ref は、どれも HEAD と同じになった。同じ push に `-u` を付けると `branch.task/x.remote=origin`・`branch.task/x.merge=refs/heads/task/x` を書き、`branch.autoSetupRebase` が `always`・`remote` のときは `branch.task/x.rebase=true` も書いた(`local`・`never`・設定なし・`push.autoSetupRemote=true` と `push.default=current` では 2 項目)。無人の push に `-u` を付けず、`loop.sh` のイテレーションの後の照合が共有の `config` への追加を許さない根拠(unattended-mode.md §7・loop.md §4) | ローカル実測(2026-09-30・git 2.55.0。Issue #134 の「何が起きているか」〈`-u` つきで `local`・`never` が 2 項目〉・現状分析 5・完了条件 1・追加修正記録〈完了条件 1 を `local`・`never` まで広げた実測: `-u` なしで 0 項目・`-u` つきで 2 項目〉。bare の origin と linked worktree・global と system の設定を scratch へ向けた) | 2(無人ループ・発見ループ) |
 | **Claude Code** の質問の仕組み(`AskUserQuestion`)の 1 回の上限と、推奨の印の慣例: 1 回の呼び出しで質問は 1〜4 問、各質問の選択肢は 2〜4 個。公式文書の原文: "Question limits: each `AskUserQuestion` call supports 1-4 questions with 2-4 options each"(質問の形式の表の `options` も "Array of 2-4 choices")。推奨の選択肢は先頭に置き、名前の末尾に「(Recommended)」を付ける慣例がある(ツールの定義の記載。出典の頁を「Recommended」で探したが、この慣例の記載は見つからなかった)。skill は数を本文に書かず、実行時にその仕組みの定義で確かめる(init-project の質問の区切り方)。skill 本文は「質問で確認する」などと書き、道具への対応づけは解決表 §8 に置く。人が読む選択肢の印は「(推奨)」にそろえる(writing-for-people.md の質問と選択肢) | [Handle approvals and user input](https://code.claude.com/docs/en/agent-sdk/user-input) の「Limitations」と質問の形式の表(2026-10-06 確認)・ローカルの観察(2026-10-06・Claude Code 2.1.289 の質問のツールの定義: 1 回に 1〜4 問・選択肢 2〜4 個・推奨の選択肢は先頭に置き、名前の末尾に「(Recommended)」を付ける) | 5-25・init-project の Phase 2 |
-| **Claude Code** の応答の中のファイルを開ける形(ターミナル〈CLI〉と、表示のアプリ): ホストがセッションに渡すシステムの情報は、`パス:行番号` の形の参照は多くのターミナルでクリックできるとし、その形を `` ` `` で囲んで示す。応答の文は Markdown として表示する、とも書く。作業ディレクトリの外にある一時ファイル用のフォルダのファイルは、絶対パスを 1 つながりで書くよう求める(短くしたパスは作業ディレクトリから読まれ、行き先が無くなるため)。ほかの、作業ディレクトリの外のファイルも同じと推測される。全画面の表示では、Cmd(macOS)か Ctrl(Linux・Windows)を押しながら URL かファイルのパスをクリックすると開き、道具の出力のパス(Edit・Write の後に出るものなど)は、ファイルマネージャでそのファイルを選んだ状態で開く。Linux と WSL では、`org.freedesktop.FileManager1` の D-Bus のつなぎ口を持つファイルマネージャが無いと、ファイルのパスをクリックしても何も開かない(原文: "needs a file manager that provides the `org.freedesktop.FileManager1` D-Bus interface. Without one, nothing opens")。利用者の報告(2026-11-05): Orca という表示のアプリで Claude Code を使う画面では、会話に出した次の 5 つの形が、すべてクリックで開けた — (1) Markdown のリンクの形(`[名前](絶対パス)`。作業ディレクトリの外のファイル)(2) `` ` `` で囲んだ `絶対パス:行` (3) 囲まない絶対パス (4) `file://` の URL (5) `` ` `` で囲んだ、作業ディレクトリからの相対の `パス:行`。これは利用者の 1 つの環境での観察で、Claude Code の版は**未確認**。また、Claude Desktop では、プロジェクトの外のパスが開けなかったことが過去にあった(利用者の過去の経験。条件は**未確認**)。どのターミナルで開けるか・`:行番号` でその行へ移るか・Orca のほかの表示で Markdown のリンクの形で手元のファイルが開くか・Web・IDE の拡張での扱いは**未確認**(IDE の拡張の公式文書が開けると書くのは、ファイルを送る道具で送ったファイルの名前だけで、ふつうの応答の中のリンクは書いていない) | このリポジトリの作業セッションと、その委託先のシステムの情報で確認(2026-11-04。Claude Code 2.1.318〈この機械の `claude --version` の値。2026-11-05 確認〉。[Issue #335](https://github.com/Yuki-Maeda-valour/workflow/issues/335))・[Fullscreen rendering](https://code.claude.com/docs/en/fullscreen) の「Use the mouse」・[VS Code](https://code.claude.com/docs/en/vs-code) の「Files Claude sends you」(2026-11-04 確認)・利用者の報告(2026-11-05。Orca での 5 つの形と、Claude Desktop の過去の経験) | 5-25・解決表 §9 |
+| **Claude Code** の応答の中のファイルを開ける形(ターミナル〈CLI〉と、表示のアプリ): ホストがセッションに渡すシステムの情報は、`パス:行番号` の形の参照は多くのターミナルでクリックできるとし、その形を `` ` `` で囲んで示す。応答の文は Markdown として表示する、とも書く。作業ディレクトリの外にある一時ファイル用のフォルダのファイルは、絶対パスを 1 つながりで書くよう求める(短くしたパスは作業ディレクトリから読まれ、行き先が無くなるため)。ほかの、作業ディレクトリの外のファイルも同じと推測される。全画面の表示では、Cmd(macOS)か Ctrl(Linux・Windows)を押しながら URL かファイルのパスをクリックすると開き、道具の出力のパス(Edit・Write の後に出るものなど)は、ファイルマネージャでそのファイルを選んだ状態で開く。Linux と WSL では、`org.freedesktop.FileManager1` の D-Bus のつなぎ口を持つファイルマネージャが無いと、ファイルのパスをクリックしても何も開かない(原文: "needs a file manager that provides the `org.freedesktop.FileManager1` D-Bus interface. Without one, nothing opens")。利用者の報告(2026-11-05): Orca という表示のアプリで Claude Code を使う画面では、会話に出した次の 5 つの形が、すべてクリックで開けた — (1) Markdown のリンクの形(表示名を角括弧、絶対パスを丸括弧で続ける形。作業ディレクトリの外のファイル)(2) `` ` `` で囲んだ `絶対パス:行` (3) 囲まない絶対パス (4) `file://` の URL (5) `` ` `` で囲んだ、作業ディレクトリからの相対の `パス:行`。これは利用者の 1 つの環境での観察で、Claude Code の版は**未確認**。また、Claude Desktop では、プロジェクトの外のパスが開けなかったことが過去にあった(利用者の過去の経験。条件は**未確認**)。どのターミナルで開けるか・`:行番号` でその行へ移るか・Orca のほかの表示で Markdown のリンクの形で手元のファイルが開くか・Web・IDE の拡張での扱いは**未確認**(IDE の拡張の公式文書が開けると書くのは、ファイルを送る道具で送ったファイルの名前だけで、ふつうの応答の中のリンクは書いていない) | このリポジトリの作業セッションと、その委託先のシステムの情報で確認(2026-11-04。Claude Code 2.1.318〈この機械の `claude --version` の値。2026-11-05 確認〉。[Issue #335](https://github.com/Yuki-Maeda-valour/workflow/issues/335))・[Fullscreen rendering](https://code.claude.com/docs/en/fullscreen) の「Use the mouse」・[VS Code](https://code.claude.com/docs/en/vs-code) の「Files Claude sends you」(2026-11-04 確認)・利用者の報告(2026-11-05。Orca での 5 つの形と、Claude Desktop の過去の経験) | 5-25・解決表 §9 |
 | **Claude Code** の日本語の文書の、メモリの呼び方: AI が自分で書き残す記憶を「自動メモリ」と呼ぶ(原文: 「**自動メモリ**: あなたの修正と好みに基づいて Claude が自分自身で書くメモ」「自動メモリはマシンローカルです」)。CLAUDE.md などの指示のファイルも「メモリファイル」と呼ぶ(「プロジェクトレベルのメモリファイル」など)。長音は「メモリ」 | [Claude があなたのプロジェクトを記憶する方法](https://code.claude.com/docs/ja/memory)(2026-11-04 確認。[Issue #335](https://github.com/Yuki-Maeda-valour/workflow/issues/335)。調べた経緯は [Issue #333](https://github.com/Yuki-Maeda-valour/workflow/issues/333)) | 5-25・writing-for-people.md の言い換え表 |
 
 **検証済みの範囲**: 実ホスト(Codex / Cursor)での **SKILL.md の読み込み・起動を確認済み**(どの工程まで動いたかの記録は無い)(2026-09-11、ユーザーによる実環境での確認報告)。**CLI ランナーとしての疎通は両 CLI で実測済み**(2026-09-09: codex 0.153.4 を導入・cursor-agent は認証済みで実レビューを取得)。**Codex のエージェント定義本体の置き場所**は公式に明記が無い(上記の `~/.codex/agents/` の TOML がこれにあたると見られるが**未確認**)。
@@ -861,22 +862,23 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - PR(変更を本流へ取り込む前に確かめてもらう依頼)を、実装の PR と配る PR に分ける。段階 2〜4 は並列に進める。出典は [Issue #400 の「進め方」の節](https://github.com/Yuki-Maeda-valour/workflow/issues/400)(2026-11-08)。
 - 段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))では、`native/`・`.github/workflows/`・検査の補助を作った。`plugins/`・`.claude-plugin/marketplace.json`・`setup.sh` は変えず、版と `CHANGELOG.md` も変えなかった。
 - 段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から、実行ファイル 3 本と入口を同梱する。人が CI(変更を送るたびに自動で検査する仕組み)の成果物を取り込む。配布を開始する版は、main 取り込み後の v4 の次のマイナーとする。
-- 段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))では、開発用ソースに `resolve-task-dir` と旧版との比較を追加する。配布物は段階 0b のままである。新コマンドの配布と呼び出しの変更は、後続の段階 1b で行う。
+- 段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))では、開発用ソースに `resolve-task-dir` と旧版との比較を追加した。この段階では配布物を変えなかった。
+- 段階 1b([Issue #450](https://github.com/Yuki-Maeda-valour/workflow/issues/450))では、新コマンドを含む 3 本と検査情報を取り込み、対象の skill と `loop.sh` を共通入口へつなぐ。配布元のソースと、入口を含む公開する SHA の検査は分ける。出所と検査手順は [testing.md](testing.md#段階-1b-の配布と導入の検査) に記す。
 - 利用者向けに Rust を自動導入する処理は加えない。v4 の利用者の Python・PyYAML・bash の要件と既存の呼び出し方は維持する。
 
-`DEV_WORKFLOW_ENGINE` は、段階 0b から同梱する `bin/dev-workflow/launch.sh` が読む。既存の skill の呼び出しは旧版のまま維持する。
+`DEV_WORKFLOW_ENGINE` は、段階 0b から同梱する `bin/dev-workflow/launch.sh` が読む。段階 1b では保存先の解決をこの入口へ通す。既定は旧 Python のまま維持する。
 
-| 値 | 0b の入口で選ぶ動作 |
+| 値 | 1b の入口で選ぶ動作 |
 |---|---|
-| 未設定 | 旧版を選ぶ。段階 0 の入口には旧版のコマンドが無いため終了 2 |
+| 未設定 | `resolve-task-dir` は同梱の旧 Python。それ以外の未登録コマンドは終了 2 |
 | `legacy` | 未設定と同じ |
 | `rust` | Rust 版 |
 | 空文字・ほかの値 | 設定の誤りとして終了 2 |
 
 - 切り替えは profile(プロジェクトの設定ファイル)から読まない。Rust 版が使えないときも、自動で旧版へ戻さない。
-- 製品の実行ファイルのパスを指定する環境変数は作らない。`DEV_WORKFLOW_TEST_NATIVE_BINARY` は、ソースから作った実行ファイルを検査するためだけに使う。
-- 配布済みの段階 0b の実行ファイルが持つコマンドは `--version`・`--help`・`probe --json`・`probe --self-sha256`。Rust 実行ファイル自体は Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
-- sh の入口は OS・CPU・最低 OS と、選んだ 1 本のハッシュを外部の道具で検査してから起動する。条件と試し方は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
+- 製品の実行ファイルのパスを指定する環境変数は作らない。`DEV_WORKFLOW_TEST_NATIVE_BINARY` は、検査対象の実行ファイルをテストへ明示するためだけに使う。製品の入口は読まない。
+- 段階 1b の配布物は `resolve-task-dir` と、段階 0b の `--version`・`--help`・`probe --json`・`probe --self-sha256` を持つ。Rust 実行ファイル自体は Git・外部コマンド・ネットワーク・設定ファイルを使わず、作業フォルダを変えない。
+- sh の入口は、Rust の選択時に OS・CPU・最低 OS と、選んだ 1 本のハッシュを外部の道具で検査してから起動する。旧版は同じ配布の `resolve-task-dir.py` を `python3 -B` で起動し、Rust 用の条件を要求しない。条件と試し方は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にある。
 - `probe` に旧版は無い。入口の `--version`・`--help` も、未設定・`legacy` では終了 2 になる。試しのコマンドが通っても、旧版との同等性や OS の保護機能を確認したとは扱わない。
 
 ### タスク保存先の解決(段階 1a)
@@ -890,7 +892,8 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
   - 利用者が 2026-11-09 に承認した差である。`utf-8:strict` と `utf-8:surrogateescape` の専用ケースで検査する。出典は [Issue #448 の技術的考慮事項](https://github.com/Yuki-Maeda-valour/workflow/issues/448)。
 - 権限と非 UTF-8 の専用ケースは、通常の一致判定に混ぜない。通常の比較で認める差は、実行名の表示と独立コピーの絶対ルートだけである。ほかの出力と終了値の完全一致を保つ。
 - 比較は Python 3.10 系と通常利用者で実行する。Linux 2 種類・Mac 2 種類の CI は Python 3.10.11 を使う。実行前後のファイルが変わらないことも確かめる。詳しい検査は [testing.md](testing.md#タスク保存先の比較段階-1a) にある。
-- 旧 Python 版、各 skill と `loop.sh` の呼び出し、配布物、プラグインの版と `CHANGELOG.md` は変えない。段階 1b 以降は未完了である。
+- 旧 Python の実装は残す。段階 1b は配布と入口の接続だけを変更し、この節の解決契約と承認済みの差を維持する。入口は引数・作業場所・標準入出力・終了値を加工せず渡す。
+- `loop.sh` は保持したプラグインの入口を使い、起動直前の環境確認、作業場所 `/`、fd 7 の閉鎖、解決失敗を終了 30 にする扱いを維持する。成功後の文字制限・保護パスの確認も変えない。
 
 ### Rust の構成とビルド入力(段階 0a)
 

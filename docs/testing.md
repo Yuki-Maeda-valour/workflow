@@ -17,8 +17,8 @@ flowchart LR
 ## Rust の開発と検査(段階 0a)
 
 Rust の検査は、既存の全回帰テストとは別に流す。段階 0a([Issue #442](https://github.com/Yuki-Maeda-valour/workflow/issues/442))で開発用の土台を作り、段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から入口と実行ファイル 3 本を同梱する。CI(変更を送るたびに自動で検査する仕組み)も、このソースの検査を続ける。
-利用者向けの試し方と必要環境は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-0b) にある。
-段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))の `resolve-task-dir` は開発用ソースだけにある。配布した段階 0b の入口には含まれない。
+利用者向けの試し方と必要環境は [runtime-requirements.md](../plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にある。
+段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))で検査した `resolve-task-dir` を、段階 1b([Issue #450](https://github.com/Yuki-Maeda-valour/workflow/issues/450))で配布する。共通入口・既存の呼び出し元・導入後の検査は、下の「段階 1b の配布と導入の検査」にある。
 
 ### Rust 1.99.1 の導入と外部の出力先
 
@@ -120,7 +120,68 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - Mac の APFS が実在名の作成を `EILSEQ` で拒む場合だけ、その理由を出力して実在ルートと候補名の検査を省く。明示値の検査は省かない。名前の作成以外の失敗や、別の OS・エラーは省略理由にしない。
   - 引数解析の非 UTF-8 エラーは、通常の完全一致の比較を続ける。
 - `native/ci/scripts/test_native_ci.py` は、専用判定が別の例外・発生箇所・出力先・終了値・期待バイトの変化を拒否することを確かめる。実際の出力設定の違いとファイルの変更も拒否する。通常の比較が同じ旧版の例外を許さないことも検査する。
-- この比較は `run-all.py` に含めない。今回作った実行ファイルを指定し、Rust の検査として別に流す。
+- この比較は `run-all.py` に含めない。今回作った実行ファイルと、配布に採用する実行ファイルをそれぞれ指定し、Rust の検査として別に流す。
+
+### 段階 1b の配布と導入の検査
+
+配布元の検査と、公開する状態での検査を分ける。配布元の CI が成功していても、共通入口・呼び出し元・導入後の検査を省かない。
+
+配布元は [Native CI run 42503942205](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42503942205) である。必須 9 件がすべて成功した同じ run の `native-dist.tar` から、次の 5 ファイルを同時に取り込む。古い失敗 run や、手元で再ビルドしたファイルを混ぜない。
+
+| `plugins/dev-workflow/bin/dev-workflow/` 内のファイル | 権限 |
+|---|---|
+| `linux-x86_64/dev-workflow` | `0755` |
+| `linux-arm64/dev-workflow` | `0755` |
+| `macos-universal/dev-workflow` | `0755` |
+| `SHA256SUMS` | `0644` |
+| `build-info.json` | `0644` |
+
+| 出所の記録 | 値 |
+|---|---|
+| ソースの commit | `3b9dfcc273f89898e13a2ccfb31f863c9a510fee` |
+| `native/` のソース入力の SHA256 | `a91c5b6bfd19352949fafec455a19f0340d8816ff102e9883aa8ec028a12742c` |
+| `native/Cargo.lock` の SHA256 | `56e9fddd70e2d0df59ce1a254a044c082c6f5ce9b4d2b2efd521b413628f598a` |
+| `native-dist.tar` の SHA256 | `e46a68b8592962ffc667639e3f69df1807136ec505aa28f5fc37f5e982438b0b` |
+
+- `build-info.json` のソース・道具・run・対象・各実行ファイルの SHA256 を、上の出所と照合する。アーカイブの名前・種類・権限も確かめる。`launch.sh` はこの 5 ファイルに含まれず、プラグイン側のコードとして検査する。
+- 配布元の比較は、Linux の各 CPU で 2 回のビルドごとに 714 件が成功した。Mac は各 CPU の 2 回のビルドと、結合・署名後の各 CPU で 710 件が成功した。
+  - Mac の APFS が非 UTF-8 の実在ルート・候補名を `EILSEQ` で拒んだ 4 件だけを省略した。生バイトの明示値は、両方の出力設定で検査した。Mac を 714 件成功とは記録しない。
+- `DEV_WORKFLOW_ENGINE` が未設定・`legacy` の場合は、同梱の旧 Python を使う。`rust` の場合だけ Rust を使う。空文字・未知の値は終了 2 にし、Rust の失敗から旧版へ自動で戻さない。
+- 共通入口の検査は、引数・作業場所・標準入出力・終了値の保持も含む。`0400` と非 UTF-8 出力の承認済みの差は上の比較条件を使い、通常の比較を緩めない。
+- `scripts/test_native_launch.py` は、エンジンの選択、実行ファイルや道具の欠落、改変、リンクからの起動、引数などを検査する。`scripts/test_setup.py` はコピー・リンクの導入と、元の配置を取り除いたコピーからの起動も検査する。
+- `scripts/check_dist_launch.py` は実際の配布入口を起動する。保存先の 5 条件を未設定・`legacy`・`rust` で試す 15 件と、従来の 4 コマンドを必須にする。独立に組み立てた期待 JSON のバイト列と、実行前後のファイルの内容・種類・権限を比べる。
+  - Mac では署名と両 CPU 向けの形式も検査する。`.github/workflows/dist-check.yml` は Linux arm64・Mac Intel・Mac Apple Silicon の 3 件を実行する。Linux x86_64 は手元で同じ入口を流す。
+
+リポジトリ直下から、配布入口と配布物の比較を流す。比較には Python 3.10 系を使い、root 以外の通常利用者で実行する。下の実行ファイルの指定は Linux x86_64 用である。
+
+```bash
+python3 -B scripts/check_dist_launch.py --root .
+DEV_WORKFLOW_TEST_NATIVE_BINARY="$PWD/plugins/dev-workflow/bin/dev-workflow/linux-x86_64/dev-workflow" \
+  python3 -B native/ci/check_resolve_task_dir.py
+```
+
+実際のプラグイン導入には `claude` CLI を使う。`scripts/check_plugin_install.py` が一時フォルダを作り、専用の `CLAUDE_CONFIG_DIR` を渡して marketplace 登録・user scope への導入・導入先の取得を行う。利用者の通常の設定先と `HOME` は変えない。
+
+```bash
+python3 -B scripts/check_plugin_install.py --root .
+```
+
+- 導入元は検査対象を commit したリポジトリにする。作業ブランチの commit 前に確かめる場合は、検査対象だけを専用の一時コピーへ移して検証用 commit を作り、作業ブランチに未レビューの commit を作らない。
+- 一覧から得た導入先が専用の設定先の内側にあり、元のリポジトリとは別の場所であることを確かめる。リンク・特殊ファイルを拒否し、全項目の内容・権限・ハッシュを元のプラグインと照合してから起動する。
+- 導入先でも保存先解決の 15 件と従来の 4 コマンドを実行する。起動後にも元と導入先の無変更を確かめる。一時の設定先は終了時に片付ける。
+- 最終の版を付けた後にも実導入を流し直す。`scripts/test_check_plugin_install.py` の代用 CLI による検査だけでは、実導入の合格とは扱わない。
+
+2026-11-09 時点の記録は次のとおりである。実装 commit は `b613108953be65dc02de2491a2dbe3f9b3d0df27`。公開する最終 commit の結果は、全回帰テストと最終 CI の完了後に PR 本文へ記録する。
+
+| 検査 | 確認した結果と範囲 |
+|---|---|
+| Linux x86_64 の配布入口 | 保存先解決 15 件・従来の 4 コマンドが合格 |
+| 通常利用者の Python 3.10.12 での比較 | 配布物と今回のソースから作った実行ファイルの両方で 714 件が合格 |
+| Linux x86_64 の実プラグイン導入 | 検証用 commit `4e9cf1f9442534e33e70db3da68851e220a210e2` で、149 項目の内容・権限が一致した。導入先の保存先解決 15 件と従来の 4 コマンドが合格 |
+| 導入先の Linux x86_64 の SHA256 | `9bcb0e3bc2bc6555d559255d7b7c7531456955d04372faef43136b77165e70d7`。配布の記録と一致 |
+| 今回の Mac 実機への再導入 | 未確認。段階 0b の実機記録は [README.md](../README.md#e-rust-版を試す段階-1b) に分けて残す |
+| Linux カーネル 5.6・macOS 11 の最低 OS | 実機では未確認。入口の版の判定と、現在の CI 環境での検査とは分ける |
+| 公開する最終 commit の Native CI・Distribution launch・全回帰テスト | この時点では未実行。配布元 CI の成功を代わりに使わない |
 
 ## 全回帰テストのコマンド(run-all.py)
 

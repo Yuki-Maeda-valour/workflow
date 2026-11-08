@@ -2,6 +2,19 @@
 
 v4.2.0 以前は commit 履歴を参照。
 
+## (次の版)
+
+### 追加
+
+- 段階 1a で検証した `resolve-task-dir` を含む Rust 実行ファイルを配布する。Linux 2 本と Mac 共通 1 本、`SHA256SUMS`、`build-info.json` を同じ成功 run の成果物へ更新する。([Issue #450](https://github.com/Yuki-Maeda-valour/workflow/issues/450))
+- 配布入口で保存先の解決を 15 通り確認する。専用の `CLAUDE_CONFIG_DIR` へ実プラグインを導入し、内容・権限・ハッシュを確かめてから起動する検査を追加する。利用者の通常設定は変更しない。
+
+### 変更
+
+- 保存先を解決する skill と `loop.sh` が、同じ配布の `launch.sh resolve-task-dir` を使う。未設定・`legacy` は旧 Python、`rust` のときだけ Rust を使う。空文字・未知の値は終了 2。失敗時に別の版へ自動で切り替えない。
+- 引数・作業場所・標準入出力・終了値と、権限・非 UTF-8 出力の承認済みの差を維持する。旧 Python は残し、利用者への Rust・Cargo の導入は加えない。
+- コピー・リンクの導入先と、無人ループが保持したプラグインからの実起動を検査する。使用直前の確認と、改変時に止める条件は維持する。
+
 ## v4.52.0
 
 ### 追加
