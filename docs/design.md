@@ -863,6 +863,9 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 - 段階 0b([Issue #443](https://github.com/Yuki-Maeda-valour/workflow/issues/443))から、実行ファイル 3 本と入口を同梱する。人が CI(変更を送るたびに自動で検査する仕組み)の成果物を取り込む。配布を開始する版は、main 取り込み後の v4 の次のマイナーとする。
 - 段階 1a([Issue #448](https://github.com/Yuki-Maeda-valour/workflow/issues/448))では、開発用ソースに `resolve-task-dir` と旧版との比較を追加する。配布物は段階 0b のままである。新コマンドの配布と呼び出しの変更は、後続の段階 1b で行う。
 - 利用者向けに Rust を自動導入する処理は加えない。v4 の利用者の Python・PyYAML・bash の要件と既存の呼び出し方は維持する。
+- [Issue #283](https://github.com/Yuki-Maeda-valour/workflow/issues/283)は、段階 2 で Git 設定の観測を比べるための入力と性質を固定する。廃止済みの #246・#282 の分割計画は再開しない。
+  - 製品と既存の拒否条件は変えず、読み取り順序、処理量と時間の上限、変更の再検査、返す値のテストを追加する。
+  - Python 内部だけの観察と、移行時に引き継ぐ性質は分ける。Rust 版との比較は未実施である。既存テストとの対応と、不具合を入れた独立コピーの確認方法は [testing.md](testing.md#git-設定の観測を移行へ引き継ぐテスト283) に置く。
 
 `DEV_WORKFLOW_ENGINE` は、段階 0b から同梱する `bin/dev-workflow/launch.sh` が読む。既存の skill の呼び出しは旧版のまま維持する。
 

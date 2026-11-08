@@ -10,6 +10,9 @@ import tempfile
 import importlib.util
 import unittest
 import ctypes
+import contextlib
+import hashlib
+import types
 from unittest import mock
 
 
@@ -1355,6 +1358,292 @@ class LoopStateTest(unittest.TestCase):
         self.assertEqual(0, self.snap("unchanged-b.json", exclude_worktree=str(own)).returncode)
         result = subprocess.run(["python3", str(SCRIPT), "compare", "--before", str(self.root.parent / "unchanged-a.json"), "--after", str(self.root.parent / "unchanged-b.json"), "--self-worktree", str(own), "--self-ref", "refs/heads/task/missing"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
         self.assertEqual(0, result.returncode, result.stdout.decode() + result.stderr.decode())
+
+
+class ConfigSnapshotContractTest(unittest.TestCase):
+    """Python observations and reusable inputs for the stage 2 comparison.
+
+    These tests own their environment from Git initialization onwards.  The
+    original regression class above deliberately retains its existing setup.
+    """
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory(prefix="loop-config-contract-")
+        self.addCleanup(self.temp.cleanup)
+        self.base = pathlib.Path(self.temp.name)
+        self.root = self.base / "repo"
+        self.root.mkdir()
+        home = self.base / "home"
+        home.mkdir()
+        xdg = home / "xdg"
+        xdg.mkdir()
+        self.global_config = home / "global"
+        self.global_config.write_text("")
+        # Remove inherited command-line config and repository redirections as
+        # well as ordinary user/system settings before the first Git command.
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        env.update(HOME=str(home), XDG_CONFIG_HOME=str(xdg),
+                   GIT_CONFIG_GLOBAL=str(self.global_config), GIT_CONFIG_NOSYSTEM="1")
+        patch = mock.patch.dict(os.environ, env, clear=True)
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.git("-c", "init.defaultBranch=main", "init", "-q")
+        self.common = self.root / ".git"
+        self.config = self.common / "config"
+
+    def git(self, *args: str) -> bytes:
+        return subprocess.run(
+            ["git", "-C", str(self.root), *LOOP_STATE.SAFE_GIT_PREFIX,
+             "-c", "maintenance.auto=false", "-c", "gc.auto=0", *args],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        ).stdout
+
+    def budget(self, *, items: int = 10_000, total: int = 10_000_000):
+        return LOOP_STATE.Budget(items, total, 1_000_000, 10)
+
+    def graph(self) -> list[pathlib.Path]:
+        self.ordinary = self.base / "m-ordinary.inc"
+        self.conditional = self.base / "n-conditional.inc"
+        self.first = self.base / "z-first.inc"
+        self.second = self.base / "a-second.inc"
+        self.ordinary.write_text("[contract]\nvalue = ordinary\n")
+        self.conditional.write_text("[contract]\nvalue = conditional\n")
+        self.second.write_text("[contract]\nvalue = nested\n")
+        self.condition = "hasconfig:remote.*.url:https://example.invalid/**"
+        self.first.write_text(f'[includeIf "{self.condition}"]\npath = {self.second}\n')
+        self.global_config.write_text(
+            f"[include]\npath = {self.ordinary}\n"
+            f'[includeIf "onbranch:main"]\npath = {self.conditional}\n'
+            f'[includeIf "{self.condition}"]\npath = {self.first}\n'
+        )
+        self.git("config", "remote.origin.url", "https://example.invalid/repo")
+        return [self.global_config, self.config, self.ordinary,
+                self.conditional, self.first, self.second]
+
+    def snapshot(self, budget=None):
+        return LOOP_STATE.config_snapshot(
+            str(self.root), str(self.common), budget if budget is not None else self.budget(),
+            git_dir=str(self.common),
+        )
+
+    def successful_snapshot(self, label: str, budget=None):
+        try:
+            return self.snapshot(budget)
+        except LOOP_STATE.Stop as exc:
+            self.fail(f"{label}: unexpected Stop: {exc}")
+
+    @contextlib.contextmanager
+    def trace(self, *, before_effective=None, after_effective=None, before_candidates=None, reading=None):
+        """Wrap real operations; callbacks only change the test clock/input."""
+        record = types.SimpleNamespace(events=[], budgets=[], raw=None)
+        original_run = LOOP_STATE.run_git
+        original_read = LOOP_STATE.safe_config_file
+        original_probe = LOOP_STATE.probe_condition
+        original_target = LOOP_STATE.include_target
+        original_candidates = LOOP_STATE.config_candidates
+        original_bytes = LOOP_STATE.read_open_regular
+
+        def run(top, *args, **kwargs):
+            record.budgets.append(("git", kwargs.get("budget")))
+            phase = None
+            if args[:3] == ("config", "--show-origin", "--show-scope"):
+                phase = "roots" if "--no-includes" in args else "effective"
+                record.events.append((phase + "-start", None))
+                if phase == "effective" and before_effective:
+                    before_effective()
+            result = original_run(top, *args, **kwargs)
+            if phase:
+                record.events.append((phase + "-done", None))
+                if phase == "effective":
+                    record.raw = result
+                    if after_effective:
+                        after_effective()
+            return result
+
+        def read(top, path, budget, *args, **kwargs):
+            record.budgets.append(("file", budget))
+            with reading(path) if reading else contextlib.nullcontext():
+                result = original_read(top, path, budget, *args, **kwargs)
+            record.events.append(("read-done", path))
+            return result
+
+        def probe(top, condition, origin, effective, budget, **kwargs):
+            record.budgets.append(("condition", budget))
+            record.events.append(("condition-start", origin))
+            return original_probe(top, condition, origin, effective, budget, **kwargs)
+
+        def target(top, value, origin, budget):
+            record.budgets.append(("include-path", budget))
+            return original_target(top, value, origin, budget)
+
+        def candidates(top, common, git_dir, budget):
+            record.budgets.append(("candidates", budget))
+            record.events.append(("candidates-start", None))
+            if before_candidates:
+                before_candidates()
+            result = original_candidates(top, common, git_dir, budget)
+            record.events.append(("candidates-done", None))
+            return result
+
+        def read_bytes(fd, before, budget):
+            record.budgets.append(("bytes", budget))
+            return original_bytes(fd, before, budget)
+
+        with contextlib.ExitStack() as stack:
+            for name, wrapper in (("run_git", run), ("safe_config_file", read),
+                                  ("probe_condition", probe), ("include_target", target),
+                                  ("config_candidates", candidates), ("read_open_regular", read_bytes)):
+                stack.enter_context(mock.patch.object(LOOP_STATE, name, wrapper))
+            yield record
+
+    def test_config_snapshot_orders_reads_conditions_rechecks_and_candidates(self) -> None:
+        paths = self.graph()
+        with self.trace() as trace:
+            self.successful_snapshot("CONFIG_ORDER")
+        events = trace.events
+        roots_done = events.index(("roots-done", None))
+        condition_start = next(i for i, event in enumerate(events) if event[0] == "condition-start")
+        effective_start = events.index(("effective-start", None))
+        effective_done = events.index(("effective-done", None))
+        candidates_start = events.index(("candidates-start", None))
+        for root in (self.global_config, self.config):
+            first_read = events.index(("read-done", str(root)))
+            self.assertLess(roots_done, first_read, "CONFIG_ORDER: discover roots before reading")
+            self.assertLess(first_read, condition_start, "CONFIG_ORDER: all roots before conditions")
+        for path in paths:
+            reads = [i for i, event in enumerate(events) if event == ("read-done", str(path))]
+            self.assertLess(reads[0], effective_start, "CONFIG_ORDER: graph before effective Git")
+            self.assertTrue(any(effective_done < i < candidates_start for i in reads),
+                            "CONFIG_ORDER: every actual origin rechecked before candidates")
+        self.assertLess(candidates_start, events.index(("candidates-done", None)), "CONFIG_ORDER")
+
+    def test_config_snapshot_returns_exact_values_and_ordered_candidates(self) -> None:
+        paths = self.graph()
+        with self.trace() as trace:
+            result = self.successful_snapshot("CONFIG_RESULT")
+        self.assertEqual({"effective_sha256", "origins", "candidates"}, set(result), "CONFIG_KEYS")
+        self.assertIsInstance(trace.raw, bytes)
+        self.assertEqual(hashlib.sha256(trace.raw).hexdigest(), result["effective_sha256"], "CONFIG_DIGEST")
+        expected_paths = sorted("config:" + str(path) for path in paths)
+        self.assertEqual(expected_paths, [row["path"] for row in result["origins"]], "CONFIG_ORIGINS_ORDER")
+        for path, row in zip(sorted(paths), result["origins"]):
+            self.assertEqual("file", row["kind"])
+            self.assertEqual(hashlib.sha256(path.read_bytes()).hexdigest(), row["sha256"])
+        expected_candidates = [
+            ("common", str(self.config), "present"),
+            ("common", str(self.common / "config.worktree"), "absent"),
+            ("global", str(self.global_config), "present"),
+        ]
+        self.assertEqual(expected_candidates,
+                         [(row["kind"], row["path"], row["state"]) for row in result["candidates"]],
+                         "CONFIG_CANDIDATES")
+        for row in result["candidates"]:
+            if row["state"] == "present":
+                self.assertEqual({"kind", "path", "state", "entry"}, set(row), "CONFIG_CANDIDATES")
+                self.assertEqual("config:" + row["path"], row["entry"]["path"])
+                self.assertEqual(hashlib.sha256(pathlib.Path(row["path"]).read_bytes()).hexdigest(),
+                                 row["entry"]["sha256"])
+            else:
+                self.assertEqual({"kind", "path", "state"}, set(row), "CONFIG_CANDIDATES")
+
+    def test_config_snapshot_drains_nested_hasconfig_queue(self) -> None:
+        self.graph()
+        with self.trace() as trace:
+            result = self.successful_snapshot("CONFIG_QUEUE")
+        self.assertIn("config:" + str(self.second), [row["path"] for row in result["origins"]], "CONFIG_QUEUE")
+        self.assertIn(("condition-start", str(self.first)), trace.events, "CONFIG_QUEUE")
+        self.assertLess(trace.events.index(("read-done", str(self.second))),
+                        trace.events.index(("effective-start", None)), "CONFIG_QUEUE")
+
+    def test_config_snapshot_rejects_normal_and_deferred_cycles_before_effective_git(self) -> None:
+        first = self.base / "cycle-a.inc"
+        second = self.base / "cycle-b.inc"
+        self.git("config", "remote.origin.url", "https://example.invalid/repo")
+        self.global_config.write_text(f"[include]\npath = {first}\n")
+        first.write_text(f"[include]\npath = {second}\n")
+        for kind in ("normal", "deferred"):
+            with self.subTest(kind=kind):
+                ordinary = "[contract]\nvalue = acyclic\n"
+                second.write_text(ordinary)
+                self.successful_snapshot("CONFIG_CYCLE: normal control")
+                section = ('includeIf "hasconfig:remote.*.url:https://example.invalid/**"'
+                           if kind == "deferred" else "include")
+                @contextlib.contextmanager
+                def cycle_while_reading(path):
+                    # A static cycle is rejected by Git's setup even with
+                    # --no-includes/--file.  Expose the edge to the real held-fd
+                    # parser, then restore the disk input before the next Git
+                    # setup.  No parser output or product decision is mocked.
+                    if path != str(second):
+                        yield
+                        return
+                    second.write_text(f"[{section}]\npath = {first}\n")
+                    try:
+                        yield
+                    finally:
+                        second.write_text(ordinary)
+                def reject_effective():
+                    self.fail("CONFIG_CYCLE: effective Git reached before cycle rejection")
+                with self.trace(reading=cycle_while_reading, before_effective=reject_effective) as trace:
+                    with self.assertRaisesRegex(LOOP_STATE.Stop, "include が循環している", msg="CONFIG_CYCLE"):
+                        self.snapshot()
+                self.assertNotIn(("effective-start", None), trace.events, "CONFIG_CYCLE")
+
+    def test_config_snapshot_passes_same_budget_through_every_phase(self) -> None:
+        self.graph()
+        budget = self.budget()
+        with self.trace() as trace:
+            self.successful_snapshot("CONFIG_BUDGET_ID", budget)
+        self.assertEqual({"git", "file", "condition", "include-path", "candidates", "bytes"},
+                         {phase for phase, _ in trace.budgets})
+        for phase, actual in trace.budgets:
+            self.assertIs(budget, actual, "CONFIG_BUDGET_ID: " + phase)
+
+    def test_config_snapshot_keeps_callers_item_and_byte_consumption(self) -> None:
+        self.graph()
+        measured = self.budget()
+        self.successful_snapshot("CONFIG_BUDGET: measure", measured)
+        self.assertGreater(measured.count, 0)
+        self.assertGreater(measured.bytes, 0)
+        for kind in ("items", "bytes"):
+            with self.subTest(kind=kind):
+                limits = {"items": measured.count} if kind == "items" else {"total": measured.bytes}
+                self.successful_snapshot("CONFIG_BUDGET: exact control", self.budget(**limits))
+                used = self.budget(**limits)
+                if kind == "items":
+                    used.tick()
+                    reason = "項目数"
+                else:
+                    used.read(1)
+                    reason = "総読取量"
+                with self.assertRaisesRegex(LOOP_STATE.Stop, reason, msg="CONFIG_BUDGET"):
+                    self.snapshot(used)
+
+    def test_config_snapshot_keeps_callers_deadline_at_late_phases(self) -> None:
+        self.graph()
+        for phase in ("before_effective", "after_effective", "before_candidates"):
+            with self.subTest(phase=phase):
+                now = [0.0]
+                # Replace only the product's clock object, not the time module
+                # used by subprocess/unittest.  Real Git still runs normally.
+                clock = types.SimpleNamespace(monotonic=lambda: now[0])
+                with mock.patch.object(LOOP_STATE, "time", clock):
+                    self.successful_snapshot("CONFIG_DEADLINE: normal control", self.budget())
+                    budget = self.budget()
+                    def expire():
+                        now[0] = 11.0
+                    with self.trace(**{phase: expire}):
+                        with self.assertRaisesRegex(LOOP_STATE.Stop, "60 秒の上限|時間内", msg="CONFIG_DEADLINE"):
+                            self.snapshot(budget)
+
+    def test_config_snapshot_rejects_origin_change_after_effective_git(self) -> None:
+        self.graph()
+        self.successful_snapshot("CONFIG_RECHECK: normal control")
+        def change_include():
+            self.second.write_text("[contract]\nvalue = changed-after-effective-git\n")
+        with self.trace(after_effective=change_include):
+            with self.assertRaisesRegex(LOOP_STATE.Stop, "config が実効値の読取中に変わった", msg="CONFIG_RECHECK"):
+                self.snapshot()
 
 
 if __name__ == "__main__": unittest.main()
