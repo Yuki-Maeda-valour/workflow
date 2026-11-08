@@ -94,7 +94,7 @@ mod tests {
         let (mut stdout, mut stderr) = (Vec::new(), Vec::new());
         assert_eq!(
             emit_to(self_sha256(reader), &mut stdout, &mut stderr),
-            ExitCode::Runtime
+            ExitCode::RUNTIME
         );
         assert!(stdout.is_empty());
         assert_eq!(
