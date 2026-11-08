@@ -173,14 +173,15 @@ DEV_WORKFLOW_ENGINE=rust sh "$installed_plugin/bin/dev-workflow/launch.sh" probe
 setup の更新前には上書きする管理対象を控え、元のモードに `--force` を付けて skills と `bin/dev-workflow/` を同じ版にそろえます。他の `bin/` は削除しません。
 Mac の隔離属性(ダウンロードしたファイルに macOS が付ける印)で止まった場合は、属性を消して合格にしません。
 
-配布版の確認状況(2026-11-08、Task 3.2 の文書作成時点)は次のとおりです。
+配布版の確認状況(2026-11-08 時点)は次のとおりです。
 0a の成果物と、0b で配布する版の導入結果は分けて扱います。
+確かめた配布 commit は `b3aeeda`(ビルド元 `e74af2d`)です。
 
 | 確認する環境と方法 | 0b の結果 |
 |---|---|
-| Linux x86_64 の実際のプラグイン導入先 | 未確認。Task 3.1 の結果を記録する |
-| Linux arm64・Mac Intel・Mac Apple Silicon の自動検査で、配布 commit の浅い clone(最新の状態だけを取る複製)から起動 | 未確認。Task 3.1 の結果を記録する |
-| Mac Apple Silicon の実機でプラグインを導入 | 未確認。利用者の実機での結果が必要 |
+| Linux x86_64 の実際のプラグイン導入先 | 確認済み。Ubuntu 22.04・カーネル 6.8・Claude Code 2.1.319 で、使い捨ての設定フォルダに導入した。導入先の入口で 4 つのコマンドが終了 0、`SHA256SUMS` が一致、未設定は終了 2。ネットワークを切っても起動した |
+| Linux arm64・Mac Intel・Mac Apple Silicon の自動検査で、配布 commit の浅い clone(最新の状態だけを取る複製)から起動 | 確認済み。GitHub Actions の `Distribution launch`(run 42418929988)で、3 種類とも成功した |
+| Mac Apple Silicon の実機でプラグインを導入 | 未確認。利用者が後日、実機で行う。結果が出るまで、#443 と #400 の段階 0 は完了にしない |
 | Mac Intel の実機でプラグインを導入 | 未確認。実機が無いため、自動検査での起動と分けて記録する |
 | 最低 OS の Linux 5.6・macOS 11 の実機 | 未確認。新しい OS の自動検査の成功だけでは確認済みとしない |
 
