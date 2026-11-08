@@ -2,10 +2,10 @@
 
 mod commands;
 
-use dev_workflow_core::{CommandError, CommandResult, build_info, emit};
+use dev_workflow_core::{CommandError, CommandOutput, CommandResult, build_info, emit};
 use std::ffi::OsString;
 
-const HELP: &str = "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n";
+const HELP: &str = "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n  dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]\n";
 
 fn main() -> std::process::ExitCode {
     emit(run(&std::env::args_os().skip(1).collect::<Vec<_>>())).into()
@@ -22,14 +22,16 @@ fn run(args: &[OsString]) -> CommandResult {
             ));
         }
         return if first == "--version" {
-            Ok(format!(
-                "dev-workflow {} (source_input_sha256: {})\n",
-                build_info::NATIVE_VERSION,
-                build_info::SOURCE_INPUT_SHA256
-            )
-            .into_bytes())
+            Ok(CommandOutput::stdout(
+                format!(
+                    "dev-workflow {} (source_input_sha256: {})\n",
+                    build_info::NATIVE_VERSION,
+                    build_info::SOURCE_INPUT_SHA256
+                )
+                .into_bytes(),
+            ))
         } else {
-            Ok(HELP.as_bytes().to_vec())
+            Ok(CommandOutput::stdout(HELP.as_bytes()))
         };
     }
     let Some(command) = commands::COMMANDS.iter().find(|entry| first == entry.name) else {
@@ -57,7 +59,7 @@ mod tests {
 
     #[test]
     fn version_and_help_have_the_promised_shape() {
-        let version = String::from_utf8(run(&["--version".into()]).unwrap()).unwrap();
+        let version = String::from_utf8(run(&["--version".into()]).unwrap().stdout).unwrap();
         assert_eq!(version.lines().count(), 1);
         assert!(version.ends_with('\n'));
         assert!(version.contains(build_info::NATIVE_VERSION));
@@ -69,7 +71,7 @@ mod tests {
                 .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
         );
         assert!(build_info::RUSTC.starts_with("rustc 1.99.1 "));
-        assert_eq!(run(&["--help".into()]).unwrap(), HELP.as_bytes());
+        assert_eq!(run(&["--help".into()]).unwrap().stdout, HELP.as_bytes());
     }
 
     #[cfg(unix)]

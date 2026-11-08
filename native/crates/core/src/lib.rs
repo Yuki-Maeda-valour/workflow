@@ -3,4 +3,4 @@
 pub mod build_info;
 pub mod output;
 
-pub use output::{CommandError, CommandResult, ExitCode, emit, emit_to};
+pub use output::{CommandError, CommandOutput, CommandResult, ExitCode, emit, emit_to};

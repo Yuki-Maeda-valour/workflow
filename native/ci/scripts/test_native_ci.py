@@ -1,10 +1,12 @@
 """CI の単体・結合テスト。配布物の検査と実行補助はリポジトリの実装を使う。"""
 
 import copy
+import errno
 import hashlib
 import json
 import os
 from pathlib import Path
+import stat
 import struct
 import subprocess
 import sys
@@ -19,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import binary_tools
 import build
 import check_probe
+import check_resolve_task_dir
 import check_workflow
 import make_dist
 import source_input_hash as source_hash
@@ -650,6 +653,182 @@ class BuildTests(TempCase):
         self.assertEqual(len(signed), 2)
         output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
+
+
+class ResolveTaskDirTests(TempCase):
+    def test_python_version_and_binary_selection_are_mandatory(self):
+        support = SimpleNamespace(require_native_binary=mock.Mock(side_effect=ValueError("missing binary")))
+        for version in ((3, 9), (3, 11), (3, 12)):
+            with mock.patch.object(check_resolve_task_dir.sys, "version_info", version), self.assertRaisesRegex(ValueError, "Python 3.10"):
+                check_resolve_task_dir.check_resolve_task_dir(support)
+        support.require_native_binary.assert_not_called()
+        with mock.patch.object(check_resolve_task_dir.sys, "version_info", (3, 10)), self.assertRaisesRegex(ValueError, "missing binary"):
+            check_resolve_task_dir.check_resolve_task_dir(support)
+
+    def test_comparison_requires_both_trees_to_equal_the_initial_tree(self):
+        comparison = SimpleNamespace(matches=True, legacy=SimpleNamespace(returncode=0),
+                                     before={"before": 1}, legacy_tree={}, native_tree={})
+        support = SimpleNamespace(compare_runs=mock.Mock(return_value=comparison))
+        with self.assertRaisesRegex(ValueError, "初期のファイル"):
+            check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+        comparison.legacy_tree = comparison.native_tree = comparison.before
+        check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+        comparison.matches = False
+        comparison.differences = ("stdout",)
+        comparison.native = "native-result"
+        with self.assertRaisesRegex(ValueError, "不一致"):
+            check_resolve_task_dir.check_case(support, self.root / "binary", self.root / "initial", self.root / "work", [], 0)
+
+    def test_root_does_not_pass_permission_cases(self):
+        for check in (check_resolve_task_dir.permission_cases, check_resolve_task_dir.permission_child_metadata_case):
+            with mock.patch.object(check_resolve_task_dir.os, "geteuid", return_value=0), self.assertRaisesRegex(ValueError, "通常利用者"):
+                check(None, self.root / "binary", self.root)
+
+    @unittest.skipIf(os.geteuid() == 0, "0400 の権限拒否は通常利用者が必須。実バイナリの比較では root を失敗にする")
+    def test_child_metadata_permission_checks_each_output_exactly_and_restores_the_tree(self):
+        actual_support = check_probe.load_support()
+        for mutation in (None, "type", "errno", "path", "old-stdout", "json-key", "json-space", "new-stderr", "timeout", "code", "mode", "content"):
+            parent = self.root / (mutation or "valid")
+            parent.mkdir()
+
+            def command(argv, **kwargs):
+                folder = Path(argv[-1])
+                self.assertEqual(stat.S_IMODE(folder.stat().st_mode), 0o400)
+                self.assertNotEqual(kwargs["cwd"], folder)
+                target = folder.resolve(strict=True) / "child"
+                error = str(PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(target)))
+                old = argv[0] == sys.executable
+                result = SimpleNamespace(returncode=1, stdout=b"", stderr=b"", timed_out=False)
+                if old:
+                    result.stderr = ("Traceback (most recent call last):\n  test frame\nPermissionError: " + error + "\n").encode()
+                    if mutation == "type":
+                        result.stderr = result.stderr.replace(b"PermissionError:", b"FileNotFoundError:")
+                    elif mutation == "errno":
+                        result.stderr = result.stderr.replace(f"[Errno {errno.EACCES}]".encode(), b"[Errno 2]")
+                    elif mutation == "path":
+                        result.stderr = result.stderr.replace(os.fsencode(target), os.fsencode(target) + b"-wrong")
+                    elif mutation == "old-stdout":
+                        result.stdout = b"unexpected output"
+                    elif mutation == "mode":
+                        folder.chmod(0o500)
+                    elif mutation == "content":
+                        folder.chmod(0o700)
+                        (folder / "child/進行中_作業.md").write_bytes(b"changed")
+                        folder.chmod(0o400)
+                else:
+                    result.stdout = (json.dumps({"error": error}, ensure_ascii=False, sort_keys=True) + "\n").encode()
+                    if mutation == "json-key":
+                        result.stdout = result.stdout.replace(b'"error"', b'"other"')
+                    elif mutation == "json-space":
+                        result.stdout = result.stdout.replace(b'": ', b'":')
+                    elif mutation == "new-stderr":
+                        result.stderr = b"unexpected diagnostic"
+                    elif mutation == "timeout":
+                        result.timed_out = True
+                    elif mutation == "code":
+                        result.returncode = 2
+                return result
+
+            support = SimpleNamespace(snapshot_tree=actual_support.snapshot_tree,
+                                      run_command=mock.Mock(side_effect=command))
+            with self.subTest(mutation=mutation):
+                if mutation is None:
+                    check_resolve_task_dir.permission_child_metadata_case(support, self.root / "binary", parent)
+                    self.assertEqual(support.run_command.call_count, 2)
+                else:
+                    with self.assertRaises(ValueError):
+                        check_resolve_task_dir.permission_child_metadata_case(support, self.root / "binary", parent)
+                for side in ("legacy", "native"):
+                    folder = parent / ("permission-child-metadata-" + side)
+                    initial = parent / "permission-initial-child-metadata"
+                    self.assertEqual(stat.S_IMODE(folder.stat().st_mode), stat.S_IMODE(initial.stat().st_mode))
+
+    def test_main_returns_failure_for_version_missing_binary_and_comparison_errors(self):
+        for error in (ValueError("Python 3.10"), ValueError("missing binary"), ValueError("comparison differs")):
+            with mock.patch.object(check_resolve_task_dir, "check_resolve_task_dir", side_effect=error):
+                self.assertEqual(check_resolve_task_dir.main(), 1)
+
+    def test_actual_cli_rejects_missing_empty_absent_and_non_executable_binary(self):
+        path = self.write("not-executable", b"not an executable", 0o644)
+        for value in (None, "", str(self.root / "absent"), str(path)):
+            environment = dict(os.environ)
+            if value is None:
+                environment.pop("DEV_WORKFLOW_TEST_NATIVE_BINARY", None)
+            else:
+                environment["DEV_WORKFLOW_TEST_NATIVE_BINARY"] = value
+            result = subprocess.run([sys.executable, "-B", check_resolve_task_dir.__file__], env=environment,
+                                    capture_output=True, timeout=10)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, b"")
+            self.assertTrue(result.stderr.startswith(b"ERROR:"))
+
+
+class ResolveTaskDirConnectionTests(TempCase):
+    def test_probe_runs_both_required_checks_with_the_same_binary_and_python(self):
+        binary = self.root / "binary"
+        with mock.patch.object(build, "run") as run:
+            build.probe(binary)
+        self.assertEqual([call.args[0] for call in run.call_args_list], [
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_probe.py"],
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_resolve_task_dir.py"]])
+        self.assertTrue(all(call.kwargs["env"]["DEV_WORKFLOW_TEST_NATIVE_BINARY"] == str(binary)
+                            for call in run.call_args_list))
+        with mock.patch.object(build, "run", side_effect=[None, subprocess.CalledProcessError(1, "comparison")]):
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.probe(binary)
+
+    def test_build_and_reproduce_check_each_of_the_two_binaries_for_all_four_platforms(self):
+        for command in ("build", "reproduce"):
+            for target in build.TARGETS:
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", target]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "quality"), \
+                        mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "pack_tar"), \
+                        mock.patch.object(build, "probe") as probe:
+                    self.assertEqual(build.main(), 0)
+                    self.assertEqual(probe.call_args_list, [mock.call(self.root / "1/dev-workflow"), mock.call(self.root / "2/dev-workflow")])
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", target]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "quality"), \
+                        mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "probe", side_effect=subprocess.CalledProcessError(1, "comparison")):
+                    self.assertEqual(build.main(), 1)
+
+    def test_signed_universal_binary_runs_both_checks_and_propagates_failure(self):
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", return_value="arm64 x86_64"), \
+                mock.patch.object(build, "probe") as probe:
+            build.verify_universal(self.root, self.root)
+            probe.assert_called_once_with(self.root / "dev-workflow")
+            probe.side_effect = subprocess.CalledProcessError(1, "comparison")
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.verify_universal(self.root, self.root)
+
+    def test_workflow_requires_fixed_python_after_the_initial_policy_check(self):
+        document = json.loads((source_hash.ROOT / ".github/workflows/native.yml").read_text())
+        for job in ("build", "verify-universal"):
+            steps = document["jobs"][job]["steps"]
+            python_step = steps[2]
+            self.assertEqual(python_step["uses"], "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0")
+            self.assertEqual(python_step["with"], {"python-version": "3.10.11"})
+            for mutation in ("remove", "late", "early", "version", "cache", "tag"):
+                changed = copy.deepcopy(document)
+                altered = changed["jobs"][job]["steps"]
+                if mutation == "remove":
+                    altered.pop(2)
+                elif mutation == "late":
+                    altered.append(altered.pop(2))
+                elif mutation == "early":
+                    altered.insert(1, altered.pop(2))
+                elif mutation == "version":
+                    altered[2]["with"]["python-version"] = "3.11"
+                elif mutation == "cache":
+                    altered[2]["with"]["cache"] = "pip"
+                elif mutation == "tag":
+                    altered[2]["uses"] = "actions/setup-python@v7"
+                with self.subTest(job=job, mutation=mutation):
+                    self.assertTrue(check_workflow.check_document(changed))
 
 
 if __name__ == "__main__":

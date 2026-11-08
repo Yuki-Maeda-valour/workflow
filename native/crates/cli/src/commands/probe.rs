@@ -1,4 +1,4 @@
-use dev_workflow_core::{CommandError, CommandResult, build_info};
+use dev_workflow_core::{CommandError, CommandOutput, CommandResult, build_info};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::ffi::OsString;
@@ -51,7 +51,7 @@ fn json() -> CommandResult {
     let mut bytes = serde_json::to_vec(&info)
         .map_err(|error| CommandError::runtime(format!("JSON を作れません: {error}")))?;
     bytes.push(b'\n');
-    Ok(bytes)
+    Ok(CommandOutput::stdout(bytes))
 }
 
 fn read_error(error: io::Error) -> CommandError {
@@ -63,7 +63,11 @@ fn self_sha256(mut file: impl Read) -> CommandResult {
     let mut buffer = [0; 16 * 1024];
     loop {
         match file.read(&mut buffer) {
-            Ok(0) => return Ok(format!("{:x}\n", hash.finalize()).into_bytes()),
+            Ok(0) => {
+                return Ok(CommandOutput::stdout(
+                    format!("{:x}\n", hash.finalize()).into_bytes(),
+                ));
+            }
             Ok(count) => hash.update(&buffer[..count]),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(read_error(error)),
@@ -115,7 +119,7 @@ mod tests {
 
         let reader = InterruptedOnce(true).chain(io::Cursor::new(b"abc"));
         assert_eq!(
-            self_sha256(reader).unwrap(),
+            self_sha256(reader).unwrap().stdout,
             b"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\n"
         );
     }

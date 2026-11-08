@@ -177,6 +177,7 @@ def reproduce(name, work):
 def probe(binary):
     env = {**os.environ, "DEV_WORKFLOW_TEST_NATIVE_BINARY": str(binary)}
     run([sys.executable, "-B", ROOT / "native/ci/check_probe.py"], env=env)
+    run([sys.executable, "-B", ROOT / "native/ci/check_resolve_task_dir.py"], env=env)
 
 
 def read_record(folder):
@@ -287,9 +288,8 @@ def main():
             if args.command == "build":
                 quality(args.platform, work)
             stage = reproduce(args.platform, work)
-            if args.command == "build":
-                for number in (1, 2):
-                    probe(stage / f"{number}/dev-workflow")
+            for number in (1, 2):
+                probe(stage / f"{number}/dev-workflow")
             pack_tar(stage, work / (args.platform + ".tar"), ["1/dev-workflow", "2/dev-workflow", "record.json"])
             print(f"2 回のビルド: {stage}")
         elif args.command == "combine":
