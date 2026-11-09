@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+workflow-yaml-parser.workspace = true
 dev-workflow-platform.workspace = true
 
 [build-dependencies]
@@ -25,4 +26,8 @@ harness = false
 
 [[test]]
 name = "child_process"
+harness = false
+
+[[test]]
+name = "loop_state_profile"
 harness = false

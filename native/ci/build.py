@@ -78,6 +78,7 @@ def build_environment(target_dir, name):
 
 def prepare(name):
     target, _ = target_config(name)
+    run([sys.executable, "-m", "pip", "install", "-r", ROOT / "requirements-dev.txt"])
     run(["rustup", "toolchain", "install", TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"])
     run(["rustup", "target", "add", "--toolchain", TOOLCHAIN, target])
 

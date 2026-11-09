@@ -552,6 +552,23 @@ class ProbeSupportIntegrationTests(TempCase):
 
 
 class BuildTests(TempCase):
+    def test_prepare_installs_comparison_dependencies_with_the_running_python(self):
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+                mock.patch.object(build, "run") as run:
+            build.prepare("linux-x86_64")
+        self.assertEqual(run.call_args_list[0].args[0],
+                         [sys.executable, "-m", "pip", "install", "-r", source_hash.ROOT / "requirements-dev.txt"])
+        self.assertIn(mock.call(["rustup", "target", "add", "--toolchain", build.TOOLCHAIN, "test-target"]),
+                      run.call_args_list)
+
+    def test_prepare_dependency_failure_stops_before_build_tool_setup(self):
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+                mock.patch.object(build, "run", side_effect=subprocess.CalledProcessError(1, "pip")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.prepare("linux-x86_64")
+        self.assertEqual(run.call_count, 1)
+
+
     def test_wrapper_preserves_cargo_binary_environment_and_remaps_paths(self):
         binary = str(self.root / "dev-workflow")
         result = subprocess.run(

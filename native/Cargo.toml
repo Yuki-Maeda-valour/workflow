@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/cli", "crates/core", "crates/platform"]
+members = ["crates/cli", "crates/core", "crates/platform", "crates/yaml-parser"]
 resolver = "3"
 
 [workspace.package]
@@ -9,6 +9,7 @@ rust-version = "1.99.1"
 publish = false
 
 [workspace.dependencies]
+workflow-yaml-parser = { path = "crates/yaml-parser" }
 dev-workflow-core = { path = "crates/core" }
 dev-workflow-platform = { path = "crates/platform" }
 serde = { version = "1.0.228", features = ["derive"] }
