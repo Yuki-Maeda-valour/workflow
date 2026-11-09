@@ -13,7 +13,12 @@ sha2.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true
+serde_json.workspace = true
 
 [[test]]
 name = "command_io"
+harness = false
+
+[[test]]
+name = "held_file"
 harness = false
