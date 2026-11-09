@@ -1,14 +1,14 @@
 # Rust の土台と共有の約束
 
-このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査を実装しています。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0bは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0cは未着手です。
+このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0cは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0cは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
 `probe --self-sha256` は自己の実行ファイル全体の SHA256 を返します。
 どちらも末尾改行付きの標準出力と終了 0 を返します。
 不正な引数は終了 2、自己のファイルを読めない場合などの実行時エラーは終了 1 です。
-実行時に外部コマンド・ネットワーク・設定ファイルを使わず、状態ファイルを作りません。
+既存のCLIは実行時に外部コマンド・ネットワーク・設定ファイルを使わず、状態ファイルを作りません。
 
 ## タスク保存先の解決(段階 1a)
 
@@ -24,8 +24,8 @@
 ## 部品とコマンドの登録
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
-- `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0bで、開いたフォルダとファイルの保持・属性検査を追加しました。
+- `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・ビルド情報を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作を持ちます。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
 
@@ -74,7 +74,7 @@ main -> execute -> 登録表の関数(args, io)
 - 標準出力の失敗では、標準エラーへ `dev-workflow: 標準出力に書けません: <理由>\n` を一度だけ試みます。標準エラーの失敗では追加診断を出しません。既に出たバイト列は取り消せません。
 - 数値の終了値をシグナル終了と同一視しません。シグナル変換、時間や処理量の上限、ファイル保護、子プロセス監督はC0aに含みません。失敗を無視したコマンドの強制中断もしません。
 
-C0bのファイル保護と上限は下の節に記します。C0cの子プロセス監督は未着手です。
+C0bのファイル保護と上限、C0cの単一子実行は下の節に記します。子孫全体の監督は後続のR4Qの責務です。
 分割と依存順は [設計の記録](../docs/design.md#共通の終了値と入出力c0a)、実プロセスでの確認は [検査手順](../docs/testing.md#共通の終了値と入出力の検査c0a)にあります。
 #448の権限・非UTF-8出力の差は、保存先の専用比較だけに適用します。
 
@@ -106,7 +106,7 @@ C0bのファイル保護と上限は下の節に記します。C0cの子プロ�
 - 加算と1ファイル上限の検査は、自動では時刻を検査しません。呼出元が必要な順で組み合わせます。
 - 数値が収まらない加算は `Overflow` です。値を折り返さず、それ以後は項目数とバイト数の両方の加算を拒否します。
 - 読取りへは同じ `&mut Budget` を渡します。複数ファイルの途中で累積値と期限を作り直しません。
-- 期限は、処理が明示的に時刻を確認する方式です。停止中のOS呼出しを期限で中断する保証はありません。処理全体の強制停止はC0c以降の責務です。
+- 期限は、処理が明示的に時刻を確認する方式です。停止中のOS呼出しを期限で中断する保証はありません。C0cもこの限界を持ちます。
 
 ### 同じフォルダとファイルを保持する型
 
@@ -160,6 +160,65 @@ EOF -> 同じ実体を Full で再検査 -> 本文だけを返す
 #454の既定値・不在の扱い・YAML解析前の閉鎖など、後続の呼出元へ残す責務は [設計の記録](../docs/design.md#処理量と時間の上限保持実体の検査c0b)にあります。
 旧版との53組の比較、新APIの1件、比較器の自己テスト19件と必須の実行経路は [検査手順](../docs/testing.md#処理量と保持実体の検査c0b)にあります。
 
+## 単一子の実行と回収(C0c)
+
+[Issue #458](https://github.com/Yuki-Maeda-valour/workflow/issues/458)の部品は、直接起動した子1個だけを実行・停止・回収します。
+子孫全体の停止や不在を保証するAPIではありません。配布物・既存の呼び出し元・旧Python・版・CHANGELOGは変更していません。
+
+`dev_workflow_core::process` の入口は次の形です。
+
+```rust
+pub fn run_child<E>(
+    command: &mut Command,
+    input: ChildInput<'_>,
+    budget: &mut Budget,
+    deadlines: ChildDeadlines,
+    cancel: &AtomicBool,
+    consumer: impl FnMut(OutputStream, &[u8], &mut Budget) -> Result<(), E>,
+) -> Result<ChildOutcome, RunFailure<E>>
+```
+
+| 型・引数 | 約束 |
+|---|---|
+| `Command` | `std::process::Command`。呼出元が引数・環境・作業フォルダを決める。3本の標準入出力だけをパイプへ上書きする |
+| `ChildInput` | 借用する固定 `bytes: &[u8]` と `broken_pipe: BrokenPipePolicy`。空入力と全送信後はstdinを閉じる |
+| `BrokenPipePolicy` | 未送信bytesがあるときのEPIPEや子終了を、`Reject`は `InputClosed`、`Close`は入力閉鎖後の続行とする |
+| `ChildDeadlines` | `execution`・`cleanup` は呼出元が作る絶対時刻 `Instant`。`cleanup < execution` を起動前に拒否する |
+| `cancel` | 呼出元の `AtomicBool` がtrueなら取消。OSの信号を捕捉する設定ではない |
+| `OutputStream`・`ChildStream` | 前者は `Stdout`/`Stderr`、後者は入出力失敗の `Stdin`/`Stdout`/`Stderr` を区別する |
+| `ChildStatus` | `Exited(ExitCode)` と `Signaled(i32)`。0〜255の数値と実際の信号番号を変換せず分ける |
+| `ChildOutcome` | 回収した `status`、`input_written: usize`、`input_closed_early: bool`。未送信分を送信済みとしない |
+| `RunCause<E>` | `InvalidDeadlines`・`Cancelled`・`Deadline`・`Spawn`・`Setup`・`Poll`・`InputClosed`・`Io { stream, error }`・`Wait`・`Consumer(E)` |
+| `RunFailure<E>` | `cause`、任意の `status`、入力の送信量と早期閉鎖、`kill_error`・`wait_error`、`cleanup_expired`、`pending_child: Option<Child>` |
+
+### 入出力・予算・期限
+
+- consumer(受け取ったバイト列を処理する呼出元の関数)へ非空の出力だけを渡します。C0aの `CommandIo` へ直接書き、途中の `flush` も使えます。失敗は `Consumer(E)` として返します。
+- 同じC0bの `&mut Budget` を渡します。共通部は項目数・総量・1ファイルの量を加算しません。stdout/stderr別の上限、計数順、出力の保持と破棄はconsumerが決めます。受理した途中出力と消費量は失敗後も戻しません。
+- 起動前の順序は不正な期限→取消→実行残時間です。実行期限は `Budget::deadline()` と `execution` の早い方です。下位で予算・期限を作り直したり延長したりしません。
+- 3本を待たずに読み書きできる設定にします。`poll`の待ちは残時間と20msの短い方です。1周回にstdin・stdout・stderrを各1操作、最大65536bytesずつ進めます。
+- 各出力内のバイト順序を保ちます。stdoutとstderrをまたぐ順序は定めません。子の回収と全パイプの終了を確認してから成功を返します。
+- 数値0以外や信号終了でも、入出力と回収が完了すれば `Ok` になり得ます。用途別の成否と最終の終了コードは呼出元が決めます。
+
+### 失敗時の停止と未回収の所有権
+
+```text
+実行失敗 -> 親側3パイプを閉じる -> 未回収なら終了確認
+  生存を確認 -> 直接子へKILLを1回 -> 固定のcleanup期限内で回収
+  非再試行のwait失敗 / 回収期限切れ -> 最初の原因と未回収Childを返す
+```
+
+- 回収済みの子へ信号を送りません。最初の原因と、後の `kill_error`/`wait_error` を分けて保持します。KILL失敗後に終了を確認できても、成功へ変えません。
+- cleanup期限が既に切れていても、初回の非待機確認、必要なKILL、直後の非待機確認だけは行います。待機後・再試行前は絶対期限を確認します。回収不能なら `cleanup_expired=true` と未回収の所有権を返します。
+- `try_wait` は `EINTR`/`EAGAIN` だけを期限内で再試行します。それ以外の失敗後は、残るパイプの閉鎖以外のOS操作を追加しません。通常実行中なら `cause=Wait` と `wait_error` に同じエラー情報を残します。cleanup中なら元の原因を保ちます。
+- `pending_child` は親側のパイプを閉じた `std::process::Child` です。呼出元が保持し、明示的に追加回収してください。型の破棄だけで回収済みにはなりません。非再試行のwait失敗で返す `cleanup_expired` は、その時点で期限へ達したかを示します。
+- 孫が出力パイプを保持すると、元の実行期限で失敗します。直接子の終了状態は保持します。パイプを閉じて生きる孫は、直接子の成功後も残り得ます。
+- 期限と取消は処理の合間に確認します。consumerの停止・panic、停止中のOS呼出し、実行順の遅延を強制中断しません。親死亡後の停止・回収も保証しません。
+- 親のSIGTERM/SIGINT/SIGHUPの捕捉・再送、他の回収処理やSIGCHLDの自動回収との競合は対象外です。プロセスグループ(信号をまとめて送れるプロセスの集まり)と子孫全体の監督はR4Qへ残します。
+- YAML解析・機密指定・状態保存・走査へは接続していません。R4Sには取得済みbytesの解析、#454には用途別の上限・検査順序を残します。
+
+設計判断は [design.md](../docs/design.md#単一子の実行と回収c0c)、専用比較と未確認条件は [testing.md](../docs/testing.md#単一子の実行と回収の検査c0c)にあります。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -205,7 +264,7 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json` と、C0bで追加した `rustix` です。
-`rustix` は `=1.1.6` に固定し、`platform` だけで `fs` と既定の `std` を使います。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
+`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event` と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
 次のコマンドは `native/` で実行します。
@@ -219,8 +278,8 @@ cargo test --locked
 cargo build --release --locked --target x86_64-unknown-linux-musl
 ```
 
-`cargo test --locked` は、C0bの実ファイル比較も実行します。`python3` がPython 3.10系であり、root以外の利用者であることが必須です。
-専用比較を省略して合格にはしません。Mac実機と最低OSでのC0bの動作は未確認です。
+`cargo test --locked` は、C0bの実ファイル比較とC0cの実子比較も実行します。`python3` がPython 3.10系であり、root以外の利用者であることが必須です。
+専用比較を省略して合格にはしません。Mac実機と最低OSでのC0b/C0cの動作は未確認です。
 
 release の設定は `codegen-units=1`・`opt-level=3`・`lto="fat"`・`strip="symbols"`・`debug=0`・`incremental=false` です。
 panic の設定は既定のままです。Linux のリンカーは Rust の musl 向けの既定を使います。
