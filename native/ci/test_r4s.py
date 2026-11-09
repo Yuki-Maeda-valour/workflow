@@ -231,7 +231,7 @@ class InputAndCoverageTests(unittest.TestCase):
         cases += [('yaml/malformed', 'compose', 'RuntimeError'), ('yaml/duplicate_top', 'compose', 'same-value')]
         with tempfile.TemporaryDirectory(prefix='r4s-hidden-fault-') as temporary:
             for index, (identifier, method, kind) in enumerate(cases):
-                root = Path(temporary) / str(index)
+                root = Path(temporary).resolve() / str(index)
                 check.prepare_inputs(root, [by_id[identifier]])
                 result = run_command([sys.executable, '-B', '-c', script, str(Path(check.__file__).parent),
                                       str(root), identifier, method, kind], cwd=root, timeout=10)
@@ -316,7 +316,7 @@ class ImplementationMutationTests(unittest.TestCase):
                                        r'suffix = r"(?:/.*)?\Z" if raw.endswith("/") else r"\Z"'),
         }
         with tempfile.TemporaryDirectory(prefix='r4s-mutants-') as temporary:
-            root = Path(temporary)
+            root = Path(temporary).resolve()
             profile = root / '.claude/project-profile.yml'
             profile.parent.mkdir()
             def profile_run(row, function):
