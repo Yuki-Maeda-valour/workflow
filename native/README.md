@@ -1,7 +1,7 @@
 # Rust の土台と共有の約束
 
-このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力を実装しています。
-`resolve-task-dir` は段階 1b で配布済みです。C0aは開発用ソースだけにあり、配布物と呼び出し元は切り替えていません。
+このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査を実装しています。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0bは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0cは未着手です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -24,8 +24,8 @@
 ## 部品とコマンドの登録
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
-- `crates/core`: 終了コード・入出力処理・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0aでも処理を追加していません。
+- `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・ビルド情報を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bで、開いたフォルダとファイルの保持・属性検査を追加しました。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
 
@@ -74,7 +74,7 @@ main -> execute -> 登録表の関数(args, io)
 - 標準出力の失敗では、標準エラーへ `dev-workflow: 標準出力に書けません: <理由>\n` を一度だけ試みます。標準エラーの失敗では追加診断を出しません。既に出たバイト列は取り消せません。
 - 数値の終了値をシグナル終了と同一視しません。シグナル変換、時間や処理量の上限、ファイル保護、子プロセス監督はC0aに含みません。失敗を無視したコマンドの強制中断もしません。
 
-C0bのファイル保護と上限、続くC0cの子プロセス監督は未着手です。
+C0bのファイル保護と上限は下の節に記します。C0cの子プロセス監督は未着手です。
 分割と依存順は [設計の記録](../docs/design.md#共通の終了値と入出力c0a)、実プロセスでの確認は [検査手順](../docs/testing.md#共通の終了値と入出力の検査c0a)にあります。
 #448の権限・非UTF-8出力の差は、保存先の専用比較だけに適用します。
 
@@ -82,6 +82,83 @@ C0bのファイル保護と上限、続くC0cの子プロセス監督は未着�
 `RUSTC` は `rustc --version` の末尾改行を除いた値です。
 `--version` は `dev-workflow 0.1.0 (source_input_sha256: <小文字64桁>)\n` を返します。
 `--help` は `--version`・`--help`・`probe --json`・`probe --self-sha256`・`resolve-task-dir` の 5 つの使い方を表示します。
+
+## 処理量と時間の上限・保持実体の検査(C0b)
+
+[Issue #456](https://github.com/Yuki-Maeda-valour/workflow/issues/456)で、共通部品を実装しました。
+既存のCLIへは接続していません。YAML解析、機密指定の解釈、状態の走査、子プロセス監督は含みません。
+
+### 呼出元が持つ上限と期限
+
+`dev_workflow_core::budget` は次の型を公開します。
+
+| 名前 | 約束 |
+|---|---|
+| `BudgetLimits` | `items`・`total_bytes`・`file_bytes` を `u64` で渡す。既定値は持たない |
+| `Budget::new(limits, deadline)` | 呼出元の絶対期限 `Instant` と上限を保存し、累積値を0から始める |
+| `items()`・`bytes()`・`deadline()`・`limits()` | 現在の値を返す。累積値のリセットや期限の延長は公開しない |
+| `check_time()` | 現在時刻が期限を超えると拒否する。期限との等値は受け付ける |
+| `remaining()` | 正の残時間を返す。期限との等値と超過は拒否する |
+| `add_items(n)`・`add_bytes(n)` | 指定値を加えてから、それぞれの上限を検査する。超過した消費量も戻さない |
+| `check_file_bytes(n)` | 1ファイルの上限だけを検査する。累積値は増やさない |
+| `BudgetError` | `Deadline`・`Items`・`FileBytes`・`TotalBytes`・`Overflow` を区別する |
+
+- 加算と1ファイル上限の検査は、自動では時刻を検査しません。呼出元が必要な順で組み合わせます。
+- 数値が収まらない加算は `Overflow` です。値を折り返さず、それ以後は項目数とバイト数の両方の加算を拒否します。
+- 読取りへは同じ `&mut Budget` を渡します。複数ファイルの途中で累積値と期限を作り直しません。
+- 期限は、処理が明示的に時刻を確認する方式です。停止中のOS呼出しを期限で中断する保証はありません。処理全体の強制停止はC0c以降の責務です。
+
+### 同じフォルダとファイルを保持する型
+
+`dev_workflow_platform::fs` は、開いた実体を指すOSの識別子(fd)を型の内側に保持します。
+所有する型の破棄で閉じます。識別子の取出し・複製や読取り位置の変更は公開しません。
+
+| 名前 | 約束 |
+|---|---|
+| `FileSnapshot` | `dev`・`ino`・`mode`・`size` と、秒・ナノ秒に分けた `mtime`・`ctime` を保持する |
+| `SnapshotMatch::Full` | 実体を識別する `dev`・`ino`、種類と権限の `mode`、容量、更新時刻、属性変更時刻をすべて比べる |
+| `SnapshotMatch::DirectoryPath` | `dev`・`ino`・種類・権限を比べる。子の増減で変わるフォルダの容量と時刻は比べない |
+| `HeldDir::open_absolute(path)` | 絶対パスの各段をリンクを辿らず開き、直前の属性と `DirectoryPath` で比べる |
+| `HeldDir::metadata(name)` | 保持した親を基準に、リンクを辿らず子の属性を取得する |
+| `HeldDir::open_dir(name, expected, comparison)` | 同じ親から子フォルダを開き、指定した比較項目で直前値を検査する |
+| `HeldDir::verify_entry(name, expected, comparison)` | 保持した親の下の名前を再検査する。必要な呼出元が明示的に使う |
+| `HeldFile::open_at(parent, name, expected)` | 同じ親から通常ファイルを開く。直前値と開いた実体を `Full` で比べる |
+| `HeldFile::snapshot()`・`verify_unchanged()` | 同じ保持実体の属性を取得する・開いた時点から変わらないことを検査する |
+| `HeldFile::begin_read()` | 本文を読む前に使用開始を記録し、排他的な `ReadSession` を1回だけ作る |
+| `ReadSession` | `read_chunk(&mut [u8])`・`opened_snapshot()`・`verify_unchanged()` を公開する。本文はこの型だけが読める |
+| `FsError` | `Io`・`InvalidInput`・`NotRegular`・`NotDirectory`・`Changed`・`AlreadyRead` を区別する |
+
+- パスと名前は非UTF-8のバイトを保ちます。子の名前は空・`/`・NULを拒否します。
+- `open_absolute` は `.`・`..` を消さず、実体を順に辿ります。パスの正規化や指定ルートへの閉じ込めは行いません。
+- 開くときは `NOFOLLOW`・`NONBLOCK`・`CLOEXEC` を指定します。FIFOで書き手を待ちません。
+- `FsError::Io` はOSのエラー種別と数値を保ちます。`is_not_found()` が真になるのは `ENOENT` だけです。`ENOTDIR`・`EACCES` などを不在へまとめません。
+- 使用開始後は、未読のままセッションを破棄しても、空読取り・EOF・失敗の後でも `AlreadyRead` です。
+- 親のパスが差し替わっても、保持した旧親から旧本文を読めます。最後に親のパスを必ず再検査する条件は追加しません。
+
+### 検査付き読取り
+
+`dev_workflow_core::fs::read_verified(&mut HeldFile, &mut Budget)` は `Result<Vec<u8>, ReadError>` を返します。
+`ReadError` は `Fs(FsError)` と `Budget(BudgetError)` を区別します。
+
+```text
+保持した親 -> 子の属性 -> リンクを辿らず開く -> Full で比較
+                                               |
+使用開始を記録 -> 宣言サイズの上限 -> 65536 バイトずつ読む
+                                               |
+非空の読取り -> 期限 -> 総バイト加算 -> 1ファイル上限
+                                               |
+EOF -> 同じ実体を Full で再検査 -> 本文だけを返す
+```
+
+- 最初に使用開始を記録します。宣言サイズや期限などで最初の呼出しが拒否されても、再呼出しは `AlreadyRead` です。OSの追加呼出しも予算の追加消費もありません。
+- 毎回65536バイトを要求します。残り予算に合わせて短くしません。短読後もEOFまで続けます。
+- 非空の読取りごとに、期限確認→実際の総バイト加算→今回のファイルの累積バイト上限の順で検査します。EOFでは加算しません。
+- 項目数の加算、宣言サイズによる総量の予約、実読取り量と宣言サイズの一致判定は行いません。
+- `Interrupted` は期限を確認して再試行します。それ以外の読取り失敗は返します。
+- EOFの後は同じ実体の属性を再検査します。途中で失敗した場合は本文を返さず、消費量も戻しません。
+
+#454の既定値・不在の扱い・YAML解析前の閉鎖など、後続の呼出元へ残す責務は [設計の記録](../docs/design.md#処理量と時間の上限保持実体の検査c0b)にあります。
+旧版との53組の比較、新APIの1件、比較器の自己テスト19件と必須の実行経路は [検査手順](../docs/testing.md#処理量と保持実体の検査c0b)にあります。
 
 ## ソース入力の SHA256
 
@@ -127,7 +204,8 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 ## ビルドと検証
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
-`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json` だけです。
+`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json` と、C0bで追加した `rustix` です。
+`rustix` は `=1.1.6` に固定し、`platform` だけで `fs` と既定の `std` を使います。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
 次のコマンドは `native/` で実行します。
@@ -140,6 +218,9 @@ cargo clippy --all-targets --locked -- -D warnings
 cargo test --locked
 cargo build --release --locked --target x86_64-unknown-linux-musl
 ```
+
+`cargo test --locked` は、C0bの実ファイル比較も実行します。`python3` がPython 3.10系であり、root以外の利用者であることが必須です。
+専用比較を省略して合格にはしません。Mac実機と最低OSでのC0bの動作は未確認です。
 
 release の設定は `codegen-units=1`・`opt-level=3`・`lto="fat"`・`strip="symbols"`・`debug=0`・`incremental=false` です。
 panic の設定は既定のままです。Linux のリンカーは Rust の musl 向けの既定を使います。
