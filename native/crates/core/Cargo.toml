@@ -22,3 +22,7 @@ harness = false
 [[test]]
 name = "held_file"
 harness = false
+
+[[test]]
+name = "child_process"
+harness = false
