@@ -3,6 +3,7 @@
 pub mod budget;
 pub mod build_info;
 pub mod fs;
+pub mod loop_state;
 pub mod output;
 
 pub use output::{

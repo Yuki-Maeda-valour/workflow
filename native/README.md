@@ -1,7 +1,8 @@
 # Rust の土台と共有の約束
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0cは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0cは既存のCLIへ未接続です。
+R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0cと今回のR4S部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4Sは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -24,8 +25,9 @@
 ## 部品とコマンドの登録
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
-- `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・ビルド情報を持ちます。
+- `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・loop-stateの純粋部品・ビルド情報を持ちます。
 - `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作を持ちます。
+- `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
 
@@ -215,9 +217,36 @@ pub fn run_child<E>(
 - 孫が出力パイプを保持すると、元の実行期限で失敗します。直接子の終了状態は保持します。パイプを閉じて生きる孫は、直接子の成功後も残り得ます。
 - 期限と取消は処理の合間に確認します。consumerの停止・panic、停止中のOS呼出し、実行順の遅延を強制中断しません。親死亡後の停止・回収も保証しません。
 - 親のSIGTERM/SIGINT/SIGHUPの捕捉・再送、他の回収処理やSIGCHLDの自動回収との競合は対象外です。プロセスグループ(信号をまとめて送れるプロセスの集まり)と子孫全体の監督はR4Qへ残します。
-- YAML解析・機密指定・状態保存・走査へは接続していません。R4Sには取得済みbytesの解析、#454には用途別の上限・検査順序を残します。
+- YAML解析・機密指定・状態保存・走査へは接続していません。取得済みbytesを扱うR4Sの純粋部品は下に記します。#454の用途別の入出力上限・検査順序は後続の呼出元が受け持ちます。
 
 設計判断は [design.md](../docs/design.md#単一子の実行と回収c0c)、専用比較と未確認条件は [testing.md](../docs/testing.md#単一子の実行と回収の検査c0c)にあります。
+
+## loop-state用の純粋部品(R4S)
+
+`dev_workflow_core::loop_state`は、渡された入力だけでYAML解析・機密指定・glob(パスのパターン)照合を行います。
+ファイル・Git・環境・時刻を読み取らず、外部Pythonを起動しません。
+
+| 公開API | 入力と結果 |
+|---|---|
+| `CodepointString::try_from_codepoints(Vec<u32>)` | Unicodeの文字番号を保持。0〜0x10FFFF以外は`InvalidCodepoint { index, value }` |
+| `CodepointString::as_codepoints()` | 保持した`&[u32]`を返す。`From<&str>`も使える |
+| `LegacyIntLimit::from_python_value(i64)` | 0、または640〜2,147,483,647を受ける。無効値は`InvalidLegacyIntLimit { value }` |
+| `profile_patterns(raw: &[u8], int_limit: LegacyIntLimit)` | 取得済みUTF-8 bytesを解析し、`Result<Vec<CodepointString>, ProfileError>`を返す |
+| `canonical_secret_patterns(&PatternInput)` | 指定の型とglobを検査し、同じ結果型で既定3件と初出順の指定を返す |
+| `default_secret_patterns()` | `.env`・`.env.*`・`.dev.vars`を順に返す |
+| `secret_path(&CodepointString, &[CodepointString])` | パスが指定のいずれかに一致するかを`bool`で返す |
+
+- `CodepointString`の内部は非公開の`Vec<u32>`です。surrogate(UTF-16の代用符号の値)も1個ずつ保持します。空列やNULは文字型では受け、機密指定の検査で判断します。JSONを通して2個を1文字へ合成しません。
+- `PatternInput`は`NotList`または`List(Vec<PatternItem>)`です。要素は`Text(CodepointString)`と`Other`に分けます。全要素の型検査を終えてからglobを検査します。
+- `ProfileError`は解析・構築失敗の`UnreadableYaml`、配列や文字列の型違いの`NotStringList`、不正な指定の`InvalidGlob`です。`message()`は順に`secret_paths を安全に読めない`、`secret_paths が文字列配列でない`、`secret_paths に不正な glob がある`を返します。
+- `LegacyIntLimit`の0は制限なしです。呼出元が旧Pythonの整数変換設定を渡します。環境を読む既定構築や、新しい4300桁制限はありません。
+- `profile_patterns`は全ノードの明示重複を構築前に検査します。続いて旧SafeLoaderの構築順序とmergeを再現します。SafeLoaderが構築しない子まで一律に拒否しません。
+- `secret_path`は指定の正規化や機密指定の検査を加えません。大小文字はCPython 3.10・Unicode 13.0.0の固定表を使い、LFと`/`の扱いも旧版のままです。
+- 唯一の承認済み差は、Pythonの再帰上限だけによる拒否です。有限な入力をRustの反復処理では受け付けます。新しい深さ・容量上限は設けません。scalarの自己参照や未知の失敗は許可しません。
+- ファイルの不在判定、C0b/C0cへの接続、S2Lの全7コマンド・状態保存・走査、R4A/B・R4Q、他用途の移植は含みません。公開CLI・配布物・呼出元・版・`CHANGELOG.md`も変更していません。
+
+調査元は [Issue #454](https://github.com/Yuki-Maeda-valour/workflow/issues/454)、実装契約は [Issue #462](https://github.com/Yuki-Maeda-valour/workflow/issues/462)です。
+構文・順序・globの規則と承認の範囲は [design.md](../docs/design.md#loop-state用の純粋部品r4s)、必須比較と未確認条件は [testing.md](../docs/testing.md#loop-state用の純粋部品の検査r4s)にあります。
 
 ## ソース入力の SHA256
 
@@ -263,8 +292,9 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 ## ビルドと検証
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
-`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json` と、C0bで追加した `rustix` です。
+`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix` と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
 `rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event` と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
+YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
 次のコマンドは `native/` で実行します。
@@ -278,8 +308,9 @@ cargo test --locked
 cargo build --release --locked --target x86_64-unknown-linux-musl
 ```
 
-`cargo test --locked` は、C0bの実ファイル比較とC0cの実子比較も実行します。`python3` がPython 3.10系であり、root以外の利用者であることが必須です。
-専用比較を省略して合格にはしません。Mac実機と最低OSでのC0b/C0cの動作は未確認です。
+`cargo test --locked` は、C0bの実ファイル比較、C0cの実子比較、R4Sの固定期待・旧Python・Rustの比較も実行します。`python3`がPython 3.10系であり、root以外の利用者であることが必須です。
+事前にリポジトリ直下で、同じPythonを使い `python3 -m pip install -r requirements-dev.txt` を実行してください。R4SはUnicode 13.0.0とPyYAML 6.0.3を要求します。
+専用比較を省略して合格にはしません。Mac実機と最低OSでのC0b/C0c/R4Sの動作は未確認です。R4SのLinux実装検証と、未実行のPR用必須CIは [検査記録](../docs/testing.md#loop-state用の純粋部品の検査r4s)で区別しています。
 
 release の設定は `codegen-units=1`・`opt-level=3`・`lto="fat"`・`strip="symbols"`・`debug=0`・`incremental=false` です。
 panic の設定は既定のままです。Linux のリンカーは Rust の musl 向けの既定を使います。

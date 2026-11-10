@@ -5,7 +5,7 @@
 
 ## コマンド
 
-リポジトリ直下から実行します。Python 3.10 以上と標準ライブラリだけを使います。
+リポジトリ直下から実行します。CIの補助はPython 3.10以上と標準ライブラリを使います。R4Sの比較には`requirements-dev.txt`の開発依存も必要です。
 旧版との比較を含む `build`・`reproduce`・`verify-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `CARGO_TARGET_DIR` にはリポジトリの外のフォルダを指定してください。
 CI では `RUNNER_TEMP/native-ci` が既定です。`CARGO_HOME` は呼び出し側の値を保ちます。
@@ -18,8 +18,8 @@ python3 -B native/ci/build.py prepare --platform linux-x86_64
 python3 -B native/ci/build.py build --platform linux-x86_64
 ```
 
-- `prepare`: Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
-- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。今回作った 2 本を、それぞれ `check_probe.py` と `check_resolve_task_dir.py` で検査します。
+- `prepare`: 実行中のPythonで`pip install -r requirements-dev.txt`を行い、Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
+- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。RustテストにはR4Sの専用比較も含まれます。今回作った 2 本を、それぞれ `check_probe.py` と `check_resolve_task_dir.py` で検査します。
 - `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、その 2 本の上記の検査を行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
@@ -40,6 +40,15 @@ ELF の CPU、動的ローダー指定の不在、共有ライブラリ依存の
 musl の版は Rust `1.99.1` の [musl-toolchain.sh](https://github.com/rust-lang/rust/blob/1.99.1/src/ci/docker/scripts/musl-toolchain.sh) と
 [musl.sh](https://github.com/rust-lang/rust/blob/1.99.1/src/ci/docker/scripts/musl.sh) の `1.2.5` です。
 Rust 側の修正を含む実体を識別できるように、付属する各ファイルの SHA256 も記録します。
+
+## R4Sの必須比較
+
+- #454の調査を基に、#462でloop-state用の純粋部品を実装しました。`core`の`loop_state_profile`テストが、標準の`cargo test --locked`から`check_r4s.py --bridge <今回のテスト実行物>`を必ず起動します。
+- Linux2種・Mac2種の`build`はPython 3.10.11を用意し、`prepare`でPyYAML 6.0.3を含む開発依存を入れます。比較はUnicode 13.0.0と非rootも要求します。依存不在や失敗を省略しません。
+- 比較対象は固定634件、追加218件と56件、JSON境界4件、旧用途94件、Unicode全域と公開matcherの5716方向です。自己検査20件には実装故障10種を含みます。内部例外が旧版の既知の拒否へ変わって見える場合も不合格にします。
+- 旧用途94件の確認はRustへの移植ではありません。Pythonの再帰上限だけの承認済み差を、固定した入力と別期待で検査します。[比較の契約と手順](../../docs/testing.md#loop-state用の純粋部品の検査r4s)に従ってください。
+- `build.py test`はCI補助の検査です。R4Sの実比較はCargoの経路で行います。`reproduce`はRustテストを省くため、その代わりにはなりません。公開CLIや配布物に比較用の入口はありません。
+- 2026-11-10のLinux実装検証は成功しました。この時点でR4SのPR用必須CIは未実行です。4環境へ検査を必須化したことと、その成功を分けて記録します。Mac実機・最低OSも未確認です。
 
 ## 成果物と他 Task との結合
 

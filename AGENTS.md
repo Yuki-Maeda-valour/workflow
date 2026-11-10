@@ -70,7 +70,7 @@ plugins/dev-workflow/
 ├── bin/dev-workflow/               # 共通の入口 launch.sh・Linux 2 本・Mac 共通 1 本・SHA256SUMS・build-info.json(段階 1b。#450)
 ├── hooks/                         # 使う道具の版の確かめ(SessionStart の hook の hooks.json・確かめの tool-versions.sh・道具と最低の版の一覧 tool-requirements.tsv。#431)
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
-native/                             # Rust 1.99.1 の開発用ソース(Cargo.toml・Cargo.lock・rust-toolchain.toml・crates/{cli,core,platform}・.cargo/ のビルド設定・ci/ のビルドと検査)
+native/                             # Rust 1.99.1 の開発用ソース(Cargo.toml・Cargo.lock・rust-toolchain.toml・crates/{cli,core,platform,yaml-parser}・.cargo/ のビルド設定・ci/ のビルドと検査)
 .github/workflows/                  # native.yml(4 種類の機械のビルド)と dist-check.yml(配布入口の起動)の CI(変更を送るたびに自動で検査する仕組み)
 scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py。配布入口は check_dist_launch.py、専用設定先への実導入は check_plugin_install.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
@@ -197,11 +197,12 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - 段階 0a で作ったソースとビルドの検査は、段階 0b の配布後も続ける。配布した入口・3 本の試し方と必要環境は [runtime-requirements.md](plugins/dev-workflow/skills/do-task/references/runtime-requirements.md#rust-版を試す条件段階-1b) にある。利用者には Rust・Cargo の導入を求めない。
 - 段階 1b(#450)では、段階 1a(#448)の `resolve-task-dir` を配布し、対象の skill と `loop.sh` を共通入口へつなぐ。未設定・`legacy` は旧 Python、`rust` だけ Rust を使う。配布と専用設定先への実導入の検査は [docs/testing.md](docs/testing.md#段階-1b-の配布と導入の検査) に従う。
 - C0a(#453)の入出力、C0b(#456)の予算・保持実体、C0c(#458)の単一子実行は実装済み。C0b/C0cは既存CLIへ未接続。配布は段階 1b・v4.53.0 のまま。契約は [docs/design.md](docs/design.md#単一子の実行と回収c0c)、APIは [native/README.md](native/README.md#単一子の実行と回収c0c) にある。
+- R4Sのloop-state用YAML・機密指定・globの純粋部品は#462で実装済み。調査元は#454。公開CLI・配布・呼出元は未変更。契約と唯一の承認済み差は [docs/design.md](docs/design.md#loop-state用の純粋部品r4s)、APIは [native/README.md](native/README.md#loop-state用の純粋部品r4s) にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
 - `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
-- C0b/C0cの `cargo test --locked` もPython3.10系と非rootを必須とする。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#単一子の実行と回収の検査c0c) にある。
+- C0b/C0c/R4Sの `cargo test --locked` もPython3.10系と非rootを必須とする。R4Sは同じPythonへ `requirements-dev.txt` の依存を入れる。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#loop-state用の純粋部品の検査r4s) にある。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy

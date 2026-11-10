@@ -1,0 +1,1894 @@
+{
+  "schema_version": 1,
+  "source": "\u7ba1\u7406\u62c5\u5f53\u304c\u7b2c1\u30ec\u30d3\u30e5\u30fc\u524d\u306b\u898b\u3064\u3051\u305f\u6570\u5024trim16\u3001\u975especific tag6\u3001\u672b\u5c3eLF2\u500b\u306e\u65e5\u66423\u3001yaml tag3\u306e\u8a0828\u5165\u529b\u3002",
+  "scalar_probe_sha256": "ca4c425fc9bddbe986efa7203ca762cce0508b238c41e091c37230df071b2cd7",
+  "profile_count": 28,
+  "graph_count": 28,
+  "cases": [
+    {
+      "id": "manager/profile/int-control-001c-prefix",
+      "source_id": "int-control-001c-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e7420225c753030316331220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001c-prefix",
+      "source_id": "int-control-001c-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e7420225c753030316331220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              28,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001c-suffix",
+      "source_id": "int-control-001c-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e742022315c7530303163220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001c-suffix",
+      "source_id": "int-control-001c-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e742022315c7530303163220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              49,
+              28
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001d-prefix",
+      "source_id": "int-control-001d-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e7420225c753030316431220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001d-prefix",
+      "source_id": "int-control-001d-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e7420225c753030316431220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              29,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001d-suffix",
+      "source_id": "int-control-001d-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e742022315c7530303164220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001d-suffix",
+      "source_id": "int-control-001d-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e742022315c7530303164220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              49,
+              29
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001e-prefix",
+      "source_id": "int-control-001e-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e7420225c753030316531220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001e-prefix",
+      "source_id": "int-control-001e-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e7420225c753030316531220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              30,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001e-suffix",
+      "source_id": "int-control-001e-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e742022315c7530303165220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001e-suffix",
+      "source_id": "int-control-001e-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e742022315c7530303165220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              49,
+              30
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001f-prefix",
+      "source_id": "int-control-001f-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e7420225c753030316631220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001f-prefix",
+      "source_id": "int-control-001f-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e7420225c753030316631220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              31,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/int-control-001f-suffix",
+      "source_id": "int-control-001f-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121696e742022315c7530303166220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/int-control-001f-suffix",
+      "source_id": "int-control-001f-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121696e742022315c7530303166220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              49,
+              31
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001c-prefix",
+      "source_id": "float-control-001c-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316331220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001c-prefix",
+      "source_id": "float-control-001c-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316331220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              28,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001c-suffix",
+      "source_id": "float-control-001c-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303163220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001c-suffix",
+      "source_id": "float-control-001c-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303163220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              49,
+              28
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001d-prefix",
+      "source_id": "float-control-001d-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316431220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001d-prefix",
+      "source_id": "float-control-001d-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316431220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              29,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001d-suffix",
+      "source_id": "float-control-001d-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303164220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001d-suffix",
+      "source_id": "float-control-001d-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303164220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              49,
+              29
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001e-prefix",
+      "source_id": "float-control-001e-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316531220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001e-prefix",
+      "source_id": "float-control-001e-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316531220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              30,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001e-suffix",
+      "source_id": "float-control-001e-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303165220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001e-suffix",
+      "source_id": "float-control-001e-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303165220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              49,
+              30
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001f-prefix",
+      "source_id": "float-control-001f-prefix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316631220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001f-prefix",
+      "source_id": "float-control-001f-prefix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f617420225c753030316631220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              31,
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/float-control-001f-suffix",
+      "source_id": "float-control-001f-suffix",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303166220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/float-control-001f-suffix",
+      "source_id": "float-control-001f-suffix",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a202121666c6f61742022315c7530303166220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              49,
+              31
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-0",
+      "source_id": "nonspecific-scalar-0",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a20212022323030312d31322d31345c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "patterns": [
+          [
+            46,
+            101,
+            110,
+            118
+          ],
+          [
+            46,
+            101,
+            110,
+            118,
+            46,
+            42
+          ],
+          [
+            46,
+            100,
+            101,
+            118,
+            46,
+            118,
+            97,
+            114,
+            115
+          ]
+        ]
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-0",
+      "source_id": "nonspecific-scalar-0",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a20212022323030312d31322d31345c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              50,
+              48,
+              48,
+              49,
+              45,
+              49,
+              50,
+              45,
+              49,
+              52,
+              10,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-1",
+      "source_id": "nonspecific-scalar-1",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a20212022323030312d31322d31345432313a35393a34335a5c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "patterns": [
+          [
+            46,
+            101,
+            110,
+            118
+          ],
+          [
+            46,
+            101,
+            110,
+            118,
+            46,
+            42
+          ],
+          [
+            46,
+            100,
+            101,
+            118,
+            46,
+            118,
+            97,
+            114,
+            115
+          ]
+        ]
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-1",
+      "source_id": "nonspecific-scalar-1",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a20212022323030312d31322d31345432313a35393a34335a5c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              50,
+              48,
+              48,
+              49,
+              45,
+              49,
+              50,
+              45,
+              49,
+              52,
+              84,
+              50,
+              49,
+              58,
+              53,
+              57,
+              58,
+              52,
+              51,
+              90,
+              10,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-2",
+      "source_id": "nonspecific-scalar-2",
+      "purpose": "loop-profile",
+      "input_hex": "756e757365643a20212022323030312d31322d31345432313a35393a34332b32333a35395c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "patterns": [
+          [
+            46,
+            101,
+            110,
+            118
+          ],
+          [
+            46,
+            101,
+            110,
+            118,
+            46,
+            42
+          ],
+          [
+            46,
+            100,
+            101,
+            118,
+            46,
+            118,
+            97,
+            114,
+            115
+          ]
+        ]
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-2",
+      "source_id": "nonspecific-scalar-2",
+      "purpose": "node-graph",
+      "input_hex": "756e757365643a20212022323030312d31322d31345432313a35393a34332b32333a35395c6e5c6e220a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              117,
+              110,
+              117,
+              115,
+              101,
+              100
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              50,
+              48,
+              48,
+              49,
+              45,
+              49,
+              50,
+              45,
+              49,
+              52,
+              84,
+              50,
+              49,
+              58,
+              53,
+              57,
+              58,
+              52,
+              51,
+              43,
+              50,
+              51,
+              58,
+              53,
+              57,
+              10,
+              10
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-3",
+      "source_id": "nonspecific-scalar-3",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b21202231225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u304c\u6587\u5b57\u5217\u914d\u5217\u3067\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-3",
+      "source_id": "nonspecific-scalar-3",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b21202231225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:int",
+            "value": [
+              49
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-4",
+      "source_id": "nonspecific-scalar-4",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b21202274727565225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u304c\u6587\u5b57\u5217\u914d\u5217\u3067\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-4",
+      "source_id": "nonspecific-scalar-4",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b21202274727565225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:bool",
+            "value": [
+              116,
+              114,
+              117,
+              101
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-5",
+      "source_id": "nonspecific-scalar-5",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b2120226e756c6c225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u304c\u6587\u5b57\u5217\u914d\u5217\u3067\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-5",
+      "source_id": "nonspecific-scalar-5",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b2120226e756c6c225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:null",
+            "value": [
+              110,
+              117,
+              108,
+              108
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-6",
+      "source_id": "nonspecific-scalar-6",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b212022323030312d31322d3134225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u304c\u6587\u5b57\u5217\u914d\u5217\u3067\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-6",
+      "source_id": "nonspecific-scalar-6",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b212022323030312d31322d3134225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:timestamp",
+            "value": [
+              50,
+              48,
+              48,
+              49,
+              45,
+              49,
+              50,
+              45,
+              49,
+              52
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-7",
+      "source_id": "nonspecific-scalar-7",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b212022312e30225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u304c\u6587\u5b57\u5217\u914d\u5217\u3067\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-7",
+      "source_id": "nonspecific-scalar-7",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b212022312e30225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:float",
+            "value": [
+              49,
+              46,
+              48
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-scalar-8",
+      "source_id": "nonspecific-scalar-8",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b2120223038225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "patterns": [
+          [
+            46,
+            101,
+            110,
+            118
+          ],
+          [
+            46,
+            101,
+            110,
+            118,
+            46,
+            42
+          ],
+          [
+            46,
+            100,
+            101,
+            118,
+            46,
+            118,
+            97,
+            114,
+            115
+          ],
+          [
+            48,
+            56
+          ]
+        ]
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-scalar-8",
+      "source_id": "nonspecific-scalar-8",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b2120223038225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              48,
+              56
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-yaml-bang",
+      "source_id": "nonspecific-yaml-bang",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b21202221225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-yaml-bang",
+      "source_id": "nonspecific-yaml-bang",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b21202221225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:yaml",
+            "value": [
+              33
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-yaml-ampersand",
+      "source_id": "nonspecific-yaml-ampersand",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b21202226225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-yaml-ampersand",
+      "source_id": "nonspecific-yaml-ampersand",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b21202226225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:yaml",
+            "value": [
+              38
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "manager/profile/nonspecific-yaml-star",
+      "source_id": "nonspecific-yaml-star",
+      "purpose": "loop-profile",
+      "input_hex": "7365637265745f70617468733a205b2120222a225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": false,
+        "reason": "secret_paths \u3092\u5b89\u5168\u306b\u8aad\u3081\u306a\u3044"
+      }
+    },
+    {
+      "id": "manager/graph/nonspecific-yaml-star",
+      "source_id": "nonspecific-yaml-star",
+      "purpose": "node-graph",
+      "input_hex": "7365637265745f70617468733a205b2120222a225d0a",
+      "context": {
+        "integer_max_str_digits": 4300
+      },
+      "expected": {
+        "accepted": true,
+        "nodes": [
+          {
+            "kind": "mapping",
+            "tag": "tag:yaml.org,2002:map",
+            "value": [
+              [
+                1,
+                2
+              ]
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:str",
+            "value": [
+              115,
+              101,
+              99,
+              114,
+              101,
+              116,
+              95,
+              112,
+              97,
+              116,
+              104,
+              115
+            ]
+          },
+          {
+            "kind": "sequence",
+            "tag": "tag:yaml.org,2002:seq",
+            "value": [
+              3
+            ]
+          },
+          {
+            "kind": "scalar",
+            "tag": "tag:yaml.org,2002:yaml",
+            "value": [
+              42
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

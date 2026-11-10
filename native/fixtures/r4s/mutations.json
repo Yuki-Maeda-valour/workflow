@@ -1,0 +1,110 @@
+[
+  {
+    "mutant": "canonical-elementwise-order",
+    "checked": [
+      "order/canonical/badglob-number",
+      "order/canonical/badglob-empty"
+    ],
+    "detected": [
+      "order/canonical/badglob-number",
+      "order/canonical/badglob-empty"
+    ]
+  },
+  {
+    "mutant": "matcher-prevalidation",
+    "checked": [
+      "direct-matcher/literal-brackets",
+      "direct-matcher/literal-newline",
+      "direct-matcher/empty-then-x"
+    ],
+    "detected": [
+      "direct-matcher/literal-brackets",
+      "direct-matcher/literal-newline",
+      "direct-matcher/empty-then-x"
+    ]
+  },
+  {
+    "mutant": "canonical-sorted",
+    "checked": [
+      "canonical/order_and_exact_duplicates"
+    ],
+    "detected": [
+      "canonical/order_and_exact_duplicates"
+    ]
+  },
+  {
+    "mutant": "matcher-ascii",
+    "checked": [
+      "matcher/'i' 'İ'",
+      "matcher/'s' 'ſ'"
+    ],
+    "detected": [
+      "matcher/'i' 'İ'",
+      "matcher/'s' 'ſ'"
+    ]
+  },
+  {
+    "mutant": "duplicate-check-removed",
+    "checked": [
+      "yaml/duplicate_top",
+      "yaml/duplicate_nested_unused",
+      "yaml/duplicate_alias"
+    ],
+    "detected": [
+      "yaml/duplicate_top",
+      "yaml/duplicate_nested_unused",
+      "yaml/duplicate_alias"
+    ]
+  },
+  {
+    "mutant": "merge-sequence-reversed",
+    "checked": [
+      "yaml/merge_sequence"
+    ],
+    "detected": [
+      "yaml/merge_sequence"
+    ]
+  },
+  {
+    "mutant": "yaml-pair-composed-by-json",
+    "checked": [
+      "yaml/escaped_pair"
+    ],
+    "detected": [
+      "yaml/escaped_pair"
+    ]
+  },
+  {
+    "mutant": "star-treated-as-dotstar",
+    "checked": [
+      "E03"
+    ],
+    "detected": [
+      "E03"
+    ]
+  },
+  {
+    "mutant": "glob-dotall",
+    "checked": [
+      "E04",
+      "E05",
+      "E07"
+    ],
+    "detected": [
+      "E04",
+      "E05",
+      "E07"
+    ]
+  },
+  {
+    "mutant": "glob-strict-end",
+    "checked": [
+      "E01",
+      "direct-matcher/double-star-terminal-lf"
+    ],
+    "detected": [
+      "E01",
+      "direct-matcher/double-star-terminal-lf"
+    ]
+  }
+]

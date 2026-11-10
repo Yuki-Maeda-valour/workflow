@@ -155,6 +155,49 @@ cargo test --locked
 公開前の全回帰テストは管理担当が他の編集・レビュー・検証を止めて流す。最新mainを含む最終SHAと結果をPRへ記録する。
 同じSHAの `pull_request` イベントでLinux・Macの必須CIがすべて成功したことを確認する。手元の検査や `push` イベントの成功で代用しない。
 
+### loop-state用の純粋部品の検査(R4S)
+
+[Issue #454](https://github.com/Yuki-Maeda-valour/workflow/issues/454)の全15表209行を、[Issue #462](https://github.com/Yuki-Maeda-valour/workflow/issues/462)の固定入力へ対応づけた。
+契約は [design.md](design.md#loop-state用の純粋部品r4s)、公開APIは [native/README.md](../native/README.md#loop-state用の純粋部品r4s)にある。
+
+```text
+cargo test --locked
+  -> loop_state_profile (harness = false)
+     -> python3 -B check_r4s.py --bridge 今回のテスト実行物
+        -> test_r4s.py の自己検査20件
+        -> 固定期待値・旧Python・Rustの3方向の比較
+        -> Unicode全域・JSON境界・旧用途・入力の無変更
+```
+
+- リポジトリ直下で`python3 -m pip install -r requirements-dev.txt`を実行する。Cargoが起動する同じ`python3`へ入れる。Python 3.10系・Unicode 13.0.0・PyYAML 6.0.3・非rootを必須とし、不在・別版・失敗を省略して合格にしない。
+- 単独の再確認は`native/`で`cargo test --locked -p dev-workflow-core --test loop_state_profile`を使う。`CARGO_TARGET_DIR`はリポジトリ外にする。公開CLIや配布済み実行物には比較用の入口を追加していない。
+- 通常の純粋部品の比較は公開APIを使う。ノード観測だけは同じ内部ソースをテスト用接続から参照する。tag・文字番号・順序・aliasの同一性を比べ、使われない値の変化も検出する。
+- 期待値は実行中の旧版から生成しない。固定期待値と旧Python、固定期待値とRust、旧PythonとRustを別々に比較する。原本634件の内容とSHA-256を保持し、追加ケースは別ファイルに置く。
+
+| 対象 | 件数と確認内容 |
+|---|---|
+| 固定原本 | 634件。公開API571件とノード63件 |
+| レビューで追加した境界 | 218件。109入力それぞれのprofile結果とノード結果 |
+| 管理担当が追加した境界 | 56件。28入力それぞれのprofile結果とノード結果 |
+| JSON保存の境界 | 4件。保存前の2個のsurrogateと保存・再読後の1文字を区別。保存前後を使う照合8件もRustと比較 |
+| 他用途の旧結果 | 94件。`secret-profiles`88件とhost6件。Rustへの移植件数には含めない |
+| 大小文字 | PythonとRustの内部テストで0〜0x10FFFFの全域を1419組の固定表と比較。公開matcherでも同値の全5716方向を比較 |
+| 比較器の自己検査 | 20件。実装故障10種と、内部故障5種による子プロセスの非0終了を含む |
+
+- 原本は`native/fixtures/r4s/cases.json`、追加は`regressions.json`と`manager-regressions.json`である。元表の対応と他用途・後続の責務も同じフォルダに保存する。入力はbytesの16進表現と文字番号の整数列で保持する。
+- TABと合法な引用内TAB、複数の宣言、EOF、暗黙キーの旧1024文字条件、block末尾、flow構文、整数上限、非特定tagと改行を追加検査する。入力・タグ・構築結果のどれかだけの一致で合格にしない。
+- 旧版の`Stop`等が包んだ原因は、入力IDごとの固定した例外の型・メッセージ・発生箇所・cause/contextと照合する。想定外の`RuntimeError`や`ValueError`をYAMLの正当な拒否へ変えない。両版が同じ不明な失敗を返しても不合格とする。
+- 唯一の差は`approved-differences.json`の`constructor/merge_chain/1100`である。Python再帰上限による拒否とRust受理を別期待で比べる。scalar自己参照や任意の`RecursionError`を一括して認めず、#448の別用途の差も転用しない。
+- 接続の実終了・stderr・時間切れ・JSONの形式を検査する。各比較batchの外側は120秒、Cargoからの全体は300秒を上限とする。これは検査用の停止条件であり、純粋APIの上限ではない。
+- 長い物理一時パスを使い、入力の内容・種類・権限・リンク先・実体番号・サイズ・更新時刻を前後で比較する。通常読取りで変わる`atime`だけを対象外にする。状態保存は旧版のJSON境界検査だけであり、Rustの製品処理へは追加していない。
+- `native/ci/build.py`の標準のCargoテストから、Linux2種・Mac2種の`build`で必須実行する。`prepare`は同じPythonへ開発依存を入れる。`reproduce`や配布済み実行物の検査は、このCargo経路の代わりにならない。
+
+2026-11-10のLinux実装検証では、上記の比較、書式・clippy・Cargoテスト・ビルド、既存の保存先714件、通常Pythonと新しいvenvでの規約検査が成功した。
+実装commitは`c43b49efe91818c9217999052bfaf8c237a402f4`である。管理担当が単独で行った全回帰テストは1898.1秒で合格した。
+unittestは2128件、失敗0・エラー0・skip44。loop3615・review345・implement360・diff983・guard1773はすべて失敗0である。
+この時点でR4SのPR用必須CIは未実行であり、Mac実機・最低OSでの動作も未確認である。
+文書更新と最新mainを含む最終SHAでは、全回帰テストと同じSHAのLinux・Macの`pull_request`必須CIを別途確認する。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -167,7 +210,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 | `macos-15` | `macos-arm64` | `aarch64-apple-darwin` | 同上 |
 
 - 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
-- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを入れる。`build --platform <表の値>` は必須検査、2 回のビルド、今回作った各実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査を行う。
+- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った各実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査を行う。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked --target <Rust の対象名>`。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。

@@ -945,7 +945,7 @@ for s in plugins/dev-workflow/skills/*/scripts; do [ -d "$s" ] && grep -rhoE "$V
 #### #454・R4Sへ引き継ぐ境界
 
 [Issue #454](https://github.com/Yuki-Maeda-valour/workflow/issues/454)の読取り・上限・再検査の要件は、次の範囲まで共通部品で満たした。
-R4Sは取得済みバイト列のYAML解析、S2Lは用途別の状態観測と走査を受け持つ後続の作業である。今回の部品は、どちらの製品処理にも未接続である。
+R4Sの取得済みバイト列を扱う純粋部品は、下の [R4Sの節](#loop-state用の純粋部品r4s)に記す。C0bからの接続と、S2Lの用途別の状態観測・走査は後続の作業である。
 
 | 今回実装・検査した範囲 | 後続の呼出元が決めて守る範囲 |
 |---|---|
@@ -976,13 +976,70 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
   - `try_wait` の `EINTR`/`EAGAIN` 以外の失敗後は、開いたパイプの閉鎖以外のOS操作を追加しない。`pending_child` の所有権を呼出元へ返す。呼出元は保持して明示的に回収し、破棄だけを回収と扱わない。
 - 成功には直接子の回収と全パイプの終了の両方が必要である。孫が出力パイプを保持すれば元の実行期限で失敗する。パイプを閉じて生存する孫は成功後も残り得る。
 - 期限と取消は処理の合間に確認する。consumerの停止やpanic、停止中のOS呼出し、実行順の遅延を期限で中断する機能はない。親死亡後の子の停止・回収も保証しない。親のSIGTERM/SIGINT/SIGHUPを自動で捕捉・再送しない。
-- 別の回収処理やSIGCHLDの自動回収との競合、子孫の停止と不在証明は対象外である。R4Qの監督、R4Sの取得済みbytesのYAML解析、#454の機密指定・用途別規則へ責務を残す。
+- 別の回収処理やSIGCHLDの自動回収との競合、子孫の停止と不在証明は対象外である。R4Qの監督は後続である。YAML解析と機密指定は下のR4Sの純粋部品が扱うが、C0cからの接続と#454の用途別の入出力規則は未実装である。
 
 型と停止順序は [native/README.md](../native/README.md#単一子の実行と回収c0c)、必須比較と保証を確かめた範囲は [testing.md](testing.md#単一子の実行と回収の検査c0c)に記す。
 
+### loop-state用の純粋部品(R4S)
+
+[Issue #454](https://github.com/Yuki-Maeda-valour/workflow/issues/454)は調査と互換条件の記録である。
+[Issue #462](https://github.com/Yuki-Maeda-valour/workflow/issues/462)で、R4Sのうちloop-state用YAML解析・機密指定・glob照合を開発用ソースへ実装した。
+`core::loop_state`は渡された入力だけを使う。ファイル・Git・環境・時刻を読み取らず、外部Pythonを起動しない。
+
+```text
+取得済みbytes → UTF-8検査 → ノード作成 → 全ノードの明示重複検査
+  → SafeLoader相当の構築 → 全要素の型検査 → glob検査 → 既定3件＋初出順
+
+パスの整数列 ＋ 指定の整数列 → Python 3.10の規則によるglob照合
+```
+
+#### 文字表現とYAMLの採用部品
+
+- `CodepointString`は非公開の`Vec<u32>`に、Unicodeの文字番号を順序どおり保持する。0〜0x10FFFFを受け、surrogate(UTF-16の代用符号の値)も失わない。2個のsurrogateを1文字へ合成しない。
+- `try_from_codepoints`は値域外だけ`InvalidCodepoint { index, value }`を返す。空列・NULは文字型では受け、用途別に検査する。`String`やJSON文字列へ変換して一致を判定しない。
+- YAMLのイベント解析には、`saphyr-parser 0.1.2`の局所修正版`workflow-yaml-parser 0.1.0`を採用した。元版のままでは、surrogate・Unicode改行・アンカー・構文条件・深さ制限が旧版と異なるためである。
+- 上流commitは`478b9f76addf0687478113e0dd3a1dba86e4d274`。元crateのSHA-256は`f54c7c96aa2abeb55dbdcda75287722d5e454f020aaa817895d4d62b9785073a`である。
+- `MIT OR Apache-2.0`のライセンス原文を保持する。直接依存は`arraydeque =0.5.1`と`thiserror =2.0.21`へ固定し、両方の既定機能を無効にする。間接依存は`Cargo.lock`で固定する。
+- `Parser::new_from_iter`を使い、文字列用の最適化経路は使わない。スカラー値の整数列、旧版の文字・構文条件、EOF停止を局所修正した。上流の固定深さ制限と、環境を読む診断出力は含めない。
+- この部品はイベントだけを作る。YAML 1.1の型解決と構築は`core::loop_state`が行う。元版・変更ファイル・ライセンス・更新手順は [UPSTREAM.md](../native/crates/yaml-parser/UPSTREAM.md)に残す。更新時も旧版との比較と追加の境界検査を省かない。
+
+#### 受理条件と失敗の順序
+
+1. 入力bytesを厳密なUTF-8と旧Readerの許容文字で検査する。先頭BOMは1個だけ除く。単一文書を解析し、alias(別の場所のノードへの参照)は同じ番号で保持する。
+2. 全ノードの各mappingで、str tagの明示キー`secret_paths`が重複すれば拒否する。merge(別のmappingからの取り込み)と構築より前に調べる。使用しない子も訪問する。
+3. PyYAML 6.0.3のSafeLoaderと同じ順序で構築する。未知tag、不正binary・日付、通常mappingのキーにできない値の拒否を維持する。SafeLoaderが構築しない子を一律検査しない。
+4. 最上位がmappingなら`secret_paths`を得る。不在や最上位がmapping以外なら空配列とする。全要素が空でない文字列かを調べてから、glob(パスのパターン)を検査する。
+5. 既定の`.env`・`.env.*`・`.dev.vars`を先頭に置く。完全一致の重複だけを除き、初出順を保つ。パスの正規化は加えない。
+
+- `profile_patterns`の解析・明示重複・構築の失敗は`UnreadableYaml`。非配列・非文字列・空文字列は`NotStringList`。不正な指定は`InvalidGlob`である。
+- `ProfileError::message()`は順に`secret_paths を安全に読めない`、`secret_paths が文字列配列でない`、`secret_paths に不正な glob がある`を返す。入力本文を理由へ足さない。
+- `//`、`/`だけの指定、U+0000〜001F・007F、`'`・`"`・バッククォート・`$`・`[`・`]`・`{`・`}`を含む指定は拒否する。空白・`.`・`..`・バックスラッシュ・surrogateは独自に拒否しない。
+- 明示値はmergeより優先する。merge配列は先頭が優先し、複数mergeキーは旧版の最後が優先する。自己merge・相互mergeも旧構築結果に従う。
+- 型解決はYAML 1.1のままである。`yes`・`ON`はbool、`012`・`1:20`はint、`08`・`1e3`はstrになる。引用された値でも、非特定tagの`!`があれば型解決する。
+- `LegacyIntLimit`は旧Pythonの整数変換設定を呼出元から受ける。0、または640〜2,147,483,647だけを受け、0は制限なしである。無効な設定は`InvalidLegacyIntLimit`で返す。環境からの既定値や新しい4300桁制限は設けない。YAML版の数字にも同じ設定を使う。
+
+#### glob照合と承認済みの差
+
+| 指定 | 旧Pythonと同じ意味 |
+|---|---|
+| `*` / `?` | `/`以外を0個以上 / 1文字番号。LFも対象 |
+| `**` | LF以外を0個以上。`/`も対象 |
+| `**/` | 空、またはLFを跨がない接頭辞と末尾`/` |
+| 先頭`/` | rootからだけ一致。無ければLFを跨がない接頭辞の`/`直後も候補 |
+| 末尾`/` | 対象自身、または`/`で始まるLFを跨がない子孫 |
+| 終端 | 文字列末尾、または最後のLF1個の直前 |
+
+- 指定の前後の`/`を全て除いてから照合の要素へ分ける。先頭・末尾の判定には除く前の指定を使う。空や`/`だけの指定は読み飛ばす。
+- 大小文字はCPython 3.10・Unicode 13.0.0の1419組の固定表を使う。Rust標準の小文字化や正規表現の既定動作へ置き換えない。`secret_path`は任意の指定をそのまま照合し、機密指定の検査を追加しない。
+- 唯一の承認済み差は、Pythonの実行環境の再帰上限だけで拒否される有限な入力を、Rustが反復処理で受理することである。2026-11-09の利用者の判断を#462へ記録した。新しい深さ・容量の上限は設けない。
+- 固定入力`constructor/merge_chain/1100`では、旧版の`RecursionError`による拒否と、Rustの既定3件の受理を別々の期待値で確認する。scalarの自己参照、任意の`RecursionError`、未知の失敗へ許可を広げない。#448で承認した別用途の差も転用しない。
+- ファイルの不在判定、C0b/C0cへの接続、S2Lの全7コマンド・状態保存・走査、`secret-profiles`等の他用途、R4A/B・R4Qの移植は含めない。公開CLI・配布物・呼出元・版・`CHANGELOG.md`は変更しない。
+
+公開APIは [native/README.md](../native/README.md#loop-state用の純粋部品r4s)、固定期待・旧Python・Rustの比較と未確認条件は [testing.md](testing.md#loop-state用の純粋部品の検査r4s)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
-- `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform` をまとめる。移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
+- `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
 - Rust は `native/rust-toolchain.toml` で `1.99.1` に固定する。`rustfmt`・`clippy` を用意し、`Cargo.lock` を共有する。内部の版 `0.1.0` は配布プラグインの版と分ける。
 - `platform` 以外の自作 crate(Rust の部品単位)では `#![forbid(unsafe_code)]` を使う。`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使い、安全な関数だけを外へ公開する。
 - ビルドの設定は `native/Cargo.toml`・`native/.cargo/`・`native/ci/` に置く。`.github/workflows/native.yml` の実行コマンドは `native/ci/` のスクリプトを呼ぶだけにする。
@@ -1001,7 +1058,7 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 
 ### Rust で使う部品の候補(段階 0 では依存に加えない)
 
-- YAML を読む部品の第一候補は `saphyr-parser`。旧版と同じ読み取り結果にする互換の層を組み合わせる。最初に YAML を読む機能を移植するとき、PyYAML との比較を実装する。0a の `probe` は YAML を読まない。
+- 段階 0 のYAML候補は `saphyr-parser`だった。R4Sでは局所修正版とPyYAMLとの比較を実装した。採用した版と条件は [R4Sの節](#文字表現とyamlの採用部品)にある。0a の `probe` は YAML を読まない。
 - OS を呼ぶ部品の候補は `rustix`。Linux の権限を制限する Landlock には `landlock`、macOS で変化の通知を受ける kqueue には `nix` を候補とする。
 - これらは候補の記録だけで、段階 0 では依存に追加しない。0a の直接依存は `serde`・`serde_json`・`sha2` だけ。出典は [Issue #442 の Task 3.1](https://github.com/Yuki-Maeda-valour/workflow/issues/442)。
 
@@ -1011,7 +1068,7 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
-- `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLの候補・Landlock・kqueueの部品は未採用である。
+- `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLは後のR4Sで局所修正版を採用した。Landlock・kqueueの部品は未採用である。
 - Mac向けのソースや型検査だけでは動作を確認したことにしない。Linux2種・Mac2種のCIで実ファイル検査を必須にする。C0bのMac実機と最低OSでの動作は未確認である。
 
 ### 公開経路の安全用のオプション

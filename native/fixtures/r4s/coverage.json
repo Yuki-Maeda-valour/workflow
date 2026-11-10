@@ -1,0 +1,3651 @@
+{
+  "schema_version": 1,
+  "table_count": 15,
+  "total_rows": 209,
+  "tables": [
+    {
+      "number": 1,
+      "section": "## 読み取り箇所と呼び出し元",
+      "rows": [
+        "| 入口 | YAML の使い方 | テスト・担当境界 |",
+        "|---|---|---|",
+        "| `loop-state.py:1348 profile_patterns` | `snapshot:1825` → 各 worktree の `profile_patterns:1887`。現在の `.claude/project-profile.yml` を開いた親から読む | S2L。本調査の主対象。残る 6 コマンドは保存 JSON を読むため、この経路で YAML を再読しない |",
+        "| `loop-state.py:1400 canonical_secret_patterns` | YAML を読まない。解析後の型・glob を確かめ、既定 3 指定を付け順序を保って重複除去 | S2L の前状態再利用からも利用 |",
+        "| `secret-profiles.py:188 paths_from_yaml` | UTF-8 を先に検査。compose→重複検査→safe_load。null 以外の非 dict 最上位を拒否。返り値には既定を足さず重複も残す | R4S。`main:251` の現在・各 ref、`diagnostic-plan.py:155 add_source` が利用 |",
+        "| `secret-profiles.py:251 main` | 既定→現在→ref 引数順で指定を足し、完全一致の重複を除いて UTF-8 NUL 列を出す | R4S/S3D/R4M。CLI 出力差は今回の loop-state 契約と分ける |",
+        "| `loop.sh:318 cmd_profile` | 固定した profile の別項目を `safe_load(open(...,\"rb\"))` で読む。`secret_paths` を検査しない。最上位非 dict は拒否 | 将来の loop.sh 移植側。secret_paths 専用規則をそのまま入れない |",
+        "| `host-check.py:536 frontmatter_grants` / `:588 cross_check_yaml` | 自前の厳しい行解析が主。PyYAML は任意の突き合わせ。権限宣言に alias/merge/引用キーを使う形は拒否する。無関係な曖昧 YAML は受理する場合がある | R4H。secret_paths 解析器への一律置換は禁止。今回の 6 例は境界を示すだけで全面設計ではない |",
+        "| `diagnostic-plan.py:155 add_source` | `paths_from_yaml(raw,\"診断\")` の ProfileError を `profile-invalid` / 終了 23 へ変える | R4D。上流の用途別拒否を引き継ぐ |"
+      ],
+      "row_count": 7,
+      "scope": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "number": 2,
+      "section": "## 入力・期待結果・根拠・不足テスト",
+      "rows": [
+        "| ID | YAML 入力または生バイト | loop の結果 | profiles の結果 | 根拠 | 既存テスト | 不足 |",
+        "|---|---|---|---|---|---|---|",
+        "| empty | `\"\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| comment | `\"# only\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| null | `\"null\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| empty_map | `\"{}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| keyless | `\"quality: {}\\n\"` | `D` | `[]` | L/P + 実測 | S1 | 専用比較 |",
+        "| empty_list | `\"[]\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| nonempty_list | `\"[a,b]\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| string | `\"hello\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| number | `\"17\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| boolean | `\"true\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| date | `\"2026-11-09\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| empty_paths | `\"secret_paths: []\\n\"` | `D` | `[]` | L/P + 実測 | S1/L1 | 専用比較 |",
+        "| paths_null | `\"secret_paths:\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| paths_scalar | `\"secret_paths: plain\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| paths_map | `\"secret_paths: {}\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| paths_empty_item | `\"secret_paths: [\\\"\\\"]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| paths_basic | `\"secret_paths: [vault, .env, vault, second]\\n\"` | `D + [\"vault\",\"second\"]` | `[\"vault\",\".env\",\"vault\",\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| paths_alias | `\"defs: &p [vault]\\nsecret_paths: *p\\n\"` | `D + [\"vault\"]` | `[\"vault\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_map | `\"defs: &d {secret_paths: [merged]}\\n<<: *d\\n\"` | `D + [\"merged\"]` | `[\"merged\"]` | L/P + 実測 | S1 | 専用比較 |",
+        "| merge_explicit_after | `\"defs: &d {secret_paths: [merged]}\\n<<: *d\\nsecret_paths: [explicit]\\n\"` | `D + [\"explicit\"]` | `[\"explicit\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_explicit_before | `\"secret_paths: [explicit]\\ndefs: &d {secret_paths: [merged]}\\n<<: *d\\n\"` | `D + [\"explicit\"]` | `[\"explicit\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_sequence | `\"a: &a {secret_paths: [first]}\\nb: &b {secret_paths: [second]}\\n<<: [*a,*b]\\n\"` | `D + [\"first\"]` | `[\"first\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| repeated_merge | `\"a: &a {secret_paths: [first]}\\nb: &b {secret_paths: [second]}\\n<<: *a\\n<<: *b\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_nonmap | `\"<<: [first]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_self | `\"&s {<<: *s, secret_paths: [self]}\\n\"` | `D + [\"self\"]` | `[\"self\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| recursive_unrelated_map | `\"other: &r {self: *r}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| recursive_unrelated_sequence | `\"other: &r [*r]\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| recursive_paths | `\"secret_paths: &r [*r]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_top | `\"secret_paths: [a]\\nsecret_paths: [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S2/S3 | 専用比較 |",
+        "| duplicate_nested_unused | `\"other: {secret_paths: [a], secret_paths: [b]}\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_alias | `\"defs: &d {secret_paths: [a], secret_paths: [b]}\\n<<: *d\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S2/L1 | 専用比較 |",
+        "| duplicate_sequence_root | `\"- {secret_paths: [a], secret_paths: [b]}\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_quoted | `\"secret_paths: [a]\\n\\\"secret_paths\\\": [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_escape | `\"secret_paths: [a]\\n\\\"secret_\\\\u0070aths\\\": [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_other | `\"other: first\\nother: second\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| case_distinct | `\"Secret_paths: [ignored]\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| literal_merge_key | `\"\\\"<<\\\": {secret_paths: [ignored]}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| unknown_tag_unused | `\"other: !custom value\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| binary_unused | `\"other: !!binary YQ==\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| set_unused | `\"other: !!set {a: null}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| unhashable_key | `\"? [a, b]\\n: value\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| tagged_str_key | `\"!!str secret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| undefined_alias | `\"secret_paths: *missing\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| duplicate_anchor | `\"a: &x [a]\\nb: &x [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| multiple_docs | `\"secret_paths: [first]\\n---\\nsecret_paths: [second]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| trailing_doc_end | `\"secret_paths: [first]\\n...\\n\"` | `D + [\"first\"]` | `[\"first\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| malformed | `\"secret_paths: [\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S1 | 専用比較 |",
+        "| tab_indent | `\"secret_paths:\\n\\t- a\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_bool_yes | `\"secret_paths: [yes]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_bool_on | `\"secret_paths: [ON]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_bool_false | `\"secret_paths: [False]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_int | `\"secret_paths: [123]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_octal | `\"secret_paths: [012]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_octal_invalid | `\"secret_paths: [08]\\n\"` | `D + [\"08\"]` | `[\"08\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_sexagesimal | `\"secret_paths: [1:20]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_float | `\"secret_paths: [1.5]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_scientific_no_decimal | `\"secret_paths: [1e3]\\n\"` | `D + [\"1e3\"]` | `[\"1e3\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_date | `\"secret_paths: [2026-11-09]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_null | `\"secret_paths: [~]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_binary | `\"secret_paths: [!!binary YQ==]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_tagged_str | `\"secret_paths: [!!str yes]\\n\"` | `D + [\"yes\"]` | `[\"yes\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_quoted | `\"secret_paths: [\\\"yes\\\"]\\n\"` | `D + [\"yes\"]` | `[\"yes\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_nonfinite | `\"secret_paths: [.nan]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_nested_list | `\"secret_paths: [[a]]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| item_nested_map | `\"secret_paths: [{a: b}]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| unicode | `\"secret_paths: [\\\"\\u65e5\\u672c\\u8a9e\\\", \\\"\\u00e9\\\", \\\"e\\u0301\\\"]\\n\"` | `D + [\"\\u65e5\\u672c\\u8a9e\",\"\\u00e9\",\"e\\u0301\"]` | `[\"\\u65e5\\u672c\\u8a9e\",\"\\u00e9\",\"e\\u0301\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| unicode_bom | `\"\\ufeffsecret_paths: [\\u65e5\\u672c\\u8a9e]\\n\"` | `D + [\"\\u65e5\\u672c\\u8a9e\"]` | `[\"\\u65e5\\u672c\\u8a9e\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| crlf | `\"secret_paths: [safe]\\r\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| literal_nul | `bytes.hex=7365637265745f70617468733a205b22610062225d0a` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| invalid_utf8 | `bytes.hex=7365637265745f70617468733a205b22ff225d0a` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile は UTF-8 でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| utf16 | `bytes.hex=fffe7300650063007200650074005f00700061007400680073003a0020005b0073006100660065005d000a00` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile は UTF-8 でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| escaped_nul | `\"secret_paths: [\\\"a\\\\0b\\\"]\\n\"` | `Stop(\"secret_paths に不正な glob がある\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | S3（同等条件。入力文字列は異なる） | Rust比較への接続・今回の固定期待値 |",
+        "| escaped_del | `\"secret_paths: [\\\"a\\\\x7fb\\\"]\\n\"` | `Stop(\"secret_paths に不正な glob がある\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| escaped_c1 | `\"secret_paths: [\\\"a\\\\x85b\\\"]\\n\"` | D + 1文字列（コードポイント U+0061,U+0085,U+0062） | 同じ1文字列だけ | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| literal_c1 | `bytes.hex=7365637265745f70617468733a205b2261c28562225d0a` | `D + [\"a b\"]` | `[\"a b\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| escaped_surrogate | `\"secret_paths: [\\\"\\\\uD800\\\"]\\n\"` | `D + [\"\\ud800\"]` | `[\"\\ud800\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| escaped_low_surrogate | `\"secret_paths: [\\\"\\\\uDC80\\\"]\\n\"` | `D + [\"\\udc80\"]` | `[\"\\udc80\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| escaped_pair（YAML直後 U+D83D,U+DE00） | `\"secret_paths: [\\\"\\\\uD83D\\\\uDE00\\\"]\\n\"` | D + 1文字列（コードポイント U+D83D,U+DE00） | 1文字列だけ（コードポイント U+D83D,U+DE00） | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| unicode_scalar（YAML直後 U+1F600） | `\"secret_paths: [\\\"\\\\U0001F600\\\"]\\n\"` | D + 1文字列（コードポイント U+1F600） | 1文字列だけ（コードポイント U+1F600） | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| value_tag_key | `\"!!value secret_paths: [fromvalue]\\n\"` | `D + [\"fromvalue\"]` | `[\"fromvalue\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| value_tag_duplicate | `\"!!value secret_paths: [first]\\nsecret_paths: [second]\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| value_tag_duplicate_reverse | `\"secret_paths: [first]\\n!!value secret_paths: [second]\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| merge_tag_custom_spelling | `\"!!merge anything: {secret_paths: [merged]}\\n\"` | `D + [\"merged\"]` | `[\"merged\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| invalid_date_unused | `\"other: 2026-99-99\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| date_unused | `\"other: 2026-11-09\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| binary_invalid_unused | `\"other: !!binary a\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| nonstring_valid_key | `\"true: ignored\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+        "| single_y_n | `\"secret_paths: [y, n]\\n\"` | `D + [\"y\",\"n\"]` | `[\"y\",\"n\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |"
+      ],
+      "row_count": 88,
+      "scope": "全88loop結果をRust比較。profiles全88列は旧用途差の固定資料"
+    },
+    {
+      "number": 3,
+      "section": "## 実 CLI の観測",
+      "rows": [
+        "| 入力 ID | loop-state 終了値 | loop-state stderr | 状態作成 | secret-profiles 終了値 | secret-profiles stderr の最終行 |",
+        "|---|---|---|---|---|---|",
+        "| empty_list | 0 | `\"\"` | あり | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile \\u306f map \\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+        "| paths_null | 20 | `\"ERROR [loop-state] secret_paths \\u304c\\u6587\\u5b57\\u5217\\u914d\\u5217\\u3067\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e secret_paths \\u306f\\u914d\\u5217\\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+        "| paths_empty_item | 20 | `\"ERROR [loop-state] secret_paths \\u304c\\u6587\\u5b57\\u5217\\u914d\\u5217\\u3067\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e secret_paths \\u306b\\u4e0d\\u6b63\\u306a glob \\u304c\\u3042\\u308b\"` |",
+        "| duplicate_top | 20 | `\"ERROR [loop-state] secret_paths \\u3092\\u5b89\\u5168\\u306b\\u8aad\\u3081\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile YAML \\u3092\\u8aad\\u3081\\u306a\\u3044\"` |",
+        "| invalid_utf8 | 20 | `\"ERROR [loop-state] secret_paths \\u3092\\u5b89\\u5168\\u306b\\u8aad\\u3081\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile \\u306f UTF-8 \\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+        "| escaped_surrogate | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode character '\\\\ud800' in position 0: surrogates not allowed\"` |",
+        "| escaped_low_surrogate | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode character '\\\\udc80' in position 0: surrogates not allowed\"` |",
+        "| escaped_pair（YAML直後 U+D83D,U+DE00） | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode characters in position 0-1: surrogates not allowed\"` |",
+        "| unicode_scalar（YAML直後 U+1F600） | 0 | `\"\"` | あり | 0 | `\"\"` |"
+      ],
+      "row_count": 9,
+      "scope": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "number": 4,
+      "section": "## surrogate と JSON 往復の境界",
+      "rows": [
+        "| YAML の文字列内の escape | YAML 直後のコードポイント | 保存 JSON | JSON 再読後 | `secret_path(\"😀\",pattern)` 前→後 |",
+        "|---|---|---|---|---|",
+        "| `\\uD83D\\uDE00` | `[\"U+D83D\",\"U+DE00\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud83d\\\\ude00\\\"]}\"` | `[\"U+1F600\"]` | False → True |",
+        "| `\\U0001F600` | `[\"U+1F600\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud83d\\\\ude00\\\"]}\"` | `[\"U+1F600\"]` | True → True |",
+        "| `\\uD800` | `[\"U+D800\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud800\\\"]}\"` | `[\"U+D800\"]` | False → False |",
+        "| `\\uDC80` | `[\"U+DC80\"]` | `\"{\\\"patterns\\\":[\\\"\\\\udc80\\\"]}\"` | `[\"U+DC80\"]` | False → False |"
+      ],
+      "row_count": 4,
+      "scope": "4件のYAML直後をRust比較。JSON保存再読は旧版を観測し整数列としてRustへ供給"
+    },
+    {
+      "number": 5,
+      "section": "## 他用途との境界例",
+      "rows": [
+        "| host-check 入力 ID | 入力 | 結果 |",
+        "|---|---|---|",
+        "| plain | `\"---\\nallowed-tools: Read\\n---\\n\"` | `[\"Read\"]` |",
+        "| duplicate | `\"---\\nallowed-tools: Read\\nallowed-tools: Grep\\n---\\n\"` | `Unclear: allowed-tools の鍵が重複している` |",
+        "| alias | `\"---\\na: &a [Read]\\nallowed-tools: *a\\n---\\n\"` | `Unclear: 値を解釈できない(YAML の記号・注釈・入れ子)` |",
+        "| merge | `\"---\\na: &a {allowed-tools: Read}\\n<<: *a\\n---\\n\"` | `Unclear: frontmatter の行を解釈できない(引用の鍵・フロー・アンカー・タグ・マージ・指示)` |",
+        "| quoted_key | `\"---\\n\\\"allowed-tools\\\": Read\\n---\\n\"` | `Unclear: frontmatter の行を解釈できない(引用の鍵・フロー・アンカー・タグ・マージ・指示)` |",
+        "| invalid_unrelated | `\"---\\nname: x\\n\\\"quoted\\\": 1\\n{a: 1}\\n---\\n\"` | `null` |"
+      ],
+      "row_count": 6,
+      "scope": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "number": 6,
+      "section": "## 状態と機密指定の読み取り経路",
+      "rows": [
+        "| 経路 | 入力と読み方 | 根拠 |",
+        "|---|---|---|",
+        "| `loop.sh take_snapshot` → `loop-state snapshot` → `profile_patterns` | 各現在 worktree の `.claude/project-profile.yml`。親を開いたまま通常ファイルを読む | `ship/loop.sh:711–729`、`ship/loop-state.py:1348–1397,1825–1902` |",
+        "| `loop.sh` 起動時 `py profile` | デフォルトブランチの固定 SHA から `100644 blob` だけを取り出す。`safe_load`。機密指定の検査なし | `ship/loop.sh:318–389,3004–3039` |",
+        "| `secret-profiles.py` | 現在 profile → 引数 `--ref` 順の commit profile。既定3指定と初出順の和集合を NUL 区切り出力 | `do/secret-profiles.py:74–186,189–280` |",
+        "| `diagnostic-plan.py add_source` | `secret-profiles.paths_from_yaml` と安全な現在/commit reader を再利用。保存する計画へ単調に追加 | `do/diagnostic-plan.py:134–169,181–210` |",
+        "| `prior_state` → `prior_secret_patterns` | JSON 状態を読み、schema 7 を要求。その後、機密指定行と worktree 対応を検査 | `ship/loop-state.py:1411–1418,1490–1531` |",
+        "| `read_state` | 有界な通常ファイル読み取り → `json.loads` → 最上位 dict の確認だけ | `ship/loop-state.py:1711–1752` |",
+        "| `compare` | 最初の状態の schema/必須キーを確認。前後完全同一なら即 0 | `ship/loop-state.py:1959–1977` |",
+        "| `state-digest` | JSON を解析せず、元の状態バイト列をハッシュ化 | `ship/loop-state.py:1738–1740` |"
+      ],
+      "row_count": 8,
+      "scope": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "number": 7,
+      "section": "## 機密指定と状態の比較表",
+      "rows": [
+        "| ID | 入力 | 期待結果 | 根拠 | 既存テスト | 追加 |",
+        "|---|---|---|---|---|---|",
+        "| S01 | profile 不在、または `secret_paths: []` | `['.env','.env.*','.dev.vars']` | `loop-state.py:1352–1364,1408` | `test_normal_snapshot_is_stable_and_secret_is_metadata_only`（不在） | 空配列の正確な保存順、`.claude` だけ存在するケース |",
+        "| S02 | `secret_paths: [z,a,z,.env,A,a]` | `['.env','.env.*','.dev.vars','z','a','A']` | `1400–1408`、観測 `canonical/order_and_exact_duplicates` | 直接の順序テストなし | 正確な順序・大小文字違いの重複非除去 |",
+        "| S03 | `secret_paths: null`、文字列 `a`、`[1]`、`[true]`、`['']` | `Stop('secret_paths が文字列配列でない')`。snapshot なら終了20 | `1402–1403,2195–2197`、観測 `canonical` | loop-state の直接テストなし | 各型を別ケースにする |",
+        "| S04 | 指定内の `//`、`/` だけ、U+0000〜001F、U+007F、引用符2種、バッククォート、`$`、`[`、`]`、`{`、`}` | `Stop('secret_paths に不正な glob がある')` | `1405–1407` | `test_profile_normal_merge_is_allowed_but_secret_duplicate_and_bad_glob_stop`（`bad[glob`） | 各禁止文字、境界 U+001F/U+0020/U+007E/U+007F/U+0080 |",
+        "| S05 | `' '`、`'../x'`、`'./x'`、`'a/../b'`、`'!x'`、バックスラッシュ入り、`'*'`、`'**'`、`'.'` | すべて指定として受理。正規化・否定指定・全件除外拒否を加えない | `1400–1408`、観測 `canonical/accepted_*` | 直接テストなし | 受理を保持。特に `*` は root `.` も機密化し全木が属性だけになる |",
+        "| S06 | `.env` と `nested/.ENV` | 一致。大小文字は区別しない | `179–202` | `test_secret_globs_do_not_hash_nested_case_or_directory_contents` | 大文字・小文字の保持 |",
+        "| S07 | `/.env` と `.ENV` / `nested/.env` | root のみ一致 / 不一致 | `198–200`、観測 `matcher` | 直接テストなし | anchor の比較 |",
+        "| S08 | `a/*` と `a/b/c`、`a/**` と `a/b/c` | 不一致 / 一致 | `188–196`、観測 `matcher` | 子孫の一部は既存テスト | `*` のスラッシュ境界 |",
+        "| S09 | `**/key` と `key`、`a/**/key` と `a/key` | 両方一致。ゼロ階層を含む | `190–193` | `test_double_star_zero_directory_and_secret_directory_metadata` | 既存入力を再利用 |",
+        "| S10 | `a?` と `a/` | 不一致。`?` は `/` 以外1文字 | `195`、観測 `matcher` | 直接テストなし | Unicode1文字、0/2文字の境界 |",
+        "| S11 | `vault` と `vault/file` を `secret_path` へ直接渡す | 不一致 | `199`、観測 `matcher` | 直接テストなし | 後述の tree 継承と分ける |",
+        "| S12 | `vault/` と `vault/file` / `x/vault` | 両方一致 | `184,198–200`、観測 `matcher` | `test_secret_globs_do_not_hash_nested_case_or_directory_contents` の一部 | root/nestedと末尾 `/` の組合せ |",
+        "| S13 | glob `i` と `İ`/`ı`、`s` と `ſ`、`k` と `K`、`ß` と `SS` | 最初の4組は一致、最後は不一致 | Python `re.IGNORECASE`、観測 `matcher` | なし | Python Unicode照合をASCII ignore-caseへ置換しない |",
+        "| S14 | glob `vault`、実ディレクトリ `vault` と子・孫・リンク | ディレクトリ自身の一致を子孫へ継承。全件を列挙。本文とリンク先文字列を読まない | `tree:474–503`、観測 `tree/directory_inheritance` | `test_double_star_zero_directory_and_secret_directory_metadata` | `vault` と `vault/` 両方、本文openの0回を外部観測で確認 |",
+        "| S15 | 機密リンクの外部参照先だけを書き換える | 機密リンクの属性が同じなら観測結果は変わらない | `487–489` | `test_secret_symlink_target_bytes_are_outside_the_metadata_only_boundary` | 既存入力再利用。参照先を読まない検査 |",
+        "| S16 | 前状態 `private.txt`、現在 `secret_paths: []` | `private.txt` を維持し本文を読まない | `1877–1888` | `test_prior_secret_patterns_keep_each_existing_worktree_metadata_only` | 正確な保存順の比較 |",
+        "| S17 | 前状態 `private.txt`、現在 profile 削除 | 同じく維持。観測 CLI は終了0、private の `secret:true`、`sha256` なし | `1354–1364,1887`、観測 `snapshot/deleted_profile_keeps_prior` | 独立した削除テストなし | 削除ケースを既存縮小ケースと別に追加 |",
+        "| S18 | 前状態 `private.txt`、現在 `[b,a,b]` | 既定3→`private.txt`→`b`→`a` | `1887`、観測 `snapshot/prior_first_current_append` | 直接の順序テストなし | 同名指定・前状態順・現在順 |",
+        "| S19 | 前状態正常、現在 `secret_paths: null` | 終了20。stdout空。新状態ファイルなし。過去の指定だけで成功しない | `1397,1402–1403`、観測 `snapshot/bad_profile_never_falls_back_to_prior` | 直接テストなし | 拒否後の出力非作成・既存出力保全 |",
+        "| S20 | worktree A=`private.txt`、別worktree B=`second.txt` | それぞれ自分の指定だけを継承。他の worktree へ横流ししない | `1876–1888` | `test_prior_secret_patterns_keep_each_existing_worktree_metadata_only` | 既存入力再利用 |",
+        "| S21 | 人の worktree を移動、現在指定を縮小、`--fresh-config-baseline`あり | Git管理ディレクトリの実パスが同じならその worktree の前指定を維持 | `1880–1886` | `test_secret_union_follows_human_worktree_move_at_fresh_boundary` | 移動先の名前に基づく誤継承を検出 |",
+        "| S22 | 同じ移動、`--fresh-config-baseline`なし | 終了20。profile/本文を観測する前に停止 | `1840–1852` | 同上 | 新しい人の worktree 追加も同じ拒否。先行読取0の外部検査 |",
+        "| S23 | 親自身の正確な worktree 削除、所有・不在・4欄一致 | `worktrees/worktree_contents/worktree_configs/secret_patterns` の該当1行だけ削除。人の行を残す | `1422–1487` | `test_parent_verified_exact_removed_worktree_is_pruned_but_not_other_rows` | 既存入力再利用。一般的な全行削除へ広げない |",
+        "| S24 | `.claude` が通常dirでない / profileが通常fileでない | 本文を読まず停止。profile 不在とは区別 | `1352–1368` | `test_profile_symlink_and_output_tmp_symlink_cannot_redirect_reads_or_writes`（末端link） | 親link・FIFO・dir・短読/増加・容量境界は用途別保証確認 |",
+        "| S25 | 保持した停止ファイルが `.env` の通常file | 属性のみ。`secret` も `sha256` もなし。空→非空は差分 | `482–486` | `test_stop_control_overrides_secret_classification_without_hashing` | 既存入力再利用 |"
+      ],
+      "row_count": 25,
+      "scope": "S01の空配列、S02-S13の純粋部分を実装。S14-S25の走査/状態/IOは後続S2L"
+    },
+    {
+      "number": 8,
+      "section": "### 保存状態の入力",
+      "rows": [
+        "| ID | 上の入力からの変更 | 期待結果 | 根拠・既存テスト・不足 |",
+        "|---|---|---|---|",
+        "| P01 | 変更なし | `/work/a` と `/admin/a` をキーに同じ指定を返す | `1490–1531`、観測 `prior/valid`。直接テストなし、追加必要 |",
+        "| P02 | `secret_patterns` 削除または null | `前の secret_paths の状態が新しい必須欄を持たない` | `1494–1496`。直接テストなし |",
+        "| P03 | 指定行に余分な `extra:true` / `path`非文字列 / `patterns`非配列 / 要素非文字列 | `前の secret_paths の状態を読めない` | `1498–1507`。直接テストなし |",
+        "| P04 | 同じ `path` の行を2件 | `前の secret_paths の状態が重複している` | `1501–1502`。直接テストなし |",
+        "| P05 | 既定3指定のどれか削除 | `前の secret_paths の状態に既定値が無い` | `1508–1509`。直接テストなし |",
+        "| P06 | 既定3の順序反転 / 既定追加重複 / 独自指定重複 | `前の secret_paths の状態が正規形でない` | `1510–1512`。直接テストなし |",
+        "| P07 | `patterns`の末尾へ `[x]` | `secret_paths に不正な glob がある` | `1510`→`1405–1407`。直接テストなし |",
+        "| P08 | `worktree_configs`削除/null、config行の`path`/`git_dir`非文字列 | `前の secret_paths の worktree 状態を読めない` | `1514–1520`。直接テストなし |",
+        "| P09 | config行のpathを `/work/missing` へ変更 | `前の secret_paths の worktree 対応が無い` | `1521–1523`。直接テストなし |",
+        "| P10 | config行を空配列へ変更 | `前の secret_paths の worktree 対応が矛盾している` | `1529–1530`。直接テストなし |",
+        "| P11 | 異なるpathの指定行とconfig行を足す。同じgit_dir・異なるpatterns | `前の secret_paths の worktree 対応が矛盾している` | `1524–1527`。直接テストなし |",
+        "| P12 | 同じgit_dirでもpatterns同一 | 内部関数は受理 | `1526`、観測 `prior/same_admin_True`。snapshot全体の受理とは主張しない |",
+        "| P13 | config行の余分なkey / 完全同一config行の重複 | 内部関数は受理 | 観測 `prior/configs_extra_key,configs_duplicate_same`。後続の別検査との差を残す |",
+        "| P14 | 両方の `path` を文字列 `relative` へ変更 | 内部関数は受理 | 観測 `prior/relative_path`。この関数へ絶対パス検査を足して全体受理の同値を崩さない |",
+        "| P15 | JSON `{\"secret_patterns\":null,\"secret_patterns\":[]}` を `read_state` へ渡す | `{\"secret_patterns\":[]}`。JSON重複は後勝ち | `1743–1752`、観測 `state/json_duplicate_last_wins`。YAMLの重複secret拒否と混同しない |",
+        "| P16 | `schema:7` と compare必須12欄を持ち、他11欄はnullの同一JSONを前後へ渡す | `compare` 終了0、stdout/stderr空 | `1965–1977`、観測 `state/compare_identical_malformed_secret_rows`。任意の保存読取へ厳密schemaを共通適用しない |"
+      ],
+      "row_count": 16,
+      "scope": "P01-P16すべて後続S2L。旧観測を保持しschema7実装しない"
+    },
+    {
+      "number": 9,
+      "section": "## 機密指定の用途別の差",
+      "rows": [
+        "| 条件 | loop-state | secret-profiles | loop.sh 起動設定 | diagnostic |",
+        "|---|---|---|---|---|",
+        "| profileの最上位がscalar/sequence | secretなしとして既定3を返す | null以外は拒否 | null以外は拒否 | secret-profilesの拒否を使う |",
+        "| `secret_paths:null` | 拒否 | 拒否 | secret欄を検査しない | 拒否 |",
+        "| 同じmappingのstrタグsecretキー重複 | aliasや入れ子内も拒否 | 同じ | SafeLoaderの後勝ち。他欄が正常なら受理 | secret-profilesと同じ |",
+        "| YAML解析関数の重複指定 | 既定3を付けて完全一致重複除去 | paths_from_yaml自身は重複を保持。CLIが既定3を付けて初出順に統合 | 対象外 | 各出典を初出順で加える |",
+        "| 機密指定の順序 | 前状態→現在 | 既定3→現在→ref引数順 | 対象外 | 既定3→current→held-head→base→start→branch→extra→CLI追加。継承計画は保持 |",
+        "| 現在profileの大きさ | snapshotの共有予算。CLI単独既定は1ファイル64MiB・総量1GiB。loop.shが渡す上限は別に維持 | 1MiB | 固定commit blobのこの経路に専用上限なし | current/referenceともsecret-profilesの1MiBと診断側期限等 |",
+        "| 固定commit profileモード | 読まない | `100644`と`100755` | `100644`だけ | secret-profiles backendに従う |",
+        "| glob照合 | str / Python re.IGNORECASE | CLIは照合しない | 対象外 | UTF-8 bytes / GNU grep / LC_ALL=C / 大小区別 |",
+        "| `vault` vs `vault/file` 単独照合 | 不一致。treeが親dirを機密にすると子孫に継承 | CLIは照合しない | 対象外 | `($\\|/)`を常につけるため一致 |",
+        "| `*`で全件一致 | 受理 | 受理 | 対象外 | 代表5パス全件一致を拒否する後段あり |"
+      ],
+      "row_count": 10,
+      "scope": "用途差資料。loopの列だけRust実装。GNU EREを含む他用途は境界"
+    },
+    {
+      "number": 10,
+      "section": "### 改行・非 UTF-8 名の追加比較条件",
+      "rows": [
+        "| ID | pattern | rel | `secret_path` の期待結果 | 既存テスト | 不足する比較 |",
+        "|---|---|---|---|---|---|",
+        "| E01 | `\"x\"` | `\"x\\n\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E02 | `\"x\"` | `\"x\\nz\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E03 | `\"*\"` | `\"a\\nb\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E04 | `\"**\"` | `\"a\\nb\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E05 | `\"x\"` | `\"a\\nb/x\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E06 | `\"a*/x\"` | `\"a\\nb/x\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E07 | `\"vault/\"` | `\"vault/a\\nb\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E08 | `\"?\"` | `\"\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E09 | `\"x*\"` | `\"x\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E10 | `\"\\udcff\"` | `\"\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |"
+      ],
+      "row_count": 10,
+      "scope": "E01-E10すべてRust matcher比較"
+    },
+    {
+      "number": 11,
+      "section": "### YAML と非 UTF-8 の名前",
+      "rows": [
+        "| ID | 入力 | 期待結果 | 既存テスト | 不足する比較 |",
+        "|---|---|---|---|---|",
+        "| E11 | `canonical_secret_patterns(['x\\n'])` | `Stop('secret_paths に不正な glob がある')` | S3の制御文字と同種。LFそのものは未追加 | パターン内LFの固定期待値 |",
+        "| E12 | ASCII/UTF-8 バイト列 `b'secret_paths: [\"\\\\uDCFF\"]\\n'` | `profile_patterns` は既定3指定の後ろに U+DCFF の文字列を追加して返す | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+        "| E13 | E12 の profile と、ファイル名バイト列 `b'\\xff'` の通常ファイル | `tree` の該当行は `path='\\udcff', kind='file', secret=True`。`sha256` 欄なし | 通常名の機密属性は既存。0xff名は未追加 | 元バイト名と属性のみの走査をS2Lで比較 |",
+        "| E14 | 生バイト `0xff` を YAML 文字列へ直接入れた `b'secret_paths: [\"\\xff\"]\\n'` | `Stop('secret_paths を安全に読めない')` | 不正UTF-8の拒否は既存条件。本入力は未追加 | 生0xffのYAMLとE12の受理差を固定 |"
+      ],
+      "row_count": 4,
+      "scope": "E11/E12/E14をRust比較。E13実在名/treeは旧観測保持、後続S2L"
+    },
+    {
+      "number": 12,
+      "section": "### 親ディレクトリ差替えの保証の限界",
+      "rows": [
+        "| 時点 | 現行の検査 |",
+        "|---|---|",
+        "| root までの各親を開くとき | 各要素の `stat` と開いた実体の `fstat` を比較。`same_directory_path` は dev/ino/種類/権限を比較 |",
+        "| `.claude` を開くとき | root の保持 fd から `stat/open`。開いた親の dev/ino/mode/size/mtime/ctime を直前の値と比較 |",
+        "| profile を開くとき | `.claude` の保持 fd から末端を `stat/open`。通常ファイルであり、dev/ino/mode/size/mtime/ctime が一致するか確認 |",
+        "| profile 読み取り後 | 開いた末端ファイルの `fstat` が読み始めと一致するか確認 |",
+        "| `.claude` の親パス再検査 | `profile_patterns/read_at` では、末尾の必須操作としては行わない |",
+        "| YAML 解析時 | バイト取得の後に親 fd と root fd を閉じてから解析する。解析中まで fd を保持する実装ではない |"
+      ],
+      "row_count": 6,
+      "scope": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "number": 13,
+      "section": "## C0・R4S・S2L へ渡す要件",
+      "rows": [
+        "| 担当 | 実装する範囲 | 今回の要件 |",
+        "|---|---|---|",
+        "| C0a（#453） | 生バイトの入出力と終了値 | 固定された診断を再符号化せず出せること。通常拒否の20と引数不正の2を、個別コマンドが選べること |",
+        "| C0b（正式設計前） | 保持したファイル実体と共通の処理量・時間の上限 | 同じ親と開いた実体から読み、種類・実体・属性の検査を省かないこと。呼出元の消費量と期限を維持すること。不在と読めない状態を区別できること |",
+        "| C0c（正式設計前） | 子の実行と回収 | YAML解析の純粋な部分には不要。S2L の Git 呼出とテスト用の子実行は別に接続すること |",
+        "| R4S の今回確定した部分 | `loop-state` 用のバイト入力のYAML解釈、重複検査、指定の検査・順序、独自のglob照合 | 呼出元別の意味を識別できる構造にする。無関係な用途を1つの厳しい/緩いモードへ統一しない。今回の新規独立CLI登録は不要 |",
+        "| S2L | profileの安全な読取、前状態の用途別検査、worktreeごとの和集合、走査、状態保存、CLI | R4Sの結果を走査前に使う。機密の本文を開かない。履歴を消したり、エラーを成功へ変えたりしない。JSONを読む段階の変換も旧版どおりとする |",
+        "| R4S の残り・S3D・R4D・R4H | `secret-profiles` CLI、GNU ERE、診断、hostの設定 | 今回は受理差を記録する。各入口の完全な移植設計と比較はそれぞれで行う |"
+      ],
+      "row_count": 6,
+      "scope": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "number": 14,
+      "section": "## 参考実装",
+      "rows": [
+        "| 参照先 | 再利用する内容 |",
+        "|---|---|",
+        "| `loop-state.py` の `profile_patterns`・`canonical_secret_patterns`・`secret_path` | 用途別の受理条件と返す順序。Python内部のオブジェクト番号はRustの契約にしない |",
+        "| `secret-profiles.py` の `paths_from_yaml` | 同じnode検査を使っても、最上位の型と返す値の意味が異なる例 |",
+        "| `scripts/test_loop_state.py`・`scripts/test_secret_profiles.py` | 表の既存入力・期待値。既存テストと拒否条件は変えない |",
+        "| `scripts/support_native.py` | 生バイト・終了値・時間切れ・副作用の比較。通常の比較条件は緩めない |",
+        "| `native/ci/check_resolve_task_dir.py` | 比較元と実行ファイルを明示し、使えなければ失敗にする構成。#448固有の差は再利用しない |"
+      ],
+      "row_count": 5,
+      "scope": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "number": 15,
+      "section": "## 未決事項と着手条件",
+      "rows": [
+        "| 項目 | 確定したこと | 残っていること・担当 |",
+        "|---|---|---|",
+        "| C0との接続 | 上表の必要保証と責務 | C0b/cの関数・型・失敗結果の正式契約は未確定。C0担当とS2L担当が接続前に合意する |",
+        "| YAML部品 | 観測した受理条件が基準 | 依存の選定と版、特殊な文字の内部表現はR4S実装時の選択。期待値を変える権限は含まない |",
+        "| 実行環境 | 今回はLinux・Python3.10.12で観測 | Python3.10.11、Mac、最低OSでの実測は未実施。対象別のCIで確認する |",
+        "| R4Sの残り | 呼出元の違いを消さない | GNU EREとlocale、他入口の完全な設計は別の対象 |",
+        "| S2L | profile/状態/走査の引き渡し条件 | Git設定・7コマンド・schema7全体のRust実装は未着手。#283/PR451の既存材料を使う |"
+      ],
+      "row_count": 5,
+      "scope": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    }
+  ],
+  "S_rows": [
+    {
+      "id": "S01",
+      "scope": "split-absence-S2L-empty-list-Rust",
+      "case_ids": [
+        "yaml/empty_paths",
+        "canonical/empty"
+      ],
+      "out_of_scope_reason": "profile absence handled by S2L"
+    },
+    {
+      "id": "S02",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "canonical/order_and_exact_duplicates",
+        "yaml/paths_basic"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S03",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "canonical/null",
+        "canonical/scalar",
+        "canonical/number",
+        "canonical/boolean",
+        "canonical/empty_string",
+        "yaml/paths_null",
+        "yaml/paths_scalar",
+        "yaml/paths_map",
+        "yaml/paths_empty_item"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S04",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "canonical/forbidden_0x27",
+        "canonical/forbidden_0x22",
+        "canonical/forbidden_0x60",
+        "canonical/forbidden_0x24",
+        "canonical/forbidden_0x5b",
+        "canonical/forbidden_0x5d",
+        "canonical/forbidden_0x7b",
+        "canonical/forbidden_0x7d",
+        "canonical/forbidden_0x0",
+        "canonical/forbidden_0x1f",
+        "canonical/forbidden_0x7f",
+        "S04/control-01",
+        "S04/control-02",
+        "S04/control-03",
+        "S04/control-04",
+        "S04/control-05",
+        "S04/control-06",
+        "S04/control-07",
+        "S04/control-08",
+        "S04/control-09",
+        "S04/control-0a",
+        "S04/control-0b",
+        "S04/control-0c",
+        "S04/control-0d",
+        "S04/control-0e",
+        "S04/control-0f",
+        "S04/control-10",
+        "S04/control-11",
+        "S04/control-12",
+        "S04/control-13",
+        "S04/control-14",
+        "S04/control-15",
+        "S04/control-16",
+        "S04/control-17",
+        "S04/control-18",
+        "S04/control-19",
+        "S04/control-1a",
+        "S04/control-1b",
+        "S04/control-1c",
+        "S04/control-1d",
+        "S04/control-1e",
+        "S04/boundary-20",
+        "S04/boundary-7e",
+        "S04/boundary-80",
+        "canonical/slash_only",
+        "canonical/double_slash",
+        "E11"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S05",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "canonical/accepted_' '",
+        "canonical/accepted_'a b'",
+        "canonical/accepted_'../x'",
+        "canonical/accepted_'./x'",
+        "canonical/accepted_'a/../b'",
+        "canonical/accepted_'!x'",
+        "canonical/accepted_'a\\\\b'",
+        "canonical/accepted_'/x'",
+        "canonical/accepted_'x/'",
+        "canonical/accepted_'***'",
+        "canonical/accepted_'*'",
+        "canonical/accepted_'**'",
+        "canonical/accepted_'.'",
+        "canonical/accepted_'#x'",
+        "canonical/accepted_'x:y'",
+        "canonical/accepted_'x|y'",
+        "canonical/accepted_'x+y'",
+        "canonical/accepted_'İ'",
+        "canonical/accepted_'K'",
+        "S10/star-root",
+        "matcher/'!x' 'x'",
+        "matcher/'../x' 'x'",
+        "matcher/'./x' 'x'",
+        "matcher/'a\\\\b' 'a/b'",
+        "direct-matcher/literal-backslash",
+        "direct-matcher/literal-backslash-not-slash"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S06",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'.env' 'nested/.ENV'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S07",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'/.env' 'nested/.env'",
+        "matcher/'/.env' '.ENV'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S08",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'a/*' 'a/b/c'",
+        "matcher/'a/**' 'a/b/c'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S09",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'**/key' 'key'",
+        "matcher/'a/**/key' 'a/key'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S10",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'a?' 'a/'",
+        "E08",
+        "S10/zero",
+        "S10/unicode-one",
+        "S10/two",
+        "S10/surrogate-pair-two"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S11",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'vault' 'vault/file'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S12",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'vault/' 'vault/file'",
+        "matcher/'vault/' 'x/vault'",
+        "E07",
+        "direct-matcher/directory-terminal-lf"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S13",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "matcher/'i' 'İ'",
+        "matcher/'i' 'ı'",
+        "matcher/'s' 'ſ'",
+        "matcher/'k' 'K'",
+        "matcher/'ß' 'SS'"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "S14",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S15",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S16",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S17",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S18",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S19",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S20",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S21",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S22",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S23",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S24",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "id": "S25",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    }
+  ],
+  "P_rows": [
+    {
+      "id": "P01",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P02",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P03",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P04",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P05",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P06",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P07",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P08",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P09",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P10",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P11",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P12",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P13",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P14",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P15",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "id": "P16",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    }
+  ],
+  "E_rows": [
+    {
+      "id": "E01",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E01"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E02",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E02"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E03",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E03"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E04",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E04"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E05",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E05"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E06",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E06"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E07",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E07"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E08",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E08"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E09",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E09"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E10",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E10"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E11",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E11"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E12",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E12"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E13",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "S2L tree scan"
+    },
+    {
+      "id": "E14",
+      "scope": "Rust-pure",
+      "case_ids": [
+        "E14"
+      ],
+      "out_of_scope_reason": null
+    },
+    {
+      "id": "E15",
+      "scope": "S2L-legacy-boundary-only",
+      "case_ids": [],
+      "out_of_scope_reason": "held parent IO already C0b, full caller deferred to S2L"
+    }
+  ],
+  "yaml_row_cases": [
+    {
+      "source_id": "empty",
+      "case_ids": [
+        "yaml/empty"
+      ]
+    },
+    {
+      "source_id": "comment",
+      "case_ids": [
+        "yaml/comment"
+      ]
+    },
+    {
+      "source_id": "null",
+      "case_ids": [
+        "yaml/null"
+      ]
+    },
+    {
+      "source_id": "empty_map",
+      "case_ids": [
+        "yaml/empty_map"
+      ]
+    },
+    {
+      "source_id": "keyless",
+      "case_ids": [
+        "yaml/keyless"
+      ]
+    },
+    {
+      "source_id": "empty_list",
+      "case_ids": [
+        "yaml/empty_list"
+      ]
+    },
+    {
+      "source_id": "nonempty_list",
+      "case_ids": [
+        "yaml/nonempty_list"
+      ]
+    },
+    {
+      "source_id": "string",
+      "case_ids": [
+        "yaml/string"
+      ]
+    },
+    {
+      "source_id": "number",
+      "case_ids": [
+        "yaml/number"
+      ]
+    },
+    {
+      "source_id": "boolean",
+      "case_ids": [
+        "yaml/boolean"
+      ]
+    },
+    {
+      "source_id": "date",
+      "case_ids": [
+        "yaml/date"
+      ]
+    },
+    {
+      "source_id": "empty_paths",
+      "case_ids": [
+        "yaml/empty_paths"
+      ]
+    },
+    {
+      "source_id": "paths_null",
+      "case_ids": [
+        "yaml/paths_null"
+      ]
+    },
+    {
+      "source_id": "paths_scalar",
+      "case_ids": [
+        "yaml/paths_scalar"
+      ]
+    },
+    {
+      "source_id": "paths_map",
+      "case_ids": [
+        "yaml/paths_map"
+      ]
+    },
+    {
+      "source_id": "paths_empty_item",
+      "case_ids": [
+        "yaml/paths_empty_item"
+      ]
+    },
+    {
+      "source_id": "paths_basic",
+      "case_ids": [
+        "yaml/paths_basic"
+      ]
+    },
+    {
+      "source_id": "paths_alias",
+      "case_ids": [
+        "yaml/paths_alias"
+      ]
+    },
+    {
+      "source_id": "merge_map",
+      "case_ids": [
+        "yaml/merge_map"
+      ]
+    },
+    {
+      "source_id": "merge_explicit_after",
+      "case_ids": [
+        "yaml/merge_explicit_after"
+      ]
+    },
+    {
+      "source_id": "merge_explicit_before",
+      "case_ids": [
+        "yaml/merge_explicit_before"
+      ]
+    },
+    {
+      "source_id": "merge_sequence",
+      "case_ids": [
+        "yaml/merge_sequence"
+      ]
+    },
+    {
+      "source_id": "repeated_merge",
+      "case_ids": [
+        "yaml/repeated_merge"
+      ]
+    },
+    {
+      "source_id": "merge_nonmap",
+      "case_ids": [
+        "yaml/merge_nonmap"
+      ]
+    },
+    {
+      "source_id": "merge_self",
+      "case_ids": [
+        "yaml/merge_self"
+      ]
+    },
+    {
+      "source_id": "recursive_unrelated_map",
+      "case_ids": [
+        "yaml/recursive_unrelated_map"
+      ]
+    },
+    {
+      "source_id": "recursive_unrelated_sequence",
+      "case_ids": [
+        "yaml/recursive_unrelated_sequence"
+      ]
+    },
+    {
+      "source_id": "recursive_paths",
+      "case_ids": [
+        "yaml/recursive_paths"
+      ]
+    },
+    {
+      "source_id": "duplicate_top",
+      "case_ids": [
+        "yaml/duplicate_top"
+      ]
+    },
+    {
+      "source_id": "duplicate_nested_unused",
+      "case_ids": [
+        "yaml/duplicate_nested_unused"
+      ]
+    },
+    {
+      "source_id": "duplicate_alias",
+      "case_ids": [
+        "yaml/duplicate_alias"
+      ]
+    },
+    {
+      "source_id": "duplicate_sequence_root",
+      "case_ids": [
+        "yaml/duplicate_sequence_root"
+      ]
+    },
+    {
+      "source_id": "duplicate_quoted",
+      "case_ids": [
+        "yaml/duplicate_quoted"
+      ]
+    },
+    {
+      "source_id": "duplicate_escape",
+      "case_ids": [
+        "yaml/duplicate_escape"
+      ]
+    },
+    {
+      "source_id": "duplicate_other",
+      "case_ids": [
+        "yaml/duplicate_other"
+      ]
+    },
+    {
+      "source_id": "case_distinct",
+      "case_ids": [
+        "yaml/case_distinct"
+      ]
+    },
+    {
+      "source_id": "literal_merge_key",
+      "case_ids": [
+        "yaml/literal_merge_key"
+      ]
+    },
+    {
+      "source_id": "unknown_tag_unused",
+      "case_ids": [
+        "yaml/unknown_tag_unused"
+      ]
+    },
+    {
+      "source_id": "binary_unused",
+      "case_ids": [
+        "yaml/binary_unused"
+      ]
+    },
+    {
+      "source_id": "set_unused",
+      "case_ids": [
+        "yaml/set_unused"
+      ]
+    },
+    {
+      "source_id": "unhashable_key",
+      "case_ids": [
+        "yaml/unhashable_key"
+      ]
+    },
+    {
+      "source_id": "tagged_str_key",
+      "case_ids": [
+        "yaml/tagged_str_key"
+      ]
+    },
+    {
+      "source_id": "undefined_alias",
+      "case_ids": [
+        "yaml/undefined_alias"
+      ]
+    },
+    {
+      "source_id": "duplicate_anchor",
+      "case_ids": [
+        "yaml/duplicate_anchor"
+      ]
+    },
+    {
+      "source_id": "multiple_docs",
+      "case_ids": [
+        "yaml/multiple_docs"
+      ]
+    },
+    {
+      "source_id": "trailing_doc_end",
+      "case_ids": [
+        "yaml/trailing_doc_end"
+      ]
+    },
+    {
+      "source_id": "malformed",
+      "case_ids": [
+        "yaml/malformed"
+      ]
+    },
+    {
+      "source_id": "tab_indent",
+      "case_ids": [
+        "yaml/tab_indent"
+      ]
+    },
+    {
+      "source_id": "item_bool_yes",
+      "case_ids": [
+        "yaml/item_bool_yes"
+      ]
+    },
+    {
+      "source_id": "item_bool_on",
+      "case_ids": [
+        "yaml/item_bool_on"
+      ]
+    },
+    {
+      "source_id": "item_bool_false",
+      "case_ids": [
+        "yaml/item_bool_false"
+      ]
+    },
+    {
+      "source_id": "item_int",
+      "case_ids": [
+        "yaml/item_int"
+      ]
+    },
+    {
+      "source_id": "item_octal",
+      "case_ids": [
+        "yaml/item_octal"
+      ]
+    },
+    {
+      "source_id": "item_octal_invalid",
+      "case_ids": [
+        "yaml/item_octal_invalid"
+      ]
+    },
+    {
+      "source_id": "item_sexagesimal",
+      "case_ids": [
+        "yaml/item_sexagesimal"
+      ]
+    },
+    {
+      "source_id": "item_float",
+      "case_ids": [
+        "yaml/item_float"
+      ]
+    },
+    {
+      "source_id": "item_scientific_no_decimal",
+      "case_ids": [
+        "yaml/item_scientific_no_decimal"
+      ]
+    },
+    {
+      "source_id": "item_date",
+      "case_ids": [
+        "yaml/item_date"
+      ]
+    },
+    {
+      "source_id": "item_null",
+      "case_ids": [
+        "yaml/item_null"
+      ]
+    },
+    {
+      "source_id": "item_binary",
+      "case_ids": [
+        "yaml/item_binary"
+      ]
+    },
+    {
+      "source_id": "item_tagged_str",
+      "case_ids": [
+        "yaml/item_tagged_str"
+      ]
+    },
+    {
+      "source_id": "item_quoted",
+      "case_ids": [
+        "yaml/item_quoted"
+      ]
+    },
+    {
+      "source_id": "item_nonfinite",
+      "case_ids": [
+        "yaml/item_nonfinite"
+      ]
+    },
+    {
+      "source_id": "item_nested_list",
+      "case_ids": [
+        "yaml/item_nested_list"
+      ]
+    },
+    {
+      "source_id": "item_nested_map",
+      "case_ids": [
+        "yaml/item_nested_map"
+      ]
+    },
+    {
+      "source_id": "unicode",
+      "case_ids": [
+        "yaml/unicode"
+      ]
+    },
+    {
+      "source_id": "unicode_bom",
+      "case_ids": [
+        "yaml/unicode_bom"
+      ]
+    },
+    {
+      "source_id": "crlf",
+      "case_ids": [
+        "yaml/crlf"
+      ]
+    },
+    {
+      "source_id": "literal_nul",
+      "case_ids": [
+        "yaml/literal_nul"
+      ]
+    },
+    {
+      "source_id": "invalid_utf8",
+      "case_ids": [
+        "yaml/invalid_utf8"
+      ]
+    },
+    {
+      "source_id": "utf16",
+      "case_ids": [
+        "yaml/utf16"
+      ]
+    },
+    {
+      "source_id": "escaped_nul",
+      "case_ids": [
+        "yaml/escaped_nul"
+      ]
+    },
+    {
+      "source_id": "escaped_del",
+      "case_ids": [
+        "yaml/escaped_del"
+      ]
+    },
+    {
+      "source_id": "escaped_c1",
+      "case_ids": [
+        "yaml/escaped_c1"
+      ]
+    },
+    {
+      "source_id": "literal_c1",
+      "case_ids": [
+        "yaml/literal_c1"
+      ]
+    },
+    {
+      "source_id": "escaped_surrogate",
+      "case_ids": [
+        "yaml/escaped_surrogate"
+      ]
+    },
+    {
+      "source_id": "escaped_low_surrogate",
+      "case_ids": [
+        "yaml/escaped_low_surrogate"
+      ]
+    },
+    {
+      "source_id": "escaped_pair",
+      "case_ids": [
+        "yaml/escaped_pair"
+      ]
+    },
+    {
+      "source_id": "unicode_scalar",
+      "case_ids": [
+        "yaml/unicode_scalar"
+      ]
+    },
+    {
+      "source_id": "value_tag_key",
+      "case_ids": [
+        "yaml/value_tag_key"
+      ]
+    },
+    {
+      "source_id": "value_tag_duplicate",
+      "case_ids": [
+        "yaml/value_tag_duplicate"
+      ]
+    },
+    {
+      "source_id": "value_tag_duplicate_reverse",
+      "case_ids": [
+        "yaml/value_tag_duplicate_reverse"
+      ]
+    },
+    {
+      "source_id": "merge_tag_custom_spelling",
+      "case_ids": [
+        "yaml/merge_tag_custom_spelling"
+      ]
+    },
+    {
+      "source_id": "invalid_date_unused",
+      "case_ids": [
+        "yaml/invalid_date_unused"
+      ]
+    },
+    {
+      "source_id": "date_unused",
+      "case_ids": [
+        "yaml/date_unused"
+      ]
+    },
+    {
+      "source_id": "binary_invalid_unused",
+      "case_ids": [
+        "yaml/binary_invalid_unused"
+      ]
+    },
+    {
+      "source_id": "nonstring_valid_key",
+      "case_ids": [
+        "yaml/nonstring_valid_key"
+      ]
+    },
+    {
+      "source_id": "single_y_n",
+      "case_ids": [
+        "yaml/single_y_n"
+      ]
+    }
+  ],
+  "json_row_cases": [
+    {
+      "source_id": "json/pair",
+      "yaml_before_and_matcher_case": "json/pair",
+      "saved_json_and_after_source": "legacy-only JSON boundary; fixed codepoints passed into Rust matcher"
+    },
+    {
+      "source_id": "json/scalar",
+      "yaml_before_and_matcher_case": "json/scalar",
+      "saved_json_and_after_source": "legacy-only JSON boundary; fixed codepoints passed into Rust matcher"
+    },
+    {
+      "source_id": "json/high",
+      "yaml_before_and_matcher_case": "json/high",
+      "saved_json_and_after_source": "legacy-only JSON boundary; fixed codepoints passed into Rust matcher"
+    },
+    {
+      "source_id": "json/low",
+      "yaml_before_and_matcher_case": "json/low",
+      "saved_json_and_after_source": "legacy-only JSON boundary; fixed codepoints passed into Rust matcher"
+    }
+  ],
+  "reverse_sources": {
+    "canonical/empty": [
+      "S01"
+    ],
+    "canonical/order_and_exact_duplicates": [
+      "S02"
+    ],
+    "canonical/null": [
+      "S03"
+    ],
+    "canonical/scalar": [
+      "S03"
+    ],
+    "canonical/number": [
+      "S03"
+    ],
+    "canonical/boolean": [
+      "S03"
+    ],
+    "canonical/empty_string": [
+      "S03"
+    ],
+    "canonical/slash_only": [
+      "S04"
+    ],
+    "canonical/double_slash": [
+      "S04"
+    ],
+    "canonical/forbidden_0x27": [
+      "S04"
+    ],
+    "canonical/forbidden_0x22": [
+      "S04"
+    ],
+    "canonical/forbidden_0x60": [
+      "S04"
+    ],
+    "canonical/forbidden_0x24": [
+      "S04"
+    ],
+    "canonical/forbidden_0x5b": [
+      "S04"
+    ],
+    "canonical/forbidden_0x5d": [
+      "S04"
+    ],
+    "canonical/forbidden_0x7b": [
+      "S04"
+    ],
+    "canonical/forbidden_0x7d": [
+      "S04"
+    ],
+    "canonical/forbidden_0x0": [
+      "S04"
+    ],
+    "canonical/forbidden_0x1f": [
+      "S04"
+    ],
+    "canonical/forbidden_0x7f": [
+      "S04"
+    ],
+    "canonical/accepted_' '": [
+      "S05"
+    ],
+    "canonical/accepted_'a b'": [
+      "S05"
+    ],
+    "canonical/accepted_'../x'": [
+      "S05"
+    ],
+    "canonical/accepted_'./x'": [
+      "S05"
+    ],
+    "canonical/accepted_'a/../b'": [
+      "S05"
+    ],
+    "canonical/accepted_'!x'": [
+      "S05"
+    ],
+    "canonical/accepted_'a\\\\b'": [
+      "S05"
+    ],
+    "canonical/accepted_'/x'": [
+      "S05"
+    ],
+    "canonical/accepted_'x/'": [
+      "S05"
+    ],
+    "canonical/accepted_'***'": [
+      "S05"
+    ],
+    "canonical/accepted_'*'": [
+      "S05"
+    ],
+    "canonical/accepted_'**'": [
+      "S05"
+    ],
+    "canonical/accepted_'.'": [
+      "S05"
+    ],
+    "canonical/accepted_'#x'": [
+      "S05"
+    ],
+    "canonical/accepted_'x:y'": [
+      "S05"
+    ],
+    "canonical/accepted_'x|y'": [
+      "S05"
+    ],
+    "canonical/accepted_'x+y'": [
+      "S05"
+    ],
+    "canonical/accepted_'İ'": [
+      "S05"
+    ],
+    "canonical/accepted_'K'": [
+      "S05"
+    ],
+    "matcher/'.env' 'nested/.ENV'": [
+      "S06"
+    ],
+    "matcher/'/.env' 'nested/.env'": [
+      "S07"
+    ],
+    "matcher/'/.env' '.ENV'": [
+      "S07"
+    ],
+    "matcher/'a/*' 'a/b/c'": [
+      "S08"
+    ],
+    "matcher/'a/**' 'a/b/c'": [
+      "S08"
+    ],
+    "matcher/'**/key' 'key'": [
+      "S09"
+    ],
+    "matcher/'a/**/key' 'a/key'": [
+      "S09"
+    ],
+    "matcher/'a?' 'a/'": [
+      "S10"
+    ],
+    "matcher/'vault' 'vault/file'": [
+      "S11"
+    ],
+    "matcher/'vault/' 'vault/file'": [
+      "S12"
+    ],
+    "matcher/'vault/' 'x/vault'": [
+      "S12"
+    ],
+    "matcher/'!x' 'x'": [
+      "S05"
+    ],
+    "matcher/'../x' 'x'": [
+      "S05"
+    ],
+    "matcher/'./x' 'x'": [
+      "S05"
+    ],
+    "matcher/'a\\\\b' 'a/b'": [
+      "S05"
+    ],
+    "matcher/'i' 'İ'": [
+      "S13"
+    ],
+    "matcher/'i' 'ı'": [
+      "S13"
+    ],
+    "matcher/'s' 'ſ'": [
+      "S13"
+    ],
+    "matcher/'k' 'K'": [
+      "S13"
+    ],
+    "matcher/'ß' 'SS'": [
+      "S13"
+    ]
+  },
+  "fixture_file": "cases.json",
+  "fixture_sha256": "48893743a678f43fa46ad585abf2a8854c5abb444570f2c2bfa2c617429c6676",
+  "row_links": [
+    {
+      "table": 1,
+      "row": 1,
+      "source": "| `loop-state.py:1348 profile_patterns` | `snapshot:1825` → 各 worktree の `profile_patterns:1887`。現在の `.claude/project-profile.yml` を開いた親から読む | S2L。本調査の主対象。残る 6 コマンドは保存 JSON を読むため、この経路で YAML を再読しない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 2,
+      "source": "| `loop-state.py:1400 canonical_secret_patterns` | YAML を読まない。解析後の型・glob を確かめ、既定 3 指定を付け順序を保って重複除去 | S2L の前状態再利用からも利用 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 3,
+      "source": "| `secret-profiles.py:188 paths_from_yaml` | UTF-8 を先に検査。compose→重複検査→safe_load。null 以外の非 dict 最上位を拒否。返り値には既定を足さず重複も残す | R4S。`main:251` の現在・各 ref、`diagnostic-plan.py:155 add_source` が利用 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 4,
+      "source": "| `secret-profiles.py:251 main` | 既定→現在→ref 引数順で指定を足し、完全一致の重複を除いて UTF-8 NUL 列を出す | R4S/S3D/R4M。CLI 出力差は今回の loop-state 契約と分ける |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 5,
+      "source": "| `loop.sh:318 cmd_profile` | 固定した profile の別項目を `safe_load(open(...,\"rb\"))` で読む。`secret_paths` を検査しない。最上位非 dict は拒否 | 将来の loop.sh 移植側。secret_paths 専用規則をそのまま入れない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 6,
+      "source": "| `host-check.py:536 frontmatter_grants` / `:588 cross_check_yaml` | 自前の厳しい行解析が主。PyYAML は任意の突き合わせ。権限宣言に alias/merge/引用キーを使う形は拒否する。無関係な曖昧 YAML は受理する場合がある | R4H。secret_paths 解析器への一律置換は禁止。今回の 6 例は境界を示すだけで全面設計ではない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 1,
+      "row": 7,
+      "source": "| `diagnostic-plan.py:155 add_source` | `paths_from_yaml(raw,\"診断\")` の ProfileError を `profile-invalid` / 終了 23 へ変える | R4D。上流の用途別拒否を引き継ぐ |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "境界資料。loopのbytes入口のみRust実装"
+    },
+    {
+      "table": 2,
+      "row": 1,
+      "source": "| empty | `\"\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/empty"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 2,
+      "source": "| comment | `\"# only\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/comment"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 3,
+      "source": "| null | `\"null\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/null"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 4,
+      "source": "| empty_map | `\"{}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/empty_map"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 5,
+      "source": "| keyless | `\"quality: {}\\n\"` | `D` | `[]` | L/P + 実測 | S1 | 専用比較 |",
+      "case_ids": [
+        "yaml/keyless"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 6,
+      "source": "| empty_list | `\"[]\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/empty_list"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 7,
+      "source": "| nonempty_list | `\"[a,b]\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/nonempty_list"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 8,
+      "source": "| string | `\"hello\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/string"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 9,
+      "source": "| number | `\"17\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/number"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 10,
+      "source": "| boolean | `\"true\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/boolean"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 11,
+      "source": "| date | `\"2026-11-09\\n\"` | `D` | `ProfileError(\"観測 の profile は map でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/date"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 12,
+      "source": "| empty_paths | `\"secret_paths: []\\n\"` | `D` | `[]` | L/P + 実測 | S1/L1 | 専用比較 |",
+      "case_ids": [
+        "yaml/empty_paths"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 13,
+      "source": "| paths_null | `\"secret_paths:\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_null"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 14,
+      "source": "| paths_scalar | `\"secret_paths: plain\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_scalar"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 15,
+      "source": "| paths_map | `\"secret_paths: {}\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_map"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 16,
+      "source": "| paths_empty_item | `\"secret_paths: [\\\"\\\"]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_empty_item"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 17,
+      "source": "| paths_basic | `\"secret_paths: [vault, .env, vault, second]\\n\"` | `D + [\"vault\",\"second\"]` | `[\"vault\",\".env\",\"vault\",\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_basic"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 18,
+      "source": "| paths_alias | `\"defs: &p [vault]\\nsecret_paths: *p\\n\"` | `D + [\"vault\"]` | `[\"vault\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/paths_alias"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 19,
+      "source": "| merge_map | `\"defs: &d {secret_paths: [merged]}\\n<<: *d\\n\"` | `D + [\"merged\"]` | `[\"merged\"]` | L/P + 実測 | S1 | 専用比較 |",
+      "case_ids": [
+        "yaml/merge_map"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 20,
+      "source": "| merge_explicit_after | `\"defs: &d {secret_paths: [merged]}\\n<<: *d\\nsecret_paths: [explicit]\\n\"` | `D + [\"explicit\"]` | `[\"explicit\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_explicit_after"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 21,
+      "source": "| merge_explicit_before | `\"secret_paths: [explicit]\\ndefs: &d {secret_paths: [merged]}\\n<<: *d\\n\"` | `D + [\"explicit\"]` | `[\"explicit\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_explicit_before"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 22,
+      "source": "| merge_sequence | `\"a: &a {secret_paths: [first]}\\nb: &b {secret_paths: [second]}\\n<<: [*a,*b]\\n\"` | `D + [\"first\"]` | `[\"first\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_sequence"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 23,
+      "source": "| repeated_merge | `\"a: &a {secret_paths: [first]}\\nb: &b {secret_paths: [second]}\\n<<: *a\\n<<: *b\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/repeated_merge"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 24,
+      "source": "| merge_nonmap | `\"<<: [first]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_nonmap"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 25,
+      "source": "| merge_self | `\"&s {<<: *s, secret_paths: [self]}\\n\"` | `D + [\"self\"]` | `[\"self\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_self"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 26,
+      "source": "| recursive_unrelated_map | `\"other: &r {self: *r}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/recursive_unrelated_map"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 27,
+      "source": "| recursive_unrelated_sequence | `\"other: &r [*r]\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/recursive_unrelated_sequence"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 28,
+      "source": "| recursive_paths | `\"secret_paths: &r [*r]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/recursive_paths"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 29,
+      "source": "| duplicate_top | `\"secret_paths: [a]\\nsecret_paths: [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S2/S3 | 専用比較 |",
+      "case_ids": [
+        "yaml/duplicate_top"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 30,
+      "source": "| duplicate_nested_unused | `\"other: {secret_paths: [a], secret_paths: [b]}\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_nested_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 31,
+      "source": "| duplicate_alias | `\"defs: &d {secret_paths: [a], secret_paths: [b]}\\n<<: *d\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S2/L1 | 専用比較 |",
+      "case_ids": [
+        "yaml/duplicate_alias"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 32,
+      "source": "| duplicate_sequence_root | `\"- {secret_paths: [a], secret_paths: [b]}\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_sequence_root"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 33,
+      "source": "| duplicate_quoted | `\"secret_paths: [a]\\n\\\"secret_paths\\\": [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_quoted"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 34,
+      "source": "| duplicate_escape | `\"secret_paths: [a]\\n\\\"secret_\\\\u0070aths\\\": [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_escape"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 35,
+      "source": "| duplicate_other | `\"other: first\\nother: second\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_other"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 36,
+      "source": "| case_distinct | `\"Secret_paths: [ignored]\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/case_distinct"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 37,
+      "source": "| literal_merge_key | `\"\\\"<<\\\": {secret_paths: [ignored]}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/literal_merge_key"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 38,
+      "source": "| unknown_tag_unused | `\"other: !custom value\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/unknown_tag_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 39,
+      "source": "| binary_unused | `\"other: !!binary YQ==\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/binary_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 40,
+      "source": "| set_unused | `\"other: !!set {a: null}\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/set_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 41,
+      "source": "| unhashable_key | `\"? [a, b]\\n: value\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/unhashable_key"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 42,
+      "source": "| tagged_str_key | `\"!!str secret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/tagged_str_key"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 43,
+      "source": "| undefined_alias | `\"secret_paths: *missing\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/undefined_alias"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 44,
+      "source": "| duplicate_anchor | `\"a: &x [a]\\nb: &x [b]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/duplicate_anchor"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 45,
+      "source": "| multiple_docs | `\"secret_paths: [first]\\n---\\nsecret_paths: [second]\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/multiple_docs"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 46,
+      "source": "| trailing_doc_end | `\"secret_paths: [first]\\n...\\n\"` | `D + [\"first\"]` | `[\"first\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/trailing_doc_end"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 47,
+      "source": "| malformed | `\"secret_paths: [\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | S1 | 専用比較 |",
+      "case_ids": [
+        "yaml/malformed"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 48,
+      "source": "| tab_indent | `\"secret_paths:\\n\\t- a\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/tab_indent"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 49,
+      "source": "| item_bool_yes | `\"secret_paths: [yes]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_bool_yes"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 50,
+      "source": "| item_bool_on | `\"secret_paths: [ON]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_bool_on"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 51,
+      "source": "| item_bool_false | `\"secret_paths: [False]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_bool_false"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 52,
+      "source": "| item_int | `\"secret_paths: [123]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_int"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 53,
+      "source": "| item_octal | `\"secret_paths: [012]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_octal"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 54,
+      "source": "| item_octal_invalid | `\"secret_paths: [08]\\n\"` | `D + [\"08\"]` | `[\"08\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_octal_invalid"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 55,
+      "source": "| item_sexagesimal | `\"secret_paths: [1:20]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_sexagesimal"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 56,
+      "source": "| item_float | `\"secret_paths: [1.5]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_float"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 57,
+      "source": "| item_scientific_no_decimal | `\"secret_paths: [1e3]\\n\"` | `D + [\"1e3\"]` | `[\"1e3\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_scientific_no_decimal"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 58,
+      "source": "| item_date | `\"secret_paths: [2026-11-09]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_date"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 59,
+      "source": "| item_null | `\"secret_paths: [~]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_null"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 60,
+      "source": "| item_binary | `\"secret_paths: [!!binary YQ==]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_binary"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 61,
+      "source": "| item_tagged_str | `\"secret_paths: [!!str yes]\\n\"` | `D + [\"yes\"]` | `[\"yes\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_tagged_str"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 62,
+      "source": "| item_quoted | `\"secret_paths: [\\\"yes\\\"]\\n\"` | `D + [\"yes\"]` | `[\"yes\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_quoted"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 63,
+      "source": "| item_nonfinite | `\"secret_paths: [.nan]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_nonfinite"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 64,
+      "source": "| item_nested_list | `\"secret_paths: [[a]]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_nested_list"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 65,
+      "source": "| item_nested_map | `\"secret_paths: [{a: b}]\\n\"` | `Stop(\"secret_paths が文字列配列でない\")` | `ProfileError(\"観測 の secret_paths は文字列の配列でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/item_nested_map"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 66,
+      "source": "| unicode | `\"secret_paths: [\\\"\\u65e5\\u672c\\u8a9e\\\", \\\"\\u00e9\\\", \\\"e\\u0301\\\"]\\n\"` | `D + [\"\\u65e5\\u672c\\u8a9e\",\"\\u00e9\",\"e\\u0301\"]` | `[\"\\u65e5\\u672c\\u8a9e\",\"\\u00e9\",\"e\\u0301\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/unicode"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 67,
+      "source": "| unicode_bom | `\"\\ufeffsecret_paths: [\\u65e5\\u672c\\u8a9e]\\n\"` | `D + [\"\\u65e5\\u672c\\u8a9e\"]` | `[\"\\u65e5\\u672c\\u8a9e\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/unicode_bom"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 68,
+      "source": "| crlf | `\"secret_paths: [safe]\\r\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/crlf"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 69,
+      "source": "| literal_nul | `bytes.hex=7365637265745f70617468733a205b22610062225d0a` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/literal_nul"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 70,
+      "source": "| invalid_utf8 | `bytes.hex=7365637265745f70617468733a205b22ff225d0a` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile は UTF-8 でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/invalid_utf8"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 71,
+      "source": "| utf16 | `bytes.hex=fffe7300650063007200650074005f00700061007400680073003a0020005b0073006100660065005d000a00` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile は UTF-8 でなければならない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/utf16"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 72,
+      "source": "| escaped_nul | `\"secret_paths: [\\\"a\\\\0b\\\"]\\n\"` | `Stop(\"secret_paths に不正な glob がある\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | S3（同等条件。入力文字列は異なる） | Rust比較への接続・今回の固定期待値 |",
+      "case_ids": [
+        "yaml/escaped_nul"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 73,
+      "source": "| escaped_del | `\"secret_paths: [\\\"a\\\\x7fb\\\"]\\n\"` | `Stop(\"secret_paths に不正な glob がある\")` | `ProfileError(\"観測 の secret_paths に不正な glob がある\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/escaped_del"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 74,
+      "source": "| escaped_c1 | `\"secret_paths: [\\\"a\\\\x85b\\\"]\\n\"` | D + 1文字列（コードポイント U+0061,U+0085,U+0062） | 同じ1文字列だけ | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/escaped_c1"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 75,
+      "source": "| literal_c1 | `bytes.hex=7365637265745f70617468733a205b2261c28562225d0a` | `D + [\"a b\"]` | `[\"a b\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/literal_c1"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 76,
+      "source": "| escaped_surrogate | `\"secret_paths: [\\\"\\\\uD800\\\"]\\n\"` | `D + [\"\\ud800\"]` | `[\"\\ud800\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/escaped_surrogate"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 77,
+      "source": "| escaped_low_surrogate | `\"secret_paths: [\\\"\\\\uDC80\\\"]\\n\"` | `D + [\"\\udc80\"]` | `[\"\\udc80\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/escaped_low_surrogate"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 78,
+      "source": "| escaped_pair（YAML直後 U+D83D,U+DE00） | `\"secret_paths: [\\\"\\\\uD83D\\\\uDE00\\\"]\\n\"` | D + 1文字列（コードポイント U+D83D,U+DE00） | 1文字列だけ（コードポイント U+D83D,U+DE00） | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/escaped_pair"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 79,
+      "source": "| unicode_scalar（YAML直後 U+1F600） | `\"secret_paths: [\\\"\\\\U0001F600\\\"]\\n\"` | D + 1文字列（コードポイント U+1F600） | 1文字列だけ（コードポイント U+1F600） | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/unicode_scalar"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 80,
+      "source": "| value_tag_key | `\"!!value secret_paths: [fromvalue]\\n\"` | `D + [\"fromvalue\"]` | `[\"fromvalue\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/value_tag_key"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 81,
+      "source": "| value_tag_duplicate | `\"!!value secret_paths: [first]\\nsecret_paths: [second]\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/value_tag_duplicate"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 82,
+      "source": "| value_tag_duplicate_reverse | `\"secret_paths: [first]\\n!!value secret_paths: [second]\\n\"` | `D + [\"second\"]` | `[\"second\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/value_tag_duplicate_reverse"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 83,
+      "source": "| merge_tag_custom_spelling | `\"!!merge anything: {secret_paths: [merged]}\\n\"` | `D + [\"merged\"]` | `[\"merged\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/merge_tag_custom_spelling"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 84,
+      "source": "| invalid_date_unused | `\"other: 2026-99-99\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/invalid_date_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 85,
+      "source": "| date_unused | `\"other: 2026-11-09\\n\"` | `D` | `[]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/date_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 86,
+      "source": "| binary_invalid_unused | `\"other: !!binary a\\n\"` | `Stop(\"secret_paths を安全に読めない\")` | `ProfileError(\"観測 の profile YAML を読めない\")` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/binary_invalid_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 87,
+      "source": "| nonstring_valid_key | `\"true: ignored\\nsecret_paths: [safe]\\n\"` | `D + [\"safe\"]` | `[\"safe\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/nonstring_valid_key"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 2,
+      "row": 88,
+      "source": "| single_y_n | `\"secret_paths: [y, n]\\n\"` | `D + [\"y\",\"n\"]` | `[\"y\",\"n\"]` | L/P + 実測 | 未追加 | 専用比較・旧版の期待値固定 |",
+      "case_ids": [
+        "yaml/single_y_n"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 3,
+      "row": 1,
+      "source": "| empty_list | 0 | `\"\"` | あり | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile \\u306f map \\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/empty_list"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 2,
+      "source": "| paths_null | 20 | `\"ERROR [loop-state] secret_paths \\u304c\\u6587\\u5b57\\u5217\\u914d\\u5217\\u3067\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e secret_paths \\u306f\\u914d\\u5217\\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/paths_null"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 3,
+      "source": "| paths_empty_item | 20 | `\"ERROR [loop-state] secret_paths \\u304c\\u6587\\u5b57\\u5217\\u914d\\u5217\\u3067\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e secret_paths \\u306b\\u4e0d\\u6b63\\u306a glob \\u304c\\u3042\\u308b\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/paths_empty_item"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 4,
+      "source": "| duplicate_top | 20 | `\"ERROR [loop-state] secret_paths \\u3092\\u5b89\\u5168\\u306b\\u8aad\\u3081\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile YAML \\u3092\\u8aad\\u3081\\u306a\\u3044\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/duplicate_top"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 5,
+      "source": "| invalid_utf8 | 20 | `\"ERROR [loop-state] secret_paths \\u3092\\u5b89\\u5168\\u306b\\u8aad\\u3081\\u306a\\u3044\\n\"` | なし | 20 | `\"ERROR [secret-profile] \\u73fe\\u5728 \\u306e profile \\u306f UTF-8 \\u3067\\u306a\\u3051\\u308c\\u3070\\u306a\\u3089\\u306a\\u3044\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/invalid_utf8"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 6,
+      "source": "| escaped_surrogate | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode character '\\\\ud800' in position 0: surrogates not allowed\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/escaped_surrogate"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 7,
+      "source": "| escaped_low_surrogate | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode character '\\\\udc80' in position 0: surrogates not allowed\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/escaped_low_surrogate"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 8,
+      "source": "| escaped_pair（YAML直後 U+D83D,U+DE00） | 0 | `\"\"` | あり | 1 | `\"UnicodeEncodeError: 'utf-8' codec can't encode characters in position 0-1: surrogates not allowed\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/escaped_pair"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 3,
+      "row": 9,
+      "source": "| unicode_scalar（YAML直後 U+1F600） | 0 | `\"\"` | あり | 0 | `\"\"` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.yaml_cli/unicode_scalar"
+      ],
+      "out_of_scope_reason": "旧CLI境界のみ。Rust公開CLI/状態保存を実装しない"
+    },
+    {
+      "table": 4,
+      "row": 1,
+      "source": "| `\\uD83D\\uDE00` | `[\"U+D83D\",\"U+DE00\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud83d\\\\ude00\\\"]}\"` | `[\"U+1F600\"]` | False → True |",
+      "case_ids": [
+        "yaml/escaped_pair"
+      ],
+      "boundary_ids": [
+        "json/pair"
+      ],
+      "out_of_scope_reason": "JSON保存は旧版だけ。保存後整数列をRust matcherへ渡す"
+    },
+    {
+      "table": 4,
+      "row": 2,
+      "source": "| `\\U0001F600` | `[\"U+1F600\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud83d\\\\ude00\\\"]}\"` | `[\"U+1F600\"]` | True → True |",
+      "case_ids": [
+        "yaml/unicode_scalar"
+      ],
+      "boundary_ids": [
+        "json/scalar"
+      ],
+      "out_of_scope_reason": "JSON保存は旧版だけ。保存後整数列をRust matcherへ渡す"
+    },
+    {
+      "table": 4,
+      "row": 3,
+      "source": "| `\\uD800` | `[\"U+D800\"]` | `\"{\\\"patterns\\\":[\\\"\\\\ud800\\\"]}\"` | `[\"U+D800\"]` | False → False |",
+      "case_ids": [
+        "yaml/escaped_surrogate"
+      ],
+      "boundary_ids": [
+        "json/high"
+      ],
+      "out_of_scope_reason": "JSON保存は旧版だけ。保存後整数列をRust matcherへ渡す"
+    },
+    {
+      "table": 4,
+      "row": 4,
+      "source": "| `\\uDC80` | `[\"U+DC80\"]` | `\"{\\\"patterns\\\":[\\\"\\\\udc80\\\"]}\"` | `[\"U+DC80\"]` | False → False |",
+      "case_ids": [
+        "yaml/escaped_low_surrogate"
+      ],
+      "boundary_ids": [
+        "json/low"
+      ],
+      "out_of_scope_reason": "JSON保存は旧版だけ。保存後整数列をRust matcherへ渡す"
+    },
+    {
+      "table": 5,
+      "row": 1,
+      "source": "| plain | `\"---\\nallowed-tools: Read\\n---\\n\"` | `[\"Read\"]` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/plain"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 5,
+      "row": 2,
+      "source": "| duplicate | `\"---\\nallowed-tools: Read\\nallowed-tools: Grep\\n---\\n\"` | `Unclear: allowed-tools の鍵が重複している` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/duplicate"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 5,
+      "row": 3,
+      "source": "| alias | `\"---\\na: &a [Read]\\nallowed-tools: *a\\n---\\n\"` | `Unclear: 値を解釈できない(YAML の記号・注釈・入れ子)` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/alias"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 5,
+      "row": 4,
+      "source": "| merge | `\"---\\na: &a {allowed-tools: Read}\\n<<: *a\\n---\\n\"` | `Unclear: frontmatter の行を解釈できない(引用の鍵・フロー・アンカー・タグ・マージ・指示)` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/merge"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 5,
+      "row": 5,
+      "source": "| quoted_key | `\"---\\n\\\"allowed-tools\\\": Read\\n---\\n\"` | `Unclear: frontmatter の行を解釈できない(引用の鍵・フロー・アンカー・タグ・マージ・指示)` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/quoted_key"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 5,
+      "row": 6,
+      "source": "| invalid_unrelated | `\"---\\nname: x\\n\\\"quoted\\\": 1\\n{a: 1}\\n---\\n\"` | `null` |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.host/invalid_unrelated"
+      ],
+      "out_of_scope_reason": "旧host境界6件のみ。R4Hを実装しない"
+    },
+    {
+      "table": 6,
+      "row": 1,
+      "source": "| `loop.sh take_snapshot` → `loop-state snapshot` → `profile_patterns` | 各現在 worktree の `.claude/project-profile.yml`。親を開いたまま通常ファイルを読む | `ship/loop.sh:711–729`、`ship/loop-state.py:1348–1397,1825–1902` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 2,
+      "source": "| `loop.sh` 起動時 `py profile` | デフォルトブランチの固定 SHA から `100644 blob` だけを取り出す。`safe_load`。機密指定の検査なし | `ship/loop.sh:318–389,3004–3039` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 3,
+      "source": "| `secret-profiles.py` | 現在 profile → 引数 `--ref` 順の commit profile。既定3指定と初出順の和集合を NUL 区切り出力 | `do/secret-profiles.py:74–186,189–280` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 4,
+      "source": "| `diagnostic-plan.py add_source` | `secret-profiles.paths_from_yaml` と安全な現在/commit reader を再利用。保存する計画へ単調に追加 | `do/diagnostic-plan.py:134–169,181–210` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 5,
+      "source": "| `prior_state` → `prior_secret_patterns` | JSON 状態を読み、schema 7 を要求。その後、機密指定行と worktree 対応を検査 | `ship/loop-state.py:1411–1418,1490–1531` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 6,
+      "source": "| `read_state` | 有界な通常ファイル読み取り → `json.loads` → 最上位 dict の確認だけ | `ship/loop-state.py:1711–1752` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 7,
+      "source": "| `compare` | 最初の状態の schema/必須キーを確認。前後完全同一なら即 0 | `ship/loop-state.py:1959–1977` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 6,
+      "row": 8,
+      "source": "| `state-digest` | JSON を解析せず、元の状態バイト列をハッシュ化 | `ship/loop-state.py:1738–1740` |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "経路資料。取得済みbytes以降の純粋処理だけRust実装"
+    },
+    {
+      "table": 7,
+      "row": 1,
+      "source": "| S01 | profile 不在、または `secret_paths: []` | `['.env','.env.*','.dev.vars']` | `loop-state.py:1352–1364,1408` | `test_normal_snapshot_is_stable_and_secret_is_metadata_only`（不在） | 空配列の正確な保存順、`.claude` だけ存在するケース |",
+      "case_ids": [
+        "yaml/empty_paths",
+        "canonical/empty"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "profile absence handled by S2L"
+    },
+    {
+      "table": 7,
+      "row": 2,
+      "source": "| S02 | `secret_paths: [z,a,z,.env,A,a]` | `['.env','.env.*','.dev.vars','z','a','A']` | `1400–1408`、観測 `canonical/order_and_exact_duplicates` | 直接の順序テストなし | 正確な順序・大小文字違いの重複非除去 |",
+      "case_ids": [
+        "canonical/order_and_exact_duplicates",
+        "yaml/paths_basic"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 3,
+      "source": "| S03 | `secret_paths: null`、文字列 `a`、`[1]`、`[true]`、`['']` | `Stop('secret_paths が文字列配列でない')`。snapshot なら終了20 | `1402–1403,2195–2197`、観測 `canonical` | loop-state の直接テストなし | 各型を別ケースにする |",
+      "case_ids": [
+        "canonical/null",
+        "canonical/scalar",
+        "canonical/number",
+        "canonical/boolean",
+        "canonical/empty_string",
+        "yaml/paths_null",
+        "yaml/paths_scalar",
+        "yaml/paths_map",
+        "yaml/paths_empty_item"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 4,
+      "source": "| S04 | 指定内の `//`、`/` だけ、U+0000〜001F、U+007F、引用符2種、バッククォート、`$`、`[`、`]`、`{`、`}` | `Stop('secret_paths に不正な glob がある')` | `1405–1407` | `test_profile_normal_merge_is_allowed_but_secret_duplicate_and_bad_glob_stop`（`bad[glob`） | 各禁止文字、境界 U+001F/U+0020/U+007E/U+007F/U+0080 |",
+      "case_ids": [
+        "canonical/forbidden_0x27",
+        "canonical/forbidden_0x22",
+        "canonical/forbidden_0x60",
+        "canonical/forbidden_0x24",
+        "canonical/forbidden_0x5b",
+        "canonical/forbidden_0x5d",
+        "canonical/forbidden_0x7b",
+        "canonical/forbidden_0x7d",
+        "canonical/forbidden_0x0",
+        "canonical/forbidden_0x1f",
+        "canonical/forbidden_0x7f",
+        "S04/control-01",
+        "S04/control-02",
+        "S04/control-03",
+        "S04/control-04",
+        "S04/control-05",
+        "S04/control-06",
+        "S04/control-07",
+        "S04/control-08",
+        "S04/control-09",
+        "S04/control-0a",
+        "S04/control-0b",
+        "S04/control-0c",
+        "S04/control-0d",
+        "S04/control-0e",
+        "S04/control-0f",
+        "S04/control-10",
+        "S04/control-11",
+        "S04/control-12",
+        "S04/control-13",
+        "S04/control-14",
+        "S04/control-15",
+        "S04/control-16",
+        "S04/control-17",
+        "S04/control-18",
+        "S04/control-19",
+        "S04/control-1a",
+        "S04/control-1b",
+        "S04/control-1c",
+        "S04/control-1d",
+        "S04/control-1e",
+        "S04/boundary-20",
+        "S04/boundary-7e",
+        "S04/boundary-80",
+        "canonical/slash_only",
+        "canonical/double_slash",
+        "E11"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 5,
+      "source": "| S05 | `' '`、`'../x'`、`'./x'`、`'a/../b'`、`'!x'`、バックスラッシュ入り、`'*'`、`'**'`、`'.'` | すべて指定として受理。正規化・否定指定・全件除外拒否を加えない | `1400–1408`、観測 `canonical/accepted_*` | 直接テストなし | 受理を保持。特に `*` は root `.` も機密化し全木が属性だけになる |",
+      "case_ids": [
+        "canonical/accepted_' '",
+        "canonical/accepted_'a b'",
+        "canonical/accepted_'../x'",
+        "canonical/accepted_'./x'",
+        "canonical/accepted_'a/../b'",
+        "canonical/accepted_'!x'",
+        "canonical/accepted_'a\\\\b'",
+        "canonical/accepted_'/x'",
+        "canonical/accepted_'x/'",
+        "canonical/accepted_'***'",
+        "canonical/accepted_'*'",
+        "canonical/accepted_'**'",
+        "canonical/accepted_'.'",
+        "canonical/accepted_'#x'",
+        "canonical/accepted_'x:y'",
+        "canonical/accepted_'x|y'",
+        "canonical/accepted_'x+y'",
+        "canonical/accepted_'İ'",
+        "canonical/accepted_'K'",
+        "S10/star-root",
+        "matcher/'!x' 'x'",
+        "matcher/'../x' 'x'",
+        "matcher/'./x' 'x'",
+        "matcher/'a\\\\b' 'a/b'",
+        "direct-matcher/literal-backslash",
+        "direct-matcher/literal-backslash-not-slash"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 6,
+      "source": "| S06 | `.env` と `nested/.ENV` | 一致。大小文字は区別しない | `179–202` | `test_secret_globs_do_not_hash_nested_case_or_directory_contents` | 大文字・小文字の保持 |",
+      "case_ids": [
+        "matcher/'.env' 'nested/.ENV'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 7,
+      "source": "| S07 | `/.env` と `.ENV` / `nested/.env` | root のみ一致 / 不一致 | `198–200`、観測 `matcher` | 直接テストなし | anchor の比較 |",
+      "case_ids": [
+        "matcher/'/.env' 'nested/.env'",
+        "matcher/'/.env' '.ENV'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 8,
+      "source": "| S08 | `a/*` と `a/b/c`、`a/**` と `a/b/c` | 不一致 / 一致 | `188–196`、観測 `matcher` | 子孫の一部は既存テスト | `*` のスラッシュ境界 |",
+      "case_ids": [
+        "matcher/'a/*' 'a/b/c'",
+        "matcher/'a/**' 'a/b/c'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 9,
+      "source": "| S09 | `**/key` と `key`、`a/**/key` と `a/key` | 両方一致。ゼロ階層を含む | `190–193` | `test_double_star_zero_directory_and_secret_directory_metadata` | 既存入力を再利用 |",
+      "case_ids": [
+        "matcher/'**/key' 'key'",
+        "matcher/'a/**/key' 'a/key'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 10,
+      "source": "| S10 | `a?` と `a/` | 不一致。`?` は `/` 以外1文字 | `195`、観測 `matcher` | 直接テストなし | Unicode1文字、0/2文字の境界 |",
+      "case_ids": [
+        "matcher/'a?' 'a/'",
+        "E08",
+        "S10/zero",
+        "S10/unicode-one",
+        "S10/two",
+        "S10/surrogate-pair-two"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 11,
+      "source": "| S11 | `vault` と `vault/file` を `secret_path` へ直接渡す | 不一致 | `199`、観測 `matcher` | 直接テストなし | 後述の tree 継承と分ける |",
+      "case_ids": [
+        "matcher/'vault' 'vault/file'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 12,
+      "source": "| S12 | `vault/` と `vault/file` / `x/vault` | 両方一致 | `184,198–200`、観測 `matcher` | `test_secret_globs_do_not_hash_nested_case_or_directory_contents` の一部 | root/nestedと末尾 `/` の組合せ |",
+      "case_ids": [
+        "matcher/'vault/' 'vault/file'",
+        "matcher/'vault/' 'x/vault'",
+        "E07",
+        "direct-matcher/directory-terminal-lf"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 13,
+      "source": "| S13 | glob `i` と `İ`/`ı`、`s` と `ſ`、`k` と `K`、`ß` と `SS` | 最初の4組は一致、最後は不一致 | Python `re.IGNORECASE`、観測 `matcher` | なし | Python Unicode照合をASCII ignore-caseへ置換しない |",
+      "case_ids": [
+        "matcher/'i' 'İ'",
+        "matcher/'i' 'ı'",
+        "matcher/'s' 'ſ'",
+        "matcher/'k' 'K'",
+        "matcher/'ß' 'SS'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 7,
+      "row": 14,
+      "source": "| S14 | glob `vault`、実ディレクトリ `vault` と子・孫・リンク | ディレクトリ自身の一致を子孫へ継承。全件を列挙。本文とリンク先文字列を読まない | `tree:474–503`、観測 `tree/directory_inheritance` | `test_double_star_zero_directory_and_secret_directory_metadata` | `vault` と `vault/` 両方、本文openの0回を外部観測で確認 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 15,
+      "source": "| S15 | 機密リンクの外部参照先だけを書き換える | 機密リンクの属性が同じなら観測結果は変わらない | `487–489` | `test_secret_symlink_target_bytes_are_outside_the_metadata_only_boundary` | 既存入力再利用。参照先を読まない検査 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 16,
+      "source": "| S16 | 前状態 `private.txt`、現在 `secret_paths: []` | `private.txt` を維持し本文を読まない | `1877–1888` | `test_prior_secret_patterns_keep_each_existing_worktree_metadata_only` | 正確な保存順の比較 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 17,
+      "source": "| S17 | 前状態 `private.txt`、現在 profile 削除 | 同じく維持。観測 CLI は終了0、private の `secret:true`、`sha256` なし | `1354–1364,1887`、観測 `snapshot/deleted_profile_keeps_prior` | 独立した削除テストなし | 削除ケースを既存縮小ケースと別に追加 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 18,
+      "source": "| S18 | 前状態 `private.txt`、現在 `[b,a,b]` | 既定3→`private.txt`→`b`→`a` | `1887`、観測 `snapshot/prior_first_current_append` | 直接の順序テストなし | 同名指定・前状態順・現在順 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 19,
+      "source": "| S19 | 前状態正常、現在 `secret_paths: null` | 終了20。stdout空。新状態ファイルなし。過去の指定だけで成功しない | `1397,1402–1403`、観測 `snapshot/bad_profile_never_falls_back_to_prior` | 直接テストなし | 拒否後の出力非作成・既存出力保全 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 20,
+      "source": "| S20 | worktree A=`private.txt`、別worktree B=`second.txt` | それぞれ自分の指定だけを継承。他の worktree へ横流ししない | `1876–1888` | `test_prior_secret_patterns_keep_each_existing_worktree_metadata_only` | 既存入力再利用 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 21,
+      "source": "| S21 | 人の worktree を移動、現在指定を縮小、`--fresh-config-baseline`あり | Git管理ディレクトリの実パスが同じならその worktree の前指定を維持 | `1880–1886` | `test_secret_union_follows_human_worktree_move_at_fresh_boundary` | 移動先の名前に基づく誤継承を検出 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 22,
+      "source": "| S22 | 同じ移動、`--fresh-config-baseline`なし | 終了20。profile/本文を観測する前に停止 | `1840–1852` | 同上 | 新しい人の worktree 追加も同じ拒否。先行読取0の外部検査 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 23,
+      "source": "| S23 | 親自身の正確な worktree 削除、所有・不在・4欄一致 | `worktrees/worktree_contents/worktree_configs/secret_patterns` の該当1行だけ削除。人の行を残す | `1422–1487` | `test_parent_verified_exact_removed_worktree_is_pruned_but_not_other_rows` | 既存入力再利用。一般的な全行削除へ広げない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 24,
+      "source": "| S24 | `.claude` が通常dirでない / profileが通常fileでない | 本文を読まず停止。profile 不在とは区別 | `1352–1368` | `test_profile_symlink_and_output_tmp_symlink_cannot_redirect_reads_or_writes`（末端link） | 親link・FIFO・dir・短読/増加・容量境界は用途別保証確認 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 7,
+      "row": 25,
+      "source": "| S25 | 保持した停止ファイルが `.env` の通常file | 属性のみ。`secret` も `sha256` もなし。空→非空は差分 | `482–486` | `test_stop_control_overrides_secret_classification_without_hashing` | 既存入力再利用 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L filesystem/state/worktree/control semantics; no Rust implementation this task"
+    },
+    {
+      "table": 8,
+      "row": 1,
+      "source": "| P01 | 変更なし | `/work/a` と `/admin/a` をキーに同じ指定を返す | `1490–1531`、観測 `prior/valid`。直接テストなし、追加必要 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 2,
+      "source": "| P02 | `secret_patterns` 削除または null | `前の secret_paths の状態が新しい必須欄を持たない` | `1494–1496`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 3,
+      "source": "| P03 | 指定行に余分な `extra:true` / `path`非文字列 / `patterns`非配列 / 要素非文字列 | `前の secret_paths の状態を読めない` | `1498–1507`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 4,
+      "source": "| P04 | 同じ `path` の行を2件 | `前の secret_paths の状態が重複している` | `1501–1502`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 5,
+      "source": "| P05 | 既定3指定のどれか削除 | `前の secret_paths の状態に既定値が無い` | `1508–1509`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 6,
+      "source": "| P06 | 既定3の順序反転 / 既定追加重複 / 独自指定重複 | `前の secret_paths の状態が正規形でない` | `1510–1512`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 7,
+      "source": "| P07 | `patterns`の末尾へ `[x]` | `secret_paths に不正な glob がある` | `1510`→`1405–1407`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 8,
+      "source": "| P08 | `worktree_configs`削除/null、config行の`path`/`git_dir`非文字列 | `前の secret_paths の worktree 状態を読めない` | `1514–1520`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 9,
+      "source": "| P09 | config行のpathを `/work/missing` へ変更 | `前の secret_paths の worktree 対応が無い` | `1521–1523`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 10,
+      "source": "| P10 | config行を空配列へ変更 | `前の secret_paths の worktree 対応が矛盾している` | `1529–1530`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 11,
+      "source": "| P11 | 異なるpathの指定行とconfig行を足す。同じgit_dir・異なるpatterns | `前の secret_paths の worktree 対応が矛盾している` | `1524–1527`。直接テストなし |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 12,
+      "source": "| P12 | 同じgit_dirでもpatterns同一 | 内部関数は受理 | `1526`、観測 `prior/same_admin_True`。snapshot全体の受理とは主張しない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 13,
+      "source": "| P13 | config行の余分なkey / 完全同一config行の重複 | 内部関数は受理 | 観測 `prior/configs_extra_key,configs_duplicate_same`。後続の別検査との差を残す |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 14,
+      "source": "| P14 | 両方の `path` を文字列 `relative` へ変更 | 内部関数は受理 | 観測 `prior/relative_path`。この関数へ絶対パス検査を足して全体受理の同値を崩さない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 15,
+      "source": "| P15 | JSON `{\"secret_patterns\":null,\"secret_patterns\":[]}` を `read_state` へ渡す | `{\"secret_patterns\":[]}`。JSON重複は後勝ち | `1743–1752`、観測 `state/json_duplicate_last_wins`。YAMLの重複secret拒否と混同しない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 8,
+      "row": 16,
+      "source": "| P16 | `schema:7` と compare必須12欄を持ち、他11欄はnullの同一JSONを前後へ渡す | `compare` 終了0、stdout/stderr空 | `1965–1977`、観測 `state/compare_identical_malformed_secret_rows`。任意の保存読取へ厳密schemaを共通適用しない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "S2L schema7 and state APIs excluded"
+    },
+    {
+      "table": 9,
+      "row": 1,
+      "source": "| profileの最上位がscalar/sequence | secretなしとして既定3を返す | null以外は拒否 | null以外は拒否 | secret-profilesの拒否を使う |",
+      "case_ids": [
+        "yaml/empty_list",
+        "yaml/string"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 2,
+      "source": "| `secret_paths:null` | 拒否 | 拒否 | secret欄を検査しない | 拒否 |",
+      "case_ids": [
+        "yaml/paths_null"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 3,
+      "source": "| 同じmappingのstrタグsecretキー重複 | aliasや入れ子内も拒否 | 同じ | SafeLoaderの後勝ち。他欄が正常なら受理 | secret-profilesと同じ |",
+      "case_ids": [
+        "yaml/duplicate_top",
+        "yaml/duplicate_nested_unused"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 4,
+      "source": "| YAML解析関数の重複指定 | 既定3を付けて完全一致重複除去 | paths_from_yaml自身は重複を保持。CLIが既定3を付けて初出順に統合 | 対象外 | 各出典を初出順で加える |",
+      "case_ids": [
+        "canonical/order_and_exact_duplicates"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 5,
+      "source": "| 機密指定の順序 | 前状態→現在 | 既定3→現在→ref引数順 | 対象外 | 既定3→current→held-head→base→start→branch→extra→CLI追加。継承計画は保持 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 6,
+      "source": "| 現在profileの大きさ | snapshotの共有予算。CLI単独既定は1ファイル64MiB・総量1GiB。loop.shが渡す上限は別に維持 | 1MiB | 固定commit blobのこの経路に専用上限なし | current/referenceともsecret-profilesの1MiBと診断側期限等 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 7,
+      "source": "| 固定commit profileモード | 読まない | `100644`と`100755` | `100644`だけ | secret-profiles backendに従う |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 8,
+      "source": "| glob照合 | str / Python re.IGNORECASE | CLIは照合しない | 対象外 | UTF-8 bytes / GNU grep / LC_ALL=C / 大小区別 |",
+      "case_ids": [
+        "matcher/'i' 'İ'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 9,
+      "source": "| `vault` vs `vault/file` 単独照合 | 不一致。treeが親dirを機密にすると子孫に継承 | CLIは照合しない | 対象外 | `($\\|/)`を常につけるため一致 |",
+      "case_ids": [
+        "matcher/'vault' 'vault/file'"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 9,
+      "row": 10,
+      "source": "| `*`で全件一致 | 受理 | 受理 | 対象外 | 代表5パス全件一致を拒否する後段あり |",
+      "case_ids": [
+        "S10/star-root"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": "loop純粋部品以外の用途は境界資料。状態・走査・他用途を実装しない"
+    },
+    {
+      "table": 10,
+      "row": 1,
+      "source": "| E01 | `\"x\"` | `\"x\\n\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E01"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 2,
+      "source": "| E02 | `\"x\"` | `\"x\\nz\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E02"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 3,
+      "source": "| E03 | `\"*\"` | `\"a\\nb\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E03"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 4,
+      "source": "| E04 | `\"**\"` | `\"a\\nb\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E04"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 5,
+      "source": "| E05 | `\"x\"` | `\"a\\nb/x\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E05"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 6,
+      "source": "| E06 | `\"a*/x\"` | `\"a\\nb/x\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E06"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 7,
+      "source": "| E07 | `\"vault/\"` | `\"vault/a\\nb\"` | false | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E07"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 8,
+      "source": "| E08 | `\"?\"` | `\"\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E08"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 9,
+      "source": "| E09 | `\"x*\"` | `\"x\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E09"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 10,
+      "row": 10,
+      "source": "| E10 | `\"\\udcff\"` | `\"\\udcff\"` | true | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E10"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 11,
+      "row": 1,
+      "source": "| E11 | `canonical_secret_patterns(['x\\n'])` | `Stop('secret_paths に不正な glob がある')` | S3の制御文字と同種。LFそのものは未追加 | パターン内LFの固定期待値 |",
+      "case_ids": [
+        "E11"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 11,
+      "row": 2,
+      "source": "| E12 | ASCII/UTF-8 バイト列 `b'secret_paths: [\"\\\\uDCFF\"]\\n'` | `profile_patterns` は既定3指定の後ろに U+DCFF の文字列を追加して返す | 専用入力は未追加 | 入力と固定期待値をRust比較へ接続 |",
+      "case_ids": [
+        "E12"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 11,
+      "row": 3,
+      "source": "| E13 | E12 の profile と、ファイル名バイト列 `b'\\xff'` の通常ファイル | `tree` の該当行は `path='\\udcff', kind='file', secret=True`。`sha256` 欄なし | 通常名の機密属性は既存。0xff名は未追加 | 元バイト名と属性のみの走査をS2Lで比較 |",
+      "case_ids": [],
+      "boundary_ids": [
+        "legacy_only.E13"
+      ],
+      "out_of_scope_reason": "S2L tree scan"
+    },
+    {
+      "table": 11,
+      "row": 4,
+      "source": "| E14 | 生バイト `0xff` を YAML 文字列へ直接入れた `b'secret_paths: [\"\\xff\"]\\n'` | `Stop('secret_paths を安全に読めない')` | 不正UTF-8の拒否は既存条件。本入力は未追加 | 生0xffのYAMLとE12の受理差を固定 |",
+      "case_ids": [
+        "E14"
+      ],
+      "boundary_ids": [],
+      "out_of_scope_reason": null
+    },
+    {
+      "table": 12,
+      "row": 1,
+      "source": "| root までの各親を開くとき | 各要素の `stat` と開いた実体の `fstat` を比較。`same_directory_path` は dev/ino/種類/権限を比較 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 12,
+      "row": 2,
+      "source": "| `.claude` を開くとき | root の保持 fd から `stat/open`。開いた親の dev/ino/mode/size/mtime/ctime を直前の値と比較 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 12,
+      "row": 3,
+      "source": "| profile を開くとき | `.claude` の保持 fd から末端を `stat/open`。通常ファイルであり、dev/ino/mode/size/mtime/ctime が一致するか確認 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 12,
+      "row": 4,
+      "source": "| profile 読み取り後 | 開いた末端ファイルの `fstat` が読み始めと一致するか確認 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 12,
+      "row": 5,
+      "source": "| `.claude` の親パス再検査 | `profile_patterns/read_at` では、末尾の必須操作としては行わない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 12,
+      "row": 6,
+      "source": "| YAML 解析時 | バイト取得の後に親 fd と root fd を閉じてから解析する。解析中まで fd を保持する実装ではない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "保持親検査の責務資料。E15は旧観測保持、後続S2L。C0b再実装しない"
+    },
+    {
+      "table": 13,
+      "row": 1,
+      "source": "| C0a（#453） | 生バイトの入出力と終了値 | 固定された診断を再符号化せず出せること。通常拒否の20と引数不正の2を、個別コマンドが選べること |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 13,
+      "row": 2,
+      "source": "| C0b（正式設計前） | 保持したファイル実体と共通の処理量・時間の上限 | 同じ親と開いた実体から読み、種類・実体・属性の検査を省かないこと。呼出元の消費量と期限を維持すること。不在と読めない状態を区別できること |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 13,
+      "row": 3,
+      "source": "| C0c（正式設計前） | 子の実行と回収 | YAML解析の純粋な部分には不要。S2L の Git 呼出とテスト用の子実行は別に接続すること |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 13,
+      "row": 4,
+      "source": "| R4S の今回確定した部分 | `loop-state` 用のバイト入力のYAML解釈、重複検査、指定の検査・順序、独自のglob照合 | 呼出元別の意味を識別できる構造にする。無関係な用途を1つの厳しい/緩いモードへ統一しない。今回の新規独立CLI登録は不要 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 13,
+      "row": 5,
+      "source": "| S2L | profileの安全な読取、前状態の用途別検査、worktreeごとの和集合、走査、状態保存、CLI | R4Sの結果を走査前に使う。機密の本文を開かない。履歴を消したり、エラーを成功へ変えたりしない。JSONを読む段階の変換も旧版どおりとする |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 13,
+      "row": 6,
+      "source": "| R4S の残り・S3D・R4D・R4H | `secret-profiles` CLI、GNU ERE、診断、hostの設定 | 今回は受理差を記録する。各入口の完全な移植設計と比較はそれぞれで行う |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "責務資料。C0aはtest bridge、C0b/cは今回製品parserに不要"
+    },
+    {
+      "table": 14,
+      "row": 1,
+      "source": "| `loop-state.py` の `profile_patterns`・`canonical_secret_patterns`・`secret_path` | 用途別の受理条件と返す順序。Python内部のオブジェクト番号はRustの契約にしない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "table": 14,
+      "row": 2,
+      "source": "| `secret-profiles.py` の `paths_from_yaml` | 同じnode検査を使っても、最上位の型と返す値の意味が異なる例 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "table": 14,
+      "row": 3,
+      "source": "| `scripts/test_loop_state.py`・`scripts/test_secret_profiles.py` | 表の既存入力・期待値。既存テストと拒否条件は変えない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "table": 14,
+      "row": 4,
+      "source": "| `scripts/support_native.py` | 生バイト・終了値・時間切れ・副作用の比較。通常の比較条件は緩めない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "table": 14,
+      "row": 5,
+      "source": "| `native/ci/check_resolve_task_dir.py` | 比較元と実行ファイルを明示し、使えなければ失敗にする構成。#448固有の差は再利用しない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "既存実装の参照のみ。#283 Gitテストを複製しない"
+    },
+    {
+      "table": 15,
+      "row": 1,
+      "source": "| C0との接続 | 上表の必要保証と責務 | C0b/cの関数・型・失敗結果の正式契約は未確定。C0担当とS2L担当が接続前に合意する |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    },
+    {
+      "table": 15,
+      "row": 2,
+      "source": "| YAML部品 | 観測した受理条件が基準 | 依存の選定と版、特殊な文字の内部表現はR4S実装時の選択。期待値を変える権限は含まない |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    },
+    {
+      "table": 15,
+      "row": 3,
+      "source": "| 実行環境 | 今回はLinux・Python3.10.12で観測 | Python3.10.11、Mac、最低OSでの実測は未実施。対象別のCIで確認する |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    },
+    {
+      "table": 15,
+      "row": 4,
+      "source": "| R4Sの残り | 呼出元の違いを消さない | GNU EREとlocale、他入口の完全な設計は別の対象 |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    },
+    {
+      "table": 15,
+      "row": 5,
+      "source": "| S2L | profile/状態/走査の引き渡し条件 | Git設定・7コマンド・schema7全体のRust実装は未着手。#283/PR451の既存材料を使う |",
+      "case_ids": [],
+      "boundary_ids": [],
+      "out_of_scope_reason": "C0b/cは最新mainで完了へ訂正。その他対象外を保持"
+    }
+  ]
+}
