@@ -230,7 +230,9 @@ fn main() -> std::process::ExitCode {
             .spawn()
             .expect("専用比較器を起動できない"),
     );
-    let deadline = Instant::now() + Duration::from_secs(300);
+    // Mac Intelでは267.1秒で成功する一方、300秒で時間切れになる回もある。
+    // 全件比較を維持し、実行時間の変動に備えて上限に余裕を持たせる。
+    let deadline = Instant::now() + Duration::from_secs(900);
     loop {
         if let Some(status) = child.0.try_wait().expect("専用比較器の待機に失敗") {
             assert!(status.success(), "task-digest の比較が不合格: {status}");
