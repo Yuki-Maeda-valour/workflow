@@ -235,7 +235,7 @@ def origin_traceback(exception, *, decode_stream=None):
 ENCODINGS = (
     ('posix', {'LC_ALL':'POSIX','PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}, 'ascii','surrogateescape','ascii','ascii',0),
     ('invalid-locale', {'LC_ALL':'r4b_INVALID_LOCALE','PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}, 'ascii','surrogateescape','ascii','ascii',0),
-    ('locale-utf8', {'LC_ALL':'en_US.UTF-8' if sys.platform=='darwin' else 'C.UTF-8','PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}, 'utf-8','surrogateescape','utf-8','utf-8',0),
+    ('locale-utf8', {'LC_ALL':'en_US.UTF-8' if sys.platform=='darwin' else 'C.UTF-8','PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}, 'utf-8','strict' if sys.platform=='darwin' else 'surrogateescape','utf-8','utf-8',0),
     ('default-utf8', {'PYTHONUTF8':'1','PYTHONCOERCECLOCALE':'0'}, 'utf-8','surrogateescape','utf-8','utf-8',1),
     ('auto-utf8', {'PYTHONCOERCECLOCALE':'0'}, 'utf-8','surrogateescape','utf-8','utf-8',1),
     ('ascii-locale', {'PYTHONUTF8':'0','PYTHONCOERCECLOCALE':'0'}, 'ascii','surrogateescape','ascii','ascii',0),
@@ -256,9 +256,16 @@ def effective_encoding(env, setting):
     result=run_command([sys.executable,'-B','-c',code],cwd=ROOT,env=env)
     if result.returncode or result.stderr or result.timed_out:raise AssertionError('文字コードの実効設定を確認できない')
     actual=json.loads(result.stdout)
-    for index in (0,2,4,5):actual[index]=codecs.lookup(actual[index]).name
+    for index in (0,2,4,5):
+        try:actual[index]=codecs.lookup(actual[index]).name
+        except (LookupError,TypeError):
+            raise AssertionError('実効文字コードのcodec名が不正') from None
     expected=[out,errors,out,'backslashreplace',child,'utf-8' if sys.platform=='darwin' else filesystem,'surrogateescape',mode]
-    if actual!=expected:raise AssertionError('指定した実効文字コードと一致しない: '+name)
+    if actual!=expected:
+        # 設定プローブの8値だけを表示する。未知の文字列は転記しない。
+        known={'ascii','utf-8','iso8859-1','strict','surrogateescape','backslashreplace','replace'}
+        safe=[value if (type(value) is str and value in known) or (type(value) is int and value in (0,1)) else '<unexpected>' for value in actual]
+        raise AssertionError('指定した実効文字コードと一致しない: '+name+' actual='+repr(safe)+' expected='+repr(expected))
     return filesystem if sys.platform!='darwin' else 'utf-8'
 
 

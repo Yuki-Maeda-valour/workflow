@@ -165,6 +165,36 @@ class Comparator(unittest.TestCase):
                         broken=dataclasses.replace(good,stdout=good.stdout.replace(b'\r\n',b'\n'))
                         with self.assertRaises(AssertionError):self.m.terminal_contract(good,broken,**kwargs)
 
+    def test_locale_effective_eight_values_are_fixed_for_linux_and_darwin(self):
+        for platform,errors in (('linux','surrogateescape'),('darwin','strict')):
+            with self.subTest(platform=platform), mock.patch.object(sys,'platform',platform):
+                spec=importlib.util.spec_from_file_location('r4b_encoding_'+platform,Path(__file__).with_name('check_r4b.py'))
+                module=importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                setting=next(item for item in module.ENCODINGS if item[0]=='locale-utf8')
+                self.assertEqual(setting[1]['LC_ALL'],'en_US.UTF-8' if platform=='darwin' else 'C.UTF-8')
+                self.assertEqual(setting[3],errors)
+                expected=['utf-8',errors,'utf-8','backslashreplace','utf-8','utf-8','surrogateescape',0]
+                def probe(values):return self.result(out=module.json.dumps(values).encode())
+                with mock.patch.object(module,'run_command',return_value=probe(expected)):
+                    self.assertEqual(module.effective_encoding({},setting),'utf-8')
+                for index,replacement in enumerate(('ascii','replace','ascii','strict','ascii','ascii','strict',1)):
+                    changed=list(expected);changed[index]=replacement
+                    with mock.patch.object(module,'run_command',return_value=probe(changed)):
+                        with self.assertRaisesRegex(AssertionError,'actual=.*expected='):module.effective_encoding({},setting)
+                changed=list(expected);changed[1]=module.SECRET.decode()
+                with mock.patch.object(module,'run_command',return_value=probe(changed)):
+                    with self.assertRaises(AssertionError) as failure:module.effective_encoding({},setting)
+                self.assertNotIn(module.SECRET.decode(),str(failure.exception))
+                for index in (0,2,4,5):
+                    changed=list(expected);changed[index]=module.SECRET.decode()
+                    with mock.patch.object(module,'run_command',return_value=probe(changed)):
+                        with self.assertRaises(AssertionError) as failure:module.effective_encoding({},setting)
+                    self.assertEqual(str(failure.exception),'実効文字コードのcodec名が不正')
+                    diagnostic=''.join(module.traceback.format_exception(type(failure.exception),failure.exception,failure.exception.__traceback__))
+                    self.assertNotIn(module.SECRET.decode(),diagnostic)
+
+
     def test_pty_helper_controls_real_stdout_width_without_normalizing_bytes(self):
         env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
         for width in (30,80):
