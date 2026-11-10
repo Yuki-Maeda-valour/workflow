@@ -1033,7 +1033,7 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 - 大小文字はCPython 3.10・Unicode 13.0.0の1419組の固定表を使う。Rust標準の小文字化や正規表現の既定動作へ置き換えない。`secret_path`は任意の指定をそのまま照合し、機密指定の検査を追加しない。
 - 唯一の承認済み差は、Pythonの実行環境の再帰上限だけで拒否される有限な入力を、Rustが反復処理で受理することである。2026-11-09の利用者の判断を#462へ記録した。新しい深さ・容量の上限は設けない。
 - 固定入力`constructor/merge_chain/1100`では、旧版の`RecursionError`による拒否と、Rustの既定3件の受理を別々の期待値で確認する。scalarの自己参照、任意の`RecursionError`、未知の失敗へ許可を広げない。#448で承認した別用途の差も転用しない。
-- ファイルの不在判定、C0b/C0cへの接続、S2Lの全7コマンド・状態保存・走査、`secret-profiles`等の他用途、R4A/B・R4Qの移植は含めない。公開CLI・配布物・呼出元・版・`CHANGELOG.md`は変更しない。
+- ファイルの不在判定、C0b/C0cへの接続、S2Lの全7コマンド・状態保存・走査、`secret-profiles`等の他用途、R4Qの移植は含めない。R4A/R4Bの移植は別の節に記す。公開CLI・配布物・呼出元・版・`CHANGELOG.md`は変更しない。
 
 公開APIは [native/README.md](../native/README.md#loop-state用の純粋部品r4s)、固定期待・旧Python・Rustの比較と未確認条件は [testing.md](testing.md#loop-state用の純粋部品の検査r4s)に記す。
 
@@ -1068,6 +1068,44 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 - stderrの書き込み失敗は通常時120・バッファなし時1を保つ。固定診断は通常のstderrと同じUTF-8・ASCIIの処理を通す。
 
 APIは [native/README.md](../native/README.md#本文の正規化と確認用の値r4a-task-digest)、固定期待との比較と手元実測は [testing.md](testing.md#task-digestの比較r4a)に記す。
+
+### origin判定とGit設定の確認値(R4B)
+
+[Issue #461](https://github.com/Yuki-Maeda-valour/workflow/issues/461)で、`origin-repo.py`と`git-config-digest.py`を開発用Rustソースへ移した。
+製品CLIの登録表・help・既存呼出元へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+
+- `cli/src/commands/origin_repo/`がoriginを判定する。JSONは`origin`・`same`・`repo`・`form`・`vcs`・`reason`・`push_url_sha256`の順の7項目を保つ。
+- Gitは`remote`→`remote.origin.vcs`→fetch URL→push URL→同一先の判定→必要なTLSまたはSSH設定確認の順に実行する。URL書換えはGitに任せ、拒否後の追加起動を行わない。
+- fetch/pushが各1本のときだけpush URLのSHA-256を保持する。認証情報を除いた送信先だけを`repo`へ返し、URL・Git/SSH出力・設定値を診断へ転記しない。
+- `cli/src/commands/git_config_digest/`は、Gitが返した3つの所在と、共有`config`・各作業ツリーの`config.worktree`を記述する。
+- `lstat`・`readlink`・リンク先の`stat`で不在・通常ファイル・リンク・その他を分ける。ENOENT/ENOTDIRは不在とし、リンク先が通常ファイルの場合だけ項目を読む。
+- `git config --file <path> --no-includes --list -z`の順序、重複、値なし/空値を保つ。include宣言は材料へ含めるが、この読取りでは展開しない。
+- パス・リンク字面・設定値をASCIIエスケープし、キーをソートした空白なしJSONのSHA-256を作る。表示は`sha256:`と小文字64桁・末尾LF、終了0である。
+- `--expect`一致は無出力・終了0、不一致は`git 設定のダイジェストが --expect と一致しない`とLF・終了1。不正形式と読取り失敗は終了2とする。
+- `platform::r4b_process::capture`はstdinを`/dev/null`にし、stdout/stderrを同時に読む。originのGitは無期限、SSH設定の展開とdigestの各Gitはそれぞれ10秒である。全体を10秒にはしない。
+- 時間切れでは直接子だけをkill/waitし、親のパイプを閉じる。孫のEOFは待たず、子孫全体の停止は保証しない。回収用の新しい期限・容量制限は加えない。C0cへ一律に接続しない。
+- 引数の省略・重複・短縮・未知引数は旧argparseの順序を維持する。有効な`COLUMNS`を優先し、未設定・無効・0・負値ではstdoutの実端末幅を使う。端末取得の失敗時だけ80へ戻す。
+
+#### R4Bに限る承認済みの差
+
+出典は#461の2026-11-10の利用者判断である。旧Python・既存テスト・UTF-8設定の通常比較は変更しない。他コマンドの承認差は流用しない。
+
+1. originのGit出力が厳密なUTF-8として読めない場合は、空stdout・終了1・UTF-8の`git の出力を読めない`とLFを返す。Git失敗の終了2へ混ぜない。SSHの解釈失敗は既存の拒否理由を含むJSONと終了0を維持する。
+2. stdout/stderrの書き込み・flush故障はC0aで終了1とする。stdout故障の診断は`dev-workflow: 標準出力に書けません: <OSのエラー>`とLFである。診断先も故障すれば診断なしを許し、途中stdoutを空とは定めない。
+3. Pythonの文字コード設定だけに由来する文字解釈は、引数・診断・`COLUMNS`・確認値材料のパス/リンク字面を含め、UTF-8と`surrogateescape`へ固定する。不正バイトを保持する扱いであり、originのGit/SSHの厳密なUTF-8検査を緩めない。
+   - stdout/stderrは常にUTF-8とする。`PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・localeによる旧版の例外、エスケープ、分類、折返し、確認値、`--expect`、呼出列の差を個別期待へ固定する。
+   - ファイル操作、Git引数、環境変数の生バイトを維持する。非UTF-8のファイル名設定でパス由来の確認値が変わり、Rustへ旧値を渡した場合も、既存の不一致診断と終了1を使う。
+
+専用exampleの`r4b_contract`だけが2モジュールを起動し、C0aの`CommandOutput`・`emit`を使う。
+Linux2種・Mac2種のCIは各ビルド2回と署名後Macの両CPUで専用比較を必須とする。検査用実行物は転送用だけに含め、配布物へ入れない。
+
+```text
+旧Python2本 ─────┐
+                 ├─ 同じ物理入力 → 固定期待・出力・呼出順・入力無変更を確認
+r4b_contract ────┘
+```
+
+APIは [native/README.md](../native/README.md#origin判定とgit設定の確認値r4b)、検査手順と手元実測は [testing.md](testing.md#r4bの比較)に記す。
 
 ### Rust の構成とビルド入力(段階 0a)
 
