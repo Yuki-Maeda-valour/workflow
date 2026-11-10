@@ -25,6 +25,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
+CI_BINARIES = ("dev-workflow", "r4b_contract")
+BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
+UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
 MUSL_VERSION = "1.2.5"
 
@@ -140,6 +143,7 @@ def quality(name, work):
         run(["cargo", "fmt", "--check"], env=env)
         run(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"], env=env)
         run(["cargo", "test", "--locked"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
 
 
 def reproduce(name, work):
@@ -157,19 +161,22 @@ def reproduce(name, work):
             if tools_before is not None and details != tools_before:
                 raise ValueError("2 回のビルドで道具の記録が変わりました")
             tools_before = details
-            run(["cargo", "build", "--release", "--locked", "--target", target], env=env)
-            destination = stage / f"{number}/dev-workflow"
-            destination.parent.mkdir()
-            shutil.copyfile(Path(temporary) / target / "release/dev-workflow", destination)
-            destination.chmod(0o755)
-            if machine is not None:
-                check_static_elf(destination, machine)
+            run(["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--target", target], env=env)
+            (stage / str(number)).mkdir()
+            for filename in CI_BINARIES:
+                source = Path(temporary) / target / "release" / ("examples/r4b_contract" if filename=="r4b_contract" else filename)
+                destination = stage / str(number) / filename
+                shutil.copyfile(source, destination)
+                destination.chmod(0o755)
+                if machine is not None:
+                    check_static_elf(destination, machine)
     if machine is not None:
-        run(["cmp", stage / "1/dev-workflow", stage / "2/dev-workflow"])
+        for filename in CI_BINARIES:
+            run(["cmp", stage / "1" / filename, stage / "2" / filename])
     if identity() != before:
         raise ValueError("ビルド中にソース・依存・Rust の記録が変わりました")
     record = {**before, "targets": {target: tools_before}, "files": {
-        f"{number}/dev-workflow": sha256(stage / f"{number}/dev-workflow") for number in (1, 2)
+        relative: sha256(stage / relative) for relative in BUILD_FILES
     }}
     write_json(stage / "record.json", record)
     return stage
@@ -181,13 +188,18 @@ def probe(binary):
     run([sys.executable, "-B", ROOT / "native/ci/check_resolve_task_dir.py"], env=env)
 
 
+def r4b_probe(fixture):
+    run([sys.executable, "-B", ROOT / "native/ci/check_r4b.py", "--fixture", fixture])
+
+
 def read_record(folder):
     record = read_json(folder / "record.json")
     current = identity()
     if any(record.get(key) != value for key, value in current.items()):
         raise ValueError("転送された成果物のビルド元が一致しません")
-    expected = {str(p.relative_to(folder)) for p in folder.rglob("dev-workflow")}
-    if set(record["files"]) != expected:
+    expected = set(UNIVERSAL_FILES if record.get("signing") else BUILD_FILES)
+    actual = {str(p.relative_to(folder)) for p in folder.rglob("*") if not p.is_dir()}
+    if actual != expected | {"record.json"} or set(record["files"]) != expected:
         raise ValueError("転送された実行ファイルの一覧が一致しません")
     for relative, digest in record["files"].items():
         if sha256(folder / relative) != digest or (folder / relative).stat().st_mode & 0o777 != 0o755:
@@ -197,7 +209,7 @@ def read_record(folder):
 
 def extract_build(name, downloads, work):
     parent = Path(tempfile.mkdtemp(prefix="received-", dir=work))
-    folder = unpack_tar(downloads / (name + ".tar"), parent / name, ["1/dev-workflow", "2/dev-workflow", "record.json"])
+    folder = unpack_tar(downloads / (name + ".tar"), parent / name, [*BUILD_FILES, "record.json"])
     return folder, read_record(folder)
 
 
@@ -213,47 +225,54 @@ def combine(downloads, work):
     left, left_info = extract_build("macos-x86_64", downloads, work)
     right, right_info = extract_build("macos-arm64", downloads, work)
     stage = Path(tempfile.mkdtemp(prefix="universal-", dir=work))
-    outputs = []
-    for number in (1, 2):
-        output = stage / str(number) / "dev-workflow"
-        output.parent.mkdir()
-        run(["lipo", "-create", left / f"{number}/dev-workflow", right / f"{number}/dev-workflow", "-output", output])
-        output.chmod(0o755)
-        sign(output)
-        outputs.append(output)
-    run(["cmp", *outputs])
+    outputs = {}
+    for filename in CI_BINARIES:
+        files=[]
+        for number in (1, 2):
+            output = stage / str(number) / filename
+            output.parent.mkdir(exist_ok=True)
+            run(["lipo", "-create", left / str(number) / filename, right / str(number) / filename, "-output", output])
+            output.chmod(0o755)
+            sign(output)
+            files.append(output)
+        run(["cmp", *files])
+        outputs[filename]=files[0]
     record = {**identity(), "targets": {**left_info["targets"], **right_info["targets"]},
               "signing": {"identifier": SIGN_ID, "timestamp": "none", "identity": "ad-hoc",
                           "codesign_sha256": sha256(Path(shutil.which("codesign"))),
                           "macos": run(["sw_vers"], capture=True),
                           "xcode": run(["xcodebuild", "-version"], capture=True)},
-              "files": {"dev-workflow": sha256(outputs[0])}}
-    shutil.copy2(outputs[0], stage / "dev-workflow")
+              "files": {name: sha256(path) for name,path in outputs.items()}}
+    for name,path in outputs.items():
+        shutil.copy2(path, stage / name)
     write_json(stage / "record.json", record)
-    pack_tar(stage, work / "macos-universal.tar", ["dev-workflow", "record.json"])
+    pack_tar(stage, work / "macos-universal.tar", [*UNIVERSAL_FILES, "record.json"])
 
 
 def extract_universal(downloads, work):
     parent = Path(tempfile.mkdtemp(prefix="received-macos-", dir=work))
-    folder = unpack_tar(downloads / "macos-universal.tar", parent / "bundle", ["dev-workflow", "record.json"])
+    folder = unpack_tar(downloads / "macos-universal.tar", parent / "bundle", [*UNIVERSAL_FILES, "record.json"])
     return folder, read_record(folder)
 
 
 def verify_universal(downloads, work):
     folder, _ = extract_universal(downloads, work)
-    run(["codesign", "--verify", "--strict", "--verbose=2", folder / "dev-workflow"])
-    if sorted(run(["lipo", "-archs", folder / "dev-workflow"], capture=True).split()) != ["arm64", "x86_64"]:
-        raise ValueError("Mac の最終ファイルの CPU が違います")
-    # 署名し直さず、転送された同じバイト列をネイティブ CPU で起動する。
+    for filename in CI_BINARIES:
+        run(["codesign", "--verify", "--strict", "--verbose=2", folder / filename])
+        if sorted(run(["lipo", "-archs", folder / filename], capture=True).split()) != ["arm64", "x86_64"]:
+            raise ValueError("Mac の最終ファイルの CPU が違います")
+    # 署名後の同じ2実行物を、各CPUの必須ジョブで検査する。
     probe(folder / "dev-workflow")
+    r4b_probe(folder / "r4b_contract")
 
 
 def package(downloads, work):
     binaries, targets = [], {}
     for name in ("linux-x86_64", "linux-arm64"):
         folder, record = extract_build(name, downloads, work)
-        run(["cmp", folder / "1/dev-workflow", folder / "2/dev-workflow"])
-        check_static_elf(folder / "1/dev-workflow", TARGETS[name][3])
+        for filename in CI_BINARIES:
+            run(["cmp", folder / "1" / filename, folder / "2" / filename])
+            check_static_elf(folder / "1" / filename, TARGETS[name][3])
         binaries.append(folder / "1/dev-workflow")
         targets.update(record["targets"])
     folder, record = extract_universal(downloads, work)
@@ -291,7 +310,8 @@ def main():
             stage = reproduce(args.platform, work)
             for number in (1, 2):
                 probe(stage / f"{number}/dev-workflow")
-            pack_tar(stage, work / (args.platform + ".tar"), ["1/dev-workflow", "2/dev-workflow", "record.json"])
+                r4b_probe(stage / f"{number}/r4b_contract")
+            pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
         elif args.command == "combine":
             combine(downloads, work)

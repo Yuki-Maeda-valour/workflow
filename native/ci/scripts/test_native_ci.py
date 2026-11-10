@@ -613,10 +613,13 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
+                fixture=binary.parent / "examples/r4b_contract"
+                fixture.parent.mkdir()
+                fixture.write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             else:
@@ -647,6 +650,9 @@ class BuildTests(TempCase):
         right = self.write("right/1/dev-workflow", b"right1").parent.parent
         self.write("left/2/dev-workflow", b"left1")
         self.write("right/2/dev-workflow", b"right1")
+        for name in ("left", "right"):
+            for number in (1,2):
+                self.write(f"{name}/{number}/r4b_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -657,7 +663,7 @@ class BuildTests(TempCase):
             if args[:2] == ["lipo", "-create"]:
                 Path(args[-1]).write_bytes(Path(args[2]).read_bytes() + Path(args[3]).read_bytes())
             elif args[0] == "cmp":
-                self.assertEqual(list(args[1:]), signed)
+                self.assertEqual(list(args[1:]), signed[-2:])
                 subprocess.run(args, check=True)
             else:
                 return "tool version"
@@ -668,8 +674,8 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 2)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "record.json"])
+        self.assertEqual(len(signed), 4)
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1022,6 +1028,7 @@ class ResolveTaskDirConnectionTests(TempCase):
                         mock.patch.object(build, "quality"), \
                         mock.patch.object(build, "reproduce", return_value=self.root), \
                         mock.patch.object(build, "pack_tar"), \
+                        mock.patch.object(build, "r4b_probe"), \
                         mock.patch.object(build, "probe") as probe:
                     self.assertEqual(build.main(), 0)
                     self.assertEqual(probe.call_args_list, [mock.call(self.root / "1/dev-workflow"), mock.call(self.root / "2/dev-workflow")])
@@ -1029,13 +1036,15 @@ class ResolveTaskDirConnectionTests(TempCase):
                         mock.patch.object(build, "workspace", return_value=self.root), \
                         mock.patch.object(build, "quality"), \
                         mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "r4b_probe"), \
                         mock.patch.object(build, "probe", side_effect=subprocess.CalledProcessError(1, "comparison")):
                     self.assertEqual(build.main(), 1)
 
     def test_signed_universal_binary_runs_both_checks_and_propagates_failure(self):
         with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
                 mock.patch.object(build, "run", return_value="arm64 x86_64"), \
-                mock.patch.object(build, "probe") as probe:
+                mock.patch.object(build, "r4b_probe"), \
+                        mock.patch.object(build, "probe") as probe:
             build.verify_universal(self.root, self.root)
             probe.assert_called_once_with(self.root / "dev-workflow")
             probe.side_effect = subprocess.CalledProcessError(1, "comparison")
@@ -1066,6 +1075,58 @@ class ResolveTaskDirConnectionTests(TempCase):
                     altered[2]["uses"] = "actions/setup-python@v7"
                 with self.subTest(job=job, mutation=mutation):
                     self.assertTrue(check_workflow.check_document(changed))
+
+
+class R4BConnectionTests(TempCase):
+    def test_quality_requires_example_tests_and_comparison_failure_is_fatal(self):
+        with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run") as run:
+            build.quality("linux-x86_64",self.root)
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","r4b_contract"],[call.args[0] for call in run.call_args_list])
+        fixture=self.root/"r4b_contract"
+        with mock.patch.object(build,"run") as run:
+            build.r4b_probe(fixture)
+        self.assertEqual(run.call_args.args[0],[sys.executable,"-B",source_hash.ROOT/"native/ci/check_r4b.py","--fixture",fixture])
+        with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"comparison")):
+            with self.assertRaises(subprocess.CalledProcessError):build.r4b_probe(fixture)
+
+    def test_each_build_and_signed_cpu_requires_r4b_comparison(self):
+        for command in ("build","reproduce"):
+            for platform_name in build.TARGETS:
+                with mock.patch.object(sys,"argv",["build.py",command,"--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"quality"),mock.patch.object(build,"reproduce",return_value=self.root),mock.patch.object(build,"pack_tar"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe") as check:
+                    self.assertEqual(build.main(),0)
+                    self.assertEqual(check.call_args_list,[mock.call(self.root/"1/r4b_contract"),mock.call(self.root/"2/r4b_contract")])
+                    check.side_effect=subprocess.CalledProcessError(1,"R4B")
+                    self.assertEqual(build.main(),1)
+        with mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"run",return_value="arm64 x86_64"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe") as check:
+            build.verify_universal(self.root,self.root)
+            check.assert_called_once_with(self.root/"r4b_contract")
+            check.side_effect=subprocess.CalledProcessError(1,"R4B")
+            with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
+
+    def test_transfer_file_allowlist_and_hashes_are_exact(self):
+        for name in build.BUILD_FILES:self.write(name,b"fixture",0o755)
+        record={"files":{name:binary_tools.sha256(self.root/name) for name in build.BUILD_FILES}}
+        make_dist.write_json(self.root/"record.json",record)
+        with mock.patch.object(build,"identity",return_value={}):
+            self.assertEqual(build.read_record(self.root),record)
+            for mutation in ("missing","hash","unlisted","extra-record"):
+                changed=copy.deepcopy(record)
+                fixture=self.root/"1/r4b_contract"
+                if mutation=="missing":fixture.rename(self.root/"saved")
+                elif mutation=="hash":fixture.write_bytes(b"changed")
+                elif mutation=="unlisted":self.write("unexpected",b"x")
+                else:changed['files']['unexpected']='0'*64
+                make_dist.write_json(self.root/"record.json",changed)
+                with self.assertRaises(ValueError):build.read_record(self.root)
+                if mutation=="missing":(self.root/"saved").rename(fixture)
+                elif mutation=="hash":fixture.write_bytes(b"fixture")
+                elif mutation=="unlisted":(self.root/"unexpected").unlink()
+            make_dist.write_json(self.root/"record.json",record)
+
+    def test_fixture_is_not_a_distribution_binary(self):
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract"))
+        self.assertFalse(any("r4b" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract")})
 
 
 if __name__ == "__main__":
