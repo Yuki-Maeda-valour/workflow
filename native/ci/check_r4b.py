@@ -158,7 +158,7 @@ def run_pty(argv, *, columns, env, cwd=ROOT):
         termios.tcsetattr(slave,termios.TCSANOW,attributes)
         fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,columns,0,0))
         process=subprocess.Popen(argv,cwd=cwd,env=env,stdin=subprocess.DEVNULL,stdout=slave,stderr=subprocess.PIPE,start_new_session=True)
-        os.close(slave);slave=None
+        # 最後のslave closeで未読出力を捨てるOSでも、排出前に閉じない。
         timed_out=False
         try:_,stderr=process.communicate(timeout=10)
         except subprocess.TimeoutExpired:

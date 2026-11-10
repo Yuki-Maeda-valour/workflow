@@ -185,13 +185,51 @@ class Comparator(unittest.TestCase):
         self.assertEqual(result,self.result(out=b'a\r\nb\r\r\n'))
 
     def test_pty_helper_drains_bytes_before_each_platform_end_condition(self):
-        for ending in (b'',OSError(self.m.errno.EIO,'closed'),BlockingIOError(self.m.errno.EAGAIN,'drained')):
-            with self.subTest(ending=repr(ending)):
+        for timeout,ending in ((False,b''),(False,OSError(self.m.errno.EIO,'closed')),(False,BlockingIOError(self.m.errno.EAGAIN,'drained')),(True,BlockingIOError(self.m.errno.EAGAIN,'drained'))):
+            with self.subTest(timeout=timeout,ending=repr(ending)):
                 process=mock.Mock(returncode=0)
-                process.communicate.return_value=(None,b'')
-                with mock.patch.object(self.m.subprocess,'Popen',return_value=process), mock.patch.object(self.m.os,'read',side_effect=[b'30\r',b'\n',ending]):
+                process.communicate.side_effect=[self.m.subprocess.TimeoutExpired('unused',10),(None,b'')] if timeout else [(None,b'')]
+                with mock.patch.object(self.m.subprocess,'Popen',return_value=process), mock.patch.object(self.m.os,'killpg') as kill, mock.patch.object(self.m.os,'read',side_effect=[b'30\r',b'\n',ending]):
                     result=self.m.run_pty(['unused'],columns=30,env=dict(os.environ))
-                self.assertEqual(result,self.result(out=b'30\r\n'))
+                self.assertEqual(result,self.result(out=b'30\r\n',timeout=timeout))
+                self.assertEqual(kill.call_count,int(timeout))
+
+    def test_pty_helper_keeps_slave_open_until_real_output_is_drained(self):
+        original_open=self.m.pty.openpty
+        original_read=self.m.os.read
+        descriptors=[]
+        def open_pair():
+            pair=original_open()
+            descriptors.extend(pair)
+            return pair
+        def read_while_slave_open(fd,size):
+            if descriptors and fd==descriptors[0]:
+                # 最後のslave closeによる出力破棄を、Linuxでも見逃さない。
+                os.fstat(descriptors[1])
+            return original_read(fd,size)
+        with mock.patch.object(self.m.pty,'openpty',side_effect=open_pair), mock.patch.object(self.m.os,'read',side_effect=read_while_slave_open):
+            result=self.m.run_pty([sys.executable,'-B','-c',"import os; os.write(1,b'kept\\r\\n')"],columns=30,env=dict(os.environ))
+        self.assertEqual(result,self.result(out=b'kept\r\r\n'))
+        for fd in descriptors:
+            with self.assertRaises(OSError):os.fstat(fd)
+
+        # slaveが最後に閉じられると未読キューを失う端末を模す。
+        descriptors.clear()
+        queued=[b'kept\r',b'\r\n']
+        def read_discarded_queue(fd,size):
+            try:os.fstat(descriptors[1])
+            except OSError:
+                queued.clear()
+                return b''
+            if queued:return queued.pop(0)
+            raise BlockingIOError(self.m.errno.EAGAIN,'drained')
+        process=mock.Mock(returncode=0)
+        process.communicate.return_value=(None,b'')
+        with mock.patch.object(self.m.pty,'openpty',side_effect=open_pair), mock.patch.object(self.m.subprocess,'Popen',return_value=process), mock.patch.object(self.m.os,'read',side_effect=read_discarded_queue):
+            result=self.m.run_pty(['unused'],columns=30,env=dict(os.environ))
+        self.assertEqual(result,self.result(out=b'kept\r\r\n'))
+        for fd in descriptors:
+            with self.assertRaises(OSError):os.fstat(fd)
 
     def test_input_and_call_order_corruption_are_not_equal(self):
         self.m.unchanged([{'mode':1}],[{'mode':1}])
