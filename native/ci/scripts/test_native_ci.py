@@ -230,6 +230,40 @@ class WorkflowTests(TempCase):
         self.assertEqual(check_workflow.check_document(self.document), [])
         self.assertEqual(check_workflow.check_workflows(), [])
 
+    def test_native_comparison_job_timeouts_are_fixed(self):
+        for job,minutes in (("build",60),("verify-universal",30)):
+            self.assertEqual(self.document["jobs"][job]["timeout-minutes"],minutes)
+            for display_name in ("Native", "Renamed", None):
+                for renamed_job in (False, True):
+                    base=copy.deepcopy(self.document)
+                    if display_name is None:base.pop("name")
+                    else:base["name"]=display_name
+                    key=job
+                    if renamed_job:
+                        key="comparison"
+                        base["jobs"][key]=base["jobs"].pop(job)
+                    self.assertEqual(check_workflow.check_document(base),[])
+                    for value in (None,0,15,40,minutes-1,minutes+1,str(minutes),True):
+                        changed=copy.deepcopy(base)
+                        if value is None:changed["jobs"][key].pop("timeout-minutes")
+                        else:changed["jobs"][key]["timeout-minutes"]=value
+                        with self.subTest(job=job,display_name=display_name,renamed_job=renamed_job,value=value):
+                            self.assertTrue(check_workflow.check_document(changed))
+
+    def test_native_build_option_first_forms_are_rejected_even_with_correct_timeout(self):
+        for job,operation,minutes in (("build","build",60),("verify-universal","verify-universal",30)):
+            for arguments in (f"--platform linux-x86_64 {operation}", f"--downloads downloads {operation}", f"-- {operation}"):
+                for value in (minutes,None,1):
+                    changed=copy.deepcopy(self.document)
+                    steps=changed["jobs"][job]["steps"]
+                    step=next(step for step in steps if check_workflow.native_build_command(step.get("run"))==operation)
+                    step["run"]="python3 -B native/ci/build.py "+arguments
+                    if value is None:changed["jobs"][job].pop("timeout-minutes")
+                    else:changed["jobs"][job]["timeout-minutes"]=value
+                    with self.subTest(job=job,arguments=arguments,value=value):
+                        errors=check_workflow.check_document(changed)
+                        self.assertTrue(any("コマンド名をオプションより先" in error for error in errors))
+
     def test_unsafe_mutations_fail(self):
         changes = (
             lambda d: d["on"].update(pull_request_target={}),
