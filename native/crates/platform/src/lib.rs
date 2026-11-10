@@ -5,3 +5,5 @@
 pub mod fs;
 
 pub mod process;
+
+pub mod task_digest;

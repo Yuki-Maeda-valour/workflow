@@ -11,6 +11,12 @@ path = "src/main.rs"
 
 [dependencies]
 dev-workflow-core.workspace = true
+dev-workflow-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+
+[[test]]
+name = "task_digest"
+path = "tests/task_digest.rs"
+harness = false
