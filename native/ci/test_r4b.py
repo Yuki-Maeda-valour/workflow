@@ -169,7 +169,29 @@ class Comparator(unittest.TestCase):
         env=dict(os.environ,PYTHONUTF8='1',PYTHONIOENCODING='utf-8')
         for width in (30,80):
             result=self.m.run_pty([sys.executable,'-B','-c','import os; print(os.get_terminal_size(1).columns)'],columns=width,env=env)
-            self.m.fixed(result,0,(str(width)+'\r\n').encode(),b'')
+            with self.subTest(width=width):
+                self.assertEqual(result,self.result(out=(str(width)+'\r\n').encode()))
+
+    def test_pty_helper_sets_output_flags_before_spawn(self):
+        original=self.m.pty.openpty
+        def different_defaults():
+            master,slave=original()
+            attributes=self.m.termios.tcgetattr(slave)
+            attributes[1] &= ~(self.m.termios.OPOST | self.m.termios.ONLCR)
+            self.m.termios.tcsetattr(slave,self.m.termios.TCSANOW,attributes)
+            return master,slave
+        with mock.patch.object(self.m.pty,'openpty',side_effect=different_defaults):
+            result=self.m.run_pty([sys.executable,'-B','-c',"import os; os.write(1,b'a\\nb\\r\\n')"],columns=30,env=dict(os.environ))
+        self.assertEqual(result,self.result(out=b'a\r\nb\r\r\n'))
+
+    def test_pty_helper_drains_bytes_before_each_platform_end_condition(self):
+        for ending in (b'',OSError(self.m.errno.EIO,'closed'),BlockingIOError(self.m.errno.EAGAIN,'drained')):
+            with self.subTest(ending=repr(ending)):
+                process=mock.Mock(returncode=0)
+                process.communicate.return_value=(None,b'')
+                with mock.patch.object(self.m.subprocess,'Popen',return_value=process), mock.patch.object(self.m.os,'read',side_effect=[b'30\r',b'\n',ending]):
+                    result=self.m.run_pty(['unused'],columns=30,env=dict(os.environ))
+                self.assertEqual(result,self.result(out=b'30\r\n'))
 
     def test_input_and_call_order_corruption_are_not_equal(self):
         self.m.unchanged([{'mode':1}],[{'mode':1}])

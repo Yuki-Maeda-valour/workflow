@@ -7,7 +7,6 @@ import contextlib
 import errno
 import fcntl
 import pty
-import select
 import struct
 import termios
 import ctypes
@@ -151,6 +150,12 @@ def run_pty(argv, *, columns, env, cwd=ROOT):
     # stderrは通常のpipe、stdoutだけが実端末。改行のCRLF変換も生バイトで比較する。
     master,slave=pty.openpty()
     try:
+        # OSごとの初期値に依存せず、比較する端末の改行規則を起動前に固定する。
+        attributes=termios.tcgetattr(slave)
+        attributes[1] |= termios.OPOST | termios.ONLCR
+        for name in ('OCRNL','ONOCR','ONLRET'):
+            attributes[1] &= ~getattr(termios,name,0)
+        termios.tcsetattr(slave,termios.TCSANOW,attributes)
         fcntl.ioctl(slave,termios.TIOCSWINSZ,struct.pack('HHHH',24,columns,0,0))
         process=subprocess.Popen(argv,cwd=cwd,env=env,stdin=subprocess.DEVNULL,stdout=slave,stderr=subprocess.PIPE,start_new_session=True)
         os.close(slave);slave=None
@@ -162,16 +167,14 @@ def run_pty(argv, *, columns, env, cwd=ROOT):
             _,stderr=process.communicate(timeout=2)
         stdout=bytearray()
         os.set_blocking(master,False)
-        deadline=time.monotonic()+1
         while True:
             try:part=os.read(master,65536)
             except OSError as error:
                 if error.errno==errno.EIO:break
                 if error.errno not in (errno.EAGAIN,errno.EWOULDBLOCK):raise
-                if time.monotonic()>=deadline:
-                    timed_out=True;break
-                select.select([master],[],[],.02)
-                continue
+                # 直接子はcommunicateで回収済み。slave切断後の通知が
+                # EAGAINでも、EOFの形ではなく排出完了として扱う。
+                break
             if not part:break
             stdout.extend(part)
         return RunResult(process.returncode,bytes(stdout),stderr,timed_out)
