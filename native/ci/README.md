@@ -19,7 +19,7 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 ```
 
 - `prepare`: 実行中のPythonで`pip install -r requirements-dev.txt`を行い、Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
-- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。RustテストにはR4Sの専用比較も含まれます。今回作った 2 本を、それぞれ `check_probe.py` と `check_resolve_task_dir.py` で検査します。
+- `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。RustテストにはR4Sとtask-digestの専用比較も含まれます。今回作った 2 本を、それぞれ `check_probe.py` と `check_resolve_task_dir.py` で検査します。
 - `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、その 2 本の上記の検査を行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
@@ -49,6 +49,15 @@ Rust 側の修正を含む実体を識別できるように、付属する各フ
 - 旧用途94件の確認はRustへの移植ではありません。Pythonの再帰上限だけの承認済み差を、固定した入力と別期待で検査します。[比較の契約と手順](../../docs/testing.md#loop-state用の純粋部品の検査r4s)に従ってください。
 - `build.py test`はCI補助の検査です。R4Sの実比較はCargoの経路で行います。`reproduce`はRustテストを省くため、その代わりにはなりません。公開CLIや配布物に比較用の入口はありません。
 - 2026-11-10のLinux実装検証は成功しました。この時点でR4SのPR用必須CIは未実行です。4環境へ検査を必須化したことと、その成功を分けて記録します。Mac実機・最低OSも未確認です。
+
+## task-digestの必須比較(R4A)
+
+- #460の専用入口は[専用テスト](../crates/cli/tests/task_digest.rs)です。`harness = false`の通常起動で`check_task_digest.py --fixture <今回のテスト実行物>`と比較器の自己検査を必ず実行します。製品CLIへは登録していません。
+- Linux2種・Mac2種の`build`は、Python3.10.11・非rootで`quality()`の`cargo test --locked`からこの比較を実行します。0件、時間切れ、入力欠落、比較器の失敗やskipを成功にしません。
+- 旧Pythonと固定期待に対し、本文・値・生の入出力・終了値・入力無変更を比較します。承認済みの特殊入出力3条件と対照、環境設定の境界は通常件数と分けます。
+- `COLUMNS`の4300/4301桁と、有効な`PYTHONINTMAXSTRDIGITS`の無制限・最小値・上書き値も実PTYで比較します。
+- `build.py test`と`reproduce`、配布物のprobe/保存先比較は、この専用比較の代わりになりません。
+- 2026-11-10の手元Linux x86_64・Python3.10.12では専用比較と自己検査33件が成功し、未実施0件でした。Mac等の成功はこの実測から判断しません。[分類別件数・限定差・未確認条件](../../docs/testing.md#task-digestの比較r4a)を参照してください。
 
 ## 成果物と他 Task との結合
 

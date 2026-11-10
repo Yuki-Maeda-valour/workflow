@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0cと今回のR4S部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4Sは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4SとR4Aのtask-digestは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digestは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -248,6 +248,22 @@ pub fn run_child<E>(
 調査元は [Issue #454](https://github.com/Yuki-Maeda-valour/workflow/issues/454)、実装契約は [Issue #462](https://github.com/Yuki-Maeda-valour/workflow/issues/462)です。
 構文・順序・globの規則と承認の範囲は [design.md](../docs/design.md#loop-state用の純粋部品r4s)、必須比較と未確認条件は [testing.md](../docs/testing.md#loop-state用の純粋部品の検査r4s)にあります。
 
+## 本文の正規化と確認用の値(R4A task-digest)
+
+#460で、旧`task-digest.py`と同じ結果を返す専用部品を実装しました。
+製品CLIの登録・help・配布・既存の呼び出し元には接続していません。
+
+- `crates/cli/src/commands/task_digest/normalize.rs`の`body`が正規化本文を返し、`digest`が`sha256:`とSHA-256の先頭16桁を返します。
+- 同じ専用モジュールの`run`は`CommandIo`から入力を借り、`CommandOutput`を返します。`execute_to`はC0aを入力専用に使い、実出力は`output::emit_fd_to`へ渡します。共通の出力処理へ替えないでください。
+- `platform::task_digest::RegularPath::inspect`はリンクを辿って通常ファイルを確認します。`open`は待たずに開いて同じfdの種類を調べ、`RegularFile::read_chunk`はその実体だけを読みます。
+- `stdout_columns`はstdoutの端末幅を調べます。`is_linux_full`は実際のwriterと同じfdの種類・デバイス番号を調べます。パスを開き直しません。
+- `COLUMNS`はPythonの整数変換の桁数上限を含めて判定します。有効な`PYTHONINTMAXSTRDIGITS`の0または640以上を反映し、既定は4300です。
+- 特殊な入出力3条件だけ、終了1と空stdoutを維持して旧例外の詳細を固定診断へ変えます。通常の出力失敗は終了120、stderr書込み失敗はバッファなし時1を保ちます。
+- [専用テスト](crates/cli/tests/task_digest.rs)だけが専用部品を参照します。`cargo test --locked`の通常起動でPython比較と自己検査へ必ず進みます。
+
+正規化規則、ファイルの保証範囲、限定差の厳密な条件は [design.md](../docs/design.md#本文の正規化と確認用の値r4a-task-digest)にあります。
+件数と手元Linux実測、4機種の必須経路、未確認条件は [testing.md](../docs/testing.md#task-digestの比較r4a)にあります。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -293,7 +309,7 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix` と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
-`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event` と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
+`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
@@ -308,7 +324,7 @@ cargo test --locked
 cargo build --release --locked --target x86_64-unknown-linux-musl
 ```
 
-`cargo test --locked` は、C0bの実ファイル比較、C0cの実子比較、R4Sの固定期待・旧Python・Rustの比較も実行します。`python3`がPython 3.10系であり、root以外の利用者であることが必須です。
+`cargo test --locked` は、C0bの実ファイル比較、C0cの実子比較、R4Sとtask-digestの固定期待・旧Python・Rustの比較も実行します。`python3`がPython 3.10系であり、root以外の利用者であることが必須です。
 事前にリポジトリ直下で、同じPythonを使い `python3 -m pip install -r requirements-dev.txt` を実行してください。R4SはUnicode 13.0.0とPyYAML 6.0.3を要求します。
 専用比較を省略して合格にはしません。Mac実機と最低OSでのC0b/C0c/R4Sの動作は未確認です。R4SのLinux実装検証と、未実行のPR用必須CIは [検査記録](../docs/testing.md#loop-state用の純粋部品の検査r4s)で区別しています。
 

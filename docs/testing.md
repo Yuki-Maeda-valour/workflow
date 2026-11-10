@@ -198,6 +198,39 @@ unittestは2128件、失敗0・エラー0・skip44。loop3615・review345・impl
 この時点でR4SのPR用必須CIは未実行であり、Mac実機・最低OSでの動作も未確認である。
 文書更新と最新mainを含む最終SHAでは、全回帰テストと同じSHAのLinux・Macの`pull_request`必須CIを別途確認する。
 
+### task-digestの比較(R4A)
+
+#460の開発用実装は、旧Python・固定期待・Rustで正規化本文、値、生の入出力と終了値を比較する。
+契約は [design.md](design.md#本文の正規化と確認用の値r4a-task-digest)、APIは [native/README.md](../native/README.md#本文の正規化と確認用の値r4a-task-digest)にある。
+
+- `cargo test --locked`は、`cli`の`harness = false`の`task_digest`を起動する。引数なしの入口から`check_task_digest.py --fixture <今回のテスト実行物>`と自己検査`test_task_digest.py`を必須実行する。
+- Python3.10系・非rootを要求する。実行物不在、0件、欠落、時間切れ、両側の想定外失敗、自己検査の失敗とskipを拒否する。配布済みの実行物へ切り替えない。
+- 既存`test_task_digest.py`の37観点と16固定値、BASEの`sha256:21eefa756f838e54`を再利用する。BOM、改行、空白、フェンス内外と不正フェンス、可変ヘッダー、記録節、チェック行を比較する。
+- 引数・非UTF-8のargv/パス・UTF-8不正・リンク・非通常ファイル・短読・途中失敗も比較する。端末幅は実PTYを使う。
+- `COLUMNS`の4300/4301桁、符号、underscore、Unicode数字、先頭0を確認する。有効な`PYTHONINTMAXSTRDIGITS`の0・640・5000と各境界も固定期待と比較する。
+- stat後/open後の通常ファイルとFIFOへの差し替えを同期する。交換が1回だけ行われたこと、元実体の読取り、fd解放を確認する。入力の本文・種類・mode・リンク先・実体番号・size・mtime・ctimeを比較し、通常読取りで変わり得るatimeは除く。
+- UTF-8 strict/surrogateescapeとASCIIを使い、閉じたstdout/stderr、両出力不能、書込み・flush失敗を比べる。合成writerは実旧版との互換件数へ加えない。
+- 承認済みの非同期stdin・バッファなし切断stdout・バッファなしLinux`/dev/full`は、通常一致件数と分けて双方の診断を固定する。旧例外のソース位置・種類・末尾も確認する。Linux以外の`/dev/full`は理由と件数を未実施として出す。
+- `PYTHONUNBUFFERED`の固定49値と、代表11値×文字コード・実出力条件を別に確認する。各条件の欠落、余分な出力、別の例外、誤値、診断差、時間切れを自己検査で拒否する。
+
+#### 手元のLinux実装検証(2026-11-10)
+
+実装commitは`1b75f044f0cd0bd5e6d6bff025ebc67867bb22b3`である。
+Linux x86_64・Python3.10.12・通常利用者で、13項目の品質検査が成功した。
+書式・clippy・Cargoテスト・開発/releaseビルド、workflowとCI補助、規約、既存テスト、今回のreleaseによるprobe/保存先比較、ソース入力の値を含む。
+
+- 正規化本文・stdin・fileは各654件、引数325件、PTY54起動、ファイル操作30件、同期差し替え8起動、読取り2件、出力32件、閉じたstderr18件が成功した。これらは比較器が出した分類別件数である。
+- 承認済み3条件は各3件の計9件、対照7条件は各3件の計21件が成功した。通常の一致件数と分ける。
+- 合成writerは32条件であり、実旧版との互換件数へ含めない。環境設定の固定表49条件、実stdout/stderr165条件が成功した。
+- 比較器の自己検査33件が成功した。専用比較の未実施は0件である。
+- この手元実測はMac・Linux arm64・最低OS・実機、UTF-8/ASCII以外の出力文字コードの動作確認を含まない。
+
+#### 4機種CIで必須となる経路
+
+Linux2種・Mac2種の`build.py build`は、Python3.10.11と同じPythonへの開発依存を用意し、`quality()`の`cargo test --locked`で専用比較を必ず実行する。
+`build.py test`、`reproduce`、配布物の検査はこの専用比較の代わりにならない。
+上の手元実測はPR用CIの成功を意味しない。公開する同じSHAの`pull_request`必須CIと全回帰テストは、管理担当が別に記録する。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
