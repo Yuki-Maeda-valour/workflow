@@ -213,6 +213,14 @@ unittestは2128件、失敗0・エラー0・skip44。loop3615・review345・impl
 - 承認済みの非同期stdin・バッファなし切断stdout・バッファなしLinux`/dev/full`は、通常一致件数と分けて双方の診断を固定する。旧例外のソース位置・種類・末尾も確認する。Linux以外の`/dev/full`は理由と件数を未実施として出す。
 - `PYTHONUNBUFFERED`の固定49値と、代表11値×文字コード・実出力条件を別に確認する。各条件の欠落、余分な出力、別の例外、誤値、診断差、時間切れを自己検査で拒否する。
 
+#### 比較全体の上限(#465)
+
+- 比較全体の上限は900秒。通常の子実行は15秒、差し替え比較は通知待ちと応答後の待機にそれぞれ15秒を設ける。これらの期限、全比較件数、時間切れの失敗扱いと子の停止・回収は変更しない。
+- [PR #464の検証](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42806167952)(attempt 1)では、比較開始から合格までMac arm64は173.7秒、Linux x86_64は198.3秒、Linux arm64は176.7秒、Mac Intelは267.1秒だった。
+- 旧上限300秒では、Mac Intelの成功実測に対する余裕は32.9秒だった。[同じSHAのpush](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42806066674)と[マージ後mainのpush](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42808207949)は、いずれもMac Intelで300秒の時間切れとなった。
+- [#465](https://github.com/Yuki-Maeda-valour/workflow/issues/465)で900秒を採用した。成功最大実測の3.37倍で、余裕は632.9秒。失敗した回の完了時間は不明なため、600秒案より余裕を取る。Cargo検査自体の1800秒上限より短く、正常時の所要時間は増やさない。
+- 比較器の並列化は行わない。共用入力と変更前後の検査を保つための追加設計を避け、今回の変更を全体上限に絞る。修正後のMac Intelの所要時間と余裕は、同じSHAのPR用CIで別途記録する。
+
 #### 手元のLinux実装検証(2026-11-10)
 
 実装commitは`1b75f044f0cd0bd5e6d6bff025ebc67867bb22b3`である。
