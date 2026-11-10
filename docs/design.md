@@ -1037,6 +1037,38 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 
 公開APIは [native/README.md](../native/README.md#loop-state用の純粋部品r4s)、固定期待・旧Python・Rustの比較と未確認条件は [testing.md](testing.md#loop-state用の純粋部品の検査r4s)に記す。
 
+### 本文の正規化と確認用の値(R4A task-digest)
+
+[Issue #460](https://github.com/Yuki-Maeda-valour/workflow/issues/460)で、`task-digest.py`と同じ本文正規化・確認用の値・引数・入出力を開発用Rustソースへ実装した。
+製品CLIの登録表とhelpへは接続していない。配布と既存の呼び出し元は段階1b・プラグインv4.53.0のままである。
+
+- `cli/src/commands/task_digest/`が、UTF-8の確認、本文の正規化、SHA-256の先頭16桁、引数の診断、専用の出力処理を持つ。
+- 先頭BOMは1個だけ除く。CRLF・CRをLFへ変え、LFで分割する。各行末の半角スペースとTABだけを除く。
+- フェンス全体を検査してから、外側にちょうど1個ある`## 追加修正記録`の節を除く。最初の外側の節より前の可変ヘッダー3種、外側の空行も除く。
+- 外側のチェック済み行を未チェックへ変える。字下げはPython3.10の正規表現の空白集合を使う。残る行をLFで連結し、末尾LFを加えずに値を計算する。
+- フェンスは旧版独自の規則を保つ。未閉鎖と対応外の外側の字下げを拒否する。Unicodeの正規化や一般的なMarkdown解析は加えない。
+- `platform::task_digest`は、リンクを辿る`stat`、`O_NONBLOCK`でのopen、同じfdの`fstat`、同じ実体からの読み取りを行う。通常ファイルへの親・末端リンクを許す。
+- 開く前にFIFOへ変われば待たずに拒否する。開いた後のパス変更では元の実体を読む。inode一致、読み取り後の再検査、量や時間の上限は加えない。
+- C0aの`CommandIo`と出力の型を使う。共通の`execute_to`へは空の成功出力をsinkへ渡し、実際の出力と終了値は専用処理が決める。C0bのリンク拒否は流用しない。
+- 成功は値とLF・終了0、読み取り・UTF-8・構造の拒否は終了1、引数の拒否は終了2である。通常の出力失敗は旧Pythonの診断と終了120を保つ。書き込み・flush・部分出力を分ける。
+- `COLUMNS`はPython3.10の整数変換へ合わせる。数字の桁数は符号とunderscoreを除き、Unicode数字と先頭0を含む。既定4300桁を超えればstdoutの端末幅へ戻る。
+- 有効な`PYTHONINTMAXSTRDIGITS`の0(無制限)または640以上を反映する。Python起動前の無効設定、Pythonの`-X`と実行中の上限変更APIは再実装しない。
+- 端末幅取得だけに既存`rustix`の`termios`を追加する。外部依存の版と自作のunsafeは増やしていない。
+
+#### 承認済みの特殊な入出力3条件
+
+2026-11-09の利用者承認に基づき、次の条件だけ例外の詳細表示を固定診断へ変える。
+終了1と空の標準出力は維持する。任意の例外や#448・R4Sの承認済み差へ広げない。
+
+- 書き手を開いた非同期stdinにデータがなく、読み取りが待ちを要求する場合は、`算出できない: 非同期の標準入力にデータがない`とLFを出す。
+- バッファなし出力で成功値のstdoutが切断したパイプなら、`算出できない: 標準出力のパイプが閉じている`とLFを出す。
+- バッファなし出力でLinuxの`/dev/full`への最初のwriteが`ENOSPC`なら、`算出できない: 標準出力の空き容量がない`とLFを出す。
+- stdoutの2条件は、元のstderrが空・成功値・書き込み済み0・最初のwrite失敗に限る。`/dev/full`は実際に書く同じfdの文字デバイスmajor=1・minor=7で確認する。任意writer、別デバイス、flush失敗、部分出力へ広げない。
+- `PYTHONUNBUFFERED`は生バイトを旧CPython3.10と同じ規則で読む。未設定・空・先頭ASCII空白と符号を許した末尾までの整数0だけが無効である。末尾空白、非UTF-8、非ゼロ値は有効である。
+- stderrの書き込み失敗は通常時120・バッファなし時1を保つ。固定診断は通常のstderrと同じUTF-8・ASCIIの処理を通す。
+
+APIは [native/README.md](../native/README.md#本文の正規化と確認用の値r4a-task-digest)、固定期待との比較と手元実測は [testing.md](testing.md#task-digestの比較r4a)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
@@ -1065,6 +1097,7 @@ YAML解析・機密指定・状態保存・走査・子プロセス監督・配�
 #### C0b で採用した OS 呼出しの部品
 
 - 2026-11-09のC0bで `rustix` を採用した。段階 0 の候補記録は上に残す。`native/Cargo.toml` で `=1.1.6` に固定し、`platform` だけに `fs` と既定の `std` を追加した。
+- R4Aのtask-digestではstdoutの端末幅取得に`termios`を加えた。
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。

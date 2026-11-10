@@ -53,6 +53,7 @@ name = "dev-workflow-cli"
 version = "0.1.0"
 dependencies = [
  "dev-workflow-core",
+ "dev-workflow-platform",
  "serde",
  "serde_json",
  "sha2",
