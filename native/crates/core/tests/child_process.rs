@@ -327,7 +327,9 @@ fn main() -> std::process::ExitCode {
         .arg(std::env::current_exe().unwrap())
         .spawn()
         .unwrap();
-    let deadline = Instant::now() + Duration::from_secs(180);
+    // Mac Intelでは修正前の成功の最大が169.9秒で、180秒で時間切れになる回もあった。
+    // 全件比較を維持し、修正前の成功の最大の2倍以上を上限に取る。
+    let deadline = Instant::now() + Duration::from_secs(360);
     loop {
         if let Some(status) = child.try_wait().unwrap() {
             assert!(status.success(), "C0c checker failed: {status}");

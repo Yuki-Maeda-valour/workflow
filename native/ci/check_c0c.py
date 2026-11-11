@@ -1,27 +1,37 @@
 #!/usr/bin/env python3
 """C0cの固定期待、旧loop比較、実子の残存、入力無変更を確認する。"""
-import argparse
 import copy
-import ctypes
 import errno
-import importlib.util
 import json
 import os
 from pathlib import Path
 import signal
 import selectors
 import subprocess
-import stat
 import sys
-import tempfile
 import time
-import unittest
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
-from support_native import run_command, snapshot_tree
 from support_proc import assert_absent_now, cleanup, probe, record as process_record
+
+# 子と接続の中継は期限の窓の中で起動するので、使わない重いモジュールを読まない。
+# 判定は main() の振り分けと同じ条件にする。比較器として読み込んだときは全部を読む。
+LIGHT_PATH = __name__ == '__main__' and (sys.argv[1:2] in (['--fixture-driver'], ['--stream-driver'])
+                                         or '--child' in sys.argv[1:] or '--c0c-child' in sys.argv[1:])
+if not LIGHT_PATH:
+    import argparse
+    import ctypes
+    import importlib.util
+    import statistics
+    import tempfile
+    import unittest
+    from unittest import mock
+    from support_native import run_command, snapshot_tree
+
+# 期限の4ケースは、期限の時点で子が狙った状態にいることを前提にする。
+# CIの実測で、入力なしのケースの記録までの時間の最大の4倍以上を取る(詳細はdocs/testing.md)。
+DEADLINE_CASE_MS = 2000
 
 
 def encode(value):
@@ -287,13 +297,27 @@ class PipeReader:
         return self.exact(end)
 
 
-def observe_return(process, notice, iteration, control, spawned):
+def observe_return(process, notice, iteration, control, spawned, sent_ns=None, execution_ms=None):
+    # 送る直前の時刻(sent_ns)と同じ戻らない時計で、返却の通知を受けた時刻を取る。
+    received_ns = time.monotonic_ns()
     keys(notice, 'returned')
     integer(notice['returned'])
     if notice['returned'] != iteration or process.poll() is not None:
         raise ValueError('返却の順序か接続の生存が違う')
     if spawned:
-        pid = json.loads(control.read_text(), object_pairs_hook=unique)['pid']
+        try:
+            text = control.read_text()
+        except FileNotFoundError:
+            # 期限まで待って止めたなら、送る直前からの時間は必ず execution_ms 以上になる。
+            # 未満なら期限より前に返った(製品の不具合の疑い)。どちらでも失敗のまま扱う。
+            detail = []
+            if sent_ns is not None:
+                detail.append(f'計画を送る直前から返却の通知まで {(received_ns - sent_ns) / 1e6:.1f} ms')
+            if execution_ms is not None:
+                detail.append(f'execution_ms={execution_ms}')
+            suffix = '(' + '・'.join(detail) + ')' if detail else ''
+            raise ValueError(f'子の PID の記録が無いまま返却された: {control.name}{suffix}') from None
+        pid = json.loads(text, object_pairs_hook=unique)['pid']
         integer(pid, 1)
         # aliveを見たらその場で失敗する。接続終了や子の自然終了を待たない。
         assert_absent_now(pid)
@@ -307,9 +331,12 @@ def observe_return(process, notice, iteration, control, spawned):
     return absent
 
 
-def acknowledge(process, reader, iteration, control, spawned):
+def acknowledge(process, reader, iteration, control, spawned, sent_ns=None, execution_ms=None, before_reply=None):
     notice = json.loads(reader.line(), object_pairs_hook=unique)
-    absent = observe_return(process, notice, iteration, control, spawned)
+    absent = observe_return(process, notice, iteration, control, spawned, sent_ns, execution_ms)
+    if before_reply is not None:
+        # 応答を送る前は、接続が応答を待って止まっている。次の子が記録を上書きする前に読める。
+        before_reply()
     send(process, encode(dict(direct_child_absent=absent)))
 
 
@@ -323,13 +350,25 @@ def send(process, data):
 
 
 def fixture_driver(fixture, name, plan, control, spawned):
+    execution_ms = plan['execution_ms']
     process = subprocess.Popen([fixture, '--fixture', name], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0)
     try:
-        send(process, encode(plan))
+        data = encode(plan)
+        # 期限まで待ったかを見る時間は、送る直前から、製品の期限と同じく戻らない時計で測る。
+        sent_ns = time.monotonic_ns()
+        send(process, data)
+        # 記録までの時間は、送り終えた時点から、記録のファイルの時刻と同じ壁時計で測る。
+        sent_wall_ns = time.time_ns()
         reader = PipeReader(process.stdout, time.monotonic() + 10)
+
+        def measure():
+            latency = os.stat(control).st_mtime_ns - sent_wall_ns
+            control.with_suffix('.latency').write_text(str(latency))
+
         for iteration in range(plan['repeat']):
-            acknowledge(process, reader, iteration, control, spawned)
+            acknowledge(process, reader, iteration, control, spawned, sent_ns, execution_ms,
+                        measure if spawned and iteration == 0 else None)
         final = reader.line()
         stdout, stderr = process.communicate(timeout=max(.01, reader.deadline-time.monotonic()))
         if process.returncode or stderr or stdout or reader.buffer:
@@ -359,6 +398,16 @@ def run_case(fixture, name, plan, wanted, initial, control, *, partial_input=Fal
             raise ValueError('子孫の残存境界を観測できない')
         if tree(initial) != before:
             raise ValueError('入力が変更された')
+        # 記録までの時間は表示だけに使う。測定が黙って抜けないよう、有無は合否に入れる。
+        measured = control.with_suffix('.latency')
+        if wanted['status'] is not None:
+            if not measured.exists():
+                raise ValueError(f'記録までの時間が無い: {control.name}')
+            latency = int(measured.read_text())
+        elif measured.exists():
+            raise ValueError(f'記録までの時間があってはいけない: {control.name}')
+        else:
+            latency = None
         if legacy:
             old_value = legacy_record(name, plan, control)
             from support_native import RunResult
@@ -369,6 +418,7 @@ def run_case(fixture, name, plan, wanted, initial, control, *, partial_input=Fal
         leftovers = cleanup(control.parent, records=[control, control.with_suffix('.grand')])
         if leftovers:
             raise RuntimeError(f'検査の子が残った: {leftovers}')
+    return latency
 
 
 def cases():
@@ -406,8 +456,8 @@ def cases():
     yield 'invalid-deadlines',{},dict(cleanup_ms=0,cancel='before'),dict(cause='invalid-deadlines',spawned=False)
     yield 'cancel-output',{'stdout_hex':'78','linger':True},dict(cancel='output'),dict(stdout=b'x',cause='cancelled',signal_number=signal.SIGKILL)
     for mode in ['close-outputs','output']:
-        yield 'deadline-'+mode,{'mode':mode,'linger':True},dict(execution_ms=500),dict(cause='deadline',signal_number=signal.SIGKILL)
-    yield 'stdin-stall',{'stdout_hex':'78','stderr_hex':'79','linger':True},dict(input_hex=data.hex(),execution_ms=500),dict(stdout=b'x',stderr=b'y',cause='deadline',signal_number=signal.SIGKILL)
+        yield 'deadline-'+mode,{'mode':mode,'linger':True},dict(execution_ms=DEADLINE_CASE_MS),dict(cause='deadline',signal_number=signal.SIGKILL)
+    yield 'stdin-stall',{'stdout_hex':'78','stderr_hex':'79','linger':True},dict(input_hex=data.hex(),execution_ms=DEADLINE_CASE_MS),dict(stdout=b'x',stderr=b'y',cause='deadline',signal_number=signal.SIGKILL)
     for policy in ['reject','close']:
         wanted=dict(early=True)
         if policy=='reject':
@@ -415,7 +465,7 @@ def cases():
         yield 'epipe-'+policy,{'mode':'close-input','linger':policy=='reject'},dict(input_hex=data.hex(),broken_pipe=policy),wanted
     for consumer in ['refused','write-failed','flush-failed']:
         yield consumer,{'stdout_hex':'78','linger':True},dict(consumer=consumer),dict(cause='consumer',consumer=consumer,signal_number=signal.SIGKILL,used=1)
-    yield 'grandchild-holds-pipe',{'mode':'fork-hold'},dict(execution_ms=500),dict(cause='deadline')
+    yield 'grandchild-holds-pipe',{'mode':'fork-hold'},dict(execution_ms=DEADLINE_CASE_MS),dict(cause='deadline')
     yield 'grandchild-closes-pipe',{'mode':'fork-close'}, {}, {}
     for clear, value, expected_value in [(False,None,b'inherited'),(True,None,b'<absent>'),(True,'replaced',b'replaced')]:
         yield f'env-{clear}-{value}',{'mode':'environment'},dict(clear_env=clear,env={} if value is None else {'C0C_VALUE':value}),dict(stdout=expected_value)
@@ -455,8 +505,37 @@ def git_plan(cwd, control, config, executable, search):
     return plan
 
 
+def latency_summary(pairs, deadline_names, input_names):
+    # 表示だけに使い、合否には使わない。負の値も 0 に切り上げず、そのまま出す。
+    def ms(value):
+        return f'{value / 1e6:.1f}'
+
+    def largest(group):
+        # 同じ値が並ぶときは、先に出たケース名を取る(max は最初の最大を返す)。
+        return max(group, key=lambda pair: pair[1])
+
+    plain = [pair for pair in pairs if pair[0] not in input_names]
+    given = [pair for pair in pairs if pair[0] in input_names]
+    timed = [value for name, value in pairs if name in deadline_names]
+    parts = [f'入力なし 測定 {len(plain)} 件']
+    if plain:
+        name, value = largest(plain)
+        parts += [f'中央 {ms(statistics.median([v for _, v in plain]))} ms', f'最大 {ms(value)} ms({name})']
+    parts.append(f'入力あり 測定 {len(given)} 件')
+    if given:
+        name, value = largest(given)
+        parts.append(f'最大 {ms(value)} ms({name})')
+    parts.append(f'期限のケース {len(timed)} 件の最大 {ms(max(timed))} ms' if timed else '期限のケース 0 件')
+    parts.append(f'期限 {DEADLINE_CASE_MS} ms')
+    return 'C0c 記録までの時間: ' + ' / '.join(parts)
+
+
 def run_all(fixture):
     count=0
+    # 記録までの時間は、子を起動したケースの (ケース名, ナノ秒) を集め、最後に要約だけを出す。
+    pairs=[];deadline_names=set();input_names=set()
+    def note(name,latency):
+        if latency is not None:pairs.append((name,latency))
     with tempfile.TemporaryDirectory(prefix='c0c-compare-') as directory:
         root=Path(directory).resolve()
         initial=root/'input';initial.mkdir();(initial/'unchanged').write_bytes(b'\0\xffinput')
@@ -466,7 +545,9 @@ def run_all(fixture):
             path=control/(name+'.json');plan=plan_for(initial,path,config);plan.update(changes)
             want=expected(name,**wanted)
             partial=name.startswith('epipe-') or name=='stdin-stall'
-            run_case(fixture,name,plan,want,initial,path,partial_input=partial)
+            if plan['input_hex']:input_names.add(name)
+            if changes.get('execution_ms')==DEADLINE_CASE_MS:deadline_names.add(name)
+            note(name,run_case(fixture,name,plan,want,initial,path,partial_input=partial))
             count+=1
         stream_control=control/'stream.json'
         stream_plan=plan_for(initial,stream_control,{'mode':'handshake'})
@@ -479,7 +560,7 @@ def run_all(fixture):
         long=initial/('a'*80)/('b'*80)/('日本語 空白'+ 'c'*40);long.mkdir(parents=True)
         for name,cwd in [('long-cwd',long)]:
             path=control/(name+'.json');plan=plan_for(cwd,path,{'mode':'cwd'})
-            run_case(fixture,name,plan,expected(name,stdout=os.fsencode(cwd)),initial,path);count+=1
+            note(name,run_case(fixture,name,plan,expected(name,stdout=os.fsencode(cwd)),initial,path));count+=1
         try:
             raw=initial/os.fsdecode(b'raw-\xff');raw.mkdir()
         except OSError as error:
@@ -488,14 +569,14 @@ def run_all(fixture):
             print('P2: MacのEILSEQにより実在名の事前作成だけ未実施')
         else:
             path=control/'raw-name.json';plan=git_plan(raw,path,{'mode':'cwd'},git,fake)
-            run_case(fixture,'raw-name',plan,expected('raw-name',stdout=os.fsencode(raw)),initial,path,legacy=True);count+=1
+            note('raw-name',run_case(fixture,'raw-name',plan,expected('raw-name',stdout=os.fsencode(raw)),initial,path,legacy=True));count+=1
             binary=raw/os.fsdecode(b'exec-\xff')
             write_launcher(binary)
             aliases=initial/'raw-alias';aliases.mkdir()
             alias=aliases/'git';alias.symlink_to(os.path.relpath(binary,aliases))
             if not alias.samefile(binary):raise ValueError('旧版とRustの実行物が別の実体')
             path=control/'raw-executable.json';plan=git_plan(raw,path,{'stdout_hex':'00ff'},binary,aliases)
-            run_case(fixture,'raw-executable',plan,expected('raw-executable',stdout=b'\0\xff'),initial,path,legacy=True);count+=1
+            note('raw-executable',run_case(fixture,'raw-executable',plan,expected('raw-executable',stdout=b'\0\xff'),initial,path,legacy=True));count+=1
         for name,kind,code in [('missing','missing',errno.ENOENT),('denied','denied',errno.EACCES),('missing-cwd','cwd',errno.ENOENT)]:
             path=control/(name+'.json');plan=plan_for(initial,path,{})
             if kind=='cwd':plan['cwd_hex']=os.fsencode(initial/'missing').hex()
@@ -503,7 +584,7 @@ def run_all(fixture):
                 binary=initial/kind
                 if kind=='denied':binary.write_bytes(b'not executable');binary.chmod(0o600)
                 plan['argv_hex']=[os.fsencode(binary).hex()]
-            run_case(fixture,name,plan,expected(name,cause='spawn',os_errno=code,spawned=False),initial,path);count+=1
+            note(name,run_case(fixture,name,plan,expected(name,cause='spawn',os_errno=code,spawned=False),initial,path));count+=1
         # 旧run_gitはPATHでgitを選ぶ。短い固定interpreterパスだけをshebangへ置く。
         for name,body,code,total,prior in [('legacy-raw',b'\0\xff',237,20,0),('legacy-empty',b'',0,20,0),('legacy-below',b'xxx',0,11,7),('legacy-equal',b'xxxx',0,11,7),('legacy-over',b'xxxxx',0,11,7)]:
             path=control/(name+'.json');config={'stdout_hex':body.hex(),'code':code,'linger':name=='legacy-over'}
@@ -512,10 +593,11 @@ def run_all(fixture):
             plan['argv_hex']=[os.fsencode(x).hex() for x in args]
             want=expected(name,stdout=body,code=code,used=prior+len(body))
             if name=='legacy-over':want=expected(name,cause='consumer',consumer='total-limit',signal_number=signal.SIGKILL,used=prior)
-            run_case(fixture,name,plan,want,initial,path,legacy=True);count+=1
+            note(name,run_case(fixture,name,plan,want,initial,path,legacy=True));count+=1
         name='legacy-missing';path=control/(name+'.json');plan=plan_for(initial,path,{})
         missing=root/'no-git';missing.mkdir();plan['env']={'PATH':str(missing)};plan['argv_hex']=[os.fsencode(missing/'git').hex()]
-        run_case(fixture,name,plan,expected(name,cause='spawn',os_errno=errno.ENOENT,spawned=False),initial,path,legacy=True);count+=1
+        note(name,run_case(fixture,name,plan,expected(name,cause='spawn',os_errno=errno.ENOENT,spawned=False),initial,path,legacy=True));count+=1
+    print(latency_summary(pairs,deadline_names,input_names))
     return count
 
 
