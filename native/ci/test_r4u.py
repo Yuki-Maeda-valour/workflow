@@ -353,6 +353,54 @@ class DeepTreeTests(unittest.TestCase):
             checker.check_nofile(checker.REQUIRED_NOFILE - 1)
 
 
+class MacFixtureTests(unittest.TestCase):
+    """Mac の固定期待(cases-macos.json): Mac の CI の 2 種類のログから取り出して 1 つにしたもの。"""
+
+    @classmethod
+    def setUpClass(cls):
+        with patch.object(checker, "OS_NAME", "macos"):
+            cls.path = checker.os_fixture_path()
+            cls.doc = checker.load_fixture_document(cls.path)
+        cls.linux = json.loads(checker.CASES_FIXTURE.read_text(encoding="utf-8"))
+        cls.cases, cls.step2 = checker.all_cases()
+
+    def test_document_is_read_on_mac_and_matches_the_case_list(self):
+        self.assertEqual("cases-macos.json", self.path.name)
+        self.assertEqual(self.linux["case_ids"], self.doc["case_ids"])
+        self.assertEqual(["arm64", "x86_64"], self.doc["machines"])
+        self.assertTrue(self.doc["legacy_recorded"])
+        # Linux では、この OS の固定期待として読まない(OS の欄が違う)。
+        with patch.object(checker, "OS_NAME", "linux"), self.assertRaises(checker.Failure):
+            checker.load_fixture_document(self.path)
+
+    def test_every_case_has_a_mac_expectation_or_a_closed_list_reason(self):
+        reasons = set(self.doc["skipped"].values())
+        self.assertLessEqual(reasons, {checker.SKIP_DEVFULL, checker.SKIP_NON_UTF8})
+        for case in self.cases:
+            with self.subTest(case=case.id):
+                if case.step2 is None and not case.fixture:
+                    self.assertNotIn(case.id, self.doc["cases"])
+                elif case.id in self.doc["skipped"]:
+                    self.assertNotIn(case.id, self.doc["cases"])
+                else:
+                    self.assertIn(case.id, self.doc["cases"])
+        self.assertEqual(sum(1 for c in self.cases if c.step2 is not None), len(self.step2["entries"]))
+
+    def test_merge_requires_everything_but_the_machine_to_match(self):
+        one = dict(self.doc, machines=["x86_64"])
+        other = dict(self.doc, machines=["arm64"])
+        self.assertEqual(["arm64", "x86_64"], checker.merge_fixtures([one, other])["machines"])
+        old_style = {k: v for k, v in self.doc.items() if k != "machines"}
+        self.assertEqual(["arm64", "x86_64"],
+                         checker.merge_fixtures([dict(old_style, machine="arm64"), one])["machines"])
+        changed = json.loads(json.dumps(other))
+        changed["cases"]["legacy:basic-doc-example"]["exit"] = 0
+        with self.assertRaisesRegex(checker.Failure, "legacy:basic-doc-example"):
+            checker.merge_fixtures([one, changed])
+        with self.assertRaises(checker.Failure):
+            checker.merge_fixtures([])
+
+
 class FixtureTests(unittest.TestCase):
     marks = [(b"/tmp/root", checker.ROOT_MARK)]
 
@@ -835,6 +883,38 @@ class RealChildTests(unittest.TestCase):
         other = checker.Result(1, b"", b"abc", [write(2, b"ab"), write(2, b"cd", ret=1)])
         with self.assertRaisesRegex(checker.Failure, "模擬"):
             checker.check_rlimit_model(real, other, "旧版")
+
+    def mac_cases(self):
+        with patch.object(checker, "OS_NAME", "macos"):
+            return checker.load_fixture_document(checker.os_fixture_path())["cases"]
+
+    def test_mac_fixture_is_used_as_the_third_party(self):
+        # OS に依らない入力の Mac の固定期待で、旧版・固定期待・Rust の 3 者の比較の経路を Linux で通す。
+        case = next(c for c in checker.all_cases()[0] if c.id == "legacy:basic-doc-example")
+        ctx = self.context(self.fake("mac-third"))
+        fixtures = json.loads(json.dumps(self.mac_cases()))
+        outcome = checker.run_case(ctx, case, fixtures, {})
+        self.assertEqual(("合格", True), (outcome.status, outcome.fixed))
+        for key, value in (("exit", 0), ("stdout", "検査ファイル数: 1\n"), ("writes", {"count": 1, "sha256": "0" * 64})):
+            changed = json.loads(json.dumps(fixtures))
+            changed[case.id][key] = value
+            with self.subTest(key=key), self.assertRaisesRegex(checker.Failure, "固定期待と違う"):
+                checker.run_case(self.context(ctx.rust), case, changed, {})
+
+    def test_mac_step2_fixture_is_used_as_the_third_party(self):
+        # 手順 2 の Mac の経路(規則を旧版から作り直し、cases-macos.json と比べる)を、OS の印だけ Mac にして通す。
+        case = next(c for c in checker.all_cases()[0] if c.id == "step2:one:buffered:file:sigint")
+        target = self.script("mac-step2", f"#!{checker.this_python()}\n" + textwrap.dedent(f"""\
+            import os, sys
+            os.execv({checker.this_python()!r}, [{checker.this_python()!r}, {str(checker.LEGACY)!r}] + sys.argv[2:])
+            """))
+        fixtures = json.loads(json.dumps(self.mac_cases()))
+        with patch.object(checker, "MAC", True), patch.object(checker, "LINUX", False):
+            self.assertTrue(checker.check_step2(self.context(target), case, {}, fixtures))
+            changed = json.loads(json.dumps(fixtures))
+            changed[case.id]["exit"] = 0
+            with self.assertRaisesRegex(checker.Failure, "手順 2 の固定期待と違う"):
+                checker.check_step2(self.context(target), case, {}, changed)
 
     def test_out_of_scope_variable_reaching_the_child_fails(self):
         ctx = self.context(self.fake("same3"))

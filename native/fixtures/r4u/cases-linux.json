@@ -4712,7 +4712,9 @@
   "sha256": "b2eea09e6b0c1b4f84b8c4b36f2d04aa517c88b3eb410c5a19e619457e09d4ab"
  },
  "legacy_recorded": true,
- "machine": "x86_64",
+ "machines": [
+  "x86_64"
+ ],
  "marks": {
   "@LEGACY@": "旧スクリプトの絶対パス(利用者の入力に置いた偽の File の行)",
   "@ROOT@": "入力の木の根(作業場所)",

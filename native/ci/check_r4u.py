@@ -2452,6 +2452,10 @@ def main_compare(rust, only=None):
     if os_data is not None and os_data["case_ids"] != list_data["case_ids"]:
         raise Failure(f"{os_path.name} のケースの一覧が {CASES_FIXTURE.name} と違う")
     fixtures = os_data["cases"] if os_data is not None else None
+    if os_data is not None:
+        import platform
+        print(f"固定期待: {os_path.name}(測った機械 {machines_of(os_data)}・この機械 {platform.machine()}。"
+              "機械の種類は照らさない)", flush=True)
     if fixtures is None:
         print(f"この OS の固定期待 {os_path.name} が無い。旧版で測った値を最後に出し、比較は不合格にする", flush=True)
     cases, step2_data = all_cases()
@@ -2674,7 +2678,8 @@ def fixture_document(python, case_ids, entries, skipped, legacy_recorded):
         "python": {"version": python.version, "stdlib_sha256": STDLIB_SHA256},
         "legacy": {"path": LEGACY_REL, "sha256": LEGACY_SHA256},
         "platform": OS_NAME,
-        "machine": platform.machine(),
+        # 値を測った機械(記録。比較器は照らさない: 同じ OS の機械の種類で値は変わらない〈Mac の 2 種類で確かめた〉)。
+        "machines": [platform.machine()],
         "legacy_recorded": legacy_recorded,
         "marks": {"@ROOT@": "入力の木の根(作業場所)", "@TOP@": "/tmp の直下に作る一時フォルダ",
                   "@TOPNAME@": "その名前", "@LEGACY@": "旧スクリプトの絶対パス(利用者の入力に置いた偽の File の行)"},
@@ -2714,11 +2719,34 @@ def extract_fixture(log, name):
     raise Failure(f"{name} の終わりの行が無い")
 
 
-def main_extract_fixture(log_path, out):
+def machines_of(document):
+    if "machines" in document:
+        return list(document["machines"])
+    return [document["machine"]] if "machine" in document else []
+
+
+def merge_fixtures(documents):
+    """同じ OS の複数の機械で測った固定期待を 1 つにする。機械の欄のほかが全部同じときだけ。"""
+    if not documents:
+        raise Failure("固定期待が 1 つも無い")
+    rest = [{k: v for k, v in doc.items() if k not in ("machine", "machines")} for doc in documents]
+    for index, other in enumerate(rest[1:], 2):
+        if other != rest[0]:
+            keys = sorted(k for k in set(other) | set(rest[0]) if other.get(k) != rest[0].get(k))
+            cases = sorted(k for k in set(other.get("cases", {})) | set(rest[0].get("cases", {}))
+                           if other.get("cases", {}).get(k) != rest[0].get("cases", {}).get(k))
+            raise Failure(f"{index} つ目の固定期待が 1 つ目と違う(欄 {keys}・ケース {cases[:20]})。1 つにまとめられない")
+    merged = dict(rest[0])
+    merged["machines"] = sorted({machine for doc in documents for machine in machines_of(doc)})
+    return merged
+
+
+def main_extract_fixture(log_paths, out):
     name = out.name
-    data = extract_fixture(log_path.read_text(encoding="utf-8", errors="replace"), name)
+    documents = [extract_fixture(path.read_text(encoding="utf-8", errors="replace"), name) for path in log_paths]
+    data = merge_fixtures(documents)
     out.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"固定期待: {len(data['cases'])} 件 → {out}")
+    print(f"固定期待: {len(data['cases'])} 件・機械 {data['machines']} → {out}")
     return 0
 
 
@@ -2757,8 +2785,9 @@ def main(argv=None):
     group.add_argument("--fixture", help="Rust の検査用の実行物")
     group.add_argument("--measure-cases", action="store_true")
     group.add_argument("--measure-step2", action="store_true")
-    group.add_argument("--extract-fixture", type=Path, metavar="ログ",
-                       help="固定期待が無い OS の CI のログから、比較器が出した固定期待を取り出す(--out に書く)")
+    group.add_argument("--extract-fixture", type=Path, nargs="+", metavar="ログ",
+                       help="固定期待が無い OS の CI のログから、比較器が出した固定期待を取り出す(--out に書く)。"
+                            "同じ OS の複数の機械のログを渡すと、機械の欄のほかが同じことを確かめて 1 つにする")
     parser.add_argument("--out", type=Path)
     parser.add_argument("--only", action="append", help="調べるための部分実行(ケースの ID。合格にはしない)")
     args = parser.parse_args(argv)
