@@ -19,12 +19,49 @@
   "sigint": "action=sigint",
   "fail-once": "action=fail,errno=28",
   "fail-persist": "action=fail,errno=28,persist=1",
-  "fail-persist-epipe": "action=fail,errno=32,persist=1"
+  "fail-persist-epipe": "action=fail,errno=32,persist=1",
+  "cut": "action=cut,errno=27"
  },
  "table": [
   {
    "mode": "buffered",
    "piece": "exception",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "IsADirectoryError: ["
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "RecursionError: maxi"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "OSError: [Errno 40] "
+     ],
+     "exit": 120
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "exception",
    "action": "fail-once",
    "inputs": [
     "one",
@@ -103,6 +140,42 @@
      "dropped": "",
      "added": [],
      "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "file",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"chec"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"chec"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"path"
+     ],
+     "exit": 120
     }
    ]
   },
@@ -241,6 +314,42 @@
   {
    "mode": "buffered",
    "piece": "header",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 120
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "header",
    "action": "fail-once",
    "inputs": [
     "one",
@@ -373,6 +482,24 @@
   {
    "mode": "buffered",
    "piece": "header2",
+   "action": "cut",
+   "inputs": [
+    "two"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 120
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "header2",
    "action": "fail-once",
    "inputs": [
     "two"
@@ -435,6 +562,24 @@
       ""
      ],
      "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "repeated",
+   "action": "cut",
+   "inputs": [
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  [Previous line rep"
+     ],
+     "exit": 120
     }
    ]
   },
@@ -509,6 +654,24 @@
   {
    "mode": "buffered",
    "piece": "separator",
+   "action": "cut",
+   "inputs": [
+    "two"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "During handling of "
+     ],
+     "exit": 120
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "separator",
    "action": "fail-once",
    "inputs": [
     "two"
@@ -571,6 +734,42 @@
       ""
      ],
      "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "buffered",
+   "piece": "source",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    sys.exit(mai"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    sys.exit(mai"
+     ],
+     "exit": 120
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    p."
+     ],
+     "exit": 120
     }
    ]
   },
@@ -666,6 +865,42 @@
      "result": "出す",
      "dropped": "",
      "added": [],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "colon",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "IsADirectoryError:"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "RecursionError:"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "OSError:"
+     ],
      "exit": 1
     }
    ]
@@ -817,6 +1052,30 @@
   {
    "mode": "unbuffered",
    "piece": "end",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "落とす",
+     "dropped": "空行",
+     "added": [],
+     "exit": 1
+    },
+    {
+     "result": "落とす",
+     "dropped": "空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "end",
    "action": "fail-once",
    "inputs": [
     "one",
@@ -900,6 +1159,42 @@
      "result": "落とす",
      "dropped": "2 段の区切り・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
      "added": [],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "file",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"chec"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"chec"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  File \"path"
+     ],
      "exit": 1
     }
    ]
@@ -1014,6 +1309,42 @@
      "result": "落とす",
      "dropped": "ソースの行",
      "added": [],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "header",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
      "exit": 1
     }
    ]
@@ -1153,6 +1484,24 @@
   {
    "mode": "unbuffered",
    "piece": "header2",
+   "action": "cut",
+   "inputs": [
+    "two"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "Traceback (most r"
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "header2",
    "action": "fail-once",
    "inputs": [
     "two"
@@ -1213,6 +1562,42 @@
      "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
      "added": [
       ""
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "indent",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  "
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  "
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  "
      ],
      "exit": 1
     }
@@ -1335,6 +1720,24 @@
   {
    "mode": "unbuffered",
    "piece": "repeated",
+   "action": "cut",
+   "inputs": [
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "  [Previous line rep"
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "repeated",
    "action": "fail-once",
    "inputs": [
     "rec"
@@ -1403,6 +1806,24 @@
   {
    "mode": "unbuffered",
    "piece": "separator",
+   "action": "cut",
+   "inputs": [
+    "two"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "During handling of "
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "separator",
    "action": "fail-once",
    "inputs": [
     "two"
@@ -1461,6 +1882,42 @@
      "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
      "added": [
       ""
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "source",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    sys.exit(main("
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    sys.exit(main("
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "    p.st"
      ],
      "exit": 1
     }
@@ -1606,6 +2063,36 @@
      "added": [
       "    sys.exit(main(sys.argv[1:]))  File \"check_links.py\", line 52, in main"
      ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "source_end",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "落とす",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [],
+     "exit": 1
+    },
+    {
+     "result": "落とす",
+     "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [],
+     "exit": 1
+    },
+    {
+     "result": "落とす",
+     "dropped": "File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [],
      "exit": 1
     }
    ]
@@ -1745,6 +2232,42 @@
   {
    "mode": "unbuffered",
    "piece": "typename",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "IsADirec"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "Recursi"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "OSE"
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "typename",
    "action": "fail-once",
    "inputs": [
     "one",
@@ -1841,6 +2364,42 @@
      "dropped": "例外の行",
      "added": [
       "RecursionError: <exception str() failed>"
+     ],
+     "exit": 1
+    }
+   ]
+  },
+  {
+   "mode": "unbuffered",
+   "piece": "value",
+   "action": "cut",
+   "inputs": [
+    "one",
+    "two",
+    "rec"
+   ],
+   "outcomes": [
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "IsADirectoryError: [Errno 21] Is a d"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行",
+     "added": [
+      "RecursionError: maximum recursio"
+     ],
+     "exit": 1
+    },
+    {
+     "result": "置き換える",
+     "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+     "added": [
+      "OSError: [Errno 40] Too many "
      ],
      "exit": 1
     }
@@ -2151,6 +2710,72 @@
    "added": []
   },
   {
+   "id": "step2:one:buffered:header:cut",
+   "input": "one",
+   "mode": "buffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "ecent call last):\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
+  },
+  {
    "id": "step2:one:buffered:file:sigint",
    "input": "one",
    "mode": "buffered",
@@ -2353,6 +2978,79 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:buffered:file:cut",
+   "input": "one",
+   "mode": "buffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"chec",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"chec"
+   ]
   },
   {
    "id": "step2:one:buffered:source:sigint",
@@ -2679,6 +3377,93 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:buffered:source:cut",
+   "input": "one",
+   "mode": "buffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=202020207379732e65786974286d61696e287379732e617267765b313a5d29290a,occ=1,exact=1,action=cut,bytes=16,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(mai",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    sys.exit(main(sys.argv[1:]))\n",
+     16,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    sys.exit(mai"
+   ]
   },
   {
    "id": "step2:one:buffered:exception:sigint",
@@ -3084,6 +3869,128 @@
    "added": []
   },
   {
+   "id": "step2:one:buffered:exception:cut",
+   "input": "one",
+   "mode": "buffered",
+   "piece": "exception",
+   "action": "cut",
+   "rules": "fd=2,prefix=4973414469726563746f72794572726f723a205b4572726e6f2032315d2049732061206469726563,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    sys.exit(main(sys.argv[1:]))\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1134, in read_text\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1119, in open\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    return self._accessor.open(self, mode, buffering, encoding, errors,\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "IsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "Errno 21] Is a directory: 'g/x.md'\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Errno 21] Is a directory: 'g/x.md'\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Errno 21] Is a directory: 'g/x.md'\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Errno 21] Is a directory: 'g/x.md'\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Errno 21] Is a directory: 'g/x.md'\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "IsADirectoryError: ["
+   ]
+  },
+  {
    "id": "step2:one:unbuffered:header:sigint",
    "input": "one",
    "mode": "unbuffered",
@@ -3202,6 +4109,44 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:unbuffered:header:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:one:unbuffered:file:sigint",
@@ -3453,6 +4398,58 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:unbuffered:file:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"chec",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "    ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"chec"
+   ]
   },
   {
    "id": "step2:one:unbuffered:indent:sigint",
@@ -3851,6 +4848,65 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:unbuffered:indent:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "indent",
+   "action": "cut",
+   "rules": "fd=2,prefix=20202020,occ=1,exact=1,action=cut,bytes=2,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n  ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     2,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  "
+   ]
   },
   {
    "id": "step2:one:unbuffered:source:sigint",
@@ -4285,6 +5341,72 @@
    ]
   },
   {
+   "id": "step2:one:unbuffered:source:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=7379732e65786974286d61696e287379732e617267765b313a5d2929,occ=1,exact=1,action=cut,bytes=14,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     14,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    sys.exit(main("
+   ]
+  },
+  {
    "id": "step2:one:unbuffered:source_end:sigint",
    "input": "one",
    "mode": "unbuffered",
@@ -4629,6 +5751,70 @@
      -1,
      32,
      "fail"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": []
+  },
+  {
+   "id": "step2:one:unbuffered:source_end:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "source_end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=1,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
     ]
    ],
    "result": "落とす",
@@ -5237,6 +6423,163 @@
    "result": "落とす",
    "dropped": "例外の行",
    "added": []
+  },
+  {
+   "id": "step2:one:unbuffered:typename:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "typename",
+   "action": "cut",
+   "rules": "fd=2,prefix=4973414469726563746f72794572726f72,occ=1,exact=1,action=cut,bytes=8,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirec",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "text = md.read_text(encoding=\"utf-8\", errors=\"replace\")",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1134, in read_text\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with self.open(mode='r', encoding=encoding, errors=errors) as f:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1119, in open\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.open(self, mode, buffering, encoding, errors,",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "IsADirectoryError",
+     8,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     ": ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "IsADirec"
+   ]
   },
   {
    "id": "step2:one:unbuffered:colon:sigint",
@@ -5864,6 +7207,170 @@
    "dropped": "例外の行・空行",
    "added": [
     "IsADirectoryError"
+   ]
+  },
+  {
+   "id": "step2:one:unbuffered:colon:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "colon",
+   "action": "cut",
+   "rules": "fd=2,prefix=3a20,occ=1,exact=1,action=cut,bytes=1,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError:",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "text = md.read_text(encoding=\"utf-8\", errors=\"replace\")",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1134, in read_text\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with self.open(mode='r', encoding=encoding, errors=errors) as f:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1119, in open\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.open(self, mode, buffering, encoding, errors,",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "IsADirectoryError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     1,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "[Errno 21] Is a directory: 'g/x.md'",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "IsADirectoryError:"
    ]
   },
   {
@@ -6511,6 +8018,170 @@
    "dropped": "例外の行・空行",
    "added": [
     "IsADirectoryError: "
+   ]
+  },
+  {
+   "id": "step2:one:unbuffered:value:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "value",
+   "action": "cut",
+   "rules": "fd=2,prefix=5b4572726e6f2032315d2049732061206469726563746f72793a2027672f782e6d6427,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a d",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "text = md.read_text(encoding=\"utf-8\", errors=\"replace\")",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1134, in read_text\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with self.open(mode='r', encoding=encoding, errors=errors) as f:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1119, in open\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.open(self, mode, buffering, encoding, errors,",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "IsADirectoryError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 21] Is a directory: 'g/x.md'",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "IsADirectoryError: [Errno 21] Is a d"
    ]
   },
   {
@@ -7162,6 +8833,168 @@
    "added": []
   },
   {
+   "id": "step2:one:unbuffered:end:cut",
+   "input": "one",
+   "mode": "unbuffered",
+   "piece": "end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=5,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 52, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "text = md.read_text(encoding=\"utf-8\", errors=\"replace\")",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1134, in read_text\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with self.open(mode='r', encoding=encoding, errors=errors) as f:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1119, in open\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.open(self, mode, buffering, encoding, errors,",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "IsADirectoryError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 21] Is a directory: 'g/x.md'",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "空行",
+   "added": []
+  },
+  {
    "id": "step2:two:buffered:header:sigint",
    "input": "two",
    "mode": "buffered",
@@ -7518,6 +9351,86 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:buffered:header:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "ecent call last):\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:two:buffered:file:sigint",
@@ -7904,6 +9817,93 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:buffered:file:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"path",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "lib.py\", line 1087, in resolve\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"path"
+   ]
   },
   {
    "id": "step2:two:buffered:source:sigint",
@@ -8356,6 +10356,107 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:buffered:source:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=20202020702e7374617428290a,occ=1,exact=1,action=cut,bytes=6,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    p.stat()\n",
+     6,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "stat()\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "stat()\n  File \"pathlib.py\", line 1097, in stat\n\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    p."
+   ]
   },
   {
    "id": "step2:two:buffered:exception:sigint",
@@ -8824,6 +10925,114 @@
    "added": []
   },
   {
+   "id": "step2:two:buffered:exception:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "exception",
+   "action": "cut",
+   "rules": "fd=2,prefix=4f534572726f723a205b4572726e6f2034305d20546f6f206d616e79206c6576656c73206f662073,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    p.stat()\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "OSError: [Errno 40] "
+   ]
+  },
+  {
    "id": "step2:two:buffered:separator:sigint",
    "input": "two",
    "mode": "buffered",
@@ -9166,6 +11375,114 @@
    "result": "落とす",
    "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:buffered:separator:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "separator",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a447572696e672068616e646c696e67206f66207468652061626f766520657863657074696f6e2c,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    p.stat()\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "the above exception, another exception occurred:\n\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "During handling of "
+   ]
   },
   {
    "id": "step2:two:buffered:header2:sigint",
@@ -9538,6 +11855,121 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:two:buffered:header2:cut",
+   "input": "two",
+   "mode": "buffered",
+   "piece": "header2",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=2,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    p.stat()\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "ecent call last):\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:two:unbuffered:header:sigint",
@@ -9994,6 +12426,58 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:header:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:two:unbuffered:file:sigint",
@@ -10525,6 +13009,72 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:file:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"path",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "    ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"path"
+   ]
   },
   {
    "id": "step2:two:unbuffered:indent:sigint",
@@ -11147,6 +13697,79 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:indent:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "indent",
+   "action": "cut",
+   "rules": "fd=2,prefix=20202020,occ=1,exact=1,action=cut,bytes=2,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n  ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     2,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "p.stat()",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  "
+   ]
   },
   {
    "id": "step2:two:unbuffered:source:sigint",
@@ -11805,6 +14428,86 @@
    ]
   },
   {
+   "id": "step2:two:unbuffered:source:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=702e737461742829,occ=1,exact=1,action=cut,bytes=4,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.st",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     4,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    p.st"
+   ]
+  },
+  {
    "id": "step2:two:unbuffered:source_end:sigint",
    "input": "two",
    "mode": "unbuffered",
@@ -12429,6 +15132,84 @@
      -1,
      32,
      "fail"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "File の行・ソースの行・例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:source_end:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "source_end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=1,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
     ]
    ],
    "result": "落とす",
@@ -13149,6 +15930,121 @@
    "result": "落とす",
    "dropped": "例外の行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:typename:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "typename",
+   "action": "cut",
+   "rules": "fd=2,prefix=4f534572726f72,occ=1,exact=1,action=cut,bytes=3,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSE",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     3,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     ": ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "OSE"
+   ]
   },
   {
    "id": "step2:two:unbuffered:colon:sigint",
@@ -13888,6 +16784,128 @@
    "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": [
     "OSError"
+   ]
+  },
+  {
+   "id": "step2:two:unbuffered:colon:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "colon",
+   "action": "cut",
+   "rules": "fd=2,prefix=3a20,occ=1,exact=1,action=cut,bytes=1,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError:",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     1,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "[Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "OSError:"
    ]
   },
   {
@@ -14650,6 +17668,128 @@
    ]
   },
   {
+   "id": "step2:two:unbuffered:value:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "value",
+   "action": "cut",
+   "rules": "fd=2,prefix=5b4572726e6f2034305d20546f6f206d616e79206c6576656c73206f662073796d626f6c6963206c,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "OSError: [Errno 40] Too many "
+   ]
+  },
+  {
    "id": "step2:two:unbuffered:end:sigint",
    "input": "two",
    "mode": "unbuffered",
@@ -15263,6 +18403,126 @@
    "added": []
   },
   {
+   "id": "step2:two:unbuffered:end:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=3,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "空行・2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": []
+  },
+  {
    "id": "step2:two:unbuffered:separator:sigint",
    "input": "two",
    "mode": "unbuffered",
@@ -15743,6 +19003,135 @@
    "result": "落とす",
    "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
    "added": []
+  },
+  {
+   "id": "step2:two:unbuffered:separator:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "separator",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a447572696e672068616e646c696e67206f66207468652061626f766520657863657074696f6e2c,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "2 段の区切り・空行・見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "During handling of "
+   ]
   },
   {
    "id": "step2:two:unbuffered:header2:sigint",
@@ -16257,6 +19646,142 @@
    "added": []
   },
   {
+   "id": "step2:two:unbuffered:header2:cut",
+   "input": "two",
+   "mode": "unbuffered",
+   "piece": "header2",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=2,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1087, in resolve\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "p.stat()",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1097, in stat\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return self._accessor.stat(self, follow_symlinks=follow_symlinks)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "OSError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "[Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\nDuring handling of the above exception, another exception occurred:\n\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
+  },
+  {
    "id": "step2:rec:buffered:header:sigint",
    "input": "rec",
    "mode": "buffered",
@@ -16431,6 +19956,72 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:buffered:header:cut",
+   "input": "rec",
+   "mode": "buffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "ecent call last):\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "ecent call last):\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:rec:buffered:file:sigint",
@@ -16635,6 +20226,79 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:buffered:file:cut",
+   "input": "rec",
+   "mode": "buffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"chec",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "k_links.py\", line 93, in <module>\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"chec"
+   ]
   },
   {
    "id": "step2:rec:buffered:source:sigint",
@@ -17143,6 +20807,93 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:buffered:source:cut",
+   "input": "rec",
+   "mode": "buffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=202020207379732e65786974286d61696e287379732e617267765b313a5d29290a,occ=1,exact=1,action=cut,bytes=16,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(mai",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    sys.exit(main(sys.argv[1:]))\n",
+     16,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "n(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    sys.exit(mai"
+   ]
   },
   {
    "id": "step2:rec:buffered:repeated:sigint",
@@ -17795,6 +21546,191 @@
    "result": "落とす",
    "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:buffered:repeated:cut",
+   "input": "rec",
+   "mode": "buffered",
+   "piece": "repeated",
+   "action": "cut",
+   "rules": "fd=2,prefix=20205b50726576696f7573206c696e6520726570656174656420393836206d6f72652074696d6573,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line rep",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    sys.exit(main(sys.argv[1:]))\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for md in iter_md_files(argv):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for f in sorted(p.rglob(\"*.md\")):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in selector.select_from(self):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "eated 986 more times]\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "eated 986 more times]\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "eated 986 more times]\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "eated 986 more times]\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "eated 986 more times]\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "eated 986 more times]\n\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  [Previous line rep"
+   ]
   },
   {
    "id": "step2:rec:buffered:exception:sigint",
@@ -18564,6 +22500,219 @@
    "added": []
   },
   {
+   "id": "step2:rec:buffered:exception:cut",
+   "input": "rec",
+   "mode": "buffered",
+   "piece": "exception",
+   "action": "cut",
+   "rules": "fd=2,prefix=526563757273696f6e4572726f723a206d6178696d756d20726563757273696f6e20646570746820,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 120,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError: maxi",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    sys.exit(main(sys.argv[1:]))\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for md in iter_md_files(argv):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for f in sorted(p.rglob(\"*.md\")):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in selector.select_from(self):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    for p in self._iterate_directories(path, is_dir, scandir):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    with scandir(parent_path) as scandir_it:\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 632, in __fspath__\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    return str(self)\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "RecursionError: maximum recursion depth exceeded\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "mum recursion depth exceeded\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "mum recursion depth exceeded\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "mum recursion depth exceeded\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "mum recursion depth exceeded\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "mum recursion depth exceeded\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "RecursionError: maxi"
+   ]
+  },
+  {
    "id": "step2:rec:unbuffered:header:sigint",
    "input": "rec",
    "mode": "unbuffered",
@@ -18682,6 +22831,44 @@
    "result": "落とす",
    "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:header:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "header",
+   "action": "cut",
+   "rules": "fd=2,prefix=54726163656261636b20286d6f737420726563656e742063616c6c206c617374293a0a,occ=1,exact=1,action=cut,bytes=17,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most r",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     17,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "見出し・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "Traceback (most r"
+   ]
   },
   {
    "id": "step2:rec:unbuffered:file:sigint",
@@ -19108,6 +23295,58 @@
    "result": "落とす",
    "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:file:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "file",
+   "action": "cut",
+   "rules": "fd=2,prefix=202046696c652022,occ=1,exact=0,action=cut,bytes=12,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"chec",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     12,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "    ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  File \"chec"
+   ]
   },
   {
    "id": "step2:rec:unbuffered:indent:sigint",
@@ -19856,6 +24095,65 @@
    "result": "落とす",
    "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:indent:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "indent",
+   "action": "cut",
+   "rules": "fd=2,prefix=20202020,occ=1,exact=1,action=cut,bytes=2,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n  ",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     2,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  "
+   ]
   },
   {
    "id": "step2:rec:unbuffered:source:sigint",
@@ -20640,6 +24938,72 @@
    ]
   },
   {
+   "id": "step2:rec:unbuffered:source:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "source",
+   "action": "cut",
+   "rules": "fd=2,prefix=7379732e65786974286d61696e287379732e617267765b313a5d2929,occ=1,exact=1,action=cut,bytes=14,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     14,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "    sys.exit(main("
+   ]
+  },
+  {
    "id": "step2:rec:unbuffered:source_end:sigint",
    "input": "rec",
    "mode": "unbuffered",
@@ -21159,6 +25523,70 @@
      -1,
      32,
      "fail"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・File の行・ソースの行・繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:source_end:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "source_end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=1,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
     ]
    ],
    "result": "落とす",
@@ -22208,6 +26636,275 @@
    "result": "落とす",
    "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:repeated:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "repeated",
+   "action": "cut",
+   "rules": "fd=2,prefix=20205b50726576696f7573206c696e6520726570656174656420393836206d6f72652074696d6573,occ=1,exact=0,action=cut,bytes=20,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line rep",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for md in iter_md_files(argv):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for f in sorted(p.rglob(\"*.md\")):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in selector.select_from(self):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for starting_point in self._iterate_directories(parent_path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     20,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "繰り返しの行・File の行・ソースの行・File の行・ソースの行・例外の行・空行",
+   "added": [
+    "  [Previous line rep"
+   ]
   },
   {
    "id": "step2:rec:unbuffered:typename:sigint",
@@ -23511,6 +28208,338 @@
    "result": "落とす",
    "dropped": "例外の行",
    "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:typename:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "typename",
+   "action": "cut",
+   "rules": "fd=2,prefix=526563757273696f6e4572726f72,occ=1,exact=1,action=cut,bytes=7,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursi",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for md in iter_md_files(argv):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for f in sorted(p.rglob(\"*.md\")):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in selector.select_from(self):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for starting_point in self._iterate_directories(parent_path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with scandir(parent_path) as scandir_it:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 632, in __fspath__\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return str(self)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "RecursionError",
+     7,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     ": ",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "Recursi"
+   ]
   },
   {
    "id": "step2:rec:unbuffered:colon:sigint",
@@ -24838,6 +29867,345 @@
    "dropped": "例外の行・空行",
    "added": [
     "RecursionError"
+   ]
+  },
+  {
+   "id": "step2:rec:unbuffered:colon:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "colon",
+   "action": "cut",
+   "rules": "fd=2,prefix=3a20,occ=1,exact=1,action=cut,bytes=1,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError:",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for md in iter_md_files(argv):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for f in sorted(p.rglob(\"*.md\")):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in selector.select_from(self):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for starting_point in self._iterate_directories(parent_path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with scandir(parent_path) as scandir_it:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 632, in __fspath__\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return str(self)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "RecursionError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     1,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "maximum recursion depth exceeded",
+     -1,
+     27,
+     "cut-fail"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "RecursionError:"
    ]
   },
   {
@@ -26188,6 +31556,345 @@
    ]
   },
   {
+   "id": "step2:rec:unbuffered:value:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "value",
+   "action": "cut",
+   "rules": "fd=2,prefix=6d6178696d756d20726563757273696f6e206465707468206578636565646564,occ=1,exact=1,action=cut,bytes=16,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError: maximum recursio",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for md in iter_md_files(argv):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for f in sorted(p.rglob(\"*.md\")):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in selector.select_from(self):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for starting_point in self._iterate_directories(parent_path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with scandir(parent_path) as scandir_it:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 632, in __fspath__\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return str(self)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "RecursionError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "maximum recursion depth exceeded",
+     16,
+     0,
+     "cut"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut-fail"
+    ]
+   ],
+   "result": "置き換える",
+   "dropped": "例外の行・空行",
+   "added": [
+    "RecursionError: maximum recursio"
+   ]
+  },
+  {
    "id": "step2:rec:unbuffered:end:sigint",
    "input": "rec",
    "mode": "unbuffered",
@@ -27529,6 +33236,343 @@
      -1,
      32,
      "fail"
+    ]
+   ],
+   "result": "落とす",
+   "dropped": "空行",
+   "added": []
+  },
+  {
+   "id": "step2:rec:unbuffered:end:cut",
+   "input": "rec",
+   "mode": "unbuffered",
+   "piece": "end",
+   "action": "cut",
+   "rules": "fd=2,prefix=0a,occ=11,exact=1,action=cut,bytes=0,errno=27",
+   "exit": 1,
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError: maximum recursion depth exceeded",
+   "writes": [
+    [
+     2,
+     "Traceback (most recent call last):\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 93, in <module>\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "sys.exit(main(sys.argv[1:]))",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 51, in main\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for md in iter_md_files(argv):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"check_links.py\", line 28, in iter_md_files\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for f in sorted(p.rglob(\"*.md\")):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 1047, in rglob\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in selector.select_from(self):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 492, in _select_from\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for starting_point in self._iterate_directories(parent_path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 482, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "for p in self._iterate_directories(path, is_dir, scandir):",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  [Previous line repeated 986 more times]\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 471, in _iterate_directories\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "with scandir(parent_path) as scandir_it:",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "  File \"pathlib.py\", line 632, in __fspath__\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "    ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "return str(self)",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "RecursionError",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     ": ",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "maximum recursion depth exceeded",
+     "full",
+     0,
+     "none"
+    ],
+    [
+     2,
+     "\n",
+     -1,
+     27,
+     "cut"
     ]
    ],
    "result": "落とす",

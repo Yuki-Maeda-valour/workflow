@@ -399,8 +399,12 @@
      "data": "[x](m)\n"
     },
     {
+     "op": "dir",
+     "path": "t/b"
+    },
+    {
      "op": "file",
-     "path": "t/b.md",
+     "path": "t/b/b.md",
      "data": "[x](m)\n"
     },
     {
@@ -444,7 +448,7 @@
    ],
    "expected": {
     "exit": 1,
-    "stdout": "検査ファイル数: 12\nERROR t/B.md:1: リンク切れ -> m\nERROR t/_.md:1: リンク切れ -> m\nERROR t/a/-.md:1: リンク切れ -> m\nERROR t/a/A.md:1: リンク切れ -> m\nERROR t/a/b.md:1: リンク切れ -> m\nERROR t/a-b.md:1: リンク切れ -> m\nERROR t/a.md:1: リンク切れ -> m\nERROR t/b.md:1: リンク切れ -> m\nERROR t/~.md:1: リンク切れ -> m\nERROR t/日本.md:1: リンク切れ -> m\nERROR t/ｚ.md:1: リンク切れ -> m\nERROR t/😀.md:1: リンク切れ -> m\n結果: ERROR 12 件 / WARN 0 件\n",
+    "stdout": "検査ファイル数: 12\nERROR t/B.md:1: リンク切れ -> m\nERROR t/_.md:1: リンク切れ -> m\nERROR t/a/-.md:1: リンク切れ -> m\nERROR t/a/A.md:1: リンク切れ -> m\nERROR t/a/b.md:1: リンク切れ -> m\nERROR t/a-b.md:1: リンク切れ -> m\nERROR t/a.md:1: リンク切れ -> m\nERROR t/b/b.md:1: リンク切れ -> m\nERROR t/~.md:1: リンク切れ -> m\nERROR t/日本.md:1: リンク切れ -> m\nERROR t/ｚ.md:1: リンク切れ -> m\nERROR t/😀.md:1: リンク切れ -> m\n結果: ERROR 12 件 / WARN 0 件\n",
     "stderr": ""
    }
   },

@@ -13,9 +13,19 @@
  *       (exact=1 なら、長さも prefix と同じ write だけを数える)
  *     - action=fail(errno=<数>)・short(bytes=<数>。その数だけ実際に書く)・sigint(実際に書いた後に自分へ SIGINT)
  *       ・quota(bytes=<残りの合計>・errno=<数>。残りを超える分は切り、残りが 0 なら失敗)
+ *       ・cut(bytes=<数>・errno=<数>。選んだ write をその数で切り〈0 なら失敗〉、その後の同じ fd の write を
+ *         すべて失敗にする。RLIMIT_FSIZE の上限が、選んだ write の途中に来たときと同じ。
+ *         選んだ write がその数より短ければ全部を書き、故障は起こさない〈上限に届かない〉)
  *     - persist=1: 選んだ回とその後の同じ fd の write に、同じ動作を当て続ける
  * - 記録の欄: fd・要求の長さ・戻り値・errno・当てた動作・要求したバイト列(16 進)。
- * - 起動の前に閉じていた fd 0〜2 を塞がないよう、記録の fd は 200 以上へ移す。
+ * - 起動の時に、受け継いだ環境変数の名前を 1 行(`{"env":[<16 進>...],"pid":<数>,"exe":"<16 進>"}`)記録する
+ *   (比較の前提の外の変数が残っていないことと、ケースが与えた変数が消えていないことを、比較器が子の中から
+ *   確かめるため)。
+ * - exec の連鎖に耐える(Mac の framework の起動用のプログラムが、本体を posix_spawn の SETEXEC で起動し直す
+ *   ときなど)。`fd:` の記録の fd は close-on-exec にせず、連鎖の後のプログラムも同じ fd へ記録する。各プログラムは
+ *   起動の時に環境の行を 1 行ずつ書く(pid は同じ)。比較器は最後の行を、実際に動いたプログラムの環境として
+ *   確かめる。fd が使えない(EBADF など)ときは abort せず、そのプログラムは記録しない。
+ * - 起動の前に閉じていた fd 0〜2 を塞がないよう、ファイルへの記録の fd は 200 以上へ移す。
  */
 #define _GNU_SOURCE
 #include <errno.h>
@@ -29,13 +39,17 @@
 #include <unistd.h>
 #ifdef __linux__
 #include <dlfcn.h>
+extern char **environ;
+#else
+#include <crt_externs.h>
+#include <mach-o/dyld.h>
 #endif
 
 #define MAX_RULES 16
 #define MAX_PREFIX 256
 #define MAX_FDS 64
 
-enum action { ACT_NONE, ACT_FAIL, ACT_SHORT, ACT_SIGINT, ACT_QUOTA };
+enum action { ACT_NONE, ACT_FAIL, ACT_SHORT, ACT_SIGINT, ACT_QUOTA, ACT_CUT };
 
 struct rule {
     int fd;
@@ -51,6 +65,7 @@ struct rule {
     int persist;
     long seen;      /* prefix に合った回数 */
     int triggered;  /* persist で当て続けている */
+    int failing;    /* cut で切った後(その後の write をすべて失敗にする) */
 };
 
 static struct rule rules[MAX_RULES];
@@ -120,6 +135,7 @@ static void parse_rule(char *text) {
             else if (!strcmp(value, "short")) r->action = ACT_SHORT;
             else if (!strcmp(value, "sigint")) r->action = ACT_SIGINT;
             else if (!strcmp(value, "quota")) r->action = ACT_QUOTA;
+            else if (!strcmp(value, "cut")) r->action = ACT_CUT;
             else abort();
         } else if (!strcmp(key, "errno")) {
             r->err = atoi(value);
@@ -142,12 +158,18 @@ static void parse_rule(char *text) {
     rule_count++;
 }
 
+static void record_env(void);
+
 __attribute__((constructor)) static void shim_init(void) {
     const char *path = getenv("R4U_SHIM_LOG");
     if (path && !strncmp(path, "fd:", 3)) {
         log_fd = atoi(path + 3);
-        if (log_fd < 3 || fcntl(log_fd, F_SETFD, FD_CLOEXEC) < 0) {
+        if (log_fd < 3) {
             abort();
+        }
+        if (fcntl(log_fd, F_GETFD) < 0) {
+            /* exec の連鎖の前のプログラムが閉じたなど。abort せず、このプログラムは記録しない。 */
+            log_fd = -1;
         }
     } else if (path && *path) {
         int fd = open(path, O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0600);
@@ -173,6 +195,7 @@ __attribute__((constructor)) static void shim_init(void) {
         }
         free(copy);
     }
+    record_env();
     ready = 1;
 }
 
@@ -233,13 +256,56 @@ static void record(int fd, const void *buf, size_t count, ssize_t ret, int err, 
     put("\"}\n", 3);
 }
 
+static void record_env(void) {
+    if (log_fd < 0) {
+        return;
+    }
+    static const char digits[] = "0123456789abcdef";
+#ifdef __linux__
+    char **env = environ;
+#else
+    char **env = *_NSGetEnviron();
+#endif
+    put("{\"env\":[", 8);
+    for (int i = 0; env && env[i]; i++) {
+        const char *eq = strchr(env[i], '=');
+        size_t n = eq ? (size_t)(eq - env[i]) : strlen(env[i]);
+        if (i) put(",", 1);
+        put("\"", 1);
+        for (size_t j = 0; j < n; j++) {
+            char pair[2] = {digits[(unsigned char)env[i][j] >> 4], digits[(unsigned char)env[i][j] & 15]};
+            put(pair, 2);
+        }
+        put("\"", 1);
+    }
+    put("],\"pid\":", 8);
+    put_num((long long)getpid());
+    char exe[4096];
+    size_t exe_len = 0;
+#ifdef __linux__
+    ssize_t got = readlink("/proc/self/exe", exe, sizeof(exe));
+    if (got > 0) exe_len = (size_t)got;
+#else
+    uint32_t size = sizeof(exe);
+    if (_NSGetExecutablePath(exe, &size) == 0) exe_len = strnlen(exe, sizeof(exe));
+#endif
+    put(",\"exe\":\"", 8);
+    for (size_t j = 0; j < exe_len; j++) {
+        char pair[2] = {digits[(unsigned char)exe[j] >> 4], digits[(unsigned char)exe[j] & 15]};
+        put(pair, 2);
+    }
+    put("\"}\n", 3);
+}
+
 static struct rule *select_rule(int fd, const void *buf, size_t count, long nth) {
     struct rule *chosen = NULL;
     for (int i = 0; i < rule_count; i++) {
         struct rule *r = &rules[i];
         if (r->fd != -1 && r->fd != fd) continue;
         int hit = 0;
-        if (r->triggered) {
+        if (r->failing) {
+            hit = 1;
+        } else if (r->triggered) {
             hit = 1;
         } else if (r->action == ACT_QUOTA && r->nth <= 0 && !r->has_prefix) {
             hit = 1;
@@ -283,6 +349,26 @@ ssize_t r4u_write(int fd, const void *buf, size_t count) {
         ret = call_real(fd, buf, n);
         err = errno;
         action = "short";
+    } else if (r && r->action == ACT_CUT) {
+        if (r->failing) {
+            ret = -1;
+            err = r->err;
+            action = "cut-fail";
+        } else if ((size_t)r->bytes >= count) {
+            ret = call_real(fd, buf, count);
+            err = errno;
+            action = "cut-full";
+        } else if (r->bytes <= 0) {
+            ret = -1;
+            err = r->err;
+            r->failing = 1;
+            action = "cut";
+        } else {
+            ret = call_real(fd, buf, (size_t)r->bytes);
+            err = errno;
+            r->failing = 1;
+            action = "cut";
+        }
     } else if (r && r->action == ACT_QUOTA) {
         if (r->bytes <= 0) {
             ret = -1;
