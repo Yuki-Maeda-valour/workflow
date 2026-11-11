@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4SとR4Aのtask-digestは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digestは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4Bは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -263,6 +263,29 @@ pub fn run_child<E>(
 
 正規化規則、ファイルの保証範囲、限定差の厳密な条件は [design.md](../docs/design.md#本文の正規化と確認用の値r4a-task-digest)にあります。
 件数と手元Linux実測、4機種の必須経路、未確認条件は [testing.md](../docs/testing.md#task-digestの比較r4a)にあります。
+
+## origin判定とGit設定の確認値(R4B)
+
+#461で旧Python2本に対応する専用モジュールを実装しました。製品CLIの登録・help・配布・既存呼出元は変えていません。
+
+- `crates/cli/src/commands/origin_repo::run`は、`--dir`を受けて7項目のorigin判定を返します。Gitは無期限、`ssh -G -- git@github.com`だけ10秒です。接続は行いません。
+- `crates/cli/src/commands/git_config_digest::run`は、設定の所在・種類・リンク字面・順序付き項目のASCII JSONからSHA-256を作ります。各Gitは10秒です。
+- `--expect`一致は無出力・終了0、不一致は既存診断・終了1、不正形式と読取り失敗は終了2です。
+- `crates/cli/src/commands/r4b_support/`は専用の引数・文字化・JSON・Git引数を持ちます。ファイル操作とGitへ渡す引数・環境の生バイトは保ちます。
+- `platform::r4b_process::capture(&mut Command, Option<Duration>)`は、`Captured { code, stdout, stderr }`または`Failure::{Timeout, Io}`を返します。信号終了は負の番号です。
+- stdinは`/dev/null`です。時間切れでは直接子だけをkill/waitし、親のパイプを閉じます。孫のEOFや読取りスレッドを待ちません。子孫全体の停止を保証せず、C0cへ一律に接続しません。
+- `platform::r4b_process::metadata`・`read_link`が生パスで不在・種類・リンク字面を調べます。C0bのリンク拒否・実体保持・再検査は追加しません。
+- 有効な`COLUMNS`を優先します。無効・0・負値・未設定なら`stdout_columns`で実端末幅を調べ、取得失敗時だけ80へ戻ります。
+- `crates/cli/examples/r4b_contract.rs`が`args_os()`からコマンド名を除いて各`run`へ渡します。最終出力はC0aの`emit`へ渡します。`R4B_OUTPUT_FAULT`はこの検査入口だけの故障注入です。
+
+承認済みの差は [設計のR4B節](../docs/design.md#r4bに限る承認済みの差)に限ります。
+originのGitの不正UTF-8は空stdout・終了1・固定診断、SSHの不正UTF-8は従来の拒否JSONです。
+書き込み/flush故障はC0a・終了1で、途中出力と診断先故障を分けます。
+Pythonの文字コード設定による引数・表示幅・パス材料等の解釈差はUTF-8＋`surrogateescape`へ固定し、標準出力と標準エラーは常にUTF-8です。
+originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を緩めません。
+
+[必須の実行手順と検証範囲](../docs/testing.md#r4bの比較)に従ってください。
+通常の`cargo test --locked`だけではexampleの単体検査と旧版比較は完了しません。
 
 ## ソース入力の SHA256
 

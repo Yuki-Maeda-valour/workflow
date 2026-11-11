@@ -39,6 +39,16 @@ SCRIPT_COMMAND = re.compile(
 DIST_LAUNCH_COMMAND = "python3 -B scripts/check_dist_launch.py --root ."
 
 
+
+def native_build_command(command):
+    # build.pyの位置引数を先頭に置く正規形だけをCIで許す。
+    # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
+    if not isinstance(command, str):
+        return None
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test)(?: |$)", command)
+    return match[1] if match else None
+
+
 def check_document(document):
     if not isinstance(document, dict):
         return ["ワークフローは object が必要です"]
@@ -84,6 +94,17 @@ def check_document(document):
             continue
         if set(job) - JOB_KEYS:
             problems.append(f"{name}: job の設定は needs・strategy・runs-on・timeout-minutes・steps に限ります")
+        # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
+        native_timeouts = {"build": 60, "verify-universal": 30}
+        steps = job.get("steps")
+        for step in steps if isinstance(steps, list) else []:
+            command = step.get("run") if isinstance(step, dict) else None
+            operation = native_build_command(command)
+            if operation in native_timeouts:
+                required = native_timeouts[operation]
+                timeout = job.get("timeout-minutes")
+                if type(timeout) is not int or timeout != required:
+                    problems.append(f"{name}: timeout-minutes は {required} が必要です")
         strategy = job.get("strategy")
         valid_matrix = False
         if "strategy" in job:
@@ -115,8 +136,7 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and isinstance(step.get("run"), str) and re.match(
-                                  r"python3 -B native/ci/build\.py (?:build|reproduce|verify-universal)(?: |$)", step["run"])]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal"}]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -133,6 +153,8 @@ def check_document(document):
                 problems.append(f"{name}: step には run か uses のどちらか 1 つが必要です")
             if "run" in step:
                 command = step["run"]
+                if isinstance(command, str) and command.startswith("python3 -B native/ci/build.py ") and native_build_command(command) is None:
+                    problems.append(f"{name}: build.py はコマンド名をオプションより先に指定してください")
                 if not isinstance(command, str) or not (
                         SCRIPT_COMMAND.fullmatch(command) or command == DIST_LAUNCH_COMMAND):
                     problems.append(f"{name}: run は native/ci/ のスクリプトを 1 本呼ぶか、"
