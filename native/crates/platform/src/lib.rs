@@ -10,3 +10,9 @@ pub mod task_digest;
 
 /// R4B専用の生バイト入出力と直接子の回収。
 pub mod r4b_process;
+
+/// loop-state専用の保持入力・保存・直接子の接続。
+pub mod loop_state;
+
+#[cfg(target_os = "linux")]
+pub mod loop_state_watch;

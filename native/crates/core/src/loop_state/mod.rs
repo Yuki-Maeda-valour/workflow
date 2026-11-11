@@ -6,6 +6,9 @@ mod casefold;
 mod construct;
 mod glob;
 pub(crate) mod graph;
+mod legacy_parser;
+pub mod legacy_recursion;
+mod legacy_scanner;
 mod scalar;
 
 use std::collections::HashSet;
@@ -129,6 +132,21 @@ pub fn profile_patterns(
         .map_err(|()| ProfileError::UnreadableYaml)?;
     let input =
         construct::patterns(&mut graph, int_limit).map_err(|()| ProfileError::UnreadableYaml)?;
+    canonical_secret_patterns(&input)
+}
+pub fn profile_patterns_for_loop(
+    raw: &[u8],
+    int_limit: LegacyIntLimit,
+    recursion: legacy_recursion::LegacyRecursionContext,
+) -> Result<Vec<CodepointString>, ProfileError> {
+    let unreadable = |()| ProfileError::UnreadableYaml;
+    let text = std::str::from_utf8(raw).map_err(|_| ProfileError::UnreadableYaml)?;
+    legacy_recursion::compose(text, recursion, false).map_err(unreadable)?;
+    let mut graph = graph::compose(raw, int_limit).map_err(unreadable)?;
+    legacy_recursion::duplicates(&graph, recursion).map_err(unreadable)?;
+    legacy_recursion::compose(text, recursion, true).map_err(unreadable)?;
+    let input =
+        construct::patterns_for_loop(&mut graph, int_limit, recursion).map_err(unreadable)?;
     canonical_secret_patterns(&input)
 }
 pub fn secret_path(rel: &CodepointString, patterns: &[CodepointString]) -> bool {

@@ -25,7 +25,7 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "loop_state_fixture")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -144,6 +144,9 @@ def quality(name, work):
         run(["cargo", "clippy", "--all-targets", "--locked", "--", "-D", "warnings"], env=env)
         run(["cargo", "test", "--locked"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
+        # 同じソースの各OS品質工程で一度。release各回はCLI比較と自己検査を行う。
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_units.py"], env=env)
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_mutations.py"], env=env)
 
 
 def reproduce(name, work):
@@ -161,10 +164,10 @@ def reproduce(name, work):
             if tools_before is not None and details != tools_before:
                 raise ValueError("2 回のビルドで道具の記録が変わりました")
             tools_before = details
-            run(["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--target", target], env=env)
+            run(["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "loop_state_fixture", "--target", target], env=env)
             (stage / str(number)).mkdir()
             for filename in CI_BINARIES:
-                source = Path(temporary) / target / "release" / ("examples/r4b_contract" if filename=="r4b_contract" else filename)
+                source = Path(temporary) / target / "release" / ("examples/" + filename if filename != "dev-workflow" else filename)
                 destination = stage / str(number) / filename
                 shutil.copyfile(source, destination)
                 destination.chmod(0o755)
@@ -190,6 +193,11 @@ def probe(binary):
 
 def r4b_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_r4b.py", "--fixture", fixture])
+
+
+def loop_state_probe(fixture):
+    run([sys.executable, "-B", ROOT / "native/ci/check_loop_state.py", "--fixture", fixture])
+    run([sys.executable, "-B", ROOT / "native/ci/test_loop_state.py", "--fixture", fixture])
 
 
 def read_record(folder):
@@ -264,6 +272,7 @@ def verify_universal(downloads, work):
     # 署名後の同じ2実行物を、各CPUの必須ジョブで検査する。
     probe(folder / "dev-workflow")
     r4b_probe(folder / "r4b_contract")
+    loop_state_probe(folder / "loop_state_fixture")
 
 
 def package(downloads, work):
@@ -311,6 +320,7 @@ def main():
             for number in (1, 2):
                 probe(stage / f"{number}/dev-workflow")
                 r4b_probe(stage / f"{number}/r4b_contract")
+                loop_state_probe(stage / f"{number}/loop_state_fixture")
             pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
         elif args.command == "combine":
