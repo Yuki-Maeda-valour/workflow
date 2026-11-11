@@ -16,11 +16,16 @@
  *       ・cut(bytes=<数>・errno=<数>。選んだ write をその数で切り〈0 なら失敗〉、その後の同じ fd の write を
  *         すべて失敗にする。RLIMIT_FSIZE の上限が、選んだ write の途中に来たときと同じ。
  *         選んだ write がその数より短ければ全部を書き、故障は起こさない〈上限に届かない〉)
+ *       ・budget(bytes=<上限>・errno=<数>。write ごとに、書いた後の合計が上限以内なら全部を書き、超えるなら
+ *         その write だけを失敗にする。後の収まる write は通る。Mac の RLIMIT_FSIZE の動きの模擬)
+ *     - map=<16 進の元>:<16 進の置換>|...(budget だけ): 合計の数え方にだけ、元の文字列を置換の長さで数える
+ *       (旧版の実行環境のパスを固定名にした長さで判定する。書く中身は変えない)
  *     - persist=1: 選んだ回とその後の同じ fd の write に、同じ動作を当て続ける
  * - 記録の欄: fd・要求の長さ・戻り値・errno・当てた動作・要求したバイト列(16 進)。
- * - 起動の時に、受け継いだ環境変数の名前を 1 行(`{"env":[<16 進>...],"pid":<数>,"exe":"<16 進>"}`)記録する
- *   (比較の前提の外の変数が残っていないことと、ケースが与えた変数が消えていないことを、比較器が子の中から
- *   確かめるため)。
+ * - 起動の時に、受け継いだ環境変数の名前を 1 行(`{"env":[<16 進>...],"pid":<数>,"exe":"<16 進>",
+ *   "values":{<16 進の名前>:<16 進の値>}}`)記録する(比較の前提の外の変数が残っていないことと、ケースが与えた
+ *   変数が消えていないことを、比較器が子の中から確かめるため)。値は、比較器が値で扱いを決める 2 つの変数
+ *   (`__CF_USER_TEXT_ENCODING`・`__PYVENV_LAUNCHER__`)だけを記録する。
  * - exec の連鎖に耐える(Mac の framework の起動用のプログラムが、本体を posix_spawn の SETEXEC で起動し直す
  *   ときなど)。`fd:` の記録の fd は close-on-exec にせず、連鎖の後のプログラムも同じ fd へ記録する。各プログラムは
  *   起動の時に環境の行を 1 行ずつ書く(pid は同じ)。比較器は最後の行を、実際に動いたプログラムの環境として
@@ -47,9 +52,16 @@ extern char **environ;
 
 #define MAX_RULES 16
 #define MAX_PREFIX 256
+#define MAX_MAP 32
 #define MAX_FDS 64
 
-enum action { ACT_NONE, ACT_FAIL, ACT_SHORT, ACT_SIGINT, ACT_QUOTA, ACT_CUT };
+enum action { ACT_NONE, ACT_FAIL, ACT_SHORT, ACT_SIGINT, ACT_QUOTA, ACT_CUT, ACT_BUDGET };
+
+struct mapping {
+    unsigned char *from;
+    size_t from_len;
+    size_t to_len;
+};
 
 struct rule {
     int fd;
@@ -66,6 +78,9 @@ struct rule {
     long seen;      /* prefix に合った回数 */
     int triggered;  /* persist で当て続けている */
     int failing;    /* cut で切った後(その後の write をすべて失敗にする) */
+    long used;      /* budget で数えた合計 */
+    struct mapping map[MAX_MAP];
+    int map_count;
 };
 
 static struct rule rules[MAX_RULES];
@@ -136,6 +151,7 @@ static void parse_rule(char *text) {
             else if (!strcmp(value, "sigint")) r->action = ACT_SIGINT;
             else if (!strcmp(value, "quota")) r->action = ACT_QUOTA;
             else if (!strcmp(value, "cut")) r->action = ACT_CUT;
+            else if (!strcmp(value, "budget")) r->action = ACT_BUDGET;
             else abort();
         } else if (!strcmp(key, "errno")) {
             r->err = atoi(value);
@@ -143,13 +159,46 @@ static void parse_rule(char *text) {
             r->bytes = atol(value);
         } else if (!strcmp(key, "exact")) {
             r->exact = atoi(value);
+        } else if (!strcmp(key, "map")) {
+            char *pairs = strdup(value);
+            if (!pairs) {
+                abort();
+            }
+            char *keep = NULL;
+            for (char *pair = strtok_r(pairs, "|", &keep); pair; pair = strtok_r(NULL, "|", &keep)) {
+                char *colon = strchr(pair, ':');
+                if (!colon || r->map_count >= MAX_MAP) {
+                    abort();
+                }
+                *colon = '\0';
+                size_t n = strlen(pair), m = strlen(colon + 1);
+                if (n % 2 || m % 2 || n == 0) {
+                    abort();
+                }
+                struct mapping *mp = &r->map[r->map_count++];
+                mp->from = malloc(n / 2);
+                if (!mp->from) {
+                    abort();
+                }
+                for (size_t i = 0; i < n / 2; i++) {
+                    int hi = hexval(pair[2 * i]), lo = hexval(pair[2 * i + 1]);
+                    if (hi < 0 || lo < 0) {
+                        abort();
+                    }
+                    mp->from[i] = (unsigned char)(hi * 16 + lo);
+                }
+                mp->from_len = n / 2;
+                mp->to_len = m / 2;
+            }
+            free(pairs);
         } else if (!strcmp(key, "persist")) {
             r->persist = atoi(value);
         } else {
             abort();
         }
     }
-    if (r->action == ACT_NONE || (r->nth <= 0 && !r->has_prefix && r->action != ACT_QUOTA)) {
+    if (r->action == ACT_NONE ||
+        (r->nth <= 0 && !r->has_prefix && r->action != ACT_QUOTA && r->action != ACT_BUDGET)) {
         abort();
     }
     if (r->has_prefix && r->occ <= 0) {
@@ -256,6 +305,8 @@ static void record(int fd, const void *buf, size_t count, ssize_t ret, int err, 
     put("\"}\n", 3);
 }
 
+static void put_str(const char *text) { put(text, strlen(text)); }
+
 static void record_env(void) {
     if (log_fd < 0) {
         return;
@@ -266,19 +317,40 @@ static void record_env(void) {
 #else
     char **env = *_NSGetEnviron();
 #endif
-    put("{\"env\":[", 8);
+    put_str("{\"env\":[");
     for (int i = 0; env && env[i]; i++) {
         const char *eq = strchr(env[i], '=');
         size_t n = eq ? (size_t)(eq - env[i]) : strlen(env[i]);
-        if (i) put(",", 1);
-        put("\"", 1);
+        if (i) put_str(",");
+        put_str("\"");
         for (size_t j = 0; j < n; j++) {
             char pair[2] = {digits[(unsigned char)env[i][j] >> 4], digits[(unsigned char)env[i][j] & 15]};
             put(pair, 2);
         }
-        put("\"", 1);
+        put_str("\"");
     }
-    put("],\"pid\":", 8);
+    put_str("],\"values\":{");
+    int shown = 0;
+    for (int i = 0; env && env[i]; i++) {
+        static const char *const names[] = {"__CF_USER_TEXT_ENCODING=", "__PYVENV_LAUNCHER__="};
+        for (size_t k = 0; k < sizeof(names) / sizeof(names[0]); k++) {
+            size_t n = strlen(names[k]);
+            if (strncmp(env[i], names[k], n) != 0) continue;
+            if (shown++) put_str(",");
+            put_str("\"");
+            for (size_t j = 0; j + 1 < n; j++) {
+                char pair[2] = {digits[(unsigned char)names[k][j] >> 4], digits[(unsigned char)names[k][j] & 15]};
+                put(pair, 2);
+            }
+            put_str("\":\"");
+            for (const char *v = env[i] + n; *v; v++) {
+                char pair[2] = {digits[(unsigned char)*v >> 4], digits[(unsigned char)*v & 15]};
+                put(pair, 2);
+            }
+            put_str("\"");
+        }
+    }
+    put_str("},\"pid\":");
     put_num((long long)getpid());
     char exe[4096];
     size_t exe_len = 0;
@@ -289,12 +361,31 @@ static void record_env(void) {
     uint32_t size = sizeof(exe);
     if (_NSGetExecutablePath(exe, &size) == 0) exe_len = strnlen(exe, sizeof(exe));
 #endif
-    put(",\"exe\":\"", 8);
+    put_str(",\"exe\":\"");
     for (size_t j = 0; j < exe_len; j++) {
         char pair[2] = {digits[(unsigned char)exe[j] >> 4], digits[(unsigned char)exe[j] & 15]};
         put(pair, 2);
     }
-    put("\"}\n", 3);
+    put_str("\"}\n");
+}
+
+/* budget の合計に数える長さ: map の元の文字列を、置換の長さで数える(重ならずに左から)。 */
+static long effective_length(const struct rule *r, const void *buf, size_t count) {
+    long length = (long)count;
+    const unsigned char *bytes = buf;
+    for (int m = 0; m < r->map_count; m++) {
+        const struct mapping *mp = &r->map[m];
+        size_t at = 0;
+        while (at + mp->from_len <= count) {
+            const unsigned char *hit = memmem(bytes + at, count - at, mp->from, mp->from_len);
+            if (!hit) {
+                break;
+            }
+            length += (long)mp->to_len - (long)mp->from_len;
+            at = (size_t)(hit - bytes) + mp->from_len;
+        }
+    }
+    return length;
 }
 
 static struct rule *select_rule(int fd, const void *buf, size_t count, long nth) {
@@ -307,7 +398,7 @@ static struct rule *select_rule(int fd, const void *buf, size_t count, long nth)
             hit = 1;
         } else if (r->triggered) {
             hit = 1;
-        } else if (r->action == ACT_QUOTA && r->nth <= 0 && !r->has_prefix) {
+        } else if ((r->action == ACT_QUOTA || r->action == ACT_BUDGET) && r->nth <= 0 && !r->has_prefix) {
             hit = 1;
         } else if (r->has_prefix) {
             if (count >= r->prefix_len && (!r->exact || count == r->prefix_len) &&
@@ -368,6 +459,22 @@ ssize_t r4u_write(int fd, const void *buf, size_t count) {
             err = errno;
             r->failing = 1;
             action = "cut";
+        }
+    } else if (r && r->action == ACT_BUDGET) {
+        long need = effective_length(r, buf, count);
+        if (need <= r->bytes - r->used) {
+            ret = call_real(fd, buf, count);
+            err = errno;
+            if (ret == (ssize_t)count) {
+                r->used += need;
+            } else if (ret > 0) {
+                r->used += ret;
+            }
+            action = "budget";
+        } else {
+            ret = -1;
+            err = r->err;
+            action = "budget-fail";
         }
     } else if (r && r->action == ACT_QUOTA) {
         if (r->bytes <= 0) {

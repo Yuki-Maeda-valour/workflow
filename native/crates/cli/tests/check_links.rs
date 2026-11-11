@@ -150,21 +150,27 @@ fn main() -> std::process::ExitCode {
             &[],
         ),
     ];
+    // 片方が落ちても、もう片方の結果まで待ってから判定する(Mac の CI は 1 回が長いので、1 回で両方の結果を出す)。
     let deadline = Instant::now() + DEADLINE;
+    let mut failures = Vec::new();
     while checkers.iter().any(|checker| !checker.done) {
         for checker in checkers.iter_mut().filter(|checker| !checker.done) {
             if let Some(status) = checker.child.try_wait().expect("専用比較器の待機に失敗")
             {
                 checker.done = true;
-                assert!(status.success(), "{} が不合格: {status}", checker.name);
+                if !status.success() {
+                    failures.push(format!("{} が不合格: {status}", checker.name));
+                }
             }
         }
         assert!(
             Instant::now() < deadline,
-            "R4U の比較が時間切れ(全体 {} 秒)",
-            DEADLINE.as_secs()
+            "R4U の比較が時間切れ(全体 {} 秒){}",
+            DEADLINE.as_secs(),
+            failures.join("・")
         );
         std::thread::sleep(Duration::from_millis(20));
     }
+    assert!(failures.is_empty(), "{}", failures.join("・"));
     std::process::ExitCode::SUCCESS
 }

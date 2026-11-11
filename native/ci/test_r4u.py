@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -36,6 +37,10 @@ def frame(path, line=93, func="<module>"):
 
 def write(fd, data, ret=None, errno=0, action="none"):
     return checker.Write(fd, data, len(data), len(data) if ret is None else ret, errno, action)
+
+
+def image(names, pid=7, exe=b"/bin/x", values=None):
+    return checker.Image(frozenset(names), pid, exe, {} if values is None else values)
 
 
 def obs(exit=1, stdout=b"", stderr=b"", writes=None, frames=None):
@@ -191,16 +196,22 @@ class CompareTests(unittest.TestCase):
     def test_log_must_end_with_a_complete_line(self):
         with self.assertRaises(checker.Failure):
             checker.read_log(b'{"env":[],"pid":7,"exe":""}\n{"fd":1')
-        writes, names, chain = checker.read_log(b'{"env":["50415448"],"pid":7,"exe":"2f62"}\n{"fd":1,"len":1,'
-                                                b'"ret":1,"errno":0,"action":"none","data":"61"}\n')
-        self.assertEqual(({"PATH"}, [write(1, b"a")], [b"/b"]), (names, writes, chain))
+        writes, image, chain = checker.read_log(b'{"env":["50415448"],"values":{},"pid":7,"exe":"2f62"}\n{"fd":1,'
+                                                b'"len":1,"ret":1,"errno":0,"action":"none","data":"61"}\n')
+        self.assertEqual(({"PATH"}, 7, b"/b", [write(1, b"a")], [b"/b"]),
+                         (set(image.names), image.pid, image.exe, writes, chain))
 
     def test_exec_chain_uses_the_last_program_and_refuses_other_shapes(self):
         line = b'{"fd":1,"len":1,"ret":1,"errno":0,"action":"none","data":"61"}\n'
         first = b'{"env":["50415448","58"],"pid":7,"exe":"2f61"}\n'
         last = b'{"env":["50415448"],"pid":7,"exe":"2f62"}\n'
-        writes, names, chain = checker.read_log(first + last + line)
-        self.assertEqual(({"PATH"}, [b"/a", b"/b"], 1), (names, chain, len(writes)))
+        writes, image, chain = checker.read_log(first + last + line)
+        self.assertEqual(({"PATH"}, [b"/a", b"/b"], 1), (set(image.names), chain, len(writes)))
+        # 値を記録する 2 つの変数の値を読む(__CF_USER_TEXT_ENCODING=0x1F5:0x0:0x0)。
+        cf = checker.CF_ENCODING.encode().hex()
+        _, image, _ = checker.read_log(('{"env":["%s"],"values":{"%s":"%s"},"pid":7,"exe":""}\n'
+                                        % (cf, cf, b"0x1F5:0x0:0x0".hex())).encode())
+        self.assertEqual({checker.CF_ENCODING: "0x1F5:0x0:0x0"}, image.values)
         # 連鎖の前のプログラムが書いていた・別の pid(子のプロセス)が記録した
         for data in (first + line + last, first + last.replace(b'"pid":7', b'"pid":8') + line):
             with self.subTest(data=data), self.assertRaises(checker.Failure):
@@ -227,8 +238,10 @@ class LauncherTests(unittest.TestCase):
 
     def test_launcher_variable_is_out_of_scope_and_named_in_the_failure(self):
         child = checker.child_env({}, "/shim", "fd:9", "")
+        image = checker.Image(frozenset(set(child) | {checker.LAUNCHER_VARIABLE}), 7, b"/app/Python",
+                              {checker.LAUNCHER_VARIABLE: "/bin/python3.10"})
         with self.assertRaisesRegex(checker.Failure, "起動用"):
-            checker.check_env_names("x", set(child) | {checker.LAUNCHER_VARIABLE}, child, True, [b"/bin/python3.10"])
+            checker.check_env_names("x", image, child, True, [b"/bin/python3.10", b"/app/Python"])
         with self.assertRaises(checker.Failure):
             checker.child_env({checker.LAUNCHER_VARIABLE: "/bin/python3.10"})
 
@@ -277,6 +290,67 @@ class FixtureDocumentTests(unittest.TestCase):
         with self.assertRaises(checker.Failure):
             checker.check_fixture(full, unrecorded, obs(0, b"ok\n", b"", [(1, b"ok\n", 1, 0, "none")]), None,
                                   marks, False, True)
+
+
+class DeepTreeTests(unittest.TestCase):
+    """深い木(最も深いケースは 995 段)を、段の数に依らない fd の数で辿り、消す。"""
+
+    SCRIPT = textwrap.dedent("""\
+        import os, resource, sys
+        sys.path.insert(0, sys.argv[2])
+        sys.setrecursionlimit(20000)
+        import check_r4u as c
+        root = sys.argv[1]
+        c.make_deep(os.path.join(root, "t"), 995, "d")
+        os.mkdir(os.path.join(root, "n"))
+        os.chmod(os.path.join(root, "n"), 0)
+        os.makedirs(os.path.join(root, "x", "y"))
+        os.chmod(os.path.join(root, "x"), 0o600)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (int(sys.argv[3]), resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+        try:
+            before = c.snapshot(root)
+        except c.Failure as exc:
+            print("Failure", exc)
+            sys.exit(3)
+        fd = os.open(os.path.join(root, "t"), os.O_RDONLY)
+        for _ in range(995):
+            child = os.open("d", os.O_RDONLY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        os.close(os.open("deep-file", os.O_WRONLY | os.O_CREAT, 0o600, dir_fd=fd))
+        os.close(fd)
+        after = c.snapshot(root)
+        c.restore_and_remove(root)
+        print(len(before), before != after, any(k.endswith(b"/deep-file") and len(k) > 1990 for k in after),
+              before.get(b"/n/<open>"), before.get(b"/x/y"), os.path.lexists(root))
+        """)
+
+    def run_script(self, limit):
+        with tempfile.TemporaryDirectory(prefix="r4u-deep-") as temp:
+            root = os.path.join(temp, "case")
+            os.mkdir(root)
+            try:
+                return subprocess.run([sys.executable, "-B", "-c", self.SCRIPT, root, str(Path(checker.__file__).parent),
+                                       str(limit)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, timeout=120)
+            finally:
+                checker.restore_and_remove(root)
+
+    def test_deep_tree_is_walked_and_removed_with_few_descriptors(self):
+        done = self.run_script(24)
+        self.assertEqual(0, done.returncode, done.stderr.decode())
+        self.assertEqual("1000 True True ('error', 13) ('error', 13) False", done.stdout.decode().strip())
+
+    def test_exhausted_descriptors_are_a_failure_not_data(self):
+        # 開いている fd の番号より上限を小さくすると、最初の open が EMFILE になる。データにせず失敗にする。
+        done = self.run_script(3)
+        self.assertEqual(3, done.returncode, done.stdout.decode() + done.stderr.decode())
+        self.assertIn("fd が尽きた", done.stdout.decode())
+
+    def test_comparator_needs_a_fixed_number_of_descriptors(self):
+        checker.check_nofile(checker.REQUIRED_NOFILE)
+        with self.assertRaisesRegex(checker.Failure, "ulimit -n"):
+            checker.check_nofile(checker.REQUIRED_NOFILE - 1)
 
 
 class FixtureTests(unittest.TestCase):
@@ -430,16 +504,53 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_recorded_child_environment_must_match_exactly(self):
         child = checker.child_env({"PYTHONOPTIMIZE": "2"}, "/shim", "fd:9", "")
-        checker.check_env_names("x", set(child), child, True)
+        self.assertEqual(set(), checker.check_env_names("x", image(child), child, True))
         for names in (set(child) | {"PYTHONPATH"}, set(child) - {"PYTHONOPTIMIZE"}, set()):
             with self.subTest(names=names), self.assertRaises(checker.Failure):
-                checker.check_env_names("x", names, child, True)
+                checker.check_env_names("x", image(names), child, True)
         with self.assertRaises(checker.Failure):
             checker.check_env_names("x", None, child, True)
         checker.check_env_names("x", None, child, False)
         bad = dict(child, PYTHONMALLOCSTATS="1")
         with self.assertRaises(checker.Failure):
-            checker.check_env_names("x", set(bad), bad, True)
+            checker.check_env_names("x", image(bad), bad, True)
+
+    def test_failure_names_the_record_and_the_expected_set(self):
+        # 次に Mac で落ちたとき、1 回で原因が分かるように、pid・実行物・期待の集合・記録の集合を出す。
+        child = checker.child_env({}, "/shim", "fd:9", "")
+        try:
+            checker.check_env_names("case/legacy", image(set(child) | {"EXTRA"}, pid=4242, exe=b"/x/Python"), child,
+                                    True, [b"/x/Python"])
+        except checker.Failure as exc:
+            text = str(exc)
+        else:
+            self.fail("余計な変数を通した")
+        for part in ("余計 ['EXTRA']", "欠け []", "pid 4242", "/x/Python", "期待の集合", "記録の集合"):
+            self.assertIn(part, text)
+        self.assertNotIn("余計 ['LC_ALL'", text)
+
+    def test_os_added_variable_is_excluded_only_with_every_condition(self):
+        # 2026-11-12 02:41 の決定: Mac の CoreFoundation が足す __CF_USER_TEXT_ENCODING だけ。
+        child = checker.child_env({}, "/shim", "fd:9", "")
+        good = f"0x{os.getuid():X}:0x0:0x0"
+        cf = checker.CF_ENCODING
+        self.assertEqual({cf}, checker.check_env_names(
+            "x", image(set(child) | {cf}, values={cf: good}), child, True, mac=True))
+        refused = [
+            (image(set(child) | {cf}, values={cf: good}), child, False),  # Mac でない
+            (image(set(child) | {cf}, values={cf: "0x0:0x0:0x0" if os.getuid() else "0x1:0x0:0x0"}), child, True),
+            (image(set(child) | {cf}, values={cf: good + "x"}), child, True),  # 形の違う値
+            (image(set(child) | {cf}, values={}), child, True),  # 値の記録が無い
+            (image(set(child) | {cf, "EXTRA"}, values={cf: good}), child, True),  # ほかの余計な変数
+            (image(set(child) | {"__CF_OTHER"}, values={}), child, True),  # 似た名前
+        ]
+        for record, passed, mac in refused:
+            with self.subTest(record=record, mac=mac), self.assertRaises(checker.Failure):
+                checker.check_env_names("x", record, passed, True, mac=mac)
+        line = checker.os_added_line({("legacy", cf, good): 3, ("rust", cf, good): 1})
+        self.assertIn("旧版 3 回", line)
+        self.assertIn("Rust 1 回", line)
+        self.assertIn("なし", checker.os_added_line({}))
 
 
 class PythonTests(unittest.TestCase):
@@ -457,6 +568,31 @@ class PythonTests(unittest.TestCase):
                         {"environ": ["LC_ALL", "PATH", "PYTHONPATH"]}):
             with self.subTest(changes=changes), self.assertRaises(checker.Failure):
                 checker.check_python(self.info(**changes))
+
+    def test_os_added_variable_in_the_probe_only_on_mac(self):
+        environ = ["LC_ALL", "PATH", checker.CF_ENCODING]
+        good = f"0x{os.getuid():X}:0x0:0x0"
+        self.assertEqual(frozenset(), checker.check_python(self.info(environ=environ, cf=good), mac=True))
+        for info, mac in ((self.info(environ=environ, cf=good), False), (self.info(environ=environ, cf="x"), True),
+                          (self.info(environ=environ + ["EXTRA"], cf=good), True)):
+            with self.subTest(info=info, mac=mac), self.assertRaises(checker.Failure):
+                checker.check_python(info, mac=mac)
+        try:
+            checker.check_python(self.info(environ=environ + ["EXTRA"], cf=good), mac=True)
+        except checker.Failure as exc:
+            self.assertIn("余計 ['EXTRA']", str(exc))
+            self.assertIn("期待の集合 ['LC_ALL', 'PATH']", str(exc))
+
+    def test_rlimit_behavior_is_classified_from_a_small_write(self):
+        efbig = -checker.EFBIG
+        self.assertEqual("partial", checker.classify_rlimit([6, 4, efbig]))
+        self.assertEqual("reject", checker.classify_rlimit([6, efbig, 4]))
+        for results in ([6, efbig, efbig], [6, 6, 4], [6, 4, 0], [efbig, efbig, efbig], []):
+            with self.subTest(results=results), self.assertRaises(checker.Failure):
+                checker.classify_rlimit(results)
+        # この機械の動き(実行の最初に確かめるものと同じ)。Linux は partial だけ。
+        mode = checker.probe_rlimit()
+        self.assertEqual("partial", mode) if checker.LINUX else self.assertIn(mode, ("partial", "reject"))
 
     def test_stdlib_that_differs_is_reported_by_name(self):
         sha = dict(checker.STDLIB_SHA256, **{"posixpath.py": "0" * 64})
@@ -546,6 +682,16 @@ class RealChildTests(unittest.TestCase):
         outcome = self.run_pair(ctx)
         self.assertEqual(("合格", True, True), (outcome.status, outcome.fixed, outcome.record))
 
+    def test_positive_control_through_a_pseudo_terminal(self):
+        # 子が終わるまで子の側の端を開いたままにして、親の側の端から読み切る(Mac で読み残しを捨てないため)。
+        ctx = self.context(self.fake("same-pty"))
+        case = checker.Case("x", "output", checker.BASIC, ["docs"], stdout="pty")
+        measured = self.context(ctx.rust)
+        fixtures = {case.id: checker.run_case(measured, case, None, {}, measure=True)}
+        self.assertEqual("合格", checker.run_case(ctx, case, fixtures, {}).status)
+        result = checker.execute(ctx, case, "legacy")
+        self.assertTrue(result.stdout.endswith("件\r\n".encode()))
+
     def test_extra_output_fails(self):
         ctx = self.context(self.fake("extra", after='print("extra")'))
         with self.assertRaises(checker.Failure):
@@ -571,8 +717,9 @@ class RealChildTests(unittest.TestCase):
             self.run_pair(ctx)
 
     def test_target_missing_from_the_record_fails(self):
+        # Mac の /bin/sh は保護されていて共有ライブラリを読まないので、Python で何も書かない検査対象を作る。
         silent = Path(self.temp) / "silent"
-        silent.write_text("#!/bin/sh\nexit 0\n")
+        silent.write_text(f"#!{checker.this_python()}\nimport sys\nsys.exit(0)\n")
         silent.chmod(stat.S_IRWXU)
         with self.assertRaisesRegex(checker.Failure, "Rust の試しの書込みが記録に現れない"):
             checker.probe_recording(self.context(str(silent)))
@@ -619,6 +766,75 @@ class RealChildTests(unittest.TestCase):
         self.assertIn("検査ファイル数".encode(), result.stdout)
         with self.assertRaisesRegex(checker.Failure, "記録が合わない"):
             checker.observe(ctx, self.basic(), result)
+
+    def writer(self, name, sizes):
+        """stderr(ファイル)へ、決まった大きさの write を順に出す検査対象(結果は記録で見る)。"""
+        return self.script(name, f"#!{checker.this_python()}\nimport os\n"
+                                 f"for data in {sizes!r}:\n    try:\n        os.write(2, data)\n"
+                                 f"    except OSError:\n        pass\n")
+
+    def test_budget_rule_rejects_only_the_crossing_write(self):
+        # reject の OS の RLIMIT_FSIZE の模擬: 上限をまたぐ write だけを拒み、後の収まる write は通す。
+        ctx = self.context(self.writer("budget", [b"x" * 6, b"x" * 6, b"x" * 4, b"x"]))
+        case = checker.Case("budget", "fault", [], [], stderr="file")
+        result = checker.execute(ctx, case, "rust", rules=f"fd=2,action=budget,bytes=10,errno={checker.EFBIG}")
+        got = [(w.ret, w.errno, w.action) for w in result.writes if w.fd == 2]
+        self.assertEqual([(6, 0, "budget"), (-1, checker.EFBIG, "budget-fail"), (4, 0, "budget"),
+                          (-1, checker.EFBIG, "budget-fail")], got)
+        self.assertEqual(b"x" * 10, result.stderr)
+
+    def test_budget_rule_counts_mapped_paths_at_the_fixed_length(self):
+        # 判定にだけ、旧版の実行環境のパスを固定名の長さで数える(書く中身は元のまま)。
+        long = b"  File \"/very/long/legacy/path/check_links.py\""
+        ctx = self.context(self.writer("budget-map", [long, b"x" * 2, b"y"]))
+        case = checker.Case("budget-map", "fault", [], [], stderr="file")
+        fixed = b'  File "check_links.py"'
+        rule = (f"fd=2,action=budget,bytes={len(fixed) + 2},errno={checker.EFBIG},"
+                f"map={b'/very/long/legacy/path/check_links.py'.hex()}:{b'check_links.py'.hex()}")
+        result = checker.execute(ctx, case, "rust", rules=rule)
+        self.assertEqual([len(long), 2, -1], [w.ret for w in result.writes if w.fd == 2])
+        self.assertEqual(long + b"x" * 2, result.stderr)
+
+    def test_reject_os_flow_builds_the_expectation_from_the_same_rule(self):
+        # reject の OS の流れを、Linux で共有ライブラリの模擬だけを使って通す(実際の上限との確かめは、
+        # Linux の動きが partial なので外す)。偽の検査対象は旧版そのものなので、合格の対照になる。
+        # 呼出履歴を旧版と同じにするため、偽の検査対象は旧版を exec する(実行の連鎖。最後のプログラムが旧版)。
+        target = self.script("reject-flow", f"#!{checker.this_python()}\n" + textwrap.dedent(f"""\
+            import os, sys
+            os.execv({checker.this_python()!r}, [{checker.this_python()!r}, {str(checker.LEGACY)!r}] + sys.argv[2:])
+            """))
+        ctx = self.context(target)
+        ctx.rlimit_mode = "reject"
+        case = checker.Case("partial-reject", "partial", checker.ONE, ["g"], stderr="file",
+                            partial=("quota", "field"))
+        with patch.object(checker, "check_rlimit_model", lambda real, model, who: None):
+            measured = self.context(ctx.rust)
+            measured.rlimit_mode = "reject"
+            fixtures = {case.id: checker.run_case(measured, case, None, {}, measure=True)}
+            outcome = checker.run_case(ctx, case, fixtures, {})
+        self.assertEqual("合格", outcome.status)
+        self.assertGreater(len(ctx.norm.seen), 0)
+        with patch.object(checker, "check_rlimit_model", lambda real, model, who: None):
+            # 欄の途中の上限: 固定名の長さで数えても、上限をまたぐ write が拒まれる。
+            expected, params, _ = checker.partial_expectation(ctx, case)
+            self.assertIn("budget-fail", [w[4] for w in expected.writes])
+            self.assertIn(",map=", params["rules"])
+            # 旧版だけが切れる範囲: 固定名の長さで数えると拒まれない(元の長さで数えると拒まれる)。
+            only = checker.replace(case, partial=("quota", "legacy-only"))
+            expected, params, _ = checker.partial_expectation(ctx, only)
+            self.assertNotIn("budget-fail", [w[4] for w in expected.writes])
+            plain = params["rules"].split(",map=")[0]
+            unmapped = checker.execute(ctx, only, "legacy", rules=plain)
+            self.assertIn("budget-fail", [w.action for w in unmapped.writes])
+
+    def test_rlimit_model_mismatch_fails(self):
+        real = checker.Result(1, b"", b"ab", [write(2, b"ab"), write(2, b"cd", ret=-1, errno=checker.EFBIG)])
+        model = checker.Result(1, b"", b"ab", [write(2, b"ab"), write(2, b"cd", ret=-1, errno=checker.EFBIG,
+                                                                      action="budget-fail")])
+        checker.check_rlimit_model(real, model, "旧版")
+        other = checker.Result(1, b"", b"abc", [write(2, b"ab"), write(2, b"cd", ret=1)])
+        with self.assertRaisesRegex(checker.Failure, "模擬"):
+            checker.check_rlimit_model(real, other, "旧版")
 
     def test_out_of_scope_variable_reaching_the_child_fails(self):
         ctx = self.context(self.fake("same3"))

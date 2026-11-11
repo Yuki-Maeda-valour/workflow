@@ -99,6 +99,10 @@ GROUPS = {
 
 # ケースが子に与えてよい変数。ほか(22:31〈22:35〉と 00:28 の決定で比較の前提の外にした変数)は与えない。
 LAUNCHER_VARIABLE = "__PYVENV_LAUNCHER__"
+# 2026-11-12 02:41 の決定: 旧版の処理系や OS の部品が自分で足す値。Mac の CoreFoundation は、プロセスの環境に
+# この変数が無いと足す(旧 Python・Python の起動用・Python の子)。子の出力を変えない OS の変数なので、Mac で、
+# 比較器が渡していない、決まった形の値のときだけ、環境の確かめから外す(値と有無を記録する)。
+CF_ENCODING = "__CF_USER_TEXT_ENCODING"
 CASE_ENV_ALLOWED = frozenset({"PYTHONOPTIMIZE", "PYTHONHASHSEED", "PYTHONINTMAXSTRDIGITS", "PYTHONUNBUFFERED",
                               "LANG", "PYTHONIOENCODING", "PYTHONUTF8"})
 
@@ -122,6 +126,8 @@ class Python:
     mismatched: frozenset
     # Mac の framework の起動用のプログラム(R4U_PYTHON などが指したもの)。本体を直接起動したときだけ入る。
     launcher: str | None = None
+    # 旧 Python の os.environ にあった __CF_USER_TEXT_ENCODING の値(OS が足した。記録のため)。
+    cf: str | None = None
 
 
 PROBE = r"""
@@ -135,6 +141,7 @@ for name in ("pathlib.py", "posixpath.py", "genericpath.py"):
 print(json.dumps({"version": platform.python_version(), "dirs": dirs, "sha256": digest,
                   "executable": sys.executable, "base_prefix": sys.base_prefix,
                   "framework": sysconfig.get_config_var("PYTHONFRAMEWORK") or "",
+                  "cf": os.environ.get("__CF_USER_TEXT_ENCODING"),
                   "stdout": [sys.stdout.encoding, sys.stdout.errors],
                   "stderr": [sys.stderr.encoding, sys.stderr.errors],
                   "environ": sorted(os.environ)}))
@@ -152,14 +159,32 @@ def child_env(case_env, shim=None, log=None, rules=""):
     return env
 
 
-def check_python(info):
+def cf_value_ok(value):
+    """CoreFoundation が足す値の形: 0x<利用者の番号の 16 進(大文字・先頭に 0 を付けない)>:0x<16 進>:0x<16 進>。"""
+    return isinstance(value, str) and re.fullmatch(
+        rf"0x{os.getuid():X}:0x[0-9A-Fa-f]+:0x[0-9A-Fa-f]+", value) is not None
+
+
+def os_added(names, values, passed, mac=MAC):
+    """OS の部品が自分で足した変数として、環境の確かめから外すもの(Mac・渡していない・値の形が合うときだけ)。"""
+    if mac and CF_ENCODING in names and CF_ENCODING not in passed and cf_value_ok(values.get(CF_ENCODING)):
+        return {CF_ENCODING}
+    return set()
+
+
+def check_python(info, mac=MAC):
     """PROBE の結果から、比べてよい Python かを決める。本家と違う中身のファイルの名前を返す。"""
     if not info["version"].startswith("3.10."):
         raise Failure(f"Python 3.10 系で流す(実際は {info['version']})。R4U_PYTHON を渡す")
     if info["stdout"] != ["utf-8", "surrogateescape"] or info["stderr"] != ["utf-8", "backslashreplace"]:
         raise Failure(f"基準の環境で旧 Python の文字コードが違う: {info['stdout']} {info['stderr']}")
-    if info["environ"] != ["LC_ALL", "PATH"]:
-        raise Failure(f"子の環境に余計な変数がある: {info['environ']}")
+    expected = {"LC_ALL", "PATH"}
+    environ = set(info["environ"])
+    removed = os_added(environ, {CF_ENCODING: info.get("cf")}, expected, mac)
+    if environ - removed != expected:
+        raise Failure(f"旧 Python の os.environ が、許した変数の並びと違う(余計 {sorted(environ - removed - expected)}・"
+                      f"欠け {sorted(expected - environ)})。期待の集合 {sorted(expected)}・実際の集合 {sorted(environ)}・"
+                      f"OS が足した変数として外したもの {sorted(removed)}(値 {info.get('cf')!r})")
     return frozenset(name for name, digest in STDLIB_SHA256.items() if info["sha256"].get(name) != digest)
 
 
@@ -211,7 +236,7 @@ def find_python():
         for form in (directory, os.path.realpath(directory)):
             if form not in dirs:
                 dirs.append(form)
-    return Python(path, info["version"], tuple(dirs), info["sha256"], mismatched, launcher)
+    return Python(path, info["version"], tuple(dirs), info["sha256"], mismatched, launcher, info.get("cf"))
 
 
 # ---- 書込みの記録 ----
@@ -242,8 +267,17 @@ class Write:
     action: str
 
 
+@dataclass(frozen=True)
+class Image:
+    """記録の環境の行(1 つのプログラムの始まり)。"""
+    names: frozenset
+    pid: int | None
+    exe: bytes
+    values: dict
+
+
 def read_log(data):
-    """記録の行を読む。戻り値は (write の列, 環境変数の名前の集合か None, 実行の連鎖のプログラムの列)。
+    """記録の行を読む。戻り値は (write の列, 最後のプログラムの Image か None, 実行の連鎖のプログラムの列)。
 
     - 途中で切れた行は失敗。
     - 環境の行は、プログラムが始まるたびに 1 行ある。exec の連鎖(同じ pid)なら、最後の行が実際に動いた
@@ -259,14 +293,17 @@ def read_log(data):
             exe = bytes.fromhex(record.get("exe", ""))
             if writes:
                 raise Failure(f"exec の連鎖の前のプログラムが書いた後に、次のプログラム({exe!r})が始まった")
-            names = {bytes.fromhex(name).decode("utf-8", "surrogateescape") for name in record["env"]}
-            images.append((names, record.get("pid"), exe))
+            names = frozenset(bytes.fromhex(name).decode("utf-8", "surrogateescape") for name in record["env"])
+            values = {bytes.fromhex(k).decode("utf-8", "surrogateescape"): bytes.fromhex(v).decode("utf-8", "surrogateescape")
+                      for k, v in record.get("values", {}).items()}
+            images.append(Image(names, record.get("pid"), exe, values))
             continue
         writes.append(Write(record["fd"], bytes.fromhex(record["data"]), record["len"], record["ret"],
                             record["errno"], record["action"]))
-    if len({pid for _, pid, _ in images}) > 1:
-        raise Failure("子が別のプロセスを起動し、そこでも記録した")
-    return writes, (images[-1][0] if images else None), [exe for _, _, exe in images]
+    if len({image.pid for image in images}) > 1:
+        raise Failure("子が別のプロセスを起動し、そこでも記録した: " +
+                      ", ".join(f"pid {image.pid}・{os.fsdecode(image.exe)}" for image in images))
+    return writes, (images[-1] if images else None), [image.exe for image in images]
 
 
 # ---- 入力の木 ----
@@ -342,85 +379,163 @@ def make_chain(directory, count):
         os.symlink(f"l{index + 1}", os.path.join(directory, f"l{index}"))
 
 
+FD_EXHAUSTED = (errno.EMFILE, errno.ENFILE)
+# 比較器が同時に開く fd の数は、木の段の数に依らない(下の歩き方)。子の起動・パイプ・疑似端末を含めた上限の目安。
+REQUIRED_NOFILE = 64
+
+
+def check_nofile(limit=None):
+    """比較器自身が開ける fd の上限を確かめる(子の上限は変えない。比較器が動けるかの確かめ)。"""
+    soft = resource.getrlimit(resource.RLIMIT_NOFILE)[0] if limit is None else limit
+    if soft != resource.RLIM_INFINITY and soft < REQUIRED_NOFILE:
+        raise Failure(f"比較器が開ける fd の上限(RLIMIT_NOFILE の soft)が {soft} で、必要な {REQUIRED_NOFILE} に足りない"
+                      "(木の段の数には依らない。ulimit -n を上げて流す)")
+
+
+def fd_error(exc, where):
+    """fd が尽きた誤りは、データとして記録せず失敗にする(入力の無変更の確かめを弱めないため)。"""
+    if exc.errno in FD_EXHAUSTED:
+        raise Failure(f"比較器の fd が尽きた({where}): {exc}") from exc
+
+
+def list_names(fd):
+    try:
+        with os.scandir(fd) as it:
+            return sorted(os.fsencode(entry.name) for entry in it)
+    except OSError as exc:
+        fd_error(exc, "一覧")
+        raise
+
+
+def open_at(name, dir_fd, flags):
+    try:
+        return os.open(name, flags, dir_fd=dir_fd)
+    except OSError as exc:
+        fd_error(exc, "開く")
+        raise
+
+
 def restore_and_remove(root):
-    """外した権限を戻してから、深い木も含めて消す。"""
-    if not os.path.lexists(root):
+    """外した権限を戻してから、深い木も含めて消す。
+
+    ディレクトリの fd から辿って消す(パスの長さの上限〈Mac は 1024 バイト〉を超える深い木も消せる)。開いている fd は
+    段の数に依らない: 子を開いたら親を閉じ、終わったら `..` を開いて戻る(権限を 0o700 に戻してから入る)。
+    """
+    try:
+        st = os.lstat(root)
+    except FileNotFoundError:
         return
-    if not os.path.isdir(root) or os.path.islink(root):
+    if not stat.S_ISDIR(st.st_mode):
         os.unlink(root)
         return
-    stack = [root]
-    while stack:
-        current = stack.pop()
-        try:
-            st = os.lstat(current)
-            if stat.S_ISDIR(st.st_mode):
-                os.chmod(current, 0o700)
-                with os.scandir(current) as it:
-                    for entry in it:
-                        if entry.is_dir(follow_symlinks=False) and len(entry.path) < 900:
-                            stack.append(entry.path)
-        except OSError:
-            continue
-    limit = sys.getrecursionlimit()
-    sys.setrecursionlimit(20000)
+    os.chmod(root, 0o700)
+    fd = open_at(root, None, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    pending = [list_names(fd)]
+    entered = []
     try:
-        shutil.rmtree(root)
+        while True:
+            if not pending[-1]:
+                pending.pop()
+                if not pending:
+                    break
+                parent = open_at("..", fd, os.O_RDONLY | os.O_DIRECTORY)
+                os.close(fd)
+                fd = parent
+                os.rmdir(entered.pop(), dir_fd=fd)
+                continue
+            name = pending[-1].pop()
+            st = os.lstat(name, dir_fd=fd)
+            if not stat.S_ISDIR(st.st_mode):
+                os.unlink(name, dir_fd=fd)
+                continue
+            os.chmod(name, 0o700, dir_fd=fd)
+            child = open_at(name, fd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            os.close(fd)
+            fd = child
+            entered.append(name)
+            pending.append(list_names(fd))
     finally:
-        sys.setrecursionlimit(limit)
+        os.close(fd)
+    os.rmdir(root)
 
 
 def snapshot(root):
     """入力の木の中身(種類・権限・大きさ・時刻・中身・リンク先)。深い所は fd から辿る。
 
-    FIFO は中身を持たないので、比較器が書いて変わる時刻を見ない(種類・権限・inode は見る)。
+    - FIFO は中身を持たないので、比較器が書いて変わる時刻を見ない(種類・権限・inode は見る)。
+    - 開いている fd は段の数に依らない: 探索できる(所有者の x がある)ディレクトリへは、親を閉じて入り、
+      終わったら `..` を開いて戻る。探索できないディレクトリは、親を開いたまま、中の名前だけを記録する
+      (中の lstat は失敗する。先へは進めない)。
+    - fd が尽きた誤り(EMFILE・ENFILE)はデータにせず、失敗にする。
     """
     found = {}
 
-    def visit(dir_fd, relative):
+    def entry(dir_fd, name, path):
+        """1 つの名前を記録する。入るべきディレクトリなら lstat の結果を返す。"""
         try:
-            names = sorted(os.listdir(dir_fd))
+            st = os.lstat(name, dir_fd=dir_fd)
         except OSError as exc:
-            found[relative + b"/<list>"] = ("error", exc.errno)
-            return
-        for name in names:
-            name = os.fsencode(name)
-            path = relative + b"/" + name
+            fd_error(exc, "lstat")
+            found[path] = ("error", exc.errno)
+            return None
+        if stat.S_ISFIFO(st.st_mode):
+            found[path] = ((st.st_mode, st.st_ino), None)
+            return None
+        attributes = (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+        body = None
+        if stat.S_ISLNK(st.st_mode):
+            body = os.readlink(name, dir_fd=dir_fd)
+        elif stat.S_ISREG(st.st_mode):
             try:
-                st = os.lstat(name, dir_fd=dir_fd)
+                fd = open_at(name, dir_fd, os.O_RDONLY | os.O_NONBLOCK)
             except OSError as exc:
-                found[path] = ("error", exc.errno)
+                body = ("error", exc.errno)
+            else:
+                with os.fdopen(fd, "rb") as stream:
+                    body = hashlib.sha256(stream.read()).hexdigest()
+        found[path] = (attributes, body)
+        return st if stat.S_ISDIR(st.st_mode) else None
+
+    def names_or_error(fd, path):
+        try:
+            return list_names(fd)
+        except OSError as exc:
+            found[path + b"/<list>"] = ("error", exc.errno)
+            return []
+
+    fd = open_at(root, None, os.O_RDONLY | os.O_DIRECTORY)
+    pending = [(b"", names_or_error(fd, b""))]
+    try:
+        while pending:
+            relative, names = pending[-1]
+            if not names:
+                pending.pop()
+                if pending:
+                    parent = open_at("..", fd, os.O_RDONLY | os.O_DIRECTORY)
+                    os.close(fd)
+                    fd = parent
                 continue
-            if stat.S_ISFIFO(st.st_mode):
-                found[path] = ((st.st_mode, st.st_ino), None)
+            name = names.pop()
+            path = relative + b"/" + name
+            st = entry(fd, name, path)
+            if st is None:
                 continue
-            attributes = (st.st_mode, st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
-            body = None
-            if stat.S_ISLNK(st.st_mode):
-                body = os.readlink(name, dir_fd=dir_fd)
-            elif stat.S_ISREG(st.st_mode):
+            try:
+                child = open_at(name, fd, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            except OSError as exc:
+                found[path + b"/<open>"] = ("error", exc.errno)
+                continue
+            if not st.st_mode & stat.S_IXUSR:
+                # 探索できない: 中の名前だけ(lstat は失敗する)。`..` で戻れないので、親は開いたまま。
                 try:
-                    fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK, dir_fd=dir_fd)
-                except OSError as exc:
-                    body = ("error", exc.errno)
-                else:
-                    with os.fdopen(fd, "rb") as stream:
-                        body = hashlib.sha256(stream.read()).hexdigest()
-            found[path] = (attributes, body)
-            if stat.S_ISDIR(st.st_mode):
-                try:
-                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=dir_fd)
-                except OSError as exc:
-                    found[path + b"/<open>"] = ("error", exc.errno)
-                    continue
-                try:
-                    visit(child, path)
+                    for inner in names_or_error(child, path):
+                        entry(child, inner, path + b"/" + inner)
                 finally:
                     os.close(child)
-
-    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
-    try:
-        visit(fd, b"")
+                continue
+            os.close(fd)
+            fd = child
+            pending.append((path, names_or_error(fd, path)))
     finally:
         os.close(fd)
     return found
@@ -499,8 +614,12 @@ class Context:
         self.top = top
         self.counter = 0
         self.legacy_recorded = True
+        # この OS の RLIMIT_FSIZE の動き(probe_rlimit)。Linux は partial。
+        self.rlimit_mode = "partial"
         self.note = ""
         self.measured = {}
+        # OS の部品が足した変数として、環境の確かめから外した回数((側, 名前, 値) ごと)。
+        self.os_added = {}
         self.norm = Normalizer(python)
 
     def marks(self):
@@ -549,9 +668,10 @@ def stdio_target(spec, temp, closers, pty_masters, which):
         closers.append(("drain", read_end))
         return write_end
     if spec == "pty":
+        # 子が終わるまで、比較器も子の側の端を開いたままにする(Mac は、子の側の端がすべて閉じると、読み残した
+        # 出力を捨てることがある)。子が終わった後に、親の側の端から読み切る。
         master, slave = pty.openpty()
-        closers.append(slave)
-        pty_masters.append((which, master))
+        pty_masters.append((which, master, slave))
         return slave
     if spec == "closed":
         return None
@@ -567,6 +687,24 @@ def read_all(fd, sink):
         if not chunk:
             break
         sink.append(chunk)
+
+
+def read_pty(master, sink, stop):
+    """疑似端末の親の側の端を読む。stop の後は、読めるものが無くなるまで読んで終わる。"""
+    import select
+    while True:
+        ready, _, _ = select.select([master], [], [], 0.05)
+        if ready:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError:
+                break
+            if not chunk:
+                break
+            sink.append(chunk)
+            continue
+        if stop.is_set():
+            break
 
 
 def wait_until(predicate, what, timeout=30):
@@ -689,6 +827,8 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
     masters = []
     fds = {}
     closed = []
+    readers = []
+    stop = threading.Event()
     proc = None
     log_sink = []
     try:
@@ -718,11 +858,10 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
                 os.close(fd)
         closers = [fd for fd in closers if not isinstance(fd, int)]
         pty_out = {}
-        readers = []
-        for which, master in masters:
+        for which, master, _ in masters:
             sink = []
             pty_out[which] = sink
-            reader = threading.Thread(target=read_all, args=(master, sink), daemon=True)
+            reader = threading.Thread(target=read_pty, args=(master, sink, stop), daemon=True)
             reader.start()
             readers.append(reader)
         try:
@@ -737,8 +876,11 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
             proc.kill()
             proc.communicate()
             return Result(None, b"", b"", [], True)
+        stop.set()
         for reader in readers:
             reader.join(timeout=30)
+            if reader.is_alive():
+                raise Failure(f"{case.id}/{kind}: 疑似端末を読み切れない")
         log_reader.join(timeout=30)
         stdout = stdout or b""
         stderr = stderr or b""
@@ -756,40 +898,55 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
                 os.close(item[1])
             else:
                 os.close(item)
-        for _, master in masters:
+        stop.set()
+        for reader in readers:
+            reader.join(timeout=5)
+        for _, master, slave in masters:
             os.close(master)
+            os.close(slave)
         os.close(log_read)
-    writes, names, chain = read_log(b"".join(log_sink))
-    check_env_names(f"{case.id}/{kind}", names, child, kind == "rust" or ctx.legacy_recorded, chain)
+    writes, image, chain = read_log(b"".join(log_sink))
+    removed = check_env_names(f"{case.id}/{kind}", image, child, kind == "rust" or ctx.legacy_recorded, chain)
+    for name in removed:
+        key = (kind, name, image.values.get(name))
+        ctx.os_added[key] = ctx.os_added.get(key, 0) + 1
     if case.preserve and input_state(ctx) != before:
         raise Failure(f"{case.id}/{kind}: 入力の木が変わった(またはファイルが増えた)")
     leftover = sorted(set(os.listdir(work)) - {"stdout.out", "stderr.out"})
     if leftover:
         raise Failure(f"{case.id}/{kind}: 作業フォルダに新しいファイルができた: {leftover}")
-    return Result(proc.returncode, stdout, stderr, writes, False, names)
+    return Result(proc.returncode, stdout, stderr, writes, False, None if image is None else set(image.names))
 
 
-def check_env_names(where, names, child, recorded, chain=()):
+def check_env_names(where, image, child, recorded, chain=(), mac=MAC):
     """子の中で共有ライブラリが記録した環境変数の名前が、比較器が許して並べた変数と同じか。
 
-    `__PYVENV_LAUNCHER__` は、Mac の framework の起動用のプログラム(Mac/Tools/pythonw.c)が本体を起動し直すときに
-    付ける変数。2026-11-12 00:28 の決定で効果を再現しない変数なので、比較の前提の外として子に入れない
-    (起動用を通さず、本体を直接起動する)。入っていたら、その理由を示して失敗にする。
+    戻り値は、OS の部品が足した変数として外した名前の集合(記録のため)。
+    - `__PYVENV_LAUNCHER__` は、Mac の framework の起動用のプログラム(Mac/Tools/pythonw.c)が本体を起動し直すときに
+      付ける変数。2026-11-12 00:28 の決定で効果を再現しない変数なので、比較の前提の外として子に入れない
+      (起動用を通さず、本体を直接起動する)。入っていたら、その理由を示して失敗にする。
+    - `__CF_USER_TEXT_ENCODING` は、2026-11-12 02:41 の決定で外す(os_added)。ほかの余計な変数は失敗。
+    - 失敗の文に、比べた記録の pid・実行物・実行の連鎖・期待の集合・記録の集合を出す。
     """
-    if names is None:
+    if image is None:
         if recorded:
-            raise Failure(f"{where}: 子の環境の記録が無い(共有ライブラリが読み込まれていない)")
-        return
+            raise Failure(f"{where}: 子の環境の記録が無い(共有ライブラリが読み込まれていない)。期待の集合 {sorted(child)}")
+        return set()
+    names = set(image.names)
+    seen = (f"比べた記録: pid {image.pid}・実行物 {os.fsdecode(image.exe)!r}・実行の連鎖 "
+            f"{[os.fsdecode(exe) for exe in chain]}。期待の集合 {sorted(child)}・記録の集合 {sorted(names)}")
     if LAUNCHER_VARIABLE in names and LAUNCHER_VARIABLE not in child:
         raise Failure(f"{where}: Mac の framework の起動用のプログラムが {LAUNCHER_VARIABLE} を付けた"
-                      f"(実行の連鎖 {[os.fsdecode(exe) for exe in chain]})。比較の前提の外の変数なので、"
-                      "本体を直接起動する")
+                      f"(値 {image.values.get(LAUNCHER_VARIABLE)!r})。比較の前提の外の変数なので、本体を直接起動する。"
+                      f"{seen}")
     allowed = {"PATH", "LC_ALL", *SHIM_KEYS} | CASE_ENV_ALLOWED
     if set(child) - allowed:
         raise Failure(f"{where}: 比較の前提の外の変数を子に渡した: {sorted(set(child) - allowed)}")
-    if names != set(child):
-        raise Failure(f"{where}: 子の環境が、許した変数の並びと違う(余計 {sorted(names - set(child))}・"
-                      f"欠け {sorted(set(child) - names)})")
+    removed = os_added(names, image.values, child, mac)
+    if names - removed != set(child):
+        raise Failure(f"{where}: 子の環境が、許した変数の並びと違う(余計 {sorted(names - removed - set(child))}・"
+                      f"欠け {sorted(set(child) - names)})。{seen}・OS が足した変数として外したもの {sorted(removed)}")
+    return removed
 
 
 def run_scenario(ctx, case, proc):
@@ -820,7 +977,10 @@ def run_scenario(ctx, case, proc):
             if LINUX:
                 wait_until(lambda: opened(pid, fifo), f"{case.id}: FIFO を開いた")
             os.unlink(fifo)
-            os.rmdir(work)
+            try:
+                os.rmdir(work)
+            except OSError as exc:
+                raise Failure(f"{case.id}: 子の作業場所を消せない(この OS の動作): {exc}") from exc
             os.write(writer, b"[x](b)\n")
         finally:
             os.close(writer)
@@ -847,6 +1007,8 @@ class Normalizer:
                 names[os.fsencode(os.path.join(directory, name))] = name.encode()
         self.names = names
         self.mismatched = {name.encode() for name in python.mismatched}
+        # 実際に対応づけたパスの形(budget の数え方に渡す。同じファイルの別の形を重ねて数えないため)。
+        self.seen = set()
 
     def map(self, data, at_start=True, frames=None):
         starts = [0] if at_start else []
@@ -862,6 +1024,7 @@ class Normalizer:
             path = found.group(1)
             if path in self.names:
                 fixed = self.names[path]
+                self.seen.add(path)
             elif path in FIXED_NAMES:
                 fixed = path
             else:
@@ -1160,6 +1323,90 @@ def locate(fixed_writes, quota):
     raise Failure("上限が固定名の流れの外にある")
 
 
+RLIMIT_PROBE = r"""
+import json, os, resource, signal, sys
+signal.signal(signal.SIGXFSZ, signal.SIG_IGN)
+resource.setrlimit(resource.RLIMIT_FSIZE, (10, 10))
+fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+out = []
+for size in (6, 6, 4):
+    try:
+        out.append(os.write(fd, b"x" * size))
+    except OSError as exc:
+        out.append(-exc.errno)
+os.close(fd)
+print(json.dumps(out))
+"""
+
+
+def classify_rlimit(results):
+    """上限 10 バイトのファイルへの 6・6・4 バイトの write の結果から、RLIMIT_FSIZE の動きを決める。
+
+    - "partial": 上限まで書き、その後は EFBIG(Linux): 6・4・EFBIG。
+    - "reject": 上限をまたぐ write だけを拒み、後の収まる write は通す: 6・EFBIG・4。
+    ほかの形は、比較器が扱えない動きとして失敗にする。
+    """
+    if results == [6, 4, -EFBIG]:
+        return "partial"
+    if results == [6, -EFBIG, 4]:
+        return "reject"
+    raise Failure(f"この OS の RLIMIT_FSIZE の動きを扱えない(6・6・4 バイトの write の結果 {results})")
+
+
+def probe_rlimit():
+    """実行の最初に、小さな書込みでこの OS の RLIMIT_FSIZE の動きを確かめる(Linux は partial だけを認める)。"""
+    with tempfile.TemporaryDirectory(prefix="r4u-rlimit-") as temp:
+        done = subprocess.run([sys.executable, "-I", "-c", RLIMIT_PROBE, os.path.join(temp, "out")],
+                              env=child_env({}), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, timeout=60)
+    if done.returncode != 0:
+        raise Failure(f"RLIMIT_FSIZE の動きを確かめられない: {done.stderr[-2000:]!r}")
+    mode = classify_rlimit(json.loads(done.stdout))
+    if LINUX and mode != "partial":
+        raise Failure(f"Linux の RLIMIT_FSIZE が上限まで書かない: {mode}")
+    return mode
+
+
+def budget_rule(norm, quota):
+    """reject の OS の RLIMIT_FSIZE の模擬(共有ライブラリの budget)。合計の数え方にだけ、旧版の実行環境の
+    パスを固定名の長さで数える(22:26・22:38 の決定: 固定名に置き換えた書込みに同じ故障を当てる)。"""
+    pairs = "|".join(f"{path.hex()}:{norm.names[path].hex()}" for path in sorted(norm.seen))
+    if not pairs:
+        raise Failure("固定名にするパスが、故障なしの旧版の出力に無い(budget の数え方を作れない)")
+    return f"fd=2,action=budget,bytes={quota},errno={EFBIG},map={pairs}"
+
+
+def check_rlimit_model(real, model, who):
+    """実際の RLIMIT_FSIZE で動かした結果と、共有ライブラリの模擬(map なし)で動かした結果が同じか。"""
+    def shape(result):
+        return (result.code, result.stdout, result.stderr, [(w.fd, w.data, w.ret, w.errno) for w in result.writes])
+    if real.timed_out or model.timed_out:
+        raise Failure(f"{who}: RLIMIT_FSIZE の確かめが時間切れ")
+    if shape(real) != shape(model):
+        raise Failure(f"{who}: この OS の RLIMIT_FSIZE の動きが、共有ライブラリの模擬(上限をまたぐ write だけを拒む)"
+                      f"と違う\n実際 {shape(real)!r}\n模擬 {shape(model)!r}")
+
+
+def reject_expectation(ctx, case, quota):
+    """reject の OS(Mac の見込み)の、合計の上限のケースの期待。決まった位置で切る式は使わない。
+
+    1. 旧版を、実際の RLIMIT_FSIZE と、共有ライブラリの模擬(map なし)で動かし、同じことを確かめる。
+    2. 旧版を、模擬に map(固定名の長さで数える)を足して動かし、その結果を Rust の期待にする。
+    Rust は同じ規則(map つき)で動かし、さらに実際の RLIMIT_FSIZE の結果とも同じことを run_case で確かめる。
+    """
+    rule = budget_rule(ctx.norm, quota)
+    plain = f"fd=2,action=budget,bytes={quota},errno={EFBIG}"
+    real = execute(ctx, case, "legacy", rules="", rlimit=quota)
+    model = execute(ctx, case, "legacy", rules=plain, rlimit=None)
+    check_rlimit_model(real, model, "旧版")
+    simulated = execute(ctx, case, "legacy", rules=rule, rlimit=None)
+    expected = observe(ctx, case, simulated)
+    if not any(w.action == "budget-fail" for w in simulated.writes) and \
+            any(w.ret < 0 for w in real.writes if w.fd == 2):
+        ctx.note = legacy_only_note(real.code, simulated.code)
+    return expected, {"rules": rule, "real_rlimit": quota}, True
+
+
 def legacy_only_note(faulted, base):
     return (f"22:38 の決定: 旧版だけが切れる範囲。故障の無かったときの旧版に合わせた(故障ありの旧版の終了値 {faulted}・"
             f"故障なしの旧版の終了値 {base})")
@@ -1180,6 +1427,8 @@ def partial_expectation(ctx, case, recorded=True):
     fixed_stream = b"".join(w[1] for w in fixed2)
     if kind == "quota":
         quota = quota_position(position, fixed_stream, legacy_stream)
+        if ctx.rlimit_mode == "reject":
+            return reject_expectation(ctx, case, quota)
         faulted = execute(ctx, case, "legacy", rules="", rlimit=quota)
         if faulted.timed_out or faulted.code is None:
             raise Failure("故障ありの旧版が終わらない")
@@ -1987,8 +2236,12 @@ def run_case(ctx, case, fixtures, mac_cache, measure=False):
         ctx.measured[case.id] = entry
     if measure:
         return entry
+    real_rlimit = params.pop("real_rlimit", None)
     rust_result = execute(ctx, case, "rust", **params)
     rust = observe(ctx, case, rust_result)
+    if real_rlimit is not None:
+        # reject の OS: Rust も、実際の RLIMIT_FSIZE と共有ライブラリの模擬で同じ結果になる。
+        check_rlimit_model(execute(ctx, case, "rust", rules="", rlimit=real_rlimit), rust_result, "Rust")
     compare_obs(case.id, legacy, rust, interrupt, labels)
     for kind, result in (("Rust", rust_result),):
         if (result.stdout or result.stderr) and not result.writes:
@@ -2175,6 +2428,7 @@ def main_compare(rust, only=None):
         raise Failure("この OS は比較の対象でない")
     if hashlib.sha256(LEGACY.read_bytes()).hexdigest() != LEGACY_SHA256:
         raise Failure("旧版が変わった")
+    check_nofile()
     started = time.monotonic()
     python = find_python()
     global SCANDIR_PYTHON
@@ -2182,6 +2436,9 @@ def main_compare(rust, only=None):
     print(f"旧 Python: {python.version}({python.path})", flush=True)
     if python.launcher:
         print(f"  起動用のプログラム {python.launcher} を通さず、本体を直接起動する", flush=True)
+    if MAC:
+        print(f"  記録({CF_ENCODING}。旧 Python の os.environ): " +
+              ("なし" if python.cf is None else f"あり(値 {python.cf!r}。OS が足した変数として外した)"), flush=True)
     if python.version != "3.10.11":
         print("  注意: 本家 3.10.11 でない。標準ライブラリの中身が同じでも、C の部分の動作の差(例: 3.10.12 は"
               "書込みの失敗が続くときの試行が 1 回多い)で失敗するケースがある。成功にも skip にもしない", flush=True)
@@ -2208,6 +2465,11 @@ def main_compare(rust, only=None):
         ctx = None
         try:
             ctx = Context(python, rust, build_shim(temp), temp, top)
+            ctx.rlimit_mode = probe_rlimit()
+            print(f"RLIMIT_FSIZE の動き: {ctx.rlimit_mode}" + (
+                "(上限まで書き、その後は EFBIG)" if ctx.rlimit_mode == "partial" else
+                "(上限をまたぐ write だけを拒み、後の収まる write は通す。合計の上限のケースは共有ライブラリの"
+                "模擬で期待を作り、実際の上限の結果と同じことを旧版と Rust で確かめる)"), flush=True)
             probe_recording(ctx)
             if only:
                 # 調べるための部分実行。合格にはしない。
@@ -2231,6 +2493,10 @@ def main_compare(rust, only=None):
                     outcome = classify_skip(str(exc), MAC)
                 except Failure as exc:
                     outcome = Outcome("不合格", str(exc))
+                except Exception as exc:  # noqa: BLE001 — 1 件の想定外の例外で、残りのケースの結果を失わない
+                    import traceback
+                    outcome = Outcome("不合格", f"比較器の想定外の例外: {type(exc).__name__}: {exc}\n"
+                                                + traceback.format_exc())
                 outcomes[case.id] = outcome
                 if outcome.status == "合格":
                     note = "" if outcome.record else "(書込みの記録の比較は未実施: " + SKIP_NO_RECORD + ")"
@@ -2271,6 +2537,7 @@ def main_compare(rust, only=None):
         print(f"書込みの記録を比べずに合格にした件数(成功の一部に数えない): {no_record} 件({SKIP_NO_RECORD})")
     print(f"照合の生成入力: {corpus_count} 件(旧版・固定期待・Rust)")
     print(f"子の実行: {executions} 回(旧版と Rust の合計。照合の生成入力と旧 Python の確かめを除く)")
+    print(os_added_line(ctx.os_added if ctx is not None else {}))
     print(f"R4U の比較: 合格 {counts['合格']} 件 / 全 {len(every)} 件・未実施 {counts['未実施']} 件・"
           f"不合格 {counts['不合格']} 件・固定期待と比べた {fixed} 件 / {sys.platform} / 旧 Python {python.version}"
           f"({python.path})/ {elapsed:.1f} 秒")
@@ -2287,6 +2554,15 @@ def overall_status(status, fixtures, os_path):
               f"上の区切りの間の JSON を native/fixtures/r4u/{os_path.name} に置く(--extract-fixture <ログ> で取り出せる)")
         return 1
     return status
+
+
+def os_added_line(counts):
+    """OS の部品が足した変数として外した記録(2026-11-12 02:41 の決定の「値と有無を記録する」)。"""
+    if not counts:
+        return f"記録({CF_ENCODING} を子の環境の確かめから外した): なし"
+    parts = [f"{'旧版' if kind == 'legacy' else 'Rust'} {count} 回(値 {value!r})"
+             for (kind, _, value), count in sorted(counts.items(), key=lambda item: (item[0][0], str(item[0][2])))]
+    return f"記録({CF_ENCODING} を子の環境の確かめから外した。2026-11-12 02:41 の決定): " + "・".join(parts)
 
 
 def classify_skip(reason, mac):
@@ -2324,6 +2600,7 @@ def show(case, kind, result):
 def measure_setup():
     if not (LINUX or MAC):
         raise Failure("この OS は比較の対象でない")
+    check_nofile()
     python = find_python()
     if python.mismatched or python.version != "3.10.11":
         raise Failure("固定期待は本家と同じ中身の 3.10.11 で作る")
@@ -2346,6 +2623,7 @@ def main_measure_cases(out):
         top = tempfile.mkdtemp(prefix="r4u-top-", dir="/tmp")
         try:
             ctx = Context(python, None, build_shim(temp), temp, top)
+            ctx.rlimit_mode = probe_rlimit()
             probe_recording(ctx, kinds=("legacy",))
             mac_cache = {}
             for case in cases:
