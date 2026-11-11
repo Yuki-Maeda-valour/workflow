@@ -386,6 +386,8 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 - 比べ方が違う所は2つある。
   - 既存テストが旧helperを直接起動する4件(`check_r4r.py` の `DIRECT`)は、終わった時のファイルを値でなく回の中の関係で比べる(`end_state`。復元先と退避本文が等しいか・元のままか・一時フォルダの数など)。
   - 監督役の bash が出す終了の知らせの行は、信号の語だけに縮めて比べる(`runner_stderr`)。ほかの行は字面のまま比べる。
+- cp の欄が違ったときは、違いの中身を不合格の文に出す。env の値を出すのは `LC_*`・`LANG`・`LANGUAGE`・`__CF_USER_TEXT_ENCODING`・`__PYVENV_LAUNCHER__` だけで、ほかは名前だけを出す。
+- Mac の `LC_CTYPE` の記録は、比べる前に旧と Rust の両方の値を出す。
 - cp の代わりの観測器は、環境を変えない小さなCのプログラムである。比較器の中のソースを、実行時に `cc` で組む。
   - 記録はソケットで比較器へ送る。子に `RLIMIT_FSIZE` がかかるので、ファイルへは書かない。
   - 組んだ直後に決めた argv と環境で起動し、変えずに記録することを確かめる。PythonやshはLC_CTYPEや環境の並びを変えるので、観測器に使わない。

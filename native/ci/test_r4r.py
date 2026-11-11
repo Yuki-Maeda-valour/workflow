@@ -166,6 +166,29 @@ class Comparator(unittest.TestCase):
                 self.assertEqual(self.m.differences(good, self.observed(**change)), fields)
                 with self.assertRaises(self.m.ComparisonError):
                     self.m.compare_observed(good, self.observed(**change))
+        # cp の欄の違いの文: env は決めた名前(LC_*・LANG・LANGUAGE・__CF_USER_TEXT_ENCODING・
+        # __PYVENV_LAUNCHER__)だけ値を出し、ほかの名前は値を出さない。ほかの欄は両方の値を出す。
+        def env(*entries):
+            return b'\0'.join(entries).hex()
+        old_env = env(b'LANG=C', b'R4R_SECRET=old-value', b'LC_CTYPE=UTF-8', b'__CF_USER_TEXT_ENCODING=0x1F5:0x0:0x0',
+                      b'PATH=/old/bin')
+        new_env = env(b'LANG=C', b'R4R_SECRET=new-value', b'LC_CTYPE=C.UTF-8', b'PATH=/old/bin', b'R4R_EXTRA=x')
+        with self.assertRaises(self.m.ComparisonError) as caught:
+            self.m.compare_observed(self.observed(stub=[dict(stub, env=old_env, argv0='/a')]),
+                                    self.observed(stub=[dict(stub, env=new_env, argv0='/b')]))
+        message = str(caught.exception)
+        for shown in ("'LC_CTYPE=UTF-8'", "'LC_CTYPE=C.UTF-8'", "'__CF_USER_TEXT_ENCODING=0x1F5:0x0:0x0'",
+                      "'R4R_SECRET'", "'R4R_EXTRA'", "cp.argv0: 旧 '/a' / Rust '/b'"):
+            self.assertIn(shown, message)
+        for hidden in ('old-value', 'new-value', "'R4R_EXTRA=x'", '/old/bin', 'LANG=C'):
+            self.assertNotIn(hidden, message)
+        # 項目が同じで並びだけが違えば、並びの違いを名前で出す(値は出さない)。
+        with self.assertRaises(self.m.ComparisonError) as caught:
+            self.m.compare_observed(self.observed(stub=[dict(stub, env=env(b'Z=1', b'LC_CTYPE=C.UTF-8', b'A=2'))]),
+                                    self.observed(stub=[dict(stub, env=env(b'LC_CTYPE=C.UTF-8', b'Z=1', b'A=2'))]))
+        message = str(caught.exception)
+        self.assertIn("並び: 共通の項目の 1 番目が 旧 'Z' / Rust 'LC_CTYPE'", message)
+        self.assertNotIn('Z=1', message)
 
     def test_stdout_normalization_is_only_the_temp_hex(self):
         a = self.result(33, b'TEMP_PATH=/x/.restore-taskmd-' + b'0' * 32 + b'\n')

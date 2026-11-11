@@ -339,6 +339,78 @@ def differences(old, new):
     return found
 
 
+# cp の環境の違いを出すときに、値も出す名前(地域設定と、Mac の CoreFoundation・Python の起動役が足しうる
+# 名前)。ほかの名前は、実行機の環境の値を出さないよう、名前だけを出す。
+ENV_SHOWN = ('LANG', 'LANGUAGE', '__CF_USER_TEXT_ENCODING', '__PYVENV_LAUNCHER__')
+DETAIL_LIMIT = 300
+
+
+def clip(text, limit=DETAIL_LIMIT):
+    return text if len(text) <= limit else text[:limit - 1] + '…'
+
+
+def env_entries(hexed):
+    return [entry for entry in bytes.fromhex(hexed).split(b'\0') if entry]
+
+
+def env_name(entry):
+    return entry.split(b'=', 1)[0]
+
+
+def env_shown(entry):
+    """値を出してよい名前なら NAME=値、ほかは名前だけ(値は出さない)。"""
+    name = env_name(entry)
+    text = entry if name.startswith(b'LC_') or name.decode('latin-1') in ENV_SHOWN else name
+    return repr(text.decode('utf-8', 'backslashreplace'))
+
+
+def env_difference(old_hex, new_hex):
+    """cp が受け取った環境の違い: 旧だけにある項目・Rust だけにある項目・並びの違い。"""
+    left, right = env_entries(old_hex), env_entries(new_hex)
+    only_old = [entry for entry in left if entry not in right]
+    only_new = [entry for entry in right if entry not in left]
+    parts = []
+    if only_old:
+        parts.append('旧だけ [' + ', '.join(map(env_shown, only_old)) + ']')
+    if only_new:
+        parts.append('Rust だけ [' + ', '.join(map(env_shown, only_new)) + ']')
+    common_old = [entry for entry in left if entry in right]
+    common_new = [entry for entry in right if entry in left]
+    if common_old != common_new:
+        index = next((i for i, (a, b) in enumerate(zip(common_old, common_new)) if a != b),
+                     min(len(common_old), len(common_new)))
+
+        def name(items):
+            if index >= len(items):
+                return '(なし)'
+            return repr(env_name(items[index]).decode('utf-8', 'backslashreplace'))
+        parts.append(f'並び: 共通の項目の {index + 1} 番目が 旧 {name(common_old)} / Rust {name(common_new)}')
+    hidden = any(env_shown(entry) != repr(entry.decode('utf-8', 'backslashreplace')) for entry in only_old + only_new)
+    return clip('cp.env: ' + ('; '.join(parts) if parts else '項目の数だけが違う')), hidden
+
+
+def stub_details(old, new):
+    """cp の欄の違いの中身。env は決めた名前だけ値を出し、ほかの欄は両方の値を出す。"""
+    if len(old.stub) != len(new.stub):
+        return [f'cp.count: 旧 {len(old.stub)} 件 / Rust {len(new.stub)} 件']
+    details = []
+    hidden = False
+    for number, (left, right) in enumerate(zip(old.stub, new.stub), 1):
+        prefix = f'cp {number} 回目の ' if len(old.stub) > 1 else ''
+        for field in STUB_FIELDS:
+            if left.get(field) == right.get(field):
+                continue
+            if field == 'env':
+                text, some_hidden = env_difference(left['env'], right['env'])
+                details.append(prefix + text)
+                hidden = hidden or some_hidden
+            else:
+                details.append(prefix + clip(f'cp.{field}: 旧 {left.get(field)!r} / Rust {right.get(field)!r}'))
+    if hidden:
+        details.append('env は LC_*・LANG・LANGUAGE・__CF_USER_TEXT_ENCODING・__PYVENV_LAUNCHER__ のほかは名前だけを出す')
+    return details
+
+
 def compare_observed(old, new):
     found = differences(old, new)
     if found:
@@ -346,6 +418,8 @@ def compare_observed(old, new):
         for name in found:
             if name in ('returncode', 'stdout', 'stderr'):
                 detail.append(f'{name}: 旧 {getattr(old.result, name)!r} / Rust {getattr(new.result, name)!r}')
+        if any(name.startswith('cp.') for name in found):
+            detail.extend(stub_details(old, new))
         raise ComparisonError('旧と Rust が違う: ' + ', '.join(found) + ('(' + '; '.join(detail) + ')' if detail else ''))
 
 
@@ -939,12 +1013,15 @@ def run_side(sc, legacy):
     return observe(sc, result, relations, started)
 
 
-def run_pair(sc):
+def run_pair(sc, before_compare=None):
+    """before_compare は、比べる前に旧と Rust の観測を受け取る(比べて落ちても記録を残すため)。"""
     backup = sc.base / 'backup'
     snapshot(sc.root, backup)
     old = run_side(sc, True)
     restore_layout(sc.root, backup)
     new = run_side(sc, False)
+    if before_compare is not None:
+        before_compare(old, new)
     compare_observed(old, new)
     return old, new
 
@@ -1670,11 +1747,14 @@ class Contract(unittest.TestCase):
                     {'Z': '1', 'LC_CTYPE': 'POSIX', 'A': '2'}):
             with self.subTest(env=env):
                 self.destination.write_bytes(b'current\x00contents\n')
-                old, _ = run_pair(self.scenario(env=env))
-                for record in old.stub:
-                    entries = bytes.fromhex(record['env']).split(b'\0')
-                    values = [e.split(b'=', 1)[1] for e in entries if e.startswith(b'LC_CTYPE=')]
-                    print(f'R4R: 記録(Mac の LC_CTYPE): env={env} → {values}')
+
+                def record(old, new, env=env):
+                    # 比べる前に、旧と Rust の両方の値を出す(比べて落ちても記録が残る)。
+                    def values(observed):
+                        return [[e.split(b'=', 1)[1] for e in env_entries(item['env']) if e.startswith(b'LC_CTYPE=')]
+                                for item in observed.stub]
+                    print(f'R4R: 記録(Mac の LC_CTYPE): env={env} → 旧 {values(old)} / Rust {values(new)}', flush=True)
+                run_pair(self.scenario(env=env), before_compare=record)
 
     def test_unreadable_locale_name_is_legacy_only_fixed_expectation(self):
         """読み込めない地域設定の名前は、glibc が読めるかを musl の Rust は知れないので、R4R では Rust と
