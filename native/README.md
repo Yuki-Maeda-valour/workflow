@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4Bは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4Rは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -26,7 +26,7 @@ R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の�
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
 - `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・loop-stateの純粋部品・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)を持ちます。
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
@@ -287,6 +287,32 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 [必須の実行手順と検証範囲](../docs/testing.md#r4bの比較)に従ってください。
 通常の`cargo test --locked`だけではexampleの単体検査と旧版比較は完了しません。
 
+## タスク本文の復元の内部部品(R4R)
+
+#473で旧helper `restore-taskmd.py` と同じ結果を返す部品を実装しました。製品CLIの登録表・help・配布・既存呼出元(`implement-guard.sh` など)は変えていません。
+段階3の `implement-guard restore-taskmd`(S3I-A #474)が同じプロセスで呼ぶ予定です。
+
+- `crates/platform/src/restore_taskmd.rs` は、保持した親の fd を使う `openat`・`fstatat`・`mkdirat`・`unlinkat`・`renameat` などを、1回だけ呼ぶ安全な関数で公開します。`EINTR` を再試行するかは呼出元が決めます。
+- 同じファイルは、TERM・INT・HUP の最初の1つだけを記録する処理、3つの信号の mask、`SIGXFSZ` の無視、子への信号、OSの乱数と `/dev/urandom` への切り替え、`/dev/null` の `O_RDWR` の1回の open、環境の `LC_CTYPE` の書き換えを持ちます。
+- 子の起動は `spawn(program, args, devnull, ChildKind)` です。`ChildKind::Version` は stdout だけをパイプにします。`ChildKind::Copy` は2本の fd を同じ番号で継がせ、`RLIMIT_FSIZE` を soft・hard とも N にします。
+  - 子の中では fd を閉じません。`close_range` → 親で列挙した fd → `sysconf(_SC_OPEN_MAX)` までの番号の順に、exec の時に閉じる印を付けます。最後に、親で用意した argv で `execv` を呼びます。
+  - 子の準備と exec の失敗は、起動の失敗として返します。`SIGCHLD` を無視した起動で std が panic しても、表示を出さずに起動の失敗として返します。
+- `crates/cli/src/commands/restore_taskmd/` は、引数(`args.rs`)・`--cp` の解決(`realpath.rs`)・本体(`operation.rs`)・子の状態(`child.rs`)・応答と書き出し(`response.rs`)を持ちます。
+  - `mod.rs` の先頭に、旧helperの関数との対応表と、`EINTR` の扱いの表があります。cli 側に `unsafe` はありません。
+- S3I-A が使う入口は次のとおりです。
+  - `start()` は、引数の検査の前に `SIGXFSZ` を無視し、`LC_CTYPE` を書き換えます。ほかのスレッドが無い時に1回だけ呼びます。
+  - `parse_request(&[OsString]) -> Result<Request, ArgumentError>`、`Restore::new(Request)`(300秒の期限の起点)、`Restore::run() -> (u8, Vec<u8>)`、`checkpoint_before_output()`、`handlers_installed()` です。
+  - 書き出しの1段目 `emit(&mut Output<W>, Option<&mut Restore>, u8, &[u8]) -> (u8, Emitted)` は、TERM・INT・HUP を止めて応答を確定し、書き込みと明示の flush を行い、mask を戻します。
+  - `Emitted` は、書けた・溜めた物が残った・直接の書き込みで失敗した・mask を設定できない、を分けます。
+  - 2段目は、`exit_flush` が Python の終了時の (1)(2) の flush を行い、(2) の失敗を返します。呼出元は `unraisable_lines` の2行を `write_stderr_lines` で出し、終了値を120にします。その後に `exit_close` が (3) 処理を既定へ戻すことと、(4) 閉じる時の2回の flush を行います。
+  - 呼出元は、継承可能な fd を増やしてから呼びません。TERM・INT・HUP を止めた mask のままでも呼びません。
+- `crates/cli/examples/r4r_contract.rs` は検査専用入口です。`args_os()` からプログラム名を除いた argv を、旧helperと同じ形で受けます。故障を注入する環境変数や、時間を縮める入口はありません。
+- Rust の単体テストは、Linuxで57件(Macは26件)です。`cargo test --locked -p dev-workflow-cli --example r4r_contract` だけで流れます。Linuxだけの31件は `crates/cli/src/commands/restore_taskmd/tests.rs` の `#[cfg(target_os = "linux")]` の件です。旧テストのうち内部を差し替える46件の対応先は、`native/ci/r4r_test_map.json` にあります。
+
+旧版との差を認めた所はありません。
+契約と、R4Rでは比べない4件は [設計のR4R節](../docs/design.md#タスク本文の復元の内部部品r4r)にあります。
+[比較の手順と件数](../docs/testing.md#r4rの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -331,8 +357,9 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 ## ビルドと検証
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
-`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix` と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
-`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
+`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix`・R4Rの `libc 0.2.191`(`platform` だけ)と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
+`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。
+R4Rも子を `std::process::Command` で起動します。ただし、子だけの `RLIMIT_FSIZE`・余分な fd を継がせない印・子の信号の既定と mask・旧版と同じ `execv` は、exec の前に子の中で動く処理が要ります。そのため `platform` の `restore_taskmd` だけが `pre_exec` と `libc` を使います。最初の信号を記録する処理と mask、Mac の地域設定の判定、環境の `LC_CTYPE` の書き換えも、同じファイルの `unsafe` に置きます。`rustix` の採用の根拠と、R4Rが `libc` と `unsafe` を使う理由は、[設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 

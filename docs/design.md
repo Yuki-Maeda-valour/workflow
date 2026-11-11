@@ -1107,6 +1107,63 @@ r4b_contract ────┘
 
 APIは [native/README.md](../native/README.md#origin判定とgit設定の確認値r4b)、検査手順と手元実測は [testing.md](testing.md#r4bの比較)に記す。
 
+### タスク本文の復元の内部部品(R4R)
+
+[Issue #473](https://github.com/Yuki-Maeda-valour/workflow/issues/473)で、旧helper `plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py` と同じ結果を返す内部部品を、開発用Rustソースへ移した。
+製品CLIの登録表・help・既存呼出元(`implement-guard.sh`・SKILL.md など)へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+段階3の `implement-guard restore-taskmd`(S3I-A #474)が同じプロセスで呼ぶ予定である。独立コマンド `restore-taskmd` の登録は段階4に残す。
+
+- 引数は `restore` と5つの組(`--source`・`--destination`・`--expected-mode`・`--expected-sha256`・`--cp`)を1回ずつ受け、バイト列で判定する。違えば TERM・INT・HUP の処理を設定せず、`REASON=internal-argument` と終了値33を返す。
+- 作業は300秒とする。期限はC0bの `Budget::remaining` で見て、期限ちょうども拒否する。子の停止は TERM 後5秒・KILL 後5秒、後片付けは5秒、監視の間隔は0.05秒である。
+- 読み取りの単位は65536バイト、応答の上限は4 MiB、`cp --version` の出力の上限は8192バイトである。
+- 退避本文と復元先は、`/` から親の各段をリンクを辿らずに開く。復元先と同じ親に mode 0700 の `.restore-taskmd-<16進32桁>` を作る。
+- fd の別名(`/proc/self/fd`、次に `/dev/fd`)で短いコピーを試し、GNU `cp -aL --reflink=never` で準備し、`renameat` で公開する。
+- 処理の順は、旧helperの関数の順のまま保つ。失敗から理由への対応と、`TOUCHED` と `TEMP` の決まりも旧helperと同じにする。
+- 応答の行の形とC風引用は、旧helperと同じバイト列にする。
+  - C風引用は、パスに制御文字(0〜31番と127番)・`"`・`\` があるときだけ、全体の前後に `"` を付ける。
+  - 7〜13番は `\a`・`\b`・`\t`・`\n`・`\v`・`\f`・`\r`、`"` は `\"`、`\` は `\\` に書き換える。ほかの制御文字は `\` と8進3桁にする。UTF-8でないバイトはそのまま残す。
+- `--cp` は Python 3.10 の `os.path.realpath`(strict でない)と同じ規則で、文字列の上で解決する。リンクの連鎖は991段まで解決し、992段で旧helperの `RecursionError` と同じく `runtime-unavailable` にする。`/bin` がリンクの機械で `/bin/cp` を経るときは、1段多く数える。
+- コピーの子は、1回開いた `/dev/null` を0〜2番に使う。`--version` の子は、1番を出力を読むパイプにし、0番と2番に同じ `/dev/null` を使う。
+  - どちらの子にも、0〜2番と、コピーの子に渡す2本のほかの fd を継がせない。`SIGPIPE`・`SIGXFSZ` を既定に戻し、mask は親のもの、環境は親の環境のまま継ぐ。
+  - 子の準備と exec の失敗は、起動の失敗(`runtime-unavailable`)にする。子の状態の取得の `ECHILD` は、終了値0で終わったと扱う。
+
+#### 旧Pythonの実行時の性質
+
+Rustでも同じにする。CPython 3.10.12のソースと、旧helperの出力先を差し替える実測で確かめた。
+
+- 起動時に `SIGXFSZ` を無視する。`SIGPIPE` はRustの実行時が無視する。書き込みの上限を超えた書き込みは、信号で終わらず `EFBIG` になる。
+- PEP 538 の `LC_CTYPE` の書き換えを、部品の開始時にプロセスの環境へ行う。既にあれば同じ位置で置き換え、無ければ末尾に足す。子はその並びのまま継ぐ。
+  - Linux(muslで組む)は環境変数だけで決める。`LC_ALL` が空で、`LC_CTYPE`(空なら `LANG`)が空・`C`・`POSIX` なら `C.UTF-8` にする。
+  - Mac は旧Pythonと同じlibcで決める。`setlocale(LC_CTYPE, "")` の後の名前が `C` と等しいときだけ書き換える。`POSIX` は含めない。値は `C.UTF-8`・`C.utf8`・`UTF-8` のうち、`nl_langinfo(CODESET)` が空でない最初の名前である。
+- `EINTR` は、旧helperが呼ぶPythonの関数ごとに、再試行するかを合わせる。CPython 3.10.12の `posixmodule.c` で確かめた表は、`native/crates/cli/src/commands/restore_taskmd/mod.rs` の先頭にある。
+- TERM・INT・HUP の処理は `SA_ONSTACK` だけで設定し、`SA_RESTART` を付けない。`sa_mask` は空である。
+- `os.urandom` が `getrandom`(Macは `getentropy`)の ENOSYS・EPERM で `/dev/urandom` に切り替え、その fd を開いたまま保持する動きも合わせる。
+- 応答は、Pythonの溜めて書く出力と同じ規則で書く。溜め場所の大きさBは、stdout の `st_blksize`(1以下なら8192)である。
+  - 明示の flush の後、Pythonの終了時と同じ順に4つを行う。(1) `flush_io` の flush(失敗を表示しない)。(2) `flush_std_files` の flush(失敗したら2行を出し、終了値を120に決める)。(3) TERM・INT・HUP を既定へ戻す。(4) 閉じる時の2回の flush(失敗を表示しない)。
+  - 書く試みは、明示の flush から数えて全部で5回である。実測(2026-11-11、CPython 3.10.12)では、EIO が1・2回なら33・stderrなし・応答は書かれる。3・4回なら120・2行・書かれる。5回なら120・2行・書かれない。
+  - 応答がBより長いときに直接の書き込みが失敗すると33を返し、終了時には何も出さない。
+
+#### R4Rでは比べず、S3I-A #474で決めること
+
+Pythonの実行時だけに由来し、検査専用入口では旧版と同じにできない4件である。R4Rは製品の入口を持たないので、ここでは差を認めない。
+比較器が旧helperだけを流して記録するのは2つである。下の2の `LANG=xx_YY.UTF-8` は、記録した値を固定期待と照らす。下の3の待たずに書く設定のパイプの `EAGAIN` は、Linuxで結果を表示するだけで照らさない。
+ほかはR4Rで記録していないので、S3I-A #474で測る。
+
+1. 起動時に閉じた標準の fd(0〜2)と、フォルダなどの標準の fd。利用者の決定(2026-11-11 17:45)の範囲で扱う。
+2. 読み込めない地域設定の名前(`LANG=xx_YY.UTF-8` など)と、`C.UTF-8` の無い環境での `LC_CTYPE`(Linux)。Macは同じlibcで決めるので比べる。
+3. UTF-8でない地域設定での書き出しの失敗の1行目、`native/crates/cli/src/commands/restore_taskmd/response.rs` の `describe_errno` が文を持つ6つ(EPIPE・ENOSPC・EIO・EBADF・EFBIG・EDQUOT)のほかの errno の2行目、待たずに書く設定のパイプの `EAGAIN`。
+4. 引数の誤りの応答を書く間の SIGINT と、Pythonの起動の途中に届いた信号。
+
+旧版との差を認めた所は無い。ほかのコマンドで認めた差も持ち込まない。
+
+```text
+旧helper(python3 -I -B restore-taskmd.py restore …) ─┐
+                                                    ├─ 同じパスの配置・同じ argv → 終了値・stdout・stderr・ファイル・実体の関係・cp の観測・子の回収を比べる
+r4r_contract restore … ──────────────────────────────┘
+```
+
+APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
@@ -1137,6 +1194,11 @@ APIは [native/README.md](../native/README.md#origin判定とgit設定の確認�
 - 2026-11-09のC0bで `rustix` を採用した。段階 0 の候補記録は上に残す。`native/Cargo.toml` で `=1.1.6` に固定し、`platform` だけに `fs` と既定の `std` を追加した。
 - R4Aのtask-digestではstdoutの端末幅取得に`termios`を加えた。
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
+- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
+  - 旧helperの `_posixsubprocess` と同じ子の準備が要るためである。子だけの `RLIMIT_FSIZE`、`close_range` か列挙した fd への exec の時に閉じる印、`SIGPIPE`・`SIGXFSZ` の既定、mask、`execv` は、exec の前に子の中で動く。`std::process::Command` の `pre_exec` と `libc` でしか書けない。
+  - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
+  - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
+  - `rustix` の機能と、依存の版は増やしていない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
 - `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLは後のR4Sで局所修正版を採用した。Landlock・kqueueの部品は未採用である。

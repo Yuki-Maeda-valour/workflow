@@ -286,6 +286,75 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4b.py'
 CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4bの必須比較と検査用実行物)にある。
 R4Bの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
+### R4Rの比較
+
+#473のタスク本文の復元の内部部品は、製品CLIへ未登録・未配布の開発用実装である。
+[契約とR4Rでは比べない4件](design.md#タスク本文の復元の内部部品r4r)、[部品と入口](../native/README.md#タスク本文の復元の内部部品r4r)を参照する。
+Python3.10系・非rootと、Cコンパイラ(`cc`)を必須とする。`cc` が無ければ、比較器は省略せずに失敗する。
+通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しない。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。次はLinux x86_64の例であり、他機種はその機械のRust対象名へ変える。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example r4r_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example r4r_contract --target x86_64-unknown-linux-musl)
+python3 -B native/ci/check_r4r.py --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/r4r_contract"
+python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
+```
+
+- `--fixture`の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物やPATHへ切り替えない。
+- 同じパスの配置で、旧helper(`python3 -I -B`)を流してから配置を戻し、Rustを流す。比べるのは次のとおりである。
+  - 終了値、stdout、stderr。
+  - 復元先と退避本文の内容・`st_mode`・uid・gid・mtimeのns・user xattr・POSIX ACLと、一時フォルダの残り。
+  - 実体の関係(実行前に作った復元先のハードリンクと開いた fd が、旧い中身を保つか)。
+  - cp の観測(argv[0]・argv・環境の並び・`RLIMIT_FSIZE`・開いた fd と flags・信号の mask と既定)と、子の回収。
+- 正規化は2つだけである。stdout の一時フォルダの16進32桁と、cp の argv の fd 番号(継いだ fd の番号と一致することを別に確かめる)。
+- 比べ方が違う所は2つある。
+  - 既存テストが旧helperを直接起動する4件(`check_r4r.py` の `DIRECT`)は、終わった時のファイルを値でなく回の中の関係で比べる(`end_state`。復元先と退避本文が等しいか・元のままか・一時フォルダの数など)。
+  - 監督役の bash が出す終了の知らせの行は、信号の語だけに縮めて比べる(`runner_stderr`)。ほかの行は字面のまま比べる。
+- cp の代わりの観測器は、環境を変えない小さなCのプログラムである。比較器の中のソースを、実行時に `cc` で組む。
+  - 記録はソケットで比較器へ送る。子に `RLIMIT_FSIZE` がかかるので、ファイルへは書かない。
+  - 組んだ直後に決めた argv と環境で起動し、変えずに記録することを確かめる。PythonやshはLC_CTYPEや環境の並びを変えるので、観測器に使わない。
+- 既存の63件は、名前の一覧を固定の件数とsha256で照らし、16・1・46に分ける。
+  - 旧helperを起動し内部を差し替えない16件は、元のままのクラス(L)と、`HELPER` をRustへ差し替えたクラス(R)で流す。Rは同じパスで旧helperとRustを順に流して比べ、既存の検査をRustの結果に当てる。
+  - 旧helperどうしを同じ手順で比べる回も流し、比べ方が揺れないことを確かめる。Linuxでは各回33件(L16・R16・監督の1件)である。
+  - Rの各件で、入口の起動の回数が、比べた組の数と直接起動の記録の数の和と等しいことを照らす。
+  - 監督の関数だけを確かめる1件は、Linuxで元のまま流す。比較の件数には数えない。
+  - 内部を差し替える46件は、Rustの単体テストへ対応表(`native/ci/r4r_test_map.json`)で結ぶ。Linuxだけが28件、両方が18件、再現できない件は0件である。対応表は `cargo test … -- --list` と `-- --list --ignored` の出力と照らす。
+- Macは16件を、既存の検査を当てる4件・結果だけを比べる8件・省く4件に分ける。3組が重ならずに16件を覆うことを照らす。ACLの件はMacでも流し、既存の省略で省かれたことを確かめる。
+- 追加の境界はLinuxで25件である。引数・`--cp`・ファイル・起動の状態・環境・書き出しの失敗・信号と、旧helperの出力先を差し替える実験3件を含む。Macでは9件を流す。
+  - 各件に旧helperの固定期待を置き、旧helperどうしの比較だけで合格にしない。
+  - 出力先を差し替える実験3件(`check_r4r.py` の `FlushExperiment`)は、旧helperだけを流して固定期待で照らす。Rust側の同じ条件は、exampleの単体テスト(`test_exit_flush_order_and_counts` など)で確かめる。
+  - 読み込めない地域設定の名前(`LANG=xx_YY.UTF-8`)は、Linuxで旧helperだけを流し、固定期待で照らす。Rustとは比べない。
+  - 待たずに書く設定のパイプの `EAGAIN` は、25件の外で、Linuxで旧helperだけを流して結果を表示する。固定期待とは照らさず、Rustとも比べない。
+- 比較器の自己検査16件を、`check_r4r.py` の中から必ず流す。壊した結果・時間切れ・実行不能・0件・入口の未起動・対応表の欠け・`cc` が無い・観測器の失敗と環境の書き換えを、すべて失敗にすることを確かめる。
+  - Macの分岐をLinuxで模擬する2件は、Macの成功には数えない。
+
+#### 手元のLinux実装検証(2026-11-11)
+
+実装commitは`a95ba64d32dfe2e17c44ab8c07c95b41c3edb195`である。Linux x86_64・Python3.10.12・通常利用者・coreutils 8.32で、チェックリストの検査がすべて成功した。
+
+- `check_r4r.py` は、自己検査16件・既存33件の2回(旧helperどうし・Rust)・追加25件が成功した。全体で約100秒である。
+- `cargo test --locked` の110件(platformのR4R検査10件を含む)が成功した。通常の `cargo test --locked` は example の単体検査を流さない。
+- `cargo test --locked -p dev-workflow-cli --example r4r_contract` の57件が成功した。
+- 旧helperの既存テスト63件、probe、保存先比較714件、`check_r4b.py`、`build.py test` の74件、規約検査のERROR 0・WARN 0も成功した。
+- `/proc` の無いLinuxでの旧helperとRustの一致は、事前レビューのレビュアーが手元で測った。比較器には入れていない。`/proc` を隠す手段(`unshare` など)がCIの実行機で使えるかは未確認である。platformの検査では、列挙できない経路を強制して確かめる。
+- この記録はMac・Linux arm64・最低OS実機の動作、PR用CI、最新mainを含む最終SHAの全回帰テストの成功を意味しない。
+
+#### 未確認の条件
+
+- Macの実機と最低のOSの版、MacのGNU cpの実体。
+- Macで旧Pythonが `LC_CTYPE` を書き換えるかと、その値。MacのCIで旧helperとRustの一致を比べ、値を記録する。
+- Macの止まり方(本物の `/dev/fd` で両方が `33`・`fd-copy-unavailable`・`TOUCHED=none`・`TEMP=removed`、BSDのcpでは `runtime-unavailable`)は設計の推測である。
+- Macで `test_normal_existing_and_absent_binary_empty_modes_and_names` が、APFSがUTF-8でない名前を拒むために `OSError` になりうる(推測)。
+- Macの errno の文(特に EDQUOT の69・`Disc quota exceeded`)は推測である。Macの比較(`check_r4r.py` の `MAC_CONTRACT`)に書き出しの失敗の件が無いので、R4Rでは確かめていない。
+- Linuxのcoreutils 8.30・8.31・9.0〜9.6・9.8以降。手元で確かめたのは8.32である。
+- CIの実行機の `cc` の有無。GitHubの実行機にはあると推測する。
+
+CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
+R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -298,18 +367,19 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 | `macos-15` | `macos-arm64` | `aarch64-apple-darwin` | 同上 |
 
 - 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
-- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った製品用実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査、検査専用の `r4b_contract` の比較を行う。
+- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った製品用実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査、検査専用の `r4b_contract` と `r4r_contract` の比較を行う。品質検査では、R4Rのexampleの単体検査と対応表の照合も行う。
 - 工程全体の上限は`build`が60分、`verify-universal`が30分。比較ごとの期限や時間切れの失敗扱いは変えない。
   - 2026-11-11のMac Intelの[実行記録](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42903337858/job/130134906190)では、R4Bの1回目は自己検査0.738秒・旧版46件50.638秒・追加23件787.250秒で成功した。合計838.626秒である。
   - `build`は品質検査と2回のビルドに加え、製品用とR4B用を各2回比較する。従来の40分では2回目の追加比較中に工程全体が打ち切られたため、60分に延ばす。
   - `verify-universal`は署名検査の後、製品用のprobe・保存先比較とR4B比較を各1回行う。R4Bだけで約14分の実測があり、従来の15分では残りの比較や準備の余裕がないため30分に延ばす。新上限でのMac完走は未確認である。
+  - R4Rの比較は、`build` では各回、`verify-universal` では1回加わる。手元のLinux x86_64では1回約100秒だった。Macでの時間と、上の上限の中での完走は未確認である。上限は変えていない。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
-- 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --target <Rust の対象名>`。
+- 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --target <Rust の対象名>`。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
-  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4Bの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。
+  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。
 - `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
 - 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
 - `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
