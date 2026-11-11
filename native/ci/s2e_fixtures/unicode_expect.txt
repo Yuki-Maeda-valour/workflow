@@ -1,0 +1,1778 @@
+# gen_unicode_tables.py が作る。全文字番号の判定の範囲(Python 3.10 / Unicode 13.0.0)。
+space 9 d
+space 1c 20
+space 85 85
+space a0 a0
+space 1680 1680
+space 2000 200a
+space 2028 2029
+space 202f 202f
+space 205f 205f
+space 3000 3000
+decimal 30 30 0
+decimal 31 31 1
+decimal 32 32 2
+decimal 33 33 3
+decimal 34 34 4
+decimal 35 35 5
+decimal 36 36 6
+decimal 37 37 7
+decimal 38 38 8
+decimal 39 39 9
+decimal 660 660 0
+decimal 661 661 1
+decimal 662 662 2
+decimal 663 663 3
+decimal 664 664 4
+decimal 665 665 5
+decimal 666 666 6
+decimal 667 667 7
+decimal 668 668 8
+decimal 669 669 9
+decimal 6f0 6f0 0
+decimal 6f1 6f1 1
+decimal 6f2 6f2 2
+decimal 6f3 6f3 3
+decimal 6f4 6f4 4
+decimal 6f5 6f5 5
+decimal 6f6 6f6 6
+decimal 6f7 6f7 7
+decimal 6f8 6f8 8
+decimal 6f9 6f9 9
+decimal 7c0 7c0 0
+decimal 7c1 7c1 1
+decimal 7c2 7c2 2
+decimal 7c3 7c3 3
+decimal 7c4 7c4 4
+decimal 7c5 7c5 5
+decimal 7c6 7c6 6
+decimal 7c7 7c7 7
+decimal 7c8 7c8 8
+decimal 7c9 7c9 9
+decimal 966 966 0
+decimal 967 967 1
+decimal 968 968 2
+decimal 969 969 3
+decimal 96a 96a 4
+decimal 96b 96b 5
+decimal 96c 96c 6
+decimal 96d 96d 7
+decimal 96e 96e 8
+decimal 96f 96f 9
+decimal 9e6 9e6 0
+decimal 9e7 9e7 1
+decimal 9e8 9e8 2
+decimal 9e9 9e9 3
+decimal 9ea 9ea 4
+decimal 9eb 9eb 5
+decimal 9ec 9ec 6
+decimal 9ed 9ed 7
+decimal 9ee 9ee 8
+decimal 9ef 9ef 9
+decimal a66 a66 0
+decimal a67 a67 1
+decimal a68 a68 2
+decimal a69 a69 3
+decimal a6a a6a 4
+decimal a6b a6b 5
+decimal a6c a6c 6
+decimal a6d a6d 7
+decimal a6e a6e 8
+decimal a6f a6f 9
+decimal ae6 ae6 0
+decimal ae7 ae7 1
+decimal ae8 ae8 2
+decimal ae9 ae9 3
+decimal aea aea 4
+decimal aeb aeb 5
+decimal aec aec 6
+decimal aed aed 7
+decimal aee aee 8
+decimal aef aef 9
+decimal b66 b66 0
+decimal b67 b67 1
+decimal b68 b68 2
+decimal b69 b69 3
+decimal b6a b6a 4
+decimal b6b b6b 5
+decimal b6c b6c 6
+decimal b6d b6d 7
+decimal b6e b6e 8
+decimal b6f b6f 9
+decimal be6 be6 0
+decimal be7 be7 1
+decimal be8 be8 2
+decimal be9 be9 3
+decimal bea bea 4
+decimal beb beb 5
+decimal bec bec 6
+decimal bed bed 7
+decimal bee bee 8
+decimal bef bef 9
+decimal c66 c66 0
+decimal c67 c67 1
+decimal c68 c68 2
+decimal c69 c69 3
+decimal c6a c6a 4
+decimal c6b c6b 5
+decimal c6c c6c 6
+decimal c6d c6d 7
+decimal c6e c6e 8
+decimal c6f c6f 9
+decimal ce6 ce6 0
+decimal ce7 ce7 1
+decimal ce8 ce8 2
+decimal ce9 ce9 3
+decimal cea cea 4
+decimal ceb ceb 5
+decimal cec cec 6
+decimal ced ced 7
+decimal cee cee 8
+decimal cef cef 9
+decimal d66 d66 0
+decimal d67 d67 1
+decimal d68 d68 2
+decimal d69 d69 3
+decimal d6a d6a 4
+decimal d6b d6b 5
+decimal d6c d6c 6
+decimal d6d d6d 7
+decimal d6e d6e 8
+decimal d6f d6f 9
+decimal de6 de6 0
+decimal de7 de7 1
+decimal de8 de8 2
+decimal de9 de9 3
+decimal dea dea 4
+decimal deb deb 5
+decimal dec dec 6
+decimal ded ded 7
+decimal dee dee 8
+decimal def def 9
+decimal e50 e50 0
+decimal e51 e51 1
+decimal e52 e52 2
+decimal e53 e53 3
+decimal e54 e54 4
+decimal e55 e55 5
+decimal e56 e56 6
+decimal e57 e57 7
+decimal e58 e58 8
+decimal e59 e59 9
+decimal ed0 ed0 0
+decimal ed1 ed1 1
+decimal ed2 ed2 2
+decimal ed3 ed3 3
+decimal ed4 ed4 4
+decimal ed5 ed5 5
+decimal ed6 ed6 6
+decimal ed7 ed7 7
+decimal ed8 ed8 8
+decimal ed9 ed9 9
+decimal f20 f20 0
+decimal f21 f21 1
+decimal f22 f22 2
+decimal f23 f23 3
+decimal f24 f24 4
+decimal f25 f25 5
+decimal f26 f26 6
+decimal f27 f27 7
+decimal f28 f28 8
+decimal f29 f29 9
+decimal 1040 1040 0
+decimal 1041 1041 1
+decimal 1042 1042 2
+decimal 1043 1043 3
+decimal 1044 1044 4
+decimal 1045 1045 5
+decimal 1046 1046 6
+decimal 1047 1047 7
+decimal 1048 1048 8
+decimal 1049 1049 9
+decimal 1090 1090 0
+decimal 1091 1091 1
+decimal 1092 1092 2
+decimal 1093 1093 3
+decimal 1094 1094 4
+decimal 1095 1095 5
+decimal 1096 1096 6
+decimal 1097 1097 7
+decimal 1098 1098 8
+decimal 1099 1099 9
+decimal 17e0 17e0 0
+decimal 17e1 17e1 1
+decimal 17e2 17e2 2
+decimal 17e3 17e3 3
+decimal 17e4 17e4 4
+decimal 17e5 17e5 5
+decimal 17e6 17e6 6
+decimal 17e7 17e7 7
+decimal 17e8 17e8 8
+decimal 17e9 17e9 9
+decimal 1810 1810 0
+decimal 1811 1811 1
+decimal 1812 1812 2
+decimal 1813 1813 3
+decimal 1814 1814 4
+decimal 1815 1815 5
+decimal 1816 1816 6
+decimal 1817 1817 7
+decimal 1818 1818 8
+decimal 1819 1819 9
+decimal 1946 1946 0
+decimal 1947 1947 1
+decimal 1948 1948 2
+decimal 1949 1949 3
+decimal 194a 194a 4
+decimal 194b 194b 5
+decimal 194c 194c 6
+decimal 194d 194d 7
+decimal 194e 194e 8
+decimal 194f 194f 9
+decimal 19d0 19d0 0
+decimal 19d1 19d1 1
+decimal 19d2 19d2 2
+decimal 19d3 19d3 3
+decimal 19d4 19d4 4
+decimal 19d5 19d5 5
+decimal 19d6 19d6 6
+decimal 19d7 19d7 7
+decimal 19d8 19d8 8
+decimal 19d9 19d9 9
+decimal 1a80 1a80 0
+decimal 1a81 1a81 1
+decimal 1a82 1a82 2
+decimal 1a83 1a83 3
+decimal 1a84 1a84 4
+decimal 1a85 1a85 5
+decimal 1a86 1a86 6
+decimal 1a87 1a87 7
+decimal 1a88 1a88 8
+decimal 1a89 1a89 9
+decimal 1a90 1a90 0
+decimal 1a91 1a91 1
+decimal 1a92 1a92 2
+decimal 1a93 1a93 3
+decimal 1a94 1a94 4
+decimal 1a95 1a95 5
+decimal 1a96 1a96 6
+decimal 1a97 1a97 7
+decimal 1a98 1a98 8
+decimal 1a99 1a99 9
+decimal 1b50 1b50 0
+decimal 1b51 1b51 1
+decimal 1b52 1b52 2
+decimal 1b53 1b53 3
+decimal 1b54 1b54 4
+decimal 1b55 1b55 5
+decimal 1b56 1b56 6
+decimal 1b57 1b57 7
+decimal 1b58 1b58 8
+decimal 1b59 1b59 9
+decimal 1bb0 1bb0 0
+decimal 1bb1 1bb1 1
+decimal 1bb2 1bb2 2
+decimal 1bb3 1bb3 3
+decimal 1bb4 1bb4 4
+decimal 1bb5 1bb5 5
+decimal 1bb6 1bb6 6
+decimal 1bb7 1bb7 7
+decimal 1bb8 1bb8 8
+decimal 1bb9 1bb9 9
+decimal 1c40 1c40 0
+decimal 1c41 1c41 1
+decimal 1c42 1c42 2
+decimal 1c43 1c43 3
+decimal 1c44 1c44 4
+decimal 1c45 1c45 5
+decimal 1c46 1c46 6
+decimal 1c47 1c47 7
+decimal 1c48 1c48 8
+decimal 1c49 1c49 9
+decimal 1c50 1c50 0
+decimal 1c51 1c51 1
+decimal 1c52 1c52 2
+decimal 1c53 1c53 3
+decimal 1c54 1c54 4
+decimal 1c55 1c55 5
+decimal 1c56 1c56 6
+decimal 1c57 1c57 7
+decimal 1c58 1c58 8
+decimal 1c59 1c59 9
+decimal a620 a620 0
+decimal a621 a621 1
+decimal a622 a622 2
+decimal a623 a623 3
+decimal a624 a624 4
+decimal a625 a625 5
+decimal a626 a626 6
+decimal a627 a627 7
+decimal a628 a628 8
+decimal a629 a629 9
+decimal a8d0 a8d0 0
+decimal a8d1 a8d1 1
+decimal a8d2 a8d2 2
+decimal a8d3 a8d3 3
+decimal a8d4 a8d4 4
+decimal a8d5 a8d5 5
+decimal a8d6 a8d6 6
+decimal a8d7 a8d7 7
+decimal a8d8 a8d8 8
+decimal a8d9 a8d9 9
+decimal a900 a900 0
+decimal a901 a901 1
+decimal a902 a902 2
+decimal a903 a903 3
+decimal a904 a904 4
+decimal a905 a905 5
+decimal a906 a906 6
+decimal a907 a907 7
+decimal a908 a908 8
+decimal a909 a909 9
+decimal a9d0 a9d0 0
+decimal a9d1 a9d1 1
+decimal a9d2 a9d2 2
+decimal a9d3 a9d3 3
+decimal a9d4 a9d4 4
+decimal a9d5 a9d5 5
+decimal a9d6 a9d6 6
+decimal a9d7 a9d7 7
+decimal a9d8 a9d8 8
+decimal a9d9 a9d9 9
+decimal a9f0 a9f0 0
+decimal a9f1 a9f1 1
+decimal a9f2 a9f2 2
+decimal a9f3 a9f3 3
+decimal a9f4 a9f4 4
+decimal a9f5 a9f5 5
+decimal a9f6 a9f6 6
+decimal a9f7 a9f7 7
+decimal a9f8 a9f8 8
+decimal a9f9 a9f9 9
+decimal aa50 aa50 0
+decimal aa51 aa51 1
+decimal aa52 aa52 2
+decimal aa53 aa53 3
+decimal aa54 aa54 4
+decimal aa55 aa55 5
+decimal aa56 aa56 6
+decimal aa57 aa57 7
+decimal aa58 aa58 8
+decimal aa59 aa59 9
+decimal abf0 abf0 0
+decimal abf1 abf1 1
+decimal abf2 abf2 2
+decimal abf3 abf3 3
+decimal abf4 abf4 4
+decimal abf5 abf5 5
+decimal abf6 abf6 6
+decimal abf7 abf7 7
+decimal abf8 abf8 8
+decimal abf9 abf9 9
+decimal ff10 ff10 0
+decimal ff11 ff11 1
+decimal ff12 ff12 2
+decimal ff13 ff13 3
+decimal ff14 ff14 4
+decimal ff15 ff15 5
+decimal ff16 ff16 6
+decimal ff17 ff17 7
+decimal ff18 ff18 8
+decimal ff19 ff19 9
+decimal 104a0 104a0 0
+decimal 104a1 104a1 1
+decimal 104a2 104a2 2
+decimal 104a3 104a3 3
+decimal 104a4 104a4 4
+decimal 104a5 104a5 5
+decimal 104a6 104a6 6
+decimal 104a7 104a7 7
+decimal 104a8 104a8 8
+decimal 104a9 104a9 9
+decimal 10d30 10d30 0
+decimal 10d31 10d31 1
+decimal 10d32 10d32 2
+decimal 10d33 10d33 3
+decimal 10d34 10d34 4
+decimal 10d35 10d35 5
+decimal 10d36 10d36 6
+decimal 10d37 10d37 7
+decimal 10d38 10d38 8
+decimal 10d39 10d39 9
+decimal 11066 11066 0
+decimal 11067 11067 1
+decimal 11068 11068 2
+decimal 11069 11069 3
+decimal 1106a 1106a 4
+decimal 1106b 1106b 5
+decimal 1106c 1106c 6
+decimal 1106d 1106d 7
+decimal 1106e 1106e 8
+decimal 1106f 1106f 9
+decimal 110f0 110f0 0
+decimal 110f1 110f1 1
+decimal 110f2 110f2 2
+decimal 110f3 110f3 3
+decimal 110f4 110f4 4
+decimal 110f5 110f5 5
+decimal 110f6 110f6 6
+decimal 110f7 110f7 7
+decimal 110f8 110f8 8
+decimal 110f9 110f9 9
+decimal 11136 11136 0
+decimal 11137 11137 1
+decimal 11138 11138 2
+decimal 11139 11139 3
+decimal 1113a 1113a 4
+decimal 1113b 1113b 5
+decimal 1113c 1113c 6
+decimal 1113d 1113d 7
+decimal 1113e 1113e 8
+decimal 1113f 1113f 9
+decimal 111d0 111d0 0
+decimal 111d1 111d1 1
+decimal 111d2 111d2 2
+decimal 111d3 111d3 3
+decimal 111d4 111d4 4
+decimal 111d5 111d5 5
+decimal 111d6 111d6 6
+decimal 111d7 111d7 7
+decimal 111d8 111d8 8
+decimal 111d9 111d9 9
+decimal 112f0 112f0 0
+decimal 112f1 112f1 1
+decimal 112f2 112f2 2
+decimal 112f3 112f3 3
+decimal 112f4 112f4 4
+decimal 112f5 112f5 5
+decimal 112f6 112f6 6
+decimal 112f7 112f7 7
+decimal 112f8 112f8 8
+decimal 112f9 112f9 9
+decimal 11450 11450 0
+decimal 11451 11451 1
+decimal 11452 11452 2
+decimal 11453 11453 3
+decimal 11454 11454 4
+decimal 11455 11455 5
+decimal 11456 11456 6
+decimal 11457 11457 7
+decimal 11458 11458 8
+decimal 11459 11459 9
+decimal 114d0 114d0 0
+decimal 114d1 114d1 1
+decimal 114d2 114d2 2
+decimal 114d3 114d3 3
+decimal 114d4 114d4 4
+decimal 114d5 114d5 5
+decimal 114d6 114d6 6
+decimal 114d7 114d7 7
+decimal 114d8 114d8 8
+decimal 114d9 114d9 9
+decimal 11650 11650 0
+decimal 11651 11651 1
+decimal 11652 11652 2
+decimal 11653 11653 3
+decimal 11654 11654 4
+decimal 11655 11655 5
+decimal 11656 11656 6
+decimal 11657 11657 7
+decimal 11658 11658 8
+decimal 11659 11659 9
+decimal 116c0 116c0 0
+decimal 116c1 116c1 1
+decimal 116c2 116c2 2
+decimal 116c3 116c3 3
+decimal 116c4 116c4 4
+decimal 116c5 116c5 5
+decimal 116c6 116c6 6
+decimal 116c7 116c7 7
+decimal 116c8 116c8 8
+decimal 116c9 116c9 9
+decimal 11730 11730 0
+decimal 11731 11731 1
+decimal 11732 11732 2
+decimal 11733 11733 3
+decimal 11734 11734 4
+decimal 11735 11735 5
+decimal 11736 11736 6
+decimal 11737 11737 7
+decimal 11738 11738 8
+decimal 11739 11739 9
+decimal 118e0 118e0 0
+decimal 118e1 118e1 1
+decimal 118e2 118e2 2
+decimal 118e3 118e3 3
+decimal 118e4 118e4 4
+decimal 118e5 118e5 5
+decimal 118e6 118e6 6
+decimal 118e7 118e7 7
+decimal 118e8 118e8 8
+decimal 118e9 118e9 9
+decimal 11950 11950 0
+decimal 11951 11951 1
+decimal 11952 11952 2
+decimal 11953 11953 3
+decimal 11954 11954 4
+decimal 11955 11955 5
+decimal 11956 11956 6
+decimal 11957 11957 7
+decimal 11958 11958 8
+decimal 11959 11959 9
+decimal 11c50 11c50 0
+decimal 11c51 11c51 1
+decimal 11c52 11c52 2
+decimal 11c53 11c53 3
+decimal 11c54 11c54 4
+decimal 11c55 11c55 5
+decimal 11c56 11c56 6
+decimal 11c57 11c57 7
+decimal 11c58 11c58 8
+decimal 11c59 11c59 9
+decimal 11d50 11d50 0
+decimal 11d51 11d51 1
+decimal 11d52 11d52 2
+decimal 11d53 11d53 3
+decimal 11d54 11d54 4
+decimal 11d55 11d55 5
+decimal 11d56 11d56 6
+decimal 11d57 11d57 7
+decimal 11d58 11d58 8
+decimal 11d59 11d59 9
+decimal 11da0 11da0 0
+decimal 11da1 11da1 1
+decimal 11da2 11da2 2
+decimal 11da3 11da3 3
+decimal 11da4 11da4 4
+decimal 11da5 11da5 5
+decimal 11da6 11da6 6
+decimal 11da7 11da7 7
+decimal 11da8 11da8 8
+decimal 11da9 11da9 9
+decimal 16a60 16a60 0
+decimal 16a61 16a61 1
+decimal 16a62 16a62 2
+decimal 16a63 16a63 3
+decimal 16a64 16a64 4
+decimal 16a65 16a65 5
+decimal 16a66 16a66 6
+decimal 16a67 16a67 7
+decimal 16a68 16a68 8
+decimal 16a69 16a69 9
+decimal 16b50 16b50 0
+decimal 16b51 16b51 1
+decimal 16b52 16b52 2
+decimal 16b53 16b53 3
+decimal 16b54 16b54 4
+decimal 16b55 16b55 5
+decimal 16b56 16b56 6
+decimal 16b57 16b57 7
+decimal 16b58 16b58 8
+decimal 16b59 16b59 9
+decimal 1d7ce 1d7ce 0
+decimal 1d7cf 1d7cf 1
+decimal 1d7d0 1d7d0 2
+decimal 1d7d1 1d7d1 3
+decimal 1d7d2 1d7d2 4
+decimal 1d7d3 1d7d3 5
+decimal 1d7d4 1d7d4 6
+decimal 1d7d5 1d7d5 7
+decimal 1d7d6 1d7d6 8
+decimal 1d7d7 1d7d7 9
+decimal 1d7d8 1d7d8 0
+decimal 1d7d9 1d7d9 1
+decimal 1d7da 1d7da 2
+decimal 1d7db 1d7db 3
+decimal 1d7dc 1d7dc 4
+decimal 1d7dd 1d7dd 5
+decimal 1d7de 1d7de 6
+decimal 1d7df 1d7df 7
+decimal 1d7e0 1d7e0 8
+decimal 1d7e1 1d7e1 9
+decimal 1d7e2 1d7e2 0
+decimal 1d7e3 1d7e3 1
+decimal 1d7e4 1d7e4 2
+decimal 1d7e5 1d7e5 3
+decimal 1d7e6 1d7e6 4
+decimal 1d7e7 1d7e7 5
+decimal 1d7e8 1d7e8 6
+decimal 1d7e9 1d7e9 7
+decimal 1d7ea 1d7ea 8
+decimal 1d7eb 1d7eb 9
+decimal 1d7ec 1d7ec 0
+decimal 1d7ed 1d7ed 1
+decimal 1d7ee 1d7ee 2
+decimal 1d7ef 1d7ef 3
+decimal 1d7f0 1d7f0 4
+decimal 1d7f1 1d7f1 5
+decimal 1d7f2 1d7f2 6
+decimal 1d7f3 1d7f3 7
+decimal 1d7f4 1d7f4 8
+decimal 1d7f5 1d7f5 9
+decimal 1d7f6 1d7f6 0
+decimal 1d7f7 1d7f7 1
+decimal 1d7f8 1d7f8 2
+decimal 1d7f9 1d7f9 3
+decimal 1d7fa 1d7fa 4
+decimal 1d7fb 1d7fb 5
+decimal 1d7fc 1d7fc 6
+decimal 1d7fd 1d7fd 7
+decimal 1d7fe 1d7fe 8
+decimal 1d7ff 1d7ff 9
+decimal 1e140 1e140 0
+decimal 1e141 1e141 1
+decimal 1e142 1e142 2
+decimal 1e143 1e143 3
+decimal 1e144 1e144 4
+decimal 1e145 1e145 5
+decimal 1e146 1e146 6
+decimal 1e147 1e147 7
+decimal 1e148 1e148 8
+decimal 1e149 1e149 9
+decimal 1e2f0 1e2f0 0
+decimal 1e2f1 1e2f1 1
+decimal 1e2f2 1e2f2 2
+decimal 1e2f3 1e2f3 3
+decimal 1e2f4 1e2f4 4
+decimal 1e2f5 1e2f5 5
+decimal 1e2f6 1e2f6 6
+decimal 1e2f7 1e2f7 7
+decimal 1e2f8 1e2f8 8
+decimal 1e2f9 1e2f9 9
+decimal 1e950 1e950 0
+decimal 1e951 1e951 1
+decimal 1e952 1e952 2
+decimal 1e953 1e953 3
+decimal 1e954 1e954 4
+decimal 1e955 1e955 5
+decimal 1e956 1e956 6
+decimal 1e957 1e957 7
+decimal 1e958 1e958 8
+decimal 1e959 1e959 9
+decimal 1fbf0 1fbf0 0
+decimal 1fbf1 1fbf1 1
+decimal 1fbf2 1fbf2 2
+decimal 1fbf3 1fbf3 3
+decimal 1fbf4 1fbf4 4
+decimal 1fbf5 1fbf5 5
+decimal 1fbf6 1fbf6 6
+decimal 1fbf7 1fbf7 7
+decimal 1fbf8 1fbf8 8
+decimal 1fbf9 1fbf9 9
+nonprintable 0 1f
+nonprintable 7f a0
+nonprintable ad ad
+nonprintable 378 379
+nonprintable 380 383
+nonprintable 38b 38b
+nonprintable 38d 38d
+nonprintable 3a2 3a2
+nonprintable 530 530
+nonprintable 557 558
+nonprintable 58b 58c
+nonprintable 590 590
+nonprintable 5c8 5cf
+nonprintable 5eb 5ee
+nonprintable 5f5 605
+nonprintable 61c 61d
+nonprintable 6dd 6dd
+nonprintable 70e 70f
+nonprintable 74b 74c
+nonprintable 7b2 7bf
+nonprintable 7fb 7fc
+nonprintable 82e 82f
+nonprintable 83f 83f
+nonprintable 85c 85d
+nonprintable 85f 85f
+nonprintable 86b 89f
+nonprintable 8b5 8b5
+nonprintable 8c8 8d2
+nonprintable 8e2 8e2
+nonprintable 984 984
+nonprintable 98d 98e
+nonprintable 991 992
+nonprintable 9a9 9a9
+nonprintable 9b1 9b1
+nonprintable 9b3 9b5
+nonprintable 9ba 9bb
+nonprintable 9c5 9c6
+nonprintable 9c9 9ca
+nonprintable 9cf 9d6
+nonprintable 9d8 9db
+nonprintable 9de 9de
+nonprintable 9e4 9e5
+nonprintable 9ff a00
+nonprintable a04 a04
+nonprintable a0b a0e
+nonprintable a11 a12
+nonprintable a29 a29
+nonprintable a31 a31
+nonprintable a34 a34
+nonprintable a37 a37
+nonprintable a3a a3b
+nonprintable a3d a3d
+nonprintable a43 a46
+nonprintable a49 a4a
+nonprintable a4e a50
+nonprintable a52 a58
+nonprintable a5d a5d
+nonprintable a5f a65
+nonprintable a77 a80
+nonprintable a84 a84
+nonprintable a8e a8e
+nonprintable a92 a92
+nonprintable aa9 aa9
+nonprintable ab1 ab1
+nonprintable ab4 ab4
+nonprintable aba abb
+nonprintable ac6 ac6
+nonprintable aca aca
+nonprintable ace acf
+nonprintable ad1 adf
+nonprintable ae4 ae5
+nonprintable af2 af8
+nonprintable b00 b00
+nonprintable b04 b04
+nonprintable b0d b0e
+nonprintable b11 b12
+nonprintable b29 b29
+nonprintable b31 b31
+nonprintable b34 b34
+nonprintable b3a b3b
+nonprintable b45 b46
+nonprintable b49 b4a
+nonprintable b4e b54
+nonprintable b58 b5b
+nonprintable b5e b5e
+nonprintable b64 b65
+nonprintable b78 b81
+nonprintable b84 b84
+nonprintable b8b b8d
+nonprintable b91 b91
+nonprintable b96 b98
+nonprintable b9b b9b
+nonprintable b9d b9d
+nonprintable ba0 ba2
+nonprintable ba5 ba7
+nonprintable bab bad
+nonprintable bba bbd
+nonprintable bc3 bc5
+nonprintable bc9 bc9
+nonprintable bce bcf
+nonprintable bd1 bd6
+nonprintable bd8 be5
+nonprintable bfb bff
+nonprintable c0d c0d
+nonprintable c11 c11
+nonprintable c29 c29
+nonprintable c3a c3c
+nonprintable c45 c45
+nonprintable c49 c49
+nonprintable c4e c54
+nonprintable c57 c57
+nonprintable c5b c5f
+nonprintable c64 c65
+nonprintable c70 c76
+nonprintable c8d c8d
+nonprintable c91 c91
+nonprintable ca9 ca9
+nonprintable cb4 cb4
+nonprintable cba cbb
+nonprintable cc5 cc5
+nonprintable cc9 cc9
+nonprintable cce cd4
+nonprintable cd7 cdd
+nonprintable cdf cdf
+nonprintable ce4 ce5
+nonprintable cf0 cf0
+nonprintable cf3 cff
+nonprintable d0d d0d
+nonprintable d11 d11
+nonprintable d45 d45
+nonprintable d49 d49
+nonprintable d50 d53
+nonprintable d64 d65
+nonprintable d80 d80
+nonprintable d84 d84
+nonprintable d97 d99
+nonprintable db2 db2
+nonprintable dbc dbc
+nonprintable dbe dbf
+nonprintable dc7 dc9
+nonprintable dcb dce
+nonprintable dd5 dd5
+nonprintable dd7 dd7
+nonprintable de0 de5
+nonprintable df0 df1
+nonprintable df5 e00
+nonprintable e3b e3e
+nonprintable e5c e80
+nonprintable e83 e83
+nonprintable e85 e85
+nonprintable e8b e8b
+nonprintable ea4 ea4
+nonprintable ea6 ea6
+nonprintable ebe ebf
+nonprintable ec5 ec5
+nonprintable ec7 ec7
+nonprintable ece ecf
+nonprintable eda edb
+nonprintable ee0 eff
+nonprintable f48 f48
+nonprintable f6d f70
+nonprintable f98 f98
+nonprintable fbd fbd
+nonprintable fcd fcd
+nonprintable fdb fff
+nonprintable 10c6 10c6
+nonprintable 10c8 10cc
+nonprintable 10ce 10cf
+nonprintable 1249 1249
+nonprintable 124e 124f
+nonprintable 1257 1257
+nonprintable 1259 1259
+nonprintable 125e 125f
+nonprintable 1289 1289
+nonprintable 128e 128f
+nonprintable 12b1 12b1
+nonprintable 12b6 12b7
+nonprintable 12bf 12bf
+nonprintable 12c1 12c1
+nonprintable 12c6 12c7
+nonprintable 12d7 12d7
+nonprintable 1311 1311
+nonprintable 1316 1317
+nonprintable 135b 135c
+nonprintable 137d 137f
+nonprintable 139a 139f
+nonprintable 13f6 13f7
+nonprintable 13fe 13ff
+nonprintable 1680 1680
+nonprintable 169d 169f
+nonprintable 16f9 16ff
+nonprintable 170d 170d
+nonprintable 1715 171f
+nonprintable 1737 173f
+nonprintable 1754 175f
+nonprintable 176d 176d
+nonprintable 1771 1771
+nonprintable 1774 177f
+nonprintable 17de 17df
+nonprintable 17ea 17ef
+nonprintable 17fa 17ff
+nonprintable 180e 180f
+nonprintable 181a 181f
+nonprintable 1879 187f
+nonprintable 18ab 18af
+nonprintable 18f6 18ff
+nonprintable 191f 191f
+nonprintable 192c 192f
+nonprintable 193c 193f
+nonprintable 1941 1943
+nonprintable 196e 196f
+nonprintable 1975 197f
+nonprintable 19ac 19af
+nonprintable 19ca 19cf
+nonprintable 19db 19dd
+nonprintable 1a1c 1a1d
+nonprintable 1a5f 1a5f
+nonprintable 1a7d 1a7e
+nonprintable 1a8a 1a8f
+nonprintable 1a9a 1a9f
+nonprintable 1aae 1aaf
+nonprintable 1ac1 1aff
+nonprintable 1b4c 1b4f
+nonprintable 1b7d 1b7f
+nonprintable 1bf4 1bfb
+nonprintable 1c38 1c3a
+nonprintable 1c4a 1c4c
+nonprintable 1c89 1c8f
+nonprintable 1cbb 1cbc
+nonprintable 1cc8 1ccf
+nonprintable 1cfb 1cff
+nonprintable 1dfa 1dfa
+nonprintable 1f16 1f17
+nonprintable 1f1e 1f1f
+nonprintable 1f46 1f47
+nonprintable 1f4e 1f4f
+nonprintable 1f58 1f58
+nonprintable 1f5a 1f5a
+nonprintable 1f5c 1f5c
+nonprintable 1f5e 1f5e
+nonprintable 1f7e 1f7f
+nonprintable 1fb5 1fb5
+nonprintable 1fc5 1fc5
+nonprintable 1fd4 1fd5
+nonprintable 1fdc 1fdc
+nonprintable 1ff0 1ff1
+nonprintable 1ff5 1ff5
+nonprintable 1fff 200f
+nonprintable 2028 202f
+nonprintable 205f 206f
+nonprintable 2072 2073
+nonprintable 208f 208f
+nonprintable 209d 209f
+nonprintable 20c0 20cf
+nonprintable 20f1 20ff
+nonprintable 218c 218f
+nonprintable 2427 243f
+nonprintable 244b 245f
+nonprintable 2b74 2b75
+nonprintable 2b96 2b96
+nonprintable 2c2f 2c2f
+nonprintable 2c5f 2c5f
+nonprintable 2cf4 2cf8
+nonprintable 2d26 2d26
+nonprintable 2d28 2d2c
+nonprintable 2d2e 2d2f
+nonprintable 2d68 2d6e
+nonprintable 2d71 2d7e
+nonprintable 2d97 2d9f
+nonprintable 2da7 2da7
+nonprintable 2daf 2daf
+nonprintable 2db7 2db7
+nonprintable 2dbf 2dbf
+nonprintable 2dc7 2dc7
+nonprintable 2dcf 2dcf
+nonprintable 2dd7 2dd7
+nonprintable 2ddf 2ddf
+nonprintable 2e53 2e7f
+nonprintable 2e9a 2e9a
+nonprintable 2ef4 2eff
+nonprintable 2fd6 2fef
+nonprintable 2ffc 3000
+nonprintable 3040 3040
+nonprintable 3097 3098
+nonprintable 3100 3104
+nonprintable 3130 3130
+nonprintable 318f 318f
+nonprintable 31e4 31ef
+nonprintable 321f 321f
+nonprintable 9ffd 9fff
+nonprintable a48d a48f
+nonprintable a4c7 a4cf
+nonprintable a62c a63f
+nonprintable a6f8 a6ff
+nonprintable a7c0 a7c1
+nonprintable a7cb a7f4
+nonprintable a82d a82f
+nonprintable a83a a83f
+nonprintable a878 a87f
+nonprintable a8c6 a8cd
+nonprintable a8da a8df
+nonprintable a954 a95e
+nonprintable a97d a97f
+nonprintable a9ce a9ce
+nonprintable a9da a9dd
+nonprintable a9ff a9ff
+nonprintable aa37 aa3f
+nonprintable aa4e aa4f
+nonprintable aa5a aa5b
+nonprintable aac3 aada
+nonprintable aaf7 ab00
+nonprintable ab07 ab08
+nonprintable ab0f ab10
+nonprintable ab17 ab1f
+nonprintable ab27 ab27
+nonprintable ab2f ab2f
+nonprintable ab6c ab6f
+nonprintable abee abef
+nonprintable abfa abff
+nonprintable d7a4 d7af
+nonprintable d7c7 d7ca
+nonprintable d7fc f8ff
+nonprintable fa6e fa6f
+nonprintable fada faff
+nonprintable fb07 fb12
+nonprintable fb18 fb1c
+nonprintable fb37 fb37
+nonprintable fb3d fb3d
+nonprintable fb3f fb3f
+nonprintable fb42 fb42
+nonprintable fb45 fb45
+nonprintable fbc2 fbd2
+nonprintable fd40 fd4f
+nonprintable fd90 fd91
+nonprintable fdc8 fdef
+nonprintable fdfe fdff
+nonprintable fe1a fe1f
+nonprintable fe53 fe53
+nonprintable fe67 fe67
+nonprintable fe6c fe6f
+nonprintable fe75 fe75
+nonprintable fefd ff00
+nonprintable ffbf ffc1
+nonprintable ffc8 ffc9
+nonprintable ffd0 ffd1
+nonprintable ffd8 ffd9
+nonprintable ffdd ffdf
+nonprintable ffe7 ffe7
+nonprintable ffef fffb
+nonprintable fffe ffff
+nonprintable 1000c 1000c
+nonprintable 10027 10027
+nonprintable 1003b 1003b
+nonprintable 1003e 1003e
+nonprintable 1004e 1004f
+nonprintable 1005e 1007f
+nonprintable 100fb 100ff
+nonprintable 10103 10106
+nonprintable 10134 10136
+nonprintable 1018f 1018f
+nonprintable 1019d 1019f
+nonprintable 101a1 101cf
+nonprintable 101fe 1027f
+nonprintable 1029d 1029f
+nonprintable 102d1 102df
+nonprintable 102fc 102ff
+nonprintable 10324 1032c
+nonprintable 1034b 1034f
+nonprintable 1037b 1037f
+nonprintable 1039e 1039e
+nonprintable 103c4 103c7
+nonprintable 103d6 103ff
+nonprintable 1049e 1049f
+nonprintable 104aa 104af
+nonprintable 104d4 104d7
+nonprintable 104fc 104ff
+nonprintable 10528 1052f
+nonprintable 10564 1056e
+nonprintable 10570 105ff
+nonprintable 10737 1073f
+nonprintable 10756 1075f
+nonprintable 10768 107ff
+nonprintable 10806 10807
+nonprintable 10809 10809
+nonprintable 10836 10836
+nonprintable 10839 1083b
+nonprintable 1083d 1083e
+nonprintable 10856 10856
+nonprintable 1089f 108a6
+nonprintable 108b0 108df
+nonprintable 108f3 108f3
+nonprintable 108f6 108fa
+nonprintable 1091c 1091e
+nonprintable 1093a 1093e
+nonprintable 10940 1097f
+nonprintable 109b8 109bb
+nonprintable 109d0 109d1
+nonprintable 10a04 10a04
+nonprintable 10a07 10a0b
+nonprintable 10a14 10a14
+nonprintable 10a18 10a18
+nonprintable 10a36 10a37
+nonprintable 10a3b 10a3e
+nonprintable 10a49 10a4f
+nonprintable 10a59 10a5f
+nonprintable 10aa0 10abf
+nonprintable 10ae7 10aea
+nonprintable 10af7 10aff
+nonprintable 10b36 10b38
+nonprintable 10b56 10b57
+nonprintable 10b73 10b77
+nonprintable 10b92 10b98
+nonprintable 10b9d 10ba8
+nonprintable 10bb0 10bff
+nonprintable 10c49 10c7f
+nonprintable 10cb3 10cbf
+nonprintable 10cf3 10cf9
+nonprintable 10d28 10d2f
+nonprintable 10d3a 10e5f
+nonprintable 10e7f 10e7f
+nonprintable 10eaa 10eaa
+nonprintable 10eae 10eaf
+nonprintable 10eb2 10eff
+nonprintable 10f28 10f2f
+nonprintable 10f5a 10faf
+nonprintable 10fcc 10fdf
+nonprintable 10ff7 10fff
+nonprintable 1104e 11051
+nonprintable 11070 1107e
+nonprintable 110bd 110bd
+nonprintable 110c2 110cf
+nonprintable 110e9 110ef
+nonprintable 110fa 110ff
+nonprintable 11135 11135
+nonprintable 11148 1114f
+nonprintable 11177 1117f
+nonprintable 111e0 111e0
+nonprintable 111f5 111ff
+nonprintable 11212 11212
+nonprintable 1123f 1127f
+nonprintable 11287 11287
+nonprintable 11289 11289
+nonprintable 1128e 1128e
+nonprintable 1129e 1129e
+nonprintable 112aa 112af
+nonprintable 112eb 112ef
+nonprintable 112fa 112ff
+nonprintable 11304 11304
+nonprintable 1130d 1130e
+nonprintable 11311 11312
+nonprintable 11329 11329
+nonprintable 11331 11331
+nonprintable 11334 11334
+nonprintable 1133a 1133a
+nonprintable 11345 11346
+nonprintable 11349 1134a
+nonprintable 1134e 1134f
+nonprintable 11351 11356
+nonprintable 11358 1135c
+nonprintable 11364 11365
+nonprintable 1136d 1136f
+nonprintable 11375 113ff
+nonprintable 1145c 1145c
+nonprintable 11462 1147f
+nonprintable 114c8 114cf
+nonprintable 114da 1157f
+nonprintable 115b6 115b7
+nonprintable 115de 115ff
+nonprintable 11645 1164f
+nonprintable 1165a 1165f
+nonprintable 1166d 1167f
+nonprintable 116b9 116bf
+nonprintable 116ca 116ff
+nonprintable 1171b 1171c
+nonprintable 1172c 1172f
+nonprintable 11740 117ff
+nonprintable 1183c 1189f
+nonprintable 118f3 118fe
+nonprintable 11907 11908
+nonprintable 1190a 1190b
+nonprintable 11914 11914
+nonprintable 11917 11917
+nonprintable 11936 11936
+nonprintable 11939 1193a
+nonprintable 11947 1194f
+nonprintable 1195a 1199f
+nonprintable 119a8 119a9
+nonprintable 119d8 119d9
+nonprintable 119e5 119ff
+nonprintable 11a48 11a4f
+nonprintable 11aa3 11abf
+nonprintable 11af9 11bff
+nonprintable 11c09 11c09
+nonprintable 11c37 11c37
+nonprintable 11c46 11c4f
+nonprintable 11c6d 11c6f
+nonprintable 11c90 11c91
+nonprintable 11ca8 11ca8
+nonprintable 11cb7 11cff
+nonprintable 11d07 11d07
+nonprintable 11d0a 11d0a
+nonprintable 11d37 11d39
+nonprintable 11d3b 11d3b
+nonprintable 11d3e 11d3e
+nonprintable 11d48 11d4f
+nonprintable 11d5a 11d5f
+nonprintable 11d66 11d66
+nonprintable 11d69 11d69
+nonprintable 11d8f 11d8f
+nonprintable 11d92 11d92
+nonprintable 11d99 11d9f
+nonprintable 11daa 11edf
+nonprintable 11ef9 11faf
+nonprintable 11fb1 11fbf
+nonprintable 11ff2 11ffe
+nonprintable 1239a 123ff
+nonprintable 1246f 1246f
+nonprintable 12475 1247f
+nonprintable 12544 12fff
+nonprintable 1342f 143ff
+nonprintable 14647 167ff
+nonprintable 16a39 16a3f
+nonprintable 16a5f 16a5f
+nonprintable 16a6a 16a6d
+nonprintable 16a70 16acf
+nonprintable 16aee 16aef
+nonprintable 16af6 16aff
+nonprintable 16b46 16b4f
+nonprintable 16b5a 16b5a
+nonprintable 16b62 16b62
+nonprintable 16b78 16b7c
+nonprintable 16b90 16e3f
+nonprintable 16e9b 16eff
+nonprintable 16f4b 16f4e
+nonprintable 16f88 16f8e
+nonprintable 16fa0 16fdf
+nonprintable 16fe5 16fef
+nonprintable 16ff2 16fff
+nonprintable 187f8 187ff
+nonprintable 18cd6 18cff
+nonprintable 18d09 1afff
+nonprintable 1b11f 1b14f
+nonprintable 1b153 1b163
+nonprintable 1b168 1b16f
+nonprintable 1b2fc 1bbff
+nonprintable 1bc6b 1bc6f
+nonprintable 1bc7d 1bc7f
+nonprintable 1bc89 1bc8f
+nonprintable 1bc9a 1bc9b
+nonprintable 1bca0 1cfff
+nonprintable 1d0f6 1d0ff
+nonprintable 1d127 1d128
+nonprintable 1d173 1d17a
+nonprintable 1d1e9 1d1ff
+nonprintable 1d246 1d2df
+nonprintable 1d2f4 1d2ff
+nonprintable 1d357 1d35f
+nonprintable 1d379 1d3ff
+nonprintable 1d455 1d455
+nonprintable 1d49d 1d49d
+nonprintable 1d4a0 1d4a1
+nonprintable 1d4a3 1d4a4
+nonprintable 1d4a7 1d4a8
+nonprintable 1d4ad 1d4ad
+nonprintable 1d4ba 1d4ba
+nonprintable 1d4bc 1d4bc
+nonprintable 1d4c4 1d4c4
+nonprintable 1d506 1d506
+nonprintable 1d50b 1d50c
+nonprintable 1d515 1d515
+nonprintable 1d51d 1d51d
+nonprintable 1d53a 1d53a
+nonprintable 1d53f 1d53f
+nonprintable 1d545 1d545
+nonprintable 1d547 1d549
+nonprintable 1d551 1d551
+nonprintable 1d6a6 1d6a7
+nonprintable 1d7cc 1d7cd
+nonprintable 1da8c 1da9a
+nonprintable 1daa0 1daa0
+nonprintable 1dab0 1dfff
+nonprintable 1e007 1e007
+nonprintable 1e019 1e01a
+nonprintable 1e022 1e022
+nonprintable 1e025 1e025
+nonprintable 1e02b 1e0ff
+nonprintable 1e12d 1e12f
+nonprintable 1e13e 1e13f
+nonprintable 1e14a 1e14d
+nonprintable 1e150 1e2bf
+nonprintable 1e2fa 1e2fe
+nonprintable 1e300 1e7ff
+nonprintable 1e8c5 1e8c6
+nonprintable 1e8d7 1e8ff
+nonprintable 1e94c 1e94f
+nonprintable 1e95a 1e95d
+nonprintable 1e960 1ec70
+nonprintable 1ecb5 1ed00
+nonprintable 1ed3e 1edff
+nonprintable 1ee04 1ee04
+nonprintable 1ee20 1ee20
+nonprintable 1ee23 1ee23
+nonprintable 1ee25 1ee26
+nonprintable 1ee28 1ee28
+nonprintable 1ee33 1ee33
+nonprintable 1ee38 1ee38
+nonprintable 1ee3a 1ee3a
+nonprintable 1ee3c 1ee41
+nonprintable 1ee43 1ee46
+nonprintable 1ee48 1ee48
+nonprintable 1ee4a 1ee4a
+nonprintable 1ee4c 1ee4c
+nonprintable 1ee50 1ee50
+nonprintable 1ee53 1ee53
+nonprintable 1ee55 1ee56
+nonprintable 1ee58 1ee58
+nonprintable 1ee5a 1ee5a
+nonprintable 1ee5c 1ee5c
+nonprintable 1ee5e 1ee5e
+nonprintable 1ee60 1ee60
+nonprintable 1ee63 1ee63
+nonprintable 1ee65 1ee66
+nonprintable 1ee6b 1ee6b
+nonprintable 1ee73 1ee73
+nonprintable 1ee78 1ee78
+nonprintable 1ee7d 1ee7d
+nonprintable 1ee7f 1ee7f
+nonprintable 1ee8a 1ee8a
+nonprintable 1ee9c 1eea0
+nonprintable 1eea4 1eea4
+nonprintable 1eeaa 1eeaa
+nonprintable 1eebc 1eeef
+nonprintable 1eef2 1efff
+nonprintable 1f02c 1f02f
+nonprintable 1f094 1f09f
+nonprintable 1f0af 1f0b0
+nonprintable 1f0c0 1f0c0
+nonprintable 1f0d0 1f0d0
+nonprintable 1f0f6 1f0ff
+nonprintable 1f1ae 1f1e5
+nonprintable 1f203 1f20f
+nonprintable 1f23c 1f23f
+nonprintable 1f249 1f24f
+nonprintable 1f252 1f25f
+nonprintable 1f266 1f2ff
+nonprintable 1f6d8 1f6df
+nonprintable 1f6ed 1f6ef
+nonprintable 1f6fd 1f6ff
+nonprintable 1f774 1f77f
+nonprintable 1f7d9 1f7df
+nonprintable 1f7ec 1f7ff
+nonprintable 1f80c 1f80f
+nonprintable 1f848 1f84f
+nonprintable 1f85a 1f85f
+nonprintable 1f888 1f88f
+nonprintable 1f8ae 1f8af
+nonprintable 1f8b2 1f8ff
+nonprintable 1f979 1f979
+nonprintable 1f9cc 1f9cc
+nonprintable 1fa54 1fa5f
+nonprintable 1fa6e 1fa6f
+nonprintable 1fa75 1fa77
+nonprintable 1fa7b 1fa7f
+nonprintable 1fa87 1fa8f
+nonprintable 1faa9 1faaf
+nonprintable 1fab7 1fabf
+nonprintable 1fac3 1facf
+nonprintable 1fad7 1faff
+nonprintable 1fb93 1fb93
+nonprintable 1fbcb 1fbef
+nonprintable 1fbfa 1ffff
+nonprintable 2a6de 2a6ff
+nonprintable 2b735 2b73f
+nonprintable 2b81e 2b81f
+nonprintable 2cea2 2ceaf
+nonprintable 2ebe1 2f7ff
+nonprintable 2fa1e 2ffff
+nonprintable 3134b e00ff
+nonprintable e01f0 10ffff
+combining 300 314 230
+combining 315 315 232
+combining 316 319 220
+combining 31a 31a 232
+combining 31b 31b 216
+combining 31c 320 220
+combining 321 322 202
+combining 323 326 220
+combining 327 328 202
+combining 329 333 220
+combining 334 338 1
+combining 339 33c 220
+combining 33d 344 230
+combining 345 345 240
+combining 346 346 230
+combining 347 349 220
+combining 34a 34c 230
+combining 34d 34e 220
+combining 350 352 230
+combining 353 356 220
+combining 357 357 230
+combining 358 358 232
+combining 359 35a 220
+combining 35b 35b 230
+combining 35c 35c 233
+combining 35d 35e 234
+combining 35f 35f 233
+combining 360 361 234
+combining 362 362 233
+combining 363 36f 230
+combining 483 487 230
+combining 591 591 220
+combining 592 595 230
+combining 596 596 220
+combining 597 599 230
+combining 59a 59a 222
+combining 59b 59b 220
+combining 59c 5a1 230
+combining 5a2 5a7 220
+combining 5a8 5a9 230
+combining 5aa 5aa 220
+combining 5ab 5ac 230
+combining 5ad 5ad 222
+combining 5ae 5ae 228
+combining 5af 5af 230
+combining 5b0 5b0 10
+combining 5b1 5b1 11
+combining 5b2 5b2 12
+combining 5b3 5b3 13
+combining 5b4 5b4 14
+combining 5b5 5b5 15
+combining 5b6 5b6 16
+combining 5b7 5b7 17
+combining 5b8 5b8 18
+combining 5b9 5ba 19
+combining 5bb 5bb 20
+combining 5bc 5bc 21
+combining 5bd 5bd 22
+combining 5bf 5bf 23
+combining 5c1 5c1 24
+combining 5c2 5c2 25
+combining 5c4 5c4 230
+combining 5c5 5c5 220
+combining 5c7 5c7 18
+combining 610 617 230
+combining 618 618 30
+combining 619 619 31
+combining 61a 61a 32
+combining 64b 64b 27
+combining 64c 64c 28
+combining 64d 64d 29
+combining 64e 64e 30
+combining 64f 64f 31
+combining 650 650 32
+combining 651 651 33
+combining 652 652 34
+combining 653 654 230
+combining 655 656 220
+combining 657 65b 230
+combining 65c 65c 220
+combining 65d 65e 230
+combining 65f 65f 220
+combining 670 670 35
+combining 6d6 6dc 230
+combining 6df 6e2 230
+combining 6e3 6e3 220
+combining 6e4 6e4 230
+combining 6e7 6e8 230
+combining 6ea 6ea 220
+combining 6eb 6ec 230
+combining 6ed 6ed 220
+combining 711 711 36
+combining 730 730 230
+combining 731 731 220
+combining 732 733 230
+combining 734 734 220
+combining 735 736 230
+combining 737 739 220
+combining 73a 73a 230
+combining 73b 73c 220
+combining 73d 73d 230
+combining 73e 73e 220
+combining 73f 741 230
+combining 742 742 220
+combining 743 743 230
+combining 744 744 220
+combining 745 745 230
+combining 746 746 220
+combining 747 747 230
+combining 748 748 220
+combining 749 74a 230
+combining 7eb 7f1 230
+combining 7f2 7f2 220
+combining 7f3 7f3 230
+combining 7fd 7fd 220
+combining 816 819 230
+combining 81b 823 230
+combining 825 827 230
+combining 829 82d 230
+combining 859 85b 220
+combining 8d3 8d3 220
+combining 8d4 8e1 230
+combining 8e3 8e3 220
+combining 8e4 8e5 230
+combining 8e6 8e6 220
+combining 8e7 8e8 230
+combining 8e9 8e9 220
+combining 8ea 8ec 230
+combining 8ed 8ef 220
+combining 8f0 8f0 27
+combining 8f1 8f1 28
+combining 8f2 8f2 29
+combining 8f3 8f5 230
+combining 8f6 8f6 220
+combining 8f7 8f8 230
+combining 8f9 8fa 220
+combining 8fb 8ff 230
+combining 93c 93c 7
+combining 94d 94d 9
+combining 951 951 230
+combining 952 952 220
+combining 953 954 230
+combining 9bc 9bc 7
+combining 9cd 9cd 9
+combining 9fe 9fe 230
+combining a3c a3c 7
+combining a4d a4d 9
+combining abc abc 7
+combining acd acd 9
+combining b3c b3c 7
+combining b4d b4d 9
+combining bcd bcd 9
+combining c4d c4d 9
+combining c55 c55 84
+combining c56 c56 91
+combining cbc cbc 7
+combining ccd ccd 9
+combining d3b d3c 9
+combining d4d d4d 9
+combining dca dca 9
+combining e38 e39 103
+combining e3a e3a 9
+combining e48 e4b 107
+combining eb8 eb9 118
+combining eba eba 9
+combining ec8 ecb 122
+combining f18 f19 220
+combining f35 f35 220
+combining f37 f37 220
+combining f39 f39 216
+combining f71 f71 129
+combining f72 f72 130
+combining f74 f74 132
+combining f7a f7d 130
+combining f80 f80 130
+combining f82 f83 230
+combining f84 f84 9
+combining f86 f87 230
+combining fc6 fc6 220
+combining 1037 1037 7
+combining 1039 103a 9
+combining 108d 108d 220
+combining 135d 135f 230
+combining 1714 1714 9
+combining 1734 1734 9
+combining 17d2 17d2 9
+combining 17dd 17dd 230
+combining 18a9 18a9 228
+combining 1939 1939 222
+combining 193a 193a 230
+combining 193b 193b 220
+combining 1a17 1a17 230
+combining 1a18 1a18 220
+combining 1a60 1a60 9
+combining 1a75 1a7c 230
+combining 1a7f 1a7f 220
+combining 1ab0 1ab4 230
+combining 1ab5 1aba 220
+combining 1abb 1abc 230
+combining 1abd 1abd 220
+combining 1abf 1ac0 220
+combining 1b34 1b34 7
+combining 1b44 1b44 9
+combining 1b6b 1b6b 230
+combining 1b6c 1b6c 220
+combining 1b6d 1b73 230
+combining 1baa 1bab 9
+combining 1be6 1be6 7
+combining 1bf2 1bf3 9
+combining 1c37 1c37 7
+combining 1cd0 1cd2 230
+combining 1cd4 1cd4 1
+combining 1cd5 1cd9 220
+combining 1cda 1cdb 230
+combining 1cdc 1cdf 220
+combining 1ce0 1ce0 230
+combining 1ce2 1ce8 1
+combining 1ced 1ced 220
+combining 1cf4 1cf4 230
+combining 1cf8 1cf9 230
+combining 1dc0 1dc1 230
+combining 1dc2 1dc2 220
+combining 1dc3 1dc9 230
+combining 1dca 1dca 220
+combining 1dcb 1dcc 230
+combining 1dcd 1dcd 234
+combining 1dce 1dce 214
+combining 1dcf 1dcf 220
+combining 1dd0 1dd0 202
+combining 1dd1 1df5 230
+combining 1df6 1df6 232
+combining 1df7 1df8 228
+combining 1df9 1df9 220
+combining 1dfb 1dfb 230
+combining 1dfc 1dfc 233
+combining 1dfd 1dfd 220
+combining 1dfe 1dfe 230
+combining 1dff 1dff 220
+combining 20d0 20d1 230
+combining 20d2 20d3 1
+combining 20d4 20d7 230
+combining 20d8 20da 1
+combining 20db 20dc 230
+combining 20e1 20e1 230
+combining 20e5 20e6 1
+combining 20e7 20e7 230
+combining 20e8 20e8 220
+combining 20e9 20e9 230
+combining 20ea 20eb 1
+combining 20ec 20ef 220
+combining 20f0 20f0 230
+combining 2cef 2cf1 230
+combining 2d7f 2d7f 9
+combining 2de0 2dff 230
+combining 302a 302a 218
+combining 302b 302b 228
+combining 302c 302c 232
+combining 302d 302d 222
+combining 302e 302f 224
+combining 3099 309a 8
+combining a66f a66f 230
+combining a674 a67d 230
+combining a69e a69f 230
+combining a6f0 a6f1 230
+combining a806 a806 9
+combining a82c a82c 9
+combining a8c4 a8c4 9
+combining a8e0 a8f1 230
+combining a92b a92d 220
+combining a953 a953 9
+combining a9b3 a9b3 7
+combining a9c0 a9c0 9
+combining aab0 aab0 230
+combining aab2 aab3 230
+combining aab4 aab4 220
+combining aab7 aab8 230
+combining aabe aabf 230
+combining aac1 aac1 230
+combining aaf6 aaf6 9
+combining abed abed 9
+combining fb1e fb1e 26
+combining fe20 fe26 230
+combining fe27 fe2d 220
+combining fe2e fe2f 230
+combining 101fd 101fd 220
+combining 102e0 102e0 220
+combining 10376 1037a 230
+combining 10a0d 10a0d 220
+combining 10a0f 10a0f 230
+combining 10a38 10a38 230
+combining 10a39 10a39 1
+combining 10a3a 10a3a 220
+combining 10a3f 10a3f 9
+combining 10ae5 10ae5 230
+combining 10ae6 10ae6 220
+combining 10d24 10d27 230
+combining 10eab 10eac 230
+combining 10f46 10f47 220
+combining 10f48 10f4a 230
+combining 10f4b 10f4b 220
+combining 10f4c 10f4c 230
+combining 10f4d 10f50 220
+combining 11046 11046 9
+combining 1107f 1107f 9
+combining 110b9 110b9 9
+combining 110ba 110ba 7
+combining 11100 11102 230
+combining 11133 11134 9
+combining 11173 11173 7
+combining 111c0 111c0 9
+combining 111ca 111ca 7
+combining 11235 11235 9
+combining 11236 11236 7
+combining 112e9 112e9 7
+combining 112ea 112ea 9
+combining 1133b 1133c 7
+combining 1134d 1134d 9
+combining 11366 1136c 230
+combining 11370 11374 230
+combining 11442 11442 9
+combining 11446 11446 7
+combining 1145e 1145e 230
+combining 114c2 114c2 9
+combining 114c3 114c3 7
+combining 115bf 115bf 9
+combining 115c0 115c0 7
+combining 1163f 1163f 9
+combining 116b6 116b6 9
+combining 116b7 116b7 7
+combining 1172b 1172b 9
+combining 11839 11839 9
+combining 1183a 1183a 7
+combining 1193d 1193e 9
+combining 11943 11943 7
+combining 119e0 119e0 9
+combining 11a34 11a34 9
+combining 11a47 11a47 9
+combining 11a99 11a99 9
+combining 11c3f 11c3f 9
+combining 11d42 11d42 7
+combining 11d44 11d45 9
+combining 11d97 11d97 9
+combining 16af0 16af4 1
+combining 16b30 16b36 230
+combining 16ff0 16ff1 6
+combining 1bc9e 1bc9e 1
+combining 1d165 1d166 216
+combining 1d167 1d169 1
+combining 1d16d 1d16d 226
+combining 1d16e 1d172 216
+combining 1d17b 1d182 220
+combining 1d185 1d189 230
+combining 1d18a 1d18b 220
+combining 1d1aa 1d1ad 230
+combining 1d242 1d244 230
+combining 1e000 1e006 230
+combining 1e008 1e018 230
+combining 1e01b 1e021 230
+combining 1e023 1e024 230
+combining 1e026 1e02a 230
+combining 1e130 1e136 230
+combining 1e2ec 1e2ef 230
+combining 1e8d0 1e8d6 220
+combining 1e944 1e949 230
+combining 1e94a 1e94a 7
+nfc_changes 340 341
+nfc_changes 343 344
+nfc_changes 374 374
+nfc_changes 37e 37e
+nfc_changes 387 387
+nfc_changes 958 95f
+nfc_changes 9dc 9dd
+nfc_changes 9df 9df
+nfc_changes a33 a33
+nfc_changes a36 a36
+nfc_changes a59 a5b
+nfc_changes a5e a5e
+nfc_changes b5c b5d
+nfc_changes f43 f43
+nfc_changes f4d f4d
+nfc_changes f52 f52
+nfc_changes f57 f57
+nfc_changes f5c f5c
+nfc_changes f69 f69
+nfc_changes f73 f73
+nfc_changes f75 f76
+nfc_changes f78 f78
+nfc_changes f81 f81
+nfc_changes f93 f93
+nfc_changes f9d f9d
+nfc_changes fa2 fa2
+nfc_changes fa7 fa7
+nfc_changes fac fac
+nfc_changes fb9 fb9
+nfc_changes 1f71 1f71
+nfc_changes 1f73 1f73
+nfc_changes 1f75 1f75
+nfc_changes 1f77 1f77
+nfc_changes 1f79 1f79
+nfc_changes 1f7b 1f7b
+nfc_changes 1f7d 1f7d
+nfc_changes 1fbb 1fbb
+nfc_changes 1fbe 1fbe
+nfc_changes 1fc9 1fc9
+nfc_changes 1fcb 1fcb
+nfc_changes 1fd3 1fd3
+nfc_changes 1fdb 1fdb
+nfc_changes 1fe3 1fe3
+nfc_changes 1feb 1feb
+nfc_changes 1fee 1fef
+nfc_changes 1ff9 1ff9
+nfc_changes 1ffb 1ffb
+nfc_changes 1ffd 1ffd
+nfc_changes 2000 2001
+nfc_changes 2126 2126
+nfc_changes 212a 212b
+nfc_changes 2329 232a
+nfc_changes 2adc 2adc
+nfc_changes f900 fa0d
+nfc_changes fa10 fa10
+nfc_changes fa12 fa12
+nfc_changes fa15 fa1e
+nfc_changes fa20 fa20
+nfc_changes fa22 fa22
+nfc_changes fa25 fa26
+nfc_changes fa2a fa6d
+nfc_changes fa70 fad9
+nfc_changes fb1d fb1d
+nfc_changes fb1f fb1f
+nfc_changes fb2a fb36
+nfc_changes fb38 fb3c
+nfc_changes fb3e fb3e
+nfc_changes fb40 fb41
+nfc_changes fb43 fb44
+nfc_changes fb46 fb4e
+nfc_changes 1d15e 1d164
+nfc_changes 1d1bb 1d1c0
+nfc_changes 2f800 2fa1d
