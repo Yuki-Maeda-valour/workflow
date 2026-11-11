@@ -1203,6 +1203,765 @@ def make_main2():
         return {"main_flush_cases.json": flush_cases(folder), "main_tty_cases.json": tty_cases(folder), "main_block_cases.json": block_cases(folder)}
 
 
+# ---------------------------------------------------------------- 段階 2a(記述子・設定・一覧・控えの値)
+
+EMPTY = []  # 旧版の `[]`(`--x=--` の値)。
+
+
+def with_env(env, cwd, function):
+    """環境変数と作業場所を一時的に差し替えて `function` を呼ぶ。"""
+    import os
+
+    saved_env, saved_cwd = dict(os.environ), os.getcwd()
+    os.environ.clear()
+    os.environ.update(env)
+    os.chdir(cwd)
+    try:
+        return function()
+    finally:
+        os.environ.clear()
+        os.environ.update(saved_env)
+        os.chdir(saved_cwd)
+
+
+def result_of(function):
+    try:
+        return {"ok": typed(function())}
+    except Exception as error:  # noqa: BLE001
+        return {"error": {"type": type(error).__name__, "msg": str(error)}}
+
+
+def pick(r, pool):
+    return r.choice(pool)
+
+
+def default_env(r):
+    env = {}
+    pools = {
+        "HOME": ["/h", "/h", "/h", "/h/", "/home/u", "//h", "/h/./x//", "~", "", "rel", "/h/..", "/h/\u00e9", "/h/e\u0301", "/h/\udc80", None],
+        "CLAUDE_CONFIG_DIR": [None, None, "/c", "/c/", "", "~/c", "/c/./d", "/c/..", "//c", "rel"],
+        "XDG_CONFIG_HOME": [None, None, "", "/x", "rel", "~/x", "~root/x", "/x/"],
+        "BASH_ENV": [None, None, "", "/b", "rel", "~/b"],
+        "ENV": [None, None, "", "/e", "rel"],
+        "ZDOTDIR": [None, None, "", "/z", "rel", "~root/z"],
+        "GIT_CONFIG_GLOBAL": [None, None, "", "/g", "rel", "~/g"],
+        "GIT_CONFIG_SYSTEM": [None, None, "", "/s", "rel"],
+        "GIT_CONFIG_NOSYSTEM": [None, None, "1", "true", "yes", "0", "", "TRUE"],
+    }
+    for name, pool in pools.items():
+        value = pick(r, pool)
+        if value is not None:
+            env[name] = value
+    return env
+
+
+def specs_cases():
+    import argparse
+    import copy
+    import os
+
+    guard = load_guard()
+    r = rng("specs")
+    out = {"host_path": [], "host_paths": [], "default_specs": [], "bootstrap": []}
+    values = ["/a", "/a/", "//a", "///a", "/a/./b//c", "/a/../b", "..", "/..", "a", "", "~", "~/a", "/\u00e9", "/e\u0301", "/a/\udc80", "/", "/a b/", " /a",
+              None, 1, True, [], {}, 1.5, ["/a"]]
+    for value in values:
+        out["host_path"].append({"value": typed(value), **result_of(lambda: guard.host_path(value, "x"))})
+    envs = [{"HOME": h} for h in ["/h", "/h/", "~", "", "rel", "/h/..", "//h", "/h/e\u0301", "/h/\udc80"]]
+    for config in ["/c", "", "~", "/c/..", "rel", "/c//x/./"]:
+        envs.append({"HOME": "/h", "CLAUDE_CONFIG_DIR": config})
+    envs += [{}, {"CLAUDE_CONFIG_DIR": "/c"}, {"HOME": "/h"}]
+    for env in envs:
+        out["host_paths"].append({"env": {k: cp(v) for k, v in env.items()}, **result_of(lambda: guard.host_paths(dict(env)))})
+    for _ in range(170):
+        env = default_env(r)
+        cwd = pick(r, ["/", "/usr"])
+        case = {"env": {k: cp(v) for k, v in env.items()}, "cwd": cp(cwd)}
+        case.update(with_env({k: v for k, v in env.items()}, cwd, lambda: result_of(guard.default_specs)))
+        out["default_specs"].append(case)
+
+    class Captured(Exception):
+        pass
+
+    def run_bootstrap(args):
+        captured = {}
+
+        def capture(root, specs, inventory=None, blobs=None, expected=None):
+            captured["root"] = str(root)
+            captured["specs"] = copy.deepcopy(specs)
+            raise Captured()
+
+        saved = guard.snapshot
+        guard.snapshot = capture
+        try:
+            namespace = argparse.Namespace(inventory=None, **args)
+            try:
+                guard.bootstrap(namespace)
+            except Captured:
+                return {"ok": {"root": cp(captured["root"]), "output": cp(str(guard.absolute(args["output"]))), "specs": typed(captured["specs"])}}
+            except Exception as error:  # noqa: BLE001
+                return {"error": {"type": type(error).__name__, "msg": str(error)}}
+        finally:
+            guard.snapshot = saved
+
+    path_pool = ["/p", "/p/", "rel", "~/p", "~root/p", "/p/./q", "/p//q", "", "/e\u0301", "/p/\udc80", EMPTY]
+    for index in range(150):
+        env = {"HOME": "/h"} if r.random() < 0.8 else default_env(r)
+        if r.random() < 0.3:
+            env.update({k: v for k, v in default_env(r).items() if k != "HOME"})
+        root = pick(r, ["/r", "/r/", "rel", "/r/..", "/r/./x", "~/r", "/"])
+        output = pick(r, ["/o", "/r", "/r/o", "/r/", "rel/o", "/o/..", "/", "~/o", "/r/..", "/o//x"])
+        def many():
+            return [pick(r, path_pool) for _ in range(r.choice([0, 0, 1, 2, 3]))]
+        managed = [pick(r, ["/m", "/m/", "/etc/claude-code", "rel", "~/m", "//m", "", "/m/..", "/m/./x", "/m/e\u0301", EMPTY, "/m"]) for _ in range(r.choice([0, 0, 1, 2]))]
+        args = {"root": root, "output": output, "setting": many(), "config": many(), "shell": many(), "skills_dir": many(), "settings_dir": many(), "managed_dir": managed}
+        cwd = pick(r, ["/", "/usr"])
+        case = {"env": {k: cp(v) for k, v in env.items()}, "cwd": cp(cwd), "args": {k: typed_arg_list(v) for k, v in args.items()}}
+        case.update(with_env(env, cwd, lambda: run_bootstrap(args)))
+        out["bootstrap"].append(case)
+    return out
+
+
+def typed_arg_list(value):
+    if isinstance(value, list) and value is not EMPTY:
+        return {"t": "list", "v": [typed_arg_list(v) for v in value]}
+    if value is EMPTY:
+        return {"t": "empty"}
+    return {"t": "str", "v": cp(value)}
+
+
+def settings_json_cases():
+    texts = [
+        "{}", '{"env":{}}', '{"env":{"A":"b"}}', '{"env":[]}', '{"env":"x"}', '{"env":{"A":1}}', '{"env":{"HOME":"x"}}', '{"env":{"CLAUDE_CONFIG_DIR":"x"}}',
+        '{"env":{"CLAUDE_CODE_REMOTE_SETTINGS_PATH":"x"}}', '{"env":{"CLAUDE_CODE_MANAGED_SETTINGS_PATH":"x"}}', '{"env":{"CLAUDE_CODE_MOCK_REMOTE_SETTINGS":"1"}}',
+        '{"env":{"A":"b","XDG_CONFIG_HOME":"x"}}', '{"env":{"CLAUDE_CODE_SIMPLE":"x"}}', '{"env":{"CLAUDE_CODE_SAFE_MODE":"x"}}', '{"env":{"CLAUDE_CODE_SHELL_PREFIX":"x"}}',
+        '{"env":{"HOME":1}}', '{"policyHelper":1}', '{"policyHelpers":[]}', '{"disableAllHooks":true}', '{"disableAllHooks":1}', '{"disableAllHooks":"true"}',
+        '{"disableAllHooks":false}', '{"allowManagedHooksOnly":true}', '{"allowManagedHooksOnly":1}', '{"allowManagedHooksOnly":true,"disableAllHooks":false}',
+        '{"env":null}', '{"permissions":{"allow":["Bash(ls)"]}}',
+    ]
+    return texts
+
+
+def settings_cases():
+    import os
+
+    guard = load_guard()
+    r = rng("settings")
+    out = {"check": [], "specs": [], "rules": [], "bash": [], "allowlist": [], "read": []}
+    for text in settings_json_cases():
+        value = json.loads(text)
+        for managed in (False, True):
+            out["check"].append({"value": typed(value), "managed": managed, **result_of(lambda: guard.check_host_setting(value, managed))})
+    # host_settings_specs
+    def entries_of(names, kind="file"):
+        entries = {}
+        for name in names:
+            entries[name] = [kind, 420, "ab"] if kind == "file" else [kind]
+        return entries
+
+    base_specs = {"host_paths": {"user_settings": "/u/s.json", "cache_settings": "/u/r.json"}, "managed_roots": ["/etc/claude-code"]}
+    d = "external:/etc/claude-code/managed-settings.d/"
+    spec_inputs = [
+        (base_specs, {}),
+        (base_specs, {d + "a.json": ["file", 420, "x"], d + "B.json": ["file", 420, "x"], d + "c.JSON": ["file", 420, "x"], d + ".h.json": ["file", 420, "x"],
+                      d + "sub/x.json": ["file", 420, "x"], d + "z.txt": ["file", 420, "x"], d + "d.json": ["directory", 493], d + "e.json": ["missing"]}),
+        ({**base_specs, "managed_roots": ["/etc/claude-code", "/m/x/"]}, {d + "a.json": ["file", 420, "x"], "external:/m/x/managed-settings.d/q.json": ["file", 1, "y"]}),
+        ({**base_specs, "managed_roots": []}, {}),
+        ({**base_specs, "managed_roots": ["rel"]}, {}),
+        ({**base_specs, "managed_roots": [1]}, {}),
+        ({**base_specs, "managed_roots": "x"}, {}),
+        ({"managed_roots": []}, {}),
+        ({"host_paths": {"user_settings": "/u"}, "managed_roots": []}, {}),
+        ({"host_paths": {"user_settings": 1, "cache_settings": "/c"}, "managed_roots": []}, {}),
+        ({"host_paths": [], "managed_roots": []}, {}),
+        (base_specs, {d + "a.json": "file"}),
+        (base_specs, {d + "a.json": 1}),
+        (base_specs, {d + "a.json": {"x": 1}}),
+        (base_specs, {d + "a.json": None}),
+        (base_specs, {d + "a.json": ["file"], d + "b.json": [], d + "c.json": "f"}),
+        ({**base_specs, "managed_roots": ["/etc/claude-code/"]}, {d + "a.json": ["file", 1, "x"]}),
+        ({**base_specs, "managed_roots": ["/e//c/./d"]}, {"external:/e/c/d/managed-settings.d/a.json": ["file", 1, "x"]}),
+    ]
+    def dropins(root, names):
+        return {"external:" + root + "/managed-settings.d/" + name: ["file", 420, "x"] for name in names}
+
+    unsorted_names = ["b.json", "a.json", "B.json", "10.json", "2.json", "\u00e9.json", "\u3042.json", "Z.json", "_x.json", "a b.json"]
+    spec_inputs += [
+        (base_specs, dropins("/etc/claude-code", unsorted_names)),
+        ({**base_specs, "managed_roots": ["/etc/claude-code", "/m/x"]},
+         {**dropins("/m/x", ["q.json", "c.json", "a.json"]), **dropins("/etc/claude-code", unsorted_names[:5]), "external:/etc/other": ["file", 1, "z"],
+          **dropins("/m/x", ["b.json"])}),
+        ({**base_specs, "managed_roots": ["/m/x", "/etc/claude-code", "/m/y"]},
+         {**dropins("/etc/claude-code", ["z.json", "m.json"]), **dropins("/m/y", ["k.json", "d.json"]), **dropins("/m/x", ["f.json", "e.json", "g.json"])}),
+    ]
+    for specs, entries in spec_inputs:
+        out["specs"].append({"specs": typed(specs), "entries": typed(entries), **result_of(lambda: guard.host_settings_specs(specs, entries))})
+    # split_rules / bash_rule
+    pool = ["Bash", "Bash(ls)", "Bash(ls:*)", "Bash(git commit *)", "Bash(ls *)", "Bash(*)", "Bash()", "Bash( )", "Bash(:*)", "Bash( *)", "Bash(a*b)", "Bash(a *b)",
+            "Bash(a  b:*)", " ", ",", "(", ")", "*", ":*", "\u3000", "\u00a0", "\x1c", "a", "Read", "Bash(", "Bash)", "bash", "Bash(ls\u3000-l)", "Bash(\tls\n)", ",,", "(,)", "Bash(a, b)"]
+    texts = list(pool)
+    for _ in range(260):
+        texts.append("".join(r.choice(pool) for _ in range(r.randint(1, 5))))
+    for text in texts:
+        out["rules"].append({"text": cp(text), "rules": [cp(x) for x in guard.split_rules(text)]})
+        got = guard.bash_rule(text)
+        out["bash"].append({"text": cp(text), "result": "skip" if got == "skip" else None if got is None else [got[0], [cp(w) for w in got[1]]]})
+    # host-allowlist(`main` を動かして、出力と終了コードを比べる)
+    def capture_main(argv, settings):
+        import io
+
+        out_stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="surrogateescape", newline="\n")
+        err_stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="backslashreplace", newline="\n")
+        saved = (sys.stdout, sys.stderr, sys.argv, guard.read_host_settings)
+        sys.stdout, sys.stderr, sys.argv = out_stream, err_stream, ["environment-guard.py"] + argv
+        guard.read_host_settings = lambda state, expected: settings
+        code = None
+        try:
+            code = guard.main()
+        except SystemExit as error:
+            code = error.code
+        finally:
+            sys.stdout, sys.stderr, sys.argv, guard.read_host_settings = saved
+        out_stream.flush()
+        err_stream.flush()
+        return {"code": code, "stdout": out_stream.buffer.getvalue().hex(), "stderr": err_stream.buffer.getvalue().hex()}
+
+    allow_pool = ["Bash(ls)", "Bash(ls:*)", "Bash(git *)", "Bash", "Bash(*)", "Read", "Bash( )", "Bash(a*b)", "Bash(ls)", 1, None, "Bash(x\ny)", "Bash(" + "z" * 320 + "*)",
+                  "Bash(a\x00\x1fb*)", "Bash(\u00e9*)", "Bash(\udc80 *)", "Bash(\ud800*)"]
+    values_pool = ["Bash(ls)", "Bash(ls:*),Bash(cat)", "Bash(a b) Bash(c)", "Read", "(Bash(x*))", "Bash(x*)", ",", "Bash", "Bash(a (b) *)", "Bash(a\u3000b)"]
+    for index in range(70):
+        allow = [pick(r, allow_pool) for _ in range(r.choice([0, 1, 2, 4]))]
+        user = {} if r.random() < 0.2 else {"permissions": pick(r, [{"allow": allow}, {"allow": allow}, {"allow": "x"}, {"allow": None}, [], "p", {}])}
+        argv = ["host-allowlist", "--state", "s", "--expect-sha256", "h"]
+        values = []
+        for _ in range(r.choice([0, 1, 2, 3])):
+            kind = r.random()
+            if kind < 0.8:
+                v = pick(r, values_pool)
+                argv += ["--allowed-tools", v]
+                values.append(v)
+            else:
+                argv += ["--allowed-tools=--"]
+                values.append(None)
+        settings = {"user_settings": "/u", "user": user, "cache": None, "managed": [], "checked": 1, "permission_sources": []}
+        try:
+            result = capture_main(argv, settings)
+        except Exception as error:  # noqa: BLE001
+            result = {"python_error": str(error)}
+        out["allowlist"].append({"argv": argv, "user": typed(user), **result})
+    # read_host_settings の後半
+    out["read"] = read_settings_cases(guard, r)
+    out["output"] = host_settings_output_cases(guard)
+    out["host_paths_main"] = host_paths_main_cases(guard)
+    return out
+
+
+def capture_guard_main(guard, argv, settings=None):
+    """`guard.main()` を `argv` で動かし、標準出力・標準エラー(16 進)と終了コードを返す。`settings` があれば
+    `read_host_settings` をその値で置き換える。"""
+    import io
+
+    out_stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="surrogateescape", newline="\n")
+    err_stream = io.TextIOWrapper(io.BytesIO(), encoding="utf-8", errors="backslashreplace", newline="\n")
+    saved = (sys.stdout, sys.stderr, sys.argv, guard.read_host_settings)
+    sys.stdout, sys.stderr, sys.argv = out_stream, err_stream, ["environment-guard.py"] + argv
+    if settings is not None:
+        guard.read_host_settings = lambda state, expected: settings
+    code = None
+    try:
+        code = guard.main()
+    except SystemExit as error:
+        code = error.code
+    finally:
+        sys.stdout, sys.stderr, sys.argv, guard.read_host_settings = saved
+    out_stream.flush()
+    err_stream.flush()
+    return {"code": code, "stdout": out_stream.buffer.getvalue().hex(), "stderr": err_stream.buffer.getvalue().hex()}
+
+
+def host_settings_output_cases(guard):
+    cases = []
+    paths = ["/u/settings.json", "/\u00e9/\u65e5\u672c\u8a9e.json", '/a"b\\c', "/\udc80", "/\x00x", "/\u2028", "", "/\ud83d\ude00", "/a\tb", "relative"]
+    for path in paths:
+        for checked in (0, 1, 5, 10 ** 30):
+            settings = {"user_settings": path, "user": {}, "cache": None, "managed": [], "checked": checked, "permission_sources": []}
+            result = capture_guard_main(guard, ["host-settings", "--state", "s", "--expect-sha256", "h"], settings)
+            cases.append({"user_settings": cp(path), "checked": checked if checked < 10 ** 9 else str(checked), "big": checked >= 10 ** 9, **result})
+    return cases
+
+
+def host_paths_main_cases(guard):
+    cases = []
+    homes = ["/h", "/h/", "~", "", "rel", "/h/..", "//h", "/h/e\u0301", "/h/\udc80", "/h/\u65e5\u672c", '/h/"q', "/h/\x01", "/h/\u2028", None]
+    configs = [None, "/c", "", "~", "/c/..", "rel", "/c//x/./", "/c/\u00e9", "/c/\udcff"]
+    for home in homes:
+        for config in configs:
+            env = {}
+            if home is not None:
+                env["HOME"] = home
+            if config is not None:
+                env["CLAUDE_CONFIG_DIR"] = config
+            result = with_env(env, "/", lambda: capture_guard_main(guard, ["host-paths"]))
+            cases.append({"env": {k: cp(v) for k, v in env.items()}, **result})
+    return cases
+
+
+def read_settings_cases(guard, r):
+    import hashlib
+
+    def sha(raw):
+        return hashlib.sha256(raw).hexdigest()
+
+    cases = []
+
+    def case(desc, entries, fake, extra=None, site=None):
+        value = {"version": 3, "host_settings": desc, "entries": entries}
+        if entries is Ellipsis:
+            del value["entries"]
+        if extra:
+            value.update(extra)
+        record_calls = []
+
+        def verify(state, expected, current_inventory=None):
+            return value
+
+        def record(path, key, budget, local, expected=None, **kw):
+            record_calls.append(path)
+            item = fake.get(path)
+            if item is None:
+                raise FileNotFoundError(2, "No such file or directory", path)
+            if "raise" in item:
+                raise OSError(13, "Permission denied", path)
+            for k, v in item.get("local", {}).items():
+                local[k] = v
+            return bytes.fromhex(item["raw"]) if item.get("raw") is not None else None
+
+        saved = (guard.verify, guard.record)
+        guard.verify, guard.record = verify, record
+        try:
+            if site is None:
+                result = result_of(lambda: guard.read_host_settings("s", "h"))
+            else:
+                result = outcome(call_at(site, guard.read_host_settings, "s", "h"))
+                if result["site"] is None:
+                    return
+        finally:
+            guard.verify, guard.record = saved
+        cases.append({"value": typed(value), "fake": typed(fake), "records": typed(record_calls), **result})
+
+    def raw(text):
+        return text.encode().hex()
+
+    def file_entry(path, text):
+        return {"external:" + path: ["file", 420, sha(text.encode())]}
+
+    u, c, m, d = "/u/settings.json", "/u/remote.json", "/etc/claude-code/managed-settings.json", "/etc/claude-code/managed-settings.d/a.json"
+    entries = {}
+    for path, text in ((u, '{"permissions":{"allow":["Bash(ls)"]}}'), (c, '{}'), (m, '{"x":1}'), (d, '{"env":{"A":"b"}}')):
+        entries.update(file_entry(path, text))
+    fake = {u: {"raw": raw('{"permissions":{"allow":["Bash(ls)"]}}'), "local": file_entry(u, '{"permissions":{"allow":["Bash(ls)"]}}')},
+            c: {"raw": raw("{}"), "local": file_entry(c, "{}")},
+            m: {"raw": raw('{"x":1}'), "local": file_entry(m, '{"x":1}')},
+            d: {"raw": raw('{"env":{"A":"b"}}'), "local": file_entry(d, '{"env":{"A":"b"}}')}}
+    full = [{"path": u, "kind": "user"}, {"path": c, "kind": "cache"}, {"path": m, "kind": "managed"}, {"path": d, "kind": "managed"}]
+    case(full, entries, fake)
+    case(full[:1], entries, fake)
+    case([], entries, fake)
+    case(full[1:], entries, fake)
+    case(full + [{"path": u, "kind": "user"}], entries, fake)
+    case(full + [{"path": c, "kind": "cache"}], entries, fake)
+    case("x", entries, fake)
+    case(None, entries, fake)
+    for bad in [{"path": u}, {"path": u, "kind": "other"}, {"path": 1, "kind": "user"}, {"path": u, "kind": "user", "x": 1}, "s", [], {"path": u, "kind": ["user"]}, {"kind": "user", "path": "/no"}]:
+        case([bad] + full, entries, fake)
+    # 不在・本文違い・link
+    missing_entries = dict(entries)
+    missing_entries["external:" + c] = ["missing"]
+    case(full, missing_entries, {**fake, c: {"raw": None, "local": {"external:" + c: ["missing"]}}})
+    case(full, missing_entries, {**fake, c: {"raw": raw("{}"), "local": file_entry(c, "{}")}})
+    case(full, entries, {**fake, u: {"raw": raw('{"a":2}'), "local": file_entry(u, '{"a":2}')}})
+    case(full, entries, {**fake, u: {"raw": raw('{"permissions":{"allow":["Bash(ls)"]}}'), "local": {**file_entry(u, '{"permissions":{"allow":["Bash(ls)"]}}'), "@file-link:0:external:" + u: ["configuration-link", "t", 1, 2]}}})
+    link_entries = dict(entries)
+    link_entries["@file-link:0:external:" + u] = ["configuration-link", "t", 1, 2, 3, 4, 5]
+    case(full, link_entries, fake)
+    case(full, link_entries, {**fake, u: {**fake[u], "local": {**fake[u]["local"], "@file-link:0:external:" + u: ["configuration-link", "t", 1, 2, 3, 4, 5]}}})
+    case(full, link_entries, {**fake, u: {**fake[u], "local": {**fake[u]["local"], "@file-link:0:external:" + u: ["configuration-link", "t", 1, 2, 3, 4, 6]}}})
+    colon_entries = dict(entries)
+    colon_entries["@file-link:1:external:" + u] = ["configuration-link", "t", 1, 2]
+    case(full, colon_entries, {**fake, u: {**fake[u], "local": {**fake[u]["local"], "@file-link:1:external:" + u: ["configuration-link", "t", 1, 2]}}})
+    case(full, entries, {**fake, d: {"raise": True}})
+    case(full, entries, {k: v for k, v in fake.items() if k != m})
+    # 設定の本文の検査の失敗
+    for text in ["[]", "x", '{"a":1,"a":2}', '{"a":NaN}', '{"env":{"HOME":"x"}}', '{"disableAllHooks":true}', '{"allowManagedHooksOnly":true}', "\ufeff{}", '{"a":' + "[" * 120 + "]" * 120 + "}"]:
+        for kind_index in (0, 2, 3):
+            path = [u, c, m, d][kind_index]
+            e2 = dict(entries)
+            e2.update(file_entry(path, text))
+            f2 = dict(fake)
+            f2[path] = {"raw": raw(text), "local": file_entry(path, text)}
+            case(full, e2, f2)
+    case(full, entries, fake, {"host_settings": full})
+    not_dict_entries = {"version": 3}
+    case(full, "e", fake)
+    case(full, 5, fake)
+    case([], 5, fake)
+    # entries が辞書でないとき: 項目の検査が先、`key not in entries` はその後(旧版の順)
+    for bad_entries in ["e", 5, None, [], ["x"], {}, 1.5, True, "external:" + u, ["external:" + u], ["external:" + u, "@file-link:0:external:" + u], [1, "external:" + u]]:
+        case(full, bad_entries, fake)
+        case([{"path": u}] + full, bad_entries, fake)
+        case([{"path": u, "kind": "user"}], bad_entries, fake)
+        case([], bad_entries, fake)
+    case(full, Ellipsis, fake)
+    case([], Ellipsis, fake)
+    case(None, Ellipsis, fake)
+    # 呼び出し側の深さの境界(`dump` のフレーム 1 段を含む)
+    missing_user = {"external:" + u: ["missing"]}
+    missing_fake = {u: {"raw": None, "local": {"external:" + u: ["missing"]}}}
+    for site in range(988, 1000):
+        case(full[:1], entries, fake, site=site)
+        # ファイルが無いときは本文の解析に進まないので、`dump` の境界まで届く。
+        case(full[:1], missing_user, missing_fake, site=site)
+        case([{"path": u, "kind": "cache"}, {"path": "/u/x", "kind": "user"}], {**missing_user, "external:/u/x": ["missing"]}, {**missing_fake, "/u/x": {"raw": None, "local": {"external:/u/x": ["missing"]}}}, site=site)
+    return cases
+
+
+def inventory_cases():
+    import copy
+    import hashlib
+
+    guard = load_guard()
+    r = rng("inventory")
+    cases = []
+    config = "/h/.claude"
+
+    def blob(value):
+        return json.dumps(value).encode()
+
+    def make(inventory, components, blobs, trees, host_paths=None, label="", specs=None):
+        if specs is None:
+            specs = {"components": components, "host_paths": {"config": config} if host_paths is None else host_paths}
+        specs_for_case = copy.deepcopy(specs)
+
+        def fake_tree(path, kind, budget, entries, expected=None, blobs=None):
+            item = trees.get(path)
+            if item is None:
+                return "component:" + kind + ":" + path
+            if item.get("blob") is not None:
+                blobs[item["key"]] = bytes.fromhex(item["blob"])
+            return item["key"]
+
+        saved = guard.component_tree
+        guard.component_tree = fake_tree
+        stored = {k: v for k, v in blobs.items()}
+        try:
+            result = with_env({"HOME": "/h"}, "/", lambda: result_of(lambda: (guard._component_inventory(specs, inventory, None, {}, stored), specs)[1]))
+        finally:
+            guard.component_tree = saved
+        cases.append({"label": label, "inventory": typed(inventory), "specs": typed(specs_for_case),
+                      "blobs": {k: v.hex() for k, v in blobs.items()}, "trees": typed(trees), **result})
+
+    skills = [{"kind": "personal-skill", "path": "/h/.claude/skills"}, {"kind": "enterprise-skill", "path": "/etc/s"}, {"kind": "plugin", "path": "/d", "source": "workflow"}]
+    known = {"m": {"installLocation": "/mk"}}
+    manifest_path = "/mk/.claude-plugin/marketplace.json"
+    manifest = {"plugins": [{"name": "p", "source": "./plug"}, {"name": "q", "source": "./q"}]}
+    installed = {"plugins": {"p@m": [{"installPath": "/ins/p", "scope": "user"}]}}
+    full_blobs = {"external:" + config + "/plugins/known_marketplaces.json": blob(known), "external:" + config + "/plugins/installed_plugins.json": blob(installed)}
+    trees = {manifest_path: {"key": "component:marketplace-manifest:" + manifest_path, "blob": blob(manifest).hex()}}
+    item = {"id": "p@m", "installPath": "/ins/p", "scope": "user"}
+    make([], skills, {}, {}, label="empty")
+    make([item], skills, full_blobs, trees, label="full")
+    make([item, item], skills, full_blobs, trees, label="twice")
+    make([{**item, "scope": "synced"}], skills, full_blobs, trees, label="synced")
+    make([{"id": "p", "installPath": "/ins/p"}], skills, {}, {}, label="no-marketplace")
+    make([{"id": "p@m", "installPath": "/ins/p"}], skills, full_blobs, trees, label="no-scope")
+    make([{**item, "scope": "project"}], skills, full_blobs, trees, label="scope-mismatch")
+    make([{**item, "installPath": "/other"}], skills, full_blobs, trees, label="path-mismatch")
+    make([{"id": "", "installPath": "/ins/p"}], skills, {}, {}, label="empty-id")
+    make([{"installPath": "/ins/p"}], skills, {}, {}, label="no-id")
+    make([{"id": 1, "installPath": "/ins/p"}], skills, {}, {}, label="int-id")
+    make([item], skills, full_blobs, trees, host_paths={}, label="no-config")
+    make([item], skills, full_blobs, trees, host_paths={"config": ""}, label="empty-config")
+    make([item], skills, full_blobs, trees, host_paths={"config": 5}, label="int-config")
+    make([item], skills, full_blobs, trees, host_paths=[], label="list-host-paths")
+    make([item], skills, {k: v for k, v in full_blobs.items() if "known" not in k}, trees, label="no-registry")
+    make([item], skills, {k: v for k, v in full_blobs.items() if "installed" not in k}, trees, label="no-installed")
+    make([item], skills, full_blobs, {}, label="no-manifest")
+    make([item], skills, full_blobs, {manifest_path: {"key": "k", "blob": None}}, label="manifest-key-without-blob")
+    for name, value in [("not-dict", {"m": 1}), ("no-location", {"m": {}}), ("rel-location", {"m": {"installLocation": "rel"}}), ("int-location", {"m": {"installLocation": 1}}), ("other-market", {"x": {"installLocation": "/mk"}})]:
+        make([item], skills, {**full_blobs, "external:" + config + "/plugins/known_marketplaces.json": blob(value)}, trees, label=name)
+    for name, value in [("no-plugins", {}), ("plugins-dict", {"plugins": {}}), ("zero-match", {"plugins": [{"name": "z"}]}), ("two-match", {"plugins": [{"name": "p", "source": "./a"}, {"name": "p", "source": "./b"}]}),
+                        ("non-dict-entry", {"plugins": [1, {"name": "p", "source": "./a"}]}), ("source-abs", {"plugins": [{"name": "p", "source": "/abs"}]}), ("source-dotdot", {"plugins": [{"name": "p", "source": "./a/../b"}]}),
+                        ("source-int", {"plugins": [{"name": "p", "source": 1}]}), ("source-none", {"plugins": [{"name": "p"}]}), ("source-dotslash-only", {"plugins": [{"name": "p", "source": "./"}]}),
+                        ("source-dots", {"plugins": [{"name": "p", "source": "./.../x"}]})]:
+        make([item], skills, full_blobs, {manifest_path: {"key": "component:marketplace-manifest:" + manifest_path, "blob": blob(value).hex()}}, label=name)
+    for name, value in [("not-dict", []), ("no-plugin", {"plugins": {}}), ("plugins-list", {"plugins": []}), ("two", {"plugins": {"p@m": [{"installPath": "/ins/p", "scope": "user"}, {"installPath": "/ins/p", "scope": "user"}]}}),
+                        ("not-list", {"plugins": {"p@m": {}}}), ("non-dict-candidate", {"plugins": {"p@m": [1]}}), ("wrong-path", {"plugins": {"p@m": [{"installPath": "/x", "scope": "user"}]}})]:
+        make([item], skills, {**full_blobs, "external:" + config + "/plugins/installed_plugins.json": blob(value)}, trees, label="installed-" + name)
+    # skills-dir
+    skills_manifest = "component:personal-skill:/h/.claude/skills/foo/.claude-plugin/plugin.json"
+    sd = {"id": "foo@skills-dir", "installPath": "/h/.claude/skills/foo"}
+    make([sd], skills, {skills_manifest: blob({"name": "foo"})}, {}, label="skills-dir")
+    make([sd], skills, {skills_manifest: blob({"name": "bar"})}, {}, label="skills-dir-name-mismatch")
+    make([sd], skills, {}, {}, label="skills-dir-no-manifest")
+    make([sd], skills[1:], {skills_manifest: blob({"name": "foo"})}, {}, label="skills-dir-no-candidate")
+    make([{"id": "@skills-dir", "installPath": "/h/.claude/skills/foo"}], skills, {}, {}, label="skills-dir-empty-name")
+    make([{"id": "a@b@skills-dir", "installPath": "/h/.claude/skills/foo"}], skills, {}, {}, label="skills-dir-at")
+    make([{**sd, "installPath": "/h/.claude/skills/./foo"}], skills, {skills_manifest: blob({"name": "foo"})}, {}, label="skills-dir-unnormalized")
+    make([sd], skills + [{"kind": "enterprise-skill", "path": "/h/.claude/skills"}], {skills_manifest: blob({"name": "foo"})}, {}, label="skills-dir-two-candidates")
+    make([sd], skills, {skills_manifest: b"{bad"}, {}, label="skills-dir-bad-json")
+    make([sd], skills, {skills_manifest: blob([])}, {}, label="skills-dir-list-manifest")
+    # add の衝突
+    dup = [{"kind": "plugin", "path": "/ins/p", "plugin": "other@m", "source": "x"}] + skills
+    make([{**item, "scope": "synced"}], dup, {}, {}, label="add-conflict-plugin")
+    dup2 = [{"kind": "plugin", "path": "/ins/p", "plugin": "p@m", "source": "x"}] + skills
+    make([{**item, "scope": "synced"}], dup2, {}, {}, label="add-same-plugin")
+    dup3 = [{"kind": "plugin", "path": "/ins/p", "entry": [1]}] + skills
+    make([{**item, "scope": "synced"}], dup3, {}, {}, label="add-conflict-entry")
+    dup4 = [{"kind": "marketplace-manifest", "path": manifest_path, "source": "/mk", "entry": [{"plugin": "z@m", "entry": {}}]}] + skills
+    make([item], dup4, full_blobs, trees, label="manifest-existing-new-selection")
+    dup5 = [{"kind": "marketplace-manifest", "path": manifest_path, "source": "/mk", "entry": [{"plugin": "p@m", "entry": manifest["plugins"][0]}]}] + skills
+    make([item], dup5, full_blobs, trees, label="manifest-existing-same-selection")
+    # 壊れた控え(SHA-256 は合うが形が違う)での、評価の順と例外
+    synced = {**item, "scope": "synced"}
+    hp = {"config": config}
+    make([], None, {}, {}, specs={"host_paths": hp}, label="no-components-empty-inventory")
+    make([synced], None, {}, {}, specs={"host_paths": hp}, label="no-components-add")
+    make([sd], None, {}, {}, specs={"host_paths": hp}, label="no-components-skills-dir")
+    make([synced], None, {}, {}, specs={"host_paths": []}, label="host-paths-list-before-components")
+    make([synced], None, {}, {}, specs={"host_paths": None}, label="host-paths-none-before-components")
+    make([], None, {}, {}, specs={"host_paths": []}, label="host-paths-list-empty-inventory")
+    for name, value in [("none", None), ("dict", {"a": 1}), ("str", "ab"), ("int", 5), ("empty-dict", {})]:
+        make([synced], None, {}, {}, specs={"components": value, "host_paths": hp}, label="components-" + name)
+        make([sd], None, {}, {}, specs={"components": value, "host_paths": hp}, label="components-skills-" + name)
+    for name, olds in [("old-no-path", [{"kind": "other"}]), ("old-kind-only-plugin", [{"kind": "plugin"}]), ("old-no-kind", [{"path": "/x"}]), ("old-int", [1]),
+                       ("old-str", ["abc"]), ("old-list", [[]]), ("old-none", [None]), ("old-match-then-bad", [{"kind": "plugin", "path": "/ins/p", "plugin": "p@m", "entry": None}, 1]),
+                       ("old-bad-after-other", [{"kind": "x", "path": "/y"}, 1])]:
+        make([synced], None, {}, {}, specs={"components": olds, "host_paths": hp}, label="add-" + name)
+        make([sd], None, {}, {}, specs={"components": olds, "host_paths": hp}, label="skills-" + name)
+    for name, entry in [("missing", "MISSING"), ("none", None), ("dict", {}), ("str", "x"), ("int", 5), ("list", []), ("float", 1.5), ("bool", True)]:
+        existing = {"kind": "marketplace-manifest", "path": manifest_path, "source": "/mk"}
+        if entry != "MISSING":
+            existing["entry"] = entry
+        make([item], None, full_blobs, trees, specs={"components": [existing] + skills, "host_paths": hp}, label="manifest-entry-" + name)
+    make([item], None, full_blobs, trees, specs={"components": [{"kind": "marketplace-manifest", "path": manifest_path}, 1] + skills, "host_paths": hp}, label="manifest-then-bad")
+    make([{"id": "p@m"}], skills, {}, {}, label="no-install-path")
+    make([1], skills, {}, {}, label="item-int")
+    make(["x"], skills, {}, {}, label="item-str")
+    make([{**item, "scope": None}], skills, full_blobs, trees, label="scope-none")
+    make([{**item, "scope": ""}], skills, full_blobs, trees, label="scope-empty")
+    make([{**item, "scope": 0}], skills, full_blobs, trees, label="scope-zero")
+    return cases
+
+
+def state_cases():
+    import hashlib
+    import os
+
+    guard = load_guard()
+    r = rng("state")
+    out = {"load": [], "digest": [], "bootstrap": []}
+
+    def sha(raw):
+        return hashlib.sha256(raw).hexdigest()
+
+    def load(expected, raw, label=""):
+        def read(path):
+            if raw is None:
+                raise FileNotFoundError(2, "No such file or directory", "s")
+            return raw
+
+        saved = guard.read_regular
+        guard.read_regular = read
+        try:
+            result = result_of(lambda: guard.load_verified("s", expected))
+        finally:
+            guard.read_regular = saved
+        out["load"].append({"label": label, "expected": typed(expected), "raw": raw.hex() if raw is not None else None, **result})
+
+    good = json.dumps({"version": 3, "a": [1, 2.5, "x"]}).encode()
+    load(sha(good), good, "good")
+    load(sha(good).upper(), good, "upper")
+    load(sha(good)[:-1], good, "short")
+    load(sha(good) + "0", good, "long")
+    load("", good, "empty")
+    load(None, good, "none")
+    load("g" * 64, good, "bad-hex")
+    load(sha(good), None, "missing-file")
+    load("0" * 64, good, "mismatch")
+    load(sha(good) + "\n", good, "newline")
+    for label, body in [("version-float", b'{"version":3.0}'), ("version-true", b'{"version":true}'), ("version-str", b'{"version":"3"}'), ("version-2", b'{"version":2}'),
+                        ("no-version", b"{}"), ("list", b"[3]"), ("bad-json", b"{"), ("nan", b'{"version":3,"x":NaN}'), ("dup", b'{"version":3,"version":2}'), ("bom", b'\xef\xbb\xbf{"version":3}'),
+                        ("utf16", '{"version":3}'.encode("utf-16")), ("big-int", b'{"version":3,"x":' + b"9" * 5000 + b"}"), ("empty-body", b""), ("bad-utf8", b'{"version":3,"x":"\xff"}')]:
+        load(sha(body), body, label)
+
+    def comp(kind, path, **extra):
+        return {"kind": kind, "path": path, **extra}
+
+    def base():
+        return {
+            "version": 3,
+            "specs": {"components": [comp("personal-skill", "/c/skills"), comp("plugin", "/dist/plugin", source="workflow"), comp("plugin", "/ins/p", plugin="p@m", source="user"),
+                                     comp("marketplace-manifest", "/m/.claude-plugin/marketplace.json", source="/m", entry=[{"plugin": "p@m", "entry": {"name": "p"}}])]},
+            "inventory": [{"id": "p@m", "installPath": "/ins/p", "scope": "user", "version": "1", "extra": 1}],
+            "entries": {
+                "component:plugin:/dist/plugin": ["directory", 493],
+                "component:plugin:/dist/plugin/a.txt": ["file", 420, "abc"],
+                "@stat:component:plugin:/dist/plugin": ["directory-stat", 1, 2, 3],
+                "@names:component:plugin:/dist/plugin": ["a.txt"],
+                "@link:component:plugin:/dist/plugin/l": ["installation-link", "t", 1, 2, 3],
+                "@link:component:personal-skill:/c/skills/x": ["installation-link", "t", 1, 2, 3],
+                "@route:component:personal-skill:/c/skills:/x": ["link-step", "a", 1, 2, 3, 4],
+                "@route:component:personal-skill:/c/skills:/y": ["route", "a", 1, 2],
+                "@route:component:plugin:/dist/plugin:/q": ["link-step", 1, 2, 3, 4],
+                "@route:component:plugin:/dist/plugin/z": ["link-step", 1, 2, 3, 4],
+                "@route:component:plugin:/ins/p:/w": ["route", 1, 2, 3],
+                "@route:component:other:/x": ["route", 1, 2, 3],
+                "@names:component:personal-skill:/c/skills": ["x", "y"],
+                "component:personal-skill:/c/skills": ["directory", 493],
+                "external:/etc/x": ["file", 420, "zz"],
+                "plugin": ["directory", 493],
+                "@origin:component:plugin:/dist/plugin": ["origin"],
+            },
+        }
+
+    def digest(value, label):
+        def load_fake(state, expected):
+            return value
+
+        saved = guard.load_verified
+        guard.load_verified = load_fake
+        try:
+            result = result_of(lambda: guard.component_policy_digest("s", "h"))
+            descriptors = result_of(lambda: guard._component_descriptors(value))
+        finally:
+            guard.load_verified = saved
+        out["digest"].append({"label": label, "value": typed(value), "digest": result, "descriptors": descriptors})
+
+    digest(base(), "base")
+    for label, mutate in [
+        ("no-specs", lambda v: v.pop("specs")), ("specs-list", lambda v: v.update(specs=[])), ("specs-none", lambda v: v.update(specs=None)),
+        ("specs-empty", lambda v: v.update(specs={})), ("components-none", lambda v: v["specs"].update(components=None)), ("components-empty", lambda v: v["specs"].update(components=[])),
+        ("components-dict", lambda v: v["specs"].update(components={"a": 1})), ("item-not-dict", lambda v: v["specs"]["components"].append(1)),
+        ("kind-unknown", lambda v: v["specs"]["components"].append(comp("x", "/p"))), ("kind-list", lambda v: v["specs"]["components"].append({"kind": [], "path": "/p"})),
+        ("kind-dict", lambda v: v["specs"]["components"].append({"kind": {}, "path": "/p"})), ("kind-none", lambda v: v["specs"]["components"].append({"path": "/p"})),
+        ("kind-int", lambda v: v["specs"]["components"].append({"kind": 1, "path": "/p"})), ("path-relative", lambda v: v["specs"]["components"].append(comp("plugin", "p"))),
+        ("path-int", lambda v: v["specs"]["components"].append({"kind": "plugin", "path": 1})), ("no-path", lambda v: v["specs"]["components"].append({"kind": "plugin"})),
+        ("duplicate", lambda v: v["specs"]["components"].append(comp("plugin", "/ins/p"))), ("same-path-other-kind", lambda v: v["specs"]["components"].append(comp("personal-agent", "/ins/p"))),
+        ("no-workflow", lambda v: v["specs"]["components"].__setitem__(1, comp("plugin", "/dist/plugin"))),
+        ("two-workflow", lambda v: v["specs"]["components"].append(comp("plugin", "/dist2", source="workflow"))),
+        ("workflow-source-int", lambda v: v["specs"]["components"][1].update(source=1)),
+        ("no-entries", lambda v: v.pop("entries")), ("entries-list", lambda v: v.update(entries=[])), ("entries-str", lambda v: v.update(entries="x")), ("entries-none", lambda v: v.update(entries=None)),
+        ("entry-empty-list-route", lambda v: v["entries"].update({"@route:component:other:/e": []})), ("entry-str-route", lambda v: v["entries"].update({"@route:component:other:/e": "link-step"})),
+        ("entry-int-route", lambda v: v["entries"].update({"@route:component:other:/e": 5})), ("entry-dict-route", lambda v: v["entries"].update({"@route:component:other:/e": {"a": 1}})),
+        ("entry-none-route", lambda v: v["entries"].update({"@route:component:other:/e": None})),
+        ("link-entry-int", lambda v: v["entries"].update({"@link:component:other:/e": 5})), ("link-entry-str", lambda v: v["entries"].update({"@link:component:other:/e": "abc"})),
+        ("link-entry-dict", lambda v: v["entries"].update({"@link:component:other:/e": {}})), ("link-entry-none", lambda v: v["entries"].update({"@link:component:other:/e": None})),
+        ("collision", lambda v: v["entries"].update({"@names:component:plugin:/dist/plugin/": ["x"], "component:plugin:@workflow": ["c"]})),
+        ("no-inventory", lambda v: v.pop("inventory")), ("inventory-none", lambda v: v.update(inventory=None)), ("inventory-int", lambda v: v.update(inventory=5)),
+        ("inventory-dict", lambda v: v.update(inventory={"id": 1, "x": 2})), ("inventory-str", lambda v: v.update(inventory="idx")), ("inventory-str-none", lambda v: v.update(inventory="abc")),
+        ("inventory-item-int", lambda v: v["inventory"].append(5)), ("inventory-item-none", lambda v: v["inventory"].append(None)), ("inventory-item-str", lambda v: v["inventory"].append("id")),
+        ("inventory-item-str-no", lambda v: v["inventory"].append("zzz")), ("inventory-item-list", lambda v: v["inventory"].append(["id"])), ("inventory-item-list-no", lambda v: v["inventory"].append([1])),
+        ("inventory-item-empty", lambda v: v["inventory"].append({})), ("inventory-empty", lambda v: v.update(inventory=[])),
+        ("unicode", lambda v: v["entries"].update({"component:plugin:/dist/plugin/\u00e9\ud83d\ude00": ["file", 1, "q"], "@names:component:plugin:/dist/plugin/\u00e9": ["\u3042"]})),
+    ]:
+        value = base()
+        mutate(value)
+        digest(value, label)
+    # `dump` のフレーム 1 段を含む深さの境界: 複数キーの dict を葉にした入れ子の entries と、呼び出し側の深さ
+    # 入れ子が深い値は JSON の読み込みの深さ制限に当たるので、基本の控えと段数 `k` だけを持つ(値は Rust 側で作る)。
+    out["digest_depth"] = {"base": typed(base()), "cases": []}
+    for site in (900, 975, 994):
+        center = 1000 - site - 9
+        for k in range(max(1, center - 4), center + 5):
+            leaf = {"a": 1, "b": 2}
+            for _ in range(k):
+                leaf = [leaf]
+            value = base()
+            value["entries"]["component:plugin:/dist/plugin/deep"] = leaf
+
+            def load_fake(state, expected, value=value):
+                return value
+
+            saved = guard.load_verified
+            guard.load_verified = load_fake
+            try:
+                result = outcome(call_at(site, guard.component_policy_digest, "s", "h"))
+            finally:
+                guard.load_verified = saved
+            if result["site"] is None:
+                continue
+            out["digest_depth"]["cases"].append({"k": k, **result})
+    # bootstrap の控えと受領(旧版の `bootstrap` を一時フォルダで動かす)
+    def run_bootstrap(args, entries, blobs_hex):
+        saved = (guard.snapshot, guard.verify)
+        blobs_bytes = {k: bytes.fromhex(v) for k, v in blobs_hex.items()}
+
+        def snapshot(root, specs, inventory=None, blobs=None, expected=None):
+            blobs.update(blobs_bytes)
+            return json.loads(json.dumps(entries))
+
+        guard.snapshot, guard.verify = snapshot, lambda *a, **k: None
+        try:
+            import shutil
+            import tempfile
+
+            folder = tempfile.mkdtemp(prefix="s2e-fixture-")
+            try:
+                import io
+
+                output = folder + "/out"
+                namespace = __import__("argparse").Namespace(inventory=None, **{**args, "output": output})
+                stdout = io.StringIO()
+                saved_out = sys.stdout
+                sys.stdout = stdout
+                try:
+                    guard.bootstrap(namespace)
+                finally:
+                    sys.stdout = saved_out
+                raw = open(output + "/environment.json", "rb").read().decode()
+                receipt = stdout.getvalue()
+                guard_copy = open(output + "/environment-guard.py", "rb").read()
+                files = {}
+                for base_dir, dirs, names in os.walk(output + "/plugin"):
+                    for name in names:
+                        path = os.path.join(base_dir, name)
+                        files[path[len(output):]] = open(path, "rb").read().hex()
+                # 一時パスは `/O` へ置き換える。控えの `sha256` は、置き換えた本文から計算し直す(中身が毎回同じになる)。
+                replaced = raw.replace(folder, "/O")
+                receipt = receipt.replace(folder, "/O").replace(sha(raw.encode()), sha(replaced.encode()))
+                result = {"ok": {"raw": replaced, "receipt": receipt, "files": files,
+                                 "guard_sha256": sha(guard_copy), "state_sha256": sha(replaced.encode())}}
+            finally:
+                shutil.rmtree(folder, ignore_errors=True)
+        except Exception as error:  # noqa: BLE001
+            result = {"error": {"type": type(error).__name__, "msg": str(error)}}
+        finally:
+            guard.snapshot, guard.verify = saved
+        return result
+
+    plugin_entries = {"plugin": ["directory", 493], "plugin/a.txt": ["file", 420, sha(b"A")], "plugin/sub": ["directory", 448], "plugin/sub/b.txt": ["file", 384, sha(b"B")],
+                      "external:/h/.claude/settings.json": ["missing"], "component:plugin:/r": ["directory", 493]}
+    blobs = {"plugin/a.txt": b"A".hex(), "plugin/sub/b.txt": b"B".hex()}
+    for index, args in enumerate([
+        {"root": "/r", "setting": [], "config": [], "shell": [], "skills_dir": [], "settings_dir": [], "managed_dir": []},
+        {"root": "/r", "setting": ["/s1"], "config": ["/g1"], "shell": ["/sh"], "skills_dir": ["/sk"], "settings_dir": ["/sd"], "managed_dir": ["/m"]},
+        {"root": "/r", "setting": ["/s1", "/s1"], "config": [], "shell": [], "skills_dir": ["/sk", "/sk"], "settings_dir": [], "managed_dir": ["/etc/claude-code"]},
+        {"root": "/r", "setting": ["rel"], "config": ["~/g"], "shell": [], "skills_dir": [], "settings_dir": ["/d1", "/d1/"], "managed_dir": ["/m", "/m"]},
+        {"root": "/r", "setting": [], "config": [], "shell": [], "skills_dir": [], "settings_dir": [], "managed_dir": ["rel"]},
+        {"root": "/r/..", "setting": [], "config": [], "shell": [], "skills_dir": [], "settings_dir": [], "managed_dir": []},
+    ]):
+        env = {"HOME": "/h"}
+        case = {"args": {k: typed_arg_list(v) for k, v in args.items()}, "entries": typed(plugin_entries), "blobs": blobs}
+        case.update(with_env(env, "/", lambda: run_bootstrap(args, plugin_entries, blobs)))
+        out["bootstrap"].append(case)
+    return out
+
+
+@area("stage2a")
+def make_stage2a():
+    return {"specs_cases.json": specs_cases(), "settings_cases.json": settings_cases(), "inventory_cases.json": inventory_cases(), "state_cases.json": state_cases()}
+
+
 def serialize(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
 

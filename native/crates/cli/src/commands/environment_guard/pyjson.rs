@@ -767,7 +767,7 @@ fn json_error_calls(depth: usize) -> Result<(), PyException> {
 /// 呼出しの深さの確認。`depth` は、その呼出しで使う再帰の深さ(上限を超えると `RecursionError`)。
 /// 旧版の呼出しの種類ごとに、文面が違う。
 #[derive(Clone, Copy)]
-enum Call {
+pub(crate) enum Call {
     /// Python の関数のフレーム。
     Frame,
     /// C の型の呼出し(`tp_call`)。
@@ -778,7 +778,7 @@ enum Call {
     Comparison,
 }
 
-fn enter_call(depth: usize, call: Call) -> Result<(), PyException> {
+pub(crate) fn enter_call(depth: usize, call: Call) -> Result<(), PyException> {
     if depth <= RECURSION_LIMIT {
         return Ok(());
     }
@@ -1244,8 +1244,16 @@ pub fn dumps(value: &PyValue, options: DumpOptions, ctx: PyCtx) -> Result<Vec<u3
 }
 
 /// 控え(`dump`): `json.dumps(ensure_ascii=True, sort_keys=True, separators=(',', ':'))` と末尾の LF。
+/// 旧版の `dump(value)` は Python の関数なので、`json.dumps` はその 1 段下から呼ばれる。
+/// `ctx.depth` は `dump` を呼ぶフレームの深さ。
 pub fn dump_state(value: &PyValue, ctx: PyCtx) -> Result<Vec<u8>, PyException> {
-    let mut text = dumps(value, DumpOptions::STATE, ctx)?;
+    // `dump` 自身のフレームの確認。
+    enter_call(ctx.depth + 1, Call::Frame)?;
+    let inner = PyCtx {
+        depth: ctx.depth + 1,
+        ..ctx
+    };
+    let mut text = dumps(value, DumpOptions::STATE, inner)?;
     text.push(0x0a);
     Ok(text.iter().map(|&c| c as u8).collect())
 }

@@ -111,6 +111,102 @@ pub fn for_this_os(expected: &str) -> String {
     )
 }
 
+use super::error::os_error_message;
+use super::pyops::Cps;
+use super::pypath::UserLookup;
+use super::pyvalue::{PyDict, PyInt};
+use super::specs::Host;
+use std::collections::HashMap;
+
+/// `to_typed` の逆。固定期待の「型の印つき」の形から値を作る。
+pub fn from_typed(value: &Value) -> PyValue {
+    match value["t"].as_str().expect("t") {
+        "none" => PyValue::None,
+        "bool" => PyValue::Bool(value["v"].as_bool().unwrap()),
+        "int" => {
+            let text = value["v"].as_str().unwrap();
+            let (negative, digits) = text.strip_prefix('-').map_or((false, text), |d| (true, d));
+            PyValue::Int(PyInt::from_decimal(negative, digits))
+        }
+        "float" => PyValue::Float(value["v"].as_str().unwrap().parse().unwrap()),
+        "str" => super::pyops::text(cps_of(&value["v"])),
+        "list" => PyValue::List(
+            value["v"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(from_typed)
+                .collect(),
+        ),
+        "dict" => {
+            let mut dict = PyDict::new();
+            for pair in value["v"].as_array().unwrap() {
+                dict.insert(from_typed(&pair[0]), from_typed(&pair[1]))
+                    .unwrap();
+            }
+            PyValue::Dict(dict)
+        }
+        other => panic!("未知の型 {other}"),
+    }
+}
+
+/// `{"ok": 型の印つきの値}` か `{"error": {"type", "msg"}}`。
+pub fn result_json(result: Result<PyValue, PyException>) -> Value {
+    match result {
+        Ok(value) => json!({"ok": to_typed(&value)}),
+        Err(error) => json!({"error": error_of(&error)}),
+    }
+}
+
+/// 差し込み口の偽物: 環境変数と作業場所は固定期待から、利用者データベースは `root` だけ。
+pub struct FakeHost {
+    pub env: HashMap<String, Cps>,
+    pub cwd: Cps,
+}
+
+struct RootOnly;
+
+impl UserLookup for RootOnly {
+    fn home_of_name(&self, name: &[u8]) -> Result<Option<Vec<u8>>, PyException> {
+        Ok((name == b"root").then(|| b"/root".to_vec()))
+    }
+    fn home_of_current_user(&self) -> Result<Option<Vec<u8>>, PyException> {
+        Ok(Some(b"/root".to_vec()))
+    }
+}
+
+impl Host for FakeHost {
+    fn env(&self, name: &str) -> Option<Cps> {
+        self.env.get(name).cloned()
+    }
+    fn cwd(&self) -> Result<Cps, PyException> {
+        Ok(self.cwd.clone())
+    }
+    fn users(&self) -> &dyn UserLookup {
+        &RootOnly
+    }
+}
+
+pub fn fake_host(env: &Value, cwd: &[u32]) -> FakeHost {
+    FakeHost {
+        env: env
+            .as_object()
+            .unwrap()
+            .iter()
+            .map(|(k, v)| (k.clone(), cps_of(v)))
+            .collect(),
+        cwd: cwd.to_vec(),
+    }
+}
+
+/// `FileNotFoundError(2, ..., path)` の例外。
+pub fn not_found(path: &[u32]) -> PyException {
+    PyException::with_cps(
+        "FileNotFoundError",
+        os_error_message(2, "No such file or directory", Some(path)),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
