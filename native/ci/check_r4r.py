@@ -4,6 +4,8 @@ Rust の検査専用入口 r4r_contract と比べる。
 
 比較の正規化は 2 つだけ: stdout の一時フォルダの 16 進 32 桁と、偽の cp が記録した argv の
 fd 番号(継いだ fd の番号と一致することを別に確かめる)。時間切れは成功に数えない。
+cp の子の環境の比較から外すのは、2026-11-12 02:41 の決定の __CF_USER_TEXT_ENCODING の 1 項目だけ
+(条件は exclude_cf_encoding。除いた値と有無は記録の行に出す)。
 """
 import argparse
 import contextlib
@@ -306,6 +308,9 @@ class Observed:
     relations: dict
     stub: list
     elapsed: float
+    # helper を起動したときに渡した環境に __CF_USER_TEXT_ENCODING があったか(run_side が起動の直前に
+    # 記録する)。None は記録していない(不明なので、除く条件に当たらない)。
+    cf_passed: object = None
 
 
 STUB_FIELDS = ('argv0', 'args', 'env', 'fsize', 'fds', 'blocked', 'ignored', 'caught')
@@ -411,7 +416,66 @@ def stub_details(old, new):
     return details
 
 
-def compare_observed(old, new):
+# 2026-11-12 02:41 の決定で、cp の子の環境の比較から外す 1 項目。Mac の旧 Python(CoreFoundation)が
+# 旧の子の環境へ自分で足す値で、Rust は再現しない。
+CF_ENCODING = '__CF_USER_TEXT_ENCODING'
+
+
+def cf_encoding_prefix():
+    """除く値の始まり: 0x と、比較器の uid の 16 進(大文字・先頭に 0 を付けない。uid 0 は 0)と :。"""
+    return b'0x' + format(os.getuid(), 'X').encode() + b':'
+
+
+def passed_has_cf(env):
+    """旧 helper を起動するときに渡す環境に CF_ENCODING があるか。env を指定しない起動(環境を受け継ぐ
+    起動)は、起動の直前の比較器の os.environ で決める。"""
+    return CF_ENCODING in (os.environ if env is None else env)
+
+
+def exclude_cf_encoding(old, new, system=None):
+    """旧の側の cp の子の環境から CF_ENCODING の 1 項目を除いた観測と、記録の行を返す。次のすべてを
+    満たす cp の記録だけを除く: Mac(darwin)で流している・旧 helper を起動したときに渡した環境に無い
+    (old.cf_passed が False。記録していない None は除かない)・旧の記録にこの名前の項目がちょうど 1 個
+    あり、値が cf_encoding_prefix() で始まる。Rust の側は一切除かない(渡していないのに Rust の子に
+    現れたら、比べて不一致になる)。ほかの名前・形の違う値・2 個以上は除かない。"""
+    system = system or SYSTEM
+    if system != 'darwin' or old.cf_passed is not False:
+        return old, []
+    name = CF_ENCODING.encode()
+    prefix = cf_encoding_prefix()
+    stub = []
+    notes = []
+    for number, record in enumerate(old.stub, 1):
+        # 並びと空の項目を変えないよう、区切りだけで分けて、除く 1 項目のほかは字面のまま戻す。
+        entries = bytes.fromhex(record['env']).split(b'\0')
+        found = [index for index, entry in enumerate(entries) if env_name(entry) == name]
+        if len(found) != 1:
+            stub.append(record)
+            continue
+        entry = entries[found[0]]
+        _, equals, value = entry.partition(b'=')
+        if not equals or not value.startswith(prefix):
+            stub.append(record)
+            continue
+        del entries[found[0]]
+        stub.append(dict(record, env=b'\0'.join(entries).hex()))
+        rust = new.stub[number - 1] if number <= len(new.stub) else None
+        rust_count = None if rust is None else sum(1 for item in env_entries(rust['env']) if env_name(item) == name)
+        rust_text = '記録なし' if rust is None else 'なし' if rust_count == 0 else f'あり({rust_count} 個)'
+        notes.append(f'R4R: 記録({CF_ENCODING} を旧の cp の子の環境から除いた): cp {number} 回目: '
+                     f'値 {value.decode("utf-8", "backslashreplace")!r} / 渡した環境に なし / 旧の子に あり(1 個) / '
+                     f'Rust の子に {rust_text}')
+    if not notes:
+        return old, []
+    return dataclasses.replace(old, stub=stub), notes
+
+
+def compare_observed(old, new, system=None):
+    """旧と Rust の観測を比べる。cp の子の環境は、exclude_cf_encoding の条件を満たす 1 項目だけを旧の側
+    から除いてから比べ、除いたときは比べる前に記録の行を出す(比べて落ちても記録が残る)。"""
+    old, notes = exclude_cf_encoding(old, new, system)
+    for note in notes:
+        print(note, flush=True)
     found = differences(old, new)
     if found:
         detail = []
@@ -939,7 +1003,7 @@ def path_arg(sc, key):
     return sc.args[sc.args.index(key) + 1]
 
 
-def observe(sc, result, relations, started):
+def observe(sc, result, relations, started, cf_passed=None):
     source = path_arg(sc, '--source')
     destination = path_arg(sc, '--destination')
     files = {'source': file_record(source), 'destination': file_record(destination)}
@@ -951,7 +1015,7 @@ def observe(sc, result, relations, started):
     if sc.log is not None and sc.stub_expected and not stub:
         # 偽の cp を使う件で記録が 1 件も無ければ、観測器が失敗した(比べずに合格にしない)。
         raise AssertionError('偽の cp の記録が無い(観測器が失敗した)')
-    return Observed(result, files, temps, relations, stub, time.monotonic() - started)
+    return Observed(result, files, temps, relations, stub, time.monotonic() - started, cf_passed)
 
 
 def open_stdout(kind, base):
@@ -988,6 +1052,8 @@ def run_side(sc, legacy):
     if sc.lock:
         sc.lock()
     stream, owned = open_stdout(sc.stdout, sc.base)
+    # 起動の直前に、渡す環境(env を指定しない起動では比較器の os.environ)に CF_ENCODING があるかを記録する。
+    cf_passed = passed_has_cf(sc.env)
     started = time.monotonic()
     try:
         result = launch(legacy_argv(sc.args) if legacy else native_argv(sc.args), env=sc.env, stdout=stream,
@@ -1010,7 +1076,7 @@ def run_side(sc, legacy):
         }
         os.close(held)
         link.unlink()
-    return observe(sc, result, relations, started)
+    return observe(sc, result, relations, started, cf_passed)
 
 
 def run_pair(sc, before_compare=None):
@@ -1276,6 +1342,9 @@ def existing_suite(target='rust', records=None, system=None):
             new_started = time.monotonic()
             result = launch([sys.executable, '-B', str(shim), *argv], timeout=sc.timeout)
             new = observe(sc, result, {}, new_started)
+            # 追加の境界と同じ関数で比べる(__CF_USER_TEXT_ENCODING を除く条件も同じ。環境を受け継ぐ起動
+            # なので、run_side が起動の直前の os.environ で判定する)。この組は偽の cp を観測しない(log が
+            # 無い)ので、cp の記録は両方 0 件で、除く項目も無い。
             compare_observed(old, new)
             self.records.append(('pair', old.result.returncode, normalize(old.result.stdout)))
             if not cli and new.result.stderr:
@@ -2081,6 +2150,18 @@ def contract_suite():
     return suite
 
 
+def record_cf_environ(system=None):
+    """Mac の実行の始めに、比較器の os.environ に __CF_USER_TEXT_ENCODING があるかを記録する(環境を
+    受け継ぐ起動で、除く条件の「渡した環境に無い」を決める根拠)。Mac のほかでは何も出さない。"""
+    if (system or SYSTEM) != 'darwin':
+        return None
+    value = os.environ.get(CF_ENCODING)
+    line = (f'R4R: 記録(Mac の比較器の os.environ の {CF_ENCODING}): '
+            + ('なし' if value is None else f'あり(値 {value!r})'))
+    print(line, flush=True)
+    return line
+
+
 def record_eagain():
     """待たずに書く設定の空きの無いパイプ。旧 helper の結果だけを記録する(S3I-A の基準。Rust とは比べない)。"""
     if not LINUX:
@@ -2117,6 +2198,7 @@ def main(argv=None):
         return 0
     FIXTURE = fixture_path(args.fixture)
     use_real_tempdir()
+    record_cf_environ()
     problems = []
 
     def stage(name, action):

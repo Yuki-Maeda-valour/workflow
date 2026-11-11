@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """R4R 比較器が、壊した結果・時間切れ・実行不能・0 件・入口の未起動・対応表の欠けを見逃さない検査。"""
+import contextlib
 import copy
 import dataclasses
 import importlib.util
@@ -12,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import types
 import unittest
 from unittest import mock
 
@@ -189,6 +191,169 @@ class Comparator(unittest.TestCase):
         message = str(caught.exception)
         self.assertIn("並び: 共通の項目の 1 番目が 旧 'Z' / Rust 'LC_CTYPE'", message)
         self.assertNotIn('Z=1', message)
+
+    def assert_mismatch(self, error, shown='cp.env'):
+        self.assertIsNotNone(error, '不一致にならなかった')
+        self.assertIn(shown, error)
+
+    def cf_compare(self, old_entries, new_entries, *, passed=False, system='darwin', count=1):
+        """合成の cp の記録(count 回分)で比べ、(不一致の文か None, 出た行) を返す。旧の観測を書き換えない
+        (比べる前の記録に、除く前の値が残る)ことも確かめる。"""
+        def env(entries):
+            return b'\0'.join(entries).hex()
+        base = self.observed().stub[0]
+        old = self.observed(stub=[dict(base, env=env(old_entries)) for _ in range(count)], cf_passed=passed)
+        new = self.observed(stub=[dict(base, env=env(new_entries)) for _ in range(count)])
+        kept = copy.deepcopy(old.stub)
+        out = io.StringIO()
+        error = None
+        with mock.patch('sys.stdout', out):
+            try:
+                self.m.compare_observed(old, new, system=system)
+            except self.m.ComparisonError as caught:
+                error = str(caught)
+        self.assertEqual(old.stub, kept)
+        return error, out.getvalue()
+
+    def test_cf_encoding_is_excluded_only_when_every_condition_holds(self):
+        """2026-11-12 02:41 の決定の 1 項目(__CF_USER_TEXT_ENCODING)を、Mac・渡した環境に無い・旧の側に
+        形の合う値がちょうど 1 個のときだけ、旧の側から除く(Task 4.4 の (a)〜(e) と (g) の除いた記録)。"""
+        name = self.m.CF_ENCODING.encode()
+        value = b'0x' + format(os.getuid(), 'X').encode() + b':0x0:0x0'
+        cf = name + b'=' + value
+        marker = f'R4R: 記録({self.m.CF_ENCODING} を旧の cp の子の環境から除いた)'
+        # 値の始まり: 大文字の 16 進・先頭に 0 を付けない・uid 0 は 0。
+        for uid, prefix in ((0, b'0x0:'), (0x1F5, b'0x1F5:'), (1000, b'0x3E8:')):
+            with mock.patch.object(os, 'getuid', return_value=uid):
+                self.assertEqual(self.m.cf_encoding_prefix(), prefix)
+        # (a) Mac・渡した環境に無い・旧にだけ形の合う値が 1 個 → 除いて合格し、値と有無を記録する。
+        for old_entries in ([b'A=1', cf, b'B=2'], [cf, b'A=1', b'B=2'], [b'A=1', b'B=2', cf]):
+            with self.subTest(case='a', old=old_entries):
+                error, out = self.cf_compare(old_entries, [b'A=1', b'B=2'])
+                self.assertIsNone(error)
+                lines = out.splitlines()
+                self.assertEqual(len(lines), 1)
+                self.assertTrue(lines[0].startswith(marker + ': cp 1 回目: '), lines[0])
+                for shown in (repr(value.decode()), '渡した環境に なし', '旧の子に あり(1 個)', 'Rust の子に なし'):
+                    self.assertIn(shown, lines[0])
+        error, out = self.cf_compare([b'A=1', cf], [b'A=1'], count=2)
+        self.assertIsNone(error)
+        self.assertEqual([line.split(': ')[2] for line in out.splitlines()], ['cp 1 回目', 'cp 2 回目'])
+        # 除くのはその 1 項目だけ。ほかの項目の値と並びの違いは隠さない。
+        for old_entries, new_entries in (([b'A=1', cf, b'B=2'], [b'B=2', b'A=1']), ([b'A=1', cf], [b'A=2']),
+                                         ([b'A=1', cf, b'B=2'], [b'A=1'])):
+            with self.subTest(case='a-others', old=old_entries, new=new_entries):
+                error, out = self.cf_compare(old_entries, new_entries)
+                self.assert_mismatch(error)
+                self.assertIn(marker, out)
+        # (b) 渡した環境にある → 除かない。旧と Rust が同じ値なら合格、違えば不一致。
+        other = name + b'=' + b'0x' + format(os.getuid() + 1, 'X').encode() + b':0x0:0x0'
+        error, out = self.cf_compare([b'A=1', cf], [b'A=1', cf], passed=True)
+        self.assertEqual((error, out), (None, ''))
+        for new_entries in ([b'A=1', other], [b'A=1']):
+            with self.subTest(case='b', new=new_entries):
+                error, out = self.cf_compare([b'A=1', cf], new_entries, passed=True)
+                self.assert_mismatch(error)
+                self.assert_mismatch(error, repr(cf.decode()))
+                self.assertEqual(out, '')
+        # (c) Rust の側は除かない。渡していないのに Rust の子に現れたら不一致。
+        error, out = self.cf_compare([b'A=1'], [b'A=1', cf])
+        self.assert_mismatch(error)
+        self.assertEqual(out, '')
+        error, out = self.cf_compare([b'A=1', cf], [b'A=1', cf])
+        self.assert_mismatch(error, "Rust だけ ['" + cf.decode() + "']")
+        self.assertIn('Rust の子に あり(1 個)', out)
+        # (d) Linux では除かない。記録していない(渡した環境が不明)ときも除かない。
+        for system, passed in (('linux', False), ('darwin', None)):
+            with self.subTest(case='d', system=system, passed=passed):
+                error, out = self.cf_compare([b'A=1', cf], [b'A=1'], passed=passed, system=system)
+                self.assert_mismatch(error, "旧だけ ['" + cf.decode() + "']")
+                self.assertEqual(out, '')
+        # (e) ほかの名前・形の違う値・2 個以上は除かず不一致。
+        uid = format(os.getuid(), 'X').encode()
+        broken = [name + b'_X=' + value, b'X' + cf, name.lower() + b'=' + value, other,
+                  name + b'=0x0' + uid + b':0x0:0x0', name + b'=0X' + uid + b':0x0:0x0', name + b'=0x' + uid,
+                  name + b'= ' + value, name + b'=' + str(os.getuid()).encode() + b':0x0:0x0', name]
+        for entries in [[b'A=1', item] for item in broken] + [[b'A=1', cf, cf], [cf, b'A=1', other],
+                                                              [cf, b'A=1', name]]:
+            with self.subTest(case='e', old=entries):
+                error, out = self.cf_compare(entries, [b'A=1'])
+                self.assert_mismatch(error)
+                self.assertEqual(out, '')
+        # 小文字の 16 進(uid に A〜F を含む 0x1F5 で確かめる。大文字は除く対照)。
+        with mock.patch.object(os, 'getuid', return_value=0x1F5):
+            error, out = self.cf_compare([b'A=1', name + b'=0x1f5:0x0:0x0'], [b'A=1'])
+            self.assert_mismatch(error)
+            self.assertEqual(out, '')
+            error, out = self.cf_compare([b'A=1', name + b'=0x1F5:0x0:0x0'], [b'A=1'])
+            self.assertIsNone(error)
+            self.assertIn(marker, out)
+
+    def test_cf_passed_is_decided_by_os_environ_when_the_environment_is_inherited(self):
+        """(f) 渡した環境は、env を指定した起動ではその dict、指定しない起動(環境を受け継ぐ起動)では
+        起動の直前の比較器の os.environ。run_side で旧 helper を実際に起動して記録を確かめ、その記録で
+        除く条件を合成の記録に当てる。"""
+        name = self.m.CF_ENCODING
+        value = '0x%X:0x0:0x0' % os.getuid()
+        case = self.m.Contract('test_files')
+        case.setUp()
+        self.addCleanup(case.doCleanups)
+        case.stub('gnu')
+        cf = (name + '=' + value).encode()
+        for label, in_environ, env, expected in (('受け継ぐ・os.environ にある', True, None, True),
+                                                 ('受け継ぐ・os.environ に無い', False, None, False),
+                                                 ('env を指定・無い(os.environ にはある)', True, {}, False),
+                                                 ('env を指定・ある(os.environ には無い)', False, {name: value}, True)):
+            with self.subTest(label):
+                with mock.patch.dict(os.environ):
+                    if in_environ:
+                        os.environ[name] = value
+                    else:
+                        os.environ.pop(name, None)
+                    case.destination.write_bytes(b'current\x00contents\n')
+                    old = self.m.run_side(case.scenario(env=env), True)
+                self.assertTrue(old.stub, '偽の cp の記録が無い')
+                self.assertIs(old.cf_passed, expected)
+                error, out = self.cf_compare([b'A=1', cf], [b'A=1'], passed=old.cf_passed)
+                if expected:
+                    self.assert_mismatch(error)
+                    self.assertEqual(out, '')
+                else:
+                    self.assertIsNone(error)
+                    self.assertIn(repr(value), out)
+
+    def test_mac_run_records_cf_of_os_environ_at_start(self):
+        """(g) Mac の実行の始め(比較器の自己検査より前)に、比較器の os.environ に __CF_USER_TEXT_ENCODING
+        があるかを記録する。Mac のほかでは出さない。段の中身は差し替え、main の順序だけを確かめる。"""
+        name = self.m.CF_ENCODING
+        value = '0x%X:0x0:0x0' % os.getuid()
+        head = f'R4R: 記録(Mac の比較器の os.environ の {name}): '
+        for system, present, expected in (('darwin', True, f'あり(値 {value!r})'), ('darwin', False, 'なし'),
+                                          ('linux', True, None)):
+            with self.subTest(system=system, present=present):
+                out = io.StringIO()
+                seen = []
+
+                def run_suite(suite, **kwargs):
+                    seen.append(out.getvalue())
+                with mock.patch.dict(os.environ), mock.patch('sys.stdout', out), mock.patch.multiple(
+                        self.m, SYSTEM=system, FIXTURE=None, load=mock.Mock(return_value=types.SimpleNamespace()),
+                        run_suite=mock.Mock(side_effect=run_suite), run_existing=mock.Mock(),
+                        record_eagain=mock.Mock(), subreaper=contextlib.nullcontext, use_real_tempdir=mock.Mock()):
+                    if present:
+                        os.environ[name] = value
+                    else:
+                        os.environ.pop(name, None)
+                    self.assertEqual(self.m.main(['--fixture', sys.executable]), 0)
+                lines = out.getvalue().splitlines()
+                self.assertEqual(lines[-1], 'R4R: 合格')
+                self.assertTrue(seen)
+                if expected is None:
+                    self.assertNotIn('os.environ の ' + name, out.getvalue())
+                else:
+                    self.assertEqual(lines[0], head + expected)
+                    # 最初の段(比較器の自己検査)を始める時点で、もう出ている。
+                    self.assertEqual(seen[0].splitlines(), [head + expected])
 
     def test_stdout_normalization_is_only_the_temp_hex(self):
         a = self.result(33, b'TEMP_PATH=/x/.restore-taskmd-' + b'0' * 32 + b'\n')
