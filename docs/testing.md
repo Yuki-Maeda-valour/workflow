@@ -374,6 +374,9 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 ```
 
 - `--fixture`の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物やPATHへ切り替えない。
+- 比べる配置は、一時フォルダの実体のパスに置く。`check_r4r.py` が開始時に、一時フォルダの置き場をリンクを含まないパスへ変える(`use_real_tempdir`)。同じプロセスで流す既存のテストにも効く。
+  - Macの既定の一時フォルダ(`/var/folders/…`)は、`/var` が `/private/var` へのリンクである。
+  - 旧helperとRustは親の各段をリンクを辿らずに開くので、リンクを含むパスでは退避本文を開けず、`taskmd-body` で止まる。比べたい経路に届かない。
 - 同じパスの配置で、旧helper(`python3 -I -B`)を流してから配置を戻し、Rustを流す。比べるのは次のとおりである。
   - 終了値、stdout、stderr。
   - 復元先と退避本文の内容・`st_mode`・uid・gid・mtimeのns・user xattr・POSIX ACLと、一時フォルダの残り。
@@ -396,10 +399,17 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 - 追加の境界はLinuxで25件である。引数・`--cp`・ファイル・起動の状態・環境・書き出しの失敗・信号と、旧helperの出力先を差し替える実験3件を含む。Macでは9件を流す。
   - 各件に旧helperの固定期待を置き、旧helperどうしの比較だけで合格にしない。
   - 出力先を差し替える実験3件(`check_r4r.py` の `FlushExperiment`)は、旧helperだけを流して固定期待で照らす。Rust側の同じ条件は、exampleの単体テスト(`test_exit_flush_order_and_counts` など)で確かめる。
+  - Macでは、3件のうち `test_partial_direct_write_then_two_failures_is_33` だけが、`--version` だけに答える観測器を cp に使う(`gnu_cp`。Linuxは本物のGNU cp)。Macの cp はBSD版で `--version` に答えず、旧helperが一時フォルダを作る前に止まり、応答が4096バイトより長くならないためである。
+  - 同じ件で応答を長くする深い親のパスは、MacのPATH_MAX(1024バイト)より長い。そのため、1段ずつ相対で作り、相対で片付ける。
+  - ほかの2件は変えていない。`test_valid_arguments_term_during_close_flush_ends_by_term_after_two_lines` は本物の cp(`real_cp()`)を使い、`test_short_response_flush_count` は cp を使わない。
   - 読み込めない地域設定の名前(`LANG=xx_YY.UTF-8`)は、Linuxで旧helperだけを流し、固定期待で照らす。Rustとは比べない。
   - 待たずに書く設定のパイプの `EAGAIN` は、25件の外で、Linuxで旧helperだけを流して結果を表示する。固定期待とは照らさず、Rustとも比べない。
 - 比較器の自己検査16件を、`check_r4r.py` の中から必ず流す。壊した結果・時間切れ・実行不能・0件・入口の未起動・対応表の欠け・`cc` が無い・観測器の失敗と環境の書き換えを、すべて失敗にすることを確かめる。
   - Macの分岐をLinuxで模擬する2件は、Macの成功には数えない。
+  - `--cp` がリンクを含むパスでも、何も変えない包みは違わず、argv[0] を変える包みだけが違うことを照らす。リンクを含む一時フォルダの置き場が、実体のパスへ変わることも照らす。
+- 段は、自己検査・既存の2回(旧helperどうし・Rust)・追加の境界・`EAGAIN` の記録の順に流す。
+  - ある段が落ちても、後の段を省かずに流す。最後に、落ちた段の名前を出して終了値1で不合格にする。自己検査が落ちた回の比較は、合格に数えない。
+  - 各段の失敗は `R4R: 不合格(<段>)` の行に出す。落ちた件の名前と例外の行も、出力を捨てる自己検査を含めて出す。1回のCIで多くの原因を見るためである。
 
 #### 手元のLinux実装検証(2026-11-11)
 
@@ -420,7 +430,23 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 - Macで `test_normal_existing_and_absent_binary_empty_modes_and_names` が、APFSがUTF-8でない名前を拒むために `OSError` になりうる(推測)。
 - Macの errno の文(特に EDQUOT の69・`Disc quota exceeded`)は推測である。Macの比較(`check_r4r.py` の `MAC_CONTRACT`)に書き出しの失敗の件が無いので、R4Rでは確かめていない。
 - Linuxのcoreutils 8.30・8.31・9.0〜9.6・9.8以降。手元で確かめたのは8.32である。
-- CIの実行機の `cc` の有無。GitHubの実行機にはあると推測する。
+- Macの比較の本体(既存18件の2回・追加9件)の結果と、Macでの時間。下のPR用CIでは、自己検査で止まったので、まだ流れていない。
+
+#### PR用CIの記録(run 43040473054)
+
+[PR #483のCI](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43040473054)(attempt 1・head `958ff5dba1e5d3c3bf794c3d8986176042dd5e5f`)の結果である。
+
+- Linux 2機種の `build` は成功した。`check_r4r.py` の全段を含む。
+- Mac 2機種(`macos-15` のarm64・`macos-15-intel`)の `build` は、比較器の自己検査16件のうち4件で落ちた。
+  - CIの記録の `AssertionError` で原因を確かめたのは3件である。
+    - `cp.argv0` の2件: 包みが `--cp` を解決せずに argv[0] にしたので、一時フォルダの `/var` のリンクで旧helperと食い違った。
+    - ACL の照合の1件: 自己検査がLinuxの経路を確かめる所で、OSを指定していなかった。
+  - 残りの1件(`test_mac_branches_simulated_on_linux_not_counted_as_mac_success`)は、出力を捨てていたので、記録に理由が無い。
+    - 原因はコードからの推定である。リンクを含む親では、旧helperとRustが退避本文を開けずに `taskmd-body` で止まる。
+    - Linuxで一時フォルダをリンク経由にすると、同じ件が同じ形で落ちることは確かめた。
+  - 比較器を直した。直した後のMacのCIは未実施である。次のCIで落ちたときは、落ちた件の名前と理由が `R4R: 不合格(…)` の行に出る。
+  - 当時の比較器は自己検査で止まったので、Macの比較の本体は1度も流れていない。
+- 観測器を `cc` で組む自己検査は、Mac 2機種でも成功した。4機種のGitHubの実行機に `cc` があることを、この回で確かめた。
 
 CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
 R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。

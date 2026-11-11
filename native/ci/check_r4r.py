@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import traceback
 import unittest
 from unittest import mock
 
@@ -107,6 +108,15 @@ def load(path, name):
     sys.modules[name] = module
     spec.loader.exec_module(module)
     return module
+
+
+def use_real_tempdir():
+    """このプロセスの一時フォルダの置き場を、リンクを含まない実体のパスにする。Mac の既定(/var/folders/…)
+    は /var が /private/var へのリンクなので、親の各段をリンクを辿らずに開く旧 helper と Rust は、退避
+    本文を開けずに taskmd-body で止まり、比べたい経路に届かない。比べる配置は実体のパスに置く(既存の
+    テストの TemporaryDirectory も、同じプロセスの中でこの置き場を使う)。"""
+    tempfile.tempdir = os.path.realpath(tempfile.gettempdir())
+    return tempfile.tempdir
 
 
 def fixture_path(value):
@@ -1294,12 +1304,43 @@ def unraisable(kind, number, text):
 
 
 def deep_parent(base, length=3995):
-    """PATH_MAX 未満で、応答が B=4096 より長くなる親のパス。"""
+    """応答が B=4096 より長くなる親のパス(Linux の PATH_MAX 未満)。Mac の PATH_MAX(1024)より長いので、
+    パスの全体を OS へ渡さず、1 段ずつ相対で作る(旧 helper と Rust も、親を 1 段ずつ相対で開く)。"""
+    os.makedirs(base, exist_ok=True)
     path = str(base)
-    while len(path) < length:
-        path += '/' + 'd' * min(200, length - len(path) - 1)
-    os.makedirs(path)
+    fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        while len(path) < length:
+            size = min(200, length - len(path) - 1)
+            if size <= 0:
+                break
+            name = 'd' * size
+            os.mkdir(name, dir_fd=fd)
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+            path += '/' + name
+    finally:
+        os.close(fd)
     return Path(path)
+
+
+def reset_deep(parent):
+    """deep_parent の親を mode 0700 にし、旧 helper が残した一時フォルダ(umask 0777 で mode 0。中は空)を
+    消す。Mac の PATH_MAX より長いパスを全体で渡さないよう、/ から 1 段ずつ相対で開く。"""
+    fd = os.open('/', os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in Path(parent).parts[1:]:
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.close(fd)
+            fd = child
+        os.fchmod(fd, 0o700)
+        for name in os.listdir(fd):
+            if name.startswith('.restore-taskmd-'):
+                os.chmod(name, 0o700, dir_fd=fd)
+                os.rmdir(name, dir_fd=fd)
+    finally:
+        os.close(fd)
 
 
 class Contract(unittest.TestCase):
@@ -1817,6 +1858,16 @@ class FlushExperiment(unittest.TestCase):
             if LINUX:
                 self.assertEqual(destination.read_bytes(), b'body\n')
 
+    def gnu_cp(self, base):
+        """--version に GNU と答える cp。Linux は本物の GNU cp。Mac の cp は BSD で --version を受けず、
+        旧 helper が一時フォルダを作る前に runtime-unavailable で止まって応答が B より長くならないので、
+        --version だけに答える観測器を使う(この実験はコピーまで進まない)。"""
+        if LINUX:
+            return real_cp()
+        stub, channel = make_stub(base / 'stub', mode='version-only')
+        self.addCleanup(channel.close)
+        return str(stub)
+
     def test_partial_direct_write_then_two_failures_is_33(self):
         with tempfile.TemporaryDirectory() as temp:
             base = Path(temp)
@@ -1826,14 +1877,13 @@ class FlushExperiment(unittest.TestCase):
             parent = deep_parent(base / 'deep')
             args = ['restore', '--source', str(source), '--destination', str(parent / 'current'),
                     '--expected-mode', '640', '--expected-sha256', hashlib.sha256(b'body\n').hexdigest(),
-                    '--cp', real_cp()]
+                    '--cp', self.gnu_cp(base)]
             plain = launch(legacy_argv(args), preexec=lambda: os.umask(0o777))
-            make_writable(parent)
-            for child in parent.glob('.restore-taskmd-*'):
-                child.rmdir()
+            reset_deep(parent)
+            self.assertIn(b'REASON=prepare-failed\n', plain.stdout)
             self.assertGreater(len(plain.stdout), 4096)
             result = self.run_wrapped('1000,EIO,EIO', 4096, args, preexec=lambda: os.umask(0o777))
-            make_writable(parent)
+            reset_deep(parent)
             self.assertEqual(result.returncode, 33)
             self.assertEqual(normalize(result.stdout), normalize(plain.stdout))
             self.assertEqual(result.stderr, b'')
@@ -1874,14 +1924,39 @@ def check_map(listed, ignored, system, data=None):
     return used
 
 
+EXCEPTION_LINE = re.compile(r'[A-Za-z_][\w.]*(?:Error|Exception|Exit|Interrupt|Expired)\b')
+
+
+def reason_of(trace):
+    """traceback の最後の例外の行(と続く 2 行まで)。"""
+    lines = [line for line in trace.rstrip().splitlines() if line.strip()]
+    for index in range(len(lines) - 1, -1, -1):
+        if EXCEPTION_LINE.match(lines[index]):
+            return ' / '.join(lines[index:index + 3])[:500]
+    return lines[-1][:500] if lines else ''
+
+
+def suite_problems(result, count, unexpected, limit=40):
+    """落ちた件の名前と理由。出力を捨てる自己検査でも、次の CI で原因が分かるよう、不合格の知らせに残す。"""
+    lines = [f'- 失敗: {test.id()}: {reason_of(trace)}' for test, trace in result.failures]
+    lines += [f'- エラー: {test.id()}: {reason_of(trace)}' for test, trace in result.errors]
+    lines += [f'- 省略: {test.id()}: {reason}' for test, reason in unexpected]
+    lines += [f'- 想定外の成功: {test.id()}' for test in result.unexpectedSuccesses]
+    if result.testsRun != count:
+        lines.append(f'- 流した件数 {result.testsRun} / 集めた件数 {count}')
+    if len(lines) > limit:
+        lines = lines[:limit] + [f'- ほか {len(lines) - limit} 件']
+    return '\n'.join(lines)
+
+
 def run_suite(suite, *, allow_skips=()):
     count = suite.countTestCases()
     if count == 0:
         raise AssertionError('検査ケースが0件')
     result = unittest.TextTestRunner(verbosity=2).run(suite)
-    unexpected = [test for test, _ in result.skipped if test._testMethodName not in allow_skips]
+    unexpected = [(test, reason) for test, reason in result.skipped if test._testMethodName not in allow_skips]
     if not result.wasSuccessful() or result.testsRun != count or unexpected:
-        raise AssertionError('未実行・失敗・省略したケースがある')
+        raise AssertionError('未実行・失敗・省略したケースがある\n' + suite_problems(result, count, unexpected))
     return result
 
 
@@ -1961,33 +2036,53 @@ def main(argv=None):
         print(f'R4R: 対応表 合格({SYSTEM} で {used} 件)')
         return 0
     FIXTURE = fixture_path(args.fixture)
-    # 比較器自身の検査を先に通す。
+    use_real_tempdir()
+    problems = []
+
+    def stage(name, action):
+        """段を流す。落ちても後の段を省かずに流し、最後にまとめて不合格で終える(1 回の CI で多くの
+        原因を見るため。比較器の自己検査が落ちた回の比較は、合格に数えない)。"""
+        try:
+            action()
+        except Exception as error:  # noqa: BLE001 - 後の段を流してから、必ず不合格で終える。
+            problems.append(name)
+            if not isinstance(error, (AssertionError, ComparisonError)):
+                traceback.print_exc()
+            print(f'R4R: 不合格({name}): {type(error).__name__}: {error}', file=sys.stderr, flush=True)
+
+    # 比較器自身の検査を先に流す。
     module = load(Path(__file__).with_name('test_r4r.py'), 'r4r_comparator_tests')
     module.subject = sys.modules[__name__]
-    run_suite(unittest.defaultTestLoader.loadTestsFromModule(module))
+    stage('比較器の自己検査', lambda: run_suite(unittest.defaultTestLoader.loadTestsFromModule(module)))
     with subreaper():
         # 比べ方が揺れないことの確かめ: 旧 helper どうしを同じ手順で比べ、全記録が一致すること。
         for target in ('legacy', 'rust'):
-            existing = existing_suite(target)
-            try:
-                result = run_suite(existing.suite, allow_skips=(ACL,))
-                skipped = compare_existing(existing.records, existing.launches, existing.rust_names, result)
-            finally:
-                existing.close()
-            launches = existing.launches
-            sides = {}
-            for test, reason in result.skipped:
-                sides.setdefault(test._testMethodName, []).append((type(test).__name__, reason))
-            for name, items in sides.items():
-                if sorted(side for side, _ in items) != ['Legacy', 'Rust'] or len({r for _, r in items}) != 1:
-                    raise AssertionError(f'旧と Rust で省略の理由が違う: {name}')
-                print(f'R4R: 省略({SYSTEM}・{target}): {name}: {items[0][1]}')
-            print(f'R4R: 既存({target}): {result.testsRun} 件・省略 {len(skipped)} 件・入口の起動 '
-                  f'{len(launches.read_text().splitlines())} 回')
-        run_suite(contract_suite())
-        record_eagain()
+            stage(f'既存({target})', lambda target=target: run_existing(target))
+        stage('追加の境界', lambda: run_suite(contract_suite()))
+        stage('EAGAIN の記録', record_eagain)
+    if problems:
+        raise AssertionError('不合格の段: ' + '・'.join(problems) + '(各段の「R4R: 不合格(…)」の行を見る)')
     print('R4R: 合格')
     return 0
+
+
+def run_existing(target):
+    existing = existing_suite(target)
+    try:
+        result = run_suite(existing.suite, allow_skips=(ACL,))
+        skipped = compare_existing(existing.records, existing.launches, existing.rust_names, result)
+    finally:
+        existing.close()
+    launches = existing.launches
+    sides = {}
+    for test, reason in result.skipped:
+        sides.setdefault(test._testMethodName, []).append((type(test).__name__, reason))
+    for name, items in sides.items():
+        if sorted(side for side, _ in items) != ['Legacy', 'Rust'] or len({r for _, r in items}) != 1:
+            raise AssertionError(f'旧と Rust で省略の理由が違う: {name}')
+        print(f'R4R: 省略({SYSTEM}・{target}): {name}: {items[0][1]}')
+    print(f'R4R: 既存({target}): {result.testsRun} 件・省略 {len(skipped)} 件・入口の起動 '
+          f'{len(launches.read_text().splitlines())} 回')
 
 
 if __name__ == '__main__':

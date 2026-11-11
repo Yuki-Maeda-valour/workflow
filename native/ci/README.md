@@ -144,11 +144,16 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 - 各回に`check_r4r.py --fixture <今回作ったr4r_contractの絶対パス>`を必須実行します(`r4r_probe()`)。通常の製品CLIへR4Rを登録して代用しません。
 - `verify-universal`は同じ署名後の`r4r_contract`を受け取り、Intel/Apple Siliconの両CPUで専用比較を実行します。専用比較の失敗は工程全体の失敗です。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4r_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
-- 比較はPython3.10系・非rootで行い、Cコンパイラ(`cc`)を要ります。`cc` が無ければ省略せずに失敗します。Linuxの`build`はすでに`cc`を使います。Macの実行機に`cc`があるかは未確認です。
+- 比較はPython3.10系・非rootで行い、Cコンパイラ(`cc`)を要ります。`cc` が無ければ省略せずに失敗します。
+  - 4機種の実行機に`cc`があることは、[PR #483のCI](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43040473054)(attempt 1)で確かめました。Linux 2機種は比較が成功し、Mac 2機種は観測器を組む自己検査が成功しました。
 - Linuxでは自己検査16件・既存33件の2回・追加25件を必須実行し、手元のLinux x86_64で約100秒でした。Macでは自己検査16件・既存18件の2回・追加9件を流します。Macでの時間は未確認です。
+- 比べる配置は、一時フォルダの実体のパスに置きます。Macの`/var`は`/private/var`へのリンクで、リンクを含むパスでは旧helperとRustが退避本文を開けずに止まるからです。
+- Macの出力先を差し替える実験3件のうち、`test_partial_direct_write_then_two_failures_is_33`だけが、`--version`だけに答える観測器をcpに使います。MacのcpはBSD版で`--version`に答えないからです。ほかの2件は変えていません(1件は本物のcp、1件はcpを使わない)。
+- 自己検査が落ちても、後の段(既存の2回・追加の境界・`EAGAIN`の記録)を省かずに流し、最後に終了値1で失敗します。落ちた件の名前と例外の行は、`R4R: 不合格(<段>)`の行に出ます。
 - `policy`の`build.py test`は、`quality()`・`r4r_probe()`・`verify_universal()`の接続と、検査用実行物が配布物へ入らないことを確かめます。
 
-R4Rの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認の4機種CI・Mac実機・最低OS・最終全回帰テストは区別します。
+R4Rの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認のMac実機・最低OS・最終全回帰テストは区別します。
+上のPR用CIでは、Mac 2機種が比較器の自己検査で落ちたので、Macの比較の本体はまだCIで流れていません。比較器は直しましたが、直した後のMacのCIは未実施です。記録は [testing.md](../../docs/testing.md#pr用ciの記録run-43040473054) にあります。
 
 ## ワークフローの検査
 

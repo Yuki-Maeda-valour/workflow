@@ -92,9 +92,11 @@ sys.exit(code)
 
 # --cp を包み、子が受け取るものを 1 つだけ変える。包みは Python の os.execv にそろえる(シェルは
 # PWD などを足すので使わない)。Python が起動時に変える SIGPIPE・SIGXFSZ は既定へ戻してから exec する。
+# 旧 helper は --cp を os.path.realpath で解決し、その結果を実行するパスと argv[0] に使うので、包みも
+# 控えた --cp を同じく解決してから exec する(Mac の /var のように、リンクを含むパスでも同じ argv[0])。
 WRAPPER_HEAD = ('#!{python} -IB\nimport os, resource, signal, sys\n'
                 'signal.signal(signal.SIGPIPE, signal.SIG_DFL)\nsignal.signal(signal.SIGXFSZ, signal.SIG_DFL)\n'
-                't = open(sys.argv[0] + ".target").read()\nargs = sys.argv[1:]\nzero = t\n')
+                't = os.path.realpath(open(sys.argv[0] + ".target").read())\nargs = sys.argv[1:]\nzero = t\n')
 WRAPPERS = {
     'none': '',
     # --version の起動も壊す(Mac ではコピーの子が起動されないことがあるため)。観測器は 2 番目以降を見ない。
@@ -120,6 +122,7 @@ FAKE_FIELDS = {'none': [], 'line': ['stdout'], 'order': ['stdout'], 'code': ['re
 class Comparator(unittest.TestCase):
     def setUp(self):
         self.m = get_subject()
+        self.m.use_real_tempdir()
         self.base = Path(tempfile.mkdtemp(prefix='r4r-self-'))
         self.addCleanup(shutil.rmtree, self.base, True)
 
@@ -271,12 +274,17 @@ class Comparator(unittest.TestCase):
         with mock.patch.object(self.m, 'FIXTURE', fixture):
             return self.m.run_pair(case.scenario(timeout=timeout))
 
-    def fake_differences(self, fixture, stub='gnu'):
-        """run_pair と同じ手順で流し、旧と偽物で違った欄の一覧を返す。"""
+    def fake_differences(self, fixture, stub='gnu', alias=False):
+        """run_pair と同じ手順で流し、旧と偽物で違った欄の一覧を返す。alias では --cp をリンクの
+        フォルダ経由で渡す(Mac の /var のように、旧 helper の realpath で別のパスになる形)。"""
         case = self.m.Contract('test_files')
         case.setUp()
         self.addCleanup(case.doCleanups)
         case.stub(stub)
+        if alias:
+            link = case.base / 'cp-alias'
+            link.symlink_to(Path(case.cp).parent, target_is_directory=True)
+            case.cp = str(link / Path(case.cp).name)
         sc = case.scenario()
         with mock.patch.object(self.m, 'FIXTURE', fixture):
             self.m.snapshot(sc.root, sc.base / 'backup')
@@ -290,6 +298,9 @@ class Comparator(unittest.TestCase):
         # 正しい例(旧 helper を流すだけの偽物と、何も変えない包み)では、どの欄も違わない。
         self.assertEqual(self.fake_differences(self.fake('none'), stub), [])
         self.assertEqual(self.fake_differences(self.fake('none', 'none'), stub), [])
+        # --cp がリンクを含むパスでも、何も変えない包みは違わず、argv[0] を変える包みだけが違う。
+        self.assertEqual(self.fake_differences(self.fake('none', 'none'), stub, alias=True), [])
+        self.assertEqual(self.fake_differences(self.fake('none', 'argv0'), stub, alias=True), ['cp.argv0'])
         for mode, fields in FAKE_FIELDS.items():
             if mode == 'none':
                 continue
@@ -390,26 +401,28 @@ class Comparator(unittest.TestCase):
         result = unittest.TestResult()
         name = self.m.SIXTEEN[0]
         records = {('R', name): [('pair', 0, b''), ('launches', 1)]}
-        self.m.compare_existing(records, launches, [name], result)
+        # ここから Linux の経路(ACL の省略の照合が無い)。Mac の実機でも Linux の経路を確かめるので、
+        # OS を明示する(省略すると実行した OS になり、Mac では ACL の照合に当たる)。
+        self.m.compare_existing(records, launches, [name], result, system='linux')
         # 入口が起動されなかった件・比べずに起動した回・記録の無い起動は失敗。
         for broken in ([('launches', 0)], [('pair', 0, b''), ('launches', 2)], [('launches', 1)],
                        [('pair', 0, b''), ('pair', 0, b''), ('launches', 1)]):
             with self.assertRaises(AssertionError):
-                self.m.compare_existing({('R', name): broken}, launches, [name], result)
+                self.m.compare_existing({('R', name): broken}, launches, [name], result, system='linux')
         launches.write_text('')
         with self.assertRaises(AssertionError):
-            self.m.compare_existing(records, launches, [name], result)
+            self.m.compare_existing(records, launches, [name], result, system='linux')
         # 直接起動の件の回の関係が L と R で違えば失敗。
         launches.write_text('rust\n')
         direct = self.m.DIRECT[0]
         same = [('run', 33, b'x', b''), ('end', {'temp-dirs': 0})]
         records = {('L', direct): list(same), ('R', direct): list(same) + [('launches', 1)],
                    ('R', name): [('pair', 0, b''), ('launches', 1)]}
-        self.m.compare_existing(records, launches, [name, direct], result)
+        self.m.compare_existing(records, launches, [name, direct], result, system='linux')
         for broken in ([('run', 20, b'x', b''), same[1]], [same[0], ('end', {'temp-dirs': 1})], same[:1]):
             records[('R', direct)] = broken + [('launches', 1)]
             with self.assertRaises(self.m.ComparisonError):
-                self.m.compare_existing(records, launches, [name, direct], result)
+                self.m.compare_existing(records, launches, [name, direct], result, system='linux')
         # Mac の分岐: ACL の件が L と R の両方で、既存の理由で省かれていなければ失敗。
         records[('R', direct)] = list(same) + [('launches', 1)]
 
@@ -432,6 +445,16 @@ class Comparator(unittest.TestCase):
         """Mac の分岐(代用品の cp の受け手の保持・結果だけを比べる 8 件の包み・対照のコピー・ACL の
         省略の照合)を Linux で模擬する。Mac の成功には数えない。"""
         print('R4R: Mac の分岐を Linux で模擬する(Mac の成功には数えない)')
+        # Mac の既定の一時フォルダ(/var/folders/…)は /var がリンク。比較器は配置をリンクを含まない実体の
+        # パスに置く(旧 helper と Rust は親の各段をリンクを辿らずに開くので、置かないと退避本文を開けずに
+        # taskmd-body で止まり、意図した経路に届かない)。
+        real = self.base / 'real-tmp'
+        real.mkdir()
+        linked = self.base / 'linked-tmp'
+        linked.symlink_to(real, target_is_directory=True)
+        with mock.patch.object(tempfile, 'tempdir', str(linked)):
+            self.assertEqual(self.m.use_real_tempdir(), os.path.realpath(real))
+            self.assertEqual(tempfile.gettempdir(), os.path.realpath(real))
         target = 'rust' if self.m.FIXTURE else 'legacy'
         real_which = shutil.which
 
