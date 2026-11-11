@@ -10,3 +10,6 @@ pub mod task_digest;
 
 /// R4B専用の生バイト入出力と直接子の回収。
 pub mod r4b_process;
+
+/// R4R専用のタスク本文の復元の OS の操作。
+pub mod restore_taskmd;

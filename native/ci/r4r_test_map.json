@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "note": "旧テスト(scripts/test_restore_taskmd.py)の内部を差し替える 46 件 → Rust の単体テスト(cargo test -p dev-workflow-cli --example r4r_contract)。os は流す OS。成功のコピーが要る件は linux だけ。",
+  "tests": {
+    "test_cleanup_after_publish_failure_is_not_success": {
+      "rust": "restore_taskmd::tests::test_cleanup_after_publish_failure_is_not_success",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_cleanup_deadline_retains_temp": {
+      "rust": "restore_taskmd::tests::test_cleanup_deadline_retains_temp",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_cleanup_failure_reports_non_utf8_exact_retained_path": {
+      "rust": "restore_taskmd::tests::test_cleanup_failure_reports_non_utf8_exact_retained_path",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_copy_deadline_term_ignore_kill_and_reap": {
+      "rust": "restore_taskmd::tests::test_copy_deadline_term_ignore_kill_and_reap",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_copy_failure_preserves_existing_and_absent": {
+      "rust": "restore_taskmd::tests::test_copy_failure_preserves_existing_and_absent",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_corrupt_prepared_bytes_are_never_published": {
+      "rust": "restore_taskmd::tests::test_corrupt_prepared_bytes_are_never_published",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_cp_launch_failure_in_probe_is_runtime_unavailable": {
+      "rust": "restore_taskmd::tests::test_cp_launch_failure_in_probe_is_runtime_unavailable",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_cp_version_timeout_stops_and_reaps_direct_child": {
+      "rust": "restore_taskmd::tests::test_cp_version_timeout_stops_and_reaps_direct_child",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_deadline_before_and_after_publication": {
+      "rust": "restore_taskmd::tests::test_deadline_before_and_after_publication",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_fd_alias_device_mismatch_is_fd_copy_unavailable": {
+      "rust": "restore_taskmd::tests::test_fd_alias_device_mismatch_is_fd_copy_unavailable",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_final_mask_restoration_failure_preserves_one_final_result": {
+      "rust": "restore_taskmd::tests::test_final_mask_restoration_failure_preserves_one_final_result",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_final_mask_setup_failure_has_no_valid_response": {
+      "rust": "restore_taskmd::tests::test_final_mask_setup_failure_has_no_valid_response",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_final_output_failure_never_returns_success": {
+      "rust": "restore_taskmd::tests::test_final_output_failure_never_returns_success",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_final_response_captured_signal_before_output_is_failure": {
+      "rust": "restore_taskmd::tests::test_final_response_captured_signal_before_output_is_failure",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_final_response_commit_masks_signal_until_single_result_written": {
+      "rust": "restore_taskmd::tests::test_final_response_commit_masks_signal_until_single_result_written",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_final_signal_mask_boundaries_generate_write_flush_and_unmask": {
+      "rust": "restore_taskmd::tests::test_final_signal_mask_boundaries_generate_write_flush_and_unmask",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_hash_reads_are_chunked_and_three_passes_bounded": {
+      "rust": "restore_taskmd::tests::test_hash_reads_are_chunked_and_three_passes_bounded",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_missing_fd_aliases_fails_without_publication": {
+      "rust": "restore_taskmd::tests::test_missing_fd_aliases_fails_without_publication",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_missing_static_api_is_no_temp_and_no_change": {
+      "rust": "restore_taskmd::tests::test_missing_static_api_is_no_temp_and_no_change",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_parent_swap_does_not_write_to_symlink_target": {
+      "rust": "restore_taskmd::tests::test_parent_swap_does_not_write_to_symlink_target",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_parent_swap_forces_unknown_temp_without_stale_path": {
+      "rust": "restore_taskmd::tests::test_parent_swap_forces_unknown_temp_without_stale_path",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_post_publish_verification_failure_is_not_rolled_back": {
+      "rust": "restore_taskmd::tests::test_post_publish_verification_failure_is_not_rolled_back",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_prepare_failure_keeps_original": {
+      "rust": "restore_taskmd::tests::test_prepare_failure_keeps_original",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_prepared_name_swap_is_detected_without_deleting_replacement": {
+      "rust": "restore_taskmd::tests::test_prepared_name_swap_is_detected_without_deleting_replacement",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_probe_cleanup_unverified_entry_is_cleanup_failed": {
+      "rust": "restore_taskmd::tests::test_probe_cleanup_unverified_entry_is_cleanup_failed",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_probe_rename_failure_is_runtime_unavailable": {
+      "rust": "restore_taskmd::tests::test_probe_rename_failure_is_runtime_unavailable",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_probe_setup_failure_is_runtime_unavailable": {
+      "rust": "restore_taskmd::tests::test_probe_setup_failure_is_runtime_unavailable",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_published_name_swap_reports_changed_and_preserves_foreign_inode": {
+      "rust": "restore_taskmd::tests::test_published_name_swap_reports_changed_and_preserves_foreign_inode",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_replace_failure_preserves_original": {
+      "rust": "restore_taskmd::tests::test_replace_failure_preserves_original",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_response_size_checked_before_temp_creation": {
+      "rust": "restore_taskmd::tests::test_response_size_checked_before_temp_creation",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_second_fd_alias_candidate_can_succeed": {
+      "rust": "restore_taskmd::tests::test_second_fd_alias_candidate_can_succeed",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_signal_during_real_replace_keeps_replaced_state": {
+      "rust": "restore_taskmd::tests::test_signal_during_real_replace_keeps_replaced_state",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_signals_at_every_boundary_report_actual_change_once": {
+      "rust": "restore_taskmd::tests::test_signals_at_every_boundary_report_actual_change_once",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_source_short_read_growth_and_same_size_mutation": {
+      "rust": "restore_taskmd::tests::test_source_short_read_growth_and_same_size_mutation",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_already_exited_waits_once": {
+      "rust": "restore_taskmd::tests::test_stop_child_already_exited_waits_once",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_exits_after_kill_reaped_by_final_check": {
+      "rust": "restore_taskmd::tests::test_stop_child_exits_after_kill_reaped_by_final_check",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_exits_after_terminate_without_kill": {
+      "rust": "restore_taskmd::tests::test_stop_child_exits_after_terminate_without_kill",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_never_exits_marks_unreaped": {
+      "rust": "restore_taskmd::tests::test_stop_child_never_exits_marks_unreaped",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_reaps_during_wait_loop": {
+      "rust": "restore_taskmd::tests::test_stop_child_reaps_during_wait_loop",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_terminate_oserror_proceeds_to_kill": {
+      "rust": "restore_taskmd::tests::test_stop_child_terminate_oserror_proceeds_to_kill",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_terminate_oserror_proceeds_to_wait_loop": {
+      "rust": "restore_taskmd::tests::test_stop_child_terminate_oserror_proceeds_to_wait_loop",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_unreaped_flag_returns_false_without_calls": {
+      "rust": "restore_taskmd::tests::test_stop_child_unreaped_flag_returns_false_without_calls",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_stop_child_without_child_returns_true": {
+      "rust": "restore_taskmd::tests::test_stop_child_without_child_returns_true",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_target_created_after_absence_check_is_not_overwritten": {
+      "rust": "restore_taskmd::tests::test_target_created_after_absence_check_is_not_overwritten",
+      "os": [
+        "linux"
+      ]
+    },
+    "test_unexpected_exception_emits_no_traceback_or_content": {
+      "rust": "restore_taskmd::tests::test_unexpected_exception_emits_no_traceback_or_content",
+      "os": [
+        "linux",
+        "darwin"
+      ]
+    },
+    "test_unreaped_child_uses_single_stop_budget_and_retains_temp": {
+      "rust": "restore_taskmd::tests::test_unreaped_child_uses_single_stop_budget_and_retains_temp",
+      "os": [
+        "linux"
+      ]
+    }
+  }
+}
