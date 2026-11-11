@@ -2,6 +2,8 @@
 //! R4U(#480)の文字列だけの部品の単体検査。固定期待は本家 CPython 3.10.11 の実測
 //! (native/fixtures/r4u/ の gen_unit_fixtures.py・gen_matcher_corpus.py が作る)。
 #[path = "../src/commands/check_links/mod.rs"]
+// 入口(run)と OS の部品は tests/check_links.rs が別プロセスで検査する。ここでは文字列の部品だけを使う。
+#[allow(dead_code)]
 mod check_links;
 
 use check_links::matcher::{self, Found};
@@ -683,4 +685,136 @@ fn pieces_follow_cpython_write_calls() {
             .iter()
             .any(|piece| piece.text == "  [Previous line repeated 995 more times]\n")
     );
+}
+
+#[test]
+fn doc_is_the_legacy_docstring() {
+    // print(__doc__) で出す本文は、旧版の先頭の docstring(三重引用符の間)と同じ。
+    let legacy = std::fs::read_to_string(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../plugins/dev-workflow/skills/update-doc/scripts/check_links.py"
+    ))
+    .expect("旧版を読めない");
+    let start = legacy.find("\"\"\"").expect("docstring の始まりが無い") + 3;
+    let end = start
+        + legacy[start..]
+            .find("\"\"\"")
+            .expect("docstring の終わりが無い");
+    assert_eq!(check_links::legacy::DOC, &legacy[start..end]);
+}
+
+#[test]
+fn startup_flags_follow_cpython_parsing() {
+    use check_links::startup::{env_flag, hash_seed_valid, int_max_str_digits_valid, str_to_int};
+    // _Py_str_to_int(strtol を全体で読み、int に収まるとき)。
+    for (text, expected) in [
+        ("0", Some(0)),
+        ("2", Some(2)),
+        (" 2", Some(2)),
+        ("\t\n\x0b\x0c\r+7", Some(7)),
+        ("-3", Some(-3)),
+        ("-0", Some(0)),
+        ("2 ", None),
+        ("+", None),
+        ("- 1", None),
+        ("0x10", None),
+        ("2147483647", Some(i32::MAX)),
+        ("2147483648", None),
+        ("-2147483648", Some(i32::MIN)),
+        ("99999999999999999999", None),
+        ("", None),
+    ] {
+        assert_eq!(str_to_int(text.as_bytes()), expected, "{text:?}");
+    }
+    // _Py_get_env_flag(読めない値と負の値は 1)。
+    for (value, expected) in [
+        (None, 0),
+        (Some("0"), 0),
+        (Some("000"), 0),
+        (Some(" 0"), 0),
+        (Some("2"), 2),
+        (Some("x"), 1),
+        (Some("-1"), 1),
+        (Some("2 "), 1),
+    ] {
+        assert_eq!(env_flag(value.map(str::as_bytes)), expected, "{value:?}");
+    }
+    // config_init_hash_seed(random か strtoul で 0〜4294967295)。
+    for (value, expected) in [
+        (None, true),
+        (Some("random"), true),
+        (Some("Random"), false),
+        (Some("0"), true),
+        (Some(" 7"), true),
+        (Some("+7"), true),
+        (Some("-0"), true),
+        (Some("-1"), false),
+        (Some("4294967295"), true),
+        (Some("4294967296"), false),
+        (Some("5 "), false),
+        (Some("999999999999999999999999999999"), false),
+    ] {
+        assert_eq!(
+            hash_seed_valid(value.map(str::as_bytes)),
+            expected,
+            "{value:?}"
+        );
+    }
+    // config_init_int_max_str_digits(0 か 640 以上)。
+    for (value, expected) in [
+        (None, true),
+        (Some("0"), true),
+        (Some("640"), true),
+        (Some("639"), false),
+        (Some("-1"), false),
+        (Some("x"), false),
+        (Some("2147483648"), false),
+    ] {
+        assert_eq!(
+            int_max_str_digits_valid(value.map(str::as_bytes)),
+            expected,
+            "{value:?}"
+        );
+    }
+}
+
+#[test]
+fn recursion_limits_match_measured_tracebacks() {
+    // linux.json の深い木(995 段)と長いリンクの列(1100 個)で、最初に RecursionError になった深さが境目。
+    let linux = load(LINUX);
+    let repeat = |id: &str| {
+        list(&linux["tracebacks"])
+            .iter()
+            .find(|case| case["id"] == id)
+            .and_then(|case| case["chain"][0]["repeat"].as_u64())
+            .expect("呼出履歴の固定期待が無い") as usize
+    };
+    assert_eq!(
+        check_links::fsops::RGLOB_RECURSION_DEPTH,
+        repeat("rglob-recursion")
+    );
+    assert_eq!(
+        check_links::fsops::LINK_RECURSION_DEPTH,
+        repeat("link-resolve-recursion")
+    );
+    assert_eq!(
+        check_links::fsops::LINK_RECURSION_DEPTH,
+        repeat("code-resolve-recursion")
+    );
+}
+
+#[test]
+#[should_panic(expected = "main の前の控えが無い")]
+fn run_without_capture_panics_before_any_output() {
+    // この単体検査の実行物は main の前の控えを置かない。入口は何も書かずに panic する(呼出元の誤り)。
+    assert!(!dev_workflow_platform::check_links::captured_before_main());
+    assert_eq!(
+        dev_workflow_platform::check_links::sigpipe_ignored_at_start(),
+        None
+    );
+    assert_eq!(
+        dev_workflow_platform::check_links::std_valid_at_start(1),
+        None
+    );
+    check_links::run(&[]);
 }

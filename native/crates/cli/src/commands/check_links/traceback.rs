@@ -240,6 +240,8 @@ pub enum Site {
     ResolveGetcwd(Resolve),
     /// `resolve` の後の stat の ELOOP(前の例外。呼出元のフレームを持たない)。
     ResolveStat,
+    /// `resolve` の後の stat の NUL(ValueError。輪で止まった残りの部品に NUL があるとき)。
+    ResolveStatValue(Resolve),
     /// ELOOP から作る RuntimeError(後の例外)。
     ResolveLoop(Resolve),
     /// リンクを辿る深さが再帰の上限に当たったとき(isabs の `_get_sep` の isinstance)。
@@ -314,6 +316,7 @@ impl Site {
                 ABSPATH_GETCWD,
             ],
             Site::ResolveStat => vec![RESOLVE_STAT, STAT],
+            Site::ResolveStatValue(call) => vec![MODULE, call.frame(), RESOLVE_STAT, STAT],
             Site::ResolveLoop(call) => vec![MODULE, call.frame(), RESOLVE_CHECK_ELOOP, CHECK_ELOOP],
             Site::ResolveRecursion { call, depth } => {
                 realpath(call, depth, &[JOINREALPATH_ISABS, ISABS_SEP, GET_SEP])
