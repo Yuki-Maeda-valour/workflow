@@ -24,7 +24,7 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 - `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、各回の製品用実行物とR4B・R4R検査用実行物の上記の検査を行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。R4B・R4R検査用実行物の署名検査と専用比較も行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
-- CIの工程全体の上限は`build`が60分、`verify-universal`が30分です。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。新上限でのMac完走は未確認です。
+- CIの工程全体の上限は`build`が60分、`verify-universal`が30分です。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。Macの`build`は、run 43085911008で新上限の中で終わりました(x86_64が44分46秒、arm64が28分35秒)。`verify-universal`は、run 43085911008でMac arm64が13分9秒、Mac x86_64が17分8秒で成功しました(上限30分)。同じcommitのpush用のrun 43085900763では、Mac x86_64が26分39秒で、上限まで残り約3分でした。2つのrunとも`distribution`の工程は待ちのまま始まらず、GitHub側の実行機の割り当ての問題と推測しています。推測の根拠(HTTP 502の記録と、mainの過去のrunの`distribution`の成功)は [testing.md](../../docs/testing.md#pr用ciの記録run-43085911008) にあります。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
 
 Linux で指定する名前は `linux-x86_64`・`linux-arm64` です。
@@ -146,14 +146,15 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4r_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
 - 比較はPython3.10系・非rootで行い、Cコンパイラ(`cc`)を要ります。`cc` が無ければ省略せずに失敗します。
   - 4機種の実行機に`cc`があることは、[PR #483のCI](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43040473054)(attempt 1)で確かめました。Linux 2機種は比較が成功し、Mac 2機種は観測器を組む自己検査が成功しました。
-- Linuxでは自己検査16件・既存33件の2回・追加25件を必須実行し、手元のLinux x86_64で約100秒でした。Macでは自己検査16件・既存18件の2回・追加9件を流します。Macでの時間は未確認です。
+- Linuxでは自己検査19件・既存33件の2回・追加25件を必須実行します。手元のLinux x86_64では、2026-11-11に約100秒(自己検査16件の時点)、2026-11-12に約122秒でした。Macでは自己検査19件・既存18件の2回・追加9件を流します。Macの`build`の工程全体は、run 43085911008でx86_64が44分46秒、arm64が28分35秒でした(上限60分)。R4Rの比較だけの時間は、Mac arm64で1回あたり約69秒でした。Mac x86_64の比較だけの時間は未確認です。
+- Macでは、旧helperの子にだけ付く`__CF_USER_TEXT_ENCODING`の1項目を、条件をすべて満たすときだけ旧の側から除いて比べます(2026-11-12 02:41の決定)。Rustの側は除きません。条件と記録の行は [testing.md](../../docs/testing.md#r4rの比較) にあります。
 - 比べる配置は、一時フォルダの実体のパスに置きます。Macの`/var`は`/private/var`へのリンクで、リンクを含むパスでは旧helperとRustが退避本文を開けずに止まるからです。
 - Macの出力先を差し替える実験3件のうち、`test_partial_direct_write_then_two_failures_is_33`だけが、`--version`だけに答える観測器をcpに使います。MacのcpはBSD版で`--version`に答えないからです。ほかの2件は変えていません(1件は本物のcp、1件はcpを使わない)。
 - 自己検査が落ちても、後の段(既存の2回・追加の境界・`EAGAIN`の記録)を省かずに流し、最後に終了値1で失敗します。落ちた件の名前と例外の行は、`R4R: 不合格(<段>)`の行に出ます。
 - `policy`の`build.py test`は、`quality()`・`r4r_probe()`・`verify_universal()`の接続と、検査用実行物が配布物へ入らないことを確かめます。
 
 R4Rの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認のMac実機・最低OS・最終全回帰テストは区別します。
-上のPR用CIでは、Mac 2機種が比較器の自己検査で落ちたので、Macの比較の本体はまだCIで流れていません。比較器は直しましたが、直した後のMacのCIは未実施です。記録は [testing.md](../../docs/testing.md#pr用ciの記録run-43040473054) にあります。
+上のPR用CI(run 43040473054)では、Mac 2機種が比較器の自己検査で落ちました。直した後のrun 43067201954ではMacの比較の本体が流れ、追加の境界の7件が`__CF_USER_TEXT_ENCODING`の差で落ちました。この1項目を除くようにした後のrun 43085911008では、Mac 2機種の`build`が成功しました。記録は [testing.md](../../docs/testing.md#pr用ciの記録run-43040473054) と、その後の2回の節にあります。
 
 ## ワークフローの検査
 

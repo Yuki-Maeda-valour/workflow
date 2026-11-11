@@ -309,7 +309,7 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 - `crates/cli/examples/r4r_contract.rs` は検査専用入口です。`args_os()` からプログラム名を除いた argv を、旧helperと同じ形で受けます。故障を注入する環境変数や、時間を縮める入口はありません。
 - Rust の単体テストは、Linuxで57件(Macは26件)です。`cargo test --locked -p dev-workflow-cli --example r4r_contract` だけで流れます。Linuxだけの31件は `crates/cli/src/commands/restore_taskmd/tests.rs` の `#[cfg(target_os = "linux")]` の件です。旧テストのうち内部を差し替える46件の対応先は、`native/ci/r4r_test_map.json` にあります。
 
-旧版との差を認めた所はありません。
+認めた差は、2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけです。Macの旧Pythonが子の環境に足す変数を、比較から外します。Rustはこの変数を足しません。
 契約と、R4Rでは比べない4件は [設計のR4R節](../docs/design.md#タスク本文の復元の内部部品r4r)にあります。
 [比較の手順と件数](../docs/testing.md#r4rの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
 
