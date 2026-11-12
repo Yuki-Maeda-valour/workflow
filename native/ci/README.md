@@ -7,6 +7,8 @@
 
 リポジトリ直下から実行します。CIの補助はPython 3.10以上と標準ライブラリを使います。R4Sの比較には`requirements-dev.txt`の開発依存も必要です。
 旧版との比較を含む `build`・`reproduce`・`verify-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
+`r4d1` も、Python 3.10 系と root 以外の通常利用者での実行が必要です。
+`r4d1` には、reftable(Git が参照を表の形のファイルに保存する形式)を作れる git 2.45 以上も必要です。欠ければ失敗にします。
 `CARGO_TARGET_DIR` にはリポジトリの外のフォルダを指定してください。
 CIの`build.py`呼出しは、コマンド名を先に置き、その後にオプションを指定します。オプション先行形と`--`を先に置く形はCI定義の検査で拒否します。
 CI では `RUNNER_TEMP/native-ci` が既定です。`CARGO_HOME` は呼び出し側の値を保ちます。
@@ -17,6 +19,7 @@ python3 -B native/ci/source_input_hash.py --root .
 python3 -B native/ci/build.py test
 python3 -B native/ci/build.py prepare --platform linux-x86_64
 python3 -B native/ci/build.py build --platform linux-x86_64
+python3 -B native/ci/build.py r4d1 --platform linux-x86_64
 ```
 
 - `prepare`: 実行中のPythonで`pip install -r requirements-dev.txt`を行い、Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
@@ -26,6 +29,8 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。R4B・R4R検査用実行物の署名検査と専用比較も行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
 - CIの工程全体の上限は`build`が60分、`verify-universal`が30分です。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。Macの`build`は、run 43085911008で新上限の中で終わりました(x86_64が44分46秒、arm64が28分35秒)。`verify-universal`は、run 43085911008でMac arm64が13分9秒、Mac x86_64が17分8秒で成功しました(上限30分)。同じcommitのpush用のrun 43085900763では、Mac x86_64が26分39秒で、上限まで残り約3分でした。2つのrunとも`distribution`の工程は待ちのまま始まらず、GitHub側の実行機の割り当ての問題と推測しています。推測の根拠(HTTP 502の記録と、mainの過去のrunの`distribution`の成功)は [testing.md](../../docs/testing.md#pr用ciの記録run-43085911008) にあります。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
+- `r4d1`: `build` の後の必須ジョブです。上限は 30 分です。次の比較のコマンドを `quality()` と同じ環境で流し、比較のテストがちょうど 1 件合格したことを確かめます。比較のテストには `#[ignore]` の印があり、通常の `cargo test` では流れません(結果は `ignored`)。
+  - `cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input`
 
 Linux で指定する名前は `linux-x86_64`・`linux-arm64` です。
 Mac は `macos-x86_64`・`macos-arm64` です。対象と同じ OS・CPU でビルドします。
@@ -252,6 +257,16 @@ attempt 1 は、build (macos-x86_64) の成果物の保存が GitHub 側の通�
 - ジョブ `build` では比較が流れませんでした(`R4U の比較は流していない: ` の行があり、`R4U の比較: ` の行はありません)。
 - ジョブ `r4u` の時間は、最も長い Mac x86_64 でも3分21秒でした(上限30分)。機械ごとの時間は [testing.md](../../docs/testing.md#check_links-の比較r4u) の「R4U の時間の記録」にあります。
 - Task 3.1c の前(run 43118591090・commit 5b142a1)は比較が `build` の中で流れ、Mac x86_64 の `build` は43分29秒でした(上限60分)。
+
+## R4D-1の必須比較
+
+#481 の診断の reftable の比較は、build の後の専用ジョブ `r4d1` で流します(#488)。4 機種(Linux 2 種・Mac 2 種)で、`build.py r4d1 --platform <機械>` を流します。
+- 通常の `cargo test --locked` では、比較のテストは流れません。`quality()` も比較を流しません。
+- `r4d1()` は、`quality()` と同じ環境(`build_environment()`・Python 3.10.11・root 以外)で比較のコマンドを 1 回流します。標準出力は 1 行ずつ CI のログに出します。
+- 比較のテストがちょうど 1 件合格したことを確かめます。0 件・飛ばし・別のテストの合格・時間切れは、合格にしません。
+- `distribution` の `needs` には入れません。必須 CI の全ジョブの成功を確かめてから merge する決まり([testing.md](../../docs/testing.md#共通の終了値と入出力の検査c0a))があるので、必須です。
+  - この決まりは、CI が自動で止めるものではありません。merge の前に、管理担当が `r4d1` を含む全ジョブの成功を確かめます。
+- 件数と時間は [testing.md](../../docs/testing.md#r4d-1-の-reftable-の比較) にあります。
 
 ## ワークフローの検査
 

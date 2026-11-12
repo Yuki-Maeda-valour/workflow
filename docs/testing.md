@@ -718,6 +718,123 @@ run 43157591744(commit 841eb03)の attempt 2 の値である。比較と自己�
 CI での必須の経路(ジョブ `r4u` と `build.py r4u`)は、[CI入口の説明](../native/ci/README.md#check_links-の必須比較r4u)にある。
 R4U は検査用の実行物を別に作らない。CI の転送と、配布用の `native-dist.tar` は変わらない。
 
+### R4D-1 の reftable の比較
+
+#481 の診断の reftable の読み取りは、製品 CLI へ未登録・未配布の開発用実装である。
+[契約](design.md#診断の-reftable-の読み取りr4d-1)、[API](../native/README.md#診断の-reftable-の読み取りr4d-1) を参照する。
+
+- 言葉: reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式である。
+  - table は reftable の 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体である。
+  - section は table の中の、種類ごとのまとまり(参照・object・log など)である。block は section の中の 1 つの区切りである。
+  - varint は長さが変わる整数の書き方である。
+  - header と footer は table の頭と末尾の管理情報、CRC は誤りを見つけるための検査値である。
+  - index は、目的の block を探すための索引の block である。
+  - シンボリック参照は、ほかの参照を指す参照である(例 `HEAD` → `refs/heads/main`)。
+- G1 の table は次の 9 個である。
+  - T1: 版 1 の sha1。T2: 版 2 の sha1。T3: 版 2 の sha256。
+  - T4: シンボリック参照と、UTF-8 でない名前を含む。
+  - T5 と T6: 削除の印を含む 2 段の stack の、古い table と新しい table。
+  - T7: 2 段の index。Rust の検査の定数 `T7_TABLE` と同じバイト列である。
+  - T8: 本物の git の sha1。T9: 本物の git の sha256。
+
+#### 流し方と前提
+
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。比較は、下のコマンドの `-- --ignored --exact …` の行か `build.py r4d1` で流す。CI は `r4d1` のジョブで流す。専用の実行物は要らない。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input)
+python3 -B native/ci/build.py r4d1 --platform <機械>
+python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
+```
+
+- 前提は Python 3.10 系・root 以外の利用者・reftable を作れる git 2.45 以上である。欠ければ失敗にする(skip にしない)。
+- 比較器は標準ライブラリだけを使う。`requirements-dev.txt` の依存は要らない。
+- 古い git のために別の git の場所を渡す口は無い。
+- git 2.56.0 で確かめた。2.45〜2.55 は手元では未確認である。
+- 流れは、比較器の `--generate` が入力と旧版の結果を作る → Rust が同じ条件で動かす → `--compare` が全件を並びまで比べる、である。
+- `--compare` は、自己検査 21 件の合格、件数の下限、読んだ後に入力が変わっていないこと、T7 の定数の一致も確かめる。
+- 差し込みを入れた Rust の結果では、「量」の条件の入力だけを `--compare --expect-mismatch` で流し、不一致が出ることで比較が働くことを確かめる。
+- 比較の検査 1 回の中の、すべての起動の上限は 900 秒である。比較器は git の各呼び出しに 60 秒の上限を付ける。
+
+#### 入力の組と件数
+
+予算の条件は「通常」「期限切れ」「停止」「N 回目の確かめで期限」「`management_output` の上限を L にする」である。
+
+| 組 | 入力 | 件数(hp-pc の実際の値) |
+|---|---|---|
+| G1 | T1〜T9(合計 4,740 バイト)の全ての長さの切り詰めと、各位置の 1 バイトの変異 | 切り詰め 4,749・変異 18,960 |
+| G1h | header と footer の欄の各バイトの変異(footer の header と CRC は作り直す) | 2,352 |
+| G2 | 既存の 12 件の検査と同じ内容・2001 件以上の参照・空の stack・log だけの table・一覧の文法の異常・順の異常 | 36 |
+| G3 | 上限と順の境界(合計 200MiB・一覧の 1 行 4096 バイト・名前と指す先 1024 バイト・varint) | 14 |
+| G4 | ファイルの代わりのリンクや FIFO・権限・リンクを含むパス・相対パス・NUL・空のパス・誤ったハッシュの形式 | 24 |
+| G5 | 予算だけの操作(9 種類の境界・桁あふれ・期限の固定・停止の印) | 24 |
+| G6 | 本物の git の stack(10 リポジトリ。共有の stack 10・linked worktree の stack 4) | 14 |
+| G7 | UTF-8 でないバイトを名前に含むフォルダの下の stack(Linux だけ) | 1 |
+
+- T8(本物の git の sha1)は 450 バイト、T9(本物の git の sha256)は 2,735 バイトである。T9 の ref index・object・log・log index の位置はどれも 0 でない。
+- 件数の下限は、G1・G1h・G6 は式と一致、G2〜G5 は一覧の長さと一致、性質(`git-*`・`nonutf8-*`・`table-object-section`)は 1 以上である。入力は合計 26,174 件で、不一致は 0 件だった。
+- Mac(APFS)は G7 の入力を作れず、`R4D-1 作れなかった入力: g7-nonutf8-directory(darwin)` の行を出す(run 43146215798 の Mac 2 つで確かめた)。
+- 本物の git は `GIT_TEST_REFTABLE_AUTOCOMPACTION=false` で自動の圧縮を止め、複数の table と削除の印を残す。
+- 旧版の実行の回数は合計 193,905 回で、上限 300,000 回の内側である。うち G1 の切り詰めが 97,809 回、変異が 76,895 回、G1h が 18,382 回で、ほかの組(G2〜G4・G6・G7)が 819 回である(和は合計と合う)。
+- 設計の見積もりと実測の差は次のとおりである。
+  - 見積もり: 旧版の実行は約 20 万回、G1 は約 5.5KB、T9 は git 2.56.0 で 2,857 バイト。
+  - 実測: 旧版の実行は 193,905 回、T1〜T9 の合計は 4,740 バイト、T9 は 2,735 バイト。
+  - T9 の差の理由は未確認である。設計の 2,857 バイトは、検証担当が `git refs optimize`(table をまとめる操作)の後の table で測った値で、生成器の作り方(1 回の `update-ref --stdin` が作った table を取り出す)と違うためと推測される。
+  - 目安(hp-pc で 120 秒以内・Mac Intel で 400 秒以内)は満たした。hp-pc の要約の行は最大 34.2 秒、Mac Intel は 136.4 秒である。
+- 上限を超えたときは、設計の順(T1〜T8 の変異の「量」の条件を減らす → 全件を当てる変異の table を 1 つにする)で減らす。今回は減らしていない。
+
+#### 時間の記録(hp-pc。Linux x86_64・git 2.56.0)
+
+- 2026-11-11〜12 に hp-pc で流した 6 回の観測値である。ほかの担当が同時に走っていたかは未確認である。物差しは CI の表と同じに分ける。
+  - 比較器の要約の行の秒(生成と比べる処理。Rust の実行を含まない): 25.1〜34.2 秒。
+  - 旧版の生成: 15〜18.7 秒。
+  - Rust の実行: 8.1〜9.4 秒(ほかに約 9.6 秒の回があった)。
+  - 比較の検査の関数そのものの時間は別に測っていない(要約の行の秒と Rust の実行の和は約 33〜44 秒で、下の `diagnostic_reftable` 全体の時間の大半を占める)。
+- `cargo test --locked -p dev-workflow-cli --test diagnostic_reftable` 全体(22 件)は 36〜47 秒だった。
+- `cargo test --locked` 全体は、ビルドを含めて 2 分 32 秒〜2 分 49 秒だった。
+- 上の `cargo test` の値は、#481 の時点の手元で、比較を通常の `cargo test --locked` で流していたときに測った値である。#488 の後、比較は `r4d1` のジョブか `build.py r4d1` で流す。`r4d1` のジョブの時間は PR の本文に書く。
+- 自己検査(`native/ci/test_diagnostic_reftable.py`)は 8〜9 秒である。
+- 上限との余裕(CI の Mac Intel の `cargo test` 全体は 2026-11-11 の main で約 528 秒だった)。
+  - この 528 秒は、2026-11-11 の main(#481 より前)の値である。R4D-1 の比較は含まない(`task_digest` の比較の約 416 秒を含む)。
+  - #488 の後、比較は `r4d1()` の 1 回 1,800 秒の上限と、比較の 900 秒の上限の両方が効く。CI では、checkout と `prepare` の後に `r4d1()` が始まるので、`r4d1()` の 1,800 秒より先に、ジョブの上限 30 分に当たる。
+  - build のジョブ全体の上限は 60 分(`.github/workflows/native.yml` の `build`)である。R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac x86_64 の build のジョブは 47 分 10 秒だった。
+
+#### 期限の検査の測定値
+
+実時間の期限の検査は、期限 2 秒・待つ長さの上限 10 秒で、読み取りの k 回目の後に期限を過ぎるまで待ち、次の確かめが `time-limit` になることを確かめる。k は先頭・中央・末尾(T7 の stack は読み取り 25 回)である。
+
+- hp-pc で、予算を作ってから k 回目の読み取りに着くまでの時間は、k=1/13/25 で 0.009〜0.024 / 0.078〜0.139 / 0.095〜0.219 ミリ秒だった(観測した全部の回)。
+- 値は `cargo test` のログに `R4D-1 期限の検査:` の行で残る。
+- 期限の 2 秒は、#469 の決まり(CI での実測の最大の 4 倍以上)に合わせた。
+
+#### CI の値(commit dbb5888 の push。Native の run 43146215798・attempt 1・全ジョブ成功)
+
+[Native の run 43146215798](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43146215798) の build のジョブの値である。#481 の時点では、比較は build のジョブの中で流していた。以降の表の時間は、その時点の測定値である。
+
+| 機械 | git | 比較の時間(要約の行) | 旧版の生成 | Rust の実行 | `diagnostic_reftable` 全体 | 期限の検査 k=1/13/25(ミリ秒) | build のジョブ全体 |
+|---|---|---|---|---|---|---|---|
+| linux-x86_64(ubuntu-24.04) | 2.56.0 | 46.9 秒・入力 26174 件・不一致 0 | 30.7 秒(193,905 回) | 14.5 秒 | 69.48 秒 | 0.021 / 0.142 / 0.165 | 25 分 04 秒 |
+| linux-arm64(ubuntu-24.04-arm) | 2.56.0 | 37.6 秒・入力 26174 件・不一致 0 | 24.0 秒(193,905 回) | 11.9 秒 | 66.13 秒 | 0.009 / 0.107 / 0.128 | 26 分 10 秒 |
+| macos-arm64(macos-15) | 2.56.0 | 65.2 秒・入力 26173 件・不一致 0 | 47.0 秒(193,904 回) | 26.1 秒 | 103.95 秒 | 0.024 / 0.401 / 0.589 | 27 分 36 秒 |
+| macos-x86_64(macos-15-intel) | 2.55.0 | 136.4 秒・入力 26173 件・不一致 0 | 98.2 秒(193,904 回) | 40.1 秒 | 201.12 秒 | 2.342 / 0.244 / 1.483 | 38 分 51 秒 |
+
+- 4 つとも、差し込みの回は「不一致 6689 件・期待どおり失敗」、比較器の自己検査は 21 件合格だった。
+- Mac の 2 つでは `R4D-1 作れなかった入力: g7-nonutf8-directory(darwin)` の行が出て、`g7-nonutf8-directory=0` だった。
+  - 入力は Linux より 1 件少ない 26173 件、旧版の実行も 1 回少ない 193,904 回である。
+  - Linux の 2 つは `g7-nonutf8-directory=1` だった。
+- Mac Intel の git は 2.55.0 で、T9 を含む入力の生成が通った(生成器の大きさと section の確かめを通過)。2.45〜2.54 は未確認のままである。
+- 期限の検査の最大は、Mac Intel の k=1 の 2.342 ミリ秒だった。その 4 倍(約 9.4 ミリ秒)は期限 2 秒より十分小さいので、期限は 2 秒のままにする。
+- verify-universal のジョブは、Mac Intel が 17 分 44 秒、Mac arm64 が 11 分 20 秒だった。
+
+上限との余裕。
+- 比較器の上限 900 秒に対し、最大は Mac Intel の 136.4 秒(`diagnostic_reftable` 全体は 201 秒)だった。
+- build のジョブの最大は 38 分 51 秒で、上限 60 分に対し約 21 分の余裕がある。
+- ただし、R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac Intel の build のジョブは 47 分 10 秒だった(R4R の比較が加わったためと推測される)。
+  - R4D-1 の分(`diagnostic_reftable` 全体の約 3 分 21 秒)を足すと、約 50 分 31 秒の見積もりになる(推測)。この見積もりは、比較を build のジョブで流す #481 の形の値である。
+  - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
+  - 実測は、PR の CI で確かめて PR の本文に書く。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -766,6 +883,10 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 各処理はソース取得の直後にこの検査を流す。PR のソース SHA とリポジトリを明示し、`persist-credentials: false` を付ける。
   - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
   - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
+- `r4d1` のジョブは、`build` の後に、4 機種で R4D-1 の旧版との比較だけを流す。
+  - 上限は 30 分である。`build.py r4d1 --platform <表の値>` が、`quality()` と同じ環境で比較のコマンドを 1 回流す。
+  - 比較のテストがちょうど 1 件合格したことを確かめる。0 件・飛ばし・別のテストの合格・時間切れは、合格にしない。
+  - `distribution` の `needs` には入れない。必須であることは、必須 CI の全ジョブの成功を確かめてから merge する決まりで担う。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
 
 ### ビルド入力の記録
