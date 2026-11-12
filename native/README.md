@@ -392,6 +392,65 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
 
 契約と全コマンド共通の決定の当て方は [設計の R4U 節](../docs/design.md#r4ucheck_linksの文書のリンク検査)にあります。
 [比較の流し方と件数](../docs/testing.md#check_links-の比較r4u)に従ってください。流し方の要点は、[ビルドと検証](#ビルドと検証)の R4U の段落にあります。
+## Markdown の表の XLSX 出力(R4E)
+
+#482で、旧スクリプト `md_tables_to_xlsx.py`(export-doc が使う、Markdown の表を XLSX にするスクリプト)と同じ結果を返す専用モジュールを実装しました。
+製品CLIの登録表・help・`launch.sh`・配布・既存呼出元(export-doc の `SKILL.md`)は変えていません。製品の `dev-workflow md-tables-to-xlsx` は「未知のコマンド」で終了2のままです。製品への接続は、後の配布の段(D4)で行います。
+
+`crates/cli/src/commands/md_tables_to_xlsx/` のファイルと役割は次のとおりです。
+
+| ファイル | 役割 |
+|---|---|
+| `mod.rs` | 入口 `run(&[OsString], &StartupState) -> ExitCode` と、旧版の `main()` の順(引数 → 入力 → 出力先の事前検査 → ブック → 親の作成 → ZIP → `OK` の行)。届いた SIGINT を確かめる所の一覧も、ここにあります |
+| `args.rs` | Python 3.10 の argparse と同じ解析・誤りの出し方・`--help`。折り返しの幅は `COLUMNS` → 標準出力の端末の幅 → 80 から 2 を引き、textwrap の規則で折り返します |
+| `markdown.rs` | 入力の `is_file()`・UTF-8 の厳密な読み取り・行の分割・表の取り出し。Python の `re` の意味を、正規表現の部品(regex の crate)を使わない手書きの照合で保ちます |
+| `sheet_name.rs` | 旧版の `unique_sheet_name` と、openpyxl 3.1.5 の `avoid_duplicate_name`(大文字小文字を区別しない重複の番号) |
+| `paths.rs` | 出力先の事前検査(`output_paths`・`physical_directory`・`posixpath.realpath`・`Path.resolve` など)・Python の再帰の上限の深さ・親の作成(`Path.mkdir`) |
+| `workbook.rs` | ブックの組み立て。セルの型・32767 文字の切り詰め・制御文字と 18279 列の誤り・列幅・シート名の `UserWarning` |
+| `xml.rs` | 各部分の XML のバイト(属性と文字のエスケープ・サロゲートの `&#NNNNN;`)。`app.xml` の文と書式は openpyxl から転記しました |
+| `zip.rs` | ZIP の書き出し(CRC-32・DEFLATE の非圧縮ブロック・中央ディレクトリ・ZIP64 の規則)・出力先の開き方・書き込みの失敗と `ZipFile.__del__` の呼出履歴 |
+| `pyio.rs` | Python の標準出力と標準エラーの溜め方・`print`・起動を変える環境変数・例外の表示・終了処理 |
+| `errors.rs` | 例外の型と文・`repr`・errno の文の表(Linux は glibc の文、Mac は OS の文)・呼出履歴の段の表(固定名・行番号・関数・ソースの行) |
+| `unicode13.rs` | 生成物です。手で直しません。CPython 3.10.11(Unicode 13.0.0)の小文字化・語末のシグマの判定・`re.I` で同じと見なす文字の組・空白の表で、`native/fixtures/r4e/generate_unicode13.py` が作ります |
+| `theme1.xml` | 既定テーマのバイト(10140 バイト)。`xml.rs` が `include_bytes!` で埋め込みます |
+| `NOTICE.md` | openpyxl 3.1.5(MIT ライセンス)から転記した部分と、許諾の全文 |
+
+- `printable`(`repr` のエスケープ)と `decimal`(10 進数字の値)は、R4B の `r4b_support/unicode.rs` を `#[path]` で取り込み、読み取りだけで使います。
+- 新しい crate は足していません。XLSX と ZIP は自前で作ります。
+
+`crates/platform/src/r4e.rs` は、R4E 専用の OS の部品です。Linux と Mac の、64 ビットの x86_64 と aarch64 だけで組みます。
+
+- C の型・関数・定数は `libc` の crate のものを使います。`libc` 0.2.191 に Unix 向けの宣言が無い `tzset` だけを、手で宣言します。
+
+- 起動前の状態: `record_startup_state()`(`main` より前に呼ばれる一覧からだけ呼ぶ)と `startup_state() -> Option<StartupState>`。
+  - `StartupState` は、fd 0〜2 の起動の時点の状態(開いていたか・種類、Python 3.10 がその fd を使うか)と、継いだ `SIGPIPE`・`SIGINT` の扱いを持ちます。
+  - 記録が無いときは `None` で、既定値を作りません。
+- fd: `fd_kind`・`is_terminal`(Linux は glibc と同じく `tcgetattr` で判定)・`terminal_columns`・`stdout_terminal_columns`・`write_once`(`write` を 1 回だけ)・`close_checked`(`close(2)` の誤りを返す)・`block_size`。
+- 信号: `ignore_sigxfsz`・`set_sigpipe_ignored`・`install_python_sigint -> SigintSetup`・`sigint_pending`・`take_sigint`・`sigint_count`・`restore_default_sigint`・`resend_sigint_by_default`。
+  - SIGINT の扱いは、起動時に既定のときだけ置きます。`SA_RESTART` を付けないので、書き込みなどの待ちは `EINTR` で戻ります。
+- 時刻と実行中の thread: `local_time`(`localtime_r`)・`utc_time`・`current_thread_id`(`pthread_self`)。
+- 現在のディレクトリ: `current_dir`。Linux は glibc の `getcwd` と同じ手順で、4096 バイトを超える現在地も得ます。Mac は OS の `getcwd` を使います。
+
+unsafe の置き場は、次の 2 つだけです。
+
+- platform の `r4e.rs` の中。公開するのは安全な関数だけです。
+- `crates/cli/examples/r4e_contract.rs` の、起動前の関数の一覧の項目(1 つの静的変数 `RECORD_STARTUP_STATE`)。
+  - Linux は `.init_array`、Mac は `__DATA,__mod_init_func` に置きます。項目を置く属性(`link_section`)が unsafe の属性なので、example の先頭は `#![deny(unsafe_code)]` にし、この 1 つだけに `#[allow(unsafe_code)]` を付けます。
+  - `md_tables_to_xlsx` の木は `#![forbid(unsafe_code)]` です。platform の木は一覧の項目を持たない(テストの実行ファイルを除く)ので、製品の `dev-workflow` の起動前の関数は増えません。
+
+`crates/cli/examples/r4e_contract.rs` は検査専用の入口です。
+
+- `md_tables_to_xlsx` を `#[path]` で取り込み、`args_os()` からプログラム名を除いた argv を、旧版と同じ形で受けて `run` へ渡します。出力は Python と同じ出し方で、C0a の `emit` は使いません。
+- 起動前の記録が無ければ、`r4e_contract: 起動前の記録がありません` を出して終了70にします(旧版が返さない値です)。
+- 検査専用の隠れた環境変数が 2 つあります。どちらも、値があるときだけ働き、本体を動かさずに終わります。
+  - `R4E_CONTRACT_STARTUP_PROBE`: 起動前の記録と今の fd の種類を、`r4e-startup <要約> now=<種類>` の 1 行で出します。値は `1`(標準出力)・`stderr`(標準エラー)・`file:<パス>`(そのファイル)です。
+  - `R4E_CONTRACT_FRAMES`: 呼出履歴の段の表を、JSON の行で標準出力へ出します。比較器が旧版の環境の実物と照らすのに使います。
+  - 故障を注入する環境変数や、時間を縮める入口はありません。
+- Rust の単体テストは、Linux x86_64 で 114 件です(Mac の件数は未確認)。`cargo test --locked -p dev-workflow-cli --example r4e_contract` だけで流れます。platform の `r4e.rs` の検査は、通常の `cargo test --locked` で流れます。
+
+認めた差は、決定の表にあるものだけです。R4E だけに当てる差は、CSV の経路を移さないこと・XLSX を圧縮しないこと・一時ファイルを使わないことです。
+契約と認めた差の一覧は [設計のR4E節](../docs/design.md#markdown-の表の-xlsx-出力r4e)にあります。
+[比較の手順と件数](../docs/testing.md#r4eの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
 
 ## 診断の reftable の読み取り(R4D-1)
 
