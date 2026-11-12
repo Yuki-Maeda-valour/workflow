@@ -627,12 +627,12 @@ print(json.dumps(result,separators=(',',':')))
     );
     assert_eq!(
         old.get("count"),
-        &V::from(b.count),
+        &V::from(i128::try_from(b.count).unwrap()),
         "MAC_REAL_REJECTION_ITEMS"
     );
     assert_eq!(
         old.get("bytes"),
-        &V::from(b.bytes),
+        &V::from(i128::try_from(b.bytes).unwrap()),
         "MAC_REAL_REJECTION_BYTES"
     );
     assert!(operations.iter().any(|(_,e)|matches!(e,super::observe::Event::Spawn{arguments,..}if arguments.iter().any(|v|v=="--no-includes"))),"MAC_ROOTS_ACTUALLY_SPAWNED");

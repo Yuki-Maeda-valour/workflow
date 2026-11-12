@@ -208,9 +208,14 @@ fn traced<T>(body: impl FnOnce() -> T) -> (T, Vec<Event>) {
     ));
     let result = body();
     drop(guard);
-    let mut events = Rc::try_unwrap(events).unwrap().into_inner();
+    let events = Rc::try_unwrap(events).unwrap().into_inner();
+    // Linux だけが実際の open の監視を足す(Mac では足すものが無いので mut にしない)。
     #[cfg(target_os = "linux")]
-    events.extend(watch.finish());
+    let events = {
+        let mut events = events;
+        events.extend(watch.finish());
+        events
+    };
     (result, events)
 }
 fn opened(events: &[Event], name: &str) -> usize {
