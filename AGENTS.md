@@ -200,11 +200,13 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - R4Sのloop-state用YAML・機密指定・globの純粋部品は#462で実装済み。調査元は#454。公開CLI・配布・呼出元は未変更。契約と唯一の承認済み差は [docs/design.md](docs/design.md#loop-state用の純粋部品r4s)、APIは [native/README.md](native/README.md#loop-state用の純粋部品r4s) にある。
 - R4Aの`task-digest`は#460で開発用ソースへ実装済み。未登録・未配布であり、契約と必須比較は [docs/design.md](docs/design.md#本文の正規化と確認用の値r4a-task-digest)・[docs/testing.md](docs/testing.md#task-digestの比較r4a)にある。
 - R4Bのorigin判定とGit設定の確認値は#461で開発用ソースへ実装済み。未登録・未配布。契約は [docs/design.md](docs/design.md#origin判定とgit設定の確認値r4b)、exampleの必須検査と約9分の比較手順は [docs/testing.md](docs/testing.md#r4bの比較)にある。
+- R4Uの文書のリンク検査(旧`check_links.py`のRust版)は#480で開発用ソースへ実装済み。未登録・未配布。製品の実行物は変えていない(mainの前に呼ぶ控えの処理は検査用の実行物だけにある)。旧版との比較はCIの必須ジョブ `r4u` で流し、`build` では流さない。旧版の固定期待のテストは `scripts/test_check_links.py`(`run-all.py` が集める)。契約と全コマンド共通の決定の当て方は [docs/design.md](docs/design.md#r4ucheck_linksの文書のリンク検査)、比較の流し方と件数は [docs/testing.md](docs/testing.md#check_links-の比較r4u)にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
 - `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
 - C0b/C0c/R4Sの `cargo test --locked` もPython3.10系と非rootを必須とする。R4Sは同じPythonへ `requirements-dev.txt` の依存を入れる。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#loop-state用の純粋部品の検査r4s) にある。
+- R4Uの比較は、`--r4u-compare` を付けない `cargo test --locked` では流れない(`check_links` のテストは `R4U の比較は流していない: ` で始まる1行を出して終了0)。流すときは、`R4U_PYTHON` にCPythonの公式の3.10.11と同じ中身のPython(例: `uv python find 3.10.11` の出力)を渡し、`(cd native && cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare)` を流す。Cコンパイラ `cc` と非rootも必須とする。渡さずに作業機のUbuntuの3.10.12で流すと失敗する(skipしない)。CIでは必須ジョブ `r4u` が流す(2026-11-12 12:59 の決定)。手順は [docs/testing.md](docs/testing.md#check_links-の比較r4u) にある。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
