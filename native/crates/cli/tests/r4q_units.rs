@@ -1,15 +1,20 @@
 #![forbid(unsafe_code)]
-//! R4Q(#494)の単位 1 の単体検査。
+//! R4Q(#494)の単体検査。
 //! - Python の再現の純粋な部品(`commands/r4q_python`)を、本家 CPython 3.10.11 の実測の固定期待
 //!   (`native/fixtures/r4q/units.json`。作り方は同じフォルダの `gen_units.py`)と照らす。
 //! - 監督の OS の部品(platform の `r4q_process`)を、実際のプロセスで確かめる。プロセス全体に効く設定
 //!   (信号の処理・mask・subreaper・SIGCHLD の無視)を変える検査は、このテストの実行物を子として起動し直し、
 //!   その中だけで行う(`in_child`。R4R の `restore_taskmd.rs` と同じ形)。
+//! - 監督と親(`loop_supervisor`・`check_process`)を、OS の操作と時計を差し替えた世界で動かし、旧版を
+//!   mock して作った固定期待(`native/fixtures/r4q/injected.json`。作り方は `gen_injected.py`)と、
+//!   ケースの ID ごとに操作の呼出しの並びと結果を照らす(`injected`)。
 //! - 一時フォルダは cargo の `CARGO_TARGET_TMPDIR`(ビルド先の中)の下に作り、検査の終わりに消す。
-#[path = "../src/commands/r4q_python/mod.rs"]
-// 単位 2・3 で使う関数のうち、この検査で照らさないものがある。
-#[allow(dead_code)]
-mod r4q_python;
+#[path = "../src/commands/check_process/mod.rs"]
+// R4V と比較器が使う関数と、実行物の入口(`run`)のうち、この検査で照らさないものがある。
+#[allow(dead_code, unused_imports)]
+mod check_process;
+
+use check_process::loop_supervisor::r4q_python;
 
 use r4q_python::argparse::{self, Outcome};
 use r4q_python::exception::{self, Filename, OsError};
@@ -604,8 +609,15 @@ fn argparse_parse_matches_legacy_parsers() {
                 };
                 assert_eq!(show(&output), format_of(name, columns, key), "{label}");
             }
-            Outcome::Error(output) => {
+            Outcome::Error(error) => {
                 errors += 1;
+                let output = error.text();
+                // usage の write と `<prog>: error:` の write は別(書く途中の失敗の呼出履歴が分かれる)。
+                assert_eq!(
+                    show(&error.usage),
+                    format_of(name, columns, "usage"),
+                    "{label}"
+                );
                 let message = outcome
                     .get("error")
                     .unwrap_or_else(|| panic!("{label}: 誤りでない {outcome}"));
@@ -828,6 +840,131 @@ fn legacy_tracebacks_match_real_runs() {
     }
     // KeyError の値は、品質コマンドの pid の repr。
     assert_eq!(exception::key_error_message(&PyValue::int(4321)), "4321");
+}
+
+/// argparse を通る書き出しの失敗(help・usage・error の経路と、stdout・stderr の失敗・None)を、本家
+/// 3.10.11 で旧版の main を流した実測(書いた流れと文、終了値か呼出履歴の文)と照らす。
+#[test]
+fn argparse_write_failures_match_legacy() {
+    use legacy::{Stream, WriteStep};
+    let units = units();
+    let cases = list(&units["argparse_writes"]);
+    assert_eq!(cases.len(), 26);
+    let mut chained = 0;
+    for case in cases {
+        let id = case["id"].as_str().unwrap();
+        let (parser, script, doc) = match case["script"].as_str().unwrap() {
+            "check-process.py" => (
+                &argparse::CHECK_PROCESS,
+                legacy::Script::CheckProcess,
+                legacy::CHECK_PROCESS_DOC,
+            ),
+            "loop-supervisor.py" => (
+                &argparse::LOOP_SUPERVISOR,
+                legacy::Script::LoopSupervisor,
+                legacy::LOOP_SUPERVISOR_DOC,
+            ),
+            other => panic!("知らない旧スクリプト: {other}"),
+        };
+        let args: Vec<Vec<u32>> = list(&case["args"]).iter().map(text).collect();
+        let context = argparse::Context {
+            width: 78,
+            description: Some(doc),
+            max_str_digits: 4300,
+        };
+        // 流れの状態: "ok"(書ける)・"none"(None)・"fail<n>"(n 回目の write が OSError)。
+        let mode = |stream: Stream| match stream {
+            Stream::Stdout => case["stdout"].as_str().unwrap(),
+            Stream::Stderr => case["stderr"].as_str().unwrap(),
+        };
+        let mut counts = [0usize; 2];
+        let mut writes: Vec<Value> = Vec::new();
+        let mut write =
+            |streams: &[Stream], body: &[u32]| -> Result<(), r4q_python::traceback::Exception> {
+                let Some(&stream) = streams.iter().find(|&&stream| mode(stream) != "none") else {
+                    return Err(legacy::exception(
+                        "AttributeError",
+                        "'NoneType' object has no attribute 'write'",
+                    ));
+                };
+                let slot = stream as usize;
+                counts[slot] += 1;
+                if mode(stream) == format!("fail{}", counts[slot]) {
+                    return Err(legacy::exception(
+                        "OSError",
+                        "[Errno 28] No space left on device",
+                    ));
+                }
+                let name = if stream == Stream::Stdout {
+                    "stdout"
+                } else {
+                    "stderr"
+                };
+                writes.push(serde_json::json!([name, show(body)]));
+                Ok(())
+            };
+        let raised = |chain: Vec<r4q_python::traceback::Traceback>| -> Value {
+            let text: String = r4q_python::traceback::print_exception(&chain)
+                .into_iter()
+                .map(|piece| piece.text)
+                .collect();
+            serde_json::json!({ "raised": text })
+        };
+        let end = match argparse::parse(parser, &args, &context) {
+            Outcome::Help(body) => match write(legacy::HELP_STREAMS, &body) {
+                Ok(()) => serde_json::json!({ "exit": 0 }),
+                Err(error) => raised(legacy::argparse_chain(script, None, WriteStep::Help, error)),
+            },
+            Outcome::Error(error) => match write(legacy::USAGE_STREAMS, &error.usage) {
+                Err(exception) => raised(legacy::argparse_chain(
+                    script,
+                    Some(&error.site),
+                    WriteStep::Usage,
+                    exception,
+                )),
+                Ok(()) => match write(legacy::MESSAGE_STREAMS, &error.message) {
+                    Err(exception) => raised(legacy::argparse_chain(
+                        script,
+                        Some(&error.site),
+                        WriteStep::Message,
+                        exception,
+                    )),
+                    Ok(()) => serde_json::json!({ "exit": 2 }),
+                },
+            },
+            Outcome::Parsed(_) => panic!("{id}: 書き出しの経路でない"),
+        };
+        if end["raised"]
+            .as_str()
+            .is_some_and(|text| text.contains("During handling"))
+        {
+            chained += 1;
+        }
+        assert_eq!(writes, case["writes"].as_array().unwrap().clone(), "{id}");
+        assert_eq!(
+            end,
+            case["end"],
+            "{id}: {}",
+            end["raised"].as_str().unwrap_or_default()
+        );
+    }
+    assert_eq!(chained, 11, "ArgumentError を捕まえた経路の数");
+}
+
+/// 壊れた children の pid を `os.pidfd_open` に渡すときの変換(本家 3.10.11 の本物の `os.pidfd_open` の実測)。
+#[test]
+fn pidfd_pid_conversion_matches_python() {
+    use check_process::loop_supervisor::supervise::pidfd_pid;
+    let units = units();
+    let cases = list(&units["pidfd_pid"]);
+    assert_eq!(cases.len(), 11);
+    for case in cases {
+        let pid = case["pid"].as_str().unwrap();
+        match case["overflow"].as_str() {
+            Some(message) => assert_eq!(pidfd_pid(pid), Err(message), "{pid}"),
+            None => assert_eq!(pidfd_pid(pid), Ok(pid.parse::<i32>().unwrap()), "{pid}"),
+        }
+    }
 }
 
 // ---- 監督の OS の部品(platform の r4q_process) ----
@@ -1227,6 +1364,40 @@ mod os_parts {
         println!("CHILD-OK");
     }
 
+    /// 段階 5 へ渡す /proc の読取り(platform)と解釈(純粋な関数)。
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn proc_stat_and_children_are_read_and_parsed() {
+        use super::check_process::loop_supervisor::supervise::{
+            IdentityError, parse_children, parse_identity,
+        };
+        let me = os::getpid().to_string();
+        let raw = os::read_proc_stat(&me).unwrap();
+        let (ppid, starttime) = parse_identity(&raw, 4300).unwrap();
+        assert_eq!(ppid, os::getppid().to_string());
+        assert!(starttime.parse::<u64>().unwrap() > 0);
+        let children = os::read_own_children(os::getpid()).unwrap();
+        let text: Vec<u32> = children.iter().map(|&byte| u32::from(byte)).collect();
+        assert!(parse_children(&text, 4300).is_ok());
+        let missing = os::read_proc_stat("2147483647").unwrap_err();
+        assert!(missing.has_filename(), "開く段の誤りはファイル名付き");
+        assert_eq!(missing.errno(), os::errno::ENOENT);
+        assert_eq!(os::proc_stat_path("12"), "/proc/12/stat");
+        assert_eq!(os::own_children_path(12), "/proc/self/task/12/children");
+        // 解釈の純粋な関数(旧版の str.split・rindex(b')')・fields[1]・fields[19])。
+        let spaced: Vec<u32> = "\u{3000}12\t34\x1c".chars().map(u32::from).collect();
+        assert_eq!(parse_children(&spaced, 4300).unwrap(), vec!["12", "34"]);
+        assert!(parse_children(&['x' as u32], 4300).is_err());
+        assert!(matches!(
+            parse_identity(b"1 cmd S 2", 4300),
+            Err(IdentityError::Raise(_))
+        ));
+        assert_eq!(
+            parse_identity(b"1 (a) b) S 2", 4300),
+            Err(IdentityError::Index)
+        );
+    }
+
     #[test]
     fn pipe_select_and_files() {
         let scratch = Scratch::new("files");
@@ -1238,8 +1409,9 @@ mod os_parts {
         let mut buffer = [0u8; 8];
         assert_eq!(os::read(reader.as_fd(), &mut buffer).unwrap(), 2);
         os::close(writer).unwrap();
-        // 書き口が全部閉じると、終わりも「読める」。
-        assert!(os::select_readable(reader.as_fd(), Some(Duration::ZERO)).unwrap());
+        // 書き口が全部閉じると、終わりも「読める」。同じ実行物の別のテストのスレッドが fork した子は、
+        // exec(CLOEXEC で閉じる)までの間だけ書き口の写しを持つので、期限を付けて待つ。
+        assert!(os::select_readable(reader.as_fd(), Some(Duration::from_secs(20))).unwrap());
         assert_eq!(os::read(reader.as_fd(), &mut buffer).unwrap(), 0);
         // 記録のファイル: 排他で作り、0600(umask を引く)、リンクを辿らない。
         let record = scratch.path("recovery.json");
@@ -1280,8 +1452,18 @@ mod os_parts {
         assert_eq!(std::fs::read(scratch.path("target.json")).unwrap(), b"out");
         let null = os::open_dev_null().unwrap();
         assert_eq!(os::write(null.as_fd(), b"x").unwrap(), 1);
-        os::set_inheritable(null.as_raw_fd(), true).unwrap();
-        os::set_inheritable(null.as_raw_fd(), false).unwrap();
+        os::set_inheritable(null.as_fd(), true).unwrap();
+        os::set_inheritable(null.as_fd(), false).unwrap();
+        // anchor の継いだ fd: 開いている番号だけを借りる。負の番号と閉じた番号は EBADF。
+        let inherited = os::inherited_fd(null.as_raw_fd()).unwrap();
+        assert_eq!(os::write(inherited, b"y").unwrap(), 1);
+        // 閉じた番号は、別のテストのスレッドがすぐ使い直しうるので、開けない番号(i32::MAX)で確かめる。
+        for bad in [-1, -5, i32::MAX] {
+            assert_eq!(
+                os::inherited_fd(bad).unwrap_err().raw_os_error(),
+                Some(os::errno::EBADF)
+            );
+        }
     }
 
     #[test]
@@ -1485,15 +1667,14 @@ mod os_parts {
         let (status, output) = run_to_file(&request, &scratch.path("env.txt"));
         assert_eq!(status, Termination::Exited(0));
         assert_eq!(output, b"Z=1\nA=2\nPATH=/usr/bin:/bin\nM=\xff\n");
-        // env を渡さないときは、起動した側の環境をそのまま(並びも)継ぐ。
+        // env を渡さないときは、起動した側の環境(libc の environ)をそのまま(並びも)継ぐ。
+        // 旧版の Popen(env=None)も execv で environ を継ぐ。cargo が Mac で足す
+        // DYLD_FALLBACK_LIBRARY_PATH も、そのまま子に届く(macOS 15 の CI で /usr/bin/env が出力した)。
+        // vars_os は environ を前から読む(`=` の無い項目だけを飛ばす。テストの環境には無い)。
         let request = Request::new(&[b"/usr/bin/env"]);
         let (_, output) = run_to_file(&request, &scratch.path("inherit.txt"));
         let mut expected = Vec::new();
-        // Mac の SIP は、保護された /usr/bin/env へ DYLD_* を渡さない(cargo がテストに DYLD_FALLBACK_LIBRARY_PATH を足す)。
-        let shown = |key: &std::ffi::OsStr| {
-            !(cfg!(target_os = "macos") && key.as_bytes().starts_with(b"DYLD_"))
-        };
-        for (key, value) in std::env::vars_os().filter(|(key, _)| shown(key)) {
+        for (key, value) in std::env::vars_os() {
             expected.extend_from_slice(key.as_bytes());
             expected.push(b'=');
             expected.extend_from_slice(value.as_bytes());
@@ -1593,7 +1774,7 @@ mod os_parts {
         // 0〜2 のほかの fd を閉じる。渡した fd だけを同じ番号で継がせる。setsid は求めたときだけ。
         let passed = std::fs::File::open("/dev/null").unwrap();
         let leaked = std::fs::File::open("/dev/null").unwrap();
-        os::set_inheritable(leaked.as_raw_fd(), true).unwrap();
+        os::set_inheritable(leaked.as_fd(), true).unwrap();
         let script = b"ls /proc/$$/fd; cat /proc/$$/stat".to_vec();
         let request = Request {
             pass: vec![passed.as_fd()],
@@ -1784,5 +1965,1045 @@ mod os_parts {
             std::thread::sleep(Duration::from_millis(10));
         }
         println!("CHILD-OK");
+    }
+}
+
+/// 監督と親の差し替えの比較(設計の「比べ方の決まり」の差し替えの列)。旧版を mock して作った固定期待と、
+/// 同じ応答を操作の単位の trait([`Ops`])で与えた Rust の呼出しの並びと結果を、ケースの ID ごとに照らす。
+mod injected {
+    use super::check_process::cli::{self as cp_cli, CheckProcessResult};
+    use super::check_process::loop_supervisor::cli::{self as ls_cli, MainResult};
+    use super::check_process::loop_supervisor::ops::{
+        Class, FileInfo, Handler, MonitorLaunch, OpenFlags, Ops, OsFailure, OsResult, Platform,
+        PyErr, Saved, SelectFailure, WaitFailure,
+    };
+    use super::check_process::run_command::{
+        CALLER_FRAMES, Method, Monitor, PYTHON_RECURSION_LIMIT, Request, RunError, RunRequest,
+        enter_stop, exit_stop, notice_room, read_result_room, run_with,
+    };
+    use super::r4q_python::argparse::Context;
+    use super::r4q_python::exception::Filename;
+    use super::r4q_python::legacy;
+    use super::r4q_python::number::PyNumber;
+    use super::r4q_python::value::PyValue;
+    use super::{hex, unhex};
+    use serde_json::{Value, json};
+    use std::collections::{HashMap, HashSet, VecDeque};
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+    use std::path::PathBuf;
+
+    const INJECTED: &str = include_str!("../../../fixtures/r4q/injected.json");
+    /// 固定期待のケースの数(足したら、ここも直す)。
+    const COUNT: usize = 197;
+    /// どの機械でも必ず流す ID。
+    const FIXED: [&str; 2] = [
+        "inj-posix-anchor-killed-after-notice-linux",
+        "inj-posix-anchor-killed-after-notice-macos",
+    ];
+    const LIMIT: usize = 20000;
+    const ENOENT: i32 = 2;
+    const EPERM: i32 = 1;
+    const ESRCH: i32 = 3;
+    const SIGINT: i32 = 2;
+
+    /// 否定の検査で当てる、わざと誤った振る舞い(誤った操作の並びや応答の扱い)。
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum Mutation {
+        None,
+        /// killpg の TERM・KILL の EPERM を無視する。
+        IgnoreEperm,
+        /// 群の確かめ(signal 0)の EPERM を不在とする。
+        EpermAsAbsent,
+        /// pidfd ではなく pid で送る。
+        SendByPid,
+        /// pidfd を開いた後の starttime を照らさない(前に読んだ値を使う)。
+        SkipStarttime,
+        /// 最初の killpg の前に anchor を poll で回収する。
+        ReapAnchorEarly,
+        /// pidfd が無いと POSIX の方式へ切り替える(pidfd の無い Linux を POSIX の OS に見せる)。
+        FallbackToPosix,
+    }
+
+    /// 差し替えた OS の世界(`gen_injected.py` の `World` と同じ規則)。
+    struct Fake {
+        queues: HashMap<String, VecDeque<Value>>,
+        defaults: HashMap<String, Value>,
+        calls: Vec<Value>,
+        clock: f64,
+        platform: Platform,
+        has_pidfd: bool,
+        pid: i32,
+        ppid: i32,
+        handlers: HashMap<i32, Handler>,
+        latest: i32,
+        first: i32,
+        saved: usize,
+        next_fd: i32,
+        output_fds: HashSet<i32>,
+        pidfds: HashMap<i32, i32>,
+        last_stat: HashMap<String, Vec<u8>>,
+        reaped_early: bool,
+        /// 既定の SIGINT の処理の印(KeyboardInterrupt)。
+        keyboard: bool,
+        /// 呼出しが上限を超えた(誤った振る舞いの終わらない待ち。時計を先へ飛ばして期限で抜けさせる)。
+        exhausted: bool,
+        mutation: Mutation,
+    }
+
+    fn chars(text: &str) -> Vec<u32> {
+        text.chars().map(u32::from).collect()
+    }
+
+    fn string(codes: &[u32]) -> String {
+        codes
+            .iter()
+            .map(|&code| char::from_u32(code).expect("surrogate を含まない"))
+            .collect()
+    }
+
+    fn utf8(raw: &[u8]) -> String {
+        String::from_utf8(raw.to_vec()).expect("固定期待の入力は UTF-8")
+    }
+
+    impl Fake {
+        fn new(world: &Value, mutation: Mutation) -> Self {
+            let mut queues = HashMap::new();
+            if let Some(responses) = world.get("responses").and_then(Value::as_object) {
+                for (name, items) in responses {
+                    let items: VecDeque<Value> =
+                        items.as_array().unwrap().iter().cloned().collect();
+                    queues.insert(name.clone(), items);
+                }
+            }
+            let mut defaults = HashMap::new();
+            if let Some(items) = world.get("defaults").and_then(Value::as_object) {
+                for (name, item) in items {
+                    defaults.insert(name.clone(), item.clone());
+                }
+            }
+            let platform = match world
+                .get("platform")
+                .and_then(Value::as_str)
+                .unwrap_or("linux")
+            {
+                "linux" => Platform::Linux,
+                "darwin" => Platform::Darwin,
+                other => panic!("知らない OS: {other}"),
+            };
+            let number = |name: &str, default: i64| {
+                world.get(name).and_then(Value::as_i64).unwrap_or(default) as i32
+            };
+            Self {
+                queues,
+                defaults,
+                calls: Vec::new(),
+                clock: 1000.0,
+                platform,
+                has_pidfd: world
+                    .get("has_pidfd")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+                pid: number("pid", 100),
+                ppid: number("ppid", 50),
+                handlers: HashMap::new(),
+                latest: 0,
+                first: 0,
+                saved: 0,
+                next_fd: 10,
+                output_fds: HashSet::new(),
+                pidfds: HashMap::new(),
+                last_stat: HashMap::new(),
+                reaped_early: false,
+                keyboard: false,
+                exhausted: false,
+                mutation,
+            }
+        }
+
+        fn record(&mut self, call: Value) {
+            if self.calls.len() >= LIMIT {
+                self.exhausted = true;
+                return;
+            }
+            self.calls.push(call);
+        }
+
+        fn take(&mut self, name: &str) -> Option<Value> {
+            if let Some(queue) = self.queues.get_mut(name)
+                && let Some(item) = queue.pop_front()
+            {
+                return Some(item);
+            }
+            self.defaults.get(name).cloned()
+        }
+
+        /// 記録して応答を取り、時計を進める。
+        fn step(&mut self, name: &str, call: Value) -> Option<Value> {
+            self.record(call);
+            let response = self.take(name);
+            self.advance(&response);
+            response
+        }
+
+        fn advance(&mut self, response: &Option<Value>) {
+            if let Some(seconds) = response
+                .as_ref()
+                .and_then(|r| r.get("advance"))
+                .and_then(Value::as_f64)
+            {
+                self.clock += seconds;
+            }
+        }
+
+        /// 応答の "signal": 置いた処理を呼ぶ。
+        fn deliver(&mut self, response: &Option<Value>) {
+            let Some(number) = response
+                .as_ref()
+                .and_then(|r| r.get("signal"))
+                .and_then(Value::as_i64)
+            else {
+                return;
+            };
+            let number = number as i32;
+            match self.handlers.get(&number) {
+                Some(Handler::Interrupted) => self.latest = number,
+                Some(Handler::Receive) => {
+                    if self.first == 0 {
+                        self.first = number;
+                    }
+                }
+                Some(Handler::Nothing) => {}
+                // 置き換える前の SIGINT は Python の既定の処理(KeyboardInterrupt。区切りで見る)。
+                None if number == SIGINT => self.keyboard = true,
+                other => panic!("信号 {number} の処理が置かれていない: {other:?}"),
+            }
+        }
+
+        fn failure(response: &Option<Value>) -> Option<(OsFailure, Option<String>)> {
+            let error = response.as_ref()?.get("err")?;
+            Some((
+                OsFailure {
+                    errno: error["errno"].as_i64().unwrap() as i32,
+                    text: error["text"].as_str().unwrap().to_owned(),
+                },
+                error
+                    .get("filename")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            ))
+        }
+
+        /// `/proc` の読取りの誤り(開く段はファイル名付き、"at": "read" の読む段は付かない)。
+        fn proc_failure(response: &Option<Value>, path: &str) -> Option<PyErr> {
+            let (failure, _) = Self::failure(response)?;
+            let at_read =
+                response.as_ref()?["err"].get("at").and_then(Value::as_str) == Some("read");
+            let filename = (!at_read).then(|| Filename::from_raw(path.as_bytes()));
+            Some(PyErr::os(&failure, filename))
+        }
+
+        fn ok(response: &Option<Value>) -> Option<&Value> {
+            response.as_ref()?.get("ok")
+        }
+
+        fn fd(&mut self) -> i32 {
+            self.next_fd += 1;
+            self.next_fd
+        }
+
+        /// 値を返すだけの操作(誤りは OsFailure)。
+        fn simple<T>(
+            &mut self,
+            name: &str,
+            call: Value,
+            read: impl FnOnce(&Value) -> T,
+            default: impl FnOnce(&mut Self) -> T,
+        ) -> OsResult<T> {
+            let response = self.step(name, call);
+            if let Some((failure, _)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(failure);
+            }
+            let value = match Self::ok(&response).filter(|value| !value.is_null()) {
+                Some(value) => read(value),
+                None => default(self),
+            };
+            self.deliver(&response);
+            Ok(value)
+        }
+
+        fn unused(&self) -> Vec<String> {
+            let mut names: Vec<String> = self
+                .queues
+                .iter()
+                .filter(|(_, items)| !items.is_empty())
+                .map(|(name, items)| format!("{name}×{}", items.len()))
+                .collect();
+            names.sort();
+            names
+        }
+    }
+
+    fn handler_name(handler: Handler) -> Value {
+        match handler {
+            Handler::Interrupted => json!("interrupted"),
+            Handler::Receive => json!("receive"),
+            Handler::Nothing => json!("nothing"),
+            Handler::Previous(Saved(number)) => json!(["previous", number]),
+        }
+    }
+
+    impl Ops for Fake {
+        fn monotonic(&mut self) -> f64 {
+            let response = self.step("monotonic", json!(["monotonic"]));
+            if let Some(value) = Self::ok(&response).and_then(Value::as_f64) {
+                self.clock = value;
+            }
+            if self.exhausted {
+                self.clock = 1e18;
+            }
+            let value = self.clock;
+            self.deliver(&response);
+            value
+        }
+
+        fn sleep(&mut self, seconds: f64) -> Result<(), PyErr> {
+            let response = self.step("sleep", json!(["sleep", seconds]));
+            self.clock += seconds;
+            self.deliver(&response);
+            Ok(())
+        }
+
+        fn getpid(&mut self) -> i32 {
+            self.simple(
+                "getpid",
+                json!(["getpid"]),
+                |v| v.as_i64().unwrap() as i32,
+                |f| f.pid,
+            )
+            .unwrap()
+        }
+
+        fn getppid(&mut self) -> i32 {
+            self.simple(
+                "getppid",
+                json!(["getppid"]),
+                |v| v.as_i64().unwrap() as i32,
+                |f| f.ppid,
+            )
+            .unwrap()
+        }
+
+        fn prctl(&mut self, option: i32, arg: i32) -> i32 {
+            self.simple(
+                "prctl",
+                json!(["prctl", option, arg]),
+                |v| v.as_i64().unwrap() as i32,
+                |_| 0,
+            )
+            .unwrap()
+        }
+
+        fn get_errno(&mut self) -> i32 {
+            self.simple(
+                "get_errno",
+                json!(["get_errno"]),
+                |v| v.as_i64().unwrap() as i32,
+                |_| 0,
+            )
+            .unwrap()
+        }
+
+        fn set_handler(&mut self, number: i32, handler: Handler) -> Saved {
+            self.record(json!(["set_handler", number, handler_name(handler)]));
+            self.handlers.insert(number, handler);
+            self.saved += 1;
+            let response = self.take("set_handler");
+            self.advance(&response);
+            self.deliver(&response);
+            Saved(self.saved)
+        }
+
+        fn latest_signal(&self) -> i32 {
+            self.latest
+        }
+
+        fn set_latest_signal(&mut self, number: i32) {
+            self.latest = number;
+        }
+
+        fn first_signal(&self) -> i32 {
+            self.first
+        }
+
+        fn clear_first_signal(&mut self) {
+            self.first = 0;
+        }
+
+        fn spawn(&mut self, argv: &[Vec<u32>]) -> Result<i32, PyErr> {
+            let argv: Vec<String> = argv.iter().map(|arg| string(arg)).collect();
+            let response = self.step("spawn", json!(["spawn", argv]));
+            if let Some((failure, filename)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(PyErr::os(
+                    &failure,
+                    filename.map(|name| Filename::Str(chars(&name))),
+                ));
+            }
+            let pid = Self::ok(&response).and_then(Value::as_i64).unwrap_or(200) as i32;
+            self.deliver(&response);
+            Ok(pid)
+        }
+
+        fn waitpid_any(&mut self) -> OsResult<(i32, i32)> {
+            self.simple(
+                "waitpid_any",
+                json!(["waitpid_any"]),
+                |v| (v[0].as_i64().unwrap() as i32, v[1].as_i64().unwrap() as i32),
+                |_| (0, 0),
+            )
+        }
+
+        fn read_children(&mut self, pid: i32) -> Result<Vec<u32>, PyErr> {
+            let text = format!("/proc/self/task/{pid}/children");
+            let response = self.step("read_children", json!(["read_children", text]));
+            if let Some(error) = Self::proc_failure(&response, &text) {
+                self.deliver(&response);
+                return Err(error);
+            }
+            let value = Self::ok(&response).map_or_else(Vec::new, |v| chars(v.as_str().unwrap()));
+            self.deliver(&response);
+            Ok(value)
+        }
+
+        fn read_stat(&mut self, pid: &str) -> Result<Vec<u8>, PyErr> {
+            let text = format!("/proc/{pid}/stat");
+            let after_pidfd = self
+                .calls
+                .last()
+                .is_some_and(|call| call[0] == "pidfd_open");
+            let response = self.step("read_stat", json!(["read_stat", text]));
+            let response = response.or_else(|| {
+                Some(json!({"err": {"errno": ENOENT, "text": "No such file or directory"}}))
+            });
+            if let Some(error) = Self::proc_failure(&response, &text) {
+                self.deliver(&response);
+                return Err(error);
+            }
+            let mut raw = unhex(Self::ok(&response).unwrap().as_str().unwrap());
+            if self.mutation == Mutation::SkipStarttime
+                && after_pidfd
+                && let Some(before) = self.last_stat.get(&text)
+            {
+                raw = before.clone();
+            }
+            self.last_stat.insert(text, raw.clone());
+            self.deliver(&response);
+            Ok(raw)
+        }
+
+        fn pidfd_open(&mut self, pid: i32) -> OsResult<i32> {
+            let fd = self.simple(
+                "pidfd_open",
+                json!(["pidfd_open", pid]),
+                |v| v.as_i64().unwrap() as i32,
+                Fake::fd,
+            )?;
+            self.pidfds.insert(fd, pid);
+            Ok(fd)
+        }
+
+        fn pidfd_send_signal(&mut self, fd: i32, number: i32) -> OsResult<()> {
+            let call = if self.mutation == Mutation::SendByPid {
+                json!(["kill", self.pidfds.get(&fd).copied().unwrap_or(-1), number])
+            } else {
+                json!(["pidfd_send_signal", fd, number])
+            };
+            self.record(call);
+            let response = self.take("pidfd_send_signal");
+            self.advance(&response);
+            if let Some((failure, _)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(failure);
+            }
+            self.deliver(&response);
+            Ok(())
+        }
+
+        fn close(&mut self, fd: i32) -> OsResult<()> {
+            self.simple("close", json!(["close", fd]), |_| (), |_| ())
+        }
+
+        fn spawn_monitor(&mut self, launch: &MonitorLaunch) -> Result<i32, PyErr> {
+            let argv: Vec<String> = launch.argv.iter().map(|arg| utf8(arg)).collect();
+            let env = launch.env.as_ref().map(|pairs| {
+                pairs
+                    .iter()
+                    .map(|(key, value)| json!([utf8(key), utf8(value)]))
+                    .collect::<Vec<_>>()
+            });
+            let call = json!(["spawn_monitor", {
+                "argv": argv,
+                "cwd": launch.cwd.as_ref().map(|cwd| utf8(cwd)),
+                "env": env,
+                "stdout": launch.stdout,
+                "stderr": launch.stderr,
+                "pass_fds": launch.pass_fds,
+                "new_session": launch.new_session,
+            }]);
+            let response = self.step("spawn_monitor", call);
+            if let Some((failure, filename)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(PyErr::os(
+                    &failure,
+                    filename.map(|name| Filename::Str(chars(&name))),
+                ));
+            }
+            let pid = Self::ok(&response).and_then(Value::as_i64).unwrap_or(300) as i32;
+            self.deliver(&response);
+            Ok(pid)
+        }
+
+        fn poll_monitor(&mut self, pid: i32) -> Option<i32> {
+            let response = self.step("poll_monitor", json!(["poll_monitor", pid]));
+            let value = Self::ok(&response)
+                .and_then(Value::as_i64)
+                .map(|code| code as i32);
+            self.deliver(&response);
+            value
+        }
+
+        fn wait_monitor(&mut self, pid: i32, timeout: Option<f64>) -> Result<i32, WaitFailure> {
+            let response = self.step("wait_monitor", json!(["wait_monitor", pid, timeout]));
+            if response
+                .as_ref()
+                .and_then(|r| r.get("timeout"))
+                .and_then(Value::as_bool)
+                == Some(true)
+            {
+                self.deliver(&response);
+                return Err(WaitFailure::Timeout);
+            }
+            if let Some((failure, _)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(WaitFailure::Os(failure));
+            }
+            let code = Self::ok(&response).and_then(Value::as_i64).unwrap_or(0) as i32;
+            self.deliver(&response);
+            Ok(code)
+        }
+
+        fn token_hex(&mut self) -> Result<String, PyErr> {
+            let response = self.step("token_hex", json!(["token_hex"]));
+            if let Some(raised) = response.as_ref().and_then(|r| r.get("raise")) {
+                self.deliver(&response);
+                let message = raised[1].as_str().unwrap().to_owned();
+                return Err(match raised[0].as_str().unwrap() {
+                    "NotImplementedError" => {
+                        PyErr::new(Class::Runtime("NotImplementedError"), message)
+                    }
+                    "RuntimeError" => PyErr::runtime(message),
+                    other => panic!("知らない例外: {other}"),
+                });
+            }
+            if let Some((failure, _)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(PyErr::os(&failure, None));
+            }
+            let token = Self::ok(&response)
+                .and_then(Value::as_str)
+                .map_or_else(|| "0123456789abcdef".repeat(4), str::to_owned);
+            self.deliver(&response);
+            Ok(token)
+        }
+
+        fn keyboard_interrupt(&mut self) -> bool {
+            std::mem::take(&mut self.keyboard)
+        }
+
+        fn pipe(&mut self) -> OsResult<(i32, i32)> {
+            self.simple(
+                "pipe",
+                json!(["pipe"]),
+                |v| (v[0].as_i64().unwrap() as i32, v[1].as_i64().unwrap() as i32),
+                |_| (20, 21),
+            )
+        }
+
+        fn select(&mut self, fd: i32, timeout: f64) -> Result<bool, SelectFailure> {
+            self.record(json!(["select", fd, timeout]));
+            if fd >= 1024 {
+                return Err(SelectFailure::OutOfRange);
+            }
+            let response = self.take("select");
+            self.advance(&response);
+            if let Some((failure, _)) = Self::failure(&response) {
+                self.deliver(&response);
+                return Err(SelectFailure::Os(failure));
+            }
+            let ready = Self::ok(&response)
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            self.deliver(&response);
+            Ok(ready)
+        }
+
+        fn read(&mut self, fd: i32, size: usize) -> OsResult<Vec<u8>> {
+            self.simple(
+                "read",
+                json!(["read", fd, size]),
+                |v| unhex(v.as_str().unwrap()),
+                |_| Vec::new(),
+            )
+        }
+
+        fn killpg(&mut self, pgid: i32, number: i32) -> OsResult<()> {
+            if self.mutation == Mutation::ReapAnchorEarly && !self.reaped_early {
+                self.reaped_early = true;
+                self.record(json!(["poll_monitor", pgid]));
+            }
+            match self.simple("killpg", json!(["killpg", pgid, number]), |_| (), |_| ()) {
+                Err(failure)
+                    if failure.errno == EPERM
+                        && number != 0
+                        && self.mutation == Mutation::IgnoreEperm =>
+                {
+                    Ok(())
+                }
+                Err(failure)
+                    if failure.errno == EPERM
+                        && number == 0
+                        && self.mutation == Mutation::EpermAsAbsent =>
+                {
+                    Err(OsFailure {
+                        errno: ESRCH,
+                        text: "No such process".to_owned(),
+                    })
+                }
+                other => other,
+            }
+        }
+
+        fn open(&mut self, path: &[u8], flags: OpenFlags) -> OsResult<i32> {
+            let mode = match flags {
+                OpenFlags::Create => json!(0o600),
+                OpenFlags::Read => Value::Null,
+            };
+            let call = json!(["open", utf8(path), flags.names(), mode]);
+            self.simple("open", call, |v| v.as_i64().unwrap() as i32, Fake::fd)
+        }
+
+        fn fstat(&mut self, fd: i32) -> OsResult<FileInfo> {
+            self.simple(
+                "fstat",
+                json!(["fstat", fd]),
+                |v| FileInfo {
+                    regular: v["regular"].as_bool().unwrap(),
+                    size: v["size"].as_i64().unwrap(),
+                },
+                |_| FileInfo {
+                    regular: true,
+                    size: 0,
+                },
+            )
+        }
+
+        fn write(&mut self, fd: i32, data: &[u8]) -> OsResult<usize> {
+            let length = data.len();
+            self.simple(
+                "write",
+                json!(["write", fd, hex(data)]),
+                |v| v.as_u64().unwrap() as usize,
+                |_| length,
+            )
+        }
+
+        fn fsync(&mut self, fd: i32) -> OsResult<()> {
+            self.simple("fsync", json!(["fsync", fd]), |_| (), |_| ())
+        }
+
+        fn platform(&mut self) -> Platform {
+            if self.mutation == Mutation::FallbackToPosix && !self.has_pidfd {
+                return Platform::Darwin;
+            }
+            self.platform
+        }
+
+        fn has_pidfd(&mut self) -> bool {
+            self.has_pidfd
+        }
+
+        fn open_output(&mut self, path: &[u8]) -> OsResult<i32> {
+            let fd = self.simple(
+                "open_output",
+                json!(["open_output", utf8(path)]),
+                |v| v.as_i64().unwrap() as i32,
+                Fake::fd,
+            )?;
+            self.output_fds.insert(fd);
+            Ok(fd)
+        }
+
+        fn close_output(&mut self, fd: i32) -> OsResult<()> {
+            self.simple("close_output", json!(["close_output", fd]), |_| (), |_| ())
+        }
+
+        fn fstat_output(&mut self, fd: i32) -> OsResult<i64> {
+            assert!(
+                self.output_fds.contains(&fd),
+                "出力のファイルでない fd {fd}"
+            );
+            self.simple(
+                "fstat_output",
+                json!(["fstat_output", fd]),
+                |v| v.as_i64().unwrap(),
+                |_| 0,
+            )
+        }
+
+        fn rewind_output(&mut self, fd: i32) -> OsResult<()> {
+            self.simple(
+                "rewind_output",
+                json!(["rewind_output", fd]),
+                |_| (),
+                |_| (),
+            )
+        }
+
+        fn read_output(&mut self, fd: i32, size: usize) -> OsResult<Vec<u8>> {
+            self.simple(
+                "read_output",
+                json!(["read_output", fd, size]),
+                |v| unhex(v.as_str().unwrap()),
+                |_| Vec::new(),
+            )
+        }
+    }
+
+    fn main_result(result: MainResult) -> Value {
+        match result {
+            MainResult::Exit(code) => json!({"exit": code, "stderr": ""}),
+            MainResult::KeyboardInterrupt => json!({"keyboard_interrupt": true, "stderr": ""}),
+            MainResult::Message { text, code } => {
+                json!({"exit": code, "stderr": format!("{}\n", string(&text))})
+            }
+            MainResult::Uncaught {
+                site,
+                type_name,
+                message,
+            } => {
+                // 旧版の main から下の呼出履歴(`<module>` の行は mock の中では出ない)。
+                let frames: Vec<Value> = site.frames()[1..]
+                    .iter()
+                    .map(|frame| json!([frame.file, frame.line, frame.name, frame.source]))
+                    .collect();
+                json!({"uncaught": [type_name, message], "frames": frames, "stderr": ""})
+            }
+            other => panic!("差し替えのケースで argparse の結果は出ない: {other:?}"),
+        }
+    }
+
+    fn form(value: &PyValue) -> Value {
+        match value {
+            PyValue::None => Value::Null,
+            PyValue::Bool(flag) => json!(flag),
+            PyValue::Int(digits) => json!(digits.parse::<i64>().unwrap()),
+            PyValue::Str(codes) => json!(string(codes)),
+            PyValue::Bytes(raw) => json!({"bytes": hex(raw)}),
+            other => panic!("結果に知らない値: {other:?}"),
+        }
+    }
+
+    fn number(value: &Value) -> PyNumber {
+        match (value.get("int"), value.get("float")) {
+            (Some(digits), _) => PyNumber::Int(digits.as_str().unwrap().to_owned()),
+            (_, Some(text)) => PyNumber::Float(text.as_str().unwrap().parse().unwrap()),
+            _ => panic!("数でない: {value}"),
+        }
+    }
+
+    fn args(given: &Value) -> Vec<Vec<u32>> {
+        given["args"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| chars(arg.as_str().unwrap()))
+            .collect()
+    }
+
+    fn os(text: &str) -> OsString {
+        OsString::from_vec(text.as_bytes().to_vec())
+    }
+
+    fn run_rc(fake: &mut Fake, given: &Value) -> Value {
+        let argv: Vec<OsString> = given["argv"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|arg| os(arg.as_str().unwrap()))
+            .collect();
+        let cwd = given["cwd"].as_str().map(PathBuf::from);
+        let env: Option<Vec<(OsString, OsString)>> = given["env"].as_array().map(|pairs| {
+            pairs
+                .iter()
+                .map(|pair| (os(pair[0].as_str().unwrap()), os(pair[1].as_str().unwrap())))
+                .collect()
+        });
+        let directory = PathBuf::from(given["directory"].as_str().unwrap());
+        let method = match given["method"].as_str() {
+            Some("linux") => Some(Method::Linux),
+            Some("posix") => Some(Method::Posix),
+            None => None,
+            Some(other) => panic!("知らない方式: {other}"),
+        };
+        let monitor = Monitor {
+            program: os("python3"),
+            prefix: vec![os("-B"), os("check-process.py")],
+        };
+        let request = RunRequest {
+            argv: &argv,
+            cwd: cwd.as_deref(),
+            env: env.as_deref(),
+            timeout: number(&given["timeout"]),
+            directory: &directory,
+            grace: number(&given["grace"]),
+            method,
+            keep: given["keep"].as_u64().unwrap() as usize,
+            monitor: &monitor,
+            int_max_str_digits: given["int_max_str_digits"].as_u64().unwrap() as usize,
+            caller_frames: given["caller_frames"].as_u64().unwrap() as usize,
+            recursion_limit: PYTHON_RECURSION_LIMIT,
+        };
+        let previous = enter_stop(fake);
+        let outcome = run_with(fake, &Request::from_request(&request));
+        exit_stop(fake, &previous);
+        match outcome {
+            Ok(pairs) => {
+                json!({"result": pairs.iter().map(|(key, value)| json!([form(key), form(value)])).collect::<Vec<_>>()})
+            }
+            Err(RunError::Recovery(message)) => json!({"error": ["RecoveryError", message]}),
+            Err(RunError::Interrupted(message)) => json!({"error": ["Interrupted", message]}),
+            Err(RunError::Unwrapped { kind, message }) => json!({"error": [kind, message]}),
+        }
+    }
+
+    /// 1 つのケースを流し、呼出しの並びと結果と使わなかった応答を返す。
+    fn run_case(case: &Value, mutation: Mutation) -> (Vec<Value>, Value, Vec<String>) {
+        let mut fake = Fake::new(&case["world"], mutation);
+        let given = &case["input"];
+        let result = match case["kind"].as_str().unwrap() {
+            "ls" => {
+                let context = Context {
+                    width: 78,
+                    description: Some(legacy::LOOP_SUPERVISOR_DOC),
+                    max_str_digits: 4300,
+                };
+                main_result(ls_cli::main_logic(&mut fake, &args(given), &context))
+            }
+            "cp" => {
+                let context = Context {
+                    width: 78,
+                    description: Some(legacy::CHECK_PROCESS_DOC),
+                    max_str_digits: 4300,
+                };
+                match cp_cli::main_logic(&mut fake, &args(given), &context) {
+                    CheckProcessResult::Done(result) => main_result(result),
+                    CheckProcessResult::Anchor(_) => panic!("差し替えのケースに anchor は無い"),
+                }
+            }
+            "rc" => run_rc(&mut fake, given),
+            other => panic!("知らない種類: {other}"),
+        };
+        let unused = fake.unused();
+        (fake.calls, result, unused)
+    }
+
+    fn fixture() -> Value {
+        serde_json::from_str(INJECTED).expect("差し替えの固定期待の JSON を読めない")
+    }
+
+    /// 固定期待と食い違うケースの ID と、最初に違った所。
+    fn mismatches(mutation: Mutation) -> Vec<(String, String)> {
+        let fixture = fixture();
+        let mut found = Vec::new();
+        for case in fixture["cases"].as_array().unwrap() {
+            let id = case["id"].as_str().unwrap().to_owned();
+            let (calls, result, unused) = run_case(case, mutation);
+            let expected = &case["expect"];
+            let expected_calls = expected["calls"].as_array().unwrap();
+            let detail = if let Some(index) = (0..calls.len().max(expected_calls.len()))
+                .find(|&index| calls.get(index) != expected_calls.get(index))
+            {
+                format!(
+                    "呼出し {index}: 期待 {} / 実際 {}",
+                    expected_calls
+                        .get(index)
+                        .map_or("なし".to_owned(), Value::to_string),
+                    calls.get(index).map_or("なし".to_owned(), Value::to_string)
+                )
+            } else if result != expected["result"] {
+                format!("結果: 期待 {} / 実際 {result}", expected["result"])
+            } else if !unused.is_empty() {
+                format!("使わなかった応答: {unused:?}")
+            } else if calls.len() >= LIMIT {
+                format!("呼出しが上限 {LIMIT} に達した")
+            } else {
+                continue;
+            };
+            found.push((id, detail));
+        }
+        found
+    }
+
+    /// json.loads の入れ子の上限は、呼出元のフレームの数で決まる(既定は検査用の親の 2)。固定期待を作った
+    /// 親は 4(`<module>`・`main`・`build`・`run_rc`)で、上限ちょうどと 1 つ深い記録・通知のケースがある。
+    #[test]
+    fn json_nesting_room_follows_caller_frames() {
+        assert_eq!(read_result_room(PYTHON_RECURSION_LIMIT, CALLER_FRAMES), 991);
+        assert_eq!(notice_room(PYTHON_RECURSION_LIMIT, CALLER_FRAMES), 992);
+        let fixture = fixture();
+        let mut nested = 0;
+        for case in fixture["cases"].as_array().unwrap() {
+            if case["kind"] != "rc" {
+                continue;
+            }
+            let frames = case["input"]["caller_frames"].as_u64().unwrap() as usize;
+            assert_eq!(frames, 4, "{}", case["id"]);
+            let id = case["id"].as_str().unwrap();
+            if id.contains("nested") {
+                nested += 1;
+                let room = if id.contains("record") {
+                    read_result_room(PYTHON_RECURSION_LIMIT, frames)
+                } else {
+                    notice_room(PYTHON_RECURSION_LIMIT, frames)
+                };
+                let reads = case["world"]["responses"]["read"].as_array().unwrap();
+                let raw = unhex(reads[0]["ok"].as_str().unwrap());
+                let depth = raw.iter().filter(|&&byte| byte == b'[').count();
+                assert_eq!(depth, room + usize::from(id.ends_with("over-room")), "{id}");
+            }
+        }
+        assert_eq!(nested, 4);
+    }
+
+    #[test]
+    fn fixture_has_fixed_count_ids_and_current_legacy() {
+        let fixture = fixture();
+        let cases = fixture["cases"].as_array().unwrap();
+        assert_eq!(cases.len(), COUNT);
+        assert_eq!(fixture["count"].as_u64(), Some(COUNT as u64));
+        let ids: HashSet<&str> = cases
+            .iter()
+            .map(|case| case["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids.len(), COUNT, "ID が重なる");
+        for id in FIXED {
+            assert!(ids.contains(id), "{id} が無い");
+        }
+        assert!(ids.iter().all(|id| id.starts_with("inj-")));
+        let units = super::units();
+        assert_eq!(
+            fixture["python"]["legacy_sha256"],
+            units["python"]["legacy_sha256"]
+        );
+        assert_eq!(fixture["python"]["version"], "3.10.11");
+    }
+
+    #[test]
+    fn calls_and_results_match_mocked_legacy() {
+        let found = mismatches(Mutation::None);
+        assert!(
+            found.is_empty(),
+            "{} 件が食い違う:\n{}",
+            found.len(),
+            found
+                .iter()
+                .map(|(id, detail)| format!("{id}: {detail}"))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// わざと誤った振る舞いを当てると、決まったケースが必ず食い違う(否定の検査)。
+    #[test]
+    fn broken_behaviours_always_mismatch() {
+        let expected: [(Mutation, &[&str]); 6] = [
+            (
+                Mutation::IgnoreEperm,
+                &[
+                    "inj-rc-posix-term-eperm",
+                    "inj-rc-posix-kill-eperm",
+                    "inj-posix-anchor-killed-after-notice-macos",
+                ],
+            ),
+            (
+                Mutation::EpermAsAbsent,
+                &[
+                    "inj-rc-posix-eperm-continues",
+                    "inj-rc-posix-eperm-then-esrch",
+                ],
+            ),
+            (
+                Mutation::SendByPid,
+                &[
+                    "inj-ls-timeout-term-resend",
+                    "inj-ls-grace-zero-kill-first",
+                    "inj-rc-linux-stop-forwarded",
+                    "inj-ls-check-ok",
+                ],
+            ),
+            (
+                Mutation::SkipStarttime,
+                &[
+                    "inj-ls-starttime-changed",
+                    "inj-ls-starttime-changed-close-ebadf",
+                ],
+            ),
+            (
+                Mutation::ReapAnchorEarly,
+                &[
+                    "inj-rc-posix-exit3",
+                    "inj-posix-anchor-killed-after-notice-linux",
+                    "inj-posix-anchor-killed-after-notice-macos",
+                ],
+            ),
+            (
+                Mutation::FallbackToPosix,
+                &["inj-rc-method-default-linux-without-pidfd"],
+            ),
+        ];
+        for (mutation, ids) in expected {
+            let found: HashSet<String> =
+                mismatches(mutation).into_iter().map(|(id, _)| id).collect();
+            for id in ids {
+                assert!(found.contains(*id), "{mutation:?} で {id} が食い違わない");
+            }
+        }
+    }
+
+    /// 固定期待の応答を 1 つ壊すと、照らし合わせが食い違う(固定期待を読んでいることの確かめ)。
+    #[test]
+    fn altered_expectation_is_detected() {
+        let fixture = fixture();
+        let case = fixture["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|case| case["id"] == "inj-ls-exit3")
+            .unwrap();
+        let (calls, result, _) = run_case(case, Mutation::None);
+        assert_eq!(&calls, case["expect"]["calls"].as_array().unwrap());
+        let mut changed = case["world"].clone();
+        changed["responses"]["waitpid_any"][0]["ok"][1] = json!(4 << 8);
+        let altered = json!({"kind": case["kind"], "input": case["input"], "world": changed});
+        let (_, other, _) = run_case(&altered, Mutation::None);
+        assert_eq!(result, case["expect"]["result"]);
+        assert_eq!(
+            other, result,
+            "記録の returncode は結果の欄ではなく write の呼出しに出る"
+        );
+        let (other_calls, _, _) = run_case(&altered, Mutation::None);
+        assert_ne!(&other_calls, case["expect"]["calls"].as_array().unwrap());
     }
 }

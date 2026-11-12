@@ -136,7 +136,53 @@ pub enum Outcome {
     /// `-h`:標準出力へ書く文と終了 0。
     Help(Vec<u32>),
     /// 誤り:標準エラーへ書く文(usage と `<prog>: error: …`)と終了 2。
-    Error(Vec<u32>),
+    Error(ParseError),
+}
+
+/// `parser.error(message)` の中身。旧版は usage(`print_usage`)と `<prog>: error: …`(`exit`)を
+/// 別々の `file.write` で書く。書く途中の例外の呼出履歴は、誤りを出した所([`ErrorSite`])で決まる。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ParseError {
+    /// `format_usage()`。
+    pub usage: Vec<u32>,
+    /// `'%(prog)s: error: %(message)s\n'`。
+    pub message: Vec<u32>,
+    pub site: ErrorSite,
+}
+
+impl ParseError {
+    /// 2 つの write を続けた文。
+    pub fn text(&self) -> Vec<u32> {
+        let mut out = self.usage.clone();
+        out.extend_from_slice(&self.message);
+        out
+    }
+}
+
+/// `parser.error` を呼んだ所(argparse 3.10.11)。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ErrorSite {
+    /// `parse_known_args` が捕まえた `ArgumentError`(`argparse.py:1869`)。`text` は `str(ArgumentError)`。
+    Argument { raised: ArgumentRaise, text: String },
+    /// `_parse_known_args` の必須の確かめ(`argparse.py:2107`)。
+    Required,
+    /// `parse_args` の知らない引数(`argparse.py:1836`)。
+    Unrecognized,
+    /// `_parse_optional` の曖昧な省略形(`argparse.py:2230`。旧版の 2 本の parser では起きない)。
+    Ambiguous,
+}
+
+/// `ArgumentError` を投げた所。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArgumentRaise {
+    /// 値を取らない 1 字の選択肢の続きが、知らない 1 字の選択肢(`consume_optional`、`argparse.py:1987`)。
+    IgnoredShort,
+    /// 値を取らない選択肢に `=値`(`consume_optional`、`argparse.py:2001`)。
+    IgnoredExplicit,
+    /// 値が無い(`_match_argument`、`argparse.py:2174`)。
+    ExpectedOne,
+    /// 型の変換の失敗(`_get_value`、`argparse.py:2508`)。`cause` は捕まえた `ValueError` の文。
+    InvalidValue { cause: String },
 }
 
 /// `shutil.get_terminal_size().columns`。`COLUMNS` を `int()` で読み、0 以下か読めなければ標準出力の端末の幅
@@ -228,7 +274,7 @@ struct Engine<'a> {
 
 enum Stop {
     Help,
-    Error(Vec<u32>),
+    Error(ParseError),
 }
 
 impl Engine<'_> {
@@ -248,16 +294,27 @@ impl Engine<'_> {
         }
     }
 
-    fn argument_error(&self, index: usize, message: &str) -> Stop {
-        self.error(&chars(&format!("argument {}: {message}", self.name(index))))
+    fn argument_error(&self, index: usize, message: &str, raised: ArgumentRaise) -> Stop {
+        let text = format!("argument {}: {message}", self.name(index));
+        self.error(
+            &chars(&text),
+            ErrorSite::Argument {
+                raised,
+                text: text.clone(),
+            },
+        )
     }
 
-    fn error(&self, message: &[u32]) -> Stop {
-        let mut out = chars(&format_usage(self.parser, self.context.width));
-        out.extend(chars(&format!("{}: error: ", self.parser.prog)));
+    fn error(&self, message: &[u32], site: ErrorSite) -> Stop {
+        let usage = chars(&format_usage(self.parser, self.context.width));
+        let mut out = chars(&format!("{}: error: ", self.parser.prog));
         out.extend_from_slice(message);
         out.push(u32::from(b'\n'));
-        Stop::Error(out)
+        Stop::Error(ParseError {
+            usage,
+            message: out,
+            site,
+        })
     }
 
     fn option_tuples(&self, text: &[u32]) -> Vec<OptionTuple> {
@@ -331,7 +388,7 @@ impl Engine<'_> {
             let mut message = chars("ambiguous option: ");
             message.extend_from_slice(text);
             message.extend(chars(&format!(" could match {}", matches.join(", "))));
-            return Err(self.error(&message));
+            return Err(self.error(&message, ErrorSite::Ambiguous));
         }
         if let Some(tuple) = tuples.into_iter().next() {
             return Ok(Some(tuple));
@@ -356,21 +413,21 @@ impl Engine<'_> {
             Kind::Store(convert) => convert,
             _ => Convert::Str,
         };
-        let failure = |type_name: &str| {
-            let mut message = chars(&format!("invalid {type_name} value: "));
-            message.extend(value::str_repr(text));
-            let mut full = chars(&format!("argument {}: ", self.name(index)));
-            full.extend(message);
-            self.error(&full)
+        let failure = |type_name: &str, cause: String| {
+            let message = format!(
+                "invalid {type_name} value: {}",
+                value::text(&value::str_repr(text))
+            );
+            self.argument_error(index, &message, ArgumentRaise::InvalidValue { cause })
         };
         match convert {
             Convert::Str => Ok(PyValue::Str(text.to_vec())),
             Convert::Int => number::int_from_str(text, self.context.max_str_digits)
                 .map(PyValue::Int)
-                .map_err(|_| failure("int")),
+                .map_err(|cause| failure("int", cause)),
             Convert::Float => number::float_from_str(text)
                 .map(PyValue::Float)
-                .map_err(|_| failure("float")),
+                .map_err(|cause| failure("float", cause)),
         }
     }
 }
@@ -466,10 +523,15 @@ impl State<'_> {
     }
 }
 
-fn ignored_explicit(engine: &Engine<'_>, action: usize, explicit: &[u32]) -> Stop {
+fn ignored_explicit(
+    engine: &Engine<'_>,
+    action: usize,
+    explicit: &[u32],
+    raised: ArgumentRaise,
+) -> Stop {
     let mut message = chars("ignored explicit argument ");
     message.extend(value::str_repr(explicit));
-    engine.argument_error(action, &value::text(&message))
+    engine.argument_error(action, &value::text(&message), raised)
 }
 
 fn run(engine: &Engine<'_>, args: &[Vec<u32>]) -> Result<Vec<(&'static str, PyValue)>, Stop> {
@@ -568,13 +630,25 @@ fn run(engine: &Engine<'_>, args: &[Vec<u32>]) -> Result<Vec<(&'static str, PyVa
                                 option = short;
                                 explicit = if rest.is_empty() { None } else { Some(rest) };
                             }
-                            None => return Err(ignored_explicit(engine, action, &explicit_value)),
+                            None => {
+                                return Err(ignored_explicit(
+                                    engine,
+                                    action,
+                                    &explicit_value,
+                                    ArgumentRaise::IgnoredShort,
+                                ));
+                            }
                         }
                     } else if takes_value {
                         queue.push((action, vec![explicit_value]));
                         break start + 1;
                     } else {
-                        return Err(ignored_explicit(engine, action, &explicit_value));
+                        return Err(ignored_explicit(
+                            engine,
+                            action,
+                            &explicit_value,
+                            ArgumentRaise::IgnoredExplicit,
+                        ));
                     }
                 }
                 None => {
@@ -584,7 +658,11 @@ fn run(engine: &Engine<'_>, args: &[Vec<u32>]) -> Result<Vec<(&'static str, PyVa
                     } else if pattern.get(first) == Some(&b'A') {
                         1
                     } else {
-                        return Err(engine.argument_error(action, "expected one argument"));
+                        return Err(engine.argument_error(
+                            action,
+                            "expected one argument",
+                            ArgumentRaise::ExpectedOne,
+                        ));
                     };
                     queue.push((action, args[first..first + count].to_vec()));
                     break first + count;
@@ -606,10 +684,13 @@ fn run(engine: &Engine<'_>, args: &[Vec<u32>]) -> Result<Vec<(&'static str, PyVa
         .map(|(index, _)| engine.name(index))
         .collect();
     if !required.is_empty() {
-        return Err(engine.error(&chars(&format!(
-            "the following arguments are required: {}",
-            required.join(", ")
-        ))));
+        return Err(engine.error(
+            &chars(&format!(
+                "the following arguments are required: {}",
+                required.join(", ")
+            )),
+            ErrorSite::Required,
+        ));
     }
     if !extras.is_empty() {
         let mut message = chars("unrecognized arguments: ");
@@ -619,7 +700,7 @@ fn run(engine: &Engine<'_>, args: &[Vec<u32>]) -> Result<Vec<(&'static str, PyVa
             }
             message.extend_from_slice(text);
         }
-        return Err(engine.error(&message));
+        return Err(engine.error(&message, ErrorSite::Unrecognized));
     }
     Ok(state.namespace)
 }

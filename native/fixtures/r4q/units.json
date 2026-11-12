@@ -145454,5 +145454,459 @@
    "inner": "IdentityAfter",
    "stderr": "Traceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 327, in main\n    linux_worker(args, argv)\n  File \"check-process.py\", line 296, in linux_worker\n    result = supervisor.supervise(argv, args.timeout, args.grace)\n  File \"loop-supervisor.py\", line 102, in supervise\n    signal_owned(signal.SIGTERM if time.monotonic() < term_end else signal.SIGKILL)\n  File \"loop-supervisor.py\", line 57, in signal_owned\n    after = identity(pid)\n  File \"loop-supervisor.py\", line 40, in identity\n    return (int(fields[1]), int(fields[19]))  # ppid, starttime\nIndexError: list index out of range\n"
   }
+ ],
+ "argparse_writes": [
+  {
+   "id": "lo-help-out-fail1-err-ok",
+   "script": "loop-supervisor.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "fail1",
+   "stderr": "ok",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1943, in take_action\n    action(self, namespace, argument_values, option_string)\n  File \"argparse.py\", line 1106, in __call__\n    parser.print_help()\n  File \"argparse.py\", line 2567, in print_help\n    self._print_message(self.format_help(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-help-out-none-err-ok",
+   "script": "loop-supervisor.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "none",
+   "stderr": "ok",
+   "writes": [
+    [
+     "stderr",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n\nLinux の subreaper で、1 回のイテレーションで起動したプロセス(子孫を含む)を、最後の waitpid まで所有して回収する。\n\npositional arguments:\n  command\n\noptions:\n  -h, --help         show this help message and exit\n  --result RESULT\n  --nonce NONCE\n  --timeout TIMEOUT\n  --grace GRACE\n"
+    ]
+   ],
+   "end": {
+    "exit": 0
+   }
+  },
+  {
+   "id": "lo-help-out-none-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "none",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1943, in take_action\n    action(self, namespace, argument_values, option_string)\n  File \"argparse.py\", line 1106, in __call__\n    parser.print_help()\n  File \"argparse.py\", line 2567, in print_help\n    self._print_message(self.format_help(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-help-out-none-err-none",
+   "script": "loop-supervisor.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "none",
+   "stderr": "none",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1943, in take_action\n    action(self, namespace, argument_values, option_string)\n  File \"argparse.py\", line 1106, in __call__\n    parser.print_help()\n  File \"argparse.py\", line 2567, in print_help\n    self._print_message(self.format_help(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nAttributeError: 'NoneType' object has no attribute 'write'\n"
+   }
+  },
+  {
+   "id": "lo-required-out-ok-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-required-out-ok-err-fail2",
+   "script": "loop-supervisor.py",
+   "args": [],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-required-out-ok-err-none",
+   "script": "loop-supervisor.py",
+   "args": [],
+   "stdout": "ok",
+   "stderr": "none",
+   "writes": [
+    [
+     "stdout",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nAttributeError: 'NoneType' object has no attribute 'write'\n"
+   }
+  },
+  {
+   "id": "lo-required-out-fail1-err-none",
+   "script": "loop-supervisor.py",
+   "args": [],
+   "stdout": "fail1",
+   "stderr": "none",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-required-out-none-err-none",
+   "script": "loop-supervisor.py",
+   "args": [],
+   "stdout": "none",
+   "stderr": "none",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nAttributeError: 'NoneType' object has no attribute 'write'\n"
+   }
+  },
+  {
+   "id": "lo-float-out-ok-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--timeout",
+    "x"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 2495, in _get_value\n    result = type_func(arg_string)\nValueError: could not convert string to float: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1927, in take_action\n    argument_values = self._get_values(action, argument_strings)\n  File \"argparse.py\", line 2462, in _get_values\n    value = self._get_value(action, arg_string)\n  File \"argparse.py\", line 2508, in _get_value\n    raise ArgumentError(action, msg % args)\nargparse.ArgumentError: argument --timeout: invalid float value: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-float-out-ok-err-fail2",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--timeout",
+    "x"
+   ],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 2495, in _get_value\n    result = type_func(arg_string)\nValueError: could not convert string to float: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1927, in take_action\n    argument_values = self._get_values(action, argument_strings)\n  File \"argparse.py\", line 2462, in _get_values\n    value = self._get_value(action, arg_string)\n  File \"argparse.py\", line 2508, in _get_value\n    raise ArgumentError(action, msg % args)\nargparse.ArgumentError: argument --timeout: invalid float value: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-expected-out-ok-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--result"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2009, in consume_optional\n    arg_count = match_argument(action, selected_patterns)\n  File \"argparse.py\", line 2174, in _match_argument\n    raise ArgumentError(action, msg)\nargparse.ArgumentError: argument --result: expected one argument\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-expected-out-ok-err-fail2",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--result"
+   ],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2009, in consume_optional\n    arg_count = match_argument(action, selected_patterns)\n  File \"argparse.py\", line 2174, in _match_argument\n    raise ArgumentError(action, msg)\nargparse.ArgumentError: argument --result: expected one argument\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-ignored-long-out-ok-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--help=x"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2001, in consume_optional\n    raise ArgumentError(action, msg % explicit_arg)\nargparse.ArgumentError: argument -h/--help: ignored explicit argument 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-ignored-long-out-ok-err-none",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--help=x"
+   ],
+   "stdout": "ok",
+   "stderr": "none",
+   "writes": [
+    [
+     "stdout",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2001, in consume_optional\n    raise ArgumentError(action, msg % explicit_arg)\nargparse.ArgumentError: argument -h/--help: ignored explicit argument 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nAttributeError: 'NoneType' object has no attribute 'write'\n"
+   }
+  },
+  {
+   "id": "lo-unrecognized-out-ok-err-fail1",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--zz",
+    "--result",
+    "r",
+    "--nonce",
+    "n",
+    "--timeout",
+    "1",
+    "--grace",
+    "1"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1836, in parse_args\n    self.error(msg % ' '.join(argv))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "lo-unrecognized-out-ok-err-fail2",
+   "script": "loop-supervisor.py",
+   "args": [
+    "--zz",
+    "--result",
+    "r",
+    "--nonce",
+    "n",
+    "--timeout",
+    "1",
+    "--grace",
+    "1"
+   ],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: loop-supervisor.py [-h] --result RESULT --nonce NONCE --timeout TIMEOUT\n                          --grace GRACE\n                          ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"loop-supervisor.py\", line 152, in <module>\n    sys.exit(main())\n  File \"loop-supervisor.py\", line 129, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1836, in parse_args\n    self.error(msg % ' '.join(argv))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-help-out-fail1-err-ok",
+   "script": "check-process.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "fail1",
+   "stderr": "ok",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1943, in take_action\n    action(self, namespace, argument_values, option_string)\n  File \"argparse.py\", line 1106, in __call__\n    parser.print_help()\n  File \"argparse.py\", line 2567, in print_help\n    self._print_message(self.format_help(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-help-out-none-err-ok",
+   "script": "check-process.py",
+   "args": [
+    "-h"
+   ],
+   "stdout": "none",
+   "stderr": "ok",
+   "writes": [
+    [
+     "stderr",
+     "usage: check-process.py [-h] [--anchor-fd ANCHOR_FD] [--linux]\n                        [--result RESULT] [--timeout TIMEOUT] [--grace GRACE]\n                        --nonce NONCE\n                        ...\n\n品質コマンドを監督し、回収の確認が取れてから呼出元へ返す。 Linux は既存の専用 subreaper、他 POSIX は未回収の anchor\nが保持する群を使う。 群外への切離しと同じ利用者権限による監督への攻撃を完全に隔離するものではない。\n\npositional arguments:\n  command\n\noptions:\n  -h, --help            show this help message and exit\n  --anchor-fd ANCHOR_FD\n  --linux\n  --result RESULT\n  --timeout TIMEOUT\n  --grace GRACE\n  --nonce NONCE\n"
+    ]
+   ],
+   "end": {
+    "exit": 0
+   }
+  },
+  {
+   "id": "ch-int-out-ok-err-fail1",
+   "script": "check-process.py",
+   "args": [
+    "--anchor-fd",
+    "x",
+    "--nonce",
+    "n"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 2495, in _get_value\n    result = type_func(arg_string)\nValueError: invalid literal for int() with base 10: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1927, in take_action\n    argument_values = self._get_values(action, argument_strings)\n  File \"argparse.py\", line 2462, in _get_values\n    value = self._get_value(action, arg_string)\n  File \"argparse.py\", line 2508, in _get_value\n    raise ArgumentError(action, msg % args)\nargparse.ArgumentError: argument --anchor-fd: invalid int value: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-int-out-ok-err-fail2",
+   "script": "check-process.py",
+   "args": [
+    "--anchor-fd",
+    "x",
+    "--nonce",
+    "n"
+   ],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: check-process.py [-h] [--anchor-fd ANCHOR_FD] [--linux]\n                        [--result RESULT] [--timeout TIMEOUT] [--grace GRACE]\n                        --nonce NONCE\n                        ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 2495, in _get_value\n    result = type_func(arg_string)\nValueError: invalid literal for int() with base 10: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1927, in take_action\n    argument_values = self._get_values(action, argument_strings)\n  File \"argparse.py\", line 2462, in _get_values\n    value = self._get_value(action, arg_string)\n  File \"argparse.py\", line 2508, in _get_value\n    raise ArgumentError(action, msg % args)\nargparse.ArgumentError: argument --anchor-fd: invalid int value: 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-int-digits-out-ok-err-fail1",
+   "script": "check-process.py",
+   "args": [
+    "--anchor-fd",
+    "11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111",
+    "--nonce",
+    "n"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 2495, in _get_value\n    result = type_func(arg_string)\nValueError: Exceeds the limit (4300) for integer string conversion: value has 5000 digits; use sys.set_int_max_str_digits() to increase the limit\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 2019, in consume_optional\n    take_action(action, args, option_string)\n  File \"argparse.py\", line 1927, in take_action\n    argument_values = self._get_values(action, argument_strings)\n  File \"argparse.py\", line 2462, in _get_values\n    value = self._get_value(action, arg_string)\n  File \"argparse.py\", line 2508, in _get_value\n    raise ArgumentError(action, msg % args)\nargparse.ArgumentError: argument --anchor-fd: invalid int value: '11111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111111'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-ignored-short-out-ok-err-fail1",
+   "script": "check-process.py",
+   "args": [
+    "-hx"
+   ],
+   "stdout": "ok",
+   "stderr": "fail1",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 1987, in consume_optional\n    raise ArgumentError(action, msg % explicit_arg)\nargparse.ArgumentError: argument -h/--help: ignored explicit argument 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-ignored-short-out-ok-err-fail2",
+   "script": "check-process.py",
+   "args": [
+    "-hx"
+   ],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: check-process.py [-h] [--anchor-fd ANCHOR_FD] [--linux]\n                        [--result RESULT] [--timeout TIMEOUT] [--grace GRACE]\n                        --nonce NONCE\n                        ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2079, in _parse_known_args\n    start_index = consume_optional(start_index)\n  File \"argparse.py\", line 1987, in consume_optional\n    raise ArgumentError(action, msg % explicit_arg)\nargparse.ArgumentError: argument -h/--help: ignored explicit argument 'x'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1869, in parse_known_args\n    self.error(str(err))\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-required-out-ok-err-fail2",
+   "script": "check-process.py",
+   "args": [],
+   "stdout": "ok",
+   "stderr": "fail2",
+   "writes": [
+    [
+     "stderr",
+     "usage: check-process.py [-h] [--anchor-fd ANCHOR_FD] [--linux]\n                        [--result RESULT] [--timeout TIMEOUT] [--grace GRACE]\n                        --nonce NONCE\n                        ...\n"
+    ]
+   ],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2594, in error\n    self.exit(2, _('%(prog)s: error: %(message)s\\n') % args)\n  File \"argparse.py\", line 2580, in exit\n    self._print_message(message, _sys.stderr)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  },
+  {
+   "id": "ch-required-out-fail1-err-none",
+   "script": "check-process.py",
+   "args": [],
+   "stdout": "fail1",
+   "stderr": "none",
+   "writes": [],
+   "end": {
+    "raised": "Traceback (most recent call last):\n  File \"check-process.py\", line 337, in <module>\n    sys.exit(main())\n  File \"check-process.py\", line 319, in main\n    args = parser.parse_args()\n  File \"argparse.py\", line 1833, in parse_args\n    args, argv = self.parse_known_args(args, namespace)\n  File \"argparse.py\", line 1866, in parse_known_args\n    namespace, args = self._parse_known_args(args, namespace)\n  File \"argparse.py\", line 2107, in _parse_known_args\n    self.error(_('the following arguments are required: %s') %\n  File \"argparse.py\", line 2592, in error\n    self.print_usage(_sys.stderr)\n  File \"argparse.py\", line 2562, in print_usage\n    self._print_message(self.format_usage(), file)\n  File \"argparse.py\", line 2573, in _print_message\n    file.write(message)\nOSError: [Errno 28] No space left on device\n"
+   }
+  }
+ ],
+ "pidfd_pid": [
+  {
+   "pid": "2147483647",
+   "overflow": null
+  },
+  {
+   "pid": "2147483648",
+   "overflow": "signed integer is greater than maximum"
+  },
+  {
+   "pid": "-2147483648",
+   "overflow": null
+  },
+  {
+   "pid": "-2147483649",
+   "overflow": "signed integer is less than minimum"
+  },
+  {
+   "pid": "9223372036854775807",
+   "overflow": "signed integer is greater than maximum"
+  },
+  {
+   "pid": "9223372036854775808",
+   "overflow": "Python int too large to convert to C long"
+  },
+  {
+   "pid": "-9223372036854775808",
+   "overflow": "signed integer is less than minimum"
+  },
+  {
+   "pid": "-9223372036854775809",
+   "overflow": "Python int too large to convert to C long"
+  },
+  {
+   "pid": "100000000000000000000",
+   "overflow": "Python int too large to convert to C long"
+  },
+  {
+   "pid": "-100000000000000000000",
+   "overflow": "Python int too large to convert to C long"
+  },
+  {
+   "pid": "10000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+   "overflow": "Python int too large to convert to C long"
+  }
  ]
 }

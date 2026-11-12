@@ -710,9 +710,156 @@ pub fn close(fd: OwnedFd) -> io::Result<()> {
     }
 }
 
+// ---- /proc の読取り(監督の所有の確かめ。段階 5 の loop.sh の Rust 版も使う) ----
+
+/// `Path(…).read_bytes()` の失敗。旧版の OSError は、開く段の誤りにだけファイル名が付く(読む段の
+/// `FileIO.readall` の誤りには付かない)。
+#[derive(Debug)]
+pub enum ProcReadError {
+    Open(io::Error),
+    Read(io::Error),
+}
+
+impl ProcReadError {
+    pub fn errno(&self) -> i32 {
+        match self {
+            ProcReadError::Open(error) | ProcReadError::Read(error) => {
+                error.raw_os_error().unwrap_or(0)
+            }
+        }
+    }
+
+    /// 旧版の例外にファイル名が付くか。
+    pub fn has_filename(&self) -> bool {
+        matches!(self, ProcReadError::Open(_))
+    }
+}
+
+/// ファイルの全部を読む(`FileIO` の open〈`O_RDONLY|O_CLOEXEC`〉と `readall`。どちらも EINTR を繰り返す)。
+fn read_whole(path: &[u8]) -> Result<Vec<u8>, ProcReadError> {
+    let fd = retry_eintr(|| {
+        fs::open(path, OFlags::RDONLY | OFlags::CLOEXEC, Mode::empty()).map_err(rustix_error)
+    })
+    .map_err(ProcReadError::Open)?;
+    let mut out = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match retry_eintr(|| read(fd.as_fd(), &mut chunk)) {
+            Ok(0) => return Ok(out),
+            Ok(count) => out.extend_from_slice(&chunk[..count]),
+            Err(error) => return Err(ProcReadError::Read(error)),
+        }
+    }
+}
+
+/// 旧版 `own_children` のパス(`/proc/self/task/<pid>/children`)。
+pub fn own_children_path(pid: i32) -> String {
+    format!("/proc/self/task/{pid}/children")
+}
+
+/// 旧版 `identity` のパス(`/proc/<pid>/stat`。`pid` は `children` から読んだ 10 進の字面)。
+pub fn proc_stat_path(pid: &str) -> String {
+    format!("/proc/{pid}/stat")
+}
+
+/// `Path(f'/proc/self/task/{os.getpid()}/children').read_text()` の読取り(復号は呼出元。
+/// 旧版の `read_text` は UTF-8 の strict)。
+pub fn read_own_children(pid: i32) -> Result<Vec<u8>, ProcReadError> {
+    read_whole(own_children_path(pid).as_bytes())
+}
+
+/// `Path(f'/proc/{pid}/stat').read_bytes()`(旧版 `identity` の読取り。解釈は呼出元の純粋な関数)。
+pub fn read_proc_stat(pid: &str) -> Result<Vec<u8>, ProcReadError> {
+    read_whole(proc_stat_path(pid).as_bytes())
+}
+
+// ---- 乱数の /dev/urandom の段(CPython 3.10.11 `Python/bootstrap_hash.c` の `dev_urandom`) ----
+
+/// `dev_urandom(buffer, size, raise=1)` の失敗。
+#[derive(Debug)]
+pub enum UrandomError {
+    /// 開けない(ENOENT・ENXIO・ENODEV・EACCES)。旧版は `NotImplementedError('/dev/urandom (or equivalent) not found')`。
+    NotFound,
+    /// ほかの開く誤り(旧版は `/dev/urandom` のファイル名付きの OSError)。
+    Open(io::Error),
+    /// 開いた後の fstat の誤り(ファイル名の無い OSError)。
+    Fstat(io::Error),
+    /// 読む誤り(ファイル名の無い OSError)。
+    Read(io::Error),
+    /// 途中で終わった(`RuntimeError('Failed to read <残りのバイト数> bytes from /dev/urandom')`)。
+    Eof(usize),
+}
+
+/// 開いた `/dev/urandom` の控え(CPython の `urandom_cache`。プロセスの間ずっと開いておく)。
+static URANDOM: std::sync::Mutex<Option<(OwnedFd, libc::dev_t, libc::ino_t)>> =
+    std::sync::Mutex::new(None);
+
+/// `/dev/urandom` から `buffer` を満たす(getrandom・getentropy が ENOSYS・EPERM のときだけ呼ぶ)。
+pub fn dev_urandom(buffer: &mut [u8]) -> Result<(), UrandomError> {
+    let mut cache = URANDOM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let stale = cache.as_ref().is_some_and(|(fd, dev, ino)| {
+        fs::fstat(fd.as_fd()).map_or(true, |info| info.st_dev != *dev || info.st_ino != *ino)
+    });
+    if stale && let Some((fd, _, _)) = cache.take() {
+        // 閉じない(ほかの用途で使われている番号かもしれない。CPython と同じ)。
+        let _ = std::os::fd::IntoRawFd::into_raw_fd(fd);
+    }
+    if cache.is_none() {
+        let fd = retry_eintr(|| {
+            fs::open(
+                "/dev/urandom",
+                OFlags::RDONLY | OFlags::CLOEXEC,
+                Mode::empty(),
+            )
+            .map_err(rustix_error)
+        })
+        .map_err(|error| match error.raw_os_error() {
+            Some(libc::ENOENT | libc::ENXIO | libc::ENODEV | libc::EACCES) => {
+                UrandomError::NotFound
+            }
+            _ => UrandomError::Open(error),
+        })?;
+        let info =
+            fs::fstat(fd.as_fd()).map_err(|error| UrandomError::Fstat(rustix_error(error)))?;
+        *cache = Some((fd, info.st_dev, info.st_ino));
+    }
+    let Some((fd, _, _)) = cache.as_ref() else {
+        return Err(UrandomError::Fstat(io::Error::from_raw_os_error(
+            libc::EBADF,
+        )));
+    };
+    let mut filled = 0usize;
+    while filled < buffer.len() {
+        match retry_eintr(|| read(fd.as_fd(), &mut buffer[filled..])) {
+            Ok(0) => return Err(UrandomError::Eof(buffer.len() - filled)),
+            Ok(count) => filled += count,
+            Err(error) => return Err(UrandomError::Read(error)),
+        }
+    }
+    Ok(())
+}
+
+/// anchor が `--anchor-fd` で受けた、起動した側から継いだ fd(旧版 `anchor(fd, nonce, argv)` の fd)を借りる。
+/// - 使う所は check-process の anchor の通知の fd だけ(継がない設定にして、通知の行を 1 回書く)。
+/// - 負の番号と開いていない番号は `EBADF`(旧版の `os.set_inheritable(fd, False)` と同じ errno)。
+/// - このプロセスはこの fd を閉じない(anchor は KILL まで pause を続ける)ので、借用はプロセスの終わりまで有効。
+pub fn inherited_fd(fd: RawFd) -> io::Result<BorrowedFd<'static>> {
+    if fd < 0 {
+        return Err(io::Error::from_raw_os_error(libc::EBADF));
+    }
+    // SAFETY: fcntl(F_GETFD) は番号の fd の印を読むだけで、記憶域に触れない。
+    if unsafe { libc::fcntl(fd, libc::F_GETFD) } < 0 {
+        return Err(last_error());
+    }
+    // SAFETY: 上で開いていることを確かめた。起動した側から継いだ fd で、このプロセスは閉じない。
+    Ok(unsafe { BorrowedFd::borrow_raw(fd) })
+}
+
 /// fd の exec の時に閉じる印を変える(Python の `os.set_inheritable(fd, inheritable)`)。
-pub fn set_inheritable(fd: RawFd, inheritable: bool) -> io::Result<()> {
-    set_cloexec(fd, !inheritable)
+pub fn set_inheritable(fd: BorrowedFd<'_>, inheritable: bool) -> io::Result<()> {
+    set_cloexec(fd.as_raw_fd(), !inheritable)
 }
 
 // ---- 子の起動 ----

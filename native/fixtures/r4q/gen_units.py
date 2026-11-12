@@ -5,7 +5,9 @@
   shutil.get_terminal_size の幅・int()(桁の上限を含む)・float()・float の repr・int と float の和・
   json.loads(bytes)(文字コードの判定と surrogatepass を含む)・json.dumps・OSError などの str(exc)・
   strerror(Linux)・TimeoutExpired の文・pathlib の str(directory / name)・Unicode の空白と 10 進数字の表・
-  旧版の docstring・旧版が捕まえない例外の呼出履歴(旧スクリプトのパスは固定名)。
+  旧版の docstring・旧版が捕まえない例外の呼出履歴(旧スクリプトのパスは固定名)・argparse を通る書き出しの
+  失敗(help・usage・error の経路と、stdout・stderr の失敗と None。旧版の main をこのプロセスで流し、書いた流れと
+  文と、終了値か呼出履歴の文。argparse.py も固定名)・os.pidfd_open の pid の変換(本物の os.pidfd_open)。
 - 使い方: Linux・root でない利用者で、pidfd のある本家と同じ中身の 3.10.11 を使う。一時フォルダの親を渡す
   (自分で作った一時フォルダだけを最後に消す。/tmp には作らない)。
   "$R4Q_PYTHON" -B native/fixtures/r4q/gen_units.py --temp-root <フォルダ> [--out <ファイル>]
@@ -27,6 +29,7 @@ import signal
 import subprocess
 import sys
 import tempfile
+import traceback
 import unicodedata
 from pathlib import Path, PurePosixPath
 
@@ -767,6 +770,122 @@ def traceback_cases(work):
     return cases
 
 
+# ---- os.pidfd_open の pid の変換(壊れた children の pid。mock で置き換えない本物の変換) ----
+
+def pid_conversion_cases():
+    values = [2 ** 31 - 1, 2 ** 31, -2 ** 31, -2 ** 31 - 1, 2 ** 63 - 1, 2 ** 63, -2 ** 63, -2 ** 63 - 1, 10 ** 20,
+              -10 ** 20, 10 ** 400]
+    cases = []
+    for value in values:
+        try:
+            fd = os.pidfd_open(value)
+        except OverflowError as exc:
+            cases.append({"pid": str(value), "overflow": str(exc)})
+            continue
+        except OSError:
+            pass  # C の int の中の値は変換を通り、呼出しの誤り(ESRCH・EINVAL)になる
+        else:
+            os.close(fd)
+        cases.append({"pid": str(value), "overflow": None})
+    return cases
+
+
+# ---- argparse を通る書き出しの失敗(help・usage・error の各経路と、stdout・stderr の失敗・None) ----
+
+ARGPARSE_PATH = str(Path(argparse.__file__).resolve())
+
+
+class Recorder:
+    """sys.stdout・sys.stderr の代わり。n 回目の write で OSError を投げる(本物の write は C なのでフレームが無い。
+    このクラスのフレームは呼出履歴から外す)。"""
+
+    def __init__(self, name, fail_at, writes):
+        self.name, self.fail_at, self.writes, self.count = name, fail_at, writes, 0
+
+    def write(self, text):
+        self.count += 1
+        if self.count == self.fail_at:
+            raise OSError(28, "No space left on device")
+        self.writes.append([self.name, text])
+        return len(text)
+
+    def flush(self):
+        pass
+
+
+def stream(name, mode, writes):
+    if mode == "none":
+        return None
+    return Recorder(name, int(mode[4:]) if mode.startswith("fail") else 0, writes)
+
+
+def format_raised(exc):
+    """呼出履歴の文(旧スクリプトと argparse.py のフレームだけ。パスは固定名)。"""
+    def keep(chain_exc):
+        frames = [frame for frame in traceback.extract_tb(chain_exc.__traceback__)
+                  if frame.filename in {str(path) for path in LEGACY.values()} or frame.filename == ARGPARSE_PATH]
+        return traceback.StackSummary.from_list(frames)
+    chain = []
+    current = exc
+    while current is not None:
+        chain.append(current)
+        current = current.__context__ if not current.__suppress_context__ and current.__cause__ is None else None
+    blocks = []
+    for item in reversed(chain):
+        lines = ["Traceback (most recent call last):\n"] + keep(item).format()
+        lines += traceback.format_exception_only(type(item), item)
+        blocks.append("".join(lines))
+    text = "\nDuring handling of the above exception, another exception occurred:\n\n".join(blocks)
+    for name, path in LEGACY.items():
+        text = text.replace(f'File "{path}"', f'File "{name}"')
+    return text.replace(f'File "{ARGPARSE_PATH}"', 'File "argparse.py"')
+
+
+def run_argparse_write(name, args, out, err):
+    writes = []
+    saved = sys.stdout, sys.stderr, sys.argv
+    sys.argv = [str(LEGACY[name]), *args]
+    sys.stdout, sys.stderr = stream("stdout", out, writes), stream("stderr", err, writes)
+    code = compile(LEGACY[name].read_text(encoding="utf-8"), str(LEGACY[name]), "exec")
+    try:
+        exec(code, {"__name__": "__main__", "__file__": str(LEGACY[name]), "__builtins__": __builtins__})
+        end = {"exit": None}
+    except SystemExit as exc:
+        end = {"exit": exc.code}
+    except BaseException as exc:  # noqa: B902(書き出しの失敗の例外を、そのまま呼出履歴の文にする)
+        end = {"raised": format_raised(exc)}
+    finally:
+        sys.stdout, sys.stderr, sys.argv = saved
+    return writes, end
+
+
+def argparse_write_cases():
+    unrecognized = ["--zz", "--result", "r", "--nonce", "n", "--timeout", "1", "--grace", "1"]
+    plan = [
+        ("loop-supervisor.py", "help", ["-h"], [("fail1", "ok"), ("none", "ok"), ("none", "fail1"), ("none", "none")]),
+        ("loop-supervisor.py", "required", [], [("ok", "fail1"), ("ok", "fail2"), ("ok", "none"), ("fail1", "none"),
+                                                 ("none", "none")]),
+        ("loop-supervisor.py", "float", ["--timeout", "x"], [("ok", "fail1"), ("ok", "fail2")]),
+        ("loop-supervisor.py", "expected", ["--result"], [("ok", "fail1"), ("ok", "fail2")]),
+        ("loop-supervisor.py", "ignored-long", ["--help=x"], [("ok", "fail1"), ("ok", "none")]),
+        ("loop-supervisor.py", "unrecognized", unrecognized, [("ok", "fail1"), ("ok", "fail2")]),
+        ("check-process.py", "help", ["-h"], [("fail1", "ok"), ("none", "ok")]),
+        ("check-process.py", "int", ["--anchor-fd", "x", "--nonce", "n"], [("ok", "fail1"), ("ok", "fail2")]),
+        ("check-process.py", "int-digits", ["--anchor-fd", "1" * 5000, "--nonce", "n"], [("ok", "fail1")]),
+        ("check-process.py", "ignored-short", ["-hx"], [("ok", "fail1"), ("ok", "fail2")]),
+        ("check-process.py", "required", [], [("ok", "fail2"), ("fail1", "none")]),
+    ]
+    cases = []
+    with_columns(80)
+    for name, label, args, setups in plan:
+        for out, err in setups:
+            writes, end = run_argparse_write(name, args, out, err)
+            cases.append({"id": f"{name[:2]}-{label}-out-{out}-err-{err}", "script": name, "args": args,
+                          "stdout": out, "stderr": err, "writes": writes, "end": end})
+    with_columns(None)
+    return cases
+
+
 def docstrings():
     result = {}
     for name, path in LEGACY.items():
@@ -798,6 +917,8 @@ def main():
             "terminal": terminal_cases(),
             "exception": exception_cases(),
             "traceback": traceback_cases(work),
+            "argparse_writes": argparse_write_cases(),
+            "pidfd_pid": pid_conversion_cases(),
         }
     finally:
         shutil.rmtree(work)

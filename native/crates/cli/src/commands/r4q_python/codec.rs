@@ -81,8 +81,8 @@ fn continuation(byte: u8) -> bool {
 /// `raw.decode(encoding, 'surrogatepass')`(`detect_encoding` が返す名前だけ)。
 pub fn decode_surrogatepass(raw: &[u8], encoding: &str) -> Result<Vec<u32>, DecodeError> {
     match encoding {
-        "utf-8" => utf8(raw),
-        "utf-8-sig" => utf8(raw.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(raw)),
+        "utf-8" => utf8(raw, true),
+        "utf-8-sig" => utf8(raw.strip_prefix(&[0xef, 0xbb, 0xbf]).unwrap_or(raw), true),
         "utf-16" => utf16(raw, None),
         "utf-16-le" => utf16(raw, Some(false)),
         "utf-16-be" => utf16(raw, Some(true)),
@@ -93,8 +93,13 @@ pub fn decode_surrogatepass(raw: &[u8], encoding: &str) -> Result<Vec<u32>, Deco
     }
 }
 
-/// UTF-8(surrogatepass)。
-fn utf8(raw: &[u8]) -> Result<Vec<u32>, DecodeError> {
+/// `raw.decode('utf-8')`(strict。旧版の `Path.read_text()` の復号)。
+pub fn decode_utf8_strict(raw: &[u8]) -> Result<Vec<u32>, DecodeError> {
+    utf8(raw, false)
+}
+
+/// UTF-8(`surrogatepass` が真なら surrogatepass、偽なら strict)。
+fn utf8(raw: &[u8], surrogatepass: bool) -> Result<Vec<u32>, DecodeError> {
     let n = raw.len();
     let mut out = Vec::with_capacity(n);
     let mut pos = 0;
@@ -192,7 +197,12 @@ fn utf8(raw: &[u8]) -> Result<Vec<u32>, DecodeError> {
             }
             Some((reason, end)) => {
                 // surrogatepass: 3 バイトの surrogate の符号なら受け取って続ける。
-                if left >= 3 && (b0 & 0xf0) == 0xe0 && continuation(at(1)) && continuation(at(2)) {
+                if surrogatepass
+                    && left >= 3
+                    && (b0 & 0xf0) == 0xe0
+                    && continuation(at(1))
+                    && continuation(at(2))
+                {
                     let code = (u32::from(b0 & 0x0f) << 12)
                         | (u32::from(at(1) & 0x3f) << 6)
                         | u32::from(at(2) & 0x3f);
