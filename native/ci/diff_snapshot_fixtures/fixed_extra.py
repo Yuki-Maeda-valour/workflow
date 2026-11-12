@@ -130,6 +130,16 @@ D5_CAUSES = {'python-missing': b'python3: command not found', 'pyyaml-missing': 
              'helper-missing': 'profile helper が無い'.encode()}
 
 
+def d5_plain_python(parent):
+    """PyYAMLを持たないpython。比較器のPythonがvenvか、PyYAMLを直接入れた物かに依らないよう、空のvenvを作る。"""
+    folder = parent / 'd5-plain-venv'
+    python = folder / 'bin/python3'
+    if not python.exists():
+        subprocess.run([sys.executable, '-m', 'venv', '--without-pip', str(folder)], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return str(python)
+
+
 def d5_fill(folder, python, real_path, log=None):
     """同じPATHの文字列のまま、フォルダの中身だけを替える。python: 'yaml'・'plain'・None。
 
@@ -142,7 +152,8 @@ def d5_fill(folder, python, real_path, log=None):
         if real is None:
             raise AssertionError(f'D5の専用PATHに置く道具がありません: {tool}')
         os.symlink(os.path.realpath(real), folder / tool)
-    target = {'yaml': shutil.which('python3', path=real_path), 'plain': os.path.realpath(sys.executable)}.get(python)
+    target = {'yaml': shutil.which('python3', path=real_path),
+              'plain': d5_plain_python(folder.parent) if python == 'plain' else None}.get(python)
     if python is not None:
         record = "printf 'python3\\n' >> '" + str(log) + "'\n" if log is not None else ''
         (folder / 'python3').write_text('#!/bin/sh\n' + record + "exec '" + target + "' \"$@\"\n")
