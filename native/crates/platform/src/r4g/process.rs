@@ -2122,6 +2122,39 @@ mod tests {
     }
 
     /// テストを動かしている PATH で道具を探す(子へ別の PATH を渡しても、比較元の起動を変えない)。
+    /// その機械の bash の版(`BASH_VERSINFO`の0〜2)。
+    fn bash_version(bash: &Path) -> Vec<u32> {
+        let output = Command::new(bash)
+            .args([
+                "-c",
+                "echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]} ${BASH_VERSINFO[2]}",
+            ])
+            .env_remove("BASH_ENV")
+            .output()
+            .unwrap()
+            .stdout;
+        String::from_utf8(output)
+            .unwrap()
+            .split_whitespace()
+            .map(|part| part.parse().unwrap())
+            .collect()
+    }
+
+    /// その機械の bash が基準の版(5.2.21。2026-11-12 00:35 の決定)なら、そのパス。違えば、その bash とは
+    /// 比べなかったことを出して`None`(Mac の /bin/bash 3.2 などは、文も扱いも基準と違う)。
+    fn baseline_bash(test: &str) -> Option<PathBuf> {
+        let bash = which("bash");
+        let version = bash_version(&bash);
+        if version == [5, 2, 21] {
+            Some(bash)
+        } else {
+            eprintln!(
+                "{test}: その機械の bash とは比べなかった(この機械の bash は {version:?}。基準は 5.2.21)"
+            );
+            None
+        }
+    }
+
     fn which(name: &str) -> PathBuf {
         let path = std::env::var_os("PATH").unwrap_or_default();
         match bash_find_command(name.as_bytes(), Some(path.as_bytes()), &mut |_| None) {
@@ -2185,8 +2218,9 @@ mod tests {
         let python3 = which("python3").as_os_str().as_bytes().to_vec();
         let child = bash_spawn(&BashCommand {
             path: &python3,
+            // argv[0] も同じパスにする(子の PATH に python3 が無い機械でも、旧Pythonが自分の置き場所を決められる)。
             argv: &[
-                b"python3".to_vec(),
+                python3.clone(),
                 b"-I".to_vec(),
                 b"-c".to_vec(),
                 b"import os, sys\nopen(sys.argv[1], 'wb').write(b''.join(k + b'\\0' + v + b'\\0' for k, v in os.environb.items() if k not in (b'PATH', b'LC_CTYPE')))".to_vec(),
@@ -2562,6 +2596,9 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
     fn bash_spawn_matches_bash_for_inherited_fds_and_signals() {
         let tree = Tree::new("bash-scenarios");
         let probes = probes();
+        // その機械の bash と比べるのは、基準の版のときだけ。Rust の子の確かめ(下の fd 7 と終了値)は
+        // どの機械でも行う。
+        let bash = baseline_bash("bash_spawn_matches_bash_for_inherited_fds_and_signals");
         for launcher in [
             ["SIG_DFL", "SIG_DFL", "SIG_DFL", "0", "1"],
             ["SIG_IGN", "SIG_IGN", "SIG_DFL", "1", "1"],
@@ -2569,19 +2606,24 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
         ] {
             let oracle = tree.0.join(format!("oracle-{}", launcher.join("-")));
             let ours = tree.0.join(format!("ours-{}", launcher.join("-")));
-            let output = Command::new(which("python3"))
-                .args(["-I", "-c", LAUNCHER])
-                .args(launcher)
-                .arg(which("bash"))
-                .args(["-c", &bash_oracle_script(&probes, &oracle)])
-                .env("PATH", "/usr/bin:/bin")
-                .env("LC_ALL", "C")
-                .env_remove("BASH_ENV")
-                .output()
-                .unwrap();
-            assert!(output.status.success(), "{output:?}");
             launch_child(&launcher, "bash", &ours);
             for (index, probe) in probes.iter().enumerate() {
+                let Some(bash) = &bash else {
+                    break;
+                };
+                if index == 0 {
+                    let output = Command::new(which("python3"))
+                        .args(["-I", "-c", LAUNCHER])
+                        .args(launcher)
+                        .arg(bash)
+                        .args(["-c", &bash_oracle_script(&probes, &oracle)])
+                        .env("PATH", "/usr/bin:/bin")
+                        .env("LC_ALL", "C")
+                        .env_remove("BASH_ENV")
+                        .output()
+                        .unwrap();
+                    assert!(output.status.success(), "{output:?}");
+                }
                 let expected = std::fs::read(format!("{}.{index}", oracle.display())).unwrap();
                 let actual = std::fs::read(format!("{}.{index}", ours.display())).unwrap();
                 // env の出力は bash が足す PWD・SHLVL・_ を含むので、名前の集合ではなく
@@ -2601,6 +2643,10 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             }
             let fds = std::fs::read_to_string(format!("{}.0", ours.display())).unwrap();
             assert_eq!(fds.contains("\n7\n"), launcher[4] == "1", "{fds}");
+            let env = std::fs::read_to_string(format!("{}.1", ours.display())).unwrap();
+            for line in ["PATH=/usr/bin:/bin\n", "LC_ALL=C\n"] {
+                assert!(env.contains(line), "{env}");
+            }
             // SIGCHLD を無視した起動でも、旧bashと同じく子の終了値 3 を受け取る。
             let code = std::fs::read_to_string(format!("{}.2", ours.display())).unwrap();
             assert!(code.ends_with("\n3\n"), "{code}");
@@ -2948,8 +2994,30 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             dir("missing"),
             "~/bin".to_string(),
         ];
+        // どの機械でも: Rust の探し方(基準の bash 5.2.21 の規則)の固定の期待。ディレクトリの後の実行できない
+        // ファイルは、旧bashと同じく「見つからない」(127)になる。
+        let fixed = [
+            BashLookup::Found(tree.bytes("d_exec/prog")),
+            BashLookup::Found(tree.bytes("d_exec/prog")),
+            BashLookup::NotExecutable(tree.bytes("d_noexec/prog")),
+            BashLookup::NotFound,
+            BashLookup::NotExecutable(tree.bytes("d_noexec/prog")),
+            BashLookup::NotFound,
+            BashLookup::Found(tree.bytes("home/bin/prog")),
+        ];
+        for (case, wanted) in cases.iter().zip(fixed) {
+            let home = tree.bytes("home");
+            let lookup = bash_find_command(b"prog", Some(case.as_bytes()), &mut |user| {
+                user.is_empty().then(|| home.clone())
+            });
+            assert_eq!(lookup, wanted, "{case}");
+        }
+        // 基準の版の bash があれば、その bash の探し方とも比べる。
+        let Some(bash) = baseline_bash("bash_lookup_matches_bash") else {
+            return;
+        };
         for case in &cases {
-            let output = Command::new(which("bash"))
+            let output = Command::new(&bash)
                 .args([
                     "-c",
                     "command -v prog; echo \"cv=$?\"; prog >/dev/null 2>&1; echo \"rc=$?\"",
@@ -3066,21 +3134,19 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
         for (name, body, _) in &files {
             tree.file(name, body, if *name == "noexec" { 0o644 } else { 0o755 });
         }
-        let bash = which("bash");
-        let version = Command::new(&bash)
-            .args([
-                "-c",
-                "echo ${BASH_VERSINFO[0]} ${BASH_VERSINFO[1]} ${BASH_VERSINFO[2]}",
-            ])
-            .output()
-            .unwrap()
-            .stdout;
-        let version: Vec<u32> = String::from_utf8(version)
-            .unwrap()
-            .split_whitespace()
-            .map(|part| part.parse().unwrap())
-            .collect();
-        let rules = BashExecRules::for_version(version[0], version[1], version[2]);
+        // Rust が作る経路と終了値は、基準の版(bash 5.2.21。2026-11-12 00:35 の決定)の規則に固定する。
+        // その機械の bash と比べるのは、基準の版のときだけ(Mac の /bin/bash 3.2 などは文も扱いも違う)。
+        let baseline = baseline_bash("bash_exec_failure_matches_bash");
+        let compare = baseline.is_some();
+        let bash = baseline.clone().unwrap_or_else(|| which("bash"));
+        let rules = BashExecRules::baseline();
+        let kind_of = |outcome: &BashExecFailure| {
+            format!("{outcome:?}")
+                .split([' ', '{'])
+                .next()
+                .unwrap()
+                .to_string()
+        };
         let signals = BashSignals::capture_and_prepare().unwrap();
         let mut kinds = std::collections::BTreeSet::new();
         let names = files
@@ -3089,16 +3155,7 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             .chain([("dir", None), ("missing", None)]);
         for (name, script) in names {
             let path = tree.bytes(name);
-            // 単純なコマンド1つの -c は、bash 自身が execve し、失敗の経路を同じ形で通る。
-            let output = Command::new(&bash)
-                .args(["-c", "\"$0\""])
-                .arg(os(&path))
-                .env("LC_ALL", "C")
-                .env("PATH", "/usr/bin:/bin")
-                .env_remove("BASH_ENV")
-                .output()
-                .unwrap();
-            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            // どの機械でも: 起動は exec の段で失敗し、その errno から経路を決める。
             let error = bash_spawn(&BashCommand {
                 path: &path,
                 argv: std::slice::from_ref(&path),
@@ -3112,6 +3169,20 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             };
             assert_eq!(failure.stage, ExecStage::Exec, "{name}");
             let outcome = bash_exec_failure(&path, failure.errno, rules);
+            kinds.insert(kind_of(&outcome));
+            if !compare {
+                continue;
+            }
+            // 単純なコマンド1つの -c は、bash 自身が execve し、失敗の経路を同じ形で通る。
+            let output = Command::new(&bash)
+                .args(["-c", "\"$0\""])
+                .arg(os(&path))
+                .env("LC_ALL", "C")
+                .env("PATH", "/usr/bin:/bin")
+                .env_remove("BASH_ENV")
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
             let marker = match &outcome {
                 BashExecFailure::IsDirectory { .. } => "Is a directory".to_string(),
                 BashExecFailure::FileError { errno, .. } => strerror(*errno),
@@ -3141,22 +3212,48 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             } else {
                 assert!(stderr.contains(&marker), "{name} {outcome:?} {stderr}");
             }
-            kinds.insert(
-                format!("{outcome:?}")
-                    .split([' ', '{'])
-                    .next()
-                    .unwrap()
-                    .to_string(),
-            );
         }
+        // どの機械でも: Rust 自身の分類(基準の規則)。Linux の execve が返す errno を渡したときの経路を、
+        // ファイルの中身と状態から決めることを確かめる(機械の bash も機械の errno も使わない)。
+        let classified: [(&str, Errno, &str); 13] = [
+            ("badinterp", Errno::NOENT, "RequiredFileNotFound"),
+            ("badinterp_cr", Errno::NOENT, "RequiredFileNotFound"),
+            ("badinterp_arg", Errno::NOENT, "RequiredFileNotFound"),
+            ("interp_noexec", Errno::ACCESS, "BadInterpreter"),
+            ("noshebang", Errno::NOEXEC, "ShellScript"),
+            ("binary_nul", Errno::NOEXEC, "BinaryFile"),
+            ("elf_nonul", Errno::NOEXEC, "BinaryFile"),
+            ("hashbang_empty_nul3", Errno::NOEXEC, "ShellScript"),
+            ("hashbang_empty_nul2", Errno::NOEXEC, "BinaryFile"),
+            ("empty", Errno::NOEXEC, "EmptyFile"),
+            ("noexec", Errno::ACCESS, "FileError"),
+            ("dir", Errno::ACCESS, "IsDirectory"),
+            ("missing", Errno::NOENT, "FileError"),
+        ];
+        for (name, errno, kind) in classified {
+            let outcome = bash_exec_failure(&tree.bytes(name), errno, rules);
+            assert_eq!(kind_of(&outcome), kind, "{name} {outcome:?}");
+        }
+        assert_eq!(
+            bash_exec_failure(&tree.bytes("interp_noexec"), Errno::ACCESS, rules),
+            BashExecFailure::BadInterpreter {
+                errno: Errno::ACCESS,
+                interpreter: tree.bytes("plain"),
+            }
+        );
+        assert_eq!(
+            bash_exec_failure(&tree.bytes("missing"), Errno::NOENT, rules).status(),
+            Some(127)
+        );
+        assert_eq!(
+            bash_exec_failure(&tree.bytes("noexec"), Errno::ACCESS, rules).status(),
+            Some(126)
+        );
         // 長い `#!` の行: 旧bash 5.2 は先頭の 128 バイトを読み、最後のバイトを NUL にしてから解釈系の名前を
         // 取る(名前は途中で切れる)。Rust はこの基準の版(5.2.21。2026-11-12 00:35 の決定)だけを再現する。
-        // 読む長さの違う版(Mac の /bin/bash 3.2 は 80 バイトで、最後のバイトを NUL にしない)では比べない。
-        if version != [5, 2, 21] {
-            eprintln!(
-                "bash_exec_failure_matches_bash: 長い #! の組は比べなかった(この機械の bash は {version:?}。基準は 5.2.21)"
-            );
-        } else {
+        // 読む長さの違う版(Mac の /bin/bash 3.2 は 80 バイトで、最後のバイトを NUL にしない)では比べない
+        // (比べなかったことは上で出した)。
+        if compare {
             let deep = tree.0.join("d".repeat(120));
             std::fs::create_dir(&deep).unwrap();
             std::fs::write(deep.join("plain"), b"x\n").unwrap();
@@ -3197,20 +3294,20 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             assert!(stderr.contains(&marker), "{outcome:?} {stderr}");
             assert_eq!(output.status.code(), Some(126), "{stderr}");
         }
-        // 空振りしていない: 6つの経路(5.2 だけは bad interpreter の代わりに required file not found)。
-        for kind in [
-            "IsDirectory",
-            "FileError",
-            "EmptyFile",
-            "BinaryFile",
-            "ShellScript",
-        ] {
-            assert!(kinds.contains(kind), "{kinds:?}");
+        // 空振りしていない: 基準の機械の errno で、6つの経路と required file not found を通った。
+        if compare {
+            for kind in [
+                "IsDirectory",
+                "FileError",
+                "EmptyFile",
+                "BinaryFile",
+                "ShellScript",
+                "BadInterpreter",
+                "RequiredFileNotFound",
+            ] {
+                assert!(kinds.contains(kind), "{kinds:?}");
+            }
         }
-        assert!(
-            kinds.contains("BadInterpreter") || kinds.contains("RequiredFileNotFound"),
-            "{kinds:?}"
-        );
         let (read, write) = pipe().unwrap();
         assert!(read.as_raw_fd() >= 3 && write.as_raw_fd() >= 3);
     }

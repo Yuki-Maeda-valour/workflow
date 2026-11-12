@@ -501,7 +501,12 @@ mod tests {
     /// この機械の`locale -a`の名前は成り立ち、入っていない名前は成り立たない。
     #[test]
     fn installed_locales_match_locale_a() {
+        // glibc の`locale -a`と比べる(Linux だけ。Mac の libc の地域設定は別の経路で、reviews-dir の比較は
+        // 基準の版の道具の無い Mac では流さない。2026-11-12 00:35 の決定)。
         if !cfg!(target_os = "linux") {
+            eprintln!(
+                "installed_locales_match_locale_a: 比べなかった(glibc の locale -a は Linux だけ)"
+            );
             return;
         }
         let Ok(output) = std::process::Command::new("locale").arg("-a").output() else {
