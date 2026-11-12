@@ -10,7 +10,7 @@ import tempfile
 import time
 
 from . import closed_env
-from .compare import exact_ids, file_state, fixed, unchanged
+from .compare import exact_ids, file_state, fixed, high_fd, unchanged
 from .vectors import vectors
 
 STUB = r'''import json,os,pathlib,subprocess,sys
@@ -86,7 +86,7 @@ def observe(case, fixture, legacy):
     bindir=fixture.root/'bin';bindir.mkdir()
     for command in ('mv','rm'):
         path=bindir/command;path.write_text('#!'+sys.executable+'\n'+STUB);path.chmod(0o700)
-    notice_read,notice_write=os.pipe();release_read,release_write=os.pipe()
+    notice_read,notice_write=map(high_fd,os.pipe());release_read,release_write=map(high_fd,os.pipe())
     env=dict(fixture.env,PATH=str(bindir)+os.pathsep+fixture.env['PATH'],
              S3D_PUBLICATION_ROOT=str(fixture.root),S3D_PUBLICATION_POINT=case.get('point',''),
              S3D_PUBLICATION_ACTION=case.get('action',''),S3D_REAL_MV=shutil.which('mv'),S3D_REAL_RM=shutil.which('rm'),

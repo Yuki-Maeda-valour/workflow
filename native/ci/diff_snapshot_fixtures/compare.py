@@ -2,6 +2,7 @@
 from collections import Counter
 from dataclasses import dataclass
 import datetime
+import fcntl
 import hashlib
 import os
 from pathlib import Path
@@ -10,6 +11,16 @@ import signal
 import stat
 import subprocess
 import time
+
+
+HIGH_FD_MIN = 100
+
+
+def high_fd(fd):
+    """同期用のfdを、旧版が固定で開閉する3・4番などと重ならない高い番号へ移す(元の番号は閉じる)。"""
+    moved = fcntl.fcntl(fd, fcntl.F_DUPFD_CLOEXEC, HIGH_FD_MIN)
+    os.close(fd)
+    return moved
 
 
 @dataclass(frozen=True)

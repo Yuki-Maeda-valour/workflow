@@ -14,7 +14,7 @@ from unittest import mock
 import check_diff_snapshot as subject
 from diff_snapshot_fixtures import legacy_adapter
 from diff_snapshot_fixtures.diagnostics import SOURCE_LINES, INTERNAL, SURROGATE_FRAMES, APPROVED_DIFFERENCES, bash_locations, compare_surrogate, compare_unknown_codec, thread_field, typed_report
-from diff_snapshot_fixtures.compare import AuditEvent, Result, audit_reads, binary_path, exact_ids, fixed, report_time, same_result, unchanged
+from diff_snapshot_fixtures.compare import AuditEvent, Result, audit_reads, binary_path, exact_ids, fixed, report_time, same_result, unchanged, high_fd
 from diff_snapshot_fixtures.read_audit import parse_trace
 
 
@@ -1105,6 +1105,34 @@ class BashBehaviorVariables(unittest.TestCase):
                     closed_env.check(dict(env, BASH_COMPAT='99'))
                 self.assertIn('bash_behavior_vars', closed_env.report())
 
+
+
+class SyncDescriptors(unittest.TestCase):
+    def test_sync_descriptors_avoid_the_legacy_fixed_numbers_even_with_only_0_to_2_open(self):
+        code = (
+            'import os,sys\n'
+            'sys.path.insert(0, sys.argv[1])\n'
+            'from diff_snapshot_fixtures.compare import high_fd\n'
+            'for fd in [int(x) for x in os.listdir("/proc/self/fd")]:\n'
+            '    if fd > 2:\n'
+            '        try: os.close(fd)\n'
+            '        except OSError: pass\n'
+            'plain = os.pipe()\n'
+            'moved = [high_fd(fd) for fd in plain]\n'
+            'print(plain[0], plain[1], *moved)\n'
+            'for fd in moved: os.fstat(fd)\n'
+            'for fd in plain:\n'
+            '    try: os.fstat(fd)\n'
+            '    except OSError: pass\n'
+            '    else: raise SystemExit("元の番号が開いたままです")\n')
+        done = subprocess.run([sys.executable, '-B', '-c', code, str(Path(__file__).resolve().parent)],
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True, close_fds=True)
+        self.assertEqual(0, done.returncode, done.stderr)
+        plain0, plain1, *moved = [int(x) for x in done.stdout.split()]
+        self.assertLessEqual(max(plain0, plain1), 6)
+        for fd in moved:
+            self.assertGreaterEqual(fd, 100)
+            self.assertNotIn(fd, (3, 4))
 
 
 class StartupEnv(unittest.TestCase):
