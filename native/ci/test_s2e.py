@@ -7,6 +7,7 @@ import io
 import json
 import os
 import resource
+import signal
 from pathlib import Path
 import stat
 import subprocess
@@ -218,6 +219,22 @@ class Comparator(unittest.TestCase):
             self.assertEqual(result.returncode, 9, (fd, result))
         self.assertEqual(self.m.run_process(epipe + ['1'], env=self.m.base_env(), cwd='/').returncode, 0)
 
+    def test_sigpipe_ignore_mode_really_starts_the_child_with_sigpipe_ignored(self):
+        # Python は自分で SIGPIPE を無視にするので、Python でなく /proc の SigIgn(ビット 13)を `cat` で読む。
+        probe = ['/bin/cat', '/proc/self/status']
+
+        def ignored(redirects):
+            result = self.m.run_process(probe, env=self.m.base_env(), cwd='/', redirects=redirects)
+            line = [x for x in result.stdout.decode().splitlines() if x.startswith('SigIgn:')][0]
+            return bool(int(line.split()[1], 16) & (1 << (signal.SIGPIPE - 1)))
+        self.assertFalse(ignored({}))
+        self.assertTrue(ignored({'sigpipe': 'ignore'}))
+        self.assertFalse(ignored({'sigpipe': 'default'}))
+        # 呼び出し側の辞書は変えない。
+        redirects = {'sigpipe': 'ignore'}
+        self.m.run_process(probe, env=self.m.base_env(), cwd='/', redirects=redirects)
+        self.assertEqual(redirects, {'sigpipe': 'ignore'})
+
     # ---- U7: 旧新それぞれの固定期待
 
     def test_u7_checks_old_and_new_expectations_separately(self):
@@ -339,16 +356,10 @@ class MutatedFixture(unittest.TestCase):
         起動時に落ちるので、sh で書く。ほかのときは旧 guard をそのまま起動する。"""
         folder = self.base / f'sh-{mode}'
         folder.mkdir(exist_ok=True)
-        for name, (code, out, err) in self.m.UNIMPLEMENTED_FATAL.items():
-            command, fd = name.split('-fd')
-            key = f'{command}-{fd[0]}'
-            (folder / (key + '.out')).write_bytes(out)
-            (folder / (key + '.err')).write_bytes(err)
-            (folder / (key + '.code')).write_text(str(code))
         path = self.base / f'fake-sh-{mode}'
         path.write_text(textwrap.dedent(f'''\
             #!/bin/sh
-            if [ -d /proc/self/fd/0 ]; then fd=0; elif [ -d /proc/self/fd/1 ]; then fd=1; elif [ -d /proc/self/fd/2 ]; then fd=2; else fd=; fi
+            if [ -d /proc/self/fd/0 ]; then fd=0; elif [ -d /proc/self/fd/1 ]; then fd=1; elif [ -d /proc/self/fd/2 ]; then fd=2; elif [ -n "${{PYTHONHASHSEED+x}}" ]; then fd=h; else fd=; fi
             if [ -z "$fd" ]; then exec {sys.executable} -B {str(self.script)} "$@"; fi
             case {mode} in
               sleep) exec sleep 120 ;;
@@ -356,11 +367,6 @@ class MutatedFixture(unittest.TestCase):
               badshape)
                 printf 'Fatal Python error: init_sys_streams: <stdin> is a directory, cannot continue\\nPython runtime state: core initialized\\n\\nCurrent thread 0x00007f3a2c42a000 (most recent call first):\\n' >&2
                 exit 1 ;;
-              unimplemented)
-                key="$1-$fd"
-                cat {folder}/$key.err >&2
-                if [ "$fd" != 1 ]; then cat {folder}/$key.out; fi
-                exit "$(cat {folder}/$key.code)" ;;
               *) exec {sys.executable} -B {str(self.script)} "$@" ;;
             esac
             '''), encoding='utf-8')
@@ -431,11 +437,12 @@ class MutatedFixture(unittest.TestCase):
 
     def fatal_cases(self):
         cases = [c for c in self.m.all_cases() if c.group == 'fatal']
-        self.assertEqual({c.name for c in cases}, set(self.m.UNIMPLEMENTED_FATAL))
+        names = {c.name for c in cases}
+        # 起動時の Fatal は全件を再現する(固定の未実装の一覧は無い)。
+        self.assertFalse(hasattr(self.m, 'UNIMPLEMENTED_FATAL'))
+        self.assertTrue({'host-paths-fd0-directory', 'host-paths-fd1-directory', 'host-paths-fd2-directory', 'verify-pair-fd0-directory',
+                         "host-paths-hashseed-'abc'", 'host-paths-hashseed-before-intmaxstrdigits'} <= names, names)
         return cases
-
-    def renamed(self, case, name='other-fd-directory'):
-        return dataclasses.replace(case, name=name)
 
     def run_fatal(self, mode, case, timeout=30):
         """比べる件が 0 件で落ちる(ほかの理由で落ちた)のと区別するため、通常の一致の件を 1 つ足して流す。"""
@@ -446,46 +453,39 @@ class MutatedFixture(unittest.TestCase):
             self.run_fatal(mode, case, timeout)
         self.assertTrue(str(caught.exception).startswith(f'fatal/{case.name}: '), str(caught.exception))
 
-    def test_fatal_cases_on_the_static_list_compare_the_current_rust_result(self):
-        cases = self.fatal_cases()
-        # 今の Rust と同じ結果を返す偽の入口は、未実装の印に数える(件数には入れない)。
-        tally = self.m.run_contract(self.fake_sh('unimplemented'), cases + self.m.smoke_cases()[2:3], old_script=self.script, cwd=self.work)
-        self.assertEqual((tally['matched'], tally['approved']), (1, 0))
-        self.assertEqual(sorted(tally['unimplemented']), sorted('fatal/' + c.name for c in cases))
-        # 一覧の件で、旧 guard と同じ Fatal を返す(実装済みに見える)入口は、固定期待と合わないので落ちる。
-        for case in cases:
-            with self.subTest(case=case.name, mode='control'):
-                self.assertFatalRejected('control', case)
-
-    def test_static_list_cases_reject_timeout_panic_and_broken_fatal(self):
-        for mode, timeout in (('sleep', 1), ('panic', 30), ('badshape', 30)):
-            for case in self.fatal_cases():
-                with self.subTest(mode=mode, case=case.name):
-                    self.assertFatalRejected(mode, case, timeout)
-
-    def test_names_outside_the_static_list_never_become_unimplemented(self):
+    def test_every_fatal_case_passes_with_the_old_result_and_is_never_unimplemented(self):
         for case in self.fatal_cases():
-            other = self.renamed(case)
-            self.assertNotIn(other.name, self.m.UNIMPLEMENTED_FATAL)
-            # 旧 guard と同じ形式・同じ本文なら、Current thread の値が違っても通り、「認めた差」に数える。
-            tally = self.run_fatal('control', other)
-            # 標準エラーがディレクトリの件は、旧版と完全に一致するので通常の一致に数える。
-            expected = (2, 0, []) if case.kind == 'fatal-silent' else (1, 1, [])
-            self.assertEqual((tally['matched'], tally['approved'], tally['unimplemented']), expected)
-            # 形が合わない結果(今の Rust の結果・panic・形の崩れた Fatal・時間切れ)は、未実装に回らずに落ちる。
-            # 標準エラーがディレクトリの件は、旧版が何も書かない(終了コード 1・出力なし)ので、形の崩れた Fatal は旧版と同じ見た目になる。
-            modes = [('unimplemented', 30), ('panic', 30), ('badshape', 30), ('sleep', 1)]
+            with self.subTest(case=case.name):
+                # 旧 guard と同じ形式・同じ本文なら、Current thread の値が違っても通り、「認めた差」に数える。
+                # 旧版が診断を書けない件(標準エラーがディレクトリ)は、旧版と完全に一致するので通常の一致に数える。
+                tally = self.run_fatal('control', case)
+                expected = (2, 0) if case.kind == 'fatal-silent' else (1, 1)
+                self.assertEqual((tally['matched'], tally['approved'], tally['unimplemented']), (*expected, []))
+
+    def test_fatal_cases_reject_timeout_panic_and_broken_fatal(self):
+        for case in self.fatal_cases():
+            modes = [('panic', 30), ('badshape', 30), ('sleep', 1)]
             if case.kind == 'fatal-silent':
+                # 旧版が何も書かない(終了コード 1・出力なし)ので、形の崩れた Fatal は旧版と同じ見た目になりうる。
                 modes.remove(('badshape', 30))
             for mode, timeout in modes:
                 with self.subTest(case=case.name, mode=mode):
-                    self.assertFatalRejected(mode, other, timeout)
+                    self.assertFatalRejected(mode, case, timeout)
 
-    def test_stderr_directory_case_fixes_the_old_result_and_the_current_rust_result(self):
+    def test_startup_cases_compare_the_whole_result(self):
+        ok = [c for c in self.m.all_cases() if c.group == 'startup-ok']
+        self.assertGreaterEqual(len(ok), 10)
+        tally = self.m.run_contract(self.fake('control'), ok, old_script=self.script, cwd=self.work)
+        self.assertEqual((tally['matched'], tally['approved']), (len(ok), 0))
+        # 結果の 1 バイトを変えた入口は落ちる。
+        with self.assertRaises(AssertionError):
+            self.m.run_contract(self.fake('stdout_char'), ok, old_script=self.script, cwd=self.work)
+
+    def test_stderr_directory_case_fixes_the_old_result_and_requires_the_same_rust_result(self):
         result = lambda code=0, out=b'', err=b'': self.m.RunResult(code, out, err, False)  # noqa: E731
         case = next(c for c in self.fatal_cases() if c.kind == 'fatal-silent')
         self.assertEqual(case.redirects, {2: 'dir'})
-        # 旧版の固定期待(1・空・空)が崩れたら落ちる(旧版の側の結果をずらした Runner)。
+
         class Stub:
             old_script = '/old/environment-guard.py'
 
@@ -498,23 +498,56 @@ class MutatedFixture(unittest.TestCase):
             def new(self, case):
                 return self.new_result
 
-        rust = result(*self.m.UNIMPLEMENTED_FATAL[case.name])
+        # 旧版の固定期待(1・空・空)と同じ結果だけが通る。
         tally = {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []}
-        self.m.run_case(Stub(result(1), rust), case, tally)
-        self.assertEqual(tally['unimplemented'], [f'fatal/{case.name}'])
-        # 一覧の外(名前を変えた件)は、旧版と出力まで完全に一致したときだけ通る(通常の一致に数える)。
-        other = dataclasses.replace(case, name='other-fd2-directory')
-        tally = {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []}
-        self.m.run_case(Stub(result(1), result(1)), other, tally)
+        self.m.run_case(Stub(result(1), result(1)), case, tally)
         self.assertEqual((tally['matched'], tally['approved'], tally['unimplemented']), (1, 0, []))
-        for new in (result(1, b'x'), result(1, b'', b'x'), result(0), result(2), dataclasses.replace(result(1), timed_out=True), rust):
+        for new in (result(1, b'x'), result(1, b'', b'x'), result(0), result(2), dataclasses.replace(result(1), timed_out=True)):
             with self.assertRaises(AssertionError):
-                self.m.run_case(Stub(result(1), new), other, {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []})
-        for old, new in [(result(0), rust), (result(1, b'x'), rust), (result(1, b'', b'x'), rust),
-                         (dataclasses.replace(result(1), timed_out=True), rust), (result(1), result(1)),
-                         (result(1), dataclasses.replace(rust, timed_out=True)), (result(1), result(0, rust.stdout, b'x'))]:
+                self.m.run_case(Stub(result(1), new), case, {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []})
+        # 旧版の側の結果が固定期待(1・空・空)から外れたら、新旧が同じでも落ちる。
+        for old in (result(0), result(1, b'x'), result(1, b'', b'x'), dataclasses.replace(result(1), timed_out=True)):
             with self.assertRaises(AssertionError):
-                self.m.run_case(Stub(old, new), case, {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []})
+                self.m.run_case(Stub(old, old), case, {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []})
+
+
+    def test_closed_stderr_cases_fix_the_old_result_and_require_the_same_rust_result(self):
+        result = lambda code=0, out=b'', err=b'': self.m.RunResult(code, out, err, False)  # noqa: E731
+        cases = [c for c in self.m.all_cases() if c.group == 'fatal-closed-stderr']
+        kinds = {c.kind for c in cases}
+        self.assertEqual(kinds, {'fatal-sigpipe', 'fatal-epipe'})
+        self.assertTrue({'hashseed', 'intmaxstrdigits', 'fd0-directory'} <= {c.name for c in cases})
+        # 親が SIGPIPE を無視にして起動する場合(旧版は信号でなく 1)が、設定の段階の Fatal ごとに入っている。
+        ignored = [c for c in cases if c.redirects.get('sigpipe') == 'ignore']
+        self.assertEqual({c.kind for c in ignored}, {'fatal-epipe'})
+        self.assertTrue({'ignored-sigpipe-hashseed', 'ignored-sigpipe-intmaxstrdigits', 'ignored-sigpipe-hashseed-help'} <= {c.name for c in ignored})
+
+        class Stub:
+            old_script = '/old/environment-guard.py'
+
+            def __init__(self, old, new):
+                self.old_result, self.new_result = old, new
+
+            def old(self, case, redirects=None):
+                return self.old_result
+
+            def new(self, case):
+                return self.new_result
+
+        fresh = lambda: {'matched': 0, 'approved': 0, 'u4': 0, 'unimplemented': []}  # noqa: E731
+        for case in cases:
+            code = -13 if case.kind == 'fatal-sigpipe' else 1
+            tally = fresh()
+            self.m.run_case(Stub(result(code), result(code)), case, tally)
+            self.assertEqual((tally['matched'], tally['approved']), (1, 0))
+            # Rust が違う終了値(信号でなく 1、または逆)・出力・時間切れなら落ちる。
+            other = 1 if code == -13 else -13
+            for new in (result(other), result(code, b'x'), result(code, b'', b'x'), dataclasses.replace(result(code), timed_out=True)):
+                with self.subTest(case=case.name, new=new), self.assertRaises(AssertionError):
+                    self.m.run_case(Stub(result(code), new), case, fresh())
+            # 旧版の側の結果が固定期待から外れたら、新旧が同じでも落ちる。
+            with self.subTest(case=case.name, old=other), self.assertRaises(AssertionError):
+                self.m.run_case(Stub(result(other), result(other)), case, fresh())
 
 
 class ComparatorFoundations(unittest.TestCase):

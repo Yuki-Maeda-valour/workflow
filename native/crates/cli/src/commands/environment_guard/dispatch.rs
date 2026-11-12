@@ -1,8 +1,10 @@
 //! コマンドの振り分け。`host-paths`・`bootstrap`・`verify`・`host-settings`・`host-allowlist` を動かす。
-//! `read`・`exec`・`hook`・`verify-pair` は、引き続き本体なしで止める(段階 2b-2)。
+//! 段階 2b-2a: `read`・`exec`・`hook`(`copy`)と `verify-pair`(`pair`)。
 use super::args::Parsed;
 use super::bootstrap::bootstrap;
+use super::copy::run_copy;
 use super::error::PyException;
+use super::pair::run_pair;
 use super::pyjson::{DumpOptions, PyCtx, dumps};
 use super::pyops::Cps;
 use super::pypath::UserLookup;
@@ -11,7 +13,6 @@ use super::pyvalue::PyValue;
 use super::reader::read_host_settings;
 use super::runtime::PyStream;
 use super::settings::{host_allowlist_lines, host_allowlist_rules, host_settings_output};
-use super::snapshot::verify;
 use super::specs::{Host, host_paths};
 use dev_workflow_platform::environment_guard::{
     PasswdLookup, passwd_home, passwd_home_of_current_user,
@@ -111,23 +112,25 @@ pub fn dispatch(
             )?;
             Ok(0)
         }
-        "verify" => {
-            let current = parsed
-                .namespace
-                .value("current_inventory")
-                .map(|v| v.py_str());
-            verify(
-                host,
-                &arg_text(parsed, "state"),
-                &arg_text(parsed, "expect_sha256"),
-                current.as_deref(),
-                PyCtx {
-                    depth: CALLEE_DEPTH,
-                    ..main_ctx
-                },
-            )?;
-            Ok(0)
-        }
+        // `verify` も旧版は `run_copy` を通る(`run_copy` が `verify` を呼ぶ)。
+        "verify" | "read" | "exec" | "hook" => run_copy(
+            host,
+            parsed,
+            stdout,
+            PyCtx {
+                depth: CALLEE_DEPTH,
+                ..main_ctx
+            },
+        ),
+        "verify-pair" => run_pair(
+            host,
+            parsed,
+            stdout,
+            PyCtx {
+                depth: CALLEE_DEPTH,
+                ..main_ctx
+            },
+        ),
         "host-settings" => {
             let result = read_host_settings(
                 host,
@@ -157,7 +160,7 @@ pub fn dispatch(
             }
             Ok(0)
         }
-        _ => Err(PyException::stop("このコマンドの本体は段階 2b で実装する")),
+        other => unreachable!("`argparse` が受けないコマンド: {other}"),
     }
 }
 
@@ -211,7 +214,7 @@ mod tests {
     }
 
     #[test]
-    fn the_other_commands_stop_without_a_body() {
+    fn a_hook_with_a_malformed_hash_stops_before_reading_anything() {
         let host = fake_host(&serde_json::json!({}), &decode_fs(b"/"));
         let args = vec![
             decode_fs(b"hook"),

@@ -27,7 +27,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
-const GUARD_BYTES: &[u8] = include_bytes!(
+pub(super) const GUARD_BYTES: &[u8] = include_bytes!(
     "../../../../../../plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py"
 );
 const GUARD_REL: &str = "plugin/skills/ship-task/scripts/environment-guard.py";
@@ -37,6 +37,8 @@ pub struct TestHost {
     env: HashMap<String, Cps>,
     cwd: Cps,
     process: Vec<(Vec<u8>, Vec<u8>)>,
+    /// `verify-pair` が `go` を待つ標準入力の代わり(無ければ、すぐ EOF になる `/dev/null`)。
+    go: Option<std::os::fd::OwnedFd>,
 }
 
 impl TestHost {
@@ -51,7 +53,13 @@ impl TestHost {
                 .iter()
                 .map(|(k, v)| (k.as_bytes().to_vec(), v.as_bytes().to_vec()))
                 .collect(),
+            go: None,
         }
+    }
+
+    pub fn with_go(mut self, input: std::os::fd::OwnedFd) -> Self {
+        self.go = Some(input);
+        self
     }
 }
 
@@ -67,6 +75,12 @@ impl Host for TestHost {
     }
     fn process_env(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         self.process.clone()
+    }
+    fn go_input(&self) -> std::io::Result<std::os::fd::OwnedFd> {
+        match &self.go {
+            Some(input) => input.try_clone(),
+            None => std::fs::File::open("/dev/null").map(std::os::fd::OwnedFd::from),
+        }
     }
 }
 
@@ -94,7 +108,7 @@ pub fn run_cli(host: &TestHost, args: &[String]) -> (i32, Vec<u8>, Vec<u8>) {
     (status, out, err)
 }
 
-fn find_in_path(name: &str) -> String {
+pub(super) fn find_in_path(name: &str) -> String {
     std::env::var("PATH")
         .unwrap()
         .split(':')
@@ -106,12 +120,12 @@ fn find_in_path(name: &str) -> String {
         .to_owned()
 }
 
-fn set_mode(path: &Path, mode: u32) {
+pub(super) fn set_mode(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
 
 /// 配布物の guard を置く(旧版を起動する側と同じ位置と mode)。
-fn place_guard(root: &Path) {
+pub(super) fn place_guard(root: &Path) {
     let path = root.join(GUARD_REL);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     for each in [
@@ -149,7 +163,7 @@ fn sub(text: &str, root: &str) -> String {
     out
 }
 
-fn mask_sha(text: &str) -> String {
+pub(super) fn mask_sha(text: &str) -> String {
     let marker = "\"sha256\": \"";
     let mut out = String::new();
     let mut rest = text;
@@ -356,7 +370,7 @@ fn digest_bytes(value: Value) -> Value {
 
 // ---------------------------------------------------------------- 流れの実行
 
-fn replace_body(items: &[Value], root: &str) -> Vec<Value> {
+pub(super) fn replace_body(items: &[Value], root: &str) -> Vec<Value> {
     items
         .iter()
         .map(|item| {
@@ -383,7 +397,7 @@ fn install_recorder(dir: &Path, template: &str) -> String {
     bin.to_str().unwrap().to_owned()
 }
 
-fn run_ops(root: &Path, ops: &[Value]) {
+pub(super) fn run_ops(root: &Path, ops: &[Value]) {
     // `bytes`(16 進の生バイトで書く操作)だけ、ここで行う。ほかは観測の検査と同じ操作。
     let mut rest: Vec<Value> = Vec::new();
     for op in ops {

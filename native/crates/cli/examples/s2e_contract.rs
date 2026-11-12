@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 //! S2E専用の検査入口。製品登録表を変更しない。
-//! 段階 2b-1c は、引数・出力・終了コードと `host-paths`・`bootstrap`・`verify`・`host-settings`・`host-allowlist`、
-//! 比較用の内部 reader の隠しコマンド(`reader-host-settings`・`reader-components`・`reader-policy-digest`)まで。
-//! `read`・`exec`・`hook`・`verify-pair` の本体は段階 2b-2 が足す。
+//! 9 コマンド(`bootstrap`・`verify`・`read`・`exec`・`hook`・`verify-pair`・`host-paths`・`host-settings`・`host-allowlist`)と、
+//! 比較用の内部 reader の隠しコマンド(`reader-host-settings`・`reader-components`・`reader-policy-digest`)を動かす。
+//! 旧 Python が起動の時点で止まる経路(不正な `PYTHONHASHSEED`・標準の fd がディレクトリ)も、本体の前に再現する。
 #[path = "../src/commands/environment_guard/mod.rs"]
 mod environment_guard;
 

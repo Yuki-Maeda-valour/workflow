@@ -3715,6 +3715,415 @@ def make_commands():
     return {"command_cases.json": {"python": "3.10", "cases": cases}}
 
 
+# ---------------------------------------------------------------- read・exec・hook・verify-pair(area `copy`)
+#
+# 旧 guard を `python3 -B <guard> <コマンド>` で直接起動した結果(U5)。同じ物理入力で、`bootstrap` → (入力の変更)→
+# `read`・`exec`・`hook`・`verify-pair` の流れを旧版で動かし、終了コード・標準出力・標準エラーと、`exec` の子が書いた
+# 観測用のファイル(argv・環境・終了の種類)を固定期待にする。`verify-pair` は、`verified` が出た後の入力の変更と、
+# 標準入力の書き方(語・分割・EOF・時間切れ)を決めて流す。`hook` の判定器は旧版だけが実行する(U3)ので、
+# その結果は文書として残し、Rust の期待は固定の文面にする。
+
+CP_PROBE_PY = (
+    "import json, os, sys\n"
+    "out, mode = sys.argv[1], sys.argv[2]\n"
+    "with open(out, 'w') as handle:\n"
+    "    json.dump({'argv': sys.argv, 'env': list(os.environ.items()), 'bytecode_off': sys.flags.dont_write_bytecode}, handle)\n"
+    "if mode.startswith('exit:'):\n"
+    "    sys.exit(int(mode[5:]))\n"
+    "if mode.startswith('kill:'):\n"
+    "    os.kill(os.getpid(), int(mode[5:]))\n"
+)
+CP_PROBE_SH = (
+    "#!/bin/bash\n"
+    "out=$1\n"
+    "printf '%s\\n' \"argv0=$0\" \"args=$*\" \"n=$#\" \"pdwb=$PYTHONDONTWRITEBYTECODE\" \"x=$S2E_X\" > \"$out\"\n"
+    "case $2 in exit:*) exit \"${2#exit:}\" ;; kill:*) kill -\"${2#kill:}\" $$ ;; esac\n"
+)
+CP_HOOK_REL = "skills/ship-task/scripts/loop-permission.py"
+CP_HOOK_PY = "import sys\nsys.stdout.write('hook-ran\\n')\nraise SystemExit(7)\n"
+CP_FAKE = "#!/bin/sh\necho \"fake:$*\" > {r}/probe/fake\nexit 5\n"
+CP_GUARD_COPY = "{r}/out/a/environment-guard.py"
+
+
+def cp_layout(hook=True):
+    items = cmd_base_layout(gitconfig="[user]\n\tname = a\n") + [
+        L("plugin/scripts/probe.py", body=CP_PROBE_PY), L("plugin/scripts/probe.sh", body=CP_PROBE_SH, mode=0o755),
+        L("plugin/data/empty.bin", body=""), L("plugin/data/big.bin", size=300000),
+        L("probe", "dir"),
+        L("bin-noexec/python3", body="#!/bin/sh\nexit 0\n", mode=0o644), L("bin-noexec/bash", body="#!/bin/sh\nexit 0\n", mode=0o644),
+        L("bin-fake/python3", body=CP_FAKE, mode=0o755), L("bin-fake/bash", body=CP_FAKE, mode=0o755),
+        # 実物への固定のリンク(PATH の探し先を、一時フォルダの中の名前だけで書くため。`{python3}`・`{bash}` は PATH で見つけた実体)。
+        L("pybin", "dir"), L("pybin/python3", "link", target="{python3}"), L("shbin", "dir"), L("shbin/bash", "link", target="{bash}"),
+        L("inv.json", body="[]"), L("inv-new.json", body='[{"id":"p1@market","installPath":"{r}/nowhere","scope":"user"}]'),
+    ]
+    if hook:
+        items.append(L("plugin/" + CP_HOOK_REL, body=CP_HOOK_PY))
+    return items
+
+
+def cp_sub(text, root):
+    """`{r}`・`{state:名}`・`{sha:名}`(`cmd_sub`)に、控えた guard の SHA-256(`{guard:名}`)を足す。"""
+    if not isinstance(text, str):
+        return text
+    out = cmd_sub(text, root)
+    # 親が控える guard の SHA-256(`bootstrap` の受領の `guard_sha256`)。控えの隣のコピーは、後で変えることがある。
+    out = __import__("re").sub(r"\{guard:[A-Za-z0-9_-]+\}", OLD_GUARD_SHA256, out)
+    return out
+
+
+def cp_apply(root, ops):
+    """入力の変更。`rewrite`(今の本文をそのまま書き戻す。時刻だけが変わる)だけ、ここで行い、残りは `obs_apply`。"""
+    import time
+    rest = []
+    for op in ops:
+        if op["op"] == "rewrite":
+            if rest:
+                obs_apply(root, rest)
+                rest = []
+            time.sleep(0.03)
+            path = os.path.join(root, op["path"])
+            with open(path, "rb") as handle:
+                raw = handle.read()
+            with open(path, "wb") as handle:
+                handle.write(raw)
+        elif op["op"] == "bytes":
+            if rest:
+                obs_apply(root, rest)
+                rest = []
+            time.sleep(0.03)
+            with open(os.path.join(root, op["path"]), "wb") as handle:
+                handle.write(bytes.fromhex(op["hex"]))
+        else:
+            rest.append(op)
+    if rest:
+        obs_apply(root, rest)
+
+
+def cp_run_old(argv, env, cwd, root, step):
+    import select
+    import subprocess
+    import time
+    spec = step.get("stdin")
+    if step.get("ops_after_verify"):
+        # 旧版の `verify` を包み、戻った後に書き換える(`run_copy` の `verify` の後の窓)。
+        driver = (
+            "import importlib.util, json, os, sys\n"
+            "path = sys.argv[1]\n"
+            "spec = importlib.util.spec_from_file_location('guard_old', path)\n"
+            "guard = importlib.util.module_from_spec(spec)\n"
+            "spec.loader.exec_module(guard)\n"
+            "inner = guard.verify\n"
+            "def verify(*args, **kwargs):\n"
+            "    value = inner(*args, **kwargs)\n"
+            "    for op in json.loads(os.environ['S2E_AFTER_VERIFY']):\n"
+            "        with open(op['path'], 'wb') as handle:\n"
+            "            handle.write(op['body'].encode())\n"
+            "    return value\n"
+            "guard.verify = verify\n"
+            "sys.argv = sys.argv[1:]\n"
+            "raise SystemExit(guard.main())\n"
+        )
+        ops = [{"path": os.path.join(root, op["path"]), "body": op["body"]} for op in step["ops_after_verify"] if op["op"] == "write"]
+        if len(ops) != len(step["ops_after_verify"]):
+            raise SystemExit("ops_after_verify は write だけ")
+        env = dict(env, S2E_AFTER_VERIFY=json.dumps(ops))
+        argv = [argv[0], argv[1], "-c", driver, *argv[2:]]
+    if spec is None:
+        done = subprocess.run(argv, env=env, cwd=cwd, capture_output=True, stdin=subprocess.DEVNULL, preexec_fn=cmd_raise_nofile, timeout=60)
+        return done.returncode, done.stdout, done.stderr
+    proc = subprocess.Popen(argv, env=env, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            preexec_fn=cmd_raise_nofile)
+    seen = b""
+    deadline = time.monotonic() + 20
+    # `verified` が出るか、旧版が終わる(1 回目の照合の失敗など)まで待つ。
+    while b"verified\n" not in seen and time.monotonic() < deadline:
+        ready, _, _ = select.select([proc.stdout], [], [], 0.2)
+        if ready:
+            chunk = os.read(proc.stdout.fileno(), 4096)
+            if not chunk:
+                break
+            seen += chunk
+        elif proc.poll() is not None:
+            break
+    if b"verified\n" in seen:
+        if step.get("ops_after_verified"):
+            cp_apply(root, step["ops_after_verified"])
+        time.sleep(spec.get("delay", 0))
+        try:
+            for chunk in spec.get("chunks", []):
+                proc.stdin.write(chunk.encode("latin-1"))
+                proc.stdin.flush()
+                time.sleep(spec.get("gap", 0))
+            if spec.get("close"):
+                proc.stdin.close()
+        except BrokenPipeError:
+            pass
+    # `communicate` は標準入力を閉じてしまう(待ち時間の件は、開いたままで旧版が時間切れになるのを待つ)ので使わない。
+    try:
+        proc.wait(timeout=40)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+        raise SystemExit("旧版が終わらない: " + " ".join(argv))
+    out, err = proc.stdout.read(), proc.stderr.read()
+    for handle in (proc.stdin, proc.stdout, proc.stderr):
+        try:
+            handle.close()
+        except (BrokenPipeError, OSError):
+            pass
+    return proc.returncode, seen + out, err
+
+
+def cp_scenario(case):
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    base = os.path.realpath(tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP")))
+    root = os.path.join(base, "case")
+    os.mkdir(root)
+    os.chmod(root, 0o775)
+    results = []
+    try:
+        import shutil as sh
+        layout = [dict(item, target=item["target"].replace("{python3}", sh.which("python3")).replace("{bash}", sh.which("bash")))
+                  if item.get("kind") == "link" else item for item in case["layout"]]
+        cmd_build(root, layout)
+        cmd_place_guard(root)
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": root + "/home", "GIT_CONFIG_NOSYSTEM": "1", "LANG": "C.UTF-8"}
+        os.mkdir(os.path.join(root, "out"))
+        os.chmod(os.path.join(root, "out"), 0o755)
+        for step in case["steps"]:
+            run_env = dict(env)
+            for key, value in step.get("env", {}).items():
+                if value is None:
+                    run_env.pop(key, None)
+                else:
+                    run_env[key] = cp_sub(value, root)
+            if step.get("ops_before"):
+                cp_apply(root, step["ops_before"])
+            args = [cp_sub(a, root) for a in step["args"]]
+            # `verify-pair` は、読み込み器が起動するのと同じ、控えの隣の guard のコピーから起動する(旧版は自分の `__file__` を
+            # 照らし直すので、Rust が照らす控えの隣のコピーと同じファイルになる)。ほかは配布物の guard から起動する。
+            guard = os.path.join(root, "out", "a", "environment-guard.py") if args[0] == "verify-pair" else os.path.join(root, CMD_GUARD_REL)
+            code, out, err = cp_run_old([sys.executable, "-B", guard, *args], run_env, root, root, step)
+            # 標準出力は生バイト(`read`)なので 1 バイト 1 字(latin-1)、標準エラーと観測用のファイルは UTF-8(読めない所は置き換え)。
+            text = lambda raw, enc="utf-8": re.sub(CMD_SHA_RE, '"sha256": "*"', raw.decode(enc, "replace").replace(root, "{r}"))  # noqa: E731
+            result = {"code": code}
+            if len(out) > 2000:
+                # 大きな本文は、長さと SHA-256 だけを残す。
+                import hashlib
+                result.update({"stdout_len": len(out), "stdout_sha256": hashlib.sha256(out).hexdigest()})
+            else:
+                result["stdout"] = text(out, "latin-1")
+            if step.get("uncaught"):
+                # 捕まえない例外(U4): traceback の途中は比べない。最後の行だけを残す。
+                result["stderr_last"] = text(err).strip().splitlines()[-1]
+            elif not step.get("ignore_stderr"):
+                result["stderr"] = text(err)
+            probes = {}
+            probe_dir = os.path.join(root, "probe")
+            for name in sorted(os.listdir(probe_dir)):
+                with open(os.path.join(probe_dir, name), "rb") as handle:
+                    # 機種ごとに違う既定の PATH は、印にする(Rust のテストも、自分の PATH を同じ印に置き換えて比べる)。
+                    probes[name] = handle.read().decode("utf-8", "replace").replace(root, "{r}").replace(env["PATH"], "{PATH}")
+                os.unlink(os.path.join(probe_dir, name))
+            result["probes"] = probes
+            results.append(result)
+        text = json.dumps(results)
+        if base in text:
+            raise SystemExit("固定期待に一時フォルダの名前が入った: " + case["name"])
+    finally:
+        subprocess.run(["rm", "-rf", base], check=False)
+    return results
+
+
+def cp_cases():
+    cases = []
+    inv = ["--inventory", "{r}/inv.json"]
+
+    def add(name, steps, **kw):
+        cases.append({"name": name, "layout": kw.pop("layout", None) or cp_layout(), "steps": steps, **kw})
+
+    def S(args, **kw):
+        return {"args": args, **kw}
+
+    def state(command, *extra):
+        return [command, "--state", "{state:a}", "--expect-sha256", "{sha:a}", *extra]
+
+    def RD(path, *extra, **kw):
+        return S(state("read", *extra, "--path", path), **kw)
+
+    def EX(script, *words, **kw):
+        return S(state("exec", "--path", script, *words), **kw)
+
+    def HK(path, **kw):
+        return S(state("hook", "--path", path), **kw)
+
+    def PR(*, inventory="{r}/inv.json", guard="{guard:a}", timeout="30", sha="{sha:a}", **kw):
+        return S(["verify-pair", "--state", "{state:a}", "--expect-sha256", sha, "--current-inventory", inventory,
+                  "--guard-sha256", guard, "--go-timeout", timeout], **kw)
+
+    boot = S(BS("a", *inv), ops_before=[{"op": "bytes", "path": "plugin/data/all-bytes.bin", "hex": bytes(range(256)).hex()}])
+    plain_boot = S(BS("a", *inv))
+    GO = {"chunks": ["go\n"]}
+
+    # ---- read
+    add("read", [boot] + [RD(p) for p in (
+        "README.md", "data/empty.bin", "data/big.bin", "data/all-bytes.bin", "skills/a/SKILL.md", "skills/ship-task/scripts/run.sh",
+        "./README.md", "skills//a/SKILL.md", "README.md/", "data/./empty.bin", "scripts/probe.py", "private.txt", "group/g.txt",
+        # 拒否: 絶対パス・`..`・空・`.`・ディレクトリ・不在・通常ファイルの下・保持していないファイル
+        "/etc/passwd", "../x", "a/../README.md", "..", "", ".", "//x", "skills", "data/", "missing", "README.md/x", "README.md/../README.md",
+    )] + [
+        RD("README.md", "--current-inventory", "{r}/inv.json"), RD("README.md", "--current-inventory", "{r}/inv-new.json"),
+        RD("README.md", "--current-inventory", "{r}/missing.json"),
+        S(["read", "--state", "{state:a}", "--expect-sha256", "0" * 64, "--path", "README.md"]),
+        S(["read", "--state", "{state:a}", "--expect-sha256", "xyz", "--path", "README.md"]),
+        S(["read", "--state", "{r}/out/missing/environment.json", "--expect-sha256", "{sha:a}", "--path", "README.md"]),
+    ])
+
+    # ---- 照合の拒否(read・exec・hook・verify-pair の入口はすべて、先に照合する)
+    for name, ops in (
+        ("edit-source", [{"op": "write", "path": "plugin/README.md", "body": "HELLO"}]),
+        ("edit-copy", [{"op": "write", "path": "out/a/plugin/README.md", "body": "HELLO"}]),
+        ("add-copy-file", [{"op": "write", "path": "out/a/plugin/new.txt", "body": "n"}]),
+        ("remove-copy-file", [{"op": "rm", "path": "out/a/plugin/README.md"}]),
+        ("edit-home-settings", [{"op": "write", "path": "home/.claude/settings.json", "body": "{}"}]),
+        ("garbage-state", [{"op": "write", "path": "out/a/environment.json", "body": "{"}]),
+        ("remove-state", [{"op": "rm", "path": "out/a/environment.json"}]),
+    ):
+        add("refusal-" + name, [plain_boot, RD("README.md", ops_before=ops), EX("scripts/probe.py", "--", "python3", "{r}/probe/p", "exit:0"),
+                                HK(CP_HOOK_REL), PR(stdin={"chunks": ["go\n"]})])
+
+    # ---- exec
+    py, sh = "scripts/probe.py", "scripts/probe.sh"
+    steps = [plain_boot]
+    for index, mode in enumerate(("exit:0", "exit:1", "exit:3", "exit:255", "exit:256", "exit:300", "kill:9", "kill:15", "kill:1", "kill:13")):
+        steps.append(EX(py, "--", "python3", "{r}/probe/py%d" % index, mode))
+    for index, mode in enumerate(("exit:0", "exit:7", "exit:130", "exit:256", "kill:9", "kill:15")):
+        steps.append(EX(sh, "--", "bash", "{r}/probe/sh%d" % index, mode, env={"S2E_X": "x%d" % index}))
+    # `--` が無い・引数の形(空白・空・非 ASCII・オプションの形)
+    steps += [
+        EX(py, "python3", "{r}/probe/nodash", "exit:2"),
+        EX(sh, "bash", "{r}/probe/args", "exit:0", "a b", "", "é", "-x", "--flag", "-h", "--", "tail"),
+        EX(py, "--", "python3", "{r}/probe/args-py", "exit:0", "a b", "", "é", "-x", "--flag", "-h", "--", "tail"),
+        EX(py, "--", "python3", "{r}/probe/dd", "exit:0", "--"),
+        # 環境(追加の変数・既存の値の置き換え・順序)
+        EX(py, "--", "python3", "{r}/probe/env1", "exit:0", env={"S2E_X": "1", "S2E_Y": "é"}),
+        EX(py, "--", "python3", "{r}/probe/env2", "exit:0", env={"PYTHONDONTWRITEBYTECODE": "0"}),
+        EX(py, "--", "python3", "{r}/probe/env3", "exit:0", env={"PYTHONDONTWRITEBYTECODE": None, "S2E_X": "after"}),
+        EX(sh, "--", "bash", "{r}/probe/env4", "exit:0", env={"PYTHONDONTWRITEBYTECODE": "", "S2E_X": "2"}),
+        # PATH の探し方
+        EX(py, "--", "python3", "{r}/probe/path1", "exit:0", env={"PATH": "{r}/bin-noexec:{r}/pybin"}),
+        EX(py, "--", "python3", "{r}/probe/path2", "exit:0", env={"PATH": "{r}/bin-noexec"}),
+        EX(py, "--", "python3", "{r}/probe/path3", "exit:0", env={"PATH": "{r}/nonexistent"}),
+        EX(py, "--", "python3", "{r}/probe/path4", "exit:0", env={"PATH": ""}),
+        EX(py, "--", "python3", "{r}/probe/path5", "exit:0", env={"PATH": "{r}/bin-fake:{r}/pybin"}),
+        EX(sh, "--", "bash", "{r}/probe/path6", "exit:0", env={"PATH": "{r}/bin-fake:{r}/shbin"}),
+        EX(sh, "--", "bash", "{r}/probe/path7", "exit:0", env={"PATH": "{r}/bin-noexec:{r}/shbin"}),
+        EX(sh, "--", "bash", "{r}/probe/path8", "exit:0", env={"PATH": "{r}/bin-noexec"}),
+        EX(sh, "--", "bash", "{r}/probe/path9", "exit:0", env={"PATH": None, "S2E_X": "nopath"}),
+        EX(sh, "--", "bash", "{r}/probe/path10", "exit:0", env={"PATH": "{r}/shbin:{r}/bin-fake"}),
+        EX(sh, "--", "bash", "{r}/probe/path11", "exit:0", env={"PATH": "{r}/nonexistent:{r}/bin-noexec:{r}/shbin"}),
+        # 実行形式の拒否
+        EX(py, "--", "sh", "{r}/probe/x", "exit:0"), EX(py, "--", "python", "{r}/probe/x", "exit:0"),
+        EX(py, "--", "/usr/bin/python3", "{r}/probe/x", "exit:0"), EX(py, "--", "python3.10", "x"), EX(py, "--", "BASH", "x"),
+        EX(py, "--", "bash ", "x"), EX(py, "--", ""), EX(py), EX(py, "--"), EX(py, "--", "--", "python3"),
+        # 相対パスの拒否
+        EX("/etc/passwd", "--", "python3", "{r}/probe/x"), EX("../x", "--", "python3"), EX("a/../scripts/probe.py", "--", "python3"),
+        EX("", "--", "python3"), EX(".", "--", "python3"),
+        # 子の中の失敗(スクリプトが無い・ディレクトリ)は、旧版は読まずに子へ渡す。子の標準エラーは版で変わるので比べない。
+        EX("scripts/missing.py", "--", "python3", ignore_stderr=True), EX("scripts", "--", "python3", ignore_stderr=True),
+        EX("scripts/missing.sh", "--", "bash", ignore_stderr=True),
+    ]
+    add("exec", steps)
+
+    # ---- hook
+    add("hook", [
+        plain_boot, HK(CP_HOOK_REL, u3=True),
+        HK("./" + CP_HOOK_REL), HK("skills/ship-task/scripts/../scripts/loop-permission.py"), HK("README.md"), HK("scripts/probe.py"),
+        HK("/" + CP_HOOK_REL), HK("../x"), HK(""), HK("."), HK(CP_HOOK_REL + "/"), HK("skills/ship-task/scripts/run.sh"),
+        S(state("hook", "--current-inventory", "{r}/inv.json", "--path", CP_HOOK_REL), u3=True),
+        S(state("hook", "--current-inventory", "{r}/inv-new.json", "--path", CP_HOOK_REL)),
+    ])
+    add("hook-missing", [plain_boot, HK(CP_HOOK_REL), HK("README.md")], layout=cp_layout(hook=False))
+    # `verify` の後、判定器を読むまでの間にコピーの判定器が書き換わる窓(旧版は `verify` を包んで再現する)。
+    # 旧版も Rust も、保持値との違いで止まる。
+    add("hook-after-verify", [plain_boot, HK(CP_HOOK_REL, ops_after_verify=[
+        {"op": "write", "path": "out/a/plugin/" + CP_HOOK_REL, "body": "# swapped after verify\n"}])])
+
+    # ---- verify-pair
+    pair_steps = [plain_boot,
+        PR(stdin=GO), PR(stdin={"chunks": ["g", "o\n"], "gap": 0.05}), PR(stdin={"chunks": ["go\nextra"]}), PR(stdin={"chunks": ["go\n"], "close": True}),
+        PR(stdin={"chunks": ["go\n"], "delay": 0.3}), PR(stdin={"chunks": ["g", "o", "\n"], "gap": 0.05, "close": True}),
+        PR(stdin={"chunks": ["stop\n"]}), PR(stdin={"chunks": ["xyz\n"]}), PR(stdin={"chunks": ["go"], "close": True}), PR(stdin={"chunks": ["GO\n"]}),
+        PR(stdin={"chunks": ["go\r\n"]}), PR(stdin={"chunks": ["g"], "close": True}), PR(stdin={"chunks": [], "close": True}),
+        PR(stdin={"chunks": ["go\n"]}, timeout="1"), PR(stdin={"chunks": []}, timeout="1"), PR(stdin={"chunks": ["g"]}, timeout="1"),
+        PR(stdin={"chunks": ["go\n"], "delay": 0.4}, timeout="1"), PR(stdin={"chunks": ["go\n"], "delay": 1.6}, timeout="1"),
+        PR(stdin=GO, timeout="+7"), PR(stdin=GO, timeout=" 7 "), PR(stdin=GO, timeout="1_0"), PR(stdin=GO, timeout="٧"),
+        # 引数の拒否(1 回目の照合の前)
+        PR(stdin=GO, timeout="0"), PR(stdin=GO, timeout="-3"), PR(stdin=GO, timeout="abc"), PR(stdin=GO, timeout="1.5"), PR(stdin=GO, timeout=""),
+        PR(stdin=GO, guard="xyz"), PR(stdin=GO, guard="A" * 64), PR(stdin=GO, guard="a" * 63), PR(stdin=GO, guard="a" * 65), PR(stdin=GO, guard=""),
+        PR(stdin=GO, guard="{guard:a}\n"), PR(stdin=GO, guard="٠" * 64),
+        PR(stdin=GO, timeout="0", guard="xyz"),
+        # 1 回目の照合の拒否(`verified` は出ない)
+        PR(stdin=GO, sha="0" * 64), PR(stdin=GO, sha="xyz"),
+        S(["verify-pair", "--state", "{r}/out/missing/environment.json", "--expect-sha256", "{sha:a}", "--current-inventory", "{r}/inv.json",
+           "--guard-sha256", "{guard:a}", "--go-timeout", "5"], stdin=GO),
+        # 2 回目の照合(一覧つき)の拒否: 一覧が違う・不在・壊れている
+        PR(stdin=GO, inventory="{r}/inv-new.json"), PR(stdin=GO, inventory="{r}/missing.json"), PR(stdin=GO, inventory="{r}/probe"),
+        # guard の照らし直し(U2): 控えの guard の SHA-256 と違う値
+        PR(stdin=GO, guard="0" * 64), PR(stdin=GO, guard="f" * 64),
+        # 待ち時間の極端な値(Linux で測った。Mac の select は 1e8 秒を超えると EINVAL)
+        PR(stdin=GO, timeout="100000000"), PR(stdin=GO, timeout="100000001"), PR(stdin=GO, timeout="9000000000"), PR(stdin=GO, timeout="9223372035"),
+        PR(stdin=GO, timeout="9223372036"), PR(stdin=GO, timeout="9223372037", uncaught=True), PR(stdin=GO, timeout="10000000000", uncaught=True),
+        PR(stdin=GO, timeout="1" + "0" * 30, uncaught=True), PR(stdin=GO, timeout="1" + "0" * 308, uncaught=True), PR(stdin=GO, timeout="9" * 400, uncaught=True),
+    ]
+    add("pair", pair_steps)
+
+    # ---- verify-pair: `verified` の後の入力の変更(旧版は 2 回目の照合と、自分の本体の照らし直しで見つける)
+    def after(name, ops, *, timeout="30", **kw):
+        add("pair-after-" + name, [plain_boot, PR(stdin=GO, ops_after_verified=ops, timeout=timeout, **kw)])
+    after("edit-source", [{"op": "write", "path": "plugin/README.md", "body": "HELLO"}])
+    after("add-source-file", [{"op": "write", "path": "plugin/new.txt", "body": "n"}])
+    after("edit-copy", [{"op": "write", "path": "out/a/plugin/README.md", "body": "HELLO"}])
+    after("edit-copy-and-restore", [{"op": "write", "path": "out/a/plugin/README.md", "body": "HELLO"},
+                                    {"op": "write", "path": "out/a/plugin/README.md", "body": "hello"}])
+    after("remove-copy-file", [{"op": "rm", "path": "out/a/plugin/README.md"}])
+    after("add-copy-file", [{"op": "write", "path": "out/a/plugin/extra.txt", "body": "e"}])
+    after("edit-guard-copy", [{"op": "write", "path": "out/a/environment-guard.py", "body": "# changed\n"}])
+    after("rewrite-guard-copy", [{"op": "rewrite", "path": "out/a/environment-guard.py"}])
+    after("remove-guard-copy", [{"op": "rm", "path": "out/a/environment-guard.py"}])
+    after("guard-copy-as-directory", [{"op": "rm", "path": "out/a/environment-guard.py"}, {"op": "mkdir", "path": "out/a/environment-guard.py"}])
+    after("edit-state", [{"op": "write", "path": "out/a/environment.json", "body": "{}"}])
+    after("edit-home-settings", [{"op": "write", "path": "home/.claude/settings.json", "body": "{}"}])
+    after("rewrite-state", [{"op": "rewrite", "path": "out/a/environment.json"}])
+    after("rewrite-source", [{"op": "rewrite", "path": "plugin/README.md"}])
+    after("rewrite-inventory", [{"op": "rewrite", "path": "inv.json"}])
+    after("edit-inventory", [{"op": "write", "path": "inv.json", "body": "[{}]"}])
+    after("remove-inventory", [{"op": "rm", "path": "inv.json"}])
+    after("guard-mode-change", [{"op": "chmod", "path": "out/a/environment-guard.py", "mode": 0o755}])
+    after("guard-unreadable", [{"op": "chmod", "path": "out/a/environment-guard.py", "mode": 0o200}])
+    after("guard-to-link", [{"op": "rm", "path": "out/a/environment-guard.py"}, {"op": "link", "path": "out/a/environment-guard.py", "target": "{r}/plugin/skills/ship-task/scripts/environment-guard.py"}])
+    return cases
+
+
+@area("copy")
+def make_copy():
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    if sys.platform != "linux":
+        raise SystemExit("固定期待は Linux で作る(既定の監視先の /etc が機種で違う)")
+    if not os.path.exists(GUARD_PATH):
+        raise SystemExit("旧 guard が無い")
+    load_guard()
+    cases = cp_cases()
+    for case in cases:
+        case["results"] = cp_scenario(case)
+    return {"copy_cases.json": {"python": "3.10", "cases": cases}}
+
+
 def serialize(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
 

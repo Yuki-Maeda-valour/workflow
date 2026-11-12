@@ -4,7 +4,7 @@
 //!   中で再試行する(`SIGINT`が来ていなければ繰り返し、来ていれば`EINTR`を返す。旧版の`PyErr_CheckSignals`)のは、
 //!   `retry`と、それを使う`spawn`(errpipeの読取り)・`Child::wait`だけ。`Child::wait_timeout`は休みながら
 //!   確かめ直し、`scan_dir`は`getdents`が`EINTR`を返せば誤りとして返す。
-//! - `unsafe`を置く場所: リンクを辿らない`chmod`(`fchmodat`)・信号の扱いの取得と設定・利用者データベースの読取り
+//! - `unsafe`を置く場所: `main`より前に受け継いだ`SIGPIPE`の扱いを控える初期化の関数・リンクを辿らない`chmod`(`fchmodat`)・信号の扱いの取得と設定・利用者データベースの読取り
 //!   (`getpwnam_r`・`getpwuid_r`)・`fcntl`・`waitpid`・`kill`・子の起動(`fork`・`execve`)。各所に安全の理由を書く。
 //! - `fork`の後の子(`child_main`)では、確保・ロック・`Rust`の入出力・パニックを使わない。`async-signal-safe`な
 //!   システムコール(`close`・`dup`・`dup2`・`fcntl`・`chdir`・`sigaction`・`sigemptyset`・`close_range`・`execve`・`write`・`_exit`)だけを呼び、
@@ -266,6 +266,10 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::Result<bool> {
     if select_timeout_too_large(timeout_ms, cfg!(target_os = "macos")) {
         return Err(io::Error::from_raw_os_error(libc::EINVAL));
     }
+    #[cfg(target_vendor = "apple")]
+    if let Some(result) = select_readable(fd, timeout_ms) {
+        return result;
+    }
     let poll_once = |ms: Option<i64>| -> io::Result<bool> {
         let mut fds = [PollFd::new(&fd, PollFlags::IN)];
         let timeout = ms.map(|ms| Timespec {
@@ -283,6 +287,47 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::Result<bool> {
         }
     }
     Ok(false)
+}
+
+/// Macは、旧Pythonの`select.select`と同じ`select(2)`で待つ(`poll(2)`は、macOSでは端末などのデバイスを扱えない)。
+/// `fd`が`FD_SETSIZE`以上のときは`select`に渡せないので`None`(`poll`で待つ)。待ち時間が負なら無期限。
+#[cfg(target_vendor = "apple")]
+fn select_readable(fd: BorrowedFd<'_>, timeout_ms: i64) -> Option<io::Result<bool>> {
+    let raw = fd.as_raw_fd();
+    if raw < 0 || raw >= libc::FD_SETSIZE as c_int {
+        return None;
+    }
+    // SAFETY: `fd_set`はすべて0で有効な初期値。
+    let mut set: libc::fd_set = unsafe { std::mem::zeroed() };
+    // SAFETY: `raw`は`0..FD_SETSIZE`の範囲で、`set`は書込み可能。
+    unsafe {
+        libc::FD_ZERO(&mut set);
+        libc::FD_SET(raw, &mut set);
+    }
+    let mut timeout = libc::timeval {
+        tv_sec: (timeout_ms.max(0) / 1000) as libc::time_t,
+        tv_usec: ((timeout_ms.max(0) % 1000) * 1000) as libc::suseconds_t,
+    };
+    let timeout_ptr = if timeout_ms < 0 {
+        std::ptr::null_mut()
+    } else {
+        &mut timeout as *mut libc::timeval
+    };
+    // SAFETY: `set`と`timeout`は有効で書込み可能な領域(`timeout_ptr`は無期限のとき`null`)。書込み・例外の集合は渡さない。
+    let found = unsafe {
+        libc::select(
+            raw + 1,
+            &mut set,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            timeout_ptr,
+        )
+    };
+    Some(if found < 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(found > 0)
+    })
 }
 
 /// `poll_fds`で待つ向き。
@@ -345,6 +390,57 @@ pub fn signal_disposition(number: i32) -> io::Result<Disposition> {
         return Err(io::Error::last_os_error());
     }
     Ok(disposition_of(&action))
+}
+
+/// 起動時(`main`より前)に控えた`SIGPIPE`の扱い。0は未取得、1は既定、2は無視、3は関数。
+static INHERITED_SIGPIPE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+/// 初期化の関数が呼ばれた回数(検査用。1回だけ呼ばれることを確かめる)。
+#[cfg(test)]
+static CAPTURE_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// `main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控える。
+/// Rustの標準ライブラリは、`main`の前(`lang_start`)に`SIGPIPE`を無視へ変えるので、受け継いだ値はこの時点でしか読めない。
+/// 確保・ロック・`Rust`の入出力を使わない(標準ライブラリの初期化より前に走るため)。
+extern "C" fn capture_inherited_sigpipe() {
+    #[cfg(test)]
+    CAPTURE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    // SAFETY: sigactionはすべて0で有効な初期値。第2引数がnullなら設定は変えない。
+    let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
+    // SAFETY: `action`は書込み可能な有効な領域。
+    if unsafe { libc::sigaction(libc::SIGPIPE, std::ptr::null(), &mut action) } != 0 {
+        return;
+    }
+    let code = match disposition_of(&action) {
+        Disposition::Default => 1,
+        Disposition::Ignore => 2,
+        Disposition::Handler => 3,
+    };
+    INHERITED_SIGPIPE.store(code, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// 初期化の関数の表への登録(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`)。ローダーが`main`より前に1回だけ呼ぶ。
+#[used]
+#[cfg_attr(
+    any(target_os = "linux", target_os = "android"),
+    unsafe(link_section = ".init_array")
+)]
+#[cfg_attr(
+    target_vendor = "apple",
+    unsafe(link_section = "__DATA,__mod_init_func")
+)]
+static CAPTURE_INHERITED_SIGPIPE: extern "C" fn() = capture_inherited_sigpipe;
+
+/// 起動時に控えた、受け継いだ`SIGPIPE`の扱い。控えていなければ`None`(登録の無い機種など)。
+/// 登録の静的な値を読んで、その目的ファイルが必ずリンクされるようにする。
+pub fn inherited_sigpipe() -> Option<Disposition> {
+    std::hint::black_box(&CAPTURE_INHERITED_SIGPIPE);
+    match INHERITED_SIGPIPE.load(std::sync::atomic::Ordering::Relaxed) {
+        1 => Some(Disposition::Default),
+        2 => Some(Disposition::Ignore),
+        3 => Some(Disposition::Handler),
+        _ => None,
+    }
 }
 
 /// 信号を無視にする(旧版の起動時の`SIGPIPE`・`SIGXFSZ`の扱い)。
@@ -508,6 +604,13 @@ pub fn signal_set_default(number: i32) -> io::Result<()> {
 pub fn ignore_parent_signals() -> io::Result<()> {
     ignore_signal(SIGPIPE)?;
     ignore_signal(SIGXFSZ)
+}
+
+/// 今のスレッドの識別子。旧Pythonが起動時の`Fatal Python error`に書く`Current thread 0x…`の値(`pthread_self`)。
+#[allow(clippy::unnecessary_cast)]
+pub fn current_thread_id() -> u64 {
+    // SAFETY: `pthread_self`は引数も前提も無く、呼んだスレッドの識別子を返すだけ。
+    unsafe { libc::pthread_self() as u64 }
 }
 
 /// `EINTR`なら、`SIGINT`が来ていなければ繰り返す。来ていれば`EINTR`のまま返す。
@@ -2468,6 +2571,59 @@ int main(void) {\n\
         assert_eq!(signal_disposition(SIGXFSZ).unwrap(), Disposition::Ignore);
         signal_set_default(SIGXFSZ).unwrap();
         assert_eq!(signal_disposition(SIGXFSZ).unwrap(), Disposition::Default);
+    }
+
+    /// 親が決めた`SIGPIPE`の扱い(`ignore`か`default`)で、同じ検査だけを子として起動し、出力を返す。
+    fn inherited_sigpipe_child(inherited: &str) -> String {
+        use std::os::unix::process::CommandExt;
+        let exe = std::env::current_exe().unwrap();
+        let mut command = std::process::Command::new(exe);
+        command
+            .args([
+                "--exact",
+                "environment_guard::child_tests::inherited_sigpipe_is_recorded_before_main",
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("S2E_EXPECT_SIGPIPE", inherited);
+        let ignore = inherited == "ignore";
+        // SAFETY: `fork`の後の子で、`sigaction`だけを呼ぶ(async-signal-safe)。
+        unsafe {
+            command.pre_exec(move || {
+                let mut action: libc::sigaction = std::mem::zeroed();
+                action.sa_sigaction = if ignore { libc::SIG_IGN } else { libc::SIG_DFL };
+                libc::sigemptyset(&mut action.sa_mask);
+                libc::sigaction(libc::SIGPIPE, &action, std::ptr::null_mut());
+                Ok(())
+            });
+        }
+        let output = command.output().unwrap();
+        format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    }
+
+    #[test]
+    fn inherited_sigpipe_is_recorded_before_main() {
+        if let Ok(want) = std::env::var("S2E_EXPECT_SIGPIPE") {
+            // 子の中: Rustの実行時は`main`の前に無視へ変えているので、今の値は常に無視。控えた値だけが親の値を保つ。
+            assert_eq!(signal_disposition(SIGPIPE).unwrap(), Disposition::Ignore);
+            let want = if want == "ignore" {
+                Disposition::Ignore
+            } else {
+                Disposition::Default
+            };
+            assert_eq!(inherited_sigpipe(), Some(want));
+            // ローダーが`main`より前に1回だけ呼んでいる(この検査は呼んでいない)。
+            assert_eq!(CAPTURE_CALLS.load(std::sync::atomic::Ordering::Relaxed), 1);
+            return;
+        }
+        for inherited in ["ignore", "default"] {
+            let text = inherited_sigpipe_child(inherited);
+            assert!(text.contains("1 passed"), "{inherited}: {text}");
+        }
     }
 
     #[test]

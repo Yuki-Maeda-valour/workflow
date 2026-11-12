@@ -6,13 +6,13 @@
 - 生の標準出力・標準エラー・終了コードを、加工せずに比べる。加工は「認めた差」の関数に限る:
   U4(traceback の途中の行)・旧版の実行環境のパス・Current thread の値・U7(閉じた標準の fd)。
   認めた差は通常の一致の件数に混ぜず、旧新それぞれの固定期待を別に確かめる。
-- 未起動・時間切れ・件数 0 は合格にしない。本体がまだ無い経路は「未実装の印」で件数から外し、一覧に出す。
+- 未起動・時間切れ・件数 0 は合格にしない。本体がまだ無い経路は「未実装の印」で件数から外し、一覧に出す(今は 0 件)。
 - 既存の 117 テストの対応表は `TEST_MAPPING`(と `native/ci/s2e_fixtures/test_mapping.md`)。
 - 9 コマンドのうち bootstrap・verify・host-settings・host-allowlist と内部 reader の旧新比較(同じ物理入力を実際に順に流す。bootstrap の出力一式の
   バイト比較・読取りだけの前後確認・相互読取り・競合・上限の端(旧版で測る)・SIGINT・書込みの失敗・U1・U2・U6)は `s2e_commands.py`。
   各項目に「全機種で必須」か「Linux だけ」の印(と理由)を付け、機種ごとの項目数を完全一致で確かめる。どの項目も Rust を起動した比較が 1 件以上
   ないと不合格。Mac の経路(旧版の bootstrap は patched・Linux だけの項目は流さない)は、環境変数 S2E_SIMULATE_MAC=1 で Linux から模擬できる
-  (比較器の検査用。Mac 実機の動きの確認ではない。模擬の合格は終了コード 3 で、最後の行も「S2E: 合格」ではない)。read・exec・hook・verify-pair は 2 段目 b-2。
+  (比較器の検査用。Mac 実機の動きの確認ではない。模擬の合格は終了コード 3 で、最後の行も「S2E: 合格」ではない)。read・exec・hook・verify-pair の旧新比較は 2 段目 b-2b(起動時の Fatal は 2 段目 b-2a で再現済み)。
 """
 import argparse
 import dataclasses
@@ -58,8 +58,11 @@ def run_process(argv, *, env, cwd, redirects=None, stdin=None, timeout=OLD_TIMEO
 
     モード: 'close'(閉じる)・'dir'(ディレクトリを読み取りで開く)・'full'(/dev/full へ)・
     'pipe-closed'(読み手が閉じたパイプへ。fd 1 と 2 だけ)。起動できなければ OSError をそのまま投げる。
+    キー 'sigpipe' の値 'ignore' は、子を `SIGPIPE` を無視にして起動する(Python の `subprocess` は既定へ戻して起動するので、
+    起動の直前に戻す。値が無ければ既定のまま)。
     """
     redirects = dict(redirects or {})
+    ignore_sigpipe = redirects.pop('sigpipe', None) == 'ignore'
     targets = {1: subprocess.PIPE, 2: subprocess.PIPE}
     handles = []
     shell = []
@@ -83,7 +86,8 @@ def run_process(argv, *, env, cwd, redirects=None, stdin=None, timeout=OLD_TIMEO
     try:
         with subprocess.Popen(command, cwd=cwd, env=env, start_new_session=True,
                               stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
-                              stdout=targets[1], stderr=targets[2]) as process:
+                              stdout=targets[1], stderr=targets[2],
+                              preexec_fn=(lambda: signal.signal(signal.SIGPIPE, signal.SIG_IGN)) if ignore_sigpipe else None) as process:
             try:
                 timed_out = False
                 try:
@@ -188,6 +192,8 @@ CURRENT_THREAD = re.compile(rb'Current thread 0x[0-9a-f]+ \(most recent call fir
 FATAL_SHAPE = re.compile(
     rb'\AFatal Python error: [^\n]+\nPython runtime state: [^\n]+\n(?:[A-Za-z]+Error: [^\n]*\n)?\n'
     rb'Current thread 0x[0-9a-f]+ \(most recent call first\):\n  <no Python frame>\n\Z')
+# 設定の読み込みの段階(preinitialized)で止まる診断(PYTHONHASHSEED・PYTHONINTMAXSTRDIGITS の誤り)には、Current thread の節が無い。
+FATAL_SHAPE_CONFIG = re.compile(rb'\AFatal Python error: config_init_[a-z_]+: [^\n]+\nPython runtime state: preinitialized\n\n\Z')
 
 
 def normalize_current_thread(stderr):
@@ -196,7 +202,7 @@ def normalize_current_thread(stderr):
 
 
 def fatal_shape_ok(stderr):
-    return FATAL_SHAPE.match(stderr) is not None
+    return FATAL_SHAPE.match(stderr) is not None or FATAL_SHAPE_CONFIG.match(stderr) is not None
 
 
 def approved_fatal(old, new):
@@ -221,7 +227,7 @@ class Case:
     args: list
     env: dict = dataclasses.field(default_factory=dict)
     redirects: dict = dataclasses.field(default_factory=dict)
-    kind: str = 'same'            # same・parse(解析だけで終わる)・u4auto(出力の故障。traceback なら U4)・u7・fatal・fatal-silent(fd 2 がディレクトリ)
+    kind: str = 'same'            # same・parse(解析だけで終わる)・u4auto(出力の故障。traceback なら U4)・u7・fatal・fatal-silent(fd 2 がディレクトリ)・fatal-sigpipe / fatal-epipe(fd 2 が閉じたパイプ)
     u7: object = None             # 旧版の通常の実行から、旧新の固定期待を作る関数
 
 
@@ -387,24 +393,63 @@ def u7_cases():
 
 
 def fatal_cases():
-    """標準の fd がディレクトリのとき、旧版は起動時に落ちる。Rust の再現は 2 段目 b の申し送りで、
-    再現していない 4 件(fd 2 は旧版が診断を書けず、終了コード 1・出力なし)は `UNIMPLEMENTED_FATAL`(静的な一覧)で「未実装の印」にする(形式の検査は旧版側に常に行う。fd 2 の件は、Fatal の診断を旧版が書けないので、旧版の固定期待〈1・空・空〉を照らす)。"""
+    """旧 Python が起動の時点で止まる経路。Rust は全件を再現する(2 段目 b-2a)。
+    標準の fd がディレクトリ(旧版の診断は、stdin・stdout の順。stderr 自身がディレクトリなら診断を書けず、終了コード 1・出力なし)・
+    不正な PYTHONHASHSEED(PYTHONINTMAXSTRDIGITS の誤り・fd がディレクトリより先に決まる)。診断の全文・終了値・標準出力は旧版に合わせ、
+    Current thread の値だけ形式を確かめる。旧版の側の形式と固定期待(旧版が診断を書けない件は 1・空・空)は常に照らす。
+    PYTHONOPTIMIZE は、旧 guard に assert が無いので出力を変えない(同じ結果になることを確かめる)。"""
     good = base_env({'HOME': '/h'})
-    return [Case('fatal', f'host-paths-fd{fd}-directory', ['host-paths'], good, {fd: 'dir'}, kind='fatal') for fd in (0, 1)] + \
-           [Case('fatal', 'host-paths-fd2-directory', ['host-paths'], good, {2: 'dir'}, kind='fatal-silent')] + \
-           [Case('fatal', 'verify-pair-fd0-directory', ['verify-pair', '--state', 's', '--expect-sha256', 'h', '--current-inventory', 'c',
-                                                        '--guard-sha256', 'g', '--go-timeout', '5'], good, {0: 'dir'}, kind='fatal')]
-
-
-# 標準の fd がディレクトリのときの Fatal 診断を、Rust がまだ再現しない件(2 段目 b の申し送り)。
-# 名前の一覧で決め、Rust の今の結果(終了コード・標準出力・標準エラー)を固定期待にする。
-# 再現を実装したら、この一覧から外す(固定期待が合わなくなって落ちる)。
-UNIMPLEMENTED_FATAL = {
-    'host-paths-fd0-directory': (0, b'{"home":"/h","config":"/h/.claude","user_settings":"/h/.claude/settings.json","cache_settings":"/h/.claude/remote-settings.json"}\n', b''),
-    'host-paths-fd1-directory': (120, b'', b"Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nOSError: [Errno 9] Bad file descriptor\n"),
-    'host-paths-fd2-directory': (0, b'{"home":"/h","config":"/h/.claude","user_settings":"/h/.claude/settings.json","cache_settings":"/h/.claude/remote-settings.json"}\n', b''),
-    'verify-pair-fd0-directory': (20, b'', 'ERROR [environment-guard] このコマンドの本体は段階 2b で実装する\n'.encode()),
-}
+    pair = ['verify-pair', '--state', 's', '--expect-sha256', 'h', '--current-inventory', 'c', '--guard-sha256', 'g', '--go-timeout', '5']
+    cases = [Case('fatal', f'host-paths-fd{fd}-directory', ['host-paths'], good, {fd: 'dir'}, kind='fatal') for fd in (0, 1)]
+    cases += [Case('fatal', 'host-paths-fd2-directory', ['host-paths'], good, {2: 'dir'}, kind='fatal-silent'),
+              Case('fatal', 'verify-pair-fd0-directory', pair, good, {0: 'dir'}, kind='fatal')]
+    # 組み合わせ: 先に決まる診断が出る(stdin → stdout。stderr がディレクトリなら何も書けない)。
+    cases += [Case('fatal', 'host-paths-fd01-directory', ['host-paths'], good, {0: 'dir', 1: 'dir'}, kind='fatal'),
+              Case('fatal', 'host-paths-fd12-directory', ['host-paths'], good, {1: 'dir', 2: 'dir'}, kind='fatal-silent'),
+              Case('fatal', 'host-paths-fd02-directory', ['host-paths'], good, {0: 'dir', 2: 'dir'}, kind='fatal-silent'),
+              Case('fatal', 'help-fd0-directory', ['-h'], good, {0: 'dir'}, kind='fatal'),
+              Case('fatal', 'exec-fd1-directory', ['exec', '--state', 's', '--expect-sha256', 'h', '--path', 'p', 'python3'], good, {1: 'dir'}, kind='fatal')]
+    for seed in ('abc', '4294967296', '-1', '5 ', '0x5', '1_0', '+', ' ', 'RANDOM', '99999999999999999999999', '--5'):
+        cases.append(Case('fatal', 'host-paths-hashseed-' + repr(seed), ['host-paths'], base_env({'HOME': '/h', 'PYTHONHASHSEED': seed}), kind='fatal'))
+    cases += [Case('fatal', 'host-paths-hashseed-before-intmaxstrdigits', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x', 'PYTHONINTMAXSTRDIGITS': '5'}), kind='fatal'),
+              Case('fatal', 'host-paths-hashseed-before-fd0-directory', ['host-paths'], base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x'}), {0: 'dir'}, kind='fatal'),
+              Case('fatal', 'host-paths-intmaxstrdigits-before-fd0-directory', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONINTMAXSTRDIGITS': '5'}), {0: 'dir'}, kind='fatal'),
+              Case('fatal', 'help-hashseed', ['-h'], base_env({'PYTHONHASHSEED': 'bad'}), kind='fatal')]
+    # 標準エラーが読む側の閉じたパイプのとき(`SIGPIPE`)。設定の段階の Fatal は、旧 Python が `SIGPIPE` を無視にする前に起きるので、
+    # 旧版は信号(13)で終わる。標準の fd がディレクトリの Fatal は、無視にした後なので、書込みの失敗で終了コード 1。
+    closed = {2: 'pipe-closed'}
+    cases += [Case('fatal-closed-stderr', 'hashseed', ['host-paths'], base_env({'HOME': '/h', 'PYTHONHASHSEED': 'abc'}), closed, kind='fatal-sigpipe'),
+              Case('fatal-closed-stderr', 'hashseed-help', ['-h'], base_env({'PYTHONHASHSEED': '-1'}), closed, kind='fatal-sigpipe'),
+              Case('fatal-closed-stderr', 'intmaxstrdigits', ['host-paths'], base_env({'HOME': '/h', 'PYTHONINTMAXSTRDIGITS': '5'}), closed, kind='fatal-sigpipe'),
+              Case('fatal-closed-stderr', 'hashseed-before-intmaxstrdigits', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x', 'PYTHONINTMAXSTRDIGITS': '5'}), closed, kind='fatal-sigpipe'),
+              Case('fatal-closed-stderr', 'hashseed-before-fd0-directory', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x'}), {0: 'dir', 2: 'pipe-closed'}, kind='fatal-sigpipe'),
+              Case('fatal-closed-stderr', 'fd0-directory', ['host-paths'], good, {0: 'dir', 2: 'pipe-closed'}, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'fd1-directory', ['host-paths'], good, {1: 'dir', 2: 'pipe-closed'}, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'verify-pair-fd0-directory', pair, good, {0: 'dir', 2: 'pipe-closed'}, kind='fatal-epipe')]
+    # 親が `SIGPIPE` を無視にして起動したとき。旧 Python は、初期化の前は受け継いだ扱いのまま診断を書くので、
+    # 書込みが失敗して終了コード 1(信号ではない)。Rust は `main` の前に控えた扱いで同じにする。
+    ignored = {2: 'pipe-closed', 'sigpipe': 'ignore'}
+    cases += [Case('fatal-closed-stderr', 'ignored-sigpipe-hashseed', ['host-paths'], base_env({'HOME': '/h', 'PYTHONHASHSEED': 'abc'}), ignored, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-hashseed-help', ['-h'], base_env({'PYTHONHASHSEED': '-1'}), ignored, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-intmaxstrdigits', ['host-paths'], base_env({'HOME': '/h', 'PYTHONINTMAXSTRDIGITS': '5'}), ignored, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-hashseed-before-intmaxstrdigits', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x', 'PYTHONINTMAXSTRDIGITS': '5'}), ignored, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-hashseed-before-fd0-directory', ['host-paths'],
+                   base_env({'HOME': '/h', 'PYTHONHASHSEED': 'x'}), {0: 'dir', **ignored}, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-fd0-directory', ['host-paths'], good, {0: 'dir', **ignored}, kind='fatal-epipe'),
+              Case('fatal-closed-stderr', 'ignored-sigpipe-fd1-directory', ['host-paths'], good, {1: 'dir', **ignored}, kind='fatal-epipe')]
+    # 止めない値(先頭の空白と符号・範囲の端・random・空)と、出力を変えない PYTHONOPTIMIZE。
+    for seed in ('', 'random', '0', ' 5', '+5', '-0', '4294967295', '\t7', '007', '-18446744073709551615'):
+        cases.append(Case('startup-ok', 'host-paths-hashseed-' + repr(seed), ['host-paths'], base_env({'HOME': '/h', 'PYTHONHASHSEED': seed})))
+    for level in ('1', '2', 'x', ''):
+        cases.append(Case('startup-ok', 'host-paths-optimize-' + repr(level), ['host-paths'], base_env({'HOME': '/h', 'PYTHONOPTIMIZE': level})))
+    cases.append(Case('startup-ok', 'host-paths-error-optimize', ['host-paths'], base_env({'HOME': 'rel', 'PYTHONOPTIMIZE': '2'})))
+    cases.append(Case('startup-ok', 'verify-error-optimize', ['verify', '--state', 's', '--expect-sha256', 'h'], base_env({'PYTHONOPTIMIZE': '1'})))
+    return cases
 
 
 # 2 段目 b-2 で足す本体の成功経路。今は数えない(skip として合格にしない)。b-1d で足した bootstrap・verify・host-settings・host-allowlist・
@@ -474,23 +519,18 @@ def run_case(runner, case, tally):
         elif case.kind == 'fatal-silent':
             # 標準エラーがディレクトリ: 旧版は Fatal の診断を書けず、終了コード 1・出力なし。旧版の固定期待を別に照らす。
             fixed(old, 1)
-            if case.name in UNIMPLEMENTED_FATAL:
-                fixed(new, *UNIMPLEMENTED_FATAL[case.name])
-                tally['unimplemented'].append(label)
-            else:
-                same_result(old, new)
-                tally['matched'] += 1
+            same_result(old, new)
+            tally['matched'] += 1
+        elif case.kind in ('fatal-sigpipe', 'fatal-epipe'):
+            # 標準エラーが閉じたパイプ。旧版の固定期待(信号 13 か、終了コード 1。出力なし)を別に照らし、Rust も同じ結果。
+            fixed(old, -signal.SIGPIPE if case.kind == 'fatal-sigpipe' else 1)
+            same_result(old, new)
+            tally['matched'] += 1
         elif case.kind == 'fatal':
             if not fatal_shape_ok(old.stderr):
                 raise AssertionError('旧版の Fatal 診断の形式が想定と違う')
-            if case.name in UNIMPLEMENTED_FATAL:
-                # 未実装の印は、出力の形ではなく静的な一覧だけで決める。時間切れ・panic・形の崩れた Fatal は
-                # 固定期待と合わないので落ちる。
-                fixed(new, *UNIMPLEMENTED_FATAL[case.name])
-                tally['unimplemented'].append(label)
-            else:
-                approved_fatal(old, new)
-                tally['approved'] += 1
+            approved_fatal(old, new)
+            tally['approved'] += 1
         else:
             raise AssertionError('未知のケースの種類')
     except AssertionError as error:

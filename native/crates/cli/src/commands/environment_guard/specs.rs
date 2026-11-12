@@ -18,6 +18,11 @@ pub trait Host {
     fn process_env(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
         super::gitconfig::process_environment()
     }
+    /// 標準入力(fd 0)。`verify-pair` が `go` を待つ。複製して渡す(読取りの位置は元と共有する)。
+    fn go_input(&self) -> std::io::Result<std::os::fd::OwnedFd> {
+        use std::os::fd::AsFd;
+        std::io::stdin().as_fd().try_clone_to_owned()
+    }
     /// `PYTHONINTMAXSTRDIGITS`(整数の文字列変換の上限。0 は無制限)。起動時の誤りは入口が止めるので、既定に戻す。
     fn max_str_digits(&self) -> usize {
         use std::os::unix::ffi::OsStrExt;
