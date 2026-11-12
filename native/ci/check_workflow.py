@@ -47,7 +47,7 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4g|r4g-universal)(?: |$)", command)
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4g|r4g-universal)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -58,6 +58,7 @@ REQUIRED_NATIVE_JOBS = (
     "combine",
     "verify-universal",
     "distribution",
+    "r4d1",
     "r4u",
     "r4g",
     "r4g-universal",
@@ -146,6 +147,8 @@ def check_document(document):
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
         # R4U(#480)の比較は build の枠に入れず、ジョブ r4u で流す(2026-11-12 12:59 の決定)。
         native_timeouts = {"build": 60, "verify-universal": 30, "r4u": 30}
+        # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
+        native_timeouts["r4d1"] = 30
         # R4Gは時間の枠に入らないので、別のジョブ(r4g・r4g-universal)で比較する(2026-11-12 12:59 の決定)。
         native_timeouts.update(R4G_TIMEOUTS)
         steps = job.get("steps")
@@ -188,7 +191,7 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u"}]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1"}]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in R4G_TIMEOUTS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)

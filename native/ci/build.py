@@ -5,10 +5,12 @@ import argparse
 import os
 from pathlib import Path
 import platform
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import unittest
 
 from binary_tools import check_static_elf, pack_tar, sha256, unpack_tar
@@ -32,6 +34,14 @@ BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINAR
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
 MUSL_VERSION = "1.2.5"
+# R4D-1 の比較(build の後の専用ジョブ)。検査で小さくできるように名前を付ける。
+R4D1_TIMEOUT = 1800
+R4D1_JOIN_TIMEOUT = 10
+R4D1_TEST = "rust_matches_the_legacy_reftable_reader_on_every_input"
+R4D1_SUMMARY = re.compile(
+    r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; "
+    r"finished in [0-9]+(\.[0-9]+)?s"
+)
 
 
 # R4G の専用比較(check_r4g.py)の1回の上限。手元の Linux x86_64 で約11分、CI の機械では長くなる。
@@ -48,6 +58,71 @@ def run(args, *, env=None, capture=False, timeout=1800):
         text=capture, timeout=timeout,
     )
     return result.stdout.strip() if capture else None
+
+
+def stream_command(args, *, env, timeout, join_timeout, cwd=None):
+    """標準出力を 1 行ずつ書き出しながら控える。標準エラーはそのまま流す。控えた文字列を返す。"""
+    print("+ " + " ".join(map(str, args)), file=sys.stderr, flush=True)
+    child = subprocess.Popen(
+        list(map(str, args)), cwd=cwd or ROOT / "native", env=env,
+        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+    )
+    lines = []
+
+    def read():
+        for raw in iter(child.stdout.readline, b""):
+            line = raw.decode("utf-8", errors="replace")
+            lines.append(line)
+            try:
+                sys.stdout.write(line)
+                sys.stdout.flush()
+            except (OSError, ValueError, UnicodeError):
+                # 書き出せなくても、控えと読み取りは続ける(要約の行を読み落とさない)。
+                pass
+
+    reader = threading.Thread(target=read, daemon=True)
+    reader.start()
+    try:
+        code = child.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        child.kill()
+        child.wait()
+        reader.join(join_timeout)
+        if not reader.is_alive():
+            child.stdout.close()
+        raise subprocess.TimeoutExpired(list(map(str, args)), timeout, output="".join(lines))
+    reader.join(join_timeout)
+    alive = reader.is_alive()
+    if not alive:
+        child.stdout.close()
+    output = "".join(lines)
+    if code != 0:
+        raise subprocess.CalledProcessError(code, list(map(str, args)), output=output)
+    if alive:
+        raise ValueError("比較の標準出力を読み切れませんでした(要約の行を確かめられません)")
+    return output
+
+
+def check_r4d1_output(output):
+    lines = output.split("\n")
+    if lines.count(f"test {R4D1_TEST} ... ok") != 1:
+        raise ValueError(f"比較のテスト {R4D1_TEST} の ok の行がちょうど 1 行ではありません")
+    summary = [line for line in lines if line.startswith("test result:")]
+    if len(summary) != 1 or not R4D1_SUMMARY.fullmatch(summary[0]):
+        raise ValueError("test result の行が、比較のテスト 1 件だけの合格ではありません")
+
+
+def r4d1(name, work):
+    """R4D-1 の旧版との比較を、quality() と同じ環境で 1 回流し、1 件の合格を確かめる。"""
+    target_config(name)
+    with tempfile.TemporaryDirectory(prefix="r4d1-", dir=work) as temporary:
+        env = build_environment(Path(temporary), name)
+        output = stream_command(
+            ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "diagnostic_reftable",
+             "--", "--ignored", "--exact", R4D1_TEST],
+            env=env, timeout=R4D1_TIMEOUT, join_timeout=R4D1_JOIN_TIMEOUT, cwd=ROOT / "native",
+        )
+    check_r4d1_output(output)
 
 
 def workspace():
@@ -392,7 +467,7 @@ def r4g_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4g", "r4g-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4g", "r4g-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -400,7 +475,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4g", "r4g-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4g", "r4g-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -425,6 +500,8 @@ def main():
             package(downloads, work)
         elif args.command == "r4u":
             r4u(args.platform, work)
+        elif args.command == "r4d1":
+            r4d1(args.platform, work)
         elif args.command == "r4g":
             r4g(args.platform, downloads, work)
         elif args.command == "r4g-universal":
