@@ -276,6 +276,17 @@ attempt 1 は、build (macos-x86_64) の成果物の保存が GitHub 側の通�
 JSON の重複キーも拒否します。新しい CI も同じ形式で追加してください。
 
 - イベントは `pull_request`・`push`・`workflow_dispatch` の 3 つです。
+  - push 用は main だけで流れます。作業ブランチへ送っても流れません。
+  - pull_request 用は PR ごとに流れます。同じ PR に新しい SHA が来ると、古い SHA の流れを打ち切ります(`concurrency`。同じ組の流れを 1 本に絞る設定)。
+  - main の push 用と、手で起動した流れは、打ち切りません。
+  - `check_workflow.py` は、`push` と `concurrency` を決めた 1 つの形だけ許します。どのワークフローも、この `concurrency` を必ず持ちます(無いと拒みます)。
+    - `push` は `branches: ["main"]` だけです。
+    - `concurrency` は `check_workflow.py` の `CONCURRENCY` と同じ字面だけです。組の名前は、ワークフローの名前・イベントの種類・PR の番号か run の番号です。
+  - 作業ブランチでは push 用の CI が流れません。PR の本文に書く CI の値は、PR の先頭の SHA の pull_request 用の run から取ります。
+  - 打ち切られた run の結果は `cancelled` になります。merge の条件には、PR の先頭の SHA の、打ち切られていない run の最新の attempt(やり直しの回)だけを数えます。打ち切られた run は、SHA に関係なく数えません(同じ SHA のまま PR を閉じて開き直すと、先頭の SHA にも打ち切られた run が残ります)。
+  - 古い SHA の pull_request 用の run は、やり直し(re-run)しません。やり直すと同じ組に入り、動いている先頭の SHA の run を打ち切るためです。やり直すのは、PR の先頭の SHA の run だけです。
+  - ワークフローの名前を重ねません。組の名前に入るため、重なると同じ PR の 2 本が互いを打ち切ります。`check_workflow.py` が拒みます。
+  - `name` は、書くなら空でない文字列だけです。
 - 権限は `contents: read` だけです。秘密情報・書き込み権限・キャッシュを渡しません。
 - checkout は PR のソース SHA とリポジトリを明示します。`persist-credentials: false` を必須にします。
 - 各 job は checkout の直後に `check_workflow.py` を呼びます。
