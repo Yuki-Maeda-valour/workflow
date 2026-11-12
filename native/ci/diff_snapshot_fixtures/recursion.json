@@ -1,0 +1,566 @@
+{
+  "python": "3.10.11",
+  "yaml": "6.0.3",
+  "cases": [
+    {
+      "id": "recursion-seq-492",
+      "generator": "value",
+      "kind": "seq",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-seq-493",
+      "generator": "value",
+      "kind": "seq",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-seq-494",
+      "generator": "value",
+      "kind": "seq",
+      "depth": 494,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-seq-495",
+      "generator": "value",
+      "kind": "seq",
+      "depth": 495,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-map-490",
+      "generator": "value",
+      "kind": "map",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-map-491",
+      "generator": "value",
+      "kind": "map",
+      "depth": 491,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-map-492",
+      "generator": "value",
+      "kind": "map",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-map-493",
+      "generator": "value",
+      "kind": "map",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-unused_seq-491",
+      "generator": "value",
+      "kind": "unused_seq",
+      "depth": 491,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-unused_seq-492",
+      "generator": "value",
+      "kind": "unused_seq",
+      "depth": 492,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-unused_seq-493",
+      "generator": "value",
+      "kind": "unused_seq",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-unused_seq-494",
+      "generator": "value",
+      "kind": "unused_seq",
+      "depth": 494,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-unused_map-489",
+      "generator": "value",
+      "kind": "unused_map",
+      "depth": 489,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-unused_map-490",
+      "generator": "value",
+      "kind": "unused_map",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-unused_map-491",
+      "generator": "value",
+      "kind": "unused_map",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-unused_map-492",
+      "generator": "value",
+      "kind": "unused_map",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-alias-1498",
+      "generator": "value",
+      "kind": "alias",
+      "depth": 1498,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-alias-1499",
+      "generator": "value",
+      "kind": "alias",
+      "depth": 1499,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-alias-1500",
+      "generator": "value",
+      "kind": "alias",
+      "depth": 1500,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-alias-1501",
+      "generator": "value",
+      "kind": "alias",
+      "depth": 1501,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-merge-1498",
+      "generator": "value",
+      "kind": "merge",
+      "depth": 1498,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-merge-1499",
+      "generator": "value",
+      "kind": "merge",
+      "depth": 1499,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-merge-1500",
+      "generator": "value",
+      "kind": "merge",
+      "depth": 1500,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-merge-1501",
+      "generator": "value",
+      "kind": "merge",
+      "depth": 1501,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-scalar-489",
+      "generator": "value",
+      "kind": "scalar",
+      "depth": 489,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-scalar-490",
+      "generator": "value",
+      "kind": "scalar",
+      "depth": 490,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-scalar-491",
+      "generator": "value",
+      "kind": "scalar",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-scalar-492",
+      "generator": "value",
+      "kind": "scalar",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-scalar_alias-985",
+      "generator": "value",
+      "kind": "scalar_alias",
+      "depth": 985,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-scalar_alias-986",
+      "generator": "value",
+      "kind": "scalar_alias",
+      "depth": 986,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-scalar_alias-987",
+      "generator": "value",
+      "kind": "scalar_alias",
+      "depth": 987,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-scalar_alias-988",
+      "generator": "value",
+      "kind": "scalar_alias",
+      "depth": 988,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_empty-493",
+      "generator": "data",
+      "kind": "sequence_empty",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_empty-494",
+      "generator": "data",
+      "kind": "sequence_empty",
+      "depth": 494,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_plain-492",
+      "generator": "data",
+      "kind": "sequence_plain",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_plain-493",
+      "generator": "data",
+      "kind": "sequence_plain",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_double-492",
+      "generator": "data",
+      "kind": "sequence_double",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_double-493",
+      "generator": "data",
+      "kind": "sequence_double",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_single-492",
+      "generator": "data",
+      "kind": "sequence_single",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_single-493",
+      "generator": "data",
+      "kind": "sequence_single",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_tag-492",
+      "generator": "data",
+      "kind": "sequence_tag",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_tag-493",
+      "generator": "data",
+      "kind": "sequence_tag",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_alias-491",
+      "generator": "data",
+      "kind": "sequence_alias",
+      "depth": 491,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-sequence_alias-492",
+      "generator": "data",
+      "kind": "sequence_alias",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_comment-492",
+      "generator": "data",
+      "kind": "sequence_comment",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_comment-493",
+      "generator": "data",
+      "kind": "sequence_comment",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_null-492",
+      "generator": "data",
+      "kind": "sequence_null",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_null-493",
+      "generator": "data",
+      "kind": "sequence_null",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_number-492",
+      "generator": "data",
+      "kind": "sequence_number",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_number-493",
+      "generator": "data",
+      "kind": "sequence_number",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-sequence_long-492",
+      "generator": "data",
+      "kind": "sequence_long",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-sequence_long-493",
+      "generator": "data",
+      "kind": "sequence_long",
+      "depth": 493,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_plain-491",
+      "generator": "data",
+      "kind": "mapping_plain",
+      "depth": 491,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_plain-492",
+      "generator": "data",
+      "kind": "mapping_plain",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_double-490",
+      "generator": "data",
+      "kind": "mapping_double",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_double-491",
+      "generator": "data",
+      "kind": "mapping_double",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_single-490",
+      "generator": "data",
+      "kind": "mapping_single",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_single-491",
+      "generator": "data",
+      "kind": "mapping_single",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_tag-490",
+      "generator": "data",
+      "kind": "mapping_tag",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_tag-491",
+      "generator": "data",
+      "kind": "mapping_tag",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_empty-490",
+      "generator": "data",
+      "kind": "mapping_empty",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_empty-491",
+      "generator": "data",
+      "kind": "mapping_empty",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-mapping_null-491",
+      "generator": "data",
+      "kind": "mapping_null",
+      "depth": 491,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-mapping_null-492",
+      "generator": "data",
+      "kind": "mapping_null",
+      "depth": 492,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-block_seq_empty-490",
+      "generator": "data",
+      "kind": "block_seq_empty",
+      "depth": 490,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-block_seq_empty-491",
+      "generator": "data",
+      "kind": "block_seq_empty",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-block_seq_scalar-490",
+      "generator": "data",
+      "kind": "block_seq_scalar",
+      "depth": 490,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile は map でなければならない\n"
+    },
+    {
+      "id": "recursion-block_seq_scalar-491",
+      "generator": "data",
+      "kind": "block_seq_scalar",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    },
+    {
+      "id": "recursion-block_map-490",
+      "generator": "data",
+      "kind": "block_map",
+      "depth": 490,
+      "expected": 0,
+      "stderr": ""
+    },
+    {
+      "id": "recursion-block_map-491",
+      "generator": "data",
+      "kind": "block_map",
+      "depth": 491,
+      "expected": 20,
+      "stderr": "ERROR [secret-profile] 現在 の profile YAML を読めない\n"
+    }
+  ]
+}

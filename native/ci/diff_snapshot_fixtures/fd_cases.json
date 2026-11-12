@@ -1,0 +1,677 @@
+{
+  "source_sha256": "aa6c5b71368ddd7b9a12d4af62d6ead8518a6560fe05b7b23f03a512e84f04fe",
+  "cases": [
+    {
+      "id": "fd-print-0-closed-default",
+      "mode": "print",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-0-closed-ignored",
+      "mode": "print",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-0-directory-default",
+      "mode": "print",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-0-directory-ignored",
+      "mode": "print",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-1-closed-default",
+      "mode": "print",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 20,
+      "bash_rows": [
+        {
+          "position": 0,
+          "line": 567,
+          "detail_hex": "7072696e74663a207772697465206572726f723a204261642066696c652064657363726970746f72"
+        }
+      ]
+    },
+    {
+      "id": "fd-print-1-closed-ignored",
+      "mode": "print",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 20,
+      "bash_rows": [
+        {
+          "position": 0,
+          "line": 567,
+          "detail_hex": "7072696e74663a207772697465206572726f723a204261642066696c652064657363726970746f72"
+        }
+      ]
+    },
+    {
+      "id": "fd-print-1-directory-default",
+      "mode": "print",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20,
+      "bash_rows": [
+        {
+          "position": 0,
+          "line": 567,
+          "detail_hex": "7072696e74663a207772697465206572726f723a204261642066696c652064657363726970746f72"
+        }
+      ]
+    },
+    {
+      "id": "fd-print-1-directory-ignored",
+      "mode": "print",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20,
+      "bash_rows": [
+        {
+          "position": 0,
+          "line": 567,
+          "detail_hex": "7072696e74663a207772697465206572726f723a204261642066696c652064657363726970746f72"
+        }
+      ]
+    },
+    {
+      "id": "fd-print-2-closed-default",
+      "mode": "print",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-2-closed-ignored",
+      "mode": "print",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-2-directory-default",
+      "mode": "print",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-print-2-directory-ignored",
+      "mode": "print",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-0-closed-default",
+      "mode": "precheck",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-0-closed-ignored",
+      "mode": "precheck",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-0-directory-default",
+      "mode": "precheck",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-0-directory-ignored",
+      "mode": "precheck",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-1-closed-default",
+      "mode": "precheck",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-1-closed-ignored",
+      "mode": "precheck",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-1-directory-default",
+      "mode": "precheck",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-1-directory-ignored",
+      "mode": "precheck",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-2-closed-default",
+      "mode": "precheck",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-2-closed-ignored",
+      "mode": "precheck",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-2-directory-default",
+      "mode": "precheck",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-precheck-2-directory-ignored",
+      "mode": "precheck",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-0-closed-default",
+      "mode": "normal",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-0-closed-ignored",
+      "mode": "normal",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-0-directory-default",
+      "mode": "normal",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-0-directory-ignored",
+      "mode": "normal",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-1-closed-default",
+      "mode": "normal",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-1-closed-ignored",
+      "mode": "normal",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-1-directory-default",
+      "mode": "normal",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-1-directory-ignored",
+      "mode": "normal",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-2-closed-default",
+      "mode": "normal",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-2-closed-ignored",
+      "mode": "normal",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-2-directory-default",
+      "mode": "normal",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-normal-2-directory-ignored",
+      "mode": "normal",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-0-closed-default",
+      "mode": "profile",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-0-closed-ignored",
+      "mode": "profile",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-0-directory-default",
+      "mode": "profile",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20,
+      "bash_rows": [],
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f7379735f73747265616d733a203c737464696e3e2069732061206469726563746f72792c2063616e6e6f7420636f6e74696e75650a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-0-directory-ignored",
+      "mode": "profile",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20,
+      "bash_rows": [],
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f7379735f73747265616d733a203c737464696e3e2069732061206469726563746f72792c2063616e6e6f7420636f6e74696e75650a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-1-closed-default",
+      "mode": "profile",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-1-closed-ignored",
+      "mode": "profile",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-1-directory-default",
+      "mode": "profile",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-1-directory-ignored",
+      "mode": "profile",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-2-closed-default",
+      "mode": "profile",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-2-closed-ignored",
+      "mode": "profile",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-2-directory-default",
+      "mode": "profile",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-2-directory-ignored",
+      "mode": "profile",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 0,
+      "bash_rows": []
+    },
+    {
+      "id": "fd-profile-error-0-closed-default",
+      "mode": "profile-error",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-0-closed-ignored",
+      "mode": "profile-error",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-0-directory-default",
+      "mode": "profile-error",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f7379735f73747265616d733a203c737464696e3e2069732061206469726563746f72792c2063616e6e6f7420636f6e74696e75650a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-error-0-directory-ignored",
+      "mode": "profile-error",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f7379735f73747265616d733a203c737464696e3e2069732061206469726563746f72792c2063616e6e6f7420636f6e74696e75650a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-error-1-closed-default",
+      "mode": "profile-error",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-1-closed-ignored",
+      "mode": "profile-error",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-1-directory-default",
+      "mode": "profile-error",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-1-directory-ignored",
+      "mode": "profile-error",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20
+    },
+    {
+      "id": "fd-profile-error-2-closed-default",
+      "mode": "profile-error",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-error-2-closed-ignored",
+      "mode": "profile-error",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-error-2-directory-default",
+      "mode": "profile-error",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-error-2-directory-ignored",
+      "mode": "profile-error",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-fatal-0-closed-default",
+      "mode": "profile-fatal",
+      "fd": 0,
+      "kind": "closed",
+      "state": "default",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-0-closed-ignored",
+      "mode": "profile-fatal",
+      "fd": 0,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-0-directory-default",
+      "mode": "profile-fatal",
+      "fd": 0,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-0-directory-ignored",
+      "mode": "profile-fatal",
+      "fd": 0,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-1-closed-default",
+      "mode": "profile-fatal",
+      "fd": 1,
+      "kind": "closed",
+      "state": "default",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-1-closed-ignored",
+      "mode": "profile-fatal",
+      "fd": 1,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-1-directory-default",
+      "mode": "profile-fatal",
+      "fd": 1,
+      "kind": "directory",
+      "state": "default",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-1-directory-ignored",
+      "mode": "profile-fatal",
+      "fd": 1,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 20,
+      "thread_before_hex": "466174616c20507974686f6e206572726f723a20696e69745f737464696f5f656e636f64696e673a206661696c656420746f206765742074686520507974686f6e20636f646563206e616d65206f662074686520737464696f20656e636f64696e670a507974686f6e2072756e74696d652073746174653a20636f726520696e697469616c697a65640a4c6f6f6b75704572726f723a20756e6b6e6f776e20656e636f64696e673a20646f65732d6e6f742d65786973742d7333640a0a",
+      "thread_after_hex": "20203c6e6f20507974686f6e206672616d653e0a4552524f52205b696e7465726e616c5d207365637265742070726f66696c6520e381aee5928ce99b86e59088e38292e4bd9ce3828ce381aae381840a"
+    },
+    {
+      "id": "fd-profile-fatal-2-closed-default",
+      "mode": "profile-fatal",
+      "fd": 2,
+      "kind": "closed",
+      "state": "default",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-fatal-2-closed-ignored",
+      "mode": "profile-fatal",
+      "fd": 2,
+      "kind": "closed",
+      "state": "ignored",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-fatal-2-directory-default",
+      "mode": "profile-fatal",
+      "fd": 2,
+      "kind": "directory",
+      "state": "default",
+      "expected": 1
+    },
+    {
+      "id": "fd-profile-fatal-2-directory-ignored",
+      "mode": "profile-fatal",
+      "fd": 2,
+      "kind": "directory",
+      "state": "ignored",
+      "expected": 1
+    }
+  ]
+}

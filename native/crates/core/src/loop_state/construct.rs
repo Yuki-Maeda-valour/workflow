@@ -15,6 +15,7 @@ use std::{
 enum Value {
     Text(CodepointString),
     Atom,
+    Null,
     List(Vec<Option<usize>>),
     Map(Option<usize>),
     Set,
@@ -24,6 +25,8 @@ struct Constructor<'a> {
     values: Vec<Option<Value>>,
     pending: VecDeque<usize>,
     limit: LegacyIntLimit,
+    recursion: Option<super::snapshot_recursion::RecursionPolicy>,
+    scalar_frames: usize,
 }
 impl Constructor<'_> {
     fn scalar(&self, mut id: usize) -> Result<Vec<u32>, ()> {
@@ -31,6 +34,9 @@ impl Constructor<'_> {
         loop {
             if !seen.insert(id) {
                 return Err(());
+            }
+            if let Some(policy) = self.recursion {
+                policy.scalar(self.scalar_frames, seen.len())?;
             }
             match &self.graph.nodes[id].data {
                 Data::Scalar(v) => return Ok(v.clone()),
@@ -86,7 +92,11 @@ impl Constructor<'_> {
                 if !scalar::validate(&tag, &scalar, self.limit) {
                     return Err(());
                 }
-                Value::Atom
+                if tag == "null" {
+                    Value::Null
+                } else {
+                    Value::Atom
+                }
             }
             _ => return Err(()),
         };
@@ -126,7 +136,11 @@ impl Constructor<'_> {
             }
         }
         let mut stack = vec![Frame::new(id)];
-        while let Some(frame) = stack.last_mut() {
+        while !stack.is_empty() {
+            if let Some(policy) = self.recursion {
+                policy.merge(stack.len())?;
+            }
+            let frame = stack.last_mut().unwrap();
             match &mut frame.wait {
                 Wait::One(child) => {
                     frame
@@ -205,6 +219,11 @@ impl Constructor<'_> {
                 .strip_prefix(PREFIX)
                 .ok_or(())?
                 .to_owned();
+            self.scalar_frames = match tag.as_str() {
+                "seq" => 14,
+                "map" | "set" => 14,
+                _ => 12,
+            };
             let value = match tag.as_str() {
                 "seq" => {
                     let Data::Sequence(children) = self.graph.nodes[id].data.clone() else {
@@ -273,6 +292,8 @@ pub(super) fn patterns(graph: &mut Graph, limit: LegacyIntLimit) -> Result<Patte
         graph,
         pending: VecDeque::new(),
         limit,
+        recursion: None,
+        scalar_frames: 10,
     };
     c.ensure(0)?;
     c.finish()?;
@@ -291,4 +312,55 @@ pub(super) fn patterns(graph: &mut Graph, limit: LegacyIntLimit) -> Result<Patte
             })
             .collect(),
     ))
+}
+
+/// Purpose-specific results; the legacy loop-state adapter remains unchanged.
+pub(crate) enum SnapshotInput {
+    Empty,
+    Null,
+    NotMapping,
+    Missing,
+    NullPatterns,
+    Patterns(PatternInput),
+}
+pub(crate) fn snapshot_input(
+    graph: &mut Graph,
+    limit: LegacyIntLimit,
+    recursion: super::snapshot_recursion::RecursionPolicy,
+) -> Result<SnapshotInput, ()> {
+    if graph.nodes.is_empty() {
+        return Ok(SnapshotInput::Empty);
+    }
+    let mut c = Constructor {
+        values: vec![None; graph.nodes.len()],
+        graph,
+        pending: VecDeque::new(),
+        limit,
+        recursion: Some(recursion),
+        scalar_frames: 10,
+    };
+    c.ensure(0)?;
+    c.finish()?;
+    let id = match &c.values[0] {
+        Some(Value::Null) => return Ok(SnapshotInput::Null),
+        Some(Value::Map(None)) => return Ok(SnapshotInput::Missing),
+        Some(Value::Map(Some(id))) => *id,
+        _ => return Ok(SnapshotInput::NotMapping),
+    };
+    let Some(value) = &c.values[id] else {
+        return Err(());
+    };
+    match value {
+        Value::Null => Ok(SnapshotInput::NullPatterns),
+        Value::List(items) => Ok(SnapshotInput::Patterns(PatternInput::List(
+            items
+                .iter()
+                .map(|item| match item.and_then(|i| c.values[i].as_ref()) {
+                    Some(Value::Text(s)) => PatternItem::Text(s.clone()),
+                    _ => PatternItem::Other,
+                })
+                .collect(),
+        ))),
+        _ => Ok(SnapshotInput::Patterns(PatternInput::NotList)),
+    }
 }

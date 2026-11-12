@@ -12,3 +12,6 @@ pub use output::{
 };
 
 pub mod process;
+
+/// Purpose-specific snapshot profile parsing and encoding.
+pub mod s3d_profile;

@@ -3,10 +3,12 @@
 //! Text uses Python code points, including unpaired surrogates. No function in
 //! this module opens files or consults process-global configuration.
 mod casefold;
-mod construct;
+pub(crate) mod construct;
 mod glob;
 pub(crate) mod graph;
 mod scalar;
+#[path = "../s3d_profile/parser_budget.rs"]
+pub(crate) mod snapshot_recursion;
 
 use std::collections::HashSet;
 

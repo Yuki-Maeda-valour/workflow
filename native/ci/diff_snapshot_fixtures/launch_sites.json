@@ -1,0 +1,888 @@
+{
+ "schema": 1,
+ "base_versions": {
+  "bash": "5.2.21",
+  "coreutils": "9.4",
+  "findutils": "4.9.0",
+  "sed": "4.9",
+  "grep": "3.11",
+  "glibc": "2.39"
+ },
+ "sites": [
+  {
+   "lines": [
+    576
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --show-toplevel$",
+   "stdio": "substitution, stderr discarded",
+   "note": "",
+   "id": "site-01-git"
+  },
+  {
+   "lines": [
+    587
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*config --get core\\.worktree$",
+   "stdio": "substitution, stderr discarded",
+   "note": "",
+   "id": "site-02-git"
+  },
+  {
+   "lines": [
+    625
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*version$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-03-git"
+  },
+  {
+   "lines": [
+    720
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*config --show-scope --includes --list -z$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-04-git"
+  },
+  {
+   "lines": [
+    784
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*for-each-ref refs/replace/$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-05-git"
+  },
+  {
+   "lines": [
+    790,
+    794
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --verify --quiet \\S+\\^\\{tree\\}$",
+   "stdio": "discarded",
+   "note": "",
+   "id": "site-06-git"
+  },
+  {
+   "lines": [
+    801
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --path-format=absolute --git-path info/attributes$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-07-git"
+  },
+  {
+   "lines": [
+    853,
+    1245
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files (?:-z|-s -z)$",
+   "stdio": "file or pipe",
+   "note": "",
+   "id": "site-08-git"
+  },
+  {
+   "lines": [
+    856
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files -o --exclude-standard -z$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-09-git"
+  },
+  {
+   "lines": [
+    859
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files -s -z$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-10-git"
+  },
+  {
+   "lines": [
+    900
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*check-attr --stdin -z filter working-tree-encoding ident$",
+   "stdio": "file stdin attrin.z",
+   "note": "",
+   "id": "site-11-git"
+  },
+  {
+   "lines": [
+    929
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*config --get-regexp \\^filter\\\\\\.\\(unset\\|unspecified\\)\\\\\\.$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-12-git"
+  },
+  {
+   "lines": [
+    950,
+    1254
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files (?:-v -z|-z -v)$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-13-git"
+  },
+  {
+   "lines": [
+    954
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*config --get core\\.sparsecheckout$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-14-git"
+  },
+  {
+   "lines": [
+    956
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --path-format=absolute --git-path info/sparse-checkout$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-15-git"
+  },
+  {
+   "lines": [
+    980
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*sparse-checkout check-rules -z$",
+   "stdio": "file stdin cand.z",
+   "note": "",
+   "id": "site-16-git"
+  },
+  {
+   "lines": [
+    1068
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*config --get filter\\.\\S+$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-17-git"
+  },
+  {
+   "lines": [
+    1124
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --verify --quiet HEAD$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-18-git"
+  },
+  {
+   "lines": [
+    1127
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*merge-base --is-ancestor \\S+ HEAD$",
+   "stdio": "discarded",
+   "note": "",
+   "id": "site-19-git"
+  },
+  {
+   "lines": [
+    1245
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*-c core\\.ignoreStat=false update-index -z --index-info$",
+   "stdio": "pipe, GIT_INDEX_FILE",
+   "note": "",
+   "id": "site-20-git"
+  },
+  {
+   "lines": [
+    1249
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*update-index --skip-worktree -z --stdin$",
+   "stdio": "file stdin sparse.z",
+   "note": "",
+   "id": "site-21-git"
+  },
+  {
+   "lines": [
+    1297,
+    1593,
+    1626
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*(?:-c \\S+ )*diff --name-only .*$",
+   "stdio": "file or substitution",
+   "note": "",
+   "id": "site-22-git"
+  },
+  {
+   "lines": [
+    1321
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-tree -z \\S+ -- :\\(literal\\).*$",
+   "stdio": "pipe",
+   "note": "",
+   "id": "site-23-git"
+  },
+  {
+   "lines": [
+    1324
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files -s -z -- :\\(literal\\).*$",
+   "stdio": "pipe",
+   "note": "",
+   "id": "site-24-git"
+  },
+  {
+   "lines": [
+    1339
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*cat-file blob \\S+$",
+   "stdio": "pipe, read end closed after 8000 bytes",
+   "note": "",
+   "id": "site-25-git"
+  },
+  {
+   "lines": [
+    1342
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*cat-file -s \\S+$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-26-git"
+  },
+  {
+   "lines": [
+    1373,
+    1389,
+    1490,
+    1644
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*(?:-c \\S* )*diff .*$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-27-git"
+  },
+  {
+   "lines": [
+    1557,
+    1559
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*ls-files -o --ignored --exclude-(?:per-directory=\\.gitignore|standard) -z$",
+   "stdio": "file",
+   "note": "",
+   "id": "site-28-git"
+  },
+  {
+   "lines": [
+    1574
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*rev-parse --path-format=absolute --git-path info/exclude$",
+   "stdio": "substitution",
+   "note": "",
+   "id": "site-29-git"
+  },
+  {
+   "lines": [
+    "helper"
+   ],
+   "tool": "git",
+   "launched": true,
+   "match": "^(?:--no-pager |--no-replace-objects |-c \\S* |-C \\S+ )*(?:rev-parse --show-object-format|hash-object -t tree /dev/null|rev-parse --verify --quiet .*|ls-tree -z .*|cat-file .*)$",
+   "stdio": "stdin and stderr /dev/null, 10 s limit",
+   "note": "profile Git; _ is python3 found in PATH",
+   "id": "site-30-git"
+  },
+  {
+   "lines": [
+    372
+   ],
+   "tool": "grep",
+   "launched": true,
+   "match": "^-Eiqz -- .*$",
+   "stdio": "pipe stdin",
+   "id": "site-31-grep"
+  },
+  {
+   "lines": [
+    519,
+    556
+   ],
+   "tool": "grep",
+   "launched": true,
+   "match": "^-Eqz -- .*$",
+   "stdio": "pipe stdin, stderr discarded",
+   "id": "site-32-grep"
+  },
+  {
+   "lines": [
+    255
+   ],
+   "tool": "sed",
+   "launched": false,
+   "args": "sed -n '2,/^# --- end usage ---$/p' \"$0\" | sed '$d'",
+   "rust": "usage text held by Rust",
+   "id": "site-33-sed"
+  },
+  {
+   "lines": [
+    272,
+    273,
+    274,
+    279,
+    280,
+    281,
+    733,
+    807
+   ],
+   "tool": "sha256sum",
+   "launched": false,
+   "args": "sha256sum <FILE | cut -d\" \" -f1",
+   "rust": "sha2 in process; at 279 (694・807・1418) a failed open keeps the Bash redirection diagnostic and a failed read sha256sum's own, then the ERR traps of 279 and of the assignment",
+   "id": "site-34-sha256sum",
+   "diagnostics": [
+    {
+     "name": "redirect",
+     "template": "{script}: line {line}: {path}: Permission denied\n",
+     "measured": "bash: line 1: <D>/unreadable/x: Permission denied\n",
+     "recipe": "redirect",
+     "version": "bash 5.2.21"
+    },
+    {
+     "name": "read",
+     "template": "sha256sum: -: Is a directory\n",
+     "measured": "sha256sum: -: Is a directory\n",
+     "recipe": "sha256sum-read",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "N"
+  },
+  {
+   "lines": [
+    335,
+    731,
+    1321,
+    1395,
+    1467
+   ],
+   "tool": "tr",
+   "launched": false,
+   "args": "tr",
+   "rust": "in process",
+   "id": "site-35-tr"
+  },
+  {
+   "lines": [
+    377,
+    384
+   ],
+   "tool": "realpath",
+   "launched": false,
+   "args": "realpath [-m] -- P",
+   "rust": "in process",
+   "id": "site-36-realpath"
+  },
+  {
+   "lines": [
+    378,
+    385,
+    1411,
+    1462
+   ],
+   "tool": "readlink",
+   "launched": false,
+   "args": "readlink [-f] -- P",
+   "rust": "in process; at 1411・1462 (2>/dev/null; printf x) a failed readlink leaves the value empty without a diagnostic",
+   "id": "site-37-readlink"
+  },
+  {
+   "lines": [
+    589,
+    613
+   ],
+   "tool": "mktemp",
+   "launched": false,
+   "args": "mktemp -d",
+   "rust": "directory made in process (589 removed at 594)",
+   "diagnostics": [
+    {
+     "name": "missing",
+     "template": "mktemp: failed to create directory via template {template}: No such file or directory\n",
+     "measured": "mktemp: failed to create directory via template '<D>/missing/tmp.XXXXXXXXXX': No such file or directory\n",
+     "recipe": "mktemp-missing",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "E",
+   "id": "site-38-mktemp"
+  },
+  {
+   "lines": [
+    594,
+    245,
+    246,
+    247
+   ],
+   "tool": "rm",
+   "launched": false,
+   "args": "rm -rf -- DIR",
+   "rust": "removed in process; the first failure ends the old EXIT trap",
+   "diagnostics": [
+    {
+     "name": "unremovable",
+     "template": "rm: cannot remove {path}: Permission denied\n",
+     "measured": "rm: cannot remove '<D>/rr/inner/f': Permission denied\n",
+     "recipe": "rm-rf",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "N",
+   "id": "site-39-rm"
+  },
+  {
+   "lines": [
+    242,
+    1195
+   ],
+   "tool": "rm",
+   "launched": false,
+   "args": "rm -f -- PATCH_ABS",
+   "rust": "removed in process",
+   "diagnostics": [
+    {
+     "name": "directory",
+     "template": "rm: cannot remove {path}: Is a directory\n",
+     "measured": "rm: cannot remove '<D>/target': Is a directory\n",
+     "recipe": "rm-dir",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "id": "site-40-rm"
+  },
+  {
+   "lines": [
+    604
+   ],
+   "tool": "dirname",
+   "launched": false,
+   "args": "dirname -- SCRIPT_PATH",
+   "rust": "not resolved (23:19)",
+   "id": "site-41-dirname"
+  },
+  {
+   "lines": [
+    641,
+    642,
+    1185,
+    1189
+   ],
+   "tool": "dirname",
+   "launched": false,
+   "args": "dirname/basename -- P",
+   "rust": "in process",
+   "id": "site-42-dirname"
+  },
+  {
+   "lines": [
+    668
+   ],
+   "tool": "mkdir",
+   "launched": false,
+   "args": "mkdir -p -- PARENT",
+   "rust": "in process",
+   "diagnostics": [
+    {
+     "name": "unwritable",
+     "template": "mkdir: cannot create directory {dir}: Permission denied\n",
+     "measured": "mkdir: cannot create directory '<D>/ro/sub': Permission denied\n",
+     "recipe": "mkdir-ro",
+     "version": "coreutils 9.4"
+    },
+    {
+     "name": "too-long",
+     "template": "mkdir: cannot create directory {dir}: File name too long\n",
+     "measured": "mkdir: cannot create directory '<D>/<LONG>': File name too long\n",
+     "recipe": "mkdir-long",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "E",
+   "id": "site-43-mkdir"
+  },
+  {
+   "lines": [
+    705
+   ],
+   "tool": "grep",
+   "launched": false,
+   "args": "grep -q -e git-lfs -e filter-process ERRFILE",
+   "rust": "in process (GNU grep rules)",
+   "id": "site-44-grep"
+  },
+  {
+   "lines": [
+    710,
+    721,
+    897,
+    1137,
+    1492
+   ],
+   "tool": "cat",
+   "launched": false,
+   "args": "cat",
+   "rust": "in process; 897 is written by Rust as Git's input (attrin.z). coreutils 9.4 copies with copy_file_range and names the input",
+   "id": "site-45-cat",
+   "diagnostics": [
+    {
+     "name": "write",
+     "template": "cat: {input}: File too large\n",
+     "measured": "cat: src: File too large\n",
+     "recipe": "cat-fsize",
+     "version": "coreutils 9.4"
+    }
+   ]
+  },
+  {
+   "lines": [
+    978,
+    1248
+   ],
+   "tool": "printf",
+   "launched": false,
+   "args": "printf '%s\\0' P >>$TMPD/NAME (Bash builtin)",
+   "rust": "written by Rust as Git's input (cand.z・sparse.z)",
+   "diagnostics": [
+    {
+     "name": "write",
+     "template": "{script}: line {line}: printf: write error: File too large\n",
+     "measured": "bash: line 1: printf: write error: File too large\n",
+     "recipe": "printf-fsize",
+     "version": "bash 5.2.21"
+    }
+   ],
+   "id": "site-58-printf"
+  },
+  {
+   "lines": [
+    888
+   ],
+   "tool": "find",
+   "launched": false,
+   "args": "find ./P/. -mindepth 1 -maxdepth 1 -print -quit",
+   "rust": "in process",
+   "diagnostics": [
+    {
+     "name": "unreadable",
+     "template": "find: {path}: Permission denied\n",
+     "measured": "find: './unreadable/.': Permission denied\n",
+     "recipe": "find-unreadable",
+     "version": "findutils 4.9.0"
+    }
+   ],
+   "method": "E",
+   "id": "site-46-find"
+  },
+  {
+   "lines": [
+    1016
+   ],
+   "tool": "sort",
+   "launched": false,
+   "args": "LC_ALL=C sort -z",
+   "rust": "in process",
+   "id": "site-47-sort"
+  },
+  {
+   "lines": [
+    1145
+   ],
+   "tool": "date",
+   "launched": false,
+   "args": "date '+%Y-%m-%d %H:%M:%S'",
+   "rust": "in process",
+   "id": "site-48-date"
+  },
+  {
+   "lines": [
+    1186,
+    1190
+   ],
+   "tool": "mktemp",
+   "launched": false,
+   "args": "mktemp -d DIR/.diff-snapshot.XXXXXX",
+   "rust": "in process",
+   "diagnostics": [
+    {
+     "name": "unwritable",
+     "template": "mktemp: failed to create directory via template {template}: Permission denied\n",
+     "measured": "mktemp: failed to create directory via template '<D>/ro/.diff-snapshot.XXXXXX': Permission denied\n",
+     "recipe": "mktemp-ro",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "E",
+   "id": "site-49-mktemp"
+  },
+  {
+   "lines": [
+    1187,
+    1191
+   ],
+   "tool": "cp",
+   "launched": false,
+   "args": "cp -- $TMPD/NAME.raw $PUB/NAME.tmp",
+   "rust": "written in process from memory",
+   "diagnostics": [
+    {
+     "name": "create",
+     "template": "cp: cannot create regular file {dest}: Permission denied\n",
+     "measured": "cp: cannot create regular file '<D>/ro/out.tmp': Permission denied\n",
+     "recipe": "cp-create",
+     "version": "coreutils 9.4"
+    },
+    {
+     "name": "write",
+     "template": "cp: error copying {source} to {dest}: File too large\n",
+     "measured": "cp: error copying 'src' to '<D>/big.tmp': File too large\n",
+     "recipe": "cp-fsize",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "N",
+   "id": "site-50-cp"
+  },
+  {
+   "lines": [
+    1192,
+    1194
+   ],
+   "tool": "mv",
+   "launched": false,
+   "args": "mv -- TMP DEST",
+   "rust": "rename in process",
+   "diagnostics": [
+    {
+     "name": "denied",
+     "template": "mv: cannot move {source} to {dest}: Permission denied\n",
+     "measured": "mv: cannot move 'm1' to '<D>/ro/m1': Permission denied\n",
+     "recipe": "mv-ro",
+     "version": "coreutils 9.4"
+    },
+    {
+     "name": "directory",
+     "template": "mv: cannot overwrite directory {dest} with non-directory\n",
+     "measured": "mv: cannot overwrite directory 'target/src' with non-directory\n",
+     "recipe": "mv-overwrite-dir",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "N",
+   "id": "site-51-mv"
+  },
+  {
+   "lines": [
+    1226
+   ],
+   "tool": "python3",
+   "launched": false,
+   "args": "python3 secret-profiles.py --cwd TOP --ref ...",
+   "rust": "profile helper moved into Rust (D5)",
+   "id": "site-52-python3"
+  },
+  {
+   "lines": [
+    1314,
+    1315,
+    1339
+   ],
+   "tool": "head",
+   "launched": false,
+   "args": "head -c 8000",
+   "rust": "in process (1339 reads Git's output); at 1314・1315 (head_has_nul in an if) both pipelines report a failed open (Bash) or read (head), the ERR trap stays quiet and what was read decides",
+   "id": "site-53-head",
+   "diagnostics": [
+    {
+     "name": "redirect",
+     "template": "{script}: line {line}: {path}: Permission denied\n",
+     "measured": "bash: line 1: <D>/unreadable/x: Permission denied\n",
+     "recipe": "redirect",
+     "version": "bash 5.2.21"
+    },
+    {
+     "name": "read",
+     "template": "head: error reading 'standard input': Is a directory\n",
+     "measured": "head: error reading 'standard input': Is a directory\n",
+     "recipe": "head-read",
+     "version": "coreutils 9.4"
+    }
+   ],
+   "method": "N"
+  },
+  {
+   "lines": [
+    1347,
+    1416,
+    1472
+   ],
+   "tool": "wc",
+   "launched": false,
+   "args": "wc -c <FILE | tr -d ' '",
+   "rust": "size from an open descriptor",
+   "diagnostics": [
+    {
+     "name": "redirect",
+     "template": "{script}: line {line}: {path}: Permission denied\n",
+     "measured": "bash: line 1: <D>/unreadable/x: Permission denied\n",
+     "recipe": "redirect",
+     "version": "bash 5.2.21"
+    }
+   ],
+   "method": "N",
+   "id": "site-54-wc"
+  },
+  {
+   "lines": [
+    1526
+   ],
+   "tool": "find",
+   "launched": false,
+   "args": "find . -path ./.git -prune -o -name .git -prune -print0 -o -type d -print0",
+   "rust": "in process",
+   "id": "site-55-find"
+  },
+  {
+   "lines": [
+    1576
+   ],
+   "tool": "grep",
+   "launched": false,
+   "args": "grep -qv -e '^#' -e '^[[:space:]]*$' FILE",
+   "rust": "in process (GNU grep rules)",
+   "id": "site-56-grep"
+  },
+  {
+   "lines": [
+    1652
+   ],
+   "tool": "grep",
+   "launched": false,
+   "args": "grep -h '^Binary files ' FILES",
+   "rust": "in process (GNU grep rules)",
+   "id": "site-57-grep"
+  }
+ ],
+ "temp_files": {
+  ".sha.in": "memory",
+  "attr.err": "git-output-file",
+  "attr.z": "git-output-file",
+  "attrin.z": "git-stdin-file",
+  "basehead": "memory",
+  "binlines": "memory",
+  "body.err": "git-output-file",
+  "cand.z": "git-stdin-file",
+  "cfg.err": "git-output-file",
+  "cfg.z": "git-output-file",
+  "cfgval": "memory",
+  "dg": "memory",
+  "dgs": "memory",
+  "find.z": "memory",
+  "flags.err": "git-output-file",
+  "flags.z": "git-output-file",
+  "gitlink-children.err": "memory",
+  "gitlink-children.z": "memory",
+  "idxflags.z": "git-output-file",
+  "ignA.z": "git-output-file",
+  "ignB.z": "git-output-file",
+  "index.tmp": "git-output-file",
+  "out.raw": "memory",
+  "patch.err": "git-output-file",
+  "patch.raw": "git-output-file",
+  "pdiff.err": "git-output-file",
+  "pdiff.z": "git-output-file",
+  "replace.txt": "git-output-file",
+  "rules.z": "git-output-file",
+  "s_body": "git-output-file",
+  "s_default": "memory",
+  "s_gitignore": "memory",
+  "s_notinc": "memory",
+  "s_omit_t": "memory",
+  "s_omit_u": "memory",
+  "s_outside": "memory",
+  "s_secret": "memory",
+  "s_stat": "git-output-file",
+  "s_tamper": "memory",
+  "s_untracked": "memory",
+  "secret-profile-globs.z": "memory",
+  "secret-profile.err": "memory",
+  "sparse.z": "git-stdin-file",
+  "stage.err": "git-output-file",
+  "stage.z": "git-output-file",
+  "stat.err": "git-output-file",
+  "tdiff.err": "git-output-file",
+  "tdiff.z": "git-output-file",
+  "tracked.err": "git-output-file",
+  "tracked.z": "git-output-file",
+  "tracked_lower.z": "memory",
+  "ud": "git-output-file",
+  "uderr": "git-output-file",
+  "unsetf.txt": "git-output-file",
+  "untracked.err": "git-output-file",
+  "untracked.z": "git-output-file"
+ }
+}

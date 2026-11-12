@@ -7,4 +7,5 @@ publish.workspace = true
 
 [dependencies]
 rustix.workspace = true
+rustix.features = ["process", "rand", "stdio"]
 libc.workspace = true

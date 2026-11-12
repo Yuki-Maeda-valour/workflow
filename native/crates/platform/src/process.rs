@@ -22,6 +22,10 @@ pub struct DirectChild {
 }
 
 impl DirectChild {
+    pub(crate) fn id(&self) -> u32 {
+        self.child.id()
+    }
+
     pub fn spawn(command: &mut Command) -> io::Result<Self> {
         let mut child = command
             .stdin(Stdio::piped())
