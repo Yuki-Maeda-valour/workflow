@@ -95,7 +95,9 @@ def check_document(document):
         if set(job) - JOB_KEYS:
             problems.append(f"{name}: job の設定は needs・strategy・runs-on・timeout-minutes・steps に限ります")
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
-        native_timeouts = {"build": 60, "verify-universal": 30}
+        # S2L(#468)はbuildの各回の比較とqualityの単体・変異の検査、署名後の各CPUの比較を足す。
+        # R4Rのpush用run 43085900763でMac Intelのbuildが48.2分・verify-universalが26.6分を使ったため、120分・60分にする。
+        native_timeouts = {"build": 120, "verify-universal": 60}
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None

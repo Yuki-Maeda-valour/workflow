@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4Rは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・S2Lのloop-stateの状態観測7コマンドは開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/S2Lは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -26,7 +26,7 @@ R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の�
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
 - `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・loop-stateの純粋部品・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)、S2Lの保持入力・保存・直接子の接続(`loop_state`)と起動時の信号の初期化(`loop_state_signal`)、Linuxのテスト用のopenの監視(`loop_state_watch`)を持ちます。
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。

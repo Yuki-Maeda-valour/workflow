@@ -288,7 +288,7 @@ def verify_universal(downloads, work):
         run(["codesign", "--verify", "--strict", "--verbose=2", folder / filename])
         if sorted(run(["lipo", "-archs", folder / filename], capture=True).split()) != ["arm64", "x86_64"]:
             raise ValueError("Mac の最終ファイルの CPU が違います")
-    # 署名後の同じ3実行物を、各CPUの必須ジョブで検査する。
+    # 署名後の同じ4実行物を、各CPUの必須ジョブで検査する。
     probe(folder / "dev-workflow")
     r4b_probe(folder / "r4b_contract")
     r4r_probe(folder / "r4r_contract")

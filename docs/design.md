@@ -1298,11 +1298,17 @@ APIは [native/README.md](../native/README.md#loop-stateの状態観測7コマ�
 - 2026-11-09のC0bで `rustix` を採用した。段階 0 の候補記録は上に残す。`native/Cargo.toml` で `=1.1.6` に固定し、`platform` だけに `fs` と既定の `std` を追加した。
 - R4Aのtask-digestではstdoutの端末幅取得に`termios`を加えた。
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
-- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
+- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、R4Rの自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
   - 旧helperの `_posixsubprocess` と同じ子の準備が要るためである。子だけの `RLIMIT_FSIZE`、`close_range` か列挙した fd への exec の時に閉じる印、`SIGPIPE`・`SIGXFSZ` の既定、mask、`execv` は、exec の前に子の中で動く。`std::process::Command` の `pre_exec` と `libc` でしか書けない。
   - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
   - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
   - `rustix` の機能と、依存の版は増やしていない。
+- S2L(#468)では、依存を増やさず、自作の `unsafe` とCの関数の宣言(`extern "C"`)を `native/crates/platform/src/loop_state.rs`・`loop_state_signal.rs`・`loop_state_watch.rs` と、テストの `loop_state_tests.rs` に置いた。cli・core と検査専用入口の `loop_state_fixture` は `unsafe` を使わない。
+  - `loop_state.rs`: Gitの子の準備を `pre_exec` の中で行う。旧CPythonの`subprocess`と同じく `SIGPIPE`・`SIGXFSZ` を既定へ戻し、許したfdだけを引き継ぐ(Linuxは `close_range` の `syscall`、使えなければディレクトリの列挙。`signal`・`fcntl`・`getrlimit`・`syscall`・`open`・`close` と、Macの `__getdirentries64` を直接呼ぶ)。
+    - `syscall`: Linuxの `close_range`(番号436)と、fdの列挙の `getdents64`(x86_64は217、arm64は61)に使う。
+    - `__getdirentries64`: Macのfdの列挙(`/dev/fd`)に使う。Apple Libcの非公開のexportで、公開APIではない。Macでの実際のリンクと動作は、まだCIで確かめていない(PRのCIで確かめる)。
+  - `loop_state_signal.rs`: 起動時の信号の初期化(`signal`・`siginterrupt`・`sigaction`)、起動の失敗の診断に使う主スレッドの識別子(`pthread_self`)、SIGINTによる終了(`kill`・`getpid`)。
+  - `loop_state_watch.rs`: Linuxの `inotify`(`inotify_init1`・`inotify_add_watch`)で、テストが持つフォルダのopenだけを監視する(製品の経路では使わない)。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
 - `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLは後のR4Sで局所修正版を採用した。Landlock・kqueueの部品は未採用である。

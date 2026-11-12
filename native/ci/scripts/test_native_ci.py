@@ -231,7 +231,7 @@ class WorkflowTests(TempCase):
         self.assertEqual(check_workflow.check_workflows(), [])
 
     def test_native_comparison_job_timeouts_are_fixed(self):
-        for job,minutes in (("build",60),("verify-universal",30)):
+        for job,minutes in (("build",120),("verify-universal",60)):
             self.assertEqual(self.document["jobs"][job]["timeout-minutes"],minutes)
             for display_name in ("Native", "Renamed", None):
                 for renamed_job in (False, True):
@@ -251,7 +251,7 @@ class WorkflowTests(TempCase):
                             self.assertTrue(check_workflow.check_document(changed))
 
     def test_native_build_option_first_forms_are_rejected_even_with_correct_timeout(self):
-        for job,operation,minutes in (("build","build",60),("verify-universal","verify-universal",30)):
+        for job,operation,minutes in (("build","build",120),("verify-universal","verify-universal",60)):
             for arguments in (f"--platform linux-x86_64 {operation}", f"--downloads downloads {operation}", f"-- {operation}"):
                 for value in (minutes,None,1):
                     changed=copy.deepcopy(self.document)
@@ -1225,7 +1225,7 @@ class R4RConnectionTests(TempCase):
             check.side_effect=subprocess.CalledProcessError(1,"R4R")
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
-    def test_reproduce_builds_and_extracts_both_examples(self):
+    def test_reproduce_builds_and_extracts_all_examples(self):
         self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
