@@ -234,7 +234,8 @@ def run_case(case, fixture, binary, legacy):
         path.write_bytes(b'* text\n')
         path.chmod(0)
         try:
-            detail = str(path).encode() + b': Permission denied'
+            # 旧 801 行は git の実体のパスを使うので、TMPDIR がシンボリックリンクを通っても合うよう実体で書く。
+            detail = str(path.resolve()).encode() + b': Permission denied'
             return pair(f, binary, legacy, normal(f), code=20,
                         rows=[{'position': 0, 'line': 279, 'detail': detail}])
         finally:

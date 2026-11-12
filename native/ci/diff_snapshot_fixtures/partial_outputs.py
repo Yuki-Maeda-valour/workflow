@@ -63,7 +63,8 @@ def _run(command, case, f, env, *, stdout_limited, stderr_limited, size):
         result, cuts = write_cuts.run(command, cwd=f.root, env=env, size=size,
                                       stdout_file=out if stdout_limited else None,
                                       stderr_file=err if stderr_limited else None)
-        cut = {name: any(Path(c['path']) == path for c in cuts) for name, path in (('stdout', out), ('stderr', err))}
+        # strace -y は実体のパスを出すので、TMPDIR がシンボリックリンクを通っても合うよう、実体へ直して比べる。
+        cut = {name: any(Path(c['path']) == path.resolve() for c in cuts) for name, path in (('stdout', out), ('stderr', err))}
     return result, cut
 
 
@@ -212,7 +213,8 @@ def compare_file_case(case, f, binary, legacy):
                     if d['name'] == 'write')
     shown = PUB_NAME.sub(b'/.diff-snapshot.X/', TMPD_NAME.sub(b'/tmp.X/', new.stderr))
     source = "'" + str(f.root / 'tmp-shared') + "/tmp.X/out.raw'"
-    dest = "'" + str(f.root) + "/.diff-snapshot.X/out.tmp'"
+    # 公開先は realpath で実体にした出力先(1185 行の dirname)なので、TMPDIR がシンボリックリンクを通っても合うよう実体で書く。
+    dest = "'" + str(f.root.resolve()) + "/.diff-snapshot.X/out.tmp'"
     expected = (template.replace('{source}', source).replace('{dest}', dest).encode()
                 + 'ERROR [internal] 予期しない失敗(終了コード 1・行 1187)\n'.encode())
     if shown != expected:

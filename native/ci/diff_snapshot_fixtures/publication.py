@@ -88,10 +88,11 @@ def observe(case, fixture, legacy):
         path=bindir/command;path.write_text('#!'+sys.executable+'\n'+STUB);path.chmod(0o700)
     notice_read,notice_write=map(high_fd,os.pipe());release_read,release_write=map(high_fd,os.pipe())
     env=dict(fixture.env,PATH=str(bindir)+os.pathsep+fixture.env['PATH'],
-             S3D_PUBLICATION_ROOT=str(fixture.root),S3D_PUBLICATION_POINT=case.get('point',''),
+             S3D_PUBLICATION_ROOT=str(fixture.root.resolve()),S3D_PUBLICATION_POINT=case.get('point',''),
              S3D_PUBLICATION_ACTION=case.get('action',''),S3D_REAL_MV=shutil.which('mv'),S3D_REAL_RM=shutil.which('rm'),
              S3D_NOTICE_FD=str(notice_write),S3D_RELEASE_FD=str(release_read),
              S3D_INITIAL_IGNORE='1' if case.get('state')=='ignored' else '0')
+    # 旧版は realpath -m の実体のパスで mv を呼ぶ(abs_maybe)。TMPDIR がシンボリックリンクを通っても合うよう、置き場は実体で渡す。
     closed_env.guard(env, fixture.root)
     process=subprocess.Popen(['bash',str(legacy),*fixture.normal(),'--patch-out',str(fixture.patch)],cwd=fixture.root,env=env,
                              stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,

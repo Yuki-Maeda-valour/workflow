@@ -1263,7 +1263,9 @@ fn read_failures(passed: &mut Vec<String>) -> Vec<Value> {
             failure.code,
             &failure.stderr,
             20,
-            &sha_text(stage, raw(info.as_os_str()), 807),
+            // 実体のパス: 旧 801 行は `git rev-parse --path-format=absolute --git-path` の出力を使い、git が
+            // シンボリックリンクを実体へ解決する(0694 の一覧は渡したままのパスなので `raw(list)`)。
+            &sha_text(stage, raw(info.canonicalize().unwrap().as_os_str()), 807),
         );
         // 1418: sha="$(sha256_file "$f")" of a file present before (outside).
         let root = repository();
