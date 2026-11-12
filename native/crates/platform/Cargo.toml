@@ -7,3 +7,4 @@ publish.workspace = true
 
 [dependencies]
 rustix = { workspace = true, features = ["try_close"] }
+libc.workspace = true

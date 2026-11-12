@@ -200,6 +200,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - R4Sのloop-state用YAML・機密指定・globの純粋部品は#462で実装済み。調査元は#454。公開CLI・配布・呼出元は未変更。契約と唯一の承認済み差は [docs/design.md](docs/design.md#loop-state用の純粋部品r4s)、APIは [native/README.md](native/README.md#loop-state用の純粋部品r4s) にある。
 - R4Aの`task-digest`は#460で開発用ソースへ実装済み。未登録・未配布であり、契約と必須比較は [docs/design.md](docs/design.md#本文の正規化と確認用の値r4a-task-digest)・[docs/testing.md](docs/testing.md#task-digestの比較r4a)にある。
 - R4Bのorigin判定とGit設定の確認値は#461で開発用ソースへ実装済み。未登録・未配布。契約は [docs/design.md](docs/design.md#origin判定とgit設定の確認値r4b)、exampleの必須検査と約9分の比較手順は [docs/testing.md](docs/testing.md#r4bの比較)にある。
+- R4Rのタスク本文の復元の内部部品は#473で開発用ソースへ実装済み。未登録・未配布。認めた差は2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけ(Macの旧Pythonが子の環境に足す変数を比較から外す)。比べていない4件はS3I-A #474で決める。契約は [docs/design.md](docs/design.md#タスク本文の復元の内部部品r4r)、exampleの必須検査と比較の手順(`check_r4r.py --fixture <r4r_contractの絶対パス>`。Python3.10系・root以外の通常利用者と、Cコンパイラ `cc` が要る)は [docs/testing.md](docs/testing.md#r4rの比較)にある。
 - R4D-1の診断のreftable(Gitが参照を表の形のファイルに保存する形式)読み取りは#481で開発用ソースへ実装済み。未登録・未配布であり、契約は [docs/design.md](docs/design.md#診断の-reftable-の読み取りr4d-1)、比較は [docs/testing.md](docs/testing.md#r4d-1-の-reftable-の比較) にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
