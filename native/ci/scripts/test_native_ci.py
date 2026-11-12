@@ -1,18 +1,22 @@
 """CI の単体・結合テスト。配布物の検査と実行補助はリポジトリの実装を使う。"""
 
+import contextlib
 import copy
 import errno
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
+import signal
 import stat
 import struct
 import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -1482,6 +1486,291 @@ class R4UConnectionTests(TempCase):
                     self.assertEqual(changed, added.replace(entry, ""))
                     self.assertIn(extra, changed)
                     self.assertNotIn(entry, changed)
+
+
+class R4D1Tests(TempCase):
+    GOOD = (
+        "running 1 test\n"
+        "test rust_matches_the_legacy_reftable_reader_on_every_input ... ok\n\n"
+        "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 46.91s\n"
+    )
+    NAME = "rust_matches_the_legacy_reftable_reader_on_every_input"
+    SUMMARY = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 21 filtered out; finished in 46.91s"
+    COMMAND = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "diagnostic_reftable",
+               "--", "--ignored", "--exact", "rust_matches_the_legacy_reftable_reader_on_every_input"]
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def quiet(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+        return stack
+
+    def r4d1_step_index(self, document, job="r4d1"):
+        steps = document["jobs"][job]["steps"]
+        return next(index for index, step in enumerate(steps)
+                    if check_workflow.native_build_command(step.get("run")) == "r4d1")
+
+    # (a) 実際の native.yml の r4d1 のジョブ
+    def test_actual_r4d1_job_has_the_required_shape(self):
+        jobs = self.document["jobs"]
+        job = jobs["r4d1"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["strategy"]["matrix"], jobs["build"]["strategy"]["matrix"])
+        self.assertEqual(len(job["strategy"]["matrix"]["include"]), 4)
+        self.assertIs(job["strategy"]["fail-fast"], False)
+        self.assertEqual(job["runs-on"], "${{ matrix.runner }}")
+        self.assertEqual(job["timeout-minutes"], 30)
+        steps = job["steps"]
+        self.assertEqual(len(steps), 5)
+        self.assertTrue(steps[0]["uses"].startswith("actions/checkout@"))
+        self.assertEqual(steps[1]["run"], "python3 -B native/ci/check_workflow.py")
+        self.assertTrue(steps[2]["uses"].startswith("actions/setup-python@"))
+        self.assertEqual(steps[2]["with"], {"python-version": "3.10.11"})
+        self.assertEqual(steps[3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+        self.assertEqual(steps[4]["run"], "python3 -B native/ci/build.py r4d1 --platform '${{ matrix.platform }}'")
+        callers = [name for name, value in jobs.items()
+                   if any(check_workflow.native_build_command(step.get("run")) == "r4d1" for step in value["steps"])]
+        self.assertEqual(callers, ["r4d1"])
+
+    def test_distribution_needs_do_not_include_r4d1(self):
+        self.assertEqual(self.document["jobs"]["distribution"]["needs"], ["build", "combine", "verify-universal"])
+
+    # (b) 上限
+    def test_r4d1_timeout_is_fixed_at_30(self):
+        for renamed in (False, True):
+            base = copy.deepcopy(self.document)
+            key = "r4d1"
+            if renamed:
+                key = "comparison"
+                base["jobs"][key] = base["jobs"].pop("r4d1")
+            self.assertEqual(check_workflow.check_document(base), [])
+            for value in (None, 0, 29, 31, "30", True):
+                changed = copy.deepcopy(base)
+                if value is None:
+                    changed["jobs"][key].pop("timeout-minutes")
+                else:
+                    changed["jobs"][key]["timeout-minutes"] = value
+                with self.subTest(renamed=renamed, value=value):
+                    self.assertTrue(check_workflow.check_document(changed))
+
+    def test_r4d1_step_in_the_build_job_is_rejected_by_timeout(self):
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["build"]["steps"].append(
+            {"name": "x", "run": "python3 -B native/ci/build.py r4d1 --platform '${{ matrix.platform }}'"})
+        errors = check_workflow.check_document(changed)
+        self.assertTrue(any("timeout-minutes は 30 が必要です" in error for error in errors))
+
+    # (c) 工程の並びとオプション先行形
+    def test_r4d1_requires_python_before_the_comparison(self):
+        changed = copy.deepcopy(self.document)
+        steps = changed["jobs"]["r4d1"]["steps"]
+        del steps[2]
+        self.assertTrue(check_workflow.check_document(changed))
+        changed = copy.deepcopy(self.document)
+        steps = changed["jobs"]["r4d1"]["steps"]
+        steps.append(steps.pop(2))
+        self.assertTrue(check_workflow.check_document(changed))
+
+    def test_r4d1_option_first_forms_are_rejected(self):
+        for arguments in ("--platform linux-x86_64 r4d1", "--downloads downloads r4d1", "-- r4d1"):
+            changed = copy.deepcopy(self.document)
+            changed["jobs"]["r4d1"]["steps"][4]["run"] = "python3 -B native/ci/build.py " + arguments
+            with self.subTest(arguments=arguments):
+                errors = check_workflow.check_document(changed)
+                self.assertTrue(any("コマンド名をオプションより先" in error for error in errors))
+
+    # (d) r4d1() が比較のコマンドを流す所と、要約の行の確かめ
+    def run_r4d1(self, output):
+        with mock.patch.object(build, "target_config", return_value=("t", None)) as target, \
+                mock.patch.object(build, "build_environment", return_value={"MARK": "1"}) as environment, \
+                mock.patch.object(build, "stream_command", return_value=output) as stream:
+            build.r4d1("linux-x86_64", self.root)
+        self.target = target
+        return environment, stream
+
+    def test_r4d1_runs_the_comparison_once_with_the_quality_environment(self):
+        environment, stream = self.run_r4d1(self.GOOD)
+        self.target.assert_called_once_with("linux-x86_64")
+        self.assertEqual(build.R4D1_TIMEOUT, 1800)
+        self.assertEqual(build.R4D1_JOIN_TIMEOUT, 10)
+        stream.assert_called_once()
+        self.assertEqual(stream.call_args.args[0], self.COMMAND)
+        self.assertEqual(stream.call_args.kwargs["env"], {"MARK": "1"})
+        self.assertEqual(stream.call_args.kwargs["cwd"], source_hash.ROOT / "native")
+        self.assertEqual(stream.call_args.kwargs["timeout"], build.R4D1_TIMEOUT)
+        self.assertEqual(stream.call_args.kwargs["join_timeout"], build.R4D1_JOIN_TIMEOUT)
+        self.assertEqual(environment.call_args.args[1], "linux-x86_64")
+        self.assertEqual(environment.call_args.args[0].parent, self.root)
+
+    def test_r4d1_rejects_outputs_that_are_not_exactly_one_passed_test(self):
+        ok = f"test {self.NAME} ... ok"
+        cases = {
+            "0 passed": f"{ok}\n" + self.SUMMARY.replace("1 passed", "0 passed") + "\n",
+            "1 ignored": f"{ok}\n" + self.SUMMARY.replace("0 ignored", "1 ignored") + "\n",
+            "1 failed": f"{ok}\n" + self.SUMMARY.replace("0 failed", "1 failed") + "\n",
+            "two summaries": f"{ok}\n{self.SUMMARY}\n{self.SUMMARY}\n",
+            "no summary": f"{ok}\n",
+            "no ok line": f"running 1 test\n{self.SUMMARY}\n",
+            "other name": f"test other_test ... ok\n{self.SUMMARY}\n",
+            "longer name": f"test {self.NAME}_2 ... ok\n{self.SUMMARY}\n",
+            "prefixed": f"test x::{self.NAME} ... ok\n{self.SUMMARY}\n",
+            "trailing text": f"{ok} extra\n{self.SUMMARY}\n",
+            "leading space": f" {ok}\n{self.SUMMARY}\n",
+            "carriage return": f"{ok}\r\n{self.SUMMARY}\n",
+            "ok twice": f"{ok}\n{ok}\n{self.SUMMARY}\n",
+            "ignored line": f"test {self.NAME} ... ignored\n{self.SUMMARY}\n",
+            "trailing summary text": f"{ok}\n{self.SUMMARY} extra\n",
+        }
+        for label, output in cases.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                self.run_r4d1(output)
+
+    # (d2) 本物の偽の子で、流して読む所を確かめる
+    def kill_later(self, pid_file):
+        def cleanup():
+            for _ in range(50):
+                try:
+                    text = pid_file.read_text()
+                except OSError:
+                    text = ""
+                if text:
+                    break
+                time.sleep(0.1)
+            if text:
+                try:
+                    os.kill(int(text), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+        self.addCleanup(cleanup)
+
+    GRANDCHILD = (
+        "import subprocess,sys,time\n"
+        "g=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])\n"
+        "open(sys.argv[1],'w').write(str(g.pid))\n"
+    )
+
+    def stream(self, code, *, timeout, join_timeout, extra=()):
+        with self.quiet() as _:
+            return build.stream_command([sys.executable, "-c", code, *extra], env=os.environ.copy(),
+                                        timeout=timeout, join_timeout=join_timeout)
+
+    def test_stream_command_returns_the_output_and_writes_it_through(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            text = build.stream_command(
+                [sys.executable, "-c", "import sys;sys.stdout.buffer.write(b'a\\xff\\nb\\r\\n')"],
+                env=os.environ.copy(), timeout=20, join_timeout=5)
+        self.assertEqual(text, "a\ufffd\nb\r\n")
+        self.assertEqual(out.getvalue(), text)
+
+    def test_stream_command_passes_env_and_cwd_to_the_child(self):
+        work = self.root / "work"
+        work.mkdir()
+        env = {**os.environ, "R4D1_MARK": "marked-value"}
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            text = build.stream_command(
+                [sys.executable, "-c", "import os;print(os.environ.get('R4D1_MARK'));print(os.getcwd())"],
+                env=env, cwd=work, timeout=20, join_timeout=5)
+        self.assertEqual(text.split("\n")[:2], ["marked-value", os.path.realpath(work)])
+        default = io.StringIO()
+        with contextlib.redirect_stdout(default), contextlib.redirect_stderr(io.StringIO()):
+            text = build.stream_command([sys.executable, "-c", "import os;print(os.getcwd())"],
+                                        env=os.environ.copy(), timeout=20, join_timeout=5)
+        self.assertEqual(text.strip(), os.path.realpath(source_hash.ROOT / "native"))
+
+    def test_stream_command_keeps_reading_when_stdout_cannot_be_written(self):
+        class Broken:
+            def write(self, _):
+                raise BrokenPipeError("closed")
+
+            def flush(self):
+                raise BrokenPipeError("closed")
+
+        with mock.patch.object(sys, "stdout", Broken()), contextlib.redirect_stderr(io.StringIO()):
+            text = build.stream_command(
+                [sys.executable, "-c", "print('first');print('second')"],
+                env=os.environ.copy(), timeout=20, join_timeout=5)
+        self.assertEqual(text, "first\nsecond\n")
+
+    def test_stream_command_writes_the_output_before_failing(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            with self.assertRaises(subprocess.CalledProcessError) as caught:
+                build.stream_command([sys.executable, "-c", "print('reason');raise SystemExit(3)"],
+                                     env=os.environ.copy(), timeout=20, join_timeout=5)
+        self.assertEqual(caught.exception.returncode, 3)
+        self.assertEqual(out.getvalue(), "reason\n")
+        self.assertEqual(caught.exception.output, "reason\n")
+
+    def test_stream_command_times_out_on_a_child_that_does_not_stop(self):
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.stream("import time;time.sleep(60)", timeout=1, join_timeout=1)
+        self.assertLess(time.monotonic() - started, 20)
+
+    def test_stream_command_times_out_when_a_grandchild_holds_the_pipe(self):
+        pid_file = self.root / "pid-timeout"
+        self.kill_later(pid_file)
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.stream(self.GRANDCHILD + "time.sleep(60)", timeout=1, join_timeout=1, extra=[str(pid_file)])
+        self.assertLess(time.monotonic() - started, 20)
+        # 孫の経路を通ったことの確かめ(孫の pid が記録されている)。
+        self.assertTrue(pid_file.read_text().strip().isdigit())
+
+    def test_stream_command_fails_when_a_grandchild_outlives_a_normal_exit(self):
+        pid_file = self.root / "pid-exit"
+        self.kill_later(pid_file)
+        started = time.monotonic()
+        with self.assertRaises(ValueError):
+            self.stream(self.GRANDCHILD, timeout=20, join_timeout=1, extra=[str(pid_file)])
+        self.assertLess(time.monotonic() - started, 20)
+
+    # (e) main() の呼び分け
+    def test_main_dispatches_r4d1_for_each_platform(self):
+        for platform_name in build.TARGETS:
+            argv = ["build.py", "r4d1", "--platform", platform_name]
+            with self.subTest(platform=platform_name):
+                with mock.patch.object(sys, "argv", argv), mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "r4d1") as called:
+                    self.assertEqual(build.main(), 0)
+                    called.assert_called_once_with(platform_name, self.root)
+                for error in (ValueError("x"), subprocess.CalledProcessError(1, "x")):
+                    with mock.patch.object(sys, "argv", argv), mock.patch.object(build, "workspace", return_value=self.root), \
+                            mock.patch.object(build, "r4d1", side_effect=error), self.quiet():
+                        self.assertEqual(build.main(), 1)
+
+    def test_main_requires_platform_for_r4d1(self):
+        errors = io.StringIO()
+        with mock.patch.object(sys, "argv", ["build.py", "r4d1"]), mock.patch.object(build, "r4d1") as called, \
+                contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+            build.main()
+        called.assert_not_called()
+        self.assertIn("--platform が必要です", errors.getvalue())
+
+    # (f) quality() は比較を流さない
+    def test_quality_does_not_run_the_comparison(self):
+        def run(args, *, env=None, capture=False):
+            return "" if capture else None
+        with mock.patch.object(build, "build_environment", return_value={}), mock.patch.object(build, "run", side_effect=run) as called, \
+                mock.patch.object(build, "r4d1", create=True) as comparison, \
+                mock.patch.object(build, "stream_command", create=True) as stream:
+            build.quality("linux-x86_64", self.root)
+        comparison.assert_not_called()
+        stream.assert_not_called()
+        commands = [call.args[0] for call in called.call_args_list]
+        self.assertFalse(any("diagnostic_reftable" in " ".join(map(str, command)) for command in commands))
+        self.assertFalse(any("--include-ignored" in command for command in commands))
+        self.assertEqual([command for command in commands if "--ignored" in command],
+                         [["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract",
+                           "--", "--list", "--ignored"]])
+        self.assertIn(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract",
+                       "--", "--list", "--ignored"], commands)
 
 
 if __name__ == "__main__":

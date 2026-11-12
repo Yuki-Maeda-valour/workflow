@@ -290,6 +290,100 @@ impl ReadSession<'_> {
     }
 }
 
+// ---- R4D-1: 旧版 diagnostic-reftable.py と同じ開き方と閉じ方に要る部品 ----
+// 既存の open_absolute(全段でリンクを辿らない)・HeldFile・ReadSession は変えず、混ぜて使わない。
+// 旧版の Python 3.10.11 は os.open・os.fstat・os.read を EINTR で呼び直し、os.stat・os.lseek・os.close は
+// 呼び直さない。足す部品も、開く・fstat・読むだけを呼び直す。
+
+fn retry_eintr<T>(mut operation: impl FnMut() -> rustix::io::Result<T>) -> rustix::io::Result<T> {
+    loop {
+        match operation() {
+            Err(rustix::io::Errno::INTR) => continue,
+            other => return other,
+        }
+    }
+}
+
+fn reject_nul(path: &Path) -> Result<(), FsError> {
+    if path.as_os_str().as_bytes().contains(&0) {
+        Err(FsError::InvalidInput)
+    } else {
+        Ok(())
+    }
+}
+
+/// 閉じる失敗を返す。所有する fd を取り出して 1 回だけ閉じ、失敗しても再び使わない。
+fn close_owned(fd: OwnedFd) -> Result<(), FsError> {
+    let raw = std::os::fd::IntoRawFd::into_raw_fd(fd);
+    // SAFETY: raw は直前に OwnedFd から取り出した、自分だけが持つ有効な fd である。
+    // 取り出した後に OwnedFd の Drop で閉じる経路は無く、ここで 1 回だけ閉じる。
+    // close は失敗しても fd を無効にするので、失敗した後も再び使わない。
+    unsafe { rustix::io::try_close(raw) }.map_err(FsError::from)
+}
+
+/// 作業場所から見たパスを、最後の段だけリンクを辿らずに調べる(途中の段は OS が辿る)。
+/// 相対パスも受ける。空のパスは検査せずに OS へ渡す(OS の ENOENT を返す)。呼び直さない。
+pub fn lstat_path(path: &Path) -> Result<FileSnapshot, FsError> {
+    reject_nul(path)?;
+    Ok(FileSnapshot::from_stat(fs::lstat(path)?))
+}
+
+/// `HeldDir::open_path` や `HeldDir::open_plain` で開いた通常ファイルの fd。種類や状態は比べない。
+#[derive(Debug)]
+pub struct PlainFile {
+    fd: OwnedFd,
+}
+
+impl PlainFile {
+    pub fn snapshot(&self) -> Result<FileSnapshot, FsError> {
+        Ok(FileSnapshot::from_stat(retry_eintr(|| {
+            fs::fstat(&self.fd)
+        })?))
+    }
+
+    /// 位置を指定して読む(ファイルの位置は変えない)。
+    pub fn read_at(&self, offset: u64, buffer: &mut [u8]) -> Result<usize, FsError> {
+        Ok(retry_eintr(|| {
+            rustix::io::pread(&self.fd, &mut *buffer, offset)
+        })?)
+    }
+
+    /// 閉じて、閉じる失敗を返す。
+    pub fn close(self) -> Result<(), FsError> {
+        close_owned(self.fd)
+    }
+}
+
+impl HeldDir {
+    /// パスを `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` で開く。比べる処理は呼出側が行う。
+    /// 空のパスも検査せずに OS へ渡す。
+    pub fn open_path(path: &Path) -> Result<Self, FsError> {
+        reject_nul(path)?;
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let fd = retry_eintr(|| fs::open(path, flags, Mode::empty()))?;
+        Ok(Self { fd })
+    }
+
+    /// 保持したフォルダの fd の状態。
+    pub fn snapshot(&self) -> Result<FileSnapshot, FsError> {
+        Ok(FileSnapshot::from_stat(retry_eintr(|| {
+            fs::fstat(&self.fd)
+        })?))
+    }
+
+    /// 保持したフォルダから `O_RDONLY|O_NOFOLLOW|O_NONBLOCK|O_CLOEXEC` で開く。種類や状態は比べない。
+    pub fn open_plain(&self, name: &OsStr) -> Result<PlainFile, FsError> {
+        component(name)?;
+        let fd = retry_eintr(|| fs::openat(&self.fd, name, flags(), Mode::empty()))?;
+        Ok(PlainFile { fd })
+    }
+
+    /// 閉じて、閉じる失敗を返す。
+    pub fn close(self) -> Result<(), FsError> {
+        close_owned(self.fd)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,5 +585,139 @@ mod tests {
             parent.open_dir(OsStr::new("child"), &before, SnapshotMatch::Full),
             Err(FsError::Changed)
         ));
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_part_tests {
+    use super::*;
+    use std::fs as stdfs;
+    use std::os::unix::fs::symlink;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    struct Tree(PathBuf);
+    impl Tree {
+        fn new() -> Self {
+            let path = std::env::temp_dir().join(format!(
+                "r4d-platform-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, Ordering::Relaxed)
+            ));
+            stdfs::create_dir(&path).unwrap();
+            Self(path.canonicalize().unwrap())
+        }
+    }
+    impl Drop for Tree {
+        fn drop(&mut self) {
+            stdfs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+
+    #[test]
+    fn lstat_path_does_not_follow_only_the_last_component() {
+        let tree = Tree::new();
+        stdfs::create_dir(tree.0.join("real")).unwrap();
+        stdfs::write(tree.0.join("real/file"), b"x").unwrap();
+        symlink("real", tree.0.join("link")).unwrap();
+        // 途中の段のリンクは辿る。
+        assert!(lstat_path(&tree.0.join("link/file")).unwrap().is_regular());
+        // 最後の段のリンクは辿らない。
+        let link = lstat_path(&tree.0.join("link")).unwrap();
+        assert!(!link.is_directory() && !link.is_regular());
+        assert!(lstat_path(&tree.0.join("real")).unwrap().is_directory());
+        // 末尾のスラッシュは OS が辿る。
+        assert!(lstat_path(&tree.0.join("link/")).unwrap().is_directory());
+    }
+
+    #[test]
+    fn relative_paths_and_empty_paths_go_to_the_os() {
+        // 作業場所は変えない。相対パスは現在の作業場所から見る(Cargo は manifest のフォルダ)。
+        assert!(lstat_path(Path::new(".")).unwrap().is_directory());
+        let error = lstat_path(Path::new("")).unwrap_err();
+        assert!(error.is_not_found());
+        let error = HeldDir::open_path(Path::new("")).unwrap_err();
+        assert!(error.is_not_found());
+        assert!(matches!(
+            lstat_path(Path::new("a\0b")),
+            Err(FsError::InvalidInput)
+        ));
+        assert!(matches!(
+            HeldDir::open_path(Path::new("a\0b")),
+            Err(FsError::InvalidInput)
+        ));
+        let dir = HeldDir::open_path(Path::new(".")).unwrap();
+        assert!(dir.snapshot().unwrap().is_directory());
+        dir.close().unwrap();
+    }
+
+    #[test]
+    fn open_path_refuses_a_final_symlink_and_non_directories() {
+        let tree = Tree::new();
+        stdfs::create_dir(tree.0.join("real")).unwrap();
+        stdfs::write(tree.0.join("file"), b"x").unwrap();
+        symlink("real", tree.0.join("link")).unwrap();
+        assert!(matches!(
+            HeldDir::open_path(&tree.0.join("link")),
+            Err(FsError::Io(_))
+        ));
+        assert!(matches!(
+            HeldDir::open_path(&tree.0.join("file")),
+            Err(FsError::Io(_))
+        ));
+        // 途中の段のリンクは辿る。
+        symlink(&tree.0, tree.0.join("up")).unwrap();
+        let dir = HeldDir::open_path(&tree.0.join("up/real")).unwrap();
+        assert!(dir.snapshot().unwrap().is_directory());
+        dir.close().unwrap();
+    }
+
+    #[test]
+    fn open_plain_reads_at_positions_without_moving_the_file_position() {
+        let tree = Tree::new();
+        stdfs::write(tree.0.join("file"), b"abcdef").unwrap();
+        symlink("file", tree.0.join("link")).unwrap();
+        let dir = HeldDir::open_path(&tree.0).unwrap();
+        let before = dir.metadata(OsStr::new("file")).unwrap();
+        let file = dir.open_plain(OsStr::new("file")).unwrap();
+        assert_eq!(file.snapshot().unwrap(), before);
+        let mut buffer = [0; 3];
+        assert_eq!(file.read_at(2, &mut buffer).unwrap(), 3);
+        assert_eq!(&buffer, b"cde");
+        assert_eq!(file.read_at(0, &mut buffer).unwrap(), 3);
+        assert_eq!(&buffer, b"abc");
+        assert_eq!(file.read_at(6, &mut buffer).unwrap(), 0);
+        assert_eq!(file.read_at(4, &mut buffer).unwrap(), 2);
+        assert_eq!(&buffer[..2], b"ef");
+        file.close().unwrap();
+        // 名前が最後の段のリンクなら開かない。
+        assert!(matches!(
+            dir.open_plain(OsStr::new("link")),
+            Err(FsError::Io(_))
+        ));
+        assert!(matches!(
+            dir.open_plain(OsStr::new("a/b")),
+            Err(FsError::InvalidInput)
+        ));
+        assert!(
+            dir.open_plain(OsStr::new("missing"))
+                .unwrap_err()
+                .is_not_found()
+        );
+        dir.close().unwrap();
+    }
+
+    #[test]
+    fn close_consumes_the_descriptor_and_reports_success() {
+        // close(self) は所有する fd を取り出して 1 回だけ閉じる。self を消費するので、閉じた後に file や dir を
+        // 使う式や、Drop でもう一度閉じる道は、型の上で書けない。
+        // 閉じる失敗の割り当てと優先は、reftable.rs の差し込み口(Hooks)の検査で確かめる。
+        let tree = Tree::new();
+        stdfs::write(tree.0.join("file"), b"x").unwrap();
+        let dir = HeldDir::open_path(&tree.0).unwrap();
+        let file = dir.open_plain(OsStr::new("file")).unwrap();
+        assert!(file.close().is_ok());
+        assert!(dir.close().is_ok());
     }
 }
