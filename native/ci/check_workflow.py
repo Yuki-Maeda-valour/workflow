@@ -45,8 +45,53 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test)(?: |$)", command)
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4e|r4e-universal)(?: |$)", command)
     return match[1] if match else None
+
+
+# native.yml に必須のジョブ。ジョブを足すときは、この一覧の末尾へ足す(足し忘れで検査が通らなくなる)。
+REQUIRED_NATIVE_JOBS = (
+    "policy",
+    "build",
+    "combine",
+    "verify-universal",
+    "distribution",
+    "r4e",
+    "r4e-universal",
+)
+# R4E(#482)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合)。
+R4E_JOBS = (
+    ("r4e", "r4e", set(RUNNERS)),
+    ("r4e-universal", "r4e-universal", {"macos-x86_64", "macos-arm64"}),
+)
+
+
+def check_native_required(document):
+    """native.yml だけに当てる追加の判定(必須のジョブと R4E の比較の工程・機種)。"""
+    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+        return []
+    jobs = document["jobs"]
+    problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
+    for name, subcommand, platforms in R4E_JOBS:
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        steps = steps if isinstance(steps, list) else []
+        expected = f"python3 -B native/ci/build.py {subcommand} --platform '${{{{ matrix.platform }}}}'"
+        found = any(
+            isinstance(step, dict) and native_build_command(step.get("run")) == subcommand and step.get("run") == expected
+            for step in steps
+        )
+        if not found:
+            problems.append(f"{name}: build.py {subcommand} の工程が必要です")
+        strategy = job.get("strategy")
+        include = strategy.get("matrix", {}).get("include") if isinstance(strategy, dict) and isinstance(strategy.get("matrix"), dict) else None
+        rows = include if isinstance(include, list) else []
+        got = [row.get("platform") for row in rows if isinstance(row, dict)]
+        if len(got) != len(platforms) or set(got) != platforms:
+            problems.append(f"{name}: matrix の機種は {sorted(platforms)} の {len(platforms)} 機種が必要です")
+    return problems
 
 
 def check_document(document):
@@ -95,7 +140,8 @@ def check_document(document):
         if set(job) - JOB_KEYS:
             problems.append(f"{name}: job の設定は needs・strategy・runs-on・timeout-minutes・steps に限ります")
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
-        native_timeouts = {"build": 60, "verify-universal": 30}
+        # R4Eは時間の枠に入らないので、別のジョブ(r4e・r4e-universal)で比較する。
+        native_timeouts = {"build": 60, "verify-universal": 30, "r4e": 30, "r4e-universal": 30}
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -136,7 +182,7 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal"}]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4e", "r4e-universal"}]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -206,6 +252,11 @@ def check_workflows(root=ROOT):
             errors = check_document(read_json(path))
         except (OSError, ValueError) as error:
             errors = [f"JSON 形式の YAML が必要です(重複キーも拒否します): {error}"]
+        if path.name == "native.yml":
+            try:
+                errors = [*errors, *check_native_required(read_json(path))]
+            except (OSError, ValueError):
+                pass
         problems.extend(f"{path.name}: {error}" for error in errors)
     return problems
 

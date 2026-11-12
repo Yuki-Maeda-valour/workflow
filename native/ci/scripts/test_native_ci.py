@@ -436,6 +436,27 @@ class WorkflowTests(TempCase):
         rows = jobs["verify-universal"]["strategy"]["matrix"]["include"]
         self.assertEqual({row["runner"] for row in rows}, {"macos-15-intel", "macos-15"})
         self.assertEqual(jobs["verify-universal"]["needs"], "combine")
+        self.assertIn("r4e", jobs["distribution"]["needs"])
+        self.assertIn("r4e-universal", jobs["distribution"]["needs"])
+
+    def test_native_required_jobs_and_r4e_shape_are_checked(self):
+        self.assertEqual(check_workflow.check_native_required(self.document), [])
+        for name in check_workflow.REQUIRED_NATIVE_JOBS:
+            with self.subTest(removed=name):
+                changed = copy.deepcopy(self.document)
+                del changed["jobs"][name]
+                self.assertTrue(check_workflow.check_native_required(changed))
+        for name in ("r4e", "r4e-universal"):
+            with self.subTest(step=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["steps"] = [s for s in changed["jobs"][name]["steps"] if "build.py r4e" not in s.get("run", "")]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(platform=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["strategy"]["matrix"]["include"].pop()
+                self.assertTrue(check_workflow.check_native_required(changed))
+        self.write(".github/workflows/native.yml", json.dumps({**self.document, "jobs": {k: v for k, v in self.document["jobs"].items() if k != "r4e"}}).encode())
+        self.assertTrue(any("r4e" in p for p in check_workflow.check_workflows(self.root)))
 
 
 class BinaryTests(TempCase):
@@ -647,12 +668,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "r4e_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract"):
+                for example in ("r4b_contract", "r4r_contract", "r4e_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -688,6 +709,7 @@ class BuildTests(TempCase):
             for number in (1,2):
                 self.write(f"{name}/{number}/r4b_contract", b"fixture")
                 self.write(f"{name}/{number}/r4r_contract", b"fixture")
+                self.write(f"{name}/{number}/r4e_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -709,8 +731,8 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 6)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "record.json"])
+        self.assertEqual(len(signed), 8)
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "r4e_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1163,9 +1185,9 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract"))
-        self.assertFalse(any("r4b" in path or "r4r" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract")})
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","r4e_contract"))
+        self.assertFalse(any("r4b" in path or "r4r" in path or "r4e" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","r4e_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1220,8 +1242,453 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_both_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","r4e_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
+
+
+
+class R4EConnectionTests(TempCase):
+    """R4E(#482)の検査入口 r4e_contract の CI への接続。比較は別のジョブ r4e・r4e-universal で流す。"""
+
+    STRACE_LOG = b'1 execve("/bin/true", ["/bin/true"], 0x7ffd /* 1 var */) = 0\n1 +++ exited with 0 +++\n'
+
+    def fake_run(self, calls, *, fail=None, archs="arm64 x86_64", strace_log=None):
+        log = self.STRACE_LOG if strace_log is None else strace_log
+
+        def run(args, *, env=None, capture=False):
+            args = list(args)
+            calls.append(args)
+            if fail is not None and fail(args):
+                raise subprocess.CalledProcessError(1, args)
+            if args[0] == "strace":
+                Path(args[args.index("-o") + 1]).write_bytes(log)
+            if args[0] == "lipo":
+                return archs
+            return "" if capture else None
+        return run
+
+    def call_r4e(self, function, name, calls, **kwargs):
+        received = self.root / "received"
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)) as config, \
+                mock.patch.object(build, "extract_build", return_value=(received, {})) as extract, \
+                mock.patch.object(build, "extract_universal", return_value=(received, {})) as universal, \
+                mock.patch.object(build, "run", side_effect=self.fake_run(calls, **kwargs)), \
+                mock.patch.object(build.platform, "python_version", return_value="3.10.11"), \
+                mock.patch.object(build.platform, "python_implementation", return_value="CPython"):
+            self.target_config, self.extract_build, self.extract_universal = config, extract, universal
+            function(name, self.root / "downloads", self.root)
+        return received
+
+    @staticmethod
+    def comparisons(calls):
+        return [call for call in calls if call[:3] == [sys.executable, "-B", source_hash.ROOT / "native/ci/check_r4e.py"]]
+
+    def assert_comparison(self, call, fixture, python):
+        self.assertEqual(call[3:7], ["--fixture", fixture, "--legacy-python", python])
+        self.assertEqual(call[7], "--temp-parent")
+        self.assertEqual(Path(call[8]).parent, self.root)
+        self.assertTrue(Path(call[8]).is_dir())
+        self.assertEqual(len(call), 9)
+
+    def venv_python(self, calls):
+        venvs = [call for call in calls if call[:3] == [sys.executable, "-m", "venv"]]
+        self.assertEqual(len(venvs), 1)
+        folder = Path(venvs[0][3])
+        self.assertEqual(folder.parent, self.root)
+        python = folder / "bin/python"
+        self.assertIn([python, "-m", "pip", "install", "--no-deps", "--require-hashes",
+                       "-r", source_hash.ROOT / "native/ci/r4e-requirements.txt"], calls)
+        self.assertLess(calls.index(venvs[0]), calls.index([python, "-m", "pip", "install", "--no-deps", "--require-hashes",
+                                                            "-r", source_hash.ROOT / "native/ci/r4e-requirements.txt"]))
+        return python
+
+    def strace_calls(self, calls):
+        return [call for call in calls if call[:2] == ["sudo", "apt-get"] or call[:1] == ["strace"]]
+
+    def test_r4e_compares_each_of_the_two_built_binaries_on_all_four_platforms(self):
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call_r4e(build.r4e, name, calls)
+                self.target_config.assert_called_once_with(name)
+                self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
+                python = self.venv_python(calls)
+                checks = self.comparisons(calls)
+                self.assertEqual(len(checks), 2)
+                for number, check in zip((1, 2), checks):
+                    self.assert_comparison(check, received / str(number) / "r4e_contract", python)
+                # 比較の前に、venv(と Linux では strace)を用意する。
+                self.assertTrue(all(calls.index(check) == len(calls) - 2 + index for index, check in enumerate(checks)))
+                traced = self.strace_calls(calls)
+                if name.startswith("linux-"):
+                    self.assertEqual(traced[:2], [["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "-y", "strace"]])
+                    self.assertEqual(traced[2][:5], ["strace", "-f", "-e", "trace=execve", "-o"])
+                    self.assertEqual(traced[2][6:], ["/bin/true"])
+                    self.assertEqual(Path(traced[2][5]).parent.parent, self.root)
+                    self.assertEqual(calls[:3], traced)
+                else:
+                    self.assertEqual(traced, [])
+
+    def test_r4e_stops_at_the_first_failed_comparison(self):
+        for name in ("linux-x86_64", "macos-x86_64"):
+            calls = []
+            with self.subTest(platform=name), self.assertRaises(subprocess.CalledProcessError):
+                self.call_r4e(build.r4e, name, calls, fail=lambda args: "check_r4e.py" in str(args))
+            self.assertEqual(len(self.comparisons(calls)), 1)
+
+    def test_r4e_strace_failures_stop_before_the_legacy_venv_and_comparison(self):
+        failures = (
+            ("apt", {"fail": lambda args: args[:2] == ["sudo", "apt-get"] and "install" in args}, subprocess.CalledProcessError),
+            ("update", {"fail": lambda args: args == ["sudo", "apt-get", "update"]}, subprocess.CalledProcessError),
+            ("ptrace", {"fail": lambda args: args[0] == "strace"}, subprocess.CalledProcessError),
+            ("empty-log", {"strace_log": b""}, ValueError),
+            ("two-execve", {"strace_log": self.STRACE_LOG + b'2 execve("/bin/sh", ["sh"], 0x0) = 0\n'}, ValueError),
+        )
+        for label, options, error in failures:
+            for function in (build.r4e, build.r4e_universal):
+                name = "linux-arm64" if function is build.r4e else "macos-arm64"
+                calls = []
+                if function is build.r4e_universal:
+                    # Mac では strace を使わないので、同じ失敗は起きない。
+                    self.call_r4e(function, name, calls, **options)
+                    self.assertEqual(self.strace_calls(calls), [])
+                    self.assertEqual(len(self.comparisons(calls)), 1)
+                    continue
+                with self.subTest(label=label), self.assertRaises(error):
+                    self.call_r4e(function, name, calls, **options)
+                self.assertFalse(any(call[1:3] == ["-m", "venv"] for call in calls))
+                self.assertEqual(self.comparisons(calls), [])
+                self.extract_build.assert_not_called()
+
+    def test_r4e_requires_cpython_3_10_11_for_the_legacy_venv(self):
+        for version, implementation in (("3.10.12", "CPython"), ("3.11.9", "CPython"), ("3.10.11", "PyPy")):
+            calls = []
+            with self.subTest(version=version, implementation=implementation), \
+                    mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+                    mock.patch.object(build, "extract_build", return_value=(self.root, {})) as extract, \
+                    mock.patch.object(build, "run", side_effect=self.fake_run(calls)), \
+                    mock.patch.object(build.platform, "python_version", return_value=version), \
+                    mock.patch.object(build.platform, "python_implementation", return_value=implementation):
+                with self.assertRaises(ValueError):
+                    build.r4e("macos-arm64", self.root, self.root)
+                self.assertEqual(calls, [])
+                extract.assert_not_called()
+
+    def test_r4e_dependency_install_failure_stops_before_comparison(self):
+        calls = []
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.call_r4e(build.r4e, "linux-x86_64", calls, fail=lambda args: "--require-hashes" in args)
+        self.assertEqual(self.comparisons(calls), [])
+
+    def test_r4e_universal_checks_signature_and_cpus_then_compares_on_both_macs(self):
+        for name in ("macos-x86_64", "macos-arm64"):
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call_r4e(build.r4e_universal, name, calls)
+                self.target_config.assert_called_once_with(name)
+                self.extract_universal.assert_called_once_with(self.root / "downloads", self.root)
+                self.extract_build.assert_not_called()
+                fixture = received / "r4e_contract"
+                python = self.venv_python(calls)
+                checks = self.comparisons(calls)
+                self.assertEqual(len(checks), 1)
+                self.assert_comparison(checks[0], fixture, python)
+                signature = ["codesign", "--verify", "--strict", "--verbose=2", fixture]
+                cpus = ["lipo", "-archs", fixture]
+                self.assertLess(calls.index(signature), calls.index(cpus))
+                self.assertLess(calls.index(cpus), calls.index(checks[0]))
+                self.assertEqual(self.strace_calls(calls), [])
+
+    def test_r4e_universal_rejects_linux_wrong_cpus_bad_signature_and_failed_comparison(self):
+        for name in ("linux-x86_64", "linux-arm64"):
+            calls = []
+            with self.subTest(platform=name), self.assertRaises(ValueError):
+                self.call_r4e(build.r4e_universal, name, calls)
+            self.assertEqual(calls, [])
+        cases = (
+            ("one-cpu", {"archs": "arm64"}, ValueError),
+            ("signature", {"fail": lambda args: args[0] == "codesign"}, subprocess.CalledProcessError),
+            ("comparison", {"fail": lambda args: "check_r4e.py" in str(args)}, subprocess.CalledProcessError),
+        )
+        for label, options, error in cases:
+            calls = []
+            with self.subTest(label=label), self.assertRaises(error):
+                self.call_r4e(build.r4e_universal, "macos-x86_64", calls, **options)
+            if label != "comparison":
+                self.assertEqual(self.comparisons(calls), [])
+
+    def test_main_requires_platform_and_dispatches_the_two_commands(self):
+        for command in ("r4e", "r4e-universal"):
+            with self.subTest(command=command):
+                with mock.patch.object(sys, "argv", ["build.py", command]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "r4e") as r4e, \
+                        mock.patch.object(build, "r4e_universal") as universal, \
+                        mock.patch("sys.stderr"), self.assertRaises(SystemExit) as stopped:
+                    build.main()
+                self.assertEqual(stopped.exception.code, 2)
+                r4e.assert_not_called()
+                universal.assert_not_called()
+                for platform_name in ("linux-x86_64", "macos-arm64"):
+                    called, other = ("r4e", "r4e_universal") if command == "r4e" else ("r4e_universal", "r4e")
+                    with mock.patch.object(sys, "argv", ["build.py", command, "--platform", platform_name]), \
+                            mock.patch.object(build, "workspace", return_value=self.root), \
+                            mock.patch.object(build, called) as target, \
+                            mock.patch.object(build, other) as unused, \
+                            mock.patch.object(build, "quality") as quality, \
+                            mock.patch.object(build, "reproduce") as reproduce:
+                        self.assertEqual(build.main(), 0)
+                        target.assert_called_once_with(platform_name, self.root / "downloads", self.root)
+                        unused.assert_not_called()
+                        quality.assert_not_called()
+                        reproduce.assert_not_called()
+                        target.side_effect = subprocess.CalledProcessError(1, "R4E")
+                        self.assertEqual(build.main(), 1)
+
+    def test_build_and_reproduce_do_not_run_the_r4e_comparison(self):
+        # build と verify-universal の時間の枠に入らないので、比較は別のジョブだけで流す。
+        for command in ("build", "reproduce"):
+            with mock.patch.object(sys, "argv", ["build.py", command, "--platform", "macos-x86_64"]), \
+                    mock.patch.object(build, "workspace", return_value=self.root), \
+                    mock.patch.object(build, "quality"), \
+                    mock.patch.object(build, "reproduce", return_value=self.root), \
+                    mock.patch.object(build, "pack_tar") as pack, \
+                    mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                    mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "r4e_probe") as check:
+                self.assertEqual(build.main(), 0)
+                check.assert_not_called()
+                self.assertIn("1/r4e_contract", pack.call_args.args[2])
+                self.assertIn("2/r4e_contract", pack.call_args.args[2])
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", return_value="arm64 x86_64") as run, \
+                mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "r4e_probe") as check:
+            build.verify_universal(self.root, self.root)
+            check.assert_not_called()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["codesign", "--verify", "--strict", "--verbose=2", self.root / "r4e_contract"], commands)
+        self.assertIn(["lipo", "-archs", self.root / "r4e_contract"], commands)
+
+    def test_quality_runs_the_example_tests_and_their_failure_is_fatal(self):
+        test = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4e_contract"]
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) as run:
+            build.quality("linux-x86_64", self.root)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(test, commands)
+        self.assertLess(commands.index(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"]), commands.index(test))
+
+        def failing(args, *, env=None, capture=False):
+            if list(args) == test:
+                raise subprocess.CalledProcessError(101, args)
+            return "" if capture else None
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=failing), \
+                self.assertRaises(subprocess.CalledProcessError):
+            build.quality("linux-x86_64", self.root)
+
+    def test_reproduce_builds_copies_and_compares_the_r4e_example(self):
+        def build_run(missing=False, second=None):
+            count = []
+
+            def run(args, *, env=None, capture=False):
+                if args[:2] == ["cargo", "build"]:
+                    self.assertEqual(args[args.index("--example", args.index("r4r_contract")) + 1], "r4e_contract")
+                    count.append(1)
+                    folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
+                    (folder / "examples").mkdir(parents=True)
+                    (folder / "dev-workflow").write_bytes(elf())
+                    for example in ("r4b_contract", "r4r_contract", "r4e_contract"):
+                        if missing and example == "r4e_contract":
+                            continue
+                        data = second if example == "r4e_contract" and len(count) == 2 and second is not None else elf()
+                        (folder / "examples" / example).write_bytes(data)
+                elif args[0] == "cmp":
+                    subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    self.fail(f"unexpected command: {args}")
+            return run
+
+        def reproduce(run, static=binary_tools.check_static_elf):
+            with mock.patch.object(build, "target_config", return_value=("test-target", 62)), \
+                    mock.patch.object(build, "tool_record", return_value={"linker": "test"}), \
+                    mock.patch.object(build, "identity", return_value={"rustc": "rustc 1.99.1 (test)"}), \
+                    mock.patch.object(build, "check_static_elf", side_effect=static) as checked, \
+                    mock.patch.object(build, "run", side_effect=run), \
+                    mock.patch.dict(os.environ, {}, clear=True):
+                return build.reproduce("linux-x86_64", self.root), checked
+
+        folder, checked = reproduce(build_run())
+        record = make_dist.read_json(folder / "record.json")
+        for number in (1, 2):
+            self.assertEqual((folder / str(number) / "r4e_contract").stat().st_mode & 0o777, 0o755)
+            self.assertIn(f"{number}/r4e_contract", record["files"])
+            self.assertIn(mock.call(folder / str(number) / "r4e_contract", 62), checked.call_args_list)
+        # 2 本の不一致・欠落・動的な ELF は止める。
+        with self.assertRaises(subprocess.CalledProcessError):
+            reproduce(build_run(second=elf() + b"changed"))
+        with self.assertRaises(OSError):
+            reproduce(build_run(missing=True))
+        with self.assertRaises(ValueError):
+            reproduce(build_run(second=elf(segment=2, needed=True)))
+
+    def test_transfer_allowlists_include_the_example_and_reject_changes(self):
+        self.assertIn("1/r4e_contract", build.BUILD_FILES)
+        self.assertIn("2/r4e_contract", build.BUILD_FILES)
+        self.assertIn("r4e_contract", build.UNIVERSAL_FILES)
+        for signed, names in ((False, build.BUILD_FILES), (True, build.UNIVERSAL_FILES)):
+            folder = self.root / ("universal" if signed else "build")
+            for name in names:
+                self.write(str(folder.relative_to(self.root) / name), b"fixture", 0o755)
+            record = {"files": {name: binary_tools.sha256(folder / name) for name in names}}
+            if signed:
+                record["signing"] = {"identifier": build.SIGN_ID}
+            make_dist.write_json(folder / "record.json", record)
+            fixture = folder / ("r4e_contract" if signed else "1/r4e_contract")
+            with mock.patch.object(build, "identity", return_value={}):
+                self.assertEqual(build.read_record(folder), record)
+                for mutation in ("missing", "hash", "mode", "record"):
+                    changed = copy.deepcopy(record)
+                    if mutation == "missing":
+                        fixture.rename(self.root / "saved")
+                    elif mutation == "hash":
+                        fixture.write_bytes(b"changed")
+                    elif mutation == "mode":
+                        fixture.chmod(0o644)
+                    else:
+                        changed["files"].pop(str(fixture.relative_to(folder)))
+                    make_dist.write_json(folder / "record.json", changed)
+                    with self.subTest(signed=signed, mutation=mutation), self.assertRaises(ValueError):
+                        build.read_record(folder)
+                    if mutation == "missing":
+                        (self.root / "saved").rename(fixture)
+                    elif mutation == "hash":
+                        fixture.write_bytes(b"fixture")
+                    elif mutation == "mode":
+                        fixture.chmod(0o755)
+                    make_dist.write_json(folder / "record.json", record)
+        # tar の受け取りも同じ一覧で行う(欠けた tar は拒む)。
+        partial = self.root / "partial"
+        names = [name for name in build.BUILD_FILES if name != "2/r4e_contract"]
+        for name in names:
+            self.write(str(Path("partial") / name), b"fixture", 0o755)
+        self.write("partial/record.json", b"{}")
+        downloads = self.root / "downloads"
+        downloads.mkdir()
+        binary_tools.pack_tar(partial, downloads / "linux-x86_64.tar", [*names, "record.json"])
+        with self.assertRaises(ValueError):
+            build.extract_build("linux-x86_64", downloads, self.root)
+
+    def test_package_checks_the_example_but_distributes_only_the_product(self):
+        folders = {}
+        for name in ("linux-x86_64", "linux-arm64"):
+            folder = self.root / name
+            for relative in build.BUILD_FILES:
+                self.write(f"{name}/{relative}", elf(build.TARGETS[name][3]), 0o755)
+            folders[name] = (folder, {"targets": {name: {}}})
+        universal = self.root / "universal"
+        for relative in build.UNIVERSAL_FILES:
+            self.write(f"universal/{relative}", macho(), 0o755)
+        bundle = self.root / "bundle"
+        with mock.patch.object(build, "extract_build", side_effect=lambda name, downloads, work: folders[name]), \
+                mock.patch.object(build, "extract_universal", return_value=(universal, {"targets": {}, "signing": {}})), \
+                mock.patch.object(build, "identity", return_value={}), \
+                mock.patch.object(build, "run") as run, \
+                mock.patch.object(build, "check_static_elf") as static, \
+                mock.patch.object(build, "make_dist", return_value=bundle) as dist, \
+                mock.patch.object(build, "pack_tar") as pack, \
+                mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "1", "GITHUB_SERVER_URL": "https://example.invalid", "GITHUB_REPOSITORY": "a/b"}):
+            build.package(self.root, self.root)
+        for name in ("linux-x86_64", "linux-arm64"):
+            folder = folders[name][0]
+            self.assertIn(mock.call(["cmp", folder / "1/r4e_contract", folder / "2/r4e_contract"]), run.call_args_list)
+            self.assertIn(mock.call(folder / "1/r4e_contract", build.TARGETS[name][3]), static.call_args_list)
+        binaries = dist.call_args.args[0]
+        self.assertEqual(binaries, [folders["linux-x86_64"][0] / "1/dev-workflow", folders["linux-arm64"][0] / "1/dev-workflow",
+                                    universal / "dev-workflow"])
+        self.assertEqual(pack.call_args.args[2], [*make_dist.BINARY_PATHS, "SHA256SUMS", "build-info.json"])
+        self.assertEqual([path.name for path in binaries], ["dev-workflow"] * 3)
+        self.assertFalse(any("r4e" in name for name in pack.call_args.args[2]))
+
+    def test_workflow_runs_r4e_in_two_separate_jobs(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        jobs = document["jobs"]
+        self.assertEqual(check_workflow.check_document(document), [])
+        self.assertEqual(jobs["distribution"]["needs"], ["build", "combine", "verify-universal", "r4e", "r4e-universal"])
+        expected = {
+            "r4e": ("build", jobs["build"]["strategy"], "native-build-${{ matrix.platform }}",
+                    "python3 -B native/ci/build.py r4e --platform '${{ matrix.platform }}'"),
+            "r4e-universal": ("combine", jobs["verify-universal"]["strategy"], "native-universal",
+                              "python3 -B native/ci/build.py r4e-universal --platform '${{ matrix.platform }}'"),
+        }
+        for job, (needs, strategy, artifact, command) in expected.items():
+            with self.subTest(job=job):
+                steps = jobs[job]["steps"]
+                self.assertEqual(jobs[job]["needs"], needs)
+                self.assertEqual(jobs[job]["strategy"], strategy)
+                self.assertEqual(jobs[job]["runs-on"], "${{ matrix.runner }}")
+                self.assertEqual(jobs[job]["timeout-minutes"], 30)
+                self.assertEqual(steps[:3], jobs["build"]["steps"][:3])
+                self.assertEqual(steps[3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+                self.assertEqual(steps[4]["uses"], "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093")
+                self.assertEqual(steps[4]["with"]["name"], artifact)
+                self.assertEqual(steps[4]["with"]["path"], "${{ runner.temp }}/native-ci/downloads")
+                self.assertEqual(steps[-1]["run"], command)
+                self.assertEqual(len(steps), 6)
+        self.assertEqual(len(jobs["r4e"]["strategy"]["matrix"]["include"]), 4)
+        self.assertEqual({row["platform"] for row in jobs["r4e-universal"]["strategy"]["matrix"]["include"]},
+                         set(build.R4E_UNIVERSAL_PLATFORMS))
+
+    def test_workflow_rejects_wrong_timeouts_missing_python_and_other_command_forms(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        for job, operation in (("r4e", "r4e"), ("r4e-universal", "r4e-universal")):
+            for renamed in (False, True):
+                base = copy.deepcopy(document)
+                key = job
+                if renamed:
+                    key = "compare"
+                    base["jobs"][key] = base["jobs"].pop(job)
+                self.assertEqual(check_workflow.check_document(base), [])
+                for value in (None, 0, 15, 29, 31, 60, "30", True):
+                    changed = copy.deepcopy(base)
+                    if value is None:
+                        changed["jobs"][key].pop("timeout-minutes")
+                    else:
+                        changed["jobs"][key]["timeout-minutes"] = value
+                    with self.subTest(job=job, renamed=renamed, value=value):
+                        self.assertTrue(any("timeout-minutes は 30" in error for error in check_workflow.check_document(changed)))
+            for mutation in ("remove", "late", "early", "version"):
+                changed = copy.deepcopy(document)
+                steps = changed["jobs"][job]["steps"]
+                if mutation == "remove":
+                    steps.pop(2)
+                elif mutation == "late":
+                    steps.append(steps.pop(2))
+                elif mutation == "early":
+                    steps.insert(1, steps.pop(2))
+                else:
+                    steps[2]["with"]["python-version"] = "3.10.12"
+                with self.subTest(job=job, mutation=mutation):
+                    self.assertTrue(check_workflow.check_document(changed))
+            for arguments in (f"--platform macos-arm64 {operation}", f"--downloads downloads {operation}", f"-- {operation}"):
+                changed = copy.deepcopy(document)
+                changed["jobs"][job]["steps"][-1]["run"] = "python3 -B native/ci/build.py " + arguments
+                with self.subTest(job=job, arguments=arguments):
+                    errors = check_workflow.check_document(changed)
+                    self.assertTrue(any("コマンド名をオプションより先" in error for error in errors))
+        # build の 60 分の枠の中で比較を流す形は、上限が合わないので拒む。
+        changed = copy.deepcopy(document)
+        changed["jobs"]["build"]["steps"].append({"run": "python3 -B native/ci/build.py r4e --platform '${{ matrix.platform }}'"})
+        self.assertTrue(any("timeout-minutes は 30" in error for error in check_workflow.check_document(changed)))
+
+    def test_command_names_do_not_match_by_prefix(self):
+        prefix = "python3 -B native/ci/build.py "
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4e --platform linux-x86_64"), "r4e")
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4e-universal --platform macos-arm64"), "r4e-universal")
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4e-universal"), "r4e-universal")
+        for command in ("r4ex", "r4e-", "r4e-universalx", "r4e_universal", "r4e-universal-"):
+            with self.subTest(command=command):
+                self.assertIsNone(check_workflow.native_build_command(prefix + command))
 
 
 if __name__ == "__main__":
