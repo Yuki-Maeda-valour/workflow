@@ -188,3 +188,41 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 確認に使う API は `repos/actions/<名前>/commits/<タグ>`、`repos/actions/<名前>/commits/<SHA>`、
 `repos/actions/<名前>/contents/action.yml?ref=<SHA>` です。
 更新するときは 3 つを確認してから `check_workflow.py` の記録とワークフローを同時に変えます。
+
+## R4Eの必須比較と検査用実行物
+
+#482の部品(Markdownの表をXLSXにする旧版のスクリプトの移植)は未登録・未配布です。検査用の入口は`r4e_contract`(cargoのexample)です。
+比較(`check_r4e.py`)は、`build`と`verify-universal`では流しません。別の2つのジョブ`r4e`・`r4e-universal`で流します。
+
+```sh
+python3 -B native/ci/build.py r4e --platform linux-x86_64
+python3 -B native/ci/build.py r4e-universal --platform macos-arm64
+```
+
+- `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4e_contract`を実行します。
+- Linux2種・Mac2種の`build`/`reproduce`は、`r4e_contract`を`CI_BINARIES`の1つとして各2回作ります。
+  - Linuxでは静的なELFかを検査し、2本のバイト列を比べます。
+  - Macでは`combine`が2回分を結合・署名し、署名後のバイト列を比べます。`verify-universal`は署名と2種類のCPUを確かめます。
+  - 転送の一覧(`BUILD_FILES`・`UNIVERSAL_FILES`)にも入ります。欠落・余分なファイル・ハッシュや権限の違いを拒否します。
+- `r4e`: `build`の後に4機種で流します。`build`のtarを受け取り、2回のビルドの`r4e_contract`のそれぞれで比較します。
+- `r4e-universal`: `combine`の後にMac2機種で流します。署名後のtarを受け取り、`r4e_contract`の署名と2種類のCPUを確かめてから比較します。Linuxの名前を渡すと失敗します。
+- 2つのジョブの工程全体の上限は、どちらも30分です。
+- 2つのジョブは、次の順に進めます。
+  1. `prepare`でRustと開発依存を用意します。受け取ったtarの記録を照らすときに、Rustの版を読むためです。
+  2. Linuxでは`sudo apt-get update`と`sudo apt-get install -y strace`の後、`strace -f -e trace=execve -o <一時のファイル> /bin/true`を流します。`execve`の行がちょうど1行でなければ止めます。比較器もLinuxでは`strace`を必須にしています。
+  3. 実行中のPythonがCPython 3.10.11かを確かめます。違えば止めます。
+  4. 作業用の一時フォルダに、旧版用のvenv(Pythonの部品を分ける環境)を作ります。部品は`pip install --no-deps --require-hashes -r native/ci/r4e-requirements.txt`で入れます(openpyxl 3.1.5・et_xmlfile 2.0.0。lxmlは入れません)。
+  5. `check_r4e.py --fixture <受け取ったr4e_contractの絶対パス> --legacy-python <venvのpython> --temp-parent <作業用の一時フォルダ>`を流します。最後の行(`合格: <件数> 件(未実施 <件数> 件)/ <秒> 秒`)がCIの記録に残ります。比較の失敗は工程全体の失敗です。
+- 比較はPython3.10系・非rootで行います。
+- `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4e_contract`は`native-dist.tar`の5ファイルへ入りません。
+- `distribution`の`needs`は変えていません。全ジョブの成功がマージの条件なので、2つのジョブも必須です。
+
+別のジョブにした理由は、時間の予算です(2026-11-12の管理担当の決定)。
+
+- main 942a4deのpushのCI(run 43114316373)で、Mac Intelの`build`は47分10秒(上限60分)でした。`verify-universal`は16分43秒(上限30分)でした。
+- `build`の内訳は、`check_r4b.py`が1回約13分50秒(2回で約27分40秒)、`check_r4r.py`が1回約54秒、品質の検査が約10分でした。
+- 上限の2割を残す予算では、`build`にR4Eの比較を足せる時間は約50秒しかありません。
+- R4Eの比較は、手元のLinux x86_64で1回約40〜70秒です。`build`で2回・`verify-universal`で1回流す形は収まりません。
+- `build`に残る分(`r4e_contract`のreleaseビルド2回とexampleの単体検査)は、手元のLinux x86_64で約25秒増えました(releaseビルド1回あたり約8秒、exampleの単体検査約9秒)。Mac Intelでの増え方は未確認です。
+
+4機種と署名後のMacのCIでの成功は未確認です。
