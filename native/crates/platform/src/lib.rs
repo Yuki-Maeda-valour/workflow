@@ -13,3 +13,6 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// R4G専用。起動前の状態・fd相対の読取り・旧subprocessと旧bashの子の実行。
+pub mod r4g;

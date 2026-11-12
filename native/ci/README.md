@@ -123,12 +123,12 @@ Python 3.11 以降の子プロセスでも、例外表示の位置の印を抑�
 #461の2コマンドは未登録・未配布です。[契約](../../docs/design.md#origin判定とgit設定の確認値r4b)と [実行手順・手元実測](../../docs/testing.md#r4bの比較)を参照してください。
 
 - `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4b_contract`を実行します。
-- Linux2種・Mac2種の`build`/`reproduce`は、別々の空の出力先から3本(製品用`dev-workflow`と、検査用の`r4b_contract`・`r4r_contract`)を各2回作ります。3本の一覧は`build.py`の`CI_BINARIES`で、R4Rも同じ一覧で作って転送します。
+- Linux2種・Mac2種の`build`/`reproduce`は、別々の空の出力先から4本(製品用`dev-workflow`と、検査用の`r4b_contract`・`r4r_contract`・`r4g_contract`)を各2回作ります。4本の一覧は`build.py`の`CI_BINARIES`で、R4R・R4Gも同じ一覧で作って転送します。
 - 各回に`check_r4b.py --fixture <今回作ったr4b_contractの絶対パス>`を必須実行します。通常の製品CLIへR4Bを登録して代用しません。
-- Linuxでは3本のELFを検査し、各2回のバイト列を比較します。Macは3本を各2回結合・署名し、署名後のバイト列を比較します。
-- `verify-universal`は同じ署名後の3本を受け取り、Intel/Apple Siliconの両CPUで`r4b_contract`の専用比較を実行します。専用比較の失敗は工程全体の失敗です。
-- 転送用の固定一覧(`BUILD_FILES`)は`1/dev-workflow`・`1/r4b_contract`・`1/r4r_contract`・`2/dev-workflow`・`2/r4b_contract`・`2/r4r_contract`と`record.json`です。
-- Mac結合後の転送一覧(`UNIVERSAL_FILES`)は`dev-workflow`・`r4b_contract`・`r4r_contract`と`record.json`です。欠落・余分なファイル・ハッシュや権限の違いを拒否します。
+- Linuxでは4本のELFを検査し、各2回のバイト列を比較します。Macは4本を各2回結合・署名し、署名後のバイト列を比較します。
+- `verify-universal`は同じ署名後の4本を受け取り、Intel/Apple Siliconの両CPUで`r4b_contract`の専用比較を実行します。専用比較の失敗は工程全体の失敗です。
+- 転送用の固定一覧(`BUILD_FILES`)は`1/dev-workflow`・`1/r4b_contract`・`1/r4r_contract`・`1/r4g_contract`・`2/dev-workflow`・`2/r4b_contract`・`2/r4r_contract`・`2/r4g_contract`と`record.json`です。
+- Mac結合後の転送一覧(`UNIVERSAL_FILES`)は`dev-workflow`・`r4b_contract`・`r4r_contract`・`r4g_contract`と`record.json`です。欠落・余分なファイル・ハッシュや権限の違いを拒否します。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4b_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
 - 比較はPython3.10系・非rootで行います。自己検査16件・既存46件・追加23件を必須実行し、追加比較だけで約9分かかります。短い自己検査だけで置き換えません。
 
@@ -140,7 +140,7 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 
 - `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4r_contract`を実行します。
 - 続けて `r4r_map()` が、同じexampleの `-- --list` と `-- --list --ignored` の出力を取り、`check_r4r.py --map-list <一覧> --map-ignored <一覧>` で対応表と照らします。46件の全件・その機械で流す対応先の存在・`#[ignore]` の不在を確かめます。
-- Linux2種・Mac2種の`build`/`reproduce`は、`r4r_contract`を3本の1つとして各2回作ります。ELFの検査・バイト列の比較・Macの結合と署名・転送の一覧は、[R4Bの節](#r4bの必須比較と検査用実行物)にまとめてあります。
+- Linux2種・Mac2種の`build`/`reproduce`は、`r4r_contract`を4本の1つとして各2回作ります。ELFの検査・バイト列の比較・Macの結合と署名・転送の一覧は、[R4Bの節](#r4bの必須比較と検査用実行物)にまとめてあります。
 - 各回に`check_r4r.py --fixture <今回作ったr4r_contractの絶対パス>`を必須実行します(`r4r_probe()`)。通常の製品CLIへR4Rを登録して代用しません。
 - `verify-universal`は同じ署名後の`r4r_contract`を受け取り、Intel/Apple Siliconの両CPUで専用比較を実行します。専用比較の失敗は工程全体の失敗です。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4r_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
@@ -155,6 +155,45 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 
 R4Rの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認のMac実機・最低OS・最終全回帰テストは区別します。
 上のPR用CI(run 43040473054)では、Mac 2機種が比較器の自己検査で落ちました。直した後のrun 43067201954ではMacの比較の本体が流れ、追加の境界の7件が`__CF_USER_TEXT_ENCODING`の差で落ちました。この1項目を除くようにした後のrun 43085911008では、Mac 2機種の`build`が成功しました。記録は [testing.md](../../docs/testing.md#pr用ciの記録run-43040473054) と、その後の2回の節にあります。
+
+## R4Gの必須比較と検査用実行物
+
+#479の3コマンド(pending-implementation・reviews-dir・implementation-git)は未登録・未配布です。契約と決定済みの差は #479 と `native/ci/r4g_fixtures/decided-differences.json` にあります。
+比較(`check_r4g.py`)は、`build`と`verify-universal`では流しません。別の2つのジョブ`r4g`・`r4g-universal`で流します(2026-11-12 12:59の決定)。
+
+```sh
+python3 -B native/ci/build.py r4g --platform linux-x86_64
+python3 -B native/ci/build.py r4g-universal --platform macos-arm64
+```
+
+- `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4g_contract`を実行します。`build`に残るR4Gの分は、この単体検査と`r4g_contract`のビルドだけです。
+- Linux2種・Mac2種の`build`/`reproduce`は、`r4g_contract`を4本の1つとして各2回作り、tarに入れます。ELFの検査・バイト列の比較・Macの結合と署名・転送の一覧は、[R4Bの節](#r4bの必須比較と検査用実行物)にまとめてあります。
+- `r4g`: `build`の後に4機種で流します。`build`のtarを受け取り、2回のビルドの`r4g_contract`のそれぞれで`check_r4g.py --fixture <受け取ったr4g_contractの絶対パス>`を流します(`r4g_probe()`)。
+- `r4g-universal`: `combine`の後にMac2機種で流します。署名後のtarを受け取り、`r4g_contract`の署名と2種類のCPUを確かめてから比較します。Linuxの名前を渡すと失敗します。
+- 2つのジョブは、`prepare`でRustと開発依存を用意し(受け取ったtarの記録を照らすときにRustの版を読むため)、tarを受け取ってから比較します。比較の失敗は工程全体の失敗です。
+- `distribution`の`needs`の末尾に`r4g`と`r4g-universal`を足しました。R4Gの比較が落ちたら配布のtarを作りません(R4B・R4Rと同じ)。
+- `check_workflow.py`は、`native.yml`に必須のジョブ(`REQUIRED_NATIVE_JOBS`)と、2つのジョブの`build.py`の工程と機種(`R4G_JOBS`。`r4g`は4機種・`r4g-universal`はMac2機種)を確かめます。
+- Linuxの`r4g`は、始めに(`prepare_r4g_linux()`)straceが無ければ`apt-get`で入れ、GitHubのUbuntu 24.04がAppArmorで止めている利用者の名前空間を`sysctl`で許します(/proc を隠す組が使う)。`prepare`・`build`・`reproduce`・`distribution`では行いません。Linuxの`r4g_probe()`は`--require-strace --require-userns`を付け、straceの記録の比較と名前空間を必須にします。手元の名前空間を作れない機械では`--require-userns`を付けずに流し、その組を「未実施」と記録します(合格の件数に数えません)。
+- `r4g_probe()`は、短い一時フォルダ(`/tmp/r4g…`)を`TMPDIR`に渡します。既存テストが一時フォルダの下に作るAF_UNIXのソケットのパスは、Macで103バイトまでです(Linuxは107)。Macの既定の`TMPDIR`では超えるので、比較器が始めに止まります。1回の上限は3600秒です(`R4G_TIMEOUT`)。
+- `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4g_contract`は`native-dist.tar`の5ファイルへ入りません。
+- Linuxだけの組: `/dev/full`の出力先・pipeの大きさの指定・/procを読む観測・/procを隠す組。Macではこれらを「未実施」と記録し、最後の行に`未実施 N 件`として出します。
+- reviews-dirの4節は、道具の版の基準(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9。2026-11-12 00:35の決定)がある機械だけで流します。Ubuntu 24.04の実行機は基準と同じ版です。Macは基準の版が無いので、4節を「未実施」と記録します。Linuxで版が違えば失敗にします。
+- reviews-dirの信号の比較は、Linuxでは`/proc/<pid>/wchan`でシェルと群の全員が待つ呼出しの中にいるのを確かめてから信号を送ります。Mac(とLinux以外)は読めないので0.5秒待つだけです。Macではreviews-dirの節は未実施ですが、implementation-gitの信号の組でも使い、0.5秒待つだけです。基準の道具を用意したMacでreviews-dirを流して揺れたときは、落ちた組の群の状態(比較器が添える)を記録し、Linuxの結果を正とします。
+- reviews-dirは、呼出元が旧スクリプトの変数と同じ名前をexportしたときに旧bashが子へ渡す値も再現し、比較します(2026-11-12 14:24の決定4。名前の一覧は`check_r4g.py`の`REVIEWS_SCRIPT_NAMES`)。
+- 比較はPython3.10.11・非rootで行います。
+
+ジョブの上限(`check_workflow.py`の`R4G_TIMEOUTS`)は、`r4g`が60分、`r4g-universal`が30分です。理由は次の実測と見込みです。
+
+- 手元の測定(Linux x86_64の容器、2026-11-12): 16 CPUで1回あたり約620〜700秒でした。CPUを2つに絞った回と4つに絞った回を同時に流すと、976秒と983秒でした(どちらも合格190件)。
+- 1回のうち約181秒は時計で決まります(本物の期限 Git 30秒・事前検査120秒を旧版とRustの両方で待つ分と、本物の時計の上限の節)。
+- `r4g`(2回): Linuxは1回約17〜20分と見込みます(GitHubの実行機を手元の2〜4 CPUの1〜1.2倍と見る。未確認の推測)。2回で約34〜40分、`prepare`とstraceの用意に約3分を足して約37〜43分です。上限の2割を残すと約54分になるので、60分にしました。
+- Macはreviews-dirの4節とLinuxだけの組が無く、1回あたり約11〜15分と見込みます(Mac Intelは時計で決まらない分を手元の1.55倍と見る。R4BのMac Intelの実測838秒と手元の約9分から)。2回で約22〜30分、`prepare`に約5分を足して約27〜35分で、60分に収まります。
+- `r4g-universal`(1回): Mac Intelで約11〜15分と`prepare`の約5分で約16〜20分です。2割を残すと約25分になるので、30分にしました。
+- 4機種と署名後のMacのCIでの時間と成功は未確認です。最初のCIで実測して記録します。
+
+`policy`の`build.py test`は、`quality()`の単体検査・`r4g_probe()`(Linuxの`--require-strace --require-userns`・短い`TMPDIR`・上限)・`r4g`と`r4g-universal`の流れ(4機種・2回・署名とCPUの確かめ・Linuxの準備はこの2つだけ)・`build`と`verify-universal`が比較を流さないこと・ワークフローの2つのジョブの形と上限・`distribution`の`needs`・必須のジョブの一覧と機種の確かめ・検査用実行物が配布物へ入らないことを確かめます。
+
+R4Gの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認の4機種CI・Mac実機・最低OS・最終全回帰テストは区別します。
 
 ## ワークフローの検査
 

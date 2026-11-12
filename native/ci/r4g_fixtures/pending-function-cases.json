@@ -1,0 +1,3050 @@
+{
+ "decisions": [
+  {
+   "acknowledged": {},
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "confirmation-required",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "mixed",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。",
+     "重なりのある候補があるため、identity の確認値では続行できません。list_sha256 で確認してください。"
+    ]
+   ],
+   "label": "mixed",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。",
+     "重なりのある候補があるため、identity の確認値では続行できません。list_sha256 で確認してください。"
+    ]
+   ],
+   "label": "mixed",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "acknowledged",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "mixed",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "mixed",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     },
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {},
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "other-projects-only",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "other-only",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "acknowledged",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "other-only",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "other-only",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "acknowledged",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "other-only",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    [
+     "別プロジェクトの保護記録: 1 件。所属の印で別のプロジェクトと確かめたため、止めません(名前とパスはJSONにだけ出します)。"
+    ]
+   ],
+   "label": "other-only",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d7a",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {},
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "none",
+    []
+   ],
+   "label": "empty",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "acknowledged",
+    []
+   ],
+   "label": "empty",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "identity": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    []
+   ],
+   "label": "empty",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    0,
+    "acknowledged",
+    []
+   ],
+   "label": "empty",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "acknowledged": {
+    "list": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+   },
+   "digests": {
+    "identity": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "list": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   "expected": [
+    10,
+    "list-changed",
+    []
+   ],
+   "label": "empty",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  }
+ ],
+ "digests": [
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "fixed",
+   "list": "c6846d4850a3703d5365dc73c53c70bb351d19a06aa118773f3816c1a929a990",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "display-only",
+   "list": "c6846d4850a3703d5365dc73c53c70bb351d19a06aa118773f3816c1a929a990",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "表示だけ",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": false,
+    "cwd": "display changed",
+    "cwd_bytes_hex": "2f637764",
+    "identity_sha256": "unused",
+    "issues": [
+     {
+      "message": "表示だけ"
+     }
+    ],
+    "list_sha256": "unused",
+    "result": "acknowledged",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "表示だけ",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "表示だけ",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "candidate-mtime_ns",
+   "list": "27f6c37b824c34729a1f45c16ecf791526a2357a44574dd577e4f3bd323ec7c9",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 101,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "candidate-ctime_ns",
+   "list": "fa0f3287f41aa12123899bc7d75c6781ac27aa52780b4b56b2b16b4bf9b8e54b",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 201,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "candidate-size",
+   "list": "efb2e8f78529366aef9cd59fdcbde3f421bb487bd531344188860bea4c9a4314",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4097,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "candidate-mode",
+   "list": "d08c624557a4570f9733c6df351368c35972354da2b3939d668d75aa938d6a7d",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16895,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "3fe6c5a8166571365a02b1f2a3d43dd1b9c03a961c1f74c626e440c3b25530a7",
+   "label": "candidate-ino",
+   "list": "cac0b68c88b17821b68ffcb93058e4198ee6590d59cb4c1c0d33e255b650cdc6",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 13,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "918b8bc95e28a46eae94f6916e5b13b8cd28ec44be727198f461c1bbe0c11be0",
+   "label": "candidate-dev",
+   "list": "cd0ca0989041bbf968b1183e3f8a538c85992c62f27bd3cbbe27753260bd061e",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 8,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "4a18b63a570ba948088c1087031d3a36d4daf7c493e3a2dd21639b86708538c8",
+   "label": "candidate-uid",
+   "list": "adee676e8eb4e7fe7937f3a320a25f1a1f908afb233141b6c78289689c32a969",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 43
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "7a5e725a7cde10e2db3e81efe3d8b89a5cf1cb14e34f8c839b639bba5bd74597",
+   "label": "candidate-kind",
+   "list": "fc2a5f0540f64711ad0e6c880f58ec128e0a9290ccf181d7918a7be9ef6c4459",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "file",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "49b38f886c3b3be66bc637ab97db5e4d0451bb7b4964a276bd30ff7e002b5b3c",
+   "label": "candidate-name_bytes_hex",
+   "list": "ac2ed7c2961ef0791f9dc7c10ff4990ca9e4216d89f11ac3b371fc26a0b40a30",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d79",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "d0ee32bc62977c19d80793ee1135c446fac259e2ff4c98712924e19ff71d5e60",
+   "label": "candidate-path_bytes_hex",
+   "list": "a7588bd43ff65048cb546b8acd9d1cd250f608a77bb4dd7eb08d871c194c402a",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d79",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "root-identity-mode",
+   "list": "90b805898fbe4784ddb889a7b3f0ac1b3797211494c94b8f1772adb8c9500f48",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16895,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16895,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "efea27bbce6ac4e10b8bd957530e5042bbe6bf31daeaff25ed696ecdad4b1cf5",
+   "label": "root-identity-ino",
+   "list": "b15d82987d1197be69e4b0adab8029c53e49d1b0e4a30b93f21ffbf34b383c80",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 14,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "b18fa27177243a65da75c656ab9fd4ca257e771e5f5dc697ef67ae0529d23eaf",
+   "label": "root-identity-uid",
+   "list": "e22a2e43947d447e23f764cd8709112d71c2a2141115210589357832118ebd4c",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 43
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "9869fb990a186e173da5e99cd3f03b9545a47c7772689088c4de48836d8e5565",
+   "label": "cwd",
+   "list": "bb8c0ed060e6fd566de4b150ae7b601e177202d911ee3d1fccc3e9aaeb66caf9",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637765",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "286e9aa12e8f7f5f38e9af045ccc371a121e4a1206cbd10491d970dec050a0de",
+   "label": "no-candidates",
+   "list": "1c9d38b9892b8027aa4a74dd21b12fdc223aa425a3a7b4a868a89eacfb6deeb8",
+   "result": {
+    "candidates": [],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "19bb62772b930b0e28e65f3e7a520b716344f6293eccd6a29acc24d0ee62d7e4",
+   "label": "alias-input",
+   "list": "18454b13b786b83fb7ca8d8355bc41060306b98b86732338ea4d2e616a10e916",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c69617332",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "51497e13f2d6b151d36b60eb6164f3523618effd99a90c592b695bcf78b1563c",
+   "label": "extra-keys",
+   "list": "c6846d4850a3703d5365dc73c53c70bb351d19a06aa118773f3816c1a929a990",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": {
+       "top": "/a",
+       "top_bytes_hex": "2f61"
+      },
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "no-mark",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42,
+      "unknown_later": 1
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "108f5af1dcbb38174e07cebb8573637c6e52445ac018ae0a8cc05730886ecf48",
+   "label": "reason-overlap",
+   "list": "c6846d4850a3703d5365dc73c53c70bb351d19a06aa118773f3816c1a929a990",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": "overlap",
+      "relation": "confirmation-required",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  },
+  {
+   "identity": "286e9aa12e8f7f5f38e9af045ccc371a121e4a1206cbd10491d970dec050a0de",
+   "label": "other-project",
+   "list": "1c9d38b9892b8027aa4a74dd21b12fdc223aa425a3a7b4a868a89eacfb6deeb8",
+   "result": {
+    "candidates": [
+     {
+      "ctime_ns": 200,
+      "dev": 7,
+      "ino": 12,
+      "kind": "directory",
+      "mode": 16832,
+      "mtime_ns": 100,
+      "name_bytes_hex": "67756172642d78",
+      "owner": null,
+      "path": "/state/guard-x",
+      "path_bytes_hex": "2f73746174652f67756172642d78",
+      "reason": null,
+      "relation": "other-project",
+      "root_id": "xdg_state",
+      "size": 4096,
+      "uid": 42
+     }
+    ],
+    "complete": true,
+    "cwd": "/cwd",
+    "cwd_bytes_hex": "2f637764",
+    "issues": [],
+    "result": "confirmation-required",
+    "roots": [
+     {
+      "canonical_id": "xdg_state",
+      "id": "xdg_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/state",
+      "input_path_bytes_hex": "2f7374617465",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": "xdg_state",
+      "id": "home_state",
+      "identity": {
+       "dev": 7,
+       "ino": 11,
+       "mode": 16832,
+       "uid": 42
+      },
+      "input_path": "/alias",
+      "input_path_bytes_hex": "2f616c696173",
+      "reason": null,
+      "resolved_path": "/state",
+      "resolved_path_bytes_hex": "2f7374617465",
+      "status": "present"
+     },
+     {
+      "canonical_id": null,
+      "id": "home_cache",
+      "identity": null,
+      "input_path": null,
+      "input_path_bytes_hex": null,
+      "reason": "unset",
+      "resolved_path": null,
+      "resolved_path_bytes_hex": null,
+      "status": "skipped"
+     }
+    ],
+    "schema_version": 2
+   }
+  }
+ ],
+ "kinds": [
+  [
+   24960,
+   "block"
+  ],
+  [
+   8576,
+   "character"
+  ],
+  [
+   384,
+   "other"
+  ],
+  [
+   16832,
+   "directory"
+  ],
+  [
+   33188,
+   "file"
+  ],
+  [
+   41471,
+   "symlink"
+  ],
+  [
+   4480,
+   "fifo"
+  ],
+  [
+   49645,
+   "socket"
+  ]
+ ]
+}

@@ -1,0 +1,144 @@
+{
+ "files": {
+  "test_implementation_git.py": {
+   "classes": {
+    "RealRepositoryTests": {
+     "count": 6,
+     "names": [
+      "test_index_bytes_stat_refs_and_tracked_files_unchanged",
+      "test_literal_paths_all_environment_variants_and_repeat",
+      "test_mutation_removing_only_operation_environment_is_detected",
+      "test_no_filter_plain_repository",
+      "test_normal_filter_separate_processes_all_five",
+      "test_regular_config_change_old_rejected_new_approval_resumes"
+     ],
+     "sha256": "4fd5a4a442450bf960b372cd5096a5dec511c1187cbc6458af9b6b10a9b46777"
+    },
+    "RuntimeAndDocumentTests": {
+     "count": 2,
+     "names": [
+      "test_actual_five_handoff_documents_and_limits",
+      "test_runtime_actual_document_command_missing_python_import_and_dependency"
+     ],
+     "sha256": "26e5b9b8b3c8dfd3e3da97e08d1c849d85dbf199fc878cb26f8d170193896b23"
+    },
+    "StubContractTests": {
+     "count": 11,
+     "names": [
+      "test_all_argument_boundaries_before_precheck",
+      "test_blob_only_and_resolution_failure",
+      "test_broken_machine_outputs_stop_before_git",
+      "test_context_canonical_order_and_binding",
+      "test_defaults_allowed_options_and_forced_flags",
+      "test_duplicate_options_all_spellings",
+      "test_effective_values_all_four_and_rc",
+      "test_help_strict_input_and_missing_context",
+      "test_precheck_exit_codes_timeout_and_git_errors",
+      "test_same_environment_order_and_original_bytes",
+      "test_target_environment_missing_dependency_and_wrong_root"
+     ],
+     "sha256": "15c169925420b4ee31601f7fd59546b2acb0616ed9339af39459bcd95e90abc2"
+    }
+   },
+   "sha256": "8736213d5b3f531584d6b9ce2ac14fadf5469443fc27edaa927a5d1097bf573e"
+  },
+  "test_implementation_git_input.py": {
+   "classes": {
+    "InputCharacterization": {
+     "count": 10,
+     "names": [
+      "test_check_order",
+      "test_cwd_errors",
+      "test_diff_range_and_combination",
+      "test_duplicates_and_argparse_errors",
+      "test_expected_hash_shape",
+      "test_help_output",
+      "test_log_limit_and_show_combination",
+      "test_missing_entry_or_operation",
+      "test_path_errors",
+      "test_revision_errors"
+     ],
+     "sha256": "a712030a2e207c5553960d8df663c75a4f1bb564b3dd1483b710b56b80209e7c"
+    }
+   },
+   "sha256": "5c10c8e775dda0688b82acb60a73d0666394eaf3a6e514032b0b66f6f4acad89"
+  },
+  "test_pending_implementation.py": {
+   "classes": {
+    "PendingBoundaryTests": {
+     "count": 21,
+     "names": [
+      "test_candidate_disappears_or_metadata_changes",
+      "test_candidate_internals_never_opened_or_scanned",
+      "test_candidate_owner_change_during_scan_stops",
+      "test_decide_outcome_is_pure_and_returns_exit_outcome_and_notes",
+      "test_digests_ignore_candidate_keys_added_later",
+      "test_final_recheck_compares_numbers_kind_and_owner_only",
+      "test_final_time_check_sits_between_digests_and_decision",
+      "test_fixed_payload_hash_and_excluded_display_values",
+      "test_main_outcome_exit_code_and_stderr_are_pinned",
+      "test_mark_owner_and_changes_while_reading",
+      "test_missing_capabilities_stop_before_scan",
+      "test_missing_stat_fields_and_clock",
+      "test_python310_syntax_and_no_process_or_write_entry",
+      "test_root_alias_is_enumerated_once",
+      "test_root_changes_while_fd_is_held",
+      "test_runtime_unavailable_denied_and_unknown_exception",
+      "test_special_file_classification_without_creating_devices",
+      "test_time_limit_uses_monotonic",
+      "test_unexpected_failure_in_decision_becomes_internal",
+      "test_unsupported_features_in_each_new_opener_stop_with_11",
+      "test_unsupported_features_in_mark_and_git_readers_stop_with_11"
+     ],
+     "sha256": "7dceed1d4ddb45bdfc4d97ed460e640043d8308937253a0a97c1044b4fa785c1"
+    },
+    "PendingCLITests": {
+     "count": 14,
+     "names": [
+      "test_absent_empty_roots_and_no_creation",
+      "test_acknowledgement_changes_cwd_inode_name_root_and_count",
+      "test_all_roots_home_symlink_and_same_inode_alias",
+      "test_both_acknowledgements_are_usage_error",
+      "test_direct_names_kinds_and_non_utf8_canonical_output",
+      "test_entry_limit_and_candidate_limit_boundaries",
+      "test_handwork_changes_times_same_identity_and_new_ack",
+      "test_identity_ack_changes_with_cwd_name_kind_count_and_root",
+      "test_identity_ack_ignores_time_size_and_mode_changes",
+      "test_identity_ack_rejects_candidate_recreated_under_same_name",
+      "test_internal_contents_and_fixture_metadata_unchanged",
+      "test_root_file_broken_link_and_loop_stop",
+      "test_unset_relative_and_no_roots",
+      "test_usage_unknown_operations_ack_format_and_help"
+     ],
+     "sha256": "52afd0fe5286f0bcf1625b29809839e8cbf6adf58fc281e8b674b66a8cec2cc0"
+    },
+    "PendingDocumentContractTests": {
+     "count": 2,
+     "names": [
+      "test_entry_before_target_body_git_and_preserved_implementation_paths",
+      "test_full_human_confirmation_failure_and_handwork_contract"
+     ],
+     "sha256": "3a6c60734173b27cbbe3333927c7a0f13ff47a5c76d640873af493d698fc1270"
+    },
+    "PendingOwnerTests": {
+     "count": 10,
+     "names": [
+      "test_current_git_place_is_decided_without_git",
+      "test_mark_kinds_size_and_format_stop_with_reason",
+      "test_numbers_of_record_top_common_and_taskdir_must_match",
+      "test_overlap_alone_stops_even_when_common_differs",
+      "test_results_digests_and_identity_rules",
+      "test_submodule_records_stop_both_directions",
+      "test_take_in_outside_worktree_overlaps_through_common_only",
+      "test_take_mark_lets_other_projects_continue",
+      "test_take_mark_still_stops_overlapping_or_unknown_work",
+      "test_unreadable_ancestor_is_overlap_unknown"
+     ],
+     "sha256": "80257a0acd7ec4c18a3b48c057721917df8a299debd970965debcd309df90e26"
+    }
+   },
+   "sha256": "65b6b258a524df4b511781b9c7dbd98aa6a5b79f72439b2913b85d7afa0134ce"
+  }
+ },
+ "total": 76
+}

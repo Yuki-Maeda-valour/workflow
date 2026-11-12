@@ -217,7 +217,9 @@
       "needs": [
         "build",
         "combine",
-        "verify-universal"
+        "verify-universal",
+        "r4g",
+        "r4g-universal"
       ],
       "runs-on": "ubuntu-24.04",
       "timeout-minutes": 15,
@@ -277,6 +279,132 @@
             "if-no-files-found": "error",
             "retention-days": 7
           }
+        }
+      ]
+    },
+    "r4g": {
+      "needs": "build",
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "platform": "linux-x86_64",
+              "runner": "ubuntu-24.04"
+            },
+            {
+              "platform": "linux-arm64",
+              "runner": "ubuntu-24.04-arm"
+            },
+            {
+              "platform": "macos-x86_64",
+              "runner": "macos-15-intel"
+            },
+            {
+              "platform": "macos-arm64",
+              "runner": "macos-15"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 60,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "比較用の Python 3.10.11 を用意",
+          "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+          "with": {
+            "python-version": "3.10.11"
+          }
+        },
+        {
+          "name": "Rust と比較用の依存を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'"
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "name": "native-build-${{ matrix.platform }}",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "2 回のビルドの r4g_contract で R4G の比較",
+          "run": "python3 -B native/ci/build.py r4g --platform '${{ matrix.platform }}'"
+        }
+      ]
+    },
+    "r4g-universal": {
+      "needs": "combine",
+      "strategy": {
+        "fail-fast": false,
+        "matrix": {
+          "include": [
+            {
+              "platform": "macos-x86_64",
+              "runner": "macos-15-intel"
+            },
+            {
+              "platform": "macos-arm64",
+              "runner": "macos-15"
+            }
+          ]
+        }
+      },
+      "runs-on": "${{ matrix.runner }}",
+      "timeout-minutes": 30,
+      "steps": [
+        {
+          "name": "ソース SHA を取得",
+          "uses": "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
+          "with": {
+            "repository": "${{ github.event.pull_request.head.repo.full_name || github.repository }}",
+            "ref": "${{ github.event.pull_request.head.sha || github.sha }}",
+            "persist-credentials": false
+          }
+        },
+        {
+          "name": "ワークフローを検査",
+          "run": "python3 -B native/ci/check_workflow.py"
+        },
+        {
+          "name": "比較用の Python 3.10.11 を用意",
+          "uses": "actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0",
+          "with": {
+            "python-version": "3.10.11"
+          }
+        },
+        {
+          "name": "Rust と比較用の依存を用意",
+          "run": "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'"
+        },
+        {
+          "name": "tar を取得",
+          "uses": "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093",
+          "with": {
+            "name": "native-universal",
+            "path": "${{ runner.temp }}/native-ci/downloads",
+            "merge-multiple": true
+          }
+        },
+        {
+          "name": "署名後の r4g_contract で R4G の比較",
+          "run": "python3 -B native/ci/build.py r4g-universal --platform '${{ matrix.platform }}'"
         }
       ]
     }
