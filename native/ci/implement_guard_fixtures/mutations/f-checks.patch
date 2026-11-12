@@ -1,0 +1,11 @@
+--- a/native/crates/cli/src/commands/implement_guard/taskmd_diff.rs	2026-11-12 11:55:36.539048517 +0900
++++ b/native/crates/cli/src/commands/implement_guard/taskmd_diff.rs	2026-11-12 11:55:36.551048168 +0900
+@@ -219,7 +219,7 @@
+         return;
+     }
+     i += 1;
+-    if matches!(line.get(i), Some(b'x' | b'X'))
++    if line.get(i).is_some()
+         && line.get(i + 1) == Some(&b']')
+         && let Some(slot) = line.get_mut(i)
+     {

@@ -188,3 +188,42 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 確認に使う API は `repos/actions/<名前>/commits/<タグ>`、`repos/actions/<名前>/commits/<SHA>`、
 `repos/actions/<名前>/contents/action.yml?ref=<SHA>` です。
 更新するときは 3 つを確認してから `check_workflow.py` の記録とワークフローを同時に変えます。
+
+## S3I-Aの必須比較と検査専用入口
+
+- 比較器`check_implement_guard.py`は、新しい2つのジョブ`implement-guard`(`build`の後・4機種)と`implement-guard-universal`(`combine`の後・Mac2機種)で流します。`build`と`verify-universal`では流しません(2026-11-12 12:59の決定)。
+- 4機種と署名後のMacのCIでの成功は未確認です。
+
+比較はPython3.10系・root以外の利用者で行い、Cコンパイラ(`cc`)を要ります。#474の部品(`implement-guard.sh`のGitを使わない部分の移植)は未登録・未配布です。検査専用入口は`implement_guard_contract`(cargoのexample)です。
+
+- `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example implement_guard_contract`を実行します。Macでは、この単体テストがerrnoの文を全番号と表の外の1000で`os.strerror`と照らします。
+- Linux2種・Mac2種の`build`/`reproduce`は、`implement_guard_contract`を`CI_BINARIES`の1つとして各2回作ります。
+  - Linuxでは、静的にリンクした実行ファイル(ELF。共有ライブラリを読まない形)かを検査し、2本のバイト列を比べます。
+  - Macでは`combine`が2回分を結合・署名し、署名後のバイト列を比べます。`verify-universal`は署名と2種類のCPUを確かめます。
+  - 転送の一覧(`BUILD_FILES`・`UNIVERSAL_FILES`)にも入ります。
+- `implement-guard`: `build`のtarを受け取り、1本目の`implement_guard_contract`で比較器を流します。2本が同じバイト列であることは`reproduce`が確かめます。範囲はLinuxが`full`、Macが`mac`です(比較器が機械で決めます)。
+- `implement-guard-universal`: 署名と2種類のCPUを確かめてから、範囲`signed`で比較器を流します。Linuxの名前を渡すと失敗します。
+- 起動の記録の確かめ: Linuxでは`strace`(プロセスの起動〈`execve`〉を記録する道具。ptraceという仕組みを使う)で、Rustの入口が`cp`のほかを起動しないことを確かめます。CIでは`strace`を入れません。実行機に無いかptraceが使えなければ、比較器はその確かめを未実施と記録します。
+- `/dev/null`を開けない起動: 利用者の名前空間(`unshare -U -m`。権限なしで、そのプロセスだけのファイルの見え方を作る仕組み)を作れる機械だけで流します。作れなければ、比較器が未実施と記録します。
+- 比較器は、範囲ごとのケースの一覧(群ごとの件数とラベルの一覧のsha256。`implement_guard_fixtures/case_lists.json`)と、Linuxではerrnoの文の表(`gen_strerror.py --check`)も照らします。
+- 上限は`implement-guard`が45分、`implement-guard-universal`が20分です。手元の所要時間の2倍以上にしました。`build`と`verify-universal`の上限は変えていません。
+  - 手元(基準の容器・Linux x86_64)の範囲`full`は、2026-11-12の差し戻しiter2の回で700秒、iter3の回で727秒でした(比較器の自己検査・旧selftestの2通りを含む。ほかの検査と同時に流した回で、混み方で変わります)。
+  - 45分(2700秒)は、長い方の727秒の約3.7倍で、2倍以上の目安を満たします。
+  - 範囲`signed`は、iter3の回で19秒でした(比較器の自己検査22件を含む)。20分は、その2倍以上です。
+  - CIの4機種とMacでの時間は未確認です。
+- `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`implement_guard_contract`は`native-dist.tar`の5ファイルへ入りません。
+- `distribution`の`needs`に2つのジョブを足しました。全ジョブの成功がマージの条件なので、2つのジョブも必須です。`check_workflow.py`の`REQUIRED_NATIVE_JOBS`・`IMPLEMENT_GUARD_JOBS`が、ジョブ・工程・機種・`needs`を確かめます。
+
+CIのジョブの手元での再現(リポジトリ直下):
+
+```sh
+python3 -B native/ci/build.py implement-guard --platform linux-x86_64
+python3 -B native/ci/build.py implement-guard-universal --platform macos-arm64
+```
+
+次の2つはCIでは流しません。旧版か道具の版が変わったときに、手元の基準の容器で流します。
+
+```sh
+python3 -B native/ci/implement_guard_measure.py --check   # 旧版の測定の照らし(値を省くと implement_guard_fixtures/expected_old.json)
+python3 -B native/ci/implement_guard_mutations.py         # Rust のソースへの変異の確かめ
+```

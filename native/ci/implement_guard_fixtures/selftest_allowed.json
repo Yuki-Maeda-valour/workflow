@@ -1,0 +1,142 @@
+[
+ {
+  "case": "J9",
+  "line": "同梱helper不在 → 33(実際: 0 / 期待: 33)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper不在: runtime-unavailable(stdout に行が無い: REASON=runtime-unavailable)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper不在: TEMP=none(stdout に行が無い: TEMP=none)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper不在: TOUCHED=none(stdout に行が無い: TOUCHED=none)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper不在: 元bytes保持(実際: 18b9a1de042dac077912edc57456de8263e6c8c95af6baffdb2699ccc004a5cc / 期待: 48aa6cae8c70abdb28631d22b316e6d9f9d0768ec2911de7090e248b2afe6ca1)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper構文不正 → 33(実際: 0 / 期待: 33)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper構文不正: runtime-unavailable(stdout に行が無い: REASON=runtime-unavailable)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "同梱helper構文不正: 元mode保持(実際: 644 / 期待: 640)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "Python起動不能 → 33(実際: 0 / 期待: 33)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "Python起動不能: runtime-unavailable(stdout に行が無い: REASON=runtime-unavailable)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J9",
+  "line": "Python起動不能: 元bytes保持(実際: 18b9a1de042dac077912edc57456de8263e6c8c95af6baffdb2699ccc004a5cc / 期待: 48aa6cae8c70abdb28631d22b316e6d9f9d0768ec2911de7090e248b2afe6ca1)",
+  "reason": "決定 D5: Rust は python3 と同梱 helper を探さず、読み込みも確かめない(helper の不在・構文の誤り・Python の起動の失敗・exec の失敗と、偽の Python で止める確かめは Rust では起きない)"
+ },
+ {
+  "case": "J10",
+  "line": "exec前の所有不明一時物: helperへ引き渡さず33(実際: 0 / 期待: 33)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "所有不明一時物: cleanup-failed(stdout に行が無い: REASON=cleanup-failed)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "所有不明一時物: TEMP=unknown(stdout に行が無い: TEMP=unknown)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "所有不明一時物: TOUCHED=none(stdout に行が無い: TOUCHED=none)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "所有不明一時物: 元bytes保持(実際: 18b9a1de042dac077912edc57456de8263e6c8c95af6baffdb2699ccc004a5cc / 期待: 48aa6cae8c70abdb28631d22b316e6d9f9d0768ec2911de7090e248b2afe6ca1)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "execそのものの失敗 → 33(実際: 0 / 期待: 33)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec失敗: runtime-unavailable(stdout に行が無い: REASON=runtime-unavailable)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec前に捕捉したTERM → 20(実際: 0 / 期待: 20)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec前TERM: interrupted(stdout に行が無い: REASON=interrupted)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec前TERM: TOUCHED=none(stdout に行が無い: TOUCHED=none)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec後KILLは非成功137(実際: 0 / 期待: 137)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "exec後KILLは無応答: callerでunknownと扱う(実際: 43 / 期待: 0)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "中断fixture: 元bytes保持(実際: 18b9a1de042dac077912edc57456de8263e6c8c95af6baffdb2699ccc004a5cc / 期待: 48aa6cae8c70abdb28631d22b316e6d9f9d0768ec2911de7090e248b2afe6ca1)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "J10",
+  "line": "中断fixture: 元mode保持(実際: 644 / 期待: 640)",
+  "reason": "旧版の中身の差し替え: selftest が旧版の字面(restore_exec_cleanup)を書き換えるが、Rust 流しの包みには同じ字面が無い"
+ },
+ {
+  "case": "P8",
+  "line": "cleanup で属性だけ取れない: exit 20(実際: 0 / 期待: 20)",
+  "reason": "BASH_ENV: 2026-11-11 22:31 の決定で効果を再現しない(cleanup の部分)"
+ },
+ {
+  "case": "P8",
+  "line": "cleanup で属性だけ取れない: ERROR を出す(stderr に無い: ERROR [internal] 保護領域は消したが、所属の印が残ったか確かめられない)",
+  "reason": "BASH_ENV: 2026-11-11 22:31 の決定で効果を再現しない(cleanup の部分)"
+ },
+ {
+  "case": "P8",
+  "line": "cleanup で属性だけ取れない: 印は残る(消せたと言わない)",
+  "reason": "BASH_ENV: 2026-11-11 22:31 の決定で効果を再現しない(cleanup の部分)"
+ }
+]

@@ -1,0 +1,84 @@
+{
+ "full": {
+  "Git と道具の不起動": {
+   "count": 3,
+   "labels_sha256": "a1be761a8106fcdb2fe2732276265886a0dd17ed5a79764eb4195ae2d927d0e7"
+  },
+  "cleanup": {
+   "count": 19,
+   "labels_sha256": "fbbca7856f02f29a349b32a14b8c79d4b2be849d03fbec97f0d73bfb328de797"
+  },
+  "restore-taskmd": {
+   "count": 49,
+   "labels_sha256": "27f000a44da57e5e224183532ef514e69e3a3c89513d8d286374cc8aed4c63b2"
+  },
+  "taskmd-diff": {
+   "count": 31,
+   "labels_sha256": "a39b9ef29d378fa540c1a750d078f83392aab3ab33d2afe11fc23d6809935d85"
+  },
+  "保護領域の確かめ": {
+   "count": 159,
+   "labels_sha256": "64f4a03c4e9f758f72174e9ba7bb3093e8903da042911d131a3d207b6fcc8890"
+  },
+  "出力の故障": {
+   "count": 118,
+   "labels_sha256": "92ea80caea35139ee7e1f66b75050293e9c6bbdf63350cc9bbfff2783b8e748d"
+  },
+  "引数と使い方": {
+   "count": 117,
+   "labels_sha256": "9a5e85184a05fa8471b5a617272d2559bf939ba72a2b537bdea3e0426ae734e7"
+  },
+  "旧版の記録の相互読み": {
+   "count": 15,
+   "labels_sha256": "482a58684ff0f8cee13511e149dd3164b95ac951c078aca777ab190d371c084c"
+  },
+  "記録の読み取り": {
+   "count": 67,
+   "labels_sha256": "eee7ae67aa7a4381a93ae4a69dd1f4bfe68524fa54889311e93577b3e357aee6"
+  },
+  "起動の状態": {
+   "count": 39,
+   "labels_sha256": "03731ee4273fb71a38661dc54a0268d5288d4d30a6ff760a44b5806737f5e4d1"
+  }
+ },
+ "mac": {
+  "cleanup": {
+   "count": 10,
+   "labels_sha256": "c48c9d5225d31bcf619419f8de752c6d00b7123fd6e65670a8bbe1990fbf6b96"
+  },
+  "restore-taskmd": {
+   "count": 8,
+   "labels_sha256": "76c070edb3a7b12c3e22cdfe22fe184b60b77326d5727161580df5f1839b05d0"
+  },
+  "taskmd-diff": {
+   "count": 30,
+   "labels_sha256": "f3c968469dbb0db8783b5582b1b6e7d201719d45b2fbd2d9d590fddab1357fdf"
+  },
+  "保護領域の確かめ": {
+   "count": 151,
+   "labels_sha256": "28a57e5bda342e90a567688b2f96e9706311a1180916e6929da3bc362c1999b4"
+  },
+  "引数と使い方": {
+   "count": 117,
+   "labels_sha256": "9a5e85184a05fa8471b5a617272d2559bf939ba72a2b537bdea3e0426ae734e7"
+  },
+  "記録の読み取り": {
+   "count": 67,
+   "labels_sha256": "eee7ae67aa7a4381a93ae4a69dd1f4bfe68524fa54889311e93577b3e357aee6"
+  }
+ },
+ "signed": {
+  "taskmd-diff": {
+   "count": 1,
+   "labels_sha256": "0967115f2813a3541eaef77de9d9d5773f1c0c04314b0bbfe4ff3b3b1c55b5d5"
+  },
+  "保護領域の確かめ": {
+   "count": 1,
+   "labels_sha256": "700722c96f102d40bb3f2c5b27f1c4a484742480082aea3538009fe26f807180"
+  },
+  "引数と使い方": {
+   "count": 1,
+   "labels_sha256": "bc2280ab95c897b7c3c106f6956fa6389fa8ad4a190680f27284c28a7bf5b9fe"
+  }
+ }
+}

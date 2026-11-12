@@ -588,6 +588,22 @@ fn legacy_locale_target() -> Option<&'static str> {
     }
 }
 
+// ---- errno の文(Mac) ----
+
+/// libSystem の `strerror_r` の文(S3I-A #474)。表に無い番号で `EINVAL` が返っても、バッファに入った文
+/// (`Unknown error: <番号>`)をそのまま使う(Python の `os.strerror` と同じ文)。
+#[cfg(target_os = "macos")]
+pub fn strerror_text(number: i32) -> String {
+    let mut buffer = [0u8; 512];
+    // SAFETY: 書き込める領域と長さを渡す。strerror_r は NUL で終わる文を長さの中に書く。戻り値(0 か
+    // EINVAL・ERANGE)に関係なく、バッファの先頭から NUL までを読む。
+    unsafe {
+        libc::strerror_r(number, buffer.as_mut_ptr().cast(), buffer.len());
+    }
+    let end = buffer.iter().position(|b| *b == 0).unwrap_or(buffer.len());
+    String::from_utf8_lossy(buffer.get(..end).unwrap_or_default()).into_owned()
+}
+
 // ---- 子の起動 ----
 
 /// 子の種類。

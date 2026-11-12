@@ -1,0 +1,7689 @@
+{
+ "about": "旧版の測定の固定期待(implement_guard_measure.py)。信号の地点は、同じ手順を repeat 回(Rust の結果が出なければ max_repeat 回まで)流した結果と回数。rule は決定の表の「旧 bash の信号」の規則の 2 通り(Rust の単体テストが rust_repeat 回ずつ作る)。outcomes の rule は、見た結果が規則のどれに当たるか。",
+ "faults": [
+  {
+   "comm": null,
+   "errno": 13,
+   "fault": "mktemp の mkdir が EACCES",
+   "mark_exists": true,
+   "point": "mktemp",
+   "rc": 20,
+   "scenario": "taskmd-diff same",
+   "spec": "mkdir:.work-",
+   "state_exists": true,
+   "stderr": "mktemp: failed to create directory via template '<state>/.work-XXXXXX': Permission denied\nERROR [internal] 保護領域に一時ディレクトリを作れない\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": null,
+   "errno": 28,
+   "fault": "mktemp の mkdir が ENOSPC",
+   "mark_exists": true,
+   "point": "mktemp",
+   "rc": 20,
+   "scenario": "taskmd-diff same",
+   "spec": "mkdir:.work-",
+   "state_exists": true,
+   "stderr": "mktemp: failed to create directory via template '<state>/.work-XXXXXX': No space left on device\nERROR [internal] 保護領域に一時ディレクトリを作れない\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": null,
+   "errno": 5,
+   "fault": "rm の unlink が EIO",
+   "mark_exists": true,
+   "point": "rm-unlink",
+   "rc": 20,
+   "scenario": "cleanup",
+   "spec": "unlink:manifest.tsv",
+   "state_exists": true,
+   "stderr": "rm: cannot remove '<state>/manifest.tsv': Input/output error\nERROR [internal] 保護領域を消せない: <state>\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": null,
+   "errno": 16,
+   "fault": "rm の rmdir が EBUSY",
+   "mark_exists": true,
+   "point": "rm-rmdir",
+   "rc": 20,
+   "scenario": "cleanup",
+   "spec": "rmdir:snapshot",
+   "state_exists": true,
+   "stderr": "rm: cannot remove '<state>/snapshot': Device or resource busy\nERROR [internal] 保護領域を消せない: <state>\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": null,
+   "errno": 5,
+   "fault": "印の rm が EIO",
+   "mark_exists": true,
+   "point": "rm-mark",
+   "rc": 20,
+   "scenario": "cleanup",
+   "spec": "unlink:owner-fixed",
+   "state_exists": false,
+   "stderr": "NOTE: 保護領域を消した: <state>\nERROR [internal] 保護領域は消したが、所属の印を消せない(機密を含まないので手で消してよい): <parent>/owner-fixed\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "bash",
+   "errno": 5,
+   "fault": "load_meta の 4-meta.txt の read が EIO",
+   "mark_exists": true,
+   "point": "read",
+   "rc": 20,
+   "scenario": "taskmd-diff same",
+   "spec": "read:/snapshot/4-meta.txt",
+   "state_exists": true,
+   "stderr": "implement-guard.sh: line 2284: read: read error: 0: Input/output error\nERROR [internal] 保護領域の記録に必要な項目が無い\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "bash",
+   "errno": 5,
+   "fault": "load_meta の taskmd.txt の read が EIO",
+   "mark_exists": true,
+   "point": "read",
+   "rc": 20,
+   "scenario": "taskmd-diff same",
+   "spec": "read:/snapshot/taskmd.txt",
+   "state_exists": true,
+   "stderr": "implement-guard.sh: line 2291: read: read error: 0: Input/output error\nERROR [internal] 保護領域の記録に必要な項目が無い\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "bash",
+   "errno": 5,
+   "fault": "T 行の read が EIO(taskmd-diff)",
+   "mark_exists": true,
+   "point": "read",
+   "rc": 33,
+   "scenario": "taskmd-diff same",
+   "spec": "read:/manifest.tsv",
+   "state_exists": true,
+   "stderr": "implement-guard.sh: line 2333: read: read error: 0: Input/output error\nERROR [taskmd-body] 退避したタスク MD が記録と一致しない(完了条件の基準を信頼できない)\n",
+   "stdout": "REASON=taskmd-body\n",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "bash",
+   "errno": 5,
+   "fault": "T 行の read が EIO(restore-taskmd)",
+   "mark_exists": true,
+   "point": "read",
+   "rc": 33,
+   "scenario": "restore-taskmd",
+   "spec": "read:/manifest.tsv",
+   "state_exists": true,
+   "stderr": "implement-guard.sh: line 3002: read: read error: 0: Input/output error\nERROR [taskmd-body] 退避した本文の記録を読めない\n",
+   "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=taskmd-body\n",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "sed",
+   "errno": 5,
+   "fault": "sed の読み取りが EIO(退避した本文)",
+   "mark_exists": true,
+   "point": "read-sed",
+   "rc": 20,
+   "scenario": "taskmd-diff checks-only",
+   "spec": "read:/taskmd-body",
+   "state_exists": true,
+   "stderr": "sed: read error on stdin: Input/output error\nERROR [internal] 予期しない失敗(終了コード 4・行 2963)\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "sed",
+   "errno": 5,
+   "fault": "sed の読み取りが EIO(タスク本文)",
+   "mark_exists": true,
+   "point": "read-sed",
+   "rc": 20,
+   "scenario": "taskmd-diff checks-only",
+   "spec": "read:/task/t.md",
+   "state_exists": true,
+   "stderr": "sed: read error on stdin: Input/output error\nERROR [internal] 予期しない失敗(終了コード 4・行 2964)\n",
+   "stdout": "",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "cmp",
+   "errno": 5,
+   "fault": "cmp の読み取りが EIO(退避した本文)",
+   "mark_exists": true,
+   "point": "read-cmp",
+   "rc": 0,
+   "scenario": "taskmd-diff same",
+   "spec": "read:/taskmd-body",
+   "state_exists": true,
+   "stderr": "cmp: <state>/taskmd-body: Input/output error\n",
+   "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+   "timed_out": false,
+   "work_left": 0
+  },
+  {
+   "comm": "cmp",
+   "errno": 5,
+   "fault": "cmp の読み取りが EIO(タスク本文)",
+   "mark_exists": true,
+   "point": "read-cmp",
+   "rc": 0,
+   "scenario": "taskmd-diff same",
+   "spec": "read:/task/t.md",
+   "state_exists": true,
+   "stderr": "cmp: <base>/repo/task/t.md: Input/output error\n",
+   "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+   "timed_out": false,
+   "work_left": 0
+  }
+ ],
+ "max_repeat": 30,
+ "old_sha256": "b958cc12b60c26364d3eff11d9f31a98b532363d9556221f7e58b8d2a50a6981",
+ "repeat": 6,
+ "rust_repeat": 3,
+ "signals": [
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 4,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    {
+     "count": 2,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "outside-rule",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": false,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff same",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff same",
+   "signal": "INT",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 2,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=same\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff same",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-d <state>/.work-XXXXXX",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "mktemp",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "mktemp"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 14,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>/taskmd-body",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 16,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-body",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo/task/t.md",
+   "call": 17,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-selected",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/taskmd-body <base>/repo/task/t.md",
+   "call": 18,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-same",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-c %s -- <state>/taskmd-body",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %s -- <state>/taskmd-body",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %s -- <state>/taskmd-body",
+   "call": 19,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %s -- <base>/repo/task/t.md",
+   "call": 20,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 5,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    {
+     "count": 1,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "outside-rule",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": false,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %s -- <base>/repo/task/t.md",
+   "call": 20,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %s -- <base>/repo/task/t.md",
+   "call": 20,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-size-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 21,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 21,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 21,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-before",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 22,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 22,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-E s/^([[:space:]]*[-*+][[:space:]]+\\[)[xX](\\])/\\1 \\2/",
+   "call": 22,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sed-after",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sed"
+  },
+  {
+   "args": "-s <state>/.work-XXXXXX/before.norm <state>/.work-XXXXXX/after.norm",
+   "call": 23,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-norm",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/.work-XXXXXX/before.norm <state>/.work-XXXXXX/after.norm",
+   "call": 23,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 5,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    {
+     "count": 1,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "next-builtin",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-norm",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": false,
+   "tool": "cmp"
+  },
+  {
+   "args": "-s <state>/.work-XXXXXX/before.norm <state>/.work-XXXXXX/after.norm",
+   "call": 23,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 5,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    {
+     "count": 1,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "next-builtin",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "cmp-norm",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": false,
+   "tool": "cmp"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 24,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 24,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 2,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "INT",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>/.work-XXXXXX",
+   "call": 24,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "TASKMD=checks-only\nDOD=<state>/taskmd-body\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-work",
+   "scenario": "taskmd-diff checks-only",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-mode-state",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "sha256-manifest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 5,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 8,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 9,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 10,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 11,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "",
+   "call": 12,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "snapshot-digest",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "sha256sum"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <base>/repo",
+   "call": 13,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cwd",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <work>/fakes/python3",
+   "call": 14,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <work>/fakes/python3",
+   "call": 14,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <work>/fakes/python3",
+   "call": 14,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- /usr/bin/cp",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cp",
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- /usr/bin/cp",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 2,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cp",
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- /usr/bin/cp",
+   "call": 15,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "realpath-cp",
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <root>/plugins/dev-workflow/skills/do-task/scripts",
+   "call": 16,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <root>/plugins/dev-workflow/skills/do-task/scripts",
+   "call": 16,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-- <root>/plugins/dev-workflow/skills/do-task/scripts",
+   "call": 16,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "realpath"
+  },
+  {
+   "args": "-I -B -c import runpy,sys; runpy.run_path(sys.argv[1], run_name=\"restore_taskmd_check\") <root>/plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py",
+   "call": 17,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 1,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "python3"
+  },
+  {
+   "args": "-I -B -c import runpy,sys; runpy.run_path(sys.argv[1], run_name=\"restore_taskmd_check\") <root>/plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py",
+   "call": 17,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "INT",
+   "stable": true,
+   "tool": "python3"
+  },
+  {
+   "args": "-I -B -c import runpy,sys; runpy.run_path(sys.argv[1], run_name=\"restore_taskmd_check\") <root>/plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py",
+   "call": 17,
+   "occurrence": 0,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": null,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "RESTORED=no\nTOUCHED=none\nTEMP=none\nREASON=interrupted\n",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "runs": 6,
+   "rust_point": null,
+   "scenario": "restore-taskmd",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "python3"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %a -- /",
+   "call": 1,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "resolve-stat",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %d:%i -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-identity",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %d:%i -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-identity",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-c %d:%i -- <state>",
+   "call": 2,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": true,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "stat-identity",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "stat"
+  },
+  {
+   "args": "-rf -- <state>",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-state",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-state",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-rf -- <state>",
+   "call": 3,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-state",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-qxF -e guard_dev\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-qxF -e guard_dev\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-qxF -e guard_dev\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 4,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-qxF -e guard_ino\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 5,
+   "occurrence": 2,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-qxF -e guard_ino\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 5,
+   "occurrence": 2,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-qxF -e guard_ino\t<n> -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 5,
+   "occurrence": 2,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": true,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": true,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "grep",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "grep"
+  },
+  {
+   "args": "-f -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-mark",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-f -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-mark",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "-f -- <base>/xdg/dev-workflow/owner-fixed",
+   "call": 6,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": null,
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "rm-mark",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "rm"
+  },
+  {
+   "args": "<base>/xdg/dev-workflow -mindepth 1 -maxdepth 1 -name owner-fixed -print",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\nNOTE: 所属の印を消した: <parent>/owner-fixed\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "find",
+   "scenario": "cleanup",
+   "signal": "TERM",
+   "stable": true,
+   "tool": "find"
+  },
+  {
+   "args": "<base>/xdg/dev-workflow -mindepth 1 -maxdepth 1 -name owner-fixed -print",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\nNOTE: 所属の印を消した: <parent>/owner-fixed\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "find",
+   "scenario": "cleanup",
+   "signal": "INT",
+   "stable": true,
+   "tool": "find"
+  },
+  {
+   "args": "<base>/xdg/dev-workflow -mindepth 1 -maxdepth 1 -name owner-fixed -print",
+   "call": 7,
+   "occurrence": 1,
+   "outcomes": [
+    {
+     "count": 6,
+     "mark_exists": false,
+     "rc": 20,
+     "rule": "tool",
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   ],
+   "retries": 0,
+   "rule": {
+    "next_builtin": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\nNOTE: 所属の印を消した: <parent>/owner-fixed\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    },
+    "tool": {
+     "mark_exists": false,
+     "rc": 20,
+     "state_exists": false,
+     "stderr": "NOTE: 保護領域を消した: <state>\n",
+     "stdout": "",
+     "timed_out": false,
+     "work_left": 0
+    }
+   },
+   "runs": 6,
+   "rust_point": "find",
+   "scenario": "cleanup",
+   "signal": "HUP",
+   "stable": true,
+   "tool": "find"
+  }
+ ],
+ "unmeasured": [
+  {
+   "point": "exec </dev/null の失敗",
+   "reason": "ここでは測らない。比較器の「/dev/null を開けない起動」(利用者の名前空間で /dev/null を開けないファイルに差し替える)で、旧版と Rust を直接比べる。名前空間を作れない機械では、比較器が未実施と記録する"
+  },
+  {
+   "point": "checks-only の cmp(before.norm と after.norm)の読み取りの EIO",
+   "reason": "Rust に同じ地点が無い。Rust は 00:35 の決定で正規化した中間のファイルを作らず、値で比べるので、そのファイルの読み取りが無い"
+  },
+  {
+   "point": "restore-taskmd の旧 helper の exec(python3 -I -B restore-taskmd.py restore …)",
+   "reason": "旧版の bash は exec で旧 helper に置き換わるので、bash の罠の地点ではない。exec の後の信号は旧 helper の Python が受け、R4R の比較のとおり"
+  }
+ ]
+}

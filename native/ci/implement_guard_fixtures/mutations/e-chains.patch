@@ -1,0 +1,58 @@
+--- a/native/crates/platform/src/restore_taskmd.rs
++++ b/native/crates/platform/src/restore_taskmd.rs
+@@ -86,7 +86,7 @@
+     fs::openat(
+         dir,
+         name,
+-        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
++        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
+         Mode::empty(),
+     )
+     .map_err(errno)
+@@ -97,7 +97,7 @@
+     fs::openat(
+         dir,
+         name,
+-        OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::NONBLOCK | OFlags::CLOEXEC,
++        OFlags::RDONLY | OFlags::NONBLOCK | OFlags::CLOEXEC,
+         Mode::empty(),
+     )
+     .map_err(errno)
+@@ -108,7 +108,7 @@
+     fs::openat(
+         dir,
+         name,
+-        OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::NOFOLLOW | OFlags::CLOEXEC,
++        OFlags::RDWR | OFlags::CREATE | OFlags::EXCL | OFlags::CLOEXEC,
+         Mode::from_raw_mode(0o600),
+     )
+     .map_err(errno)
+--- a/native/crates/cli/src/commands/restore_taskmd/operation.rs
++++ b/native/crates/cli/src/commands/restore_taskmd/operation.rs
+@@ -1122,7 +1122,7 @@
+ 
+     fn before_publish(&mut self) -> Outcome {
+         self.checkpoint("before-publish")?;
+-        self.check_chains()?;
++        // 変異 e: 段ごとの確かめを外す
+         self.check_prepared_name()?;
+         let source = Self::required(self.source_fd)?;
+         let now = self.os_fstat(source)?;
+@@ -1180,7 +1180,7 @@
+     fn verify_published(&mut self) -> Outcome {
+         #[cfg(test)]
+         self.at(Point::Enter("verify_published", 0))?;
+-        self.check_chains()?;
++        // 変異 e: 段ごとの確かめを外す
+         self.check_published_name()?;
+         let prepared = Self::required(self.prepared_fd)?;
+         self.hash_fd(prepared, "verify-failed")?;
+@@ -1235,7 +1235,7 @@
+ 
+     fn cleanup_body(&mut self, end: Instant) -> Outcome {
+         self.temp = Temp::Unknown;
+-        self.check_chains()?;
++        // 変異 e: 段ごとの確かめを外す
+         let parent = Self::required(self.parent_fd)?;
+         let name = self.temp_name.clone();
+         let info = self.stat_at(parent, &name)?;
