@@ -202,6 +202,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - R4Bのorigin判定とGit設定の確認値は#461で開発用ソースへ実装済み。未登録・未配布。契約は [docs/design.md](docs/design.md#origin判定とgit設定の確認値r4b)、exampleの必須検査と約9分の比較手順は [docs/testing.md](docs/testing.md#r4bの比較)にある。
 - R4Rのタスク本文の復元の内部部品は#473で開発用ソースへ実装済み。未登録・未配布。認めた差は2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけ(Macの旧Pythonが子の環境に足す変数を比較から外す)。比べていない4件はS3I-A #474で決める。契約は [docs/design.md](docs/design.md#タスク本文の復元の内部部品r4r)、exampleの必須検査と比較の手順(`check_r4r.py --fixture <r4r_contractの絶対パス>`。Python3.10系・root以外の通常利用者と、Cコンパイラ `cc` が要る)は [docs/testing.md](docs/testing.md#r4rの比較)にある。
 - R4Uの文書のリンク検査(旧`check_links.py`のRust版)は#480で開発用ソースへ実装済み。未登録・未配布。製品の実行物は変えていない(mainの前に呼ぶ控えの処理は検査用の実行物だけにある)。旧版との比較はCIの必須ジョブ `r4u` で流し、`build` では流さない。旧版の固定期待のテストは `scripts/test_check_links.py`(`run-all.py` が集める)。契約と全コマンド共通の決定の当て方は [docs/design.md](docs/design.md#r4ucheck_linksの文書のリンク検査)、比較の流し方と件数は [docs/testing.md](docs/testing.md#check_links-の比較r4u)にある。
+- R4D-1の診断のreftable(Gitが参照を表の形のファイルに保存する形式)読み取りは#481で開発用ソースへ実装済み。未登録・未配布であり、契約は [docs/design.md](docs/design.md#診断の-reftable-の読み取りr4d-1)、比較は [docs/testing.md](docs/testing.md#r4d-1-の-reftable-の比較) にある。
 - R4EのMarkdownの表のXLSX出力(旧`md_tables_to_xlsx.py`)は#482で開発用ソースへ実装済み。未登録・未配布であり、製品の`dev-workflow md-tables-to-xlsx`は今までどおり「未知のコマンド」で終了2。認めた差は決定の表にあるものだけで、R4Eだけに当てる差はCSVの経路を移さないこと(2026-11-11 23:02)・XLSXを圧縮しないこと・一時ファイルを使わないこと(どちらも2026-11-12 00:28)である。契約と認めた差は [docs/design.md](docs/design.md#markdown-の表の-xlsx-出力r4e)、exampleの必須検査と比較の手順(`check_r4e.py --fixture <r4e_contractの絶対パス> --legacy-python <旧版用のvenvのpython>`。比較器はPython3.10系・root以外の通常利用者で流す。旧版用のvenvは配布元の修正が入っていないCPython 3.10.11で作り、`native/ci/r4e-requirements.txt` を `--no-deps --require-hashes` で入れる。Linuxでは`strace`が要る)は [docs/testing.md](docs/testing.md#r4eの比較)にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
@@ -209,11 +210,16 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
 - C0b/C0c/R4Sの `cargo test --locked` もPython3.10系と非rootを必須とする。R4Sは同じPythonへ `requirements-dev.txt` の依存を入れる。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#loop-state用の純粋部品の検査r4s) にある。
 - R4Uの比較は、`--r4u-compare` を付けない `cargo test --locked` では流れない(`check_links` のテストは `R4U の比較は流していない: ` で始まる1行を出して終了0)。流すときは、`R4U_PYTHON` にCPythonの公式の3.10.11と同じ中身のPython(例: `uv python find 3.10.11` の出力)を渡し、`(cd native && cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare)` を流す。Cコンパイラ `cc` と非rootも必須とする。渡さずに作業機のUbuntuの3.10.12で流すと失敗する(skipしない)。CIでは必須ジョブ `r4u` が流す(2026-11-12 12:59 の決定)。手順は [docs/testing.md](docs/testing.md#check_links-の比較r4u) にある。
+- R4D-1の比較のテストには `#[ignore]` の印を付けた。そのため、通常の `cargo test --locked` では流れない(結果は `ignored`)。
+  - 比較は、下のコマンドの塊の `-- --ignored --exact …` の行か `build.py r4d1` で流す。
+  - CIは `r4d1` のジョブで流す。
+  - reftableを作れるgit 2.45以上・Python3.10系・非rootが必須で、`requirements-dev.txt` の依存は要らない。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
 export CARGO_TARGET_DIR="$(mktemp -d)"
 (cd native && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input)
 python3 -B native/ci/check_workflow.py
 python3 -B native/ci/build.py test
 python3 -B -m unittest discover -s scripts -p 'test_task_directory.py'
