@@ -11,6 +11,7 @@ mod precheck;
 mod publish;
 mod report;
 mod secret_profiles;
+#[cfg(target_os = "linux")]
 mod strerror_table;
 mod tools;
 mod tracked;
