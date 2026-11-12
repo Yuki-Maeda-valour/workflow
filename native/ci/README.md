@@ -320,8 +320,9 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 - 比較器は、範囲ごとのケースの一覧(群ごとの件数とラベルの一覧のsha256。`implement_guard_fixtures/case_lists.json`)と、Linuxではerrnoの文の表(`gen_strerror.py --check`)も照らします。
 - 上限は`implement-guard`が45分、`implement-guard-universal`が20分です。手元の所要時間の2倍以上にしました。`build`と`verify-universal`の上限は変えていません。
   - 手元(基準の容器・Linux x86_64・2026-11-12)の範囲`full`は、実装担当の回で700秒と727秒、管理担当の検証の回(commit `c4ded694`)で532秒でした(比較器の自己検査と旧selftestの2通りを含みます。実装担当の回は、ほかの検査と同時に流しました)。
+  - CIの直しの後(2026-11-13・実装担当の回)の範囲`full`は、554秒でした(比較器の自己検査23件と、Pythonで書く記録の段を含みます)。
   - 45分(2700秒)は、最も長い727秒の約3.7倍で、2倍以上の目安を満たします。
-  - 範囲`signed`は、実装担当の回で19秒でした(比較器の自己検査22件を含みます)。20分は、その2倍以上です。
+  - 範囲`signed`は、実装担当の回(2026-11-13)で25秒でした(比較器の自己検査23件を含みます)。20分は、その2倍以上です。
   - CIの4機種とMacでの時間は未確認です。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`implement_guard_contract`は`native-dist.tar`の5ファイルへ入りません。
 - `distribution`の`needs`に2つのジョブを足しました。全ジョブの成功がマージの条件なので、2つのジョブも必須です。`check_workflow.py`の`REQUIRED_NATIVE_JOBS`・`IMPLEMENT_GUARD_JOBS`が、ジョブ・工程・機種・`needs`を確かめます。

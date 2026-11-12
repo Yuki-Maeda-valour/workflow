@@ -438,6 +438,7 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
   - `taskmd_diff.rs`・`restore.rs`・`cleanup.rs`: 3つのサブコマンドの本体。`cleanup.rs` の `rm -rf` は、親の fd から辿ります。
   - `childenv.rs`: 本文の復元の cp の子の環境。
   - `tests.rs`: 単体テスト(23件)。旧版を測った固定期待(`native/ci/implement_guard_fixtures/expected_old.json`)と同じ地点を、差し込み点で起こして照らします。
+    - 故障の固定期待と照らす1件(`faults_match_the_measured_old_version`)は、Linuxだけで流します。Linuxで測ったerrnoの文が、Macの文と違うためです。Macでは22件です。
 - `restore.rs` は、exec の時点に当たる所で、R4Rの公開関数(`start`・`parse_request`・`Restore`・`emit`・`exit_flush`・`exit_close` など)を、`examples/r4r_contract.rs` と同じ順に、同じプロセスで呼びます。R4Rの中身は変えていません。errno の文は `restore_taskmd/errno_text.rs`(Linuxは生成物の `errno_glibc.rs`、Macは `platform` の `strerror_text`)から出します。
 - `crates/platform/src/implement_guard.rs` は、起動の前の記録・信号の扱いと mask・umask・`/dev/null` への差し替え・fd の種類・環境の置き換え・`faccessat`・地域設定の判定・`rm -rf` の走査(`openat`・getdents・`fstatat`・`unlinkat`)を、安全な関数で公開します。
   - S3I-A の OS の呼び出し(`libc` の関数と `unsafe`)は、このファイルの安全な関数の中だけにあります。例は、信号の扱いと mask・`raise`・umask・fd の差し替えと種類(`dup2`・`fstat`・`fcntl`・`BorrowedFd::borrow_raw`)・環境の読み取りと置き換え(`environ`・`clearenv`・`setenv`)・利用者の番号とログインのシェル(`getuid`・`geteuid`・`getpwuid`)・`faccessat`・`pthread_self`・Macの `newlocale` です。全部の並びではありません。全部は、そのファイルの `unsafe` の所で見てください。

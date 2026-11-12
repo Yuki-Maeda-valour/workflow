@@ -839,6 +839,9 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
 - 比較はPython3.10系・root以外の通常利用者で行い、Cコンパイラ(`cc`)を要る。どれかが欠ければ、比較器は省略せずに失敗する。
 - 版に依る欄(道具の文・bashの文・`strerror` の文など)があるので、範囲 `full` は基準の環境で流す。基準はCIのUbuntu 24.04(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・grep 3.11・glibc 2.39・CPython 3.10.11)で、手元ではこれと同じ版の容器を使う。基準と違う機械では、範囲 `full` を失敗にする(skip にしない)。
 - 通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しない。
+- exampleの単体テストのうち、故障の固定期待(`expected_old.json` の故障の13件)と照らす `faults_match_the_measured_old_version` は、Linuxだけで流す。
+  - この固定期待は、Linux(glibc 2.39)の旧版に `LD_PRELOAD` で故障を起こして測った。errno の文(例: EBUSY の `Device or resource busy`)が、Macの `strerror_r` の文(`Resource busy`)と違う。
+  - Macでは、故障の差し込み点の確かめが無い。
 
 リポジトリ直下で実行する。出力先はリポジトリ外に置く。
 
@@ -857,8 +860,11 @@ python3 -B native/ci/implement_guard_mutations.py            # Rust のソース
 - 範囲は `--scope full|mac|signed` で選ぶ。省略はLinuxが `full`、Macが `mac` である。
   - `full`: 下の群の全部と、ほかの段の全部。
   - `mac`: 引数と使い方・保護領域の確かめ・記録の読み取り・taskmd-diff・restore-taskmd の停止(8件)・cleanup。Macで比べられないケース(`/dev/full`・UTF-8でない名前・mode 1700・GNUの道具の文が出るケースなど)は外し、群ごとの件数と理由を「未実施」の行に出す。bash 4.0以上が無いMacでは、旧版との比較を未実施と記録し、Linuxで旧版を測った固定期待(13件)と照らす。
+    - 旧版の `take` は、bash 4.0以上が無いと `bash 4.0 以上が必要` で止まる。そこで、13件のうち配置の要る8件の記録は、比較器が旧版の `take` と同じ形で、Python(`PyTake`)で書く。範囲 `signed` でも同じである。
+    - Pythonで書く記録は、比較器の配置(1つのリポジトリ。下のリポジトリ・`.gitmodules`・unmerged が無い)だけを写す。写していない配置では、推し量らずに止める。
   - `signed`: 署名後の実行物が動くことの確かめ(引数と使い方・保護領域の確かめ・`taskmd-diff` の `same` の3件)。
-- 比較器の自己検査(`test_implement_guard.py`。22件)を、どの範囲でも比較器の中から流す。OSで成り立たない件と、bash 4.0以上が無いときに旧版を起動する件は、skip にして理由を「未実施」の行に出す。
+- 比較器の自己検査(`test_implement_guard.py`。23件)を、どの範囲でも比較器の中から流す。OSで成り立たない件と、bash 4.0以上が無いときに旧版を起動する件は、skip にして理由を「未実施」の行に出す。
+  - 23件には、bash 4.0以上が無いMacをまねる1件を含む。偽の bash 3.2(版を聞かれると3を返し、ほかの起動には `bash 4.0 以上が必要` と終了値2を返す)をPATHの先頭に置き、範囲 `mac` と `signed` を別のプロセスで流す。固定期待の13件がすべて比べられて合格することを確かめる。Macでは流さない(本物の範囲 `mac`・`signed` が同じ道を通る)。
 - 比べるのは、終了値(信号で終わればその番号)・stdout・stderr・記録の中のファイル・所属の印・タスク本文・cp の観測器が記録した子の環境と argv・偽の `git` の起動の回数である。
   - 置き換えるのは、旧版の実行環境のパスの既知の欄(bashの文の先頭の呼出名など)・`Current thread` の値・一時フォルダの16進32桁・`printf` の `%(` の誤りの文の1文字だけである。
   - 子の環境は、追加の決定4の6個(`CAP`・`RP`・`SP_DIR`・`helper`・`helper_dir`・`python_path`)だけを両方の集合から外して比べる。外した名前ごとの旧版とRustの有無と値は、`S3I-A: 決定 4 の名前の記録:` の行にケースごとに出す。Rustの側は、受け継いだ値と同じか、受け継いでいなければ無いことを確かめる。
@@ -881,13 +887,17 @@ python3 -B native/ci/implement_guard_mutations.py            # Rust のソース
 | 合計 | 597 | 20 |
 
 - 境界の印の件数は、引数が正しい `take` と、記録の読み取りまで通った `config-check`・`compare` で、Rustが印(終了値99)で止まった件である。比べる件で印を受けたら失敗にする。
-- 群のほかの段: 決定D5の3件・PATHを絞ったRustの3件・詰めたFIFO(読み手が読まないパイプ)で止めて TERM・INT・HUP を送る48件・strace(プロセスの起動を記録する道具)の3件・`/dev/null` を開けない起動の4件・fd 0〜2を閉じた起動の32件(旧版とRustをそれぞれの固定期待で照らす)。
+- 群のほかの段: 決定D5の3件・PATHを絞ったRustの3件・詰めたFIFO(読み手が読まないパイプ)で止めて TERM・INT・HUP を送る48件・Pythonで書く記録の14件の配置・strace(プロセスの起動を記録する道具)の3件・`/dev/null` を開けない起動の4件・fd 0〜2を閉じた起動の32件(旧版とRustをそれぞれの固定期待で照らす)。
+  - Pythonで書く記録の段(`run_record_writer`)は、bash 4.0以上が無いMacで比較器が書く記録が、旧版の `take` の記録と同じことを確かめる。配置は、固定期待のうち配置の要る8件と、保護領域の置き場の候補を変えた `taskmd-diff`・`cleanup` の6件(`..` を含む `XDG_STATE_HOME`・HOMEの `.local/state`・HOMEの `.cache`)である。
+    - 同じ配置で、旧版の `take` の後に記録をPythonで書き直す。記録の中のファイル(名前・種類・mode・リンクの数・中身)・所属の印・`take` の stdout と stderr を比べる。
+    - 旧版の `take` の記録を旧版で読んだ結果と、Pythonの記録を旧版とRustで読んだ結果(終了値・stdout・stderr)が同じことを確かめる。固定期待の8件は、その固定期待とも比べる。
   - strace の段は、strace が無いか ptrace(他のプロセスを見張る仕組み)が使えなければ、未実施と記録する。
   - `/dev/null` を開けない起動は、利用者の名前空間(`unshare -U -m`。権限なしで、そのプロセスだけのファイルの見え方を作る仕組み)を作れる機械だけで流す。作れなければ、未実施と記録する。手元の基準の容器では、`--security-opt seccomp=unconfined --security-opt apparmor=unconfined` を付けて流した。
 - 旧selftestは、旧版流しとRust流しの2通りで流す(群Lの変異は含めない)。Rust流しは、`taskmd-diff`・`restore-taskmd`・`cleanup` と使い方をRustへ、`take`・`config-check`・`compare` を旧版へ渡す包みを使う。
   - 確かめの行は611行で、Rustを通った行は583行・旧版だけの行は28行である。Rustを通った行の最低件数(583)を固定する。
   - Rust流しで FAIL を許すのは、固定の一覧(`selftest_allowed.json`。J9・J10・P8の28行)だけである。一覧の外の FAIL と、一覧の中の PASS は失敗にする。
 - 管理担当の検証(2026-11-12 22:45に終わった回。機密と既存の未追跡を持ち込まない検証用コピー)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・532秒で合格した。
+- 実装担当の回(2026-11-13。CIの直しの後。手元の基準の容器)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・554秒で合格した。Pythonで書く記録の段は20.8秒だった。
 
 #### 旧版の測定の照らし(手元だけ)
 
@@ -911,6 +921,7 @@ python3 -B native/ci/implement_guard_mutations.py            # Rust のソース
 
 - Macの実機・CIでの比較(範囲 `mac`・`signed`)・最低のOSの版。範囲 `mac` のうち、Macで比べないとしたケースの一部(mode 1700・NULを含む印など)は、Macでの違いを推測で決めた。
 - MacのCIの実行機に bash 4.0以上があるか。無ければ、旧版との比較は固定期待の13件だけになる。
+- Macで、Pythonで書く記録の8件が固定期待と合うか。旧版の `take` の記録と同じことは、Linuxでだけ確かめた。
 - CIのUbuntuの実行機の strace と ptrace の有無、利用者の名前空間を作れるか(作れなければ、その段は未実施と記録される)。
 - 4機種のCIの `implement-guard`・`implement-guard-universal` のジョブの時間。
 - 旧版の規則の外の遅い罠が起きる仕組み。
