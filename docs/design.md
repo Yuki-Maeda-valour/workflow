@@ -1380,6 +1380,92 @@ R4U の実装と検査だけに当てる。ほかのコマンドの差へは広�
 
 API は [native/README.md](../native/README.md#r4ucheck_linksの文書のリンク検査)、比較の流し方と件数は [testing.md](testing.md#check_links-の比較r4u)に記す。
 
+### 診断の reftable の読み取り(R4D-1)
+
+#481 で、診断 9 本(`diagnostic-*.py`)の Rust 移植(R4D)の 1 つ目の単位を、開発用ソースへ実装した。
+製品のコマンドへは登録しない。配布も変えない。呼出元は無い。
+reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式である。
+table は reftable の 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体である。
+section は table の中の、種類ごとのまとまり(参照・object・log など)、block は section の中の 1 つの区切り、varint は長さが変わる整数の書き方、header と footer は table の頭と末尾の管理情報、CRC は誤りを見つけるための検査値である。
+index は、目的の block を探すための索引の block、シンボリック参照は、ほかの参照を指す参照(例 `HEAD` → `refs/heads/main`)である。
+
+R4D の 5 つの単位(Issue は、R4D-1 が #481、R4D-2〜R4D-5 が #484〜#487)。
+
+| 単位 | 対象 |
+|---|---|
+| R4D-1 | `diagnostic-reftable.py` と、診断の予算の型(`diagnostic-runtime.py` の `LIMITS`・`Failure`・`Budget`) |
+| R4D-2 | 実行の土台(`Reader`・`Runtime`・子の監督・後始末・送出)と `diagnostic-output.py` |
+| R4D-3 | 保護記録と専用の管理領域(`diagnostic-state.py`・`diagnostic-private.py`・`diagnostic-paths.py`) |
+| R4D-4 | 除外の計画(`diagnostic-plan.py`・`diagnostic-git.py` の引数の解析と検査・機密指定の読み取り) |
+| R4D-5 | 観測と入口(`diagnostic-views.py` の 7 操作・除外の照合・`run` と入口全体) |
+
+#### 維持する性質
+
+- 旧版と同じ順で処理する。予算を確かめる位置・読む範囲・失敗の理由の決まり方・閉じる順まで 1 対 1 で合わせる。
+  - 入力は呼出元が渡す専用コピーだけを読む。Git は起動しない。
+  - 名前と指す先は bytes のまま返す。名前の文法・シンボリック参照の解決・linked worktree(追加の作業場所)の合成は呼出元の仕事である。
+  - log と object の section の本文は解釈しない。
+- 上限の数値と、失敗の理由の字面と終了値は旧版のまま変えない。
+  - 入力の合計 200MiB・参照の名前と指す先 1024 バイト・一覧の 1 行 4096 バイト・varint 10 バイト・読む単位 64KiB。
+- 合成の結果は Python の dict と同じ並びにする。上書きは位置を保ち、削除の後に足し直すと末尾に付く。
+- 予算は呼出元から受け取ったものを使い、部品の中で作り直さない。
+
+#### 失敗の理由と終了値
+
+| 理由 | 終了値 | 出る場面 |
+|---|---|---|
+| `invalid-reftable`・`invalid-reftable-varint`・`invalid-reftable-file`・`invalid-reftable-list`・`invalid-reftable-directory`・`invalid-reftable-stack-order`・`changed-reftable`・`reftable-hash-mismatch`・`incomplete-metadata` | 23 | table の解釈・一覧の文法・更新番号の順・読む前後の変化・ハッシュの形式・ENOENT |
+| `management-input-limit`・`reftable-io` | 20 | 開いた大きさの合計の超過・ほかの OS の失敗・閉じる失敗 |
+| `interrupted`・`time-limit`・`management_output-limit` | 20 | 予算の失敗 |
+
+- 失敗は 3 種類に分ける。reftable の失敗、予算の失敗、旧版で `OSError` でない例外になる入力(パスに NUL を含む。旧版は `ValueError`)である。
+- NUL の判定は、旧版と同じく最初の予算の確かめの後に置く。入口での割り当ては R4D-5 で行う。
+- ハッシュの形式の検査は、予算の確かめより先に行う。
+- 閉じる失敗が 1 つでもあれば、それまでの結果や失敗より優先して `reftable-io`(20)にする。
+  - 閉じる順は、table を開いた順 → `tables.list` → フォルダである。
+  - 開く途中の失敗のときに閉じる失敗が起きたら、元の失敗の代わりに `reftable-io`(20)になる(旧版の :65-67 と同じ)。
+
+#### 予算の型
+
+- 9 種類の量(`management_copy`・`management_output`・`management_entries`・`worktree_entries`・`body`・`patch_copy`・`git_output`・`stderr`・`json`)と上限は、`LIMITS` と同じ値である。
+- 期限は作るときに 1 回だけ決める。量は工程をまたいで累積し、失敗しても戻さない。
+- 順は、停止の印 → 残り時間 → 足す → 上限である。時刻は浮動小数の秒で、残り時間は `max(0.0, 期限 - 時計())` である。
+- 足し算が桁あふれするときは、使った量を `u64::MAX` に張り付けて `<量の名前>-limit` にする。
+- C0b の予算(量が 1 系統)は使わない。
+- 検査のときだけ使える差し込み(時計・`management_output` へ足す量・上限の表)は `#[cfg(test)]` に置く。製品の経路から期限や量を変える口は無い。
+
+#### EINTR の扱い
+
+EINTR は、信号で呼び出しが中断されたときの失敗である。旧版の Python 3.10.11 は、CPython v3.10.11 の `Modules/posixmodule.c` と `Python/fileutils.c` で次のとおり確かめた。
+
+- 呼び直す: `os.open`・`os.fstat`・`os.read`。
+- 呼び直さない: `os.stat`・`os.lseek`・`os.close`。`os.close` は失敗を `OSError` にする。
+
+足した OS の部品も、開く・状態を取る(fstat)・読む処理だけを呼び直す。パスと名前の調べ(`lstat_path`・`HeldDir::metadata`)と閉じる処理は呼び直さない。
+
+#### 足した OS の部品と自作の unsafe
+
+`crates/platform/src/fs.rs` の既存の関数は変えず、次を足した。C0b の `HeldFile`・`ReadSession`・`read_verified` とは混ぜて使わない。
+
+- `lstat_path(path)`: 最後の段だけリンクを辿らずに調べる。相対パスも受ける。空のパスは検査せずに OS へ渡す。
+- `HeldDir::open_path`: `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` で開く。
+- `HeldDir::snapshot`・`HeldDir::open_plain`・`HeldDir::close`、`PlainFile::snapshot`・`read_at`・`close`。
+- 状態は、旧版の 6 欄(dev・ino・mode・size・mtime・ctime)を `FileSnapshot` 全体の一致で比べる(`SnapshotMatch::Full` と同じ比べ方。size と時刻を見ない `DirectoryPath` は使わない)。
+
+閉じる失敗を返すために、`platform/Cargo.toml` で rustix の `try_close` 機能を有効にした。機能の指定は `Cargo.lock` に記録されないので、`Cargo.lock` は変わらない。
+
+- `try_close` は `unsafe` の関数である。R4D-1 で、自作の `unsafe` を `platform/src/fs.rs` の `close_owned` の 1 か所だけ足した。
+  - 前の「C0b/C0c/R4A は自作の `unsafe` を増やさない」の記録は、その時点の事実であり、書き換えていない。
+  - R4D-1 が足した関数は、どれも安全な関数として公開する(`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使う。[段階 0a の決まり](#rust-の構成とビルド入力段階-0a)のとおり)。
+- 安全である理由は `SAFETY` の注釈に書いた。自分が所有する fd を `into_raw_fd` で取り出し、1 回だけ閉じる。失敗しても再び使わない。取り出した後に `Drop` で再び閉じる道は無い。
+- rustix の文書は「この機能があることは、使うべきだという意味ではない」と書いている。それでも使う理由は、旧版が閉じる失敗を `reftable-io` にし、入出力の故障は旧版に合わせると決めたためである。
+
+#### 比較
+
+旧版と Rust を、同じ入力・同じ予算の条件で比べる。比較器(`native/ci/check_diagnostic_reftable.py`)は、製品の符号化を使わない table と、本物の git が作った reftable の両方を作る。
+UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
+
 ### diff-snapshotの全モード(S3D)
 
 [Issue #472](https://github.com/Yuki-Maeda-valour/workflow/issues/472)で、`diff-snapshot.sh`の全モードを開発用Rustソースへ移した。
