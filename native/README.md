@@ -330,7 +330,7 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
   - `lstat_path(path)`: 最後の段だけリンクを辿らずに調べます。
   - `PlainFile`: `snapshot()`・`read_at(offset, buf)`・`close()` を持ちます。
   - `HeldDir::open_path`・`snapshot`・`open_plain`・`close`: `close` は閉じる失敗を返します。
-  - 自作の `unsafe` は `close_owned` の 1 か所です。
+  - R4D-1 が足した自作の `unsafe` は、`close_owned` の 1 か所です。
 
 `diagnostic_git` は `commands/mod.rs` に登録していません。検査は `tests/diagnostic_reftable.rs` が `#[path]` で読み込みます。
 
@@ -390,7 +390,7 @@ Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix`・R4Rの `libc 0.2.191`(`platform` だけ)と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
 `rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。
 R4Rも子を `std::process::Command` で起動します。ただし、子だけの `RLIMIT_FSIZE`・余分な fd を継がせない印・子の信号の既定と mask・旧版と同じ `execv` は、exec の前に子の中で動く処理が要ります。そのため `platform` の `restore_taskmd` だけが `pre_exec` と `libc` を使います。最初の信号を記録する処理と mask、Mac の地域設定の判定、環境の `LC_CTYPE` の書き換えも、同じファイルの `unsafe` に置きます。`rustix` の採用の根拠と、R4Rが `libc` と `unsafe` を使う理由は、[設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
-R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。自作の `unsafe` は `platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
+R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。R4D-1 が足した自作の `unsafe` は、`platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
