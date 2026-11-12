@@ -356,12 +356,6 @@ class DeepTreeTests(unittest.TestCase):
 class MacFixtureTests(unittest.TestCase):
     """Mac の固定期待(cases-macos.json): Mac の CI の 2 種類のログから取り出して 1 つにしたもの。"""
 
-    # Task 3.1b で足したケース。Mac の値は、Mac 2 種類の CI のログ(比較器が、固定期待に無いケースだけを旧版で
-    # 測って出したもの)から --extract-fixture で足す。それまで Mac の比較は不合格になる(ここでは欠けを許す)。
-    MAC_PENDING = frozenset({
-        *(f"signal-args-none-sigint-{mode}-{when}" for mode in ("pipe", "unbuffered", "pty") for when in ("1", "last")),
-        "signal-env-hashseed-bad-word-sigint", "signal-stdio-stdin-dir-sigint"})
-
     @classmethod
     def setUpClass(cls):
         with patch.object(checker, "OS_NAME", "macos"):
@@ -369,13 +363,12 @@ class MacFixtureTests(unittest.TestCase):
             cls.doc = checker.load_fixture_document(cls.path)
         cls.linux = json.loads(checker.CASES_FIXTURE.read_text(encoding="utf-8"))
         cls.cases, cls.step2 = checker.all_cases()
-        _, cls.missing = checker.os_fixture_plan(cls.linux["case_ids"], cls.doc, cls.path.name)
 
     def test_document_is_read_on_mac_and_matches_the_case_list(self):
         self.assertEqual("cases-macos.json", self.path.name)
-        # Mac の一覧は、Linux の一覧から、まだ Mac の値を足していないケースだけを除いた形(順は同じ)。
-        self.assertLessEqual(set(self.missing), self.MAC_PENDING)
-        self.assertEqual([i for i in self.linux["case_ids"] if i not in self.missing], self.doc["case_ids"])
+        # Mac の一覧は Linux の一覧と同じ(欠けたケースを許さない)。
+        self.assertEqual(self.linux["case_ids"], self.doc["case_ids"])
+        self.assertEqual([], checker.os_fixture_plan(self.linux["case_ids"], self.doc, self.path.name)[1])
         self.assertEqual(["arm64", "x86_64"], self.doc["machines"])
         self.assertTrue(self.doc["legacy_recorded"])
         # Linux では、この OS の固定期待として読まない(OS の欄が違う)。
@@ -387,10 +380,7 @@ class MacFixtureTests(unittest.TestCase):
         self.assertLessEqual(reasons, {checker.SKIP_DEVFULL, checker.SKIP_NON_UTF8})
         for case in self.cases:
             with self.subTest(case=case.id):
-                if case.id in self.missing:
-                    self.assertNotIn(case.id, self.doc["cases"])
-                    self.assertNotIn(case.id, self.doc["skipped"])
-                elif case.step2 is None and not case.fixture:
+                if case.step2 is None and not case.fixture:
                     self.assertNotIn(case.id, self.doc["cases"])
                 elif case.id in self.doc["skipped"]:
                     self.assertNotIn(case.id, self.doc["cases"])

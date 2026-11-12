@@ -225,6 +225,14 @@
   "signal-write-sigint-pty-2",
   "signal-write-sigint-pty-3",
   "signal-write-sigint-pty-last",
+  "signal-args-none-sigint-pipe-1",
+  "signal-args-none-sigint-pipe-last",
+  "signal-args-none-sigint-unbuffered-1",
+  "signal-args-none-sigint-unbuffered-last",
+  "signal-args-none-sigint-pty-1",
+  "signal-args-none-sigint-pty-last",
+  "signal-env-hashseed-bad-word-sigint",
+  "signal-stdio-stdin-dir-sigint",
   "walk-fifo-writer",
   "rglob-depth-988",
   "rglob-depth-989",
@@ -3140,6 +3148,72 @@
     "sha256": "ede0c784699192136c33a8f726fc0402b5f7ef35e1953e0de7ff5a3650c06f1d"
    }
   },
+  "signal-args-none-sigint-pipe-1": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "822ce99e1ebb23068dc8561738dc69250bfff454dbc2f1c88b76a2ebe4e52f35"
+   }
+  },
+  "signal-args-none-sigint-pipe-last": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "822ce99e1ebb23068dc8561738dc69250bfff454dbc2f1c88b76a2ebe4e52f35"
+   }
+  },
+  "signal-args-none-sigint-pty-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\r\n\r\n使い方:\r\n    python3 check_links.py <ファイルまたはディレクトリ>...\r\n\r\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\r\n検査対象:\r\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\r\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\r\n     無ければ WARN — コード片の可能性があるため error にはしない)\r\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\r\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "2eea58fc78dd862ec5d947558edce79ef7a44635e95b450409b774533b079bc7"
+   }
+  },
+  "signal-args-none-sigint-pty-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\r\n\r\n使い方:\r\n    python3 check_links.py <ファイルまたはディレクトリ>...\r\n\r\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\r\n検査対象:\r\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\r\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\r\n     無ければ WARN — コード片の可能性があるため error にはしない)\r\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\r\n\r\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "4f7fb073fceba1699aa478ac0e98229d799f7bde24b68ac4b1250f68de7728f6"
+   }
+  },
+  "signal-args-none-sigint-unbuffered-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "2eea58fc78dd862ec5d947558edce79ef7a44635e95b450409b774533b079bc7"
+   }
+  },
+  "signal-args-none-sigint-unbuffered-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "4f7fb073fceba1699aa478ac0e98229d799f7bde24b68ac4b1250f68de7728f6"
+   }
+  },
+  "signal-env-hashseed-bad-word-sigint": {
+   "exit": -2,
+   "frames": [],
+   "stderr": "Fatal Python error: ",
+   "stdout": "",
+   "writes": {
+    "count": 1,
+    "sha256": "d49f4b5baf9258537acb788722f3b938957a0e43505101f051bf61adb1435910"
+   }
+  },
   "signal-fifo-sigint-pipe": {
    "exit": -2,
    "last_line": "KeyboardInterrupt",
@@ -3262,6 +3336,16 @@
    "writes": {
     "count": 1,
     "sha256": "9761a2404c60ad8a332e20a668f43b221076639c8d42eb875c929590b02abc9e"
+   }
+  },
+  "signal-stdio-stdin-dir-sigint": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: init_sys_streams: <stdin> is a directory, cannot continue\nPython runtime state: core initialized\n\nCurrent thread 0x<thread> (most recent call first):\n  <no Python frame>\n",
+   "stdout": "",
+   "writes": {
+    "count": 13,
+    "sha256": "050968d69e2adf9eead74b1cf417f8bed4b1c77e9a82bf42a61bacd21f9c8574"
    }
   },
   "signal-write-sigint-pipe-1": {

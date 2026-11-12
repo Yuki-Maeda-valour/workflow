@@ -1,11 +1,16 @@
 #![deny(unsafe_code)]
-//! R4U(#480)の専用比較を通常の `cargo test` で必ず流す。製品への登録は行わない。
+//! R4U(#480)の専用比較の入口。比較は `--r4u-compare` を受けたときだけ流す(CI はジョブ `r4u`)。
+//! 製品への登録は行わない。
 //! - `--check-links-fixture <引数…>` を受けたときだけ、実際の標準入出力で検査対象として動く
 //!   (旧版を `python3 check_links.py <引数…>` で起動したときと同じ動作)。
 //! - `--check-links-matcher <生成入力の JSON>` を受けたときは、2 種類の照合を生成入力の全件に当てた結果を
 //!   JSON で出す(比較器が、旧版の関数を 1 回の Python の起動で当てた結果・固定期待と比べる)。
-//! - それ以外では `native/ci/check_r4u.py`(自分を検査対象として渡す)と `native/ci/test_r4u.py`
-//!   (比較器の自己検査)を必ず起動する。どちらかの失敗・未実行・時間切れ(全体 900 秒)でテストを落とす。
+//! - テストの引数 `--r4u-compare`(`cargo test … --test check_links -- --r4u-compare`)を受けたときは、
+//!   `native/ci/check_r4u.py`(自分を検査対象として渡す)と `native/ci/test_r4u.py`(比較器の自己検査)を
+//!   必ず起動する。どちらかの失敗・未実行・時間切れ(全体 900 秒)でテストを落とす。
+//! - 引数が無いとき(素の `cargo test --locked`。CI の build)は、比較を流していないことと流し方を 1 行出して
+//!   終了 0 にする(比較の合格とは数えない)。比較は CI のジョブ `r4u`(`build.py r4u`)で流す
+//!   (2026-11-12 12:59 の決定)。
 #[path = "../src/commands/check_links/mod.rs"]
 // 文字列だけの部品のうち、表を写して照らす関数は tests/check_links_units.rs だけが使う。
 #[allow(dead_code)]
@@ -22,6 +27,13 @@ use std::time::{Duration, Instant};
 
 const FIXTURE_FLAG: &str = "--check-links-fixture";
 const MATCHER_FLAG: &str = "--check-links-matcher";
+/// 比較器と自己検査を起動するテストの引数(CI のジョブ `r4u` が渡す)。
+const COMPARE_FLAG: &str = "--r4u-compare";
+/// 引数が無いときに出す 1 行。比較器の結果の行の頭(`R4U の比較: `)とは別の文字列にする
+/// (build のログにこの頭が無いことで、build で比較を流していないことを確かめるため)。
+const NOT_RUN: &str = "R4U の比較は流していない: 流すときは R4U_PYTHON=<本家 3.10.11 の Python> を渡して \
+     cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare(CI はジョブ r4u の \
+     python3 -B native/ci/build.py r4u --platform <機械>)";
 /// 比較全体の上限。task-digest と同じく、Mac Intel の変動に備えて余裕を持たせる。
 const DEADLINE: Duration = Duration::from_secs(900);
 
@@ -126,7 +138,14 @@ fn main() -> std::process::ExitCode {
         assert_eq!(args.len(), 2, "生成入力の JSON を 1 つ渡す");
         return matcher_fixture(Path::new(&args[1]));
     }
-    assert!(args.is_empty(), "専用比較を省く引数は受け付けない");
+    if args.is_empty() {
+        println!("{NOT_RUN}");
+        return std::process::ExitCode::SUCCESS;
+    }
+    assert!(
+        args.len() == 1 && args[0] == COMPARE_FLAG,
+        "受け付ける引数は {COMPARE_FLAG} だけ: {args:?}"
+    );
     assert!(
         captured_before_main(),
         "main の前の控えが実行物に入っていない"

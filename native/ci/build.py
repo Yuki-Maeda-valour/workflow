@@ -287,9 +287,30 @@ def package(downloads, work):
     pack_tar(bundle, work / "native-dist.tar", [*BINARY_PATHS, "SHA256SUMS", "build-info.json"])
 
 
+# R4U(#480)の比較は、build と verify-universal の時間の枠に入れず、別のジョブ r4u で流す(2026-11-12 12:59 の
+# 決定)。build の成果物は受け取らず、ジョブの中で検査用の実行物(cargo test の check_links)を作る。
+R4U_LEGACY_PYTHON = "3.10.11"
+R4U_COMMAND = ("cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "check_links", "--", "--r4u-compare")
+
+
+def r4u(name, work):
+    """Rust 1.99.1 と本家 3.10.11 の Python を確かめ、その Python を R4U_PYTHON に渡して R4U の比較を流す。"""
+    target_config(name)
+    rustc = run(["rustc", "--version"], capture=True)
+    if not rustc.startswith("rustc " + TOOLCHAIN + " "):
+        raise ValueError(f"R4U の比較は Rust {TOOLCHAIN} が必要です: {rustc}")
+    implementation, version = platform.python_implementation(), platform.python_version()
+    if implementation != "CPython" or version != R4U_LEGACY_PYTHON:
+        raise ValueError(f"R4U の旧版用の Python は CPython {R4U_LEGACY_PYTHON} が必要です: {implementation} {version}")
+    with tempfile.TemporaryDirectory(prefix="r4u-", dir=work) as temporary:
+        env = build_environment(Path(temporary), name)
+        env["R4U_PYTHON"] = sys.executable
+        run(list(R4U_COMMAND), env=env)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -297,7 +318,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -319,6 +340,8 @@ def main():
             verify_universal(downloads, work)
         elif args.command == "package":
             package(downloads, work)
+        elif args.command == "r4u":
+            r4u(args.platform, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

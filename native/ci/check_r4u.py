@@ -3,8 +3,9 @@
 
 使い方:
     python3 -B native/ci/check_r4u.py --fixture <Rust の検査用の実行物>
-        cargo test(native/crates/cli/tests/check_links.rs)から呼ばれる。必須のケースを全部比べ、
-        ID ごとの結果と、組ごとの件数を出す。
+        cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare
+        (native/crates/cli/tests/check_links.rs。CI はジョブ r4u の build.py r4u)から呼ばれる。必須のケースを
+        全部比べ、ID ごとの結果と、組ごとの件数を出す。素の cargo test --locked では呼ばれない。
     python3 -B native/ci/check_r4u.py --measure-cases [--out <ファイル>]
         Linux で旧版を動かし、ケースごとの固定期待(cases-linux.json)を作る。
     python3 -B native/ci/check_r4u.py --measure-step2 [--out <ファイル>]
