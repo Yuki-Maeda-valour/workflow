@@ -302,7 +302,7 @@ class WorkflowTests(TempCase):
         folder = self.root / ".github/workflows"
         folder.mkdir(parents=True)
         make_dist.write_json(folder / "one.yml", self.document)
-        make_dist.write_json(folder / "two.yaml", self.document)
+        make_dist.write_json(folder / "two.yaml", {**self.document, "name": "Native copy"})
         self.assertEqual(check_workflow.check_workflows(self.root), [])
         (folder / "two.yaml").write_text('on: [pull_request_target]\n')
         self.assertTrue(check_workflow.check_workflows(self.root))
@@ -391,7 +391,7 @@ class WorkflowTests(TempCase):
                 self.assertTrue(check_workflow.check_document(document))
 
     def test_event_value_mutations_fail(self):
-        for event in ("pull_request", "push", "workflow_dispatch"):
+        for event in ("pull_request", "workflow_dispatch"):
             for value in ({"tags": ["*"]}, {"branches": ["main"]}, {"paths": ["native/**"]},
                           {"types": ["closed"]}, {"inputs": {}}, {"future-setting": {}},
                           [], "", True):
@@ -402,6 +402,89 @@ class WorkflowTests(TempCase):
             document = copy.deepcopy(self.document)
             document["on"][event] = None
             self.assertEqual(check_workflow.check_document(document), [])
+
+    def test_push_event_is_main_only(self):
+        self.assertEqual(self.document["on"]["push"], {"branches": ["main"]})
+        for value in ({}, None, {"branches": ["main", "task/*"]}, {"branches": ["*"]}, {"branches": "main"},
+                      {"branches": ["main"], "tags": ["*"]}, {"branches-ignore": ["main"]},
+                      {"tags": ["*"]}, {"paths": ["native/**"]}, [], "", True):
+            document = copy.deepcopy(self.document)
+            document["on"]["push"] = value
+            with self.subTest(value=value):
+                errors = check_workflow.check_document(document)
+                self.assertTrue(any("push は branches" in error for error in errors))
+
+    def test_concurrency_is_fixed(self):
+        self.assertEqual(check_workflow.check_document(self.document), [])
+        self.assertEqual(self.document["concurrency"], check_workflow.CONCURRENCY)
+        group = self.document["concurrency"]["group"]
+        mutations = [
+            lambda d: d.pop("concurrency"), lambda d: d.update(concurrency={}),
+            lambda d: d.update(concurrency="group"),
+            lambda d: d["concurrency"].update(**{"cancel-in-progress": True}),
+            lambda d: d["concurrency"].update(**{"cancel-in-progress": False}),
+            lambda d: d["concurrency"].update(**{"cancel-in-progress": "true"}),
+            lambda d: d["concurrency"].update(**{"cancel-in-progress": "${{ github.event_name != 'pull_request' }}"}),
+            lambda d: d["concurrency"].update(group="${{ github.ref }}"),
+            lambda d: d["concurrency"].update(group=group.replace(" || github.run_id", "")),
+            lambda d: d["concurrency"].update(group=group.replace("-${{ github.event_name }}", "")),
+            lambda d: d["concurrency"].update(queue="max"),
+            lambda d: d["concurrency"].update(queue="single"),
+            lambda d: d["concurrency"].update(**{"future-setting": True}),
+        ]
+        for mutate in mutations:
+            document = copy.deepcopy(self.document)
+            mutate(document)
+            with self.subTest(mutate=mutate):
+                errors = check_workflow.check_document(document)
+                self.assertTrue(any("concurrency は決めた" in error for error in errors))
+
+    def test_concurrency_expressions_stay_inside_concurrency(self):
+        for expression in (self.document["concurrency"]["group"], self.document["concurrency"]["cancel-in-progress"]):
+            document = copy.deepcopy(self.document)
+            document["jobs"]["policy"]["steps"][1]["name"] = expression
+            with self.subTest(expression=expression):
+                errors = check_workflow.check_document(document)
+                self.assertTrue(any("確認していない式は使えません" in error for error in errors))
+
+    def test_second_workflow_requires_concurrency(self):
+        document = copy.deepcopy(self.document)
+        document["name"] = "Distribution check"
+        folder = self.root / ".github/workflows"
+        folder.mkdir(parents=True)
+        make_dist.write_json(folder / "native.yml", self.document)
+        make_dist.write_json(folder / "dist-check.yml", document)
+        self.assertEqual(check_workflow.check_workflows(self.root), [])
+        document.pop("concurrency")
+        make_dist.write_json(folder / "dist-check.yml", document)
+        problems = check_workflow.check_workflows(self.root)
+        self.assertTrue(problems)
+        self.assertTrue(all(problem.startswith("dist-check.yml:") for problem in problems))
+        self.assertTrue(any("concurrency は決めた" in problem for problem in problems))
+
+    def test_workflow_names_must_not_overlap(self):
+        folder = self.root / ".github/workflows"
+        folder.mkdir(parents=True)
+        make_dist.write_json(folder / "a.yml", self.document)
+        cases = (("Native", "同名"), ("native", "大文字と小文字だけが違う"))
+        for name, label in cases:
+            make_dist.write_json(folder / "b.yml", {**self.document, "name": name})
+            with self.subTest(label=label):
+                problems = check_workflow.check_workflows(self.root)
+                self.assertTrue(any(problem.startswith("b.yml:") and "名前が重なって" in problem for problem in problems))
+        # name の無い文書の名前は、ファイルのパス。
+        a_document = {key: value for key, value in self.document.items() if key != "name"}
+        make_dist.write_json(folder / "a.yml", a_document)
+        make_dist.write_json(folder / "b.yml", {**self.document, "name": ".github/workflows/a.yml"})
+        self.assertTrue(any("名前が重なって" in problem for problem in check_workflow.check_workflows(self.root)))
+        make_dist.write_json(folder / "b.yml", {**self.document, "name": "Other"})
+        self.assertEqual(check_workflow.check_workflows(self.root), [])
+        for value in (1, ["Native"], ""):
+            document = copy.deepcopy(self.document)
+            document["name"] = value
+            with self.subTest(name=value):
+                errors = check_workflow.check_document(document)
+                self.assertTrue(any("name は空でない文字列" in error for error in errors))
 
     def test_second_workflow_can_check_distribution_from_shallow_checkout(self):
         document = copy.deepcopy(self.document)
