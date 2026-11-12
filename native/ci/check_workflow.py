@@ -62,16 +62,7 @@ REQUIRED_NATIVE_JOBS = (
     "implement-guard",
     "implement-guard-universal",
 )
-# 比較のジョブの形: (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
-# R4D(#481)の比較のジョブ。
-R4D_JOBS = (
-    ("r4d1", "r4d1", set(RUNNERS), "build"),
-)
-# R4U(#480)の比較のジョブ。
-R4U_JOBS = (
-    ("r4u", "r4u", set(RUNNERS), "build"),
-)
-# S3I-A(#474)の比較のジョブ。
+# S3I-A(#474)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 IMPLEMENT_GUARD_JOBS = (
     ("implement-guard", "implement-guard", set(RUNNERS), "build"),
     ("implement-guard-universal", "implement-guard-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
@@ -79,12 +70,12 @@ IMPLEMENT_GUARD_JOBS = (
 
 
 def check_native_required(document):
-    """native.yml だけに当てる追加の判定(必須のジョブと、R4D・R4U・S3I-A の比較の工程・機種・needs)。"""
+    """native.yml だけに当てる追加の判定(必須のジョブと、S3I-A の比較の工程・機種・needs)。"""
     if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
         return []
     jobs = document["jobs"]
     problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
-    for name, subcommand, platforms, needs in (*R4D_JOBS, *R4U_JOBS, *IMPLEMENT_GUARD_JOBS):
+    for name, subcommand, platforms, needs in IMPLEMENT_GUARD_JOBS:
         job = jobs.get(name)
         if not isinstance(job, dict):
             continue
