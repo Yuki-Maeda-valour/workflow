@@ -15,6 +15,7 @@
 //   action: truncate:<path>:<長さ>  append:<path>:<文字列>  rewrite:<path>:<同じ長さの文字列>(mtime も変える) /
 //           swap:<path>:<target>(path を target を指す symlink に差し替える)。
 // R4A_CLOSE_FAIL=<errno>  O_NOFOLLOW と O_NONBLOCK で開いたファイル(permlog)の close を、実際に閉じた後に errno で失敗させる。
+// R4A_CALLS=<path>  終了時に、差込みが見た呼び出しの要点(write の fd ごとの回数とバイト数・read・open・close の回数)を 1 行で追記する(診断用)。
 // R4A_TRACE=<path>  その fd への書込み要求の中身を、4 バイトの長さ(little endian)+中身の列で書き出す。
 #define _GNU_SOURCE
 #include <dlfcn.h>
@@ -54,6 +55,9 @@ static int target_fd = 0, trace_fd = -1;
 static char mode[32];
 static size_t limit = 0, accepted = 0;
 static unsigned long sequence = 0;
+// 診断用の呼び出しの記録(R4A_CALLS)。write は fd 0〜2 とそれ以外を分ける。
+static unsigned long calls_write[4], calls_write_bytes[4], calls_read, calls_open, calls_close;
+static const char *calls_path = NULL;
 static int failing = 0;
 
 __attribute__((constructor)) static void setup(void) {
@@ -70,6 +74,7 @@ __attribute__((constructor)) static void setup(void) {
       limit = n;
     }
   }
+  calls_path = getenv("R4A_CALLS");
   const char *trace = getenv("R4A_TRACE");
   if (trace) trace_fd = open(trace, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
   errno = saved;
@@ -77,6 +82,11 @@ __attribute__((constructor)) static void setup(void) {
 
 ssize_t HOOK(write)(int fd, const void *data, size_t size) {
   if (!original_write) original_write = next_symbol("write");
+  if (calls_path) {
+    int slot = (fd >= 0 && fd <= 2) ? fd : 3;
+    calls_write[slot]++;
+    calls_write_bytes[slot] += size;
+  }
   if (fd != target_fd || target_fd == 0) return original_write(fd, data, size);
   unsigned long index = ++sequence;
   if (trace_fd >= 0) {
@@ -193,6 +203,7 @@ static void race_on_open(int flags, const char *path) {
 ssize_t HOOK(read)(int fd, void *data, size_t size) {
   static ssize_t (*real_read)(int, void *, size_t);
   if (!real_read) real_read = next_symbol("read");
+  if (calls_path) calls_read++;
   if (race_fd < 0 || fd != race_fd) return real_read(fd, data, size);
   int first = (++race_reads == 1);
   if (first && !strcmp(race_event, "before-first-read")) race_run();
@@ -221,6 +232,7 @@ static int traced_openat(const char *symbol, int dirfd, const char *path, int fl
   static int (*real_openat64)(int, const char *, int, ...);
   int (**real)(int, const char *, int, ...) = strcmp(symbol, "openat") ? &real_openat64 : &real_openat;
   if (!*real) *real = next_symbol(strcmp(symbol, "openat") ? "openat" : "openat");
+  if (calls_path) calls_open++;
   race_on_open(flags, path);
   return note_open((*real)(dirfd, path, flags, mode), flags);
 }
@@ -277,6 +289,7 @@ INTERPOSE(open);
 int HOOK(close)(int fd) {
   static int (*real_close)(int);
   if (!real_close) real_close = next_symbol("close");
+  if (calls_path) calls_close++;
   int result = real_close(fd);
   if (fd >= 0 && fd == close_fault_fd) {
     close_fault_fd = -1;
@@ -290,3 +303,17 @@ INTERPOSE(write);
 INTERPOSE(read);
 INTERPOSE(close);
 INTERPOSE(openat);
+
+// 診断用: 終了時に、見えた呼び出しの要点を追記する(write は fd 0・1・2・その他の「回数/バイト数」)。
+__attribute__((destructor)) static void dump_calls(void) {
+  if (!calls_path || !original_write) return;
+  int saved = errno;
+  FILE *out = fopen(calls_path, "a");
+  if (out) {
+    fprintf(out, "write fd0=%lu/%lu fd1=%lu/%lu fd2=%lu/%lu other=%lu/%lu read=%lu open=%lu close=%lu\n", calls_write[0],
+            calls_write_bytes[0], calls_write[1], calls_write_bytes[1], calls_write[2], calls_write_bytes[2], calls_write[3],
+            calls_write_bytes[3], calls_read, calls_open, calls_close);
+    fclose(out);
+  }
+  errno = saved;
+}

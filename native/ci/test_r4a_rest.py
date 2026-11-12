@@ -369,6 +369,7 @@ class SelftestGate(unittest.TestCase):
     """比較器が、自分の自己検査を比較の前に流し、落ちたら比較を止める。"""
 
     def run_gate(self, body, *, in_selftest=False, no_selftest=False):
+        """自己検査の入口を呼ぶ。落ちたときは失敗の文、合格・省略は None を返す。"""
         import types
         with tempfile.TemporaryDirectory() as directory:
             test_file = Path(directory) / "inner_tests.py"
@@ -379,7 +380,7 @@ class SelftestGate(unittest.TestCase):
             if in_selftest:
                 os.environ["R4A_REST_IN_SELFTEST"] = "1"
             try:
-                checker.run_selftest(options, Path("/bin/true"), test_file=test_file)
+                return checker.run_selftest(options, Path("/bin/true"), test_file=test_file)
             finally:
                 for name, value in saved.items():
                     if value is None:
@@ -387,17 +388,30 @@ class SelftestGate(unittest.TestCase):
                     else:
                         os.environ[name] = value
 
-    def test_a_failing_selftest_stops_the_comparison(self):
-        with self.assertRaises(SystemExit) as raised:
-            self.run_gate("self.fail('boom')")
-        self.assertIn("比較は流さない", str(raised.exception))
+    def test_a_failing_selftest_is_reported_but_does_not_stop_the_comparison(self):
+        message = self.run_gate("self.fail('boom')")
+        self.assertIn("自己検査が失敗した", message)
+        self.assertIn("test_it", message)
 
-    def test_a_passing_selftest_lets_the_comparison_continue(self):
-        self.run_gate("pass")
+    def test_a_passing_selftest_returns_nothing(self):
+        self.assertIsNone(self.run_gate("pass"))
 
     def test_the_gate_is_skipped_inside_a_selftest_and_when_asked(self):
-        self.run_gate("self.fail('流れてはいけない')", in_selftest=True)
-        self.run_gate("self.fail('流れてはいけない')", no_selftest=True)
+        self.assertIsNone(self.run_gate("self.fail('流れてはいけない')", in_selftest=True))
+        self.assertIsNone(self.run_gate("self.fail('流れてはいけない')", no_selftest=True))
+
+    def test_the_comparison_runs_even_if_the_selftest_fails_and_the_last_line_says_so(self):
+        with tempfile.TemporaryDirectory() as directory:
+            failing = Path(directory) / "failing_tests.py"
+            failing.write_text("import unittest\nclass T(unittest.TestCase):\n    def test_bad(self):\n        self.fail('x')\n")
+            env = {k: v for k, v in os.environ.items() if k != "R4A_REST_IN_SELFTEST"}
+            result = subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture_binary()),
+                                     "--only", "host-argv", "--selftest-file", str(failing)],
+                                    capture_output=True, text=True, timeout=300, cwd=directory, env=env)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("比べた case", result.stdout)  # 本体の比較は流れた
+        last = [line for line in result.stdout.splitlines() if line.strip()][-1]
+        self.assertTrue(last.startswith("結果: 自己検査が失敗した"), last)
 
 
 class ShimBuild(unittest.TestCase):
@@ -424,6 +438,276 @@ class ShimBuild(unittest.TestCase):
             ineffective = Path(directory) / "ineffective.lib"
             subprocess.run(["cc", *flags, "-o", str(ineffective), str(empty)], check=True, capture_output=True)
             self.assertFalse(checker.shim_is_effective(ineffective))
+
+    def test_the_shim_records_a_summary_of_the_calls_it_saw(self):
+        if sys.platform not in ("linux", "darwin"):
+            self.skipTest("差込みの対象 OS でない")
+        with tempfile.TemporaryDirectory() as directory:
+            shim = checker.build_shim(directory)
+            calls = Path(directory) / "calls.txt"
+            env = dict(os.environ, R4A_CALLS=str(calls), PYTHONNOUSERSITE="1", **checker.shim_env(shim))
+            subprocess.run([sys.executable, "-I", "-c", "import os\nos.write(1, b'abc')\nos.write(2, b'de')"],
+                           capture_output=True, env=env, timeout=60)
+            line = calls.read_text().strip()
+            self.assertRegex(line, r"^write fd0=\d+/\d+ fd1=\d+/\d+ fd2=\d+/\d+ other=\d+/\d+ read=\d+ open=\d+ close=\d+$")
+            # os.write(1, 3 バイト) と os.write(2, 2 バイト)を数えている(Python の起動の書き込みがあれば、それ以上)。
+            fd1 = int(line.split("fd1=")[1].split()[0].split("/")[1])
+            fd2 = int(line.split("fd2=")[1].split()[0].split("/")[1])
+            self.assertGreaterEqual(fd1, 3)
+            self.assertGreaterEqual(fd2, 2)
+
+
+class BoundaryGroups(unittest.TestCase):
+    """境界の前・等値・後の組。旧版の出力が境界(等値と後の間)で変わらない組は、比較器の誤りとして失敗にする。"""
+
+    def test_every_group_member_is_a_required_case(self):
+        required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))["cases"]
+        groups = checker.boundary_groups()
+        self.assertGreaterEqual(len(groups), 21)
+        for name, ids, rule, part in groups:
+            self.assertIn(rule, ("accept", "cap"))
+            self.assertIn(part, ("bytes", "lines", "refusal"))
+            self.assertEqual(len(ids), 3, name)  # 前・等値・後の 3 件に固定する
+            for case_id in ids:
+                self.assertIn(case_id, required, f"{name}: {case_id}")
+
+    def test_identical_outputs_before_and_after_are_a_failure(self):
+        groups = [("g", ["a", "b", "c"], "accept", "bytes")]
+        ok, bad = (0, b"ok", b""), (1, b"error", b"")
+        # 陽性: 前 = 等値 かつ 等値 ≠ 後。
+        self.assertEqual(checker.check_boundaries({"a": ok, "b": ok, "c": bad}, groups), (1, []))
+        # 陰性: 3 つとも同じ・前だけ違う(境界が前と等値の間)・全部違う・後が等値と同じ。
+        for outputs in ({"a": ok, "b": ok, "c": ok}, {"a": bad, "b": ok, "c": ok}, {"a": ok, "b": bad, "c": (2, b"x", b"")},
+                        {"a": ok, "b": bad, "c": bad}):
+            checked, failures = checker.check_boundaries(outputs, groups)
+            self.assertEqual((checked, len(failures)), (1, 1), outputs)
+            self.assertIn("見分けられない", failures[0])
+
+    def test_a_cap_group_needs_short_then_equal_and_equal(self):
+        groups = [("g", ["a", "b", "c"], "cap", "bytes")]
+        out = lambda n: (0, b"x" * n, b"")
+        self.assertEqual(checker.check_boundaries({"a": out(9), "b": out(10), "c": out(10)}, groups), (1, []))
+        for sizes in ((10, 10, 10), (9, 10, 11), (9, 9, 9), (11, 10, 10)):
+            checked, failures = checker.check_boundaries({k: out(n) for k, n in zip("abc", sizes)}, groups)
+            self.assertEqual((checked, len(failures)), (1, 1), sizes)
+
+    def test_incomplete_groups_are_not_judged(self):
+        self.assertEqual(checker.check_boundaries({"a": (0, b"", b"")}, [("g", ["a", "b", "c"], "accept", "bytes")]), (0, []))
+
+    def test_the_part_that_is_compared_is_the_boundary_part(self):
+        # 量がそのまま出る出力でも、境界に関わる部分だけで判定する。`line=` の数(明細の上限)と、読取上限の拒否の有無。
+        lines = lambda n: (0, b"deny=%d\n" % n + b"line=x\n" * min(n, 100), b"")
+        cap = [("g", ["a", "b", "c"], "cap", "lines")]
+        self.assertEqual(checker.check_boundaries({"a": lines(99), "b": lines(100), "c": lines(101)}, cap), (1, []))
+        # 件数が 199・200・201 でも `line=` は 100 で頭打ちになるので、前 < 等値 でなく、失敗になる。
+        self.assertEqual(len(checker.check_boundaries({"a": lines(199), "b": lines(200), "c": lines(201)}, cap)[1]), 1)
+        refuse = lambda flag: (0, b"allow=1\n" + (b"reference-error=x\n" if flag else b""), b"")
+        accept = [("g", ["a", "b", "c"], "accept", "refusal")]
+        self.assertEqual(checker.check_boundaries({"a": refuse(False), "b": refuse(False), "c": refuse(True)}, accept), (1, []))
+        self.assertEqual(len(checker.check_boundaries({"a": refuse(True), "b": refuse(True), "c": refuse(True)}, accept)[1]), 1)
+
+    def test_a_full_run_requires_every_group_to_be_checked(self):
+        groups = [("g", ["a", "b", "c"], "accept", "bytes"), ("h", ["d", "e", "f"], "accept", "bytes")]
+        ok, bad = (0, b"ok", b""), (1, b"error", b"")
+        outputs = {"a": ok, "b": ok, "c": bad}
+        checked, failures = checker.check_boundaries(outputs, groups, expected_groups=2)
+        self.assertEqual(checked, 1)
+        self.assertIn("定義した 2 組と違う", failures[0])
+        self.assertEqual(checker.check_boundaries(outputs, groups), (1, []))
+
+    def test_generated_inputs_have_the_exact_length(self):
+        for digits in (639, 640, 641, 4299, 4300, 4301):
+            self.assertEqual(checker.int_in_dict_result(digits).count("9"), digits)
+            self.assertEqual(checker.int_in_dict_origin(digits).count(b"9"), digits)
+        for total in (1999, 2000, 2001):
+            text = json.loads(checker.denials_input(total))
+            self.assertEqual(len(json.dumps({"denials": text["denials"]}, ensure_ascii=False)), total)
+        self.assertEqual(checker.nest_depth("[" * 7 + "]" * 7), 7)
+        self.assertEqual(checker.nest_depth('{"a":' * 5 + "1" + "}" * 5), 5)
+
+
+class FifoWait(unittest.TestCase):
+    def test_fifo_wait_needs_an_open_syscall_and_the_sleeping_state(self):
+        import unittest.mock as mock
+        stat = lambda state: f"123 (python3) {state} 1 1 1 0 -1"
+        with mock.patch("platform.machine", return_value="x86_64"):
+            open_call = "257 0xffffffffffffff9c 0x7ffd 0x0"
+            # 陽性: open 系の中で、眠っている(S)。wchan が読めない・0 のときは名前を見ない。
+            self.assertTrue(checker.fifo_wait(open_call, stat("S"), "wait_for_partner"))
+            self.assertTrue(checker.fifo_wait(open_call, stat("S"), "0"))
+            self.assertTrue(checker.fifo_wait(open_call, stat("S"), "(読めない: PermissionError 13)"))
+            # 陰性: D 状態の open(旧 Python の起動の途中)・走っている・open でない syscall・wchan の名前が違う。
+            self.assertFalse(checker.fifo_wait(open_call, stat("D"), "wait_for_partner"))
+            self.assertFalse(checker.fifo_wait(open_call, stat("R"), "0"))
+            self.assertFalse(checker.fifo_wait("0 0x0 0x7ffd 0x2000", stat("S"), "wait_for_partner"))
+            self.assertFalse(checker.fifo_wait("running", stat("S"), "0"))
+            self.assertFalse(checker.fifo_wait(open_call, stat("S"), "do_some_other_wait"))
+            # syscall が読めない機械は、wchan の名前と状態だけで確かめる。
+            self.assertTrue(checker.fifo_wait("(読めない: OSError 1)", stat("S"), "fifo_open"))
+            self.assertFalse(checker.fifo_wait("(読めない: OSError 1)", stat("S"), "0"))
+        self.assertEqual(checker.proc_state("42 (a b) c) S 1"), "S")
+        self.assertEqual(checker.proc_state(""), "")
+
+    @unittest.skipUnless(sys.platform == "linux", "/proc は Linux だけ")
+    def test_a_real_fifo_opener_is_recognised_and_a_regular_file_reader_is_not(self):
+        import platform
+        import unittest.mock as mock
+        if platform.machine() not in checker.SYSCALL_NUMBERS:
+            self.skipTest("syscall の番号表が無いアーキテクチャ")
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "f.fifo"
+            os.mkfifo(fifo)
+            regular = Path(directory) / "plain.txt"
+            regular.write_text("x")
+            opener = subprocess.Popen(["cat", str(fifo)])  # 書き手がいない FIFO の open で待つ
+            try:
+                checker.wait_for_state(opener.pid, "cat", "fifo")
+            finally:
+                opener.kill()
+                opener.wait()
+            # 普通のファイルを開いた後に眠る子は、FIFO の open の待ちと見なさない。
+            sleeper = subprocess.Popen(["sh", "-c", f"exec 3< {regular}; exec sleep 30"])
+            try:
+                with mock.patch.object(checker, "CHILD_TIMEOUT", 1):
+                    with self.assertRaises(checker.Failure):
+                        checker.wait_for_state(sleeper.pid, None, "fifo")
+            finally:
+                sleeper.kill()
+                sleeper.wait()
+
+
+class OsConditionMimicry(unittest.TestCase):
+    """Linux で Mac の条件(EILSEQ と locale の有り)をまねる。まねは自己検査の中だけ。固定の一覧と違えば失敗、同じなら未完で終了 0。"""
+
+    def run_mimic(self, *args, wrapper=None, extra_env=None, in_selftest=True):
+        env = {k: v for k, v in os.environ.items() if k not in ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE")}
+        env.update(extra_env or {})
+        if not in_selftest:
+            env.pop("R4A_REST_IN_SELFTEST", None)
+        fixture = wrapper or fixture_binary()
+        with tempfile.TemporaryDirectory(prefix="r4a-rest-mimic-") as cwd:
+            return subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture), "--no-selftest", *args],
+                                  capture_output=True, text=True, timeout=600, cwd=cwd, env=env)
+
+    def test_the_fixed_lists_are_consistent(self):
+        required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))
+        self.assertEqual(required["requires_raw_name"], sorted(checker.RAW_NAME_CASES))
+        self.assertEqual(checker.RAW_NAME_EXPECTED_REJECTED["linux"], [])
+        self.assertEqual(len(checker.RAW_NAME_EXPECTED_REJECTED["darwin"]), 2)
+        self.assertEqual(checker.UNAVAILABLE_BY_OS["linux"], [])
+        self.assertEqual(len(checker.UNAVAILABLE_BY_OS["darwin"]), 7)
+        for case_id in checker.UNAVAILABLE_BY_OS["darwin"]:
+            self.assertIn(case_id, required["cases"])
+        # UTF-8 でない名前は、`store` を使う case には入れない(専用の置き場 `rawstore` に分ける)。
+        with tempfile.TemporaryDirectory() as directory:
+            checker.make_candidate_inputs(directory)
+            names = [os.fsencode(n) for n in os.listdir(Path(directory) / "store")]
+            self.assertFalse(any(b"\xff" in n for n in names))
+            self.assertTrue(any(b"\xff" in os.fsencode(n) for n in os.listdir(Path(directory) / "rawstore")))
+
+    def test_simulation_is_refused_outside_the_selftest(self):
+        for name in ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE"):
+            result = self.run_mimic("--only", "host-argv", extra_env={name: "1"}, in_selftest=False)
+            self.assertEqual(result.returncode, 1, name)
+            self.assertIn("自己検査の中", result.stderr)
+
+    def test_the_mac_conditions_give_an_incomplete_result_with_exit_zero(self):
+        result = self.run_mimic("--only", "candidate-keys,loop-task-text",
+                                extra_env={"R4A_REST_SIMULATE_EILSEQ": "1", "R4A_REST_SIMULATE_LOCALE": "1"})
+        self.assertEqual(result.returncode, 0, result.stderr[-1500:])
+        self.assertIn("結果: 未完", result.stdout)
+        # 未実施は、raw name の 2 件と locale の 2 件(candidate-key・task-info)。成功には数えない。
+        self.assertIn("未実施 4 件", result.stdout)
+        self.assertIn("charset/locale-ja_JP.eucJP/candidate-key", result.stdout)
+        self.assertIn("sha256", result.stdout)  # 旧版の出力の要点
+        self.assertNotIn("結果: 合格", result.stdout)
+
+    def test_a_set_that_differs_from_the_fixed_list_is_a_failure(self):
+        # locale だけをまねる(Linux の一覧は空)と、未実施の集合が一覧と違うので失敗(終了 1)。
+        result = self.run_mimic("--only", "loop-task-text", extra_env={"R4A_REST_SIMULATE_LOCALE": "1"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("固定の一覧と違う", result.stderr)
+
+    def test_rust_is_compared_with_the_unconfigured_old_version_before_the_locale_is_given_up(self):
+        with tempfile.TemporaryDirectory() as directory:
+            wrapper = Path(directory) / "w"
+            # eucJP の case のときだけ、Rust の出力を変える。locale を理由に未実施にしても、この差は不一致にする。
+            wrapper.write_text(f'#!/bin/sh\n"{fixture_binary()}" "$@"; rc=$?\n[ "$LC_ALL" = ja_JP.eucJP ] && echo extra\nexit $rc\n')
+            wrapper.chmod(0o755)
+            result = self.run_mimic("--only", "loop-task-text", wrapper=wrapper,
+                                    extra_env={"R4A_REST_SIMULATE_LOCALE": "1", "R4A_REST_SIMULATE_EILSEQ": "1"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("Rust が設定を読んでいる", result.stderr)
+
+
+class WaitingAndRawNames(unittest.TestCase):
+    def test_syscall_line_decides_the_wait_by_number_and_fd(self):
+        import unittest.mock as mock
+        with mock.patch("platform.machine", return_value="x86_64"):
+            self.assertTrue(checker.syscall_wait("stdin", "0 0x0 0x7ffd 0x2000 0x0 0x0 0x0 0x7ffd 0x7f00"))
+            self.assertFalse(checker.syscall_wait("stdin", "0 0x3 0x7ffd 0x2000"))  # 別の fd の read
+            self.assertTrue(checker.syscall_wait("fullpipe", "1 0x1 0x7ffd 0x30d42"))
+            self.assertFalse(checker.syscall_wait("fullpipe", "1 0x2 0x7ffd 0x30d42"))
+            self.assertTrue(checker.syscall_wait("fifo", "257 0xffffffffffffff9c 0x7ffd 0x0"))
+            self.assertFalse(checker.syscall_wait("stdin", "running"))
+            self.assertFalse(checker.syscall_wait("stdin", "-1 0x7ffd 0x7f00"))
+        with mock.patch("platform.machine", return_value="aarch64"):
+            self.assertTrue(checker.syscall_wait("stdin", "63 0x0 0x7ffd 0x2000"))
+            self.assertTrue(checker.syscall_wait("fullpipe", "64 0x1 0x7ffd 0x2000"))
+        with mock.patch("platform.machine", return_value="riscv64"):
+            self.assertFalse(checker.syscall_wait("stdin", "63 0x0"))
+
+    @unittest.skipUnless(sys.platform == "linux", "/proc は Linux だけ")
+    def test_wait_timeout_reports_what_was_seen(self):
+        import unittest.mock as mock
+        child = subprocess.Popen(["sleep", "30"])
+        try:
+            with mock.patch.object(checker, "CHILD_TIMEOUT", 1):
+                with self.assertRaises(checker.Failure) as raised:
+                    checker.wait_for_state(child.pid, "sleep", "stdin")  # sleep は read で待たない
+            message = str(raised.exception)
+            for word in ("wchan=", "syscall=", "stat=", "cmdline=", "kernel="):
+                self.assertIn(word, message)
+        finally:
+            child.kill()
+            child.wait()
+
+    @unittest.skipUnless(sys.platform == "linux", "/proc は Linux だけ")
+    def test_real_blocked_children_are_recognised_without_wchan_names(self):
+        import platform
+        import unittest.mock as mock
+        if platform.machine() not in checker.SYSCALL_NUMBERS:
+            self.skipTest("syscall の番号表が無いアーキテクチャ")
+        # wchan の名前に頼らず(空にして)、/proc/<pid>/syscall の番号と fd だけで、本物の待ちを見分ける。
+        child = subprocess.Popen(["cat"], stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+        try:
+            with mock.patch.object(checker, "WAIT_STATES", {"stdin": (), "fifo": (), "fullpipe": ()}):
+                checker.wait_for_state(child.pid, "cat", "stdin")
+                with mock.patch.object(checker, "CHILD_TIMEOUT", 1):
+                    with self.assertRaises(checker.Failure):
+                        checker.wait_for_state(child.pid, "cat", "fullpipe")  # cat は write で待たない
+        finally:
+            child.kill()
+            child.wait()
+
+    def test_raw_name_rejection_is_tolerated_only_off_linux_and_only_for_eilseq(self):
+        import errno
+        import unittest.mock as mock
+        with tempfile.TemporaryDirectory() as directory:
+            rejected = OSError(errno.EILSEQ, "Illegal byte sequence")
+            checker.RAW_NAME_REJECTED.clear()
+            with mock.patch("builtins.open", side_effect=rejected), mock.patch.object(checker.sys, "platform", "darwin"):
+                checker.create_raw_name_file(directory, b"bad-\xff", b"x")
+            self.assertEqual(checker.RAW_NAME_REJECTED, [(b"bad-\xff", errno.EILSEQ)])
+            checker.RAW_NAME_REJECTED.clear()
+            with mock.patch("builtins.open", side_effect=rejected), mock.patch.object(checker.sys, "platform", "linux"):
+                with self.assertRaises(OSError):
+                    checker.create_raw_name_file(directory, b"bad-\xff", b"x")
+            with mock.patch("builtins.open", side_effect=OSError(errno.EACCES, "denied")), \
+                    mock.patch.object(checker.sys, "platform", "darwin"):
+                with self.assertRaises(OSError):
+                    checker.create_raw_name_file(directory, b"bad-\xff", b"x")
+            self.assertEqual(checker.RAW_NAME_REJECTED, [])
 
 
 class ShimPolicy(unittest.TestCase):
@@ -683,11 +967,11 @@ class EndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             wrapper = Path(directory) / "w"
             # 標準出力が閉じて渡された(起動時に閉じた fd)ときだけ、標準エラーに余計な出力を足す。
-            wrapper.write_text('#!/bin/sh\n"' + str(real) + '" "$@"; rc=$?\nif [ ! -e /proc/$$/fd/1 ]; then echo extra >&2; fi\nexit $rc\n')
+            wrapper.write_text('#!/bin/sh\n"' + str(real) + '" "$@"; rc=$?\nif ! ( exec 3>&1 ) 2>/dev/null; then echo extra >&2; fi\nexit $rc\n')
             wrapper.chmod(0o755)
             result = run_checker(wrapper, "--only", "host-argv")
         self.assertEqual(result.returncode, 1)
-        self.assertIn("closed-host", result.stderr)
+        self.assertIn("closed-host", result.stderr, result.stdout[-1500:] + result.stderr[-1500:])
 
     def test_nothing_is_left_in_the_repository_even_when_started_from_it(self):
         # 比較器をリポジトリの直下から起動し、子が作業場所の直下へファイルを作ろうとしても、リポジトリには何も残らない。
@@ -712,6 +996,9 @@ class EndToEnd(unittest.TestCase):
             result = run_checker(fixture, "--only", "resolve-task-store")
         self.assertEqual(result.returncode, 1)
         self.assertIn("固定名にした書込みの列に同じ規則を当てた結果と違う", result.stderr)
+        # 故障の case の失敗には、差込みが記録した呼び出しの要点(write の fd ごとの回数とバイト数など)が付く。
+        self.assertIn("差込みが見た呼び出し", result.stderr)
+        self.assertRegex(result.stderr, r"write fd0=\d+/\d+ fd1=\d+/\d+ fd2=\d+/\d+ other=\d+/\d+ read=\d+ open=\d+ close=\d+")
 
     def test_thread_value_change_is_allowed_only_for_the_startup_failure_line(self):
         real = fixture_binary()

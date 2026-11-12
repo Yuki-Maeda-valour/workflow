@@ -41,7 +41,27 @@ SCRIPTS = {
 HELD_CODE = {"loop-task-text", "loop-child-output"}
 
 # 機械の事情(locale の有無)で確かめられない case の、OS ごとに固定した一覧。違えば失敗にする。
-UNAVAILABLE_BY_OS = {"linux": [], "darwin": []}
+# 機械の事情で確かめられない case の、OS ごとに固定した一覧(case の ID)。実際の集合が一覧と違えば失敗にする。
+#  - Mac: 記録した機械(Linux)と locale の有無が違うとき、旧版の `ja_JP.eucJP` の固定期待の照らしだけを未実施にする
+#    (Rust と設定なしの旧版の比較は、未実施にせず必ず流す)。
+UNAVAILABLE_BY_OS = {"linux": [], "darwin": [f"charset/locale-ja_JP.eucJP/{name}" for name in
+                     ("store-help", "host-error", "store-arg-echo", "store-non-utf8-arg", "candidate-key", "child-origin", "task-info")]}
+# UTF-8 でないファイル名を OS が EILSEQ で拒む(APFS)。拒まれる名前の集合を OS ごとに固定する(違えば失敗)。
+# その名前に頼る case は、必須の一覧の `requires_raw_name`。この OS では未実施に数え、合格に足さない。
+RAW_NAME_EXPECTED_REJECTED = {"linux": [], "darwin": [b"bad-\xff", b"\xe5\x80\x99\xe8\xa3\x9c_\xff.md"]}
+RAW_NAME_CASES = ("task/non-utf8-path", "candidate/collect-raw-name")
+# Linux で Mac の条件をまねる環境変数。自己検査の中(`R4A_REST_IN_SELFTEST`)だけで使える。
+SIMULATION_VARIABLES = ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE")
+
+
+def os_key():
+    """固定の一覧を引く OS の名前。Mac の条件のまねをしているときは `darwin`(自己検査の中だけ)。"""
+    if os.environ.get("R4A_REST_SIMULATE_EILSEQ") in ("1", "raise"):
+        return "darwin"
+    return sys.platform
+
+
+RAW_NAME_REJECTED = []  # 実際に作ろうとして、OS の errno(EILSEQ)で拒まれた名前
 
 # 本家 CPython 3.10.11 の標準ライブラリの SHA-256(設計の固定期待)。
 UPSTREAM_SHA256 = {
@@ -124,6 +144,136 @@ class Case:
         self.fifo = fifo
 
 
+# PYTHONINTMAXSTRDIGITS の値(ID は中身どおり)。空文字は CPython 3.10.11 で未設定と同じ(有効)。'640 ' は不正。
+INT_LIMIT_VALUES = (("invalid-639", "639"), ("invalid-abc", "abc"), ("invalid-640-trailing-space", "640 "),
+                    ("invalid-negative", "-1"), ("invalid-2147483648", "2147483648"), ("empty-ok", ""), ("640-ok", "640"))
+
+
+def nest_depth(text):
+    """JSON 文字列の入れ子の深さ(`[` と `{` の最大の重なり。文字列の中は数えない入力に限って使う)。"""
+    depth = best = 0
+    for ch in text if isinstance(text, str) else text.decode():
+        if ch in "[{":
+            depth += 1
+            best = max(best, depth)
+        elif ch in "]}":
+            depth -= 1
+    return best
+
+
+def create_raw_name_file(directory, name, data):
+    """UTF-8 でないファイル名の入力を作る。Linux 以外で OS が EILSEQ で拒んだときだけ、作らずに記録して進む。"""
+    import errno
+    target = os.fsencode(directory) + b"/" + name
+    # 自己検査と確かめの専用: 環境変数で、OS が EILSEQ で拒んだことにする(Linux で Mac の条件をまねる)。正式の検査では設定しない。
+    # `raise` は、拒まれたときに何もせず止まる旧い動き(33d51ec)をまねる。Mac の失敗の原因の確かめ専用。
+    simulate = os.environ.get("R4A_REST_SIMULATE_EILSEQ")
+    if simulate == "1":
+        RAW_NAME_REJECTED.append((name, errno.EILSEQ))
+        return
+    if simulate == "raise":
+        raise OSError(errno.EILSEQ, "Illegal byte sequence")
+    try:
+        with open(target, "wb") as handle:
+            handle.write(data if isinstance(data, bytes) else data.encode())
+    except OSError as error:
+        if sys.platform != "linux" and error.errno == errno.EILSEQ:
+            RAW_NAME_REJECTED.append((name, error.errno))
+            return
+        raise
+
+
+def int_in_dict_result(digits):
+    text = '{"type":"result","result":"無人のイテレーションの結果: PR — x","n":' + "9" * digits + "}"
+    assert text.count("9") == digits, "入力の桁数が違う(比較器の誤り)"
+    return text
+
+
+def int_in_dict_origin(digits):
+    text = '{"origin":true,"same":true,"vcs":true,"reason":"r","repo":"o/n","n":' + "9" * digits + "}"
+    assert text.count("9") == digits, "入力の桁数が違う(比較器の誤り)"
+    return text.encode()
+
+
+def denials_input(total):
+    """旧版が出す `denials=` の本文(`json.dumps({"denials": [...]})`)の長さがちょうど `total` 字になる入力。"""
+    import json as json_module
+    for pad in range(total):
+        dumped = json_module.dumps({"denials": ["x" * pad]}, ensure_ascii=False)
+        if len(dumped) == total:
+            return json_module.dumps({"type": "result", "denials": ["x" * pad]})
+    raise AssertionError("denials の長さを作れない(比較器の誤り)")
+
+
+def boundary_groups():
+    """境界の前・等値・後の組。各組は (名前, [case ID(前・等値・後の順)], 規則, 見る部分)。
+    規則 accept(受け付けの境界): 前 = 等値(同じ)かつ 等値 ≠ 後。ちょうど「等値と後の間」で変わることを求める。
+    規則 cap(切り詰め): 前 < 等値 = 後(後は上限で切られる)。
+    見る部分: `bytes`(終了値・標準出力・標準エラーの全体)、`lines`(`line=` の行の数)、`refusal`(`reference-error=` の有無)。
+    出力に入力の量がそのまま出る組は、境界に関わる部分だけを取り出して比べる。
+    組の中で旧版の出力が規則を満たさなければ、境界を見分けられない case を作った比較器の誤りとして失敗にする。"""
+    groups = []
+    for kind in ("result", "permlog", "origin"):
+        groups.append((f"{kind} の整数の桁(既定の上限 4300)", [f"child/{kind}-int-digits-{n}" for n in (4299, 4300, 4301)], "accept", "bytes"))
+        groups.append((f"{kind} の整数の桁(上限 640)", [f"child/{kind}-int-digits-{n}-limit640" for n in (639, 640, 641)], "accept", "bytes"))
+    groups += [
+        ("result の JSON の深さ", [f"child/result-deep-{n}" for n in (993, 994, 995)], "accept", "bytes"),
+        ("permlog の JSON の深さ", [f"child/permlog-deep-{n}" for n in (993, 994, 995)], "accept", "bytes"),
+        ("origin-json の JSON の深さ", [f"child/origin-raw-deep-{n}" for n in (993, 994, 995)], "accept", "bytes"),
+        ("permlog の 1 MiB", ["child/permlog-file-1mib-minus1", "child/permlog-file-1mib", "child/permlog-file-over-1mib"], "accept", "refusal"),
+        ("permlog の 10000 行", ["child/permlog-lines-9999", "child/permlog-lines-10000", "child/permlog-lines-10001"], "accept", "refusal"),
+        ("permlog の明細 100 件", [f"child/permlog-deny-{n}" for n in (99, 100, 101)], "cap", "lines"),
+        ("result の明細 500 字", [f"child/result-detail-{n}" for n in (499, 500, 501)], "cap", "bytes"),
+        ("result の denials 2000 字", [f"child/result-denials-len-{n}" for n in (1999, 2000, 2001)], "cap", "bytes"),
+        ("permlog の kind 100 字", [f"child/permlog-kind-{n}" for n in (99, 100, 101)], "cap", "bytes"),
+        ("permlog の明細の行 600 字", [f"child/permlog-line-{n}" for n in (599, 600, 601)], "cap", "bytes"),
+        ("origin-json の reason 300 字", [f"child/origin-reason-{n}" for n in (299, 300, 301)], "cap", "bytes"),
+        ("resolve-task-store の整数の桁(既定の上限)", ["store/int-digits-640", "store/int-digits-4300", "store/int-digits-4301"], "accept", "bytes"),
+        ("resolve-task-store の整数の桁(上限 640)", ["store/int-limit-env-639-ok", "store/int-limit-env-640-ok", "store/int-limit-env-640-over"], "accept", "bytes"),
+        ("resolve-task-store の配列の深さ", [f"store/deep-array-{n}" for n in (993, 994, 995)], "accept", "bytes"),
+        ("resolve-task-store の辞書の深さ", [f"store/deep-object-{n}" for n in (993, 994, 995)], "accept", "bytes"),
+    ]
+    return groups
+
+
+def boundary_value(result, part):
+    """旧版の出力 (終了値, 標準出力, 標準エラー) から、境界に関わる部分を取り出す。"""
+    if part == "bytes":
+        return result
+    if part == "lines":
+        return sum(1 for line in result[1].split(b"\n") if line.startswith(b"line="))
+    if part == "refusal":
+        return b"reference-error=" in result[1]
+    raise AssertionError(part)
+
+
+def check_boundaries(outputs, groups, expected_groups=None):
+    """`outputs`: case ID -> 旧版の (終了値, 標準出力, 標準エラー)。全件がそろった組だけを確かめる。
+    `expected_groups` を渡すと、確かめた組の数がその数と同じことを求める(全件の比較で、組が飛ばされない)。
+    返す値: (確かめた組の数, 失敗の一覧)。"""
+    failures = []
+    checked = 0
+    for name, ids, rule, part in groups:
+        if not all(i in outputs for i in ids):
+            continue
+        checked += 1
+        before, at, after = (boundary_value(outputs[i], part) for i in ids)
+        if rule == "accept":
+            if not (before == at and at != after):
+                failures.append(f"境界の組「{name}」({part}): 前 = 等値 かつ 等値 ≠ 後 でない。境界を見分けられない入力(比較器の誤り): {ids}")
+        elif rule == "cap":
+            def size(value):
+                return value if isinstance(value, int) else len(value[1]) + len(value[2])
+            if not (size(before) < size(at) == size(after)):
+                failures.append(f"境界の組「{name}」({part}): 前 {size(before)}・等値 {size(at)}・後 {size(after)} で、"
+                                "前 < 等値 = 後 でない。上限の位置に当たらない入力(比較器の誤り)")
+        else:
+            raise AssertionError(rule)
+    if expected_groups is not None and checked != expected_groups:
+        failures.append(f"確かめた境界の組が {checked} 組で、定義した {expected_groups} 組と違う(旧版の出力がそろわない組がある)")
+    return checked, failures
+
+
 def needs_shim(case):
     return case.fault is not None or bool(case.preload) or case.race is not None
 
@@ -181,16 +331,18 @@ def store_cases():
     for digits in (640, 4300, 4301, 5000):
         add(f"int-digits-{digits}", ["--value-json", "9" * digits])
     for depth in (993, 994, 995):
+        assert nest_depth("[" * depth + "]" * depth) == depth and nest_depth('{"a":' * depth + "1" + "}" * depth) == depth
         recursion = LOADS_RECURSION if depth == 995 else None
         add(f"deep-array-{depth}", ["--value-json", "[" * depth + "]" * depth], frames=recursion)
         add(f"deep-object-{depth}", ["--value-json", '{"a":' * depth + "1" + "}" * depth], frames=recursion)
     add("deep-array-994-nan", ["--value-json", "[" * 994 + "NaN" + "]" * 994], frames=LOADS_RECURSION)
     add("deep-array-995-unclosed", ["--value-json", "[" * 995], frames=LOADS_RECURSION)
+    add("int-limit-env-639-ok", ["--value-json", "9" * 639], env={"PYTHONINTMAXSTRDIGITS": "640"})
     add("int-limit-env-640-ok", ["--value-json", "9" * 640], env={"PYTHONINTMAXSTRDIGITS": "640"})
     add("int-limit-env-640-over", ["--value-json", "9" * 641], env={"PYTHONINTMAXSTRDIGITS": "640"})
     add("int-limit-env-0", ["--value-json", "9" * 5000], env={"PYTHONINTMAXSTRDIGITS": "0"})
-    for bad in ("639", "abc", "640 ", "-1", "2147483648"):
-        add(f"int-limit-env-invalid-{bad.strip() or 'blank'}", [], env={"PYTHONINTMAXSTRDIGITS": bad})
+    for label, bad in INT_LIMIT_VALUES[:5]:
+        add(f"int-limit-env-{label}", [], env={"PYTHONINTMAXSTRDIGITS": bad})
     add("int-limit-env-empty", [], env={"PYTHONINTMAXSTRDIGITS": ""})
     add("int-limit-env-padded", ["--value-json", "9" * 641], env={"PYTHONINTMAXSTRDIGITS": " +0700"})
     # 引数の境界(argparse)。
@@ -325,6 +477,9 @@ def host_cases():
     add("stdout-full-ok", ["run"], stdout="full")
     for value in ("640", "639"):
         add(f"int-limit-env-{value}", ["run"], env={"PYTHONINTMAXSTRDIGITS": value})
+    for label, value in INT_LIMIT_VALUES:
+        if value not in ("640", "639"):
+            add(f"int-limit-env-{label}", ["run"], env={"PYTHONINTMAXSTRDIGITS": value})
     return cases
 
 
@@ -334,6 +489,8 @@ TASK = "loop-task-text"
 def make_task_inputs(directory):
     """loop-task-text の入力ファイル(以前の試作の B1 と同じ内容)を作る。"""
     directory = Path(directory)
+    if (directory / "normal.md").exists() and (directory / "broken-link.md").is_symlink():
+        return  # 作成済み(疑似端末の case と ほかの case が、どちらが先でも同じ入力を使う)
     (directory / "normal.md").write_bytes(
         "> **無人実行**: 可\r\n> **作成日**: 2026-02-30\r\n## 追加修正記録\r\n"
         "- **保留**(ship-task・2026-01-02): G2\r\n".encode())
@@ -343,8 +500,14 @@ def make_task_inputs(directory):
     (directory / "records.md").write_text(
         "## 追加修正記録\n- **保留**(ship-task・2026-01-02): S1\n## x\n## 追加修正記録\n"
         "- **保留**(ship-task・2026-01-02): D7junk\n", encoding="utf-8")
-    with open(os.fsencode(directory) + b"/bad-\xff", "wb") as handle:
-        handle.write((directory / "normal.md").read_bytes())
+    create_raw_name_file(directory, b"bad-\xff", (directory / "normal.md").read_bytes())
+    (directory / "empty.md").write_bytes(b"")
+    if not os.path.lexists(directory / "locked.md"):
+        (directory / "locked.md").write_bytes(b"> **x**: y\n")
+        (directory / "locked.md").chmod(0)
+    for link, target in (("link.md", "normal.md"), ("broken-link.md", "absent.md")):
+        if not os.path.lexists(directory / link):
+            os.symlink(target, directory / link)
 
 
 def task_cases():
@@ -371,6 +534,15 @@ def task_cases():
         Case("task/not-found", TASK, ["taskinfo", "missing"]),
         Case("task/directory", TASK, ["taskinfo", "."]),
         Case("task/non-utf8-path", TASK, [], binary_argv=[b"taskinfo", b"bad-\xff"]),
+        # Python 起動失敗の診断(directory の標準入出力。-c の保持本文でも、起動前に拒否される)。
+        Case("task/startup-stdin-dir", TASK, ["taskinfo", "-"], stdin="dir", thread=True),
+        Case("task/startup-stdout-dir", TASK, ["taskinfo", "normal.md"], stdout="dir", thread=True),
+        Case("task/startup-stderr-dir", TASK, ["taskinfo", "normal.md"], stderr="dir", thread=True),
+        *[Case(f"task/int-limit-env-{label}", TASK, ["taskinfo", "normal.md"], env={"PYTHONINTMAXSTRDIGITS": value})
+          for label, value in INT_LIMIT_VALUES],
+        # ファイルの種類: 空・権限なし・リンク・壊れたリンク(3 つのコマンドすべて)。
+        *[Case(f"task/file-{kind}-{command}", TASK, [command, f"{kind}.md"])
+          for kind in ("empty", "locked", "link", "broken-link") for command in ("taskinfo", "holdcount", "holdcode")],
     ]
     return cases
 
@@ -397,6 +569,8 @@ def make_candidate_inputs(directory):
     """candidate-keys の入力(保存先・候補の本文)を作る。"""
     base = Path(directory)
     store = base / "store"
+    if (store / "候補_locked.md").exists() or os.path.lexists(store / "候補_locked.md"):
+        return  # 作成済み(疑似端末の case と ほかの case が、どちらが先でも同じ入力を使う。権限なしのファイルへ書き直さない)
     store.mkdir(exist_ok=True)
     files = {
         "進行中_a.md": HEADER_OK + "- [ ] x\n",
@@ -416,7 +590,11 @@ def make_candidate_inputs(directory):
         write(store, name, body)
     write(store, "候補_invalid-utf8.md", b"> **\xe6\x8c\x87\xe6\x91\x98\xe3\x82\xad\xe3\x83\xbc**: \xff\n")
     write(store, "候補_truncated-utf8.md", b"> x\n\xe2\x82")
-    write(store, b"\xe5\x80\x99\xe8\xa3\x9c_\xff.md", "> **指摘キー**: raw-name\n")
+    # UTF-8 でない名前のファイルは、専用の置き場に分ける(ほかの観点の case は、この名前に頼らず全 OS で比べる)。
+    rawstore = base / "rawstore"
+    rawstore.mkdir(exist_ok=True)
+    write(rawstore, "候補_raw-ok.md", "> **指摘キー**: raw-ok\n")
+    create_raw_name_file(rawstore, b"\xe5\x80\x99\xe8\xa3\x9c_\xff.md", "> **指摘キー**: raw-name\n")
     (store / "候補_dir.md").mkdir(exist_ok=True)
     for link, target in (("候補_link.md", "進行中_a.md"), ("候補_broken.md", "missing")):
         if not os.path.lexists(store / link):
@@ -489,6 +667,7 @@ def candidate_cases():
         cases.append(case)
 
     add("collect-store", ["--task-dir", "store"])
+    add("collect-raw-name", ["--task-dir", "rawstore"])  # UTF-8 でない名前のファイルを含む(Mac では未実施。requires_raw_name)
     for label, value in {"empty": "empty", "absent": "absent", "plain-file": "plain.txt", "plain-file-slash": "plain.txt/",
                          "dirlink": "dirlink", "brokendir": "brokendir", "locked": "locked", "dot-slash": "./store",
                          "double-slash": "store//", "dot": ".", "nested-dot": "store/./", "dotdot": "store/../store",
@@ -533,6 +712,17 @@ def candidate_cases():
     add("check-stdin-source", ["--check", "--source", "refactor", "-"],
         stdin=(Path(__file__).parent / "r4a_rest_fixtures" / "candidate_ok.md").read_bytes())
     add("check-stdin-dir", ["--check", "-"], stdin="dir", thread=True)
+    add("check-stdout-dir", ["--check", "check-ok.md"], stdout="dir", thread=True)
+    add("check-stderr-dir", ["--check", "check-ok.md"], stderr="dir", thread=True)
+    # PYTHONINTMAXSTRDIGITS の起動前拒否(5 入口すべてに接続する)。
+    for label, value in INT_LIMIT_VALUES:
+        add(f"int-limit-env-{label}", ["--check", "check-ok.md"], env={"PYTHONINTMAXSTRDIGITS": value})
+    # usage の折り返し(argparse・add_help=False)。COLUMNS の値と、疑似端末の幅は pty_cases にある。
+    for columns in ("40", "120", "x", "1000"):
+        add(f"usage-columns-{columns}", ["--bad"], env={"COLUMNS": columns})
+    # ファイルの種類(--check)。権限なし(check-locked)のほか、リンク・壊れたリンク。
+    add("check-file-link", ["--check", "store/候補_link.md"])
+    add("check-file-broken-link", ["--check", "store/候補_broken.md"])
     return cases
 
 
@@ -545,6 +735,8 @@ def make_candidate_inputs_names():
 
 def make_child_inputs(directory):
     base = Path(directory) / "child"
+    if (base / "result-pr.json").exists() and (base / "locked.json").exists():
+        return  # 作成済み(疑似端末の case と result の case が、どちらが先でも同じ入力を使う。権限なしのファイルへ書き直さない)
     base.mkdir(exist_ok=True)
     result = lambda text, **kw: json.dumps({"type": "result", "result": text, **kw}, ensure_ascii=False)
     outcome = "無人のイテレーションの結果: {} — {}"
@@ -576,7 +768,7 @@ def make_child_inputs(directory):
         "result-string": '"x"',
         "result-bom": "\ufeff{}",
         "result-nan": "NaN",
-        "result-big-int": "9" * 5000,
+        "result-big-int": '{"type":"result","result":"無人のイテレーションの結果: PR — x","n":' + "9" * 5000 + "}",
         "result-deep-993": "[" * 993 + "]" * 993,
         "result-deep-994": "[" * 994 + "]" * 994,
         "result-deep-995": "[" * 995 + "]" * 995,
@@ -592,6 +784,20 @@ def make_child_inputs(directory):
     }
     for name, body in files.items():
         write(base, name + ".json", body)
+        if name.startswith("result-deep-") and name.split("-")[-1].isdigit():
+            assert nest_depth(body) == int(name.split("-")[-1]), "result の深さが違う(比較器の誤り)"
+    # 整数の桁の境界(既定の上限 4300 と、PYTHONINTMAXSTRDIGITS=640 の上限)。
+    for digits in (639, 640, 641, 4299, 4300, 4301):
+        # 整数は辞書の中に置く。受け付けたときと超えたときで出力が分かれる形にする(数だけの JSON は、どちらも同じ出力になる)。
+        write(base, f"result-int-{digits}.json", int_in_dict_result(digits))
+        write(base, f"perm-int-{digits}.log", '{"decision":"allow","n":' + "9" * digits + "}\n")
+    locked = base / "locked.json"
+    if not os.path.lexists(locked):
+        write(base, "locked.json", "{}")
+        locked.chmod(0)
+    for link, target in (("link.json", "result-pr.json"), ("broken-link.json", "absent.json")):
+        if not os.path.lexists(base / link):
+            os.symlink(target, base / link)
     write(base, "result-invalid-utf8.json", b'{"type":"result","result":"\xff' + "無人のイテレーションの結果: PR — x".encode() + b'"}')
     # permlog。
     line = lambda **kw: json.dumps(kw, ensure_ascii=False)
@@ -621,32 +827,47 @@ def make_child_inputs(directory):
         "deep": '{"decision":"allow","d":' + "[" * 100 + "]" * 100 + "}\n",
         "deep-993": '{"decision":"allow","d":' + "[" * 992 + "]" * 992 + "}\n",
         "deep-994": '{"decision":"allow","d":' + "[" * 993 + "]" * 993 + "}\n",
+        "deep-995": '{"decision":"allow","d":' + "[" * 994 + "]" * 994 + "}\n",
         "deep-repr": '{"decision":"deny","kind":"x","tool_name":' + "[" * 900 + "]" * 900 + "}\n",
         "nested-repr": '{"decision":"deny","kind":"x","tool_name":{"a":[1,"b\'c",2.5,null,{"z":false}]},"reason":"\\"q\\"","subject":[]}\n',
         "dup-keys": '{"decision":"allow","decision":"deny","kind":"d"}\n',
     }
     for name, body in perm.items():
         write(base, f"perm-{name}.log", body)
-    big = (line(decision="allow") + "\n").encode()
-    exact = (big * (1048576 // len(big) + 1))[:1048576 - 1] + b"\n"
-    write(base, "perm-1mib.log", exact)
-    write(base, "perm-over-1mib.log", exact + b"\n")
-    # 境界の手前(1MiB-1・9999 行・明細 99 件と 100 件ちょうど)。
+    for n in (993, 994, 995):
+        assert nest_depth((base / f"perm-deep-{n}.log").read_text()) == n, "permlog の深さが違う(比較器の誤り)"
+    # 大きさの境界(1 MiB-2・1 MiB-1・1 MiB・1 MiB+1)。行数の上限(10000 行)に先に当たらないよう、1 行に詰める。
     def exact(size):
-        unit = (line(decision="allow") + "\n").encode()
-        count = size // len(unit) - 2
-        head = unit * count
-        rest = size - len(head)
-        pad = rest - len((line(decision="allow", pad="") + "\n").encode())
-        return head + (line(decision="allow", pad="p" * pad) + "\n").encode()
+        head = b'{"decision":"allow","pad":"'
+        tail = b'"}\n'
+        data = head + b"p" * (size - len(head) - len(tail)) + tail
+        assert len(data) == size and data.count(b"\n") == 1, "大きさの境界の入力の大きさが違う(比較器の誤り)"
+        return data
 
+    write(base, "perm-1mib.log", exact(1048576))
+    write(base, "perm-over-1mib.log", exact(1048577))
     write(base, "perm-1mib-minus1.log", exact(1048575))
     write(base, "perm-1mib-minus2.log", exact(1048574))
     write(base, "perm-9999.log", (line(decision="allow") + "\n") * 9999)
+    for count in (9999, 10000, 10001):
+        name = {9999: "perm-9999.log", 10000: "perm-lines-10000.log", 10001: "perm-lines-10001.log"}[count]
+        assert (base / name).read_bytes().count(b"\n") == count, "行数の境界の入力の行数が違う(比較器の誤り)"
     for count in (99, 100, 101):
         write(base, f"perm-deny-{count}.log",
               "".join(line(decision="deny", kind="k", tool_name=f"t{n}", reason="r", subject="s") + "\n" for n in range(count)))
     write(base, "perm-70000.log", exact(70000))
+    for count in (99, 100, 101):
+        assert (base / f"perm-deny-{count}.log").read_bytes().count(b'"decision": "deny"') == count, "明細の件数が違う(比較器の誤り)"
+    # 切り詰めの上限の前・等値・後(明細 500・denials 2000・kind 100・明細の行 600・origin の reason 300)。
+    for size in (499, 500, 501):
+        write(base, f"result-detail-{size}.json", result(outcome.format("PR", "x" * size)))
+    for size in (1999, 2000, 2001):
+        write(base, f"result-denials-len-{size}.json", denials_input(size))
+    for size in (99, 100, 101):
+        write(base, f"perm-kind-{size}.log", line(decision="deny", kind="k" * size, tool_name="t", reason="r", subject="s") + "\n")
+    for size in (599, 600, 601):
+        write(base, f"perm-line-{size}.log",
+              line(decision="deny", kind="k", tool_name="t", reason="r" * (size - 10), subject="s") + "\n")
     write(base, "perm-invalid-utf8.log", b'{"decision":"allow","x":"\xff"}\n')
     write(base, "perm-truncated-utf8.log", b'{"decision":"allow","x":"\xe2\x82"}\n')
     write(base, "perm-bom.log", b"\xef\xbb\xbf" + line(decision="allow").encode() + b"\n")
@@ -722,7 +943,7 @@ def child_cases():
     for name, value in origins.items():
         add(f"origin-{name}", ["origin-json"], stdin=json.dumps(value).encode())
     raw = {"empty": b"", "not-json": b"x", "list": b"[]", "invalid-utf8": b"\xff", "bom": b"\xef\xbb\xbf{}", "scalar": b"1",
-           "big-int": ("9" * 5000).encode(), "deep-994": ("[" * 994 + "]" * 994).encode(), "deep-995": ("[" * 995 + "]" * 995).encode(),
+           "big-int": int_in_dict_origin(5000), "deep-994": ("[" * 994 + "]" * 994).encode(), "deep-995": ("[" * 995 + "]" * 995).encode(),
            "nan": b"NaN", "dup-bool": b'{"origin":true,"origin":false,"same":true,"vcs":true}',
            "big-repo": b'{"origin":true,"same":true,"vcs":true,"repo":"' + b"r" * 9000 + b'"}',
            "huge-repo": b'{"origin":true,"same":true,"vcs":true,"repo":"' + b"r" * 70000 + b'"}'}
@@ -733,8 +954,48 @@ def child_cases():
     add("origin-unbuffered", ["origin-json"], stdin=json.dumps(origins["ok"]).encode(), env={"PYTHONUNBUFFERED": "1"})
     add("origin-stdout-full", ["origin-json"], stdin=json.dumps(origins["ok"]).encode(), stdout="full")
     add("origin-stdin-dir", ["origin-json"], stdin="dir", thread=True)
+    add("origin-stdout-dir", ["origin-json"], stdout="dir", thread=True)
+    add("origin-stderr-dir", ["origin-json"], stderr="dir", thread=True)
     add("result-int-limit", ["result", "child/result-big-int.json"], env={"PYTHONINTMAXSTRDIGITS": "0"})
     add("result-int-limit-640", ["result", "child/result-big-int.json"], env={"PYTHONINTMAXSTRDIGITS": "640"})
+    # PYTHONINTMAXSTRDIGITS の起動前拒否(5 入口すべてに接続する)。origin-json と result の両方の入口。
+    for label, value in INT_LIMIT_VALUES:
+        add(f"origin-int-limit-env-{label}", ["origin-json"], stdin=json.dumps(origins["ok"]).encode(),
+            env={"PYTHONINTMAXSTRDIGITS": value})
+        add(f"result-int-limit-env-{label}", ["result", "child/result-pr.json"], env={"PYTHONINTMAXSTRDIGITS": value})
+    # 整数の桁の境界: 既定の上限(4299・4300・4301 桁)と、上限 640 のとき(639・640・641 桁)。3 入口すべて。
+    # 整数は辞書の中に置き、受け付けたときと超えたときで出力が分かれる形にする(境界の組は、比較器が旧版の出力の変化を確かめる)。
+    for digits, env in ((4299, {}), (4300, {}), (4301, {}), (639, {"PYTHONINTMAXSTRDIGITS": "640"}),
+                        (640, {"PYTHONINTMAXSTRDIGITS": "640"}), (641, {"PYTHONINTMAXSTRDIGITS": "640"}),
+                        (4300, {"PYTHONINTMAXSTRDIGITS": "640"})):
+        tag = f"{digits}" + ("-limit640" if env else "")
+        add(f"result-int-digits-{tag}", ["result", f"child/result-int-{digits}.json"], env=env)
+        add(f"permlog-int-digits-{tag}", ["permlog", f"child/perm-int-{digits}.log"], env=env)
+        add(f"origin-int-digits-{tag}", ["origin-json"], stdin=int_in_dict_origin(digits), env=env)
+    # permlog の境界の手前の入力(1 MiB-1・1 MiB-2・9999 行・明細 99 件と 100 件と 101 件)。
+    for name in ("1mib-minus1", "1mib-minus2"):
+        add(f"permlog-file-{name}", ["permlog", f"child/perm-{name}.log"])
+    add("permlog-lines-9999", ["permlog", "child/perm-9999.log"])
+    for count in (99, 100, 101):
+        add(f"permlog-deny-{count}", ["permlog", f"child/perm-deny-{count}.log"])
+    for depth_name in ("deep-995",):
+        add(f"permlog-{depth_name}", ["permlog", f"child/perm-{depth_name}.log"])
+    assert nest_depth("[" * 993 + "]" * 993) == 993
+    add("origin-raw-deep-993", ["origin-json"], stdin=("[" * 993 + "]" * 993).encode())
+    for size in (499, 500, 501):
+        add(f"result-detail-{size}", ["result", f"child/result-detail-{size}.json"])
+    for size in (1999, 2000, 2001):
+        add(f"result-denials-len-{size}", ["result", f"child/result-denials-len-{size}.json"])
+    for size in (99, 100, 101):
+        add(f"permlog-kind-{size}", ["permlog", f"child/perm-kind-{size}.log"])
+    for size in (599, 600, 601):
+        add(f"permlog-line-{size}", ["permlog", f"child/perm-line-{size}.log"])
+    for size in (299, 300, 301):
+        add(f"origin-reason-{size}", ["origin-json"],
+            stdin=json.dumps({"origin": True, "same": True, "vcs": True, "reason": "r" * size, "repo": "o/n"}).encode())
+    # ファイルの種類(result): 権限なし・リンク・壊れたリンク。
+    for kind in ("locked", "link", "broken-link"):
+        add(f"result-file-{kind}", ["result", f"child/{kind}.json"])
     return cases
 
 
@@ -790,9 +1051,50 @@ def pty_cases():
         # stderr だけが端末のときは、標準出力(pipe)の幅の問い合わせで 80 に落ちる。
         add(f"store-usage-stderr-tty-{cols}", STORE, ["--bad"], (24, cols, "stderr"))
         add(f"host-error-stderr-tty-{cols}", HOST, ["-x"], (24, cols, "stderr"))
+    # candidate-keys の usage(argparse・add_help=False。誤りの usage は標準エラーへ出る)。
+    for cols in (80, 100, 60, 30, 10, 1, 0):
+        add(f"candidate-usage-stdout-tty-{cols}", CAND, ["--bad"], (24, cols, "stdout"))
+        add(f"candidate-usage-both-tty-{cols}", CAND, ["--bad"], (24, cols, "both"))
+        add(f"candidate-usage-stderr-tty-{cols}", CAND, ["--bad"], (24, cols, "stderr"))
+    for columns in ("40", "120", "x"):
+        add(f"candidate-usage-tty-columns-{columns}", CAND, ["--bad"], (24, 100, "stdout"), env={"COLUMNS": columns})
     for columns in ("40", "120", "x"):
         add(f"store-help-tty-columns-{columns}", STORE, ["--help"], (24, 100, "stdout"), env={"COLUMNS": columns})
     add("store-help-tty-lines-only", STORE, ["--help"], (50, 70, "stdout"), env={"LINES": "5"})
+    # loop の 2 本(argparse なし)。標準出力は行ごとのバッファになり、標準出力と標準エラーが同じ端末なら出力の混ざる順が決まる。
+    first_child = [True]
+    first_task = [True]
+    for which in ("stdout", "both"):
+        for label, name, stdin in (("surrogate-repo", "origin-json", json.dumps(
+                {"origin": True, "same": True, "vcs": True, "repo": "a\ud800b"}).encode()),
+                                   ("ok", "origin-json", json.dumps(
+                {"origin": True, "same": False, "vcs": True, "reason": "ok", "repo": "owner/name"}).encode())):
+            add(f"child-origin-{label}-{which}-tty", CHILD, [name], (24, 80, which), stdin=stdin)
+        for label in ("pr", "deep-denials", "dumps-mixed-992", "bad-json"):
+            add(f"child-result-{label}-{which}-tty", CHILD, ["result", f"child/result-{label}.json"], (24, 80, which))
+        add(f"child-permlog-ok-{which}-tty", CHILD, ["permlog", "child/perm-ok.log"], (24, 80, which))
+        add(f"task-info-{which}-tty", TASK, ["taskinfo", "-"], (24, 80, which),
+            stdin="> **無人実行**: 可\n> **作成日**: 2026-01-02\n日本語\n".encode())
+        add(f"task-info-missing-{which}-tty", TASK, ["taskinfo", "missing"], (24, 80, which))
+    for case in cases:
+        if case.helper == CHILD and first_child[0]:
+            case.setup = make_child_inputs
+            first_child[0] = False
+        if case.helper == TASK and first_task[0]:
+            case.setup = make_task_inputs
+            first_task[0] = False
+    # 成功の出力(標準出力の行ごとのバッファ・混ざる順)。candidate-keys と host-argv にも当てる。
+    first_candidate = [True]
+    for which in ("stdout", "both"):
+        for label, argv in (("check", ["--check", "check-ok.md"]), ("collect", ["--task-dir", "store"]),
+                            ("usage-error", ["--check"])):
+            case = Case(f"pty/candidate-{label}-{which}-tty", CAND, argv, pty=(24, 80, which))
+            if first_candidate[0]:
+                case.setup = make_candidate_inputs
+                first_candidate[0] = False
+            cases.append(case)
+        add(f"host-ok-{which}-tty", HOST, ["run"], (24, 80, which))
+        add(f"host-error-{which}-tty", HOST, ["-x"], (24, 80, which))
     add("store-success-stdout-tty", STORE, [], (24, 80, "stdout"))
     add("store-unbuffered-stdout-tty", STORE, [], (24, 80, "stdout"), env={"PYTHONUNBUFFERED": "1"})
     return cases
@@ -832,6 +1134,8 @@ def signal_cases():
     # 受け継いだ SIG_IGN: 標準入力の読取りの途中の SIGINT は効かず、残りを読んで正常に終わる。
     cases.append(Case("signal/child-int-ignored-stdin-read", CHILD, ["origin-json"],
                       signal=("INT", b'{"origin":true,', "stdin", True, b'"same":true,"vcs":true}')))
+    cases.append(Case("signal/task-int-ignored-stdin-read", TASK, ["taskinfo", "-"],
+                      signal=("INT", b"> **", "stdin", True, ignored_tail["task"][4:])))
     cases.append(Case("signal/candidate-int-ignored-stdin-read", CAND, ["--check", "-"],
                       signal=("INT", b"> **", "stdin", True, ignored_tail["candidate"][4:])))
     # 読み手のいない満杯の pipe へ書く間の SIGINT(両方のバッファの方式)。
@@ -1339,6 +1643,7 @@ def charset_cases():
         "store-arg-echo": (STORE, ["--bad=日本語"], b""),
         "store-non-utf8-arg": (STORE, None, b""),
         "candidate-key": (CAND, ["--check", "-"], "> **発見元**: refactor\n> **指摘キー**: 日本語é\n".encode()),
+        "task-info": (TASK, ["taskinfo", "-"], "> **作成日**: 2026-01-02\n> **無人実行**: 可\n日本語é\n".encode()),
         "child-origin": (CHILD, ["origin-json"],
                          json.dumps({"origin": True, "same": True, "vcs": True, "reason": "理由", "repo": "リポジトリ"},
                                     ensure_ascii=False).encode()),
@@ -1398,6 +1703,8 @@ def charset_record(result, case=None, mapper=None):
 
 def locale_available(name):
     """その locale が、この機械で使えるか(使えなければ旧版は C に落ちる。結果が機械で変わる)。"""
+    if os.environ.get("R4A_REST_SIMULATE_LOCALE") == "1" and name == "ja_JP.eucJP":
+        return True  # Mac の条件のまね(自己検査の中だけ)
     result = subprocess.run([sys.executable, "-c", "import locale,sys\ntry:\n locale.setlocale(locale.LC_ALL, sys.argv[1])\nexcept locale.Error:\n sys.exit(1)", name],
                             capture_output=True, env=dict(os.environ, PYTHONUTF8="1"))
     return result.returncode == 0
@@ -1418,13 +1725,20 @@ def run_charset_case(case, env, run_dir, binary, expectations, record, mapper):
         return
     if case.id not in expectations:
         raise Failure("設定ありの旧版の固定期待が charset_expectations.json に無い(--record-charset で記録する)")
-    expected = expectations[case.id]
-    if "locale_available" in expected and expected["locale_available"] != current["locale_available"]:
-        raise Unavailable("locale の有無が、記録した機械と違う(結果が locale に依存する)")
-    if current != expected:
-        raise Failure(f"設定ありの旧版が固定期待と違う: {current!r}")
+    # Rust と設定なしの旧版の比較は、未実施にせず必ず流す(Rust は文字コードの設定を読まない)。
     if rust != base:
         raise Failure(f"Rust が設定を読んでいる(設定なしの旧版と違う):\n旧(設定なし): {base!r}\n新: {rust!r}")
+    expected = expectations[case.id]
+    if "locale_available" in expected and expected["locale_available"] != current["locale_available"]:
+        # 旧版の固定期待の照らしだけを未実施にする(OS ごとの固定の一覧の case だけ)。後で固定期待を記録できるよう、出力の要点を出す。
+        listing = subprocess.run(["locale", "-a"], capture_output=True, text=True).stdout.split()
+        raw = bytes.fromhex(current.get("stdout", "")) + bytes.fromhex(current.get("stderr", ""))
+        raise Unavailable(f"locale の有無が、記録した機械と違う(記録 {expected['locale_available']}・今 {current['locale_available']}・"
+                          f"LC_ALL={case.env.get('LC_ALL')}・locale -a の件数 {len(listing)}・eucJP を含む名前 "
+                          f"{[name for name in listing if 'euc' in name.lower()][:5]}。旧版の出力 終了値 {current['rc']}・{len(raw)} バイト・"
+                          f"sha256 {hashlib.sha256(raw).hexdigest()[:16]}・先頭 {raw[:48]!r})")
+    if current != expected:
+        raise Failure(f"設定ありの旧版が固定期待と違う: {current!r}")
 
 
 # ---------------------------------------------------------------- 起動時に閉じた標準の fd(旧新別の期待)
@@ -1562,6 +1876,23 @@ def map_pieces(mapper, pieces):
 
 
 def run_fault_case(case, env, run_dir, binary, mapper, shim, work):
+    """故障の case。失敗のときは、差込みが記録した呼び出しの要点(write の fd ごとの回数とバイト数・read・open・close)を文に足す。"""
+    calls = {"quiet": Path(work) / "calls-quiet.txt", "fault": Path(work) / "calls-fault.txt"}
+    for path in calls.values():
+        path.unlink(missing_ok=True)
+    try:
+        return _run_fault_case(case, env, run_dir, binary, mapper, shim, work, calls)
+    except Failure as failure:
+        def summary(path):
+            try:
+                return path.read_text(errors="replace").strip().replace("\n", " | ")[:200] or "(記録なし)"
+            except OSError:
+                return "(記録なし)"
+        raise Failure(f"{failure}\n  差込みが見た呼び出し(終了時の記録): 故障なしの旧版 [{summary(calls['quiet'])}]・故障ありの旧版 [{summary(calls['fault'])}]"
+                      f"・規則 {case.fault}")
+
+
+def _run_fault_case(case, env, run_dir, binary, mapper, shim, work, calls):
     fd, mode, limit = case.fault.split(":")
     fd, limit = int(fd), int(limit)
     retry = "PYTHONUNBUFFERED" not in case.env or case.env["PYTHONUNBUFFERED"] in ("", "0")
@@ -1569,10 +1900,10 @@ def run_fault_case(case, env, run_dir, binary, mapper, shim, work):
     trace = Path(work) / "trace.bin"
     trace.unlink(missing_ok=True)
     # 故障なしの旧版の書込みの列(同じ case・同じバッファの方式)を記録する。
-    quiet = dict(legacy_env, R4A_FAULT=f"{fd}:budget:999999999", R4A_TRACE=str(trace))
+    quiet = dict(legacy_env, R4A_FAULT=f"{fd}:budget:999999999", R4A_TRACE=str(trace), R4A_CALLS=str(calls["quiet"]))
     quiet_result = run_child(legacy_command(case), case, quiet, run_dir)
     pieces = read_trace(trace)
-    old = run_child(legacy_command(case), case, dict(legacy_env, R4A_FAULT=case.fault), run_dir)
+    old = run_child(legacy_command(case), case, dict(legacy_env, R4A_FAULT=case.fault, R4A_CALLS=str(calls["fault"])), run_dir)
     new = run_child(rust_command(binary, case), case, dict(env, R4A_FAULT=case.fault), run_dir)
     if fd == 2 and mode not in ("fail-first", "fail-second", "fail-nth", "fail-first-and-nth"):
         joined = b"".join(pieces)
@@ -1643,7 +1974,7 @@ def compare_faulted(case, mapper, quiet_result, old, new, fd, mode, quiet_frames
 
 
 def run_pty(argv, case, env, cwd):
-    """疑似端末で動かす。標準入力は /dev/null。端末に向けた出力は master から読む(CRLF になる)。"""
+    """疑似端末で動かす。標準入力は /dev/null(case が入力を持つときは、その入力を渡して閉じる)。端末に向けた出力は master から読む(CRLF になる)。"""
     import fcntl
     import pty as pty_module
     import struct
@@ -1654,9 +1985,15 @@ def run_pty(argv, case, env, cwd):
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         stdout = slave if which in ("stdout", "both") else subprocess.PIPE
         stderr = slave if which in ("stderr", "both") else subprocess.PIPE
-        process = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=stdout, stderr=stderr, env=env, cwd=cwd)
+        feed = case.stdin if isinstance(case.stdin, bytes) and case.stdin else None
+        process = subprocess.Popen(argv, stdin=subprocess.PIPE if feed else subprocess.DEVNULL, stdout=stdout,
+                                   stderr=stderr, env=env, cwd=cwd)
         os.close(slave)
         slave = -1
+        if feed:
+            process.stdin.write(feed)  # 入力は小さい(pipe に収まる)。書いたら閉じて、EOF を渡す
+            process.stdin.close()
+            process.stdin = None
         chunks = []
         deadline = time.monotonic() + CHILD_TIMEOUT
         import select
@@ -1701,32 +2038,95 @@ def run_pty(argv, case, env, cwd):
 
 
 WAIT_STATES = {
-    # 子が待っている場所(Linux の /proc/<pid>/wchan の先頭)。標準入力の read・FIFO の open・満杯の pipe への write。
-    "stdin": ("pipe_read", "wait_woken", "pipe_wait"),
+    # 子が待っている場所。`/proc/<pid>/syscall`(待っている syscall の番号と引数。カーネルの版によらない)を先に使い、
+    # 読めないときだけ `/proc/<pid>/wchan` の名前(カーネルの版で変わる)で確かめる。
+    "stdin": ("pipe_read", "anon_pipe_read", "wait_woken", "pipe_wait", "pipe_wait_readable"),
     "fifo": ("wait_for_partner", "fifo_open"),
-    "fullpipe": ("pipe_write", "pipe_wait_writable"),
+    "fullpipe": ("pipe_write", "anon_pipe_write", "pipe_wait_writable"),
+}
+# syscall の番号(アーキテクチャごと): read・write・open 系。
+SYSCALL_NUMBERS = {
+    "x86_64": {"read": (0,), "write": (1,), "open": (2, 257)},
+    "aarch64": {"read": (63,), "write": (64,), "open": (56,)},
 }
 
 
+def syscall_wait(kind, text):
+    """`/proc/<pid>/syscall` の 1 行が、`kind` の待ちか。read は fd 0、write は fd 1、open は open 系なら待ちとする。"""
+    import platform
+    table = SYSCALL_NUMBERS.get(platform.machine())
+    parts = text.split()
+    if table is None or len(parts) < 2 or not parts[0].lstrip("-").isdigit():
+        return False
+    number = int(parts[0])
+    try:
+        first_arg = int(parts[1], 16)
+    except ValueError:
+        return False
+    if kind == "stdin":
+        return number in table["read"] and first_arg == 0
+    if kind == "fullpipe":
+        return number in table["write"] and first_arg == 1
+    if kind == "fifo":
+        return number in table["open"]
+    return False
+
+
+def proc_state(stat_text):
+    """`/proc/<pid>/stat` の状態(S: 眠っている・D: ディスクなどの待ち・R: 走っている)。読めなければ空。"""
+    close = stat_text.rfind(")")
+    rest = stat_text[close + 1:].split() if close >= 0 else []
+    return rest[0] if rest else ""
+
+
+def fifo_wait(syscall_text, stat_text, wchan_text):
+    """FIFO を開いて待っているか。open 系の syscall の中で、状態が `S`(眠っている)であることを求める。
+    wchan が読めるとき(空・`0` でないとき)は、`WAIT_STATES["fifo"]` とも照らす。
+    旧 Python の起動の途中の open(D 状態)や、普通のファイルの open の途中を、待ちと見なさない。"""
+    if proc_state(stat_text) != "S":
+        return False
+    wchan = wchan_text.strip()
+    if syscall_text.startswith("(読めない"):
+        return wchan.startswith(WAIT_STATES["fifo"])  # syscall が読めない機械は、wchan の名前だけで確かめる
+    if not syscall_wait("fifo", syscall_text):
+        return False
+    if wchan in ("", "0") or wchan.startswith("(読めない"):
+        return True
+    return wchan.startswith(WAIT_STATES["fifo"])
+
+
 def wait_for_state(pid, argv0, kind):
-    """子が待つ場所に入ったことを、Linux では /proc/<pid>/wchan で確かめる(sleep の偶然に頼らない)。
-    Linux 以外には確かめる手段が無いので、この関数を使う case は Linux 以外では未実施にする(固定の一覧)。"""
+    """子が待つ場所に入ったことを、Linux では /proc で確かめる(sleep の偶然に頼らない)。
+    Linux 以外には確かめる手段が無いので、この関数を使う case は Linux 以外では未実施にする(固定の一覧)。
+    時間切れのときは、見えた値(状態・syscall・wchan・コマンド)を失敗の文に出す。"""
     if sys.platform != "linux":
         raise Failure("Linux 以外では待ちの状態を確かめられない(この case は未実施の固定の一覧に入る)")
     deadline = time.monotonic() + CHILD_TIMEOUT
+    seen = {}
     while time.monotonic() < deadline:
+        for name in ("wchan", "syscall", "stat"):
+            try:
+                seen[name] = Path(f"/proc/{pid}/{name}").read_text(errors="replace").strip()
+            except OSError as error:
+                seen[name] = f"(読めない: {error.__class__.__name__} {error.errno})"
         try:
-            wchan = Path(f"/proc/{pid}/wchan").read_text()
             command = Path(f"/proc/{pid}/cmdline").read_bytes()
         except OSError:
-            wchan, command = "", b""
+            command = b""
+        seen["cmdline"] = command[:60]
         if argv0 is not None and not command.startswith(os.fsencode(str(argv0))):
             time.sleep(0.005)
             continue  # exec の前(fork した直後)の子を、待っていると見なさない
-        if wchan.startswith(WAIT_STATES[kind]):
+        if kind == "fifo":
+            if fifo_wait(seen.get("syscall", ""), seen.get("stat", ""), seen.get("wchan", "")):
+                return
+        elif syscall_wait(kind, seen.get("syscall", "")) or seen.get("wchan", "").startswith(WAIT_STATES[kind]):
             return
         time.sleep(0.02)
-    raise Failure(f"子が {kind} で待たなかった(合図の時間切れ)")
+    import platform
+    raise Failure(f"子が {kind} で待たなかった(合図の時間切れ)。見えた値: wchan={seen.get('wchan')!r} "
+                  f"syscall={seen.get('syscall')!r} stat={seen.get('stat', '')[:80]!r} cmdline={seen.get('cmdline')!r} "
+                  f"machine={platform.machine()} kernel={platform.release()}")
 
 
 def wait_for_blocked_read(pid, argv0=None):
@@ -1762,6 +2162,9 @@ def run_signal(argv, case, env, cwd):
             process.stdin.write(tail)
             process.stdin.flush()
         try:
+            if mode == "fullpipe" and not ignored:
+                # 読む前に、子が信号で終わるのを待つ。先に読むと、塞がっていた write が信号より先に進み、通るバイト数が揺れる。
+                process.wait(timeout=CHILD_TIMEOUT)
             out, err = process.communicate(timeout=CHILD_TIMEOUT)
         except subprocess.TimeoutExpired:
             process.kill()
@@ -2127,7 +2530,8 @@ class Mapper:
         for item in frames:
             groups.setdefault(item[4], []).append(item)
         if len(groups) != len(expected):
-            raise Failure(f"Traceback の数が期待と違う: 期待 {len(expected)}・実際 {len(groups)}")
+            raise Failure(f"Traceback の数が期待と違う: 期待 {len(expected)}・実際 {len(groups)}"
+                          f"(標準エラーの先頭 300 バイト: {stderr[:300]!r}・全体 {len(stderr)} バイト)")
         for sequence, want in enumerate(expected):
             got = groups.get(sequence, [])
             if len(got) != len(want):
@@ -2261,10 +2665,11 @@ def describe_snapshot_change(before, after):
 
 
 def run_selftest(options, binary, test_file=None):
-    """比較器の自己検査(`test_r4a_rest.py`)を、比較の前に流す。落ちたら比較を合格にしない(R4B・R4R と同じ)。
+    """比較器の自己検査(`test_r4a_rest.py`)を、比較の前に流す。落ちても本体の比較は流し(CI の 1 回で両方の結果を得る)、
+    終了コードは 1 のまま、最後の行で自己検査の失敗を知らせる(合格にしない)。落ちたときは失敗の文を返し、合格・省略は `None`。
     自己検査の中の子の比較器は、環境変数で自己検査を流さない(再帰しない)。"""
     if options.no_selftest or options.list_cases or options.write_required or os.environ.get("R4A_REST_IN_SELFTEST"):
-        return
+        return None
     import importlib.util
     import unittest
     os.environ["R4A_REST_IN_SELFTEST"] = "1"
@@ -2278,8 +2683,10 @@ def run_selftest(options, binary, test_file=None):
         unittest.defaultTestLoader.loadTestsFromModule(module))
     os.environ.pop("R4A_REST_IN_SELFTEST", None)
     if not result.wasSuccessful() or result.testsRun == 0:
-        raise SystemExit(f"比較器の自己検査が失敗した({result.testsRun} 件・失敗 {len(result.failures)}・エラー {len(result.errors)})。比較は流さない")
+        names = [str(test).split(" ")[0] for test, _ in result.failures + result.errors][:8]
+        return (f"比較器の自己検査が失敗した({result.testsRun} 件・失敗 {len(result.failures)}・エラー {len(result.errors)}: {names})")
     print(f"比較器の自己検査: {result.testsRun} 件合格 / {time.monotonic() - started:.1f} 秒")
+    return None
 
 
 def main():
@@ -2295,9 +2702,13 @@ def main():
                         help="設定ありの旧版の結果を charset_expectations.json へ記録する(旧版を取り換えたときだけ人が実行する)")
     parser.add_argument("--write-required", action="store_true",
                         help="必須 case の一覧を書き出す(case を足したときだけ人が実行して差分を確かめる)")
+    parser.add_argument("--selftest-file", type=Path, default=None, help=argparse.SUPPRESS)  # 自己検査の確かめ専用
     parser.add_argument("--no-selftest", action="store_true",
                         help="比較器の自己検査を流さない(同じ比較器を 2 回目に流すとき。自己検査の中の子の比較は、環境変数で自動に流さない)")
     options = parser.parse_args()
+    for name in SIMULATION_VARIABLES:
+        if os.environ.get(name) and not os.environ.get("R4A_REST_IN_SELFTEST"):
+            raise SystemExit(f"{name} は自己検査の中(R4A_REST_IN_SELFTEST)でだけ使える。正式の検査では設定しない")
     # 比較器と、その子(旧版・Rust・補助のコマンド)は、使い捨ての一時フォルダの中で動かす。リポジトリに何も残さない。
     scratch = tempfile.TemporaryDirectory(prefix="r4a-rest-scratch-")
     os.chdir(scratch.name)
@@ -2310,8 +2721,23 @@ def main():
     if str(binary) == "" or not binary.is_absolute() or not binary.is_file() or not os.access(binary, os.X_OK):
         raise SystemExit(f"検査用の実行ファイルが絶対パスの実行可能なファイルでない: {binary!r}")
 
-    run_selftest(options, binary)
+    selftest_failure = run_selftest(options, binary, test_file=options.selftest_file)
+    code = 0
+    try:
+        compare(options, binary)
+    except SystemExit as exit_:
+        code = exit_.code if isinstance(exit_.code, int) else 1
+        if exit_.code is not None and not isinstance(exit_.code, int):
+            print(exit_.code, file=sys.stderr)
+    if selftest_failure is not None:
+        print(f"結果: 自己検査が失敗した。{selftest_failure}。比較の結果は上のとおり(比較の終了コード {code})")
+        raise SystemExit(1)
+    if code:
+        raise SystemExit(code)
 
+
+def compare(options, binary):
+    """本体の比較(必須 case を旧版と Rust で比べる)。"""
     known = ["resolve-task-store", "candidate-keys", "host-argv", "loop-task-text", "loop-child-output"]
     helpers = [h for h in options.only.split(",") if h] if options.only else list(known)
     unknown = [h for h in helpers if h not in known]
@@ -2326,7 +2752,8 @@ def main():
         (FIXTURES / "required_cases.json").write_text(
             json.dumps({"cases": {c.id: c.helper for c in sorted(every, key=lambda c: c.id)},
                         "requires_shim": sorted(c.id for c in every if needs_shim(c)),
-                        "requires_linux": sorted(c.id for c in every if needs_linux(c))},
+                        "requires_linux": sorted(c.id for c in every if needs_linux(c)),
+                        "requires_raw_name": sorted(c.id for c in every if c.id in RAW_NAME_CASES)},
                        ensure_ascii=False, indent=1) + "\n",
             encoding="utf-8")
         print(f"書き出した case: {len(every)}")
@@ -2369,6 +2796,9 @@ def main():
     print(f"導入先の置き場: {sorted(set(stdlib_dirs))}")
     print(f"本家と違うファイル: {mismatched or 'なし'}")
 
+    boundary_list = boundary_groups()
+    boundary_ids = {i for _, ids, _, _ in boundary_list for i in ids}
+    boundary_out = {}
     started = time.monotonic()
     passed = 0
     failures = []
@@ -2415,6 +2845,9 @@ def main():
                 if needs_linux(case) and sys.platform != "linux":
                     not_run.append(case.id)
                     continue
+                if case.id in RAW_NAME_CASES and os_key() != "linux":
+                    not_run.append(case.id)
+                    continue
                 if needs_shim(case) and shim is None:
                     if sys.platform == "linux":
                         raise Failure("Linux で故障の差込みライブラリを作れない・効かない(cc が無い・ビルドの失敗・差込みの無効)。未実施にしない")
@@ -2437,6 +2870,8 @@ def main():
                 uncapturable.extend(verdict.get("uncapturable", []))
                 cut_flags.extend(verdict.get("cut_inside_field", []))
                 passed += 1
+                if case.id in boundary_ids and RECENT:
+                    boundary_out[case.id] = RECENT[0]  # 旧版の出力(最初の子は旧版)
             except Failure as error:
                 if case.pending:
                     pending.append(f"{case.id}: {error}")
@@ -2445,6 +2880,11 @@ def main():
             except OSError as error:
                 # case の中の OS の失敗(例: 装置が無い)は、その case の失敗にして、ほかの case を流し続ける。
                 failures.append(f"{case.id}: OS の失敗: {error!r}")
+    # `--only` の無い全件の比較では、定義した組をすべて確かめたことを求める。
+    boundary_checked, boundary_failures = check_boundaries(
+        boundary_out, boundary_list, expected_groups=len(boundary_list) if not options.only else None)
+    failures.extend(boundary_failures)
+    print(f"境界の組: {boundary_checked} 組で、旧版の出力が境界で変わることを確かめた")
     if sorted(executed) != sorted(ids):
         failures.append("実行した case が必須の集合と違う")
     if closed_record_out is not None:
@@ -2467,26 +2907,32 @@ def main():
     shim_ids = sorted(c.id for c in cases if c.fault is not None or c.preload or c.race is not None)
     unavailable = [line for line in not_run if ": " in line]
     # locale の有無などで確かめられない case(Unavailable)の集合も、OS ごとに固定した一覧と照らす(今は全 OS で空)。
-    unexpected_unavailable = sorted(line.split(": ", 1)[0] for line in unavailable
-                                    if line.split(": ", 1)[0] not in UNAVAILABLE_BY_OS.get(sys.platform, []))
-    if unexpected_unavailable:
-        failures.append(f"この OS の固定の一覧に無い未実施(locale の有無が記録と違う)がある: {unexpected_unavailable[:5]}"
-                        "(別の機械では、期待を記録し直すか、OS ごとの一覧に足す)")
+    key = os_key()
+    # 理由つきの未実施(locale)は、case の ID で固定した OS ごとの一覧と、集合が同じでなければ失敗にする。
+    unavailable_ids = sorted(line.split(": ", 1)[0] for line in unavailable)
+    expected_unavailable = sorted(i for i in UNAVAILABLE_BY_OS.get(key, []) if i in set(ids))
+    unavailable_ok = unavailable_ids == expected_unavailable
+    if not unavailable_ok:
+        failures.append(f"理由つきの未実施の集合が、この OS の固定の一覧と違う: 実際 {len(unavailable_ids)} 件・一覧 {len(expected_unavailable)} 件"
+                        f"(差: {sorted(set(unavailable_ids) ^ set(expected_unavailable))[:6]})")
     plain_not_run = sorted(line for line in not_run if ": " not in line)
-    fixed_unrun = False  # この OS の固定の一覧のとおりの未実施だけ(終了 2 にしない)
     id_set = set(ids)
-    listed_linux = sorted(i for i in required.get("requires_linux", []) if i in id_set)
-    if sys.platform == "linux":
-        if plain_not_run:
-            failures.append(f"Linux で未実施の case がある: {plain_not_run[:5]}")
-    else:
-        listed = set(listed_linux)
+    expected_plain = set()
+    if sys.platform != "linux":
+        expected_plain |= {i for i in required.get("requires_linux", []) if i in id_set}
         if shim is None:
-            listed |= {i for i in required.get("requires_shim", []) if i in id_set}
-        if plain_not_run != sorted(listed):
-            failures.append(f"未実施の集合が、この OS の固定の一覧(requires_linux・requires_shim)と違う: 未実施 {len(plain_not_run)} 件・一覧 {len(listed)} 件")
-        else:
-            fixed_unrun = not unavailable
+            expected_plain |= {i for i in required.get("requires_shim", []) if i in id_set}
+    if key != "linux":
+        expected_plain |= {i for i in required.get("requires_raw_name", []) if i in id_set}
+    plain_ok = plain_not_run == sorted(expected_plain)
+    if not plain_ok:
+        failures.append(f"未実施の集合が、この OS の固定の一覧(requires_linux・requires_shim・requires_raw_name)と違う: "
+                        f"未実施 {len(plain_not_run)} 件・一覧 {len(expected_plain)} 件(差: {sorted(set(plain_not_run) ^ expected_plain)[:6]})")
+    # UTF-8 でない名前を OS が拒んだ集合も、OS ごとの固定の一覧と同じでなければ失敗にする(Linux では 1 つも拒まれない)。
+    rejected = sorted(name for name, _ in RAW_NAME_REJECTED)
+    if rejected != sorted(RAW_NAME_EXPECTED_REJECTED.get(key, [])) and not options.only:
+        failures.append(f"OS が拒んだ UTF-8 でない名前の集合が、この OS の固定の一覧と違う: 実際 {rejected}・一覧 {RAW_NAME_EXPECTED_REJECTED.get(key, [])}")
+    fixed_unrun = unavailable_ok and plain_ok
     if not_run:
         print(f"未実施: {len(not_run)} 件(この機械・OS で確かめられない。成功には数えない)")
         for line in unavailable[:10]:
@@ -2510,6 +2956,9 @@ def main():
         if not_run:
             marker.append(f"未実施 {len(not_run)} 件")
         partial = "(" + "・".join(marker) + ": 全件合格ではない)"
+    if RAW_NAME_REJECTED:
+        print(f"UTF-8 でないファイル名を OS が拒んだ(errno {RAW_NAME_REJECTED[0][1]})ので、{len(RAW_NAME_REJECTED)} 個の入力を作らなかった: "
+              f"{[name for name, _ in RAW_NAME_REJECTED]}。この入力を使う case は未実施に数えた(requires_raw_name。根拠: この OS の errno)")
     print(f"比べた case: {passed}/{len(cases)} {partial} / {elapsed:.1f} 秒")
     if failures:
         for line in failures[:40]:
