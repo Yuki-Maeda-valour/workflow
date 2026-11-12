@@ -223,7 +223,7 @@ cargo test --locked
   - 入力なしの最大を使うのは、子の起動の道が全ケースで同じためである。
   - 入力ありの最大は4種類の機械の中で157.9ミリ秒(Mac arm64の `stdin-stall`)で、設計の条件の1000ミリ秒以下を満たす。
 - 上限360秒は、修正前の成功の最大169.9秒の2倍以上(約2.1倍)である。修正後のMac Intelの48.2秒に対しては約7.5倍である。
-- 公開するSHAのpush用とpull_request用のCIの値は、PRの本文に書く。この文書の版には、その版自身のCIの値を書けないためである。
+- 公開するSHAのpush用とpull_request用のCIの値は、PRの本文に書く。この文書の版には、その版自身のCIの値を書けないためである。(#469 の時点の書き方。#495 から、作業ブランチでは push 用の CI は流れないので、PR の本文には pull_request 用の CI の値を書く。今の決まりは「4 種類の CI と成果物」の節にある)
 
 ### loop-state用の純粋部品の検査(R4S)
 
@@ -668,6 +668,10 @@ Mac で行わなくてよいのは、次の3つの条件に当たるケースだ
   - 足す形: 固定期待に無いケースがあるとき(ケースを足したとき)。比較器は、固定期待にあるケースを固定期待と比べ、無いケースだけを旧版で測って出す。`--extract-fixture` は、既存の項目を1バイトも変えずに、足りないケースの項目とケースの一覧だけを足す。
 - 手順は次のとおりである。
   1. 全体の形は `cases-macos.json` を外した commit を、足す形はケースを足した commit を、CI で流す。
+     - その commit は、PR の pull_request 用の run か、手で起動する run(`workflow_dispatch`。打ち切られない)で流す。
+     - 手で起動するときは、その commit を先頭にしたブランチを選んで起動する(PR でないときは、選んだブランチの先頭の commit を取り出すため。例: `gh workflow run native.yml --ref <ブランチ>`。この入口で流したことは未確認)。
+     - PR で流すときは、2 種類の Mac のログを保存するまで、その PR に新しい SHA を送らない。
+     - 送ると run が打ち切られ、ログが残らないことがある。
   2. Mac の比較器は、測った値を `===== R4U の固定期待 cases-macos.json ここから =====` と `===== R4U の固定期待 cases-macos.json ここまで(sha256 <値>)=====` の行の間に出し、不合格で終わる。
   3. 2種類の Mac の、比較を流した工程(Task 3.1c の後はジョブ `r4u`)のログを、行頭が時刻だけの形で保存する。例: `gh api --allow-escape-sequences repos/<所有者>/<リポジトリ>/actions/jobs/<工程の番号>/logs > <ファイル>`。`gh run view --log` の形(行頭に工程の名前が付く)は読めない。
   4. `python3 -B native/ci/check_r4u.py --extract-fixture <arm64 のログ> <x86_64 のログ>` を流す。
@@ -937,7 +941,19 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
 - 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
 - `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
-  - イベントは `pull_request`・`push`・`workflow_dispatch`。権限は `contents: read` だけ。
+  - イベントは `pull_request`・`push`・`workflow_dispatch` の 3 つ。
+    - push 用は main だけで流れる。作業ブランチへ送っても流れない。
+    - pull_request 用は PR ごとに流れる。同じ PR に新しい SHA が来ると、古い SHA の流れを打ち切る(`concurrency`。同じ組の流れを 1 本に絞る設定)。
+    - main の push 用と、手で起動した流れは、打ち切らない。
+    - `check_workflow.py` は、`push` と `concurrency` を決めた 1 つの形だけ許す。どのワークフローも、この `concurrency` を必ず持つ(無いと拒む)。
+      - `push` は `branches: ["main"]` だけ。
+      - `concurrency` は `check_workflow.py` の `CONCURRENCY` と同じ字面だけ。組の名前は、ワークフローの名前・イベントの種類・PR の番号か run の番号。
+    - 作業ブランチでは push 用の CI が流れない。PR の本文に書く CI の値は、PR の先頭の SHA の pull_request 用の run から取る。
+    - 打ち切られた run の結果は `cancelled` になる。merge の条件には、PR の先頭の SHA の、打ち切られていない run の最新の attempt(やり直しの回)だけを数える。打ち切られた run は、SHA に関係なく数えない(同じ SHA のまま PR を閉じて開き直すと、先頭の SHA にも打ち切られた run が残る)。
+    - 古い SHA の pull_request 用の run は、やり直し(re-run)しない。やり直すと同じ組に入り、動いている先頭の SHA の run を打ち切るため。やり直すのは、PR の先頭の SHA の run だけ。
+    - ワークフローの名前を重ねない。組の名前に入るため、重なると同じ PR の 2 本が互いを打ち切る。`check_workflow.py` が拒む。
+    - `name` は、書くなら空でない文字列だけ。
+  - 権限は `contents: read` だけ。
   - 各処理はソース取得の直後にこの検査を流す。PR のソース SHA とリポジトリを明示し、`persist-credentials: false` を付ける。
   - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
   - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
