@@ -338,7 +338,8 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 | `crates/core/src/loop_state/legacy_recursion.rs`・`legacy_parser.rs`・`legacy_scanner.rs` | `LegacyRecursionContext`と`profile_patterns_for_loop`。PyYAMLのcompose・構築とCPython 3.10の呼出しの深さを数える |
 
 - fdの番号・所有権・読取り位置は、`platform`の外へ出しません。`/proc/self/fd/<番号>`の組み立ても`platform`の中に閉じます。
-- `crates/platform/src/fs.rs`へ足したのは、`pub(crate)`のfdの借用、openとfstatの後に旧版の比較の呼出しを挟む`pub(crate)`の入口、`HeldDir::snapshot`です。既存のC0b・C0cのAPIの動作は変えていません。
+- `crates/platform/src/fs.rs`へ足したのは、`pub(crate)`のfdの借用と、openとfstatの後に旧版の比較の呼出しを挟む`pub(crate)`の入口です。既存のC0b・C0cのAPIの動作は変えていません。
+- 保持したフォルダの属性は、R4D-1(#481)が足した`HeldDir::snapshot`で取ります。fstatがEINTRで中断されたら呼び直します(旧版の`os.fstat`も呼び直します)。
 - 既存の`core::loop_state::profile_patterns`(R4S)の結果は変えていません。S2Lは`profile_patterns_for_loop`を使います。
 - 単体テストは`*_tests.rs`と各モジュールの`tests`にあります。`check_loop_state_units.py`が必須の名前と件数で照らします。
 

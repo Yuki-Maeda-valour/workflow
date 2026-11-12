@@ -105,9 +105,6 @@ impl HeldDir {
     pub(crate) fn borrowed_fd(&self) -> BorrowedFd<'_> {
         self.fd.as_fd()
     }
-    pub fn snapshot(&self) -> Result<FileSnapshot, FsError> {
-        Ok(FileSnapshot::from_stat(fs::fstat(&self.fd)?))
-    }
     pub fn open_absolute(path: &Path) -> Result<Self, FsError> {
         let raw = path.as_os_str().as_bytes();
         if !raw.starts_with(b"/") || raw.contains(&0) {
