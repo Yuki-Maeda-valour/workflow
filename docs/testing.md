@@ -507,6 +507,330 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
 R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
+### check_links の比較(R4U)
+
+#480 の文書のリンク検査は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と全コマンド共通の決定の当て方](design.md#r4ucheck_linksの文書のリンク検査)、[部品と入口](../native/README.md#r4ucheck_linksの文書のリンク検査)を参照する。
+比較は、テストの引数 `--r4u-compare` を付けたときだけ流れる。`--r4u-compare` を付けない `cargo test --locked`(CI の `build`)では流れない。
+CI では必須ジョブ `r4u` で流れる(2026-11-12 12:59 の決定。Task 3.1c)。別に作る検査用の実行物(example)は無い。
+
+```text
+cargo test --locked                                   (CI の build。比較は流さない)
+  -> check_links(harness = false。crates/cli/tests/check_links.rs)
+     -> 「R4U の比較は流していない: 」で始まる 1 行を出して終了 0(比較の合格に数えない)
+  -> check_links_units(文字列だけの部品の単体検査 18 件)
+
+cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare
+                                                      (CI のジョブ r4u の build.py r4u)
+  -> check_links(全体の上限 900 秒)
+     -> python3 -B native/ci/check_r4u.py --fixture <今回のテスト実行物>
+        -> 旧版(R4U_PYTHON)・固定期待・Rust の 3 者の比較 508 件
+     -> python3 -B native/ci/test_r4u.py(比較器の自己検査 79 件。上と同時に流す)
+```
+
+#### 流し方
+
+要るものは次のとおりである。どれかが欠けると、省かずに失敗する。
+
+- 本家 CPython 3.10.11 と同じ中身の Python(旧版を動かす)。`R4U_PYTHON` で渡す。無ければ PATH の `python3` を使う。
+  - 呼出履歴の標準ライブラリの行番号とソースの行を比べるためである。比較器は `pathlib.py`・`posixpath.py`・`genericpath.py` の SHA-256 を本家と比べ、違うファイルの欄を含むケースを失敗にする。成功にも skip にもしない。
+  - 作業機の Ubuntu の 3.10.12 は、`posixpath.py` だけが本家と違う。`R4U_PYTHON` を渡さずに流すと失敗する。
+  - 比較器は、3.10.11 でない Python では注意の行を出す。C の部分の動きの差(例: 3.10.12 は、書き込みの失敗が続くときの試行が1回多い)でも落ちうるためである。
+  - CI が `actions/setup-python` で入れる 3.10.11(Linux 24.04 の x64・arm64、Mac の x64・arm64)と、uv で入れる 3.10.11 は、3本とも本家と同じ中身だった(2026-11-11 に配布物を取り寄せて照らした)。
+- 比較器と自己検査を動かす PATH の `python3`。
+- root 以外の通常利用者。root では失敗する。
+- C コンパイラ `cc`。書き込みを記録する共有ライブラリを、比較器が一時フォルダで組む。
+- 開ける fd の上限(`ulimit -n` の soft)が64以上。
+
+リポジトリ直下で実行する。出力先はリポジトリの外に置く。
+
+```bash
+uv python install 3.10.11
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && R4U_PYTHON="$(uv python find 3.10.11)" cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare)
+(cd native && cargo test --locked -p dev-workflow-cli --test check_links_units)
+python3 -B native/ci/test_r4u.py
+python3 -B -m unittest discover -s scripts -p 'test_check_links.py'
+```
+
+- `--r4u-compare` を付けない `cargo test --locked` では比較が流れない。`check_links` のテストは `R4U の比較は流していない: ` で始まる1行を出して終了0になる。これを比較の合格の代わりにしない。
+- 手元の Linux x86_64(本家と同じ中身の 3.10.11)では、commit 80b8cc2 で合格508件・固定期待と比べた507件・自己検査79件だった(2026-11-12。管理担当の記録)。
+- `check_r4u.py --fixture <check_links のテスト実行物> --only <ケースのID>` は、調べるための部分実行である。旧版と Rust の結果を表示し、必ず終了2で終わる(合格にしない)。
+- `scripts/test_check_links.py` は、旧版だけを固定期待 `legacy-cases.json`(40件)と比べる。7件のテストで、作業機の Python 3.10.12 でも約1.4秒で終わる(2026-11-12 の実測)。`run-all.py` が集める。標準ライブラリの行番号に頼る呼出履歴は比べない(比較器で比べる)。
+- `native/ci/test_r4u.py` は、作業機の Python 3.10.12 でも `R4U_PYTHON` なしで流れる(commit 841eb03 の79件。2026-11-12 の実測で約16秒)。
+
+#### 比べる中身
+
+- 同じ入力・同じ環境で、旧版と Rust を1回ずつ動かす。stdout・stderr・終了値・信号・write の記録を、旧版と Rust で比べ、さらに両方を固定期待と比べる。両側が同じ誤りをしても見つけるためである。
+- 呼出履歴の `File` の欄は、旧スクリプトと本家の標準ライブラリのパスだけを固定名にしてから比べる。書き込みの区切りと行の始まりで呼出履歴の形を読み、フレームの行のパスの欄だけに当てる。利用者が渡したパス・作業場所のパス・例外の本文のパスは置き換えない。
+- `Current thread 0x<16桁>` の値は、起動の失敗のケースだけで、位置と形式を見る。値そのものは比べない。
+- 固定名の欄を含む書き込みが途中で切れるケースは、2026-11-11 22:26・22:38 の決定(#471 の設計の (ア)(イ))のとおりに Rust の期待を作ってから比べる。
+- 子の環境は、許すものを並べて一から作る。`PATH`・`LC_ALL=C` と、ケースが与える7つ(`PYTHONOPTIMIZE`・`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONUNBUFFERED`・`LANG`・`PYTHONIOENCODING`・`PYTHONUTF8`)と、共有ライブラリの3つ(`LD_PRELOAD` か `DYLD_INSERT_LIBRARIES`・`R4U_SHIM_LOG`・`R4U_SHIM_RULES`)だけである。
+  - 子の中で共有ライブラリが環境変数の名前を記録する。ほかの変数が残っていたら失敗にし、ケースが与えた変数が消えていたら失敗にする。
+  - Mac では、比較器が渡していない `__CF_USER_TEXT_ENCODING` だけを、値の形が合うときに確かめから外して記録する(2026-11-12 02:41 の決定)。
+- 旧 Python は、比べる前に1回起動して調べる。`sys.stdout` が UTF-8 と surrogateescape、`sys.stderr` が UTF-8 と backslashreplace でなければ失敗にする。
+- Mac の framework の Python(CI の Mac arm64 は python.org の pkg)は、起動用のプログラムを通さず、本体を直接起動する。起動用のプログラムは `__PYVENV_LAUNCHER__` を足して本体を起動し直すが、この変数は比較の前提の外だからである。
+- 入力の木が実行の前後で変わらないことと、作業フォルダに新しいファイルができないことを確かめる。
+- 資源の上限(`RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK`・`RLIMIT_FSIZE`)は設定せず、受け継いだ値を記録の行に出す。`RLIMIT_FSIZE` は、ケースが与えるときだけ子に設定する。
+- 2種類の照合は、決まった乱数の種で作った12051件の入力で比べる。旧版の関数は1回の Python の起動でまとめて当て、Rust は `--check-links-matcher` で全件を当てる。
+- その OS の固定期待に無いケースがあるとき(ケースを足したとき)は、そのケースだけを旧版で測ってログの終わりに出し、ほかが全部合格でも不合格にする。固定期待にあるケースは、今までどおり固定期待と比べる(下の「固定期待を作り直す手順」)。
+- 1件の想定外の例外でも、残りのケースは流す。最後に `R4U の比較: 合格 <数> 件 / 全 <数> 件・未実施 <数> 件・不合格 <数> 件・固定期待と比べた <数> 件 / <OS> / 旧 Python <版>(<パス>)/ <秒> 秒` の行を出す。
+
+信号のケースの比べ方(2026-11-12 06:58・08:55 の決定の当て方。Task 3.1b):
+
+- 信号は、共有ライブラリが決まった write の直後に送るか、比較器が子の FIFO の待ちを確かめてから送る。待ちの確かめは、Linux が `/proc/<pid>/wchan`(`fifo_open` か `wait_for_partner`)、Mac が `proc_pidinfo` で読むスレッドの状態(動くスレッドが0で、Unix の呼び出しの回数が0.3秒変わらない。推定)である。
+- SIGINT は 22:35 の決定の安定した部分(信号で終わること・終了値・最後の行・それまでの stdout・子が残らないこと)を比べる。呼出履歴の途中の行は比べない。SIGTERM は全バイトを比べる。
+- FIFO の待ちの途中の SIGINT の7件(`signal-fifo-sigint-*` の6件と `traceback:read-fifo-sigint`)は、旧版と Rust の stderr の呼出履歴の最後のフレームが `File "pathlib.py", line 1119, in open` であることも確かめる。違えば失敗にする。比べる欄は変えない。
+  - このフレームは、open の行の中で止まったことだけを示す。FIFO の待ちに入った後に送った根拠は、wchan と Mac の推定の判定である。
+- 引数0個の応答を書く間の SIGINT の6件(`signal-args-none-sigint-{pipe,unbuffered,pty}-{1,last}`)は、共有ライブラリが stdout の1回目と最後の write の直後に送る(バッファあり・`PYTHONUNBUFFERED`・疑似端末)。旧版が SIGINT で終わったときは、中断の比べ方にする。
+- 起動の失敗の診断の1回目の write の直後の SIGINT の2件(`signal-env-hashseed-bad-word-sigint`・`signal-stdio-stdin-dir-sigint`)は、`env-hashseed-bad-word` と `stdio-stdin-dir` と同じ入力に `fd=2,nth=1,action=sigint` を当てる。中断の比べ方を使わず、stdout・stderr・終了値・信号・write の記録の全部を比べる。`Current thread` の値の欄だけは、形式を確かめて伏せる。
+  - 旧版の実測: `PYTHONHASHSEED` が不正なときは SIGINT で終わり、stderr は `Fatal Python error: ` の20バイトだった。stdin がディレクトリのときは、終了値1で診断の全文を出した。
+
+#### 件数(push 用の CI の Native・ジョブ `r4u`・run 43157591744・commit 841eb03)
+
+[run 43157591744](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43157591744) の attempt 2 の4種類のジョブ `r4u` の結果である。
+括弧の中は、固定期待とも比べた件数である。
+
+| 組 | 件数 | Linux 2種類 | Mac 2種類 |
+|---|---|---|---|
+| 基本 | 1 | 合格1(1) | 合格1(1) |
+| 引数 | 18 | 合格18(18) | 合格17・未実施1(17) |
+| 走査 | 18 | 合格18(17) | 合格17・未実施1(16) |
+| 本文 | 27 | 合格27(27) | 合格27(27) |
+| コード中のパス | 17 | 合格17(17) | 合格17(17) |
+| 出力 | 41 | 合格41(41) | 合格41(41) |
+| 故障 | 50 | 合格50(50) | 合格39・未実施11(39) |
+| 部分書込み(固定名の欄) | 24 | 合格24(24) | 合格24(24) |
+| 信号 | 34 | 合格34(34) | 合格34(34) |
+| 段階ごとの失敗と中断 | 235 | 合格235(235) | 合格235(235) |
+| 文字コードの設定 | 6 | 合格6(6) | 合格3・未実施3(3) |
+| 環境変数 | 36 | 合格36(36) | 合格36(36) |
+| 照合の生成入力 | 1(12051入力) | 合格1(1) | 合格1(1) |
+| 計 | 508 | 合格508(507) | 合格492・未実施16・不合格0(491) |
+
+- 組の名前は、比較器が出す「組ごとの件数:」の行の名前である。
+- Task 3.1b で足した8件は、どれも信号の組に入る(26件から34件)。
+- Linux は未実施を認めないので、合格すれば全508件が合格になる。固定期待と比べた件数(507件)は、固定期待の中身で決まる。
+- 固定期待を持たないケースは `walk-permission-abort` の1件だけである。結果が readdir の順に依るので、旧版と Rust の一致だけで比べる。
+- 4種類とも、旧版と Rust の試しの書き込みが記録に現れた。記録を比べずに合格にしたケースは0件だった。
+- 4種類とも、`RLIMIT_FSIZE` の動きは同じだった(上限まで書き、その後は EFBIG)。
+- 比較器の自己検査は、4種類とも79件・失敗0件・skip0件だった。文字列だけの部品の単体検査(`check_links_units`)は、ジョブ `build` の中で18件が成功した。
+- ジョブ `build` のログには `R4U の比較は流していない: ` で始まる行があり、`R4U の比較: ` で始まる行は無かった。
+
+#### Mac で行わなかったケース(閉じた一覧)
+
+Mac で行わなくてよいのは、次の3つの条件に当たるケースだけである。ほかの未実施は失敗にする。Linux では未実施を認めない。
+
+- `/dev/full` が無い: run 43157591744 で11件(`fault-*-devfull-*` の10件と `traceback:exit-flush-devfull`)。
+- UTF-8 でない名前の作成が EILSEQ か EINVAL で拒否される: 5件(`args-non-utf8`・`legacy:walk-sort-non-utf8`・`encoding-lang-c-utf8-non-utf8-name`・`encoding-pythonioencoding-utf8-strict-non-utf8-name`・`encoding-pythonutf8-zero`)。
+- 旧版の試しの書き込みが記録に現れない: 0件。
+
+未実施のケースは、件数と理由を出し、成功に数えない。
+
+#### 自己検査(`test_r4u.py`)
+
+79件である。0件・skip・失敗のどれかがあれば終了1にする。次を不合格にすることを確かめる。
+
+- 呼出履歴の固定名: 利用者の入力に置いた偽の `File` の行や作業場所のパスの置き換え、固定名の誤り、行番号の差、本家と違う標準ライブラリの欄。
+- `Current thread` の値: 欠け・不正な形・2回、起動の失敗でないケースへの形式の確かめの転用。
+- ケースの一覧と結果: 欠け・重なり・0件・余分、固定期待と旧版と Rust のどれかとの食い違い、両側の同じ誤り、入力の変更、余計な出力、時間切れ、書き込みの記録に現れない検査対象、手順2の表の欄の欠け。
+- 環境: 許した変数の外の変数が子に届くこと、基準の環境でない旧 Python、`__PYVENV_LAUNCHER__`、条件の欠けた `__CF_USER_TEXT_ENCODING`。
+- Mac: 閉じた一覧に無い未実施、Mac の固定期待が無いこと、機械の欄のほかが違う固定期待をまとめること。
+- 実際の子: 旧版をそのまま動かす偽の検査対象で、比べるためのケース(合格するはずの組)が合格し、壊した組が不合格になる。
+- 送った時点の確かめ: FIFO の待ちの途中の SIGINT の7件すべてで最後のフレームを確かめること、`pathlib.py` の open の行でないフレームで終わる呼出履歴(Task 3.1b)。
+- 固定期待に無いケース: 欠けたケースだけを旧版で測り、ほかが全部合格でも不合格にすること。足す値が既存の項目を変える形、既存の項目のバイト列が変わる形(2種類の Mac のログを通した往復も確かめる)。
+
+#### 書き込みの記録と故障の注入
+
+- 比較器が、`native/ci/r4u_write_shim.c` を一時フォルダで `cc` で組む。組めなければ、比較全体を失敗にする。
+- Linux は `LD_PRELOAD`、Mac は `DYLD_INSERT_LIBRARIES` と `__DATA,__interpose` で `write` を置き換える。旧版と Rust の両方へ、同じ形で差し込む。
+- write の1回ごとに、fd・長さ・戻り値・errno・当てた動作・中身を記録する。記録はパイプ(`R4U_SHIM_LOG=fd:<数>`)へ書くので、`RLIMIT_FSIZE` の影響を受けない。
+- 故障は `R4U_SHIM_RULES` の規則で当てる。当てる write は、fd ごとの回数か、中身の頭(何回目か)で選ぶ。動作は、失敗・途中まで書く・書いた後に自分へ SIGINT・合計の上限・その位置で切ってその後を失敗にする、などである。
+- 手順2(呼出履歴を出している間)のケースは、当てる write を回数ではなく呼出履歴の部品の種類で選ぶ。
+- Rust の stdout と stderr の書き込みは libc の `write` を通るので、検査用の実行物(動的リンク)でも記録できる。製品の中に、検査専用の書き込みの差し替えは無い。
+
+#### 固定期待を作り直す手順
+
+固定期待は `native/fixtures/r4u/` に置く。旧版の SHA-256 が変わると、比較器は「旧版が変わった」で失敗する。そのときは、旧版の変更に合わせて作り直す。
+
+| ファイル | 中身 | 作り方 |
+|---|---|---|
+| `legacy-cases.json` | OS に依らない旧版のケース40件。`scripts/test_check_links.py` と比較器が使う | 生成の道具は無い。入力と期待を直接書いてある |
+| `cases-linux.json` | 全ケースの一覧282件(OS に依らない)と、Linux の固定期待281件 | Linux で `R4U_PYTHON=<3.10.11> python3 -B native/ci/check_r4u.py --measure-cases` |
+| `step2.json` | 手順2の実測225件と、部品ごとの表95行(Linux) | Linux で `R4U_PYTHON=<3.10.11> python3 -B native/ci/check_r4u.py --measure-step2` |
+| `cases-macos.json` | Mac の固定期待490件(手順2の225件を含む)と、未実施16件の理由 | 下の手順で、Mac の CI のログから取り出す |
+| `units.json`・`linux.json` | 文字列だけの部品・呼出履歴の定型と、glibc の文の固定表 | Linux で `"$R4U_PYTHON" -B native/fixtures/r4u/gen_unit_fixtures.py` |
+| `matcher-corpus.json` | 照合の生成入力12051件と、旧版の正規表現の結果 | `python3 -B native/fixtures/r4u/gen_matcher_corpus.py`。Python 3.10 系なら同じバイト列になる(`test_check_links.py` が流し直して確かめる) |
+
+- `--measure-cases` と `--measure-step2` は、本家と同じ中身の 3.10.11 でないと止まる。
+- Mac の固定期待は、手元に Mac が無くても作れる。形は2つある。
+  - 全体の形: `cases-macos.json` が無いとき。比較器は全部のケースを旧版で測って出す。`--extract-fixture` は新しいファイルを書く。既にあるファイルは上書きしない(作り直すときは消してから流す)。
+  - 足す形: 固定期待に無いケースがあるとき(ケースを足したとき)。比較器は、固定期待にあるケースを固定期待と比べ、無いケースだけを旧版で測って出す。`--extract-fixture` は、既存の項目を1バイトも変えずに、足りないケースの項目とケースの一覧だけを足す。
+- 手順は次のとおりである。
+  1. 全体の形は `cases-macos.json` を外した commit を、足す形はケースを足した commit を、CI で流す。
+  2. Mac の比較器は、測った値を `===== R4U の固定期待 cases-macos.json ここから =====` と `===== R4U の固定期待 cases-macos.json ここまで(sha256 <値>)=====` の行の間に出し、不合格で終わる。
+  3. 2種類の Mac の、比較を流した工程(Task 3.1c の後はジョブ `r4u`)のログを、行頭が時刻だけの形で保存する。例: `gh api --allow-escape-sequences repos/<所有者>/<リポジトリ>/actions/jobs/<工程の番号>/logs > <ファイル>`。`gh run view --log` の形(行頭に工程の名前が付く)は読めない。
+  4. `python3 -B native/ci/check_r4u.py --extract-fixture <arm64 のログ> <x86_64 のログ>` を流す。
+  5. 比較器は、各 JSON の SHA-256 を終わりの行と照らし、機械の欄のほかが同じことを確かめてから、`native/fixtures/r4u/cases-macos.json` に書く(足す形では、足す値と既存の固定期待の測った条件と機械が同じことも確かめる)。
+  6. 比較器が「JSON の SHA-256 が終わりの行と違う(ほかの出力が混ざった)」で止まったときは、区切りの間で JSON の行の形でない行(標準エラーの混ざり)だけを除いたコピーを作る。コピーの JSON の SHA-256 が終わりの行と一致することを確かめてから、コピーを渡す。値は変えない。
+- Mac の固定期待は、旧版(本家 3.10.11)の実測だけから作る。Rust の出力は使わない。
+- 今の `cases-macos.json` は、次の2つから作った。どちらのログも、比較を build の中で流していた形(Task 3.1c の前)である。
+  - run 43114986888(commit 91bd35d)の2種類の Mac のログ: 全体の形の482件。
+  - run 43152122842(commit 80b8cc2)の2種類の Mac のログ: 足す形の8件(Task 3.1b のケース。commit 841eb03 で足した)。
+    - x86_64 のログは、区切りの間に標準エラーの6行(空行・Rust の panic と不合格の行・`RUST_BACKTRACE` の案内・cargo の error・`build.py` の ERROR)が混ざり、`--extract-fixture` が SHA-256 の不一致で止まった。
+    - その6行だけを除いたコピー(`ci-43152122842-macos-x86_64.cleaned.log`)で、終わりの行の SHA-256 と一致することを確かめてから足した。値は変えていない。
+    - 2026-11-12 に、80b8cc2 の `cases-macos.json` へ同じ2つのログから取り出し直し、841eb03 の `cases-macos.json` とバイト列が同じことを確かめた。除く前の x86_64 のログでは、比較器が SHA-256 の不一致で止まることも確かめた。
+
+#### R4U の時間の記録
+
+run 43157591744(commit 841eb03)の attempt 2 の値である。比較と自己検査は、ジョブ `r4u` の中で同時に流れる。
+
+| 機械 | 比較(`check_r4u.py`) | 自己検査(79件) | ジョブ `r4u` の全体 | ジョブ `build` の全体 |
+|---|---|---|---|---|
+| Linux x86_64 | 77.1秒 | 7.8秒 | 1分50秒 | 21分54秒 |
+| Linux arm64 | 93.1秒 | 7.6秒 | 2分5秒 | 25分16秒 |
+| Mac arm64 | 109.2秒 | 18.4秒 | 2分52秒 | 24分15秒 |
+| Mac x86_64 | 125.1秒 | 20.0秒 | 3分21秒 | 35分12秒 |
+
+- 比較と自己検査の全体の上限900秒に対し、最も長い Mac x86_64 でも125.1秒だった。
+- ジョブ `r4u` の上限30分に対し、最も長い Mac x86_64 でも3分21秒だった。上限は、この最初の実測で確かめた。
+- 子の実行は、Linux で1059回、Mac で1041回だった(旧版と Rust の合計。照合の生成入力を除く)。
+- ジョブ `build` の中の `check_links_units` は、4種類とも18件が成功し、0.28〜0.40秒だった。
+- attempt 1 は、build (macos-x86_64) が成果物の保存で `Failed to CreateArtifact: Unable to make request: ENOTFOUND`(GitHub 側の通信の失敗)で止まった(41分36秒)。失敗したジョブだけを再実行した attempt 2 で、全13ジョブが成功した。
+  - attempt 2 で流れたのは、Mac x86_64 の `build` と、その後のジョブである。ほかの3つの `build` の値は、attempt 1 で成功したジョブのものである。
+- Task 3.1c の前(run 43118591090・commit 5b142a1。必須のケースは500件)は、比較が `build` の中で流れていた。そのときの比較は Linux x86_64 で58.4秒、Mac x86_64 で170.2秒で、Mac x86_64 の `build` の全体は43分29秒(上限60分)だった。
+- 手元の Linux x86_64(本家と同じ中身の 3.10.11)では、Task 3.1b の前の実装の途中の記録で、比較1回が65〜73秒だった。
+
+#### 未確認の条件
+
+- 最新の main と合わせた後の CI。管理担当が、取り込んだ後の CI で次を確かめる(#480 の「実装の commit の後の手順」)。
+  - ジョブ `build` のログに `R4U の比較は流していない: ` で始まる行があり、`R4U の比較: ` で始まる行が無いこと。
+  - ジョブ `r4u` の時間が、上限30分に余裕を持って収まること。収まらないなら止まって聞く。
+- Mac の実機と最低の OS の版での動作。確かめたのは GitHub の実行機(`macos-15` の arm64・`macos-15-intel`)だけである。
+- readdir が種類を返さないファイルシステム(DT_UNKNOWN)での、子のディレクトリの判定の経路。比較のケースでは通っていない。
+- PR 用の必須 CI と、最新の main を含む最終 SHA での全回帰テスト(回帰テストをすべて流すこと)。上の記録は push 用の CI である。
+- 製品の入口へつないだときの動作。製品へつなぐときは、main の前に呼ぶ static が製品の入口にも要る。08:55 の決定(製品の入口を変えない)と照らし、そのときに止まって聞く([設計の R4U 節](design.md#r4ucheck_linksの文書のリンク検査))。
+
+CI での必須の経路(ジョブ `r4u` と `build.py r4u`)は、[CI入口の説明](../native/ci/README.md#check_links-の必須比較r4u)にある。
+R4U は検査用の実行物を別に作らない。CI の転送と、配布用の `native-dist.tar` は変わらない。
+
+### R4D-1 の reftable の比較
+
+#481 の診断の reftable の読み取りは、製品 CLI へ未登録・未配布の開発用実装である。
+[契約](design.md#診断の-reftable-の読み取りr4d-1)、[API](../native/README.md#診断の-reftable-の読み取りr4d-1) を参照する。
+
+- 言葉: reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式である。
+  - table は reftable の 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体である。
+  - section は table の中の、種類ごとのまとまり(参照・object・log など)である。block は section の中の 1 つの区切りである。
+  - varint は長さが変わる整数の書き方である。
+  - header と footer は table の頭と末尾の管理情報、CRC は誤りを見つけるための検査値である。
+  - index は、目的の block を探すための索引の block である。
+  - シンボリック参照は、ほかの参照を指す参照である(例 `HEAD` → `refs/heads/main`)。
+- G1 の table は次の 9 個である。
+  - T1: 版 1 の sha1。T2: 版 2 の sha1。T3: 版 2 の sha256。
+  - T4: シンボリック参照と、UTF-8 でない名前を含む。
+  - T5 と T6: 削除の印を含む 2 段の stack の、古い table と新しい table。
+  - T7: 2 段の index。Rust の検査の定数 `T7_TABLE` と同じバイト列である。
+  - T8: 本物の git の sha1。T9: 本物の git の sha256。
+
+#### 流し方と前提
+
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。比較は、下のコマンドの `-- --ignored --exact …` の行か `build.py r4d1` で流す。CI は `r4d1` のジョブで流す。専用の実行物は要らない。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input)
+python3 -B native/ci/build.py r4d1 --platform <機械>
+python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
+```
+
+- 前提は Python 3.10 系・root 以外の利用者・reftable を作れる git 2.45 以上である。欠ければ失敗にする(skip にしない)。
+- 比較器は標準ライブラリだけを使う。`requirements-dev.txt` の依存は要らない。
+- 古い git のために別の git の場所を渡す口は無い。
+- git 2.56.0 で確かめた。2.45〜2.55 は手元では未確認である。
+- 流れは、比較器の `--generate` が入力と旧版の結果を作る → Rust が同じ条件で動かす → `--compare` が全件を並びまで比べる、である。
+- `--compare` は、自己検査 21 件の合格、件数の下限、読んだ後に入力が変わっていないこと、T7 の定数の一致も確かめる。
+- 差し込みを入れた Rust の結果では、「量」の条件の入力だけを `--compare --expect-mismatch` で流し、不一致が出ることで比較が働くことを確かめる。
+- 比較の検査 1 回の中の、すべての起動の上限は 900 秒である。比較器は git の各呼び出しに 60 秒の上限を付ける。
+
+#### 入力の組と件数
+
+予算の条件は「通常」「期限切れ」「停止」「N 回目の確かめで期限」「`management_output` の上限を L にする」である。
+
+| 組 | 入力 | 件数(hp-pc の実際の値) |
+|---|---|---|
+| G1 | T1〜T9(合計 4,740 バイト)の全ての長さの切り詰めと、各位置の 1 バイトの変異 | 切り詰め 4,749・変異 18,960 |
+| G1h | header と footer の欄の各バイトの変異(footer の header と CRC は作り直す) | 2,352 |
+| G2 | 既存の 12 件の検査と同じ内容・2001 件以上の参照・空の stack・log だけの table・一覧の文法の異常・順の異常 | 36 |
+| G3 | 上限と順の境界(合計 200MiB・一覧の 1 行 4096 バイト・名前と指す先 1024 バイト・varint) | 14 |
+| G4 | ファイルの代わりのリンクや FIFO・権限・リンクを含むパス・相対パス・NUL・空のパス・誤ったハッシュの形式 | 24 |
+| G5 | 予算だけの操作(9 種類の境界・桁あふれ・期限の固定・停止の印) | 24 |
+| G6 | 本物の git の stack(10 リポジトリ。共有の stack 10・linked worktree の stack 4) | 14 |
+| G7 | UTF-8 でないバイトを名前に含むフォルダの下の stack(Linux だけ) | 1 |
+
+- T8(本物の git の sha1)は 450 バイト、T9(本物の git の sha256)は 2,735 バイトである。T9 の ref index・object・log・log index の位置はどれも 0 でない。
+- 件数の下限は、G1・G1h・G6 は式と一致、G2〜G5 は一覧の長さと一致、性質(`git-*`・`nonutf8-*`・`table-object-section`)は 1 以上である。入力は合計 26,174 件で、不一致は 0 件だった。
+- Mac(APFS)は G7 の入力を作れず、`R4D-1 作れなかった入力: g7-nonutf8-directory(darwin)` の行を出す(run 43146215798 の Mac 2 つで確かめた)。
+- 本物の git は `GIT_TEST_REFTABLE_AUTOCOMPACTION=false` で自動の圧縮を止め、複数の table と削除の印を残す。
+- 旧版の実行の回数は合計 193,905 回で、上限 300,000 回の内側である。うち G1 の切り詰めが 97,809 回、変異が 76,895 回、G1h が 18,382 回で、ほかの組(G2〜G4・G6・G7)が 819 回である(和は合計と合う)。
+- 設計の見積もりと実測の差は次のとおりである。
+  - 見積もり: 旧版の実行は約 20 万回、G1 は約 5.5KB、T9 は git 2.56.0 で 2,857 バイト。
+  - 実測: 旧版の実行は 193,905 回、T1〜T9 の合計は 4,740 バイト、T9 は 2,735 バイト。
+  - T9 の差の理由は未確認である。設計の 2,857 バイトは、検証担当が `git refs optimize`(table をまとめる操作)の後の table で測った値で、生成器の作り方(1 回の `update-ref --stdin` が作った table を取り出す)と違うためと推測される。
+  - 目安(hp-pc で 120 秒以内・Mac Intel で 400 秒以内)は満たした。hp-pc の要約の行は最大 34.2 秒、Mac Intel は 136.4 秒である。
+- 上限を超えたときは、設計の順(T1〜T8 の変異の「量」の条件を減らす → 全件を当てる変異の table を 1 つにする)で減らす。今回は減らしていない。
+
+#### 時間の記録(hp-pc。Linux x86_64・git 2.56.0)
+
+- 2026-11-11〜12 に hp-pc で流した 6 回の観測値である。ほかの担当が同時に走っていたかは未確認である。物差しは CI の表と同じに分ける。
+  - 比較器の要約の行の秒(生成と比べる処理。Rust の実行を含まない): 25.1〜34.2 秒。
+  - 旧版の生成: 15〜18.7 秒。
+  - Rust の実行: 8.1〜9.4 秒(ほかに約 9.6 秒の回があった)。
+  - 比較の検査の関数そのものの時間は別に測っていない(要約の行の秒と Rust の実行の和は約 33〜44 秒で、下の `diagnostic_reftable` 全体の時間の大半を占める)。
+- `cargo test --locked -p dev-workflow-cli --test diagnostic_reftable` 全体(22 件)は 36〜47 秒だった。
+- `cargo test --locked` 全体は、ビルドを含めて 2 分 32 秒〜2 分 49 秒だった。
+- 上の `cargo test` の値は、#481 の時点の手元で、比較を通常の `cargo test --locked` で流していたときに測った値である。#488 の後、比較は `r4d1` のジョブか `build.py r4d1` で流す。`r4d1` のジョブの時間は PR の本文に書く。
+- 自己検査(`native/ci/test_diagnostic_reftable.py`)は 8〜9 秒である。
+- 上限との余裕(CI の Mac Intel の `cargo test` 全体は 2026-11-11 の main で約 528 秒だった)。
+  - この 528 秒は、2026-11-11 の main(#481 より前)の値である。R4D-1 の比較は含まない(`task_digest` の比較の約 416 秒を含む)。
+  - #488 の後、比較は `r4d1()` の 1 回 1,800 秒の上限と、比較の 900 秒の上限の両方が効く。CI では、checkout と `prepare` の後に `r4d1()` が始まるので、`r4d1()` の 1,800 秒より先に、ジョブの上限 30 分に当たる。
+  - build のジョブ全体の上限は 60 分(`.github/workflows/native.yml` の `build`)である。R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac x86_64 の build のジョブは 47 分 10 秒だった。
+
+#### 期限の検査の測定値
+
+実時間の期限の検査は、期限 2 秒・待つ長さの上限 10 秒で、読み取りの k 回目の後に期限を過ぎるまで待ち、次の確かめが `time-limit` になることを確かめる。k は先頭・中央・末尾(T7 の stack は読み取り 25 回)である。
+
+- hp-pc で、予算を作ってから k 回目の読み取りに着くまでの時間は、k=1/13/25 で 0.009〜0.024 / 0.078〜0.139 / 0.095〜0.219 ミリ秒だった(観測した全部の回)。
+- 値は `cargo test` のログに `R4D-1 期限の検査:` の行で残る。
+- 期限の 2 秒は、#469 の決まり(CI での実測の最大の 4 倍以上)に合わせた。
+
+#### CI の値(commit dbb5888 の push。Native の run 43146215798・attempt 1・全ジョブ成功)
+
+[Native の run 43146215798](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43146215798) の build のジョブの値である。#481 の時点では、比較は build のジョブの中で流していた。以降の表の時間は、その時点の測定値である。
+
+| 機械 | git | 比較の時間(要約の行) | 旧版の生成 | Rust の実行 | `diagnostic_reftable` 全体 | 期限の検査 k=1/13/25(ミリ秒) | build のジョブ全体 |
+|---|---|---|---|---|---|---|---|
+| linux-x86_64(ubuntu-24.04) | 2.56.0 | 46.9 秒・入力 26174 件・不一致 0 | 30.7 秒(193,905 回) | 14.5 秒 | 69.48 秒 | 0.021 / 0.142 / 0.165 | 25 分 04 秒 |
+| linux-arm64(ubuntu-24.04-arm) | 2.56.0 | 37.6 秒・入力 26174 件・不一致 0 | 24.0 秒(193,905 回) | 11.9 秒 | 66.13 秒 | 0.009 / 0.107 / 0.128 | 26 分 10 秒 |
+| macos-arm64(macos-15) | 2.56.0 | 65.2 秒・入力 26173 件・不一致 0 | 47.0 秒(193,904 回) | 26.1 秒 | 103.95 秒 | 0.024 / 0.401 / 0.589 | 27 分 36 秒 |
+| macos-x86_64(macos-15-intel) | 2.55.0 | 136.4 秒・入力 26173 件・不一致 0 | 98.2 秒(193,904 回) | 40.1 秒 | 201.12 秒 | 2.342 / 0.244 / 1.483 | 38 分 51 秒 |
+
+- 4 つとも、差し込みの回は「不一致 6689 件・期待どおり失敗」、比較器の自己検査は 21 件合格だった。
+- Mac の 2 つでは `R4D-1 作れなかった入力: g7-nonutf8-directory(darwin)` の行が出て、`g7-nonutf8-directory=0` だった。
+  - 入力は Linux より 1 件少ない 26173 件、旧版の実行も 1 回少ない 193,904 回である。
+  - Linux の 2 つは `g7-nonutf8-directory=1` だった。
+- Mac Intel の git は 2.55.0 で、T9 を含む入力の生成が通った(生成器の大きさと section の確かめを通過)。2.45〜2.54 は未確認のままである。
+- 期限の検査の最大は、Mac Intel の k=1 の 2.342 ミリ秒だった。その 4 倍(約 9.4 ミリ秒)は期限 2 秒より十分小さいので、期限は 2 秒のままにする。
+- verify-universal のジョブは、Mac Intel が 17 分 44 秒、Mac arm64 が 11 分 20 秒だった。
+
+上限との余裕。
+- 比較器の上限 900 秒に対し、最大は Mac Intel の 136.4 秒(`diagnostic_reftable` 全体は 201 秒)だった。
+- build のジョブの最大は 38 分 51 秒で、上限 60 分に対し約 21 分の余裕がある。
+- ただし、R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac Intel の build のジョブは 47 分 10 秒だった(R4R の比較が加わったためと推測される)。
+  - R4D-1 の分(`diagnostic_reftable` 全体の約 3 分 21 秒)を足すと、約 50 分 31 秒の見積もりになる(推測)。この見積もりは、比較を build のジョブで流す #481 の形の値である。
+  - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
+  - 実測は、PR の CI で確かめて PR の本文に書く。
+
 ### S3I-Aの比較
 
 #474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
@@ -630,6 +954,10 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 各処理はソース取得の直後にこの検査を流す。PR のソース SHA とリポジトリを明示し、`persist-credentials: false` を付ける。
   - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
   - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
+- `r4d1` のジョブは、`build` の後に、4 機種で R4D-1 の旧版との比較だけを流す。
+  - 上限は 30 分である。`build.py r4d1 --platform <表の値>` が、`quality()` と同じ環境で比較のコマンドを 1 回流す。
+  - 比較のテストがちょうど 1 件合格したことを確かめる。0 件・飛ばし・別のテストの合格・時間切れは、合格にしない。
+  - `distribution` の `needs` には入れない。必須であることは、必須 CI の全ジョブの成功を確かめてから merge する決まりで担う。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
 
 ### ビルド入力の記録
