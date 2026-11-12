@@ -134,6 +134,21 @@ Python 3.11 以降の子プロセスでも、例外表示の位置の印を抑�
 
 R4Bの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認の4機種CI・Mac実機・最低OS・最終全回帰テストは区別します。
 
+## S2Lの必須比較と検査用実行物
+
+#468の`loop-state`の7コマンドは未登録・未配布です。[契約](../../docs/design.md#loop-stateの状態観測7コマンドs2l)と [実行手順・件数・時間](../../docs/testing.md#s2lの比較)を参照してください。
+
+- `quality()`は、各OSで1回、`check_loop_state_units.py`(Rustテスト56件)と`check_loop_state_mutations.py`(誤りを入れた21種類)を流します。
+- Linux2種・Mac2種の`build`/`reproduce`は、製品用`dev-workflow`・検査用`r4b_contract`と同じ2回のビルドで、検査用`loop_state_fixture`も作ります。
+- 各回に`check_loop_state.py --fixture <今回作ったloop_state_fixtureの絶対パス>`と`test_loop_state.py --fixture <同じパス>`を必須実行します。
+- Linuxは3本のELFを検査し、各2回のバイト列を比べます。Macは3本を各2回結合・署名し、署名後のバイト列を比べます。
+- `verify-universal`は、署名後の同じ`loop_state_fixture`を、Intel・Apple Siliconの両CPUで比べます。専用比較の失敗は工程全体の失敗です。
+- 転送用の固定一覧は、`CI_BINARIES`の3本(`dev-workflow`・`r4b_contract`・`loop_state_fixture`)の各2回と`record.json`です。Mac結合後は3本と`record.json`です。
+- `package`は製品用だけを配布用へ渡します。`loop_state_fixture`は`native-dist.tar`の5ファイルへ入りません。
+- 比較は本家CPython 3.10.11・PyYAML 6.0.3・非rootで行います。件数の欠け・skip・時間切れを成功にしません。
+- 自己検査`test_loop_state.py`の26件は、比較器が不一致・外す環境変数の残り・固定名の誤った対応づけを拒否することを確かめます。
+- 手元の比較は1回176〜235秒でした。CIの工程の上限(`build`60分・`verify-universal`30分)の中で完走するかは未確認です。
+
 ## ワークフローの検査
 
 `.github/workflows/` の全 `*.yml`・`*.yaml` を検査します。

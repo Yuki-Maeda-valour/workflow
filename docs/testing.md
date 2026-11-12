@@ -283,8 +283,70 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4b.py'
 - 今回のreleaseによるprobeと保存先比較714件、規約検査のERROR 0・WARN 0も成功した。
 - この記録はMac・Linux arm64・最低OS実機の動作、PR用CI、最新mainを含む最終SHAの全回帰テストの成功を意味しない。これらは未確認であり、後続工程で別に記録する。
 
-CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4bの必須比較と検査用実行物)にある。
+CIの必須接続は [4 種類の CI と成果物](#4-種類の-ci-と成果物)の節と [CI入口の説明](../native/ci/README.md#r4bの必須比較と検査用実行物)にある。
 R4Bの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
+
+### S2Lの比較
+
+#468の`loop-state`の7コマンドは、製品CLIへ未登録・未配布の開発用実装である。
+[契約と承認された差](design.md#loop-stateの状態観測7コマンドs2l)、[専用部品と入口](../native/README.md#loop-stateの状態観測7コマンドs2l)を参照する。
+本家CPython 3.10.11・PyYAML 6.0.3・非rootを必須とし、今回のソースから作った`loop_state_fixture`を絶対パスで渡す。
+通常の`cargo test --locked`だけでは、旧版との比較は完了しない。
+
+リポジトリ直下で、同じPythonへ開発依存を入れてから実行する。出力先はリポジトリ外に置く。
+次はLinux x86_64の例であり、他機種はその機械のRust対象名へ変える。
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo build --release --locked -p dev-workflow-cli --example loop_state_fixture --target x86_64-unknown-linux-musl)
+fixture="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/loop_state_fixture"
+python3 -B native/ci/check_loop_state.py --fixture "$fixture"
+python3 -B native/ci/test_loop_state.py --fixture "$fixture"
+python3 -B native/ci/check_loop_state_units.py
+python3 -B native/ci/check_loop_state_mutations.py
+```
+
+| 入口 | 確かめること |
+|---|---|
+| `check_loop_state.py` | 同じ物理入力で旧版とRustを起動し、生の標準出力・標準エラー・終了値・状態ファイル・入力の無変更を比べる。部品は`loop_state_arguments.py`・`loop_state_contract_cases.py`・`loop_state_encoding.py`・`loop_state_encoding_matrix.py`・`loop_state_yaml_cases.py`・`loop_state_decision_cases.py`ほか |
+| `test_loop_state.py` | 比較器の自己検査26件。出力・終了値・保存結果の不一致、外す環境変数の残り、固定名の対応づけの誤りを拒否することを確かめる |
+| `check_loop_state_units.py` | 検査用exampleのRustテスト56件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
+| `check_loop_state_mutations.py` | ソースのコピーへ誤りを21種類入れ(設定のグラフ10・安全の観測とYAML11)、指定した検査が落ちることを確かめる |
+
+- 件数は比較器が数え、1件でも欠ければ失敗にする。0件・skip・時間切れ・想定外の失敗を合格にしない。
+- Macの列は、比較器が機種ごとに要求する件数である。Macでの実行は未確認である。
+
+| 群 | Linux | Mac |
+|---|---|---|
+| 旧版のテストのメソッドと比較 | 57メソッド・183比較 | 行わない(Linuxの固定期待のため) |
+| 引数・疑似端末(PTY) | 404・40 | 404・40 |
+| 契約(値・例外・パス・出力の故障) | 610 | 476 |
+| 文字コード設定・YAMLの境界・文字コードの組 | 35・80・126 | 35・80・126 |
+| 全コマンド共通の決定と点検の比較 | 331 | 210 |
+
+- Macでは、旧版が`snapshot`・`preflight`をmemfdと`/proc/self/fd`の不在で拒否する。全7コマンドの拒否と成功を、個別の期待で比べる。
+- 決定の比較は、起動の失敗の`Current thread`・`PYTHONHASHSEED`・`PYTHONOPTIMIZE`・SIGINT・SIGTERM・時間切れ・保存の途中の書き込みの失敗・`onbranch`の一時の置き場・Git以外を起動しないことを含む。
+- 実装レビューの指摘と、実装担当の点検(os.pathの字面・`try`/`except`の全数・パスの比較と鍵)で見つけた差も、恒久の比較に入れた。直す前のRustでは不一致になることを確かめてある。
+- 旧スクリプトと既存の検査は変えていない。Ubuntuの3.10.12では、旧Python単独の`scripts/test_loop_state.py`の65テストと、`scripts/check_loop_state_mutations.py`の10変異だけを流す。
+
+#### 比較に使うPython
+
+- 旧版とRustの比較は、本家CPython 3.10.11で流す。導入先のフレームを含むcaseでは、標準ライブラリ12本のSHA-256を、CPythonの`v3.10.11`タグの`Lib/`の値と照らす。違えば、そのcaseを失敗にする(成功にもskipにもしない)。
+- CIは`actions/setup-python`の3.10.11を使う。手元では、python.orgのソースから建てた3.10.11を使った。
+- uvで入れる3.10.11の配布物は`os.memfd_create`を持たないため、この比較には使えない。
+- 比較器は、決定が比較の前提の外にした環境変数を外して起動し、子の環境に残っていれば失敗にする。sitecustomize・利用者のsiteの`.pth`・argparseの翻訳ファイルが無いことも確かめる。
+- 資源の上限(RLIMIT_NOFILEなど)を下げた旧新の比較はしない(2026-11-12 00:42の決定)。受け継いだ値を記録するだけである。書き込みの失敗のcaseだけ`RLIMIT_FSIZE`を使う。
+
+#### 手元のLinux実装検証(2026-11-12)
+
+実装commitは`ba643c3eb3225305d9c1bb5e967f3bc813fae046`である。
+管理担当が、レビューした中身だけを取り出した別のコピーで品質検査24件を流し、すべて終了値0だった。
+
+- 作業機(Linux x86_64・16 CPU)での所要時間は、`check_loop_state.py`が176〜235秒、`cargo test --locked`が約170〜190秒、`check_loop_state_mutations.py`が約30〜40秒だった。
+- R4Bの比較は同じ回で約460秒だった。
+- CIの`build`(60分)・`verify-universal`(30分)の上限の中で、S2Lの比較を含めて完走するかは未確認である。Macでの実際の動作、Linux arm64、最低OSも未確認であり、PRのCIで確かめる。
+- この記録は、PR用CIと、最新mainを含む最終SHAの全回帰テストの成功を意味しない。
 
 ### 4 種類の CI と成果物
 
@@ -318,6 +380,10 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 外部 Action は完全な commit SHA に固定する。キャッシュの Action・`pull_request_target`・秘密情報・書き込み権限は使わない。
   - ビルド設定は CI の定義に直接書かず、`native/ci/` のスクリプトに置く。採用した Action の確認記録は [native/ci/README.md](../native/ci/README.md#ワークフローの検査)にある。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
+- S2L(#468)の検査用実行物`loop_state_fixture`も、`build`・`reproduce`の2回のビルドに`--example loop_state_fixture`で含める。各回で`check_loop_state.py`と`test_loop_state.py`を流す。
+  - `quality()`は、各OSで1回、`check_loop_state_units.py`と`check_loop_state_mutations.py`を流す。
+  - `verify-universal`は、署名後の同じ`loop_state_fixture`を両CPUで比べる。`package`は配布用へ渡さない。
+  - 手元の比較は1回176〜235秒だった。CIの上限の中で完走するかは未確認である。
 
 ### ビルド入力の記録
 

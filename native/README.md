@@ -287,6 +287,36 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 [必須の実行手順と検証範囲](../docs/testing.md#r4bの比較)に従ってください。
 通常の`cargo test --locked`だけではexampleの単体検査と旧版比較は完了しません。
 
+## loop-stateの状態観測7コマンド(S2L)
+
+#468で、旧`loop-state.py`の7コマンドに対応する専用モジュールを実装しました。製品CLIの登録・help・配布・`loop.sh`などの既存呼出元は変えていません。
+
+- 未登録で試す入口は`crates/cli/examples/loop_state_fixture.rs`だけです。`args_os()`の最初の要素(実行ファイルの名前)を除いて、`commands/loop_state/mod.rs`の`main`へ渡し、その終了値で終わります。
+- 製品の`dev-workflow`は、引き続き`loop-state`を未登録のコマンドとして拒否します。
+
+| 置き場 | 主な部品と役目 |
+|---|---|
+| `crates/cli/src/commands/loop_state/mod.rs` | 7コマンドの振り分けと、`Stop`(終了20)・捕まえない例外(終了1)の出し分け |
+| 同`args.rs`・`runtime.rs`・`output.rs` | 旧`argparse`の解析とhelp。文字コードをUTF-8と`surrogateescape`へ固定する`LegacyRuntime`。書き込みの途中と終了時のflushの失敗を分ける出力 |
+| 同`json.rs`・`error.rs` | `PyValue`・`PyInteger`(文字番号・任意精度整数・非有限数を保つJSONの値)。`LegacyException`(例外の型・理由・因果・フレームと、旧版と同じ形の呼出履歴) |
+| 同`state.rs`・`legacy_file.rs`・`budget.rs` | 状態の読取りと保存、保持した親からのopen。`TextIOWrapper`と`BufferedWriter`の区切り。旧`Budget`の計数順 |
+| 同`snapshot.rs`・`preflight.rs`・`config.rs`・`scan.rs` | 状態の観測の順序、管理先・候補・出典の事前の検査、設定のグラフ、属性を先に調べる走査と機密指定 |
+| 同`control.rs`・`compare.rs` | `stop-control`・`derive-removed-worktree`と、`compare`の差の診断 |
+| 同`process.rs`・`interrupt.rs`・`legacy_tempfile.rs` | `run_git`と`index_snapshot`、SIGINTの後始末、`onbranch`の一時の置き場(`tempfile.mkdtemp`と同じ候補と名前) |
+| 同`realpath.rs`・`walk_recursion.rs`・`walk_regex.rs` | `posixpath.realpath`と、走査・glob照合の旧CPythonの呼出しの深さ |
+| `crates/platform/src/loop_state.rs` | `LoopChild`(stdoutだけパイプの直接の子)、`MemoryFile`(memfd)、`InheritedInput`・`LoopArg`・`MemoryPart`、保持した親からの列挙・リンク・保存 |
+| `crates/platform/src/loop_state_signal.rs` | 起動時の信号の初期化(SIGINT・SIGXFSZ)と、起動の失敗の診断に使う主スレッドの識別子 |
+| `crates/platform/src/loop_state_watch.rs` | Linuxの実際のopenの監視。テストが持つフォルダだけを見る |
+| `crates/core/src/loop_state/legacy_recursion.rs`・`legacy_parser.rs`・`legacy_scanner.rs` | `LegacyRecursionContext`と`profile_patterns_for_loop`。PyYAMLのcompose・構築とCPython 3.10の呼出しの深さを数える |
+
+- fdの番号・所有権・読取り位置は、`platform`の外へ出しません。`/proc/self/fd/<番号>`の組み立ても`platform`の中に閉じます。
+- `crates/platform/src/fs.rs`へ足したのは、`pub(crate)`のfdの借用、openとfstatの後に旧版の比較の呼出しを挟む`pub(crate)`の入口、`HeldDir::snapshot`です。既存のC0b・C0cのAPIの動作は変えていません。
+- 既存の`core::loop_state::profile_patterns`(R4S)の結果は変えていません。S2Lは`profile_patterns_for_loop`を使います。
+- 単体テストは`*_tests.rs`と各モジュールの`tests`にあります。`check_loop_state_units.py`が必須の名前と件数で照らします。
+
+契約・拒否の順序・承認された差は [design.md](../docs/design.md#loop-stateの状態観測7コマンドs2l)にあります。
+[比較の手順・件数・時間](../docs/testing.md#s2lの比較)に従ってください。通常の`cargo test --locked`だけでは旧版との比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
