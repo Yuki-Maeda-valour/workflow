@@ -43,7 +43,7 @@ def invoke(command,env,cwd,out_route='pipe',err_route='pipe'):
             os.killpg(child.pid,signal.SIGKILL);child.communicate(timeout=3)
 
 class Pairs:
-    def __init__(self,fixture,work):self.fixture=fixture;self.work=work;self.count=0;self.commands=set();self.groups={};self.env=arguments.environment()
+    def __init__(self,fixture,work):self.fixture=fixture;self.work=work;self.count=0;self.commands=set();self.groups={};self.boundaries=[];self.env=arguments.environment()
     def run(self,label,argv,expected=None,output=None,existing=None,delta=None,group='values',out_route='pipe',err_route='pipe'):
         env=self.env.copy()
         for key,value in (delta or {}).items():
@@ -61,7 +61,7 @@ class Pairs:
         check.compare_result(label,old,new)
         actual=check.output_state(output)
         if actual!=old_state:raise check.Mismatch(f'CONTRACT_STATE: {label}: {old_state!r} != {actual!r}')
-        if expected is not None and old.returncode!=expected:raise AssertionError(f'CONTRACT_FIXED_EXIT: {label}: {old.returncode} != {expected}')
+        if expected is not None and old.returncode!=expected:raise AssertionError(f'CONTRACT_FIXED_EXIT: {label}: {old.returncode} != {expected}: stderr={old.stderr[-600:]!r}')
         self.count+=1;self.commands.add(argv[0]);self.groups[group]=self.groups.get(group,0)+1
         return new,actual
 
@@ -140,7 +140,7 @@ def run(fixture):
         r1.compare_values(pair);r1.json_causes(pair);r1.walks(pair);r1.state_stops(pair)
         import loop_state_r2_cases as r2
         r2.compare_values(pair);r2.repositories(pair)
-        return {'contract_cases':pair.count,'groups':pair.groups,'commands':sorted(pair.commands),'permission_body_reached':sys.platform!='darwin','r1_walk_semantics_reached':sys.platform!='darwin','r2_refs_semantics_reached':sys.platform!='darwin','skipped':0,'timeouts':0,'seconds':round(time.monotonic()-start,3)}
+        return {'contract_cases':pair.count,'groups':pair.groups,'commands':sorted(pair.commands),'os_boundaries':pair.boundaries,'permission_body_reached':sys.platform!='darwin','r1_walk_semantics_reached':sys.platform!='darwin','r2_refs_semantics_reached':sys.platform!='darwin','skipped':0,'timeouts':0,'seconds':round(time.monotonic()-start,3)}
 
 def repository_cases(pair):
     """E02/E09 と、使用箇所だけ構造を確認する C04 の旧固定78入力。"""
@@ -156,7 +156,7 @@ def repository_cases(pair):
     initialize(repo);shared=['--top',repo,'--common',repo/'.git','--repo-admin',repo/'.git'];out=folder/'out';state=folder/'state'
     pilot=invoke([sys.executable,'-B',str(check.LEGACY),'snapshot','--out',str(out),*map(os.fspath,shared)],pair.env,folder)
     if sys.platform=='darwin':
-        assert pilot.returncode==20 and not out.exists(),'MAC_PRIOR_PREPARATION_REFUSAL'
+        assert pilot.returncode==20 and not out.exists(),'MAC_PRIOR_PREPARATION_REFUSAL: exit='+repr(pilot.returncode)+' stderr='+ascii(pilot.stderr[-600:])
         # 旧の実候補を読み、後段のparserに届く保存入力だけを用意する。
         # snapshot成功の代用へ数えず、以後の両CLIの実拒否を比較する。
         script="""import importlib.util,json,sys
@@ -187,7 +187,11 @@ t,c=sys.argv[2:];b=m.Budget(100000,10000000,1000000,60);q=m.config_candidates(t,
         if sys.platform!='darwin':assert b'PermissionError:' in result.stderr and b"'large'" in result.stderr and b'in hash_at\n' in result.stderr,'E02_PERMISSION_CALL_CHAIN'
         assert saved is None,'E02_NO_OUTPUT'
     finally:large.chmod(0o600)
-    raw_repo=folder/'repo-\udcff';raw_repo.mkdir();initialize(raw_repo)
+    raw_repo=folder/'repo-\udcff'
+    # Mac の APFS は UTF-8 でない名前を作れない。そのときだけ E09 を飛ばし、行で出す(E09 に ASCII の対照は無い)。
+    if not check.create_raw(raw_repo,Path.mkdir):
+        pair.boundaries.append(check.os_boundary('E09-snapshot-bare-utf8','skipped','none'));return
+    initialize(raw_repo)
     result,saved=pair.run('E09-snapshot-bare-utf8',['snapshot','--out',out,'--top',raw_repo,'--common',raw_repo/'.git','--repo-admin',raw_repo/'.git'],1,output=out,group='repository2')
     assert b'UnicodeDecodeError:' in result.stderr and b'0xff in position' in result.stderr and b'invalid start byte' in result.stderr and b'in snapshot\n' in result.stderr and saved is None,'E09_BARE_UTF8_DECODE'
 

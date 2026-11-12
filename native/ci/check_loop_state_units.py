@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """S2LのRust54件を実行し、必須名・件数・未実行0を照合する。"""
-import hashlib,json,os,subprocess,sys,time
+import hashlib,json,os,re,subprocess,sys,time
 from pathlib import Path
 import check_loop_state as check
 import check_loop_state_mutations as mutations
@@ -39,6 +39,25 @@ def assert_result(result,log=None):
         if f'test {name} ... ok'.encode() not in output:raise AssertionError('S2L_UNIT_MISSING: '+name)
     if b'... ignored' in output:raise AssertionError('S2L_UNIT_SKIP')
 
+# Mac の既定の APFS が受け付けない入力(UTF-8 でない名前・大文字小文字だけ違う名前)を、
+# 飛ばす(skipped)か、別の所に作り直して同じ検査を流す(replaced)検査。ASCII の対照は全 OS で流す。
+# Linux では 1 件も出さない。
+MAC_FS_REFUSALS=[('i01_secret_globs_never_open_body','replaced'),
+                 ('r3_directory_change_during_read_keeps_surrogate_name','skipped'),
+                 ('r3_enumeration_failure_keeps_surrogate_name','skipped')]
+
+def fs_refusals(stdout):
+    """S2L_OS_BOUNDARY の input= つきの行の(検査の名前, action)。"""
+    pattern=rb'S2L_OS_BOUNDARY name=(\S+) os=\S+ input=\S+(?: \S+)*? action=(\S+)'
+    rows=sorted((m.group(1).decode(),m.group(2).decode()) for m in re.finditer(pattern,stdout))
+    if len(rows)!=len(re.findall(rb'S2L_OS_BOUNDARY name=\S+ os=\S+ input=',stdout)):raise AssertionError('S2L_UNIT_FS_REFUSAL_FORM')
+    return rows
+
+def assert_fs_refusals(refusals):
+    """Mac ではちょうど MAC_FS_REFUSALS、ほかの OS では 0 件でなければ失敗にする(黙って合格にしない)。"""
+    expected=sorted(MAC_FS_REFUSALS) if sys.platform=='darwin' else []
+    if refusals!=expected:raise AssertionError('S2L_UNIT_FS_REFUSALS: '+repr(refusals))
+
 def main():
     check.environment();started=time.monotonic();native=check.ROOT/'native';env=os.environ.copy()
     if not env.get('CARGO_TARGET_DIR') or Path(env['CARGO_TARGET_DIR']).resolve()==check.ROOT or check.ROOT in Path(env['CARGO_TARGET_DIR']).resolve().parents:raise RuntimeError('外部CARGO_TARGET_DIRが必要です')
@@ -54,5 +73,6 @@ def main():
         assert_result(result,logfile.read_bytes() if logfile.exists() else b'')
     # RLIMIT_NOFILE を下げた旧新の比較(低いfdの上限)は、恒久の比較に入れない(00:42 の決定)。
     if hashlib.sha256(binary.read_bytes()).hexdigest()!=before:raise AssertionError('S2L_UNIT_BINARY_CHANGED')
-    print(json.dumps({'rust_tests':COUNT,'common_graph':8,'linux_real_connections':0 if sys.platform=='darwin' else 8,'mac_actual_refusals':8 if sys.platform=='darwin' else 0,'safety_observations':25,'yaml_context':1,'other_pure':3,'r3_and_decisions':11,'refs_component_boundaries':3-result.stdout.count(b'M02_OS_REFUSAL_BOUNDARY_NOT_REACHED:'),'refs_component_os_refusals':result.stdout.count(b'M02_OS_REFUSAL_BOUNDARY_NOT_REACHED:'),'low_fd_comparisons':0,'skipped':0,'binary_sha256':before,'seconds':round(time.monotonic()-started,3)}));return 0
+    refusals=fs_refusals(result.stdout);assert_fs_refusals(refusals)
+    print(json.dumps({'rust_tests':COUNT,'common_graph':8,'linux_real_connections':0 if sys.platform=='darwin' else 8,'mac_actual_refusals':8 if sys.platform=='darwin' else 0,'safety_observations':25,'yaml_context':1,'other_pure':3,'r3_and_decisions':11,'refs_component_boundaries':3-result.stdout.count(b'M02_OS_REFUSAL_BOUNDARY_NOT_REACHED:'),'refs_component_os_refusals':result.stdout.count(b'M02_OS_REFUSAL_BOUNDARY_NOT_REACHED:'),'low_fd_comparisons':0,'fs_input_refusals':refusals,'skipped':0,'binary_sha256':before,'seconds':round(time.monotonic()-started,3)}));return 0
 if __name__=='__main__':raise SystemExit(main())

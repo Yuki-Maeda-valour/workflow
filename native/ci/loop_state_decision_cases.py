@@ -63,6 +63,7 @@ class Runner:
         self.work = work
         self.groups = {}
         self.cases = []
+        self.boundaries = []
         self.base = arguments.environment()
         self.bindir = work / "stall-bin"
         self.bindir.mkdir()
@@ -972,7 +973,13 @@ def tree_permissions(runner):
     for name in ["d", "d-\udcff"]:
         for child in [False, True]:
             directory = repo / name
-            directory.mkdir()
+            if name.isascii():
+                directory.mkdir()
+            elif not check.create_raw(directory, Path.mkdir):
+                # Mac の APFS は UTF-8 でない名前を作れない。そのときだけ飛ばし、行で出す(ASCII の対照は d)。
+                kind = "child" if child else "empty"
+                runner.boundaries.append(check.os_boundary("r3-mode0400-raw-" + kind, "skipped", f"r3-mode0400-{ascii('d')}-{kind}"))
+                continue
             if child:
                 (directory / "child").write_bytes(b"child body")
             directory.chmod(0o400)
@@ -1126,6 +1133,7 @@ def run(fixture, full=True):
         r7_path_equality(runner)
         sources = git_only(runner)
         return {"decision_cases": len(runner.cases), "groups": runner.groups, "st_blksize": blocksize,
+                "os_boundaries": runner.boundaries,
                 "timeout_elapsed_seconds": runner.timing,
                 "rust_child_sources": sources,
                 # 書込みが途中まで通る出力の故障は、今の比較に無い(/dev/full と閉じた pipe は 0 バイト)。

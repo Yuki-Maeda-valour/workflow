@@ -1245,7 +1245,13 @@ APIは [native/README.md](../native/README.md#タスク本文の復元の内部�
 
 #### OSの限界
 
-- Macの旧版は、`os.memfd_create`と`/proc/self/fd`が無いため、`snapshot`・`preflight`をGitの前に拒否する。Rustも同じ所で拒否し、一時ファイルや`/dev/fd`へ切り替えない。
+- Macには`/proc/self/fd`が無い。旧版は、`/proc/self/fd/<番号>`を渡す`git config --file`の解析が失敗するので、`snapshot`・`preflight`を「git の状態読取に失敗した」で拒否する。
+  - 前の状態の無い`snapshot`は、その解析の前に、worktreeの一覧と、停止ファイルの確かめ(停止ファイルの引数があるときの`stop_control_from_args`の`os.stat`)を行う。
+  - 続けて、名前の順で最初のworktreeだけについて、`rev-parse`・`secret_paths`の読取り・`diff-index`・`config.worktree`とprivate refsの読取り・configの出典の一覧(`git config --show-origin`)を行う。2つ目より後のworktreeには届かない。
+  - 前の状態を使う`snapshot`は、worktreeの一覧の前に、保存したconfigの確かめの中のその解析で拒否する。
+  - `preflight`も、保存したconfigの確かめの中のその解析で拒否する。
+  - Macの旧Pythonには`os.memfd_create`も無い。ただし、memfdを使うincludeIfの条件の判定は、その解析の後なので届かない。
+- Rustも同じ所で拒否し、一時ファイルや`/dev/fd`へ切り替えない。
 - Linuxの成功を、Macの成功として扱わない。Macでの実際の動作は未確認であり、PRのCIで確かめる。
 
 #### 承認された差と全コマンド共通の決定

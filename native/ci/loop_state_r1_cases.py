@@ -172,7 +172,7 @@ def walks(pair):
                         if leaf:deep.leaf(depth,b'leaf body')
                         identities=deep.identity(depth,leaf)
                         result,saved=pair.run(f'R1-walk-{context}-{depth}-{leaf}',['snapshot','--out',out,'--top',repo,'--common',repo/'.git','--repo-admin',repo/'.git'],20 if sys.platform=='darwin'else expected,output=out,group='r1_walk')
-                        if sys.platform=='darwin':assert saved is None and result.returncode==20,'R1_MAC_WALK_NOT_REACHED'
+                        if sys.platform=='darwin':assert saved is None and result.returncode==20,'R1_MAC_WALK_NOT_REACHED: exit='+repr(result.returncode)+' stderr='+ascii(result.stderr[-600:])
                         elif expected:
                             assert saved is None and b'RecursionError:' in result.stderr and result.stdout==b'','R1_WALK_RECURSION_NO_SAVE'
                         else:assert saved is not None and saved[1]==0o600,'R1_WALK_STATE_CREATED'

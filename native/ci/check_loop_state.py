@@ -2,6 +2,7 @@
 """S2Lの同一物理入力に対する生出力・終了値・状態の旧新比較。"""
 from __future__ import annotations
 import argparse
+import errno
 import hashlib
 import importlib.util
 import json
@@ -25,6 +26,50 @@ _RUN = subprocess.run
 
 class Mismatch(AssertionError):
     pass
+
+
+def os_label():
+    return "macos" if sys.platform == "darwin" else sys.platform
+
+
+def create_raw(path, create):
+    """UTF-8 でない名前を実際に作る。Mac の APFS が EILSEQ で拒むときだけ偽を返す。
+
+    ほかの OS とほかの失敗は例外のまま止める(Linux の検査は変えない)。
+    """
+    try:
+        create(path)
+    except OSError as error:
+        if sys.platform == "darwin" and error.errno == errno.EILSEQ:
+            return False
+        raise
+    return True
+
+
+def os_boundary(name, action, control):
+    """ファイル系が受け付けない入力の扱いを、Rust の検査と同じ S2L_OS_BOUNDARY の行で出す。
+
+    action は skipped(case を流さない)・not_created(ファイルを作らずに同じ引数で比べる)・
+    replaced(作る名前を置き換えて比べる)。control は ASCII の対照の case の label(無ければ none)。
+    """
+    print(f"S2L_OS_BOUNDARY name={name} os={os_label()} input=non_utf8_name errno={errno.EILSEQ} "
+          f"action={action} ascii_control={control}", flush=True)
+    return {"name": name, "input": "non_utf8_name", "errno": errno.EILSEQ, "action": action, "ascii_control": control}
+
+
+# Mac の APFS が UTF-8 でない名前を拒むときの扱い(名前, action)。
+# Linux では 1 件も許さない。Mac ではちょうどこの一覧を求める(黙って合格にしない)。
+MAC_OS_BOUNDARIES = {
+    "arguments": [("arguments-state-raw", "not_created")],
+    "contracts": [("E09-snapshot-bare-utf8", "skipped"), ("R2-denied-directory-raw", "skipped"),
+                  ("R2-denied-file-raw", "skipped")],
+    "encoding": [("encoding-file-names", "replaced")],
+    "decisions": [("r3-mode0400-raw-empty", "skipped"), ("r3-mode0400-raw-child", "skipped")],
+}
+
+
+def expected_os_boundaries(group):
+    return MAC_OS_BOUNDARIES.get(group, []) if sys.platform == "darwin" else []
 
 
 def compare_result(name, old, new):
@@ -418,18 +463,31 @@ def decision_groups():
             "r3_tree":4,"r3_realpath":17,"r4_config_snapshot":9,"r4_config_prior":10,"r4_preflight_json":5,
             "r4_realpath":4,"r5_saved_paths":9,"r5_same_bytes":14,"r6_os_path":27,"r6_strings":15,"r7_held_errors":14,"r7_exception_audit":6,"r7_path_equality":25,"git_only":2}
     if sys.platform=="darwin":
-        # Mac の旧版は snapshot・preflight の Git の前で memfd と /proc/self/fd を拒否する。
+        # Mac の旧版は、/proc/self/fd/<番号> を渡す git config --file の解析の失敗で snapshot・preflight を拒否する。
+        # 前の状態の無い snapshot は、その前に worktree の一覧・停止ファイルの確かめと、名前の順で最初の worktree の
+        # rev-parse・secret_paths の読取り・diff-index・config の出典の一覧を行う。
+        # 前の状態を使う snapshot と preflight は、保存した config の確かめの中で拒否する。
         # 待ちの点・onbranch・前の状態を使う case へ届かない case は数えない(到達しない成功にしない)。
         for key in ("sigint","sigterm","sigint_ignored","onbranch","timeouts","timeouts_10s","r4_config_prior",
                     "r5_saved_paths","r5_same_bytes","r7_held_errors","r7_exception_audit"):groups.pop(key)
         # Mac は前の状態を取れないので、gitdir の preflight・保存パス・HEAD・buffering の case を数えない。
         # r7 の比較(前の状態・権限)は前の状態を取れないので、初回の snapshot の 5 件だけを数える。
         groups.update(git_only=1,r6_os_path=8,r6_strings=6,r7_path_equality=5)
+        # Mac の APFS は UTF-8 でない名前を作れない。ASCII の対照の 2 件だけを数える(MAC_OS_BOUNDARIES)。
+        groups.update(r3_tree=2)
     return groups
 
 
+def contract_groups():
+    """契約の比較の群ごとの件数。Mac は /dev/full と、APFS が作れない UTF-8 でない名前の case を数えない。"""
+    mac=sys.platform=="darwin"
+    return {"json19":19,"structure":13,"paths":16,"io":32 if mac else 51,"numeric23":23,"prior_structure78":78,
+            "repository2":1 if mac else 2,"r1_compare":24,"r1_json":110 if mac else 165,"r1_walk":17,
+            "r1_state_stop":28 if mac else 42,"r2_compare":92 if mac else 138,"r2_permissions":2 if mac else 4,"r2_refs":18}
+
+
 def require_full_coverage(report):
-    expected_groups={"json19":19,"structure":13,"paths":16,"io":32 if sys.platform=="darwin" else 51,"numeric23":23,"prior_structure78":78,"repository2":2,"r1_compare":24,"r1_json":110 if sys.platform=="darwin" else 165,"r1_walk":17,"r1_state_stop":28 if sys.platform=="darwin" else 42,"r2_compare":92 if sys.platform=="darwin"else 138,"r2_permissions":4,"r2_refs":18}
+    expected_groups=contract_groups()
     if report.get("partial"):
         raise Mismatch("S2L_PARTIAL_CANNOT_PASS_FULL_GATE")
     if report.get("arguments",{}).get("arguments")!=404 or report.get("terminals",{}).get("pty")!=40:
@@ -455,6 +513,9 @@ def require_full_coverage(report):
     for group in ("arguments","terminals","contracts","encoding","yaml","encoding_matrix","decisions"):
         if report[group].get("skipped")!=0:raise Mismatch("S2L_SKIPPED: "+group)
         if report[group].get("timeouts",0)!=0:raise Mismatch("S2L_TIMEOUT: "+group)
+        # ファイル系が拒んで飛ばした入力は、OS ごとに決めた一覧とちょうど同じでなければならない。
+        if [(row.get("name"),row.get("action")) for row in report[group].get("os_boundaries",[])]!=expected_os_boundaries(group):
+            raise Mismatch("S2L_OS_BOUNDARY: "+group)
     if sys.platform!="darwin" and (report.get("legacy_methods")!=57 or report.get("legacy_comparisons")!=183
                                     or report.get("legacy_commands")!=LEGACY_INVOCATIONS):
         raise Mismatch("S2L_LEGACY_COVERAGE")

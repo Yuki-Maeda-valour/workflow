@@ -252,24 +252,62 @@ fn row<'a>(rows: &'a [V], path: &str) -> &'a V {
 #[test]
 fn i01_secret_globs_never_open_body() {
     isolated("i01_secret_globs_never_open_body", |f| {
-        for name in ["private.txt", "PRIVATE.txt", "ordinary"] {
-            std::fs::write(f.root.join(name), b"owned sentinel").unwrap()
+        std::fs::write(f.root.join("private.txt"), b"owned sentinel").unwrap();
+        // 大文字小文字だけ違う名前。Mac の既定の APFS は同じ名前と見るので、作った直後に
+        // 確かめる。同じ実体になったときだけ、大文字の名前を別の根に作り直して同じ検査を流し、
+        // 置き換えたことを S2L_OS_BOUNDARY の行で出す(旧 secret_path の re.IGNORECASE を Mac でも見る)。
+        let mut case_root = None;
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(f.root.join("PRIVATE.txt"))
+        {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(b"owned sentinel").unwrap();
+            }
+            Err(error)
+                if cfg!(target_os = "macos")
+                    && error.kind() == std::io::ErrorKind::AlreadyExists
+                    && std::fs::metadata(f.root.join("PRIVATE.txt")).unwrap().ino()
+                        == std::fs::metadata(f.root.join("private.txt")).unwrap().ino() =>
+            {
+                let other = f.base.join("case-root");
+                std::fs::create_dir(&other).unwrap();
+                for name in ["PRIVATE.txt", "ordinary"] {
+                    std::fs::write(other.join(name), b"owned sentinel").unwrap();
+                }
+                println!(
+                    "S2L_OS_BOUNDARY name=i01_secret_globs_never_open_body os=macos input=case_only_name refused=case_folded action=replaced replaced=PRIVATE.txt:case-root/PRIVATE.txt ascii_control=private.txt"
+                );
+                case_root = Some(other);
+            }
+            Err(error) => panic!("I01_CASE_ONLY_NAME: {error}"),
         }
-        let (rows, events) = traced(|| {
-            scan::tree(&f.root, &[Text::from("private.txt")], &mut budget(), None).unwrap()
-        });
-        for name in ["private.txt", "PRIVATE.txt"] {
-            assert!(row(&rows, name).get("secret").truth(), "I01_SECRET");
-            assert_eq!(opened(&events, name), 0, "I01_NO_OPEN");
-            assert!(matches!(row(&rows, name).get("sha256"), V::Null));
+        std::fs::write(f.root.join("ordinary"), b"owned sentinel").unwrap();
+        let scan = |root: &Path| {
+            traced(|| scan::tree(root, &[Text::from("private.txt")], &mut budget(), None).unwrap())
+        };
+        // 根ごとに、機密の名前と対照(ordinary)を同じ検査で見る。ASCII の private.txt は全 OS で流す。
+        let mut roots = vec![(scan(&f.root), vec!["private.txt"])];
+        match case_root {
+            None => roots[0].1.push("PRIVATE.txt"),
+            Some(other) => roots.push((scan(&other), vec!["PRIVATE.txt"])),
         }
-        assert_eq!(opened(&events, "ordinary"), 1, "I01_CONTROL_OPEN");
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e,Event::Read{count,..}if *count>0)),
-            "I01_CONTROL_READ"
-        );
+        for ((rows, events), secrets) in &roots {
+            for name in secrets {
+                assert!(row(rows, name).get("secret").truth(), "I01_SECRET");
+                assert_eq!(opened(events, name), 0, "I01_NO_OPEN");
+                assert!(matches!(row(rows, name).get("sha256"), V::Null));
+            }
+            assert_eq!(opened(events, "ordinary"), 1, "I01_CONTROL_OPEN");
+            assert!(
+                events
+                    .iter()
+                    .any(|e| matches!(e,Event::Read{count,..}if *count>0)),
+                "I01_CONTROL_READ"
+            );
+        }
     });
 }
 #[test]

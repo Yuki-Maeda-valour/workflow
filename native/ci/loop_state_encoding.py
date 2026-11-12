@@ -24,8 +24,17 @@ def _run(TMP,NEW):
   if stat.S_ISREG(s.st_mode):d['sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
   if stat.S_ISLNK(s.st_mode):d['target_hex']=os.fsencode(os.readlink(path)).hex()
   return d
- repo=TMP/'repo';repo.mkdir();home=TMP/'home-\udcff';home.mkdir();xdg=TMP/'xdg';xdg.mkdir();bindir=TMP/'bin';bindir.mkdir();outputs=TMP/'outputs';outputs.mkdir();inputs=TMP/'inputs';inputs.mkdir()
- global_config=home/'global-\udcff';global_config.write_bytes('[s2l]\nlabel = 漢字-'.encode()+b'\xff\n')
+ # Mac の APFS は UTF-8 でない名前を作れない。最初の名前を実際に作って確かめ、拒んだときだけ、
+ # 作るファイルとディレクトリの名前の生のバイトを ASCII の xff に置き換える。置き換えたことは行で出す。
+ # そのため Mac では、その名前を値に持つ環境変数 HOME と GIT_CONFIG_GLOBAL も xff の名前になる。
+ # 作らない名前(停止ファイルの相対パス・除いた worktree・JSON の中の文字列)とほかの環境変数は、生のバイトのまま比べる。
+ boundaries=[];refused=not s2l_comparator.create_raw(TMP/'home-\udcff',pathlib.Path.mkdir)
+ def fs(name):return name.replace('\udcff','xff') if refused else name
+ if refused:boundaries.append(s2l_comparator.os_boundary('encoding-file-names','replaced','none'))
+ repo=TMP/'repo';repo.mkdir();home=TMP/fs('home-\udcff')
+ if refused:home.mkdir()
+ xdg=TMP/'xdg';xdg.mkdir();bindir=TMP/'bin';bindir.mkdir();outputs=TMP/'outputs';outputs.mkdir();inputs=TMP/'inputs';inputs.mkdir()
+ global_config=home/fs('global-\udcff');global_config.write_bytes('[s2l]\nlabel = 漢字-'.encode()+b'\xff\n')
  system_config=TMP/'system.cfg';system_config.write_bytes(b'')
  gitlog=TMP/'git-events.bin'
  wrapper=bindir/'git'
@@ -46,24 +55,24 @@ def _run(TMP,NEW):
  (repo/'tracked').write_bytes(b'tracked\r\n\x00\xff\n')
  (repo/'private-owned.txt').write_bytes(b'OWN-PROBE-SECRET\x00\xff')
  (repo/'.claude').mkdir();(repo/'.claude/project-profile.yml').write_bytes(b'secret_paths: [private-owned.txt]\n')
- file_name='資料-\udcff';(repo/file_name).write_bytes(b'\xff\xfe\x00\x00raw\r\n\x80\n')
- link_name='link-漢-\udcff';os.symlink(os.fsencode(file_name),raw(repo/link_name))
+ file_name=fs('資料-\udcff');(repo/file_name).write_bytes(b'\xff\xfe\x00\x00raw\r\n\x80\n')
+ link_name=fs('link-漢-\udcff');os.symlink(os.fsencode(file_name),raw(repo/link_name))
  git('add','tracked');git('-c','user.name=probe','-c','user.email=probe@example.invalid','commit','-qm','base')
  admin=repo/'.git';stop_rel='停止-\udcff'
- state_out=outputs/'out-状態-\udcff.json'
- state_input=inputs/'held-状態-\udcff.json'
- payload=inputs/'bytes-資料-\udcff.bin';payload.write_bytes(b'\xff\xfe\x00\x00\r\nraw\x00\xff\x80\n')
+ state_out=outputs/fs('out-状態-\udcff.json')
+ state_input=inputs/fs('held-状態-\udcff.json')
+ payload=inputs/fs('bytes-資料-\udcff.bin');payload.write_bytes(b'\xff\xfe\x00\x00\r\nraw\x00\xff\x80\n')
  control={'schema':7,'stop_control':{'worktree':str(repo),'rel':'新規-\udcff/停止','new_dirs':['新規-\udcff']}}
- control_input=inputs/'control-停止-\udcff.json';control_input.write_bytes(b'\xff\xfe\x00\x00'+canonical(control).decode('ascii').encode('utf-32-le'))
+ control_input=inputs/fs('control-停止-\udcff.json');control_input.write_bytes(b'\xff\xfe\x00\x00'+canonical(control).decode('ascii').encode('utf-32-le'))
  removed=str(TMP/'removed-漢-\udcff')
  derive={'schema':7,'worktrees':[{'worktree':removed}],'worktree_contents':[{'path':removed}],'worktree_configs':[{'path':removed}],'secret_patterns':[{'path':removed}],'raw_marker':'漢字-\udcff'}
- derive_input=inputs/'derive-除去-\udcff.json';derive_input.write_bytes(b'\xff\xfe'+canonical(derive).decode('ascii').encode('utf-16-le'))
+ derive_input=inputs/fs('derive-除去-\udcff.json');derive_input.write_bytes(b'\xff\xfe'+canonical(derive).decode('ascii').encode('utf-16-le'))
  derived=copy.deepcopy(derive)
  for key in ('worktrees','worktree_contents','worktree_configs','secret_patterns'):derived[key]=[]
  comparison={'schema':7,'refs':[{'name':'refs/heads/漢-\udcff','oid':'0'*40,'symref':''}],'worktrees':[],'worktree_contents':[],'worktree_configs':[],'secret_patterns':[],'stop_control':None,'config':{},'common_admin':{},'common_config':{'state':'absent'},'common_config_worktree':{'state':'absent'},'repo_admin':{'path':'/self','config_worktree':{'state':'absent'}}}
  changed=copy.deepcopy(comparison);changed['stop_control']={'worktree':'/self','rel':'停止','new_dirs':[]}
- before=inputs/'before-状態-\udcff.json';before.write_bytes(b'\xff\xfe'+canonical(comparison).decode('ascii').encode('utf-16-le'))
- after=inputs/'after-状態-\udcff.json';after.write_bytes(b'\x00\x00\xfe\xff'+canonical(changed).decode('ascii').encode('utf-32-be'))
+ before=inputs/fs('before-状態-\udcff.json');before.write_bytes(b'\xff\xfe'+canonical(comparison).decode('ascii').encode('utf-16-le'))
+ after=inputs/fs('after-状態-\udcff.json');after.write_bytes(b'\x00\x00\xfe\xff'+canonical(changed).decode('ascii').encode('utf-32-be'))
  commands={
   'snapshot':['snapshot','--out',state_out,'--top',repo,'--common',admin,'--repo-admin',admin,'--stop-control-worktree',repo,'--stop-control-rel',stop_rel],
   'stop-control':['stop-control','--state',control_input],
@@ -110,9 +119,11 @@ def _run(TMP,NEW):
  pilot=run('legacy','snapshot',{})
  (DIR/'utf8-normal-v3-pilot.json').write_text(json.dumps({'tmp':str(TMP),'pilot':pilot,'setup':setup},ensure_ascii=True,indent=2)+'\n')
  if sys.platform=='darwin':
-  assert pilot['exit']==20 and pilot['output'] is None and bytes.fromhex(pilot['stderr']['hex'])==b'ERROR [loop-state] '+ 'git の状態読取に失敗した\n'.encode(), 'MAC_NORMAL_SNAPSHOT_REJECTION'
+  # 失敗したときは、旧版の終了値と標準エラーの末尾を CI に残す(pilot の JSON は一時の置き場と一緒に消える)。
+  assert pilot['exit']==20 and pilot['output'] is None and bytes.fromhex(pilot['stderr']['hex'])==b'ERROR [loop-state] '+ 'git の状態読取に失敗した\n'.encode(), 'MAC_NORMAL_SNAPSHOT_REJECTION: exit='+repr(pilot['exit'])+' stderr='+ascii(pilot['stderr']['text'][-600:])
   script=MAC_PREPARE_SCRIPT
-  prepared=subprocess.run([sys.executable,'-B','-c',script,str(OLD),str(repo),str(admin)],env=base,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=8,check=True)
+  prepared=subprocess.run([sys.executable,'-B','-c',script,str(OLD),str(repo),str(admin)],env=base,stdout=subprocess.PIPE,stderr=subprocess.PIPE,timeout=8,check=False)
+  assert prepared.returncode==0,'MAC_PREPARE: exit='+repr(prepared.returncode)+' stderr='+ascii(prepared.stderr[-600:])
   snapshot_bytes=prepared.stdout;snapshot=json.loads(snapshot_bytes);state_input.write_bytes(snapshot_bytes);ascii_snapshot=copy.deepcopy(snapshot)
  else:
   assert pilot['exit']==0 and pilot['output'] is not None,pilot['stderr']['text']
@@ -153,7 +164,9 @@ def _run(TMP,NEW):
    return check(result,(code,out,err,output))
   if setting=='filesystem-ascii':
    if command=='snapshot' and sys.platform!='darwin':return check(result,(0,b'',b'',canonical(ascii_snapshot)))
-   if command=='derive-removed-worktree':return check(result,(20,b'','ERROR [loop-state] 親が削除した worktree の記録が基準と一致しない\n'.encode(),None))
+   # Mac の CPython は引数とファイル系の文字化を常に UTF-8 にする(_Py_FORCE_UTF8_FS_ENCODING)。
+   # PYTHONUTF8=0 と C の locale でも引数は JSON の文字列と一致し、通常の期待と同じになる。
+   if command=='derive-removed-worktree' and sys.platform!='darwin':return check(result,(20,b'','ERROR [loop-state] 親が削除した worktree の記録が基準と一致しない\n'.encode(),None))
   return check(result,exp)
  
  # Include input inode/mtime/ctime/bytes/link target; atime is not compared because reads may update it.
@@ -169,6 +182,8 @@ def _run(TMP,NEW):
    row={'setting':setting,'command':command,'argv_hex':[raw(x).hex() for x in commands[command]],'env_delta':{os.fsdecode(k):describe(v) for k,v in delta.items()},'legacy_expected':old_ok,'rust_expected':new_ok,'raw_same':same,'legacy':old,'rust':new}
    report['cases'].append(row)
    print(setting,command,'old_expected',old_ok,'rust_expected',new_ok,'same',same,'exits',old['exit'],new['exit'],'git',len(old['git_events']),len(new['git_events']),flush=True)
+   # 期待と違えば、旧新の標準エラーを出す(Mac の値を推測で決めず、CI の出力で確かめるため)。
+   if not (old_ok and new_ok):print('ENCODING_UNEXPECTED',setting,command,json.dumps({'legacy':old['stderr']['text'][-600:],'rust':new['stderr']['text'][-600:]},ensure_ascii=True),flush=True)
  manifest_after={raw(p).hex():metadata(p) for p in owned_inputs}
  report['input_manifest_before']=manifest_before;report['input_manifest_after']=manifest_after
  report['inputs_unchanged']=manifest_before==manifest_after
@@ -184,4 +199,5 @@ def _run(TMP,NEW):
  report['summary']['mac_snapshot_success_semantics_reached']=sys.platform!='darwin'
  report['summary']['commands']=sorted({row['command'] for row in report['cases']})
  report['summary']['skipped']=0
+ report['summary']['os_boundaries']=boundaries
  return report['summary']

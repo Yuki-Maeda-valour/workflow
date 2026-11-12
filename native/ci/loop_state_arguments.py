@@ -39,10 +39,14 @@ def equal(label,old,new):
         if getattr(old,field)!=getattr(new,field):
             raise AssertionError(f'CLI_ARGUMENT_{field.upper()}: {label}: old={getattr(old,field)!r} new={getattr(new,field)!r}')
 
-def argument_cases(TMP):
+def argument_cases(TMP,boundaries):
+    import check_loop_state as check
     A=TMP/'state-a'; A.write_bytes(b'{"probe":"a"}\n')
     B=TMP/'state-b'; B.write_bytes(b'{"probe":"b"}\n')
-    BAD=TMP/'state-raw-\udcff'; BAD.write_bytes(b'raw-path\xff\n')
+    BAD=TMP/'state-raw-\udcff'
+    # Mac の APFS は UTF-8 でない名前を作れない。そのときだけ作らずに、同じ引数(生のバイトのパス)で比べる。
+    if not check.create_raw(BAD,lambda p:p.write_bytes(b'raw-path\xff\n')):
+        boundaries.append(check.os_boundary('arguments-state-raw','not_created','none'))
     M=TMP/'missing'
     cases=[]
     def b(v):return v if isinstance(v,bytes) else os.fsencode(v)
@@ -150,7 +154,9 @@ def run_pty(prefix,args,env,cwd,mode,width):
 def arguments(fixture):
     started=time.monotonic()
     with tempfile.TemporaryDirectory(prefix='s2l-arguments-') as temporary:
-        root=Path(temporary);cases=argument_cases(root);base=environment();inputs=[root/'state-a',root/'state-b',root/'state-raw-\udcff'];before=[identity(p)for p in inputs]
+        # Mac の一時の置き場(/var/folders)は /private へのリンク。旧版は祖先のリンクを辿らないので、実体のパスで比べる。
+        boundaries=[];root=Path(temporary).resolve();cases=argument_cases(root,boundaries);base=environment()
+        inputs=[root/'state-a',root/'state-b']+([] if boundaries else [root/'state-raw-\udcff']);before=[identity(p)for p in inputs]
         for case in cases:
             env=base.copy()
             for key,value in case['env'].items():
@@ -162,7 +168,7 @@ def arguments(fixture):
             new=run([os.fsencode(fixture),*case['args']],env,root)
             equal(case['label'],old,new)
         assert before==[identity(p)for p in inputs], 'CLI_ARGUMENT_INPUT_CHANGED'
-    return {'arguments':len(cases),'skipped':0,'seconds':round(time.monotonic()-started,3)}
+    return {'arguments':len(cases),'skipped':0,'os_boundaries':boundaries,'seconds':round(time.monotonic()-started,3)}
 
 def terminals(fixture):
     started=time.monotonic();cases=[]

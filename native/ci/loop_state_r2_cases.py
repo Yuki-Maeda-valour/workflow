@@ -3,7 +3,9 @@
 from __future__ import annotations
 import copy
 import os
+from pathlib import Path
 import sys
+import check_loop_state as check
 from loop_state_contract_cases import canonical
 from loop_state_r1_cases import self_pair
 import loop_state_arguments as arguments
@@ -81,8 +83,11 @@ def repositories(pair):
         for kind in ['directory','file']:
             for name in ['denied','denied-\udcff']:
                 path=repo/name
-                if kind=='directory':path.mkdir()
-                else:path.write_bytes(b'owned permission fixture')
+                create=Path.mkdir if kind=='directory' else lambda p:p.write_bytes(b'owned permission fixture')
+                if name.isascii():create(path)
+                elif not check.create_raw(path,create):
+                    # Mac の APFS は UTF-8 でない名前を作れない。そのときだけ飛ばし、行で出す(ASCII の対照は denied)。
+                    pair.boundaries.append(check.os_boundary('R2-denied-'+kind+'-raw','skipped','R2-denied-'+kind+'-'+ascii('denied')));continue
                 before=arguments.identity(path)if kind=='file'else None
                 path.chmod(0)
                 try:

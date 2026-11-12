@@ -304,14 +304,17 @@ class ComparisonTest(unittest.TestCase):
             self.saving_case(old, changed)
 
     def complete_report(self):
-        groups={"json19":19,"structure":13,"paths":16,"io":32 if CHECK.sys.platform=="darwin" else 51,"numeric23":23,"prior_structure78":78,"repository2":2,"r1_compare":24,"r1_json":110 if CHECK.sys.platform=="darwin" else 165,"r1_walk":17,"r1_state_stop":28 if CHECK.sys.platform=="darwin" else 42,"r2_compare":92 if CHECK.sys.platform=="darwin"else 138,"r2_permissions":4,"r2_refs":18}
+        groups=CHECK.contract_groups()
+        # Mac は /dev/full の経路と、APFS が作れない UTF-8 でない名前の case を数えない。
+        self.assertEqual((groups["io"],groups["repository2"],groups["r2_permissions"]),(32,1,2) if CHECK.sys.platform=="darwin" else (51,2,4))
+        def boundaries(group):return [{"name":name,"action":action} for name,action in CHECK.expected_os_boundaries(group)]
         return {"partial":False,"legacy_methods":57,"legacy_comparisons":183,"legacy_commands":dict(CHECK.LEGACY_INVOCATIONS),
-                "arguments":{"arguments":404,"skipped":0},"terminals":{"pty":40,"skipped":0},
-                "contracts":{"contract_cases":sum(groups.values()),"groups":groups,"skipped":0},
-                "encoding":{"cases":35,"legacy_expected":35,"rust_expected":35,"commands":sorted(CHECK.COMMANDS),"timeouts":0,"inputs_unchanged":True,"all_groups_absent":True,"git_raw_env_preserved":True,"skipped":0},
+                "arguments":{"arguments":404,"skipped":0,"os_boundaries":boundaries("arguments")},"terminals":{"pty":40,"skipped":0},
+                "contracts":{"contract_cases":sum(groups.values()),"groups":groups,"skipped":0,"os_boundaries":boundaries("contracts")},
+                "encoding":{"cases":35,"legacy_expected":35,"rust_expected":35,"commands":sorted(CHECK.COMMANDS),"timeouts":0,"inputs_unchanged":True,"all_groups_absent":True,"git_raw_env_preserved":True,"skipped":0,"os_boundaries":boundaries("encoding")},
                 "yaml":{"yaml_cli":80,"top":40,"linked":40,"skipped":0},
                 "encoding_matrix":{"encoding_matrix":126,"settings":18,"regular_file":8,"unknown_handler_write":1,"commands":sorted(CHECK.COMMANDS),"skipped":0},
-                "decisions":{"decision_cases":sum(CHECK.decision_groups().values()),"groups":CHECK.decision_groups(),"skipped":0,"timeouts":0}}
+                "decisions":{"decision_cases":sum(CHECK.decision_groups().values()),"groups":CHECK.decision_groups(),"skipped":0,"timeouts":0,"os_boundaries":boundaries("decisions")}}
 
     def test_r1_cause_and_walk_groups_are_required(self):
         import loop_state_r1_cases as r1
@@ -333,6 +336,27 @@ class ComparisonTest(unittest.TestCase):
         for group,key,value in [(None,"partial",True),("encoding","commands",["state-digest"]),("encoding","rust_expected",0),("encoding","all_groups_absent",False),("encoding","inputs_unchanged",False),("contracts","contract_cases",1)]:
             bad=copy.deepcopy(good);(bad if group is None else bad[group])[key]=value
             with self.subTest(group=group,key=key),self.assertRaises(CHECK.Mismatch):CHECK.require_full_coverage(bad)
+        # ファイル系が拒んで飛ばした入力: 一覧に無い飛ばし(Linux では 1 件でも)・一覧の欠けは不合格。
+        for group in ("arguments","terminals","contracts","encoding","yaml","encoding_matrix","decisions"):
+            bad=copy.deepcopy(good);bad[group]["os_boundaries"]=[*bad[group].get("os_boundaries",[]),{"name":"unexpected"}]
+            with self.subTest(group=group,boundary="extra"),self.assertRaisesRegex(CHECK.Mismatch,"S2L_OS_BOUNDARY"):CHECK.require_full_coverage(bad)
+            if CHECK.expected_os_boundaries(group):
+                bad=copy.deepcopy(good);bad[group]["os_boundaries"]=bad[group]["os_boundaries"][1:]
+                with self.subTest(group=group,boundary="missing"),self.assertRaisesRegex(CHECK.Mismatch,"S2L_OS_BOUNDARY"):CHECK.require_full_coverage(bad)
+                bad=copy.deepcopy(good);bad[group]["os_boundaries"][0]["action"]="other"
+                with self.subTest(group=group,boundary="action"),self.assertRaisesRegex(CHECK.Mismatch,"S2L_OS_BOUNDARY"):CHECK.require_full_coverage(bad)
+        # Linux では作れない名前を飛ばさない。Mac でも EILSEQ のときだけ飛ばす(ほかの失敗は止める)。
+        import errno
+        with tempfile.TemporaryDirectory(prefix='s2l-raw-name-') as temporary:
+            path=Path(temporary)/'raw-\udcff'
+            def refused(_):raise OSError(errno.EILSEQ,'Illegal byte sequence')
+            def denied(_):raise OSError(errno.EACCES,'Permission denied')
+            def created(_):pass
+            for platform,create,expected in [("linux",refused,OSError),("darwin",denied,OSError),("darwin",refused,False),("linux",created,True),("darwin",created,True)]:
+                with self.subTest(platform=platform,create=create.__name__),mock.patch.object(CHECK.sys,"platform",platform):
+                    if expected is OSError:
+                        with self.assertRaises(OSError):CHECK.create_raw(path,create)
+                    else:self.assertIs(CHECK.create_raw(path,create),expected)
 
     def test_unit_inventory_missing_ignored_and_fake_success_fail(self):
         listing=''.join(name+': test\n' for name in sorted(units.REQUIRED)).encode();units.assert_listing(listing)
@@ -350,6 +374,19 @@ class ComparisonTest(unittest.TestCase):
             with self.assertRaises(AssertionError):units.assert_result(subprocess.CompletedProcess([],0,summary,b''),bad)
         for raw in [summary,lines+summary.replace(f'{units.COUNT} passed'.encode(),f'{units.COUNT-1} passed'.encode()),lines+summary.replace(b'0 ignored',b'1 ignored'),lines+summary+b'... ignored']:
             with self.assertRaises(AssertionError):units.assert_result(subprocess.CompletedProcess([],0,raw,b''))
+        # ファイル系が拒んで飛ばした検査は、Mac ではちょうど決めた一覧、ほかの OS では 0 件。
+        stdout=b''.join(f'S2L_OS_BOUNDARY name={name} os=macos input=non_utf8_name errno=92 action={action} ascii_control=x\n'.encode() for name,action in units.MAC_FS_REFUSALS)
+        stdout+=b'S2L_OS_BOUNDARY name=config_snapshot_x os=macos old_reject=true\n'
+        self.assertEqual(units.fs_refusals(stdout),sorted(units.MAC_FS_REFUSALS))
+        with self.assertRaisesRegex(AssertionError,'S2L_UNIT_FS_REFUSAL_FORM'):units.fs_refusals(b'S2L_OS_BOUNDARY name=x os=macos input=non_utf8_name\n')
+        swapped=[(name,'skipped' if action=='replaced' else 'replaced') for name,action in sorted(units.MAC_FS_REFUSALS)]
+        for platform,refusals,accepted in [('linux',[],True),('linux',[('r3_enumeration_failure_keeps_surrogate_name','skipped')],False),
+                                           ('darwin',sorted(units.MAC_FS_REFUSALS),True),('darwin',sorted(units.MAC_FS_REFUSALS)[1:],False),
+                                           ('darwin',swapped,False),('darwin',[],False)]:
+            with self.subTest(platform=platform,refusals=refusals),mock.patch.object(units.sys,'platform',platform):
+                if accepted:units.assert_fs_refusals(refusals)
+                else:
+                    with self.assertRaisesRegex(AssertionError,'S2L_UNIT_FS_REFUSALS'):units.assert_fs_refusals(refusals)
 
     def test_r2_mutation_anchors_and_mac_embedded_script(self):
         import ast,loop_state_encoding

@@ -11,6 +11,14 @@ use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Child, ChildStdout, Command, Stdio};
 use std::time::Duration;
 
+/// 検査が期待を OS の値から作るためのエラー番号(Linux と Mac で番号が違う)。
+pub mod errno {
+    /// 空でないディレクトリの rmdir(Linux 39・Mac 66)。
+    pub const ENOTEMPTY: i32 = libc::ENOTEMPTY;
+    /// ファイル系が受け付けない名前(Mac の APFS の UTF-8 でない名前。Linux 84・Mac 92)。
+    pub const EILSEQ: i32 = libc::EILSEQ;
+}
+
 // C0 の DirectoryPath 比較を保った S2L の祖先接続。fd は渡さない。
 #[derive(Clone, Copy, Debug)]
 pub enum DirectoryOperation {

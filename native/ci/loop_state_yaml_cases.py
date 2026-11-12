@@ -39,7 +39,11 @@ def run(fixture):
                 expected=20 if sys.platform=='darwin' else 0 if label in SUCCESS else 20
                 result,saved=pair.run(f'yaml-{target}-{label}',['snapshot','--out',out,'--top',repo,'--common',repo/'.git','--repo-admin',repo/'.git'],expected,output=out,group='yaml80')
                 assert baseline==[arguments.identity(p)for p in profiles],'YAML_PROFILE_INPUT_CHANGED'
-                if sys.platform=='darwin':assert result.stderr=='ERROR [loop-state] git の状態読取に失敗した\n'.encode() and saved is None,'MAC_YAML_UNREACHED_EXPECTATION'
+                if sys.platform=='darwin':
+                    # Mac の旧版は、各 worktree の secret_paths を読んだ後の config の解析(/proc/self/fd)で拒む。
+                    # worktree は名前の順(linked → repo)に見るので、linked の YAML の拒否はその解析より前に届く。
+                    reason='secret_paths を安全に読めない' if target==1 and label not in SUCCESS else 'git の状態読取に失敗した'
+                    assert result.stderr==('ERROR [loop-state] '+reason+'\n').encode() and saved is None,'MAC_YAML_UNREACHED_EXPECTATION: '+label+' exit='+repr(result.returncode)+' stderr='+ascii(result.stderr[-600:])
                 elif expected==0:
                     assert saved is not None and saved[1]==0o600 and json.loads(saved[2])['schema']==7,'YAML_STATE_CREATED'
                     if target==0 and label=='flow-plain-489':

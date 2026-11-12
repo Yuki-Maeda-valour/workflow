@@ -43,7 +43,8 @@ def old_startup(name,result):
 def run(fixture):
     started=time.monotonic();count=0;differences=0
     with tempfile.TemporaryDirectory(prefix='s2l-encoding-matrix-') as temporary:
-        root=Path(temporary);state=root/'state';state.write_bytes(b'{"schema":7,"stop_control":null}');out=root/'out'
+        # Mac の一時の置き場(/var/folders)は /private へのリンク。旧版は祖先のリンクを辿らないので、実体のパスで比べる。
+        root=Path(temporary).resolve();state=root/'state';state.write_bytes(b'{"schema":7,"stop_control":null}');out=root/'out'
         valid={'snapshot':['--out',out,'--top',root,'--common',root,'--repo-admin',root],'preflight':['--state',state,'--top',root,'--common',root,'--repo-admin',root],'derive-removed-worktree':['--state',state,'--out',out,'--removed-worktree','/removed','--own-worktree','/removed'],'stop-control':['--state',state],'state-digest':['--state',state],'state-digests':['--state',state],'compare':['--before',state,'--after',state]}
         assert set(valid)==check.COMMANDS
         for setting,delta,codec in SETTINGS:

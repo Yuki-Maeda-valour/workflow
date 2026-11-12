@@ -6,7 +6,10 @@ use super::{
     observe::{self, Event},
     scan, state,
 };
-use dev_workflow_platform::{fs::HeldDir, loop_state::signal};
+use dev_workflow_platform::{
+    fs::HeldDir,
+    loop_state::{errno, signal},
+};
 use std::{
     ffi::OsStr,
     os::unix::ffi::OsStrExt,
@@ -32,6 +35,22 @@ fn budget() -> Budget {
 fn raw_name(raw: &[u8]) -> &OsStr {
     OsStr::from_bytes(raw)
 }
+/// UTF-8 でない名前のディレクトリを作る。Mac の APFS は EILSEQ で拒むので、そのときだけ
+/// 飛ばしたことを S2L_OS_BOUNDARY の行で出して false を返す(黙って合格にしない)。
+/// ほかの OS とほかの失敗は止める(Linux の検査は変えない)。
+fn create_raw_directory(test: &str, path: &Path, control: &str) -> bool {
+    match std::fs::create_dir(path) {
+        Ok(()) => true,
+        Err(error) if cfg!(target_os = "macos") && error.raw_os_error() == Some(errno::EILSEQ) => {
+            println!(
+                "S2L_OS_BOUNDARY name={test} os=macos input=non_utf8_name errno={} action=skipped ascii_control={control}",
+                errno::EILSEQ
+            );
+            false
+        }
+        Err(error) => panic!("S2L_RAW_NAME_CREATE: {}: {error}", path.display()),
+    }
+}
 fn descriptors() -> usize {
     std::fs::read_dir(if cfg!(target_os = "linux") {
         "/proc/self/fd"
@@ -47,7 +66,17 @@ fn r3_enumeration_failure_keeps_surrogate_name() {
     for (name, shown) in [(&b"d-\xff"[..], "d-\\udcff"), (&b"d-a"[..], "d-a")] {
         let root = base("names");
         let directory = root.join(raw_name(name));
-        std::fs::create_dir(&directory).unwrap();
+        // ASCII の対照(d-a)は全 OS で流す。UTF-8 でない名前だけ、ファイル系が拒めば飛ばす。
+        if name.is_ascii() {
+            std::fs::create_dir(&directory).unwrap();
+        } else if !create_raw_directory(
+            "r3_enumeration_failure_keeps_surrogate_name",
+            &directory,
+            "d-a",
+        ) {
+            std::fs::remove_dir_all(root).unwrap();
+            continue;
+        }
         std::fs::write(directory.join("f"), b"body").unwrap();
         let _guard = observe::install(|event| match event {
             Event::Names { label }
@@ -72,31 +101,43 @@ fn r3_enumeration_failure_keeps_surrogate_name() {
 
 #[test]
 fn r3_directory_change_during_read_keeps_surrogate_name() {
-    let root = base("changed");
-    let directory = root.join(raw_name(b"d-\xff"));
-    std::fs::create_dir(&directory).unwrap();
-    std::fs::write(directory.join("f"), b"body").unwrap();
-    let target = directory.clone();
-    let _guard = observe::install(move |event| {
-        if let Event::Open { name, .. } = event
-            && name == "f"
-        {
-            // 時刻の刻みに依らず必ず変わる mode を変える(旧 same() も mode を比べる)。
-            use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
-            std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode ^ 0o010))
-                .unwrap();
+    // ASCII の対照(d-a)は全 OS で流す。UTF-8 でない名前だけ、ファイル系が拒めば飛ばす。
+    for (name, shown) in [(&b"d-\xff"[..], "d-\\udcff"), (&b"d-a"[..], "d-a")] {
+        let root = base("changed");
+        let directory = root.join(raw_name(name));
+        if name.is_ascii() {
+            std::fs::create_dir(&directory).unwrap();
+        } else if !create_raw_directory(
+            "r3_directory_change_during_read_keeps_surrogate_name",
+            &directory,
+            "d-a",
+        ) {
+            std::fs::remove_dir_all(root).unwrap();
+            continue;
         }
-        Ok(())
-    });
-    let error = scan::tree(&root, &[], &mut budget(), None).unwrap_err();
-    assert_eq!(
-        error.stop_reason(),
-        Some("ディレクトリが読取中に変わった: d-\\udcff"),
-        "R3_CHANGED_SURROGATE"
-    );
-    drop(_guard);
-    std::fs::remove_dir_all(root).unwrap();
+        std::fs::write(directory.join("f"), b"body").unwrap();
+        let target = directory.clone();
+        let _guard = observe::install(move |event| {
+            if let Event::Open { name, .. } = event
+                && name == "f"
+            {
+                // 時刻の刻みに依らず必ず変わる mode を変える(旧 same() も mode を比べる)。
+                use std::os::unix::fs::PermissionsExt;
+                let mode = std::fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+                std::fs::set_permissions(&target, std::fs::Permissions::from_mode(mode ^ 0o010))
+                    .unwrap();
+            }
+            Ok(())
+        });
+        let error = scan::tree(&root, &[], &mut budget(), None).unwrap_err();
+        assert_eq!(
+            error.stop_reason(),
+            Some(format!("ディレクトリが読取中に変わった: {shown}").as_str()),
+            "R3_CHANGED_SURROGATE"
+        );
+        drop(_guard);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 }
 
 #[test]
@@ -327,9 +368,13 @@ fn onbranch_cleanup_follows_os_walk_bottom_up() {
     let error = super::preflight::cleanup_temporary(&temp, &parent).unwrap_err();
     std::fs::set_permissions(temp.join("closed"), std::fs::Permissions::from_mode(0o700)).unwrap();
     let rendered = super::error::render(&error);
+    // errno の番号と文字列は OS の値から作る(ENOTEMPTY は Linux 39・Mac 66)。
+    let reason = std::io::Error::from_raw_os_error(errno::ENOTEMPTY).to_string();
+    let reason = reason.split(" (os error ").next().unwrap();
     assert!(
         rendered.ends_with(&format!(
-            "OSError: [Errno 39] Directory not empty: '{}'\n",
+            "OSError: [Errno {}] {reason}: '{}'\n",
+            errno::ENOTEMPTY,
             temp.join("closed").display()
         )),
         "CLEANUP_UNLISTED: {rendered}"
