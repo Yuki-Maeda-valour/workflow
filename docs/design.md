@@ -1200,6 +1200,97 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### 残り5本の解析補助(R4A)
+
+[Issue #471](https://github.com/Yuki-Maeda-valour/workflow/issues/471)で、旧Pythonの5本を、開発用Rustソースへ移した。
+5本は、`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output` である。
+製品CLIの登録表・help・配布・既存呼出元(`loop.sh` など)は変えていない。未登録・未配布である。配布は段階1b・プラグインv4.53.0のまま。
+
+- 検査用の入口は、専用example `r4a_rest_contract` だけである。`commands/mod.rs` の `COMMANDS` へは足していない。
+- 旧版は変えていない。Rustの出力と終了値は、旧Pythonと同じバイト列にする。
+- 契約の正本は、Issue #471の設計v20である。ここには要点だけを書く。
+- 本体からPythonや外部コマンドを起動しない。
+
+| 対象 | 要点 |
+|---|---|
+| `resolve-task-store` | YAMLは読まず、解析済みの値を検査する。省略・null・空文字は `file`。値の拒否とJSON構文の拒否を区別する |
+| `candidate-keys` | 5つの状態の直下のファイルを集める。末端のリンクは除く。本文は厳密なUTF-8。NFCはUnicode 13、空白はPythonの規則 |
+| `host-argv` | 許可する引数の集合は閉じている。先頭の `--` を1個だけ除く。重複の判定の順は旧版のまま。終了20。値を診断へ出さない。ホストは起動しない |
+| `loop-task-text` | `taskinfo`・`holdcount`・`holdcode` の3つ。UTF-8は置換で復号し、BOMは1個だけ除く。`taskinfo` は、コードフェンスの外のヘッダーの行を見る。`holdcount` と `holdcode` は、各追加修正記録の節の中で、コードフェンスの外の行を見る |
+| `loop-child-output` | `result`・`permlog`・`origin-json` の3つ。JSONは旧版の規則。部分出力と部分集計も旧版のまま。permlogだけ、1 MiB・10000行の上限と、リンクを辿らない読取りを持つ |
+
+共通の部品:
+- 状態名は `resolve_task_dir::state_file` を再利用する。コードフェンスは `task_digest::normalize::fence_flags` に方針の引数(`FencePolicy`)を足した。
+  - `task_digest` の `body` は厳密な方針のままで、出力は変わらない。
+  - 5本のうち2本は、緩い方針を使う。
+- C0aの入出力型を使う。ただし、出力の失敗を一律に終了1へ変えない。旧Pythonの二段のバッファ(文字の層と書き込みの層)の動きを再現する。
+- permlogにC0bの保持実体と検査付き読取りを直結しない。旧版にない属性検査・期限・EOFまでの読取りを増やさないためである。
+  - 親と末端を `O_NOFOLLOW` で1段ずつ開く。宣言された大きさだけを読む。
+  - 読んだ後の `fstat`・1バイトの追加の読取り・属性の比較の順は、旧版のまま。親は再検査しない。
+  - 量は `Budget::check_file_bytes` と `add_items` で数える。
+- JSONの重複キー・任意の大きさの整数・浮動小数点・孤立したsurrogate・Python 3.10の文字表現は、旧版のまま保つ。
+- 起動時に閉じた標準のfd(0〜2)は、Rust標準の実行時が `/dev/null` で開き直す。fdを記録する部品は持たない。旧版とは別の固定期待で比べる(下の決定7)。
+- `strerror` の表は、基準の機械の表を持つ(下の決定7)。基準の機械は、Linuxが CI の Ubuntu 24.04 のglibc、MacがCIのmacOSである。
+  - Linuxの表(範囲の外は `Unknown error N`)は、作業機の glibc 2.35(Ubuntu 22.04)で生成した。
+    - CIの Linux x86_64(Ubuntu 24.04)と Linux arm64 の旧版の `os.strerror` とは、一致した。commit ab0b9ab の push 用 CI([Native run 43250661920](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43250661920))のログに `strerror の表: 比較機の旧版の文と一致` がある(必須 case 2034 件の時点)。
+  - Macの表は、Apple Libc `Libc-1725.40.4` の `errlst.c` から生成した(範囲の外は `Unknown error: N`)。CIの Mac x86_64 と Mac arm64 の旧版の `os.strerror` とは、一致した(同じ CI のログ)。
+  - Macでも、OSの `strerror` は使わない。表は、errnoの文が出るすべての所で使う。
+- `PYTHONOPTIMIZE` と不正な `PYTHONHASHSEED` は、旧版どおり再現する(下の決定5)。
+
+#### 認めた旧版との差と、比較の前提の外(利用者の決定の範囲)
+
+次の7つの決定の範囲だけである。範囲を超えて足さない。広げる必要が出たら、止まって聞く。
+時刻は日本時間である。「委任」は、利用者の委任で全体の管理担当が決めたものである。
+
+1. 文字コードの設定だけによる差(2026-11-11 15:53の決定。22:24に全コマンドへ広げられた)。
+   - `PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・locale・ファイル名の文字コード設定だけに由来する解釈は、UTF-8と `surrogateescape` に固定する。Rustはこれらの設定を読まない。
+   - 標準エラーのerror handlerは、旧版の既定どおり `backslashreplace` を保つ。
+   - 出力・読取り・パス・引数・環境変数に当てる。OSや外部へ渡す生バイトは変えない。
+   - ソースが明示したUTF-8の厳密な復号と置換、JSON自身の判定は変えない。
+   - 未知のcodecなどで旧Pythonが起動に失敗するときも、Rustは通常どおり動く。設定ごとの別の期待で検査する。
+2. Pythonの起動失敗(`Fatal Python error`)の診断の `Current thread` の値(2026-11-11 17:45の決定。17:26の標準入力だけの決定を含む)。
+   - 値は比べず、位置と形式(`0x` と小文字16進16桁、診断に1回)だけを検査する。診断に `Current thread` の行が無い条件では、全文を比べる。
+   - 対象は、条件を確かめた必須caseだけである。ほかの行・標準出力・終了値は全文を比べる。
+   - Rustの値は、実行スレッドの `pthread_self()` に当たる値から作る。
+   - 全移行コマンドに当てる決定である。実装と検査は、この5本だけで行った。
+3. 診断に出る旧版の実行環境のパス(2026-11-11 17:58の決定・21:35の拡張・22:26と22:38の追加)。
+   - 旧スクリプトと呼出名、旧版を動かすPythonの標準ライブラリなど導入先のパスは、固定のファイル名にして比べる。
+   - 導入先のフレームの行番号とソースの行は、本家のCPython 3.10.11の値に合わせる(22:26)。標準ライブラリの中身が本家と違うPythonでは、そのcaseを失敗にする(成功にもskipにもしない)。
+   - 書き込みが途中のバイト数までしか通らない条件(22:26)。
+     - 故障のない旧版の出力で、実行環境のパスを固定名に置き換える。
+     - それを同じバイト数で切ったものを、Rustの期待にする。
+     - 終了値と標準出力は、旧版に合わせる。
+   - 固定名に置き換えて短くなった出力に、書き込みが途中までしか通らない故障を当てるとき(22:38)。
+     - 旧版の書き込みを固定名に置き換えた上で、同じ故障を当てた結果を、Rustの期待にする。
+     - 置き換えた書き込みが切れないときは、故障の無かった旧版の結果(出力・終了値・標準出力)に合わせる。
+     - このときの、故障ありの旧版との終了値の差(例: 120と1)を認める。
+     - 両方が切れるときは、22:26のとおり、置き換えた出力を同じバイト数で切ったものを期待にする。
+   - 利用者が渡したパス・作業場所のパス・例外本文のパス・ほかの可変の値には広げない。
+4. 旧Pythonの起動を変える環境変数と、SIGINT・自分自身を指すパス(2026-11-11 22:31の決定。22:35に全コマンドへ)。
+   - `PYTHONUNBUFFERED` と `PYTHONINTMAXSTRDIGITS`(有効な値の効果と、不正な値の起動の失敗)は、旧版どおり再現する。
+   - `PYTHONPATH`・sitecustomize・利用者のsiteの.pth・`PYTHONHOME`・`PYTHONWARNINGS`などと、argparseの文の翻訳ファイルの効果は、比較の前提の外にする。
+   - SIGINTでの中断は、信号で終わること・終了値・最後の行 `KeyboardInterrupt`・それまでの標準出力・子を残さないことを比べる。途中の呼出履歴の行は比べない。SIGTERMは全バイトで比べる。
+   - 自分自身を指すパス(`/proc/self`・`/dev/fd` など)は、比較の前提の外にする。
+5. 22:31の一覧に無いPythonの環境変数(2026-11-12 00:28の決定)。
+   - Python本体の設定・計測・診断のための変数(`PYTHONMALLOCSTATS`・`PYTHONPLATLIBDIR`・`PYTHONWARNDEFAULTENCODING`・`PYTHONPYCACHEPREFIX`・`PYTHONEXECUTABLE` など)の効果は、比較の前提の外にする。
+   - `PYTHONOPTIMIZE`(有効な値と不正な値)と不正な `PYTHONHASHSEED` は、旧版どおり再現する。
+   - 記憶域の不足は、比較の前提の外にする。
+6. 処理系の資源の上限(2026-11-12 00:42の決定。委任)。
+   - `RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK` などで失敗の境目が決まる条件は、比較の前提の外にする。比較器は設定せず、受け継いだ値を記録する。
+   - `RLIMIT_FSIZE` などの書き込みの故障は含めない(これまでどおり比べる)。
+7. 起動時に閉じた標準のfdと `strerror`(2026-11-12 08:55の決定。委任)。
+   - 閉じた標準のfd(0〜2)は、Rust標準の実行時が `/dev/null` で開き直す。開き直しの差を認める。その後の動きは旧版に合わせる。旧版と別の期待で検査する。
+   - `strerror` の文は、基準の機械の表をRustが持つ。基準の機械に無いerrnoの差は認めて記録する。
+
+進め方の決定(契約ではない)。
+- 2026-11-12 11:57(全体の管理担当): 共有ファイルは、各担当の作業ブランチで並行して編集してよい。共有ファイルへの変更は、できるだけ足すだけにする。
+- 同日 12:59: 新しいコマンドの比較は、`build` と `verify-universal` に入れず、コマンドごとの必須ジョブで流す([testing.md](testing.md#4-種類の-ci-と成果物))。
+- どちらも、設計v17〜v20に反映した。
+
+保持した本文を `python -c` で動かす既存の `loop.sh` の方式は変えていない。Rustの配布時に、保持本文をどう検証して起動するかは未決である。
+
+APIは [native/README.md](../native/README.md#残り5本の解析補助r4a)、検査の手順と件数は [testing.md](testing.md#残り5本の解析補助の比較r4a)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

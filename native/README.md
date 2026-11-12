@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4Rは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・R4Aの残り5本の解析補助は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4Rは既存のCLIへ未接続です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -312,6 +312,36 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 認めた差は、2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけです。Macの旧Pythonが子の環境に足す変数を、比較から外します。Rustはこの変数を足しません。
 契約と、R4Rでは比べない4件は [設計のR4R節](../docs/design.md#タスク本文の復元の内部部品r4r)にあります。
 [比較の手順と件数](../docs/testing.md#r4rの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
+
+## 残り5本の解析補助(R4A)
+
+#471で旧Pythonの5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)と同じ結果を返す部品を実装しました。
+製品CLIの登録表・help・配布・既存呼出元(`loop.sh` など)は変えていません。未登録・未配布です。
+
+- 本体は `crates/cli/src/commands/<名前>/mod.rs` にあります。ハイフンは下線にします(例: `candidate_keys`)。
+  - 共通の部品は `commands/r4a_rest_support/` です(引数の解析 `args`・文字 `chars`・JSON `json`・NFC `nfc`・例外の表示 `exception`・二段のバッファ `runtime`・標準入出力と終了の工程 `stream`・起動前の拒否 `startup`)。
+  - Unicode 13の表と `strerror` の表は `r4a_rest_support/unicode/` にあり、生成器(`generate*.py`)が同じ場所にあります。
+- 入口の関数は、どれも `main(&mut Program, ...)` の形です。引数はバイトと文字番号を保つ `PyStr` で受けます。
+  - `resolve_task_store::main(program, &Env, &[PyStr])`・`resolve(Option<&PyJson>)`(解析済みの値の判定)。
+  - `candidate_keys::main(program, &Env, &[PyStr])`・`check_text(&[u32], Option<&[u32]>)`・`normalize_key`。
+  - `host_argv::main(program, &[PyStr])`・`validate(&[PyStr]) -> Result<(), Failure>`。
+  - `loop_task_text::main(program, &[PyStr])`。
+  - `loop_child_output::main(program, &[PyStr], 整数の桁の上限, &mut dyn PermlogHooks)`。
+- `crates/platform/src/r4a_rest.rs` は、R4Aだけが使うOSの操作を、安全な関数で公開します。
+  - 標準fdの種別と大きさ(`standard_fd_info`・`standard_fd_kind`)、端末幅(`terminal_size`)、スレッドの値(`pthread_identity`)。
+  - 生の1回の入出力(`write_once`・`read_once`)。`EINTR` は、SIGINTを受け取っていなければ再試行します。受け取っていれば `INTR` を返します。
+  - SIGINT(`install_sigint_handler`・`sigint_pending`・`take_sigint`・`exit_by_sigint`)。受け継いだ扱いが `SIG_DFL` のときだけ受け手を入れます。`SIG_IGN` はそのまま残します。
+  - ファイルの読取り(`read_file`)と、permlogの読取り(`read_permlog`)。permlogは、親と末端をリンクを辿らずに1段ずつ開きます。
+  - `PermlogHooks` は、検査が競合や `close` の失敗を差し込む口です。製品は `NoHooks` を渡し、何も起こしません。
+- `crates/cli/examples/r4a_rest_contract.rs` は検査専用入口です。第1引数に5本の名前を取ります。
+  - 検査専用の補助が3つあります(`strerror`・`chartable`・`nfc`)。
+  - 環境変数で故障や競合を差し込む部品(`R4A_FAULT`・`R4A_RACE`・`R4A_CLOSE_FAIL`)は、このexampleの中にだけあり、製品の入口にはありません。
+- 製品の `commands/mod.rs` には、5本を登録していません。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example r4a_rest_contract` が48件、`-p dev-workflow-platform --example r4a_rest_platform` が7件です。
+
+認めた旧版との差と、比較の前提の外は、利用者の決定7つ(2026-11-11 15:53・17:45・17:58〜22:38、22:31、2026-11-12 00:28・00:42・08:55)の範囲だけです。時刻つきの一覧は [設計のR4A節](../docs/design.md#認めた旧版との差と比較の前提の外利用者の決定の範囲)にあります。
+契約は [設計のR4A節](../docs/design.md#残り5本の解析補助r4a)にあります。
+[比較の手順と件数](../docs/testing.md#残り5本の解析補助の比較r4a)に従ってください。通常の `cargo test --locked` だけでは、旧版との比較は完了しません。
 
 ## ソース入力の SHA256
 

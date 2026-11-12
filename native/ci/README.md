@@ -195,19 +195,48 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 
 - 5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)の移植は、未登録・未配布です。
 - 実行物は開発用の `r4a_rest_contract` です。
-- 契約は設計書にC4で追記する予定で、まだありません。
-- 必須caseは1824件です。比較器の自己検査(`test_r4a_rest.py`)は60件です。
+- 契約は [設計のR4A節](../../docs/design.md#残り5本の解析補助r4a)、APIは [native/README.md](../README.md#残り5本の解析補助r4a)、手順と件数は [testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
+- 必須caseは2034件です。比較器の自己検査(`test_r4a_rest.py`)は105件です。境界の組は21組です。
 
 - `quality()`は、`cargo test --locked -p dev-workflow-cli --example r4a_rest_contract`と、`-p dev-workflow-platform --example r4a_rest_platform`を実行します。
 - 専用比較(`check_r4a_rest.py --strict-pending`)は`build`・`verify-universal`には入れず、必須の2ジョブで流します。
   - `r4a-rest`: `build`の後。4機種で、同じ機種の`1/`と`2/`の`r4a_rest_contract`を比べます。比較器の自己検査は1回目の比較だけで流します。
   - `r4a-rest-universal`: `combine`の後。Mac 2機種で、署名後のMac共通の実行物を各CPUで比べます。
-  - どちらも、`actions/setup-python`の3.10.11の後に`build.py prepare`を流し、そのPythonを`$R4A_REST_PYTHON`として旧版に使います。
-- 比較器は、比較の前に自己検査60件を流し、落ちたら比較を流しません。作業機での実測は897秒です(2026-11-12。負荷の高い機械で計りました)。比較本体は65秒でした(同日)。
-- 上限は、1回の比較(900秒)×回数 + 自己検査(900秒)+ 準備と余裕で決めました。`r4a-rest`は60分、`r4a-rest-universal`は45分です。
-  - 1回の比較900秒は見込み(未確認)です。作業機の実測は上の65秒でした。
-  - 自己検査900秒も見込み(未確認)です。CIの結果を見て更新します。
+  - どちらも、`actions/setup-python`の3.10.11の後に`build.py prepare`を流します。`build.py`は、そのPythonで比較器を起動します。比較器は、自分を動かしたPythonで旧版を動かします(環境変数`R4A_REST_PYTHON`は、比較器は読みません)。
+- 比較器は、比較の前に自己検査105件を流します。落ちても、本体の比較は流し、終了コードは1のままです。最後の行で自己検査の失敗を知らせます。
+- 自己検査は、検査専用の絞り込み`--case <ID>`で短くなりました。絞り込んだ走りは、`--only`と同じ部分比較です。CIの`build.py`は、この引数を渡しません。
+- 作業機での実測は、自己検査が約42秒(絞り込みの前は約1319秒)、比較が約100〜123秒です(2026-11-13、commit e74acea の時点。作業機の負荷でばらつきます)。
+- 比較器が起動するすべての子は、グループで記録し、走りごとの印`R4A_REST_RUN`で終わりに確かめます。残っていれば、止めて終了コード1にします。
+  - 時間切れと例外ではグループごとSIGTERM、少し待ってからSIGKILLです。外からSIGTERMを受けたときは、作業フォルダも消してから終わります。LinuxはPDEATHSIGも使います。
+  - Macの`r4a-rest`で、終わりに`r4a_rest_contract`が各12個残りました。commit 33d51ecとab0b9abの、どちらのpush用CIも、この仕組みの前の版です。
+  - 確かめた事実: commit 33d51ecのCIのMacでは、本体の比較が流れず、自己検査だけが流れました。その中で、各12個が残りました。
+  - ab0b9abでも、Mac 2機種で各12個でした。pidの範囲は、33d51ecがMac x86_64で10661〜14602・Mac arm64で7489〜13422、ab0b9abがMac x86_64で9640〜15088・Mac arm64で7867〜14664です。
+  - ab0b9abでは自己検査と本体の比較の両方が流れました。本体の比較でも残ったかは未確認です(pidの範囲は、自己検査と比較に分けてログに出ません)。
+  - 自己検査が起動した子が止められたとき、その下のRustが残った経路と推測します(未確認)。次のCIで、0個になるかを確かめます。
+- 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めました。`r4a-rest`は60分、`r4a-rest-universal`は45分です。
+  - CIの実測(commit ab0b9ab、自己検査80件、絞り込みの前、[Native run 43250661920](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43250661920))は、自己検査がLinux x86_64で1055.9秒、Linux arm64で1026.5秒、Mac x86_64で1286.1秒、Mac arm64で850.1秒でした。
+  - 比較1回は、Linux x86_64が約117秒、Linux arm64が約99秒、Mac x86_64が298.8秒、Mac arm64が140.2秒でした。
+  - 絞り込み後の自己検査は、作業機の約42秒に、Mac x86_64の遅さ(同じ80件で作業機の約1.2倍)をあてはめると約50秒になります(見込み。未確認)。
+  - 見込みの合計(Mac x86_64)は、`r4a-rest`が約11分、`r4a-rest-universal`が約6分です。準備とダウンロードは含みません(Linuxでは約30秒、Mac x86_64では約74秒でした。ab0b9abのジョブの始めから、`r4a-rest`の手順までの時間です)。
+  - 最悪の場合(比較が上限900秒を使い切る)でも、約31分(`r4a-rest`)と約16分(`r4a-rest-universal`)で、上限の内です。上限は、絞り込み後のCIの実測が出てから見直します。今は変えません。
 - `r4a_rest_contract`は転送用の成果物に入りますが、配布物には入りません(`make_dist.BINARY_PATHS`に無いことを検査します)。
-- Macの`strerror`は、Apple Libc `Libc-1725.40.4`の表(`errno_macos.rs`)を使い、OSの`strerror`は使いません。CIのMacの比較器が、旧版の`os.strerror`と表を照らします(違えば失敗)。
-- Macの故障の差込みは、`fault_shim.c`を`cc -dynamiclib`で作り、`DYLD_INSERT_LIBRARIES`で旧版に当てます。差込みが効くことを、OSごとの固定の期待にしています(Linux・Macとも「効く」)。`cc`が無い・ビルドの失敗・効きの期待違いは、どのOSでも失敗です。CIで効かないと分かったときに、期待を固定し直します。
-- `/dev/full`を使う満杯の出力と、待ちの状態を`/proc`で確かめる信号のcaseは、Linuxだけで流します。Macでは固定の一覧(`requires_linux`)のとおり未実施として件数を出し、成功には数えません。
+- Macの`strerror`は、Apple Libc `Libc-1725.40.4`の表(`errno_macos.rs`)を使い、OSの`strerror`は使いません。比較器が、旧版の`os.strerror`と表を照らします(違えば失敗)。
+  - 一致しました。Linux x86_64・Linux arm64・Mac x86_64・Mac arm64のすべてです(commit ab0b9ab の push 用 CI、[Native run 43250661920](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43250661920))。
+- Macの故障の差込みは、`fault_shim.c`を`cc -dynamiclib`で作り、`DYLD_INSERT_LIBRARIES`で旧版に当てます。差込みが効くことを、OSごとの固定の期待にしています(Linux・Macとも「効く」)。commit ab0b9ab の push 用 CI では、Linux x86_64・Linux arm64・Mac x86_64・Mac arm64のすべてで、旧版に効きました。`cc`が無い・ビルドの失敗・効きの期待違いは、どのOSでも失敗です。CIで効かないと分かったときに、期待を固定し直します。
+- `/dev/full`を使う満杯の出力と、待ちの状態を`/proc`で確かめる信号のcase(`requires_linux`、86件)は、Linuxだけで流します。
+- Macの未実施は、固定の一覧のとおりのときだけ`結果: 未完(…)`で終了コード0にします。件数を出し、成功には数えません。一覧と違えば失敗です。
+  - `requires_raw_name`(2件): UTF-8でないファイル名に頼るcaseです。macOS(APFS)は、この名前を`EILSEQ`で拒みます。拒まれる名前の集合も、OSごとに固定します。
+  - locale(7件、caseのIDで固定): 旧版の`ja_JP.eucJP`の固定期待の照らしだけを未実施にします。Rustと、設定なしの旧版の比較は必ず流します。
+- Macの本体の比較は、commit ab0b9ab の push 用 CI で、初めて流れました(Mac x86_64・Mac arm64とも1935/2034、未実施95件。固定の一覧のとおり)。
+  - 不一致は4件で、どれも旧版の固定期待の照らしでした。OSごとの期待にして直しました(commit e74acea)。
+  - 故障のcase 3件は、Macの旧版の標準エラーが`Exception ignored in: <_io.TextIOWrapper name='<stdout>' …>`の2行になるためです。Tracebackの期待は、Macでは無しです。原因のbufferの大きさは推測です(未確認)。
+  - permlogのsymlinkの固定期待は、ELOOPのerrnoがMacで62です(Linuxは40)。
+  - Macの自己検査は、Linuxでまねる検査3件が落ちました。Linuxだけで流すようにしました。
+- 次は未確認です。CIの結果を見てから書きます。
+  - commit e74acea(OSごとの期待)の後のMac 2機種の結果。
+  - 固定の一覧のとおりの未実施での、終了コード0の`結果: 未完(…)`。
+  - 子の回収の仕組みの後の、Macの「残りが0個」。
+  - `r4a-rest-universal`の結果。
+  - 必須case 2034件・自己検査105件での、各機種の時間。
+- 詳しい仕組み(境界の組・待ちの確かめ・子の回収・`--case`・OSごとの期待・差込みの診断`R4A_CALLS`・Macの条件のまね)は、[testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
+

@@ -507,6 +507,175 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
 R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
+### 残り5本の解析補助の比較(R4A)
+
+#471の5本は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と認めた差](design.md#残り5本の解析補助r4a)、[APIと入口](../native/README.md#残り5本の解析補助r4a)を参照する。
+旧版との比較は、通常の `cargo test --locked` には入っていない。次の手順で別に流す。
+
+必要な環境:
+- 比較用の旧Pythonは、本家のCPython 3.10.11である。`argparse.py` など5本の標準ライブラリのSHA-256を、比較器が照合する。
+  - 標準ライブラリの中身が本家3.10.11と違うPython(配布元の修正が入ったUbuntuの3.10.12など)では、導入先のフレームを含むcaseが失敗する。
+  - CIは `actions/setup-python` の3.10.11を使う。
+- root以外の通常利用者で流す。Cコンパイラ(`cc`)が要る。無ければ、比較器は省略せずに失敗する。
+- 比較器は、自分を動かしたPython(`sys.executable`)で旧版を動かす。そのため、比較器を本家3.10.11のPythonで起動する。
+  - 環境変数 `R4A_REST_PYTHON` は、比較器は読まない。旧版は、どこでも `sys.executable` で動かす。
+  - `test_r4a_rest.py` だけが読む。手元の絶対パスが固定期待に入っていないかの検査で、探す文字列に、その Python の導入先のフォルダを足すためである。
+  - CIの `build.py` は、`setup-python` のPythonで比較器を起動する。
+- 出力先は、リポジトリの外に置く。
+
+リポジトリ直下で流す。次はLinux x86_64の例である。`<本家3.10.11のPython>` は、その実行ファイルの絶対パスである。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example r4a_rest_contract)
+(cd native && cargo test --locked -p dev-workflow-platform --example r4a_rest_platform)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example r4a_rest_contract --target x86_64-unknown-linux-musl)
+<本家3.10.11のPython> -B native/ci/check_r4a_rest.py --strict-pending \
+  --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/r4a_rest_contract"
+```
+
+- 比較器は、比較の前に自己検査(`native/ci/test_r4a_rest.py`)を流す。
+  - 自己検査が落ちても、本体の比較は流す。終了コードは1のままで、最後の行(`結果: 自己検査が失敗した。…`)で必ず知らせる。目的は、1回の実行で、自己検査と比較の両方の結果を得ることである。
+  - 自己検査を流さない条件は、次の3つである。
+    - `--no-selftest` を付けたとき。
+    - `--list-cases` か `--write-required` を付けたとき。
+    - 環境変数 `R4A_REST_IN_SELFTEST` があるとき。この変数は、自己検査の中の子の比較器だけが使う。正式の検査では設定しない。
+- `--fixture` の省略・不在・実行不能を拒否する。配布済みの実行物やPATHへ切り替えない。
+- `--only <補助>` は作業の途中の部分比較である。全件合格とは言わない。正式の検査とCIでは使わない。
+- 比較器と子は、使い捨ての一時フォルダの中で動く。リポジトリには何も残さない。
+
+件数(2026-11-13。commit e74acea の時点。Linux x86_64):
+- 必須case: 2034件。`native/ci/r4a_rest_fixtures/required_cases.json` が正本で、実行した集合と完全に一致しなければ失敗にする。
+- 補助ごとの内訳は、`resolve-task-store` 719・`loop-child-output` 415・`candidate-keys` 384・`loop-task-text` 306・`host-argv` 210である。
+- 固定の一覧は、次の3つである。
+  - `requires_linux`: 86件(`resolve-task-store` 54・`candidate-keys` 12・`loop-child-output` 9・`loop-task-text` 8・`host-argv` 3)。
+  - `requires_shim`: 247件(`resolve-task-store` 135・`loop-child-output` 42・`candidate-keys` 30・`loop-task-text` 23・`host-argv` 17)。
+  - `requires_raw_name`: 2件(`candidate-keys` 1・`loop-task-text` 1)。
+- 比較の結果は、2034/2034の合格。接続待ち0・未実施0・捕捉不能10(標準出力などがディレクトリのとき。空の観測に読み替えず、見える出力と終了値だけを比べた)。
+- 境界の組: 21組。21組のすべてで、旧版の出力が境界で変わることを確かめた。
+- 比較器の自己検査: 105件。
+- Rustの単体検査: `cargo test --locked` の全体が117件。platformの `r4a_rest` の7件を含む。cliの48件は、`--example r4a_rest_contract` を付けたときだけ流れる。
+- 実測時間(作業機): 自己検査が約42秒、比較が約100〜123秒だった(作業機の負荷でばらつく)。自己検査は、絞り込み(`--case`)の前は約1319秒(93件)だった。
+
+比べ方:
+- 旧版・Rust・固定期待の3つを使う。旧版の診断に出る実行環境のパスは、構造(Tracebackのフレームの行)で解析して固定名にする。
+- 入力のファイルは、比べる前後で変わっていないことを確かめる(種類・mode・大きさ・時刻・内容)。
+- 文字コードの設定ありの旧版は、記録した固定期待(`charset_expectations.json`)と照らす。起動時に閉じたfdは、旧版と別の固定期待(`closed_fd_expectations.json`)で照らす。
+- 起動失敗の診断は、`Current thread` の行だけ位置と形式を検査し、ほかは全文を比べる。対象外のcaseには広げない。
+- SIGINTは、標準入力のread・FIFOのopen・満杯のpipeへのwriteの途中と、受け継いだ `SIG_IGN` の場合を比べる。
+
+境界の組(前・等値・後):
+- 整数の桁・JSONの深さ・permlogの1 MiBと10000行と明細100件・切り詰めの上限など、21組を比べる。
+- 規則は2つである。
+  - `accept`(受け付けの境界): 前と等値の出力が同じで、等値と後の出力が違う。ちょうど「等値と後の間」で変わることを求める。
+  - `cap`(切り詰め): 前 < 等値 = 後の長さである。後は上限で切られる。
+- 出力に入力の量がそのまま出る組は、境界に関わる部分だけで判定する。`line=` の行の数と、`reference-error=` の有無である。
+- 規則に当たらない組は、境界を見分けられない入力を作った比較器の誤りとして、失敗にする。
+- `--only` の無い全件の比較では、確かめた組の数が定義した組の数と同じことを求める。
+- 入力の桁数・ファイルの大きさ・行数・件数・入れ子の深さ・文字数は、比較器の中で `assert` で確かめる。
+
+待ちの確かめ(信号のcase):
+- Linuxでは、子が待ちの状態に入ってから信号を送る。`/proc/<pid>/syscall` の番号と引数で確かめる(x86_64とaarch64)。
+  - 標準入力のreadはfd 0のread、満杯のpipeはfd 1のwrite、FIFOのopenはopen系の呼び出しである。
+  - FIFOは、状態(`/proc/<pid>/stat`)が `S` であることも求める。`/proc/<pid>/wchan` が読めるときは、wchanの名前とも照らす。
+  - `syscall` が読めない機械は、wchanの名前だけで確かめる。
+- 時間切れのときは、見えた値(wchan・syscall・stat・cmdline・machine・kernel)を失敗の文に出す。
+- Linux以外には確かめる手段が無い。この種のcaseは、Linux以外では未実施にする(`requires_linux`)。
+
+子のプロセスの回収:
+- 比較器が起動するすべての子(旧版・Rust・自己検査の中の子の比較器)は、新しいプロセスグループで起動して記録する。
+- 時間切れと例外では、グループへSIGTERMを送り、少し待ってからSIGKILLで止める。時間の上限つきで出力を読み切る。
+  - 親が終わったのに、グループに残った子が出力のpipeを持ち続けるときは、その子を止めて、失敗として記録する。
+- すべての子の環境に、走りごとの印 `R4A_REST_RUN` を入れる。
+  - 自己検査の中の子の比較器は、親の印にコンマで自分の印を足す。親は、どの子孫も自分の印で見つけられる。
+  - 別のsessionに切り離された子も、印で見つけて止める。Linuxは `/proc/<pid>/environ`、Macは `ps -E` で探す。
+  - 実行物のパスと「親がinit」には頼らない。印の無い同じ実行物や、引数にパスを持つだけのプロセスは止めない。
+- 比較器の終わりに、記録したグループと印を持つプロセスが残っていないことを確かめる。残っていれば、止めてから、終了コード1の失敗にする。最後の行は `結果: 子のプロセスが残っていた(N 件)…` である。
+- 外からSIGTERMを受けたときは、記録したグループへSIGTERM、少し待ってからSIGKILLを送り、印による掃除と作業フォルダ(`r4a-rest-scratch-*`・`r4a-rest-compare-*`)の削除をしてから終わる。
+- Linuxでは、比較器が先に死んだ(外からSIGKILLされた)ときに、子もSIGKILLで死ぬ(`PR_SET_PDEATHSIG`)。Macには無い。
+- 空と確かめたグループは、記録から外す。PermissionErrorのグループは、自分の子と見なさない。
+- 自己検査で、次を確かめる。時間切れ・例外・SIGTERMで何も残らないこと。切り離された子が、印で止まること。PDEATHSIGを外した形(自己検査の中だけの環境変数 `R4A_REST_NO_PDEATHSIG`)でも、SIGTERMの経路で何も残らないこと。
+
+自己検査の絞り込み(`--case`):
+- 比較器に、検査専用の絞り込み `--case <ID>`(繰り返せる)がある。指定したcaseだけを比べる。
+- `--only` と同じ部分比較で、全件合格とは言わない。未知のIDは、終了コード1の失敗にする。CIの `build.py` は、この引数を渡さない。
+- 端から端までの自己検査(子の比較器を起動する所)は、確かめたいcaseだけを流す。確かめる振る舞いは弱めていない。
+- `--case` の走りでは、必須の集合の一致と未実施の固定の一覧は、指定したcaseだけで照らす。
+- 境界の組の数・拒まれた名前の集合・故障の上限の位置は、`--case` の走りでは確かめない(部分比較のため)。全件の比較だけで確かめる。CIの正式の比較は `--case` を使わないので、これらを全件で確かめる。
+- 絞った自己検査が選ぶcaseは、`requires_linux` と `requires_raw_name` に当たらないことを、自己検査が確かめる。意図して当てる3件(`candidate/collect-raw-name`・`task/non-utf8-path`・`fault/store-trace-budget-60`)は、固定の許可の一覧にある。
+- localeの7件(`charset/locale-ja_JP.eucJP/` で始まるID)は、確かめの外にする(IDの前方一致)。Macでも、Rustと設定なしの旧版の比較は流れるためである。
+- Macの条件をLinuxでまねる検査(`OsConditionMimicry`)は、Linuxだけで流す。本物のMacでの確かめは、本体の比較が担う。
+
+差込みと診断:
+- 故障の差込みは、Linuxが `LD_PRELOAD`、Macが `cc -dynamiclib` と `DYLD_INSERT_LIBRARIES` である。旧版に効くことを、OSごとの固定の期待にしている(Linux・Macとも「効く」)。`cc` が無い・ビルドの失敗・効きの期待違いは、どのOSでも失敗である。
+- 差込みは、診断用に、見た呼び出しの要点を記録する(環境変数 `R4A_CALLS`)。write(fd 0・1・2・その他の回数とバイト数)・read・open・closeの回数である。
+- 故障のcaseが失敗したときは、この記録を失敗の文に付ける。故障なしの旧版と故障ありの旧版の分である。
+- Tracebackの数が違うときは、標準エラーの先頭300バイトも出す。
+
+OSごとの固定の未実施(Mac):
+- 未実施は、成功に数えない。件数を出す。固定の一覧のとおりなら、`結果: 未完(…)` で終了コード0にする。一覧と違えば、失敗(終了コード1)にする。
+- `requires_linux`(86件): `/dev/full` を使うcaseと、待ちの状態を `/proc` で確かめる信号のcase。
+- `requires_raw_name`(2件): UTF-8でないファイル名のファイルに頼るcase(`candidate/collect-raw-name`・`task/non-utf8-path`)。
+  - macOS(APFS)は、このファイル名を `EILSEQ` で拒む。
+  - 拒まれる名前の集合は、OSごとに固定している。実際に拒まれた集合が違えば失敗にする。Linuxでは1つも拒まれない。
+  - `store` を使うほかのcaseは、この名前を使わず、全OSで比べる。
+- locale(7件、caseのIDで固定): `charset/locale-ja_JP.eucJP/*` の旧版の固定期待の照らしだけを、未実施にする。記録した機械と、localeの有無が違うときである。
+  - Rustと、設定なしの旧版の比較は、未実施にせず必ず流す。
+  - 未実施の理由に、旧版の出力の要点(終了値・バイト数・SHA-256の先頭16桁・先頭48バイト)を出す。後でMacの固定期待を記録するためである。
+
+自己検査の補足:
+- 起動時に閉じたfdの判定は、`/proc` を使わない。
+- Macの条件(`EILSEQ` と、localeがあること)を、Linuxでまねる環境変数が2つある(`R4A_REST_SIMULATE_EILSEQ`・`R4A_REST_SIMULATE_LOCALE`)。
+  - 自己検査の中(`R4A_REST_IN_SELFTEST` がある)でだけ受け付ける。それ以外で設定されていたら、終了コード1で失敗にする。正式の検査では設定しない。
+  - Linuxでまねた全件の比較は、終了コード0・`結果: 未完`・未実施9件(locale 7件と `requires_raw_name` 2件)だった(2026-11-12)。一覧と同じ件数である。
+
+OSごとの期待(Macの旧版の出力を根拠にする。commit ab0b9ab の push 用 CI、[Native run 43250661920](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43250661920)):
+- 故障のcase 3件(`fault/candidate-check-budget-40`・`…-short-fail-20`・`…-budget-0`)のTracebackの期待は、OSごとにする。
+  - Linuxは、標準出力のbufferが小さく、書込みの途中でOSErrorになる。Tracebackは1つである。
+  - Macの旧版の標準エラーは、`Exception ignored in: <_io.TextIOWrapper name='<stdout>' …>` と `OSError: [Errno 28] No space left on device` の2行だけだった。Tracebackは無い。
+  - 差込みの記録では、故障なしの旧版は、fd 1へ1回で9065バイトを書いた。Macの旧版は、標準出力を終了時のflushでまとめて書いたと見られる。標準出力のbufferがLinuxより大きいためと推測する(未確認)。
+  - 無バッファ(`PYTHONUNBUFFERED`)のcaseは、Macも同じTracebackである。
+  - Rustのbufferの大きさの決め方は、旧版と同じである(コードで確かめた)。`st_blksize` が1より大きければそれ、でなければ8192である。Rustと旧版の比較は、OSごとの期待のもとで必ず流す。
+- `child/legacy/permlog: symlink` の固定期待のerrnoの番号は、OSごとにする。ELOOPは、Linuxが40、Macが62である。旧テストの表は変えない。Macでは、比較器が固定期待の文の番号を62に置き換え、旧版とRustの両方の結果を、そのまま、置き換えた期待と照らす。
+- この2つは、commit e74acea で直した。直した後のMacの結果は未確認である(次のCIで確かめる)。
+
+CIで確かめた事実(commit ab0b9ab の push 用 CI、[Native run 43250661920](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43250661920)。必須 case 2034 件・自己検査 80 件の時点。子の回収の仕組みの前):
+- Linux x86_64(Ubuntu 24.04)・Linux arm64: `r4a-rest` は成功した。
+  - `strerror` の表は、旧版の `os.strerror` と一致した(ログの `strerror の表: 比較機の旧版の文と一致`)。Linux arm64も一致した。
+  - 差込みは旧版に効いた。比較は2回とも2034/2034で、2回のビルドの両方が合格した。
+  - Linux x86_64: 自己検査 80件が1055.9秒、比較が117.1秒と116.7秒。ジョブは約22分である。
+  - Linux arm64: 自己検査 80件が1026.5秒、比較が98.2秒と99.7秒。ジョブは約21分である。
+- Mac x86_64・Mac arm64: 本体の比較が初めて流れた。ジョブは失敗した。
+  - `strerror` の表は、旧版の `os.strerror` と一致した(Apple Libc `Libc-1725.40.4` の表)。差込み(`DYLD_INSERT_LIBRARIES`)は、旧版に効いた。
+  - 比べたcaseは1935/2034である。未実施は95件で、固定の一覧のとおりだった(`requires_linux` 86・`requires_raw_name` 2・localeの7)。
+  - 不一致は4件で、どれも旧版の固定期待の照らしだった。上の「OSごとの期待」の2つである(故障のcase 3件とELOOPのerrno 1件)。
+  - Mac x86_64: 自己検査 80件が1286.1秒、比較1回目が298.8秒。2回目の比較の前に落ちた。
+  - Mac arm64: 自己検査 80件が850.1秒、比較1回目が140.2秒。
+- Mac 2機種の自己検査は、3件が落ちた。Linuxで Macをまねる検査(`OsConditionMimicry`)が、本物のMacで落ちた。Linuxだけで流すようにした。
+- Mac 2機種で、終わりに `r4a_rest_contract` が各12個残った(`Terminate orphan process`)。
+  - 同じことが、commit 33d51ec の push 用 CI([Native run 43202903830](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43202903830))でも起きた。どちらも、子の回収の仕組みの前の版である。
+  - 確かめた事実: commit 33d51ec のCIのMacでは、本体の比較が流れず、自己検査だけが流れた。その中で、各12個が残った。
+  - ab0b9ab でも、Mac 2機種で各12個だった。残ったpidの範囲は、次のとおりである。
+    - commit 33d51ec: Mac x86_64が10661〜14602、Mac arm64が7489〜13422。
+    - commit ab0b9ab: Mac x86_64が9640〜15088、Mac arm64が7867〜14664。
+  - ab0b9ab では、自己検査と本体の比較の両方が流れた。本体の比較でも残ったかは未確認である(pidの範囲は、自己検査と比較に分けてログに出ない)。
+  - 自己検査が起動した子の比較器や偽の実行物が、時間切れや失敗で止められたとき、その下のRustが残った経路と推測する(未確認)。
+  - 上の「子のプロセスの回収」の仕組みが、この経路を止める。次のCIで、残りが0個になるかを確かめる。
+- Linux x86_64のcommit 33d51ec の CI は、待ちの確かめの時間切れで18件が落ちた(`/proc` の `wchan` の名前に頼った確かめ。`syscall` に変えた直しの前)。ab0b9ab では、2機種とも合格した。
+
+未確認(CI の結果を見てから書く):
+- commit e74acea(OSごとの期待・Linuxだけで流す自己検査)の後の、Mac 2機種の結果。
+- 固定の一覧のとおりの未実施での終了コード0の `結果: 未完(…)`。
+- 子の回収の仕組みの後の、Macの「残りが0個」。
+- Macの `ps -E` による印の探索と、`pgrep` を使う自己検査の動作。
+- `r4a-rest-universal`(署名後の実行物を、Mac 2機種で比べるジョブ)の結果。
+- 必須 case 2034 件・自己検査 105 件での、各機種の自己検査と比較の時間。
+
+CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と次の節にある。
+- 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。
+- 既存のtask-digest・R4B・R4R・保存先解決の比較は、この変更でも通る(2026-11-12。task-digestは `cargo test` の中、保存先解決は714件)。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -520,6 +689,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 
 - 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
 - `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った製品用実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査、検査専用の `r4b_contract` と `r4r_contract` の比較を行う。品質検査では、R4Rのexampleの単体検査と対応表の照合も行う。
+- R4A残り5本(#471)から、品質検査では、exampleの単体検査2本(`-p dev-workflow-cli --example r4a_rest_contract`・`-p dev-workflow-platform --example r4a_rest_platform`)も行う。
 - 工程全体の上限は`build`が60分、`verify-universal`が30分。比較ごとの期限や時間切れの失敗扱いは変えない。
   - 2026-11-11のMac Intelの[実行記録](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42903337858/job/130134906190)では、R4Bの1回目は自己検査0.738秒・旧版46件50.638秒・追加23件787.250秒で成功した。合計838.626秒である。
   - `build`は品質検査と2回のビルドに加え、製品用とR4B用を各2回比較する。従来の40分では2回目の追加比較中に工程全体が打ち切られたため、60分に延ばす。
@@ -529,8 +699,22 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
     - R4Rの比較だけの時間は、Mac arm64で1回あたり約69秒だった(`check_r4r.py --fixture` の起動から `R4R: 合格` まで。2回とも)。Mac x86_64の比較だけの時間は未確認である。
     - `verify-universal` は、PR用のrun 43085911008で、Mac arm64が13分9秒、Mac x86_64が17分8秒で成功した(上限30分)。
     - 同じcommitのpush用のrun 43085900763では、Mac x86_64の `verify-universal` が26分39秒で成功した。上限まで残り約3分だった。
+- R4A残り5本(#471)の専用比較は、`build`・`verify-universal` には入れず、必須の2ジョブで流す。
+  - `r4a-rest`: `build` の後。4機種で、同じ機種の2回のビルドの `r4a_rest_contract` を比べる。上限は60分。
+  - `r4a-rest-universal`: `combine` の後。Mac 2機種で、署名後の同じ実行物を各CPUで比べる。上限は45分。
+  - どちらも、`actions/setup-python` の3.10.11の後に `build.py prepare` を流す。
+  - 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めた。
+  - 自己検査は、絞り込み(`--case`)で短くなった。作業機の実測は、約1319秒(93件、絞り込みの前)から約42秒(105件)になった。
+  - CIの実測は、次のとおりである(commit ab0b9ab、自己検査80件、絞り込みの前)。
+    - 自己検査: Linux x86_64が1055.9秒、Linux arm64が1026.5秒、Mac x86_64が1286.1秒、Mac arm64が850.1秒。
+    - 比較1回: Linux x86_64が約117秒、Linux arm64が約99秒、Mac x86_64が298.8秒、Mac arm64が140.2秒。
+  - 絞り込み後の自己検査は、作業機の約42秒に、CIのMac x86_64の遅さ(同じ80件で作業機の約1.2倍: 1286秒と1077秒)をあてはめると、約50秒になる(見込み。未確認)。
+  - 見込みの合計(Mac x86_64): `r4a-rest` は 298.8秒×2 + 約50秒 = 約650秒(約11分)、`r4a-rest-universal` は 298.8秒 + 約50秒 = 約350秒(約6分)になる。準備とダウンロードは含まない(Linuxでは約30秒、Mac x86_64では約74秒だった。commit ab0b9ab のジョブの始めから、`r4a-rest` の手順までの時間)。
+  - 最悪の場合(比較が上限900秒を使い切る)でも、`r4a-rest` は 900秒×2 + 約50秒 = 約31分(上限60分)、`r4a-rest-universal` は 900秒 + 約50秒 = 約16分(上限45分)である。どちらも上限の内で、余裕は大きい。
+  - 上限(60分・45分)を下げるかは、絞り込み後のCIの実測が出てから決める。今は変えない。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --target <Rust の対象名>`。
+- R4A(#471)から、同じビルドに `--example r4a_rest_contract` も足す(`build.py` の `EXAMPLES`)。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
