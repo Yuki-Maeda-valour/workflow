@@ -46,6 +46,9 @@ def native_build_command(command):
     if not isinstance(command, str):
         return None
     match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u)(?: |$)", command)
+    if match is None:
+        # R4Q(#494)の比較の操作(ジョブ r4q)。既存の名前の並びとは別の行で足す。
+        match = re.match(r"python3 -B native/ci/build[.]py (r4q)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -97,6 +100,8 @@ def check_document(document):
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
         # R4U(#480)の比較は build の枠に入れず、ジョブ r4u で流す(2026-11-12 12:59 の決定)。
         native_timeouts = {"build": 60, "verify-universal": 30, "r4u": 30}
+        # R4Q(#494)の比較はジョブ r4q で流す。上限は最初の CI で所要時間を測るまで仮に 60 分(設計の Task 3.3)。
+        native_timeouts["r4q"] = 60
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -138,6 +143,9 @@ def check_document(document):
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                               and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u"}]
+        # R4Q(#494)の比較も、checkout 直後の検査の後に Python 3.10.11 を用意してから流す。
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) == "r4q"]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):

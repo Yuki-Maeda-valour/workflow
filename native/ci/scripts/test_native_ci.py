@@ -1,8 +1,10 @@
 """CI の単体・結合テスト。配布物の検査と実行補助はリポジトリの実装を使う。"""
 
+import contextlib
 import copy
 import errno
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -1449,6 +1451,347 @@ class R4UConnectionTests(TempCase):
                     self.assertEqual(changed, added.replace(entry, ""))
                     self.assertIn(extra, changed)
                     self.assertNotIn(entry, changed)
+
+
+
+class R4QConnectionTests(TempCase):
+    """R4Q(#494)の比較を、build ではなくジョブ r4q(build.py r4q)で流す(2026-11-12 12:59 の決定。Task 3.3)。"""
+
+    R4Q_RUN = "python3 -B native/ci/build.py r4q --platform '${{ matrix.platform }}'"
+    COMPARE = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "r4q"]
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def report(self, implementation="CPython", version="3.10.11", digests=None, pidfd=True, call="成功"):
+        """build.r4q_python_report が返す形(既定は基準どおりの Python)。"""
+        return {"implementation": implementation, "version": version, "executable": "/py/bin/python3.10",
+                "stdlib": "/py/lib/python3.10",
+                "sha256": dict(build.R4Q_STDLIB_SHA256) if digests is None else digests,
+                "pidfd": {"os.pidfd_open": pidfd, "signal.pidfd_send_signal": pidfd},
+                "pidfd_call": call if pidfd else None,
+                "strerror": {"105": "No message available on STREAM", "106": "Policy not found",
+                             "107": "Unknown error: 107", "108": "Unknown error: 108"}}
+
+    def r4q_calls(self, name="linux-x86_64", rustc="rustc 1.99.1 (0123456789 2026-10-01)", report=None,
+                  given=None, failure=None, errno_header=None):
+        """build.r4q を、道具の呼出しを控えて動かす。戻り値は (呼んだコマンドと環境の列, 出力, 起きた例外か None)。"""
+        commands = []
+
+        def run(args, *, env=None, capture=False):
+            commands.append((list(args), env))
+            if args[:2] == ["rustc", "--version"]:
+                return rustc
+            return "" if capture else None
+
+        def compare(command, env):
+            commands.append((list(command), env))
+            if failure is not None:
+                raise failure
+
+        probed = []
+        error = None
+        environ = {key: value for key, value in os.environ.items() if key != "R4Q_PYTHON"}
+        if given is not None:
+            environ["R4Q_PYTHON"] = given
+        output = io.StringIO()
+        with mock.patch.object(build, "target_config", return_value=(build.TARGETS[name][0], None)) as target, \
+                mock.patch.object(build, "build_environment", return_value={"LC_ALL": "C"}), \
+                mock.patch.object(build, "r4q_python_report",
+                                  side_effect=lambda python: probed.append(python) or (report or self.report())), \
+                mock.patch.object(build, "r4q_mac_errno", return_value=errno_header or {
+                    "sdk": "/sdk", "version": "15.5", "header": "/sdk/usr/include/sys/errno.h",
+                    "lines": ["#define ELAST           106             /* Must be equal largest errno */"]}), \
+                mock.patch.object(build, "run", side_effect=run), \
+                mock.patch.object(build, "r4q_compare", side_effect=compare), \
+                mock.patch.dict(os.environ, environ, clear=True), \
+                contextlib.redirect_stdout(output):
+            try:
+                build.r4q(name, self.root)
+            except (ValueError, subprocess.CalledProcessError) as exc:
+                error = exc
+        target.assert_called_once_with(name)
+        return commands, output.getvalue(), probed, error
+
+    def test_r4q_checks_rust_and_python_then_runs_the_comparison_with_that_python(self):
+        for name in build.TARGETS:
+            with self.subTest(name=name):
+                commands, output, probed, error = self.r4q_calls(name)
+                self.assertIsNone(error)
+                musl = ["--target", build.TARGETS[name][0]] if name.startswith("linux-") else []
+                self.assertEqual([command for command, _ in commands],
+                                 [["rustc", "--version"], [*self.COMPARE, *musl, "--", "--r4q-compare"]])
+                # CI は、この build.py を動かす Python(actions/setup-python の 3.10.11)を比べる。
+                self.assertEqual(probed, [sys.executable])
+                self.assertEqual(commands[1][1], {"LC_ALL": "C", "R4Q_PYTHON": sys.executable})
+                self.assertIn("実装と版: CPython 3.10.11", output)
+                self.assertIn(f"標準ライブラリの照合: {len(build.R4Q_STDLIB_SHA256)} 件中 "
+                              f"{len(build.R4Q_STDLIB_SHA256)} 件が本家 3.10.11 と同じ", output)
+                self.assertIn("自分への pidfd と signal 0: 成功", output)
+                # Mac は ELAST の手がかり(os.strerror の 105〜108 と SDK の sys/errno.h の ELAST の行)も出す。
+                mac = name.startswith("macos-")
+                self.assertEqual("os.strerror(107): Unknown error: 107" in output, mac)
+                self.assertEqual("ELAST の行: #define ELAST" in output, mac)
+                self.assertEqual("SDK: 15.5(/sdk)" in output, mac)
+
+    def test_r4q_python_can_be_given_as_an_absolute_path(self):
+        # 作業機は、本家のソースから作った 3.10.11 を R4Q_PYTHON で渡す(build.py は別の Python で動かす)。
+        commands, _, probed, error = self.r4q_calls(given="/opt/python-3.10.11/bin/python3.10")
+        self.assertIsNone(error)
+        self.assertEqual(probed, ["/opt/python-3.10.11/bin/python3.10"])
+        self.assertEqual(commands[-1][1]["R4Q_PYTHON"], "/opt/python-3.10.11/bin/python3.10")
+        commands, _, probed, error = self.r4q_calls(given="python3.10")
+        self.assertIsInstance(error, ValueError)
+        self.assertEqual(probed, [])
+
+    def test_r4q_stops_before_the_comparison_for_wrong_rust_or_python(self):
+        missing = dict(build.R4Q_STDLIB_SHA256, **{"argparse.py": None})
+        changed = dict(build.R4Q_STDLIB_SHA256, **{"subprocess.py": "0" * 64})
+        cases = [({"rustc": "rustc 1.99.0 (0123456789 2026-09-01)"}, "Rust"),
+                 ({"rustc": "rustc 1.99.10 (x)"}, "Rust"),
+                 ({"report": self.report(version="3.10.12")}, "3.10.12"),
+                 ({"report": self.report(version="3.11.4")}, "3.11.4"),
+                 ({"report": self.report(implementation="PyPy")}, "PyPy"),
+                 ({"report": self.report(digests=missing)}, "argparse.py"),
+                 ({"report": self.report(digests=changed)}, "subprocess.py"),
+                 ({"report": self.report(pidfd=False)}, "pidfd"),
+                 ({"report": self.report(call="PermissionError: [Errno 1] Operation not permitted")}, "pidfd")]
+        for changes, word in cases:
+            with self.subTest(changes=changes):
+                commands, output, _, error = self.r4q_calls(**changes)
+                self.assertIsInstance(error, ValueError)
+                self.assertIn(word, str(error))
+                # 比較の cargo test を呼ばない。
+                self.assertFalse(any("--r4q-compare" in command for command, _ in commands))
+        # 違う標準ライブラリのファイルは、名前と実際の SHA-256 をログに出す。
+        _, output, _, _ = self.r4q_calls(report=self.report(digests=changed))
+        self.assertIn("subprocess.py: 本家 3.10.11 と違う(sha256 " + "0" * 64 + ")", output)
+        self.assertIn(f"{len(build.R4Q_STDLIB_SHA256)} 件中 {len(build.R4Q_STDLIB_SHA256) - 1} 件", output)
+
+    def test_r4q_on_mac_needs_no_pidfd_and_only_logs_the_errno_header(self):
+        for header in ({"error": "xcrun を使えない: [Errno 2] No such file or directory: 'xcrun'"},
+                       {"sdk": "/sdk", "version": "15.5", "header": "/sdk/usr/include/sys/errno.h", "lines": []}):
+            with self.subTest(header=header):
+                commands, output, _, error = self.r4q_calls("macos-arm64", report=self.report(pidfd=False),
+                                                            errno_header=header)
+                self.assertIsNone(error)
+                self.assertEqual(commands[-1][0][-1], "--r4q-compare")
+                self.assertIn("pidfd: os.pidfd_open 無し・signal.pidfd_send_signal 無し", output)
+                self.assertTrue("xcrun を使えない" in output or "ELAST の行が無い" in output)
+
+    def test_r4q_comparison_failure_is_fatal(self):
+        commands, _, _, error = self.r4q_calls(failure=subprocess.CalledProcessError(101, "cargo test"))
+        self.assertIsInstance(error, subprocess.CalledProcessError)
+        self.assertEqual(commands[-1][0][-1], "--r4q-compare")
+
+    def test_r4q_compare_runs_in_native_with_its_own_time_limit(self):
+        with mock.patch.object(build.subprocess, "run") as run, mock.patch("sys.stderr"):
+            build.r4q_compare(["cargo", "test"], {"A": "1"})
+        run.assert_called_once_with(["cargo", "test"], cwd=build.ROOT / "native", env={"A": "1"}, check=True,
+                                    stdin=subprocess.DEVNULL, timeout=build.R4Q_TIMEOUT)
+        # ジョブ r4q の上限(60 分)の中に収める。
+        self.assertLess(build.R4Q_TIMEOUT, 60 * 60)
+
+    def test_main_requires_platform_and_dispatches_r4q(self):
+        with mock.patch.object(sys, "argv", ["build.py", "r4q"]), mock.patch.object(build, "r4q") as r4q, \
+                mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            build.main()
+        r4q.assert_not_called()
+        for platform_name in build.TARGETS:
+            with mock.patch.object(sys, "argv", ["build.py", "r4q", "--platform", platform_name]), \
+                    mock.patch.object(build, "workspace", return_value=self.root), \
+                    mock.patch.object(build, "quality") as quality, mock.patch.object(build, "reproduce") as reproduce, \
+                    mock.patch.object(build, "r4u") as r4u, mock.patch.object(build, "r4q") as r4q:
+                self.assertEqual(build.main(), 0)
+                r4q.assert_called_once_with(platform_name, self.root)
+                quality.assert_not_called()
+                reproduce.assert_not_called()
+                r4u.assert_not_called()
+                r4q.side_effect = ValueError("R4Q の比較用の Python が基準と違います")
+                with mock.patch("sys.stderr"):
+                    self.assertEqual(build.main(), 1)
+
+    def test_stdlib_table_holds_the_listed_files_of_the_design(self):
+        table = build.R4Q_STDLIB_SHA256
+        # 設計の 22:26 の項に名前のある標準ライブラリ。
+        for name in ("argparse.py", "gettext.py", "shutil.py", "subprocess.py", "signal.py", "json/__init__.py",
+                     "json/decoder.py", "json/encoder.py", "json/scanner.py", "secrets.py", "pathlib.py",
+                     "posixpath.py", "genericpath.py", "os.py", "stat.py", "importlib/util.py", "ctypes/__init__.py",
+                     # 機械ごとのファイルでなく、旧版の全部の起動で読み込まれる(sys.path と .pth を作る)。
+                     "site.py", "_sitebuiltins.py"):
+            self.assertIn(name, table)
+        self.assertEqual(len(table), 66)
+        for name, digest in table.items():
+            with self.subTest(name=name):
+                self.assertRegex(name, r"^[a-z_][a-z0-9_]*(/[a-z_][a-z0-9_]*)*\.py$")
+                self.assertRegex(digest, r"^[0-9a-f]{64}$")
+                # 機械ごとに作られるファイル(_sysconfigdata_* など)と site-packages は入れない。
+                self.assertNotRegex(name, r"^_sysconfigdata|site-packages")
+        # R4U の比較器の固定表と重なる 3 件は、同じ値(本家 3.10.11)。
+        import check_r4u
+        for name, digest in check_r4u.STDLIB_SHA256.items():
+            self.assertEqual(table[name], digest)
+
+    def test_probe_runs_with_the_running_python(self):
+        # 調べは標準ライブラリだけで動く(作業機の 3.10.12 でも CI の 3.10.11 でも)。
+        report = build.r4q_python_report(sys.executable)
+        self.assertEqual(set(report), {"implementation", "version", "executable", "stdlib", "sha256", "pidfd",
+                                       "pidfd_call", "strerror"})
+        self.assertEqual(set(report["sha256"]), set(build.R4Q_STDLIB_SHA256))
+        self.assertEqual(report["stdlib"], os.path.dirname(os.__file__))
+        self.assertEqual(report["sha256"]["os.py"],
+                         hashlib.sha256(Path(os.__file__).read_bytes()).hexdigest())
+        self.assertEqual(list(report["strerror"]), ["105", "106", "107", "108"])
+        self.assertEqual(report["pidfd"]["os.pidfd_open"], hasattr(os, "pidfd_open"))
+        with self.assertRaises(ValueError):
+            build.r4q_python_report(str(self.root / "no-such-python"))
+
+    def test_mac_errno_reads_the_elast_lines_of_the_sdk(self):
+        header = self.write("sdk/usr/include/sys/errno.h",
+                            b"#define\tENOTCAPABLE\t107\n#define ELAST           107\t/* Must be equal largest errno */\n"
+                            b"#if __DARWIN_C_LEVEL >= __DARWIN_C_FULL\n")
+        replies = {"--show-sdk-path": str(self.root / "sdk"), "--show-sdk-version": "26.0"}
+        with mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: replies[args[1]]):
+            found = build.r4q_mac_errno()
+        self.assertEqual(found, {"sdk": str(self.root / "sdk"), "version": "26.0", "header": str(header),
+                                 "lines": ["#define ELAST           107\t/* Must be equal largest errno */"]})
+        with mock.patch.object(build, "run", side_effect=FileNotFoundError(2, "No such file or directory")):
+            self.assertIn("error", build.r4q_mac_errno())
+        replies["--show-sdk-path"] = str(self.root / "missing")
+        with mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: replies[args[1]]):
+            self.assertIn("読めない", build.r4q_mac_errno()["error"])
+
+    def test_build_runs_plain_cargo_test_without_the_r4q_comparison(self):
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) \
+                as run:
+            build.quality("linux-x86_64", self.root)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["cargo", "test", "--locked"], commands)
+        self.assertFalse(any("--r4q-compare" in command for command in commands))
+        for job in ("build", "verify-universal", "combine", "distribution", "r4u"):
+            self.assertFalse(any(check_workflow.native_build_command(step.get("run")) == "r4q"
+                                 for step in self.document["jobs"][job]["steps"]))
+
+    def test_workflow_runs_r4q_in_its_own_job_after_build_on_four_machines(self):
+        jobs = self.document["jobs"]
+        self.assertEqual(check_workflow.check_document(self.document), [])
+        job = jobs["r4q"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["strategy"], jobs["build"]["strategy"])
+        self.assertEqual(job["strategy"]["fail-fast"], False)
+        self.assertEqual([row["platform"] for row in job["strategy"]["matrix"]["include"]], list(build.TARGETS))
+        self.assertEqual(job["runs-on"], "${{ matrix.runner }}")
+        self.assertEqual(job["timeout-minutes"], 60)
+        # checkout・最初の検査・Python 3.10.11 は build と同じ。Rust の用意は build と同じ prepare。
+        self.assertEqual(job["steps"][:3], jobs["build"]["steps"][:3])
+        self.assertEqual(job["steps"][3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+        self.assertEqual(job["steps"][-1]["run"], self.R4Q_RUN)
+        self.assertEqual(len(job["steps"]), 5)
+        self.assertNotIn("r4q", jobs["distribution"]["needs"])
+        # 足すだけ(既存のジョブの後ろ)。build と verify-universal の上限は変えない。
+        self.assertGreater(list(jobs).index("r4q"), list(jobs).index("r4u"))
+        self.assertEqual(jobs["build"]["timeout-minutes"], 60)
+        self.assertEqual(jobs["verify-universal"]["timeout-minutes"], 30)
+        self.assertEqual(jobs["r4u"]["timeout-minutes"], 30)
+
+    def test_check_workflow_knows_the_r4q_operation(self):
+        prefix = "python3 -B native/ci/build.py "
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4q --platform linux-x86_64"), "r4q")
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4q"), "r4q")
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4u"), "r4u")
+        for command in ("r4qx", "r4q-", "r4q_compare", "R4Q"):
+            with self.subTest(command=command):
+                self.assertIsNone(check_workflow.native_build_command(prefix + command))
+
+    def test_check_workflow_requires_the_r4q_timeout_python_and_command_form(self):
+        for renamed in (False, True):
+            base = copy.deepcopy(self.document)
+            key = "r4q"
+            if renamed:
+                key = "r4q-renamed-for-test"
+                self.assertNotIn(key, base["jobs"])
+                base["jobs"][key] = base["jobs"].pop("r4q")
+            self.assertEqual(check_workflow.check_document(base), [])
+            for value in (None, 0, 30, 59, 61, 120, "60", True):
+                changed = copy.deepcopy(base)
+                if value is None:
+                    changed["jobs"][key].pop("timeout-minutes")
+                else:
+                    changed["jobs"][key]["timeout-minutes"] = value
+                with self.subTest(renamed=renamed, value=value):
+                    self.assertTrue(any("timeout-minutes は 60" in error
+                                        for error in check_workflow.check_document(changed)))
+        for mutation in ("remove", "late", "early", "version"):
+            changed = copy.deepcopy(self.document)
+            steps = changed["jobs"]["r4q"]["steps"]
+            if mutation == "remove":
+                steps.pop(2)
+            elif mutation == "late":
+                steps.append(steps.pop(2))
+            elif mutation == "early":
+                steps.insert(1, steps.pop(2))
+            else:
+                steps[2]["with"]["python-version"] = "3.10.12"
+            with self.subTest(mutation=mutation):
+                self.assertTrue(check_workflow.check_document(changed))
+        for arguments in ("--platform linux-x86_64 r4q", "--downloads downloads r4q", "-- r4q"):
+            changed = copy.deepcopy(self.document)
+            changed["jobs"]["r4q"]["steps"][-1]["run"] = "python3 -B native/ci/build.py " + arguments
+            with self.subTest(arguments=arguments):
+                self.assertTrue(any("コマンド名をオプションより先" in error
+                                    for error in check_workflow.check_document(changed)))
+        # r4u の 30 分の枠や build の枠の中で r4q を流す形は、上限が合わないので拒む。
+        for job in ("r4u", "verify-universal"):
+            changed = copy.deepcopy(self.document)
+            changed["jobs"][job]["steps"].append({"run": self.R4Q_RUN})
+            with self.subTest(job=job):
+                self.assertTrue(any("timeout-minutes は 60" in error
+                                    for error in check_workflow.check_document(changed)))
+
+    # check_workflow.py に R4Q のために足した 3 つの行(どれも別の行。既存の目印の行は書き換えない)。
+    R4Q_LINES = {
+        "names": 'match = re.match(r"python3 -B native/ci/build[.]py (r4q)(?: |$)", command)',
+        "timeouts": 'native_timeouts["r4q"] = 60',
+        "comparisons": 'and native_build_command(step.get("run")) == "r4q"]',
+    }
+
+    def without_r4q(self, which):
+        """check_workflow.py から R4Q の 1 つの行(とその文)を除いた版。"""
+        import types
+        path = Path(check_workflow.__file__)
+        lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+        found = [index for index, line in enumerate(lines) if self.R4Q_LINES[which] in line]
+        self.assertEqual(len(found), 1, which)
+        index = found[0]
+        if which == "names":
+            # `if match is None:` の中の 1 行だけの文なので、if ごと除く。
+            self.assertIn("if match is None:", lines[index - 2])
+            del lines[index - 2:index + 1]
+        elif which == "comparisons":
+            self.assertIn("comparison_indices +=", lines[index - 1])
+            del lines[index - 1:index + 1]
+        else:
+            del lines[index]
+        module = types.ModuleType("check_workflow_without_r4q")
+        module.__file__ = str(path)
+        exec(compile("".join(lines), str(path), "exec"), module.__dict__)
+        return module
+
+    def test_each_r4q_line_in_check_workflow_is_needed(self):
+        names = self.without_r4q("names")
+        self.assertTrue(any("コマンド名をオプションより先" in error for error in names.check_document(self.document)))
+        timeouts = self.without_r4q("timeouts")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4q"]["timeout-minutes"] = 30
+        self.assertEqual(timeouts.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
+        comparisons = self.without_r4q("comparisons")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4q"]["steps"].pop(2)
+        self.assertEqual(comparisons.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
 
 
 if __name__ == "__main__":
