@@ -13,3 +13,6 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// R4C専用の候補の採用の OS の操作。
+pub mod adopt_candidate;

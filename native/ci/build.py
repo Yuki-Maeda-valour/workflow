@@ -25,9 +25,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "adopt_candidate_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "adopt_candidate_contract")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -148,6 +148,7 @@ def quality(name, work):
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
         r4r_map(env, Path(temporary))
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "adopt_candidate_contract"], env=env)
 
 
 def r4r_map(env, folder):
@@ -209,6 +210,11 @@ def r4b_probe(fixture):
 
 def r4r_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_r4r.py", "--fixture", fixture])
+
+
+def adopt_probe(fixture):
+    # --evidence: 機種で変わる旧版の診断の生出力を、この機種のログへ残す(固定期待は証拠を見てから作る)。
+    run([sys.executable, "-B", ROOT / "native/ci/check_adopt_candidate.py", "--fixture", fixture, "--evidence"])
 
 
 def read_record(folder):
@@ -286,6 +292,19 @@ def verify_universal(downloads, work):
     r4r_probe(folder / "r4r_contract")
 
 
+def r4c(platform, downloads, work):
+    """R4C の比較。build の 2 回分の実行物を、build とは別のジョブで検査する(CI の時間を分けるため)。"""
+    folder, _ = extract_build(platform, downloads, work)
+    for number in (1, 2):
+        adopt_probe(folder / f"{number}/adopt_candidate_contract")
+
+
+def r4c_universal(downloads, work):
+    """R4C の比較。署名後の Mac 共通の実行物を、各 CPU のジョブで検査する。"""
+    folder, _ = extract_universal(downloads, work)
+    adopt_probe(folder / "adopt_candidate_contract")
+
+
 def package(downloads, work):
     binaries, targets = [], {}
     for name in ("linux-x86_64", "linux-arm64"):
@@ -309,7 +328,7 @@ def package(downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "r4c", "r4c-universal", "test"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -317,7 +336,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4c") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -340,6 +359,10 @@ def main():
             verify_universal(downloads, work)
         elif args.command == "package":
             package(downloads, work)
+        elif args.command == "r4c":
+            r4c(args.platform, downloads, work)
+        elif args.command == "r4c-universal":
+            r4c_universal(downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
