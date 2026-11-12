@@ -439,9 +439,11 @@ fn symlink_and_fifo_candidates_are_refused() {
         &StubPrecheck::passing(),
         &arguments(&tmp, None, None, &digest(BODY)),
     );
+    // ELOOP の番号は機種で違う(Linux 40・Mac 62)。文は同じ。
+    let eloop = if cfg!(target_os = "linux") { 40 } else { 62 };
     assert_eq!(
         message(result),
-        "[Errno 40] Too many levels of symbolic links: '候補_例.md'"
+        format!("[Errno {eloop}] Too many levels of symbolic links: '候補_例.md'")
     );
     let tmp = Tmp::new("fifo");
     assert!(
