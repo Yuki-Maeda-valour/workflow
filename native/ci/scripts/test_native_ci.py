@@ -440,6 +440,33 @@ class WorkflowTests(TempCase):
         rows = jobs["verify-universal"]["strategy"]["matrix"]["include"]
         self.assertEqual({row["runner"] for row in rows}, {"macos-15-intel", "macos-15"})
         self.assertEqual(jobs["verify-universal"]["needs"], "combine")
+        self.assertIn("r4g", jobs["distribution"]["needs"])
+        self.assertIn("r4g-universal", jobs["distribution"]["needs"])
+
+    def test_native_required_jobs_and_r4g_shape_are_checked(self):
+        self.assertEqual(check_workflow.check_native_required(self.document), [])
+        for name in check_workflow.REQUIRED_NATIVE_JOBS:
+            with self.subTest(removed=name):
+                changed = copy.deepcopy(self.document)
+                del changed["jobs"][name]
+                self.assertTrue(check_workflow.check_native_required(changed))
+        for name in ("r4g", "r4g-universal"):
+            with self.subTest(step=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["steps"] = [s for s in changed["jobs"][name]["steps"] if "build.py r4g" not in s.get("run", "")]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(platform=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["strategy"]["matrix"]["include"].pop()
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(other_platform=name):
+                # 機種の数が同じでも、違う機種(Mac の組に Linux)なら拒む。
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["strategy"]["matrix"]["include"][-1] = {"platform": "linux-x86_64", "runner": "ubuntu-24.04"}
+                self.assertTrue(check_workflow.check_native_required(changed))
+        self.assertEqual({name for name, _, _ in check_workflow.R4G_JOBS}, {"r4g", "r4g-universal"})
+        self.write(".github/workflows/native.yml", json.dumps({**self.document, "jobs": {k: v for k, v in self.document["jobs"].items() if k != "r4g"}}).encode())
+        self.assertTrue(any("r4g" in p for p in check_workflow.check_workflows(self.root)))
 
 
 class BinaryTests(TempCase):
@@ -651,12 +678,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "r4g_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract"):
+                for example in ("r4b_contract", "r4r_contract", "r4g_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -692,6 +719,7 @@ class BuildTests(TempCase):
             for number in (1,2):
                 self.write(f"{name}/{number}/r4b_contract", b"fixture")
                 self.write(f"{name}/{number}/r4r_contract", b"fixture")
+                self.write(f"{name}/{number}/r4g_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -713,8 +741,8 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 6)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "record.json"])
+        self.assertEqual(len(signed), 8)
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "r4g_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1167,9 +1195,9 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract"))
-        self.assertFalse(any("r4b" in path or "r4r" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract")})
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","r4g_contract"))
+        self.assertFalse(any("r4b" in path or "r4r" in path or "r4g" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","r4g_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1224,7 +1252,7 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_both_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","r4g_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
 
@@ -1504,7 +1532,10 @@ class R4D1Tests(TempCase):
         self.assertEqual(callers, ["r4d1"])
 
     def test_distribution_needs_do_not_include_r4d1(self):
-        self.assertEqual(self.document["jobs"]["distribution"]["needs"], ["build", "combine", "verify-universal"])
+        # main の 3 つの後ろに、R4G の比較のジョブ(r4g・r4g-universal)が足される。r4d1 は入らない。
+        needs = self.document["jobs"]["distribution"]["needs"]
+        self.assertEqual(needs[:3], ["build", "combine", "verify-universal"])
+        self.assertNotIn("r4d1", needs)
 
     # (b) 上限
     def test_r4d1_timeout_is_fixed_at_30(self):
@@ -1738,6 +1769,276 @@ class R4D1Tests(TempCase):
                            "--", "--list", "--ignored"]])
         self.assertIn(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract",
                        "--", "--list", "--ignored"], commands)
+
+
+class R4GConnectionTests(TempCase):
+    """R4G(#479)の検査入口 r4g_contract の CI への接続。比較は別のジョブ r4g・r4g-universal で流す
+    (2026-11-12 12:59 の決定)。build に残すのは、r4g_contract のビルドと example の単体検査だけ。"""
+
+    def fake_run(self, calls, *, fail=None, archs="arm64 x86_64"):
+        def run(args, *, env=None, capture=False, timeout=1800):
+            args = list(args)
+            calls.append(args)
+            if fail is not None and fail(args):
+                raise subprocess.CalledProcessError(1, args)
+            if args[0] == "lipo":
+                return archs
+            return "" if capture else None
+        return run
+
+    def call_r4g(self, function, name, calls, **kwargs):
+        received = self.root / "received"
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)) as config, \
+                mock.patch.object(build, "extract_build", return_value=(received, {})) as extract, \
+                mock.patch.object(build, "extract_universal", return_value=(received, {})) as universal, \
+                mock.patch.object(build, "prepare_r4g_linux") as linux, \
+                mock.patch.object(build, "r4g_probe") as probe, \
+                mock.patch.object(build, "run", side_effect=self.fake_run(calls, **kwargs)):
+            self.target_config, self.extract_build, self.extract_universal = config, extract, universal
+            self.linux, self.probe = linux, probe
+            function(name, self.root / "downloads", self.root)
+        return received
+
+    def test_quality_requires_example_tests(self):
+        test = ["cargo","test","--locked","-p","dev-workflow-cli","--example","r4g_contract"]
+        with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=lambda args,*,env=None,capture=False:"" if capture else None) as run:
+            build.quality("linux-x86_64",self.root)
+        self.assertIn(test,[call.args[0] for call in run.call_args_list])
+
+        def failing(args, *, env=None, capture=False):
+            if list(args) == test:
+                raise subprocess.CalledProcessError(101, args)
+            return "" if capture else None
+        with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=failing),self.assertRaises(subprocess.CalledProcessError):
+            build.quality("linux-x86_64",self.root)
+
+    def test_probe_command_short_tmpdir_strace_and_failure_is_fatal(self):
+        fixture=self.root/"r4g_contract"
+        for system,extra in (("Linux",["--require-strace","--require-userns"]),("Darwin",[])):
+            with mock.patch.object(build.platform,"system",return_value=system),mock.patch.object(build,"run") as run:
+                build.r4g_probe(fixture)
+            self.assertEqual(run.call_args.args[0],[sys.executable,"-B",source_hash.ROOT/"native/ci/check_r4g.py","--fixture",fixture,*extra])
+            self.assertEqual(run.call_args.kwargs["timeout"],build.R4G_TIMEOUT)
+            # AF_UNIX のパスの上限(Mac は103)に収まる短い一時フォルダ。比較の後に消える。
+            temporary=Path(run.call_args.kwargs["env"]["TMPDIR"])
+            self.assertTrue(str(temporary).startswith("/tmp/r4g"))
+            self.assertLessEqual(len(str(temporary))+len("/pending-contract-xxxxxxxx/xdg/dev-workflow/guard-socket"),103)
+            self.assertFalse(temporary.exists())
+        with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"comparison")):
+            with self.assertRaises(subprocess.CalledProcessError):build.r4g_probe(fixture)
+
+    def test_r4g_compares_each_of_the_two_built_binaries_on_all_four_platforms(self):
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call_r4g(build.r4g, name, calls)
+                self.target_config.assert_called_once_with(name)
+                self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
+                self.extract_universal.assert_not_called()
+                self.assertEqual(self.probe.call_args_list,
+                                 [mock.call(received / "1" / "r4g_contract"), mock.call(received / "2" / "r4g_contract")])
+                # Linux だけ、比較の前に strace と利用者の名前空間を用意する。
+                self.assertEqual(self.linux.call_count, 1 if name.startswith("linux-") else 0)
+                self.assertEqual(calls, [])
+
+    def test_r4g_stops_at_the_first_failed_comparison_and_preparation_failure(self):
+        received = self.root / "received"
+        with mock.patch.object(build, "target_config", return_value=("t", None)), \
+                mock.patch.object(build, "extract_build", return_value=(received, {})), \
+                mock.patch.object(build, "prepare_r4g_linux"), \
+                mock.patch.object(build, "r4g_probe", side_effect=subprocess.CalledProcessError(1, "R4G")) as probe, \
+                self.assertRaises(subprocess.CalledProcessError):
+            build.r4g("linux-x86_64", self.root, self.root)
+        self.assertEqual(probe.call_count, 1)
+        with mock.patch.object(build, "target_config", return_value=("t", None)), \
+                mock.patch.object(build, "extract_build") as extract, \
+                mock.patch.object(build, "prepare_r4g_linux", side_effect=subprocess.CalledProcessError(100, "apt")), \
+                mock.patch.object(build, "r4g_probe") as probe, \
+                self.assertRaises(subprocess.CalledProcessError):
+            build.r4g("linux-arm64", self.root, self.root)
+        extract.assert_not_called()
+        probe.assert_not_called()
+
+    def test_r4g_universal_checks_signature_and_cpus_then_compares_on_both_macs(self):
+        for name in build.R4G_UNIVERSAL_PLATFORMS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call_r4g(build.r4g_universal, name, calls)
+                fixture = received / "r4g_contract"
+                self.target_config.assert_called_once_with(name)
+                self.extract_universal.assert_called_once_with(self.root / "downloads", self.root)
+                self.extract_build.assert_not_called()
+                self.linux.assert_not_called()
+                self.assertEqual(calls, [["codesign", "--verify", "--strict", "--verbose=2", fixture], ["lipo", "-archs", fixture]])
+                self.probe.assert_called_once_with(fixture)
+        self.assertEqual(set(build.R4G_UNIVERSAL_PLATFORMS), {"macos-x86_64", "macos-arm64"})
+
+    def test_r4g_universal_rejects_linux_wrong_cpus_and_bad_signature(self):
+        for name in ("linux-x86_64", "linux-arm64"):
+            calls = []
+            with self.subTest(platform=name), self.assertRaises(ValueError):
+                self.call_r4g(build.r4g_universal, name, calls)
+            self.assertEqual(calls, [])
+            self.probe.assert_not_called()
+        for label, options, error in (("one-cpu", {"archs": "arm64"}, ValueError),
+                                      ("signature", {"fail": lambda args: args[0] == "codesign"}, subprocess.CalledProcessError)):
+            calls = []
+            with self.subTest(label=label), self.assertRaises(error):
+                self.call_r4g(build.r4g_universal, "macos-x86_64", calls, **options)
+            self.probe.assert_not_called()
+
+    def test_prepare_on_linux_requires_strace_and_user_namespaces(self):
+        restrict=self.root/"restrict"
+        cases=((None,"1",[["sudo","apt-get","update"],["sudo","apt-get","install","-y","--no-install-recommends","strace"],
+                           ["sudo","sysctl","-w","kernel.apparmor_restrict_unprivileged_userns=0"]]),
+               ("/usr/bin/strace","0",[]))
+        for which,value,expected in cases:
+            restrict.write_text(value+"\n",encoding="ascii")
+            with mock.patch.object(build.shutil,"which",return_value=which),mock.patch.object(build,"R4G_USERNS_RESTRICT",restrict),mock.patch.object(build,"run") as run:
+                build.prepare_r4g_linux()
+            self.assertEqual([call.args[0] for call in run.call_args_list],expected)
+        # prepare(配る工程でも使う)と build・reproduce は R4G の準備をしない。r4g・r4g-universal の始めだけで行う。
+        with mock.patch.object(build,"target_config",return_value=("t",None)),mock.patch.object(build,"run"),mock.patch.object(build,"prepare_r4g_linux") as linux:
+            build.prepare("macos-arm64")
+            build.prepare("linux-x86_64")
+            linux.assert_not_called()
+
+    def test_main_requires_platform_and_dispatches_the_two_commands(self):
+        for command, called, other in (("r4g", "r4g", "r4g_universal"), ("r4g-universal", "r4g_universal", "r4g")):
+            with self.subTest(command=command):
+                with mock.patch.object(sys, "argv", ["build.py", command]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, called) as target, \
+                        mock.patch("sys.stderr"), self.assertRaises(SystemExit) as stopped:
+                    build.main()
+                self.assertEqual(stopped.exception.code, 2)
+                target.assert_not_called()
+                for platform_name in ("linux-x86_64", "macos-arm64"):
+                    with mock.patch.object(sys, "argv", ["build.py", command, "--platform", platform_name]), \
+                            mock.patch.object(build, "workspace", return_value=self.root), \
+                            mock.patch.object(build, called) as target, \
+                            mock.patch.object(build, other) as unused, \
+                            mock.patch.object(build, "quality") as quality, \
+                            mock.patch.object(build, "reproduce") as reproduce:
+                        self.assertEqual(build.main(), 0)
+                        target.assert_called_once_with(platform_name, self.root / "downloads", self.root)
+                        unused.assert_not_called()
+                        quality.assert_not_called()
+                        reproduce.assert_not_called()
+                        target.side_effect = subprocess.CalledProcessError(1, "R4G")
+                        self.assertEqual(build.main(), 1)
+
+    def test_build_reproduce_and_verify_universal_do_not_run_the_r4g_comparison(self):
+        # build と verify-universal の時間の枠に入らないので、比較と Linux の準備は別のジョブだけで行う。
+        for command in ("build", "reproduce"):
+            for platform_name in build.TARGETS:
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", platform_name]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "quality"), \
+                        mock.patch.object(build, "reproduce", return_value=self.root), \
+                        mock.patch.object(build, "pack_tar") as pack, \
+                        mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                        mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "r4g_probe") as check, \
+                        mock.patch.object(build, "prepare_r4g_linux") as linux:
+                    self.assertEqual(build.main(), 0)
+                    check.assert_not_called()
+                    linux.assert_not_called()
+                    # 比較のジョブが受け取るので、tar には2回分の r4g_contract を入れる。
+                    self.assertIn("1/r4g_contract", pack.call_args.args[2])
+                    self.assertIn("2/r4g_contract", pack.call_args.args[2])
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", return_value="arm64 x86_64") as run, \
+                mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "r4g_probe") as check:
+            build.verify_universal(self.root, self.root)
+            check.assert_not_called()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["codesign", "--verify", "--strict", "--verbose=2", self.root / "r4g_contract"], commands)
+        self.assertIn(["lipo", "-archs", self.root / "r4g_contract"], commands)
+
+    def test_workflow_runs_r4g_in_two_separate_jobs(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        jobs = document["jobs"]
+        self.assertEqual(check_workflow.check_document(document), [])
+        # R4G の比較が落ちたら配布の tar を作らない(R4B・R4R と同じ)。既存の並びの後ろに足した。
+        self.assertEqual(jobs["distribution"]["needs"][:3], ["build", "combine", "verify-universal"])
+        self.assertEqual(jobs["distribution"]["needs"][-2:], ["r4g", "r4g-universal"])
+        # 上げた上限は main の値へ戻した(R4G の比較を build と verify-universal から外したので)。
+        self.assertEqual((jobs["build"]["timeout-minutes"], jobs["verify-universal"]["timeout-minutes"]), (60, 30))
+        expected = {
+            "r4g": ("build", jobs["build"]["strategy"], "native-build-${{ matrix.platform }}",
+                    "python3 -B native/ci/build.py r4g --platform '${{ matrix.platform }}'"),
+            "r4g-universal": ("combine", jobs["verify-universal"]["strategy"], "native-universal",
+                              "python3 -B native/ci/build.py r4g-universal --platform '${{ matrix.platform }}'"),
+        }
+        for job, (needs, strategy, artifact, command) in expected.items():
+            with self.subTest(job=job):
+                steps = jobs[job]["steps"]
+                self.assertEqual(jobs[job]["needs"], needs)
+                self.assertEqual(jobs[job]["strategy"], strategy)
+                self.assertEqual(jobs[job]["runs-on"], "${{ matrix.runner }}")
+                self.assertEqual(jobs[job]["timeout-minutes"], check_workflow.R4G_TIMEOUTS[job])
+                self.assertEqual(steps[:3], jobs["build"]["steps"][:3])
+                self.assertEqual(steps[3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+                self.assertEqual(steps[4]["uses"], "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093")
+                self.assertEqual(steps[4]["with"], {"name": artifact, "path": "${{ runner.temp }}/native-ci/downloads",
+                                                    "merge-multiple": True})
+                self.assertEqual(steps[-1]["run"], command)
+                self.assertEqual(len(steps), 6)
+        self.assertEqual(len(jobs["r4g"]["strategy"]["matrix"]["include"]), 4)
+        self.assertEqual({row["platform"] for row in jobs["r4g-universal"]["strategy"]["matrix"]["include"]},
+                         set(build.R4G_UNIVERSAL_PLATFORMS))
+        self.assertEqual(check_workflow.R4G_TIMEOUTS, {"r4g": 60, "r4g-universal": 30})
+
+    def test_workflow_rejects_wrong_timeouts_missing_python_and_other_command_forms(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        for job in ("r4g", "r4g-universal"):
+            minutes = check_workflow.R4G_TIMEOUTS[job]
+            for renamed in (False, True):
+                base = copy.deepcopy(document)
+                key = job
+                if renamed:
+                    key = "compare"
+                    base["jobs"][key] = base["jobs"].pop(job)
+                self.assertEqual(check_workflow.check_document(base), [])
+                for value in (None, 0, minutes - 1, minutes + 1, 60 if minutes != 60 else 30, str(minutes), True):
+                    changed = copy.deepcopy(base)
+                    if value is None:
+                        changed["jobs"][key].pop("timeout-minutes")
+                    else:
+                        changed["jobs"][key]["timeout-minutes"] = value
+                    with self.subTest(job=job, renamed=renamed, value=value):
+                        self.assertTrue(any(f"timeout-minutes は {minutes}" in error
+                                            for error in check_workflow.check_document(changed)))
+            # 比較の前の Python 3.10.11 が無い・遅い・早すぎる・版が違う形は拒む。
+            for mutation in ("remove", "late", "early", "version"):
+                changed = copy.deepcopy(document)
+                steps = changed["jobs"][job]["steps"]
+                if mutation == "remove":
+                    steps.pop(2)
+                elif mutation == "late":
+                    steps.append(steps.pop(2))
+                elif mutation == "early":
+                    steps.insert(1, steps.pop(2))
+                else:
+                    steps[2]["with"]["python-version"] = "3.10.12"
+                with self.subTest(job=job, mutation=mutation):
+                    self.assertTrue(check_workflow.check_document(changed))
+            # オプションを先に置く形・別の表記は許さない。
+            for arguments in (f"--platform linux-x86_64 {job}", f"-- {job}", f"--downloads d {job}"):
+                changed = copy.deepcopy(document)
+                changed["jobs"][job]["steps"][-1]["run"] = f"python3 -B native/ci/build.py {arguments}"
+                with self.subTest(job=job, arguments=arguments):
+                    self.assertTrue(any("コマンド名をオプションより先" in error
+                                        for error in check_workflow.check_document(changed)))
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py r4g --platform x"), "r4g")
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py r4g-universal"), "r4g-universal")
+        self.assertIsNone(check_workflow.native_build_command("python3 -B native/ci/build.py r4gx"))
+
+    def test_fixture_is_not_a_distribution_binary(self):
+        self.assertIn("r4g_contract",build.CI_BINARIES)
+        self.assertIn("r4g_contract",build.EXAMPLES)
+        self.assertFalse(any("r4g" in path for path in make_dist.BINARY_PATHS))
 
 
 if __name__ == "__main__":

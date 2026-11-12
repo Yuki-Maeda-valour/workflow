@@ -1466,12 +1466,127 @@ EINTR は、信号で呼び出しが中断されたときの失敗である。�
 UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
 比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
 
+### 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
+
+[Issue #479](https://github.com/Yuki-Maeda-valour/workflow/issues/479)で、旧3本 `plugins/dev-workflow/skills/do-task/scripts/pending-implementation.py`・`reviews-dir.sh`・`implementation-git.py` と同じ結果を返す部品を、開発用Rustソースへ移した。
+製品CLIの登録表・help・既存呼出元(SKILL.md・references・`implement-guard.sh`・`implement-agent.sh`)へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。版と `CHANGELOG.md` も変えない。
+製品への接続は、後続の配布タスク(D3・D4)で行う。`implementation-git` の事前検査をRust版へ切り替えるのは、そのうちD3である。診断9本の移植(R4D)は、`implementation-git` の `SAFE_GIT` の14項目を使う予定である。
+
+```text
+旧3本(python3 <script> / bash <script>) ─┐
+                                        ├─ 同じ物理入力 → 終了値・標準出力・標準エラー・ファイルの状態・子の起動の列を比べる
+r4g_contract <コマンド> … ───────────────┘
+```
+
+- 比較元は旧版を残す。旧版は呼出元と同じ形(`python3 <script>`・`bash <script>`)で起動する。
+- 検査専用入口 `r4g_contract` だけが、旧版の起動の形に無い値(旧スクリプトの呼出名・旧版の `__file__`・出力の故障・時計・期限)を `--r4g-*` の指定で受ける。製品の引数・環境変数から保護を外す口は作らない。
+- 旧版の保護の性質は弱めない。
+  - pendingは、Gitを起動せず、候補の中を開かない。
+  - implementation-gitは、読取りでindexや状態を更新しない(下の「管理担当の判断」の1を除く)。
+  - reviews-dirは、呼出側が承認したfilterの無効化を消さない。
+
+#### 3つのコマンドの契約(要点)
+
+分岐の正本は旧版のコードである。ここは要点だけを書く。
+
+- `reviews-dir`(`ensure`・`save-untracked`・`-h`・`--help`)
+  - `.claude` と `.claude/reviews` を、階層ごとにリンクを辿らず検査してから作る。symlinkは `ERROR [symlink]`、ディレクトリでないものは `ERROR [not-directory]` で終了3。
+  - `save-untracked` は、基準の時点の未追跡の一覧を一時ファイル `.base-untracked.XXXXXX` へ書き、sha256を計算して `rename(2)` で公開する。止まったときは何も公開せず、一時ファイルを消す。Gitの失敗は終了4、予期しない失敗は `ERROR [internal]` で終了20。
+  - 旧版が外部コマンドへ任せる処理(`sed`・`mkdir`・`mktemp`・`git`・sha256の道具・`cut`・`python3`・`mv`・`rm`)は、旧版と同じ外部コマンドを同じ引数・環境・入出力の向きで起動する(下の決定の表の「外部コマンド」)。
+  - 子の環境は、旧bashが渡す値の集合(`PWD`・`SHLVL`・`_` を含む)と同じにする。`CDPATH` は外し、`GIT_NO_LAZY_FETCH=1` を足す。呼出側の `GIT_CONFIG_COUNT`・`GIT_CONFIG_KEY_<n>`・`GIT_CONFIG_VALUE_<n>` は外さない。
+  - 信号は旧bashと同じに扱う。子を待つ間の `INT` は続け、`TERM`・`HUP` は子の終わりを待たずに終了時の処理(EXITの罠)を動かす。
+  - 診断の行番号は、Rustのソースではなく旧版の処理地点に対応する固定の表から出す。
+- `pending-implementation`(`scan`)
+  - 置き場3か所(`$XDG_STATE_HOME/dev-workflow`・`$HOME/.local/state/dev-workflow`・`$HOME/.cache/dev-workflow`)の直下を、候補の中を開かずに数える。上限は4096件(`entry-limit`)と128候補(`candidate-limit`)、全体5秒(`time-limit`)。
+  - 印(`owner-<guard-の後>`)は、通常ファイル・候補と同じuid・64KiB以下のときだけ `O_NOFOLLOW` で開く。印の形式(13キーが1回ずつ・`version` は1・番号は十進など)は、旧 `implement-guard.sh` を正本として同じに検査する。
+  - 結果は正準JSON(`sort_keys`・`ensure_ascii`・空白なし)と改行を1回出す。終了値は0・10・11・2・20。`list_sha256` と `identity_sha256` は混ぜない。
+  - Gitを起動しない。`GIT_DIR`・`GIT_WORK_TREE`・`GIT_COMMON_DIR` が非空なら決められないとする。
+- `implementation-git`(`prepare`・`run` の5操作 `status`・`diff`・`log`・`show`・`ls-files`)
+  - 全引数が厳密なUTF-8でNULを含まないことを確かめてから、Python 3.10のargparseと同じ解析をする。helpは各階層の全文と折返しまで同じにする。
+  - 事前検査は、兄弟の `diff-snapshot.sh` に当たるスクリプトを `bash <script> --cwd <cwd> --precheck` で起動する(標準入力null・120秒)。Rust版の事前検査への切替えはD3で行う。
+  - Gitは `git -C <cwd> <SAFE_GIT> …` を標準入力null・30秒で起動する。子の環境は旧版の `clean_env` と同じ順の辞書にし、`GIT_NO_LAZY_FETCH=1`・`GIT_OPTIONAL_LOCKS=0`・`GIT_TERMINAL_PROMPT=0` を足す。
+  - 5操作のargvは旧版の字面と同じ。revisionは `rev-parse --verify --end-of-options <値>^{commit}` で40桁か64桁へ解決する。
+  - 最上位の例外は、`OSError`・`ValueError`・`UnicodeError`・`RuntimeError` なら `ERROR [runtime] 実行に失敗: <例外の文>` と終了20、ほかは呼出履歴と終了1にする。
+
+#### 利用者・管理担当の決定とその当て方
+
+R4Gの設計は、2026-11-11 22:31までの決定で確定した(それまでは、設計の中で判断待ちにしていた)。その後の決定(22:38・23:19・00:28・00:35・00:42・02:41・06:58・08:55・09:58・12:59・14:24)は、実装の途中で当てた。決定の原文は、Rust移行の管理担当の記録(`rust-decision-*.txt`)にある。
+比較器は、この一覧を `native/ci/r4g_fixtures/decided-differences.json` に持つ(決定20件と、比較の前提の外9件。ここに無い差は不合格にする)。
+どれも、Rust移行のすべてのコマンドに当てる決定である。ほかの差へは広げない。広げる必要があれば止まって聞く。
+
+| 決定(日時・決めた人) | 内容 | R4Gでの当て方 |
+|---|---|---|
+| 文字コード(2026-11-11 22:24・利用者) | 文字コードの設定だけによる差は、UTF-8と `surrogateescape`(UTF-8として読めないバイトを特別な文字に置いて、元へ戻せるようにする方式)に固定する。標準エラーの `backslashreplace` と生バイトは保つ | pending・implementation-gitの入出力をこの固定で作る。旧Pythonの地域設定の強制が足す `LC_CTYPE=C.UTF-8` は、環境変数だけで決まる場合は再現し、入っているlocaleで変わる場合だけ、ケースごとの固定期待に記録する(22:31の回答) |
+| 旧bashの実行環境(2026-11-11 22:31・利用者) | 外部コマンドは旧版と同じ引数と環境で起動し、診断は翻訳まで一致させる。bash自身の行は `LC_ALL=C` の英語に固定する。`BASH_ENV`・`BASH_FUNC_<名>%%`・`SHELLOPTS`・`BASHOPTS`・`POSIXLY_CORRECT` の効果は再現しない。子の環境は値の集合を合わせ、並びは比べない | reviews-dirに当てる。比較では、この5つを旧版の環境から除く |
+| 旧Pythonの起動の環境変数(2026-11-11 22:31・利用者) | `PYTHONUNBUFFERED` と `PYTHONINTMAXSTRDIGITS` は旧版どおり再現する。`PYTHONPATH`・`sitecustomize`・利用者のsite・`PYTHONHOME`・`PYTHONPROFILEIMPORTTIME`・`PYTHONVERBOSE`・`PYTHONINSPECT`・`PYTHONWARNINGS`・`PYTHONMALLOC`・`PYTHONDEVMODE`・`PYTHONFAULTHANDLER`・`PYTHONTRACEMALLOC`・argparseの翻訳ファイルは再現しない | pending・implementation-gitに当てる。再現しない名前は、比較の環境から外す(比較器が外した名前を1行出す) |
+| 実行ごとに変わる出力(2026-11-11 22:31・利用者) | 安定した部分だけを比べる。`SIGINT` での中断は、信号で終わること・終了値・最後の行 `KeyboardInterrupt`・それまでの標準出力・子を残さないことだけを比べる。時間切れの文の残り時間の小数は、表記の形と、0より大きく期限以下であることだけを検査する。5秒の上限は実時間で確かめ、出力の比較は検査専用の注入で同じ時刻を与える。`/proc/self`・`/dev/fd` など自分自身を指すパスは前提の外 | pendingの時計は、検査入口の `--r4g-clock` で旧版の包みと同じ値を与える。本物の単調時計でも、確認点を決めて止めた上で同じ位置の `time-limit` になることを確かめる |
+| 実行環境のパスの固定名(2026-11-11 17:58・21:35に拡張・利用者) | 旧スクリプト自身のパス・呼出名・旧版を動かすPythonの標準ライブラリなどの導入先のパスは、固定のファイル名にしてよい。利用者が渡したパスなどへは広げない | 呼出履歴の所在地の欄だけを、位置と出現数を確かめてから固定名へ対応づける |
+| 起動の失敗の `Current thread`(2026-11-11 17:45・利用者) | 旧Pythonが起動の時点で落ちる診断の `Current thread` の値は、位置と形式だけを検査する | 標準入出力がディレクトリの起動で当てる |
+| 標準ライブラリの行番号と途中までの書き込み(2026-11-11 22:26・22:38の追加・利用者) | 標準ライブラリの行番号は、本家のCPython 3.10.11の値に合わせる。本家と違うPython(配布元の修正が入ったUbuntuのPythonなど)とは、その診断を比べない。比べたときは失敗にし、成功やskipにしない。書き込みが途中のバイト数までしか通らない条件では、所在地を固定名に置き換えた故障なしの旧版の出力を、同じバイト数で切ったものをRustの期待にする。置き換えた書き込みが切れないときは、故障なしの旧版の結果に合わせる(故障ありの旧版との終了値の差、例えば120と1は認める) | `check_r4g.py` が、旧版を動かすPythonの版が3.10.11であることと、標準ライブラリ20ファイルのSHA-256(`cpython-3.10.11-stdlib.json`)が本家のソース配布物の値と一致することを確かめ、違えば失敗で止まる |
+| 外部コマンド(2026-11-11 23:19・利用者) | Rustの中で同じ結果を作れる道具は起動しない。ただしR4Gは、設計済みなので例外とし、22:31の決定のまま外部コマンドを旧版と同じに起動してよい(reviews-dirは呼ばれる回数が少ない)。道具がPATHに無い・GNUでない・壊れているときの差は認める | reviews-dirだけ旧版と同じ外部コマンドを起動する。pendingは子を起動しない。implementation-gitの子は旧 `subprocess.run` と同じに起動する(`git` と、事前検査の `bash`) |
+| 書き込みの途中の失敗・記憶域・22:31の一覧に無いPythonの環境変数(2026-11-12 00:28・利用者。R4E #482のAを全コマンドへ) | 書き込みの途中の失敗は、位置が実装で変わる場合に限り、安定した部分を比べる。記憶域の不足は前提の外。22:31の一覧に無い旧Pythonの環境変数(`PYTHONMALLOCSTATS`・`PYTHONPLATLIBDIR`・`PYTHONWARNDEFAULTENCODING`・`PYTHONPYCACHEPREFIX`・`PYTHONEXECUTABLE` など)も再現せず、前提の外にする。`PYTHONOPTIMIZE` と不正な `PYTHONHASHSEED` は再現する | R4Gは書き込みの位置を旧版と同じにするので、この決定で当てるケースは0件(全バイトで比べる) |
+| 中間の書き込み・道具の版・setlocaleの警告(2026-11-12 00:35・利用者。S3D #472のAを全コマンドへ) | 旧版が一時ディレクトリへ中間のファイルを書く所の故障(一時領域が尽きた・書き込みの上限)で旧版が止まる差は認める。Rustがファイルへ書く所の失敗は旧版に合わせる。bashの実行の失敗の扱いやRustが作る失敗の文面と `SHLVL` などの基準は、CIのUbuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9)に固定する。ほかの版との差は認める。入っていないlocaleの指定で出る `setlocale` の警告は、Rustも同じ英語の警告を出す | 比較器が道具の版を確かめ、基準と違う機械ではreviews-dirの比較を失敗にする(Macで同じ版を用意できなければ未実施と記録する)。bash 5.2.21の規則に合わせると、解釈系の無い `#!` の実行の失敗は127になる(5.1・5.3は126) |
+| 旧版の処理系の資源の上限(2026-11-12 00:42・管理担当が利用者の委任で決めた) | `RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK`・メモリ不足での起動の失敗など、旧版の処理系の資源の使い方で失敗する境目が決まる条件は前提の外にする。`RLIMIT_FSIZE` などの書き込みの故障は含めない | 比較器はこれらを設定せず、受け継いだ値を1行記録する |
+| OSが足す子の環境(2026-11-12 02:41・管理担当が利用者の委任で決めた) | 旧版の処理系やOSの部品が子の環境へ自分で足す値(例: Macの旧Pythonの `__CF_USER_TEXT_ENCODING`)は再現しない。比較では、その変数だけを子の環境の比較から外し、値と有無を記録する | implementation-gitとreviews-dirの子の環境の比較に当てる |
+| 順序と時刻とプロセス番号(2026-11-12 06:58・管理担当が利用者の委任で決めた) | 競り合いで結果が変わる場面は、順序を決めた流し方では全部を比べ、決めない流し方では、残るかどうかの一致は求めず、残りうる物の範囲・ほかの出力・終了値を比べて、残った回数を旧版とRustの両方で記録する。実行の時刻で変わる環境変数(`EPOCHSECONDS`・`EPOCHREALTIME`)は、その値の欄だけ、表記の形と、実行の始めから終わりの間にあることを検査する。bashが子の信号での終わりを知らせる行のpidは、番号を伏せて全文を比べ、伏せた番号の並びが、記録した子の番号の並びと等しいことを検査する | reviews-dirの信号の比較に当てる。これで未決は0件になった。比較器は、未決が残れば最終の合格を失敗にする(`--allow-undecided` を付けたときだけ記録して通す) |
+| 閉じた標準fdと書き出しの失敗の文(2026-11-12 08:55・管理担当が利用者の委任で決めた。S3I-A #474から。全コマンド) | 起動時に閉じたfd 0〜2は、Rustの標準の初期化(閉じた0〜2を `/dev/null` で開き直す)のまま使い、旧版との差を認める。製品の入口(`main.rs`)は変えない。書き出しの失敗の文の `encoding='…'` はutf-8にする。`OSError` の2行目のerrnoの文(`strerror`)は、基準の機械の表をRustが持って出す(LinuxはCIのUbuntu 24.04のglibc、MacはCIのmacOS)。表に無いerrnoの差は認めて記録する。待たずに書くpipeの `EAGAIN` と起動の途中の信号は、安定した部分だけを比べる。bashのERRの行番号は旧版と同じにする(差は認めない) | fd 0〜2の起動前の状態は記録せず、閉じたfdの旧版の挙動(`sys.stdout` が無い状態など)は再現しない。閉じたfdのケース(決定名 `rust-std-fd-reopen`)の期待は、閉じたfdを `/dev/null`(読み書き)にして流した旧版の結果とし、全部を比べる。`strerror` の表(決定名 `strerror-table`)は、Linuxは容器のglibc 2.39で作った0〜133の表、MacはAppleのLibcの表である。比較のケースで表に無いerrnoが出るものは、今は無い |
+| bashの動きを変えるほかの環境変数(2026-11-12 09:58・管理担当が利用者の委任で決めた。S3I-A #474から。全コマンド) | `FUNCNEST`・`GLOBIGNORE`・`EXECIGNORE`・範囲の中の `BASH_COMPAT`・`TMOUT` など、bashが環境から読んで動きを変える変数も、`BASH_ENV` などと同じく効果を再現せず、比較の入力に使わない。対象の一覧は、bash 5.2.21の `variables.c` から作り、比較器に固定する。起動時の警告と子の環境へ渡る値は再現する | 比較器の `BASH_BEHAVIOR_ENV`(`BASH_LOADABLES_PATH`・`CHILD_MAX`・`EXECIGNORE`・`FUNCNEST`・`GLOBIGNORE`・`POSIX_PEDANTIC`・`PS4`・`TIMEFORMAT`・`TMOUT`・`TZ`)と範囲の中の `BASH_COMPAT` を、比較の環境から除く。前提の外の項目は `bash-behavior-env`。Rustは元からこれらの効果を再現しない |
+| 呼出元がexportした名前をスクリプトが代入したとき(2026-11-12 14:24・管理担当が利用者の委任で決めた。S3I-A #474から。全コマンド) | 呼出元の環境に旧スクリプトの内部の変数と同じ名前があり、旧bashがその名前を `exec` の時点の値で子へ渡す場合、値をRustで作れるものは再現する。値が旧版の置き場所や旧版が探す処理系の場所で決まるものは再現せず、受け継いだ値をそのまま子へ渡す。その名前だけを子の環境の比較から外し、旧版とRustの値と有無を記録する | reviews-dirで17個(`GIT_PRE`・`TMP`・`ec`・`code`・`reason`・`d`・`SHA_CMD`・`SUB`・`ROOT`・`TOP`・`LIST`・`REVIEWS`・`NAME`・`PUBLISH`・`rc`・`SHA`・`NL`)を再現する。`GIT_PRE` は配列にするので子の環境から消える。比較器は20組で比べ、`REVIEWS_SCRIPT_NAMES` がスクリプトの全代入と一致することを自己検査する。pendingとimplementation-gitは環境を書き換えないので対象外 |
+
+比較の前提の外にした9件は、`decided-differences.json` の `outside_premises` にある(`bash-startup-env`・`python-startup-env`・`self-referring-paths`・`broken-tools`・`intermediate-write-failure`・`memory-exhaustion`・`python-startup-env-more`・`resource-limits`・`bash-behavior-env`)。
+
+- 実時間の境界(120秒・30秒・5秒)は、Linux x86_64の容器で1回ずつ実測した。容器の全体の各回(記録のあるすべての回)で、Gitの30秒は旧版30.0〜30.1秒・Rust 30.0〜30.1秒、事前検査の120秒は旧版120.0〜120.2秒・Rust 120.1秒だった。pendingの5秒は、本物の単調時計で止めた確認点から同じ位置の `time-limit` になった。
+
+#### 管理担当の判断(旧版との差ではなく、設計の記述の読み替え)
+
+1. 完了条件5(読取りでindexや状態を更新しない)は、「statの揃った状態」で確かめる。
+   - 旧版の `run diff` は、中身が同じでstatだけが違うファイルがあると、Gitの自動の取り直しで `.git/index` を書き直す。`GIT_OPTIONAL_LOCKS=0` でも書く(`diff`・`diff HEAD`・`diff --stat`。`status`・`show`・`log`・`ls-files` は書かない)。
+   - Rustも旧版と同じに動く。設計の「読取りでindexや状態を更新しない」は、この自動の取り直しを除いた意味で読む。
+   - 旧版にも `-c diff.autoRefreshIndex=false` を足すかは、旧版の動作を変える話なので、このIssueの範囲の外とする。
+2. 壊れた道具(2026-11-11 23:19の決定)をR4Gに当てる範囲は、旧bashが実行形式でない文字のファイル(shebangの無いもの)をスクリプトとして実行する経路だけに限る。Rustで再現できない経路だからである。
+   - PATHに無い道具・実行権の無いファイル・解釈系の無い `#!`・2進・ディレクトリは、bash 5.2.21の規則で再現して比べる。Rustは、shebangの無い文字のファイルの経路を起動の失敗(126)にする。
+3. 旧bashの `SIGCHLD` の性質は、再現しない事実として記録する(決定の一覧には載せない)。
+   - 旧bashは、`SIGCHLD` の関数(`SA_RESTART`)の中で受けた終わらせる信号の処理が、読んでいるpipeが閉じるまで遅れる。Rustはこれを再現しない。
+   - 順序を決めた比較では、前提(処理していない `SIGCHLD` が無く、待つ呼出しの中で眠っていること)で避ける。順序を決めない流し方で出力や終了値に差が出たら不合格になる。一時ファイルが残るかどうかの差は、06:58の決定の範囲である。
+
+#### CIの形(2026-11-12 12:59の決定)
+
+- 12:59の決定(管理担当が利用者の委任で決めた。R4E #482の知らせから): 新しいコマンドの比較は、`build` と `verify-universal` に入れず、コマンドごとの新しい必須ジョブで流す。既存のジョブの上限は、理由と実測なしに上げない。ジョブを足すときは、`check_workflow.py` の許す形と必須の数え方も同じPRで直す。理由は、`build` の上限の余裕が小さく、担当が並行して比較を足すと越えるためである。
+- R4Gでは、`build` に残すのは `r4g_contract` のビルド(配布でないtarへ入れる)と、exampleの単体検査だけにした。`build`(60分)と `verify-universal`(30分)の上限は、mainのままである。
+- 比較は2つのジョブで流す。
+  - `r4g`: `build` の後に4機種で、`build` のtarを受け取り、2回のビルドの `r4g_contract` のそれぞれで `check_r4g.py` を流す。上限60分。
+  - `r4g-universal`: `combine` の後にMac 2機種で、署名後の `r4g_contract` を流す。上限30分。
+  - `distribution` は、この2つを待つ。落ちたら配布のtarを作らない。
+- `check_workflow.py` は、必須のジョブ(`REQUIRED_NATIVE_JOBS`)と、2つのジョブの工程と機種(`R4G_JOBS`)を確かめる。上限の根拠と見込みは [native/ci/README.md](../native/ci/README.md) にある。CIでの実測は未記録である。
+
+#### 比較器の数え方(流し直しと範囲だけの確認)
+
+- 0.05秒の期限の組は、次の2つのどちらかに当たるときに限り、流し直す。上限は20回で、回数を観測に残す。流し直しは、最後に全部の一致を求める。
+  - 旧版と結果が同じで、違いが「期限の来た子の起動の記録が末尾に1行あるか」だけのとき(`timeout_record_difference`)。途中の行・2行・欠けた行・ほかの子の記録・中身の違いは、直ちに不合格にする。原因は、記録の代用品が期限より前に記録を書けたかが、負荷で変わるためである。
+  - 両方が終了コード20・同じ標準出力で、標準エラーの時間切れの文が1つずつあり、期限の来た工程だけが違うとき(`timeout_stage_difference`)。原因は、どの子で0.05秒の期限が来るかが、負荷で変わるためである。
+- 順序を決めない、コマンド置換の群への信号は、06:58の決定(`race-unordered-outcome`)で、残るかどうかの一致を求めず、範囲だけを確かめて回数を記録する(ケース `reviews-dir/comsub-group-race`)。
+
+#### 起動前の状態の記録のマクロ
+
+- Rustの標準ライブラリは、`main` の前に、閉じたfd 0〜2を `/dev/null` で開き、`SIGPIPE` を無視へ変える。旧PythonとBashは `SIGPIPE` を変えないので、旧版と比べるには、変える前の信号の扱いが要る。
+- 閉じたfd 0〜2は、標準ライブラリの初期化のとおり `/dev/null` で開いたまま使う(2026-11-12 08:55の決定。旧版との差を認める)。fdの起動前の状態は記録しない。記録するのは、継いだ `SIGPIPE` と、信号ごとの起動前の扱いである。
+- `platform` の `r4g_record_startup_state!` を展開した実行ファイルだけが、ローダーが `main` より前に呼ぶ初期化の表(Linuxは `.init_array`、Macは `__DATA,__mod_init_func`)へ記録の関数を載せる。展開してよいのは、検査専用入口 `r4g_contract` の1か所と、`platform` の `startup.rs` の単体テストだけである。
+- 製品の実行ファイル `dev-workflow` は、このマクロを展開しない。製品の動作は変わらない。
+  - 単位1の確かめ(2026-11-12): 製品のmusl releaseの `.init_array` は、基準も `r4g` ありも8バイトで同じ。製品のバイト列は、`libc` の宣言だけを足した版と比べて、差は `.note.gnu.build-id` だけ。72通りの起動の比較も、すべて同じだった。
+  - 942a4deの上でも、同じ確かめ(8 / 8バイト・72通り全部同じ)を繰り返した。
+- R4G が足した自作の `unsafe`(Rustの安全検査を外す書き方)は、`native/crates/platform/src/r4g/` の3つのファイル(`startup.rs`・`fs.rs`・`process.rs`)の中だけに置く。`platform` の公開関数は、安全な関数に限る。
+  - 例外は、公開する `unsafe` 関数 `record_before_std`(`#[doc(hidden)]`。main の前に、展開した側の `static` から呼ぶ形でだけ使う)と、マクロを展開した側(検査専用入口と上の単体テスト)に生まれる `#[unsafe(link_section)]` の `static` である。マクロは外部のcrateのものなので、展開した側の `#![forbid(unsafe_code)]` には当たらない。`scripts/test_native_r4g.py` が、検査入口の先頭が `#![forbid(unsafe_code)]` であることと、`cli` 側の専用モジュールに `unsafe`・`link_section`・`no_mangle`・`export_name` の字面が無いことを、静的に確かめる。
+  - ほかの自作crate(`cli`・`core`)は `#![forbid(unsafe_code)]` のままである。
+- 依存は、R4Rの `libc 0.2.191` の宣言をそのまま使う(`default-features` は変えない)。Rustの依存とcrateの共有ファイル(`Cargo.toml`・`Cargo.lock`・`lib.rs`)へのR4Gの差分は、`native/crates/platform/src/lib.rs` の `pub mod r4g;` の1行だけである。CIの定義と補助(`native/ci/`・`.github/workflows/native.yml`)は、別に直した。
+
+APIは [native/README.md](../native/README.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)、検査手順と手元の実測は [testing.md](testing.md#r4gの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
 - Rust は `native/rust-toolchain.toml` で `1.99.1` に固定する。`rustfmt`・`clippy` を用意し、`Cargo.lock` を共有する。内部の版 `0.1.0` は配布プラグインの版と分ける。
 - `platform` 以外の自作 crate(Rust の部品単位)では `#![forbid(unsafe_code)]` を使う。`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使い、安全な関数だけを外へ公開する。
-  - 例外は、R4U の `platform::check_links::capture_before_main` だけである。main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
+  - 例外は、R4U の `platform::check_links::capture_before_main` と、R4G の `platform::r4g::startup::record_before_std`(`#[doc(hidden)]`)である。どちらも main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
 - ビルドの設定は `native/Cargo.toml`・`native/.cargo/`・`native/ci/` に置く。`.github/workflows/native.yml` の実行コマンドは `native/ci/` のスクリプトを呼ぶだけにする。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外に置く。導入と必須の検査は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)、4 種類の CI と比較の補助は [testing.md](testing.md#rust-の開発と検査段階-0a) に記す。
 - ソース入力の SHA256(内容の違いを確かめるための値)は、`native/` の Git 追跡ファイルだけから作る。パス順に、リポジトリ直下からの相対パス・Git のモード・作業中の本文を、それぞれの長さと一緒に計算へ入れる。
@@ -1504,9 +1619,10 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
   - `rustix` の機能と、依存の版は増やしていない。
 - R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
   - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
-  - 例外が1つある。main の前に static から呼ぶ `capture_before_main` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
+  - 例外が2つある。main の前に static から呼ぶ `capture_before_main`(R4U)と、R4G の `record_before_std` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
   - 検査用の実行物 `native/crates/cli/tests/check_links.rs` は `#![deny(unsafe_code)]` の中で、main の前に呼ぶ static の `link_section` のためだけに `unsafe_code` を許す。cli の `commands/check_links/` は `#![forbid(unsafe_code)]` のまま。
   - `rustix` の機能と、依存の版は増やしていない。
+- R4G(#479)でも、R4Rの `libc 0.2.191` の宣言をそのまま使った。R4G が足した自作の `unsafe` は、`native/crates/platform/src/r4g/` の `startup.rs`・`fs.rs`・`process.rs` だけに置く(`restore_taskmd.rs` には足さない)。旧Pythonの `subprocess`・旧bashの子の起動と信号・起動前の状態の記録が、`std::process::Command` と `rustix` だけでは書けないためである。`rustix` の機能と依存の版は増やしていない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
 - `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLは後のR4Sで局所修正版を採用した。Landlock・kqueueの部品は未採用である。

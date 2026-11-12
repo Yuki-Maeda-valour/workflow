@@ -37,6 +37,8 @@ SCRIPT_COMMAND = re.compile(
 # 段階 0b(#443)の配布の確かめ。配布 commit の浅い clone で、配った入口を起動する。
 # native/ の外に置く(native/ はソース入力なので、0b では変えない)。この 1 行の字面だけを許す。
 DIST_LAUNCH_COMMAND = "python3 -B scripts/check_dist_launch.py --root ."
+# R4G(#479)の比較のジョブの工程全体の上限(分)。根拠は native/ci/README.md の R4G の節(実測と見込み)。
+R4G_TIMEOUTS = {"r4g": 60, "r4g-universal": 30}
 
 
 
@@ -45,8 +47,56 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1)(?: |$)", command)
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4g|r4g-universal)(?: |$)", command)
     return match[1] if match else None
+
+
+# native.yml に必須のジョブ。ジョブを足すときは、この一覧の末尾へ足す(足し忘れで検査が通らなくなる)。
+REQUIRED_NATIVE_JOBS = (
+    "policy",
+    "build",
+    "combine",
+    "verify-universal",
+    "distribution",
+    "r4d1",
+    "r4u",
+    "r4g",
+    "r4g-universal",
+)
+# R4G(#479)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合)。
+R4G_JOBS = (
+    ("r4g", "r4g", set(RUNNERS)),
+    ("r4g-universal", "r4g-universal", {"macos-x86_64", "macos-arm64"}),
+)
+
+
+def check_native_required(document):
+    """native.yml だけに当てる追加の判定(必須のジョブと、比較のジョブの工程・機種)。"""
+    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+        return []
+    jobs = document["jobs"]
+    problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
+    # 比較のジョブの一覧を足すときは、この並びに足す。
+    for name, subcommand, platforms in (*R4G_JOBS,):
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        steps = steps if isinstance(steps, list) else []
+        expected = f"python3 -B native/ci/build.py {subcommand} --platform '${{{{ matrix.platform }}}}'"
+        found = any(
+            isinstance(step, dict) and native_build_command(step.get("run")) == subcommand and step.get("run") == expected
+            for step in steps
+        )
+        if not found:
+            problems.append(f"{name}: build.py {subcommand} の工程が必要です")
+        strategy = job.get("strategy")
+        include = strategy.get("matrix", {}).get("include") if isinstance(strategy, dict) and isinstance(strategy.get("matrix"), dict) else None
+        rows = include if isinstance(include, list) else []
+        got = [row.get("platform") for row in rows if isinstance(row, dict)]
+        if len(got) != len(platforms) or set(got) != platforms:
+            problems.append(f"{name}: matrix の機種は {sorted(platforms)} の {len(platforms)} 機種が必要です")
+    return problems
 
 
 def check_document(document):
@@ -99,6 +149,8 @@ def check_document(document):
         native_timeouts = {"build": 60, "verify-universal": 30, "r4u": 30}
         # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
         native_timeouts["r4d1"] = 30
+        # R4Gは時間の枠に入らないので、別のジョブ(r4g・r4g-universal)で比較する(2026-11-12 12:59 の決定)。
+        native_timeouts.update(R4G_TIMEOUTS)
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -140,6 +192,8 @@ def check_document(document):
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                               and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1"}]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in R4G_TIMEOUTS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -209,6 +263,11 @@ def check_workflows(root=ROOT):
             errors = check_document(read_json(path))
         except (OSError, ValueError) as error:
             errors = [f"JSON 形式の YAML が必要です(重複キーも拒否します): {error}"]
+        if path.name == "native.yml":
+            try:
+                errors = [*errors, *check_native_required(read_json(path))]
+            except (OSError, ValueError):
+                pass
         problems.extend(f"{path.name}: {error}" for error in errors)
     return problems
 

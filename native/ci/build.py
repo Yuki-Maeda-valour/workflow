@@ -27,9 +27,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "r4g_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "r4g_contract")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -44,12 +44,18 @@ R4D1_SUMMARY = re.compile(
 )
 
 
-def run(args, *, env=None, capture=False):
+# R4G の専用比較(check_r4g.py)の1回の上限。手元の Linux x86_64 で約11分、CI の機械では長くなる。
+R4G_TIMEOUT = 3600
+# Ubuntu 24.04 の AppArmor による、利用者の名前空間の制限(R4G の /proc を隠す組が使う)。
+R4G_USERNS_RESTRICT = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
+
+
+def run(args, *, env=None, capture=False, timeout=1800):
     print("+ " + " ".join(map(str, args)), file=sys.stderr, flush=True)
     result = subprocess.run(
         list(map(str, args)), cwd=ROOT / "native", env=env, check=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if capture else None,
-        text=capture, timeout=1800,
+        text=capture, timeout=timeout,
     )
     return result.stdout.strip() if capture else None
 
@@ -163,6 +169,17 @@ def prepare(name):
     run(["rustup", "target", "add", "--toolchain", TOOLCHAIN, target])
 
 
+def prepare_r4g_linux():
+    """R4G の専用比較を Linux で必須の形で流す準備(r4g・r4g-universal のジョブの始めだけ。build・reproduce・
+    distribution では行わない)。strace の記録を必須にする(無ければ入れる)。/proc を隠す組
+    (新しい利用者とマウントの名前空間)のため、GitHub の Ubuntu 24.04 が AppArmor で止めている利用者の名前空間を許す。"""
+    if shutil.which("strace") is None:
+        run(["sudo", "apt-get", "update"])
+        run(["sudo", "apt-get", "install", "-y", "--no-install-recommends", "strace"])
+    if R4G_USERNS_RESTRICT.exists() and R4G_USERNS_RESTRICT.read_text(encoding="ascii").strip() != "0":
+        run(["sudo", "sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"])
+
+
 def identity():
     return {
         "schema_version": 1,
@@ -222,6 +239,7 @@ def quality(name, work):
         run(["cargo", "test", "--locked"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4g_contract"], env=env)
         r4r_map(env, Path(temporary))
 
 
@@ -284,6 +302,17 @@ def r4b_probe(fixture):
 
 def r4r_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_r4r.py", "--fixture", fixture])
+
+
+def r4g_probe(fixture):
+    """R4G の専用比較。Linux は strace の記録と、/proc を隠す組(利用者の名前空間)を必須にする(--require-strace・
+    --require-userns)。既存テストが一時フォルダの下に作る
+    AF_UNIX のソケットのパスは Mac で103バイトまでなので、短い一時フォルダを TMPDIR に渡す。"""
+    linux = platform.system() == "Linux"
+    with tempfile.TemporaryDirectory(prefix="r4g", dir="/tmp") as temporary:
+        env = {**os.environ, "TMPDIR": temporary}
+        run([sys.executable, "-B", ROOT / "native/ci/check_r4g.py", "--fixture", fixture,
+             *(["--require-strace", "--require-userns"] if linux else [])], env=env, timeout=R4G_TIMEOUT)
 
 
 def read_record(folder):
@@ -403,9 +432,42 @@ def r4u(name, work):
         run(list(R4U_COMMAND), env=env)
 
 
+# R4G(#479)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブ(r4g・r4g-universal)で流す
+# (2026-11-12 12:59 の決定)。build に残すのは、r4g_contract のビルド(tar に入れる)と example の単体検査だけ。
+R4G_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def r4g_prepare(name):
+    """機械を確かめ、Linux では strace と利用者の名前空間を用意する(比較器は Linux で両方を必須にする)。"""
+    target_config(name)
+    if name.startswith("linux-"):
+        prepare_r4g_linux()
+
+
+def r4g(name, downloads, work):
+    """build の tar を受け取り、2 回のビルドの r4g_contract のそれぞれで比較する。"""
+    r4g_prepare(name)
+    folder, _ = extract_build(name, downloads, work)
+    for number in (1, 2):
+        r4g_probe(folder / str(number) / "r4g_contract")
+
+
+def r4g_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、r4g_contract で比較する。"""
+    if name not in R4G_UNIVERSAL_PLATFORMS:
+        raise ValueError("r4g-universal は Mac の 2 機種で実行してください")
+    r4g_prepare(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "r4g_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    r4g_probe(fixture)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4g", "r4g-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -413,7 +475,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4g", "r4g-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -440,6 +502,10 @@ def main():
             r4u(args.platform, work)
         elif args.command == "r4d1":
             r4d1(args.platform, work)
+        elif args.command == "r4g":
+            r4g(args.platform, downloads, work)
+        elif args.command == "r4g-universal":
+            r4g_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

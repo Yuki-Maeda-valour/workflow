@@ -2,7 +2,7 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4Rは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/R4Gは既存のCLIへ未接続です。
 R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあり、既存のCLIへ未接続・未配布です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
@@ -27,11 +27,11 @@ R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあ�
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
 - `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・loop-stateの純粋部品・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)、R4Gの起動前の状態の記録・fd相対の読取り・旧版と同じ子の実行(`r4g`)を持ちます。
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
-  - 例外は、R4U の `check_links::capture_before_main` だけです。main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
+  - 例外は、R4U の `check_links::capture_before_main` と、R4G の `r4g::startup::record_before_std`(`#[doc(hidden)]`)です。どちらも main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
 `Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
@@ -357,7 +357,7 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
   - `install_sigint` は、起動時に SIGINT が既定の動作のときだけ、印を立てる処理を `SA_RESTART` なしで置きます。
 - main の前の控え: `capture_before_main`・`captured_before_main`・`sigpipe_ignored_at_start`・`std_valid_at_start`・`restore_start_sigpipe`。
   - `capture_before_main` は、親から受け継いだ SIGPIPE の扱いと、fd 0〜2 が使えるか(Python の `is_valid_fd` と同じ方法)を読むだけです。扱いも fd も errno も変えません。
-  - platform が公開する関数のうち、`unsafe` なのはこの関数だけです(`pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
+  - platform が公開する関数のうち、`unsafe` なのはこの関数と、R4G の `r4g::startup::record_before_std` だけです(どちらも `pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
 - `rustix` に無い `sigaction`・`kill`・`getpid`・`pthread_self` などと libc の `write` は、このファイルの中で `unsafe extern "C"` として宣言し、安全な関数で包みます。`libc` の crate は使いません。
 
 ### main の前に呼ぶ static
@@ -423,6 +423,31 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
 
 比較は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
 
+## 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
+
+#479で旧 `pending-implementation.py`・`reviews-dir.sh`・`implementation-git.py` と同じ結果を返す部品を実装しました。製品CLIの登録表・help・配布・既存呼出元は変えていません。
+製品への接続は、後続の配布タスク(D3・D4)で行います。`implementation-git` の事前検査をRust版へ切り替えるのは、そのうちD3です。契約と決定済みの差は [設計のR4G節](../docs/design.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)にあります。
+
+- `crates/cli/src/commands/` の専用モジュールは4つです。どれも `mod.rs` から `lines.rs` などの部品を持ちます。
+  - `pending_implementation/`: `scan`。`scan.rs`(置き場の走査)・`mark.rs`(印の検査)・`report.rs`(結果のJSONと標準エラーの行)・`system.rs`(OS呼出しの差替え口)・`lines.rs`(旧版の行の固定表)。
+  - `reviews_dir/`: `ensure`・`save-untracked`。`shell.rs`(旧bashの子の起動・信号・EXITの罠)・`locale.rs`(`LC_ALL=C` の英語の診断)・`lines.rs`(旧版の行番号の固定表)。
+  - `implementation_git/`: `prepare`・`run`の5操作。`args.rs`(Python 3.10のargparseと同じ解析)・`help.rs`(helpの全文と折返し)・`path.rs`(`--cwd` と物理パス)・`lines.rs`(呼出履歴の固定表)。
+  - `r4g_support/`: 旧Python 3.10と旧bashの入出力・診断・起動失敗の再現部品。`python_io.rs`(`TextIOWrapper` と同じ時点の書き込み)・`python_startup.rs`(起動の環境変数と起動の失敗の診断)・`bash.rs`・`json.rs`(正準JSON)・`pyint.rs`(`int()` の受理条件)・`strerror.rs`(glibcとlibSystemの英語の文面)・`text.rs`・`traceback.rs`。R4Bの `bytes.rs`・`unicode.rs` は変更せず `#[path]` で取り込みます。
+- `crates/cli/examples/r4g_contract.rs` は検査専用入口です。形は `r4g_contract [--r4g-… の指定]… <コマンド> [引数]…` で、コマンドは `pending-implementation`・`reviews-dir`・`implementation-git` です。
+  - `--r4g-…` の指定は、旧版の起動の形に無い値を検査のときだけ渡す口です。製品のコマンドには接続しません。指定は `--r4g-script-name`・`--r4g-script-file`・`--r4g-output-fault`・`--r4g-clock`・`--r4g-pending-fault`・`--r4g-deadlines`・`--r4g-mutation` です。
+  - 製品の登録表(`COMMANDS`)には載せません。製品の引数・環境変数から保護を外す口はありません。
+  - 起動前の記録のマクロ `r4g_record_startup_state!` を展開するのは、この入口と `platform` の `startup.rs` の単体テストだけです。
+- `crates/platform/src/r4g/` はR4G専用のOS部品です。R4G が足した自作の `unsafe` は、この3つのファイルだけに置きます(`pub mod r4g;` を `lib.rs` に足しました)。
+  - `startup.rs`: 標準ライブラリが `main` の前に変える前の、`SIGPIPE` と信号の扱いの記録と戻し(fd 0〜2は記録しません。2026-11-12 08:55の決定)。旧Pythonの `SIGINT` の扱い。
+  - `fs.rs`: fd相対の `openat`・`fstatat`・readdir・`..`・上限付きの読取り・長いパスでも得られる現在のディレクトリ。
+  - `process.rs`: 旧 `subprocess` と旧bashと同じ子の実行(継承したfdを閉じる・PATHの探索とerrno・環境の辞書・信号の設定とmask)・旧bashの信号の扱いとコマンド置換のサブシェル。
+- `implementation_git::SAFE_GIT`(14項目)と `safe_git_argv()` は、診断9本の移植(R4D)が使う予定の定数です。
+- 比較は `native/ci/check_r4g.py` が行います。決定済みの差の一覧は `native/ci/r4g_fixtures/decided-differences.json` にあります。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example r4g_contract` で52件、`cargo test --locked -p dev-workflow-platform --target x86_64-unknown-linux-musl` の44件(R4Rなどの分を含む)です(手元のLinux x86_64。Macは未確認)。
+
+`libc` は、R4Rが宣言した `0.2.191` をそのまま使います(R4Gは版も機能も変えません)。Rustの依存とcrateの共有ファイル(`Cargo.toml`・`Cargo.lock`・`crates/platform/src/lib.rs`)へのR4Gの差分は、`crates/platform/src/lib.rs` の `pub mod r4g;` の1行だけです。
+[比較の手順と件数](../docs/testing.md#r4gの比較)に従ってください。通常の `cargo test --locked` だけでは、exampleの単体検査と旧版比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -467,10 +492,11 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 ## ビルドと検証
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
-`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix`・R4Rの `libc 0.2.191`(`platform` だけ)と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
+`Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix`・R4Rの `libc 0.2.191`(`platform` だけ。R4Gも同じ宣言を使い、版も機能も変えません)と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
 `rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。
 R4Rも子を `std::process::Command` で起動します。ただし、子だけの `RLIMIT_FSIZE`・余分な fd を継がせない印・子の信号の既定と mask・旧版と同じ `execv` は、exec の前に子の中で動く処理が要ります。そのため `platform` の `restore_taskmd` だけが `pre_exec` と `libc` を使います。最初の信号を記録する処理と mask、Mac の地域設定の判定、環境の `LC_CTYPE` の書き換えも、同じファイルの `unsafe` に置きます。`rustix` の採用の根拠と、R4Rが `libc` と `unsafe` を使う理由は、[設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。R4D-1 が足した自作の `unsafe` は、`platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
+R4Gも `platform` の `libc` を使います。R4G が足した自作の `unsafe` は、`platform` の `r4g` の3つのファイル(`startup.rs`・`fs.rs`・`process.rs`)だけに置き、`restore_taskmd` には足しません。理由と範囲は [設計のR4G節](../docs/design.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)にあります。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
