@@ -20,3 +20,8 @@ sha2.workspace = true
 name = "task_digest"
 path = "tests/task_digest.rs"
 harness = false
+
+[[test]]
+name = "check_links"
+path = "tests/check_links.rs"
+harness = false

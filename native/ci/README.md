@@ -156,6 +156,103 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 R4Rの上記経路はコード上で必須にしました。今回の手元Linux品質検証と、未確認のMac実機・最低OS・最終全回帰テストは区別します。
 上のPR用CI(run 43040473054)では、Mac 2機種が比較器の自己検査で落ちました。直した後のrun 43067201954ではMacの比較の本体が流れ、追加の境界の7件が`__CF_USER_TEXT_ENCODING`の差で落ちました。この1項目を除くようにした後のrun 43085911008では、Mac 2機種の`build`が成功しました。記録は [testing.md](../../docs/testing.md#pr用ciの記録run-43040473054) と、その後の2回の節にあります。
 
+## check_links の必須比較(R4U)
+
+#480の文書のリンク検査の部品は未登録・未配布です。[契約](../../docs/design.md#r4ucheck_linksの文書のリンク検査)と [流し方・件数・時間](../../docs/testing.md#check_links-の比較r4u)を参照してください。
+
+- 比較は、2026-11-12 12:59 の決定のとおり、`build` と `verify-universal` に入れず、必須ジョブ `r4u` で流します(Task 3.1c)。
+- 入口は [専用テスト](../crates/cli/tests/check_links.rs)(`harness = false`)です。
+  - テストの引数 `--r4u-compare` を受けたときだけ、`check_r4u.py --fixture <今回のテスト実行物>` と `test_r4u.py` を起動します。どちらかの失敗・未実行・時間切れ(全体900秒)でテストが落ちます。
+  - 引数が無いとき(`build` の `quality()` が流す、`--r4u-compare` を付けない `cargo test --locked`)は、`R4U の比較は流していない: ` で始まる1行を出して終了0にします。比較の合格には数えません。比較器の結果の行の頭 `R4U の比較: ` とは別の文字列です。
+- `build` に残るのは、単体テスト(`check_links_units`)と `cargo clippy --all-targets` の検査だけです。`reproduce` と `verify-universal` は R4U を流しません。
+- R4U は検査用の実行物を別に作りません。`CI_BINARIES`・`BUILD_FILES`・`UNIVERSAL_FILES` と、配布用の `native-dist.tar` の5ファイルは変わりません。
+
+### ジョブ `r4u` と `build.py r4u`
+
+```sh
+python3 -B native/ci/build.py prepare --platform linux-x86_64
+python3 -B native/ci/build.py r4u --platform linux-x86_64
+```
+
+- `.github/workflows/native.yml` の末尾のジョブ `r4u` は、`build` の後に、`build` と同じ4機種の matrix(`fail-fast` なし)で流れます。上限は30分です。最初の実測(run 43157591744)では、最も長い機械でも3分21秒でした。
+- 手順は5つです。checkout・`check_workflow.py`・`actions/setup-python` の 3.10.11 の3つは、`build` と同じです。続けて `build.py prepare --platform <機械>` と `build.py r4u --platform <機械>` を流します。
+- `build` の成果物は受け取りません。ジョブの中で、検査対象のテストの実行物を作ります。Mac 共通の実行物を作らないので、`combine` の後のジョブはありません。
+- `distribution` の `needs` には入れません(R4E #482 の `r4e` と同じ形)。main に保護の設定は無く、PR 用の CI の全ジョブの成功がマージの条件なので、`r4u` の失敗はマージを止めます。
+- `build.py r4u` は、`--platform` が必須です。Rust が `1.99.1` で、実行中の Python が CPython 3.10.11 であることを確かめます。どちらかが違えば、比較の前に止まります。
+- 確かめた後、その Python を `R4U_PYTHON` に渡して、`cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare` を流します。出力先は、作業フォルダの中の一時フォルダです。比較の失敗は工程全体の失敗です。
+
+### `check_workflow.py` と `test_native_ci.py`
+
+- `check_workflow.py` は、次の3つの集合に `r4u` を入れました。
+  - `native_build_command` が受け付ける操作の名前。ここから欠けると、ジョブ `r4u` の手順を正しい形の `build.py` の呼び出しとして読めず、`native.yml` の検査で不合格になります。
+  - `native_timeouts` のジョブ `r4u` の上限(30分)。上限の違うジョブ `r4u` を拒みます。
+  - `comparison_indices` が数える比較の操作。比較の前に、`actions/setup-python` の手順がちょうど1つあることを確かめます。Python 3.10.11 を用意しないジョブ `r4u` を拒みます。
+- `native_timeouts` と `comparison_indices` から `r4u` が欠けても、`check_workflow.py` は今の `native.yml` を合格にします。上限の違うジョブ `r4u` や、Python 3.10.11 を用意しないジョブ `r4u` も通してしまいます。この欠けは、`build.py test`(`test_native_ci.py` の `R4UConnectionTests`)が見つけます。
+- `build.py` では、操作の選択肢と、`--platform` が要る操作の集合に `r4u` を入れました。
+- `scripts/test_native_ci.py` の `R4UConnectionTests` の10件が、次を確かめます。
+  - `build.py r4u` が、Rust と Python を確かめてから、その Python を `R4U_PYTHON` に渡して比較を流すこと。違う Rust や Python では比較の前に止まること。比較の失敗が工程の失敗になること。
+  - `build.py` の `main` が `r4u` に `--platform` を求め、`r4u` だけを呼ぶこと。`build` が、`--r4u-compare` を付けない `cargo test --locked` を流すこと。
+  - `native.yml` のジョブ `r4u` が、`build` の後に4機種で、上限30分・5手順の形で流れ、`distribution` の `needs` に入らないこと。
+  - `check_workflow.py` の3つの集合の `r4u` が、どれも欠かせないこと。1つずつ除いた版で確かめます。操作の名前を除いた版は、今の `native.yml` を不合格にします。上限と比較の操作を除いた版は、壊れた形(上限の違うジョブ `r4u`・Python 3.10.11 を用意しないジョブ `r4u`)を通し、今の版はそれを拒みます。
+- `build.py test` は80件です(2026-11-12 の手元の実測。commit 841eb03)。
+
+### `check_r4u.py`
+
+旧版(本家 CPython 3.10.11)・固定期待・Rust の検査用の実行物を比べる比較器です。
+
+| 使い方 | 中身 |
+|---|---|
+| `--fixture <実行物>` | 必須のケース508件を比べ、ケースの ID ごとの結果と、組ごとの件数を出す |
+| `--fixture <実行物> --only <ID>` | 調べるための部分実行。結果を表示し、終了2で終わる(合格にしない) |
+| `--measure-cases [--out <ファイル>]` | その OS の旧版で、ケースごとの固定期待(`cases-linux.json` か `cases-macos.json`)を作る |
+| `--measure-step2 [--out <ファイル>]` | 呼出履歴を出している間の失敗と SIGINT の部品ごとの表(`step2.json`)を作る |
+| `--extract-fixture <ログ…> [--out <ファイル>]` | 比較器が CI のログへ出した旧版の値を取り出す。既定の書き先は `cases-macos.json`。全体の形は新しく書き(既にあれば上書きしない)、足す形は既存の項目を変えずに足りないケースだけを足す |
+
+- 旧版を動かす Python は `R4U_PYTHON`(無ければ PATH の `python3`)です。版と、`pathlib.py`・`posixpath.py`・`genericpath.py` の SHA-256 を出します。本家と違うファイルの欄を含むケースは失敗にします。
+- Mac の framework の Python は、起動用のプログラムを通さず、本体を直接起動します。
+- 子の環境は、許すものを並べて一から作ります。子の中の環境変数の名前は、共有ライブラリが記録します。余分な変数と欠けた変数は失敗です。
+- root では失敗します。開ける fd の上限(soft)が64より小さいときも失敗します。
+- その OS の固定期待が無いときと、固定期待に無いケースがあるときは、ほかが全部合格でも不合格です。
+  - 固定期待が無いときは全部のケースを、無いケースがあるときはそのケースだけを、旧版で測ります。測った値は区切りの行の間に出すので、`--extract-fixture` で取り出せます。
+  - 同じ OS の複数の機械のログを渡すと、機械の欄のほかが同じことを確かめて1つにします。ログは行頭が時刻だけの形で渡します(`gh run view --log` の形は読めません)。
+- Mac で行わなくてよいのは、閉じた一覧(`/dev/full` が無い・UTF-8 でない名前を作れない・旧版の試しの書き込みが記録に現れない)のケースだけです。件数と理由を出し、成功に数えません。
+- 信号は、共有ライブラリが決まった write の直後に送るか、子の FIFO の待ちを確かめてから送ります(Linux は `/proc/<pid>/wchan`、Mac は `proc_pidinfo` で読むスレッドの状態)。
+- FIFO の待ちの途中の SIGINT の7件では、旧版と Rust の呼出履歴の最後のフレームが `pathlib.py` の open の行(`File "pathlib.py", line 1119, in open`)であることも確かめます(Task 3.1b)。
+
+### `test_r4u.py`
+
+`check_r4u.py` の自己検査です。79件です。0件・skip・失敗のどれかがあれば終了1です。
+固定名の対応づけ、`Current thread` の形式、部分書き込みの期待、ケースの一覧、未実施の扱い、子の環境の組み立て、旧 Python の確かめを単体で確かめます。
+送った時点の確かめ(最後のフレーム)と、固定期待に無いケースの扱い(旧版で測って不合格にすること・既存の項目を変えずに足すこと)も確かめます。
+実際の子でも、合格するはずの組が合格し、余計な出力・入力の変更・両側の同じ誤り・時間切れ・記録に現れない検査対象・許さない変数を拒むことを確かめます。
+
+### `r4u_write_shim.c`
+
+write(2) の呼び出しを1回ずつ記録し、決めた故障と SIGINT を当てる共有ライブラリです。比較の専用で、製品には入りません。
+
+- 比較器と自己検査が、一時フォルダで `cc -O1 -Wall -Wextra -Werror -fPIC` で組みます。Linux は `-shared`(と `-ldl`)、Mac は `-dynamiclib` です。組めなければ比較全体が失敗です。
+- Linux は `LD_PRELOAD`、Mac は `DYLD_INSERT_LIBRARIES` と `__DATA,__interpose` で `write` を置き換えます。旧 Python と Rust の両方へ、同じ形で差し込みます。
+- 設定は環境変数で渡します。
+  - `R4U_SHIM_LOG`: 記録の書き先です。`fd:<数>` なら受け継いだ fd(パイプ)、ほかはファイルのパス(追記)です。比較器はパイプを使うので、`RLIMIT_FSIZE` の影響を受けません。
+  - `R4U_SHIM_RULES`: `;` で区切った規則です。当てる write は、fd ごとの回数(`nth`)か、中身の頭(`prefix`)と何回目か(`occ`)で選びます。
+  - 動作は `fail`(失敗)・`short`(途中まで書く)・`sigint`(書いた後に自分へ SIGINT)・`quota`(合計の上限)・`cut`(その位置で切り、その後を失敗にする)・`budget`(上限をまたぐ write だけを失敗にする。`RLIMIT_FSIZE` がこう動く OS のための模擬で、CI の4種はどれも当たらなかった)です。`persist=1` で当て続けます。
+- 記録の1行は、1回の write の fd・要求の長さ・戻り値・errno・当てた動作・中身(16進)です。
+- プログラムの始まりに、受け継いだ環境変数の名前を1行記録します。値は `__CF_USER_TEXT_ENCODING`・`__PYVENV_LAUNCHER__` だけを記録します。
+- exec の連鎖でも記録を続けます(Mac の framework の起動用のプログラムが本体を起動し直すときなど)。
+- ファイルへ記録するときは、記録用の fd を200以上へ移します。起動の前に閉じていた fd 0〜2 を使わないためです。
+
+### CI の記録(run 43157591744)
+
+push 用の CI の Native(commit 841eb03)の attempt 2 のジョブ `r4u` の結果です。
+attempt 1 は、build (macos-x86_64) の成果物の保存が GitHub 側の通信の失敗(`ENOTFOUND`)で止まりました。失敗したジョブだけを再実行した attempt 2 で、全13ジョブが成功しました。
+
+- Linux 2種は、508件がすべて合格しました(固定期待と比べた507件)。
+- Mac 2種は、合格492件・未実施16件・不合格0件でした(固定期待と比べた491件)。未実施は閉じた一覧の2条件だけです(`/dev/full` が無い11件・UTF-8 でない名前を作れない5件)。
+- 4種とも、旧版と Rust の試しの書き込みが記録に現れました。自己検査は79件がすべて合格しました。
+- ジョブ `build` では比較が流れませんでした(`R4U の比較は流していない: ` の行があり、`R4U の比較: ` の行はありません)。
+- ジョブ `r4u` の時間は、最も長い Mac x86_64 でも3分21秒でした(上限30分)。機械ごとの時間は [testing.md](../../docs/testing.md#check_links-の比較r4u) の「R4U の時間の記録」にあります。
+- Task 3.1c の前(run 43118591090・commit 5b142a1)は比較が `build` の中で流れ、Mac x86_64 の `build` は43分29秒でした(上限60分)。
+
 ## R4Gの必須比較と検査用実行物
 
 #479の3コマンド(pending-implementation・reviews-dir・implementation-git)は未登録・未配布です。契約と決定済みの差は #479 と `native/ci/r4g_fixtures/decided-differences.json` にあります。

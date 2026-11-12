@@ -6,6 +6,7 @@ pub mod fs;
 
 pub mod process;
 
+pub mod check_links;
 pub mod task_digest;
 
 /// R4B専用の生バイト入出力と直接子の回収。

@@ -3,6 +3,7 @@
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
 `resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/R4Gは既存のCLIへ未接続です。
+R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあり、既存のCLIへ未接続・未配布です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
@@ -30,6 +31,7 @@ R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の�
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
+  - 例外は、R4U の `check_links::capture_before_main` だけです。main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
 `Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
@@ -313,6 +315,84 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 契約と、R4Rでは比べない4件は [設計のR4R節](../docs/design.md#タスク本文の復元の内部部品r4r)にあります。
 [比較の手順と件数](../docs/testing.md#r4rの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
 
+## R4U(check_links)の文書のリンク検査
+
+#480で、旧版 `plugins/dev-workflow/skills/update-doc/scripts/check_links.py` と同じ結果を返す専用の部品を実装しました。
+製品CLIの登録表・help・配布・既存の呼び出し元は変えていません。未登録・未配布です。
+製品の実行物(`dev-workflow`)には入りません。検査用の実行物だけが `#[path]` で読み込みます。
+
+### 入口
+
+- `crates/cli/src/commands/check_links::run(args: &[OsString]) -> ExitCode` が入口です。
+  - `python3 check_links.py <引数…>` で旧版を起動したときと同じ動作をして、終了値を返します。`args` にプログラム名は含めません。
+  - 出力は、実行の途中で、Python と同じ動きをする書き手(`pyio`)が書きます。C0a の `CommandIo`・`execute_to`・`emit_to` は使いません。
+  - SIGINT で中断したときは、既定の動作に戻して自分へ SIGINT を送ります。それでも終わらなければ130を返します。
+  - main の前の控え(下の `capture_before_main`)が無いときは、何も書かずに panic します(呼出元の誤り)。
+- 同じフォルダの部品は次のとおりです。
+
+| モジュール | 受け持ち |
+|---|---|
+| `legacy` | 旧版の `main`・`iter_md_files` を同じ順で行う |
+| `fsops` | pathlib・posixpath を通す OS の呼び出し(`is_dir`・`is_file`・`exists`・`rglob`・`read_bytes`・`resolve`) |
+| `matcher` | 2種類の照合(`links`・`code_paths`・`line_number`・`link_target`・`code_skipped`)。一般的な正規表現は使わない |
+| `path`・`posix` | `PurePosixPath` の整え方・`parent`・`parents`・並べ方と、posixpath の `isabs`・`join`・`split`・`normpath` |
+| `text` | `errors="replace"` の UTF-8 の読み取りと改行のそろえ方(`decode`) |
+| `oserror` | errno から選ぶ例外の種類と、Linux の glibc の文の固定表 |
+| `traceback`・`display` | 呼出履歴の定型(固定名と本家 3.10.11 の行番号)と、呼出履歴・`Exception ignored`・起動の失敗の診断の書き方 |
+| `pyio` | `sys.stdout`・`sys.stderr` に当たる書き手(`TextIOWrapper` と `BufferedWriter` と同じ溜め方) |
+| `startup` | 起動時の環境変数の読み方(`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONUNBUFFERED`・`PYTHONOPTIMIZE`) |
+
+- `crates/cli/src/commands/resolve_task_dir/bytes.rs`(surrogateescape の符号位置と repr)と `crates/cli/src/commands/resolve_task_dir/unicode.rs`(`str.isprintable` の表)を `#[path]` で読み込みます。元のファイルは変えていません。
+
+### platform の部品
+
+`crates/platform/src/check_links.rs` は、本家 3.10.11 の旧版と同じ OS の呼び出しを、1回ずつ行います。
+
+- ファイル: `stat`・`lstat`・`readlink`・`getcwd`・`scandir`・`open_read`(`ReadFile::meta`・`isatty`・`tell`・`read`)・`fstat_std`・`isatty_std`・`os_strerror`(Mac だけが使う)・`write`。
+  - パスは、文字列を連結した完全なパスで受けます。ディレクトリの fd から辿る呼び出し・リンクの拒否・量の上限は加えません。
+  - 開く・読む・書くは EINTR を自動で繰り返しません。呼出元が、Python と同じ所で SIGINT の印を見て、繰り返すかを決めます。
+  - 大きさと回数も旧版に合わせます。`getcwd` は1024バイトずつ広げます。`readlink` は MAXPATHLEN(Linux 4096・Mac 1024)で1回だけ呼びます。一覧は、Linux が glibc の opendir と同じ大きさの `getdents64`、Mac が libc の `opendir`・`readdir` です。
+  - `write` は libc の `write` を1回だけ呼びます。stdout と stderr への書き込みは、すべてこれを通します。
+- 信号: `ignore_sigpipe_and_sigxfsz`・`install_sigint`・`take_interrupt`・`interrupt_pending`・`finish_sigint`・`exit_by_sigint`・`thread_ident`(`pthread_self` の値)。
+  - `install_sigint` は、起動時に SIGINT が既定の動作のときだけ、印を立てる処理を `SA_RESTART` なしで置きます。
+- main の前の控え: `capture_before_main`・`captured_before_main`・`sigpipe_ignored_at_start`・`std_valid_at_start`・`restore_start_sigpipe`。
+  - `capture_before_main` は、親から受け継いだ SIGPIPE の扱いと、fd 0〜2 が使えるか(Python の `is_valid_fd` と同じ方法)を読むだけです。扱いも fd も errno も変えません。
+  - platform が公開する関数のうち、`unsafe` なのはこの関数だけです(`pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
+- `rustix` に無い `sigaction`・`kill`・`getpid`・`pthread_self` などと libc の `write` は、このファイルの中で `unsafe extern "C"` として宣言し、安全な関数で包みます。`libc` の crate は使いません。
+
+### main の前に呼ぶ static
+
+入口を持つ実行物は、main の前に `capture_before_main` を呼ぶ static を置きます。今は検査用の実行物 `crates/cli/tests/check_links.rs` だけが置いています。
+Rust の起動の処理は、main の前に SIGPIPE を無視にし、閉じた fd 0〜2 へ `/dev/null` を開きます。その前に控えるためです。
+製品へつなぐときは、製品の入口にも同じ static が要ります(2026-11-12 04:20 の決定)。08:55 の決定は製品の入口(`main.rs`)を変えないと定めるので、つなぐときに照らし、止まって聞きます([設計の R4U 節](../docs/design.md#r4ucheck_linksの文書のリンク検査))。
+
+```rust
+#[cfg(target_os = "linux")]
+#[allow(unsafe_code)]
+#[used]
+#[unsafe(link_section = ".init_array")]
+static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
+
+#[cfg(target_os = "macos")]
+#[allow(unsafe_code)]
+#[used]
+#[unsafe(link_section = "__DATA,__mod_init_func,mod_init_funcs")]
+static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
+```
+
+### 検査用の実行物
+
+- `crates/cli/tests/check_links.rs`(`harness = false`)は、引数で動きを変えます。
+  - `--check-links-fixture <引数…>`: 実際の標準入出力で、検査対象として `run` を呼びます。
+  - `--check-links-matcher <生成入力の JSON>`: 2種類の照合を全件に当てた結果を JSON で出します。
+  - `--r4u-compare`(`cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare`): `native/ci/check_r4u.py --fixture <自分>` と `native/ci/test_r4u.py` を同時に起動します。どちらかの失敗・未実行・時間切れ(全体900秒)でテストを落とします。
+  - 引数なし(`--r4u-compare` を付けない `cargo test --locked`。CI の `build`): 比較を流さず、`R4U の比較は流していない: ` で始まる1行(流し方を添える)を出して終了0にします。この1行は比較の合格に数えません。
+  - ほかの引数は受け付けません。
+- `crates/cli/tests/check_links_units.rs` は、文字列だけの部品を固定期待(`native/fixtures/r4u/` の `units.json`・`linux.json`・`matcher-corpus.json`)と比べます。18件です。
+
+契約と全コマンド共通の決定の当て方は [設計の R4U 節](../docs/design.md#r4ucheck_linksの文書のリンク検査)にあります。
+[比較の流し方と件数](../docs/testing.md#check_links-の比較r4u)に従ってください。流し方の要点は、[ビルドと検証](#ビルドと検証)の R4U の段落にあります。
+
 ## 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
 
 #479で旧 `pending-implementation.py`・`reviews-dir.sh`・`implementation-git.py` と同じ結果を返す部品を実装しました。製品CLIの登録表・help・配布・既存呼出元は変えていません。
@@ -403,6 +483,7 @@ cargo build --release --locked --target x86_64-unknown-linux-musl
 `cargo test --locked` は、C0bの実ファイル比較、C0cの実子比較、R4Sとtask-digestの固定期待・旧Python・Rustの比較も実行します。`python3`がPython 3.10系であり、root以外の利用者であることが必須です。
 事前にリポジトリ直下で、同じPythonを使い `python3 -m pip install -r requirements-dev.txt` を実行してください。R4SはUnicode 13.0.0とPyYAML 6.0.3を要求します。
 専用比較を省略して合格にはしません。Mac実機と最低OSでのC0b/C0c/R4Sの動作は未確認です。R4SのLinux実装検証と、未実行のPR用必須CIは [検査記録](../docs/testing.md#loop-state用の純粋部品の検査r4s)で区別しています。
+R4Uの比較は、`--r4u-compare` を付けない `cargo test --locked` では流れません(`check_links` のテストは `R4U の比較は流していない: ` で始まる1行を出して終了0)。流すときは `R4U_PYTHON` に本家(CPythonの公式の版)と同じ中身の Python 3.10.11 を渡し、Cコンパイラ `cc` を用意して、`cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare` を流してください。渡さずに作業機の Ubuntu の 3.10.12 で流すと失敗します。CIでは必須ジョブ `r4u` が流します。[手順](../docs/testing.md#check_links-の比較r4u)を参照してください。
 
 release の設定は `codegen-units=1`・`opt-level=3`・`lto="fat"`・`strip="symbols"`・`debug=0`・`incremental=false` です。
 panic の設定は既定のままです。Linux のリンカーは Rust の musl 向けの既定を使います。
