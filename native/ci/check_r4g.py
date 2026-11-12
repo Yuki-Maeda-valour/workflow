@@ -1308,10 +1308,97 @@ def iter_tests(suite):
             yield item
 
 
+# ---------------------------------------------------------------- 旧版の前提(bash 4.0 以上・大文字と小文字の区別)
+
+# 旧版の bash の道具の前提が無い機械(Mac)では、その前提を要る組を未実施と記録する(2026-11-12 00:35 の決定
+# 「Mac で同じ版を用意できなければ未実施と記録する」の当て方。管理担当の 2026-11-13 の判断。S3I-A の前例と同じ)。
+# 基準の機械(Linux)で前提が欠けていれば、未実施にせず失敗にする。
+BASH4_PLACES = ('/opt/homebrew/bin/bash', '/usr/local/bin/bash')
+PREMISE_REASONS = {
+    'bash4': 'この機械に bash 4.0 以上が無い(旧版の diff-snapshot.sh・implement-guard.sh は bash 4.0 以上と GNU の'
+             '道具を要る。2026-11-12 00:35 の決定)',
+    'case': '大文字と小文字を区別しないファイルシステム(Case.txt と case.txt が同じファイルになる)',
+}
+# 既存テストのうち、旧版の前提を要るもの: {(クラス, メソッドか None〈クラスの全部〉): 前提の鍵}。
+EXISTING_PREMISES = {
+    ('PendingOwnerTests', 'test_take_mark_lets_other_projects_continue'): ('bash4',),
+    ('PendingOwnerTests', 'test_take_mark_still_stops_overlapping_or_unknown_work'): ('bash4',),
+    ('PendingOwnerTests', 'test_take_in_outside_worktree_overlaps_through_common_only'): ('bash4',),
+    ('RealRepositoryTests', None): ('bash4', 'case'),
+}
+_MACHINE = {}
+
+
+def find_bash4(candidates=None):
+    """bash 4.0 以上(PATH・/opt/homebrew/bin/bash・/usr/local/bin/bash の順)。無ければ None。"""
+    for candidate in ((shutil.which('bash'), *BASH4_PLACES) if candidates is None else candidates):
+        if not candidate or not os.access(candidate, os.X_OK):
+            continue
+        try:
+            done = subprocess.run([candidate, '-c', 'echo ${BASH_VERSINFO[0]}'], capture_output=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if done.returncode == 0 and done.stdout.strip().isdigit() and int(done.stdout) >= 4:
+            return candidate
+    return None
+
+
+def case_insensitive(directory=None):
+    """一時フォルダのファイルシステムが、大文字と小文字を区別しないか(Case.txt を作り、case.txt で見つかるか)。"""
+    with tempfile.TemporaryDirectory(prefix='r4g-case-', dir=directory) as temp:
+        (Path(temp) / 'Case.txt').write_bytes(b'')
+        return (Path(temp) / 'case.txt').exists()
+
+
+def machine_gaps():
+    """この機械に無い旧版の前提(PREMISE_REASONS の鍵)。1回だけ調べる。"""
+    if 'gaps' not in _MACHINE:
+        gaps = set()
+        if find_bash4() is None:
+            gaps.add('bash4')
+        if case_insensitive():
+            gaps.add('case')
+        _MACHINE['gaps'] = frozenset(gaps)
+    return _MACHINE['gaps']
+
+
+def missing_premises(needs, platform=None, gaps=None):
+    """`needs` のうち、この機械に無い前提の理由の並び。基準の機械(Linux)で欠けていれば失敗にする。"""
+    platform = sys.platform if platform is None else platform
+    gaps = machine_gaps() if gaps is None else gaps
+    missing = [key for key in needs if key in gaps]
+    if missing and platform.startswith('linux'):
+        raise Difference('基準の機械(Linux)に旧版の前提が無い(未実施にしない): '
+                         + '・'.join(PREMISE_REASONS[key] for key in missing))
+    return [PREMISE_REASONS[key] for key in missing]
+
+
+def premises_not_run(test, needs, part=None):
+    """前提が無ければ、テスト(全体か一部の組)を未実施と記録して True。全体のときは、呼んだ後に return する。"""
+    reasons = missing_premises(needs)
+    if reasons:
+        not_run(test, part, '・'.join(reasons))
+    return bool(reasons)
+
+
+def premises_filtered(suite, platform=None, gaps=None):
+    """既存テストのうち、この機械に無い前提を要るもの(EXISTING_PREMISES)を除いて未実施と記録する。"""
+    kept = unittest.TestSuite()
+    for test in iter_tests(suite):
+        name = type(test).__name__.removeprefix('Paired')
+        needs = EXISTING_PREMISES.get((name, test._testMethodName)) or EXISTING_PREMISES.get((name, None)) or ()
+        reasons = missing_premises(needs, platform, gaps)
+        if reasons:
+            NOT_RUN.append((test.id(), None, '・'.join(reasons), False))
+        else:
+            kept.addTest(test)
+    return kept
+
+
 def pending_existing_suite():
     """既存のCLIの24件(PendingCLITests 14・PendingOwnerTests 10)を旧版とRustの組で流す。"""
     wrappers = {(PENDING_TESTS, name): pending_cli_wrapper for name in ('PendingCLITests', 'PendingOwnerTests')}
-    return linux_only_filtered(existing_suite(wrappers, classes=set(wrappers)))
+    return premises_filtered(linux_only_filtered(existing_suite(wrappers, classes=set(wrappers))))
 
 
 def load_correspondence():
@@ -3433,8 +3520,29 @@ def sleeping_in(pid, functions):
     return seen in functions and process_state(pid) == 'S' and not unhandled, seen
 
 
+# 待つ所の名前(/proc/<pid>/wchan)の表。同じ待ち方でも、カーネルの版や関数の埋め込みで名前が変わるので、
+# ここだけで受け付ける名前を決める。表に無い名前で眠っていれば、待つ所の確かめは理由つきで止まる。
+# 根拠(Linux のソース。v6.8・v6.14・v6.15・v6.17 で確かめた):
+# - pipe の読み: v6.14 までは fs/pipe.c の pipe_read。v6.15 で無名の pipe の読みが anon_pipe_read になった
+#   (FIFO は fifo_pipe_read が anon_pipe_read を呼び、眠るのは anon_pipe_read の中)。
+# - 子を待つ: kernel/exit.c の do_wait(v6.8〜v6.17 で同じ。schedule() を呼ぶのは do_wait)。
+# - FIFO を開いて相手を待つ: fs/pipe.c の wait_for_partner(fifo_open から呼ぶ static。埋め込まれれば fifo_open)。
+# - 眠り(nanosleep): do_nanosleep は __sched なので wchan に出ず、呼出し元の hrtimer_nanosleep(v6.8〜v6.17)。
+WCHAN_NAMES = {
+    'pipe_read': ('pipe_read', 'anon_pipe_read'),
+    'do_wait': ('do_wait',),
+    'fifo_open': ('wait_for_partner', 'fifo_open'),
+    'nanosleep': ('hrtimer_nanosleep',),
+}
+
+
+def waits(*kinds):
+    """待ち方の種類(WCHAN_NAMES の鍵)から、受け付ける wchan の名前の並び。"""
+    return tuple(name for kind in kinds for name in WCHAN_NAMES[kind])
+
+
 # 信号を送る前に、群の全員が眠っていてよい待つ所(コマンド置換の pipe を読む・子を待つ・FIFO を開いて待つ)。
-GROUP_WAITS = ('pipe_read', 'do_wait', 'wait_for_partner', 'fifo_open')
+GROUP_WAITS = waits('pipe_read', 'do_wait', 'fifo_open')
 
 
 def group_members(pgid):
@@ -3483,7 +3591,7 @@ def wait_stub_blocked(pid, what='代用品が FIFO を開いて待つ'):
     開く前に信号を受け(開く呼出しが中断されない)、中断されたときと違う出力になる。旧版と Rust の差ではなく、
     比較器の同期の不足なので、送る前にここまで待つ。確かめたカーネル(6.8.0 x86_64)では `wait_for_partner`。
     この関数が呼出し元へ埋め込まれたカーネルでは呼出し元の `fifo_open` になるので、両方を受け付ける。"""
-    wait_sleeping_in(pid, ('wait_for_partner', 'fifo_open'), what)
+    wait_sleeping_in(pid, waits('fifo_open'), what)
 
 
 def wait_state(pid, accept, what, timeout=15):
@@ -3632,8 +3740,8 @@ def ordered_hup_run(world, argv, env, order):
         # 代用品は放す FIFO を開いて待ち、親はコマンド置換の pipe を読む呼出しの中、サブシェルは子を待つ呼出しの
         # 中にいること。
         wait_stub_blocked(stub_pid)
-        wait_sleeping_in(process.pid, ('pipe_read',), f'{order}: 親が pipe を読む')
-        wait_sleeping_in(subshell, ('do_wait',), f'{order}: サブシェルが子を待つ')
+        wait_sleeping_in(process.pid, waits('pipe_read'), f'{order}: 親が pipe を読む')
+        wait_sleeping_in(subshell, waits('do_wait'), f'{order}: サブシェルが子を待つ')
         wait_group_settled(process.pid, f'{order}: シェルの群が待つ')
         stopped = process.pid if order == 'subshell-first' else subshell
         os.kill(stopped, signal.SIGSTOP)
@@ -3641,7 +3749,7 @@ def ordered_hup_run(world, argv, env, order):
         if stopped != process.pid:
             # サブシェルが止まると、親へ SIGCHLD が届く。旧bashは、その関数(SA_RESTART)を終えて読む呼出しへ
             # 戻るまで待ってから送る(関数の中で受けた HUP では、読む呼出しが中断されない)。
-            wait_sleeping_in(process.pid, ('pipe_read',), f'{order}: 親が pipe を読む(止めた後)')
+            wait_sleeping_in(process.pid, waits('pipe_read'), f'{order}: 親が pipe を読む(止めた後)')
         if order == 'after-parent':
             os.kill(process.pid, signal.SIGSTOP)
             wait_state(process.pid, lambda state: state in ('T', 't'), f'{order}: 親を止める')
@@ -3729,7 +3837,7 @@ def signal_run(world, argv, env, target, signal_number, *, launch=None, raw=None
     wait_stub_blocked(stub_pid)
     # シェルは、子を待つか、コマンド置換の pipe を読む呼出しの中にいること(信号を確かめてから呼出しに入る
     # までの隙間に送らない)。
-    wait_sleeping_in(process.pid, ('pipe_read', 'do_wait'), 'シェルが待つ')
+    wait_sleeping_in(process.pid, waits('pipe_read', 'do_wait'), 'シェルが待つ')
     wait_group_settled(process.pid, 'シェルの群が待つ')
     if target == 'process':
         os.kill(process.pid, signal_number)
@@ -3779,7 +3887,7 @@ def ordered_git_signal_run(world, argv, env, order, signal_number, launch=None):
         stub_pid = int(read_fifo(notify).split()[0])
         wait_stub_blocked(stub_pid)
         # シェルは git を待つ呼出しの中にいること。
-        wait_sleeping_in(process.pid, ('do_wait',), f'{order}: シェルが git を待つ')
+        wait_sleeping_in(process.pid, waits('do_wait'), f'{order}: シェルが git を待つ')
         wait_group_settled(process.pid, f'{order}: シェルの群が待つ')
         if order == 'git-first':
             os.kill(process.pid, signal.SIGSTOP)
@@ -3863,23 +3971,29 @@ REVIEWS_COMSUB_POSITIONS = (('mktemp', '', True), ('sha256sum', '', True), ('cut
                             ('python3', 'os.replace', True), ('mv', '', False))
 
 
+def proc_signal_pending(pid, number):
+    """Linux: 信号 `number` の保留の印(スレッドと共有)が立っているか。読めなければ None。"""
+    try:
+        with open('/proc/%d/status' % pid) as handle:
+            fields = {line.split(':')[0]: int(line.split()[1], 16) for line in handle.read().splitlines()
+                      if line.startswith(('SigPnd:', 'ShdPnd:'))}
+    except (OSError, IndexError, ValueError):
+        return None
+    return bool((fields.get('SigPnd', 0) | fields.get('ShdPnd', 0)) & (1 << (number - 1)))
+
+
 def wait_signal_taken(pid, number, timeout=15):
     """Linux: 送った信号 `number` を、プロセスが受け取る(スレッドと共有の保留の印が消える)か、プロセスが
-    終わるまで待つ。受け取らなければ失敗。"""
-    bit = 1 << (number - 1)
+    終わるまで待つ。受け取らなければ失敗。ほかの機種は読めないので、0.5 秒待つだけにする(使うのは Linux
+    だけの組)。"""
+    if not sys.platform.startswith('linux'):
+        time.sleep(0.5)
+        return
     deadline = time.monotonic() + timeout
-    pending = None
     while time.monotonic() < deadline:
         if process_state(pid) in (None, 'Z'):
             return
-        try:
-            with open('/proc/%d/status' % pid) as handle:
-                fields = {line.split(':')[0]: int(line.split()[1], 16) for line in handle.read().splitlines()
-                          if line.startswith(('SigPnd:', 'ShdPnd:'))}
-        except (OSError, IndexError, ValueError):
-            return
-        pending = (fields.get('SigPnd', 0) | fields.get('ShdPnd', 0)) & bit
-        if not pending:
+        if not proc_signal_pending(pid, number):
             return
         time.sleep(0.002)
     raise Difference(f'送った信号 {number} を受け取らない(状態 {process_state(pid)})')
@@ -4161,8 +4275,13 @@ class ReviewsSignals(unittest.TestCase):
                         # 進んでから送る(知らせの後、exec の前に受けると、dash が受けたまま sleep へ進む)。
                         for name, role in (('sha', sha_role), ('cut', cut_role)):
                             wait_sleeping_in(children[name],
-                                             ('hrtimer_nanosleep',) if role == 'dies' else ('do_wait',),
+                                             waits('nanosleep') if role == 'dies' else waits('do_wait'),
                                              f'{variant}: {name} の代用品が待つ')
+                        # シェル(コマンド置換の pipe を読む親と、パイプラインを待つサブシェル)も待つ所に入ってから
+                        # 送る。サブシェルが2つ目の子を起こした後、子を待つ呼出しに入る前に受けると、待つ間の INT の
+                        # 決め方(child_caught_sigint)を通らず、負荷で出力が揺れる(比較器の同期の不足)。
+                        wait_group_settled(process.pid, f'{variant}: シェルの群が待つ',
+                                           functions=GROUP_WAITS + waits('nanosleep'))
                         os.killpg(process.pid, signal.SIGINT)
                         out, err = process.communicate(timeout=30)
                     except BaseException:
@@ -4441,7 +4560,7 @@ def ig_existing_suite():
     wrappers = {(IG_INPUT_TESTS, 'InputCharacterization'): ig_input_wrapper,
                 (IG_GIT_TESTS, 'StubContractTests'): ig_harness_wrapper,
                 (IG_GIT_TESTS, 'RealRepositoryTests'): ig_harness_wrapper}
-    return existing_suite(wrappers, classes=set(wrappers))
+    return premises_filtered(existing_suite(wrappers, classes=set(wrappers)))
 
 
 def ig_load_correspondence():
@@ -4648,6 +4767,33 @@ def shlex_quote(text):
     return "'" + str(text).replace("'", "'\\''") + "'"
 
 
+# 代用品の事前検査で流すときの --accept の値(代用品は値を確かめない。旧版も Rust も同じ値を事前検査へ渡す)。
+IG_STUB_ACCEPT = 'b' * 64
+IG_PRECHECK_REAL_PART = '実の事前検査(diff-snapshot.sh)で承認した組'
+
+
+def ig_precheck_modes(test):
+    """承認した事前検査を使う組の流し方。'real' は実の事前検査(旧版の diff-snapshot.sh は bash 4.0 以上と GNU の
+    道具を要る)、'stub' は、承認の後の実の事前検査と同じ字句(ig_tokens(ig_filters(IG_FILTER)))を返す代用品で、
+    どの機械でも流す(事前検査の後の、子の環境と Git の5操作の比較)。bash 4.0 以上が無い機械では 'real' の組を
+    未実施と記録する(基準の機械〈Linux〉では未実施にせず失敗にする)。"""
+    modes = ['stub']
+    if not premises_not_run(test, ('bash4',), IG_PRECHECK_REAL_PART):
+        modes.insert(0, 'real')
+    return modes
+
+
+def ig_approved(test, mode, make=None):
+    """`mode` の事前検査で承認した (世界, --accept の値, prepare の照合値)。`make` は世界を作る関数(precheck=)。"""
+    make = make or (lambda precheck=None: IgWorld(test, precheck=precheck))
+    if mode == 'stub':
+        world = make(precheck=ig_precheck_stub(ig_tokens(ig_filters(IG_FILTER))))
+        return world, IG_STUB_ACCEPT, world.prepared(IG_STUB_ACCEPT)
+    world = make()
+    accept = world.approval()
+    return world, accept, world.prepared(accept)
+
+
 def ig_tokens(mapping, reverse=False):
     entries = list(mapping.items())
     if reverse:
@@ -4839,62 +4985,62 @@ class IgContract(unittest.TestCase):
             locked.chmod(0o700)
 
     def test_environment_variables_and_child_environment(self):
-        world = IgWorld(self)
-        accept = world.approval()
-        digest = world.prepared(accept)
-        for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
-                    'GIT_ALTERNATE_OBJECT_DIRECTORIES'):
-            for value in ('elsewhere', ''):
-                with self.subTest(key=key, value=value):
-                    old, _, calls = world.pair(world.run_args(digest, 'status', accept=accept),
-                                               env=world.env(**{key: value}))
-                    self.assertEqual(old.returncode, 2 if value else 0)
-        inherited = {'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'filter.old.clean', 'GIT_CONFIG_VALUE_0': 'old',
-                     'GIT_CONFIG_PARAMETERS': "'x.y=1'", 'GIT_LITERAL_PATHSPECS': '1', 'GIT_GLOB_PATHSPECS': '1',
-                     'GIT_NOGLOB_PATHSPECS': '1', 'GIT_ICASE_PATHSPECS': '1', 'GIT_NO_LAZY_FETCH': '0',
-                     'GIT_OPTIONAL_LOCKS': '1', 'GIT_CONFIG_KEY_9': 'x'}
-        for label, changes in (('inherited', inherited), ('lazy-first', {'GIT_TERMINAL_PROMPT': '1'}),
-                               ('pwd', {'PWD': '/', 'OLDPWD': '/'}), ('columns', {'COLUMNS': '20'})):
-            with self.subTest(label=label):
-                env = dict(changes)
-                env.update(world.env())
-                world.pair(world.run_args(digest, 'show', accept=accept), env=env)
+        for mode in ig_precheck_modes(self):
+            with self.subTest(precheck=mode):
+                world, accept, digest = ig_approved(self, mode)
+                for key in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+                            'GIT_ALTERNATE_OBJECT_DIRECTORIES'):
+                    for value in ('elsewhere', ''):
+                        with self.subTest(key=key, value=value):
+                            old, _, calls = world.pair(world.run_args(digest, 'status', accept=accept),
+                                                       env=world.env(**{key: value}))
+                            self.assertEqual(old.returncode, 2 if value else 0)
+                inherited = {'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'filter.old.clean', 'GIT_CONFIG_VALUE_0': 'old',
+                             'GIT_CONFIG_PARAMETERS': "'x.y=1'", 'GIT_LITERAL_PATHSPECS': '1', 'GIT_GLOB_PATHSPECS': '1',
+                             'GIT_NOGLOB_PATHSPECS': '1', 'GIT_ICASE_PATHSPECS': '1', 'GIT_NO_LAZY_FETCH': '0',
+                             'GIT_OPTIONAL_LOCKS': '1', 'GIT_CONFIG_KEY_9': 'x'}
+                for label, changes in (('inherited', inherited), ('lazy-first', {'GIT_TERMINAL_PROMPT': '1'}),
+                                       ('pwd', {'PWD': '/', 'OLDPWD': '/'}), ('columns', {'COLUMNS': '20'})):
+                    with self.subTest(label=label):
+                        env = dict(changes)
+                        env.update(world.env())
+                        world.pair(world.run_args(digest, 'show', accept=accept), env=env)
 
     def test_raw_environment_order_duplicates_and_odd_entries(self):
-        world = IgWorld(self)
-        accept = world.approval()
-        digest = world.prepared(accept)
-        base = [f'{key}={value}'.encode() for key, value in world.env().items()]
-        for label, entries in (('duplicate-path', [b'PATH=/nonexistent'] + base + [b'PATH=/also']),
-                               ('duplicate-git', base + [b'GIT_DIR=', b'GIT_DIR=elsewhere']),
-                               ('odd', [b'=x', b'noequals', b'A=B=C'] + base),
-                               ('non-utf8', base + [b'R4G_X=\xff', b'R4G_\xfe=1'])):
-            with self.subTest(label=label):
-                launch = {'raw_env': [entry.hex() for entry in entries]}
-                world.pair(world.run_args(digest, 'status', accept=accept), launch=launch)
+        for mode in ig_precheck_modes(self):
+            with self.subTest(precheck=mode):
+                world, accept, digest = ig_approved(self, mode)
+                base = [f'{key}={value}'.encode() for key, value in world.env().items()]
+                for label, entries in (('duplicate-path', [b'PATH=/nonexistent'] + base + [b'PATH=/also']),
+                                       ('duplicate-git', base + [b'GIT_DIR=', b'GIT_DIR=elsewhere']),
+                                       ('odd', [b'=x', b'noequals', b'A=B=C'] + base),
+                                       ('non-utf8', base + [b'R4G_X=\xff', b'R4G_\xfe=1'])):
+                    with self.subTest(label=label):
+                        launch = {'raw_env': [entry.hex() for entry in entries]}
+                        world.pair(world.run_args(digest, 'status', accept=accept), launch=launch)
 
     def test_locale_coercion_in_the_child_environment(self):
-        world = IgWorld(self)
-        accept = world.approval()
-        digest = world.prepared(accept)
-        for label, changes in (('coerce', {'LC_ALL': None}), ('coerce-ctype-c', {'LC_ALL': None, 'LC_CTYPE': 'C'}),
-                               ('coerce-lang-c', {'LC_ALL': None, 'LANG': 'C'}),
-                               # POSIX は Linux では C と同じに強制し、Mac の libc は POSIX のまま返すので強制も
-                               # 警告もしない(CPython 3.10.11 の _Py_LegacyLocaleDetected。bpo-30672)。
-                               ('lang-posix', {'LC_ALL': None, 'LANG': 'POSIX'}),
-                               ('warn-all-posix', {'LC_ALL': 'POSIX', 'PYTHONCOERCECLOCALE': 'warn'}),
-                               ('no-coerce', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': '0'}),
-                               ('warn', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': 'warn'}),
-                               ('installed', {'LC_ALL': None, 'LANG': installed_utf8_locale()}),
-                               ('c-all', {'LC_ALL': 'C'})):
-            if label == 'installed' and changes['LANG'] is None:
-                not_run(self, 'installed', 'この機械に UTF-8 の地域設定が無い')
-                continue
-            with self.subTest(label=label):
-                env = world.env(**changes)
-                if label == 'coerce-ctype-c':
-                    env = dict([('LC_CTYPE', 'C')] + [item for item in env.items() if item[0] != 'LC_CTYPE'])
-                world.pair(world.run_args(digest, 'status', accept=accept), env=env)
+        for mode in ig_precheck_modes(self):
+            with self.subTest(precheck=mode):
+                world, accept, digest = ig_approved(self, mode)
+                for label, changes in (('coerce', {'LC_ALL': None}), ('coerce-ctype-c', {'LC_ALL': None, 'LC_CTYPE': 'C'}),
+                                       ('coerce-lang-c', {'LC_ALL': None, 'LANG': 'C'}),
+                                       # POSIX は Linux では C と同じに強制し、Mac の libc は POSIX のまま返すので強制も
+                                       # 警告もしない(CPython 3.10.11 の _Py_LegacyLocaleDetected。bpo-30672)。
+                                       ('lang-posix', {'LC_ALL': None, 'LANG': 'POSIX'}),
+                                       ('warn-all-posix', {'LC_ALL': 'POSIX', 'PYTHONCOERCECLOCALE': 'warn'}),
+                                       ('no-coerce', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': '0'}),
+                                       ('warn', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': 'warn'}),
+                                       ('installed', {'LC_ALL': None, 'LANG': installed_utf8_locale()}),
+                                       ('c-all', {'LC_ALL': 'C'})):
+                    if label == 'installed' and changes['LANG'] is None:
+                        not_run(self, f'{mode}: installed', 'この機械に UTF-8 の地域設定が無い')
+                        continue
+                    with self.subTest(label=label):
+                        env = world.env(**changes)
+                        if label == 'coerce-ctype-c':
+                            env = dict([('LC_CTYPE', 'C')] + [item for item in env.items() if item[0] != 'LC_CTYPE'])
+                        world.pair(world.run_args(digest, 'status', accept=accept), env=env)
         with self.subTest(label='not-installed'):
             # 事前検査の bash は地域設定で警告を変えうるので、出力の無い代用品の事前検査で比べる。
             world = IgWorld(self, precheck=ig_precheck_stub())
@@ -5051,24 +5197,24 @@ class IgContract(unittest.TestCase):
             world.pair(world.run_args(digest, 'status'), env=world.env(path=str(only_bash)))
 
     def test_five_operations_argv_and_paths(self):
-        world = IgWorld(self)
-        accept = world.approval()
-        digest = world.prepared(accept)
-        initial = world.git('rev-list', '--max-parents=0', 'HEAD').stdout.decode().strip()
-        cases = [('status',), ('status', '--format', 'porcelain', '--untracked', 'all'), ('status', '--untracked=no'),
-                 ('diff',), ('diff', '--cached'), ('diff', '--base', initial), ('diff', '--base', initial, '--target',
-                                                                                 'HEAD'),
-                 ('diff', '--format', 'name-status', '--context', '0'), ('diff', '--format=stat', '--context=100'),
-                 ('log',), ('log', '--limit', '1', '--format', 'fuller'), ('log', '--from', initial),
-                 ('log', '--from', initial, '--to', 'HEAD'), ('show',), ('show', '--rev', initial),
-                 ('show', '--format', 'name-only'), ('show', '--file', 'normal.txt'), ('show', '--file', 'link'),
-                 ('show', '--file', 'dir'), ('show', '--file', 'missing'), ('show', '--rev', 'nope'),
-                 ('ls-files',), ('ls-files', '--mode', 'untracked'),
-                 ('status', '--path', 'normal.txt', '--path', '日本語 [a].txt'),
-                 ('ls-files', '--path', 'space name.txt'), ('diff', '--path', '*.txt'), ('log', '--path', 'Case.txt')]
-        for rest in cases:
-            with self.subTest(rest=rest):
-                world.pair(world.run_args(digest, *rest, accept=accept))
+        for mode in ig_precheck_modes(self):
+            with self.subTest(precheck=mode):
+                world, accept, digest = ig_approved(self, mode)
+                initial = world.git('rev-list', '--max-parents=0', 'HEAD').stdout.decode().strip()
+                cases = [('status',), ('status', '--format', 'porcelain', '--untracked', 'all'), ('status', '--untracked=no'),
+                         ('diff',), ('diff', '--cached'), ('diff', '--base', initial), ('diff', '--base', initial, '--target',
+                                                                                         'HEAD'),
+                         ('diff', '--format', 'name-status', '--context', '0'), ('diff', '--format=stat', '--context=100'),
+                         ('log',), ('log', '--limit', '1', '--format', 'fuller'), ('log', '--from', initial),
+                         ('log', '--from', initial, '--to', 'HEAD'), ('show',), ('show', '--rev', initial),
+                         ('show', '--format', 'name-only'), ('show', '--file', 'normal.txt'), ('show', '--file', 'link'),
+                         ('show', '--file', 'dir'), ('show', '--file', 'missing'), ('show', '--rev', 'nope'),
+                         ('ls-files',), ('ls-files', '--mode', 'untracked'),
+                         ('status', '--path', 'normal.txt', '--path', '日本語 [a].txt'),
+                         ('ls-files', '--path', 'space name.txt'), ('diff', '--path', '*.txt'), ('log', '--path', 'Case.txt')]
+                for rest in cases:
+                    with self.subTest(rest=rest):
+                        world.pair(world.run_args(digest, *rest, accept=accept))
 
 
 _COERCED = []
@@ -5374,8 +5520,8 @@ class IgReadonly(unittest.TestCase):
     """完了条件5(implementation-git-readonly): run の5操作を実Gitで流し、前後で .git/index と参照の内容・時刻が
     変わらない(旧版と Rust の両方)。出力と子の起動の列も旧版と比べる。"""
 
-    def world(self):
-        world = IgWorld(self)
+    def world(self, precheck=None):
+        world = IgWorld(self, precheck=precheck)
         # index より古い時刻にそろえてから index を取り直し、racy な項目(index と同じ秒の変更)を作らない。
         past = time.time() - 100
         for path in world.repo.rglob('*'):
@@ -5405,41 +5551,39 @@ class IgReadonly(unittest.TestCase):
         return results
 
     def test_five_operations_do_not_touch_index_or_refs(self):
-        world = self.world()
-        accept = world.approval()
-        digest = world.prepared(accept)
-        for op in self.ops(world):
-            with self.subTest(op=op):
-                results = self.runs(world, op, accept, digest)
-                self.assertEqual([result.returncode for result, _, _ in results], [0, 0])
-                self.assertEqual([changed for _, _, changed in results], [False, False])
-                OBSERVATIONS.append(f'implementation-git-readonly: {" ".join(op)} の前後で index と参照が同じ'
-                                    '(旧版・Rust)')
+        for mode in ig_precheck_modes(self):
+            world, accept, digest = ig_approved(self, mode, self.world)
+            for op in self.ops(world):
+                with self.subTest(precheck=mode, op=op):
+                    results = self.runs(world, op, accept, digest)
+                    self.assertEqual([result.returncode for result, _, _ in results], [0, 0])
+                    self.assertEqual([changed for _, _, changed in results], [False, False])
+                    OBSERVATIONS.append(f'implementation-git-readonly: {" ".join(op)} の前後で index と参照が同じ'
+                                        f'(旧版・Rust。事前検査 {mode})')
 
     def test_stat_only_changes_behave_like_the_old_version(self):
         """中身が同じで stat だけが違うファイルがあるとき。status は index を書かない(GIT_OPTIONAL_LOCKS=0)。
         diff は旧版でも Git の自動の取り直し(diff.autorefreshindex)で index を書く。Rust も同じであることを確かめ、
         旧版の振る舞いとして記録する。"""
-        world = self.world()
-        accept = world.approval()
-        digest = world.prepared(accept)
-        future = time.time() + 1000
-        index = (world.repo / '.git/index').read_bytes()
+        for mode in ig_precheck_modes(self):
+            world, accept, digest = ig_approved(self, mode, self.world)
+            future = time.time() + 1000
+            index = (world.repo / '.git/index').read_bytes()
 
-        def reset():
-            # 旧版と Rust の前に同じ状態(取り直す前の index と、stat だけが違うファイル)へ戻す。
-            (world.repo / '.git/index').write_bytes(index)
-            for name in IgWorld.NAMES[1:]:
-                os.utime(world.repo / name, (future, future))
-        for op in self.ops(world):
-            with self.subTest(op=op):
-                results = self.runs(world, op, accept, digest, reset)
-                changed = [changed for _, _, changed in results]
-                self.assertEqual(changed[0], changed[1])
-                if op[0] != 'diff':
-                    self.assertEqual(changed, [False, False])
-                OBSERVATIONS.append(f'implementation-git-readonly: stat だけが違うとき {" ".join(op)} が index を'
-                                    f'書いた: 旧版 {changed[0]}・Rust {changed[1]}')
+            def reset(world=world, index=index, future=future):
+                # 旧版と Rust の前に同じ状態(取り直す前の index と、stat だけが違うファイル)へ戻す。
+                (world.repo / '.git/index').write_bytes(index)
+                for name in IgWorld.NAMES[1:]:
+                    os.utime(world.repo / name, (future, future))
+            for op in self.ops(world):
+                with self.subTest(precheck=mode, op=op):
+                    results = self.runs(world, op, accept, digest, reset)
+                    changed = [changed for _, _, changed in results]
+                    self.assertEqual(changed[0], changed[1])
+                    if op[0] != 'diff':
+                        self.assertEqual(changed, [False, False])
+                    OBSERVATIONS.append(f'implementation-git-readonly: stat だけが違うとき {" ".join(op)} が index を'
+                                        f'書いた: 旧版 {changed[0]}・Rust {changed[1]}(事前検査 {mode})')
 
 
 class IgRealDeadlines(unittest.TestCase):
@@ -5585,6 +5729,19 @@ def main(argv=None):
     module = load(Path(__file__).with_name('test_r4g.py'), 'r4g_comparator_tests')
     module.subject = sys.modules[__name__]
     count = run_suite(unittest.defaultTestLoader.loadTestsFromTestCase(module.Comparator))
+    uname = os.uname()
+    print(f'R4G: 機械: {sys.platform} {uname.release} {uname.machine}(待つ所の名前は WCHAN_NAMES で受け付ける)')
+    # 旧版の前提(bash 4.0 以上・大文字と小文字の区別)。PATH の外の bash 4.0 以上は、PATH の先頭へ足して旧版にも
+    # Rust にも同じ bash を使わせる。基準の機械(Linux)で欠けていれば、ここで失敗にする(未実施にしない)。
+    bash4 = find_bash4()
+    if bash4 is not None and bash4 != shutil.which('bash'):
+        os.environ['PATH'] = os.path.dirname(bash4) + os.pathsep + os.environ.get('PATH', '')
+        print(f'R4G: PATH の先頭へ足した bash 4.0 以上: {bash4}')
+    _MACHINE.clear()
+    gaps = missing_premises(tuple(PREMISE_REASONS))
+    print(f'R4G: 旧版の前提: bash 4.0 以上 {bash4 or "無し"}・ファイル名の大文字と小文字を'
+          f'{"区別しない" if "case" in machine_gaps() else "区別する"}'
+          + (f'(前提を要る組は未実施と記録する: {"・".join(gaps)})' if gaps else ''))
     print('R4G: 受け継いだ資源の上限(設定しない): ' + ' '.join(
         f'{name}={soft}/{hard}' for name, (soft, hard) in inherited_limits().items()))
     control = 'strace の対照: 未実施(この機械では使えない)'

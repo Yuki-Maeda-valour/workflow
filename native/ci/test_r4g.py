@@ -354,7 +354,8 @@ class Comparator(unittest.TestCase):
                 self.assertEqual(call[0], os.fsencode(str(stub)).hex())
                 self.assertEqual(call[1], [b'-C'.hex(), b'/r'.hex(), b'\xff'.hex()])
                 self.assertEqual(call[2], [item.hex() for item in envp])
-                self.assertEqual(call[3], os.fsencode(temp).hex())
+                # 作業場所は代用品の getcwd(実体のパス。Mac の /tmp は /private/tmp への symlink)。
+                self.assertEqual(call[3], os.fsencode(os.path.realpath(temp)).hex())
             self.assertEqual(len({json.dumps(call[2]) for call in calls}), 4)
             self.m.same_calls('implementation-git', calls[:1], calls[:1])
             for other in calls[1:]:
@@ -665,8 +666,24 @@ class Comparator(unittest.TestCase):
                 pass
             holder.stderr.close()
 
-    @unittest.skipUnless(sys.platform.startswith('linux'), '/proc を読む(Linux だけ)')
+    def not_linux_waits_only(self, wait):
+        """Linux 以外の待ち方: /proc を読まずに 0.5 秒待つだけ(省略にすると比較器の自己検査が落ちるので、
+        その機械の経路を確かめる)。"""
+        def forbidden(*args, **kwargs):
+            raise AssertionError('Linux 以外で /proc を読む関数を呼んだ')
+        with mock.patch.object(self.m, 'group_members', forbidden), \
+                mock.patch.object(self.m, 'sleeping_in', forbidden), \
+                mock.patch.object(self.m, 'proc_signal_pending', forbidden):
+            started = time.monotonic()
+            wait()
+            self.assertGreaterEqual(time.monotonic() - started, 0.45)
+
     def test_group_settled_waits_for_every_member_of_the_group(self):
+        if not sys.platform.startswith('linux'):
+            self.not_linux_waits_only(lambda: self.m.wait_group_settled(os.getpid(), 'self-test', timeout=0.1))
+            self.not_linux_waits_only(lambda: self.m.wait_sleeping_in(os.getpid(), self.m.GROUP_WAITS, 'self-test',
+                                                                      timeout=0.1))
+            return
         # 群の頭(cat)は pipe を読んで眠り、隣の子(sleep)は待つ所の外で 0.4 秒眠る: 隣が終わるまで待つ。
         leader = subprocess.Popen(['sh', '-c', 'sleep 0.4 & exec cat'], stdin=subprocess.PIPE,
                                   stdout=subprocess.DEVNULL, start_new_session=True)
@@ -688,8 +705,10 @@ class Comparator(unittest.TestCase):
             for process in (leader, stuck):
                 process.wait(timeout=10)
 
-    @unittest.skipUnless(sys.platform.startswith('linux'), '/proc を読む(Linux だけ)')
     def test_signal_taken_waits_until_the_pending_mark_is_cleared(self):
+        if not sys.platform.startswith('linux'):
+            self.not_linux_waits_only(lambda: self.m.wait_signal_taken(os.getpid(), signal.SIGUSR1, timeout=0.1))
+            return
         code = ('import signal, sys, time\n'
                 'if sys.argv[1] == "block":\n'
                 '    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})\n'
@@ -739,11 +758,141 @@ class Comparator(unittest.TestCase):
             self.assertIn(cls, manifest['files'][self.m.PENDING_TESTS]['classes'])
             self.assertTrue(hasattr(getattr(module, cls), method), (cls, method))
 
+    def test_bash4_is_searched_in_path_then_homebrew_places(self):
+        with tempfile.TemporaryDirectory() as temp:
+            def fake(name, major):
+                path = Path(temp) / name
+                path.write_text('#!/bin/sh\necho %s\n' % major)
+                path.chmod(0o755)
+                return str(path)
+            old, new, broken = fake('bash3', 3), fake('bash5', 5), fake('broken', 'x')
+            missing = str(Path(temp) / 'missing')
+            self.assertEqual(self.m.find_bash4((old, missing, broken, new)), new)
+            self.assertIsNone(self.m.find_bash4((None, old, missing, broken)))
+        self.assertEqual(self.m.BASH4_PLACES, ('/opt/homebrew/bin/bash', '/usr/local/bin/bash'))
+        self.assertIsInstance(self.m.case_insensitive(), bool)
+
+    def test_missing_premises_are_not_run_elsewhere_and_fail_on_linux(self):
+        both = frozenset({'bash4', 'case'})
+        self.assertEqual(self.m.missing_premises(('bash4',), 'darwin', frozenset()), [])
+        self.assertEqual(self.m.missing_premises(('bash4', 'case'), 'darwin', both),
+                         [self.m.PREMISE_REASONS['bash4'], self.m.PREMISE_REASONS['case']])
+        self.assertEqual(self.m.missing_premises(('case',), 'darwin', frozenset({'bash4'})), [])
+        # 基準の機械(Linux)では未実施にしない(失敗にする)。
+        with self.assertRaisesRegex(self.m.Difference, '基準の機械'):
+            self.m.missing_premises(('bash4',), 'linux', both)
+        self.assertEqual(self.m.missing_premises(('bash4',), 'linux', frozenset()), [])
+
+        class PairedRealRepositoryTests(unittest.TestCase):
+            def test_a(self):
+                pass
+
+        class PairedPendingOwnerTests(unittest.TestCase):
+            def test_take_mark_lets_other_projects_continue(self):
+                pass
+
+            def test_mark_kinds_size_and_format_stop_with_reason(self):
+                pass
+        suite = unittest.TestSuite([PairedRealRepositoryTests('test_a'),
+                                    PairedPendingOwnerTests('test_take_mark_lets_other_projects_continue'),
+                                    PairedPendingOwnerTests('test_mark_kinds_size_and_format_stop_with_reason')])
+        with mock.patch.object(self.m, 'NOT_RUN', []) as records:
+            kept = self.m.premises_filtered(suite, 'linux', frozenset())
+            self.assertEqual(len(list(self.m.iter_tests(kept))), 3)
+            self.assertEqual(records, [])
+            kept = self.m.premises_filtered(suite, 'darwin', frozenset({'case'}))
+            self.assertEqual([test._testMethodName for test in self.m.iter_tests(kept)],
+                             ['test_take_mark_lets_other_projects_continue',
+                              'test_mark_kinds_size_and_format_stop_with_reason'])
+            self.assertEqual([(record[2], record[3]) for record in records], [(self.m.PREMISE_REASONS['case'], False)])
+            records.clear()
+            kept = self.m.premises_filtered(suite, 'darwin', both)
+            self.assertEqual([test._testMethodName for test in self.m.iter_tests(kept)],
+                             ['test_mark_kinds_size_and_format_stop_with_reason'])
+            self.assertEqual(len(records), 2)
+            with self.assertRaises(self.m.Difference):
+                self.m.premises_filtered(suite, 'linux', both)
+        # 事前検査の組: 前提が無い機械では実の事前検査の組を一部の未実施と記録し、代用品の組だけを流す。
+        test = unittest.TestCase()
+        with mock.patch.object(self.m, 'NOT_RUN', []) as records:
+            with mock.patch.object(self.m, 'machine_gaps', lambda: frozenset()):
+                self.assertEqual(self.m.ig_precheck_modes(test), ['real', 'stub'])
+            with mock.patch.object(self.m, 'machine_gaps', lambda: both), mock.patch.object(self.m.sys, 'platform', 'darwin'):
+                self.assertEqual(self.m.ig_precheck_modes(test), ['stub'])
+            self.assertEqual([(record[1], record[3]) for record in records], [(self.m.IG_PRECHECK_REAL_PART, True)])
+            with mock.patch.object(self.m, 'machine_gaps', lambda: both), mock.patch.object(self.m.sys, 'platform', 'linux'):
+                with self.assertRaises(self.m.Difference):
+                    self.m.ig_precheck_modes(test)
+
+    def test_premise_lists_cover_the_tests_that_need_them(self):
+        """前提の一覧が、前提を要るテストとちょうど同じこと(既存テストや比較器に足すと、この検査が更新を促す)。"""
+        import ast
+        manifest = self.m.existing_manifest()
+        pending = self.m.load(self.m.ROOT / 'scripts' / self.m.PENDING_TESTS, 'r4g_premise_pending')
+        git = self.m.load(self.m.ROOT / 'scripts' / self.m.IG_GIT_TESTS, 'r4g_premise_git')
+        for (cls, method), needs in self.m.EXISTING_PREMISES.items():
+            module, file = ((pending, self.m.PENDING_TESTS) if cls.startswith('Pending')
+                            else (git, self.m.IG_GIT_TESTS))
+            self.assertIn(cls, manifest['files'][file]['classes'])
+            self.assertTrue(method is None or hasattr(getattr(module, cls), method), (cls, method))
+            self.assertTrue(set(needs) <= set(self.m.PREMISE_REASONS))
+        # 既存の pending のテストのうち take(implement-guard.sh)を呼ぶものは、bash 4.0 以上の一覧と同じ。
+        source = (self.m.ROOT / 'scripts' / self.m.PENDING_TESTS).read_text(encoding='utf-8')
+        takes = set()
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ClassDef) and node.name == 'PendingOwnerTests':
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and 'self.take(' in ast.get_source_segment(source, item):
+                        takes.add(item.name)
+        self.assertEqual({('PendingOwnerTests', name) for name in takes},
+                         {key for key, needs in self.m.EXISTING_PREMISES.items() if key[0] == 'PendingOwnerTests'})
+        # RealRepositoryTests は、大文字と小文字だけが違う2つの名前と、実の事前検査を使う。
+        names = git.RealRepositoryTests.setUp.__code__.co_consts
+        self.assertTrue(any(isinstance(item, tuple) and {'Case.txt', 'case.txt'} <= set(item) for item in names))
+        # 比較器の中で実の事前検査の承認(approval)を呼ぶのは ig_approved だけ(ほかは代用品の事前検査)。
+        tree = ast.parse(Path(self.m.__file__).read_text(encoding='utf-8'))
+        callers = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef):
+                for inner in ast.walk(node):
+                    if (isinstance(inner, ast.Call) and isinstance(inner.func, ast.Attribute)
+                            and inner.func.attr == 'approval'):
+                        callers.add(node.name)
+        self.assertEqual(callers, {'ig_approved'})
+
     def test_stub_blocked_accepts_the_inlined_fifo_open(self):
         seen = []
         with mock.patch.object(self.m, 'wait_sleeping_in', lambda pid, functions, what: seen.append(functions)):
             self.m.wait_stub_blocked(1)
         self.assertEqual(seen, [('wait_for_partner', 'fifo_open')])
+
+    def test_wait_names_accept_each_kernels_name_for_the_same_wait(self):
+        # 同じ待ち方のカーネルごとの名前(Linux v6.15 で pipe_read が anon_pipe_read になった)。
+        self.assertEqual(self.m.waits('pipe_read'), ('pipe_read', 'anon_pipe_read'))
+        self.assertEqual(self.m.waits('fifo_open'), ('wait_for_partner', 'fifo_open'))
+        self.assertEqual(self.m.waits('do_wait'), ('do_wait',))
+        self.assertEqual(self.m.waits('nanosleep'), ('hrtimer_nanosleep',))
+        self.assertEqual(self.m.GROUP_WAITS, ('pipe_read', 'anon_pipe_read', 'do_wait', 'wait_for_partner', 'fifo_open'))
+        with self.assertRaises(KeyError):
+            self.m.waits('unknown-wait')
+        # 表の名前で眠っていれば待ち終わり、表に無い名前(眠りの hrtimer_nanosleep は群の待つ所でない)なら止まる。
+        def fake(seen):
+            def sleeping(pid, functions):
+                return seen in functions, seen
+            return sleeping
+        for name, settled in (('anon_pipe_read', True), ('pipe_read', True), ('fifo_open', True),
+                              ('hrtimer_nanosleep', False), ('pipe_write', False)):
+            with self.subTest(wchan=name), \
+                    mock.patch.object(self.m, 'sleeping_in', fake(name)), \
+                    mock.patch.object(self.m, 'group_members', lambda pgid: [4242]), \
+                    mock.patch.object(self.m, 'process_state', lambda pid: 'S'), \
+                    mock.patch.object(self.m, 'group_report', lambda pgid: []), \
+                    mock.patch.object(self.m.sys, 'platform', 'linux'):
+                if settled:
+                    self.m.wait_group_settled(1, 'self-test', timeout=1)
+                else:
+                    with self.assertRaises(self.m.Difference):
+                        self.m.wait_group_settled(1, 'self-test', timeout=0.05)
 
     def test_installed_locale_strips_the_runtime_added_variable(self):
         # Mac の旧Pythonが子へ足す __CF_USER_TEXT_ENCODING は、02:41 の決定で外す(このケースも決定の cases にある)。
