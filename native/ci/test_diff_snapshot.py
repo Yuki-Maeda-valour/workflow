@@ -559,6 +559,12 @@ class Utf8Fixed(unittest.TestCase):
             u.same_with_thread(a,Result(20,b'',b'Current thread 0x7f02 (most recent call first):\n',None,None),same_result)
 
 
+def startup_markers_in_code(text,markers):
+    """行コメント(前の空白を除いて//で始まる行。///と//!を含む)を除いた本文にある印を返す。"""
+    code='\n'.join(line for line in text.splitlines() if not line.lstrip().startswith('//'))
+    return [marker for marker in markers if marker in code]
+
+
 class LoaderInitializer(unittest.TestCase):
     """main前の処理は開発用exampleだけに置き、製品が使うplatformには置かない。"""
     def test_only_the_example_registers_startup_state(self):
@@ -567,13 +573,20 @@ class LoaderInitializer(unittest.TestCase):
         for path in sorted((native/'crates/platform/src').rglob('*.rs')):
             text=path.read_text()
             with self.subTest(path=path.name):
-                self.assertFalse(any(marker in text for marker in markers))
+                self.assertFalse(startup_markers_in_code(text,markers))
         example=(native/'crates/cli/examples/diff_snapshot_contract.rs').read_text()
         self.assertEqual(1,example.count('.init_array'))
         self.assertEqual(1,example.count('remember_startup_state'))
         for path in sorted((native/'crates/cli/src').rglob('*.rs')):
             with self.subTest(path=path.name):
                 self.assertNotIn('remember_startup_state',path.read_text())
+
+    def test_marker_scan_ignores_only_line_comments(self):
+        """属性の行は印ありと判定し、doc コメントだけの文字列は印なしと判定する。"""
+        markers=('.init_array','__mod_init_func','link_section')
+        self.assertEqual(['.init_array','link_section'],startup_markers_in_code('#[used]\n#[unsafe(link_section = ".init_array")]\nstatic X: u8 = 0;\n',markers))
+        self.assertEqual(['.init_array'],startup_markers_in_code('const _MARK: &str = ".init_array";\n',markers))
+        self.assertEqual([],startup_markers_in_code('/// Linux は `.init_array`、Mac は `__mod_init_func`。\n    //! link_section\n// .init_array\n',markers))
 
 
 class DynamicAudit(unittest.TestCase):
