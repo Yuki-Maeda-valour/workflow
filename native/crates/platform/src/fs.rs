@@ -101,6 +101,14 @@ pub struct HeldDir {
 }
 
 impl HeldDir {
+    pub(crate) fn from_owned_fd(fd: OwnedFd) -> Result<Self, FsError> {
+        let stat = FileSnapshot::from_stat(fs::fstat(&fd)?);
+        if !stat.is_directory() {
+            return Err(FsError::NotDirectory);
+        }
+        Ok(Self { fd })
+    }
+
     pub fn open_absolute(path: &Path) -> Result<Self, FsError> {
         let raw = path.as_os_str().as_bytes();
         if !raw.starts_with(b"/") || raw.contains(&0) {
@@ -171,6 +179,10 @@ pub struct HeldFile {
 }
 
 impl HeldFile {
+    pub(crate) fn raw_fd(&self) -> std::os::fd::RawFd {
+        std::os::fd::AsRawFd::as_raw_fd(&self.fd)
+    }
+
     pub fn open_at(
         parent: &HeldDir,
         name: &OsStr,

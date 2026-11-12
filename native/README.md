@@ -423,6 +423,36 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
 
 比較は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
 
+## diff-snapshotの全モード(S3D)
+
+#472で、旧`diff-snapshot.sh`の全モードに対応する専用モジュールを実装しました。製品CLIの登録・help・配布・既存呼出元は変えていません。
+
+- `crates/cli/src/commands/diff_snapshot::execute(Vec<OsString>, Signals)`は、`CommandOutput`を返します。`main_entry()`は引数を`args_os()`から取り、信号の受け口を入れて最終の標準エラーを出します。
+- `crates/cli/examples/diff_snapshot_contract.rs`が`main_entry()`だけを呼びます。製品の`dev-workflow`には登録しません。`#![deny(unsafe_code)]`で、起動前の信号とfdの状態を記録する`.init_array`の初期化子だけを例外にしています。
+- 専用モジュールは、引数(`args`・`helper_args`)・GNU ERE(`ere`)・安全なGit実行(`git`)・事前検査(`precheck`)・承認値(`approval`)・profile(`secret_profiles`)・追跡と未追跡の分類(`tracked`・`untracked`)・11節(`report`)・出力(`output`)・公開(`publish`)に分かれます。
+- 外部に起動するのは`git`と`grep`だけです。ほかの道具の処理と失敗の診断は`tools`が持ち、旧版の行番号・文面(`LC_ALL=C`の英語)・終了値に合わせます。`strerror_table`はglibc 2.39の固定表(134件)です。
+- 生バイトの引数・パス・Git出力を`to_string_lossy`で変えません。`legacy_text`は、旧Pythonの`PYTHONINTMAXSTRDIGITS`・不正な`PYTHONHASHSEED`・標準入力がディレクトリのときの起動失敗とUTF-8の診断を受け持ちます。文字コード設定は読みません。
+- `typed_tests`(`cfg(test)`)は、Rustの型で操作を差し替えて、公開の前後・信号・profileの差替え・時刻・書き込みの故障を検査します。通常の入口にはこの差替えを有効にする引数や環境変数がありません。
+
+#### platformの専用部品
+
+- `platform::diff_snapshot::fs`は、保持したディレクトリからのprofile読取り(`current_profile`)・読取りと同時のhash(`read_and_hash`)・生パスの`read_link`と`open_size`・標準fdへの書き込み(`write_standard`)・開始時の場所の保存と復帰(`SavedDirectory`)・OSの`strerror`(`os_strerror`)を持ちます。
+- `platform::diff_snapshot::process`は、旧bashが子の環境へ渡す`LINENO`(`Lineno`)、profile用`git`の10秒つきの取得(`profile_capture`)・期限なしの取得(`capture`)・パイプ(`pipeline`)・bashが子へ渡す環境の再現(`Shell`・`export`)を持ちます。
+- `platform::diff_snapshot::signals::Signals`が、旧bashの信号と終了値を再現します。`locale::lc_all`は、`LC_ALL`に指定したlocaleが入っているかをglibcの規則(Linux)かDarwinの`newlocale`(Mac)で判定し、muslの`setlocale`には聞きません。
+- `Operations`・`Audit`・`AuditScope`・`FaultScope`は、検査用の操作の差替え・読取りの記録・故障の注入です。通常は`NativeOperations`・`NoAudit`が使われます。
+- 残るlibcの直接呼出しの理由は`platform/src/diff_snapshot/mod.rs`の冒頭にあります。`rustix`には`process`・`rand`・`stdio`の機能を足しました。`Cargo.lock`は変わりません。
+
+#### coreの専用部品
+
+- `core::s3d_profile::snapshot_patterns(raw, SnapshotYamlPolicy)`は、1つのprofileの`secret_paths`相当を、`CodepointString`の一覧か`SnapshotProfileError`で返します。既定の追加と重複除去はしません。
+- `SnapshotYamlPolicy::python_3_10(LegacyIntLimit)`は、CPython 3.10.11・PyYAML 6.0.3の再帰条件を使います。`recursion`は旧処理の呼出段数を数え、実スタックの深さを使いません。`legacy_scanner`と`legacy_parser`が、token取得の順と状態遷移を再現します。
+- `validate_glob`はglob1件を検査します。`codec`は、厳密なUTF-8の検査と孤立surrogateの符号化の失敗位置だけを持ちます。
+- `loop_state`には、用途別の入口が必要とする型情報と解析段階の観測を足しました(共有ファイル。既存の入口の受理条件と結果は変えません)。
+
+契約と承認済みの差は [設計のS3D節](../docs/design.md#s3dに限る承認済みの差)にあります。
+比較の流し方・版に依る欄・手元実測は [testing.md](../docs/testing.md#s3dの比較)にあります。
+通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。

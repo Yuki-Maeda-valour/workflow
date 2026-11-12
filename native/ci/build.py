@@ -16,6 +16,7 @@ import unittest
 from binary_tools import check_static_elf, pack_tar, sha256, unpack_tar
 from make_dist import BINARY_PATHS, make_dist, read_json, write_json
 from source_input_hash import ROOT, git, source_input_hash
+import s3d_ci
 
 
 TOOLCHAIN = "1.99.1"
@@ -30,6 +31,9 @@ SOURCE_DATE_EPOCH = "0"
 CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
 EXAMPLES = ("r4b_contract", "r4r_contract")
+# S3D(#472)の検査専用入口。比較は build の外の別ジョブ(s3d・s3d-universal)で流す。
+CI_BINARIES += ("diff_snapshot_contract",)
+EXAMPLES += ("diff_snapshot_contract",)
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -223,6 +227,10 @@ def quality(name, work):
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
         r4r_map(env, Path(temporary))
+        # S3D の example の単体検査。全体の比較は s3d・s3d-universal のジョブで流す。
+        # Linux だけで流す(12:59 の決定の CI の時間。Mac は brew が要るので、s3d ジョブの型検査の記録で兼ねる)。
+        if name.startswith("linux-"):
+            s3d_ci.unit_test(name, work, env, run=run)
 
 
 def r4r_map(env, folder):
@@ -361,6 +369,35 @@ def verify_universal(downloads, work):
     r4r_probe(folder / "r4r_contract")
 
 
+# S3D(#472)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+S3D_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def s3d(name, downloads, work):
+    """build の tar を受け取り、型検査の記録を作ってから、2 回のビルドの diff_snapshot_contract のそれぞれで全体を比較する。"""
+    target_config(name)
+    s3d_ci.prepare_tools(name)
+    folder, _ = extract_build(name, downloads, work)
+    report = s3d_ci.typed_report(name, work, root=ROOT, build_environment=build_environment, run=run)
+    for number in (1, 2):
+        s3d_ci.probe(folder / str(number) / "diff_snapshot_contract", report, work, root=ROOT)
+
+
+def s3d_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、この機械の CPU で全体を比較する。"""
+    if name not in S3D_UNIVERSAL_PLATFORMS:
+        raise ValueError("s3d-universal は Mac の 2 機種で実行してください")
+    target_config(name)
+    s3d_ci.prepare_tools(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "diff_snapshot_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    report = s3d_ci.typed_report(name, work, root=ROOT, build_environment=build_environment, run=run)
+    s3d_ci.probe(fixture, report, work, root=ROOT)
+
+
 def package(downloads, work):
     binaries, targets = [], {}
     for name in ("linux-x86_64", "linux-arm64"):
@@ -405,15 +442,18 @@ def r4u(name, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "s3d", "s3d-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
     try:
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
+            suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1") and not args.platform:
+            parser.error("--platform が必要です")
+        if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -440,6 +480,10 @@ def main():
             r4u(args.platform, work)
         elif args.command == "r4d1":
             r4d1(args.platform, work)
+        elif args.command == "s3d":
+            s3d(args.platform, downloads, work)
+        elif args.command == "s3d-universal":
+            s3d_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

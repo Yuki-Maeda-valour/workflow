@@ -1466,6 +1466,85 @@ EINTR は、信号で呼び出しが中断されたときの失敗である。�
 UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
 比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
 
+### diff-snapshotの全モード(S3D)
+
+[Issue #472](https://github.com/Yuki-Maeda-valour/workflow/issues/472)で、`diff-snapshot.sh`の全モードを開発用Rustソースへ移した。
+製品CLIの登録表・help・既存呼出元・版・`CHANGELOG.md`は変えていない。未登録・未配布であり、配布は段階1b・プラグインv4.53.0のままである。
+
+- 入口は`cli/examples/diff_snapshot_contract.rs`だけである。`cli/src/commands/diff_snapshot/`が、引数・事前検査・承認値・profile・分類・11節・patch公開を受け持つ。
+- 対象は通常・`--precheck`・`--print-exclude-ere`・`--exclude-glob`・`--exclude`・`--secret-profile-ref`・`--secret-profile-union-sha256`・`--pre-untracked`系・`--max-untracked-bytes`・`-h`・`--accept`・`--patch-out`・`--patch-base`である。
+- 終了値は0/2/4/20/21/22を旧版に合わせる。11節の順序は`追跡差分(stat)`から`gitignore により除外(.gitignore 以外)`までを固定する。
+- 外部の道具として起動するのは`git`と、GNU ERE照合などに使う`grep`だけである。旧版が起動する`mktemp`・`mkdir`・`cp`・`mv`・`rm`・`find`・`sed`・`sha256sum`などはRustの中で処理する。
+  - 旧版が起動する`git`と`grep`は、旧版と同じ引数・環境・入出力の向きで起動する。旧版が出力をファイルへ向ける呼出しは、Rustもファイルへ向ける。
+  - 起動しない道具の失敗の診断は、基準の版の英語の文面(`LC_ALL=C`)をRustが作る。文面は`cli/src/commands/diff_snapshot/tools.rs`と固定表`strerror_table.rs`が持つ。
+  - 旧版604行のhelperの場所の解決(`dirname`)は行わない。出典は2026-11-12 00:00の#472への回答(「helperの場所は求めない」)である。
+- profileは`python3`・`PyYAML`・helperを使わない。`core/src/s3d_profile/`が用途別のYAML受理と、旧Pythonの呼出段数に合わせた再帰条件を持つ。
+  - 既定・現在・refの順の和集合、初出順の重複除去、NUL区切りの確認値は旧版と同じである。
+  - `core/src/s3d_profile/codec.rs`は厳密なUTF-8の検査と、孤立surrogateの符号化の失敗位置だけを持つ。codecの表は置かない。
+- 機密本文は、Gitが比較のために内部で読むことだけを旧版どおり許す(2026-11-11の利用者決定A)。
+  - Markdown・patch・標準出力・標準エラー・ログへ本文を出さない。
+  - 機密判定の後に、本文表示・大きさ検査・binary検査・hash計算のために機密本文を開かない。旧版より読取りを増やさない。
+- 公開は2ファイル一括の原子的操作ではない。patchを先に公開し、Markdown公開前の失敗ではpatchを除き、公開後の信号では両方を残す旧動作を保つ。
+- 比較の基準は、Ubuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・grep 3.11・glibc 2.39)、CPython 3.10.11、PyYAML 6.0.3である。
+  - `strerror`の文は、Linuxでは基準のglibc 2.39の固定表(134件)を使う。CIのLinux実行ファイルは静的なmuslで、libcの文がglibcと違うためである。
+  - 基準と違う機械では、版に依る欄(Rustが作る道具の文・bash自身の文・`SHLVL`・bashの起動時の警告)だけを失敗か未実施として記録し、成功に数えない。ほかの欄は比べる。
+
+#### S3Dに限る承認済みの差
+
+出典は#472の追加修正記録と、2026-11-11〜11-12の利用者決定である(全コマンド共通の決定を含む)。
+旧版・旧自己テストの通常比較は変更しない。ほかのコマンドの承認差は流用せず、ここにない差は認めない。
+Git内部の機密本文の読取り(決定A)は、旧版と異なる結果を許すものではない。
+
+1. 旧版の実行環境のパス(旧スクリプト自身の呼出名・`secret-profiles.py`の所在地・旧Pythonの標準ライブラリの導入先・bash起動時の警告の先頭のbash名)は、固定のファイル名にする(11-11 17:58・21:35・22:26)。
+   - 書き込みが途中のバイト数までしか通らない故障では、固定名へ置き換えた出力を同じバイト数で切ったものを期待にする。置き換えた書き込みが切れない場合は、故障のない旧版の結果に合わせ、終了値の差(例: 120と1)を認める(11-11 22:38)。
+2. 旧Pythonが起動時に落ちる診断の`Current thread`の値は、一致を求めず、位置と形式だけを検査する(11-11 17:45)。
+3. Pythonの文字コード設定(`PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・locale・ファイル名の文字コード)だけで変わる差は、UTF-8と`surrogateescape`へ固定する。標準エラーの`backslashreplace`と生バイトは保つ(11-11 22:24)。
+   - 未知のcodec名などによる旧Pythonの起動失敗は、Rustでは起きない差とする。
+   - 整数変換の上限・端末幅・出力のバッファ・再帰の上限・入出力の故障・標準入力がディレクトリの起動失敗は、旧版に合わせる。
+4. 旧bashと旧Pythonの起動を変える設定の効果は再現せず、比較の前提の外にする(11-11 22:31・11-12 00:28)。
+   - bashは`BASH_ENV`・`BASH_FUNC_<名>%%`・`SHELLOPTS`・`BASHOPTS`・`POSIXLY_CORRECT`である。
+   - Pythonは`PYTHONPATH`・`sitecustomize`・`PYTHONHOME`・`PYTHONWARNINGS`・`PYTHONMALLOC`・`PYTHONDEVMODE`などと、`PYTHONMALLOCSTATS`・`PYTHONPLATLIBDIR`などである。
+   - `PYTHONINTMAXSTRDIGITS`・不正な`PYTHONHASHSEED`・`COLUMNS`は旧版どおり再現する。`PYTHONOPTIMIZE`は出力を変えないことを確かめる。
+   - 記憶域の不足と、自分自身を指すパス(`/proc/self`・`/dev/fd`など)も前提の外にする。
+   - `RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK`など処理系の資源で失敗の境目が決まる条件は前提の外にする。比較器は設定せず、受け継いだ値を記録する(11-12 00:42)。`RLIMIT_FSIZE`の書き込み故障は比べる。
+5. 書き込みの途中の失敗(`ENOSPC`・`EFBIG`・`EIO`など)で位置が実装で変わる場合は、終了値・空の標準出力・呼出履歴の先頭から呼出元の行まで・各呼出履歴の最後の行・入力の無変更・ほかのファイルを作らないことを比べる。呼出履歴の内側の行と部分ファイルの中身は比べない(11-12 00:28)。
+6. 外部の道具を起動しない差(11-11 23:19)。
+   - 道具がPATHに無い・GNUでない・壊れているときの差を認める。
+   - 旧helperの`python3`・使い方の`sed`・helperの場所を求める`dirname`は、Rustが起動しない。
+   - Rustは、旧版と同じ失敗の診断・終了値・行番号を、基準の版の文面で作る。
+7. 中間の書き込みの故障と道具の版(11-12 00:35)。
+   - 旧版が一時ディレクトリへ中間のファイルを書く所の故障(一時領域が尽きた・書き込みの上限)で旧版だけが止まる差を認める。Rustが中で持つ値の書き込み故障と、それだけに現れる`PYTHONUNBUFFERED`の効果は再現しない。
+   - Rustもファイルへ書く所(`git`の出力や入力をファイルへ向ける呼出し・使い捨てindex・報告とpatchの公開)の失敗は、旧版に合わせる。
+   - 基準と違う版の道具の文面と`SHLVL`の差を認める。比較器は版を確かめ、基準と違う機械では失敗か未実施にする。
+   - bashのsetlocale警告は、旧版が出す条件(入っていないlocaleを`LC_ALL`に指定したとき)でRustも出す。差は警告の文の言語だけである。
+8. 子の環境に旧版の処理系やOSの部品が足す値(Macの旧Pythonが足す`__CF_USER_TEXT_ENCODING`)は再現しない。Macでprofile用`git`の子の環境の比較から、この変数だけを外し、値と有無を記録する(11-12 02:41)。
+9. `python3`・`PyYAML`・helperが無い環境では、旧版は終了20で止まる。Rustは製品からPythonへの依存を無くす#400の決定D5に従い、正常な環境と同じ結果を返す。この差は3条件(`python3`なし・profileがあるのに`PyYAML`なし・helperなし)だけに限る。
+
+後から出た全コマンドの決定の当て方(#472の追加修正記録の2026-11-12 07:39・10:58の節による)。
+
+- 06:58(競り合い・実行時刻で変わる環境変数・実行ごとに変わるプロセス番号):
+  - 旧bashが前景の子の信号での終わりを知らせる行は`Terminated`・`Hangup`だけで、番号を含まない。番号の照合を当てる場面は無い。
+  - 公開の途中の信号は、順序を決めた同期点で流し、全部を比べる。
+  - 時刻で変わる環境変数(`EPOCHSECONDS`・`EPOCHREALTIME`)は、旧版が子の環境を組み直した時の値を渡す。比較器は、形と、各実行の始めから終わりの間にあることだけを検査し、ほかは全部を比べる(群`dynamic-*`)。
+  - 当てる場面が見つかったときは、その決定を当てて記録する。
+- 08:55:
+  - 起動時に閉じた標準fd(0〜2)は、開発用exampleが起動前の状態を記録し、旧版どおりに動く。固定入力72件が旧版と一致しており、決定が認める差は使わない。製品の入口へつなぐ配布のタスクでは、決定のとおりRustの標準の初期化を使い、旧版との差を認めてよい。
+  - 旧Pythonが子へ足す`LC_CTYPE=C.UTF-8`は起きない。旧版は`LC_ALL=C`をexportしてからhelperを起動するため、旧Pythonのlocaleの強制が働かない。子の環境の集合の比較で確かめる。
+  - `strerror`の文は、Linuxは基準のglibc 2.39の固定表、MacはCIのmacOSの`strerror`を使う。表に無いerrnoが出たときは、差を認めて記録する。
+  - bashのERRの行番号は旧版と同じ番号を出す(差を認めない)。
+- 09:58と起動時の警告・`LINENO`: bashが環境から読み込んで動きを変える変数(`FUNCNEST`・`GLOBIGNORE`・`EXECIGNORE`・範囲の中の`BASH_COMPAT`・`TMOUT`など)は、効果を再現せず、比較の入力に使わない。
+  - 対象の一覧は、bash 5.2.21の`variables.c`の初期化と`sv_*`の代入の処理から作り、比較器に固定する。一覧は`native/ci/diff_snapshot_fixtures/bash_behavior_vars.json`に固定した。
+  - 起動時の警告(setlocale・`SHLVL`・範囲外の`BASH_COMPAT`・整数でないか閉じた番号の`BASH_XTRACEFD`)と子の環境へ渡る値は、これまでの決定どおり再現する。
+  - 子の環境の`LINENO`は、旧bashが子の環境を最後に組み直した行になる。Rustは旧版の行を各起動場所で渡して合わせる。`EPOCHSECONDS`・`EPOCHREALTIME`は子の起動時刻にする。
+
+```text
+旧 diff-snapshot.sh ──┐                     ┌─ 終了値・標準出力・標準エラー
+(bash+旧helper)       ├─ 同じ物理入力 ────→ ├─ Markdown・patchの生バイト
+diff_snapshot_contract ┘                     └─ 入力の無変更・公開状態・子の終了
+```
+
+APIは [native/README.md](../native/README.md#diff-snapshotの全モードs3d)、比較の流し方と手元実測は [testing.md](testing.md#s3dの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

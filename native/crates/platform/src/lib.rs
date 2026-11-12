@@ -14,3 +14,6 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// S3D専用の差分スナップショットの OS の操作。
+pub mod diff_snapshot;

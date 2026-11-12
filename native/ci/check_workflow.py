@@ -45,6 +45,13 @@ CONCURRENCY = {
     "group": "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
 }
+# S3D(#472)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+# s3d は build の tar の 2 回分を 4 機種で、s3d-universal は署名後の Mac のファイルを両 CPU で比較する。
+S3D_OPERATIONS = {"s3d": set(RUNNERS), "s3d-universal": {"macos-x86_64", "macos-arm64"}}
+# 上限は、比較 1 回の上限 60 分 × 回数(2・1)に、準備の 30 分を足す(内側の上限で先に止まる)。
+S3D_TIMEOUTS = {"s3d": 150, "s3d-universal": 90}
+# S3D の版に依る欄の基準は CI の Ubuntu 24.04 の版。Linux の比較はこの機械で流す。
+S3D_BASE_RUNNERS = {"linux-x86_64": "ubuntu-24.04", "linux-arm64": "ubuntu-24.04-arm"}
 
 
 
@@ -54,6 +61,8 @@ def native_build_command(command):
     if not isinstance(command, str):
         return None
     match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1)(?: |$)", command)
+    # 上の行の目印(test_native_ci.py の R4U_ENTRIES)と重ならないよう、接頭辞と操作名を分けて書く。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (s3d-universal|s3d)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -112,6 +121,7 @@ def check_document(document):
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
         # R4U(#480)の比較は build の枠に入れず、ジョブ r4u で流す(2026-11-12 12:59 の決定)。
         native_timeouts = {"build": 60, "verify-universal": 30, "r4u": 30}
+        native_timeouts.update(S3D_TIMEOUTS)
         # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
         native_timeouts["r4d1"] = 30
         steps = job.get("steps")
@@ -155,6 +165,8 @@ def check_document(document):
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                               and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1"}]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in S3D_OPERATIONS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -207,6 +219,38 @@ def check_document(document):
                     problems.append(f"{name}: persist-credentials: false が必要です")
                 if settings.get("ref") != SOURCE_REF or settings.get("repository") != SOURCE_REPO:
                     problems.append(f"{name}: PR のソース SHA とリポジトリを明示してください")
+    problems.extend(check_s3d_jobs(jobs))
+    return problems
+
+
+def check_s3d_jobs(jobs):
+    """build を流すワークフローでは、S3D の比較のジョブを必須にする(機種をそろえ、省けない形に限る)。"""
+    found = {operation: [] for operation in S3D_OPERATIONS}
+    builds = False
+    for job in jobs.values():
+        steps = job.get("steps") if isinstance(job, dict) else None
+        for step in steps if isinstance(steps, list) else []:
+            operation = native_build_command(step.get("run") if isinstance(step, dict) else None)
+            builds = builds or operation == "build"
+            if operation in found:
+                found[operation].append((job, step["run"]))
+    if not builds:
+        return []
+    problems = []
+    if any(RUNNERS.get(platform) != runner for platform, runner in S3D_BASE_RUNNERS.items()):
+        problems.append("S3D の Linux の比較は基準の版の機械(Ubuntu 24.04)で流します")
+    for operation, platforms in S3D_OPERATIONS.items():
+        if len(found[operation]) != 1:
+            problems.append(f"S3D の比較のジョブ({operation})が 1 つ必要です")
+            continue
+        job, command = found[operation][0]
+        matrix = job.get("strategy", {}).get("matrix", {}) if isinstance(job.get("strategy"), dict) else {}
+        rows = matrix.get("include") if isinstance(matrix, dict) else None
+        listed = [row.get("platform") for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        if sorted(listed) != sorted(platforms) or job.get("runs-on") != "${{ matrix.runner }}":
+            problems.append(f"S3D の比較を流す機械がそろっていません({operation})")
+        if command != f"python3 -B native/ci/build.py {operation} --platform '${{{{ matrix.platform }}}}'":
+            problems.append(f"S3D の比較は matrix の機械ごとに流してください({operation})")
     return problems
 
 
