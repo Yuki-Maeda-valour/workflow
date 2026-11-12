@@ -1962,6 +1962,315 @@ def make_stage2a():
     return {"specs_cases.json": specs_cases(), "settings_cases.json": settings_cases(), "inventory_cases.json": inventory_cases(), "state_cases.json": state_cases()}
 
 
+# ---------------------------------------------------------------- 子の起動(2b-1a)
+# 旧版の `subprocess.Popen`(Python 3.10)の PATH の探し方・信号・fd・returncode を測る。
+# Rust の platform の単体テストが同じ配置を作って同じ結果を期待する。一時フォルダは
+# 環境変数 S2E_FIXTURE_TMP の下(無ければ OS の既定)に作り、自分で作ったものだけを消す。
+
+TRACKED_SIGNALS = ["INT", "USR1", "USR2", "PIPE", "XFSZ"]
+
+
+def _child_layout(root, entries):
+    for entry in entries:
+        path = os.path.join(root, entry["path"])
+        kind = entry["kind"]
+        if kind == "dir":
+            os.makedirs(path, exist_ok=True)
+            continue
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        if kind == "dangling":
+            os.symlink("nowhere", path)
+            continue
+        tag = entry.get("tag", "x")
+        body = {
+            "exec": "#!/bin/sh\necho %s\n" % tag,
+            "noexec": "#!/bin/sh\necho %s\n" % tag,
+            "shebangless": "echo %s\n" % tag,
+            "file": "plain\n",
+        }[kind]
+        with open(path, "w") as handle:
+            handle.write(body)
+        os.chmod(path, 0o644 if kind in ("noexec", "file") else 0o755)
+
+
+def _child_outcome(argv, env, cwd, stdin_data=None, stderr="devnull"):
+    import errno
+    import subprocess
+
+    try:
+        proc = subprocess.Popen(
+            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL if stderr == "devnull" else None, env=env, cwd=cwd)
+    except OSError as error:
+        target = "none"
+        if error.filename is not None:
+            target = "executable" if error.filename == argv[0] else "cwd"
+        return {"error": errno.errorcode[error.errno], "target": target, "type": type(error).__name__}
+    out, _ = proc.communicate(stdin_data)
+    return {"stdout": out.decode(), "returncode": proc.returncode}
+
+
+def _child_path_cases(root):
+    tool = lambda d, kind="exec", tag=None: {"path": d + "/tool", "kind": kind, "tag": tag or d}
+    cases = [
+        ("second-dir", [{"path": "d1", "kind": "dir"}, tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("first-wins", [tool("d1"), tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("noexec-then-ok", [tool("d1", "noexec"), tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("noexec-only", [tool("d1", "noexec")], "{r}/d1:{r}/d2", "tool", None),
+        ("notdir-then-missing", [{"path": "d1", "kind": "file"}, {"path": "d2", "kind": "dir"}], "{r}/d1:{r}/d2", "tool", None),
+        ("notdir-then-noexec", [{"path": "d1", "kind": "file"}, tool("d2", "noexec")], "{r}/d1:{r}/d2", "tool", None),
+        ("enoexec-then-ok", [tool("d1", "shebangless"), tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("enoexec-only", [tool("d1", "shebangless")], "{r}/d1", "tool", None),
+        ("enoexec-then-eacces", [tool("d1", "shebangless"), tool("d2", "noexec")], "{r}/d1:{r}/d2", "tool", None),
+        ("eacces-then-enoexec", [tool("d1", "noexec"), tool("d2", "shebangless")], "{r}/d1:{r}/d2", "tool", None),
+        ("dir-named-tool-then-ok", [{"path": "d1/tool", "kind": "dir"}, tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("dir-named-tool-only", [{"path": "d1/tool", "kind": "dir"}], "{r}/d1", "tool", None),
+        ("dangling-then-ok", [{"path": "d1/tool", "kind": "dangling"}, tool("d2")], "{r}/d1:{r}/d2", "tool", None),
+        ("missing-everywhere", [{"path": "d1", "kind": "dir"}], "{r}/d1:{r}/d2", "tool", None),
+        ("empty-path-entry-uses-cwd", [tool("work")], "", "tool", "{r}/work"),
+        ("empty-entry-in-middle", [tool("work"), {"path": "d1", "kind": "dir"}], "{r}/d1::{r}/d2", "tool", "{r}/work"),
+        ("relative-entry-after-chdir", [tool("work/rel")], "rel", "tool", "{r}/work"),
+        ("relative-entry-not-from-parent-cwd", [tool("rel"), {"path": "work", "kind": "dir"}], "rel", "tool", "{r}/work"),
+        ("trailing-slash-entry", [tool("d1")], "{r}/d1/", "tool", None),
+        ("slash-in-name-skips-path", [tool("d1")], "{r}/d1", "{r}/d1/tool", None),
+        ("slash-in-name-missing", [{"path": "d1", "kind": "dir"}], "{r}/d1", "{r}/d1/tool", None),
+        ("relative-slash-name-uses-cwd", [tool("work/sub")], "{r}/nowhere", "sub/tool", "{r}/work"),
+        ("cwd-missing", [tool("d1")], "{r}/d1", "tool", "{r}/nope"),
+        ("cwd-is-file", [tool("d1"), {"path": "afile", "kind": "file"}], "{r}/d1", "tool", "{r}/afile"),
+        ("cwd-missing-and-exec-missing", [], "{r}/d1", "tool", "{r}/nope"),
+        ("path-unset-uses-defpath", [], None, "sh", None, ["-c", "echo defpath"]),
+        ("path-unset-missing", [], None, "no-such-tool-s2e-2b1a", None),
+        ("empty-path-missing", [], "", "no-such-tool-s2e-2b1a", None),
+    ]
+    out = []
+    for name, layout, path_env, argv0, cwd, *rest in cases:
+        out.append({"name": name, "layout": layout, "path": path_env, "argv0": argv0, "cwd": cwd,
+                    "rest": rest[0] if rest else []})
+    return out
+
+
+def _child_signal_state(spec):
+    """子の `/proc/self/status` の SigIgn・SigBlk から、追う信号だけを名前で返す。"""
+    import signal
+    import subprocess
+
+    numbers = {n: getattr(signal, "SIG" + n) for n in TRACKED_SIGNALS}
+    saved = {n: signal.getsignal(numbers[n]) for n in numbers}
+    old_mask = signal.pthread_sigmask(signal.SIG_BLOCK, [])
+    try:
+        for n in TRACKED_SIGNALS:
+            # 指定が無い PIPE・XFSZ は無視(Python の起動時の状態)。ほかは既定。指定があればそのとおり。
+            how = spec.get(n, "ignore" if n in ("PIPE", "XFSZ") else "default")
+            signal.signal(numbers[n], {"default": signal.SIG_DFL, "ignore": signal.SIG_IGN, "handler": (lambda *a: None)}[how])
+        signal.pthread_sigmask(signal.SIG_SETMASK, [numbers[n] for n in TRACKED_SIGNALS if spec.get(n + "-block")])
+        out = subprocess.run(["cat", "/proc/self/status"], stdout=subprocess.PIPE, stdin=subprocess.DEVNULL,
+                             env={"PATH": "/usr/bin:/bin"}).stdout.decode()
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old_mask)
+        for n, handler in saved.items():
+            signal.signal(numbers[n], handler)
+    masks = {}
+    for line in out.splitlines():
+        key, _, value = line.partition(":")
+        if key in ("SigIgn", "SigBlk"):
+            masks[key] = int(value.strip(), 16)
+    pick = lambda mask: [n for n in TRACKED_SIGNALS if mask >> (numbers[n] - 1) & 1]
+    return {"ignored": pick(masks["SigIgn"]), "blocked": pick(masks["SigBlk"])}
+
+
+def _child_signal_cases():
+    specs = [
+        {"name": "all-default"},
+        {"name": "int-ignored", "INT": "ignore"},
+        {"name": "usr1-ignored", "USR1": "ignore"},
+        {"name": "usr1-handler", "USR1": "handler"},
+        {"name": "usr2-blocked", "USR2-block": True},
+        {"name": "ignore-and-block", "USR1": "ignore", "USR2": "ignore", "USR2-block": True, "INT-block": True},
+        {"name": "pipe-xfsz-default-in-parent", "PIPE": "default", "XFSZ": "default"},
+    ]
+    out = []
+    for spec in specs:
+        spec = dict(spec)
+        name = spec.pop("name")
+        state = _child_signal_state(spec)
+        out.append({"name": name, "spec": spec, "expect": state})
+    return out
+
+
+def _child_returncode_cases():
+    import signal
+    import subprocess
+
+    def run(argv, sigchld_ignored=False, kill=False, poll_first=False):
+        saved = signal.getsignal(signal.SIGCHLD)
+        try:
+            if sigchld_ignored:
+                signal.signal(signal.SIGCHLD, signal.SIG_IGN)
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, env={"PATH": "/usr/bin:/bin"})
+            first = None
+            if kill:
+                proc.kill()
+            elif poll_first:
+                first = proc.poll()
+            code = proc.wait()
+            proc.stdout.close()
+            return {"poll_right_after_spawn": first, "returncode": code}
+        finally:
+            signal.signal(signal.SIGCHLD, saved)
+
+    exit3 = ["sh", "-c", "exit 3"]
+    sleeper = ["sh", "-c", "sleep 1"]
+    return [
+        {"name": "exit-3", "argv": exit3, "sigchld_ignored": False, "kill": False, "poll_first": False,
+         "expect": run(exit3)},
+        {"name": "killed-by-signal-9", "argv": ["sh", "-c", "kill -9 $$"], "sigchld_ignored": False, "kill": False,
+         "poll_first": False,
+         "expect": run(["sh", "-c", "kill -9 $$"])},
+        {"name": "kill-method", "argv": sleeper, "sigchld_ignored": False, "kill": True, "poll_first": False,
+         "expect": run(sleeper, kill=True)},
+        {"name": "sigchld-ignored-exit-3", "argv": exit3, "sigchld_ignored": True, "kill": False, "poll_first": False,
+         "expect": run(exit3, sigchld_ignored=True)},
+        {"name": "sigchld-ignored-still-running", "argv": sleeper, "sigchld_ignored": True, "kill": False,
+         "poll_first": True, "expect": run(sleeper, sigchld_ignored=True, poll_first=True)},
+    ]
+
+
+def _child_stdio_cases():
+    """fd の受け継ぎ・環境変数の集合・作業場所・標準エラーの捨て先。"""
+    import subprocess
+
+    cases = []
+
+    def outcome(name, argv, pairs, cwd, leak_fd=False):
+        env = dict(pairs)
+        fd = None
+        try:
+            if leak_fd:
+                fd = os.open("/dev/null", os.O_RDONLY)
+                os.set_inheritable(fd, True)
+            result = _child_outcome(argv, env, cwd)
+        finally:
+            if fd is not None:
+                os.close(fd)
+        cases.append({"name": name, "argv": argv, "env": [list(pair) for pair in pairs], "cwd": cwd, "leak_fd": leak_fd, "expect": result})
+
+    path = [("PATH", "/usr/bin:/bin")]
+    fds = ["sh", "-c", "for f in /proc/$$/fd/*; do echo ${f##*/}; done"]
+    outcome("fds-0-2-only", fds, path, None)
+    outcome("fds-0-2-only-with-leaked-fd", fds, path, None, leak_fd=True)
+    outcome("env-exact-in-order", ["env"], [("PATH", "/usr/bin:/bin"), ("B", ""), ("A", "1")], None)
+    outcome("env-without-path-uses-defpath", ["env"], [("X", "1")], None)
+    outcome("cwd-root", ["sh", "-c", "pwd"], path, "/")
+    outcome("cwd-usr", ["sh", "-c", "pwd"], path, "/usr")
+    outcome("stderr-to-devnull", ["sh", "-c", "echo err >&2; echo out"], path, None)
+    return cases
+
+
+def _child_chmod_cases():
+    """リンクを辿らない chmod(`os.chmod(name, mode, dir_fd=fd, follow_symlinks=False)`)の結果。"""
+    import tempfile
+    import shutil
+
+    base = tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP"))
+    try:
+        os.mkdir(os.path.join(base, "d"))
+        os.symlink("d", os.path.join(base, "l"))
+        with open(os.path.join(base, "f"), "w"):
+            pass
+        fd = os.open(base, os.O_RDONLY)
+        out = []
+        try:
+            for name in ("d", "f", "l", "missing"):
+                try:
+                    os.chmod(name, 0o750, dir_fd=fd, follow_symlinks=False)
+                    out.append({"name": name, "ok": True})
+                except Exception as error:
+                    import errno
+                    out.append({"name": name, "error": type(error).__name__, "message": str(error),
+                                "errno": errno.errorcode.get(error.errno) if isinstance(error, OSError) else None})
+        finally:
+            os.close(fd)
+        return out
+    finally:
+        shutil.rmtree(base)
+
+
+def _child_env_error_cases():
+    """環境変数の名前・値の検査(`Popen` が `ValueError` にするもの)と、`exec` の前の失敗のファイル名。"""
+    import subprocess
+
+    out = []
+    for name, env in (
+        ("equals-in-key", [("A=B", "1"), ("PATH", "/usr/bin")]),
+        ("empty-key-is-allowed", [("", "1"), ("PATH", "/usr/bin")]),
+        ("nul-in-key", [("A\0B", "1"), ("PATH", "/usr/bin")]),
+        ("nul-in-value", [("A", "1\0"), ("PATH", "/usr/bin")]),
+        ("equals-in-value-is-allowed", [("A", "x=y"), ("PATH", "/usr/bin")]),
+    ):
+        try:
+            proc = subprocess.Popen(["env"], env=dict(env), stdout=subprocess.PIPE, stdin=subprocess.DEVNULL)
+            expect = {"stdout": proc.communicate()[0].decode(), "returncode": proc.returncode}
+        except ValueError as error:
+            expect = {"error": "ValueError", "message": str(error)}
+        out.append({"name": name, "env": [list(pair) for pair in env], "expect": expect})
+    # 環境変数の誤りは、作業場所の誤りより先に出る(どちらも `fork` の前)。
+    try:
+        subprocess.Popen(["env"], env={"A=B": "1"}, cwd="/nonexistent")
+    except ValueError as error:
+        out.append({"name": "env-error-before-cwd-error", "env": [["A=B", "1"]], "expect": {"error": "ValueError", "message": str(error)}})
+    return out
+
+
+def _child_preexec_cases():
+    """`exec` の前に失敗したとき(標準入力に閉じた fd を渡す)の、例外のファイル名の種類。"""
+    import subprocess
+
+    out = []
+    for cwd in (None, "/"):
+        try:
+            subprocess.Popen(["true"], stdin=99, cwd=cwd)
+        except OSError as error:
+            target = "none" if error.filename is None else "cwd"
+            out.append({"cwd": cwd, "target": target, "type": type(error).__name__})
+    return out
+
+
+@area("child")
+def make_child():
+    import shutil
+    import tempfile
+
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    root = tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP"))
+    try:
+        path_cases = _child_path_cases(root)
+        for case in path_cases:
+            case_root = os.path.join(root, case["name"])
+            os.mkdir(case_root)
+            _child_layout(case_root, case["layout"])
+            sub = lambda text: None if text is None else text.replace("{r}", case_root)
+            env = {} if case["path"] is None else {"PATH": sub(case["path"])}
+            argv = [sub(case["argv0"]), *case["rest"]]
+            case["expect"] = _child_outcome(argv, env, sub(case["cwd"]))
+        # 絶対パスが出力に入らないことを確かめる(固定期待に一時フォルダの名前を残さない)。
+        text = json.dumps(path_cases)
+        if root in text:
+            raise SystemExit("固定期待に一時フォルダの名前が入った")
+        return {"child_cases.json": {
+            "python": "3.10",
+            "path_cases": path_cases,
+            "signal_cases": _child_signal_cases(),
+            "returncode_cases": _child_returncode_cases(),
+            "stdio_cases": _child_stdio_cases(),
+            "chmod_cases": _child_chmod_cases(),
+            "env_error_cases": _child_env_error_cases(),
+            "preexec_cases": _child_preexec_cases(),
+        }}
+    finally:
+        shutil.rmtree(root)
+
+
 def serialize(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
 

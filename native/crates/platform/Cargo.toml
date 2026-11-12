@@ -8,3 +8,6 @@ publish.workspace = true
 [dependencies]
 rustix.workspace = true
 libc.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

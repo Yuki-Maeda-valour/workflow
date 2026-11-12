@@ -1,13 +1,16 @@
 //! environment-guard の移植(S2E・#470)。開発用ソースで、製品の登録表にはつなげない。
 //! 段階 1: OS を呼ばない部品(引数・出力・Python の値・JSON・文字列・パス)。
 //! 段階 2a: 記述子・設定・一覧・控えの値の組み立てと検査(OS を呼ばない形)と、`host-paths`。
-//! ファイル操作・子の起動・9 コマンドの本体と内部 reader は段階 2b が足す。
+//! 段階 2b-1a: 環境用の予算(`budget`)とファイル操作(`fsio`)。子の起動は platform にある。
+//! 9 コマンドの本体と内部 reader は、続きの段階が足す。
 // 段階 1 の部品は、段階 2 の 9 コマンドが使う。
 #![allow(dead_code)]
 pub mod args;
+pub mod budget;
 pub mod dispatch;
 mod errno_table;
 pub mod error;
+pub mod fsio;
 pub mod inventory;
 pub mod output;
 pub mod pyjson;
