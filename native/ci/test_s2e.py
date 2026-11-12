@@ -1,10 +1,15 @@
 #!/usr/bin/env python3
 """S2E 比較器(check_s2e.py)自身の検査。不具合を入れた結果・未起動・時間切れを不合格にすることを確かめる。"""
+import contextlib
 import dataclasses
 import importlib.util
 import io
+import json
+import os
+import resource
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import tempfile
 import textwrap
@@ -260,7 +265,13 @@ class Comparator(unittest.TestCase):
         commands = {case.name.split('/')[0] for case in cases if case.group == 'args'}
         self.assertTrue(set(self.m.COMMANDS) <= commands)
         self.assertEqual(len(set((c.group, c.name) for c in cases)), len(cases), 'ケース名が重複している')
-        self.assertGreaterEqual(len(self.m.PENDING_2B), 8)
+        self.assertGreaterEqual(len(self.m.PENDING_2B), 6)
+        text = '\n'.join(self.m.PENDING_2B)
+        for frame in ('read・exec', 'hook', 'verify-pair', 'U4', 'U7', 'U5'):
+            self.assertIn(frame, text)
+        # b-1d で足した物は、予定の枠に残さない。
+        for done in ('bootstrap:', 'verify:', 'host-settings', 'U1', 'U2', 'U6', '相互読取り'):
+            self.assertNotIn(done, text)
 
 
 class MutatedFixture(unittest.TestCase):
@@ -591,6 +602,663 @@ class ComparatorFoundations(unittest.TestCase):
             staged = self.m.stage_distribution(base / 'c')
             self.assertEqual(staged.read_bytes(), self.m.GUARD.read_bytes())
             self.assertEqual(staged.stat().st_mode & 0o777, 0o644)
+
+
+# ---------------------------------------------------------------- 9 コマンドの旧新比較(s2e_commands.py)
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import s2e_commands  # noqa: E402
+
+FAKE_COMMANDS = r'''#!{python}
+import json, os, subprocess, sys, time
+GUARD, MODE, READER, HOSTCHECK = {guard!r}, {mode!r}, {reader!r}, {hostcheck!r}
+RUNNER, BASE = {runner!r}, {base!r}
+args = sys.argv[1:]
+if MODE == 'sleep':
+    time.sleep(120)
+if args and args[0].startswith('reader-'):
+    done = subprocess.run([sys.executable, '-B', READER, args[0], args[1], args[2], HOSTCHECK], capture_output=True)
+    if MODE == 'reader-touch':
+        os.utime(os.getcwd())   # 読取りだけの reader が、入力(流れの根のフォルダ自身)の時刻を変える
+    lines = done.stdout.split(b'\n')
+    pre = len(lines) == 4   # host-check の前処理で止まった入力は、3 行目に前処理を通さない呼出しの戻りが付く(Rust の reader はそれと同じ出力)
+    out = (lines[2] if pre else lines[0]) + b'\n'   # 2 行目は host-check.py の戻りで、Rust の出力には無い
+    if MODE == 'reader-pre-type' and pre:
+        out = out.replace(b'"type":"', b'"type":"X', 1)
+    if MODE == 'reader-pre-msg' and pre:
+        out = out.replace(b'"msg":"', b'"msg":"X', 1)
+    if MODE == 'json-type':
+        out = out.replace(b'{{"t":"str"', b'{{"t":"bytes"', 1) if b'{{"t":"str"' in out else out.replace(b'{{"t":"list"', b'{{"t":"dict"')
+    sys.stdout.buffer.write(out)
+    sys.exit(done.returncode)
+if MODE in ('budget', 'recheck', 'include', 'component-set', 'order', 'git-count-verify', 'git-count-bootstrap'):
+    os.execv(sys.executable, [sys.executable, '-B', '-c', RUNNER, GUARD, MODE] + args)
+done = subprocess.run([sys.executable, '-B', GUARD] + args, capture_output=True)
+out, err = done.stdout, done.stderr
+if MODE == 'error-name':
+    err = err.replace(b'(OSError)', b'(IOError)')
+if MODE == 'read-forbidden' and args and args[0] == 'verify' and done.returncode == 20:
+    # 拒否するとき(読む前に止まるはずのとき)に、読んではならない先(FIFO・権限の無いファイル)を開く Rust。FIFO は開いて止まり、権限の無いファイルは別の理由(読めない)で止まる。
+    import stat
+    for folder, names, files in os.walk(os.getcwd()):
+        for name in names + files:
+            path = os.path.join(folder, name)
+            mode = os.lstat(path).st_mode
+            if stat.S_ISFIFO(mode) or (stat.S_ISREG(mode) and mode & 0o444 == 0):
+                try:
+                    open(path, 'rb').read(1)
+                except OSError as error:
+                    sys.stderr.write('ERROR [environment-guard] 検査を完了できない (' + type(error).__name__ + ')\n')
+                    sys.exit(20)
+if args and args[0] == 'bootstrap' and done.returncode == 0:
+    output = args[args.index('--output') + 1]
+    if MODE == 'guard-copy':
+        with open(output + '/environment-guard.py', 'ab') as handle:
+            handle.write(b'\n')
+    if MODE == 'tree-extra':
+        open(output + '/extra.txt', 'w').close()
+    if MODE == 'state-key':
+        # 控えに鍵を 1 つ足す(照合は読み飛ばす)。受領の sha256 は変わるが、競合の流れの比較は受領の sha256 を除くので、控えの本文の比較だけが拾う
+        value = json.load(open(output + '/environment.json'))
+        value['zz'] = 1
+        json.dump(value, open(output + '/environment.json', 'w'))
+    if MODE == 'receipt-field':
+        receipt = json.loads(out)
+        receipt['guard_sha256'] = '1' * 64
+        out = (json.dumps(receipt) + '\n').encode()
+    if MODE == 'outside-write':
+        open(os.getcwd() + '/stray.txt', 'w').close()   # 出力先の外の入力に、ファイルを足す
+    if MODE == 'tree-mode':
+        os.chmod(output, 0o750)
+    if MODE == 'receipt-json':
+        out = (json.dumps(json.loads(out), sort_keys=True) + '\n').encode()
+    if MODE == 'receipt-sha':
+        receipt = json.loads(out)
+        receipt['sha256'] = '0' * 64
+        out = (json.dumps(receipt) + '\n').encode()
+    if MODE in ('cross', 'readonly'):
+        with open(BASE + '/made.txt', 'a') as handle:
+            handle.write(str(os.stat(output + '/environment.json').st_ino) + '\n')
+if MODE == 'cross' and args and args[0] == 'verify':
+    made = open(BASE + '/made.txt').read().split() if os.path.exists(BASE + '/made.txt') else []
+    if str(os.stat(args[args.index('--state') + 1]).st_ino) not in made:
+        sys.stderr.write('ERROR [environment-guard] この Rust が作っていない控え\n')
+        sys.exit(20)
+if MODE == 'readonly' and args and args[0] == 'verify' and done.returncode == 0:
+    # この Rust が作った控えを照合するときだけ、入力の時刻を変える(旧版の控えを読む相互読取りでは変えない。読取りだけの前後確認だけが拾う)。
+    made = open(BASE + '/made.txt').read().split() if os.path.exists(BASE + '/made.txt') else []
+    state = args[args.index('--state') + 1]
+    if str(os.stat(state).st_ino) in made:
+        os.utime(json.load(open(state))['root'] + '/README.md')
+if MODE == 'readonly-time' and args and args[0] == 'verify' and done.returncode == 0:
+    os.utime(os.getcwd())   # 監視していない入力(流れの根のフォルダ自身)の時刻だけを変える
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(err)
+sys.exit(done.returncode)
+'''
+
+# 旧版の側も同じ受領の細工をする旧 guard の包み(旧新の受領が同じで、控えの生バイトの SHA-256 とだけ合わない入力を作る)。
+WRAP_OLD = r'''import json, subprocess, sys
+done = subprocess.run([sys.executable, '-B', {guard!r}] + sys.argv[1:], capture_output=True)
+out = done.stdout
+if sys.argv[1] == 'bootstrap' and done.returncode == 0:
+    receipt = json.loads(out)
+    receipt['sha256'] = '0' * 64
+    out = (json.dumps(receipt) + '\n').encode()
+sys.stdout.buffer.write(out)
+sys.stderr.buffer.write(done.stderr)
+sys.exit(done.returncode)
+'''
+
+# Rust が作った控えを読めない旧 guard の包み(旧版が Rust の控えを照合できない入力を作る。控えの本文は旧新で同じ)。
+WRAP_OLD_REFUSES = r'''import os, subprocess, sys
+BASE = {base!r}
+if sys.argv[1] == 'verify':
+    made = open(BASE + '/made.txt').read().split() if os.path.exists(BASE + '/made.txt') else []
+    if str(os.stat(sys.argv[sys.argv.index('--state') + 1]).st_ino) in made:
+        sys.stderr.write('ERROR [environment-guard] この旧版が読めない控え\n')
+        sys.exit(20)
+done = subprocess.run([sys.executable, '-B', {guard!r}] + sys.argv[1:], capture_output=True)
+sys.stdout.buffer.write(done.stdout)
+sys.stderr.buffer.write(done.stderr)
+sys.exit(done.returncode)
+'''
+
+PATCH_RUNNER = r'''
+import importlib.util, sys
+spec = importlib.util.spec_from_file_location("environment_guard_fake", sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+mode = sys.argv[2]
+sys.argv = [sys.argv[1]] + sys.argv[3:]
+command = sys.argv[1] if len(sys.argv) > 1 else ''
+if mode == 'budget':
+    module.MAX_ENTRIES += 1
+elif mode == 'recheck':
+    def verify(state, expected, current_inventory=None):
+        value = module.load_verified(state, expected)
+        if current_inventory is not None and module.plugin_inventory(module.read_regular(current_inventory)) != value['inventory']:
+            raise module.Stop('有効 plugin の一覧が変わった')
+        if module.snapshot(value['root'], value['specs'], value['inventory'], expected=value['entries']) != value['entries']:
+            raise module.Stop('配布物または利用者環境が変わった')
+        return value
+    module.verify = verify
+elif mode == 'order':
+    def verify(state, expected, current_inventory=None):
+        value = module.load_verified(state, expected)
+        copied = {}
+        module.tree(value['copy'], 'plugin', module.Budget(), copied)
+        wanted = {k: v for k, v in value['entries'].items() if k == 'plugin' or k.startswith('plugin/')}
+        if copied != wanted:
+            raise module.Stop('信頼コピーが変わった')
+        if module.snapshot(value['root'], value['specs'], value['inventory'], expected=value['entries']) != value['entries']:
+            raise module.Stop('配布物または利用者環境が変わった')
+        return value
+    module.verify = verify
+elif mode == 'include':
+    module.includes = lambda path, raw, budget: []
+elif mode == 'git-count-verify' and command == 'verify' or mode == 'git-count-bootstrap' and command == 'bootstrap':
+    original = module.includes
+    module.includes = lambda path, raw, budget: (original(path, raw, budget), original(path, raw, budget))[0]
+elif mode == 'component-set' and command == 'verify':
+    # 部品の集合から personal-agent を外した確認でも通してしまう(agents のフォルダが後から作られても見逃す)。verify 以降の差で、
+    # Mac の経路の旧版の bootstrap でも効く。
+    original = module.verify
+
+    def verify(state, expected, current_inventory=None):
+        try:
+            return original(state, expected, current_inventory)
+        except module.Stop:
+            value = module.load_verified(state, expected)
+            specs = dict(value['specs'])
+            specs['components'] = [item for item in specs['components'] if item['kind'] != 'personal-agent']
+            entries = {key: item for key, item in value['entries'].items() if not key.startswith('component:personal-agent:')}
+            if module.snapshot(value['root'], specs, value['inventory'], expected=entries) != entries:
+                raise
+            return value
+    module.verify = verify
+raise SystemExit(module.main())
+'''
+
+
+FAKE_SIGINT = r"""#!{python}
+import os, signal, subprocess, sys
+MODE = {mode!r}
+child = subprocess.Popen(['git', '--version'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+
+
+def stop(number, frame):
+    if MODE != 'leave-child':
+        os.kill(child.pid, signal.SIGKILL)   # `child.wait()` は、主の流れが待っている最中に同じ鍵を取るので使わない
+    sys.stderr.write('Traceback (most recent call last):\n  File "x", line 1, in <module>\nKeyboardInterrupt\n')
+    if MODE == 'exit-130':
+        sys.exit(130)
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    os.kill(os.getpid(), signal.SIGINT)
+
+
+signal.signal(signal.SIGINT, stop)
+child.wait()
+"""
+
+
+class CommandComparison(unittest.TestCase):
+    """9 コマンドの旧新比較(`s2e_commands.py`)が、壊れた Rust を見つけること。偽の Rust は、旧 guard を包んで 1 つずつ壊した実行ファイルで、
+    製品の example の外(テストの一時フォルダ)に作る。環境変数やテスト専用の組み立ての feature では作らない。
+    壊し方ごとに、落ちた比較の文面を `assertRaisesRegex` で固定する(別の比較が拾っても通さない)。Rust の bootstrap を流す壊し方は、
+    Mac の経路(旧版の bootstrap は patched・Rust の bootstrap は流さない)では意味を持たないので、Linux の経路だけで確かめる。"""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.folder = tempfile.TemporaryDirectory(prefix='s2e-cmd-test-')
+        cls.base = Path(os.path.realpath(cls.folder.name))
+        cls.reader = cls.base / 'old_reader.py'
+        cls.reader.write_text(s2e_commands.OLD_READER)
+        cls.wrapper = cls.base / 'wrap_old.py'
+        cls.wrapper.write_text(WRAP_OLD.format(guard=str(s2e_commands.GUARD)))
+        cls.work = cls.base / 'work'
+        cls.work.mkdir()
+        cls.fakes = {}
+        cls.g = s2e_commands.gen()
+        cls.flows = {case['name']: case for case in cls.g.cmd_cases()}
+        cls.extra = {case['name']: case for _, _, case, _ in s2e_commands.extra_cases()}
+
+    @classmethod
+    def tearDownClass(cls):
+        s2e_commands.remove_tree(cls.base)
+
+    @property
+    def rust_bootstrap(self):
+        """Rust の bootstrap を流す経路か(Linux)。Mac の経路は旧版の patched の bootstrap で控えを作る。"""
+        return not s2e_commands.MAC_PATH
+
+    def fake(self, mode):
+        if mode not in self.fakes:
+            path = self.base / f'fake-{mode}'
+            state = self.base / f'state-{mode}'
+            state.mkdir()
+            path.write_text(FAKE_COMMANDS.format(python=sys.executable, guard=str(s2e_commands.GUARD), mode=mode, reader=str(self.reader),
+                                                 hostcheck=str(s2e_commands.HOST_CHECK), runner=PATCH_RUNNER, base=str(state)))
+            path.chmod(0o755)
+            self.fakes[mode] = path
+        return self.fakes[mode]
+
+    def run_case(self, mode, case, **kwargs):
+        return s2e_commands.run_flow(case, self.fake(mode), self.work, **kwargs)
+
+    def order_case(self):
+        g, BS, CMD = self.g, self.g.BS, self.g.CMD
+        both = {'ops_before': [{'op': 'write', 'path': 'plugin/README.md', 'body': 'HELLO'}, {'op': 'write', 'path': 'out/a/plugin/README.md', 'body': 'WORLD'}],
+                'args': CMD('verify')}
+        return {'name': 'order-both-changed', 'layout': g.cmd_base_layout(), 'runs': [{'args': BS('a')}, both], 'no_readers': True,
+                'no_readers_reason': '順序の壊し方の検査用'}
+
+    def test_control_passes_every_comparison_and_counts_them(self):
+        for name in ('basic', 'include-chain', 'verify-copy-edit', 'verify-agents-dir-created', 'options-readers'):
+            tally = self.run_case('control', self.flows[name])
+            self.assertGreater(tally.runs, 0, name)
+            self.assertGreater(tally.readonly, 0, name)
+            self.assertGreater(tally.rust_runs, 0, name)
+        tally = self.run_case('control', self.flows['basic'])
+        self.assertGreater(tally.bootstrap_bytes, 0)
+        self.assertGreater(tally.cross, 0)
+        self.assertGreater(tally.readers, 0)
+        self.run_case('control', self.order_case())
+
+    # (壊し方, 流れ, 落ちるはずの比較の文面, Rust の bootstrap を流す壊し方か)
+    def defects(self):
+        f, x = self.flows, self.extra
+        return [
+            ('recheck', f['verify-copy-edit'], r'verify-copy-edit#\d+ verify: 旧新が一致しない', False),
+            ('order', self.order_case(), r'order-both-changed#1 verify: 旧新が一致しない', False),
+            ('include', f['include-chain'], r'include-chain#\d+ (bootstrap|verify): (旧新が一致しない|Rust が旧版の出力一式を照合できない)', False),
+            ('component-set', f['verify-agents-dir-created'], r'verify-agents-dir-created#\d+ verify: (旧新が一致しない|Git の起動回数が違う)', False),
+            ('git-count-verify', f['include-chain'], r'include-chain#\d+ verify: Git の起動回数が違う', False),
+            ('git-count-bootstrap', f['include-chain'], r'include-chain#0 bootstrap: Git の起動回数が違う', True),
+            ('json-type', f['options-readers'], r'options-readers reader-[a-z-]+ [a-z]+: 旧新が一致しない', False),
+            ('readonly', f['basic'], r'basic#\d+ verify: 読取りだけのコマンドが入力を変えた', True),
+            ('readonly-time', f['basic'], r'basic#0 bootstrap: .*照合したときに読取りだけのコマンドが入力を変えた', False),
+            ('reader-touch', f['options-readers'], r'options-readers reader-[a-z-]+ [a-z]+: 読取りだけの reader が入力を変えた', False),
+            ('outside-write', f['basic'], r'basic#0 bootstrap: bootstrap が出力先の外の入力を変えた', True),
+            ('guard-copy', f['basic'], r'basic#0 bootstrap: 出力一式のバイト列が違う: environment-guard.py: 内容が違う', True),
+            ('tree-extra', f['basic'], r'basic#0 bootstrap: 出力一式のバイト列が違う: extra.txt: 片方にしか無い', True),
+            ('tree-mode', f['basic'], r'basic#0 bootstrap: 出力一式のバイト列が違う: \.: 種類か mode が違う', True),
+            ('receipt-json', f['basic'], r'basic#0 bootstrap: 旧新が一致しない', True),
+            ('cross', f['basic'], r'basic#0 bootstrap: Rust が旧版の控えを照合できない', True),
+        ]
+
+    def test_each_defect_is_rejected_by_the_comparison_it_belongs_to(self):
+        for mode, case, pattern, needs_rust_bootstrap in self.defects():
+            if needs_rust_bootstrap and not self.rust_bootstrap:
+                continue   # Mac の経路は Rust の bootstrap を流さない(既定の監視先で失敗する)ので、bootstrap の出力の不具合は Linux の経路でだけ確かめる
+            with self.subTest(defect=mode):
+                with self.assertRaisesRegex(AssertionError, pattern):
+                    self.run_case(mode, case)
+
+    def test_the_receipt_sha256_check_is_the_only_one_that_sees_a_receipt_both_sides_got_wrong(self):
+        if not self.rust_bootstrap:
+            return   # Rust の bootstrap の受領を比べる入力(Linux の経路)
+        wrapper = self.wrapper
+
+        class Wrapped(s2e_commands.Flow):
+            def setup(self):
+                super().setup()
+                self.old_script_override = wrapper
+        with self.assertRaisesRegex(AssertionError, r'basic#0 bootstrap: 受領が控えの生バイトの SHA-256 と合わない'):
+            Wrapped(self.flows['basic'], self.fake('receipt-sha'), self.work).go()
+
+    def test_an_old_guard_that_cannot_read_the_rust_state_is_rejected(self):
+        if not self.rust_bootstrap:
+            return   # Rust の bootstrap が作った控えを旧版が読む相互読取り(Linux の経路)
+        fake = self.fake('cross')
+        wrapper = self.base / 'wrap_old_refuses.py'
+        wrapper.write_text(WRAP_OLD_REFUSES.format(base=str(self.base / 'state-cross'), guard=str(s2e_commands.GUARD)))
+
+        class Refusing(s2e_commands.Flow):
+            def setup(self):
+                super().setup()
+                self.old_script_override = wrapper
+        with self.assertRaisesRegex(AssertionError, r'basic#0 bootstrap: 旧版が Rust の控えを照合できない'):
+            Refusing(self.flows['basic'], fake, self.work).go()
+
+    def test_a_rust_that_reads_a_forbidden_target_is_rejected(self):
+        # 読んではならない先を FIFO(開くと止まる)・権限の無いファイル(別の理由で止まる)にした流れで、本文を開く Rust は旧新が違う(止まる)。
+        self.run_case('control', self.extra['x-preread-root-edit-0200'])
+        for name in ('x-preread-root-edit-0200', 'x-preread-new-root-0200', 'x-preread-include-edit-0200', 'x-preread-absent-include-0200'):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(AssertionError, name + r'#\d+ verify: 旧新が一致しない'):
+                    self.run_case('read-forbidden', self.extra[name])
+        for name in ('x-preread-root-edit-fifo', 'x-preread-new-root-fifo', 'x-preread-include-edit-fifo', 'x-preread-absent-include-fifo'):
+            with self.subTest(name=name), mock.patch.object(s2e_commands, 'TOOL_TIMEOUT', 3):
+                with self.assertRaisesRegex(AssertionError, name + r'#\d+ verify: 時間切れ'):
+                    self.run_case('read-forbidden', self.extra[name])
+
+    def test_the_budget_edge_just_after_the_limit_is_rejected(self):
+        if not self.rust_bootstrap:
+            return   # 上限の端は Linux だけで流す項目(Mac は Rust の bootstrap を流さない)。Mac では確かめない
+        after = next(case for case in s2e_commands.boundary_item_cases(self.work) if case['name'] == 'x-limit-entries-after')
+        with self.assertRaisesRegex(AssertionError, r'x-limit-entries-after#0 bootstrap: 旧新が一致しない'):
+            self.run_case('budget', after)
+        self.run_case('control', after)
+
+    def test_timeout_and_unstarted_fixture_are_not_passes(self):
+        with mock.patch.object(s2e_commands, 'TOOL_TIMEOUT', 2), self.assertRaisesRegex(AssertionError, r'時間切れ'):
+            self.run_case('sleep', self.flows['basic'])
+        with self.assertRaises(OSError):
+            s2e_commands.run_flow(self.flows['basic'], self.base / 'nonexistent-fixture', self.work)
+
+    def test_a_limit_that_cannot_be_set_is_a_failure_not_a_silent_pass(self):
+        with mock.patch.object(s2e_commands.resource, 'setrlimit', side_effect=OSError(1, 'denied')):
+            with self.assertRaisesRegex(AssertionError, r'起動前の上限の設定に失敗した'):
+                s2e_commands.run_tool(['/bin/true'], env={}, cwd='/', fsize=100)
+
+    def test_every_item_must_start_rust_at_least_once(self):
+        empty = s2e_commands.Item('flow', 'no-rust', s2e_commands.ALL, lambda tmp: s2e_commands.Tally(runs=3))
+        with mock.patch.object(s2e_commands, 'items', return_value=[empty]):
+            with self.assertRaisesRegex(AssertionError, r'flow/no-rust: Rust を起動した比較が 0 件'):
+                s2e_commands.run_items('/x', self.work, log=lambda text: None)
+        # Rust の起動数は、控えが無い照合(失敗した bootstrap の後)を数えない。
+        self.assertTrue(s2e_commands.Flow.is_meaningful_rust_run(['bootstrap', '--root', '/x']))
+        self.assertFalse(s2e_commands.Flow.is_meaningful_rust_run(['verify', '--state', str(self.base / 'no-such-state'), '--expect-sha256', '0']))
+        self.assertTrue(s2e_commands.Flow.is_meaningful_rust_run(['verify', '--state', str(self.reader), '--expect-sha256', '0']))
+
+    def test_zero_totals_and_missing_names_are_rejected(self):
+        m = get_subject()
+        tally = s2e_commands.Tally(runs=1, bootstrap_bytes=1, cross=1, readers=1, readonly=1, approved=1)
+        self.assertEqual(m.check_command_totals(tally, {('flow', 'all'): [3, 1.0]}), 3)
+        for field in ('runs', 'bootstrap_bytes', 'cross', 'readers', 'readonly') + (('approved',) if not s2e_commands.MAC_PATH else ()):
+            with self.assertRaises(AssertionError, msg=field):
+                m.check_command_totals(dataclasses.replace(tally, **{field: 0}), {('flow', 'all'): [3, 1.0]})
+        with self.assertRaises(AssertionError):
+            m.check_command_totals(tally, {})
+        saved = list(m.TEST_MAPPING)
+        try:
+            m.TEST_MAPPING[0] = (saved[0][0], saved[0][1], '比較[no-such-case]', '')
+            with self.assertRaises(AssertionError):
+                m.check_mapping_references()
+            m.TEST_MAPPING[0] = (saved[0][0], saved[0][1], 'budget.rs::no_such_test', '')
+            with self.assertRaises(AssertionError):
+                m.check_mapping_references()
+        finally:
+            m.TEST_MAPPING[:] = saved
+        self.assertGreater(m.check_mapping_references(), 100)
+
+    def test_item_counts_are_fixed_per_machine_and_linux_only_items_have_reasons(self):
+        m = get_subject()
+        items = s2e_commands.items('/nonexistent-fixture')
+        machine = 'mac' if s2e_commands.MAC_PATH else 'linux'
+        per_group = {}
+        skipped = []
+        for item in items:
+            if item.mark == s2e_commands.LINUX_ONLY and s2e_commands.MAC_PATH:
+                skipped.append((item.name, item.reason))
+                continue
+            per_group.setdefault((item.group, item.mark), [0, 0.0])[0] += 1
+        self.assertEqual(m.check_command_items(per_group, skipped, items), m.EXPECTED_ITEMS[machine]['total'])
+        for change in (lambda: per_group.__setitem__(('flow', 'all'), [per_group[('flow', 'all')][0] + 1, 0.0]),
+                       lambda: per_group.pop(('mac', 'all'))):
+            with self.subTest():
+                changed = {key: list(value) for key, value in per_group.items()}
+                saved = dict(per_group)
+                try:
+                    change()
+                    with self.assertRaises(AssertionError):
+                        m.check_command_items(per_group, skipped, items)
+                finally:
+                    per_group.clear()
+                    per_group.update(saved)
+        with self.assertRaises(AssertionError):   # Linux だけの印の項目が増えたか減った
+            moved = [dataclasses.replace(item, mark=s2e_commands.LINUX_ONLY) if item.name == 'x-sigint-verify' else item for item in items]
+            m.check_command_items(per_group, skipped, moved)
+        with self.assertRaises(AssertionError):   # 理由の無い Linux だけの印
+            unreasoned = [dataclasses.replace(item, reason='') if item.mark == s2e_commands.LINUX_ONLY else item for item in items]
+            m.check_command_items(per_group, skipped, unreasoned)
+
+    def test_mapping_rows_cut_short_are_rejected(self):
+        m = get_subject()
+        saved = list(m.TEST_MAPPING)
+        try:
+            for cut in ('プ', '比較', '', 'x'):
+                m.TEST_MAPPING[0] = (saved[0][0], saved[0][1], cut, '')
+                with self.assertRaises(AssertionError, msg=cut):
+                    m.check_mapping()
+            m.TEST_MAPPING[0] = (saved[0][0], saved[0][1], '比較[basic]', '')
+            m.check_mapping()
+        finally:
+            m.TEST_MAPPING[:] = saved
+        for name, category, target, _ in m.TEST_MAPPING:   # 全行が行き先を示す語を持つ(切れた行が 1 つも無い)
+            self.assertTrue(category == m.O or any(word in target for word in m.TARGET_WORDS), name)
+
+    def test_snapshot_and_byte_comparison_see_content_mode_link_and_time_changes(self):
+        root = self.base / 'snap'
+        root.mkdir()
+        (root / 'f').write_text('a')
+        (root / 'l').symlink_to('f')
+        before = s2e_commands.tree_snapshot(root)
+        self.assertEqual(before, s2e_commands.tree_snapshot(root))
+        for change in (lambda: (root / 'f').write_text('b'), lambda: os.utime(root / 'f', (1, 1)), lambda: os.chmod(root / 'f', 0o600),
+                       lambda: ((root / 'l').unlink(), (root / 'l').symlink_to('g')), lambda: (root / 'n').write_text('x'), lambda: os.utime(root, (2, 2))):
+            change()
+            self.assertNotEqual(before, s2e_commands.tree_snapshot(root))
+            before = s2e_commands.tree_snapshot(root)
+        left, right = self.base / 'out-a', self.base / 'out-b'
+        for side in (left, right):
+            side.mkdir()
+            (side / 'x').write_bytes(b'same')
+        self.assertIsNone(s2e_commands.first_tree_difference(s2e_commands.tree_bytes(left), s2e_commands.tree_bytes(right)))
+        (right / 'x').write_bytes(b'diff')
+        self.assertIn('x', s2e_commands.first_tree_difference(s2e_commands.tree_bytes(left), s2e_commands.tree_bytes(right)))
+        (right / 'x').write_bytes(b'same')
+        os.chmod(right / 'x', 0o600)
+        self.assertIn('mode', s2e_commands.first_tree_difference(s2e_commands.tree_bytes(left), s2e_commands.tree_bytes(right)))
+
+    def test_a_one_bit_flip_changes_only_that_bit(self):
+        flow = s2e_commands.Flow({'name': 'flip', 'layout': [], 'runs': []}, self.fake('control'), self.work)
+        try:
+            flow.root.mkdir()
+            (flow.root / 'f').write_bytes(b'\x10abc')
+            os.chmod(flow.root / 'f', 0o755)
+            flow.apply_ops([{'op': 'flip', 'path': 'f'}, {'op': 'flip', 'path': 'f', 'offset': 2}])
+            self.assertEqual((flow.root / 'f').read_bytes(), b'\x11a\x63c')
+            self.assertEqual(os.stat(flow.root / 'f').st_mode & 0o777, 0o755)
+        finally:
+            flow.close()
+
+    def test_the_state_digest_hides_only_device_inode_and_times(self):
+        flow = s2e_commands.Flow(self.flows['basic'], self.fake('control'), self.work, tool='old')
+        try:
+            flow.setup()
+            # Mac の経路は旧版の bootstrap を patched で流す(patched なしは既定の監視先 /etc のリンクで失敗する)
+            result = flow.run_old(s2e_commands._bootstrap_args(flow.root, 'a'), patched=flow.mode == 'patched')
+            self.assertEqual(result.returncode, 0, result.stderr)
+            raw = (flow.root / 'out/a/environment.json').read_bytes()
+            value = json.loads(raw)
+            digest = s2e_commands.state_digest(raw, flow.root)
+            masked = self.g.MASK_POSITIONS
+            kind, key = next((entry[0], name) for name, entry in value['entries'].items()
+                             if isinstance(entry, list) and entry and entry[0] in masked)
+            changed = json.loads(raw)
+            changed['entries'][key][masked[kind][0]] = 1234567
+            self.assertEqual(s2e_commands.state_digest(json.dumps(changed).encode(), flow.root), digest)
+            for edit in (lambda v: v.update(version=4), lambda v: v['entries'].pop(key),
+                         lambda v: v['entries'][key].__setitem__(0, 'other-kind'), lambda v: v.update(extra=1)):
+                changed = json.loads(raw)
+                edit(changed)
+                self.assertNotEqual(s2e_commands.state_digest(json.dumps(changed).encode(), flow.root), digest)
+        finally:
+            flow.close()
+
+    def test_the_fake_git_race_hook_changes_the_input_only_at_the_named_call(self):
+        case = {'name': 'race-hook', 'layout': self.g.cmd_base_layout(), 'no_readers': True,
+                'runs': [{'args': self.g.BS('a')}, {'args': self.g.CMD('verify'), 'race': {'call': 99, 'ops': [{'op': 'write', 'path': 'plugin/README.md', 'body': 'x'}]}}]}
+        flow = s2e_commands.Flow(case, self.fake('control'), self.work, tool='old', mode='patched')
+        flow.go()
+        self.assertEqual([record['code'] for record in flow.log], [0, 0])   # 99 回目の Git の起動は来ない。差し込まれない
+        case['runs'][1]['race']['call'] = 1
+        flow = s2e_commands.Flow(case, self.fake('control'), self.work, tool='old', mode='patched')
+        flow.go()
+        self.assertEqual(flow.log[1]['code'], 0)
+        flow = s2e_commands.Flow(dict(case, runs=case['runs'] + [{'args': self.g.CMD('verify')}]), self.fake('control'), self.work, tool='old', mode='patched')
+        flow.go()
+        self.assertEqual(flow.log[2]['code'], 20)   # 差し込まれた変更を、次の照合が見つける
+
+    def test_solo_comparison_sees_the_output_folder_the_state_body_and_the_receipt_of_a_bootstrap(self):
+        if not self.rust_bootstrap:
+            return   # 競合の流れの bootstrap を Rust で流すのは Linux の経路(Mac の経路は旧版の patched で作る)
+        case = {'name': 'solo-bootstrap', 'layout': self.g.cmd_base_layout(), 'no_readers': True,
+                'runs': [{'args': self.g.BS('a')}, {'args': self.g.CMD('verify')}]}
+        self.assertGreater(s2e_commands.run_solo_pair(case, self.fake('control'), self.work, mode='cli').rust_runs, 0)
+        for defect in ('tree-extra', 'state-key', 'receipt-field'):   # 出力フォルダの構成・控えの本文・受領の別の欄。どれも別の比較が拾わない
+            with self.subTest(defect=defect):
+                with self.assertRaisesRegex(AssertionError, r'solo-bootstrap#0 bootstrap: 旧新が一致しない'):
+                    s2e_commands.run_solo_pair(case, self.fake(defect), self.work, mode='cli')
+
+    def test_a_reader_that_differs_on_an_input_stopped_by_the_host_check_preprocessing_is_rejected(self):
+        case = self.extra['x-forged-state']
+        tally = self.run_case('control', case)
+        self.assertGreater(tally.readers, 0)
+        self.assertFalse([text for text in tally.excluded if 'reader を比べない(host-check の前処理が止め' in text])
+        for defect, pattern in (('reader-pre-type', r'x-forged-state reader-[a-z-]+ [a-z]+: 旧新が一致しない'),
+                                ('reader-pre-msg', r'x-forged-state reader-[a-z-]+ [a-z]+: 旧新が一致しない')):
+            with self.subTest(defect=defect):
+                with self.assertRaisesRegex(AssertionError, pattern):
+                    self.run_case(defect, case)
+
+    def test_a_forbidden_target_flow_must_stop_the_old_guard_for_the_fixed_reason(self):
+        names = [name for name in self.extra if name.startswith('x-preread-') and 'nested' not in name]
+        self.assertEqual(len(names), 8)
+        for name in names:
+            self.assertEqual(self.extra[name]['expect_old']['code'], 20, name)
+            self.assertTrue(self.extra[name]['expect_old']['stderr'].startswith(b'ERROR [environment-guard] '), name)
+        # 配置が変わって旧版が別の理由で止まるようになったら(期待を変えて模擬する)、旧新が一致していても合格にしない。
+        case = dict(self.extra['x-preread-root-edit-0200'], expect_old=dict(self.extra['x-preread-root-edit-0200']['expect_old'],
+                    stderr=s2e_commands.PREREAD_NEW_ROOT))
+        with self.assertRaisesRegex(AssertionError, r'x-preread-root-edit-0200#2 verify: 旧版が決まった理由で止まらない'):
+            self.run_case('control', case)
+        case = dict(self.extra['x-preread-new-root-fifo'], expect_old=dict(self.extra['x-preread-new-root-fifo']['expect_old'], code=0))
+        with self.assertRaisesRegex(AssertionError, r'x-preread-new-root-fifo#2 verify: 旧版が決まった理由で止まらない'):
+            self.run_case('control', case)
+
+    def test_the_tilde_flows_record_that_nss_only_users_are_unconfirmed(self):
+        tally = self.run_case('control', self.extra['x-tilde-forms'])
+        self.assertTrue(any('x-tilde-forms' in text and 'NSS' in text and '未確認' in text for text in tally.excluded), tally.excluded)
+
+    def test_the_simulated_mac_runs_an_unpatched_old_bootstrap_against_an_etc_link(self):
+        if not s2e_commands.SIMULATED_MAC_ONLY:
+            return   # Mac の経路の模擬(S2E_SIMULATE_MAC=1)のときだけ確かめる(check_s2e.py は省略を不合格にするので skip しない)
+        flow = s2e_commands.Flow(self.flows['basic'], self.fake('control'), self.work, tool='old', mode='cli')
+        try:
+            flow.setup()
+            args = s2e_commands._bootstrap_args(flow.root, 'a')
+            result = flow.run_old(args)
+            self.assertNotEqual(result.returncode, 0)   # Mac と同じく、既定の監視先が /etc へのリンクなので失敗する
+            self.assertEqual(flow.run_old(args, patched=True).returncode, 0)
+            flow.mac_link = False
+            s2e_commands.remove_tree(flow.root / 'out/a')
+            self.assertEqual(flow.run_old(args).returncode, 0)   # run_mac_default だけは、実際の既定の監視先の結果を見る
+        finally:
+            flow.close()
+
+    def test_a_simulated_mac_pass_is_not_a_linux_pass(self):
+        m = get_subject()
+        for simulated, code, line in ((True, 3, m.SIMULATION_PASS), (False, 0, 'S2E: 合格')):
+            with self.subTest(simulated=simulated):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out):
+                    self.assertEqual(m.finish(simulated), code)
+                self.assertEqual(out.getvalue(), line + '\n')
+        self.assertNotEqual(m.SIMULATION_PASS, 'S2E: 合格')
+        self.assertIn('Linux の合格ではありません', m.SIMULATION_NOTICE)
+        with mock.patch.object(s2e_commands, 'SIMULATE_MAC', True), mock.patch.object(s2e_commands, 'IS_MAC', False):
+            self.assertTrue(m.is_simulation())
+        with mock.patch.object(s2e_commands, 'SIMULATE_MAC', False):
+            self.assertFalse(m.is_simulation())
+
+    def test_solo_races_compare_two_separate_runs_and_reject_a_difference(self):
+        ops = [{'op': 'write', 'path': 'home/extra.cfg', 'body': '[user]\n\tname = swapped\n'}]
+        case = {'name': 'solo-race', 'layout': self.g.cmd_base_layout(), 'no_readers': True,
+                'runs': [{'args': self.g.BS('a')}, {'args': self.g.CMD('verify'), 'race': {'call': 1, 'ops': ops}}, {'args': self.g.CMD('verify')}]}
+        # Mac の経路と同じ流し方(競合の無い bootstrap の控えは旧版の patched で作り、競合の回だけを旧新で流す)で、Linux でも確かめる。
+        for mode in ('patched',) + (('cli',) if self.rust_bootstrap else ()):
+            with self.subTest(mode=mode):
+                self.assertGreater(s2e_commands.run_solo_pair(case, self.fake('control'), self.work, mode=mode).rust_runs, 0)
+                for defect in ('include', 'git-count-verify'):
+                    # Mac の経路(patched)の bootstrap は旧版なので、最初の差は競合の回(verify)。Linux の bootstrap(cli)は bootstrap の回から違いうる。
+                    with self.assertRaisesRegex(AssertionError, r'solo-race#\d+ (bootstrap|verify): 旧新が一致しない' if mode == 'cli' else r'solo-race#1 verify: 旧新が一致しない'):
+                        s2e_commands.run_solo_pair(case, self.fake(defect), self.work, mode=mode)
+
+    def test_u2_expectations_reject_an_old_like_rust(self):
+        # U2 の旧新それぞれの固定期待は Linux だけの項目(Rust の bootstrap が要る。Mac の経路は旧版の bootstrap が既定の監視先で失敗する)。
+        if not self.rust_bootstrap:
+            return
+        # 旧版と同じ振る舞いの偽の Rust(配布物に guard が無くても成功する)は、U2 の固定期待で落ちる。
+        with self.assertRaisesRegex(AssertionError, r'U2'):
+            s2e_commands.run_u2(self.fake('control'), self.work)
+
+    def test_u1_expectations_reject_a_strict_rust_when_the_locale_exists(self):
+        probe = subprocess.run([sys.executable, '-B', '-c', 'import sys; print(sys.stdout.errors)'], env=dict(os.environ, LC_ALL='en_US.UTF-8'),
+                               capture_output=True)
+        if probe.stdout.strip() == b'strict':
+            with self.assertRaises(AssertionError):
+                s2e_commands.run_u1(self.fake('control'), self.work)
+        else:
+            tally = s2e_commands.run_u1(self.fake('control'), self.work)
+            self.assertTrue(any('en_US.UTF-8' in text for text in tally.excluded))
+
+    def test_the_inherited_nofile_is_recorded_and_never_set_by_the_runner(self):
+        self.assertEqual(s2e_commands.inherited_nofile(), resource.getrlimit(resource.RLIMIT_NOFILE))
+        probe = [sys.executable, '-B', '-c', 'import resource; print(*resource.getrlimit(resource.RLIMIT_NOFILE))']
+        result = s2e_commands.run_tool(probe, env=dict(os.environ), cwd='/')
+        self.assertEqual(result.stdout.decode().split(), [str(v) for v in resource.getrlimit(resource.RLIMIT_NOFILE)])
+
+    def sigint_fake(self, mode):
+        path = self.base / f'fake-sigint-{mode}'
+        path.write_text(FAKE_SIGINT.format(python=sys.executable, mode=mode))
+        path.chmod(0o755)
+        return path
+
+    def test_sigint_comparison_sees_the_exit_status_the_last_line_and_a_child_left_behind(self):
+        # 偽の Rust: 'good' は旧版と同じ(子を止め、最後の行 KeyboardInterrupt で、信号 2 で終わる)。
+        # 'exit-130' は終了値 130(信号で終わらない)、'leave-child' は止めた git の子を残す。
+        for command in ('bootstrap', 'verify'):
+            if command == 'bootstrap' and not self.rust_bootstrap:
+                continue   # 中断された bootstrap は Rust の bootstrap が要る(Linux だけの項目)
+            kwargs = {'mode': 'patched'} if command == 'verify' else {}
+            with self.subTest(command=command, fake='good'):
+                self.assertGreater(s2e_commands.run_sigint(command, self.sigint_fake('good'), self.work, **kwargs).runs, 0)
+            for fake in ('exit-130', 'leave-child'):
+                with self.subTest(command=command, fake=fake):
+                    with self.assertRaisesRegex(AssertionError, r'sigint-' + command + r': 旧新が一致しない'):
+                        s2e_commands.run_sigint(command, self.sigint_fake(fake), self.work, **kwargs)
+
+    def test_the_fsize_comparison_rejects_a_different_failure(self):
+        if not self.rust_bootstrap:
+            return   # 書込みの失敗は Rust の bootstrap で比べる(Linux の経路)
+        self.assertGreater(s2e_commands.run_fsize(self.fake('control'), self.work).runs, 0)
+        with self.assertRaisesRegex(AssertionError, r'fsize 1: 旧新が一致しない'):
+            s2e_commands.run_fsize(self.fake('error-name'), self.work)
+
+    def test_each_item_has_a_mark_and_linux_only_items_are_listed(self):
+        items = s2e_commands.items(self.base / 'unused')
+        self.assertEqual(len({item.name for item in items}), len(items), '項目の名前が重複している')
+        self.assertTrue({item.mark for item in items} <= {s2e_commands.ALL, s2e_commands.LINUX_ONLY})
+        names = {item.name for item in items}
+        self.assertTrue({'default-watch-bootstrap', 'patched-bootstrap-sample'} <= names)
+        marks = {item.name: item.mark for item in items}
+        self.assertEqual(marks['default-watch-bootstrap'], s2e_commands.ALL)     # Mac の必須の 2 項目
+        self.assertEqual(marks['patched-bootstrap-sample'], s2e_commands.ALL)
+        self.assertEqual(marks['u2-guard-origin'], s2e_commands.LINUX_ONLY)
+        # bootstrap しか流さない流れは Linux だけ(Mac の経路では Rust を 1 回も起動しない)。読取りのコマンドがある流れは全機種。
+        self.assertEqual(marks['x-special-settings-fifo'], s2e_commands.LINUX_ONLY)
+        self.assertEqual(marks['x-preread-root-edit-fifo'], s2e_commands.ALL)
+        self.assertEqual(marks['x-race-verify-settings-edit'], s2e_commands.ALL)
+        self.assertEqual(marks['x-race-bootstrap-settings-edit'], s2e_commands.LINUX_ONLY)
+        with mock.patch.object(s2e_commands, 'MAC_PATH', True):
+            tally, per_group, skipped, _ = s2e_commands.run_items(self.base / 'unused', self.work, only=['x-limit', 'u2-guard'], log=lambda text: None)
+        self.assertEqual(per_group, {})
+        self.assertTrue(any(name.startswith('x-limit') for name, _ in skipped) and 'u2-guard-origin' in [name for name, _ in skipped])
+        self.assertTrue(all('Mac では未確認' in reason or 'Mac' in reason for _, reason in skipped))
+        self.assertEqual(tally.runs, 0)
 
 
 if __name__ == '__main__':
