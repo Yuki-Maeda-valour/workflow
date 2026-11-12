@@ -356,6 +356,12 @@ class DeepTreeTests(unittest.TestCase):
 class MacFixtureTests(unittest.TestCase):
     """Mac の固定期待(cases-macos.json): Mac の CI の 2 種類のログから取り出して 1 つにしたもの。"""
 
+    # Task 3.1b で足したケース。Mac の値は、Mac 2 種類の CI のログ(比較器が、固定期待に無いケースだけを旧版で
+    # 測って出したもの)から --extract-fixture で足す。それまで Mac の比較は不合格になる(ここでは欠けを許す)。
+    MAC_PENDING = frozenset({
+        *(f"signal-args-none-sigint-{mode}-{when}" for mode in ("pipe", "unbuffered", "pty") for when in ("1", "last")),
+        "signal-env-hashseed-bad-word-sigint", "signal-stdio-stdin-dir-sigint"})
+
     @classmethod
     def setUpClass(cls):
         with patch.object(checker, "OS_NAME", "macos"):
@@ -363,10 +369,13 @@ class MacFixtureTests(unittest.TestCase):
             cls.doc = checker.load_fixture_document(cls.path)
         cls.linux = json.loads(checker.CASES_FIXTURE.read_text(encoding="utf-8"))
         cls.cases, cls.step2 = checker.all_cases()
+        _, cls.missing = checker.os_fixture_plan(cls.linux["case_ids"], cls.doc, cls.path.name)
 
     def test_document_is_read_on_mac_and_matches_the_case_list(self):
         self.assertEqual("cases-macos.json", self.path.name)
-        self.assertEqual(self.linux["case_ids"], self.doc["case_ids"])
+        # Mac の一覧は、Linux の一覧から、まだ Mac の値を足していないケースだけを除いた形(順は同じ)。
+        self.assertLessEqual(set(self.missing), self.MAC_PENDING)
+        self.assertEqual([i for i in self.linux["case_ids"] if i not in self.missing], self.doc["case_ids"])
         self.assertEqual(["arm64", "x86_64"], self.doc["machines"])
         self.assertTrue(self.doc["legacy_recorded"])
         # Linux では、この OS の固定期待として読まない(OS の欄が違う)。
@@ -378,7 +387,10 @@ class MacFixtureTests(unittest.TestCase):
         self.assertLessEqual(reasons, {checker.SKIP_DEVFULL, checker.SKIP_NON_UTF8})
         for case in self.cases:
             with self.subTest(case=case.id):
-                if case.step2 is None and not case.fixture:
+                if case.id in self.missing:
+                    self.assertNotIn(case.id, self.doc["cases"])
+                    self.assertNotIn(case.id, self.doc["skipped"])
+                elif case.step2 is None and not case.fixture:
                     self.assertNotIn(case.id, self.doc["cases"])
                 elif case.id in self.doc["skipped"]:
                     self.assertNotIn(case.id, self.doc["cases"])
@@ -399,6 +411,181 @@ class MacFixtureTests(unittest.TestCase):
             checker.merge_fixtures([one, changed])
         with self.assertRaises(checker.Failure):
             checker.merge_fixtures([])
+
+
+class MissingFixtureTests(unittest.TestCase):
+    """この OS の固定期待に無いケース: 固定期待の一覧の形を確かめ、無いケースがあれば比較を不合格にする。"""
+
+    def test_plan_finds_only_missing_cases_and_keeps_the_order(self):
+        doc = {"case_ids": ["a", "c"], "cases": {"a": {"exit": 0}}}
+        self.assertEqual(({"a": {"exit": 0}}, ["b", "d"]), checker.os_fixture_plan(["a", "b", "c", "d"], doc, "x"))
+        self.assertEqual(({"a": {"exit": 0}}, []), checker.os_fixture_plan(["a", "c"], doc, "x"))
+        self.assertEqual((None, []), checker.os_fixture_plan(["a", "c"], None, "x"))
+        # 固定期待にだけあるケース・順の違い・重複は、何も測らずに失敗。
+        for ids, have in ((["a"], ["a", "c"]), (["c", "a", "b"], ["a", "c"]), (["a", "b"], ["a", "a"]),
+                          (["a", "a"], ["a"])):
+            with self.subTest(ids=ids, have=have), self.assertRaises(checker.Failure):
+                checker.os_fixture_plan(ids, {"case_ids": have, "cases": {}}, "x")
+
+    def test_missing_cases_fail_even_when_everything_passed(self):
+        import contextlib
+        import io
+        path = checker.FIXTURES / "cases-macos.json"
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(1, checker.overall_status(0, {}, path, ["a", "b"]))
+        self.assertIn("無いケースが 2 件", out.getvalue())
+        self.assertEqual(0, checker.overall_status(0, {}, path, []))
+
+    def test_additions_document_holds_only_missing_cases(self):
+        measured = {"a": {"exit": 0}, "b": {"exit": 1}, "d": {"exit": 2}}
+        outcomes = {"a": checker.Outcome("合格"), "b": checker.Outcome("不合格", "x"),
+                    "c": checker.classify_skip(checker.SKIP_DEVFULL, True),
+                    "e": checker.classify_skip(checker.SKIP_NON_UTF8, True)}
+        doc = checker.additions_document(python(), ["a", "b", "c", "d", "e"], ["b", "c"], measured, outcomes, True)
+        self.assertEqual((["b", "c"], {"b": {"exit": 1}}, {"c": checker.SKIP_DEVFULL}),
+                         (doc[checker.ADDED_KEY], doc["cases"], doc["skipped"]))
+        self.assertEqual(["a", "b", "c", "d", "e"], doc["case_ids"])
+
+
+class ExtractAdditionsTests(unittest.TestCase):
+    """--extract-fixture の足す形: 既存の固定期待の項目を 1 バイトも変えず、足りないケースの項目と一覧だけを足す。"""
+
+    NEW = "signal-new-selftest"
+
+    @classmethod
+    def setUpClass(cls):
+        with patch.object(checker, "OS_NAME", "macos"):
+            cls.path = checker.os_fixture_path()
+        cls.text = cls.path.read_text(encoding="utf-8")
+        cls.existing = json.loads(cls.text)
+
+    def additions(self, machines=None, entry=None, added=None, ids=None, skipped=None):
+        old = self.existing["case_ids"]
+        new_ids = ids if ids is not None else old[:len(old) // 2] + [self.NEW] + old[len(old) // 2:]
+        cases = {self.NEW: {"exit": 1, "stdout": "x\n"}} if entry is None else entry
+        with patch.object(checker, "OS_NAME", "macos"):
+            doc = checker.fixture_document(python(), new_ids, cases, skipped or {}, True)
+        doc["machines"] = list(self.existing["machines"] if machines is None else machines)
+        doc[checker.ADDED_KEY] = [self.NEW] if added is None else added
+        return doc
+
+    def test_existing_entries_are_kept_byte_for_byte(self):
+        import difflib
+        text = checker.add_to_fixture(self.text, self.additions(), set())
+        new = json.loads(text)
+        self.assertEqual({"exit": 1, "stdout": "x\n"}, new["cases"][self.NEW])
+        self.assertEqual(self.additions()["case_ids"], new["case_ids"])
+        for key, value in self.existing.items():
+            if key not in ("case_ids", "cases"):
+                self.assertEqual(value, new[key])
+        for key, value in self.existing["cases"].items():
+            self.assertEqual(value, new["cases"][key])
+        # 行で見ても、既存の行は 1 行も変わらず、足した行(一覧の ID の 1 行と、項目の行)だけが入る。
+        old_lines, new_lines = self.text.splitlines(), text.splitlines()
+        ops = {op for op, *_ in difflib.SequenceMatcher(None, old_lines, new_lines, autojunk=False).get_opcodes()}
+        self.assertEqual({"equal", "insert"}, ops)
+        added = 1 + len(checker.entry_text(self.NEW, new["cases"][self.NEW]).splitlines())
+        self.assertEqual(len(old_lines) + added, len(new_lines))
+
+    def test_round_trip_through_two_mac_logs(self):
+        import contextlib
+        import io
+        with tempfile.TemporaryDirectory(prefix="r4u-extract-") as temp:
+            out = Path(temp, "cases-macos.json")
+            out.write_text(self.text, encoding="utf-8")
+            logs = []
+            for machine in ("arm64", "x86_64"):
+                doc = self.additions(machines=[machine])
+                log = Path(temp, f"{machine}.log")
+                with patch.object(checker, "OS_NAME", "macos"):
+                    dump = checker.fixture_dump(out.name, doc)
+                log.write_text("前\n" + "\n".join("2026-11-12T00:00:00.0000000Z " + line for line in dump.splitlines())
+                               + "\n後\n", encoding="utf-8")
+                logs.append(log)
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(0, checker.main_extract_fixture(logs, out))
+            self.assertEqual(checker.add_to_fixture(self.text, self.additions(), set()), out.read_text(encoding="utf-8"))
+            # 片方の機械のログだけ: 2 種類の Mac の値が同じことを確かめられないので、足さない。
+            out.write_text(self.text, encoding="utf-8")
+            with self.assertRaisesRegex(checker.Failure, "機械"):
+                checker.main_extract_fixture(logs[:1], out)
+            # 2 種類の機械で値が違う: 1 つにできない。
+            other = self.additions(machines=["x86_64"], entry={self.NEW: {"exit": 2}})
+            logs[1].write_text(checker.fixture_dump(out.name, other), encoding="utf-8")
+            with self.assertRaises(checker.Failure):
+                checker.main_extract_fixture(logs, out)
+            self.assertEqual(self.text, out.read_text(encoding="utf-8"))
+            # 全体の形のログは、既存の固定期待を上書きしない。足す形のログは、固定期待が無ければ書かない。
+            full = dict(self.additions())
+            del full[checker.ADDED_KEY]
+            logs[0].write_text(checker.fixture_dump(out.name, full), encoding="utf-8")
+            with self.assertRaisesRegex(checker.Failure, "上書きしない"):
+                checker.main_extract_fixture(logs[:1], out)
+            missing = Path(temp, "none", "cases-macos.json")
+            logs[0].write_text(checker.fixture_dump(out.name, self.additions()), encoding="utf-8")
+            with self.assertRaisesRegex(checker.Failure, "無い"):
+                checker.main_extract_fixture(logs[:1], missing)
+
+    def test_additions_that_would_change_existing_items_fail(self):
+        old = self.existing["case_ids"]
+        changed_header = self.additions()
+        changed_header["python"] = dict(changed_header["python"], version="3.10.12")
+        bad = [
+            self.additions(entry={self.NEW: {"exit": 1}, old[0]: {"exit": 9}}),  # 既存の項目を書き換える
+            self.additions(added=[self.NEW, old[0]]),  # 既存の一覧にあるケースを足す
+            self.additions(ids=[self.NEW] + old[::-1]),  # 既存の順を変える
+            self.additions(ids=old),  # 足すケースが一覧に無い
+            self.additions(entry={}),  # 足すケースの値が無い
+            self.additions(skipped={self.NEW: checker.SKIP_DEVFULL}),  # 項目と未実施の理由の両方
+            self.additions(entry={"other": {"exit": 0}, self.NEW: {"exit": 1}}),  # 足すケースでない項目
+            self.additions(machines=["arm64"]),  # 測った機械が足りない
+            changed_header,  # 測った条件が違う
+        ]
+        for doc in bad:
+            with self.subTest(doc={k: v for k, v in doc.items() if k != "case_ids"}), \
+                    self.assertRaises(checker.Failure):
+                checker.add_to_fixture(self.text, doc, set())
+        # 固定期待を持たないケースの項目・比較器の書き方でない既存のファイル
+        with self.assertRaises(checker.Failure):
+            checker.add_to_fixture(self.text, self.additions(), {self.NEW})
+        with self.assertRaises(checker.Failure):
+            checker.add_to_fixture(json.dumps(self.existing, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                                   self.additions(), set())
+        # 固定期待を持たないケースは、値が無くても足せる(一覧だけに入る)。
+        text = checker.add_to_fixture(self.text, self.additions(entry={}), {self.NEW})
+        self.assertNotIn(self.NEW, json.loads(text)["cases"])
+        self.assertIn(self.NEW, json.loads(text)["case_ids"])
+
+
+class OpenFrameTests(unittest.TestCase):
+    """送った時点の確かめ(Task 3.1b): FIFO の待ちの途中の SIGINT の呼出履歴の最後のフレーム。"""
+
+    HEAD = b"Traceback (most recent call last):\n" + frame(b"check_links.py", 52, "main") + b"    text = x\n"
+
+    def test_open_frame_is_the_last_frame_of_the_linux_fixture(self):
+        data = json.loads((checker.FIXTURES / "linux.json").read_text(encoding="utf-8"))
+        stderr = next(case["stderr"] for case in data["tracebacks"] if case["id"] == "read-fifo-sigint")
+        self.assertEqual(checker.OPEN_FRAME, checker.last_frame(stderr.encode()))
+
+    def test_other_last_frames_fail(self):
+        good = self.HEAD + frame(b"pathlib.py", 1134, "read_text") + b"    with\n" + checker.OPEN_FRAME + \
+            b"\n    return\nKeyboardInterrupt\n"
+        checker.check_open_frame("x", "旧版", obs(-signal.SIGINT, b"", good))
+        for stderr in (self.HEAD + frame(b"pathlib.py", 1134, "read_text") + b"    with\nKeyboardInterrupt\n",
+                       self.HEAD + b"KeyboardInterrupt\n",
+                       self.HEAD + frame(b"pathlib.py", 1118, "open") + b"    return\nKeyboardInterrupt\n",
+                       self.HEAD + frame(b"posixpath.py", 1119, "open") + b"    return\nKeyboardInterrupt\n",
+                       good.replace(b"KeyboardInterrupt\n", frame(b"check_links.py", 1, "x") + b"KeyboardInterrupt\n"),
+                       b"KeyboardInterrupt: " + checker.OPEN_FRAME + b"\n",
+                       b"KeyboardInterrupt\n", b""):
+            with self.subTest(stderr=stderr[-120:]), self.assertRaises(checker.Failure):
+                checker.check_open_frame("x", "Rust ", obs(-signal.SIGINT, b"", stderr))
+
+    def test_every_fifo_sigint_case_checks_the_frame(self):
+        flagged = sorted(case.id for case in checker.all_cases()[0] if case.open_frame)
+        expected = sorted([f"signal-fifo-sigint-{prefix}{mode}" for prefix in ("", "warn-")
+                           for mode in ("pipe", "unbuffered", "pty")] + ["traceback:read-fifo-sigint"])
+        self.assertEqual(expected, flagged)
 
 
 class FixtureTests(unittest.TestCase):
@@ -915,6 +1102,60 @@ class RealChildTests(unittest.TestCase):
             changed[case.id]["exit"] = 0
             with self.assertRaisesRegex(checker.Failure, "手順 2 の固定期待と違う"):
                 checker.check_step2(self.context(target), case, {}, changed)
+
+    def interrupted(self, name, last):
+        """呼出履歴(最後のフレームが last)と KeyboardInterrupt を stderr へ書き、SIGINT で終わる検査対象。"""
+        lines = [b"Traceback (most recent call last):\n", frame(b"check_links.py", 52, "main"), b"    text = x\n",
+                 last + b"\n", b"    return\n", b"KeyboardInterrupt\n"]
+        return self.script(name, f"#!{checker.this_python()}\n" + textwrap.dedent(f"""\
+            import os, signal
+            for data in {lines!r}:
+                os.write(2, data)
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            os.kill(os.getpid(), signal.SIGINT)
+            """))
+
+    def test_fifo_sigint_with_another_last_frame_fails(self):
+        # 比べる欄(終了値・stdout・最後の行・stdout の書込みの記録)は同じでも、最後のフレームが違えば不合格。
+        good = self.interrupted("frame-good", checker.OPEN_FRAME)
+        early = self.interrupted("frame-early", frame(b"pathlib.py", 1134, "read_text")[:-1])
+        case = checker.Case("fifo-frame", "signal", [], [], interrupt=True, open_frame=True)
+        self.assertEqual("合格", checker.run_case(self.context(good, legacy=good), case, None, {}).status)
+        with self.assertRaisesRegex(checker.Failure, "旧版の呼出履歴の最後のフレーム"):
+            checker.run_case(self.context(good, legacy=early), case, None, {})
+        with self.assertRaisesRegex(checker.Failure, "旧版の呼出履歴の最後のフレーム"):
+            checker.run_case(self.context(good, legacy=early), case, None, {}, measure=True)
+        with self.assertRaisesRegex(checker.Failure, "Rust の呼出履歴の最後のフレーム"):
+            checker.run_case(self.context(early, legacy=good), case, None, {})
+        # 確かめを付けないケースでは、同じ結果を合格にする(比べる欄は 22:35 の決定のまま)。
+        plain = checker.replace(case, open_frame=False)
+        self.assertEqual("合格", checker.run_case(self.context(early, legacy=good), plain, None, {}).status)
+
+    def test_missing_cases_are_measured_from_the_legacy_and_fail(self):
+        import contextlib
+        import io
+        listed = self.basic()
+        new = checker.Case("new-case", "basic", checker.BASIC, ["docs", "missing"])
+        reference = self.context(self.fake("reference"))
+        fixtures = {listed.id: checker.run_case(reference, listed, None, {}, measure=True)}
+        want = checker.run_case(self.context(self.fake("reference2")), new, None, {}, measure=True)
+        for name, rust in (("same-missing", self.fake("same-missing")),
+                           # Rust の出力が違っても、足す値は旧版だけから作る。
+                           ("extra-missing", self.fake("extra-missing", after='print("extra")'))):
+            with self.subTest(name=name):
+                ctx = self.context(rust)
+                with contextlib.redirect_stdout(io.StringIO()):
+                    outcomes, _ = checker.compare_each(ctx, [listed, new], fixtures, [new.id])
+                    status = checker.overall_status(checker.final_status(outcomes, [listed.id, new.id], False),
+                                                    fixtures, checker.FIXTURES / "cases-macos.json", [new.id])
+                if name == "same-missing":
+                    self.assertEqual(("合格", True), (outcomes[listed.id].status, outcomes[listed.id].fixed))
+                self.assertEqual("不合格", outcomes[new.id].status)
+                self.assertIn("固定期待に無いケース", outcomes[new.id].message)
+                self.assertEqual(1, status)
+                doc = checker.additions_document(python(), [listed.id, new.id], [new.id], ctx.measured, outcomes,
+                                                 True)
+                self.assertEqual(({new.id: want}, [new.id]), (doc["cases"], doc[checker.ADDED_KEY]))
 
     def test_out_of_scope_variable_reaching_the_child_fails(self):
         ctx = self.context(self.fake("same3"))

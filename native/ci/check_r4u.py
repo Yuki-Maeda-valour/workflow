@@ -9,6 +9,9 @@
         Linux で旧版を動かし、ケースごとの固定期待(cases-linux.json)を作る。
     python3 -B native/ci/check_r4u.py --measure-step2 [--out <ファイル>]
         手順 2(呼出履歴を出している間)の書込みの失敗と SIGINT の部品ごとの表(step2.json)を作る。
+    python3 -B native/ci/check_r4u.py --extract-fixture <ログ>... [--out <ファイル>]
+        固定期待が無い OS(または固定期待に無いケースがある OS)の CI のログから、比較器が出した旧版の値を
+        取り出す。足す形のログは、既存の固定期待の項目を変えずに、足りないケースの項目とケースの一覧だけを足す。
 
 - 旧版を動かす Python は R4U_PYTHON(無ければ PATH の python3)。版と、対応づける標準ライブラリ
   (pathlib.py・posixpath.py・genericpath.py)の SHA-256 を記録する。本家 3.10.11 と違う中身のファイルの
@@ -582,6 +585,9 @@ class Case:
     # cases-linux.json の固定期待を持つか(readdir の順に依るケースは持たない)。
     fixture: bool = True
     step2: dict | None = None
+    # FIFO の待ちの途中の SIGINT: 旧版と Rust の呼出履歴の最後のフレームが OPEN_FRAME であることを確かめる
+    # (送った時点の確かめ。Task 3.1b)。比べる欄(22:35 の決定)は変えない。
+    open_frame: bool = False
 
 
 @dataclass
@@ -1183,6 +1189,25 @@ def unlabeled(writes):
     return None if writes is None else [w[:4] for w in writes]
 
 
+# 送った時点の確かめ(Task 3.1b): FIFO の待ちの途中の SIGINT で、呼出履歴の最後のフレームは、本家の標準ライブラリの
+# pathlib.py の open の行(固定名にした後。linux.json の read-fifo-sigint と同じ)。このフレームは、送った時点が
+# open の行の中だったことだけを示す。FIFO の待ちに入った後に送った根拠は、wchan と Mac の推定の判定(blocked)。
+OPEN_FRAME = b'  File "pathlib.py", line 1119, in open'
+
+
+def last_frame(stderr):
+    """stderr の呼出履歴の最後のフレームの行(行の全体が `  File "<パス>", line <数>, in <名前>`)。無ければ None。"""
+    frames = [line for line in stderr.split(b"\n") if FRAME_RE.fullmatch(line)]
+    return frames[-1] if frames else None
+
+
+def check_open_frame(case_id, who, obs):
+    got = last_frame(obs.stderr)
+    if got != OPEN_FRAME:
+        raise Failure(f"{case_id}: {who}の呼出履歴の最後のフレームが {OPEN_FRAME.decode()!r} でない"
+                      f"(送った時点が FIFO を開く行の中でない): {got!r}")
+
+
 def compare_obs(case_id, legacy, rust, interrupt, labels=True):
     """旧版から作った期待と Rust を比べる。中断の比べ方は、信号で終わること・終了値・最後の行・stdout。"""
     if legacy.exit != rust.exit:
@@ -1552,7 +1577,7 @@ def linux_traceback_cases():
         Case("read-isdir", "walk", [write("g/y.md", "[a](b)\n"), {"op": "dir", "path": "g/x.md"}], ["g"]),
         Case("read-eacces", "body", [write("a.md", "[x](m)\n"), chmod("a.md", 0)], ["a.md"]),
         Case("read-fifo-sigint", "signal", [{"op": "fifo", "path": "a.md"}], ["."], scenario="fifo-sigint",
-             interrupt=True),
+             interrupt=True, open_frame=True),
         Case("link-resolve-nul", "body", [write("a.md", b"[x](a\x00b)\n")], ["a.md"]),
         Case("link-resolve-loop", "body", [write("d/a.md", "[a](loop)\n"),
                                            {"op": "symlink", "path": "d/loop", "target": "loop"}], ["d/a.md"]),
@@ -1739,7 +1764,7 @@ def behavior_cases():
         for mode, extra, out in (("pipe", {}, "pipe"), ("unbuffered", {"PYTHONUNBUFFERED": "1"}, "pipe"),
                                  ("pty", {}, "pty")):
             add(f"signal-fifo-sigint-{prefix}{mode}", "signal", warn, argv, env=extra, stdout=out,
-                scenario="fifo-sigint", interrupt=True)
+                scenario="fifo-sigint", interrupt=True, open_frame=True)
             add(f"signal-fifo-sigterm-{prefix}{mode}", "signal", warn, argv, env=extra, stdout=out,
                 scenario="fifo-sigterm")
     add("signal-sigint-ignored", "signal", warn, ["missing", "f"], scenario="fifo-ignored", sigint_ignored=True)
@@ -1752,6 +1777,22 @@ def behavior_cases():
                 rules=f"fd=1,nth={nth},action=sigint", interrupt=None)
         add(f"signal-write-sigint-{mode}-last", "signal", big, ["a.md"], env=extra, stdout=out,
             derive=last_stdout_write, interrupt=None)
+    # 引数 0 個の応答(docstring と終了 2)を書く間の SIGINT(2026-11-12 08:55 の決定。Task 3.1b)。共有ライブラリが
+    # stdout の 1 回目と最後の write の直後に送る。比べ方は signal-write-sigint-* と同じ(旧版が SIGINT で終わった
+    # ときだけ中断の比べ方)。
+    for mode, extra, out in (("pipe", {}, "pipe"), ("unbuffered", {"PYTHONUNBUFFERED": "1"}, "pipe"),
+                             ("pty", {}, "pty")):
+        add(f"signal-args-none-sigint-{mode}-1", "signal", [], [], env=extra, stdout=out,
+            rules="fd=1,nth=1,action=sigint", interrupt=None)
+        add(f"signal-args-none-sigint-{mode}-last", "signal", [], [], env=extra, stdout=out,
+            derive=last_stdout_write, interrupt=None)
+    # 起動の失敗の診断の 1 回目の write の直後の SIGINT(値の確かめの側と、標準入出力の確かめの側。Task 3.1b)。
+    # env-hashseed-bad-word・stdio-stdin-dir と同じ入力。中断の比べ方を使わず、全部を比べる(最後の行が
+    # KeyboardInterrupt であることを求めない)。Current thread の値の欄だけは、stdio-stdin-dir と同じく形式を確かめて伏せる。
+    add("signal-env-hashseed-bad-word-sigint", "signal", BASIC, ["docs"], env={"PYTHONHASHSEED": "Random"},
+        rules="fd=2,nth=1,action=sigint")
+    add("signal-stdio-stdin-dir-sigint", "signal", BASIC, ["docs"], stdin="dir", fatal=True,
+        rules="fd=2,nth=1,action=sigint")
     # 走査
     add("walk-fifo-writer", "walk", warn, ["f"], scenario="fifo-write")
     add("rglob-depth-988", "walk", [lambda root: make_deep(os.path.join(root, "t"), 988, "d")], ["t"])
@@ -2226,6 +2267,8 @@ def run_case(ctx, case, fixtures, mac_cache, measure=False):
         return Outcome("合格", fixed=check_step2(ctx, case, mac_cache, fixtures))
     ctx.note = ""
     legacy, params, labels, configured = legacy_side(ctx, case)
+    if case.open_frame:
+        check_open_frame(case.id, "旧版", legacy)
     interrupt = is_interrupt(case, legacy)
     marks = ctx.marks()
     entry = canonical(legacy, marks, interrupt, labels)
@@ -2243,6 +2286,8 @@ def run_case(ctx, case, fixtures, mac_cache, measure=False):
         # reject の OS: Rust も、実際の RLIMIT_FSIZE と共有ライブラリの模擬で同じ結果になる。
         check_rlimit_model(execute(ctx, case, "rust", rules="", rlimit=real_rlimit), rust_result, "Rust")
     compare_obs(case.id, legacy, rust, interrupt, labels)
+    if case.open_frame:
+        check_open_frame(case.id, "Rust ", rust)
     for kind, result in (("Rust", rust_result),):
         if (result.stdout or result.stderr) and not result.writes:
             raise Failure(f"{kind}の書込みが記録に現れない")
@@ -2392,6 +2437,8 @@ REQUIRED = (
       for mode in ("pipe", "unbuffered", "pty")),
     *(f"signal-write-sigint-{mode}-{when}" for mode in ("pipe", "unbuffered", "pty") for when in ("1", "2", "last")),
     "signal-sigint-ignored", "traceback:read-fifo-sigint",
+    *(f"signal-args-none-sigint-{mode}-{when}" for mode in ("pipe", "unbuffered", "pty") for when in ("1", "last")),
+    "signal-env-hashseed-bad-word-sigint", "signal-stdio-stdin-dir-sigint",
     # 段階ごとの失敗と中断
     "fault-stdout-flushio-eagain-sigint-buffered", "fault-stdout-close-fail-buffered",
     "step2:one:buffered:file:sigint", "step2:two:buffered:separator:fail-once", "step2:rec:buffered:repeated:cut",
@@ -2449,15 +2496,16 @@ def main_compare(rust, only=None):
     list_data = load_fixture_document(CASES_FIXTURE)
     os_path = os_fixture_path()
     os_data = list_data if os_path == CASES_FIXTURE else (load_fixture_document(os_path) if os_path.exists() else None)
-    if os_data is not None and os_data["case_ids"] != list_data["case_ids"]:
-        raise Failure(f"{os_path.name} のケースの一覧が {CASES_FIXTURE.name} と違う")
-    fixtures = os_data["cases"] if os_data is not None else None
+    fixtures, missing = os_fixture_plan(list_data["case_ids"], os_data, os_path.name)
     if os_data is not None:
         import platform
         print(f"固定期待: {os_path.name}(測った機械 {machines_of(os_data)}・この機械 {platform.machine()}。"
               "機械の種類は照らさない)", flush=True)
     if fixtures is None:
         print(f"この OS の固定期待 {os_path.name} が無い。旧版で測った値を最後に出し、比較は不合格にする", flush=True)
+    if missing:
+        print(f"この OS の固定期待 {os_path.name} に無いケース {len(missing)} 件: {', '.join(missing)}。"
+              "旧版で測った値を最後に出し、比較は不合格にする(固定期待にあるケースは固定期待と比べる)", flush=True)
     cases, step2_data = all_cases()
     corpus_case = Case("corpus:matcher", "corpus")
     check_case_list(cases + [corpus_case], list_data["case_ids"] + ["corpus:matcher"])
@@ -2483,33 +2531,7 @@ def main_compare(rust, only=None):
                             show(case, kind, execute(ctx, case, kind))
                 print("部分実行(--only)は合格にしない")
                 return 2
-            outcomes = {}
-            mac_cache = {}
-            corpus_count = 0
-            for case in cases + [corpus_case]:
-                try:
-                    if case is corpus_case:
-                        corpus_count = check_corpus(ctx)
-                        outcome = Outcome("合格", fixed=True)
-                    else:
-                        outcome = run_case(ctx, case, fixtures, mac_cache)
-                except Skip as exc:
-                    outcome = classify_skip(str(exc), MAC)
-                except Failure as exc:
-                    outcome = Outcome("不合格", str(exc))
-                except Exception as exc:  # noqa: BLE001 — 1 件の想定外の例外で、残りのケースの結果を失わない
-                    import traceback
-                    outcome = Outcome("不合格", f"比較器の想定外の例外: {type(exc).__name__}: {exc}\n"
-                                                + traceback.format_exc())
-                outcomes[case.id] = outcome
-                if outcome.status == "合格":
-                    note = "" if outcome.record else "(書込みの記録の比較は未実施: " + SKIP_NO_RECORD + ")"
-                    note += f"({outcome.message})" if outcome.message else ""
-                    print(f"合格 {case.id}{note}", flush=True)
-                elif outcome.status == "未実施":
-                    print(f"未実施 {case.id}: {outcome.message}", flush=True)
-                else:
-                    print(f"不合格 {case.id}: {outcome.message}", flush=True)
+            outcomes, corpus_count = compare_each(ctx, cases + [corpus_case], fixtures, missing, corpus_case)
         finally:
             executions = ctx.counter if ctx is not None else 0
             restore_and_remove(top)
@@ -2519,6 +2541,10 @@ def main_compare(rust, only=None):
     if fixtures is None:
         skipped = {i: o.message for i, o in outcomes.items() if o.status == "未実施"}
         document = fixture_document(python, list_data["case_ids"], ctx.measured, skipped, ctx.legacy_recorded)
+        print(fixture_dump(os_path.name, document), flush=True)
+    elif missing:
+        document = additions_document(python, list_data["case_ids"], missing, ctx.measured, outcomes,
+                                      ctx.legacy_recorded)
         print(fixture_dump(os_path.name, document), flush=True)
     elapsed = time.monotonic() - started
     limits = {name: resource.getrlimit(getattr(resource, name))
@@ -2548,14 +2574,82 @@ def main_compare(rust, only=None):
     status = final_status(outcomes, [case.id for case in every], MAC)
     if status:
         print("不合格の ID: " + ", ".join(i for i, o in outcomes.items() if o.status != "合格"))
-    return overall_status(status, fixtures, os_path)
+    return overall_status(status, fixtures, os_path, missing)
 
 
-def overall_status(status, fixtures, os_path):
-    """この OS の固定期待が無ければ、ほかが全部合格でも不合格(成功にも skip にもしない)。"""
+def compare_each(ctx, cases, fixtures, missing=(), corpus_case=None):
+    """ケースを順に比べ、ID ごとの結果を出す。戻り値は (ID ごとの結果, 照合の生成入力の件数)。
+
+    固定期待に無いケース(missing)も、旧版と Rust を比べる(旧版の値は ctx.measured に入り、最後にログへ出す)。
+    固定期待と比べられないので不合格になる。
+    """
+    outcomes = {}
+    mac_cache = {}
+    corpus_count = 0
+    missing = set(missing)
+    for case in cases:
+        try:
+            if case is corpus_case:
+                corpus_count = check_corpus(ctx)
+                outcome = Outcome("合格", fixed=True)
+            else:
+                outcome = run_case(ctx, case, fixtures, mac_cache)
+        except Skip as exc:
+            outcome = classify_skip(str(exc), MAC)
+        except Failure as exc:
+            outcome = Outcome("不合格", str(exc))
+        except Exception as exc:  # noqa: BLE001 — 1 件の想定外の例外で、残りのケースの結果を失わない
+            import traceback
+            outcome = Outcome("不合格", f"比較器の想定外の例外: {type(exc).__name__}: {exc}\n"
+                                        + traceback.format_exc())
+        if case.id in missing and outcome.status == "不合格":
+            outcome.message = f"この OS の固定期待に無いケース(旧版の値をログの終わりに出す): {outcome.message}"
+        outcomes[case.id] = outcome
+        if outcome.status == "合格":
+            note = "" if outcome.record else "(書込みの記録の比較は未実施: " + SKIP_NO_RECORD + ")"
+            note += f"({outcome.message})" if outcome.message else ""
+            print(f"合格 {case.id}{note}", flush=True)
+        elif outcome.status == "未実施":
+            print(f"未実施 {case.id}: {outcome.message}", flush=True)
+        else:
+            print(f"不合格 {case.id}: {outcome.message}", flush=True)
+    return outcomes, corpus_count
+
+
+def os_fixture_plan(list_ids, os_data, name):
+    """この OS の固定期待(os_data)と、ケースの一覧(cases-linux.json の case_ids)の関係を決める。
+
+    戻り値は (固定期待の項目, 固定期待に無いケースの ID の列〈一覧の順〉)。
+    - 固定期待が無い: (None, [])。全部を旧版で測ってログへ出し、比較は不合格にする。
+    - 一覧が同じ: (項目, [])。
+    - 固定期待の一覧が、ケースの一覧から何件かを除いた形(残りの順は同じ): (項目, 欠け)。欠けたケースだけを
+      旧版で測ってログへ出し、その回の比較を不合格にする。固定期待にあるケースは、今までどおり固定期待と比べる。
+    - ほか(固定期待の一覧にだけあるケース・順の違い・重複): 失敗(何も測らない)。
+    """
+    if os_data is None:
+        return None, []
+    have = list(os_data["case_ids"])
+    if len(have) != len(set(have)) or len(list_ids) != len(set(list_ids)):
+        raise Failure(f"{name} か {CASES_FIXTURE.name} のケースの一覧に重複がある")
+    present = set(have)
+    missing = [case_id for case_id in list_ids if case_id not in present]
+    if [case_id for case_id in list_ids if case_id in present] != have:
+        extra = sorted(present - set(list_ids))
+        raise Failure(f"{name} のケースの一覧が、{CASES_FIXTURE.name} の一覧から足りないケースを除いた形でない"
+                      f"({name} にだけある {extra}・ほかは順の違い)")
+    return os_data["cases"], missing
+
+
+def overall_status(status, fixtures, os_path, missing=()):
+    """この OS の固定期待が無いか、固定期待に無いケースがあれば、ほかが全部合格でも不合格(成功にも skip にもしない)。"""
     if fixtures is None:
         print(f"不合格: この OS の固定期待 {os_path.name} が無い(旧版・固定期待・Rust の 3 者で比べていない)。"
               f"上の区切りの間の JSON を native/fixtures/r4u/{os_path.name} に置く(--extract-fixture <ログ> で取り出せる)")
+        return 1
+    if missing:
+        print(f"不合格: この OS の固定期待 {os_path.name} に無いケースが {len(missing)} 件ある(旧版・固定期待・Rust の"
+              f" 3 者で比べていない)。上の区切りの間の JSON(無いケースの値だけ)を、--extract-fixture <ログ> で"
+              f" native/fixtures/r4u/{os_path.name} に足す(既存の項目は変えない)")
         return 1
     return status
 
@@ -2647,7 +2741,7 @@ def main_measure_cases(out):
             restore_and_remove(top + ".md")
             restore_and_remove(os.path.join(temp, "case"))
     data = fixture_document(python, case_ids, ctx.measured, skipped, ctx.legacy_recorded)
-    out.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    out.write_text(fixture_text(data), encoding="utf-8")
     print(f"固定期待: {len(data['cases'])} 件・一覧 {len(case_ids)} 件・未実施 {len(skipped)} 件 → {out}")
     return 0
 
@@ -2687,6 +2781,93 @@ def fixture_document(python, case_ids, entries, skipped, legacy_recorded):
         "skipped": dict(sorted(skipped.items())),
         "cases": dict(sorted(entries.items())),
     }
+
+
+# 固定期待に無いケースだけの値をログへ出す形の印(足すケースの ID の列。一覧の順)。
+ADDED_KEY = "added_case_ids"
+# 足す形で、既存の固定期待と同じであることを求めない欄(ほかの欄は全部同じであることを求める)。
+ADD_FREE_KEYS = ("machine", "machines", "case_ids", "cases", "skipped", ADDED_KEY)
+
+
+def additions_document(python, case_ids, missing, measured, outcomes, legacy_recorded):
+    """固定期待に無いケースだけを、旧版で測った値で出す形(--extract-fixture が既存の固定期待へ足す)。
+
+    項目は旧版の結果だけから作る(run_case が旧版から作った期待。Rust の出力は使わない)。
+    """
+    entries = {case_id: measured[case_id] for case_id in missing if case_id in measured}
+    skipped = {case_id: outcomes[case_id].message for case_id in missing
+               if case_id in outcomes and outcomes[case_id].status == "未実施"}
+    document = fixture_document(python, case_ids, entries, skipped, legacy_recorded)
+    document[ADDED_KEY] = list(missing)
+    return document
+
+
+def fixture_text(document):
+    """固定期待のファイルの中身(鍵を並べ、字下げ 1。--measure-cases・--extract-fixture で同じ書き方)。"""
+    return json.dumps(document, ensure_ascii=False, indent=1, sort_keys=True) + "\n"
+
+
+def entry_text(key, value, depth=2):
+    """固定期待のファイルの中の、1 つの項目のテキスト(cases・skipped の項目は深さ 2)。"""
+    pad = " " * depth
+    body = json.dumps(value, ensure_ascii=False, indent=1, sort_keys=True).replace("\n", "\n" + pad)
+    return pad + json.dumps(key, ensure_ascii=False) + ": " + body
+
+
+def no_fixture_ids():
+    """固定期待を持たないケース(readdir の順に依る)の ID。"""
+    return {case.id for case in all_cases()[0] if case.step2 is None and not case.fixture}
+
+
+def add_to_fixture(existing_text, additions, without_fixture):
+    """既存の固定期待(テキスト)に、足りないケースの項目とケースの一覧だけを足した中身を返す。
+
+    既存の項目(各欄・cases と skipped の各項目)は 1 バイトも変えない。足す値は、固定期待に無いケースだけを
+    旧版で測った形(additions_document。2 種類の機械のログを merge_fixtures で 1 つにしたもの)に限る。
+    """
+    existing = json.loads(existing_text)
+    if fixture_text(existing) != existing_text:
+        raise Failure("既存の固定期待が、比較器の書き方(鍵を並べ、字下げ 1)でない。項目を変えずに足せない")
+    if ADDED_KEY in existing or ADDED_KEY not in additions:
+        raise Failure("既存の固定期待に足す形でない")
+    for key in sorted((set(existing) | set(additions)) - set(ADD_FREE_KEYS)):
+        if existing.get(key) != additions.get(key):
+            raise Failure(f"足す値と既存の固定期待で欄 {key} が違う(測った条件が違う)")
+    if machines_of(additions) != machines_of(existing):
+        raise Failure(f"足す値を測った機械 {machines_of(additions)} が、既存の固定期待の機械 {machines_of(existing)} と違う"
+                      "(同じ OS の全部の機械のログを渡す)")
+    old_ids = existing["case_ids"]
+    new_ids = additions["case_ids"]
+    added = additions[ADDED_KEY]
+    if len(added) != len(set(added)) or len(new_ids) != len(set(new_ids)) or set(added) & set(old_ids):
+        raise Failure("足すケースが重複しているか、既存の一覧にある")
+    if not set(added) <= set(new_ids) or [case_id for case_id in new_ids if case_id not in set(added)] != old_ids:
+        raise Failure("足した後のケースの一覧が、既存の一覧(順を変えない)に足すケースを入れた形でない")
+    cases, skipped = additions["cases"], additions["skipped"]
+    if set(cases) & set(skipped) or not (set(cases) | set(skipped)) <= set(added):
+        raise Failure("足すケースでない項目があるか、項目と未実施の理由の両方がある")
+    if (set(cases) | set(skipped)) & (set(existing["cases"]) | set(existing["skipped"])):
+        raise Failure("足す項目が既存の固定期待にある(既存の項目は変えない)")
+    if (set(cases) | set(skipped)) & set(without_fixture):
+        raise Failure("固定期待を持たないケースの項目がある")
+    lost = [case_id for case_id in added
+            if case_id not in cases and case_id not in skipped and case_id not in without_fixture]
+    if lost:
+        raise Failure(f"足すケースの値がログに無い(旧版で測れなかった): {lost}")
+    merged = dict(existing)
+    merged["case_ids"] = list(new_ids)
+    merged["cases"] = dict(sorted({**existing["cases"], **cases}.items()))
+    merged["skipped"] = dict(sorted({**existing["skipped"], **skipped}.items()))
+    text = fixture_text(merged)
+    # 既存の項目のテキストが、足した後のファイルにそのまま残ること(1 バイトも変えない)。
+    for part in ("cases", "skipped"):
+        for key, value in existing[part].items():
+            if entry_text(key, value) not in text or entry_text(key, value) not in existing_text:
+                raise Failure(f"既存の項目 {part}/{key} のテキストが変わる")
+    for key in set(existing) - {"case_ids", "cases", "skipped"}:
+        if entry_text(key, existing[key], 1) not in text:
+            raise Failure(f"既存の欄 {key} のテキストが変わる")
+    return text
 
 
 FIXTURE_BEGIN = "===== R4U の固定期待 {name} ここから ====="
@@ -2742,10 +2923,26 @@ def merge_fixtures(documents):
 
 
 def main_extract_fixture(log_paths, out):
+    """CI のログから固定期待を取り出す。
+
+    - 固定期待が無い OS のログ(全体の形): 新しく書く。既にあれば上書きしない(既存の項目を変えないため)。
+    - 固定期待に無いケースだけのログ(足す形): 既存の固定期待に、足りないケースの項目とケースの一覧だけを足す。
+    どちらも、同じ OS の複数の機械のログの値が、機械の欄のほかで同じことを確かめる(merge_fixtures)。
+    """
     name = out.name
     documents = [extract_fixture(path.read_text(encoding="utf-8", errors="replace"), name) for path in log_paths]
     data = merge_fixtures(documents)
-    out.write_text(json.dumps(data, ensure_ascii=False, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+    if ADDED_KEY in data:
+        if not out.exists():
+            raise Failure(f"{out} が無い。足す形のログ(固定期待に無いケースだけ)は、既存の固定期待に足す")
+        text = add_to_fixture(out.read_text(encoding="utf-8"), data, no_fixture_ids())
+        out.write_text(text, encoding="utf-8")
+        print(f"固定期待: {len(data[ADDED_KEY])} 件を足した(項目 {len(data['cases'])}・未実施 {len(data['skipped'])}。"
+              f"既存の項目は変えない)・機械 {data['machines']} → {out}")
+        return 0
+    if out.exists():
+        raise Failure(f"{out} が既にある。全体の形のログでは上書きしない(既存の項目を変えないため。作り直すときは消してから)")
+    out.write_text(fixture_text(data), encoding="utf-8")
     print(f"固定期待: {len(data['cases'])} 件・機械 {data['machines']} → {out}")
     return 0
 
