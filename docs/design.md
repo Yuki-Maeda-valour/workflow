@@ -1157,6 +1157,8 @@ Pythonの実行時だけに由来し、検査専用入口では旧版と同じ�
 3. UTF-8でない地域設定での書き出しの失敗の1行目、`native/crates/cli/src/commands/restore_taskmd/response.rs` の `describe_errno` が文を持つ6つ(EPIPE・ENOSPC・EIO・EBADF・EFBIG・EDQUOT)のほかの errno の2行目、待たずに書く設定のパイプの `EAGAIN`。
 4. 引数の誤りの応答を書く間の SIGINT と、Pythonの起動の途中に届いた信号。
 
+S3I-A #474で決めた結果は、[S3I-Aの節](#r4rで比べなかった4件の結果)にある。
+
 #### 比較から外す1項目(`__CF_USER_TEXT_ENCODING`)
 
 認めた差は、2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけである。Macの旧Pythonが子の環境に足す変数を、比較から外す。ほかのコマンドで認めた差は持ち込まない。
@@ -1200,6 +1202,92 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### implement-guardのGitを呼ばない3コマンドと記録の読み取り(S3I-A)
+
+[Issue #474](https://github.com/Yuki-Maeda-valour/workflow/issues/474)で、`plugins/dev-workflow/skills/do-task/scripts/implement-guard.sh`(以下「旧版」。sha256 `b958cc12b60c26364d3eff11d9f31a98b532363d9556221f7e58b8d2a50a6981`)のうち、Gitを呼ばない部分を開発用Rustソースへ移した(commit `c4ded694`)。
+開発中で未配布である。製品CLIの登録表・help・既存の呼出元(do-task の SKILL.md と references・`implement-agent.sh`・`diagnostic-state.py`)は変えていない。配布は段階1b・プラグインv4.53.0のまま。
+残りは、`take` の本体(S3I-B #475)と、`config-check`・`compare` の本体(S3I-C #476)である。
+
+- 移したのは、`taskmd-diff`・`restore-taskmd`・`cleanup` の3つのサブコマンドと、全6サブコマンドの使い方・引数の検査・保護領域の確かめ・記録の読み取りである。
+- 検査専用入口 `implement_guard_contract`(cargoのexample)だけが呼ぶ。引数が正しい `take` と、記録の読み取りまで通った `config-check`・`compare` は、境界の印(stderr の `ERROR [s3i-a-boundary] <サブコマンド> の本体は S3I-B・S3I-C で移す` の1行と終了値99)で止める。99は旧版のどの終わり方にも無い(単体テストが旧版のバイト列で確かめる)。
+- Rustは道具を起動しない。起動するのは、本文の復元のGNU `cp` だけである(2026-11-11 23:19・2026-11-12 02:54の決定)。旧版が起動する `stat`・`sha256sum`・`realpath`・`cmp`・`sed`・`rm`・`find`・`grep`・`mktemp` などの結果と、旧版の地点で出る道具の文(`LC_ALL=C` の英語)を、Rustが作る。
+
+#### 維持する契約
+
+- 使い方: 旧版の2〜202行(18733バイト)と同じ文を出す。
+  - `-h`・`--help` は、使い方を stderr へ出して終了値0である(旧版の `usage()` は `>&2` で常に stderr へ出す)。
+  - 引数の誤りは、`ERROR [usage] …` の行と使い方を stderr へ出して終了値2である。
+  - 使い方を出す `sed` の終わり方(終了値4・141・153)も合わせる。
+- 保護領域の確かめ: `--state` が保護領域の候補(`XDG_STATE_HOME`・`HOME/.local/state`・`HOME/.cache` の下の `dev-workflow`)の下の `guard-*` か、`/tmp`・`TMPDIR` の下でないか、mode 700か、`manifest.tsv` と `snapshot` のダイジェストが引数と同じかを、旧版の順に確かめる。
+  - パスの解決は、`cd -P`・`pwd -P`・GNU `realpath` 9.4・bashの `command -v` の規則で行う。値がちょうど `-` のときは、bashの `cd -` と同じく、起動時にフォルダだった `OLDPWD` へ移る。
+- 記録の読み取り: `4-meta.txt`・`taskmd.txt` を、bashの `while IFS=$'\t' read -r` と同じに読む(NULを落とす・改行で終わらない最後の行は読まない)。引用した値は、旧版の `cunquote` の `printf -v` を基準の容器で測った表(13692行)と同じに戻す。
+- bashの実行時の再現:
+  - 起動時の警告は、`SHLVL`・`BASH_XTRACEFD`・`BASH_COMPAT`・setlocale の順に、旧版と同じ文を出す。setlocaleの判定は、Linuxはglibcの規則(`LOCPATH`・locale-archive・`locale.alias`)を読み、Macは `newlocale` で行う。
+  - `ERR` の罠の行(`ERROR [internal] 予期しない失敗(終了コード $ec・行 $LINENO)`)は、旧版の同じ失敗の場所の行番号を出す。失敗の場所と行番号の表は `native/crates/cli/src/commands/implement_guard/sites.rs` にある。
+  - 組み込みの `echo`・`printf` の書き込みの失敗は、`implement-guard.sh: line <行>: <命令>: write error: <strerror>` と、その後の `ERR` の罠(終了値20。stderrの失敗は終了値1)にする。glibc 2.39 の行ごとの溜め方(4096バイト・`vfprintf` の128バイト)も合わせる。
+  - TERM・INT・HUP の罠は、bashと同じ命令の区切り(組み込みの命令の後と、旧版が前面の道具を起動する所の後)で確かめる。`EXIT` の罠の `rm -rf -- "$WORK"` の後でも確かめる(受けていれば終了値20)。
+  - 閉じたパイプ(`SIGPIPE` が既定)と `RLIMIT_FSIZE` を超える書き込み(`SIGXFSZ`)では、`EXIT` の罠(`WORK` を消す)を走らせてから、その信号で終わる。
+  - `rm -rf` は、GNU rm 9.4 の fts(GNU rm が使うフォルダ走査の部品)と同じ辿り方をする。
+    - フォルダは、親の fd(開いたファイルの番号)から開く。
+    - 開くときはリンクを辿らない(`O_NOFOLLOW|O_DIRECTORY`。リンクとフォルダでない物は開けない)。
+    - 開いたフォルダが、先に調べた device と inode(ファイルを見分ける2つの番号)と同じかを照らしてから辿る。
+    - 消す順と出る文は、旧版と同じである。
+- 子の環境(本文の復元の cp の子): bashの取り込みと書き出しの規則(名前の無い項目を落とす・同じ名前は後ろ・`SHLVL`・`PWD`・`OLDPWD`・`IFS`・`LINENO` などの決め直し)を再現する。旧版が export する `LC_ALL=C`・`GIT_NO_LAZY_FETCH=1`・`GIT_OPTIONAL_LOCKS=0` も渡す。
+  - 呼出元が旧スクリプトの変数と同じ名前を export していたとき、94個(固定の値の `SP_BASE=implement-guard.sh` を含む)は旧版と同じ値を渡す(2026-11-12 14:24の追加の決定4)。
+  - `CAP`・`RP`・`SP_DIR`・`helper`・`helper_dir`・`python_path` の6個は、値が旧版の置き場所か `python3` の場所で決まるので再現しない。Rustは受け継いだ値をそのまま渡し、受け継いでいなければ渡さない(同じ決定)。
+- `restore-taskmd` の exec の時点: TERM・INT・HUP を起動時の扱いへ戻す。`SIGCHLD` の扱い(既定か無視)は引き継いだまま保ち、止め(mask。信号を一時的に止める設定)は `SIGCHLD` だけを外す。その後は、R4Rの部品を同じプロセスで呼ぶ(下の「R4Rの部品の使い方」)。
+
+#### 当てた決定と認めた差
+
+設計(Issue #474)の「旧版との差と、決定の当て方」の表の行だけを当てた。表に無い差は認めていない。下は主な行で、表の全部ではない(全部は Issue #474 の表にある)。
+
+- 起動時に閉じた標準の fd(0〜2)(2026-11-12 08:55): Rustの標準の実行時の初期化(閉じた0〜2を `/dev/null` で開き直す)をそのまま使い、旧版との差を認める。比較器は、閉じた起動の旧版とRustの結果を、それぞれの固定期待(32件)と照らす。互いには比べない。
+- 書き出しの失敗の文(08:55): errno の文は、Linuxは基準の容器のglibc 2.39から生成のスクリプトで作った全番号の表、Macは libSystem の `strerror_r` をその場で呼ぶ。Pythonの例外の型は CPython 3.10 の対応表に合わせる。
+- 実行ごとに変わる出力(2026-11-11 22:31・22:35)と、順序を決めない流し方(2026-11-12 06:58):
+  - 旧版の `printf` の `%(` の誤りの文の1文字(書式の後ろのメモリを読む)だけを伏せて比べる。
+  - 旧版どうしでも、罠の時点が揺れる地点がある。
+    - 規則の2通りは、罠が道具の直後に動いた結果と、次の組み込みの命令の後に動いた結果である。
+    - Rustに許すのは、規則の2通りのうち、旧版の測定で実際に出たものだけである。
+    - Rustは道具の直後の結果を出す。それが旧版で出たことを、単体テストが確かめる。
+  - 旧版の測定の照らし(`--check`)は、2つを確かめる。
+    - 揺れない地点の固定期待の結果が、今の測定にも出ること。
+    - Rustの結果が、今の測定にも出ること。
+  - 固定期待で見ていない結果は、記録に出し、失敗にしない。管理担当が、22:35・06:58の決定と決定の表の範囲と判断した。
+  - 規則の外の遅い罠(罠が最後の `printf` の後に動く)は旧版だけに出る。Rustには許さない。起きる仕組みは未確認である。
+- 比較の入力に使わない環境変数(2026-11-12 09:58の追加の決定3): `BASH_ENV`・`SHELLOPTS`・`FUNCNEST`・`GLOBIGNORE`・`BASH_ARGV0` など15個と、`BASH_FUNC_`・`LD_`・`MALLOC_`(Macは `DYLD_` も)で始まる名前は、効果を再現せず、比較の入力に使わない。一覧は `native/ci/implement_guard_fixtures/excluded_env.json` に固定した。
+- 決定D5と中間の書き込みの故障(00:35): Rustは `python3` と `restore-taskmd.py` を探さない。旧版がその条件で `runtime-unavailable` になる差を認める。`taskmd-diff` の `before.norm`・`after.norm` はRustの中で値として持つ。
+- 子の環境に処理系が足す値(02:41): Macの旧Pythonが cp の子に足す `__CF_USER_TEXT_ENCODING` の扱いは、R4Rと同じ決定である。S3I-Aの比較器は、Macでは restore-taskmd の停止の件だけを比べ、cp の子の環境を比べない。
+- 旧版の実行環境のパス(2026-11-11 17:58・21:35・22:26・22:38): bashの文の先頭のスクリプトの呼出名は固定名 `implement-guard.sh`、bashの起動時の警告の先頭は固定名 `bash`、旧helperの呼出履歴のファイル名は固定名 `restore-taskmd.py` にする。比較器は既知の欄だけを対応づけ、残りをバイト単位で比べる。途中で切れる出力は、22:26・22:38の3つの場合に分ける。
+- bashが子に渡す `BASH_VERSION`(2026-11-12 00:35): 呼出元がこれを export した起動で、Rustは基準の版の値 `5.2.21(1)-release` を渡す。ほかの版のbashとの差は認める。
+- 外部の道具(2026-11-11 23:19・2026-11-12 02:54): 道具がPATHに無い・GNUでない・壊れているときの差は認める(Rustは cp のほかの道具を起動しない)。
+- 記憶域の不足と処理系の資源の上限(2026-11-12 00:28・00:42): 比較の前提の外とする。
+
+#### R4Rで比べなかった4件の結果
+
+[R4Rの節](#r4rでは比べずs3i-a-474で決めること)の4件は、次のように扱った。
+
+1. 起動時に閉じた標準の fd とフォルダの標準の fd: 閉じた fd は08:55の決定で差を認め、固定期待で照らす(上)。stdout か stderr がフォルダのときは、旧helperの `Fatal Python error` と同じ形を出す(2026-11-11 17:45の決定)。比較器の restore-taskmd の群で比べる。
+2. 読み込めない地域設定の名前と `LC_CTYPE`: 旧版は `LC_ALL=C` を export してから旧helperを起動するので、PythonのPEP 538 の書き換え(C の地域設定のときに `LC_CTYPE` を UTF-8 の名前へ変える動き)は起きない(08:55の決定の表の行)。比較器は、`LANG`・`LC_CTYPE`・`LC_ALL` を変えた起動で、cp の子の環境が旧版と同じことを確かめる。
+3. 書き出しの失敗の文:
+   - 1行目は、旧版が `LC_ALL=C` で旧helperを起動するので、地域設定で変わらない(2026-11-11 22:24・2026-11-12 08:55。`encoding='utf-8'` は R4R のまま)。
+   - 2行目の errno の文は、生成した全番号の表(Linux)と libSystem(Mac)で出す(08:55)。
+   - 待たずに書く設定のパイプの `EAGAIN` は「安定した部分だけを比べる」(22:35)と決めた。比較器のケースには入れていない。
+4. 引数の誤りの応答を書く間の SIGINT: 旧helperが応答を書く間は TERM・INT・HUP を止め、止めを戻した所で `KeyboardInterrupt` になる。Rustも同じ所で `KeyboardInterrupt` の2行を出して SIGINT で終わる。比較器は、詰めたFIFO(読み手が読まない名前付きのパイプ)で止めて送り、信号で終わること・終了値・最後の行・それまでの出力を比べる(08:55・22:35)。Pythonの起動の途中に届いた信号は、比較器のケースに入れていない。
+
+#### R4Rの部品の使い方
+
+- 呼ぶのは `restore_taskmd` の公開関数だけで、順は `examples/r4r_contract.rs` と同じである。引数は、旧版が旧helperへ渡す argv と同じ並びをバイト列で組む。
+- exec の時点に当たる所で、(1) 罠を戻し `SIGCHLD` の止めだけを外す、(2) プロセスの環境を子の環境に置き換える、(3) `SIGPIPE` を無視にして `restore_taskmd::start()` を呼ぶ、(4) 引き継いだ SIGINT が既定のときだけ `KeyboardInterrupt` の再現を置く、(5) stdout か stderr がフォルダなら `Fatal Python error` で終了値1、の順に行う。
+- R4Rの中身(`operation.rs`・`child.rs`・`args.rs`・`realpath.rs`)は変えていない。変えたのは、errno の文の表(新しい `restore_taskmd/errno_text.rs` と生成物の `errno_glibc.rs`)と、Macの `strerror_text`(`platform/src/restore_taskmd.rs`)だけである。
+
+```text
+旧版(bash implement-guard.sh <サブコマンド> …) ─┐
+                                              ├─ 同じパスの配置・同じ argv・同じ環境 → 終了値・stdout・stderr・記録・印・タスク本文・cp の子の環境・偽の git の起動を比べる
+implement_guard_contract <サブコマンド> … ──────┘
+```
+
+APIは [native/README.md](../native/README.md#implement-guardのgitを呼ばない3コマンドs3i-a)、比較の手順と件数は [testing.md](testing.md#s3i-aの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
@@ -1235,6 +1323,11 @@ APIは [native/README.md](../native/README.md#タスク本文の復元の内部�
   - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
   - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
   - `rustix` の機能と、依存の版は増やしていない。
+- S3I-A(#474)では、自作の `unsafe`(OS の呼び出し)を `native/crates/platform/src/implement_guard.rs` の安全な関数の中に置いた。cli は `unsafe` を使わない。
+  - 例は、信号の扱いと mask・`raise`・umask・fd の差し替えと種類(`dup2`・`fstat`・`fcntl`・`BorrowedFd::borrow_raw`)・環境の読み取りと置き換え(`environ`・`clearenv`・`setenv`)・利用者の番号とログインのシェル(`getuid`・`geteuid`・`getpwuid`)・`faccessat`・`pthread_self`・Macの `newlocale` である。これは全部の並びではない。全部は、そのファイルの `unsafe` の所(`grep -n unsafe`)で見る。
+  - Macの errno の文の `strerror_r` は、R4Rの `native/crates/platform/src/restore_taskmd.rs` の `strerror_text` に足した(S3I-Aが足した `unsafe`)。
+  - 検査専用入口 `implement_guard_contract.rs` は `#![deny(unsafe_code)]` で、初期化の表への登録(Linuxは `.init_array`、Macは `__DATA,__mod_init_func`)の1項目だけを許す。`main` の前に、引き継いだ `SIGPIPE` の扱いなどを記録するためである。製品の実行ファイルはこの関数を参照しない。
+  - `rm -rf` の走査は、`rustix` の `openat`・`Dir::new`(開き直さずに読む)・`statat`・`unlinkat` で書いた。`rustix` の機能と、依存の版は増やしていない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
 - `Cargo.lock` に必要な間接依存を加え、既存依存の版は上げていない。Rustは1.99.1のまま。YAMLは後のR4Sで局所修正版を採用した。Landlock・kqueueの部品は未採用である。

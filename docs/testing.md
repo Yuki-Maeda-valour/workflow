@@ -507,6 +507,92 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
 CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
 R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
+### S3I-Aの比較
+
+#474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と当てた決定](design.md#implement-guardのgitを呼ばない3コマンドと記録の読み取りs3i-a)、[部品と入口](../native/README.md#implement-guardのgitを呼ばない3コマンドs3i-a)を参照する。
+
+- 比較はPython3.10系・root以外の通常利用者で行い、Cコンパイラ(`cc`)を要る。どれかが欠ければ、比較器は省略せずに失敗する。
+- 版に依る欄(道具の文・bashの文・`strerror` の文など)があるので、範囲 `full` は基準の環境で流す。基準はCIのUbuntu 24.04(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・grep 3.11・glibc 2.39・CPython 3.10.11)で、手元ではこれと同じ版の容器を使う。基準と違う機械では、範囲 `full` を失敗にする(skip にしない)。
+- 通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しない。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example implement_guard_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example implement_guard_contract --target x86_64-unknown-linux-musl)
+python3 -B native/ci/check_implement_guard.py --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/implement_guard_contract"
+python3 -B -m unittest discover -s native/ci -p 'test_implement_guard.py'
+python3 -B native/ci/implement_guard_measure.py --check      # 旧版の測定の照らし(手元だけ。約20〜24分。2026-11-12 の 3 回で 1228〜1459 秒)
+python3 -B native/ci/implement_guard_mutations.py            # Rust のソースへの変異の確かめ(手元だけ)
+```
+
+- `--fixture` の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物やPATHへ切り替えない。
+- 旧版(sha256 `b958cc12…`)と旧helper(`0f33bf55…`)の sha256 と、使い方の文が旧版の2〜202行と同じことを、最初に照らす。違えば失敗する。
+- 範囲は `--scope full|mac|signed` で選ぶ。省略はLinuxが `full`、Macが `mac` である。
+  - `full`: 下の群の全部と、ほかの段の全部。
+  - `mac`: 引数と使い方・保護領域の確かめ・記録の読み取り・taskmd-diff・restore-taskmd の停止(8件)・cleanup。Macで比べられないケース(`/dev/full`・UTF-8でない名前・mode 1700・GNUの道具の文が出るケースなど)は外し、群ごとの件数と理由を「未実施」の行に出す。bash 4.0以上が無いMacでは、旧版との比較を未実施と記録し、Linuxで旧版を測った固定期待(13件)と照らす。
+  - `signed`: 署名後の実行物が動くことの確かめ(引数と使い方・保護領域の確かめ・`taskmd-diff` の `same` の3件)。
+- 比較器の自己検査(`test_implement_guard.py`。22件)を、どの範囲でも比較器の中から流す。OSで成り立たない件と、bash 4.0以上が無いときに旧版を起動する件は、skip にして理由を「未実施」の行に出す。
+- 比べるのは、終了値(信号で終わればその番号)・stdout・stderr・記録の中のファイル・所属の印・タスク本文・cp の観測器が記録した子の環境と argv・偽の `git` の起動の回数である。
+  - 置き換えるのは、旧版の実行環境のパスの既知の欄(bashの文の先頭の呼出名など)・`Current thread` の値・一時フォルダの16進32桁・`printf` の `%(` の誤りの文の1文字だけである。
+  - 子の環境は、追加の決定4の6個(`CAP`・`RP`・`SP_DIR`・`helper`・`helper_dir`・`python_path`)だけを両方の集合から外して比べる。外した名前ごとの旧版とRustの有無と値は、`S3I-A: 決定 4 の名前の記録:` の行にケースごとに出す。Rustの側は、受け継いだ値と同じか、受け継いでいなければ無いことを確かめる。
+- ケースの一覧(範囲ごとに、群ごとの件数とラベルの一覧の sha256)は `native/ci/implement_guard_fixtures/case_lists.json` に固定する。ほかの固定期待と一覧も、同じフォルダに件数と sha256 で固定する。
+
+範囲 `full` の群ごとの件数(2026-11-12・commit `c4ded694`):
+
+| 群 | 比べた件数 | 境界の印の件数 |
+|---|---|---|
+| 引数と使い方 | 115 | 2 |
+| 保護領域の確かめ | 143 | 16 |
+| 記録の読み取り | 65 | 2 |
+| taskmd-diff | 31 | 0 |
+| restore-taskmd | 49 | 0 |
+| cleanup | 19 | 0 |
+| 出力の故障 | 118 | 0 |
+| 起動の状態 | 39 | 0 |
+| 旧版の記録の相互読み | 15 | 0 |
+| Git と道具の不起動 | 3 | 0 |
+| 合計 | 597 | 20 |
+
+- 境界の印の件数は、引数が正しい `take` と、記録の読み取りまで通った `config-check`・`compare` で、Rustが印(終了値99)で止まった件である。比べる件で印を受けたら失敗にする。
+- 群のほかの段: 決定D5の3件・PATHを絞ったRustの3件・詰めたFIFO(読み手が読まないパイプ)で止めて TERM・INT・HUP を送る48件・strace(プロセスの起動を記録する道具)の3件・`/dev/null` を開けない起動の4件・fd 0〜2を閉じた起動の32件(旧版とRustをそれぞれの固定期待で照らす)。
+  - strace の段は、strace が無いか ptrace(他のプロセスを見張る仕組み)が使えなければ、未実施と記録する。
+  - `/dev/null` を開けない起動は、利用者の名前空間(`unshare -U -m`。権限なしで、そのプロセスだけのファイルの見え方を作る仕組み)を作れる機械だけで流す。作れなければ、未実施と記録する。手元の基準の容器では、`--security-opt seccomp=unconfined --security-opt apparmor=unconfined` を付けて流した。
+- 旧selftestは、旧版流しとRust流しの2通りで流す(群Lの変異は含めない)。Rust流しは、`taskmd-diff`・`restore-taskmd`・`cleanup` と使い方をRustへ、`take`・`config-check`・`compare` を旧版へ渡す包みを使う。
+  - 確かめの行は611行で、Rustを通った行は583行・旧版だけの行は28行である。Rustを通った行の最低件数(583)を固定する。
+  - Rust流しで FAIL を許すのは、固定の一覧(`selftest_allowed.json`。J9・J10・P8の28行)だけである。一覧の外の FAIL と、一覧の中の PASS は失敗にする。
+- 管理担当の検証(2026-11-12 22:45に終わった回。機密と既存の未追跡を持ち込まない検証用コピー)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・532秒で合格した。
+
+#### 旧版の測定の照らし(手元だけ)
+
+- `implement_guard_measure.py` は、比較器で同じ時点を作れない結果を、旧版で測って固定期待(`expected_old.json`)にする。CIでは流さない(2026-11-12 12:59の決定)。旧版か道具の版が変わったときに、手元の基準の容器で測り直す。
+- 信号(道具の地点): 旧版が起動する道具の偽(Cで組んだ観測器)をPATHの先頭に置いて止め、TERM・INT・HUP を送って結果を測る。201地点(Rustの地点は192。決定D5の道具の地点が9)を、地点ごとに6回流す。
+  - Rustの結果(罠が道具の直後に動いた結果)が出なければ、30回まで増やす。それでも出なければ失敗にする。
+  - 規則の2通りは、Rustの単体テストが書き出す(`S3IA_EXPORT_RULE_OUTCOMES=<書き先> cargo test --locked -p dev-workflow-cli --example implement_guard_contract signals_at_tool_points`)。`--write <出力> --rules <書き先>` で固定期待を作る。
+- 起こせない失敗: `LD_PRELOAD` の部品で、旧版の `mkdir`・`unlinkat`・`read`・`getdelim` を失敗させて13件を測る。測れない3件は、固定期待に「未測定」と理由を書く(`exec </dev/null` の失敗は比較器の段で直接比べる・checks-only の cmp が中間のファイルを読むときの誤りはRustに地点が無い・旧helperの exec は bash の地点ではない)。
+- 照らし(`--check`。値を省くと `expected_old.json`)は、揺れない地点の固定期待の結果と、Rustの結果が今の測定にも出ることを確かめる。固定期待で見ていない結果は `S3I-A 測定: 記録:` の行に出し、失敗にしない(旧版どうしの競り合い。[設計のS3I-A節](design.md#当てた決定と認めた差))。
+  - 管理担当の検証の回: 201地点・揺れた4地点・旧版を1206回流して1228秒で合格した(固定期待で見ていない結果を1地点で記録)。
+  - 実装担当の回(2026-11-12): 今の照らし方の回は1422秒で合格した(固定期待で見ていない結果を4地点で記録)。前の照らし方(固定期待に無い結果を失敗にする)の2回は、それぞれ別の地点で、6回の固定期待に無かった結果を見て落ちた。
+  - 測り直し(`--write`)は、1459秒だった(201地点・揺れた4地点・旧版1206回)。
+
+#### 変異の確かめ(手元だけ)
+
+- `implement_guard_mutations.py` は、`native/ci/implement_guard_fixtures/mutations/` の4つの変異を1つずつ当てたコピーを組み、比較器の狙った群と、旧selftestのRust流しが落ちることを確かめる。CIでは流さない。cargo 1.99.1 が要る。
+  - a: ダイジェストの照合を外す。f: チェックの正規化で任意の1文字を受ける。m: `..` の正規化を外す。e: R4Rの段の検査を外す(親のリンクを辿らない開き方と、段ごとの確かめの両方)。
+- 実装担当の回(2026-11-12・572秒)では、4つとも落ちた。比較器の不一致は a 24件・e 29件・f 2件・m 2件、Rust流しの一覧の外の FAIL は 4・5・4・4行だった。管理担当の検証の回も合格した。
+
+#### 未確認の条件
+
+- Macの実機・CIでの比較(範囲 `mac`・`signed`)・最低のOSの版。範囲 `mac` のうち、Macで比べないとしたケースの一部(mode 1700・NULを含む印など)は、Macでの違いを推測で決めた。
+- MacのCIの実行機に bash 4.0以上があるか。無ければ、旧版との比較は固定期待の13件だけになる。
+- CIのUbuntuの実行機の strace と ptrace の有無、利用者の名前空間を作れるか(作れなければ、その段は未実施と記録される)。
+- 4機種のCIの `implement-guard`・`implement-guard-universal` のジョブの時間。
+- 旧版の規則の外の遅い罠が起きる仕組み。
+
+CIの接続は [CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口)にある。検査専用入口はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -531,6 +617,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
     - 同じcommitのpush用のrun 43085900763では、Mac x86_64の `verify-universal` が26分39秒で成功した。上限まで残り約3分だった。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --target <Rust の対象名>`。
+  - S3I-A(#474)で、検査専用の `implement_guard_contract` も同じ2回のビルドに加わった(`--example implement_guard_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `implement-guard`(`build` の後・4機種)と `implement-guard-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ45分と20分である([S3I-Aの比較](#s3i-aの比較)・[CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口))。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。

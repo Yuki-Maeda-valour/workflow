@@ -4,8 +4,12 @@
 //!   製品の実行ファイルはこの関数を参照しないので、`main` の前に何も走らない。
 //! - 各関数は 1 回だけシステムコールを呼ぶ。`EINTR` の扱いは呼び出し側(cli の `implement_guard`)が
 //!   旧 bash と同じに決める。
-//! - `unsafe` は、このファイルの信号・mask・umask・fd の差し替え・環境の置き換え・`faccessat`・
-//!   `pthread_self`・Mac の `newlocale` だけに置く。各所に安全の理由を書く。
+//! - S3I-A の OS の呼び出し(`libc` の関数と `unsafe`)は、このファイルの安全な関数の中だけに置く。
+//!   例: 信号の扱いと mask・`raise`・umask・fd の差し替えと種類(`dup2`・`fstat`・`fcntl`・
+//!   `BorrowedFd::borrow_raw`)・環境の読み取りと置き換え(`environ`・`clearenv`・`setenv`)・
+//!   利用者の番号とログインのシェル(`getuid`・`geteuid`・`getpwuid`)・`faccessat`・`pthread_self`・
+//!   Mac の `newlocale`。各所に安全の理由を書く(このほか、Mac の errno の文の `strerror_r` は
+//!   R4R の `restore_taskmd.rs` の `strerror_text` にある)。
 #![deny(unsafe_op_in_unsafe_fn)]
 
 use std::ffi::CString;
