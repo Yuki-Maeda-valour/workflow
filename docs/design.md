@@ -1200,6 +1200,186 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### R4U(check_links)の文書のリンク検査
+
+[Issue #480](https://github.com/Yuki-Maeda-valour/workflow/issues/480)で、旧版 `plugins/dev-workflow/skills/update-doc/scripts/check_links.py`(93行)と同じ結果を返す専用の部品を、開発用Rustソースへ実装した。
+製品CLIの登録表(`native/crates/cli/src/commands/mod.rs`)・help・既存の呼び出し元(update-doc の `SKILL.md`)へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+旧版・`plugins/` の下のテスト・版・`CHANGELOG.md` は変えていない。
+旧版の誤検出も変えない。例は、複数行にまたがる `[` から数える行番号と、バッククォートの組の取り違えである。直すなら別のタスクにする。
+
+- `cli/src/commands/check_links/` が専用の処理を持つ。製品の実行物には入らない。検査用の実行物(`native/crates/cli/tests/check_links.rs`・`native/crates/cli/tests/check_links_units.rs`)だけが `#[path]` で読み込む。
+- OS の呼び出しは `platform::check_links` に置く。cli 側の処理は `#![forbid(unsafe_code)]` を保つ。
+- C0a から使うのは `ExitCode` の型だけである。`CommandIo`・`execute_to`・`emit_to` は、書き込みの時点と失敗の扱いが旧版と違うので使わない。C0b の保持実体・リンクの拒否と、C0c の子の実行は使わない。
+- 外部の crate・`rustix` の機能・依存の版は増やしていない。`libc` の crate も使わない(OS の呼び出しの宣言の仕方は [C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
+- 旧版との比較は、CI の必須ジョブ `r4u` で流す。`build` の `cargo test --locked` では流さない(2026-11-12 12:59 の決定。Task 3.1c)。
+
+#### 旧版と同じにする動作(要点)
+
+細かい契約の正本は、Issue #480 の「維持する動作」の節である。ここには要点だけを置く。
+「本家 3.10.11」は、CPython の公式の v3.10.11 のソースと同じ中身の Python を指す。
+
+- 引数
+  - 0個なら、旧版の説明の文(docstring)を stdout へ出して終了2。`PYTHONOPTIMIZE` が2以上なら、旧版と同じく `None` と改行を出す。
+  - 1個以上なら、すべてを対象として順に扱う。`-h`・`--`・空文字も対象である。
+  - 引数のバイト列は変えない。対象は pathlib の `PurePosixPath` と同じ規則で整えてから、OS の呼び出しにも使う(`a.md/` は `a.md` になる)。
+  - 判定は `is_dir` → `is_file` の順で、どちらもリンクを辿る stat を使う。どちらでもない対象は、その時点で stdout へ `WARN: 対象が見つかりません: <引数>` を出す。この行は件数に数えない。
+- 走査(`Path.rglob("*.md")`)
+  - 本家 3.10.11 の `pathlib.py` と同じ順・同じ OS の呼び出しで行う。パスは文字列を連結した完全なパスで渡す。ディレクトリの fd から辿る呼び出し(openat など)にしない。
+  - 集めたパスは、部品の列として Unicode の符号位置の順に並べる。UTF-8 でない名前は、surrogateescape(読めないバイトを U+DC80〜U+DCFF の文字に置く Python の扱い)の値で比べる。
+  - 並べた後に、部品のどれかが除外の7個(`.git`・`node_modules`・`dist`・`build`・`.next`・`vendor`・`__pycache__`)と同じパスを外す。対象のパス自身の部品も数える。直接渡したファイルには当てない。
+  - 権限の誤り(`PermissionError`)のディレクトリは黙って飛ばす。深さが Python の再帰の上限に当たると、旧版と同じ `RecursionError` の呼出履歴を出して終了1(本家 3.10.11 の Linux では深さ990から)。
+- 2種類の照合
+  - リンク `\[[^\]]*\]\(([^)\s]+)\)` と、コード中のパス `` `([A-Za-z0-9_.@/-]+/[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,10})` `` の2つである。
+  - 正規表現の外部の部品を使わず、旧版の後戻りと同じ一致を手で組んだ。空白は Python 3.10 の `\s` と同じ集合を使う。
+  - 行番号は、一致の始まり(`[` か開きのバッククォートの位置)の行である。
+  - 決まった乱数の種で作った12051件の入力で、旧版の関数の結果と比べる。
+- 読み取り・解決・存在の確かめ
+  - 本文は `open(path, "r", encoding="utf-8", errors="replace")` と同じに読む。読めないバイトは Python 3.10 と同じ範囲で U+FFFD にする。CRLF と CR は LF にそろえ、BOM は残す。FIFO は書き手が来るまで待つ。
+  - `/` で始まらないリンクは、本家 3.10.11 の `resolve()`(strict でない)と同じ規則で解決してから、`exists()` で確かめる。`/` で始まるリンクは解決しない。
+  - コード中のパスは、ファイルの親の祖先の先頭3個に連結したパスも順に探す。その後、必ず元のパスの `exists()` を確かめる。例外の出る時点を旧版と同じにするためである。
+  - OS の誤りの例外は、旧版と同じ種類と本文にする。Linux の OS の文は glibc の文の固定表を使い、Mac は OS の文を使う。配布物が使う musl の文は使わない。パスの repr は Python 3.10(Unicode 13.0)に合わせる。
+- 出力と終了値
+  - 最後に `検査ファイル数: <数>`・`WARN  <内容>`・`ERROR <内容>`・`結果: ERROR <数> 件 / WARN <数> 件` の順に出す。ERROR が1件以上なら終了1、無ければ終了0。
+  - 例外で止まったときは、旧版と同じ呼出履歴を stderr へ出して終了1。終わるときの書き出しが失敗したら終了120。
+  - 呼出履歴の `File` の欄は、旧スクリプトを `check_links.py`、標準ライブラリを `pathlib.py`・`posixpath.py`・`genericpath.py` の固定名で出す。行番号とソースの行は、本家 3.10.11 の値である。
+- 書き込みの区切りと故障
+  - stdout と stderr は、本家 3.10.11 の `TextIOWrapper` と `BufferedWriter` と同じ時点・区切り・中身で書く。
+  - stdout は、パイプかファイルなら溜めてから書く。`TextIOWrapper` の区切りは8192バイト、`BufferedWriter` の大きさは stdout の `st_blksize`(1以下なら8192)である。端末なら行ごとに書く。stderr は常に行ごとに書く。
+  - `PYTHONUNBUFFERED` は、[R4A](#本文の正規化と確認用の値r4a-task-digest) と同じ規則で有効かを決める。有効なら、書くたびに出す。
+  - 終わるときは、旧版と同じ4つの順に行う。(1) stderr・stdout の書き出し(失敗は黙って捨てる)。(2) 呼出履歴。(3) stdout・stderr の書き出し(失敗なら終了120)。(4) 閉じるときの書き出し。
+  - 書き込みの失敗は、旧版と同じ例外・呼出履歴・書き込みの試行の回数・終了値にする。対象は、閉じたパイプの EPIPE・`/dev/full` の ENOSPC・`RLIMIT_FSIZE` の途中までの書き込みと EFBIG・待たずに書く設定の EAGAIN である。
+  - 呼出履歴を出している間の失敗と SIGINT で、どの部品が欠けるかは、本家 3.10.11 で測った表(`native/fixtures/r4u/step2.json` の `table`。95行)に合わせる。
+  - stdout と stderr への書き込みは、すべて libc の `write` を通す。比較器が共有ライブラリを差し込み、記録と故障の注入をするためである。製品の処理の中に、検査専用の分岐は置かない。
+- 起動の失敗
+  - 旧 Python と同じ順に調べる。`PYTHONHASHSEED` の不正 → `PYTHONINTMAXSTRDIGITS` の不正 → stdin・stdout・stderr がディレクトリか、の順である。
+  - どれかに当たれば、旧版と同じ `Fatal Python error: ...` の診断を fd 2 へ直接書き、終了1。診断の `Current thread 0x<16桁>` の値は、実行中のスレッドの `pthread_self()` の値から作る。
+  - SIGINT を捕まえる処理を置くのは、2つの環境変数の確かめの後で、標準入出力の確かめの前である(本家 3.10.11 の起動の順)。
+  - 起動の前に閉じていた fd 0〜2 への出力は、旧版と同じく黙って捨てる。
+- 信号
+  - SIGINT は、起動時に既定の動作のときだけ捕まえる。`SA_RESTART` は付けない。
+  - 捕まえたら旧版と同じ所で中断し、stdout を書き出して `KeyboardInterrupt` の呼出履歴を出す。最後に既定の動作へ戻し、自分へ SIGINT を送って終わる。
+  - 引数0個の応答を書く間と、起動の失敗の診断を書く間に届いた SIGINT も、旧版と同じ結果にする(Task 3.1b。下の 08:55 の項)。
+  - SIGTERM は既定の動作で終わる。SIGPIPE と SIGXFSZ は、旧 Python と同じ時点で無視にする。
+- 文字コード
+  - Python の文字コードの設定(`PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・地域設定)は読まない。引数・パス・stdout は生のバイトを保ち、stderr は UTF-8 と backslashreplace にする。
+
+#### 実装の途中で決めたこと(2026-11-12。管理担当)
+
+- SIGPIPE の扱いを main の前に控える(03:50)
+  - 旧 Python は、`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS` の不正の診断を、親から受け継いだ SIGPIPE の扱いのまま書く。stderr が閉じたパイプなら、旧版は SIGPIPE で終わる。
+  - Rust の起動の処理は、main の前に SIGPIPE を無視にする。そのままでは終了1になり、旧版と違う。旧版に合わせて直せる差なので、差を認めずに直した。
+  - main の前に元の扱いを控え、この2つの診断を書く間は、元の扱いに戻す。旧 Python が無視にする時点(SIGXFSZ と同じ所)から無視にする。
+  - 必須のケースに、親が SIGPIPE を既定にしたときと、無視にしたときの2つを足した。
+- main の前の処理は検査用の実行物だけに置く(04:20)
+  - 控える関数 `platform::check_links::capture_before_main` は platform に置く。
+  - main の前に呼ぶ static(Linux は `.init_array`、Mac は `__mod_init_func`)は、検査用の実行物 `native/crates/cli/tests/check_links.rs` だけに置く。製品の実行物(`dev-workflow`)は変えない。
+  - 同じ控えで、起動の前に閉じていた fd 0〜2 も、Python の `is_valid_fd` と同じ方法で記録する。Rust の起動の処理が閉じた fd 0〜2 へ開く `/dev/null` と、呼出元が渡した `/dev/null` を見分けるためである。
+  - 控えが無いまま入口の `run` を呼ぶと、何も書かずに panic する(呼出元の誤り)。
+  - 04:20 の決定は、後で製品へつなぐときに、配布の担当が製品の入口に同じ static を置くとした。08:55 の決定は製品の入口(`main.rs`)を変えないと定めるので、つなぐときに照らし、止まって聞く(下の 08:55 の項)。
+- 呼出履歴を出している間の部品ごとの表(Task 2.3 の最初の作業)
+  - 実装担当が本家 3.10.11 で測った。入力は3つ(1段の呼出履歴・前の例外とつながった2段の呼出履歴・`RecursionError`)。故障は4つ(SIGINT・1回だけの失敗・続く失敗・`RLIMIT_FSIZE` の途中で切る)。
+  - 全95行を `step2.json` の `table` に置いた。管理担当が設計レビューの実測の例と照らし、すべて一致した。違いは1点で、`PYTHONUNBUFFERED` でも2段の区切りは1回の write だった。
+- Mac の確かめ(07:55)
+  - push 用の CI の Native(run 43114986888・commit 91bd35d)で、Mac 2種類とも、旧版と Rust の試しの書き込みが記録に現れた。
+  - `RLIMIT_FSIZE` の動きは Linux と同じだった(上限まで書き、その後は EFBIG)。
+  - 2種類の Mac が測った固定期待(482件)は、機械の欄のほかは同じだった。これを `native/fixtures/r4u/cases-macos.json` に置いた。
+- SIGINT のケースを足す(Task 3.1b。commit 80b8cc2・841eb03)
+  - 08:55 の決定の当て方を照らし、足りないケースを Task 3.1b で必須のケースに足した。どれも信号の組に入る。
+  - 足したのは、引数0個の応答を書く間の SIGINT の6件(`signal-args-none-sigint-{pipe,unbuffered,pty}-{1,last}`)と、起動の失敗の診断を書く間の SIGINT の2件(`signal-env-hashseed-bad-word-sigint`・`signal-stdio-stdin-dir-sigint`)である。
+  - FIFO の待ちの途中の SIGINT の7件には、送った時点の確かめ(呼出履歴の最後のフレーム)を足した。
+  - 起動の失敗の2件の旧版の実測は、設計の推定どおりだった。`PYTHONHASHSEED` が不正なときは SIGINT で終わり、stderr は `Fatal Python error: ` の20バイトだった。stdin がディレクトリのときは、終了値1で診断の全文を出した。
+  - Mac の固定期待には、push 用の CI の run 43152122842(commit 80b8cc2)のログから8件を足した(commit 841eb03)。比較器は、固定期待に無いケースだけを旧版(本家 3.10.11)で測ってログへ出す。`--extract-fixture` は、その値を既存の固定期待へ足す。Rust の出力は使っていない。既存の482件の項目は変えていない。
+  - 当て方の中身は、下の 06:58・08:55 の項にある。
+- 比較を build から必須ジョブ `r4u` へ移す(Task 3.1c。commit 841eb03)
+  - 2026-11-12 12:59 の決定に合わせた。中身は下の 12:59 の項にある。
+
+#### 全コマンド共通の決定の当て方
+
+出典は #400 のコメントである。決定の時刻と #400 のコメントの見出しの対応は、Issue #480 の表にある。
+R4U の実装と検査だけに当てる。ほかのコマンドの差へは広げない。広げる必要が出たら止まって聞く。
+
+| 決定の時刻 | 中身 | R4Uでの当て方 |
+|---|---|---|
+| 2026-11-11 17:45・17:58 | 起動の失敗の `Current thread` の値・診断の旧スクリプトのパス | 値は位置と形式(16桁の16進)だけを比べる。旧スクリプトのパスは `check_links.py` の固定名にする |
+| 2026-11-11 21:35 | 固定名を、標準ライブラリなど導入先のパスへ広げる | `pathlib.py`・`posixpath.py`・`genericpath.py` を固定名にする。比較器は3本の SHA-256 を本家 3.10.11 と比べ、違うファイルの欄を含むケースを失敗にする |
+| 2026-11-11 22:24・22:26 | 文字コードの固定・標準ライブラリの行番号・途中で切れる出力 | UTF-8 と surrogateescape に固定する(stderr は backslashreplace)。設定で旧版が変わる条件(`PYTHONIOENCODING=utf-8` と UTF-8 でない名前など)は、設定ごとの別の期待で比べる。標準ライブラリの行番号は本家 3.10.11 の値にする。途中で切れる出力は、22:38 の行と同じ作り方で期待を作る |
+| 2026-11-11 22:31 | 旧 Python の実行環境・起動を変える環境変数・実行ごとに変わる出力(後の決定では「22:35 の決定」と呼ぶ。同じ決定) | `PYTHONPATH` など一覧の変数と、sitecustomize の効果は再現しない。比較器は子の環境を、許すものを並べて一から作る。SIGINT は安定した部分を、SIGTERM は全バイトを比べる |
+| 2026-11-11 22:38 | 固定名で短くなった出力と、途中までの書き込み | 固定名の欄を含む書き込みが途中で切れるケースは、[#471](https://github.com/Yuki-Maeda-valour/workflow/issues/471) の設計の (ア)(イ) と同じ作り方で Rust の期待を作る |
+| 2026-11-11 23:19 | 外部の道具を起動しない | 当たる所が無い。旧版も Rust も子を起動しない |
+| 2026-11-12 00:28 | 書き込みの途中の失敗・記憶域の不足・一覧に無い Python の環境変数 | 書き込みの区切りは旧版と同じなので、失敗の位置は実装に依らない。このため、`Current thread` の値の欄のほかは、全部の行と write の記録を比べる。記憶域の不足は比較の前提の外。一覧に無い変数(`PYTHONMALLOCSTATS` など)は再現しない。`PYTHONOPTIMIZE` と不正な `PYTHONHASHSEED` は再現する |
+| 2026-11-12 00:35 | 中間の書き込みの故障・道具の版・bash の setlocale の警告 | 当たる所が無い。中間のファイルを書かず、bash も外部の道具も使わない |
+| 2026-11-12 00:42 | 旧版の処理系自体の資源の上限 | `RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK` などは比較の前提の外。比較器は設定せず、受け継いだ値を記録する。`RLIMIT_FSIZE` の書き込みの故障は旧版に合わせる |
+| 2026-11-12 02:41 | 旧版の処理系や OS の部品が、子の環境へ自分で足す値 | Mac で、比較器が渡していない `__CF_USER_TEXT_ENCODING`(値が `0x<uid の大文字の16進>:0x…:0x…` の形)だけを、環境の確かめから外して記録する。旧版と Rust の両方の記録に同じ条件を当てる。出力の比べ方は変えない |
+| 2026-11-12 06:58 | 競り合い・実行の時刻・プロセスの番号で変わる値の比べ方 | 旧版は一時ファイル・時刻・プロセスの番号を出さない。信号は順序を決めて送るので、06:58 の緩め(残る物の範囲で比べる)は使わない(下の項) |
+| 2026-11-12 08:55 | 閉じた fd 0〜2・子へ渡す LC_CTYPE・strerror の表・EAGAIN と起動の途中の信号・bash の ERR の表示・書き出しの失敗 | 下の項のとおり。子へ渡す LC_CTYPE と bash の2項目は当たらない(子を起動せず、bash を使わない) |
+| 2026-11-12 09:58 | bash が環境から読み込むほかの変数は再現しない | 当たる所が無い。bash を使わない |
+| 2026-11-12 11:57 | 共有ファイルは作業ブランチの上で並行して編集してよい・マージは準備ができた順に1本ずつ | 共有ファイル(この節を含む5つの文書・`native/crates/cli/Cargo.toml`・`native/crates/platform/src/lib.rs`)と、12:59 の決定で変えた CI の4ファイル(`.github/workflows/native.yml`・`native/ci/build.py`・`native/ci/check_workflow.py`・`native/ci/scripts/test_native_ci.py`)は、作業ブランチの上で足すだけにした |
+| 2026-11-12 12:59 | 新しいコマンドの比較は build と verify-universal に入れず、コマンドごとの新しい必須ジョブで流す | 比較を必須ジョブ `r4u`(build の後・4機種)へ移した。build には単体テスト(`check_links_units`)と clippy だけが残る(下の項) |
+
+「比較の前提の外」は、旧版と Rust の結果の違いを失敗にしないことを指す。
+
+06:58 の当て方(信号を送る時点):
+
+- 信号は、共有ライブラリが決まった write の直後に送るか、比較器が子の FIFO の待ちに入ったことを確かめてから送る。待ちの確かめは、Linux が `/proc/<pid>/wchan`、Mac がスレッドの状態である。
+- Mac の待ちの確かめは推定である(動くスレッドが0で、Unix の呼び出しの回数が0.3秒変わらない)。
+- 早すぎた送信のうち、SIGINT の処理を置く前の送信は、最後の行が `KeyboardInterrupt` にならず失敗する。置いた後で FIFO を開く前の送信は、比べる欄では見分けられない。
+- これを補うため、FIFO の待ちの途中の SIGINT の7件(`signal-fifo-sigint-*` の6件と `traceback:read-fifo-sigint`)で、呼出履歴の最後のフレームが本家の標準ライブラリの `pathlib.py` の open の行であることを確かめる(Task 3.1b)。比べる欄は 22:35 の決定のまま変えない。
+  - このフレームは、送った時点が open の行の中(open の呼び出しの直前の一瞬か、FIFO の待ち)だったことだけを示す。FIFO の待ちに入った後に送った主な根拠は、Linux の wchan と Mac の推定である。
+  - open の呼び出しに入った後で、FIFO の待ちに入る前に届いたときは、待ちが EINTR で戻らず、時間切れで失敗する(CPython のコードからの推定)。
+- SIGTERM は、待ちの前に WARN を書き出さない形では、送る時点で出力が変わらない。WARN を先に書き出す形(`PYTHONUNBUFFERED`・疑似端末)では、早すぎる送信は固定期待の WARN の行と合わずに失敗する(ケースの作りからの理由。早すぎる送信を起こしての実測はしていない)。
+
+08:55 の当て方:
+
+- 閉じた fd 0〜2
+  - 決定は、Rust の標準の初期化(閉じた0〜2を `/dev/null` で開き直す)をそのまま使い、旧版との差を認め、製品の入口(`main.rs`)を変えないと定める。
+  - R4U は製品の入口を変えず、標準の初期化もそのまま動く。検査用の実行物だけが、標準の初期化より前に動く控えの処理(`.init_array`・`__mod_init_func` の static)で元の状態を控え、旧版と同じ結果を出す。決定が認めた差を使わないだけで、決定を変えない。
+  - Rust の本処理は、控えが済んだことを要求する。製品へつなぐときの入口の扱いは、そのときに 08:55 の決定と照らし、止まって聞く(#480 の範囲の外)。
+- strerror(OS の誤りの文)
+  - Linux は Rust が固定表を持つ。表は作業機の glibc 2.35 から作った。容器の Ubuntu 24.04(glibc 2.39)の文と、errno 1〜133 ですべて同じことを確かめた(2026-11-12)。表に無い番号は、glibc と同じ `Unknown error <n>` を出す。
+  - Mac は実行時に OS の strerror を呼ぶ。決定の表は CI の macOS の文なので、CI の macOS では表と同じ文になる(Mac 2種類の CI の比較で、共有ライブラリで当てた書き込みの失敗のケースの文が旧版と一致した)。ほかの Mac では、その機械の旧版と同じ文になる(決定より厳しい側)。
+- EAGAIN
+  - 決定は、読み手の速さで変わる実行ごとの出力として、安定した部分だけを比べると定める。
+  - R4U のケースは、読み手のいない満杯の非ブロッキングのパイプを渡すか、共有ライブラリで決まった時点に当てる。時点が読み手の速さに依らないので、緩めを使わず全部を比べる(決定より厳しい側)。
+- 起動の途中に届いた信号
+  - 起動の正常な経路には write も待ちも無く、時点を決めて送れない。このため、正常な経路を狙うケースは作らない。
+  - 起動の失敗の経路は、診断を fd 2 へ書く。その1回目の write の直後に SIGINT を送るケースを足した(Task 3.1b)。対象は、値の確かめの側(`PYTHONHASHSEED` が不正。`signal-env-hashseed-bad-word-sigint`)と、標準入出力の確かめの側(stdin がディレクトリ。`signal-stdio-stdin-dir-sigint`)の2つである。
+  - この2つは、時点が write で決まり、Python の呼出履歴を出さない。このため、22:35 の緩め(安定した部分だけ)を使わず、stdout・stderr・終了値・信号・write の記録の全部を比べる(決定より厳しい側)。旧版が SIGINT で終わっても、最後の行が `KeyboardInterrupt` であることは求めない。
+  - 診断の `Current thread` の値の欄だけは、17:45 の決定のとおり形式を確かめて伏せる(既存の `stdio-stdin-dir` のケースと同じ。write の記録も同じ)。
+  - 旧版の結果は、固定期待を作るときの実測で確かめ、設計の推定どおりだった。値の確かめの側は、SIGINT の処理を置く前なので SIGINT で終わった。標準入出力の確かめの側は、置いた後なので印が立つだけで、終了1になった。
+- 引数の誤りの応答を書く間の SIGINT
+  - 旧版の引数0個の応答(docstring と終了2)を書く間に、共有ライブラリが stdout の1回目と最後の write の直後に SIGINT を送るケースを足した(Task 3.1b。バッファあり・`PYTHONUNBUFFERED`・疑似端末の6件。`signal-args-none-sigint-{pipe,unbuffered,pty}-{1,last}`)。
+  - 比べ方は 22:35 の決定の SIGINT の扱いである。旧版が SIGINT で終わったときは、中断の比べ方にする。
+- 書き出しの失敗の文
+  - `Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>` の `encoding` は `utf-8` にする(上の文字コードの固定)。
+
+12:59 の当て方:
+
+- R4U の比較(`native/crates/cli/tests/check_links.rs` が起動する比較器 `check_r4u.py` と自己検査 `test_r4u.py`)を、build の `cargo test --locked` から外し、新しい必須ジョブ `r4u` で流す(Task 3.1c)。
+  - ジョブ `r4u` は build の後に、Linux 2種類・Mac 2種類の4機種で流れる。中では `python3 -B native/ci/build.py r4u --platform <機械>` が `cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare` を流す。
+  - テストの実行物は、`--r4u-compare` を受けたときだけ比較器と自己検査を起動する。受けないとき(`--r4u-compare` を付けない `cargo test --locked`)は、`R4U の比較は流していない: ` で始まる1行を出して終了0にする。この1行は比較の合格に数えない。
+  - この1行は、比較器の結果の行の頭(`R4U の比較: `)とは別の文字列にした。build のログにこの頭が無いことで、build で比較を流していないことを確かめられる。
+  - build に残るのは、単体テスト(`check_links_units`)と `cargo clippy --all-targets` の検査だけである。
+- 検査対象は、機械ごとに作る動的リンクのテストの実行物である。配布物でも example でもない。Mac 共通の実行物を作らないので、combine の後の Mac 2機種のジョブは作らない。
+- verify-universal は R4U を流していないので変えない。既存のジョブの上限も変えない。ジョブ `r4u` の上限は30分である。最初の実測(run 43157591744)では、最も長い Mac x86_64 でも3分21秒だった。
+- 「必須」の意味: main には保護の設定が無い。マージの条件は「PR 用の CI の全ジョブが同じ attempt で成功」なので、ジョブ `r4u` の失敗はマージを止める。R4E #482 の `r4e` の形に合わせ、`distribution` の `needs` には入れない。
+- ジョブを足すのに合わせ、`native/ci/check_workflow.py` の許す形と必須の数え方も同じ変更で直した(12:59 の決定の2項目め)。
+
+#### 比べ方
+
+```text
+旧Python(本家 3.10.11) ─┐                      ┌ 固定期待(native/fixtures/r4u/)
+                         ├─ 同じ入力・同じ環境 ─┼ stdout・stderr・終了値・信号
+検査用の Rust 実行物 ────┘  (同じ共有ライブラリ  ├ write(2) の区切りと中身(記録)
+                              で記録する)       └ 入力の無変更・新しいファイルが無いこと
+```
+
+- 比較器 `native/ci/check_r4u.py` が、旧版・固定期待・Rust の3者を比べる。`cargo test --locked -p dev-workflow-cli --test check_links -- --r4u-compare` で流れ、CI では必須ジョブ `r4u` で流れる。`--r4u-compare` を付けない `cargo test --locked` では流れない。
+- 標準ライブラリの行番号を比べるので、本家 3.10.11 と同じ中身の Python が要る。作業機では `R4U_PYTHON` で渡す。
+- 必須のケースは508件である。Mac で行わなくてよいケースは、閉じた一覧(`/dev/full` が無い・UTF-8 でない名前を作れない・旧版の試しの書き込みが記録に現れない)だけとする。件数と理由を出し、成功に数えない。
+- 信号を送る時点の確かめと、Task 3.1b で足したケースの比べ方は、上の 06:58・08:55 の当て方にある。
+
+API は [native/README.md](../native/README.md#r4ucheck_linksの文書のリンク検査)、比較の流し方と件数は [testing.md](testing.md#check_links-の比較r4u)に記す。
+
 ### 診断の reftable の読み取り(R4D-1)
 
 #481 で、診断 9 本(`diagnostic-*.py`)の Rust 移植(R4D)の 1 つ目の単位を、開発用ソースへ実装した。
@@ -1291,6 +1471,7 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
 - Rust は `native/rust-toolchain.toml` で `1.99.1` に固定する。`rustfmt`・`clippy` を用意し、`Cargo.lock` を共有する。内部の版 `0.1.0` は配布プラグインの版と分ける。
 - `platform` 以外の自作 crate(Rust の部品単位)では `#![forbid(unsafe_code)]` を使う。`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使い、安全な関数だけを外へ公開する。
+  - 例外は、R4U の `platform::check_links::capture_before_main` だけである。main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
 - ビルドの設定は `native/Cargo.toml`・`native/.cargo/`・`native/ci/` に置く。`.github/workflows/native.yml` の実行コマンドは `native/ci/` のスクリプトを呼ぶだけにする。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外に置く。導入と必須の検査は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)、4 種類の CI と比較の補助は [testing.md](testing.md#rust-の開発と検査段階-0a) に記す。
 - ソース入力の SHA256(内容の違いを確かめるための値)は、`native/` の Git 追跡ファイルだけから作る。パス順に、リポジトリ直下からの相対パス・Git のモード・作業中の本文を、それぞれの長さと一緒に計算へ入れる。
@@ -1320,6 +1501,11 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
   - 旧helperの `_posixsubprocess` と同じ子の準備が要るためである。子だけの `RLIMIT_FSIZE`、`close_range` か列挙した fd への exec の時に閉じる印、`SIGPIPE`・`SIGXFSZ` の既定、mask、`execv` は、exec の前に子の中で動く。`std::process::Command` の `pre_exec` と `libc` でしか書けない。
   - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
   - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
+  - `rustix` の機能と、依存の版は増やしていない。
+- R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
+  - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
+  - 例外が1つある。main の前に static から呼ぶ `capture_before_main` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
+  - 検査用の実行物 `native/crates/cli/tests/check_links.rs` は `#![deny(unsafe_code)]` の中で、main の前に呼ぶ static の `link_section` のためだけに `unsafe_code` を許す。cli の `commands/check_links/` は `#![forbid(unsafe_code)]` のまま。
   - `rustix` の機能と、依存の版は増やしていない。
 - [公式の `openat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.openat.html)と [公式の `statat`](https://docs.rs/rustix/1.1.6/rustix/fs/fn.statat.html)は、保持した親の識別子を受ける。所有する型で閉鎖を管理でき、自作の危険なOS呼出しを増やさずに済むため選んだ。
 - 依存の根拠は [1.1.6のパッケージ](https://docs.rs/crate/rustix/1.1.6/source/Cargo.toml.orig)と、配布ソースの [OS呼出し実装](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/src/backend/libc/fs/syscalls.rs)・[ビルド設定](https://github.com/bytecodealliance/rustix/blob/4a563ad698b2c20ff848515821023d2265a788d0/build.rs)である。Linuxは `linux_raw`、Macは `libc` の既定を使う。
