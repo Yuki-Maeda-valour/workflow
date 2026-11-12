@@ -6,7 +6,7 @@
 ## コマンド
 
 リポジトリ直下から実行します。CIの補助はPython 3.10以上と標準ライブラリを使います。R4Sの比較には`requirements-dev.txt`の開発依存も必要です。
-旧版との比較を含む `build`・`reproduce`・`verify-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
+旧版との比較を含む `build`・`reproduce`・`verify-universal`・`r4a-rest`・`r4a-rest-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `CARGO_TARGET_DIR` にはリポジトリの外のフォルダを指定してください。
 CIの`build.py`呼出しは、コマンド名を先に置き、その後にオプションを指定します。オプション先行形と`--`を先に置く形はCI定義の検査で拒否します。
 CI では `RUNNER_TEMP/native-ci` が既定です。`CARGO_HOME` は呼び出し側の値を保ちます。
@@ -25,6 +25,8 @@ python3 -B native/ci/build.py build --platform linux-x86_64
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。R4B・R4R検査用実行物の署名検査と専用比較も行います。Intel と Apple Silicon の両方で実行し、署名し直しません。
 - CIの工程全体の上限は`build`が60分、`verify-universal`が30分です。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。Macの`build`は、run 43085911008で新上限の中で終わりました(x86_64が44分46秒、arm64が28分35秒)。`verify-universal`は、run 43085911008でMac arm64が13分9秒、Mac x86_64が17分8秒で成功しました(上限30分)。同じcommitのpush用のrun 43085900763では、Mac x86_64が26分39秒で、上限まで残り約3分でした。2つのrunとも`distribution`の工程は待ちのまま始まらず、GitHub側の実行機の割り当ての問題と推測しています。推測の根拠(HTTP 502の記録と、mainの過去のrunの`distribution`の成功)は [testing.md](../../docs/testing.md#pr用ciの記録run-43085911008) にあります。
+- `r4a-rest`: `build`の後に、同じ機種の2回のビルド(`1/`・`2/`)の`r4a_rest_contract`を専用比較します(R4A残り5本)。Linux 2種・Mac 2種です。
+- `r4a-rest-universal`: `combine`の後に、署名後のMac共通の`r4a_rest_contract`を、Intel/Apple Siliconの両CPUで専用比較します(署名し直しません)。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
 
 Linux で指定する名前は `linux-x86_64`・`linux-arm64` です。
@@ -123,12 +125,12 @@ Python 3.11 以降の子プロセスでも、例外表示の位置の印を抑�
 #461の2コマンドは未登録・未配布です。[契約](../../docs/design.md#origin判定とgit設定の確認値r4b)と [実行手順・手元実測](../../docs/testing.md#r4bの比較)を参照してください。
 
 - `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4b_contract`を実行します。
-- Linux2種・Mac2種の`build`/`reproduce`は、別々の空の出力先から3本(製品用`dev-workflow`と、検査用の`r4b_contract`・`r4r_contract`)を各2回作ります。3本の一覧は`build.py`の`CI_BINARIES`で、R4Rも同じ一覧で作って転送します。
+- Linux2種・Mac2種の`build`/`reproduce`は、別々の空の出力先から4本(製品用`dev-workflow`と、検査用の`r4b_contract`・`r4r_contract`・`r4a_rest_contract`)を各2回作ります。4本の一覧は`build.py`の`CI_BINARIES`で、R4Rも同じ一覧で作って転送します。
 - 各回に`check_r4b.py --fixture <今回作ったr4b_contractの絶対パス>`を必須実行します。通常の製品CLIへR4Bを登録して代用しません。
-- Linuxでは3本のELFを検査し、各2回のバイト列を比較します。Macは3本を各2回結合・署名し、署名後のバイト列を比較します。
-- `verify-universal`は同じ署名後の3本を受け取り、Intel/Apple Siliconの両CPUで`r4b_contract`の専用比較を実行します。専用比較の失敗は工程全体の失敗です。
-- 転送用の固定一覧(`BUILD_FILES`)は`1/dev-workflow`・`1/r4b_contract`・`1/r4r_contract`・`2/dev-workflow`・`2/r4b_contract`・`2/r4r_contract`と`record.json`です。
-- Mac結合後の転送一覧(`UNIVERSAL_FILES`)は`dev-workflow`・`r4b_contract`・`r4r_contract`と`record.json`です。欠落・余分なファイル・ハッシュや権限の違いを拒否します。
+- Linuxでは4本のELFを検査し、各2回のバイト列を比較します。Macは4本を各2回結合・署名し、署名後のバイト列を比較します。
+- `verify-universal`は同じ署名後の4本を受け取り、Intel/Apple Siliconの両CPUで`r4b_contract`の専用比較を実行します。専用比較の失敗は工程全体の失敗です。
+- 転送用の固定一覧(`BUILD_FILES`)は`1/`・`2/`それぞれの`dev-workflow`・`r4b_contract`・`r4r_contract`・`r4a_rest_contract`(計8本)と`record.json`です。
+- Mac結合後の転送一覧(`UNIVERSAL_FILES`)は`dev-workflow`・`r4b_contract`・`r4r_contract`・`r4a_rest_contract`と`record.json`です。欠落・余分なファイル・ハッシュや権限の違いを拒否します。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4b_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
 - 比較はPython3.10系・非rootで行います。自己検査16件・既存46件・追加23件を必須実行し、追加比較だけで約9分かかります。短い自己検査だけで置き換えません。
 
@@ -140,7 +142,7 @@ R4Bの上記経路はコード上で必須にしました。今回の手元Linux
 
 - `quality()`は通常のCargo検査に加え、`cargo test --locked -p dev-workflow-cli --example r4r_contract`を実行します。
 - 続けて `r4r_map()` が、同じexampleの `-- --list` と `-- --list --ignored` の出力を取り、`check_r4r.py --map-list <一覧> --map-ignored <一覧>` で対応表と照らします。46件の全件・その機械で流す対応先の存在・`#[ignore]` の不在を確かめます。
-- Linux2種・Mac2種の`build`/`reproduce`は、`r4r_contract`を3本の1つとして各2回作ります。ELFの検査・バイト列の比較・Macの結合と署名・転送の一覧は、[R4Bの節](#r4bの必須比較と検査用実行物)にまとめてあります。
+- Linux2種・Mac2種の`build`/`reproduce`は、`r4r_contract`を4本の1つとして各2回作ります。ELFの検査・バイト列の比較・Macの結合と署名・転送の一覧は、[R4Bの節](#r4bの必須比較と検査用実行物)にまとめてあります。
 - 各回に`check_r4r.py --fixture <今回作ったr4r_contractの絶対パス>`を必須実行します(`r4r_probe()`)。通常の製品CLIへR4Rを登録して代用しません。
 - `verify-universal`は同じ署名後の`r4r_contract`を受け取り、Intel/Apple Siliconの両CPUで専用比較を実行します。専用比較の失敗は工程全体の失敗です。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`r4r_contract`は`native-dist.tar`の5ファイルへ入りません。配布済みのプラグインも変更しません。
@@ -188,3 +190,24 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 確認に使う API は `repos/actions/<名前>/commits/<タグ>`、`repos/actions/<名前>/commits/<SHA>`、
 `repos/actions/<名前>/contents/action.yml?ref=<SHA>` です。
 更新するときは 3 つを確認してから `check_workflow.py` の記録とワークフローを同時に変えます。
+
+## R4A残り5本の必須比較と検査用実行物
+
+- 5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)の移植は、未登録・未配布です。
+- 実行物は開発用の `r4a_rest_contract` です。
+- 契約は設計書にC4で追記する予定で、まだありません。
+- 必須caseは1824件です。比較器の自己検査(`test_r4a_rest.py`)は60件です。
+
+- `quality()`は、`cargo test --locked -p dev-workflow-cli --example r4a_rest_contract`と、`-p dev-workflow-platform --example r4a_rest_platform`を実行します。
+- 専用比較(`check_r4a_rest.py --strict-pending`)は`build`・`verify-universal`には入れず、必須の2ジョブで流します。
+  - `r4a-rest`: `build`の後。4機種で、同じ機種の`1/`と`2/`の`r4a_rest_contract`を比べます。比較器の自己検査は1回目の比較だけで流します。
+  - `r4a-rest-universal`: `combine`の後。Mac 2機種で、署名後のMac共通の実行物を各CPUで比べます。
+  - どちらも、`actions/setup-python`の3.10.11の後に`build.py prepare`を流し、そのPythonを`$R4A_REST_PYTHON`として旧版に使います。
+- 比較器は、比較の前に自己検査60件を流し、落ちたら比較を流しません。作業機での実測は897秒です(2026-11-12。負荷の高い機械で計りました)。比較本体は65秒でした(同日)。
+- 上限は、1回の比較(900秒)×回数 + 自己検査(900秒)+ 準備と余裕で決めました。`r4a-rest`は60分、`r4a-rest-universal`は45分です。
+  - 1回の比較900秒は見込み(未確認)です。作業機の実測は上の65秒でした。
+  - 自己検査900秒も見込み(未確認)です。CIの結果を見て更新します。
+- `r4a_rest_contract`は転送用の成果物に入りますが、配布物には入りません(`make_dist.BINARY_PATHS`に無いことを検査します)。
+- Macの`strerror`は、Apple Libc `Libc-1725.40.4`の表(`errno_macos.rs`)を使い、OSの`strerror`は使いません。CIのMacの比較器が、旧版の`os.strerror`と表を照らします(違えば失敗)。
+- Macの故障の差込みは、`fault_shim.c`を`cc -dynamiclib`で作り、`DYLD_INSERT_LIBRARIES`で旧版に当てます。差込みが効くことを、OSごとの固定の期待にしています(Linux・Macとも「効く」)。`cc`が無い・ビルドの失敗・効きの期待違いは、どのOSでも失敗です。CIで効かないと分かったときに、期待を固定し直します。
+- `/dev/full`を使う満杯の出力と、待ちの状態を`/proc`で確かめる信号のcaseは、Linuxだけで流します。Macでは固定の一覧(`requires_linux`)のとおり未実施として件数を出し、成功には数えません。

@@ -25,9 +25,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "r4a_rest_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "r4a_rest_contract")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -147,6 +147,9 @@ def quality(name, work):
         run(["cargo", "test", "--locked"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
+        # R4A 残り 5 本の専用 example の単体検査(専用比較は、新しい必須ジョブ r4a-rest・r4a-rest-universal で流す)。
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4a_rest_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-platform", "--example", "r4a_rest_platform"], env=env)
         r4r_map(env, Path(temporary))
 
 
@@ -209,6 +212,32 @@ def r4b_probe(fixture):
 
 def r4r_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_r4r.py", "--fixture", fixture])
+
+
+def r4a_rest_probe(fixture, selftest=True):
+    """R4A 残り 5 本の専用比較。旧版は、この Python(CI の setup-python の 3.10.11)で動かす(`$R4A_REST_PYTHON`)。
+    接続待ちが 1 件でも残れば失敗にする(`--strict-pending`)。未実施は、固定の一覧(Linux 以外の OS で確かめられない case)の
+    とおりのときだけ終了 0 で、成功には数えず件数を出す。一覧と違う未実施・cc が無い・差込みの効きの期待違いは失敗(0 以外)。"""
+    python = sys.executable
+    env = {**os.environ, "R4A_REST_PYTHON": python}
+    command = [python, "-B", ROOT / "native/ci/check_r4a_rest.py", "--fixture", fixture, "--strict-pending"]
+    if not selftest:
+        command.append("--no-selftest")  # 比較器の自己検査は、ジョブの中で 1 回だけ流す(2 回目の比較では省く)
+    run(command, env=env)
+
+
+def r4a_rest_build(name, downloads, work):
+    """build の後の機種ごとの必須ジョブ: 同じ機種の 2 回のビルド(`1/`・`2/`)の両方の専用 example を比べる。"""
+    target_config(name)  # 同じ OS・CPU の機械でだけ流す
+    folder, _ = extract_build(name, downloads, work)
+    for number in (1, 2):
+        r4a_rest_probe(folder / str(number) / "r4a_rest_contract", selftest=number == 1)
+
+
+def r4a_rest_universal(downloads, work):
+    """combine の後の Mac 2 機種の必須ジョブ: 署名後の Mac 共通の実行物を、各 CPU で比べる(署名し直さない)。"""
+    folder, _ = extract_universal(downloads, work)
+    r4a_rest_probe(folder / "r4a_rest_contract")
 
 
 def read_record(folder):
@@ -309,7 +338,8 @@ def package(downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test",
+                                                    "r4a-rest", "r4a-rest-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -317,7 +347,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4a-rest") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -334,6 +364,10 @@ def main():
                 r4r_probe(stage / f"{number}/r4r_contract")
             pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
+        elif args.command == "r4a-rest":
+            r4a_rest_build(args.platform, downloads, work)
+        elif args.command == "r4a-rest-universal":
+            r4a_rest_universal(downloads, work)
         elif args.command == "combine":
             combine(downloads, work)
         elif args.command == "verify-universal":

@@ -45,7 +45,7 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test)(?: |$)", command)
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4a-rest-universal|r4a-rest)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -95,7 +95,8 @@ def check_document(document):
         if set(job) - JOB_KEYS:
             problems.append(f"{name}: job の設定は needs・strategy・runs-on・timeout-minutes・steps に限ります")
         # R4Bはbuildで2回、署名後は各CPUで1回比較する。外側で打ち切らない。
-        native_timeouts = {"build": 60, "verify-universal": 30}
+        # R4A 残り 5 本は、1 回の比較の上限 900 秒 × 比較の回数 + 比較器の自己検査(900 秒)+ 準備と余裕で決める(r4a-rest は 2 回で 60 分、r4a-rest-universal は 1 回で 45 分)。
+        native_timeouts = {"build": 60, "verify-universal": 30, "r4a-rest": 60, "r4a-rest-universal": 45}
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -136,11 +137,17 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal"}]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4a-rest", "r4a-rest-universal"}]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
             problems.append(f"{name}: 比較の前、checkout 直後の検査の後に Python 3.10.11 が必要です")
+        for index in comparison_indices:
+            if native_build_command(steps[index].get("run")) in {"r4a-rest", "r4a-rest-universal"}:
+                prepares = [i for i, step in enumerate(steps) if isinstance(step, dict)
+                            and native_build_command(step.get("run")) == "prepare"]
+                if len(prepares) != 1 or not python_indices or not python_indices[0] < prepares[0] < index:
+                    problems.append(f"{name}: 比較の前に、Python の後で prepare を 1 回流す必要があります(rustc の記録を照らすため)")
         for index, step in enumerate(steps):
             if not isinstance(step, dict):
                 problems.append(f"{name}: step は object が必要です")

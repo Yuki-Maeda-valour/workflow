@@ -13,3 +13,6 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// R4A残り5本専用の標準入出力・端末幅・スレッド値・SIGINT・permlog の OS の操作。
+pub mod r4a_rest;

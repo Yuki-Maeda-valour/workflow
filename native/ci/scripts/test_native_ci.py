@@ -647,12 +647,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "r4a_rest_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract"):
+                for example in ("r4b_contract", "r4r_contract", "r4a_rest_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -688,6 +688,7 @@ class BuildTests(TempCase):
             for number in (1,2):
                 self.write(f"{name}/{number}/r4b_contract", b"fixture")
                 self.write(f"{name}/{number}/r4r_contract", b"fixture")
+                self.write(f"{name}/{number}/r4a_rest_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -709,8 +710,8 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 6)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "record.json"])
+        self.assertEqual(len(signed), 8)
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "r4a_rest_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1163,9 +1164,9 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract"))
-        self.assertFalse(any("r4b" in path or "r4r" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract")})
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","r4a_rest_contract"))
+        self.assertFalse(any("r4b" in path or "r4r" in path or "r4a_rest" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","r4a_rest_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1220,8 +1221,73 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_both_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","r4a_rest_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
+
+
+class R4aRestConnectionTests(TempCase):
+    def test_quality_runs_example_unit_tests(self):
+        def run(args, *, env=None, capture=False):
+            return "" if capture else None
+        with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=run) as called:
+            build.quality("linux-x86_64",self.root)
+        commands=[call.args[0] for call in called.call_args_list]
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","r4a_rest_contract"],commands)
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-platform","--example","r4a_rest_platform"],commands)
+
+    def test_probe_is_strict_and_failure_is_fatal(self):
+        with mock.patch.object(build,"run") as called:
+            build.r4a_rest_probe(Path("fixture"))
+        args=called.call_args.args[0]
+        self.assertEqual(args[0],sys.executable)
+        self.assertIn("--strict-pending",args)
+        self.assertNotIn("--no-selftest",args)
+        with mock.patch.object(build,"run") as called:
+            build.r4a_rest_probe(Path("fixture"),selftest=False)
+        self.assertIn("--no-selftest",called.call_args.args[0])
+        self.assertEqual(called.call_args.kwargs["env"]["R4A_REST_PYTHON"],sys.executable)
+        with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"x")):
+            with self.assertRaises(subprocess.CalledProcessError):build.r4a_rest_probe(Path("fixture"))
+
+    def test_build_job_compares_both_builds_and_universal_uses_signed_file(self):
+        folder=self.root/"folder"
+        with mock.patch.object(build,"target_config"),mock.patch.object(build,"extract_build",return_value=(folder,{})),mock.patch.object(build,"r4a_rest_probe") as probe:
+            build.r4a_rest_build("linux-x86_64",self.root,self.root)
+        self.assertEqual([c.args[0] for c in probe.call_args_list],[folder/"1"/"r4a_rest_contract",folder/"2"/"r4a_rest_contract"])
+        # 比較器の自己検査は 1 回目の比較だけで流す。
+        self.assertEqual([c.kwargs.get("selftest") for c in probe.call_args_list],[True,False])
+        with mock.patch.object(build,"extract_universal",return_value=(folder,{})),mock.patch.object(build,"r4a_rest_probe") as probe:
+            build.r4a_rest_universal(self.root,self.root)
+        probe.assert_called_once_with(folder/"r4a_rest_contract")
+
+    def test_workflow_jobs_and_timeouts(self):
+        workflow=json.loads((source_hash.ROOT/".github/workflows/native.yml").read_text())
+        jobs=workflow["jobs"]
+        self.assertEqual(jobs["r4a-rest"]["needs"],"build")
+        self.assertEqual(jobs["r4a-rest-universal"]["needs"],"combine")
+        self.assertEqual(jobs["r4a-rest"]["timeout-minutes"],60)
+        self.assertEqual(jobs["r4a-rest-universal"]["timeout-minutes"],45)
+        for name in ("r4a-rest","r4a-rest-universal"):
+            steps=jobs[name]["steps"]
+            python=[i for i,step in enumerate(steps) if "setup-python" in step.get("uses","")]
+            runs=[i for i,step in enumerate(steps) if "build.py "+name in step.get("run","")]
+            self.assertEqual(len(python),1);self.assertEqual(len(runs),1)
+            self.assertLess(python[0],runs[0])
+            self.assertEqual(steps[python[0]]["with"]["python-version"],"3.10.11")
+            prepare=[i for i,step in enumerate(steps) if "build.py prepare --platform" in step.get("run","")]
+            self.assertEqual(len(prepare),1)
+            self.assertLess(python[0],prepare[0]);self.assertLess(prepare[0],runs[0])
+
+    def test_policy_requires_prepare_before_the_comparison(self):
+        workflow=json.loads((source_hash.ROOT/".github/workflows/native.yml").read_text())
+        self.assertEqual(check_workflow.check_document(workflow),[])
+        for job in ("r4a-rest","r4a-rest-universal"):
+            changed=copy.deepcopy(workflow)
+            changed["jobs"][job]["steps"]=[step for step in changed["jobs"][job]["steps"] if "build.py prepare" not in step.get("run","")]
+            self.assertTrue(any("prepare" in problem for problem in check_workflow.check_document(changed)),job)
+
+    def test_example_is_not_a_distribution_binary(self):
+        self.assertFalse(any("r4a_rest" in path for path in make_dist.BINARY_PATHS))
 
 
 if __name__ == "__main__":
