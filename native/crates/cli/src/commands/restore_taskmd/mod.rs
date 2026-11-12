@@ -73,6 +73,9 @@
 //! `exit_close`((3) 処理を既定へ戻す・(4) 閉じる時の 2 回の flush)を行う。
 mod args;
 mod child;
+#[cfg(not(target_os = "macos"))]
+mod errno_glibc;
+pub mod errno_text;
 mod operation;
 mod realpath;
 mod response;

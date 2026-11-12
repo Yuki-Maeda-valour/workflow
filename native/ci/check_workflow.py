@@ -53,8 +53,58 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1)(?: |$)", command)
+    # R4U(#480)・R4D(#481)と S3I-A(#474)の比較は、build の時間の枠の外のジョブで流す。
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|implement-guard|implement-guard-universal)(?: |$)", command)
     return match[1] if match else None
+
+
+# native.yml に必須のジョブ。ジョブを足すときは、この一覧の末尾へ足す(足し忘れで検査が通らなくなる)。
+REQUIRED_NATIVE_JOBS = (
+    "policy",
+    "build",
+    "combine",
+    "verify-universal",
+    "distribution",
+    "r4d1",
+    "r4u",
+    "implement-guard",
+    "implement-guard-universal",
+)
+# S3I-A(#474)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
+IMPLEMENT_GUARD_JOBS = (
+    ("implement-guard", "implement-guard", set(RUNNERS), "build"),
+    ("implement-guard-universal", "implement-guard-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
+)
+
+
+def check_native_required(document):
+    """native.yml だけに当てる追加の判定(必須のジョブと、S3I-A の比較の工程・機種・needs)。"""
+    if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
+        return []
+    jobs = document["jobs"]
+    problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
+    for name, subcommand, platforms, needs in IMPLEMENT_GUARD_JOBS:
+        job = jobs.get(name)
+        if not isinstance(job, dict):
+            continue
+        steps = job.get("steps")
+        steps = steps if isinstance(steps, list) else []
+        expected = f"python3 -B native/ci/build.py {subcommand} --platform '${{{{ matrix.platform }}}}'"
+        found = any(
+            isinstance(step, dict) and native_build_command(step.get("run")) == subcommand and step.get("run") == expected
+            for step in steps
+        )
+        if not found:
+            problems.append(f"{name}: build.py {subcommand} の工程が必要です")
+        strategy = job.get("strategy")
+        include = strategy.get("matrix", {}).get("include") if isinstance(strategy, dict) and isinstance(strategy.get("matrix"), dict) else None
+        rows = include if isinstance(include, list) else []
+        got = [row.get("platform") for row in rows if isinstance(row, dict)]
+        if len(got) != len(platforms) or set(got) != platforms:
+            problems.append(f"{name}: matrix の機種は {sorted(platforms)} の {len(platforms)} 機種が必要です")
+        if job.get("needs") != needs:
+            problems.append(f"{name}: needs は {needs} が必要です")
+    return problems
 
 
 def check_document(document):
@@ -114,6 +164,8 @@ def check_document(document):
         native_timeouts = {"build": 60, "verify-universal": 30, "r4u": 30}
         # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
         native_timeouts["r4d1"] = 30
+        # S3I-Aの比較のジョブ(手元の所要時間の 2 倍以上。2026-11-12 12:59 の決定)。
+        native_timeouts.update({"implement-guard": 45, "implement-guard-universal": 20})
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -154,7 +206,7 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1"}]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1", "implement-guard", "implement-guard-universal"}]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -241,6 +293,11 @@ def check_workflows(root=ROOT):
         except (OSError, ValueError) as error:
             document = None
             errors = [f"JSON 形式の YAML が必要です(重複キーも拒否します): {error}"]
+        if path.name == "native.yml":
+            try:
+                errors = [*errors, *check_native_required(read_json(path))]
+            except (OSError, ValueError):
+                pass
         problems.extend(f"{path.name}: {error}" for error in errors)
         problems.extend(overlap_problems(path.name, document, names))
     return problems

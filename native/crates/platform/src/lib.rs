@@ -14,3 +14,6 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// S3I-A専用の implement-guard の検査専用入口の OS の操作。
+pub mod implement_guard;

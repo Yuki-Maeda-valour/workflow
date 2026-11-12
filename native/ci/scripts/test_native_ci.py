@@ -734,12 +734,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "implement_guard_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract"):
+                for example in ("r4b_contract", "r4r_contract", "implement_guard_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -775,6 +775,7 @@ class BuildTests(TempCase):
             for number in (1,2):
                 self.write(f"{name}/{number}/r4b_contract", b"fixture")
                 self.write(f"{name}/{number}/r4r_contract", b"fixture")
+                self.write(f"{name}/{number}/implement_guard_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -796,8 +797,8 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 6)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "record.json"])
+        self.assertEqual(len(signed), 8)
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "implement_guard_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1250,9 +1251,9 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract"))
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","implement_guard_contract"))
         self.assertFalse(any("r4b" in path or "r4r" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract")})
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","implement_guard_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1307,7 +1308,7 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_both_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","implement_guard_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
 
@@ -1587,7 +1588,9 @@ class R4D1Tests(TempCase):
         self.assertEqual(callers, ["r4d1"])
 
     def test_distribution_needs_do_not_include_r4d1(self):
-        self.assertEqual(self.document["jobs"]["distribution"]["needs"], ["build", "combine", "verify-universal"])
+        # S3I-A(#474)の 2 つのジョブを足した後の値(r4d1 は入れない)。
+        self.assertEqual(self.document["jobs"]["distribution"]["needs"],
+                         ["build", "combine", "verify-universal", "implement-guard", "implement-guard-universal"])
 
     # (b) 上限
     def test_r4d1_timeout_is_fixed_at_30(self):
@@ -1821,6 +1824,250 @@ class R4D1Tests(TempCase):
                            "--", "--list", "--ignored"]])
         self.assertIn(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract",
                        "--", "--list", "--ignored"], commands)
+
+
+class ImplementGuardConnectionTests(TempCase):
+    """S3I-A(#474)の検査専用入口 implement_guard_contract の CI への接続。比較は別のジョブ
+    implement-guard(build の後・4 機種)と implement-guard-universal(combine の後・Mac 2 機種)で流す。"""
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def fake_run(self, calls, *, fail=None, archs="arm64 x86_64"):
+        def run(args, *, env=None, capture=False):
+            args = list(args)
+            calls.append(args)
+            if fail is not None and fail(args):
+                raise subprocess.CalledProcessError(1, args)
+            if args[0] == "lipo":
+                return archs
+            return "" if capture else None
+        return run
+
+    def call(self, function, name, calls, **kwargs):
+        received = self.root / "received"
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)) as config, \
+                mock.patch.object(build, "extract_build", return_value=(received, {})) as extract, \
+                mock.patch.object(build, "extract_universal", return_value=(received, {})) as universal, \
+                mock.patch.object(build, "run", side_effect=self.fake_run(calls, **kwargs)):
+            self.target_config, self.extract_build, self.extract_universal = config, extract, universal
+            function(name, self.root / "downloads", self.root)
+        return received
+
+    @staticmethod
+    def comparisons(calls):
+        return [call for call in calls if call[:3] == [sys.executable, "-B", source_hash.ROOT / "native/ci/check_implement_guard.py"]]
+
+    @staticmethod
+    def strace_calls(calls):
+        return [call for call in calls if call[:2] == ["sudo", "apt-get"] or call[:1] == ["strace"]]
+
+    def test_compares_the_first_built_binary_on_all_four_platforms(self):
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call(build.implement_guard, name, calls)
+                self.target_config.assert_called_once_with(name)
+                self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
+                checks = self.comparisons(calls)
+                # 2 本が同じバイト列であることは reproduce が確かめるので、比較は 1 本目だけ。
+                self.assertEqual(checks, [[sys.executable, "-B", source_hash.ROOT / "native/ci/check_implement_guard.py",
+                                           "--fixture", received / "1" / "implement_guard_contract"]])
+                self.assertEqual(calls, checks)
+                # strace は入れない(設計: 無ければ比較器が未実施と記録する)。
+                self.assertEqual(self.strace_calls(calls), [])
+
+    def test_comparison_failure_is_fatal(self):
+        for name in ("linux-x86_64", "macos-arm64"):
+            with self.subTest(platform=name), self.assertRaises(subprocess.CalledProcessError):
+                self.call(build.implement_guard, name, [], fail=lambda args: "check_implement_guard.py" in str(args))
+
+    def test_universal_checks_signature_and_cpus_then_runs_the_signed_scope(self):
+        for name in build.IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call(build.implement_guard_universal, name, calls)
+                self.extract_universal.assert_called_once_with(self.root / "downloads", self.root)
+                self.extract_build.assert_not_called()
+                fixture = received / "implement_guard_contract"
+                checks = self.comparisons(calls)
+                self.assertEqual(checks, [[sys.executable, "-B", source_hash.ROOT / "native/ci/check_implement_guard.py",
+                                           "--fixture", fixture, "--scope", "signed"]])
+                signature = ["codesign", "--verify", "--strict", "--verbose=2", fixture]
+                cpus = ["lipo", "-archs", fixture]
+                self.assertLess(calls.index(signature), calls.index(cpus))
+                self.assertLess(calls.index(cpus), calls.index(checks[0]))
+                self.assertEqual(self.strace_calls(calls), [])
+
+    def test_universal_rejects_linux_wrong_cpus_bad_signature_and_failed_comparison(self):
+        for name in ("linux-x86_64", "linux-arm64"):
+            calls = []
+            with self.subTest(platform=name), self.assertRaises(ValueError):
+                self.call(build.implement_guard_universal, name, calls)
+            self.assertEqual(calls, [])
+        for label, options, error in (
+                ("one-cpu", {"archs": "arm64"}, ValueError),
+                ("signature", {"fail": lambda args: args[0] == "codesign"}, subprocess.CalledProcessError),
+                ("comparison", {"fail": lambda args: "check_implement_guard.py" in str(args)}, subprocess.CalledProcessError)):
+            calls = []
+            with self.subTest(label=label), self.assertRaises(error):
+                self.call(build.implement_guard_universal, "macos-x86_64", calls, **options)
+            if label != "comparison":
+                self.assertEqual(self.comparisons(calls), [])
+
+    def test_main_requires_platform_and_dispatches_the_two_commands(self):
+        for command, called, other in (("implement-guard", "implement_guard", "implement_guard_universal"),
+                                       ("implement-guard-universal", "implement_guard_universal", "implement_guard")):
+            with self.subTest(command=command):
+                with mock.patch.object(sys, "argv", ["build.py", command]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, called) as target, \
+                        mock.patch("sys.stderr"), self.assertRaises(SystemExit) as stopped:
+                    build.main()
+                self.assertEqual(stopped.exception.code, 2)
+                target.assert_not_called()
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", "macos-arm64"]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, called) as target, \
+                        mock.patch.object(build, other) as unused, \
+                        mock.patch.object(build, "quality") as quality, \
+                        mock.patch.object(build, "reproduce") as reproduce:
+                    self.assertEqual(build.main(), 0)
+                    target.assert_called_once_with("macos-arm64", self.root / "downloads", self.root)
+                    unused.assert_not_called()
+                    quality.assert_not_called()
+                    reproduce.assert_not_called()
+                    target.side_effect = subprocess.CalledProcessError(1, "S3I-A")
+                    self.assertEqual(build.main(), 1)
+
+    def test_build_and_verify_universal_do_not_run_the_comparison(self):
+        # build と verify-universal の時間の枠に入らないので、比較は別のジョブだけで流す。
+        with mock.patch.object(sys, "argv", ["build.py", "build", "--platform", "linux-x86_64"]), \
+                mock.patch.object(build, "workspace", return_value=self.root), \
+                mock.patch.object(build, "quality"), \
+                mock.patch.object(build, "reproduce", return_value=self.root), \
+                mock.patch.object(build, "pack_tar") as pack, \
+                mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "implement_guard_probe") as check:
+            self.assertEqual(build.main(), 0)
+            check.assert_not_called()
+            self.assertIn("1/implement_guard_contract", pack.call_args.args[2])
+            self.assertIn("2/implement_guard_contract", pack.call_args.args[2])
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", return_value="arm64 x86_64") as run, \
+                mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), \
+                mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "implement_guard_probe") as check:
+            build.verify_universal(self.root, self.root)
+            check.assert_not_called()
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["codesign", "--verify", "--strict", "--verbose=2", self.root / "implement_guard_contract"], commands)
+        self.assertIn(["lipo", "-archs", self.root / "implement_guard_contract"], commands)
+
+    def test_quality_runs_the_example_tests_and_their_failure_is_fatal(self):
+        test = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_guard_contract"]
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) as run:
+            build.quality("linux-x86_64", self.root)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(test, commands)
+        self.assertLess(commands.index(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"]),
+                        commands.index(test))
+
+        def failing(args, *, env=None, capture=False):
+            if list(args) == test:
+                raise subprocess.CalledProcessError(101, args)
+            return "" if capture else None
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=failing), \
+                self.assertRaises(subprocess.CalledProcessError):
+            build.quality("linux-x86_64", self.root)
+
+    def test_fixture_is_not_a_distribution_binary(self):
+        self.assertIn("implement_guard_contract", build.CI_BINARIES)
+        self.assertIn("implement_guard_contract", build.EXAMPLES)
+        self.assertFalse(any("implement_guard" in path for path in make_dist.BINARY_PATHS))
+        self.assertIn("1/implement_guard_contract", build.BUILD_FILES)
+        self.assertIn("2/implement_guard_contract", build.BUILD_FILES)
+        self.assertIn("implement_guard_contract", build.UNIVERSAL_FILES)
+
+    def test_workflow_has_the_two_required_jobs(self):
+        jobs = self.document["jobs"]
+        job = jobs["implement-guard"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["timeout-minutes"], 45)
+        self.assertEqual({row["platform"] for row in job["strategy"]["matrix"]["include"]}, set(build.TARGETS))
+        self.assertEqual(job["steps"][-1]["run"], "python3 -B native/ci/build.py implement-guard --platform '${{ matrix.platform }}'")
+        self.assertEqual(job["steps"][-2]["with"]["name"], "native-build-${{ matrix.platform }}")
+        universal = jobs["implement-guard-universal"]
+        self.assertEqual(universal["needs"], "combine")
+        self.assertEqual(universal["timeout-minutes"], 20)
+        self.assertEqual({row["platform"] for row in universal["strategy"]["matrix"]["include"]},
+                         set(build.IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS))
+        self.assertEqual(universal["steps"][-1]["run"],
+                         "python3 -B native/ci/build.py implement-guard-universal --platform '${{ matrix.platform }}'")
+        self.assertEqual(universal["steps"][-2]["with"]["name"], "native-universal")
+        for name in ("implement-guard", "implement-guard-universal"):
+            self.assertEqual(jobs[name]["steps"][2]["with"], {"python-version": "3.10.11"})
+        # build と verify-universal の上限は変えない。
+        self.assertEqual(jobs["build"]["timeout-minutes"], 60)
+        self.assertEqual(jobs["verify-universal"]["timeout-minutes"], 30)
+
+    def test_required_jobs_and_the_two_jobs_shape_are_checked(self):
+        self.assertEqual(check_workflow.check_native_required(self.document), [])
+        self.assertIn("implement-guard", self.document["jobs"]["distribution"]["needs"])
+        self.assertIn("implement-guard-universal", self.document["jobs"]["distribution"]["needs"])
+        for name in check_workflow.REQUIRED_NATIVE_JOBS:
+            with self.subTest(removed=name):
+                changed = copy.deepcopy(self.document)
+                del changed["jobs"][name]
+                self.assertTrue(check_workflow.check_native_required(changed))
+        for name, needs in (("implement-guard", "build"), ("implement-guard-universal", "combine")):
+            with self.subTest(step=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["steps"] = [s for s in changed["jobs"][name]["steps"]
+                                                  if "build.py implement-guard" not in s.get("run", "")]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(platform=name):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][name]["strategy"]["matrix"]["include"].pop()
+                self.assertTrue(check_workflow.check_native_required(changed))
+            for other in ("policy", "combine" if needs == "build" else "build", ["build", "combine"]):
+                with self.subTest(needs=name, value=other):
+                    changed = copy.deepcopy(self.document)
+                    changed["jobs"][name]["needs"] = other
+                    self.assertTrue(check_workflow.check_native_required(changed))
+        self.write(".github/workflows/native.yml", json.dumps(
+            {**self.document, "jobs": {k: v for k, v in self.document["jobs"].items() if k != "implement-guard"}}).encode())
+        self.assertTrue(any("implement-guard" in p for p in check_workflow.check_workflows(self.root)))
+
+    def test_policy_fixes_the_timeouts_python_and_command_form_of_the_two_jobs(self):
+        self.assertEqual(check_workflow.check_document(self.document), [])
+        for job, minutes in (("implement-guard", 45), ("implement-guard-universal", 20)):
+            for value in (None, 0, minutes - 1, minutes + 1, str(minutes), True):
+                changed = copy.deepcopy(self.document)
+                if value is None:
+                    changed["jobs"][job].pop("timeout-minutes")
+                else:
+                    changed["jobs"][job]["timeout-minutes"] = value
+                with self.subTest(job=job, value=value):
+                    self.assertTrue(check_workflow.check_document(changed))
+            changed = copy.deepcopy(self.document)
+            changed["jobs"][job]["steps"].pop(2)
+            with self.subTest(job=job, python="removed"):
+                self.assertTrue(any("Python 3.10.11" in error for error in check_workflow.check_document(changed)))
+            operation = job
+            for arguments in (f"--platform linux-x86_64 {operation}", f"-- {operation}"):
+                changed = copy.deepcopy(self.document)
+                changed["jobs"][job]["steps"][-1]["run"] = "python3 -B native/ci/build.py " + arguments
+                with self.subTest(job=job, arguments=arguments):
+                    errors = check_workflow.check_document(changed)
+                    self.assertTrue(any("コマンド名をオプションより先" in error for error in errors))
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py implement-guard --platform x"),
+                         "implement-guard")
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py implement-guard-universal"),
+                         "implement-guard-universal")
+        self.assertIsNone(check_workflow.native_build_command("python3 -B native/ci/build.py implement-guards"))
 
 
 if __name__ == "__main__":

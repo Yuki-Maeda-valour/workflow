@@ -124,35 +124,17 @@ pub fn unraisable_lines(error: &io::Error) -> [Vec<u8>; 2] {
             .to_vec();
     let number = error.raw_os_error().unwrap_or(0);
     let (kind, text) = describe_errno(number);
-    let second = match text {
-        Some(text) => format!("{kind}: [Errno {number}] {text}\n"),
-        None => format!("{kind}: [Errno {number}] Unknown error {number}\n"),
-    };
+    let second = format!("{kind}: [Errno {number}] {text}\n");
     [first, second.into_bytes()]
 }
 
-/// errno から Python の型と C ライブラリの文(Linux は glibc、Mac は CI で確定)。
-/// 表に無い番号は S3I-A #474 で決める(R4R では比べない)。
-fn describe_errno(number: i32) -> (&'static str, Option<&'static str>) {
-    use os::errno::*;
-    let kind = if number == EPIPE {
-        "BrokenPipeError"
-    } else {
-        "OSError"
-    };
-    let text = match number {
-        n if n == EPIPE => Some("Broken pipe"),
-        n if n == ENOSPC => Some("No space left on device"),
-        n if n == EIO => Some("Input/output error"),
-        n if n == EBADF => Some("Bad file descriptor"),
-        n if n == EFBIG => Some("File too large"),
-        #[cfg(target_os = "linux")]
-        n if n == EDQUOT => Some("Disk quota exceeded"),
-        #[cfg(not(target_os = "linux"))]
-        n if n == EDQUOT => Some("Disc quota exceeded"),
-        _ => None,
-    };
-    (kind, text)
+/// errno から Python の型と C ライブラリの文(S3I-A #474 で `errno_text` へ広げた。Linux は glibc 2.39 の
+/// 生成した表、Mac は libSystem の `strerror_r`)。
+fn describe_errno(number: i32) -> (&'static str, String) {
+    (
+        super::errno_text::exception_type(number),
+        super::errno_text::strerror(number),
+    )
 }
 
 /// stderr へ 1 行ずつ書く(Python の stderr は行ごとに書く)。失敗は無視する。

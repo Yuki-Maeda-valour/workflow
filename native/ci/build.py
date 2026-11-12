@@ -27,9 +27,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "implement_guard_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "implement_guard_contract")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -222,6 +222,7 @@ def quality(name, work):
         run(["cargo", "test", "--locked"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_guard_contract"], env=env)
         r4r_map(env, Path(temporary))
 
 
@@ -403,9 +404,44 @@ def r4u(name, work):
         run(list(R4U_COMMAND), env=env)
 
 
+# S3I-A(#474)の比較も、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def implement_guard_probe(fixture, scope=None):
+    """check_implement_guard.py の比較を必須で流す。結果の行は CI の記録に残る。"""
+    args = [sys.executable, "-B", ROOT / "native/ci/check_implement_guard.py", "--fixture", fixture]
+    if scope is not None:
+        args += ["--scope", scope]
+    run(args)
+
+
+def implement_guard(name, downloads, work):
+    """build の tar を受け取り、1 本目の implement_guard_contract で比較する(2 本が同じことは reproduce が確かめる)。
+
+    strace は入れない(実行機に無いか ptrace が使えなければ、比較器がその確かめを未実施と記録する)。
+    """
+    target_config(name)
+    folder, _ = extract_build(name, downloads, work)
+    implement_guard_probe(folder / "1" / "implement_guard_contract")
+
+
+def implement_guard_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、範囲 signed で比較する。"""
+    if name not in IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS:
+        raise ValueError("implement-guard-universal は Mac の 2 機種で実行してください")
+    target_config(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "implement_guard_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    implement_guard_probe(fixture, "signed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "implement-guard", "implement-guard-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -413,7 +449,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "implement-guard", "implement-guard-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -440,6 +476,10 @@ def main():
             r4u(args.platform, work)
         elif args.command == "r4d1":
             r4d1(args.platform, work)
+        elif args.command == "implement-guard":
+            implement_guard(args.platform, downloads, work)
+        elif args.command == "implement-guard-universal":
+            implement_guard_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
