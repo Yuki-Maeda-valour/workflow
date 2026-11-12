@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import unittest.mock
+import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -23,6 +25,26 @@ sys.dont_write_bytecode = True
 os.environ["R4A_REST_IN_SELFTEST"] = "1"
 
 import check_r4a_rest as checker  # noqa: E402
+
+
+import contextlib
+
+
+@contextlib.contextmanager
+def preserved_run_mark():
+    """走りの印(共有の値と環境変数)を、検査の前後で書き換えない。本体の比較の間、掃除が古い印で探さないようにする。"""
+    saved_mark = checker.RUN_MARK[0]
+    saved_main = checker.MAIN_MARK[0]
+    saved_env = os.environ.get(checker.RUN_VARIABLE)
+    try:
+        yield
+    finally:
+        checker.RUN_MARK[0] = saved_mark
+        checker.MAIN_MARK[0] = saved_main
+        if saved_env is None:
+            os.environ.pop(checker.RUN_VARIABLE, None)
+        else:
+            os.environ[checker.RUN_VARIABLE] = saved_env
 
 
 def fixture_binary():
@@ -46,7 +68,7 @@ def assert_only_pending(test, result):
 def run_checker(binary, *extra):
     # 子は一時フォルダの中で動かす(リポジトリに何も残さない)。
     with tempfile.TemporaryDirectory(prefix="r4a-rest-test-cwd-") as cwd:
-        return subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(binary), *extra],
+        return checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(binary), *extra],
                               capture_output=True, text=True, timeout=300, cwd=cwd)
 
 
@@ -405,8 +427,8 @@ class SelftestGate(unittest.TestCase):
             failing = Path(directory) / "failing_tests.py"
             failing.write_text("import unittest\nclass T(unittest.TestCase):\n    def test_bad(self):\n        self.fail('x')\n")
             env = {k: v for k, v in os.environ.items() if k != "R4A_REST_IN_SELFTEST"}
-            result = subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture_binary()),
-                                     "--only", "host-argv", "--selftest-file", str(failing)],
+            result = checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture_binary()),
+                                     "--case", "host/args-empty", "--selftest-file", str(failing)],
                                     capture_output=True, text=True, timeout=300, cwd=directory, env=env)
         self.assertEqual(result.returncode, 1)
         self.assertIn("比べた case", result.stdout)  # 本体の比較は流れた
@@ -586,9 +608,10 @@ class OsConditionMimicry(unittest.TestCase):
             env.pop("R4A_REST_IN_SELFTEST", None)
         fixture = wrapper or fixture_binary()
         with tempfile.TemporaryDirectory(prefix="r4a-rest-mimic-") as cwd:
-            return subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture), "--no-selftest", *args],
+            return checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture), "--no-selftest", *args],
                                   capture_output=True, text=True, timeout=600, cwd=cwd, env=env)
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux で Mac の条件をまねる検査。本物の Mac での確かめは、本体の比較が担う")
     def test_the_fixed_lists_are_consistent(self):
         required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))
         self.assertEqual(required["requires_raw_name"], sorted(checker.RAW_NAME_CASES))
@@ -607,12 +630,13 @@ class OsConditionMimicry(unittest.TestCase):
 
     def test_simulation_is_refused_outside_the_selftest(self):
         for name in ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE"):
-            result = self.run_mimic("--only", "host-argv", extra_env={name: "1"}, in_selftest=False)
+            result = self.run_mimic("--case", "host/args-empty", extra_env={name: "1"}, in_selftest=False)
             self.assertEqual(result.returncode, 1, name)
             self.assertIn("自己検査の中", result.stderr)
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux で Mac の条件をまねる検査。本物の Mac での確かめは、本体の比較が担う")
     def test_the_mac_conditions_give_an_incomplete_result_with_exit_zero(self):
-        result = self.run_mimic("--only", "candidate-keys,loop-task-text",
+        result = self.run_mimic("--case", "candidate/collect-raw-name", "--case", "task/non-utf8-path", "--case", "charset/locale-ja_JP.eucJP/candidate-key", "--case", "charset/locale-ja_JP.eucJP/task-info",
                                 extra_env={"R4A_REST_SIMULATE_EILSEQ": "1", "R4A_REST_SIMULATE_LOCALE": "1"})
         self.assertEqual(result.returncode, 0, result.stderr[-1500:])
         self.assertIn("結果: 未完", result.stdout)
@@ -622,9 +646,10 @@ class OsConditionMimicry(unittest.TestCase):
         self.assertIn("sha256", result.stdout)  # 旧版の出力の要点
         self.assertNotIn("結果: 合格", result.stdout)
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux で Mac の条件をまねる検査。本物の Mac での確かめは、本体の比較が担う")
     def test_a_set_that_differs_from_the_fixed_list_is_a_failure(self):
         # locale だけをまねる(Linux の一覧は空)と、未実施の集合が一覧と違うので失敗(終了 1)。
-        result = self.run_mimic("--only", "loop-task-text", extra_env={"R4A_REST_SIMULATE_LOCALE": "1"})
+        result = self.run_mimic("--case", "charset/locale-ja_JP.eucJP/task-info", extra_env={"R4A_REST_SIMULATE_LOCALE": "1"})
         self.assertEqual(result.returncode, 1)
         self.assertIn("固定の一覧と違う", result.stderr)
 
@@ -634,10 +659,379 @@ class OsConditionMimicry(unittest.TestCase):
             # eucJP の case のときだけ、Rust の出力を変える。locale を理由に未実施にしても、この差は不一致にする。
             wrapper.write_text(f'#!/bin/sh\n"{fixture_binary()}" "$@"; rc=$?\n[ "$LC_ALL" = ja_JP.eucJP ] && echo extra\nexit $rc\n')
             wrapper.chmod(0o755)
-            result = self.run_mimic("--only", "loop-task-text", wrapper=wrapper,
+            result = self.run_mimic("--case", "charset/locale-ja_JP.eucJP/task-info", wrapper=wrapper,
                                     extra_env={"R4A_REST_SIMULATE_LOCALE": "1", "R4A_REST_SIMULATE_EILSEQ": "1"})
         self.assertEqual(result.returncode, 1)
         self.assertIn("Rust が設定を読んでいる", result.stderr)
+
+
+class ChildProcesses(unittest.TestCase):
+    """比較器が起動した子は、時間切れ・例外の経路でも、グループごと止めて回収する。終わりに、残りがあれば止めて失敗にする(全 OS)。"""
+
+    def setUp(self):
+        checker.final_process_check(None)  # 前の検査の記録を流す
+        self.assertEqual(checker.LEFT_BEHIND, [])
+
+    def test_a_timeout_stops_the_whole_group_including_grandchildren(self):
+        started = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            checker.run_group(["sh", "-c", "sleep 60 & wait"], timeout=1, capture_output=True)
+        self.assertLess(time.monotonic() - started, 30)
+        for _ in range(40):
+            if not checker.group_alive(checker.LAST_GROUP[0]):
+                break
+            time.sleep(0.1)
+        self.assertFalse(checker.group_alive(checker.LAST_GROUP[0]))
+
+    def test_an_exception_path_also_stops_the_group(self):
+        class Stop(Exception):
+            pass
+        original = subprocess.Popen.communicate
+
+        def broken(self, *args, **kwargs):
+            raise Stop()
+        with unittest.mock.patch.object(subprocess.Popen, "communicate", broken):
+            with self.assertRaises(Stop):
+                checker.run_group(["sh", "-c", "sleep 60 & wait"], capture_output=True)
+        for _ in range(40):
+            if not checker.group_alive(checker.LAST_GROUP[0]):
+                break
+            time.sleep(0.1)
+        self.assertFalse(checker.group_alive(checker.LAST_GROUP[0]))
+
+    def test_a_straggler_left_in_the_group_is_stopped_and_recorded(self):
+        result = checker.run_group(["sh", "-c", "sleep 60 & exit 0"], capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(len(checker.LEFT_BEHIND), 1)
+        for _ in range(40):  # 止めた子が init に回収されるまで、少し待つ
+            if not checker.group_alive(checker.LAST_GROUP[0]):
+                break
+            time.sleep(0.1)
+        self.assertFalse(checker.group_alive(checker.LAST_GROUP[0]))
+        found = checker.final_process_check(None)
+        self.assertEqual(len(found), 1)  # 記録した 1 件(グループはもう止まっている)
+
+    def test_nothing_left_means_an_empty_result(self):
+        checker.run_group(["sh", "-c", "exit 0"], capture_output=True, timeout=30)
+        self.assertEqual(checker.final_process_check(None), [])
+
+    def test_the_comparer_fails_when_the_fixture_leaves_a_child_behind(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            wrapper = Path(directory) / "w"
+            wrapper.write_text(f'#!/bin/sh\nsleep 300 &\necho $! > "{pid_file}"\nexec "{fixture_binary()}" "$@"\n')
+            wrapper.chmod(0o755)
+            result = run_checker(wrapper, "--case", "host/args-empty")
+            left_pid = int(pid_file.read_text())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("子のプロセスが残っていた", result.stdout + result.stderr)
+        with self.assertRaises(ProcessLookupError):  # 止められている
+            for _ in range(50):
+                os.kill(left_pid, 0)
+                time.sleep(0.1)
+            os.kill(left_pid, 0)
+
+    def test_a_clean_fixture_leaves_nothing(self):
+        result = run_checker(fixture_binary(), "--case", "host/args-empty")
+        self.assertIn(result.returncode, (0, 2))
+        self.assertNotIn("子のプロセスが残っていた", result.stdout + result.stderr)
+
+
+    def test_a_finished_group_is_forgotten_and_a_foreign_group_is_not_ours(self):
+        checker.run_group(["sh", "-c", "exit 0"], capture_output=True, timeout=30)
+        self.assertNotIn(checker.LAST_GROUP[0], checker.CHILD_GROUPS)  # 空と確かめたグループは、記録から外す
+        with unittest.mock.patch.object(os, "killpg", side_effect=PermissionError):
+            self.assertFalse(checker.group_alive(12345))  # 他人のグループは、自分の子と見なさない
+
+    def test_the_run_mark_is_chained_so_a_parent_finds_every_descendant(self):
+        with preserved_run_mark():
+            os.environ.pop(checker.RUN_VARIABLE, None)
+            first = checker.start_run_mark()
+            self.assertEqual(os.environ[checker.RUN_VARIABLE], first)
+            second = checker.start_run_mark()  # 自己検査の中の子の比較器: 親の印を受け継ぎ、自分の印を足す
+            self.assertEqual(os.environ[checker.RUN_VARIABLE], f"{first},{second}")
+            self.assertNotEqual(first, second)
+
+    def test_the_selftest_does_not_change_the_main_mark(self):
+        before_main, before_run = checker.MAIN_MARK[0], checker.RUN_MARK[0]
+        before_env = os.environ.get(checker.RUN_VARIABLE)
+        with preserved_run_mark():
+            checker.start_run_mark()
+            self.assertEqual(checker.MAIN_MARK[0], before_main)  # 本体の印は、start_run_mark() では変わらない
+        self.assertEqual((checker.MAIN_MARK[0], checker.RUN_MARK[0], os.environ.get(checker.RUN_VARIABLE)),
+                         (before_main, before_run, before_env))
+
+    def test_a_marked_process_in_another_session_is_found_and_stopped(self):
+        with preserved_run_mark():
+            mark = checker.start_run_mark()
+            child = subprocess.Popen(["sleep", "300"], start_new_session=True)  # グループも session も別。環境に印を受け継ぐ
+            try:
+                found = [pid for pid, _ in checker.marked_processes(mark)]
+                self.assertIn(child.pid, found)
+                stopped = checker.sweep(mark)
+                self.assertTrue(any(str(child.pid) in line for line in stopped))
+                child.wait(timeout=10)
+                self.assertNotEqual(child.returncode, None)
+            finally:
+                child.kill()
+                child.wait()
+
+    def test_a_process_without_the_mark_is_not_touched_even_if_it_runs_the_same_executable(self):
+        # 印の無い同じ実行物(別の走りの残り・他人の比較器)と、引数にパスを持つだけのプロセスは、止めない。
+        with preserved_run_mark():
+            mark = checker.start_run_mark()
+            env = {k: v for k, v in os.environ.items() if k != checker.RUN_VARIABLE}
+            with tempfile.TemporaryDirectory() as directory:
+                fifo = Path(directory) / "bystander.fifo"
+                os.mkfifo(fifo)
+                bystander = subprocess.Popen([str(fixture_binary()), "candidate-keys", "--check", str(fifo)], env=env,
+                                             start_new_session=True)
+                by_path = subprocess.Popen(["sh", "-c", "sleep 300", str(fixture_binary())], env=env, start_new_session=True)
+                try:
+                    time.sleep(0.5)
+                    self.assertEqual([pid for pid, _ in checker.marked_processes(mark) if pid in (bystander.pid, by_path.pid)], [])
+                    self.assertEqual(checker.sweep(mark), [])
+                    self.assertIsNone(bystander.poll())
+                    self.assertIsNone(by_path.poll())
+                finally:
+                    for process in (bystander, by_path):
+                        checker.kill_group(process.pid)  # グループごと止める(sh の下の sleep も)
+                        process.wait()
+
+    def test_pty_and_signal_children_are_forgotten_after_they_are_reaped(self):
+        case = checker.Case("x", checker.HOST, ["-x"], pty=(24, 80, "stdout"))
+        env = dict(os.environ)
+        with tempfile.TemporaryDirectory() as directory:
+            checker.run_pty([str(fixture_binary()), "host-argv", "-x"], case, env, directory)
+            self.assertNotIn(checker.LAST_GROUP[0], checker.CHILD_GROUPS)  # 疑似端末の case の後に、記録が残らない
+            if sys.platform == "linux":
+                signal_case = checker.Case("y", checker.CAND, ["--check", "-"], signal=("TERM", b"", "stdin", False, b""))
+                checker.run_signal([str(fixture_binary()), "candidate-keys", "--check", "-"], signal_case, env, directory)
+                self.assertNotIn(checker.LAST_GROUP[0], checker.CHILD_GROUPS)
+        self.assertEqual(checker.CHILD_GROUPS, [])
+
+    def test_a_timeout_also_sweeps_a_detached_child_and_does_not_wait_forever(self):
+        with preserved_run_mark():
+            checker.MAIN_MARK[0] = None
+            mark = checker.start_run_mark()
+            checker.MAIN_MARK[0] = mark
+            code = ("import subprocess,sys;p=subprocess.Popen(['sleep','300'],start_new_session=True);"
+                    "open(sys.argv[1],'w').write(str(p.pid));import time;time.sleep(300)")
+            with tempfile.TemporaryDirectory() as directory:
+                pid_file = Path(directory) / "pid"
+                started = time.monotonic()
+                with self.assertRaises(subprocess.TimeoutExpired):
+                    checker.run_group([sys.executable, "-c", code, str(pid_file)], timeout=2, capture_output=True)
+                self.assertLess(time.monotonic() - started, 40)  # 切り離された子が pipe を持っていても、読取りで止まらない
+                detached = int(pid_file.read_text())
+            for _ in range(50):
+                try:
+                    os.kill(detached, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.1)
+            with self.assertRaises(ProcessLookupError):
+                os.kill(detached, 0)
+            checker.final_process_check(None)
+
+    def test_the_comparer_fails_when_the_fixture_leaves_a_child_behind_in_a_pty_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            wrapper = Path(directory) / "w"
+            wrapper.write_text(f'#!/bin/sh\nsleep 300 &\necho $! > "{pid_file}"\nexec "{fixture_binary()}" "$@"\n')
+            wrapper.chmod(0o755)
+            result = run_checker(wrapper, "--case", "pty/host-ok-stdout-tty")  # 疑似端末の経路(run_pty)だけを通す
+            left_pid = int(pid_file.read_text())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("子のプロセスが残っていた", result.stdout + result.stderr)
+        self.assertIn("(疑似端末)", result.stdout + result.stderr)  # 疑似端末の経路の記録
+        for _ in range(50):
+            try:
+                os.kill(left_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(left_pid, 0)
+
+    def test_the_comparer_stops_a_detached_descendant_in_a_pty_case(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            wrapper = Path(directory) / "w"
+            code = ("import subprocess,sys;p=subprocess.Popen(['sleep','300'],start_new_session=True);"
+                    "open(sys.argv[1],'w').write(str(p.pid))")
+            wrapper.write_text(f'#!/bin/sh\n"{sys.executable}" -c "{code}" "{pid_file}"\nexec "{fixture_binary()}" "$@"\n')
+            wrapper.chmod(0o755)
+            result = run_checker(wrapper, "--case", "pty/host-ok-stdout-tty")
+            detached = int(pid_file.read_text())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("子のプロセスが残っていた", result.stdout + result.stderr)
+        for _ in range(50):
+            try:
+                os.kill(detached, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(detached, 0)
+
+    def test_a_signal_case_timeout_stops_the_whole_group_with_a_bounded_wait(self):
+        case = checker.Case("z", checker.CAND, [], signal=("INT", b"", "stdin", True, b""))  # SIGINT を無視して、終わらない子
+        started = time.monotonic()
+        with unittest.mock.patch.object(checker, "wait_for_state"), unittest.mock.patch.object(checker, "CHILD_TIMEOUT", 1):
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaises(checker.Failure) as raised:
+                    checker.run_signal(["sh", "-c", "sleep 60 & wait"], case, dict(os.environ), directory)
+        self.assertIn("時間切れ", str(raised.exception))
+        self.assertLess(time.monotonic() - started, 40)
+        for _ in range(40):
+            if not checker.group_alive(checker.LAST_GROUP[0]):
+                break
+            time.sleep(0.1)
+        self.assertFalse(checker.group_alive(checker.LAST_GROUP[0]))  # 直接の子だけでなく、下の子も止まっている
+
+    def test_the_comparer_stops_a_detached_descendant_by_its_mark(self):
+        with tempfile.TemporaryDirectory() as directory:
+            pid_file = Path(directory) / "pid"
+            wrapper = Path(directory) / "w"
+            # 別の session に切り離した子を残す(グループにも残らない)。印だけで見つかる。
+            code = ("import subprocess,sys;p=subprocess.Popen(['sleep','300'],start_new_session=True);"
+                    "open(sys.argv[1],'w').write(str(p.pid))")
+            wrapper.write_text(f'#!/bin/sh\n"{sys.executable}" -c "{code}" "{pid_file}"\nexec "{fixture_binary()}" "$@"\n')
+            wrapper.chmod(0o755)
+            result = run_checker(wrapper, "--case", "host/args-empty")
+            detached = int(pid_file.read_text())
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("子のプロセスが残っていた", result.stdout + result.stderr)
+        self.assertIn("印を持つプロセス", result.stdout + result.stderr)
+        for _ in range(50):
+            try:
+                os.kill(detached, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(detached, 0)
+
+    def terminate_comparer_with_blocked_children(self, *, no_pdeathsig):
+        import signal as signal_module
+        with tempfile.TemporaryDirectory() as directory:
+            fifo = Path(directory) / "blocked.fifo"
+            os.mkfifo(fifo)
+            wrapper = Path(directory) / "w"
+            # どの case でも、書き手のいない FIFO を開いて待つ Rust の子になる(下に Rust の子を持つ状態を作る)。
+            wrapper.write_text(f'#!/bin/sh\nexec "{fixture_binary()}" candidate-keys --check "{fifo}"\n')
+            wrapper.chmod(0o755)
+            scratch_parent = Path(directory) / "tmp"
+            scratch_parent.mkdir()
+            env = dict(os.environ, R4A_REST_CHILD_TIMEOUT="60", TMPDIR=str(scratch_parent))  # 作業フォルダの置き場を、検査の中にする
+            if no_pdeathsig:
+                env["R4A_REST_NO_PDEATHSIG"] = "1"
+            comparer = subprocess.Popen([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(wrapper),
+                                         "--no-selftest", "--case", "host/args-empty"], env=env, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, start_new_session=True)
+            try:
+                for _ in range(300):  # 子(Rust)が FIFO の open で待つまで待つ
+                    seen = subprocess.run(["pgrep", "-f", str(fifo)], capture_output=True, text=True).stdout.split()
+                    if seen:
+                        break
+                    time.sleep(0.1)
+                self.assertTrue(seen, "Rust の子が起動しなかった")
+                comparer.send_signal(signal_module.SIGTERM)  # 外から SIGTERM(子の比較器の時間切れと同じ形)
+                comparer.wait(timeout=60)
+            finally:
+                if comparer.poll() is None:
+                    comparer.kill()
+                    comparer.wait()
+                comparer.stdout.close()
+                comparer.stderr.close()
+            for _ in range(100):
+                left = subprocess.run(["pgrep", "-f", str(fifo)], capture_output=True, text=True).stdout.split()
+                if not left:
+                    break
+                time.sleep(0.1)
+            for pid in left:
+                try:
+                    os.kill(int(pid), 9)
+                except OSError:
+                    pass
+            leftover_dirs = sorted(p.name for p in scratch_parent.glob("r4a-rest-*"))
+        self.assertEqual(leftover_dirs, [], "SIGTERM の後に、作業フォルダ(r4a-rest-*)が残った")
+        self.assertEqual(left, [], "SIGTERM の後に Rust の子が残った")
+        self.assertEqual(comparer.returncode, 128 + signal_module.SIGTERM)
+
+    def test_an_external_sigterm_leaves_nothing_below_the_comparer(self):
+        self.terminate_comparer_with_blocked_children(no_pdeathsig=False)
+
+    @unittest.skipUnless(sys.platform == "linux", "PDEATHSIG は Linux だけ")
+    def test_an_external_sigterm_leaves_nothing_even_without_pdeathsig(self):
+        # Mac には PDEATHSIG が無い。その仕組みに頼らずに、SIGTERM の受け手と印の掃除だけで片付くことを確かめる。
+        self.terminate_comparer_with_blocked_children(no_pdeathsig=True)
+
+
+class NarrowedCases(unittest.TestCase):
+    """絞った自己検査(`--case`)が、どの OS でも流れる case を選んでいること。Mac の固定の未実施の一覧に当たる case だけに絞らない。"""
+
+    # 意図して一覧の case を選ぶ検査(Mac の条件のまね・Linux だけの検査)。ほかの検査は、一覧に当たる case を選ばない。
+    INTENTIONAL = {
+        "candidate/collect-raw-name", "task/non-utf8-path",  # `requires_raw_name`: Mac の条件のまね(環境変数)で、未実施を確かめる
+        "fault/store-trace-budget-60",                       # `requires_linux`: Mac でも流れる `fault/store-usage-budget-30` と組で選ぶ
+    }
+
+    def selected_ids(self):
+        """この検査ファイルが `--case` に渡す case の ID(引数の並びを文字列として読む)。"""
+        source = (HERE / "test_r4a_rest.py").read_text(encoding="utf-8")
+        required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))["cases"]
+        found = set(re.findall(r'"--case",\s*"([^"\' +]+)"', source))
+        self.assertEqual([i for i in found if i not in required and not i.startswith("host/does-not")], [], "未知の case を選んでいる")
+        return sorted(i for i in found if i in required)
+
+    def test_selected_cases_do_not_fall_on_the_darwin_unrun_lists_unless_intended(self):
+        required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))
+        unrun = set(required["requires_linux"]) | set(required["requires_raw_name"]) | set(checker.UNAVAILABLE_BY_OS["darwin"])
+        chosen = self.selected_ids()
+        self.assertGreater(len(chosen), 10)
+        offenders = [i for i in chosen if i in unrun and i not in self.INTENTIONAL
+                     and not i.startswith("charset/locale-ja_JP.eucJP/")]
+        self.assertEqual(offenders, [], "Mac で未実施になる case だけを選んだ検査がある(Mac の CI で落ちる)")
+
+    def test_the_intentional_linux_only_case_is_paired_with_a_case_that_runs_everywhere(self):
+        required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))
+        partner = "fault/store-usage-budget-30"
+        self.assertNotIn(partner, required["requires_linux"])
+        self.assertNotIn(partner, required["requires_raw_name"])
+        source = (HERE / "test_r4a_rest.py").read_text(encoding="utf-8")
+        self.assertIn('"--case", "fault/store-trace-budget-60", "--case", "' + partner + '"', source)
+
+
+class OsSpecificExpectations(unittest.TestCase):
+    """OS ごとの期待。根拠は、commit ab0b9ab の push 用 CI(Native run 43250661920)の Mac x86_64 の旧版の出力。"""
+
+    def test_errno_numbers_in_fixed_expectations_follow_the_os(self):
+        text = "reference-error=[Errno 40] Too many levels of symbolic links\n"
+        with unittest.mock.patch.object(checker.sys, "platform", "darwin"):
+            self.assertEqual(checker.os_errno_text(text), "reference-error=[Errno 62] Too many levels of symbolic links\n")
+            self.assertEqual(checker.os_errno_text("[Errno 28] No space left on device"), "[Errno 28] No space left on device")
+        with unittest.mock.patch.object(checker.sys, "platform", "linux"):
+            self.assertEqual(checker.os_errno_text(text), text)
+
+    def test_the_candidate_check_fault_expectation_depends_on_the_buffer_of_the_os(self):
+        linux_frames = [[checker.CAND_MODULE, ("candidate-keys.py", 227, "main")]]
+        with unittest.mock.patch.object(checker.sys, "platform", "linux"):
+            self.assertEqual(checker.candidate_check_frames(True, ""), linux_frames)
+            self.assertEqual(checker.candidate_check_frames(True, "-unbuffered"), linux_frames)
+            self.assertIsNone(checker.candidate_check_frames(False, ""))
+        with unittest.mock.patch.object(checker.sys, "platform", "darwin"):
+            self.assertEqual(checker.candidate_check_frames(True, ""), [])  # Mac の旧版: Traceback なし(終了時の flush の失敗)
+            self.assertEqual(checker.candidate_check_frames(True, "-unbuffered"), linux_frames)  # 無バッファは同じ
+            self.assertIsNone(checker.candidate_check_frames(False, ""))
+
+    def test_rust_sizes_the_buffer_like_python(self):
+        # Python は FileIO の `_blksize`(`st_blksize` が 1 より大きければそれ、でなければ 8192)を BufferedWriter の大きさにする。
+        source = (HERE.parent / "crates/cli/examples/r4a_rest_contract.rs").read_text(encoding="utf-8")
+        self.assertIn("if info.blksize > 1", source)
+        self.assertIn("info.blksize as usize", source)
+        self.assertIn("8192", source)
 
 
 class WaitingAndRawNames(unittest.TestCase):
@@ -872,14 +1266,14 @@ class EndToEnd(unittest.TestCase):
         return path
 
     def test_passthrough_passes_and_reports_partial_comparison(self):
-        result = run_checker(fixture_binary(), "--only", "host-argv")
+        result = run_checker(fixture_binary(), "--case", "host/args-empty", "--case", "host/args-turns-ok")
         assert_only_pending(self, result)
         self.assertIn("部分比較", result.stdout)
 
     def test_extra_stderr_byte_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.wrapper(directory, f'"{fixture_binary()}" "$@"\nrc=$?\nprintf x >&2\nexit $rc\n')
-            result = run_checker(fixture, "--only", "host-argv")
+            result = run_checker(fixture, "--case", "host/args-empty")
         self.assertEqual(result.returncode, 1)
         self.assertIn("標準エラーが違う", result.stderr)
 
@@ -889,21 +1283,21 @@ class EndToEnd(unittest.TestCase):
                 directory,
                 f'out=$("{fixture_binary()}" "$@")\nrc=$?\nprintf "%sX" "$out"\nexit $rc\n',
             )
-            for helper in ("candidate-keys", "loop-child-output"):
-                result = run_checker(fixture, "--only", helper)
+            for helper, case_id in (("candidate-keys", "candidate/collect-store"), ("loop-child-output", "child/result-pr")):
+                result = run_checker(fixture, "--case", case_id)
                 self.assertEqual(result.returncode, 1, helper)
                 self.assertIn("不一致", result.stderr, helper)
 
     def test_input_change_and_timeout_are_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.wrapper(directory, f'touch changed-by-fixture\nexec "{fixture_binary()}" "$@"\n')
-            result = run_checker(fixture, "--only", "host-argv")
+            result = run_checker(fixture, "--case", "host/args-empty")
             self.assertEqual(result.returncode, 1)
             self.assertIn("入力・旧スクリプトの置き場が変わった", result.stderr)
             slow = self.wrapper(directory, "sleep 5\n")
             env = dict(os.environ, R4A_REST_CHILD_TIMEOUT="1")
-            result = subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(slow),
-                                     "--only", "host-argv"], capture_output=True, text=True, timeout=300, env=env)
+            result = checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(slow),
+                                     "--case", "host/args-empty"], capture_output=True, text=True, timeout=300, env=env)
         self.assertEqual(result.returncode, 1)
         self.assertIn("時間切れ", result.stdout + result.stderr)
 
@@ -913,13 +1307,13 @@ class EndToEnd(unittest.TestCase):
             touch = Path(directory) / "touch"
             touch.write_text('#!/bin/sh\ntouch -d "2001-01-01 00:00:00" sentinel.txt\nexec "' + str(real) + '" "$@"\n')
             touch.chmod(0o755)
-            result = run_checker(touch, "--only", "host-argv")
+            result = run_checker(touch, "--case", "host/args-empty")
             self.assertEqual(result.returncode, 1)
             self.assertIn("入力・旧スクリプトの置き場が変わった", result.stderr)
             relink = Path(directory) / "relink"
             relink.write_text('#!/bin/sh\nif [ -L dirlink ]; then ln -sfn nowhere dirlink; fi\nexec "' + str(real) + '" "$@"\n')
             relink.chmod(0o755)
-            result = run_checker(relink, "--only", "candidate-keys")
+            result = run_checker(relink, "--case", "candidate/collect-store")
         self.assertEqual(result.returncode, 1)
         self.assertIn("入力・旧スクリプトの置き場が変わった", result.stderr)
 
@@ -946,8 +1340,8 @@ class EndToEnd(unittest.TestCase):
         if sys.platform != "linux":
             return
         env = dict(os.environ, PATH="/nonexistent")
-        result = subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture_binary()),
-                                 "--only", "resolve-task-store"], capture_output=True, text=True, timeout=300, env=env)
+        result = checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(fixture_binary()),
+                                 "--case", "store/value-omitted"], capture_output=True, text=True, timeout=300, env=env)
         self.assertEqual(result.returncode, 1)
         self.assertIn("失敗にする", result.stderr)
 
@@ -969,7 +1363,7 @@ class EndToEnd(unittest.TestCase):
             # 標準出力が閉じて渡された(起動時に閉じた fd)ときだけ、標準エラーに余計な出力を足す。
             wrapper.write_text('#!/bin/sh\n"' + str(real) + '" "$@"; rc=$?\nif ! ( exec 3>&1 ) 2>/dev/null; then echo extra >&2; fi\nexit $rc\n')
             wrapper.chmod(0o755)
-            result = run_checker(wrapper, "--only", "host-argv")
+            result = run_checker(wrapper, "--case", "m3c/closed-host-error-stdout")
         self.assertEqual(result.returncode, 1)
         self.assertIn("closed-host", result.stderr, result.stdout[-1500:] + result.stderr[-1500:])
 
@@ -983,7 +1377,7 @@ class EndToEnd(unittest.TestCase):
             wrapper = Path(directory) / "w"
             wrapper.write_text('#!/bin/sh\ntouch changed-by-fixture sentinel.txt\nexec "' + str(real) + '" "$@"\n')
             wrapper.chmod(0o755)
-            subprocess.run([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(wrapper), "--only", "host-argv"],
+            checker.run_group([sys.executable, "-B", str(HERE / "check_r4a_rest.py"), "--fixture", str(wrapper), "--case", "host/args-empty"],
                            capture_output=True, text=True, timeout=300, cwd=repository)
         self.assertEqual(sorted(p.name for p in repository.iterdir()), before)
         self.assertEqual(sorted(p.name for p in (repository / "native").iterdir()), before_native)
@@ -993,7 +1387,8 @@ class EndToEnd(unittest.TestCase):
         # Rust が故障の規則(合計の上限)を無視して全部を出すと、固定名にした書込みの列の期待と合わず失敗する。
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.wrapper(directory, f'unset R4A_FAULT\nexec "{fixture_binary()}" "$@"\n')
-            result = run_checker(fixture, "--only", "resolve-task-store")
+            # Linux だけの case(`/dev/full` を使う)と、Mac でも流れる case の両方を選ぶ。どちらの OS でも、失敗(終了 1)と期待の文を確かめる。
+            result = run_checker(fixture, "--case", "fault/store-trace-budget-60", "--case", "fault/store-usage-budget-30")
         self.assertEqual(result.returncode, 1)
         self.assertIn("固定名にした書込みの列に同じ規則を当てた結果と違う", result.stderr)
         # 故障の case の失敗には、差込みが記録した呼び出しの要点(write の fd ごとの回数とバイト数など)が付く。
@@ -1011,7 +1406,7 @@ class EndToEnd(unittest.TestCase):
                 "  sed -E 's/0x[0-9a-f]{16}/0x0123456789abcdef/' \"$t\" >&2; rm -f \"$t\"; exit $rc\nfi\n"
                 f'exec "{real}" "$@"\n')
             ok.chmod(0o755)
-            result = run_checker(ok, "--only", "host-argv")
+            result = run_checker(ok, "--case", "host/startup-stdin-dir")
             assert_only_pending(self, result)
             # 診断に `Current thread` の行をもう 1 回足すと、1 回でないので失敗する。
             twice = Path(directory) / "twice"
@@ -1021,7 +1416,7 @@ class EndToEnd(unittest.TestCase):
                 "  echo 'Current thread 0x0000000000000001 (most recent call first):' >&2; exit $rc\nfi\n"
                 f'exec "{real}" "$@"\n')
             twice.chmod(0o755)
-            result = run_checker(twice, "--only", "host-argv")
+            result = run_checker(twice, "--case", "host/startup-stdin-dir")
         self.assertEqual(result.returncode, 1)
         self.assertIn("Current thread の行が 1 回でない", result.stderr)
 
@@ -1030,22 +1425,28 @@ class EndToEnd(unittest.TestCase):
         # 終了 1 になる。接続待ちとは報告しない。
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.wrapper(directory, f'[ "$COLUMNS" = x ] && export COLUMNS=20\nexec "{fixture_binary()}" "$@"\n')
-            result = run_checker(fixture, "--only", "resolve-task-store")
+            result = run_checker(fixture, "--case", "pty/store-help-tty-columns-x")
             self.assertEqual(result.returncode, 1, result.stderr[-1500:])
             self.assertIn("不一致", result.stderr)
             self.assertIn("pty/store-help-tty-columns-x", result.stderr)
             self.assertNotIn("接続待ち", result.stdout)
             self.assertNotIn("結果: 合格", result.stdout)
         # 不一致が無い補助の部分比較は、終了 0(全件合格とは言わない)。
-        partial = run_checker(fixture_binary(), "--only", "resolve-task-store")
+        partial = run_checker(fixture_binary(), "--case", "store/value-omitted")
         assert_only_pending(self, partial)
         self.assertIn("部分比較", partial.stdout)
 
     def test_exit_code_difference_is_rejected(self):
         with tempfile.TemporaryDirectory() as directory:
             fixture = self.wrapper(directory, f'"{fixture_binary()}" "$@" >/dev/null 2>&1\nexit 7\n')
-            result = run_checker(fixture, "--only", "host-argv")
+            result = run_checker(fixture, "--case", "host/args-empty")
         self.assertEqual(result.returncode, 1)
+        self.assertIn("host/args-empty", result.stderr)  # 絞った case の ID が、失敗の文に出る(ID の書き違えで通らない)
+
+    def test_an_unknown_case_is_rejected_with_exit_one(self):
+        result = run_checker(fixture_binary(), "--case", "host/does-not-exist")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("未知の case", result.stderr)
 
     def test_same_wrong_value_on_both_sides_is_not_accepted_by_fixed_expectation(self):
         # 旧版と Rust が同じ誤った Traceback を出しても、固定期待(行番号)が違えば失敗する。
@@ -1076,7 +1477,7 @@ class EndToEnd(unittest.TestCase):
             required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))
             del required["cases"]["host/args-empty"]
             (fixtures / "required_cases.json").write_text(json.dumps(required))
-            result = subprocess.run([sys.executable, "-B", str(copy / "check_r4a_rest.py"), "--fixture",
+            result = checker.run_group([sys.executable, "-B", str(copy / "check_r4a_rest.py"), "--fixture",
                                      str(fixture_binary()), "--only", "host-argv"],
                                     capture_output=True, text=True, timeout=120)
         self.assertNotEqual(result.returncode, 0)

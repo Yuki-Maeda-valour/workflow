@@ -51,7 +51,7 @@ UNAVAILABLE_BY_OS = {"linux": [], "darwin": [f"charset/locale-ja_JP.eucJP/{name}
 RAW_NAME_EXPECTED_REJECTED = {"linux": [], "darwin": [b"bad-\xff", b"\xe5\x80\x99\xe8\xa3\x9c_\xff.md"]}
 RAW_NAME_CASES = ("task/non-utf8-path", "candidate/collect-raw-name")
 # Linux で Mac の条件をまねる環境変数。自己検査の中(`R4A_REST_IN_SELFTEST`)だけで使える。
-SIMULATION_VARIABLES = ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE")
+SIMULATION_VARIABLES = ("R4A_REST_SIMULATE_EILSEQ", "R4A_REST_SIMULATE_LOCALE", "R4A_REST_NO_PDEATHSIG")
 
 
 def os_key():
@@ -272,6 +272,279 @@ def check_boundaries(outputs, groups, expected_groups=None):
     if expected_groups is not None and checked != expected_groups:
         failures.append(f"確かめた境界の組が {checked} 組で、定義した {expected_groups} 組と違う(旧版の出力がそろわない組がある)")
     return checked, failures
+
+
+# ---------------------------------------------------------------- 子のプロセスの管理
+# 比較器が起動するすべての子(旧版・Rust・自己検査の中の子の比較器)は、新しいプロセスグループで起動して記録し、
+# 時間切れ・例外の経路でも、グループごと止めて回収する。終わる前に、残っていないことを確かめる(全 OS)。
+# 記録は、比較器の本体と自己検査(別のモジュールとして読み込まれる)で共有するため、`sys` に置く。
+CHILD_GROUPS = sys.__dict__.setdefault("_r4a_rest_child_groups", [])
+LEFT_BEHIND = sys.__dict__.setdefault("_r4a_rest_left_behind", [])
+RUN_MARK = sys.__dict__.setdefault("_r4a_rest_run_mark", [None])  # この走りの印(`start_run_mark` が入れる)
+WORKDIRS = sys.__dict__.setdefault("_r4a_rest_workdirs", [])  # 比較器の作業フォルダ(SIGTERM の受け手が、終わる前に消す)
+MAIN_MARK = sys.__dict__.setdefault("_r4a_rest_main_mark", [None])  # 比較器の本体の印。自己検査が作る印では書き換えない
+LAST_GROUP = sys.__dict__.setdefault("_r4a_rest_last_group", [None])  # 最後に起動した子のグループ(自己検査が確かめに使う)
+
+
+def kill_group(pgid, sig=9):
+    try:
+        os.killpg(pgid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def group_alive(pgid):
+    """そのグループに、自分が見られるプロセスが残っているか。PermissionError(他人のグループ)は、自分の子と見なさない。"""
+    try:
+        os.killpg(pgid, 0)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
+
+
+def forget_group(pgid):
+    """グループが空と確かめたら、記録から外す(pid が使い回されて、無関係のグループを止めないため)。"""
+    if not group_alive(pgid) and pgid in CHILD_GROUPS:
+        CHILD_GROUPS.remove(pgid)
+
+
+def parent_death_hook():
+    """Linux では、比較器が先に死んだとき(外から SIGKILL されたとき)に、子も SIGKILL で死ぬようにする。Mac には無い。"""
+    if sys.platform != "linux":
+        return None
+    if os.environ.get("R4A_REST_NO_PDEATHSIG") == "1" and os.environ.get("R4A_REST_IN_SELFTEST"):
+        return None  # 自己検査の専用: この仕組みに頼らずに、子が片付くことを確かめる
+
+    def hook():
+        import ctypes
+        ctypes.CDLL(None).prctl(1, 9)  # PR_SET_PDEATHSIG, SIGKILL
+    return hook
+
+
+def child_preexec(extra=None):
+    hooks = [h for h in (parent_death_hook(), extra) if h is not None]
+    if not hooks:
+        return None
+
+    def run():
+        for hook in hooks:
+            hook()
+    return run
+
+
+def register_child(process):
+    CHILD_GROUPS.append(process.pid)
+    LAST_GROUP[0] = process.pid
+
+
+def stop_group(process, grace=5):
+    """グループへ SIGTERM を送り、少し待ってから SIGKILL で止める。自己検査の中の子の比較器が、下の子を片付ける間を与える。"""
+    kill_group(process.pid, 15)
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        process.poll()  # 親(ゾンビ)を回収しないと、グループは「残っている」ままになる
+        if not group_alive(process.pid):
+            break
+        time.sleep(0.05)
+    kill_group(process.pid, 9)
+    process.poll()
+    forget_group(process.pid)
+
+
+def communicate_group(process, input=None, timeout=None):
+    """`communicate` と同じに出力を集める。親が終わったのに、出力の pipe を持ち続ける子が残っているときは、その子を止めて
+    (`straggler` を真にして返す)、読取りを終わらせる。同じグループの子は、グループごと止める。別のグループ・別の session に
+    切り離した子は、走りの印で見つけて止める(親が終わって 1 秒たっても読取りが終わらないとき)。
+    時間切れは `TimeoutExpired`(呼出側がグループを止める)。"""
+    deadline = None if timeout is None else time.monotonic() + timeout
+    first = True
+    straggler = False
+    gone_since = None
+    while True:
+        try:
+            out, err = process.communicate(input=input if first else None, timeout=0.2)
+            return out, err, straggler
+        except subprocess.TimeoutExpired:
+            first = False
+            if process.poll() is not None:
+                if group_alive(process.pid):
+                    straggler = True
+                    kill_group(process.pid)
+                if gone_since is None:
+                    gone_since = time.monotonic()
+                elif time.monotonic() - gone_since > 1.0 and active_mark():
+                    swept = sweep(active_mark())
+                    if swept:
+                        straggler = True
+                        LEFT_BEHIND.extend(swept)
+            if deadline is not None and time.monotonic() > deadline:
+                raise
+
+
+def run_group(argv, *, input=None, timeout=None, check=False, capture_output=False, text=False, env=None, cwd=None,
+              stdin=None, stdout=None, stderr=None, preexec_fn=None):
+    """`subprocess.run` と同じ形で、子を新しいプロセスグループで起動して記録する。時間切れ・例外のときは、グループごと止める。
+    正常に終わった後も、グループに残った子(孫など)があれば、止めて `LEFT_BEHIND` に記録する(終わりの確かめで失敗にする)。"""
+    if capture_output:
+        stdout = stderr = subprocess.PIPE
+    process = subprocess.Popen(argv, stdin=subprocess.PIPE if input is not None else stdin, stdout=stdout, stderr=stderr,
+                               env=env, cwd=cwd, text=text, start_new_session=True, preexec_fn=child_preexec(preexec_fn))
+    register_child(process)
+    try:
+        out, err, straggler = communicate_group(process, input, timeout)
+    except BaseException:
+        # 時間切れ・例外の経路でも、グループを止め、印で切り離された子も掃除してから、時間の上限つきで読み切る。
+        stop_group(process)
+        if active_mark():
+            LEFT_BEHIND.extend(sweep(active_mark()))
+        try:
+            process.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            try:
+                process.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+        raise
+    if straggler or group_alive(process.pid):
+        LEFT_BEHIND.append(f"{argv[0]} の起動後に、グループにプロセスが残った")
+        kill_group(process.pid)
+    forget_group(process.pid)
+    if check and process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, argv, out, err)
+    return subprocess.CompletedProcess(argv, process.returncode, out, err)
+
+
+RUN_VARIABLE = "R4A_REST_RUN"
+
+
+def start_run_mark(main=False):
+    """この走りの印を作り、環境へ入れる。すべての子(と、その下の子孫)が受け継ぐ。
+    自己検査の中の子の比較器は、親の印を受け継いだ上に、自分の印を足す(コンマ区切り)。親は、どの子孫も自分の印で見つけられる。"""
+    import uuid
+    mark = uuid.uuid4().hex
+    chain = os.environ.get(RUN_VARIABLE)
+    os.environ[RUN_VARIABLE] = f"{chain},{mark}" if chain else mark
+    RUN_MARK[0] = mark
+    if main:
+        MAIN_MARK[0] = mark
+    return mark
+
+
+def active_mark():
+    """子の掃除に使う印。本体の印があればそれ(自己検査の途中で作った印には変わらない)。"""
+    return MAIN_MARK[0] or RUN_MARK[0]
+
+
+def marked_processes(mark):
+    """印を環境に持つプロセスの (pid, コマンド行) の一覧。Linux は `/proc/<pid>/environ`、それ以外(Mac)は `ps -E`。
+    パスや「親が init」には頼らない。自分自身は除く。"""
+    found = []
+    needle = mark.encode()
+    if os.path.isdir("/proc/self"):
+        for name in os.listdir("/proc"):
+            if not name.isdigit() or int(name) == os.getpid():
+                continue
+            try:
+                environment = Path(f"/proc/{name}/environ").read_bytes()
+            except OSError:
+                continue  # 他人のプロセス・消えたプロセス
+            if needle in environment:
+                try:
+                    command = Path(f"/proc/{name}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+                except OSError:
+                    command = ""
+                found.append((int(name), command[:100]))
+        return found
+    env = {k: v for k, v in os.environ.items() if k != RUN_VARIABLE}  # ps 自身を、印の対象にしない
+    try:
+        listing = subprocess.run(["ps", "-E", "-A", "-o", "pid=,command="], capture_output=True, text=True, timeout=60, env=env).stdout
+    except (OSError, subprocess.SubprocessError):
+        return found
+    for line in listing.splitlines():
+        parts = line.strip().split(None, 1)
+        if len(parts) == 2 and parts[0].isdigit() and int(parts[0]) != os.getpid() and mark in parts[1]:
+            found.append((int(parts[0]), parts[1][:100]))
+    return found
+
+
+def sweep(mark):
+    """印を持つプロセスを止める(SIGKILL)。止めたものの一覧を返す。"""
+    stopped = []
+    for pid, command in marked_processes(mark):
+        stopped.append(f"印を持つプロセス {pid}: {command}")
+        try:
+            os.kill(pid, 9)
+        except OSError:
+            pass
+    return stopped
+
+
+def final_process_check(mark):
+    """比較器の終わりの確かめ。自分が起動した子が残っていれば、止めてから、残っていた事実の一覧を返す(空なら残りなし)。
+    子の見分けは、記録したグループと、走りごとの印(環境変数)による。実行物のパスや「親が init」には頼らない。"""
+    found = list(LEFT_BEHIND)
+    LEFT_BEHIND.clear()
+    for pgid in list(CHILD_GROUPS):
+        if group_alive(pgid):
+            found.append(f"グループ {pgid} にプロセスが残っていた")
+            kill_group(pgid)
+        forget_group(pgid)
+    CHILD_GROUPS.clear()
+    if mark:
+        found.extend(sweep(mark))
+    return found
+
+
+def install_term_handler(mark):
+    """SIGTERM で止められたとき(自己検査の中の子の比較器の時間切れ・外からの終了)に、記録した子を、まず SIGTERM、
+    少し待ってから SIGKILL で止める。そのうえで印による掃除を流してから終わる。"""
+    import signal as signal_module
+
+    def handler(signum, frame):
+        pgids = list(CHILD_GROUPS)
+        for pgid in pgids:
+            kill_group(pgid, 15)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            for pgid in pgids:
+                try:
+                    os.waitpid(pgid, os.WNOHANG)  # 親(ゾンビ)を回収する
+                except (ChildProcessError, OSError):
+                    pass
+            if not any(group_alive(pgid) for pgid in pgids):
+                break
+            time.sleep(0.05)
+        for pgid in pgids:
+            kill_group(pgid, 9)
+        sweep(mark)
+        import shutil
+        for directory in list(WORKDIRS):  # os._exit では、作業フォルダの後始末が走らない。ここで消す
+            shutil.rmtree(directory, ignore_errors=True)
+        os._exit(128 + signum)
+    signal_module.signal(signal_module.SIGTERM, handler)
+
+
+def os_errno_text(text):
+    """固定期待の errno の番号を、この OS の番号にする。Mac の ELOOP は 62(Linux は 40)。
+    根拠: commit ab0b9ab の push 用 CI(Native run 43250661920)の Mac x86_64 の旧版の出力 `[Errno 62] Too many levels of symbolic links`。"""
+    if sys.platform == "darwin":
+        return text.replace("[Errno 40] Too many levels of symbolic links", "[Errno 62] Too many levels of symbolic links")
+    return text
+
+
+def candidate_check_frames(traced, label):
+    """candidate-keys の `--check`(標準出力が 9065 バイト)に標準出力の故障を当てる case の、Traceback の期待。
+    Linux は、標準出力の buffer(st_blksize)が小さく、書込みの途中で OSError になる(Traceback 1 つ)。
+    Mac の旧版は、buffer が出力より大きく、終了時の flush でまとめて書き、`Exception ignored in: <_io.TextIOWrapper name='<stdout>' …>`
+    と OSError の 2 行だけになる(Traceback なし)。根拠: ab0b9ab の push 用 CI の Mac x86_64 の旧版の出力と、差込みの記録
+    (故障なしの旧版は fd1 へ 1 回 9065 バイト)。無バッファの case(label が空でない)は、Mac も同じ Traceback になる。
+    Rust は同じ決め方(st_blksize が 1 より大きければそれ、でなければ 8192)で buffer を持つ。"""
+    if not traced:
+        return None
+    if sys.platform == "darwin" and label == "":
+        return []
+    return [[CAND_MODULE, ("candidate-keys.py", 227, "main")]]
 
 
 def needs_shim(case):
@@ -1015,6 +1288,7 @@ def legacy_child_cases():
 
         def judge(result, name=name, mode=mode, expected=expected):
             rc, out, err = expected
+            out, err = os_errno_text(out), os_errno_text(err)  # errno の番号は OS で変わる(Mac の ELOOP は 62)
             got = (result[0], result[1].decode("utf-8"), result[2].decode("utf-8"))
             if mode == "全体":
                 if got != (rc, out, err):
@@ -1202,7 +1476,7 @@ def fault_cases():
                                               ("", "short-fail", 20), ("-unbuffered", "short-fail", 20),
                                               ("", "budget", 0), ("-unbuffered", "budget", 0)}
             add(f"candidate-check{label}-{mode}-{limit}", CAND, ["--check", "-"], f"1:{mode}:{limit}", stdin=big_key, env=env,
-                frames=[[CAND_MODULE, ("candidate-keys.py", 227, "main")]] if traced else None)
+                frames=candidate_check_frames(traced, label))
             add(f"task-info{label}-{mode}-{limit}", TASK, ["taskinfo", "-"], f"1:{mode}:{limit}", stdin=task_text, env=env)
     add("child-origin-stderr-budget-30", CHILD, ["origin-json"], "2:budget:30", stdin=big_origin, stdout="full")
     add("task-info-stderr-cut-20", TASK, ["taskinfo", "-"], "2:cut-first:20", stdin=task_text, stdout="full")
@@ -1801,7 +2075,7 @@ def shim_is_effective(shim):
     code = ("import os,sys\ntry:\n os.write(1,b'x')\nexcept OSError as e:\n sys.stderr.write('R4A-SHIM-EFFECTIVE %d' % e.errno)\n")
     env = dict(os.environ, R4A_FAULT="1:budget:0", PYTHONNOUSERSITE="1", **shim_env(shim))
     try:
-        result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, timeout=60, env=env)
+        result = run_group([sys.executable, "-I", "-c", code], capture_output=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError):
         return False
     return b"R4A-SHIM-EFFECTIVE 28" in result.stderr
@@ -1981,13 +2255,15 @@ def run_pty(argv, case, env, cwd):
     import termios
     rows, cols, which = case.pty
     master, slave = pty_module.openpty()
+    process = None
     try:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         stdout = slave if which in ("stdout", "both") else subprocess.PIPE
         stderr = slave if which in ("stderr", "both") else subprocess.PIPE
         feed = case.stdin if isinstance(case.stdin, bytes) and case.stdin else None
         process = subprocess.Popen(argv, stdin=subprocess.PIPE if feed else subprocess.DEVNULL, stdout=stdout,
-                                   stderr=stderr, env=env, cwd=cwd)
+                                   stderr=stderr, env=env, cwd=cwd, start_new_session=True, preexec_fn=child_preexec())
+        register_child(process)
         os.close(slave)
         slave = -1
         if feed:
@@ -2022,9 +2298,12 @@ def run_pty(argv, case, env, cwd):
                     pass
                 break
             if time.monotonic() > deadline:
-                process.kill()
+                stop_group(process, grace=1)
+                process.wait()
                 raise Failure(f"{case.id}: 時間切れ(疑似端末)")
-        out, err = process.communicate(timeout=CHILD_TIMEOUT)
+        out, err, straggler = communicate_group(process, None, CHILD_TIMEOUT)
+        if straggler:
+            LEFT_BEHIND.append(f"{argv[0]} の起動後に、グループにプロセスが残った(疑似端末)")
         terminal = b"".join(chunks)
         if which == "stdout":
             return process.returncode, terminal, err or b""
@@ -2032,6 +2311,14 @@ def run_pty(argv, case, env, cwd):
             return process.returncode, out or b"", terminal
         return process.returncode, terminal, b""
     finally:
+        if process is not None:
+            if group_alive(process.pid):
+                kill_group(process.pid)  # 例外の経路でも、グループごと止める
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            forget_group(process.pid)
         os.close(master)
         if slave != -1:
             os.close(slave)
@@ -2141,7 +2428,8 @@ def run_signal(argv, case, env, cwd):
     process = subprocess.Popen(
         argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=cwd,
         start_new_session=True,
-        preexec_fn=(lambda: signal_module.signal(signal_module.SIGINT, signal_module.SIG_IGN)) if ignored else None)
+        preexec_fn=child_preexec((lambda: signal_module.signal(signal_module.SIGINT, signal_module.SIG_IGN)) if ignored else None))
+    register_child(process)
     try:
         process.stdin.write(preload)
         process.stdin.flush()
@@ -2167,8 +2455,11 @@ def run_signal(argv, case, env, cwd):
                 process.wait(timeout=CHILD_TIMEOUT)
             out, err = process.communicate(timeout=CHILD_TIMEOUT)
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.communicate()
+            kill_group(process.pid)  # 直接の子だけでなく、グループごと止める
+            try:
+                process.communicate(timeout=10)  # 時間の上限つきで読み切る
+            except subprocess.TimeoutExpired:
+                pass
             raise Failure(f"{case.id}: 信号の後に終わらない(時間切れ)")
         try:
             os.killpg(process.pid, 0)
@@ -2180,6 +2471,11 @@ def run_signal(argv, case, env, cwd):
             os.killpg(process.pid, 9)  # 子を残さない
         except OSError:
             pass
+        try:
+            process.wait(timeout=5)  # 回収して、グループが空と確かめたら記録から外す
+        except subprocess.TimeoutExpired:
+            pass
+        forget_group(process.pid)
     return process.returncode, out, err
 
 
@@ -2378,8 +2674,8 @@ def run_child_inner(argv, case, env, cwd):
         try:
             if closes:
                 stdin_arg["preexec_fn"] = lambda: [os.close(fd) for fd in closes]
-            completed = subprocess.run(argv, stdout=stdout, stderr=stderr, env=env, cwd=cwd,
-                                       timeout=CHILD_TIMEOUT, check=False, **stdin_arg)
+            completed = run_group(argv, stdout=stdout, stderr=stderr, env=env, cwd=cwd,
+                                  timeout=CHILD_TIMEOUT, check=False, **stdin_arg)
         except subprocess.TimeoutExpired:
             raise Failure(f"{case.id}: 時間切れ({CHILD_TIMEOUT} 秒): {argv[:3]}")
         return completed.returncode, completed.stdout or b"", completed.stderr or b""
@@ -2613,7 +2909,7 @@ def strerror_table_matches(binary):
     numbers = list(range(-1, 300)) + [9999, 100000]
     text = subprocess.run([sys.executable, "-I", "-c", "import os,sys\nfor n in %r: print(n, os.strerror(n), sep='\\t')" % numbers],
                           capture_output=True, check=True, env=dict(os.environ, PYTHONUTF8="1")).stdout
-    mine = subprocess.run([str(binary), "strerror"], capture_output=True, timeout=60).stdout
+    mine = run_group([str(binary), "strerror"], capture_output=True, timeout=60).stdout
     return text == mine
 
 
@@ -2703,6 +2999,9 @@ def main():
     parser.add_argument("--write-required", action="store_true",
                         help="必須 case の一覧を書き出す(case を足したときだけ人が実行して差分を確かめる)")
     parser.add_argument("--selftest-file", type=Path, default=None, help=argparse.SUPPRESS)  # 自己検査の確かめ専用
+    parser.add_argument("--case", action="append", default=[], metavar="ID",
+                        help="検査専用の case の絞り込み(繰り返せる)。指定した case だけを比べる。`--only` と同じ部分比較で、全件合格とは言わない。"
+                             "端から端までの自己検査が、確かめたい case だけを流すために使う")
     parser.add_argument("--no-selftest", action="store_true",
                         help="比較器の自己検査を流さない(同じ比較器を 2 回目に流すとき。自己検査の中の子の比較は、環境変数で自動に流さない)")
     options = parser.parse_args()
@@ -2711,6 +3010,7 @@ def main():
             raise SystemExit(f"{name} は自己検査の中(R4A_REST_IN_SELFTEST)でだけ使える。正式の検査では設定しない")
     # 比較器と、その子(旧版・Rust・補助のコマンド)は、使い捨ての一時フォルダの中で動かす。リポジトリに何も残さない。
     scratch = tempfile.TemporaryDirectory(prefix="r4a-rest-scratch-")
+    WORKDIRS.append(scratch.name)
     os.chdir(scratch.name)
 
     if sys.version_info[:2] != (3, 10):
@@ -2721,6 +3021,8 @@ def main():
     if str(binary) == "" or not binary.is_absolute() or not binary.is_file() or not os.access(binary, os.X_OK):
         raise SystemExit(f"検査用の実行ファイルが絶対パスの実行可能なファイルでない: {binary!r}")
 
+    mark = start_run_mark(main=True)
+    install_term_handler(mark)
     selftest_failure = run_selftest(options, binary, test_file=options.selftest_file)
     code = 0
     try:
@@ -2729,6 +3031,12 @@ def main():
         code = exit_.code if isinstance(exit_.code, int) else 1
         if exit_.code is not None and not isinstance(exit_.code, int):
             print(exit_.code, file=sys.stderr)
+    # 終わりの確かめ: 自分が起動した子(旧版・Rust・自己検査の中の子の比較器の下を含む)が残っていれば、止めてから失敗にする(全 OS)。
+    left = final_process_check(mark)
+    if left:
+        print(f"不一致: 子のプロセスが残っていた(止めた)。{len(left)} 件: {left[:6]}", file=sys.stderr)
+        print(f"結果: 子のプロセスが残っていた({len(left)} 件)。比較の結果は上のとおり(比較の終了コード {code})")
+        raise SystemExit(1)
     if selftest_failure is not None:
         print(f"結果: 自己検査が失敗した。{selftest_failure}。比較の結果は上のとおり(比較の終了コード {code})")
         raise SystemExit(1)
@@ -2740,11 +3048,23 @@ def compare(options, binary):
     """本体の比較(必須 case を旧版と Rust で比べる)。"""
     known = ["resolve-task-store", "candidate-keys", "host-argv", "loop-task-text", "loop-child-output"]
     helpers = [h for h in options.only.split(",") if h] if options.only else list(known)
+    selected = list(dict.fromkeys(options.case))
+    if selected:
+        # 絞り込み: 指定した case の補助だけを組み立て、その中の指定した case だけを比べる。
+        every_required = json.loads((FIXTURES / "required_cases.json").read_text(encoding="utf-8"))["cases"]
+        unknown_cases = [i for i in selected if i not in every_required]
+        if unknown_cases:
+            raise SystemExit(f"未知の case: {unknown_cases[:5]}")
+        helpers = sorted({every_required[i] for i in selected})
+    partial_run = bool(options.only or selected)  # 部分比較(全件合格とは言わない)
     unknown = [h for h in helpers if h not in known]
     if unknown:
         raise SystemExit(f"未知の補助: {unknown}")
 
     cases = all_cases(helpers)
+    setup_cases = list(cases)  # 絞り込んでも、入力を作る処理(setup)は、除いた case の分も流す
+    if selected:
+        cases = [c for c in cases if c.id in selected]
     if not cases and not options.write_required:
         raise SystemExit("比べる case が 0 件(0 件を成功にしない)")
     if options.write_required:
@@ -2769,7 +3089,7 @@ def compare(options, binary):
     duplicates = sorted({i for i in ids if ids.count(i) > 1})
     if duplicates:
         raise SystemExit(f"case ID が重複している: {duplicates}")
-    wanted = sorted(i for i, helper in required["cases"].items() if helper in helpers)
+    wanted = sorted(selected) if selected else sorted(i for i, helper in required["cases"].items() if helper in helpers)
     if sorted(ids) != wanted:
         missing = sorted(set(wanted) - set(ids))
         extra = sorted(set(ids) - set(wanted))
@@ -2812,11 +3132,18 @@ def compare(options, binary):
     closed_expectations = json.loads(CLOSED_FILE.read_text(encoding="utf-8")) if CLOSED_FILE.exists() else {}
     closed_record_out = {} if options.record_closed else None
     with tempfile.TemporaryDirectory(prefix="r4a-rest-compare-") as work:
+        WORKDIRS.append(work)
         work = Path(work)
         shim = build_shim(work)
         fixtures_dir = work / "inputs"
         fixtures_dir.mkdir()
         (fixtures_dir / "sentinel.txt").write_bytes(b"unchanged\n")
+        if selected:
+            done_setups = set()
+            for case in setup_cases:
+                if case.setup is not None and case.setup not in done_setups:
+                    case.setup(fixtures_dir)
+                    done_setups.add(case.setup)
         for case in cases:
             if time.monotonic() - started > TOTAL_TIMEOUT:
                 raise SystemExit(f"全体の上限 {TOTAL_TIMEOUT} 秒を超えた")
@@ -2882,7 +3209,7 @@ def compare(options, binary):
                 failures.append(f"{case.id}: OS の失敗: {error!r}")
     # `--only` の無い全件の比較では、定義した組をすべて確かめたことを求める。
     boundary_checked, boundary_failures = check_boundaries(
-        boundary_out, boundary_list, expected_groups=len(boundary_list) if not options.only else None)
+        boundary_out, boundary_list, expected_groups=len(boundary_list) if not partial_run else None)
     failures.extend(boundary_failures)
     print(f"境界の組: {boundary_checked} 組で、旧版の出力が境界で変わることを確かめた")
     if sorted(executed) != sorted(ids):
@@ -2896,7 +3223,7 @@ def compare(options, binary):
         print(f"記録した文字コード設定の case: {len(charset_record_out)}")
         return
     elapsed = time.monotonic() - started
-    partial = "" if sorted(helpers) == sorted(known) else "(部分比較: 全件合格ではない)"
+    partial = "" if sorted(helpers) == sorted(known) and not selected else "(部分比較: 全件合格ではない)"
     if pending:
         print(f"接続待ち: {len(pending)} 件(Rust 側が platform と接続するまで一致しない。成功には数えない)")
         for line in pending[:60]:
@@ -2930,7 +3257,7 @@ def compare(options, binary):
                         f"未実施 {len(plain_not_run)} 件・一覧 {len(expected_plain)} 件(差: {sorted(set(plain_not_run) ^ expected_plain)[:6]})")
     # UTF-8 でない名前を OS が拒んだ集合も、OS ごとの固定の一覧と同じでなければ失敗にする(Linux では 1 つも拒まれない)。
     rejected = sorted(name for name, _ in RAW_NAME_REJECTED)
-    if rejected != sorted(RAW_NAME_EXPECTED_REJECTED.get(key, [])) and not options.only:
+    if rejected != sorted(RAW_NAME_EXPECTED_REJECTED.get(key, [])) and not partial_run:
         failures.append(f"OS が拒んだ UTF-8 でない名前の集合が、この OS の固定の一覧と違う: 実際 {rejected}・一覧 {RAW_NAME_EXPECTED_REJECTED.get(key, [])}")
     fixed_unrun = unavailable_ok and plain_ok
     if not_run:
@@ -2943,7 +3270,7 @@ def compare(options, binary):
     positions = {item[1] for item in cut_flags}
     if any(item[2] for item in cut_flags):
         positions.add("legacy-only")
-    if "fault" in " ".join(ids) and "resolve-task-store" in helpers and not options.only:
+    if "fault" in " ".join(ids) and "resolve-task-store" in helpers and not partial_run:
         for needed in ("inside", "outside", "legacy-only"):
             if needed not in positions:
                 failures.append(f"故障の case に、上限が「{needed}」の位置に来るものが無い")
