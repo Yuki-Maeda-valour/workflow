@@ -1110,9 +1110,12 @@ def flush_cases(folder):
 
 
 def tty_cases(folder):
+    import fcntl
     import pty
     import select
     import subprocess
+    import termios
+    import time
 
     driver = Path(folder) / "driver.py"
     driver.write_text(MAIN_DRIVER, encoding="utf-8")
@@ -1129,11 +1132,24 @@ def tty_cases(folder):
                     if mode == "full":
                         # 端末のまま、書込みが EAGAIN になる(満杯で、非 block)。
                         os.set_blocking(slave, False)
-                        try:
-                            while True:
+                        # 満杯の判定は、カーネルの作業(slave の書込みを master 側へ移す処理)が
+                        # 終わった後でなければならない。EAGAIN の後も、書込みを試し直して
+                        # 入る分が無くなる(連続 5 回 EAGAIN で、master 側の量も変わらない)まで続ける。
+                        # 回数で決める。10 秒は止まらないための安全の上限だけ。
+                        deadline = time.monotonic() + 10
+                        calm = 0
+                        last = -1
+                        while calm < 5:
+                            if time.monotonic() > deadline:
+                                raise SystemExit("疑似端末を満杯にできない。固定期待を作らない")
+                            try:
                                 os.write(slave, b"x" * 512)
-                        except BlockingIOError:
-                            pass
+                                calm = 0
+                            except BlockingIOError:
+                                queued = struct.unpack("i", fcntl.ioctl(master, termios.FIONREAD, b"\0\0\0\0"))[0]
+                                calm = calm + 1 if queued == last else 0
+                                last = queued
+                                select.select([], [slave], [], 0.01)
                     env_extra = {"PYTHONUNBUFFERED": "1"} if unbuffered else None
                     done = run_driver(driver, [str(GUARD_PATH), spec] + command, slave, subprocess.PIPE, env_extra)
                     os.close(slave)
@@ -1141,7 +1157,14 @@ def tty_cases(folder):
                         os.close(master)
                     data = b""
                     if mode == "open":
-                        while select.select([master], [], [], 0.05)[0]:
+                        # 子が終わり、親の側の slave も閉じた後なので、残りを読み終えると
+                        # Linux は EIO、Mac は 0 バイトの EOF を返す。時間の待ちで
+                        # 読み終えたことにしない。10 秒は止まらないための安全の上限だけ。
+                        deadline = time.monotonic() + 10
+                        while True:
+                            remaining = deadline - time.monotonic()
+                            if remaining <= 0 or not select.select([master], [], [], remaining)[0]:
+                                raise SystemExit("疑似端末の読み切りが 10 秒の上限に当たった。固定期待を作らない")
                             try:
                                 chunk = os.read(master, 65536)
                             except OSError:
@@ -2420,6 +2443,11 @@ def obs_apply(root, ops):
                 os.chmod(path, op["mode"])
             elif created:
                 os.chmod(path, OBS_NEW_MODE)
+        elif kind == "deepdirs":
+            cmd_deep_dirs(root, op["path"])
+        elif kind == "bytes":
+            with open(path, "wb") as handle:
+                handle.write(bytes.fromhex(op["hex"]))
         elif kind == "rm":
             os.unlink(path)
         elif kind == "rmtree":
@@ -2484,8 +2512,11 @@ def obs_run(guard, root, ancestors, run, previous):
         # `functools.partial` はキーワード引数があると、C の呼出し(`tp_call`)を 1 つ挟んで深さが 1 増える。
         # 呼出元のフレームの深さを正確にするため、位置引数だけで呼ぶ。
         if call["fn"] == "tree":
+            # `path_input`: 旧版が `tree` に `Path` を渡す入口(`snapshot` の `tree(root, 'plugin', …)`)。
+            from pathlib import Path as _Path
+            tree_path = _Path(sub(call["path"])) if call.get("path_input") else sub(call["path"])
             at_depth(target, functools.partial(
-                guard.tree, sub(call["path"]), call["key"], budget, entries, blobs,
+                guard.tree, tree_path, call["key"], budget, entries, blobs,
                 call.get("optional", False), call.get("user_links", False), expected))
         elif call["fn"] == "component_tree":
             ret = at_depth(target, functools.partial(
@@ -3030,6 +3061,8 @@ def tree_depth_cases():
     add("depth-tree-prologue", small, T(), range(960, 1001))
     small_link = [L("t/a.txt", body="a"), L("t/lnk", "link", target="{r}/store"), L("store/s.txt", body="s")]
     add("depth-tree-prologue-link", small_link, T(user_links=True), range(960, 1001))
+    # 旧版の `snapshot` が `Path` を渡す入口(`str(path)` が `Path.__str__` を呼ぶので、落ちる検査の並びが違う)
+    add("depth-tree-prologue-path", small, T(path_input=True), range(960, 1001))
     return cases
 
 
@@ -3042,6 +3075,644 @@ def make_depth():
     for case in cases:
         case["results"] = obs_scenario(guard, case)
     return {"depth_cases.json": {"python": "3.10", "cases": cases}}
+
+
+# ---------------------------------------------------------------- 9 コマンドの本体(2b-1c)
+# 旧 guard を `python3 -B <配布物の中の guard> <コマンド>` で直接起動した(U5)結果を、同じ物理入力(一時フォルダ)で
+# 取る。`bootstrap`→(入力の変更)→`verify`・`host-settings`・`host-allowlist` の流れで、終了コード・標準出力・標準エラー・
+# 出力フォルダの中身・控えの値・Git の起動回数を残す。dev・ino・時刻は `*` に置き換え、一時フォルダは `{r}` に置き換える。
+# 控えの足取り(`@route:` など)は一時フォルダの深さで変わるので外す(部品の木の中身は observe の固定期待が見る)。
+# `/etc` の下の既定の監視先(機種で中身が変わる `/etc/profile` など)は、控えから外す。
+
+CMD_GUARD_REL = "plugin/skills/ship-task/scripts/environment-guard.py"
+CMD_DROP_PREFIX = ("@route:", "@route-end:", "@absolute:", "@origin:")
+CMD_SHA_RE = r'"sha256": "[0-9a-f]{64}"'
+
+
+def cmd_sub(text, root):
+    if not isinstance(text, str):
+        return text
+    out = text.replace("{r}", root)
+    import re
+    for name in re.findall(r"\{(?:state|sha):[A-Za-z0-9_-]+\}", out):
+        kind, _, label = name[1:-1].partition(":")
+        path = os.path.join(root, "out", label, "environment.json")
+        if kind == "state":
+            out = out.replace(name, path)
+        else:
+            import hashlib
+            digest = hashlib.sha256(open(path, "rb").read()).hexdigest() if os.path.exists(path) else "0" * 64
+            out = out.replace(name, digest)
+    return out
+
+
+def cmd_raise_nofile():
+    # 深い木の走査は、親の fd を開いたまま子を開く(約 1000 本)。旧版の起動の条件の外(fd の上限)で止まらないよう上げる。
+    import resource
+    resource.setrlimit(resource.RLIMIT_NOFILE, (8192, 8192))
+
+
+def cmd_unroot(value, root):
+    if isinstance(value, str):
+        return value.replace(root, "{r}")
+    if isinstance(value, list):
+        return [cmd_unroot(v, root) for v in value]
+    if isinstance(value, dict):
+        return {cmd_unroot(k, root): cmd_unroot(v, root) for k, v in value.items()}
+    return value
+
+
+def cmd_sha_map(layout, root):
+    """本文に一時フォルダの絶対パス(`{r}`)を含むファイルは、SHA-256 が実行ごとに変わる。`{r}` のままの本文の SHA-256 に直す。"""
+    import hashlib
+    out = {}
+    for item in layout:
+        if item.get("kind", "file") == "file" and "{r}" in item.get("body", ""):
+            out[hashlib.sha256(item["body"].replace("{r}", root).encode()).hexdigest()] = hashlib.sha256(item["body"].encode()).hexdigest()
+    return out
+
+
+def cmd_norm_state(value, root, shamap):
+    entries = {}
+    order = []
+    for key, entry in value["entries"].items():
+        if key.startswith(CMD_DROP_PREFIX):
+            continue
+        if "external:/etc/" in key and "external:/etc/claude-code" not in key:
+            continue
+        name = key.replace(root, "{r}")
+        entries[name] = [shamap.get(x, x) if isinstance(x, str) else x for x in cmd_unroot(obs_mask_entry(entry), root)]
+        order.append(name)
+    out = {k: cmd_unroot(v, root) for k, v in value.items() if k != "entries"}
+    out["entries"] = entries
+    out["entry_order"] = order
+    return out
+
+
+def cmd_listing(directory, root):
+    import hashlib
+    out = []
+    for base, dirs, files in os.walk(directory):
+        dirs.sort()
+        for name in sorted(dirs + files):
+            path = os.path.join(base, name)
+            rel = os.path.relpath(path, directory)
+            st = os.lstat(path)
+            mode = st.st_mode & 0o7777
+            if os.path.isdir(path) and not os.path.islink(path):
+                out.append([rel, "d", mode])
+            else:
+                out.append([rel, "f", mode, hashlib.sha256(open(path, "rb").read()).hexdigest() if rel != "environment.json" else "state"])
+    return out
+
+
+def cmd_place_guard(root):
+    path = os.path.join(root, CMD_GUARD_REL)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    for each in ("plugin", "plugin/skills", "plugin/skills/ship-task", "plugin/skills/ship-task/scripts"):
+        os.chmod(os.path.join(root, each), 0o755)
+    with open(path, "wb") as handle:
+        handle.write(GUARD_PATH.read_bytes())
+    os.chmod(path, 0o644)
+
+
+def cmd_deep_dirs(root, path):
+    """深いフォルダ(`os.makedirs` の再帰が上限に当たる段数)を、親の fd をたどって 1 段ずつ作る。mode は 0o755。"""
+    fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.split("/"):
+            try:
+                os.mkdir(part, 0o755, dir_fd=fd)
+            except FileExistsError:
+                pass
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY, dir_fd=fd)
+            os.fchmod(child, 0o755)
+            os.close(fd)
+            fd = child
+    finally:
+        os.close(fd)
+
+
+def cmd_build(root, layout):
+    items = []
+    for item in layout:
+        if item.get("kind") == "dir" and item["path"].count("/") > 200:
+            cmd_deep_dirs(root, item["path"])
+        item = dict(item)
+        if "body" in item:
+            item["body"] = item["body"].replace("{r}", root)
+        items.append(item)
+    obs_build(root, items)
+
+
+def cmd_rewrite_state(root, env, name, change):
+    """控えを、旧版の関数で作り直す(旧テスト `test_legacy_state_verify_retains_previous_contract` と同じ手順)。
+    `drop_components`: 記述子を外す(旧形式)。`user_directories`: 保持する利用者フォルダを置く。`recompute`: 旧版の
+    `snapshot` で `entries` を作り直す。`add_entries`: 控えの集合へ鍵を足す。書いた生バイトの SHA-256 を返す。"""
+    import hashlib
+    guard = load_guard()
+    path = os.path.join(root, "out", name, "environment.json")
+    value = json.loads(open(path, "rb").read())
+    specs = value["specs"]
+    if change.get("drop_components"):
+        specs.pop("components")
+    if "user_directories" in change:
+        specs["user_directories"] = [item.replace("{r}", root) for item in change["user_directories"]]
+    if change.get("recompute"):
+        saved = dict(os.environ)
+        os.environ.clear()
+        os.environ.update(env)
+        try:
+            value["entries"] = guard.snapshot(value["root"], specs, value["inventory"])
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+    for key, held in change.get("add_entries", {}).items():
+        value["entries"][key] = held
+    raw = guard.dump(value)
+    with open(path, "wb") as handle:
+        handle.write(raw)
+    return hashlib.sha256(raw).hexdigest()
+
+
+def cmd_scenario(guard_unused, case):
+    import re
+    import shutil
+    import subprocess
+    import tempfile
+
+    base = os.path.realpath(tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP")))
+    root = os.path.join(base, "case")
+    os.mkdir(root)
+    os.chmod(root, 0o775)
+    results = []
+    shas = {}
+    try:
+        cmd_build(root, case["layout"])
+        cmd_place_guard(root)
+        shamap = cmd_sha_map(case["layout"], root)
+        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": root + "/home", "GIT_CONFIG_NOSYSTEM": "1", "LANG": "C.UTF-8"}
+        calls_file = None
+        if case.get("git_recorder"):
+            import shutil as sh
+            bindir = os.path.join(base, "bin")
+            os.mkdir(bindir)
+            with open(os.path.join(bindir, "git"), "w") as handle:
+                handle.write(recorder_text(sys.executable, base, sh.which("git")))
+            os.chmod(os.path.join(bindir, "git"), 0o755)
+            env["PATH"] = bindir + ":" + env["PATH"]
+            calls_file = os.path.join(base, "calls.jsonl")
+        for key, value in case.get("env", {}).items():
+            env[key] = cmd_sub(value, root)
+        os.mkdir(os.path.join(root, "out"))
+        os.chmod(os.path.join(root, "out"), 0o755)
+        guard = os.path.join(root, CMD_GUARD_REL)
+        for run in case["runs"]:
+            # 控えの作り直しが先、入力の変更は後(変更を含めないため)。
+            rewritten = None
+            if run.get("rewrite"):
+                shas[run["rewrite"]["name"]] = cmd_rewrite_state(root, env, run["rewrite"]["name"], run["rewrite"]["change"])
+                if run["rewrite"]["change"].get("record"):
+                    with open(os.path.join(root, "out", run["rewrite"]["name"], "environment.json"), "rb") as handle:
+                        rewritten = cmd_norm_state(json.loads(handle.read()), root, shamap)
+            if run.get("ops_before"):
+                obs_apply(root, run["ops_before"])
+            if calls_file and os.path.exists(calls_file):
+                os.unlink(calls_file)
+            args = [cmd_sub(a, root) for a in run["args"]]
+            done = subprocess.run([sys.executable, "-B", guard, *args], env=env, cwd=root, capture_output=True,
+                                  preexec_fn=cmd_raise_nofile)
+            stdout = done.stdout.decode("utf-8", "replace")
+            stderr = done.stderr.decode("utf-8", "replace")
+            result = {
+                "code": done.returncode,
+                "stdout": re.sub(CMD_SHA_RE, '"sha256": "*"', stdout.replace(root, "{r}")),
+                "stderr": stderr.replace(root, "{r}"),
+            }
+            if rewritten is not None:
+                result["rewritten"] = rewritten
+            if calls_file:
+                result["git_calls"] = sum(1 for _ in open(calls_file)) if os.path.exists(calls_file) else 0
+            if "--output" in args and not case.get("brief"):
+                out = args[args.index("--output") + 1]
+                if os.path.isdir(out):
+                    result["files"] = cmd_listing(out, root)
+                    # 出力フォルダ自身の mode(`mkdir(0o700)` は umask を受ける)。
+                    result["root_mode"] = os.lstat(out).st_mode & 0o7777
+                    state = os.path.join(out, "environment.json")
+                    if os.path.exists(state):
+                        raw = open(state, "rb").read()
+                        result["state"] = cmd_norm_state(json.loads(raw), root, shamap)
+                        result["receipt_sha_matches"] = ('"sha256": "%s"' % __import__("hashlib").sha256(raw).hexdigest()) in stdout
+            if "--output" in args and result.get("receipt_sha_matches") and not case.get("brief"):
+                shas[os.path.basename(args[args.index("--output") + 1])] = __import__("hashlib").sha256(raw).hexdigest()
+            results.append(result)
+        readers = {} if case.get("no_readers") else cmd_readers(root, env, shas)
+        text = json.dumps([results, readers])
+        if base in text:
+            raise SystemExit("固定期待に一時フォルダの名前が入った: " + case["name"])
+    finally:
+        # 深い木は `shutil.rmtree` の再帰が上限に当たるので、`rm` で消す(作ったフォルダだけ)。
+        subprocess.run(["rm", "-rf", base], check=False)
+    return results, readers
+
+
+def cmd_typed(value):
+    """型の印つきの値(Rust の `reader::typed_json` と同じ形。`str` は JSON の文字列として別に持つ)。"""
+    if value is None:
+        return {"t": "none"}
+    if isinstance(value, bool):
+        return {"t": "bool", "v": value}
+    if isinstance(value, int):
+        return {"t": "int", "v": str(value)}
+    if isinstance(value, float):
+        return {"t": "float", "v": repr(value)}
+    if isinstance(value, str):
+        return {"t": "str", "v": value}
+    if isinstance(value, bytes):
+        # 大きな本文は、長さと SHA-256 だけを残す(Rust 側も同じ形に直してから比べる)。
+        return {"t": "bytes", "len": len(value), "sha256": __import__("hashlib").sha256(value).hexdigest()}
+    if isinstance(value, list):
+        return {"t": "list", "v": [cmd_typed(v) for v in value]}
+    if isinstance(value, dict):
+        return {"t": "dict", "v": [[cmd_typed(k), cmd_typed(v)] for k, v in value.items()]}
+    raise SystemExit("型が不明: " + repr(type(value)))
+
+
+def cmd_readers(root, env, shas):
+    """旧版の内部 reader 3 つ(`host-check.py` が呼ぶ関数)を、最後の入力の状態で動かす。"""
+    guard = load_guard()
+    out = {}
+    saved = dict(os.environ)
+    os.environ.update(env)
+    try:
+        for name, sha in sorted(shas.items()):
+            state = os.path.join(root, "out", name, "environment.json")
+            entry = {}
+            for label, function in (("host_settings", guard.read_host_settings), ("components", guard.read_components),
+                                    ("digest", guard.component_policy_digest)):
+                try:
+                    value = function(state, sha)
+                    # 一時フォルダの絶対パス(と dev・ino・時刻)から決まる値は、実行ごとに変わる。`source` は
+                    # `sha256(dump([kind, path]))` で、Rust の検査が同じ式で確かめる。`digest` は 64 桁の 16 進だけを確かめる。
+                    if label == "host_settings":
+                        for item in value["permission_sources"]:
+                            item["source"] = "*"
+                    elif label == "digest":
+                        value = "*"
+                    entry[label] = {"ok": cmd_typed(cmd_unroot(value, root))}
+                except Exception as caught:  # noqa: BLE001 旧版の例外の型と文面をそのまま記録する
+                    entry[label] = {"error": {"type": type(caught).__name__, "msg": str(caught).replace(root, "{r}")}}
+            out[name] = entry
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+    return out
+
+
+def cmd_base_layout(settings=None, gitconfig="[include]\n\tpath = extra.cfg\n"):
+    return [
+        L("plugin/.claude-plugin/plugin.json", body='{"name":"x"}'),
+        L("plugin/README.md", body="hello"),
+        L("plugin/skills/a/SKILL.md", body="a skill"),
+        L("plugin/skills/ship-task/scripts/run.sh", body="#!/bin/sh\n", mode=0o755),
+        # umask で mode が変わる(`mkdir`・新規作成は umask を受け、`chmod`・`fchmod` で決める)入力。
+        L("plugin/group", "dir", mode=0o775), L("plugin/group/g.txt", body="g", mode=0o664), L("plugin/private.txt", body="p", mode=0o600),
+        # `mkdir` だけでは同じ mode にならないフォルダ(umask 002 でも 022 でも `chmod` が要る)。setgid は `mkdir` の mode で付かない。
+        L("plugin/wide", "dir", mode=0o777), L("plugin/wide/w.txt", body="w"), L("plugin/sgid", "dir", mode=0o2775), L("plugin/sgid/s.txt", body="s"),
+        L("home/.claude/settings.json", body=json.dumps(settings if settings is not None else {"permissions": {"allow": ["Bash(git status)", "Bash(ls:*)", "Bash(*)", "Read", "Bash(  echo hi  )"]}})),
+        L("home/.gitconfig", body=gitconfig),
+        L("home/extra.cfg", body="[user]\n\tname = a\n"),
+        L("home/.claude/skills/s1/SKILL.md", body="# skill\n"),
+    ]
+
+
+def BS(name="a", *extra):
+    return ["bootstrap", "--root", "{r}/plugin", "--output", "{r}/out/" + name, *extra]
+
+
+def CMD(command, name="a", *extra):
+    return [command, "--state", "{state:%s}" % name, "--expect-sha256", "{sha:%s}" % name, *extra]
+
+
+def cmd_cases():
+    cases = []
+
+    def add(name, layout, runs, **kw):
+        cases.append({"name": name, "layout": layout, "runs": [r if isinstance(r, dict) else {"args": r} for r in runs], **kw})
+
+    def op(*ops, args):
+        return {"ops_before": list(ops), "args": args}
+
+    # ---- 基本の流れ
+    add("basic", cmd_base_layout(), [
+        BS("a"), CMD("verify"), CMD("host-settings"), CMD("host-allowlist"),
+        CMD("host-allowlist", "a", "--allowed-tools", "Bash(foo:*) Bash(x y)", "--allowed-tools", "Bash( * ) Bash"),
+        BS("a"),  # 既存の出力は開かない
+        BS("b"), CMD("verify", "b"),
+        BS("e", "--inventory", ""),  # 空の文字列は「一覧なし」
+        CMD("verify", "a", "--current-inventory", ""),  # 空の文字列は読む(作業場所のフォルダ)
+        ["host-paths"],
+    ], git_recorder=True)
+    def options_layout():
+        return cmd_base_layout() + [
+        L("extra/s.json", body='{"a":1}'), L("extra/rc", body="alias x=y\n"), L("extra/gc", body="[user]\n\tname = z\n"),
+        L("extra/skills/sk/.claude-plugin/plugin.json", body='{"name":"sk"}'), L("extra/skills/sk/SKILL.md", body="sk"),
+        L("extra/sdir/one.json", body="{}"), L("extra/sdir/sub/two.txt", body="two"),
+        L("managed/managed-settings.json", body='{"permissions":{"allow":["Bash(m1)"]}}'),
+        L("managed/managed-settings.d/20-b.json", body='{"permissions":{"allow":["Bash(m3)"]}}'),
+        L("managed/managed-settings.d/10-a.json", body='{"permissions":{"allow":["Bash(m2:*)"]}}'),
+        L("managed/managed-settings.d/.hidden.json", body="{}"), L("managed/managed-settings.d/x.JSON", body="{}"),
+        L("managed/managed-settings.d/sub/deep.json", body="{}"),
+        L("managed/.claude/skills/ms/SKILL.md", body="ms"), L("managed/.claude/agents/ma.md", body="ma"),
+        L("inst/p1/.claude-plugin/plugin.json", body='{"name":"p1"}'), L("inst/p1/SKILL.md", body="p1"),
+        L("inst/p2/.claude-plugin/plugin.json", body='{"name":"p2"}'), L("inst/p3/SKILL.md", body="p3"),
+        L("mk/p3src/SKILL.md", body="p3src"),
+        L("mk/.claude-plugin/marketplace.json", body='{"plugins":[{"name":"p1","source":"./p1src"},{"name":"p3","source":"./p3src"},{"name":"other","source":"./o"}]}'),
+        L("mk/p1src/.claude-plugin/plugin.json", body='{"name":"p1"}'), L("mk/p1src/skills/q/SKILL.md", body="q"),
+        L("home/.claude/plugins/known_marketplaces.json", body='{"market":{"installLocation":"{r}/mk"}}'),
+        L("home/.claude/plugins/installed_plugins.json", body='{"plugins":{"p1@market":[{"installPath":"{r}/inst/p1","scope":"user"}],"p3@market":[{"installPath":"{r}/inst/p3","scope":"project"},{"installPath":"{r}/inst/p3","scope":"user"}]}}'),
+        L("inv.json", body='[{"id":"p1@market","installPath":"{r}/inst/p1","scope":"user"},{"id":"p3@market","installPath":"{r}/inst/p3","scope":"project"},{"id":"sk@skills-dir","installPath":"{r}/extra/skills/sk"},{"id":"off@market","enabled":false,"installPath":"/x"},{"id":"loc@local","scope":"synced","installPath":"{r}/inst/p2"}]'),
+        L("inv-new.json", body='[{"id":"p1@market","installPath":"{r}/inst/p1","scope":"user"}]'),
+    ]
+
+    add("options", options_layout(), [
+        BS("a", "--setting", "{r}/extra/s.json", "--shell", "{r}/extra/rc", "--config", "{r}/extra/gc", "--skills-dir", "{r}/extra/skills",
+           "--settings-dir", "{r}/extra/sdir", "--managed-dir", "{r}/managed", "--inventory", "{r}/inv.json"),
+        CMD("verify"), CMD("verify", "a", "--current-inventory", "{r}/inv.json"), CMD("verify", "a", "--current-inventory", "{r}/inv-new.json"),
+        CMD("host-settings"), CMD("host-allowlist"),
+        op({"op": "write", "path": "mk/p1src/skills/q/SKILL.md", "body": "q2"}, args=CMD("verify")),
+        op({"op": "write", "path": "inst/p1/SKILL.md", "body": "changed"}, args=CMD("verify")),
+        op({"op": "write", "path": "managed/managed-settings.d/30-c.json", "body": "{}"}, args=CMD("host-settings")),
+        BS("c", "--inventory", "{r}/missing.json"),
+    ], git_recorder=True)
+    # ---- bootstrap の拒否
+    add("bootstrap-refusals", cmd_base_layout() + [L("badinv.json", body="[{"), L("dup.json", body='[{"id":"a","installPath":"/x"},{"id":"a","installPath":"/y"}]'),
+                                                  L("dir-as-file.json", "dir"), L("rel.json", body='[{"id":"a","installPath":"rel"}]'),
+                                                  L("notlist.json", body="{}"), L("nan.json", body="[NaN]")], [
+        ["bootstrap", "--root", "{r}/plugin/../plugin", "--output", "{r}/out/a"],
+        ["bootstrap", "--root", "{r}/plugin", "--output", "{r}/out/../out/b"],
+        ["bootstrap", "--root", "{r}/plugin", "--output", "{r}/plugin/out"],
+        ["bootstrap", "--root", "{r}/plugin", "--output", "{r}/plugin"],
+        BS("c", "--inventory", "{r}/badinv.json"), BS("d", "--inventory", "{r}/dup.json"), BS("e", "--inventory", "{r}/dir-as-file.json"),
+        BS("f", "--inventory", "{r}/rel.json"), BS("g", "--inventory", "{r}/notlist.json"), BS("h", "--inventory", "{r}/nan.json"),
+        BS("i", "--managed-dir", "relative/x"), BS("j", "--managed-dir", "~/x"), BS("k", "--managed-dir", "//x"),
+        BS("l", "--managed-dir", "/x/../y"), BS("m", "--skills-dir", "{r}/nope"),
+        ["bootstrap", "--root", "{r}/nope", "--output", "{r}/out/n"],
+        ["bootstrap", "--root", "{r}/plugin/README.md", "--output", "{r}/out/o"],
+        ["bootstrap", "--root", "{r}/plugin", "--output", "{r}/missing-parent/p"],
+        BS("a"), BS("a"),
+    ], git_recorder=True)
+    # ---- 照合の拒否
+    refusals = [
+        ("edit-plugin-file", {"op": "write", "path": "plugin/README.md", "body": "HELLO"}),
+        ("edit-plugin-file-same-size", {"op": "write", "path": "plugin/README.md", "body": "hellO"}),
+        ("add-plugin-file", {"op": "write", "path": "plugin/new.txt", "body": "n"}),
+        ("remove-plugin-file", {"op": "rm", "path": "plugin/README.md"}),
+        ("chmod-plugin-file", {"op": "chmod", "path": "plugin/README.md", "mode": 0o600}),
+        ("plugin-link", {"op": "link", "path": "plugin/lnk", "target": "{r}/home"}),
+        ("copy-edit", {"op": "write", "path": "out/a/plugin/README.md", "body": "HELLO"}),
+        ("copy-remove", {"op": "rm", "path": "out/a/plugin/README.md"}),
+        ("copy-add", {"op": "write", "path": "out/a/plugin/extra.txt", "body": "x"}),
+        ("copy-chmod", {"op": "chmod", "path": "out/a/plugin/README.md", "mode": 0o644}),
+        ("copy-dir-chmod", {"op": "chmod", "path": "out/a/plugin/skills", "mode": 0o700}),
+        ("state-edit", {"op": "write", "path": "out/a/environment.json", "body": "{}"}),
+        ("state-remove", {"op": "rm", "path": "out/a/environment.json"}),
+        ("settings-edit", {"op": "write", "path": "home/.claude/settings.json", "body": "{}"}),
+        ("settings-remove", {"op": "rm", "path": "home/.claude/settings.json"}),
+        ("settings-to-link", {"op": "rm", "path": "home/.claude/settings.json"}),
+        ("cache-created", {"op": "write", "path": "home/.claude/remote-settings.json", "body": "{}"}),
+        ("shell-created", {"op": "write", "path": "home/.bashrc", "body": "x"}),
+        ("skill-edit", {"op": "write", "path": "home/.claude/skills/s1/SKILL.md", "body": "# changed\n"}),
+        ("skill-added", [{"op": "mkdir", "path": "home/.claude/skills/s2"}, {"op": "write", "path": "home/.claude/skills/s2/SKILL.md", "body": "new"}]),
+        ("skill-removed", {"op": "rmtree", "path": "home/.claude/skills/s1"}),
+        ("skills-dir-removed", {"op": "rmtree", "path": "home/.claude/skills"}),
+        ("agents-dir-created", [{"op": "mkdir", "path": "home/.claude/agents"}, {"op": "write", "path": "home/.claude/agents/a.md", "body": "ag"}]),
+        ("gitconfig-edit", {"op": "write", "path": "home/.gitconfig", "body": "[include]\n\tpath = other.cfg\n"}),
+        ("gitconfig-edit-keeps-include-text", {"op": "write", "path": "home/.gitconfig", "body": "[include]\n\tpath = extra.cfg\n# x\n"}),
+        ("gitconfig-remove", {"op": "rm", "path": "home/.gitconfig"}),
+        ("include-target-edit", {"op": "write", "path": "home/extra.cfg", "body": "[user]\n\tname = b\n"}),
+        ("include-target-remove", {"op": "rm", "path": "home/extra.cfg"}),
+        ("xdg-config-created", [{"op": "mkdir", "path": "home/.config/git"}, {"op": "write", "path": "home/.config/git/config", "body": "[user]\n\tname = x\n"}]),
+    ]
+    for name, operation in refusals:
+        operations = operation if isinstance(operation, list) else [operation]
+        runs = [BS("a"), op(*operations, args=CMD("verify")), CMD("host-settings"), CMD("host-allowlist")]
+        if name == "settings-to-link":
+            runs = [BS("a"), op({"op": "write", "path": "real.json", "body": '{"permissions":{"allow":["Bash(l)"]}}'}, operation,
+                                {"op": "link", "path": "home/.claude/settings.json", "target": "{r}/real.json"}, args=CMD("verify")), CMD("host-settings")]
+        add("verify-" + name, cmd_base_layout(), runs, git_recorder=True)
+    # ---- 観測の順(2 つの変更があるとき、先に止まる理由が決まる: files → directories → components → configs)
+    order_layout = cmd_base_layout() + [L("extra/sdir/one.json", body="{}"), L("real2.json", body="{}")]
+    order_args = BS("a", "--settings-dir", "{r}/extra/sdir")
+    new_shell = {"op": "write", "path": "home/.zlogout", "body": "x"}
+    settings_link = [{"op": "rm", "path": "home/.claude/settings.json"}, {"op": "link", "path": "home/.claude/settings.json", "target": "{r}/real2.json"}]
+    new_in_dir = {"op": "write", "path": "extra/sdir/two.json", "body": "{}"}
+    skill_edit = {"op": "write", "path": "home/.claude/skills/s1/SKILL.md", "body": "# changed\n"}
+    gitconfig_edit = {"op": "write", "path": "home/.gitconfig", "body": "[include]\n\tpath = other.cfg\n"}
+    add("order-files", order_layout, [order_args, op(new_shell, *settings_link, args=CMD("verify"))], git_recorder=True)
+    add("order-files-before-directories", order_layout, [order_args, op(new_in_dir, new_shell, args=CMD("verify"))], git_recorder=True)
+    add("order-directories-before-components", order_layout, [order_args, op(skill_edit, new_in_dir, args=CMD("verify"))], git_recorder=True)
+    add("order-components-before-configs", order_layout, [order_args, op(gitconfig_edit, skill_edit, args=CMD("verify"))], git_recorder=True)
+    # ---- 設定のリンク(保持した リンクの鎖)
+    link_layout = [item for item in cmd_base_layout() if item["path"] != "home/.claude/settings.json"]
+    link_layout.append(L("real.json", body='{"permissions":{"allow":["Bash(l)"]}}'))
+    link_layout.append(L("home/.claude/settings.json", "link", target="{r}/real.json"))
+    add("settings-link", link_layout, [
+        BS("a"), CMD("verify"), CMD("host-settings"), CMD("host-allowlist"),
+        op({"op": "write", "path": "real.json", "body": '{"permissions":{"allow":["Bash(m)"]}}'}, args=CMD("verify")),
+        op({"op": "link", "path": "home/.claude/settings.json", "target": "{r}/real2.json"}, {"op": "write", "path": "real2.json", "body": "{}"}, args=CMD("verify")),
+        CMD("host-settings"),
+    ], git_recorder=True)
+    # ---- host-settings の拒否
+    host_cases = [
+        ("invalid-json", "{"), ("not-object", "[]"), ("duplicate-key", '{"a":1,"a":2}'), ("nan", '{"a":NaN}'), ("infinity", '{"a":Infinity}'),
+        ("env-not-dict", '{"env":[]}'), ("env-value-not-str", '{"env":{"A":1}}'), ("env-home", '{"env":{"HOME":"/x"}}'),
+        ("env-source", '{"env":{"CLAUDE_CODE_REMOTE_SETTINGS_PATH":"/x"}}'), ("env-managed", '{"env":{"CLAUDE_CODE_MANAGED_SETTINGS_PATH":"/x"}}'),
+        ("env-mock", '{"env":{"CLAUDE_CODE_MOCK_REMOTE_SETTINGS":"x"}}'), ("env-simple", '{"env":{"CLAUDE_CODE_SIMPLE":"1"}}'),
+        ("env-ok", '{"env":{"FOO":"bar"}}'), ("policy-helper", '{"policyHelper":1}'), ("policy-helpers", '{"policyHelpers":[]}'),
+        ("hooks-disabled", '{"disableAllHooks":true}'), ("hooks-false", '{"disableAllHooks":false}'), ("hooks-one", '{"disableAllHooks":1}'),
+        ("deep-ok", '{"a":' * 100 + "1" + "}" * 100), ("deep-over", '{"a":' * 101 + "1" + "}" * 101),
+        ("very-deep", '{"a":' * 1500 + "1" + "}" * 1500),
+        ("bom", "﻿{}"), ("non-utf8", None), ("empty", ""), ("allow-not-list", '{"permissions":{"allow":"Bash(x)"}}'),
+        ("permissions-not-dict", '{"permissions":[]}'), ("allow-mixed", '{"permissions":{"allow":["Bash(a)",1,null,"Bash(b:*)","Bash","Read","Bash()"]}}'),
+        ("long-rule", '{"permissions":{"allow":["Bash(' + "x" * 400 + '*)"]}}'),
+        ("control-chars", '{"permissions":{"allow":["Bash(\\u0001*)", "Bash(a\\tb *)"]}}'),
+    ]
+    for name, body in host_cases:
+        layout = [item for item in cmd_base_layout() if item["path"] != "home/.claude/settings.json"]
+        layout.append(L("home/.claude/settings.json", body=body) if body is not None else L("home/.claude/settings.json", body="x"))
+        runs = [BS("a"), CMD("host-settings"), CMD("host-allowlist"), CMD("verify")]
+        if body is None:
+            runs = [{"ops_before": [{"op": "bytes", "path": "home/.claude/settings.json", "hex": "7b22610a223a2dff7d"}], "args": BS("a")}, CMD("host-settings")]
+        add("host-" + name, layout, runs, **({"no_readers": True} if name == "deep-ok" else {}))
+    # 管理設定の拒否
+    managed_layout = lambda body: cmd_base_layout() + [L("managed/managed-settings.json", body='{"permissions":{"allow":["Bash(m)"]}}'), L("managed/managed-settings.d/10-x.json", body=body)]
+    for name, body in [("managed-hooks-only", '{"allowManagedHooksOnly":true}'), ("managed-hooks-disabled", '{"disableAllHooks":true}'),
+                       ("managed-bad-json", "{"), ("managed-env-home", '{"env":{"HOME":"x"}}'), ("managed-ok", '{"permissions":{"allow":["Bash(d)"]}}')]:
+        add("host-" + name, managed_layout(body), [BS("a", "--managed-dir", "{r}/managed"), CMD("host-settings"), CMD("host-allowlist")])
+    add("host-user-hooks-only", cmd_base_layout(settings={"allowManagedHooksOnly": True}), [BS("a"), CMD("host-settings")])
+    # ---- include の字面の判定と停止の順
+    base_includes = [
+        ("plain", "[user]\n\tname = a\n"), ("comment-upper", "# INCLUDE here\n[user]\n\tname = a\n"), ("section-mixed", "[IncludeIf \"gitdir:/x/\"]\n\tpath = extra.cfg\n"),
+        ("quoted", "[include]\n\tpath = \"extra.cfg\"\n"), ("chain", "[include]\n\tpath = extra.cfg\n"),
+        ("absolute", "[include]\n\tpath = {r}/home/extra.cfg\n"), ("missing-target", "[include]\n\tpath = nothere.cfg\n"),
+    ]
+    for name, body in base_includes:
+        layout = cmd_base_layout(gitconfig=body.replace("{r}", "{r}"))
+        layout = [dict(item, body=item["body"]) if "body" in item else item for item in layout]
+        add("include-" + name, layout, [
+            BS("a"), CMD("verify"), CMD("verify"),
+            op({"op": "write", "path": "home/extra.cfg", "body": "[user]\n\tname = changed\n"}, args=CMD("verify")),
+            op({"op": "write", "path": "home/.gitconfig", "body": "[user]\n\tname = changed\n"}, args=CMD("verify")),
+        ], git_recorder=True)
+    add("include-chain-two", cmd_base_layout(gitconfig="[include]\n\tpath = extra.cfg\n") + [
+        L("home/extra2.cfg", body="[user]\n\tname = deep\n")], [
+        {"ops_before": [{"op": "write", "path": "home/extra.cfg", "body": "[include]\n\tpath = extra2.cfg\n"}], "args": BS("a")},
+        CMD("verify"),
+        op({"op": "write", "path": "home/extra2.cfg", "body": "[user]\n\tname = deeper\n"}, args=CMD("verify")),
+        op({"op": "write", "path": "home/extra.cfg", "body": "[include]\n\tpath = extra3.cfg\n"}, args=CMD("verify")),
+    ], git_recorder=True)
+    add("include-link-config", cmd_base_layout() + [L("realcfg", body="[include]\n\tpath = extra.cfg\n")], [
+        {"ops_before": [{"op": "rm", "path": "home/.gitconfig"}, {"op": "link", "path": "home/.gitconfig", "target": "{r}/realcfg"}], "args": BS("a")},
+        CMD("verify"),
+        op({"op": "write", "path": "realcfg", "body": "[include]\n\tpath = other.cfg\n"}, args=CMD("verify")),
+    ], git_recorder=True)
+    add("git-global-env", cmd_base_layout() + [L("g/gc", body="[user]\n\tname = envcfg\n")], [
+        BS("a"), CMD("verify"),
+    ], env={"GIT_CONFIG_GLOBAL": "{r}/g/gc", "XDG_CONFIG_HOME": "{r}/xdg", "BASH_ENV": "{r}/benv", "ENV": "{r}/envf", "ZDOTDIR": "{r}/zd"}, git_recorder=True)
+    add("git-duplicate-include", cmd_base_layout() + [L("home/.config/git/config", body="[include]\n\tpath = {r}/home/extra.cfg\n")], [
+        BS("a"), CMD("verify"),
+        op({"op": "write", "path": "home/extra.cfg", "body": "[user]\n\tname = changed\n"}, args=CMD("verify")),
+    ], git_recorder=True)
+    add("git-null-device", cmd_base_layout(), [BS("a"), CMD("verify")], env={"GIT_CONFIG_GLOBAL": "/dev/null"}, git_recorder=True)
+
+    def rewrite(change, args, *ops, name="a"):
+        run = {"rewrite": {"name": name, "change": change}, "args": args}
+        if ops:
+            run["ops_before"] = list(ops)
+        return run
+
+    # ---- 旧形式の控え(`components` が無い。旧テスト `test_legacy_state_verify_retains_previous_contract` と同じ手順で作り直す)。
+    # 配布物の根は、旧版の `snapshot` が `absolute(root)` を通すので、`verify` でも `Path` で `tree` に渡る。
+    legacy = {"drop_components": True, "recompute": True}
+    add("legacy-state", cmd_base_layout(), [
+        BS("a"), rewrite(legacy, CMD("verify")), CMD("host-settings"), CMD("host-allowlist"),
+    ], git_recorder=True)
+    for name, operation in (
+        ("edit-plugin-file", {"op": "write", "path": "plugin/README.md", "body": "HELLO"}),
+        ("copy-edit", {"op": "write", "path": "out/a/plugin/README.md", "body": "HELLO"}),
+        ("settings-edit", {"op": "write", "path": "home/.claude/settings.json", "body": "{}"}),
+        ("gitconfig-edit", {"op": "write", "path": "home/.gitconfig", "body": "[include]\n\tpath = other.cfg\n"}),
+    ):
+        add("legacy-state-" + name, cmd_base_layout(), [
+            BS("a"), rewrite(legacy, CMD("verify")), op(operation, args=CMD("verify")), CMD("host-settings"), CMD("host-allowlist"),
+        ], git_recorder=True)
+    # ---- 旧形式の控え + 一覧(`--inventory`)。一覧の installPath ごとに `installed:` の木を照合する分岐
+    # (旧版 1081〜1085 行)を通す。項目は、配布物の根と同じ installPath(除外される)と、根でない installPath
+    # (`@` の無い ID は registry が要らない)の両方。作り直した後の控えの中身も固定期待にする(`rewritten`)。
+    inv_layout = cmd_base_layout() + [
+        L("inst/p1/.claude-plugin/plugin.json", body='{"name":"p1"}'), L("inst/p1/SKILL.md", body="p1"), L("inst/p1/sub/x.txt", body="x"),
+        L("inv-legacy.json", body='[{"id":"rootitem","installPath":"{r}/plugin"},{"id":"insti","installPath":"{r}/inst/p1"}]'),
+    ]
+    legacy_rec = {"drop_components": True, "recompute": True, "record": True}
+    add("legacy-state-inventory", inv_layout, [
+        BS("a", "--inventory", "{r}/inv-legacy.json"), rewrite(legacy_rec, CMD("verify")), CMD("host-settings"), CMD("host-allowlist"),
+    ], git_recorder=True)
+    for name, operation in (
+        ("edit-install", {"op": "write", "path": "inst/p1/SKILL.md", "body": "changed"}),
+        ("add-install", {"op": "write", "path": "inst/p1/new.txt", "body": "n"}),
+        # installPath ごと消す。旧版は configs の木を installed の木より先に走査する。`verify` では `.gitconfig` の
+        # include の字面で Git を 2 回起動した後、installed の木で `FileNotFoundError`(終了 20)になる。installed を
+        # 先に走査する実装では Git が起動されない(走査の順序の差は、Git の起動回数に出る)。
+        ("remove-install", {"op": "rmtree", "path": "inst/p1"}),
+    ):
+        add("legacy-state-inventory-" + name, inv_layout, [
+            BS("a", "--inventory", "{r}/inv-legacy.json"), rewrite(legacy_rec, CMD("verify"), operation), CMD("host-settings"), CMD("host-allowlist"),
+        ], git_recorder=True)
+    # ---- 控えの集合に、記述子の外の部品の鍵を足す(`read_components` の最後の集合の比較だけが止める)
+    foreign = {"add_entries": {"component:personal-skill:/nonexistent-s2e/x": ["missing"]}}
+    add("reader-foreign-component", cmd_base_layout(), [
+        BS("a"), rewrite(foreign, CMD("verify")), CMD("host-settings"),
+    ], git_recorder=True)
+    # ---- 一覧つきで、marketplace-manifest(単一ファイルの部品)を持つ流れ。reader が最後の状態で成功し、`relative`・`path` を比べる。
+    add("options-readers", options_layout(), [
+        BS("a", "--setting", "{r}/extra/s.json", "--shell", "{r}/extra/rc", "--config", "{r}/extra/gc", "--skills-dir", "{r}/extra/skills",
+           "--settings-dir", "{r}/extra/sdir", "--managed-dir", "{r}/managed", "--inventory", "{r}/inv.json"),
+        CMD("verify"), CMD("host-settings"),
+    ], git_recorder=True)
+    # ---- 利用者フォルダ(`user_directories`。導入リンクの先を保持する)。`bootstrap` は空で作るので、控えへ置く。
+    ud_layout = cmd_base_layout() + [
+        L("ud/s1/SKILL.md", body="one"), L("ud/lnk", "link", target="{r}/tgt"), L("tgt/t.txt", body="t"), L("tgt2/t.txt", body="t2"),
+    ]
+    userdirs = {"user_directories": ["{r}/ud"], "recompute": True}
+    add("userdir-links", ud_layout, [
+        BS("a"), rewrite(userdirs, CMD("verify")), CMD("host-settings"), CMD("host-allowlist"),
+    ], git_recorder=True)
+    for name, operations in (
+        ("target-edit", [{"op": "write", "path": "tgt/t.txt", "body": "changed"}]),
+        ("link-repoint", [{"op": "link", "path": "ud/lnk", "target": "{r}/tgt2"}]),
+        ("file-added", [{"op": "write", "path": "ud/new.txt", "body": "n"}]),
+        ("link-added", [{"op": "link", "path": "ud/lnk2", "target": "{r}/tgt"}]),
+    ):
+        add("userdir-" + name, ud_layout, [BS("a"), rewrite(userdirs, CMD("verify"), *operations), CMD("host-settings")], git_recorder=True)
+    return cases
+
+
+# 各コマンドの入口の再帰の深さ(U5: 直接の起動)。ディレクトリだけの深い木(`--settings-dir` の下)を、旧版が
+# 通る最後の段数とその前後で動かす。旧版の `tree` のフレームの深さは、`bootstrap`・`verify`・`host-settings` が 6、
+# `host-allowlist` が 7(`bootstrap` の最初の観測は 5)。測った境目: 990 段は全部通り、991 段は `host-allowlist` だけ落ち、
+# 992 段は全部落ちる。
+
+
+def entry_depth_cases():
+    cases = []
+    deep = lambda count: L("extra/deep/" + "/".join("a" * count) if count else "extra/deep", "dir")
+    for count in (990, 991):
+        cases.append({"name": "depth-%d" % count, "brief": True, "layout": cmd_base_layout() + [deep(count)], "runs": [
+            {"args": BS("a", "--settings-dir", "{r}/extra/deep")}, {"args": CMD("verify")}, {"args": CMD("host-settings")},
+            {"args": CMD("host-allowlist")}]})
+    cases.append({"name": "depth-992-bootstrap", "brief": True, "layout": cmd_base_layout() + [deep(992)], "runs": [
+        {"args": BS("a", "--settings-dir", "{r}/extra/deep")}]})
+    cases.append({"name": "depth-992-after-state", "brief": True, "layout": cmd_base_layout() + [deep(991)], "runs": [
+        {"args": BS("a", "--settings-dir", "{r}/extra/deep")},
+        {"ops_before": [{"op": "mkdir", "path": "extra/deep/" + "/".join("a" * 992)}], "args": CMD("verify")},
+        {"args": CMD("host-settings")}, {"args": CMD("host-allowlist")}]})
+    # 照合のコピーの木(`tree(copy, …)` は `verify` の直下の呼出しで、フレームの深さは 5)。コピーの中へ深い木を足す。
+    # 測った境目: 992 段は通って「信頼コピーが変わった」、993 段は `RecursionError`。
+    for count in (992, 993):
+        cases.append({"name": "depth-copy-%d" % count, "brief": True, "layout": cmd_base_layout(), "runs": [
+            {"args": BS("a")},
+            {"ops_before": [{"op": "deepdirs", "path": "out/a/plugin/" + "/".join("a" * count)}], "args": CMD("verify")}]})
+    return cases
+
+
+@area("entry_depth")
+def make_entry_depth():
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    if sys.platform != "linux":
+        raise SystemExit("9 コマンドの固定期待は Linux で作る")
+    load_guard()
+    cases = entry_depth_cases()
+    for case in cases:
+        case["results"], case["readers"] = cmd_scenario(None, case)
+    return {"entry_depth_cases.json": {"python": "3.10", "cases": cases}}
+
+
+@area("commands")
+def make_commands():
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    if sys.platform != "linux":
+        raise SystemExit("9 コマンドの固定期待は Linux で作る(既定の監視先の /etc が機種で違う)")
+    if not os.path.exists(GUARD_PATH):
+        raise SystemExit("旧 guard が無い")
+    load_guard()
+    cases = cmd_cases()
+    for case in cases:
+        case["results"], case["readers"] = cmd_scenario(None, case)
+    return {"command_cases.json": {"python": "3.10", "cases": cases}}
 
 
 def serialize(value):

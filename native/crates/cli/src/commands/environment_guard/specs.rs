@@ -14,6 +14,17 @@ pub trait Host {
     /// `os.getcwd()`。
     fn cwd(&self) -> Result<Cps, PyException>;
     fn users(&self) -> &dyn UserLookup;
+    /// `dict(os.environ)`(Git 設定の解析の子の環境の元。名前と値の生バイト)。
+    fn process_env(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
+        super::gitconfig::process_environment()
+    }
+    /// `PYTHONINTMAXSTRDIGITS`(整数の文字列変換の上限。0 は無制限)。起動時の誤りは入口が止めるので、既定に戻す。
+    fn max_str_digits(&self) -> usize {
+        use std::os::unix::ffi::OsStrExt;
+        let value = std::env::var_os("PYTHONINTMAXSTRDIGITS");
+        super::runtime::int_max_str_digits_from(value.as_deref().map(OsStrExt::as_bytes))
+            .unwrap_or(4300)
+    }
 }
 
 fn stop(message: &str) -> PyException {

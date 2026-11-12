@@ -7,7 +7,7 @@ use super::component::component_tree;
 use super::dispatch::ProcessHost;
 use super::entry;
 use super::error::PyException;
-use super::fsio::{Obs, TreeOptions, tree};
+use super::fsio::{Obs, TreeOptions, tree, tree_for};
 use super::inventory::Blobs;
 use super::pyops::{Cps, as_text, text};
 use super::pystr::{cps, decode_fs, to_string};
@@ -386,7 +386,8 @@ fn execute(
                 budget: &mut budget,
                 entries: &mut entries,
             };
-            tree(
+            // `path_input`: 旧版が `tree` に `Path` を渡す入口(`snapshot` の `tree(root, 'plugin', …)`)。
+            tree_for(
                 &mut obs,
                 &path,
                 &cps(str_of(call, "key")),
@@ -397,6 +398,7 @@ fn execute(
                     expected,
                 },
                 frame_depth,
+                flag("path_input"),
             )
         }
         "component_tree" => {

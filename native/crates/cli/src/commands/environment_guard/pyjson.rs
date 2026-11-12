@@ -776,6 +776,8 @@ pub(crate) enum Call {
     InstanceCheck,
     /// 比較(`PyObject_RichCompare`)の中の再帰。
     Comparison,
+    /// `str(x)`(`PyObject_Str`)の中の再帰。
+    Str,
 }
 
 pub(crate) fn enter_call(depth: usize, call: Call) -> Result<(), PyException> {
@@ -787,6 +789,7 @@ pub(crate) fn enter_call(depth: usize, call: Call) -> Result<(), PyException> {
         Call::Native => " while calling a Python object",
         Call::InstanceCheck => " in __instancecheck__",
         Call::Comparison => " in comparison",
+        Call::Str => " while getting the str of an object",
     }))
 }
 

@@ -178,6 +178,16 @@ pub fn chmod_nofollow_at(fd: BorrowedFd<'_>, name: &[u32], mode: u32) -> Result<
     })
 }
 
+/// `os.mkdir(name, mode, dir_fd=fd)`(umask を受ける)。例外のファイル名は `name`。
+pub fn mkdir_at(fd: BorrowedFd<'_>, name: &[u32], mode: u32) -> Result<(), PyException> {
+    let bytes = enc(name)?;
+    os::retry(|| {
+        injected("mkdir")?;
+        os::mkdir_at(fd, &bytes, mode)
+    })
+    .map_err(|error| os_err(error, Some(name)))
+}
+
 // ---------------------------------------------------------------- parent
 
 /// 旧版の `parent(path)`。`/` から 1 段ずつリンクを辿らずに開き、`body` の後に全段の
@@ -651,6 +661,18 @@ pub fn tree(
     options: TreeOptions<'_>,
     depth: usize,
 ) -> Result<(), PyException> {
+    tree_for(obs, path, key, options, depth, false)
+}
+
+/// `tree` を、`path` に `Path` を渡す入口(`path_input`。旧版の `snapshot` の `tree(root, 'plugin', …)`)でも呼べる形。
+pub fn tree_for(
+    obs: &mut Obs<'_>,
+    path: &[u32],
+    key: &[u32],
+    options: TreeOptions<'_>,
+    depth: usize,
+    path_input: bool,
+) -> Result<(), PyException> {
     let TreeOptions {
         blobs,
         optional,
@@ -660,7 +682,11 @@ pub fn tree(
     let d: Depth = Some(depth);
     depth::frame(d)?;
     // `with parent(path)` に入る所。旧版の `try` の中だが、`RecursionError` は `FileNotFoundError` でないので素通り。
-    depth::parent_enter(d)?;
+    if path_input {
+        depth::parent_enter_path(d)?;
+    } else {
+        depth::parent_enter(d)?;
+    }
     let result = with_parent(obs.host, path, |fd, name| {
         depth::native(d)?; // os.stat
         let st = lstat_at(fd, name)?;

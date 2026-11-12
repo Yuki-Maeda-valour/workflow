@@ -1,17 +1,24 @@
-//! コマンドの振り分け。段階 2a は `host-paths` だけを動かす(環境変数だけで完結する)。
-//! ほかの 8 コマンドは、引き続き本体なしで止める(ファイル操作と子の起動は段階 2b)。
+//! コマンドの振り分け。`host-paths`・`bootstrap`・`verify`・`host-settings`・`host-allowlist` を動かす。
+//! `read`・`exec`・`hook`・`verify-pair` は、引き続き本体なしで止める(段階 2b-2)。
 use super::args::Parsed;
+use super::bootstrap::bootstrap;
 use super::error::PyException;
 use super::pyjson::{DumpOptions, PyCtx, dumps};
 use super::pyops::Cps;
 use super::pypath::UserLookup;
 use super::pystr::decode_fs;
 use super::pyvalue::PyValue;
+use super::reader::read_host_settings;
 use super::runtime::PyStream;
+use super::settings::{host_allowlist_lines, host_allowlist_rules, host_settings_output};
+use super::snapshot::verify;
 use super::specs::{Host, host_paths};
+use dev_workflow_platform::environment_guard::{
+    PasswdLookup, passwd_home, passwd_home_of_current_user,
+};
 use std::os::unix::ffi::OsStrExt;
 
-/// 利用者データベースを引けない代用品(段階 2b の platform が実装するまで)。`~user` は展開しない。
+/// 利用者データベースを引けない代用品(`~user` は展開しない)。
 pub struct NoUsers;
 
 impl UserLookup for NoUsers {
@@ -20,6 +27,26 @@ impl UserLookup for NoUsers {
     }
     fn home_of_current_user(&self) -> Result<Option<Vec<u8>>, PyException> {
         Ok(None)
+    }
+}
+
+/// 利用者データベース(`pwd`)の引き方(U6)。Linux の musl は `/etc/passwd` だけ、Mac は旧版と同じ仕組み。
+/// 引けない・誤りのとき(旧版は `KeyError`)は、展開しない(`None`)。
+pub struct PlatformUsers;
+
+fn home(found: std::io::Result<PasswdLookup>) -> Result<Option<Vec<u8>>, PyException> {
+    Ok(match found {
+        Ok(PasswdLookup::Found(home)) => Some(home),
+        Ok(PasswdLookup::NotFound) | Err(_) => None,
+    })
+}
+
+impl UserLookup for PlatformUsers {
+    fn home_of_name(&self, name: &[u8]) -> Result<Option<Vec<u8>>, PyException> {
+        home(passwd_home(name))
+    }
+    fn home_of_current_user(&self) -> Result<Option<Vec<u8>>, PyException> {
+        home(passwd_home_of_current_user())
     }
 }
 
@@ -36,13 +63,24 @@ impl Host for ProcessHost {
             .map_err(|error| super::error::from_io(&error, None))
     }
     fn users(&self) -> &dyn UserLookup {
-        &NoUsers
+        &PlatformUsers
     }
 }
 
 /// 旧版を `python3 -B environment-guard.py` で動かしたときの、`main` のフレームの深さ
 /// (`<module>` と `main`)。`json.dumps` を呼ぶフレーム。
-const MAIN_DEPTH: usize = 2;
+pub const MAIN_DEPTH: usize = 2;
+
+/// コマンドの入口の関数のフレームの深さ(旧版の `main` から 1 つ下: `run_copy`・`host_allowlist`)。
+const CALLEE_DEPTH: usize = MAIN_DEPTH + 1;
+
+fn arg_text(parsed: &Parsed, dest: &str) -> Cps {
+    parsed
+        .namespace
+        .value(dest)
+        .expect("`argparse` が必須の引数を確かめている")
+        .py_str()
+}
 
 /// 旧版の `main` の、コマンドごとの分岐。戻り値は `SystemExit` の値。
 pub fn dispatch(
@@ -50,6 +88,11 @@ pub fn dispatch(
     parsed: &Parsed,
     stdout: &mut PyStream<'_>,
 ) -> Result<i64, PyException> {
+    let digits = host.max_str_digits();
+    let main_ctx = PyCtx {
+        depth: MAIN_DEPTH,
+        max_str_digits: digits,
+    };
     match parsed.command.as_str() {
         "host-paths" => {
             let paths = host_paths(host)?;
@@ -57,6 +100,61 @@ pub fn dispatch(
             let ctx = PyCtx::new(MAIN_DEPTH);
             let line = dumps(&PyValue::Dict(paths), DumpOptions::HOST, ctx)?;
             stdout.print(&line)?;
+            Ok(0)
+        }
+        "bootstrap" => {
+            bootstrap(
+                host,
+                &parsed.namespace,
+                &mut |line| stdout.print(line),
+                main_ctx,
+            )?;
+            Ok(0)
+        }
+        "verify" => {
+            let current = parsed
+                .namespace
+                .value("current_inventory")
+                .map(|v| v.py_str());
+            verify(
+                host,
+                &arg_text(parsed, "state"),
+                &arg_text(parsed, "expect_sha256"),
+                current.as_deref(),
+                PyCtx {
+                    depth: CALLEE_DEPTH,
+                    ..main_ctx
+                },
+            )?;
+            Ok(0)
+        }
+        "host-settings" => {
+            let result = read_host_settings(
+                host,
+                &arg_text(parsed, "state"),
+                &arg_text(parsed, "expect_sha256"),
+                main_ctx,
+            )?;
+            let line = host_settings_output(&result, main_ctx)?;
+            stdout.print(&line)?;
+            Ok(0)
+        }
+        "host-allowlist" => {
+            // `host_allowlist` の本体(`main` の 1 つ下)が `read_host_settings` を呼ぶ。
+            let settings = read_host_settings(
+                host,
+                &arg_text(parsed, "state"),
+                &arg_text(parsed, "expect_sha256"),
+                PyCtx {
+                    depth: CALLEE_DEPTH,
+                    ..main_ctx
+                },
+            )?;
+            let (rules, unused) =
+                host_allowlist_rules(&settings, parsed.namespace.many("allowed_tools"))?;
+            for line in host_allowlist_lines(&rules, &unused, main_ctx)? {
+                stdout.print(&line)?;
+            }
             Ok(0)
         }
         _ => Err(PyException::stop("このコマンドの本体は段階 2b で実装する")),

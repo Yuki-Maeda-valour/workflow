@@ -57,11 +57,21 @@ pub fn sorted(d: Depth) -> Result<(), PyException> {
 /// `d` を 1 つずつ変えて、最初に落ちる検査の種類を測った表(`gen_cases.py` の area `depth` の固定期待が、
 /// 表と旧版の一致を確かめる)。表より浅ければ通る。
 pub fn parent_enter(d: Depth) -> Result<(), PyException> {
+    parent_enter_with(d, PARENT_ENTER)
+}
+
+/// 旧版の `with parent(path)` に `Path` を渡す入口(`tree(root, 'plugin', …)` の `root`)。`absolute()` の `str(path)` が
+/// `Path.__str__`(Python の関数)を呼ぶので、文字列を渡す入口と落ちる検査の並びが違う。
+pub fn parent_enter_path(d: Depth) -> Result<(), PyException> {
+    parent_enter_with(d, PARENT_ENTER_PATH)
+}
+
+fn parent_enter_with(d: Depth, table: &[u8]) -> Result<(), PyException> {
     let Some(d) = d else { return Ok(()) };
     let Some(index) = d.checked_sub(PARENT_ENTER_FROM) else {
         return Ok(());
     };
-    let Some(kind) = PARENT_ENTER.get(index).copied() else {
+    let Some(kind) = table.get(index).copied() else {
         // 表の先(1000 を超える深さ)は、フレームの検査が先に落ちる。
         return Ok(());
     };
@@ -70,6 +80,7 @@ pub fn parent_enter(d: Depth) -> Result<(), PyException> {
         match kind {
             b'C' => Call::Comparison,
             b'F' => Call::Frame,
+            b'S' => Call::Str,
             _ => Call::Native,
         },
     )
@@ -79,6 +90,8 @@ pub fn parent_enter(d: Depth) -> Result<(), PyException> {
 pub const PARENT_ENTER_FROM: usize = 990;
 /// 深さ `PARENT_ENTER_FROM` から 1000 まで、最初に落ちる検査の種類(`C` 比較・`N` C の呼出し・`F` フレーム)。
 pub const PARENT_ENTER: &[u8] = b"CNNNCNNNFNF";
+/// `Path` を渡す入口の表(`S` は `str()` の中の再帰。旧 Python 3.10.12 で、深さ 990 から 1000 まで測った)。
+pub const PARENT_ENTER_PATH: &[u8] = b"CNNFFSNNFNF";
 
 #[cfg(test)]
 mod tests {
