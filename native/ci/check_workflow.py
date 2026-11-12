@@ -23,7 +23,7 @@ ACTION_INPUTS = {
     "actions/upload-artifact": {"name", "path", "if-no-files-found", "retention-days"},
     "actions/download-artifact": {"name", "pattern", "path", "merge-multiple"},
 }
-TOP_KEYS = {"name", "on", "permissions", "jobs"}
+TOP_KEYS = {"name", "on", "concurrency", "permissions", "jobs"}
 JOB_KEYS = {"needs", "strategy", "runs-on", "timeout-minutes", "steps"}
 SOURCE_REF = "${{ github.event.pull_request.head.sha || github.sha }}"
 SOURCE_REPO = "${{ github.event.pull_request.head.repo.full_name || github.repository }}"
@@ -37,6 +37,14 @@ SCRIPT_COMMAND = re.compile(
 # 段階 0b(#443)の配布の確かめ。配布 commit の浅い clone で、配った入口を起動する。
 # native/ の外に置く(native/ はソース入力なので、0b では変えない)。この 1 行の字面だけを許す。
 DIST_LAUNCH_COMMAND = "python3 -B scripts/check_dist_launch.py --root ."
+# push 用の流れは main だけ。作業ブランチは PR の pull_request 用で検査する(#495)。
+PUSH_EVENT = {"branches": ["main"]}
+# 打ち切るのは、同じ PR の古い SHA の pull_request 用の流れだけ。
+# main の push と手で起動した流れは、組の名前の最後が run ごとに違う番号なので、打ち切らない。
+CONCURRENCY = {
+    "group": "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
+    "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
+}
 
 
 
@@ -104,12 +112,19 @@ def check_document(document):
         return ["ワークフローは object が必要です"]
     problems = []
     if set(document) - TOP_KEYS:
-        problems.append("トップの設定は name・on・permissions・jobs に限ります")
+        problems.append("トップの設定は name・on・concurrency・permissions・jobs に限ります")
     events = document.get("on")
     if not isinstance(events, dict) or set(events) != {"pull_request", "push", "workflow_dispatch"}:
         problems.append("イベントは pull_request・push・workflow_dispatch の 3 つに限ります")
-    elif any(value != {} and value is not None for value in events.values()):
-        problems.append("イベントの設定は空の object または null に限ります")
+    else:
+        if any(key != "push" and value != {} and value is not None for key, value in events.items()):
+            problems.append("イベントの設定は空の object または null に限ります")
+        if events["push"] != PUSH_EVENT:
+            problems.append('push は branches: ["main"] だけに限ります')
+    if document.get("concurrency") != CONCURRENCY:
+        problems.append("concurrency は決めた 1 つの形に限ります")
+    if "name" in document and (not isinstance(document["name"], str) or not document["name"]):
+        problems.append("name は空でない文字列に限ります")
     if document.get("permissions") != {"contents": "read"}:
         problems.append("permissions は contents: read に限ります")
 
@@ -134,7 +149,7 @@ def check_document(document):
                     problems.append("環境・実行の設定は native/ci/ に置いてください")
                 inspect(child)
 
-    inspect(document)
+    inspect({key: value for key, value in document.items() if key != "concurrency"})
     jobs = document.get("jobs")
     if not isinstance(jobs, dict) or not jobs:
         return problems + ["jobs がありません"]
@@ -247,19 +262,36 @@ def check_document(document):
     return problems
 
 
+def overlap_problems(file_name, document, names):
+    # 組の名前は大文字と小文字を区別しない。名前が重なると、同じ PR の 2 本が互いを打ち切る。
+    # name が無いときの GitHub の既定の名前は、ファイルのパス。
+    if not isinstance(document, dict):
+        return []
+    name = document.get("name", f".github/workflows/{file_name}")
+    if not isinstance(name, str) or not name:
+        return []
+    earlier = names.setdefault(name.casefold(), file_name)
+    if earlier == file_name:
+        return []
+    return [f"{file_name}: ワークフローの名前が重なっています: {name}({earlier} と同じ)"]
+
+
 def check_workflows(root=ROOT):
     folder = Path(root) / ".github/workflows"
     files = sorted([*folder.glob("*.yml"), *folder.glob("*.yaml")])
     if not files:
         return [".github/workflows/ に検査するファイルがありません"]
     problems = []
+    names = {}
     for path in files:
         if path.is_symlink() or not path.is_file():
             problems.append(f"{path.name}: 通常ファイルが必要です")
             continue
         try:
-            errors = check_document(read_json(path))
+            document = read_json(path)
+            errors = check_document(document)
         except (OSError, ValueError) as error:
+            document = None
             errors = [f"JSON 形式の YAML が必要です(重複キーも拒否します): {error}"]
         if path.name == "native.yml":
             try:
@@ -267,6 +299,7 @@ def check_workflows(root=ROOT):
             except (OSError, ValueError):
                 pass
         problems.extend(f"{path.name}: {error}" for error in errors)
+        problems.extend(overlap_problems(path.name, document, names))
     return problems
 
 
