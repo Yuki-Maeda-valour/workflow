@@ -14,3 +14,5 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+pub mod r4q_process;
