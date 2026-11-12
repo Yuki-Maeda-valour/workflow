@@ -1244,7 +1244,7 @@ class R4UConnectionTests(TempCase):
                 return rustc
             if failure is not None:
                 raise failure
-            return None
+            return "" if capture else None
         error = None
         with mock.patch.object(build, "target_config", return_value=("test-target", None)) as target, \
                 mock.patch.object(build, "build_environment", return_value={"LC_ALL": "C"}), \
@@ -1301,7 +1301,10 @@ class R4UConnectionTests(TempCase):
 
     def test_build_runs_plain_cargo_test_without_the_comparison(self):
         # build の cargo test --locked は、比較の引数を渡さない(check_links は流していないことを 1 行出すだけ)。
-        with mock.patch.object(build, "build_environment", return_value={}), mock.patch.object(build, "run") as run:
+        # quality はほかの担当の手順(例: R4R の r4r_map)で出力を受け取って書くので、受け取るときは空の文字列を返す。
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) \
+                as run:
             build.quality("linux-x86_64", self.root)
         commands = [call.args[0] for call in run.call_args_list]
         self.assertIn(["cargo", "test", "--locked"], commands)
