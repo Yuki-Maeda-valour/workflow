@@ -218,10 +218,26 @@ pub enum Coercion {
     DependsOnInstalledLocale,
 }
 
-/// 強制の後の`LC_CTYPE`の値。旧Pythonは`C.UTF-8`・`C.utf8`・`UTF-8`の順に`setlocale`を試し、最初に
-/// 受け入れた名前にする。glibc 2.35以上は`C.UTF-8`を内蔵するので、Linuxの比較の機械では常に`C.UTF-8`。
-/// それより古いglibcとMacでは、入っている地域設定で決まる(Macは単位6のCIで実測して確かめる)。
-pub const COERCED_LOCALE: &str = "C.UTF-8";
+/// 旧Pythonが強制で試す名前の順(`_TARGET_LOCALES`)。
+const COERCION_TARGETS: [&str; 3] = ["C.UTF-8", "C.utf8", "UTF-8"];
+
+/// 強制の後の`LC_CTYPE`の値。旧Pythonは`C.UTF-8`・`C.utf8`・`UTF-8`の順に`setlocale(LC_CTYPE, …)`を
+/// 試し、最初に受け入れた名前にする。どれも受け入れなければ強制しない(`None`)。
+///
+/// - Linux: 基準の機械のglibc 2.39は`C.UTF-8`を内蔵するので、常に`C.UTF-8`。
+/// - Mac: libcは`/usr/share/locale/<名前>/LC_CTYPE`を読めるときに受け入れるので、その有無で選ぶ
+///   (macOS 15 に`C.UTF-8`が無ければ`UTF-8`になる。CI の macOS で旧版と比べて確かめる)。
+pub fn coerced_locale() -> Option<&'static str> {
+    if cfg!(target_os = "linux") {
+        return Some(COERCION_TARGETS[0]);
+    }
+    COERCION_TARGETS.into_iter().find(|name| {
+        std::path::Path::new("/usr/share/locale")
+            .join(name)
+            .join("LC_CTYPE")
+            .is_file()
+    })
+}
 
 /// 旧Pythonの`_Py_LegacyLocaleDetected`と`_Py_CoerceLegacyLocale`の、環境変数だけで決まる部分。
 ///
@@ -231,35 +247,46 @@ pub const COERCED_LOCALE: &str = "C.UTF-8";
 /// - `LC_ALL`が無ければ、`LC_CTYPE`・`LANG`の順に最初の空でない名前を見る。無いか`C`・`POSIX`なら強制する。
 ///   ほかの名前は、入っている地域設定で決まる(入っていなければCのままになり強制する)。
 ///
-/// MacもLinuxと同じ規則で分ける(`POSIX`を`C`と扱うかなど、Macの実際の振る舞いは単位6のCIで確かめる)。
+/// `POSIX`の扱いは機械で違う。旧Pythonは`setlocale(LC_CTYPE, NULL)`が`"C"`のときだけ強制し、警告する
+/// (CPython 3.10.11 の`_Py_LegacyLocaleDetected`)。glibcは`POSIX`を`C`の別名にして`"C"`を返すが、Macの
+/// libcは`"POSIX"`のまま返す(CPython の`test_c_locale_coercion`も、`POSIX`を`C`と同じに扱うのは Linux だけ。
+/// bpo-30672)。そのため Mac の`POSIX`は、強制も警告もしない(どの機械にも入っている名前なので、入っている
+/// 地域設定では決まらない)。
 pub fn coercion(env: &[(Vec<u8>, Vec<u8>)]) -> Coercion {
     let setting = get(env, b"PYTHONCOERCECLOCALE");
     if setting == Some(b"0".as_slice()) {
         return Coercion::None { warn: false };
     }
     let warn = setting == Some(b"warn".as_slice());
-    let is_c = |name: &[u8]| matches!(name, b"C" | b"POSIX");
+    let linux = cfg!(target_os = "linux");
+    let is_c = |name: &[u8]| name == b"C" || (linux && name == b"POSIX");
+    let posix_kept = |name: &[u8]| !linux && name == b"POSIX";
     if let Some(all) = get(env, b"LC_ALL") {
         return match (warn, is_c(all)) {
             (false, _) => Coercion::None { warn: false },
             (true, true) => Coercion::None { warn: true },
+            (true, false) if posix_kept(all) => Coercion::None { warn: false },
             (true, false) => Coercion::DependsOnInstalledLocale,
         };
     }
     match get(env, b"LC_CTYPE").or_else(|| get(env, b"LANG")) {
+        Some(name) if posix_kept(name) => Coercion::None { warn: false },
         Some(name) if !is_c(name) => Coercion::DependsOnInstalledLocale,
+        // 試す名前をどれも受け入れなければ、旧Pythonは強制せず、`warn`なら Cのままである警告を出す。
+        _ if coerced_locale().is_none() => Coercion::None { warn },
         _ => Coercion::Coerce { warn },
     }
 }
 
-/// `warn`のときの警告の文(標準エラーへ直接書く)。
-pub fn coercion_warning(coercion: &Coercion) -> Option<&'static str> {
+/// `warn`のときの警告の文(標準エラーへ直接書く)。強制の文には、受け入れた名前(`coerced_locale`)が入る。
+pub fn coercion_warning(coercion: &Coercion) -> Option<String> {
     match coercion {
-        Coercion::Coerce { warn: true } => Some(
-            "Python detected LC_CTYPE=C: LC_CTYPE coerced to C.UTF-8 (set another locale or PYTHONCOERCECLOCALE=0 to disable this locale coercion behavior).\n",
-        ),
+        Coercion::Coerce { warn: true } => Some(format!(
+            "Python detected LC_CTYPE=C: LC_CTYPE coerced to {} (set another locale or PYTHONCOERCECLOCALE=0 to disable this locale coercion behavior).\n",
+            coerced_locale().unwrap_or(COERCION_TARGETS[0])
+        )),
         Coercion::None { warn: true } => Some(
-            "Python runtime initialized with LC_CTYPE=C (a locale with default ASCII encoding), which may cause Unicode compatibility problems. Using C.UTF-8, C.utf8, or UTF-8 (if available) as alternative Unicode-compatible locales is recommended.\n",
+            "Python runtime initialized with LC_CTYPE=C (a locale with default ASCII encoding), which may cause Unicode compatibility problems. Using C.UTF-8, C.utf8, or UTF-8 (if available) as alternative Unicode-compatible locales is recommended.\n".to_string(),
         ),
         _ => None,
     }
@@ -395,11 +422,12 @@ mod tests {
 
     #[test]
     fn coercion_matches_python_when_the_environment_decides_it() {
-        let cases: [&[(&str, &str)]; 13] = [
+        let cases: [&[(&str, &str)]; 14] = [
             &[],
             &[("PYTHONCOERCECLOCALE", "warn")],
             &[("PYTHONCOERCECLOCALE", "warn"), ("LC_ALL", "C")],
             &[("PYTHONCOERCECLOCALE", "warn"), ("LANG", "POSIX")],
+            &[("PYTHONCOERCECLOCALE", "warn"), ("LC_ALL", "POSIX")],
             &[("PYTHONCOERCECLOCALE", "0")],
             &[("LC_ALL", "C")],
             &[("LANG", "C"), ("LC_CTYPE", "POSIX")],
@@ -411,6 +439,31 @@ mod tests {
             &[("LC_ALL", "xx_YY.UTF-8"), ("LC_CTYPE", "C")],
             &[("PYTHONCOERCECLOCALE", "0"), ("LC_ALL", "C")],
         ];
+        // POSIX の組の期待: Linux は C と同じに扱い、Mac は強制も警告もしない(上の`coercion`の説明)。
+        let linux = cfg!(target_os = "linux");
+        assert_eq!(
+            coercion(&env(&[("PYTHONCOERCECLOCALE", "warn"), ("LANG", "POSIX")])),
+            if linux {
+                Coercion::Coerce { warn: true }
+            } else {
+                Coercion::None { warn: false }
+            }
+        );
+        assert_eq!(
+            coercion(&env(&[
+                ("PYTHONCOERCECLOCALE", "warn"),
+                ("LC_ALL", "POSIX")
+            ])),
+            Coercion::None { warn: linux }
+        );
+        assert_eq!(
+            coercion(&env(&[("LANG", "C"), ("LC_CTYPE", "POSIX")])),
+            if linux {
+                Coercion::Coerce { warn: false }
+            } else {
+                Coercion::None { warn: false }
+            }
+        );
         for pairs in cases {
             let output = python(pairs, "import os, sys; print(os.environ.get('LC_CTYPE'))");
             let decided = coercion(&env(pairs));
@@ -422,7 +475,11 @@ mod tests {
                 .map(|(_, value)| *value);
             match &decided {
                 Coercion::Coerce { .. } => {
-                    assert_eq!(stdout, format!("{COERCED_LOCALE}\n"), "{pairs:?}")
+                    assert_eq!(
+                        stdout,
+                        format!("{}\n", coerced_locale().unwrap()),
+                        "{pairs:?}"
+                    )
                 }
                 Coercion::None { .. } => assert_eq!(
                     stdout,
@@ -436,7 +493,7 @@ mod tests {
             }
             assert_eq!(
                 stderr,
-                coercion_warning(&decided).unwrap_or(""),
+                coercion_warning(&decided).unwrap_or_default(),
                 "{pairs:?}"
             );
         }

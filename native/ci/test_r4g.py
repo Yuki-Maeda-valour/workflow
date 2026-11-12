@@ -39,6 +39,11 @@ class Comparator(unittest.TestCase):
         patcher = mock.patch.object(self.m, 'DECISIONS', patched)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # 強制の名前は機械で決まる(Mac は入っている地域設定)。自己検査は Linux の基準の値で組む。
+        self.real_coerced = self.m.coerced_ctype_entry
+        coerced = mock.patch.object(self.m, 'coerced_ctype_entry', lambda: b'LC_CTYPE=C.UTF-8')
+        coerced.start()
+        self.addCleanup(coerced.stop)
 
     def result(self, code=0, out=b'', err=b'', timeout=False):
         return self.m.RunResult(code, out, err, timeout)
@@ -710,6 +715,30 @@ class Comparator(unittest.TestCase):
         # 終わったプロセスは待たない。
         self.m.wait_signal_taken(child.pid, signal.SIGUSR1, timeout=10)
 
+    def test_linux_only_existing_tests_are_recorded_as_not_run_elsewhere(self):
+        class PairedPendingCLITests(unittest.TestCase):
+            def test_direct_names_kinds_and_non_utf8_canonical_output(self):
+                pass
+
+            def test_other(self):
+                pass
+        suite = unittest.TestSuite([PairedPendingCLITests('test_direct_names_kinds_and_non_utf8_canonical_output'),
+                                    PairedPendingCLITests('test_other')])
+        with mock.patch.object(self.m, 'NOT_RUN', []) as records:
+            self.assertIs(self.m.linux_only_filtered(suite, 'linux'), suite)
+            self.assertEqual(records, [])
+            kept = self.m.linux_only_filtered(suite, 'darwin')
+            self.assertEqual([test._testMethodName for test in self.m.iter_tests(kept)], ['test_other'])
+            self.assertEqual(len(records), 1)
+            self.assertIn('APFS', records[0][2])
+            self.assertFalse(records[0][3])
+        # 一覧の名前は、既存テストに本当にある。
+        manifest = self.m.existing_manifest()
+        module = self.m.load(self.m.ROOT / 'scripts' / self.m.PENDING_TESTS, 'r4g_linux_only_names')
+        for cls, method in self.m.EXISTING_LINUX_ONLY:
+            self.assertIn(cls, manifest['files'][self.m.PENDING_TESTS]['classes'])
+            self.assertTrue(hasattr(getattr(module, cls), method), (cls, method))
+
     def test_stub_blocked_accepts_the_inlined_fifo_open(self):
         seen = []
         with mock.patch.object(self.m, 'wait_sleeping_in', lambda pid, functions, what: seen.append(functions)):
@@ -800,6 +829,19 @@ class Comparator(unittest.TestCase):
                     trace('implementation-git.py', 're.py') + b'extra\n'):
             with self.assertRaises(self.m.Difference):
                 self.m.ig_compare(old, self.result(1, err=bad), case='self-test')
+
+    def test_coerced_ctype_entry_is_asked_from_the_old_python(self):
+        # 本物の関数は、この機械の旧Pythonが地域設定の変数の無い環境で選ぶ名前を返す(Linux の基準は C.UTF-8)。
+        with mock.patch.object(self.m, '_COERCED', []):
+            entry = self.real_coerced()
+        if sys.platform.startswith('linux'):
+            self.assertEqual(entry, b'LC_CTYPE=C.UTF-8')
+        else:
+            self.assertTrue(entry is None or entry.startswith(b'LC_CTYPE='), entry)
+        # 強制しない機械では、入っていない地域設定の差の前提が無いので、比べずに止める。
+        with mock.patch.object(self.m, 'coerced_ctype_entry', lambda: None), self.assertRaises(self.m.Difference):
+            self.m.installed_locale_lc_ctype('implementation-git', 'self-test', [[b'/g'.hex(), [], [], b'/'.hex()]],
+                                             [[b'/g'.hex(), [], [], b'/'.hex()]])
 
     def test_installed_locale_difference_is_only_lc_ctype(self):
         def call(*env):

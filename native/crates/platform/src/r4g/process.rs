@@ -2016,8 +2016,12 @@ mod tests {
     struct Tree(PathBuf);
     impl Tree {
         fn new(name: &str) -> Self {
-            let path =
-                std::env::temp_dir().join(format!("r4g-process-{}-{name}", std::process::id()));
+            Self::new_in(&std::env::temp_dir(), name)
+        }
+        /// 短いパスが要るとき(`#!` の行に置くパスなど)は、`/tmp` の下に作る。Mac の一時フォルダ
+        /// (`/private/var/folders/…`)は長く、`#!` の行が旧bashの読む先頭のバイト数を超えるため。
+        fn new_in(base: &Path, name: &str) -> Self {
+            let path = base.join(format!("r4g-process-{}-{name}", std::process::id()));
             let _ = std::fs::remove_dir_all(&path);
             std::fs::create_dir(&path).unwrap();
             Self(path.canonicalize().unwrap())
@@ -2176,10 +2180,9 @@ mod tests {
         // 旧Pythonへ同じ生の環境を渡し、os.environ の並びと値を比べる。
         let tree = Tree::new("environ");
         let report = tree.0.join("report");
-        let python3 = match bash_find_command(b"python3", Some(b"/usr/bin:/bin"), &mut |_| None) {
-            BashLookup::Found(path) => path,
-            other => panic!("{other:?}"),
-        };
+        // 旧Pythonは、受け継いだ PATH で探す(CI では比較用の 3.10.11)。Mac の /usr/bin/python3 は Xcode の
+        // 仲介(xcrun)で、SDKROOT などを自分の環境へ足すので使わない。子の環境の PATH は下のとおり渡す。
+        let python3 = which("python3").as_os_str().as_bytes().to_vec();
         let child = bash_spawn(&BashCommand {
             path: &python3,
             argv: &[
@@ -2206,7 +2209,26 @@ mod tests {
             ours.push(0);
         }
         ours.extend_from_slice(b"LC_ALL\0C.UTF-8\0");
-        assert_eq!(std::fs::read(&report).unwrap(), ours);
+        let raw = std::fs::read(&report).unwrap();
+        // Mac の旧Pythonは、起動の中で CoreFoundation が自分の環境へ __CF_USER_TEXT_ENCODING を足す
+        // (2026-11-12 02:41 の決定。Rust は足さない)。Mac ではその1項目がちょうど1つあることを確かめて
+        // から除き、ほかを全部比べる。Linux では無いこと。
+        // 項目(名前\0値\0)に分けて、その1項目だけを除く(位置は問わない。ほかの項目は全部比べる)。
+        let mut fields: Vec<&[u8]> = raw.split(|byte| *byte == 0).collect();
+        assert_eq!(fields.pop(), Some(&b""[..]), "{raw:?}");
+        assert_eq!(fields.len() % 2, 0, "{raw:?}");
+        let pairs: Vec<(&[u8], &[u8])> = fields.chunks(2).map(|pair| (pair[0], pair[1])).collect();
+        let found = pairs
+            .iter()
+            .filter(|(key, _)| *key == b"__CF_USER_TEXT_ENCODING")
+            .count();
+        assert_eq!(found, usize::from(cfg!(target_os = "macos")), "{raw:?}");
+        let theirs: Vec<u8> = pairs
+            .iter()
+            .filter(|(key, _)| *key != b"__CF_USER_TEXT_ENCODING")
+            .flat_map(|(key, value)| [*key, &b"\0"[..], *value, &b"\0"[..]].concat())
+            .collect();
+        assert_eq!(theirs, ours);
         // 辞書の代入は位置を保ち、新しい名前は末尾へ足す。pop は並びを詰める。
         env.insert(b"B", b"9");
         env.insert(b"D", b"4");
@@ -2515,7 +2537,9 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             };
             assert_eq!(kind, expected_kind, "{action}");
             // 調べ方が空振りしていない(fd 7 を渡しても子には無い・環境の順・終了値)。
-            // SIGCHLD を無視した起動では、旧Pythonは回収できない子の終了値を 0 にする。
+            // SIGCHLD を無視した起動では、Linux は子を自動で回収するので、旧Pythonは回収できない子の終了値を
+            // 0 にする。Mac のカーネルは自動で回収しないので、無視した起動でも本当の終了値になる(上の旧版との
+            // 比較は、どちらの OS でも全部同じであることを求める)。
             let text = actual;
             assert!(text.starts_with("0\0"), "{text}");
             assert!(!text.contains("\n7\n"), "{text}");
@@ -2523,7 +2547,7 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
                 text.contains("PATH=/usr/bin:/bin\nB=2\nA=1\nLC_ALL=C\n"),
                 "{text}"
             );
-            if launcher[2] == "SIG_DFL" {
+            if launcher[2] == "SIG_DFL" || !cfg!(target_os = "linux") {
                 assert!(text.contains("3\0out\n\0err\n\0-15\0\0\0"), "{text}");
             } else {
                 assert!(
@@ -2624,11 +2648,18 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
             "bash-echild",
             &report,
         );
-        // 表を作る前は ECHILD を返し(旧Pythonの子のように 0 にしない)、作った後は 5 を受け取る。
+        // 表を作る前は、Linux は ECHILD を返し(旧Pythonの子のように 0 にしない)、作った後は 5 を受け取る。
+        // Mac のカーネルは、起動の前から SIGCHLD を無視していても子を自動では回収しないので、作る前も 5 を
+        // 受け取る(CI の macOS 15 で確かめた。旧版との差ではなく OS の違い)。
         // 子へは起動時の無視を渡し、親の SIGCHLD は既定へ戻っている。
+        let before = if cfg!(target_os = "linux") {
+            format!("Err({:?})", Errno::CHILD)
+        } else {
+            "Ok(Exited(5))".to_string()
+        };
         assert_eq!(
             std::fs::read_to_string(&report).unwrap(),
-            format!("Err({:?}) Ok(Exited(5)) Ignore Default", Errno::CHILD)
+            format!("{before} Ok(Exited(5)) Ignore Default")
         );
     }
 
@@ -3004,7 +3035,9 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
 
     #[test]
     fn bash_exec_failure_matches_bash() {
-        let tree = Tree::new("bash-exec");
+        // 解釈系のパスは、旧bashが読む先頭(5.2 は 128 バイト、Mac の /bin/bash 3.2 は 80 バイト)に
+        // 収まる短さにする(長い `#!` の行の切り方は、下で基準の版だけ確かめる)。
+        let tree = Tree::new_in(Path::new("/tmp"), "bash-exec");
         tree.file("plain", b"x\n", 0o644);
         std::fs::create_dir(tree.0.join("dir")).unwrap();
         let interp_noexec = format!("#!{}\necho hi\n", tree.0.join("plain").display());
@@ -3115,6 +3148,54 @@ for probe in sys.argv[2:]:\n    args = probe.split('\\x1f')\n    r = subprocess.
                     .unwrap()
                     .to_string(),
             );
+        }
+        // 長い `#!` の行: 旧bash 5.2 は先頭の 128 バイトを読み、最後のバイトを NUL にしてから解釈系の名前を
+        // 取る(名前は途中で切れる)。Rust はこの基準の版(5.2.21。2026-11-12 00:35 の決定)だけを再現する。
+        // 読む長さの違う版(Mac の /bin/bash 3.2 は 80 バイトで、最後のバイトを NUL にしない)では比べない。
+        if version != [5, 2, 21] {
+            eprintln!(
+                "bash_exec_failure_matches_bash: 長い #! の組は比べなかった(この機械の bash は {version:?}。基準は 5.2.21)"
+            );
+        } else {
+            let deep = tree.0.join("d".repeat(120));
+            std::fs::create_dir(&deep).unwrap();
+            std::fs::write(deep.join("plain"), b"x\n").unwrap();
+            let line = format!("#!{}\necho hi\n", deep.join("plain").display());
+            assert!(line.len() > 130, "{line}");
+            tree.file("interp_long", line.as_bytes(), 0o755);
+            let path = tree.bytes("interp_long");
+            let output = Command::new(&bash)
+                .args(["-c", "\"$0\""])
+                .arg(os(&path))
+                .env("LC_ALL", "C")
+                .env("PATH", "/usr/bin:/bin")
+                .env_remove("BASH_ENV")
+                .output()
+                .unwrap();
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+            let error = bash_spawn(&BashCommand {
+                path: &path,
+                argv: std::slice::from_ref(&path),
+                env: &[b"PATH=/usr/bin:/bin".to_vec()],
+                stdio: [StdTarget::Inherit; 3],
+                signals: &signals,
+            })
+            .unwrap_err();
+            let BashSpawnError::Child(failure) = error else {
+                panic!("interp_long: {error:?}");
+            };
+            let outcome = bash_exec_failure(&path, failure.errno, rules);
+            let BashExecFailure::BadInterpreter { errno, interpreter } = &outcome else {
+                panic!("interp_long: {outcome:?}");
+            };
+            assert_eq!(interpreter.len(), 125, "{outcome:?}");
+            let marker = format!(
+                "{}: bad interpreter: {}",
+                String::from_utf8_lossy(interpreter),
+                strerror(*errno)
+            );
+            assert!(stderr.contains(&marker), "{outcome:?} {stderr}");
+            assert_eq!(output.status.code(), Some(126), "{stderr}");
         }
         // 空振りしていない: 6つの経路(5.2 だけは bad interpreter の代わりに required file not found)。
         for kind in [

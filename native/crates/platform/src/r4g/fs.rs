@@ -675,12 +675,18 @@ mod tests {
     #[test]
     fn scandir_matches_python_order_and_rewinds_the_shared_offset() {
         let tree = Tree::new("scandir");
-        // 32KiB の受け皿を何回も満たす数と、長さの違う名前・UTF-8でない名前を入れる。
+        // 32KiB の受け皿を何回も満たす数と、長さの違う名前・ASCII でない名前を入れる。Linux は UTF-8 でない
+        // 名前も作る。Mac の APFS は UTF-8 でない名前を作れない(EILSEQ)ので、UTF-8 の名前にする。
         for index in 0..3000 {
             let name = format!("{index:05}-{}", "x".repeat(index % 200));
             std::fs::write(tree.0.join(name), b"").unwrap();
         }
-        std::fs::write(tree.0.join(std::ffi::OsStr::from_bytes(b"raw-\xff")), b"").unwrap();
+        let odd: &[u8] = if cfg!(target_os = "linux") {
+            b"raw-\xff"
+        } else {
+            "raw-日本".as_bytes()
+        };
+        std::fs::write(tree.0.join(std::ffi::OsStr::from_bytes(odd)), b"").unwrap();
         let fd = dir_fd(&tree.0);
         let expected = python(
             "import os, sys\nfd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)\nwith os.scandir(fd) as it:\n    sys.stdout.buffer.write(b''.join(os.fsencode(e.name) + b'\\0' for e in it))",

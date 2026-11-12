@@ -192,6 +192,24 @@ mod tests {
 
     #[test]
     fn diagnostics_match_bash_in_the_c_locale() {
+        // 文は基準の版(bash 5.2.21。2026-11-12 00:35 の決定)の規則で作る。基準の版の無い機械(Mac の
+        // /bin/bash 3.2 など)では比べず、比べなかったことを出す。
+        let version = Command::new("bash")
+            .args([
+                "-c",
+                "echo ${BASH_VERSINFO[0]}.${BASH_VERSINFO[1]}.${BASH_VERSINFO[2]}",
+            ])
+            .env("PATH", "/usr/bin:/bin")
+            .env_remove("BASH_ENV")
+            .output()
+            .unwrap();
+        let version = String::from_utf8_lossy(&version.stdout).trim().to_string();
+        if version != "5.2.21" {
+            eprintln!(
+                "diagnostics_match_bash_in_the_c_locale: 比べなかった(この機械の bash は {version}。基準は 5.2.21)"
+            );
+            return;
+        }
         let tree = std::env::temp_dir().join(format!("r4g-bash-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tree);
         std::fs::create_dir(&tree).unwrap();

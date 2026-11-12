@@ -21,6 +21,7 @@ from pathlib import Path
 import re
 import shutil
 import signal
+import socket
 import stat as stat_module
 import subprocess
 import sys
@@ -1276,10 +1277,41 @@ def pending_cli_wrapper(original, module):
     return Paired
 
 
+# 既存テストのうち、入力を Linux だけで作れるもの: {(クラス, メソッド): 理由}。ほかの機械では流さず未実施と記録する
+# (合格に数えない)。同じ観点は、代わりの組でどの機械でも比べる。
+EXISTING_LINUX_ONLY = {
+    ('PendingCLITests', 'test_direct_names_kinds_and_non_utf8_canonical_output'):
+        'Mac の APFS は UTF-8 でない名前を作れない(EILSEQ)。UTF-8 の名前の組は '
+        'PendingContract.test_direct_names_and_kinds_with_utf8_names で比べる',
+}
+
+
+def linux_only_filtered(suite, platform=None):
+    """Linux でなければ、EXISTING_LINUX_ONLY のテストを除いて未実施と記録する。"""
+    if (sys.platform if platform is None else platform).startswith('linux'):
+        return suite
+    kept = unittest.TestSuite()
+    for test in iter_tests(suite):
+        key = (type(test).__name__.removeprefix('Paired'), test._testMethodName)
+        if key in EXISTING_LINUX_ONLY:
+            NOT_RUN.append((test.id(), None, EXISTING_LINUX_ONLY[key], False))
+        else:
+            kept.addTest(test)
+    return kept
+
+
+def iter_tests(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from iter_tests(item)
+        else:
+            yield item
+
+
 def pending_existing_suite():
     """既存のCLIの24件(PendingCLITests 14・PendingOwnerTests 10)を旧版とRustの組で流す。"""
     wrappers = {(PENDING_TESTS, name): pending_cli_wrapper for name in ('PendingCLITests', 'PendingOwnerTests')}
-    return existing_suite(wrappers, classes=set(wrappers))
+    return linux_only_filtered(existing_suite(wrappers, classes=set(wrappers)))
 
 
 def load_correspondence():
@@ -1932,7 +1964,8 @@ class PendingIO(unittest.TestCase):
 
     def test_encoding_is_fixed_to_utf8(self):
         world = self.world()
-        os.mkdir(os.fsencode(str(world.roots[0])) + b'/guard-' + '日本語'.encode() + b'-\xff')
+        # UTF-8 でない名前の部分は Linux だけ(Mac の APFS は作れない。EILSEQ)。Mac は非 ASCII の UTF-8 で比べる。
+        os.mkdir(os.fsencode(str(world.roots[0])) + b'/guard-' + '日本語'.encode() + NON_UTF8_SUFFIX)
         utf8 = dict(world.env, LC_ALL='C.UTF-8')
         expected, _ = pending_plain(world.args(), utf8, str(world.base), [world.base])
         for changes in ({'LC_ALL': 'C', 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0'},
@@ -2163,6 +2196,28 @@ class PendingContract(unittest.TestCase):
             with self.subTest(env={k: env.get(k) for k in ('HOME', 'XDG_STATE_HOME')}):
                 self.same(world, env=env)
 
+    def test_direct_names_and_kinds_with_utf8_names(self):
+        """既存テストの PendingCLITests.test_direct_names_kinds_and_non_utf8_canonical_output と同じ入力から、UTF-8 で
+        ない名前だけを除いた組。Mac の APFS はその名前を作れないので、既存テストは Mac で未実施と記録し
+        (EXISTING_LINUX_ONLY)、名前の種類・並び・正準の出力はこの組でどの機械でも比べる。"""
+        world = self.world()
+        root = world.roots[0]
+        (root / 'guard-directory').mkdir()
+        (root / 'guard-file').write_bytes(b'plain sentinel')
+        (root / 'guard-symlink').symlink_to(world.base / 'missing-target')
+        os.mkfifo(str(root / 'guard-fifo'))
+        sock = socket.socket(socket.AF_UNIX)
+        self.addCleanup(sock.close)
+        sock.bind(str(root / 'guard-socket'))
+        for name in ('guard-', 'Guard-a', 'implement-a', 'other'):
+            (root / name).mkdir()
+            (root / name / 'guard-deep').mkdir()
+        for name in ('guard-日本語'.encode(), b'guard-a b', b'guard-\n', b'guard-\xc2\x85', b'guard-*[abc]?'):
+            Path(os.fsdecode(os.fsencode(str(root)) + b'/' + name)).write_bytes(b'normal')
+        old = self.same(world)
+        self.assertEqual(len(result_of(old)['candidates']), 10)
+
+
 # ---------------------------------------------------------------- pending-observation(完了条件4)
 
 PENDING_STATIC_FILES = (
@@ -2253,8 +2308,8 @@ def observation_world(test):
     world.create_roots()
     world.make_top(world.cwd)
     root = os.fsencode(str(world.roots[0]))
-    names = [b'guard-ascii', 'guard-日本語'.encode(), b'guard-\xff\xfe', b'guard-fifo', b'guard-locked',
-             b'guard-file']
+    names = [b'guard-ascii', 'guard-日本語'.encode(), b'guard-raw' + NON_UTF8_SUFFIX, b'guard-fifo',
+             b'guard-locked', b'guard-file']
     for name in names[:3]:
         os.mkdir(root + b'/' + name)
     os.mkfifo(root + b'/guard-fifo')
@@ -4768,7 +4823,7 @@ class IgContract(unittest.TestCase):
         (world.base / 'loop2').symlink_to(world.base / 'loop1')
         locked = world.base / 'locked'
         (locked / 'inner').mkdir(parents=True)
-        odd = os.fsencode(str(world.base)) + b'/odd-\xff'
+        odd = os.fsencode(str(world.base)) + b'/odd' + NON_UTF8_SUFFIX
         os.mkdir(odd)
         os.symlink(odd, str(world.base / 'odd-link'))
         (world.base / 'plain').write_text('x')
@@ -4824,10 +4879,17 @@ class IgContract(unittest.TestCase):
         digest = world.prepared(accept)
         for label, changes in (('coerce', {'LC_ALL': None}), ('coerce-ctype-c', {'LC_ALL': None, 'LC_CTYPE': 'C'}),
                                ('coerce-lang-c', {'LC_ALL': None, 'LANG': 'C'}),
+                               # POSIX は Linux では C と同じに強制し、Mac の libc は POSIX のまま返すので強制も
+                               # 警告もしない(CPython 3.10.11 の _Py_LegacyLocaleDetected。bpo-30672)。
+                               ('lang-posix', {'LC_ALL': None, 'LANG': 'POSIX'}),
+                               ('warn-all-posix', {'LC_ALL': 'POSIX', 'PYTHONCOERCECLOCALE': 'warn'}),
                                ('no-coerce', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': '0'}),
                                ('warn', {'LC_ALL': None, 'PYTHONCOERCECLOCALE': 'warn'}),
-                               ('installed', {'LC_ALL': None, 'LANG': 'C.UTF-8'}),
+                               ('installed', {'LC_ALL': None, 'LANG': installed_utf8_locale()}),
                                ('c-all', {'LC_ALL': 'C'})):
+            if label == 'installed' and changes['LANG'] is None:
+                not_run(self, 'installed', 'この機械に UTF-8 の地域設定が無い')
+                continue
             with self.subTest(label=label):
                 env = world.env(**changes)
                 if label == 'coerce-ctype-c':
@@ -5009,16 +5071,47 @@ class IgContract(unittest.TestCase):
                 world.pair(world.run_args(digest, *rest, accept=accept))
 
 
+_COERCED = []
+
+
+def coerced_ctype_entry():
+    """この機械の旧Pythonが、地域設定の強制で自分の環境へ足す `LC_CTYPE=<名前>` の項目(強制しなければ None)。
+    旧Pythonは C.UTF-8・C.utf8・UTF-8 の順に受け入れる名前を探す(Linux の基準の機械は C.UTF-8。Mac は入って
+    いる地域設定で決まる)。決め打ちせず、旧Pythonに地域設定の変数を外した環境で聞く(1回だけ)。"""
+    if not _COERCED:
+        env = {key: value for key, value in os.environ.items() if key not in ('LC_ALL', 'LC_CTYPE', 'LANG')}
+        out = subprocess.run([sys.executable, '-I', '-c',
+                              'import os, sys; sys.stdout.buffer.write(os.environb.get(b"LC_CTYPE", b""))'],
+                             env=env, stdin=subprocess.DEVNULL, capture_output=True, check=True).stdout
+        _COERCED.append(b'LC_CTYPE=' + out if out else None)
+    return _COERCED[0]
+
+
+def installed_utf8_locale():
+    """この機械に入っている UTF-8 の地域設定の名前(旧Pythonが強制しない名前)。Linux の基準の機械は C.UTF-8。
+    Mac は /usr/share/locale/<名前>/LC_CTYPE がある最初の名前。無ければ None。"""
+    if sys.platform.startswith('linux'):
+        return 'C.UTF-8'
+    for name in ('C.UTF-8', 'en_US.UTF-8', 'UTF-8'):
+        if (Path('/usr/share/locale') / name / 'LC_CTYPE').is_file():
+            return name
+    return None
+
+
 def installed_locale_lc_ctype(command, case, old_calls, new_calls):
-    """入っていない地域設定の名前で、旧Pythonだけが子の環境へ LC_CTYPE=C.UTF-8 を足す差(2026-11-11 22:31 の回答)。
-    旧版の子の環境が、Rust の子の環境の末尾にその1項目を足したものと同じこと。ほかは全部比べる。"""
+    """入っていない地域設定の名前で、旧Pythonだけが子の環境へ LC_CTYPE=<強制の名前> を足す差(2026-11-11 22:31 の
+    回答。Linux の基準の機械では LC_CTYPE=C.UTF-8)。旧版の子の環境が、Rust の子の環境の末尾にその1項目を足した
+    ものと同じこと。ほかは全部比べる。"""
     applied(command, 'installed-locale-lc-ctype', case)
     if len(old_calls) != len(new_calls) or not old_calls:
         raise Difference('子の起動の数が違う')
     # 旧版の実行環境が自分で足す変数(Mac の __CF_USER_TEXT_ENCODING)は、ほかの比較と同じく外して記録する
     # (2026-11-12 02:41 の決定。このケースも決定の cases にある)。
     old_calls, new_calls = runtime_added(command, case, old_calls, new_calls)
-    added = b'LC_CTYPE=C.UTF-8'.hex()
+    entry = coerced_ctype_entry()
+    if entry is None:
+        raise Difference('この機械の旧Pythonは強制しない(入っていない地域設定の差の前提が無い)')
+    added = entry.hex()
     for left, right in zip(old_calls, new_calls):
         if left[0] != right[0] or left[1] != right[1] or left[3] != right[3]:
             raise Difference('子の起動のパス・引数・作業場所が違う')
@@ -5026,7 +5119,7 @@ def installed_locale_lc_ctype(command, case, old_calls, new_calls):
             raise Difference('子が継いだ信号の扱いか、開いている fd が違う')
         rest = list(left[2])
         if added not in rest or added in right[2]:
-            raise Difference('旧版だけが LC_CTYPE=C.UTF-8 を渡す形でない')
+            raise Difference(f'旧版だけが {entry.decode(errors="replace")} を渡す形でない')
         rest.remove(added)
         if left[5:6] == ['shell']:
             # bash の孫(事前検査の中の Git)は bash が環境を並べ直すので、値の集合で比べる。
@@ -5448,6 +5541,11 @@ PYTHON_OUTSIDE_PREMISES = frozenset((
     'PYTHONMALLOC', 'PYTHONDEVMODE', 'PYTHONFAULTHANDLER', 'PYTHONTRACEMALLOC', 'PYTHONMALLOCSTATS',
     'PYTHONPLATLIBDIR', 'PYTHONWARNDEFAULTENCODING', 'PYTHONPYCACHEPREFIX', 'PYTHONEXECUTABLE',
     'PYTHONUSERBASE', 'PYTHONNOUSERSITE'))
+
+
+# 名前に足す UTF-8 でないバイト。Mac の APFS は UTF-8 でない名前を作れない(EILSEQ)ので、Mac は非 ASCII の
+# UTF-8 にする(UTF-8 でない名前の比べ方は Linux の CI で確かめる)。
+NON_UTF8_SUFFIX = b'-\xff\xfe' if sys.platform.startswith('linux') else '-é'.encode()
 
 
 def socket_path_limit(platform=None):

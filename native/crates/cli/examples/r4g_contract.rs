@@ -406,7 +406,7 @@ mod python {
         if let startup_py::Coercion::None { warn: true } = coercion
             && let Some(warning) = startup_py::coercion_warning(&coercion)
         {
-            let _ = stdio.stderr.write(&from_str(warning));
+            let _ = stdio.stderr.write(&from_str(&warning));
         }
         Ok(Booted {
             stdio,
@@ -463,12 +463,16 @@ mod python {
         }
     }
 
-    /// 旧Pythonの地域設定の強制が`setenv("LC_CTYPE", "C.UTF-8", 1)`で変えた`environ`
+    /// 旧Pythonの地域設定の強制が`setenv("LC_CTYPE", <受け入れた名前>, 1)`で変えた`environ`
     /// (最初の`LC_CTYPE=`の項目を置き換え、無ければ末尾に足す)。
     fn coerced_entries(entries: &[Vec<u8>], coercion: &startup_py::Coercion) -> Vec<Vec<u8>> {
         let mut entries = entries.to_vec();
         if let startup_py::Coercion::Coerce { .. } = coercion {
-            let value = format!("LC_CTYPE={}", startup_py::COERCED_LOCALE).into_bytes();
+            let value = format!(
+                "LC_CTYPE={}",
+                startup_py::coerced_locale().expect("強制は受け入れた名前があるときだけ")
+            )
+            .into_bytes();
             match entries
                 .iter()
                 .position(|entry| entry.starts_with(b"LC_CTYPE="))
