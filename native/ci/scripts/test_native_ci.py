@@ -1257,5 +1257,232 @@ class S2LConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.loop_state_probe(fixture)
 
 
+class R4UConnectionTests(TempCase):
+    """R4U(#480)の比較を、build ではなくジョブ r4u(build.py r4u)で流す(2026-11-12 12:59 の決定)。"""
+
+    R4U_RUN = "python3 -B native/ci/build.py r4u --platform '${{ matrix.platform }}'"
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def r4u_calls(self, rustc="rustc 1.99.1 (0123456789 2026-10-01)", implementation="CPython", version="3.10.11",
+                  failure=None):
+        """build.r4u を、道具の呼出しを控えて動かす。戻り値は (呼んだコマンドと環境の列, 起きた例外か None)。"""
+        commands = []
+
+        def run(args, *, env=None, capture=False):
+            commands.append((list(args), env))
+            if args[:2] == ["rustc", "--version"]:
+                return rustc
+            if failure is not None:
+                raise failure
+            return "" if capture else None
+        error = None
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)) as target, \
+                mock.patch.object(build, "build_environment", return_value={"LC_ALL": "C"}), \
+                mock.patch.object(build.platform, "python_implementation", return_value=implementation), \
+                mock.patch.object(build.platform, "python_version", return_value=version), \
+                mock.patch.object(build, "run", side_effect=run):
+            try:
+                build.r4u("linux-x86_64", self.root)
+            except (ValueError, subprocess.CalledProcessError) as exc:
+                error = exc
+        target.assert_called_once_with("linux-x86_64")
+        return commands, error
+
+    def test_r4u_checks_rust_and_python_then_runs_the_comparison_with_that_python(self):
+        commands, error = self.r4u_calls()
+        self.assertIsNone(error)
+        self.assertEqual([command for command, _ in commands],
+                         [["rustc", "--version"],
+                          ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "check_links", "--",
+                           "--r4u-compare"]])
+        self.assertEqual(commands[1][1], {"LC_ALL": "C", "R4U_PYTHON": sys.executable})
+
+    def test_r4u_stops_before_the_comparison_for_wrong_rust_or_python(self):
+        for changes in ({"rustc": "rustc 1.99.0 (0123456789 2026-09-01)"}, {"rustc": "rustc 1.99.10 (x)"},
+                        {"version": "3.10.12"}, {"version": "3.11.4"}, {"implementation": "PyPy"}):
+            with self.subTest(changes=changes):
+                commands, error = self.r4u_calls(**changes)
+                self.assertIsInstance(error, ValueError)
+                # 版を確かめる rustc --version のほかは何も呼ばない(比較の cargo test を呼ばない)。
+                self.assertEqual([command for command, _ in commands], [["rustc", "--version"]])
+
+    def test_r4u_comparison_failure_is_fatal(self):
+        commands, error = self.r4u_calls(failure=subprocess.CalledProcessError(101, "cargo test"))
+        self.assertIsInstance(error, subprocess.CalledProcessError)
+        self.assertEqual(commands[-1][0][-1], "--r4u-compare")
+
+    def test_main_requires_platform_and_dispatches_r4u(self):
+        with mock.patch.object(sys, "argv", ["build.py", "r4u"]), mock.patch.object(build, "r4u") as r4u, \
+                mock.patch("sys.stderr"), self.assertRaises(SystemExit):
+            build.main()
+        r4u.assert_not_called()
+        for platform_name in build.TARGETS:
+            with mock.patch.object(sys, "argv", ["build.py", "r4u", "--platform", platform_name]), \
+                    mock.patch.object(build, "workspace", return_value=self.root), \
+                    mock.patch.object(build, "quality") as quality, mock.patch.object(build, "reproduce") as reproduce, \
+                    mock.patch.object(build, "r4u") as r4u:
+                self.assertEqual(build.main(), 0)
+                r4u.assert_called_once_with(platform_name, self.root)
+                quality.assert_not_called()
+                reproduce.assert_not_called()
+                r4u.side_effect = subprocess.CalledProcessError(101, "cargo test")
+                with mock.patch("sys.stderr"):
+                    self.assertEqual(build.main(), 1)
+
+    def test_build_runs_plain_cargo_test_without_the_comparison(self):
+        # build の cargo test --locked は、比較の引数を渡さない(check_links は流していないことを 1 行出すだけ)。
+        # quality はほかの担当の手順(例: R4R の r4r_map)で出力を受け取って書くので、受け取るときは空の文字列を返す。
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) \
+                as run:
+            build.quality("linux-x86_64", self.root)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertIn(["cargo", "test", "--locked"], commands)
+        self.assertFalse(any("--r4u-compare" in command for command in commands))
+        for job in ("build", "verify-universal", "combine", "distribution"):
+            self.assertFalse(any(check_workflow.native_build_command(step.get("run")) == "r4u"
+                                 for step in self.document["jobs"][job]["steps"]))
+
+    def test_workflow_runs_r4u_in_its_own_job_after_build_on_four_machines(self):
+        jobs = self.document["jobs"]
+        self.assertEqual(check_workflow.check_document(self.document), [])
+        job = jobs["r4u"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["strategy"], jobs["build"]["strategy"])
+        self.assertEqual(job["strategy"]["fail-fast"], False)
+        self.assertEqual([row["platform"] for row in job["strategy"]["matrix"]["include"]], list(build.TARGETS))
+        self.assertEqual(job["runs-on"], "${{ matrix.runner }}")
+        self.assertEqual(job["timeout-minutes"], 30)
+        # checkout・最初の検査・Python 3.10.11 は build と同じ。Rust の用意は build と同じ prepare。
+        self.assertEqual(job["steps"][:3], jobs["build"]["steps"][:3])
+        self.assertEqual(job["steps"][3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+        self.assertEqual(job["steps"][-1]["run"], self.R4U_RUN)
+        self.assertEqual(len(job["steps"]), 5)
+        self.assertNotIn("r4u", jobs["distribution"]["needs"])
+        # 足すだけ(既存のジョブの後ろ)。ほかの担当が後ろにジョブを足しても通るよう、最後であることは求めない。
+        self.assertGreater(list(jobs).index("r4u"), list(jobs).index("distribution"))
+
+    def test_check_workflow_knows_the_r4u_operation(self):
+        prefix = "python3 -B native/ci/build.py "
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4u --platform linux-x86_64"), "r4u")
+        self.assertEqual(check_workflow.native_build_command(prefix + "r4u"), "r4u")
+        for command in ("r4ux", "r4u-", "r4u_compare", "R4U"):
+            with self.subTest(command=command):
+                self.assertIsNone(check_workflow.native_build_command(prefix + command))
+
+    def test_check_workflow_requires_the_r4u_timeout_python_and_command_form(self):
+        for renamed in (False, True):
+            base = copy.deepcopy(self.document)
+            key = "r4u"
+            if renamed:
+                # ほかの担当のジョブの名前と重ならない名前にする。
+                key = "r4u-renamed-for-test"
+                self.assertNotIn(key, base["jobs"])
+                base["jobs"][key] = base["jobs"].pop("r4u")
+            self.assertEqual(check_workflow.check_document(base), [])
+            for value in (None, 0, 15, 29, 31, 60, "30", True):
+                changed = copy.deepcopy(base)
+                if value is None:
+                    changed["jobs"][key].pop("timeout-minutes")
+                else:
+                    changed["jobs"][key]["timeout-minutes"] = value
+                with self.subTest(renamed=renamed, value=value):
+                    self.assertTrue(any("timeout-minutes は 30" in error
+                                        for error in check_workflow.check_document(changed)))
+        for mutation in ("remove", "late", "early", "version"):
+            changed = copy.deepcopy(self.document)
+            steps = changed["jobs"]["r4u"]["steps"]
+            if mutation == "remove":
+                steps.pop(2)
+            elif mutation == "late":
+                steps.append(steps.pop(2))
+            elif mutation == "early":
+                steps.insert(1, steps.pop(2))
+            else:
+                steps[2]["with"]["python-version"] = "3.10.12"
+            with self.subTest(mutation=mutation):
+                self.assertTrue(check_workflow.check_document(changed))
+        for arguments in ("--platform linux-x86_64 r4u", "--downloads downloads r4u", "-- r4u"):
+            changed = copy.deepcopy(self.document)
+            changed["jobs"]["r4u"]["steps"][-1]["run"] = "python3 -B native/ci/build.py " + arguments
+            with self.subTest(arguments=arguments):
+                self.assertTrue(any("コマンド名をオプションより先" in error
+                                    for error in check_workflow.check_document(changed)))
+        # build の 60 分の枠の中で比較を流す形は、上限が合わないので拒む。
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["build"]["steps"].append({"run": self.R4U_RUN})
+        self.assertTrue(any("timeout-minutes は 30" in error for error in check_workflow.check_document(changed)))
+
+    # check_workflow.py の 3 つの集合: 集合の行の目印と、その行の中で r4u の項目だけに当たる正規表現。
+    # 前後の名前に頼らない(ほかの担当が同じ集合に名前を足しても、r4u の項目だけを除ける)。
+    R4U_ENTRIES = {
+        # 操作の名前は、native_build_command の中の re.match の行。
+        "names": (r"python3 -B native/ci/build\.py (", r"\|r4u(?=[|)])"),
+        "timeouts": ("native_timeouts = {", r',\s*"r4u": 30(?=\s*[,}])'),
+        "comparisons": ('native_build_command(step.get("run")) in {', r',\s*"r4u"(?=\s*[,}])'),
+    }
+
+    def remove_r4u(self, source, which):
+        """source(check_workflow.py の中身)の 1 つの集合から r4u の項目だけを除く。目印の行と除いた数は 1 つずつ。"""
+        marker, pattern = self.R4U_ENTRIES[which]
+        lines = source.splitlines(keepends=True)
+        found = [index for index, line in enumerate(lines) if marker in line]
+        self.assertEqual(len(found), 1, marker)
+        line, count = re.subn(pattern, "", lines[found[0]])
+        self.assertEqual(count, 1, (which, lines[found[0]]))
+        lines[found[0]] = line
+        return "".join(lines)
+
+    def without_r4u(self, which):
+        """check_workflow.py の 1 つの集合から r4u を除いた版(r4u が欠けたときに何が起きるかを見る)。"""
+        import types
+        path = Path(check_workflow.__file__)
+        module = types.ModuleType("check_workflow_without_r4u")
+        module.__file__ = str(path)
+        source = self.remove_r4u(path.read_text(encoding="utf-8"), which)
+        exec(compile(source, str(path), "exec"), module.__dict__)
+        return module
+
+    def test_each_r4u_entry_in_check_workflow_is_needed(self):
+        # 操作の名前に r4u が無いと、ジョブ r4u の手順を正しい形の build.py として読めず、実際のワークフローが不合格。
+        names = self.without_r4u("names")
+        self.assertTrue(any("コマンド名をオプションより先" in error for error in names.check_document(self.document)))
+        # 上限の表に r4u が無いと、上限の違うジョブ r4u を通してしまう(実際の check_workflow.py は拒む)。
+        timeouts = self.without_r4u("timeouts")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4u"]["timeout-minutes"] = 60
+        self.assertEqual(timeouts.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
+        # 比較の操作に r4u が無いと、Python 3.10.11 を用意しないジョブ r4u を通してしまう(実際の check_workflow.py は拒む)。
+        comparisons = self.without_r4u("comparisons")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4u"]["steps"].pop(2)
+        self.assertEqual(comparisons.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
+
+    def test_removing_r4u_does_not_depend_on_the_neighbouring_names(self):
+        # ほかの担当(例: R4E #482 の r4e・r4e-universal)が同じ集合の r4u の前か後ろに名前を足した形でも、
+        # r4u の項目だけを除き、ほかの名前は残す。
+        source = Path(check_workflow.__file__).read_text(encoding="utf-8")
+        others = {"names": ("|r4e|r4e-universal", "|r4u"),
+                  "timeouts": (', "r4e": 30, "r4e-universal": 30', ', "r4u": 30'),
+                  "comparisons": (', "r4e", "r4e-universal"', ', "r4u"')}
+        for which, (extra, entry) in others.items():
+            marker, _ = self.R4U_ENTRIES[which]
+            line = next(line for line in source.splitlines(keepends=True) if marker in line)
+            self.assertEqual(line.count(entry), 1, (which, line))
+            for place in ("before", "after"):
+                added = line.replace(entry, extra + entry if place == "before" else entry + extra)
+                with self.subTest(which=which, place=place):
+                    removed = self.remove_r4u(source.replace(line, added), which)
+                    changed = next(item for item in removed.splitlines(keepends=True) if marker in item)
+                    self.assertEqual(changed, added.replace(entry, ""))
+                    self.assertIn(extra, changed)
+                    self.assertNotIn(entry, changed)
+
+
 if __name__ == "__main__":
     unittest.main()
