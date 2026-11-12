@@ -19,6 +19,10 @@ unsafe extern "C" {
     fn c_signal(signal: i32, handler: usize) -> usize;
     #[link_name = "siginterrupt"]
     fn c_siginterrupt(signal: i32, flag: i32) -> i32;
+    // R4U の check_links.rs も同じ libc の sigaction を、自分の struct(SigAction)へのポインタの型で宣言する。
+    // 型は違うが、呼出しの規約(int と 2 つのポインタを渡し、int を返す)は同じである。
+    // S2L は、今の SIGINT の扱いを読むだけに使う(action は NULL、old は struct より大きい領域)。
+    #[allow(clashing_extern_declarations)]
     #[link_name = "sigaction"]
     fn c_sigaction(signal: i32, action: *const u8, old: *mut u8) -> i32;
     #[link_name = "pthread_self"]

@@ -1411,7 +1411,7 @@ class R4UConnectionTests(TempCase):
             with self.subTest(arguments=arguments):
                 self.assertTrue(any("コマンド名をオプションより先" in error
                                     for error in check_workflow.check_document(changed)))
-        # build の 60 分の枠の中で比較を流す形は、上限が合わないので拒む。
+        # build の枠の中で比較を流す形は、上限が合わないので拒む。
         changed = copy.deepcopy(self.document)
         changed["jobs"]["build"]["steps"].append({"run": self.R4U_RUN})
         self.assertTrue(any("timeout-minutes は 30" in error for error in check_workflow.check_document(changed)))
