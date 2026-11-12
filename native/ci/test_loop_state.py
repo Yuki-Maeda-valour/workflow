@@ -258,6 +258,25 @@ class ComparisonTest(unittest.TestCase):
             setattr(changed, field, value)
             with self.subTest(field=field), self.assertRaisesRegex(CHECK.Mismatch, marker):
                 CHECK.compare_result("mutation", baseline, changed)
+        # 失敗の文脈: 起動の前に label だけを記録し、流し終えた側から結果を足す。いちばん新しい 1 件だけを出す。
+        import types
+        saved=dict(CHECK.LAST_CASE)
+        try:
+            CHECK.start_case("case-a");CHECK.record("old",baseline)
+            text=CHECK.last_case_text([CHECK])
+            self.assertTrue(text.startswith("失敗した時に流していた case: case-a\n"),text)
+            self.assertIn("  new: (結果なし)",text);self.assertIn("終了値 0",text)
+            CHECK.remember("case-a",baseline,changed)
+            self.assertTrue(CHECK.last_case_text([CHECK]).startswith("最後に旧新を流し終えた case: case-a\n"))
+            older=types.SimpleNamespace(LAST_CASE=dict(CHECK.LAST_CASE))
+            CHECK.start_case("case-b")
+            text=CHECK.last_case_text([older,CHECK])
+            self.assertEqual(text.count(" case: "),1,text);self.assertIn("流していた case: case-b",text)
+            self.assertIn("  old: (結果なし)",text);self.assertNotIn("case-a",text)
+            newer=types.SimpleNamespace(LAST_CASE={**older.LAST_CASE,"at":CHECK.LAST_CASE["at"]+1})
+            self.assertTrue(CHECK.last_case_text([CHECK,newer]).startswith("最後に旧新を流し終えた case: case-a\n"))
+        finally:
+            CHECK.LAST_CASE.clear();CHECK.LAST_CASE.update(saved)
 
     def saving_case(self, old_action, new_action, initial=None, old_code=0):
         with tempfile.TemporaryDirectory(prefix="s2l-comparator-") as temporary:
@@ -438,6 +457,19 @@ class ComparisonTest(unittest.TestCase):
                 CHECK.Comparison('/owned/fixture').run(['python3',str(other),'stop-control'])
         record=CHECK.interpreter_record()
         self.assertEqual(record['sitecustomize'],'absent');self.assertIn('RLIMIT_NOFILE',record['inherited_limits'])
+        # 子の process group: ESRCH だけを「無い」と見る。Mac のゾンビだけの EPERM は回収まで待つ。生きていればすぐ偽。
+        def sequence(*results):
+            items=list(results)
+            def killpg(pid,signal_number):
+                item=items.pop(0)
+                if item is not None:raise item
+            return killpg
+        for results,zombie_wait,expected in [((ProcessLookupError(),),3,True),((None,),3,False),
+                                             ((PermissionError(),PermissionError(),ProcessLookupError()),3,True),
+                                             ((PermissionError(),)*1000,0.03,False)]:
+            with self.subTest(results=[type(r).__name__ for r in results[:3]]),mock.patch.object(CHECK.os,'killpg',sequence(*results)):
+                self.assertIs(CHECK.process_group(1,zombie_wait)[0],expected)
+        with mock.patch.object(CHECK.os,'killpg',sequence(OSError(5,'Input/output error'))),self.assertRaises(OSError):CHECK.process_group(1)
 
     def test_legacy_child_keeps_pyyaml_version_and_path_after_home_change(self):
         import os,yaml

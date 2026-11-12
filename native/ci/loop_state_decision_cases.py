@@ -132,8 +132,11 @@ class Runner:
                 os.killpg(child.pid, 0)
             except ProcessLookupError:
                 break
+            except PermissionError:
+                # Mac(XNU)は、ゾンビだけが残る process group に EPERM を返す。回収されるまで待つ。
+                pass
             if time.monotonic() > deadline:
-                raise AssertionError("S2L_CHILD_REMAINS")
+                raise AssertionError("S2L_CHILD_REMAINS: " + " ".join(map(os.fsdecode, argv[-6:])))
             time.sleep(0.01)
         return subprocess.CompletedProcess(argv, child.returncode, out or b"", err or b""), seconds
 
@@ -142,13 +145,16 @@ class Runner:
         results = []
         states = []
         seconds_pair = []
-        for engine in ([sys.executable, "-B", str(check.LEGACY)], [str(self.fixture)]):
+        check.start_case(label)
+        for side, engine in (("old", [sys.executable, "-B", str(check.LEGACY)]), ("new", [str(self.fixture)])):
             check.restore_output(output, None)
             result, seconds = self.launch([*engine, *map(os.fspath, argv)], env, **options)
+            check.record(side, result)
             results.append(result)
             seconds_pair.append(seconds)
             states.append(check.output_state(output))
         old, new = results
+        check.remember(label, old, new)
         (compare or check.compare_result)(label, old, new)
         if states[0] != states[1]:
             raise check.Mismatch(f"S2L_STATE: {label}: {states[0]!r} != {states[1]!r}")

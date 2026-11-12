@@ -54,7 +54,7 @@ def run(fixture):
                 else:env[os.fsencode(key)]=os.fsencode(value)
             check.verify_child_environment(env,delta)
             for command,tail in valid.items():
-                argv=[command,*map(os.fspath,tail),'--max-items','0'];old=contracts.invoke([sys.executable,'-B',str(check.LEGACY),*argv],env,root);new=contracts.invoke([str(fixture),*argv],env,root)
+                argv=[command,*map(os.fspath,tail),'--max-items','0'];check.start_case(f'{setting}/{command}');old=contracts.invoke([sys.executable,'-B',str(check.LEGACY),*argv],env,root);new=contracts.invoke([str(fixture),*argv],env,root);check.remember(f'{setting}/{command}',old,new)
                 assert new.returncode==20 and new.stdout==b'' and new.stderr==REASON.encode('utf-8'),f'ENCODING_FIXED_UTF8:{setting}/{command}'
                 if codec is None:assert old_startup(setting,old),f'ENCODING_OLD_STARTUP:{setting}/{command}: {old!r}'
                 else:assert old.returncode==20 and old.stdout==b'' and old.stderr==REASON.encode(codec,'backslashreplace'),f'ENCODING_OLD_CODEC:{setting}/{command}: {old!r}'
@@ -69,10 +69,10 @@ def run(fixture):
                 with path.open('wb') as stream:
                     result=subprocess.run([*prefix,'state-digest','--state',str(state)],env=env,stdin=subprocess.DEVNULL,stdout=stream,stderr=subprocess.PIPE,timeout=8,check=False)
                 expected=digest.encode(codec if engine=='old' else 'utf-8')
-                assert result.returncode==0 and result.stderr==b'' and path.read_bytes()==expected,f'ENCODING_REGULAR_FILE:{codec}/{engine}'
+                assert result.returncode==0 and result.stderr==b'' and path.read_bytes()==expected,f'ENCODING_REGULAR_FILE:{codec}/{engine}: exit={result.returncode} stderr={result.stderr[-600:]!r} file={path.read_bytes()[-200:]!r}'
         # 未知handlerは初期化時は通り、stdoutで非ASCIIを符号化する時に失敗する。
         left=root/'before';right=root/'after';left.write_bytes(contracts.canonical(contracts.BASE));right.write_bytes(contracts.canonical({**contracts.BASE,'config':['changed']}));env=arguments.environment();env[b'PYTHONIOENCODING']=b'ascii:s2l_no_handler'
-        argv=['compare','--before',str(left),'--after',str(right)];old=contracts.invoke([sys.executable,'-B',str(check.LEGACY),*argv],env,root);new=contracts.invoke([str(fixture),*argv],env,root)
+        argv=['compare','--before',str(left),'--after',str(right)];check.start_case('unknown-handler-write');old=contracts.invoke([sys.executable,'-B',str(check.LEGACY),*argv],env,root);new=contracts.invoke([str(fixture),*argv],env,root);check.remember('unknown-handler-write',old,new)
         source=str(check.LEGACY)
         expected=('Traceback (most recent call last):\n'+f'  File "{source}", line 2201, in <module>\n    raise SystemExit(main())\n'+f'  File "{source}", line 2194, in main\n    return compare(args)\n'+f'  File "{source}", line 2040, in compare\n    for line in diagnostic_diffs(before, after, required): print("差分: " + line)\n'+"LookupError: unknown error handler name 's2l_no_handler'\n").encode('ascii','backslashreplace')
         assert old.returncode==1 and old.stdout==b'' and old.stderr==expected,'ENCODING_UNKNOWN_HANDLER_WRITE'

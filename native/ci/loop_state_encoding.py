@@ -100,6 +100,7 @@ def _run(TMP,NEW):
    events.append(event);at=end+1
   return events
  
+ def result_of(row):return subprocess.CompletedProcess([],row['exit'],bytes.fromhex(row['stdout']['hex']),bytes.fromhex(row['stderr']['hex']))
  def run(who,command,setting):
   clear_output();gitlog.write_bytes(b'')
   env=base.copy();env.update(setting)
@@ -109,13 +110,13 @@ def _run(TMP,NEW):
   timed=False
   try:out,err=p.communicate(timeout=10)
   except subprocess.TimeoutExpired:timed=True;os.killpg(p.pid,signal.SIGKILL);out,err=p.communicate(timeout=2)
-  try:os.killpg(p.pid,0);absent=False
-  except ProcessLookupError:absent=True
+  absent,_=s2l_comparator.process_group(p.pid)
   events=git_events(gitlog.read_bytes())
   return {'exit':p.returncode,'stdout':describe(out),'stderr':describe(err),'output':output_state(),'initial_output_absent':True,'git_events':events,'git_log':describe(gitlog.read_bytes()),'timeout':timed,'group_absent':absent,'seconds':round(time.monotonic()-start,6)}
  
  # Old successful output is the baseline oracle; explicit semantic assertions below
  # prevent a no-op or stale output from becoming the Rust expectation.
+ s2l_comparator.start_case('encoding pilot(旧版の snapshot)')
  pilot=run('legacy','snapshot',{})
  (DIR/'utf8-normal-v3-pilot.json').write_text(json.dumps({'tmp':str(TMP),'pilot':pilot,'setup':setup},ensure_ascii=True,indent=2)+'\n')
  if sys.platform=='darwin':
@@ -176,7 +177,9 @@ def _run(TMP,NEW):
  start=time.monotonic()
  for setting,delta in settings:
   for command in commands:
-   old=run('legacy',command,delta);new=run('rust',command,delta)
+   s2l_comparator.start_case(f'encoding {setting}/{command}')
+   old=run('legacy',command,delta);s2l_comparator.record('old',result_of(old));new=run('rust',command,delta)
+   s2l_comparator.remember(f'encoding {setting}/{command}',result_of(old),result_of(new))
    old_ok=check_old(old,command,setting);new_ok=check(new,expected[command])
    same=all(old[k]==new[k] for k in ('exit','stdout','stderr','output'))
    row={'setting':setting,'command':command,'argv_hex':[raw(x).hex() for x in commands[command]],'env_delta':{os.fsdecode(k):describe(v) for k,v in delta.items()},'legacy_expected':old_ok,'rust_expected':new_ok,'raw_same':same,'legacy':old,'rust':new}

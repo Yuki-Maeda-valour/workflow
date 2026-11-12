@@ -28,6 +28,74 @@ class Mismatch(AssertionError):
     pass
 
 
+# いま流している(または最後に流した)case。失敗したときに、その label と旧新の結果の末尾を CI に残す。
+# case を起動する前に label だけを記録し、旧新の結果は流し終えた側から足す(合否は変えない)。
+LAST_CASE = {}
+
+
+def start_case(label):
+    LAST_CASE.clear()
+    LAST_CASE.update(label=label, at=time.monotonic_ns())
+
+
+def record(side, result):
+    LAST_CASE[side] = result
+
+
+def remember(label, old, new):
+    if LAST_CASE.get("label") != label:
+        start_case(label)
+    LAST_CASE.update(old=old, new=new)
+
+
+def last_case_text(modules=None):
+    """いちばん新しく記録した 1 件の case の label と、旧新の結果の末尾。
+
+    本体として起動すると、比較器自身(__main__)と case の部品が読み込む check_loop_state は別の module になる。
+    2 つの記録のうち、起動の前に記録した時刻がいちばん新しいものだけを出す。
+    """
+    if modules is None:
+        modules = {id(m): m for m in (sys.modules.get("check_loop_state"), sys.modules.get(__name__)) if m}.values()
+    cases = [case for case in (getattr(module, "LAST_CASE", {}) for module in modules) if case]
+    if not cases:
+        return ""
+    case = max(cases, key=lambda row: row["at"])
+    finished = case.get("old") is not None and case.get("new") is not None
+    rows = [("最後に旧新を流し終えた case: " if finished else "失敗した時に流していた case: ") + case["label"]]
+    for side in ("old", "new"):
+        result = case.get(side)
+        if result is None:
+            rows.append(f"  {side}: (結果なし)")
+            continue
+        rows.append(f"  {side}: 終了値 {getattr(result, 'returncode', None)!r} "
+                    f"標準出力の末尾 {(getattr(result, 'stdout', b'') or b'')[-600:]!r} "
+                    f"標準エラーの末尾 {(getattr(result, 'stderr', b'') or b'')[-600:]!r}")
+    return "\n".join(rows)
+
+
+def process_group(pid, zombie_wait=3.0):
+    """killpg(pid, 0) で、子の process group が無くなったか。(無いか, 見た結果) を返す。
+
+    Mac(XNU の kern_sig.c の killpg1)は、ゾンビだけが残る process group に ESRCH ではなく EPERM を返す。
+    そのときだけ、回収されて ESRCH になるまで zombie_wait 秒まで待つ。0(生きている)はすぐに偽を返す
+    (Linux の動きは変えない)。
+    """
+    deadline = time.monotonic() + zombie_wait
+    eperm = 0
+    while True:
+        try:
+            os.killpg(pid, 0)
+        except ProcessLookupError:
+            return True, f"ESRCH(EPERM {eperm} 回の後)" if eperm else "ESRCH"
+        except PermissionError:
+            eperm += 1
+            if time.monotonic() < deadline:
+                time.sleep(0.01)
+                continue
+            return False, f"EPERM {eperm} 回"
+        return False, "alive"
+
+
 def os_label():
     return "macos" if sys.platform == "darwin" else sys.platform
 
@@ -300,10 +368,13 @@ class Comparison:
         legacy_command=[sys.executable,*command[1:]]
         if Path(str(command[1])).name != LEGACY_NAME:
             raise Mismatch("S2L_LEGACY_NAME: 旧スクリプトの名前が固定名と違う")
+        start_case(" ".join(map(str, target)))
         old = _RUN(legacy_command, *args, **kwargs)
+        record("old", old)
         state = output_state(output)
         restore_output(output, initial)
         new = _RUN([self.fixture, *target], *args, **kwargs)
+        remember(" ".join(map(str, target)), old, new)
         compare_result(" ".join(map(str, target)), old, new)
         actual = output_state(output)
         if state != actual:
@@ -543,17 +614,20 @@ def main():
             report["legacy_class_applicability"]="Linux固定期待57件はRustの22観測/共通8性質へ対応付ける。Macは全7CLIの実拒否/成功を個別期待で比較する"
         if not args.case:
             import loop_state_arguments,loop_state_contract_cases,loop_state_encoding,loop_state_yaml_cases,loop_state_encoding_matrix,loop_state_decision_cases
-            report["arguments"]=loop_state_arguments.arguments(fixture)
-            report["terminals"]=loop_state_arguments.terminals(fixture)
-            report["contracts"]=loop_state_contract_cases.run(fixture)
-            report["encoding"]=loop_state_encoding.run(fixture)
-            report["yaml"]=loop_state_yaml_cases.run(fixture)
-            report["encoding_matrix"]=loop_state_encoding_matrix.run(fixture)
-            report["decisions"]=loop_state_decision_cases.run(fixture)
+            # 群の準備(case の前)で止まったときも、前の群の case を出さないよう、群の名前を先に記録する。
+            for group,call in [("arguments",loop_state_arguments.arguments),("terminals",loop_state_arguments.terminals),
+                               ("contracts",loop_state_contract_cases.run),("encoding",loop_state_encoding.run),
+                               ("yaml",loop_state_yaml_cases.run),("encoding_matrix",loop_state_encoding_matrix.run),
+                               ("decisions",loop_state_decision_cases.run)]:
+                start_case(group+" の準備(case の前)")
+                report[group]=call(fixture)
             require_full_coverage(report)
         if hashlib.sha256(fixture.read_bytes()).hexdigest()!=before:raise Mismatch("S2L_BINARY_CHANGED_DURING_COMPARISON")
         report["seconds"]=round(time.monotonic()-start,3);print(json.dumps(report,ensure_ascii=False));return 0
     except (OSError,ValueError,RuntimeError,AssertionError,subprocess.TimeoutExpired) as exc:
-        print(f"異常: {exc}",file=sys.stderr);return 1
+        print(f"異常: {exc}",file=sys.stderr)
+        context=last_case_text()
+        if context:print(context,file=sys.stderr)
+        return 1
 
 if __name__=="__main__":raise SystemExit(main())

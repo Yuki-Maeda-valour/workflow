@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """S2L の引数404件とPTY40件。旧CLIを同じ物理入力で直接起動する。"""
 from __future__ import annotations
-import errno,fcntl,hashlib,json,os,pty,signal,struct,subprocess,sys,tempfile,termios,time
+import errno,fcntl,hashlib,json,os,pty,select,signal,struct,subprocess,sys,tempfile,termios,threading,time
 from pathlib import Path
 import yaml
 ROOT=Path(__file__).resolve().parents[2]
@@ -116,8 +116,28 @@ def argument_cases(TMP,boundaries):
     assert len(cases)==404, len(cases)
     return cases
 
-def run_pty(prefix,args,env,cwd,mode,width):
- master=slave=None;p=None;timed=False;start=time.monotonic()
+def run_pty(prefix,args,env,cwd,mode,width,label=''):
+ """疑似端末の 1 回の起動。子が動いている間も主側(master)を読み続ける。
+
+ Mac の疑似端末は、読まれずに溜められる量が Linux より小さい。子が終わってから読むと、
+ `--help` のような出力で子が書込みで止まり、時間切れになる。旧版と Rust に同じ読み方を当てる。
+ """
+ master=slave=None;p=None;timed=False;start=time.monotonic();chunks=[];failures=[];done=threading.Event();reader=None
+ def drain():
+  try:
+   while True:
+    finished=done.is_set()
+    ready,_,_=select.select([master],[],[],0.02)
+    if ready:
+     try:chunk=os.read(master,65536)
+     except BlockingIOError:chunk=None
+     except OSError as e:
+      if e.errno==errno.EIO:return
+      raise
+     if chunk:chunks.append(chunk);continue
+     if chunk==b'':return
+    if finished:return
+  except BaseException as e:failures.append(e)
  try:
   master,slave=pty.openpty()
   attrs=termios.tcgetattr(slave);attrs[1]&=~termios.OPOST
@@ -126,28 +146,31 @@ def run_pty(prefix,args,env,cwd,mode,width):
   actual=list(struct.unpack('HHHH',fcntl.ioctl(slave,termios.TIOCGWINSZ,b'\0'*8)))
   assert actual==[24,width,0,0]
   guard(env)
+  os.set_blocking(master,False)
   p=subprocess.Popen([*prefix,*args],stdin=subprocess.DEVNULL,stdout=slave if mode=='stdout-pty' else subprocess.PIPE,stderr=subprocess.PIPE if mode=='stdout-pty' else slave,env=env,cwd=cwd,start_new_session=True)
+  reader=threading.Thread(target=drain,daemon=True);reader.start()
   try:out,err=p.communicate(timeout=5)
   except subprocess.TimeoutExpired:
    timed=True;os.killpg(p.pid,signal.SIGKILL);out,err=p.communicate(timeout=2)
-  os.set_blocking(master,False);chunks=[]
-  while True:
-   try:chunk=os.read(master,65536)
-   except OSError as e:
-    if e.errno in (errno.EIO,errno.EAGAIN,errno.EWOULDBLOCK):break
-    raise
-   if not chunk:break
-   chunks.append(chunk)
-  capture=b''.join(chunks)
+  # 子が終わった後に溜まっている分まで読んでから止める。
+  done.set();reader.join(timeout=5)
+  capture=b''.join(chunks);piped=out if mode=='stderr-pty' else err
   if mode=='stdout-pty':out=capture
   else:err=capture
-  try:os.killpg(p.pid,0);absent=False
-  except ProcessLookupError:absent=True
-  assert not timed and absent, 'PTY_TIMEOUT_OR_CHILD_REMAINS'
+  import check_loop_state as check
+  try:absent,group=check.process_group(p.pid)
+  except OSError as e:absent=False;group=f'{type(e).__name__} errno={e.errno}'
+  error=repr(failures[0]) if failures else 'None'
+  detail=(f'{label or " ".join(map(os.fsdecode,args))} mode={mode} width={width} timed={timed} absent={absent} killpg={group} '
+          f'seconds={time.monotonic()-start:.3f} returncode={p.returncode} pty_bytes={len(capture)} pipe_bytes={len(piped or b"")} '
+          f'reader_alive={reader.is_alive()} reader_error={error}')
+  assert not timed and absent and not reader.is_alive() and not failures, 'PTY_TIMEOUT_OR_CHILD_REMAINS: '+detail
   return subprocess.CompletedProcess([*prefix,*args],p.returncode,out,err)
  finally:
   if p is not None and p.poll() is None:
    os.killpg(p.pid,signal.SIGKILL);p.communicate(timeout=2)
+  done.set()
+  if reader is not None:reader.join(timeout=5)
   for fd in (master,slave):
    if fd is not None:os.close(fd)
 
@@ -164,9 +187,10 @@ def arguments(fixture):
                 else:env[key]=value
             import check_loop_state as check
             check.verify_child_environment(env,{os.fsdecode(k):v for k,v in case['env'].items() if k.startswith(b'PYTHON')})
-            old=run([os.fsencode(sys.executable),b'-B',os.fsencode(LEGACY),*case['args']],env,root)
+            check.start_case(case['label'])
+            old=run([os.fsencode(sys.executable),b'-B',os.fsencode(LEGACY),*case['args']],env,root);check.record('old',old)
             new=run([os.fsencode(fixture),*case['args']],env,root)
-            equal(case['label'],old,new)
+            check.remember(case['label'],old,new);equal(case['label'],old,new)
         assert before==[identity(p)for p in inputs], 'CLI_ARGUMENT_INPUT_CHANGED'
     return {'arguments':len(cases),'skipped':0,'os_boundaries':boundaries,'seconds':round(time.monotonic()-started,3)}
 
@@ -188,8 +212,12 @@ def terminals(fixture):
         for setting,width,command,mode in cases:
             env=base.copy()
             if setting is not None:env[b'COLUMNS']=setting.encode()
-            args=([]if command=='root'else[command])+['--help'];old=run_pty([sys.executable,'-B',str(LEGACY)],args,env,temporary,mode,width);new=run_pty([str(fixture)],args,env,temporary,mode,width)
-            equal(f'{mode}/{command}/{setting}/{width}',old,new)
+            args=([]if command=='root'else[command])+['--help'];label=f'{mode}/{command}/{setting}/{width}'
+            import check_loop_state as check
+            check.start_case(label)
+            old=run_pty([sys.executable,'-B',str(LEGACY)],args,env,temporary,mode,width,'old '+label);check.record('old',old)
+            new=run_pty([str(fixture)],args,env,temporary,mode,width,'new '+label)
+            check.remember(label,old,new);equal(label,old,new)
             effective=80 if setting=='80' or mode=='stderr-pty' else width
             equal('PTY_FIXED_WIDTH_EXPECTATION',known[command,effective],old)
     return {'pty':len(cases),'skipped':0,'seconds':round(time.monotonic()-started,3)}
