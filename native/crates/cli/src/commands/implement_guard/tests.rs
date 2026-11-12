@@ -964,6 +964,9 @@ fn signals_at_tool_points_match_the_measured_old_version() {
     assert!(checked > 0);
 }
 
+// 故障の固定期待は、Linux(glibc 2.39)の旧版に LD_PRELOAD で起こして測ったもので、errno の文(例: EBUSY の
+// `Device or resource busy`)が Mac の `strerror_r` の文と違う。旧版の測定と同じ Linux だけで照らす。
+#[cfg(target_os = "linux")]
 #[test]
 fn faults_match_the_measured_old_version() {
     // LD_PRELOAD で旧版に起こした失敗(mkdir・unlinkat・read・getdelim)と同じ地点を差し込み点で起こし、

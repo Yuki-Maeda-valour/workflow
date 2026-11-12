@@ -1163,10 +1163,19 @@ mod tests {
             return;
         }
         redirect_stdin_to_dev_null().unwrap();
-        let target = std::fs::read_link("/proc/self/fd/0")
-            .map(|p| p.as_os_str().as_bytes().to_vec())
-            .unwrap_or_else(|_| b"/dev/null".to_vec());
-        assert_eq!(target, b"/dev/null");
+        // fd 0 が /dev/null を指す(`/proc` と `/dev/fd` の見え方は OS で違うので、fd 0 そのものを fstat して、
+        // /dev/null の stat と種類・rdev・ino・dev を比べる)。
+        use std::os::fd::AsFd;
+        let stdin = rustix::fs::fstat(std::io::stdin().as_fd()).unwrap();
+        let null = rustix::fs::stat("/dev/null").unwrap();
+        assert_eq!(
+            rustix::fs::FileType::from_raw_mode(stdin.st_mode),
+            rustix::fs::FileType::CharacterDevice
+        );
+        assert_eq!(
+            (stdin.st_rdev, stdin.st_ino, stdin.st_dev),
+            (null.st_rdev, null.st_ino, null.st_dev)
+        );
         // 読み取り専用で開いた。
         // SAFETY: fcntl は整数だけを使う。
         let flags = unsafe { libc::fcntl(0, libc::F_GETFL) };

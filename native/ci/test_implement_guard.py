@@ -4,7 +4,8 @@
 正しい例(今回ビルドした検査専用入口)を先に通し、次に 1 か所ずつ壊した偽の入口(追加の決定 4 の名前を
 受け継いだ値と違う値で渡すものを含む)・時間切れ・実行不能・0 件・
 境界の印の誤用・版の違う道具の文・musl の strerror の文・selftest の許す失敗の一覧の外れと中の成功・
-Rust を通った行の不足を与え、すべて失敗になることを確かめる。偽の入口は C で組み、本物を起動してから
+Rust を通った行の不足を与え、すべて失敗になることを確かめる。bash 4.0 以上が無い Mac をまねた範囲 mac・signed
+(偽の bash 3.2 を PATH の先頭に置く)で、Mac の固定期待の全件が比べられて合格することも確かめる。偽の入口は C で組み、本物を起動してから
 (または起動の前に)1 か所だけを変える。
 """
 import dataclasses
@@ -332,6 +333,54 @@ class Broken(unittest.TestCase):
         own = subject.Result(0, b'', str(subject.OLD).encode() + b': line 3: x\n', False, 0)
         self.assertEqual(subject.normalize(own, True).stderr, b'implement-guard.sh: line 3: x\n')
         self.assertEqual(subject.normalize(own, False).stderr, own.stderr)
+
+
+FAKE_BASH32 = '''#!/bin/sh
+# 偽の bash 3.2(GitHub の macOS の実行機の /bin/bash の版)。版の問い合わせには 3 を返し、ほかの起動(旧版の
+# implement-guard.sh の take など)には、旧版が bash 3.2 で出す行と終了値 2 を返す。
+case "$1" in -c) case "$2" in *BASH_VERSINFO*) echo 3; exit 0 ;; esac ;; esac
+echo "ERROR [usage] bash 4.0 以上が必要" >&2
+exit 2
+'''
+NESTED = 'S3IA_NO_BASH4_NESTED'   # 入れ子の比較器の中で、この件を流さない印
+
+
+class NoBash4(unittest.TestCase):
+    """bash 4.0 以上が無い Mac をまねる: 偽の bash 3.2 を PATH の先頭に置き、BASH=None で範囲 mac と signed を
+    流し、Mac の固定期待の全件(配置の要る 8 件は Python で書く記録)が比べられて合格すること。"""
+
+    @unittest.skipIf(MAC, 'Mac の実行機は、bash 4.0 以上が無ければ本物の範囲 mac・signed がこの道を通る')
+    @unittest.skipIf(os.environ.get(NESTED), 'この件が起動した入れ子の範囲 mac・signed の中')
+    def test_fixed_expectations_without_bash4(self):
+        get_subject()
+        if subject.FIXTURE is None:
+            self.skipTest('単独で流すときは、検査専用入口が無い')
+        for other in ('/opt/homebrew/bin/bash', '/usr/local/bin/bash'):
+            if os.access(other, os.X_OK):
+                done = subprocess.run([other, '-c', 'echo ${BASH_VERSINFO[0]}'], capture_output=True)
+                if done.stdout.strip().isdigit() and int(done.stdout) >= 4:
+                    self.skipTest(f'{other} が bash 4.0 以上なので、偽の bash だけでは BASH を空にできない')
+        directory = Path(tempfile.mkdtemp(prefix='s3ia-nobash4-', dir=str(Path.home())))
+        try:
+            fake = directory / 'bin'
+            fake.mkdir()
+            (fake / 'bash').write_text(FAKE_BASH32)
+            (fake / 'bash').chmod(0o755)
+            env = {**os.environ, 'PATH': f'{fake}:{os.environ.get("PATH", "")}', NESTED: '1'}
+            for scope in ('mac', 'signed'):
+                done = subprocess.run([sys.executable, '-B', str(Path(subject.__file__).resolve()), '--fixture',
+                                       str(subject.FIXTURE), '--scope', scope], env=env, capture_output=True,
+                                      stdin=subprocess.DEVNULL, timeout=1200)
+                out = done.stdout.decode(errors='replace')
+                err = done.stderr.decode(errors='replace')
+                self.assertEqual(done.returncode, 0, f'範囲 {scope}: {out[-2000:]}{err[-2000:]}')
+                self.assertIn('S3I-A: 未実施: 旧版との比較の全部: bash 4.0 以上が無い', out)
+                self.assertIn(f'旧版と比べた 0 件・固定期待で確かめた {len(subject.MAC_FIXED_CASES)} 件', out)
+                self.assertNotIn('S3I-A: 不合格', err)
+                self.assertTrue(out.rstrip().endswith('S3I-A: 合格'), out[-500:])
+        finally:
+            subject.make_writable(directory)
+            shutil.rmtree(directory, ignore_errors=True)
 
 
 class Selftest(unittest.TestCase):

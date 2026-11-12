@@ -12,7 +12,8 @@
   比べ、外した名前ごとの旧版と Rust の有無と値をケースごとに出す。Rust の側は、受け継いだ値と同じか、受け継いで
   いなければ無いことを確かめる。
 - 範囲 full の段: 群・決定 D5・PATH を絞った Rust・詰めた FIFO の信号(helper の引数の誤りの応答を書く間の
-  SIGINT〈KeyboardInterrupt〉を含む)・strace・/dev/null を開けない起動(名前空間を作れる機械だけ)・fd 0〜2 を
+  SIGINT〈KeyboardInterrupt〉を含む)・Python で書く記録(bash 4.0 以上が無いときの配置。旧版の take の記録と
+  同じこと)・strace・/dev/null を開けない起動(名前空間を作れる機械だけ)・fd 0〜2 を
   閉じた起動(08:55 の決定。旧版と Rust をそれぞれの固定期待で確かめ、互いには比べない)・旧 selftest の 2 通り。
 - 旧版の測定の照らし(implement_guard_measure.py --check)は、ここでは流さない(手元の基準の容器で流す。CI の
   時間。2026-11-12 12:59 の決定)。ここでは、その固定期待の件数と sha256 だけを確かめる。
@@ -437,7 +438,8 @@ TASK_TEXT = b'# t\n- [ ] one\n- [ ] two\nbody\n'
 
 def make_world(base, *, task=TASK_TEXT, task_path='task/t.md', suffix='fixed', prepare=None, take=True,
                select=None):
-    """git のリポジトリと未追跡のタスク本文を作り、旧版の take で記録を作る(guard-<suffix> の名前に決める)。"""
+    """git のリポジトリと未追跡のタスク本文を作り、旧版の take で記録を作る(guard-<suffix> の名前に決める)。
+    bash 4.0 以上が無ければ、同じ形の記録を Python で書く(take_record)。"""
     base = Path(base)
     if base.exists():
         make_writable(base)
@@ -464,11 +466,7 @@ def make_world(base, *, task=TASK_TEXT, task_path='task/t.md', suffix='fixed', p
                'PATH': f'{TOOLS.fixed_dir}:{os.environ.get("PATH", "")}', 'GIT_CONFIG_GLOBAL': '/dev/null'}
         env.pop('TMPDIR', None)
         selected = select if select is not None else task_path
-        done = subprocess.run(['bash', str(OLD), 'take', '--cwd', str(repo), '--task-md', selected], env=env,
-                              capture_output=True, cwd=repo)
-        if done.returncode:
-            raise AssertionError('旧版の take が失敗した: ' + done.stderr.decode(errors='replace'))
-        fields = dict(line.split(b'=', 1) for line in done.stdout.splitlines())
+        fields = take_record(repo, selected, env, '旧版の take が失敗した: ')
         world.state = os.fsdecode(fields[b'STATE_DIR'])
         world.man = fields[b'MANIFEST_SHA256'].decode()
         world.snap = fields[b'SNAPSHOT_SHA256'].decode()
@@ -532,6 +530,730 @@ def reseal(world):
     """記録を書き換えた後に、2 つのダイジェストを合わせ直す。"""
     world.man = sha256_file(Path(world.state) / 'manifest.tsv')
     world.snap = snapshot_digest(world.state)
+
+
+# ---- 旧版の take と同じ形の記録(bash 4.0 以上が無いとき。設計 Task 4.1・テスト計画の「Mac」) ----
+#
+# bash 4.0 以上が無い機械(GitHub の macOS の実行機の Bash 3.2.57)では、旧版の take が `bash 4.0 以上が必要` で
+# 止まる。範囲 mac・signed の固定期待の配置は、旧版の cmd_take を比較器の配置(1 つのリポジトリ。下のリポジトリ・
+# .gitmodules・include の無い設定・unmerged が無い)の範囲で写した Python で書く。同じ配置で旧版の take の記録と
+# 同じこと(記録の中のファイルの名前・種類・mode・中身、take の stdout と stderr、記録を読む旧版と Rust の結果)は、
+# Linux の範囲 full の段 run_record_writer が確かめる。範囲の外の配置は推し量らずに止める。
+
+TAKE_GIT_PRE = ('--no-pager', '--no-replace-objects', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=',
+                '-c', 'core.hooksPath=/dev/null', '-c', 'core.ignoreCase=false', '-c', 'core.splitIndex=false')
+TAKE_GIT_PRE_HOOKS = ('--no-pager', '--no-replace-objects', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=',
+                      '-c', 'core.ignoreCase=false', '-c', 'core.splitIndex=false')
+TAKE_DIFF_CFG = ('-c', 'diff.autoRefreshIndex=false', '-c', 'core.ignoreStat=false')
+TAKE_CONFIG_ENV = ('HOME', 'XDG_CONFIG_HOME', 'GIT_CONFIG', 'GIT_CONFIG_GLOBAL', 'GIT_CONFIG_SYSTEM',
+                   'GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_PARAMETERS')
+TAKE_APPLE_GIT = re.compile(rb'git version [^ ]+ \(Apple Git-[0-9]+(\.[0-9]+)*\)')
+TAKE_MAN_PATH = re.compile(rb'/.+/share/man')
+QUOTES = {value: key for key, value in ESCAPES.items() if key not in (b'"', b'\\')}
+RECORD_CHECK = None   # list を入れると、take_record が旧版の take と Python の両方で記録を作り、違いを足す
+
+
+class TakeOutside(AssertionError):
+    """Python の記録が写していない配置(旧版の take なら縮退か別の記録になる)。"""
+
+
+def path_field(value):
+    """旧版の path_field(needs_quote のときだけ cquote。LC_ALL=C の 1 バイトずつ)。"""
+    if not (value.startswith(b'"') or b'"' in value or b'\\' in value or any(c < 0x20 or c == 0x7f for c in value)):
+        return value
+    out = bytearray(b'"')
+    for c in value:
+        ch = bytes([c])
+        if ch in (b'"', b'\\'):
+            out += b'\\' + ch
+        elif ch in QUOTES:
+            out += b'\\' + QUOTES[ch]
+        elif c < 0x20 or c == 0x7f:
+            out += b'\\%03o' % c
+        else:
+            out += ch
+    return bytes(out + b'"')
+
+
+def split_path(value):
+    """旧版の split_path → (SP_DIR, SP_BASE)。"""
+    if re.fullmatch(rb'.*/.+', value, re.S):
+        head, _, tail = value.rpartition(b'/')
+        return head or b'/', tail
+    if value == b'/':
+        return b'/', b''
+    return b'.', value
+
+
+def norm_rest(rest):
+    """旧版の norm_rest(まだ無い部分の `..` を語彙的に打ち消す。打ち消しきれなければ None)。"""
+    out = []
+    for segment in rest.split(b'/'):
+        if segment in (b'', b'.'):
+            continue
+        if segment == b'..':
+            if not out:
+                return None
+            out.pop()
+        else:
+            out.append(segment)
+    return b'/'.join(out)
+
+
+def mode_text(path):
+    """旧版の stat_mode(リンクを辿らない 8 進。Rust の mode_text と同じ)。"""
+    return b'%o' % (os.lstat(path).st_mode & 0o7777)
+
+
+def identity(path):
+    """旧版の stat_identity(`stat -c '%d:%i'`。リンクを辿らない)。"""
+    info = os.lstat(path)
+    return b'%d:%d' % (info.st_dev, info.st_ino)
+
+
+def sha_hex(data):
+    return hashlib.sha256(data).hexdigest().encode()
+
+
+class PyTake:
+    """旧版の cmd_take の写し。引数・環境は旧版の take の起動と同じ(env は起動に渡す dict)。"""
+
+    def __init__(self, cwd, select, env):
+        self.cwd = os.fsencode(cwd)
+        self.task_md = os.fsencode(select)
+        self.env = dict(env)
+        self.git_env = {k: v for k, v in env.items()
+                        if k not in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_COMMON_DIR', 'GIT_PREFIX')}
+        self.git_env.update(LC_ALL='C', GIT_NO_LAZY_FETCH='1', GIT_OPTIONAL_LOCKS='0')
+        self.stderr = bytearray()
+        self.top = self.cwd
+
+    def var(self, name):
+        value = self.env.get(name)
+        return None if value is None else os.fsencode(value)
+
+    def git(self, *args, cwd=None, env=None, stdin=None):
+        done = subprocess.run(['git', *args], cwd=cwd if cwd is not None else self.top,
+                              env=env if env is not None else self.git_env, input=stdin, capture_output=True)
+        return done.returncode, done.stdout
+
+    def capture(self, *args, **kw):
+        """capture_path(末尾の改行 1 個を落とす)。"""
+        rc, out = self.git(*args, **kw)
+        return rc, out[:-1] if out.endswith(b'\n') else out
+
+    def must(self, *args, **kw):
+        rc, out = self.git(*args, **kw)
+        if rc:
+            raise TakeOutside(f'git {args[-1]!r} が終了値 {rc} を返した')
+        return out
+
+    def run(self):
+        mask = os.umask(0o077)
+        try:
+            return self._run()
+        finally:
+            os.umask(mask)
+
+    def _run(self):
+        if not os.path.isdir(self.cwd):
+            raise TakeOutside('--cwd が無い')
+        rc, top_raw = self.capture(*TAKE_GIT_PRE, '-C', self.cwd, 'rev-parse', '--show-toplevel', cwd=self.cwd)
+        if rc or not top_raw:
+            raise TakeOutside('not-git')
+        self.top = os.path.realpath(top_raw)
+        self.cwd_phys = os.path.realpath(self.cwd)
+        if not (self.cwd_phys == self.top or self.cwd_phys.startswith(self.top + b'/')):
+            raise TakeOutside('toplevel が --cwd を含まない')
+        reviews = b'.claude/reviews'
+        self.excl = reviews if self.cwd_phys == self.top else self.cwd_phys[len(self.top) + 1:] + b'/' + reviews
+        self.excl_tmp = os.path.realpath(b'/tmp') if os.path.isdir(b'/tmp') else b''
+        tmpdir = self.var('TMPDIR')
+        self.excl_tmpdir = os.path.realpath(tmpdir) if tmpdir and os.path.isdir(tmpdir) else b''
+        state_base = self.resolve_state_base()
+        owner = self.prepare_owner_mark()
+        suffix = self.var('FIXED_GUARD_SUFFIX') or b'fixed'   # 比較器の mktemp(guard-XXXXXX の名前を決める)
+        new_state = state_base + b'/guard-' + suffix
+        os.mkdir(new_state, 0o700)
+        os.chmod(new_state, 0o700)
+        work = new_state + b'/.work'
+        for name in (work, new_state + b'/snapshot', new_state + b'/files'):
+            os.mkdir(name)
+        mark = self.write_owner_mark(new_state, owner, work)
+        self.taskmd(new_state, mark, owner)
+        # 旧版はここで cd -P -- "$TOP" する。ここから先の git は、cwd を TOP にして起動する(self.git の既定)。
+        self.config_origins(new_state, work)
+        self.collect_git(new_state, work)
+        return self.backup(new_state, work, mark)
+
+    # -- 保護領域(resolve_state_base) --
+    def forbidden(self, path):
+        return any(d and (path == d or path.startswith(d + b'/')) for d in (self.excl_tmp, self.excl_tmpdir, self.top))
+
+    def resolve_future(self, path):
+        rest = b''
+        while True:
+            if os.path.isdir(path):
+                real = os.path.realpath(path)
+                if rest:
+                    rest = norm_rest(rest)
+                    if rest is None:
+                        return None
+                    if rest:
+                        real = real + b'/' + rest
+                return real
+            if os.path.lexists(path) or path in (b'/', b'.', b''):
+                return None
+            path, base = split_path(path)
+            rest = base + b'/' + rest if rest else base
+
+    def resolve_state_base(self):
+        home = self.var('HOME') or b''
+        for candidate in (self.var('XDG_STATE_HOME') or b'', home + b'/.local/state', home + b'/.cache'):
+            if candidate in (b'', b'/.local/state', b'/.cache') or not candidate.startswith(b'/'):
+                continue
+            want = self.resolve_future(candidate + b'/dev-workflow')
+            if want is None or self.forbidden(want):
+                continue
+            try:
+                os.makedirs(want, exist_ok=True)
+            except OSError:
+                continue
+            with contextlib.suppress(OSError):
+                os.chmod(want, 0o700)
+            if not os.path.isdir(want):
+                continue
+            real = os.path.realpath(want)
+            if not self.forbidden(real):
+                return real
+        raise TakeOutside('no-protected-area')
+
+    # -- 所属の印(prepare_owner_mark・write_owner_mark) --
+    def prepare_owner_mark(self):
+        path = os.fsdecode(self.var('PATH') or b'')
+        for tool in ('link', 'od'):
+            if shutil.which(tool, path=path) is None:
+                return {'skip': f'{tool} が無い'.encode()}
+        rc, common = self.capture(*TAKE_GIT_PRE, '-C', self.top, 'rev-parse', '--git-common-dir')
+        if rc or not common:
+            return {'skip': '共通の置き場を求められない'.encode()}
+        common = os.path.realpath(common if common.startswith(b'/') else self.top + b'/' + common)
+        task = self.task_md if self.task_md.startswith(b'/') else self.cwd_phys + b'/' + self.task_md
+        if not os.path.exists(task):
+            return {'skip': 'タスク MD の在るフォルダを求められない'.encode()}
+        taskdir = os.path.realpath(split_path(os.path.realpath(task))[0])
+        tmpdir = self.var('TMPDIR') or b''
+        if tmpdir:
+            if not tmpdir.startswith(b'/'):
+                return {'skip': 'TMPDIR が相対パス(外部の実装役の起動場所によって指す先が変わる)'.encode()}
+            if not self.excl_tmpdir:
+                return {'skip': 'TMPDIR の物理パスを求められない'.encode()}
+            tmpdir = self.excl_tmpdir
+        return {'skip': b'', 'common': common, 'taskdir': taskdir, 'tmpdir': tmpdir,
+                'ids': [identity(p) for p in (self.top, common, taskdir)]}
+
+    def write_owner_mark(self, new_state, owner, work):
+        if owner['skip']:
+            self.stderr += 'NOTE: 所属の印を書けない: '.encode() + owner['skip'] + b'\n'
+            return False
+        guard = identity(new_state).split(b':')
+        lines = [b'version\t1', b'guard_dev\t' + guard[0], b'guard_ino\t' + guard[1]]
+        for key, value, ident in ((b'top', self.top, owner['ids'][0]), (b'common', owner['common'], owner['ids'][1]),
+                                  (b'taskdir', owner['taskdir'], owner['ids'][2])):
+            dev, ino = ident.split(b':')
+            lines += [key + b'\t' + value.hex().encode(), key + b'_dev\t' + dev, key + b'_ino\t' + ino]
+        lines.append(b'tmpdir\t' + owner['tmpdir'].hex().encode())
+        tmp = work + b'/owner-mark'
+        with open(tmp, 'wb') as handle:
+            handle.write(b''.join(line + b'\n' for line in lines))
+        os.chmod(tmp, 0o600)
+        mark = os.path.dirname(new_state) + b'/owner-' + os.path.basename(new_state)[len(b'guard-'):]
+        if os.path.lexists(mark):
+            os.unlink(tmp)
+            self.stderr += 'NOTE: 所属の印を書けない: 印の名前に既にエントリが在る: '.encode() + path_field(mark) + b'\n'
+            return False
+        os.link(tmp, mark)
+        os.unlink(tmp)
+        return True
+
+    # -- タスク MD の実体と taskmd.txt --
+    def taskmd(self, new_state, mark, owner):
+        select = self.task_md if self.task_md.startswith(b'/') else self.cwd_phys + b'/' + self.task_md
+        parent, base = split_path(select)
+        if not os.path.isdir(parent):
+            raise TakeOutside('taskmd(親が無い)')
+        self.sel = os.path.realpath(parent) + b'/' + base
+        kind = b'symlink' if os.path.islink(self.sel) else b'file'
+        if not os.path.exists(self.sel):
+            raise TakeOutside('taskmd(無い)')
+        self.real = os.path.realpath(self.sel)
+        if os.path.islink(self.real) or not os.path.isfile(self.real) or not os.access(self.real, os.R_OK):
+            raise TakeOutside('taskmd(通常ファイルでない・読めない)')
+        if mark and split_path(self.real)[0] != owner['taskdir']:
+            raise TakeOutside('タスク MD の在るフォルダが、印を書いた後に変わった')
+        self.real_rel = self.real[len(self.top) + 1:] if self.real.startswith(self.top + b'/') else b'\x01'
+        self.sel_rel = self.sel[len(self.top) + 1:] if self.sel.startswith(self.top + b'/') else b'\x01'
+        with open(new_state + b'/snapshot/taskmd.txt', 'wb') as handle:
+            handle.write(b'selected\t' + path_field(self.sel) + b'\nreal\t' + path_field(self.real) + b'\nkind\t'
+                         + kind + b'\n')
+
+    # -- 設定の出典(collect_config_origins・collect_context_plan) --
+    def env_row(self, name):
+        value = self.var(name)
+        state = b'unset' if value is None else b'set'
+        return b'env\t' + name.encode() + b'\t' + state + b'\t' + sha_hex(name.encode() + b':' + state + b':'
+                                                                        + (value or b''))
+
+    def isolated(self, work, *args):
+        """isolated_config_git(設定の選択を隔離した git config)。"""
+        parse = work + b'/config-parse'
+        if not os.path.isdir(parse + b'/repo.git'):
+            for name in (b'/repo.git/objects', b'/repo.git/refs'):
+                os.makedirs(parse + name)
+            Path(os.fsdecode(parse + b'/repo.git/config')).write_bytes(b'')
+            Path(os.fsdecode(parse + b'/repo.git/HEAD')).write_bytes(b'ref: refs/heads/guard\n')
+        env = {'PATH': self.env.get('PATH', ''), 'LC_ALL': 'C', 'GIT_CONFIG_NOSYSTEM': '1',
+               'GIT_CONFIG_GLOBAL': '/dev/null', 'GIT_CONFIG_SYSTEM': '/dev/null', 'GIT_CONFIG_COUNT': '0',
+               'GIT_DIR': os.fsdecode(parse + b'/repo.git'), 'GIT_NO_LAZY_FETCH': '1', 'GIT_TERMINAL_PROMPT': '0'}
+        if 'HOME' in self.env:
+            env['HOME'] = self.env['HOME']
+        return self.git(*TAKE_GIT_PRE, '-C', parse, *args, cwd=parse, env=env)
+
+    def walk(self, target, rows):
+        """candidate_walk(take)。'file' か None(無い)を返す。"""
+        if not target.startswith(b'/'):
+            raise TakeOutside('候補が絶対パスでない')
+        rest, path, links = target[1:], b'/', 0
+        while True:
+            link = b'-'
+            if os.path.islink(path):
+                kind, link = b'l', os.readlink(path)
+            elif os.path.isdir(path):
+                kind = b'd'
+            elif os.path.isfile(path):
+                kind = b'f'
+            elif os.path.exists(path):
+                raise TakeOutside('設定の候補が通常ファイルでもフォルダでもない')
+            else:
+                rows.append(b'missing\t' + path_field(path))
+                return None
+            rows.append(b'node\t' + kind + b'\t' + identity(path) + b'\t' + path_field(link) + b'\t'
+                        + path_field(path))
+            if kind == b'l':
+                links += 1
+                if links > 40 or not link:
+                    raise TakeOutside('設定の候補のリンクが多すぎる')
+                if rest:
+                    link = link + b'/' + rest
+                if link.startswith(b'/'):
+                    path, rest = b'/', link[1:]
+                else:
+                    path, rest = split_path(path)[0], link
+                continue
+            if not rest:
+                if kind != b'f' or not os.access(path, os.R_OK):
+                    raise TakeOutside('設定の候補を読めない')
+                rows.append(b'data\t' + sha_hex(Path(os.fsdecode(path)).read_bytes()))
+                return 'file'
+            if kind != b'd':
+                raise TakeOutside('設定の候補の途中がフォルダでない')
+            part, _, rest = rest.partition(b'/')
+            if part:
+                path = (path[:-1] if path.endswith(b'/') else path) + b'/' + part
+
+    def config_origins(self, new_state, work):
+        rows = [b'config-origins-v3']
+        queue = []
+        seen = set()
+
+        def enqueue(path, kind='config'):
+            if not path.startswith(b'/'):
+                raise TakeOutside('設定の候補が絶対パスでない')
+            if path not in seen:
+                seen.add(path)
+                queue.append((path, kind))
+
+        def admin_entry(path):
+            enqueue(path + b'/.implement-guard-admin-entry' if os.path.isdir(path) else path, 'admin')
+
+        def config_path(path):
+            if path.startswith(b'/'):
+                enqueue(path)
+            else:
+                enqueue(self.cwd_phys + b'/' + path)
+                if self.cwd_phys != self.top:
+                    enqueue(self.top + b'/' + path)
+
+        def absolute(path):
+            return path if path.startswith(b'/') else self.top + b'/' + path
+
+        def rev_parse(*args):
+            rc, out = self.capture(*TAKE_GIT_PRE, '-C', self.top, 'rev-parse', *args)
+            if rc or not out:
+                raise TakeOutside(f'rev-parse {args}')
+            return absolute(out)
+
+        rows += [self.env_row(name) for name in TAKE_CONFIG_ENV]
+        count = self.var('GIT_CONFIG_COUNT') or b'0'
+        if not count.isdigit():
+            raise TakeOutside('GIT_CONFIG_COUNT が数でない')
+        for index in range(int(count)):
+            rows += [self.env_row(f'GIT_CONFIG_KEY_{index}'), self.env_row(f'GIT_CONFIG_VALUE_{index}')]
+        enqueue(rev_parse('--git-path', 'config'))
+        enqueue(rev_parse('--git-path', 'config.worktree'))
+        common = rev_parse('--git-common-dir')
+        enqueue(common + b'/config')
+        enqueue(common + b'/config.worktree')
+        gitdir = rev_parse('--git-dir')
+        enqueue(gitdir + b'/config')
+        enqueue(gitdir + b'/config.worktree')
+        rows.append(b'plan-admin\t' + path_field(gitdir) + b'\t' + path_field(common))
+        admin_entry(self.top + b'/.git')
+        admin_entry(gitdir)
+        enqueue(gitdir + b'/commondir', 'admin')
+        admin_entry(common)
+        global_config = self.var('GIT_CONFIG_GLOBAL')
+        home = self.var('HOME')
+        if global_config is not None:
+            if global_config and global_config != b'/dev/null':
+                config_path(global_config)
+        else:
+            if home is not None:
+                config_path(home + b'/.gitconfig')
+            if self.var('XDG_CONFIG_HOME'):
+                config_path(self.var('XDG_CONFIG_HOME') + b'/git/config')
+            elif home is not None:
+                config_path(home + b'/.config/git/config')
+        system = self.var('GIT_CONFIG_NOSYSTEM') is None
+        if not system:
+            raise TakeOutside('GIT_CONFIG_NOSYSTEM がある')
+        system_config = self.var('GIT_CONFIG_SYSTEM')
+        self.system_selected = b''
+        if system_config != b'/dev/null' and (system_config is None or system_config):
+            rc, selected = self.capture(*TAKE_GIT_PRE, '-C', self.top, 'var', 'GIT_CONFIG_SYSTEM')
+            if rc or not selected:
+                raise TakeOutside('system-var')
+            self.system_selected = selected
+            if selected != b'/dev/null':
+                config_path(selected)
+            if system_config:
+                config_path(system_config)
+        self.xcode = b''
+        rc, version = self.capture(*TAKE_GIT_PRE, '-C', self.top, 'version')
+        if rc:
+            raise TakeOutside('git version')
+        if b'\n' not in version and TAKE_APPLE_GIT.fullmatch(version):
+            rc, man = self.capture(*TAKE_GIT_PRE, '-C', self.top, '--man-path')
+            if rc or b'\n' in man or not TAKE_MAN_PATH.fullmatch(man):
+                raise TakeOutside('apple-layout')
+            self.xcode = man[:-len(b'/share/man')] + b'/share/git-core/gitconfig'
+            config_path(self.xcode)
+        git_config = self.var('GIT_CONFIG')
+        if git_config and git_config != b'/dev/null':
+            config_path(git_config)
+        roots = [path for path, kind in queue if kind == 'config']
+        rows += [b'plan-root\t' + path_field(path) for path in roots]
+        drained = self.drain(queue, 0, rows, work, enqueue)
+        # collect_context_plan(文脈は 1 つ。下のリポジトリと .gitmodules は写さない)
+        formats = []
+        for key, allowed in (('extensions.objectformat', (b'sha1', b'sha256')), ('extensions.refstorage',
+                                                                                 (b'files', b'reftable'))):
+            value = b''
+            if os.path.exists(common + b'/config'):
+                rc, out = self.isolated(work, 'config', '--file', common + b'/config', '--no-includes', '--null',
+                                        '--get', key)
+                if rc == 0:
+                    value = out.split(b'\0', 1)[0]
+                elif rc != 1 or out:
+                    raise TakeOutside(f'{key} を読めない')
+            formats.append(value or allowed[0])
+            if formats[-1] not in allowed:
+                raise TakeOutside(f'{key} が既知でない')
+        rc, head = self.git(*TAKE_GIT_PRE, 'rev-parse', '--verify', '--quiet', 'HEAD')
+        head = head.rstrip(b'\n') if rc == 0 else b'-'
+        if rc not in (0, 1):
+            raise TakeOutside('rev-parse HEAD')
+        listing = self.must(*TAKE_GIT_PRE, 'ls-files', '--stage', '-z').split(b'\0')
+        if head != b'-':
+            listing += self.must(*TAKE_GIT_PRE, 'ls-tree', '-r', '-z', head).split(b'\0')
+        for row in filter(None, listing):
+            meta, _, name = row.partition(b'\t')
+            if meta.startswith(b'160000 ') or name == b'.gitmodules':
+                raise TakeOutside('下のリポジトリか .gitmodules がある')
+        enqueue(self.top + b'/.gitmodules', 'admin')
+        self.drain(queue, drained, rows, work, enqueue)
+        if os.path.lexists(self.top + b'/.gitmodules'):
+            raise TakeOutside('.gitmodules がある')
+        Path(os.fsdecode(new_state + b'/snapshot/config-origins.txt')).write_bytes(b''.join(r + b'\n' for r in rows))
+        context = [b'0', b'-1', b'0', b'1', path_field(self.top), path_field(gitdir), path_field(common), formats[0],
+                   formats[1], head, b'0', b'none', b'-', b'-']
+        text = b'context-plan-v1\ncontext\t' + b'\t'.join(context) + b'\n'
+        text += b''.join(b'root\t0:0\t' + path_field(path) + b'\n' for path in roots)
+        Path(os.fsdecode(new_state + b'/snapshot/config-contexts.txt')).write_bytes(text)
+
+    def drain(self, queue, start, rows, work, enqueue):
+        """候補を順に辿る(admin でない通常ファイルは include を足す)。辿った数を返す。"""
+        index = start
+        while index < len(queue):
+            path, kind = queue[index]
+            index += 1
+            if index > 2000:
+                raise TakeOutside('設定の候補が多すぎる')
+            rows.append(b'candidate\t' + path_field(path))
+            if self.walk(path, rows) == 'file' and kind != 'admin':
+                self.includes(path, work, enqueue)
+        return index
+
+    def includes(self, path, work, enqueue):
+        rc, keys = self.isolated(work, 'config', '--file', path, '--no-includes', '--null', '--name-only',
+                                 '--get-regexp', r'^(include\.path|includeif\..*\.path)$')
+        if rc:
+            if rc != 1 or keys:
+                raise TakeOutside('include の鍵を読めない')
+            return
+        parent = os.path.dirname(path) or b'/'
+        done = set()
+        for key in filter(None, keys.split(b'\0')):
+            if key in done:
+                continue
+            done.add(key)
+            rc, values = self.isolated(work, 'config', '--file', path, '--no-includes', '--null', '--type=path',
+                                       '--get-all', key)
+            if rc:
+                raise TakeOutside('include の値を読めない')
+            for value in filter(None, values.split(b'\0')):
+                enqueue(value if value.startswith(b'/') else parent + b'/' + value)
+
+    # -- ①②④⑤(collect_git) --
+    def git_path_abs(self, pre, name):
+        for fmt in (('--path-format=absolute',), ()):
+            rc, out = self.capture(*pre, 'rev-parse', *fmt, '--git-path', name)
+            if rc == 0 and out and not out.startswith(b'-'):
+                return out if out.startswith(b'/') else self.top + b'/' + out
+        raise TakeOutside(f'--git-path {name}')
+
+    def hooks_lines(self, hooks):
+        real = digest = '(無し)'.encode()
+        listing = b''
+        if os.path.lexists(hooks):
+            real = os.path.realpath(hooks) if os.path.exists(hooks) else '(無し)'.encode()
+            if os.path.isdir(hooks) and os.path.exists(hooks):
+                names = []
+                for current, dirs, files in os.walk(real):
+                    names += [os.path.join(current, name) for name in dirs + files]
+                for path in sorted(names):
+                    info = os.lstat(path)
+                    value = b'-'
+                    if stat.S_ISLNK(info.st_mode):
+                        kind, value = b'l', sha_hex(os.readlink(path))
+                    elif stat.S_ISDIR(info.st_mode):
+                        kind = b'd'
+                    elif stat.S_ISREG(info.st_mode):
+                        if os.access(path, os.R_OK):
+                            kind, value = b'f', sha_hex(Path(os.fsdecode(path)).read_bytes())
+                        else:
+                            kind = b'u'
+                    else:
+                        kind = b'o'
+                    listing += (b'hook\t' + kind + b'\t' + mode_text(path) + b'\t' + value + b'\t'
+                                + path_field(path[len(real) + 1:]) + b'\n')
+                digest = sha_hex(listing)
+            else:
+                digest = '(ディレクトリでない)'.encode()
+        return (b'hooks-path\t' + path_field(hooks) + b'\nhooks-real\t' + path_field(real) + b'\nhooks-digest\t'
+                + digest + b'\n' + listing)
+
+    @staticmethod
+    def config_digest(path):
+        if not os.path.lexists(path):
+            return '(無し)'.encode()
+        if os.path.isfile(path) and os.access(path, os.R_OK):
+            return sha_hex(Path(os.fsdecode(path)).read_bytes())
+        return '(読めない)'.encode()
+
+    def collect_git(self, new_state, work):
+        snapshot = new_state + b'/snapshot/'
+        rc, head = self.git(*TAKE_GIT_PRE, 'rev-parse', '--verify', '--quiet', 'HEAD')
+        if rc not in (0, 1) or (rc == 0 and not head.strip(b'\n')):
+            raise TakeOutside('rev-parse HEAD')
+        head = head.rstrip(b'\n') if rc == 0 else '(HEAD 無し)'.encode()
+        stage = self.must(*TAKE_GIT_PRE, 'ls-files', '-s', '-z')
+        index_env = {**self.git_env, 'GIT_INDEX_FILE': os.fsdecode(work + b'/index.tmp')}
+        self.must(*TAKE_GIT_PRE, 'update-index', '-z', '--index-info', env=index_env, stdin=stage)
+        rc, tree = self.git(*TAKE_GIT_PRE, 'write-tree', env=index_env)
+        tree = tree.rstrip(b'\n')
+        if rc or not tree:
+            raise TakeOutside('unmerged')
+        rc, branch = self.git(*TAKE_GIT_PRE, 'symbolic-ref', '-q', 'HEAD')
+        if rc not in (0, 1):
+            raise TakeOutside('symbolic-ref HEAD')
+        branch = branch.rstrip(b'\n') if rc == 0 else b'(detached)'
+        refs = self.must(*TAKE_GIT_PRE, 'for-each-ref', '--format=%(objectname) %(refname)')
+        hooks = self.git_path_abs(TAKE_GIT_PRE_HOOKS, 'hooks')
+        config = self.git_path_abs(TAKE_GIT_PRE, 'config')
+        config_worktree = self.git_path_abs(TAKE_GIT_PRE, 'config.worktree')
+        meta = (b'toplevel\t' + path_field(self.top) + b'\ncwd\t' + path_field(self.cwd_phys) + b'\nexclude\t'
+                + path_field(self.excl) + b'\nhead\t' + head + b'\nindex-tree\t' + tree + b'\nbranch\t' + branch
+                + b'\n')
+        meta += self.hooks_lines(hooks)
+        meta += (b'config-path\t' + path_field(config) + b'\nconfig-digest\t' + self.config_digest(config)
+                 + b'\nconfig-worktree-path\t' + path_field(config_worktree) + b'\nconfig-worktree-digest\t'
+                 + self.config_digest(config_worktree) + b'\n')
+        meta += b''.join(b'ref\t' + line + b'\n' for line in refs.split(b'\n')[:-1])
+        Path(os.fsdecode(snapshot + b'4-meta.txt')).write_bytes(meta)
+        base = b'HEAD'
+        if head == '(HEAD 無し)'.encode():
+            base = self.must(*TAKE_GIT_PRE, 'hash-object', '-t', 'tree', '/dev/null').rstrip(b'\n')
+        exclude = b':(exclude,literal)' + self.excl
+        Path(os.fsdecode(snapshot + b'1-diff.bin')).write_bytes(self.must(
+            *TAKE_GIT_PRE, *TAKE_DIFF_CFG, 'diff', '--binary', '--no-ext-diff', '--no-textconv', '--submodule=short',
+            '--ignore-submodules=dirty', base, '--', '.', exclude))
+        Path(os.fsdecode(snapshot + b'2-status.z')).write_bytes(self.must(
+            *TAKE_GIT_PRE, '-c', 'core.ignoreStat=false', 'status', '--porcelain=v1', '-z', '-uall',
+            '--ignore-submodules=dirty', '--', '.', exclude))
+        rc, _ = self.git(*TAKE_GIT_PRE, 'rev-parse', '--verify', '--quiet', 'refs/stash')
+        if rc == 0:
+            stash = self.must(*TAKE_GIT_PRE, 'reflog', 'show', '--format=%H %gd %gs', 'refs/stash')
+        elif rc == 1:
+            stash = 'stash 無し\n'.encode()
+        else:
+            raise TakeOutside('rev-parse refs/stash')
+        Path(os.fsdecode(snapshot + b'5-stash.txt')).write_bytes(stash)
+        Path(os.fsdecode(snapshot + b'6-contexts.txt')).write_bytes(b'')
+
+    # -- ③ の退避とマニフェスト --
+    def backup(self, new_state, work, mark):
+        raw = self.must(*TAKE_GIT_PRE, 'ls-files', '-o', '--exclude-standard', '-z')
+        chosen = sorted(f for f in raw.split(b'\0') if f and (f in (self.real_rel, self.sel_rel) or not (
+            f == self.excl or f.startswith(self.excl + b'/'))))
+        entries = total = unreadable = 0
+        for name in chosen:
+            entries += 1
+            path = self.top + b'/' + name
+            if not name.endswith(b'/') and not os.path.islink(path) and os.path.isfile(path):
+                total += os.lstat(path).st_size
+            if entries > 2000 or total > 209715200:
+                raise TakeOutside('over-limit')
+        body = new_state + b'/taskmd-body'
+        shutil.copy2(self.real, body)
+        manifest = (b'T\t' + mode_text(body) + b'\t' + sha_hex(Path(os.fsdecode(body)).read_bytes()) + b'\t'
+                    + path_field(self.real) + b'\n')
+        for name in chosen:
+            kind, value, mode = self.row(new_state, name)
+            manifest += kind + b'\t' + mode + b'\t' + value + b'\t' + path_field(name) + b'\n'
+            if kind == b'u':
+                unreadable += 1
+                self.stderr += b'NOTE: unreadable ' + path_field(name) + b'\n'
+        Path(os.fsdecode(new_state + b'/manifest.tsv')).write_bytes(manifest)
+        shutil.rmtree(work)
+        state = os.fsdecode(new_state)
+        out = (b'STATE_DIR=' + path_field(new_state) + b'\nMANIFEST_SHA256=' + sha_hex(manifest)
+               + b'\nSNAPSHOT_SHA256=' + snapshot_digest(state).encode() + b'\nENTRIES=%d\nBYTES=%d\nUNREADABLE=%d\n'
+               % (entries, total, unreadable) + b'TASKMD_REAL=' + path_field(self.real) + b'\nOWNER_MARK='
+               + (b'yes' if mark else b'no') + b'\n')
+        return out, bytes(self.stderr)
+
+    def row(self, new_state, name):
+        """build_row(take) → (種別, 値, mode)。"""
+        path = self.top + b'/' + name
+        try:
+            mode = mode_text(path)
+        except OSError:
+            mode = b'-'
+        if name.endswith(b'/'):
+            return b'o', b'-', mode
+        dest = new_state + b'/files/' + name
+        try:
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+        except OSError:
+            return b'u', b'-', mode
+        if os.path.islink(path):
+            link = os.readlink(path)
+            os.symlink(link, dest)
+            return b'l', path_field(link), mode
+        if not os.path.exists(path):
+            return b'u', b'-', mode
+        if not os.path.isfile(path):
+            return b'o', b'-', mode
+        if not os.access(path, os.R_OK):
+            return b'u', b'-', mode
+        shutil.copy2(path, dest)
+        return b'f', sha_hex(Path(os.fsdecode(dest)).read_bytes()), mode
+
+
+def write_take_record(cwd, select, env):
+    """旧版の take と同じ形の記録を書き、(take の stdout, stderr)を返す。"""
+    return PyTake(cwd, select, env).run()
+
+
+def read_record(state):
+    """記録と所属の印の中身(相対の名前 → (種類, mode, リンクの数, 中身))。印の guard の番号は、記録の
+    フォルダの番号と同じことを確かめてから字面を外す(作り直した記録は番号が変わる)。"""
+    state = os.fsencode(state)
+    found = {}
+    for current, dirs, files in os.walk(state):
+        for name in dirs + files:
+            path = os.path.join(current, name)
+            info = os.lstat(path)
+            if stat.S_ISLNK(info.st_mode):
+                data = os.readlink(path)
+            elif stat.S_ISREG(info.st_mode):
+                data = Path(os.fsdecode(path)).read_bytes()
+            else:
+                data = b''
+            found[os.path.relpath(path, state)] = (stat.S_IFMT(info.st_mode), stat.S_IMODE(info.st_mode),
+                                                   info.st_nlink if not stat.S_ISDIR(info.st_mode) else 0, data)
+    found[b'.'] = (stat.S_IFDIR, stat.S_IMODE(os.lstat(state).st_mode), 0, b'')
+    mark = os.path.dirname(state) + b'/owner-' + os.path.basename(state)[len(b'guard-'):]
+    if os.path.lexists(mark):
+        info = os.lstat(mark)
+        guard = os.lstat(state)
+        lines = Path(os.fsdecode(mark)).read_bytes().split(b'\n')
+        want = {b'guard_dev': b'%d' % guard.st_dev, b'guard_ino': b'%d' % guard.st_ino}
+        kept = []
+        for line in lines:
+            key, _, value = line.partition(b'\t')
+            if key in want:
+                kept.append(key + (b'\t<guard>' if value == want[key] else b'\t<other>'))
+            else:
+                kept.append(line)
+        found[b'<owner>'] = (stat.S_IFMT(info.st_mode), stat.S_IMODE(info.st_mode), info.st_nlink, b'\n'.join(kept))
+    return found
+
+
+def take_record(cwd, select, env, failure):
+    """take の記録を作り、take の stdout の欄を返す。旧版を流せない(bash 4.0 以上が無い)ときは、同じ形の記録を
+    Python で書く。RECORD_CHECK(list)があるときは、旧版の take の後に、同じ配置で記録を Python で書き直し、
+    中身・stdout・stderr の違いを RECORD_CHECK に足す(配置には Python の記録が残る)。
+    旧版の take を流す bash は main が決めた BASH。main を通らない呼び出し(測定の道具)では、ここで探す。"""
+    bash = BASH if BASH is not None else find_bash4()
+    if bash is None:
+        out, _ = write_take_record(cwd, select, env)
+    else:
+        done = subprocess.run([bash, str(OLD), 'take', '--cwd', str(cwd), '--task-md', select], env=env,
+                              capture_output=True, cwd=cwd)
+        if done.returncode:
+            raise AssertionError(failure + done.stderr.decode(errors='replace'))
+        out = done.stdout
+        if RECORD_CHECK is not None:
+            state = unquote(dict(line.split(b'=', 1) for line in out.splitlines())[b'STATE_DIR'])
+            old = read_record(state)
+            mark = os.path.dirname(state) + b'/owner-' + os.path.basename(state)[len(b'guard-'):]
+            make_writable(os.fsdecode(state))
+            shutil.rmtree(state)
+            if os.path.lexists(mark):
+                os.unlink(mark)
+            out, err = write_take_record(cwd, select, env)
+            new = read_record(state)
+            if out != done.stdout:
+                RECORD_CHECK.append(f'take の stdout が違う: 旧版 {done.stdout!r} / Python {out!r}')
+            if err != done.stderr:
+                RECORD_CHECK.append(f'take の stderr が違う: 旧版 {done.stderr!r} / Python {err!r}')
+            for name in sorted(set(old) | set(new)):
+                if old.get(name) != new.get(name):
+                    RECORD_CHECK.append(f'記録の {os.fsdecode(name)} が違う: 旧版 {clip(repr(old.get(name)))} / '
+                                        f'Python {clip(repr(new.get(name)))}')
+    return dict(line.split(b'=', 1) for line in out.splitlines())
 
 
 def argv_for(sub, values, *, names=('--cwd', '--state', '--manifest-sha256', '--snapshot-sha256'), extra=()):
@@ -1114,11 +1836,7 @@ def make_world_dotdot(base):
     xdg = world.xdg / 'new' / '..'
     env = {**os.environ, 'XDG_STATE_HOME': str(xdg), 'HOME': str(world.home), 'PATH': f'{TOOLS.fixed_dir}:{os.environ.get("PATH", "")}'}
     env.pop('TMPDIR', None)
-    done = subprocess.run(['bash', str(OLD), 'take', '--cwd', str(world.repo), '--task-md', 'task/t.md'], env=env,
-                          capture_output=True, cwd=world.repo)
-    if done.returncode:
-        raise AssertionError('旧版の take(.. を含む候補)が失敗した: ' + done.stderr.decode(errors='replace'))
-    fields = dict(line.split(b'=', 1) for line in done.stdout.splitlines())
+    fields = take_record(world.repo, 'task/t.md', env, '旧版の take(.. を含む候補)が失敗した: ')
     world.state = os.fsdecode(fields[b'STATE_DIR'])
     world.man = fields[b'MANIFEST_SHA256'].decode()
     world.snap = fields[b'SNAPSHOT_SHA256'].decode()
@@ -1136,11 +1854,7 @@ def make_world_home(base, where, home_root=False):
     if where == '.cache':
         # .local/state を作れないようにして、2 つ目の候補を使わせる。
         (world.home / '.local').write_bytes(b'')
-    done = subprocess.run(['bash', str(OLD), 'take', '--cwd', str(world.repo), '--task-md', 'task/t.md'], env=env,
-                          capture_output=True, cwd=world.repo)
-    if done.returncode:
-        raise AssertionError('旧版の take(HOME の候補)が失敗した: ' + done.stderr.decode(errors='replace'))
-    fields = dict(line.split(b'=', 1) for line in done.stdout.splitlines())
+    fields = take_record(world.repo, 'task/t.md', env, '旧版の take(HOME の候補)が失敗した: ')
     world.state = os.fsdecode(fields[b'STATE_DIR'])
     world.man = fields[b'MANIFEST_SHA256'].decode()
     world.snap = fields[b'SNAPSHOT_SHA256'].decode()
@@ -2550,7 +3264,8 @@ def write_mac_fixed(root, path):
 
 
 def run_mac_fixed(root):
-    """旧版を流せない Mac: Rust の結果を、Linux で測った旧版の固定期待と比べる。"""
+    """旧版を流せない Mac: Rust の結果を、Linux で測った旧版の固定期待と比べる(配置の記録は、旧版の take と
+    同じ形のものを Python で書く。take_record)。"""
     fixed = json.loads(MAC_FIXED.read_text(encoding='utf-8'))
     problems = []
     count = 0
@@ -2566,6 +3281,78 @@ def run_mac_fixed(root):
         except Exception as error:  # noqa: BLE001
             problems.append(f'Mac の固定期待 {case.label}: {type(error).__name__}: {error}')
     return count, problems
+
+
+RECORD_EXTRA_LABELS = ('.. を含む候補', 'HOME の候補', 'HOME の .cache')   # XDG_STATE_HOME の外の記録の置き場
+
+
+def record_cases():
+    """Python で書く記録を確かめるケース: Mac の固定期待のうち配置の要るもの(8 件)と、保護領域の置き場を
+    make_world の外で決める taskmd-diff・cleanup の 6 件。"""
+    found = [case for case in mac_cases() if case.build is not None]
+    for case in group_state():
+        if case.label.split(' ', 1)[1] in RECORD_EXTRA_LABELS and case.label.split(' ', 1)[0] in ('taskmd-diff',
+                                                                                                  'cleanup'):
+            found.append(case)
+    return found
+
+
+def run_record_writer(root):
+    """範囲 full(旧版を流せる Linux): bash 4.0 以上が無いときに Python で書く記録が、旧版の take の記録と同じこと。
+    1. 同じ配置で旧版の take の後に Python で書き直し、記録の中のファイルの名前・種類・mode・リンクの数・中身と
+       所属の印(guard の番号は、それぞれの記録のフォルダの番号と同じことを確かめて外す)、take の stdout と
+       stderr を比べる(take_record の RECORD_CHECK)。
+    2. 旧版の take で作った配置で流した旧版の結果と、Python の記録で流した旧版と Rust の結果(終了値・stdout・
+       stderr。<base> に置き換える)が同じこと。Mac の固定期待のケースは、その固定期待とも同じこと。Python の
+       記録での旧版と Rust は、群と同じ比べ方(compare_sides)でも比べる。"""
+    global RECORD_CHECK
+    if BASH is None:
+        return ['Python で書く記録の確かめ: bash 4.0 以上が無い(範囲 full で流す)']
+    fixed = json.loads(MAC_FIXED.read_text(encoding='utf-8'))
+    problems = []
+    cases = record_cases()
+    for index, case in enumerate(cases):
+        name = f'{case.group}/{case.label}'
+        take_base = Path(root) / f'record-{index}-take'
+        py_base = Path(root) / f'record-{index}-py'
+        try:
+            take_base.mkdir(parents=True)
+            take_world = case.build(take_base / 'w')
+            take_old = fixed_record(take_world, run_side(case, take_base, take_world, True), take_base)
+            py_base.mkdir(parents=True)
+            RECORD_CHECK = []
+            try:
+                world = case.build(py_base / 'w')
+                found = RECORD_CHECK
+            finally:
+                RECORD_CHECK = None
+            problems += [f'Python で書く記録 {name}: {item}' for item in found]
+            template = py_base / 'template'
+            copy_world(world.base, template)
+            old = run_side(case, py_base, world, True)
+            copy_world(template, world.base)
+            fix_mark(world)
+            new = run_side(case, py_base, world, False)
+            py_old = fixed_record(world, old, py_base)
+            py_new = fixed_record(world, new, py_base)
+            if py_old != take_old:
+                problems.append(f'Python で書く記録 {name}: 旧版の結果が、旧版の take の記録のときと違う: '
+                                f'{clip(repr(take_old))} / {clip(repr(py_old))}')
+            if py_new != take_old:
+                problems.append(f'Python で書く記録 {name}: Rust の結果が、旧版の take の記録での旧版と違う: '
+                                f'{clip(repr(take_old))} / {clip(repr(py_new))}')
+            if case.label in fixed and py_new != fixed[case.label]:
+                problems.append(f'Python で書く記録 {name}: Rust の結果が Mac の固定期待と違う')
+            compare_sides(case, old, new, py_base)
+        except Exception as error:  # noqa: BLE001 - 1 件の失敗で残りのケースを止めない。
+            problems.append(f'Python で書く記録 {name}: {type(error).__name__}: {error}')
+        finally:
+            for base in (take_base, py_base):
+                if base.exists():
+                    make_writable(base)
+                    shutil.rmtree(base, ignore_errors=True)
+    print(f'S3I-A: Python で書く記録: {len(cases)} 件の配置で、旧版の take の記録と比べた', flush=True)
+    return problems
 
 
 def run_self_tests(unperformed):
@@ -2649,7 +3436,7 @@ def main(argv=None):
             print(f'S3I-A: fd を閉じた起動の固定期待: {write_closed_fds(root, args.write_closed_fds)} 件')
             return 3
         if BASH is None:
-            # bash 4.0 以上が無い(Mac): 旧版との比較の全部を未実施にし、固定期待と比べる。
+            # bash 4.0 以上が無い(Mac): 旧版との比較の全部を未実施にし、固定期待と比べる(配置の記録は Python で書く)。
             unperformed.append('旧版との比較の全部: bash 4.0 以上が無い')
             fixed_count, found = run_mac_fixed(root)
             problems += found
@@ -2664,7 +3451,7 @@ def main(argv=None):
             run_groups(scope, names, root, results, skipped)
         if not args.groups and scope == 'full':
             for label, stage in (('決定 D5', run_d5), ('PATH を絞った Rust', run_restricted_path),
-                                 ('詰めた FIFO の信号', run_fifo)):
+                                 ('詰めた FIFO の信号', run_fifo), ('Python で書く記録', run_record_writer)):
                 stage_started = time.monotonic()
                 problems += stage(root)
                 print(f'S3I-A: 時間: {label} {time.monotonic() - stage_started:.1f} 秒', flush=True)
