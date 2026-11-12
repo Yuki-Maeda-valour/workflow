@@ -1489,7 +1489,7 @@ R4Gの設計は、2026-11-11 22:31までの決定で確定した(それまでは
   - 単位1の確かめ(2026-11-12): 製品のmusl releaseの `.init_array` は、基準も `r4g` ありも8バイトで同じ。製品のバイト列は、`libc` の宣言だけを足した版と比べて、差は `.note.gnu.build-id` だけ。72通りの起動の比較も、すべて同じだった。
   - 942a4deの上でも、同じ確かめ(8 / 8バイト・72通り全部同じ)を繰り返した。
 - `unsafe`(Rustの安全検査を外す書き方)は、`native/crates/platform/src/r4g/` の3つのファイル(`startup.rs`・`fs.rs`・`process.rs`)の中だけに置く。`platform` の公開関数は、安全な関数に限る。
-  - 唯一の例外は、マクロを展開した側(検査専用入口と上の単体テスト)に生まれる `#[unsafe(link_section)]` の `static` である。マクロは外部のcrateのものなので、展開した側の `#![forbid(unsafe_code)]` には当たらない。`scripts/test_native_r4g.py` が、検査入口の先頭が `#![forbid(unsafe_code)]` であることと、`cli` 側の専用モジュールに `unsafe`・`link_section`・`no_mangle`・`export_name` の字面が無いことを、静的に確かめる。
+  - 例外は、公開する `unsafe` 関数 `record_before_std`(`#[doc(hidden)]`。main の前に、展開した側の `static` から呼ぶ形でだけ使う)と、マクロを展開した側(検査専用入口と上の単体テスト)に生まれる `#[unsafe(link_section)]` の `static` である。マクロは外部のcrateのものなので、展開した側の `#![forbid(unsafe_code)]` には当たらない。`scripts/test_native_r4g.py` が、検査入口の先頭が `#![forbid(unsafe_code)]` であることと、`cli` 側の専用モジュールに `unsafe`・`link_section`・`no_mangle`・`export_name` の字面が無いことを、静的に確かめる。
   - ほかの自作crate(`cli`・`core`)は `#![forbid(unsafe_code)]` のままである。
 - 依存は、R4Rの `libc 0.2.191` の宣言をそのまま使う(`default-features` は変えない)。Rustの依存とcrateの共有ファイル(`Cargo.toml`・`Cargo.lock`・`lib.rs`)へのR4Gの差分は、`native/crates/platform/src/lib.rs` の `pub mod r4g;` の1行だけである。CIの定義と補助(`native/ci/`・`.github/workflows/native.yml`)は、別に直した。
 
@@ -1500,7 +1500,7 @@ APIは [native/README.md](../native/README.md#保護記録の探索reviewsの配
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
 - Rust は `native/rust-toolchain.toml` で `1.99.1` に固定する。`rustfmt`・`clippy` を用意し、`Cargo.lock` を共有する。内部の版 `0.1.0` は配布プラグインの版と分ける。
 - `platform` 以外の自作 crate(Rust の部品単位)では `#![forbid(unsafe_code)]` を使う。`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使い、安全な関数だけを外へ公開する。
-  - 例外は、R4U の `platform::check_links::capture_before_main` だけである。main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
+  - 例外は、R4U の `platform::check_links::capture_before_main` と、R4G の `platform::r4g::startup::record_before_std`(`#[doc(hidden)]`)である。どちらも main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
 - ビルドの設定は `native/Cargo.toml`・`native/.cargo/`・`native/ci/` に置く。`.github/workflows/native.yml` の実行コマンドは `native/ci/` のスクリプトを呼ぶだけにする。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外に置く。導入と必須の検査は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)、4 種類の CI と比較の補助は [testing.md](testing.md#rust-の開発と検査段階-0a) に記す。
 - ソース入力の SHA256(内容の違いを確かめるための値)は、`native/` の Git 追跡ファイルだけから作る。パス順に、リポジトリ直下からの相対パス・Git のモード・作業中の本文を、それぞれの長さと一緒に計算へ入れる。
@@ -1533,7 +1533,7 @@ APIは [native/README.md](../native/README.md#保護記録の探索reviewsの配
   - `rustix` の機能と、依存の版は増やしていない。
 - R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
   - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
-  - 例外が1つある。main の前に static から呼ぶ `capture_before_main` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
+  - 例外が2つある。main の前に static から呼ぶ `capture_before_main`(R4U)と、R4G の `record_before_std` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
   - 検査用の実行物 `native/crates/cli/tests/check_links.rs` は `#![deny(unsafe_code)]` の中で、main の前に呼ぶ static の `link_section` のためだけに `unsafe_code` を許す。cli の `commands/check_links/` は `#![forbid(unsafe_code)]` のまま。
   - `rustix` の機能と、依存の版は増やしていない。
 - R4G(#479)でも、R4Rの `libc 0.2.191` の宣言をそのまま使った。自作の `unsafe` は `native/crates/platform/src/r4g/` の `startup.rs`・`fs.rs`・`process.rs` だけに置く(`restore_taskmd.rs` には足さない)。旧Pythonの `subprocess`・旧bashの子の起動と信号・起動前の状態の記録が、`std::process::Command` と `rustix` だけでは書けないためである。`rustix` の機能と依存の版は増やしていない。

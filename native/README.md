@@ -31,7 +31,7 @@ R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあ�
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
-  - 例外は、R4U の `check_links::capture_before_main` だけです。main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
+  - 例外は、R4U の `check_links::capture_before_main` と、R4G の `r4g::startup::record_before_std`(`#[doc(hidden)]`)です。どちらも main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
 `Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
@@ -357,7 +357,7 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
   - `install_sigint` は、起動時に SIGINT が既定の動作のときだけ、印を立てる処理を `SA_RESTART` なしで置きます。
 - main の前の控え: `capture_before_main`・`captured_before_main`・`sigpipe_ignored_at_start`・`std_valid_at_start`・`restore_start_sigpipe`。
   - `capture_before_main` は、親から受け継いだ SIGPIPE の扱いと、fd 0〜2 が使えるか(Python の `is_valid_fd` と同じ方法)を読むだけです。扱いも fd も errno も変えません。
-  - platform が公開する関数のうち、`unsafe` なのはこの関数だけです(`pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
+  - platform が公開する関数のうち、`unsafe` なのはこの関数と、R4G の `r4g::startup::record_before_std` だけです(どちらも `pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
 - `rustix` に無い `sigaction`・`kill`・`getpid`・`pthread_self` などと libc の `write` は、このファイルの中で `unsafe extern "C"` として宣言し、安全な関数で包みます。`libc` の crate は使いません。
 
 ### main の前に呼ぶ static

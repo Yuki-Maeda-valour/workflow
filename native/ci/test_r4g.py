@@ -683,6 +683,33 @@ class Comparator(unittest.TestCase):
             for process in (leader, stuck):
                 process.wait(timeout=10)
 
+    @unittest.skipUnless(sys.platform.startswith('linux'), '/proc を読む(Linux だけ)')
+    def test_signal_taken_waits_until_the_pending_mark_is_cleared(self):
+        code = ('import signal, sys, time\n'
+                'if sys.argv[1] == "block":\n'
+                '    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR1})\n'
+                'else:\n'
+                '    signal.signal(signal.SIGUSR1, lambda *a: None)\n'
+                'print("ready", flush=True)\n'
+                'time.sleep(30)\n')
+        for mode in ('handle', 'block'):
+            child = subprocess.Popen([sys.executable, '-c', code, mode], stdout=subprocess.PIPE)
+            try:
+                self.assertEqual(child.stdout.readline(), b'ready\n')
+                child.send_signal(signal.SIGUSR1)
+                if mode == 'handle':
+                    self.m.wait_signal_taken(child.pid, signal.SIGUSR1, timeout=10)
+                else:
+                    # 止めた信号は保留のまま: 上限で不合格(pipe を読み始めない)。
+                    with self.assertRaises(self.m.Difference):
+                        self.m.wait_signal_taken(child.pid, signal.SIGUSR1, timeout=0.3)
+            finally:
+                child.kill()
+                child.wait(timeout=10)
+                child.stdout.close()
+        # 終わったプロセスは待たない。
+        self.m.wait_signal_taken(child.pid, signal.SIGUSR1, timeout=10)
+
     def test_stub_blocked_accepts_the_inlined_fifo_open(self):
         seen = []
         with mock.patch.object(self.m, 'wait_sleeping_in', lambda pid, functions, what: seen.append(functions)):

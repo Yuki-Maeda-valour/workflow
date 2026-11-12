@@ -3808,6 +3808,28 @@ REVIEWS_COMSUB_POSITIONS = (('mktemp', '', True), ('sha256sum', '', True), ('cut
                             ('python3', 'os.replace', True), ('mv', '', False))
 
 
+def wait_signal_taken(pid, number, timeout=15):
+    """Linux: 送った信号 `number` を、プロセスが受け取る(スレッドと共有の保留の印が消える)か、プロセスが
+    終わるまで待つ。受け取らなければ失敗。"""
+    bit = 1 << (number - 1)
+    deadline = time.monotonic() + timeout
+    pending = None
+    while time.monotonic() < deadline:
+        if process_state(pid) in (None, 'Z'):
+            return
+        try:
+            with open('/proc/%d/status' % pid) as handle:
+                fields = {line.split(':')[0]: int(line.split()[1], 16) for line in handle.read().splitlines()
+                          if line.startswith(('SigPnd:', 'ShdPnd:'))}
+        except (OSError, IndexError, ValueError):
+            return
+        pending = (fields.get('SigPnd', 0) | fields.get('ShdPnd', 0)) & bit
+        if not pending:
+            return
+        time.sleep(0.002)
+    raise Difference(f'送った信号 {number} を受け取らない(状態 {process_state(pid)})')
+
+
 def blocked_stderr_signal(world, argv, env, signal_number):
     """子を待たない間の信号: 標準エラーの pipe を 4096 バイトにして先に満たし、シェルの最初の標準エラーへの
     write で止まったのを /proc/<pid>/syscall で確かめてから、プロセスへ信号を送る。"""
@@ -3833,6 +3855,9 @@ def blocked_stderr_signal(world, argv, env, signal_number):
     else:
         raise Difference('標準エラーの書込みで止まらない')
     process.send_signal(signal_number)
+    # 送った信号を受け取る(保留の印が消える)まで、pipe を読まない。読むと、止まった書込みが進むのと信号で
+    # 中断されるのとが競い、行が出るかが負荷で変わる(旧版と Rust の差ではない)。
+    wait_signal_taken(process.pid, signal_number)
     chunks = []
     while True:
         part = os.read(read_end, 65536)
