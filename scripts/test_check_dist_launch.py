@@ -371,6 +371,7 @@ class DistWorkflowTest(unittest.TestCase):
         native = json.loads((checker.ROOT / ".github/workflows/native.yml").read_text())
         self.assertEqual(workflow["on"], native["on"])
         self.assertEqual(workflow["permissions"], native["permissions"])
+        self.assertEqual(workflow["concurrency"], native["concurrency"])
         self.assertEqual(set(workflow["jobs"]), {"launch"})
         job = workflow["jobs"]["launch"]
         self.assertEqual(job["runs-on"], "${{ matrix.runner }}")
