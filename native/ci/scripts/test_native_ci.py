@@ -235,7 +235,7 @@ class WorkflowTests(TempCase):
         self.assertEqual(check_workflow.check_workflows(), [])
 
     def test_native_comparison_job_timeouts_are_fixed(self):
-        for job,minutes in (("build",60),("verify-universal",30)):
+        for job,minutes in (("build",120),("verify-universal",60)):
             self.assertEqual(self.document["jobs"][job]["timeout-minutes"],minutes)
             for display_name in ("Native", "Renamed", None):
                 for renamed_job in (False, True):
@@ -255,7 +255,7 @@ class WorkflowTests(TempCase):
                             self.assertTrue(check_workflow.check_document(changed))
 
     def test_native_build_option_first_forms_are_rejected_even_with_correct_timeout(self):
-        for job,operation,minutes in (("build","build",60),("verify-universal","verify-universal",30)):
+        for job,operation,minutes in (("build","build",120),("verify-universal","verify-universal",60)):
             for arguments in (f"--platform linux-x86_64 {operation}", f"--downloads downloads {operation}", f"-- {operation}"):
                 for value in (minutes,None,1):
                     changed=copy.deepcopy(self.document)
@@ -734,12 +734,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract"):
+                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -775,6 +775,7 @@ class BuildTests(TempCase):
             for number in (1,2):
                 self.write(f"{name}/{number}/r4b_contract", b"fixture")
                 self.write(f"{name}/{number}/r4r_contract", b"fixture")
+                self.write(f"{name}/{number}/loop_state_fixture", b"loop fixture")
         signed = []
 
         def sign(path):
@@ -796,8 +797,9 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 6)
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "record.json"])
+        self.assertEqual(len(signed), 8)
+        self.assertEqual({path.name for path in signed},set(build.CI_BINARIES))
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1152,6 +1154,7 @@ class ResolveTaskDirConnectionTests(TempCase):
                         mock.patch.object(build, "pack_tar"), \
                         mock.patch.object(build, "r4b_probe"), \
                         mock.patch.object(build, "r4r_probe"), \
+                        mock.patch.object(build, "loop_state_probe"), \
                         mock.patch.object(build, "probe") as probe:
                     self.assertEqual(build.main(), 0)
                     self.assertEqual(probe.call_args_list, [mock.call(self.root / "1/dev-workflow"), mock.call(self.root / "2/dev-workflow")])
@@ -1161,6 +1164,7 @@ class ResolveTaskDirConnectionTests(TempCase):
                         mock.patch.object(build, "reproduce", return_value=self.root), \
                         mock.patch.object(build, "r4b_probe"), \
                         mock.patch.object(build, "r4r_probe"), \
+                        mock.patch.object(build, "loop_state_probe"), \
                         mock.patch.object(build, "probe", side_effect=subprocess.CalledProcessError(1, "comparison")):
                     self.assertEqual(build.main(), 1)
 
@@ -1169,6 +1173,7 @@ class ResolveTaskDirConnectionTests(TempCase):
                 mock.patch.object(build, "run", return_value="arm64 x86_64"), \
                 mock.patch.object(build, "r4b_probe"), \
                 mock.patch.object(build, "r4r_probe"), \
+                mock.patch.object(build, "loop_state_probe"), \
                         mock.patch.object(build, "probe") as probe:
             build.verify_universal(self.root, self.root)
             probe.assert_called_once_with(self.root / "dev-workflow")
@@ -1218,12 +1223,12 @@ class R4BConnectionTests(TempCase):
     def test_each_build_and_signed_cpu_requires_r4b_comparison(self):
         for command in ("build","reproduce"):
             for platform_name in build.TARGETS:
-                with mock.patch.object(sys,"argv",["build.py",command,"--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"quality"),mock.patch.object(build,"reproduce",return_value=self.root),mock.patch.object(build,"pack_tar"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4r_probe"),mock.patch.object(build,"r4b_probe") as check:
+                with mock.patch.object(sys,"argv",["build.py",command,"--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"quality"),mock.patch.object(build,"reproduce",return_value=self.root),mock.patch.object(build,"pack_tar"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4r_probe"),mock.patch.object(build,"loop_state_probe"),mock.patch.object(build,"r4b_probe") as check:
                     self.assertEqual(build.main(),0)
                     self.assertEqual(check.call_args_list,[mock.call(self.root/"1/r4b_contract"),mock.call(self.root/"2/r4b_contract")])
                     check.side_effect=subprocess.CalledProcessError(1,"R4B")
                     self.assertEqual(build.main(),1)
-        with mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"run",return_value="arm64 x86_64"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4r_probe"),mock.patch.object(build,"r4b_probe") as check:
+        with mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"run",return_value="arm64 x86_64"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4r_probe"),mock.patch.object(build,"loop_state_probe"),mock.patch.object(build,"r4b_probe") as check:
             build.verify_universal(self.root,self.root)
             check.assert_called_once_with(self.root/"r4b_contract")
             check.side_effect=subprocess.CalledProcessError(1,"R4B")
@@ -1250,9 +1255,10 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract"))
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture"))
         self.assertFalse(any("r4b" in path or "r4r" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract")})
+        self.assertFalse(any("loop_state" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1295,20 +1301,47 @@ class R4RConnectionTests(TempCase):
     def test_each_build_and_signed_cpu_requires_r4r_comparison(self):
         for command in ("build","reproduce"):
             for platform_name in build.TARGETS:
-                with mock.patch.object(sys,"argv",["build.py",command,"--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"quality"),mock.patch.object(build,"reproduce",return_value=self.root),mock.patch.object(build,"pack_tar"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe"),mock.patch.object(build,"r4r_probe") as check:
+                with mock.patch.object(sys,"argv",["build.py",command,"--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"quality"),mock.patch.object(build,"reproduce",return_value=self.root),mock.patch.object(build,"pack_tar"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe"),mock.patch.object(build,"loop_state_probe"),mock.patch.object(build,"r4r_probe") as check:
                     self.assertEqual(build.main(),0)
                     self.assertEqual(check.call_args_list,[mock.call(self.root/"1/r4r_contract"),mock.call(self.root/"2/r4r_contract")])
                     check.side_effect=subprocess.CalledProcessError(1,"R4R")
                     self.assertEqual(build.main(),1)
-        with mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"run",return_value="arm64 x86_64"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe"),mock.patch.object(build,"r4r_probe") as check:
+        with mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"run",return_value="arm64 x86_64"),mock.patch.object(build,"probe"),mock.patch.object(build,"r4b_probe"),mock.patch.object(build,"loop_state_probe"),mock.patch.object(build,"r4r_probe") as check:
             build.verify_universal(self.root,self.root)
             check.assert_called_once_with(self.root/"r4r_contract")
             check.side_effect=subprocess.CalledProcessError(1,"R4R")
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
-    def test_reproduce_builds_and_extracts_both_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract"))
+    def test_reproduce_builds_and_extracts_all_examples(self):
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
+
+
+class S2LConnectionTests(TempCase):
+    def test_quality_requires_units_and_mutations_once_on_all_platforms(self):
+        for platform_name in build.TARGETS:
+            with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=lambda args,*,env=None,capture=False:"" if capture else None) as run:
+                build.quality(platform_name,self.root)
+            commands=[call.args[0]for call in run.call_args_list]
+            for name in ('check_loop_state_units.py','check_loop_state_mutations.py'):
+                self.assertEqual(commands.count([sys.executable,'-B',source_hash.ROOT/'native/ci'/name]),1)
+            self.assertNotIn(['cargo','test','--locked','-p','dev-workflow-cli','--example','loop_state_fixture'],commands)
+
+    def test_each_build_and_signed_cpu_requires_cli_and_selftest(self):
+        for platform_name in build.TARGETS:
+            with mock.patch.object(sys,'argv',['build.py','build','--platform',platform_name]),mock.patch.object(build,'workspace',return_value=self.root),mock.patch.object(build,'quality'),mock.patch.object(build,'reproduce',return_value=self.root),mock.patch.object(build,'pack_tar'),mock.patch.object(build,'probe'),mock.patch.object(build,'r4b_probe'),mock.patch.object(build,'r4r_probe'),mock.patch.object(build,'loop_state_probe')as check:
+                self.assertEqual(build.main(),0)
+                self.assertEqual(check.call_args_list,[mock.call(self.root/'1/loop_state_fixture'),mock.call(self.root/'2/loop_state_fixture')])
+                check.side_effect=subprocess.CalledProcessError(1,'S2L');self.assertEqual(build.main(),1)
+        with mock.patch.object(build,'extract_universal',return_value=(self.root,{})),mock.patch.object(build,'run',return_value='arm64 x86_64'),mock.patch.object(build,'probe'),mock.patch.object(build,'r4b_probe'),mock.patch.object(build,'r4r_probe'),mock.patch.object(build,'loop_state_probe')as check:
+            build.verify_universal(self.root,self.root);check.assert_called_once_with(self.root/'loop_state_fixture')
+            check.side_effect=subprocess.CalledProcessError(1,'S2L')
+            with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
+        fixture=self.root/'loop_state_fixture'
+        with mock.patch.object(build,'run')as run:build.loop_state_probe(fixture)
+        self.assertEqual([c.args[0]for c in run.call_args_list],[[sys.executable,'-B',source_hash.ROOT/'native/ci'/name,'--fixture',fixture]for name in ('check_loop_state.py','test_loop_state.py')])
+        with mock.patch.object(build,'run',side_effect=subprocess.CalledProcessError(1,'S2L')):
+            with self.assertRaises(subprocess.CalledProcessError):build.loop_state_probe(fixture)
 
 
 class R4UConnectionTests(TempCase):
@@ -1465,7 +1498,7 @@ class R4UConnectionTests(TempCase):
             with self.subTest(arguments=arguments):
                 self.assertTrue(any("コマンド名をオプションより先" in error
                                     for error in check_workflow.check_document(changed)))
-        # build の 60 分の枠の中で比較を流す形は、上限が合わないので拒む。
+        # build の枠の中で比較を流す形は、上限が合わないので拒む。
         changed = copy.deepcopy(self.document)
         changed["jobs"]["build"]["steps"].append({"run": self.R4U_RUN})
         self.assertTrue(any("timeout-minutes は 30" in error for error in check_workflow.check_document(changed)))

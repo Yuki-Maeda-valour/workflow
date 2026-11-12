@@ -353,7 +353,7 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4b.py'
 - 今回のreleaseによるprobeと保存先比較714件、規約検査のERROR 0・WARN 0も成功した。
 - この記録はMac・Linux arm64・最低OS実機の動作、PR用CI、最新mainを含む最終SHAの全回帰テストの成功を意味しない。これらは未確認であり、後続工程で別に記録する。
 
-CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4bの必須比較と検査用実行物)にある。
+CIの必須接続は [4 種類の CI と成果物](#4-種類の-ci-と成果物)の節と [CI入口の説明](../native/ci/README.md#r4bの必須比較と検査用実行物)にある。
 R4Bの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
 ### R4Rの比較
@@ -504,8 +504,80 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4r.py'
     - mainのpush用のNativeのrun 42988322539(`06a1e23`)とrun 42929357050(`0241db3`)では、`distribution` が成功している。完了はそれぞれ2026-11-11T09:30:37Zと2026-11-11T01:10:54Zである(管理担当がGitHubのAPIのjobsで確かめた)。
 - 同じcommitのpush用のrun 43085900763でも、`distribution` は待ちのまま始まらなかった。この run の Mac x86_64 の `verify-universal` は26分39秒で成功した(上限まで残り約3分)。
 
-CIの必須接続は次の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
+CIの必須接続は [4 種類の CI と成果物](#4-種類の-ci-と成果物)の節と [CI入口の説明](../native/ci/README.md#r4rの必須比較と検査用実行物)にある。
 R4Rの検査用実行物はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
+
+### S2Lの比較
+
+#468の`loop-state`の7コマンドは、製品CLIへ未登録・未配布の開発用実装である。
+[契約と承認された差](design.md#loop-stateの状態観測7コマンドs2l)、[専用部品と入口](../native/README.md#loop-stateの状態観測7コマンドs2l)を参照する。
+本家CPython 3.10.11・PyYAML 6.0.3・非rootを必須とし、今回のソースから作った`loop_state_fixture`を絶対パスで渡す。
+通常の`cargo test --locked`だけでは、旧版との比較は完了しない。
+
+リポジトリ直下で、同じPythonへ開発依存を入れてから実行する。出力先はリポジトリ外に置く。
+次はLinux x86_64の例であり、他機種はその機械のRust対象名へ変える。
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo build --release --locked -p dev-workflow-cli --example loop_state_fixture --target x86_64-unknown-linux-musl)
+fixture="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/loop_state_fixture"
+python3 -B native/ci/check_loop_state.py --fixture "$fixture"
+python3 -B native/ci/test_loop_state.py --fixture "$fixture"
+python3 -B native/ci/check_loop_state_units.py
+python3 -B native/ci/check_loop_state_mutations.py
+```
+
+| 入口 | 確かめること |
+|---|---|
+| `check_loop_state.py` | 同じ物理入力で旧版とRustを起動し、生の標準出力・標準エラー・終了値・状態ファイル・入力の無変更を比べる。部品は`loop_state_arguments.py`・`loop_state_contract_cases.py`・`loop_state_encoding.py`・`loop_state_encoding_matrix.py`・`loop_state_yaml_cases.py`・`loop_state_decision_cases.py`ほか |
+| `test_loop_state.py` | 比較器の自己検査26件。出力・終了値・保存結果の不一致、外す環境変数の残り、固定名の対応づけの誤りを拒否することを確かめる |
+| `check_loop_state_units.py` | 検査用exampleのRustテスト56件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
+| `check_loop_state_mutations.py` | ソースのコピーへ誤りを21種類入れ(設定のグラフ10・安全の観測とYAML11)、指定した検査が落ちることを確かめる |
+
+- 件数は比較器が数え、1件でも欠ければ失敗にする。0件・skip・時間切れ・想定外の失敗を合格にしない。
+- Macの列は、比較器が機種ごとに要求する件数である。Macでの実行は未確認である。
+  - MacのAPFSは、UTF-8でない名前と、大文字小文字だけが違う名前を作れない。
+  - Macでは、これらの名前を作る部分を、飛ばすか、置き換えて比べる。どちらも`S2L_OS_BOUNDARY`の行を出す。
+  - 飛ばす物と置き換える物の一覧は、比較器と`check_loop_state_units.py`に決めてある。
+  - 飛ばすのは、比較器の5件(契約3件・決定2件)と、`check_loop_state_units.py`の2件である。
+  - 置き換えて比べるのは、比較器の2件と、`check_loop_state_units.py`の1件である。
+    - 引数の1件は、ファイルを作らずに、同じ生のバイトの引数で比べる。
+    - 文字コード設定の1件は、作るファイルとディレクトリの名前の生のバイトを`xff`にして比べる。
+    - `i01`の1件は、大文字の名前を別の根に作り直して、同じ検査を流す。
+  - Macでは、`S2L_OS_BOUNDARY`の行の名前と扱いが一覧とちょうど同じでなければ、失敗にする。
+  - Linuxでは、その行が1件でも出れば、失敗にする。
+
+| 群 | Linux | Mac |
+|---|---|---|
+| 旧版のテストのメソッドと比較 | 57メソッド・183比較 | 行わない(Linuxの固定期待のため) |
+| 引数・疑似端末(PTY) | 404・40 | 404・40 |
+| 契約(値・例外・パス・出力の故障) | 610 | 473 |
+| 文字コード設定・YAMLの境界・文字コードの組 | 35・80・126 | 35・80・126 |
+| 全コマンド共通の決定と点検の比較 | 331 | 208 |
+
+- Macでは、旧版が`/proc/self/fd/<番号>`を渡す`git config --file`の解析の失敗で、`snapshot`・`preflight`を拒否する。全7コマンドの拒否と成功を、個別の期待で比べる。
+- 決定の比較は、起動の失敗の`Current thread`・`PYTHONHASHSEED`・`PYTHONOPTIMIZE`・SIGINT・SIGTERM・時間切れ・保存の途中の書き込みの失敗・`onbranch`の一時の置き場・Git以外を起動しないことを含む。
+- 実装レビューの指摘と、実装担当の点検(os.pathの字面・`try`/`except`の全数・パスの比較と鍵)で見つけた差も、恒久の比較に入れた。直す前のRustでは不一致になることを確かめてある。
+- 旧スクリプトと既存の検査は変えていない。Ubuntuの3.10.12では、旧Python単独の`scripts/test_loop_state.py`の65テストと、`scripts/check_loop_state_mutations.py`の10変異だけを流す。
+
+#### 比較に使うPython
+
+- 旧版とRustの比較は、本家CPython 3.10.11で流す。導入先のフレームを含むcaseでは、標準ライブラリ12本のSHA-256を、CPythonの`v3.10.11`タグの`Lib/`の値と照らす。違えば、そのcaseを失敗にする(成功にもskipにもしない)。
+- CIは`actions/setup-python`の3.10.11を使う。手元では、python.orgのソースから建てた3.10.11を使った。
+- uvで入れる3.10.11の配布物は`os.memfd_create`を持たないため、この比較には使えない。
+- 比較器は、決定が比較の前提の外にした環境変数を外して起動し、子の環境に残っていれば失敗にする。sitecustomize・利用者のsiteの`.pth`・argparseの翻訳ファイルが無いことも確かめる。
+- 資源の上限(RLIMIT_NOFILEなど)を下げた旧新の比較はしない(2026-11-12 00:42の決定)。受け継いだ値を記録するだけである。書き込みの失敗のcaseだけ`RLIMIT_FSIZE`を使う。
+
+#### 手元のLinux実装検証(2026-11-12)
+
+実装commitは`ba643c3eb3225305d9c1bb5e967f3bc813fae046`である。
+管理担当が、レビューした中身だけを取り出した別のコピーで品質検査24件を流し、すべて終了値0だった。
+
+- 作業機(Linux x86_64・16 CPU)での所要時間は、`check_loop_state.py`が176〜235秒、`cargo test --locked`が約170〜190秒、`check_loop_state_mutations.py`が約30〜40秒だった。
+- R4Bの比較は同じ回で約460秒だった。
+- CIの`build`(120分)・`verify-universal`(60分)の上限の中で、S2Lの比較を含めて完走するかは未確認である。Macでの実際の動作、Linux arm64、最低OSも未確認であり、PRのCIで確かめる。
+- この記録は、PR用CIと、最新mainを含む最終SHAの全回帰テストの成功を意味しない。
 
 ### check_links の比較(R4U)
 
@@ -798,7 +870,7 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
 - 上限との余裕(CI の Mac Intel の `cargo test` 全体は 2026-11-11 の main で約 528 秒だった)。
   - この 528 秒は、2026-11-11 の main(#481 より前)の値である。R4D-1 の比較は含まない(`task_digest` の比較の約 416 秒を含む)。
   - #488 の後、比較は `r4d1()` の 1 回 1,800 秒の上限と、比較の 900 秒の上限の両方が効く。CI では、checkout と `prepare` の後に `r4d1()` が始まるので、`r4d1()` の 1,800 秒より先に、ジョブの上限 30 分に当たる。
-  - build のジョブ全体の上限は 60 分(`.github/workflows/native.yml` の `build`)である。R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac x86_64 の build のジョブは 47 分 10 秒だった。
+  - build のジョブ全体の上限は 120 分(`.github/workflows/native.yml` の `build`。S2L #468 の前は 60 分)である。R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac x86_64 の build のジョブは 47 分 10 秒だった。
 
 #### 期限の検査の測定値
 
@@ -829,7 +901,7 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
 
 上限との余裕。
 - 比較器の上限 900 秒に対し、最大は Mac Intel の 136.4 秒(`diagnostic_reftable` 全体は 201 秒)だった。
-- build のジョブの最大は 38 分 51 秒で、上限 60 分に対し約 21 分の余裕がある。
+- build のジョブの最大は 38 分 51 秒で、当時の上限 60 分に対し約 21 分の余裕があった。
 - ただし、R4R #473 の merge(942a4de)の push の [Native の run 43114316373](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/43114316373) で、Mac Intel の build のジョブは 47 分 10 秒だった(R4R の比較が加わったためと推測される)。
   - R4D-1 の分(`diagnostic_reftable` 全体の約 3 分 21 秒)を足すと、約 50 分 31 秒の見積もりになる(推測)。この見積もりは、比較を build のジョブで流す #481 の形の値である。
   - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
@@ -847,8 +919,8 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 | `macos-15` | `macos-arm64` | `aarch64-apple-darwin` | 同上 |
 
 - 最初の `policy` は、CI の定義と補助のテストを流す。`build` は表の 4 種類すべてで書式・clippy・Rust テストを必須にする。
-- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った製品用実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査、検査専用の `r4b_contract` と `r4r_contract` の比較を行う。品質検査では、R4Rのexampleの単体検査と対応表の照合も行う。
-- 工程全体の上限は`build`が60分、`verify-universal`が30分。比較ごとの期限や時間切れの失敗扱いは変えない。
+- `prepare --platform <表の値>` は Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリと、同じPythonへの`requirements-dev.txt`の依存を入れる。`build --platform <表の値>` はR4Sの専用比較を含む必須検査、2 回のビルド、今回作った製品用実行ファイルの `check_probe.py` と `check_resolve_task_dir.py` による検査、検査専用の `r4b_contract` と `r4r_contract` の比較を行う。品質検査では、R4Rのexampleの単体検査と対応表の照合も行う。S2Lでは、品質検査で `check_loop_state_units.py` と `check_loop_state_mutations.py` を流し、各回の `loop_state_fixture` を `check_loop_state.py` と `test_loop_state.py` で比べる。
+- 工程全体の上限は`build`が120分、`verify-universal`が60分(S2L #468の前は60分・30分)。比較ごとの期限や時間切れの失敗扱いは変えない。
   - 2026-11-11のMac Intelの[実行記録](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/42903337858/job/130134906190)では、R4Bの1回目は自己検査0.738秒・旧版46件50.638秒・追加23件787.250秒で成功した。合計838.626秒である。
   - `build`は品質検査と2回のビルドに加え、製品用とR4B用を各2回比較する。従来の40分では2回目の追加比較中に工程全体が打ち切られたため、60分に延ばす。
   - `verify-universal`は署名検査の後、製品用のprobe・保存先比較とR4B比較を各1回行う。R4Bだけで約14分の実測があり、従来の15分では残りの比較や準備の余裕がないため30分に延ばす。新上限でのMacの完走は、run 43085911008とrun 43085900763で確かめた(時間は下のR4Rの行)。
@@ -857,13 +929,16 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
     - R4Rの比較だけの時間は、Mac arm64で1回あたり約69秒だった(`check_r4r.py --fixture` の起動から `R4R: 合格` まで。2回とも)。Mac x86_64の比較だけの時間は未確認である。
     - `verify-universal` は、PR用のrun 43085911008で、Mac arm64が13分9秒、Mac x86_64が17分8秒で成功した(上限30分)。
     - 同じcommitのpush用のrun 43085900763では、Mac x86_64の `verify-universal` が26分39秒で成功した。上限まで残り約3分だった。
+  - S2L(#468)は、`build`の各回の比較と`quality()`の単体・変異の検査、`verify-universal`の比較1回を足す。比較は手元のLinux x86_64でも1回176〜235秒かかる。
+    - R4Rのpush用のrun 43085900763では、Mac Intelの`build`が48.2分(上限60分)、`verify-universal`が26.6分(上限30分)を使っていた。S2Lを足すと上限を超えるおそれが高いため、`build`を120分、`verify-universal`を60分に延ばす。
+    - 新しい上限でのMacの完走と所要時間は未確認であり、PRのCIで確かめる。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
-- 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --target <Rust の対象名>`。
+- 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --example loop_state_fixture --target <Rust の対象名>`。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
-  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。
+  - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。S2Lの `loop_state_fixture` も同じ結合・署名・比較を通し、両CPUで `check_loop_state.py` と `test_loop_state.py` を流す。
 - `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
 - 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
 - `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
@@ -888,6 +963,10 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 比較のテストがちょうど 1 件合格したことを確かめる。0 件・飛ばし・別のテストの合格・時間切れは、合格にしない。
   - `distribution` の `needs` には入れない。必須であることは、必須 CI の全ジョブの成功を確かめてから merge する決まりで担う。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
+- S2L(#468)の検査用実行物`loop_state_fixture`も、`build`・`reproduce`の2回のビルドに`--example loop_state_fixture`で含める。各回で`check_loop_state.py`と`test_loop_state.py`を流す。
+  - `quality()`は、各OSで1回、`check_loop_state_units.py`と`check_loop_state_mutations.py`を流す。
+  - `verify-universal`は、署名後の同じ`loop_state_fixture`を両CPUで比べる。`package`は配布用へ渡さない。
+  - 手元の比較は1回176〜235秒だった。CIの上限の中で完走するかは未確認である。
 
 ### ビルド入力の記録
 

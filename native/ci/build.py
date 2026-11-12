@@ -27,9 +27,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "loop_state_fixture")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -223,6 +223,9 @@ def quality(name, work):
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
         r4r_map(env, Path(temporary))
+        # 同じソースの各OS品質工程で一度。release各回はCLI比較と自己検査を行う。
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_units.py"], env=env)
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_mutations.py"], env=env)
 
 
 def r4r_map(env, folder):
@@ -284,6 +287,11 @@ def r4b_probe(fixture):
 
 def r4r_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_r4r.py", "--fixture", fixture])
+
+
+def loop_state_probe(fixture):
+    run([sys.executable, "-B", ROOT / "native/ci/check_loop_state.py", "--fixture", fixture])
+    run([sys.executable, "-B", ROOT / "native/ci/test_loop_state.py", "--fixture", fixture])
 
 
 def read_record(folder):
@@ -355,10 +363,11 @@ def verify_universal(downloads, work):
         run(["codesign", "--verify", "--strict", "--verbose=2", folder / filename])
         if sorted(run(["lipo", "-archs", folder / filename], capture=True).split()) != ["arm64", "x86_64"]:
             raise ValueError("Mac の最終ファイルの CPU が違います")
-    # 署名後の同じ3実行物を、各CPUの必須ジョブで検査する。
+    # 署名後の同じ4実行物を、各CPUの必須ジョブで検査する。
     probe(folder / "dev-workflow")
     r4b_probe(folder / "r4b_contract")
     r4r_probe(folder / "r4r_contract")
+    loop_state_probe(folder / "loop_state_fixture")
 
 
 def package(downloads, work):
@@ -428,6 +437,7 @@ def main():
                 probe(stage / f"{number}/dev-workflow")
                 r4b_probe(stage / f"{number}/r4b_contract")
                 r4r_probe(stage / f"{number}/r4r_contract")
+                loop_state_probe(stage / f"{number}/loop_state_fixture")
             pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
         elif args.command == "combine":
