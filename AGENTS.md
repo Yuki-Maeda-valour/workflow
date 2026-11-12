@@ -200,11 +200,13 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - R4Sのloop-state用YAML・機密指定・globの純粋部品は#462で実装済み。調査元は#454。公開CLI・配布・呼出元は未変更。契約と唯一の承認済み差は [docs/design.md](docs/design.md#loop-state用の純粋部品r4s)、APIは [native/README.md](native/README.md#loop-state用の純粋部品r4s) にある。
 - R4Aの`task-digest`は#460で開発用ソースへ実装済み。未登録・未配布であり、契約と必須比較は [docs/design.md](docs/design.md#本文の正規化と確認用の値r4a-task-digest)・[docs/testing.md](docs/testing.md#task-digestの比較r4a)にある。
 - R4Bのorigin判定とGit設定の確認値は#461で開発用ソースへ実装済み。未登録・未配布。契約は [docs/design.md](docs/design.md#origin判定とgit設定の確認値r4b)、exampleの必須検査と約9分の比較手順は [docs/testing.md](docs/testing.md#r4bの比較)にある。
+- R4D-1の診断のreftable(Gitが参照を表の形のファイルに保存する形式)読み取りは#481で開発用ソースへ実装済み。未登録・未配布であり、契約は [docs/design.md](docs/design.md#診断の-reftable-の読み取りr4d-1)、比較は [docs/testing.md](docs/testing.md#r4d-1-の-reftable-の比較) にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
 - `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
 - C0b/C0c/R4Sの `cargo test --locked` もPython3.10系と非rootを必須とする。R4Sは同じPythonへ `requirements-dev.txt` の依存を入れる。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#loop-state用の純粋部品の検査r4s) にある。
+- R4D-1の `cargo test --locked` は、reftableを作れるgit 2.45以上も必要とする。Python3.10系・非rootも必須で、`requirements-dev.txt` の依存は要らない。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy

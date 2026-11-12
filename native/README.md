@@ -287,6 +287,30 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 [必須の実行手順と検証範囲](../docs/testing.md#r4bの比較)に従ってください。
 通常の`cargo test --locked`だけではexampleの単体検査と旧版比較は完了しません。
 
+## 診断の reftable の読み取り(R4D-1)
+
+#481 で、旧 Python の `diagnostic-reftable.py` と診断の予算の型に対応する内部部品を実装しました。reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式です。table はその 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体です。
+製品 CLI の登録・help・配布・既存の呼出元は変えていません。呼出元はまだありません(R4D-3 で使います)。契約は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
+
+- `crates/cli/src/commands/diagnostic_git/budget.rs`
+  - `Budget`: `new()`(期限 300 秒)・`check()`・`charge(Kind, u64)`・`remaining()`・`stop_flag()`・`request_stop()`・`used(Kind)`。
+  - `Kind`: 9 種類の量。`name()`・`limit_reason()`・`default_limit()`・`from_name()` を持ちます。
+  - `Failure { reason, code }`: 理由の字面と終了値です。
+- `crates/cli/src/commands/diagnostic_git/reftable.rs`
+  - `read_stack(path: &OsStr, hash_format: &str, budget: &mut Budget) -> Result<Stack, ReadError>`: パスは相対パスも受けます。ハッシュの形式は `sha1` か `sha256` です。
+  - `Stack`: 旧版の dict と同じ並びで、`iter()`・`get()`・`len()` を持ちます。`Entry { name, oid, target }` の名前と指す先は bytes です。
+  - `ReadError`: `Reftable(Failure)`・`Budget(Failure)`・`Other("ValueError")`(パスに NUL を含む)の 3 種類です。
+- `crates/platform/src/fs.rs` に足した部品
+  - `lstat_path(path)`: 最後の段だけリンクを辿らずに調べます。
+  - `PlainFile`: `snapshot()`・`read_at(offset, buf)`・`close()` を持ちます。
+  - `HeldDir::open_path`・`snapshot`・`open_plain`・`close`: `close` は閉じる失敗を返します。
+  - 自作の `unsafe` は `close_owned` の 1 か所です。
+
+`diagnostic_git` は `commands/mod.rs` に登録していません。検査は `tests/diagnostic_reftable.rs` が `#[path]` で読み込みます。
+
+必須の比較は [テストの手順](../docs/testing.md#r4d-1-の-reftable-の比較) に従ってください。
+`cargo test --locked` は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -333,6 +357,7 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix` と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
 `rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。採用の根拠は [設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
+R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。自作の `unsafe` は `platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
