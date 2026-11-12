@@ -335,7 +335,13 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 `diagnostic_git` は `commands/mod.rs` に登録していません。検査は `tests/diagnostic_reftable.rs` が `#[path]` で読み込みます。
 
 必須の比較は [テストの手順](../docs/testing.md#r4d-1-の-reftable-の比較) に従ってください。
-`cargo test --locked` は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れません(結果は `ignored`)。比較は、次のコマンドか `build.py r4d1` で流します。
+
+```sh
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input)
+```
+
+比較は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
 
 ## ソース入力の SHA256
 

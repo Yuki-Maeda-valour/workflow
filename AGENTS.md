@@ -207,12 +207,16 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
 - `check_resolve_task_dir.py` は Python 3.10 系と root 以外の通常利用者で実行する。別の Python の版や root での実行は失敗する。CI の比較用 Python は 3.10.11 に固定する。
 - C0b/C0c/R4Sの `cargo test --locked` もPython3.10系と非rootを必須とする。R4Sは同じPythonへ `requirements-dev.txt` の依存を入れる。専用比較をLinux2種・Mac2種のCIで省略しない。件数と条件は [docs/testing.md](docs/testing.md#loop-state用の純粋部品の検査r4s) にある。
-- R4D-1の `cargo test --locked` は、reftableを作れるgit 2.45以上も必要とする。Python3.10系・非rootも必須で、`requirements-dev.txt` の依存は要らない。
+- R4D-1の比較のテストには `#[ignore]` の印を付けた。そのため、通常の `cargo test --locked` では流れない(結果は `ignored`)。
+  - 比較は、下のコマンドの塊の `-- --ignored --exact …` の行か `build.py r4d1` で流す。
+  - CIは `r4d1` のジョブで流す。
+  - reftableを作れるgit 2.45以上・Python3.10系・非rootが必須で、`requirements-dev.txt` の依存は要らない。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
 export CARGO_TARGET_DIR="$(mktemp -d)"
 (cd native && cargo fmt --check && cargo clippy --all-targets --locked -- -D warnings && cargo test --locked)
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input)
 python3 -B native/ci/check_workflow.py
 python3 -B native/ci/build.py test
 python3 -B -m unittest discover -s scripts -p 'test_task_directory.py'

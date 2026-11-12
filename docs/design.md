@@ -1284,6 +1284,7 @@ EINTR は、信号で呼び出しが中断されたときの失敗である。�
 
 旧版と Rust を、同じ入力・同じ予算の条件で比べる。比較器(`native/ci/check_diagnostic_reftable.py`)は、製品の符号化を使わない table と、本物の git が作った reftable の両方を作る。
 UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
 
 ### Rust の構成とビルド入力(段階 0a)
 

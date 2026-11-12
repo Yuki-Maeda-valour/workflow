@@ -275,6 +275,7 @@ fn write_json(path: &Path, value: &Value) {
 }
 
 #[test]
+#[ignore = "R4D-1 の比較。CI は r4d1 のジョブ、手元は build.py r4d1 か -- --ignored で流す"]
 fn rust_matches_the_legacy_reftable_reader_on_every_input() {
     let started = Instant::now();
     let scratch =
