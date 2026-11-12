@@ -1200,6 +1200,176 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### Markdown の表の XLSX 出力(R4E)
+
+[Issue #482](https://github.com/Yuki-Maeda-valour/workflow/issues/482)で、旧スクリプト `plugins/dev-workflow/skills/export-doc/scripts/md_tables_to_xlsx.py`(Markdown の表を XLSX にする)と同じ結果を返すコマンドを、開発用Rustソースへ移した。
+製品CLIの登録表・help・`launch.sh`・既存呼出元(export-doc の `SKILL.md`)へは未接続であり、未配布である。製品の `dev-workflow md-tables-to-xlsx` は今までどおり「未知のコマンド」で終了2になる。配布は段階1b・プラグインv4.53.0のまま。
+製品への接続は、後の配布の段(D4)で改めて設計する。
+
+- XLSX(Excel の表計算のファイル。中身は ZIP に入った XML)は Rust が自分で作る。Python と openpyxl(旧版が XLSX を作るのに使う Python の部品)に依存せず、新しい crate も足さない。
+- 比べる旧版は、配布元が標準ライブラリに手を加えていない CPython 3.10.11(Ubuntu の Python のように標準ライブラリを変えたものは使わない)に、openpyxl 3.1.5 と et_xmlfile 2.0.0 だけを入れた環境である。lxml(XML の別の部品)は入れない。
+- 旧版も Rust も外部の道具を起動しない。
+
+#### 契約の要点
+
+- 引数は、Python 3.10 の argparse と同じ順・同じ文で扱う。
+  - `inputs`(1 個以上)・`-o/--output`(必須)・`--source-root`(繰り返し)。短縮・`=` の形・`--`・同じ選択肢の重複(最後が勝つ)も同じにする。
+  - 誤りは、使い方の行と `md_tables_to_xlsx.py: error: …` を標準エラーへ出し、終了2。呼出名は固定名 `md_tables_to_xlsx.py` とする。
+  - `--help` の折り返しの幅は、`COLUMNS` → 標準出力の端末の幅 → 80 の順で決めて 2 を引く。
+  - 折り返しは textwrap(Python の折り返しの部品)の規則で行う。
+  - 引数のバイトは surrogateescape(UTF-8 でないバイトを特別な文字で保つ方式)で文字にする。ファイル操作には元のバイトを使う。
+- 入力は引数の順に、`is_file()` で調べてから UTF-8 として厳密に読む。
+  - 無い入力は、全部を読んだ後に `WARN 入力が存在しない: <引数>` を出す。表が無く、無い入力があれば終了2。表が無いだけなら `表が見つからなかった(出力なし)` と終了1。
+  - UTF-8 として壊れた入力と読み取りの誤りは、呼出履歴(traceback。例外が起きた所までの関数の並び)と終了1。位置と理由の文も Python と同じにする。
+  - 行の分け方・空白の判定・正規表現は、Python の `str.splitlines()`・`str.isspace()`・`re` と同じ意味にする。
+  - Rust の正規表現の部品(regex の crate)は使わない。Rust の Unicode の版で結果が変わる関数も使わない。
+- 表の取り出しは旧版と同じにする。コードフェンスは行頭の空白の後の ```` ``` ```` だけを扱う。表の 1 行目は `|` で始まる行だけ。表の名前は `f"{文書名} {見出し}".strip()` である。
+- セルの型と書式は openpyxl 3.1.5 と同じにする。
+  - 値は 32767 文字で切ってから制御文字を照らす。あれば `IllegalCharacterError` の呼出履歴と終了1で、何も作らない。
+  - 2 文字以上で `=` で始まる値は数式、`#N/A` など 7 つの語は誤りの型、ほかはセルの中に直接書く文字列(`inlineStr`)にする。
+  - 1 行目は太字、`A2` で固定、列幅は 8〜60。1 行が 18279 列以上なら、`ValueError: Invalid column index 18279` の呼出履歴と終了1。
+- シート名は、旧版の `unique_sheet_name`(禁止の文字を空白へ・31 文字で切る・`_2`…)の後に、openpyxl 3.1.5 の `avoid_duplicate_name`(大文字小文字を区別せずに番号を足す)を同じ意味で行う。
+  - 大文字小文字の対応と空白の集合は、CPython 3.10.11 から生成した表(文字の分類の表は Unicode の版 13.0.0) `unicode13.rs` で引く。
+  - 番号を足して 32 文字以上になったときだけ、`UserWarning` を実行中の最初の 1 回だけ標準エラーへ出す。
+- 出力先は、書き込みの前に全件を検査する。
+  - 正本(元の文書のディレクトリ)の中・入力そのもの・最後のリンク(出力先の名前そのものがシンボリックリンク)・複数のハードリンク・特殊ファイルは、`ERROR 出力を拒否: <理由>` と終了2。ディレクトリもファイルも作らず、入力を変えない。
+  - `posixpath.realpath`・`Path.resolve()` などを同じ意味で実装する。
+  - Python の再帰の上限で止まる深さも同じにする。旧版の実測では、無い親の階層は985個で成功・986個で終了2、リンクの連なりは989個で成功・990個で終了2だった。
+  - Linux では、4096 バイトを超える現在のディレクトリも、glibc の `getcwd` と同じ手順で得る。
+  - errno(OS の誤りの番号)の文は、Linux は glibc の文、Mac は OS の文にする。検査入口が静的に結合する(ライブラリを実行ファイルへ取り込む)musl(小さな C ライブラリ)の文は使わない。
+- 各部分の XML のバイトは、openpyxl 3.1.5・et_xmlfile 2.0.0・CPython 3.10.11 の ElementTree が lxml なしで出すものと同じにする。既定テーマ(10140 バイト)と書式は固定のバイトで、openpyxl(MIT ライセンス)から転記した。許諾の表示は `NOTICE.md` にある。
+- ZIP の欄は旧版と同じにする。
+  - 部分の順は `docProps/app.xml`・`docProps/core.xml`・`xl/theme/theme1.xml`・`xl/worksheets/sheet<N>.xml`…・`xl/styles.xml`・`_rels/.rels`・`xl/workbook.xml`・`xl/_rels/workbook.xml.rels`・`[Content_Types].xml` である。
+  - 各部分は方式8(DEFLATE)・版20・作成元3(Unix)・旗0で、隙間なく並べる。外部属性は、ふつうの部分が `0o600<<16`、シートの部分が `0o100600<<16` である。
+  - 時刻は、書いた時刻の現地時刻(`localtime_r`)を 2 秒単位で切り捨てる。
+  - ZIP64(大きなファイル用の ZIP の拡張)のうち、部分ごとの「展開後の大きさ × 1.05 が 2^31-1 を超える」と部分の数で決まる規則は、zipfile と同じにする。
+- 出力先の親は、`Path.mkdir(parents=True, exist_ok=True)` と同じ順で作る。
+  - 出力先は `O_RDWR|O_CREAT|O_TRUNC`(モード `0o666`)で開き、失敗したら `O_WRONLY|O_CREAT|O_TRUNC` で開き直す。既存のファイルは同じ実体を切り詰めて上書きする。
+  - 成功は `OK <-o の字面> にシート <数> 件を出力` と終了0。
+- 出力と故障は、CPython 3.10.11 の入出力と終了処理に合わせる。
+  - 標準エラーは行ごとにすぐ書く。
+  - 標準出力は、端末でなければ終了時にまとめて書く。端末なら行ごと、`PYTHONUNBUFFERED` ならすぐ書く。
+  - 終了時の書き出しの失敗は、`Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>`・例外の行・終了120。
+  - 起動時に閉じていた fd 1・fd 2 は、旧版の `sys.stdout`・`sys.stderr` が無い状態として扱う。
+  - `SIGPIPE`・`SIGXFSZ` を無視する。`ulimit -f` を超える書き込みは `EFBIG` になる。
+  - 再現する起動の環境変数は、`PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONOPTIMIZE`(2 以上で `--help` の説明文が消える)・不正な `PYTHONHASHSEED`(起動の失敗)である。
+  - XLSX の書き込みの失敗の後に、旧版の `ZipFile.__del__` が出す 2 つ目の呼出履歴も出す。
+- SIGINT は、起動時に既定の扱いのときだけ、旧版と同じに扱う。起動時に無視されていれば、無視を続ける。
+  - 1 回届くと、呼出履歴と最後の行 `KeyboardInterrupt` を標準エラーへ出し、SIGINT で終わる。
+  - 標準出力のパイプが一杯で、終了時の書き出しで止まっている間(既定の溜め方)は、旧版の実測と同じにする。
+  - 1 回目は何も出さずに書き直す。2 回目で `Exception ignored in: <_io.TextIOWrapper name='<stdout>' …>` と `KeyboardInterrupt: ` を出す。3 回目で SIGINT で終わる。
+  - `PYTHONUNBUFFERED=1` では `print` の所で止まり、1 回目で呼出履歴を出して SIGINT で終わる。
+
+#### 認めた差
+
+次の表の差だけを認める。ほかのコマンドで認めた差は持ち込まない。
+
+表と下の文で使う Q1〜Q5 は、2026-11-12 00:28 の決定の問いの番号である。
+
+- Q1: 書き込みの途中の失敗(容量の上限などで、XLSX の書き込みの途中で失敗する場面)。
+- Q2: 記憶域の不足と、位置で決まる ZIP64 の欄。
+- Q3: Rust は XLSX を圧縮しない。
+- Q4: Rust は一時ファイルを使わない。
+- Q5: 一覧に無い起動の環境変数(Python 自身の起動を変える変数のうち、再現する一覧に無いもの)。
+
+| 差 | 決定 | 比べ方の要点 |
+|---|---|---|
+| openpyxl が無い旧版の CSV | 2026-11-11 23:02(R4E だけ) | Rust はいつも XLSX を出し、CSV の経路を移さない。比較は openpyxl がある旧版とだけ行う |
+| XLSX のバイト | 同上 | ZIP の構造と、展開した各部分のバイトで比べる。圧縮のバイト列・圧縮後の大きさ・ZIP の時刻・`core.xml` の 2 つの時刻は比べず、形式と実行の前後の範囲を確かめる |
+| 圧縮しない(Q3) | 2026-11-12 00:28(R4E だけ) | 圧縮のバイト列と大きさは比べない。容量の上限が両者の大きさの間にあるとき、Rust だけが失敗する差を認める |
+| 一時ファイルを使わない(Q4) | 同上(R4E だけ) | 旧版の失敗が一時ファイルによる場面だけ、Rust の期待を、同じ入力を通常の条件で流した旧版の結果にする |
+| 書き込みの途中の失敗(Q1) | 同上(全コマンド) | 終了値・空の標準出力・呼出履歴の先頭から `wb.save(checked_out)` の行まで・各呼出履歴の最後の行・入力の無変更・ほかのファイルを作らないことを比べる。最初の書き出しの失敗は、番地のほかの全部の行を比べる |
+| 記憶域の不足と、位置で決まる ZIP64 の欄(Q2) | 同上(全コマンド) | 比較の前提の外(ケースを作らない) |
+| 一覧に無い起動の環境変数(Q5) | 同上(全コマンド) | `PYTHONMALLOCSTATS` などの効果は比較の前提の外。`PYTHONOPTIMIZE` と不正な `PYTHONHASHSEED` は再現する |
+| 文字コードの設定 | 2026-11-11 22:24(全コマンド) | Rust は UTF-8 と surrogateescape に固定する(標準エラーは backslashreplace)。期待は `PYTHONUTF8=1` の旧版の結果 |
+| 起動の失敗の `Current thread` | 2026-11-11 17:45(全コマンド) | 位置と形式だけを検査する |
+| 実行環境のパス | 2026-11-11 17:58・21:35・22:26・22:38(全コマンド) | 旧スクリプトは固定名、標準ライブラリと site-packages は相対のパスに置き換えて比べる。行番号は CPython 3.10.11 と openpyxl 3.1.5 の値 |
+| 起動を変える環境変数・実行ごとに変わる出力 | 2026-11-11 22:31(22:35 に全コマンドへ広げた) | SIGINT は、信号で終わること・終了値・最後の行・それまでの標準出力を比べる。SIGTERM は全バイト。`ZipFile.__del__` の番地は形式だけ |
+| 外部の道具 | 2026-11-11 23:19(全コマンド) | 旧版も Rust も起動しない |
+| 旧版の処理系の資源の上限 | 2026-11-12 00:42(全コマンド) | `RLIMIT_FSIZE` のほかの上限は設定せず、受け継いだ値を記録する |
+
+R4E だけに当てる 3 つの利用者の決定の文と、補足は次のとおりである。
+
+- CSV の経路(2026-11-11 23:02):「Rust 版の md_tables_to_xlsx は、openpyxl の有無に関わらず、いつも XLSX を出す。XLSX は Rust が自分で作る(Python と openpyxl に依存しない)。」「旧版で openpyxl が無いときに CSV を出す動作との差は認める。」
+  - Rust には CSV を選ぶ引数も分岐も作らない。旧版の CSV の経路と、その既存テストは残す。
+  - 比較器は、Rust を Python の無い `PATH` で流し、openpyxl のある旧版の XLSX と比べる。`FALLBACK` を出さず、出力名と同じ名前の CSV のディレクトリを作らないことも確かめる。
+- Q3:「Rust は XLSX の各部分を圧縮しない(DEFLATE の非圧縮ブロック)。ファイルが旧版より大きくなる差と、空き容量・ulimit -f・ディスクの割り当てが両者の大きさの間にあるときに Rust だけが失敗する差を認める。」
+  - DEFLATE の非圧縮ブロックは、形式は DEFLATE のまま、中身を圧縮しない区切りである。Rust は 65535 バイトずつに分けて書き、方式の欄は 8 のままにする。
+  - ファイルは旧版の約 3.4 倍(3 行の表)から約 10 倍(2000 行×5 列で値が似た表)になる。設計を確かめたレビュアーの実測で、入力で変わる。
+- Q4:「Rust は一時ファイルを使わず、メモリ上で組み立てる。一時ファイルの置き場が使えない・一杯・umask などで旧版だけが失敗する差を認める。シートの部分の外部属性は旧版と同じ値(0o100600<<16)を書き、時刻は書いた時刻にする。」
+  - openpyxl は、シートの XML を一時ファイル(`TMPDIR` などの置き場の `openpyxl.XXXXXXXX`)へ書いてから ZIP へ入れる。
+  - 比較器は、次の 3 つのどれかに当たるときだけ、旧版の失敗が一時ファイルによると見分ける。
+    - 例外の文に、そのケースの一時ファイルの名前が入る。
+    - 呼出履歴に `openpyxl/writer/excel.py` の 199・200 行(シートの一時ファイルを書く所)がある。
+    - `tempfile.py` の `No usable temporary directory found` が出る。
+
+Q1 の当て方は、R4E の作業をまとめる担当(R4E だけの進行と判断を受け持つ担当。以下の「R4E の作業をまとめる担当」は、この担当だけを指す)が、2026-11-12 00:28 の決定の範囲で決めた。
+
+- 上限で、旧版の XLSX が終わりの記録(`_write_end_record`)で失敗する範囲(3 行の表で約 4404〜4959 バイト。出典は [Issue #482](https://github.com/Yuki-Maeda-valour/workflow/issues/482) の追加修正記録の 2026-11-12 の「決定 Q1 の当て方」で、旧版を上限を変えて流した実測)では、旧版は `zipfile.py` の `close` から始まる例外の連鎖の形になる。Rust は部分の中で失敗して、`ZipFile.__del__` の形になる。
+- 理由は、失敗の位置が圧縮で決まること(Q1)と、Rust の XLSX が大きいこと(Q3)の組み合わせである。この範囲で一致するのは、終了値・空の標準出力・最後の行だけである。
+- 比較器のケースは、形まで一致する上限(旧版の XLSX の大きさの半分と 0)で流す。
+
+比較器は、差ごとに名前を付けた一覧(`native/fixtures/r4e/cases.json` の `approved_differences`)を持つ。各ケースは当てる差の名前を宣言し、宣言の無い差で一致しなければ失敗にする。XLSX のバイトと実行環境のパスの 2 つは、すべてのケースに当てる。
+
+#### 起動前の状態の記録(製品には入らない)
+
+Rust の標準ライブラリは、`main` の前に、閉じた fd 0〜2 を `/dev/null` で開き、`SIGPIPE` を無視へ変える。旧版の動き(fd 1・fd 2 が閉じた起動での出し方)に合わせるには、その前の状態が要る。
+
+- 記録する関数 `record_startup_state` の本体は、platform の `r4e.rs` に置く。中の unsafe(Rust の安全の検査を外すコード)は platform に閉じる。
+- `main` より前に呼ばれる関数の一覧の項目(関数を指す 1 つの静的変数)は、検査専用の入口 `examples/r4e_contract.rs` にだけ置く。
+  - 置き場は、Linux が `.init_array`、Mac が `__DATA,__mod_init_func` である。どちらも、実行ファイルの読み込み時に呼ぶ関数の一覧の領域である。
+  - `#[used]` を付け、最適化と結合で消えないようにする。
+- 項目を置く属性(`link_section`)は unsafe の属性である。そのため、example の先頭は `#![deny(unsafe_code)]` にし、その 1 つの静的変数だけに `#[allow(unsafe_code)]` を付ける。
+  - 「platform 以外は `#![forbid(unsafe_code)]`」の決まりの例外は、この 1 か所だけである。`md_tables_to_xlsx` のモジュールは `#![forbid(unsafe_code)]` のままにする。
+- platform の木は一覧の項目を持たない(テストの実行ファイルにだけ置く)。release は全体をまとめて最適化する設定(`lto = "fat"`・`codegen-units = 1`)だが、製品の `dev-workflow` の起動前の関数は増えない。
+- 確かめた結果(2026-11-12):
+  - 製品の `.init_array` の大きさは、R4E の前の main(06a1e23)から作ったものと同じだった(gnu 0x10・musl 0x8)。`--help`・`--version`・`probe`・`resolve-task-dir`・`md-tables-to-xlsx` の起動の結果も、ふつう・fd 0〜2 を閉じた起動・`SIGPIPE` を無視した起動で同じだった。
+  - example の記録は、Linux x86_64 の gnu と musl で、fd を閉じた組み合わせ・ディレクトリ・疑似端末・`SIGINT` と `SIGPIPE` を無視した起動のすべてで正しかった。
+  - Mac 2 種と Linux aarch64 は、結合の前のオブジェクトに一覧の項目(8 バイト・再配置 1)があることまで、手元で確かめた。実際に呼ばれることは、CI(run 43162803365)で 4 機種とも確かめた(下の「未確認の条件」の節も参照)。
+- unsafe を使うのは、platform の `r4e.rs`(起動前の記録・信号の扱い・`localtime_r`・`getcwd`・`pthread_self`・`close`)と、example の 1 つの静的変数だけである。
+- C の型・関数・定数は、R4R #473 が platform の依存に足した `libc`(0.2.191)のものを使う。`libc` に Unix 向けの宣言が無い `tzset` だけを手で宣言する。
+
+#### CI のジョブを分けた理由(時間の予算)
+
+R4E の比較(`check_r4e.py`)は、`build` と `verify-universal` に入れず、新しい 2 つの必須のジョブ `r4e`・`r4e-universal` で流す。R4E の作業をまとめる担当が 2026-11-12 に決めた。出典は [Issue #482](https://github.com/Yuki-Maeda-valour/workflow/issues/482) の追加修正記録「2026-11-12: CI の時間を測り直し、R4E の比較を別のジョブにした」である。そこに「管理担当の判断」とある「管理担当」は、R4E の作業をまとめる担当を指す。決めた後に、共有の記録で知らせた。その知らせを受けて、Rust 移行の全体をまとめる担当が 12:59 に、この形をすべての新しいコマンドの決まりにした(下の箇条)。その決定の文(「管理担当が利用者の委任で決めた」)の「管理担当」は、Rust 移行の全体をまとめる担当を指す。旧版との差は生まない。
+
+- 設計は「両方のジョブで、時間の上限の 2 割以上を残す」を予算にした。
+- main 942a4de の push の CI(run 43114316373)の Mac Intel で、`build` は 47 分 10 秒(上限 60 分)だった。
+  - 内訳は、`check_r4b.py` が 2 回で約 27 分 40 秒、`check_r4r.py` が 1 回 約 54 秒、品質の検査が約 10 分、2 回のビルドが約 1 分 15 秒である。
+  - `verify-universal` は 16 分 43 秒(上限 30 分)だった。
+- `build` を 48 分までに収めると、R4E の比較に使えるのは約 50 秒しかない。設計が最初に置いた形(`build` で 2 回・`verify-universal` で 1 回)は収まらない。
+- `r4e` は `build` の後に、4 機種で `build` の 2 本の `r4e_contract` を比べる(上限 30 分)。`r4e-universal` は `combine` の後に、Mac 2 機種で署名後の 1 本を比べる(上限 30 分)。
+- `build` には、`r4e_contract` の 2 回のビルドと 2 本の一致・Linux の ELF の検査・example の単体テストが残る。`combine` と `verify-universal` は、既存の処理で `r4e_contract` の結合・署名・確かめを行う。既存のジョブの時間の上限は変えない。
+- `distribution` は 2 つのジョブの成功を待つ(`needs` の末尾に足した)。R4B・R4R と同じく、比較が落ちたら配布用 tar を作らない。
+- この形は、2026-11-12 12:59 に、Rust 移行の全体をまとめる担当(R4E の作業をまとめる担当とは別の、複数のコマンドの移行を通して利用者から判断を任された担当)が、新しいコマンドの比較のすべてに当てる決まりにした(コマンドごとの必須のジョブ。`build` に足してよいのは example のビルドと単体テストの分だけ)。`check_workflow.py` は `native.yml` の必須のジョブの集合を持ち、欠けたら失敗にする。
+- PR の前の確かめ用の run(43162803365)では、`build` に増えた時間はばらつきの中で、Mac Intel の `build` は 39 分 30 秒だった。値は [testing.md](testing.md#r4eの比較) にある。
+
+#### 未確認の条件と、配布の段(D4)への引き継ぎ
+
+- Mac の実機と最低の OS の版、数 GB の入力は未確認である。
+- Mac 2 機種と Linux aarch64 で起動前の関数が実際に呼ばれることは、CI(run 43162803365)の比較器の事前の確かめで確かめた。
+- Mac で流れた比較は 785 件で、すべて一致した。810 件(必須のケース 805 件と固定期待 5 件)のうち、Mac で流さないのは 25 件(Linux だけのケース 24 件と固定期待の⑤)である。
+- 未実施の 30 件は、その 25 件に、810 件の外の確かめ 5 件を足したものである。5 件は、`strace` の 2 件・`LC_ALL=C.UTF-8` の事前の確かめ・Linux だけの自己検査 1 件・`generate_expected.py --check` の中の 05 である。内訳は [testing.md](testing.md#r4eの比較) にある。
+- 部品が 65535 個を超える ZIP64 の欄と、処理の後半に届いた SIGINT の呼出履歴の行は、旧版と並べて比べていない(実装レビューの抜き打ちでも流せなかった)。
+- Linux の検査入口は、静的に結合した musl(小さな C ライブラリ)を使う。
+  - そのため、書式の誤った `TZ`(時刻帯の環境変数)などでは、現地時刻が通常の C ライブラリ(glibc)と違いうる。時刻の値は比べないので、比較は 4 つの `TZ`(未設定・`UTC`・`Asia/Tokyo`・`America/New_York`)で範囲を確かめるだけにした。
+- D4 で製品へつなぐときは、起動前の状態を製品でどう得るかを改めて設計する。今の記録の仕組みは検査専用の example にしか無く、製品の `dev-workflow` の起動前の関数と起動の動きを変えていない。
+
+```text
+旧版(CPython 3.10.11 + openpyxl 3.1.5・lxml なし) ─┐
+                                                   ├─ 同じ形の入力(別々の置き場)→ 終了値・stdout・stderr・
+r4e_contract(examples。検査専用の入口) ────────────┘   ファイルの状態・ZIP の構造・展開した各部分のバイトを比べる
+  │  起動前の記録の項目(1 つの静的変数。unsafe の例外)
+  └─ commands/md_tables_to_xlsx/(unsafe なし)
+       args → markdown → paths(事前検査)→ workbook・sheet_name・xml → paths(親の作成)→ zip
+       pyio・errors(Python の入出力・起動・例外と呼出履歴)を全体で使う
+          │ 安全な関数だけを呼ぶ
+          ▼
+     platform::r4e(起動前の状態・信号・現地時刻・端末の幅・fd の種類・現在地。unsafe はここに閉じる)
+```
+
+APIは [native/README.md](../native/README.md#markdown-の表の-xlsx-出力r4e)、比較の手順と件数は [testing.md](testing.md#r4eの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
