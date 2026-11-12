@@ -201,6 +201,8 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - R4Aの`task-digest`は#460で開発用ソースへ実装済み。未登録・未配布であり、契約と必須比較は [docs/design.md](docs/design.md#本文の正規化と確認用の値r4a-task-digest)・[docs/testing.md](docs/testing.md#task-digestの比較r4a)にある。
 - R4Bのorigin判定とGit設定の確認値は#461で開発用ソースへ実装済み。未登録・未配布。契約は [docs/design.md](docs/design.md#origin判定とgit設定の確認値r4b)、exampleの必須検査と約9分の比較手順は [docs/testing.md](docs/testing.md#r4bの比較)にある。
 - R4Rのタスク本文の復元の内部部品は#473で開発用ソースへ実装済み。未登録・未配布。認めた差は2026-11-12 02:41の決定の`__CF_USER_TEXT_ENCODING`の1件だけ(Macの旧Pythonが子の環境に足す変数を比較から外す)。比べていない4件はS3I-A #474で決める。契約は [docs/design.md](docs/design.md#タスク本文の復元の内部部品r4r)、exampleの必須検査と比較の手順(`check_r4r.py --fixture <r4r_contractの絶対パス>`。Python3.10系・root以外の通常利用者と、Cコンパイラ `cc` が要る)は [docs/testing.md](docs/testing.md#r4rの比較)にある。
+- S3Dの`diff-snapshot.sh`の全モードは#472で開発用ソースへ実装済み。未登録・未配布であり、配布は段階 1b・v4.53.0 のまま。契約と承認済みの差は [docs/design.md](docs/design.md#diff-snapshotの全モードs3d)、比較の流し方と容器で約18分(1,068秒)の実測は [docs/testing.md](docs/testing.md#s3dの比較)、APIは [native/README.md](native/README.md#diff-snapshotの全モードs3d) にある。
+- S3Dの専用比較は、Python3.10系(PyYAML 6.0.3)・非root・GNU道具・実`git-lfs`・Linuxでは`strace`が必須。版に依る欄の基準はUbuntu 24.04の版で、Macは未実施として記録する。CIでは新しい必須ジョブ `s3d`(4機種)と `s3d-universal`(Mac 2機種)で流す。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
