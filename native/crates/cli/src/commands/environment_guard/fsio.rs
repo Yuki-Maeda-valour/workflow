@@ -1479,10 +1479,6 @@ mod tests {
 
     #[test]
     fn chmod_nofollow_cases_match_python_3_10() {
-        if !cfg!(target_os = "linux") {
-            eprintln!("固定期待は Linux(glibc)の旧版。Mac は未確認");
-            return;
-        }
         let dir = Dir::new("chmod");
         std::fs::create_dir(dir.path("d")).unwrap();
         symlink("d", dir.path("l")).unwrap();
@@ -1493,6 +1489,23 @@ mod tests {
         for case in cases {
             let name = case["name"].as_str().unwrap();
             let target = dir.cps(name);
+            // リンク自身の変更(`l`)は、固定期待が Linux(glibc)の旧版の `ValueError`。Mac は `fchmodat` がリンク自身を
+            // 変えられるので旧版の結果が違いうるが、未測定。Mac では結果の種類は比べず、リンクの指す先が変わらないことだけを確かめる。
+            if name == "l" && !cfg!(target_os = "linux") {
+                std::fs::create_dir(dir.path("d2")).unwrap();
+                std::fs::set_permissions(dir.path("d2"), std::fs::Permissions::from_mode(0o755))
+                    .unwrap();
+                symlink("d2", dir.path("l2")).unwrap();
+                let _ = with_parent(&ProcessHost, &dir.cps("l2"), |fd, name| {
+                    chmod_nofollow_at(fd, name, 0o750)
+                });
+                assert_eq!(
+                    std::fs::metadata(dir.path("d2")).unwrap().mode() & 0o777,
+                    0o755,
+                    "リンクを辿って先を変えた"
+                );
+                continue;
+            }
             let got = with_parent(&ProcessHost, &target, |fd, name| {
                 chmod_nofollow_at(fd, name, 0o750)
             });

@@ -2361,6 +2361,10 @@ def obs_depth_ticks(entries, root, ancestors, rootkey):
     return total
 
 
+# mode を指定しない新しいファイル・FIFO の mode。umask で変わらないよう、明示する(umask 002 の機械で作った値)。
+OBS_NEW_MODE = 0o664
+
+
 def obs_build(root, items):
     """配置(layout)を作る。暗黙の親ディレクトリは 0o755。"""
     dirs = {}
@@ -2391,6 +2395,7 @@ def obs_build(root, items):
             os.link(os.path.join(root, item["target"]), path)
         elif kind == "fifo":
             os.mkfifo(path)
+            os.chmod(path, OBS_NEW_MODE)
         else:
             raise SystemExit("配置の種類が不明: " + kind)
     # 浅い親から順に、mode を決める(深い方を先に 0o555 などにすると、後の chmod が届かないため)。
@@ -2408,10 +2413,13 @@ def obs_apply(root, ops):
         path = os.path.join(root, op["path"]) if "path" in op else None
         kind = op["op"]
         if kind == "write":
+            created = not os.path.lexists(path)
             with open(path, "wb") as handle:
                 handle.write(op["body"].encode())
             if "mode" in op:
                 os.chmod(path, op["mode"])
+            elif created:
+                os.chmod(path, OBS_NEW_MODE)
         elif kind == "rm":
             os.unlink(path)
         elif kind == "rmtree":
@@ -2429,6 +2437,7 @@ def obs_apply(root, ops):
             os.chmod(path, op["mode"])
         elif kind == "fifo":
             os.mkfifo(path)
+            os.chmod(path, OBS_NEW_MODE)
         else:
             raise SystemExit("操作の種類が不明: " + kind)
 
@@ -2521,6 +2530,8 @@ def obs_scenario(guard, case):
     base = os.path.realpath(tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP")))
     root = os.path.join(base, "case")
     os.mkdir(root)
+    # 固定期待の値が umask で変わらないよう、根の mode を決める(umask 002 の機械で作った値 0o775)。
+    os.chmod(root, 0o775)
     ancestors = len([p for p in root.split("/") if p])
     previous_entries = []
     results = []

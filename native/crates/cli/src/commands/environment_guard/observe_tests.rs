@@ -29,6 +29,9 @@ pub struct Dir(pub PathBuf);
 
 impl Dir {
     pub fn new(label: &str) -> Self {
+        // 深い木の走査は、親の fd を開いたまま子を開く(約 1000 本)。Mac の既定の上限(256)では足りないので上げる。
+        dev_workflow_platform::environment_guard::raise_open_file_limit(4096)
+            .expect("fd の上限を上げられる");
         let base = std::env::var_os("S2E_TEST_TMP")
             .map(PathBuf::from)
             .unwrap_or_else(std::env::temp_dir);
@@ -37,7 +40,11 @@ impl Dir {
         for count in 0u32.. {
             let path = base.join(format!("s2e-obs-{}-{label}-{count}", std::process::id()));
             match std::fs::create_dir(&path) {
-                Ok(()) => return Self(path),
+                Ok(()) => {
+                    // 旧版の固定期待を作った側は `mkdtemp`(0o700)。umask で mode が変わらないよう、そろえる。
+                    set_mode(&path, 0o700);
+                    return Self(path);
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => panic!("{}: {error}", path.display()),
             }
@@ -71,6 +78,9 @@ fn mode_of(item: &Value, default: u32) -> u32 {
 fn set_mode(path: &Path, mode: u32) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
 }
+
+/// mode を指定しない新しいファイル・FIFO の mode。umask で変わらないよう明示する(固定期待は umask 002 の機械で作った値)。
+const NEW_MODE: u32 = 0o664;
 
 /// 配置(layout)を作る。暗黙の親ディレクトリは 0o755。
 pub fn build_layout(root: &Path, items: &[Value]) {
@@ -121,6 +131,8 @@ pub fn make_fifo(path: &Path) {
         .status()
         .expect("mkfifo を起動できない");
     assert!(status.success(), "mkfifo が失敗した");
+    // umask で変わらないよう、mode を決める(固定期待を作った側と同じ 0o664)。
+    set_mode(path, NEW_MODE);
 }
 
 /// 変更の操作。内容を変えても時刻が同じにならないよう、カーネルの時計が進むのを待つ。
@@ -132,9 +144,12 @@ pub fn apply_ops(root: &Path, ops: &[Value]) {
         match str_of(op, "op") {
             "write" => {
                 let path = path.unwrap();
+                let created = path.symlink_metadata().is_err();
                 std::fs::write(&path, str_of(op, "body").as_bytes()).unwrap();
                 if op.get("mode").is_some() {
                     set_mode(&path, mode_of(op, 0o644));
+                } else if created {
+                    set_mode(&path, NEW_MODE);
                 }
             }
             "rm" => std::fs::remove_file(path.unwrap()).unwrap(),
@@ -511,11 +526,62 @@ fn describe_diff(want: &Value, got: &Value) -> String {
     lines.join("\n")
 }
 
+/// 実際のファイルシステムで、シンボリックリンク自身の `lstat` の mode。
+/// Linux は 0o120777。macOS は umask をリンクの mode に当てる(umask 022 なら 0o120755)。
+/// 配置の外(`dir` の直下)に試しのリンクを作って測り、すぐ消す。
+fn probe_link_mode(dir: &Path) -> u64 {
+    let probe = dir.join("probe-link");
+    symlink("x", &probe).unwrap();
+    let mode = std::fs::symlink_metadata(&probe).unwrap().mode();
+    std::fs::remove_file(&probe).unwrap();
+    u64::from(mode)
+}
+
+/// 固定期待のうち、旧版を測った Linux のファイルシステムでしか成り立たない値だけを、
+/// この機械で同じ物理入力から読める値に置き換える(ほかは 1 つも変えない)。
+/// - リンク自身の mode(0o120777): 実際のリンクを `lstat` した mode(`link_mode`)。
+/// - ディレクトリの `file-stat` の大きさ: 鍵が指す実際のディレクトリを `lstat` した大きさ(ext 系の 4096 とは限らない)。
+fn portable_expectation(want: &Value, root: &Path, link_mode: u64) -> Value {
+    const LINK_MODE_ON_LINUX: u64 = 0o120_777;
+    const S_IFMT: u64 = 0o170_000;
+    const S_IFDIR: u64 = 0o040_000;
+    let mut want = want.clone();
+    let Some(entries) = want.get_mut("entries").and_then(Value::as_object_mut) else {
+        return want;
+    };
+    for (key, value) in entries.iter_mut() {
+        let Some(items) = value.as_array_mut() else {
+            continue;
+        };
+        for item in items.iter_mut().skip(1) {
+            if item.as_u64() == Some(LINK_MODE_ON_LINUX) {
+                *item = json!(link_mode);
+            }
+        }
+        let is_directory = items.first().and_then(Value::as_str) == Some("file-stat")
+            && items
+                .get(3)
+                .and_then(Value::as_u64)
+                .map(|mode| mode & S_IFMT)
+                == Some(S_IFDIR);
+        if is_directory && let Some((_, rest)) = key.split_once("{r}") {
+            let path = format!("{}{rest}", root.to_str().unwrap());
+            let meta = std::fs::symlink_metadata(&path).unwrap();
+            assert!(meta.is_dir(), "{key}: 固定期待はディレクトリのはず");
+            items[4] = json!(meta.size());
+        }
+    }
+    want
+}
+
 fn run_case(case: &Value) {
     let name = str_of(case, "name");
     let dir = Dir::new("case");
     let root = dir.0.join("case");
     std::fs::create_dir(&root).unwrap();
+    // 固定期待を作った側が決めた根の mode(umask 002 の機械で作った値)。umask で変わらないよう、そろえる。
+    set_mode(&root, 0o775);
+    let link_mode = probe_link_mode(&dir.0);
     let ancestors = root.components().filter(|c| c.as_os_str() != "/").count();
     build_layout(&root, case["layout"].as_array().unwrap());
     let mut previous: Vec<PyDict> = Vec::new();
@@ -523,7 +589,7 @@ fn run_case(case: &Value) {
     let mut adjust = 0i64;
     for (index, run) in case["runs"].as_array().unwrap().iter().enumerate() {
         let (shown, entries) = execute(&root, ancestors, run, &previous, &mut budget, &mut adjust);
-        let want = &case["results"][index];
+        let want = &portable_expectation(&case["results"][index], &root, link_mode);
         assert!(
             &shown == want,
             "{name} の {index} 回目が旧版と違う\n{}",
@@ -610,10 +676,25 @@ fn the_test_helpers_agree_with_the_values_the_code_writes() {
 
 use std::os::unix::fs::MetadataExt;
 
+/// `st_dev` の旧 Python の見え方(10 進の文字列)。Mac の `dev_t` は符号つき 32 ビットで、
+/// `MetadataExt::dev` は符号を広げた値を返すので、符号つきに戻す。
+fn dev_text(meta: &std::fs::Metadata) -> String {
+    #[cfg(target_os = "macos")]
+    {
+        #[allow(clippy::cast_possible_wrap)]
+        let signed = meta.dev() as i64;
+        signed.to_string()
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        meta.dev().to_string()
+    }
+}
+
 fn stat_numbers(meta: &std::fs::Metadata) -> [Value; 6] {
     let ns = |sec: i64, nsec: i64| i128::from(sec) * 1_000_000_000 + i128::from(nsec);
     [
-        json!(meta.dev()),
+        json!(dev_text(meta)),
         json!(meta.ino()),
         json!(meta.mode()),
         json!(meta.size()),
@@ -698,7 +779,7 @@ fn entries_carry_the_real_stat_values_in_the_old_positions() {
         entry_of(&entries, &format!("@stat:{plugin_key}")),
         json!([
             "directory-stat",
-            dir_meta.dev().to_string(),
+            dev_text(&dir_meta),
             dir_meta.ino().to_string(),
             dir_meta.mode().to_string()
         ])
@@ -708,7 +789,7 @@ fn entries_carry_the_real_stat_values_in_the_old_positions() {
         json!([
             "directory-step",
             "p",
-            dir_meta.dev().to_string(),
+            dev_text(&dir_meta),
             dir_meta.ino().to_string(),
             dir_meta.mode().to_string()
         ])
@@ -734,7 +815,7 @@ fn entries_carry_the_real_stat_values_in_the_old_positions() {
     );
     let link = lstat("s/one");
     let link_ids = [
-        link.dev().to_string(),
+        dev_text(&link),
         link.ino().to_string(),
         link.mode().to_string(),
     ];
@@ -782,9 +863,9 @@ fn entries_carry_the_real_stat_values_in_the_old_positions() {
         json!([
             "configuration-link",
             "f",
-            link.dev().to_string(),
+            dev_text(&link),
             link.ino().to_string(),
-            target.dev().to_string(),
+            dev_text(&target),
             target.ino().to_string(),
             target.mode().to_string()
         ])
@@ -815,9 +896,9 @@ fn entries_carry_the_real_stat_values_in_the_old_positions() {
         json!([
             "installation-link",
             format!("{root_text}/store/x"),
-            link.dev().to_string(),
+            dev_text(&link),
             link.ino().to_string(),
-            target.dev().to_string(),
+            dev_text(&target),
             target.ino().to_string(),
             target.mode().to_string()
         ])

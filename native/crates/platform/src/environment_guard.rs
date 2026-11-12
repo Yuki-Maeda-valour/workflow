@@ -170,6 +170,34 @@ pub fn chmod_nofollow_at(dir: BorrowedFd<'_>, name: &[u8], mode: u32) -> io::Res
     }
 }
 
+/// 開けるfdの数の上限(`RLIMIT_NOFILE`のsoft)を`want`まで上げる(hardは超えない。既に`want`以上なら何もしない)。
+/// 戻り値は、その後のsoftの値。深い木の走査は、親のfdを開いたまま子を開くので、Macの既定(256)では足りない。
+/// 検査の準備のための入口で、製品の入口は呼ばない(旧版も上限を変えないので、製品は旧版と同じ上限で動く)。
+pub fn raise_open_file_limit(want: libc::rlim_t) -> io::Result<libc::rlim_t> {
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: `limit`は書込み可能な有効な領域。
+    if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let target = if limit.rlim_max == libc::RLIM_INFINITY {
+        want
+    } else {
+        want.min(limit.rlim_max)
+    };
+    if limit.rlim_cur >= target {
+        return Ok(limit.rlim_cur);
+    }
+    limit.rlim_cur = target;
+    // SAFETY: `limit`は有効な値。soft(`rlim_cur`)だけを上げ、hardは変えない。
+    if unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &limit) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(target)
+}
+
 /// `scan_dir`の失敗: OSの誤りか、呼び出し側の関数の失敗。
 #[derive(Debug)]
 pub enum ScanError<E> {
@@ -1443,6 +1471,30 @@ mod tests {
     }
 
     #[test]
+    fn the_open_file_limit_can_be_raised_but_not_above_the_hard_limit() {
+        let mut limit = libc::rlimit {
+            rlim_cur: 0,
+            rlim_max: 0,
+        };
+        // SAFETY: `limit`は書込み可能な有効な領域。
+        assert_eq!(
+            unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &mut limit) },
+            0
+        );
+        let want = 4096;
+        let got = raise_open_file_limit(want).unwrap();
+        let expect = if limit.rlim_max == libc::RLIM_INFINITY {
+            want.max(limit.rlim_cur)
+        } else {
+            want.min(limit.rlim_max).max(limit.rlim_cur)
+        };
+        assert_eq!(got, expect);
+        // 2回目は、もう上がっているので何も変えない。
+        assert_eq!(raise_open_file_limit(want).unwrap(), got);
+        assert_eq!(raise_open_file_limit(1).unwrap(), got);
+    }
+
+    #[test]
     fn passwd_root_and_missing() {
         match passwd_home(b"root").unwrap() {
             PasswdLookup::Found(home) => assert!(!home.is_empty()),
@@ -1685,11 +1737,89 @@ mod child_tests {
 
     #[test]
     fn stdio_env_cwd_and_fd_cases_match_python_3_10() {
-        assert!(stdio_cases(false) >= 6);
+        // 件数は機種ごとに決まっている: Linuxは固定期待の全件、Macは`fds-`(`/proc/$$/fd`を読む例)を除いた件数。
+        // 固定期待の中身から数え、実際に流した件数と完全に一致することを確かめる。
+        let all = cases();
+        let list = all["stdio_cases"].as_array().unwrap();
+        let plain = |case: &&Value| !case["leak_fd"].as_bool().unwrap();
+        let total = list.iter().filter(plain).count();
+        let fds = list
+            .iter()
+            .filter(plain)
+            .filter(|case| case["name"].as_str().unwrap().starts_with("fds-"))
+            .count();
+        assert_eq!((total, fds), (6, 1), "固定期待の中身が変わった");
+        let want = if cfg!(target_os = "linux") {
+            total
+        } else {
+            total - fds
+        };
+        assert_eq!(stdio_cases(false), want);
+    }
+
+    /// 子の側から3番以降のfdが開いているかを、外部コマンド(`/usr/bin/true`)への`>&N`で確かめる(閉じたfdへの複製は失敗する)。
+    /// 2桁以上の番号を使うので、dash(0〜9だけ)ではなくbashで流す(macOSにもbash 3.2がある)。
+    /// 組み込みコマンドの`(: >&N)`は使わない: bash 3.2(macOSのsh)は、書き換えを戻すためにfd 1を10番以降へ控えるので、
+    /// fd 10が閉じていても「開いている」と判定する。外部コマンドは子プロセスの中で書き換えるので、控えが入らない。
+    /// 親の列挙・上限までの番号のどちらの経路でも、何も開いていない。
+    fn assert_child_has_no_fd_above_2() {
+        let env = vec![(b"PATH".to_vec(), b"/usr/bin:/bin".to_vec())];
+        let script = b"n=3; while [ $n -lt 200 ]; do if /usr/bin/true 2>/dev/null >&$n; then echo open$n; fi; n=$((n+1)); done";
+        let argv = [b"bash".to_vec(), b"-c".to_vec(), script.to_vec()];
+        let (out, code) = run(&argv, &env, None, b"").unwrap();
+        assert_eq!((out, code), (Vec::new(), 0));
+    }
+
+    /// CLOEXECの無いfdを持った子が、`fds`(番号)を「開いている」と確かめられること(この確かめが働いている証明)。
+    fn assert_own_child_sees_fds(fds: &[c_int]) {
+        let script = "n=3; while [ $n -lt 200 ]; do if /usr/bin/true 2>/dev/null >&$n; then echo open$n; fi; n=$((n+1)); done";
+        let own = std::process::Command::new("bash")
+            .args(["-c", script])
+            .output()
+            .unwrap();
+        let want: String = fds.iter().map(|fd| format!("open{fd}\n")).collect();
+        assert_eq!(String::from_utf8_lossy(&own.stdout), want);
+    }
+
+    /// 「CLOEXECの無いfdは子へ渡らない」(Linuxは`/proc/self/fd`、Macは`/dev/fd`の列挙と、上限までの番号の両経路)。
+    /// CLOEXECの無いfdを持ったまま、ほかのテストが子を起動するとその子へ渡るので、別プロセスで行う。
+    /// 低い番号(3以降の最初の空き)と、150番あたり(上限までの番号の経路だけが届く大きさ)の2つを漏らす。
+    #[test]
+    fn a_leaked_fd_is_not_inherited_by_the_child_via_shell_probe() {
+        if !isolated(
+            "a_leaked_fd_is_not_inherited_by_the_child_via_shell_probe",
+            None,
+        ) {
+            return;
+        }
+        // Linuxでも`close_range`を使わせず、列挙と上限までの番号の経路を通す(Macは元から`close_range`が無い)。
+        FORCE_NO_CLOSE_RANGE.store(true, Ordering::SeqCst);
+        // SAFETY: 固定の文字列を開き、F_DUPFDで150以上の空きへ複製する。CLOEXECを付けず、このプロセスの終わりまで閉じない。
+        let (low, high) = unsafe {
+            let low = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
+            let high = libc::fcntl(low, libc::F_DUPFD, 150);
+            (low, high)
+        };
+        assert!(low >= 3 && high >= 150, "{low} {high}");
+        // 先に、この確かめが「開いているfd」を見つけられることを、普通に起動した子(fdを受け継ぐ)で示す。
+        assert_own_child_sees_fds(&[low, high]);
+        // 列挙の経路(`/dev/fd`か`/proc/self/fd`)が、漏らしたfdを見つけていること(黙って上限までの経路へ落ちていない)。
+        let listed = enumerate_open_fds().unwrap();
+        assert!(
+            listed.contains(&low) && listed.contains(&high),
+            "{listed:?}"
+        );
+        assert!(enumerated_fds().is_some());
+        assert_child_has_no_fd_above_2();
+        assert_exec_failure_reaches_parent();
+        FORCE_NO_ENUMERATION.store(true, Ordering::SeqCst);
+        assert!(enumerated_fds().is_none());
+        assert_child_has_no_fd_above_2();
+        assert_exec_failure_reaches_parent();
+        assert!(open_max() >= 3);
     }
 
     /// 代わりの経路でも、errpipeの書く側(keep)を閉じないこと。閉じると`execve`の失敗が親へ届かず`Ok`になる。
-    #[cfg(target_os = "linux")]
     fn assert_exec_failure_reaches_parent() {
         let result = spawn(&SpawnSpec {
             argv: &[b"/nonexistent-s2e-fallback/x".to_vec()],
@@ -1953,8 +2083,21 @@ mod child_tests {
         let fixture: Value =
             serde_json::from_str(include_str!("../../../ci/s2e_fixtures/environ_cases.json"))
                 .expect("environ_cases.json が JSON でない");
+        // 件数は機種ごとに決まっている: Linuxは固定期待の全件、Macは`coerce`(Linuxで測った足し込み)を除いた件数。
+        let list = fixture["cases"].as_array().unwrap();
+        let total = list.len();
+        let coerced = list
+            .iter()
+            .filter(|case| case["coerce"].as_bool().unwrap())
+            .count();
+        assert!(coerced >= 1 && total > coerced, "固定期待の中身が変わった");
+        let want = if cfg!(target_os = "linux") {
+            total
+        } else {
+            total - coerced
+        };
         let mut ran = 0;
-        for case in fixture["cases"].as_array().unwrap() {
+        for case in list {
             let name = case["name"].as_str().unwrap();
             let coerce = case["coerce"].as_bool().unwrap();
             // PEP 538 の足し込みの固定期待は Linux で測った。Mac は地域設定の判定が別なので比べない。
@@ -2002,7 +2145,7 @@ mod child_tests {
             assert_eq!(child.wait().unwrap(), 0, "{name}");
             ran += 1;
         }
-        assert!(ran >= 8, "比べた件数が少ない: {ran}");
+        assert_eq!(ran, want, "比べた件数が固定期待と合わない");
     }
 
     // ---- プロセス全体の信号の扱いを変える検査(別プロセスで行う)
@@ -2046,7 +2189,6 @@ mod child_tests {
         false
     }
 
-    #[cfg(target_os = "linux")]
     fn signal_number(name: &str) -> i32 {
         match name {
             "INT" => libc::SIGINT,
@@ -2058,10 +2200,8 @@ mod child_tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     extern "C" fn noop(_number: c_int) {}
 
-    #[cfg(target_os = "linux")]
     fn set_handler(number: i32) {
         // SAFETY: sigactionはすべて0で有効な初期値。
         let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
@@ -2073,7 +2213,6 @@ mod child_tests {
         );
     }
 
-    #[cfg(target_os = "linux")]
     fn set_mask(blocked: &[i32]) {
         // SAFETY: 空の集合を作って、呼出しスレッドのmaskを置き換える。
         unsafe {
@@ -2089,7 +2228,6 @@ mod child_tests {
         }
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn signal_cases_match_python_3_10() {
         if !isolated("signal_cases_match_python_3_10", None) {
@@ -2097,7 +2235,22 @@ mod child_tests {
         }
         let tracked = ["INT", "USR1", "USR2", "PIPE", "XFSZ"];
         let env = vec![(b"PATH".to_vec(), b"/usr/bin:/bin".to_vec())];
-        let argv = vec![b"cat".to_vec(), b"/proc/self/status".to_vec()];
+        // 子の信号の状態を読む手段(どちらも`SigIgn:`・`SigBlk:`の行に16進の集合を出す)。
+        // Linuxは`/proc/self/status`。全機種で、Cの観測用プログラム(`cc`で組む。sigprocmaskとsigactionで読む)。
+        // Macには`/proc`が無いので、Cの観測用プログラムが要る(`cc`が無ければ失敗にする。Xcodeのコマンドラインツールを入れる)。
+        let observer = SignalObserver::build();
+        assert!(
+            observer.is_some() || cfg!(target_os = "linux"),
+            "信号の観測用プログラムを組めない(`cc`が要る。macOSはxcode-select --installで入れる)"
+        );
+        let mut backends: Vec<Vec<Vec<u8>>> = Vec::new();
+        if cfg!(target_os = "linux") {
+            backends.push(vec![b"cat".to_vec(), b"/proc/self/status".to_vec()]);
+        }
+        if let Some(observer) = &observer {
+            use std::os::unix::ffi::OsStrExt;
+            backends.push(vec![observer.path().as_os_str().as_bytes().to_vec()]);
+        }
         let list = &cases()["signal_cases"];
         assert!(list.as_array().unwrap().len() >= 7);
         for case in list.as_array().unwrap() {
@@ -2125,39 +2278,107 @@ mod child_tests {
                 }
             }
             set_mask(&blocked);
-            let (out, code) = run(&argv, &env, None, b"").unwrap();
+            let outputs: Vec<(Vec<u8>, i32)> = backends
+                .iter()
+                .map(|argv| run(argv, &env, None, b"").unwrap())
+                .collect();
             set_mask(&[]);
-            assert_eq!(code, 0, "{name}");
-            let text = String::from_utf8(out).unwrap();
-            let mask = |key: &str| -> u64 {
-                let line = text.lines().find(|line| line.starts_with(key)).unwrap();
-                u64::from_str_radix(line.split(':').nth(1).unwrap().trim(), 16).unwrap()
+            for (out, code) in outputs {
+                assert_eq!(code, 0, "{name}");
+                let text = String::from_utf8(out).unwrap();
+                let mask = |key: &str| -> u64 {
+                    let line = text.lines().find(|line| line.starts_with(key)).unwrap();
+                    u64::from_str_radix(line.split(':').nth(1).unwrap().trim(), 16).unwrap()
+                };
+                let pick = |mask: u64| -> Vec<String> {
+                    tracked
+                        .iter()
+                        .filter(|key| mask >> (signal_number(key) - 1) & 1 == 1)
+                        .map(|key| (*key).to_owned())
+                        .collect()
+                };
+                let names = |value: &Value| -> Vec<String> {
+                    value
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .map(|item| item.as_str().unwrap().to_owned())
+                        .collect()
+                };
+                assert_eq!(
+                    pick(mask("SigIgn")),
+                    names(&case["expect"]["ignored"]),
+                    "{name}: ignored"
+                );
+                assert_eq!(
+                    pick(mask("SigBlk")),
+                    names(&case["expect"]["blocked"]),
+                    "{name}: blocked"
+                );
+            }
+        }
+    }
+
+    /// 子の信号の無視・maskを読むCのプログラム(`cc`で組む)。信号・環境・fdを変えないよう、シェルやPythonを通さずに直接起動する。
+    struct SignalObserver {
+        dir: std::path::PathBuf,
+    }
+
+    impl SignalObserver {
+        const SOURCE: &'static str = "#include <signal.h>\n#include <stdio.h>\n\
+int main(void) {\n\
+    unsigned long long ignored = 0, blocked = 0;\n\
+    sigset_t current;\n\
+    sigemptyset(&current);\n\
+    sigprocmask(SIG_BLOCK, NULL, &current);\n\
+    for (int number = 1; number < NSIG && number <= 64; number++) {\n\
+        struct sigaction action;\n\
+        if (sigaction(number, NULL, &action) == 0 && action.sa_handler == SIG_IGN) {\n\
+            ignored |= 1ULL << (number - 1);\n\
+        }\n\
+        if (sigismember(&current, number) == 1) {\n\
+            blocked |= 1ULL << (number - 1);\n\
+        }\n\
+    }\n\
+    printf(\"SigIgn:\\t%016llx\\nSigBlk:\\t%016llx\\n\", ignored, blocked);\n\
+    return 0;\n\
+}\n";
+
+        /// 組めれば`Some`。`cc`が無ければ`None`。組めたのに動かなければ失敗にする。
+        fn build() -> Option<SignalObserver> {
+            // 排他に作った自分のフォルダ(`S2E_TEST_TMP`に従う)。消すのもこのパスだけ。
+            let observer = SignalObserver {
+                dir: scratch("signal-observer"),
             };
-            let pick = |mask: u64| -> Vec<String> {
-                tracked
-                    .iter()
-                    .filter(|key| mask >> (signal_number(key) - 1) & 1 == 1)
-                    .map(|key| (*key).to_owned())
-                    .collect()
+            let source = observer.dir.join("observer.c");
+            std::fs::write(&source, Self::SOURCE).unwrap();
+            let built = match std::process::Command::new("cc")
+                .arg("-O1")
+                .arg("-o")
+                .arg(observer.path())
+                .arg(&source)
+                .output()
+            {
+                Ok(output) => output,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
+                Err(error) => panic!("cc を起動できない: {error}"),
             };
-            let names = |value: &Value| -> Vec<String> {
-                value
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .map(|item| item.as_str().unwrap().to_owned())
-                    .collect()
-            };
-            assert_eq!(
-                pick(mask("SigIgn")),
-                names(&case["expect"]["ignored"]),
-                "{name}: ignored"
+            assert!(
+                built.status.success(),
+                "観測用プログラムを組めない: {}",
+                String::from_utf8_lossy(&built.stderr)
             );
-            assert_eq!(
-                pick(mask("SigBlk")),
-                names(&case["expect"]["blocked"]),
-                "{name}: blocked"
-            );
+            Some(observer)
+        }
+
+        fn path(&self) -> std::path::PathBuf {
+            self.dir.join("observer")
+        }
+    }
+
+    impl Drop for SignalObserver {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -2359,12 +2580,11 @@ mod child_tests {
         assert_eq!((out, code), (b"via-fd0\n".to_vec(), 0));
         // 標準エラーだけを`/dev/null`にすると、`/dev/null`が0番になる(CLOEXECなので、子の0番は閉じる)。
         // 子の2番が`/dev/null`を指す(終了コード0)。標準出力は受け継ぐ。
-        #[cfg(target_os = "linux")]
         {
             let argv = [
                 b"sh".to_vec(),
                 b"-c".to_vec(),
-                b"test \"$(readlink /proc/self/fd/2)\" = /dev/null".to_vec(),
+                b"[ /dev/fd/2 -ef /dev/null ]".to_vec(),
             ];
             let mut child = spawn(&SpawnSpec {
                 argv: &argv,

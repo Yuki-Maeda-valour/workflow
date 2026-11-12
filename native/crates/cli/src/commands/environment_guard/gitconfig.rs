@@ -418,11 +418,16 @@ mod tests {
             .collect()
     }
 
-    /// 旧 Python の `{k: v}` から、PATH と Mac の旧 Python が足す変数を除いた環境。
-    fn comparable_env(call: &Value) -> Value {
+    /// 記録用の偽の git(Python)が見た環境から、PATH を除いた環境。`sent` は Rust が子へ渡した環境(`git_env` の結果)。
+    /// Mac では、記録用の Python が自分で足す変数(`__CF_USER_TEXT_ENCODING` など)があるので、Rust が渡していない名前は除いて比べる。
+    /// 渡した名前の値と、固定期待にだけ有る名前の欠けは、Linux と同じく比べる。
+    fn comparable_env(call: &Value, sent: &[(Vec<u8>, Vec<u8>)]) -> Value {
         let mut env = call["env"].as_object().unwrap().clone();
         env.remove("PATH");
         env.remove("__CF_USER_TEXT_ENCODING");
+        if cfg!(target_os = "macos") {
+            env.retain(|name, _| sent.iter().any(|(key, _)| key == name.as_bytes()));
+        }
         Value::Object(env)
     }
 
@@ -475,7 +480,7 @@ mod tests {
             let calls: Vec<Value> = read_calls(&dir.0)
                 .iter()
                 .map(|call| {
-                    json!({"argv": call["argv"], "stdin": call["stdin"], "env": comparable_env(call)})
+                    json!({"argv": call["argv"], "stdin": call["stdin"], "env": comparable_env(call, &git_env(&env))})
                 })
                 .collect();
             assert_eq!(
@@ -550,7 +555,7 @@ mod tests {
         .unwrap();
         let calls: Vec<Value> = read_calls(&dir.0)
             .iter()
-            .map(|call| json!({"argv": call["argv"], "env": comparable_env(call)}))
+            .map(|call| json!({"argv": call["argv"], "env": comparable_env(call, &git_env(&env))}))
             .collect();
         assert_eq!(Value::Array(calls), case["calls"]);
     }
@@ -645,11 +650,15 @@ mod tests {
         assert_eq!(out, b"/\n");
     }
 
-    #[cfg(target_os = "linux")]
     #[test]
     fn the_childs_standard_error_is_the_null_device() {
         let dir = Dir::new("git-stderr");
-        let script = write_script(&dir.0, "fd2", "#!/bin/sh\nreadlink /proc/self/fd/2\n");
+        // `/dev/fd/2` が `/dev/null` と同じ実体(同じ dev と inode)か。`/proc` の無い Mac でも使える。
+        let script = write_script(
+            &dir.0,
+            "fd2",
+            "#!/bin/sh\nif [ /dev/fd/2 -ef /dev/null ]; then echo /dev/null; else echo other; fi\n",
+        );
         let mut budget = EnvBudget::new();
         let out = git_config_output(&argv_of(&script), b"", &sh_env(), &mut budget).unwrap();
         assert_eq!(out, b"/dev/null\n");
