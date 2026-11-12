@@ -279,10 +279,15 @@ fn load(
         return Err(stop("host-settings"));
     }
     let mut local = PyDict::new();
-    // 辞書でない `entries` が鍵を含むのは、保持値が壊れたときだけ。`record` までは旧版と同じに進み、
-    // 照合の後の `entries.get` で `AttributeError` になる。
+    // 辞書でない `entries`(保持値が壊れたとき)に対する旧版の振る舞いは、本物の `record` をつなぐと
+    // この関数が作る固定期待の偽物とは違う。
+    // - 本文がある: 旧版の `record` の中の `expected[key]`(辞書でない `expected` への添字)が `TypeError`
+    //   (list は `list indices must be integers or slices, not str`、str は `string indices must be integers`)。
+    // - 本文が無い: `record` は不在を記録して `None` を返し、照合の後の `entries.get` で `AttributeError`。
+    // 本物の `record`(`record.rs`)は辞書を受けるので、ここでは空の辞書を渡す。空の辞書では保持していない鍵として
+    // `Stop` になり、旧版の `TypeError` とは違う。
     // 実物の流れでは届かない: 呼び出し側の `verify` が `entries` を `snapshot` の dict と比べるので、
-    // 辞書でない `entries` はそこで拒否される。旧版との順だけを固定期待で確かめている。
+    // 辞書でない `entries` はそこで拒否される。旧版との順だけを、偽の `record` と固定期待で確かめている。
     let empty = PyDict::new();
     let expected = match entries_value {
         PyValue::Dict(entries) => entries,

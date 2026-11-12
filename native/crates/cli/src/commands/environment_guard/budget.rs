@@ -4,11 +4,13 @@
 //! - `tick`: 項目の加算 → 項目上限 → 期限(旧版は `entries > MAX or now > deadline` の 1 文)。
 //! - `reserve`: `tick` → 1 ファイル上限 → 総量の確認と加算。
 //!
-//! 違いは、総量を超えた予約で C0b が超えた後の値を残すことだけ。旧版でも `Stop` で観測が終わり、
-//! 予算は捨てられるので、観測できない。
+//! 違いは、総量を超えた予約で C0b が超えた後の値を残すことだけ。旧版は、確かめてから加算するので、止まった予約は
+//! 総量を変えない。`bytes()` は旧版と同じく、止まった予約を足さない値を返す(固定期待が予算の値を比べる)。
+use super::depth::{Depth, call, compare, native};
 use super::error::PyException;
 use super::fsio::Identity;
 use dev_workflow_core::budget::{Budget, BudgetLimits};
+use dev_workflow_platform::environment_guard as os;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
@@ -27,6 +29,8 @@ pub const RESERVE_STOP: &str = "環境の読取バイト上限を超える";
 #[derive(Debug)]
 pub struct EnvBudget {
     core: Budget,
+    /// 旧版の `Budget.bytes`(止まった予約は足さない)。
+    bytes_seen: u64,
     /// `identity(st)` → (本文, mode)。
     pub component_bytes: HashMap<Identity, (Vec<u8>, u32)>,
 }
@@ -47,26 +51,59 @@ impl EnvBudget {
                 },
                 deadline,
             ),
+            bytes_seen: 0,
             component_bytes: HashMap::new(),
         }
     }
 
     /// `Budget.tick(count)`。
+    ///
+    /// `SIGINT` が届いていれば、まず `KeyboardInterrupt` にする(旧版は、次のバイトコードの境目で投げる。
+    /// 観測の各段が `tick` を通るので、ここで印を見る)。
     pub fn tick(&mut self, count: u64) -> Result<(), PyException> {
-        let over = self.core.add_items(count).is_err() || self.core.check_time().is_err();
-        if over {
-            Err(PyException::stop(TICK_STOP))
-        } else {
-            Ok(())
+        self.tick_at(count, None)
+    }
+
+    /// `Budget.tick(count)` を、深さ `caller` のフレームから呼ぶ形。旧版の `tick` の中の呼出しの順:
+    /// フレームに入る → `self.entries += count` → `self.entries > MAX_ENTRIES`(比較)→ 超えていなければ
+    /// `time.monotonic()`(C の呼出し)→ `> self.deadline`(比較)。項目上限を超えたときは、時計を読まない。
+    pub fn tick_at(&mut self, count: u64, caller: Depth) -> Result<(), PyException> {
+        if os::take_sigint() {
+            return Err(PyException::new("KeyboardInterrupt", ""));
         }
+        let inside = call(caller)?;
+        let over_items = self.core.add_items(count).is_err();
+        compare(inside)?;
+        if over_items {
+            return Err(PyException::stop(TICK_STOP));
+        }
+        native(inside)?;
+        compare(inside)?;
+        if self.core.check_time().is_err() {
+            return Err(PyException::stop(TICK_STOP));
+        }
+        Ok(())
     }
 
     /// `Budget.reserve(size)`。
     pub fn reserve(&mut self, size: u64) -> Result<(), PyException> {
-        self.tick(0)?;
-        if self.core.check_file_bytes(size).is_err() || self.core.add_bytes(size).is_err() {
+        self.reserve_at(size, None)
+    }
+
+    /// `Budget.reserve(size)` を、深さ `caller` のフレームから呼ぶ形。旧版の順: フレームに入る → `self.tick()` →
+    /// `size > MAX_FILE`(比較。超えていれば止まる)→ `self.bytes + size > MAX_TOTAL`(比較)→ `self.bytes += size`。
+    pub fn reserve_at(&mut self, size: u64, caller: Depth) -> Result<(), PyException> {
+        let inside = call(caller)?;
+        self.tick_at(0, inside)?;
+        compare(inside)?;
+        if self.core.check_file_bytes(size).is_err() {
             return Err(PyException::stop(RESERVE_STOP));
         }
+        compare(inside)?;
+        if self.core.add_bytes(size).is_err() {
+            return Err(PyException::stop(RESERVE_STOP));
+        }
+        self.bytes_seen += size;
         Ok(())
     }
 
@@ -75,7 +112,7 @@ impl EnvBudget {
     }
 
     pub fn bytes(&self) -> u64 {
-        self.core.bytes()
+        self.bytes_seen
     }
 }
 
@@ -167,5 +204,67 @@ mod tests {
         // 項目上限に当たっていれば、大きすぎる予約でも `tick` の理由が先に出る。
         assert!(budget.tick(MAX_ENTRIES + 1).is_err());
         assert_eq!(message(budget.reserve(MAX_FILE + 1)), TICK_STOP);
+    }
+
+    /// `SIGINT` の印を立てるテストは、プロセス全体の信号の扱いを変えるので、別プロセスで行う。
+    fn isolated(name: &str) -> bool {
+        if std::env::var_os("S2E_BUDGET_ISOLATED").is_some_and(|value| value == name) {
+            return true;
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("environment_guard::budget::tests::{name}"),
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("S2E_BUDGET_ISOLATED", name)
+            .output()
+            .unwrap();
+        let text = format!(
+            "{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success(),
+            "別プロセスの検査が失敗({name}): {text}"
+        );
+        assert!(
+            text.contains("1 passed"),
+            "別プロセスが検査を流していない({name}): {text}"
+        );
+        false
+    }
+
+    #[test]
+    fn a_pending_sigint_is_a_keyboard_interrupt_at_the_next_tick() {
+        if !isolated("a_pending_sigint_is_a_keyboard_interrupt_at_the_next_tick") {
+            return;
+        }
+        os::signal_set_default(os::SIGINT).unwrap();
+        assert!(os::install_sigint_handler().unwrap());
+        // 印が無ければ、ふつうの `tick`。
+        let mut budget = EnvBudget::new();
+        budget.tick(0).unwrap();
+        let sent = std::process::Command::new("kill")
+            .args(["-INT", &std::process::id().to_string()])
+            .status()
+            .unwrap();
+        assert!(sent.success());
+        let start = Instant::now();
+        while !os::sigint_pending() {
+            assert!(
+                start.elapsed() < Duration::from_secs(10),
+                "SIGINT が届かない"
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let error = budget.tick(1).unwrap_err();
+        assert_eq!(error.type_name, "KeyboardInterrupt");
+        // 印は消え、項目も数えない(旧版は、次のバイトコードの境目で投げる)。
+        assert!(!os::sigint_pending());
+        assert_eq!(budget.entries(), 0);
+        budget.tick(0).unwrap();
     }
 }

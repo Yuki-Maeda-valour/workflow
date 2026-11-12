@@ -6,12 +6,19 @@
 //! - 細かい競合(`lstat` と `open` の間など)の注入は、`cfg(test)` のフックだけで行う。フックは製品と同じ関数の中の
 //!   定めた位置で呼ばれ、製品のビルドでは何も呼ばない(`hook!` は式を評価しない)。
 use super::budget::EnvBudget;
-use super::error::{PyException, from_io};
-use super::pystr::{encode_error, encode_fs};
+use super::depth::{self, Depth};
+use super::entry;
+use super::error::{PyException, from_io, os_error_message, os_error_type, strerror};
+use super::inventory::Blobs;
+use super::pyops::{Cps, slice_to};
+use super::pypath::PyPath;
+use super::pystr::{decode_fs, encode_error, encode_fs};
+use super::pyvalue::{PyDict, PyValue};
 use super::specs::Host;
+use dev_workflow_core::loop_state::CodepointString;
 use dev_workflow_platform::environment_guard as os;
 use std::io;
-use std::os::fd::{AsFd, BorrowedFd, OwnedFd};
+use std::os::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 
 pub use super::specs::absolute;
 
@@ -79,6 +86,30 @@ pub enum Fault {}
 #[cfg(test)]
 use hooks::{Fault, Point};
 
+/// システムコールの前に、誤り(`EINTR` など)を差し込める位置。製品のビルドでは何もしない。
+/// `retry` の中で呼ぶので、`EINTR` を返せば再試行の経路を通る。
+#[cfg(test)]
+pub(crate) fn injected(name: &'static str) -> io::Result<()> {
+    hooks::fire_syscall(name).map_or(Ok(()), Err)
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn injected(_name: &'static str) -> io::Result<()> {
+    Ok(())
+}
+
+/// 名前つきの位置のフック(競合を差し込む位置。木の走査・部品・記録・Git 解析が使う)。
+/// 製品のビルドでは何もしない。
+#[cfg(test)]
+pub(crate) fn site(name: &'static str) {
+    let _ = hooks::fire(&Point::Site(name));
+}
+
+#[cfg(not(test))]
+#[inline(always)]
+pub(crate) fn site(_name: &'static str) {}
+
 // ---------------------------------------------------------------- 例外への変換
 
 fn stop(message: &str) -> PyException {
@@ -105,25 +136,41 @@ fn enc(name: &[u32]) -> Result<Vec<u8>, PyException> {
 /// `os.stat(name, dir_fd=fd, follow_symlinks=False)`。例外のファイル名は `name`。
 pub fn lstat_at(fd: BorrowedFd<'_>, name: &[u32]) -> Result<os::Stat, PyException> {
     let bytes = enc(name)?;
-    os::retry(|| os::lstat_at(fd, &bytes)).map_err(|error| os_err(error, Some(name)))
+    os::retry(|| {
+        injected("lstat")?;
+        os::lstat_at(fd, &bytes)
+    })
+    .map_err(|error| os_err(error, Some(name)))
 }
 
 /// `os.fstat(fd)`。
 pub fn fstat(fd: BorrowedFd<'_>) -> Result<os::Stat, PyException> {
-    os::retry(|| os::fstat(fd)).map_err(|error| os_err(error, None))
+    os::retry(|| {
+        injected("fstat")?;
+        os::fstat(fd)
+    })
+    .map_err(|error| os_err(error, None))
 }
 
 /// `os.open(name, O_RDONLY|O_DIRECTORY|O_NOFOLLOW, dir_fd=fd)`。
 pub fn open_dir_at(fd: BorrowedFd<'_>, name: &[u32]) -> Result<OwnedFd, PyException> {
     let bytes = enc(name)?;
-    os::retry(|| os::open_dir_at(fd, &bytes)).map_err(|error| os_err(error, Some(name)))
+    os::retry(|| {
+        injected("open_dir")?;
+        os::open_dir_at(fd, &bytes)
+    })
+    .map_err(|error| os_err(error, Some(name)))
 }
 
 /// `os.chmod(name, mode, dir_fd=fd, follow_symlinks=False)`。リンクを辿れない環境(リンク自身を
 /// 変えられない)は、旧 Python 3.10 と同じ `ValueError`(測った文面)にする。
 pub fn chmod_nofollow_at(fd: BorrowedFd<'_>, name: &[u32], mode: u32) -> Result<(), PyException> {
     let bytes = enc(name)?;
-    os::retry(|| os::chmod_nofollow_at(fd, &bytes, mode)).map_err(|error| {
+    os::retry(|| {
+        injected("chmod")?;
+        os::chmod_nofollow_at(fd, &bytes, mode)
+    })
+    .map_err(|error| {
         if matches!(error.raw_os_error(), Some(code) if code == os::EOPNOTSUPP || code == os::ENOTSUP) {
             return PyException::value_error("chmod: cannot use dir_fd and follow_symlinks together");
         }
@@ -180,31 +227,56 @@ fn is_regular(mode: u32) -> bool {
 /// 順序: `lstat` → 保持値との比較 → 種類と `0o444` → 全長の予約 → nofollow・非 block の `open` →
 /// `fstat` の比較 → (`tick` → 最大 65536 バイトの `read`)の繰返し → 1 バイトの追加 `read` →
 /// `fstat` と `lstat` の再照合。
-#[cfg_attr(not(test), allow(unused_variables, unused_assignments))]
 pub fn read_at(
     fd: BorrowedFd<'_>,
     name: &[u32],
     budget: &mut EnvBudget,
     expected: Option<Identity>,
 ) -> Result<(Vec<u8>, u32), PyException> {
+    read_at_in(None, fd, name, budget, expected)
+}
+
+/// `read_at` を、本体のフレームの深さ `depth` で数える形(旧版の再帰の深さ)。`depth` の本体の中で旧版が
+/// 呼ぶもの(`os.stat`・`stat.S_ISREG`・`budget.reserve`・`identity`・`budget.tick`・`os.read`・`min`・`len`・
+/// `b''.join`・`stat.S_IMODE`)を、旧版の順に確かめる。
+#[cfg_attr(not(test), allow(unused_variables, unused_assignments))]
+pub fn read_at_in(
+    depth: Depth,
+    fd: BorrowedFd<'_>,
+    name: &[u32],
+    budget: &mut EnvBudget,
+    expected: Option<Identity>,
+) -> Result<(Vec<u8>, u32), PyException> {
+    depth::frame(depth)?;
+    depth::native(depth)?; // os.stat
     let before = lstat_at(fd, name)?;
     let _ = hook!(Point::AfterLstat);
-    if let Some(expected) = expected
-        && identity(&before) != expected
-    {
-        return Err(stop("本文読取前に監視対象が変わった"));
+    if let Some(expected) = expected {
+        // `identity(before) != expected_identity`: 関数の呼出しと、タプルの比較。
+        depth::call(depth)?;
+        depth::compare_tuple(depth)?;
+        if identity(&before) != expected {
+            return Err(stop("本文読取前に監視対象が変わった"));
+        }
     }
+    depth::native(depth)?; // stat.S_ISREG
     if !is_regular(before.mode) || before.mode & 0o444 == 0 {
         return Err(stop("監視対象が読める通常ファイルでない"));
     }
     // `st_size` は負にならない。
     let size = u64::try_from(before.size).unwrap_or(0);
-    budget.reserve(size)?;
+    budget.reserve_at(size, depth)?;
     let bytes = enc(name)?;
     let _ = hook!(Point::BeforeOpen);
+    depth::native(depth)?; // os.open
     let opened =
         os::retry(|| os::open_read_at(fd, &bytes)).map_err(|error| os_err(error, Some(name)))?;
     let _ = hook!(Point::AfterOpen);
+    // `identity(before) != identity(os.fstat(opened))`
+    depth::call(depth)?;
+    depth::native(depth)?;
+    depth::call(depth)?;
+    depth::compare_tuple(depth)?;
     if identity(&before) != identity(&fstat(opened.as_fd())?) {
         return Err(stop("open 時に監視対象が変わった"));
     }
@@ -212,9 +284,11 @@ pub fn read_at(
     let mut left = size;
     let mut count = 0;
     while left > 0 {
-        budget.tick(0)?;
+        budget.tick_at(0, depth)?;
         let _ = hook!(Point::BeforeRead(count));
         count += 1;
+        depth::native(depth)?; // min
+        depth::native(depth)?; // os.read
         let want = left.min(65536) as usize;
         let start = data.len();
         data.resize(start + want, 0);
@@ -224,9 +298,12 @@ pub fn read_at(
         if got == 0 {
             return Err(stop("読取中に短くなった"));
         }
+        depth::native(depth)?; // len
         left -= got as u64;
+        depth::native(depth)?; // chunks.append
     }
     let _ = hook!(Point::BeforeExtraRead);
+    depth::native(depth)?; // os.read(opened, 1)
     let mut extra = [0u8; 1];
     let more =
         os::retry(|| os::read(opened.as_fd(), &mut extra)).map_err(|error| os_err(error, None))?;
@@ -235,9 +312,23 @@ pub fn read_at(
     }
     let _ = hook!(Point::BeforeFinalCheck);
     let held = identity(&before);
-    if held != identity(&fstat(opened.as_fd())?) || held != identity(&lstat_at(fd, name)?) {
+    // `identity(before) != identity(os.fstat(opened)) or identity(before) != identity(os.stat(...))`
+    depth::call(depth)?;
+    depth::native(depth)?;
+    depth::call(depth)?;
+    depth::compare_tuple(depth)?;
+    if held != identity(&fstat(opened.as_fd())?) {
         return Err(stop("読取中に監視対象が変わった"));
     }
+    depth::call(depth)?;
+    depth::native(depth)?;
+    depth::call(depth)?;
+    depth::compare_tuple(depth)?;
+    if held != identity(&lstat_at(fd, name)?) {
+        return Err(stop("読取中に監視対象が変わった"));
+    }
+    depth::native(depth)?; // b''.join
+    depth::native(depth)?; // stat.S_IMODE
     Ok((data, before.mode & S_IMODE))
 }
 
@@ -311,6 +402,313 @@ pub fn write_new(host: &dyn Host, path: &[u32], raw: &[u8], mode: u32) -> Result
     })
 }
 
+// ---------------------------------------------------------------- 木の走査の部品
+
+/// `os.readlink(name, dir_fd=fd)`。結果は `fsdecode` した文字番号。例外のファイル名は `name`。
+pub fn readlink_at(fd: BorrowedFd<'_>, name: &[u32]) -> Result<Vec<u32>, PyException> {
+    let bytes = enc(name)?;
+    let link = os::retry(|| {
+        injected("readlink")?;
+        os::readlink_at(fd, &bytes)
+    })
+    .map_err(|error| os_err(error, Some(name)))?;
+    Ok(decode_fs(&link))
+}
+
+/// `os.open('/', O_RDONLY|O_DIRECTORY|O_NOFOLLOW)`。例外のファイル名は `/`。
+pub fn open_root() -> Result<OwnedFd, PyException> {
+    os::retry(os::open_root).map_err(|error| os_err(error, Some(&[0x2f])))
+}
+
+/// `os.dup(fd)`(継承しない複製)。
+pub fn dup(fd: BorrowedFd<'_>) -> Result<OwnedFd, PyException> {
+    fd.try_clone_to_owned().map_err(|error| os_err(error, None))
+}
+
+/// 読取りの失敗(`readdir` など)の旧版の例外: ファイル名が fd の整数の `OSError`(`[Errno 5] …: 5`)。
+fn scan_failure(error: &io::Error, fd: i32) -> PyException {
+    let Some(errno) = error.raw_os_error() else {
+        return from_io(error, None);
+    };
+    let mut cps = os_error_message(errno, &strerror(errno), None)
+        .as_codepoints()
+        .to_vec();
+    cps.extend(": ".chars().map(u32::from));
+    cps.extend(fd.to_string().chars().map(u32::from));
+    PyException::with_cps(
+        os_error_type(errno),
+        CodepointString::try_from_codepoints(cps).expect("文字番号は範囲内"),
+    )
+}
+
+/// `with os.scandir(fd) as scan: for item in scan: budget.tick(1); names.append(item.name)`。
+/// 項目を 1 つ読むごとに `tick(1)` して名前を足す(旧版の順)。名前は並べ替えない。
+pub fn scan_names(
+    fd: BorrowedFd<'_>,
+    budget: &mut EnvBudget,
+    depth: Depth,
+) -> Result<Vec<Cps>, PyException> {
+    let mut names: Vec<Cps> = Vec::new();
+    let result = os::scan_dir(fd, |name| {
+        budget.tick_at(1, depth)?;
+        depth::native(depth)?; // names.append
+        names.push(decode_fs(name));
+        Ok::<(), PyException>(())
+    });
+    match result {
+        Ok(()) => Ok(names),
+        Err(os::ScanError::Callback(error)) => Err(error),
+        Err(os::ScanError::Dup(error)) => Err(os_err(error, None)),
+        Err(os::ScanError::Os(error)) => Err(scan_failure(&error, fd.as_raw_fd())),
+    }
+}
+
+/// 観測が共有する道具: 環境・予算・控えの辞書。
+pub struct Obs<'a> {
+    pub host: &'a dyn Host,
+    pub budget: &'a mut EnvBudget,
+    pub entries: &'a mut PyDict,
+}
+
+fn is_dir(mode: u32) -> bool {
+    mode & os::S_IFMT == os::S_IFDIR
+}
+
+fn is_link(mode: u32) -> bool {
+    mode & os::S_IFMT == os::S_IFLNK
+}
+
+fn key_of(prefix: &[u32], name: &[u32]) -> Cps {
+    let mut key = prefix.to_vec();
+    key.push(0x2f);
+    key.extend_from_slice(name);
+    key
+}
+
+/// 旧版の `FileNotFoundError` を捕まえる `except` の判定。
+pub fn is_not_found(error: &PyException) -> bool {
+    error.is_instance("FileNotFoundError")
+}
+
+/// 旧版の `walk_at(fd, prefix, budget, entries, blobs, links_at, expected)`。`depth` は `walk_at` のフレームの
+/// 再帰の深さ(旧版の呼出しの深さ。Python 3.10.12 の `_Py_EnterRecursiveCall` の数え方に合わせる)。
+/// 旧版が呼ぶ Python の関数・C の関数・比較を、旧版の順に確かめ、1000 を超えれば同じ文面の `RecursionError`
+/// にする(`depth` の本体: `os.fstat`・`stat.S_IMODE`・`os.scandir`・`budget.tick`・`sorted`・`os.stat`・
+/// `stat.S_ISDIR`・`os.open`・`directory_identity` の比較・`read_at`・`sha`・最後の `(mtime, ctime)` の比較)。
+///
+/// 子のディレクトリへの再帰は `links_at`・`expected` を渡さない(旧版と同じ)。導入リンクの先の走査は
+/// `blobs` も渡さない。Rust の再帰も同じ深さで止まるので、スタックは 1000 段までしか使わない。
+pub fn walk_at(
+    obs: &mut Obs<'_>,
+    fd: BorrowedFd<'_>,
+    prefix: &[u32],
+    mut blobs: Option<&mut Blobs>,
+    links_at: Option<&[u32]>,
+    expected: Option<&PyDict>,
+    depth: usize,
+) -> Result<(), PyException> {
+    let d: Depth = Some(depth);
+    depth::frame(d)?;
+    depth::native(d)?; // os.fstat
+    let before = fstat(fd)?;
+    depth::native(d)?; // stat.S_IMODE
+    entry::put(obs.entries, prefix, entry::directory(before.mode & S_IMODE));
+    depth::native(d)?; // os.scandir
+    depth::native(d)?; // `with` の __enter__
+    let mut names = scan_names(fd, obs.budget, d)?;
+    depth::native(d)?; // `with` の __exit__
+    depth::sorted(d)?;
+    names.sort();
+    site("walk-after-scan");
+    for name in &names {
+        obs.budget.tick_at(0, d)?;
+        let key = key_of(prefix, name);
+        depth::native(d)?; // os.stat
+        let st = lstat_at(fd, name)?;
+        site("walk-after-lstat");
+        depth::native(d)?; // stat.S_ISDIR
+        if is_dir(st.mode) {
+            depth::native(d)?; // os.open
+            let child = open_dir_at(fd, name)?;
+            site("walk-after-open-dir");
+            // `directory_identity(st) != directory_identity(os.fstat(child))`
+            depth::call(d)?;
+            depth::native(d)?;
+            depth::call(d)?;
+            depth::compare_tuple(d)?;
+            if directory_identity(&st) != directory_identity(&fstat(child.as_fd())?) {
+                return Err(stop("走査前にディレクトリが変わった"));
+            }
+            walk_at(
+                obs,
+                child.as_fd(),
+                &key,
+                blobs.as_deref_mut(),
+                None,
+                None,
+                depth + 1,
+            )?;
+            // `directory_identity(st) != directory_identity(os.stat(...))`
+            depth::call(d)?;
+            depth::native(d)?;
+            depth::call(d)?;
+            depth::compare_tuple(d)?;
+            if directory_identity(&st) != directory_identity(&lstat_at(fd, name)?) {
+                return Err(stop("走査中にディレクトリが変わった"));
+            }
+            continue;
+        }
+        depth::native(d)?; // stat.S_ISLNK
+        if let (true, Some(links_at)) = (is_link(st.mode), links_at) {
+            // 正式な user skills/commands 直下の導入リンクだけを固定する。
+            // 再照合では対象本文に触れる前に字面と対象実体を比較する。
+            let link = readlink_at(fd, name)?;
+            let as_path = PyPath::new(&link);
+            let target = if as_path.is_absolute() {
+                as_path
+            } else {
+                PyPath::new(links_at).join(&link)
+            };
+            let mut link_key: Cps = "@link:".chars().map(u32::from).collect();
+            link_key.extend_from_slice(&key);
+            let mut held = entry::link_head("installation-link", &link, st.dev, st.ino);
+            if let Some(expected) = expected {
+                let current = match entry::get(expected, &link_key) {
+                    Some(value) => slice_to(value, 4)?,
+                    None => PyValue::List(Vec::new()),
+                };
+                if current.py_ne(&PyValue::List(held.clone())) {
+                    return Err(stop("導入リンクが開始時から変わった"));
+                }
+            }
+            depth::parent_enter(d)?;
+            with_parent(obs.host, &target.to_cps(), |target_fd, target_name| {
+                let opened = open_dir_at(target_fd, target_name)?;
+                let target_st = fstat(opened.as_fd())?;
+                held.extend(entry::directory_values(&directory_identity(&target_st)));
+                if let Some(expected) = expected
+                    && entry::get(expected, &link_key)
+                        .is_none_or(|value| value.py_ne(&PyValue::List(held.clone())))
+                {
+                    return Err(stop("導入リンクの対象が開始時から変わった"));
+                }
+                entry::put(obs.entries, &link_key, PyValue::List(held.clone()));
+                walk_at(obs, opened.as_fd(), &key, None, None, None, depth + 1)?;
+                site("walk-link-in-target");
+                if directory_identity(&target_st)
+                    != directory_identity(&lstat_at(target_fd, target_name)?)
+                {
+                    return Err(stop("導入リンクの対象が走査中に変わった"));
+                }
+                Ok(())
+            })?;
+            site("walk-link-after-target");
+            if identity(&st) != identity(&lstat_at(fd, name)?) {
+                return Err(stop("導入リンクが走査中に変わった"));
+            }
+            continue;
+        }
+        depth::native(d)?; // stat.S_ISREG
+        if is_regular(st.mode) {
+            let (raw, mode) = read_at_in(depth::call(d)?, fd, name, obs.budget, None)?;
+            // `['file', mode, sha(raw)]`: `sha` は関数で、中で `hashlib.sha256(raw).hexdigest()`。
+            let inside = depth::call(d)?;
+            depth::native(inside)?;
+            depth::native(inside)?;
+            entry::put(obs.entries, &key, entry::file(mode, &sha(&raw)));
+            if let Some(blobs) = blobs.as_deref_mut() {
+                blobs.insert(key.clone(), raw);
+            }
+        } else {
+            return Err(stop("監視対象に symlink または特殊ファイルがある"));
+        }
+    }
+    depth::native(d)?; // os.fstat
+    let after = fstat(fd)?;
+    depth::compare_tuple(d)?;
+    if (before.mtime_ns, before.ctime_ns) != (after.mtime_ns, after.ctime_ns) {
+        return Err(stop("走査中にディレクトリの集合が変わった"));
+    }
+    Ok(())
+}
+
+/// `tree` の引数のうち、省略できるもの。
+#[derive(Default)]
+pub struct TreeOptions<'a> {
+    pub blobs: Option<&'a mut Blobs>,
+    pub optional: bool,
+    pub user_links: bool,
+    pub expected: Option<&'a PyDict>,
+}
+
+/// 旧版の `tree(path, key, budget, entries, blobs, optional, user_links, expected)`。`depth` は `tree` のフレームの
+/// 再帰の深さ。`FileNotFoundError` は、本文の読取りなど中で起きたものも含めて、`optional` なら不在として控える
+/// (旧版の `except FileNotFoundError` は `with` の外側にある)。
+pub fn tree(
+    obs: &mut Obs<'_>,
+    path: &[u32],
+    key: &[u32],
+    options: TreeOptions<'_>,
+    depth: usize,
+) -> Result<(), PyException> {
+    let TreeOptions {
+        blobs,
+        optional,
+        user_links,
+        expected,
+    } = options;
+    let d: Depth = Some(depth);
+    depth::frame(d)?;
+    // `with parent(path)` に入る所。旧版の `try` の中だが、`RecursionError` は `FileNotFoundError` でないので素通り。
+    depth::parent_enter(d)?;
+    let result = with_parent(obs.host, path, |fd, name| {
+        depth::native(d)?; // os.stat
+        let st = lstat_at(fd, name)?;
+        site("tree-after-lstat");
+        depth::native(d)?; // os.open
+        let child = open_dir_at(fd, name)?;
+        site("tree-after-open");
+        // `directory_identity(st) != directory_identity(os.fstat(child))`
+        depth::call(d)?;
+        depth::native(d)?;
+        depth::call(d)?;
+        depth::compare_tuple(d)?;
+        if directory_identity(&st) != directory_identity(&fstat(child.as_fd())?) {
+            return Err(stop("ディレクトリが差し替えられた"));
+        }
+        let host = obs.host;
+        let mut inner = Obs {
+            host,
+            budget: &mut *obs.budget,
+            entries: &mut *obs.entries,
+        };
+        walk_at(
+            &mut inner,
+            child.as_fd(),
+            key,
+            blobs,
+            user_links.then_some(path),
+            expected,
+            depth + 1,
+        )?;
+        depth::call(d)?;
+        depth::native(d)?;
+        depth::call(d)?;
+        depth::compare_tuple(d)?;
+        if directory_identity(&st) != directory_identity(&lstat_at(fd, name)?) {
+            return Err(stop("走査中にルートが差し替えられた"));
+        }
+        Ok(())
+    });
+    match result {
+        Err(error) if is_not_found(&error) && optional => {
+            entry::put(obs.entries, key, entry::missing());
+            Ok(())
+        }
+        other => other,
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod hooks {
     use std::cell::RefCell;
@@ -339,6 +737,8 @@ pub(crate) mod hooks {
         Write(usize),
         Fchmod,
         Fsync,
+        /// 名前つきの位置(`fsio::site`)。木の走査・部品・記録・Git 解析が使う。
+        Site(&'static str),
     }
 
     pub enum Fault {
@@ -351,6 +751,38 @@ pub(crate) mod hooks {
 
     thread_local! {
         static HOOK: RefCell<Option<Hook>> = const { RefCell::new(None) };
+    }
+
+    type SyscallHook = Box<dyn FnMut(&'static str) -> Option<io::Error>>;
+
+    thread_local! {
+        static SYSCALL_HOOK: RefCell<Option<SyscallHook>> = const { RefCell::new(None) };
+    }
+
+    /// システムコールの前に、誤りを差し込む(`fsio::injected`)。位置のフックとは別の口で、
+    /// 位置の記録を数える既存の検査に混ざらない。
+    pub fn fire_syscall(name: &'static str) -> Option<io::Error> {
+        let taken = SYSCALL_HOOK.with(|slot| slot.borrow_mut().take());
+        let mut hook = taken?;
+        let result = hook(name);
+        SYSCALL_HOOK.with(|slot| *slot.borrow_mut() = Some(hook));
+        result
+    }
+
+    /// システムコールの誤りを差し込むフックを入れて `body` を流し、終わったら外す。
+    pub fn with_syscall<T>(
+        hook: impl FnMut(&'static str) -> Option<io::Error> + 'static,
+        body: impl FnOnce() -> T,
+    ) -> T {
+        struct Reset;
+        impl Drop for Reset {
+            fn drop(&mut self) {
+                SYSCALL_HOOK.with(|slot| *slot.borrow_mut() = None);
+            }
+        }
+        SYSCALL_HOOK.with(|slot| *slot.borrow_mut() = Some(Box::new(hook)));
+        let _reset = Reset;
+        body()
     }
 
     pub fn fire(point: &Point) -> Option<Fault> {
@@ -783,58 +1215,58 @@ mod tests {
     fn a_swapped_parent_is_rejected_after_the_body() {
         // 1 段を別のフォルダに差し替える。
         let dir = Dir::new("parent-swap");
-        dir.write("a/b/f", b"data", 0o644);
+        dir.write("pa/pb/f", b"data", 0o644);
         let root = dir.0.clone();
         let error = with(
             move |point| {
-                if *point == Point::ParentOpened(cps("b")) {
-                    std::fs::rename(root.join("a"), root.join("a2")).unwrap();
-                    std::fs::create_dir(root.join("a")).unwrap();
+                if *point == Point::ParentOpened(cps("pb")) {
+                    std::fs::rename(root.join("pa"), root.join("pa2")).unwrap();
+                    std::fs::create_dir(root.join("pa")).unwrap();
                 }
                 None
             },
-            || read_regular(&ProcessHost, &dir.cps("a/b/f"), None).unwrap_err(),
+            || read_regular(&ProcessHost, &dir.cps("pa/pb/f"), None).unwrap_err(),
         );
         assert_eq!(error.type_name, "Stop");
         assert_eq!(message(&error), "検査中に親ディレクトリが差し替えられた");
         // 差し替えずに名前だけが消えたときは、名前つきの `FileNotFoundError`(照合の `stat` が失敗する)。
         let dir = Dir::new("parent-gone");
-        dir.write("a/b/f", b"data", 0o644);
+        dir.write("pa/pb/f", b"data", 0o644);
         let root = dir.0.clone();
         let error = with(
             move |point| {
-                if *point == Point::ParentOpened(cps("b")) {
-                    std::fs::rename(root.join("a"), root.join("a2")).unwrap();
+                if *point == Point::ParentOpened(cps("pb")) {
+                    std::fs::rename(root.join("pa"), root.join("pa2")).unwrap();
                 }
                 None
             },
-            || read_regular(&ProcessHost, &dir.cps("a/b/f"), None).unwrap_err(),
+            || read_regular(&ProcessHost, &dir.cps("pa/pb/f"), None).unwrap_err(),
         );
         assert_eq!(error.type_name, "FileNotFoundError");
-        assert_eq!(message(&error), "[Errno 2] No such file or directory: 'a'");
+        assert_eq!(message(&error), "[Errno 2] No such file or directory: 'pa'");
         // mode だけが変わった親も、3 項目の照合で止まる。
         let dir = Dir::new("parent-mode");
-        dir.write("a/f", b"data", 0o644);
+        dir.write("pa/f", b"data", 0o644);
         let root = dir.0.clone();
         let error = with(
             move |point| {
-                if *point == Point::ParentOpened(cps("a")) {
+                if *point == Point::ParentOpened(cps("pa")) {
                     std::fs::set_permissions(
-                        root.join("a"),
+                        root.join("pa"),
                         std::fs::Permissions::from_mode(0o750),
                     )
                     .unwrap();
                 }
                 None
             },
-            || read_regular(&ProcessHost, &dir.cps("a/f"), None).unwrap_err(),
+            || read_regular(&ProcessHost, &dir.cps("pa/f"), None).unwrap_err(),
         );
         assert_eq!(message(&error), "検査中に親ディレクトリが差し替えられた");
         // 変わらなければ通り、最後の名前は空にならない。
         let dir = Dir::new("parent-ok");
-        dir.write("a/f", b"data", 0o644);
+        dir.write("pa/f", b"data", 0o644);
         assert_eq!(
-            read_regular(&ProcessHost, &dir.cps("a/f"), None).unwrap(),
+            read_regular(&ProcessHost, &dir.cps("pa/f"), None).unwrap(),
             b"data"
         );
     }
@@ -842,19 +1274,19 @@ mod tests {
     #[test]
     fn the_recheck_is_skipped_when_the_body_fails() {
         let dir = Dir::new("parent-body-fails");
-        dir.write("a/f", b"data", 0o644);
+        dir.write("pa/f", b"data", 0o644);
         let root = dir.0.clone();
         let error = with(
             move |point| {
-                if *point == Point::ParentOpened(cps("a")) {
-                    std::fs::rename(root.join("a"), root.join("a2")).unwrap();
+                if *point == Point::ParentOpened(cps("pa")) {
+                    std::fs::rename(root.join("pa"), root.join("pa2")).unwrap();
                 }
                 None
             },
             || {
                 with_parent(
                     &ProcessHost,
-                    &dir.cps("a/f"),
+                    &dir.cps("pa/f"),
                     |_, _| -> Result<(), PyException> { Err(PyException::stop("本文の失敗")) },
                 )
                 .unwrap_err()

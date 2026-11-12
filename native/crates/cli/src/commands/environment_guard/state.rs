@@ -14,7 +14,7 @@ fn stop(message: &str) -> PyException {
     PyException::stop(message)
 }
 
-const COMPONENT_KINDS: [&str; 8] = [
+pub const COMPONENT_KINDS: [&str; 8] = [
     "personal-skill",
     "enterprise-skill",
     "personal-command",

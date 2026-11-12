@@ -2271,6 +2271,768 @@ def make_child():
         shutil.rmtree(root)
 
 
+# ---------------------------------------------------------------- 木の走査・部品・記録・Git 解析(2b-1b)
+# 旧版の `tree`・`component_tree`・`record`・`includes` を、同じ物理入力(一時フォルダ)に対して動かした結果。
+# 一時フォルダは環境変数 S2E_FIXTURE_TMP の下(無ければ OS の既定)に作り、自分で作ったものだけを消す。
+# dev・ino・時刻はその実行ごとに変わるので、`*` に置き換える。ほかの値(mode・サイズ・ハッシュ・名前・数)は
+# そのまま残す。一時フォルダの絶対パスは `{r}` に置き換える。
+
+OBSERVE_HOME = "/fixture-home"
+MAX_FILE = 8 * 1024 * 1024
+MAX_TOTAL = 64 * 1024 * 1024
+MASKED = "*"
+# 種類ごとに、その実行ごとに変わる位置(0 始まり。0 番は種類の名前)。
+MASK_POSITIONS = {
+    "file-stat": (1, 2, 5, 6),
+    "directory-stat": (1, 2),
+    "directory-step": (2, 3),
+    "link-step": (3, 4, 5),
+}
+
+
+def obs_mask_entry(entry):
+    if not isinstance(entry, list) or not entry or not isinstance(entry[0], str):
+        return entry
+    kind = entry[0]
+    positions = MASK_POSITIONS.get(kind)
+    if kind == "installation-link":
+        positions = (2, 3, 4) if len(entry) == 5 else (2, 3, 4, 5)
+    if kind == "configuration-link":
+        positions = (2, 3, 4, 5)
+    if positions is None:
+        return entry
+    return [MASKED if i in positions else v for i, v in enumerate(entry)]
+
+
+def obs_plain(entries, root, ancestors, drop_routes, rootkey):
+    """旧版の `entries` を、固定期待に残せる JSON にする。
+
+    部品の木の根(`rootkey`)の足取り(`@route:`・`@route-end:`)は、`/` から根までの親の数(`ancestors`)が
+    一時フォルダの場所で変わるので、その数を引く(親の足取りは捨てる)。入れ子の部品の足取りは、そのまま。
+    """
+    def unroot(value):
+        if isinstance(value, str):
+            return value.replace(root, "{r}")
+        if isinstance(value, list):
+            return [unroot(v) for v in value]
+        return value
+
+    out = {}
+    for key, value in entries.items():
+        for prefix in ("@route:", "@absolute:@route:"):
+            if key.startswith(prefix):
+                break
+        else:
+            prefix = None
+        if drop_routes and key.startswith(("@route:", "@absolute:", "@route-end:", "@origin:")):
+            continue
+        if key.startswith("@origin:"):
+            value = [value[0], MASKED, MASKED, MASKED]
+        elif key.startswith("@route-end:"):
+            if key == "@route-end:" + str(rootkey):
+                value = [value[0], value[1] - ancestors]
+        elif prefix is not None:
+            head, _, number = key.rpartition(":")
+            if head == prefix + str(rootkey):
+                if int(number) < ancestors:
+                    continue
+                key = head + ":" + str(int(number) - ancestors)
+        out[unroot(key)] = unroot(obs_mask_entry(value))
+    return out
+
+
+def obs_depth_ticks(entries, root, ancestors, rootkey):
+    """部品の木の呼出しが、一時フォルダの深さのせいで余計に使った予算の項目数。
+
+    根の足取り `@route:<根>:<n>`(n < ancestors)が 1 つにつき 1 回、`{r}/…` を指す絶対パスの導入リンクが
+    辿る空の要素 1 つと親の要素 `ancestors` 個で 1 + ancestors 回。足取りを捨てる回(drop_routes)も、捨てる前に数える。
+    """
+    if rootkey is None:
+        return 0
+    total = 0
+    for key, value in entries.items():
+        head, _, number = key.rpartition(":")
+        if key.startswith("@route:") and head == "@route:" + rootkey and int(number) < ancestors:
+            total += 1
+        if isinstance(value, list) and value and value[0] == "link-step":
+            text = value[2]
+            if text == root or text.startswith(root + "/"):
+                total += 1 + ancestors
+    return total
+
+
+def obs_build(root, items):
+    """配置(layout)を作る。暗黙の親ディレクトリは 0o755。"""
+    dirs = {}
+    for item in items:
+        path = os.path.join(root, item["path"])
+        kind = item["kind"]
+        parent = os.path.dirname(path)
+        if not os.path.isdir(parent):
+            made = []
+            walk = parent
+            while not os.path.isdir(walk):
+                made.append(walk)
+                walk = os.path.dirname(walk)
+            os.makedirs(parent)
+            for each in made:
+                dirs.setdefault(each, 0o755)
+        if kind == "dir":
+            os.makedirs(path, exist_ok=True)
+            dirs[path] = item.get("mode", 0o755)
+        elif kind == "file":
+            data = item["body"].encode() if "body" in item else b"x" * item["size"]
+            with open(path, "wb") as handle:
+                handle.write(data)
+            os.chmod(path, item.get("mode", 0o644))
+        elif kind == "link":
+            os.symlink(item["target"].replace("{r}", root), path)
+        elif kind == "hardlink":
+            os.link(os.path.join(root, item["target"]), path)
+        elif kind == "fifo":
+            os.mkfifo(path)
+        else:
+            raise SystemExit("配置の種類が不明: " + kind)
+    # 浅い親から順に、mode を決める(深い方を先に 0o555 などにすると、後の chmod が届かないため)。
+    for path in sorted(dirs):
+        os.chmod(path, dirs[path])
+
+
+def obs_apply(root, ops):
+    import time
+    import shutil
+
+    # 内容を変えても時刻が同じにならないよう、カーネルの時計(粗い)が進むのを待つ。
+    time.sleep(0.03)
+    for op in ops:
+        path = os.path.join(root, op["path"]) if "path" in op else None
+        kind = op["op"]
+        if kind == "write":
+            with open(path, "wb") as handle:
+                handle.write(op["body"].encode())
+            if "mode" in op:
+                os.chmod(path, op["mode"])
+        elif kind == "rm":
+            os.unlink(path)
+        elif kind == "rmtree":
+            shutil.rmtree(path)
+        elif kind == "mkdir":
+            os.makedirs(path, exist_ok=True)
+            os.chmod(path, op.get("mode", 0o755))
+        elif kind == "link":
+            if os.path.lexists(path):
+                os.unlink(path)
+            os.symlink(op["target"].replace("{r}", root), path)
+        elif kind == "rename":
+            os.rename(path, os.path.join(root, op["to"]))
+        elif kind == "chmod":
+            os.chmod(path, op["mode"])
+        elif kind == "fifo":
+            os.mkfifo(path)
+        else:
+            raise SystemExit("操作の種類が不明: " + kind)
+
+
+def obs_run(guard, root, ancestors, run, previous):
+    """1 回の呼出し。`previous` は、前の回の (entries, budget)。"""
+    import hashlib
+
+    if run.get("ops_before"):
+        obs_apply(root, run["ops_before"])
+    call = run["call"]
+    budget = previous[1] if run.get("reuse_budget") else guard.Budget()
+    # 一時フォルダの深さで変わる予算の分(部品の木の `/` から根までの足取り)を、記録の前に引く。
+    adjust = previous[2] if run.get("reuse_budget") else 0
+    preload = run.get("preload", {})
+    if "entries" in preload:
+        # 部品の木では、先に親の足取りが `ancestors` 回、予算を使う。上限に当たる場所が深さで動かないよう、
+        # その分を先に引いておき、記録のときに足し戻す。
+        offset = ancestors if call["fn"] == "component_tree" else 0
+        budget.entries = preload["entries"] - offset
+        adjust = -offset
+    if "bytes" in preload:
+        budget.bytes = preload["bytes"]
+    expected = None
+    if run.get("expected_from") is not None:
+        expected = previous_entries[run["expected_from"]]
+    entries = {}
+    blobs = {} if call.get("blobs") else None
+    sub = lambda text: text.replace("{r}", root)
+    ret = None
+    error = None
+    import functools
+
+    def at_depth(target, function):
+        """`function` の本体のフレームの深さが、ちょうど `target` になるよう、Python のフレームを積んで呼ぶ。"""
+        def rec():
+            if frame_count(sys._getframe()) < target - 1:
+                return rec()
+            return function()
+        return rec() if target is not None else function()
+
+    target = run.get("depth")
+    try:
+        # `functools.partial` はキーワード引数があると、C の呼出し(`tp_call`)を 1 つ挟んで深さが 1 増える。
+        # 呼出元のフレームの深さを正確にするため、位置引数だけで呼ぶ。
+        if call["fn"] == "tree":
+            at_depth(target, functools.partial(
+                guard.tree, sub(call["path"]), call["key"], budget, entries, blobs,
+                call.get("optional", False), call.get("user_links", False), expected))
+        elif call["fn"] == "component_tree":
+            ret = at_depth(target, functools.partial(
+                guard.component_tree, sub(call["path"]), call["kind"], budget, entries, expected, blobs))
+        elif call["fn"] == "record":
+            raw = at_depth(target, functools.partial(
+                guard.record, sub(call["path"]), call["key"], budget, entries, expected,
+                call.get("depth", 0), call.get("required", False)))
+            ret = None if raw is None else raw.hex()
+        else:
+            raise SystemExit("呼出しが不明: " + call["fn"])
+    except Exception as caught:  # noqa: BLE001 旧版の例外の型と文面をそのまま記録する
+        error = {"type": type(caught).__name__, "msg": str(caught).replace(root, "{r}")}
+    rootkey = "component:%s:%s" % (call["kind"], sub(call["path"])) if call["fn"] == "component_tree" else None
+    depth_ticks = obs_depth_ticks(entries, root, ancestors, rootkey)
+    result = {
+        "ret": ret.replace(root, "{r}") if isinstance(ret, str) and call["fn"] == "component_tree" else ret,
+        "entries": obs_plain(entries, root, ancestors, run.get("drop_routes", False),
+                             "component:%s:%s" % (call["kind"], sub(call["path"])) if call["fn"] == "component_tree" else None),
+        "blobs": [[k.replace(root, "{r}"), hashlib.sha256(v).hexdigest(), len(v)] for k, v in (blobs or {}).items()],
+        "budget": [budget.entries - adjust - depth_ticks, budget.bytes],
+        "error": error,
+    }
+    if run.get("summary"):
+        # 大きな控えは、数と SHA-256(鍵を並べた、空白なしの JSON)だけを残す。
+        import hashlib
+        text = json.dumps(result["entries"], sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        result["entries"] = {"count": len(result["entries"]), "sha256": hashlib.sha256(text.encode()).hexdigest()}
+    if expected is not None:
+        result["equals_expected"] = entries == expected
+    return result, entries, budget, adjust + depth_ticks
+
+
+previous_entries = []
+
+
+def obs_scenario(guard, case):
+    import shutil
+    import tempfile
+
+    global previous_entries
+    base = os.path.realpath(tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP")))
+    root = os.path.join(base, "case")
+    os.mkdir(root)
+    ancestors = len([p for p in root.split("/") if p])
+    previous_entries = []
+    results = []
+    try:
+        obs_build(root, case["layout"])
+        previous = (None, None, 0)
+        for run in case["runs"]:
+            result, entries, budget, adjust = obs_run(guard, root, ancestors, run, previous)
+            previous_entries.append(entries)
+            previous = (entries, budget, adjust)
+            results.append(result)
+        text = json.dumps(results)
+        if base in text:
+            raise SystemExit("固定期待に一時フォルダの名前が入った: " + case["name"])
+    finally:
+        shutil.rmtree(base)
+    return results
+
+
+def L(path, kind="file", **kw):
+    return {"path": path, "kind": kind, **kw}
+
+
+def T(key="k", path="{r}/t", **kw):
+    return {"fn": "tree", "path": path, "key": key, **kw}
+
+
+def C(kind, path, **kw):
+    return {"fn": "component_tree", "kind": kind, "path": path, **kw}
+
+
+def R(path, key="external:x", **kw):
+    return {"fn": "record", "path": path, "key": key, **kw}
+
+
+def obs_cases():
+    cases = []
+
+    def add(name, layout, *runs):
+        cases.append({"name": name, "layout": layout, "runs": [r if "call" in r else {"call": r} for r in runs]})
+
+    def run(call, **kw):
+        return {"call": call, **kw}
+
+    # ---- tree
+    tree_files = [L("t/z.txt", body="zed", mode=0o600), L("t/a.txt", body="alpha"), L("t/m/inner.txt", body="in"),
+                  L("t/m/deep/leaf.txt", body="leaf", mode=0o400), L("t/empty", "dir", mode=0o700),
+                  L("t/B.txt", body="upper")]
+    add("tree-basic", tree_files, T(blobs=True))
+    add("tree-no-blobs", tree_files, T())
+    add("tree-missing-required", [L("t/x", body="x")], T(path="{r}/none"))
+    add("tree-missing-optional", [L("t/x", body="x")], T(path="{r}/none", optional=True))
+    add("tree-missing-parent-optional", [L("t/x", body="x")], T(path="{r}/none/deeper", optional=True))
+    add("tree-parent-is-file", [L("f", body="x")], T(path="{r}/f/sub", optional=True))
+    add("tree-root-is-file", [L("f", body="x")], T(path="{r}/f"))
+    add("tree-root-is-link", [L("real/a", body="a"), L("t", "link", target="{r}/real")], T())
+    add("tree-link-without-user-links", [L("t/a", body="a"), L("t/l", "link", target="a")], T())
+    add("tree-fifo", [L("t/a", body="a"), L("t/p", "fifo")], T())
+    add("tree-unreadable", [L("t/a", body="a", mode=0o000)], T())
+    add("tree-write-only-file", [L("t/a", body="a", mode=0o200)], T())
+    add("tree-subdir-link", [L("t/sub/l", "link", target="x"), L("t/a", body="a")], T())
+    links = [L("t/own.txt", body="own"), L("store/skill/s.md", body="skill"), L("store/skill2/s2.md", body="two"),
+             L("store/skill2/nested/n.md", body="nested"),
+             L("t/abs", "link", target="{r}/store/skill"), L("t/rel", "link", target="../store/skill2")]
+    add("tree-user-links", links, T(user_links=True, blobs=True))
+    add("tree-user-links-optional-dangling", [L("t/ok", body="ok"), L("t/dang", "link", target="{r}/nowhere")],
+        T(user_links=True, optional=True))
+    add("tree-user-links-dangling-required", [L("t/ok", body="ok"), L("t/dang", "link", target="{r}/nowhere")],
+        T(user_links=True))
+    add("tree-user-links-target-is-file", [L("t/f", "link", target="{r}/file"), L("file", body="x")], T(user_links=True))
+    add("tree-user-links-nested-link-ignored", links + [L("t/sub/inner", "link", target="{r}/store/skill")],
+        T(user_links=True))
+    add("tree-user-links-expected-same", links, T(user_links=True, blobs=True),
+        run(T(user_links=True, blobs=True), expected_from=0))
+    add("tree-user-links-expected-new-link", links, T(user_links=True),
+        run(T(user_links=True), ops_before=[{"op": "link", "path": "t/more", "target": "{r}/store/skill"}], expected_from=0))
+    add("tree-user-links-expected-text-changed", links, T(user_links=True),
+        run(T(user_links=True), ops_before=[{"op": "link", "path": "t/abs", "target": "{r}/store/skill2"}], expected_from=0))
+    add("tree-user-links-expected-target-replaced", links, T(user_links=True),
+        run(T(user_links=True), ops_before=[
+            {"op": "mkdir", "path": "store/new"}, {"op": "write", "path": "store/new/s.md", "body": "skill"},
+            {"op": "rename", "path": "store/skill", "to": "store/old"}, {"op": "rename", "path": "store/new", "to": "store/skill"}],
+            expected_from=0))
+    add("tree-user-links-expected-removed-link", links, T(user_links=True),
+        run(T(user_links=True), ops_before=[{"op": "rm", "path": "t/abs"}], expected_from=0))
+    add("tree-budget-items-last-ok", [L("t/a%d" % i, body="x") for i in range(5)], run(T(), preload={"entries": 10000 - 5}))
+    add("tree-budget-items-one-over", [L("t/a%d" % i, body="x") for i in range(5)], run(T(), preload={"entries": 10000 - 4}))
+    add("tree-budget-bytes-last-ok", [L("t/a", body="0123456789")], run(T(), preload={"bytes": MAX_TOTAL - 10}))
+    add("tree-budget-bytes-one-over", [L("t/a", body="0123456789")], run(T(), preload={"bytes": MAX_TOTAL - 9}))
+    add("tree-file-limit-ok", [L("t/big", size=MAX_FILE)], T(blobs=True))
+    add("tree-file-limit-over", [L("t/big", size=MAX_FILE + 1)], T(blobs=True))
+    add("tree-empty-dir", [L("t", "dir")], T(blobs=True))
+
+    # ---- component_tree
+    plugin = [L("p/b.txt", body="bee"), L("p/a/x.md", body="ex"), L("p/a/deep/y.md", body="why", mode=0o444),
+              L("p/empty", "dir"), L("p/Z", body="zed", mode=0o755)]
+    add("component-plugin", plugin, C("plugin", "{r}/p", blobs=True))
+    add("component-plugin-no-blobs", plugin, C("plugin", "{r}/p"))
+    add("component-plugin-missing", plugin, C("plugin", "{r}/none"))
+    add("component-skill-missing", plugin, C("personal-skill", "{r}/none"))
+    add("component-skill-missing-deep-parent", plugin, C("personal-agent", "{r}/none/deeper/agents"))
+    add("component-kind-unknown", plugin, C("nonsense", "{r}/p"))
+    add("component-root-is-file", [L("f", body="x")], C("plugin", "{r}/f"))
+    add("component-root-link-parent", [L("real/skills/s.md", body="s"), L("lnk", "link", target="real")],
+        C("personal-skill", "{r}/lnk/skills"))
+    add("component-root-link-itself", [L("real/s.md", body="s"), L("skills", "link", target="real")],
+        C("personal-skill", "{r}/skills"))
+    add("component-plugin-link-rejected", plugin + [L("p/l", "link", target="a")], C("plugin", "{r}/p"))
+    add("component-command-link-rejected", [L("c/x.md", body="x"), L("c/l", "link", target="x.md")], C("personal-command", "{r}/c"))
+    skills = [L("s/own/SKILL.md", body="own"), L("store/one/SKILL.md", body="one"), L("store/two/SKILL.md", body="two"),
+              L("store/two/res/r.txt", body="res"),
+              L("s/rel", "link", target="../store/one"), L("s/hop", "link", target="rel2"),
+              L("s/rel2", "link", target="../store/two")]
+    add("component-skill-links", skills, C("personal-skill", "{r}/s", blobs=True))
+    add("component-enterprise-skill-links", skills, C("enterprise-skill", "{r}/s", blobs=True))
+    add("component-skill-abs-link", skills + [L("s/abs", "link", target="{r}/store/one")],
+        run(C("personal-skill", "{r}/s", blobs=True), drop_routes=True))
+    add("component-skill-link-to-file", skills + [L("s/tofile", "link", target="own/SKILL.md")], C("personal-skill", "{r}/s"))
+    add("component-skill-link-dangling", skills + [L("s/gone", "link", target="../store/none")], C("personal-skill", "{r}/s"))
+    add("component-skill-link-dotdot", skills + [L("s/dots", "link", target="own/../../store/one")], C("personal-skill", "{r}/s", blobs=True))
+    add("component-skill-link-loop", [L("s/a", "link", target="a")], C("personal-skill", "{r}/s"))
+    add("component-skill-link-loop-pair", [L("s/a", "link", target="b"), L("s/b", "link", target="a")], C("personal-skill", "{r}/s"))
+    # 導入リンクの鎖: `s/e` から数えて `count` 回のリンクを辿って、実体のディレクトリへ着く(`e` を 1 回目と数える)。
+    for count in (39, 40, 41):
+        chain = [L("chain/c%d" % i, "link", target="c%d" % (i + 1)) for i in range(1, count - 1)]
+        chain.append(L("chain/c%d" % (count - 1), "link", target="../store/one"))
+        add("component-link-chain-%d" % count,
+            [L("store/one/SKILL.md", body="one"), L("s/e", "link", target="../chain/c1")] + chain,
+            C("personal-skill", "{r}/s"))
+    for depth_count in (100, 101):
+        layout = [L("d/" + "/".join("d" for _ in range(depth_count)) + "/leaf.txt", body="leaf")]
+        add("component-depth-%d" % depth_count, layout, C("plugin", "{r}/d"))
+    mani = "{r}/m/.claude-plugin/marketplace.json"
+    add("component-manifest-file", [L("m/.claude-plugin/marketplace.json", body="{}"), L("m/other/x", body="x")],
+        C("marketplace-manifest", mani, blobs=True))
+    add("component-manifest-missing", [L("m/.claude-plugin/other", body="x")], C("marketplace-manifest", mani))
+    add("component-manifest-parent-missing", [L("x", body="x")], C("marketplace-manifest", mani))
+    add("component-manifest-is-dir", [L("m/.claude-plugin/marketplace.json/x", body="x")], C("marketplace-manifest", mani))
+    add("component-manifest-is-link", [L("m/.claude-plugin/real.json", body="{}"),
+                                       L("m/.claude-plugin/marketplace.json", "link", target="real.json")],
+        C("marketplace-manifest", mani))
+    add("component-fifo", plugin + [L("p/pipe", "fifo")], C("plugin", "{r}/p"))
+    add("component-unreadable", plugin + [L("p/secret", body="s", mode=0o000)], C("plugin", "{r}/p"))
+    add("component-hardlinks-read-once", [L("p/a", body="same-bytes"), L("p/b", "hardlink", target="p/a"),
+                                          L("p/c", "hardlink", target="p/a")], C("plugin", "{r}/p", blobs=True))
+    add("component-hardlinks-across-components",
+        [L("p/a", body="shared-bytes"), L("q/b", "hardlink", target="p/a")],
+        C("plugin", "{r}/p", blobs=True), run(C("plugin", "{r}/q", blobs=True), reuse_budget=True))
+    add("component-distinct-files-read-twice", [L("p/a", body="same-bytes"), L("p/b", body="same-bytes")],
+        C("plugin", "{r}/p", blobs=True))
+    add("component-expected-same", plugin, C("plugin", "{r}/p", blobs=True),
+        run(C("plugin", "{r}/p", blobs=True), expected_from=0))
+    add("component-expected-new-file", plugin, C("plugin", "{r}/p"),
+        run(C("plugin", "{r}/p"), ops_before=[{"op": "write", "path": "p/new.txt", "body": "n", "mode": 0}], expected_from=0))
+    add("component-expected-removed-file", plugin, C("plugin", "{r}/p"),
+        run(C("plugin", "{r}/p"), ops_before=[{"op": "rm", "path": "p/b.txt"}], expected_from=0))
+    add("component-expected-changed-content", plugin, C("plugin", "{r}/p"),
+        run(C("plugin", "{r}/p"), ops_before=[{"op": "write", "path": "p/b.txt", "body": "bat"}], expected_from=0))
+    add("component-expected-link-retargeted", skills, C("personal-skill", "{r}/s"),
+        run(C("personal-skill", "{r}/s"), ops_before=[{"op": "link", "path": "s/rel", "target": "../store/two"}], expected_from=0))
+    add("component-expected-link-target-replaced", skills, C("personal-skill", "{r}/s"),
+        run(C("personal-skill", "{r}/s"), ops_before=[
+            {"op": "mkdir", "path": "store/new"}, {"op": "write", "path": "store/new/SKILL.md", "body": "one"},
+            {"op": "rename", "path": "store/one", "to": "store/old"}, {"op": "rename", "path": "store/new", "to": "store/one"}],
+            expected_from=0))
+    add("component-expected-missing-then-created", plugin, C("personal-skill", "{r}/none"),
+        run(C("personal-skill", "{r}/none"), ops_before=[{"op": "mkdir", "path": "none"}], expected_from=0))
+    add("component-expected-manifest-missing-then-created", [L("m/.claude-plugin/other", body="x")],
+        C("marketplace-manifest", mani),
+        run(C("marketplace-manifest", mani), ops_before=[{"op": "write", "path": "m/.claude-plugin/marketplace.json", "body": "{}"}],
+            expected_from=0))
+    add("component-budget-items-over", plugin, run(C("plugin", "{r}/p"), preload={"entries": 10000 - 3}))
+    add("component-budget-bytes-over", [L("p/a", body="0123456789")],
+        run(C("plugin", "{r}/p"), preload={"bytes": MAX_TOTAL - 9}))
+    add("component-budget-bytes-last-ok", [L("p/a", body="0123456789")],
+        run(C("plugin", "{r}/p"), preload={"bytes": MAX_TOTAL - 10}))
+
+    # ---- record
+    f = [L("c/file.json", body="{\"a\": 1}", mode=0o640)]
+    add("record-file", f, R("{r}/c/file.json"))
+    add("record-missing", f, R("{r}/c/none.json"))
+    add("record-missing-parent", f, R("{r}/none/none.json"))
+    add("record-parent-is-file", [L("c", body="x")], R("{r}/c/none.json"))
+    add("record-directory", f, R("{r}/c"))
+    add("record-unreadable", [L("c/s", body="x", mode=0o000)], R("{r}/c/s"))
+    add("record-fifo", [L("c/p", "fifo")], R("{r}/c/p"))
+    add("record-link", f + [L("c/l", "link", target="file.json")], R("{r}/c/l"))
+    add("record-link-absolute", f + [L("c/l", "link", target="{r}/c/file.json")], R("{r}/c/l"))
+    add("record-link-chain", f + [L("c/l1", "link", target="l2"), L("c/l2", "link", target="{r}/c/l3"), L("c/l3", "link", target="file.json")],
+        R("{r}/c/l1"))
+    add("record-link-dotdot", f + [L("c/sub/x", body="x"), L("c/l", "link", target="sub/../file.json")], R("{r}/c/l"))
+    add("record-link-dangling", [L("c/l", "link", target="gone")], R("{r}/c/l"))
+    add("record-link-to-dir", [L("c/d/x", body="x"), L("c/l", "link", target="d")], R("{r}/c/l"))
+    add("record-link-loop", [L("c/l", "link", target="l")], R("{r}/c/l"))
+    for count in (39, 40, 41):
+        chain = [L("c/l%d" % i, "link", target="l%d" % (i + 1)) for i in range(count - 1)]
+        chain.append(L("c/l%d" % (count - 1), "link", target="file.json"))
+        add("record-link-depth-%d" % count, f + chain, R("{r}/c/l0"))
+    add("record-depth-argument-over", f, run(R("{r}/c/file.json", depth=41)))
+    add("record-depth-argument-last", f, run(R("{r}/c/file.json", depth=40)))
+    add("record-required-missing", f, R("{r}/c/none.json", required=True))
+    add("record-budget-bytes-over", f, run(R("{r}/c/file.json"), preload={"bytes": MAX_TOTAL - 7}))
+    add("record-budget-items-over", f, run(R("{r}/c/file.json"), preload={"entries": 10000}))
+    add("record-expected-same", f + [L("c/l", "link", target="file.json")], R("{r}/c/file.json"),
+        run(R("{r}/c/file.json"), expected_from=0))
+    add("record-expected-key-unknown", f, R("{r}/c/file.json"),
+        run(R("{r}/c/file.json", key="external:other"), expected_from=0))
+    add("record-expected-missing-then-created", f, R("{r}/c/new.json"),
+        run(R("{r}/c/new.json"), ops_before=[{"op": "write", "path": "c/new.json", "body": "{}"}], expected_from=0))
+    add("record-expected-still-missing", f, R("{r}/c/new.json"), run(R("{r}/c/new.json"), expected_from=0))
+    add("record-expected-content-changed", f, R("{r}/c/file.json"),
+        run(R("{r}/c/file.json"), ops_before=[{"op": "write", "path": "c/file.json", "body": "{\"a\": 2}"}], expected_from=0))
+    lnk = f + [L("c/l", "link", target="file.json")]
+    add("record-expected-link-same", lnk, R("{r}/c/l"), run(R("{r}/c/l"), expected_from=0))
+    add("record-expected-link-text-changed", lnk + [L("c/other.json", body="o")], R("{r}/c/l"),
+        run(R("{r}/c/l"), ops_before=[{"op": "link", "path": "c/l", "target": "other.json"}], expected_from=0))
+    add("record-expected-link-target-replaced", lnk, R("{r}/c/l"),
+        run(R("{r}/c/l"), ops_before=[
+            {"op": "write", "path": "c/new.json", "body": "{\"a\": 1}", "mode": 0o640},
+            {"op": "rename", "path": "c/file.json", "to": "c/old.json"}, {"op": "rename", "path": "c/new.json", "to": "c/file.json"}],
+            expected_from=0))
+    add("record-expected-file-became-link", f, R("{r}/c/file.json"),
+        run(R("{r}/c/file.json"), ops_before=[
+            {"op": "rename", "path": "c/file.json", "to": "c/real.json"}, {"op": "link", "path": "c/file.json", "target": "real.json"}],
+            expected_from=0))
+    add("record-expected-link-became-file", lnk, R("{r}/c/l"),
+        run(R("{r}/c/l"), ops_before=[{"op": "rm", "path": "c/l"}, {"op": "write", "path": "c/l", "body": "x"}], expected_from=0))
+    return cases
+
+
+# ---- Git 設定の解析(includes)
+
+# 記録用の偽の git(Python)。呼ばれた引数・標準入力の SHA-256・環境を 1 行の JSON で記録し、本物の git を同じ引数・
+# 標準入力で呼んで、その標準出力と終了コードをそのまま返す。`@PYTHON@`・`@OUT@`・`@GIT@` は、使う側が置き換える。
+GIT_RECORDER = """#!@PYTHON@ -IS
+import hashlib, json, os, subprocess, sys
+data = sys.stdin.buffer.read()
+call = {"argv": [os.fsdecode(a) for a in sys.argv[1:]], "stdin": hashlib.sha256(data).hexdigest(),
+        "env": {os.fsdecode(k): os.fsdecode(v) for k, v in os.environb.items()}}
+with open("@OUT@/calls.jsonl", "a") as handle:
+    handle.write(json.dumps(call) + "\\n")
+done = subprocess.run(["@GIT@"] + sys.argv[1:], input=data, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+sys.stdout.buffer.write(done.stdout)
+sys.exit(done.returncode)
+"""
+
+
+def recorder_text(python, out, git):
+    for value in (python, out, git):
+        assert "'" not in value and '"' not in value and "\\" not in value
+    return GIT_RECORDER.replace("@PYTHON@", python).replace("@OUT@", out).replace("@GIT@", git)
+
+
+def git_cases_definition():
+    return [
+        {"name": "no-include", "raw": "[user]\n\tname = x\n"},
+        {"name": "relative", "raw": "[include]\n\tpath = inc.cfg\n"},
+        {"name": "absolute", "raw": "[include]\n\tpath = /abs/inc.cfg\n"},
+        {"name": "two-values-one-key", "raw": "[include]\n\tpath = a\n\tpath = b\n"},
+        {"name": "include-if", "raw": "[includeIf \"gitdir:/x/\"]\n\tpath = c\n[includeIf \"onbranch:main\"]\n\tpath = d\n[includeif \"gitdir/i:/Y/\"]\n\tpath = e\n"},
+        {"name": "case-insensitive", "raw": "[INCLUDE]\n\tPATH = up\n"},
+        {"name": "tilde", "raw": "[include]\n\tpath = ~/inc.cfg\n"},
+        {"name": "empty-value", "raw": "[include]\n\tpath =\n"},
+        {"name": "dotdot", "raw": "[include]\n\tpath = ../x/../y\n"},
+        {"name": "syntax-error", "raw": "[include\n\tpath = x\n"},
+        {"name": "quoted-and-continued", "raw": "[include]\n\tpath = \"dir with space/x\"\n[include]\n\tpath = long\\\nname\n"},
+        {"name": "boolean-path", "raw": "[include]\n\tpath\n"},
+        {"name": "non-utf8", "raw_hex": "5b696e636c7564655d0a09706174683d636166e90a"},
+        {"name": "entries-last-ok", "many": 9998, "tail": "[include]\n\tpath = last\n"},
+        {"name": "entries-over", "many": 9999, "tail": "[include]\n\tpath = last\n"},
+        {"name": "only-section-keys", "raw": "[includeX]\n\tpath = no\n[include]\n\tother = no\n[includeif]\n\tpath = odd\n"},
+        {"name": "empty-raw", "raw": ""},
+    ]
+
+
+def git_raw(case):
+    if "many" in case:
+        return ("[s]\n" + "".join("\tk%d = v\n" % i for i in range(case["many"])) + case["tail"]).encode()
+    return bytes.fromhex(case["raw_hex"]) if "raw_hex" in case else case["raw"].encode()
+
+
+def git_run_old(guard, case, root, bindir, recorder):
+    """旧版の `includes` を、記録用の偽の git(本物の git を呼ぶ)の PATH で動かす。"""
+    from pathlib import Path
+
+    raw = git_raw(case)
+    env = git_env_base(bindir)
+    saved = dict(os.environ)
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        try:
+            value = guard.includes(Path(root) / "cfg/config", raw)
+            return {"ok": [[ord(c) for c in item.replace(root, "{r}")] for item in value]}
+        except Exception as error:  # noqa: BLE001
+            return {"error": {"type": type(error).__name__, "msg": str(error).replace(root, "{r}")}}
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
+
+
+def git_env_base(bindir):
+    return {"PATH": bindir + ":" + os.environ.get("PATH", "/usr/bin:/bin"), "HOME": OBSERVE_HOME, "LANG": "C.UTF-8"}
+
+
+GIT_ENV_CASE = {
+    "FOO": "bar",
+    "GIT_CONFIG_COUNT": "2", "GIT_CONFIG_KEY_0": "a.b", "GIT_CONFIG_VALUE_0": "c", "GIT_CONFIG_KEY_1": "d.e",
+    "GIT_CONFIG_PARAMETERS": "'x.y=z'", "GIT_CONFIG_NOSYSTEM": "0", "GIT_CONFIG_GLOBAL": "/home/other/gitconfig",
+    "GIT_CONFIG_SYSTEM": "/etc/gitconfig", "GIT_TERMINAL_PROMPT": "1", "GIT_NO_LAZY_FETCH": "0",
+    "GIT_CONFIG_KEYS": "kept", "GIT_CONFIGX": "kept2",
+}
+
+
+def git_cases():
+    import shutil
+    import tempfile
+    import subprocess
+
+    guard = load_guard()
+    git = shutil.which("git")
+    python = sys.executable
+    base = os.path.realpath(tempfile.mkdtemp(dir=os.environ.get("S2E_FIXTURE_TMP")))
+    out = {"cases": [], "recorder": GIT_RECORDER, "env_extra": GIT_ENV_CASE}
+    try:
+        root = os.path.join(base, "r")
+        os.makedirs(root + "/cfg")
+        bindir = os.path.join(base, "bin")
+        os.mkdir(bindir)
+        recorder = os.path.join(bindir, "git")
+        text = recorder_text(python, base, git)
+        with open(recorder, "w") as handle:
+            handle.write(text)
+        os.chmod(recorder, 0o755)
+        for case in git_cases_definition():
+            record_file = os.path.join(base, "calls.jsonl")
+            if os.path.exists(record_file):
+                os.unlink(record_file)
+            result = git_run_old(guard, case, root, bindir, recorder)
+            calls = []
+            if os.path.exists(record_file):
+                for line in open(record_file):
+                    call = json.loads(line)
+                    env = {k: v for k, v in call["env"].items() if k not in ("PATH", "__CF_USER_TEXT_ENCODING")}
+                    calls.append({"argv": call["argv"], "stdin": call["stdin"], "env": env})
+            out["cases"].append({**case, "result": result, "calls": calls})
+        # 環境変数の扱い(除くもの・足すもの・上書きするもの)。
+        env_case = {"raw": "[include]\n\tpath = a\n"}
+        saved = dict(os.environ)
+        os.environ.clear()
+        os.environ.update({**git_env_base(bindir), **GIT_ENV_CASE})
+        record_file = os.path.join(base, "calls.jsonl")
+        if os.path.exists(record_file):
+            os.unlink(record_file)
+        try:
+            from pathlib import Path
+            guard.includes(Path(root) / "cfg/config", env_case["raw"].encode())
+        finally:
+            os.environ.clear()
+            os.environ.update(saved)
+        calls = [json.loads(line) for line in open(record_file)]
+        out["env_case"] = {"raw": env_case["raw"], "calls": [
+            {"argv": c["argv"], "env": {k: v for k, v in c["env"].items() if k not in ("PATH", "__CF_USER_TEXT_ENCODING")}}
+            for c in calls]}
+        text = json.dumps(out)
+        if base in text:
+            raise SystemExit("固定期待に一時フォルダの名前が入った")
+        out["safe_prefix"] = list(guard.SAFE_GIT_PREFIX)
+        return out
+    finally:
+        shutil.rmtree(base)
+
+
+# ---------------------------------------------------------------- environ の生の項目
+
+# 旧 Python 3.10.12 の `os.environ` は、`environ` の各項目を最初の `=` で分け(名前が空でもよい)、`=` の無い項目を捨て、
+# 同じ名前が重なれば最初の値と位置を残す(`convertenviron` の `PyDict_SetDefault`)。`dict(os.environ)` が子の環境になる。
+# `os.environ` は辞書なので、重なった名前を持つ `environ` は ctypes の `execve` で作る。
+ENVIRON_MARKER = "S2E_PLATFORM_ISOLATED=environ"
+
+ENVIRON_LAUNCH = r"""
+import ctypes, json, sys
+spec = json.loads(sys.argv[1])
+libc = ctypes.CDLL(None, use_errno=True)
+envp = (ctypes.c_char_p * (len(spec["envp"]) + 1))(*[e.encode() for e in spec["envp"]], None)
+argv = (ctypes.c_char_p * len(spec["argv"] + [None]))(*[a.encode() for a in spec["argv"]], None)
+sys.stdout.flush()
+libc.execve(spec["path"].encode(), argv, envp)
+raise SystemExit("execve が失敗した: %d" % ctypes.get_errno())
+"""
+
+ENVIRON_PROBE = r"""
+import json, os, subprocess, sys
+pairs = [[os.fsencode(k).decode("latin-1"), os.fsencode(v).decode("latin-1")] for k, v in dict(os.environ).items()]
+try:
+    subprocess.run([sys.executable, "-c", "pass"], env=dict(os.environ), check=True)
+    spawn = "ok"
+except Exception as caught:
+    spawn = type(caught).__name__ + ": " + str(caught)
+print(json.dumps({"pairs": pairs, "spawn": spawn}))
+"""
+
+ENVIRON_CASES = [
+    # (名前, envp, 地域設定の足し込み(PEP 538)を Linux で比べるか)
+    ("dup-first-wins", ["A=1", "A=2", "PATH=/usr/bin:/bin", "LC_ALL=C"], False),
+    ("dup-path-first-wins", ["PATH=/first", "A=1", "PATH=/second", "LC_ALL=C"], False),
+    ("leading-equals", ["=foo=bar", "A=1", "LC_ALL=C"], False),
+    ("only-equals", ["=", "A=", "LC_ALL=C"], False),
+    ("empty-name-dup", ["=one", "A=1", "=two", "LC_ALL=C"], False),
+    ("no-equals-dropped", ["NOEQUALS", "A=1", "NOEQ2", "LC_ALL=C"], False),
+    ("value-with-equals", ["A=x=y=z", "B==", "LC_ALL=C"], False),
+    ("brief-mixed", ["A=1", "A=2", "=foo=bar", "PATH=/usr/bin:/bin", "=", "B=x=y", "NOEQ", "PATH=/other", "LC_ALL=C"], False),
+    ("coerced-linux-no-locale", ["A=1", "A=2", "=foo=bar"], True),
+    ("coerced-linux-lang-c", ["LANG=C", "A=1", "LANG=POSIX"], True),
+    ("coerced-linux-lc-ctype-empty", ["LC_CTYPE=", "A=1", "LC_CTYPE=C.UTF-8"], True),
+]
+
+
+def environ_cases():
+    import subprocess
+
+    out = {"python": "3.10", "marker": ENVIRON_MARKER, "cases": []}
+    for name, envp, coerce in ENVIRON_CASES:
+        full = envp + [ENVIRON_MARKER]
+        spec = {"path": sys.executable, "argv": [sys.executable, "-B", "-c", ENVIRON_PROBE], "envp": full}
+        result = subprocess.run([sys.executable, "-B", "-c", ENVIRON_LAUNCH, json.dumps(spec)],
+                                capture_output=True, timeout=60)
+        if result.returncode != 0:
+            raise SystemExit("環境の観測が失敗した(%s): %r" % (name, result.stderr))
+        observed = json.loads(result.stdout)
+        out["cases"].append({"name": name, "envp": full, "coerce": coerce,
+                             "pairs": observed["pairs"], "spawn": observed["spawn"]})
+    return out
+
+
+@area("environ")
+def make_environ():
+    if sys.platform != "linux":
+        raise SystemExit("PEP 538 の足し込みの固定期待は Linux で作る")
+    return {"environ_cases.json": environ_cases()}
+
+
+@area("observe")
+def make_observe():
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    guard = load_guard()
+    cases = obs_cases()
+    for case in cases:
+        case["results"] = obs_scenario(guard, case)
+    return {"observe_cases.json": {"python": "3.10", "cases": cases}, "git_cases.json": git_cases()}
+
+
+# ---- 再帰の深さ(2b-1b の続き)
+# 旧版の `tree` を、呼出元のフレームの深さ(`depth`)を 1 つずつ変えて呼び、RecursionError が出る位置(誤りの文面・
+# それまでに控えた項目と予算)を測る。基準の起動は旧 guard の直接起動(`python3 -B <guard>`)で、呼出元の深さは
+# 固定期待の生成スクリプトが積む Python のフレームの数で決める。Rust の `depth` は、`tree` のフレームの深さ。
+
+
+def depth_chain(count, leaf, root="t", every=None, extra_leaf_files=0):
+    path = root + "/" + "/".join("d%d" % i for i in range(count))
+    items = [L(root + "/top.txt", body="top")]
+    if every is not None:
+        for i in range(count):
+            items.append(L(root + "/" + "/".join("d%d" % j for j in range(i + 1)) + "/f.txt", body="level%d" % i))
+    if leaf == "file":
+        items.append(L(path + "/leaf.txt", body="leaf"))
+    elif leaf == "files":
+        items += [L(path + "/%s.txt" % name, body=name) for name in ("c", "a", "b")]
+    else:
+        items.append(L(path, "dir"))
+    return items
+
+
+def tree_depth_cases():
+    cases = []
+
+    def add(name, layout, call, depths):
+        cases.append({"name": name, "layout": layout,
+                      "runs": [{"call": call, "depth": d, "summary": True} for d in depths]})
+
+    near = lambda count, extra=0: range(1000 - count - 14 - extra, 1000 - count + 4)
+    add("depth-tree-dir-leaf", depth_chain(95, "dir"), T(), near(95))
+    add("depth-tree-file-leaf", depth_chain(95, "file"), T(), near(95))
+    add("depth-tree-files-leaf", depth_chain(95, "files"), T(), near(95))
+    add("depth-tree-file-every-level", depth_chain(90, "file", every=True), T(), near(90))
+    # 導入リンクの先の木(`walk_at` は、リンクの先を `parent` の中で走査する)
+    deep = "/".join("c%d" % i for i in range(90))
+    link_dir = [L("t/own.txt", body="own"), L("t/lnk", "link", target="{r}/store/top"), L("store/top/" + deep, "dir")]
+    add("depth-tree-link-dir-leaf", link_dir, T(user_links=True), near(90, 4))
+    link_file = [L("t/own.txt", body="own"), L("t/lnk", "link", target="{r}/store/top"),
+                 L("store/top/" + deep + "/f.txt", body="in-link")]
+    add("depth-tree-link-file-leaf", link_file, T(user_links=True), near(90, 4))
+    # 木の入口(`parent` の連なり)が上限に当たる深さ
+    small = [L("t/a.txt", body="a"), L("t/sub/b.txt", body="b")]
+    add("depth-tree-prologue", small, T(), range(960, 1001))
+    small_link = [L("t/a.txt", body="a"), L("t/lnk", "link", target="{r}/store"), L("store/s.txt", body="s")]
+    add("depth-tree-prologue-link", small_link, T(user_links=True), range(960, 1001))
+    return cases
+
+
+@area("depth")
+def make_depth():
+    if os.getuid() == 0:
+        raise SystemExit("root では権限の入力が変わる。root 以外で実行する")
+    guard = load_guard()
+    cases = tree_depth_cases()
+    for case in cases:
+        case["results"] = obs_scenario(guard, case)
+    return {"depth_cases.json": {"python": "3.10", "cases": cases}}
+
+
 def serialize(value):
     return json.dumps(value, ensure_ascii=True, separators=(",", ":"), sort_keys=True) + "\n"
 

@@ -2,22 +2,33 @@
 //! 段階 1: OS を呼ばない部品(引数・出力・Python の値・JSON・文字列・パス)。
 //! 段階 2a: 記述子・設定・一覧・控えの値の組み立てと検査(OS を呼ばない形)と、`host-paths`。
 //! 段階 2b-1a: 環境用の予算(`budget`)とファイル操作(`fsio`)。子の起動は platform にある。
+//! 段階 2b-1b: 木の走査(fsio の walk_at・tree)・部品の木(component)・記録(record)・Git 設定の解析(gitconfig)・
+//! 再帰の深さ(depth)・控えの値(entry)。
 //! 9 コマンドの本体と内部 reader は、続きの段階が足す。
 // 段階 1 の部品は、段階 2 の 9 コマンドが使う。
 #![allow(dead_code)]
 pub mod args;
 pub mod budget;
+pub mod component;
+pub mod depth;
 pub mod dispatch;
+pub mod entry;
 mod errno_table;
 pub mod error;
 pub mod fsio;
+pub mod gitconfig;
 pub mod inventory;
+#[cfg(test)]
+mod observe_tests;
 pub mod output;
 pub mod pyjson;
 pub mod pyops;
 pub mod pypath;
 pub mod pystr;
 pub mod pyvalue;
+#[cfg(test)]
+mod race_tests;
+pub mod record;
 pub mod runtime;
 pub mod settings;
 pub mod specs;

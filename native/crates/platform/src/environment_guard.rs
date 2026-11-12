@@ -173,6 +173,9 @@ pub fn chmod_nofollow_at(dir: BorrowedFd<'_>, name: &[u8], mode: u32) -> io::Res
 /// `scan_dir`の失敗: OSの誤りか、呼び出し側の関数の失敗。
 #[derive(Debug)]
 pub enum ScanError<E> {
+    /// fdの複製に失敗した(旧版の`os.scandir(fd)`は、ファイル名の無い`OSError`にする)。
+    Dup(io::Error),
+    /// `fdopendir`か読取りに失敗した(旧版は、ファイル名がfdの整数の`OSError`にする)。
     Os(io::Error),
     Callback(E),
 }
@@ -186,7 +189,7 @@ pub fn scan_dir<E>(
     mut each: impl FnMut(&[u8]) -> Result<(), E>,
 ) -> Result<(), ScanError<E>> {
     let duplicate =
-        rustix::io::fcntl_dupfd_cloexec(fd, 0).map_err(|code| ScanError::Os(errno(code)))?;
+        rustix::io::fcntl_dupfd_cloexec(fd, 0).map_err(|code| ScanError::Dup(errno(code)))?;
     let mut dir = Dir::new(duplicate).map_err(|code| ScanError::Os(errno(code)))?;
     let result = (|| {
         while let Some(entry) = dir.read() {
@@ -254,6 +257,39 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::Result<bool> {
     Ok(false)
 }
 
+/// `poll_fds`で待つ向き。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Interest {
+    pub read: bool,
+    pub write: bool,
+}
+
+/// 複数のfdを待つ(旧版の`selectors.DefaultSelector().select(timeout)`)。`timeout_ms`はミリ秒(負なら無期限)。
+/// 戻り値は`fds`と同じ並びで、そのfdに何かの事象(読める・書ける・切断・誤り)があれば`true`。
+/// 旧版は、読めるかの印以外(切断・誤り)も呼出し側の「対応する側の処理」へ回すので、区別しない。
+/// `EINTR`は、そのまま返す(呼出し側が`retry`で包む)。
+pub fn poll_fds(fds: &[(BorrowedFd<'_>, Interest)], timeout_ms: i64) -> io::Result<Vec<bool>> {
+    let mut set: Vec<PollFd<'_>> = fds
+        .iter()
+        .map(|(fd, interest)| {
+            let mut flags = PollFlags::empty();
+            if interest.read {
+                flags |= PollFlags::IN;
+            }
+            if interest.write {
+                flags |= PollFlags::OUT;
+            }
+            PollFd::new(fd, flags)
+        })
+        .collect();
+    let timeout = (timeout_ms >= 0).then(|| Timespec {
+        tv_sec: timeout_ms / 1000,
+        tv_nsec: (timeout_ms % 1000) * 1_000_000,
+    });
+    poll(&mut set, timeout.as_ref()).map_err(errno)?;
+    Ok(set.iter().map(|item| !item.revents().is_empty()).collect())
+}
+
 /// 信号の扱い。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Disposition {
@@ -300,6 +336,7 @@ pub fn ignore_signal(number: i32) -> io::Result<()> {
 }
 
 pub const EINTR: i32 = libc::EINTR;
+pub const EPIPE: i32 = libc::EPIPE;
 pub const EOPNOTSUPP: i32 = libc::EOPNOTSUPP;
 pub const ENOTSUP: i32 = libc::ENOTSUP;
 pub const SIGINT: i32 = libc::SIGINT;
@@ -470,6 +507,65 @@ pub enum Stdio {
     Pipe,
     /// `/dev/null`(`subprocess.DEVNULL`)。
     DevNull,
+}
+
+/// `environ`の生の項目から、旧Python 3.10の`os.environ`(`posixmodule.c`の`convertenviron`)と同じ
+/// 名前と値の組を作る。各項目を最初の`=`で分け(名前が空でもよい)、`=`の無い項目は捨て、
+/// 同じ名前が重なれば最初の値と位置を残す(`PyDict_SetDefault`)。
+pub fn environ_pairs(entries: &[&[u8]]) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut pairs: Vec<(Vec<u8>, Vec<u8>)> = Vec::new();
+    for entry in entries {
+        let Some(split) = entry.iter().position(|byte| *byte == b'=') else {
+            continue;
+        };
+        let (name, value) = (&entry[..split], &entry[split + 1..]);
+        if !pairs.iter().any(|(seen, _)| seen == name) {
+            pairs.push((name.to_vec(), value.to_vec()));
+        }
+    }
+    pairs
+}
+
+#[cfg(target_vendor = "apple")]
+fn raw_environ() -> *const *const c_char {
+    // SAFETY: `_NSGetEnviron`は、`environ`の変数の場所を返す(実行ファイルでも共有ライブラリでも使える)。
+    unsafe { *libc::_NSGetEnviron() as *const *const c_char }
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn raw_environ() -> *const *const c_char {
+    unsafe extern "C" {
+        static environ: *const *const c_char;
+    }
+    // SAFETY: `environ`はlibcの変数で、読むだけ。
+    unsafe { environ }
+}
+
+/// 今のプロセスの`environ`を、`environ_pairs`で組にする(旧版の`dict(os.environ)`)。
+/// `std::env::vars_os`は2文字目以降の最初の`=`で分け、重なった名前は後の値が勝つので使わない。
+///
+/// ほかのスレッドが環境を書き換えない時に呼ぶ(コマンドの開始時の前提。`std::env::set_var`と同じ制約)。
+pub fn process_environ() -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut entries: Vec<&[u8]> = Vec::new();
+    let table = raw_environ();
+    if !table.is_null() {
+        let mut at = table;
+        // SAFETY: `environ`はNULで終わる、NUL終端の文字列へのポインタの並び。読む間、書き換えない前提。
+        unsafe {
+            while !(*at).is_null() {
+                entries.push(std::ffi::CStr::from_ptr(*at).to_bytes());
+                at = at.add(1);
+            }
+        }
+    }
+    environ_pairs(&entries)
+}
+
+/// 旧Python 3.10が起動時に(PEP 538で)足す`LC_CTYPE`を、プロセスの環境へ同じく足す。足したら`true`。
+/// 規則と注意は`restore_taskmd::coerce_c_locale`と同じ(R4Rと同じ形。環境変数だけで決まる場合の再現)。
+/// `process_environ`の前に、部品の開始時に1回だけ呼ぶ。
+pub fn coerce_c_locale() -> bool {
+    crate::restore_taskmd::coerce_c_locale()
 }
 
 pub struct SpawnSpec<'a> {
@@ -1213,7 +1309,7 @@ mod tests {
             Ok(())
         }) {
             Ok(()) => Ok(names),
-            Err(ScanError::Os(error)) => Err(error),
+            Err(ScanError::Os(error) | ScanError::Dup(error)) => Err(error),
             Err(ScanError::Callback(())) => unreachable!(),
         }
     }
@@ -1307,6 +1403,43 @@ mod tests {
         assert!(!wait_readable(reader.as_fd(), 10).unwrap());
         write(writer.as_fd(), b"go\n").unwrap();
         assert!(wait_readable(reader.as_fd(), 10).unwrap());
+    }
+
+    #[test]
+    fn poll_fds_reports_each_descriptor_in_order() {
+        let (reader, writer) = std::io::pipe().unwrap();
+        let (reader2, writer2) = std::io::pipe().unwrap();
+        let read = Interest {
+            read: true,
+            write: false,
+        };
+        let write_side = Interest {
+            read: false,
+            write: true,
+        };
+        // 何も届いていない読み側は待ちきり、書き側は空いているので、すぐ「事象あり」。
+        let ready = poll_fds(&[(reader.as_fd(), read), (writer2.as_fd(), write_side)], 10).unwrap();
+        assert_eq!(ready, vec![false, true]);
+        write(writer.as_fd(), b"x").unwrap();
+        let ready = poll_fds(&[(reader.as_fd(), read), (reader2.as_fd(), read)], 10).unwrap();
+        assert_eq!(ready, vec![true, false]);
+        // 時間切れ: 何も起きなければ、すべて `false`。
+        let started = Instant::now();
+        let ready = poll_fds(&[(reader2.as_fd(), read)], 50).unwrap();
+        assert_eq!(ready, vec![false]);
+        assert!(started.elapsed() >= Duration::from_millis(40));
+        // 書き側を閉じると、読み側は切断で「事象あり」。読み側を閉じると、書き側は誤りで「事象あり」。
+        drop(writer2);
+        assert_eq!(
+            poll_fds(&[(reader2.as_fd(), read)], 1000).unwrap(),
+            vec![true]
+        );
+        drop(reader);
+        assert_eq!(
+            poll_fds(&[(writer.as_fd(), write_side)], 1000).unwrap(),
+            vec![true]
+        );
+        assert!(poll_fds(&[], 1).unwrap().is_empty());
     }
 
     #[test]
@@ -1701,6 +1834,175 @@ mod child_tests {
             expect["returncode"].as_i64().unwrap(),
             "{name}"
         );
+    }
+
+    // ---- environ の生の項目(旧Python 3.10の`dict(os.environ)`)
+
+    #[test]
+    fn environ_pairs_split_at_the_first_equals_and_keep_the_first_duplicate() {
+        let entries: [&[u8]; 8] = [
+            b"A=1",
+            b"A=2",
+            b"=foo=bar",
+            b"PATH=/p",
+            b"=",
+            b"B=x=y",
+            b"NOEQ",
+            b"PATH=/q",
+        ];
+        let pairs = environ_pairs(&entries);
+        let shown: Vec<(&[u8], &[u8])> = pairs
+            .iter()
+            .map(|(k, v)| (k.as_slice(), v.as_slice()))
+            .collect();
+        let want: [(&[u8], &[u8]); 4] = [
+            (b"A", b"1"),
+            (b"", b"foo=bar"),
+            (b"PATH", b"/p"),
+            (b"B", b"x=y"),
+        ];
+        assert_eq!(shown, want);
+        assert!(environ_pairs(&[]).is_empty());
+    }
+
+    /// `envp`をそのまま持つ子として、このテストの実行ファイルを`execve`し、`name`の検査だけを流す。
+    /// 標準出力を返す(重なった名前を持つ`envp`は`Command::env`では作れないので、`pre_exec`で`execve`する)。
+    fn run_with_envp(name: &str, envp: &[String]) -> String {
+        use std::ffi::CString;
+        use std::os::unix::process::CommandExt;
+        let exe = std::env::current_exe().unwrap();
+        let path = CString::new(exe.as_os_str().as_encoded_bytes()).unwrap();
+        let args: Vec<CString> = [
+            exe.to_str().unwrap(),
+            "--exact",
+            &format!("environment_guard::child_tests::{name}"),
+            "--nocapture",
+            "--test-threads=1",
+        ]
+        .iter()
+        .map(|arg| CString::new(*arg).unwrap())
+        .collect();
+        let env: Vec<CString> = envp
+            .iter()
+            .map(|e| CString::new(e.as_str()).unwrap())
+            .collect();
+        let mut argv: Vec<*const c_char> = args.iter().map(|a| a.as_ptr()).collect();
+        argv.push(std::ptr::null());
+        let mut table: Vec<*const c_char> = env.iter().map(|e| e.as_ptr()).collect();
+        table.push(std::ptr::null());
+        let mut command = std::process::Command::new(&exe);
+        // 領域は`output`が返るまで、この関数が持ち続ける。closureには番地だけを渡す(`Sync`のため)。
+        let (path_at, argv_at, table_at) = (
+            path.as_ptr() as usize,
+            argv.as_ptr() as usize,
+            table.as_ptr() as usize,
+        );
+        // SAFETY: `fork`の後の子で、確保済みの領域だけを使って`execve`する(確保も解放もしない)。
+        unsafe {
+            command.pre_exec(move || {
+                libc::execve(
+                    path_at as *const c_char,
+                    argv_at as *const *const c_char,
+                    table_at as *const *const c_char,
+                );
+                Err(io::Error::last_os_error())
+            });
+        }
+        let output = command.output().unwrap();
+        let text = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            output.status.success() && text.contains("1 passed"),
+            "{name}: {text}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        text
+    }
+
+    /// 別プロセスの中の本体。`S2E_PLATFORM_ISOLATED`が`environ`のときだけ働き、組を標準出力に出す。
+    fn print_environ(coerce: bool) {
+        if std::env::var_os("S2E_PLATFORM_ISOLATED").is_none_or(|value| value != "environ") {
+            return;
+        }
+        if coerce {
+            coerce_c_locale();
+        }
+        let pairs: Vec<Value> = process_environ()
+            .iter()
+            .map(|(k, v)| {
+                serde_json::json!([
+                    k.iter().map(|b| char::from(*b)).collect::<String>(),
+                    v.iter().map(|b| char::from(*b)).collect::<String>()
+                ])
+            })
+            .collect();
+        println!("S2E_ENVIRON_BEGIN{}S2E_ENVIRON_END", Value::Array(pairs));
+    }
+
+    #[test]
+    fn environ_child() {
+        print_environ(false);
+    }
+
+    #[test]
+    fn environ_child_coerced() {
+        print_environ(true);
+    }
+
+    #[test]
+    fn process_environ_matches_the_old_python_dict_of_os_environ() {
+        let fixture: Value =
+            serde_json::from_str(include_str!("../../../ci/s2e_fixtures/environ_cases.json"))
+                .expect("environ_cases.json が JSON でない");
+        let mut ran = 0;
+        for case in fixture["cases"].as_array().unwrap() {
+            let name = case["name"].as_str().unwrap();
+            let coerce = case["coerce"].as_bool().unwrap();
+            // PEP 538 の足し込みの固定期待は Linux で測った。Mac は地域設定の判定が別なので比べない。
+            if coerce && !cfg!(target_os = "linux") {
+                continue;
+            }
+            let envp: Vec<String> = case["envp"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|e| e.as_str().unwrap().to_owned())
+                .collect();
+            let text = run_with_envp(
+                if coerce {
+                    "environ_child_coerced"
+                } else {
+                    "environ_child"
+                },
+                &envp,
+            );
+            let body = text
+                .split_once("S2E_ENVIRON_BEGIN")
+                .and_then(|(_, rest)| rest.split_once("S2E_ENVIRON_END"))
+                .unwrap_or_else(|| panic!("{name}: 組が出ていない: {text}"))
+                .0;
+            let got: Value = serde_json::from_str(body).unwrap();
+            assert_eq!(got, case["pairs"], "{name}");
+            // 旧版は、この組を子の環境にして起動に成功する(名前に`=`を含まないので`ValueError`にならない)。
+            assert_eq!(case["spawn"], "ok", "{name}");
+            let pairs: Vec<(Vec<u8>, Vec<u8>)> = got
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|pair| (bytes(&pair[0]), bytes(&pair[1])))
+                .collect();
+            let mut child = spawn(&SpawnSpec {
+                argv: &[b"/bin/sh".to_vec(), b"-c".to_vec(), b"exit 0".to_vec()],
+                env: &pairs,
+                cwd: None,
+                stdin: Stdio::DevNull,
+                stdout: Stdio::DevNull,
+                stderr: Stdio::DevNull,
+            })
+            .unwrap_or_else(|error| panic!("{name}: {error:?}"));
+            assert_eq!(child.wait().unwrap(), 0, "{name}");
+            ran += 1;
+        }
+        assert!(ran >= 8, "比べた件数が少ない: {ran}");
     }
 
     // ---- プロセス全体の信号の扱いを変える検査(別プロセスで行う)
