@@ -1200,6 +1200,80 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### loop-stateの状態観測7コマンド(S2L)
+
+[Issue #468](https://github.com/Yuki-Maeda-valour/workflow/issues/468)で、`loop-state.py`の7コマンドを開発用Rustソースへ移した。
+製品CLIの登録表・help・配布物・`loop.sh`などの既存呼出元へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+試せる入口は、開発用exampleの`loop_state_fixture`だけである。
+
+- 対象は`snapshot`・`stop-control`・`preflight`・`derive-removed-worktree`・`state-digest`・`state-digests`・`compare`。引数・既定値・help・誤引数の診断は、旧`argparse`と同じ順に解析する。
+- 終了値は旧版どおり。`Stop`(旧版が想定した停止)は終了20、`compare`の差は終了1、誤引数は終了2である。捕まえない例外は、旧版と同じ形の呼出履歴(traceback)と終了1を出す。
+- 状態は`schema7`の12欄で保存する。ASCIIのエスケープ・キー順・区切りの空白なし・末尾LFなしで書き、孤立したsurrogateも失わない。
+- 状態の読取りは旧`json.loads(bytes)`の規則を保つ。UTF-8/16/32とBOM、重複キーの最後の値、非有限数、任意精度の整数、`7.0 == 7`などの比較である。
+- 保存は`.<名前>.tmp.<pid>`をmode 0600で排他的に作り、flush・fsyncの後に同じ親フォルダからreplaceする。失敗したときに残すファイルと消す順も旧版に合わせた。
+- `state-digest`・`state-digests`はJSONを解析せず、生バイトのSHA-256を返す。直接の`OSError`を固定の理由へ変えるのは`state-digests`だけである。
+
+#### 拒否の順序と機密の本文
+
+```text
+保存状態 → 管理先(.git・commondir)と候補の確認 → 全出典をGitなしで一致確認
+  → 保持したfdを隔離したGitへ渡して解析 → include・条件の判定 → 通常のGit
+  → 機密指定の累積 → 属性を先に調べる走査 → 状態の保存
+```
+
+- 既存の基準を固定する実行の途中では、保存時に無かった候補と未知のinclude先を、本文を開く前に拒否する。拒否した後にGitや設定を読み直さない。設定値を診断へ転記しない。
+- 機密に当たるファイルは属性だけを記録する。機密のリンクの字面も読まない。lstatの後に種類と機密を判定し、必要な通常ファイルだけ本文を読む。
+- profileは保持した親から読み、親を閉じてからYAMLを解析する。過去と現在の機密指定を初出順で累積する。
+- 保存済みの出典・候補を固定する検査の例外は、旧版と同じく、初回・`--fresh-config-baseline`・親が指定した新しい自分のworktreeの`config.worktree`に限る。停止ファイルの例外も、旧版と同じ正確な指定に限る。
+- 捕まえる例外の型・Stopの文・フレームは、旧版の`try`/`except`をすべて対照表で照らして合わせた。パスは旧版と同じく、os.pathの結果の文字列を字面どおりに比べる。
+
+#### 保持fdと単一子の接続
+
+- Gitの子は`platform::loop_state::LoopChild`で起動する。stdinとstderrはDEVNULL、stdoutだけパイプにし、直接の子だけを回収する。`index_snapshot`は3本ともDEVNULLの別の起動を使う。
+- 子へ渡すファイルは、保持した通常ファイルか、`MemoryFile`(memfdで作るメモリ上の匿名ファイル)だけである。`/proc/self/fd/<番号>`の組み立てはplatformの中に閉じ、fdの番号を外へ出さない。
+- 許可したfdだけを子へ引き継ぎ、無関係のfdは閉じる。親の読取り位置・CLOEXEC・所有権は変えない。
+- 子の時間は、10秒と共有の残り時間の早い側である。超過したら、旧版の順で直接の子をkill・waitし、stdoutを閉じる。
+- C0cの`DirectChild`・`run_child`には接続しない。パイプの数と回収期限の契約が違うためである。C0cのソースとテストは変えていない。
+- 起動する外部の道具はGitだけである(23:19の決定)。
+
+#### 再帰の文脈
+
+- `core::loop_state::legacy_recursion`の`LegacyRecursionContext`は、旧CLIの`<module> → main → snapshot → profile_patterns`の呼出しの深さを表す(`recursion_limit=1000`・`entry_depth=4`)。
+- `profile_patterns_for_loop`は、PyYAMLのcompose・重複検査・2回目のcompose・構築・mergeの各段階と、CPython 3.10の一時的な加算を数える。旧版が`RecursionError`で拒否する所で、同じ拒否をする。既存の`profile_patterns`(R4S)は変えていない。
+- R4Sの再帰上限の承認済み差(有限な入力を受け付ける)は、S2Lへ転用しない。
+- refsとファイルの走査・realpath・状態のJSONの再帰も、旧版が`RecursionError`になる境界を比較で確かめた。Rust自身のスタックの深さや新しい固定の上限は使わない。
+
+#### OSの限界
+
+- Macには`/proc/self/fd`が無い。旧版は、`/proc/self/fd/<番号>`を渡す`git config --file`の解析が失敗するので、`snapshot`・`preflight`を「git の状態読取に失敗した」で拒否する。
+  - 前の状態の無い`snapshot`は、その解析の前に、worktreeの一覧と、停止ファイルの確かめ(停止ファイルの引数があるときの`stop_control_from_args`の`os.stat`)を行う。
+  - 続けて、名前の順で最初のworktreeだけについて、`rev-parse`・`secret_paths`の読取り・`diff-index`・`config.worktree`とprivate refsの読取り・configの出典の一覧(`git config --show-origin`)を行う。2つ目より後のworktreeには届かない。
+  - 前の状態を使う`snapshot`は、worktreeの一覧の前に、保存したconfigの確かめの中のその解析で拒否する。
+  - `preflight`も、保存したconfigの確かめの中のその解析で拒否する。
+  - Macの旧Pythonには`os.memfd_create`も無い。ただし、memfdを使うincludeIfの条件の判定は、その解析の後なので届かない。
+- Rustも同じ所で拒否し、一時ファイルや`/dev/fd`へ切り替えない。
+- Linuxの成功を、Macの成功として扱わない。Macでの実際の動作は未確認であり、PRのCIで確かめる。
+
+#### 承認された差と全コマンド共通の決定
+
+- 承認された差は、2026-11-11 12:39の利用者回答による文字コードの固定だけである。R4Bと同じ範囲で、7コマンドすべてに当てる。
+  - `PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・locale・ファイル名の文字コード設定に由来する解釈を、UTF-8と`surrogateescape`へ固定する。Rustはこれらの設定を読まない。
+  - ファイル操作・Gitの引数・環境変数・保存する状態の生バイトは変えない。整数変換の上限・端末幅・バッファの扱い・再帰は旧版どおりである。
+- 全コマンド共通の利用者の決定(2026-11-11の17:45・17:58〈21:35に広げた〉・22:24・22:26・22:31・22:38・23:19と、2026-11-12の00:28・00:35・00:42)は、#468の本文の「全コマンド共通の決定の適用」の節に書いた範囲だけを当てた。
+  - 出典は決定のファイルである: `rust-decision-startup-fatal-diagnostic.txt`・`rust-decision-script-path-in-diagnostic.txt`・`rust-decision-encoding-utf8.txt`・`rust-decision-runtime-env.txt`・`rust-decision-external-commands.txt`・`rust-decision-failure-modes.txt`・`rust-decision-bash-tools.txt`。
+  - 当てたもの: 起動の失敗の`Current thread`の値の形式検査、導入先の固定名`<CPython3.10>/…`と旧スクリプトの固定名`loop-state.py`、本家CPython 3.10.11の行番号、SIGINT・SIGTERM、時間切れの秒の欄、保存の途中の書き込みの失敗、`onbranch`の一時の置き場、Git以外を起動しないこと。
+  - 比較の前提の外にしたもの: 記憶域の不足、処理系の資源の上限(RLIMIT_NOFILEなど)で決まる失敗、決定が挙げたPythonの起動を変える環境変数の効果。
+- 実装とレビューの間に、旧版との差を新たに認めた所は無い。見つけた差は、すべて旧版へ合わせて直した。
+- R4S・R4A・R4B・#448の承認済み差は転用しない。
+
+```text
+旧Python(本家3.10.11) ─┐
+                        ├─ 同じ物理入力 → 生出力・終了値・状態ファイル・入力無変更を確認
+loop_state_fixture ─────┘
+```
+
+APIは [native/README.md](../native/README.md#loop-stateの状態観測7コマンドs2l)、比較の手順・件数・時間は [testing.md](testing.md#s2lの比較)に記す。
+
 ### R4U(check_links)の文書のリンク検査
 
 [Issue #480](https://github.com/Yuki-Maeda-valour/workflow/issues/480)で、旧版 `plugins/dev-workflow/skills/update-doc/scripts/check_links.py`(93行)と同じ結果を返す専用の部品を、開発用Rustソースへ実装した。
@@ -1497,11 +1571,17 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 - 2026-11-09のC0bで `rustix` を採用した。段階 0 の候補記録は上に残す。`native/Cargo.toml` で `=1.1.6` に固定し、`platform` だけに `fs` と既定の `std` を追加した。
 - R4Aのtask-digestではstdoutの端末幅取得に`termios`を加えた。
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
-- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
+- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、R4Rの自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
   - 旧helperの `_posixsubprocess` と同じ子の準備が要るためである。子だけの `RLIMIT_FSIZE`、`close_range` か列挙した fd への exec の時に閉じる印、`SIGPIPE`・`SIGXFSZ` の既定、mask、`execv` は、exec の前に子の中で動く。`std::process::Command` の `pre_exec` と `libc` でしか書けない。
   - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
   - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
   - `rustix` の機能と、依存の版は増やしていない。
+- S2L(#468)では、依存を増やさず、自作の `unsafe` とCの関数の宣言(`extern "C"`)を `native/crates/platform/src/loop_state.rs`・`loop_state_signal.rs`・`loop_state_watch.rs` と、テストの `loop_state_tests.rs` に置いた。cli・core と検査専用入口の `loop_state_fixture` は `unsafe` を使わない。
+  - `loop_state.rs`: Gitの子の準備を `pre_exec` の中で行う。旧CPythonの`subprocess`と同じく `SIGPIPE`・`SIGXFSZ` を既定へ戻し、許したfdだけを引き継ぐ(Linuxは `close_range` の `syscall`、使えなければディレクトリの列挙。`signal`・`fcntl`・`getrlimit`・`syscall`・`open`・`close` と、Macの `__getdirentries64` を直接呼ぶ)。
+    - `syscall`: Linuxの `close_range`(番号436)と、fdの列挙の `getdents64`(x86_64は217、arm64は61)に使う。
+    - `__getdirentries64`: Macのfdの列挙(`/dev/fd`)に使う。Apple Libcの非公開のexportで、公開APIではない。Macでの実際のリンクと動作は、まだCIで確かめていない(PRのCIで確かめる)。
+  - `loop_state_signal.rs`: 起動時の信号の初期化(`signal`・`siginterrupt`・`sigaction`)、起動の失敗の診断に使う主スレッドの識別子(`pthread_self`)、SIGINTによる終了(`kill`・`getpid`)。
+  - `loop_state_watch.rs`: Linuxの `inotify`(`inotify_init1`・`inotify_add_watch`)で、テストが持つフォルダのopenだけを監視する(製品の経路では使わない)。
 - R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
   - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
   - 例外が1つある。main の前に static から呼ぶ `capture_before_main` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。

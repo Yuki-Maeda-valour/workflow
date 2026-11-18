@@ -66,7 +66,7 @@
         }
       },
       "runs-on": "${{ matrix.runner }}",
-      "timeout-minutes": 60,
+      "timeout-minutes": 120,
       "steps": [
         {
           "name": "ソース SHA を取得",
@@ -180,7 +180,7 @@
         }
       },
       "runs-on": "${{ matrix.runner }}",
-      "timeout-minutes": 30,
+      "timeout-minutes": 60,
       "steps": [
         {
           "name": "ソース SHA を取得",
