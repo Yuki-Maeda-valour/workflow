@@ -14,3 +14,9 @@ pub mod r4b_process;
 
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
+
+/// loop-state専用の保持入力・保存・直接子の接続。
+pub mod loop_state;
+
+#[cfg(target_os = "linux")]
+pub mod loop_state_watch;
