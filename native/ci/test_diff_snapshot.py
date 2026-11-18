@@ -205,6 +205,100 @@ class DiagnosticBoundaries(unittest.TestCase):
         with self.assertRaises(AssertionError):
             same_result(Result(20,b'',expected+suffix),Result(20,b'',expected+suffix.replace(invocation,b'diff-snapshot.sh')))
 
+    def test_bash_location_reason_is_version_dependent_only_for_manifest_cases_off_base(self):
+        from diff_snapshot_fixtures import compare
+        invocation=b'/fixture/diff-snapshot.sh'
+        rows=[{'position':0,'line':1477,'detail':b'[: 99: integer expression expected'}]
+        base=invocation+b': line 1477: [: 99: integer expression expected\n'
+        new53=invocation+b': line 1477: [: 99: integer expected\n'
+        saved=dict(compare.VERSION_TOLERANT); masked=set(compare.VERSION_MASKED)
+        try:
+            # 基準の機械(名前の集合が未設定)では、文の違いで落ちる。ケースを渡しても同じ。
+            compare.VERSION_TOLERANT.update(names=None,kinds=None)
+            with self.assertRaisesRegex(AssertionError,'期待=.*実際='):
+                bash_locations(new53,invocation=invocation,rows=rows,case='case-a')
+            self.assertEqual(b'diff-snapshot.sh: line 1477: [: 99: integer expression expected\n',
+                             bash_locations(base,invocation=invocation,rows=rows,case='case-a'))
+            # 基準でない機械: manifestがbash-messageを載せるケースだけ、記録して通る。
+            compare.VERSION_TOLERANT.update(names={'case-a','case-t'},kinds={'case-a':{'bash-message'},'case-t':{'tool-message'}})
+            compare.VERSION_MASKED.clear()
+            self.assertEqual(b'diff-snapshot.sh: line 1477: [: 99: integer expected\n',
+                             bash_locations(new53,invocation=invocation,rows=rows,case='case-a'))
+            self.assertEqual({'case-a'},compare.VERSION_MASKED)
+            # kindsが未設定なら、名前があっても厳しい側(偽)にする。
+            compare.VERSION_TOLERANT.update(names={'case-a'},kinds=None)
+            self.assertFalse(compare.version_tolerates('case-a','bash-message'))
+            with self.assertRaises(AssertionError):
+                bash_locations(new53,invocation=invocation,rows=rows,case='case-a')
+            compare.VERSION_TOLERANT.update(names={'case-a','case-t'},kinds={'case-a':{'bash-message'},'case-t':{'tool-message'}})
+            # 版に依る欄でないケース・種類が違うケース・ケース未指定は、基準でない機械でも落ちる。
+            for case in ('case-b','case-t',''):
+                with self.assertRaises(AssertionError):
+                    bash_locations(new53,invocation=invocation,rows=rows,case=case)
+            # 位置・行番号・呼出名の形・操作名と値(最後の`: `より前)は、版に依る欄でも比べる。
+            for bad in (new53.replace(b'line 1477',b'line 1478'),b'prefix\n'+new53,new53+new53,
+                        invocation+b': line 1477: \n',invocation+b': line 1477: [: 98: integer expected\n',
+                        invocation+b': line 1477: printf: write error: Broken pipe\n',
+                        invocation+b': line 1477: integer expected\n'):
+                with self.assertRaises(AssertionError):
+                    bash_locations(bad,invocation=invocation,rows=rows,case='case-a')
+        finally:
+            compare.VERSION_TOLERANT.clear(); compare.VERSION_TOLERANT.update(saved)
+            compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
+
+    def test_startup_warning_text_is_version_dependent_only_for_manifest_cases_off_base(self):
+        from diff_snapshot_fixtures import compare, startup_env
+        case={'warning':'bash: BASH_COMPAT: 5.3: compatibility value out of range\n'}
+        quiet=Result(0,b'',b'',case='startup-env-compat-5-3')
+        saved=dict(compare.VERSION_TOLERANT); masked=set(compare.VERSION_MASKED); hits=dict(compare.VERSION_HITS)
+        try:
+            compare.VERSION_TOLERANT.update(names=None,kinds=None)
+            startup_env._check_warning(case,dataclasses.replace(quiet,stderr=case['warning'].encode()))
+            with self.assertRaisesRegex(AssertionError,'期待=.*実際='):
+                startup_env._check_warning(case,quiet)
+            compare.VERSION_TOLERANT.update(names={'startup-env-compat-5-3'},kinds={'startup-env-compat-5-3':{'bash-message'}})
+            compare.VERSION_MASKED.clear(); compare.VERSION_HITS.clear()
+            startup_env._check_warning(case,quiet)
+            self.assertEqual({'startup-env-compat-5-3'},compare.VERSION_MASKED)
+            self.assertEqual({'startup-env-compat-5-3':{'bash-message'}},compare.VERSION_HITS[compare.CURRENT_SCOPE[0]])
+            with self.assertRaises(AssertionError):
+                startup_env._check_warning(case,dataclasses.replace(quiet,case='startup-env-other'))
+            # 同じケースでも、別の文・足された警告は落とす(消えるだけを認める)。
+            for text in (b'bash: BASH_COMPAT: 5.3: something else\n',case['warning'].encode()+b'bash: extra\n'):
+                with self.assertRaises(AssertionError):
+                    startup_env._check_warning(case,dataclasses.replace(quiet,stderr=text))
+            with self.assertRaises(AssertionError):
+                startup_env._check_warning(case,dataclasses.replace(quiet,stderr=b'bash: x\n',case='startup-env-other'))
+        finally:
+            compare.VERSION_TOLERANT.clear(); compare.VERSION_TOLERANT.update(saved)
+            compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS.update(hits)
+
+    def test_fixed_tool_message_is_version_dependent_only_for_manifest_cases_off_base(self):
+        from diff_snapshot_fixtures import compare
+        base=b"mktemp: failed to create directory via template 'x/tmp.XXXXXXXXXX': No such file or directory\nERROR [internal] a\n"
+        new=b"mktemp: cannot create directory 'x/tmp.XXXXXXXXXX': No such file or directory\nERROR [internal] a\n"
+        def result(stderr,case='case-t'): return Result(20,b'',stderr,case=case)
+        saved=dict(compare.VERSION_TOLERANT); masked=set(compare.VERSION_MASKED)
+        try:
+            compare.VERSION_TOLERANT.update(names=None,kinds=None)
+            fixed(result(base),20,stdout=b'',stderr=base,version_kind='tool-message')
+            with self.assertRaisesRegex(AssertionError,'期待=.*実際='):
+                fixed(result(new),20,stdout=b'',stderr=base,version_kind='tool-message')
+            compare.VERSION_TOLERANT.update(names={'case-t','case-b'},kinds={'case-t':{'tool-message'},'case-b':{'bash-message'}})
+            compare.VERSION_MASKED.clear()
+            fixed(result(new),20,stdout=b'',stderr=base,version_kind='tool-message')
+            self.assertEqual({'case-t'},compare.VERSION_MASKED)
+            # 版に依る欄でない・種類違い・版を指定しない・道具の行以外の差・道具の行が消えた場合は落ちる。
+            for value,kwargs in ((result(new,'case-x'),{'version_kind':'tool-message'}),(result(new,'case-b'),{'version_kind':'tool-message'}),
+                                 (result(new),{}),(result(new.replace(b'internal] a',b'internal] b'),),{'version_kind':'tool-message'}),
+                                 (result(b'ERROR [internal] a\n'),{'version_kind':'tool-message'})):
+                with self.assertRaises(AssertionError):
+                    fixed(value,20,stdout=b'',stderr=base,**kwargs)
+        finally:
+            compare.VERSION_TOLERANT.clear(); compare.VERSION_TOLERANT.update(saved)
+            compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
+
 
 class ReadAudit(unittest.TestCase):
     def setUp(self):

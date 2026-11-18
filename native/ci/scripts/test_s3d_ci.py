@@ -208,12 +208,40 @@ class S3DCiTests(unittest.TestCase):
             s3d_ci.prepare_tools('macos-arm64')
         self.assertEqual(execute.call_args_list,[mock.call(['brew','install','bash','grep','coreutils','findutils'])])
         # 比較のジョブのLinuxは、git-lfsとstraceが無ければ入れる。
-        with mock.patch.object(s3d_ci.shutil,'which',side_effect=lambda tool:'/usr/bin/git' if tool=='git' else None),mock.patch.object(s3d_ci,'execute') as execute:
+        with mock.patch.object(s3d_ci.shutil,'which',side_effect=lambda tool:'/usr/bin/git' if tool=='git' else None),mock.patch.object(s3d_ci,'execute') as execute,\
+                mock.patch.object(s3d_ci,'japanese_missing',return_value=[]):
             s3d_ci.prepare_tools('linux-arm64')
             self.assertEqual(execute.call_args_list,[mock.call(['sudo','apt-get','update']),mock.call(['sudo','apt-get','install','-y','git-lfs','strace'])])
         with mock.patch.object(s3d_ci.shutil,'which',side_effect=['/usr/bin/git','/usr/bin/git-lfs','/other/git']),mock.patch.object(s3d_ci,'execute'),self.assertRaisesRegex(RuntimeError,'Gitの実体'):
             s3d_ci.prepare_tools('macos-arm64')
 
+    def test_linux_installs_japanese_locale_and_translations_only_when_missing(self):
+        git_only = lambda tool: '/usr/bin/git' if tool == 'git' else '/usr/bin/' + tool
+        # 要るものが揃っているときは、何も入れない。
+        with mock.patch.object(s3d_ci.shutil, 'which', side_effect=git_only), mock.patch.object(s3d_ci, 'execute') as execute, \
+                mock.patch.object(s3d_ci, 'japanese_missing', return_value=[]):
+            s3d_ci.prepare_tools('linux-x86_64')
+        execute.assert_not_called()
+        # 欠けているときは、基準の版の容器と同じ組を入れ、入れた後に揃えば通る。
+        states = [['ja_JP.UTF-8のlocale'], []]
+        with mock.patch.object(s3d_ci.shutil, 'which', side_effect=git_only), mock.patch.object(s3d_ci, 'execute') as execute, \
+                mock.patch.object(s3d_ci, 'japanese_missing', side_effect=lambda: states.pop(0)):
+            s3d_ci.prepare_tools('linux-x86_64')
+        self.assertEqual(execute.call_args_list, [mock.call(['sudo', 'apt-get', 'update']),
+                         mock.call(['sudo', 'apt-get', 'install', '-y', 'locales', 'language-pack-ja', 'language-pack-ja-base'])])
+        # 入れても揃わなければ失敗にする。
+        with mock.patch.object(s3d_ci.shutil, 'which', side_effect=git_only), mock.patch.object(s3d_ci, 'execute'), \
+                mock.patch.object(s3d_ci, 'japanese_missing', return_value=['gitの日本語の翻訳ファイル']), \
+                self.assertRaisesRegex(RuntimeError, '翻訳ファイル'):
+            s3d_ci.prepare_tools('linux-x86_64')
+
+    def test_japanese_missing_uses_the_same_condition_as_the_comparison(self):
+        with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\nja_JP.utf8\n')), \
+                mock.patch.object(s3d_ci.Path, 'is_file', return_value=True):
+            self.assertEqual(s3d_ci.japanese_missing(), [])
+        with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\n')), \
+                mock.patch.object(s3d_ci.Path, 'is_file', return_value=False):
+            self.assertEqual(len(s3d_ci.japanese_missing()), 3)
 
     def report(self, **changes):
         versions = {'bash': '5.2.21', 'coreutils': '9.4', 'findutils': '4.9.0', 'sed': '4.9', 'grep': '3.11', 'glibc': '2.39'}

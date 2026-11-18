@@ -530,6 +530,11 @@ def main(argv=None):
             # 基準でない機械: manifestの版に依る欄だけを比べずに記録し、ほかの欄は比べる。
             compare_module.VERSION_TOLERANT['names'] = {name.split(':')[0] for fields in data['version_fields'].values()
                                                         for name in fields}
+            tolerant_kinds = {}
+            for fields in data['version_fields'].values():
+                for name, kinds in fields.items():
+                    tolerant_kinds.setdefault(name.split(':')[0], set()).update(kinds)
+            compare_module.VERSION_TOLERANT['kinds'] = tolerant_kinds
         proof = None
         if args.only in (None, 'publication'):
             compare_module.CURRENT_SCOPE[0] = 'publication'

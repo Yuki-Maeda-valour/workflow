@@ -72,7 +72,7 @@ def _mapping(case, legacy, bash):
     """旧版の結果の、固定名へ置き換える欄だけを置き換える関数。"""
     if case['mode'] == 'print':
         rows = [{'position': 0, 'line': 567, 'detail': PRINT_ERROR}]
-        return lambda raw: bash_locations(raw, invocation=str(legacy), rows=rows) if raw.strip() else raw
+        return lambda raw: bash_locations(raw, invocation=str(legacy), rows=rows, case=case['id']) if raw.strip() else raw
     if case['mode'] == 'warning':
         prefix = os.fsencode(bash) + b': warning: '
 

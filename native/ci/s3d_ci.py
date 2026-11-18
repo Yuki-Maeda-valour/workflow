@@ -27,6 +27,23 @@ VERSION_TOOLS = ('bash', 'coreutils', 'findutils', 'sed', 'grep', 'glibc')
 MAC_NOT_RUN = {'version', 'strace', 'proc'}
 
 
+# 基準の版の容器(native/ci/README.mdの手順)と同じ組。fixed_extra.japanese_readyと同じ条件を満たす。
+JAPANESE_PACKAGES = ['locales', 'language-pack-ja', 'language-pack-ja-base']
+
+
+def japanese_missing():
+    """fixed_extra.japanese_readyと同じ条件で、足りないものの一覧を返す(空なら揃っている)。"""
+    missing = []
+    listed = subprocess.run(['locale', '-a'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False).stdout
+    if not any(name.lower() in (b'ja_jp.utf8', b'ja_jp.utf-8') for name in listed.split()):
+        missing.append('ja_JP.UTF-8のlocale')
+    for tool in ('git', 'grep'):
+        if not any(Path(folder, 'ja/LC_MESSAGES', tool + '.mo').is_file()
+                   for folder in ('/usr/share/locale', '/usr/share/locale-langpack')):
+            missing.append(f'{tool}の日本語の翻訳ファイル')
+    return missing
+
+
 def execute(argv, *, env=None):
     subprocess.run(list(map(str, argv)), check=True, env=env, stdin=subprocess.DEVNULL)
 
@@ -46,9 +63,16 @@ def prepare_tools(name):
         execute(['brew', 'install', 'bash', 'grep', 'coreutils', 'findutils'])
         if shutil.which('git-lfs') is None:
             execute(['brew', 'install', 'git-lfs'])
-    elif any(shutil.which(tool) is None for tool in ('git-lfs', 'strace')):
-        execute(['sudo', 'apt-get', 'update'])
-        execute(['sudo', 'apt-get', 'install', '-y', 'git-lfs', 'strace'])
+    else:
+        packages = [package for package, tool in (('git-lfs', 'git-lfs'), ('strace', 'strace')) if shutil.which(tool) is None]
+        # 日本語の3件(japanese-*)は、ja_JP.UTF-8のlocaleとgit・grepの翻訳ファイルが要る(基準の版の容器と同じ組)。
+        if japanese_missing():
+            packages += JAPANESE_PACKAGES
+        if packages:
+            execute(['sudo', 'apt-get', 'update'])
+            execute(['sudo', 'apt-get', 'install', '-y', *packages])
+        if japanese_missing():
+            raise RuntimeError('日本語のlocaleかgit・grepの翻訳ファイルを用意できません: ' + ', '.join(japanese_missing()))
     if os.path.realpath(shutil.which('git') or '') != before:
         raise RuntimeError('必要道具の準備がGitの実体を変更しました')
 

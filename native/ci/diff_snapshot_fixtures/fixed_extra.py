@@ -446,7 +446,7 @@ def run_case(case, fixture, binary, legacy):
                               report=f.out, patch=f.patch))
             unchanged(before, f.input_state())
         old, new = values
-        fixed(old, 20, stdout=b'', stderr=expected)
+        fixed(old, 20, stdout=b'', stderr=expected, version_kind='tool-message')
         same_result(old, new)
         return old, new
     if kind == 'e-mkdir-long':

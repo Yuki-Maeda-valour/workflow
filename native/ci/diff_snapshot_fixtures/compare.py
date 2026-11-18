@@ -99,13 +99,23 @@ def same_result(old, new, *, markers=(), generated_report=True):
         raise AssertionError('Markdownが旧版と一致しません')
 
 
-def fixed(result, code, *, stdout=None, stderr=None):
+def fixed(result, code, *, stdout=None, stderr=None, version_kind=None):
+    """固定の終了値・標準出力・標準エラーと比べる。
+
+    `version_kind`を渡した所だけ、基準でない機械で、manifestがその種類の欄を載せるケースの標準エラーを、
+    版に依る行(VERSION_MARKERSの行)を除いて比べ、除いた行は版に依る欄として記録する。基準の機械では厳しいまま。
+    """
     if result.timed_out or result.returncode != code:
         raise AssertionError(f'固定の終了値と一致しません: expected={code} actual={result.returncode} timeout={result.timed_out}')
     if stdout is not None and result.stdout != stdout:
         raise AssertionError('固定のstdoutと一致しません')
     if stderr is not None and result.stderr != stderr:
-        raise AssertionError('固定のstderrと一致しません')
+        if version_kind and version_tolerates(result.case, version_kind) and version_strip(result.stderr) == version_strip(stderr) \
+                and any(VERSION_MARKERS.match(line) for line in result.stderr.splitlines(keepends=True)):
+            VERSION_MASKED.add(result.case)
+            return
+        raise AssertionError('固定のstderrと一致しません: '
+                             f'期待={stderr[:300]!r} 実際={result.stderr[:300]!r}')
 
 
 # 版に依る欄(Rustが作る道具の文・bash自身の文・SHLVL・bashの起動時の警告)。
@@ -117,7 +127,7 @@ VERSION_KINDS = ('tool-message', 'bash-message', 'SHLVL', 'bash-startup-warning'
 VERSION_HITS = {}
 CURRENT_SCOPE = ['']
 # 基準でない機械では、manifestの欄だけを比べずに記録する(ほかの欄は比べる)。
-VERSION_TOLERANT = {'names': None}
+VERSION_TOLERANT = {'names': None, 'kinds': None}
 VERSION_MASKED = set()
 
 
@@ -153,15 +163,30 @@ def note_versions(argv, cwd, stderr):
             note_field(Path(cwd).name, kind)
 
 
+def version_tolerates(case, kind):
+    """基準でない機械で、このケースのこの種類の欄を、比べずに版に依る欄として扱ってよいか。
+
+    manifest(cases.jsonのversion_fields)が、そのケースの欄としてこの種類を載せているときだけ真。
+    基準の機械(名前の集合が未設定)では常に偽で、厳しく比べる。
+    """
+    names, kinds = VERSION_TOLERANT['names'], VERSION_TOLERANT.get('kinds')
+    if names is None or kinds is None or not case or case not in names:
+        return False
+    return kind in kinds.get(case, ())
+
+
+def version_strip(value):
+    """標準エラーから、版に依る行(道具の文・bash自身の文・setlocaleの警告)を除く。"""
+    return b''.join(line for line in (value or b'').splitlines(keepends=True)
+                    if not VERSION_MARKERS.match(line) and not line.startswith(b'bash: warning: setlocale: '))
+
+
 def version_masked(old, new):
     """基準でない機械で、manifestの欄を持つケースの標準エラーを、版に依る行を除いて比べる。"""
     names = VERSION_TOLERANT['names']
     if names is None or not old.case or old.case != new.case or old.case not in names:
         return False
-    def strip(value):
-        return b''.join(line for line in (value or b'').splitlines(keepends=True)
-                        if not VERSION_MARKERS.match(line) and not line.startswith(b'bash: warning: setlocale: '))
-    if strip(old.stderr) != strip(new.stderr):
+    if version_strip(old.stderr) != version_strip(new.stderr):
         return False
     VERSION_MASKED.add(old.case)
     return True

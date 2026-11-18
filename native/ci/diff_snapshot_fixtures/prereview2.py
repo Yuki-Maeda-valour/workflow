@@ -81,7 +81,7 @@ def _pair(f, binary, legacy, args, *, cwd, code, env_update=None, report=None, a
     old, new = values
     fixed(old, code)
     if rows is not None:
-        old = dataclasses.replace(old, stderr=bash_locations(old.stderr, invocation=str(legacy), rows=rows))
+        old = dataclasses.replace(old, stderr=bash_locations(old.stderr, invocation=str(legacy), rows=rows, case=old.case))
     same_result(old, new)
     return old, new
 

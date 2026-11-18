@@ -3,6 +3,7 @@ import dataclasses
 import os
 import re
 
+from . import compare
 from .compare import fixed, no_secrets, same_result
 
 APPROVED_DIFFERENCES = [
@@ -84,8 +85,14 @@ def typed_report(path, *, source_sha256, manifest_sha256, expected_ids):
     return value
 
 
-def bash_locations(raw, *, invocation, rows):
-    """旧ソースから固定した発生行の先頭欄だけを置換する。"""
+def bash_locations(raw, *, invocation, rows, case=''):
+    """旧ソースから固定した発生行の先頭欄だけを置換する。
+
+    基準でない機械で、manifestの版に依る欄(bash-message)を持つケース(`case`)だけは、発生行の失敗理由の文
+    (bash自身の文。5.3で`[`の整数エラーが`integer expression expected`から`integer expected`へ変わった等)を
+    固定値と比べず、版に依る欄として記録する。位置・出現数・`<呼出名>: line <行>: `の形は、どの機械でも比べる。
+    比べずに通した行は、Rust側と旧版の標準エラーを比べる所(`compare.version_masked`)が、版に依る行を除いて比べる。
+    """
     invocation = os.fsencode(invocation)
     if not invocation or b'\n' in invocation or b'\0' in invocation:
         raise AssertionError('旧Bash呼出名が一意でありません')
@@ -95,8 +102,19 @@ def bash_locations(raw, *, invocation, rows):
         raise AssertionError('Bash所在地欄の位置または出現数が違います')
     for row in rows:
         position = row['position']
-        expected = invocation + b': line ' + str(row['line']).encode() + b': ' + row['detail'] + b'\n'
-        if lines[position] != expected:
-            raise AssertionError('Bash発生行・操作・失敗理由が固定値と違います')
+        head = invocation + b': line ' + str(row['line']).encode() + b': '
+        expected = head + row['detail'] + b'\n'
+        actual = lines[position]
+        if actual != expected:
+            # 固定のdetailの最後の`: `より前(操作名と値。`[: 99`・`printf: write error`・パスなど)は、版に依る欄でも比べる。
+            # 変わりうるのは最後の理由の文(bash 5.3の`integer expected`など)だけ。
+            operation = row['detail'].rpartition(b': ')[0]
+            stable = head + operation + b': '
+            if not (compare.version_tolerates(case, 'bash-message') and operation and actual.startswith(stable)
+                    and actual.endswith(b'\n') and len(actual) > len(stable) + 1):
+                raise AssertionError('Bash発生行・操作・失敗理由が固定値と違います: '
+                                     f'期待={expected[:300]!r} 実際={actual[:300]!r}')
+            compare.VERSION_MASKED.add(case)
+            expected = actual
         lines[position] = b'diff-snapshot.sh' + expected[len(invocation):]
     return b''.join(lines)

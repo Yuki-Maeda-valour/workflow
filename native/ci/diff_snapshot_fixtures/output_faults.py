@@ -70,7 +70,7 @@ def compare_case(case,fixture,binary,legacy):
     old,new=values
     if case['mode']=='print' and case['code']==20:
         detail=b'printf: write error: '+{'closed':b'Bad file descriptor','pipe':b'Broken pipe','full':b'No space left on device'}[case['failure']]
-        mapped=bash_locations(old.stderr,invocation=invocation,rows=[{'position':0,'line':567,'detail':detail}])
+        mapped=bash_locations(old.stderr,invocation=invocation,rows=[{'position':0,'line':567,'detail':detail}],case=old.case)
         old=dataclasses.replace(old,stderr=mapped)
     same_result(old,new)
     if fixture.out.exists() or fixture.patch.exists():raise AssertionError('出力故障で成果物を公開しました')

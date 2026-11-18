@@ -121,7 +121,7 @@ def pair(fixture, binary, legacy, args, *, code, rows=None, collect=False, **kwa
     (old, old_files), (new, new_files) = values
     fixed(old, code)
     if rows is not None:
-        old = dataclasses.replace(old, stderr=bash_locations(old.stderr, invocation=str(legacy), rows=rows))
+        old = dataclasses.replace(old, stderr=bash_locations(old.stderr, invocation=str(legacy), rows=rows, case=old.case))
     same_result(old, new)
     if old_files != new_files:
         raise AssertionError('公開したファイルの位置または中身が旧版と違います')
@@ -210,7 +210,8 @@ def run_case(case, fixture, binary, legacy):
         old, new = values
         fixed(old, 20, stdout=b'', stderr=("mktemp: failed to create directory via template '" + missing
                                            + "/tmp.XXXXXXXXXX': No such file or directory\n").encode()
-              + internal(1, 613) + internal(20, 613))
+              + internal(1, 613) + internal(20, 613),
+              version_kind='tool-message')
         same_result(old, new)
         return old, new
     if kind == 'unwritable':
@@ -503,9 +504,9 @@ def partial_run(command, args, fixture, size, *, stdout_file, stderr_file):
     return Result(done.returncode, stdout, stderr, None, None, started, time.time())
 
 
-def cut_location(clean, *, invocation, rows, size):
+def cut_location(clean, *, invocation, rows, size, case=''):
     """故障なしの旧出力の所在地欄を固定名へ置き換えてから、同じbyte数で切る。"""
-    mapped = bash_locations(clean, invocation=invocation, rows=rows) if rows else clean
+    mapped = bash_locations(clean, invocation=invocation, rows=rows, case=case) if rows else clean
     return mapped[:size]
 
 

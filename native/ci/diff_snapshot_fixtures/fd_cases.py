@@ -72,7 +72,7 @@ def compare(case,old,new,*,legacy):
         raise AssertionError('起動時fdの固定終了値が旧新版と一致しません')
     if case.get('bash_rows'):
         rows=[dict(row,detail=bytes.fromhex(row['detail_hex'])) for row in case['bash_rows']]
-        old=dataclasses.replace(old,stderr=bash_locations(old.stderr,invocation=str(legacy),rows=rows))
+        old=dataclasses.replace(old,stderr=bash_locations(old.stderr,invocation=str(legacy),rows=rows,case=old.case))
     if 'thread_before_hex' in case:
         before=bytes.fromhex(case['thread_before_hex']);after=bytes.fromhex(case['thread_after_hex'])
         old=dataclasses.replace(old,stderr=fixed_thread(old.stderr,before,after))
