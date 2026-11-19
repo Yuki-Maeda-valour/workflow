@@ -88,7 +88,8 @@ secret_paths: [".env", ".env.*", ".dev.vars"]
 #                             #  割り当て規則は do-task/references/delegation-map.md §2 (a))
 #   implementer: internal                 # internal(既定)| 既定表(external-runners.md §12-6)にある実装用
 #                                         # ランナー名。既定表外は無視して報告(runners と同じ信頼モデル)。
-#                                         # 宣言されていてもセッション初回に明示承認を得るまでは内蔵で実行する
+#                                         # 宣言されていても、利用者が一度 codex を選んで承認するまでは
+#                                         # 内蔵で実行する(選択は利用者の設定に保存。external-runners.md §12-10)
 #                                         # ※ 旧値 cursor は既定表の名前ではない(既定表の名は cursor-agent)。
 #                                         #   多様性が目的で cursor を設定していた場合は runners へ移す
 #                                         #   (レビューのベンダー横断は runners を宣言したときだけ有効になる)

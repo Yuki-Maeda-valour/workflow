@@ -15,5 +15,14 @@ pub mod r4b_process;
 /// R4R専用のタスク本文の復元の OS の操作。
 pub mod restore_taskmd;
 
+/// loop-state専用の保持入力・保存・直接子の接続。
+pub mod loop_state;
+
+#[cfg(target_os = "linux")]
+pub mod loop_state_watch;
+
+/// R4E専用の起動前の状態の記録・信号・時刻・端末の OS の操作。
+pub mod r4e;
+
 /// S3I-A専用の implement-guard の検査専用入口の OS の操作。
 pub mod implement_guard;
