@@ -12,9 +12,11 @@
   比べ、外した名前ごとの旧版と Rust の有無と値をケースごとに出す。Rust の側は、受け継いだ値と同じか、受け継いで
   いなければ無いことを確かめる。
 - 範囲 full の段: 群・決定 D5・PATH を絞った Rust・詰めた FIFO の信号(helper の引数の誤りの応答を書く間の
-  SIGINT〈KeyboardInterrupt〉を含む)・Python で書く記録(bash 4.0 以上が無いときの配置。旧版の take の記録と
-  同じこと)・strace・/dev/null を開けない起動(名前空間を作れる機械だけ)・fd 0〜2 を
-  閉じた起動(08:55 の決定。旧版と Rust をそれぞれの固定期待で確かめ、互いには比べない)・旧 selftest の 2 通り。
+  SIGINT〈KeyboardInterrupt〉を含む。書き込みで止まったことを /proc から見分けられる機械だけ)・Python で書く記録
+  (bash 4.0 以上が無いときの配置。旧版の take の記録と同じこと)・strace(ptrace を使える機械だけ)・/dev/null を
+  開けない起動(名前空間を作れる機械だけ)・fd 0〜2 を閉じた起動(08:55 の決定。旧版と Rust をそれぞれの
+  固定期待で確かめ、互いには比べない)・旧 selftest の 2 通り。使えるかは段の始めに 1 回だけ試し、使えなければ
+  短い時間で未実施と記録する(成功に数えない)。
 - 旧版の測定の照らし(implement_guard_measure.py --check)は、ここでは流さない(手元の基準の容器で流す。CI の
   時間。2026-11-12 12:59 の決定)。ここでは、その固定期待の件数と sha256 だけを確かめる。
 """
@@ -2658,6 +2660,7 @@ def run_d5(root):
 
 # ---- /dev/null を開けない起動(作れる機械だけ) ----
 
+PROBE_TIMEOUT = 20   # 段の始めの試し(名前空間・strace)の上限の秒数。使えない機械で長く止まらないようにする。
 DEVNULL_CASES = (
     ('-h', None, fixed(['-h'])),
     ('taskmd-diff same', standard, state_args('taskmd-diff')),
@@ -2679,8 +2682,13 @@ def devnull_wrapper(root):
                'mount --bind "$0" /dev/null && p="$1" && shift && '
                'exec "$p" --inh-caps=-all --ambient-caps=-all --bounding-set=-all "$@"', str(blocked), setpriv]
     # wrapper の後ろに、起動器と引数がそのまま続く(setpriv が権限を落としてから exec する)。
-    probe = subprocess.run([*wrapper, '/bin/sh', '-c', 'exec </dev/null'], capture_output=True, timeout=30,
-                           stdin=subprocess.DEVNULL)
+    try:
+        probe = subprocess.run([*wrapper, '/bin/sh', '-c', 'exec </dev/null'], capture_output=True,
+                               timeout=PROBE_TIMEOUT, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return None, f'名前空間の試しが {PROBE_TIMEOUT} 秒で終わらない'
+    except OSError as error:
+        return None, f'名前空間の試しを起動できない({type(error).__name__}: {error})'
     if probe.returncode == 0 or b'Permission denied' not in probe.stderr:
         return None, ('名前空間で /dev/null を差し替えられない: '
                       + probe.stderr.decode(errors='replace').strip()[-300:])
@@ -2877,8 +2885,13 @@ def strace_usable(root):
     if not strace:
         return None, 'strace が無い'
     probe = Path(root) / 'strace-probe.txt'
-    done = subprocess.run([strace, '-f', '-qq', '-e', 'trace=execve', '-o', str(probe), '/bin/true'],
-                          capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+    try:
+        done = subprocess.run([strace, '-f', '-qq', '-e', 'trace=execve', '-o', str(probe), '/bin/true'],
+                              capture_output=True, timeout=PROBE_TIMEOUT, stdin=subprocess.DEVNULL)
+    except subprocess.TimeoutExpired:
+        return None, f'strace の試し(/bin/true)が {PROBE_TIMEOUT} 秒で終わらない'
+    except OSError as error:
+        return None, f'strace を起動できない({type(error).__name__}: {error})'
     text = probe.read_text(errors='replace') if probe.exists() else ''
     if done.returncode != 0 or len(re.findall(r'execve\(', text)) != 1:
         return None, 'ptrace が使えない(' + done.stderr.decode(errors='replace').strip()[-200:] + ')'
@@ -2963,23 +2976,121 @@ def keyboard_equal(old, new):
     return parts[0] == parts[1]
 
 
-def blocked_in_write(pid, fifo):
-    """write で、詰めた FIFO を指す fd(1 か 2。bash の `>&2` は fd 2 を fd 1 へ写して書く)に止まった。"""
-    try:
-        wchan = Path(f'/proc/{pid}/wchan').read_text().strip()
-        fields = Path(f'/proc/{pid}/syscall').read_text().split()
-        if wchan != 'pipe_write' or fields[:1] != ['1'] or len(fields) < 2:
-            return False
-        fd = int(fields[1], 16)
-        return fd in (1, 2) and os.stat(f'/proc/{pid}/fd/{fd}').st_ino == os.stat(fifo).st_ino
-    except (OSError, ValueError):
+# 書き込みで止まったことの見分け方(/proc の中身から決める。設計 Task 4.1: 送る前に wchan と syscall を確かめ、
+# 期限内に確かめられなければ失敗にする)。
+# - write の番号は機械ごとに決める(Linux の x86_64 は 1、aarch64 は 64)。ほかの機械は未対応として見分けない
+#   (段を未実施にする。CI に無い機械)。
+# - wchan(待っている関数の名前)は、パイプへの書き込みで待つ関数の名前の集合のどれか。pipe_write のほかの 2 つは、
+#   新しいカーネル(Linux 6.14 以降と推測)で関数の名前が変わる見込みへの読み替え(推測。未確認)。コンパイラが付ける
+#   `.` から後ろの接尾辞(例: pipe_write.isra.0)は落として比べる(2026-11-19 03:44 の管理担当の判断。Issue #474 の
+#   追加修正記録)。
+WRITE_SYSCALLS = {'x86_64': 1, 'aarch64': 64}
+PIPE_WRITE_WCHANS = ('pipe_write', 'anon_pipe_write', 'fifo_pipe_write')
+FIFO_BLOCK_WAIT = 15      # 各ケースの片側で、書き込みで止まるのを待つ秒数
+FIFO_PROBE_QUIET = 0.5    # 段の始めの試し: 子が書く前に、止まったと見なさないことを確かめる秒数
+FIFO_PROBE_WAIT = 10      # 段の始めの試し: 子に書かせてから、止まったと見分けるまで待つ秒数
+FIFO_WAIT_LIMIT = 4       # 試しで見分けられたのに、止まりを見分けられず待ち切った片側がこの回数になったら、残りを流さない
+FIFO_PROBE_SCRIPT = 'read -r -n 1 go; printf x'   # 試しの子(bash): stdin の 1 バイトを待ってから fd 1 へ書く
+
+
+@dataclasses.dataclass
+class ProcView:
+    """/proc/<pid> から読んだ中身。読めなかった物は None にし、errors に理由(例外の名前)を入れる。
+    fds は、fd 番号(1・2)から、その fd が指す物の (st_dev, st_ino)。"""
+    stat: object = None
+    syscall: object = None
+    wchan: object = None
+    fds: dict = dataclasses.field(default_factory=dict)
+    errors: dict = dataclasses.field(default_factory=dict)
+
+
+@dataclasses.dataclass(frozen=True)
+class FifoWatch:
+    """段の始めの試しで見分けられた機械と、出力に出す説明。"""
+    machine: str
+    note: str
+
+
+def read_proc(pid, proc_root='/proc'):
+    """見分けに使う /proc/<pid> の stat・syscall・wchan と、fd 1・2 の指す物を読む(単体の自己検査は
+    proc_root に偽の /proc を渡す)。"""
+    view = ProcView()
+    folder = Path(proc_root) / str(pid)
+    for name in ('stat', 'syscall', 'wchan'):
+        try:
+            setattr(view, name, (folder / name).read_text(errors='replace'))
+        except OSError as error:
+            view.errors[name] = type(error).__name__
+    for fd in (1, 2):
+        try:
+            info = os.stat(folder / 'fd' / str(fd))
+            view.fds[fd] = (info.st_dev, info.st_ino)
+        except OSError as error:
+            view.errors[f'fd/{fd}'] = type(error).__name__
+    return view
+
+
+def write_block_seen(view, machine, fifo):
+    """view から、詰めた FIFO への write で止まっていると見分けられるか。fifo は FIFO の (st_dev, st_ino)。
+    - 機械の write の番号を持つ(WRITE_SYSCALLS)。持たない機械は見分けない(常に False)。
+    - stat の状態が S(割り込める待ち。詰めたパイプへの write の待ちはこれになる)。名前の欄に `)` が
+      あっても読めるように、最後の `)` の後ろを読む。
+    - syscall の番号がこの機械の write で、最初の引数の fd が 1 か 2(bash の `>&2` は fd 2 を fd 1 へ写して書く)、
+      その fd が詰めた FIFO を指す。syscall は、止まっている間だけ番号と引数を出す(動いていれば running)。
+    - wchan の `.` から後ろ(コンパイラが付ける接尾辞。例: pipe_write.isra.0)を落とした名前が、パイプへの
+      書き込みで待つ関数の名前(PIPE_WRITE_WCHANS)のどれか。"""
+    number = WRITE_SYSCALLS.get(machine)
+    if number is None or view.stat is None or view.syscall is None or view.wchan is None:
         return False
+    if view.stat.rpartition(')')[2].split()[:1] != ['S']:
+        return False
+    fields = view.syscall.split()
+    if len(fields) < 2 or fields[0] != str(number):
+        return False
+    try:
+        fd = int(fields[1], 16)
+    except ValueError:
+        return False
+    if fd not in (1, 2) or view.fds.get(fd) != fifo:
+        return False
+    return view.wchan.strip().split('.')[0] in PIPE_WRITE_WCHANS
 
 
-def run_fifo_side(world, base, argv, stream, number, legacy, ignored):
-    path = base / f'fifo-{"old" if legacy else "new"}'
-    if path.exists():
-        path.unlink()
+def describe_view(view, fifo=None):
+    """最後に読んだ値の要約(問題の文に出す。次の CI で原因を見るため)。stat は名前の欄と、その後ろの 3 欄
+    (状態・親・グループ)、syscall と wchan は値の全部、fd 1・2 が詰めた FIFO を指すか、読めなかった物。"""
+    if view is None:
+        return '読んでいない'
+
+    def shown(name, text):
+        if text is None:
+            return f'{name} 読めない'
+        if name == 'stat':
+            head, mark, tail = text.rpartition(')')
+            text = head + mark + ' ' + ' '.join(tail.split()[:3]) if mark else text
+        return f'{name} {text.strip()!r}'
+
+    parts = [shown('stat', view.stat), shown('syscall', view.syscall), shown('wchan', view.wchan)]
+    if fifo is not None:
+        parts.append('FIFO を指す fd ' + (','.join(str(fd) for fd in (1, 2) if view.fds.get(fd) == fifo) or 'なし'))
+    if view.errors:
+        parts.append('読めなかった物 ' + ','.join(f'{k}:{v}' for k, v in sorted(view.errors.items())))
+    return '・'.join(parts)
+
+
+def fifo_id(path):
+    info = os.stat(path)
+    return info.st_dev, info.st_ino
+
+
+def blocked_in_write(pid, fifo, watch, proc_root='/proc'):
+    """write で、詰めた FIFO を指す fd(1 か 2)に止まった(watch は段の始めの試しで見分けられた機械)。"""
+    return write_block_seen(read_proc(pid, proc_root), watch.machine, fifo)
+
+
+def fill_fifo(path):
+    """FIFO を作り、読まない読み手と、詰めるまで書いた後の書き手(止まる書き方)を開く。
+    (読み手, 書き手, 詰めたバイト数) を返す。"""
     os.mkfifo(path)
     reader = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
     filler = os.open(path, os.O_WRONLY | os.O_NONBLOCK)
@@ -2991,16 +3102,100 @@ def run_fifo_side(world, base, argv, stream, number, legacy, ignored):
         pass
     writer = os.open(path, os.O_WRONLY)
     os.close(filler)
+    return reader, writer, filled
+
+
+class ProbeFailed(Exception):
+    """段の始めの試しで、書き込みで止まったことを /proc から見分けられなかった(問題に数える)。"""
+
+
+def fifo_watch(root):
+    """この機械で、詰めた FIFO への write で止まったことを /proc から見分けられるかを、段の始めに 1 回だけ試す。
+    ケースと同じ起動器で bash を起こし、stdin の 1 バイトを待たせてから詰めた FIFO へ書かせる。
+    1. 書かせる前の FIFO_PROBE_QUIET 秒の間は、止まったと見なさず、子も終わらないこと
+    2. 書かせてから FIFO_PROBE_WAIT 秒の中で、止まったと見分けられること
+    を確かめる。見分けられれば (FifoWatch, None)。write の番号を持たない機械では (None, 未実施の理由)。
+    見分けられなければ ProbeFailed(理由と最後に読んだ値)を投げる。"""
+    machine = os.uname().machine
+    if not LINUX:
+        return None, 'Linux でない(/proc が無い)'
+    if machine not in WRITE_SYSCALLS:
+        return None, f'この機械({machine})の write の番号を持たない(x86_64 と aarch64 だけ)'
+    bash = old_command()[0]
+    if not bash:
+        raise ProbeFailed('bash が無い')
+    base = Path(root) / 'fifo-probe'
+    base.mkdir(parents=True, exist_ok=True)
+    path = base / 'fifo'
+    reader, writer, _ = fill_fifo(path)
+    gate_read, gate_write = os.pipe()
+    process = None
+    started = time.monotonic()
+    try:
+        fifo = fifo_id(path)
+        command = [str(TOOLS.launcher), *default_env(None), '--', bash, 'bash', '-c', FIFO_PROBE_SCRIPT]
+        process = subprocess.Popen(command, stdin=gate_read, stdout=writer, stderr=subprocess.DEVNULL, cwd=base)
+        os.close(gate_read)
+        gate_read = None
+        os.close(writer)
+        writer = None
+        view = None
+        quiet_until = time.monotonic() + FIFO_PROBE_QUIET
+        while time.monotonic() < quiet_until:
+            view = read_proc(process.pid)
+            if write_block_seen(view, machine, fifo):
+                raise ProbeFailed('書かせる前の子(まだ stdin を待つはずの子)を、書き込みで止まったと見なした。'
+                                  f'見分け方か試しの子の誤り(最後に読んだ値: {describe_view(view, fifo)})')
+            if process.poll() is not None:
+                raise ProbeFailed(f'試しの子が、書かせる前に終わった(終了値 {process.returncode}。試しの子の誤り)')
+            time.sleep(0.01)
+        os.write(gate_write, b'g')
+        deadline = time.monotonic() + FIFO_PROBE_WAIT
+        while time.monotonic() < deadline:
+            view = read_proc(process.pid)
+            if write_block_seen(view, machine, fifo):
+                note = (f'機械 {machine}・write の番号 {WRITE_SYSCALLS[machine]}・wchan {view.wchan.strip()!r}'
+                        f'・試し {time.monotonic() - started:.1f} 秒')
+                return FifoWatch(machine, note), None
+            if process.poll() is not None:
+                raise ProbeFailed(f'試しの子が、書き込みで止まらずに終わった(終了値 {process.returncode}。FIFO が詰まって'
+                                  f'いないか、試しの子が書かなかった。最後に読んだ値: {describe_view(view, fifo)})')
+            time.sleep(0.01)
+        raise ProbeFailed(f'書かせてから {FIFO_PROBE_WAIT} 秒の中で、書き込みで止まったと見分けられない'
+                          f'(最後に読んだ値: {describe_view(view, fifo)})')
+    finally:
+        if process is not None:
+            process.kill()
+            process.wait()
+        for fd in (gate_read, gate_write, writer, reader):
+            if fd is not None:
+                os.close(fd)
+
+
+def run_fifo_side(world, base, argv, stream, number, legacy, ignored, watch):
+    """1 つの側を流す。(結果, 止まりを見分けたか, 止まりを見分けられずに FIFO_BLOCK_WAIT 秒を待ち切ったか,
+    止まりを見分けられなかったときに最後に読んだ /proc の値の要約)。"""
+    path = base / f'fifo-{"old" if legacy else "new"}'
+    if path.exists():
+        path.unlink()
+    reader, writer, filled = fill_fifo(path)
+    fifo = fifo_id(path)
     drained = bytearray()
-    state = {'blocked': False}
+    state = {'blocked': False, 'waited_out': False, 'last': ''}
 
     def during(process):
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline:
-            if blocked_in_write(process.pid, path):
+        deadline = time.monotonic() + FIFO_BLOCK_WAIT
+        while True:
+            view = read_proc(process.pid)
+            if write_block_seen(view, watch.machine, fifo):
                 state['blocked'] = True
                 break
             if process.poll() is not None:
+                state['last'] = f'子が終わった・{describe_view(view, fifo)}'
+                break
+            if time.monotonic() >= deadline:
+                state['waited_out'] = True
+                state['last'] = describe_view(view, fifo)
                 break
             time.sleep(0.01)
         if state['blocked']:
@@ -3041,48 +3236,90 @@ def run_fifo_side(world, base, argv, stream, number, legacy, ignored):
     else:
         err = data
     result = normalize(Result(process.returncode, out or b'', err or b'', timed_out, 0), legacy)
-    return result, state['blocked']
+    return result, state['blocked'], state['waited_out'], state['last']
+
+
+def fifo_plan():
+    """段のケースの並び(ソース × TERM・INT・HUP × 無視しない・無視した起動)。"""
+    return [(label, stream, build, argv, name, number, ignored)
+            for label, stream, build, argv in FIFO_SOURCES
+            for name, number in (('TERM', signal.SIGTERM), ('INT', signal.SIGINT), ('HUP', signal.SIGHUP))
+            for ignored in (False, True)]
 
 
 def run_fifo(root):
+    """詰めた FIFO で書き込みを止め、信号を送って旧版と Rust を比べる。(問題の一覧, 未実施の理由か None) を返す。
+    - 段の始めに、この機械で止まりを /proc から見分けられるかを 1 回だけ試す。見分けられなければ、問題に数えて
+      すぐに段を終える(ケースを流さない。設計 Task 4.1 の「期限内に確かめられなければ失敗」)。
+    - write の番号を持たない機械(x86_64・aarch64 のほか)だけは、段を流さずに未実施の理由を返す(CI に無い機械)。
+    - 見分けられるのに、ケースで片側だけ止まった・どちらも止まらなかったときは問題に数える。止まりを見分けられずに
+      待ち切った片側が FIFO_WAIT_LIMIT 回になったら、残りのケースを流さずに問題にする(待ちが積もって CI の上限に
+      当たらないように)。"""
+    stage_root = Path(root) / 'fifo-stage'
+    stage_root.mkdir(parents=True, exist_ok=True)
+    try:
+        watch, reason = fifo_watch(stage_root)
+    except ProbeFailed as error:
+        return [f'詰めた FIFO の信号: 段の始めの試しで、書き込みで止まったことを /proc から確かめられない({error})。'
+                '段のケースを流さない(成功に数えない)'], None
+    except Exception as error:  # noqa: BLE001 - 想定外の例外も、問題に数える。
+        return [f'詰めた FIFO の信号: 段の始めの試しが例外で止まった({type(error).__name__}: {error})。'
+                '段のケースを流さない(成功に数えない)'], None
+    finally:
+        make_writable(stage_root)
+        shutil.rmtree(stage_root, ignore_errors=True)
+    if watch is None:
+        print(f'S3I-A: 詰めた FIFO の信号: 未実施({reason})', flush=True)
+        return [], reason
+    print(f'S3I-A: 詰めた FIFO の見分け方: {watch.note}', flush=True)
     problems = []
     count = 0
-    for label, stream, build, argv in FIFO_SOURCES:
-        for name, number in (('TERM', signal.SIGTERM), ('INT', signal.SIGINT), ('HUP', signal.SIGHUP)):
-            for ignored in (False, True):
-                base = Path(root) / f'fifo-{count}'
-                base.mkdir(parents=True, exist_ok=True)
-                try:
-                    world = build(base / 'w') if build is not None else None
-                    template = base / 'template'
-                    if world is not None:
-                        copy_world(world.base, template)
-                    old, old_blocked = run_fifo_side(world, base, argv, stream, number, True, ignored)
-                    old_files = observe_files(world, Case('', '', None))
-                    if world is not None:
-                        copy_world(template, world.base)
-                        fix_mark(world)
-                    new, new_blocked = run_fifo_side(world, base, argv, stream, number, False, ignored)
-                    new_files = observe_files(world, Case('', '', None))
-                    tag = f'FIFO {label} {name}' + (' 無視した起動' if ignored else '')
-                    if not old_blocked or not new_blocked:
-                        problems.append(f'{tag}: 期限内に書き込みで止まったと確かめられない(成功に数えない)')
-                    elif old.timed_out or new.timed_out:
-                        problems.append(f'{tag}: 時間切れ')
-                    elif label in KEYBOARD_SOURCES and number == signal.SIGINT and not ignored:
-                        if not keyboard_equal(old, new) or old_files != new_files:
-                            problems.append(f'{tag}: KeyboardInterrupt の比べ方で違う: '
-                                            f'{difference(dataclasses.asdict(old), dataclasses.asdict(new))}')
-                    elif (old.code, old.stdout, old.stderr, old_files) != (new.code, new.stdout, new.stderr, new_files):
-                        problems.append(f'{tag}: {difference(dataclasses.asdict(old), dataclasses.asdict(new))}')
-                    count += 1
-                except Exception as error:  # noqa: BLE001
-                    problems.append(f'FIFO {label} {name}: {type(error).__name__}: {error}')
-                finally:
-                    make_writable(base)
-                    shutil.rmtree(base, ignore_errors=True)
+    waited_out = 0
+    plan = fifo_plan()
+    for index, (label, stream, build, argv, name, number, ignored) in enumerate(plan):
+        if waited_out >= FIFO_WAIT_LIMIT:
+            problems.append(f'詰めた FIFO の信号: 止まりを見分けられずに {FIFO_BLOCK_WAIT} 秒を待ち切った片側が '
+                            f'{waited_out} 回になったので、残りの {len(plan) - index} 件を流さない(成功に数えない)')
+            break
+        base = Path(root) / f'fifo-{index}'
+        base.mkdir(parents=True, exist_ok=True)
+        try:
+            world = build(base / 'w') if build is not None else None
+            template = base / 'template'
+            if world is not None:
+                copy_world(world.base, template)
+            old, old_blocked, old_waited, old_last = run_fifo_side(world, base, argv, stream, number, True, ignored,
+                                                                   watch)
+            old_files = observe_files(world, Case('', '', None))
+            if world is not None:
+                copy_world(template, world.base)
+                fix_mark(world)
+            new, new_blocked, new_waited, new_last = run_fifo_side(world, base, argv, stream, number, False, ignored,
+                                                                   watch)
+            new_files = observe_files(world, Case('', '', None))
+            waited_out += old_waited + new_waited
+            tag = f'FIFO {label} {name}' + (' 無視した起動' if ignored else '')
+            if not old_blocked or not new_blocked:
+                sides = (('旧版', old_blocked, old_last), ('Rust', new_blocked, new_last))
+                seen = ' / '.join(f'{side}: ' + ('止まった' if blocked else f'止まったと確かめられない〈最後に読んだ値: {last}〉')
+                                  for side, blocked, last in sides)
+                problems.append(f'{tag}: 期限内に書き込みで止まったと確かめられない({seen}。成功に数えない)')
+            elif old.timed_out or new.timed_out:
+                problems.append(f'{tag}: 時間切れ')
+            elif label in KEYBOARD_SOURCES and number == signal.SIGINT and not ignored:
+                if not keyboard_equal(old, new) or old_files != new_files:
+                    problems.append(f'{tag}: KeyboardInterrupt の比べ方で違う: '
+                                    f'{difference(dataclasses.asdict(old), dataclasses.asdict(new))}')
+            elif (old.code, old.stdout, old.stderr, old_files) != (new.code, new.stdout, new.stderr, new_files):
+                problems.append(f'{tag}: {difference(dataclasses.asdict(old), dataclasses.asdict(new))}')
+            count += 1
+        except Exception as error:  # noqa: BLE001
+            problems.append(f'FIFO {label} {name}: {type(error).__name__}: {error}')
+        finally:
+            make_writable(base)
+            shutil.rmtree(base, ignore_errors=True)
     print(f'S3I-A: 詰めた FIFO の信号: {count} 件', flush=True)
-    return problems
+    return problems, None
 
 
 # ---- 本体 ----
@@ -3450,15 +3687,20 @@ def main(argv=None):
             names = set(args.groups.split(',')) if args.groups else set()
             run_groups(scope, names, root, results, skipped)
         if not args.groups and scope == 'full':
-            for label, stage in (('決定 D5', run_d5), ('PATH を絞った Rust', run_restricted_path),
-                                 ('詰めた FIFO の信号', run_fifo), ('Python で書く記録', run_record_writer)):
+            for label, stage in (('決定 D5', run_d5), ('PATH を絞った Rust', run_restricted_path)):
                 stage_started = time.monotonic()
                 problems += stage(root)
                 print(f'S3I-A: 時間: {label} {time.monotonic() - stage_started:.1f} 秒', flush=True)
+            run_fifo_stage(root, problems, unperformed)
+            stage_started = time.monotonic()
+            problems += run_record_writer(root)
+            print(f'S3I-A: 時間: Python で書く記録 {time.monotonic() - stage_started:.1f} 秒', flush=True)
+            stage_started = time.monotonic()
             found, missing_reason = run_strace(root)
             problems += found
             if missing_reason:
                 unperformed.append(f'strace による exec の確かめ: {missing_reason}')
+            print(f'S3I-A: 時間: strace {time.monotonic() - stage_started:.1f} 秒', flush=True)
             stage_started = time.monotonic()
             found, missing_reason = run_devnull(root)
             problems += found
@@ -3477,6 +3719,28 @@ def main(argv=None):
     finally:
         make_writable(root)
         shutil.rmtree(root, ignore_errors=True)
+    compared, failures = report(scope, results, problems, unperformed, skipped, fixed_count, started)
+    if args.groups or args.dump_selftest:
+        print('S3I-A: 部分実行(合格に数えない)')
+        return 3
+    judge_totals(compared + fixed_count, failures, problems)
+    print('S3I-A: 合格')
+    return 0
+
+
+def run_fifo_stage(root, problems, unperformed):
+    """main の詰めた FIFO の段: 試しの失敗とケースの問題は problems へ、write の番号を持たない機械の理由は
+    unperformed へ足し、段の時間を出す。"""
+    stage_started = time.monotonic()
+    found, missing_reason = run_fifo(root)
+    problems += found
+    if missing_reason:
+        unperformed.append(f'詰めた FIFO の信号: {missing_reason}')
+    print(f'S3I-A: 時間: 詰めた FIFO の信号 {time.monotonic() - stage_started:.1f} 秒', flush=True)
+
+
+def report(scope, results, problems, unperformed, skipped, fixed_count, started):
+    """不合格・未実施・結果の行を出す。(旧版と比べた件数, 不一致の件数) を返す。"""
     failures = sum(len(o.failures) for o in results.values())
     compared = sum(o.compared for o in results.values())
     boundary = sum(o.boundary for o in results.values())
@@ -3496,12 +3760,7 @@ def main(argv=None):
     print(f'S3I-A: 結果({SYSTEM}・{scope}): 旧版と比べた {compared} 件・固定期待で確かめた {fixed_count} 件・境界 {boundary} 件・'
           f'未実施 {len(unperformed)} 項目・'
           f'不一致 {failures} 件・問題 {len(problems)} 件・{time.monotonic() - started:.1f} 秒', flush=True)
-    if args.groups or args.dump_selftest:
-        print('S3I-A: 部分実行(合格に数えない)')
-        return 3
-    judge_totals(compared + fixed_count, failures, problems)
-    print('S3I-A: 合格')
-    return 0
+    return compared, failures
 
 
 def judge_totals(compared, failures, problems):

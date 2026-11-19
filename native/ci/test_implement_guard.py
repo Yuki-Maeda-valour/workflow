@@ -6,17 +6,22 @@
 境界の印の誤用・版の違う道具の文・musl の strerror の文・selftest の許す失敗の一覧の外れと中の成功・
 Rust を通った行の不足を与え、すべて失敗になることを確かめる。bash 4.0 以上が無い Mac をまねた範囲 mac・signed
 (偽の bash 3.2 を PATH の先頭に置く)で、Mac の固定期待の全件が比べられて合格することも確かめる。偽の入口は C で組み、本物を起動してから
-(または起動の前に)1 か所だけを変える。
+(または起動の前に)1 か所だけを変える。詰めた FIFO の段の見分け方(偽の /proc)と、段の始めの試しの各経路・
+待ち切りの上限・main の配線(試しの失敗は問題、write の番号を持たない機械は未実施)も確かめる。
 """
+import contextlib
 import dataclasses
 import importlib.util
+import io
 import os
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 subject = None  # check_implement_guard(比較器が入れる。単独で流すときは読み込む)
 MAC = sys.platform == 'darwin'
@@ -381,6 +386,262 @@ class NoBash4(unittest.TestCase):
         finally:
             subject.make_writable(directory)
             shutil.rmtree(directory, ignore_errors=True)
+
+
+X86_WRITE = '1 0x1 0x55d0c2a3b2a0 0x1 0x0 0x0 0x0 0x7ffd3f1e8a38 0x7f1c2b11a8b7'
+X86_WRITE_FD2 = '1 0x2 0x55d0c2a3b2a0 0x1 0x0 0x0 0x0 0x7ffd3f1e8a38 0x7f1c2b11a8b7'
+X86_READ = '0 0x0 0x55d0c2a3b2a0 0x1 0x0 0x0 0x0 0x7ffd3f1e8a38 0x7f1c2b11a8b7'
+ARM_WRITE = '64 0x1 0xaaaad5f3c2a0 0x1 0x0 0x0 0x0 0xffffe1c2a8b0 0xffff9a1b2c3d'
+ARM_READ = '63 0x0 0xaaaad5f3c2a0 0x1 0x0 0x0 0x0 0xffffe1c2a8b0 0xffff9a1b2c3d'
+
+
+class WriteBlock(unittest.TestCase):
+    """詰めた FIFO への write で止まったことの見分け方。x86_64・aarch64・wchan が 0 の 3 通りの /proc の中身を、
+    偽の /proc(stat・syscall・wchan と、fd 1・2 のリンク)として与える。"""
+
+    @classmethod
+    def setUpClass(cls):
+        get_subject()
+
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp(prefix='s3ia-proc-'))
+        self.fifo = self.dir / 'fifo'
+        os.mkfifo(self.fifo)
+        self.other = self.dir / 'other'
+        self.other.write_bytes(b'')
+        self.fifo_id = subject.fifo_id(self.fifo)
+        self.made = 0
+
+    def tearDown(self):
+        shutil.rmtree(self.dir, ignore_errors=True)
+
+    def proc(self, syscall, *, state='S', wchan='pipe_write', fd1=None, fd2=None, comm='bash'):
+        """偽の /proc/4242 を作り、その根を返す。None の項目は作らない(読めない物になる)。"""
+        self.made += 1
+        root = self.dir / f'proc-{self.made}'
+        folder = root / '4242'
+        (folder / 'fd').mkdir(parents=True)
+        if state is not None:
+            (folder / 'stat').write_text(f'4242 ({comm}) {state} 1 4242 4242 0 -1 4194560 0 0 0 0\n')
+        if syscall is not None:
+            (folder / 'syscall').write_text(syscall + '\n')
+        if wchan is not None:
+            (folder / 'wchan').write_text(wchan)
+        os.symlink(fd1 or self.fifo, folder / 'fd' / '1')
+        os.symlink(fd2 or self.other, folder / 'fd' / '2')
+        return root
+
+    def seen(self, root, machine):
+        return subject.blocked_in_write(4242, self.fifo_id, subject.FifoWatch(machine, ''), proc_root=root)
+
+    def test_x86_64(self):
+        self.assertTrue(self.seen(self.proc(X86_WRITE), 'x86_64'))
+        # bash の `>&2` は fd 2 を書く。fd 2 が FIFO を指せば止まりと見なす。
+        self.assertTrue(self.seen(self.proc(X86_WRITE_FD2, fd1=self.other, fd2=self.fifo), 'x86_64'))
+        self.assertFalse(self.seen(self.proc(X86_WRITE, fd1=self.other), 'x86_64'), 'fd 1 が FIFO でない')
+        self.assertFalse(self.seen(self.proc(X86_WRITE.replace(' 0x1 ', ' 0x3 ', 1)), 'x86_64'), 'fd 3 への write')
+        self.assertFalse(self.seen(self.proc('running', state='R'), 'x86_64'), '動いている')
+        self.assertFalse(self.seen(self.proc(X86_WRITE, state='D'), 'x86_64'), '割り込めない待ち')
+        self.assertFalse(self.seen(self.proc(X86_READ, wchan='pipe_read'), 'x86_64'), 'read の待ち')
+        self.assertFalse(self.seen(self.proc(ARM_WRITE), 'x86_64'), 'aarch64 の write の番号')
+        self.assertFalse(self.seen(self.proc(None), 'x86_64'), 'syscall を読めない')
+        self.assertFalse(self.seen(self.proc(X86_WRITE, state=None), 'x86_64'), 'stat を読めない')
+
+    def test_aarch64(self):
+        self.assertTrue(self.seen(self.proc(ARM_WRITE), 'aarch64'))
+        self.assertTrue(self.seen(self.proc(ARM_WRITE.replace(' 0x1 ', ' 0x2 ', 1), fd2=self.fifo), 'aarch64'))
+        self.assertFalse(self.seen(self.proc(X86_WRITE), 'aarch64'), 'x86_64 の write の番号(aarch64 では別の呼び出し)')
+        self.assertFalse(self.seen(self.proc(ARM_READ, wchan='pipe_read'), 'aarch64'), 'read の待ち')
+        self.assertFalse(self.seen(self.proc(ARM_WRITE, state='R'), 'aarch64'), '動いている')
+
+    def test_wchan_names(self):
+        # wchan は必須。パイプへの書き込みで待つ関数の名前の集合(新しいカーネルの名前は推測の読み替え)だけを受ける。
+        # 0(名前を返さない)・読めない・ほかの関数は、状態と syscall と fd が合っていても止まりと見なさない。
+        for machine, syscall in (('x86_64', X86_WRITE), ('aarch64', ARM_WRITE)):
+            for name in ('pipe_write', 'anon_pipe_write', 'fifo_pipe_write', 'pipe_write\n'):
+                self.assertTrue(self.seen(self.proc(syscall, wchan=name), machine), (machine, name))
+            for name in ('0', '', 'pipe_read', 'do_select', 'pipe_write_x', None):
+                self.assertFalse(self.seen(self.proc(syscall, wchan=name), machine), (machine, name))
+        view = subject.read_proc(4242, self.proc(X86_WRITE, wchan='0'))
+        text = subject.describe_view(view, self.fifo_id)
+        self.assertIn("stat '4242 (bash) S 1 4242'", text)
+        self.assertIn(f"syscall '{X86_WRITE}'", text)
+        self.assertIn("wchan '0'", text)
+        self.assertIn('FIFO を指す fd 1', text)
+        unreadable = subject.describe_view(subject.read_proc(4242, self.proc(None, wchan=None)), self.fifo_id)
+        self.assertIn('syscall 読めない', unreadable)
+        self.assertIn('wchan 読めない', unreadable)
+        self.assertIn('読めなかった物 syscall:FileNotFoundError,wchan:FileNotFoundError', unreadable)
+
+    def test_wchan_compiler_suffix(self):
+        # コンパイラが付ける `.` から後ろの接尾辞は落として比べる(2026-11-19 03:44 の管理担当の判断)。
+        # 集合に無い名前は、`.` を含まない別の名前も、接尾辞を落として集合に無い名前も見分けない。
+        for machine, syscall in (('x86_64', X86_WRITE), ('aarch64', ARM_WRITE)):
+            for name in ('pipe_write.isra.0', 'pipe_write.constprop.0', 'fifo_pipe_write.cold', 'anon_pipe_write.isra.0'):
+                self.assertTrue(self.seen(self.proc(syscall, wchan=name), machine), (machine, name))
+            for name in ('pipe_writer', 'pipe_write_x', 'pipe_writer.isra.0', '.pipe_write', 'pipe.write'):
+                self.assertFalse(self.seen(self.proc(syscall, wchan=name), machine), (machine, name))
+
+    def test_other_machine_and_name(self):
+        for machine in ('riscv64', 'arm64', 'i686'):
+            self.assertFalse(self.seen(self.proc(X86_WRITE), machine), machine)
+            self.assertFalse(self.seen(self.proc(ARM_WRITE), machine), machine)
+        # 名前の欄の `)` と状態の文字に惑わされない(最後の `)` の後ろを読む)。
+        self.assertTrue(self.seen(self.proc(X86_WRITE, comm='a) R (b'), 'x86_64'))
+        self.assertFalse(self.seen(self.proc(X86_WRITE, state='R', comm='a) S (b'), 'x86_64'))
+
+    def test_plan_has_48_cases(self):
+        self.assertEqual(len(subject.fifo_plan()), 48)
+
+
+class FifoStage(unittest.TestCase):
+    """詰めた FIFO の段: 段の始めの試しの各経路・待ち切りの上限・main の配線(定数と関数を差し替えた軽い検査と、
+    Linux では本物の試し)。"""
+
+    @classmethod
+    def setUpClass(cls):
+        get_subject()
+        cls.dir = Path(tempfile.mkdtemp(prefix='s3ia-fifo-', dir=str(Path.home())))
+        cls.saved = (subject.TOOLS, subject.BASH)
+        cls.reason = ''
+        if not subject.LINUX or os.uname().machine not in subject.WRITE_SYSCALLS:
+            cls.reason = 'Linux の x86_64 か aarch64 でない(試しは /proc を読む)'
+        else:
+            if subject.BASH is None:
+                subject.BASH = subject.find_bash4()
+            if subject.BASH is None:
+                cls.reason = NO_BASH4
+            else:
+                subject.TOOLS = subject.Tools(cls.dir / 'tools')
+
+    @classmethod
+    def tearDownClass(cls):
+        subject.TOOLS, subject.BASH = cls.saved
+        subject.make_writable(cls.dir)
+        shutil.rmtree(cls.dir, ignore_errors=True)
+
+    def root(self):
+        return Path(tempfile.mkdtemp(dir=self.dir))
+
+    def probe(self, **patches):
+        """本物の試し(fifo_watch)を、patches の名前を差し替えて流す。"""
+        if self.reason:
+            self.skipTest(self.reason)
+        with contextlib.ExitStack() as stack:
+            for name, value in patches.items():
+                stack.enter_context(mock.patch.object(subject, name, value))
+            return subject.fifo_watch(self.root())
+
+    def failed(self, needle, **patches):
+        with self.assertRaises(subject.ProbeFailed) as caught:
+            self.probe(**patches)
+        self.assertIn(needle, str(caught.exception))
+        return str(caught.exception)
+
+    def test_probe_sees_blocked_write(self):
+        watch, reason = self.probe()
+        self.assertIsNone(reason)
+        self.assertEqual(watch.machine, os.uname().machine)
+        self.assertIn('wchan', watch.note)
+
+    def test_probe_child_writes_before_gate(self):
+        # stdin を待たずに書く子: 書かせる前に止まったと見なしたら、問題にする。
+        self.failed('書かせる前の子', FIFO_PROBE_SCRIPT='printf x')
+
+    def test_probe_child_ends(self):
+        self.failed('書き込みで止まらずに終わった(終了値 3', FIFO_PROBE_SCRIPT='read -r -n 1 go; exit 3')
+        self.failed('書かせる前に終わった(終了値 4', FIFO_PROBE_SCRIPT='exit 4')
+        real_fill = subject.fill_fifo
+
+        def not_filled(path):
+            # FIFO を詰めない(読み手が読まないだけ)。子の 1 バイトは止まらずに書ける。
+            reader, writer, filled = real_fill(path)
+            os.read(reader, 65536)
+            return reader, writer, filled
+        self.failed('書き込みで止まらずに終わった(終了値 0', fill_fifo=not_filled)
+
+    def test_probe_not_seen_in_time(self):
+        # 書かずに stdin を待ち続ける子と、wchan の名前の集合に入らない機械をまねる差し替え。どちらも期限で問題。
+        self.failed('1 秒の中で', FIFO_PROBE_WAIT=1, FIFO_PROBE_SCRIPT='read -r -n 1 go; read -r -t 30 more')
+        text = self.failed('1 秒の中で', FIFO_PROBE_WAIT=1, PIPE_WRITE_WCHANS=('not_a_pipe_function',))
+        self.assertIn('stat ', text)
+        self.assertIn('syscall ', text)
+        self.assertIn('wchan ', text)
+
+    def run_fifo_quiet(self):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            found = subject.run_fifo(self.root())
+        return found, out.getvalue()
+
+    def test_probe_failure_is_problem_and_stops(self):
+        def fail(_root):
+            raise subject.ProbeFailed('最後に読んだ値: wchan 0')
+
+        def never(*_args):
+            raise AssertionError('試しの失敗の後にケースを流した')
+        with mock.patch.object(subject, 'fifo_watch', fail), mock.patch.object(subject, 'run_fifo_side', never):
+            (problems, reason), out = self.run_fifo_quiet()
+        self.assertIsNone(reason)
+        self.assertEqual(len(problems), 1)
+        self.assertIn('段の始めの試しで、書き込みで止まったことを /proc から確かめられない(最後に読んだ値: wchan 0)',
+                      problems[0])
+        self.assertIn('段のケースを流さない', problems[0])
+        self.assertEqual(out, '')
+
+    def test_unsupported_machine_is_unperformed(self):
+        # write の番号を持たない機械では、ケースを流さずに未実施の理由を返す(問題にも成功にも数えない)。
+        with mock.patch.object(subject, 'WRITE_SYSCALLS', {}):
+            (problems, reason), out = self.run_fifo_quiet()
+        self.assertEqual(problems, [])
+        self.assertTrue(reason)
+        self.assertEqual(out, f'S3I-A: 詰めた FIFO の信号: 未実施({reason})\n')
+        if subject.LINUX:
+            self.assertIn(f'この機械({os.uname().machine})の write の番号を持たない', reason)
+
+    def test_wait_limit_stops_remaining(self):
+        plan = [(f'c{i}', 'stdout', None, subject.fixed(['-h']), 'TERM', signal.SIGTERM, False) for i in range(10)]
+        calls = []
+
+        def side(*args):
+            calls.append(args)
+            return subject.Result(0, b'', b'', False, 0), False, True, '最後の値'
+        watch = subject.FifoWatch('x86_64', '差し替え')
+        with mock.patch.object(subject, 'fifo_watch', lambda _root: (watch, None)), \
+                mock.patch.object(subject, 'fifo_plan', lambda: plan), \
+                mock.patch.object(subject, 'run_fifo_side', side):
+            (problems, reason), out = self.run_fifo_quiet()
+        self.assertIsNone(reason)
+        self.assertEqual(len(calls), subject.FIFO_WAIT_LIMIT)
+        self.assertEqual(len(problems), subject.FIFO_WAIT_LIMIT // 2 + 1)
+        self.assertIn('最後に読んだ値: 最後の値', problems[0])
+        self.assertIn(f'片側が {subject.FIFO_WAIT_LIMIT} 回になったので、残りの 8 件を流さない', problems[-1])
+        self.assertIn('S3I-A: 詰めた FIFO の信号: 2 件', out)
+
+    def wiring(self, found):
+        problems, unperformed = [], []
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(subject, 'run_fifo', lambda _root: found), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            subject.run_fifo_stage(self.root(), problems, unperformed)
+            subject.report('full', {}, problems, unperformed, {}, 0, 0.0)
+        return problems, unperformed, out.getvalue(), err.getvalue()
+
+    def test_main_counts_probe_failure_as_problem(self):
+        problems, unperformed, out, err = self.wiring((['詰めた FIFO の信号: 試しの失敗'], None))
+        self.assertEqual((problems, unperformed), (['詰めた FIFO の信号: 試しの失敗'], []))
+        self.assertIn('S3I-A: 不合格: 詰めた FIFO の信号: 試しの失敗\n', err)
+        self.assertIn('未実施 0 項目・不一致 0 件・問題 1 件', out)
+        with self.assertRaises(AssertionError):
+            subject.judge_totals(5, 0, problems)
+
+    def test_main_records_unsupported_machine_as_unperformed(self):
+        problems, unperformed, out, err = self.wiring(([], 'この機械(riscv64)の write の番号を持たない'))
+        self.assertEqual((problems, unperformed), ([], ['詰めた FIFO の信号: この機械(riscv64)の write の番号を持たない']))
+        self.assertIn('S3I-A: 未実施: 詰めた FIFO の信号: この機械(riscv64)の write の番号を持たない\n', out)
+        self.assertIn('未実施 1 項目・不一致 0 件・問題 0 件', out)
+        self.assertEqual(err, '')
+        subject.judge_totals(5, 0, problems)
 
 
 class Selftest(unittest.TestCase):
