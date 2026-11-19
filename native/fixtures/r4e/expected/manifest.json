@@ -1,0 +1,1166 @@
+{
+  "schema_version": 1,
+  "issue": 482,
+  "generator": "native/fixtures/r4e/generate_expected.py",
+  "legacy": {
+    "script": "plugins/dev-workflow/skills/export-doc/scripts/md_tables_to_xlsx.py",
+    "script_sha256": "0b3a7338fafccb25bcc3a813665a29a4add5ceb216b5f32f7502850a6bf5c4e9",
+    "python": "CPython 3.10.11",
+    "openpyxl": "3.1.5",
+    "et_xmlfile": "2.0.0",
+    "lxml": false,
+    "requirements": "native/ci/r4e-requirements.txt"
+  },
+  "run": {
+    "env": {
+      "PYTHONUTF8": "1",
+      "TZ": "UTC",
+      "PATH": "/usr/bin:/bin",
+      "HOME": "<置き場>/home",
+      "TMPDIR": "<置き場>/tmp"
+    },
+    "umask": "0o022",
+    "cwd": "<置き場>/work",
+    "command": [
+      "<旧版用の python>",
+      "md_tables_to_xlsx.py",
+      "<argv...>"
+    ]
+  },
+  "markers": {
+    "work": "@WORK@",
+    "script": "md_tables_to_xlsx.py(旧版のスクリプトの絶対パス)",
+    "site_packages": "(site-packages の絶対パスと / を消して相対にする)",
+    "stdlib": "(標準ライブラリのディレクトリの絶対パスと / を消して相対にする)",
+    "core_xml_times": {
+      "created": "@CREATED@",
+      "modified": "@MODIFIED@"
+    }
+  },
+  "not_stored": [
+    "ZIP の圧縮後の大きさと圧縮のバイト列(Q3)",
+    "ZIP の時刻の値(XLSX のバイト)",
+    "docProps/core.xml の 2 つの時刻の値と、その部分の CRC-32(sha256 は印を置いた後のバイト)"
+  ],
+  "fixed_parts_sha256": {
+    "xl/theme/theme1.xml": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+    "xl/styles.xml": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258"
+  },
+  "cases": [
+    {
+      "id": "01-basic",
+      "summary": "1 つの表の基本形(見出しつき・3 列・2 行。出力先の親を作る)",
+      "linux_only": false,
+      "files": [
+        {
+          "path": "docs/basic.md",
+          "text": "# 概要\n\n| 名前 | 値 | 備考 |\n|---|---|---|\n| a | 1 | x |\n| b | 2 | y |\n"
+        }
+      ],
+      "argv": [
+        "docs/basic.md",
+        "-o",
+        "out/basic.xlsx"
+      ],
+      "output": "out/basic.xlsx",
+      "exit_code": 0,
+      "stdout": {
+        "text": "OK out/basic.xlsx にシート 1 件を出力\n"
+      },
+      "stderr": {
+        "text": ""
+      },
+      "created": [
+        {
+          "path": "out",
+          "type": "dir",
+          "mode": "0o755"
+        },
+        {
+          "path": "out/basic.xlsx",
+          "type": "file",
+          "mode": "0o644"
+        }
+      ],
+      "parts": [
+        {
+          "name": "docProps/app.xml",
+          "file_size": 205,
+          "crc32": "484dc746",
+          "sha256": "209fca6b00afe72a5029754b94be5953d8f16d96f67130325566b9366ad4ccc5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "docProps/core.xml",
+          "file_size": 459,
+          "crc32": null,
+          "sha256": "cae43cab5a1171d40402bec68e810599ef853049d8199500dc08f7778fe21122",
+          "marked": true,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/theme/theme1.xml",
+          "file_size": 10140,
+          "crc32": "239c5c99",
+          "sha256": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet1.xml",
+          "file_size": 1205,
+          "crc32": "5dd68459",
+          "sha256": "93a2e4b2ef98355724e7028ce11b95cd90dd2e8aa1db3ba8d809b3d9f7db0402",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/styles.xml",
+          "file_size": 2752,
+          "crc32": "571cb418",
+          "sha256": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "_rels/.rels",
+          "file_size": 534,
+          "crc32": "8aeb47b7",
+          "sha256": "ec869ae44fc833c25e58afa6ae766147aa72a99147522f6070e511475222827d",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/workbook.xml",
+          "file_size": 559,
+          "crc32": "0d32bfb5",
+          "sha256": "7ed129e655bb67fe67c7c82c6da43bce32dd8325f1d7ed35bace9c65fd50f1c4",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/_rels/workbook.xml.rels",
+          "file_size": 507,
+          "crc32": "bae3eb33",
+          "sha256": "8b55e81b6390446109e3c54f68f9ed0922fea7fc7c805eb84eb23523bb638a0e",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "[Content_Types].xml",
+          "file_size": 983,
+          "crc32": "8442869b",
+          "sha256": "2fd871365a885c9d2ef12c9df3bcb523737614c8ba8581c36cd462abb5e74635",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "id": "02-duplicates",
+      "summary": "複数の表と重複名(旧版の _2・_3、31 文字で切った名前の _2、openpyxl の大文字小文字違いの番号)・2 つの入力",
+      "linux_only": false,
+      "files": [
+        {
+          "path": "docs/Report.md",
+          "text": "# 一覧\n\n| a | b |\n|---|---|\n| 1 | 2 |\n\n| c | d |\n|---|---|\n| 3 | 4 |\n\n## 一覧\n\n| e |\n|---|\n| 5 |\n\n# ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789\n\n| f |\n|---|\n| 6 |\n\n| g |\n|---|\n| 7 |\n\n# Summary\n\n| h |\n|---|\n| 8 |\n\n# SUMMARY\n\n| i |\n|---|\n| 9 |\n\n# summary\n\n| j |\n|---|\n| 10 |\n"
+        },
+        {
+          "path": "docs/other.md",
+          "text": "| k | l |\n| :---: | ---: |\n| 11 | 12 |\n"
+        }
+      ],
+      "argv": [
+        "docs/Report.md",
+        "docs/other.md",
+        "-o",
+        "out/duplicates.xlsx"
+      ],
+      "output": "out/duplicates.xlsx",
+      "exit_code": 0,
+      "stdout": {
+        "text": "OK out/duplicates.xlsx にシート 9 件を出力\n"
+      },
+      "stderr": {
+        "text": ""
+      },
+      "created": [
+        {
+          "path": "out",
+          "type": "dir",
+          "mode": "0o755"
+        },
+        {
+          "path": "out/duplicates.xlsx",
+          "type": "file",
+          "mode": "0o644"
+        }
+      ],
+      "parts": [
+        {
+          "name": "docProps/app.xml",
+          "file_size": 205,
+          "crc32": "484dc746",
+          "sha256": "209fca6b00afe72a5029754b94be5953d8f16d96f67130325566b9366ad4ccc5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "docProps/core.xml",
+          "file_size": 459,
+          "crc32": null,
+          "sha256": "cae43cab5a1171d40402bec68e810599ef853049d8199500dc08f7778fe21122",
+          "marked": true,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/theme/theme1.xml",
+          "file_size": 10140,
+          "crc32": "239c5c99",
+          "sha256": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet1.xml",
+          "file_size": 896,
+          "crc32": "625464bd",
+          "sha256": "cfb30d29d9fa4dba2b16463bd960cb7b406522f1e962b3fa131909984fe5e174",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet2.xml",
+          "file_size": 896,
+          "crc32": "b1be2239",
+          "sha256": "8ee09f7f97353b408c68d538c2834dbf948aa12e068a81845ffcbf062364bce0",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet3.xml",
+          "file_size": 751,
+          "crc32": "ffbb2aeb",
+          "sha256": "a614946ce08d36eac605c936a7f18ed6962a8b9beed8acb96944923a458f4c17",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet4.xml",
+          "file_size": 751,
+          "crc32": "5f4e334a",
+          "sha256": "56dabdc705a992caf8c56ea41a5c8fc3e5d5c17a475401c844bdf450021d4ec2",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet5.xml",
+          "file_size": 751,
+          "crc32": "3f1d3bd5",
+          "sha256": "d8452383997ac87b0636b68e59e6739b5d80c24cf052c5ef3766478e616cf0b7",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet6.xml",
+          "file_size": 751,
+          "crc32": "71af4e33",
+          "sha256": "1698a6dfb096fc287b8fd0b826dcf8b3cf04649aebae26dbb0fda90e26beaa33",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet7.xml",
+          "file_size": 751,
+          "crc32": "11fc46ac",
+          "sha256": "fd428eb2391db0121ac69f2193cfb1b2cd6c5b820c80748ed19aa7434f364ac2",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet8.xml",
+          "file_size": 752,
+          "crc32": "3be94ed4",
+          "sha256": "19cd40dcc034dd1d07f256ec19d9e9f054243c6a9a38dae1683ddeff710b715b",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet9.xml",
+          "file_size": 898,
+          "crc32": "ce5b7f80",
+          "sha256": "111efafac1816faf85c78c0f17833465ecb7acffef42b6b1f61ed1f1025632e5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/styles.xml",
+          "file_size": 2752,
+          "crc32": "571cb418",
+          "sha256": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "_rels/.rels",
+          "file_size": 534,
+          "crc32": "8aeb47b7",
+          "sha256": "ec869ae44fc833c25e58afa6ae766147aa72a99147522f6070e511475222827d",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/workbook.xml",
+          "file_size": 1157,
+          "crc32": "303f9fff",
+          "sha256": "5f7a8143ea3f63bb9894d78cd63b21330fc79a2d6df01b4849954535e162ba22",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/_rels/workbook.xml.rels",
+          "file_size": 1677,
+          "crc32": "76731105",
+          "sha256": "273a2d22ca09f5805789db28690bfbba74687771a2ee9c04f9036e01db64b623",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "[Content_Types].xml",
+          "file_size": 2079,
+          "crc32": "cfad4ebe",
+          "sha256": "fd8f6f7c98b89989acbc4978e44ba4a4621f4ed3149ee26e7a3762a8756e019e",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "id": "03-types",
+      "summary": "数式(1 文字の = は文字列)・誤りの 7 語・空のセル・列の足りない行・見出しより右の空セル(1 行目の太字の空セル)",
+      "linux_only": false,
+      "files": [
+        {
+          "path": "docs/types.md",
+          "text": "# 型\n\n| 式 | 誤り | 空 |\n|---|---|---|\n| =SUM(1,2) | #N/A | |\n| = | #DIV/0! | x |\n| =A1&\"x\"<2 | #NAME? | |\n| ==1 | #NULL! | | 右 | さらに右 |\n| a | #NUM! |\n| b | #REF! | |\n| c | #VALUE! | |\n| d | #n/a | #N/A  |\n| | | |\n"
+        }
+      ],
+      "argv": [
+        "docs/types.md",
+        "-o",
+        "out/types.xlsx"
+      ],
+      "output": "out/types.xlsx",
+      "exit_code": 0,
+      "stdout": {
+        "text": "OK out/types.xlsx にシート 1 件を出力\n"
+      },
+      "stderr": {
+        "text": ""
+      },
+      "created": [
+        {
+          "path": "out",
+          "type": "dir",
+          "mode": "0o755"
+        },
+        {
+          "path": "out/types.xlsx",
+          "type": "file",
+          "mode": "0o644"
+        }
+      ],
+      "parts": [
+        {
+          "name": "docProps/app.xml",
+          "file_size": 205,
+          "crc32": "484dc746",
+          "sha256": "209fca6b00afe72a5029754b94be5953d8f16d96f67130325566b9366ad4ccc5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "docProps/core.xml",
+          "file_size": 459,
+          "crc32": null,
+          "sha256": "cae43cab5a1171d40402bec68e810599ef853049d8199500dc08f7778fe21122",
+          "marked": true,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/theme/theme1.xml",
+          "file_size": 10140,
+          "crc32": "239c5c99",
+          "sha256": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet1.xml",
+          "file_size": 2196,
+          "crc32": "4e9081ff",
+          "sha256": "42b25a00d30bacb4c9c230d19f837879a2f64a5f136865ed429a8cf0e80e9606",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/styles.xml",
+          "file_size": 2752,
+          "crc32": "571cb418",
+          "sha256": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "_rels/.rels",
+          "file_size": 534,
+          "crc32": "8aeb47b7",
+          "sha256": "ec869ae44fc833c25e58afa6ae766147aa72a99147522f6070e511475222827d",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/workbook.xml",
+          "file_size": 556,
+          "crc32": "c03a3ac7",
+          "sha256": "f1e18cde978f5b7c5771941df330ea14b6985dc53fe8644fbd4faf56f8e3cc92",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/_rels/workbook.xml.rels",
+          "file_size": 507,
+          "crc32": "bae3eb33",
+          "sha256": "8b55e81b6390446109e3c54f68f9ed0922fea7fc7c805eb84eb23523bb638a0e",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "[Content_Types].xml",
+          "file_size": 983,
+          "crc32": "8442869b",
+          "sha256": "2fd871365a885c9d2ef12c9df3bcb523737614c8ba8581c36cd462abb5e74635",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "id": "04-long-cjk",
+      "summary": "長い値(列幅 60 の上限)・CJK(幅 2)・前後に空白の残る値・<br> の改行・装飾の除去",
+      "linux_only": false,
+      "files": [
+        {
+          "path": "docs/long.md",
+          "text": "# 長い値と日本語\n\n| 項目 | 説明 | 備考 |\n|---|---|---|\n| 日本語の項目名 | あいうえおかきくけこあいうえおかきくけこあいうえおかきくけこあいうえおかきくけこ | xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx |\n| a<br>b | 前<BR/>後 | 1行目<br />2行目はとても長いが列幅に数えないzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz |\n| **太字** と `code` | [リンク](https://example.com/a) | **  前後の空白  ** |\n| x<br> | <br  />y | ` コード ` |\n| 　全角の空白　 | 半角ｶﾅ | tab\tinside |\n"
+        }
+      ],
+      "argv": [
+        "docs/long.md",
+        "-o",
+        "out/long.xlsx"
+      ],
+      "output": "out/long.xlsx",
+      "exit_code": 0,
+      "stdout": {
+        "text": "OK out/long.xlsx にシート 1 件を出力\n"
+      },
+      "stderr": {
+        "text": ""
+      },
+      "created": [
+        {
+          "path": "out",
+          "type": "dir",
+          "mode": "0o755"
+        },
+        {
+          "path": "out/long.xlsx",
+          "type": "file",
+          "mode": "0o644"
+        }
+      ],
+      "parts": [
+        {
+          "name": "docProps/app.xml",
+          "file_size": 205,
+          "crc32": "484dc746",
+          "sha256": "209fca6b00afe72a5029754b94be5953d8f16d96f67130325566b9366ad4ccc5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "docProps/core.xml",
+          "file_size": 459,
+          "crc32": null,
+          "sha256": "cae43cab5a1171d40402bec68e810599ef853049d8199500dc08f7778fe21122",
+          "marked": true,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/theme/theme1.xml",
+          "file_size": 10140,
+          "crc32": "239c5c99",
+          "sha256": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet1.xml",
+          "file_size": 2209,
+          "crc32": "bb43804c",
+          "sha256": "2a2232056672548de8fde8714f858af5021a7b177ce8aa330b445796ffe372fb",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/styles.xml",
+          "file_size": 2752,
+          "crc32": "571cb418",
+          "sha256": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "_rels/.rels",
+          "file_size": 534,
+          "crc32": "8aeb47b7",
+          "sha256": "ec869ae44fc833c25e58afa6ae766147aa72a99147522f6070e511475222827d",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/workbook.xml",
+          "file_size": 573,
+          "crc32": "10ca444b",
+          "sha256": "94b34fbc3e24034c8cedd4ca7b25bcc57b2a2d9aebd59ea196993dcd4b180afe",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/_rels/workbook.xml.rels",
+          "file_size": 507,
+          "crc32": "bae3eb33",
+          "sha256": "8b55e81b6390446109e3c54f68f9ed0922fea7fc7c805eb84eb23523bb638a0e",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "[Content_Types].xml",
+          "file_size": 983,
+          "crc32": "8442869b",
+          "sha256": "2fd871365a885c9d2ef12c9df3bcb523737614c8ba8581c36cd462abb5e74635",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        }
+      ]
+    },
+    {
+      "id": "05-escape-nonutf8",
+      "summary": "UTF-8 でないファイル名のシート名(サロゲート)・エスケープの要る見出しとセル(& < > \" ')・シート名の禁止文字",
+      "linux_only": true,
+      "files": [
+        {
+          "path_hex": "646f63732f72e973756de92e6d64",
+          "text": "# A & B < C > \"D\" 'E'\n\n| 記号 | 値 |\n|---|---|\n| & | <tag attr=\"v\"> |\n| 'q' | a > b & c < d |\n\n# x/y\\z*?[1]:2\n\n| k |\n|---|\n| v |\n"
+        }
+      ],
+      "argv": [
+        {
+          "hex": "646f63732f72e973756de92e6d64"
+        },
+        "-o",
+        "out/escape.xlsx"
+      ],
+      "output": "out/escape.xlsx",
+      "exit_code": 0,
+      "stdout": {
+        "text": "OK out/escape.xlsx にシート 2 件を出力\n"
+      },
+      "stderr": {
+        "text": ""
+      },
+      "created": [
+        {
+          "path": "out",
+          "type": "dir",
+          "mode": "0o755"
+        },
+        {
+          "path": "out/escape.xlsx",
+          "type": "file",
+          "mode": "0o644"
+        }
+      ],
+      "parts": [
+        {
+          "name": "docProps/app.xml",
+          "file_size": 205,
+          "crc32": "484dc746",
+          "sha256": "209fca6b00afe72a5029754b94be5953d8f16d96f67130325566b9366ad4ccc5",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "docProps/core.xml",
+          "file_size": 459,
+          "crc32": null,
+          "sha256": "cae43cab5a1171d40402bec68e810599ef853049d8199500dc08f7778fe21122",
+          "marked": true,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/theme/theme1.xml",
+          "file_size": 10140,
+          "crc32": "239c5c99",
+          "sha256": "d15e8ebf78ef7b9720839d7ae8fdc81a7df5bc24706d8e137df61a5683c358d9",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet1.xml",
+          "file_size": 1058,
+          "crc32": "10ec939b",
+          "sha256": "b2f6077a81358e8d6b8fc09a5bd7712117906ee99054b01bf5686cbdfd5d7a23",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/worksheets/sheet2.xml",
+          "file_size": 751,
+          "crc32": "9474631d",
+          "sha256": "37e27941dee71d3bda47ea25ce3a9260ff71569e69c9393ca709409e3bde8d90",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o100600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/styles.xml",
+          "file_size": 2752,
+          "crc32": "571cb418",
+          "sha256": "7ed8eb63a5167dad0b1520f379df7ceda2214fb297fca55eb317cd80a7809258",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "_rels/.rels",
+          "file_size": 534,
+          "crc32": "8aeb47b7",
+          "sha256": "ec869ae44fc833c25e58afa6ae766147aa72a99147522f6070e511475222827d",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/workbook.xml",
+          "file_size": 697,
+          "crc32": "4ee6e55a",
+          "sha256": "c42675132608762d22edcd1e31bc90fa50b77caeb72dcd0fe68dc6ea25fe0721",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "xl/_rels/workbook.xml.rels",
+          "file_size": 653,
+          "crc32": "2e725eab",
+          "sha256": "15586b8b5fa62b6cbe80c791dc12827c15c2c511f84901daf48e025d77259225",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        },
+        {
+          "name": "[Content_Types].xml",
+          "file_size": 1120,
+          "crc32": "581be1a5",
+          "sha256": "8b17c67fc07ed1bc8cddabf0c66e4fb2195cfdb89689998adc2dccbaca1fb71b",
+          "marked": false,
+          "compress_type": 8,
+          "create_system": 3,
+          "create_version": 20,
+          "extract_version": 20,
+          "flag_bits": 0,
+          "volume": 0,
+          "internal_attr": 0,
+          "external_attr": "0o600<<16",
+          "extra": "",
+          "comment": ""
+        }
+      ]
+    }
+  ]
+}
