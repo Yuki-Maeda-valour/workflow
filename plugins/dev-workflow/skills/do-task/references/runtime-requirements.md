@@ -175,7 +175,7 @@ PYTHON
   - 外部 CLI のリポジトリの設定のフォルダを 1 項目ずつ歩くため、`os.scandir` に開いたディレクトリの fd を渡す(`os.scandir in os.supports_fd` が真であること)。
   - 長い形の `status`・4 つの値つきの `record`・`secret-set` は git を使う(最低の版は上の表。`rev-parse --path-format=absolute` を使う)。
   - `secret-set` は、さらに隣の `secret-profiles.py`(profile があるときは PyYAML)と、`diff-snapshot.sh`(bash 4.0 以上)と、GNU `grep`(`-z`)を使う。
-  - 満たさないときは、終了コード 20 か、`secret-set` の失敗(機密の集合が `unknown`)になる。どちらのときも、外部の実装担当を使うかを質問で聞く(聞かずに外部で実装しない)。
+  - 満たさないときは、0 以外の終了コード(多くは 20)か、`secret-set` の失敗(機密の集合が `unknown`)になる。どちらのときも、外部の実装担当を使うかを質問で聞く(聞かずに外部で実装しない)。
 
 - `diff-snapshot.sh` と `implement-guard.sh` は連想配列を使うため **bash 4.0 以上**が必要。`--help` と `--precheck` にも同じ要件がかかる。`command -v bash` と `bash --version` で、PATH から選ぶ実体と版を確認する。ログインシェルの版だけでは判断しない。
 - 本体の必要道具は GNU coreutils・GNU findutils・GNU grep。実行名 `realpath`・`readlink`・`sha256sum`・`sort`・`grep`・`find` などで PATH から選ぶ。特に `grep -z`・`sort -z` と、gitlink 検査の `find -mindepth/-maxdepth/-quit` が必要。導入しても別名や PATH の後ろにあれば選ばれないため、`command -v <実行名>` と `<実行名> --version` を記録する。
