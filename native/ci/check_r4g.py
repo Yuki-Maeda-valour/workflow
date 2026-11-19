@@ -175,11 +175,36 @@ def applied(command, name, case):
         raise Difference('この決定はこのケースに当たらない: ' + name)
 
 
+def first_difference(left, right):
+    """2つのバイト列の最初に違う位置(同じなら None。片方がもう片方の頭なら、短い方の長さ)。"""
+    if left == right:
+        return None
+    for index, (a, b) in enumerate(zip(left, right)):
+        if a != b:
+            return index
+    return min(len(left), len(right))
+
+
+def describe_difference(old, new, before=40, limit=160):
+    """失敗の調べのため、終了値と、標準出力・標準エラーの違い(バイト数・最初に違う位置・そこから前 `before`
+    バイトを含む `limit` バイトまでの repr)を短く並べる。"""
+    parts = [f'終了値 旧版 {old.returncode}・Rust {new.returncode}']
+    for label, left, right in (('標準出力', old.stdout, new.stdout), ('標準エラー', old.stderr, new.stderr)):
+        at = first_difference(left, right)
+        if at is None:
+            parts.append(f'{label} 同じ({len(left)} バイト)')
+            continue
+        start = max(0, at - before)
+        parts.append(f'{label} 旧版 {len(left)}・Rust {len(right)} バイト・最初の違い {at} バイト目'
+                     f'({start} バイト目から 旧版 {left[start:start + limit]!r}・Rust {right[start:start + limit]!r})')
+    return '・'.join(parts)
+
+
 def same_result(old, new):
     if old.timed_out or new.timed_out:
         raise Difference('比較対象が時間切れになった')
     if (old.returncode, old.stdout, old.stderr) != (new.returncode, new.stdout, new.stderr):
-        raise Difference('終了値または出力が一致しない')
+        raise Difference(f'終了値または出力が一致しない({describe_difference(old, new)})')
 
 
 def fixed(result, code, stdout=b'', stderr=b''):
@@ -211,17 +236,26 @@ def location_fields(text, *, script_path, script_name, stdlib_dir, expected):
             counts[1] += 1
             new = path[len(prefix):]
             if os.fsdecode(new) not in verified:
-                raise Difference('SHA-256で確かめた標準ライブラリの外の所在地')
+                raise Difference('SHA-256で確かめた標準ライブラリの外の所在地: ' + shortened(path))
         elif path.startswith(b'<'):
             new = path
         else:
-            raise Difference('対応づけない所在地の欄がある')
+            raise Difference('対応づけない所在地の欄がある: ' + shortened(path))
         return match.group(0).replace(b'"' + path + b'"', b'"' + new + b'"', 1)
 
     result = FILE_FIELD.sub(replace, text)
     if tuple(counts) != tuple(expected):
-        raise Difference('所在地の欄の位置か出現数が違う')
+        raise Difference(f'所在地の欄の位置か出現数が違う(旧スクリプト・標準ライブラリの欄: 旧版 {tuple(counts)}・'
+                         f'期待 {tuple(expected)})')
     return result
+
+
+def shortened(value, limit=160):
+    """失敗の調べのため、バイト列を `limit` バイトまでに縮めた repr(長いときは前後を残し、間を ... にする)。"""
+    if len(value) > limit:
+        half = (limit - 3) // 2
+        value = value[:half] + b'...' + value[-(limit - 3 - half):]
+    return repr(value)
 
 
 THREAD = re.compile(rb'^Current thread 0x([0-9a-f]{16}) \(most recent call first\):$', re.M)
@@ -4345,8 +4379,9 @@ def ig_frame_counts(text):
     return script, stdlib
 
 
-def ig_compare(old, new, *, case, script=IG_SCRIPT, decisions=(), **params):
-    """旧版に呼出履歴があれば所在地の欄の決定を当ててから、全バイトで比べる。"""
+def ig_compare(old, new, *, case, script, decisions=(), **params):
+    """旧版に呼出履歴があれば所在地の欄の決定を当ててから、全バイトで比べる。`script` は旧版として流した
+    スクリプトのパス(IgWorld の写しなど。呼出履歴の旧スクリプト自身の欄を固定名へ写す)。"""
     decisions = tuple(decisions)
     if b'Traceback (most recent call last):' in old.stderr and 'location-fields' not in decisions:
         decisions += ('location-fields',)
@@ -4856,34 +4891,69 @@ class IgCorrespondence(unittest.TestCase):
         self.assertEqual(sum(counts.values()), 29)
 
 
-def pty_run(argv, env, cwd, columns):
-    """標準出力を端末(幅 `columns`)にして起動し、終了値・端末への出力・標準エラーを返す。"""
+PTY_QUIET_SECONDS = 0.2
+
+
+def pty_run(argv, env, cwd, columns, timeout=60):
+    """標準出力を端末(幅 `columns`)にして起動し、終了値・端末への出力・標準エラーを返す。
+
+    子が終わるまで、親も端末の子の側(slave)を開いておき、子が終わった後に残りを読み切る。Mac(XNU)では、子の側の
+    最後の close が、親がまだ読んでいない出力を捨て(ttyclose の ttyflush)、親の側の読み取り(ptcread)も、子の側が
+    閉じた後は溜まった出力を返さない。子が終わるときの close が最後の close だと、子の出力の一部を失うことがある
+    (CI の Mac で1回。推測)。親が開いておけば最後の close にならない(Linux も同じ読み方で読める)。端末の親の側と
+    標準エラーの pipe は select で両方を読み、子が終わった後に PTY_QUIET_SECONDS 秒何も来なければ読み終わりとする。
+    `timeout` 秒で読み終わらなければ(子が終わらない・出し続ける・終わった後も孫が書き続ける)、群ごと止めて不合格に
+    する。期限は、ループの毎回の始めに確かめる。"""
     import fcntl
+    import select
     import struct
     import termios
     master, slave = os.openpty()
+    process = None
     try:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack('HHHH', 24, columns, 0, 0))
         process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=slave,
                                    stderr=subprocess.PIPE, start_new_session=True)
-        os.close(slave)
-        slave = None
-        chunks = []
+        out, err = [], []
+        reading = {master: out, process.stderr.fileno(): err}
+        deadline = time.monotonic() + timeout
+        quiet_until = None
         while True:
-            try:
-                part = os.read(master, 65536)
-            except OSError:
+            if time.monotonic() >= deadline:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=30)
+                raise Difference(f'端末の子が {timeout} 秒で読み終わらない(子が終わらないか、出し続けるか、'
+                                 f'終わった後も群のプロセスが書き続ける): {argv[:2]}')
+            ready = select.select(list(reading), [], [], 0.05)[0] if reading else []
+            for fd in ready:
+                try:
+                    part = os.read(fd, 65536)
+                except OSError:
+                    part = b''
+                if part:
+                    reading[fd].append(part)
+                    quiet_until = None
+                else:
+                    del reading[fd]
+            if ready:
+                continue
+            if process.poll() is None:
+                if not reading:
+                    time.sleep(0.05)
+                continue
+            if quiet_until is None:
+                quiet_until = time.monotonic() + PTY_QUIET_SECONDS
+            elif time.monotonic() >= quiet_until:
                 break
-            if not part:
-                break
-            chunks.append(part)
-        stderr = process.stderr.read()
-        process.wait(timeout=60)
-        return RunResult(process.returncode, b''.join(chunks), stderr, False)
+        return RunResult(process.returncode, b''.join(out), b''.join(err), False)
     finally:
         os.close(master)
-        if slave is not None:
-            os.close(slave)
+        os.close(slave)
+        if process is not None:
+            process.stderr.close()
 
 
 class IgArguments(unittest.TestCase):
@@ -4914,7 +4984,7 @@ class IgArguments(unittest.TestCase):
                               str(self.world.base), columns)
                 new = pty_run(ig_native(['run', 'show', '--help'], self.world.script), env, str(self.world.base),
                               columns)
-                ig_compare(old, new, case='implementation-git/contract')
+                ig_compare(old, new, case='implementation-git/contract', script=self.world.script)
 
     def test_argument_errors(self):
         repo = str(self.world.repo)
@@ -5049,7 +5119,7 @@ class IgContract(unittest.TestCase):
             args = world.run_args(digest, 'status', accept=accept)
             old, old_calls = world.run([sys.executable, str(world.script), *args], env)
             new, new_calls = world.run(ig_native(args, world.script), env)
-            ig_compare(old, new, case='implementation-git/installed-locale')
+            ig_compare(old, new, case='implementation-git/installed-locale', script=world.script)
             installed_locale_lc_ctype(IG, 'implementation-git/installed-locale', old_calls, new_calls)
 
     def test_precheck_outputs_codes_and_relay(self):
@@ -5394,7 +5464,7 @@ class IgIO(unittest.TestCase):
                                               ig_native(args, world.script))):
                     launch = {'fsize': limit, 'redirect': {'1': str(outputs[index])}}
                     results.append(world.run(argv, launch=launch, env=world.env(path=world.real_path))[0])
-                ig_compare(*results, case='implementation-git/io')
+                ig_compare(*results, case='implementation-git/io', script=world.script)
                 self.assertEqual(outputs[0].read_bytes(), outputs[1].read_bytes())
                 if args is small and limit < small_size:
                     self.assertEqual(results[0].returncode, 120)
@@ -5408,7 +5478,7 @@ class IgIO(unittest.TestCase):
                                               ig_native(failure, world.script))):
                     launch = {'fsize': limit, 'redirect': {'2': str(errors[index])}}
                     results.append(world.run(argv, launch=launch, env=world.env(path=world.real_path))[0])
-                ig_compare(*results, case='implementation-git/io')
+                ig_compare(*results, case='implementation-git/io', script=world.script)
                 self.assertEqual(errors[0].read_bytes(), errors[1].read_bytes())
 
     def test_startup_environment_and_encoding(self):
@@ -5451,7 +5521,7 @@ class IgIO(unittest.TestCase):
                     # 旧Pythonの KeyboardInterrupt は子を待ってから止めて回収する(子を残さない)。
                     self.assertEqual((old_remained, new_remained), (False, False))
                 else:
-                    ig_compare(old, new, case='implementation-git/io')
+                    ig_compare(old, new, case='implementation-git/io', script=world.script)
                     self.assertEqual(old_remained, new_remained)
 
     def test_child_state(self):
@@ -5496,7 +5566,7 @@ class IgIO(unittest.TestCase):
                                    *argv], cwd=str(world.base), env=env, timeout=60)
                 new = run_command(['bash', '-c', script, 'r4g', str(world.base), *ig_native(argv, world.script)],
                                   cwd=str(world.base), env=env, timeout=60)
-                ig_compare(old, new, case='implementation-git/io')
+                ig_compare(old, new, case='implementation-git/io', script=world.script)
 
 
 def ig_git_state(repo):
@@ -5546,7 +5616,7 @@ class IgReadonly(unittest.TestCase):
             before = ig_git_state(world.repo)
             result, calls = world.run(argv)
             results.append((result, calls, ig_git_state(world.repo) != before))
-        ig_compare(results[0][0], results[1][0], case='implementation-git/contract')
+        ig_compare(results[0][0], results[1][0], case='implementation-git/contract', script=world.script)
         same_calls(IG, results[0][1], results[1][1], case='implementation-git/calls')
         return results
 
@@ -5625,7 +5695,7 @@ class IgRealDeadlines(unittest.TestCase):
                     args = world.run_args(digest, 'status')
                     env = world.env(path=str(bin_dir) + os.pathsep + world.real_path)
                 (old, old_time), (new, new_time) = self.run_both(world, args, env)
-                ig_compare(old, new, case='implementation-git/contract')
+                ig_compare(old, new, case='implementation-git/contract', script=world.script)
                 self.assertIn(f'timed out after {limit} seconds'.encode(), old.stderr)
                 for elapsed in (old_time, new_time):
                     self.assertGreaterEqual(elapsed, limit)

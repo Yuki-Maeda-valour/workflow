@@ -185,6 +185,24 @@ class Comparator(unittest.TestCase):
             with self.assertRaises(self.m.Difference):
                 self.m.compare('pending-implementation', good, good, decisions=('current-thread',), case='self-test')
 
+    def test_mismatch_message_shows_codes_sizes_and_the_first_difference(self):
+        old = self.result(0, out=b'usage: abcdef\n', err=b'same')
+        with self.assertRaises(self.m.Difference) as failure:
+            self.m.same_result(old, self.result(1, out=b'usage: abcxef\n', err=b'same'))
+        message = str(failure.exception)
+        self.assertTrue(message.startswith('終了値または出力が一致しない('), message)
+        self.assertIn('終了値 旧版 0・Rust 1', message)
+        self.assertIn("標準出力 旧版 14・Rust 14 バイト・最初の違い 10 バイト目(0 バイト目から 旧版 b'usage: abcdef\\n'"
+                      "・Rust b'usage: abcxef\\n')", message)
+        self.assertIn('標準エラー 同じ(4 バイト)', message)
+        # 片方がもう片方の頭なら、短い方の長さの位置。repr は前 40 バイトから 160 バイトまで。
+        self.assertEqual(self.m.first_difference(b'abc', b'abcdef'), 3)
+        self.assertIsNone(self.m.first_difference(b'abc', b'abc'))
+        long_old, long_new = b'a' * 1000 + b'X' + b'b' * 1000, b'a' * 1000 + b'Y' + b'b' * 1000
+        text = self.m.describe_difference(self.result(0, out=long_old), self.result(0, out=long_new))
+        self.assertIn('最初の違い 1000 バイト目(960 バイト目から 旧版 ' + repr(long_old[960:1120]), text)
+        self.assertLess(len(text), 600)
+
     def test_compare_rejects_unlisted_and_misapplied_decisions(self):
         good = self.result(2, err=b'x')
         self.m.compare('reviews-dir', good, good)
@@ -238,8 +256,21 @@ class Comparator(unittest.TestCase):
             self.m.compare('implementation-git', unverified, self.result(1, err=self.traceback(b'implementation-git.py', b'unverified.py')),
                            decisions=('location-fields',), case='self-test', location=self.location())
         stranger = self.result(1, err=old.stderr.replace(b'/py/lib/python3.10/subprocess.py', b'/tmp/subprocess.py'))
-        with self.assertRaises(self.m.Difference):
+        # 対応づけない欄は、字面(160 バイトまで。長ければ前後を残す)を失敗の文に出す。
+        with self.assertRaisesRegex(self.m.Difference, "対応づけない所在地の欄がある: b'/tmp/subprocess.py'$"):
             self.m.compare('implementation-git', stranger, new, decisions=('location-fields',), case='self-test', location=self.location())
+        long_path = b'/head' + b'd' * 5000 + b'/tail.py'
+        far = self.result(1, err=old.stderr.replace(b'/py/lib/python3.10/subprocess.py', long_path))
+        with self.assertRaises(self.m.Difference) as failure:
+            self.m.compare('implementation-git', far, new, decisions=('location-fields',), case='self-test', location=self.location())
+        shown = str(failure.exception).split(': ', 1)[1]
+        self.assertEqual(shown, repr(long_path[:78] + b'...' + long_path[-79:]))
+        with self.assertRaisesRegex(self.m.Difference, "標準ライブラリの外の所在地: b'/py/lib/python3.10/unverified.py'"):
+            self.m.compare('implementation-git', unverified, self.result(1, err=self.traceback(b'implementation-git.py', b'unverified.py')),
+                           decisions=('location-fields',), case='self-test', location=self.location())
+        with self.assertRaisesRegex(self.m.Difference, r'旧版 \(1, 1\)・期待 \(2, 1\)'):
+            self.m.compare('implementation-git', old, new, decisions=('location-fields',), case='self-test',
+                           location=dict(self.location(), expected=(2, 1)))
         # < で始まる欄はそのまま比べる。
         string = self.result(1, err=b'  File "<string>", line 1, in <module>\n')
         self.m.compare('implementation-git', string, string, decisions=('location-fields',), case='self-test',
@@ -758,6 +789,35 @@ class Comparator(unittest.TestCase):
             self.assertIn(cls, manifest['files'][self.m.PENDING_TESTS]['classes'])
             self.assertTrue(hasattr(getattr(module, cls), method), (cls, method))
 
+    def test_pty_run_reads_everything_the_child_wrote_before_exiting(self):
+        # 書いてすぐ終わる子の出力を全部読む(Mac では、子の側の最後の close が読んでいない出力を捨てうる)。
+        code = ('import os, sys\n'
+                'os.write(1, b"%d:" % os.get_terminal_size(1).columns + b"x" * 5000)\n'
+                'os.write(2, b"err")\n'
+                'os._exit(3)\n')
+        with tempfile.TemporaryDirectory() as temp:
+            for _ in range(10):
+                result = self.m.pty_run([sys.executable, '-I', '-c', code], dict(os.environ), temp, 57)
+                self.assertEqual((result.returncode, result.stdout, result.stderr, result.timed_out),
+                                 (3, b'57:' + b'x' * 5000, b'err', False))
+            # 上限の秒数で読み終わらないとき(黙って終わらない子・出し続ける子・終わった後も書き続ける孫)は、
+            # どの場合も群ごと止めて不合格にする。
+            marker = Path(temp) / 'grandchild'
+            grandchild = ('sh -c \'echo $$ >"$1"; while :; do echo e >&2; sleep 0.01; done\' sh "$1" & '
+                          'while [ ! -s "$1" ]; do sleep 0.01; done; exit 0')
+            for argv in (['sleep', '30'], ['yes'], ['sh', '-c', grandchild, 'sh', str(marker)]):
+                with self.subTest(argv=argv[:2]):
+                    started = time.monotonic()
+                    with self.assertRaisesRegex(self.m.Difference, '読み終わらない'):
+                        self.m.pty_run(argv, dict(os.environ), temp, 80, timeout=0.5)
+                    self.assertLess(time.monotonic() - started, 10)
+            # 終わった後も書き続けた孫も止めた。
+            pid = int(marker.read_text())
+            deadline = time.monotonic() + 10
+            while self.m.pid_alive(pid) and time.monotonic() < deadline:
+                time.sleep(0.05)
+            self.assertFalse(self.m.pid_alive(pid))
+
     def test_bash4_is_searched_in_path_then_homebrew_places(self):
         with tempfile.TemporaryDirectory() as temp:
             def fake(name, major):
@@ -973,11 +1033,20 @@ class Comparator(unittest.TestCase):
                     '  File "%s", line 195, in fullmatch\n    x\nTypeError: t\n' % (first, second)).encode()
         old = self.result(1, err=trace(script, stdlib + '/re.py'))
         new = self.result(1, err=trace('implementation-git.py', 're.py'))
-        self.m.ig_compare(old, new, case='self-test')
+        self.m.ig_compare(old, new, case='self-test', script=script)
         for bad in (trace('re.py', 'implementation-git.py'), trace('implementation-git.py', 'subprocess.py'),
                     trace('implementation-git.py', 're.py') + b'extra\n'):
             with self.assertRaises(self.m.Difference):
-                self.m.ig_compare(old, self.result(1, err=bad), case='self-test')
+                self.m.ig_compare(old, self.result(1, err=bad), case='self-test', script=script)
+        # 旧版として流したスクリプト(写し)の欄は、渡した `script` で対応づける。別のパスを渡せば対応づけない。
+        copy = '/w/r4g-ig-x/copy/implementation-git.py'
+        copied = self.result(1, err=trace(copy, stdlib + '/re.py'))
+        self.m.ig_compare(copied, new, case='self-test', script=copy)
+        with self.assertRaisesRegex(self.m.Difference, '対応づけない所在地の欄がある: ' + repr(copy.encode())):
+            self.m.ig_compare(copied, new, case='self-test', script=script)
+        # どの呼出しも、旧版として流したスクリプトを渡す(既定の値は無い)。
+        with self.assertRaises(TypeError):
+            self.m.ig_compare(old, new, case='self-test')
 
     def test_coerced_ctype_entry_is_asked_from_the_old_python(self):
         # 本物の関数は、この機械の旧Pythonが地域設定の変数の無い環境で選ぶ名前を返す(Linux の基準は C.UTF-8)。
