@@ -53,7 +53,8 @@ def native_build_command(command):
     # argparseが受け付けるオプション先行形や「--」による別表記は許さない。
     if not isinstance(command, str):
         return None
-    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4e|r4e-universal)(?: |$)", command)
+    # R4U(#480)・R4D(#481)・R4E(#482)と S3I-A(#474)の比較は、build の時間の枠の外のジョブで流す。
+    match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4e|r4e-universal|implement-guard|implement-guard-universal)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -68,21 +69,25 @@ REQUIRED_NATIVE_JOBS = (
     "r4d1",
     "r4e",
     "r4e-universal",
+    "implement-guard",
+    "implement-guard-universal",
 )
-# R4E(#482)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合)。
-R4E_JOBS = (
-    ("r4e", "r4e", set(RUNNERS)),
-    ("r4e-universal", "r4e-universal", {"macos-x86_64", "macos-arm64"}),
+# 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
+COMPARISON_JOBS = (
+    ("r4e", "r4e", set(RUNNERS), "build"),
+    ("r4e-universal", "r4e-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
+    ("implement-guard", "implement-guard", set(RUNNERS), "build"),
+    ("implement-guard-universal", "implement-guard-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
 )
 
 
 def check_native_required(document):
-    """native.yml だけに当てる追加の判定(必須のジョブと R4E の比較の工程・機種)。"""
+    """native.yml だけに当てる追加の判定(必須のジョブと、R4E・S3I-A の比較のジョブの工程・機種・needs)。"""
     if not isinstance(document, dict) or not isinstance(document.get("jobs"), dict):
         return []
     jobs = document["jobs"]
     problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
-    for name, subcommand, platforms in R4E_JOBS:
+    for name, subcommand, platforms, needs in COMPARISON_JOBS:
         job = jobs.get(name)
         if not isinstance(job, dict):
             continue
@@ -101,6 +106,8 @@ def check_native_required(document):
         got = [row.get("platform") for row in rows if isinstance(row, dict)]
         if len(got) != len(platforms) or set(got) != platforms:
             problems.append(f"{name}: matrix の機種は {sorted(platforms)} の {len(platforms)} 機種が必要です")
+        if job.get("needs") != needs:
+            problems.append(f"{name}: needs は {needs} が必要です")
     return problems
 
 
@@ -165,6 +172,8 @@ def check_document(document):
         native_timeouts["r4d1"] = 30
         # R4Eも時間の枠に入らないので、別のジョブ(r4e・r4e-universal)で比較する。
         native_timeouts.update({"r4e": 30, "r4e-universal": 30})
+        # S3I-Aの比較のジョブ(手元の所要時間の 2 倍以上。2026-11-12 12:59 の決定)。
+        native_timeouts.update({"implement-guard": 45, "implement-guard-universal": 20})
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -205,7 +214,7 @@ def check_document(document):
         if not isinstance(steps[1], dict) or steps[1].get("run") != POLICY_COMMAND:
             problems.append(f"{name}: checkout の直後に check_workflow.py が必要です")
         comparison_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
-                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1", "r4e", "r4e-universal"}]
+                              and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal"}]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):

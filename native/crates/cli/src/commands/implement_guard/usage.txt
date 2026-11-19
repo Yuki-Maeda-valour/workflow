@@ -1,0 +1,201 @@
+# 外部 implementer の起動の前後で、作業ツリーと git メタ状態を保護する専用スクリプト(dev-workflow)。
+# 仕様は ../references/external-runners.md の §12-2(作業ツリーとメタ状態の保護)・§12-3(外部の git
+# 操作への対処)・§12-7(引き継ぎの発火条件)。implement-agent.sh(外部 implementer の起動)と対で使う:
+# 起動の前に take、起動の後に compare → taskmd-diff →(引き継ぎなら)restore-taskmd、完了処理の後に
+# cleanup。呼び出し側は起動と、終了値・合法な応答の照合による分岐を行う。
+# diff-snapshot.sh(レビュー用の diff スナップショット)とは別物で、共通部分の切り出しもしていない
+# (external-runners.md §11 の 2026-09-17 決定 9。必要な部品は複製して持つ)。
+#
+# 使い方:
+#   bash implement-guard.sh take           --cwd <dir> --task-md <path>
+#   bash implement-guard.sh config-check   --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
+#   bash implement-guard.sh compare        --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex> --run-rc <n>
+#   bash implement-guard.sh taskmd-diff    --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
+#   restore_taskmd_supervised implement-guard.sh --cwd <dir> --state <dir> --manifest-sha256 <hex> --snapshot-sha256 <hex>
+#   bash implement-guard.sh cleanup        --state <dir>
+#
+# 復元の前に ../references/runtime-requirements.md の「タスク本文の復元」にある
+# restore_taskmd_supervised 関数を呼出側で定義し、上の例で呼ぶ。関数を利用できなければ起動しない。
+# 関数は timeout、無ければ gtimeout の GNU 版・必要オプションを確認し、確認できなければ起動しない。
+# 公開入口全体を330秒 TERM・追加5秒 KILLで監督する。終了値と合法な応答を照合し、不明なら止める。
+#
+# サブコマンド:
+#   take            起動前のスナップショット(5 要素)と退避を保護領域に作り、記録の外に所属の印を書く
+#   compare         起動後に 5 要素を取り直して比較し、結末(正常終了 / 引き継ぎ / 縮退 / 比較不能)を決める
+#   taskmd-diff     タスク MD の変化を「チェック状態の更新だけ」と「要件本文の変更」に分ける
+#   restore-taskmd  タスク MD だけを起動前の内容へ戻す(実ツリーに書くのはこのサブコマンドだけ)
+#   cleanup         保護領域を消し、その後に所属の印を消す
+#
+# 引数:
+#   --cwd <dir>              管理ルート。リポジトリの toplevel かその配下。toplevel は自前で解決し、
+#                            **スナップショットの対象は toplevel の全体**、パスは toplevel 相対で扱う。
+#                            compare / taskmd-diff / restore-taskmd では take のときと同じ値を渡す
+#                            (toplevel などは保護領域の記録を使う。違う場所を渡したら exit 2)
+#   --task-md <path>         タスク MD。--cwd 相対か絶対パス。symlink なら実体を辿って本文を守る
+#   --state <dir>            take が stdout に出した STATE_DIR
+#   --manifest-sha256 <hex>  take が出した MANIFEST_SHA256(呼び出し側がセッション文脈に保持した値)
+#   --snapshot-sha256 <hex>  take が出した SNAPSHOT_SHA256(同上)
+#   --run-rc <n>             implement-agent.sh の終了コードをそのまま渡す(0 以上の十進整数)
+#   -h / --help              この使い方を出す
+#
+# 終了コード(**ここに無いコード・2・20 が返ったら、呼び出し側は終了コードと stderr を報告して停止する。
+#             「変化なし」や成功に読み替えない**):
+#   0   成功(take: 作成した / config-check: 設定が同じ / compare: 正常終了 / taskmd-diff: 変化なしかチェック状態の更新だけ /
+#       restore-taskmd: 戻した / cleanup: 消した)
+#   2   usage(引数の不備。cleanup の --state が保護領域の guard-* でないときもここ — 何も消さない)
+#   20  internal(予期しない失敗。take は作りかけの保護領域と所属の印を消す。
+#       take は、印を書いた後に印を消す必要が出て〈タスク MD の在るフォルダが変わった・一時ファイルを消せない〉
+#       その印が消えたと確かめられないとき〈消せない・属性を取れない・自分の印でないエントリが在る〉もここ —
+#       外部委託を行わない。残った印は記録が無いので候補に数えない。
+#       cleanup は保護領域を消した後に所属の印を消せないときもここ — 消したことと残った印を stderr に出す)
+#   30  縮退(take のみ。外部委託を行わない)。stderr に `ERROR [<理由コード>] 説明`:
+#         not-git            --cwd が git リポジトリの中でない(解決した toplevel が --cwd を含まない場合も)
+#         unmerged           index がコンフリクト中
+#         no-protected-area  保護領域を外部の書き込み範囲外に解決できない
+#         over-limit         退避の上限(2000 件・200 MiB)を超えた
+#         taskmd             タスク MD の実体を確定できない(存在しない・リンク切れ・ループ・通常ファイル
+#                            でない・読めない)、または退避・ハッシュ・マニフェスト登録に失敗した
+#   31  引き継ぎ(compare。--run-rc が 0 以外で、作業ツリーか git メタに変化がある)
+#   32  縮退(compare。--run-rc が 0 以外で、どちらにも変化が無い)
+#   33  比較不能(config-check・compare)/ 照合・復元の失敗(taskmd-diff・restore-taskmd)。人の判断を仰ぐ
+#   34  要件本文の変更(taskmd-diff)
+#   35  選択パスと実体の対応の変化(taskmd-diff)
+#
+# stdout(機械可読の `KEY=VALUE` 行。値は 1 行。**パスの値は C 風引用** — タブ・改行・その他の制御文字・
+#         `"`・`\` を含むか先頭が `"` のときだけ `"…"` で囲み `\t` `\n` `\\` `\"`、その他の制御文字は
+#         8 進 `\ooo`。診断は stderr の `NOTE:` / `ERROR [理由コード]`):
+#   config-check:
+#     CONFIG=same GIT_SKIPPED=no(隔離Gitで使用先を検査した場合)
+#     33 は RESULT=incomparable、REASON、実際のGit呼出に応じたGIT_SKIPPED。
+#   take:
+#     STATE_DIR=<保護領域のパス>  MANIFEST_SHA256=<hex>  SNAPSHOT_SHA256=<hex>
+#     ENTRIES=<未追跡エントリの件数>  BYTES=<退避対象の総バイト数>
+#     UNREADABLE=<読めなかったエントリ数。パスは stderr に `NOTE: unreadable <パス>`>
+#     TASKMD_REAL=<タスク MD の実体パス>
+#     OWNER_MARK=yes|no(所属の印を書けたか。no の理由は stderr の `NOTE: 所属の印を書けない: <理由>`。
+#                        no でも take は止めない。印の無い記録は、ほかのセッションの開始前の確認で止まりうる)
+#   compare:
+#     RESULT=normal|takeover|fallback|incomparable
+#     WORKTREE_CHANGED=yes|no|unknown   (①②③ の変化)
+#     GITMETA_CHANGED=yes|no|unknown    (④⑤ の変化)
+#     CHANGE=<分類>\t<詳細>             (変化 1 件ごとに 1 行)
+#       tracked-diff / status / submodule   <起動前の記録ファイルのパス>\t<現在値の sha256>
+#       untracked-added / untracked-removed / untracked-changed   <toplevel 相対パス>
+#                               (removed は「未追跡の対象集合から消えた」= 削除・追跡化・ignore 化。
+#                                タスク MD の実体〈マニフェストの T 行〉の変化もこの分類で出し、
+#                                そのときのパスは実体の絶対パス)
+#       head / branch / index-tree   <旧値> -> <新値>(index が unmerged なら値は `(unmerged)`)
+#       refs                    `+ <sha> <ref 名>`(増えた)/ `- <sha> <ref 名>`(消えた)/
+#                               `~ <ref 名> <旧 sha> -> <新 sha>`(変わった)
+#       stash                   `+ <reflog の行>` / `- <reflog の行>`
+#       hooks / config          <変わったファイルのパス>
+#     BASE=<退避コピーのパス>\t<ok|unverified>
+#                               未追跡の changed / removed の直後に出す。unverified は退避コピーが実体照合を
+#                               通らなかった(または退避が無い)= 「変更の有無」は言えるが「内容差分は提示不能」
+#     RESULT=incomparable のとき:
+#       REASON=manifest-digest|snapshot-digest|state-missing|hooks-changed|config-changed|config-origin-missing|retake-failed
+#       GIT_SKIPPED=yes|no     (yes = git を 1 回も呼んでいない。retake-failed は git を呼んだ後の失敗なら no)
+#   taskmd-diff:
+#     TASKMD=same|checks-only|body-changed|mapping-changed
+#     DOD=<起動前のタスク MD のコピーのパス>(以後の工程が完了条件の基準として読む)
+#     exit 33 のとき REASON=digest|taskmd-body
+#   restore-taskmd:
+#     RESTORED=yes|no
+#     TOUCHED=none|copied|replaced|unknown
+#     TEMP=none|removed|retained|unknown
+#     REASON=<理由コード>(非成功時だけ)
+#     TEMP_PATH=<C 風引用した専用領域>(TEMP=retained のときだけ)
+#     既存対象は準備した通常ファイルで原子的に replaced。不在からの作成は copied。
+#     準備失敗は対象を保つ。公開後の失敗は変更済みと報告し、自動で戻さない。
+#     成功は exit 0 / RESTORED=yes / copied または replaced / TEMP=removed の全行一致。
+#     不正・欠落・重複した応答は caller が unknown と扱い、引継ぎを停止する。
+#   REASON(taskmd-diff・restore-taskmd)の意味:
+#     digest         保護領域の検査かダイジェスト照合に失敗した
+#     taskmd-body    退避した本文の種類・モード・sha256 が記録と一致しない
+#     dest-symlink / dest-dir / dest-special  復元先が通常ファイルか不存在でない
+#     internal-argument / runtime-unavailable  内部引数・必要機能が不成立
+#     fd-copy-unavailable  fd の別名を通した短いコピーが、起動時の試しでどの別名でも成り立たない(macOS の /dev/fd・8.30 より前の GNU cp など)
+#     prepare-failed / copy-failed / replace-failed  準備・コピー・公開の失敗
+#     verify-failed / cleanup-failed  照合・自分の専用一時物の回収の失敗
+#     budget-exceeded / child-unreaped  有限予算・コピーを行う直接の子プロセスの回収の失敗
+#     interrupted    捕捉した TERM/INT/HUP(exit 20)。通常の復元失敗は exit 33
+#
+# 保護領域:
+#   解決順は `$XDG_STATE_HOME` → `$HOME/.local/state` → `$HOME/.cache`。解決後の実体パスが `/tmp`・
+#   `$TMPDIR`・toplevel の配下なら次の候補へ進み、全滅なら縮退 `no-protected-area`。
+#   **候補はまだ存在しなくてよい**。その場合は存在する最も深い親を物理的に解決し、まだ無い分は
+#   語彙的に正規化して(`.` は捨て、`..` は 1 つ前の要素と相殺する)繋いだ絶対パスで判定してから作る。
+#   **棄却する候補には mkdir も chmod もしない**(相殺しきれない `..` が残る候補も棄却する)。
+#   `<候補>/dev-workflow/guard-XXXXXX/` を 0700 で作る。レイアウト:
+#     snapshot/1-diff.bin  snapshot/2-status.z  snapshot/4-meta.txt  snapshot/5-stash.txt
+#     snapshot/taskmd.txt(選択パス・実体パス・種別)、snapshot/config-origins.txt(設定候補の記録)
+#     snapshot/config-contexts.txt(使用先・設定blob)、snapshot/6-contexts.txt(下のリポジトリのHEAD/index/diff/status)
+#     manifest.tsv         files/<toplevel 相対パス>(退避コピー)
+#     taskmd-body          (タスク MD の実体のコピー。追跡済み・ignore 済み・リポジトリ外でも必ず)
+#   **追跡ファイルの差分と未追跡ファイルの平文複製が入る。** 消すのは cleanup だけ。
+#
+# 所属の印(記録の外。開始前の確認 pending-implementation.py が記録の中を開かずに読む):
+#   `<候補>/dev-workflow/owner-XXXXXX`(XXXXXX は記録の名前 guard-XXXXXX の後ろ)。0600 の通常ファイル。
+#   1 行 1 項目の `キー\t値`。パスは元のバイトの小文字 16 進、番号は十進:
+#     version(1)・guard_dev・guard_ino(記録の番号)・top・top_dev・top_ino(toplevel)・
+#     common・common_dev・common_ino(git の共通の置き場)・taskdir・taskdir_dev・taskdir_ino
+#     (タスク MD の実体の在るフォルダ)・tmpdir(take のときの $TMPDIR の物理パス。未設定なら空。相対パスなら印を書かない)
+#   中身は記録を作る前に求め、記録を作った直後に書く(.work に一時ファイル → link で名前を付ける →
+#   名前の番号を確かめて一時ファイルを消す)。64 KiB 以下。パスと番号だけで機密を含まない。
+#   求められない・書けない(名前に既にエントリが在る・link が無い など)ときは NOTE を出して続ける。
+#   link を呼んだ後は、名前にエントリが無いと確かめられたときだけ OWNER_MARK=no で続け、それ以外は終了値 20。
+#   take の失敗・シグナルでは記録と一緒に消す。cleanup は記録を消した後に消す(この記録の印と
+#   確かめられないもの〈フォルダ・リンク・番号の違う印〉は消さない)。
+#
+# マニフェスト(manifest.tsv):
+#   1 行 1 エントリのタブ区切り `種別\tモード\t値\tパス`。並びは LC_ALL=C のパス順。
+#     T  タスク MD の実体(必ず先頭行。値 = sha256、パス = 実体の絶対パス)
+#     f  通常ファイル(値 = **退避コピー側の**生バイトの sha256)
+#     l  symlink(値 = リンク文字列。辿らない)
+#     o  その他(FIFO・ソケット・ネスト repo のディレクトリ等。値 = `-`)
+#     u  読めない(値 = `-`)
+#   パスとリンク文字列は上と同じ C 風引用。モードは `stat -c %a`、使えなければ `stat -f %Lp`。
+#
+# ダイジェスト:
+#   MANIFEST_SHA256 = manifest.tsv の sha256
+#   SNAPSHOT_SHA256 = snapshot/ の各ファイルの「sha256 + 空白 2 個 + ファイル名」を名前順に並べたものの sha256
+#
+# 5 要素の取り方(全 git 呼び出しに前置き `--no-pager --no-replace-objects -c core.quotePath=false
+#   -c core.fsmonitor= -c core.hooksPath=/dev/null -c core.ignoreCase=false -c core.splitIndex=false`。
+#   除外 = `<--cwd の toplevel 相対パス>/.claude/reviews`。①② は pathspec、③ は同じ錨で外す):
+#   ① `diff --binary --no-ext-diff --no-textconv --submodule=short --ignore-submodules=dirty <HEAD または空ツリー>`(`-c diff.autoRefreshIndex=false
+#      -c core.ignoreStat=false` つき。コミット 0 の repo は空ツリーと比べる)
+#   ② `status --porcelain=v1 -z -uall --ignore-submodules=dirty`(`GIT_OPTIONAL_LOCKS=0`)
+#   ③ マニフェスト = `ls-files -o --exclude-standard -z` のうち除外の配下でないもの + タスク MD の実体。
+#      **タスク MD は除外より優先する**(pathspec の除外は打ち消せないので、除外の配下に在るタスク MD は
+#      ①② には現れず、③ の T 行が単独で担う)
+#   ④ HEAD / index の tree(**使い捨ての index** で `write-tree`)/ ブランチ名 / refs 全体 /
+#      hooks ディレクトリ(git が実際に hook を探す場所)の全エントリのダイジェスト /
+#      `config` と `config.worktree` の sha256(無いファイルは `(無し)`)と、開始時にキーを提供した
+#      file origin の経路・構成要素の種別/リンク字面/device/inode・実体の sha256。値は新規記録に含めない。
+#      親とリンクの識別子は厳密に照合。末端通常ファイルの同内容の再作成は許可する。
+#   ⑤ stash: `refs/stash` が在れば `reflog show --format='%H %gd %gs' refs/stash` の全体、無ければ `stash 無し`
+#
+# git の状態を変えない:
+#   index・HEAD・refs・stash・config に書かない。`write-tree` は使い捨ての index に対して行い、
+#   `status` は `GIT_OPTIONAL_LOCKS=0`、`diff` は `diff.autoRefreshIndex=false` で index の書き直しを止める。
+#
+# 設定されたプログラムを実行しない:
+#   compare は、保護領域の検査 → ダイジェスト照合 → **hooks と config の検査(記録済みの実体パスからの
+#   ファイル読み取りだけ)** を終えるまで git を 1 回も呼ばない。hooks か config が変わっていたら
+#   `incomparable`(hooks-changed / config-changed)で止まり、以後の git も実行しない。
+#   出典記録の無い旧 state の compare は config-origin-missing・33。他サブコマンドは従来どおり。
+#   空/欠落/非成立 include と既知 root の新設も候補記録で照合する。
+#   Apple Git(`git version` が `git version X (Apple Git-N)` の形)は、system 設定が有効(GIT_CONFIG_NOSYSTEM が
+#   未設定か偽)のとき、GIT_CONFIG_SYSTEM の値に関係なく `<導入先>/share/git-core/gitconfig` を読む。take はこの
+#   ファイルを、`git --man-path` の値(`/…/share/man` の形だけ受け付け、末尾の `/share/man` を外したもの)から
+#   求めて保持候補にする(ファイルが無くても候補にする)。求められないときは終了値 20 で止める。
+#   保持候補に無い読み込み先を Git が読むときも終了値 20 で止め、原因の読み込み先(パスか出典の種類)と選べる
+#   実行条件を stderr に出す(設定の値・本文・Git の stderr は出さない)。
+#   初回管理パス特定前の設定と、検査中だけの並行変更は開始時信頼境界の外である。
+#   設定値を含まないのは新規出典記録と診断だけ。既存の生 diff・未追跡退避の範囲は変えない。
+#   taskmd-diff と restore-taskmd は git を呼ばない。
+#
+# 前提:
+#   bash 4.0 以上(連想配列を使う)。sha256 は `sha256sum` → `shasum` → `openssl` の順に探す。
+#   所属の印には PATH の `link`(GNU coreutils・macOS の /bin/link)と `od` を使う。無ければ印を書かずに続ける。
