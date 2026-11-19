@@ -211,16 +211,22 @@ except (Exception, SystemExit) as exc:
    - Issue 方式では Issue 方式の契約 §6 の `preflight` が必須。不在・未認証・権限不足なら開始前に停止する。以下の「Phase 5 で push・PR をしない」はファイル方式だけ。
    - 無い場合は Phase 5 で push・PR をせず、手で実行するコマンド列を示すこと(無人では結末 `縮退`)を**この時点で報告**する(最後まで走ってから「PR を作れません」と言わない)。
    - 無人のタスクのイテレーションでは、2′ で保持した origin の判定の `repo` が null なら、結末が `縮退` になる(push もしない)ことも、この時点で報告する(`gh repo view` による PR の作成先の確かめは Phase 5 で行う)
-6. **外部実装委託(作業を別の AI に任せること)の承認を先取りする**: profile によって実装の委託先が外部に解決される場合
+6. **外部実装委託(作業を別の AI に任せること)の担当を先に確かめる**: profile によって実装の委託先が外部に解決される場合に、担当を確かめる。保存した選択の値は、外部に解決されるかを問わず先に読む(次の箇条)
+   - 無人のときを除き、下の ① より前に `python3 {do-task の}scripts/implementer-choice.py status` を呼ぶ。返った値を、書き換えの見つけ方の起点(後で保存ファイルが書き換えられたかを比べる元の値。external-runners.md §12-10-7)として覚え、do-task へ引き継ぐ。
+     - 宣言が無ければ `--runner` を付けない。Issue 方式・parent-child・git でないときも呼ぶ。Phase 5 の完了の報告の前にも比べる(external-runners.md §12-10-7)。
    - Issue 方式はファイルを持たないタスクなので、承認を求めず内蔵の実装担当を使う([Issue 方式の契約](../do-task/references/github-issue.md) §5)。以下はファイル方式だけ。
-   - (解決順・parent-child で内蔵に切り替えること・提示内容・保持と取り消しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12 に従う)、
-   - **Phase 3 まで待たずにこの時点で承認を取る**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。
-   - 承認はセッション内で 1 回の判断として保持され、Phase 3 の /do-task がそれを再利用するので**同じ承認を 2 回求めない**。
+   - (解決順・parent-child で内蔵に切り替えること・提示内容・保存と聞き直しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12・§12-10 に従う)、
+   - **聞くことが要るときだけ、Phase 3 まで待たずにこの時点で聞く**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。次の順に進める。
+     - ① その時点で分かるもの(無人・Issue 方式・parent-child・git でない)を先に当てる。次に §12-10 の判定の順の 2(セッションの中の最後の指定・`status`)を当てる。内蔵に決まれば内蔵で走り、ここで終わる。
+     - ② `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>`。0 以外なら Phase 0 では聞かず、do-task の Phase 3 の扱いに任せる。
+     - ③ リポジトリの外の一時ファイルに固定の 1 行を書いて `--prompt-file` に渡し、`implement-agent.sh --dry-run` を流す(`--runner`・`--cwd`・`--model` は do-task と同じ値)。0 以外なら ② と同じく任せる。
+     - ④ `implementer-choice.py secret-set`(失敗なら `unknown`)→ 長い形の `status` → §12-10 の判定の順の 5・6。質問したときは、`record` と、セッションの中の指定と承認で覚える。
+   - Phase 3 の /do-task は判定の順をやり直し、同じ `tuple_sha256` なら聞かないので、**同じ承認を 2 回求めない**。
    - **承認が得られなくても停止しない** — 内蔵 implementer で走り切り、その旨を報告する(停止条件には加えない)。
    - **先取りした承認は、/do-task の Phase 3 の外部の手順の手順 1(承認より先に判定する縮退)で内蔵に切り替えたとき(条件 A: タスク MD がファイルでない・git でない・条件 B: 最後に承認した一覧にフィルター(Git の読み書きの変換)がある — external-runners.md §12-1)は使わず、そのことを報告する**
    - (先取りの承認は /do-task の事前検査より先にあるので、承認を取った後にこの切り替えに当たることがある)。
    - **このための引数は設けない**(承認は発話でのみ行う)。
-   - 無人では承認を求めず、内蔵 implementer で走り、そのことを報告する(S2)
+   - 無人では承認を求めず、保存した選択も読まず、内蔵 implementer で走り、そのことを報告する(S2)
 
 ## Phase 1: 設計(/create-task)
 
@@ -374,6 +380,7 @@ Issue 方式は Issue 方式の契約 §6 に従い、公開直前に本文と R
    - **手元で直すとき**(無人のタスクのイテレーションだけ): 作業ブランチに追跡は付いていない。push は `git push origin <作業ブランチ>` で実行する(追跡を付ける操作はループが動いていないときに限る — references/unattended-mode.md §9 ⑥)
    - ファイル方式は実際の完了タスク MD へのリンク。Issue 方式は `Closes #<番号>`
 4. 完了報告は [../do-task/references/writing-for-people.md](../do-task/references/writing-for-people.md) の「8. 完了報告の型」に従い、PR の URL を「リンク」に書く。
+   - 報告の前に、最後に覚えた値(§12-10-7。`record` の後は新しく覚えた値)と `implementer-choice.py status` の値を比べ、変わっていれば報告に書く(external-runners.md §12-10-7。無人では呼ばない)。
    - 設計だけで終える場合・途中で止まった場合・失敗した場合・発見の結果を返す場合も同じ型を使う。完了した作業の範囲を対象名に書き、未実施の工程を完了と呼ばない。
    - 呼び出した skill には枠を出させず、最後にこの skill が 1 つだけ出す。見出しの行も、最後にこの skill が 1 回だけ置く。「詳しい記録」は手順 3 で本文に書いた場所を指す。作成後は本文を書き換えない。
    - 発見のイテレーションと PR を作らなかったときは、既存のタスクの記録か会話に内訳を残す。停止理由・再開に必要な判断・未実施の確認は枠にも書く。無人の結果の行は、枠の外の最後の行に置く。
