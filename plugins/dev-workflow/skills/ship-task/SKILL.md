@@ -211,9 +211,9 @@ except (Exception, SystemExit) as exc:
    - Issue 方式では Issue 方式の契約 §6 の `preflight` が必須。不在・未認証・権限不足なら開始前に停止する。以下の「Phase 5 で push・PR をしない」はファイル方式だけ。
    - 無い場合は Phase 5 で push・PR をせず、手で実行するコマンド列を示すこと(無人では結末 `縮退`)を**この時点で報告**する(最後まで走ってから「PR を作れません」と言わない)。
    - 無人のタスクのイテレーションでは、2′ で保持した origin の判定の `repo` が null なら、結末が `縮退` になる(push もしない)ことも、この時点で報告する(`gh repo view` による PR の作成先の確かめは Phase 5 で行う)
-6. **外部実装委託(作業を別の AI に任せること)の担当を先に確かめる**: 下の 1 行目の起点は、無人のときを除き、外部に解決されるかを問わず取る。担当の確かめは、profile によって実装の委託先が外部に解決される場合に行う
-   - 下の ① より前に、外部に解決されるかを問わず `python3 {do-task の}scripts/implementer-choice.py status` を呼び、書き換えの見つけ方の起点として覚えて do-task へ引き継ぐ。
-     - 宣言が無ければ `--runner` を付けない。Issue 方式・parent-child・git でないときも呼ぶ。無人では呼ばない。Phase 5 の完了の報告の前にも比べる(external-runners.md §12-10-7)。
+6. **外部実装委託(作業を別の AI に任せること)の担当を先に確かめる**: profile によって実装の委託先が外部に解決される場合に、担当を確かめる。保存した選択の値は、外部に解決されるかを問わず先に読む(次の箇条)
+   - 無人のときを除き、下の ① より前に `python3 {do-task の}scripts/implementer-choice.py status` を呼ぶ。返った値を、書き換えの見つけ方の起点(後で保存ファイルが書き換えられたかを比べる元の値。external-runners.md §12-10-7)として覚え、do-task へ引き継ぐ。
+     - 宣言が無ければ `--runner` を付けない。Issue 方式・parent-child・git でないときも呼ぶ。Phase 5 の完了の報告の前にも比べる(external-runners.md §12-10-7)。
    - Issue 方式はファイルを持たないタスクなので、承認を求めず内蔵の実装担当を使う([Issue 方式の契約](../do-task/references/github-issue.md) §5)。以下はファイル方式だけ。
    - (解決順・parent-child で内蔵に切り替えること・提示内容・保存と聞き直しの規則はすべて /do-task の Phase 0・Phase 3 と [../do-task/references/external-runners.md](../do-task/references/external-runners.md) §12・§12-10 に従う)、
    - **聞くことが要るときだけ、Phase 3 まで待たずにこの時点で聞く**(原則 2「既定は走り切る」を保つため、工程の途中で承認待ちにしない)。次の順に進める。
