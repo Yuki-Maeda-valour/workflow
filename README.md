@@ -125,6 +125,10 @@ mkdir -p ~/dev/新プロジェクト                     # 配置先は事前に
   - **解決の正本**(役割語の一覧・派生名の体系〈役割の名前に印を足して、同じ役割の AI を分ける付け方〉・属性軸〈AI に任せるときの条件の種類〉・解決順〈AI に任せる手段を並べる、決まった順〉・ホストでの解決・解決できないときにすること)は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の 1 ファイルだけで、README や design はそれを参照する。
   - **移行は完了している**(新規混入は `scripts/validate.py` が ERROR で止める)。
   - **語彙・検査範囲・除外集合(検査から外すファイルや skill の一覧)・到達時の実測・残る論点は [docs/design.md](docs/design.md) §7-7 が正本**
+  - **役目を終えた委託先は閉じる**(閉じる = 止めて、ホストの担当の一覧から消す): もう差し戻さない(直す点を返してやり直してもらうことが無い)委託先は、各 skill が工程の区切りで閉じる。
+    - 人の答えを待つ間は閉じない(閉じた委託先には送れず、同じ名前へ差し戻せなくなるため)。
+    - 無人(`--unattended`)でも閉じない。`loop.sh` の 1 回分はセッションごと終わるので、委託先は残らない。`loop.sh` を使わない無人では残るが、無人の手順を増やさないため閉じない。
+    - いつ閉じるかの決まりは [docs/design.md](docs/design.md) §5-17(用途 4)、閉じる手段は [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の軸 11、各 skill の区切りは各 SKILL.md、実測は [docs/design.md](docs/design.md) §7-3 にある。
 - **人に聞く場面もホスト非依存に書く**: skill 本文は「質問で確認する」「複数選択の質問」などと書き、ホストの質問の道具への対応づけは [delegation-map.md](plugins/dev-workflow/skills/do-task/references/delegation-map.md) の §8 に置く。
   - 質問の仕組みが無いホストでは、同じ内容を文で聞く(聞き方の決まりの正本は [writing-for-people.md](plugins/dev-workflow/skills/do-task/references/writing-for-people.md) の 7 節)。
   - `AskUserQuestion`・`multiSelect`(大小を問わない)の新規混入は、`scripts/validate.py` のホスト CLI 語検査(ホストに結びつく名前を見つける検査)が ERROR で止める(語彙・検査範囲・除外は [docs/design.md](docs/design.md) §7-7-1 が正本)
