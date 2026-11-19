@@ -789,6 +789,47 @@ class Comparator(unittest.TestCase):
             self.assertIn(cls, manifest['files'][self.m.PENDING_TESTS]['classes'])
             self.assertTrue(hasattr(getattr(module, cls), method), (cls, method))
 
+    def test_setup_commits_do_not_start_background_maintenance(self):
+        """試験用の repo を作る git(IgWorld.git と、既存テストの git の包み)は、後ろの自動の手入れを起こさない。
+        対照: 指定の無い commit は、この機械の git で自動の手入れ(か、古い git の gc --auto)を起こす。"""
+        self.assertEqual(self.m.NO_AUTO_MAINTENANCE, ('-c', 'maintenance.auto=false', '-c', 'gc.auto=0'))
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / 'repo'
+            repo.mkdir()
+            env = dict(os.environ, HOME=temp, GIT_CONFIG_NOSYSTEM='1', GIT_CONFIG_GLOBAL=os.devnull, GIT_TRACE='2')
+            for key in [key for key in env if key.startswith('GIT_CONFIG_') and key not in
+                        ('GIT_CONFIG_NOSYSTEM', 'GIT_CONFIG_GLOBAL')]:
+                del env[key]
+
+            def commit(name, options):
+                (repo / name).write_text(name)
+                subprocess.run(['git', '-C', str(repo), 'add', name], env=env, check=True, capture_output=True)
+                return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', *options,
+                                       'commit', '-qm', name], env=env, check=True, capture_output=True).stderr
+            subprocess.run(['git', 'init', '-q', str(repo)], env=env, check=True, capture_output=True)
+            self.assertNotIn(b'maintenance run', commit('a', self.m.NO_AUTO_MAINTENANCE))
+            control = commit('b', ())
+            self.assertTrue(b'maintenance run' in control or b'gc --auto' in control, control[-300:])
+        # IgWorld.git と、既存テストの git の包み(git を持つクラスだけ)が、その指定を付ける。
+        seen = []
+        with mock.patch.object(self.m.subprocess, 'run', lambda argv, **kwargs: seen.append(argv)):
+            world = self.m.IgWorld.__new__(self.m.IgWorld)
+            world.real_git, world.repo, world.real_path, world.home = '/g', Path('/r'), '/bin', Path('/h')
+            world.git('commit', '-qm', 'x')
+        self.assertEqual(seen, [['/g', '-C', '/r', *self.m.NO_AUTO_MAINTENANCE, 'commit', '-qm', 'x']])
+
+        class Owner(unittest.TestCase):
+            def git(self, cwd, *args, check=True):
+                return (cwd, args, check)
+
+        class Plain(unittest.TestCase):
+            pass
+        module = type('M', (), {'subprocess': None, 'HELPER': 'h'})
+        paired = self.m.pending_cli_wrapper(Owner, module)
+        self.assertEqual(paired.git(paired(), '/c', 'commit', '-qm', 'x', check=False),
+                         ('/c', (*self.m.NO_AUTO_MAINTENANCE, 'commit', '-qm', 'x'), False))
+        self.assertNotIn('git', vars(self.m.pending_cli_wrapper(Plain, module)))
+
     def test_pty_run_reads_everything_the_child_wrote_before_exiting(self):
         # 書いてすぐ終わる子の出力を全部読む(Mac では、子の側の最後の close が読んでいない出力を捨てうる)。
         code = ('import os, sys\n'

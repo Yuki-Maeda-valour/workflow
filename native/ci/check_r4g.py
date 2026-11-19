@@ -1279,6 +1279,14 @@ class _HelperRuns:
         return result
 
 
+# 比較器と既存テストが試験用の repo を作る git(commit など)に付ける指定。新しい git(2.47 以上)は commit などの後に
+# 自動の手入れ(`git maintenance run --auto --detach`)を後ろへ切り離して走らせ、`.git/objects/maintenance.lock` を
+# 作って消す。入力の無変更の記録(repo の全体を読む)と重なると、消えたファイルを読もうとして落ちるか、入力が
+# 変わったと見える(CI の Mac arm64 で1回)。作る側の git だけに付け、repo の設定には書かない(旧版と Rust が読む
+# repo の中身は変わらない)。gc.auto=0 は、手入れの無い古い git の `gc --auto` も止める。
+NO_AUTO_MAINTENANCE = ('-c', 'maintenance.auto=false', '-c', 'gc.auto=0')
+
+
 def pending_cli_wrapper(original, module):
     """CLIの起動(`cli`と、`scan --help`の`subprocess.run`)だけを、旧版とRustの組へ置き換える。
 
@@ -1294,6 +1302,12 @@ def pending_cli_wrapper(original, module):
 
         def watched(self):
             return [self.base] + ([self.owned] if getattr(self, 'owned', None) else [])
+
+        if hasattr(original, 'git'):
+            def git(self, cwd, *args, **kwargs):
+                # 既存テストが試験用の repo を作る git(OwnerFixture の commit・worktree add など)にも、後ろの
+                # 自動の手入れを起こさない指定を付ける(cli の前後で、その repo の全体を記録して比べるため)。
+                return super().git(cwd, *NO_AUTO_MAINTENANCE, *args, **kwargs)
 
         def cli(self, args=None, env=None, cwd=None):
             args = ['scan', '--cwd', str(cwd or self.cwd)] if args is None else args
@@ -4690,8 +4704,9 @@ class IgWorld:
                 'GIT_CONFIG_GLOBAL': os.devnull}
 
     def git(self, *args):
-        return subprocess.run([self.real_git, '-C', str(self.repo), *args], env=self.setup_env(), check=True,
-                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        # 試験用の repo を作る git。後ろの自動の手入れを起こさない(NO_AUTO_MAINTENANCE の説明)。
+        return subprocess.run([self.real_git, '-C', str(self.repo), *NO_AUTO_MAINTENANCE, *args], env=self.setup_env(),
+                              check=True, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     def make_repository(self):
         self.repo.mkdir()
