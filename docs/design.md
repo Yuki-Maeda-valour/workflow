@@ -334,6 +334,15 @@ initialized_at: "YYYY-MM-DD"              # 初回導入日
       1. **完了後の追加依頼**: 差し戻し・再レビューは**同じ name への再依頼(軸 5)**。エージェントの文脈が保たれるため、再スポーン(文脈ゼロからの再調査)より速く・ぶれない。**これが双方向でやり取りできる環境の最大の利得なので、レビュー反復では必ずこちらを使う**
       2. **走行中の STATUS 問い合わせ**: **外部 implementer(下の項)を除き**、待機目安(implementer 15 分 / reviewer 20 分。**reviewer の目安は外部ランナーの既定の最大所要時間〈プローブ + 本実行 + ヘルプ照合 + 終了猶予、約 12 分〉より長く保つ** —— 短いと正常に走っている外部レビューを二重起動する)を超えたら生存を確認し(軸 7)、状態を尋ねる(軸 6)
       3. **走行中の前提是正・中止**: 委託後に前提の誤り(対象の取り違え・スコープ解釈違い)に気づいたら完了を待たずに訂正する。不要になった委託は中止を伝える(黙って結果を捨てない)
+      4. **役目を終えた委託先を閉じる(軸 11)**: もう差し戻さない委託先を、工程の区切りで閉じる。区切りは各 skill が工程の中に書く
+         - 閉じる時: その委託先へもう差し戻さないと決まった区切り。例: 調べものの結果を受け取って次の工程へ進んだ・点検の指摘が 0 になった・レビューの判定が決まった(全員 APPROVED か、人が打ち切りを選んだ)・do-task の implementer と reviewer は完了処理を終えた
+         - skill の実行が終わる時(完了・途中で止まった・失敗): その skill が起動した委託先の残りを閉じる
+         - 閉じない時: 人の答えしだいで同じ実行を続ける形で止まる間(判断を仰ぐ点・do-task の中断・実動確認の結果待ち・検証のみモードの修正の判断)。残した委託先を報告に書き、人がやめると決めたら閉じる
+         - 入れ子: 別の skill から呼ばれたときは、呼び出し元の実行が人の答えを待つ間だけ閉じない。呼び出し元が止まって実行を終えるときは、呼んだ skill が残した委託先も呼び出し元が閉じる
+         - 閉じた委託先には送れない。後で要るときは新しく起動する(送る相手が失われたときと同じ扱い)
+         - 走行中で不要になったもの: 読み取りだけの委託先は、用途 3 で中止を伝えてから閉じ、閉じたことを報告に書く。implementer は、中止を伝えた後、返答か待機の知らせが届いてから閉じる。待機目安を過ぎても届かないときは閉じて、作業ツリーの差分を確かめて報告する
+         - 閉じる手段が無い環境では閉じずに続ける。外部ランナーと外部 implementer は毎回終わるプロセスなので対象外
+         - 無人(`--unattended`)では閉じない。理由: `loop.sh` のイテレーション(無人ループの 1 回分の実行)はセッションごと終わるので残らない。loop なしの無人では残るが、無人の手順を増やさない(止める手段は許可が要らない道具だが、無人で使った実測は無い。拒否されれば `G1: 許可の拒否` として保留か失敗扱いになる)
       - 送る相手が失われている(軸 7 の生存確認に無く、軸 6 の送達が失敗する)ときだけ、一方向だけの環境と同じ再スポーンにフォールバックする(読み取りのみの役割の M2 は例外 — review-protocol.md)
       - **レビュアー同士を会話させない**。独立性が失われると多モデルレビューの多様性が意味を失う。指摘の突合は必ず team-lead が行う
     - **一方向だけの環境**: 委託は「起動 → 最終レポート」の一方向。差し戻し・追加指示は**前回成果物のパスを含めた新規起動**で代替する。応答しない委託先への STATUS 問い合わせ(M1)は省略し、待機目安を超えたら再スポーン(M2)に直行する(内蔵 implementer は、中止を伝える手段〈軸 6〉が無く走っているものを止められないので、再スポーンせず M4 へ。review-protocol.md の M2)
@@ -691,7 +700,8 @@ done | sort -k2 -rn
 | **OpenSSH のホスト鍵設定(H44)**: `StrictHostKeyChecking no/off` は変更鍵を許し、`yes`・`ask`・`accept-new` は拒否する。`ssh -G` は yes/no を true/false で出す。新しい鍵の保存先は User の先頭だけで、書き込みの失敗は接続を必ずしも止めない。User の単独 `none` は 0 本へ変換され、未知鍵は拒否される。`HostKeyAlias` は鍵の照合名を変え、`NoHostAuthenticationForLocalhost yes` はローカルの接続先の鍵検証を省きうる。`KnownHostsCommand` や DNS の検証結果は `-G` だけでは分からない | [ssh_config(5)](https://man.openbsd.org/ssh_config)・[ssh.c](https://github.com/openssh/openssh-portable/blob/master/ssh.c)・[sshconnect.c](https://github.com/openssh/openssh-portable/blob/master/sshconnect.c)(2026-10-06 確認)。OpenSSH 8.9p1 の隔離した `-G -F` 設定で出力を確認([Issue #161](https://github.com/Yuki-Maeda-valour/workflow/issues/161)) | 2(H44)・discover-mode.md §3・§10 |
 | **Claude Code** の読み取り専用のツール(Read・Glob・Grep)は、作業ディレクトリの中では承認が要らない(公式の表の原文: "Read-only \| File reads, Grep \| No, within the working directory and additional directories")。そのため `loop.sh` のイテレーションの worktree の中を読むこれらのツールは確認に回らず、許可の仲介の hook に届かない(#69 の実走の 2 晩目で、data-audit のイテレーションのメインが Read を 19 回使い、許可の仲介の記録に Read は 0 件だった。届いたのは Write と Bash だけ)。同じ実走で、委託した調査のサブエージェントが Bash の `find . -path './.git' …`・引用符の外のグロブを実行して拒否され、イテレーションが G1 で失敗した。無人のイテレーションの読むだけの調査を、先にツールで行う根拠(unattended-mode.md) | [Configure permissions](https://code.claude.com/docs/en/permissions) の「Permission system」の表(2026-09-26 確認)・ローカル実測(2026-09-26・Claude Code 2.1.281。#69 の実走) | 2(無人ループ) |
 | **Claude Code** は、Linux・macOS・WSL では Glob・Grep のツールを既定のツールの集合から外す(原文: "On macOS, Linux, and WSL, Claude Code leaves Glob and Grep out of the default tool set, and Claude searches with find and grep through the Bash tool instead.")。その検索は埋め込みの bfs・ugrep で動き、hook と許可の規則には Bash の呼び出しとして届く。2 つが戻るのは、起動時に `--tools` か `--allowedTools` で Glob か Grep を名指したとき(`--allowedTools` でどちらか 1 つを名指せば両方が戻る。設定ファイルの allow の規則では戻らない)などに限る。ファイルの許可の判定は `Read(path)`・`Edit(path)` の規則だけで行い、`Glob` のパスの規則は受け付けても判定に使わない(`--allowedTools` で渡した `Glob` の規則は起動時の警告の例外。permissions の原文: "If you write a path rule for `Write`, `NotebookEdit`, `Glob`, or the legacy `MultiEdit` tool instead, Claude Code accepts the rule but never consults it, and warns at startup, except for a `Glob` rule passed in `--allowedTools`.")。`Grep` のパスの規則の扱いは文書に無い。`loop.sh` の `--allowed-tools` では、例えば `Glob(docs/**)` のように括弧を付けて検索道具を戻す。括弧の内容を許可するファイル範囲と説明しない。2.1.293 の H47 調査では scoped Glob による Glob/Grep の復帰と outside 呼出しの hook 拒否を観察した。scoped Grep 単独でも指定内/外が hook で拒否された。道具名だけの allow と `Tool(*)` は H47 の起動前検査で拒否する。道具の名だけの規則(`Grep`)を足すと、cwd の外の `Grep` が許可の仲介の hook を通らずに通った(#193 の実ホスト。2.1.289。#107 の H47)。#69 の実走で、この値を足したイテレーションの初期化のツールに Glob・Grep の 2 つが入り、委託した調査のサブエージェント 4 体も Glob・Grep・Read だけを使って Bash を 1 回も実行しなかった(メインは Glob 3・Grep 6・Bash 47、拒否 0。許可の仲介の記録に Glob・Grep は 0 件)。足す前の 1〜2 晩目のイテレーションの記録では、Glob・Grep の使用は 0 件で、調査のサブエージェントの Bash が拒否されてイテレーションが失敗した | [Tools reference](https://code.claude.com/docs/en/tools-reference) の「Glob tool behavior」・[Configure permissions](https://code.claude.com/docs/en/permissions) の「Read and Edit」(2026-09-26 確認)・ローカル実測(2026-09-26・Claude Code 2.1.281。#69 の実走の 2 晩目の再実行)・[Issue #232](https://github.com/Yuki-Maeda-valour/workflow/issues/232)(2026-10-08 調査) | 2(無人ループ) |
-| **Claude Code** の委託先の一覧を取る手段(解決表 軸 7)は、行ごとに状態を出す(走行中は `running`、完了は `completed`) | ローカル実測(2026-09-27・Claude Code 2.1.283。#90 の設計レビューで走らせた委託の一覧で、走行中と完了が別の状態で出た) | 5-17(解決表 軸 7) |
+| **Claude Code** の委託先の一覧を取る手段(解決表 軸 7)は、2.1.283 の実測で、行ごとに状態を出した(走行中は `running`、完了は `completed`)。2.1.327 の実測では、名前を付けて起動した委託先の行に状態が出なかった | ローカル実測(2026-09-27・Claude Code 2.1.283。#90 の設計レビューで走らせた委託の一覧で、走行中と完了が別の状態で出た。2026-11-19・Claude Code 2.1.327 の実測では、名前を付けて起動した委託先の行に状態が出なかった) | 5-17(解決表 軸 7) |
+| **Claude Code** で、名前を付けて起動した委託先は返答の後も一覧に残る(行に状態の欄は無い)/ 止める手段(解決表 軸 11)に名前を渡すと止まり一覧から消える / 止めた委託先へ送ると届く相手がいないと返り、再開しない / 止める手段は走行中の作業も止める / 止める手段は許可が要らない道具 / 前で動く委託(返答が起動の結果として返る形)は返答とともに終わり一覧に残らず、止める手段は「見つからない」と返す / 委託先が返答を終えると待機の知らせが会話に届く | ローカル実測(2026-11-19・Claude Code 2.1.327。名前を付けた試しの委託先を起動し、返答の後に待機の知らせが届くことを見て、止めて一覧と送信を確かめた)と、道具の説明と公式文書 [tools-reference](https://code.claude.com/docs/en/tools-reference) の表(2026-11-19 確認。表に版の記載は無い) | 5-17(解決表 軸 11) |
 | **Claude Code** の書き込みツールの挙動(4 つ): 名前が symlink(リンク先の有無を問わない)・FIFO のとき、Write・Edit は**拒否する**(リンク先は変わらない・止まらない)/ 名前がハードリンクのとき、Read の後の Write は**新しい inode に置き換える**(もう一方の名前の中身は変わらない。Read すると先に置かれた中身が文脈に入る)/ **親ディレクトリが symlink のとき、Write は辿る**(警告なし)/ Bash のリダイレクト(`>`)は symlink を辿り、ハードリンクにはその場で書き、FIFO で止まる。外部 implementer が予測できる名前(`.claude/reviews/` の記録)に先に置いたものの扱いの根拠 | ローカル実測(2026-09-28・#118 の現状分析 2。checker も再実測) | external-runners.md §12-6 の既知の限界 |
 | **git** の push の送り先の ref: dst を書かない refspec は `remote.<name>.push` の写像に従う。`remote.origin.push = refs/heads/task/x:refs/heads/main` のもとで `git push -u origin task/x` を実行すると `task/x -> main` になり、origin の main が更新された(写像がローカルの設定でも global の設定でも同じ)。完全な refspec(`refs/heads/task/x:refs/heads/task/x`)は写像に従わず、`push.default`・`remote.pushDefault`・`branch.<b>.pushRemote` を変えても origin の `task/x` だけに送った(`remote.origin.mirror=true` のもとでは rc 128)。公式文書の `<refspec>` の項の原文: "unless the `remote.<repository>.push` configuration specifies a different `<dst>`"。無人の push を完全な refspec で実行する根拠(unattended-mode.md §7) | [git-push — Git 公式ドキュメント](https://git-scm.com/docs/git-push) の OPTIONS の `<refspec>`(2026-09-30 確認。ローカルの `man git-push`〈git 2.55.0〉も同じ文)・ローカル実測(2026-09-28・git 2.55.0。Issue #133 の現状分析 1。2026-09-30 に写像と完全な refspec を再実測) | 2(無人ループ・発見ループ) |
 | **git** の `push.followTags`: `true`(ローカルでも global でも)のもとでは、完全な refspec の push でも、送る ref から届く注釈つきタグのうち origin に無いものが送られた。`--no-follow-tags` を付けると送られなかった。公式文書の `push.followTags` の項の原文: "You may override this configuration at time of push by specifying `--no-follow-tags`."。無人の push に `--no-follow-tags` を付ける根拠(unattended-mode.md §7) | [git-push — Git 公式ドキュメント](https://git-scm.com/docs/git-push) の `--follow-tags` と CONFIGURATION の `push.followTags`(2026-09-30 確認。ローカルの `man git-push`〈git 2.55.0〉も同じ)・ローカル実測(2026-09-28・git 2.55.0。Issue #133 の現状分析 1。2026-09-30 に global の設定で再実測) | 2(無人ループ・発見ループ) |
@@ -1205,6 +1215,80 @@ r4r_contract restore … ──────────────────�
 
 APIは [native/README.md](../native/README.md#タスク本文の復元の内部部品r4r)、比較の手順と件数は [testing.md](testing.md#r4rの比較)に記す。
 
+### loop-stateの状態観測7コマンド(S2L)
+
+[Issue #468](https://github.com/Yuki-Maeda-valour/workflow/issues/468)で、`loop-state.py`の7コマンドを開発用Rustソースへ移した。
+製品CLIの登録表・help・配布物・`loop.sh`などの既存呼出元へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+試せる入口は、開発用exampleの`loop_state_fixture`だけである。
+
+- 対象は`snapshot`・`stop-control`・`preflight`・`derive-removed-worktree`・`state-digest`・`state-digests`・`compare`。引数・既定値・help・誤引数の診断は、旧`argparse`と同じ順に解析する。
+- 終了値は旧版どおり。`Stop`(旧版が想定した停止)は終了20、`compare`の差は終了1、誤引数は終了2である。捕まえない例外は、旧版と同じ形の呼出履歴(traceback)と終了1を出す。
+- 状態は`schema7`の12欄で保存する。ASCIIのエスケープ・キー順・区切りの空白なし・末尾LFなしで書き、孤立したsurrogateも失わない。
+- 状態の読取りは旧`json.loads(bytes)`の規則を保つ。UTF-8/16/32とBOM、重複キーの最後の値、非有限数、任意精度の整数、`7.0 == 7`などの比較である。
+- 保存は`.<名前>.tmp.<pid>`をmode 0600で排他的に作り、flush・fsyncの後に同じ親フォルダからreplaceする。失敗したときに残すファイルと消す順も旧版に合わせた。
+- `state-digest`・`state-digests`はJSONを解析せず、生バイトのSHA-256を返す。直接の`OSError`を固定の理由へ変えるのは`state-digests`だけである。
+
+#### 拒否の順序と機密の本文
+
+```text
+保存状態 → 管理先(.git・commondir)と候補の確認 → 全出典をGitなしで一致確認
+  → 保持したfdを隔離したGitへ渡して解析 → include・条件の判定 → 通常のGit
+  → 機密指定の累積 → 属性を先に調べる走査 → 状態の保存
+```
+
+- 既存の基準を固定する実行の途中では、保存時に無かった候補と未知のinclude先を、本文を開く前に拒否する。拒否した後にGitや設定を読み直さない。設定値を診断へ転記しない。
+- 機密に当たるファイルは属性だけを記録する。機密のリンクの字面も読まない。lstatの後に種類と機密を判定し、必要な通常ファイルだけ本文を読む。
+- profileは保持した親から読み、親を閉じてからYAMLを解析する。過去と現在の機密指定を初出順で累積する。
+- 保存済みの出典・候補を固定する検査の例外は、旧版と同じく、初回・`--fresh-config-baseline`・親が指定した新しい自分のworktreeの`config.worktree`に限る。停止ファイルの例外も、旧版と同じ正確な指定に限る。
+- 捕まえる例外の型・Stopの文・フレームは、旧版の`try`/`except`をすべて対照表で照らして合わせた。パスは旧版と同じく、os.pathの結果の文字列を字面どおりに比べる。
+
+#### 保持fdと単一子の接続
+
+- Gitの子は`platform::loop_state::LoopChild`で起動する。stdinとstderrはDEVNULL、stdoutだけパイプにし、直接の子だけを回収する。`index_snapshot`は3本ともDEVNULLの別の起動を使う。
+- 子へ渡すファイルは、保持した通常ファイルか、`MemoryFile`(memfdで作るメモリ上の匿名ファイル)だけである。`/proc/self/fd/<番号>`の組み立てはplatformの中に閉じ、fdの番号を外へ出さない。
+- 許可したfdだけを子へ引き継ぎ、無関係のfdは閉じる。親の読取り位置・CLOEXEC・所有権は変えない。
+- 子の時間は、10秒と共有の残り時間の早い側である。超過したら、旧版の順で直接の子をkill・waitし、stdoutを閉じる。
+- C0cの`DirectChild`・`run_child`には接続しない。パイプの数と回収期限の契約が違うためである。C0cのソースとテストは変えていない。
+- 起動する外部の道具はGitだけである(23:19の決定)。
+
+#### 再帰の文脈
+
+- `core::loop_state::legacy_recursion`の`LegacyRecursionContext`は、旧CLIの`<module> → main → snapshot → profile_patterns`の呼出しの深さを表す(`recursion_limit=1000`・`entry_depth=4`)。
+- `profile_patterns_for_loop`は、PyYAMLのcompose・重複検査・2回目のcompose・構築・mergeの各段階と、CPython 3.10の一時的な加算を数える。旧版が`RecursionError`で拒否する所で、同じ拒否をする。既存の`profile_patterns`(R4S)は変えていない。
+- R4Sの再帰上限の承認済み差(有限な入力を受け付ける)は、S2Lへ転用しない。
+- refsとファイルの走査・realpath・状態のJSONの再帰も、旧版が`RecursionError`になる境界を比較で確かめた。Rust自身のスタックの深さや新しい固定の上限は使わない。
+
+#### OSの限界
+
+- Macには`/proc/self/fd`が無い。旧版は、`/proc/self/fd/<番号>`を渡す`git config --file`の解析が失敗するので、`snapshot`・`preflight`を「git の状態読取に失敗した」で拒否する。
+  - 前の状態の無い`snapshot`は、その解析の前に、worktreeの一覧と、停止ファイルの確かめ(停止ファイルの引数があるときの`stop_control_from_args`の`os.stat`)を行う。
+  - 続けて、名前の順で最初のworktreeだけについて、`rev-parse`・`secret_paths`の読取り・`diff-index`・`config.worktree`とprivate refsの読取り・configの出典の一覧(`git config --show-origin`)を行う。2つ目より後のworktreeには届かない。
+  - 前の状態を使う`snapshot`は、worktreeの一覧の前に、保存したconfigの確かめの中のその解析で拒否する。
+  - `preflight`も、保存したconfigの確かめの中のその解析で拒否する。
+  - Macの旧Pythonには`os.memfd_create`も無い。ただし、memfdを使うincludeIfの条件の判定は、その解析の後なので届かない。
+- Rustも同じ所で拒否し、一時ファイルや`/dev/fd`へ切り替えない。
+- Linuxの成功を、Macの成功として扱わない。Macでの実際の動作は未確認であり、PRのCIで確かめる。
+
+#### 承認された差と全コマンド共通の決定
+
+- 承認された差は、2026-11-11 12:39の利用者回答による文字コードの固定だけである。R4Bと同じ範囲で、7コマンドすべてに当てる。
+  - `PYTHONIOENCODING`・`PYTHONUTF8`・`PYTHONCOERCECLOCALE`・locale・ファイル名の文字コード設定に由来する解釈を、UTF-8と`surrogateescape`へ固定する。Rustはこれらの設定を読まない。
+  - ファイル操作・Gitの引数・環境変数・保存する状態の生バイトは変えない。整数変換の上限・端末幅・バッファの扱い・再帰は旧版どおりである。
+- 全コマンド共通の利用者の決定(2026-11-11の17:45・17:58〈21:35に広げた〉・22:24・22:26・22:31・22:38・23:19と、2026-11-12の00:28・00:35・00:42)は、#468の本文の「全コマンド共通の決定の適用」の節に書いた範囲だけを当てた。
+  - 出典は決定のファイルである: `rust-decision-startup-fatal-diagnostic.txt`・`rust-decision-script-path-in-diagnostic.txt`・`rust-decision-encoding-utf8.txt`・`rust-decision-runtime-env.txt`・`rust-decision-external-commands.txt`・`rust-decision-failure-modes.txt`・`rust-decision-bash-tools.txt`。
+  - 当てたもの: 起動の失敗の`Current thread`の値の形式検査、導入先の固定名`<CPython3.10>/…`と旧スクリプトの固定名`loop-state.py`、本家CPython 3.10.11の行番号、SIGINT・SIGTERM、時間切れの秒の欄、保存の途中の書き込みの失敗、`onbranch`の一時の置き場、Git以外を起動しないこと。
+  - 比較の前提の外にしたもの: 記憶域の不足、処理系の資源の上限(RLIMIT_NOFILEなど)で決まる失敗、決定が挙げたPythonの起動を変える環境変数の効果。
+- 実装とレビューの間に、旧版との差を新たに認めた所は無い。見つけた差は、すべて旧版へ合わせて直した。
+- R4S・R4A・R4B・#448の承認済み差は転用しない。
+
+```text
+旧Python(本家3.10.11) ─┐
+                        ├─ 同じ物理入力 → 生出力・終了値・状態ファイル・入力無変更を確認
+loop_state_fixture ─────┘
+```
+
+APIは [native/README.md](../native/README.md#loop-stateの状態観測7コマンドs2l)、比較の手順・件数・時間は [testing.md](testing.md#s2lの比較)に記す。
+
 ### R4U(check_links)の文書のリンク検査
 
 [Issue #480](https://github.com/Yuki-Maeda-valour/workflow/issues/480)で、旧版 `plugins/dev-workflow/skills/update-doc/scripts/check_links.py`(93行)と同じ結果を返す専用の部品を、開発用Rustソースへ実装した。
@@ -1502,11 +1586,17 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 - 2026-11-09のC0bで `rustix` を採用した。段階 0 の候補記録は上に残す。`native/Cargo.toml` で `=1.1.6` に固定し、`platform` だけに `fs` と既定の `std` を追加した。
 - R4Aのtask-digestではstdoutの端末幅取得に`termios`を加えた。
 - C0cでは匿名パイプの待機確認に `event` を加えた。起動・単一子KILL・回収は `std::process` を使う。`rustix` の `process`・ネットワーク機能は有効にせず、依存の版と自作のunsafeは増やさない。
-- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
+- R4R(#473)では、既存の `Cargo.lock` の版の `libc 0.2.191` を `platform` の直接依存に加え、R4Rの自作の `unsafe` を `native/crates/platform/src/restore_taskmd.rs` だけに置いた。cli と検査専用入口は `unsafe` を使わない。
   - 旧helperの `_posixsubprocess` と同じ子の準備が要るためである。子だけの `RLIMIT_FSIZE`、`close_range` か列挙した fd への exec の時に閉じる印、`SIGPIPE`・`SIGXFSZ` の既定、mask、`execv` は、exec の前に子の中で動く。`std::process::Command` の `pre_exec` と `libc` でしか書けない。
   - std の `execvp` は ENOEXEC で `/bin/sh` へ切り替えるので、旧helperと同じ `execv` を自分で呼ぶ。
   - 最初の信号だけを記録する処理(`sigaction`)と mask、子への信号、乱数、Mac の地域設定の判定(`setlocale`・`nl_langinfo`)、環境の `LC_CTYPE` の書き換えも、同じ理由で同じファイルに置く。
   - `rustix` の機能と、依存の版は増やしていない。
+- S2L(#468)では、依存を増やさず、自作の `unsafe` とCの関数の宣言(`extern "C"`)を `native/crates/platform/src/loop_state.rs`・`loop_state_signal.rs`・`loop_state_watch.rs` と、テストの `loop_state_tests.rs` に置いた。cli・core と検査専用入口の `loop_state_fixture` は `unsafe` を使わない。
+  - `loop_state.rs`: Gitの子の準備を `pre_exec` の中で行う。旧CPythonの`subprocess`と同じく `SIGPIPE`・`SIGXFSZ` を既定へ戻し、許したfdだけを引き継ぐ(Linuxは `close_range` の `syscall`、使えなければディレクトリの列挙。`signal`・`fcntl`・`getrlimit`・`syscall`・`open`・`close` と、Macの `__getdirentries64` を直接呼ぶ)。
+    - `syscall`: Linuxの `close_range`(番号436)と、fdの列挙の `getdents64`(x86_64は217、arm64は61)に使う。
+    - `__getdirentries64`: Macのfdの列挙(`/dev/fd`)に使う。Apple Libcの非公開のexportで、公開APIではない。Macでの実際のリンクと動作は、まだCIで確かめていない(PRのCIで確かめる)。
+  - `loop_state_signal.rs`: 起動時の信号の初期化(`signal`・`siginterrupt`・`sigaction`)、起動の失敗の診断に使う主スレッドの識別子(`pthread_self`)、SIGINTによる終了(`kill`・`getpid`)。
+  - `loop_state_watch.rs`: Linuxの `inotify`(`inotify_init1`・`inotify_add_watch`)で、テストが持つフォルダのopenだけを監視する(製品の経路では使わない)。
 - R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
   - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
   - 例外が1つある。main の前に static から呼ぶ `capture_before_main` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。

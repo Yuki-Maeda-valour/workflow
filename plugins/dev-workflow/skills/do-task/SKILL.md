@@ -9,8 +9,7 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
 ## 原則
 
 1. **検証の分離**。
-   - スコープ縮小・偽完了を検出する側(team-lead〈作業を進め、結果を確かめる側の AI〉 = このセッション)は実装を受け持つ AI(implementer)と分離する。
-   - implementer の自己申告を最終確認にしない。
+   - スコープ縮小・偽完了を検出する側(team-lead〈作業を進め、結果を確かめる側の AI〉 = このセッション)は実装を受け持つ AI(implementer)と分離する。implementer の自己申告を最終確認にしない。
    - **規模に関わらず実装は implementer に委託(作業を別の AI に任せること)し、team-lead は常に検証者に回る**(team-lead による直接実装は、サブエージェント機構が使えず、別の AI を使えない環境まで段階を下げたときだけの代替)
 2. **完了条件は team-lead が再実行**。品質ゲート(書式・型・テスト・ビルドの自動の検査)コマンドは implementer の報告に関わらず team-lead 自身がもう一度実行して緑を確認する
 3. **タスク MD が契約**。実装範囲の拡大・縮小は勝手に行わない。設計と実態がずれたらタスク MD を更新するか、ユーザーに確認する(対話では、内蔵 implementer の走行中は直さず、照らした後に直す — Phase 3)。無人ではタスク MD を更新せず保留(D1)
@@ -24,6 +23,7 @@ argument-hint: "[タスクMDパス | --issue=<番号>] [--max-iter=<N>] [--revie
 6. **やり取りの範囲の判定**(design §5-17): 着手時にツールの実在で、別の AI とのやり取りの範囲を決める。独立レビュアーまたは解決表(役割の名前を、実際に使う AI の仕組みに対応づける表)を使えない場合はレビュー未完了を報告し、完了承認・後続公開へ進めない。セルフ実行と機械検証は独立レビューの代替にしない。無人では失敗扱い(D18)
 7. **委託の解決は解決表に従う**。役割語(`researcher` / `implementer` / `reviewer` / `checker`)からホスト機構への解決(派生名・属性軸・解決順・やり取りの範囲の判定の手段)は [references/delegation-map.md](references/delegation-map.md) が正本(ほかが合わせる元)
    - 内蔵の委託の依頼文には、返答の先頭の 1 行に自分のモデルの名前と版を書かせる(`モデル: <名前と版>`。分からなければ `モデル: 未確認`)。報告に使う値の決まりは、解決表の「委託先の短い説明」
+   - 役目を終えた委託先は工程の区切りで閉じる(researcher は Phase 3 の依頼文を作った後、implementer と reviewer は Phase 7 を終えた後。検証のみモードは、合格を報告したとき、または修正に進まないと人が決めたとき)。人の答えを待つ間と無人では閉じない。決まりと手段は解決表の軸 11
 8. **人が読む文(報告・質問・PR と Issue の本文・作る文書・コミットメッセージ)を書く前に [references/writing-for-people.md](references/writing-for-people.md) を読み、それに従う**
    - わかりやすさの決まり・言い換え表・字面を変えない行と語・口調の決め方。このファイルに届かないときは、権威参照ファイル(AI への指示をまとめたプロジェクトのファイル)の「応答の書き方」節と、口調の決まりを書いた節に従い、届かないことを報告に書く
 9. **worktree は並行作業のときだけ作る**(design §5-26)。
@@ -195,8 +195,7 @@ except (Exception, SystemExit) as exc:
    - 手順 3 の `git status` は `git --no-literal-pathspecs status --porcelain=v1 --untracked-files=normal --ignore-submodules=dirty -- ':(top,exclude,glob)**/[.]claude/reviews/**' ':(top,exclude,glob)**/[.]claude/grasp.md' ':(top,exclude,glob)**/[.]claude/settings.local.json' ':(top,exclude,glob)**/[.]claude/.understand-project-done'` で、base-commit.md の安全用のオプションを `git` の直後に置き、base-commit.md の `TOP`(`rev-parse --show-toplevel`)で実行する。
    - サブモジュール内の未コミット変更(superproject〈親のリポジトリ〉の commit に入らない)と、状態ファイル(diff-snapshot.sh の既定除外の 4 つ。どの深さでも。未追跡・ステージ済み〈commit 用に載せたもの〉・追跡済みのどれも)は出ない。見るのは、ほかの変更と gitlink〈サブモジュールのコミットを指す項目〉の変更(ルートからの相対パス)。
    - `[.]` は、無人のイテレーションの許可の仲介(無人の実行で、操作を許すかをその場で判定する仕組み)が `.claude` をパスと読まないための書き方(glob の中で `.` に一致する)。
-   - `git status` を確認。
-   - 未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する(無人では失敗扱い — D7)。
+   - `git status` を確認し、未コミット変更が既にある場合は、タスクと無関係な差分が混ざる旨を警告し、続行可否を確認する(無人では失敗扱い — D7)。
    - 安全な事前検査後、ブランチ処理・実装前に今回の開始時 `S` を一度保持する。[diagnostic-git.md](references/diagnostic-git.md) §2 の順とする。
    - ship-task から受領した `S` は取り直さない。基準 `B` は手順 5 の既存規則を維持する。承認済み再開の新開始は `resume-invocation` とする。
    - ブランチ出典は今回実際に作成して報告した OID(コミットを指すハッシュ値)だけ。作成記録がない既存ブランチは `not-recorded` で進め、過去の作成時を推定しない。
@@ -487,6 +486,7 @@ Issue 方式は [Issue 方式の契約](references/github-issue.md) §5「do-tas
 - [ ] 独立レビュアーが 1 名以上いて、全 reviewer が APPROVED である
 - [ ] ファイル方式は改名した。Issue 方式は本文を更新した。どちらも追加修正記録を残した
 - [ ] 実装内容とタスク MD の内容が一致している(どちらかだけの変更がない)
+- [ ] 役目を終えた委託先を閉じた(人の答えを待つ間と無人では残した。解決表の軸 11)
 
 ## 関連スキル
 
