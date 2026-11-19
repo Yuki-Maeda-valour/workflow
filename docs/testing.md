@@ -1231,6 +1231,8 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - R4E は `r4e`(`build` の後・4 機種・`build` の 2 本)と `r4e-universal`(`combine` の後・Mac 2 機種・署名後の 1 本)の 2 つを足した。上限はどちらも 30 分。`distribution` の `needs` の末尾に 2 つを足し、R4E の比較が落ちたら配布用 tar を作らない。
   - `check_workflow.py` は、`build.py` の `r4e`・`r4e-universal` のコマンドを許し、上限 30 分と、比較の前の Python 3.10.11 を求める。`native.yml` には、必須のジョブの集合(`REQUIRED_NATIVE_JOBS`)が欠けていないことも求める。ジョブを足す担当は、この集合の末尾に足す。
   - マージの条件(同じ SHA の `pull_request` の CI の全ジョブの成功)で数える Native のジョブは、R4U・R4D-1・R4E の後は 23 個になる。内訳は `policy` 1・`build` 4・`combine` 1・`verify-universal` 2・`distribution` 1・`r4d1` 4・`r4u` 4・`r4e` 4・`r4e-universal` 2 である。
+  - S3I-A(#474)の `implement-guard`(`build` の後・4 機種)と `implement-guard-universal`(`combine` の後・Mac 2 機種)を足した後は 29 個になる。内訳は、上の 23 個に `implement-guard` 4・`implement-guard-universal` 2 を足したものである。
+  - S3I-A の取り込みの後は、`REQUIRED_NATIVE_JOBS` が 11 個になった(`policy`・`build`・`combine`・`verify-universal`・`distribution`・`r4u`・`r4d1`・`r4e`・`r4e-universal`・`implement-guard`・`implement-guard-universal`)。比較のジョブの一覧は `COMPARISON_JOBS` の 1 つにまとめ、`r4e`・`r4e-universal` の `needs`(`build`・`combine`)も確かめる。
 
 ### ビルド入力の記録
 

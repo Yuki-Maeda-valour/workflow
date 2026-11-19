@@ -401,6 +401,7 @@ python3 -B native/ci/build.py r4e-universal --platform macos-arm64
   - CIの4機種とMacでの時間は未確認です。
 - `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`implement_guard_contract`は`native-dist.tar`の5ファイルへ入りません。
 - `distribution`の`needs`に2つのジョブを足しました。全ジョブの成功がマージの条件なので、2つのジョブも必須です。`check_workflow.py`の`REQUIRED_NATIVE_JOBS`・`COMPARISON_JOBS`(R4Eと共通の比較のジョブの一覧)が、ジョブ・工程・機種・`needs`を確かめます。
+- 取り込みの後(main d63703f。R4E #482 を含む)は、`REQUIRED_NATIVE_JOBS`が11個です。`COMPARISON_JOBS`は、`r4e`・`r4e-universal`の`needs`(`build`・`combine`)も確かめます。
 
 CIのジョブの手元での再現(リポジトリ直下):
 
