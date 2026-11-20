@@ -6,8 +6,8 @@ v4.2.0 以前は commit 履歴を参照。
 
 ### 修正
 
-- 本体の作業ツリーの中に別の worktree(同じリポジトリを別のフォルダに取り出した作業場所)があると、`review-guard.py` がその中のファイルを commit の対象に数え、`verify --mode stage` が必ず止まっていたのを直した。git が `<フォルダ>/` の 1 行で出す入れ子のリポジトリ(中に `.git` を持つ、追跡していないフォルダ。worktree を含む)と、どの深さの `.git` も走査しない。([Issue #503](https://github.com/Yuki-Maeda-valour/workflow/issues/503))
-  - 開始前からある入れ子のリポジトリは、無視されていても開始前の未追跡に名前で残し、後からステージしても commit の対象に入れない。
+- 本体の作業ツリーの中に別の worktree(同じリポジトリを別のフォルダに取り出した作業場所)があると、`review-guard.py` がその中のファイルを commit の対象に数え、`verify --mode stage` が必ず止まっていたのを直した。git が `<フォルダ>/` の 1 行で出す入れ子のリポジトリ(中に有効な `.git` を持つ、追跡していないフォルダ。worktree を含む)と、どの深さの `.git` も走査しない。([Issue #503](https://github.com/Yuki-Maeda-valour/workflow/issues/503))
+  - 開始前からある入れ子のリポジトリは、無視されていても開始前の未追跡に名前で残す。`take` の前でも後でも、ステージすると commit の対象に入らず、`verify --mode stage` が止まる。
 
 ## v4.55.0
 
