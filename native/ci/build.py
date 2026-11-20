@@ -27,9 +27,9 @@ TARGETS = {
 }
 SIGN_ID = "org.dev-workflow.native"
 SOURCE_DATE_EPOCH = "0"
-CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "r4g_contract")
+CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract")
 # 検査専用入口(cargo の example)。配布物には入れない。
-EXAMPLES = ("r4b_contract", "r4r_contract", "r4g_contract")
+EXAMPLES = ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract")
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -240,7 +240,12 @@ def quality(name, work):
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4b_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4r_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4g_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4e_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_guard_contract"], env=env)
         r4r_map(env, Path(temporary))
+        # 同じソースの各OS品質工程で一度。release各回はCLI比較と自己検査を行う。
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_units.py"], env=env)
+        run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_mutations.py"], env=env)
 
 
 def r4r_map(env, folder):
@@ -315,6 +320,11 @@ def r4g_probe(fixture):
              *(["--require-strace", "--require-userns"] if linux else [])], env=env, timeout=R4G_TIMEOUT)
 
 
+def loop_state_probe(fixture):
+    run([sys.executable, "-B", ROOT / "native/ci/check_loop_state.py", "--fixture", fixture])
+    run([sys.executable, "-B", ROOT / "native/ci/test_loop_state.py", "--fixture", fixture])
+
+
 def read_record(folder):
     record = read_json(folder / "record.json")
     current = identity()
@@ -384,10 +394,11 @@ def verify_universal(downloads, work):
         run(["codesign", "--verify", "--strict", "--verbose=2", folder / filename])
         if sorted(run(["lipo", "-archs", folder / filename], capture=True).split()) != ["arm64", "x86_64"]:
             raise ValueError("Mac の最終ファイルの CPU が違います")
-    # 署名後の同じ3実行物を、各CPUの必須ジョブで検査する。
+    # 署名後の同じ4実行物を、各CPUの必須ジョブで検査する。
     probe(folder / "dev-workflow")
     r4b_probe(folder / "r4b_contract")
     r4r_probe(folder / "r4r_contract")
+    loop_state_probe(folder / "loop_state_fixture")
 
 
 def package(downloads, work):
@@ -465,9 +476,112 @@ def r4g_universal(name, downloads, work):
     r4g_probe(fixture)
 
 
+# R4E(#482)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+R4E_LEGACY_PYTHON = "3.10.11"
+R4E_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def r4e_strace(work):
+    """Linux では strace を入れ、/bin/true の起動を記録できることを最初に確かめる。
+
+    比較器も Linux では strace を必須にする(外部の道具を起動しないことの確かめ)。
+    """
+    run(["sudo", "apt-get", "update"])
+    run(["sudo", "apt-get", "install", "-y", "strace"])
+    folder = Path(tempfile.mkdtemp(prefix="r4e-strace-", dir=work))
+    log = folder / "probe.txt"
+    run(["strace", "-f", "-e", "trace=execve", "-o", log, "/bin/true"])
+    if sum(b"execve(" in line for line in log.read_bytes().splitlines()) != 1:
+        raise ValueError("strace の確かめで、/bin/true の execve が 1 行ではありません")
+
+
+def r4e_legacy_venv(work):
+    """旧版用の venv を、実行中の CPython 3.10.11 とハッシュつきの依存の一覧から作る。"""
+    implementation, version = platform.python_implementation(), platform.python_version()
+    if implementation != "CPython" or version != R4E_LEGACY_PYTHON:
+        raise ValueError(f"R4E の旧版用の Python は CPython {R4E_LEGACY_PYTHON} が必要です: {implementation} {version}")
+    folder = Path(tempfile.mkdtemp(prefix="r4e-venv-", dir=work))
+    run([sys.executable, "-m", "venv", folder])
+    python = folder / "bin/python"
+    run([python, "-m", "pip", "install", "--no-deps", "--require-hashes",
+         "-r", ROOT / "native/ci/r4e-requirements.txt"])
+    return python
+
+
+def r4e_prepare(name, work):
+    """機械を確かめ、Linux では strace を確かめてから、旧版用の venv を作る。"""
+    target_config(name)
+    if name.startswith("linux-"):
+        r4e_strace(work)
+    return r4e_legacy_venv(work)
+
+
+def r4e_probe(fixture, python, work):
+    """check_r4e.py の比較を必須で流す。最後の行(合格: <件数> 件…)は CI の記録に残る。"""
+    temporary = Path(tempfile.mkdtemp(prefix="r4e-compare-", dir=work))
+    run([sys.executable, "-B", ROOT / "native/ci/check_r4e.py", "--fixture", fixture,
+         "--legacy-python", python, "--temp-parent", temporary])
+
+
+def r4e(name, downloads, work):
+    """build の tar を受け取り、2 回のビルドの r4e_contract のそれぞれで比較する。"""
+    python = r4e_prepare(name, work)
+    folder, _ = extract_build(name, downloads, work)
+    for number in (1, 2):
+        r4e_probe(folder / str(number) / "r4e_contract", python, work)
+
+
+def r4e_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、r4e_contract で比較する。"""
+    if name not in R4E_UNIVERSAL_PLATFORMS:
+        raise ValueError("r4e-universal は Mac の 2 機種で実行してください")
+    python = r4e_prepare(name, work)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "r4e_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    r4e_probe(fixture, python, work)
+
+
+# S3I-A(#474)の比較も、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def implement_guard_probe(fixture, scope=None):
+    """check_implement_guard.py の比較を必須で流す。結果の行は CI の記録に残る。"""
+    args = [sys.executable, "-B", ROOT / "native/ci/check_implement_guard.py", "--fixture", fixture]
+    if scope is not None:
+        args += ["--scope", scope]
+    run(args)
+
+
+def implement_guard(name, downloads, work):
+    """build の tar を受け取り、1 本目の implement_guard_contract で比較する(2 本が同じことは reproduce が確かめる)。
+
+    strace は入れない(実行機に無いか ptrace が使えなければ、比較器がその確かめを未実施と記録する)。
+    """
+    target_config(name)
+    folder, _ = extract_build(name, downloads, work)
+    implement_guard_probe(folder / "1" / "implement_guard_contract")
+
+
+def implement_guard_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、範囲 signed で比較する。"""
+    if name not in IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS:
+        raise ValueError("implement-guard-universal は Mac の 2 機種で実行してください")
+    target_config(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "implement_guard_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    implement_guard_probe(fixture, "signed")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4g", "r4g-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -475,7 +589,7 @@ def main():
         if args.command == "test":
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4g", "r4g-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command == "prepare":
             prepare(args.platform)
@@ -490,6 +604,7 @@ def main():
                 probe(stage / f"{number}/dev-workflow")
                 r4b_probe(stage / f"{number}/r4b_contract")
                 r4r_probe(stage / f"{number}/r4r_contract")
+                loop_state_probe(stage / f"{number}/loop_state_fixture")
             pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
         elif args.command == "combine":
@@ -502,6 +617,14 @@ def main():
             r4u(args.platform, work)
         elif args.command == "r4d1":
             r4d1(args.platform, work)
+        elif args.command == "r4e":
+            r4e(args.platform, downloads, work)
+        elif args.command == "r4e-universal":
+            r4e_universal(args.platform, downloads, work)
+        elif args.command == "implement-guard":
+            implement_guard(args.platform, downloads, work)
+        elif args.command == "implement-guard-universal":
+            implement_guard_universal(args.platform, downloads, work)
         elif args.command == "r4g":
             r4g(args.platform, downloads, work)
         elif args.command == "r4g-universal":

@@ -2,7 +2,8 @@
 
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/R4Gは既存のCLIへ未接続です。
+S3I-A(#474)の `implement-guard.sh` のGitを呼ばない3コマンドと記録の読み取りも、開発用ソースだけにあります(未登録・未配布)。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・S2Lのloop-stateの状態観測7コマンド・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/S2L/R4Gは既存のCLIへ未接続です。
 R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあり、既存のCLIへ未接続・未配布です。
 現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
@@ -27,7 +28,9 @@ R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあ�
 
 - `crates/cli`: 引数を `OsString` のまま受け取る入口です。
 - `crates/core`: 終了コード・入出力処理・処理量と時間の上限・検査付き読取り・単一子実行・loop-stateの純粋部品・ビルド情報を持ちます。
-- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)、R4Gの起動前の状態の記録・fd相対の読取り・旧版と同じ子の実行(`r4g`)を持ちます。
+- `crates/platform`: OS 固有の処理を置く境界です。C0bの保持実体と属性検査、C0cの直接子とパイプの操作、R4Rのタスク本文の復元が使うOSの操作(`restore_taskmd`)、S2Lの保持入力・保存・直接子の接続(`loop_state`)と起動時の信号の初期化(`loop_state_signal`)、Linuxのテスト用のopenの監視(`loop_state_watch`)を持ちます。
+  - S3I-Aの検査専用入口が使うOSの操作(`implement_guard`)も持ちます。
+  - R4Gの起動前の状態の記録・fd相対の読取り・旧版と同じ子の実行(`r4g`)も持ちます。
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
@@ -315,6 +318,37 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 契約と、R4Rでは比べない4件は [設計のR4R節](../docs/design.md#タスク本文の復元の内部部品r4r)にあります。
 [比較の手順と件数](../docs/testing.md#r4rの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
 
+## loop-stateの状態観測7コマンド(S2L)
+
+#468で、旧`loop-state.py`の7コマンドに対応する専用モジュールを実装しました。製品CLIの登録・help・配布・`loop.sh`などの既存呼出元は変えていません。
+
+- 未登録で試す入口は`crates/cli/examples/loop_state_fixture.rs`だけです。`args_os()`の最初の要素(実行ファイルの名前)を除いて、`commands/loop_state/mod.rs`の`main`へ渡し、その終了値で終わります。
+- 製品の`dev-workflow`は、引き続き`loop-state`を未登録のコマンドとして拒否します。
+
+| 置き場 | 主な部品と役目 |
+|---|---|
+| `crates/cli/src/commands/loop_state/mod.rs` | 7コマンドの振り分けと、`Stop`(終了20)・捕まえない例外(終了1)の出し分け |
+| 同`args.rs`・`runtime.rs`・`output.rs` | 旧`argparse`の解析とhelp。文字コードをUTF-8と`surrogateescape`へ固定する`LegacyRuntime`。書き込みの途中と終了時のflushの失敗を分ける出力 |
+| 同`json.rs`・`error.rs` | `PyValue`・`PyInteger`(文字番号・任意精度整数・非有限数を保つJSONの値)。`LegacyException`(例外の型・理由・因果・フレームと、旧版と同じ形の呼出履歴) |
+| 同`state.rs`・`legacy_file.rs`・`budget.rs` | 状態の読取りと保存、保持した親からのopen。`TextIOWrapper`と`BufferedWriter`の区切り。旧`Budget`の計数順 |
+| 同`snapshot.rs`・`preflight.rs`・`config.rs`・`scan.rs` | 状態の観測の順序、管理先・候補・出典の事前の検査、設定のグラフ、属性を先に調べる走査と機密指定 |
+| 同`control.rs`・`compare.rs` | `stop-control`・`derive-removed-worktree`と、`compare`の差の診断 |
+| 同`process.rs`・`interrupt.rs`・`legacy_tempfile.rs` | `run_git`と`index_snapshot`、SIGINTの後始末、`onbranch`の一時の置き場(`tempfile.mkdtemp`と同じ候補と名前) |
+| 同`realpath.rs`・`walk_recursion.rs`・`walk_regex.rs` | `posixpath.realpath`と、走査・glob照合の旧CPythonの呼出しの深さ |
+| `crates/platform/src/loop_state.rs` | `LoopChild`(stdoutだけパイプの直接の子)、`MemoryFile`(memfd)、`InheritedInput`・`LoopArg`・`MemoryPart`、保持した親からの列挙・リンク・保存 |
+| `crates/platform/src/loop_state_signal.rs` | 起動時の信号の初期化(SIGINT・SIGXFSZ)と、起動の失敗の診断に使う主スレッドの識別子 |
+| `crates/platform/src/loop_state_watch.rs` | Linuxの実際のopenの監視。テストが持つフォルダだけを見る |
+| `crates/core/src/loop_state/legacy_recursion.rs`・`legacy_parser.rs`・`legacy_scanner.rs` | `LegacyRecursionContext`と`profile_patterns_for_loop`。PyYAMLのcompose・構築とCPython 3.10の呼出しの深さを数える |
+
+- fdの番号・所有権・読取り位置は、`platform`の外へ出しません。`/proc/self/fd/<番号>`の組み立ても`platform`の中に閉じます。
+- `crates/platform/src/fs.rs`へ足したのは、`pub(crate)`のfdの借用と、openとfstatの後に旧版の比較の呼出しを挟む`pub(crate)`の入口です。既存のC0b・C0cのAPIの動作は変えていません。
+- 保持したフォルダの属性は、R4D-1(#481)が足した`HeldDir::snapshot`で取ります。fstatがEINTRで中断されたら呼び直します(旧版の`os.fstat`も呼び直します)。
+- 既存の`core::loop_state::profile_patterns`(R4S)の結果は変えていません。S2Lは`profile_patterns_for_loop`を使います。
+- 単体テストは`*_tests.rs`と各モジュールの`tests`にあります。`check_loop_state_units.py`が必須の名前と件数で照らします。
+
+契約・拒否の順序・承認された差は [design.md](../docs/design.md#loop-stateの状態観測7コマンドs2l)にあります。
+[比較の手順・件数・時間](../docs/testing.md#s2lの比較)に従ってください。通常の`cargo test --locked`だけでは旧版との比較は完了しません。
+
 ## R4U(check_links)の文書のリンク検査
 
 #480で、旧版 `plugins/dev-workflow/skills/update-doc/scripts/check_links.py` と同じ結果を返す専用の部品を実装しました。
@@ -392,6 +426,65 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
 
 契約と全コマンド共通の決定の当て方は [設計の R4U 節](../docs/design.md#r4ucheck_linksの文書のリンク検査)にあります。
 [比較の流し方と件数](../docs/testing.md#check_links-の比較r4u)に従ってください。流し方の要点は、[ビルドと検証](#ビルドと検証)の R4U の段落にあります。
+## Markdown の表の XLSX 出力(R4E)
+
+#482で、旧スクリプト `md_tables_to_xlsx.py`(export-doc が使う、Markdown の表を XLSX にするスクリプト)と同じ結果を返す専用モジュールを実装しました。
+製品CLIの登録表・help・`launch.sh`・配布・既存呼出元(export-doc の `SKILL.md`)は変えていません。製品の `dev-workflow md-tables-to-xlsx` は「未知のコマンド」で終了2のままです。製品への接続は、後の配布の段(D4)で行います。
+
+`crates/cli/src/commands/md_tables_to_xlsx/` のファイルと役割は次のとおりです。
+
+| ファイル | 役割 |
+|---|---|
+| `mod.rs` | 入口 `run(&[OsString], &StartupState) -> ExitCode` と、旧版の `main()` の順(引数 → 入力 → 出力先の事前検査 → ブック → 親の作成 → ZIP → `OK` の行)。届いた SIGINT を確かめる所の一覧も、ここにあります |
+| `args.rs` | Python 3.10 の argparse と同じ解析・誤りの出し方・`--help`。折り返しの幅は `COLUMNS` → 標準出力の端末の幅 → 80 から 2 を引き、textwrap の規則で折り返します |
+| `markdown.rs` | 入力の `is_file()`・UTF-8 の厳密な読み取り・行の分割・表の取り出し。Python の `re` の意味を、正規表現の部品(regex の crate)を使わない手書きの照合で保ちます |
+| `sheet_name.rs` | 旧版の `unique_sheet_name` と、openpyxl 3.1.5 の `avoid_duplicate_name`(大文字小文字を区別しない重複の番号) |
+| `paths.rs` | 出力先の事前検査(`output_paths`・`physical_directory`・`posixpath.realpath`・`Path.resolve` など)・Python の再帰の上限の深さ・親の作成(`Path.mkdir`) |
+| `workbook.rs` | ブックの組み立て。セルの型・32767 文字の切り詰め・制御文字と 18279 列の誤り・列幅・シート名の `UserWarning` |
+| `xml.rs` | 各部分の XML のバイト(属性と文字のエスケープ・サロゲートの `&#NNNNN;`)。`app.xml` の文と書式は openpyxl から転記しました |
+| `zip.rs` | ZIP の書き出し(CRC-32・DEFLATE の非圧縮ブロック・中央ディレクトリ・ZIP64 の規則)・出力先の開き方・書き込みの失敗と `ZipFile.__del__` の呼出履歴 |
+| `pyio.rs` | Python の標準出力と標準エラーの溜め方・`print`・起動を変える環境変数・例外の表示・終了処理 |
+| `errors.rs` | 例外の型と文・`repr`・errno の文の表(Linux は glibc の文、Mac は OS の文)・呼出履歴の段の表(固定名・行番号・関数・ソースの行) |
+| `unicode13.rs` | 生成物です。手で直しません。CPython 3.10.11(Unicode 13.0.0)の小文字化・語末のシグマの判定・`re.I` で同じと見なす文字の組・空白の表で、`native/fixtures/r4e/generate_unicode13.py` が作ります |
+| `theme1.xml` | 既定テーマのバイト(10140 バイト)。`xml.rs` が `include_bytes!` で埋め込みます |
+| `NOTICE.md` | openpyxl 3.1.5(MIT ライセンス)から転記した部分と、許諾の全文 |
+
+- `printable`(`repr` のエスケープ)と `decimal`(10 進数字の値)は、R4B の `r4b_support/unicode.rs` を `#[path]` で取り込み、読み取りだけで使います。
+- 新しい crate は足していません。XLSX と ZIP は自前で作ります。
+
+`crates/platform/src/r4e.rs` は、R4E 専用の OS の部品です。Linux と Mac の、64 ビットの x86_64 と aarch64 だけで組みます。
+
+- C の型・関数・定数は `libc` の crate のものを使います。`libc` 0.2.191 に Unix 向けの宣言が無い `tzset` だけを、手で宣言します。
+
+- 起動前の状態: `record_startup_state()`(`main` より前に呼ばれる一覧からだけ呼ぶ)と `startup_state() -> Option<StartupState>`。
+  - `StartupState` は、fd 0〜2 の起動の時点の状態(開いていたか・種類、Python 3.10 がその fd を使うか)と、継いだ `SIGPIPE`・`SIGINT` の扱いを持ちます。
+  - 記録が無いときは `None` で、既定値を作りません。
+- fd: `fd_kind`・`is_terminal`(Linux は glibc と同じく `tcgetattr` で判定)・`terminal_columns`・`stdout_terminal_columns`・`write_once`(`write` を 1 回だけ)・`close_checked`(`close(2)` の誤りを返す)・`block_size`。
+- 信号: `ignore_sigxfsz`・`set_sigpipe_ignored`・`install_python_sigint -> SigintSetup`・`sigint_pending`・`take_sigint`・`sigint_count`・`restore_default_sigint`・`resend_sigint_by_default`。
+  - SIGINT の扱いは、起動時に既定のときだけ置きます。`SA_RESTART` を付けないので、書き込みなどの待ちは `EINTR` で戻ります。
+- 時刻と実行中の thread: `local_time`(`localtime_r`)・`utc_time`・`current_thread_id`(`pthread_self`)。
+- 現在のディレクトリ: `current_dir`。Linux は glibc の `getcwd` と同じ手順で、4096 バイトを超える現在地も得ます。Mac は OS の `getcwd` を使います。
+
+unsafe の置き場は、次の 2 つだけです。
+
+- platform の `r4e.rs` の中。公開するのは安全な関数だけです。
+- `crates/cli/examples/r4e_contract.rs` の、起動前の関数の一覧の項目(1 つの静的変数 `RECORD_STARTUP_STATE`)。
+  - Linux は `.init_array`、Mac は `__DATA,__mod_init_func` に置きます。項目を置く属性(`link_section`)が unsafe の属性なので、example の先頭は `#![deny(unsafe_code)]` にし、この 1 つだけに `#[allow(unsafe_code)]` を付けます。
+  - `md_tables_to_xlsx` の木は `#![forbid(unsafe_code)]` です。platform の木は一覧の項目を持たない(テストの実行ファイルを除く)ので、製品の `dev-workflow` の起動前の関数は増えません。
+
+`crates/cli/examples/r4e_contract.rs` は検査専用の入口です。
+
+- `md_tables_to_xlsx` を `#[path]` で取り込み、`args_os()` からプログラム名を除いた argv を、旧版と同じ形で受けて `run` へ渡します。出力は Python と同じ出し方で、C0a の `emit` は使いません。
+- 起動前の記録が無ければ、`r4e_contract: 起動前の記録がありません` を出して終了70にします(旧版が返さない値です)。
+- 検査専用の隠れた環境変数が 2 つあります。どちらも、値があるときだけ働き、本体を動かさずに終わります。
+  - `R4E_CONTRACT_STARTUP_PROBE`: 起動前の記録と今の fd の種類を、`r4e-startup <要約> now=<種類>` の 1 行で出します。値は `1`(標準出力)・`stderr`(標準エラー)・`file:<パス>`(そのファイル)です。
+  - `R4E_CONTRACT_FRAMES`: 呼出履歴の段の表を、JSON の行で標準出力へ出します。比較器が旧版の環境の実物と照らすのに使います。
+  - 故障を注入する環境変数や、時間を縮める入口はありません。
+- Rust の単体テストは、Linux x86_64 で 114 件です(Mac の件数は未確認)。`cargo test --locked -p dev-workflow-cli --example r4e_contract` だけで流れます。platform の `r4e.rs` の検査は、通常の `cargo test --locked` で流れます。
+
+認めた差は、決定の表にあるものだけです。R4E だけに当てる差は、CSV の経路を移さないこと・XLSX を圧縮しないこと・一時ファイルを使わないことです。
+契約と認めた差の一覧は [設計のR4E節](../docs/design.md#markdown-の表の-xlsx-出力r4e)にあります。
+[比較の手順と件数](../docs/testing.md#r4eの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
 
 ## 診断の reftable の読み取り(R4D-1)
 
@@ -448,6 +541,32 @@ static CAPTURE_BEFORE_MAIN: unsafe extern "C" fn() = capture_before_main;
 `libc` は、R4Rが宣言した `0.2.191` をそのまま使います(R4Gは版も機能も変えません)。Rustの依存とcrateの共有ファイル(`Cargo.toml`・`Cargo.lock`・`crates/platform/src/lib.rs`)へのR4Gの差分は、`crates/platform/src/lib.rs` の `pub mod r4g;` の1行だけです。
 [比較の手順と件数](../docs/testing.md#r4gの比較)に従ってください。通常の `cargo test --locked` だけでは、exampleの単体検査と旧版比較は完了しません。
 
+## implement-guardのGitを呼ばない3コマンド(S3I-A)
+
+#474で、`implement-guard.sh` のうちGitを呼ばない `taskmd-diff`・`restore-taskmd`・`cleanup` の3つと、全6サブコマンドの使い方・引数の検査・保護領域の確かめ・記録の読み取りを実装しました。製品CLIの登録表・help・配布・既存の呼出元は変えていません。`take` は S3I-B #475、`config-check`・`compare` は S3I-C #476 で移します。
+
+- `crates/cli/src/commands/implement_guard/` に部品があります。
+  - `mod.rs`: 入口 `main_entry` と、旧版の関数との対応表(先頭)。引数が正しい `take` と、記録の読み取りまで通った `config-check`・`compare` は、境界の印(stderr の `ERROR [s3i-a-boundary] …` と終了値99)で止めます。
+  - `shell.rs`・`stdio.rs`・`sites.rs`: bashの実行時の再現(組み込みの `echo`・`printf` の書き出しと失敗・`ERR`・`EXIT`・TERM・INT・HUP の罠・罠を確かめる区切り)と、失敗の場所と行番号の表。
+  - `args.rs`・`usage.txt`: 引数の検査と使い方の文(旧版の2〜202行)。
+  - `paths.rs`・`state.rs`・`meta.rs`: パスの解決(`cd -P`・GNU `realpath`・`command -v`)・保護領域の確かめ・記録の読み取り。
+  - `text.rs`: C風の引用と戻し、GNU coreutils の引用(`quote`・`quoteaf`)。
+  - `taskmd_diff.rs`・`restore.rs`・`cleanup.rs`: 3つのサブコマンドの本体。`cleanup.rs` の `rm -rf` は、親の fd から辿ります。
+  - `childenv.rs`: 本文の復元の cp の子の環境。
+  - `tests.rs`: 単体テスト(23件)。旧版を測った固定期待(`native/ci/implement_guard_fixtures/expected_old.json`)と同じ地点を、差し込み点で起こして照らします。
+    - 故障の固定期待と照らす1件(`faults_match_the_measured_old_version`)は、Linuxだけで流します。Linuxで測ったerrnoの文が、Macの文と違うためです。Macでは22件です。
+- `restore.rs` は、exec の時点に当たる所で、R4Rの公開関数(`start`・`parse_request`・`Restore`・`emit`・`exit_flush`・`exit_close` など)を、`examples/r4r_contract.rs` と同じ順に、同じプロセスで呼びます。R4Rの中身は変えていません。errno の文は `restore_taskmd/errno_text.rs`(Linuxは生成物の `errno_glibc.rs`、Macは `platform` の `strerror_text`)から出します。
+- `crates/platform/src/implement_guard.rs` は、起動の前の記録・信号の扱いと mask・umask・`/dev/null` への差し替え・fd の種類・環境の置き換え・`faccessat`・地域設定の判定・`rm -rf` の走査(`openat`・getdents・`fstatat`・`unlinkat`)を、安全な関数で公開します。
+  - S3I-A の OS の呼び出し(`libc` の関数と `unsafe`)は、このファイルの安全な関数の中だけにあります。例は、信号の扱いと mask・`raise`・umask・fd の差し替えと種類(`dup2`・`fstat`・`fcntl`・`BorrowedFd::borrow_raw`)・環境の読み取りと置き換え(`environ`・`clearenv`・`setenv`)・利用者の番号とログインのシェル(`getuid`・`geteuid`・`getpwuid`)・`faccessat`・`pthread_self`・Macの `newlocale` です。全部の並びではありません。全部は、そのファイルの `unsafe` の所で見てください。
+  - Macの errno の文の `strerror_r` は、R4Rの `platform/src/restore_taskmd.rs` の `strerror_text` に足しました(S3I-A が足した `unsafe`)。
+- `crates/cli/examples/implement_guard_contract.rs` は検査専用入口です。`args_os()` からプログラム名を除いた argv を、旧版と同じ形で受けます。
+  - `#![deny(unsafe_code)]` の中で、初期化の表への登録(Linuxは `.init_array`、Macは `__DATA,__mod_init_func`)の1項目だけを `#[allow(unsafe_code)]` にしています。`main` の前に、引き継いだ `SIGPIPE` の扱いなどを記録するためです。製品の実行ファイルはこの関数を参照しないので、`main` の前に何も走りません。
+  - 故障を注入する環境変数や、時間を縮める入口はありません。差し込み点は単体テストの中だけで働きます。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example implement_guard_contract` で流れます(Linuxで83件。R4Rの件を含む)。platformの6件は `cargo test --locked` で流れます。
+
+契約と当てた決定は [設計のS3I-A節](../docs/design.md#implement-guardのgitを呼ばない3コマンドと記録の読み取りs3i-a)にあります。
+[比較の手順と件数](../docs/testing.md#s3i-aの比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
@@ -497,6 +616,7 @@ Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 R4Rも子を `std::process::Command` で起動します。ただし、子だけの `RLIMIT_FSIZE`・余分な fd を継がせない印・子の信号の既定と mask・旧版と同じ `execv` は、exec の前に子の中で動く処理が要ります。そのため `platform` の `restore_taskmd` だけが `pre_exec` と `libc` を使います。最初の信号を記録する処理と mask、Mac の地域設定の判定、環境の `LC_CTYPE` の書き換えも、同じファイルの `unsafe` に置きます。`rustix` の採用の根拠と、R4Rが `libc` と `unsafe` を使う理由は、[設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。R4D-1 が足した自作の `unsafe` は、`platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
 R4Gも `platform` の `libc` を使います。R4G が足した自作の `unsafe` は、`platform` の `r4g` の3つのファイル(`startup.rs`・`fs.rs`・`process.rs`)だけに置き、`restore_taskmd` には足しません。理由と範囲は [設計のR4G節](../docs/design.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)にあります。
+S3I-Aが起動するのは、本文の復元の GNU `cp` だけです(R4R の部品が起動します)。`platform` の `implement_guard` が、検査専用入口の OS の呼び出しに `libc` と `unsafe` を使います(並びの例は上の S3I-A の節)。Macの `strerror_text` は `restore_taskmd` に足しました。`rm -rf` の走査は `rustix` の `openat`・`Dir`・`statat`・`unlinkat` を使い、`unsafe` を増やしていません。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。
 共有の `Cargo.toml`・`Cargo.lock`・CLI入口と登録表・coreの公開する型とテストは、タスクごとに変更担当を1名へ固定してください。
 
