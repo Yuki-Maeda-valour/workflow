@@ -1052,6 +1052,120 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
   - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
   - 実測は、PR の CI で確かめて PR の本文に書く。
 
+### S3I-Aの比較
+
+#474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と当てた決定](design.md#implement-guardのgitを呼ばない3コマンドと記録の読み取りs3i-a)、[部品と入口](../native/README.md#implement-guardのgitを呼ばない3コマンドs3i-a)を参照する。
+
+- 比較はPython3.10系・root以外の通常利用者で行い、Cコンパイラ(`cc`)を要る。どれかが欠ければ、比較器は省略せずに失敗する。
+- 版に依る欄(道具の文・bashの文・`strerror` の文など)があるので、範囲 `full` は基準の環境で流す。基準はCIのUbuntu 24.04(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・grep 3.11・glibc 2.39・CPython 3.10.11)で、手元ではこれと同じ版の容器を使う。基準と違う機械では、範囲 `full` を失敗にする(skip にしない)。
+- 通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しない。
+- exampleの単体テストのうち、故障の固定期待(`expected_old.json` の故障の13件)と照らす `faults_match_the_measured_old_version` は、Linuxだけで流す。
+  - この固定期待は、Linux(glibc 2.39)の旧版に `LD_PRELOAD` で故障を起こして測った。errno の文(例: EBUSY の `Device or resource busy`)が、Macの `strerror_r` の文(`Resource busy`)と違う。
+  - Macでは、故障の差し込み点の確かめが無い。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example implement_guard_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example implement_guard_contract --target x86_64-unknown-linux-musl)
+python3 -B native/ci/check_implement_guard.py --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/implement_guard_contract"
+python3 -B -m unittest discover -s native/ci -p 'test_implement_guard.py'
+python3 -B native/ci/implement_guard_measure.py --check      # 旧版の測定の照らし(手元だけ。約20〜24分。2026-11-12 の 3 回で 1228〜1459 秒)
+python3 -B native/ci/implement_guard_mutations.py            # Rust のソースへの変異の確かめ(手元だけ)
+```
+
+- `--fixture` の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物やPATHへ切り替えない。
+- 旧版(sha256 `b958cc12…`)と旧helper(`0f33bf55…`)の sha256 と、使い方の文が旧版の2〜202行と同じことを、最初に照らす。違えば失敗する。
+- 範囲は `--scope full|mac|signed` で選ぶ。省略はLinuxが `full`、Macが `mac` である。
+  - `full`: 下の群の全部と、ほかの段の全部。
+  - `mac`: 引数と使い方・保護領域の確かめ・記録の読み取り・taskmd-diff・restore-taskmd の停止(8件)・cleanup。Macで比べられないケース(`/dev/full`・UTF-8でない名前・mode 1700・GNUの道具の文が出るケースなど)は外し、群ごとの件数と理由を「未実施」の行に出す。bash 4.0以上が無いMacでは、旧版との比較を未実施と記録し、Linuxで旧版を測った固定期待(13件)と照らす。
+    - 旧版の `take` は、bash 4.0以上が無いと `bash 4.0 以上が必要` で止まる。そこで、13件のうち配置の要る8件の記録は、比較器が旧版の `take` と同じ形で、Python(`PyTake`)で書く。範囲 `signed` でも同じである。
+    - Pythonで書く記録は、比較器の配置(1つのリポジトリ。下のリポジトリ・`.gitmodules`・unmerged が無い)だけを写す。写していない配置では、推し量らずに止める。
+  - `signed`: 署名後の実行物が動くことの確かめ(引数と使い方・保護領域の確かめ・`taskmd-diff` の `same` の3件)。
+- 比較器の自己検査(`test_implement_guard.py`。38件)を、どの範囲でも比較器の中から流す。OSで成り立たない件と、bash 4.0以上が無いときに旧版を起動する件は、skip にして理由を「未実施」の行に出す。
+  - 38件には、詰めたFIFOの段の15件を含む。
+    - 見分け方の6件: x86_64・aarch64・`wchan` が `0` の3通りの `/proc` の中身を、偽の `/proc` として与える。`wchan` の名前の集合・`wchan` の `.` から後ろの接尾辞を落とすこと(`pipe_write.isra.0` は見分け、`pipe_writer` は見分けない)・名前の欄の `)`・write の番号を持たない機械・ケースの並びの48件も確かめる。
+    - 段の始めの試しの4件: 本物の試しで見分けられること。試しの子・FIFOの詰め方・期限・`wchan` の名前の集合を差し替えて、書かせる前に止まったと見なした・止まらずに終わった・期限の中で見分けられない、の各経路が問題になること。
+    - 段と main の配線の5件: 試しの失敗が問題になり、ケースを流さないこと。write の番号を持たない機械では未実施になり、その行を出すこと。待ち切りの上限で残りを流さないこと。試しの失敗が結果の行の問題に数えられること。未実施が未実施の一覧と結果の行に入ること。
+  - 38件には、bash 4.0以上が無いMacをまねる1件を含む。偽の bash 3.2(版を聞かれると3を返し、ほかの起動には `bash 4.0 以上が必要` と終了値2を返す)をPATHの先頭に置き、範囲 `mac` と `signed` を別のプロセスで流す。固定期待の13件がすべて比べられて合格することを確かめる。Macでは流さない(本物の範囲 `mac`・`signed` が同じ道を通る)。
+- 比べるのは、終了値(信号で終わればその番号)・stdout・stderr・記録の中のファイル・所属の印・タスク本文・cp の観測器が記録した子の環境と argv・偽の `git` の起動の回数である。
+  - 置き換えるのは、旧版の実行環境のパスの既知の欄(bashの文の先頭の呼出名など)・`Current thread` の値・一時フォルダの16進32桁・`printf` の `%(` の誤りの文の1文字だけである。
+  - 子の環境は、追加の決定4の6個(`CAP`・`RP`・`SP_DIR`・`helper`・`helper_dir`・`python_path`)だけを両方の集合から外して比べる。外した名前ごとの旧版とRustの有無と値は、`S3I-A: 決定 4 の名前の記録:` の行にケースごとに出す。Rustの側は、受け継いだ値と同じか、受け継いでいなければ無いことを確かめる。
+- ケースの一覧(範囲ごとに、群ごとの件数とラベルの一覧の sha256)は `native/ci/implement_guard_fixtures/case_lists.json` に固定する。ほかの固定期待と一覧も、同じフォルダに件数と sha256 で固定する。
+
+範囲 `full` の群ごとの件数(2026-11-12・commit `c4ded694`):
+
+| 群 | 比べた件数 | 境界の印の件数 |
+|---|---|---|
+| 引数と使い方 | 115 | 2 |
+| 保護領域の確かめ | 143 | 16 |
+| 記録の読み取り | 65 | 2 |
+| taskmd-diff | 31 | 0 |
+| restore-taskmd | 49 | 0 |
+| cleanup | 19 | 0 |
+| 出力の故障 | 118 | 0 |
+| 起動の状態 | 39 | 0 |
+| 旧版の記録の相互読み | 15 | 0 |
+| Git と道具の不起動 | 3 | 0 |
+| 合計 | 597 | 20 |
+
+- 境界の印の件数は、引数が正しい `take` と、記録の読み取りまで通った `config-check`・`compare` で、Rustが印(終了値99)で止まった件である。比べる件で印を受けたら失敗にする。
+- 群のほかの段: 決定D5の3件・PATHを絞ったRustの3件・詰めたFIFO(読み手が読まないパイプ)で止めて TERM・INT・HUP を送る48件・Pythonで書く記録の14件の配置・strace(プロセスの起動を記録する道具)の3件・`/dev/null` を開けない起動の4件・fd 0〜2を閉じた起動の32件(旧版とRustをそれぞれの固定期待で照らす)。
+  - Pythonで書く記録の段(`run_record_writer`)は、bash 4.0以上が無いMacで比較器が書く記録が、旧版の `take` の記録と同じことを確かめる。配置は、固定期待のうち配置の要る8件と、保護領域の置き場の候補を変えた `taskmd-diff`・`cleanup` の6件(`..` を含む `XDG_STATE_HOME`・HOMEの `.local/state`・HOMEの `.cache`)である。
+    - 同じ配置で、旧版の `take` の後に記録をPythonで書き直す。記録の中のファイル(名前・種類・mode・リンクの数・中身)・所属の印・`take` の stdout と stderr を比べる。
+    - 旧版の `take` の記録を旧版で読んだ結果と、Pythonの記録を旧版とRustで読んだ結果(終了値・stdout・stderr)が同じことを確かめる。固定期待の8件は、その固定期待とも比べる。
+  - 詰めたFIFOの段は、段の始めに1回だけ、書き込みで止まったことを `/proc` から見分けられるかを試す。ケースと同じ起動器で bash の小さな子を起こし、詰めたFIFOへ書かせる。書かせる前の0.5秒は止まったと見なさず子も終わらないこと、書かせてから10秒の中で見分けられることを確かめる。
+    - 見分け方(設計の Task 4.1 と、2026-11-19 03:44 の管理担当の判断。Issue #474 の追加修正記録): `/proc/<pid>/stat` の状態が `S`(割り込める待ち)で、`/proc/<pid>/syscall` の番号が機械の write(x86_64 は1、aarch64 は64)で、その fd(1か2)が詰めたFIFOを指し、`/proc/<pid>/wchan` がパイプへの書き込みで待つ関数の名前(`pipe_write`・`anon_pipe_write`・`fifo_pipe_write`)のどれかである。
+    - `wchan` は、コンパイラが付ける `.` から後ろの接尾辞(例: `pipe_write.isra.0`)を落として比べる(同じ判断)。
+    - `anon_pipe_write` と `fifo_pipe_write` は、新しいカーネル(Linux 6.14 以降と推測)で関数の名前が変わる見込みへの読み替えである(推測。未確認)。
+    - 試しで見分けられなければ、問題(失敗)に数え、段のケースを流さずにすぐ終える。問題の文には、最後に読んだ `stat`・`syscall`・`wchan` の値を出す。試しの子を書かせる前に止まったと見なしたときと、試しの子が止まらずに終わったときも、問題に数える(比較器の誤り)。
+    - write の番号を持たない機械(x86_64・aarch64 のほかのLinux。CIに無い機械)と、Linuxでない機械だけは、段を流さずに未実施と記録する(同じ判断)。
+    - 見分けられるのに、ケースの片側でも止まりを確かめられなければ、問題に数える。問題の文に、最後に読んだ値を出す。止まりを見分けられずに15秒を待ち切った片側が4回になったら、残りのケースを流さずに問題にする。
+  - strace の段は、strace が無いか ptrace(他のプロセスを見張る仕組み)が使えなければ、未実施と記録する。試し(`/bin/true` を記録する)が20秒で終わらないか、strace を起動できないときも、未実施と記録する。
+  - `/dev/null` を開けない起動は、利用者の名前空間(`unshare -U -m`。権限なしで、そのプロセスだけのファイルの見え方を作る仕組み)を作れる機械だけで流す。作れなければ、未実施と記録する。名前空間の試しが20秒で終わらないか、起動できないときも、未実施と記録する。手元の基準の容器では、`--security-opt seccomp=unconfined --security-opt apparmor=unconfined` を付けて流した。
+- 旧selftestは、旧版流しとRust流しの2通りで流す(群Lの変異は含めない)。Rust流しは、`taskmd-diff`・`restore-taskmd`・`cleanup` と使い方をRustへ、`take`・`config-check`・`compare` を旧版へ渡す包みを使う。
+  - 確かめの行は611行で、Rustを通った行は583行・旧版だけの行は28行である。Rustを通った行の最低件数(583)を固定する。
+  - Rust流しで FAIL を許すのは、固定の一覧(`selftest_allowed.json`。J9・J10・P8の28行)だけである。一覧の外の FAIL と、一覧の中の PASS は失敗にする。
+- 管理担当の検証(2026-11-12 22:45に終わった回。機密と既存の未追跡を持ち込まない検証用コピー)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・532秒で合格した。
+- 実装担当の回(2026-11-13。CIの直しの後。手元の基準の容器)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・554秒で合格した。Pythonで書く記録の段は20.8秒だった。
+- 実装担当の回(2026-11-19。詰めたFIFOの段の見分け方の直しの後。手元の基準の容器)では、範囲 `full` が旧版と比べた597件・境界20件・未実施0・不一致0・問題0・650.6秒で合格した。詰めたFIFOの段は48件・49.1秒だった(試しは0.5秒。`wchan` は `pipe_write`)。比較器の自己検査は38件・31.0秒だった。
+
+#### 旧版の測定の照らし(手元だけ)
+
+- `implement_guard_measure.py` は、比較器で同じ時点を作れない結果を、旧版で測って固定期待(`expected_old.json`)にする。CIでは流さない(2026-11-12 12:59の決定)。旧版か道具の版が変わったときに、手元の基準の容器で測り直す。
+- 信号(道具の地点): 旧版が起動する道具の偽(Cで組んだ観測器)をPATHの先頭に置いて止め、TERM・INT・HUP を送って結果を測る。201地点(Rustの地点は192。決定D5の道具の地点が9)を、地点ごとに6回流す。
+  - Rustの結果(罠が道具の直後に動いた結果)が出なければ、30回まで増やす。それでも出なければ失敗にする。
+  - 規則の2通りは、Rustの単体テストが書き出す(`S3IA_EXPORT_RULE_OUTCOMES=<書き先> cargo test --locked -p dev-workflow-cli --example implement_guard_contract signals_at_tool_points`)。`--write <出力> --rules <書き先>` で固定期待を作る。
+- 起こせない失敗: `LD_PRELOAD` の部品で、旧版の `mkdir`・`unlinkat`・`read`・`getdelim` を失敗させて13件を測る。測れない3件は、固定期待に「未測定」と理由を書く(`exec </dev/null` の失敗は比較器の段で直接比べる・checks-only の cmp が中間のファイルを読むときの誤りはRustに地点が無い・旧helperの exec は bash の地点ではない)。
+- 照らし(`--check`。値を省くと `expected_old.json`)は、揺れない地点の固定期待の結果と、Rustの結果が今の測定にも出ることを確かめる。固定期待で見ていない結果は `S3I-A 測定: 記録:` の行に出し、失敗にしない(旧版どうしの競り合い。[設計のS3I-A節](design.md#当てた決定と認めた差))。
+  - 管理担当の検証の回: 201地点・揺れた4地点・旧版を1206回流して1228秒で合格した(固定期待で見ていない結果を1地点で記録)。
+  - 実装担当の回(2026-11-12): 今の照らし方の回は1422秒で合格した(固定期待で見ていない結果を4地点で記録)。前の照らし方(固定期待に無い結果を失敗にする)の2回は、それぞれ別の地点で、6回の固定期待に無かった結果を見て落ちた。
+  - 測り直し(`--write`)は、1459秒だった(201地点・揺れた4地点・旧版1206回)。
+
+#### 変異の確かめ(手元だけ)
+
+- `implement_guard_mutations.py` は、`native/ci/implement_guard_fixtures/mutations/` の4つの変異を1つずつ当てたコピーを組み、比較器の狙った群と、旧selftestのRust流しが落ちることを確かめる。CIでは流さない。cargo 1.99.1 が要る。
+  - a: ダイジェストの照合を外す。f: チェックの正規化で任意の1文字を受ける。m: `..` の正規化を外す。e: R4Rの段の検査を外す(親のリンクを辿らない開き方と、段ごとの確かめの両方)。
+- 実装担当の回(2026-11-12・572秒)では、4つとも落ちた。比較器の不一致は a 24件・e 29件・f 2件・m 2件、Rust流しの一覧の外の FAIL は 4・5・4・4行だった。管理担当の検証の回も合格した。
+
+#### 未確認の条件
+
+- Macの実機・CIでの比較(範囲 `mac`・`signed`)・最低のOSの版。範囲 `mac` のうち、Macで比べないとしたケースの一部(mode 1700・NULを含む印など)は、Macでの違いを推測で決めた。
+- MacのCIの実行機に bash 4.0以上があるか。無ければ、旧版との比較は固定期待の13件だけになる。
+- Macで、Pythonで書く記録の8件が固定期待と合うか。旧版の `take` の記録と同じことは、Linuxでだけ確かめた。
+- CIのUbuntuの実行機の strace と ptrace の有無、利用者の名前空間を作れるか(作れなければ、その段は未実施と記録される)。
+- CIのLinuxの実行機で、詰めたFIFOの段の試しが見分けられるか。2026-11-12のCI(run 43308024054)では、x86_64 と aarch64 の両方で、段が約23分かかって上限に当たった。
+  - 時間から、どの件も見分けられなかったと推測される(打ち切りで問題の行は出ていない)。
+  - aarch64 は、前の見分け方が syscall の番号を1(x86_64 の write)に決めていたので、見分けられなかったと推測される。
+  - x86_64 で見分けられなかった理由は未確認である。新しいカーネルで `wchan` の関数の名前が変わったためという説明は、推測である。
+  - aarch64 の見分け方は、単体の自己検査でだけ確かめた。
+- 4機種のCIの `implement-guard`・`implement-guard-universal` のジョブの時間。
+- 旧版の規則の外の遅い罠が起きる仕組み。
+
+CIの接続は [CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口)にある。検査専用入口はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -1079,6 +1193,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
     - 新しい上限でのMacの完走と所要時間は未確認であり、PRのCIで確かめる。
 - 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --example loop_state_fixture --target <Rust の対象名>`。
+  - S3I-A(#474)で、検査専用の `implement_guard_contract` も同じ2回のビルドに加わった(`--example implement_guard_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `implement-guard`(`build` の後・4機種)と `implement-guard-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ45分と20分である([S3I-Aの比較](#s3i-aの比較)・[CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口))。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
@@ -1116,6 +1231,8 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - R4E は `r4e`(`build` の後・4 機種・`build` の 2 本)と `r4e-universal`(`combine` の後・Mac 2 機種・署名後の 1 本)の 2 つを足した。上限はどちらも 30 分。`distribution` の `needs` の末尾に 2 つを足し、R4E の比較が落ちたら配布用 tar を作らない。
   - `check_workflow.py` は、`build.py` の `r4e`・`r4e-universal` のコマンドを許し、上限 30 分と、比較の前の Python 3.10.11 を求める。`native.yml` には、必須のジョブの集合(`REQUIRED_NATIVE_JOBS`)が欠けていないことも求める。ジョブを足す担当は、この集合の末尾に足す。
   - マージの条件(同じ SHA の `pull_request` の CI の全ジョブの成功)で数える Native のジョブは、R4U・R4D-1・R4E の後は 23 個になる。内訳は `policy` 1・`build` 4・`combine` 1・`verify-universal` 2・`distribution` 1・`r4d1` 4・`r4u` 4・`r4e` 4・`r4e-universal` 2 である。
+  - S3I-A(#474)の `implement-guard`(`build` の後・4 機種)と `implement-guard-universal`(`combine` の後・Mac 2 機種)を足した後は 29 個になる。内訳は、上の 23 個に `implement-guard` 4・`implement-guard-universal` 2 を足したものである。
+  - S3I-A の取り込みの後は、`REQUIRED_NATIVE_JOBS` が 11 個になった(`policy`・`build`・`combine`・`verify-universal`・`distribution`・`r4u`・`r4d1`・`r4e`・`r4e-universal`・`implement-guard`・`implement-guard-universal`)。比較のジョブの一覧は `COMPARISON_JOBS` の 1 つにまとめ、`r4e`・`r4e-universal` の `needs`(`build`・`combine`)も確かめる。
 
 ### ビルド入力の記録
 
