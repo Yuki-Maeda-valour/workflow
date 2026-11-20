@@ -343,11 +343,11 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 必要環境: Python 3.10 以上・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
-  - 期待の件数(2 本の合計 128 件。`test_review_guard.py` 100 件・`test_check_process.py` 28 件):
-    - macOS: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 11 件・`CheckLifecycleTest` 2 件)。成功 115 件。
+  - 期待の件数(2 本の合計 146 件。`test_review_guard.py` 118 件・`test_check_process.py` 28 件):
+    - macOS: `Ran 146 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 11 件・`CheckLifecycleTest` 2 件)。成功 133 件。
       - `skipUnless` の付け方から数えた値で、Mac では未確認。Mac で回したら実数に直す。
-    - Linux: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 115 件。
-      - 2026-11-06 に Linux(Git 2.34.1・Python 3.10.12)で回して確かめた。
+    - Linux: `Ran 146 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 133 件。
+      - 2026-11-19 に Linux(Git 2.56.1・Python 3.10.12)で回して確かめた。
   - 所要時間の目安: 4〜5 分(2026-10-31、macOS 26.6.2 / arm64 の 4 回の実行で 250〜276 秒)。
   - 数え方:
     - `grep -c "skipped 'Linux 専用: " <scratch>/run.log` と `grep -c "skipped 'macOS 専用: " <scratch>/run.log` で、OS ごとの飛ばしを数える。

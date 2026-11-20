@@ -398,7 +398,9 @@ review 前後の対象集合と実入力を hash で結び付ける。検証担�
 
 最終 task は元本文と直接検証結果から作る期待バイトだけを許し、他の状態名 MD を保護する。
 source、doc、未承認保留は別の phase。文書は実装 commit 後に別 start を取り、改名なしの commit を検証する。
-開始前の無関係な未追跡を stage 集合へ取り込まない。ignore の全有効入力と ignored path の変化、
+開始前の無関係な未追跡を stage 集合へ取り込まない。
+git が `<フォルダ>/` の 1 行で出す入れ子のリポジトリ(中に有効な `.git` を持つ、追跡していないフォルダ。worktree を含む)と、どの深さの `.git` も走査しない([Issue #503](https://github.com/Yuki-Maeda-valour/workflow/issues/503))。
+ignore の全有効入力と ignored path の変化、
 品質定義・入口・テスト・検証のスクリプトの変更を review と PR に開示し、独立した clean checkout で実検証する。
 品質入口の静的検出は動的依存の網羅を保証しない。
 
