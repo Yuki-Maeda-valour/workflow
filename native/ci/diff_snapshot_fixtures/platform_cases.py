@@ -17,7 +17,7 @@ def compare_fixture(fixture, binary, legacy, *, codes=(0,)):
         result=run([*command,*fixture.normal(),'--patch-out',str(fixture.patch)],cwd=fixture.root,
                    env=fixture.env,report=fixture.out,patch=fixture.patch)
         unchanged(before,fixture.input_state())
-        if result.returncode not in codes:raise AssertionError('実環境の旧停止契約と終了値が違います')
+        if result.returncode not in codes:raise AssertionError(f'実環境の旧停止契約と終了値が違います: 期待={codes} 実際={result.returncode} stderr末尾={result.stderr[-300:]!r}')
         values.append(result)
     same_result(*values)
     return values[0].returncode

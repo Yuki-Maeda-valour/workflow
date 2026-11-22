@@ -99,6 +99,11 @@ def same_result(old, new, *, markers=(), generated_report=True):
         raise AssertionError('Markdownが旧版と一致しません')
 
 
+def tail(value, size=300):
+    """失敗の文へ入れる出力の末尾(合成の固定入力なので機密は入らない)。"""
+    return repr((value or b'')[-size:])
+
+
 def fixed(result, code, *, stdout=None, stderr=None, version_kind=None):
     """固定の終了値・標準出力・標準エラーと比べる。
 
@@ -106,7 +111,8 @@ def fixed(result, code, *, stdout=None, stderr=None, version_kind=None):
     版に依る行(VERSION_MARKERSの行)を除いて比べ、除いた行は版に依る欄として記録する。基準の機械では厳しいまま。
     """
     if result.timed_out or result.returncode != code:
-        raise AssertionError(f'固定の終了値と一致しません: expected={code} actual={result.returncode} timeout={result.timed_out}')
+        raise AssertionError(f'固定の終了値と一致しません: expected={code} actual={result.returncode} timeout={result.timed_out} '
+                             f'stderr末尾={tail(result.stderr)}')
     if stdout is not None and result.stdout != stdout:
         raise AssertionError('固定のstdoutと一致しません')
     if stderr is not None and result.stderr != stderr:

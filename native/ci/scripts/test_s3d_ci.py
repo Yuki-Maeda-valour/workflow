@@ -254,6 +254,16 @@ class S3DCiTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             s3d_ci.check_report(report, 'Linux')
 
+    def test_report_with_group_failures_or_without_the_field_is_rejected(self):
+        s3d_ci.check_report(self.report(), 'Linux')  # 空なら通る
+        for system in ('Linux', 'Darwin'):
+            for changes in (dict(group_failures=[{'scope': 'fd', 'message': 'AssertionError: x'}]), dict(group_failures=None)):
+                with self.assertRaisesRegex(RuntimeError, '群の失敗'):
+                    s3d_ci.check_report(self.report(**changes), system)
+            report = self.report(); del report['group_failures']
+            with self.assertRaisesRegex(RuntimeError, '群の失敗'):
+                s3d_ci.check_report(report, system)
+
     def test_japanese_missing_uses_the_same_condition_as_the_comparison(self):
         with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\nja_JP.utf8\n')), \
                 mock.patch.object(s3d_ci.Path, 'is_file', return_value=True):
@@ -265,7 +275,7 @@ class S3DCiTests(unittest.TestCase):
     def report(self, **changes):
         versions = {'bash': '5.2.21', 'coreutils': '9.4', 'findutils': '4.9.0', 'sed': '4.9', 'grep': '3.11', 'glibc': '2.39'}
         value = {'tool_versions': versions, 'tool_versions_base': True, 'not_run': [], 'version_failures': [],
-                 'case_insensitive_store': {'allowed': False, 'insensitive': False, 'pretend': False},
+                 'case_insensitive_store': {'allowed': False, 'insensitive': False, 'pretend': False}, 'group_failures': [],
                  'version_fields': {'review': {'review-a': ['tool-message']}}, 'version_dependent': ['review-a'],
                  'scope': 'full-external'}
         value.update(changes)

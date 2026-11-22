@@ -8,7 +8,7 @@ import subprocess
 import time
 
 from . import closed_env
-from .compare import note_versions, Result, same_result, unchanged
+from .compare import note_versions, Result, same_result, tail, unchanged
 from .diagnostics import bash_locations
 
 SOURCE_SHA256='aa6c5b71368ddd7b9a12d4af62d6ead8518a6560fe05b7b23f03a512e84f04fe'
@@ -55,17 +55,23 @@ def execute(command,args,*,cwd,env,failure,mode,signal_state):
     return Result(process.returncode,stdout or b'',stderr or b'',started=start,ended=time.time())
 
 
+def relative_invocation(legacy,root):
+    """相対パスでの旧版の呼出名。子のcwdは実体のパスなので、symlinkを通る置き場(Macの/var→/private/var)でも
+    `..`が合うよう、両方を実体にしてから相対にする。"""
+    return os.path.relpath(os.path.realpath(legacy),os.path.realpath(root))
+
+
 def compare_case(case,fixture,binary,legacy):
     if hashlib.sha256(legacy.read_bytes()).hexdigest()!=SOURCE_SHA256:
         raise AssertionError('出力故障の旧ソース確認値が違います')
-    invocation=str(legacy) if case['invocation']=='absolute' else os.path.relpath(legacy,fixture.root)
+    invocation=str(legacy) if case['invocation']=='absolute' else relative_invocation(legacy,fixture.root)
     args=['--print-exclude-ere','--exclude-glob','.env'] if case['mode'] in ('print','both') else ['--unknown-s3d']
     values=[]
-    for command in (['bash',invocation],[str(binary)]):
+    for side,command in (('旧版',['bash',invocation]),('Rust',[str(binary)])):
         before=fixture.input_state()
         value=execute(command,args,cwd=fixture.root,env=fixture.env,failure=case['failure'],mode=case['mode'],signal_state=case['signal_state'])
         unchanged(before,fixture.input_state())
-        if value.returncode!=case['code']:raise AssertionError('出力故障の固定終了値が違います')
+        if value.returncode!=case['code']:raise AssertionError(f'出力故障の固定終了値が違います: {side} 期待={case["code"]} 実際={value.returncode} stderr末尾={tail(value.stderr)}')
         values.append(value)
     old,new=values
     if case['mode']=='print' and case['code']==20:

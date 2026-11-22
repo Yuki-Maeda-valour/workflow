@@ -47,7 +47,7 @@ def compare(case,old,new):
         before=bytes.fromhex(case['thread_before_hex']);after=bytes.fromhex(case['thread_after_hex'])
         old=dataclasses.replace(old,stderr=fixed_thread(old.stderr,before,after))
         new=dataclasses.replace(new,stderr=fixed_thread(new.stderr,before,after))
-    elif old.stderr.hex()!=case['stderr_hex']:raise AssertionError('生byte環境の固定された旧診断が違います')
+    elif old.stderr.hex()!=case['stderr_hex']:raise AssertionError(f'生byte環境の固定された旧診断が違います: 期待hex={case["stderr_hex"][-300:]} 実際hex={old.stderr.hex()[-300:]}')
     same_result(old,new)
 
 
@@ -75,7 +75,7 @@ def run_cases(binary,*,fixture_type,legacy):
                     closed_env.check_recorded_difference(fixture.root,-3,-2,utf8_fixed.SETTINGS)
                     fixed(old,case['expected'])
                     if 'thread_before_hex' in case:fixed_thread(old.stderr,bytes.fromhex(case['thread_before_hex']),bytes.fromhex(case['thread_after_hex']))
-                    elif old.stderr.hex()!=case['stderr_hex']:raise AssertionError('生byte環境の固定された旧診断が違います')
+                    elif old.stderr.hex()!=case['stderr_hex']:raise AssertionError(f'生byte環境の固定された旧診断が違います: 期待hex={case["stderr_hex"][-300:]} 実際hex={old.stderr.hex()[-300:]}')
                     utf8_fixed.same_with_thread(utf8_fixed.expectation(case['id'],old,ref),new,same_result)
                 else:compare(case,old,execute([str(binary)],args,env,fixture))
             except Exception as error:raise AssertionError(f'{case["id"]}: {error}') from error

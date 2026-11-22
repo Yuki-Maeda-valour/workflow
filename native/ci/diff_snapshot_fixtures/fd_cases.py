@@ -12,7 +12,7 @@ import time
 
 from . import closed_env
 from . import compare as compare_module
-from .compare import note_versions, Result, same_result, unchanged, exact_ids
+from .compare import note_versions, Result, same_result, tail, unchanged, exact_ids
 from .diagnostics import bash_locations
 from .output_faults import SOURCE_SHA256
 from . import utf8_fixed
@@ -94,7 +94,7 @@ def compare(case,old,new,*,legacy,store=None):
         compare_module.CASE_STORE_NOT_RUN.append({'id':case['id'],'reason':'case-insensitive-store'})
         return
     if old.returncode!=case['expected'] or new.returncode!=case['expected']:
-        raise AssertionError(f'起動時fdの固定終了値が旧新版と一致しません: 期待={case["expected"]} 旧版={old.returncode} Rust={new.returncode}')
+        raise AssertionError(f'起動時fdの固定終了値が旧新版と一致しません: 期待={case["expected"]} 旧版={old.returncode} Rust={new.returncode} 旧版stderr末尾={tail(old.stderr)} Rust stderr末尾={tail(new.stderr)}')
     if case.get('bash_rows'):
         rows=[dict(row,detail=bytes.fromhex(row['detail_hex'])) for row in case['bash_rows']]
         old=dataclasses.replace(old,stderr=bash_locations(old.stderr,invocation=str(legacy),rows=rows,case=old.case))
@@ -127,7 +127,7 @@ def run_cases(binary,*,fixture_type,legacy):
                     utf8_fixed.check_difference(original,reference);utf8_fixed.check_effective(reference)
                     ref=execute(case,fixture,['bash',str(legacy)],transform=utf8_fixed.reference_env)
                     closed_env.check_recorded_difference(fixture.root,-3,-1,utf8_fixed.SETTINGS)
-                    if old.returncode!=case['expected']:raise AssertionError('起動時fdの固定終了値が旧版と一致しません')
+                    if old.returncode!=case['expected']:raise AssertionError(f'起動時fdの固定終了値が旧版と一致しません: 期待={case["expected"]} 旧版={old.returncode} stderr末尾={tail(old.stderr)}')
                     utf8_fixed.same_with_thread(utf8_fixed.expectation(case['id'],old,ref),new,same_result)
                 else:compare(case,old,new,legacy=legacy,store=root)
             except Exception as error:raise AssertionError(f'{case["id"]}: {error}') from error

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """S3Dの旧新版を比較する。未指定の実行物や未到達ケースを成功に数えない。"""
 import argparse
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -572,6 +573,26 @@ def launch_table(work):
             'mutant_rejected': rejected, 'version_failures': version_failures}
 
 
+class GroupFailures:
+    """群の失敗を集めて、次の群へ進む(最後に全部を並べて失敗にする)。
+
+    群の入力・置き場・子のプロセスは互いに独立している。依存する所(fixed-extraは前提の群の結果、全体の突合は全群の結果)は、
+    前提の群が失敗したときは流さず、その旨を失敗として並べる。
+    """
+    def __init__(self):
+        self.failures, self.failed = [], set()
+
+    @contextlib.contextmanager
+    def attempt(self, scope):
+        try:
+            yield
+        except (AssertionError, OSError, ValueError, RuntimeError) as error:
+            self.failures.append({'scope': scope, 'message': f'{type(error).__name__}: {error}'})
+            self.failed.add(scope)
+            compare_module.CASE_STORE_NOT_RUN.clear()
+
+
+FIXED_EXTRA_PREREQUISITES = {'vectors', 'review', 'profile', 'parser', 'raw-env'}
 SCOPES = ['vectors', 'selftest', 'read-audit', 'profile', 'parser', 'platform', 'publication', 'output-faults', 'fd',
           'raw-env', 'entry-signals', 'review', 'partial', 'launch-table', 'path-reduced', 'fixed-extra']
 
@@ -610,6 +631,8 @@ def main(argv=None):
                 for name, kinds in fields.items():
                     tolerant_kinds.setdefault(name.split(':')[0], set()).update(kinds)
             compare_module.VERSION_TOLERANT['kinds'] = tolerant_kinds
+        collector = GroupFailures()
+        failures, failed_scopes, attempt = collector.failures, collector.failed, collector.attempt
         proof = None
         if args.only in (None, 'publication'):
             compare_module.CURRENT_SCOPE[0] = 'publication'
@@ -622,100 +645,122 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix='s3d-env-') as work:
             result['environment_mutants_rejected'] = closed_env.self_check(work)
         if args.only in (None, 'launch-table'):
-            compare_module.CURRENT_SCOPE[0] = 'launch-table'
-            with tempfile.TemporaryDirectory(prefix='s3d-launch-') as work:
-                result['launch_table'] = launch_table(work)
-            result['version_failures'] += result['launch_table']['version_failures']
+            with attempt('launch-table'):
+                compare_module.CURRENT_SCOPE[0] = 'launch-table'
+                with tempfile.TemporaryDirectory(prefix='s3d-launch-') as work:
+                    result['launch_table'] = launch_table(work)
+                result['version_failures'] += result['launch_table']['version_failures']
         if args.only in (None, 'vectors'):
-            compare_module.CURRENT_SCOPE[0] = 'vectors'
-            result['external'] = external_vectors(binary, data['vectors'])
+            with attempt('vectors'):
+                compare_module.CURRENT_SCOPE[0] = 'vectors'
+                result['external'] = external_vectors(binary, data['vectors'])
         if args.only in (None, 'path-reduced'):
-            compare_module.CURRENT_SCOPE[0] = 'path-reduced'
-            with tempfile.TemporaryDirectory(prefix='s3d-path-') as work:
-                result['path_reduced'] = path_reduction.run(binary, external_vectors=external_vectors, vectors=data['vectors'],
-                                                            fixture_type=Fixture, legacy=LEGACY, root=work)
+            with attempt('path-reduced'):
+                compare_module.CURRENT_SCOPE[0] = 'path-reduced'
+                with tempfile.TemporaryDirectory(prefix='s3d-path-') as work:
+                    result['path_reduced'] = path_reduction.run(binary, external_vectors=external_vectors, vectors=data['vectors'],
+                                                                fixture_type=Fixture, legacy=LEGACY, root=work)
         if args.only in (None, 'selftest'):
-            compare_module.CURRENT_SCOPE[0] = 'selftest'
-            result['legacy'] = selftest(binary)
-            result['not_run'] += SELFTEST_NOT_RUN
+            with attempt('selftest'):
+                compare_module.CURRENT_SCOPE[0] = 'selftest'
+                result['legacy'] = selftest(binary)
+                result['not_run'] += SELFTEST_NOT_RUN
         if args.only in (None, 'read-audit'):
-            compare_module.CURRENT_SCOPE[0] = 'read-audit'
-            result['read_audit'] = read_audits(binary)
+            with attempt('read-audit'):
+                compare_module.CURRENT_SCOPE[0] = 'read-audit'
+                result['read_audit'] = read_audits(binary)
         if args.only in (None, 'profile'):
-            compare_module.CURRENT_SCOPE[0] = 'profile'
-            result['additional'] += profile_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+            with attempt('profile'):
+                compare_module.CURRENT_SCOPE[0] = 'profile'
+                result['additional'] += profile_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
         if args.only in (None, 'parser'):
-            compare_module.CURRENT_SCOPE[0] = 'parser'
-            result['additional'] += parser_cases.run_cases(binary, fixture_type=Fixture)
+            with attempt('parser'):
+                compare_module.CURRENT_SCOPE[0] = 'parser'
+                result['additional'] += parser_cases.run_cases(binary, fixture_type=Fixture)
         if args.only in (None, 'platform'):
-            compare_module.CURRENT_SCOPE[0] = 'platform'
-            result['platform'] = platform_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+            with attempt('platform'):
+                compare_module.CURRENT_SCOPE[0] = 'platform'
+                result['platform'] = platform_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
         if args.only in (None, 'publication'):
-            compare_module.CURRENT_SCOPE[0] = 'publication'
-            result['publication'] = publication.run_cases(fixture_type=Fixture, legacy=LEGACY, typed_observations=proof.get('publication_observations', []))
-            result['signals'] = publication.run_signals(fixture_type=Fixture, legacy=LEGACY, typed_observations=proof.get('signal_observations', []))
+            with attempt('publication'):
+                compare_module.CURRENT_SCOPE[0] = 'publication'
+                result['publication'] = publication.run_cases(fixture_type=Fixture, legacy=LEGACY, typed_observations=proof.get('publication_observations', []))
+                result['signals'] = publication.run_signals(fixture_type=Fixture, legacy=LEGACY, typed_observations=proof.get('signal_observations', []))
         if args.only in (None, 'output-faults'):
-            compare_module.CURRENT_SCOPE[0] = 'output-faults'
-            result['output_faults'] = output_faults.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+            with attempt('output-faults'):
+                compare_module.CURRENT_SCOPE[0] = 'output-faults'
+                result['output_faults'] = output_faults.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
         if args.only in (None, 'fd'):
-            compare_module.CURRENT_SCOPE[0] = 'fd'
-            result['fd'] = fd_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
-            result['not_run'] += compare_module.CASE_STORE_NOT_RUN
-            compare_module.CASE_STORE_NOT_RUN.clear()
+            with attempt('fd'):
+                compare_module.CURRENT_SCOPE[0] = 'fd'
+                result['fd'] = fd_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+                result['not_run'] += compare_module.CASE_STORE_NOT_RUN
+                compare_module.CASE_STORE_NOT_RUN.clear()
         if args.only in (None,'raw-env'):
-            compare_module.CURRENT_SCOPE[0] = 'raw-env'
-            result['additional'] += raw_env.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
+            with attempt('raw-env'):
+                compare_module.CURRENT_SCOPE[0] = 'raw-env'
+                result['additional'] += raw_env.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
         if args.only in (None,'entry-signals'):
-            compare_module.CURRENT_SCOPE[0] = 'entry-signals'
-            result['entry_signals'] = entry_signals.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
-            exact_ids([case['id'] for case in data['entry_signals']],[item['case_id'] for item in result['entry_signals']])
+            with attempt('entry-signals'):
+                compare_module.CURRENT_SCOPE[0] = 'entry-signals'
+                result['entry_signals'] = entry_signals.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
+                exact_ids([case['id'] for case in data['entry_signals']],[item['case_id'] for item in result['entry_signals']])
         if args.only in (None,'review'):
-            compare_module.CURRENT_SCOPE[0] = 'review'
-            result['review'] = review_cases.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
-            exact_ids([case['id'] for case in data['review_cases']],[item['id'] for item in result['review']])
+            with attempt('review'):
+                compare_module.CURRENT_SCOPE[0] = 'review'
+                result['review'] = review_cases.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
+                exact_ids([case['id'] for case in data['review_cases']],[item['id'] for item in result['review']])
         if args.only in (None,'partial'):
-            compare_module.CURRENT_SCOPE[0] = 'partial'
-            try:
-                result['partial_outputs'] = review_cases.run_partial(binary,fixture_type=Fixture,legacy=LEGACY)
-                exact_ids([case['id'] for case in data['partial_outputs']],[item['id'] for item in result['partial_outputs']])
-            except compare_module.NotRun as error:
-                exact_ids([case['id'] for case in data['partial_outputs']], error.ids)
-                result['not_run'] += [{'id': case_id, 'reason': error.reason} for case_id in error.ids]
+            with attempt('partial'):
+                compare_module.CURRENT_SCOPE[0] = 'partial'
+                try:
+                    result['partial_outputs'] = review_cases.run_partial(binary,fixture_type=Fixture,legacy=LEGACY)
+                    exact_ids([case['id'] for case in data['partial_outputs']],[item['id'] for item in result['partial_outputs']])
+                except compare_module.NotRun as error:
+                    exact_ids([case['id'] for case in data['partial_outputs']], error.ids)
+                    result['not_run'] += [{'id': case_id, 'reason': error.reason} for case_id in error.ids]
         if args.only in (None, 'fixed-extra'):
-            compare_module.CURRENT_SCOPE[0] = 'fixed-extra'
-            finished = set(result['external']) | {item['id'] for item in result['review']} | set(result['additional'])
-            typed_ids = set(proof['passed']) if proof else set()
-            result['fixed_extra'] = fixed_extra.run_cases(binary, fixture_type=Fixture, legacy=LEGACY,
-                                                          finished_ids=finished, typed_ids=typed_ids,
-                                                          typed_observations=proof.get('timeout_observations', []) if proof else [])
-            result['version_failures'] += result['fixed_extra']['version_failed']
-            if darwin:
-                # Macで作れない(straceが無い)書込みの故障は、未実施として記録する(成功に数えない)。
-                moved = [case_id for case_id in result['fixed_extra']['pending'] if case_id.startswith('rust-file-write-')]
-                result['not_run'] += [{'id': case_id, 'reason': 'strace'} for case_id in moved]
-                # 別のプロセスの/proc/PID/memで開けないファイルを作る2件は、Linuxだけで作れる(型検査は全機種で流す)。
-                proc = [case_id for case_id in result['fixed_extra']['pending']
-                        if case_id in {'pr2-' + kind for kind in fixed_extra.prereview2.PROC_KINDS}]
-                result['not_run'] += [{'id': case_id, 'reason': 'proc'} for case_id in proc]
-                moved += proc
-                result['fixed_extra']['pending'] = [i for i in result['fixed_extra']['pending'] if i not in moved]
-            if args.only is None and result['fixed_extra']['pending']:
-                raise AssertionError(f'固定入力の未到達 {len(result["fixed_extra"]["pending"])} 件: '
-                                     + ', '.join(result['fixed_extra']['pending']))
-        if args.only is None:
-            compare_module.CURRENT_SCOPE[0] = 'full'
-            result['profile_replacements'] = profile_races.run_cases(helper=LEGACY.with_name('secret-profiles.py'), typed_observations=proof.get('profile_observations', []))
-            result['typed_audit'] = typed_audit.run_cases(fixture_type=Fixture,legacy=LEGACY,typed_observations=proof.get('audit_observations',[]))
-            exact_ids([case['id'] for case in data['additional_external']],result['additional'])
-            exact_ids(data['legacy_assertion_ids'],result['legacy'])
-            result['coverage']=coverage.groups(result['legacy'],result['typed_assertions_required'])
-            if any(result['coverage'][group['id']]!=group['case_ids'] for group in data['groups']):
-                raise AssertionError('実行済みの71観点が固定した記録と一致しません')
-        unchanged(before, file_state(binary))
-        if args.only in (None, 'path-reduced'):
+            with attempt('fixed-extra'):
+                if failed_scopes & FIXED_EXTRA_PREREQUISITES:
+                    raise AssertionError('前提の群が失敗したため流していません: ' + ', '.join(sorted(failed_scopes & FIXED_EXTRA_PREREQUISITES)))
+                compare_module.CURRENT_SCOPE[0] = 'fixed-extra'
+                finished = set(result['external']) | {item['id'] for item in result['review']} | set(result['additional'])
+                typed_ids = set(proof['passed']) if proof else set()
+                result['fixed_extra'] = fixed_extra.run_cases(binary, fixture_type=Fixture, legacy=LEGACY,
+                                                              finished_ids=finished, typed_ids=typed_ids,
+                                                              typed_observations=proof.get('timeout_observations', []) if proof else [])
+                result['version_failures'] += result['fixed_extra']['version_failed']
+                if darwin:
+                    # Macで作れない(straceが無い)書込みの故障は、未実施として記録する(成功に数えない)。
+                    moved = [case_id for case_id in result['fixed_extra']['pending'] if case_id.startswith('rust-file-write-')]
+                    result['not_run'] += [{'id': case_id, 'reason': 'strace'} for case_id in moved]
+                    # 別のプロセスの/proc/PID/memで開けないファイルを作る2件は、Linuxだけで作れる(型検査は全機種で流す)。
+                    proc = [case_id for case_id in result['fixed_extra']['pending']
+                            if case_id in {'pr2-' + kind for kind in fixed_extra.prereview2.PROC_KINDS}]
+                    result['not_run'] += [{'id': case_id, 'reason': 'proc'} for case_id in proc]
+                    moved += proc
+                    result['fixed_extra']['pending'] = [i for i in result['fixed_extra']['pending'] if i not in moved]
+                if args.only is None and result['fixed_extra']['pending']:
+                    raise AssertionError(f'固定入力の未到達 {len(result["fixed_extra"]["pending"])} 件: '
+                                         + ', '.join(result['fixed_extra']['pending']))
+        if args.only is None and not failures:
+            with attempt('full'):
+                compare_module.CURRENT_SCOPE[0] = 'full'
+                result['profile_replacements'] = profile_races.run_cases(helper=LEGACY.with_name('secret-profiles.py'), typed_observations=proof.get('profile_observations', []))
+                result['typed_audit'] = typed_audit.run_cases(fixture_type=Fixture,legacy=LEGACY,typed_observations=proof.get('audit_observations',[]))
+                exact_ids([case['id'] for case in data['additional_external']],result['additional'])
+                exact_ids(data['legacy_assertion_ids'],result['legacy'])
+                result['coverage']=coverage.groups(result['legacy'],result['typed_assertions_required'])
+                if any(result['coverage'][group['id']]!=group['case_ids'] for group in data['groups']):
+                    raise AssertionError('実行済みの71観点が固定した記録と一致しません')
+        with attempt('input-unchanged'):
+            unchanged(before, file_state(binary))
+        if args.only in (None, 'path-reduced') and 'path_reduced' in result:
             result['not_run'] += [{'id': case_id, 'reason': 'strace'} for case_id in result['path_reduced']['not_run']]
         # 版に依る欄: 走らせた群の観測が、manifestの欄の一覧と一致すること(印の抜けと誤りを失敗にする)。
         scopes = (SCOPES + ['full']) if args.only is None else [args.only]
+        # 失敗した群・流さなかった群の観測は、印の抜けとして数えない。
+        scopes = [scope for scope in scopes if scope not in failed_scopes and not (scope == 'full' and failures)]
         try:
             compare_module.check_versions(data['version_fields'], scopes)
             version_error = None
@@ -736,8 +781,14 @@ def main(argv=None):
         result['mac_cf_user_text_encoding'] = review_cases.CF_RECORDS
         result['seconds'] = round(time.monotonic() - began, 3)
         result['scope'] = 'full-external' if args.only is None else args.only
+        result['group_failures'] = failures
         if args.report:
             args.report.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+        if failures:
+            for item in failures:
+                print(f'S3D比較失敗(群 {item["scope"]}): {item["message"]}', file=sys.stderr)
+            print(f'S3D比較失敗: {len(failures)} 群が失敗しました: ' + ', '.join(item['scope'] for item in failures), file=sys.stderr)
+            return 1
         if version_error:
             raise AssertionError(version_error)
         print(f'外部比較: 成功 {len(result["external"])} / 追加 {len(result["additional"])} / 旧assertion {len(result["legacy"])} / 入口の信号 {len(result["entry_signals"])} / 点検 {len(result["review"])} / 部分出力 {len(result["partial_outputs"])} / {result["seconds"]} 秒')

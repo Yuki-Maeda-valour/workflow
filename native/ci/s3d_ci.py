@@ -174,6 +174,8 @@ def check_report(report, system):
         raise RuntimeError('S3Dの比較の記録に、版に依る欄の失敗と未実施の欄がありません')
     if report.get('scope') != 'full-external':
         raise RuntimeError('S3Dの比較が全体の比較ではありません')
+    if report.get('group_failures') != []:
+        raise RuntimeError('S3Dの比較の記録に、群の失敗の欄がないか、失敗が残っています')
     store = report.get('case_insensitive_store')
     if not isinstance(store, dict) or store.get('pretend'):
         raise RuntimeError('置き場の大小文字の記録がないか、テスト用の印が付いています(CIの記録に使えません)')

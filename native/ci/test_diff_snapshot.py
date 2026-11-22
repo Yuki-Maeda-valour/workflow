@@ -403,6 +403,47 @@ class DiagnosticBoundaries(unittest.TestCase):
         with self.assertRaises(AssertionError):
             subject.selftest_shape({first:('fail',listed[second]['description'].encode())},[first],listed)
 
+    def test_groups_collect_every_failure_and_pass_through_when_none_fail(self):
+        collector=subject.GroupFailures()
+        order=[]
+        for scope,error in (('a',None),('b',AssertionError('boom')),('c',None),('d',RuntimeError('x')),('e',OSError('y')),('f',ValueError('z'))):
+            with collector.attempt(scope):
+                order.append(scope)
+                if error:raise error
+        # 失敗しても次の群へ進み、全部を集める(失敗なしの群は記録しない)。
+        self.assertEqual(['a','b','c','d','e','f'],order)
+        self.assertEqual(['b','d','e','f'],[item['scope'] for item in collector.failures])
+        self.assertEqual({'b','d','e','f'},collector.failed)
+        self.assertIn('AssertionError: boom',collector.failures[0]['message'])
+        # 失敗なしなら何も記録しない。想定外の例外(KeyboardInterruptなど)は止める。
+        quiet=subject.GroupFailures()
+        with quiet.attempt('a'):pass
+        self.assertEqual([],quiet.failures)
+        with self.assertRaises(KeyError):
+            with quiet.attempt('k'):raise KeyError('x')
+
+    def test_relative_invocation_resolves_through_a_symlinked_store_of_another_depth(self):
+        from diff_snapshot_fixtures import output_faults
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(os.path.realpath(folder))
+            real=folder/'private'/'var'/'t'/'case'; real.mkdir(parents=True)
+            (folder/'var').symlink_to(folder/'private'/'var')   # Macの/var→/private/varと同じ(深さが1つ違う)
+            link_root=folder/'var'/'t'/'case'
+            script=folder/'x'/'y'/'diff-snapshot.sh'; script.parent.mkdir(parents=True); script.write_text('echo ok\n')
+            relative=output_faults.relative_invocation(script,link_root)
+            done=subprocess.run(['bash',relative],cwd=link_root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False)
+            self.assertEqual((0,b'ok\n'),(done.returncode,done.stdout),done.stderr)
+            # symlinkを通る置き場の字面から数えた相対パスでは、子のcwd(実体)で解決できない(旧来の作り方の失敗の再現)。
+            lexical=os.path.relpath(script,link_root)
+            self.assertNotEqual(lexical,relative)
+            self.assertNotEqual(0,subprocess.run(['bash',lexical],cwd=link_root,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False).returncode)
+
+    def test_failure_messages_name_the_side_and_the_tail_of_stderr(self):
+        from diff_snapshot_fixtures import compare
+        self.assertEqual(repr(b'x'*300),compare.tail(b'y'*50+b'x'*300))
+        with self.assertRaisesRegex(AssertionError,r'expected=0 actual=20 .*stderr末尾=b.*boom'):
+            fixed(Result(20,b'',b'boom\n'),0)
+
     def test_casefold_store_detects_a_store_that_treats_names_as_the_same(self):
         with tempfile.TemporaryDirectory() as folder:
             (Path(folder)/'x').write_bytes(b'')

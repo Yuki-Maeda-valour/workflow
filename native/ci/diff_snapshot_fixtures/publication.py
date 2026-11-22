@@ -129,7 +129,7 @@ def observe(case, fixture, legacy):
     if stdout:raise AssertionError('旧公開の標準出力が空でありません')
     unchanged(before,fixture.input_state())
     expected=expected_state(case)
-    if process.returncode!=expected['code']:raise AssertionError('旧公開の終了値が固定値と違います')
+    if process.returncode!=expected['code']:raise AssertionError(f'旧公開の終了値が固定値と違います: 期待={expected["code"]} 実際={process.returncode}')
     out=None if not fixture.out.exists() else fixture.out.read_bytes()
     patch=None if not fixture.patch.exists() else fixture.patch.read_bytes()
     if expected['out']=='new':
