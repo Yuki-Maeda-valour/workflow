@@ -23,8 +23,9 @@ JOB_OVERHEAD_SECONDS = 1800
 # 旧版を動かす道具。基準はCIのUbuntu 24.04の版(launch_sites.jsonのbase_versions)。
 VERSION_TOOLS = ('bash', 'coreutils', 'findutils', 'sed', 'grep', 'glibc')
 # Macで作れない欄(未実施として記録し、成功に数えない)の理由。
-# Macで作れない欄: 基準の版に依る欄・straceが要る欄・/procが要る欄(別のプロセスの/proc/PID/mem)。
-MAC_NOT_RUN = {'version', 'strace', 'proc'}
+# Macで作れない欄: 基準の版に依る欄・straceが要る欄・/procが要る欄(別のプロセスの/proc/PID/mem)・
+# 大小文字を区別しない置き場(Macの既定のAPFS)で入力を作れない旧自己テストの観点。
+MAC_NOT_RUN = {'version', 'strace', 'proc', 'case-insensitive-store'}
 
 
 # 基準の版の容器(native/ci/README.mdの手順)と同じ組。fixed_extra.japanese_readyと同じ条件を満たす。
@@ -173,6 +174,12 @@ def check_report(report, system):
         raise RuntimeError('S3Dの比較の記録に、版に依る欄の失敗と未実施の欄がありません')
     if report.get('scope') != 'full-external':
         raise RuntimeError('S3Dの比較が全体の比較ではありません')
+    store = report.get('case_insensitive_store')
+    if not isinstance(store, dict) or store.get('pretend'):
+        raise RuntimeError('置き場の大小文字の記録がないか、テスト用の印が付いています(CIの記録に使えません)')
+    case_ids = [item['id'] for item in not_run if isinstance(item, dict) and item.get('reason') == 'case-insensitive-store']
+    if case_ids and not (system == 'Darwin' and store.get('allowed') and store.get('insensitive')):
+        raise RuntimeError('大小文字を区別しない置き場の未実施が、Macで実際に区別しない置き場のとき以外に記録されています')
     if system == 'Linux':
         if base is not True:
             raise RuntimeError(f'Linuxの比較が基準の版で流れていません: {versions}')

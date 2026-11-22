@@ -11,6 +11,7 @@ import tempfile
 import time
 
 from . import closed_env
+from . import compare as compare_module
 from .compare import note_versions, Result, same_result, unchanged, exact_ids
 from .diagnostics import bash_locations
 from .output_faults import SOURCE_SHA256
@@ -67,9 +68,33 @@ def fixed_thread(raw, before, after):
     return before+b'Current thread <runtime-thread> (most recent call first):\n'+after
 
 
-def compare(case,old,new,*,legacy):
+def case_dependent():
+    """大小文字を区別しない置き場で、固定の終了値と違いうる観点(manifestの一覧)。"""
+    value=json.loads(Path(__file__).with_name('fd_cases.json').read_text())
+    listed=value.get('case_insensitive_store',{})
+    if not set(listed)<={row['id'] for row in value['cases']} or any(set(item)!={'viewpoint','reason','code'} for item in listed.values()):
+        raise AssertionError('起動時fdの大小文字に依る観点の一覧の形が違います')
+    return listed
+
+
+def case_store_allows(store):
+    """ケースが実際に使う置き場(store)が、大小文字を区別しないと確かめられたときだけ真(Macかテスト用の印の機械のみ)。"""
+    probe=compare_module.CASE_STORE['probe']
+    return bool(compare_module.CASE_STORE['gate'] and probe is not None and store is not None and probe(store))
+
+
+def compare(case,old,new,*,legacy,store=None):
+    listed=case_dependent().get(case['id'])
+    if (old.returncode!=case['expected'] or new.returncode!=case['expected']) and listed and case_store_allows(store):
+        # 想定する失敗の形: 旧版もRustも一覧の終了値(NOTEの書込みの失敗の1)で、標準エラーは空(閉じたかディレクトリ)。
+        if old.returncode!=listed['code'] or new.returncode!=listed['code'] or old.stderr or new.stderr:
+            raise AssertionError(f'大小文字に依る失敗の形が想定と違います: 想定={listed["code"]} 旧版={old.returncode} Rust={new.returncode}')
+        # さらに、終了値・標準出力・標準エラーが旧版とRustで一致することを求める。固定の終了値との比較は未実施として記録する。
+        same_result(old,new)
+        compare_module.CASE_STORE_NOT_RUN.append({'id':case['id'],'reason':'case-insensitive-store'})
+        return
     if old.returncode!=case['expected'] or new.returncode!=case['expected']:
-        raise AssertionError('起動時fdの固定終了値が旧新版と一致しません')
+        raise AssertionError(f'起動時fdの固定終了値が旧新版と一致しません: 期待={case["expected"]} 旧版={old.returncode} Rust={new.returncode}')
     if case.get('bash_rows'):
         rows=[dict(row,detail=bytes.fromhex(row['detail_hex'])) for row in case['bash_rows']]
         old=dataclasses.replace(old,stderr=bash_locations(old.stderr,invocation=str(legacy),rows=rows,case=old.case))
@@ -104,7 +129,7 @@ def run_cases(binary,*,fixture_type,legacy):
                     closed_env.check_recorded_difference(fixture.root,-3,-1,utf8_fixed.SETTINGS)
                     if old.returncode!=case['expected']:raise AssertionError('起動時fdの固定終了値が旧版と一致しません')
                     utf8_fixed.same_with_thread(utf8_fixed.expectation(case['id'],old,ref),new,same_result)
-                else:compare(case,old,new,legacy=legacy)
+                else:compare(case,old,new,legacy=legacy,store=root)
             except Exception as error:raise AssertionError(f'{case["id"]}: {error}') from error
             done.append(case['id'])
     return done

@@ -299,6 +299,115 @@ class DiagnosticBoundaries(unittest.TestCase):
             compare.VERSION_TOLERANT.clear(); compare.VERSION_TOLERANT.update(saved)
             compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
 
+    def test_case_dependent_selftest_failures_are_not_run_only_on_a_case_insensitive_mac_store(self):
+        listed=subject.case_dependent_ids()
+        self.assertEqual(['legacy-2715-01','legacy-3323-01','legacy-3324-01','legacy-3336-01','legacy-3340-01','legacy-3404-01'],sorted(listed))
+        self.assertTrue(all(item['viewpoint'] and item['reason'] for item in listed.values()))
+        ids=json.loads((subject.FIXTURES/'legacy_ids.json').read_text())['ids']
+        self.assertTrue(set(listed)<=set(ids))
+        with mock.patch.object(subject,'PRETEND',False):
+            # 基準の機械(Linux)と、区別する置き場のMac: 許可しない。区別しないMac: 許可する。
+            for system,insensitive,allowed in (('Linux',True,False),('Linux',False,False),('Darwin',False,False),('Darwin',True,True)):
+                with mock.patch.object(subject,'casefold_store',return_value=insensitive):
+                    state=subject.case_store_state(system)
+                    self.assertEqual(allowed,state['allowed'],(system,insensitive))
+                    self.assertFalse(state['pretend'])
+            # テスト用の印は、区別しない置き場のLinuxでだけ許可し、記録に残す。
+            with mock.patch.object(subject,'PRETEND',True),mock.patch.object(subject,'casefold_store',return_value=True):
+                state=subject.case_store_state('Linux')
+                self.assertEqual({'allowed':True,'insensitive':True,'pretend':True},state)
+            with mock.patch.object(subject,'PRETEND',True),mock.patch.object(subject,'casefold_store',return_value=False):
+                self.assertFalse(subject.case_store_state('Linux')['allowed'])
+        # 許可しない機械(tolerated空)では、一覧のIDでも落ちる。許可した機械では、一覧のIDだけ通り、一覧に無いIDは落ちる。
+        subject.selftest_verdict('legacy',[],0,[])
+        with self.assertRaises(AssertionError):
+            subject.selftest_verdict('legacy',['legacy-3404-01'],1,[])
+        subject.selftest_verdict('legacy',['legacy-3404-01'],1,listed)
+        for failed,code in ((['legacy-0343-01'],1),(['legacy-3404-01','legacy-0343-01'],1),([],1)):
+            with self.assertRaises(AssertionError):
+                subject.selftest_verdict('legacy',failed,code,listed)
+        # 旧版とRustの合否が同じときだけ未実施になる。違えば落ちる。
+        self.assertEqual([{'id':'legacy-3404-01','reason':'case-insensitive-store'}],subject.case_store_not_run(['legacy-3404-01'],['legacy-3404-01']))
+        for old,new in ((['legacy-3404-01'],[]),([],['legacy-3404-01']),(['legacy-3404-01'],['legacy-3323-01'])):
+            with self.assertRaises(AssertionError):
+                subject.case_store_not_run(old,new)
+
+    def test_fd_case_dependent_exit_is_not_run_only_when_the_case_store_allows_and_old_and_rust_agree(self):
+        from diff_snapshot_fixtures import compare, fd_cases
+        listed=fd_cases.case_dependent()
+        self.assertEqual(['fd-precheck-2-closed-default','fd-precheck-2-closed-ignored','fd-precheck-2-directory-default','fd-precheck-2-directory-ignored'],sorted(listed))
+        self.assertTrue(all(item['viewpoint'] and item['reason'] and item['code']==1 for item in listed.values()))
+        case=next(row for row in fd_cases.cases() if row['id']=='fd-precheck-2-closed-default')
+        self.assertEqual(0,case['expected'])
+        legacy=Path('/x/diff-snapshot.sh'); store=Path('/y/store')
+        old=Result(1,b'',b''); new=Result(1,b'',b'')
+        saved=dict(compare.CASE_STORE); compare.CASE_STORE_NOT_RUN.clear()
+        try:
+            # 許可しない機械(gateなし。基準のLinuxなど)では、一覧のIDでも固定の終了値で落ちる。
+            compare.CASE_STORE.update(gate=False,probe=lambda folder:True)
+            with self.assertRaisesRegex(AssertionError,'期待=0 旧版=1 Rust=1'):
+                fd_cases.compare(case,old,new,legacy=legacy,store=store)
+            # gateがあっても、ケースが実際に使う置き場が区別しない置き場と確かめられなければ落ちる(置き場を渡さない場合も)。
+            compare.CASE_STORE.update(gate=True,probe=lambda folder:False)
+            with self.assertRaises(AssertionError):
+                fd_cases.compare(case,old,new,legacy=legacy,store=store)
+            compare.CASE_STORE.update(gate=True,probe=lambda folder:folder==store)
+            with self.assertRaises(AssertionError):
+                fd_cases.compare(case,old,new,legacy=legacy)
+            with self.assertRaises(AssertionError):
+                fd_cases.compare(case,old,new,legacy=legacy,store=Path('/z/other'))
+            fd_cases.compare(case,old,new,legacy=legacy,store=store)
+            self.assertEqual([{'id':'fd-precheck-2-closed-default','reason':'case-insensitive-store'}],compare.CASE_STORE_NOT_RUN)
+            # 想定の形(終了値1・標準エラー空)以外は、旧版とRustが一致しても落ちる。
+            for code in (20,137,2):
+                with self.assertRaisesRegex(AssertionError,'想定と違います'):
+                    fd_cases.compare(case,Result(code,b'',b''),Result(code,b'',b''),legacy=legacy,store=store)
+            with self.assertRaisesRegex(AssertionError,'想定と違います'):
+                fd_cases.compare(case,Result(1,b'',b'NOTE\n'),Result(1,b'',b'NOTE\n'),legacy=legacy,store=store)
+            # 旧版とRustが違えば落ちる。固定の終了値と合うときは通常どおり(未実施にしない)。
+            with self.assertRaises(AssertionError):
+                fd_cases.compare(case,old,Result(20,b'',b''),legacy=legacy,store=store)
+            compare.CASE_STORE_NOT_RUN.clear()
+            fd_cases.compare(case,Result(0,b'',b''),Result(0,b'',b''),legacy=legacy,store=store)
+            self.assertEqual([],compare.CASE_STORE_NOT_RUN)
+            # 一覧に無いIDは、許可した機械でも落ちる。
+            other=next(row for row in fd_cases.cases() if row['id']=='fd-print-1-closed-default')
+            with self.assertRaises(AssertionError):
+                fd_cases.compare(dict(other,expected=0),old,new,legacy=legacy,store=store)
+        finally:
+            compare.CASE_STORE.clear(); compare.CASE_STORE.update(saved); compare.CASE_STORE_NOT_RUN.clear()
+
+    def test_case_store_state_checks_every_store_the_cases_use(self):
+        stores={'a':True,'b':False}
+        with mock.patch.object(subject,'PRETEND',False),mock.patch.object(subject,'casefold_store',side_effect=lambda folder:stores[folder]):
+            self.assertTrue(subject.case_store_state('Darwin',folders=['a'])['allowed'])
+            # 別のボリュームの置き場が区別する置き場なら、判定が食い違うので許可しない。
+            self.assertFalse(subject.case_store_state('Darwin',folders=['a','b'])['allowed'])
+            self.assertFalse(subject.case_store_state('Darwin',folders=['b','a'])['allowed'])
+            self.assertFalse(subject.case_store_state('Linux',folders=['a'])['allowed'])
+        self.assertTrue(subject.case_store_gate('Darwin'))
+        with mock.patch.object(subject,'PRETEND',False):
+            self.assertFalse(subject.case_store_gate('Linux'))
+        with mock.patch.object(subject,'PRETEND',True):
+            self.assertTrue(subject.case_store_gate('Linux'))
+
+    def test_selftest_failure_shape_matches_each_listed_observation(self):
+        listed=subject.case_dependent_ids()
+        for case_id,item in listed.items():
+            self.assertTrue(item['description'] and item['viewpoint'] and item['reason'])
+            subject.selftest_shape({case_id:('fail',('prefix '+item['description']).encode())},[case_id],listed)
+            with self.assertRaisesRegex(AssertionError,'想定と違います'):
+                subject.selftest_shape({case_id:('fail',b'other observation')},[case_id],listed)
+        # 各IDは別の観点を指す(同じ記録で別のIDの想定を満たさない)。
+        first,second=sorted(listed)[:2]
+        with self.assertRaises(AssertionError):
+            subject.selftest_shape({first:('fail',listed[second]['description'].encode())},[first],listed)
+
+    def test_casefold_store_detects_a_store_that_treats_names_as_the_same(self):
+        with tempfile.TemporaryDirectory() as folder:
+            (Path(folder)/'x').write_bytes(b'')
+            self.assertEqual((Path(folder)/'X').exists(), subject.casefold_store(folder))
+
 
 class ReadAudit(unittest.TestCase):
     def setUp(self):

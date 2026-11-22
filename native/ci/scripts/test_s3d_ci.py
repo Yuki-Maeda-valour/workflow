@@ -235,6 +235,25 @@ class S3DCiTests(unittest.TestCase):
                 self.assertRaisesRegex(RuntimeError, '翻訳ファイル'):
             s3d_ci.prepare_tools('linux-x86_64')
 
+    def test_case_insensitive_store_not_run_is_recorded_only_on_a_real_case_insensitive_mac_store(self):
+        item = [{'id': 'legacy-3404-01', 'reason': 'case-insensitive-store'}]
+        store = {'allowed': True, 'insensitive': True, 'pretend': False}
+        # Mac: 実際に区別しない置き場のときだけ許し、理由ごとに数える。
+        summary = s3d_ci.check_report(self.report(tool_versions_base=True, not_run=item, case_insensitive_store=store), 'Darwin')
+        self.assertEqual(summary['not_run'], {'case-insensitive-store': 1})
+        # Mac でも、区別する置き場・許可なし・テスト用の印は拒否する。
+        for changes in (dict(allowed=False, insensitive=False), dict(allowed=False), dict(pretend=True)):
+            with self.assertRaises(RuntimeError):
+                s3d_ci.check_report(self.report(not_run=item, case_insensitive_store=dict(store, **changes)), 'Darwin')
+        # Linux は未実施を認めない。テスト用の印や記録の欠落も拒否する。
+        with self.assertRaises(RuntimeError):
+            s3d_ci.check_report(self.report(not_run=item, case_insensitive_store=store), 'Linux')
+        with self.assertRaises(RuntimeError):
+            s3d_ci.check_report(self.report(case_insensitive_store=dict(store, pretend=True)), 'Linux')
+        report = self.report(); del report['case_insensitive_store']
+        with self.assertRaises(RuntimeError):
+            s3d_ci.check_report(report, 'Linux')
+
     def test_japanese_missing_uses_the_same_condition_as_the_comparison(self):
         with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\nja_JP.utf8\n')), \
                 mock.patch.object(s3d_ci.Path, 'is_file', return_value=True):
@@ -246,6 +265,7 @@ class S3DCiTests(unittest.TestCase):
     def report(self, **changes):
         versions = {'bash': '5.2.21', 'coreutils': '9.4', 'findutils': '4.9.0', 'sed': '4.9', 'grep': '3.11', 'glibc': '2.39'}
         value = {'tool_versions': versions, 'tool_versions_base': True, 'not_run': [], 'version_failures': [],
+                 'case_insensitive_store': {'allowed': False, 'insensitive': False, 'pretend': False},
                  'version_fields': {'review': {'review-a': ['tool-message']}}, 'version_dependent': ['review-a'],
                  'scope': 'full-external'}
         value.update(changes)

@@ -129,6 +129,11 @@ CURRENT_SCOPE = ['']
 # 基準でない機械では、manifestの欄だけを比べずに記録する(ほかの欄は比べる)。
 VERSION_TOLERANT = {'names': None, 'kinds': None}
 VERSION_MASKED = set()
+# 大小文字を区別しない置き場(Macの既定のAPFS)で入力を作れない・結果が変わる観点を、未実施として扱ってよいか。
+# check_diff_snapshotが、置き場を実際に確かめてから設定する。扱った観点は未実施の記録へ溜める(成功に数えない)。
+# gate: Macか、テスト用の印があるか。probe: 置き場が大小文字を区別しないかを確かめる関数(置き場を渡す)。
+CASE_STORE = {'gate': False, 'probe': None}
+CASE_STORE_NOT_RUN = []
 
 
 class NotRun(Exception):

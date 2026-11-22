@@ -673,5 +673,27 @@
       "state": "ignored",
       "expected": 1
     }
-  ]
+  ],
+  "case_insensitive_store": {
+    "fd-precheck-2-closed-default": {
+      "viewpoint": "起動時fd: --precheckでstderrを閉じる/ディレクトリにする(NOTEが出ない前提の終了値0)",
+      "reason": "大小文字を区別しない置き場ではgitがcore.ignorecase=trueでrepoを作り、旧版が--precheckでもNOTE(無効化して実行: core.ignorecase)をstderrへ出す。stderrを閉じたかディレクトリにした条件では、そのNOTEの書込みが失敗して終了値が0でなく1になる(旧版もRustも同じ)",
+      "code": 1
+    },
+    "fd-precheck-2-closed-ignored": {
+      "viewpoint": "起動時fd: --precheckでstderrを閉じる/ディレクトリにする(NOTEが出ない前提の終了値0)",
+      "reason": "大小文字を区別しない置き場ではgitがcore.ignorecase=trueでrepoを作り、旧版が--precheckでもNOTE(無効化して実行: core.ignorecase)をstderrへ出す。stderrを閉じたかディレクトリにした条件では、そのNOTEの書込みが失敗して終了値が0でなく1になる(旧版もRustも同じ)",
+      "code": 1
+    },
+    "fd-precheck-2-directory-default": {
+      "viewpoint": "起動時fd: --precheckでstderrを閉じる/ディレクトリにする(NOTEが出ない前提の終了値0)",
+      "reason": "大小文字を区別しない置き場ではgitがcore.ignorecase=trueでrepoを作り、旧版が--precheckでもNOTE(無効化して実行: core.ignorecase)をstderrへ出す。stderrを閉じたかディレクトリにした条件では、そのNOTEの書込みが失敗して終了値が0でなく1になる(旧版もRustも同じ)",
+      "code": 1
+    },
+    "fd-precheck-2-directory-ignored": {
+      "viewpoint": "起動時fd: --precheckでstderrを閉じる/ディレクトリにする(NOTEが出ない前提の終了値0)",
+      "reason": "大小文字を区別しない置き場ではgitがcore.ignorecase=trueでrepoを作り、旧版が--precheckでもNOTE(無効化して実行: core.ignorecase)をstderrへ出す。stderrを閉じたかディレクトリにした条件では、そのNOTEの書込みが失敗して終了値が0でなく1になる(旧版もRustも同じ)",
+      "code": 1
+    }
+  }
 }

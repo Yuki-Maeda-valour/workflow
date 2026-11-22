@@ -2044,5 +2044,37 @@
       "legacy-4001-03",
       "legacy-4005-01"
     ]
+  },
+  "case_insensitive_store": {
+    "legacy-2715-01": {
+      "viewpoint": "㉚(ii) stderr が空",
+      "description": "㉚(ii) stderr が空",
+      "reason": "大小文字を区別しない置き場ではgitがcore.ignorecase=trueでrepoを作り、旧版がNOTE(無効化して実行: core.ignorecase)をstderrへ出すため、空にならない"
+    },
+    "legacy-3323-01": {
+      "viewpoint": "㊲ 大小文字だけ違う未追跡(src/Auth.tsが未追跡として出る)",
+      "description": "㊲ src/Auth.ts が未追跡として出る",
+      "reason": "src/auth.tsとsrc/Auth.tsを同じフォルダへ作れない(同じ物を指す)ため、大小文字だけ違う未追跡の入力を作れない"
+    },
+    "legacy-3324-01": {
+      "viewpoint": "㊲ 大小文字だけ違う未追跡(src/Auth.tsの内容が出る)",
+      "description": "㊲ src/Auth.ts の内容が出る",
+      "reason": "同上。別名のファイルを作れず、未追跡として出る入力にならない"
+    },
+    "legacy-3336-01": {
+      "viewpoint": "㊲ ハードリンクの別表記(src/AUTH.tsが別表記で載る)",
+      "description": "㊲ src/AUTH.ts が別表記(同一 inode)で載る",
+      "reason": "ln src/auth.ts src/AUTH.tsが同じ名前への作成になり、別表記のハードリンクを作れない"
+    },
+    "legacy-3340-01": {
+      "viewpoint": "㊲ ハードリンクの別表記(NOTEに別表記の件数)",
+      "description": "㊲ NOTE に別表記の件数",
+      "reason": "同上。別表記(同一inode)の名前を別に作れない"
+    },
+    "legacy-3404-01": {
+      "viewpoint": "㊵ 大小文字違いの機密名 .Env",
+      "description": "㊵ .Env が除外(機密)に載る",
+      "reason": ".envと.Envを同じフォルダへ作れず、大小文字違いの機密名の入力を作れない"
+    }
   }
 }

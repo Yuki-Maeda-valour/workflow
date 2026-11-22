@@ -19,9 +19,10 @@ LIMIT = ('import os,resource,signal,sys\n'
          'signal.signal(signal.SIGXFSZ,signal.SIG_IGN)\n'
          'n=int(sys.argv[1]);resource.setrlimit(resource.RLIMIT_FSIZE,(n,n))\n'
          'os.execvp(sys.argv[2],sys.argv[2:])\n')
-CALL = re.compile(r'^(\d+\.\d+) (write|pwrite64|writev)\((\d+)<([^>]*)>, (.*)\) += (-1 ([A-Z0-9]+)|\d+)')
+CALL = re.compile(r'^(\d+\.\d+) (write|pwrite64|writev)\((\d+)<([^>]*)>(?:\(deleted\))?, (.*)\) += (-1 ([A-Z0-9]+)|\d+)')
+# 大小文字を区別しない置き場(casefoldのext4)では、straceが`<パス>(deleted)`と出すことがある(消していない)。
 # coreutils 9.4のcat・cpはcopy_file_rangeで書く。書く先は3つ目の引数。
-COPY = re.compile(r'^(\d+\.\d+) copy_file_range\(\d+<[^>]*>, [^,]+, \d+<([^>]*)>, [^,]+, (\d+), \d+\) += (-1 ([A-Z0-9]+)|\d+)')
+COPY = re.compile(r'^(\d+\.\d+) copy_file_range\(\d+<[^>]*>, [^,]+, \d+<([^>]*)>(?:\(deleted\))?, [^,]+, (\d+), \d+\) += (-1 ([A-Z0-9]+)|\d+)')
 IOV = re.compile(r'iov_len=(\d+)')
 
 

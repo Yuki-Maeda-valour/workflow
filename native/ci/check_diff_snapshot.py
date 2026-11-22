@@ -343,9 +343,74 @@ def external_vectors(binary, cases):
     return done
 
 
+CASE_STORE_REASON = 'case-insensitive-store'
+# テスト用: Linuxでも、大小文字を区別しない置き場(casefoldのext4)で、Macの扱いを確かめるための印。
+# 既定は無効。設定すると記録(case_insensitive_store.pretend)に残り、s3d_ci.check_reportがCIの記録として拒否する。
+PRETEND_ENV = 'S3D_TEST_PRETEND_DARWIN_CASE_STORE'
+# 比較器の環境を許可一覧へ縮める(closed_env.close_process)前に、読み込み時に1回だけ読む。
+PRETEND = os.environ.get(PRETEND_ENV) == '1'
+SELFTEST_NOT_RUN = []
+
+
+def casefold_store(folder=None):
+    """比較器の一時フォルダの置き場が、大小文字を区別しないことを実際に確かめる(同じ物を指すか)。"""
+    with tempfile.TemporaryDirectory(prefix='s3d-case-', dir=folder) as temporary:
+        lower, upper = Path(temporary) / 'a', Path(temporary) / 'A'
+        lower.write_bytes(b'x')
+        return upper.exists() and os.path.samestat(os.lstat(lower), os.lstat(upper))
+
+
+def case_store_gate(system=None):
+    """Macか、テスト用の印があるか(置き場の確かめの前の条件)。"""
+    return (system or platform.system()) == 'Darwin' or PRETEND
+
+
+def case_store_state(system=None, folders=None):
+    """大小文字に依る観点の失敗を未実施として扱ってよいか。Macで、実際に使う置き場がすべて区別しないときだけ真。
+
+    `folders`は、ケースが実際に使う置き場(旧自己テストの一時フォルダ・fdのケースのfixtureのrootなど)。
+    既定の一時フォルダと同じボリュームという前提にだけ頼らず、渡された置き場をすべて確かめる。
+    """
+    pretend = PRETEND
+    mac = (system or platform.system()) == 'Darwin'
+    insensitive = all(casefold_store(folder) for folder in (folders or [None])) if (mac or pretend) else False
+    return {'allowed': (mac or pretend) and insensitive, 'insensitive': insensitive, 'pretend': pretend and not mac}
+
+
+def case_dependent_ids():
+    table = json.loads((FIXTURES/'legacy_ids.json').read_text())
+    listed = table.get('case_insensitive_store', {})
+    if not set(listed) <= set(table['ids']) or any(set(item) != {'viewpoint', 'description', 'reason'} for item in listed.values()):
+        raise AssertionError('大小文字に依る観点の一覧の形が違います')
+    return listed
+
+
+def selftest_verdict(name, failed, returncode, tolerated):
+    """一覧(tolerated)に無い失敗と、失敗なしの非0の終了値は、どの機械でも止める。"""
+    if set(failed) - set(tolerated) or (returncode and not failed):
+        raise AssertionError(f'{name}の自己テストに失敗があります: {failed}')
+
+
+def selftest_shape(records, failed, listed):
+    """落ちた観点が、一覧の各IDの想定(旧自己テストの観点名)と記録の上で一致することを確かめる。"""
+    for case_id in failed:
+        description = records[case_id][1].decode('utf-8', 'replace')
+        if listed[case_id]['description'] not in description:
+            raise AssertionError(f'落ちた観点が一覧の想定と違います: {case_id}')
+
+
+def case_store_not_run(old_failed, new_failed):
+    """旧版とRustの失敗が同じ観点のときだけ、未実施の記録にする(違えば失敗)。"""
+    if sorted(old_failed) != sorted(new_failed):
+        raise AssertionError(f'大小文字に依る観点の合否が旧版とRustで違います: 旧版 {sorted(old_failed)} Rust {sorted(new_failed)}')
+    return [{'id': key, 'reason': CASE_STORE_REASON} for key in sorted(old_failed)]
+
+
 def selftest(binary):
     source = legacy_adapter.verified_source(SELFTEST)
     observed = []
+    SELFTEST_NOT_RUN.clear()
+    failures = []
     # 旧自己テストのH2は、一時フォルダのパスを含む表示が200文字に収まる前提で書かれている
     # ('sh ' + TMPDIR + '/tmp.XXXXXXXXXX/stubs/trace-clean.sh ' + 72文字)。専用のTMPDIRを短い名前で作る。
     with tempfile.TemporaryDirectory(prefix='s3d-selftest-') as temporary, \
@@ -353,6 +418,9 @@ def selftest(binary):
         if len(short) + 3 + 15 + 6 + 16 + 72 > 200:
             raise RuntimeError('比較器の一時フォルダのパスが長すぎます(旧自己テストのH2の表示が200文字を超える)')
         base = Path(temporary)
+        # 旧自己テストが実際に使う2つの置き場(base・short)を確かめて、許可を決める。
+        listed = case_dependent_ids()
+        tolerated = set(listed) if case_store_state(folders=[base, short])['allowed'] else set()
         for name, command in (('legacy', ['bash', str(LEGACY)]), ('rust', [str(binary)])):
             result_log, pid_log = base / (name + '.results'), base / (name + '.pids')
             script, wrapper = base / (name + '.selftest.sh'), base / (name + '.target.sh')
@@ -363,10 +431,13 @@ def selftest(binary):
             records = legacy_adapter.observations(result_log.read_bytes())
             if result.timed_out:
                 raise AssertionError(f'{name}の自己テストが時間切れです')
-            failed = [key for key, (state, _) in records.items() if state == 'fail']
-            skipped = [key for key, (state, _) in records.items() if state == 'skipped']
-            if failed or result.returncode:
-                raise AssertionError(f'{name}の自己テストに失敗があります: {failed}')
+            failed = [key for key, (outcome, _) in records.items() if outcome == 'fail']
+            skipped = [key for key, (outcome, _) in records.items() if outcome == 'skipped']
+            # 大小文字を区別しない置き場(Macの既定のAPFS)では、一覧の観点だけは、入力を作れず旧版も失敗する。
+            # 一覧に無い失敗・一覧外の終了値は、どの機械でも止める。旧版とRustの合否の一致は後で確かめる。
+            selftest_verdict(name, failed, result.returncode, tolerated)
+            selftest_shape(records, failed, listed)
+            failures.append(sorted(failed))
             if skipped:
                 raise AssertionError(f'{name}の必須観点が未実施です: {skipped}')
             pids = pid_log.read_bytes().split(b'\0')
@@ -374,6 +445,7 @@ def selftest(binary):
                 raise AssertionError('実行物へ到達したPIDの記録が不正です')
             observed.append(records)
     exact_ids(observed[0], observed[1])
+    SELFTEST_NOT_RUN.extend(case_store_not_run(failures[0], failures[1]))
     fixed_ids=json.loads((FIXTURES/'legacy_ids.json').read_text())['ids']
     exact_ids(fixed_ids,observed[0]);exact_ids(fixed_ids,observed[1])
     # descriptionにはscratchのパスを含む場合がある。IDと合否は完全一致で固定する。
@@ -526,6 +598,9 @@ def main(argv=None):
         base, versions = launch_sites.is_base(launch_sites.load())
         darwin = platform.system() == 'Darwin'
         result['tool_versions'], result['tool_versions_base'] = versions, base
+        result['case_insensitive_store'] = case_store_state()
+        compare_module.CASE_STORE.update(gate=case_store_gate(), probe=casefold_store)
+        compare_module.CASE_STORE_NOT_RUN.clear()
         if not base:
             # 基準でない機械: manifestの版に依る欄だけを比べずに記録し、ほかの欄は比べる。
             compare_module.VERSION_TOLERANT['names'] = {name.split(':')[0] for fields in data['version_fields'].values()
@@ -562,6 +637,7 @@ def main(argv=None):
         if args.only in (None, 'selftest'):
             compare_module.CURRENT_SCOPE[0] = 'selftest'
             result['legacy'] = selftest(binary)
+            result['not_run'] += SELFTEST_NOT_RUN
         if args.only in (None, 'read-audit'):
             compare_module.CURRENT_SCOPE[0] = 'read-audit'
             result['read_audit'] = read_audits(binary)
@@ -584,6 +660,8 @@ def main(argv=None):
         if args.only in (None, 'fd'):
             compare_module.CURRENT_SCOPE[0] = 'fd'
             result['fd'] = fd_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+            result['not_run'] += compare_module.CASE_STORE_NOT_RUN
+            compare_module.CASE_STORE_NOT_RUN.clear()
         if args.only in (None,'raw-env'):
             compare_module.CURRENT_SCOPE[0] = 'raw-env'
             result['additional'] += raw_env.run_cases(binary,fixture_type=Fixture,legacy=LEGACY)
