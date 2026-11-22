@@ -1129,6 +1129,34 @@ class StageC5(unittest.TestCase):
             self.assertEqual(review_cases.CF_RECORDS[0]['present'], True)
             self.assertEqual(review_cases.CF_RECORDS[0]['value'], '0x1F5')
 
+    def test_child_environment_mismatch_names_the_side_the_launch_site_and_the_arguments(self):
+        from diff_snapshot_fixtures import launch_sites, review_cases
+        sites = launch_sites.load()
+        cf = b'__CF_USER_TEXT_ENCODING'
+        args = (b'-C', b'/r', b'--no-pager', b'rev-parse', b'--show-object-format')
+        other = (b'--no-pager', b'ls-files', b'-z')
+        def check(legacy_env, rust_env, call=args, extra=()):
+            pending = {('git', call): [legacy_env]}
+            return review_cases.env_mismatches('case-x', sites, pending, [('git', call, rust_env), *extra])
+        # 同じ環境なら何も出ない。
+        self.assertEqual([], check({b'A': b'1'}, {b'A': b'1'}))
+        # 旧版だけにある・Rustだけにある・値が違う、を分けて出す(値は出さない)。
+        legacy_only = check({b'A': b'1', cf: b'0x1F5'}, {b'A': b'1'})
+        self.assertEqual(1, len(legacy_only))
+        self.assertIn("旧版だけ=['__CF_USER_TEXT_ENCODING']", legacy_only[0])
+        self.assertIn('Rustだけ=[]', legacy_only[0])
+        self.assertIn('site-30-git', legacy_only[0])
+        self.assertIn("'rev-parse'", legacy_only[0])
+        self.assertNotIn('0x1F5', legacy_only[0])
+        rust_only = check({b'A': b'1'}, {b'A': b'1', cf: b'0x1F5'}, call=other)
+        self.assertIn("Rustだけ=['__CF_USER_TEXT_ENCODING']", rust_only[0])
+        self.assertIn('旧版だけ=[]', rust_only[0])
+        self.assertIn("値が違う=['A']", check({b'A': b'1'}, {b'A': b'2'})[0])
+        # 旧版に無い起動と、全部の不一致を並べる(最初の1件で止めない)。
+        problems = check({b'A': b'1'}, {b'A': b'2'}, extra=[('git', other, {})])
+        self.assertEqual(2, len(problems))
+        self.assertIn('旧版に無い子の起動です', problems[1])
+
     def test_only_fsize_limit_is_set_and_inherited_limits_are_recorded(self):
         import re
         limits = subject.inherited_limits()

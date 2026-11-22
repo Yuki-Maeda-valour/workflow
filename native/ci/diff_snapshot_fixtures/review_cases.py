@@ -411,6 +411,28 @@ def cf_text_encoding(case_id, legacy_calls, *, system=None):
     return result
 
 
+def env_mismatches(case_id, sites, pending, rust_calls):
+    """Rustの子の環境を、旧版の同じ呼出しの環境と比べる。違いは、どちら側にあったか・起動の所・引数まで並べる。
+
+    pending: (道具, 引数) → 旧版の環境の列(比べるたびに先頭から使う)。環境の値は載せず、変数の名前だけを出す。
+    """
+    problems = []
+    for tool, call_args, environment in rust_calls:
+        words = [a.decode('utf-8', 'replace')[:80] for a in call_args]
+        candidates = pending.get((tool, call_args))
+        if not candidates:
+            problems.append(f'{case_id}: 旧版に無い子の起動です: {tool} 引数={words}')
+            continue
+        expected = candidates.pop(0)
+        if expected != environment:
+            legacy_only = sorted(k.decode('utf-8', 'replace') for k in set(expected) - set(environment))
+            rust_only = sorted(k.decode('utf-8', 'replace') for k in set(environment) - set(expected))
+            changed = sorted(k.decode('utf-8', 'replace') for k in expected if k in environment and expected[k] != environment[k])
+            problems.append(f'{case_id}: {tool} 起動の所={launch_sites.classify(sites, tool, call_args)} 引数={words} '
+                            f'旧版だけ={legacy_only} Rustだけ={rust_only} 値が違う={changed}')
+    return problems
+
+
 def env_probe(case, fixture, binary, legacy, *, varying=None, setup=None):
     """旧版とRustの子(gitとgrep)の環境を比べる。setupはfixtureを整えて引数を返す(既定は通常の実行)。"""
     (fixture.repo / 'seed.txt').write_bytes(b'environment probe change\n')
@@ -451,14 +473,9 @@ def env_probe(case, fixture, binary, legacy, *, varying=None, setup=None):
         pending.setdefault((tool, call_args), []).append(environment)
     if not rust_calls:
         raise AssertionError('Rustの子の起動を観測できません')
-    for tool, call_args, environment in rust_calls:
-        candidates = pending.get((tool, call_args))
-        if not candidates:
-            raise AssertionError(f'旧版に無い子の起動です: {tool}')
-        expected = candidates.pop(0)
-        if expected != environment:
-            names = sorted(set(expected) ^ set(environment)) + sorted(k for k in expected if k in environment and expected[k] != environment[k])
-            raise AssertionError(f'子の環境が旧版と違います: {tool} {[n.decode("utf-8", "replace") for n in names]}')
+    problems = env_mismatches(case['id'], launch_sites.load(), pending, rust_calls)
+    if problems:
+        raise AssertionError(f'子の環境が旧版と違います({len(problems)} 件): ' + ' / '.join(problems[:20]))
     return old, new
 
 
