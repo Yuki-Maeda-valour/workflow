@@ -1155,6 +1155,19 @@ class Comparator(unittest.TestCase):
                        (precheck, r(20, err=git.stderr + git.stderr)), (precheck, r(20, err=b'ERROR [git] other\n'))):
             self.assertIsNone(self.m.timeout_stage_difference(*broken))
 
+        # 同じ op でも、引数(config の鍵)が違えば期限の来た子が違う(CI の Mac arm64 の組)。命令の全体で比べる。
+        def config(key):
+            return r(20, err=("pre\nERROR [git] Git を実行できない: Command '['git', '-C', '/r', 'config', '--get', "
+                              f"'filter.通常 名.{key}']' timed out after 0.05 seconds\n").encode())
+        explained = self.m.timeout_stage_difference(config('clean'), config('process'))
+        self.assertIsNotNone(explained)
+        self.assertIn("'filter.通常 名.clean'", explained)
+        self.assertIn("'filter.通常 名.process'", explained)
+        self.assertIsNone(self.m.timeout_stage_difference(config('clean'), config('clean')))
+        # 命令を読めない時間切れの文(リストの字面でない)は説明できない。
+        unreadable = r(20, err=b"ERROR [git] x: Command '['git', bad]' timed out after 0.05 seconds\n")
+        self.assertIsNone(self.m.timeout_stage_difference(unreadable, config('clean')))
+
     # 既存テストの記録の代用品と同じ形の、期限の来た子の結果と記録(0.05 秒の組)。
     PRECHECK_STOP = ("ERROR [precheck] 事前検査を実行できない: Command '['bash', '/c/diff-snapshot.sh', '--cwd', '/r', "
                      "'--precheck']' timed out after 0.05 seconds\n").encode()

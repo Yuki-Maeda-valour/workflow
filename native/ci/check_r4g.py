@@ -4513,23 +4513,39 @@ TIMEOUT_LINE = re.compile(rb"^ERROR \[(precheck|git)\] [^\n]*: Command '\['([a-z
 TIMEOUT_OPS = (b'config', b'rev-parse', b'cat-file', b'status', b'diff', b'log', b'show', b'ls-files')
 
 
+def timeout_command(stderr):
+    """標準エラーの最後の行の時間切れの文から、(工程〈precheck か git〉, 命令の列)。読めなければ None。"""
+    found = TIMEOUT_LINE.search(stderr)
+    if found is None:
+        return None
+    try:
+        command = ast.literal_eval((b"['" + found.group(2) + b"'" + found.group(3) + b']').decode('utf-8'))
+    except (ValueError, SyntaxError, UnicodeDecodeError):
+        return None
+    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
+        return None
+    return found.group(1).decode(), command
+
+
 def timeout_stage_difference(old, new):
     """0.05 秒の組の不一致が「期限の来た子の違い」だけで説明できるときは、その要点。ほかの差は None。
-    説明できる: 両方が終了値20・同じ標準出力で、標準エラーの最後の行が1つの時間切れの文。"""
+    説明できる: 両方が終了値20・同じ標準出力で、標準エラーの最後の行が1つの時間切れの文。期限の来た子は、
+    時間切れの文の命令の全体(工程と、命令の列の全部)で比べる。同じ op でも引数(config の鍵など)が違えば
+    別の子で、命令の全体が同じなら説明できない。"""
     if (old.returncode, new.returncode) != (20, 20) or old.stdout != new.stdout or old.timed_out or new.timed_out:
         return None
     stages = []
     for result in (old, new):
         if result.stderr.count(b'timed out after') != 1:
             return None
-        found = TIMEOUT_LINE.search(result.stderr)
-        if found is None:
+        stage = timeout_command(result.stderr)
+        if stage is None:
             return None
-        ops = [op for op in TIMEOUT_OPS if b"'" + op + b"'" in found.group(3)]
-        stages.append(b'/'.join([found.group(1), found.group(2), *ops[:1]]).decode())
+        stages.append(stage)
     if stages[0] == stages[1]:
         return None
-    return f'旧版は {stages[0]}・Rust は {stages[1]} で期限が来た'
+    (old_kind, old_command), (new_kind, new_command) = stages
+    return f'旧版は {old_kind} の {old_command!r}・Rust は {new_kind} の {new_command!r} で期限が来た'
 
 
 def timeout_record_difference(old, new, old_trace, new_trace):
@@ -4546,16 +4562,11 @@ def timeout_record_difference(old, new, old_trace, new_trace):
         return None
     if (old.stdout, old.stderr) != (new.stdout, new.stderr) or old.stderr.count(b'timed out after') != 1:
         return None
-    found = TIMEOUT_LINE.search(old.stderr)
-    if found is None:
+    stopped = timeout_command(old.stderr)
+    if stopped is None:
         return None
-    try:
-        command = ast.literal_eval((b"['" + found.group(2) + b"'" + found.group(3) + b']').decode('utf-8'))
-    except (ValueError, SyntaxError, UnicodeDecodeError):
-        return None
-    if not isinstance(command, list) or not all(isinstance(item, str) for item in command):
-        return None
-    if found.group(1) == b'precheck':
+    kind, command = stopped
+    if kind == 'precheck':
         expected = {'kind': 'precheck', 'args': ['precheck', *command[2:]]}
     else:
         expected = {'kind': 'git', 'args': command[1:]}
@@ -4578,7 +4589,7 @@ def timeout_record_difference(old, new, old_trace, new_trace):
             or {key: record[key] for key in ('kind', 'args')} != expected):
         return None
     ops = [op.decode() for op in TIMEOUT_OPS if op.decode() in command[1:]]
-    stage = '/'.join([found.group(1).decode(), command[0], *ops[:1]])
+    stage = '/'.join([kind, command[0], *ops[:1]])
     return f'{stage} で期限が来た子の記録を、{writer} の側だけが止められる前に書けた'
 
 
