@@ -3613,7 +3613,11 @@ def wait_group_settled(pgid, what, functions=GROUP_WAITS, timeout=15):
     """群の全員が、`functions` のどれかで眠るか、終わった(ゾンビ)か、止まっているまで待つ。待たせた代用品と
     シェルのほかに、パイプラインの隣の子(sha256sum | cut の sha256sum と、その記録の代用品の Python)が
     まだ動いていれば、信号がその起動の途中(Python の初期化など)に当たるかが負荷で変わり、出力が揺れる。
-    旧版と Rust の差ではなく比較器の同期の不足なので、送る前にここまで待つ。Linux 以外は 0.5 秒待つだけ。"""
+    旧版と Rust の差ではなく比較器の同期の不足なので、送る前にここまで待つ。Linux 以外は 0.5 秒待つだけ。
+
+    群の顔ぶれは /proc の一覧の時点のもので、全員を確かめる間に新しい子が生まれることがある(一覧の後に
+    fork した子は、その回の一覧に無い)。全員が落ち着いたと見た後に一覧を取り直し、顔ぶれが同じときだけ
+    待ち終わる(CI のカーネル 7.0 の機械で、一覧の後に生まれた隣の子を見落として、すぐに戻った1回がある)。"""
     if not sys.platform.startswith('linux'):
         time.sleep(0.5)
         return
@@ -3621,13 +3625,14 @@ def wait_group_settled(pgid, what, functions=GROUP_WAITS, timeout=15):
     busy = []
     while time.monotonic() < deadline:
         busy = []
-        for pid in group_members(pgid):
+        members = group_members(pgid)
+        for pid in members:
             if process_state(pid) in (None, 'Z', 'T', 't'):
                 continue
             asleep, seen = sleeping_in(pid, functions)
             if not asleep:
                 busy.append((pid, seen, process_state(pid)))
-        if not busy:
+        if not busy and sorted(group_members(pgid)) == sorted(members):
             return
         time.sleep(0.005)
     raise Difference(f'{what}: 群の子が待つ所で眠らない({busy}・群: {group_report(pgid)})')

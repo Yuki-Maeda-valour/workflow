@@ -1086,7 +1086,7 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
 
 - `TMPDIR` は、短い名前の、自分だけが書けるフォルダにする(例の `/tmp/r4g` は先に作る)。
 - `check_r4g.py --fixture` は、実行できるRustの実行ファイル(ELFかMach-O)の絶対パスだけを受ける。旧版のスクリプトや、ほかの実行ファイルは拒否する。引数なしの起動が、入口の固定の文を返すことも確かめる。
-- `native/ci/test_r4g.py` は、比較器の自己検査59件である。`scripts/test_native_r4g.py` は、その自己検査の `Comparator`(本家のPythonも `strace` も使わない検査)に、`unsafe` と `link_section` を置く場所の静的な確認などを足し、外部のRustのビルドなしで全回帰テストへつなぐ62件である(`scripts/run-all.py` が自動で集める)。
+- `native/ci/test_r4g.py` は、比較器の自己検査60件である。`scripts/test_native_r4g.py` は、その自己検査の `Comparator`(本家のPythonも `strace` も使わない検査)に、`unsafe` と `link_section` を置く場所の静的な確認などを足し、外部のRustのビルドなしで全回帰テストへつなぐ63件である(`scripts/run-all.py` が自動で集める)。
 - Cargoと `native/ci/` の検査は、`run-all.py` に含まれない。
 - 比較の始めに、`R4G: 機械: <OS> <カーネルの版> <CPU>(待つ所の名前は WCHAN_NAMES で受け付ける)` と、`R4G: 旧版の前提: bash 4.0 以上 <パスか無し>・ファイル名の大文字と小文字を<区別する|区別しない>` の行を出す(前提が欠けるときは、行の末尾に未実施にする組を並べる)。PATHの外にbash 4.0以上があれば、PATHの先頭へ足して、旧版とRustの両方に同じbashを使わせる。
 - 待つ所の同期は、`/proc/<pid>/wchan` の名前を表 `WCHAN_NAMES` で受け付ける。pipeの読みは `pipe_read` と `anon_pipe_read`(Linux v6.15で名前が変わった。CIのカーネルで確認する)、子を待つのは `do_wait`、FIFOは `wait_for_partner` と `fifo_open`、眠りは `hrtimer_nanosleep` である。表に無い名前では、理由つきで止まる。
@@ -1142,11 +1142,11 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
 比較したのは、mainの `942a4ded2b92fa4d5f517aeacdd399d63ed57a0c` の上の、R4Gの実装commit `9ebbf500c7c314693a7698baa9e4bc3aa3324679` に対応する作業場所である(最終の検証SHAでの再実行は未実施)。容器は、Ubuntu 24.04・本家のCPython 3.10.11・root以外で、`--require-strace --require-userns` を付けた。
 
 - `check_r4g.py` の全体は、190件・未実施0件・`strace` の対照は実施で、合格した。時間は904〜983秒である(負荷が10〜13の手元。CPUを2つと4つに絞った回を同時に流した回は976秒と983秒)。
-  - その後、旧版の前提の直しと、実の事前検査と代用品の両方を流す形にした後の全体は、198件・未実施0件で、約827秒だった(記録の値。件数と時間が延びた)。比較器のMacの端末(pty)の読み取りの直しの後の、容器の全体は、200件・未実施0件・711秒だった(記録の値)。試験用のrepoを作るgitに自動の手入れを起こさない指定を付けた後の全体は、201件・未実施0件・678秒だった(記録の値)。Macの全体の結果と時間は、CIの後に記録する(未確認)。
+  - その後、旧版の前提の直しと、実の事前検査と代用品の両方を流す形にした後の全体は、198件・未実施0件で、約827秒だった(記録の値。件数と時間が延びた)。比較器のMacの端末(pty)の読み取りの直しの後の、容器の全体は、200件・未実施0件・711秒だった(記録の値)。試験用のrepoを作るgitに自動の手入れを起こさない指定を付けた後の全体は、201件・未実施0件・678秒だった(記録の値)。群への信号の前に待つ処理を、群の一覧を取り直して顔ぶれが同じときだけ待ち終わる形に直した後の全体は、202件・未実施0件・663秒だった(記録の値。CIのカーネル7.0の機械で、一覧の後に生まれた子を漏らす競合が出たため)。Macの全体の結果と時間は、CIの後に記録する(未確認)。
   - 時計で決まる分は約181秒である(本物の期限の Git 30秒と事前検査120秒を、旧版とRustの両方で待つ分と、本物の時計の上限の節)。
 - `cargo test --locked`(ワークスペース全体): 138件が成功した(記録の値。run-checks の最後の実行〈実装commitの前〉で、`cargo test` とexampleは終了コード0だった。件数は記録していない)。
 - `cargo test --locked -p dev-workflow-cli --example r4g_contract`: 52件が成功した(記録の値)。
-- `native/ci/test_r4g.py` 59件・`scripts/test_native_r4g.py` 62件・`native/ci/build.py test` 120件が成功した(main cb1a8ee〈#497〉を取り込んだ後のソース〈ff06947〉で再実行した。#497が `test_native_ci.py` にテストを足したため、115件から増えた。`test_r4g.py`・`test_native_r4g.py` の件数は、記録の値)。
+- `native/ci/test_r4g.py` 60件・`scripts/test_native_r4g.py` 63件・`native/ci/build.py test` 120件が成功した(main cb1a8ee〈#497〉を取り込んだ後のソース〈ff06947〉で再実行した。#497が `test_native_ci.py` にテストを足したため、115件から増えた。`test_r4g.py`・`test_native_r4g.py` の件数は、記録の値)。
 - 書式・clippyは、この機械と、aarch64-apple-darwin・x86_64-apple-darwin・aarch64/x86_64-unknown-linux-muslの型検査で警告0だった(記録の値)。Macの実行は未確認である。
 - 製品(musl release)の `check_probe.py`・`check_resolve_task_dir.py` の714件が成功した。`.init_array` と起動の比較は、基準と同じだった(8 / 8バイト・72通り全部同じ。記録の値)。
 

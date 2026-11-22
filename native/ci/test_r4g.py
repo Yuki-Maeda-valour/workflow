@@ -736,6 +736,35 @@ class Comparator(unittest.TestCase):
             for process in (leader, stuck):
                 process.wait(timeout=10)
 
+    def test_group_settled_rechecks_members_born_after_the_listing(self):
+        """一覧の後に生まれた子(1回目の一覧に無い)を見落として待ち終わらない: 全員が落ち着いた後に一覧を取り直し、
+        顔ぶれが変わっていれば確かめ直す(CI のカーネル 7.0 の機械で、隣の子の sleep を見落とした回の形)。"""
+        listings = iter([[10], [10, 11], [10, 11], [10, 11], [11, 10]])
+        states = {10: iter(['S'] * 20), 11: iter(['S', 'S', 'Z', 'Z', 'Z', 'Z'])}
+        checked = []
+
+        def sleeping(pid, functions):
+            checked.append(pid)
+            return (pid == 10, 'anon_pipe_read' if pid == 10 else 'hrtimer_nanosleep')
+        with mock.patch.object(self.m, 'group_members', lambda pgid: next(listings)), \
+                mock.patch.object(self.m, 'process_state', lambda pid: next(states[pid])), \
+                mock.patch.object(self.m, 'sleeping_in', sleeping), \
+                mock.patch.object(self.m, 'group_report', lambda pgid: []), \
+                mock.patch.object(self.m.sys, 'platform', 'linux'), \
+                mock.patch.object(self.m.time, 'sleep', lambda seconds: None):
+            self.m.wait_group_settled(10, 'self-test', timeout=5)
+        # 1回目は 10 だけを見て落ち着いたが、取り直した一覧に 11 があるので、11 を見て(眠りの中は落ち着いて
+        # いない)、11 が終わる(ゾンビ)まで待った。
+        self.assertIn(11, checked)
+        self.assertEqual(next(listings, 'end'), 'end')
+        # 変異の対照: 取り直さずに待ち終わる形では、1回目の一覧だけで戻り、11 を見ない。
+        listings = iter([[10]])
+        with mock.patch.object(self.m, 'group_members', lambda pgid: next(listings, [10])), \
+                mock.patch.object(self.m, 'process_state', lambda pid: 'S'), \
+                mock.patch.object(self.m, 'sleeping_in', lambda pid, functions: (True, 'anon_pipe_read')), \
+                mock.patch.object(self.m.sys, 'platform', 'linux'):
+            self.m.wait_group_settled(10, 'self-test', timeout=5)
+
     def test_signal_taken_waits_until_the_pending_mark_is_cleared(self):
         if not sys.platform.startswith('linux'):
             self.not_linux_waits_only(lambda: self.m.wait_signal_taken(os.getpid(), signal.SIGUSR1, timeout=0.1))
