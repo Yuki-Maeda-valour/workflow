@@ -42,8 +42,24 @@ impl Graph {
 /// Compose one document without recursion. This function is also observed by the
 /// test-only graph bridge; the public profile path uses these exact nodes.
 pub(crate) fn compose(raw: &[u8], limit: super::LegacyIntLimit) -> Result<Graph, ()> {
+    compose_inner(raw, limit, None)
+}
+pub(crate) fn compose_snapshot(
+    raw: &[u8],
+    limit: super::LegacyIntLimit,
+    policy: super::snapshot_recursion::RecursionPolicy,
+) -> Result<Graph, ()> {
+    compose_inner(raw, limit, Some(policy))
+}
+fn compose_inner(
+    raw: &[u8],
+    limit: super::LegacyIntLimit,
+    recursion: Option<super::snapshot_recursion::RecursionPolicy>,
+) -> Result<Graph, ()> {
     let text = std::str::from_utf8(raw).map_err(|_| ())?;
     if !text.chars().all(|c| matches!(u32::from(c),9|10|13|0x20..=0x7e|0x85|0xa0..=0xd7ff|0xe000..=0xfffd|0x10000..=0x10ffff)) { return Err(()); }
+    let mut observer =
+        recursion.map(|policy| super::snapshot_recursion::Composer::new(raw, policy));
     let mut graph = Graph { nodes: Vec::new() };
     let mut stack: Vec<(usize, Option<usize>)> = Vec::new();
     let mut anchors = HashMap::new();
@@ -51,7 +67,10 @@ pub(crate) fn compose(raw: &[u8], limit: super::LegacyIntLimit) -> Result<Graph,
     for event in Parser::new_from_iter(text.strip_prefix('\u{feff}').unwrap_or(text).chars())
         .with_legacy_integer_limit(limit.0)
     {
-        let (event, _) = event.map_err(|_| ())?;
+        let (event, marker) = event.map_err(|_| ())?;
+        if let Some(observer) = &mut observer {
+            observer.observe(&event, marker.start)?;
+        }
         let (node, anchor, opens) = match event {
             Event::DocumentStart(_) => {
                 documents += 1;

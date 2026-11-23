@@ -1272,6 +1272,109 @@ python3 -B native/ci/implement_guard_mutations.py            # Rust のソース
 
 CIの接続は [CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口)にある。検査専用入口はCI内の転送だけに含め、配布用の`native-dist.tar`には含めない。
 
+### S3Dの比較
+
+#472の`diff-snapshot.sh`の開発用実装は、製品CLIへ未登録・未配布である。
+[契約と承認済みの差](design.md#diff-snapshotの全モードs3d)、[専用部品と入口](../native/README.md#diff-snapshotの全モードs3d)を参照する。
+比較は旧`diff-snapshot.sh`・旧`secret-profiles.py`と、今回のソースから作った検査用実行物`diff_snapshot_contract`を同じ物理入力で動かして行う。
+
+必要な道具は次のとおり。1つでも欠けたら、比較の前に失敗する(省略や切替をしない)。
+- Python 3.10.11系(3.10以外は拒否)と、同じPythonへの`PyYAML` 6.0.3。root以外の利用者で実行する。
+- GNU版の`bash`・`grep`・`sort`・`sha256sum`・`find`・`touch`・`head`。`grep -Eiqz --`と`sort -z`のNUL機能が使えること。
+- 実`git-lfs`。スタブは拒否する。Git 2.45以上。
+- `strace`(Linuxだけ。機密本文の読取りの監査に使う)。
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && DEV_WORKFLOW_S3D_TYPED_REPORT="$CARGO_TARGET_DIR/s3d-typed.json" \
+  cargo test --locked -p dev-workflow-cli --example diff_snapshot_contract -- --nocapture)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example diff_snapshot_contract --target x86_64-unknown-linux-musl)
+DEV_WORKFLOW_TEST_DIFF_SNAPSHOT_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/diff_snapshot_contract" \
+DEV_WORKFLOW_S3D_TYPED_REPORT="$CARGO_TARGET_DIR/s3d-typed.json" \
+  python3 -B native/ci/check_diff_snapshot.py --report "$CARGO_TARGET_DIR/s3d-comparison.json"
+python3 -B -m unittest discover -s native/ci -p 'test_diff_snapshot.py'
+python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
+```
+
+- 出力先はリポジトリの外に置く。他機種は、その機械のRust対象名へ変える。`DEV_WORKFLOW_TEST_DIFF_SNAPSHOT_BINARY`は検査専用で、未設定・空・不在・実行不能なら失敗にする。配布済みの実行物へ切り替えない。
+- `--only <群>`で1つの群だけを流せる(`vectors`・`selftest`・`read-audit`・`profile`・`parser`・`platform`・`publication`・`output-faults`・`fd`・`raw-env`・`entry-signals`・`review`・`partial`・`launch-table`・`path-reduced`・`fixed-extra`)。作業の途中の確認用であり、全体の合格にはならない。
+- 型report(Rustの型で操作を差し替えた検査の結果のJSON)は、exampleの単体検査が`DEV_WORKFLOW_S3D_TYPED_REPORT`のパスへ作る。比較器はソース入力の値・manifestの値・期待するIDの集合と照らす。古いreportは使えず、`s3d_ci.typed_report`が毎回消してから作る。
+- 比較器は、旧自己テストをリポジトリ外へコピーして使う。元のSHA-256と変更ブロックを確かめ、旧自己テストは編集しない。
+- bashの動きを変える変数(09:58の決定)を比較の入力に使わないことは、`native/ci/diff_snapshot_fixtures/bash_behavior_vars.json`(bash 5.2.21の`variables.c`の初期化と`sv_*`の代入から作った27件の一覧と、外した名前63件の理由)を比較器が固定する。`closed_env.check`が起動のたびに一覧の変数を止める。
+- 起動時の警告(範囲外の`BASH_COMPAT`・整数でないか閉じた番号の`BASH_XTRACEFD`・`SHLVL`・setlocale)は、群`startup-env`が旧版の警告と全バイトで比べる。実行中に値が変わる変数は、群`dynamic-*`が形と時刻の範囲を検査し、`LINENO`は旧版が子の環境を組み直した行に合わせて比べる。
+- 比べるものは、終了値・標準出力・標準エラー・Markdown・patchの生バイト・元のindexと設定と入力の無変更・公開状態・子の終了・Rustが起動した子の列である。広い正規化で差を消さない。
+- 件数の下限は、旧71観点・旧assertion 926件・固定入力468件(承認済みの設計〈Issue #472本文〉の「専用検査の固定入力」の表19行の下限の合計。引数/モード39・GNU ERE/glob 170・表示byte 72・公開36・開始時の信号状態9・profile取得16の6行が342件で、部分出力17・継承した`GIT_*` 40・子の環境6などの13行を足した数)・型report 218件である。未到達・重複・0件・欠落・skip・時間切れ・誤った実装(変異)の見逃しを合格にしない。
+- Linuxでは、`strace`で親と全子のopen・read・mmap・close・子の生成を追い、合成した機密本文への余分な読取りがないことを旧版の呼出しと照合する。Macは操作の到達記録と子の起動記録を別欄で確かめる。Linuxの結果をMacの成功に数えない。
+
+#### 版に依る欄
+
+- 基準は、Ubuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・grep 3.11・glibc 2.39)である。基準の値は`native/ci/diff_snapshot_fixtures/launch_sites.json`の`base_versions`にある。
+- 比較器は旧版を動かす道具の版を確かめ、記録する。基準と違う機械では、`cases.json`の`version_fields`に載る欄(Rustが作る道具の文・bash自身の文・`SHLVL`・bashの起動時の警告)だけを、比べずに失敗として記録する。ほかの欄は比べる。
+- Linuxの専用比較は基準の版の機械(CIの`ubuntu-24.04`と`ubuntu-24.04-arm`)で流し、未実施も失敗も認めない。
+- Macは基準の版を用意できないため、版に依る欄・`strace`が要る欄・`/proc`が要る欄を未実施として記録する。成功に数えない。
+- 作業機(基準でない機械)で全体の比較が終了1で終わるのは、版に依る欄だけが失敗するためである。これは基準の版での合格ではない。基準の版の確認は、同じ版の容器かCIで行う。
+
+#### 手元の実測(2026-11-12)
+
+実装担当の記録である。この表の時点(2026-11-12)では、実装commitは作成済みで、PR・CIでの実行は未実施だった。Rust 1.99.1・Git 2.56.0。CIでの結果は「CIでの扱い」にある。
+
+| 環境 | 全体の比較 | 結果 |
+|---|---|---|
+| 基準の版の容器(静的musl・Python 3.10.11・PyYAML 6.0.3) | 1,068秒 | 終了0 |
+| 作業機(Linux x86_64・基準でない) | 974〜1,448秒(負荷で変わる) | 終了1。失敗は版に依る欄の154件だけ |
+
+- 容器の1回目は1,415秒・終了0だった。測定値の定数を直す前である。
+- 作業機の1,448秒の回は、高負荷で`review-check-rules-exits`の旧版の一時領域が残って止まった。その群だけを流し直すと合格した。
+- 作業機でそろって成功した検査: `cargo fmt --check`・`clippy -D warnings`・`cargo test --locked`(121件)・exampleの単体検査12件・型report 218件・`test_s3d_ci.py` 18件・`test_native_ci.py` 75件・`build.py test` 93件・`check_workflow.py`・`validate.py`・`claude plugin validate`。
+- 容器ではCのリンカが無く、`cargo`は未実施である。
+- `cargo test --locked`は、`TMPDIR`のパスが長いと既存の`task_digest`のAF_UNIXのパス長で落ちる(S3Dと無関係)。短い`TMPDIR`で流す。
+- Python 3.10.11の専用環境では、C0cのfd-inheritanceの1件が環境起因で落ちる(素のHEADでも同じ)。R4Rの`check_r4r.py`は、Python 3.10.12では成功し、3.10.11の専用環境では旧helper側の`select`の境界1件が落ちた(変更と無関係と推定。未確認)。
+- Mac実機での比較・Linux arm64・署名後Macでの比較は、手で起動したNativeのrun 45133632158(commit 0ab63ea)で成功した。時間は「CIでの扱い」の表にある。
+- 最終SHAの全回帰テストの結果は、PRの本文に書く。
+
+#### CIでの扱い
+
+出典は2026-11-12 12:59の決定である。比較は既存の`build`と`verify-universal`へ入れず、新しい必須ジョブで流す。
+
+- `build`は、`diff_snapshot_contract`を作り、検査物の転送とMac結合に含める。`make_dist.py`の配布一覧と`native-dist.tar`には入れない。
+  - exampleの単体検査(12件)は、Linux 2機種の`build`だけで流す。Macの`build`ではbrewを入れない。
+  - S3Dは、`build`と`verify-universal`の上限を変えない。S2L #468で延ばした120分・60分のままである。
+- `s3d`は`build`の後に、4機種で流す。各ビルド2回それぞれで全体の比較を行う。上限は270分である。
+  - 各機種で、GNU道具(Macはbrew)と実`git-lfs`(Linuxは`strace`も)を用意し、型reportを作る。
+- `s3d-universal`は`combine`の後に、Mac 2機種で流す。署名後の一致したexampleを実際のMacで比較する。上限は150分である。
+- `s3d`・`s3d-universal`は、`distribution`の`needs`に入れない。R4Uの`r4u`・R4D-1の`r4d1`と同じ形である。
+  - 理由の1つ目: S3Dのexampleは、配布物(`native-dist.tar`)に入らない。
+  - 理由の2つ目: 必須であることは、マージの条件で担う。マージの条件には、PRの先頭のSHAの、打ち切られていないrunの最新のattempt(やり直しの回)だけを数える。そのattemptで全ジョブが成功していることが要る。失敗したジョブだけをやり直したattemptも数える。
+  - 理由の3つ目: `distribution`が、最長270分の比較を待たないようにする。
+- 比較1回の上限は、Linuxが60分、Macが120分である(`native/ci/s3d_ci.py`の`COMPARISON_LIMITS`)。
+  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
+  - 根拠の1つ目は、Issue #472の設計である。時間の上限は、新旧の専用比較の実測の後に決める。既存の必須の比較を減らして時間内に収めない。
+  - 根拠の2つ目は、手で起動したNativeのrun 45118443441(commit 6a43412)である。Mac x86_64の`s3d`で、比較の1回目が当時の上限60分(3,600秒)を超えて止まった。
+  - 120分にした後のrun 45133632158では、比較1回の最長はLinuxが1,261秒(Linux arm64)、Macが3,901秒(Mac x86_64)だった。上限は、それぞれの約2.9倍と約1.85倍である。Macは2倍に届かない。
+- `native.yml`のジョブの定義は15個で、matrixを展開した実行は41件である(2026-11-23に、mainを取り込んだ後の`native.yml`を数えた)。
+  - 内訳は、`policy`1・`build`4・`combine`1・`verify-universal`2・`distribution`1・`r4d1`4・`r4u`4・`r4e`4・`r4e-universal`2・`implement-guard`4・`implement-guard-universal`2・`r4g`4・`r4g-universal`2・`s3d`4・`s3d-universal`2である。
+- `check_workflow.py`は、`native.yml`のS3Dのジョブを次のとおり確かめる。S3Dのジョブの`needs`は見ない。
+  - `REQUIRED_NATIVE_JOBS`で、`s3d`・`s3d-universal`のジョブの欠落を拒否する。
+  - `check_s3d_jobs`で、比較のジョブが1つずつあること・matrixの機種(`s3d`は4機種、`s3d-universal`はMac 2機種)・コマンドの形・Linuxの比較が基準の版の機械(Ubuntu 24.04)で流れることを確かめる。
+  - 上限(270分・150分)と、比較の前のPython 3.10.11も確かめる。
+- `test_s3d_ci.py`の`S3DWorkflowTests`は、`native.yml`の`needs`(`s3d`は`build`、`s3d-universal`は`combine`)と機種を確かめる。
+  - ジョブ・工程・機種を抜く変異と、コマンドの形・ジョブの重複・上限・Python・Linuxの機械を変える変異を、`check_workflow.py`が拒否することも確かめる。
+- 配布一覧へのexampleの混入は、`test_s3d_ci.py`の`S3DCiTests`(`test_example_is_transferred_and_never_distributed`)が拒否する。
+- `test_native_ci.py`の`S3DConnectionTests`は1件である。exampleの単体検査をLinuxの`build`だけで流し、道具を入れないことを確かめる。
+- 接続を抜く変異21件をすべて検出したのは、2026-11-12の手元の記録である(`test_s3d_ci.py` 18件・`test_native_ci.py` 75件の時点)。今のテストでは数え直していない。
+- CIでの実測は、手で起動したNativeのrun 45133632158(commit 0ab63ea)の値である。6件とも成功した。
+  - PRがmainと衝突していて、PR用のCIが流れなかった。そのため、`workflow_dispatch`(手で起動する入口)で起動した。
+
+| ジョブ | 機種 | 時間 | 上限 | 余裕 |
+|---|---|---|---|---|
+| `s3d` | Linux x86_64 | 26.4分 | 270分 | 243.6分 |
+| `s3d` | Linux arm64 | 43.0分 | 270分 | 227.0分 |
+| `s3d` | Mac arm64 | 80.1分 | 270分 | 189.9分 |
+| `s3d` | Mac x86_64 | 132.4分 | 270分 | 137.6分 |
+| `s3d-universal` | Mac arm64 | 44.7分 | 150分 | 105.3分 |
+| `s3d-universal` | Mac x86_64 | 65.0分 | 150分 | 85.0分 |
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。

@@ -60,6 +60,10 @@ class TempCase(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
+        # S3D の example の単体検査(道具の導入を含む)は test_s3d_ci.py が確かめる。
+        patcher = mock.patch.object(build.s3d_ci, "unit_test")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def write(self, relative, data=b"test", mode=0o644):
         path = self.root / relative
@@ -784,12 +788,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--example", "diff_snapshot_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract"):
+                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -829,6 +833,7 @@ class BuildTests(TempCase):
                 self.write(f"{name}/{number}/r4g_contract", b"fixture")
                 self.write(f"{name}/{number}/r4e_contract", b"fixture")
                 self.write(f"{name}/{number}/implement_guard_contract", b"fixture")
+                self.write(f"{name}/{number}/diff_snapshot_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -850,9 +855,9 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 14)
+        self.assertEqual(len(signed), 16)
         self.assertEqual({path.name for path in signed},set(build.CI_BINARIES))
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "record.json"])
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1308,10 +1313,10 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract"))
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract"))
         self.assertFalse(any("r4b" in path or "r4r" in path or "r4e" in path or "r4g" in path for path in make_dist.BINARY_PATHS))
         self.assertFalse(any("loop_state" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract")})
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1366,7 +1371,7 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_all_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
 
@@ -1621,6 +1626,23 @@ class R4UConnectionTests(TempCase):
                     self.assertEqual(changed, added.replace(entry, ""))
                     self.assertIn(extra, changed)
                     self.assertNotIn(entry, changed)
+
+
+class S3DConnectionTests(TempCase):
+    def test_example_unit_test_runs_only_in_linux_builds_without_installing_tools(self):
+        # 12:59 の決定の CI の時間: Mac の build では brew も単体検査も流さない(s3d ジョブの型検査の記録で兼ねる)。
+        quiet = lambda args, *, env=None, capture=False: "" if capture else None
+        for platform_name in build.TARGETS:
+            build.s3d_ci.unit_test.reset_mock()
+            with self.subTest(platform=platform_name), \
+                    mock.patch.object(build, "build_environment", return_value={}), \
+                    mock.patch.object(build, "run", side_effect=quiet), \
+                    mock.patch.object(build.s3d_ci, "prepare_tools") as tools, \
+                    mock.patch.object(build.s3d_ci, "execute") as execute:
+                build.quality(platform_name, self.root)
+                self.assertEqual(build.s3d_ci.unit_test.call_count, int(platform_name.startswith("linux-")))
+                tools.assert_not_called()
+                execute.assert_not_called()
 
 
 class R4D1Tests(TempCase):
@@ -2165,7 +2187,7 @@ class R4EConnectionTests(TempCase):
                     folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
                     (folder / "examples").mkdir(parents=True)
                     (folder / "dev-workflow").write_bytes(elf())
-                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract"):
+                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract"):
                         if missing and example == "r4e_contract":
                             continue
                         data = second if example == "r4e_contract" and len(count) == 2 and second is not None else elf()

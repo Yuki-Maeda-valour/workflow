@@ -1,0 +1,518 @@
+[
+  {
+    "id": "parser-empty-cwd",
+    "shape": "empty",
+    "option": "cwd",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-cwd",
+    "shape": "duplicate",
+    "option": "cwd",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-cwd",
+    "shape": "precheck",
+    "option": "cwd",
+    "expected": 0
+  },
+  {
+    "id": "parser-empty-base",
+    "shape": "empty",
+    "option": "base",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-base",
+    "shape": "duplicate",
+    "option": "base",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-base",
+    "shape": "precheck",
+    "option": "base",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-out",
+    "shape": "empty",
+    "option": "out",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-out",
+    "shape": "duplicate",
+    "option": "out",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-out",
+    "shape": "precheck",
+    "option": "out",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-exclude-glob",
+    "shape": "empty",
+    "option": "exclude-glob",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-exclude-glob",
+    "shape": "duplicate",
+    "option": "exclude-glob",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-exclude-glob",
+    "shape": "precheck",
+    "option": "exclude-glob",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-exclude",
+    "shape": "empty",
+    "option": "exclude",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-exclude",
+    "shape": "duplicate",
+    "option": "exclude",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-exclude",
+    "shape": "precheck",
+    "option": "exclude",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-secret-profile-ref",
+    "shape": "empty",
+    "option": "secret-profile-ref",
+    "expected": 20
+  },
+  {
+    "id": "parser-duplicate-secret-profile-ref",
+    "shape": "duplicate",
+    "option": "secret-profile-ref",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-secret-profile-ref",
+    "shape": "precheck",
+    "option": "secret-profile-ref",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-secret-profile-union-sha256",
+    "shape": "empty",
+    "option": "secret-profile-union-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-secret-profile-union-sha256",
+    "shape": "duplicate",
+    "option": "secret-profile-union-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-precheck-secret-profile-union-sha256",
+    "shape": "precheck",
+    "option": "secret-profile-union-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-pre-untracked",
+    "shape": "empty",
+    "option": "pre-untracked",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-pre-untracked",
+    "shape": "duplicate",
+    "option": "pre-untracked",
+    "expected": 2
+  },
+  {
+    "id": "parser-precheck-pre-untracked",
+    "shape": "precheck",
+    "option": "pre-untracked",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-pre-untracked-sha256",
+    "shape": "empty",
+    "option": "pre-untracked-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-pre-untracked-sha256",
+    "shape": "duplicate",
+    "option": "pre-untracked-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-precheck-pre-untracked-sha256",
+    "shape": "precheck",
+    "option": "pre-untracked-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-include-untracked",
+    "shape": "empty",
+    "option": "include-untracked",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-include-untracked",
+    "shape": "duplicate",
+    "option": "include-untracked",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-include-untracked",
+    "shape": "precheck",
+    "option": "include-untracked",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-max-untracked-bytes",
+    "shape": "empty",
+    "option": "max-untracked-bytes",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-max-untracked-bytes",
+    "shape": "duplicate",
+    "option": "max-untracked-bytes",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-max-untracked-bytes",
+    "shape": "precheck",
+    "option": "max-untracked-bytes",
+    "expected": 0
+  },
+  {
+    "id": "parser-empty-patch-out",
+    "shape": "empty",
+    "option": "patch-out",
+    "expected": 0
+  },
+  {
+    "id": "parser-duplicate-patch-out",
+    "shape": "duplicate",
+    "option": "patch-out",
+    "expected": 0
+  },
+  {
+    "id": "parser-precheck-patch-out",
+    "shape": "precheck",
+    "option": "patch-out",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-patch-base",
+    "shape": "empty",
+    "option": "patch-base",
+    "expected": 2
+  },
+  {
+    "id": "parser-duplicate-patch-base",
+    "shape": "duplicate",
+    "option": "patch-base",
+    "expected": 2
+  },
+  {
+    "id": "parser-precheck-patch-base",
+    "shape": "precheck",
+    "option": "patch-base",
+    "expected": 2
+  },
+  {
+    "id": "parser-empty-accept",
+    "shape": "empty",
+    "option": "accept",
+    "expected": 0
+  },
+  {
+    "id": "parser-duplicate-accept",
+    "shape": "duplicate",
+    "option": "accept",
+    "expected": 2
+  },
+  {
+    "id": "parser-precheck-accept",
+    "shape": "precheck",
+    "option": "accept",
+    "expected": 0
+  },
+  {
+    "id": "parser-raw-exclude-glob",
+    "shape": "raw",
+    "option": "exclude-glob",
+    "expected": 0
+  },
+  {
+    "id": "parser-raw-exclude",
+    "shape": "raw",
+    "option": "exclude",
+    "expected": 0
+  },
+  {
+    "id": "parser-raw-include-untracked",
+    "shape": "raw",
+    "option": "include-untracked",
+    "expected": 0
+  },
+  {
+    "id": "parser-raw-base",
+    "shape": "raw",
+    "option": "base",
+    "expected": 4
+  },
+  {
+    "id": "parser-raw-accept",
+    "shape": "raw",
+    "option": "accept",
+    "expected": 0
+  },
+  {
+    "id": "parser-raw-secret-profile-ref",
+    "shape": "raw",
+    "option": "secret-profile-ref",
+    "expected": 20
+  },
+  {
+    "id": "parser-raw-secret-profile-union-sha256",
+    "shape": "raw",
+    "option": "secret-profile-union-sha256",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-49",
+    "shape": "integer",
+    "value": "0",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-50",
+    "shape": "integer",
+    "value": "00",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-51",
+    "shape": "integer",
+    "value": "0001",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-52",
+    "shape": "integer",
+    "value": "1",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-53",
+    "shape": "integer",
+    "value": "8388608",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-54",
+    "shape": "integer",
+    "value": "1048576",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-55",
+    "shape": "integer",
+    "value": "9223372036854775807",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-56",
+    "shape": "integer",
+    "value": "9223372036854775808",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-57",
+    "shape": "integer",
+    "value": "18446744073709551615",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-58",
+    "shape": "integer",
+    "value": "18446744073709551616",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-59",
+    "shape": "integer",
+    "value": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+    "expected": 0
+  },
+  {
+    "id": "parser-integer-60",
+    "shape": "integer",
+    "value": "+1",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-61",
+    "shape": "integer",
+    "value": " 1",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-62",
+    "shape": "integer",
+    "value": "1 ",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-63",
+    "shape": "integer",
+    "value": "0x10",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-64",
+    "shape": "integer",
+    "value": "1e3",
+    "expected": 2
+  },
+  {
+    "id": "parser-integer-65",
+    "shape": "integer",
+    "value": "1\n2",
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-66",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--print-exclude-ere"
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-67",
+    "shape": "combination",
+    "args": [
+      "--print-exclude-ere",
+      "--out",
+      ""
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-68",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--max-untracked-bytes",
+      "8388608"
+    ],
+    "expected": 0
+  },
+  {
+    "id": "parser-combination-69",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--max-untracked-bytes",
+      "0"
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-70",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--base",
+      ""
+    ],
+    "expected": 0
+  },
+  {
+    "id": "parser-combination-71",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--out",
+      ""
+    ],
+    "expected": 0
+  },
+  {
+    "id": "parser-combination-72",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--secret-profile-ref",
+      ""
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-73",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--pre-untracked",
+      ""
+    ],
+    "expected": 0
+  },
+  {
+    "id": "parser-combination-74",
+    "shape": "combination",
+    "args": [
+      "--precheck",
+      "--include-untracked",
+      ""
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-75",
+    "shape": "combination",
+    "args": [
+      "--print-exclude-ere",
+      "--exclude",
+      ""
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-76",
+    "shape": "combination",
+    "args": [
+      "--print-exclude-ere",
+      "--exclude-glob",
+      ""
+    ],
+    "expected": 2
+  },
+  {
+    "id": "parser-combination-77",
+    "shape": "combination",
+    "args": [
+      "--exclude-glob",
+      "secrets/",
+      "--exclude",
+      "^tail|head$"
+    ],
+    "expected": 0
+  }
+]

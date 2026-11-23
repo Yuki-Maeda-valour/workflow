@@ -29,3 +29,6 @@ pub mod r4e;
 
 /// S3I-A専用の implement-guard の検査専用入口の OS の操作。
 pub mod implement_guard;
+
+/// S3D専用の差分スナップショットの OS の操作。
+pub mod diff_snapshot;

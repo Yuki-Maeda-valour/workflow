@@ -47,6 +47,16 @@ CONCURRENCY = {
     "group": "${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.run_id }}",
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
 }
+# S3D(#472)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+# s3d は build の tar の 2 回分を 4 機種で、s3d-universal は署名後の Mac のファイルを両 CPU で比較する。
+S3D_OPERATIONS = {"s3d": set(RUNNERS), "s3d-universal": {"macos-x86_64", "macos-arm64"}}
+# 上限は、比較 1 回の上限(Mac は 120 分・Linux は 60 分。s3d_ci の COMPARISON_LIMITS)× 回数(2・1)に、
+# 準備の 30 分を足す(内側の上限で先に止まる)。Mac の 120 分は、run 45133632158 の Mac x86_64 の比較 1 回の
+# 最長 3,901 秒の約 1.85 倍である。
+# s3d は 2 × 120 + 30 = 270 分、s3d-universal は 1 × 120 + 30 = 150 分(GitHub の 1 ジョブの上限 360 分の内)。
+S3D_TIMEOUTS = {"s3d": 270, "s3d-universal": 150}
+# S3D の版に依る欄の基準は CI の Ubuntu 24.04 の版。Linux の比較はこの機械で流す。
+S3D_BASE_RUNNERS = {"linux-x86_64": "ubuntu-24.04", "linux-arm64": "ubuntu-24.04-arm"}
 
 
 
@@ -58,6 +68,8 @@ def native_build_command(command):
     # R4U(#480)・R4D(#481)・R4E(#482)と S3I-A(#474)の比較は、build の時間の枠の外のジョブで流す。
     # R4G(#479)の比較も、別のジョブ(r4g・r4g-universal)で流す(2026-11-12 12:59 の決定)。
     match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4e|r4e-universal|implement-guard|implement-guard-universal|r4g|r4g-universal)(?: |$)", command)
+    # 上の行の目印(test_native_ci.py の R4U_ENTRIES)と重ならないよう、接頭辞と操作名を分けて書く。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (s3d-universal|s3d)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -76,6 +88,8 @@ REQUIRED_NATIVE_JOBS = (
     "implement-guard-universal",
     "r4g",
     "r4g-universal",
+    "s3d",
+    "s3d-universal",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (
@@ -179,6 +193,7 @@ def check_document(document):
         # R4Rのpush用run 43085900763でMac Intelのbuildが48.2分・verify-universalが26.6分を使ったため、120分・60分にする。
         # R4U(#480)の比較は build の枠に入れず、ジョブ r4u で流す(2026-11-12 12:59 の決定)。
         native_timeouts = {"build": 120, "verify-universal": 60, "r4u": 30}
+        native_timeouts.update(S3D_TIMEOUTS)
         # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
         native_timeouts["r4d1"] = 30
         # R4Gは時間の枠に入らないので、別のジョブ(r4g・r4g-universal)で比較する(2026-11-12 12:59 の決定)。
@@ -230,6 +245,8 @@ def check_document(document):
                               and native_build_command(step.get("run")) in {"build", "reproduce", "verify-universal", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal"}]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in R4G_TIMEOUTS]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in S3D_OPERATIONS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
@@ -282,6 +299,38 @@ def check_document(document):
                     problems.append(f"{name}: persist-credentials: false が必要です")
                 if settings.get("ref") != SOURCE_REF or settings.get("repository") != SOURCE_REPO:
                     problems.append(f"{name}: PR のソース SHA とリポジトリを明示してください")
+    problems.extend(check_s3d_jobs(jobs))
+    return problems
+
+
+def check_s3d_jobs(jobs):
+    """build を流すワークフローでは、S3D の比較のジョブを必須にする(機種をそろえ、省けない形に限る)。"""
+    found = {operation: [] for operation in S3D_OPERATIONS}
+    builds = False
+    for job in jobs.values():
+        steps = job.get("steps") if isinstance(job, dict) else None
+        for step in steps if isinstance(steps, list) else []:
+            operation = native_build_command(step.get("run") if isinstance(step, dict) else None)
+            builds = builds or operation == "build"
+            if operation in found:
+                found[operation].append((job, step["run"]))
+    if not builds:
+        return []
+    problems = []
+    if any(RUNNERS.get(platform) != runner for platform, runner in S3D_BASE_RUNNERS.items()):
+        problems.append("S3D の Linux の比較は基準の版の機械(Ubuntu 24.04)で流します")
+    for operation, platforms in S3D_OPERATIONS.items():
+        if len(found[operation]) != 1:
+            problems.append(f"S3D の比較のジョブ({operation})が 1 つ必要です")
+            continue
+        job, command = found[operation][0]
+        matrix = job.get("strategy", {}).get("matrix", {}) if isinstance(job.get("strategy"), dict) else {}
+        rows = matrix.get("include") if isinstance(matrix, dict) else None
+        listed = [row.get("platform") for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+        if sorted(listed) != sorted(platforms) or job.get("runs-on") != "${{ matrix.runner }}":
+            problems.append(f"S3D の比較を流す機械がそろっていません({operation})")
+        if command != f"python3 -B native/ci/build.py {operation} --platform '${{{{ matrix.platform }}}}'":
+            problems.append(f"S3D の比較は matrix の機械ごとに流してください({operation})")
     return problems
 
 

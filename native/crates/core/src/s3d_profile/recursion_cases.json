@@ -1,0 +1,4513 @@
+{
+  "python": "3.10.11",
+  "yaml": "6.0.3",
+  "helper_sha256": "974fa799a14250966f64591f100c971b1cc43288b822be948b58c849944fee7a",
+  "cases": [
+    {
+      "id": "recursion-seq-492",
+      "recipe": [
+        "value",
+        "seq",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "87258cf0472c9e44bd92cf5251d44fae9adc7b641c171e17203bc7f404d100ba"
+    },
+    {
+      "id": "recursion-seq-493",
+      "recipe": [
+        "value",
+        "seq",
+        493
+      ],
+      "expected": "NotMapping",
+      "sha256": "e8dbe464e1993a0d54c0ca0fb74c8a74dbb784d98a8e68af4c0760cf1dc49eab"
+    },
+    {
+      "id": "recursion-seq-494",
+      "recipe": [
+        "value",
+        "seq",
+        494
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "821b57bb77ebaece8e158694fc22f31e02702ac530369e2eb8c64ef593c89657"
+    },
+    {
+      "id": "recursion-seq-495",
+      "recipe": [
+        "value",
+        "seq",
+        495
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c700e8fedebef1c9f706ff7936ad9df3cb14f0614459363579d1f805b65a70d3"
+    },
+    {
+      "id": "recursion-map-490",
+      "recipe": [
+        "value",
+        "map",
+        490
+      ],
+      "expected": null,
+      "sha256": "89d5f815b10b39b143cdcbbf1d98434ada650904f1143ea5e9f1241fa4793ebc"
+    },
+    {
+      "id": "recursion-map-491",
+      "recipe": [
+        "value",
+        "map",
+        491
+      ],
+      "expected": null,
+      "sha256": "3d4f2bb4815b9cdd645c16b3edef7476192d544d1dd695b169aefbed80a0a0c9"
+    },
+    {
+      "id": "recursion-map-492",
+      "recipe": [
+        "value",
+        "map",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "04eedd4b5862f0a9bcd9e4ed7cc6da36534d95300acf9fc319aeade0e20ffa51"
+    },
+    {
+      "id": "recursion-map-493",
+      "recipe": [
+        "value",
+        "map",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d939a382bc7c54d0b3827cbed97f23fb6bdfff15a00530b672f94a56e6f254e8"
+    },
+    {
+      "id": "recursion-unused_seq-491",
+      "recipe": [
+        "value",
+        "unused_seq",
+        491
+      ],
+      "expected": null,
+      "sha256": "aa8055dbbae12cab9057b58bf7f83f76452bd6f7e7c06bedcc434ba9eb96824f"
+    },
+    {
+      "id": "recursion-unused_seq-492",
+      "recipe": [
+        "value",
+        "unused_seq",
+        492
+      ],
+      "expected": null,
+      "sha256": "f89fbf355db3a407c2cba3a9f49929a571afc22ff93a0660c1078b5d9559e606"
+    },
+    {
+      "id": "recursion-unused_seq-493",
+      "recipe": [
+        "value",
+        "unused_seq",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "425e993eea3dcbd234a5f2721699ae936d68abc73c36ecb6c062884123d5fa97"
+    },
+    {
+      "id": "recursion-unused_seq-494",
+      "recipe": [
+        "value",
+        "unused_seq",
+        494
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "02af381b0f965fe4574f99df7c356f56bcee664b9e8d289a34bca7ed9ad3f9d7"
+    },
+    {
+      "id": "recursion-unused_map-489",
+      "recipe": [
+        "value",
+        "unused_map",
+        489
+      ],
+      "expected": null,
+      "sha256": "c9efeedb7bee38d34cc0f1e06c8060a32b26bf71b3c7bd77767c97082eb57da2"
+    },
+    {
+      "id": "recursion-unused_map-490",
+      "recipe": [
+        "value",
+        "unused_map",
+        490
+      ],
+      "expected": null,
+      "sha256": "e5bea5ed0f4bf1b11df26e3cc4c90ad7f52e6392f9d7bd108fd568833f2b528f"
+    },
+    {
+      "id": "recursion-unused_map-491",
+      "recipe": [
+        "value",
+        "unused_map",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8b2046f5abae748e4976dd0db3fca80886c331df21bad6f63ed62100de2e23b6"
+    },
+    {
+      "id": "recursion-unused_map-492",
+      "recipe": [
+        "value",
+        "unused_map",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fa9d54ff01c06b3a50bf6e70fdff9032974b98003c58d52fb04832d13f71f638"
+    },
+    {
+      "id": "recursion-alias-1498",
+      "recipe": [
+        "value",
+        "alias",
+        1498
+      ],
+      "expected": "NotMapping",
+      "sha256": "580eaa55125e14c765b8cbf6c47431782925aabe69102814d6e82f50db8a3b4a"
+    },
+    {
+      "id": "recursion-alias-1499",
+      "recipe": [
+        "value",
+        "alias",
+        1499
+      ],
+      "expected": "NotMapping",
+      "sha256": "9ab9e3a8e9030dce01d5989c887f5ce873224296e90cb9444453aee16d3fd5a8"
+    },
+    {
+      "id": "recursion-alias-1500",
+      "recipe": [
+        "value",
+        "alias",
+        1500
+      ],
+      "expected": "NotMapping",
+      "sha256": "3296edf360bbf986e215f1b309103d21f4d12a440313da43770d15fdf83b3057"
+    },
+    {
+      "id": "recursion-alias-1501",
+      "recipe": [
+        "value",
+        "alias",
+        1501
+      ],
+      "expected": "NotMapping",
+      "sha256": "0d8637d86c5ad5a7d0c590be0375d2d1beb6abfb40fb55aa6b1773acd677f99b"
+    },
+    {
+      "id": "recursion-merge-1498",
+      "recipe": [
+        "value",
+        "merge",
+        1498
+      ],
+      "expected": "NotMapping",
+      "sha256": "441432750c3f99ef7fd53b892585633450417b96b3dbcc791d7c215c93dec353"
+    },
+    {
+      "id": "recursion-merge-1499",
+      "recipe": [
+        "value",
+        "merge",
+        1499
+      ],
+      "expected": "NotMapping",
+      "sha256": "4d14a08f8b03201d0c7c310cb1e399335da2e224f1f5eeee3f92639ee75617cc"
+    },
+    {
+      "id": "recursion-merge-1500",
+      "recipe": [
+        "value",
+        "merge",
+        1500
+      ],
+      "expected": "NotMapping",
+      "sha256": "ac33f6dafd5774762ba2455c7ae55d68f443173f459c51157f02c466dc76675f"
+    },
+    {
+      "id": "recursion-merge-1501",
+      "recipe": [
+        "value",
+        "merge",
+        1501
+      ],
+      "expected": "NotMapping",
+      "sha256": "c79588ab4fca6a5e7a7f563dc9c4abe90a76f754b0d6bbc8a736ce0d329b900e"
+    },
+    {
+      "id": "recursion-scalar-489",
+      "recipe": [
+        "value",
+        "scalar",
+        489
+      ],
+      "expected": "NotMapping",
+      "sha256": "381109823297a8833759a593d82a212e54663f26965d5f0dbc5606a6f70a9281"
+    },
+    {
+      "id": "recursion-scalar-490",
+      "recipe": [
+        "value",
+        "scalar",
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "31599079953bf4e9d0d75b82c38847b0ccf214583c7fd7db6d0e04f367ce8e17"
+    },
+    {
+      "id": "recursion-scalar-491",
+      "recipe": [
+        "value",
+        "scalar",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b475557d84266c1cfda7646360af1e6aa548cb6f4fe8ad8670de904c221586c6"
+    },
+    {
+      "id": "recursion-scalar-492",
+      "recipe": [
+        "value",
+        "scalar",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b0e0b4db5eafe28262a93ee62d47dea5ba8cd31c32b7244ed17e878ff350f8c0"
+    },
+    {
+      "id": "recursion-scalar_alias-985",
+      "recipe": [
+        "value",
+        "scalar_alias",
+        985
+      ],
+      "expected": "NotMapping",
+      "sha256": "8b0c32aac9837234615f25ebb1fa43c222673b21485fe0dfc3bdf8536bdcec08"
+    },
+    {
+      "id": "recursion-scalar_alias-986",
+      "recipe": [
+        "value",
+        "scalar_alias",
+        986
+      ],
+      "expected": "NotMapping",
+      "sha256": "035f4a163839786c779c702d6287013c0ca8989b91077d3cc61a5f694a256d6c"
+    },
+    {
+      "id": "recursion-scalar_alias-987",
+      "recipe": [
+        "value",
+        "scalar_alias",
+        987
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "35a4e3b13b229fc6393b8a4ade2a9f92d07a8dd7cde616954e24d657f6bf7314"
+    },
+    {
+      "id": "recursion-scalar_alias-988",
+      "recipe": [
+        "value",
+        "scalar_alias",
+        988
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f0ee6df77af789a71f912852c903e6cb680d581e9f499cacd16416b37a14bc27"
+    },
+    {
+      "id": "recursion-sequence_empty-493",
+      "recipe": [
+        "data",
+        "sequence_empty",
+        493
+      ],
+      "expected": "NotMapping",
+      "sha256": "e8dbe464e1993a0d54c0ca0fb74c8a74dbb784d98a8e68af4c0760cf1dc49eab"
+    },
+    {
+      "id": "recursion-sequence_empty-494",
+      "recipe": [
+        "data",
+        "sequence_empty",
+        494
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "821b57bb77ebaece8e158694fc22f31e02702ac530369e2eb8c64ef593c89657"
+    },
+    {
+      "id": "recursion-sequence_plain-492",
+      "recipe": [
+        "data",
+        "sequence_plain",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "4b044d490c9946d71533bdfe0a448dc6410637ed3ca335fc11ae6b05ab7f1296"
+    },
+    {
+      "id": "recursion-sequence_plain-493",
+      "recipe": [
+        "data",
+        "sequence_plain",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1eb90e14678f6f26bcfd34f007e1c10966cf2c9845efaf2b874a3695554b6da5"
+    },
+    {
+      "id": "recursion-sequence_double-492",
+      "recipe": [
+        "data",
+        "sequence_double",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "8fa8875520180751e68b41ab2ae5a187120823b8d8c7c5970fc7b89da8bd09c0"
+    },
+    {
+      "id": "recursion-sequence_double-493",
+      "recipe": [
+        "data",
+        "sequence_double",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "124e76bc17180eb5d3271af0c0fc50d9acd2064036c16b83712a62d014737c6a"
+    },
+    {
+      "id": "recursion-sequence_single-492",
+      "recipe": [
+        "data",
+        "sequence_single",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "1de88614ed3d33dea8f0968e76fe6292134a224ee9256b9c1229a4160749459f"
+    },
+    {
+      "id": "recursion-sequence_single-493",
+      "recipe": [
+        "data",
+        "sequence_single",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a8a9ec11a9c080c47e2fe0e621430ec4fae4104ae2bff1b2a505d6828f6fb338"
+    },
+    {
+      "id": "recursion-sequence_tag-492",
+      "recipe": [
+        "data",
+        "sequence_tag",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "302d7df80d521c319e5bfb2b857c7ccb6587be8b306262bbf7a872797f235c7e"
+    },
+    {
+      "id": "recursion-sequence_tag-493",
+      "recipe": [
+        "data",
+        "sequence_tag",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "bb92f630df79d4b388cbfb906d58d5ad157d2ae2b2673d84a8da39b544cab426"
+    },
+    {
+      "id": "recursion-sequence_alias-491",
+      "recipe": [
+        "data",
+        "sequence_alias",
+        491
+      ],
+      "expected": null,
+      "sha256": "768765bb94252da3f22224d7b030d2dc961ade914c2c1126f6d34bc81671a043"
+    },
+    {
+      "id": "recursion-sequence_alias-492",
+      "recipe": [
+        "data",
+        "sequence_alias",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d020ea94e854bafc8e5edb563ba4692e1e844b22feaba79f5502fc3a67955635"
+    },
+    {
+      "id": "recursion-sequence_comment-492",
+      "recipe": [
+        "data",
+        "sequence_comment",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "38a842233910419509f0da7d1ada7db4dee86c2c67dee5a9ae63277ab92070f0"
+    },
+    {
+      "id": "recursion-sequence_comment-493",
+      "recipe": [
+        "data",
+        "sequence_comment",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c175eb74ac8ee20a1a63395248ab46cc9ef6dabc06144f312da33082af586c4d"
+    },
+    {
+      "id": "recursion-sequence_null-492",
+      "recipe": [
+        "data",
+        "sequence_null",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "715078f559773c3362d0534f0f08e5aa074530f47338ffdc9018b3d37de2d3ba"
+    },
+    {
+      "id": "recursion-sequence_null-493",
+      "recipe": [
+        "data",
+        "sequence_null",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "21ab89fd7bc2ee0f11b6158f8ead8c11ba4b6926518fc3742cd77f6e1ec383a7"
+    },
+    {
+      "id": "recursion-sequence_number-492",
+      "recipe": [
+        "data",
+        "sequence_number",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "aab25f56d71ddeba91469e17dc947356e0fee4dcf839818f54363f030780e475"
+    },
+    {
+      "id": "recursion-sequence_number-493",
+      "recipe": [
+        "data",
+        "sequence_number",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a6e50a8506a50876c102b92849e51c45fd485977fb006b857a27b1598c56016e"
+    },
+    {
+      "id": "recursion-sequence_long-492",
+      "recipe": [
+        "data",
+        "sequence_long",
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "7ae3459e14bec98e2bf0fd42a23b651ec78a300c54eae214d8fb612d490a0f81"
+    },
+    {
+      "id": "recursion-sequence_long-493",
+      "recipe": [
+        "data",
+        "sequence_long",
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3c1d0598296adc9539e29439f4be1efc9f827e71b1e9defd97cbf2b0216e793a"
+    },
+    {
+      "id": "recursion-mapping_plain-491",
+      "recipe": [
+        "data",
+        "mapping_plain",
+        491
+      ],
+      "expected": null,
+      "sha256": "a026985af611d3e4ff9a00b521e8a961384ea268ac6337a3f2f5343fd48672fc"
+    },
+    {
+      "id": "recursion-mapping_plain-492",
+      "recipe": [
+        "data",
+        "mapping_plain",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0d2855e9bbace0a1df96441acd9b405c3868640a4d01e892d1f7e3348f138ac4"
+    },
+    {
+      "id": "recursion-mapping_double-490",
+      "recipe": [
+        "data",
+        "mapping_double",
+        490
+      ],
+      "expected": null,
+      "sha256": "8a4f338335801ce3f0da249e7a7ab645c0f61cd005065058b9a78b8d8213644e"
+    },
+    {
+      "id": "recursion-mapping_double-491",
+      "recipe": [
+        "data",
+        "mapping_double",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "e56d19a540ee0ec702172512f8c9eb470d8b66c6a0175c6715c592c3548f8fef"
+    },
+    {
+      "id": "recursion-mapping_single-490",
+      "recipe": [
+        "data",
+        "mapping_single",
+        490
+      ],
+      "expected": null,
+      "sha256": "77a81df2e95d4bd944329f4fd02387d7f98751b168ce805d43d374892f1b9e02"
+    },
+    {
+      "id": "recursion-mapping_single-491",
+      "recipe": [
+        "data",
+        "mapping_single",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "75803d1bc92de1b1a625310fbf45df256bd8560f6aa5477be92b1e116bd1b285"
+    },
+    {
+      "id": "recursion-mapping_tag-490",
+      "recipe": [
+        "data",
+        "mapping_tag",
+        490
+      ],
+      "expected": null,
+      "sha256": "14336f68b88da1a2e46d244b492da41c24fa1860c5d9f39f322f819149900577"
+    },
+    {
+      "id": "recursion-mapping_tag-491",
+      "recipe": [
+        "data",
+        "mapping_tag",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "11d4511ec8cbf47818768e9893f24ba279d532f009c048b3a39f7d90c6fdbb34"
+    },
+    {
+      "id": "recursion-mapping_empty-490",
+      "recipe": [
+        "data",
+        "mapping_empty",
+        490
+      ],
+      "expected": null,
+      "sha256": "2e3a70528d56be3c57e611f9561b90eede2cddcb8618cbb8f121f2bb5ea8628a"
+    },
+    {
+      "id": "recursion-mapping_empty-491",
+      "recipe": [
+        "data",
+        "mapping_empty",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8626813cef5f722013a5b7d9e877e555e7201ee07c97bf50858e6c20043563df"
+    },
+    {
+      "id": "recursion-mapping_null-491",
+      "recipe": [
+        "data",
+        "mapping_null",
+        491
+      ],
+      "expected": null,
+      "sha256": "3d4f2bb4815b9cdd645c16b3edef7476192d544d1dd695b169aefbed80a0a0c9"
+    },
+    {
+      "id": "recursion-mapping_null-492",
+      "recipe": [
+        "data",
+        "mapping_null",
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "04eedd4b5862f0a9bcd9e4ed7cc6da36534d95300acf9fc319aeade0e20ffa51"
+    },
+    {
+      "id": "recursion-block_seq_empty-490",
+      "recipe": [
+        "data",
+        "block_seq_empty",
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "d2405f70c5745c44010d1f9fb145e3d1d4d637a7aee725c26c00044c6540b7f4"
+    },
+    {
+      "id": "recursion-block_seq_empty-491",
+      "recipe": [
+        "data",
+        "block_seq_empty",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "26276518e6dff6b4457810074fdb3ed21a07d10a4e2ca561d6c9c3c1cdfefcfb"
+    },
+    {
+      "id": "recursion-block_seq_scalar-490",
+      "recipe": [
+        "data",
+        "block_seq_scalar",
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "d93226a06b161684ae2d6c6a59eb3fc4b06f4689f72555947787de586cc7c42f"
+    },
+    {
+      "id": "recursion-block_seq_scalar-491",
+      "recipe": [
+        "data",
+        "block_seq_scalar",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "5930f07204de00b9d9ac29377b5a2b6e2da1bfb91ee4d5072ff9e08bffcd5015"
+    },
+    {
+      "id": "recursion-block_map-490",
+      "recipe": [
+        "data",
+        "block_map",
+        490
+      ],
+      "expected": null,
+      "sha256": "e4a047cdfaf00b993aeee6d1c554c79b1a7a3a73ed92d3f828697828a27ec676"
+    },
+    {
+      "id": "recursion-block_map-491",
+      "recipe": [
+        "data",
+        "block_map",
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "93c7500663658b6df0ef41dec696bfcfd39ac3f2c30c27063b669e8fb9dc6c14"
+    },
+    {
+      "id": "mix-0-0-490",
+      "recipe": [
+        "mix",
+        0,
+        0,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "4f6b42e9d0f8d778d7f8e6cf32f19465b44f08784cadd541b96155e1ec62cef5"
+    },
+    {
+      "id": "mix-0-0-491",
+      "recipe": [
+        "mix",
+        0,
+        0,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "f54daf94c77446164dff18da70f3bf544b6b893a8d087e5b4d8121b61cf9b309"
+    },
+    {
+      "id": "mix-0-0-492",
+      "recipe": [
+        "mix",
+        0,
+        0,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "4b044d490c9946d71533bdfe0a448dc6410637ed3ca335fc11ae6b05ab7f1296"
+    },
+    {
+      "id": "mix-0-0-493",
+      "recipe": [
+        "mix",
+        0,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1eb90e14678f6f26bcfd34f007e1c10966cf2c9845efaf2b874a3695554b6da5"
+    },
+    {
+      "id": "mix-0-1-490",
+      "recipe": [
+        "mix",
+        0,
+        1,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "abe8d104762e3b3bda95fe6a9ecbf44cf28aa7228c37a551f114bba5db82e261"
+    },
+    {
+      "id": "mix-0-1-491",
+      "recipe": [
+        "mix",
+        0,
+        1,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "c5695615c297c6a30dc83a974acc52e09da3a4e86531103631f98b644ca4470d"
+    },
+    {
+      "id": "mix-0-1-492",
+      "recipe": [
+        "mix",
+        0,
+        1,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "1beb7c6413350b1f170a348f024924d3349c70fcb879e30ad1f46f77d8564b53"
+    },
+    {
+      "id": "mix-0-1-493",
+      "recipe": [
+        "mix",
+        0,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "bf92dc5b430fa2e9b100e43be69743a04cb578c8a671d565f8c18264e1424eaf"
+    },
+    {
+      "id": "mix-0-2-490",
+      "recipe": [
+        "mix",
+        0,
+        2,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "a64f1f98a0399c14aabf8660ae18fa545d0d2126a87aba47489ddb4583d29a0e"
+    },
+    {
+      "id": "mix-0-2-491",
+      "recipe": [
+        "mix",
+        0,
+        2,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "8b18421ac00e9dcfb1ef1f99f2284d533eb373f4282cc1c2f4e0ee313d3048b9"
+    },
+    {
+      "id": "mix-0-2-492",
+      "recipe": [
+        "mix",
+        0,
+        2,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "f27667563a1ec81ad63e1187386e950d723100583ab3770038f71b2324527314"
+    },
+    {
+      "id": "mix-0-2-493",
+      "recipe": [
+        "mix",
+        0,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d15a18a9bb5fa676039dcb44c7c4ababbbae0ef611e96c43e2706d07d1d8c478"
+    },
+    {
+      "id": "mix-0-3-490",
+      "recipe": [
+        "mix",
+        0,
+        3,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "0509d028e5dd4032d068da9073408ad9e7404ab56bdb98d44d52f52a81680014"
+    },
+    {
+      "id": "mix-0-3-491",
+      "recipe": [
+        "mix",
+        0,
+        3,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "4961046c781c9320fa4efa3ee098cff5168e9f1d25f9ac3baa178869f94f4d67"
+    },
+    {
+      "id": "mix-0-3-492",
+      "recipe": [
+        "mix",
+        0,
+        3,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "951506467c6009bb061bf04d169d9b7ebc47092a2520db22fc78abbc75fa068f"
+    },
+    {
+      "id": "mix-0-3-493",
+      "recipe": [
+        "mix",
+        0,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0ac9ca851d793e37cfa2dbc4985eaf7a5a694e9d310b831f9d9e38da7e636cc8"
+    },
+    {
+      "id": "mix-0-4-490",
+      "recipe": [
+        "mix",
+        0,
+        4,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "08f2db677e07f45009e8427d953d88cdfcec69f6321d4cf62e17ed20c4018418"
+    },
+    {
+      "id": "mix-0-4-491",
+      "recipe": [
+        "mix",
+        0,
+        4,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "7c51c3f5df78e1b56eef644a29b821df3235c20214f089fb3401a9d4cbbf38b4"
+    },
+    {
+      "id": "mix-0-4-492",
+      "recipe": [
+        "mix",
+        0,
+        4,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "9feae158cfc9e628f6ce2eaebd82a60ec9c14174c0bbd1c25079374520db23ac"
+    },
+    {
+      "id": "mix-0-4-493",
+      "recipe": [
+        "mix",
+        0,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ebff68287c60b75d56ccecf3fa4f87dd0df3e7ec1888d23386f104313d3dce13"
+    },
+    {
+      "id": "mix-0-5-490",
+      "recipe": [
+        "mix",
+        0,
+        5,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "48415725bce39907faf04abf9c02930d5b757df4b4c9bda671a9990bb0da6d7d"
+    },
+    {
+      "id": "mix-0-5-491",
+      "recipe": [
+        "mix",
+        0,
+        5,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "9aa6942cf7b4fbb3cb7867985eee89565e26306d0eacb3debcc912eadb356fa3"
+    },
+    {
+      "id": "mix-0-5-492",
+      "recipe": [
+        "mix",
+        0,
+        5,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "cb120eb3de4b4d9a74897ec92c07546fda3242740a09f5d9cca552cdbae8646b"
+    },
+    {
+      "id": "mix-0-5-493",
+      "recipe": [
+        "mix",
+        0,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4f720c7daaea2463da2de8b18ee9f5861b90e35efcbd15d3915feb8411ff12c2"
+    },
+    {
+      "id": "mix-0-6-490",
+      "recipe": [
+        "mix",
+        0,
+        6,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "ba4a1443a9fc4f9f82506f391a2ec1f94345b79971b8af62bc66fc2046962bb1"
+    },
+    {
+      "id": "mix-0-6-491",
+      "recipe": [
+        "mix",
+        0,
+        6,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "fe77a7159c9b3082d7d71a2f371d9376c03b9f35f85e41be39043397cb587d5a"
+    },
+    {
+      "id": "mix-0-6-492",
+      "recipe": [
+        "mix",
+        0,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "6f3464a4847a8149992b99b8f65b5cf08a973fe7c64c974be3c11cc029c061e4"
+    },
+    {
+      "id": "mix-0-6-493",
+      "recipe": [
+        "mix",
+        0,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fd9a23505a3b7a692c0a5b2ef0423ea05ff19ec8ccef2ac63ed2f7eedf8a021c"
+    },
+    {
+      "id": "mix-0-7-490",
+      "recipe": [
+        "mix",
+        0,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8b3c31897ad5f7767549a2aa7bf7953ba34bd8038cc522c0627995152d3ddc20"
+    },
+    {
+      "id": "mix-0-7-491",
+      "recipe": [
+        "mix",
+        0,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1e2ab2bf156e0fc4701f96b85502db5c11794111fc93ef01fccc8101296fa2c8"
+    },
+    {
+      "id": "mix-0-7-492",
+      "recipe": [
+        "mix",
+        0,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d65b348e5f91c87f9ccab1f343d91eb19243af583dab19e8c5a1473fb393ff2d"
+    },
+    {
+      "id": "mix-0-7-493",
+      "recipe": [
+        "mix",
+        0,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d88430d40f45859b366339431214ffd70d25ada04b065338a6feb461d2d6080e"
+    },
+    {
+      "id": "mix-1-0-490",
+      "recipe": [
+        "mix",
+        1,
+        0,
+        490
+      ],
+      "expected": null,
+      "sha256": "3270b118efbe7d8293d95efa67637a29f065e155ecaf6ace01d43aa933ab0d25"
+    },
+    {
+      "id": "mix-1-0-491",
+      "recipe": [
+        "mix",
+        1,
+        0,
+        491
+      ],
+      "expected": null,
+      "sha256": "ddfc22ff08b50ada7ced5315d42b3a8d019f9c14aad337b8d1f7c0ba17b93279"
+    },
+    {
+      "id": "mix-1-0-492",
+      "recipe": [
+        "mix",
+        1,
+        0,
+        492
+      ],
+      "expected": null,
+      "sha256": "6c671f222517b295ddc9b7291f8fed7260b052c9e7f76a4314114a0aad77e4ac"
+    },
+    {
+      "id": "mix-1-0-493",
+      "recipe": [
+        "mix",
+        1,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "073b15b6b28b073c9f5f255ddd8201cbca30289fe09273b64bed46788ba9b09f"
+    },
+    {
+      "id": "mix-1-1-490",
+      "recipe": [
+        "mix",
+        1,
+        1,
+        490
+      ],
+      "expected": null,
+      "sha256": "1de242d19b4157337f03252c05f305f27984ab2584ba64f6b5f321fbc1f70f53"
+    },
+    {
+      "id": "mix-1-1-491",
+      "recipe": [
+        "mix",
+        1,
+        1,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0a81d5fdacdc974335d07a5e1084a4430d1de42f931ebcbad02a53f5b900d19a"
+    },
+    {
+      "id": "mix-1-1-492",
+      "recipe": [
+        "mix",
+        1,
+        1,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a908aa25ebdea98061ecde0fa176351b2f266875c420d65636c264325f34d151"
+    },
+    {
+      "id": "mix-1-1-493",
+      "recipe": [
+        "mix",
+        1,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "954baf0ba792087f9e361fb366d1f3bc415d5966283f828d5641e247923833e9"
+    },
+    {
+      "id": "mix-1-2-490",
+      "recipe": [
+        "mix",
+        1,
+        2,
+        490
+      ],
+      "expected": null,
+      "sha256": "7e12aad0a60628d20b145fab7c8741bdabeefe65e81e24cf7a0dc4d2e6793dbc"
+    },
+    {
+      "id": "mix-1-2-491",
+      "recipe": [
+        "mix",
+        1,
+        2,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3a542a34865ac6c566791ee0b5c514c88439e9c1cb39299b316aac985490b379"
+    },
+    {
+      "id": "mix-1-2-492",
+      "recipe": [
+        "mix",
+        1,
+        2,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ccca84cb623867b100cc9b0fec8eb9e8c8a12fe1b00bb9c063cee2f438b3a826"
+    },
+    {
+      "id": "mix-1-2-493",
+      "recipe": [
+        "mix",
+        1,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "e5d6428f1659a33338aa4136df7441ea2b9bddabaad85554c1639212aa6f01e5"
+    },
+    {
+      "id": "mix-1-3-490",
+      "recipe": [
+        "mix",
+        1,
+        3,
+        490
+      ],
+      "expected": null,
+      "sha256": "5fedbe7df9460f00a9b0d9c83e2c2c0f43bc18bcac008c5e2846d6e205511771"
+    },
+    {
+      "id": "mix-1-3-491",
+      "recipe": [
+        "mix",
+        1,
+        3,
+        491
+      ],
+      "expected": null,
+      "sha256": "3a7f950e762a1c9f260afc606945adb7afa1484099113035199923549731cc69"
+    },
+    {
+      "id": "mix-1-3-492",
+      "recipe": [
+        "mix",
+        1,
+        3,
+        492
+      ],
+      "expected": null,
+      "sha256": "1e4b249b2f712baef99a086d739abd117829095e0889f0fa1dae3aa3c64a30f5"
+    },
+    {
+      "id": "mix-1-3-493",
+      "recipe": [
+        "mix",
+        1,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4053713a1946a662096b0fc95e6227b6b064f8b159563985ae9b28744b96e070"
+    },
+    {
+      "id": "mix-1-4-490",
+      "recipe": [
+        "mix",
+        1,
+        4,
+        490
+      ],
+      "expected": null,
+      "sha256": "a064838c0de95624ac2029a25670fc3d727cd973cb017313097256c0207531f8"
+    },
+    {
+      "id": "mix-1-4-491",
+      "recipe": [
+        "mix",
+        1,
+        4,
+        491
+      ],
+      "expected": null,
+      "sha256": "ae31633a34d7106475240105929bfdaa590df6015ec462797c65a70dd60ed4e3"
+    },
+    {
+      "id": "mix-1-4-492",
+      "recipe": [
+        "mix",
+        1,
+        4,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8b1af883e6552a5bcd961580a3de195a1228394dc55054e52db01139ecaf4b8c"
+    },
+    {
+      "id": "mix-1-4-493",
+      "recipe": [
+        "mix",
+        1,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "119d9ce437302f6e0b569bafffdb889d2a89da7c068218a814e4ff4fa400d15b"
+    },
+    {
+      "id": "mix-1-5-490",
+      "recipe": [
+        "mix",
+        1,
+        5,
+        490
+      ],
+      "expected": null,
+      "sha256": "37112f8f6e0cb5c19402bc16a4aca2f81e3a09c286653b466b40c6006a08ea80"
+    },
+    {
+      "id": "mix-1-5-491",
+      "recipe": [
+        "mix",
+        1,
+        5,
+        491
+      ],
+      "expected": null,
+      "sha256": "3c841e9523c799981d53787e2311475e507a948ef3722483112f013356c7f0bd"
+    },
+    {
+      "id": "mix-1-5-492",
+      "recipe": [
+        "mix",
+        1,
+        5,
+        492
+      ],
+      "expected": null,
+      "sha256": "2baaa77f2c304b07445a72b3c71b56b66ceeab6215f9ca40f01f10e87e7ef67d"
+    },
+    {
+      "id": "mix-1-5-493",
+      "recipe": [
+        "mix",
+        1,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "9e55a3852dd869d9dda40317e2d716ab8340c33b8f886b3f644b3d67b113a760"
+    },
+    {
+      "id": "mix-1-6-490",
+      "recipe": [
+        "mix",
+        1,
+        6,
+        490
+      ],
+      "expected": null,
+      "sha256": "53263dca454ff7568f1f5e790b063f8defdefa807d42ebd1dc229b29f5d5d011"
+    },
+    {
+      "id": "mix-1-6-491",
+      "recipe": [
+        "mix",
+        1,
+        6,
+        491
+      ],
+      "expected": null,
+      "sha256": "eb266e51aff31eb4aa809fbd44ae2e1694c7321180a74b7aa4b0870a2fbbed63"
+    },
+    {
+      "id": "mix-1-6-492",
+      "recipe": [
+        "mix",
+        1,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a1ffec6266d85ac06eced25c0f4e5c363b7d61dd3188c81e76fed5a1c114c54b"
+    },
+    {
+      "id": "mix-1-6-493",
+      "recipe": [
+        "mix",
+        1,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b99eddaae77f1127c5142f943971ccdfec7ff7a5ed860d2467ac831e5aba1e5c"
+    },
+    {
+      "id": "mix-1-7-490",
+      "recipe": [
+        "mix",
+        1,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b8e3db02c8973aae23392f1935f82217c8d48daf8ed623e8d1612a56cc5c6751"
+    },
+    {
+      "id": "mix-1-7-491",
+      "recipe": [
+        "mix",
+        1,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "199c11f0b08f6719884a2f0151d8bdc70933c6d52dacc0f478b3670722a9ac40"
+    },
+    {
+      "id": "mix-1-7-492",
+      "recipe": [
+        "mix",
+        1,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "97b632b6522add6335560fc61b5b1b5e8ccffd3c12309e91d8603c12c47d4fdb"
+    },
+    {
+      "id": "mix-1-7-493",
+      "recipe": [
+        "mix",
+        1,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7d7846cd83c30e5f36de49647eae80fd04841eb65070d0384d00db4bdc5a0248"
+    },
+    {
+      "id": "mix-2-0-490",
+      "recipe": [
+        "mix",
+        2,
+        0,
+        490
+      ],
+      "expected": null,
+      "sha256": "c9fa581641fd270b932b1639cc0a4911d531f59e830235c72c42aee119f89b85"
+    },
+    {
+      "id": "mix-2-0-491",
+      "recipe": [
+        "mix",
+        2,
+        0,
+        491
+      ],
+      "expected": null,
+      "sha256": "85b6f2a752916605e5c49a7fb7667da2dd23b1640c60c3521ea05a6d493c03b2"
+    },
+    {
+      "id": "mix-2-0-492",
+      "recipe": [
+        "mix",
+        2,
+        0,
+        492
+      ],
+      "expected": null,
+      "sha256": "888ee59094e5c3608e30eaa4f48bc62f2135082aa262fac38a69a832c55c321e"
+    },
+    {
+      "id": "mix-2-0-493",
+      "recipe": [
+        "mix",
+        2,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "906287b081c1972f5ee10c7ff7f6f7dd7b6237e5d2ba0dad30fb8cdffb004848"
+    },
+    {
+      "id": "mix-2-1-490",
+      "recipe": [
+        "mix",
+        2,
+        1,
+        490
+      ],
+      "expected": null,
+      "sha256": "fb7eff6a33127df3a19609d64422373de64cedc40e7ea97217c65da1cecbd516"
+    },
+    {
+      "id": "mix-2-1-491",
+      "recipe": [
+        "mix",
+        2,
+        1,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3957e9da5bc649e16f9dda687c14dbcd7afb8d34e3ac1ec93828836ff328c650"
+    },
+    {
+      "id": "mix-2-1-492",
+      "recipe": [
+        "mix",
+        2,
+        1,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b17d18bf91acb585472b42b26428cc10fb76d150aa63b52599ebbef9d3082f18"
+    },
+    {
+      "id": "mix-2-1-493",
+      "recipe": [
+        "mix",
+        2,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4e5432a63703d935bfb81280498cdaa1ae781bcda3eee5758aa4fa677c5633c4"
+    },
+    {
+      "id": "mix-2-2-490",
+      "recipe": [
+        "mix",
+        2,
+        2,
+        490
+      ],
+      "expected": null,
+      "sha256": "cce1aa21d7a625d7410dd5284819d45981e00d6a566cb8e9dc0c7563d489052c"
+    },
+    {
+      "id": "mix-2-2-491",
+      "recipe": [
+        "mix",
+        2,
+        2,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "526355519be5f00b70c0413c7f72cec62010c9ccdb920ef229b66dbaa15d2aae"
+    },
+    {
+      "id": "mix-2-2-492",
+      "recipe": [
+        "mix",
+        2,
+        2,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a36ff53096efb0ccf15beb91aa48c2acc7b2ff69db349837866e98ebd61a6b38"
+    },
+    {
+      "id": "mix-2-2-493",
+      "recipe": [
+        "mix",
+        2,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7274c4ad20b8dbe73b0e1f7f675b3c344750c15555c3a64566ff3acaf30553ca"
+    },
+    {
+      "id": "mix-2-3-490",
+      "recipe": [
+        "mix",
+        2,
+        3,
+        490
+      ],
+      "expected": null,
+      "sha256": "d1f3a96b1841c1f26e02d484bdd9a805a6082e08652198c95ad7c9885d6d4961"
+    },
+    {
+      "id": "mix-2-3-491",
+      "recipe": [
+        "mix",
+        2,
+        3,
+        491
+      ],
+      "expected": null,
+      "sha256": "b8d19a9129022f8d3ff100ca83767807bd930159c6754b6364f5e74a2f8f3792"
+    },
+    {
+      "id": "mix-2-3-492",
+      "recipe": [
+        "mix",
+        2,
+        3,
+        492
+      ],
+      "expected": null,
+      "sha256": "8c8eb7efbcbef135c7751816a93e09bc66aae4c28db2b0d1377cbdd31d60b805"
+    },
+    {
+      "id": "mix-2-3-493",
+      "recipe": [
+        "mix",
+        2,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1e348c5afb37ccf9ac76f0d93222c0725866aa61d6da1fcf457521fa9fd1ccbc"
+    },
+    {
+      "id": "mix-2-4-490",
+      "recipe": [
+        "mix",
+        2,
+        4,
+        490
+      ],
+      "expected": null,
+      "sha256": "272b31c67567d6113b65dea6aa4ac40f0111b48e4e9f84b0eea58dfcd0e07793"
+    },
+    {
+      "id": "mix-2-4-491",
+      "recipe": [
+        "mix",
+        2,
+        4,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3bea0cab3089ce48e1b3d9ad64b5f47beb0c84ae3156c9037dc3c5b2e1127c30"
+    },
+    {
+      "id": "mix-2-4-492",
+      "recipe": [
+        "mix",
+        2,
+        4,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "df6ca37511e9e8310665b755cf43f07e1571edaeff9bd8559fd89173594480ea"
+    },
+    {
+      "id": "mix-2-4-493",
+      "recipe": [
+        "mix",
+        2,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "60f9f22af075c1a7ece273296a9ba6f1998eee6870dbce230bef40fa2ae9bd16"
+    },
+    {
+      "id": "mix-2-5-490",
+      "recipe": [
+        "mix",
+        2,
+        5,
+        490
+      ],
+      "expected": null,
+      "sha256": "365bdb23d9b3b2d1032dbfbe8d8eefef7ff5bdbd51ed3a561504618d3e77d4e6"
+    },
+    {
+      "id": "mix-2-5-491",
+      "recipe": [
+        "mix",
+        2,
+        5,
+        491
+      ],
+      "expected": null,
+      "sha256": "dca31738bc9d9377f4817acc7ad78ff8cf0cbd30cb26b5e76faef0bed3dce8ec"
+    },
+    {
+      "id": "mix-2-5-492",
+      "recipe": [
+        "mix",
+        2,
+        5,
+        492
+      ],
+      "expected": null,
+      "sha256": "a4745574f7b642b973712f6645701a7259e0f2c9f2b9e43ee3176b41a068dfaf"
+    },
+    {
+      "id": "mix-2-5-493",
+      "recipe": [
+        "mix",
+        2,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c24fb639e3a03f73ff78d07d6acafee5514c8257bf4457e6a2e19208ca8e0ae8"
+    },
+    {
+      "id": "mix-2-6-490",
+      "recipe": [
+        "mix",
+        2,
+        6,
+        490
+      ],
+      "expected": null,
+      "sha256": "df869624aef7770a74641cefc6ba933a91866ebf26bd3e4b316aeee89e5a73dc"
+    },
+    {
+      "id": "mix-2-6-491",
+      "recipe": [
+        "mix",
+        2,
+        6,
+        491
+      ],
+      "expected": null,
+      "sha256": "6078dee997d687f2d8fd8e89fd655bdd70ec3ccefce6ad44697937f9158043ba"
+    },
+    {
+      "id": "mix-2-6-492",
+      "recipe": [
+        "mix",
+        2,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "edb23b2905e417509425ddfd09ba7203561380620756e1320cd746ba2289363a"
+    },
+    {
+      "id": "mix-2-6-493",
+      "recipe": [
+        "mix",
+        2,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "53f708a9821663f0b8bdb45442252ad1891bf9d3835af6f3265bc07dc14cb40c"
+    },
+    {
+      "id": "mix-2-7-490",
+      "recipe": [
+        "mix",
+        2,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "50fbf3a7280503c20181d453c80066dfb429474d7bb334f3c039145094698502"
+    },
+    {
+      "id": "mix-2-7-491",
+      "recipe": [
+        "mix",
+        2,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a7fe1b919d315d54772913a5bd7db7e2d9d359d6927f3c7609c06508b289b1b4"
+    },
+    {
+      "id": "mix-2-7-492",
+      "recipe": [
+        "mix",
+        2,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "44a910d4df6d1425e934e9111a2063fad448086a2c3bf8d2df5e5c42ad43291b"
+    },
+    {
+      "id": "mix-2-7-493",
+      "recipe": [
+        "mix",
+        2,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c2a90262036759dbf3e2d3401cc40f446d4f1292df4685396579a6c2706a0d2e"
+    },
+    {
+      "id": "mix-3-0-490",
+      "recipe": [
+        "mix",
+        3,
+        0,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "81bb4373fd64f4834afc43f8ce89af18d964f0b94560cb07c2f538a870e051c2"
+    },
+    {
+      "id": "mix-3-0-491",
+      "recipe": [
+        "mix",
+        3,
+        0,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "6ce20d152ce91adf90b73bfce56ca6fab39f5c0db49ac0477fc0f458ee5643e1"
+    },
+    {
+      "id": "mix-3-0-492",
+      "recipe": [
+        "mix",
+        3,
+        0,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "0454002893da02c7ef9e87112b2e225b285df7aed97881ddd84fdcf5c89316eb"
+    },
+    {
+      "id": "mix-3-0-493",
+      "recipe": [
+        "mix",
+        3,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b00b6b0022e53cfb29f3c18817e97dfc62b851e8b034acfc791631ff529393fb"
+    },
+    {
+      "id": "mix-3-1-490",
+      "recipe": [
+        "mix",
+        3,
+        1,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "ac21afbc7f0854d94ccf1b3e2aa745333faa5c53266ad4a34c843aa3a2163ce6"
+    },
+    {
+      "id": "mix-3-1-491",
+      "recipe": [
+        "mix",
+        3,
+        1,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "eb76e3210fea5d249c027ca6bff9fe78e5dccae09fd78cf1d0341ec495d8f665"
+    },
+    {
+      "id": "mix-3-1-492",
+      "recipe": [
+        "mix",
+        3,
+        1,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "74b832dd03c397414922973b9be7b8ce1a08da1124065e3c4c5123b29f7ba7a5"
+    },
+    {
+      "id": "mix-3-1-493",
+      "recipe": [
+        "mix",
+        3,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "db00b3570e705254d72c079c8ce0845abce354e4857b055fd6614a10b70f21ce"
+    },
+    {
+      "id": "mix-3-2-490",
+      "recipe": [
+        "mix",
+        3,
+        2,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "591602e71176468f437ab277ce6023d792d89c923bea154b614f9a37e9aa6bfd"
+    },
+    {
+      "id": "mix-3-2-491",
+      "recipe": [
+        "mix",
+        3,
+        2,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "06ada07bd72e31632585af638acd983e1048c8d6009aa81ded4b98265eb81f24"
+    },
+    {
+      "id": "mix-3-2-492",
+      "recipe": [
+        "mix",
+        3,
+        2,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "e8c22e0d39ac16a730bda2ace3a3f431c987afd7842ee8ca7e82a6e197125378"
+    },
+    {
+      "id": "mix-3-2-493",
+      "recipe": [
+        "mix",
+        3,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4437582f07cbb40bec66db6673685b8aafab684639b110f98b06a296c35f312c"
+    },
+    {
+      "id": "mix-3-3-490",
+      "recipe": [
+        "mix",
+        3,
+        3,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "6bf392b90883057c379b7a4c905d7b07fa9fc83837d30742da000abcc3f4f72d"
+    },
+    {
+      "id": "mix-3-3-491",
+      "recipe": [
+        "mix",
+        3,
+        3,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "5dc0b31a6af4cb8d94962d5e3ec8d7f40eedee50da55dae929b8c57a87cf3623"
+    },
+    {
+      "id": "mix-3-3-492",
+      "recipe": [
+        "mix",
+        3,
+        3,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "28c162b8aa7a9e1f59d80ef81575c0e1036f29046c189bff8d0982629c9b8a7f"
+    },
+    {
+      "id": "mix-3-3-493",
+      "recipe": [
+        "mix",
+        3,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4adcdaad143d8c520c918cc09750cab3f5f7433af826288f8ab30e7c415874ce"
+    },
+    {
+      "id": "mix-3-4-490",
+      "recipe": [
+        "mix",
+        3,
+        4,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "68c0be86ded005c84331bde2716fec5c466971a30272e067b0adc7d0ef347f5a"
+    },
+    {
+      "id": "mix-3-4-491",
+      "recipe": [
+        "mix",
+        3,
+        4,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "20861bd665c136f1f4f17f35978fe8d1fa97c086fba43721d59acca531272912"
+    },
+    {
+      "id": "mix-3-4-492",
+      "recipe": [
+        "mix",
+        3,
+        4,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "b2cb131358067a1903a88451f511c6e5ee414513bba13f80af936089beddc566"
+    },
+    {
+      "id": "mix-3-4-493",
+      "recipe": [
+        "mix",
+        3,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "e7330d5baf45e3c88144661eac77eb705481f7481c3e110b91aa93b2cf3b0598"
+    },
+    {
+      "id": "mix-3-5-490",
+      "recipe": [
+        "mix",
+        3,
+        5,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "f07ac1269c696610cc716dad8bbad6ba0f37f68e7702290eea5a6018a3dc20f6"
+    },
+    {
+      "id": "mix-3-5-491",
+      "recipe": [
+        "mix",
+        3,
+        5,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "5e57f0bd28e9439489390819c7c0da768ba00bf8df32f456f12ebb1c0afad558"
+    },
+    {
+      "id": "mix-3-5-492",
+      "recipe": [
+        "mix",
+        3,
+        5,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "c3e0b5909a21b5f10bd2ab1cdf81eedb60b0d0920f69bb33df6f3bfb174c8637"
+    },
+    {
+      "id": "mix-3-5-493",
+      "recipe": [
+        "mix",
+        3,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3794bbac699dd8720800fd5c48b95ebcb43268b6f038e1fbdf90f3ad9c422a08"
+    },
+    {
+      "id": "mix-3-6-490",
+      "recipe": [
+        "mix",
+        3,
+        6,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "344bd1f900542cad7ebb7faaa9863e7e7b4c13555d5b3eca845e1b8e3006b84b"
+    },
+    {
+      "id": "mix-3-6-491",
+      "recipe": [
+        "mix",
+        3,
+        6,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "01452aaaf5508d982079fed4740708111052785ce6b53d6e858cb15696203b29"
+    },
+    {
+      "id": "mix-3-6-492",
+      "recipe": [
+        "mix",
+        3,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "56fa5050871f9939735e84dba2e710516a29bd9819e4fd4b36bc7584e520aa7c"
+    },
+    {
+      "id": "mix-3-6-493",
+      "recipe": [
+        "mix",
+        3,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7d28be74f8e9e347c2fa465362c069dc900776d1b510771fa3dbd0839e5becf2"
+    },
+    {
+      "id": "mix-3-7-490",
+      "recipe": [
+        "mix",
+        3,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "618f1149be5f09500ec3884437f1dec290b928839599f1eae9485152b1054a67"
+    },
+    {
+      "id": "mix-3-7-491",
+      "recipe": [
+        "mix",
+        3,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "910a3824933b78ff7d471cdc52714c58c28cb65c263095603e6aa282dcfbcfd3"
+    },
+    {
+      "id": "mix-3-7-492",
+      "recipe": [
+        "mix",
+        3,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ec26cce522b0857b070965b71bfdc56b6f3efbc7410f7d8f69347723a700a70f"
+    },
+    {
+      "id": "mix-3-7-493",
+      "recipe": [
+        "mix",
+        3,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "6f92b80cccf56bdc705cc9c4466cabc64b213d229cbb3794682e2dd59abe3d2a"
+    },
+    {
+      "id": "mix-4-0-490",
+      "recipe": [
+        "mix",
+        4,
+        0,
+        490
+      ],
+      "expected": null,
+      "sha256": "5e3196f700f97360da33612ad50896b38c4e057954ddad5c60595f59f610a2a0"
+    },
+    {
+      "id": "mix-4-0-491",
+      "recipe": [
+        "mix",
+        4,
+        0,
+        491
+      ],
+      "expected": null,
+      "sha256": "368817ef6f5d4b4bda84e78f1298d4df305f920c5c25bdf44d32c178f119fcda"
+    },
+    {
+      "id": "mix-4-0-492",
+      "recipe": [
+        "mix",
+        4,
+        0,
+        492
+      ],
+      "expected": null,
+      "sha256": "1f9d8feaa7853ca08ec0f8ae1364dbda973d54c61c73ced5b4bf20f16842898a"
+    },
+    {
+      "id": "mix-4-0-493",
+      "recipe": [
+        "mix",
+        4,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "58a25f0d0878177222eaab1e465a3826c3a11ee2966329265712caad010e3b8d"
+    },
+    {
+      "id": "mix-4-1-490",
+      "recipe": [
+        "mix",
+        4,
+        1,
+        490
+      ],
+      "expected": null,
+      "sha256": "cb4b4e4cf7c579b1afbc019b469c5fbfcc43142b32d3f22b9cf3c985f881b17d"
+    },
+    {
+      "id": "mix-4-1-491",
+      "recipe": [
+        "mix",
+        4,
+        1,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "59be5f07ec11e56217df7572531b5f624a7320f8641a56b79910307bf401971e"
+    },
+    {
+      "id": "mix-4-1-492",
+      "recipe": [
+        "mix",
+        4,
+        1,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d568494d93937356ed1375e4e83edfb7bdbd74ee546900eda4ec6e41f22beefe"
+    },
+    {
+      "id": "mix-4-1-493",
+      "recipe": [
+        "mix",
+        4,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7cbcefb4fb366958b21ef4fe85f18bb03fba55f258840fa640a6e13fb2606fc7"
+    },
+    {
+      "id": "mix-4-2-490",
+      "recipe": [
+        "mix",
+        4,
+        2,
+        490
+      ],
+      "expected": null,
+      "sha256": "c32d0ef64a844c4176c0f7a59b71cad601f28917bab7070f0da8e35c3ce77e11"
+    },
+    {
+      "id": "mix-4-2-491",
+      "recipe": [
+        "mix",
+        4,
+        2,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a509b893f0d5acce4c48738aa3e244e71a9bc8ed7ec68c0a12456a067a7ae131"
+    },
+    {
+      "id": "mix-4-2-492",
+      "recipe": [
+        "mix",
+        4,
+        2,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "df5559d5123c948ef6e672f223fde143f1beef9fa51b73e37b042db1f294a16e"
+    },
+    {
+      "id": "mix-4-2-493",
+      "recipe": [
+        "mix",
+        4,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "583f8cdca915e700454789f4de632e800cedf7d181232a6a5041f1a826bdcf78"
+    },
+    {
+      "id": "mix-4-3-490",
+      "recipe": [
+        "mix",
+        4,
+        3,
+        490
+      ],
+      "expected": null,
+      "sha256": "d0f9131b3e2d16fc7b31dcc0dc1e8fb27469169a7c373b0521476fa6906fd033"
+    },
+    {
+      "id": "mix-4-3-491",
+      "recipe": [
+        "mix",
+        4,
+        3,
+        491
+      ],
+      "expected": null,
+      "sha256": "391af35880a61dc48f44719c9aaf9223272068dd0f7f402219b641c35d2cc8fb"
+    },
+    {
+      "id": "mix-4-3-492",
+      "recipe": [
+        "mix",
+        4,
+        3,
+        492
+      ],
+      "expected": null,
+      "sha256": "185c393901ebb49bda6522c2951d6e579afcbac784c300309b1e7b6fff212c1d"
+    },
+    {
+      "id": "mix-4-3-493",
+      "recipe": [
+        "mix",
+        4,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c97dc09ecaa3c26f84a7db34c8b663c2f08dc293a35cdc5ba0d99100c178c3da"
+    },
+    {
+      "id": "mix-4-4-490",
+      "recipe": [
+        "mix",
+        4,
+        4,
+        490
+      ],
+      "expected": null,
+      "sha256": "a71eedcf318d546827e5d5b05d974fbdd39ba460ec0707e3029574f0135f0133"
+    },
+    {
+      "id": "mix-4-4-491",
+      "recipe": [
+        "mix",
+        4,
+        4,
+        491
+      ],
+      "expected": null,
+      "sha256": "70a8cb19868114bd40065a37613c9a11566eadb381f660e85429fc773bd90b81"
+    },
+    {
+      "id": "mix-4-4-492",
+      "recipe": [
+        "mix",
+        4,
+        4,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "180d1a3880cf921992eaf6c1ab4901bc9298101ced3d7f6c1d2b1ec03e7f5fc5"
+    },
+    {
+      "id": "mix-4-4-493",
+      "recipe": [
+        "mix",
+        4,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1bcf1f1447943f2559ef119a3a18252f6e1391dd30a1eeefee37fe2c0568bdef"
+    },
+    {
+      "id": "mix-4-5-490",
+      "recipe": [
+        "mix",
+        4,
+        5,
+        490
+      ],
+      "expected": null,
+      "sha256": "1f347c11cbbe8181c4e0a6bb9d6c6535d614ae1fdec1c3551343a66b6b192d7d"
+    },
+    {
+      "id": "mix-4-5-491",
+      "recipe": [
+        "mix",
+        4,
+        5,
+        491
+      ],
+      "expected": null,
+      "sha256": "9e54c5ca57a90f2ea5ffe856eb9aca6e4802fe63d5576acbf27ed00048d5e65d"
+    },
+    {
+      "id": "mix-4-5-492",
+      "recipe": [
+        "mix",
+        4,
+        5,
+        492
+      ],
+      "expected": null,
+      "sha256": "9577249f15ef1730c6267e53d3a49624ab8203aab54ad8662d806b067a3a07f8"
+    },
+    {
+      "id": "mix-4-5-493",
+      "recipe": [
+        "mix",
+        4,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ff432798953ef4e169e83bf67184144037600c00fe559cd38166845781491ca4"
+    },
+    {
+      "id": "mix-4-6-490",
+      "recipe": [
+        "mix",
+        4,
+        6,
+        490
+      ],
+      "expected": null,
+      "sha256": "47fecf5c3c71942d146f7ba0afd545de3d7e1149d4b933048b2a3cc2769f0fa2"
+    },
+    {
+      "id": "mix-4-6-491",
+      "recipe": [
+        "mix",
+        4,
+        6,
+        491
+      ],
+      "expected": null,
+      "sha256": "e4386183576a0b36a7faf302801bc95ddf893ef80ec4c4fdb6318a8b6e46cac5"
+    },
+    {
+      "id": "mix-4-6-492",
+      "recipe": [
+        "mix",
+        4,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d0731509476285b51743f34b4efe312d133ed80cad9bdba2deaefdcb868ded44"
+    },
+    {
+      "id": "mix-4-6-493",
+      "recipe": [
+        "mix",
+        4,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7e31ef1021562ae268e9442cdd595ac507c286343d547571676e7d9cdcc3daa5"
+    },
+    {
+      "id": "mix-4-7-490",
+      "recipe": [
+        "mix",
+        4,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f6bddf218fee91b67c91fe8609093db50d9de1408d5c174a9f287dc5601e8811"
+    },
+    {
+      "id": "mix-4-7-491",
+      "recipe": [
+        "mix",
+        4,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "447b06b2ed62afb4a58cead581f932ae6842f6e9e39c10c571288298aa7a8fdb"
+    },
+    {
+      "id": "mix-4-7-492",
+      "recipe": [
+        "mix",
+        4,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "de4b075ecaeb5e1241bf3cc889226014d3a4d63f7f096f54509184b4dcc2ab48"
+    },
+    {
+      "id": "mix-4-7-493",
+      "recipe": [
+        "mix",
+        4,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "12cc83cb9761eec017a9193b72b28f0de2a870ac437ad9beb20443fdf7431d90"
+    },
+    {
+      "id": "mix-5-0-490",
+      "recipe": [
+        "mix",
+        5,
+        0,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "11794adcbe99775c51448667c61d9e89597f76953e4c6804835a9c3b1af350a5"
+    },
+    {
+      "id": "mix-5-0-491",
+      "recipe": [
+        "mix",
+        5,
+        0,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "4ac06d0d25d9251b608d5226c12a039a9c9979d606cc33ad7f209591ecd1c86e"
+    },
+    {
+      "id": "mix-5-0-492",
+      "recipe": [
+        "mix",
+        5,
+        0,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "2f34207177d7a88e37a3378c6447795b5334e77175fa29a1adcd278525fb4a9e"
+    },
+    {
+      "id": "mix-5-0-493",
+      "recipe": [
+        "mix",
+        5,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "72d4762e751669a428a1d4d5e6f1c675c65b93cee0c1938f65d8714dafac710b"
+    },
+    {
+      "id": "mix-5-1-490",
+      "recipe": [
+        "mix",
+        5,
+        1,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "3ffee3a0b12f9433419510ead5568c3c9dc9ce3ae17ed797899401edcc900749"
+    },
+    {
+      "id": "mix-5-1-491",
+      "recipe": [
+        "mix",
+        5,
+        1,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "3732903a844fd2c078c715bf47afc07e46f27261209b2c47e79716ca89131930"
+    },
+    {
+      "id": "mix-5-1-492",
+      "recipe": [
+        "mix",
+        5,
+        1,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "ed7976d48a03d7896c5f4f9ff5a234177975f55d67b627a72f1f8fe715272bdc"
+    },
+    {
+      "id": "mix-5-1-493",
+      "recipe": [
+        "mix",
+        5,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fbe4f0057e8a44a8fb0c2e9bdcf361d281c7d2c790b8db2c497dd11aaba98fa6"
+    },
+    {
+      "id": "mix-5-2-490",
+      "recipe": [
+        "mix",
+        5,
+        2,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "47a809e0a1143e8708d318564dc3770fa977effc86596468aead3f6c4e743214"
+    },
+    {
+      "id": "mix-5-2-491",
+      "recipe": [
+        "mix",
+        5,
+        2,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "0ca53ef02f6fbb32fc90c24b5ab0f55a60b36871b3d1122a8174fb3265051a21"
+    },
+    {
+      "id": "mix-5-2-492",
+      "recipe": [
+        "mix",
+        5,
+        2,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "b556ee6408a2c849ea76d826ce1419c942398fc6b0e82d3764a553a4121d75c7"
+    },
+    {
+      "id": "mix-5-2-493",
+      "recipe": [
+        "mix",
+        5,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3b46b91e7b546ceb6d8ce191c4933a29e22020d1d34fd9b39c84cc70e0dfbc4c"
+    },
+    {
+      "id": "mix-5-3-490",
+      "recipe": [
+        "mix",
+        5,
+        3,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "b01ccf76d5566526fb7dbf299aaecf2df8dd908abe8ddd63ec153fb9df1e28ed"
+    },
+    {
+      "id": "mix-5-3-491",
+      "recipe": [
+        "mix",
+        5,
+        3,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "11313e069e3b0f1c03f6f4ef51ad218874813de8de9cb93577c62f92205c34bc"
+    },
+    {
+      "id": "mix-5-3-492",
+      "recipe": [
+        "mix",
+        5,
+        3,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "10135f897aaf3dbbc161a948efe833bd39a6ddc1f085715412c1afb3d8d2130c"
+    },
+    {
+      "id": "mix-5-3-493",
+      "recipe": [
+        "mix",
+        5,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ac3cc02bca00aafbdb572280e11e052542b9d5502cbe86567f13605aa456efab"
+    },
+    {
+      "id": "mix-5-4-490",
+      "recipe": [
+        "mix",
+        5,
+        4,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "3976a39a1f76fed5f2f160dff8cc4c23bf4271d5236ac680fcb2c6de18bb3230"
+    },
+    {
+      "id": "mix-5-4-491",
+      "recipe": [
+        "mix",
+        5,
+        4,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "0bb137b5a75577c2bea0fc21cb61ef43799a838ab236ec804f0c433d141b8f2b"
+    },
+    {
+      "id": "mix-5-4-492",
+      "recipe": [
+        "mix",
+        5,
+        4,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "27060f8eb0ade19ad78f775fedd330268fd67d04f5696f5b14b3160e3a666ac4"
+    },
+    {
+      "id": "mix-5-4-493",
+      "recipe": [
+        "mix",
+        5,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "44375e8512c1c567a1eddabc393a6123d923946e74f693f4276fdacddee0e8a3"
+    },
+    {
+      "id": "mix-5-5-490",
+      "recipe": [
+        "mix",
+        5,
+        5,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "b97a4aa4d3865b16e551cb401a37cc870f3433b36267fcbaf318ef6f2af41ea3"
+    },
+    {
+      "id": "mix-5-5-491",
+      "recipe": [
+        "mix",
+        5,
+        5,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "66995afa496daa7f2d71ca9401645ade91f7f23529ddf062733610d582b32ec9"
+    },
+    {
+      "id": "mix-5-5-492",
+      "recipe": [
+        "mix",
+        5,
+        5,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "468e74d93a100fcade09e00537c9850c7a155a80908f93ddc31c794936b7916c"
+    },
+    {
+      "id": "mix-5-5-493",
+      "recipe": [
+        "mix",
+        5,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "baa79ffec22c293d55d1f0eb4156774825cde0a757e4eba8ac9b0ff001b58220"
+    },
+    {
+      "id": "mix-5-6-490",
+      "recipe": [
+        "mix",
+        5,
+        6,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "359f3a213466739f7b66473394452b9dd1870e50aa0847db65032e5d41dfcc35"
+    },
+    {
+      "id": "mix-5-6-491",
+      "recipe": [
+        "mix",
+        5,
+        6,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "bf35a03394c355b1e0914090eca0e6e22b4cb107e8b89db3d302fd3ae8a73baf"
+    },
+    {
+      "id": "mix-5-6-492",
+      "recipe": [
+        "mix",
+        5,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "36be2f46b60195942ad7606771a94f1dfbb05fe9ff72a10ee5a7da5672fde247"
+    },
+    {
+      "id": "mix-5-6-493",
+      "recipe": [
+        "mix",
+        5,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "044732a42fe9a4551c8e7be4499f6eb35c9db6e9e38a7eb021ddad528b91a454"
+    },
+    {
+      "id": "mix-5-7-490",
+      "recipe": [
+        "mix",
+        5,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "730be6a2beaebedbb0ef2e3222478974266b9ac19892330c2102aa8bbed993a1"
+    },
+    {
+      "id": "mix-5-7-491",
+      "recipe": [
+        "mix",
+        5,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "e8ae92912cbac0c2519113d4fdc698fa100b50fac1bba05509c750454c18d249"
+    },
+    {
+      "id": "mix-5-7-492",
+      "recipe": [
+        "mix",
+        5,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a2b3d157d44d01e60d534b154efa2d7e1a8434d768c119a944de20ffab4d908f"
+    },
+    {
+      "id": "mix-5-7-493",
+      "recipe": [
+        "mix",
+        5,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f6c4cf7c414a1a178865dfbbe36c6964e0285cd67c6ab06722de529b7062739f"
+    },
+    {
+      "id": "mix-6-0-490",
+      "recipe": [
+        "mix",
+        6,
+        0,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "7e9d74c699ae89425354a435f29f6f0e03603bdc7569e1cf4cef04830dd6d38b"
+    },
+    {
+      "id": "mix-6-0-491",
+      "recipe": [
+        "mix",
+        6,
+        0,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "85e38f0f0f972baadca3bbf46b40ad8eac0b422494a3a3670e7b6291bb589602"
+    },
+    {
+      "id": "mix-6-0-492",
+      "recipe": [
+        "mix",
+        6,
+        0,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "31d4840c7936434a4b122db4b7fd1f300e5466d9a1825376770b9fb874b65d8a"
+    },
+    {
+      "id": "mix-6-0-493",
+      "recipe": [
+        "mix",
+        6,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "43f3283eafeacf0a954e0a799d464e48d28e05aa9c6e2967a25719b37615b6e6"
+    },
+    {
+      "id": "mix-6-1-490",
+      "recipe": [
+        "mix",
+        6,
+        1,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "4d7caa26ccbee1f4ffd98c0dca8db6beaad5950eb555749aeeb4b4754477e061"
+    },
+    {
+      "id": "mix-6-1-491",
+      "recipe": [
+        "mix",
+        6,
+        1,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "1ec566540c0258b10a674539ca0ac939e2ec302f772ccd35c8ac62125e120169"
+    },
+    {
+      "id": "mix-6-1-492",
+      "recipe": [
+        "mix",
+        6,
+        1,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "761e7062137834aef3b1be713ca842d5653df509067ea3380b86d22128f45279"
+    },
+    {
+      "id": "mix-6-1-493",
+      "recipe": [
+        "mix",
+        6,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "e952e8c61c6ef65c937f4fcf85ba2285f01299032678bd7537cfe1fceab07ca9"
+    },
+    {
+      "id": "mix-6-2-490",
+      "recipe": [
+        "mix",
+        6,
+        2,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "b8d56c7f8477802da21fc84bbce977c629d853ecfed0c1acb29efd04c558580c"
+    },
+    {
+      "id": "mix-6-2-491",
+      "recipe": [
+        "mix",
+        6,
+        2,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "632b2724cecaa29025f98a5abce6336fc885ce9e26f0870565e11246ca41c6ee"
+    },
+    {
+      "id": "mix-6-2-492",
+      "recipe": [
+        "mix",
+        6,
+        2,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3f47f9d1c21200dc9cbba8d21f19a7c7c972a13a863eb6a7212266e64856079f"
+    },
+    {
+      "id": "mix-6-2-493",
+      "recipe": [
+        "mix",
+        6,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "56d6bfcedb02ec01bddda699505070a11249e743041fc017ff65d7ae3535826d"
+    },
+    {
+      "id": "mix-6-3-490",
+      "recipe": [
+        "mix",
+        6,
+        3,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "3a9bc2fa1cead19b37558d4d32f41b28aae993abd0e474c37de7eeae4e1088c3"
+    },
+    {
+      "id": "mix-6-3-491",
+      "recipe": [
+        "mix",
+        6,
+        3,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "47d33b287dfd8addf8736d228622fcc74e45bc587969a278fe5c71745f2e6ddb"
+    },
+    {
+      "id": "mix-6-3-492",
+      "recipe": [
+        "mix",
+        6,
+        3,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c9d9d6f60ce049b13098b33baaa016f0eef7873dcdee3b65539b18f53a83d138"
+    },
+    {
+      "id": "mix-6-3-493",
+      "recipe": [
+        "mix",
+        6,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "5deb78e454f1e07e6f96cc11c3b9213321a69aee30abb9e5530f9cee2ec157c4"
+    },
+    {
+      "id": "mix-6-4-490",
+      "recipe": [
+        "mix",
+        6,
+        4,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "ba22c111d7cc98a35447f0d2ec8acdddc583e3e33f240132d1e88168ac9d264c"
+    },
+    {
+      "id": "mix-6-4-491",
+      "recipe": [
+        "mix",
+        6,
+        4,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "c5d1c29aa7f4730a4ba176f79f962115c1e98f72d7753cac7d383cb72c04eea6"
+    },
+    {
+      "id": "mix-6-4-492",
+      "recipe": [
+        "mix",
+        6,
+        4,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "2b7fc6bb943dc7e9c5df5b2ab735ab03c085d35d6548cc4fdc5e3cc08a136aee"
+    },
+    {
+      "id": "mix-6-4-493",
+      "recipe": [
+        "mix",
+        6,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "78bf0a057c00ce5f7dc46cd5adc866e2e2a9aa73ee608c6f7f960a47530d0ef4"
+    },
+    {
+      "id": "mix-6-5-490",
+      "recipe": [
+        "mix",
+        6,
+        5,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "413770cdb863a5e6eb21f6d2ee83e34d92c923f6d29eca023c4793b90764269a"
+    },
+    {
+      "id": "mix-6-5-491",
+      "recipe": [
+        "mix",
+        6,
+        5,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "06b7f5ba4837fa7ff5c6a97780b9d9525f255997800c071802303ce6aa68ebf4"
+    },
+    {
+      "id": "mix-6-5-492",
+      "recipe": [
+        "mix",
+        6,
+        5,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "9222680086d8ff3449301b36bff2f96d6e2c2a0ddde95a531cb06b330e154530"
+    },
+    {
+      "id": "mix-6-5-493",
+      "recipe": [
+        "mix",
+        6,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "300ca65802b7e1bf33ba84a81d67ebb8c2ae191e29bf189251fc468b320851c5"
+    },
+    {
+      "id": "mix-6-6-490",
+      "recipe": [
+        "mix",
+        6,
+        6,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "7d68eea6715fb6a5bdb6956c4bb002811055bcf7156ab04c988b1f7fe994a7d4"
+    },
+    {
+      "id": "mix-6-6-491",
+      "recipe": [
+        "mix",
+        6,
+        6,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "0611718641e46ea156bc6f6a9aa36713f5e4d74782df2b69ae365af3cf743ae4"
+    },
+    {
+      "id": "mix-6-6-492",
+      "recipe": [
+        "mix",
+        6,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3632661cb3d2bc23145d8629d2be41d9c6fe2c3aebf1d32c332e4380ac63a3ce"
+    },
+    {
+      "id": "mix-6-6-493",
+      "recipe": [
+        "mix",
+        6,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f3d913b2174de48d067e7a9fce7c8b6c7ae189d644c8d2c2b249d3030778f4f5"
+    },
+    {
+      "id": "mix-6-7-490",
+      "recipe": [
+        "mix",
+        6,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "18fb59ff9045ee3e770ab1bcfd73ab1bf7c49b505dad928e4a0b175dceedd19c"
+    },
+    {
+      "id": "mix-6-7-491",
+      "recipe": [
+        "mix",
+        6,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b585db5632702e68aefc65a4a606a21c3aca2075a9c21e9ae3f93cd11b77df46"
+    },
+    {
+      "id": "mix-6-7-492",
+      "recipe": [
+        "mix",
+        6,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8f063ddfdb101b8ddae9917740d22165418252fe10a8b2817a672c1246dcd3d3"
+    },
+    {
+      "id": "mix-6-7-493",
+      "recipe": [
+        "mix",
+        6,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "9f012a3eef2512e7f16e925cd4bdf53ea54e8232eb83e38b3c2239e87da958e0"
+    },
+    {
+      "id": "mix-7-0-490",
+      "recipe": [
+        "mix",
+        7,
+        0,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "95f5212a2639351f186fe8d987b4e5e65ac2c182689b0d630248dc2d1f834ae6"
+    },
+    {
+      "id": "mix-7-0-491",
+      "recipe": [
+        "mix",
+        7,
+        0,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d287cd2c5669e30aebc9a0086eeccf6b89980ae31f0cc5a107e6dd6f98a39326"
+    },
+    {
+      "id": "mix-7-0-492",
+      "recipe": [
+        "mix",
+        7,
+        0,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1533862d0b6bb8c54edf5d21aea4ccb33d0f29a9e54310fd68004e54a9726ecc"
+    },
+    {
+      "id": "mix-7-0-493",
+      "recipe": [
+        "mix",
+        7,
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "dab6caee29d440380354c03407b755ea678084f79f972642fdc2ef9f9a712144"
+    },
+    {
+      "id": "mix-7-1-490",
+      "recipe": [
+        "mix",
+        7,
+        1,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "126addf5d3e08d6eb7b3669e88b1107d107908df14c5029aa55e8c5e890f4771"
+    },
+    {
+      "id": "mix-7-1-491",
+      "recipe": [
+        "mix",
+        7,
+        1,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fff4f7ab3362a5fbcb4bd1d6855523ef17a5b887465d926895309e97f9199721"
+    },
+    {
+      "id": "mix-7-1-492",
+      "recipe": [
+        "mix",
+        7,
+        1,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "46df7972a395eaf2a06b1bad849a42deefe5850d83b532f25d1255e2775bda5c"
+    },
+    {
+      "id": "mix-7-1-493",
+      "recipe": [
+        "mix",
+        7,
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "608e9e80ad655f8a97e46719ec53c989121f344a368524b828cb21844871c780"
+    },
+    {
+      "id": "mix-7-2-490",
+      "recipe": [
+        "mix",
+        7,
+        2,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4f273ef490f99243094626ec0e0a5e278f8a116910de5e6d6e8c31ae7a30d236"
+    },
+    {
+      "id": "mix-7-2-491",
+      "recipe": [
+        "mix",
+        7,
+        2,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "bf711c54119abe9a54cc87cbfbb6483c1486fab2588ff7d3bdfb8f73eb503883"
+    },
+    {
+      "id": "mix-7-2-492",
+      "recipe": [
+        "mix",
+        7,
+        2,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "88f48b11603ba115392530a2c74ef6840f00cdf8af34eebf409599aeb8a59b6d"
+    },
+    {
+      "id": "mix-7-2-493",
+      "recipe": [
+        "mix",
+        7,
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "2caa9a3545b89f7d2029845bc94a881bff459755b968e01aebbb5ef747a3ffd4"
+    },
+    {
+      "id": "mix-7-3-490",
+      "recipe": [
+        "mix",
+        7,
+        3,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "13d8030614c45ddfe77e9a87c6e9f093300bc95b946263c22d42ea27d8e28d80"
+    },
+    {
+      "id": "mix-7-3-491",
+      "recipe": [
+        "mix",
+        7,
+        3,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f3cbf50e7a3da3a4a67f1e850d545ebc170b012779f8a5219a1dcd6b5e2fd08c"
+    },
+    {
+      "id": "mix-7-3-492",
+      "recipe": [
+        "mix",
+        7,
+        3,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1c5fe569f9bc668a35df16ee785d82f43a173f3b5209c6ae60d50b0ecd7daf5e"
+    },
+    {
+      "id": "mix-7-3-493",
+      "recipe": [
+        "mix",
+        7,
+        3,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "39506e305bfe7b52494d64226f46a73874f49a8c486be4253c5f3a4278142bf6"
+    },
+    {
+      "id": "mix-7-4-490",
+      "recipe": [
+        "mix",
+        7,
+        4,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "ae97f19ae1a153b88900a1746c00931f06f639cd0a01a90f9e82428efc058b70"
+    },
+    {
+      "id": "mix-7-4-491",
+      "recipe": [
+        "mix",
+        7,
+        4,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f62393d5df1ea4f66bf5a07b11d7ce84b35550d29917e962d77788cb50ed41e4"
+    },
+    {
+      "id": "mix-7-4-492",
+      "recipe": [
+        "mix",
+        7,
+        4,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0dc8e55ad4a3ab33239d6ceb7c070e21ab71d2b7519e5a26a6bc51aa600b8ed6"
+    },
+    {
+      "id": "mix-7-4-493",
+      "recipe": [
+        "mix",
+        7,
+        4,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "79e280c11f524bb8735649862df1ab806d6c4d038baa1de9881f6ff0647a2262"
+    },
+    {
+      "id": "mix-7-5-490",
+      "recipe": [
+        "mix",
+        7,
+        5,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "093987cae35dcf7c0115c95395afbd3eb4c34c38767b8d3bf0c596218dcda583"
+    },
+    {
+      "id": "mix-7-5-491",
+      "recipe": [
+        "mix",
+        7,
+        5,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0a699ed816a353d0370b857daf42ccfeeaaab737fa177b216d0dc56306d2c8df"
+    },
+    {
+      "id": "mix-7-5-492",
+      "recipe": [
+        "mix",
+        7,
+        5,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "6158b44b83557d437829682cd46b2f63951adab2c5a77ccc3325ea26b723f36e"
+    },
+    {
+      "id": "mix-7-5-493",
+      "recipe": [
+        "mix",
+        7,
+        5,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b544daf02901c463534c138a96179c0cd4ab56a96144be796a3904629c3c7a1e"
+    },
+    {
+      "id": "mix-7-6-490",
+      "recipe": [
+        "mix",
+        7,
+        6,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "084a91d0c2a59b8dabb6d35a1362ebd2163441a27edf5001c82a066eed5a675b"
+    },
+    {
+      "id": "mix-7-6-491",
+      "recipe": [
+        "mix",
+        7,
+        6,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "da63339bbcdfcc7a5b49bb5e0ea68fa2afd7297a3cea95c922afcbef8c3de64a"
+    },
+    {
+      "id": "mix-7-6-492",
+      "recipe": [
+        "mix",
+        7,
+        6,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "27c5bcfb6b69f591926507e831ab7bd2a54a56d5bf1b9189fddd068ebd1073dc"
+    },
+    {
+      "id": "mix-7-6-493",
+      "recipe": [
+        "mix",
+        7,
+        6,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1946b8addb42db8225d8c0b750aa6d917efa6dbd61436e1436cb06ce862f7156"
+    },
+    {
+      "id": "mix-7-7-490",
+      "recipe": [
+        "mix",
+        7,
+        7,
+        490
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fc1dbd65e35ff8714dfce02e5432bdabf956f89f092c3d209a4880612053d455"
+    },
+    {
+      "id": "mix-7-7-491",
+      "recipe": [
+        "mix",
+        7,
+        7,
+        491
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d6bb3c358a2defec15ecb055847a1a6f36e99bdbd17c81724179b8c8c517b9e4"
+    },
+    {
+      "id": "mix-7-7-492",
+      "recipe": [
+        "mix",
+        7,
+        7,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7c8f50a51507be8decdb5bd2d1dc8e43fa64926b28136a7d3a718746ff166b5a"
+    },
+    {
+      "id": "mix-7-7-493",
+      "recipe": [
+        "mix",
+        7,
+        7,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f59f7537e56c8cc940abef6dac1db40bf48d31ed1ff16fbc9e8732a5e9f4a386"
+    },
+    {
+      "id": "scalar-seq-985",
+      "recipe": [
+        "scalar",
+        "seq",
+        985
+      ],
+      "expected": "NotMapping",
+      "sha256": "3969da4b309e82b958625271b6c91d8c676ce95440c1bbaa53f1fc409ac61822"
+    },
+    {
+      "id": "scalar-map-985",
+      "recipe": [
+        "scalar",
+        "map",
+        985
+      ],
+      "expected": null,
+      "sha256": "bcfab2d84830873bc99907cf2fcd395e340849c392e748409f93d72f44fc005c"
+    },
+    {
+      "id": "scalar-pairs-985",
+      "recipe": [
+        "scalar",
+        "pairs",
+        985
+      ],
+      "expected": "NotMapping",
+      "sha256": "84fbad506402f638478f9ba4bf0c6f10da446b21d63039be973d3ddc1e6a8a3b"
+    },
+    {
+      "id": "scalar-seq-986",
+      "recipe": [
+        "scalar",
+        "seq",
+        986
+      ],
+      "expected": "NotMapping",
+      "sha256": "a65d7f2038d1a12f7a563e27b410e7c8aeaf10f630e2531a1897a4042ddb4e87"
+    },
+    {
+      "id": "scalar-map-986",
+      "recipe": [
+        "scalar",
+        "map",
+        986
+      ],
+      "expected": null,
+      "sha256": "41f60038b00d3c11ce0979dd7e334fa299497d0536b5beaec723b93719225938"
+    },
+    {
+      "id": "scalar-pairs-986",
+      "recipe": [
+        "scalar",
+        "pairs",
+        986
+      ],
+      "expected": "NotMapping",
+      "sha256": "cbebb7321d854e510e6725d65ae3503d10cea785eb66431e05cf8ca7994ada31"
+    },
+    {
+      "id": "scalar-seq-987",
+      "recipe": [
+        "scalar",
+        "seq",
+        987
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "4932386960c2f46c96dd2affe947a43c1dcbff6989275387c65c2a6ba550b8cc"
+    },
+    {
+      "id": "scalar-map-987",
+      "recipe": [
+        "scalar",
+        "map",
+        987
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "8b4c6d76ecbd9676e6d67eefc8ed1c5e24ab742d0a2cea8ecb7ec3207aeadf37"
+    },
+    {
+      "id": "scalar-pairs-987",
+      "recipe": [
+        "scalar",
+        "pairs",
+        987
+      ],
+      "expected": "NotMapping",
+      "sha256": "0ea8116a045faf30af28d71d8abbdd75f00067667baabc481da39eb02fd99066"
+    },
+    {
+      "id": "scalar-seq-988",
+      "recipe": [
+        "scalar",
+        "seq",
+        988
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c304c3107a9b1942ea859cbb4fdacf78d6640c0959dabddda5e987c9841c8fca"
+    },
+    {
+      "id": "scalar-map-988",
+      "recipe": [
+        "scalar",
+        "map",
+        988
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "51a21995639eb5205428b2e7281082e061d219670e9cf6e88f19f05bf7f503c3"
+    },
+    {
+      "id": "scalar-pairs-988",
+      "recipe": [
+        "scalar",
+        "pairs",
+        988
+      ],
+      "expected": "NotMapping",
+      "sha256": "e5b0d87316c8578c040d5a2d77d33ea0f34b33fdca9083aa763c77e317371077"
+    },
+    {
+      "id": "scalar-seq-989",
+      "recipe": [
+        "scalar",
+        "seq",
+        989
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7cd41999ee4cdd640075a55a7c59958619a6ce914a613028a68c89eead569675"
+    },
+    {
+      "id": "scalar-map-989",
+      "recipe": [
+        "scalar",
+        "map",
+        989
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "1c862490418ee89a3e9781f574307b4540bae776b04e2a724d93bf3e3293a8f6"
+    },
+    {
+      "id": "scalar-pairs-989",
+      "recipe": [
+        "scalar",
+        "pairs",
+        989
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "749d780c258b7da01ee9e1d043e51f2c4ba00fe2d51624032e4303dc5a17b502"
+    },
+    {
+      "id": "lookahead-0-490",
+      "recipe": [
+        "lookahead",
+        0,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "b4e3a9f00fd9efa586f4c4d33a02bf268628b8a2f609920f813f897d961d0b34"
+    },
+    {
+      "id": "lookahead-0-491",
+      "recipe": [
+        "lookahead",
+        0,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "574bcdd908dae28d5ab0af7ee79685a63c24559c6d61b5e2b58957c01f37f1a8"
+    },
+    {
+      "id": "lookahead-0-492",
+      "recipe": [
+        "lookahead",
+        0,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "8fa8875520180751e68b41ab2ae5a187120823b8d8c7c5970fc7b89da8bd09c0"
+    },
+    {
+      "id": "lookahead-0-493",
+      "recipe": [
+        "lookahead",
+        0,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "124e76bc17180eb5d3271af0c0fc50d9acd2064036c16b83712a62d014737c6a"
+    },
+    {
+      "id": "lookahead-1-490",
+      "recipe": [
+        "lookahead",
+        1,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "ad33e9d531c7bd69fa71c25798b80731ea96901d0b39e63c99b5b9710675cb46"
+    },
+    {
+      "id": "lookahead-1-491",
+      "recipe": [
+        "lookahead",
+        1,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "466dde99800411edc85ce1edf044202d84a2b33e0c466c83d3e3a3dfe8391770"
+    },
+    {
+      "id": "lookahead-1-492",
+      "recipe": [
+        "lookahead",
+        1,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "0260c2139719a15eca77ecca0763bfac370ccc0a552efd0ff1cf541ea5cdf17a"
+    },
+    {
+      "id": "lookahead-1-493",
+      "recipe": [
+        "lookahead",
+        1,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0f5e3bc6febc87a62248c55030a13933cd9865d1ffbf0957eb535da7e902f2e4"
+    },
+    {
+      "id": "lookahead-2-490",
+      "recipe": [
+        "lookahead",
+        2,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "0fa7103339b63be15ad4df39a34d5d4a05abfabf5068716ed7a81517e72362a8"
+    },
+    {
+      "id": "lookahead-2-491",
+      "recipe": [
+        "lookahead",
+        2,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "0b52b8039296cd9bf5e983f061ed70289ca32abfa1650a80af9448dfafc5e4da"
+    },
+    {
+      "id": "lookahead-2-492",
+      "recipe": [
+        "lookahead",
+        2,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "edd6dd0c9b34e96f183c1f63e3ed9ad2c3446124ecd06f07f34732ded01c704b"
+    },
+    {
+      "id": "lookahead-2-493",
+      "recipe": [
+        "lookahead",
+        2,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "01e962487d25755419fa492f4f5abfa621eb9aafc182ce6b2973b4c924e55ae3"
+    },
+    {
+      "id": "lookahead-15-490",
+      "recipe": [
+        "lookahead",
+        15,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "9ab7f3f338cb360e926af8d6b68cf4abe9ae3ae006c8275313c92071a84efe8a"
+    },
+    {
+      "id": "lookahead-15-491",
+      "recipe": [
+        "lookahead",
+        15,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "61808985c63bcde6a4fd7a78eb059c1d2071903504d96542812cf2509bd4de75"
+    },
+    {
+      "id": "lookahead-15-492",
+      "recipe": [
+        "lookahead",
+        15,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "d483c849618670588764288ada36a600849451c657e3a8a82ed35cfa59b5e45f"
+    },
+    {
+      "id": "lookahead-15-493",
+      "recipe": [
+        "lookahead",
+        15,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "bd2443c17aa1d59a32287a88524ee49e5721c40029a9c8816f9bf2d5352b105b"
+    },
+    {
+      "id": "lookahead-511-490",
+      "recipe": [
+        "lookahead",
+        511,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "88703bbbd85e41c4539e6fb48899579a9f324e8bc9c38bca6664d64dd535417b"
+    },
+    {
+      "id": "lookahead-511-491",
+      "recipe": [
+        "lookahead",
+        511,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "72c98c6c59c7b5e91a4190e7ea38528a21067f535e0317fc91ee3fbfe3d333dc"
+    },
+    {
+      "id": "lookahead-511-492",
+      "recipe": [
+        "lookahead",
+        511,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "491687a029b3549abdb91c4ef3c1ba04a29b2be1cb2c3ca89e021cf5858535ae"
+    },
+    {
+      "id": "lookahead-511-493",
+      "recipe": [
+        "lookahead",
+        511,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "dfaa938deeb20221f4420ef2f45cc75911c298c9c8d941549a4af5ea1b25bed1"
+    },
+    {
+      "id": "lookahead-512-490",
+      "recipe": [
+        "lookahead",
+        512,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "d00a479a6815b3b392dac79c5f8f947c9c06f4d0ce3934253f19a763b84c43f3"
+    },
+    {
+      "id": "lookahead-512-491",
+      "recipe": [
+        "lookahead",
+        512,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "f47488d22f0ffc79fde43544e4d66c045885d844d50fe4b4ca7a8f1788609cf0"
+    },
+    {
+      "id": "lookahead-512-492",
+      "recipe": [
+        "lookahead",
+        512,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "a9afe095f8fe6f3ae20766931fd7671c53e399d10b7c50e2417d3a79e7cace5e"
+    },
+    {
+      "id": "lookahead-512-493",
+      "recipe": [
+        "lookahead",
+        512,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a0df8628a5a08650973d8d26f281bf2119616cde35666cd25cf2604bad7992f3"
+    },
+    {
+      "id": "lookahead-513-490",
+      "recipe": [
+        "lookahead",
+        513,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "bdfa6ad1795a721288c9ee1ce17e2220234743cea51257dbeed994b55c80718b"
+    },
+    {
+      "id": "lookahead-513-491",
+      "recipe": [
+        "lookahead",
+        513,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "8076122cb679b2b3dcddff42d118f1b019027ad7f53d5137e003a425973f6e20"
+    },
+    {
+      "id": "lookahead-513-492",
+      "recipe": [
+        "lookahead",
+        513,
+        492
+      ],
+      "expected": "NotMapping",
+      "sha256": "d6286a73bdea20ab28e35daa048fc8259e6b7463e8e7428f511fc49c6f499d60"
+    },
+    {
+      "id": "lookahead-513-493",
+      "recipe": [
+        "lookahead",
+        513,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b5b06fd56c38f504a6f1271aca2409567ee405ae9dbcf3ebff21fc194859d65e"
+    },
+    {
+      "id": "lookahead-1023-490",
+      "recipe": [
+        "lookahead",
+        1023,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "28e47e84cf22bd20cec3f3e5997619839630567100d843e9a726f70099ca4d13"
+    },
+    {
+      "id": "lookahead-1023-491",
+      "recipe": [
+        "lookahead",
+        1023,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "f84f271baa3cce3ca62d2ea618a0a0bd9cad0eea53e0968ac9afbc7ab16b0b91"
+    },
+    {
+      "id": "lookahead-1023-492",
+      "recipe": [
+        "lookahead",
+        1023,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b1767daf0da24bdceef7a604cac6ab4ca3f42be4fc7071ca2516d6c864ccc618"
+    },
+    {
+      "id": "lookahead-1023-493",
+      "recipe": [
+        "lookahead",
+        1023,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3aa03a6f145a57a7328e4b032b58023164e4d469724e0a4931abf1535df6e005"
+    },
+    {
+      "id": "lookahead-1024-490",
+      "recipe": [
+        "lookahead",
+        1024,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "c2e2078664ebf461233c4ca5e316d4bd39dffb7dfa05e3271b5b338920927f83"
+    },
+    {
+      "id": "lookahead-1024-491",
+      "recipe": [
+        "lookahead",
+        1024,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "c9120a220496e96dff50120a2dee77a29629a0ba5ecf85ddd34cdfdc57c60044"
+    },
+    {
+      "id": "lookahead-1024-492",
+      "recipe": [
+        "lookahead",
+        1024,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "cd1b96214ed06fdc34ecfae900a57798b5c4c59e81c32d586d54b69e13ff1b14"
+    },
+    {
+      "id": "lookahead-1024-493",
+      "recipe": [
+        "lookahead",
+        1024,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "88bd15ed82fb9772e5bf56a905270628b333bdec72dac20d97b1ae2241e91371"
+    },
+    {
+      "id": "lookahead-1025-490",
+      "recipe": [
+        "lookahead",
+        1025,
+        490
+      ],
+      "expected": "NotMapping",
+      "sha256": "b12eaea0dbe87b521a54727e00c0b12001cad0caccab0df16310a8ef23c2fe3d"
+    },
+    {
+      "id": "lookahead-1025-491",
+      "recipe": [
+        "lookahead",
+        1025,
+        491
+      ],
+      "expected": "NotMapping",
+      "sha256": "dc952f4e307577ad780a4f5ce04723a5af40913b5e64be02765b3f8ba4e8ae5b"
+    },
+    {
+      "id": "lookahead-1025-492",
+      "recipe": [
+        "lookahead",
+        1025,
+        492
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "0e3b92386d21fa9c087388fb1e93815ad30e5167d742c41ae3898b85d5da9634"
+    },
+    {
+      "id": "lookahead-1025-493",
+      "recipe": [
+        "lookahead",
+        1025,
+        493
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "228629be0ee735b2b6cd8956195aa3126738b7cc4c938ae53f2dd5d756ca227c"
+    },
+    {
+      "id": "block-seq-489-plain",
+      "recipe": [
+        "block",
+        "seq",
+        489,
+        "plain"
+      ],
+      "expected": "NotMapping",
+      "sha256": "bf9e12414d2b3c840eb2520aa2193bef42149da608f7a8798df0480e09e6e243"
+    },
+    {
+      "id": "block-seq-489-quoted",
+      "recipe": [
+        "block",
+        "seq",
+        489,
+        "quoted"
+      ],
+      "expected": "NotMapping",
+      "sha256": "ada9b9148957e2ce04841350910b5c17144b8b3c9f67278d4b4c4aa026927f62"
+    },
+    {
+      "id": "block-seq-489-literal",
+      "recipe": [
+        "block",
+        "seq",
+        489,
+        "literal"
+      ],
+      "expected": "NotMapping",
+      "sha256": "11971beb1067f4b3ecfda093de224a4dd6c666d8acc4b76eaf616ba209f5d171"
+    },
+    {
+      "id": "block-seq-489-folded",
+      "recipe": [
+        "block",
+        "seq",
+        489,
+        "folded"
+      ],
+      "expected": "NotMapping",
+      "sha256": "fc989702d7e219c6d40c9f033419b58b42af00c1ee193541402cd9befb738b83"
+    },
+    {
+      "id": "block-seq-489-anchor",
+      "recipe": [
+        "block",
+        "seq",
+        489,
+        "anchor"
+      ],
+      "expected": "NotMapping",
+      "sha256": "6b2884fd35409db72a230ec6c28baf4e4630d854d31a7388e89361499314ef1e"
+    },
+    {
+      "id": "block-seq-490-plain",
+      "recipe": [
+        "block",
+        "seq",
+        490,
+        "plain"
+      ],
+      "expected": "NotMapping",
+      "sha256": "d93226a06b161684ae2d6c6a59eb3fc4b06f4689f72555947787de586cc7c42f"
+    },
+    {
+      "id": "block-seq-490-quoted",
+      "recipe": [
+        "block",
+        "seq",
+        490,
+        "quoted"
+      ],
+      "expected": "NotMapping",
+      "sha256": "cc0cd0eead4361b12b19de927d454b53ab087a42518cbfa088637759ff0c1aad"
+    },
+    {
+      "id": "block-seq-490-literal",
+      "recipe": [
+        "block",
+        "seq",
+        490,
+        "literal"
+      ],
+      "expected": "NotMapping",
+      "sha256": "447deff180147a3a910215591abf656cb54f2003f16324ec5d7a95d183f84634"
+    },
+    {
+      "id": "block-seq-490-folded",
+      "recipe": [
+        "block",
+        "seq",
+        490,
+        "folded"
+      ],
+      "expected": "NotMapping",
+      "sha256": "8df4641ce7246dcea1e97ddbe72054936cb93958ffdb82cacefe43c7e55de28d"
+    },
+    {
+      "id": "block-seq-490-anchor",
+      "recipe": [
+        "block",
+        "seq",
+        490,
+        "anchor"
+      ],
+      "expected": "NotMapping",
+      "sha256": "5667f3c5a3724c5adb1bfd7164763a40ab0a0d8f4d1f95984b64374e36564ce2"
+    },
+    {
+      "id": "block-seq-491-plain",
+      "recipe": [
+        "block",
+        "seq",
+        491,
+        "plain"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "5930f07204de00b9d9ac29377b5a2b6e2da1bfb91ee4d5072ff9e08bffcd5015"
+    },
+    {
+      "id": "block-seq-491-quoted",
+      "recipe": [
+        "block",
+        "seq",
+        491,
+        "quoted"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "116bef9ff9252b14806bd2ea4461f763314b2e0d67d110bf74bc8df29710a766"
+    },
+    {
+      "id": "block-seq-491-literal",
+      "recipe": [
+        "block",
+        "seq",
+        491,
+        "literal"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "284a952769957ecbf9848711c1628943220860a914e36ffc78438334cfe129ab"
+    },
+    {
+      "id": "block-seq-491-folded",
+      "recipe": [
+        "block",
+        "seq",
+        491,
+        "folded"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7ed6ce5273dd67ff1485d50e1ed9fedbf68ed91755e40358308d19b48403cc10"
+    },
+    {
+      "id": "block-seq-491-anchor",
+      "recipe": [
+        "block",
+        "seq",
+        491,
+        "anchor"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "afc663566e177d3b54525b0e2328a4a26d4402dc7d5c571ceeb7d73dad41d5d2"
+    },
+    {
+      "id": "block-seq-492-plain",
+      "recipe": [
+        "block",
+        "seq",
+        492,
+        "plain"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "fcbcbfaff3299fbc18c7e45e12f6c41aaadca628ce6c61abdcc497dadd9e9345"
+    },
+    {
+      "id": "block-seq-492-quoted",
+      "recipe": [
+        "block",
+        "seq",
+        492,
+        "quoted"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "f410c2788ac4b2623b44140784b5893a7f10b1d48b0cee1049b3994757c156f8"
+    },
+    {
+      "id": "block-seq-492-literal",
+      "recipe": [
+        "block",
+        "seq",
+        492,
+        "literal"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "9909556551c002514a580577a8d40e1ae5de1cddf68396de822d5f89d45e23ed"
+    },
+    {
+      "id": "block-seq-492-folded",
+      "recipe": [
+        "block",
+        "seq",
+        492,
+        "folded"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "51356d9a492715bb76949c780c5ebed50abaf6da4b43acbb4c30cf57671281be"
+    },
+    {
+      "id": "block-seq-492-anchor",
+      "recipe": [
+        "block",
+        "seq",
+        492,
+        "anchor"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "2a15fe684afa37c8549aad46ce5621c54d1c19bbf17d303f8e19ff43be93e94d"
+    },
+    {
+      "id": "block-map-489-plain",
+      "recipe": [
+        "block",
+        "map",
+        489,
+        "plain"
+      ],
+      "expected": null,
+      "sha256": "22b96f0f74c3180c4ecba3d071f42e417a45a18f35fcedd1578b09cdffe7fa71"
+    },
+    {
+      "id": "block-map-489-quoted",
+      "recipe": [
+        "block",
+        "map",
+        489,
+        "quoted"
+      ],
+      "expected": null,
+      "sha256": "de9d82559ac9ffc4b1548fff22b648186c8174e08263a21ab7edca7a2ff95358"
+    },
+    {
+      "id": "block-map-489-literal",
+      "recipe": [
+        "block",
+        "map",
+        489,
+        "literal"
+      ],
+      "expected": null,
+      "sha256": "4846251fd95a0371fc4b6f7e1a4d3547e457b291e496000a6279b2108b055ca8"
+    },
+    {
+      "id": "block-map-489-folded",
+      "recipe": [
+        "block",
+        "map",
+        489,
+        "folded"
+      ],
+      "expected": null,
+      "sha256": "630c31945021e6fe86ae649c140612bf8499387c3d64f82f850f3e7b2c3e1f0d"
+    },
+    {
+      "id": "block-map-489-anchor",
+      "recipe": [
+        "block",
+        "map",
+        489,
+        "anchor"
+      ],
+      "expected": null,
+      "sha256": "55a681cd8e9148b67d8ee9cc7d95612d92ced2be8d29d0865cfa4caa7452098b"
+    },
+    {
+      "id": "block-map-490-plain",
+      "recipe": [
+        "block",
+        "map",
+        490,
+        "plain"
+      ],
+      "expected": null,
+      "sha256": "a399650b314957183e899706157128f44941b8088cb998d2425947f5697cde3e"
+    },
+    {
+      "id": "block-map-490-quoted",
+      "recipe": [
+        "block",
+        "map",
+        490,
+        "quoted"
+      ],
+      "expected": null,
+      "sha256": "7915a075d9e88ddc7fe1b221c50b2c6d56c2337891425a70f85e5dc6f47c7891"
+    },
+    {
+      "id": "block-map-490-literal",
+      "recipe": [
+        "block",
+        "map",
+        490,
+        "literal"
+      ],
+      "expected": null,
+      "sha256": "1aee02a4057b5351ada0b98ef505b692548920c16c9f02c72f83df46c52ee93f"
+    },
+    {
+      "id": "block-map-490-folded",
+      "recipe": [
+        "block",
+        "map",
+        490,
+        "folded"
+      ],
+      "expected": null,
+      "sha256": "29f832f22da205100e795d65f4f7c43f50d6e55629764ea859977adc56712cbe"
+    },
+    {
+      "id": "block-map-490-anchor",
+      "recipe": [
+        "block",
+        "map",
+        490,
+        "anchor"
+      ],
+      "expected": null,
+      "sha256": "8f0945b2aa9e89d8fcad76ed84a18927aadfd0acec052bdae6ca3e78c089bc51"
+    },
+    {
+      "id": "block-map-491-plain",
+      "recipe": [
+        "block",
+        "map",
+        491,
+        "plain"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "3b38dac2c21ef18bc807a8963141211ca55635d1d76ca70136f28dde4411a8b5"
+    },
+    {
+      "id": "block-map-491-quoted",
+      "recipe": [
+        "block",
+        "map",
+        491,
+        "quoted"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c91b5561ab34cc8d0508a09e701b72c0bdbdfb39601ee09232203f592819ccab"
+    },
+    {
+      "id": "block-map-491-literal",
+      "recipe": [
+        "block",
+        "map",
+        491,
+        "literal"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "d45067f6d7381912baab630722fdf8ee5e4316dc9508b13b9343c6a7a8e4ca1f"
+    },
+    {
+      "id": "block-map-491-folded",
+      "recipe": [
+        "block",
+        "map",
+        491,
+        "folded"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "549049777c0262762bbc2033e212ba0324859dcebbe8d5635d45ec1e9bcf31d8"
+    },
+    {
+      "id": "block-map-491-anchor",
+      "recipe": [
+        "block",
+        "map",
+        491,
+        "anchor"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a615d13774d7f808c8840c90801fcf328dbdd8a9b5c08a03d34f1a1a328efc3c"
+    },
+    {
+      "id": "block-map-492-plain",
+      "recipe": [
+        "block",
+        "map",
+        492,
+        "plain"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "a82ac3b3b46af808dc39b9f4316ef4e9adfedf8a2e8eafcf298fbe09eec3bccf"
+    },
+    {
+      "id": "block-map-492-quoted",
+      "recipe": [
+        "block",
+        "map",
+        492,
+        "quoted"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "7eb6402dc2e84fc46644b123e6132e26668268d12be848db99efdae93fcea098"
+    },
+    {
+      "id": "block-map-492-literal",
+      "recipe": [
+        "block",
+        "map",
+        492,
+        "literal"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "86e6335cfe089adce41445cc9d37739ea1ceb446444c218a5db4bdf5fbe780cc"
+    },
+    {
+      "id": "block-map-492-folded",
+      "recipe": [
+        "block",
+        "map",
+        492,
+        "folded"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "c3f64ecf184517ee25aa26e9f22affb01d5e7a9f3a1756250287f2b859fa46d7"
+    },
+    {
+      "id": "block-map-492-anchor",
+      "recipe": [
+        "block",
+        "map",
+        492,
+        "anchor"
+      ],
+      "expected": "UnreadableYaml",
+      "sha256": "b8aa4623a79ae04f8a0186c48e6ccb3e24b90335d2a90d47f7f48ac600343008"
+    }
+  ]
+}
