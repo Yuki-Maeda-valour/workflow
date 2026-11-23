@@ -389,26 +389,59 @@ def env_calls(fixture, command, label, args, extra_env):
     return result, calls
 
 
-# 2026-11-12 02:41の決定: 旧版の処理系やOSの部品が子の環境へ自分で足す値は再現しない。Macの旧Pythonが
-# profile用のgitの子の環境へ足す`__CF_USER_TEXT_ENCODING`だけを比較から外し、値と有無を記録する。
+# 2026-11-12 02:41の決定: 旧版の処理系やOSの部品が子の環境へ自分で足す値は再現しない。Macでは、子の環境を記録する
+# スタブ(Pythonのスクリプト)の起動時にCoreFoundationが`__CF_USER_TEXT_ENCODING`を足すので、旧版とRustの両側の
+# すべての子(git・grep)の比較から、この1変数だけを外し、側・起動の所・引数・値と有無を記録する。
+# 外す前に、同じ起動(道具と引数)で旧版とRustの有無と値が同じであることを確かめる(片側だけに付く場合を見逃さない)。
 CF_NAME = b'__CF_USER_TEXT_ENCODING'
 CF_RECORDS = []
 
 
-def cf_text_encoding(case_id, legacy_calls, *, system=None):
+def cf_text_encoding(case_id, legacy_calls, rust_calls=None, *, system=None):
+    """Macだけ、両側の子の環境から`__CF_USER_TEXT_ENCODING`だけを外す。(旧版の呼出し, Rustの呼出し)を返す。
+
+    rust_callsを渡さないときは旧版の呼出しだけを返す(互換)。Linuxでは何も外さない。
+    """
     import platform
+    only_legacy = rust_calls is None
+    rust_calls = list(rust_calls or [])
     if (system or platform.system()) != 'Darwin':
-        return legacy_calls
+        return legacy_calls if only_legacy else (legacy_calls, rust_calls)
     sites = launch_sites.load()
-    result = []
-    for tool, call_args, environment in legacy_calls:
-        if tool == 'git' and 'site-30-git' in launch_sites.classify(sites, tool, call_args):
-            CF_RECORDS.append({'case': case_id, 'args': [a.decode('utf-8', 'replace') for a in call_args],
+    pairs = {}
+    for side, calls in (('legacy', legacy_calls), ('rust', rust_calls)):
+        for tool, call_args, environment in calls:
+            pairs.setdefault((tool, call_args), {'legacy': [], 'rust': []})[side].append(environment)
+    problems = []
+
+    def strip(side, calls):
+        result = []
+        for tool, call_args, environment in calls:
+            words = [a.decode('utf-8', 'replace')[:80] for a in call_args]
+            CF_RECORDS.append({'case': case_id, 'side': side, 'tool': tool, 'sites': launch_sites.classify(sites, tool, call_args),
+                               'args': [a.decode('utf-8', 'replace') for a in call_args],
                                'present': CF_NAME in environment,
                                'value': environment.get(CF_NAME, b'').decode('utf-8', 'replace')})
-            environment = {k: v for k, v in environment.items() if k != CF_NAME}
-        result.append((tool, call_args, environment))
-    return result
+            result.append((tool, call_args, {k: v for k, v in environment.items() if k != CF_NAME}))
+        return result
+    for (tool, call_args), sides in ({} if only_legacy else pairs).items():
+        if len(sides['rust']) > len(sides['legacy']):
+            # Rustが多い起動は、旧版に無い起動なので失敗にする(Linuxと同じ。値は出さない)。
+            # 旧版だけが余る起動は失敗にしない。旧版が起動するrealpath・cp・mv・mktemp・grepなどは、Rustが
+            # 同じ処理をプロセスの中でするため、全ケースで旧版が多い(Linuxの計測: 43ケース全部)。余った分は
+            # 下の記録(side=legacy)に、有無と値を残す。
+            problems.append(f'{case_id}: {tool} 起動の所={launch_sites.classify(sites, tool, call_args)} '
+                            f'引数={[a.decode("utf-8", "replace")[:80] for a in call_args]} '
+                            f'旧版の回数={len(sides["legacy"])} Rustの回数={len(sides["rust"])}')
+        for old, new in zip(sides['legacy'], sides['rust']):
+            if (CF_NAME in old, old.get(CF_NAME)) != (CF_NAME in new, new.get(CF_NAME)):
+                problems.append(f'{case_id}: {tool} 起動の所={launch_sites.classify(sites, tool, call_args)} '
+                                f'引数={[a.decode("utf-8", "replace")[:80] for a in call_args]} '
+                                f'旧版の有無={CF_NAME in old} Rustの有無={CF_NAME in new} 値の一致={old.get(CF_NAME) == new.get(CF_NAME)}')
+    if problems:
+        raise AssertionError('__CF_USER_TEXT_ENCODINGの有無か値、または起動の回数が旧版とRustで違います: ' + ' / '.join(problems[:20]))
+    legacy_done = strip('legacy', legacy_calls)
+    return legacy_done if only_legacy else (legacy_done, strip('rust', rust_calls))
 
 
 def env_mismatches(case_id, sites, pending, rust_calls):
@@ -467,7 +500,7 @@ def env_probe(case, fixture, binary, legacy, *, varying=None, setup=None):
         # 基準でない機械: SHLVL(とLINENO)の欄は失敗として記録済み。ほかの変数は比べる。
         legacy_calls = [(t, a, {k: v for k, v in e.items() if k not in varying_names}) for t, a, e in legacy_calls]
         rust_calls = [(t, a, {k: v for k, v in e.items() if k not in varying_names}) for t, a, e in rust_calls]
-    legacy_calls = cf_text_encoding(case['id'], legacy_calls)
+    legacy_calls, rust_calls = cf_text_encoding(case['id'], legacy_calls, rust_calls)
     pending = {}
     for tool, call_args, environment in legacy_calls:
         pending.setdefault((tool, call_args), []).append(environment)

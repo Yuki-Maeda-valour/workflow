@@ -1118,16 +1118,56 @@ class StageC5(unittest.TestCase):
                           'd5-helper-missing': ('d5', 'helper-missing'),
                           'd5-no-profile-control': (None, None)})
 
-    def test_mac_cf_text_encoding_is_removed_only_from_profile_git(self):
+    def test_mac_cf_text_encoding_is_removed_from_both_sides_and_recorded(self):
         from diff_snapshot_fixtures import review_cases
-        calls = [('git', (b'--no-pager', b'rev-parse', b'--show-object-format'), {b'__CF_USER_TEXT_ENCODING': b'0x1F5'}),
-                 ('git', (b'--no-pager', b'version'), {b'__CF_USER_TEXT_ENCODING': b'0x1F5'})]
+        cf = b'__CF_USER_TEXT_ENCODING'
+        git = (b'--no-pager', b'rev-parse', b'--verify', b'--quiet', b'HEAD')   # site-06・18・30に当たる広い形
+        grep = (b'-q', b'x')
+        def calls(value, other=b'1'):
+            return [('git', git, {cf: value, b'A': other}), ('grep', grep, {cf: value}), ('git', (b'--no-pager', b'version'), {b'A': other})]
+        legacy, rust = calls(b'0x1F5'), calls(b'0x1F5')
         with mock.patch.object(review_cases, 'CF_RECORDS', []):
-            self.assertIs(review_cases.cf_text_encoding('c', calls, system='Linux'), calls)
-            done = review_cases.cf_text_encoding('c', calls, system='Darwin')
-            self.assertEqual([env for _, _, env in done], [{}, {b'__CF_USER_TEXT_ENCODING': b'0x1F5'}])
-            self.assertEqual(review_cases.CF_RECORDS[0]['present'], True)
-            self.assertEqual(review_cases.CF_RECORDS[0]['value'], '0x1F5')
+            # Linuxでは何も外さない(渡した物をそのまま返す)。
+            same = review_cases.cf_text_encoding('c', legacy, rust, system='Linux')
+            self.assertEqual((legacy, rust), same)
+            self.assertEqual([], review_cases.CF_RECORDS)
+            # Macでは、両側のすべての子(git・grep)から、この1変数だけを外す。ほかの変数は外さない。
+            done_legacy, done_rust = review_cases.cf_text_encoding('c', legacy, rust, system='Darwin')
+            for done in (done_legacy, done_rust):
+                self.assertEqual([{b'A': b'1'}, {}, {b'A': b'1'}], [env for _, _, env in done])
+            self.assertEqual({'legacy', 'rust'}, {r['side'] for r in review_cases.CF_RECORDS})
+            self.assertEqual(6, len(review_cases.CF_RECORDS))
+            first = review_cases.CF_RECORDS[0]
+            self.assertEqual((first['present'], first['value'], first['tool']), (True, '0x1F5', 'git'))
+            self.assertIn('site-30-git', first['sites'])
+            self.assertEqual([False], [r['present'] for r in review_cases.CF_RECORDS if r['args'] == ['--no-pager', 'version']][:1])
+            # 旧版だけの形(Rustを渡さない)も、旧版だけから外す。
+            self.assertEqual([{b'A': b'1'}, {}, {b'A': b'1'}], [env for _, _, env in review_cases.cf_text_encoding('c', legacy, system='Darwin')])
+        # 同じ起動で旧版とRustの有無か値が違えば落ちる(片側だけに付く場合を見逃さない)。
+        for rust_changed in (calls(b'0x2A5'), [('git', git, {b'A': b'1'}), legacy[1], legacy[2]],
+                             [legacy[0], ('grep', grep, {}), legacy[2]], [legacy[0], legacy[1], ('git', (b'--no-pager', b'version'), {cf: b'0x1F5'})]):
+            with mock.patch.object(review_cases, 'CF_RECORDS', []), self.assertRaisesRegex(AssertionError, '有無か値、または起動の回数が旧版とRustで違います'):
+                review_cases.cf_text_encoding('c', legacy, rust_changed, system='Darwin')
+        # Rustが多い起動は落ちる(旧版に無い起動。値は出さない)。
+        with mock.patch.object(review_cases, 'CF_RECORDS', []), self.assertRaisesRegex(AssertionError, r'旧版の回数=1 Rustの回数=2') as caught:
+            review_cases.cf_text_encoding('c', list(legacy), [*calls(b'0x1F5'), legacy[0]], system='Darwin')
+        self.assertNotIn('0x1F5', str(caught.exception))
+        # 旧版だけが余る起動は落ちない(Linuxの計測では全ケースで旧版のrealpath・cp・mvなどが余る)。
+        # 組にできた分は有無と値を確かめ、余った分も外して、有無と値を記録に残す。
+        with mock.patch.object(review_cases, 'CF_RECORDS', []):
+            extra = ('realpath', (b'--', b'/x'), {cf: b'0x1F5', b'A': b'1'})
+            done_legacy, done_rust = review_cases.cf_text_encoding('c', [*legacy, extra, legacy[0]], calls(b'0x1F5'), system='Darwin')
+            self.assertEqual(5, len(done_legacy))
+            self.assertTrue(all(cf not in env for _, _, env in done_legacy))
+            self.assertEqual([('realpath', True, '0x1F5')], [(r['tool'], r['present'], r['value']) for r in review_cases.CF_RECORDS
+                                                            if r['side'] == 'legacy' and r['tool'] == 'realpath'])
+        # 余りがあっても、組にできた分の有無か値の違いは落ちる。
+        with mock.patch.object(review_cases, 'CF_RECORDS', []), self.assertRaisesRegex(AssertionError, '有無か値'):
+            review_cases.cf_text_encoding('c', [*legacy, legacy[0]], calls(b'0x2A5'), system='Darwin')
+        # ほかの変数の違いは、この関数では隠さない(外した後にそのまま残り、後の比較で落ちる)。
+        with mock.patch.object(review_cases, 'CF_RECORDS', []):
+            done_legacy, done_rust = review_cases.cf_text_encoding('c', legacy, calls(b'0x1F5', other=b'2'), system='Darwin')
+            self.assertNotEqual(done_legacy, done_rust)
 
     def test_child_environment_mismatch_names_the_side_the_launch_site_and_the_arguments(self):
         from diff_snapshot_fixtures import launch_sites, review_cases
