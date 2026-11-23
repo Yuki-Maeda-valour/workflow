@@ -401,6 +401,218 @@ while time.monotonic() < end:
                 path.unlink()
                 self.guard(*self.context("verify"))
 
+    # 入れ子のリポジトリ(中に .git を持つ、追跡していないフォルダ。worktree を含む)の試験(#503 の C1〜C13)。
+    def nested_fixture(self, *extra_ignores, worktrees=True):
+        """.claude/reviews/ と .claude/worktrees/ を無視する設定を commit し、worktree の親のフォルダを作る。"""
+        (self.repo / ".gitignore").write_text("\n".join((".claude/reviews/", ".claude/worktrees/", *extra_ignores)) + "\n")
+        self.git("add", ".gitignore")
+        self.git("commit", "-qm", "ignore reviews and worktrees")
+        (self.repo / ".claude/reviews").mkdir(parents=True)
+        if worktrees:
+            (self.repo / ".claude/worktrees").mkdir()
+
+    def add_worktree(self, name):
+        path = self.repo / ".claude/worktrees" / name
+        self.git("worktree", "add", "-q", "-b", name, str(path))
+        return path
+
+    def nested_repo(self, name, file_name="inner.txt"):
+        """git init と 1 回の commit をした入れ子のリポジトリを、本体の中に作る。"""
+        path = self.repo / name
+        support_git.git("init", "-q", str(path), cwd=self.repo)
+        (path / file_name).write_text("inner\n", encoding="utf-8")
+        identity = ("-c", "user.name=tester", "-c", "user.email=tester@example.invalid")
+        support_git.git("add", file_name, cwd=path)
+        support_git.git("commit", "-qm", "inner", cwd=path, options=identity)
+        return path
+
+    def manifest(self):
+        return json.loads((self.state / "manifest.json").read_text())
+
+    def started(self):
+        return json.loads((self.start_state / "start.json").read_text())
+
+    def under(self, paths, prefix):
+        return [path for path in paths if path == prefix or path.startswith(prefix + "/")]
+
+    def test_nested_worktree_before_start_is_not_a_commit_path(self):
+        # C1: start の前からある worktree の中のファイルを、commit の対象に数えない。
+        self.nested_fixture()
+        other = self.add_worktree("other")
+        (other / "b.txt").write_text("only in other worktree\n", encoding="utf-8")
+        self.begin()
+        self.assertIn(".claude/worktrees/other", self.started()["preexisting_untracked"])
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture()
+        self.assertEqual([], self.under(self.manifest()["commit_paths"], ".claude/worktrees"))
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+
+    def test_nested_worktrees_changed_after_seal_keep_the_match(self):
+        # C2: seal の後に worktree を足す・消す・中を変える・根の直下に入れ子のリポジトリを作っても、照合は変わらない。
+        self.nested_fixture()
+        other = self.add_worktree("other")
+        (other / "b.txt").write_text("only in other worktree\n", encoding="utf-8")
+        gone = self.add_worktree("gone")
+        self.begin()
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture(prove=False)
+        self.add_worktree("added")
+        self.git("worktree", "remove", str(gone))
+        self.assertFalse(gone.exists())
+        (other / "source.txt").write_text("changed in other worktree\n", encoding="utf-8")
+        (other / "c.txt").write_text("new in other worktree\n", encoding="utf-8")
+        self.nested_repo("late")
+        self.guard(*self.context("verify"))
+        self.prove()
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+
+    def test_nested_worktree_added_before_take_is_not_disclosed(self):
+        # C3: start の後に足した worktree の中の ignore 規則・品質の入口を、開示の欄に出さない。
+        self.nested_fixture()
+        self.begin()
+        added = self.add_worktree("added")
+        (added / ".gitignore").write_text("*.log\n", encoding="utf-8")
+        (added / "scripts").mkdir()
+        (added / "scripts/check_x.py").write_text("print('x')\n", encoding="utf-8")
+        self.capture(prove=False)
+        disclosures = self.manifest()["disclosures"]
+        self.assertEqual([], self.under(disclosures["new_ignored_paths"], ".claude/worktrees"))
+        for key in ("ignore_changes", "quality_changes"):
+            with self.subTest(key=key):
+                self.assertEqual([], self.under([item["path"] for item in disclosures[key]], ".claude/worktrees"))
+
+    def test_nested_repository_staged_after_take_is_rejected(self):
+        # C4: start の後に作った入れ子のリポジトリを、take の後にステージすると止める。
+        self.nested_fixture()
+        self.begin()
+        self.nested_repo("nested")
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture()
+        self.assertEqual([], self.under(self.manifest()["commit_paths"], "nested"))
+        # 対照: source.txt だけをステージした時点では通る。次の expect=1 の理由は、入れ子のリポジトリのステージだけ。
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+        self.git("add", "source.txt", "nested")
+        result = self.verify("--mode", "stage", expect=1)
+        self.assertIn("RESULT=mismatch", result.stdout)
+
+    def test_nested_repository_before_start_is_not_a_commit_path(self):
+        # C5: start の前からある、無視されていない入れ子のリポジトリを、commit の対象に数えない。
+        self.nested_fixture()
+        self.nested_repo("nested")
+        self.begin()
+        self.assertIn("nested", self.started()["preexisting_untracked"])
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture()
+        self.assertEqual([], self.under(self.manifest()["commit_paths"], "nested"))
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+
+    def test_plain_ignored_file_after_start_is_still_disclosed(self):
+        # C6: 普通の無視されたファイルは、今までどおり new_ignored_paths に出る。
+        self.nested_fixture("generated/")
+        self.begin()
+        (self.repo / "generated").mkdir()
+        (self.repo / "generated/out.txt").write_text("generated\n", encoding="utf-8")
+        self.capture(prove=False)
+        self.assertIn("generated/out.txt", self.manifest()["disclosures"]["new_ignored_paths"])
+
+    def test_preexisting_nested_repository_staged_before_take_is_rejected(self):
+        # C7: start の前からある入れ子のリポジトリを take の前にステージしても、commit の対象に入らず止まる。
+        self.nested_fixture()
+        self.nested_repo("nested")
+        self.begin()
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.git("add", "nested")
+        self.capture()
+        manifest = self.manifest()
+        self.assertNotIn("nested", manifest["commit_paths"])
+        self.assertEqual(["160000"], [item["mode"] for item in manifest["index"] if item["path"] == "nested"])
+        self.git("add", "source.txt")
+        result = self.verify("--mode", "stage", expect=1)
+        self.assertIn("RESULT=mismatch", result.stdout)
+
+    def test_plain_directory_becoming_nested_repository_is_rejected(self):
+        # C8: 普通のフォルダが、seal の後に入れ子のリポジトリに変わると止まる。
+        self.nested_fixture()
+        self.begin()
+        (self.repo / "w").mkdir()
+        (self.repo / "w/x.txt").write_text("x\n", encoding="utf-8")
+        self.capture(prove=False)
+        self.guard(*self.context("verify"))
+        support_git.git("init", "-q", str(self.repo / "w"), cwd=self.repo)
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_nested_repository_losing_git_is_rejected(self):
+        # C9: 入れ子のリポジトリが、seal の後に .git を失って普通のフォルダに変わると止まる。
+        self.nested_fixture()
+        self.begin()
+        nested = self.nested_repo("w", "keep.txt")
+        self.capture(prove=False)
+        self.guard(*self.context("verify"))
+        shutil.rmtree(nested / ".git")
+        self.assertTrue((nested / "keep.txt").is_file())
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_git_inside_tracked_directory_is_not_walked(self):
+        # C10: 追跡しているフォルダの中で git init しても、.git の中身を commit の対象に数えない。
+        self.nested_fixture()
+        (self.repo / "lib").mkdir()
+        (self.repo / "lib/keep.txt").write_text("keep\n", encoding="utf-8")
+        self.git("add", "lib/keep.txt")
+        self.git("commit", "-qm", "lib")
+        self.begin()
+        support_git.git("init", "-q", str(self.repo / "lib"), cwd=self.repo)
+        self.assertTrue((self.repo / "lib/.git").is_dir())
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture()
+        paths = self.manifest()["commit_paths"]
+        self.assertIn("lib/keep.txt", paths)
+        self.assertEqual([], [path for path in paths if "/.git/" in path or path.endswith("/.git")])
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+
+    def test_creating_the_worktrees_folder_after_seal_is_still_rejected(self):
+        # C11: .claude/worktrees/ のフォルダそのものを seal の後に作ると、今までどおり止まる。
+        self.nested_fixture(worktrees=False)
+        self.begin()
+        self.capture(prove=False)
+        self.guard(*self.context("verify"))
+        self.add_worktree("first")
+        self.guard(*self.context("verify"), expect=1)
+
+    def test_nested_repository_created_after_start_and_staged_before_take_is_a_gitlink(self):
+        # C12: start の後に作って take の前にステージした入れ子のリポジトリは、今までどおり gitlink として commit の対象に入る。
+        self.nested_fixture()
+        self.begin()
+        self.nested_repo("nested")
+        self.git("add", "nested")
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.capture()
+        manifest = self.manifest()
+        self.assertIn("nested", manifest["commit_paths"])
+        self.assertEqual(["gitlink"], [item["kind"] for item in manifest["worktree"] if item["path"] == "nested"])
+        self.git("add", "source.txt")
+        self.verify("--mode", "stage")
+
+    def test_preexisting_ignored_worktree_staged_before_take_is_rejected(self):
+        # C13: start の前からある、無視された worktree を take の前にステージしても、commit の対象に入らず止まる。
+        self.nested_fixture()
+        self.add_worktree("other")
+        self.begin()
+        self.assertIn(".claude/worktrees/other", self.started()["preexisting_untracked"])
+        (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")
+        self.git("add", "-f", ".claude/worktrees/other")
+        self.capture()
+        manifest = self.manifest()
+        self.assertNotIn(".claude/worktrees/other", manifest["commit_paths"])
+        self.assertEqual(["160000"], [item["mode"] for item in manifest["index"] if item["path"] == ".claude/worktrees/other"])
+        self.git("add", "source.txt")
+        result = self.verify("--mode", "stage", expect=1)
+        self.assertIn("RESULT=mismatch", result.stdout)
+
     def test_tracked_untracked_index_and_commit_changes_are_rejected(self):
         cases = (
             ("tracked", lambda: (self.repo / "source.txt").write_text("changed\n", encoding="utf-8")),
@@ -1398,6 +1610,8 @@ class ExternalTaskDirectoryTest(unittest.TestCase):
         if args == ("rev-parse", "HEAD"):
             return b"a" * 40 + b"\n"
         if args == ("ls-files", "-o", "--exclude-standard", "-z"):
+            return b""
+        if args == ("ls-files", "-o", "--ignored", "--exclude-standard", "-z"):
             return b""
         if args == ("hash-object", "--stdin"):
             return hashlib.sha1(input_data).hexdigest().encode() + b"\n"

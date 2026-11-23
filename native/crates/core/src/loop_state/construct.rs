@@ -25,21 +25,38 @@ struct Constructor<'a> {
     values: Vec<Option<Value>>,
     pending: VecDeque<usize>,
     limit: LegacyIntLimit,
-    recursion: Option<super::snapshot_recursion::RecursionPolicy>,
+    recursion: Option<super::legacy_recursion::LegacyRecursionContext>,
+    snapshot: Option<super::snapshot_recursion::RecursionPolicy>,
     scalar_frames: usize,
 }
 impl Constructor<'_> {
-    fn scalar(&self, mut id: usize) -> Result<Vec<u32>, ()> {
+    fn probe(&self, depth: usize) -> Result<(), ()> {
+        if let Some(context) = self.recursion {
+            super::legacy_recursion::Calls::new(context).enter(depth)
+        } else {
+            Ok(())
+        }
+    }
+    fn construction_depth(&self) -> usize {
+        self.recursion.map_or(0, |c| c.entry_depth + 8)
+    }
+
+    fn scalar(&self, mut id: usize, mut depth: usize) -> Result<Vec<u32>, ()> {
         let mut seen = HashSet::new();
         loop {
+            self.probe(depth)?;
+            self.probe(depth + 1)?;
             if !seen.insert(id) {
                 return Err(());
             }
-            if let Some(policy) = self.recursion {
+            if let Some(policy) = self.snapshot {
                 policy.scalar(self.scalar_frames, seen.len())?;
             }
             match &self.graph.nodes[id].data {
-                Data::Scalar(v) => return Ok(v.clone()),
+                Data::Scalar(v) => {
+                    self.probe(depth + 2)?;
+                    return Ok(v.clone());
+                }
                 Data::Mapping(pairs) => {
                     let next = pairs
                         .borrow()
@@ -49,12 +66,15 @@ impl Constructor<'_> {
                         })
                         .ok_or(())?;
                     id = next;
+                    depth += 1;
                 }
                 _ => return Err(()),
             }
         }
     }
-    fn ensure(&mut self, id: usize) -> Result<(), ()> {
+    fn ensure(&mut self, id: usize, depth: usize) -> Result<(), ()> {
+        self.probe(depth)?;
+        self.probe(depth + 1)?;
         if self.values[id].is_some() {
             return Ok(());
         }
@@ -83,9 +103,9 @@ impl Constructor<'_> {
                 self.pending.push_back(id);
                 Value::List(Vec::new())
             }
-            "str" => Value::Text(CodepointString(self.scalar(id)?)),
+            "str" => Value::Text(CodepointString(self.scalar(id, depth + 2)?)),
             "null" | "bool" | "int" | "float" | "binary" | "timestamp" => {
-                let scalar = self.scalar(id)?;
+                let scalar = self.scalar(id, depth + 2)?;
                 if tag == "timestamp" && !matches!(self.graph.nodes[id].data, Data::Scalar(_)) {
                     return Err(());
                 }
@@ -137,9 +157,10 @@ impl Constructor<'_> {
         }
         let mut stack = vec![Frame::new(id)];
         while !stack.is_empty() {
-            if let Some(policy) = self.recursion {
+            if let Some(policy) = self.snapshot {
                 policy.merge(stack.len())?;
             }
+            self.probe(self.recursion.map_or(0, |c| c.entry_depth + 7) + stack.len())?;
             let frame = stack.last_mut().unwrap();
             match &mut frame.wait {
                 Wait::One(child) => {
@@ -230,7 +251,7 @@ impl Constructor<'_> {
                         return Err(());
                     };
                     for &child in &children {
-                        self.ensure(child)?;
+                        self.ensure(child, self.construction_depth())?;
                     }
                     Value::List(children.into_iter().map(Some).collect())
                 }
@@ -239,14 +260,14 @@ impl Constructor<'_> {
                     let pairs = self.mapping(id)?.borrow().clone();
                     let mut secret = None;
                     for (key, value) in pairs {
-                        self.ensure(key)?;
+                        self.ensure(key, self.construction_depth())?;
                         if matches!(
                             self.values[key],
                             Some(Value::List(_) | Value::Map(_) | Value::Set)
                         ) {
                             return Err(());
                         }
-                        self.ensure(value)?;
+                        self.ensure(value, self.construction_depth())?;
                         if matches!(&self.values[key],Some(Value::Text(s)) if scalar::equals(&s.0,"secret_paths"))
                         {
                             secret = Some(value);
@@ -270,8 +291,8 @@ impl Constructor<'_> {
                             return Err(());
                         }
                         let (key, value) = p[0];
-                        self.ensure(key)?;
-                        self.ensure(value)?;
+                        self.ensure(key, self.construction_depth())?;
+                        self.ensure(value, self.construction_depth())?;
                         items.push(None);
                     }
                     Value::List(items)
@@ -284,6 +305,20 @@ impl Constructor<'_> {
     }
 }
 pub(super) fn patterns(graph: &mut Graph, limit: LegacyIntLimit) -> Result<PatternInput, ()> {
+    patterns_in(graph, limit, None)
+}
+pub(super) fn patterns_for_loop(
+    graph: &mut Graph,
+    limit: LegacyIntLimit,
+    context: super::legacy_recursion::LegacyRecursionContext,
+) -> Result<PatternInput, ()> {
+    patterns_in(graph, limit, Some(context))
+}
+fn patterns_in(
+    graph: &mut Graph,
+    limit: LegacyIntLimit,
+    recursion: Option<super::legacy_recursion::LegacyRecursionContext>,
+) -> Result<PatternInput, ()> {
     if graph.nodes.is_empty() {
         return Ok(PatternInput::List(Vec::new()));
     }
@@ -292,10 +327,11 @@ pub(super) fn patterns(graph: &mut Graph, limit: LegacyIntLimit) -> Result<Patte
         graph,
         pending: VecDeque::new(),
         limit,
-        recursion: None,
+        recursion,
+        snapshot: None,
         scalar_frames: 10,
     };
-    c.ensure(0)?;
+    c.ensure(0, recursion.map_or(0, |c| c.entry_depth + 5))?;
     c.finish()?;
     let Some(Value::Map(Some(id))) = c.values[0] else {
         return Ok(PatternInput::List(Vec::new()));
@@ -336,10 +372,11 @@ pub(crate) fn snapshot_input(
         graph,
         pending: VecDeque::new(),
         limit,
-        recursion: Some(recursion),
+        recursion: None,
+        snapshot: Some(recursion),
         scalar_frames: 10,
     };
-    c.ensure(0)?;
+    c.ensure(0, 0)?;
     c.finish()?;
     let id = match &c.values[0] {
         Some(Value::Null) => return Ok(SnapshotInput::Null),

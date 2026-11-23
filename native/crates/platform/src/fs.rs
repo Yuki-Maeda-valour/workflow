@@ -3,6 +3,7 @@ use rustix::fd::OwnedFd;
 use rustix::fs::{self, AtFlags, FileType, Mode, OFlags};
 use std::ffi::OsStr;
 use std::io;
+use std::os::fd::{AsFd, BorrowedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
@@ -101,6 +102,10 @@ pub struct HeldDir {
 }
 
 impl HeldDir {
+    pub(crate) fn borrowed_fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+
     pub(crate) fn from_owned_fd(fd: OwnedFd) -> Result<Self, FsError> {
         let stat = FileSnapshot::from_stat(fs::fstat(&fd)?);
         if !stat.is_directory() {
@@ -156,6 +161,30 @@ impl HeldDir {
         Ok(Self { fd })
     }
 
+    // S2L invokes its legacy comparison calls after open/fstat, with RAII
+    // still owning the descriptor if that virtual call raises an exception.
+    pub(crate) fn open_dir_before_match<E: From<FsError>>(
+        &self,
+        name: &OsStr,
+        expected: &FileSnapshot,
+        check: impl FnOnce() -> Result<(), E>,
+    ) -> Result<Self, E> {
+        component(name).map_err(E::from)?;
+        let fd = fs::openat(&self.fd, name, flags() | OFlags::DIRECTORY, Mode::empty())
+            .map_err(FsError::from)
+            .map_err(E::from)?;
+        let opened =
+            FileSnapshot::from_stat(fs::fstat(&fd).map_err(FsError::from).map_err(E::from)?);
+        check()?;
+        if !expected.is_directory() || !opened.is_directory() {
+            return Err(E::from(FsError::NotDirectory));
+        }
+        if !expected.matches(&opened, SnapshotMatch::Full) {
+            return Err(E::from(FsError::Changed));
+        }
+        Ok(Self { fd })
+    }
+
     pub fn verify_entry(
         &self,
         name: &OsStr,
@@ -179,6 +208,10 @@ pub struct HeldFile {
 }
 
 impl HeldFile {
+    pub(crate) fn borrowed_fd(&self) -> BorrowedFd<'_> {
+        self.fd.as_fd()
+    }
+
     pub(crate) fn raw_fd(&self) -> std::os::fd::RawFd {
         std::os::fd::AsRawFd::as_raw_fd(&self.fd)
     }
@@ -196,6 +229,32 @@ impl HeldFile {
         }
         if !expected.matches(&opened, SnapshotMatch::Full) {
             return Err(FsError::Changed);
+        }
+        Ok(Self {
+            fd,
+            opened,
+            started: false,
+        })
+    }
+
+    pub(crate) fn open_before_match<E: From<FsError>>(
+        parent: &HeldDir,
+        name: &OsStr,
+        expected: &FileSnapshot,
+        check: impl FnOnce() -> Result<(), E>,
+    ) -> Result<Self, E> {
+        component(name).map_err(E::from)?;
+        let fd = fs::openat(&parent.fd, name, flags(), Mode::empty())
+            .map_err(FsError::from)
+            .map_err(E::from)?;
+        let opened =
+            FileSnapshot::from_stat(fs::fstat(&fd).map_err(FsError::from).map_err(E::from)?);
+        check()?;
+        if !opened.is_regular() {
+            return Err(E::from(FsError::NotRegular));
+        }
+        if !expected.matches(&opened, SnapshotMatch::Full) {
+            return Err(E::from(FsError::Changed));
         }
         Ok(Self {
             fd,

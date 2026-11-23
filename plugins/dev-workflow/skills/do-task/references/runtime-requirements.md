@@ -170,6 +170,13 @@ PYTHON
   `prepare` または `run` で後から必要環境の喪失が判明しても、その読取りは停止して委託元へ報告する。既に動く担当や子孫の自動停止を保証しない。
   profile が無い場合・一部 skill だけの導入でも同じ条件とする。非 Git は既存の判定に従い、この要件を適用しない。引数と停止後の扱いは [implementation-git.md](implementation-git.md) を読む。
 
+- 実装の担当の保存の [implementer-choice.py](../scripts/implementer-choice.py)([external-runners.md](external-runners.md) §12-10)は **Python 3.10 以上・POSIX** が必要。標準ライブラリだけを使う。
+  - 置き場を `/` から symlink をたどらずに開くため、`os.open` の `O_NOFOLLOW`・`O_DIRECTORY` と `dir_fd`、`os.stat` の `dir_fd` と `follow_symlinks=False` を使う。
+  - 外部 CLI のリポジトリの設定のフォルダを 1 項目ずつ歩くため、`os.scandir` に開いたディレクトリの fd を渡す(`os.scandir in os.supports_fd` が真であること)。
+  - 長い形の `status`・4 つの値つきの `record`・`secret-set` は git を使う(最低の版は上の表。`rev-parse --path-format=absolute` を使う)。
+  - `secret-set` は、さらに隣の `secret-profiles.py`(profile があるときは PyYAML)と、`diff-snapshot.sh`(bash 4.0 以上)と、GNU `grep`(`-z`)を使う。
+  - 満たさないときは、0 以外の終了コード(多くは 20)か、`secret-set` の失敗(機密の集合が `unknown`)になる。どちらのときも、外部の実装担当を使うかを質問で聞く(聞かずに外部で実装しない)。
+
 - `diff-snapshot.sh` と `implement-guard.sh` は連想配列を使うため **bash 4.0 以上**が必要。`--help` と `--precheck` にも同じ要件がかかる。`command -v bash` と `bash --version` で、PATH から選ぶ実体と版を確認する。ログインシェルの版だけでは判断しない。
 - 本体の必要道具は GNU coreutils・GNU findutils・GNU grep。実行名 `realpath`・`readlink`・`sha256sum`・`sort`・`grep`・`find` などで PATH から選ぶ。特に `grep -z`・`sort -z` と、gitlink 検査の `find -mindepth/-maxdepth/-quit` が必要。導入しても別名や PATH の後ろにあれば選ばれないため、`command -v <実行名>` と `<実行名> --version` を記録する。
   - `implement-guard.sh take` は、記録の外に所属の印を書くのに `link`(GNU coreutils・macOS の `/bin/link`)と `od` を PATH から選ぶ。無ければ印を書かず、`NOTE: 所属の印を書けない:` を出して `OWNER_MARK=no` で続ける。
@@ -336,11 +343,11 @@ Python 3.14.4、Git 2.54.0 / Apple Git-157、Bash 5.3.20、GNU coreutils 9.12・
   - 必要環境: Python 3.10 以上・Git・`PATH` で選ばれる `bash` が 4.0 以上(実 CLI がまず `diff-snapshot.sh --precheck` を起動する。Mac 標準の `/bin/bash` 3.2 では止まる)。`command -v bash` と `bash --version` を記録する。
     - `TMPDIR` の指定は要らない。
     - GNU 系ツールは要らない。2026-10-31 の実行は、`PATH` で選ばれる `grep`・`sed`・`sort`・`find`・`realpath` が BSD 版のままで成功した。
-  - 期待の件数(2 本の合計 128 件。`test_review_guard.py` 100 件・`test_check_process.py` 28 件):
-    - macOS: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 11 件・`CheckLifecycleTest` 2 件)。成功 115 件。
+  - 期待の件数(2 本の合計 146 件。`test_review_guard.py` 118 件・`test_check_process.py` 28 件):
+    - macOS: `Ran 146 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `Linux 専用: `(`CheckProcessLinuxTest` 11 件・`CheckLifecycleTest` 2 件)。成功 133 件。
       - `skipUnless` の付け方から数えた値で、Mac では未確認。Mac で回したら実数に直す。
-    - Linux: `Ran 128 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 115 件。
-      - 2026-11-06 に Linux(Git 2.34.1・Python 3.10.12)で回して確かめた。
+    - Linux: `Ran 146 tests`、最後の行が `OK (skipped=13)`。飛ばし 13 件はすべて `macOS 専用: `(`CheckProcessDarwinTest` 9 件・`CheckLifecycleTest` 3 件・`CliProcessLifecycleTest` 1 件)。成功 133 件。
+      - 2026-11-19 に Linux(Git 2.56.1・Python 3.10.12)で回して確かめた。
   - 所要時間の目安: 4〜5 分(2026-10-31、macOS 26.6.2 / arm64 の 4 回の実行で 250〜276 秒)。
   - 数え方:
     - `grep -c "skipped 'Linux 専用: " <scratch>/run.log` と `grep -c "skipped 'macOS 専用: " <scratch>/run.log` で、OS ごとの飛ばしを数える。

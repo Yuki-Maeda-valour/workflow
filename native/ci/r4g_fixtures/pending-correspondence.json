@@ -1,0 +1,335 @@
+{
+ "file": "test_pending_implementation.py",
+ "note": "既存47件の対応表。cli-pair 24・injection-pair 14・rust-unit 4・legacy-only 5。check_r4g.py が件数と名前を固定する。",
+ "entries": [
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_absent_empty_roots_and_no_creation"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_acknowledgement_changes_cwd_inode_name_root_and_count"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_all_roots_home_symlink_and_same_inode_alias"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_both_acknowledgements_are_usage_error"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_direct_names_kinds_and_non_utf8_canonical_output"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_entry_limit_and_candidate_limit_boundaries"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_handwork_changes_times_same_identity_and_new_ack"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_identity_ack_changes_with_cwd_name_kind_count_and_root"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_identity_ack_ignores_time_size_and_mode_changes"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_identity_ack_rejects_candidate_recreated_under_same_name"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_internal_contents_and_fixture_metadata_unchanged"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_root_file_broken_link_and_loop_stop"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_unset_relative_and_no_roots"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingCLITests",
+   "name": "test_usage_unknown_operations_ack_format_and_help"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_current_git_place_is_decided_without_git"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_mark_kinds_size_and_format_stop_with_reason"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_numbers_of_record_top_common_and_taskdir_must_match"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_overlap_alone_stops_even_when_common_differs"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_results_digests_and_identity_rules"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_submodule_records_stop_both_directions"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_take_in_outside_worktree_overlaps_through_common_only"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_take_mark_lets_other_projects_continue"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_take_mark_still_stops_overlapping_or_unknown_work"
+  },
+  {
+   "kind": "cli-pair",
+   "target": "pending-existing",
+   "reason": "既存のクラスを継承し、CLIの起動だけを旧版とRustの組へ置き換えて流す(入力の無変更も前後で確かめる)",
+   "class": "PendingOwnerTests",
+   "name": "test_unreadable_ancestor_is_overlap_unknown"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_candidate_disappears_or_metadata_changes",
+   "reason": "候補の名前の stat を ENOENT にする・2回目から番号を変える",
+   "class": "PendingBoundaryTests",
+   "name": "test_candidate_disappears_or_metadata_changes"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_candidate_internals_never_opened_or_scanned",
+   "reason": "呼出しの記録で、候補の名前を含む open が無いこと・書込みの旗が無いこと・scandir が置き場の3回だけであることを両方で確かめる(strace は pending-observation)",
+   "class": "PendingBoundaryTests",
+   "name": "test_candidate_internals_never_opened_or_scanned"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_candidate_owner_change_during_scan_stops",
+   "reason": "候補の2回目からの stat の持ち主を変える",
+   "class": "PendingBoundaryTests",
+   "name": "test_candidate_owner_change_during_scan_stops"
+  },
+  {
+   "kind": "rust-unit",
+   "target": "decisions_match_the_old_function_without_io",
+   "reason": "判定の関数の直接の検査。同じ表の decisions で比べ、ファイルと時計に触れない System で呼ぶ",
+   "class": "PendingBoundaryTests",
+   "name": "test_decide_outcome_is_pure_and_returns_exit_outcome_and_notes"
+  },
+  {
+   "kind": "rust-unit",
+   "target": "digests_match_the_old_functions",
+   "reason": "同じ表の extra-keys・reason-overlap・other-project のケースで比べる",
+   "class": "PendingBoundaryTests",
+   "name": "test_digests_ignore_candidate_keys_added_later"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_final_recheck_compares_numbers_kind_and_owner_only",
+   "reason": "候補の stat と置き場の fstat の時刻・大きさ・権限だけを変える",
+   "class": "PendingBoundaryTests",
+   "name": "test_final_recheck_compares_numbers_kind_and_owner_only"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_final_time_check_sits_between_digests_and_decision",
+   "reason": "時計の確認点を数え、最後の確認点だけで上限に達する並びを与える(確認値の後・判定の前)",
+   "class": "PendingBoundaryTests",
+   "name": "test_final_time_check_sits_between_digests_and_decision"
+  },
+  {
+   "kind": "rust-unit",
+   "target": "digests_match_the_old_functions",
+   "reason": "関数の直接の検査。旧版の関数の値を pending-function-cases.json に固定し(check_r4g.py が旧版と照らす)、Rustの同じ関数の値と比べる",
+   "class": "PendingBoundaryTests",
+   "name": "test_fixed_payload_hash_and_excluded_display_values"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_main_outcome_exit_code_and_stderr_are_pinned",
+   "reason": "TEMP_DIRS=() と同じく /tmp・/private/tmp の open を ENOENT にし、a〜h の組で終了値・標準エラーを比べる",
+   "class": "PendingBoundaryTests",
+   "name": "test_main_outcome_exit_code_and_stderr_are_pinned"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_mark_owner_and_changes_while_reading",
+   "reason": "印の stat の持ち主・1回目と2回目の欠落・2回目の番号の変化を与える",
+   "class": "PendingBoundaryTests",
+   "name": "test_mark_owner_and_changes_while_reading"
+  },
+  {
+   "kind": "legacy-only",
+   "target": "-",
+   "reason": "Pythonの版・POSIX・os の機能の有無(supports_*・O_*)による unsupported-python・unsupported-platform・missing-feature は、Rustに同じ条件が無い(設計の比較の前提)",
+   "class": "PendingBoundaryTests",
+   "name": "test_missing_capabilities_stop_before_scan"
+  },
+  {
+   "kind": "legacy-only",
+   "target": "-",
+   "reason": "Pythonの stat_result の欄の欠落と time.monotonic の欠落は、Rustに同じ条件が無い(設計の比較の前提)",
+   "class": "PendingBoundaryTests",
+   "name": "test_missing_stat_fields_and_clock"
+  },
+  {
+   "kind": "legacy-only",
+   "target": "-",
+   "reason": "旧版のソースのASTの検査。Rustでは pending-observation の静的検査(子の起動と書込みの道具の参照が無いこと)が同じ考え方で当たる",
+   "class": "PendingBoundaryTests",
+   "name": "test_python310_syntax_and_no_process_or_write_entry"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_root_alias_is_enumerated_once",
+   "reason": "呼出しの記録で scandir が2回であることを両方で確かめる",
+   "class": "PendingBoundaryTests",
+   "name": "test_root_alias_is_enumerated_once"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_root_changes_while_fd_is_held",
+   "reason": "置き場の fstat の2回目から番号を変える",
+   "class": "PendingBoundaryTests",
+   "name": "test_root_changes_while_fd_is_held"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_runtime_unavailable_denied_and_unknown_exception",
+   "reason": "scandir の失敗(EACCES・EPERM・ENOSYS)と想定外の例外(RuntimeError)を同じに与える。旧版のエラー番号の無い PermissionError・NotImplementedError はRustに無いので、同じ種類のエラー番号で与える",
+   "class": "PendingBoundaryTests",
+   "name": "test_runtime_unavailable_denied_and_unknown_exception"
+  },
+  {
+   "kind": "rust-unit",
+   "target": "kinds_match_the_old_function",
+   "reason": "候補の種類の関数の直接の検査。同じ表の kinds で比べる",
+   "class": "PendingBoundaryTests",
+   "name": "test_special_file_classification_without_creating_devices"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_time_limit_uses_monotonic",
+   "reason": "時計の値の並び [0.0, 6.0] を旧版の包みと --r4g-clock へ同じに与える",
+   "class": "PendingBoundaryTests",
+   "name": "test_time_limit_uses_monotonic"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_unexpected_failure_in_decision_becomes_internal",
+   "reason": "判定の OVERLAP_REASONS の評価で RuntimeError にする(旧版は any の最初の要素で、Rust は検査専用の注入)",
+   "class": "PendingBoundaryTests",
+   "name": "test_unexpected_failure_in_decision_becomes_internal"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_unsupported_features_in_each_new_opener_stop_with_11",
+   "reason": "印・top・/tmp・.. の open へ同じ故障を、確認値の3通りで与える",
+   "class": "PendingBoundaryTests",
+   "name": "test_unsupported_features_in_each_new_opener_stop_with_11"
+  },
+  {
+   "kind": "injection-pair",
+   "target": "test_unsupported_features_in_mark_and_git_readers_stop_with_11",
+   "reason": "read・印の stat・.git の stat・.. の open へ ENOSYS・ENOTSUP・EOPNOTSUPP を、確認値の3通りで与える(NotImplementedError は ENOSYS で与える)",
+   "class": "PendingBoundaryTests",
+   "name": "test_unsupported_features_in_mark_and_git_readers_stop_with_11"
+  },
+  {
+   "kind": "legacy-only",
+   "target": "-",
+   "reason": "文書(SKILL.md など)の検査。旧版の配布物だけに当たる",
+   "class": "PendingDocumentContractTests",
+   "name": "test_entry_before_target_body_git_and_preserved_implementation_paths"
+  },
+  {
+   "kind": "legacy-only",
+   "target": "-",
+   "reason": "文書の検査。旧版の配布物だけに当たる",
+   "class": "PendingDocumentContractTests",
+   "name": "test_full_human_confirmation_failure_and_handwork_contract"
+  }
+ ]
+}

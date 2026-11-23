@@ -99,6 +99,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
    - 候補モードでは、統合は指摘キーの単位(同じ観点群・同じ識別子)の中だけで行う(checks.md の「候補モードの識別子と観点群」)
 4. 結果を `.claude/reviews/data-audit-iter{N}.md` に保存する(除去した誤検出と理由を含む)。
    - 書く直前に `bash {do-task の}scripts/reviews-dir.sh ensure --root <管理ルート>` を実行し、終了コード 0 以外なら保存せずに停止して報告する(無人では失敗扱い。do-task の scripts に届かない構成〈skill の単体コピー〉では、検査を省いたことを報告に書く)
+5. Phase 3 の裏取りを終え、追加調査を同じ `name` へ頼まないと決めたら、起動した `scan-*` を閉じる(無人では閉じない。解決表の軸 11)。
 
 ## Phase 4: 報告と提案(提案 → 選択)
 
@@ -144,6 +145,7 @@ argument-hint: "[--layer=frontend|backend|database] [--quick] [--candidates [--m
 ## 最終ゲート(出力前セルフチェック)
 
 - [ ] コード・ドキュメント・設定を変更していない(書き込みは `.claude/reviews/` のみ)
+- [ ] 役目を終えた委託先を閉じた(人の答えを待つ間と無人では残した。解決表の軸 11)
 - [ ] 全指摘に path:行 と実コードの裏取りがある(伝聞・推測の指摘が無い)
 - [ ] 機密の値・認証情報を出力していない(フィールド名と場所のみ)
 - [ ] 誤検出の除去理由を記録した
