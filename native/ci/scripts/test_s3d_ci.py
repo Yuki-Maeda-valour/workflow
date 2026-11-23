@@ -272,6 +272,13 @@ class S3DCiTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             s3d_ci.check_report(self.report(not_run=item), 'Linux')
 
+    def test_mac_may_record_missing_dev_full_as_not_run_but_linux_may_not(self):
+        item = [{'id': 'output-print-full-default-absolute', 'reason': 'no-dev-full'}]
+        self.assertIn('no-dev-full', s3d_ci.MAC_NOT_RUN)
+        self.assertEqual({'no-dev-full': 1}, s3d_ci.check_report(self.report(not_run=item), 'Darwin')['not_run'])
+        with self.assertRaises(RuntimeError):
+            s3d_ci.check_report(self.report(not_run=item), 'Linux')
+
     def test_japanese_missing_uses_the_same_condition_as_the_comparison(self):
         with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\nja_JP.utf8\n')), \
                 mock.patch.object(s3d_ci.Path, 'is_file', return_value=True):
@@ -342,6 +349,20 @@ class S3DCiTests(unittest.TestCase):
                 output.write_text(json.dumps(self.report(tool_versions_base=False)))
             with self.assertRaisesRegex(RuntimeError, '基準の版'):
                 s3d_ci.probe(self.root / 'bin/binary', self.root / 'typed.json', self.root, root=self.root, run=stale)
+        # 機種ごとの上限: Linuxは60分、Macは120分(Mac x86_64の実測約60分の2倍)。未知の機種は拒否する。
+        self.assertEqual((3600, 7200), (s3d_ci.comparison_limit('Linux'), s3d_ci.comparison_limit('Darwin')))
+        with self.assertRaises(KeyError):
+            s3d_ci.comparison_limit('Windows')
+        self.assertEqual({'s3d': 270, 's3d-universal': 150}, check_workflow.S3D_TIMEOUTS)
+        # probeは、機種の上限で外部の比較を流し、上限と残りを記録する。
+        for system, limit in (('Linux', 3600), ('Darwin', 7200)):
+            seen = []
+            def run(argv, *, env, timeout, seen=seen):
+                seen.append(timeout)
+                output.write_text(json.dumps(self.report()) if system == 'Linux' else json.dumps(self.report(tool_versions_base=True)))
+            with mock.patch.object(s3d_ci, 'environment', return_value={}), mock.patch.object(s3d_ci.platform, 'system', return_value=system):
+                s3d_ci.probe(self.root / 'bin/binary', self.root / 'typed.json', self.root, root=self.root, run=run)
+            self.assertEqual([limit], seen)
         # 1回の上限は実測(いちばん遅い値)の2倍より長い。
         self.assertGreaterEqual(s3d_ci.COMPARISON_LIMIT_SECONDS, 2 * s3d_ci.MEASURED_SECONDS)
         # 外部の比較は上限つきで流し、時間切れは失敗にする。
@@ -425,7 +446,7 @@ class S3DWorkflowTests(unittest.TestCase):
         for job, count in s3d_ci.JOB_COMPARISONS.items():
             minutes = self.document['jobs'][job]['timeout-minutes']
             self.assertEqual(minutes, check_workflow.S3D_TIMEOUTS[job])
-            self.assertGreaterEqual(minutes * 60, count * s3d_ci.COMPARISON_LIMIT_SECONDS + s3d_ci.JOB_OVERHEAD_SECONDS)
+            self.assertGreaterEqual(minutes * 60, count * max(s3d_ci.COMPARISON_LIMITS.values()) + s3d_ci.JOB_OVERHEAD_SECONDS)
             self.assertLessEqual(minutes, 360)
 
 

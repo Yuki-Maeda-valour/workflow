@@ -203,18 +203,31 @@ def version_masked(old, new):
     return True
 
 
-def check_versions(manifest, scopes):
-    """走らせた群の観測が、manifestの版に依る欄と一致することを確かめる。"""
-    problems = []
+def check_versions(manifest, scopes, not_run=()):
+    """走らせた群の観測が、manifestの版に依る欄と一致することを確かめる。
+
+    `not_run`は、未実施として記録したケースの(群, ID)の組(理由は問わない)。旧版を流していないので、観測が無いのは抜けではない。
+    その群のそのケースだけを、期待と観測の両方から外し、外した`群/名前`の一覧を返す。同じ名前が別の群にあっても、その群が
+    流れていれば外さない。群の分からない記録は組にならないので、外さない(厳しい側)。流したケースは今までどおり厳しく比べる
+    (印の抜けも誤りも落とす)。基準の機械には未実施が無いので変わらない。
+    """
+    problems, excluded = [], set()
+    skipped = set(not_run)
     for scope in scopes:
         expected = {name: set(kinds) for name, kinds in manifest.get(scope, {}).items()}
-        observed = VERSION_HITS.get(scope, {})
+        observed = dict(VERSION_HITS.get(scope, {}))
+        for name in [name for name in set(expected) | set(observed) if (scope, name.split(':')[0]) in skipped]:
+            if name in expected:
+                excluded.add(f'{scope}/{name}')
+            expected.pop(name, None)
+            observed.pop(name, None)
         for name in sorted(set(expected) | set(observed)):
             if expected.get(name, set()) != observed.get(name, set()):
                 problems.append(f'{scope}/{name}: manifest={sorted(expected.get(name, ()))} '
                                 f'observed={sorted(observed.get(name, ()))}')
     if problems:
         raise AssertionError('版に依る欄の印の抜けか誤りです: ' + '; '.join(problems))
+    return sorted(excluded)
 
 
 def run(argv, *, cwd, env, report=None, patch=None, timeout=60, pass_fds=()):

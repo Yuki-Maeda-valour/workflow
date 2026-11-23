@@ -314,7 +314,7 @@
         }
       },
       "runs-on": "${{ matrix.runner }}",
-      "timeout-minutes": 150,
+      "timeout-minutes": 270,
       "steps": [
         {
           "name": "ソース SHA を取得",
@@ -373,7 +373,7 @@
         }
       },
       "runs-on": "${{ matrix.runner }}",
-      "timeout-minutes": 90,
+      "timeout-minutes": 150,
       "steps": [
         {
           "name": "ソース SHA を取得",

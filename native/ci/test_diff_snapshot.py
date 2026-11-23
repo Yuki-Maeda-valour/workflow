@@ -1260,6 +1260,43 @@ class StageC5(unittest.TestCase):
         self.assertEqual({'japanese-x':'ja_JP.UTF-8のlocaleがありません'},value['unavailable'])
         self.assertEqual(['plain-z'],value['done'])
 
+    def test_check_versions_excludes_only_cases_recorded_as_not_run(self):
+        from diff_snapshot_fixtures import compare
+        manifest={'fd':{'ran':['bash-message'],'skipped':['bash-message'],'skipped:SHLVL':['SHLVL']},'partial':{'p-skip':['bash-startup-warning']}}
+        saved=dict(compare.VERSION_HITS)
+        try:
+            # 流したケースが観測できていて、未実施のケースは旧版を流していない(観測なし)なら通り、外した名前を返す。
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS['fd']={'ran':{'bash-message'}}
+            self.assertEqual(['fd/skipped','fd/skipped:SHLVL','partial/p-skip'],
+                             compare.check_versions(manifest,['fd','partial'],not_run={('fd','skipped'),('partial','p-skip')}))
+            # 未実施でないケースの抜けは落ちる(理由が何でも、記録がなければ外さない)。
+            with self.assertRaisesRegex(AssertionError,'fd/skipped'):
+                compare.check_versions(manifest,['fd'],not_run={('fd','other')})
+            # 流したケースの抜け・誤り・予定外の観測は、未実施があっても落ちる。
+            for hits in ({'fd':{}},{'fd':{'ran':{'SHLVL'}}},{'fd':{'ran':{'bash-message'},'extra':{'SHLVL'}}}):
+                compare.VERSION_HITS.clear(); compare.VERSION_HITS.update(hits)
+                with self.assertRaisesRegex(AssertionError,'印の抜けか誤り'):
+                    compare.check_versions(manifest,['fd'],not_run={('fd','skipped')})
+            # 未実施のケースが観測されても、期待と観測の両方から外す(流していない扱い)。
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS['fd']={'ran':{'bash-message'},'skipped':{'SHLVL'}}
+            compare.check_versions(manifest,['fd'],not_run={('fd','skipped')})
+            # 同じ名前が2つの群にあるとき、一方の群だけ未実施なら、流れたもう一方の群の抜けは落ちる。群の分からない記録は外さない。
+            two={'path-reduced':{'same':['bash-message']},'partial':{'same':['bash-message']}}
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS['path-reduced']={'same':{'bash-message'}}
+            self.assertEqual(['partial/same'],compare.check_versions(two,['path-reduced','partial'],not_run={('partial','same')}))
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS['partial']={'same':{'bash-message'}}
+            with self.assertRaisesRegex(AssertionError,'path-reduced/same'):
+                compare.check_versions(two,['path-reduced','partial'],not_run={('partial','same')})
+            compare.VERSION_HITS.clear()
+            with self.assertRaisesRegex(AssertionError,'partial/same'):
+                compare.check_versions(two,['path-reduced','partial'],not_run={'same'})
+            # 基準の機械(未実施なし)では、今までどおり厳しい。
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS['fd']={'ran':{'bash-message'}}
+            with self.assertRaises(AssertionError):
+                compare.check_versions(manifest,['fd'])
+        finally:
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS.update(saved)
+
     def test_child_environment_mismatch_names_the_side_the_launch_site_and_the_arguments(self):
         from diff_snapshot_fixtures import launch_sites, review_cases
         sites = launch_sites.load()

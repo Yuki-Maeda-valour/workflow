@@ -13,8 +13,16 @@ import time
 # 全体の専用比較1回の時間。2026-11-12の実測は作業機974秒・基準の版の容器1085秒、
 # ほかの担当の検査と並んだ容器で1415秒(いちばん遅い値を使う)。
 MEASURED_SECONDS = 1415
-# 1回の比較の上限。実測の2倍より長くし、遅い機械(Mac Intel)でも内側の上限で止まるようにする。
-COMPARISON_LIMIT_SECONDS = 3600
+# 1回の比較の上限(機種ごと)。全部の群が流れるようになった実測(2026-11-23。比較1回): Linux x86_64 約17分・
+# Linux arm64 約21分・Mac arm64 約34〜40分・Mac x86_64 約59分(上限60分で時間切れ)。
+# Linuxは実測の2倍より長い60分のまま、遅いMacは実測(約60分)の2倍の120分にして、内側の上限で止まるようにする。
+COMPARISON_LIMITS = {'Linux': 3600, 'Darwin': 7200}
+COMPARISON_LIMIT_SECONDS = COMPARISON_LIMITS['Linux']
+
+
+def comparison_limit(system=None):
+    return COMPARISON_LIMITS[system or platform.system()]
+
 # 比較はbuildとverify-universalの時間の枠に入らないので、別のジョブで流す(2026-11-12 12:59の決定)。
 # ジョブごとの比較の回数: s3dは2回のビルドの各1回、s3d-universalは署名後の1回。
 JOB_COMPARISONS = {'s3d': 2, 's3d-universal': 1}
@@ -26,7 +34,7 @@ VERSION_TOOLS = ('bash', 'coreutils', 'findutils', 'sed', 'grep', 'glibc')
 # Macで作れない欄: 基準の版に依る欄・straceが要る欄・/procが要る欄(別のプロセスの/proc/PID/mem)・
 # 大小文字を区別しない置き場(Macの既定のAPFS)で入力を作れない旧自己テストの観点と、日本語のlocaleか
 # git・grepの翻訳ファイルが無く作れないケース(揃えても版に依る欄になるので、Macでは入れずに未実施とする)。
-MAC_NOT_RUN = {'version', 'strace', 'proc', 'case-insensitive-store', 'japanese-environment'}
+MAC_NOT_RUN = {'version', 'strace', 'proc', 'case-insensitive-store', 'japanese-environment', 'no-dev-full'}
 
 
 # 基準の版の容器(native/ci/README.mdの手順)と同じ組。fixed_extra.japanese_readyと同じ条件を満たす。
@@ -150,12 +158,13 @@ def probe(binary, report, work, *, root, run=run_limited):
     started = time.monotonic()
     # The full legacy selftest and every fixed group are mandatory here.
     output.unlink(missing_ok=True)
+    limit = comparison_limit()
     run([sys.executable, '-B', Path(root) / 'native/ci/check_diff_snapshot.py', '--report', output], env=env,
-        timeout=COMPARISON_LIMIT_SECONDS)
+        timeout=limit)
     elapsed = time.monotonic() - started
     summary = check_report(json.loads(output.read_text()), platform.system())
-    print(json.dumps(dict(summary, s3d_comparison_seconds=elapsed, limit_seconds=COMPARISON_LIMIT_SECONDS,
-                          margin_seconds=COMPARISON_LIMIT_SECONDS - elapsed, system=platform.system(),
+    print(json.dumps(dict(summary, s3d_comparison_seconds=elapsed, limit_seconds=limit,
+                          margin_seconds=limit - elapsed, system=platform.system(),
                           machine=platform.machine(), binary=str(binary)), ensure_ascii=False), flush=True)
 
 

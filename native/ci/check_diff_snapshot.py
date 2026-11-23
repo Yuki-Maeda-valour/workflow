@@ -664,7 +664,7 @@ def main(argv=None):
             with attempt('selftest'):
                 compare_module.CURRENT_SCOPE[0] = 'selftest'
                 result['legacy'] = selftest(binary)
-                result['not_run'] += SELFTEST_NOT_RUN
+                result['not_run'] += [dict(item, scope='selftest') for item in SELFTEST_NOT_RUN]
         if args.only in (None, 'read-audit'):
             with attempt('read-audit'):
                 compare_module.CURRENT_SCOPE[0] = 'read-audit'
@@ -690,11 +690,14 @@ def main(argv=None):
             with attempt('output-faults'):
                 compare_module.CURRENT_SCOPE[0] = 'output-faults'
                 result['output_faults'] = output_faults.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
+            # /dev/fullが無い機械(Mac)で作れない故障は、未実施として記録する(成功に数えない。Linuxでは失敗にする)。
+            result['not_run'] += [{'id': item['id'], 'reason': 'no-dev-full', 'scope': 'output-faults'} for item in result['output_faults']
+                                  if item.get('status') == 'input-unavailable']
         if args.only in (None, 'fd'):
             with attempt('fd'):
                 compare_module.CURRENT_SCOPE[0] = 'fd'
                 result['fd'] = fd_cases.run_cases(binary, fixture_type=Fixture, legacy=LEGACY)
-                result['not_run'] += compare_module.CASE_STORE_NOT_RUN
+                result['not_run'] += [dict(item, scope='fd') for item in compare_module.CASE_STORE_NOT_RUN]
                 compare_module.CASE_STORE_NOT_RUN.clear()
         if args.only in (None,'raw-env'):
             with attempt('raw-env'):
@@ -718,7 +721,7 @@ def main(argv=None):
                     exact_ids([case['id'] for case in data['partial_outputs']],[item['id'] for item in result['partial_outputs']])
                 except compare_module.NotRun as error:
                     exact_ids([case['id'] for case in data['partial_outputs']], error.ids)
-                    result['not_run'] += [{'id': case_id, 'reason': error.reason} for case_id in error.ids]
+                    result['not_run'] += [{'id': case_id, 'reason': error.reason, 'scope': 'partial'} for case_id in error.ids]
         if args.only in (None, 'fixed-extra'):
             with attempt('fixed-extra'):
                 if failed_scopes & FIXED_EXTRA_PREREQUISITES:
@@ -733,17 +736,17 @@ def main(argv=None):
                 if darwin:
                     # Macで作れない(straceが無い)書込みの故障は、未実施として記録する(成功に数えない)。
                     moved = [case_id for case_id in result['fixed_extra']['pending'] if case_id.startswith('rust-file-write-')]
-                    result['not_run'] += [{'id': case_id, 'reason': 'strace'} for case_id in moved]
+                    result['not_run'] += [{'id': case_id, 'reason': 'strace', 'scope': 'fixed-extra'} for case_id in moved]
                     # 別のプロセスの/proc/PID/memで開けないファイルを作る2件は、Linuxだけで作れる(型検査は全機種で流す)。
                     proc = [case_id for case_id in result['fixed_extra']['pending']
                             if case_id in {'pr2-' + kind for kind in fixed_extra.prereview2.PROC_KINDS}]
-                    result['not_run'] += [{'id': case_id, 'reason': 'proc'} for case_id in proc]
+                    result['not_run'] += [{'id': case_id, 'reason': 'proc', 'scope': 'fixed-extra'} for case_id in proc]
                     moved += proc
                     # 日本語のlocaleかgit・grepの翻訳ファイルが無いケース(Macの/usr/share/localeには無い)。基準の版を用意できない
                     # Macでは、揃えても版に依る欄になるので、前提を入れず、理由の分かる未実施として記録する(Linuxは失敗のまま)。
                     unavailable = result['fixed_extra'].get('unavailable', {})
                     japanese = [case_id for case_id in result['fixed_extra']['pending'] if case_id in unavailable and case_id.startswith('japanese-')]
-                    result['not_run'] += [{'id': case_id, 'reason': 'japanese-environment'} for case_id in japanese]
+                    result['not_run'] += [{'id': case_id, 'reason': 'japanese-environment', 'scope': 'fixed-extra'} for case_id in japanese]
                     moved += japanese
                     result['fixed_extra']['pending'] = [i for i in result['fixed_extra']['pending'] if i not in moved]
                 if args.only is None and result['fixed_extra']['pending']:
@@ -762,16 +765,19 @@ def main(argv=None):
         with attempt('input-unchanged'):
             unchanged(before, file_state(binary))
         if args.only in (None, 'path-reduced') and 'path_reduced' in result:
-            result['not_run'] += [{'id': case_id, 'reason': 'strace'} for case_id in result['path_reduced']['not_run']]
+            result['not_run'] += [{'id': case_id, 'reason': 'strace', 'scope': 'path-reduced'} for case_id in result['path_reduced']['not_run']]
         # 版に依る欄: 走らせた群の観測が、manifestの欄の一覧と一致すること(印の抜けと誤りを失敗にする)。
         scopes = (SCOPES + ['full']) if args.only is None else [args.only]
         # 失敗した群・流さなかった群の観測は、印の抜けとして数えない。
         scopes = [scope for scope in scopes if scope not in failed_scopes and not (scope == 'full' and failures)]
         try:
-            compare_module.check_versions(data['version_fields'], scopes)
+            excluded = compare_module.check_versions(data['version_fields'], scopes,
+                                                     not_run={(item['scope'], item['id']) for item in result['not_run'] if 'scope' in item})
             version_error = None
         except AssertionError as error:
             version_error = str(error)
+            excluded = []
+        result['version_fields_not_run'] = excluded
         hits = compare_module.VERSION_HITS
         result['version_fields'] = {scope: {name: sorted(kinds) for name, kinds in sorted(hits[scope].items())}
                                     for scope in sorted(hits)}
