@@ -1,0 +1,827 @@
+{
+ "schema": 1,
+ "decisions": [
+  "2026-11-11 22:31(BASH_ENV・BASH_FUNC_<名>%%・SHELLOPTS・BASHOPTS・POSIXLY_CORRECT の効果を再現しない)",
+  "2026-11-12 09:58 追加の決定 3(bash が環境から読み込んでスクリプトの動きを変えるほかの変数も同じ扱い。一覧は variables.c の初期化と sv_* から作り、比較器に固定する)"
+ ],
+ "rule": "一覧(behavior)は、受け継いだ値で bash 自身の動きが変わる変数。値そのものがスクリプトの読む値や子の環境の値になるだけの変数と、起動時の警告と、ロケールは、kept に理由を書いて外す。",
+ "source": {
+  "bash": "5.2.21",
+  "baseline": "s3d-ubuntu2404:local の bash(dpkg 5.2.21-2ubuntu4・BASH_VERSION 5.2.21(1)-release。2026-11-12 に容器で確認)",
+  "tarball": {
+   "url": "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz",
+   "sha256": "a139c166df7ff4471c5e0733051642ee5556c1cc8a4a78f145583c5c81ab32fb"
+  },
+  "signature": {
+   "url": "https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz.sig",
+   "sha256": "8fc93220776ef7ef0c9efaee0250b8e3085b2c95b1a5de2179c19f57710a0d9b",
+   "key": "7C0135FB088AAF6C66C650B9BB5869F064EA74AB",
+   "note": "本体と 21 の修正の .sig を、GNU の鍵束(gnu-keyring.gpg)で確かめた(すべて VALIDSIG)。"
+  },
+  "patches": [
+   {
+    "name": "bash52-001",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-001",
+    "sha256": "f42f2fee923bc2209f406a1892772121c467f44533bedfe00a176139da5d310a"
+   },
+   {
+    "name": "bash52-002",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-002",
+    "sha256": "45cc5e1b876550eee96f95bffb36c41b6cb7c07d33f671db5634405cd00fd7b8"
+   },
+   {
+    "name": "bash52-003",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-003",
+    "sha256": "6a090cdbd334306fceacd0e4a1b9e0b0678efdbbdedbd1f5842035990c8abaff"
+   },
+   {
+    "name": "bash52-004",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-004",
+    "sha256": "38827724bba908cf5721bd8d4e595d80f02c05c35f3dd7dbc4cd3c5678a42512"
+   },
+   {
+    "name": "bash52-005",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-005",
+    "sha256": "ece0eb544368b3b4359fb8464caa9d89c7a6743c8ed070be1c7d599c3675d357"
+   },
+   {
+    "name": "bash52-006",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-006",
+    "sha256": "d1e0566a257d149a0d99d450ce2885123f9995e9c01d0a5ef6df7044a72a468c"
+   },
+   {
+    "name": "bash52-007",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-007",
+    "sha256": "2500a3fc21cb08133f06648a017cebfa27f30ea19c8cbe8dfefdf16227cfd490"
+   },
+   {
+    "name": "bash52-008",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-008",
+    "sha256": "6b4bd92fd0099d1bab436b941875e99e0cb3c320997587182d6267af1844b1e8"
+   },
+   {
+    "name": "bash52-009",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-009",
+    "sha256": "f95a817882eaeb0cb78bce82859a86bbb297a308ced730ebe449cd504211d3cd"
+   },
+   {
+    "name": "bash52-010",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-010",
+    "sha256": "c7705e029f752507310ecd7270aef437e8043a9959e4d0c6065a82517996c1cd"
+   },
+   {
+    "name": "bash52-011",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-011",
+    "sha256": "831b5f25bf3e88625f3ab315043be7498907c551f86041fa3b914123d79eb6f4"
+   },
+   {
+    "name": "bash52-012",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-012",
+    "sha256": "2fb107ce1fb8e93f36997c8b0b2743fc1ca98a454c7cc5a3fcabec533f67d42c"
+   },
+   {
+    "name": "bash52-013",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-013",
+    "sha256": "094b4fd81bc488a26febba5d799689b64d52a5505b63e8ee854f48d356bc7ce6"
+   },
+   {
+    "name": "bash52-014",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-014",
+    "sha256": "3ef9246f2906ef1e487a0a3f4c647ae1c289cbd8459caa7db5ce118ef136e624"
+   },
+   {
+    "name": "bash52-015",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-015",
+    "sha256": "ef73905169db67399a728e238a9413e0d689462cb9b72ab17a05dba51221358a"
+   },
+   {
+    "name": "bash52-016",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-016",
+    "sha256": "155853bc5bd10e40a9bea369fb6f50a203a7d0358e9e32321be0d9fa21585915"
+   },
+   {
+    "name": "bash52-017",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-017",
+    "sha256": "1c48cecbc9b7b4217990580203b7e1de19c4979d0bd2c0e310167df748df2c89"
+   },
+   {
+    "name": "bash52-018",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-018",
+    "sha256": "4641dd49dd923b454dd0a346277907090410f5d60a29a2de3b82c98e49aaaa80"
+   },
+   {
+    "name": "bash52-019",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-019",
+    "sha256": "325c26860ad4bba8558356c4ab914ac57e7b415dac6f5aae86b9b05ccb7ed282"
+   },
+   {
+    "name": "bash52-020",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-020",
+    "sha256": "b6fc252aeb95ce67c9b017d29d81e8a5e285db4bf20d4ec8cdca35892be5c01d"
+   },
+   {
+    "name": "bash52-021",
+    "url": "https://ftp.gnu.org/gnu/bash/bash-5.2-patches/bash52-021",
+    "sha256": "8334b88117ad047598f23581aeb0c66c0248cdd77abc3b4e259133aa307650cd"
+   }
+  ],
+  "ubuntu": {
+   "orig_sha256": "ec21ab4efd6bd7a6e2802fbda622b81bfc43a8095d721234d4bf075797683014",
+   "debian_sha256": "bdb10c18d167dda3b265cb3db75314d524edbf7794fed36f0fb0dcc32f5e6ac9",
+   "note": "Ubuntu の bash_5.2.21.orig.tar.xz の files の 7 つは、GNU の本体に 001〜021 を当てたものと同じ確認値(ほかの差は doc の 9 個が無いことだけ)。debian/patches はこの 7 つのうち config-top.h だけを変える(PATH の既定・SYS_BASHRC など。一覧に関わらない)。"
+  },
+  "how": [
+   "curl -fsSLO https://ftp.gnu.org/gnu/bash/bash-5.2.tar.gz と bash-5.2-patches/bash52-001〜021 を取り、sha256 を patches と比べる",
+   "tar -xzf bash-5.2.tar.gz && cd bash-5.2 && for n in 001 … 021; do patch -p0 < ../bash52-$n; done(patchlevel.h の PATCHLEVEL が 21)",
+   "python3 -B native/ci/diff_snapshot_fixtures/bash_behavior_vars.py --source <bash-5.2 の場所>(files の確認値・entries・分類を照合する)"
+  ],
+  "files": {
+   "variables.c": "5083ec0a16e61ab3995af8b0a9a9e565701f4269503ab9d9f503ebca39e6d49a",
+   "shell.c": "69a6622c9460b228632cf4deb57233e59159f2bac8a600baa3c1f72635fbeff0",
+   "builtins/shopt.def": "c1bb281be9ac815fce0ab20022689d8ca8702e63c0de2cae94ebc9b4e812d91d",
+   "builtins/read.def": "77a8b2850af2b96f6dbfff101f49142b792c716a2228df292c372c15bbca5bb0",
+   "locale.c": "0bc974efdbc3657d84f96c4dae99eee104a34b7630a8049cf2a259052fe83b29",
+   "config-top.h": "29e13852a79fac3d8e0800b8bd16a7ba667f6fbd950b776b3683dbe57ce46f4a",
+   "configure.ac": "9e81caa7903713fce1d357ecce9bc8076a2953ec88befd0ab7fb9680901b98ad"
+  },
+  "functions": [
+   "initialize_shell_variables",
+   "set_pwd",
+   "set_machine_vars",
+   "initialize_shell_level",
+   "adjust_shell_level",
+   "set_ppid",
+   "set_argv0",
+   "set_home_var",
+   "set_shell_var",
+   "get_bash_name",
+   "make_vers_array",
+   "uidset",
+   "initialize_dynamic_variables",
+   "init_seconds_var",
+   "init_funcname_var"
+  ],
+  "helpers": [
+   "assign_bash_argv0",
+   "bind_invalid_envvar",
+   "bind_variable",
+   "create_variable_tables",
+   "find_function",
+   "find_variable",
+   "get_string_value",
+   "init_dynamic_array_var",
+   "init_dynamic_assoc_var",
+   "make_new_array_variable",
+   "set_if_not",
+   "sh_get_home_dir",
+   "unbind_variable_noref"
+  ],
+  "entries": [
+   {"name": "BASHFUNC_PREFIX=BASH_FUNC_", "where": "define", "line": 88, "via": "#define", "guard": ""},
+   {"name": "BASHFUNC_SUFFIX=%%", "where": "define", "line": 90, "via": "#define", "guard": ""},
+   {"name": "BASHARRAY_PREFIX=BASH_ARRAY_", "where": "define", "line": 94, "via": "#define", "guard": "ARRAY_EXPORT"},
+   {"name": "BASHARRAY_SUFFIX=%%", "where": "define", "line": 96, "via": "#define", "guard": "ARRAY_EXPORT"},
+   {"name": "BASHASSOC_PREFIX=BASH_ASSOC_", "where": "define", "line": 99, "via": "#define", "guard": "ARRAY_EXPORT"},
+   {"name": "BASHASSOC_SUFFIX=%%", "where": "define", "line": 101, "via": "#define", "guard": "ARRAY_EXPORT"},
+   {"name": "SHELLOPTS", "where": "initialize_shell_variables", "line": 506, "via": "STREQ", "guard": ""},
+   {"name": "SHELLOPTS", "where": "initialize_shell_variables", "line": 508, "via": "find_variable", "guard": ""},
+   {"name": "_", "where": "initialize_shell_variables", "line": 545, "via": "set_if_not", "guard": ""},
+   {"name": "PATH", "where": "initialize_shell_variables", "line": 552, "via": "set_if_not", "guard": ""},
+   {"name": "TERM", "where": "initialize_shell_variables", "line": 553, "via": "set_if_not", "guard": ""},
+   {"name": "NODE", "where": "initialize_shell_variables", "line": 564, "via": "bind_variable", "guard": "defined (__QNX__)"},
+   {"name": "PS1", "where": "initialize_shell_variables", "line": 574, "via": "set_if_not", "guard": "defined (PROMPT_STRING_DECODE)"},
+   {"name": "PS1", "where": "initialize_shell_variables", "line": 578, "via": "set_if_not", "guard": "!(defined (PROMPT_STRING_DECODE))"},
+   {"name": "PS2", "where": "initialize_shell_variables", "line": 580, "via": "set_if_not", "guard": ""},
+   {"name": "PS4", "where": "initialize_shell_variables", "line": 584, "via": "bind_variable", "guard": ""},
+   {"name": "PS4", "where": "initialize_shell_variables", "line": 586, "via": "set_if_not", "guard": ""},
+   {"name": "IFS", "where": "initialize_shell_variables", "line": 589, "via": "bind_variable", "guard": ""},
+   {"name": "MAILCHECK", "where": "initialize_shell_variables", "line": 601, "via": "set_if_not", "guard": ""},
+   {"name": "OPTIND", "where": "initialize_shell_variables", "line": 613, "via": "bind_variable", "guard": ""},
+   {"name": "OPTERR", "where": "initialize_shell_variables", "line": 616, "via": "bind_variable", "guard": ""},
+   {"name": "BASH", "where": "initialize_shell_variables", "line": 625, "via": "bind_variable", "guard": ""},
+   {"name": "BASH_VERSION", "where": "initialize_shell_variables", "line": 635, "via": "bind_variable", "guard": ""},
+   {"name": "BASH_EXECUTION_STRING", "where": "initialize_shell_variables", "line": 641, "via": "bind_variable", "guard": ""},
+   {"name": "POSIXLY_CORRECT", "where": "initialize_shell_variables", "line": 645, "via": "find_variable", "guard": ""},
+   {"name": "POSIX_PEDANTIC", "where": "initialize_shell_variables", "line": 647, "via": "find_variable", "guard": ""},
+   {"name": "HISTFILE", "where": "initialize_shell_variables", "line": 659, "via": "set_if_not", "guard": "defined (HISTORY)"},
+   {"name": "IGNOREEOF", "where": "initialize_shell_variables", "line": 672, "via": "find_variable", "guard": ""},
+   {"name": "ignoreeof", "where": "initialize_shell_variables", "line": 674, "via": "find_variable", "guard": ""},
+   {"name": "HISTCONTROL", "where": "initialize_shell_variables", "line": 682, "via": "sv_history_control", "guard": "defined (HISTORY)"},
+   {"name": "HISTIGNORE", "where": "initialize_shell_variables", "line": 683, "via": "sv_histignore", "guard": "defined (HISTORY)"},
+   {"name": "HISTTIMEFORMAT", "where": "initialize_shell_variables", "line": 684, "via": "sv_histtimefmt", "guard": "defined (HISTORY)"},
+   {"name": "BASH_LOADABLES_PATH", "where": "initialize_shell_variables", "line": 699, "via": "set_if_not", "guard": ""},
+   {"name": "BASH_XTRACEFD", "where": "initialize_shell_variables", "line": 701, "via": "find_variable", "guard": ""},
+   {"name": "BASH_COMPAT", "where": "initialize_shell_variables", "line": 705, "via": "sv_shcompat", "guard": ""},
+   {"name": "FUNCNEST", "where": "initialize_shell_variables", "line": 708, "via": "sv_funcnest", "guard": ""},
+   {"name": "HOSTTYPE", "where": "set_machine_vars", "line": 725, "via": "set_if_not", "guard": ""},
+   {"name": "OSTYPE", "where": "set_machine_vars", "line": 726, "via": "set_if_not", "guard": ""},
+   {"name": "MACHTYPE", "where": "set_machine_vars", "line": 727, "via": "set_if_not", "guard": ""},
+   {"name": "HOSTNAME", "where": "set_machine_vars", "line": 729, "via": "set_if_not", "guard": ""},
+   {"name": "HOME", "where": "set_home_var", "line": 750, "via": "find_variable", "guard": ""},
+   {"name": "HOME", "where": "set_home_var", "line": 752, "via": "bind_variable", "guard": ""},
+   {"name": "SHELL", "where": "set_shell_var", "line": 765, "via": "find_variable", "guard": ""},
+   {"name": "SHELL", "where": "set_shell_var", "line": 770, "via": "bind_variable", "guard": ""},
+   {"name": "PWD", "where": "get_bash_name", "line": 796, "via": "get_string_value", "guard": ""},
+   {"name": "PWD", "where": "get_bash_name", "line": 821, "via": "get_string_value", "guard": ""},
+   {"name": "SHLVL", "where": "adjust_shell_level", "line": 858, "via": "get_string_value", "guard": ""},
+   {"name": "SHLVL", "where": "adjust_shell_level", "line": 892, "via": "bind_variable", "guard": ""},
+   {"name": "HOME", "where": "set_pwd", "line": 915, "via": "find_variable", "guard": ""},
+   {"name": "PWD", "where": "set_pwd", "line": 918, "via": "find_variable", "guard": ""},
+   {"name": "PWD", "where": "set_pwd", "line": 932, "via": "bind_variable", "guard": ""},
+   {"name": "PWD", "where": "set_pwd", "line": 941, "via": "bind_variable", "guard": ""},
+   {"name": "PWD", "where": "set_pwd", "line": 949, "via": "bind_variable", "guard": ""},
+   {"name": "OLDPWD", "where": "set_pwd", "line": 959, "via": "find_variable", "guard": ""},
+   {"name": "OLDPWD", "where": "set_pwd", "line": 966, "via": "bind_variable", "guard": ""},
+   {"name": "PPID", "where": "set_ppid", "line": 979, "via": "find_variable", "guard": ""},
+   {"name": "PPID", "where": "set_ppid", "line": 982, "via": "bind_variable", "guard": ""},
+   {"name": "UID", "where": "uidset", "line": 993, "via": "find_variable", "guard": ""},
+   {"name": "UID", "where": "uidset", "line": 996, "via": "bind_variable", "guard": ""},
+   {"name": "EUID", "where": "uidset", "line": 1003, "via": "find_variable", "guard": ""},
+   {"name": "EUID", "where": "uidset", "line": 1006, "via": "bind_variable", "guard": ""},
+   {"name": "BASH_VERSINFO", "where": "make_vers_array", "line": 1019, "via": "unbind_variable_noref", "guard": "defined (ARRAY_VARS)"},
+   {"name": "BASH_VERSINFO", "where": "make_vers_array", "line": 1021, "via": "make_new_array_variable", "guard": "defined (ARRAY_VARS)"},
+   {"name": "SECONDS", "where": "init_seconds_var", "line": 1385, "via": "find_variable", "guard": ""},
+   {"name": "SECONDS", "where": "init_seconds_var", "line": 1391, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "BASH_ARGV0", "where": "set_argv0", "line": 1583, "via": "find_variable", "guard": ""},
+   {"name": "FUNCNAME", "where": "init_funcname_var", "line": 1890, "via": "find_variable", "guard": ""},
+   {"name": "FUNCNAME", "where": "init_funcname_var", "line": 1894, "via": "INIT_DYNAMIC_ARRAY_VAR", "guard": "defined (ARRAY_VARS)"},
+   {"name": "FUNCNAME", "where": "init_funcname_var", "line": 1896, "via": "INIT_DYNAMIC_VAR", "guard": "!(defined (ARRAY_VARS))"},
+   {"name": "BASH_ARGV0", "where": "initialize_dynamic_variables", "line": 1909, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "BASH_COMMAND", "where": "initialize_dynamic_variables", "line": 1911, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "BASH_SUBSHELL", "where": "initialize_dynamic_variables", "line": 1912, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "RANDOM", "where": "initialize_dynamic_variables", "line": 1914, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "SRANDOM", "where": "initialize_dynamic_variables", "line": 1916, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "LINENO", "where": "initialize_dynamic_variables", "line": 1918, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "BASHPID", "where": "initialize_dynamic_variables", "line": 1921, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "EPOCHSECONDS", "where": "initialize_dynamic_variables", "line": 1924, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "EPOCHREALTIME", "where": "initialize_dynamic_variables", "line": 1926, "via": "INIT_DYNAMIC_VAR", "guard": ""},
+   {"name": "HISTCMD", "where": "initialize_dynamic_variables", "line": 1930, "via": "INIT_DYNAMIC_VAR", "guard": "defined (HISTORY)"},
+   {"name": "COMP_WORDBREAKS", "where": "initialize_dynamic_variables", "line": 1935, "via": "INIT_DYNAMIC_VAR", "guard": "defined (READLINE)"},
+   {"name": "DIRSTACK", "where": "initialize_dynamic_variables", "line": 1939, "via": "init_dynamic_array_var", "guard": "defined (PUSHD_AND_POPD) && defined (ARRAY_VARS)"},
+   {"name": "GROUPS", "where": "initialize_dynamic_variables", "line": 1943, "via": "init_dynamic_array_var", "guard": "defined (ARRAY_VARS)"},
+   {"name": "BASH_ARGC", "where": "initialize_dynamic_variables", "line": 1946, "via": "init_dynamic_array_var", "guard": "defined (ARRAY_VARS) && defined (DEBUGGER)"},
+   {"name": "BASH_ARGV", "where": "initialize_dynamic_variables", "line": 1947, "via": "init_dynamic_array_var", "guard": "defined (ARRAY_VARS) && defined (DEBUGGER)"},
+   {"name": "BASH_SOURCE", "where": "initialize_dynamic_variables", "line": 1949, "via": "init_dynamic_array_var", "guard": "defined (ARRAY_VARS)"},
+   {"name": "BASH_LINENO", "where": "initialize_dynamic_variables", "line": 1950, "via": "init_dynamic_array_var", "guard": "defined (ARRAY_VARS)"},
+   {"name": "BASH_CMDS", "where": "initialize_dynamic_variables", "line": 1952, "via": "init_dynamic_assoc_var", "guard": "defined (ARRAY_VARS)"},
+   {"name": "BASH_ALIASES", "where": "initialize_dynamic_variables", "line": 1954, "via": "init_dynamic_assoc_var", "guard": "defined (ARRAY_VARS) && defined (ALIAS)"},
+   {"name": "BASH_COMPAT", "where": "special_vars", "line": 5806, "via": "sv_shcompat", "guard": ""},
+   {"name": "BASH_XTRACEFD", "where": "special_vars", "line": 5807, "via": "sv_xtracefd", "guard": ""},
+   {"name": "CHILD_MAX", "where": "special_vars", "line": 5810, "via": "sv_childmax", "guard": "defined (JOB_CONTROL)"},
+   {"name": "COLUMNS", "where": "special_vars", "line": 5815, "via": "sv_winsize", "guard": "defined (READLINE) && defined (STRICT_POSIX)"},
+   {"name": "COMP_WORDBREAKS", "where": "special_vars", "line": 5817, "via": "sv_comp_wordbreaks", "guard": "defined (READLINE)"},
+   {"name": "EXECIGNORE", "where": "special_vars", "line": 5820, "via": "sv_execignore", "guard": ""},
+   {"name": "FUNCNEST", "where": "special_vars", "line": 5822, "via": "sv_funcnest", "guard": ""},
+   {"name": "GLOBIGNORE", "where": "special_vars", "line": 5824, "via": "sv_globignore", "guard": ""},
+   {"name": "HISTCONTROL", "where": "special_vars", "line": 5827, "via": "sv_history_control", "guard": "defined (HISTORY)"},
+   {"name": "HISTFILESIZE", "where": "special_vars", "line": 5828, "via": "sv_histsize", "guard": "defined (HISTORY)"},
+   {"name": "HISTIGNORE", "where": "special_vars", "line": 5829, "via": "sv_histignore", "guard": "defined (HISTORY)"},
+   {"name": "HISTSIZE", "where": "special_vars", "line": 5830, "via": "sv_histsize", "guard": "defined (HISTORY)"},
+   {"name": "HISTTIMEFORMAT", "where": "special_vars", "line": 5831, "via": "sv_histtimefmt", "guard": "defined (HISTORY)"},
+   {"name": "HOME", "where": "special_vars", "line": 5835, "via": "sv_home", "guard": "defined (__CYGWIN__)"},
+   {"name": "HOSTFILE", "where": "special_vars", "line": 5839, "via": "sv_hostfile", "guard": "defined (READLINE)"},
+   {"name": "IFS", "where": "special_vars", "line": 5842, "via": "sv_ifs", "guard": ""},
+   {"name": "IGNOREEOF", "where": "special_vars", "line": 5843, "via": "sv_ignoreeof", "guard": ""},
+   {"name": "LANG", "where": "special_vars", "line": 5845, "via": "sv_locale", "guard": ""},
+   {"name": "LC_ALL", "where": "special_vars", "line": 5846, "via": "sv_locale", "guard": ""},
+   {"name": "LC_COLLATE", "where": "special_vars", "line": 5847, "via": "sv_locale", "guard": ""},
+   {"name": "LC_CTYPE", "where": "special_vars", "line": 5848, "via": "sv_locale", "guard": ""},
+   {"name": "LC_MESSAGES", "where": "special_vars", "line": 5849, "via": "sv_locale", "guard": ""},
+   {"name": "LC_NUMERIC", "where": "special_vars", "line": 5850, "via": "sv_locale", "guard": ""},
+   {"name": "LC_TIME", "where": "special_vars", "line": 5851, "via": "sv_locale", "guard": ""},
+   {"name": "LINES", "where": "special_vars", "line": 5854, "via": "sv_winsize", "guard": "defined (READLINE) && defined (STRICT_POSIX)"},
+   {"name": "MAIL", "where": "special_vars", "line": 5857, "via": "sv_mail", "guard": ""},
+   {"name": "MAILCHECK", "where": "special_vars", "line": 5858, "via": "sv_mail", "guard": ""},
+   {"name": "MAILPATH", "where": "special_vars", "line": 5859, "via": "sv_mail", "guard": ""},
+   {"name": "OPTERR", "where": "special_vars", "line": 5861, "via": "sv_opterr", "guard": ""},
+   {"name": "OPTIND", "where": "special_vars", "line": 5862, "via": "sv_optind", "guard": ""},
+   {"name": "PATH", "where": "special_vars", "line": 5864, "via": "sv_path", "guard": ""},
+   {"name": "POSIXLY_CORRECT", "where": "special_vars", "line": 5865, "via": "sv_strict_posix", "guard": ""},
+   {"name": "TERM", "where": "special_vars", "line": 5868, "via": "sv_terminal", "guard": "defined (READLINE)"},
+   {"name": "TERMCAP", "where": "special_vars", "line": 5869, "via": "sv_terminal", "guard": "defined (READLINE)"},
+   {"name": "TERMINFO", "where": "special_vars", "line": 5870, "via": "sv_terminal", "guard": "defined (READLINE)"},
+   {"name": "TEXTDOMAIN", "where": "special_vars", "line": 5873, "via": "sv_locale", "guard": ""},
+   {"name": "TEXTDOMAINDIR", "where": "special_vars", "line": 5874, "via": "sv_locale", "guard": ""},
+   {"name": "TZ", "where": "special_vars", "line": 5877, "via": "sv_tz", "guard": "defined (HAVE_TZSET)"},
+   {"name": "histchars", "where": "special_vars", "line": 5881, "via": "sv_histchars", "guard": "defined (HISTORY) && defined (BANG_HISTORY)"},
+   {"name": "ignoreeof", "where": "special_vars", "line": 5884, "via": "sv_ignoreeof", "guard": ""}
+  ]
+ },
+ "outside_variables_c": [
+  {
+   "name": "BASH_ENV",
+   "file": "shell.c",
+   "call": "get_string_value",
+   "decision": "2026-11-11 22:31"
+  },
+  {
+   "name": "BASHOPTS",
+   "file": "builtins/shopt.def",
+   "call": "find_variable",
+   "decision": "2026-11-11 22:31"
+  },
+  {
+   "name": "TMOUT",
+   "file": "builtins/read.def",
+   "call": "get_string_value",
+   "decision": "2026-11-12 09:58"
+  }
+ ],
+ "bash_compat_range": [
+  31,
+  52
+ ],
+ "behavior": [
+  {
+   "name": "BASH_ENV",
+   "values": "all",
+   "decision": "2026-11-11 22:31",
+   "effect": "対話でないシェルが起動時に、値の名前のファイルを読み込んで実行する(shell.c の execute_env_file)。"
+  },
+  {
+   "name": "BASHOPTS",
+   "values": "all",
+   "decision": "2026-11-11 22:31",
+   "effect": "受け継いだ値の shopt の設定を、起動時に有効にする。"
+  },
+  {
+   "name": "BASH_FUNC_<名>%%",
+   "values": "all",
+   "decision": "2026-11-11 22:31",
+   "effect": "値が () { で始まれば、関数として取り込む(initialize_shell_variables)。名前の形で外す。"
+  },
+  {
+   "name": "SHELLOPTS",
+   "values": "all",
+   "decision": "2026-11-11 22:31",
+   "effect": "受け継いだ値の set -o の設定を、起動時に有効にする。"
+  },
+  {
+   "name": "POSIXLY_CORRECT",
+   "values": "all",
+   "decision": "2026-11-11 22:31",
+   "effect": "起動時に POSIX モードにする(sv_strict_posix)。"
+  },
+  {
+   "name": "POSIX_PEDANTIC",
+   "values": "all",
+   "decision": "2026-11-12 09:58",
+   "effect": "POSIXLY_CORRECT が無いとき、同じく起動時に POSIX モードにする(initialize_shell_variables)。"
+  },
+  {
+   "name": "FUNCNEST",
+   "values": "all",
+   "decision": "2026-11-12 09:58",
+   "effect": "関数の入れ子の上限を決める(sv_funcnest)。超えると、その時の命令の列を打ち切る。"
+  },
+  {
+   "name": "GLOBIGNORE",
+   "values": "all",
+   "decision": "2026-11-12 09:58",
+   "effect": "パス名の展開から外す型を決め、. で始まる名前も展開させる(sv_globignore)。"
+  },
+  {
+   "name": "EXECIGNORE",
+   "values": "all",
+   "decision": "2026-11-12 09:58",
+   "effect": "PATH を探すときに外す実行ファイルの型を決める(sv_execignore)。"
+  },
+  {
+   "name": "BASH_COMPAT",
+   "values": "compat-in-range",
+   "decision": "2026-11-12 09:58",
+   "effect": "互換の段(shell_compatibility_level)を変える(sv_shcompat)。",
+   "other_values": "範囲の外の値は起動時の警告(compatibility value out of range)と既定の段になる。空は既定の段。これらは起動時の警告として再現の対象で、一覧に入れない。"
+  },
+  {
+   "name": "TMOUT",
+   "values": "all",
+   "decision": "2026-11-12 09:58",
+   "effect": "read の既定の時間切れになる(builtins/read.def)。"
+  },
+  {
+   "name": "BASH_XTRACEFD",
+   "values": "integer",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "set -x の書き出し先の番号を変える(sv_xtracefd。初期化で受け継いだ値を使う)。",
+   "other_values": "整数として読めない値と、開いていない番号は起動時の警告(invalid value for trace file descriptor)、読むだけの番号は fdopen の警告(cannot open as FILE)だけで、再現の対象(startup_env の群)。ケースの環境だけでは番号が開いているか決まらないので、比較器は整数の形の値を既定で外し、旧版の固定の警告で警告だけと確かめたケースだけが明示して渡す。空は何もしない。"
+  },
+  {
+   "name": "CHILD_MAX",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "覚えておく終わった子の数を変える(sv_childmax。local や unset の後の戻しで受け継いだ値が働く)。"
+  },
+  {
+   "name": "TEXTDOMAIN",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "スクリプトの $\"…\" の訳の領域を変える(起動時に locale.c の set_default_locale_vars が読む)。"
+  },
+  {
+   "name": "TEXTDOMAINDIR",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "スクリプトの $\"…\" の訳を探す場所を変える(起動時に locale.c の set_default_locale_vars が読む)。"
+  },
+  {
+   "name": "PS4",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "set -x の行の頭を変える。値は展開されるので命令の置き換えも動く(set_if_not で受け継いだ値が残る)。"
+  },
+  {
+   "name": "BASH_LOADABLES_PATH",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "enable -f が組み込みの命令を探す場所を変える(set_if_not で受け継いだ値が残る)。"
+  },
+  {
+   "name": "BASH_ARGV0",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "起動時に $0 を受け継いだ値にする(set_argv0)。bash の診断の頭の名前も変わる。"
+  },
+  {
+   "name": "FUNCNAME",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が関数の名前の並びを保つ変数を作らない(init_dynamic_array_var・init_funcname_var が先に戻る)。caller などの結果が変わる。"
+  },
+  {
+   "name": "BASH_SOURCE",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が読み込んだファイルの並びを保つ変数を作らない(init_dynamic_array_var・init_funcname_var が先に戻る)。caller などの結果が変わる。"
+  },
+  {
+   "name": "BASH_LINENO",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が呼び出した行の並びを保つ変数を作らない(init_dynamic_array_var・init_funcname_var が先に戻る)。caller などの結果が変わる。"
+  },
+  {
+   "name": "BASH_ARGV",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が引数の並びを保つ変数を作らない(init_dynamic_array_var・init_funcname_var が先に戻る)。caller などの結果が変わる。"
+  },
+  {
+   "name": "BASH_ARGC",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が引数の数の並びを保つ変数を作らない(init_dynamic_array_var・init_funcname_var が先に戻る)。caller などの結果が変わる。"
+  },
+  {
+   "name": "BASH_CMDS",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が命令の場所の表と結びつく変数を作らない(init_dynamic_array_var・init_dynamic_assoc_var が先に戻る)。読む値と代入の働きが変わる。"
+  },
+  {
+   "name": "BASH_ALIASES",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が別名の表と結びつく変数を作らない(init_dynamic_array_var・init_dynamic_assoc_var が先に戻る)。読む値と代入の働きが変わる。"
+  },
+  {
+   "name": "DIRSTACK",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash がpushd の場所の並びと結びつく変数を作らない(init_dynamic_array_var・init_dynamic_assoc_var が先に戻る)。読む値と代入の働きが変わる。"
+  },
+  {
+   "name": "GROUPS",
+   "values": "all",
+   "decision": "variables.c の初期化と sv_*",
+   "effect": "受け継いだ値があると、bash が所属するグループの並びと結びつく変数を作らない(init_dynamic_array_var・init_dynamic_assoc_var が先に戻る)。読む値と代入の働きが変わる。"
+  }
+ ],
+ "kept_reasons": {
+  "required-input": "比較の入力に要る変数。閉じた許可一覧の値で旧版と同じに渡す。",
+  "child-env": "子の環境へ渡る値。22:31 の決定のとおり、値の集合を比べる。",
+  "locale": "ロケール。起動時の setlocale の警告と翻訳は、これまでの決定で扱う。",
+  "interactive": "対話のシェルだけで働き、スクリプトの動きを変えない。",
+  "overwritten": "bash が起動時に自分の値で上書きし、受け継いだ値を使わない。",
+  "dynamic": "bash が実行中に値を作り、受け継いだ値は置き換わる。子へは bash の値が渡る。",
+  "value-only": "bash は自分の動きに使わず、受け継いだ値がそのままスクリプトの読む値と子の環境の値になる。",
+  "not-compiled": "基準の bash の設定では組み込まれない。"
+ },
+ "kept": [
+  {
+   "name": "PATH",
+   "reason": "required-input",
+   "note": "閉じた許可一覧の値で旧版と同じに渡す。PATH は命令の探し方、HOME は ~ の展開に使う。"
+  },
+  {
+   "name": "HOME",
+   "reason": "required-input",
+   "note": "閉じた許可一覧の値で旧版と同じに渡す。PATH は命令の探し方、HOME は ~ の展開に使う。"
+  },
+  {
+   "name": "PWD",
+   "reason": "child-env",
+   "note": "bash が足すか置き換えて子へ渡す値(22:31 の決定)。SHLVL の上限の警告は起動時の警告として再現する。"
+  },
+  {
+   "name": "OLDPWD",
+   "reason": "child-env",
+   "note": "bash が足すか置き換えて子へ渡す値(22:31 の決定)。SHLVL の上限の警告は起動時の警告として再現する。"
+  },
+  {
+   "name": "SHLVL",
+   "reason": "child-env",
+   "note": "bash が足すか置き換えて子へ渡す値(22:31 の決定)。SHLVL の上限の警告は起動時の警告として再現する。"
+  },
+  {
+   "name": "_",
+   "reason": "child-env",
+   "note": "bash が足すか置き換えて子へ渡す値(22:31 の決定)。SHLVL の上限の警告は起動時の警告として再現する。"
+  },
+  {
+   "name": "TZ",
+   "reason": "child-env",
+   "note": "子(date・git など)へ渡る値。fixed で UTC に固定する。bash 自身は printf %()T と time の書式だけで使い、diff-snapshot.sh は使わない。"
+  },
+  {
+   "name": "LANG",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_ALL",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_COLLATE",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_CTYPE",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_MESSAGES",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_NUMERIC",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "LC_TIME",
+   "reason": "locale",
+   "note": "起動時の setlocale の警告と、外部の命令の翻訳は、これまでの決定どおり再現する。"
+  },
+  {
+   "name": "PS1",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "PS2",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "MAIL",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "MAILCHECK",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "MAILPATH",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "IGNOREEOF",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "ignoreeof",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTCONTROL",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTFILESIZE",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTIGNORE",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTSIZE",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTTIMEFORMAT",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HISTFILE",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "histchars",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "HOSTFILE",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "COMP_WORDBREAKS",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "TERM",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "TERMCAP",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "TERMINFO",
+   "reason": "interactive",
+   "note": "対話のシェル(プロンプト・メール・EOF・履歴・行の編集と補完)だけで働く。受け継いだ値は子へそのまま渡る。"
+  },
+  {
+   "name": "IFS",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "OPTIND",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "OPTERR",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "BASH",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "BASH_VERSION",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "BASH_VERSINFO",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "PPID",
+   "reason": "overwritten",
+   "note": "起動時に bash の値で上書きする(PPID は子へ渡さなくなる)。"
+  },
+  {
+   "name": "BASH_COMMAND",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "BASH_SUBSHELL",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "RANDOM",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "SRANDOM",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "LINENO",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "BASHPID",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "EPOCHSECONDS",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "EPOCHREALTIME",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "HISTCMD",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "SECONDS",
+   "reason": "dynamic",
+   "note": "基準の容器で観測: RANDOM・SRANDOM・BASHPID・BASH_COMMAND・BASH_SUBSHELL・HISTCMD は子へ渡らない。SECONDS は受け継いだ文字列のまま渡る。EPOCHSECONDS・EPOCHREALTIME・LINENO は bash が子の環境を組み直した時の値になる(時刻の値は追加の決定 2。LINENO は組み直した行の値を全バイトで比べる)。"
+  },
+  {
+   "name": "UID",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "EUID",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "HOSTTYPE",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "OSTYPE",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "MACHTYPE",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "HOSTNAME",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "SHELL",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "BASH_EXECUTION_STRING",
+   "reason": "value-only",
+   "note": "bash は無いときに値を置くだけで、自分の動きには使わない。受け継いだ値は、スクリプトが読む値と子の環境の値としてそのまま使われる。"
+  },
+  {
+   "name": "COLUMNS",
+   "reason": "not-compiled",
+   "note": "対話のときの sv_winsize は STRICT_POSIX のときだけ組み込まれ、基準の bash には無い。COLUMNS は子へ渡る値として比べる。"
+  },
+  {
+   "name": "LINES",
+   "reason": "not-compiled",
+   "note": "対話のときの sv_winsize は STRICT_POSIX のときだけ組み込まれ、基準の bash には無い。COLUMNS は子へ渡る値として比べる。"
+  },
+  {
+   "name": "NODE",
+   "reason": "not-compiled",
+   "note": "QNX のときだけ組み込まれる。"
+  },
+  {
+   "name": "BASH_ARRAY_<名>%%",
+   "reason": "not-compiled",
+   "note": "ARRAY_EXPORT は config-top.h で定義されず、取り込みの処理が組み込まれない。普通の変数として子へ渡る。"
+  },
+  {
+   "name": "BASH_ASSOC_<名>%%",
+   "reason": "not-compiled",
+   "note": "ARRAY_EXPORT は config-top.h で定義されず、取り込みの処理が組み込まれない。普通の変数として子へ渡る。"
+  }
+ ]
+}

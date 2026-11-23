@@ -293,7 +293,10 @@ def entry(path: Path, root: Path, secret: bool) -> dict[str, str]:
 def walk(root: Path, patterns: list[str]) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
     result: list[dict[str, str]] = []
     excluded_entries: list[dict[str, str]] = []
-    ignored_paths = set(ignored(root))
+    listed_ignored = untracked(root, ignored_files=True)
+    ignored_paths = set(ignored_from(listed_ignored))
+    # git が `<フォルダ>/` の 1 行で出す入れ子のリポジトリ(worktree を含む)。中身はこの commit に入らない。
+    nested = nested_repositories(untracked(root, ignored_files=False), listed_ignored)
     index_items, excluded_items = git_index(root, patterns)
     gitlinks = {item["path"]: item for item in index_items + excluded_items if item["mode"] == "160000"}
     stack = [root]
@@ -310,12 +313,17 @@ def walk(root: Path, patterns: list[str]) -> tuple[list[dict[str, str]], list[di
         except OSError as exc:
             raise GuardError(f"作業ツリーを走査できない: {exc}") from exc
         for child in children:
-            if child == ".git" and current == root:
+            # git は `.git` を含むパスを commit に入れない。どの深さの `.git` も記録せず、中へも入らない。
+            if child == ".git":
                 continue
             path = current / child
             info = safe_lstat(path)
+            rel = rel_path(root, path, "走査")
+            # 入れ子のリポジトリは中へ入らず、記録もしない。gitlink は git の未追跡の一覧に出ないので当たらない。
+            if stat.S_ISDIR(info.st_mode) and rel in nested and rel not in gitlinks:
+                continue
             raw.append(path)
-            if stat.S_ISDIR(info.st_mode) and rel_path(root, path, "走査") not in gitlinks and not excluded_paths([rel_path(root, path, "走査") + "/"], [DEFAULT_EXCLUDE]):
+            if stat.S_ISDIR(info.st_mode) and rel not in gitlinks and not excluded_paths([rel + "/"], [DEFAULT_EXCLUDE]):
                 stack.append(path)
     rels = [rel_path(root, path, "作業ツリー") for path in raw]
     secret_paths = excluded_paths(rels, patterns)
@@ -402,12 +410,33 @@ def tree(cwd: Path, ref: str, patterns: list[str]) -> tuple[list[dict[str, str]]
     return sorted(entries, key=lambda x: x["path"]), sorted(excluded_entries, key=lambda x: x["path"])
 
 
-def ignored(cwd: Path) -> list[str]:
-    raw = git(cwd, "ls-files", "-o", "--ignored", "--exclude-standard", "-z")
-    paths = [decode_path(x[0]) for x in nul_fields(raw)]
+def untracked(cwd: Path, *, ignored_files: bool) -> list[str]:
+    """git の未追跡の一覧を生のまま返す。`--directory` は付けない。
+
+    中に `.git` を持つ追跡していないフォルダ(入れ子のリポジトリ。worktree を含む)は、
+    中へ入らずに末尾が `/` の 1 行で出る。ほかのフォルダは、中のファイルが 1 つずつ出る。
+    """
+    flags = ("--ignored",) if ignored_files else ()
+    return [decode_path(x[0]) for x in nul_fields(git(cwd, "ls-files", "-o", *flags, "--exclude-standard", "-z"))]
+
+
+def ignored_from(listed: list[str]) -> list[str]:
+    # 末尾が `/` の行は入れ子のリポジトリなので、無視されたファイルに数えない。
+    paths = [path for path in listed if not path.endswith("/")]
     # walk と同じ固定除外だけを外す。guard 自身の記録追加を対象集合の変更にしない。
     state_paths = excluded_paths(paths, [DEFAULT_EXCLUDE])
     return sorted(path for path in paths if path not in state_paths)
+
+
+def ignored(cwd: Path) -> list[str]:
+    return ignored_from(untracked(cwd, ignored_files=True))
+
+
+def nested_repositories(*listings: list[str]) -> set[str]:
+    """未追跡の一覧の末尾が `/` の行から `/` を除いたパス。既定の除外に当たるものは除く。"""
+    names = sorted({path[:-1] for listed in listings for path in listed if path.endswith("/")})
+    state_paths = excluded_paths(names, [DEFAULT_EXCLUDE])
+    return {name for name in names if name not in state_paths}
 
 
 def control_files(worktree: list[dict[str, str]], excluded_entries: list[dict[str, str]]) -> list[dict[str, str]]:
@@ -752,7 +781,9 @@ def start(args: argparse.Namespace) -> int:
     data["task_source"] = source_identity()
     data["quality_paths"] = [str(Path(name).absolute()) for name in args.quality_path]
     data["quality"] = quality_inventory(root, data, data["quality_paths"], patterns)
-    data["preexisting_untracked"] = sorted(decode_path(x[0]) for x in nul_fields(git(root, "ls-files", "-o", "--exclude-standard", "-z")))
+    # 入れ子のリポジトリは、無視されたものも含めて `/` を除いた名前で残す。後から git add されても commit の対象にしない。
+    preexisting = untracked(root, ignored_files=False) + [path for path in untracked(root, ignored_files=True) if path.endswith("/")]
+    data["preexisting_untracked"] = sorted({path[:-1] if path.endswith("/") else path for path in preexisting})
     state = Path(args.state).absolute()
     safe_output(state, root)
     parent_fd = open_directory(state.parent)

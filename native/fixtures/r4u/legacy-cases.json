@@ -1,0 +1,1276 @@
+{
+ "schema_version": 1,
+ "purpose": "旧版 check_links.py の固定期待(OS に依らない入力)。scripts/test_check_links.py と比較器が共有する",
+ "legacy": {
+  "path": "plugins/dev-workflow/skills/update-doc/scripts/check_links.py",
+  "sha256": "b2eea09e6b0c1b4f84b8c4b36f2d04aa517c88b3eb410c5a19e619457e09d4ab"
+ },
+ "environment": {
+  "set": {
+   "LC_ALL": "C"
+  },
+  "keep": [
+   "PATH"
+  ],
+  "removed": [
+   "PYTHONIOENCODING",
+   "PYTHONUTF8",
+   "PYTHONCOERCECLOCALE"
+  ]
+ },
+ "tree_ops": {
+  "dir": "mkdir",
+  "file": "書き込む(data)",
+  "symlink": "target を指すリンク",
+  "fifo": "mkfifo"
+ },
+ "byte_form": "文字列は UTF-8。非 UTF-8 は {\"hex\": ...}",
+ "case_count": 40,
+ "cases": [
+  {
+   "id": "basic-doc-example",
+   "purpose": "完了条件 4 の入力",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "docs"
+    },
+    {
+     "op": "file",
+     "path": "docs/a.md",
+     "data": "[x](missing.md) `src/none.py`\n"
+    }
+   ],
+   "argv": [
+    "docs"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-none",
+   "purpose": "引数 0 個は docstring を print して終了 2",
+   "tree": [],
+   "argv": [],
+   "expected": {
+    "exit": 2,
+    "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-missing",
+   "purpose": "不在の対象は WARN を出し、件数に数えない",
+   "tree": [],
+   "argv": [
+    "nope.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "WARN: 対象が見つかりません: nope.md\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-empty-string",
+   "purpose": "空文字は . として走査する",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "dir",
+     "path": "sub"
+    },
+    {
+     "op": "file",
+     "path": "sub/b.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    ""
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nERROR a.md:1: リンク切れ -> m1\nERROR sub/b.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-dash-like",
+   "purpose": "-h・--・--version も対象として扱う(argparse を使わない)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "--",
+     "data": "[x](m)\n"
+    }
+   ],
+   "argv": [
+    "-h",
+    "--",
+    "--version"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "WARN: 対象が見つかりません: -h\nWARN: 対象が見つかりません: --version\n検査ファイル数: 1\nERROR --:1: リンク切れ -> m\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-file-non-md",
+   "purpose": "直接渡したファイルは .md 以外でも読む",
+   "tree": [
+    {
+     "op": "file",
+     "path": "notes.txt",
+     "data": "[x](gone)\n"
+    }
+   ],
+   "argv": [
+    "notes.txt"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR notes.txt:1: リンク切れ -> gone\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-file-under-excluded",
+   "purpose": "直接渡したファイルには除外を当てない",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "build"
+    },
+    {
+     "op": "file",
+     "path": "build/a.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "dir",
+     "path": "node_modules"
+    },
+    {
+     "op": "dir",
+     "path": "node_modules/x"
+    },
+    {
+     "op": "file",
+     "path": "node_modules/x/b.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    "build/a.md",
+    "node_modules/x/b.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nERROR build/a.md:1: リンク切れ -> m1\nERROR node_modules/x/b.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-dir-excluded-self",
+   "purpose": "対象のパス自身の部品にも除外を当てる",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "build"
+    },
+    {
+     "op": "dir",
+     "path": "build/docs"
+    },
+    {
+     "op": "file",
+     "path": "build/docs/a.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "dir",
+     "path": "docs"
+    },
+    {
+     "op": "file",
+     "path": "docs/a.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    "build/docs",
+    "docs"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR docs/a.md:1: リンク切れ -> m2\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-normalized-spelling",
+   "purpose": "対象は PurePosixPath の規則で整えた文字列で扱う(.. は残す)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "dir",
+     "path": "docs"
+    },
+    {
+     "op": "dir",
+     "path": "docs/sub"
+    },
+    {
+     "op": "file",
+     "path": "docs/sub/b.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    "a.md/",
+    "./docs//sub/./b.md",
+    "docs/../docs/sub"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 3\nERROR a.md:1: リンク切れ -> m1\nERROR docs/sub/b.md:1: リンク切れ -> m2\nERROR docs/../docs/sub/b.md:1: リンク切れ -> m2\n結果: ERROR 3 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-absolute-missing",
+   "purpose": "WARN には引数の字面を出す(// と ///)",
+   "tree": [],
+   "argv": [
+    "//r4u-nonexistent-x",
+    "///r4u-nonexistent-y/"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "WARN: 対象が見つかりません: //r4u-nonexistent-x\nWARN: 対象が見つかりません: ///r4u-nonexistent-y/\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-duplicate-and-order",
+   "purpose": "引数の順に処理し、同じファイルは 2 回数える。WARN はその時点で出す",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "dir",
+     "path": "dir"
+    },
+    {
+     "op": "file",
+     "path": "dir/c.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    "a.md",
+    "missing1",
+    "a.md",
+    "dir"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "WARN: 対象が見つかりません: missing1\n検査ファイル数: 3\nERROR a.md:1: リンク切れ -> m1\nERROR a.md:1: リンク切れ -> m1\nERROR dir/c.md:1: リンク切れ -> m2\n結果: ERROR 3 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-fifo",
+   "purpose": "FIFO の対象はディレクトリでもファイルでもないので WARN",
+   "tree": [
+    {
+     "op": "fifo",
+     "path": "p.md"
+    }
+   ],
+   "argv": [
+    "p.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "WARN: 対象が見つかりません: p.md\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-symlinks",
+   "purpose": "ファイルへのリンクとディレクトリへのリンクを対象に渡す",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "real"
+    },
+    {
+     "op": "file",
+     "path": "real/x.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "symlink",
+     "path": "lf.md",
+     "target": "real/x.md"
+    },
+    {
+     "op": "symlink",
+     "path": "ld",
+     "target": "real"
+    }
+   ],
+   "argv": [
+    "lf.md",
+    "ld"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nERROR lf.md:1: リンク切れ -> m1\nERROR ld/x.md:1: リンク切れ -> m1\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "args-self-loop",
+   "purpose": "自分を指すリンクは stat が ELOOP なので WARN",
+   "tree": [
+    {
+     "op": "symlink",
+     "path": "loop",
+     "target": "loop"
+    }
+   ],
+   "argv": [
+    "loop"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "WARN: 対象が見つかりません: loop\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-sort-order",
+   "purpose": "部品の列を符号位置の順に並べる(文字列全体では並べない)",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "dir",
+     "path": "t/a"
+    },
+    {
+     "op": "file",
+     "path": "t/a-b.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a/b.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/B.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "dir",
+     "path": "t/b"
+    },
+    {
+     "op": "file",
+     "path": "t/b/b.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/_.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/日本.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/ｚ.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/😀.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a/A.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/~.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a/-.md",
+     "data": "[x](m)\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 12\nERROR t/B.md:1: リンク切れ -> m\nERROR t/_.md:1: リンク切れ -> m\nERROR t/a/-.md:1: リンク切れ -> m\nERROR t/a/A.md:1: リンク切れ -> m\nERROR t/a/b.md:1: リンク切れ -> m\nERROR t/a-b.md:1: リンク切れ -> m\nERROR t/a.md:1: リンク切れ -> m\nERROR t/b/b.md:1: リンク切れ -> m\nERROR t/~.md:1: リンク切れ -> m\nERROR t/日本.md:1: リンク切れ -> m\nERROR t/ｚ.md:1: リンク切れ -> m\nERROR t/😀.md:1: リンク切れ -> m\n結果: ERROR 12 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-sort-non-utf8",
+   "purpose": "非 UTF-8 の名前は surrogateescape の符号位置で並べる",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "file",
+     "path": {
+      "hex": "742f802e6d64"
+     },
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": {
+      "hex": "742fff2e6d64"
+     },
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/一.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": {
+      "hex": "742fe4b82e6d64"
+     },
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/z.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/𐀀.md",
+     "data": "[x](m)\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": {
+     "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20370a4552524f5220742f7a2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fe4b8802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742f802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fe4b82e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fee80802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742ff09080802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203720e4bbb6202f205741524e203020e4bbb60a"
+    },
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-name-patterns",
+   "purpose": "名前が .md で終わるものを集める(. 始まり・ちょうど .md・大文字は別)",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "dir",
+     "path": "t/.dir"
+    },
+    {
+     "op": "file",
+     "path": "t/.hidden.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/.dir/x.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/x.MD",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a.md.bak",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/a.mdx",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/amd",
+     "data": "[x](m)\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 3\nERROR t/.dir/x.md:1: リンク切れ -> m\nERROR t/.hidden.md:1: リンク切れ -> m\nERROR t/.md:1: リンク切れ -> m\n結果: ERROR 3 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-newline-name",
+   "purpose": "名前に LF・CR を含む .md も集め、そのまま出す",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "file",
+     "path": "t/a\nb.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/c\rd.md",
+     "data": "[x](m2)\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nERROR t/a\nb.md:1: リンク切れ -> m1\nERROR t/c\rd.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-exclude",
+   "purpose": "除外の名前を、集めたパスのどの部品にも当てる(部分一致はしない)",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "dir",
+     "path": "t/.git"
+    },
+    {
+     "op": "dir",
+     "path": "t/node_modules"
+    },
+    {
+     "op": "dir",
+     "path": "t/dist"
+    },
+    {
+     "op": "dir",
+     "path": "t/dist/x"
+    },
+    {
+     "op": "dir",
+     "path": "t/sub"
+    },
+    {
+     "op": "dir",
+     "path": "t/sub/build"
+    },
+    {
+     "op": "dir",
+     "path": "t/vendor"
+    },
+    {
+     "op": "dir",
+     "path": "t/__pycache__"
+    },
+    {
+     "op": "dir",
+     "path": "t/.next"
+    },
+    {
+     "op": "dir",
+     "path": "t/ok"
+    },
+    {
+     "op": "dir",
+     "path": "t/distx"
+    },
+    {
+     "op": "dir",
+     "path": "t/Build"
+    },
+    {
+     "op": "file",
+     "path": "t/.git/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/node_modules/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/dist/x/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/sub/build/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/vendor/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/__pycache__/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/.next/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/ok/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/distx/a.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/build.md",
+     "data": "[x](m)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/Build/a.md",
+     "data": "[x](m)\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 4\nERROR t/Build/a.md:1: リンク切れ -> m\nERROR t/build.md:1: リンク切れ -> m\nERROR t/distx/a.md:1: リンク切れ -> m\nERROR t/ok/a.md:1: リンク切れ -> m\n結果: ERROR 4 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-symlink-dir-not-followed",
+   "purpose": "ディレクトリへのリンクの中は辿らない。ファイルへのリンクの .md は読む",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "dir",
+     "path": "t/real"
+    },
+    {
+     "op": "file",
+     "path": "t/real/x.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "symlink",
+     "path": "t/link",
+     "target": "real"
+    },
+    {
+     "op": "symlink",
+     "path": "t/lf.md",
+     "target": "real/x.md"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nERROR t/lf.md:1: リンク切れ -> m1\nERROR t/real/x.md:1: リンク切れ -> m1\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "walk-target-is-dir-link",
+   "purpose": "対象自身がディレクトリへのリンクなら中を走査する",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "real"
+    },
+    {
+     "op": "dir",
+     "path": "real/sub"
+    },
+    {
+     "op": "file",
+     "path": "real/sub/x.md",
+     "data": "[x](m1)\n"
+    },
+    {
+     "op": "symlink",
+     "path": "ld",
+     "target": "real"
+    }
+   ],
+   "argv": [
+    "ld"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR ld/sub/x.md:1: リンク切れ -> m1\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-boundaries",
+   "purpose": "リンクの照合の境目(タイトル・括弧・空・入れ子・空白)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[a](m01)\n[a](m02 \"title\")\n[a](m03(b).md)\n[i](m04)k)\n[a]()\n[a]( m05)\n[[a]](m06)\n[a[b](m07)\n[a\tb](m08)\n[a] (m09)\nx[a](m10)[b](m11)\n[a](m12)\t[b](m13 )\n![img](m14.png)\n[a](m15>)\n[a](<m16>)\n[a](m17]x)\n[](m18)\n[a](m19\\)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m01\nERROR a.md:3: リンク切れ -> m03(b\nERROR a.md:4: リンク切れ -> m04\nERROR a.md:8: リンク切れ -> m07\nERROR a.md:9: リンク切れ -> m08\nERROR a.md:11: リンク切れ -> m10\nERROR a.md:11: リンク切れ -> m11\nERROR a.md:12: リンク切れ -> m12\nERROR a.md:13: リンク切れ -> m14.png\nERROR a.md:14: リンク切れ -> m15>\nERROR a.md:15: リンク切れ -> <m16>\nERROR a.md:16: リンク切れ -> m17]x\nERROR a.md:17: リンク切れ -> m18\nERROR a.md:18: リンク切れ -> m19\\\n結果: ERROR 14 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-skip-prefixes",
+   "purpose": "飛ばす接頭辞は大文字小文字を区別する",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[a](http://x)\n[a](https://x)\n[a](mailto:x)\n[a](#x)\n[a](tel:1)\n[a](HTTP://x)\n[a](Mailto:x)\n[a](ftp://x)\n[a](http:/x)\n[a](httpsx)\n[a](tel1)\n[a](#)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:6: リンク切れ -> HTTP://x\nERROR a.md:7: リンク切れ -> Mailto:x\nERROR a.md:8: リンク切れ -> ftp://x\nERROR a.md:9: リンク切れ -> http:/x\nERROR a.md:10: リンク切れ -> httpsx\nERROR a.md:11: リンク切れ -> tel1\n結果: ERROR 6 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-targets",
+   "purpose": "# の後・絶対パス・末尾の /・.. の解決",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[a](missing.md#frag)\n[a](a.md#frag)\n[a](.#x)\n[a](#only)\n[a](x#)\n[a](/)\n[a](/r4u-nonexistent-z)\n[a](sub/)\n[a](./)\n[a](..)\n[a](../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../../)\n[a](sub/../a.md)\n[a](nosub/../a.md)\n[a](//)\n[a](///r4u-nonexistent-w)\n"
+    },
+    {
+     "op": "dir",
+     "path": "sub"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> missing.md#frag\nERROR a.md:5: リンク切れ -> x#\nERROR a.md:7: リンク切れ -> /r4u-nonexistent-z\nERROR a.md:15: リンク切れ -> ///r4u-nonexistent-w\n結果: ERROR 4 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-unicode-space",
+   "purpose": "Python の \\s(Unicode)で区切る。区切らない字は拾う",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[a](m0　z)\n[a](m1​z)\n[a](m2\u001cz)\n[a](m3\u001fz)\n[a](m4z)\n[a](m5 z)\n[a](m6᠎z)\n[a](m7﻿z)\n[a](m8 z)\n[a](m9 z)\n[a](m10 z)\n[a](m11 z)\n[a](m12 z)\n[a](m13\u000bz)\n[a](m14\fz)\n[a](m15⁠z)\n[a](m16­z)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1​z\nERROR a.md:7: リンク切れ -> m6᠎z\nERROR a.md:8: リンク切れ -> m7﻿z\nERROR a.md:16: リンク切れ -> m15⁠z\nERROR a.md:17: リンク切れ -> m16­z\n結果: ERROR 5 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-multiline",
+   "purpose": "複数行にまたがる [ は [ の行を出す",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "x\n[a\nb\nc](m1)\n[d](m2\n)\n[e\n](m3)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1\nERROR a.md:7: リンク切れ -> m3\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "text-crlf-cr",
+   "purpose": "CRLF と CR は LF に揃えてから行を数える",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "a\r\n[x](m1)\rb\r[x](m2)\r\n\r\n[x](m3)\r`x\ry/z.md`[y](m4)"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1\nERROR a.md:4: リンク切れ -> m2\nERROR a.md:6: リンク切れ -> m3\nERROR a.md:8: リンク切れ -> m4\n結果: ERROR 4 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "text-invalid-utf8",
+   "purpose": "UTF-8 として読めないバイトは U+FFFD に置き換える(Python 3.10 の範囲)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": {
+      "hex": "5b615d286d31ff290a5b615d286d32c0af290a5b615d286d33eda080290a5b615d286d34e381290a5b615d286d35f09080290a5b615d286d36f4908080290a5b615d286d378080290a5b615d286d38e080af290a5b615d286d39f888808080290a5b615d286d3130efbfbe290a5b615d286d3131e381"
+     }
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m1�\nERROR a.md:2: リンク切れ -> m2��\nERROR a.md:3: リンク切れ -> m3���\nERROR a.md:4: リンク切れ -> m4�\nERROR a.md:5: リンク切れ -> m5�\nERROR a.md:6: リンク切れ -> m6����\nERROR a.md:7: リンク切れ -> m7��\nERROR a.md:8: リンク切れ -> m8���\nERROR a.md:9: リンク切れ -> m9�����\nERROR a.md:10: リンク切れ -> m10￾\n結果: ERROR 10 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "text-bom",
+   "purpose": "BOM は残す(先頭とリンク先の中)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "﻿[a](m1)\n[a](﻿m2)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m1\nERROR a.md:2: リンク切れ -> ﻿m2\n結果: ERROR 2 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-boundaries",
+   "purpose": "コード中のパスの照合の境目(拡張子の長さ・@・.・/)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "`a/b.c`\n`a/b.abcdefghij`\n`a/b.abcdefghijk`\n`@scope/pkg.json`\n`a/@b.md`\n`a@b/c.md`\n`./a.md`\n`a/.b`\n`a/b.`\n`a/b.c.d`\n`a/b.c-d`\n`/a/b.md`\n`a//b.md`\n`a/b/c.md` x\n`a.md`\n`a/b.md `\n`a/b.mD`\n`a-b_c/d-e_f.G1`\n`a/b.md` `c/d.md`\n`ａ/b.md`\n``a/b.md``\n`a/b.md\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> a/b.c\nWARN  a.md:2: 記載パスが見つからない(コード片なら無視可) -> a/b.abcdefghij\nWARN  a.md:4: 記載パスが見つからない(コード片なら無視可) -> @scope/pkg.json\nWARN  a.md:6: 記載パスが見つからない(コード片なら無視可) -> a@b/c.md\nWARN  a.md:10: 記載パスが見つからない(コード片なら無視可) -> a/b.c.d\nWARN  a.md:12: 記載パスが見つからない(コード片なら無視可) -> /a/b.md\nWARN  a.md:13: 記載パスが見つからない(コード片なら無視可) -> a//b.md\nWARN  a.md:14: 記載パスが見つからない(コード片なら無視可) -> a/b/c.md\nWARN  a.md:17: 記載パスが見つからない(コード片なら無視可) -> a/b.mD\nWARN  a.md:18: 記載パスが見つからない(コード片なら無視可) -> a-b_c/d-e_f.G1\nWARN  a.md:19: 記載パスが見つからない(コード片なら無視可) -> a/b.md\nWARN  a.md:19: 記載パスが見つからない(コード片なら無視可) -> c/d.md\nWARN  a.md:21: 記載パスが見つからない(コード片なら無視可) -> a/b.md\n結果: ERROR 0 件 / WARN 13 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-backtick-mixup",
+   "purpose": "合わない組の閉じのバッククォートが次の開きになる",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "`x`a/b.md`\n`a b` c/d.md`\n`p/q.md`r/s.md`\n`1` `2/3.md`\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> a/b.md\nWARN  a.md:3: 記載パスが見つからない(コード片なら無視可) -> p/q.md\nWARN  a.md:4: 記載パスが見つからない(コード片なら無視可) -> 2/3.md\n結果: ERROR 0 件 / WARN 3 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-skip-prefixes",
+   "purpose": "飛ばす接頭辞(http・npm・pnpm・yarn)は前方一致",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "`http/x.md` `httpx/a.md` `npm/x.md` `npmx/a.b` `pnpm/x.md` `yarn/a.b` `Yarn/a.b` `xhttp/a.b`\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> Yarn/a.b\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> xhttp/a.b\n結果: ERROR 0 件 / WARN 2 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-ancestors",
+   "purpose": "親の祖先の先頭 3 個までを試す",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "a"
+    },
+    {
+     "op": "dir",
+     "path": "a/b"
+    },
+    {
+     "op": "dir",
+     "path": "a/b/c"
+    },
+    {
+     "op": "dir",
+     "path": "a/b/c/d"
+    },
+    {
+     "op": "dir",
+     "path": "x"
+    },
+    {
+     "op": "file",
+     "path": "x/r0.md",
+     "data": ""
+    },
+    {
+     "op": "dir",
+     "path": "a/x"
+    },
+    {
+     "op": "file",
+     "path": "a/x/r1.md",
+     "data": ""
+    },
+    {
+     "op": "dir",
+     "path": "a/b/x"
+    },
+    {
+     "op": "file",
+     "path": "a/b/x/r2.md",
+     "data": ""
+    },
+    {
+     "op": "dir",
+     "path": "a/b/c/x"
+    },
+    {
+     "op": "file",
+     "path": "a/b/c/x/r3.md",
+     "data": ""
+    },
+    {
+     "op": "dir",
+     "path": "a/b/c/d/x"
+    },
+    {
+     "op": "file",
+     "path": "a/b/c/d/x/r4.md",
+     "data": ""
+    },
+    {
+     "op": "file",
+     "path": "a/b/c/d/doc.md",
+     "data": "`x/r0.md` `x/r1.md` `x/r2.md` `x/r3.md` `x/r4.md` `x/r5.md`\n"
+    }
+   ],
+   "argv": [
+    "a/b/c/d/doc.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a/b/c/d/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/r0.md\nWARN  a/b/c/d/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/r5.md\n結果: ERROR 0 件 / WARN 2 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-shallow",
+   "purpose": "祖先が少ない場所(対象の直下と作業場所の直下)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "doc.md",
+     "data": "`x/r0.md` `x/zz.md`\n"
+    },
+    {
+     "op": "dir",
+     "path": "x"
+    },
+    {
+     "op": "file",
+     "path": "x/r0.md",
+     "data": ""
+    },
+    {
+     "op": "dir",
+     "path": "y"
+    },
+    {
+     "op": "file",
+     "path": "y/doc.md",
+     "data": "`x/r0.md` `y/doc.md` `q/zz.md`\n"
+    }
+   ],
+   "argv": [
+    "doc.md",
+    "y/doc.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 2\nWARN  doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/zz.md\nWARN  y/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 2 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "codepath-absolute",
+   "purpose": "/ で始まるパスは整えた絶対パスのまま確かめる",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "`/r4u-nonexistent/a.md` `//r4u-nonexistent/b.md`\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> /r4u-nonexistent/a.md\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> //r4u-nonexistent/b.md\n結果: ERROR 0 件 / WARN 2 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "output-order-counts",
+   "purpose": "WARN の行は ERROR の行より前。件数を最後に出す",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "t"
+    },
+    {
+     "op": "file",
+     "path": "t/1.md",
+     "data": "[x](e1) `w/1.md`\n[x](e2)\n"
+    },
+    {
+     "op": "file",
+     "path": "t/2.md",
+     "data": "`w/2.md` [x](e3)\n`w/3.md`\n"
+    }
+   ],
+   "argv": [
+    "t"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 2\nWARN  t/1.md:1: 記載パスが見つからない(コード片なら無視可) -> w/1.md\nWARN  t/2.md:1: 記載パスが見つからない(コード片なら無視可) -> w/2.md\nWARN  t/2.md:2: 記載パスが見つからない(コード片なら無視可) -> w/3.md\nERROR t/1.md:1: リンク切れ -> e1\nERROR t/1.md:2: リンク切れ -> e2\nERROR t/2.md:1: リンク切れ -> e3\n結果: ERROR 3 件 / WARN 3 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "exit-zero-with-warn",
+   "purpose": "ERROR が無ければ WARN があっても終了 0",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "`w/1.md` [x](a.md)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 0,
+    "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> w/1.md\n結果: ERROR 0 件 / WARN 1 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-nul-absolute",
+   "purpose": "NUL を含む絶対パスは存在しないと扱う(ERROR)",
+   "tree": [
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[x](/r4u\u0000z)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> /r4u\u0000z\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-symlink-mid",
+   "purpose": "途中のリンクを辿って解決する",
+   "tree": [
+    {
+     "op": "dir",
+     "path": "docs"
+    },
+    {
+     "op": "dir",
+     "path": "real"
+    },
+    {
+     "op": "file",
+     "path": "real/a.md",
+     "data": ""
+    },
+    {
+     "op": "symlink",
+     "path": "docs/l",
+     "target": "../real"
+    },
+    {
+     "op": "file",
+     "path": "docs/a.md",
+     "data": "[x](l/a.md) [y](l/zz.md)\n"
+    }
+   ],
+   "argv": [
+    "docs/a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR docs/a.md:1: リンク切れ -> l/zz.md\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  },
+  {
+   "id": "link-loop-then-dotdot",
+   "purpose": "リンクの輪の後に .. が続くと正しいパスに戻る(例外にならない)",
+   "tree": [
+    {
+     "op": "symlink",
+     "path": "loop",
+     "target": "loop"
+    },
+    {
+     "op": "file",
+     "path": "a.md",
+     "data": "[x](loop/../a.md) [y](loop/../zz.md)\n"
+    }
+   ],
+   "argv": [
+    "a.md"
+   ],
+   "expected": {
+    "exit": 1,
+    "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> loop/../zz.md\n結果: ERROR 1 件 / WARN 0 件\n",
+    "stderr": ""
+   }
+  }
+ ]
+}

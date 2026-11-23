@@ -22,6 +22,7 @@ PY_CALLERS = {
     "environment": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py",
     "permission": ROOT / "plugins/dev-workflow/skills/ship-task/scripts/loop-permission.py",
     "implementation": DO_TASK_SCRIPTS / "implementation-git.py",
+    "implementer_choice": DO_TASK_SCRIPTS / "implementer-choice.py",
 }
 # Every direct Python Git caller under ship-task/scripts must be listed here or
 # in PY_GIT_EXCEPTIONS.  The review-guard exception creates an isolated, new

@@ -1,0 +1,8 @@
+# R4E(#482)の比較で使う旧版用の部品。CPython 3.10.11 の venv へ入れる。
+# 入れ方: <venv>/bin/python -m pip install --no-deps --require-hashes -r native/ci/r4e-requirements.txt
+# lxml は入れない(旧版の出力が lxml の有無で変わるため)。
+# ハッシュは pip download --no-deps で得た配布ファイル(wheel)の SHA-256。
+openpyxl==3.1.5 \
+    --hash=sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2
+et_xmlfile==2.0.0 \
+    --hash=sha256:7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa

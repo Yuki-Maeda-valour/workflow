@@ -1,0 +1,13 @@
+--- a/native/crates/cli/src/commands/implement_guard/paths.rs	2026-11-12 11:55:36.561047876 +0900
++++ b/native/crates/cli/src/commands/implement_guard/paths.rs	2026-11-12 11:55:36.573047527 +0900
+@@ -98,9 +98,7 @@
+     for segment in rest.split(|b| *b == b'/') {
+         match segment {
+             b"" | b"." => {}
+-            b".." => {
+-                out.pop()?;
+-            }
++            b".." => out.push(b"..".to_vec()),
+             other => out.push(other.to_vec()),
+         }
+     }
