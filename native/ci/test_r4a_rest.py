@@ -1129,6 +1129,37 @@ class PtyReadAll(unittest.TestCase):
         self.assertIn("かかった秒数", str(raised.exception))
 
 
+class LargeInput(unittest.TestCase):
+    """大きな入力を、子が読み始める前に眠っていても、最後まで届けて標準入力を閉じる(`communicate` の再呼出しに頼らない)。"""
+
+    def test_an_8_mb_input_reaches_a_child_that_sleeps_before_reading(self):
+        data = b"x" * (8 * 1024 * 1024)
+        started = time.monotonic()
+        result = checker.run_group(["sh", "-c", "sleep 0.5; wc -c"], input=data, capture_output=True, timeout=60)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stdout.strip(), str(len(data)).encode())
+        self.assertLess(time.monotonic() - started, 30)
+        self.assertEqual(checker.final_process_check(None), [])
+
+    def test_the_old_one_shot_input_would_stall_on_the_same_child(self):
+        # 修正前の形(`communicate` に 1 回目だけ入力を渡し、2 回目から None で呼ぶ)は、同じ子で時間切れになる。検査の足場の確かめ。
+        data = b"x" * (8 * 1024 * 1024)
+        process = subprocess.Popen(["sh", "-c", "sleep 0.5; wc -c"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                   start_new_session=True)
+        try:
+            with self.assertRaises(subprocess.TimeoutExpired):
+                process.communicate(input=data, timeout=0.2)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                process.communicate(input=None, timeout=3)  # 残りは送られず、標準入力も閉じられない
+        finally:
+            checker.kill_group(process.pid)
+            process.wait()
+
+    def test_a_child_that_exits_without_reading_does_not_hang_the_writer(self):
+        result = checker.run_group(["true"], input=b"y" * (4 * 1024 * 1024), capture_output=True, timeout=30)
+        self.assertEqual(result.returncode, 0)
+
+
 class WaitingAndRawNames(unittest.TestCase):
     def test_syscall_line_decides_the_wait_by_number_and_fd(self):
         import unittest.mock as mock

@@ -196,16 +196,16 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
 - 5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)の移植は、未登録・未配布です。
 - 実行物は開発用の `r4a_rest_contract` です。
 - 契約は [設計のR4A節](../../docs/design.md#残り5本の解析補助r4a)、APIは [native/README.md](../README.md#残り5本の解析補助r4a)、手順と件数は [testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
-- 必須caseは2034件です。比較器の自己検査(`test_r4a_rest.py`)は111件です。境界の組は21組です。
+- 必須caseは2034件です。比較器の自己検査(`test_r4a_rest.py`)は114件です。境界の組は21組です。
 
 - `quality()`は、`cargo test --locked -p dev-workflow-cli --example r4a_rest_contract`と、`-p dev-workflow-platform --example r4a_rest_platform`を実行します。
 - 専用比較(`check_r4a_rest.py --strict-pending`)は`build`・`verify-universal`には入れず、必須の2ジョブで流します。
   - `r4a-rest`: `build`の後。4機種で、同じ機種の`1/`と`2/`の`r4a_rest_contract`を比べます。比較器の自己検査は1回目の比較だけで流します。
   - `r4a-rest-universal`: `combine`の後。Mac 2機種で、署名後のMac共通の実行物を各CPUで比べます。
   - どちらも、`actions/setup-python`の3.10.11の後に`build.py prepare`を流します。`build.py`は、そのPythonで比較器を起動します。比較器は、自分を動かしたPythonで旧版を動かします(環境変数`R4A_REST_PYTHON`は、比較器は読みません)。
-- 比較器は、比較の前に自己検査111件を流します。落ちても、本体の比較は流し、終了コードは1のままです。最後の行で自己検査の失敗を知らせます。
+- 比較器は、比較の前に自己検査114件を流します。落ちても、本体の比較は流し、終了コードは1のままです。最後の行で自己検査の失敗を知らせます。
 - 自己検査は、検査専用の絞り込み`--case <ID>`で短くなりました。絞り込んだ走りは、`--only`と同じ部分比較です。CIの`build.py`は、この引数を渡しません。
-- 作業機での実測は、自己検査が約41秒(絞り込みの前は約1319秒)、比較が約94秒です(2026-11-23、自己検査111件の時点。作業機の負荷でばらつきます。以前の比較は約100〜123秒)。
+- 作業機での実測は、自己検査が約45秒(絞り込みの前は約1319秒)、比較が約95秒です(2026-11-23、自己検査114件の時点。作業機の負荷でばらつきます。以前の比較は約100〜123秒)。
 - 比較器が起動するすべての子は、グループで記録し、走りごとの印`R4A_REST_RUN`で終わりに確かめます。残っていれば、止めて終了コード1にします。
   - 時間切れと例外ではグループごとSIGTERM、少し待ってからSIGKILLです。外からSIGTERMを受けたときは、作業フォルダも消してから終わります。LinuxはPDEATHSIGも使います。
   - Macの`r4a-rest`で、終わりに`r4a_rest_contract`が各12個残りました。commit 33d51ecとab0b9abの、どちらのpush用CIも、この仕組みの前の版です。
@@ -239,10 +239,14 @@ Python 3.10.11 は [公式の配布物](https://github.com/actions/python-versio
   - Macの自己検査105件は、2機種で「OK (skipped=7)」で合格しました。skipした7件は、Linuxだけで意味のある検査です。Macで初めて流れた`ps -E`で印を探す検査と`pgrep`を使う検査も、通りました。
   - Mac arm64の`r4a-rest`と、`r4a-rest-universal`のMac x86_64は、比較器の不安定さで失敗しました。Rustと旧版の差ではありません。
     - 疑似端末の読み残し: 親が子の起動の直後にslaveを閉じると、Macではmasterの読み残しが消えることがあると推測します。親は、子が終わって読み切るまでslaveを開けておくようにしました。読み切りの判定は時間に頼らず、子が終わった後にslaveへ一意の目印を書き、masterから目印が出るまで読みます(出なければ失敗)。
-    - 遅い機械での時間切れ: 旧版が5 MBのJSONを読むcaseが、子1つの上限15秒に当たりました。上限を60秒にし、失敗の文にかかった秒数を出します。比較全体の上限(900秒)は変えません。
+    - 子1つの上限: 旧版が5 MBのJSONを標準入力で読むcaseが、子1つの上限15秒に当たりました。当時は遅い機械のためと考えて、上限を60秒にしました。commit 63e111aのCIと手元の確かめで、入力の渡し方の不具合が見つかりました(次の項)。e74acea の15秒の時間切れも、同じ原因と推測します(未確認。同じ渡し方の誤りが、e74acea の比較器にもありました)。上限60秒はそのまま残し、失敗の文にかかった秒数を出します。比較全体の上限(900秒)は変えません。
   - `r4a-rest-universal`のMac arm64は、機械が割り当たらず、取り消されました。
+- commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-Maeda-valour/workflow/actions/runs/45097810895))では、`build` 4機種・`r4a-rest` 4機種・`r4a-rest-universal`のMac arm64が成功しました。`r4a-rest-universal`のMac x86_64は1件(`child/legacy/origin-json: reason-huge`の時間切れ)が落ちました。
+  - 原因は、比較器の入力の渡し方でした。`communicate`の1回目の0.2秒で書き切れなかった大きな入力の残りが、2回目から送られず、標準入力も閉じられませんでした。遅さではありません(手元で同じ入力を旧版へ直接渡すと0.04秒でした)。
+  - 直し: 入力は、書き込み専用のthreadが最後まで書いて標準入力を閉じます。8 MBの入力を、眠ってから読む子へ渡す自己検査を足しました。
 - 次は未確認です。CIの結果を見てから書きます。
-  - 上の2つの直しの後の、Mac 2機種と`r4a-rest-universal`の結果。
-  - 必須case 2034件・自己検査111件での、各機種の時間。
+  - 入力の渡し方を直した後の、`r4a-rest` 4機種と`r4a-rest-universal` 2機種の結果。
+  - `r4a-rest-universal`のMac x86_64で、`child/legacy/origin-json: reason-huge`が通るか。
+  - 必須case 2034件・自己検査114件での、各機種の時間。
 - 詳しい仕組み(境界の組・待ちの確かめ・子の回収・`--case`・OSごとの期待・差込みの診断`R4A_CALLS`・Macの条件のまね)は、[testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
 

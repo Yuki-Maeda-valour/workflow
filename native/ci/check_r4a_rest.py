@@ -358,15 +358,34 @@ def communicate_group(process, input=None, timeout=None):
     切り離した子は、走りの印で見つけて止める(親が終わって 1 秒たっても読取りが終わらないとき)。
     時間切れは `TimeoutExpired`(呼出側がグループを止める)。"""
     deadline = None if timeout is None else time.monotonic() + timeout
-    first = True
     straggler = False
     gone_since = None
+    writer = None
+    if input is not None and process.stdin is not None:
+        # 入力は、`communicate` の再呼出しに頼らず、書き込み専用の thread で最後まで書いて標準入力を閉じる
+        # (`communicate` は、1 回目の 0.2 秒で書き切れなかった残りを、2 回目から送らない)。
+        import threading
+        stdin, process.stdin = process.stdin, None
+
+        def write_all():
+            try:
+                stdin.write(input)
+            except (BrokenPipeError, ValueError, OSError):
+                pass  # 子が先に終わった・閉じた
+            finally:
+                try:
+                    stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass
+        writer = threading.Thread(target=write_all, daemon=True)
+        writer.start()
     while True:
         try:
-            out, err = process.communicate(input=input if first else None, timeout=0.2)
+            out, err = process.communicate(timeout=0.2)
+            if writer is not None:
+                writer.join(timeout=5)
             return out, err, straggler
         except subprocess.TimeoutExpired:
-            first = False
             if process.poll() is not None:
                 if group_alive(process.pid):
                     straggler = True
