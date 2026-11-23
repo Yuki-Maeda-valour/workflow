@@ -1034,6 +1034,101 @@ class OsSpecificExpectations(unittest.TestCase):
         self.assertIn("8192", source)
 
 
+class PtyReadAll(unittest.TestCase):
+    def test_a_child_that_writes_and_exits_at_once_loses_no_output(self):
+        # 子が書いてすぐ終わっても、master の読み残しを取りこぼさない(親は、読み切るまで slave を開けておく)。
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "quick.sh"
+            script.write_text("#!/bin/sh\necho 'ERROR [host-argv] hello' >&2\necho out\n")
+            script.chmod(0o755)
+            for which in ("stderr", "stdout", "both"):
+                case = checker.Case("q", checker.HOST, [], pty=(24, 60, which))
+                for _ in range(40):
+                    _, out, err = checker.run_pty([str(script)], case, dict(os.environ), directory)
+                    terminal = err if which == "stderr" else out
+                    self.assertIn(b"hello" if which != "stdout" else b"out", terminal, which)
+                    if which == "both":
+                        self.assertIn(b"out", terminal)
+        self.assertEqual(checker.CHILD_GROUPS, [])
+
+    def test_the_end_marker_is_not_part_of_the_result_and_comes_after_all_output(self):
+        import pty as pty_module
+        master, slave = pty_module.openpty()
+        try:
+            child = subprocess.Popen(["true"])
+            child.wait()
+            os.write(slave, b"first\nsecond")  # 子の出力(改行を含まない末尾でも、目印の前に全部出る)
+            text = checker.read_terminal_until_marker(master, slave, child, "x", timeout=10)
+            self.assertEqual(text, b"first\r\nsecond")  # 端末が LF を CRLF にする
+            self.assertNotIn(b"R4A-PTY-END-", text)
+        finally:
+            os.close(master)
+            os.close(slave)
+
+    def test_a_missing_marker_is_a_failure_not_a_silent_loss(self):
+        import pty as pty_module
+        master, slave = pty_module.openpty()
+        sink = os.open(os.devnull, os.O_WRONLY)  # 目印が master に届かない形
+        try:
+            child = subprocess.Popen(["true"])
+            child.wait()
+            with self.assertRaises(checker.Failure) as raised:
+                checker.read_terminal_until_marker(master, sink, child, "x", timeout=0.5)
+            self.assertIn("目印が出なかった", str(raised.exception))
+        finally:
+            os.close(master)
+            os.close(slave)
+            os.close(sink)
+
+    def test_eof_or_error_before_the_marker_is_a_failure(self):
+        import pty as pty_module
+        master, slave = pty_module.openpty()
+        child = subprocess.Popen(["true"])
+        child.wait()
+        try:
+            with unittest.mock.patch.object(checker.os, "read", return_value=b""), \
+                    unittest.mock.patch.object(checker.select if hasattr(checker, "select") else __import__("select"), "select",
+                                               return_value=([master], [], [])):
+                with self.assertRaises(checker.Failure) as raised:
+                    checker.read_terminal_until_marker(master, slave, child, "x", timeout=5)
+            self.assertIn("EOF", str(raised.exception))
+            import errno as errno_module
+            with unittest.mock.patch.object(checker.os, "read", side_effect=OSError(errno_module.EIO, "io")), \
+                    unittest.mock.patch.object(__import__("select"), "select", return_value=([master], [], [])):
+                with self.assertRaises(checker.Failure) as raised:
+                    checker.read_terminal_until_marker(master, slave, child, "x", timeout=5)
+            self.assertIn("errno 5", str(raised.exception))
+        finally:
+            os.close(master)
+            os.close(slave)
+
+    def test_a_large_output_followed_by_an_immediate_exit_is_read_whole_and_never_blocks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            script = Path(directory) / "big.sh"
+            script.write_text("#!/bin/sh\nhead -c 262144 /dev/zero | tr '\\0' 'a' >&2\n")
+            script.chmod(0o755)
+            case = checker.Case("big", checker.HOST, [], pty=(24, 80, "stderr"))
+            for _ in range(5):
+                started = time.monotonic()
+                _, _, err = checker.run_pty([str(script)], case, dict(os.environ), directory)
+                self.assertEqual(err.count(b"a"), 262144)
+                self.assertNotIn(b"R4A-PTY-END-", err)
+                self.assertLess(time.monotonic() - started, 30)
+
+    def test_the_child_time_limit_is_long_enough_and_failures_report_the_seconds(self):
+        self.assertGreaterEqual(checker.CHILD_TIMEOUT if not os.environ.get("R4A_REST_CHILD_TIMEOUT") else 60, 60)
+        self.assertLess(checker.CHILD_TIMEOUT, checker.TOTAL_TIMEOUT)
+        with unittest.mock.patch.object(checker, "CHILD_TIMEOUT", 1):
+            with tempfile.TemporaryDirectory() as directory:
+                slow = Path(directory) / "slow.sh"
+                slow.write_text("#!/bin/sh\nsleep 30\n")
+                slow.chmod(0o755)
+                case = checker.Case("slow", checker.HOST, [])
+                with self.assertRaises(checker.Failure) as raised:
+                    checker.run_child_inner([str(slow)], case, dict(os.environ), directory)
+        self.assertIn("かかった秒数", str(raised.exception))
+
+
 class WaitingAndRawNames(unittest.TestCase):
     def test_syscall_line_decides_the_wait_by_number_and_fd(self):
         import unittest.mock as mock

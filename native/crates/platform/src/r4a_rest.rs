@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 unsafe extern "C" {
     fn signal(signal: i32, handler: usize) -> usize;
     fn siginterrupt(signal: i32, flag: i32) -> i32;
+    // R4U(check_links)も `sigaction` を宣言する。型の違う宣言が衝突しても、同じ C の関数なので、この宣言だけ許す。
+    #[allow(clashing_extern_declarations)]
     fn sigaction(signal: i32, new: *const u8, old: *mut u8) -> i32;
     fn raise(signal: i32) -> i32;
     fn close(fd: i32) -> i32;

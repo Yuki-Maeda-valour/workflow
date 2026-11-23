@@ -87,7 +87,8 @@ KEPT_ENV = ["PYTHONUNBUFFERED", "PYTHONINTMAXSTRDIGITS", "PYTHONOPTIMIZE", "PYTH
 # (3) 比較器自身が決める変数。
 COMPARER_ENV = ["PYTHONDONTWRITEBYTECODE", "PYTHONNOUSERSITE"]
 
-CHILD_TIMEOUT = int(os.environ.get("R4A_REST_CHILD_TIMEOUT", "15"))  # 1 子の上限(秒)。自己検査だけが縮める
+CHILD_TIMEOUT = int(os.environ.get("R4A_REST_CHILD_TIMEOUT", "60"))  # 1 子の上限(秒)。自己検査だけが縮める。遅い機械(Mac Intel)で 5 MB の入力を読む旧版が 15 秒に当たったため、60 秒にした
+# 1 つの比較(TOTAL_TIMEOUT 900 秒)の中で、子の時間切れが続いても、ジョブの上限(r4a-rest 60 分・r4a-rest-universal 45 分)に収まる。
 TOTAL_TIMEOUT = 900
 
 
@@ -2247,6 +2248,36 @@ def compare_faulted(case, mapper, quiet_result, old, new, fd, mode, quiet_frames
     return {}
 
 
+def read_terminal_until_marker(master, slave, process, case_id, timeout=None):
+    """端末(master)の出力を、時間に頼らずに読み切る。子が終わった後に、親が持つ slave へ、改行を含まない一意の目印を書く。
+    端末の出力は順に届くので、目印が出た時点で、子の出力はすべて出ている。目印は結果から外す。期限までに目印が出なければ失敗にする。"""
+    import select
+    import uuid
+    marker = ("R4A-PTY-END-" + uuid.uuid4().hex).encode()
+    deadline = time.monotonic() + (CHILD_TIMEOUT if timeout is None else timeout)
+    buffer = b""
+    written = False
+    while marker not in buffer:
+        if time.monotonic() > deadline:
+            stop_group(process, grace=1)
+            process.wait()
+            raise Failure(f"{case_id}: 時間切れ(疑似端末。{'目印が出なかった' if written else '子が終わらなかった'})")
+        ready, _, _ = select.select([master], [], [], 0.02)
+        if ready:
+            try:
+                data = os.read(master, 65536)
+            except OSError as error:
+                raise Failure(f"{case_id}: 目印の前に端末の読取りが失敗した(errno {error.errno})")
+            if not data:
+                raise Failure(f"{case_id}: 目印の前に端末が閉じた(EOF)")
+            buffer += data
+        elif not written and process.poll() is not None:
+            # 目印は、子が終わった後に、読むものが無い回(端末の内側の buffer が空のとき)にだけ書く。大きな出力の途中で書いて止まらない。
+            os.write(slave, marker)
+            written = True
+    return buffer.replace(marker, b"", 1)
+
+
 def run_pty(argv, case, env, cwd):
     """疑似端末で動かす。標準入力は /dev/null(case が入力を持つときは、その入力を渡して閉じる)。端末に向けた出力は master から読む(CRLF になる)。"""
     import fcntl
@@ -2264,47 +2295,16 @@ def run_pty(argv, case, env, cwd):
         process = subprocess.Popen(argv, stdin=subprocess.PIPE if feed else subprocess.DEVNULL, stdout=stdout,
                                    stderr=stderr, env=env, cwd=cwd, start_new_session=True, preexec_fn=child_preexec())
         register_child(process)
-        os.close(slave)
-        slave = -1
+        # 親の側の slave は、子が終わって master を読み切るまで開けておく。先に閉じると、Mac では、子が終わって
+        # 最後の slave が閉じたときに、master の読み残しが消えることがある。slave は終わりの後始末で閉じる。
         if feed:
             process.stdin.write(feed)  # 入力は小さい(pipe に収まる)。書いたら閉じて、EOF を渡す
             process.stdin.close()
             process.stdin = None
-        chunks = []
-        deadline = time.monotonic() + CHILD_TIMEOUT
-        import select
-        while True:
-            ready, _, _ = select.select([master], [], [], 0.2)
-            if ready:
-                try:
-                    data = os.read(master, 65536)
-                except OSError:
-                    break
-                if not data:
-                    break
-                chunks.append(data)
-            elif process.poll() is not None:
-                # 子が終わった後に残りを読み切る。
-                try:
-                    while True:
-                        ready, _, _ = select.select([master], [], [], 0.1)
-                        if not ready:
-                            break
-                        data = os.read(master, 65536)
-                        if not data:
-                            break
-                        chunks.append(data)
-                except OSError:
-                    pass
-                break
-            if time.monotonic() > deadline:
-                stop_group(process, grace=1)
-                process.wait()
-                raise Failure(f"{case.id}: 時間切れ(疑似端末)")
+        terminal = read_terminal_until_marker(master, slave, process, case.id)
         out, err, straggler = communicate_group(process, None, CHILD_TIMEOUT)
         if straggler:
             LEFT_BEHIND.append(f"{argv[0]} の起動後に、グループにプロセスが残った(疑似端末)")
-        terminal = b"".join(chunks)
         if which == "stdout":
             return process.returncode, terminal, err or b""
         if which == "stderr":
@@ -2674,10 +2674,11 @@ def run_child_inner(argv, case, env, cwd):
         try:
             if closes:
                 stdin_arg["preexec_fn"] = lambda: [os.close(fd) for fd in closes]
+            child_started = time.monotonic()
             completed = run_group(argv, stdout=stdout, stderr=stderr, env=env, cwd=cwd,
                                   timeout=CHILD_TIMEOUT, check=False, **stdin_arg)
         except subprocess.TimeoutExpired:
-            raise Failure(f"{case.id}: 時間切れ({CHILD_TIMEOUT} 秒): {argv[:3]}")
+            raise Failure(f"{case.id}: 時間切れ({CHILD_TIMEOUT} 秒。かかった秒数 {time.monotonic() - child_started:.1f}): {argv[:3]}")
         return completed.returncode, completed.stdout or b"", completed.stderr or b""
     finally:
         for handle in handles:
