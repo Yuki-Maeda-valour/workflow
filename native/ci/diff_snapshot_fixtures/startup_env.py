@@ -136,16 +136,35 @@ def _check_warning(case, old, fd=None):
     head = b''.join(line for line in old.stderr.splitlines(keepends=True)[:4] if line.startswith(b'bash: '))
     expected = case['warning'].replace('<FD>', str(fd)).encode()
     if head != expected:
-        # 範囲の外のBASH_COMPATなどの警告は、bashの版で変わる(5.3は5.3・53を範囲内とし、警告を出さない)。
-        # 基準でない機械では、manifestの版に依る欄(bash-message)を持つケースだけ、警告が消えることを認めて記録する。
+        # 基準でない機械の版に依る警告。manifestの版に依る欄を持つケースだけ、次を許して記録する(基準の機械では厳しいまま)。
+        # (1) bash-startup-warning: setlocaleの警告の行が、基準の行の頭(括弧の閉じまで)の後ろに`: <理由の文>`が付く形
+        #     (Darwinのlibcでは`: No such file or directory`が付く)。ほかの行・行の順は変えない。
+        # (2) bash-message: 範囲の外のBASH_COMPATなどの警告が、bashの版で消える(5.3は5.3・53を範囲内とし、警告を出さない)。
+        #     実際の警告の行が基準の観測の行の部分集合(警告が消えるだけ)。別の文・足された警告は落とす。
         # 旧版とRustの標準エラーは、版に依る行(`bash: `で始まる行)を除いて比べる(compare.version_masked)。
-        # 通す範囲: 実際の警告の行が、基準の観測の行の部分集合(警告が消えるだけ)。別の文・足された警告は落とす。
-        if not (version_tolerates(old.case, 'bash-message')
-                and set(head.splitlines(keepends=True)) <= set(expected.splitlines(keepends=True))):
+        relaxed = head
+        if version_tolerates(old.case, 'bash-startup-warning'):
+            relaxed = b''.join(_without_locale_reason(line) for line in head.splitlines(keepends=True))
+        if relaxed == expected and relaxed != head:
+            kinds = ('bash-startup-warning',)
+        elif version_tolerates(old.case, 'bash-message') \
+                and set(relaxed.splitlines(keepends=True)) <= set(expected.splitlines(keepends=True)):
+            kinds = ('bash-message',) + (('bash-startup-warning',) if relaxed != head else ())
+        else:
             raise AssertionError(f'旧版の起動時の警告が固定の文と違います: 期待={expected[:300]!r} 実際={head[:300]!r}')
         VERSION_MASKED.add(old.case)
-        # 警告が消えた版(5.3など)でも、manifestの欄(bash-message)を観測として記録する。
-        note_field(old.case, 'bash-message')
+        # 警告が消えた・文が変わった版でも、manifestの欄を観測として記録する。
+        for kind in kinds:
+            note_field(old.case, kind)
+
+
+LOCALE_WARNING = re.compile(rb'(bash: warning: setlocale: [^\n]*?\))(?:: [^\n]+)?\n')
+
+
+def _without_locale_reason(line):
+    """setlocaleの警告の行だけ、括弧の閉じの後ろの`: <理由の文>`を外す。ほかの行はそのまま返す。"""
+    found = LOCALE_WARNING.fullmatch(line)
+    return found.group(1) + b'\n' if found else line
 
 
 def _timed(calls, began, ended):

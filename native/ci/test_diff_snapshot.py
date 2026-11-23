@@ -1169,6 +1169,52 @@ class StageC5(unittest.TestCase):
             done_legacy, done_rust = review_cases.cf_text_encoding('c', legacy, calls(b'0x1F5', other=b'2'), system='Darwin')
             self.assertNotEqual(done_legacy, done_rust)
 
+    def test_setlocale_warning_reason_is_version_dependent_only_for_manifest_cases_off_base(self):
+        from diff_snapshot_fixtures import compare, startup_env
+        shell=b'bash: warning: shell level (1000) too high, resetting to 1\n'
+        compat=b'bash: BASH_COMPAT: 99: compatibility value out of range\n'
+        locale=b'bash: warning: setlocale: LC_ALL: cannot change locale (xx_XX.UTF-8)\n'
+        case={'warning':(shell+compat+locale).decode()}
+        def old(stderr,name='startup-env-order'): return Result(0,b'',stderr,case=name)
+        with_reason=shell+compat+locale[:-1]+b': No such file or directory\n'
+        saved=dict(compare.VERSION_TOLERANT); masked=set(compare.VERSION_MASKED); hits=dict(compare.VERSION_HITS)
+        def tolerate(*kinds,name='startup-env-order'):
+            compare.VERSION_TOLERANT.update(names={name},kinds={name:set(kinds)})
+            compare.VERSION_MASKED.clear(); compare.VERSION_HITS.clear()
+        try:
+            # 基準の機械(許可なし)では、理由が付くだけでも落ちる。基準の行そのものは通る。
+            compare.VERSION_TOLERANT.update(names=None,kinds=None)
+            startup_env._check_warning(case,old(shell+compat+locale))
+            with self.assertRaisesRegex(AssertionError,'期待=.*実際='):
+                startup_env._check_warning(case,old(with_reason))
+            # 基準でない機械で、bash-startup-warningを載せたケースは、理由が付いても通り、版に依る欄として記録される。
+            tolerate('bash-message','bash-startup-warning')
+            startup_env._check_warning(case,old(with_reason))
+            self.assertEqual({'startup-env-order'},compare.VERSION_MASKED)
+            self.assertIn('bash-startup-warning',compare.VERSION_HITS[compare.CURRENT_SCOPE[0]]['startup-env-order'])
+            tolerate('bash-startup-warning')
+            startup_env._check_warning(case,old(with_reason))
+            # 頭が違う・別の行の文が違う・行の順が違う・足された行は、理由の許可があっても落ちる。
+            for bad in (shell+compat+locale.replace(b'xx_XX',b'yy_YY')[:-1]+b': No such file or directory\n',
+                        shell.replace(b'1000',b'999')+compat+locale[:-1]+b': No such file or directory\n',
+                        compat+shell+locale[:-1]+b': No such file or directory\n',
+                        with_reason+b'bash: extra\n',
+                        shell+compat+locale[:-1]+b':\n'):
+                tolerate('bash-startup-warning')
+                with self.assertRaises(AssertionError):
+                    startup_env._check_warning(case,old(bad))
+            # bash-startup-warningを載せないケース(bash-messageだけ・種類なし・別のケース)は、理由が付くと落ちる。
+            for kinds,name in (({'bash-message'},'startup-env-order'),(set(),'startup-env-order'),({'bash-startup-warning'},'other')):
+                compare.VERSION_TOLERANT.update(names={'startup-env-order','other'},kinds={'startup-env-order':kinds if name=='startup-env-order' else set(),'other':kinds})
+                with self.assertRaises(AssertionError):
+                    startup_env._check_warning(case,old(with_reason,name='startup-env-order' if name=='startup-env-order' else 'x'))
+            # 旧版とRustの比較は、setlocaleの行を除くので、理由の有無で変わらない(version_maskedは変えていない)。
+            self.assertEqual(b'',compare.version_strip(locale)); self.assertEqual(b'',compare.version_strip(with_reason))
+        finally:
+            compare.VERSION_TOLERANT.clear(); compare.VERSION_TOLERANT.update(saved)
+            compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
+            compare.VERSION_HITS.clear(); compare.VERSION_HITS.update(hits)
+
     def test_child_environment_mismatch_names_the_side_the_launch_site_and_the_arguments(self):
         from diff_snapshot_fixtures import launch_sites, review_cases
         sites = launch_sites.load()
