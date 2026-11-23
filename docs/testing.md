@@ -1052,6 +1052,112 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
   - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
   - 実測は、PR の CI で確かめて PR の本文に書く。
 
+### R4Gの比較
+
+#479の3コマンド(`pending-implementation`・`reviews-dir`・`implementation-git`)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と決定済みの差](design.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)、[部品と入口](../native/README.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)を参照する。
+通常の `cargo test --locked` だけでは、exampleの単体検査と旧版比較は完了しない。
+
+次の条件を必須とする。足りなければ、比較器は失敗する。例外(未実施と記録して通すもの)は各行に書く。
+
+- Python 3.10系・非root。
+- 旧版を動かすPythonは、本家のCPython 3.10.11。`check_r4g.py` は、版と標準ライブラリ20ファイルのSHA-256(`native/ci/r4g_fixtures/cpython-3.10.11-stdlib.json`。python.orgの `Python-3.10.11.tgz` から作った値)を確かめる。UbuntuのPython 3.10.12では、`R4G比較は本家のCPython 3.10.11で実行してください` で止まる。
+- 道具の版は、CIのUbuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9)。reviews-dirの4節は、基準と違うLinuxでは失敗にする。Macで基準の版が無いときは、4節を流さず、テストごとに未実施と記録する(2026-11-12 00:35の決定)。
+- Linuxでは、`strace` と、`/proc` を隠す手段(`unshare -rm` と `mount`。利用者の名前空間を作れること)。`--require-strace` を付けたときだけ、`strace` が使えなければ失敗にする(付けなければ、その対照は未実施と記録する)。`strace` の記録で、pendingが候補とその下を開かないこと・Gitを起動しないことを確かめる。`--require-userns` を付けると、名前空間を作れない機械は未実施でなく失敗にする(CIのLinuxは両方を付ける。名前空間を作れない手元の機械では付けず、その組を未実施と記録する)。
+- 旧版の前提(bash 4.0以上・大文字と小文字を区別するファイルシステム)。基準の機械(Linux)で欠ければ、比較器は失敗する。Macで欠けるときは、2026-11-12 00:35の決定のとおり、前提を要る組を名前と理由つきで未実施と記録する(合格に数えない。S3I-Aと同じ扱い)。対象は次の15件である。代用品の事前検査の組は、どの機械でも流す。
+  - 既存の `PendingOwnerTests` の `take` を使う3件。
+  - 既存の `RealRepositoryTests` の全部6件。
+  - `IgContract` の実の事前検査の組4件。
+  - `IgReadonly` の実の事前検査の組2件。
+- 一時フォルダのパスは短くする。既存テストが一時フォルダの下に作るAF_UNIXのソケットのパスは、Linuxで107バイト、Macで103バイトまでである。超えると、比較器が流す前に止まる。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。次はLinux x86_64の例であり、他機種はその機械のRust対象名へ変える。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example r4g_contract)
+(cd native && cargo test --locked -p dev-workflow-platform)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example r4g_contract --target x86_64-unknown-linux-musl)
+TMPDIR=/tmp/r4g python3 -B native/ci/check_r4g.py \
+  --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/r4g_contract" --require-strace --require-userns
+python3 -B -m unittest discover -s native/ci -p 'test_r4g.py'
+python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
+```
+
+- `TMPDIR` は、短い名前の、自分だけが書けるフォルダにする(例の `/tmp/r4g` は先に作る)。
+- `check_r4g.py --fixture` は、実行できるRustの実行ファイル(ELFかMach-O)の絶対パスだけを受ける。旧版のスクリプトや、ほかの実行ファイルは拒否する。引数なしの起動が、入口の固定の文を返すことも確かめる。
+- `native/ci/test_r4g.py` は、比較器の自己検査60件である。`scripts/test_native_r4g.py` は、その自己検査の `Comparator`(本家のPythonも `strace` も使わない検査)に、`unsafe` と `link_section` を置く場所の静的な確認などを足し、外部のRustのビルドなしで全回帰テストへつなぐ63件である(`scripts/run-all.py` が自動で集める)。
+- Cargoと `native/ci/` の検査は、`run-all.py` に含まれない。
+- 比較の始めに、`R4G: 機械: <OS> <カーネルの版> <CPU>(待つ所の名前は WCHAN_NAMES で受け付ける)` と、`R4G: 旧版の前提: bash 4.0 以上 <パスか無し>・ファイル名の大文字と小文字を<区別する|区別しない>` の行を出す(前提が欠けるときは、行の末尾に未実施にする組を並べる)。PATHの外にbash 4.0以上があれば、PATHの先頭へ足して、旧版とRustの両方に同じbashを使わせる。
+- 待つ所の同期は、`/proc/<pid>/wchan` の名前を表 `WCHAN_NAMES` で受け付ける。pipeの読みは `pipe_read` と `anon_pipe_read`(Linux v6.15で名前が変わった。CIのカーネルで確認する)、子を待つのは `do_wait`、FIFOは `wait_for_partner` と `fifo_open`、眠りは `hrtimer_nanosleep` である。表に無い名前では、理由つきで止まる。
+- 単体テストのうち、その機械のbashと比べるもの(`platform` の `bash_exec_failure_matches_bash`・`bash_lookup_matches_bash`・`bash_spawn_matches_bash_for_inherited_fds_and_signals`・`diagnostics_match_bash_in_the_c_locale`・長い `#!` の組)は、bashが5.2.21のときだけ比べる。ほかの版では「その機械のbashとは比べなかった」を出す。`cli` の `installed_locales_match_locale_a` はLinuxだけで比べる。
+
+#### 容器(Ubuntu 24.04)と本家のCPython 3.10.11の用意
+
+道具の版の基準に合わせるため、手元ではUbuntu 24.04の容器で流した。作業機hp-pc(Python 3.10.12・bash 5.1.16・coreutils 8.32・findutils 4.8.0・sed 4.8)の本体では、reviews-dirの比較が基準違いで失敗する。
+
+- 容器の中身: `ubuntu:24.04` に `git`・`strace`・`ca-certificates`・`locales`・`language-pack-ja`・`language-pack-ja-base` を入れ、利用者 uid 1000 で実行した。道具の版は、bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9・git 2.43.0である。
+- 起動の指定: `--network none`。`/proc` を隠す組が `unshare -rm` と `mount` を使うため、`--security-opt seccomp=unconfined --security-opt apparmor=unconfined` を付けた。短い `TMPDIR` を取り付ける。
+- 本家のCPython 3.10.11は、`uv`(0.11.8)の `cpython-3.10.11-linux-x86_64-gnu` を、作業場所の外の場所へ入れて使い、`PATH` の先頭に `python3` として置いた。版・実装・20ファイルのSHA-256がすべて一致した。
+- 日本語の翻訳(`locale-langpack`)が容器に入っているので、`mkdir` などの診断は日本語になる。reviews-dirの外部コマンドの診断は、旧版と同じ外部コマンドを起動するので、翻訳まで一致する。
+- CIの `actions/setup-python` の3.10.11が、この確かめを通るかは未確認である(CIの最初の実行で確かめる)。
+
+#### `strace` と `/proc` を隠す組
+
+- Linuxの準備は、`r4g`・`r4g-universal` の工程の始め(`r4g_prepare()` から `prepare_r4g_linux()`)だけで行う。`strace` が無ければ `apt-get` で入れ、GitHubのUbuntu 24.04がAppArmorで止めている利用者の名前空間を `sysctl` で許す。`prepare`・`build`・`reproduce`・`distribution` では行わない。
+- `/proc` を隠す組は、新しい利用者とマウントの名前空間で `/proc` を空の `tmpfs` で隠し、reviews-dirの `ensure`・`save-untracked`・使い方の誤りが、旧版もRustも動くことを比べる(コマンド置換のサブシェルの `fork` を含む)。
+- 名前空間を作れない機械(容器の既定のseccomp・利用者の名前空間の制限など)では、この組を「未実施」と記録する。合格には数えない。
+
+#### 未実施の数え方と最終の行
+
+- テスト全体を流せなかったとき(Linuxだけの組をMacで流せない・名前空間を作れない機械など)は、合格の件数から引く。
+- テストの一部の組(`/dev/full` の組など)だけを流せないときは、ほかの組が流れるので件数から引かず、未実施の件数にだけ入れる。
+- 未実施は、1件ずつ `R4G: 未実施: <テスト>(<組>): <理由>` の行に出す。
+- 最後の行は `R4G: 合格(N 件・未実施 M 件・strace の対照: <実施|未実施(この機械では使えない)>)` である。未実施の件数が、CIの期待と合っているかは、CIの最初の実行で確かめる(未確認)。
+- 管理担当の確認待ちの項目(未決。比較器の `UNDECIDED_ITEMS`)が残れば、最終の合格を失敗にする。未決が無いときは `R4G: 未決: 0 件` を出す(現在はこの形)。残ったときは `R4G: 未決(管理担当の確認待ち。合格に数えない): …` を出し、最後に標準エラーへ `R4G: 不合格: 未決が <数> 件残っている(--allow-undecided を付けたときだけ記録して続ける)` を出して失敗にする。`--allow-undecided` は、残っても記録して通す切替えで、品質の検査には使わない。
+
+#### 決定済みの差の一覧
+
+- `native/ci/r4g_fixtures/decided-differences.json` が、旧版とRustの差として扱ってよいものを持つ。決定20件(各項目に決定の日時・出典・対象のコマンド・対象のケース)と、比較の前提の外9件である。決定の内容は [設計のR4G節](design.md#利用者管理担当の決定とその当て方)にある。
+- 一覧に無い差は不合格にする。ケースが決定を当てるときは、決定の名前を指す(`applied`)。一覧に無い名前・その決定の対象でないコマンド・対象でないケースは、`Difference` として不合格にする。
+- 2026-11-12 09:58の追加の決定(bashの動きを変えるほかの環境変数)は `bash-behavior-env`、14:24の追加の決定4(呼出元がexportした名前の子の値)は、決定の一覧ではなくケース(`reviews-dir` の20組と、自己検査の `REVIEWS_SCRIPT_NAMES`)で当てている。どちらも [設計のR4G節](design.md#利用者管理担当の決定とその当て方) に内容がある。
+
+#### Macの前提の直し(PR #496のCIの失敗から)
+
+製品の差ではなく、テストの前提がLinuxだけだったものを直した。Macの全体の結果と時間は、CIの後に記録する(未確認)。
+
+- `SIGCHLD` を無視して起動した親の子は、Linuxでは自動で回収される(`ECHILD`)。Macのカーネルは回収しないので、期待をMacでは終了値のとおりにした。旧Pythonの子の終了値の確かめも同じ。
+- APFSはUTF-8でない名前を作れない。Macは `-é`(非ASCIIのUTF-8の名前)を使う。UTF-8でない名前を作る既存テスト1件は、Macで未実施と記録し、UTF-8の名前だけの同じ入力の組をどの機械でも比べる。
+- Macの一時フォルダ(`/private/var/…`)は長く、`#!` の行がMacの `/bin/bash` 3.2の読む長さを超えた。木を `/tmp` の下に作る。
+- Macの旧Pythonが自分の環境へ足す `__CF_USER_TEXT_ENCODING` は、2026-11-12 02:41の決定のとおり再現せず、比較で除く。
+  - 比較器(`check_r4g.py` の `runtime_added`)は、子の環境の `__CF_USER_TEXT_ENCODING` を、位置を問わず外し、値と有無を記録する。数も位置も確かめない。
+  - `platform` の単体テスト `python_environ_keeps_the_first_value_and_the_insertion_order`(比較器の自己検査ではない)は、旧Pythonの `os.environ` に、Macではちょうど1つ・Linuxでは0個あることを確かめてから、その1組だけを除いて比べる。位置は問わない。
+- Xcodeの仲介の `python3` は使わない。
+- 比較器は、Macの端末(pty)の読み取りで、子の側のfdを子が終わるまで開いておく。xnuでは、子の側の最後のcloseで、たまった出力を捨てうるためである(`check_r4g.py` の `pty_run` の説明)。
+- 比較器は、試験用のrepoを作るgitに `-c maintenance.auto=false -c gc.auto=0` を付ける。新しいgitはcommitの後に手入れ(maintenance・gc)を後ろへ切り離して走らせ、比較器の読み取りと競う(Mac arm64のCIで、読む途中に `.git/objects/maintenance.lock` が消えて落ちた)ためである(`check_r4g.py` の `NO_AUTO_MAINTENANCE` の説明)。
+- 旧Pythonの地域設定の強制で `POSIX` を `C` と同じに扱うのはLinuxだけで、Macでは扱わない。Rustは、Linuxで `C.UTF-8`、Macでは `/usr/share/locale/<名前>/LC_CTYPE` がある最初の名前(`C.UTF-8`・`C.utf8`・`UTF-8`)を選び、無ければ強制しない(製品の `python_startup.rs` の `coerced_locale()`)。
+
+#### 手元の実測(Linux x86_64の容器、2026-11-12)
+
+比較したのは、mainの `942a4ded2b92fa4d5f517aeacdd399d63ed57a0c` の上の、R4Gの実装commit `9ebbf500c7c314693a7698baa9e4bc3aa3324679` に対応する作業場所である(最終の検証SHAでの再実行は未実施)。容器は、Ubuntu 24.04・本家のCPython 3.10.11・root以外で、`--require-strace --require-userns` を付けた。
+
+- `check_r4g.py` の全体は、190件・未実施0件・`strace` の対照は実施で、合格した。時間は904〜983秒である(負荷が10〜13の手元。CPUを2つと4つに絞った回を同時に流した回は976秒と983秒)。
+  - その後、旧版の前提の直しと、実の事前検査と代用品の両方を流す形にした後の全体は、198件・未実施0件で、約827秒だった(記録の値。件数と時間が延びた)。比較器のMacの端末(pty)の読み取りの直しの後の、容器の全体は、200件・未実施0件・711秒だった(記録の値)。試験用のrepoを作るgitに自動の手入れを起こさない指定を付けた後の全体は、201件・未実施0件・678秒だった(記録の値)。群への信号の前に待つ処理を、群の一覧を取り直して顔ぶれが同じときだけ待ち終わる形に直した後の全体は、202件・未実施0件・663秒だった(記録の値。CIのカーネル7.0の機械で、一覧の後に生まれた子を漏らす競合が出たため)。Macの全体の結果と時間は、CIの後に記録する(未確認)。
+  - 時計で決まる分は約181秒である(本物の期限の Git 30秒と事前検査120秒を、旧版とRustの両方で待つ分と、本物の時計の上限の節)。
+- `cargo test --locked`(ワークスペース全体): 138件が成功した(記録の値。run-checks の最後の実行〈実装commitの前〉で、`cargo test` とexampleは終了コード0だった。件数は記録していない)。
+- `cargo test --locked -p dev-workflow-cli --example r4g_contract`: 52件が成功した(記録の値)。
+- `native/ci/test_r4g.py` 60件・`scripts/test_native_r4g.py` 63件・`native/ci/build.py test` 120件が成功した(main cb1a8ee〈#497〉を取り込んだ後のソース〈ff06947〉で再実行した。#497が `test_native_ci.py` にテストを足したため、115件から増えた。`test_r4g.py`・`test_native_r4g.py` の件数は、記録の値)。
+- 書式・clippyは、この機械と、aarch64-apple-darwin・x86_64-apple-darwin・aarch64/x86_64-unknown-linux-muslの型検査で警告0だった(記録の値)。Macの実行は未確認である。
+- 製品(musl release)の `check_probe.py`・`check_resolve_task_dir.py` の714件が成功した。`.init_array` と起動の比較は、基準と同じだった(8 / 8バイト・72通り全部同じ。記録の値)。
+
+#### 未確認の条件
+
+- CIの実測(`r4g`・`r4g-universal` の4機種と署名後のMacの時間と、上限〈60分・30分〉に収まること)。CIの実測は未記録である。見込みは [native/ci/README.md](../native/ci/README.md) にある(未確認の推測)。
+- CIの `actions/setup-python` の3.10.11が、本家の確かめを通ること。
+- Macの実機・最低OSの版での動作と、Macで基準の道具(bash 5.2.21など)を用意できるか。
+- 作業機の本体(bash 5.1.16など)での全体の合格(基準違いで失敗する設計である)。
+- 全回帰テスト(`run-all.py`)と、最新のmainを取り込んだ後の最終の検証。
+
 ### S3I-Aの比較
 
 #474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
@@ -1191,14 +1297,17 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - S2L(#468)は、`build`の各回の比較と`quality()`の単体・変異の検査、`verify-universal`の比較1回を足す。比較は手元のLinux x86_64でも1回176〜235秒かかる。
     - R4Rのpush用のrun 43085900763では、Mac Intelの`build`が48.2分(上限60分)、`verify-universal`が26.6分(上限30分)を使っていた。S2Lを足すと上限を超えるおそれが高いため、`build`を120分、`verify-universal`を60分に延ばす。
     - 新しい上限でのMacの完走と所要時間は未確認であり、PRのCIで確かめる。
-- 旧版との比較を行う `build` と `verify-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
+- 旧版との比較を行う `build` と `verify-universal` と、R4Gの `r4g`・`r4g-universal` の各工程は、checkout 直後の検査の後に `actions/setup-python` で Python 3.10.11 を用意する。製品の Python 3.10 以上という下限は変えない。
 - 2 回のビルドは、同じソース・依存・道具・設定を使い、別々の空の出力先で行う。ビルドの形は `cargo build --release --locked -p dev-workflow-cli --bin dev-workflow --example r4b_contract --example r4r_contract --example loop_state_fixture --target <Rust の対象名>`。
   - S3I-A(#474)で、検査専用の `implement_guard_contract` も同じ2回のビルドに加わった(`--example implement_guard_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `implement-guard`(`build` の後・4機種)と `implement-guard-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ45分と20分である([S3I-Aの比較](#s3i-aの比較)・[CI入口の説明](../native/ci/README.md#s3i-aの必須比較と検査専用入口))。
+  - R4G(#479)で、検査専用の `r4g_contract` も同じ2回のビルドに加わった(`--example r4g_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `r4g`(`build` の後・4機種)と `r4g-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ60分と30分である([R4Gの比較](#r4gの比較)・[CI入口の説明](../native/ci/README.md#r4gの必須比較と検査用実行物))。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
   - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
   - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。S2Lの `loop_state_fixture` も同じ結合・署名・比較を通し、両CPUで `check_loop_state.py` と `test_loop_state.py` を流す。
+  - R4Gの検査用実行物 `r4g_contract` も同じ結合・署名・`cmp` を通す。両CPUでの比較は `verify-universal` ではなく `r4g-universal` で流す。
+- R4Gの比較は `build` と `verify-universal` に入れず、必須ジョブ `r4g`(`build` の後・4 機種・上限60分)と `r4g-universal`(`combine` の後・Mac 2 機種・署名後・上限30分)で流す。`distribution` の `needs` にも加える。[R4Gの比較](#r4gの比較)と [native/ci/README.md](../native/ci/README.md#r4gの必須比較と検査用実行物) を参照する。
 - `distribution` は、Linux 2 本と署名後の Mac 1 本に `SHA256SUMS`・`build-info.json` を加えた 5 ファイルを作る。`make_dist.py` が成果物の形式検査に通してから、`native-dist.tar` にまとめる。
 - 転送は tar(複数のファイルを 1 つにまとめる形式)を使い、実行してよい印を保つ。Mac の両方で最終ファイルの起動が通るまで、配布用 tar は作らない。
 - `check_workflow.py` は `.github/workflows/` の全 `*.yml`・`*.yaml` を検査する。定義は JSON と共通の YAML の書き方に限る。通常の YAML のブロック表記や、重複するキーは拒否する。
