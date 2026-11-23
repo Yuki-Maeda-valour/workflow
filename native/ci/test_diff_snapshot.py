@@ -814,10 +814,24 @@ class LoaderInitializer(unittest.TestCase):
     def test_only_the_example_registers_startup_state(self):
         native=Path(__file__).resolve().parents[1]
         markers=('.init_array','__mod_init_func','link_section')
-        for path in sorted((native/'crates/platform/src').rglob('*.rs')):
+        source=native/'crates/platform/src'
+        # 次の2ファイルは、ほかの設計がmain前の処理の印を置くので、名前(srcからの相対パス)で外す。
+        # R4E(#482)のr4e.rsは、cfg(test)のテストの実行ファイルだけに印を置く。
+        # R4G(#479)のr4g/startup.rsは、検査専用入口examples/r4g_contract.rsが展開するマクロの中に印を置く。
+        # どちらも製品のdev-workflowには入らない。ほかのplatformのファイルは今までどおり確かめる。
+        excluded={'r4e.rs','r4g/startup.rs'}
+        seen=set()
+        for path in sorted(source.rglob('*.rs')):
+            relative=path.relative_to(source).as_posix()
             text=path.read_text()
-            with self.subTest(path=path.name):
-                self.assertFalse(startup_markers_in_code(text,markers))
+            with self.subTest(path=relative):
+                if relative in excluded:
+                    seen.add(relative)
+                    # 外したファイルに印が無ければ、名前の打ち間違いか移動なので止める(素通りさせない)。
+                    self.assertTrue(startup_markers_in_code(text,markers))
+                else:
+                    self.assertFalse(startup_markers_in_code(text,markers))
+        self.assertEqual(excluded,seen)
         example=(native/'crates/cli/examples/diff_snapshot_contract.rs').read_text()
         self.assertEqual(1,example.count('.init_array'))
         self.assertEqual(1,example.count('remember_startup_state'))

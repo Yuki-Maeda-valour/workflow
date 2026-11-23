@@ -1317,7 +1317,7 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
 
 #### 手元の実測(2026-11-12)
 
-実装担当の記録である。実装commitは作成済み(PR・CIでの実行は未実施)。Rust 1.99.1・Git 2.56.0。
+実装担当の記録である。この表の時点(2026-11-12)では、実装commitは作成済みで、PR・CIでの実行は未実施だった。Rust 1.99.1・Git 2.56.0。CIでの結果は「CIでの扱い」にある。
 
 | 環境 | 全体の比較 | 結果 |
 |---|---|---|
@@ -1330,7 +1330,8 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
 - 容器ではCのリンカが無く、`cargo`は未実施である。
 - `cargo test --locked`は、`TMPDIR`のパスが長いと既存の`task_digest`のAF_UNIXのパス長で落ちる(S3Dと無関係)。短い`TMPDIR`で流す。
 - Python 3.10.11の専用環境では、C0cのfd-inheritanceの1件が環境起因で落ちる(素のHEADでも同じ)。R4Rの`check_r4r.py`は、Python 3.10.12では成功し、3.10.11の専用環境では旧helper側の`select`の境界1件が落ちた(変更と無関係と推定。未確認)。
-- 次は未確認である。Mac実機での比較・Linux arm64・署名後Macでの比較・PR用CIの時間・最終SHAの全回帰テスト。
+- Mac実機での比較・Linux arm64・署名後Macでの比較は、手で起動したNativeのrun 45133632158(commit 0ab63ea)で成功した。時間は「CIでの扱い」の表にある。
+- 最終SHAの全回帰テストの結果は、PRの本文に書く。
 
 #### CIでの扱い
 
@@ -1338,13 +1339,41 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
 
 - `build`は、`diff_snapshot_contract`を作り、検査物の転送とMac結合に含める。`make_dist.py`の配布一覧と`native-dist.tar`には入れない。
   - exampleの単体検査(12件)は、Linux 2機種の`build`だけで流す。Macの`build`ではbrewを入れない。
-  - 上限は60分のまま、`verify-universal`も30分のままである。
-- `s3d`は`build`の後に、4機種で流す。各ビルド2回それぞれで全体の比較を行う。上限は150分である。
+  - S3Dは、`build`と`verify-universal`の上限を変えない。S2L #468で延ばした120分・60分のままである。
+- `s3d`は`build`の後に、4機種で流す。各ビルド2回それぞれで全体の比較を行う。上限は270分である。
   - 各機種で、GNU道具(Macはbrew)と実`git-lfs`(Linuxは`strace`も)を用意し、型reportを作る。
-- `s3d-universal`は`combine`の後に、Mac 2機種で流す。署名後の一致したexampleを実際のMacで比較する。上限は90分である。
-- `native.yml`のジョブの定義は7つで、matrixを展開した実行は15件である(2026-11-12に`native.yml`を数えた)。`policy`1・`build`4・`combine`1・`verify-universal`2・`distribution`1の9件に、`s3d`4と`s3d-universal`2を足した数である。
-- `check_workflow.py`と`test_native_ci.py`(`S3DConnectionTests`)は、ジョブの欠落・needsの違い・機種の不足・Linuxの比較が基準の版の機械で流れないこと・配布一覧へのexampleの混入を拒否する。接続を抜く変異21件をすべて検出した。
-- PR用CIでの実測時間と余裕は、実行後に記録する(未実施)。
+- `s3d-universal`は`combine`の後に、Mac 2機種で流す。署名後の一致したexampleを実際のMacで比較する。上限は150分である。
+- `s3d`・`s3d-universal`は、`distribution`の`needs`に入れない。R4Uの`r4u`・R4D-1の`r4d1`と同じ形である。
+  - 理由の1つ目: S3Dのexampleは、配布物(`native-dist.tar`)に入らない。
+  - 理由の2つ目: 必須であることは、マージの条件で担う。マージの条件には、PRの先頭のSHAの、打ち切られていないrunの最新のattempt(やり直しの回)だけを数える。そのattemptで全ジョブが成功していることが要る。失敗したジョブだけをやり直したattemptも数える。
+  - 理由の3つ目: `distribution`が、最長270分の比較を待たないようにする。
+- 比較1回の上限は、Linuxが60分、Macが120分である(`native/ci/s3d_ci.py`の`COMPARISON_LIMITS`)。
+  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
+  - 根拠の1つ目は、Issue #472の設計である。時間の上限は、新旧の専用比較の実測の後に決める。既存の必須の比較を減らして時間内に収めない。
+  - 根拠の2つ目は、手で起動したNativeのrun 45118443441(commit 6a43412)である。Mac x86_64の`s3d`で、比較の1回目が当時の上限60分(3,600秒)を超えて止まった。
+  - 120分にした後のrun 45133632158では、比較1回の最長はLinuxが1,261秒(Linux arm64)、Macが3,901秒(Mac x86_64)だった。上限は、それぞれの約2.9倍と約1.85倍である。Macは2倍に届かない。
+- `native.yml`のジョブの定義は15個で、matrixを展開した実行は41件である(2026-11-23に、mainを取り込んだ後の`native.yml`を数えた)。
+  - 内訳は、`policy`1・`build`4・`combine`1・`verify-universal`2・`distribution`1・`r4d1`4・`r4u`4・`r4e`4・`r4e-universal`2・`implement-guard`4・`implement-guard-universal`2・`r4g`4・`r4g-universal`2・`s3d`4・`s3d-universal`2である。
+- `check_workflow.py`は、`native.yml`のS3Dのジョブを次のとおり確かめる。S3Dのジョブの`needs`は見ない。
+  - `REQUIRED_NATIVE_JOBS`で、`s3d`・`s3d-universal`のジョブの欠落を拒否する。
+  - `check_s3d_jobs`で、比較のジョブが1つずつあること・matrixの機種(`s3d`は4機種、`s3d-universal`はMac 2機種)・コマンドの形・Linuxの比較が基準の版の機械(Ubuntu 24.04)で流れることを確かめる。
+  - 上限(270分・150分)と、比較の前のPython 3.10.11も確かめる。
+- `test_s3d_ci.py`の`S3DWorkflowTests`は、`native.yml`の`needs`(`s3d`は`build`、`s3d-universal`は`combine`)と機種を確かめる。
+  - ジョブ・工程・機種を抜く変異と、コマンドの形・ジョブの重複・上限・Python・Linuxの機械を変える変異を、`check_workflow.py`が拒否することも確かめる。
+- 配布一覧へのexampleの混入は、`test_s3d_ci.py`の`S3DCiTests`(`test_example_is_transferred_and_never_distributed`)が拒否する。
+- `test_native_ci.py`の`S3DConnectionTests`は1件である。exampleの単体検査をLinuxの`build`だけで流し、道具を入れないことを確かめる。
+- 接続を抜く変異21件をすべて検出したのは、2026-11-12の手元の記録である(`test_s3d_ci.py` 18件・`test_native_ci.py` 75件の時点)。今のテストでは数え直していない。
+- CIでの実測は、手で起動したNativeのrun 45133632158(commit 0ab63ea)の値である。6件とも成功した。
+  - PRがmainと衝突していて、PR用のCIが流れなかった。そのため、`workflow_dispatch`(手で起動する入口)で起動した。
+
+| ジョブ | 機種 | 時間 | 上限 | 余裕 |
+|---|---|---|---|---|
+| `s3d` | Linux x86_64 | 26.4分 | 270分 | 243.6分 |
+| `s3d` | Linux arm64 | 43.0分 | 270分 | 227.0分 |
+| `s3d` | Mac arm64 | 80.1分 | 270分 | 189.9分 |
+| `s3d` | Mac x86_64 | 132.4分 | 270分 | 137.6分 |
+| `s3d-universal` | Mac arm64 | 44.7分 | 150分 | 105.3分 |
+| `s3d-universal` | Mac x86_64 | 65.0分 | 150分 | 85.0分 |
 
 ### 4 種類の CI と成果物
 

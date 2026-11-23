@@ -51,7 +51,8 @@ CONCURRENCY = {
 # s3d は build の tar の 2 回分を 4 機種で、s3d-universal は署名後の Mac のファイルを両 CPU で比較する。
 S3D_OPERATIONS = {"s3d": set(RUNNERS), "s3d-universal": {"macos-x86_64", "macos-arm64"}}
 # 上限は、比較 1 回の上限(Mac は 120 分・Linux は 60 分。s3d_ci の COMPARISON_LIMITS)× 回数(2・1)に、
-# 準備の 30 分を足す(内側の上限で先に止まる)。Mac x86_64 の比較 1 回の実測が約 60 分で、その 2 倍の余裕を取る。
+# 準備の 30 分を足す(内側の上限で先に止まる)。Mac の 120 分は、run 45133632158 の Mac x86_64 の比較 1 回の
+# 最長 3,901 秒の約 1.85 倍である。
 # s3d は 2 × 120 + 30 = 270 分、s3d-universal は 1 × 120 + 30 = 150 分(GitHub の 1 ジョブの上限 360 分の内)。
 S3D_TIMEOUTS = {"s3d": 270, "s3d-universal": 150}
 # S3D の版に依る欄の基準は CI の Ubuntu 24.04 の版。Linux の比較はこの機械で流す。
@@ -87,6 +88,8 @@ REQUIRED_NATIVE_JOBS = (
     "implement-guard-universal",
     "r4g",
     "r4g-universal",
+    "s3d",
+    "s3d-universal",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (

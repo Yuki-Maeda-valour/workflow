@@ -58,7 +58,7 @@ class S3DCiTests(unittest.TestCase):
             with self.subTest(operation=operation), contextlib.ExitStack() as stack:
                 stack.enter_context(mock.patch.object(sys, 'argv', ['build.py', operation, '--platform', 'linux-x86_64']))
                 for function, value in (('workspace', self.root), ('quality', None), ('reproduce', self.root), ('pack_tar', None),
-                                        ('probe', None), ('r4b_probe', None), ('r4r_probe', None)):
+                                        ('probe', None), ('r4b_probe', None), ('r4r_probe', None), ('loop_state_probe', None)):
                     stack.enter_context(mock.patch.object(build, function, return_value=value))
                 typed = stack.enter_context(mock.patch.object(s3d_ci, 'typed_report'))
                 probe = stack.enter_context(mock.patch.object(s3d_ci, 'probe'))
@@ -349,7 +349,8 @@ class S3DCiTests(unittest.TestCase):
                 output.write_text(json.dumps(self.report(tool_versions_base=False)))
             with self.assertRaisesRegex(RuntimeError, '基準の版'):
                 s3d_ci.probe(self.root / 'bin/binary', self.root / 'typed.json', self.root, root=self.root, run=stale)
-        # 機種ごとの上限: Linuxは60分、Macは120分(Mac x86_64の実測約60分の2倍)。未知の機種は拒否する。
+        # 機種ごとの上限: Linuxは60分、Macは120分(run 45133632158のMac x86_64の比較1回の最長3,901秒の約1.85倍)。
+        # 未知の機種は拒否する。
         self.assertEqual((3600, 7200), (s3d_ci.comparison_limit('Linux'), s3d_ci.comparison_limit('Darwin')))
         with self.assertRaises(KeyError):
             s3d_ci.comparison_limit('Windows')
@@ -363,7 +364,7 @@ class S3DCiTests(unittest.TestCase):
             with mock.patch.object(s3d_ci, 'environment', return_value={}), mock.patch.object(s3d_ci.platform, 'system', return_value=system):
                 s3d_ci.probe(self.root / 'bin/binary', self.root / 'typed.json', self.root, root=self.root, run=run)
             self.assertEqual([limit], seen)
-        # 1回の上限は実測(いちばん遅い値)の2倍より長い。
+        # Linuxの1回の上限は、2026-11-12の手元の実測(MEASURED_SECONDS。いちばん遅い値)の2倍より長い。
         self.assertGreaterEqual(s3d_ci.COMPARISON_LIMIT_SECONDS, 2 * s3d_ci.MEASURED_SECONDS)
         # 外部の比較は上限つきで流し、時間切れは失敗にする。
         with mock.patch.object(s3d_ci.subprocess, 'run', side_effect=subprocess.TimeoutExpired('S3D', 1)) as run:
@@ -393,8 +394,8 @@ class S3DWorkflowTests(unittest.TestCase):
         self.assertEqual(platforms('s3d-universal'), set(build.S3D_UNIVERSAL_PLATFORMS))
         self.assertEqual(jobs['s3d']['steps'][4]['with']['name'], 'native-build-${{ matrix.platform }}')
         self.assertEqual(jobs['s3d-universal']['steps'][4]['with']['name'], 'native-universal')
-        # 既存の build と verify-universal の上限は変えない。
-        self.assertEqual((jobs['build']['timeout-minutes'], jobs['verify-universal']['timeout-minutes']), (60, 30))
+        # S3D は既存の build と verify-universal の上限を変えない(S2L #468 で延ばした値のまま)。
+        self.assertEqual((jobs['build']['timeout-minutes'], jobs['verify-universal']['timeout-minutes']), (120, 60))
 
     def test_comparison_jobs_cannot_be_dropped_or_reduced(self):
         for job, platform_name in (('s3d', 'linux-arm64'), ('s3d', 'macos-x86_64'), ('s3d-universal', 'macos-arm64')):

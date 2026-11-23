@@ -2187,7 +2187,7 @@ class R4EConnectionTests(TempCase):
                     folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
                     (folder / "examples").mkdir(parents=True)
                     (folder / "dev-workflow").write_bytes(elf())
-                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract"):
+                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract"):
                         if missing and example == "r4e_contract":
                             continue
                         data = second if example == "r4e_contract" and len(count) == 2 and second is not None else elf()
