@@ -80,6 +80,12 @@ def outputs(root, ignored):
     return found
 
 
+def time_scale(system=None):
+    """子の時間切れの上限の倍率。遅いMac(Intelのrunner)では、旧版が上限より長くかかり強制終了されうる。"""
+    import platform
+    return 3 if (system or platform.system()) == 'Darwin' else 1
+
+
 def execute(fixture, command, label, args, *, env_update=None, rules=(), env_remove=(), timeout=120,
             collect=False):
     env = stubs(fixture, label, list(rules))
@@ -94,8 +100,11 @@ def execute(fixture, command, label, args, *, env_update=None, rules=(), env_rem
     before = fixture.input_state()
     listed = outputs(fixture.root, ignored)
     result = run([*command, *args], cwd=fixture.root, env=env, report=fixture.out, patch=fixture.patch,
-                 timeout=timeout)
+                 timeout=timeout * time_scale())
     unchanged(before, fixture.input_state())
+    if result.timed_out:
+        # 時間切れでプロセスグループを強制終了すると、旧版のEXITのtrapが動かず一時領域が残る。残りの検査の前に、原因を示す。
+        raise AssertionError(f'{label}: 時間切れで強制終了しました({timeout * time_scale()}秒)。遅い機械では一時領域が残ります')
     if os.listdir(scratch):
         raise AssertionError(f'{label}: 一時領域が残りました')
     shutil.rmtree(scratch)

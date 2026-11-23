@@ -739,6 +739,12 @@ def main(argv=None):
                             if case_id in {'pr2-' + kind for kind in fixed_extra.prereview2.PROC_KINDS}]
                     result['not_run'] += [{'id': case_id, 'reason': 'proc'} for case_id in proc]
                     moved += proc
+                    # 日本語のlocaleかgit・grepの翻訳ファイルが無いケース(Macの/usr/share/localeには無い)。基準の版を用意できない
+                    # Macでは、揃えても版に依る欄になるので、前提を入れず、理由の分かる未実施として記録する(Linuxは失敗のまま)。
+                    unavailable = result['fixed_extra'].get('unavailable', {})
+                    japanese = [case_id for case_id in result['fixed_extra']['pending'] if case_id in unavailable and case_id.startswith('japanese-')]
+                    result['not_run'] += [{'id': case_id, 'reason': 'japanese-environment'} for case_id in japanese]
+                    moved += japanese
                     result['fixed_extra']['pending'] = [i for i in result['fixed_extra']['pending'] if i not in moved]
                 if args.only is None and result['fixed_extra']['pending']:
                     raise AssertionError(f'固定入力の未到達 {len(result["fixed_extra"]["pending"])} 件: '

@@ -614,7 +614,7 @@ def run_cases(binary, *, fixture_type, legacy, finished_ids, typed_ids, typed_ob
     from . import launch_sites
     check_counts()
     base, _ = launch_sites.is_base(launch_sites.load())
-    done, pending, version_failed = [], [], []
+    done, pending, version_failed, unavailable = [], [], [], {}
     with tempfile.TemporaryDirectory(prefix='s3d-fixed-extra-') as temporary:
         for case in cases():
             if case['kind'] == 'shared':
@@ -635,6 +635,11 @@ def run_cases(binary, *, fixture_type, legacy, finished_ids, typed_ids, typed_ob
                 compare.note_field(case['id'], dependent)
             try:
                 run_case(case, fixture_type(root), binary, legacy)
+            except NotAvailable as error:
+                # 前提(localeや翻訳ファイル)が無い。理由を残す(Macでは、理由の分かる未実施として記録する)。
+                pending.append(case['id'])
+                unavailable[case['id']] = str(error)
+                continue
             except NotImplementedError:
                 pending.append(case['id'])
                 continue
@@ -649,4 +654,4 @@ def run_cases(binary, *, fixture_type, legacy, finished_ids, typed_ids, typed_ob
                 continue
             done.append(case['id'])
             del began
-    return {'done': done, 'pending': pending, 'version_failed': version_failed}
+    return {'done': done, 'pending': pending, 'version_failed': version_failed, 'unavailable': unavailable}

@@ -1215,6 +1215,51 @@ class StageC5(unittest.TestCase):
             compare.VERSION_MASKED.clear(); compare.VERSION_MASKED.update(masked)
             compare.VERSION_HITS.clear(); compare.VERSION_HITS.update(hits)
 
+    def test_review_execute_reports_a_timeout_before_the_leftover_scratch_and_scales_on_mac(self):
+        from diff_snapshot_fixtures import review_cases
+        self.assertEqual((1,1,3),(review_cases.time_scale('Linux'),review_cases.time_scale('Other'),review_cases.time_scale('Darwin')))
+        class Fixture:
+            def __init__(self,root):
+                self.root=root; self.env={'PATH':os.environ['PATH']}; self.out=root/'out.md'; self.patch=root/'out.patch'; self.repo=root/'repo'
+            def clean_outputs(self): pass
+            def input_state(self): return ()
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)
+            def fake_run(argv,*,cwd,env,report,patch,timeout):
+                self.assertEqual(7,timeout)
+                (Path(env['TMPDIR'])/'left').write_bytes(b'x')   # 強制終了で残った一時領域
+                return Result(-9,b'',b'',timed_out=True)
+            with mock.patch.object(review_cases,'stubs',return_value={'PATH':os.environ['PATH']}), \
+                    mock.patch.object(review_cases,'run',side_effect=fake_run), \
+                    mock.patch.object(review_cases,'unchanged'), \
+                    mock.patch.object(review_cases,'time_scale',return_value=1), \
+                    self.assertRaisesRegex(AssertionError,'legacy: 時間切れで強制終了しました\\(7秒\\)'):
+                review_cases.execute(Fixture(root),['bash','x'],'legacy',[],timeout=7)
+            # 時間切れでなく一時領域が残ったときは、従来の文で落ちる。
+            (root/'tmp-legacy'/'left').unlink(); (root/'tmp-legacy').rmdir()
+            def leftover(argv,*,cwd,env,report,patch,timeout):
+                (Path(env['TMPDIR'])/'left').write_bytes(b'x')
+                return Result(0,b'',b'')
+            with mock.patch.object(review_cases,'stubs',return_value={'PATH':os.environ['PATH']}), \
+                    mock.patch.object(review_cases,'run',side_effect=leftover), mock.patch.object(review_cases,'unchanged'), \
+                    self.assertRaisesRegex(AssertionError,'legacy: 一時領域が残りました'):
+                review_cases.execute(Fixture(root),['bash','x'],'legacy',[],timeout=7)
+
+    def test_fixed_extra_records_why_a_case_is_unavailable(self):
+        from diff_snapshot_fixtures import fixed_extra
+        cases=[{'id':'japanese-x','kind':'x'},{'id':'other-y','kind':'y'},{'id':'plain-z','kind':'z'}]
+        def run_case(case,fixture,binary,legacy):
+            if case['id']=='japanese-x': raise fixed_extra.NotAvailable('ja_JP.UTF-8のlocaleがありません')
+            if case['id']=='other-y': raise NotImplementedError('strace')
+        with mock.patch.object(fixed_extra,'cases',return_value=cases),mock.patch.object(fixed_extra,'check_counts'), \
+                mock.patch.object(fixed_extra,'run_case',side_effect=run_case):
+            with mock.patch.object(fixed_extra,'VERSION_DEPENDENT',{}):
+                value=fixed_extra.run_cases(Path('/b'),fixture_type=lambda root:None,legacy=Path('/l'),finished_ids=set(),typed_ids=set())
+        # 前提が無いケースは、理由つきで記録する。ほかの未到達(straceなど)には理由を付けない。
+        self.assertEqual(['japanese-x','other-y'],value['pending'])
+        self.assertEqual({'japanese-x':'ja_JP.UTF-8のlocaleがありません'},value['unavailable'])
+        self.assertEqual(['plain-z'],value['done'])
+
     def test_child_environment_mismatch_names_the_side_the_launch_site_and_the_arguments(self):
         from diff_snapshot_fixtures import launch_sites, review_cases
         sites = launch_sites.load()

@@ -24,8 +24,9 @@ JOB_OVERHEAD_SECONDS = 1800
 VERSION_TOOLS = ('bash', 'coreutils', 'findutils', 'sed', 'grep', 'glibc')
 # Macで作れない欄(未実施として記録し、成功に数えない)の理由。
 # Macで作れない欄: 基準の版に依る欄・straceが要る欄・/procが要る欄(別のプロセスの/proc/PID/mem)・
-# 大小文字を区別しない置き場(Macの既定のAPFS)で入力を作れない旧自己テストの観点。
-MAC_NOT_RUN = {'version', 'strace', 'proc', 'case-insensitive-store'}
+# 大小文字を区別しない置き場(Macの既定のAPFS)で入力を作れない旧自己テストの観点と、日本語のlocaleか
+# git・grepの翻訳ファイルが無く作れないケース(揃えても版に依る欄になるので、Macでは入れずに未実施とする)。
+MAC_NOT_RUN = {'version', 'strace', 'proc', 'case-insensitive-store', 'japanese-environment'}
 
 
 # 基準の版の容器(native/ci/README.mdの手順)と同じ組。fixed_extra.japanese_readyと同じ条件を満たす。

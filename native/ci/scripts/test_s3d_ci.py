@@ -264,6 +264,14 @@ class S3DCiTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, '群の失敗'):
                 s3d_ci.check_report(report, system)
 
+    def test_mac_may_record_japanese_environment_as_not_run_but_linux_may_not(self):
+        item = [{'id': 'japanese-normal', 'reason': 'japanese-environment'}]
+        self.assertIn('japanese-environment', s3d_ci.MAC_NOT_RUN)
+        summary = s3d_ci.check_report(self.report(tool_versions_base=True, not_run=item), 'Darwin')
+        self.assertEqual(summary['not_run'], {'japanese-environment': 1})
+        with self.assertRaises(RuntimeError):
+            s3d_ci.check_report(self.report(not_run=item), 'Linux')
+
     def test_japanese_missing_uses_the_same_condition_as_the_comparison(self):
         with mock.patch.object(s3d_ci.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, b'C\nja_JP.utf8\n')), \
                 mock.patch.object(s3d_ci.Path, 'is_file', return_value=True):
