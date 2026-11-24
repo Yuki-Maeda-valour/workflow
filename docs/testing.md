@@ -1086,7 +1086,7 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
 
 - `TMPDIR` は、短い名前の、自分だけが書けるフォルダにする(例の `/tmp/r4g` は先に作る)。
 - `check_r4g.py --fixture` は、実行できるRustの実行ファイル(ELFかMach-O)の絶対パスだけを受ける。旧版のスクリプトや、ほかの実行ファイルは拒否する。引数なしの起動が、入口の固定の文を返すことも確かめる。
-- `native/ci/test_r4g.py` は、比較器の自己検査60件である。`scripts/test_native_r4g.py` は、その自己検査の `Comparator`(本家のPythonも `strace` も使わない検査)に、`unsafe` と `link_section` を置く場所の静的な確認などを足し、外部のRustのビルドなしで全回帰テストへつなぐ63件である(`scripts/run-all.py` が自動で集める)。
+- `native/ci/test_r4g.py` は、比較器の自己検査63件である。`scripts/test_native_r4g.py` は、その自己検査の `Comparator`(本家のPythonも `strace` も使わない検査)に、`unsafe` と `link_section` を置く場所の静的な確認などを足し、外部のRustのビルドなしで全回帰テストへつなぐ66件である(`scripts/run-all.py` が自動で集める)。
 - Cargoと `native/ci/` の検査は、`run-all.py` に含まれない。
 - 比較の始めに、`R4G: 機械: <OS> <カーネルの版> <CPU>(待つ所の名前は WCHAN_NAMES で受け付ける)` と、`R4G: 旧版の前提: bash 4.0 以上 <パスか無し>・ファイル名の大文字と小文字を<区別する|区別しない>` の行を出す(前提が欠けるときは、行の末尾に未実施にする組を並べる)。PATHの外にbash 4.0以上があれば、PATHの先頭へ足して、旧版とRustの両方に同じbashを使わせる。
 - 待つ所の同期は、`/proc/<pid>/wchan` の名前を表 `WCHAN_NAMES` で受け付ける。pipeの読みは `pipe_read` と `anon_pipe_read`(Linux v6.15で名前が変わった。CIのカーネルで確認する)、子を待つのは `do_wait`、FIFOは `wait_for_partner` と `fifo_open`、眠りは `hrtimer_nanosleep` である。表に無い名前では、理由つきで止まる。
@@ -1157,6 +1157,25 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
 - Macの実機・最低OSの版での動作と、Macで基準の道具(bash 5.2.21など)を用意できるか。
 - 作業機の本体(bash 5.1.16など)での全体の合格(基準違いで失敗する設計である)。
 - 全回帰テスト(`run-all.py`)と、最新のmainを取り込んだ後の最終の検証。
+
+#### 自己検査の孫の確かめの揺れ(#511)
+
+- 比較器の自己検査 `test_pty_run_reads_everything_the_child_wrote_before_exiting` が、CI の Linux arm64 で 1 回落ちた(run 45094423658 の attempt 2・job 137459403833・カーネル 7.0.0-1017-azure)。
+  - 落ちたのは最後の確かめ(`self.assertFalse(self.m.pid_alive(pid))`)。待ちの条件の `pid_alive` が「死んだ」と読んで抜けた後に、確かめの `pid_alive` が「生きている」と読んだ。
+  - このテストの所要は約 4.1 秒で、合格の回と同じだった。10 秒の待ちの上限には届いていない。
+- 原因の候補(推測。未確認):
+  - (a) Linux は、終わったプロセスを回収している途中の短い間、`/proc/<pid>/stat` に状態 `X` を出す。直す前の `pid_alive` は `X` を「生きている」と読んでいた。手元(x86_64・カーネル 6.8)で、親を失った孫を SIGKILL で止めて読み続けると、400 回中 47 回で `Z` の後に `X` が見えた。
+  - (b) 番号の再利用。(c) `/proc` の読みの一時的な失敗(`process_state` は読みの失敗をすべて「無い」にする)。
+  - 手元で、テストと同じ「待つ → もう一度読む」読み方を 1500 回流すと、「生きている」は 0 回だった(再現していない)。
+- 直し(`native/ci/check_r4g.py`・`native/ci/test_r4g.py`):
+  - 死んだと読む状態の組 `DEAD_STATES` に `X` を足し、`pid_alive` はその組で判定する。比較の観測(代用品が残っていたか)も、回収の途中の代用品を「残っていた」と読まなくなる。
+  - 死ぬのを待って最後の読みで判定する `wait_process_dead` を足した。テストはそれで判定し、1 回だけ読み直して見張る(仮説が外れていたときに原因を隠さない)。
+  - 落ちたときは、待ちで読んだ状態の並び・読み直した状態・待った秒数と、`process_report` の情報(`/proc/<pid>/stat` の行・`status` の状態と親と信号の欄・`cmdline`・`wchan`。Mac は `ps -ww` の行)を失敗の文に出す。読み直しが生きていて `cmdline` が孫でなければ (b)、孫のままなら (c) かほかの原因と見分ける。
+  - 待ちの上限(10 秒)と `pty_run` の時間切れ(0.5 秒)は変えていない。
+- テストを 3 件足した。`native/ci/test_r4g.py` は 60 件から 63 件、`scripts/test_native_r4g.py` は 63 件から 66 件、CI の比較器が流す `Comparator` は 59 件から 62 件になった。
+  - main の版の比較器では、足した 3 件が落ちる(`X` の場合の判定が FAIL、2 件は関数が無いので ERROR)。
+  - わざと入れる誤り(変異)で確かめた: `DEAD_STATES` を `(None, 'Z')` に戻すと 2 件、`wait_process_dead` が抜けた後にもう 1 回読む形にすると 1 件が FAIL になる。
+  - 直した後、手元で `test_pty_run_reads_everything_the_child_wrote_before_exiting` を 20 回流して 20 回合格した(直す前も手元では落ちない。通常の経路を壊さないことの確かめ)。
 
 ### S3I-Aの比較
 

@@ -859,6 +859,75 @@ class Comparator(unittest.TestCase):
                          ('/c', (*self.m.NO_AUTO_MAINTENANCE, 'commit', '-qm', 'x'), False))
         self.assertNotIn('git', vars(self.m.pending_cli_wrapper(Plain, module)))
 
+    def test_pid_alive_reads_dead_and_zombie_and_missing_as_not_alive(self):
+        # X は終わって回収されている途中の状態なので、生きているとは読まない。CI の Linux arm64 で落ちた回は、
+        # Z から消えるまでの間の 2 回の読みが分かれたと推測される(未確認)。
+        for state, alive in (('R', True), ('S', True), ('D', True), ('T', True), ('t', True), ('I', True),
+                             ('X', False), ('Z', False), (None, False)):
+            with self.subTest(state=state):
+                with mock.patch.object(self.m, 'process_state', lambda pid, state=state: state):
+                    self.assertIs(self.m.pid_alive(1234), alive)
+
+    def test_process_report_collects_the_state_and_says_when_missing(self):
+        pid = os.getpid()
+        report = self.m.process_report(pid)
+        self.assertNotIn('\n', report)
+        self.assertIn('pid %d' % pid, report)
+        if sys.platform.startswith('linux'):
+            self.assertIn('stat=%d (' % pid, report)
+            self.assertIn('State:' + self.m.process_state(pid), report)
+            self.assertIn('PPid:%d' % os.getppid(), report)
+            self.assertIn('cmdline=' + sys.orig_argv[0], report)
+            self.assertIn('SigCgt:', report)
+            self.assertIn('wchan=', report)
+        else:
+            fields = report.split()
+            self.assertEqual(fields[3], str(os.getppid()))
+            self.assertEqual(fields[5][:1], self.m.process_state(pid))
+        # 改行を含む引数で起動した子でも、1 行になる(子は自分で止めて回収する)。
+        child = subprocess.Popen([sys.executable, '-I', '-c', 'import time\ntime.sleep(30)'])
+        try:
+            deadline = time.monotonic() + 10
+            while 'time.sleep' not in self.m.process_report(child.pid) and time.monotonic() < deadline:
+                time.sleep(0.05)  # 起動の途中(引数がまだ見えない間)を待つ
+            multi = self.m.process_report(child.pid)
+            self.assertIn('time.sleep', multi)
+        finally:
+            child.kill()
+            child.wait()
+        self.assertNotIn('\n', multi)
+        self.assertIn('pid %d' % child.pid, multi)
+        if sys.platform.startswith('linux'):
+            self.assertIn('\\n', multi)
+        # 回収した子の番号は、例外を投げずに「無い」と返す。
+        self.assertEqual(self.m.process_report(child.pid), 'pid %d: 無い' % child.pid)
+
+    def test_wait_process_dead_decides_on_the_last_state_it_read(self):
+        def run(states, timeout=10):
+            reads = iter(states)
+            calls = []
+
+            def read(pid):
+                calls.append(pid)
+                return next(reads)
+            with mock.patch.object(self.m, 'process_state', read), \
+                    mock.patch.object(self.m.time, 'sleep', lambda seconds: None):
+                seen, waited = self.m.wait_process_dead(1234, timeout)
+            return seen, waited, calls
+        # Z を読んで抜ける。その後に読み直さない(読んだのは 2 回だけ)。
+        seen, waited, calls = run(['R', 'Z', 'X', None])
+        self.assertEqual((seen, len(calls)), (['R', 'Z'], 2))
+        self.assertIn(seen[-1], self.m.DEAD_STATES)
+        self.assertGreaterEqual(waited, 0)
+        seen, waited, calls = run(['S', 'X', None])
+        self.assertEqual(seen, ['S', 'X'])
+        self.assertIn(seen[-1], self.m.DEAD_STATES)
+        # ずっと生きていれば、上限で抜け、最後が生きている。続けて同じ文字は 1 つにまとめる。
+        seen, waited, calls = run(iter(lambda: 'S', None), timeout=0.2)
+        self.assertEqual(seen, ['S'])
+        self.assertNotIn(seen[-1], self.m.DEAD_STATES)
+        self.assertGreaterEqual(waited, 0.2)
+
     def test_pty_run_reads_everything_the_child_wrote_before_exiting(self):
         # 書いてすぐ終わる子の出力を全部読む(Mac では、子の側の最後の close が読んでいない出力を捨てうる)。
         code = ('import os, sys\n'
@@ -883,10 +952,11 @@ class Comparator(unittest.TestCase):
                     self.assertLess(time.monotonic() - started, 10)
             # 終わった後も書き続けた孫も止めた。
             pid = int(marker.read_text())
-            deadline = time.monotonic() + 10
-            while self.m.pid_alive(pid) and time.monotonic() < deadline:
-                time.sleep(0.05)
-            self.assertFalse(self.m.pid_alive(pid))
+            states, waited = self.m.wait_process_dead(pid, 10)
+            after = self.m.process_state(pid)  # 見張り: 判定の後に 1 回だけ読み直し、それも死んだと読む
+            self.assertTrue(states[-1] in self.m.DEAD_STATES and after in self.m.DEAD_STATES,
+                            '孫 %d が死んでいない: 待ちで読んだ状態=%s・読み直し=%s・待った秒数=%.2f・%s'
+                            % (pid, states, after, waited, self.m.process_report(pid)))
 
     def test_bash4_is_searched_in_path_then_homebrew_places(self):
         with tempfile.TemporaryDirectory() as temp:
