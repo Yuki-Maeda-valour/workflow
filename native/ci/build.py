@@ -33,7 +33,9 @@ CI_BINARIES = ("dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixtu
 EXAMPLES = ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract")
 # S3D(#472)の検査専用入口。比較は build の外の別ジョブ(s3d・s3d-universal)で流す。
 CI_BINARIES += ("diff_snapshot_contract",)
+CI_BINARIES += ("r4a_rest_contract",)
 EXAMPLES += ("diff_snapshot_contract",)
+EXAMPLES += ("r4a_rest_contract",)
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -246,6 +248,9 @@ def quality(name, work):
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4g_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4e_contract"], env=env)
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_guard_contract"], env=env)
+        # R4A 残り 5 本の専用 example の単体検査(専用比較は、新しい必須ジョブ r4a-rest・r4a-rest-universal で流す)。
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "r4a_rest_contract"], env=env)
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-platform", "--example", "r4a_rest_platform"], env=env)
         r4r_map(env, Path(temporary))
         # 同じソースの各OS品質工程で一度。release各回はCLI比較と自己検査を行う。
         run([sys.executable, "-B", ROOT / "native/ci/check_loop_state_units.py"], env=env)
@@ -331,6 +336,42 @@ def r4g_probe(fixture):
 def loop_state_probe(fixture):
     run([sys.executable, "-B", ROOT / "native/ci/check_loop_state.py", "--fixture", fixture])
     run([sys.executable, "-B", ROOT / "native/ci/test_loop_state.py", "--fixture", fixture])
+
+
+def r4a_rest_probe(fixture, selftest=True):
+    """R4A 残り 5 本の専用比較。旧版は、この Python(CI の setup-python の 3.10.11)で動かす(`$R4A_REST_PYTHON`)。
+    接続待ちが 1 件でも残れば失敗にする(`--strict-pending`)。未実施は、固定の一覧(Linux 以外の OS で確かめられない case)の
+    とおりのときだけ終了 0 で、成功には数えず件数を出す。一覧と違う未実施・cc が無い・差込みの効きの期待違いは失敗(0 以外)。"""
+    python = sys.executable
+    env = {**os.environ, "R4A_REST_PYTHON": python}
+    command = [python, "-B", ROOT / "native/ci/check_r4a_rest.py", "--fixture", fixture, "--strict-pending"]
+    if not selftest:
+        command.append("--no-selftest")  # 比較器の自己検査は、ジョブの中で 1 回だけ流す(2 回目の比較では省く)
+    run(command, env=env)
+
+
+def r4a_rest_build(name, downloads, work):
+    """build の後の機種ごとの必須ジョブ: 同じ機種の 2 回のビルド(`1/`・`2/`)の両方の専用 example を比べる。"""
+    target_config(name)  # 同じ OS・CPU の機械でだけ流す
+    folder, _ = extract_build(name, downloads, work)
+    for number in (1, 2):
+        r4a_rest_probe(folder / str(number) / "r4a_rest_contract", selftest=number == 1)
+
+
+R4A_REST_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def r4a_rest_universal(name, downloads, work):
+    """combine の後の Mac 2 機種の必須ジョブ: 署名後の Mac 共通の実行物を、各 CPU で比べる(署名し直さない)。"""
+    if name not in R4A_REST_UNIVERSAL_PLATFORMS:
+        raise ValueError("r4a-rest-universal は Mac の 2 機種で実行してください")
+    target_config(name)  # 同じ OS・CPU の機械でだけ流す
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "r4a_rest_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    r4a_rest_probe(fixture)
 
 
 def read_record(folder):
@@ -618,7 +659,7 @@ def implement_guard_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -627,7 +668,7 @@ def main():
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -647,6 +688,10 @@ def main():
                 loop_state_probe(stage / f"{number}/loop_state_fixture")
             pack_tar(stage, work / (args.platform + ".tar"), [*BUILD_FILES, "record.json"])
             print(f"2 回のビルド: {stage}")
+        elif args.command == "r4a-rest":
+            r4a_rest_build(args.platform, downloads, work)
+        elif args.command == "r4a-rest-universal":
+            r4a_rest_universal(args.platform, downloads, work)
         elif args.command == "combine":
             combine(downloads, work)
         elif args.command == "verify-universal":

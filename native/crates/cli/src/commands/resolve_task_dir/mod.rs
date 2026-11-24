@@ -101,7 +101,8 @@ fn validate(value: &[u8], root: &[u8]) -> Result<(Vec<u8>, Vec<u8>), ResolutionE
     Ok((normalized, resolved))
 }
 
-fn state_file(name: &[u8]) -> bool {
+/// R4A の `candidate-keys` が同じ定義を使う(定義を複製しない)ため、クレート内へ公開する。
+pub(crate) fn state_file(name: &[u8]) -> bool {
     let states = ["進行中_", "完了_", "中断_", "保留_", "候補_"];
     states.iter().any(|state| {
         name.strip_prefix(state.as_bytes()).is_some_and(|suffix| {
