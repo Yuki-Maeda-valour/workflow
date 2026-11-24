@@ -173,7 +173,8 @@ R4Rの上記経路はコード上で必須にしました。今回の手元Linux
 
 #468の`loop-state`の7コマンドは未登録・未配布です。[契約](../../docs/design.md#loop-stateの状態観測7コマンドs2l)と [実行手順・件数・時間](../../docs/testing.md#s2lの比較)を参照してください。
 
-- `quality()`は、各OSで1回、`check_loop_state_units.py`(Rustテスト56件)と`check_loop_state_mutations.py`(誤りを入れた21種類)を流します。
+- `quality()`は、各OSで1回、`check_loop_state_units.py`(Rustテスト57件)と`check_loop_state_mutations.py`(誤りを入れた21種類)を流します。
+- 安全の観測のRustテスト(`safety_tests.rs` の `Fixture`)が試験のrepoを作る git には、後ろの自動の手入れを止める指定を付けます(#517)。手入れが作って消す`.git/objects/maintenance.lock`が、テスト用の監視を作る途中に消えて落ちたためです。記録は[testing.md](../../docs/testing.md#s2lの比較)にあります。
 - Linux2種・Mac2種の`build`/`reproduce`は、製品用`dev-workflow`・検査用`r4b_contract`・`r4r_contract`と同じ2回のビルドで、検査用`loop_state_fixture`も作ります。
 - 各回に`check_loop_state.py --fixture <今回作ったloop_state_fixtureの絶対パス>`と`test_loop_state.py --fixture <同じパス>`を必須実行します。
 - Linuxは4本のELFを検査し、各2回のバイト列を比べます。Macは4本を各2回結合・署名し、署名後のバイト列を比べます。
