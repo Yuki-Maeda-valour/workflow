@@ -743,6 +743,145 @@ class BuildTests(TempCase):
                 build.prepare("linux-x86_64")
         self.assertEqual(run.call_count, 1)
 
+    def run_prepare(self, name, github_actions, outputs=None, fail_at=None):
+        """prepare を、run を差し替えて流す。run の呼び出しの一覧と、標準エラーの文字列を返す(失敗は例外のまま上げる)。
+        outputs は capture=True の呼び出しの出力(キーは rustup の 2 語目以降の並び)、fail_at は失敗させる呼び出しの並び。"""
+        outputs = outputs or {}
+        self.calls = []
+        self.error_at_call = []
+        self.expected_env = None
+
+        def fake(args, **kwargs):
+            self.calls.append(mock.call(args, **kwargs))
+            self.error_at_call.append(sys.stderr.getvalue())
+            key = tuple(args[1:])
+            if fail_at is not None and key == tuple(fail_at):
+                raise subprocess.CalledProcessError(1, args)
+            return outputs.get(key, "") if kwargs.get("capture") else None
+
+        with mock.patch.dict(os.environ), mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+                mock.patch.object(build, "run", side_effect=fake), contextlib.redirect_stderr(io.StringIO()) as error:
+            if github_actions:
+                os.environ["GITHUB_ACTIONS"] = "true"
+            else:
+                os.environ.pop("GITHUB_ACTIONS", None)
+            build.prepare(name)
+            self.expected_env = {**os.environ, "RUSTUP_AUTO_INSTALL": "0"}
+            self.env_after = dict(os.environ)
+        return self.calls, error.getvalue()
+
+    def toolchain_home(self, name="1.99.1-aarch64-unknown-linux-gnu"):
+        """入れかけの道具一式の置き場をまねる(部品の一覧が空・部品の記録と clippy と更新の印が残っている)。"""
+        home = self.root / "rustup-home"
+        rustlib = home / "toolchains" / name / "lib" / "rustlib"
+        rustlib.mkdir(parents=True)
+        (rustlib / "components").write_text("")
+        (rustlib / "multirust-config.toml").write_text(
+            'config_version = "1"\n[[components]]\npkg = "rust-docs"\n[[components]]\npkg = "clippy-preview"\n')
+        (home / "toolchains" / name / "bin").mkdir()
+        (home / "toolchains" / name / "bin" / "cargo-clippy").write_text("")
+        (home / "update-hashes").mkdir()
+        (home / "update-hashes" / name).write_text("hash")
+        return home
+
+    def test_prepare_removes_installed_toolchain_on_ci_linux_arm64(self):
+        home = self.toolchain_home()
+        outputs = {
+            ("toolchain", "list"): "stable-aarch64-unknown-linux-gnu (default)\n1.99.1-aarch64-unknown-linux-gnu",
+            ("show", "home"): str(home),
+        }
+        calls, error = self.run_prepare("linux-arm64", True, outputs)
+        self.assertEqual([call.args[0] for call in calls], [
+            [sys.executable, "-m", "pip", "install", "-r", source_hash.ROOT / "requirements-dev.txt"],
+            ["rustup", "--version"],
+            ["rustup", "toolchain", "list"],
+            ["rustup", "show", "home"],
+            ["rustup", "toolchain", "uninstall", build.TOOLCHAIN],
+            ["rustup", "toolchain", "install", build.TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"],
+            ["rustup", "target", "add", "--toolchain", build.TOOLCHAIN, "test-target"],
+        ])
+        for call in calls[1:5]:
+            self.assertEqual(call.kwargs["env"], self.expected_env)
+            self.assertEqual(call.kwargs["cwd"], source_hash.ROOT)
+        self.assertNotIn("RUSTUP_AUTO_INSTALL", self.env_after)
+        # 状態の 1 行は、アンインストールより前に出ている。
+        uninstall = self.error_at_call[4]
+        self.assertIn("components=空", uninstall)
+        self.assertIn("bin/cargo-clippy=あり", uninstall)
+        self.assertNotIn("components=空", self.error_at_call[3])
+        self.assertIn("1.99.1-aarch64-unknown-linux-gnu", error)
+        self.assertIn("components", error)
+
+    def test_prepare_skips_uninstall_when_toolchain_is_not_listed(self):
+        for listing in ("no installed toolchains",
+                        "stable-aarch64-unknown-linux-gnu (default)\n1.99.10-aarch64-unknown-linux-gnu"):
+            with self.subTest(listing=listing):
+                calls, _ = self.run_prepare("linux-arm64", True, {("toolchain", "list"): listing})
+                self.assertEqual([call.args[0][1:3] for call in calls[1:]], [
+                    ["--version"], ["toolchain", "list"], ["toolchain", "install"], ["target", "add"]])
+
+    def test_prepare_stops_when_a_rustup_step_fails_on_ci_linux_arm64(self):
+        outputs = {
+            ("toolchain", "list"): "1.99.1-aarch64-unknown-linux-gnu",
+            ("show", "home"): str(self.toolchain_home()),
+        }
+        for fail_at in (("--version",), ("toolchain", "list"), ("show", "home"),
+                        ("toolchain", "uninstall", build.TOOLCHAIN)):
+            with self.subTest(fail_at=fail_at):
+                with self.assertRaises(subprocess.CalledProcessError):
+                    self.run_prepare("linux-arm64", True, outputs, fail_at=fail_at)
+                self.assertEqual(tuple(map(str, self.calls[-1].args[0][1:])), fail_at)
+                self.assertFalse([call for call in self.calls if call.args[0][1:3] == ["toolchain", "install"]])
+
+    def test_prepare_order_is_unchanged_outside_ci_linux_arm64(self):
+        for name, github_actions in (("linux-x86_64", True), ("macos-x86_64", True), ("macos-arm64", True),
+                                     ("linux-arm64", False)):
+            with self.subTest(name=name, github_actions=github_actions):
+                calls, _ = self.run_prepare(name, github_actions)
+                self.assertEqual([call.args[0][0:3] for call in calls], [
+                    [sys.executable, "-m", "pip"], ["rustup", "toolchain", "install"], ["rustup", "target", "add"]])
+
+    def test_toolchain_state_reports_every_item(self):
+        name = "1.99.1-aarch64-unknown-linux-gnu"
+        home = self.toolchain_home(name)
+        line = build.toolchain_state(str(home), name)
+        self.assertNotIn("\n", line)
+        base = home / "toolchains" / name
+        stamps = {base: 1700000000, base / "lib" / "rustlib" / "multirust-config.toml": 1700003600,
+                  base / "lib" / "rustlib" / "components": 1700007200}
+        for path, stamp in stamps.items():
+            os.utime(path, (stamp, stamp))
+        line = build.toolchain_state(str(home), name)
+        for part in ("道具一式=2023-11-14T22:13:20Z", "multirust-config.toml=2023-11-14T23:13:20Z",
+                     "components=2023-11-15T00:13:20Z"):
+            self.assertIn(part, line)
+        for part in (name, "components=空", "multirust-config.toml=あり", "rust-docs", "clippy-preview",
+                     "bin/cargo-clippy=あり", f"update-hashes/{name}=あり", "更新時刻"):
+            self.assertIn(part, line)
+        rustlib = home / "toolchains" / name / "lib" / "rustlib"
+        (rustlib / "components").write_text("rustc-x\ncargo-x\n")
+        self.assertIn("components=2 行", build.toolchain_state(str(home), name))
+        (rustlib / "components").unlink()
+        (rustlib / "multirust-config.toml").unlink()
+        (home / "update-hashes" / name).unlink()
+        (home / "toolchains" / name / "bin" / "cargo-clippy").unlink()
+        line = build.toolchain_state(str(home), name)
+        for part in ("components=無し", "multirust-config.toml=無し", "bin/cargo-clippy=無し", f"update-hashes/{name}=無し"):
+            self.assertIn(part, line)
+
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root は権限で止められない")
+    def test_toolchain_state_reports_unreadable_items_and_continues(self):
+        name = "1.99.1-aarch64-unknown-linux-gnu"
+        home = self.toolchain_home(name)
+        base = home / "toolchains" / name
+        base.chmod(0)
+        try:
+            line = build.toolchain_state(str(home), name)
+        finally:
+            base.chmod(0o755)
+        for part in ("components=読めない", "multirust-config.toml=読めない", "bin/cargo-clippy=読めない",
+                     f"update-hashes/{name}=あり"):
+            self.assertIn(part, line)
 
     def test_wrapper_preserves_cargo_binary_environment_and_remaps_paths(self):
         binary = str(self.root / "dev-workflow")
