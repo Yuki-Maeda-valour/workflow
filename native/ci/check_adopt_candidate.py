@@ -100,6 +100,7 @@ EXTRA_GROUPS = (
     ('E21', '事前検査の道具: 補助スクリプトが無い・読めない・bash が PATH に無い・GNU の道具が PATH に無い(承認済みの差の個別期待)', 'test_e21_precheck_tools_missing'),
     ('E22', '事前検査の 60 秒の期限: 直接の子を kill して wait・時間切れの表示', 'test_e22_precheck_deadline'),
     ('E23', '旧版の補助が無い・壊れている: candidate-keys.py が無い・task-digest.py が無い・candidate-keys.py に構文の誤り(承認済みの差の個別期待。Rust は採用に成功)', 'test_e23_candidate_helpers_missing'),
+    ('E24', '起動時に閉じた標準の fd(0〜2): 採用の成功・停止・引数の誤り・help・追跡済みの成功と拒否(追跡済みは root の階層の偶数と奇数の両方)。閉じたままの旧版の個別期待と、`/dev/null` にした旧版の結果を Rust の期待にする(承認済みの差の個別期待。2026-11-12 08:55 の決定)', 'test_e24_closed_std_fds'),
     ('E13a', '出口(依存部品なしで流せる部分): help と引数の誤りの出力の故障(途中書込みを含む)', 'test_e13a_output_faults'),
 )
 
@@ -969,6 +970,224 @@ def _contract_precheck_accept(self):
             side.close()
 
 
+# ---- 起動時に閉じた標準の fd(0〜2)。承認済みの差(2026-11-12 08:55 の決定 `rust-std-fd-reopen`)の個別期待 ----
+# Rust は標準の実行時の初期化(閉じた 0〜2 を `/dev/null` で開き直す)をそのまま使う。旧 Python は閉じたまま動き、`sys.stdout`・
+# `sys.stderr` が `None` になる(`print(..., file=sys.stderr)` は標準出力へ回り、argparse の使い方の表示は終了値 1 になる)。
+# 期待の作り方は前例(S3I-A・R4A 残り 5 本・R4G)と同じ: Rust の期待は、閉じた fd を `/dev/null`(読み書き)にして流した旧版の結果
+# (終了値・標準出力・標準エラー・作業ツリーの全部)。閉じたまま流した旧版は、旧版の個別期待(終了値と出た文の全体のバイト列)に固定する。
+# 旧版の規則は Linux の本家 3.10.11 で確かめた。Mac は fd の割り当て(最小の空き番号)が同じ仕組みなので同じ規則で照らし、
+# 違えば失敗にする(CI の結果を見て決める)。
+#
+# 追跡済みの経路の旧版は、閉じた fd の組のほかに、root のパスの階層の数の偶奇でも結果が変わる。旧 `directory()` が `/` から 1 段ずつ
+# `open` と `close` を繰り返すので、保持する root の fd は、空いている小さい 2 つの番号 a<b の一方を交互に使う(階層が偶数なら a、
+# 奇数なら b)。root の fd が 1 か 2 になると、子の中で標準出力・標準エラーの pipe がその番号へ `dup2` で上書きされ、
+# 起動の前処理(`fchdir(root の fd)`)が失敗して、`Exception occurred in preexec_fn.` で停止する(成功の経路でも止まる)。
+
+# (経路, 閉じる fd, 追跡済みの経路の root の階層の偶奇)。経路: success(採用の成功)・stop(停止)・usage(引数の誤り)・help(`-h`)・
+# tracked-success(追跡済み・事前検査と git の子を通る成功)・tracked-stop(追跡済み・事前検査の拒否の文を中継して停止)。
+CLOSED_CASES = (
+    *(('success', closed, None) for closed in ((0,), (1,), (2,), (1, 2), (0, 1, 2))),
+    *(('stop', closed, None) for closed in ((0,), (1,), (2,), (1, 2), (0, 1, 2))),
+    *(('usage', closed, None) for closed in ((0,), (1,), (2,), (1, 2), (0, 1, 2))),
+    *(('help', closed, None) for closed in ((1,), (2,), (1, 2))),
+    *(('tracked-success', closed, parity) for closed in ((0,), (1,), (2,), (1, 2), (0, 1, 2)) for parity in (0, 1)),
+    *(('tracked-stop', closed, parity) for closed in ((1,), (2,), (1, 2), (0, 1, 2)) for parity in (0, 1)),
+)
+PREEXEC_FAILURE = '候補の採用を停止: Exception occurred in preexec_fn.\n'.encode()
+USAGE_ERROR_MARK = b'adopt-candidate.py: error:'
+
+
+def old_root_fd(closed, depth_parity):
+    """閉じたままの旧版が保持する root の fd の番号: 空いている小さい 2 つの番号 a<b(閉じた fd と 3 以上)の、偶数の階層なら a・奇数なら b。"""
+    # 0 から順に、空いている番号(閉じた fd と、3 以上のすべて。ほかの fd は旧版の起動時に開いていない)を 2 つ取る。上限は決め打ちしない。
+    free = []
+    number = 0
+    while len(free) < 2:
+        if number in closed or number >= 3:
+            free.append(number)
+        number += 1
+    return free[depth_parity % 2]
+
+
+def closed_expectation(path, closed, devnull, parity, texts):
+    """(終了値, {fd 1 に出る全体のバイト列, fd 2 に出る全体のバイト列})。None の流れは空。`devnull` なら、閉じた流れは `/dev/null` なので空で、
+    ほかの流れへ回らない。閉じたままの旧 Python は、標準エラーが無いと `print(file=sys.stderr)` が標準出力へ回り、argparse の使い方の表示は
+    標準出力へ(誤りの行は出ず)終了値 1 になる。help は標準出力が無いと標準エラーへ回り、どちらも無いと終了値 1 になる。
+    `texts` は、旧版を何も閉じずに流した全体の出力(`usage`・`help`・`tracked-stop`)。"""
+    success_json = _stdout_for(hashlib.sha256(CANDIDATE.encode()).hexdigest(), tracked=path == 'tracked-success')
+    streams = {1: None, 2: None}
+    code = 0 if path in ('success', 'tracked-success', 'help') else 2
+    if path in ('success', 'tracked-success'):
+        fd, text = 1, success_json
+    elif path == 'help':
+        fd, text = 1, texts['help']
+        if 1 in closed and not devnull:
+            fd = 2  # 標準出力が `None` の argparse は、標準エラーへ回す
+            if 2 in closed:
+                code = 1  # どちらも `None`: 書こうとして失敗する
+    else:
+        fd = 2
+        text = {'stop': stop('候補の sha256 が保持値と違う'), 'tracked-stop': texts['tracked-stop'], 'usage': texts['usage']}[path]
+        if 2 in closed and not devnull:
+            fd = 1  # 標準エラーが `None` の旧版は、標準出力へ回す
+            if path == 'usage':
+                code = 1  # argparse が `None` へ書こうとして失敗する。標準出力へは使い方の部分だけが出る
+                text = text[:text.index(USAGE_ERROR_MARK)]
+    if path.startswith('tracked') and not devnull and old_root_fd(closed, parity) in (1, 2):
+        # root の fd が標準出力か標準エラーの番号になった旧版は、子の起動の前処理が失敗して、成功の経路でも停止する。
+        code, fd, text = 2, 2, PREEXEC_FAILURE
+        if 2 in closed:
+            fd = 1
+    if fd not in closed:
+        streams[fd] = text  # 閉じた流れには、何も出ない(`/dev/null` の側も空)
+    return code, streams
+
+
+def closed_runner(which, closed, devnull):
+    """旧版か Rust を、標準 fd `closed` を閉じて(`devnull` なら `/dev/null` を開いて)起動する。閉じていない出力は、一時ファイルへ向けて控える。"""
+    def runner(args, env, cwd, timeout=60):
+        argv = [str(OLD_PYTHON), '-B', str(LEGACY_SCRIPT), *args] if which == 'old' else [str(FIXTURE), *args]
+        with tempfile.TemporaryDirectory(prefix='r4c-closed-out-') as folder:
+            files = {1: Path(folder) / 'out', 2: Path(folder) / 'err'}
+
+            def place(source, target):
+                # 常に `dup2` してから元を閉じる(番号が同じときは何もせず、継承できるようにする)。
+                if source != target:
+                    os.dup2(source, target)
+                    os.close(source)
+                else:
+                    os.set_inheritable(target, True)
+
+            def prepare():
+                for fd in (1, 2):
+                    if fd not in closed:
+                        place(os.open(files[fd], os.O_WRONLY | os.O_CREAT), fd)
+                for fd in sorted(closed):
+                    if devnull:
+                        place(os.open('/dev/null', os.O_RDWR), fd)
+                    else:
+                        os.close(fd)
+            process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, preexec_fn=prepare, start_new_session=True)
+            try:
+                process.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, 9)
+                process.wait()
+                return RunResult(process.returncode, b'', b'', True)
+            read = lambda path: path.read_bytes() if path.exists() else b''  # noqa: E731
+            return RunResult(process.returncode, read(files[1]), read(files[2]), False)
+    return runner
+
+
+def _closed_side(runner, path, parity):
+    """旧版か Rust の 1 側。追跡済みの経路は、root のパスの階層の偶奇を `parity` にそろえる(root の下に 1 段のフォルダを足す)。"""
+    side = Side(runner, CANDIDATE)
+    if parity is not None and (len(side.root.parts) - 1) % 2 != parity:
+        deeper = side.root / 'n'
+        deeper.mkdir()
+        side.source.rename(deeper / side.source.name)
+        side.root, side.source = deeper, deeper / side.source.name
+    if parity is not None:
+        assert (len(side.root.parts) - 1) % 2 == parity, side.root
+    if path.startswith('tracked'):
+        side.commit_candidate()
+        if path == 'tracked-stop':
+            side.git('config', '--local', 'filter.untrusted.clean', 'cat')
+    return side
+
+
+def _closed_args(path):
+    return {'usage': [], 'help': ['-h']}.get(path)
+
+
+def _contract_closed_fds(self):
+    """E24: 起動時に閉じた標準の fd(承認済みの差の個別期待)。各ケースで、(1) 閉じたままの旧版を旧版の個別期待に(終了値と出た文の
+    全体のバイト列)、(2) 閉じた fd を `/dev/null` にした旧版を、同じ形の期待に固定し、(3) 閉じたままの Rust が、(2) の旧版と
+    終了値・標準出力・標準エラー・作業ツリーの全部で同じことを確かめる。追跡済みの経路は、root のパスの階層が偶数と奇数の両方で流す。
+    通常の一致件数には入れず、承認済みの差の区分で数える。"""
+    label = 'e24:closed-std-fds'
+    tracked_ready = None
+    for path, closed, parity in CLOSED_CASES:
+        if path.startswith('tracked'):
+            if tracked_ready is None:
+                tracked_ready = legacy_guard_ready(label + ':tracked')
+            if not tracked_ready:
+                continue
+        name = f'{label}:{path}:{"".join(map(str, closed))}' + ('' if parity is None else f':depth{parity}')
+        digest = '0' * 64 if path == 'stop' else None
+        outcomes = {}
+        for kind, which, runner_closed, devnull in (('old-open', 'old', (), False), ('old-closed', 'old', closed, False),
+                                                    ('old-devnull', 'old', closed, True), ('native-closed', 'native', closed, False)):
+            side = _closed_side(closed_runner(which, runner_closed, devnull), path, parity)
+            try:
+                direct = _closed_args(path)
+                if direct is not None:
+                    before = side.tree()
+                    outcomes[kind] = (side.normalize(side.runner(direct, environment(), side.root)), before, side.tree())
+                else:
+                    outcomes[kind] = side.run((), digest=digest)
+            finally:
+                side.close()
+        # 旧版を何も閉じずに流した全体の出力。使い方・help・拒否の文(root は `<ROOT>`)の期待の元になる。
+        opened = outcomes['old-open'][0]
+        texts = {'usage': opened.stderr, 'help': opened.stdout, 'tracked-stop': opened.stderr}
+
+        def check(kind, devnull, outcomes=outcomes, path=path, closed=closed, parity=parity, texts=texts):
+            result, before, after = outcomes[kind]
+            self.assertFalse(result.timed_out, kind)
+            code, streams = closed_expectation(path, closed, devnull, parity, texts)
+            self.assertEqual(result.returncode, code, f'{kind}: {result.stderr.decode("utf-8", "replace")[:200]}')
+            for fd, data in ((1, result.stdout), (2, result.stderr)):
+                self.assertEqual(data, streams[fd] or b'', f'{kind}: fd {fd}')  # 全体のバイト列で照らす
+            if code not in (0,) or path in ('usage', 'stop', 'tracked-stop', 'help'):
+                self.assertEqual(before, after, kind)  # 停止したら、作業ツリーは変わらない
+            else:
+                self.assertIn('進行中_例.md', after, kind)
+                self.assertNotIn('候補_例.md', after, kind)
+
+        def baseline(outcomes=outcomes, path=path, texts=texts):
+            # 何も閉じない旧版が、固定の文(JSON・停止の文)と完全に一致する。
+            result = outcomes['old-open'][0]
+            expected = {'success': (0, _stdout_for(hashlib.sha256(CANDIDATE.encode()).hexdigest()), b''),
+                        'tracked-success': (0, _stdout_for(hashlib.sha256(CANDIDATE.encode()).hexdigest(), tracked=True), b''),
+                        'stop': (2, b'', stop('候補の sha256 が保持値と違う')),
+                        # 使い方・help は、固定期待(arg_cases.json)の全体と照らす。自分の出力から作った期待と比べない。
+                        'usage': (2, b'', fixed_text([])[1]), 'help': (0, fixed_text(['-h'])[0], b''),
+                        'tracked-stop': (2, b'', texts['tracked-stop'])}[path]
+            self.assertEqual((result.returncode, result.stdout, result.stderr), expected)
+            if path == 'tracked-stop':
+                # 拒否の文は、旧版の停止の文の接頭辞を固定する(中身は旧版の事前検査の出力。root は `<ROOT>`)。
+                self.assertTrue(texts['tracked-stop'].startswith('候補の採用を停止: git の事前検査に通らない: '.encode()))
+
+        def compare(outcomes=outcomes):
+            old, native = outcomes['old-devnull'], outcomes['native-closed']
+            same_result(old[0], native[0])
+            same_tree(old[2], native[2])
+        passed = True
+        for which_label, kind, devnull in (('approved_old', 'old-closed', False), ('approved_old', 'old-devnull', True)):
+            with self.subTest(case=name, kind=kind):
+                try:
+                    judge_run(which_label, f'{name}:{kind}', lambda kind=kind, devnull=devnull: check(kind, devnull))
+                except Exception:  # 通らなかった判定は、どの例外でも、承認済みの差の一覧に足さない
+                    passed = False
+                    raise
+        with self.subTest(case=name, kind='baseline'):
+            try:
+                judge_run('approved_old', f'{name}:old-open', baseline)
+            except Exception:
+                passed = False
+                raise
+        with self.subTest(case=name, kind='native-closed'):
+            try:
+                judge_run('approved_native', f'{name}:native-closed', lambda: (check('native-closed', True, ), compare()))
+            except Exception:
+                passed = False
+                raise
+        if passed:
+            APPROVED_DIFFERENCE_RUN.append(name)
+
+
 Contract.test_a06_warnings_from_candidate_check = _contract_a06
 Contract.test_a12_a14_tracked_adoption = _contract_tracked
 Contract.test_a17_precheck_refusal = _contract_a17
@@ -977,6 +1196,7 @@ Contract.test_e02_parent_and_root = _contract_e02
 Contract.test_e03_candidate_size = _contract_e03
 Contract.test_e04b_candidate_analysis = _contract_candidate_analysis
 Contract.test_e07b_precheck_accept = _contract_precheck_accept
+Contract.test_e24_closed_std_fds = _contract_closed_fds
 Contract.test_e04_digest_shape = _contract_e04
 
 

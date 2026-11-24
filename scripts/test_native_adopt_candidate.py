@@ -49,7 +49,7 @@ class AdoptCandidateComparator(unittest.TestCase):
     def test_old_test_map_covers_all_26_old_methods(self):
         checker = load(CHECKER, 'r4c_checker_loaded')
         self.assertEqual(len(checker.old_test_methods()), 26)
-        self.assertEqual(checker.verify_map(), (26, 25))
+        self.assertEqual(checker.verify_map(), (26, 26))
 
     def run_checker(self, *args):
         return subprocess.run([sys.executable, '-B', str(CHECKER), *args], capture_output=True, text=True,

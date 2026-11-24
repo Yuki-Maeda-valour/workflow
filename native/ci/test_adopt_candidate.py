@@ -166,7 +166,7 @@ class Comparator(unittest.TestCase):
     def test_map_covers_every_old_method_exactly_once(self):
         methods = self.m.old_test_methods()
         self.assertEqual(len(methods), 26)
-        self.assertEqual(self.m.verify_map(), (26, 25))
+        self.assertEqual(self.m.verify_map(), (26, 26))
         table = list(self.m.OLD_TEST_MAP)
         broken = {
             'missing': (table[1:], methods),
@@ -765,12 +765,148 @@ class Comparator(unittest.TestCase):
                 self.assertEqual(tally['native_mismatch'][len(saved['native_mismatch']):], ['e04b:first'])
                 self.assertEqual(tally['old_mismatch'], saved['old_mismatch'])
 
+    # ---- 起動時に閉じた標準の fd(E24) ----
+
+    TEXTS = {'usage': b'usage: adopt-candidate.py [-h]\nadopt-candidate.py: error: x\n', 'help': b'usage: adopt-candidate.py [-h]\nhelp\n',
+             'tracked-stop': b'\xe5\x80\x99refused\n'}
+
+    def test_closed_fd_expectations_follow_the_old_python_behaviour(self):
+        t = self.TEXTS
+        e = lambda path, closed, devnull=False, parity=None: self.m.closed_expectation(path, closed, devnull, parity, t)  # noqa: E731
+        digest = __import__('hashlib').sha256(self.m.CANDIDATE.encode()).hexdigest()
+        success = self.m._stdout_for(digest)
+        stop = self.m.stop('候補の sha256 が保持値と違う')
+        self.assertEqual(e('success', (0,)), (0, {1: success, 2: None}))
+        self.assertEqual(e('success', (1,)), (0, {1: None, 2: None}))
+        # 標準エラーを閉じたままの旧版は、停止の文を標準出力へ回す。`/dev/null` にした旧版・標準出力も閉じた旧版は、どこにも出ない。
+        self.assertEqual(e('stop', (2,)), (2, {1: stop, 2: None}))
+        self.assertEqual(e('stop', (2,), True), (2, {1: None, 2: None}))
+        self.assertEqual(e('stop', (1, 2)), (2, {1: None, 2: None}))
+        self.assertEqual(e('stop', (1,)), (2, {1: None, 2: stop}))
+        # 使い方の表示は、標準エラーが無いと標準出力へ(使い方の部分だけ)出て終了値は 1。`/dev/null` にすると終了値は 2。
+        self.assertEqual(e('usage', (0,)), (2, {1: None, 2: t['usage']}))
+        self.assertEqual(e('usage', (2,)), (1, {1: b'usage: adopt-candidate.py [-h]\n', 2: None}))
+        self.assertEqual(e('usage', (2,), True), (2, {1: None, 2: None}))
+        self.assertEqual(e('usage', (1, 2)), (1, {1: None, 2: None}))
+        # help は、標準出力が無いと標準エラーへ回り、どちらも無いと終了値 1。`/dev/null` にした旧版は終了 0。
+        self.assertEqual(e('help', (1,)), (0, {1: None, 2: t['help']}))
+        self.assertEqual(e('help', (2,)), (0, {1: t['help'], 2: None}))
+        self.assertEqual(e('help', (1, 2)), (1, {1: None, 2: None}))
+        self.assertEqual(e('help', (1, 2), True), (0, {1: None, 2: None}))
+
+    def test_old_root_fd_takes_the_two_smallest_free_numbers_without_a_fixed_upper_bound(self):
+        self.assertEqual([self.m.old_root_fd(c, p) for c in ((), (0,), (1, 2)) for p in (0, 1)], [3, 4, 0, 3, 1, 2])
+
+    def test_closed_fd_expectations_for_the_tracked_path_depend_on_the_parity_of_the_root_depth(self):
+        t = self.TEXTS
+        e = lambda path, closed, parity, devnull=False: self.m.closed_expectation(path, closed, devnull, parity, t)  # noqa: E731
+        # 保持する root の fd は、空いている小さい 2 つの番号(閉じた fd と 3 以上)の、偶数の階層なら小さい方・奇数なら大きい方。
+        self.assertEqual([self.m.old_root_fd(c, 0) for c in ((0,), (1,), (2,), (1, 2), (0, 1, 2))], [0, 1, 2, 1, 0])
+        self.assertEqual([self.m.old_root_fd(c, 1) for c in ((0,), (1,), (2,), (1, 2), (0, 1, 2))], [3, 3, 3, 2, 1])
+        for closed, fails in (((0,), (False, False)), ((1,), (True, False)), ((2,), (True, False)), ((1, 2), (True, True)),
+                              ((0, 1, 2), (False, True))):
+            for parity in (0, 1):
+                code, streams = e('tracked-success', closed, parity)
+                if fails[parity]:
+                    self.assertEqual(code, 2, (closed, parity))
+                    shown = streams[2] if 2 not in closed else streams[1]
+                    if (2 in closed and 1 in closed):
+                        self.assertEqual(streams, {1: None, 2: None})
+                    else:
+                        self.assertEqual(shown, self.m.PREEXEC_FAILURE)
+                else:
+                    self.assertEqual(code, 0, (closed, parity))
+                    if 1 not in closed:
+                        self.assertIn(b'"tracked": true', streams[1])
+                # `/dev/null` にした旧版は、階層に依らず通常どおり。
+                self.assertEqual(e('tracked-success', closed, parity, True)[0], 0)
+        # 拒否の文(事前検査)も、root の fd が 1 か 2 のときは、前処理の失敗の文に変わる。
+        self.assertEqual(e('tracked-stop', (1,), 0), (2, {1: None, 2: self.m.PREEXEC_FAILURE}))
+        self.assertEqual(e('tracked-stop', (2,), 1)[1][1], t['tracked-stop'])
+
+    def test_closed_runner_really_closes_or_reopens_the_standard_streams(self):
+        saved = self.m.FIXTURE
+        self.m.FIXTURE = Path('/bin/sh')
+        # 終了値で、fd 0・1・2 が開いているかを返す(開いていなければ 1・2・4 を足す)。確かめは、どの fd も付け替えずに行う。
+        script = ['-c', 's=0; ( exec 9>&2 ) || s=$((s+4)); ( exec 9<&0 ) || s=$((s+1)); ( exec 9>&1 ) || s=$((s+2)); echo out; echo err >&2; exit $s']
+        try:
+            def run(closed, devnull):
+                return self.m.closed_runner('native', closed, devnull)(script, self.m.environment(), self.dir)
+            plain = run((), False)
+            self.assertEqual((plain.returncode, plain.stdout, plain.stderr), (0, b'out\n', b'err\n'))
+            for closed, code in (((0,), 1), ((1,), 2), ((2,), 4), ((1, 2), 6), ((0, 1, 2), 7)):
+                self.assertEqual(run(closed, False).returncode, code, closed)  # 閉じたまま
+                reopened = run(closed, True)
+                self.assertEqual((reopened.returncode, reopened.stdout), (0, b'' if 1 in closed else b'out\n'), closed)  # /dev/null で開き直す(fd 1 を閉じていなければ出力は残る)
+            self.assertEqual(run((1, 2), True).stderr, b'')
+        finally:
+            self.m.FIXTURE = saved
+
+    def run_closed_check(self, perturb_old=False, perturb_native=False, extra_native_stderr=False):
+        cases = (('stop', (2,), None), ('usage', (2,), None), ('help', (1, 2), None))
+        texts = self.TEXTS
+
+        def factory(which, closed, devnull):
+            def runner(args, env, cwd, timeout=60):
+                path = 'usage' if not args else ('help' if list(args) == ['-h'] else 'stop')
+                code, streams = self.m.closed_expectation(path, closed, devnull or which == 'native', None, texts)
+                out, err = streams[1] or b'', streams[2] or b''
+                if (perturb_old and which == 'old' and closed and not devnull) or (perturb_native and which == 'native'):
+                    code += 1
+                if extra_native_stderr and which == 'native':
+                    err += b'extra\n'  # 語は残し、標準エラーに 1 行足す
+                return self.m.RunResult(code, out, err, False)
+            return runner
+        saved = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+        approved_before = len(self.m.APPROVED_DIFFERENCE_RUN)
+        try:
+            fixed = lambda args, columns=None: (texts['help'], b'') if list(args) == ['-h'] else (b'', texts['usage'])  # noqa: E731
+            with mock.patch.object(self.m, 'CLOSED_CASES', cases), mock.patch.object(self.m, 'closed_runner', factory), \
+                    mock.patch.object(self.m, 'fixed_text', fixed):
+                result = unittest.TestResult()
+                self.m.Contract('test_e24_closed_std_fds').run(result)
+            tally = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+            self.approved_added = len(self.m.APPROVED_DIFFERENCE_RUN) - approved_before
+        finally:
+            del self.m.APPROVED_DIFFERENCE_RUN[approved_before:]
+            self.m.TALLY.clear()
+            self.m.TALLY.update(saved)
+        return result, tally, saved
+
+    def test_closed_fd_check_passes_when_old_and_rust_follow_their_expectations(self):
+        result, tally, saved = self.run_closed_check()
+        self.assertEqual(([text for _, text in result.failures], result.errors), ([], []))
+        self.assertEqual(tally['approved_old_match'] - saved['approved_old_match'], 9)
+        self.assertEqual(tally['approved_native_match'] - saved['approved_native_match'], 3)
+        self.assertEqual(self.approved_added, 3)  # 全部通ったケースだけが、承認済みの差の一覧に増える
+        # 通常の一致件数には入らない。
+        self.assertEqual((tally['old_match'], tally['native_match']), (saved['old_match'], saved['native_match']))
+
+    def test_closed_fd_check_fails_when_the_old_expectation_is_broken(self):
+        result, tally, saved = self.run_closed_check(perturb_old=True)
+        self.assertTrue(result.failures)
+        self.assertGreater(len(tally['approved_old_mismatch']), len(saved['approved_old_mismatch']))
+        self.assertEqual(self.approved_added, 0)  # 変異を入れたら、一覧に増えない
+
+    def test_closed_fd_check_fails_when_rust_differs_from_the_devnull_old(self):
+        result, tally, saved = self.run_closed_check(perturb_native=True)
+        self.assertTrue(result.failures)
+        self.assertGreater(len(tally['approved_native_mismatch']), len(saved['approved_native_mismatch']))
+        self.assertEqual(self.approved_added, 0)
+
+    def test_closed_fd_check_fails_when_rust_adds_one_line_to_stderr_and_keeps_the_words(self):
+        result, tally, saved = self.run_closed_check(extra_native_stderr=True)
+        self.assertTrue(result.failures)
+        self.assertGreater(len(tally['approved_native_mismatch']), len(saved['approved_native_mismatch']))
+        self.assertEqual(tally['approved_old_mismatch'], saved['approved_old_mismatch'])
+        self.assertEqual(self.approved_added, 0)
+
     def test_the_new_checks_are_in_the_observation_table(self):
         names = {name for name in dir(self.m.Contract) if name.startswith('test_')}
         for wanted in ('test_e19_child_mode', 'test_e19b_child_mode_without_proc', 'test_e19c_child_mode_sigint', 'test_e19d_child_mode_requires_exact_argv0', 'test_e20_precheck_observation',
                        'test_e20b_precheck_without_proc', 'test_e20c_precheck_bash_warning',
                        'test_e21_precheck_tools_missing', 'test_e22_precheck_deadline', 'test_e23_candidate_helpers_missing',
-                       'test_e04b_candidate_analysis', 'test_e07b_precheck_accept'):
+                       'test_e04b_candidate_analysis', 'test_e07b_precheck_accept', 'test_e24_closed_std_fds'):
             self.assertIn(wanted, names)
         with self.assertRaises(AssertionError):
             self.m.verify_map(extra=self.m.EXTRA_GROUPS + (('E99', 'x', 'test_e99_absent'),))
