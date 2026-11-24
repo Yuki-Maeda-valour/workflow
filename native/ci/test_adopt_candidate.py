@@ -11,6 +11,7 @@ import signal
 import stat
 import sys
 import tempfile
+import types
 import unittest
 from unittest import mock
 
@@ -342,12 +343,63 @@ class Comparator(unittest.TestCase):
         parsed = self.m.parse_shim_log(text)
         self.assertEqual(parsed, {'cwd': 'ROOT', 'env': ['FOO=bar', 'GIT_NO_LAZY_FETCH=1', 'PATH=/a'], 'argv': 'ls-files --error-unmatch', 'stdin': 'line1\nline2'})
 
+    def run_deep_root(self, base, total):
+        """`make_deep_root` を、名前と親子の記録だけをする代役の `os` で流す。(root, 記録) を返す。"""
+        fds, made, files, opened, written = {}, [], [], [], []
+
+        def fake_open(name, flags, mode=0o777, dir_fd=None):
+            fd = max(fds, default=2) + 1
+            if dir_fd is None:
+                self.assertEqual(opened, [], 'dir_fd 無しで開くのは最初の base だけ')
+                fds[fd] = os.fsencode(name)
+            else:
+                self.assertIsInstance(name, (bytes, str))
+                self.assertNotIn(b'/', os.fsencode(name))
+                if flags & os.O_CREAT:
+                    files.append((fds[dir_fd], name))
+                    fds[fd] = None
+                else:
+                    self.assertIn((fds[dir_fd], name), made, '開く前に同じ親で mkdir していない')
+                    fds[fd] = fds[dir_fd] + b'/' + name
+            opened.append(fd)
+            return fd
+
+        def fake_mkdir(name, dir_fd=None):
+            self.assertIsNotNone(dir_fd)
+            self.assertNotIn(b'/', name)
+            made.append((fds[dir_fd], name))
+
+        def fake_close(fd):
+            del fds[fd]
+
+        fake_os = types.SimpleNamespace(
+            O_RDONLY=os.O_RDONLY, O_WRONLY=os.O_WRONLY, O_CREAT=os.O_CREAT, fsencode=os.fsencode,
+            open=fake_open, mkdir=fake_mkdir, close=fake_close, write=lambda handle, data: written.append(data) or len(data))
+        with mock.patch.object(self.m, 'os', fake_os):
+            root = self.m.make_deep_root(base, total)
+        self.assertEqual(fds, {}, '開いたままの fd が残った')
+        return root, made, files, written
+
     def test_deep_roots_have_exactly_the_requested_json_length(self):
+        # 実際の深いフォルダは作らない: 容器の AppArmor(docker-default)がパスの全体を約 8 KiB で拒否するため。
+        # 実際に作る経路は、比較器の本体(E13b など)が CI で確かめる。ここでは名前と親子の記録だけで計算を確かめる。
         for total in (8192, 8193, 9808):
-            with tempfile.TemporaryDirectory(prefix='r4c-deep-') as directory:
-                root = self.m.make_deep_root(str(Path(directory).resolve()), total)
+            for length in range(1, 261):
+                base = '/' + 'b' * (length - 1)
+                root, made, files, written = self.run_deep_root(base, total)
                 path = root + '/進行中_例.md'.encode()
-                self.assertEqual(len(b'{"path": "' + path + b'", "tracked": false, "sha256": "' + b'0' * 64 + b'", "warnings": []}\n'), total)
+                self.assertEqual(len(b'{"path": "' + path + b'", "tracked": false, "sha256": "' + b'0' * 64 + b'", "warnings": []}\n'), total, (total, length))
+                self.assertTrue(made and all(0 < len(name) <= 200 for _, name in made))
+                self.assertEqual(root, os.fsencode(base) + b''.join(b'/' + name for _, name in made))
+                self.assertEqual([parent for parent, _ in made], [root[:len(root) - sum(len(n) + 1 for _, n in made[i:])] for i in range(len(made))])
+                self.assertEqual(files, [(root, '候補_例.md')])
+                self.assertEqual(written, [self.m.CANDIDATE.encode()])
+
+    def test_deep_root_refuses_lengths_it_cannot_make(self):
+        fixed = len('{"path": "') + len('", "tracked": false, "sha256": "') + 64 + len('", "warnings": []}\n') + len('進行中_例.md'.encode()) + 1
+        for total, need in ((fixed + 10 + 1, 1), (fixed + 10 - 1, -1)):
+            with self.assertRaises(ValueError):
+                self.run_deep_root('/' + 'b' * 9, total)
 
     def test_unimplemented_items_have_reasons_and_linux_only_scenarios_are_marked(self):
         self.assertTrue(self.m.UNIMPLEMENTED)

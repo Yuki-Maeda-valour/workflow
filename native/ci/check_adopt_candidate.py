@@ -2012,11 +2012,15 @@ def make_deep_root(base, total_json_bytes):
     fixed = len('{"path": "') + len('", "tracked": false, "sha256": "') + 64 + len('", "warnings": []}\n')
     destination = '進行中_例.md'
     need = total_json_bytes - fixed - len(os.fsencode(base)) - 1 - len(destination.encode())
+    if need < 0 or need == 1:  # 1 段は「/」と 1 バイト以上の名前(2 バイト以上)なので、0 と 2 以上しか作れない
+        raise ValueError(f'JSON の長さ {total_json_bytes} の深い root は作れない(base の後に足す長さ {need})')
     fd = os.open(base, os.O_RDONLY)
     path = os.fsencode(base)
     try:
-        while need > 1:
+        while need > 0:
             step = min(200, need - 1)
+            if need - step - 1 == 1:  # 1 バイトだけ残すと次の段を作れない
+                step -= 1
             name = b'a' * step
             os.mkdir(name, dir_fd=fd)
             child = os.open(name, os.O_RDONLY, dir_fd=fd)

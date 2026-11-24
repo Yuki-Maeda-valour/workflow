@@ -1625,7 +1625,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
   - `--old-python`: 旧版を動かすPython。省略すると、比較器を動かしたPythonを使う。
   - `--require-userns`: Linuxで`/proc`を隠す組を作れないときに、未実施にせず失敗にする。CIのLinuxだけが付ける。手元とMacでは付けず、名前と理由を付けて未実施にする。
   - `--evidence`: 機種で変わる旧版の診断の生出力を、`ADOPT-EVIDENCE`の行で出す。CIは付ける。固定期待は、この証拠を見てから確定する。
-- 比較器は、比較の前に自己検査(`native/ci/test_adopt_candidate.py`。59件。2026-11-24に`loadTestsFromModule`で数えた)を流す。落ちたら本体の比較へ進まない。
+- 比較器は、比較の前に自己検査(`native/ci/test_adopt_candidate.py`。60件。2026-11-24に`loadTestsFromModule`で数えた)を流す。落ちたら本体の比較へ進まない。
 - 旧テストの26メソッドは、`OLD_TEST_MAP`の観点の表へ1回ずつ載せる。載っていないメソッドは失敗にする。
 - 旧版は変えず、旧テスト(`scripts/test_adopt_candidate.py`・`scripts/test_safe_git_callers.py`)も変えない。
 
