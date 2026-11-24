@@ -24,6 +24,10 @@ python3 -B native/ci/build.py r4d1 --platform linux-x86_64
 ```
 
 - `prepare`: 実行中のPythonで`pip install -r requirements-dev.txt`を行い、Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
+  - CIのLinux arm64(`--platform linux-arm64` で、環境変数 `GITHUB_ACTIONS` が `true`)では、入れる前に、残っている 1.99.1 を消します(#509)。機械に入れかけの 1.99.1 が残っていると、`rustup toolchain install` が `detected conflict` で失敗するためです。
+  - そのとき、`rustup --version` と `rustup toolchain list` を、自動導入を止めて(`RUSTUP_AUTO_INSTALL=0`)リポジトリ直下で流します。`native/` の中では、`native/rust-toolchain.toml` の指定で、rustup が入れかけの道具を入れ直そうとするためです。
+  - 1.99.1 が一覧にあれば、`rustup show home` の下の状態を 1 行で標準エラーへ出してから、`rustup toolchain uninstall 1.99.1` を流します。状態の行は、入れかけになる理由を後で調べる材料です。
+  - x86_64・Mac・手元の機械(`GITHUB_ACTIONS` が `true` でない)では消しません。rustup の失敗は、どの工程でも止めます。
 - `build`: 書式・clippy・Rust テストの後に 2 回ビルドします。RustテストにはR4Sとtask-digestの専用比較も含まれます。各回の製品用実行物を `check_probe.py` と `check_resolve_task_dir.py` で検査します。R4BとR4Rのexample単体検査、R4Rの対応表の照合、各回の `r4b_contract`・`r4r_contract` の専用比較も必須です。S2Lの単体と変異の検査(`check_loop_state_units.py`・`check_loop_state_mutations.py`)と、各回の `loop_state_fixture` の比較(`check_loop_state.py`・`test_loop_state.py`)も必須です。
 - `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、各回の製品用実行物とR4B・R4R検査用実行物の上記の検査を行います。各回の `loop_state_fixture` の比較(`check_loop_state.py`・`test_loop_state.py`)も行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
