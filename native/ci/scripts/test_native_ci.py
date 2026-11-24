@@ -3009,15 +3009,30 @@ class AdoptConnectionTests(TempCase):
     def test_quality_requires_the_example_tests(self):
         with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=lambda args,*,env=None,capture=False:"" if capture else None) as run:
             build.quality("linux-x86_64",self.root)
-        self.assertIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","adopt_candidate_contract"],[call.args[0] for call in run.call_args_list])
+        # 取り込んだ S3D のモジュール(diff_snapshot::)と R4A の 4 モジュール(candidate_keys::・r4a_rest_support::・
+        # resolve_task_dir_definition::・task_digest_definition::)の単体検査は、R4C の example の単体検査から外す(s3d・R4A の検査に残す)。
+        commands=[call.args[0] for call in run.call_args_list]
+        skips=["--skip","diff_snapshot::","--skip","candidate_keys::","--skip","r4a_rest_support::","--skip","resolve_task_dir_definition::","--skip","task_digest_definition::"]
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","adopt_candidate_contract","--",*skips],commands)
+        self.assertEqual(build.ADOPT_IMPORTED_SKIPS,("diff_snapshot::","candidate_keys::","r4a_rest_support::","resolve_task_dir_definition::","task_digest_definition::"))
+        self.assertNotIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","adopt_candidate_contract"],commands)
 
     def test_probe_command_records_evidence_and_failure_is_fatal(self):
         fixture=self.root/"adopt_candidate_contract"
+        reference=self.root/"diff_snapshot_contract"
         with mock.patch.object(build,"run") as run:
-            build.adopt_probe(fixture)
-        self.assertEqual(run.call_args.args[0],[sys.executable,"-B",source_hash.ROOT/"native/ci/check_adopt_candidate.py","--fixture",fixture,"--evidence"])
+            build.adopt_probe(fixture,reference,{"PATH":"/gnu"})
+        self.assertEqual(run.call_args.args[0],[sys.executable,"-B",source_hash.ROOT/"native/ci/check_adopt_candidate.py","--fixture",fixture,"--diff-snapshot-fixture",reference,"--evidence"])
+        self.assertEqual(run.call_args.kwargs,{"env":{"PATH":"/gnu"}})
+        # Linux の CI では、/proc を隠す組を作れないとき失敗にする指定を渡す(既定は渡さない)。
+        with mock.patch.object(build,"run") as run:
+            build.adopt_probe(fixture,reference,None,require_userns=True)
+        self.assertEqual(run.call_args.args[0][-1],"--require-userns")
+        with mock.patch.object(build,"run") as run:
+            build.adopt_probe(fixture,reference)
+        self.assertNotIn("--require-userns",run.call_args.args[0])
         with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"comparison")):
-            with self.assertRaises(subprocess.CalledProcessError):build.adopt_probe(fixture)
+            with self.assertRaises(subprocess.CalledProcessError):build.adopt_probe(fixture,reference)
 
     def test_build_and_verify_universal_no_longer_run_the_adopt_comparison(self):
         for command in ("build","reproduce"):
@@ -3030,16 +3045,19 @@ class AdoptConnectionTests(TempCase):
 
     def test_r4c_commands_run_the_comparison_on_both_builds_and_the_signed_file(self):
         for platform_name in build.TARGETS:
-            with mock.patch.object(sys,"argv",["build.py","r4c","--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"extract_build",return_value=(self.root,{})) as extract,mock.patch.object(build,"adopt_probe") as check:
+            with mock.patch.object(sys,"argv",["build.py","r4c","--platform",platform_name]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"extract_build",return_value=(self.root,{})) as extract,mock.patch.object(build,"prepare_r4c",return_value={"PATH":"/gnu"}) as prepared,mock.patch.object(build,"adopt_probe") as check:
                 self.assertEqual(build.main(),0)
                 self.assertEqual(extract.call_args.args[0],platform_name)
-                self.assertEqual(check.call_args_list,[mock.call(self.root/"1/adopt_candidate_contract"),mock.call(self.root/"2/adopt_candidate_contract")])
+                # 同じ成果物の diff_snapshot_contract を、子のモードの基準として渡す。S3D と同じ道具の準備の後の環境で流す。
+                self.assertEqual(prepared.call_args.args[0],platform_name)
+                self.assertEqual(check.call_args_list,[mock.call(self.root/"1/adopt_candidate_contract",self.root/"1/diff_snapshot_contract",{"PATH":"/gnu"},require_userns=platform_name.startswith("linux-")),mock.call(self.root/"2/adopt_candidate_contract",self.root/"2/diff_snapshot_contract",{"PATH":"/gnu"},require_userns=platform_name.startswith("linux-"))])
                 check.side_effect=subprocess.CalledProcessError(1,"ADOPT")
                 self.assertEqual(build.main(),1)
         with mock.patch.object(sys,"argv",["build.py","r4c"]),self.assertRaises(SystemExit):build.main()
-        with mock.patch.object(sys,"argv",["build.py","r4c-universal","--platform","macos-arm64"]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"adopt_probe") as check:
+        with mock.patch.object(sys,"argv",["build.py","r4c-universal","--platform","macos-arm64"]),mock.patch.object(build,"workspace",return_value=self.root),mock.patch.object(build,"extract_universal",return_value=(self.root,{})),mock.patch.object(build,"prepare_r4c",return_value={"PATH":"/gnu"}) as prepared,mock.patch.object(build,"adopt_probe") as check:
             self.assertEqual(build.main(),0)
-            check.assert_called_once_with(self.root/"adopt_candidate_contract")
+            self.assertEqual(prepared.call_args.args[0],"macos-arm64")
+            check.assert_called_once_with(self.root/"adopt_candidate_contract",self.root/"diff_snapshot_contract",{"PATH":"/gnu"})
             check.side_effect=subprocess.CalledProcessError(1,"ADOPT")
             self.assertEqual(build.main(),1)
 
@@ -3066,6 +3084,21 @@ class AdoptConnectionTests(TempCase):
             changed=json.loads(json.dumps(document))
             del changed["jobs"][name]["steps"][2]
             self.assertTrue(check_workflow.check_document(changed),name)
+
+    def test_prepare_uses_the_s3d_tools_and_the_gnu_only_path(self):
+        with mock.patch.object(build.s3d_ci,"prepare_tools") as tools,mock.patch.object(build.s3d_ci,"environment",return_value={"PATH":"/gnu"}) as environment,mock.patch.object(build,"run") as run:
+            self.assertEqual(build.prepare_r4c("macos-arm64",self.root),{"PATH":"/gnu"})
+        tools.assert_called_once_with("macos-arm64")
+        environment.assert_called_once_with(self.root)
+        run.assert_not_called()
+        restrict=self.root/"restrict"
+        restrict.write_text("1\n")
+        with mock.patch.object(build,"R4G_USERNS_RESTRICT",restrict),mock.patch.object(build.s3d_ci,"prepare_tools"),mock.patch.object(build.s3d_ci,"environment",return_value={}),mock.patch.object(build,"run") as run:
+            build.prepare_r4c("linux-x86_64",self.root)
+            self.assertEqual(run.call_args.args[0],["sudo","sysctl","-w","kernel.apparmor_restrict_unprivileged_userns=0"])
+            run.reset_mock()
+            build.prepare_r4c("macos-x86_64",self.root)
+            run.assert_not_called()
 
     def test_example_is_built_but_never_distributed(self):
         self.assertIn("adopt_candidate_contract",build.EXAMPLES)

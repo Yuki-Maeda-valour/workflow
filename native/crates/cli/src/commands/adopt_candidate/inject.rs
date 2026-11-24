@@ -506,7 +506,8 @@ impl<O: Ops, P: Precheck<O::Dir>> Precheck<O::Dir> for InjectedPrecheck<'_, O, P
         for rule in hit.iter().filter(|rule| rule.phase == Phase::Before) {
             self.injected.perform(&rule.actions);
         }
-        // 事前検査の時間切れの注入は含めない(表示に出る argv は実部品の起動のしかたで決まる。#472 の接続後に足す)。
+        // 事前検査の時間切れの注入は含めない。表示に出る argv は実部品(`SelfPrecheck`)の起動のしかたで決まるので、
+        // 注入では作らず、単体テスト(期限 1 秒版)と比較器の E22(60 秒の実時間の期限)で確かめる。
         if let Some((code, stdout, stderr)) = hit.iter().find_map(|rule| rule.result.clone()) {
             return Ok(Child {
                 code,

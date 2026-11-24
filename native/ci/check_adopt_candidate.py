@@ -6,7 +6,7 @@
 実行物の指定が無い・不在・実行不能・旧版への接続(スクリプト・旧 Python・配る木の中)なら失敗にし、skip にしない。
 
     python3 -B native/ci/check_adopt_candidate.py --fixture <adopt_candidate_contract の絶対パス> \
-        [--old-python <本家 CPython 3.10.11 の python3.10>]
+        --diff-snapshot-fixture <同じ成果物の diff_snapshot_contract の絶対パス> [--old-python <本家 CPython 3.10.11 の python3.10>]
 
 旧 Python の標準ライブラリ(診断の呼出履歴に出る argparse.py など)は、本家 3.10.11 の SHA-256 と照らす。違えば失敗にする。
 """
@@ -26,6 +26,7 @@ import subprocess
 import sys
 import contextlib
 import tempfile
+import unicodedata
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -79,10 +80,10 @@ EXTRA_GROUPS = (
     ('E01b', '起動の失敗と環境変数: 標準の fd がディレクトリ・不正な PYTHONHASHSEED/PYTHONINTMAXSTRDIGITS・PYTHONOPTIMIZE', 'test_e01b_startup_environment'),
     ('E02', '親: symlink・不在・権限・..・差替え', 'test_e02_parent_and_root'),
     ('E03', '本文: 0・8MiB境界・特殊型・短読・成長・属性変化', ('test_e03_candidate_size', 'test_e05_e12_injected_failures')),
-    ('E04', 'SHAと候補解析: 長さ・文字種・UTF-8・警告の順', 'test_e04_digest_shape'),
+    ('E04', 'SHAと候補解析: SHA の長さ・文字種、非 UTF-8 の 3 形・BOM・ヘッダの中のフェンス・フェンスの内外のチェックボックス・NFD の指摘キー・各警告と警告の順・発見元と指摘キーが 2 行ずつ・CRLF と制御文字・見送り 2 種', ('test_e04_digest_shape', 'test_e04b_candidate_analysis')),
     ('E05', '衝突: dangling symlink・directory・stat失敗・確認後の新設', 'test_e05_e12_injected_failures'),
     ('E06', 'Git: argv順・4環境変数・GIT_*除去・保持fd cwd・stdin継承・時間切れ', ('test_e06_git_calls', 'test_e06_child_environment', 'test_e10_git_30_second_deadline')),
-    ('E07', 'precheck: accept・成功時の出力の破棄・各非0・非UTF-8', 'test_e05_e12_injected_failures'),
+    ('E07', 'precheck: accept・成功時の出力の破棄・各非0・非UTF-8。実部品: 承認の要る構成で正しい承認ダイジェストなら採用が通り、違う値なら止まる', ('test_e05_e12_injected_failures', 'test_e07b_precheck_accept')),
     ('E08', '最終確認の前: precheck中の本文変更・同文inode差替え', 'test_e05_e12_injected_failures'),
     ('E09', 'index: 非0・0件/複数・区切り・mode/stage/path・OID 39/40〜64/65', 'test_e05_e12_injected_failures'),
     ('E10', 'git mv: 非0・時間切れ・遅い衝突・改名後の差替え', 'test_e05_e12_injected_failures'),
@@ -94,6 +95,11 @@ EXTRA_GROUPS = (
     ('E16', '8192 バイトを超える出力・端末の標準出力・捕捉されない例外の全文', ('test_e13b_large_json_in_print', 'test_e13c_terminal_stdout', 'test_uncaught_tracebacks')),
     ('E17', '順序を決めない SIGINT: link から改名後の照合までの間に実際の信号を送った結果の種類(旧版の種類に Rust の種類が入る)', 'test_e17_sigint_race'),
     ('E18', '長い文で標準エラーが書けない(ファイルの上限・/dev/full・pipe。標準エラーは line_buffering)', 'test_e18_long_stderr'),
+    ('E19', '事前検査の子のモード: argv[0]=diff-snapshot.sh で入る子の出力と終了値が diff_snapshot_contract と同じ(承認の要る・要らない・--accept・Git でない・引数の誤り・SIGINT を無視して起動・途中の SIGINT・ファイルの大きさの上限・/proc を隠した起動・argv[0] が完全一致しない形では入らない)', ('test_e19_child_mode', 'test_e19b_child_mode_without_proc', 'test_e19c_child_mode_sigint', 'test_e19d_child_mode_requires_exact_argv0')),
+    ('E20', '事前検査の子の起動: 引数・cwd・stdin・環境(旧版は bash の包みで記録)・子が起動する git の cwd と環境・/proc を隠した起動・bash の起動の警告', ('test_e20_precheck_observation', 'test_e20b_precheck_without_proc', 'test_e20c_precheck_bash_warning')),
+    ('E21', '事前検査の道具: 補助スクリプトが無い・読めない・bash が PATH に無い・GNU の道具が PATH に無い(承認済みの差の個別期待)', 'test_e21_precheck_tools_missing'),
+    ('E22', '事前検査の 60 秒の期限: 直接の子を kill して wait・時間切れの表示', 'test_e22_precheck_deadline'),
+    ('E23', '旧版の補助が無い・壊れている: candidate-keys.py が無い・task-digest.py が無い・candidate-keys.py に構文の誤り(承認済みの差の個別期待。Rust は採用に成功)', 'test_e23_candidate_helpers_missing'),
     ('E13a', '出口(依存部品なしで流せる部分): help と引数の誤りの出力の故障(途中書込みを含む)', 'test_e13a_output_faults'),
 )
 
@@ -326,7 +332,11 @@ def fixed(result, code, stdout=b'', stderr=b''):
 
 # 固定期待との照合の結果を、旧版の側と Rust の側で別に数える。旧版が固定期待と違えば、Rust の結果と無関係に比較器の前提が崩れている。
 # Rust の側の不一致のうち、依存部品(#471・#472)が未接続で止まったものは別に数え、成功には数えない。
-TALLY = {'old_match': 0, 'old_mismatch': [], 'native_match': 0, 'native_mismatch': [], 'native_unconnected': []}
+TALLY = {'old_match': 0, 'old_mismatch': [], 'native_match': 0, 'native_mismatch': [], 'native_unconnected': [],
+         # 基準(S3D の実行物。子のモードの比較の基準)は旧版と別に数える。承認済みの差の個別期待も、通常の一致件数と別に数える。
+         'reference_match': 0, 'reference_mismatch': [],
+         'approved_old_match': 0, 'approved_old_mismatch': [],
+         'approved_native_match': 0, 'approved_native_mismatch': [], 'approved_native_unconnected': []}
 
 
 def _mentions(value, needle):
@@ -353,12 +363,14 @@ def judge(which, label, actual, expected):
 
 
 def judge_run(which, label, check):
-    """片側の実行とその確認 `check()`(不一致なら AssertionError)の結果を、旧版の側と Rust の側で別に数える。"""
+    """片側の実行とその確認 `check()`(不一致なら AssertionError)の結果を、区分ごとに数える。
+    区分: 'old'(旧版)・'native'(Rust)・'reference'(基準 = S3D の実行物)・'approved_old'・'approved_native'(承認済みの差の個別期待。
+    通常の一致件数に入れない)。Rust の側のうち、依存部品が未接続で止まったものは別に数える。"""
     try:
         check()
     except AssertionError as error:
-        if which == 'native' and _mentions(str(error), UNCONNECTED):
-            TALLY['native_unconnected'].append(label)
+        if which in ('native', 'approved_native') and _mentions(str(error), UNCONNECTED):
+            TALLY[which + '_unconnected'].append(label)
         else:
             TALLY[which + '_mismatch'].append(label)
         raise
@@ -471,7 +483,10 @@ class Side:
         check_no_git_ancestor(self.directory.name)
         self.root = Path(self.directory.name)
         self.source = self.root / '候補_例.md'
-        self.source.write_text(body, encoding='utf-8')
+        if isinstance(body, bytes):
+            self.source.write_bytes(body)  # UTF-8 でない本文・BOM・CRLF・制御文字など、バイト列で作る入力
+        else:
+            self.source.write_text(body, encoding='utf-8')
         self.digest = hashlib.sha256(self.source.read_bytes()).hexdigest()
 
     def close(self):
@@ -832,7 +847,7 @@ def _contract_e03(self):
 
 
 def _contract_e04(self):
-    """保持 SHA の形: 長さ・大文字・文字種(依存部品なしで拒否される)。"""
+    """保持 SHA の形: 長さ・大文字・文字種(候補解析より前に拒否される)。候補解析の結果の比較は `test_e04b_candidate_analysis`。"""
     good = hashlib.sha256(CANDIDATE.encode()).hexdigest()
     for bad in (good.upper(), good[:63], good + '0', 'g' * 64, '', ' ' + good, good + '\n'):
         with self.subTest(digest=bad):
@@ -841,12 +856,127 @@ def _contract_e04(self):
             self.assertEqual(before, after)
 
 
+HEAD_OK = '> **発見元**: refactor\n> **指摘キー**: H41\n'
+
+
+def _candidate_analysis_cases():
+    """(ID, 本文のバイト列, 期待する終了値, 警告の `code` の並び)。本文は旧版・Rust とも同じバイト列(`pair()` がバイト列を書く)。
+    終了 2 のものは、停止の文(旧版と Rust の全文の一致)を比べる。"""
+    nfd = unicodedata.normalize('NFD', 'が')
+    utf8 = lambda text: text.encode('utf-8')  # noqa: E731
+    return [
+        ('non-utf8-leading-ff', b'\xff' + utf8(HEAD_OK), 2, None),
+        ('non-utf8-truncated-multibyte-tail', utf8(HEAD_OK + '## 指摘\n内容') + b'\xe3\x81', 2, None),
+        ('non-utf8-surrogate-ed-a0-80', utf8(HEAD_OK) + b'\xed\xa0\x80\n', 2, None),
+        ('bom-header', b'\xef\xbb\xbf' + utf8(HEAD_OK + '\n## 指摘\n内容\n'), 0, []),
+        ('fence-in-header-hides-skip', utf8('> **発見元**: refactor\n```\n> **見送り**: 2026-01-01 — r\n```\n> **指摘キー**: H41\n\n## 指摘\n'), 0, []),
+        ('checkbox-inside-and-outside-fence', utf8(HEAD_OK + '\n## 指摘\n- [ ] a\n```\n- [x] b\n```\n'), 0, ['checkbox']),
+        ('checkbox-only-inside-fence', utf8(HEAD_OK + '\n## 指摘\n```\n- [X] b\n```\n'), 0, ['checkbox']),
+        ('nfd-key', utf8(f'> **発見元**: refactor\n> **指摘キー**: {nfd}\n\n## 指摘\n'), 0, []),
+        ('unattended-meta', utf8(HEAD_OK + '> **無人実行**: x\n\n## 指摘\n'), 0, ['unattended-meta']),
+        ('record-section', utf8(HEAD_OK + '\n## 追加修正記録\n- 2026-01-01 記録\n'), 0, ['record-section']),
+        ('checkbox', utf8(HEAD_OK + '\n## 指摘\n- [ ] a\n'), 0, ['checkbox']),
+        ('several-warnings-in-order', utf8('> **無人実行**: x\n\n## 追加修正記録\n- [ ] a\n'), 0,
+         ['source-count', 'key-count', 'unattended-meta', 'record-section', 'checkbox']),
+        ('two-source-and-two-key-lines', utf8('> **発見元**: refactor\n> **発見元**: data-audit\n> **指摘キー**: H1\n> **指摘キー**: H2\n\n## 指摘\n'), 0,
+         ['source-count', 'key-count']),
+        ('crlf-lines', utf8(HEAD_OK.replace('\n', '\r\n') + '\r\n## 指摘\r\n内容\r\n'), 0, []),
+        ('lone-cr-and-control-characters', utf8('> **発見元**: refactor\r> **指摘キー**: H\x0b41\x00\n\n## 指摘\n\x01内容\n'), 0, None),
+        ('skipped-stops', utf8(HEAD_OK + '> **見送り**: 2026-01-01 — r\n\n## 指摘\n'), 2, None),
+        ('skipped-malformed-stops', utf8(HEAD_OK + '> **見送り**: broken\n\n## 指摘\n'), 2, None),
+    ]
+
+
+def _contract_candidate_analysis(self):
+    """E04b: 候補解析(旧 `candidate-keys.py` の `check_text`)を通した結果を、旧版と Rust で比べる。
+    非 UTF-8 の 3 形・BOM・ヘッダの中のフェンス・フェンスの内外のチェックボックス・NFD の指摘キー・各警告・警告の順・
+    発見元と指摘キーが 2 行ずつ・CRLF と制御文字・見送り 2 種。比べるのは終了値・標準出力・標準エラー・作業ツリー。
+    旧版と Rust の両側を、固定した期待(終了値と警告の `code` の並び)にも照らす。"""
+    failures = []
+    for case_id, body, code, codes in _candidate_analysis_cases():
+        (old, old_before, old_after), (new, _, new_after) = pair(body=body)
+
+        def fixed_check(result, code=code, codes=codes):
+            self.assertFalse(result.timed_out)
+            self.assertEqual(result.returncode, code, result.stderr.decode('utf-8', 'replace')[:200])
+            if codes is not None:
+                try:
+                    got = [item['code'] for item in json.loads(result.stdout)['warnings']]
+                except (ValueError, KeyError, TypeError) as error:
+                    # 出力が JSON でない・`warnings` の形(要素の `code` など)が違うときも、側ごとの不一致として数える(AssertionError にする)。
+                    self.fail(f'標準出力が採用の JSON でない: {error!r}: {result.stdout[:200]!r}')
+                self.assertEqual(got, codes)
+
+        for which, result in (('old', old), ('native', new)):
+            try:
+                judge_run(which, f'e04b:{case_id}', lambda result=result: fixed_check(result))
+            except AssertionError as error:
+                failures.append(f'{case_id}/{which}: {error}')
+        try:
+            same_result(old, new)
+            same_tree(old_after, new_after)
+            if code == 2:
+                self.assertEqual(old_before, old_after)  # 停止したら作業ツリーは変わらない
+        except AssertionError as error:
+            failures.append(f'{case_id}/比較: {error}')
+    if failures:
+        raise AssertionError(' / '.join(failures))
+
+
+def _contract_precheck_accept(self):
+    """E07b: 承認の要る構成(filter)で、採用の入口に S3D が出した承認ダイジェストを `--accept` で渡すと採用が通り、
+    違う値では止まる。旧版と Rust の両側で、終了値・標準出力・標準エラー・作業ツリー(元の候補・先・index)を比べる。
+    準備は両側で同じ(追跡済みの候補に、承認の要る `filter` の設定を足す)。"""
+    sides = (Side(legacy), Side(native))
+    try:
+        for side in sides:
+            side.commit_candidate()
+            side.git('config', '--local', 'filter.untrusted.clean', 'cat')
+        refusals = [side.run() for side in sides]
+        digests = []
+        for which, (result, before, after) in zip(('old', 'native'), refusals):
+            def refused(result=result, before=before, after=after):
+                self.assertEqual(result.returncode, 2, result.stderr.decode('utf-8', 'replace')[:300])
+                self.assertTrue(result.stderr.startswith('候補の採用を停止: git の事前検査に通らない: '.encode()))
+                self.assertEqual(before, after)
+            judge_run(which, 'e07b:refusal-without-accept', refused)
+            found = re.search('承認ダイジェスト: ([0-9a-f]{64})'.encode(), result.stderr)
+            self.assertIsNotNone(found, which)
+            digests.append(found.group(1).decode())
+        same_result(refusals[0][0], refusals[1][0])
+        same_tree(refusals[0][2], refusals[1][2])
+        self.assertEqual(digests[0], digests[1], '承認ダイジェストが旧版と Rust で違う')
+        for label, accept, code in (('wrong', '0' * 64, 2), ('matching', digests[0], 0)):
+            outcomes = []
+            for which, side in zip(('old', 'native'), sides):
+                result, before, after = side.run(('--accept', accept))
+                outcomes.append((result, before, after))
+
+                def check(result=result, before=before, after=after, code=code, label=label):
+                    self.assertEqual(result.returncode, code, result.stderr.decode('utf-8', 'replace')[:300])
+                    if label == 'wrong':
+                        self.assertIn('承認ダイジェストが一致しない'.encode(), result.stderr)
+                        self.assertEqual(before, after)
+                    else:
+                        self.assertIn(b'"tracked": true', result.stdout)
+                        self.assertNotIn('候補_例.md', after)
+                        self.assertIn('進行中_例.md', after)
+                judge_run(which, f'e07b:accept-{label}', check)
+            same_result(outcomes[0][0], outcomes[1][0])
+            same_tree(outcomes[0][2], outcomes[1][2])
+    finally:
+        for side in sides:
+            side.close()
+
+
 Contract.test_a06_warnings_from_candidate_check = _contract_a06
 Contract.test_a12_a14_tracked_adoption = _contract_tracked
 Contract.test_a17_precheck_refusal = _contract_a17
 Contract.test_a18_symlink_and_fifo = _contract_a18
 Contract.test_e02_parent_and_root = _contract_e02
 Contract.test_e03_candidate_size = _contract_e03
+Contract.test_e04b_candidate_analysis = _contract_candidate_analysis
+Contract.test_e07b_precheck_accept = _contract_precheck_accept
 Contract.test_e04_digest_shape = _contract_e04
 
 
@@ -1278,8 +1408,8 @@ def _contract_git_calls(self):
     for which in ('old', 'native'):
         logs[which] = scenario_record(scenario, which, capture_log=True)['log_lines']
     judge_run('old', 'e06:git-calls', lambda: self.assertTrue(logs['old']))
-    # Rust の記録が空(依存部品が未接続で Git に届かなかった)なら、未接続で不通過として数える。
-    judge_run('native', 'e06:git-calls', lambda: self.assertEqual(logs['old'], logs['native'], '' if logs['native'] else UNCONNECTED))
+    # Rust の記録が空(Git に届かなかった)なら、ふつうの不一致として数える。
+    judge_run('native', 'e06:git-calls', lambda: self.assertEqual(logs['old'], logs['native'], 'Rust の git の記録が旧版と違う(空を含む)'))
     expected_env = {'GIT_NO_REPLACE_OBJECTS': '1', 'GIT_NO_LAZY_FETCH': '1', 'GIT_OPTIONAL_LOCKS': '0',
                     'GIT_TERMINAL_PROMPT': '0'}
     for entry in logs['old']:
@@ -1430,9 +1560,13 @@ def _run_with_shim(which, mode, sigint, ignore_sigint, extra_env, stdin_data, ti
         _kill_group(process.pid)  # 代役が残した孫(後ろの sleep・trap の中の sleep)を片付ける。
         log = (shims / 'shim.log').read_text(encoding='utf-8', errors='surrogateescape') if (shims / 'shim.log').exists() else None
         root_text = str(root)
-        return {'code': process.returncode, 'stdout': out.decode(), 'stderr': err.replace(os.fsencode(root), b'<ROOT>').decode(),
+
+        def normalized(data):
+            # 各実行の独立した一時フォルダ(root と、包みを置く base)だけを固定の語へ対応づける(旧版と Rust の記録を比べるため)。
+            return data.replace(os.fsencode(root), b'<ROOT>').replace(os.fsencode(base), b'<BASE>')
+        return {'code': process.returncode, 'stdout': normalized(out).decode(), 'stderr': normalized(err).decode(),
                 'elapsed': elapsed, 'child_alive': alive, 'cleaned': (shims / 'cleaned').exists(),
-                'log': log.replace(root_text, '<ROOT>') if log else None,
+                'log': log.replace(root_text, '<ROOT>').replace(str(base), '<BASE>') if log else None,
                 'tree_before': before, 'tree_after': _snapshot(root, os.lstat(source).st_ino if source.exists() else None)}
 
 
@@ -1948,6 +2082,653 @@ Contract.test_e13_success_output_faults = _contract_e13
 Contract.test_e06_git_calls = _contract_git_calls
 
 
+# ---- 事前検査(S3D)への接続(Task 2.1a)----
+# 事前検査は、自分自身を argv[0] だけ `diff-snapshot.sh` にして子として起動する(子は argv[0] が完全に一致するときだけ S3D の入口へ入る)。
+# 子のモードは、ビルドした実行物を argv[0]=`diff-snapshot.sh` で直接起動し、同じ入力の `diff_snapshot_contract`(S3D の実行物)と比べる。
+# 旧版の事前検査の子(`bash <補助スクリプト>`)の観測は、PATH の先頭に置く `bash` の包み(記録した後に本物へ置き換わる)で行う。
+# Rust は自分自身を子にするので包みを挟めない。環境の値の集合と cwd は、子が起動する `git` の包みで、旧版と Rust を比べる。
+# 事前検査と候補解析は、どちらも実部品(自分を子として起動する `SelfPrecheck`・example の `CandidateKeys`)で比べる。
+# 未接続の文(`未接続です`)が出たら失敗にし、「未接続で不通過」として別に数える(今は 0 件のはず)。
+
+DS_FIXTURE = None  # S3D の diff_snapshot_contract(子のモードの基準)
+REQUIRE_USERNS = False  # 真なら、`/proc` を隠す組を作れないとき、未実施にせず失敗にする(Linux の CI)
+CHILD_NAME = 'diff-snapshot.sh'
+GUARD_RELATIVE = 'skills/do-task/scripts/diff-snapshot.sh'
+
+
+LEGACY_TOOL_VERSIONS = {}  # 見つけた版の記録(旧版の前提の確認で埋める。結果の行に出す)
+
+
+def legacy_prerequisites():
+    """旧版の事前検査(`bash <補助スクリプト>`)の前提: bash 4.0 以上と、GNU の coreutils・findutils・grep(runtime-requirements.md の表)。
+    sed は GNU を求めない(Mac は BSD の sed のままでよい)。(満たすか, 満たさない理由)。見つけた版は `LEGACY_TOOL_VERSIONS` に記録する。"""
+    try:
+        done = subprocess.run(['bash', '-c', 'echo "${BASH_VERSINFO[0]}"'], capture_output=True, text=True, timeout=30)
+        major = int(done.stdout.strip())
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False, 'bash が PATH に無い'
+    LEGACY_TOOL_VERSIONS['bash'] = major
+    if major < 4:
+        return False, f'bash が 4.0 未満({major})'
+    for tool in ('grep', 'find', 'mktemp', 'sort'):
+        try:
+            text = subprocess.run([tool, '--version'], capture_output=True, text=True, timeout=30, env=dict(os.environ, LC_ALL='C')).stdout
+        except (OSError, subprocess.SubprocessError):
+            return False, f'{tool} が PATH に無い'
+        first = text.splitlines()[0] if text else ''
+        LEGACY_TOOL_VERSIONS[tool] = first
+        if 'GNU' not in first:
+            return False, f'{tool} が GNU の版でない'
+    return True, ''
+
+
+def legacy_guard_ready(label):
+    """旧版の事前検査を動かせるか。動かせなければ、基準の機械の Linux では失敗、Mac では名前と理由を付けて未実施(成功に数えない)。"""
+    ready, reason = legacy_prerequisites()
+    if ready:
+        return True
+    if sys.platform == 'darwin':
+        NOT_RUN.append(f'{label}: 旧版の前提を用意できない({reason})')
+        return False
+    raise AssertionError(f'{label}: 旧版の前提を満たさない({reason})。基準の機械の Linux では失敗にする')
+
+
+def version_ready(label):
+    """旧版の出力のうち、bash・道具の版に依る欄を持つケースを、基準の版(CI の Ubuntu 24.04)と照らす。
+    違えば Linux では失敗、Mac では未実施(成功に数えない)。"""
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from diff_snapshot_fixtures import launch_sites
+    base, found = launch_sites.is_base(launch_sites.load())
+    if base:
+        return True
+    if sys.platform == 'darwin':
+        NOT_RUN.append(f'{label}: 版に依る欄を基準の版と照らせない(version)')
+        return False
+    raise AssertionError(f'{label}: 道具の版が基準の版と違う(版に依る欄は失敗にする): {found}')
+
+
+def proc_hidden_prefix(argv0=None):
+    """`/proc` を隠す利用者の名前空間で実行する前置き(R4G と同じ `unshare -rm`)。作れなければ (None, 理由)。
+    `argv0` があれば、続く実行物を、その名前を `argv[0]` にして起動する。"""
+    import shutil
+    unshare = shutil.which('unshare')
+    if sys.platform != 'linux' or not unshare:
+        return None, 'Linux の unshare が無い'
+    run = f'exec -a {argv0} "$@"' if argv0 else 'exec "$@"'
+    prefix = [unshare, '-rm', 'bash', '-c', f'mount -t tmpfs r4c-no-proc /proc && test ! -e /proc/self && {run}', 'r4c-hide-proc']
+    probe = subprocess.run([*prefix, 'true'], capture_output=True, timeout=60)
+    if probe.returncode:
+        return None, 'unshare -rm で /proc を隠せない: ' + probe.stderr.decode(errors='replace').strip()[:100]
+    return prefix, ''
+
+
+def git_in(root, *args):
+    """子のモードの準備用の Git(比較の対象ではない)。利用者の設定を読まない。"""
+    env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(root), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
+    done = subprocess.run(['git', '-C', str(root), '-c', 'user.name=test', '-c', 'user.email=test@example.invalid',
+                           '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', *args], env=env, capture_output=True, timeout=30)
+    if done.returncode:
+        raise AssertionError(f'準備の git が失敗した: {args}')
+
+
+def precheck_repository(base, name, *, tamper=False):
+    """追跡済みのファイルが 1 つあるリポジトリ。`tamper` なら、承認の要る構成(filter)を足す。"""
+    root = Path(base) / name
+    root.mkdir()
+    (root / 'a.txt').write_text('a\n', encoding='utf-8')
+    git_in(root, 'init', '-q')
+    git_in(root, 'add', '--', 'a.txt')
+    git_in(root, 'commit', '-qm', 'base')
+    if tamper:
+        git_in(root, 'config', '--local', 'filter.untrusted.clean', 'cat')
+    return root
+
+
+def run_named(binary, args, cwd, env, *, ignore_sigint=False, fsize=None, hide=None, argv0=CHILD_NAME, timeout=90):
+    """`binary` を `argv[0]=diff-snapshot.sh` で直接起動する(子のモード)。`hide` は `proc_hidden_prefix(CHILD_NAME)` の前置き。"""
+    def prepare():
+        if ignore_sigint:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+        if fsize is not None:
+            resource.setrlimit(resource.RLIMIT_FSIZE, (fsize, fsize))
+    if hide:
+        argv, executable = [*hide, str(binary), *args], None
+    else:
+        argv, executable = [argv0, *args], str(binary)
+    process = subprocess.Popen(argv, executable=executable, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                               stderr=subprocess.PIPE, start_new_session=True, preexec_fn=prepare)
+    try:
+        out, err = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, 9)
+        process.communicate()
+        raise AssertionError('子のモードの実行が時間切れになった')
+    return RunResult(process.returncode, out, err, False)
+
+
+def _child_mode_cases(base, reference):
+    """(ID, 引数の作り方, 実行の条件, 期待する終了値, 標準エラーに含む語)。引数は root の絶対パスを受けて作る。"""
+    clean = precheck_repository(base, 'clean')
+    needs = precheck_repository(base, 'needs', tamper=True)
+    plain = Path(base) / 'not-git'
+    plain.mkdir()
+    out = run_named(reference, ['--cwd', str(needs), '--precheck'], needs, environment())
+    match = re.search('承認ダイジェスト: ([0-9a-f]{64})'.encode(), out.stderr)
+    if out.returncode != 22 or not match:
+        raise AssertionError('子のモードの基準(S3D の実行物)が、承認の要る構成で終了 22 と承認ダイジェストを出さない')
+    digest = match.group(1).decode()
+    return [
+        ('precheck-clean', clean, ['--cwd', '{root}', '--precheck'], {}, 0, None),
+        ('precheck-needs-approval', needs, ['--cwd', '{root}', '--precheck'], {}, 22, '承認ダイジェスト: '.encode()),
+        ('precheck-accept-matching', needs, ['--cwd', '{root}', '--precheck', '--accept', digest], {}, 0, None),
+        ('precheck-accept-mismatch', needs, ['--cwd', '{root}', '--precheck', '--accept', '0' * 64], {}, 22, '承認ダイジェストが一致しない'.encode()),
+        ('precheck-not-git', plain, ['--cwd', '{root}', '--precheck'], {}, 2, b'ERROR [usage]'),
+        ('precheck-missing-cwd', clean, ['--precheck'], {}, 2, 'ERROR [usage] --cwd が必要です'.encode()),
+        ('precheck-unknown-argument', clean, ['--cwd', '{root}', '--precheck', '--bogus'], {}, 2, 'ERROR [usage] 不明な引数'.encode()),
+        # SIGINT を無視して起動された子(親が無視して起動したとき、子も無視のまま。R4C の処理全体の設定より前に入るので変わらない)。
+        ('precheck-sigint-ignored', needs, ['--cwd', '{root}', '--precheck'], {'ignore_sigint': True}, 22, None),
+        ('precheck-clean-sigint-ignored', clean, ['--cwd', '{root}', '--precheck'], {'ignore_sigint': True}, 0, None),
+        # ファイルの大きさの上限 0: 子の SIGXFSZ が既定(R4C は無視にするが、子のモードは入る前に設定を変えない)なので、git が信号で終わる。
+        ('precheck-fsize-limit', clean, ['--cwd', '{root}', '--precheck'], {'fsize': 0}, 20, '終了コード 153'.encode()),
+    ]
+
+
+def _contract_child_mode(self):
+    """E19: argv[0]=`diff-snapshot.sh` で入る子のモードの出力と終了値が、同じ入力の `diff_snapshot_contract` と同じ。
+    比べる入力: 承認の要らない・要る・`--accept` が合う・合わない・Git でない・引数の誤り・SIGINT を無視して起動・ファイルの大きさの上限。"""
+    if DS_FIXTURE is None:
+        raise AssertionError('--diff-snapshot-fixture が無い(子のモードの基準)')
+    with tempfile.TemporaryDirectory(prefix='r4c-child-') as directory:
+        check_no_git_ancestor(directory)
+        base = Path(directory).resolve()
+        for case_id, root, args, conditions, code, needle in _child_mode_cases(base, DS_FIXTURE):
+            arguments = [str(root) if item == '{root}' else item for item in args]
+            env = environment()
+            results = {}
+            for which, binary in (('reference', DS_FIXTURE), ('native', FIXTURE)):
+                def run(binary=binary, which=which):
+                    result = run_named(binary, arguments, root, env, **conditions)
+                    results[which] = RunResult(result.returncode, result.stdout.replace(os.fsencode(root), b'<ROOT>'),
+                                               result.stderr.replace(os.fsencode(root), b'<ROOT>'), False)
+                    self.assertEqual(result.returncode, code, ('基準' if which == 'reference' else 'Rust') + ': ' + result.stderr.decode('utf-8', 'replace')[:300])
+                    if needle:
+                        self.assertIn(needle, result.stderr, which)
+                    if which == 'native':
+                        same_result(results['reference'], results['native'])
+                # 基準(S3D の実行物)の側の不一致は、旧版とは別の区分(reference)で数える。基準との照合は、Rust の側の結果として数える。
+                judge_run(which, 'e19:' + case_id, run)
+
+
+def _contract_child_mode_without_proc(self):
+    """E19b: `/proc` を隠した利用者の名前空間でも、子のモードの出力と終了値が `diff_snapshot_contract` と同じ(Linux だけ)。"""
+    label = 'e19b:child-mode-without-proc'
+    hide, reason = proc_hidden_prefix(CHILD_NAME)
+    if hide is None:
+        if REQUIRE_USERNS:
+            raise AssertionError(f'{label}: /proc を隠す組を作れない({reason})。--require-userns なので失敗にする')
+        NOT_RUN.append(f'{label}: {reason}')
+        return
+    with tempfile.TemporaryDirectory(prefix='r4c-child-') as directory:
+        check_no_git_ancestor(directory)
+        base = Path(directory).resolve()
+        for case_id, root, args, conditions, code, needle in _child_mode_cases(base, DS_FIXTURE)[:4]:
+            arguments = [str(root) if item == '{root}' else item for item in args]
+            results = {}
+            for which, binary in (('reference', DS_FIXTURE), ('native', FIXTURE)):
+                def run(binary=binary, which=which):
+                    result = run_named(binary, arguments, root, environment(), hide=hide, **conditions)
+                    results[which] = RunResult(result.returncode, result.stdout.replace(os.fsencode(root), b'<ROOT>'),
+                                               result.stderr.replace(os.fsencode(root), b'<ROOT>'), False)
+                    self.assertEqual(result.returncode, code, ('基準' if which == 'reference' else 'Rust') + ': ' + result.stderr.decode('utf-8', 'replace')[:300])
+                    if which == 'native':
+                        same_result(results['reference'], results['native'])
+                judge_run(which, f'{label}:{case_id}', run)
+
+
+def _contract_child_mode_requires_exact_argv0(self):
+    """E19d: argv[0] が `diff-snapshot.sh` と完全に一致しない形では、子のモードに入らない(パスの最後の成分だけが同じでも入らない)。
+    R4C 自身の引数の解析になり、`--cwd` を受け付けない(S3D の出力ではなく、R4C の usage と終了 2)。"""
+    with tempfile.TemporaryDirectory(prefix='r4c-child-argv0-') as directory:
+        check_no_git_ancestor(directory)
+        base = Path(directory).resolve()
+        root = precheck_repository(base, 'root')
+        for argv0 in (f'{base}/diff-snapshot.sh', './diff-snapshot.sh', 'diff-snapshot.sh.bak', 'Diff-snapshot.sh', 'diff-snapshot.sh '):
+            def run(argv0=argv0):
+                result = run_named(FIXTURE, ['--cwd', str(root), '--precheck'], root, environment(), argv0=argv0)
+                self.assertEqual(result.returncode, 2, result.stderr.decode('utf-8', 'replace')[:300])
+                self.assertTrue(result.stderr.startswith(b'usage: adopt-candidate.py'), result.stderr[:200])
+                self.assertNotIn(b'ERROR [usage]', result.stderr)
+                self.assertEqual(result.stdout, b'')
+            judge_run('native', f'e19d:argv0={argv0!r}', run)
+
+
+def run_named_with_sigint(binary, args, cwd, shims, *, ignore):
+    """子のモードの実行の途中(子が起動する `git` の包みが起動を知らせた後)に、プロセスグループ全体へ SIGINT を送る。
+    `ignore` なら、SIGINT を無視して起動する。同期は、包みが書く `started` と、続行を知らせる fifo(sleep に頼らない)。"""
+    import shutil
+    import time
+    shims.mkdir()
+    (shims / 'git').write_text(PRECHECK_GIT_SHIM)
+    (shims / 'git').chmod(0o755)
+    os.mkfifo(shims / 'release')
+    env = environment()
+    env.update({'PATH': f"{shims}:{env['PATH']}", 'R4C_REAL_GIT': shutil.which('git', path=environment()['PATH']),
+                'R4C_SHIM_DIR': str(shims), 'R4C_SHIM_MODE': 'sync'})
+
+    def prepare():
+        if ignore:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+    process = subprocess.Popen([CHILD_NAME, *args], executable=str(binary), cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, preexec_fn=prepare)
+    started = time.monotonic()
+    while not (shims / 'started').exists():
+        if process.poll() is not None or time.monotonic() - started > 30:
+            raise AssertionError('子の起動する git の包みが起動しない: ' + process.communicate()[1].decode('utf-8', 'replace')[:200])
+        time.sleep(0.02)
+    os.killpg(process.pid, signal.SIGINT)
+    # 包みが fifo を開くのを待って続行を知らせる(包みが SIGINT で終わっていれば、プロセスが終わるのでやめる)。
+    while process.poll() is None and time.monotonic() - started < 60:
+        try:
+            fd = os.open(shims / 'release', os.O_WRONLY | os.O_NONBLOCK)
+        except OSError:
+            time.sleep(0.02)
+            continue
+        os.write(fd, b'x\n')
+        os.close(fd)
+        break
+    try:
+        out, err = process.communicate(timeout=60)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, 9)
+        process.communicate()
+        raise AssertionError('SIGINT を送った子のモードの実行が時間切れになった')
+    _kill_group(process.pid)
+    return RunResult(process.returncode, out, err, False)
+
+
+def _contract_child_mode_sigint(self):
+    """E19c: 事前検査の途中でプロセスグループへ SIGINT を送った結果(終了値・出力)が、`diff_snapshot_contract` と同じ。
+    SIGINT を無視して起動したときは、親も子も止まらず事前検査が最後まで終わる(終了 0)。無視していないときは、基準と同じ扱い。"""
+    for ignore in (True, False):
+        with tempfile.TemporaryDirectory(prefix='r4c-child-sigint-') as directory:
+            check_no_git_ancestor(directory)
+            base = Path(directory).resolve()
+            results = {}
+            for which, binary in (('reference', DS_FIXTURE), ('native', FIXTURE)):
+                root = precheck_repository(base, f'root-{which}')
+
+                def run(which=which, binary=binary, root=root):
+                    result = run_named_with_sigint(binary, ['--cwd', str(root), '--precheck'], root, base / f'shim-{which}', ignore=ignore)
+                    results[which] = RunResult(result.returncode, result.stdout.replace(os.fsencode(root), b'<ROOT>'),
+                                               result.stderr.replace(os.fsencode(root), b'<ROOT>'), False)
+                    if ignore:
+                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''), ('基準' if which == 'reference' else 'Rust') + ': ' + result.stderr.decode('utf-8', 'replace')[:300])
+                    else:
+                        self.assertNotEqual(result.returncode, 0, which + ': SIGINT の後に正常終了した')
+                    if which == 'native':
+                        same_result(results['reference'], results['native'])
+                judge_run(which, f'e19c:sigint-ignored={ignore}', run)
+
+
+# 旧版の事前検査の子(`bash <補助スクリプト>`)の観測用の包み。`bash` の名前で PATH の先頭に置き、起動の引数・cwd・環境・stdin を記録して本物の bash に置き換わる。
+# 本物へ置き換わるとき、argv[0] を `bash` のまま保つ(絶対パスにすると、bash 自身の文の接頭辞が `bash:` から `/usr/bin/bash:` に変わる)。
+BASH_SHIM = r"""#!/bin/bash
+{ pwd -P; env | sort; echo "ARGV:$*"; echo "STDIN:$(cat)"; } > "$R4C_SHIM_DIR/bash.log"
+exec -a bash "$R4C_REAL_BASH" "$@"
+"""
+
+# 事前検査の子が起動する `git` の包み。最初の 1 回の cwd・環境・引数を記録し、続く呼び出しは本物へ渡す。
+# `hold` なら、記録した後に止まる(事前検査の期限の検査)。旧版は bash が、Rust は自分自身が起動する。
+PRECHECK_GIT_SHIM = r"""#!/bin/sh
+if [ ! -e "$R4C_SHIM_DIR/git.log" ]; then
+  { pwd -P; env | sort; echo "ARGV:$*"; echo "STDIN:"; } > "$R4C_SHIM_DIR/git.log"
+  if [ "$R4C_SHIM_MODE" = hold ]; then echo $$ > "$R4C_SHIM_DIR/hold.pid"; exec sleep 120; fi
+  # sync: 起動を知らせ(started)、比較器が SIGINT を送った後に release へ書くのを待つ(sleep に頼らない同期)。
+  if [ "$R4C_SHIM_MODE" = sync ]; then echo $$ > "$R4C_SHIM_DIR/started"; read _release < "$R4C_SHIM_DIR/release"; fi
+fi
+exec "$R4C_REAL_GIT" "$@"
+"""
+
+PRECHECK_VOLATILE = ('PWD=', 'OLDPWD=', 'SHLVL=', '_=', '__CF_USER_TEXT_ENCODING=', 'R4C_SHIM_', 'R4C_REAL_GIT=', 'R4C_REAL_BASH=')
+
+
+def legacy_tree(base, *, guard='present', remove=(), replace=None):
+    """旧版のスクリプトを、補助スクリプトの有無を変えた木へ写す(`<木>/skills/create-task/scripts/…`)。
+    `guard` は `present`・`missing`・`unreadable`。旧版は、自分の場所から `../../do-task/scripts/diff-snapshot.sh` を探す。
+    `remove` は写しから消す scripts の名前(`candidate-keys.py` など)、`replace` は `{名前: 本文}`(構文の誤りなど)。
+    元の `plugins/` は変えない(比較器が作った写しだけを変える)。"""
+    import shutil
+    tree = Path(base) / 'legacy-tree'
+    scripts = tree / 'skills/create-task/scripts'
+    shutil.copytree(LEGACY_SCRIPT.parent, scripts)
+    for name in remove:
+        (scripts / name).unlink()
+    for name, text in (replace or {}).items():
+        (scripts / name).write_text(text, encoding='utf-8')
+    helper = tree / GUARD_RELATIVE
+    if guard != 'missing':
+        helper.parent.mkdir(parents=True)
+        shutil.copy(ROOT / 'plugins/dev-workflow' / GUARD_RELATIVE, helper)
+        if guard == 'unreadable':
+            helper.chmod(0)
+    return scripts / LEGACY_SCRIPT.name, helper
+
+
+def run_precheck(which, *, accept=None, tamper=False, env_extra=None, stdin_data=None, bash_shim=False, path_dirs=None,
+                 hold=False, hide=None, script=None, timeout=100):
+    """追跡済みの候補を、事前検査を通して採用する。`which` は 'old' か 'native'。
+    PATH の先頭へ `bash`(旧版の観測用)と `git`(事前検査の子が起動する観測用)の包みを置く。`path_dirs` があれば、PATH はその
+    フォルダだけにする(`bash` や GNU の道具が PATH に無い条件)。記録: 作業ツリー・子の記録(`bash.log`・`git.log`)。"""
+    import shutil
+    import time
+    with fixed_umask(), tempfile.TemporaryDirectory(prefix='r4c-precheck-') as directory:
+        check_no_git_ancestor(directory)
+        base = Path(directory).resolve()
+        shims = base / 'shim'
+        shims.mkdir()
+        root = precheck_repository(base, 'root', tamper=tamper)
+        source = root / 'a.txt'
+        candidate = root / '候補_例.md'
+        candidate.write_text(CANDIDATE, encoding='utf-8')
+        git_in(root, 'add', '--', candidate.name)
+        git_in(root, 'commit', '-qm', 'candidate')
+        real_git = shutil.which('git', path=environment()['PATH'])
+        real_bash = shutil.which('bash', path=environment()['PATH'])
+        (shims / 'git').write_text(PRECHECK_GIT_SHIM)
+        (shims / 'git').chmod(0o755)
+        if bash_shim and real_bash:
+            (shims / 'bash').write_text(BASH_SHIM)
+            (shims / 'bash').chmod(0o755)
+        env = environment()
+        if path_dirs is not None:
+            # PATH はこのフォルダだけ(`bash` の包みも `git` の包みも無い)。入れた道具だけが見つかる。
+            only = base / 'path-only'
+            only.mkdir()
+            for name in path_dirs:
+                (only / name).symlink_to(shutil.which(name, path=environment()['PATH']))
+            env['PATH'] = str(only)
+        else:
+            env['PATH'] = f"{shims}:{env['PATH']}"
+        env.update({'R4C_REAL_GIT': real_git, 'R4C_REAL_BASH': real_bash or '', 'R4C_SHIM_DIR': str(shims),
+                    'R4C_SHIM_MODE': 'hold' if hold else 'log', **(env_extra or {})})
+        digest = hashlib.sha256(candidate.read_bytes()).hexdigest()
+        args = ['--root', str(root), '--expect-sha256', digest, *(['--accept', accept] if accept is not None else []), str(candidate)]
+        if which == 'old':
+            argv = [str(OLD_PYTHON), '-B', str(script or LEGACY_SCRIPT), *args]
+        else:
+            argv = [str(FIXTURE), *args]
+        if hide:
+            argv = [*hide, *argv]
+        before = _snapshot(root, os.lstat(candidate).st_ino)
+        started = time.monotonic()
+        process = subprocess.Popen(argv, cwd=root, env=env, stdin=subprocess.PIPE if stdin_data is not None else subprocess.DEVNULL,
+                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        try:
+            out, err = process.communicate(stdin_data, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            os.killpg(process.pid, 9)
+            process.communicate()
+            raise AssertionError('事前検査の実行が時間切れになった')
+        elapsed = time.monotonic() - started
+        _kill_group(process.pid)
+
+        def log(name):
+            path = shims / name
+            return path.read_text(encoding='utf-8', errors='surrogateescape').replace(str(root), '<ROOT>').replace(str(base), '<BASE>') if path.exists() else None
+        # 各実行の独立した一時フォルダ(root と、包みを置く base)だけを固定の語へ対応づける(旧版と Rust の記録を比べるため)。
+        normalized = lambda data: data.replace(os.fsencode(root), b'<ROOT>').replace(os.fsencode(base), b'<BASE>')  # noqa: E731
+        return {'code': process.returncode, 'stdout': normalized(out).decode('utf-8', 'replace'),
+                'stderr': normalized(err).decode('utf-8', 'replace'), 'elapsed': elapsed,
+                'bash_log': log('bash.log'), 'git_log': log('git.log'),
+                'tree_before': before, 'tree_after': _snapshot(root, os.lstat(candidate).st_ino if candidate.exists() else None),
+                'root': str(root), 'base': str(base), 'source': str(source)}
+
+
+def reference_adoption():
+    """補助がそろった旧版の、追跡済みの候補の採用の結果(終了値・標準出力・標準エラー・作業ツリー)。承認済みの差で、Rust の結果と照らす基準。"""
+    record = run_precheck('old', accept='ok')
+    return record['code'], record['stdout'], record['stderr'], record['tree_after']
+
+
+def parse_precheck_log(text):
+    """`bash.log`・`git.log` を、cwd・環境の集合・argv・stdin に分ける(bash などが足す値と、OS の部品が足す値を集合から除く。PATH は除かない)。"""
+    lines = text.split('\n')
+    cwd, rest = lines[0], lines[1:]
+    at = next(index for index, line in enumerate(rest) if line.startswith('ARGV:'))
+    return {'cwd': cwd, 'env': sorted(line for line in rest[:at] if line and not line.startswith(PRECHECK_VOLATILE)),
+            'argv': rest[at][5:], 'stdin': '\n'.join(rest[at + 1:]).removeprefix('STDIN:').rstrip('\n')}
+
+
+ADOPT_ENV_EXTRA = {'GIT_DIR': '/nonexistent-r4c', 'GIT_WORK_TREE': '/nonexistent-r4c', 'GIT_INDEX_FILE': '/nonexistent-r4c/index',
+                   'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.bare', 'GIT_CONFIG_VALUE_0': 'true', 'FOO': 'bar'}
+
+
+def _check_precheck_environment(self, names, label):
+    for wanted in ('GIT_NO_REPLACE_OBJECTS', 'GIT_NO_LAZY_FETCH', 'GIT_OPTIONAL_LOCKS', 'GIT_TERMINAL_PROMPT', 'FOO', 'PATH'):
+        self.assertIn(wanted, names, label)
+    for removed in ('GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_CONFIG_COUNT', 'GIT_CONFIG_KEY_0', 'GIT_CONFIG_VALUE_0'):
+        self.assertNotIn(removed, names, label)
+
+
+def _contract_precheck_observation(self):
+    """E20: 旧版の事前検査の子の引数・cwd・stdin・環境(`bash` の包みで記録)と、子が起動する `git` の cwd・環境・引数(旧版と Rust を比べる)。
+    旧版: `bash <補助スクリプトの絶対パス> --cwd <root> --precheck`(空でないときだけ `--accept <値>`)・cwd は root・stdin は継承・
+    環境は全 `GIT_` を除いた値の集合に 4 変数を足したもの。Rust は同じ引数・環境・cwd・stdin を、単体テストが自分を子にする起動で確かめる。"""
+    if not legacy_guard_ready('e20:precheck-observation'):
+        return
+    for accept, expected_tail in ((None, '--precheck'), ('', '--precheck'), ('ok', '--precheck --accept ok')):
+        logs = {}
+        for which in ('old', 'native'):
+            def run(which=which, accept=accept, expected_tail=expected_tail):
+                record = run_precheck(which, accept=accept, env_extra=ADOPT_ENV_EXTRA, stdin_data=b'STDIN-DATA', bash_shim=True)
+                self.assertEqual((record['code'], record['stdout'][:10]), (0, '{"path": "'), which + ': ' + record['stderr'])
+                git_log = parse_precheck_log(record['git_log'])
+                logs[which] = git_log
+                self.assertEqual(git_log['cwd'], '<ROOT>', which)
+                if which == 'old':
+                    bash_log = parse_precheck_log(record['bash_log'])
+                    self.assertEqual(bash_log['cwd'], '<ROOT>')
+                    self.assertEqual(bash_log['stdin'], 'STDIN-DATA')
+                    guard = bash_log['argv'].split(' ')[0]
+                    self.assertTrue(guard.endswith('/do-task/scripts/diff-snapshot.sh'), guard)
+                    self.assertEqual(bash_log['argv'], f'{guard} --cwd <ROOT> {expected_tail}')
+                    _check_precheck_environment(self, [line.split('=', 1)[0] for line in bash_log['env']], 'bash')
+                else:
+                    # 子が起動する git の cwd・環境・引数が旧版と同じ(旧版の `bash <補助スクリプト>` と Rust の自分の実行物の違いだけを対応づける)。
+                    self.assertEqual(git_log, logs['old'])
+            # 変種ごと・側ごとの失敗を別の失敗として残す(未接続とそれ以外を混ぜない)。
+            with self.subTest(accept=accept, which=which):
+                judge_run(which, f'e20:precheck-observation:{accept!r}', run)
+
+
+def _contract_precheck_without_proc(self):
+    """E20b: `/proc` を隠した利用者の名前空間でも、事前検査の子を起動できる(隠さない旧版と Rust の結果が同じ)。Linux だけ。"""
+    label = 'e20b:precheck-without-proc'
+    hide, reason = proc_hidden_prefix()
+    if hide is None:
+        if REQUIRE_USERNS:
+            raise AssertionError(f'{label}: /proc を隠す組を作れない({reason})。--require-userns なので失敗にする')
+        NOT_RUN.append(f'{label}: {reason}')
+        return
+    if not legacy_guard_ready(label):
+        return
+    results = {}
+    for which in ('old', 'native'):
+        def run(which=which):
+            # 旧版の Python は、`$ORIGIN` を使う実行物が `/proc` を要する機種があるので、`/proc` を隠すのは Rust の側だけ。
+            record = run_precheck(which, accept='ok', hide=hide if which == 'native' else None)
+            results[which] = (record['code'], record['stdout'], record['stderr'], record['tree_after'])
+            self.assertEqual((record['code'], record['stdout'][:10]), (0, '{"path": "'), which + ': ' + record['stderr'])
+            if which == 'native':
+                self.assertEqual(results['native'], results['old'])
+        judge_run(which, label, run)
+
+
+def _contract_precheck_refusal_with_bash_warning(self):
+    """E20c: 事前検査が拒否したとき、旧 bash の起動の警告(SHLVL が高すぎる)が、拒否の文の前へ中継される。版に依る欄。"""
+    label = 'e20c:precheck-bash-startup-warning'
+    if not legacy_guard_ready(label) or not version_ready(label):
+        return
+    results = {}
+    for which in ('old', 'native'):
+        def run(which=which):
+            record = run_precheck(which, tamper=True, env_extra={'SHLVL': '1000'})
+            results[which] = (record['code'], record['stdout'], record['stderr'], record['tree_after'])
+            self.assertEqual(record['code'], 2, record['stderr'])
+            # 旧版の文(`bash: warning: …`)を固定する(bash の argv[0] は `bash` のまま。パスを許さない)。旧版と Rust の全文の一致も比べる。
+            self.assertRegex(record['stderr'], r'^候補の採用を停止: git の事前検査に通らない: bash: warning: shell level \(1001\) too high, resetting to 1\n')
+            self.assertEqual(record['tree_after'], record['tree_before'])
+            if which == 'native':
+                self.assertEqual(results['native'], results['old'])
+        judge_run(which, label, run)
+
+
+def _contract_precheck_deadline(self):
+    """E22: 事前検査の 60 秒の期限。直接の子を kill して wait し、`Command '['bash', 'diff-snapshot.sh', …]' timed out after 60 seconds` で停止する。
+    旧版の補助スクリプトの絶対パスだけ固定名にそろえて比べる(2026-11-11 21:35 の決定)。子が起動する git が止まる。"""
+    label = 'e22:precheck-60-second-deadline'
+    if not legacy_guard_ready(label):
+        return
+    for which in ('old', 'native'):
+        def run(which=which):
+            record = run_precheck(which, hold=True, accept='ok')
+            guard = str(ROOT / 'plugins/dev-workflow' / GUARD_RELATIVE)
+            stderr = record['stderr'].replace(guard, CHILD_NAME)
+            expected = ("候補の採用を停止: Command '['bash', 'diff-snapshot.sh', '--cwd', '<ROOT>', '--precheck', '--accept', 'ok']' "
+                        'timed out after 60 seconds\n')
+            self.assertEqual((record['code'], record['stdout'], stderr), (2, '', expected), which)
+            self.assertTrue(60 <= record['elapsed'] < 80, f"{which}: 所要 {record['elapsed']:.1f} 秒")
+            self.assertEqual(record['tree_after'], record['tree_before'], which)
+        judge_run(which, label, run)
+
+
+def _contract_precheck_tools_missing(self):
+    """E21: 旧版の補助スクリプトの無い・読めない・`bash` が PATH に無い・GNU の道具が PATH に無い条件(2026-11-11 23:19 の決定の範囲の承認済みの差)。
+    旧版は事前検査が止まる。Rust は旧 `diff-snapshot.sh` も `bash` も道具も起動しないので、採用が進む。旧版の停止と Rust の採用を、個別期待に固定する。"""
+    label = 'e21:precheck-tools-missing'
+    if not legacy_guard_ready(label):
+        return
+    adopted = '{"path": "<ROOT>/進行中_例.md", "tracked": true, "sha256": "%s", "warnings": []}\n' % hashlib.sha256(CANDIDATE.encode()).hexdigest()
+    reference = reference_adoption()
+    cases = []
+    with tempfile.TemporaryDirectory(prefix='r4c-legacy-tree-') as trees:
+        for guard, reason in (('missing', 'No such file or directory'), ('unreadable', 'Permission denied')):
+            folder = Path(trees).resolve() / guard
+            folder.mkdir()
+            script, helper = legacy_tree(folder, guard=guard)
+            cases.append((f'guard-{guard}', {'script': script}, True,
+                          lambda stderr, helper=helper, reason=reason:
+                          re.fullmatch('候補の採用を停止: git の事前検査に通らない: bash: ' + re.escape(f'{helper}: {reason}') + '\n\n', stderr)
+                          is not None))
+        cases.append(('bash-missing', {'path_dirs': ['git'], 'bash_shim': False}, False,
+                      lambda stderr: stderr == "候補の採用を停止: [Errno 2] No such file or directory: 'bash'\n"))
+        cases.append(('gnu-tools-missing', {'path_dirs': ['git', 'bash'], 'bash_shim': False}, True,
+                      lambda stderr: stderr.startswith('候補の採用を停止: git の事前検査に通らない: ')
+                      and 'command not found' in stderr and stderr.endswith('ERROR [internal] profile helper の場所を解決できない\n\n')))
+        for case_id, kwargs, version_dependent, old_stderr_ok in cases:
+            if version_dependent:
+                ready = False
+                # 版に依るケースが基準の版でないときの失敗は、そのケースだけの失敗として残し(未接続に混ぜない)、
+                # 版に依らないケースの比較を続ける。
+                with self.subTest(case=case_id, kind='version'):
+                    ready = version_ready(f'{label}:{case_id}')
+                if not ready:
+                    continue
+            records = {which: run_precheck(which, accept='ok', **kwargs) for which in ('old', 'native')}
+            old, new = records['old'], records['native']
+
+            def check_old(old=old, ok=old_stderr_ok):
+                self.assertEqual(old['code'], 2, old['stderr'])
+                self.assertTrue(ok(old['stderr']), old['stderr'])
+                self.assertEqual(old['tree_after'], old['tree_before'])
+
+            def check_native(new=new):
+                self.assertEqual((new['code'], new['stdout']), (0, adopted), new['stderr'])
+                self.assertEqual(new['stderr'], '')
+                # 補助がそろった旧版の実行(終了値・出力・作業ツリー)と同じ結果(採用の成功。元の名前が無く、先がある)。
+                self.assertEqual((new['code'], new['stdout'], new['stderr'], new['tree_after']), reference)
+                self.assertIn('進行中_例.md', new['tree_after'])
+                self.assertNotIn('候補_例.md', new['tree_after'])
+            passed = True
+            # 承認済みの差の個別期待は、通常の一致件数と別の区分(approved_old・approved_native)で数える。
+            for which, check in (('approved_old', check_old), ('approved_native', check_native)):
+                with self.subTest(case=case_id, which=which):
+                    try:
+                        judge_run(which, f'{label}:{case_id}', check)
+                    except AssertionError:
+                        passed = False
+                        raise
+            if passed:
+                APPROVED_DIFFERENCE_RUN.append(f'{label}:{case_id}')
+
+
+def _contract_candidate_helpers_missing(self):
+    """E23: 旧版の補助(`candidate-keys.py`・それが読み込む `task-digest.py`)が無い・壊れている条件(承認済みの差の個別期待)。
+    旧版の scripts の写しは、比較器が作った場所に置く(`plugins/` は変えない)。候補は UTF-8 で読める本文(旧版は復号より先に補助を読む)。
+    (1) `candidate-keys.py` が無い・(2) `task-digest.py` が無い: 旧版は `FileNotFoundError` を捕まえ、`[Errno 2] No such file or directory: '<置き場>/<名前>.py'` で終了 2。
+    (3) `candidate-keys.py` に構文の誤りがある: 捕まえない `SyntaxError` の呼出履歴で終了 1(最後の行と終了値を比べる)。
+    Rust は旧スクリプトを読み込まないので、どの条件でも、補助がそろった旧版と同じ結果(採用の成功)になる。"""
+    label = 'e23:candidate-helpers-missing'
+    if not legacy_guard_ready(label):
+        return
+    adopted = '{"path": "<ROOT>/進行中_例.md", "tracked": true, "sha256": "%s", "warnings": []}\n' % hashlib.sha256(CANDIDATE.encode()).hexdigest()
+    reference = reference_adoption()
+    with tempfile.TemporaryDirectory(prefix='r4c-helper-tree-') as trees:
+        cases = []
+        for case_id, kwargs, check in (
+                ('candidate-keys-missing', {'remove': ('candidate-keys.py',)},
+                 lambda scripts: (2, f"候補の採用を停止: [Errno 2] No such file or directory: '{scripts}/candidate-keys.py'\n")),
+                ('task-digest-missing', {'remove': ('task-digest.py',)},
+                 lambda scripts: (2, f"候補の採用を停止: [Errno 2] No such file or directory: '{scripts}/task-digest.py'\n")),
+                ('candidate-keys-syntax-error', {'replace': {'candidate-keys.py': 'def broken(:\n    pass\n'}}, None)):
+            folder = Path(trees).resolve() / case_id
+            folder.mkdir()
+            script, _ = legacy_tree(folder, guard='missing', **kwargs)
+            cases.append((case_id, script, check))
+        for case_id, script, check in cases:
+            records = {'old': run_precheck('old', accept='ok', script=script), 'native': run_precheck('native', accept='ok')}
+
+            def check_old(record=records['old'], script=script, check=check):
+                if check is not None:
+                    self.assertEqual((record['code'], record['stderr']), check(script.parent), record['stderr'])
+                else:
+                    # 捕まえない SyntaxError: 呼出履歴の最後の行と終了値(1)だけを比べる。停止の文は出ない。
+                    self.assertEqual(record['code'], 1, record['stderr'])
+                    self.assertEqual(record['stderr'].rstrip('\n').rsplit('\n', 1)[-1], 'SyntaxError: invalid syntax')
+                    self.assertNotIn('候補の採用を停止', record['stderr'])
+                self.assertEqual((record['stdout'], record['tree_after']), ('', record['tree_before']))
+
+            def check_native(record=records['native']):
+                self.assertEqual((record['code'], record['stdout']), (0, adopted), record['stderr'])
+                self.assertEqual(record['stderr'], '')
+                # 補助がそろった旧版の実行(終了値・出力・作業ツリー)と同じ結果。
+                self.assertEqual((record['code'], record['stdout'], record['stderr'], record['tree_after']), reference)
+                self.assertIn('進行中_例.md', record['tree_after'])
+                self.assertNotIn('候補_例.md', record['tree_after'])
+            passed = True
+            for which, run_check in (('approved_old', check_old), ('approved_native', check_native)):
+                with self.subTest(case=case_id, which=which):
+                    try:
+                        judge_run(which, f'{label}:{case_id}', run_check)
+                    except AssertionError:
+                        passed = False
+                        raise
+            if passed:
+                APPROVED_DIFFERENCE_RUN.append(f'{label}:{case_id}')
+
+
+Contract.test_e19_child_mode = _contract_child_mode
+Contract.test_e19b_child_mode_without_proc = _contract_child_mode_without_proc
+Contract.test_e19c_child_mode_sigint = _contract_child_mode_sigint
+Contract.test_e19d_child_mode_requires_exact_argv0 = _contract_child_mode_requires_exact_argv0
+Contract.test_e20_precheck_observation = _contract_precheck_observation
+Contract.test_e20b_precheck_without_proc = _contract_precheck_without_proc
+Contract.test_e20c_precheck_bash_warning = _contract_precheck_refusal_with_bash_warning
+Contract.test_e21_precheck_tools_missing = _contract_precheck_tools_missing
+Contract.test_e22_precheck_deadline = _contract_precheck_deadline
+Contract.test_e23_candidate_helpers_missing = _contract_candidate_helpers_missing
+
+
 def collect_evidence(python, fixture):
     """機種で変わる旧版の診断の採取(CI の各機種のログへ残す。固定期待は、この証拠を見てから作る)。
 
@@ -1995,6 +2776,12 @@ def print_tally():
           f"{len(TALLY['native_unconnected'])} 件・それ以外の不一致 {len(TALLY['native_mismatch'])} 件", flush=True)
     for name in TALLY['native_mismatch']:
         print('ADOPT: Rust が固定期待と違う(未接続以外): ' + name, flush=True)
+    print(f"ADOPT: 基準(S3D の実行物)の照合: 一致 {TALLY['reference_match']} 件・不一致 {len(TALLY['reference_mismatch'])} 件", flush=True)
+    for name in TALLY['reference_mismatch']:
+        print('ADOPT: 基準が固定期待と違う: ' + name, flush=True)
+    print(f"ADOPT: 承認済みの差の個別期待(通常の一致件数とは別): 旧版 一致 {TALLY['approved_old_match']} 件・不一致 {len(TALLY['approved_old_mismatch'])} 件 / "
+          f"Rust 一致 {TALLY['approved_native_match']} 件・未接続で不通過 {len(TALLY['approved_native_unconnected'])} 件・それ以外の不一致 {len(TALLY['approved_native_mismatch'])} 件", flush=True)
+    print('ADOPT: 旧版の前提の道具の版(見つけた値): ' + json.dumps(LEGACY_TOOL_VERSIONS, ensure_ascii=False, sort_keys=True), flush=True)
     print('ADOPT: 未接続で通らなかった検査の ID: ' + ', '.join(sorted(set(TALLY['native_unconnected']))), flush=True)
     print('ADOPT: 未実施の ID: ' + ', '.join(sorted(set(NOT_RUN) | set(UNIMPLEMENTED))), flush=True)
     print('ADOPT: 順序を決めない SIGINT の基準の集合(順序を決めたケース + 固定): ' + (json.dumps(RACE_RESULTS['reference'], ensure_ascii=False) if 'reference' in RACE_RESULTS else '未実行'), flush=True)
@@ -2004,13 +2791,21 @@ def print_tally():
 
 
 def main(argv=None):
-    global FIXTURE, OLD_PYTHON
+    global FIXTURE, OLD_PYTHON, DS_FIXTURE, REQUIRE_USERNS
     parser = argparse.ArgumentParser()
     parser.add_argument('--fixture', required=True)
+    parser.add_argument('--diff-snapshot-fixture', required=True,
+                        help='S3D の diff_snapshot_contract(同じ成果物から作った実行物。子のモードの基準)')
     parser.add_argument('--old-python', default=sys.executable)
+    parser.add_argument('--require-userns', action='store_true',
+                        help='`/proc` を隠す利用者の名前空間を作れないとき、未実施にせず失敗にする(Linux の CI。R4G と同じ)')
     parser.add_argument('--evidence', action='store_true', help='機種で変わる旧版の診断の生出力を `ADOPT-EVIDENCE` の行で出す')
     args = parser.parse_args(argv)
+    REQUIRE_USERNS = args.require_userns
     FIXTURE = fixture_path(args.fixture)
+    DS_FIXTURE = fixture_path(args.diff_snapshot_fixture)
+    if DS_FIXTURE == FIXTURE or DS_FIXTURE.samefile(FIXTURE):
+        raise ValueError('--diff-snapshot-fixture が --fixture と同じ実行物です')
     OLD_PYTHON = Path(args.old_python)
     if sys.version_info[:2] != (3, 10) or os.geteuid() == 0:
         raise ValueError('R4C比較はPython3.10系・非rootで実行してください')
@@ -2034,7 +2829,7 @@ def main(argv=None):
     detail = f'承認済みの差 {len(APPROVED_DIFFERENCE_RUN)} 件(通常の一致件数とは別)・仮の期待 {len(PROVISIONAL_RUN)} 件・未実施 {len(notes)} 件'
     for line in notes:
         print('ADOPT: ' + line)
-    print('ADOPT: 依存部品への到達: 実部品の呼出しの検証は #471・#472 の接続後(E07 の結果の差し替えは、依存部品に届いた件数に数えない)')
+    print('ADOPT: 依存部品への到達: 事前検査(自分を子として起動する)と候補解析(candidate_keys)の実部品で比べた。未接続の文が出たら失敗にする(E07 の結果の差し替えは、依存部品に届いた件数に数えない)')
     for name in APPROVED_DIFFERENCE_RUN:
         print('ADOPT: 承認済みの差: ' + name)
     # 未実施・仮の期待が 1 件でもあるときは「合格」と出さない。

@@ -3,15 +3,10 @@
 use super::bytes::json;
 use dev_workflow_core::CommandOutput;
 
-/// 旧版が返す JSON の値(警告に入る入れ子の辞書・リストと整数・文字列・真偽・null)。
+/// 旧版が返す JSON の値(警告に入る入れ子の辞書・リストと文字列・真偽。候補解析の警告は文字列の辞書だけ)。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PyJson {
-    // `Null`・`Int` は #471 の警告の値で使う(接続時)。それまでは単体テストだけが作る。
-    #[cfg_attr(not(test), allow(dead_code))]
-    Null,
     Bool(bool),
-    #[cfg_attr(not(test), allow(dead_code))]
-    Int(i64),
     Text(Vec<u8>),
     List(Vec<PyJson>),
     Dict(Vec<(Vec<u8>, PyJson)>),
@@ -24,10 +19,8 @@ impl PyJson {
 
     pub(crate) fn render(&self) -> Vec<u8> {
         match self {
-            Self::Null => b"null".to_vec(),
             Self::Bool(true) => b"true".to_vec(),
             Self::Bool(false) => b"false".to_vec(),
-            Self::Int(value) => value.to_string().into_bytes(),
             Self::Text(value) => json(value),
             Self::List(items) => {
                 let items = items.iter().map(Self::render).collect::<Vec<_>>();
@@ -91,22 +84,27 @@ mod tests {
 
     #[test]
     fn warnings_keep_their_order_and_nested_separators() {
-        let warning = |line: i64, code: &str| {
+        let warning = |line: &str, code: &str| {
             PyJson::Dict(vec![
-                (b"line".to_vec(), PyJson::Int(line)),
+                (b"line".to_vec(), PyJson::text(line)),
                 (b"code".to_vec(), PyJson::text(code)),
                 (
                     b"extra".to_vec(),
-                    PyJson::List(vec![PyJson::Null, PyJson::Bool(false)]),
+                    PyJson::List(vec![PyJson::List(Vec::new()), PyJson::Bool(false)]),
                 ),
             ])
         };
-        let output = success(b"/p", false, b"s", vec![warning(3, "b"), warning(1, "a")]);
+        let output = success(
+            b"/p",
+            false,
+            b"s",
+            vec![warning("3", "b"), warning("1", "a")],
+        );
         assert_eq!(
             String::from_utf8(output.stdout).unwrap(),
             "{\"path\": \"/p\", \"tracked\": false, \"sha256\": \"s\", \"warnings\": \
-[{\"line\": 3, \"code\": \"b\", \"extra\": [null, false]}, \
-{\"line\": 1, \"code\": \"a\", \"extra\": [null, false]}]}\n"
+[{\"line\": \"3\", \"code\": \"b\", \"extra\": [[], false]}, \
+{\"line\": \"1\", \"code\": \"a\", \"extra\": [[], false]}]}\n"
         );
     }
 }

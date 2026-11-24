@@ -6,6 +6,7 @@ use super::flow::{Candidates, Child, LinkFailure, Ops, Precheck, Problem, Read, 
 use super::output::PyJson;
 use super::paths::PyPath;
 use super::plan::{Stop, plan};
+use super::real::{PRECHECK_TIMEOUT, SelfPrecheck, precheck_argv, precheck_display};
 use dev_workflow_platform::adopt_candidate as os;
 use sha2::{Digest, Sha256};
 use std::cell::{Cell, RefCell};
@@ -85,6 +86,8 @@ struct Hooked {
     /// 元の候補の削除が成功した直後に SIGINT が届いたことにする。
     interrupt_after_source_unlink: Cell<bool>,
     run_log: RefCell<Vec<Vec<Vec<u8>>>>,
+    /// 親の環境に足す項目(`GIT_*` が子へ渡らないことの確かめ。プロセス全体の環境は変えない)。
+    extra_env: RefCell<Vec<(Vec<u8>, Vec<u8>)>>,
 }
 impl Hooked {
     fn new() -> Self {
@@ -101,6 +104,7 @@ impl Hooked {
             interrupt: Cell::new(false),
             interrupt_after_source_unlink: Cell::new(false),
             run_log: RefCell::new(Vec::new()),
+            extra_env: RefCell::new(Vec::new()),
         }
     }
 }
@@ -180,7 +184,9 @@ impl Ops for Hooked {
         self.interrupt.get()
     }
     fn environment(&self) -> Vec<(Vec<u8>, Vec<u8>)> {
-        self.inner.environment()
+        let mut vars = self.inner.environment();
+        vars.extend(self.extra_env.borrow().iter().cloned());
+        vars
     }
     fn loop_iteration(&self) -> Option<Vec<u8>> {
         let calls = self.loop_calls.get();
@@ -284,9 +290,9 @@ fn arguments(tmp: &Tmp, name: Option<&str>, accept: Option<&str>, sha: &str) -> 
     }
 }
 
-fn adopt_with(
+fn adopt_with<P: Precheck<os::Dir>>(
     ops: &Hooked,
-    pre: &StubPrecheck,
+    pre: &P,
     args: &Arguments,
 ) -> Result<super::flow::Adoption, Stop> {
     let planned = plan(args, None, &|| Ok(b"/".to_vec())).map_err(|stop| stop)?;
@@ -912,4 +918,233 @@ fn missing_git_command_is_the_old_file_not_found_text() {
         "[Errno 2] No such file or directory: 'git'"
     );
     let _ = Path::new("");
+}
+
+// ---- 事前検査の実物(`SelfPrecheck`)。実の子の起動で、自分の実行ファイルの代わりに記録する小さな script を使う ----
+// (`argv[0]` と実行のパスが別であることと、PATH を探さないことは、platform の単体テストが確かめる。
+//  script は `$0` に実行のパスを受けるので、ここでは引数・環境・cwd・出力・終了値・期限を確かめる。stdin は確かめない。)
+
+/// 記録用の事前検査の代役の実行ファイル(script)。`body` の前に、引数・cwd・fd 0 の行き先・環境の記録を書く(fd 0 の行は、単体テストでは読まない)。
+fn recording_executable(exe: &Tmp, log: &Tmp, body: &str) -> Vec<u8> {
+    let record = log.root().join("record");
+    let script = format!(
+        "#!/bin/sh\n{{\n  printf 'ARGS:'; for a in \"$@\"; do printf '[%s]' \"$a\"; done; echo\n  pwd -P\n  \
+         readlink /proc/$$/fd/0 2>/dev/null || echo no-proc\n  env | sort\n}} > '{}'\n{body}\n",
+        record.display()
+    );
+    exe.write("precheck.sh", &script);
+    let path = exe.root().join("precheck.sh");
+    std::fs::set_permissions(&path, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
+    path.as_os_str().as_encoded_bytes().to_vec()
+}
+
+/// 書いた直後の実行は、別のスレッドの fork が書込み fd を持つ間に当たると ETXTBSY で失敗する(検査同士の並行の副作用)。数回やり直す。
+fn adopt_retrying_with<P: Precheck<os::Dir>>(
+    ops: &Hooked,
+    pre: &P,
+    tmp: &Tmp,
+    accept: Option<&str>,
+) -> Result<super::flow::Adoption, Stop> {
+    let mut result = adopt_with(ops, pre, &arguments(tmp, None, accept, &digest(BODY)));
+    for _ in 0..20 {
+        let busy = matches!(&result, Err(Stop::Caught(m))
+            if m.starts_with(b"[Errno 26]") && m.ends_with(b"'diff-snapshot.sh'"));
+        if !busy || !tmp.exists("候補_例.md") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        result = adopt_with(ops, pre, &arguments(tmp, None, accept, &digest(BODY)));
+    }
+    result
+}
+
+fn adopt_retrying<P: Precheck<os::Dir>>(
+    pre: &P,
+    tmp: &Tmp,
+    accept: Option<&str>,
+) -> Result<super::flow::Adoption, Stop> {
+    adopt_retrying_with(&Hooked::new(), pre, tmp, accept)
+}
+
+#[test]
+fn precheck_argv_has_the_fixed_name_first_and_accept_only_when_given() {
+    let argv = |accept: Option<&[u8]>| precheck_argv(b"/r o", accept);
+    let text = |argv: &[Vec<u8>]| {
+        argv.iter()
+            .map(|item| String::from_utf8_lossy(item).into_owned())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        text(&argv(None)),
+        ["diff-snapshot.sh", "--cwd", "/r o", "--precheck"]
+    );
+    assert_eq!(
+        text(&argv(Some(b"a b"))),
+        [
+            "diff-snapshot.sh",
+            "--cwd",
+            "/r o",
+            "--precheck",
+            "--accept",
+            "a b"
+        ]
+    );
+    assert_eq!(
+        String::from_utf8(super::diagnostics::timeout_message(
+            &precheck_display(&argv(Some("é\u{ff}".as_bytes()))),
+            PRECHECK_TIMEOUT
+        ))
+        .unwrap(),
+        "Command '['bash', 'diff-snapshot.sh', '--cwd', '/r o', '--precheck', '--accept', 'é\u{ff}']' timed out after 60 seconds"
+    );
+}
+
+#[test]
+fn precheck_child_gets_the_arguments_cwd_and_only_the_git_cleaned_environment() {
+    let tmp = tracked_setup(BODY);
+    let (exe, log) = (Tmp::new("pre-exe"), Tmp::new("pre-log"));
+    let precheck = SelfPrecheck::with_executable(Ok(recording_executable(
+        &exe,
+        &log,
+        "echo filter-token; echo 'NOTE: dropped' >&2; exit 0",
+    )));
+    // 親の環境に `GIT_*` と任意の変数を足し(`Hooked` の環境へ。プロセス全体の環境は変えない)、
+    // `GIT_*` が全部除かれ、旧版の 4 変数が足され、ほかの変数が残ることを確かめる。
+    let ops = Hooked::new();
+    *ops.extra_env.borrow_mut() = [
+        ("GIT_DIR", "/nonexistent-r4c"),
+        ("GIT_WORK_TREE", "/nonexistent-r4c"),
+        ("GIT_INDEX_FILE", "/nonexistent-r4c/index"),
+        ("GIT_CONFIG_COUNT", "1"),
+        ("GIT_NO_LAZY_FETCH", "0"),
+        ("FOO", "bar"),
+    ]
+    .map(|(key, value)| (key.as_bytes().to_vec(), value.as_bytes().to_vec()))
+    .to_vec();
+    let adopted = adopt_retrying_with(&ops, &precheck, &tmp, Some("ok")).unwrap();
+    assert!(
+        adopted.tracked,
+        "事前検査が成功(終了 0)すれば採用は続く。出力のトークンと NOTE は捨てる"
+    );
+    assert!(adopted.warnings.is_empty());
+    let record = std::fs::read_to_string(log.root().join("record")).unwrap();
+    let mut lines = record.lines();
+    let root = tmp.root().to_str().unwrap();
+    assert_eq!(
+        lines.next().unwrap(),
+        format!("ARGS:[--cwd][{root}][--precheck][--accept][ok]")
+    );
+    assert_eq!(lines.next().unwrap(), root, "cwd は保持した root");
+    // Rust の子の stdin の継承は、親の fd 0 を pipe に替えて中身を読ませる platform の単体テスト
+    // (`child_inherits_the_standard_input_of_the_caller`)だけが確かめる(比較器の E20 が見る stdin は旧版の側)。ここでは確かめない。
+    let _ = lines.next();
+    let volatile = ["PWD=", "OLDPWD=", "SHLVL=", "_="];
+    let mut seen: Vec<String> = lines
+        .filter(|line| !volatile.iter().any(|prefix| line.starts_with(prefix)))
+        .map(str::to_owned)
+        .collect();
+    seen.sort();
+    assert!(!seen.iter().any(|line| line.starts_with("GIT_DIR=")
+        || line.starts_with("GIT_WORK_TREE=")
+        || line.starts_with("GIT_INDEX_FILE=")
+        || line.starts_with("GIT_CONFIG_COUNT=")));
+    assert!(seen.contains(&"FOO=bar".to_owned()));
+    assert!(
+        seen.contains(&"GIT_NO_LAZY_FETCH=1".to_owned()),
+        "旧版の値で置き換わる"
+    );
+    let mut expected: Vec<String> = ops
+        .environment()
+        .into_iter()
+        .filter(|(key, _)| !key.starts_with(b"GIT_"))
+        .map(|(key, value)| {
+            format!(
+                "{}={}",
+                String::from_utf8_lossy(&key),
+                String::from_utf8_lossy(&value)
+            )
+        })
+        .chain(
+            [
+                "GIT_NO_REPLACE_OBJECTS=1",
+                "GIT_NO_LAZY_FETCH=1",
+                "GIT_OPTIONAL_LOCKS=0",
+                "GIT_TERMINAL_PROMPT=0",
+            ]
+            .map(str::to_owned),
+        )
+        .filter(|line| !volatile.iter().any(|prefix| line.starts_with(prefix)))
+        .collect();
+    expected.sort();
+    assert_eq!(seen, expected);
+    // 空の `--accept` は渡さない。
+    let again = adopt_retrying(
+        &SelfPrecheck::with_executable(Ok(recording_executable(&exe, &log, "exit 0"))),
+        &tracked_setup(BODY),
+        Some(""),
+    )
+    .unwrap();
+    assert!(again.tracked);
+    let record = std::fs::read_to_string(log.root().join("record")).unwrap();
+    assert!(
+        record.lines().next().unwrap().ends_with("[--precheck]"),
+        "{record}"
+    );
+}
+
+#[test]
+fn precheck_failure_keeps_the_stderr_and_stops_before_any_git_command() {
+    let tmp = tracked_setup(BODY);
+    let (exe, log) = (Tmp::new("pre-exe"), Tmp::new("pre-log"));
+    let precheck = SelfPrecheck::with_executable(Ok(recording_executable(
+        &exe,
+        &log,
+        "echo token; printf 'ERROR bad \\377\\n' >&2; exit 3",
+    )));
+    let ops = Hooked::new();
+    let result = adopt_retrying_with(&ops, &precheck, &tmp, None);
+    assert_eq!(
+        message(result),
+        "git の事前検査に通らない: ERROR bad \u{fffd}\n"
+    );
+    assert!(tmp.exists("候補_例.md") && ops.run_log.borrow().is_empty());
+}
+
+#[test]
+fn precheck_without_a_known_executable_path_stops_without_starting_a_child() {
+    let tmp = tracked_setup(BODY);
+    let ops = Hooked::new();
+    let precheck = SelfPrecheck::with_executable(Err(2));
+    let result = adopt_with(&ops, &precheck, &arguments(&tmp, None, None, &digest(BODY)));
+    assert_eq!(
+        message(result),
+        "[Errno 2] No such file or directory: 'diff-snapshot.sh'"
+    );
+    assert!(tmp.exists("候補_例.md") && ops.run_log.borrow().is_empty());
+}
+
+#[test]
+fn precheck_deadline_kills_the_child_and_prints_the_old_timeout_text() {
+    let tmp = tracked_setup(BODY);
+    let (exe, log) = (Tmp::new("pre-exe"), Tmp::new("pre-log"));
+    // `exec` で、直接の子そのものが眠る(期限で kill されるのは直接の子だけ)。
+    let precheck = SelfPrecheck::with_executable_and_timeout(
+        Ok(recording_executable(&exe, &log, "exec sleep 30")),
+        1,
+    );
+    let started = std::time::Instant::now();
+    let result = adopt_retrying_with(&Hooked::new(), &precheck, &tmp, Some("ok"));
+    assert_eq!(
+        message(result),
+        format!(
+            "Command '['bash', 'diff-snapshot.sh', '--cwd', '{}', '--precheck', '--accept', 'ok']' timed out after 1 seconds",
+            tmp.root().display()
+        )
+    );
+    assert!(started.elapsed() < std::time::Duration::from_secs(10));
+    assert!(tmp.exists("候補_例.md"));
+    assert_eq!(
+        PRECHECK_TIMEOUT, 60,
+        "実物の期限は 60 秒(旧 `root_run(root_fd, precheck, env, 60)`)"
+    );
 }

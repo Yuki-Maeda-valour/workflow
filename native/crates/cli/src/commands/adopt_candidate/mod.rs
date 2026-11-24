@@ -1,5 +1,6 @@
 //! R4Cの専用部分。製品CLIの登録表には接続しない。
-//! 依存部品(#471 の候補解析・#472 の事前検査)は `flow` の trait の向こうにあり、実物への接続は両方のマージ後。
+//! 依存部品(#471 の候補解析・#472 の事前検査)は `flow` の trait の向こうにある。実物は開発用 example が接続する
+//! (事前検査は自分自身を子として起動する `SelfPrecheck`、候補解析は example の `Candidates` の実物)。
 mod args;
 #[allow(dead_code)]
 #[path = "../r4b_support/bytes.rs"]
@@ -25,12 +26,13 @@ mod unicode;
 
 #[cfg(test)]
 pub(crate) use candidate::{CandidateError, FileIdentity, HeldCandidate, verify_candidate_sha};
-pub(crate) use flow::{Candidates, Child, Ops, Precheck, Problem};
+pub(crate) use flow::{Candidates, Ops, Precheck, Problem};
 #[cfg(test)]
 pub(crate) use index::{FileMode, IndexError, parse_stage_zero, verify_index_unchanged};
 pub(crate) use inject::{Injected, InjectedPrecheck};
+pub(crate) use output::PyJson;
 pub(crate) use program::{Context, run};
-pub(crate) use real::{ProcessEnv, RealOps};
+pub(crate) use real::{ProcessEnv, RealOps, SelfPrecheck};
 pub(crate) use runtime::Standard;
 
 #[cfg(test)]

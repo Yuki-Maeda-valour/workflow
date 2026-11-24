@@ -1,5 +1,6 @@
 //! 旧 `adopt()` の流れ。OS・依存部品・子の起動は trait の向こうに置き、順序と診断をここで決める。
-//! 依存部品(#471 の候補解析・#472 の事前検査)の実物への接続は、両方が main に入った後に足す。
+//! 依存部品(#471 の候補解析・#472 の事前検査)は trait の向こうにあり、実物は開発用 example が接続する
+//! (候補解析は example の `CandidateKeys`、事前検査は `real.rs` の `SelfPrecheck`)。
 use super::args::{ArgValue, Arguments};
 use super::candidate::{CandidateError, FileIdentity, HeldCandidate};
 use super::diagnostics as text;
@@ -117,18 +118,20 @@ pub(crate) trait Ops {
 }
 
 /// 候補解析が返す 1 件の問題。`code` が見送りの 2 種なら採用を拒否する。
+#[derive(Debug)]
 pub(crate) struct Problem {
     pub(crate) code: Option<Vec<u8>>,
     pub(crate) json: PyJson,
 }
 
-/// #471 の `check_text(text, None)` に当たる境界。実物の接続は #471 のマージ後。
+/// #471 の `check_text(text, None)` に当たる境界。実物は example の `CandidateKeys`(`candidate_keys::check_text`)。
 pub(crate) trait Candidates {
     fn check_text(&self, text: &str) -> Result<Vec<Problem>, Vec<u8>>;
 }
 
 /// #472 の事前検査(旧 `bash diff-snapshot.sh --cwd <root> --precheck [--accept <値>]`)に当たる境界。
-/// 全体の期限は 60 秒で、期限と回収の方法は実部品の接続時(Task 2.1)に決める。
+/// 実物は `real.rs` の `SelfPrecheck`: 自分自身を `argv[0]=diff-snapshot.sh` の直接の子として起動し、全体の期限は 60 秒、
+/// 時間切れは直接の子を kill して wait する。
 /// 失敗(時間切れ・起動失敗)は、旧版の例外の表示で返す。
 pub(crate) trait Precheck<D> {
     fn run(

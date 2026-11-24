@@ -6,6 +6,8 @@
 //! - `unsafe` は次の所だけに置く。各所に安全の理由を書く。
 //!   - 子の中(`pre_exec`)の `signal`・`sigprocmask`・`fchdir`・`fcntl`。
 //!   - 親の `fcntl`(継承 fd の印)・`signal`(SIGXFSZ の無視)・`pthread_self`・検査専用の `BorrowedFd::borrow_raw`・`umask`。
+//!   - 子へ渡さない fd の印: `fcntl`、Linux の `close_range`(`syscall`)。
+//!   - 自分の実行ファイルのパス: Linux の `getauxval(AT_EXECFN)` とそのポインタの `CStr::from_ptr`(Mac は標準ライブラリの `current_exe`で、unsafe なし)。
 //!   - SIGINT の処理: 入れるときの `sigaction`・`sigemptyset`、受け取ったときの処理の中の
 //!     `pthread_self`・`pthread_kill`(別のスレッドで受けたとき、持ち主のスレッドへ送り直す)・`waitpid`・`clock_gettime`・`nanosleep`・`kill`・`write`・`signal`・`raise`、
 //!     子の回収の前後で SIGINT を止める・今の mask を読む `pthread_sigmask`・`sigemptyset`・`sigaddset`。
@@ -363,25 +365,68 @@ unsafe fn prepare_child(raw: i32, original: libc::sigset_t) -> io::Result<()> {
     Ok(())
 }
 
-/// 旧 `close_fds=True` に当たる処理を親の側で行う: 3 以上の fd(`keep` 以外)を exec で閉じる印(CLOEXEC)にする。
+/// 旧 `close_fds=True`(CPython 3.10 の `_posixsubprocess.c`)に当たる処理を親の側で行う: 3 以上の fd(`keep` 以外)を exec で閉じる印(CLOEXEC)にする。
 /// 標準ライブラリが作る fd は元から CLOEXEC なので、継承の対象になるのは、起動した側から受け継いだ fd だけ。
+/// 旧版と同じ順序: fd の一覧(Linux は `/proc/self/fd`・Mac は `/dev/fd`)を読めればその一覧だけ。読めなければ、3 から
+/// `safe_get_max_fd`(`sysconf(_SC_OPEN_MAX)`。-1 なら 256)の手前まで全部(打ち切りは置かない)。Linux は速さのため、
+/// 使えれば `close_range(…, CLOSE_RANGE_CLOEXEC)` で範囲に印を付け、使えなければ(ENOSYS・EINVAL など)1 つずつ `fcntl` にする。
 fn close_inherited_fds_on_exec(keep: i32) {
+    if let Some(listing) = fd_listing() {
+        mark_cloexec(listing.into_iter().filter(|fd| *fd >= 3 && *fd != keep));
+        return;
+    }
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    let fds: Vec<i32> = std::fs::read_dir("/proc/self/fd")
-        .map(|entries| {
-            entries
-                .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<i32>().ok())
-                .collect()
-        })
-        .unwrap_or_default();
-    #[cfg(not(any(target_os = "linux", target_os = "android")))]
-    let fds: Vec<i32> = (3..4096).collect();
-    for fd in fds.into_iter().filter(|fd| *fd >= 3 && *fd != keep) {
+    if close_range_cloexec(3) {
+        return;
+    }
+    mark_cloexec((3..fd_limit()).filter(|fd| *fd != keep));
+}
+
+fn mark_cloexec(fds: impl Iterator<Item = i32>) {
+    for fd in fds {
         // SAFETY: 開いていない fd への `fcntl` は EBADF で失敗するだけ。`F_SETFD` は印を付けるだけで fd を閉じない。
         unsafe {
             libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC);
         }
     }
+}
+
+/// 開いている fd の一覧。Linux は `/proc/self/fd`、そのほか(Mac)は `/dev/fd`。読めなければ `None`。
+fn fd_listing() -> Option<Vec<i32>> {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let folder = "/proc/self/fd";
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
+    let folder = "/dev/fd";
+    std::fs::read_dir(folder).ok().map(|entries| {
+        entries
+            .filter_map(|entry| entry.ok()?.file_name().to_str()?.parse::<i32>().ok())
+            .collect()
+    })
+}
+
+/// `first` 以上の全 fd に CLOEXEC を付ける(Linux 5.11 以上の `close_range`)。使えなければ `false`。
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn close_range_cloexec(first: u32) -> bool {
+    // `CLOSE_RANGE_CLOEXEC`(linux/close_range.h)。
+    const CLOSE_RANGE_CLOEXEC: libc::c_uint = 4;
+    // SAFETY: `close_range` は fd の範囲と印だけを取り、メモリを触らない。CLOEXEC の印だけなので fd は閉じない。
+    unsafe {
+        libc::syscall(
+            libc::SYS_close_range,
+            first as libc::c_uint,
+            u32::MAX as libc::c_uint,
+            CLOSE_RANGE_CLOEXEC,
+        ) == 0
+    }
+}
+
+/// 開ける fd の数の上限(旧 `safe_get_max_fd`: `sysconf(_SC_OPEN_MAX)`、無制限などで取れなければ 256)。
+fn fd_limit() -> i32 {
+    fd_limit_from(rustix::process::getrlimit(rustix::process::Resource::Nofile).current)
+}
+
+fn fd_limit_from(current: Option<u64>) -> i32 {
+    current.map_or(256, |limit| i32::try_from(limit).unwrap_or(i32::MAX))
 }
 
 // ---- SIGINT(旧 Python の KeyboardInterrupt) ----
@@ -566,6 +611,29 @@ pub fn run_in_dir(
     env: &[(Vec<u8>, Vec<u8>)],
     timeout: Duration,
 ) -> Result<Captured, ChildError> {
+    run_candidates(dir, exec_candidates(&argv[0], env), argv, env, timeout)
+}
+
+/// `run_in_dir` と同じ子の起動で、実行するファイルを `executable`(絶対パス)に決め、`argv[0]` は表示用の名前だけにする。
+/// PATH を探さず、`argv[0]` の名前の別の実行物や旧 shell へも切り替えない。起動と事前の絞り込み(存在・種類・実行権限)は
+/// `executable` だけで行う。失敗の表示(`OSError` の filename)は `argv[0]`。自分自身を `diff-snapshot.sh` の名前で子にする経路(事前検査)が使う。
+pub fn run_in_dir_with_executable(
+    dir: &Dir,
+    executable: &[u8],
+    argv: &[Vec<u8>],
+    env: &[(Vec<u8>, Vec<u8>)],
+    timeout: Duration,
+) -> Result<Captured, ChildError> {
+    run_candidates(dir, vec![executable.to_vec()], argv, env, timeout)
+}
+
+fn run_candidates(
+    dir: &Dir,
+    candidates: Vec<Vec<u8>>,
+    argv: &[Vec<u8>],
+    env: &[(Vec<u8>, Vec<u8>)],
+    timeout: Duration,
+) -> Result<Captured, ChildError> {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
     let raw = dir.0.as_raw_fd();
@@ -574,7 +642,7 @@ pub fn run_in_dir(
     let mut first_failure: Option<io::Error> = None;
     let mut last_failure: Option<io::Error> = None;
     let mut spawned = None;
-    for candidate in exec_candidates(&argv[0], env) {
+    for candidate in candidates {
         match probe_executable(dir, &candidate) {
             Probe::Skip(code) => {
                 last_failure = Some(io::Error::from_raw_os_error(code));
@@ -835,6 +903,65 @@ pub fn set_umask(mask: u32) -> u32 {
 pub fn current_thread_id() -> u64 {
     // SAFETY: `pthread_self` は引数を取らず、呼び出したスレッドの識別値を返すだけ。
     unsafe { libc::pthread_self() as u64 }
+}
+
+/// 起動したプログラム(自分自身)の実行ファイルの絶対パス。起動した直後(作業場所を変える前)に決めて保持する。
+/// `/proc` に頼らない。Linux は `getauxval(AT_EXECFN)`(カーネルが渡した、起動のときのパス)、Mac は `_NSGetExecutablePath`(標準ライブラリの `current_exe` が呼ぶ)を、
+/// 相対なら今の作業場所からの絶対パスにする。決められないときは errno(ファイルが無い・作業場所を読めない)。
+/// `fexecve` などで `/dev/fd/N` として起動された場合は、自分自身を指すパスとして比較の前提の外(2026-11-11 22:31 の決定)。
+pub fn own_executable_path() -> Result<Vec<u8>, i32> {
+    absolute_executable(raw_executable_path(), || {
+        use std::os::unix::ffi::OsStringExt;
+        std::env::current_dir()
+            .map(|path| path.into_os_string().into_vec())
+            .map_err(|error| error.raw_os_error().unwrap_or(libc::EIO))
+    })
+}
+
+/// OS が返した実行ファイルのパスを絶対パスにする。絶対ならそのまま、相対なら `cwd()` の後ろへつなぐ。値が無い・空なら ENOENT。
+fn absolute_executable(
+    raw: Option<Vec<u8>>,
+    cwd: impl FnOnce() -> Result<Vec<u8>, i32>,
+) -> Result<Vec<u8>, i32> {
+    let raw = raw.filter(|path| !path.is_empty()).ok_or(libc::ENOENT)?;
+    if raw.starts_with(b"/") {
+        return Ok(raw);
+    }
+    let mut path = cwd()?;
+    if !path.starts_with(b"/") {
+        return Err(libc::ENOENT);
+    }
+    if !path.ends_with(b"/") {
+        path.push(b'/');
+    }
+    path.extend_from_slice(&raw);
+    Ok(path)
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn raw_executable_path() -> Option<Vec<u8>> {
+    // SAFETY: `getauxval` は値を返すだけ。`AT_EXECFN` の値は、カーネルがプロセスの起動のときに自分のスタックへ置いた
+    // NUL 終端の文字列へのポインタで、プロセスの間有効。無ければ 0(null)。
+    let pointer = unsafe { libc::getauxval(libc::AT_EXECFN) } as *const libc::c_char;
+    if pointer.is_null() {
+        return None;
+    }
+    // SAFETY: 上のとおり、NUL 終端の文字列を指す。
+    Some(
+        unsafe { std::ffi::CStr::from_ptr(pointer) }
+            .to_bytes()
+            .to_vec(),
+    )
+}
+
+/// Mac など: 標準ライブラリの `current_exe`(Mac は `_NSGetExecutablePath` をそのまま包む。`libc` の同名の宣言は非推奨なので、
+/// 直接は呼ばない)。返る値が相対でも、呼び出し側が起動したときの作業場所から絶対パスにする。
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn raw_executable_path() -> Option<Vec<u8>> {
+    use std::os::unix::ffi::OsStringExt;
+    std::env::current_exe()
+        .ok()
+        .map(|path| path.into_os_string().into_vec())
 }
 
 #[cfg(test)]
@@ -1503,6 +1630,275 @@ mod tests {
                     .map(|v| std::os::unix::ffi::OsStrExt::as_bytes(v.as_os_str()).to_vec())
                     .unwrap(),
             )],
+            Duration::from_millis(300),
+        );
+        assert!(matches!(result, Err(ChildError::Timeout)));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn executable_path_becomes_absolute_from_the_startup_directory() {
+        let cwd = |path: &'static [u8]| move || Ok(path.to_vec());
+        assert_eq!(
+            absolute_executable(Some(b"/opt/tool".to_vec()), || panic!(
+                "絶対なら作業場所を読まない"
+            )),
+            Ok(b"/opt/tool".to_vec())
+        );
+        assert_eq!(
+            absolute_executable(Some(b"bin/tool".to_vec()), cwd(b"/work")),
+            Ok(b"/work/bin/tool".to_vec())
+        );
+        assert_eq!(
+            absolute_executable(Some(b"./tool".to_vec()), cwd(b"/work/")),
+            Ok(b"/work/./tool".to_vec())
+        );
+        assert_eq!(
+            absolute_executable(Some(b"tool".to_vec()), cwd(b"/")),
+            Ok(b"/tool".to_vec())
+        );
+        for raw in [None, Some(Vec::new())] {
+            assert_eq!(absolute_executable(raw, cwd(b"/work")), Err(libc::ENOENT));
+        }
+        assert_eq!(
+            absolute_executable(Some(b"tool".to_vec()), || Err(libc::EACCES)),
+            Err(libc::EACCES)
+        );
+        assert_eq!(
+            absolute_executable(Some(b"tool".to_vec()), cwd(b"relative")),
+            Err(libc::ENOENT)
+        );
+    }
+
+    #[test]
+    fn own_executable_path_is_an_absolute_path_to_this_executable() {
+        let path = own_executable_path().unwrap();
+        assert!(path.starts_with(b"/"), "{path:?}");
+        let same = |a: &[u8], b: &std::path::Path| {
+            use std::os::unix::ffi::OsStrExt;
+            std::fs::canonicalize(std::ffi::OsStr::from_bytes(a)).unwrap()
+                == std::fs::canonicalize(b).unwrap()
+        };
+        assert!(same(&path, &std::env::current_exe().unwrap()));
+    }
+
+    #[test]
+    fn fd_limit_follows_the_old_safe_get_max_fd() {
+        assert_eq!(fd_limit_from(Some(1024)), 1024);
+        assert_eq!(fd_limit_from(Some(1 << 20)), 1 << 20, "打ち切りは置かない");
+        assert_eq!(fd_limit_from(None), 256, "無制限のとき");
+        assert_eq!(fd_limit_from(Some(u64::MAX)), i32::MAX);
+        assert!(fd_limit() > 3);
+    }
+
+    /// プロセス全体の状態(fd 0 の差し替え・CLOEXEC の無い fd・全 fd への印付け)を変える検査は、同じプロセスで並行に走る
+    /// ほかの検査(子の fd を数える検査・ほかのモジュールの `Command`)へ漏らさないよう、検査の実行ファイル自身を
+    /// `--exact … --test-threads=1` の子として起動し、その中で本体を行う(`interrupt_child_mode` と同じ形)。
+    /// 子の中では `true` を返す(本体を続ける)。親の中では、子を起動して成功を確かめ、`false` を返す(戻る)。
+    fn isolated(name: &str) -> bool {
+        if std::env::var("R4C_ISOLATED").as_deref() == Ok(name) {
+            return true;
+        }
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                &format!("adopt_candidate::tests::{name}"),
+                "--nocapture",
+                "--test-threads=1",
+            ])
+            .env("R4C_ISOLATED", name)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success() && String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "{name}: {}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        false
+    }
+
+    /// 一覧を読めないときの範囲の印: `close_range`(使えれば)も 1 つずつの `fcntl` も、受け継いだ fd に CLOEXEC を付ける。
+    #[test]
+    fn range_marking_sets_cloexec_on_leaked_descriptors() {
+        if !isolated("range_marking_sets_cloexec_on_leaked_descriptors") {
+            return;
+        }
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let flag = |fd: i32| unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC;
+        let leak = |target: i32| {
+            // SAFETY: 自分が開いた fd の複製を、使われていない番号に作る(CLOEXEC なし)。
+            let fd = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_DUPFD, target) };
+            assert!(fd >= target);
+            assert_eq!(flag(fd), 0);
+            fd
+        };
+        let one_by_one = leak(300);
+        mark_cloexec(one_by_one..one_by_one + 1);
+        assert_ne!(flag(one_by_one), 0);
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let ranged = leak(400);
+            if close_range_cloexec(ranged as u32) {
+                assert_ne!(flag(ranged), 0, "範囲の印");
+            }
+            // SAFETY: 上で作った複製だけを閉じる。
+            unsafe { libc::close(ranged) };
+        }
+        // SAFETY: 上で作った複製だけを閉じる。
+        unsafe { libc::close(one_by_one) };
+    }
+
+    /// 子は起動した側の標準入力を継承する(旧 `subprocess.run` に stdin を渡さない形)。親の fd 0 を pipe に替え、
+    /// 子が pipe の中身を読めることで確かめる(`/dev/null` のままでも通る確かめを避ける)。
+    #[test]
+    fn child_inherits_the_standard_input_of_the_caller() {
+        if !isolated("child_inherits_the_standard_input_of_the_caller") {
+            return;
+        }
+        use std::sync::Mutex;
+        static STDIN: Mutex<()> = Mutex::new(());
+        let _guard = STDIN
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let scratch = Scratch::new("stdin");
+        let dir = scratch.dir();
+        let mut ends = [0i32; 2];
+        // SAFETY: 2 要素の領域を渡す。作った fd は下で閉じる。
+        assert_eq!(unsafe { libc::pipe(ends.as_mut_ptr()) }, 0);
+        // SAFETY: fd 0 を一時的に pipe の読み側へ替え、最後に元へ戻す(その間に起動する他の検査の子も、読まない限り影響しない)。
+        let saved = unsafe { libc::dup(0) };
+        assert!(saved >= 0);
+        unsafe {
+            libc::dup2(ends[0], 0);
+            libc::close(ends[0]);
+        }
+        let payload = b"stdin-payload";
+        // SAFETY: 自分が持つ書込み側へ、有効なバッファを書く。
+        unsafe {
+            libc::write(ends[1], payload.as_ptr().cast(), payload.len());
+            libc::close(ends[1]);
+        }
+        let argv = [
+            b"diff-snapshot.sh".to_vec(),
+            b"-c".to_vec(),
+            b"cat".to_vec(),
+        ];
+        let through_executable =
+            run_in_dir_with_executable(&dir, b"/bin/sh", &argv, &[], Duration::from_secs(10));
+        // SAFETY: 元の fd 0 へ戻す。
+        unsafe {
+            libc::dup2(saved, 0);
+            libc::close(saved);
+        }
+        assert_eq!(through_executable.unwrap().stdout, payload);
+    }
+
+    /// 起動した側から受け継いだ fd は、子へ渡らない(旧 `close_fds=True`)。渡すのは保持した root の fd だけ。
+    #[test]
+    fn inherited_descriptors_do_not_reach_the_child() {
+        if !isolated("inherited_descriptors_do_not_reach_the_child") {
+            return;
+        }
+        let scratch = Scratch::new("leak");
+        let dir = scratch.dir();
+        let file = std::fs::File::open("/dev/null").unwrap();
+        let leaked = rustix::io::dup(&file).unwrap();
+        let raw = leaked.as_raw_fd();
+        // SAFETY: 自分が持つ fd の印を変えるだけ。`dup` は CLOEXEC なしの複製を作る前提を、明示して確かめる。
+        unsafe { libc::fcntl(raw, libc::F_SETFD, 0) };
+        let script =
+            format!("if (echo x >&{raw}) 2>/dev/null; then echo open; else echo closed; fi");
+        let argv = [b"/bin/sh".to_vec(), b"-c".to_vec(), script.into_bytes()];
+        let captured = run_in_dir(&dir, &argv, &[], Duration::from_secs(10)).unwrap();
+        assert_eq!(captured.stdout, b"closed\n");
+    }
+
+    /// 実行のパスと `argv[0]` を別に渡す。PATH は探さず、`argv[0]` の名前の別の実行物へは切り替えない。
+    #[test]
+    fn executable_path_runs_the_given_file_under_another_argv0_without_searching_path() {
+        let scratch = Scratch::new("exec");
+        let dir = scratch.dir();
+        let decoy = scratch.0.join("decoy");
+        std::fs::create_dir(&decoy).unwrap();
+        let fake = decoy.join("diff-snapshot.sh");
+        std::fs::write(&fake, "#!/bin/sh\necho DECOY\n").unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        let env = [
+            (
+                b"PATH".to_vec(),
+                decoy.as_os_str().as_encoded_bytes().to_vec(),
+            ),
+            (b"ONLY".to_vec(), b"yes".to_vec()),
+        ];
+        let argv = [
+            b"diff-snapshot.sh".to_vec(),
+            b"-c".to_vec(),
+            b"echo \"$0\"; pwd -P; echo \"$ONLY\"".to_vec(),
+        ];
+        let captured =
+            run_in_dir_with_executable(&dir, b"/bin/sh", &argv, &env, Duration::from_secs(10))
+                .unwrap();
+        let expected = format!("diff-snapshot.sh\n{}\nyes\n", scratch.0.display());
+        assert_eq!(captured.stdout, expected.as_bytes());
+        assert_eq!(captured.code, 0);
+        // 同じ引数を通常の経路で起動すると、PATH の中の同名のファイルが動く(経路が別であることの対照)。
+        let through_path = run_in_dir(&dir, &argv, &env, Duration::from_secs(10)).unwrap();
+        assert_eq!(through_path.stdout, b"DECOY\n");
+    }
+
+    /// 起動できない実行のパスは、PATH に同名があっても別の物へ切り替えず、`OSError` の表示のファイル名は `argv[0]`。
+    #[test]
+    fn executable_path_failures_name_argv0_and_never_fall_back() {
+        let scratch = Scratch::new("execfail");
+        let dir = scratch.dir();
+        let decoy = scratch.0.join("decoy");
+        std::fs::create_dir(&decoy).unwrap();
+        let fake = decoy.join("diff-snapshot.sh");
+        std::fs::write(&fake, "#!/bin/sh\necho DECOY\n").unwrap();
+        std::fs::set_permissions(&fake, std::os::unix::fs::PermissionsExt::from_mode(0o755))
+            .unwrap();
+        std::fs::write(scratch.0.join("plain"), "x").unwrap();
+        let env = [(
+            b"PATH".to_vec(),
+            decoy.as_os_str().as_encoded_bytes().to_vec(),
+        )];
+        let argv = [b"diff-snapshot.sh".to_vec()];
+        let missing = scratch.0.join("absent");
+        let not_executable = scratch.0.join("plain");
+        let cases: [(&[u8], i32); 3] = [
+            (missing.as_os_str().as_encoded_bytes(), libc::ENOENT),
+            (not_executable.as_os_str().as_encoded_bytes(), libc::EACCES),
+            (scratch.0.as_os_str().as_encoded_bytes(), libc::EACCES),
+        ];
+        for (executable, errno) in cases {
+            let result =
+                run_in_dir_with_executable(&dir, executable, &argv, &env, Duration::from_secs(10));
+            match result {
+                Err(ChildError::Spawn(failure)) => {
+                    assert_eq!(failure.errno, errno, "{executable:?}");
+                    assert_eq!(failure.filename.as_deref(), Some(&b"diff-snapshot.sh"[..]));
+                }
+                other => panic!("起動失敗のはず: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn executable_path_deadline_kills_the_direct_child() {
+        let scratch = Scratch::new("execdeadline");
+        let dir = scratch.dir();
+        let started = Instant::now();
+        let result = run_in_dir_with_executable(
+            &dir,
+            b"/bin/sh",
+            &[
+                b"diff-snapshot.sh".to_vec(),
+                b"-c".to_vec(),
+                b"exec sleep 30".to_vec(),
+            ],
+            &[(b"PATH".to_vec(), b"/usr/bin:/bin".to_vec())],
             Duration::from_millis(300),
         );
         assert!(matches!(result, Err(ChildError::Timeout)));

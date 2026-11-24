@@ -1,6 +1,6 @@
 //! 実際の OS 操作(platform の R4C 専用部品)と実環境の読み取り。
 use super::diagnostics as text;
-use super::flow::{Child, LinkFailure, Ops, Read};
+use super::flow::{Child, LinkFailure, Ops, Precheck, Read};
 use super::paths::PyPath;
 use super::runtime::Env;
 use dev_workflow_platform::adopt_candidate as os;
@@ -84,22 +84,16 @@ impl Ops for RealOps {
         env: &[(Vec<u8>, Vec<u8>)],
         timeout_seconds: u32,
     ) -> Result<Child, Vec<u8>> {
-        os::run_in_dir(
-            dir,
+        child_result(
+            os::run_in_dir(
+                dir,
+                argv,
+                env,
+                Duration::from_secs(u64::from(timeout_seconds)),
+            ),
             argv,
-            env,
-            Duration::from_secs(u64::from(timeout_seconds)),
+            timeout_seconds,
         )
-        .map(|captured| Child {
-            code: captured.code,
-            stdout: captured.stdout,
-            stderr: captured.stderr,
-        })
-        .map_err(|error| match error {
-            os::ChildError::Spawn(failure) => text::os_failure(&failure),
-            os::ChildError::Timeout => text::timeout_message(argv, timeout_seconds),
-            os::ChildError::Io(errno) => text::os_error(errno, &text::strerror(errno), None),
-        })
     }
 
     fn protect(&self, enter: bool) -> bool {
@@ -128,6 +122,120 @@ impl Ops for RealOps {
 
     fn loop_iteration(&self) -> Option<Vec<u8>> {
         std::env::var_os("DEV_WORKFLOW_LOOP_ITER").map(|value| value.as_bytes().to_vec())
+    }
+}
+
+/// 子の結果を旧版の表示へ直す。`display` は時間切れの表示に出す引数(Python の `Command` の `cmd`)。
+fn child_result(
+    result: Result<os::Captured, os::ChildError>,
+    display: &[Vec<u8>],
+    timeout_seconds: u32,
+) -> Result<Child, Vec<u8>> {
+    result
+        .map(|captured| Child {
+            code: captured.code,
+            stdout: captured.stdout,
+            stderr: captured.stderr,
+        })
+        .map_err(|error| match error {
+            os::ChildError::Spawn(failure) => text::os_failure(&failure),
+            os::ChildError::Timeout => text::timeout_message(display, timeout_seconds),
+            os::ChildError::Io(errno) => text::os_error(errno, &text::strerror(errno), None),
+        })
+}
+
+/// 事前検査の子の `argv[0]` と、時間切れの表示に出す補助スクリプトの名前(2026-11-11 21:35 の決定の固定名)。
+pub(crate) const PRECHECK_NAME: &[u8] = b"diff-snapshot.sh";
+/// 事前検査の全体の期限(旧 `root_run(root_fd, precheck, env, 60)`)。
+pub(crate) const PRECHECK_TIMEOUT: u32 = 60;
+
+/// 事前検査の子の引数(`argv[0]` から)。旧版は `bash <補助スクリプト> --cwd <root> --precheck [--accept <a>]`で、
+/// Rust は自分自身を `argv[0]` だけ `diff-snapshot.sh` にして起動する(`bash` と補助スクリプトの分は無い)。
+pub(crate) fn precheck_argv(root: &[u8], accept: Option<&[u8]>) -> Vec<Vec<u8>> {
+    let mut argv = vec![
+        PRECHECK_NAME.to_vec(),
+        b"--cwd".to_vec(),
+        root.to_vec(),
+        b"--precheck".to_vec(),
+    ];
+    if let Some(accept) = accept {
+        argv.push(b"--accept".to_vec());
+        argv.push(accept.to_vec());
+    }
+    argv
+}
+
+/// 時間切れの表示に出す引数。旧版の `cmd` は `['bash', '<補助スクリプト>', '--cwd', …]` で、補助スクリプトだけ固定名にする。
+pub(crate) fn precheck_display(argv: &[Vec<u8>]) -> Vec<Vec<u8>> {
+    let mut display = vec![b"bash".to_vec()];
+    display.extend_from_slice(argv);
+    display
+}
+
+/// #472 の事前検査の実物。自分の実行ファイルを、`argv[0]` だけ `diff-snapshot.sh` にして直接の子として起動する
+/// (子は、`argv[0]` が `diff-snapshot.sh` と完全に一致するときだけ S3D の入口へ入る)。
+/// 実行ファイルの絶対パスは、起動したとき(作業場所を変える前)に決めて保持する。決められなかった errno は、使うときに停止の文にする。
+pub(crate) struct SelfPrecheck {
+    executable: Result<Vec<u8>, i32>,
+    timeout_seconds: u32,
+}
+
+impl SelfPrecheck {
+    /// 起動した直後に呼ぶ。
+    pub(crate) fn new() -> Self {
+        Self::with_executable(os::own_executable_path())
+    }
+
+    pub(crate) fn with_executable(executable: Result<Vec<u8>, i32>) -> Self {
+        Self {
+            executable,
+            timeout_seconds: PRECHECK_TIMEOUT,
+        }
+    }
+
+    /// 検査専用: 期限を短くする(実物の 60 秒を単体テストで待たないため)。製品の経路(`new`)は 60 秒。
+    #[cfg(test)]
+    pub(crate) fn with_executable_and_timeout(
+        executable: Result<Vec<u8>, i32>,
+        timeout_seconds: u32,
+    ) -> Self {
+        Self {
+            executable,
+            timeout_seconds,
+        }
+    }
+}
+
+impl Precheck<os::Dir> for SelfPrecheck {
+    fn run(
+        &self,
+        dir: &os::Dir,
+        root: &[u8],
+        accept: Option<&[u8]>,
+        env: &[(Vec<u8>, Vec<u8>)],
+    ) -> Result<Child, Vec<u8>> {
+        let argv = precheck_argv(root, accept);
+        let executable = match &self.executable {
+            Ok(path) => path,
+            Err(errno) => {
+                return Err(text::os_failure(&os::Failure {
+                    errno: *errno,
+                    filename: Some(PRECHECK_NAME.to_vec()),
+                    filename2: None,
+                }));
+            }
+        };
+        child_result(
+            os::run_in_dir_with_executable(
+                dir,
+                executable,
+                &argv,
+                env,
+                Duration::from_secs(u64::from(self.timeout_seconds)),
+            ),
+            &precheck_display(&argv),
+            self.timeout_seconds,
+        )
     }
 }
 

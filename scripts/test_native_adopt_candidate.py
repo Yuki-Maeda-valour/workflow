@@ -49,7 +49,7 @@ class AdoptCandidateComparator(unittest.TestCase):
     def test_old_test_map_covers_all_26_old_methods(self):
         checker = load(CHECKER, 'r4c_checker_loaded')
         self.assertEqual(len(checker.old_test_methods()), 26)
-        self.assertEqual(checker.verify_map(), (26, 20))
+        self.assertEqual(checker.verify_map(), (26, 25))
 
     def run_checker(self, *args):
         return subprocess.run([sys.executable, '-B', str(CHECKER), *args], capture_output=True, text=True,
@@ -61,11 +61,17 @@ class AdoptCandidateComparator(unittest.TestCase):
             plain.write_bytes(b'\x7fELF')
             for args in (['--fixture', ''], ['--fixture', 'relative/path'], ['--fixture', str(Path(directory) / 'absent')],
                          ['--fixture', str(plain)]):
-                result = self.run_checker(*args)
+                # 子のモードの基準(S3D の実行物)は必須の引数。ここでは、使えない実行物の確認のために、同じ使えない値を渡す。
+                result = self.run_checker(*args, '--diff-snapshot-fixture', args[1])
                 self.assertEqual(result.returncode, 1, args)
                 self.assertIn('ADOPT: 不合格', result.stderr)
                 self.assertEqual(result.stdout, '')
         self.assertEqual(self.run_checker().returncode, 2)
+        # 子のモードの基準(--diff-snapshot-fixture)が無い・使えないときも、不合格(終了 1)か引数の誤り(終了 2)で、成功にしない。
+        with tempfile.TemporaryDirectory(prefix='r4c-selftest-') as directory:
+            plain = Path(directory) / 'not-executable'
+            plain.write_bytes(b'\x7fELF')
+            self.assertEqual(self.run_checker('--fixture', str(plain)).returncode, 2)
 
     def test_argument_expectations_come_from_upstream_3_10_11(self):
         document = json.loads(ARGUMENT_CASES.read_text(encoding='utf-8'))

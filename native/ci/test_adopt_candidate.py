@@ -166,7 +166,7 @@ class Comparator(unittest.TestCase):
     def test_map_covers_every_old_method_exactly_once(self):
         methods = self.m.old_test_methods()
         self.assertEqual(len(methods), 26)
-        self.assertEqual(self.m.verify_map(), (26, 20))
+        self.assertEqual(self.m.verify_map(), (26, 25))
         table = list(self.m.OLD_TEST_MAP)
         broken = {
             'missing': (table[1:], methods),
@@ -497,6 +497,283 @@ class Comparator(unittest.TestCase):
         (self.dir / '.git').write_text('gitdir: /elsewhere')
         with self.assertRaises(AssertionError):
             self.m.check_no_git_ancestor(self.dir / 'child')
+
+    # ---- 事前検査(S3D)への接続 ----
+
+    def fake_child_mode(self, *, native_change=None, both_wrong=False):
+        """子のモードの代役。基準(S3D の実行物)と Rust の実行物を、引数と作業場所の名前だけで決まる結果で返す。"""
+        digest = 'a' * 64
+
+        def run(binary, args, cwd, env, **conditions):
+            name = Path(cwd).name
+            native = str(binary) == 'native'
+            if '--cwd' not in args:
+                result = (2, b'', 'ERROR [usage] --cwd が必要です\n'.encode())
+            elif '--bogus' in args:
+                result = (2, b'', 'ERROR [usage] 不明な引数: --bogus\n'.encode())
+            elif name == 'not-git':
+                result = (2, b'', 'ERROR [usage] --cwd が git リポジトリの中でない\n'.encode())
+            elif name == 'clean':
+                result = (20, b'', 'ERROR [internal] 終了コード 153\n'.encode()) if conditions.get('fsize') is not None else (0, b'', b'')
+            elif '--accept' in args and args[args.index('--accept') + 1] == digest:
+                result = (0, b'', b'')
+            elif '--accept' in args:
+                result = (22, b'', '承認ダイジェストが一致しない\n'.encode())
+            else:
+                result = (22, b'', f'承認ダイジェスト: {digest}\n'.encode())
+            if both_wrong and name == 'clean':
+                result = (1, b'', b'x')
+            if native and native_change:
+                result = native_change(result, name, args, conditions) or result
+            return self.m.RunResult(result[0], result[1], result[2], False)
+        return run
+
+    def run_child_mode(self, run):
+        saved = (self.m.FIXTURE, self.m.DS_FIXTURE, self.m.TALLY.copy())
+        self.m.FIXTURE, self.m.DS_FIXTURE = Path('native'), Path('reference')
+        try:
+            with mock.patch.object(self.m, 'run_named', run):
+                case = self.m.Contract('test_e19_child_mode')
+                getattr(case, 'test_e19_child_mode')()
+        finally:
+            self.m.FIXTURE, self.m.DS_FIXTURE, tally = saved
+            self.m.TALLY.clear()
+            self.m.TALLY.update(tally)
+
+    def test_child_mode_check_passes_only_when_the_executable_equals_the_reference_in_every_case(self):
+        self.run_child_mode(self.fake_child_mode())
+        # Rust の実行物だけが違う(終了値・標準エラーのどれか 1 つ)なら失敗にする。
+        for change in (lambda r, name, args, c: (r[0] + 1, r[1], r[2]) if name == 'needs' and '--accept' in args else None,
+                       lambda r, name, args, c: (r[0], r[1], r[2] + b' ') if name == 'not-git' else None,
+                       lambda r, name, args, c: (r[0], b'extra', r[2]) if c.get('ignore_sigint') else None,
+                       lambda r, name, args, c: (0, b'', b'') if c.get('fsize') is not None else None):
+            with self.assertRaises(AssertionError):
+                self.run_child_mode(self.fake_child_mode(native_change=change))
+        # 基準と Rust が同じ誤値でも、固定した期待(承認の要らない構成は終了 0)と違えば失敗にする。
+        with self.assertRaises(AssertionError):
+            self.run_child_mode(self.fake_child_mode(both_wrong=True))
+
+    def test_child_mode_runs_the_executable_under_the_fixed_argv0_not_the_path(self):
+        done = self.m.run_named('/bin/sh', ['-c', 'echo "$0"'], self.dir, self.m.environment())
+        self.assertEqual((done.returncode, done.stdout), (0, b'diff-snapshot.sh\n'))
+        ignored = self.m.run_named('/bin/sh', ['-c', 'kill -INT $$; echo survived'], self.dir, self.m.environment(), ignore_sigint=True)
+        self.assertIn(b'survived', ignored.stdout)
+        limited = self.m.run_named('/bin/sh', ['-c', 'ulimit -f'], self.dir, self.m.environment(), fsize=0)
+        self.assertEqual(limited.stdout.strip(), b'0')
+
+    def test_precheck_log_is_split_without_dropping_path(self):
+        text = '<ROOT>\nFOO=bar\nPWD=/x\nSHLVL=2\n_=/usr/bin/env\nR4C_SHIM_MODE=log\nR4C_REAL_BASH=/bin/bash\nPATH=/a:/b\nARGV:/g/diff-snapshot.sh --cwd <ROOT> --precheck\nSTDIN:data\n'
+        self.assertEqual(self.m.parse_precheck_log(text), {'cwd': '<ROOT>', 'env': ['FOO=bar', 'PATH=/a:/b'],
+                                                          'argv': '/g/diff-snapshot.sh --cwd <ROOT> --precheck', 'stdin': 'data'})
+
+    def test_legacy_prerequisites_fail_on_linux_and_are_not_run_on_mac(self):
+        saved = list(self.m.NOT_RUN)
+        try:
+            with mock.patch.object(self.m, 'legacy_prerequisites', return_value=(False, 'bash が 4.0 未満(3)')):
+                with mock.patch.object(self.m.sys, 'platform', 'linux'), self.assertRaises(AssertionError):
+                    self.m.legacy_guard_ready('x')
+                self.assertEqual(self.m.NOT_RUN, saved)
+                with mock.patch.object(self.m.sys, 'platform', 'darwin'):
+                    self.assertFalse(self.m.legacy_guard_ready('x'))
+                self.assertEqual(self.m.NOT_RUN[len(saved):], ['x: 旧版の前提を用意できない(bash が 4.0 未満(3))'])
+            with mock.patch.object(self.m, 'legacy_prerequisites', return_value=(True, '')):
+                self.assertTrue(self.m.legacy_guard_ready('x'))
+        finally:
+            self.m.NOT_RUN[:] = saved
+
+    def test_version_dependent_cases_fail_on_linux_and_are_not_run_on_mac_when_not_the_base(self):
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from diff_snapshot_fixtures import launch_sites
+        saved = list(self.m.NOT_RUN)
+        try:
+            with mock.patch.object(launch_sites, 'is_base', return_value=(False, {'bash': '5.1.16'})):
+                with mock.patch.object(self.m.sys, 'platform', 'linux'), self.assertRaises(AssertionError):
+                    self.m.version_ready('v')
+                with mock.patch.object(self.m.sys, 'platform', 'darwin'):
+                    self.assertFalse(self.m.version_ready('v'))
+                self.assertEqual(self.m.NOT_RUN[len(saved):], ['v: 版に依る欄を基準の版と照らせない(version)'])
+            with mock.patch.object(launch_sites, 'is_base', return_value=(True, {})):
+                self.assertTrue(self.m.version_ready('v'))
+        finally:
+            self.m.NOT_RUN[:] = saved
+
+    def test_prerequisites_detect_an_old_bash_and_a_missing_tool(self):
+        def fake(argv, **kwargs):
+            tool = argv[0]
+            out = {'bash': '3\n', 'sed': 'sed (GNU sed) 4.9\n'}.get(tool, 'x\n')
+            return mock.Mock(stdout=out)
+        with mock.patch.object(self.m.subprocess, 'run', side_effect=fake):
+            self.assertEqual(self.m.legacy_prerequisites(), (False, 'bash が 4.0 未満(3)'))
+        def fake_gnu(argv, **kwargs):
+            if argv[0] == 'bash':
+                return mock.Mock(stdout='5\n')
+            if argv[0] == 'grep':
+                return mock.Mock(stdout='grep (BSD grep) 2.6\n')
+            return mock.Mock(stdout=f'{argv[0]} (GNU tool) 1\n')
+        with mock.patch.object(self.m.subprocess, 'run', side_effect=fake_gnu):
+            self.assertEqual(self.m.legacy_prerequisites(), (False, 'grep が GNU の版でない'))
+
+    def test_prerequisites_do_not_require_gnu_sed_and_record_the_versions(self):
+        def fake(argv, **kwargs):
+            tool = argv[0]
+            if tool == 'bash':
+                return mock.Mock(stdout='5\n')
+            if tool == 'sed':
+                return mock.Mock(stdout='sed: illegal option -- -\n')  # BSD の sed(Mac の既定)
+            return mock.Mock(stdout=f'{tool} (GNU coreutils) 9.4\n')
+        self.m.LEGACY_TOOL_VERSIONS.clear()
+        with mock.patch.object(self.m.subprocess, 'run', side_effect=fake):
+            self.assertEqual(self.m.legacy_prerequisites(), (True, ''))
+        self.assertEqual(self.m.LEGACY_TOOL_VERSIONS['bash'], 5)
+        self.assertNotIn('sed', self.m.LEGACY_TOOL_VERSIONS)
+        self.assertIn('GNU', self.m.LEGACY_TOOL_VERSIONS['grep'])
+
+    def test_the_bash_shim_keeps_argv0_and_only_the_observed_case_uses_it(self):
+        self.assertIn('exec -a bash "$R4C_REAL_BASH"', self.m.BASH_SHIM)
+        self.assertTrue(self.m.BASH_SHIM.startswith('#!/bin/bash'))
+        import inspect
+        self.assertFalse(inspect.signature(self.m.run_precheck).parameters['bash_shim'].default)
+
+    def test_tools_missing_check_keeps_comparing_after_a_version_failure_and_counts_it_as_other(self):
+        calls = []
+
+        def fake_run(which, **kwargs):
+            calls.append(sorted(kwargs))
+            return {'code': 2, 'stdout': '', 'stderr': "候補の採用を停止: [Errno 2] No such file or directory: 'bash'\n",
+                    'tree_after': {}, 'tree_before': {}}
+        case = self.m.Contract('test_e21_precheck_tools_missing')
+        result = unittest.TestResult()
+        saved = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+        try:
+            with mock.patch.object(self.m, 'legacy_guard_ready', return_value=True), \
+                    mock.patch.object(self.m, 'version_ready', side_effect=AssertionError('版が基準と違う')), \
+                    mock.patch.object(self.m, 'run_precheck', side_effect=fake_run), \
+                    mock.patch.object(self.m, 'legacy_tree', return_value=(Path('s'), Path('h'))):
+                case.run(result)
+            tally = {key: value for key, value in self.m.TALLY.items()}
+        finally:
+            self.m.TALLY.clear()
+            self.m.TALLY.update(saved)
+        texts = [text for _, text in result.failures]
+        # 版の失敗は、そのケースだけの失敗(未接続の文を含まない)。版に依らない bash-missing は比べ続けた。
+        self.assertTrue(any('版が基準と違う' in text and '未接続' not in text for text in texts), texts)
+        self.assertIn(['accept', 'bash_shim', 'path_dirs'], calls)
+        # 承認済みの差は、通常の一致件数(old・native)に入れず、別の区分で数える。
+        self.assertEqual((tally['old_match'], tally['native_match']), (saved['old_match'], saved['native_match']))
+        self.assertGreaterEqual(tally['approved_old_match'] + len(tally['approved_native_mismatch']) + tally['approved_native_match'], 1)
+
+    def test_reference_and_approved_results_are_counted_apart_from_the_old_and_native_ones(self):
+        saved = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+        try:
+            self.m.judge_run('reference', 'r', lambda: None)
+            self.m.judge_run('approved_old', 'a', lambda: None)
+            with self.assertRaises(AssertionError):
+                self.m.judge_run('reference', 'r2', lambda: self.fail('x'))
+            with self.assertRaises(AssertionError):
+                self.m.judge_run('approved_native', 'a2', lambda: self.fail('未接続です'))
+            with self.assertRaises(AssertionError):
+                self.m.judge_run('approved_native', 'a3', lambda: self.fail('違う'))
+            counts = (self.m.TALLY['reference_match'] - saved['reference_match'], self.m.TALLY['reference_mismatch'][len(saved['reference_mismatch']):],
+                      self.m.TALLY['approved_old_match'] - saved['approved_old_match'], self.m.TALLY['approved_native_unconnected'][len(saved['approved_native_unconnected']):],
+                      self.m.TALLY['approved_native_mismatch'][len(saved['approved_native_mismatch']):])
+            self.assertEqual(counts, (1, ['r2'], 1, ['a2'], ['a3']))
+            self.assertEqual((self.m.TALLY['old_match'], self.m.TALLY['native_match']), (saved['old_match'], saved['native_match']))
+            self.assertEqual((self.m.TALLY['old_mismatch'], self.m.TALLY['native_mismatch']), (saved['old_mismatch'], saved['native_mismatch']))
+        finally:
+            self.m.TALLY.clear()
+            self.m.TALLY.update(saved)
+
+    def test_exact_argv0_check_rejects_a_fixture_that_enters_the_child_mode_on_a_near_name(self):
+        saved = self.m.FIXTURE
+        try:
+            self.m.FIXTURE = Path('native')
+            ok = self.m.RunResult(2, b'', b'usage: adopt-candidate.py [-h]\n', False)
+            leak = self.m.RunResult(2, b'', b'ERROR [usage] --cwd', False)
+            with mock.patch.object(self.m, 'run_named', return_value=ok) as run:
+                case = self.m.Contract('test_e19d_child_mode_requires_exact_argv0')
+                case.test_e19d_child_mode_requires_exact_argv0()
+            self.assertEqual({call.kwargs['argv0'] for call in run.call_args_list}.__len__(), 5)
+            self.assertTrue(any(call.kwargs['argv0'].endswith('/diff-snapshot.sh') and call.kwargs['argv0'] != 'diff-snapshot.sh' for call in run.call_args_list))
+            with mock.patch.object(self.m, 'run_named', return_value=leak), self.assertRaises(AssertionError):
+                self.m.Contract('test_e19d_child_mode_requires_exact_argv0').test_e19d_child_mode_requires_exact_argv0()
+        finally:
+            self.m.FIXTURE = saved
+
+    def test_require_userns_turns_the_unavailable_proc_hiding_into_a_failure(self):
+        saved = (self.m.REQUIRE_USERNS, list(self.m.NOT_RUN))
+        try:
+            with mock.patch.object(self.m, 'proc_hidden_prefix', return_value=(None, 'unshare が使えない')), \
+                    mock.patch.object(self.m, 'legacy_guard_ready', return_value=True):
+                for name in ('test_e19b_child_mode_without_proc', 'test_e20b_precheck_without_proc'):
+                    self.m.REQUIRE_USERNS = False
+                    getattr(self.m.Contract(name), name)()
+                    self.assertTrue(self.m.NOT_RUN[-1].endswith('unshare が使えない'))
+                    self.m.REQUIRE_USERNS = True
+                    with self.assertRaises(AssertionError):
+                        getattr(self.m.Contract(name), name)()
+        finally:
+            self.m.REQUIRE_USERNS = saved[0]
+            self.m.NOT_RUN[:] = saved[1]
+
+    def test_legacy_tree_copy_removes_or_breaks_only_the_copy_and_never_touches_plugins(self):
+        before = (self.m.ROOT / 'plugins/dev-workflow/skills/create-task/scripts/candidate-keys.py').read_bytes()
+        script, helper = self.m.legacy_tree(self.dir / 'a', guard='missing', remove=('task-digest.py',),
+                                            replace={'candidate-keys.py': 'def broken(:\n'})
+        scripts = script.parent
+        self.assertEqual(script.name, 'adopt-candidate.py')
+        self.assertFalse((scripts / 'task-digest.py').exists())
+        self.assertEqual((scripts / 'candidate-keys.py').read_text(), 'def broken(:\n')
+        self.assertFalse(helper.exists())
+        self.assertTrue((scripts / 'resolve-task-dir.py').exists())
+        self.assertEqual((self.m.ROOT / 'plugins/dev-workflow/skills/create-task/scripts/candidate-keys.py').read_bytes(), before)
+        self.assertTrue((self.m.ROOT / 'plugins/dev-workflow/skills/create-task/scripts/task-digest.py').exists())
+
+    def test_a_dependency_not_connected_message_from_the_rust_side_is_still_a_failure_and_counted_apart(self):
+        saved = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+        try:
+            with self.assertRaises(AssertionError):
+                self.m.judge_run('native', 'x', lambda: self.fail('候補の採用を停止: R4C の依存部品(#471 の候補解析)は未接続です'))
+            self.assertEqual(self.m.TALLY['native_unconnected'][len(saved['native_unconnected']):], ['x'])
+            self.assertEqual(self.m.TALLY['native_mismatch'], saved['native_mismatch'])
+        finally:
+            self.m.TALLY.clear()
+            self.m.TALLY.update(saved)
+
+    def test_candidate_analysis_check_counts_a_malformed_output_as_a_side_mismatch_and_goes_on(self):
+        # JSON でない・`warnings` が無い・要素に `code` が無い・要素が辞書でない・`warnings` が配列でない出力は、どれも側ごとの不一致。
+        for bad_output in (b'not json', b'{}', b'{"warnings": [{}]}', b'{"warnings": [1]}', b'{"warnings": 5}', b'[]'):
+            with self.subTest(output=bad_output):
+                cases = [('first', b'x', 0, ['checkbox']), ('second', b'y', 0, [])]
+                calls = []
+
+                def fake_pair(body=None, **kwargs):
+                    calls.append(body)
+                    good = self.m.RunResult(0, json.dumps({'warnings': [{'code': 'checkbox'}] if body == b'x' else []}).encode(), b'', False)
+                    bad = self.m.RunResult(0, bad_output, b'', False)
+                    return (good, {}, {}), (bad if body == b'x' else good, {}, {})
+                saved = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+                try:
+                    with mock.patch.object(self.m, '_candidate_analysis_cases', return_value=cases), mock.patch.object(self.m, 'pair', fake_pair):
+                        with self.assertRaises(AssertionError) as caught:
+                            self.m.Contract('test_e04b_candidate_analysis').test_e04b_candidate_analysis()
+                    tally = {key: (list(value) if isinstance(value, list) else value) for key, value in self.m.TALLY.items()}
+                finally:
+                    self.m.TALLY.clear()
+                    self.m.TALLY.update(saved)
+                self.assertEqual(calls, [b'x', b'y'])  # 最初のケースの不一致の後も、残りのケースが流れる
+                self.assertIn('標準出力が採用の JSON でない', str(caught.exception))
+                self.assertEqual(tally['native_mismatch'][len(saved['native_mismatch']):], ['e04b:first'])
+                self.assertEqual(tally['old_mismatch'], saved['old_mismatch'])
+
+    def test_the_new_checks_are_in_the_observation_table(self):
+        names = {name for name in dir(self.m.Contract) if name.startswith('test_')}
+        for wanted in ('test_e19_child_mode', 'test_e19b_child_mode_without_proc', 'test_e19c_child_mode_sigint', 'test_e19d_child_mode_requires_exact_argv0', 'test_e20_precheck_observation',
+                       'test_e20b_precheck_without_proc', 'test_e20c_precheck_bash_warning',
+                       'test_e21_precheck_tools_missing', 'test_e22_precheck_deadline', 'test_e23_candidate_helpers_missing',
+                       'test_e04b_candidate_analysis', 'test_e07b_precheck_accept'):
+            self.assertIn(wanted, names)
+        with self.assertRaises(AssertionError):
+            self.m.verify_map(extra=self.m.EXTRA_GROUPS + (('E99', 'x', 'test_e99_absent'),))
 
 
 if __name__ == '__main__':
