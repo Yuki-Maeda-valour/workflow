@@ -1962,6 +1962,21 @@ python3 -B scripts/check_loop_state_mutations.py
 - 今回の成功だけで Rust 版との同等性を確認したとは扱わない。
 - #448 側と全回帰テストを同時に流さない。公開前は管理担当が実行権を確認し、確認済みの commit を指定して全回帰テストを流す。
 
+### CI の Linux arm64 の Rust の入れ直し(#509)
+
+- CI の Linux arm64 の機械(`ubuntu-24.04-arm`)で、`build.py prepare` の `rustup toolchain install 1.99.1` がときどき失敗していた。
+  - 記録の行は `info: recovering from a partially installed toolchain` の後に、`error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu', detected conflict: 'bin/cargo-clippy'`(run 45094423658・job 137431062394)。
+  - 起きたのは、2026-11-12〜11-23 に少なくとも 12 回と、2026-11-24 の 1 回。すべて Linux arm64 のジョブで、x86_64 と Mac では出ていない。
+- rustup 1.29.3 のソースでは、この行は、入れた部品の一覧(`lib/rustlib/components`)が空なのに、前の設定(`multirust-config.toml`)が部品を持つときに出る。一覧に無い部品のファイルは消さないので、残ったファイルが入れ直す部品とぶつかる。
+- 手元の使い捨ての `RUSTUP_HOME`(x86_64・rustup 1.29.3)で、1.99.1 を入れた後に `components` を空にし、`multirust-channel-manifest.toml` と `update-hashes/<名前>` を消すと、同じ形で失敗した(`detected conflict: 'bin/cargo-fmt'`。ぶつかるファイルは、先に届いた部品で変わる)。
+- 直し(`native/ci/build.py` の `prepare`): CI の Linux arm64(`GITHUB_ACTIONS` が `true`)だけ、入れる前に `rustup --version` と `rustup toolchain list` を流す。1.99.1 があれば、状態の 1 行を出してから `rustup toolchain uninstall 1.99.1` を流す。
+  - どれも `RUSTUP_AUTO_INSTALL=0` とリポジトリ直下で流す。手元で確かめると、`native/` の中では、一覧のコマンドも `native/rust-toolchain.toml` の道具を入れ直そうとして、同じぶつかりを起こした。
+  - 同じ手元の状態で、直した関数の後の `install` は終了コード 0 で終わり、`rustfmt`・`clippy` が入った。
+- 機械に入れかけの 1.99.1 がある理由は未確認。次に当たったとき、CI の記録の次の 2 つで調べる。
+  - `rustup --version` の出力。
+  - 状態の 1 行(`components` の状態・`multirust-config.toml` の部品の名前・`bin/cargo-clippy` と `update-hashes/<名前>` の有無・3 つの更新時刻〈UTC〉)。
+- テスト: `native/ci/scripts/test_native_ci.py` の `BuildTests` に 6 件を足した。`build.py test` は 183 件から 189 件になり、`GITHUB_ACTIONS=true` を付けても通る。main の版の `build.py` では、並びが変わらないことのテストを除く 5 件が落ちることを確かめた。
+
 ## 全回帰テストのコマンド(run-all.py)
 
 使い方(リポジトリ直下で実行する):

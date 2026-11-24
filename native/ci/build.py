@@ -2,6 +2,7 @@
 """ビルド・比較・Mac の結合・成果物の作成を行う CI の入口。"""
 
 import argparse
+from datetime import datetime, timezone
 import os
 from pathlib import Path
 import platform
@@ -61,10 +62,10 @@ R4G_TIMEOUT = 3600
 R4G_USERNS_RESTRICT = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
 
 
-def run(args, *, env=None, capture=False, timeout=1800):
+def run(args, *, env=None, capture=False, timeout=1800, cwd=None):
     print("+ " + " ".join(map(str, args)), file=sys.stderr, flush=True)
     result = subprocess.run(
-        list(map(str, args)), cwd=ROOT / "native", env=env, check=True,
+        list(map(str, args)), cwd=cwd or ROOT / "native", env=env, check=True,
         stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if capture else None,
         text=capture, timeout=timeout,
     )
@@ -176,8 +177,88 @@ def build_environment(target_dir, name):
 def prepare(name):
     target, _ = target_config(name)
     run([sys.executable, "-m", "pip", "install", "-r", ROOT / "requirements-dev.txt"])
+    # CI の Linux arm64 の機械には、入れかけの 1.99.1 が残っていることがある(#509)。入れる前に消す。
+    # 手元の機械では、入れてある 1.99.1 を消さない。
+    if name == "linux-arm64" and os.environ.get("GITHUB_ACTIONS") == "true":
+        remove_installed_toolchain()
     run(["rustup", "toolchain", "install", TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"])
     run(["rustup", "target", "add", "--toolchain", TOOLCHAIN, target])
+
+
+def remove_installed_toolchain():
+    """入れかけの 1.99.1 が残っていると、rustup の入れ直しが残ったファイルとぶつかって失敗する。
+    一覧にあれば、消す前の状態を 1 行で記録に出してから、アンインストールする。
+    作業フォルダの指定(native/rust-toolchain.toml)で rustup が自動で入れ直さないよう、
+    リポジトリ直下で、自動導入を止めて流す。"""
+    env = os.environ.copy()
+    env["RUSTUP_AUTO_INSTALL"] = "0"
+    run(["rustup", "--version"], env=env, cwd=ROOT)
+    listing = run(["rustup", "toolchain", "list"], env=env, cwd=ROOT, capture=True)
+    names = [line.split()[0] for line in listing.splitlines() if line.split()]
+    names = [name for name in names if name == TOOLCHAIN or name.startswith(TOOLCHAIN + "-")]
+    if not names:
+        return
+    home = run(["rustup", "show", "home"], env=env, cwd=ROOT, capture=True)
+    for name in names:
+        print(toolchain_state(home, name), file=sys.stderr, flush=True)
+    run(["rustup", "toolchain", "uninstall", TOOLCHAIN], env=env, cwd=ROOT)
+
+
+def toolchain_state(home, name):
+    """消す前の道具一式の状態を 1 行で返す(入れかけになる理由を後で確かめる材料。読めない項目は「読めない」と出して続ける)。"""
+    base = Path(home) / "toolchains" / name
+    rustlib = base / "lib" / "rustlib"
+
+    def mtime(path):
+        try:
+            return datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except OSError:
+            return "読めない"
+
+    def present(path):
+        """あれば True、無ければ False、通れない(権限など)なら None。"""
+        try:
+            return path.exists()
+        except OSError:
+            return None
+
+    def components():
+        path = rustlib / "components"
+        found = present(path)
+        if found is None:
+            return "読めない"
+        if not found:
+            return "無し"
+        try:
+            lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        except (OSError, UnicodeError):
+            return "読めない"
+        return f"{len(lines)} 行" if lines else "空"
+
+    def config():
+        path = rustlib / "multirust-config.toml"
+        found = present(path)
+        if found is None:
+            return "読めない"
+        if not found:
+            return "無し"
+        try:
+            packages = re.findall(r'^\s*pkg\s*=\s*"([^"]*)"', path.read_text(encoding="utf-8"), re.MULTILINE)
+        except (OSError, UnicodeError):
+            return "読めない"
+        return "あり(部品: " + (",".join(packages) or "なし") + ")"
+
+    def exists(path):
+        found = present(path)
+        return "読めない" if found is None else "あり" if found else "無し"
+
+    return (
+        f"toolchain={name} components={components()} multirust-config.toml={config()} "
+        f"bin/cargo-clippy={exists(base / 'bin' / 'cargo-clippy')} "
+        f"update-hashes/{name}={exists(Path(home) / 'update-hashes' / name)} "
+        f"更新時刻(UTC): 道具一式={mtime(base)} multirust-config.toml={mtime(rustlib / 'multirust-config.toml')} "
+        f"components={mtime(rustlib / 'components')}"
+    )
 
 
 def prepare_r4g_linux():
