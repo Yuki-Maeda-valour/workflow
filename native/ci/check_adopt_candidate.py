@@ -1908,6 +1908,22 @@ def locale_installed(name):
     return normalize(name) in {normalize(line.strip()) for line in result.stdout.splitlines()}
 
 
+def make_non_utf8_candidate(root, label):
+    """名前に UTF-8 でない `\\xff` を含む候補を作り、その生バイトのパスを返す。
+    Linux 以外(Mac の APFS は拒む見込み)で作れないときだけ、実際の errno を付けて未実施に数え、None を返す。Linux では投げ直す。"""
+    raw = os.fsencode(root) + b'/' + '候補_'.encode() + b'\xff.md'
+    try:
+        with open(raw, 'wb') as stream:
+            stream.write(CANDIDATE.encode())
+    except OSError as error:
+        if sys.platform.startswith('linux'):
+            raise
+        NOT_RUN.append(f'{label}: UTF-8 でない名前のファイルを作れない'
+                       f'({errno_module.errorcode.get(error.errno, error.errno)}: {os.strerror(error.errno or 0)})')
+        return None
+    return raw
+
+
 def _contract_approved_differences(self):
     """利用者が承認した差(2026-11-11 22:24)。旧版と Rust の個別期待のそれぞれに一致することを確かめる。"""
     help_text, _ = fixed_text(['-h'])
@@ -1949,15 +1965,18 @@ def _contract_approved_differences(self):
                 with tempfile.TemporaryDirectory(prefix='r4c-locale-') as directory:
                     check_no_git_ancestor(directory)
                     root = Path(directory).resolve()
-                    raw = os.fsencode(root) + b'/' + '候補_'.encode() + b'\xff.md'
-                    with open(raw, 'wb') as stream:
-                        stream.write(CANDIDATE.encode())
+                    raw = make_non_utf8_candidate(root, label)
+                    if raw is None:
+                        records = None
+                        break
                     digest = hashlib.sha256(CANDIDATE.encode()).hexdigest()
                     argv = ([str(OLD_PYTHON), '-B', str(LEGACY_SCRIPT)] if which == 'old' else [str(FIXTURE)])
                     run_env = {key: value for key, value in base.items() if key not in ('PYTHONUTF8', 'LC_ALL', 'LANG')}
                     run_env.update({'LC_ALL': name, 'LANG': name})
                     code, out, err = faulty([*argv, '--root', str(root), '--expect-sha256', digest, raw], run_env)
                     records[which] = (code, out, err, sorted(os.listdir(os.fsencode(root))))
+            if records is None:
+                continue
             self.assertEqual(records['old'][0], 2, '旧版: 名前を含む JSON を書けず、改名の後に終了 2')
             self.assertIn(b'surrogates not allowed', records['old'][2])
             self.assertEqual(records['native'][0], 0, 'Rust: 生バイトの JSON を出して終了 0' + (f' ({UNCONNECTED}: 依存部品の未接続で止まった)' if UNCONNECTED.encode() in records['native'][2] else ''))
@@ -2061,10 +2080,17 @@ def _contract_large_json(self):
     for (total, limit), (code, written, kind) in LARGE_JSON_EXPECTED.items():
         with self.subTest(f'JSON {total} バイト・標準出力の上限 {limit}'):
             observed, fulls = {}, {}
+            unmade = None
             for which in ('old', 'native'):
                 with tempfile.TemporaryDirectory(prefix='r4c-long-') as directory:
                     check_no_git_ancestor(directory)
-                    root = make_deep_root(str(Path(directory).resolve()), total)
+                    try:
+                        root = make_deep_root(str(Path(directory).resolve()), total)
+                    except OSError as error:
+                        if sys.platform.startswith('linux'):
+                            raise
+                        unmade = error  # Linux 以外で深い root を作れないときだけ、実際の errno を付けて未実施にする
+                        break
                     argv = ([str(OLD_PYTHON), '-B', str(LEGACY_SCRIPT)] if which == 'old' else [str(FIXTURE)])
                     result = faulty([*argv, '--root', root, '--expect-sha256', digest, root + '/候補_例.md'.encode()],
                                     environment(), stdout=('file', limit))
@@ -2073,6 +2099,10 @@ def _contract_large_json(self):
                     self.assertEqual(len(full), total)
                     observed[which] = result
                     fulls[which] = full
+            if unmade is not None:
+                NOT_RUN.append(f'E13b 大きい JSON {total} バイト・上限 {limit}: 深い root を作れない'
+                               f'({errno_module.errorcode.get(unmade.errno, unmade.errno)}: {os.strerror(unmade.errno or 0)})')
+                continue
             stderr = {'stop': stop_line, 'unraisable': UNRAISABLE % EFBIG.encode(), 'quiet': b''}[kind]
             judge_sides(f'e13b:{total}:{limit}', observed['old'], observed['native'],
                         {which: (code, fulls[which][:written], stderr) for which in fulls})

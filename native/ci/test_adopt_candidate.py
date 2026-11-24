@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """R4C比較器(check_adopt_candidate.py)が、欠落・重複・0件・skip・時間切れ・両側同じ誤値・余計な出力・
 他者の実体の削除・旧版への誤接続を拒否する自己検査。Rust の実行物は使わない(代役は小さなスクリプト)。"""
+import contextlib
 import copy
 import dataclasses
+import errno
 import importlib.util
 import json
 import os
@@ -283,10 +285,56 @@ class Comparator(unittest.TestCase):
         result = self.m.faulty([sys.executable, '-B', '-c', code], {'PATH': os.environ['PATH']}, stdout=('file', 10))
         self.assertEqual(result[1], b'x' * 10)
         self.assertIn(b'10', result[2])
-        full = self.m.faulty([sys.executable, '-B', '-c', 'import os;os.write(1,b"x")'], {'PATH': os.environ['PATH']}, stdout='full')
-        self.assertNotEqual(full[0], 0)
+        full_argv = [sys.executable, '-B', '-c', 'import os;os.write(1,b"x")']
+        if os.path.exists('/dev/full'):
+            self.assertNotEqual(self.m.faulty(full_argv, {'PATH': os.environ['PATH']}, stdout='full')[0], 0)
+        else:  # Mac などには /dev/full が無い。比較器の本体は、その入力を未実施に数える(`_unavailable`)。
+            with self.assertRaises(FileNotFoundError):
+                self.m.faulty(full_argv, {'PATH': os.environ['PATH']}, stdout='full')
+            self.assertTrue(self.m._unavailable({'stdout': 'full'}, 'x'))
+            self.m.NOT_RUN.pop()
         directory = self.m.faulty([sys.executable, '-B', '-c', 'print(1)'], {'PATH': os.environ['PATH']}, stdin='dir')
         self.assertIn(b'<stdin> is a directory', directory[2])
+
+    def test_non_linux_machines_count_uncreatable_inputs_as_not_run_with_the_real_errno(self):
+        start = len(self.m.NOT_RUN)
+        before = start
+        failure = OSError(errno.EILSEQ, os.strerror(errno.EILSEQ))
+        # E14: UTF-8 でない名前のファイルを作れない。Linux 以外は未実施、Linux は投げ直す。
+        with mock.patch.object(self.m, 'open', side_effect=failure, create=True):
+            with mock.patch.object(self.m.sys, 'platform', 'darwin'):
+                self.assertIsNone(self.m.make_non_utf8_candidate(self.dir, 'ラベル'))
+            with mock.patch.object(self.m.sys, 'platform', 'linux'), self.assertRaises(OSError):
+                self.m.make_non_utf8_candidate(self.dir, 'ラベル')
+        self.assertEqual(len(self.m.NOT_RUN) - before, 1)
+        self.assertIn('EILSEQ', self.m.NOT_RUN[-1])
+        self.assertIn('ラベル', self.m.NOT_RUN[-1])
+        # 本物の呼び出し。Linux は必ず作れる。Mac の APFS などは拒む(None と、ラベルと errno の名前を含む未実施)。
+        before = len(self.m.NOT_RUN)
+        raw = self.m.make_non_utf8_candidate(self.dir, 'ラベル')
+        if raw is None:
+            self.assertFalse(sys.platform.startswith('linux'))
+            self.assertEqual(len(self.m.NOT_RUN), before + 1)
+            self.assertIn('ラベル', self.m.NOT_RUN[-1])
+            self.assertRegex(self.m.NOT_RUN[-1], r'\(E[A-Z0-9]+: ')
+        else:
+            self.assertEqual(len(self.m.NOT_RUN), before)
+            self.assertTrue(raw.endswith(b'\xff.md') and os.path.exists(raw))
+        # E13b: 深い root を作れない。Linux 以外は組ごとに未実施、Linux は投げ直す(`faulty` は流れない)。
+        before = len(self.m.NOT_RUN)
+        with mock.patch.object(self.m, 'make_deep_root', side_effect=OSError(errno.ENAMETOOLONG, 'x')), \
+                mock.patch.object(self.m, 'faulty', side_effect=AssertionError('流してはいけない')):
+            with mock.patch.object(self.m.sys, 'platform', 'darwin'):
+                self.m._contract_large_json(self)
+            added = self.m.NOT_RUN[before:]
+            self.assertTrue(added and all('ENAMETOOLONG' in item or 'st_blksize' in item for item in added), added)
+            if len(added) > 1:
+                self.assertEqual(len(added), len(self.m.LARGE_JSON_EXPECTED))
+                self.assertTrue(all(item.startswith('E13b') for item in added))
+                strict = types.SimpleNamespace(subTest=lambda *args, **kwargs: contextlib.nullcontext(), assertEqual=self.assertEqual)
+                with mock.patch.object(self.m.sys, 'platform', 'linux'), self.assertRaises(OSError):
+                    self.m._contract_large_json(strict)  # 本物の subTest は例外を記録して先へ進むので、投げ直しは素の枠で確かめる
+        del self.m.NOT_RUN[start:]
 
     def test_errno_baseline_rejects_a_machine_that_differs_from_the_reference(self):
         self.assertEqual(self.m.verify_errno_baseline(sys.executable, reference={2: 'No such file or directory', 13: 'Permission denied'}), 2)
