@@ -2132,7 +2132,7 @@ class R4EConnectionTests(TempCase):
     def strace_calls(self, calls):
         return [call for call in calls if call[:2] == ["sudo", "apt-get"] or call[:1] == ["strace"]]
 
-    def test_r4e_compares_each_of_the_two_built_binaries_on_all_four_platforms(self):
+    def test_r4e_checks_the_two_builds_are_the_same_then_compares_the_first_on_all_four_platforms(self):
         for name in build.TARGETS:
             calls = []
             with self.subTest(platform=name):
@@ -2141,11 +2141,13 @@ class R4EConnectionTests(TempCase):
                 self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
                 python = self.venv_python(calls)
                 checks = self.comparisons(calls)
-                self.assertEqual(len(checks), 2)
-                for number, check in zip((1, 2), checks):
-                    self.assert_comparison(check, received / str(number) / "r4e_contract", python)
-                # 比較の前に、venv(と Linux では strace)を用意する。
-                self.assertTrue(all(calls.index(check) == len(calls) - 2 + index for index, check in enumerate(checks)))
+                self.assertEqual(len(checks), 1)
+                self.assert_comparison(checks[0], received / "1" / "r4e_contract", python)
+                # 比較の前に、venv(と Linux では strace)を用意し、2 本が同じことを cmp で 1 回だけ確かめる(#516)。
+                cmp_call = ["cmp", received / "1" / "r4e_contract", received / "2" / "r4e_contract"]
+                self.assertEqual(calls.count(cmp_call), 1)
+                self.assertEqual(calls.index(cmp_call), len(calls) - 2)
+                self.assertEqual(calls.index(checks[0]), len(calls) - 1)
                 traced = self.strace_calls(calls)
                 if name.startswith("linux-"):
                     self.assertEqual(traced[:2], [["sudo", "apt-get", "update"], ["sudo", "apt-get", "install", "-y", "strace"]])
@@ -2156,12 +2158,17 @@ class R4EConnectionTests(TempCase):
                 else:
                     self.assertEqual(traced, [])
 
-    def test_r4e_stops_at_the_first_failed_comparison(self):
+    def test_r4e_stops_at_the_failed_comparison_or_the_different_builds(self):
         for name in ("linux-x86_64", "macos-x86_64"):
             calls = []
             with self.subTest(platform=name), self.assertRaises(subprocess.CalledProcessError):
                 self.call_r4e(build.r4e, name, calls, fail=lambda args: "check_r4e.py" in str(args))
             self.assertEqual(len(self.comparisons(calls)), 1)
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name, failure="cmp"), self.assertRaises(subprocess.CalledProcessError):
+                self.call_r4e(build.r4e, name, calls, fail=lambda args: args[0] == "cmp")
+            self.assertEqual(self.comparisons(calls), [])
 
     def test_r4e_strace_failures_stop_before_the_legacy_venv_and_comparison(self):
         failures = (
@@ -2360,6 +2367,47 @@ class R4EConnectionTests(TempCase):
             reproduce(build_run(missing=True))
         with self.assertRaises(ValueError):
             reproduce(build_run(second=elf(segment=2, needed=True)))
+
+    def test_reproduce_compares_both_builds_on_every_platform(self):
+        # 2 回のビルドの一致は 4 機種とも cmp で確かめる(Mac の CPU ごとのビルドも。#516)。ELF の検査は Linux だけ。
+        for name, machine in (("linux-x86_64", 62), ("linux-arm64", 183), ("macos-x86_64", None), ("macos-arm64", None)):
+            cmps = []
+
+            def run(args, *, env=None, capture=False, fail=False):
+                if args[:2] == ["cargo", "build"]:
+                    folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
+                    (folder / "examples").mkdir(parents=True)
+                    for filename in build.CI_BINARIES:
+                        (folder / ("examples/" + filename if filename in build.EXAMPLES else filename)).write_bytes(b"binary")
+                elif args[0] == "cmp":
+                    cmps.append(list(args))
+                    if fail:
+                        raise subprocess.CalledProcessError(1, args)
+                else:
+                    self.fail(f"unexpected command: {args}")
+
+            def reproduce(fail):
+                with mock.patch.object(build, "target_config", return_value=("test-target", machine)), \
+                        mock.patch.object(build, "build_environment", side_effect=lambda temporary, platform: {"CARGO_TARGET_DIR": str(temporary)}), \
+                        mock.patch.object(build, "tool_record", return_value={"linker": "test"}), \
+                        mock.patch.object(build, "identity", return_value={"rustc": "rustc 1.99.1 (test)"}), \
+                        mock.patch.object(build, "check_static_elf") as checked, \
+                        mock.patch.object(build, "run", side_effect=lambda *a, **k: run(*a, **k, fail=fail)):
+                    return build.reproduce(name, self.root), checked
+
+            with self.subTest(platform=name):
+                folder, checked = reproduce(False)
+                self.assertEqual(cmps, [["cmp", folder / "1" / filename, folder / "2" / filename] for filename in build.CI_BINARIES])
+                self.assertEqual(checked.call_count, 2 * len(build.CI_BINARIES) if machine is not None else 0)
+                self.assertTrue((folder / "record.json").is_file())
+            # cmp が失敗したら、record.json を書かずに止まる。
+            cmps.clear()
+            before = set(self.root.glob(name + "-*"))
+            with self.subTest(platform=name, failure="cmp"), self.assertRaises(subprocess.CalledProcessError):
+                reproduce(True)
+            self.assertEqual(len(cmps), 1)
+            (stage,) = set(self.root.glob(name + "-*")) - before
+            self.assertFalse((stage / "record.json").exists())
 
     def test_transfer_allowlists_include_the_example_and_reject_changes(self):
         self.assertIn("1/r4e_contract", build.BUILD_FILES)
@@ -2567,10 +2615,11 @@ class ImplementGuardConnectionTests(TempCase):
                 self.target_config.assert_called_once_with(name)
                 self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
                 checks = self.comparisons(calls)
-                # 2 本が同じバイト列であることは reproduce が確かめるので、比較は 1 本目だけ。
+                # 比較の前に 2 本が同じことを cmp で 1 回だけ確かめ(#516)、比較は 1 本目だけ。
+                cmp_call = ["cmp", received / "1" / "implement_guard_contract", received / "2" / "implement_guard_contract"]
                 self.assertEqual(checks, [[sys.executable, "-B", source_hash.ROOT / "native/ci/check_implement_guard.py",
                                            "--fixture", received / "1" / "implement_guard_contract"]])
-                self.assertEqual(calls, checks)
+                self.assertEqual(calls, [cmp_call, *checks])
                 # strace は入れない(設計: 無ければ比較器が未実施と記録する)。
                 self.assertEqual(self.strace_calls(calls), [])
 
@@ -2578,6 +2627,11 @@ class ImplementGuardConnectionTests(TempCase):
         for name in ("linux-x86_64", "macos-arm64"):
             with self.subTest(platform=name), self.assertRaises(subprocess.CalledProcessError):
                 self.call(build.implement_guard, name, [], fail=lambda args: "check_implement_guard.py" in str(args))
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name, failure="cmp"), self.assertRaises(subprocess.CalledProcessError):
+                self.call(build.implement_guard, name, calls, fail=lambda args: args[0] == "cmp")
+            self.assertEqual(self.comparisons(calls), [])
 
     def test_universal_checks_signature_and_cpus_then_runs_the_signed_scope(self):
         for name in build.IMPLEMENT_GUARD_UNIVERSAL_PLATFORMS:
@@ -2824,7 +2878,7 @@ class R4GConnectionTests(TempCase):
         with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"comparison")):
             with self.assertRaises(subprocess.CalledProcessError):build.r4g_probe(fixture)
 
-    def test_r4g_compares_each_of_the_two_built_binaries_on_all_four_platforms(self):
+    def test_r4g_checks_the_two_builds_are_the_same_then_compares_the_first_on_all_four_platforms(self):
         for name in build.TARGETS:
             calls = []
             with self.subTest(platform=name):
@@ -2832,21 +2886,32 @@ class R4GConnectionTests(TempCase):
                 self.target_config.assert_called_once_with(name)
                 self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
                 self.extract_universal.assert_not_called()
-                self.assertEqual(self.probe.call_args_list,
-                                 [mock.call(received / "1" / "r4g_contract"), mock.call(received / "2" / "r4g_contract")])
+                self.assertEqual(self.probe.call_args_list, [mock.call(received / "1" / "r4g_contract")])
                 # Linux だけ、比較の前に strace と利用者の名前空間を用意する。
                 self.assertEqual(self.linux.call_count, 1 if name.startswith("linux-") else 0)
-                self.assertEqual(calls, [])
+                # 比較の前に、2 本が同じことを cmp で 1 回だけ確かめる(#516)。
+                self.assertEqual(calls, [["cmp", received / "1" / "r4g_contract", received / "2" / "r4g_contract"]])
 
-    def test_r4g_stops_at_the_first_failed_comparison_and_preparation_failure(self):
+    def test_r4g_stops_at_the_failed_comparison_the_different_builds_and_preparation_failure(self):
         received = self.root / "received"
         with mock.patch.object(build, "target_config", return_value=("t", None)), \
                 mock.patch.object(build, "extract_build", return_value=(received, {})), \
                 mock.patch.object(build, "prepare_r4g_linux"), \
+                mock.patch.object(build, "run"), \
                 mock.patch.object(build, "r4g_probe", side_effect=subprocess.CalledProcessError(1, "R4G")) as probe, \
                 self.assertRaises(subprocess.CalledProcessError):
             build.r4g("linux-x86_64", self.root, self.root)
         self.assertEqual(probe.call_count, 1)
+        for name in build.TARGETS:
+            with self.subTest(platform=name, failure="cmp"), \
+                    mock.patch.object(build, "target_config", return_value=("t", None)), \
+                    mock.patch.object(build, "extract_build", return_value=(received, {})), \
+                    mock.patch.object(build, "prepare_r4g_linux"), \
+                    mock.patch.object(build, "run", side_effect=subprocess.CalledProcessError(1, "cmp")), \
+                    mock.patch.object(build, "r4g_probe") as probe, \
+                    self.assertRaises(subprocess.CalledProcessError):
+                build.r4g(name, self.root, self.root)
+            probe.assert_not_called()
         with mock.patch.object(build, "target_config", return_value=("t", None)), \
                 mock.patch.object(build, "extract_build") as extract, \
                 mock.patch.object(build, "prepare_r4g_linux", side_effect=subprocess.CalledProcessError(100, "apt")), \
@@ -3064,13 +3129,21 @@ class R4aRestConnectionTests(TempCase):
         with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"x")):
             with self.assertRaises(subprocess.CalledProcessError):build.r4a_rest_probe(Path("fixture"))
 
-    def test_build_job_compares_both_builds_and_universal_uses_signed_file(self):
+    def test_build_job_checks_same_builds_compares_the_first_and_universal_uses_signed_file(self):
         folder=self.root/"folder"
-        with mock.patch.object(build,"target_config"),mock.patch.object(build,"extract_build",return_value=(folder,{})),mock.patch.object(build,"r4a_rest_probe") as probe:
-            build.r4a_rest_build("linux-x86_64",self.root,self.root)
-        self.assertEqual([c.args[0] for c in probe.call_args_list],[folder/"1"/"r4a_rest_contract",folder/"2"/"r4a_rest_contract"])
-        # 比較器の自己検査は 1 回目の比較だけで流す。
-        self.assertEqual([c.kwargs.get("selftest") for c in probe.call_args_list],[True,False])
+        for name in build.TARGETS:
+            with self.subTest(platform=name),mock.patch.object(build,"target_config") as config,mock.patch.object(build,"extract_build",return_value=(folder,{})),mock.patch.object(build,"run") as called,mock.patch.object(build,"r4a_rest_probe") as probe:
+                build.r4a_rest_build(name,self.root,self.root)
+            config.assert_called_once_with(name)
+            # 比較の前に 2 本が同じことを cmp で 1 回だけ確かめ(#516)、比較は 1 回目だけ。
+            called.assert_called_once_with(["cmp",folder/"1"/"r4a_rest_contract",folder/"2"/"r4a_rest_contract"])
+            self.assertEqual([c.args[0] for c in probe.call_args_list],[folder/"1"/"r4a_rest_contract"])
+            # 比較器の自己検査は、その 1 回の比較で流す。
+            self.assertEqual([c.kwargs.get("selftest") for c in probe.call_args_list],[True])
+            # 2 本が違えば、比較せずに止まる。
+            with mock.patch.object(build,"target_config"),mock.patch.object(build,"extract_build",return_value=(folder,{})),mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"cmp")),mock.patch.object(build,"r4a_rest_probe") as probe:
+                with self.assertRaises(subprocess.CalledProcessError):build.r4a_rest_build(name,self.root,self.root)
+            probe.assert_not_called()
         fixture=folder/"r4a_rest_contract"
         def run(args,*,env=None,capture=False):
             return "arm64 x86_64" if capture else None

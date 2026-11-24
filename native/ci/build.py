@@ -377,9 +377,9 @@ def reproduce(name, work):
                 destination.chmod(0o755)
                 if machine is not None:
                     check_static_elf(destination, machine)
-    if machine is not None:
-        for filename in CI_BINARIES:
-            run(["cmp", stage / "1" / filename, stage / "2" / filename])
+    # 2 回のビルドのバイト列が同じことは、4 機種とも確かめる(比較のジョブは 1 回目だけで比べる。#516)。
+    for filename in CI_BINARIES:
+        run(["cmp", stage / "1" / filename, stage / "2" / filename])
     if identity() != before:
         raise ValueError("ビルド中にソース・依存・Rust の記録が変わりました")
     record = {**before, "targets": {target: tools_before}, "files": {
@@ -427,16 +427,21 @@ def r4a_rest_probe(fixture, selftest=True):
     env = {**os.environ, "R4A_REST_PYTHON": python}
     command = [python, "-B", ROOT / "native/ci/check_r4a_rest.py", "--fixture", fixture, "--strict-pending"]
     if not selftest:
-        command.append("--no-selftest")  # 比較器の自己検査は、ジョブの中で 1 回だけ流す(2 回目の比較では省く)
+        command.append("--no-selftest")  # 比較器の自己検査を省く入口。今の CI のジョブは比較が 1 回なので使わない(#516 で 2 回目の比較をやめた)
     run(command, env=env)
 
 
+def same_builds(folder, filename):
+    """2 回目の比較の代わりに、2 本のビルドが同じことを確かめる(#516)。違えば run が例外で止まる。"""
+    run(["cmp", folder / "1" / filename, folder / "2" / filename])
+
+
 def r4a_rest_build(name, downloads, work):
-    """build の後の機種ごとの必須ジョブ: 同じ機種の 2 回のビルド(`1/`・`2/`)の両方の専用 example を比べる。"""
+    """build の後の機種ごとの必須ジョブ: 2 回のビルドが同じことを確かめてから、1 回目の専用 example を比べる(#516)。"""
     target_config(name)  # 同じ OS・CPU の機械でだけ流す
     folder, _ = extract_build(name, downloads, work)
-    for number in (1, 2):
-        r4a_rest_probe(folder / str(number) / "r4a_rest_contract", selftest=number == 1)
+    same_builds(folder, "r4a_rest_contract")
+    r4a_rest_probe(folder / "1" / "r4a_rest_contract", selftest=True)
 
 
 R4A_REST_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
@@ -536,13 +541,13 @@ S3D_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
 
 
 def s3d(name, downloads, work):
-    """build の tar を受け取り、型検査の記録を作ってから、2 回のビルドの diff_snapshot_contract のそれぞれで全体を比較する。"""
+    """build の tar を受け取り、2 本が同じことを確かめ、型検査の記録を作ってから、1 回目の diff_snapshot_contract で全体を比較する(#516)。"""
     target_config(name)
     s3d_ci.prepare_tools(name)
     folder, _ = extract_build(name, downloads, work)
+    same_builds(folder, "diff_snapshot_contract")
     report = s3d_ci.typed_report(name, work, root=ROOT, build_environment=build_environment, run=run)
-    for number in (1, 2):
-        s3d_ci.probe(folder / str(number) / "diff_snapshot_contract", report, work, root=ROOT)
+    s3d_ci.probe(folder / "1" / "diff_snapshot_contract", report, work, root=ROOT)
 
 
 def s3d_universal(name, downloads, work):
@@ -615,11 +620,11 @@ def r4g_prepare(name):
 
 
 def r4g(name, downloads, work):
-    """build の tar を受け取り、2 回のビルドの r4g_contract のそれぞれで比較する。"""
+    """build の tar を受け取り、2 本が同じことを確かめてから、1 回目の r4g_contract で比較する(#516)。"""
     r4g_prepare(name)
     folder, _ = extract_build(name, downloads, work)
-    for number in (1, 2):
-        r4g_probe(folder / str(number) / "r4g_contract")
+    same_builds(folder, "r4g_contract")
+    r4g_probe(folder / "1" / "r4g_contract")
 
 
 def r4g_universal(name, downloads, work):
@@ -683,11 +688,11 @@ def r4e_probe(fixture, python, work):
 
 
 def r4e(name, downloads, work):
-    """build の tar を受け取り、2 回のビルドの r4e_contract のそれぞれで比較する。"""
+    """build の tar を受け取り、2 本が同じことを確かめてから、1 回目の r4e_contract で比較する(#516)。"""
     python = r4e_prepare(name, work)
     folder, _ = extract_build(name, downloads, work)
-    for number in (1, 2):
-        r4e_probe(folder / str(number) / "r4e_contract", python, work)
+    same_builds(folder, "r4e_contract")
+    r4e_probe(folder / "1" / "r4e_contract", python, work)
 
 
 def r4e_universal(name, downloads, work):
@@ -716,12 +721,13 @@ def implement_guard_probe(fixture, scope=None):
 
 
 def implement_guard(name, downloads, work):
-    """build の tar を受け取り、1 本目の implement_guard_contract で比較する(2 本が同じことは reproduce が確かめる)。
+    """build の tar を受け取り、2 本が同じことを確かめてから、1 本目の implement_guard_contract で比較する(#516)。
 
     strace は入れない(実行機に無いか ptrace が使えなければ、比較器がその確かめを未実施と記録する)。
     """
     target_config(name)
     folder, _ = extract_build(name, downloads, work)
+    same_builds(folder, "implement_guard_contract")
     implement_guard_probe(folder / "1" / "implement_guard_contract")
 
 

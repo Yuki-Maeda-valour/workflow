@@ -48,12 +48,12 @@ CONCURRENCY = {
     "cancel-in-progress": "${{ github.event_name == 'pull_request' }}",
 }
 # S3D(#472)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
-# s3d は build の tar の 2 回分を 4 機種で、s3d-universal は署名後の Mac のファイルを両 CPU で比較する。
+# s3d は build の tar の 2 本が同じことを確かめてから、1 回目だけを 4 機種で比較する(#516)。s3d-universal は署名後の Mac のファイルを両 CPU で比較する。
 S3D_OPERATIONS = {"s3d": set(RUNNERS), "s3d-universal": {"macos-x86_64", "macos-arm64"}}
 # 上限は、比較 1 回の上限(Mac は 120 分・Linux は 60 分。s3d_ci の COMPARISON_LIMITS)× 回数(2・1)に、
 # 準備の 30 分を足す(内側の上限で先に止まる)。Mac の 120 分は、run 45133632158 の Mac x86_64 の比較 1 回の
 # 最長 3,901 秒の約 1.85 倍である。
-# s3d は 2 × 120 + 30 = 270 分、s3d-universal は 1 × 120 + 30 = 150 分(GitHub の 1 ジョブの上限 360 分の内)。
+# 比較は 1 回になった(#516)が、s3d の上限は 2 回の時の値のまま: 2 × 120 + 30 = 270 分、s3d-universal は 1 × 120 + 30 = 150 分(GitHub の 1 ジョブの上限 360 分の内)。
 S3D_TIMEOUTS = {"s3d": 270, "s3d-universal": 150}
 # S3D の版に依る欄の基準は CI の Ubuntu 24.04 の版。Linux の比較はこの機械で流す。
 S3D_BASE_RUNNERS = {"linux-x86_64": "ubuntu-24.04", "linux-arm64": "ubuntu-24.04-arm"}
@@ -213,7 +213,7 @@ def check_document(document):
         native_timeouts.update({"r4e": 30, "r4e-universal": 30})
         # S3I-Aの比較のジョブ(手元の所要時間の 2 倍以上。2026-11-12 12:59 の決定)。
         native_timeouts.update({"implement-guard": 45, "implement-guard-universal": 20})
-        # R4A 残り 5 本は、1 回の比較の上限 900 秒 × 比較の回数 + 比較器の自己検査(900 秒)+ 準備と余裕で決める(r4a-rest は 2 回で 60 分、r4a-rest-universal は 1 回で 45 分)。
+        # R4A 残り 5 本は、1 回の比較の上限 900 秒 × 比較の回数 + 比較器の自己検査(900 秒)+ 準備と余裕で決める(r4a-rest は 2 回の時の値のまま 60 分〈比較は 1 回になった。#516〉、r4a-rest-universal は 1 回で 45 分)。
         native_timeouts.update({"r4a-rest": 60, "r4a-rest-universal": 45})
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:

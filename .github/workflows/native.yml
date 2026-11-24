@@ -472,7 +472,7 @@
           }
         },
         {
-          "name": "2 回のビルドの r4e_contract で R4E の比較",
+          "name": "2 回のビルドの一致を確かめ、1 回目の r4e_contract で R4E の比較",
           "run": "python3 -B native/ci/build.py r4e --platform '${{ matrix.platform }}'"
         }
       ]
@@ -724,7 +724,7 @@
           }
         },
         {
-          "name": "2 回のビルドの r4g_contract で R4G の比較",
+          "name": "2 回のビルドの一致を確かめ、1 回目の r4g_contract で R4G の比較",
           "run": "python3 -B native/ci/build.py r4g --platform '${{ matrix.platform }}'"
         }
       ]
@@ -850,7 +850,7 @@
           }
         },
         {
-          "name": "2 回のビルドの diff_snapshot_contract で S3D の全体の比較",
+          "name": "2 回のビルドの一致を確かめ、1 回目の diff_snapshot_contract で S3D の全体の比較",
           "run": "python3 -B native/ci/build.py s3d --platform '${{ matrix.platform }}'"
         }
       ]
@@ -976,7 +976,7 @@
           }
         },
         {
-          "name": "同じ機種の 2 回のビルドの専用比較(R4A 残り 5 本)",
+          "name": "同じ機種の 2 回のビルドの一致を確かめ、1 回目の専用比較(R4A 残り 5 本)",
           "run": "python3 -B native/ci/build.py r4a-rest --platform '${{ matrix.platform }}'"
         }
       ]
