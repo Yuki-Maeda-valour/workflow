@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import signal
 import stat
+import subprocess
 import sys
 import tempfile
 import types
@@ -770,6 +771,45 @@ class Comparator(unittest.TestCase):
         finally:
             self.m.LEGACY_TOOL_VERSIONS.clear()
             self.m.LEGACY_TOOL_VERSIONS.update(saved)
+
+    def test_preparation_git_calls_disable_background_maintenance_on_the_command_line_only(self):
+        # 準備の Git(`Side.git`・`git_in`)は、裏の保守を起動しない(`.git/config` へは書かない)。
+        calls = []
+
+        def fake(argv, **kwargs):
+            calls.append(argv)
+            return types.SimpleNamespace(returncode=0, stdout=b'')
+        side = self.m.Side.__new__(self.m.Side)
+        side.root = self.dir
+        with mock.patch.object(self.m.subprocess, 'run', fake):
+            side.git('commit', '-qm', 'x')
+            self.m.git_in(self.dir, 'commit', '-qm', 'x')
+        self.assertEqual(len(calls), 2)
+        for argv in calls:
+            pairs = [(argv[i], argv[i + 1]) for i in range(len(argv) - 1)]
+            self.assertIn(('-c', 'maintenance.auto=false'), pairs)
+            self.assertIn(('-c', 'gc.auto=0'), pairs)
+            self.assertLess(argv.index('gc.auto=0'), argv.index('commit'))  # サブコマンドより前(git のオプション)
+            self.assertNotIn('config', argv)
+
+    def test_preparation_git_commit_starts_no_background_maintenance_but_the_control_does(self):
+        # 本物の git で対照を取る(`native/ci/test_r4g.py` の同名系の検査と同じ形)。指定ありの commit は保守を起こさず、指定なしは起こす。
+        self.assertEqual(self.m.PREPARATION_NO_MAINTENANCE, ('-c', 'maintenance.auto=false', '-c', 'gc.auto=0'))
+        repo = self.dir / 'maintenance-repo'
+        repo.mkdir()
+        # 環境は、準備の Git(`git_in`)と同じ最小のもの + `GIT_TRACE`。外の `GIT_DIR` などを引き継がない。
+        env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(self.dir), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': os.devnull,
+               'GIT_TRACE': '2'}
+
+        def commit(name, options):
+            (repo / name).write_text(name)
+            subprocess.run(['git', '-C', str(repo), 'add', name], env=env, check=True, capture_output=True)
+            return subprocess.run(['git', '-C', str(repo), '-c', 'user.name=t', '-c', 'user.email=t@t', *options,
+                                   'commit', '-qm', name], env=env, check=True, capture_output=True).stderr
+        subprocess.run(['git', 'init', '-q', str(repo)], env=env, check=True, capture_output=True)
+        self.assertNotIn(b'maintenance run', commit('a', self.m.PREPARATION_NO_MAINTENANCE))
+        control = commit('b', ())
+        self.assertTrue(b'maintenance run' in control or b'gc --auto' in control, control[-300:])
 
     def test_child_mode_runs_the_executable_under_the_fixed_argv0_not_the_path(self):
         done = self.m.run_named('/bin/sh', ['-c', 'echo "$0"'], self.dir, self.m.environment())

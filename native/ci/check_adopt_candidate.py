@@ -475,6 +475,11 @@ def native(args, env, cwd, timeout=50):
 CANDIDATE = '> **発見元**: refactor\n> **指摘キー**: H41\n\n## 指摘\n内容\n'
 
 
+# 準備の Git(比較の対象ではない)が、`commit` などの後に自動の保守を裏で起動しないようにする(木の記録と競って
+# `.git/objects/maintenance.lock` が消える)。コマンドの `-c` だけで止め、`.git/config` へは書かない(旧版と Rust が読む構成を変えない)。
+PREPARATION_NO_MAINTENANCE = ('-c', 'maintenance.auto=false', '-c', 'gc.auto=0')
+
+
 class Side:
     """旧版か Rust の片側。独立した使い捨て root を持つ。"""
 
@@ -502,7 +507,7 @@ class Side:
                'GIT_CONFIG_GLOBAL': '/dev/null'}
         result = subprocess.run(['git', '-C', str(self.root), '-c', 'user.name=test',
                                  '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgsign=false',
-                                 '-c', 'init.defaultBranch=main', *args], env=env, capture_output=True, timeout=30)
+                                 '-c', 'init.defaultBranch=main', *PREPARATION_NO_MAINTENANCE, *args], env=env, capture_output=True, timeout=30)
         if result.returncode:
             raise AssertionError(f'準備の git が失敗した: {args}')
         return result.stdout
@@ -2450,7 +2455,8 @@ def git_in(root, *args):
     """子のモードの準備用の Git(比較の対象ではない)。利用者の設定を読まない。"""
     env = {'PATH': os.environ.get('PATH', ''), 'HOME': str(root), 'GIT_CONFIG_NOSYSTEM': '1', 'GIT_CONFIG_GLOBAL': '/dev/null'}
     done = subprocess.run(['git', '-C', str(root), '-c', 'user.name=test', '-c', 'user.email=test@example.invalid',
-                           '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', *args], env=env, capture_output=True, timeout=30)
+                           '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', *PREPARATION_NO_MAINTENANCE, *args],
+                          env=env, capture_output=True, timeout=30)
     if done.returncode:
         raise AssertionError(f'準備の git が失敗した: {args}')
 
