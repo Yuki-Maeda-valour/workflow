@@ -3484,8 +3484,28 @@ def process_state(pid):
     return text[:1].decode('ascii') if result.returncode == 0 and text else None
 
 
+# 死んだと読む状態。Z は回収待ち、X は回収されている途中(Linux は Z から消えるまでの短い間、X を出す)。
+# X を生きていると読むと、Z で「死んだ」と読んだ後の読み直しが、X に当たって「生きている」に変わりうる。
+# CI の Linux arm64 で落ちた回の原因は、この形と推測される(未確認)。
+DEAD_STATES = (None, 'Z', 'X')
+
+
 def pid_alive(pid):
-    return process_state(pid) not in (None, 'Z')
+    return process_state(pid) not in DEAD_STATES
+
+
+def wait_process_dead(pid, timeout):
+    """プロセスが死ぬ(DEAD_STATES の状態を読む)のを待つ。(読んだ状態の並び, 待った秒数)を返す。
+    並びは続けて同じ文字を 1 つにまとめる。判定は、呼ぶ側が並びの最後で行う(上限で抜けたときは生きている)。"""
+    started = time.monotonic()
+    states = []
+    while True:
+        state = process_state(pid)
+        if not states or states[-1] != state:
+            states.append(state)
+        if state in DEAD_STATES or time.monotonic() - started >= timeout:
+            return states, time.monotonic() - started
+        time.sleep(0.05)
 
 
 def process_parent(pid):
@@ -3500,6 +3520,44 @@ def process_parent(pid):
                             stderr=subprocess.DEVNULL)
     text = result.stdout.strip()
     return int(text) if result.returncode == 0 and text.isdigit() else None
+
+
+def process_report(pid):
+    """失敗の調べのため、1 つのプロセスの状態を 1 行にまとめる。読めない項目は飛ばし、何も読めなければ
+    `pid <番号>: 無い`。例外は投げない。比較の観測には使わない。"""
+    items = []
+    if sys.platform.startswith('linux'):
+        def read(name):
+            try:
+                with open('/proc/%d/%s' % (pid, name), 'rb') as handle:
+                    return handle.read().decode(errors='replace')
+            except OSError:
+                return None
+        stat = read('stat')
+        if stat is not None:
+            items.append('stat=' + stat.strip()[:200])
+        status = read('status')
+        if status is not None:
+            items.append(' '.join(item.replace(':\t', ':').replace('\t', ',') for item in status.splitlines()
+                                  if item.startswith(('State', 'PPid', 'Tgid', 'NSpid', 'SigPnd', 'ShdPnd',
+                                                      'SigBlk', 'SigIgn', 'SigCgt'))))
+        cmdline = read('cmdline')
+        if cmdline is not None:
+            items.append(('cmdline=' + cmdline.replace('\0', ' ').strip().replace('\n', '\\n'))[:208])
+        wchan = read('wchan')
+        if wchan is not None:
+            items.append('wchan=' + wchan.strip())
+    else:
+        try:
+            result = subprocess.run(['ps', '-ww', '-o', 'pid=,ppid=,pgid=,stat=,args=', '-p', str(pid)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=10)
+            text = result.stdout.decode(errors='replace').strip()
+            if result.returncode == 0 and text:
+                items.append(text)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    items = [item for item in items if item]
+    return ('pid %d: %s' % (pid, ' '.join(items) if items else '無い')).replace('\r', '\\r').replace('\n', '\\n')
 
 
 def group_report(pgid):
