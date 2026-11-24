@@ -470,14 +470,14 @@ python3 -B native/ci/implement_guard_mutations.py         # Rust のソースへ
 - 5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)の移植は、未登録・未配布です。
 - 実行物は開発用の `r4a_rest_contract` です。
 - 契約は [設計のR4A節](../../docs/design.md#残り5本の解析補助r4a)、APIは [native/README.md](../README.md#残り5本の解析補助r4a)、手順と件数は [testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
-- 必須caseは2034件です。比較器の自己検査(`test_r4a_rest.py`)は114件です。境界の組は21組です。
+- 必須caseは2034件です。比較器の自己検査(`test_r4a_rest.py`)は116件です。境界の組は21組です。
 
 - `quality()`は、`cargo test --locked -p dev-workflow-cli --example r4a_rest_contract`と、`-p dev-workflow-platform --example r4a_rest_platform`を実行します。
 - 専用比較(`check_r4a_rest.py --strict-pending`)は`build`・`verify-universal`には入れず、必須の2ジョブで流します。
   - `r4a-rest`: `build`の後。4機種で、同じ機種の`1/`と`2/`の`r4a_rest_contract`を比べます。比較器の自己検査は1回目の比較だけで流します。
   - `r4a-rest-universal`: `combine`の後。Mac 2機種で、署名後のMac共通の実行物を各CPUで比べます。
   - どちらも、`actions/setup-python`の3.10.11の後に`build.py prepare`を流します。`build.py`は、そのPythonで比較器を起動します。比較器は、自分を動かしたPythonで旧版を動かします(環境変数`R4A_REST_PYTHON`は、比較器は読みません)。
-- 比較器は、比較の前に自己検査114件を流します。落ちても、本体の比較は流し、終了コードは1のままです。最後の行で自己検査の失敗を知らせます。
+- 比較器は、比較の前に自己検査116件を流します。落ちても、本体の比較は流し、終了コードは1のままです。最後の行で自己検査の失敗を知らせます。
 - 自己検査は、検査専用の絞り込み`--case <ID>`で短くなりました。絞り込んだ走りは、`--only`と同じ部分比較です。CIの`build.py`は、この引数を渡しません。
 - 作業機での実測は、自己検査が約45秒(絞り込みの前は約1319秒)、比較が約95秒です(2026-11-23、自己検査114件の時点。作業機の負荷でばらつきます。以前の比較は約100〜123秒)。
 - 比較器が起動するすべての子は、グループで記録し、走りごとの印`R4A_REST_RUN`で終わりに確かめます。残っていれば、止めて終了コード1にします。
@@ -521,6 +521,7 @@ python3 -B native/ci/implement_guard_mutations.py         # Rust のソースへ
 - 次は未確認です。CIの結果を見てから書きます。
   - 入力の渡し方を直した後の、`r4a-rest` 4機種と`r4a-rest-universal` 2機種の結果。
   - `r4a-rest-universal`のMac x86_64で、`child/legacy/origin-json: reason-huge`が通るか。
-  - 必須case 2034件・自己検査114件での、各機種の時間。
+  - 必須case 2034件・自己検査116件での、各機種の時間。
+- 自己検査で、印で子を探す確かめが、子の始まる前に探して落ちることがありました(#513)。子の合図を受けてから探す形に直しました。記録は[testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
 - 詳しい仕組み(境界の組・待ちの確かめ・子の回収・`--case`・OSごとの期待・差込みの診断`R4A_CALLS`・Macの条件のまね)は、[testing.md](../../docs/testing.md#残り5本の解析補助の比較r4a)にあります。
 
