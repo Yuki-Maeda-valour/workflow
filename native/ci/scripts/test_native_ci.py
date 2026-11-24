@@ -788,12 +788,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--example", "diff_snapshot_contract", "--example", "adopt_candidate_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--example", "diff_snapshot_contract", "--example", "r4a_rest_contract", "--example", "adopt_candidate_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "adopt_candidate_contract"):
+                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -834,6 +834,7 @@ class BuildTests(TempCase):
                 self.write(f"{name}/{number}/r4e_contract", b"fixture")
                 self.write(f"{name}/{number}/implement_guard_contract", b"fixture")
                 self.write(f"{name}/{number}/diff_snapshot_contract", b"fixture")
+                self.write(f"{name}/{number}/r4a_rest_contract", b"fixture")
                 self.write(f"{name}/{number}/adopt_candidate_contract", b"fixture")
         signed = []
 
@@ -856,9 +857,9 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 18)
+        self.assertEqual(len(signed), 20)
         self.assertEqual({path.name for path in signed},set(build.CI_BINARIES))
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "adopt_candidate_contract", "record.json"])
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1314,10 +1315,10 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","adopt_candidate_contract"))
-        self.assertFalse(any("r4b" in path or "r4r" in path or "r4e" in path or "r4g" in path for path in make_dist.BINARY_PATHS))
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract"))
+        self.assertFalse(any("r4b" in path or "r4r" in path or "r4e" in path or "r4g" in path or "r4a_rest" in path for path in make_dist.BINARY_PATHS))
         self.assertFalse(any("loop_state" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","adopt_candidate_contract")})
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1372,7 +1373,7 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_all_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","adopt_candidate_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract", "adopt_candidate_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
 
@@ -2188,7 +2189,7 @@ class R4EConnectionTests(TempCase):
                     folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
                     (folder / "examples").mkdir(parents=True)
                     (folder / "dev-workflow").write_bytes(elf())
-                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "adopt_candidate_contract"):
+                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract"):
                         if missing and example == "r4e_contract":
                             continue
                         data = second if example == "r4e_contract" and len(count) == 2 and second is not None else elf()
@@ -2899,6 +2900,109 @@ class R4GConnectionTests(TempCase):
         self.assertIn("r4g_contract",build.CI_BINARIES)
         self.assertIn("r4g_contract",build.EXAMPLES)
         self.assertFalse(any("r4g" in path for path in make_dist.BINARY_PATHS))
+
+
+class R4aRestConnectionTests(TempCase):
+    def test_quality_runs_example_unit_tests(self):
+        def run(args, *, env=None, capture=False):
+            return "" if capture else None
+        with mock.patch.object(build,"build_environment",return_value={}),mock.patch.object(build,"run",side_effect=run) as called:
+            build.quality("linux-x86_64",self.root)
+        commands=[call.args[0] for call in called.call_args_list]
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-cli","--example","r4a_rest_contract"],commands)
+        self.assertIn(["cargo","test","--locked","-p","dev-workflow-platform","--example","r4a_rest_platform"],commands)
+
+    def test_probe_is_strict_and_failure_is_fatal(self):
+        with mock.patch.object(build,"run") as called:
+            build.r4a_rest_probe(Path("fixture"))
+        args=called.call_args.args[0]
+        self.assertEqual(args[0],sys.executable)
+        self.assertIn("--strict-pending",args)
+        self.assertNotIn("--no-selftest",args)
+        with mock.patch.object(build,"run") as called:
+            build.r4a_rest_probe(Path("fixture"),selftest=False)
+        self.assertIn("--no-selftest",called.call_args.args[0])
+        self.assertEqual(called.call_args.kwargs["env"]["R4A_REST_PYTHON"],sys.executable)
+        with mock.patch.object(build,"run",side_effect=subprocess.CalledProcessError(1,"x")):
+            with self.assertRaises(subprocess.CalledProcessError):build.r4a_rest_probe(Path("fixture"))
+
+    def test_build_job_compares_both_builds_and_universal_uses_signed_file(self):
+        folder=self.root/"folder"
+        with mock.patch.object(build,"target_config"),mock.patch.object(build,"extract_build",return_value=(folder,{})),mock.patch.object(build,"r4a_rest_probe") as probe:
+            build.r4a_rest_build("linux-x86_64",self.root,self.root)
+        self.assertEqual([c.args[0] for c in probe.call_args_list],[folder/"1"/"r4a_rest_contract",folder/"2"/"r4a_rest_contract"])
+        # 比較器の自己検査は 1 回目の比較だけで流す。
+        self.assertEqual([c.kwargs.get("selftest") for c in probe.call_args_list],[True,False])
+        fixture=folder/"r4a_rest_contract"
+        def run(args,*,env=None,capture=False):
+            return "arm64 x86_64" if capture else None
+        with mock.patch.object(build,"target_config") as config,mock.patch.object(build,"extract_universal",return_value=(folder,{})),mock.patch.object(build,"run",side_effect=run) as called,mock.patch.object(build,"r4a_rest_probe") as probe:
+            build.r4a_rest_universal("macos-arm64",self.root,self.root)
+        config.assert_called_once_with("macos-arm64")
+        self.assertEqual([c.args[0] for c in called.call_args_list],[["codesign","--verify","--strict","--verbose=2",fixture],["lipo","-archs",fixture]])
+        probe.assert_called_once_with(fixture)
+        # CPU が 1 種類しか無いときは、比べずに止まる。
+        with mock.patch.object(build,"target_config"),mock.patch.object(build,"extract_universal",return_value=(folder,{})),mock.patch.object(build,"run",side_effect=lambda args,*,env=None,capture=False:"arm64" if capture else None),mock.patch.object(build,"r4a_rest_probe") as probe:
+            with self.assertRaises(ValueError):build.r4a_rest_universal("macos-arm64",self.root,self.root)
+        probe.assert_not_called()
+        for name in ("linux-x86_64","linux-arm64"):
+            with mock.patch.object(build,"extract_universal") as extracted,self.assertRaises(ValueError):
+                build.r4a_rest_universal(name,self.root,self.root)
+            extracted.assert_not_called()
+
+    def test_required_jobs_and_shape_are_checked(self):
+        workflow=json.loads((source_hash.ROOT/".github/workflows/native.yml").read_text())
+        self.assertEqual(check_workflow.check_native_required(workflow),[])
+        for name in ("r4a-rest","r4a-rest-universal"):self.assertIn(name,check_workflow.REQUIRED_NATIVE_JOBS)
+        for name in ("r4a-rest","r4a-rest-universal"):
+            with self.subTest(removed=name):
+                changed=copy.deepcopy(workflow)
+                del changed["jobs"][name]
+                self.assertTrue(any(name in p for p in check_workflow.check_native_required(changed)))
+            with self.subTest(step=name):
+                changed=copy.deepcopy(workflow)
+                changed["jobs"][name]["steps"]=[s for s in changed["jobs"][name]["steps"] if "build.py "+name not in s.get("run","")]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(platform=name):
+                changed=copy.deepcopy(workflow)
+                changed["jobs"][name]["strategy"]["matrix"]["include"].pop()
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(no_platform_argument=name):
+                changed=copy.deepcopy(workflow)
+                for step in changed["jobs"][name]["steps"]:
+                    if "build.py "+name in step.get("run",""):step["run"]=step["run"].split(" --platform")[0]
+                self.assertTrue(check_workflow.check_native_required(changed))
+        self.assertEqual({(name,needs) for name,sub,_,needs in check_workflow.COMPARISON_JOBS if sub.startswith("r4a-rest")},
+                         {("r4a-rest","build"),("r4a-rest-universal","combine")})
+
+    def test_workflow_jobs_and_timeouts(self):
+        workflow=json.loads((source_hash.ROOT/".github/workflows/native.yml").read_text())
+        jobs=workflow["jobs"]
+        self.assertEqual(jobs["r4a-rest"]["needs"],"build")
+        self.assertEqual(jobs["r4a-rest-universal"]["needs"],"combine")
+        self.assertEqual(jobs["r4a-rest"]["timeout-minutes"],60)
+        self.assertEqual(jobs["r4a-rest-universal"]["timeout-minutes"],45)
+        for name in ("r4a-rest","r4a-rest-universal"):
+            steps=jobs[name]["steps"]
+            python=[i for i,step in enumerate(steps) if "setup-python" in step.get("uses","")]
+            runs=[i for i,step in enumerate(steps) if "build.py "+name in step.get("run","")]
+            self.assertEqual(len(python),1);self.assertEqual(len(runs),1)
+            self.assertLess(python[0],runs[0])
+            self.assertEqual(steps[python[0]]["with"]["python-version"],"3.10.11")
+            prepare=[i for i,step in enumerate(steps) if "build.py prepare --platform" in step.get("run","")]
+            self.assertEqual(len(prepare),1)
+            self.assertLess(python[0],prepare[0]);self.assertLess(prepare[0],runs[0])
+
+    def test_policy_requires_prepare_before_the_comparison(self):
+        workflow=json.loads((source_hash.ROOT/".github/workflows/native.yml").read_text())
+        self.assertEqual(check_workflow.check_document(workflow),[])
+        for job in ("r4a-rest","r4a-rest-universal"):
+            changed=copy.deepcopy(workflow)
+            changed["jobs"][job]["steps"]=[step for step in changed["jobs"][job]["steps"] if "build.py prepare" not in step.get("run","")]
+            self.assertTrue(any("prepare" in problem for problem in check_workflow.check_document(changed)),job)
+
+    def test_example_is_not_a_distribution_binary(self):
+        self.assertFalse(any("r4a_rest" in path for path in make_dist.BINARY_PATHS))
 
 
 class AdoptConnectionTests(TempCase):

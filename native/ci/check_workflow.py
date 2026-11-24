@@ -70,7 +70,13 @@ def native_build_command(command):
     match = re.match(r"python3 -B native/ci/build\.py (prepare|build|reproduce|combine|verify-universal|package|test|r4u|r4d1|r4e|r4e-universal|implement-guard|implement-guard-universal|r4g|r4g-universal|r4c|r4c-universal)(?: |$)", command)
     # 上の行の目印(test_native_ci.py の R4U_ENTRIES)と重ならないよう、接頭辞と操作名を分けて書く。
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (s3d-universal|s3d)(?: |$)", command)
+    # R4A 残り 5 本(#471)の比較も、別のジョブ(r4a-rest・r4a-rest-universal)で流す。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4a-rest-universal|r4a-rest)(?: |$)", command)
     return match[1] if match else None
+
+
+# R4A 残り 5 本(#471)の比較の操作の名前(build.py の位置引数)。
+R4A_REST_OPERATIONS = {"r4a-rest", "r4a-rest-universal"}
 
 
 # native.yml に必須のジョブ。ジョブを足すときは、この一覧の末尾へ足す(足し忘れで検査が通らなくなる)。
@@ -90,6 +96,8 @@ REQUIRED_NATIVE_JOBS = (
     "r4g-universal",
     "s3d",
     "s3d-universal",
+    "r4a-rest",
+    "r4a-rest-universal",
     "r4c",
     "r4c-universal",
 )
@@ -99,6 +107,9 @@ COMPARISON_JOBS = (
     ("r4e-universal", "r4e-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
     ("implement-guard", "implement-guard", set(RUNNERS), "build"),
     ("implement-guard-universal", "implement-guard-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
+    # R4A 残り 5 本(#471)
+    ("r4a-rest", "r4a-rest", set(RUNNERS), "build"),
+    ("r4a-rest-universal", "r4a-rest-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
 )
 # R4G(#479)の比較のジョブ: (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 R4G_JOBS = (
@@ -209,6 +220,8 @@ def check_document(document):
         native_timeouts.update({"r4e": 30, "r4e-universal": 30})
         # S3I-Aの比較のジョブ(手元の所要時間の 2 倍以上。2026-11-12 12:59 の決定)。
         native_timeouts.update({"implement-guard": 45, "implement-guard-universal": 20})
+        # R4A 残り 5 本は、1 回の比較の上限 900 秒 × 比較の回数 + 比較器の自己検査(900 秒)+ 準備と余裕で決める(r4a-rest は 2 回で 60 分、r4a-rest-universal は 1 回で 45 分)。
+        native_timeouts.update({"r4a-rest": 60, "r4a-rest-universal": 45})
         # R4C(#478)の比較も別のジョブ(r4c・r4c-universal)で流す。
         native_timeouts.update({"r4c": 30, "r4c-universal": 30})
         steps = job.get("steps")
@@ -256,10 +269,18 @@ def check_document(document):
                                and native_build_command(step.get("run")) in R4G_TIMEOUTS]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in S3D_OPERATIONS]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in R4A_REST_OPERATIONS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
             problems.append(f"{name}: 比較の前、checkout 直後の検査の後に Python 3.10.11 が必要です")
+        for index in comparison_indices:
+            if native_build_command(steps[index].get("run")) in R4A_REST_OPERATIONS:
+                prepares = [i for i, step in enumerate(steps) if isinstance(step, dict)
+                            and native_build_command(step.get("run")) == "prepare"]
+                if len(prepares) != 1 or not python_indices or not python_indices[0] < prepares[0] < index:
+                    problems.append(f"{name}: 比較の前に、Python の後で prepare を 1 回流す必要があります(rustc の記録を照らすため)")
         for index, step in enumerate(steps):
             if not isinstance(step, dict):
                 problems.append(f"{name}: step は object が必要です")
