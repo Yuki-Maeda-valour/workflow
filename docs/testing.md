@@ -904,7 +904,7 @@ python3 -B native/fixtures/r4e/generate_expected.py --legacy-python "$legacy_ven
 #### CIの必須接続と時間
 
 - R4E の比較は、新しい2つの必須のジョブで流す。理由(`build` の時間の予算)は [設計のR4E節](design.md#markdown-の表の-xlsx-出力r4e) にある。
-  - `r4e`: `build` の後に、4機種で、`build` の2本の `r4e_contract` のそれぞれで比べる。上限30分。
+  - `r4e`: `build` の後に、4機種で、`build` の2本の `r4e_contract` のそれぞれで比べる。上限30分。#516 の後は、2本が同じことを `cmp` で確かめてから、1本目だけで比べる。
   - `r4e-universal`: `combine` の後に、Mac 2機種で、署名後の1本で比べる。上限30分。
   - `distribution` は、2つのジョブの成功を待つ(`needs` の末尾に足した)。R4E の比較が落ちたら配布用 tar を作らない。
 - 旧版用の venv は、各ジョブで Python 3.10.11 から `r4e-requirements.txt` で作る。Linuxのジョブは、`strace` を入れて動くことを最初に確かめる。
@@ -1359,7 +1359,7 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
 - `build`は、`diff_snapshot_contract`を作り、検査物の転送とMac結合に含める。`make_dist.py`の配布一覧と`native-dist.tar`には入れない。
   - exampleの単体検査(12件)は、Linux 2機種の`build`だけで流す。Macの`build`ではbrewを入れない。
   - S3Dは、`build`と`verify-universal`の上限を変えない。S2L #468で延ばした120分・60分のままである。
-- `s3d`は`build`の後に、4機種で流す。各ビルド2回それぞれで全体の比較を行う。上限は270分である。
+- `s3d`は`build`の後に、4機種で流す。2回のビルドが同じことを`cmp`で確かめてから、1回目のビルドで全体の比較を行う(#516。前は各ビルド2回それぞれで比べていた)。上限は270分である(2回の時の値のまま)。
   - 各機種で、GNU道具(Macはbrew)と実`git-lfs`(Linuxは`strace`も)を用意し、型reportを作る。
 - `s3d-universal`は`combine`の後に、Mac 2機種で流す。署名後の一致したexampleを実際のMacで比較する。上限は150分である。
 - `s3d`・`s3d-universal`は、`distribution`の`needs`に入れない。R4Uの`r4u`・R4D-1の`r4d1`と同じ形である。
@@ -1367,7 +1367,7 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
   - 理由の2つ目: 必須であることは、マージの条件で担う。マージの条件には、PRの先頭のSHAの、打ち切られていないrunの最新のattempt(やり直しの回)だけを数える。そのattemptで全ジョブが成功していることが要る。失敗したジョブだけをやり直したattemptも数える。
   - 理由の3つ目: `distribution`が、最長270分の比較を待たないようにする。
 - 比較1回の上限は、Linuxが60分、Macが120分である(`native/ci/s3d_ci.py`の`COMPARISON_LIMITS`)。
-  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
+  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である(#516 で `s3d` の比較は1回になったが、上限は2回の時の値のまま)。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
   - 根拠の1つ目は、Issue #472の設計である。時間の上限は、新旧の専用比較の実測の後に決める。既存の必須の比較を減らして時間内に収めない。
   - 根拠の2つ目は、手で起動したNativeのrun 45118443441(commit 6a43412)である。Mac x86_64の`s3d`で、比較の1回目が当時の上限60分(3,600秒)を超えて止まった。
   - 120分にした後のrun 45133632158では、比較1回の最長はLinuxが1,261秒(Linux arm64)、Macが3,901秒(Mac x86_64)だった。上限は、それぞれの約2.9倍と約1.85倍である。Macは2倍に届かない。
@@ -1624,21 +1624,21 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - R4G(#479)で、検査専用の `r4g_contract` も同じ2回のビルドに加わった(`--example r4g_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `r4g`(`build` の後・4機種)と `r4g-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ60分と30分である([R4Gの比較](#r4gの比較)・[CI入口の説明](../native/ci/README.md#r4gの必須比較と検査用実行物))。
 - R4A(#471)から、同じビルドに `--example r4a_rest_contract` も足す(`build.py` の `EXAMPLES`)。
 - R4A残り5本(#471)の専用比較は、`build`・`verify-universal` には入れず、必須の2ジョブで流す。
-  - `r4a-rest`: `build` の後。4機種で、同じ機種の2回のビルドの `r4a_rest_contract` を比べる。上限は60分。
+  - `r4a-rest`: `build` の後。4機種で、同じ機種の2回のビルドの `r4a_rest_contract` が同じことを `cmp` で確かめてから、1回目を比べる(#516)。上限は60分(2回の時の値のまま)。
   - `r4a-rest-universal`: `combine` の後。Mac 2機種で、署名後の同じ実行物を各CPUで比べる。上限は45分。
   - どちらも、`actions/setup-python` の3.10.11の後に `build.py prepare` を流す。
-  - 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めた。
+  - 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めた(`r4a-rest` は2回の時の値。#516 で比較は1回になった)。
   - 自己検査は、絞り込み(`--case`)で短くなった。作業機の実測は、約1319秒(93件、絞り込みの前)から約42秒(105件)になった。
   - CIの実測は、次のとおりである(commit ab0b9ab、自己検査80件、絞り込みの前)。
     - 自己検査: Linux x86_64が1055.9秒、Linux arm64が1026.5秒、Mac x86_64が1286.1秒、Mac arm64が850.1秒。
     - 比較1回: Linux x86_64が約117秒、Linux arm64が約99秒、Mac x86_64が298.8秒、Mac arm64が140.2秒。
   - 絞り込み後の自己検査は、作業機の約42秒(commit e74acea の時点、105件)に、CIのMac x86_64の遅さ(同じ80件で作業機の約1.2倍: 1286秒と1077秒)をあてはめると、約50秒になる(見込み。未確認)。
-  - 見込みの合計(Mac x86_64): `r4a-rest` は 298.8秒×2 + 約50秒 = 約650秒(約11分)、`r4a-rest-universal` は 298.8秒 + 約50秒 = 約350秒(約6分)になる。準備とダウンロードは含まない(Linuxでは約30秒、Mac x86_64では約74秒だった。commit ab0b9ab のジョブの始めから、`r4a-rest` の手順までの時間)。
-  - 最悪の場合(比較が上限900秒を使い切る)でも、`r4a-rest` は 900秒×2 + 約50秒 = 約31分(上限60分)、`r4a-rest-universal` は 900秒 + 約50秒 = 約16分(上限45分)である。どちらも上限の内で、余裕は大きい。
+  - 見込みの合計(Mac x86_64): `r4a-rest` は 298.8秒×2 + 約50秒 = 約650秒(約11分。比較2回の時の見込み。#516 の後は1回)、`r4a-rest-universal` は 298.8秒 + 約50秒 = 約350秒(約6分)になる。準備とダウンロードは含まない(Linuxでは約30秒、Mac x86_64では約74秒だった。commit ab0b9ab のジョブの始めから、`r4a-rest` の手順までの時間)。
+  - 最悪の場合(比較が上限900秒を使い切る)でも、`r4a-rest` は 900秒×2 + 約50秒 = 約31分(上限60分。比較2回の時の見込み)、`r4a-rest-universal` は 900秒 + 約50秒 = 約16分(上限45分)である。どちらも上限の内で、余裕は大きい。
   - 上限(60分・45分)を下げるかは、絞り込み後のCIの実測が出てから決める。今は変えない。
   - R4A残り5本を足した後の`native.yml`は、ジョブの定義が17個、matrixを展開した実行が47件である(2026-11-24に数えた)。増えたのは、`r4a-rest`の定義1個・実行4件と、`r4a-rest-universal`の定義1個・実行2件である。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
-  - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
+  - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。Mac も、CPU ごとの 2 回のバイト列を `cmp` で比べる(#516)。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
   - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。S2Lの `loop_state_fixture` も同じ結合・署名・比較を通し、両CPUで `check_loop_state.py` と `test_loop_state.py` を流す。
@@ -1678,6 +1678,17 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - マージの条件(同じ SHA の `pull_request` の CI の全ジョブの成功)で数える Native のジョブは、R4U・R4D-1・R4E の後は 23 個になる。内訳は `policy` 1・`build` 4・`combine` 1・`verify-universal` 2・`distribution` 1・`r4d1` 4・`r4u` 4・`r4e` 4・`r4e-universal` 2 である。
   - S3I-A(#474)の `implement-guard`(`build` の後・4 機種)と `implement-guard-universal`(`combine` の後・Mac 2 機種)を足した後は 29 個になる。内訳は、上の 23 個に `implement-guard` 4・`implement-guard-universal` 2 を足したものである。
   - S3I-A の取り込みの後は、`REQUIRED_NATIVE_JOBS` が 11 個になった(`policy`・`build`・`combine`・`verify-universal`・`distribution`・`r4u`・`r4d1`・`r4e`・`r4e-universal`・`implement-guard`・`implement-guard-universal`)。比較のジョブの一覧は `COMPARISON_JOBS` の 1 つにまとめ、`r4e`・`r4e-universal` の `needs`(`build`・`combine`)も確かめる。
+
+#### 比較のジョブの2回目の比較をやめた(#516・2026-11-25 の記録)
+
+- 移植のまとまりごとの、旧版との比較のジョブ(`s3d`・`r4g`・`r4e`・`r4a-rest`・`implement-guard`)は、`build` の tar の `1/` と `2/` が同じことを `cmp` で確かめてから、`1/` だけで比べる(`build.py` の `same_builds`)。2本が違えば、比較を呼ばずに止まる。
+- `reproduce` は、4機種とも、2回のビルドの全部の実行物を `cmp` で比べる。前は Linux だけで、Mac の CPU ごとの2本は直接比べていなかった(`combine` が束ねて署名した後の2本だけを比べていた)。
+- 比較1回の中身(旧版との完全な一致・件数・固定の一覧)と、ジョブの時間の上限は変えていない。
+- 失うもの: 同じ実行ファイルを2回比べて、時々しか出ない差(比較器や機械の揺れ、Rust 版の時々の誤り)に当たる試しの1回分。
+  - 実例: commit e74acea の push 用 CI(run 43296607476)で、`r4a-rest` の Mac arm64 は1回目が合格し、2回目だけが疑似端末の読み残しで落ちた(上の R4A の節)。
+  - 1回の CI でのこの試しの数は、Linux の各機種で2から1に、Mac の各 CPU で3(`1/`・`2/`・署名後)から2(`1/`・署名後)に減る。減ったのは `s3d`・`r4g`・`r4e`・`r4a-rest` の4つである(`implement-guard` は前から1回目だけを比べていたので変わらず、比較の前の `cmp` だけが足された)。
+  - 補う手段: 変更のたびに PR 用と main の push 用の CI が流れる。Mac は署名後の比較(`*-universal`)が残る。
+- 直す前の時間(main `01998b1` の push 用の Native の run 45396522756・attempt 1): 全体 227 分、Mac の成功したジョブの合計 604 分、`s3d (macos-x86_64)` 147.1 分、`s3d (macos-arm64)` 68.1 分。直した後の時間は、PR の CI で測って PR の本文と Issue #516 に記録する(この文書を書いた時点では未確認)。
 
 ### ビルド入力の記録
 
