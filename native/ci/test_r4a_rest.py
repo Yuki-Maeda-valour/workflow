@@ -15,6 +15,7 @@ import tempfile
 import unittest
 import unittest.mock
 import time
+import uuid
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -45,6 +46,90 @@ def preserved_run_mark():
             os.environ.pop(checker.RUN_VARIABLE, None)
         else:
             os.environ[checker.RUN_VARIABLE] = saved_env
+
+
+def process_snapshot(pid, mark):
+    """プロセスの調べの情報を 1 行で返す(失敗の文に出す)。読めない項目は飛ばし、何も読めなければ `pid <番号>: 無い`。例外は投げない。
+    環境変数の値そのものは出さない(機密が入りうる)。長さと印の有無だけを出す。"""
+    parts = []
+    if os.path.isdir("/proc/self"):
+        try:
+            stat_text = Path(f"/proc/{pid}/stat").read_text(errors="replace")
+            parts.append(f"状態 {stat_text[stat_text.rindex(')') + 1:].split()[0]}")
+        except (OSError, ValueError, IndexError):
+            pass
+        try:
+            environment = Path(f"/proc/{pid}/environ").read_bytes()
+            parts.append(f"environ {len(environment)} バイト")
+            parts.append("印あり" if mark.encode() in environment else "印なし")
+        except OSError:
+            pass
+        try:
+            command = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            parts.append(f"cmdline {command[:100]!r}")
+        except OSError:
+            pass
+    else:
+        env = {k: v for k, v in os.environ.items() if k != checker.RUN_VARIABLE}  # ps 自身を、印の対象にしない
+        try:
+            listing = subprocess.run(["ps", "-p", str(pid), "-o", "stat=,command="], capture_output=True, text=True,
+                                     errors="replace", timeout=60, env=env).stdout.strip()
+            fields = listing.split(None, 1)
+            if fields:
+                parts.append(f"状態 {fields[0]}")
+                if len(fields) == 2:
+                    parts.append(f"command {fields[1][:100]!r}")
+                with_environment = subprocess.run(["ps", "-E", "-p", str(pid), "-o", "command="], capture_output=True,
+                                                  text=True, errors="replace", timeout=60, env=env).stdout
+                parts.append("印あり" if mark in with_environment else "印なし")
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if not parts:
+        return f"pid {pid}: 無い"
+    return f"pid {pid}: " + ", ".join(parts).replace("\n", " ")
+
+
+START_SIGNAL = "started"
+START_CODE = f"import sys, time; sys.stdout.write('{START_SIGNAL}\\n'); sys.stdout.flush(); time.sleep(300)"
+
+
+def start_marked_child(limit=30):
+    """印を受け継ぐ子(別の session)を起こし、子が自分のプログラムを始めた合図を受けてから返す。
+    合図は子の Python が動き出した後にしか出ないので、受けた時点で子の環境の領域は作られている。
+    待ち時間を足すのではなく、決まった時点まで待つ。limit 秒は、合図が来ないときに止まるための安全の上限。"""
+    import select
+    mark = os.environ.get(checker.RUN_VARIABLE, "").split(",")[-1]
+    child = subprocess.Popen([sys.executable, "-B", "-c", START_CODE], stdout=subprocess.PIPE, start_new_session=True)
+    received = b""
+    deadline = time.monotonic() + limit
+    problem = None
+    try:
+        while b"\n" not in received:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                problem = f"合図が {limit} 秒以内に来なかった(受け取った中身: {received!r})"
+                break
+            if not select.select([child.stdout], [], [], remaining)[0]:
+                continue
+            chunk = os.read(child.stdout.fileno(), 64)
+            if not chunk:
+                problem = f"合図の前に EOF(受け取った中身: {received!r})"
+                break
+            received += chunk
+        if problem is None and received.split(b"\n")[0].decode(errors="replace") != START_SIGNAL:
+            problem = f"合図と違う行: {received!r}"
+    except BaseException:
+        child.kill()
+        child.wait()
+        child.stdout.close()
+        raise
+    if problem is not None:
+        snapshot = process_snapshot(child.pid, mark)  # 止める前に取る
+        child.kill()
+        child.wait()
+        child.stdout.close()
+        raise AssertionError(f"{problem}。子の調べ: {snapshot}")
+    return child
 
 
 def fixture_binary():
@@ -761,20 +846,74 @@ class ChildProcesses(unittest.TestCase):
         self.assertEqual((checker.MAIN_MARK[0], checker.RUN_MARK[0], os.environ.get(checker.RUN_VARIABLE)),
                          (before_main, before_run, before_env))
 
+    def test_a_started_marked_child_already_shows_the_mark(self):
+        # 補助が戻った直後(待たずに)、子の環境に印が見える。合図を待たずに戻る形だと、読み込みの途中で空のことが多く、落ちる。
+        with preserved_run_mark():
+            mark = checker.start_run_mark()
+            for _ in range(5):
+                child = start_marked_child()
+                try:
+                    if os.path.isdir("/proc/self"):
+                        shown = mark.encode() in Path(f"/proc/{child.pid}/environ").read_bytes()
+                    else:
+                        env = {k: v for k, v in os.environ.items() if k != checker.RUN_VARIABLE}
+                        shown = mark in subprocess.run(["ps", "-E", "-p", str(child.pid), "-o", "command="],
+                                                       capture_output=True, text=True, errors="replace", timeout=60, env=env).stdout
+                    self.assertTrue(shown, process_snapshot(child.pid, mark))
+                finally:
+                    child.kill()
+                    child.wait()
+                    child.stdout.close()
+
+    def test_process_snapshot_reports_the_state_and_the_mark(self):
+        with preserved_run_mark():
+            mark = checker.start_run_mark()
+            probe = uuid.uuid4().hex  # ほかと重ならない目印の値。子の環境に入るが、調べの 1 行には出ないはず
+            with unittest.mock.patch.dict(os.environ, {"R4A_REST_SNAPSHOT_PROBE": probe}):
+                child = start_marked_child()
+            try:
+                line = process_snapshot(child.pid, mark)
+                self.assertNotIn("\n", line)
+                self.assertIn(f"pid {child.pid}: ", line)
+                self.assertRegex(line, r"状態 [A-Za-z]")
+                self.assertIn("印あり", line)
+                if os.path.isdir("/proc/self"):
+                    self.assertRegex(line, r"environ \d+ バイト")
+                    self.assertIn("cmdline ", line)
+                self.assertNotIn(probe, line)  # 印のほかの環境変数の値は出さない
+                own = process_snapshot(os.getpid(), mark)  # 自分の環境の印は /proc/self/environ に出ないので、有無は確かめない
+                self.assertIn(f"pid {os.getpid()}: ", own)
+                self.assertRegex(own, r"状態 [A-Za-z]")
+            finally:
+                child.kill()
+                child.wait()
+                child.stdout.close()
+            self.assertEqual(process_snapshot(child.pid, mark), f"pid {child.pid}: 無い")  # 回収した子では、例外を投げない
+
     def test_a_marked_process_in_another_session_is_found_and_stopped(self):
         with preserved_run_mark():
             mark = checker.start_run_mark()
-            child = subprocess.Popen(["sleep", "300"], start_new_session=True)  # グループも session も別。環境に印を受け継ぐ
+            child = start_marked_child()  # グループも session も別。環境に印を受け継ぐ。合図を受けてから探す
             try:
+                before = process_snapshot(child.pid, mark)
                 found = [pid for pid, _ in checker.marked_processes(mark)]
-                self.assertIn(child.pid, found)
+                if child.pid not in found:  # 落ちる前に、見分ける情報を取る(合否は最初の走査の結果のまま)
+                    after = process_snapshot(child.pid, mark)
+                    again = [pid for pid, _ in checker.marked_processes(mark)]
+                    self.fail(f"{child.pid} が見つからない。走査の直前: {before} / 走査の後: {after} / "
+                              f"最初の found: {found} / もう一度の走査: {again}")
                 stopped = checker.sweep(mark)
-                self.assertTrue(any(str(child.pid) in line for line in stopped))
-                child.wait(timeout=10)
+                self.assertTrue(any(str(child.pid) in line for line in stopped),
+                                f"stopped: {stopped} / {process_snapshot(child.pid, mark)}")
+                try:
+                    child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.fail(f"sweep の後も子が終わらない: {process_snapshot(child.pid, mark)}")
                 self.assertNotEqual(child.returncode, None)
             finally:
                 child.kill()
                 child.wait()
+                child.stdout.close()
 
     def test_a_process_without_the_mark_is_not_touched_even_if_it_runs_the_same_executable(self):
         # 印の無い同じ実行物(別の走りの残り・他人の比較器)と、引数にパスを持つだけのプロセスは、止めない。
