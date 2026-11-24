@@ -1590,15 +1590,42 @@ def fault_scenarios():
     return document['scenarios']
 
 
+NO_PATH_SCENARIO = 'E06-no-path-uses-the-default-search'
+
+
+def no_path_not_run_reason(scenario, old, *, platform=None):
+    """PATH を消すシナリオだけに当てる(2026-11-11 23:19 の決定: 道具が PATH に無い・GNU でないときの差は認める)。
+    Linux 以外で、旧版の結果が固定期待と違い、かつ (1) 既定の探索パス `os.defpath` で見つかる道具が旧版の前提を満たさず、
+    (2) 旧版の結果が事前検査で止まった形(終了 2・標準出力が空・停止の文・候補が改名されていない)なら、未実施の理由を返す。
+    それ以外(Linux・期待どおり・前提を満たす・違う形)は None(今までどおり失敗の判定へ進める)。"""
+    platform = sys.platform if platform is None else platform
+    if scenario['id'] != NO_PATH_SCENARIO or platform.startswith('linux') or old == scenario['expect']:
+        return None
+    first = old['stderr'].split('\n', 1)[0]
+    tree = old.get('tree', {})
+    if not (old['code'] == 2 and old['stdout'] == '' and first.startswith('候補の採用を停止: git の事前検査に通らない: ')
+            and '候補_例.md' in tree and '進行中_例.md' not in tree):
+        return None
+    ready, why = legacy_prerequisites(os.defpath)
+    if ready:
+        return None
+    return f"{scenario['id']}: 旧版の前提を用意できない(既定の探索パスで {why}。旧版の標準エラー: {first})"
+
+
 def check_fault_scenario(scenario, *, native_too=True):
     """旧版の実出力が固定期待に合い、Rust も同じ固定期待に合うこと(旧版と Rust の結果は、旧版が固定期待と同じなので同じになる)。
     旧版の側の照合と Rust の側の照合は、別に数える。"""
     old = scenario_record(scenario, 'old')
     failures = []
-    try:
-        judge('old', scenario['id'], old, scenario['expect'])
-    except AssertionError as error:
-        failures.append(str(error))
+    reason = no_path_not_run_reason(scenario, old)
+    if reason:
+        NOT_RUN.append(reason)  # 旧版の前提を用意できない機械(Mac)。旧版の側は成功に数えない。Rust の側は下で固定期待と照らす
+    else:
+        try:
+            judge('old', scenario['id'], old, scenario['expect'])
+        except AssertionError as error:
+            first = old['stderr'].split('\n', 1)[0]
+            failures.append(f"{error}(旧版の実出力: 終了 {old['code']}・標準エラーの 1 行目: {first})")
     if native_too:
         try:
             judge('native', scenario['id'], scenario_record(scenario, 'native'), scenario['expect'])
@@ -2353,25 +2380,28 @@ GUARD_RELATIVE = 'skills/do-task/scripts/diff-snapshot.sh'
 LEGACY_TOOL_VERSIONS = {}  # 見つけた版の記録(旧版の前提の確認で埋める。結果の行に出す)
 
 
-def legacy_prerequisites():
+def legacy_prerequisites(path=None):
     """旧版の事前検査(`bash <補助スクリプト>`)の前提: bash 4.0 以上と、GNU の coreutils・findutils・grep(runtime-requirements.md の表)。
-    sed は GNU を求めない(Mac は BSD の sed のままでよい)。(満たすか, 満たさない理由)。見つけた版は `LEGACY_TOOL_VERSIONS` に記録する。"""
+    sed は GNU を求めない(Mac は BSD の sed のままでよい)。(満たすか, 満たさない理由)。見つけた版は `LEGACY_TOOL_VERSIONS` に記録する。
+    `path` があれば、道具をその探索パスで探す(PATH を消したシナリオの旧版は、既定の探索パス `os.defpath` で探すため)。その場合は記録に入れない。"""
+    base = None if path is None else dict(os.environ, PATH=path)
+    found = LEGACY_TOOL_VERSIONS if path is None else {}
     try:
-        done = subprocess.run(['bash', '-c', 'echo "${BASH_VERSINFO[0]}"'], capture_output=True, text=True, timeout=30)
+        done = subprocess.run(['bash', '-c', 'echo "${BASH_VERSINFO[0]}"'], capture_output=True, text=True, timeout=30, env=base)
         major = int(done.stdout.strip())
     except (OSError, ValueError, subprocess.SubprocessError):
         return False, 'bash が PATH に無い'
-    LEGACY_TOOL_VERSIONS['bash'] = major
+    found['bash'] = major
     if major < 4:
         return False, f'bash が 4.0 未満({major})'
     for tool in ('grep', 'find', 'mktemp', 'sort'):
         try:
-            text = subprocess.run([tool, '--version'], capture_output=True, text=True, timeout=30, env=dict(os.environ, LC_ALL='C')).stdout
+            text = subprocess.run([tool, '--version'], capture_output=True, text=True, timeout=30, env=dict(base or os.environ, LC_ALL='C')).stdout
         except (OSError, subprocess.SubprocessError):
             return False, f'{tool} が PATH に無い'
         first = text.splitlines()[0] if text else ''
-        LEGACY_TOOL_VERSIONS[tool] = first
-        if 'GNU' not in first:
+        found[tool] = first
+        if '(GNU ' not in first:  # GNU の 1 行目は `(GNU grep)` などの形。BSD grep の `(BSD grep, GNU compatible)` は GNU でない
             return False, f'{tool} が GNU の版でない'
     return True, ''
 
@@ -2610,13 +2640,21 @@ def _contract_child_mode_sigint(self):
             results = {}
             for which, binary in (('reference', DS_FIXTURE), ('native', FIXTURE)):
                 root = precheck_repository(base, f'root-{which}')
+                expected = (0, b'', b'')
+                if ignore:
+                    # 期待は、同じリポジトリを SIGINT 無しで流した結果にする。Mac の `git init` は `core.ignorecase=true` を書き、
+                    # 事前検査が無効化して実行する旨の `NOTE:` を標準エラーへ出すため、固定の空の標準エラーにしない。
+                    plain = run_named(binary, ['--cwd', str(root), '--precheck'], root, environment())
+                    expected = (plain.returncode, plain.stdout, plain.stderr)
+                    if plain.returncode != 0 or plain.stdout != b'':
+                        raise AssertionError(f'e19c: SIGINT 無しの事前検査が成功しない({which}): ' + plain.stderr.decode('utf-8', 'replace')[:300])
 
-                def run(which=which, binary=binary, root=root):
+                def run(which=which, binary=binary, root=root, expected=expected):
                     result = run_named_with_sigint(binary, ['--cwd', str(root), '--precheck'], root, base / f'shim-{which}', ignore=ignore)
                     results[which] = RunResult(result.returncode, result.stdout.replace(os.fsencode(root), b'<ROOT>'),
                                                result.stderr.replace(os.fsencode(root), b'<ROOT>'), False)
                     if ignore:
-                        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, b'', b''), ('基準' if which == 'reference' else 'Rust') + ': ' + result.stderr.decode('utf-8', 'replace')[:300])
+                        self.assertEqual((result.returncode, result.stdout, result.stderr), expected, ('基準' if which == 'reference' else 'Rust') + ': ' + result.stderr.decode('utf-8', 'replace')[:300])
                     else:
                         self.assertNotEqual(result.returncode, 0, which + ': SIGINT の後に正常終了した')
                     if which == 'native':

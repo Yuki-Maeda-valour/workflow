@@ -629,7 +629,7 @@ class Comparator(unittest.TestCase):
         return run
 
     def run_child_mode(self, run):
-        saved = (self.m.FIXTURE, self.m.DS_FIXTURE, self.m.TALLY.copy())
+        saved = (self.m.FIXTURE, self.m.DS_FIXTURE, copy.deepcopy(self.m.TALLY))
         self.m.FIXTURE, self.m.DS_FIXTURE = Path('native'), Path('reference')
         try:
             with mock.patch.object(self.m, 'run_named', run):
@@ -652,6 +652,124 @@ class Comparator(unittest.TestCase):
         # 基準と Rust が同じ誤値でも、固定した期待(承認の要らない構成は終了 0)と違えば失敗にする。
         with self.assertRaises(AssertionError):
             self.run_child_mode(self.fake_child_mode(both_wrong=True))
+
+    def test_e19c_expects_the_stderr_of_the_same_repository_run_without_sigint(self):
+        # Mac の `git init` は `core.ignorecase=true` を書き、事前検査は `NOTE:` の行を標準エラーへ出す。固定の空の標準エラーにしない。
+        note = 'NOTE: 無効化して実行: core.ignorecase\n'.encode()
+        saved = (self.m.FIXTURE, self.m.DS_FIXTURE, copy.deepcopy(self.m.TALLY))
+        self.m.FIXTURE, self.m.DS_FIXTURE = Path('native'), Path('reference')
+
+        def interrupted(stderr_when_ignored):
+            def run(binary, args, cwd, shims, *, ignore):
+                return self.result(0, b'', stderr_when_ignored) if ignore else self.result(130, b'', b'')
+            return run
+        try:
+            case = self.m.Contract('test_e19c_child_mode_sigint')
+            with mock.patch.object(self.m, 'run_named', return_value=self.result(0, b'', note)):
+                with mock.patch.object(self.m, 'run_named_with_sigint', interrupted(note)):
+                    case.test_e19c_child_mode_sigint()  # NOTE の行を含む標準エラーが、SIGINT 無しの実行と同じなら通る
+                with mock.patch.object(self.m, 'run_named_with_sigint', interrupted(b'')), self.assertRaises(AssertionError):
+                    case.test_e19c_child_mode_sigint()  # SIGINT を無視した実行の標準エラーが違えば失敗
+            with mock.patch.object(self.m, 'run_named', return_value=self.result(0, b'', b'')):
+                with mock.patch.object(self.m, 'run_named_with_sigint', interrupted(b'')):
+                    case.test_e19c_child_mode_sigint()  # Linux の形(空の標準エラー)も通る
+            # SIGINT 無しの実行が成功しない(終了値が 0 でない・標準出力が空でない)なら、期待を作らずに止める。
+            # SIGINT を無視した実行の代役は、SIGINT 無しと同じ結果を返す(止める分岐が無ければ、後の照合が通ってしまう形)。
+            for plain in (self.result(1, b'', b'x'), self.result(0, b'out', b'')):
+                def same_as_plain(binary, args, cwd, shims, *, ignore, plain=plain):
+                    return plain if ignore else self.result(130, b'', b'')
+                with mock.patch.object(self.m, 'run_named', return_value=plain), \
+                        mock.patch.object(self.m, 'run_named_with_sigint', same_as_plain), \
+                        self.assertRaisesRegex(AssertionError, 'SIGINT 無しの事前検査が成功しない'):
+                    case.test_e19c_child_mode_sigint()
+        finally:
+            self.m.FIXTURE, self.m.DS_FIXTURE, tally = saved
+            self.m.TALLY.clear()
+            self.m.TALLY.update(tally)
+
+    def test_no_path_scenario_is_not_run_only_on_a_non_linux_machine_whose_default_search_lacks_the_legacy_prerequisites(self):
+        scenario = next(item for item in self.m.fault_scenarios() if item['id'] == self.m.NO_PATH_SCENARIO)
+        stopped = {'code': 2, 'stdout': '', 'stderr': '候補の採用を停止: git の事前検査に通らない: ERROR [usage] bash 4.0 以上が必要\n',
+                   'tree': {'候補_例.md': {'kind': 'file'}}}
+        lacking = (False, 'bash が 4.0 未満(3)')
+        with mock.patch.object(self.m, 'legacy_prerequisites', return_value=lacking) as prerequisites:
+            reason = self.m.no_path_not_run_reason(scenario, stopped, platform='darwin')
+            self.assertIn(self.m.NO_PATH_SCENARIO, reason)
+            self.assertIn('bash が 4.0 未満(3)', reason)
+            self.assertIn('候補の採用を停止: git の事前検査に通らない: ERROR [usage] bash 4.0 以上が必要', reason)
+            prerequisites.assert_called_with(os.defpath)
+            # 違う形の旧版の結果(終了値・改名・標準出力・停止の文の違い)は、前提が足りなくても失敗の判定へ進める。
+            both = {'候補_例.md': {'kind': 'file'}, '進行中_例.md': {'kind': 'file'}}  # 改名の途中で止まった形
+            for changed in ({'code': 1}, {'stdout': 'x'}, {'stderr': 'KeyboardInterrupt\n'},
+                            {'tree': {'進行中_例.md': {'kind': 'file'}}}, {'tree': both}, {'tree': {}}):
+                self.assertIsNone(self.m.no_path_not_run_reason(scenario, {**stopped, **changed}, platform='darwin'), changed)
+            # Linux は、前提が足りなくても失敗のまま。固定期待と同じなら、未実施にしない。
+            self.assertIsNone(self.m.no_path_not_run_reason(scenario, stopped, platform='linux'))
+            self.assertIsNone(self.m.no_path_not_run_reason(scenario, scenario['expect'], platform='darwin'))
+            # 別のシナリオには当てない。
+            self.assertIsNone(self.m.no_path_not_run_reason({**scenario, 'id': 'E06-other'}, stopped, platform='darwin'))
+        # 前提を満たす道具なら、止まった形でも失敗の判定へ進める。
+        with mock.patch.object(self.m, 'legacy_prerequisites', return_value=(True, '')):
+            self.assertIsNone(self.m.no_path_not_run_reason(scenario, stopped, platform='darwin'))
+        # check_fault_scenario: 旧版の側は成功にも失敗にも数えず、Rust の側は固定期待と照らす。
+        before = (len(self.m.NOT_RUN), self.m.TALLY['old_match'], len(self.m.TALLY['old_mismatch']), self.m.TALLY['native_match'])
+        records = {'old': stopped, 'native': scenario['expect']}
+        with mock.patch.object(self.m, 'scenario_record', side_effect=lambda sc, which, **kw: records[which]), \
+                mock.patch.object(self.m.sys, 'platform', 'darwin'), mock.patch.object(self.m, 'legacy_prerequisites', return_value=lacking):
+            self.m.check_fault_scenario(scenario)
+        self.assertEqual((len(self.m.NOT_RUN), self.m.TALLY['old_match'], len(self.m.TALLY['old_mismatch']), self.m.TALLY['native_match']),
+                         (before[0] + 1, before[1], before[2], before[3] + 1))
+        self.m.NOT_RUN.pop()
+        self.m.TALLY['native_match'] -= 1
+        # 旧版が固定期待と違うとき(Linux)、失敗の文に旧版の終了値と標準エラーの 1 行目が入る(比べ方は変わらない)。
+        wrong = {**stopped, 'stderr': '1 行目\n2 行目\n'}
+        saved = copy.deepcopy(self.m.TALLY)
+        try:
+            with mock.patch.object(self.m, 'scenario_record', side_effect=lambda sc, which, **kw: records[which] if which == 'native' else wrong), \
+                    mock.patch.object(self.m.sys, 'platform', 'linux'), self.assertRaises(AssertionError) as caught:
+                self.m.check_fault_scenario(scenario)
+        finally:
+            self.m.TALLY.clear()
+            self.m.TALLY.update(saved)
+        self.assertIn('旧版の実出力: 終了 2・標準エラーの 1 行目: 1 行目', str(caught.exception))
+        self.assertNotIn('2 行目', str(caught.exception))
+
+    def test_legacy_prerequisites_search_the_given_path_and_judge_gnu_by_the_parenthesized_name(self):
+        gnu = {'grep': 'grep (GNU grep) 3.12', 'find': 'find (GNU findutils) 4.11.0',
+               'mktemp': 'mktemp (GNU coreutils) 9.12', 'sort': 'sort (GNU coreutils) 9.12'}
+        calls = []
+
+        def fake(versions, major='5'):
+            def run(argv, **kwargs):
+                calls.append((argv[0], kwargs.get('env')))
+                text = major + '\n' if argv[0] == 'bash' else versions[argv[0]] + '\n'
+                return types.SimpleNamespace(stdout=text, returncode=0)
+            return run
+        saved = dict(self.m.LEGACY_TOOL_VERSIONS)
+        try:
+            self.m.LEGACY_TOOL_VERSIONS.clear()
+            self.m.LEGACY_TOOL_VERSIONS['sentinel'] = 1
+            with mock.patch.object(self.m.subprocess, 'run', fake(gnu)):
+                self.assertEqual(self.m.legacy_prerequisites('/x:/y'), (True, ''))
+            self.assertEqual([name for name, _ in calls], ['bash', 'grep', 'find', 'mktemp', 'sort'])
+            self.assertTrue(all(env['PATH'] == '/x:/y' for _, env in calls))
+            self.assertTrue(all(env['LC_ALL'] == 'C' for name, env in calls if name != 'bash'))
+            self.assertEqual(self.m.LEGACY_TOOL_VERSIONS, {'sentinel': 1})  # 探索パスを渡したときは記録しない
+            calls.clear()
+            with mock.patch.object(self.m.subprocess, 'run', fake(gnu)):
+                self.assertEqual(self.m.legacy_prerequisites(), (True, ''))
+            self.assertIsNone(calls[0][1])  # 引数なしでは bash の env は None のまま
+            self.assertEqual(self.m.LEGACY_TOOL_VERSIONS['bash'], 5)
+            self.assertEqual(self.m.LEGACY_TOOL_VERSIONS['grep'], gnu['grep'])
+            # BSD grep の 1 行目は GNU でない。
+            bsd = {**gnu, 'grep': 'grep (BSD grep, GNU compatible) 2.6.0-FreeBSD'}
+            with mock.patch.object(self.m.subprocess, 'run', fake(bsd)):
+                self.assertEqual(self.m.legacy_prerequisites('/x'), (False, 'grep が GNU の版でない'))
+            with mock.patch.object(self.m.subprocess, 'run', fake(gnu, major='3')):
+                self.assertEqual(self.m.legacy_prerequisites('/x'), (False, 'bash が 4.0 未満(3)'))
+        finally:
+            self.m.LEGACY_TOOL_VERSIONS.clear()
+            self.m.LEGACY_TOOL_VERSIONS.update(saved)
 
     def test_child_mode_runs_the_executable_under_the_fixed_argv0_not_the_path(self):
         done = self.m.run_named('/bin/sh', ['-c', 'echo "$0"'], self.dir, self.m.environment())

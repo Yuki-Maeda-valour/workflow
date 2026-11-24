@@ -1625,7 +1625,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
   - `--old-python`: 旧版を動かすPython。省略すると、比較器を動かしたPythonを使う。
   - `--require-userns`: Linuxで`/proc`を隠す組を作れないときに、未実施にせず失敗にする。CIのLinuxだけが付ける。手元とMacでは付けず、名前と理由を付けて未実施にする。
   - `--evidence`: 機種で変わる旧版の診断の生出力を、`ADOPT-EVIDENCE`の行で出す。CIは付ける。固定期待は、この証拠を見てから確定する。
-- 比較器は、比較の前に自己検査(`native/ci/test_adopt_candidate.py`。61件。2026-11-24に`loadTestsFromModule`で数えた)を流す。落ちたら本体の比較へ進まない。
+- 比較器は、比較の前に自己検査(`native/ci/test_adopt_candidate.py`。64件。2026-11-24に`loadTestsFromModule`で数えた)を流す。落ちたら本体の比較へ進まない。
 - 旧テストの26メソッドは、`OLD_TEST_MAP`の観点の表へ1回ずつ載せる。載っていないメソッドは失敗にする。
 - 旧版は変えず、旧テスト(`scripts/test_adopt_candidate.py`・`scripts/test_safe_git_callers.py`)も変えない。
 
@@ -1646,6 +1646,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
   - Rust40件: E24が36ケース(閉じたままのRust)と、E21の`bash-missing` 1件と、E23の3件。
   - 基準の版では、E21の版に依る3ケースが加わり、旧版115件・Rust43件になる見込みである(未確認)。
   - 文字コード・localeの承認済みの差(E14)は、この件数に入らない。最後の行の`承認済みの差 N 件`に入る。`en_US.UTF-8`・`ja_JP.UTF-8`のうち入っていないlocaleごとに、1ケース(最大2ケース)が未実施になる。UTF-8でない名前のファイルを作れない機械(Macで拒まれる見込み)では、その場合もlocaleごとに未実施になり、実際のerrnoを理由に付ける。Linuxでは作れないと失敗にする。
+- Macで未実施になる入力が1つ増える: 注入のE06「PATHを消す」(`E06-no-path-uses-the-default-search`)。既定の探索パスの`bash`が4.0未満(Macの`/bin/bash`は3.2)などで、旧版が事前検査の停止(終了2・停止の文)になったときだけ、旧版の側を未実施に数える。Rustの側は固定期待と照らす。Linuxでは失敗のまま。
 - 固定の未実施(`UNIMPLEMENTED`)は5項目で、機械で作れない入力の未実施(`NOT_RUN`)とは別である。理由は次のとおり。
   - 短読(`read`が要求より短く返す): 普通のファイルのreadは短く返さない。読取りの塊の境目は、platformの単体テストで固定する。
   - openの後の親ディレクトリ自身の差替え: 注入を、rootの直下の1成分だけに限る決定のため、rootの外を書き換える差替えは作れない。
