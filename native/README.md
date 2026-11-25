@@ -680,7 +680,7 @@ unsafe の置き場は、次の 2 つだけです。
   - `bootstrap`・`copy`・`pair`・`dispatch`: `bootstrap`、`read`・`exec`・`hook`、`verify-pair`と、コマンドの振り分け。
   - `reader`: 内部reader3つ(`read_host_settings`・`read_components`・`component_policy_digest`)のAPI。Pythonの値と同じ意味の型(`PyValue`)か、旧版の例外と同じ型名と理由を持つエラーを返します。
 - `crates/platform/src/environment_guard.rs`は、S2Eだけが使うOS操作を、安全な関数で公開します(例外は、`main`より前に呼ぶ`unsafe`関数`capture_inherited_sigpipe`だけです)。
-  - ディレクトリ一覧・`readlinkat`・排他作成・`fchmod`・リンクを辿らない`chmod`・`fsync`・`mkdirat`・標準入力の期限つき待ち(`poll`。Macの`verify-pair`は旧版の`select`と同じ呼出しを使う)。
+  - ディレクトリ一覧・`readlinkat`・排他作成・`fchmod`・リンクを辿らない`chmod`・`fsync`・`mkdirat`・標準入力の期限つき待ち(`poll`。Macの`verify-pair`は旧版の`select`と同じ呼出しを使う)。`go`の待ち(`wait_readable_interruptible`)は約100ミリ秒に区切り、待ちの前と区切りごとに`SIGINT`の印を見ます。子の`wait`も、`WNOHANG`と最大10ミリ秒の休みで印を見直します(印を見てから待ちに入るまでに届いた信号を取りこぼさないため)。
   - 子の起動(`fork`と`execve`。PATHの探し方・受け継ぐfd・子の信号の設定を旧Pythonの`subprocess`に合わせます)と、`SIGINT`・`SIGXFSZ`の扱い、利用者データベースの読取り(`~user`)。
   - `unsafe`は、この1ファイルの関数の中だけに置きます(各所に安全の理由を書きました)。ただし、初期化の表への登録の`static`だけは、マクロを展開した側(`examples/s2e_contract.rs`とplatformのテスト)に生まれます(下の`main`より前の初期化を参照)。`cli`の`environment_guard`は`unsafe`を使いません。
 - `crates/cli/examples/s2e_contract.rs`は検査専用入口です。`#![forbid(unsafe_code)]`で、9コマンドを動かします。
@@ -698,7 +698,7 @@ unsafe の置き場は、次の 2 つだけです。
   - 2026-11-26に、muslのreleaseを直す前の作りと比べました。`strace -f -e trace=rt_sigaction dev-workflow --version`で、直す前にあった`rt_sigaction(SIGPIPE, NULL, …)`が無くなり、標準ライブラリが`SIGPIPE`を無視へ変える呼出しだけが残りました。
   - 製品の`.init_array`の大きさは、gnuが0x10・muslが0x8です(R4Eの前のmainと同じ)。
   - 配布中のv4.53.0も、`main`より前の処理は無いままです。
-- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のreleaseで193件が通りました(2026-11-25)。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のdebugで、glibcは193件、muslは194件が通りました(2026-11-26。`go`の待ちの検査を足した後)。
 
 認めた旧版との差と、比較の前提の外は、利用者の決定(U1〜U7と全コマンドの決定)の範囲だけです。時刻つきの一覧は [設計のS2E節](../docs/design.md#s2eに限る承認済みの差)にあります。
 契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。

@@ -712,7 +712,6 @@ fn read_exec_and_hook_check_the_state_first() {
 // ---------------------------------------------------------------- SIGINT(別プロセス)
 
 /// `SIGINT` の印を立てるテストは、プロセス全体の信号の扱いを変えるので、別プロセスで行う。
-#[cfg(target_os = "linux")]
 fn isolated(name: &str) -> bool {
     if std::env::var_os("S2E_COPY_ISOLATED").is_some_and(|value| value == name) {
         return true;
@@ -982,6 +981,60 @@ fn sigint_while_verify_pair_waits_for_go_is_a_keyboard_interrupt_after_verified(
     assert_eq!((code, out.as_slice()), (1, &b"verified\n"[..]), "{text}");
     assert!(text.ends_with("KeyboardInterrupt\n"), "{text}");
     assert!(started.elapsed() < Duration::from_secs(10));
+}
+
+/// 待ちに入る前に `SIGINT` の印が立っていたら、`--go-timeout` を待たずに `KeyboardInterrupt` にする
+/// (旧版は、`select` に入る前に届いた `SIGINT` も、次のバイトコードの区切りで `KeyboardInterrupt` にする)。
+/// 印を見てから待ちに入るまでの間に届いた信号は、待ちが `EINTR` で戻らないので、取りこぼしの元になる。
+/// 全機種で流す(`/proc` も GNU の道具も使わない)。
+#[test]
+fn a_sigint_that_arrived_before_the_wait_is_a_keyboard_interrupt_at_once() {
+    use dev_workflow_platform::environment_guard as os;
+    if !isolated("a_sigint_that_arrived_before_the_wait_is_a_keyboard_interrupt_at_once") {
+        return;
+    }
+    os::signal_set_default(os::SIGINT).unwrap();
+    assert!(os::install_sigint_handler().unwrap());
+    let sent = std::process::Command::new("kill")
+        .args(["-INT", &std::process::id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    let start = Instant::now();
+    while !os::sigint_pending() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "SIGINT が届かない"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // 何も書かれない管。印が先に立っているので、30 秒の期限を待たずに終わらなければならない。
+    let (reader, _writer) = std::io::pipe().unwrap();
+    let started = Instant::now();
+    let error = wait_for_go(reader.as_fd(), 30.0).unwrap_err();
+    assert_eq!(error.type_name, "KeyboardInterrupt");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "{:?}",
+        started.elapsed()
+    );
+    assert!(!os::sigint_pending());
+    // 読める物があっても、先に届いた `SIGINT` が先(旧版は、`select` の前の区切りで割り込まれる)。
+    let sent = std::process::Command::new("kill")
+        .args(["-INT", &std::process::id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success());
+    while !os::sigint_pending() {
+        assert!(
+            start.elapsed() < Duration::from_secs(10),
+            "SIGINT が届かない"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let (reader, _held) = pipe_with(b"go\n", false);
+    let error = wait_for_go(reader.as_fd(), 30.0).unwrap_err();
+    assert_eq!(error.type_name, "KeyboardInterrupt");
 }
 
 #[cfg(target_os = "linux")]

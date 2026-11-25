@@ -62,7 +62,10 @@ pub(super) fn wait_for_go(input: BorrowedFd<'_>, timeout: f64) -> Result<bool, P
         }
         // 上向きに丸めたミリ秒。Mac は、1e8 秒を超えると `EINVAL`(`select` の上限)。
         let millis = (remaining * 1000.0).ceil() as i64;
-        match os::wait_readable(input, millis) {
+        // 待ちは 100 ミリ秒ほどに区切り、待ちに入る前と区切りごとに `SIGINT` の印を見る(印は `EINTR` として戻る)。
+        // 旧版は、待ちの前に届いた `SIGINT` も次のバイトコードの区切りで `KeyboardInterrupt` にする。印を見てから待ちに入る
+        // までの間に届いた信号は、待ちを `EINTR` で戻さないので、区切らないと `--go-timeout` の満了まで気づけない。
+        match os::wait_readable_interruptible(input, millis) {
             Ok(true) => {}
             Ok(false) => return Ok(false),
             Err(error) if is_interrupt(&error) => match interrupted(&error) {

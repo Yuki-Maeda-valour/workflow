@@ -2,8 +2,12 @@
 //!
 //! - 多くの関数は1回だけシステムコールを呼び、`EINTR`の再試行は呼び出し側(cli)が決める。
 //!   中で再試行する(`SIGINT`が来ていなければ繰り返し、来ていれば`EINTR`を返す。旧版の`PyErr_CheckSignals`)のは、
-//!   `retry`と、それを使う`spawn`(errpipeの読取り)・`Child::wait`だけ。`Child::wait_timeout`は休みながら
-//!   確かめ直し、`scan_dir`は`getdents`が`EINTR`を返せば誤りとして返す。
+//!   `retry`と、それを使う`spawn`(errpipeの読取り)だけ。
+//! - `wait_readable_interruptible`は、待ちの前と約100ミリ秒の区切りごとに`SIGINT`の印を見て、立っていれば
+//!   `EINTR`を返す。待ちの途中の`EINTR`を再試行するかは、呼び出し側が決める。
+//! - `Child::wait`と`Child::wait_timeout`は、`WNOHANG`で確かめ直しながら休む(休みは0.5msの倍々。
+//!   `wait`は最大10ms、`wait_timeout`は最大50ms)。休みの前に印を見て、立っていれば`EINTR`を返す。
+//!   `scan_dir`は`getdents`が`EINTR`を返せば誤りとして返す。
 //! - `unsafe`を置く場所: `main`より前に受け継いだ`SIGPIPE`の扱いを控える初期化の関数・リンクを辿らない`chmod`(`fchmodat`)・信号の扱いの取得と設定・利用者データベースの読取り
 //!   (`getpwnam_r`・`getpwuid_r`)・`fcntl`・`waitpid`・`kill`・子の起動(`fork`・`execve`)。各所に安全の理由を書く。
 //! - `fork`の後の子(`child_main`)では、確保・ロック・`Rust`の入出力・パニックを使わない。`async-signal-safe`な
@@ -287,6 +291,43 @@ pub fn wait_readable(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::Result<bool> {
         }
     }
     Ok(false)
+}
+
+/// `SIGINT`の印を見直す間隔(ミリ秒)。`wait_readable_interruptible`が待ちをこの長さに区切る。
+pub const SIGINT_CHECK_INTERVAL_MS: i64 = 100;
+
+/// `wait_readable`と同じ待ち。ただし、待ちに入る前と区切りごとに`SIGINT`の印を見て、立っていれば
+/// `EINTR`を返す(受け取った側が`take_sigint`で`KeyboardInterrupt`にする)。
+///
+/// 印を見てから`poll`/`select`に入るまでの間に届いた信号は、ハンドラが印を立てるだけで、待ちは`EINTR`で
+/// 戻らない。1回の待ちを長くすると、その印を期限まで見ない。旧版は、バイトコードの区切りごとに受けた信号を
+/// 調べるので、待ちの前に届いた`SIGINT`はすぐ`KeyboardInterrupt`になる。そこで待ちを100ミリ秒ほどに区切り、
+/// 区切りごとに印を見直す(取りこぼしの最長は区切り1つ分)。`pselect`/`ppoll`で信号を止めて見る形は、
+/// Macの`pselect`が原子的でないので使わない。Macで1e8秒を超える待ちは、区切る前に`EINVAL`にする(旧版と同じ)。
+pub fn wait_readable_interruptible(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::Result<bool> {
+    if select_timeout_too_large(timeout_ms, cfg!(target_os = "macos")) {
+        return Err(io::Error::from_raw_os_error(libc::EINVAL));
+    }
+    let mut left = timeout_ms;
+    loop {
+        if sigint_pending() {
+            return Err(io::Error::from_raw_os_error(libc::EINTR));
+        }
+        let slice = if left < 0 {
+            SIGINT_CHECK_INTERVAL_MS
+        } else {
+            left.min(SIGINT_CHECK_INTERVAL_MS)
+        };
+        if wait_readable(fd, slice)? {
+            return Ok(true);
+        }
+        if left >= 0 {
+            left -= slice;
+            if left == 0 {
+                return Ok(false);
+            }
+        }
+    }
 }
 
 /// Macは、旧Pythonの`select.select`と同じ`select(2)`で待つ(`poll(2)`は、macOSでは端末などのデバイスを扱えない)。
@@ -1287,7 +1328,14 @@ impl Child {
     }
 
     /// `Popen.wait()`。`SIGINT`が来ていれば`EINTR`を返す。
+    ///
+    /// ブロックする`waitpid(pid, 0)`で待たない。印を見てからブロックに入るまでの間に届いた`SIGINT`は、
+    /// 印を立てるだけで`waitpid`を`EINTR`で戻さないので、子が終わるまで気づけない(旧版は、バイトコードの
+    /// 区切りで受けた信号を調べるので、待ちの前に届いた`SIGINT`はすぐ`KeyboardInterrupt`になる)。
+    /// 代わりに`WNOHANG`で調べ、印を見て、短く眠る(休みは0.5msの倍々で最大10ms。取りこぼしの最長は休み1回分)。
+    /// 結果(終了コード・信号で終わった値)と、印が立っていれば子の状態を見る前に`EINTR`で戻る順序は変えない。
     pub fn wait(&mut self) -> io::Result<i32> {
+        let mut delay = Duration::from_micros(500);
         loop {
             if let Some(code) = self.returncode {
                 return Ok(code);
@@ -1295,16 +1343,11 @@ impl Child {
             if sigint_pending() {
                 return Err(io::Error::from_raw_os_error(libc::EINTR));
             }
-            match self.try_wait(0) {
-                Ok(Some(code)) => return Ok(code),
-                Ok(None) => {}
-                Err(error) if error.raw_os_error() == Some(libc::EINTR) => {
-                    if sigint_pending() {
-                        return Err(error);
-                    }
-                }
-                Err(error) => return Err(error),
+            if let Some(code) = self.try_wait(libc::WNOHANG)? {
+                return Ok(code);
             }
+            std::thread::sleep(delay);
+            delay = (delay * 2).min(Duration::from_millis(10));
         }
     }
 
@@ -1558,6 +1601,31 @@ mod tests {
         assert!(!wait_readable(reader.as_fd(), 10).unwrap());
         write(writer.as_fd(), b"go\n").unwrap();
         assert!(wait_readable(reader.as_fd(), 10).unwrap());
+    }
+
+    #[test]
+    fn wait_readable_interruptible_keeps_the_timeout_and_data_semantics() {
+        let (reader, writer) = std::io::pipe().unwrap();
+        // 区切り(100ミリ秒)をまたぐ待ちも、期限どおりに`false`で終わる。
+        let started = Instant::now();
+        assert!(!wait_readable_interruptible(reader.as_fd(), 250).unwrap());
+        let waited = started.elapsed();
+        assert!(
+            waited >= Duration::from_millis(240) && waited < Duration::from_secs(5),
+            "{waited:?}"
+        );
+        assert!(!wait_readable_interruptible(reader.as_fd(), 0).unwrap());
+        write(writer.as_fd(), b"go\n").unwrap();
+        assert!(wait_readable_interruptible(reader.as_fd(), 250).unwrap());
+        assert!(wait_readable_interruptible(reader.as_fd(), -1).unwrap());
+        // Macの`select`の上限は、区切る前に`EINVAL`にする。
+        let limit_ms = MAC_SELECT_MAX_SECONDS * 1000;
+        let over = wait_readable_interruptible(reader.as_fd(), limit_ms + 1000);
+        if cfg!(target_os = "macos") {
+            assert_eq!(over.unwrap_err().raw_os_error(), Some(libc::EINVAL));
+        } else {
+            assert!(over.unwrap());
+        }
     }
 
     #[test]
@@ -2559,6 +2627,15 @@ int main(void) {\n\
         assert!(sigint_pending());
         let interrupted = retry::<()>(|| Err(io::Error::from_raw_os_error(libc::EINTR)));
         assert_eq!(interrupted.unwrap_err().raw_os_error(), Some(libc::EINTR));
+        // 待ちに入る前に印が立っていれば、期限も読める物も待たず`EINTR`(待ちの前に届いた信号の取りこぼしを防ぐ)。
+        let (reader, writer) = std::io::pipe().unwrap();
+        let started = Instant::now();
+        let waited = wait_readable_interruptible(reader.as_fd(), 30_000);
+        assert_eq!(waited.unwrap_err().raw_os_error(), Some(libc::EINTR));
+        write(writer.as_fd(), b"go\n").unwrap();
+        let waited = wait_readable_interruptible(reader.as_fd(), 30_000);
+        assert_eq!(waited.unwrap_err().raw_os_error(), Some(libc::EINTR));
+        assert!(started.elapsed() < Duration::from_secs(5));
         // 待っている子も、SIGINT後はEINTRで戻る。印を消すまで、後始末を除いて待ちは戻り続ける。
         let mut child = sleeper("5");
         assert_eq!(child.wait().unwrap_err().raw_os_error(), Some(libc::EINTR));
