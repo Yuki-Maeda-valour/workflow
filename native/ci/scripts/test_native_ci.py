@@ -3281,7 +3281,7 @@ class S2EConnectionTests(TempCase):
     def test_job_timeouts_leave_room_for_the_inner_timeout_times_runs_plus_preparation(self):
         # 内側の上限 × 比較の回数 + 準備(5 分)< ジョブの上限(内側の上限が先に効く。S3D と同じ形)。
         inner = build.S2E_TIMEOUT / 60
-        self.assertEqual(build.S2E_TIMEOUT, 2100)
+        self.assertEqual(build.S2E_TIMEOUT, 3000)
         self.assertLess(inner * 2 + 5, check_workflow.S2E_TIMEOUTS["s2e"])
         self.assertLess(inner * 1 + 5, check_workflow.S2E_TIMEOUTS["s2e-universal"])
 
@@ -3367,7 +3367,7 @@ class S2EConnectionTests(TempCase):
             self.assertIn(name, check_workflow.REQUIRED_NATIVE_JOBS)
         # build と verify-universal の上限は変えない(比較を入れないので)。
         self.assertEqual((jobs["build"]["timeout-minutes"], jobs["verify-universal"]["timeout-minutes"]), (120, 60))
-        self.assertEqual(check_workflow.S2E_TIMEOUTS, {"s2e": 80, "s2e-universal": 45})
+        self.assertEqual(check_workflow.S2E_TIMEOUTS, {"s2e": 120, "s2e-universal": 60})
         expected = {
             "s2e": ("build", jobs["build"]["strategy"], "native-build-${{ matrix.platform }}",
                     "python3 -B native/ci/build.py s2e --platform '${{ matrix.platform }}'"),
