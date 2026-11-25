@@ -1,0 +1,28 @@
+{
+ "files": {
+  "argparse.py": "a238b700513237e10d26056e42c5b4e42d4961ea70e15ebeef4c61c76615f004",
+  "contextlib.py": "2e17d45cf3da698c9752c58a668c8a03d0ce2280fdffd6e352794a38a94d9f07",
+  "enum.py": "59a62af0e129ae688f5549d6a273c51c5db80b534521f98dae2e4ceb485d9f75",
+  "functools.py": "1604a69d2d60921502b375a8af0d662702abe625987b773637a34c09c76a8a25",
+  "genericpath.py": "9d58ad64056a89f12258a62596c2073cd9e52b459dde152f710edc0cffcd865b",
+  "hashlib.py": "9d56ebad0263a48ac94e0b2b7a3723625f2ff4dc7707d1156580e008d40bc790",
+  "json/__init__.py": "d5d41e2c29049515d295d81a6d40b4890fbec8d8482cfb401630f8ef2f77e4d5",
+  "json/decoder.py": "9f02654649816145bc76f8c210a5fe3ba1de142d4d97a1c93105732e747c285b",
+  "json/encoder.py": "06b881b824f71e95d72af4ab865de4c35553e791b6d959a125caac61401cc350",
+  "json/scanner.py": "8604d9d03786d0d509abb49e9f069337278ea988c244069ae8ca2c89acc2cb08",
+  "os.py": "70e420e105d021d5ba2ec4d8a9b2131561db6d93e800e8580ddeb86cbd6959c3",
+  "pathlib.py": "936f14a3ecc4ac5e896e4d673666d76b25a9d581f3b4c8d8d424e830fda2a69b",
+  "posixpath.py": "2c770bac0680a5a180b1310102d14e1e120f2f2e8e47925b1574ec808cb8ad6d",
+  "re.py": "018b1a2c70e8ef537cc328d1026afdeca5839392ce47235a7b8d22e1b788cdc7",
+  "runpy.py": "fa52a1f6a3cc484d4798a1ad9438db68836fcc2b7c8f442d1a24b4ba5f01f55c",
+  "selectors.py": "b16e673c110fd6a362414308ef73ffc3c15125c87361333b309791735931040d",
+  "signal.py": "6ae9e49fe09b607bc161fc80067de9763aa48f523567a34992f00be06057f00a",
+  "sre_compile.py": "800f4c7df096e10336cd54f1aa6382721d6fcb974669463fe67f7a9189e52407",
+  "sre_parse.py": "dad10892e970f3b9d0ad874d893edde31c0303e39ea5e2678935129e29128c2f",
+  "subprocess.py": "53bb0d0780e166ef4ae94f3b2a817a8aae49a84d899db1f4c31f933d429057d6"
+ },
+ "note": "呼出履歴に出うる標準ライブラリのファイル。比べる旧Pythonの導入先の同じ相対パスと照らす。",
+ "source": "https://www.python.org/ftp/python/3.10.11/Python-3.10.11.tgz",
+ "source_sha256": "f3db31b668efa983508bd67b5712898aa4247899a346f2eb745734699ccd3859",
+ "version": "3.10.11"
+}

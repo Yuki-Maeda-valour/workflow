@@ -1,0 +1,4820 @@
+{
+ "case_ids": [
+  "legacy:basic-doc-example",
+  "legacy:args-none",
+  "legacy:args-missing",
+  "legacy:args-empty-string",
+  "legacy:args-dash-like",
+  "legacy:args-file-non-md",
+  "legacy:args-file-under-excluded",
+  "legacy:args-dir-excluded-self",
+  "legacy:args-normalized-spelling",
+  "legacy:args-absolute-missing",
+  "legacy:args-duplicate-and-order",
+  "legacy:args-fifo",
+  "legacy:args-symlinks",
+  "legacy:args-self-loop",
+  "legacy:walk-sort-order",
+  "legacy:walk-sort-non-utf8",
+  "legacy:walk-name-patterns",
+  "legacy:walk-newline-name",
+  "legacy:walk-exclude",
+  "legacy:walk-symlink-dir-not-followed",
+  "legacy:walk-target-is-dir-link",
+  "legacy:link-boundaries",
+  "legacy:link-skip-prefixes",
+  "legacy:link-targets",
+  "legacy:link-unicode-space",
+  "legacy:link-multiline",
+  "legacy:text-crlf-cr",
+  "legacy:text-invalid-utf8",
+  "legacy:text-bom",
+  "legacy:codepath-boundaries",
+  "legacy:codepath-backtick-mixup",
+  "legacy:codepath-skip-prefixes",
+  "legacy:codepath-ancestors",
+  "legacy:codepath-shallow",
+  "legacy:codepath-absolute",
+  "legacy:output-order-counts",
+  "legacy:exit-zero-with-warn",
+  "legacy:link-nul-absolute",
+  "legacy:link-symlink-mid",
+  "legacy:link-loop-then-dotdot",
+  "traceback:target-isdir-eacces",
+  "traceback:target-isdir-enametoolong",
+  "traceback:target-warn-then-eacces",
+  "traceback:rglob-deep-enametoolong",
+  "traceback:rglob-recursion",
+  "traceback:read-isdir",
+  "traceback:read-eacces",
+  "traceback:read-fifo-sigint",
+  "traceback:link-resolve-nul",
+  "traceback:link-resolve-loop",
+  "traceback:link-resolve-getcwd",
+  "traceback:link-resolve-recursion",
+  "traceback:link-exists-eacces",
+  "traceback:link-exists-enametoolong",
+  "traceback:code-resolve-recursion",
+  "traceback:code-alt-eacces",
+  "traceback:code-exists-eacces",
+  "traceback:rglob-entry-isdir-enametoolong",
+  "traceback:print-brokenpipe",
+  "traceback:exit-flush-devfull",
+  "args-none-optimize-unset",
+  "args-none-optimize-0",
+  "args-none-optimize-1",
+  "args-none-optimize-2",
+  "args-none-optimize-3",
+  "args-none-optimize-bad",
+  "args-none-optimize-negative",
+  "args-none-optimize-space",
+  "args-none-optimize-trailing",
+  "args-none-optimize-empty",
+  "args-none-pty",
+  "args-non-utf8",
+  "env-hashseed-ok-random",
+  "env-hashseed-ok-zero",
+  "env-hashseed-ok-max",
+  "env-hashseed-ok-space",
+  "env-hashseed-ok-minus-zero",
+  "env-hashseed-ok-empty",
+  "env-hashseed-bad-word",
+  "env-hashseed-bad-over",
+  "env-hashseed-bad-negative",
+  "env-hashseed-bad-trailing",
+  "env-hashseed-bad-huge",
+  "env-intmax-ok-zero",
+  "env-intmax-ok-min",
+  "env-intmax-ok-big",
+  "env-intmax-bad-small",
+  "env-intmax-bad-negative",
+  "env-intmax-bad-word",
+  "env-intmax-bad-huge",
+  "env-both-bad",
+  "startup-hashseed-broken-stderr-sigpipe-default",
+  "startup-hashseed-broken-stderr-sigpipe-ignore",
+  "startup-intmax-broken-stderr-sigpipe-default",
+  "startup-intmax-broken-stderr-sigpipe-ignore",
+  "startup-stdout-dir-broken-stderr-sigpipe-default",
+  "env-unbuffered-one",
+  "env-unbuffered-zero",
+  "env-unbuffered-zeros",
+  "env-unbuffered-bad",
+  "env-unbuffered-negative",
+  "env-unbuffered-empty",
+  "env-unbuffered-space-zero",
+  "env-lang-c-utf8",
+  "encoding-pythonioencoding-utf8-strict-non-utf8-name",
+  "encoding-pythonioencoding-ascii",
+  "encoding-pythonioencoding-unknown",
+  "encoding-pythonutf8-zero",
+  "encoding-lang-c-utf8-non-utf8-name",
+  "stdio-stdin-dir",
+  "stdio-stdout-dir",
+  "stdio-stderr-dir",
+  "stdio-stdout-stderr-dir",
+  "stdio-stdin-dir-bad-hashseed",
+  "stdio-devnull-stdout",
+  "stdio-devnull-stderr-exception",
+  "stdio-devnull-both",
+  "stdio-devnull-both-exception",
+  "stdio-closed-stdin",
+  "stdio-closed-stdin-exception",
+  "stdio-closed-stdout",
+  "stdio-closed-stdout-exception",
+  "stdio-closed-stderr",
+  "stdio-closed-stderr-exception",
+  "output-8191-pipe",
+  "output-8191-file",
+  "output-8191-pty",
+  "output-8191-unbuffered",
+  "output-8191-file-unbuffered",
+  "output-8191-pty-unbuffered",
+  "output-8192-pipe",
+  "output-8192-file",
+  "output-8192-pty",
+  "output-8192-unbuffered",
+  "output-8192-file-unbuffered",
+  "output-8192-pty-unbuffered",
+  "output-8193-pipe",
+  "output-8193-file",
+  "output-8193-pty",
+  "output-8193-unbuffered",
+  "output-8193-file-unbuffered",
+  "output-8193-pty-unbuffered",
+  "output-16383-pipe",
+  "output-16383-file",
+  "output-16383-pty",
+  "output-16383-unbuffered",
+  "output-16383-file-unbuffered",
+  "output-16383-pty-unbuffered",
+  "output-16384-pipe",
+  "output-16384-file",
+  "output-16384-pty",
+  "output-16384-unbuffered",
+  "output-16384-file-unbuffered",
+  "output-16384-pty-unbuffered",
+  "output-16385-pipe",
+  "output-16385-file",
+  "output-16385-pty",
+  "output-16385-unbuffered",
+  "output-16385-file-unbuffered",
+  "output-16385-pty-unbuffered",
+  "output-pty-cr-lf-names",
+  "output-same-pipe-exception",
+  "fault-stdout-devfull-buffered",
+  "fault-stdout-broken-buffered",
+  "fault-stdout-eagain-buffered",
+  "fault-stderr-devfull-exception-buffered",
+  "fault-stderr-devfull-noexception-buffered",
+  "fault-stderr-broken-exception-buffered",
+  "fault-stderr-broken-noexception-buffered",
+  "fault-stderr-eagain-exception-buffered",
+  "fault-both-devfull-buffered",
+  "fault-both-devfull-exception-buffered",
+  "fault-stdout-eio-once-buffered",
+  "fault-stdout-short-buffered",
+  "fault-stdout-quota-buffered",
+  "fault-stdout-rlimit-buffered",
+  "fault-stdout-flushio-eagain-sigint-buffered",
+  "fault-stdout-close-sigint-buffered",
+  "fault-stdout-close-fail-buffered",
+  "fault-stdout-close-ok-buffered",
+  "fault-unraisable-sigint-buffered",
+  "fault-stdout-devfull-unbuffered",
+  "fault-stdout-broken-unbuffered",
+  "fault-stdout-eagain-unbuffered",
+  "fault-stderr-devfull-exception-unbuffered",
+  "fault-stderr-devfull-noexception-unbuffered",
+  "fault-stderr-broken-exception-unbuffered",
+  "fault-stderr-broken-noexception-unbuffered",
+  "fault-stderr-eagain-exception-unbuffered",
+  "fault-both-devfull-unbuffered",
+  "fault-both-devfull-exception-unbuffered",
+  "fault-stdout-eio-once-unbuffered",
+  "fault-stdout-short-unbuffered",
+  "fault-stdout-quota-unbuffered",
+  "fault-stdout-rlimit-unbuffered",
+  "fault-stdout-flushio-eagain-sigint-unbuffered",
+  "fault-stdout-close-sigint-unbuffered",
+  "fault-stdout-close-fail-unbuffered",
+  "fault-stdout-close-ok-unbuffered",
+  "fault-unraisable-sigint-unbuffered",
+  "signal-fifo-sigint-pipe",
+  "signal-fifo-sigterm-pipe",
+  "signal-fifo-sigint-unbuffered",
+  "signal-fifo-sigterm-unbuffered",
+  "signal-fifo-sigint-pty",
+  "signal-fifo-sigterm-pty",
+  "signal-fifo-sigint-warn-pipe",
+  "signal-fifo-sigterm-warn-pipe",
+  "signal-fifo-sigint-warn-unbuffered",
+  "signal-fifo-sigterm-warn-unbuffered",
+  "signal-fifo-sigint-warn-pty",
+  "signal-fifo-sigterm-warn-pty",
+  "signal-sigint-ignored",
+  "signal-write-sigint-pipe-1",
+  "signal-write-sigint-pipe-2",
+  "signal-write-sigint-pipe-3",
+  "signal-write-sigint-pipe-last",
+  "signal-write-sigint-unbuffered-1",
+  "signal-write-sigint-unbuffered-2",
+  "signal-write-sigint-unbuffered-3",
+  "signal-write-sigint-unbuffered-last",
+  "signal-write-sigint-pty-1",
+  "signal-write-sigint-pty-2",
+  "signal-write-sigint-pty-3",
+  "signal-write-sigint-pty-last",
+  "signal-args-none-sigint-pipe-1",
+  "signal-args-none-sigint-pipe-last",
+  "signal-args-none-sigint-unbuffered-1",
+  "signal-args-none-sigint-unbuffered-last",
+  "signal-args-none-sigint-pty-1",
+  "signal-args-none-sigint-pty-last",
+  "signal-env-hashseed-bad-word-sigint",
+  "signal-stdio-stdin-dir-sigint",
+  "walk-fifo-writer",
+  "rglob-depth-988",
+  "rglob-depth-989",
+  "walk-unreadable-dir",
+  "walk-unsearchable-dir",
+  "walk-kinds",
+  "walk-permission-abort",
+  "link-chain-992",
+  "code-chain-992",
+  "link-chain-993",
+  "code-chain-993",
+  "args-stat-eacces",
+  "body-link-eacces-and-long",
+  "body-relative-nul",
+  "body-loop-nul",
+  "body-loop-absolute-target",
+  "body-absolute-loop",
+  "body-double-slash-md",
+  "code-location-dotdot",
+  "code-location-dotdot2",
+  "code-location-top-double-slash",
+  "code-location-top-triple-slash",
+  "code-location-top-single-slash",
+  "code-location-root-child",
+  "selftest-fake-file-line",
+  "partial-rlimit-buffered-field",
+  "partial-cut-buffered-field",
+  "partial-rlimit-buffered-outside",
+  "partial-cut-buffered-outside",
+  "partial-rlimit-buffered-legacy-only",
+  "partial-cut-buffered-legacy-only",
+  "partial-rlimit-two-buffered-field",
+  "partial-rlimit-two-buffered-outside",
+  "partial-rlimit-unbuffered-field",
+  "partial-cut-unbuffered-field",
+  "partial-rlimit-unbuffered-outside",
+  "partial-cut-unbuffered-outside",
+  "partial-rlimit-unbuffered-legacy-only",
+  "partial-cut-unbuffered-legacy-only",
+  "partial-rlimit-two-unbuffered-field",
+  "partial-rlimit-two-unbuffered-outside",
+  "partial-lost-unbuffered-field",
+  "partial-resend-buffered-field",
+  "partial-lost-unbuffered-outside",
+  "partial-resend-buffered-outside",
+  "partial-lost-unbuffered-legacy-only",
+  "partial-resend-buffered-legacy-only",
+  "partial-resend-buffered-stdlib-field",
+  "partial-cut-buffered-stdlib-field"
+ ],
+ "cases": {
+  "args-non-utf8": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "hex": "5741524e3a20e5afbee8b1a1e3818ce8a68be381a4e3818be3828ae381bee3819be382933a20ff2e6d640ae6a49ce69fbbe38395e382a1e382a4e383abe695b03a20310a4552524f522078ff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203120e4bbb6202f205741524e203020e4bbb60a"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "38a744e284cc99bb359529238b613f3aed56ae1acc2ce3e791d72b18aead5528"
+   }
+  },
+  "args-none-optimize-0": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-1": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-2": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "None\n",
+   "writes": {
+    "count": 1,
+    "sha256": "3384f7866e6155324a45cdeff2126efac6e58a6e7715f016312b86c88bfebe88"
+   }
+  },
+  "args-none-optimize-3": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "None\n",
+   "writes": {
+    "count": 1,
+    "sha256": "3384f7866e6155324a45cdeff2126efac6e58a6e7715f016312b86c88bfebe88"
+   }
+  },
+  "args-none-optimize-bad": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-empty": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-negative": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-space": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "None\n",
+   "writes": {
+    "count": 1,
+    "sha256": "3384f7866e6155324a45cdeff2126efac6e58a6e7715f016312b86c88bfebe88"
+   }
+  },
+  "args-none-optimize-trailing": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-optimize-unset": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "args-none-pty": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\r\n\r\n使い方:\r\n    python3 check_links.py <ファイルまたはディレクトリ>...\r\n\r\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\r\n検査対象:\r\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\r\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\r\n     無ければ WARN — コード片の可能性があるため error にはしない)\r\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\r\n\r\n",
+   "writes": {
+    "count": 2,
+    "sha256": "fc28789c16f4221596fb59797ee48f92bf585f3152455213d020e781c1c05313"
+   }
+  },
+  "args-stat-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     27,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1305,
+     "is_dir"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 27, in iter_md_files\n    if p.is_dir():\n  File \"pathlib.py\", line 1305, in is_dir\n    return S_ISDIR(self.stat().st_mode)\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: 'n/a.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "9b81592b1d41d043ddac035b25f0df77cc9ee9e2634e5e8f1fd8dddf7e72b939"
+   }
+  },
+  "body-absolute-loop": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> @ROOT@/loop\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "0f31d45f6d4deb11168c5f933024872b04fae126179c6204557177549f7cbdc2"
+   }
+  },
+  "body-double-slash-md": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  /@ROOT@/d/a.md:1: 記載パスが見つからない(コード片なら無視可) -> c/d.md\nERROR /@ROOT@/d/a.md:1: リンク切れ -> b.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "af603615f100669ac1f11879cc1b70b0d6381fb03cb2a52b2aa71927dd43881d"
+   }
+  },
+  "body-link-eacces-and-long": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     65,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1290,
+     "exists"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 65, in main\n    if not resolved.exists():\n  File \"pathlib.py\", line 1290, in exists\n    self.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: '@ROOT@/n/m.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "cbbd374d366c97f3878b557d0104b883bd4a2ff9c51eeb67517e896a25c7112d"
+   }
+  },
+  "body-loop-absolute-target": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR @ROOT@/d/a.md:1: リンク切れ -> loop/../x\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "7f3ae09259dc3a646bf0256141a19633e66baf3b81a18015e10e825ed1fe483e"
+   }
+  },
+  "body-loop-nul": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nValueError: embedded null byte\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "cd77fb6cbcd1733810c6d309a7c76040b35ca421c42e07d814afea030447183f"
+   }
+  },
+  "body-relative-nul": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     431,
+     "_joinrealpath"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 431, in _joinrealpath\n    st = os.lstat(newpath)\nValueError: embedded null byte\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "2648f9daa16bbf031ea47ce80a2da25c3db0c93d5fd6166f53e05ec7f513daa9"
+   }
+  },
+  "code-chain-992": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> l0/x.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "01d3df21dc71d0cfebc4316b92f81fd6920ca0b78985c75fc1dd35201bf3b2fb"
+   }
+  },
+  "code-chain-993": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     73,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     411,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     63,
+     "isabs"
+    ],
+    [
+     "posixpath.py",
+     42,
+     "_get_sep"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 73, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  [Previous line repeated 990 more times]\n  File \"posixpath.py\", line 411, in _joinrealpath\n    if isabs(rest):\n  File \"posixpath.py\", line 63, in isabs\n    sep = _get_sep(s)\n  File \"posixpath.py\", line 42, in _get_sep\n    if isinstance(path, bytes):\nRecursionError: maximum recursion depth exceeded while calling a Python object\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "71d49abcb8a5723dfa74e158749cca2d0d4d092723e59a35a55f4a101163fa38"
+   }
+  },
+  "code-location-dotdot": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  ../doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/y.md\nWARN  ../doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "9552417b20b89ba078bdd6a5594ea04644910f4a188bda65643c67df1745079d"
+   }
+  },
+  "code-location-dotdot2": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  ../../doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "4185e099936afef16074bcb044700850b6916a40dd74ccb923684b698edd5b96"
+   }
+  },
+  "code-location-root-child": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  @TOP@.md:1: 記載パスが見つからない(コード片なら無視可) -> x/y.md\nWARN  @TOP@.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "45250f1ad37085c54170b22b20f8c4402944aac8d013d4a3d38c1457b8aa5c4e"
+   }
+  },
+  "code-location-top-double-slash": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  /@TOP@/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "62990edddca337c7c5891cbf9f096aa97ba94f131ae519062281cb8414bf54f1"
+   }
+  },
+  "code-location-top-single-slash": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  @TOP@/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "2ac6ef992e8487f1172036fb7fbc8b319765c256e0c0ad0f76a13bdc100557b0"
+   }
+  },
+  "code-location-top-triple-slash": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  @TOP@/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "2ac6ef992e8487f1172036fb7fbc8b319765c256e0c0ad0f76a13bdc100557b0"
+   }
+  },
+  "encoding-lang-c-utf8-non-utf8-name": {
+   "configured": {
+    "exit": 1,
+    "frames": [],
+    "stderr": "",
+    "stdout": {
+     "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20310a4552524f5220642f78ff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203120e4bbb6202f205741524e203020e4bbb60a"
+    },
+    "writes": {
+     "count": 1,
+     "sha256": "fbc1ce0fc1b0955f45a6e4368e204ac1de01b05f66c391e30b69ecf095b7c6eb"
+    }
+   },
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20310a4552524f5220642f78ff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203120e4bbb6202f205741524e203020e4bbb60a"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "fbc1ce0fc1b0955f45a6e4368e204ac1de01b05f66c391e30b69ecf095b7c6eb"
+   }
+  },
+  "encoding-pythonioencoding-ascii": {
+   "configured": {
+    "exit": 1,
+    "frames": [
+     [
+      "check_links.py",
+      93,
+      "<module>"
+     ],
+     [
+      "check_links.py",
+      83,
+      "main"
+     ]
+    ],
+    "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"\\u691c\\u67fb\\u30d5\\u30a1\\u30a4\\u30eb\\u6570: {checked}\")\nUnicodeEncodeError: 'ascii' codec can't encode characters in position 0-6: ordinal not in range(128)\n",
+    "stdout": "",
+    "writes": {
+     "count": 6,
+     "sha256": "217ea375eb8f1c8f6c0fea2192bc7338374446af10ff50871b48f635270df54b"
+    }
+   },
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "encoding-pythonioencoding-unknown": {
+   "configured": {
+    "exit": 1,
+    "frames": [],
+    "stderr": "Fatal Python error: init_stdio_encoding: failed to get the Python codec name of the stdio encoding\nPython runtime state: core initialized\nLookupError: unknown encoding: no-such-codec\n\nCurrent thread 0x<thread> (most recent call first):\n  <no Python frame>\n",
+    "stdout": "",
+    "writes": {
+     "count": 17,
+     "sha256": "aab7a319bc65099bb8a6971ffa689550d2b26db11ab72af470b56e16c8f0a473"
+    }
+   },
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "encoding-pythonioencoding-utf8-strict-non-utf8-name": {
+   "configured": {
+    "exit": 1,
+    "frames": [
+     [
+      "check_links.py",
+      93,
+      "<module>"
+     ],
+     [
+      "check_links.py",
+      87,
+      "main"
+     ]
+    ],
+    "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 87, in main\n    print(f\"ERROR {e}\")\nUnicodeEncodeError: 'utf-8' codec can't encode character '\\udcff' in position 9: surrogates not allowed\n",
+    "stdout": "検査ファイル数: 1\n",
+    "writes": {
+     "count": 7,
+     "sha256": "2baacda4cf488b1d84a743715f444c4d335f01c4c3fb8d69bca233bf2786e5fd"
+    }
+   },
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20310a4552524f5220642f78ff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203120e4bbb6202f205741524e203020e4bbb60a"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "fbc1ce0fc1b0955f45a6e4368e204ac1de01b05f66c391e30b69ecf095b7c6eb"
+   }
+  },
+  "encoding-pythonutf8-zero": {
+   "configured": {
+    "exit": 1,
+    "frames": [
+     [
+      "check_links.py",
+      93,
+      "<module>"
+     ],
+     [
+      "check_links.py",
+      83,
+      "main"
+     ]
+    ],
+    "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"\\u691c\\u67fb\\u30d5\\u30a1\\u30a4\\u30eb\\u6570: {checked}\")\nUnicodeEncodeError: 'ascii' codec can't encode characters in position 0-6: ordinal not in range(128)\n",
+    "stdout": "",
+    "writes": {
+     "count": 6,
+     "sha256": "217ea375eb8f1c8f6c0fea2192bc7338374446af10ff50871b48f635270df54b"
+    }
+   },
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20310a4552524f5220642f78ff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203120e4bbb6202f205741524e203020e4bbb60a"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "fbc1ce0fc1b0955f45a6e4368e204ac1de01b05f66c391e30b69ecf095b7c6eb"
+   }
+  },
+  "env-both-bad": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-bad-huge": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-bad-negative": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-bad-over": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-bad-trailing": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-bad-word": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "env-hashseed-ok-empty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-hashseed-ok-max": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-hashseed-ok-minus-zero": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-hashseed-ok-random": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-hashseed-ok-space": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-hashseed-ok-zero": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-intmax-bad-huge": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "5376ba5c8994375205c3e73276ccd49515fd378e118d3156b2fc379af92faa18"
+   }
+  },
+  "env-intmax-bad-negative": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "5376ba5c8994375205c3e73276ccd49515fd378e118d3156b2fc379af92faa18"
+   }
+  },
+  "env-intmax-bad-small": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "5376ba5c8994375205c3e73276ccd49515fd378e118d3156b2fc379af92faa18"
+   }
+  },
+  "env-intmax-bad-word": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "5376ba5c8994375205c3e73276ccd49515fd378e118d3156b2fc379af92faa18"
+   }
+  },
+  "env-intmax-ok-big": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-intmax-ok-min": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-intmax-ok-zero": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-lang-c-utf8": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-unbuffered-bad": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "cd6af52791827bc2083026aabd0ced97140c0916f4b260ca98cdd138e7a89d9d"
+   }
+  },
+  "env-unbuffered-empty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-unbuffered-negative": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "cd6af52791827bc2083026aabd0ced97140c0916f4b260ca98cdd138e7a89d9d"
+   }
+  },
+  "env-unbuffered-one": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "cd6af52791827bc2083026aabd0ced97140c0916f4b260ca98cdd138e7a89d9d"
+   }
+  },
+  "env-unbuffered-space-zero": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-unbuffered-zero": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "env-unbuffered-zeros": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "fault-both-devfull-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "27e39c80295433f219c7f07e2ff47e98b7944424282e9279cf6cfc5f292c4ff6"
+   }
+  },
+  "fault-both-devfull-exception-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "40e3fd1fefd024ee6c31e12e5041801b43099b03c1fa71bc1e54753acda14c3f"
+   }
+  },
+  "fault-both-devfull-exception-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 3,
+    "sha256": "9ebfbf4aa0bf144509a963af604bbe4f6d26c5ad9119ef7206fc122a4f73bdb9"
+   }
+  },
+  "fault-both-devfull-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 3,
+    "sha256": "d9b81766108f3354fd1cd1b9f6085e0acdfaf8f176651fa0428c440e1e62159a"
+   }
+  },
+  "fault-stderr-broken-exception-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "9cbf472bb244dad3a005be1c19915d78f92a05b6c44632b9e00d90948eec9e53"
+   }
+  },
+  "fault-stderr-broken-exception-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 2,
+    "sha256": "aea85e58f3fbdd669dfa082dbc78fe9168f7bcb8a259ce10b51657eb4fe318c6"
+   }
+  },
+  "fault-stderr-broken-noexception-buffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "fault-stderr-broken-noexception-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "cd6af52791827bc2083026aabd0ced97140c0916f4b260ca98cdd138e7a89d9d"
+   }
+  },
+  "fault-stderr-devfull-exception-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "6b74969064f99cb3b6ce9d7899b9cd565f69bbe125aa47d9808c2edb4cf6956c"
+   }
+  },
+  "fault-stderr-devfull-exception-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 2,
+    "sha256": "62f9d67e1a81ab5dd258db71f8b65b6110a572be9e424c2c1ecb5a21a38797eb"
+   }
+  },
+  "fault-stderr-devfull-noexception-buffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "fault-stderr-devfull-noexception-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "cd6af52791827bc2083026aabd0ced97140c0916f4b260ca98cdd138e7a89d9d"
+   }
+  },
+  "fault-stderr-eagain-exception-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "7ed102af5cbce656f269f70fc36115069bef78678dbbd2237438d96476ce986e"
+   }
+  },
+  "fault-stderr-eagain-exception-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "9f16648c2664701ca2ee1fa5ec2a35be9dbae66daece020a070b84fadc85a382"
+   }
+  },
+  "fault-stdout-broken-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nBrokenPipeError: [Errno 32] Broken pipe\n",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "ea95b8058062271dd5b82f1a37086fc94613a95d72ccb866b8c341ec3f1a64ee"
+   }
+  },
+  "fault-stdout-broken-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     83,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"検査ファイル数: {checked}\")\nBrokenPipeError: [Errno 32] Broken pipe\n",
+   "stdout": "",
+   "writes": {
+    "count": 14,
+    "sha256": "d98d83e7124c05af3eaa7e6cc8ec688f57ef5aed4701177c95f5b83443fbc061"
+   }
+  },
+  "fault-stdout-close-fail-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nBlockingIOError: [Errno 11] write could not complete without blocking\n",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 6,
+    "sha256": "e30d0f47a8e7b0d786c2a7df6a73ec1312f70dad6f2544b21e89733575880cf2"
+   }
+  },
+  "fault-stdout-close-fail-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     85,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 85, in main\n    print(f\"WARN  {w}\")\nOSError: [Errno 5] Input/output error\n",
+   "stdout": "",
+   "writes": {
+    "count": 16,
+    "sha256": "6acc1867091c1c97d64a8d4706a3d2200b536a00465607243b1b8551680ee9c9"
+   }
+  },
+  "fault-stdout-close-ok-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nBlockingIOError: [Errno 11] write could not complete without blocking\n",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 5,
+    "sha256": "1797ec491753393891195d564374559019dde53655f5c7c014c5d9713b0d72aa"
+   }
+  },
+  "fault-stdout-close-ok-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "92e04a512f1d270dcd5d49d2aa97324526e594af013b85afbc57685f01874864"
+   }
+  },
+  "fault-stdout-close-sigint-buffered": {
+   "exit": -2,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nBlockingIOError: [Errno 11] write could not complete without blocking\n",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 5,
+    "sha256": "fda41575916d2ce274cc5eae35c93abce48375c8db188918eaef621b233419fc"
+   }
+  },
+  "fault-stdout-close-sigint-unbuffered": {
+   "exit": -2,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     85,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 85, in main\n    print(f\"WARN  {w}\")\nKeyboardInterrupt\n",
+   "stdout": "WARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py",
+   "writes": {
+    "count": 15,
+    "sha256": "c37d5cbfeac763a282c924aabf4249fca81adec1dce61efac9182340b9673fb1"
+   }
+  },
+  "fault-stdout-devfull-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nOSError: [Errno 28] No space left on device\n",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "7f2134bae80b104b0e46081736d9fcf479e031ff70889fe28845d968c5c90d8c"
+   }
+  },
+  "fault-stdout-devfull-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     83,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"検査ファイル数: {checked}\")\nOSError: [Errno 28] No space left on device\n",
+   "stdout": "",
+   "writes": {
+    "count": 14,
+    "sha256": "4c8094460efccef6a2f427b5df9e96f159fd01fe360b1a7988d945d06f1a90f3"
+   }
+  },
+  "fault-stdout-eagain-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nBlockingIOError: [Errno 11] write could not complete without blocking\n",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "502f3104a25702ce2afc8017247de189e3ac5a6d0eaf1033a772fb09e0d18db5"
+   }
+  },
+  "fault-stdout-eagain-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 8,
+    "sha256": "7c81721d01db122cdce751dd04a8396365ce24de2fc5d389574d7fcea95fdea0"
+   }
+  },
+  "fault-stdout-eio-once-buffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 2,
+    "sha256": "088f07a5d43d8ef444d7ab914bde68343947b752f61b32cdd2e7d55390212515"
+   }
+  },
+  "fault-stdout-eio-once-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     83,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"検査ファイル数: {checked}\")\nOSError: [Errno 5] Input/output error\n",
+   "stdout": "",
+   "writes": {
+    "count": 14,
+    "sha256": "8dc0caa57900dcc4743f964cfd054b5865b99e1368c4f786072d1b692e9061c9"
+   }
+  },
+  "fault-stdout-flushio-eagain-sigint-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nKeyboardInterrupt: \n",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 4,
+    "sha256": "73abfb9c93cd7d47b11ea9d2f52be5d806092afa2da59ff07b4605eda61ea4c5"
+   }
+  },
+  "fault-stdout-flushio-eagain-sigint-unbuffered": {
+   "exit": -2,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     83,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 83, in main\n    print(f\"検査ファイル数: {checked}\")\nKeyboardInterrupt\n",
+   "stdout": "\n",
+   "writes": {
+    "count": 14,
+    "sha256": "19d07242a97a65167eea824a001239d54f7c049b830df356a981f4fe68639b65"
+   }
+  },
+  "fault-stdout-quota-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nOSError: [Errno 27] File too large\n",
+   "stdout": {
+    "len": 5000,
+    "sha256": "6c137d95a78e0bfabfcc2de08e19d5d876414c009232e46ebd3e5f54a6d117a7"
+   },
+   "writes": {
+    "count": 7,
+    "sha256": "2242ed99325230209a3e8adf584f40bfae05d5f7c1c0776c43ac3dee931a1171"
+   }
+  },
+  "fault-stdout-quota-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     87,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 87, in main\n    print(f\"ERROR {e}\")\nOSError: [Errno 27] File too large\n",
+   "stdout": {
+    "len": 5000,
+    "sha256": "6c137d95a78e0bfabfcc2de08e19d5d876414c009232e46ebd3e5f54a6d117a7"
+   },
+   "writes": {
+    "count": 107,
+    "sha256": "b587219b5fbd54dfbeb809251c6209536a2ea307a7afe87512b1d08638a9f1fe"
+   }
+  },
+  "fault-stdout-rlimit-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nOSError: [Errno 27] File too large\n",
+   "stdout": {
+    "len": 5000,
+    "sha256": "6c137d95a78e0bfabfcc2de08e19d5d876414c009232e46ebd3e5f54a6d117a7"
+   },
+   "writes": {
+    "count": 7,
+    "sha256": "b70cc7f1a0431ec0f93d6e788bd1ab4514ed90d79160fe7b3dc9d2ce66b278e6"
+   }
+  },
+  "fault-stdout-rlimit-unbuffered": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     87,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 87, in main\n    print(f\"ERROR {e}\")\nOSError: [Errno 27] File too large\n",
+   "stdout": {
+    "len": 5000,
+    "sha256": "6c137d95a78e0bfabfcc2de08e19d5d876414c009232e46ebd3e5f54a6d117a7"
+   },
+   "writes": {
+    "count": 107,
+    "sha256": "282e7ee9f5aa11d7dadb331a8fe5e9ed654648bb45aa832677f12148c1da3087"
+   }
+  },
+  "fault-stdout-short-buffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 9000,
+    "sha256": "218fd94fb847d7502364ca5d67b094e6c5cfb06e045675332f923546c46b0ae3"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "7850bce4240de1edf90576bd48bfd2c6d5266049c6ffa0179280c61d1d96d3ee"
+   }
+  },
+  "fault-stdout-short-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 9000,
+    "sha256": "218fd94fb847d7502364ca5d67b094e6c5cfb06e045675332f923546c46b0ae3"
+   },
+   "writes": {
+    "count": 164,
+    "sha256": "e1e6c687a9d2f371bd8ec9a56f8e8383bc0d028bd91eac946d024158493774be"
+   }
+  },
+  "fault-unraisable-sigint-buffered": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nException ignored in sys.unraisablehook: <built-in function unraisablehook>\nKeyboardInterrupt\n",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 6,
+    "sha256": "56990940067d7362da9f19567ee4332ab3eb81acfa9d216a42102a9a6648d67a"
+   }
+  },
+  "fault-unraisable-sigint-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 8,
+    "sha256": "92e04a512f1d270dcd5d49d2aa97324526e594af013b85afbc57685f01874864"
+   }
+  },
+  "legacy:args-absolute-missing": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: //r4u-nonexistent-x\nWARN: 対象が見つかりません: ///r4u-nonexistent-y/\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "307124112a92fe976e7952dc21221a4c947611289ede9c02fc96f160d7062991"
+   }
+  },
+  "legacy:args-dash-like": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: -h\nWARN: 対象が見つかりません: --version\n検査ファイル数: 1\nERROR --:1: リンク切れ -> m\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "781e8e5ade0f250c6a4b79fc40bc6ed66f2ded3c9b6940a4a0529cbcdff7cc84"
+   }
+  },
+  "legacy:args-dir-excluded-self": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR docs/a.md:1: リンク切れ -> m2\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c8827035a04e584856f43fcecacae93b03fc5d3611bfd2d7e2fd56e8e303cb9f"
+   }
+  },
+  "legacy:args-duplicate-and-order": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing1\n検査ファイル数: 3\nERROR a.md:1: リンク切れ -> m1\nERROR a.md:1: リンク切れ -> m1\nERROR dir/c.md:1: リンク切れ -> m2\n結果: ERROR 3 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "06c36c47ac38334e16f81e7f9c1ff4dc77f675188db1915bf6d17c7ababdff5d"
+   }
+  },
+  "legacy:args-empty-string": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nERROR a.md:1: リンク切れ -> m1\nERROR sub/b.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "13f0a5b8a9739676348f920fbdf7fca2b781dc16e9fa37179807f6cd089ea235"
+   }
+  },
+  "legacy:args-fifo": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: p.md\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "e3c755009afedccc0032fe3ded19568262024bca0110a8bf0642dca9eb7e7a8b"
+   }
+  },
+  "legacy:args-file-non-md": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR notes.txt:1: リンク切れ -> gone\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "794e294eef02676a2eedef41cc970150881b99048f6b1f67de370fac4690140e"
+   }
+  },
+  "legacy:args-file-under-excluded": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nERROR build/a.md:1: リンク切れ -> m1\nERROR node_modules/x/b.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "7c7db47be21d7fd2287118d85e70790b4616535a2499ff170cb9a1a0717d9044"
+   }
+  },
+  "legacy:args-missing": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: nope.md\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "9ff9cf9a34632092c2d2c19785a627922f0dddce23fe29ed4b42c8793f62cfaf"
+   }
+  },
+  "legacy:args-none": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "68cf90ba706f6e934dac1046cfd2736f9e4e2654d6094a447be4d00afdca97f9"
+   }
+  },
+  "legacy:args-normalized-spelling": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 3\nERROR a.md:1: リンク切れ -> m1\nERROR docs/sub/b.md:1: リンク切れ -> m2\nERROR docs/../docs/sub/b.md:1: リンク切れ -> m2\n結果: ERROR 3 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "26cbbbb8c390f6b5b64590e3923ac518fcc50422bbf6ab5fe5feb69ac12720a3"
+   }
+  },
+  "legacy:args-self-loop": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: loop\n検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "5c032095c3b5143c8a236b50b50d5357cc348f742995de3db968c331f075d1e5"
+   }
+  },
+  "legacy:args-symlinks": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nERROR lf.md:1: リンク切れ -> m1\nERROR ld/x.md:1: リンク切れ -> m1\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c6073578fae34a8f519e2635970fca233a2c8d0fc41241f280b99006e6737eef"
+   }
+  },
+  "legacy:basic-doc-example": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "legacy:codepath-absolute": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> /r4u-nonexistent/a.md\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> //r4u-nonexistent/b.md\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "7ae14e1e698ddb907193ac96fb61f1faf1ae9f2c69ec03a390df4c2d9c218a3e"
+   }
+  },
+  "legacy:codepath-ancestors": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a/b/c/d/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/r0.md\nWARN  a/b/c/d/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/r5.md\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "7dbff5846fa54146627d266d41a93aae9c01b21e8e02bd45aeefc17487f9d2c8"
+   }
+  },
+  "legacy:codepath-backtick-mixup": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> a/b.md\nWARN  a.md:3: 記載パスが見つからない(コード片なら無視可) -> p/q.md\nWARN  a.md:4: 記載パスが見つからない(コード片なら無視可) -> 2/3.md\n結果: ERROR 0 件 / WARN 3 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "486cd56cf7b3f811a9350a20b0379258cbb2079a6fd5c85b461abd001dd32c5f"
+   }
+  },
+  "legacy:codepath-boundaries": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> a/b.c\nWARN  a.md:2: 記載パスが見つからない(コード片なら無視可) -> a/b.abcdefghij\nWARN  a.md:4: 記載パスが見つからない(コード片なら無視可) -> @scope/pkg.json\nWARN  a.md:6: 記載パスが見つからない(コード片なら無視可) -> a@b/c.md\nWARN  a.md:10: 記載パスが見つからない(コード片なら無視可) -> a/b.c.d\nWARN  a.md:12: 記載パスが見つからない(コード片なら無視可) -> /a/b.md\nWARN  a.md:13: 記載パスが見つからない(コード片なら無視可) -> a//b.md\nWARN  a.md:14: 記載パスが見つからない(コード片なら無視可) -> a/b/c.md\nWARN  a.md:17: 記載パスが見つからない(コード片なら無視可) -> a/b.mD\nWARN  a.md:18: 記載パスが見つからない(コード片なら無視可) -> a-b_c/d-e_f.G1\nWARN  a.md:19: 記載パスが見つからない(コード片なら無視可) -> a/b.md\nWARN  a.md:19: 記載パスが見つからない(コード片なら無視可) -> c/d.md\nWARN  a.md:21: 記載パスが見つからない(コード片なら無視可) -> a/b.md\n結果: ERROR 0 件 / WARN 13 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "1f6be3cb71c8f2db2873dafaa9871de547c29d0fa7c2a8e2f5139225a1f72539"
+   }
+  },
+  "legacy:codepath-shallow": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nWARN  doc.md:1: 記載パスが見つからない(コード片なら無視可) -> x/zz.md\nWARN  y/doc.md:1: 記載パスが見つからない(コード片なら無視可) -> q/zz.md\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "4e767b9ac63da81d3730e913e2b42b91720f79c127b02e65307438c10742b755"
+   }
+  },
+  "legacy:codepath-skip-prefixes": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> Yarn/a.b\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> xhttp/a.b\n結果: ERROR 0 件 / WARN 2 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "1c85d1002c14c205aed8722b1415f87f2edb8d0ab0ceb382914e128513307d51"
+   }
+  },
+  "legacy:exit-zero-with-warn": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  a.md:1: 記載パスが見つからない(コード片なら無視可) -> w/1.md\n結果: ERROR 0 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "02f0309e45a66f89aa54731e1f63f350be324944954b82bdcd13ebe82f38e6c6"
+   }
+  },
+  "legacy:link-boundaries": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m01\nERROR a.md:3: リンク切れ -> m03(b\nERROR a.md:4: リンク切れ -> m04\nERROR a.md:8: リンク切れ -> m07\nERROR a.md:9: リンク切れ -> m08\nERROR a.md:11: リンク切れ -> m10\nERROR a.md:11: リンク切れ -> m11\nERROR a.md:12: リンク切れ -> m12\nERROR a.md:13: リンク切れ -> m14.png\nERROR a.md:14: リンク切れ -> m15>\nERROR a.md:15: リンク切れ -> <m16>\nERROR a.md:16: リンク切れ -> m17]x\nERROR a.md:17: リンク切れ -> m18\nERROR a.md:18: リンク切れ -> m19\\\n結果: ERROR 14 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "19f06cfb78a2763ab0c1ebc665cb5f0bc93088e4985b398587cc08733c6fff94"
+   }
+  },
+  "legacy:link-loop-then-dotdot": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> loop/../zz.md\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "16d32e3aa448a30fddcbb6c94ce2cd16054ee91741aae7c95a3a01541c19ba97"
+   }
+  },
+  "legacy:link-multiline": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1\nERROR a.md:7: リンク切れ -> m3\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "b4279ec8a06a1bf448b9f7be28aab7a84da4020bfe2f4e798439b404c5a83048"
+   }
+  },
+  "legacy:link-nul-absolute": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> /r4u\u0000z\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "70568e3eff9af4c5cc2bd0a570c230f3eebb40569f86b7351ea91b0911e94e5e"
+   }
+  },
+  "legacy:link-skip-prefixes": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:6: リンク切れ -> HTTP://x\nERROR a.md:7: リンク切れ -> Mailto:x\nERROR a.md:8: リンク切れ -> ftp://x\nERROR a.md:9: リンク切れ -> http:/x\nERROR a.md:10: リンク切れ -> httpsx\nERROR a.md:11: リンク切れ -> tel1\n結果: ERROR 6 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "72a397afa46a552e92fd4bcebd682da543bc42475c3752b1a52fa24207b1125a"
+   }
+  },
+  "legacy:link-symlink-mid": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR docs/a.md:1: リンク切れ -> l/zz.md\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "119828689e35a080993715b1e16cac61a579b655dc8a64e5aa7435e271f32fe8"
+   }
+  },
+  "legacy:link-targets": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> missing.md#frag\nERROR a.md:5: リンク切れ -> x#\nERROR a.md:7: リンク切れ -> /r4u-nonexistent-z\nERROR a.md:15: リンク切れ -> ///r4u-nonexistent-w\n結果: ERROR 4 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "1125f35b6e051a1b5b2d5c9aea6ea7d7464de038ee4403b42368214e21bfd8a6"
+   }
+  },
+  "legacy:link-unicode-space": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1​z\nERROR a.md:7: リンク切れ -> m6᠎z\nERROR a.md:8: リンク切れ -> m7﻿z\nERROR a.md:16: リンク切れ -> m15⁠z\nERROR a.md:17: リンク切れ -> m16­z\n結果: ERROR 5 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "a9acd4721ab1fe80c72c06f4526bba8d3475bb39f07fc90b70dfa7562e9d8d8a"
+   }
+  },
+  "legacy:output-order-counts": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nWARN  t/1.md:1: 記載パスが見つからない(コード片なら無視可) -> w/1.md\nWARN  t/2.md:1: 記載パスが見つからない(コード片なら無視可) -> w/2.md\nWARN  t/2.md:2: 記載パスが見つからない(コード片なら無視可) -> w/3.md\nERROR t/1.md:1: リンク切れ -> e1\nERROR t/1.md:2: リンク切れ -> e2\nERROR t/2.md:1: リンク切れ -> e3\n結果: ERROR 3 件 / WARN 3 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c1b4b3c6db0ae116309f61526227a5c6734ddad25e90d928e076efa8d386f952"
+   }
+  },
+  "legacy:text-bom": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m1\nERROR a.md:2: リンク切れ -> ﻿m2\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "9b389a5c6d0fe9d8d5af9aae31b759eeaf243fabbb109c5e3459f1a0e390f224"
+   }
+  },
+  "legacy:text-crlf-cr": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:2: リンク切れ -> m1\nERROR a.md:4: リンク切れ -> m2\nERROR a.md:6: リンク切れ -> m3\nERROR a.md:8: リンク切れ -> m4\n結果: ERROR 4 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "8cdf83cf426a87a69349f3f231cc102c80f909ec5225d4137bbee4f270676dc5"
+   }
+  },
+  "legacy:text-invalid-utf8": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m1�\nERROR a.md:2: リンク切れ -> m2��\nERROR a.md:3: リンク切れ -> m3���\nERROR a.md:4: リンク切れ -> m4�\nERROR a.md:5: リンク切れ -> m5�\nERROR a.md:6: リンク切れ -> m6����\nERROR a.md:7: リンク切れ -> m7��\nERROR a.md:8: リンク切れ -> m8���\nERROR a.md:9: リンク切れ -> m9�����\nERROR a.md:10: リンク切れ -> m10￾\n結果: ERROR 10 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "b38b2a3d7badae1d879bf76c43d92ffb97e01db76384261f5c8383d8317ed77e"
+   }
+  },
+  "legacy:walk-exclude": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 4\nERROR t/Build/a.md:1: リンク切れ -> m\nERROR t/build.md:1: リンク切れ -> m\nERROR t/distx/a.md:1: リンク切れ -> m\nERROR t/ok/a.md:1: リンク切れ -> m\n結果: ERROR 4 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "eef06165b7a1bee9105059aec997df8caa9b72be34ae5bd29d9046f27ecb2fde"
+   }
+  },
+  "legacy:walk-name-patterns": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 3\nERROR t/.dir/x.md:1: リンク切れ -> m\nERROR t/.hidden.md:1: リンク切れ -> m\nERROR t/.md:1: リンク切れ -> m\n結果: ERROR 3 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "921cb6d4d7913776be6cb58f699e03bfd5c90b96e389c18d51e2addc782406c2"
+   }
+  },
+  "legacy:walk-newline-name": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nERROR t/a\nb.md:1: リンク切れ -> m1\nERROR t/c\rd.md:1: リンク切れ -> m2\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "eb054b85c7dd15bc7470f7ba24c8c66b21f87a506591e6a4cc243a24ab55b932"
+   }
+  },
+  "legacy:walk-sort-non-utf8": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "hex": "e6a49ce69fbbe38395e382a1e382a4e383abe695b03a20370a4552524f5220742f7a2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fe4b8802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742f802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fe4b82e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fff2e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742fee80802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0a4552524f5220742ff09080802e6d643a313a20e383aae383b3e382afe58887e3828c202d3e206d0ae7b590e69e9c3a204552524f52203720e4bbb6202f205741524e203020e4bbb60a"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "ce65d1dd4d2bd6432af957d83b4cc76c9f32d45c6a0feba59c4e3adc2f4ce76b"
+   }
+  },
+  "legacy:walk-sort-order": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 12\nERROR t/B.md:1: リンク切れ -> m\nERROR t/_.md:1: リンク切れ -> m\nERROR t/a/-.md:1: リンク切れ -> m\nERROR t/a/A.md:1: リンク切れ -> m\nERROR t/a/b.md:1: リンク切れ -> m\nERROR t/a-b.md:1: リンク切れ -> m\nERROR t/a.md:1: リンク切れ -> m\nERROR t/b/b.md:1: リンク切れ -> m\nERROR t/~.md:1: リンク切れ -> m\nERROR t/日本.md:1: リンク切れ -> m\nERROR t/ｚ.md:1: リンク切れ -> m\nERROR t/😀.md:1: リンク切れ -> m\n結果: ERROR 12 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "b57b205fb851e6f9b407f41b21e17bd78b921f23fb77ba09889add122dd0ef21"
+   }
+  },
+  "legacy:walk-symlink-dir-not-followed": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\nERROR t/lf.md:1: リンク切れ -> m1\nERROR t/real/x.md:1: リンク切れ -> m1\n結果: ERROR 2 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "13781833b91cb1429f124d60909beb71b8e89ca7b9fa90372aa4483a935f3a9b"
+   }
+  },
+  "legacy:walk-target-is-dir-link": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR ld/sub/x.md:1: リンク切れ -> m1\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "9adc3c7b75413cede17d9241ed1e5a0d1bf4693625ae1bb73f60abb28226a9ca"
+   }
+  },
+  "link-chain-992": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> l0\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "bdd2b36ede873ece8921792ce328e6ec4b0372b05968b5387ad009728822d116"
+   }
+  },
+  "link-chain-993": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     411,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     63,
+     "isabs"
+    ],
+    [
+     "posixpath.py",
+     42,
+     "_get_sep"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  [Previous line repeated 990 more times]\n  File \"posixpath.py\", line 411, in _joinrealpath\n    if isabs(rest):\n  File \"posixpath.py\", line 63, in isabs\n    sep = _get_sep(s)\n  File \"posixpath.py\", line 42, in _get_sep\n    if isinstance(path, bytes):\nRecursionError: maximum recursion depth exceeded while calling a Python object\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "a04fa58cf2696a82d6159e48a809630a3cf6dd580c8329e1b8fccc5e46672b93"
+   }
+  },
+  "output-16383-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16383,
+    "sha256": "9efc7d721f53a3cfb2ef330573840fb850603eac502ab84d657fe73338f78a59"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "9cfeef16c04512daa9bc6b59869a0eb0e1b8a1ca40c97eb316adbe3c4cc52ce6"
+   }
+  },
+  "output-16383-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16383,
+    "sha256": "9efc7d721f53a3cfb2ef330573840fb850603eac502ab84d657fe73338f78a59"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "ba6163caeffcc5aa1c2128246c0dca2dfeef47a1fa6f7f463382679b6402fa17"
+   }
+  },
+  "output-16383-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16383,
+    "sha256": "9efc7d721f53a3cfb2ef330573840fb850603eac502ab84d657fe73338f78a59"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "9cfeef16c04512daa9bc6b59869a0eb0e1b8a1ca40c97eb316adbe3c4cc52ce6"
+   }
+  },
+  "output-16383-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16532,
+    "sha256": "3f8ed89dd819c7e83c90e1d2409ae898c99c62ba02c57874a6259f7028631233"
+   },
+   "writes": {
+    "count": 149,
+    "sha256": "a7514c8ca61e54bc9491ad4b7bc9deaf325deae35942c1681a9664851c01e9e2"
+   }
+  },
+  "output-16383-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16532,
+    "sha256": "3f8ed89dd819c7e83c90e1d2409ae898c99c62ba02c57874a6259f7028631233"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "ba6163caeffcc5aa1c2128246c0dca2dfeef47a1fa6f7f463382679b6402fa17"
+   }
+  },
+  "output-16383-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16383,
+    "sha256": "9efc7d721f53a3cfb2ef330573840fb850603eac502ab84d657fe73338f78a59"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "ba6163caeffcc5aa1c2128246c0dca2dfeef47a1fa6f7f463382679b6402fa17"
+   }
+  },
+  "output-16384-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16384,
+    "sha256": "b5be91f5632aac93b3c249a8123e0a8993fdf11de44049a0329020d638c91438"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "b8e88dfb229d943b870e8114d795ad996dee12444e8857b1f53bd12fbdb4e71f"
+   }
+  },
+  "output-16384-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16384,
+    "sha256": "b5be91f5632aac93b3c249a8123e0a8993fdf11de44049a0329020d638c91438"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "27a49edd3f4f5b7b503583931f7b43a88b33db55f72d45a79807976dec4b8e14"
+   }
+  },
+  "output-16384-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16384,
+    "sha256": "b5be91f5632aac93b3c249a8123e0a8993fdf11de44049a0329020d638c91438"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "b8e88dfb229d943b870e8114d795ad996dee12444e8857b1f53bd12fbdb4e71f"
+   }
+  },
+  "output-16384-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16533,
+    "sha256": "e357f230acd405b78844fe3d9b5a5caa7d7419e8f78028e2326542bf4b2fa27b"
+   },
+   "writes": {
+    "count": 149,
+    "sha256": "afaae9c91149f6f92f0ddb96503fa30e80453e5085c69f260a587bcfff3a510f"
+   }
+  },
+  "output-16384-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16533,
+    "sha256": "e357f230acd405b78844fe3d9b5a5caa7d7419e8f78028e2326542bf4b2fa27b"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "27a49edd3f4f5b7b503583931f7b43a88b33db55f72d45a79807976dec4b8e14"
+   }
+  },
+  "output-16384-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16384,
+    "sha256": "b5be91f5632aac93b3c249a8123e0a8993fdf11de44049a0329020d638c91438"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "27a49edd3f4f5b7b503583931f7b43a88b33db55f72d45a79807976dec4b8e14"
+   }
+  },
+  "output-16385-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16385,
+    "sha256": "16cbbae4c419fe5d863fccf87a186cd0e77e5713abe74e9727b62d603f721309"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "f9921688b3113eecc3c0f3f252d3531f758a1fe679aab2f124ab17b488e04af0"
+   }
+  },
+  "output-16385-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16385,
+    "sha256": "16cbbae4c419fe5d863fccf87a186cd0e77e5713abe74e9727b62d603f721309"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "553f2bd3ce5948a3c270a8bbfded828b00866a597a90082b2b7f204aa0099d4f"
+   }
+  },
+  "output-16385-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16385,
+    "sha256": "16cbbae4c419fe5d863fccf87a186cd0e77e5713abe74e9727b62d603f721309"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "f9921688b3113eecc3c0f3f252d3531f758a1fe679aab2f124ab17b488e04af0"
+   }
+  },
+  "output-16385-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16534,
+    "sha256": "22518a82b600a8e54f6bea929c5eeada04b711be4a885d2a2b797fc7b64e2eea"
+   },
+   "writes": {
+    "count": 149,
+    "sha256": "2ef70716b08eb16973aa2b5c821886f620be47252714d2da635f56405d285e8a"
+   }
+  },
+  "output-16385-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16534,
+    "sha256": "22518a82b600a8e54f6bea929c5eeada04b711be4a885d2a2b797fc7b64e2eea"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "553f2bd3ce5948a3c270a8bbfded828b00866a597a90082b2b7f204aa0099d4f"
+   }
+  },
+  "output-16385-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 16385,
+    "sha256": "16cbbae4c419fe5d863fccf87a186cd0e77e5713abe74e9727b62d603f721309"
+   },
+   "writes": {
+    "count": 298,
+    "sha256": "553f2bd3ce5948a3c270a8bbfded828b00866a597a90082b2b7f204aa0099d4f"
+   }
+  },
+  "output-8191-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8191,
+    "sha256": "c74e201b0f96e39b198c292bca431cfb1aa673f7790c8fa20076027f855674c3"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "c359d4a17f2a66787dfee9433cec825137ef945e76a8e24b0cba2ff2ac1d8cfa"
+   }
+  },
+  "output-8191-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8191,
+    "sha256": "c74e201b0f96e39b198c292bca431cfb1aa673f7790c8fa20076027f855674c3"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e94b343c1b288b03570e6a4d45806c046f4dacd76c3f587ebc8425fda0b92aa3"
+   }
+  },
+  "output-8191-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8191,
+    "sha256": "c74e201b0f96e39b198c292bca431cfb1aa673f7790c8fa20076027f855674c3"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "c359d4a17f2a66787dfee9433cec825137ef945e76a8e24b0cba2ff2ac1d8cfa"
+   }
+  },
+  "output-8191-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8266,
+    "sha256": "0b5f42e11978bf6b8028e0f9dbc62f3fd85daa9e72f865f79edd3f8f8888fe9c"
+   },
+   "writes": {
+    "count": 75,
+    "sha256": "cf3dfaaf21c0dd00b19cf0fd315cba317a2f923e2640a6978fcfca59b97c4752"
+   }
+  },
+  "output-8191-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8266,
+    "sha256": "0b5f42e11978bf6b8028e0f9dbc62f3fd85daa9e72f865f79edd3f8f8888fe9c"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e94b343c1b288b03570e6a4d45806c046f4dacd76c3f587ebc8425fda0b92aa3"
+   }
+  },
+  "output-8191-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8191,
+    "sha256": "c74e201b0f96e39b198c292bca431cfb1aa673f7790c8fa20076027f855674c3"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e94b343c1b288b03570e6a4d45806c046f4dacd76c3f587ebc8425fda0b92aa3"
+   }
+  },
+  "output-8192-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8192,
+    "sha256": "12eaee660f70dde7052a9c8ef0b562803078d3455a9942e9f89f23da51fb85a4"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "edbf101368d8de710d7bd98b14dc1c39c987355f8bc2a1d51472973804570f1a"
+   }
+  },
+  "output-8192-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8192,
+    "sha256": "12eaee660f70dde7052a9c8ef0b562803078d3455a9942e9f89f23da51fb85a4"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e2d6ff2ecfc5b5476d90e3d5a46b655ef16f347d819e1887888b92fe5748dfa9"
+   }
+  },
+  "output-8192-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8192,
+    "sha256": "12eaee660f70dde7052a9c8ef0b562803078d3455a9942e9f89f23da51fb85a4"
+   },
+   "writes": {
+    "count": 1,
+    "sha256": "edbf101368d8de710d7bd98b14dc1c39c987355f8bc2a1d51472973804570f1a"
+   }
+  },
+  "output-8192-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8267,
+    "sha256": "334711465a4f8663698b0eac798d1211f855c79441aa594a994526836e03358a"
+   },
+   "writes": {
+    "count": 75,
+    "sha256": "59698d78facf03f6d7e7db69928f9aff0eb375c75fb6083b629f41d671d8ee77"
+   }
+  },
+  "output-8192-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8267,
+    "sha256": "334711465a4f8663698b0eac798d1211f855c79441aa594a994526836e03358a"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e2d6ff2ecfc5b5476d90e3d5a46b655ef16f347d819e1887888b92fe5748dfa9"
+   }
+  },
+  "output-8192-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8192,
+    "sha256": "12eaee660f70dde7052a9c8ef0b562803078d3455a9942e9f89f23da51fb85a4"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "e2d6ff2ecfc5b5476d90e3d5a46b655ef16f347d819e1887888b92fe5748dfa9"
+   }
+  },
+  "output-8193-file": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8193,
+    "sha256": "edd76cabcc0497e43f724733e70886326037fd25d5272e3ef17af5b1a05b7c69"
+   },
+   "writes": {
+    "count": 2,
+    "sha256": "73a9ba5e756136440aadf7fca9ea6e9ae9e6ee49e663edf2e1c611da869b5511"
+   }
+  },
+  "output-8193-file-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8193,
+    "sha256": "edd76cabcc0497e43f724733e70886326037fd25d5272e3ef17af5b1a05b7c69"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "50e819d037cd9f9a46afe0b48233d31504e0e962674dc61fccea5808edeb86a4"
+   }
+  },
+  "output-8193-pipe": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8193,
+    "sha256": "edd76cabcc0497e43f724733e70886326037fd25d5272e3ef17af5b1a05b7c69"
+   },
+   "writes": {
+    "count": 2,
+    "sha256": "73a9ba5e756136440aadf7fca9ea6e9ae9e6ee49e663edf2e1c611da869b5511"
+   }
+  },
+  "output-8193-pty": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8268,
+    "sha256": "445ae7b507e5b641944cd1c0acb2a47b17a3acc9a69e68de1d427fed68485043"
+   },
+   "writes": {
+    "count": 75,
+    "sha256": "0506ec90d3bb9d0f53440f73a9cc1876ac530915cd4ddc52075832b3796855e0"
+   }
+  },
+  "output-8193-pty-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8268,
+    "sha256": "445ae7b507e5b641944cd1c0acb2a47b17a3acc9a69e68de1d427fed68485043"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "50e819d037cd9f9a46afe0b48233d31504e0e962674dc61fccea5808edeb86a4"
+   }
+  },
+  "output-8193-unbuffered": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 8193,
+    "sha256": "edd76cabcc0497e43f724733e70886326037fd25d5272e3ef17af5b1a05b7c69"
+   },
+   "writes": {
+    "count": 150,
+    "sha256": "50e819d037cd9f9a46afe0b48233d31504e0e962674dc61fccea5808edeb86a4"
+   }
+  },
+  "output-pty-cr-lf-names": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 2\r\nERROR d/a\rb.md:1: リンク切れ -> m\r\nERROR d/c\r\nd.md:1: リンク切れ -> n\r\n結果: ERROR 2 件 / WARN 0 件\r\n",
+   "writes": {
+    "count": 6,
+    "sha256": "faeed9efef8b99114c441b09e4d2ba515350e0fc9a1d993a34be829610220046"
+   }
+  },
+  "output-same-pipe-exception": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing\nTraceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "writes": {
+    "count": 11,
+    "sha256": "f13ec4ef573693f1a8c0880acb59e34b9e54aac4d03a70b89f00005002bc70e1"
+   }
+  },
+  "partial-cut-buffered-field": {
+   "exit": 120,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_l",
+   "stdout": "",
+   "writes": {
+    "count": 8,
+    "sha256": "e36dccf64d8d807fc529691099569fbc5217a8cc7fcf563c7436ddfc67790fec"
+   }
+  },
+  "partial-cut-buffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "22d3e14416fa6de3d111cad9aa4e7d1709f19d820ea83f290d85f2eb98e4e9b3"
+   }
+  },
+  "partial-cut-buffered-outside": {
+   "exit": 120,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module",
+   "stdout": "",
+   "writes": {
+    "count": 8,
+    "sha256": "095eb86daefac8d971558a59a03f457cf5600dd07dbbc7cda0dfb2d766241f89"
+   }
+  },
+  "partial-cut-buffered-stdlib-field": {
+   "exit": 120,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathl",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "d169a3050a89974515f205398dfde5d32935cb9166ee429d6762f68a19c70256"
+   }
+  },
+  "partial-cut-unbuffered-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_l",
+   "stdout": "",
+   "writes": {
+    "count": 5,
+    "sha256": "ff19bbaaf1bc96a8af6885491553d222555e8336d2ecf3abdbe1b88db0ee4a55"
+   }
+  },
+  "partial-cut-unbuffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "4bee74651f322bb0f1fe7c056dc692e10357a3d0cac5c21f9ccd9af4af09d495"
+   }
+  },
+  "partial-cut-unbuffered-outside": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module",
+   "stdout": "",
+   "writes": {
+    "count": 5,
+    "sha256": "ca6774fc650eebf764d75f8e3a68f1aaf94fbdc8827b016f65066b07e06145d1"
+   }
+  },
+  "partial-lost-unbuffered-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_l    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "d3bc5c5beb6d91697310442adecb95843f9ffe6296e7ebccdcb2c28e04d1c4f7"
+   }
+  },
+  "partial-lost-unbuffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "431c54c4385e5a144ee344fdcb9f1fd6e4b8edd88e6dc3e800aaa2a4b7164445"
+   }
+  },
+  "partial-lost-unbuffered-outside": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "582fc396fc37176b6e29ef66cb2c66ac6151a08e284d393a0555791147a92ed8"
+   }
+  },
+  "partial-resend-buffered-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 11,
+    "sha256": "829c63dc6f4f19e808d59c50f21d60e02576257f6dcf0d80df44d53e4bd593f2"
+   }
+  },
+  "partial-resend-buffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "6bed9c3fdfcf3eea99e63dd3d388d57e8d98662c666765c5c232be492982c122"
+   }
+  },
+  "partial-resend-buffered-outside": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 11,
+    "sha256": "679175aa5ebf505b055a635328851f723d1cb3ce5601eabc162e9cf3eb06a5a8"
+   }
+  },
+  "partial-resend-buffered-stdlib-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 11,
+    "sha256": "0fbbb4eafba2f422bf3784d355c4cb0128e2d3664f5025995145c51ab7759840"
+   }
+  },
+  "partial-rlimit-buffered-field": {
+   "exit": 120,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_l",
+   "stdout": "",
+   "writes": {
+    "count": 8,
+    "sha256": "4bbbdee616a2c4c3258c38d3160b2dd1f4403ad279e6aa2f8f92c7c203d0bd30"
+   }
+  },
+  "partial-rlimit-buffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "9d7f23e56101490f02586821fc812ec55b4a0259658c3cc00804b8c1934b9237"
+   }
+  },
+  "partial-rlimit-buffered-outside": {
+   "exit": 120,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sy",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "c7b48064ea03f16ab8753d0526db744a07ffe9f088980a376b231c84e0520415"
+   }
+  },
+  "partial-rlimit-two-buffered-field": {
+   "exit": 120,
+   "frames": [
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"pathl",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "0e8277984822aa9a6207fcd7dd5374b927a587d2629bb7b0f71eb77df924a7e1"
+   }
+  },
+  "partial-rlimit-two-buffered-outside": {
+   "exit": 120,
+   "frames": [
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "1cb6213785ecc7ddff228c585c4072499915b49e6c1374f57b78ca852d1018cf"
+   }
+  },
+  "partial-rlimit-two-unbuffered-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"pathl",
+   "stdout": "",
+   "writes": {
+    "count": 7,
+    "sha256": "dd190d69160b0ba2e135b4761271ae84e00205a192f5d1b88c5723fdf1177bd6"
+   }
+  },
+  "partial-rlimit-two-unbuffered-outside": {
+   "exit": 1,
+   "frames": [
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "21c4f5c843f53015449da451a8f9003d27279d67ffb177ca6b9ff93bea012d26"
+   }
+  },
+  "partial-rlimit-unbuffered-field": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_l",
+   "stdout": "",
+   "writes": {
+    "count": 5,
+    "sha256": "9b294948ccd8a8c635668d7a5ee2ee0d8be4229d413051fcc34083e136547cda"
+   }
+  },
+  "partial-rlimit-unbuffered-legacy-only": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "dde10df9edb08b1bb7d655f8bd6d410846e819baa393401cead94c9601607c6d"
+   }
+  },
+  "partial-rlimit-unbuffered-outside": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sy",
+   "stdout": "",
+   "writes": {
+    "count": 7,
+    "sha256": "ecc1820b5df3c3a2fcfd41837182a7019e51e786d789bb43bc732593d25eb8e3"
+   }
+  },
+  "rglob-depth-988": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 0\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "1630c96609be7aef5780d95ceeefb080fd0517670bf0453357fb59f0bc2e9669"
+   }
+  },
+  "rglob-depth-989": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     28,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1047,
+     "rglob"
+    ],
+    [
+     "pathlib.py",
+     492,
+     "_select_from"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     471,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     632,
+     "__fspath__"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError: maximum recursion depth exceeded\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "f5c760b24cfa23eae50adc2f70a9265280ed6c39db1fd00eed9469870a8f7acd"
+   }
+  },
+  "selftest-fake-file-line": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: '  File \"@LEGACY@\", line 1, in x/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "ede0c784699192136c33a8f726fc0402b5f7ef35e1953e0de7ff5a3650c06f1d"
+   }
+  },
+  "signal-args-none-sigint-pipe-1": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "822ce99e1ebb23068dc8561738dc69250bfff454dbc2f1c88b76a2ebe4e52f35"
+   }
+  },
+  "signal-args-none-sigint-pipe-last": {
+   "exit": 2,
+   "frames": [],
+   "stderr": "",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "writes": {
+    "count": 1,
+    "sha256": "822ce99e1ebb23068dc8561738dc69250bfff454dbc2f1c88b76a2ebe4e52f35"
+   }
+  },
+  "signal-args-none-sigint-pty-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\r\n\r\n使い方:\r\n    python3 check_links.py <ファイルまたはディレクトリ>...\r\n\r\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\r\n検査対象:\r\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\r\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\r\n     無ければ WARN — コード片の可能性があるため error にはしない)\r\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\r\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "2eea58fc78dd862ec5d947558edce79ef7a44635e95b450409b774533b079bc7"
+   }
+  },
+  "signal-args-none-sigint-pty-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\r\n\r\n使い方:\r\n    python3 check_links.py <ファイルまたはディレクトリ>...\r\n\r\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\r\n検査対象:\r\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\r\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\r\n     無ければ WARN — コード片の可能性があるため error にはしない)\r\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\r\n\r\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "4f7fb073fceba1699aa478ac0e98229d799f7bde24b68ac4b1250f68de7728f6"
+   }
+  },
+  "signal-args-none-sigint-unbuffered-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "2eea58fc78dd862ec5d947558edce79ef7a44635e95b450409b774533b079bc7"
+   }
+  },
+  "signal-args-none-sigint-unbuffered-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "Markdown の相対リンク・記載パスの存在チェック(汎用・依存なし・読み取り専用)。\n\n使い方:\n    python3 check_links.py <ファイルまたはディレクトリ>...\n\nディレクトリを渡すと配下の *.md を再帰走査する(.git / node_modules 等は除外)。\n検査対象:\n  1. [text](relative/path) 形式の相対リンク(http(s):, mailto:, #アンカーのみは対象外)\n  2. `path/to/file.ext` 形式のインラインコード中の相対パスらしき文字列(存在すれば OK、\n     無ければ WARN — コード片の可能性があるため error にはしない)\n終了コード: リンク切れ(ERROR)が 1 件以上あれば 1、なければ 0。\n\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "4f7fb073fceba1699aa478ac0e98229d799f7bde24b68ac4b1250f68de7728f6"
+   }
+  },
+  "signal-env-hashseed-bad-word-sigint": {
+   "exit": -2,
+   "frames": [],
+   "stderr": "Fatal Python error: ",
+   "stdout": "",
+   "writes": {
+    "count": 1,
+    "sha256": "d49f4b5baf9258537acb788722f3b938957a0e43505101f051bf61adb1435910"
+   }
+  },
+  "signal-fifo-sigint-pipe": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "",
+   "stdout_writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigint-pty": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "",
+   "stdout_writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigint-unbuffered": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "",
+   "stdout_writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigint-warn-pipe": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "WARN: 対象が見つかりません: missing\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "0de10de38fcd2ce3effe8cff4696fa0a6847e8eb76d2fde0f22f0b0e956e74ab"
+   }
+  },
+  "signal-fifo-sigint-warn-pty": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "WARN: 対象が見つかりません: missing\r\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "0de10de38fcd2ce3effe8cff4696fa0a6847e8eb76d2fde0f22f0b0e956e74ab"
+   }
+  },
+  "signal-fifo-sigint-warn-unbuffered": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "WARN: 対象が見つかりません: missing\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "e3a47a09eb0792f53eada1e8b311fa0e10bf9d1461fbb032aa466207c0d0d7b0"
+   }
+  },
+  "signal-fifo-sigterm-pipe": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigterm-pty": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigterm-unbuffered": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigterm-warn-pipe": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "signal-fifo-sigterm-warn-pty": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing\r\n",
+   "writes": {
+    "count": 1,
+    "sha256": "0de10de38fcd2ce3effe8cff4696fa0a6847e8eb76d2fde0f22f0b0e956e74ab"
+   }
+  },
+  "signal-fifo-sigterm-warn-unbuffered": {
+   "exit": -15,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing\n",
+   "writes": {
+    "count": 2,
+    "sha256": "e3a47a09eb0792f53eada1e8b311fa0e10bf9d1461fbb032aa466207c0d0d7b0"
+   }
+  },
+  "signal-sigint-ignored": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing\n検査ファイル数: 1\nERROR f/a.md:1: リンク切れ -> m\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "9761a2404c60ad8a332e20a668f43b221076639c8d42eb875c929590b02abc9e"
+   }
+  },
+  "signal-stdio-stdin-dir-sigint": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: init_sys_streams: <stdin> is a directory, cannot continue\nPython runtime state: core initialized\n\nCurrent thread 0x<thread> (most recent call first):\n  <no Python frame>\n",
+   "stdout": "",
+   "writes": {
+    "count": 13,
+    "sha256": "050968d69e2adf9eead74b1cf417f8bed4b1c77e9a82bf42a61bacd21f9c8574"
+   }
+  },
+  "signal-write-sigint-pipe-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": {
+    "len": 8156,
+    "sha256": "96cb644f8fbeb3af77ad73c0ec12955b38660ff20ca441580be09dd9007f172c"
+   },
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "cfaf400fded25a3c22ccba0639b62e55c67fb5062d25b4b36b1f3c1bf4f2b9ba"
+   }
+  },
+  "signal-write-sigint-pipe-2": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": {
+    "len": 16345,
+    "sha256": "51f92877ec73f4b7a0ab99011e71c977fbb239914a34c98e0a27ec531b955f77"
+   },
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "3f08c7216037b72d89dbfab0e219c1019c4c3e94b6b152bb9eccad0636d439ea"
+   }
+  },
+  "signal-write-sigint-pipe-3": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 20000,
+    "sha256": "a81d4a87308b7f373e136d3428edc6c5c064d9d55d4f18d2506dfbc64d547532"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "31cf3d7b8a1421ca544c7437bfb2401c4c87dbd49c66e5ae5d09cc5691df8a5f"
+   }
+  },
+  "signal-write-sigint-pipe-last": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": {
+    "len": 20000,
+    "sha256": "a81d4a87308b7f373e136d3428edc6c5c064d9d55d4f18d2506dfbc64d547532"
+   },
+   "writes": {
+    "count": 3,
+    "sha256": "31cf3d7b8a1421ca544c7437bfb2401c4c87dbd49c66e5ae5d09cc5691df8a5f"
+   }
+  },
+  "signal-write-sigint-pty-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1\r\n",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "efc81c77515225ae81ba8af5b30b5fe00887c7cf3d334037c712bcec70a221d7"
+   }
+  },
+  "signal-write-sigint-pty-2": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1\r\nERROR a.md:1: リンク切れ -> m0000qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\r\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "3fbe7a5f2ac5f3c4d33196a75426c22ea8590e62b4c79277bd321edd0cf23744"
+   }
+  },
+  "signal-write-sigint-pty-3": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1\r\nERROR a.md:1: リンク切れ -> m0000qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\r\nERROR a.md:2: リンク切れ -> m0001qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq\r\n",
+   "stdout_writes": {
+    "count": 3,
+    "sha256": "849000846c8f4ae45519b12b6483f71f77233fdc86cb4377eed8da6b7bec79b6"
+   }
+  },
+  "signal-write-sigint-pty-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": {
+    "len": 20181,
+    "sha256": "834da09c6203f9505c032294386c1280e2fb215cb659a7228e3bf54ed81480d2"
+   },
+   "stdout_writes": {
+    "count": 181,
+    "sha256": "ed611361c2eec1d73a3f5c90a0cd29ea723178703825e9e3c55821099f238c36"
+   }
+  },
+  "signal-write-sigint-unbuffered-1": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1",
+   "stdout_writes": {
+    "count": 1,
+    "sha256": "156ce1bd1fc7594a0655dc3a8adaa7011113e5b84258fbc03d6d37b62f8ffb67"
+   }
+  },
+  "signal-write-sigint-unbuffered-2": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1\n",
+   "stdout_writes": {
+    "count": 2,
+    "sha256": "b19757a37cd2ba149a990e6be572ec10503724470e4e3cdb37f1eda6136dc31a"
+   }
+  },
+  "signal-write-sigint-unbuffered-3": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "検査ファイル数: 1\nERROR a.md:1: リンク切れ -> m0000qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+   "stdout_writes": {
+    "count": 3,
+    "sha256": "2a875480d8e0aab8439eb90a7ee3e58d0f1b5ba3e3fe28937b1bbd208822865a"
+   }
+  },
+  "signal-write-sigint-unbuffered-last": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": {
+    "len": 20000,
+    "sha256": "a81d4a87308b7f373e136d3428edc6c5c064d9d55d4f18d2506dfbc64d547532"
+   },
+   "stdout_writes": {
+    "count": 362,
+    "sha256": "10f7dd96c1b88b2deeb8c1b6c4c0c907f52ac3e391b54c0d7eda4101a043a8b3"
+   }
+  },
+  "startup-hashseed-broken-stderr-sigpipe-default": {
+   "exit": -13,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "startup-hashseed-broken-stderr-sigpipe-ignore": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "569e01b1a2b81182dedf55f73fd582b17c610041ce0f517baa2ab9abef26024d"
+   }
+  },
+  "startup-intmax-broken-stderr-sigpipe-default": {
+   "exit": -13,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "startup-intmax-broken-stderr-sigpipe-ignore": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "b33aef538be3b99afec7c62dd13061046ffb7853294622173e142391f22625c6"
+   }
+  },
+  "startup-stdout-dir-broken-stderr-sigpipe-default": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 15,
+    "sha256": "09dbd93ec41f5cbadeb7454d264e93e48a9c190e2a052ab070cdb37804ec98ad"
+   }
+  },
+  "stdio-closed-stderr": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "stdio-closed-stderr-exception": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "stdio-closed-stdin": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nWARN  docs/a.md:1: 記載パスが見つからない(コード片なら無視可) -> src/none.py\nERROR docs/a.md:1: リンク切れ -> missing.md\n結果: ERROR 1 件 / WARN 1 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "stdio-closed-stdin-exception": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "fd50476eb6208d07abd6f75683d81073d86fecab62dd8f8c9dba245dde466c4d"
+   }
+  },
+  "stdio-closed-stdout": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "stdio-closed-stdout-exception": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "fd50476eb6208d07abd6f75683d81073d86fecab62dd8f8c9dba245dde466c4d"
+   }
+  },
+  "stdio-devnull-both": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "stdio-devnull-both-exception": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 11,
+    "sha256": "f13ec4ef573693f1a8c0880acb59e34b9e54aac4d03a70b89f00005002bc70e1"
+   }
+  },
+  "stdio-devnull-stderr-exception": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "",
+   "stdout": "WARN: 対象が見つかりません: missing\n",
+   "writes": {
+    "count": 11,
+    "sha256": "f13ec4ef573693f1a8c0880acb59e34b9e54aac4d03a70b89f00005002bc70e1"
+   }
+  },
+  "stdio-devnull-stdout": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 1,
+    "sha256": "c54c78319c483b637b6293094a98c3103f6d53e54d81c7fdaf11c7b83c755f61"
+   }
+  },
+  "stdio-stderr-dir": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 15,
+    "sha256": "e6be0a7c39e1d6bc5a215db78e5c9638a493a38c288951fec65802f0249e37fc"
+   }
+  },
+  "stdio-stdin-dir": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: init_sys_streams: <stdin> is a directory, cannot continue\nPython runtime state: core initialized\n\nCurrent thread 0x<thread> (most recent call first):\n  <no Python frame>\n",
+   "stdout": "",
+   "writes": {
+    "count": 13,
+    "sha256": "017bd42e9c8c45d24c73cd400ad633b5374c87d318bcc46c30f4d8d83e3be9e0"
+   }
+  },
+  "stdio-stdin-dir-bad-hashseed": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\nPython runtime state: preinitialized\n\n",
+   "stdout": "",
+   "writes": {
+    "count": 9,
+    "sha256": "764b21055901d4a9d66e80b171ffe5a278e3d3fae9f48935f11ef168cde088f7"
+   }
+  },
+  "stdio-stdout-dir": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "Fatal Python error: init_sys_streams: can't initialize sys standard streams\nPython runtime state: core initialized\nIsADirectoryError: [Errno 21] Is a directory: 1\n\nCurrent thread 0x<thread> (most recent call first):\n  <no Python frame>\n",
+   "stdout": "",
+   "writes": {
+    "count": 17,
+    "sha256": "eafab4e842f371abdb73dff0896338f53deee7174248bcc359858e463999ffae"
+   }
+  },
+  "stdio-stdout-stderr-dir": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "",
+   "writes": {
+    "count": 15,
+    "sha256": "e6be0a7c39e1d6bc5a215db78e5c9638a493a38c288951fec65802f0249e37fc"
+   }
+  },
+  "traceback:code-alt-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     77,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1290,
+     "exists"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 77, in main\n    if (up / target).exists():\n  File \"pathlib.py\", line 1290, in exists\n    self.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: 'x/y.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "8f54ffe636b5fdeb30498e1bd202e021fdc8409bcd42f85aaaca6034d377ff4f"
+   }
+  },
+  "traceback:code-exists-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     80,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1290,
+     "exists"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 80, in main\n    if not resolved.exists() and alt is None:\n  File \"pathlib.py\", line 1290, in exists\n    self.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: '@ROOT@/d/x/y.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "ecff712e20f123512810cfaa6ea9125949eb92c907f5d32ef8b51d0d891cdfa2"
+   }
+  },
+  "traceback:code-resolve-recursion": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     73,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     411,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     63,
+     "isabs"
+    ],
+    [
+     "posixpath.py",
+     42,
+     "_get_sep"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 73, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  [Previous line repeated 990 more times]\n  File \"posixpath.py\", line 411, in _joinrealpath\n    if isabs(rest):\n  File \"posixpath.py\", line 63, in isabs\n    sep = _get_sep(s)\n  File \"posixpath.py\", line 42, in _get_sep\n    if isinstance(path, bytes):\nRecursionError: maximum recursion depth exceeded while calling a Python object\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "71d49abcb8a5723dfa74e158749cca2d0d4d092723e59a35a55f4a101163fa38"
+   }
+  },
+  "traceback:exit-flush-devfull": {
+   "exit": 120,
+   "frames": [],
+   "stderr": "Exception ignored in: <_io.TextIOWrapper name='<stdout>' mode='w' encoding='utf-8'>\nOSError: [Errno 28] No space left on device\n",
+   "stdout": "",
+   "writes": {
+    "count": 6,
+    "sha256": "5c611a76bc3f38c749504cba3c5cdbf947bba04624aa39b407506718122cc993"
+   }
+  },
+  "traceback:link-exists-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     65,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1290,
+     "exists"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 65, in main\n    if not resolved.exists():\n  File \"pathlib.py\", line 1290, in exists\n    self.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: '@ROOT@/n/a.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "7227be32ab1b98745bc851b02ac3b0e6ae13aced7b57f8d29701aee13db63f8a"
+   }
+  },
+  "traceback:link-exists-enametoolong": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     65,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1290,
+     "exists"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 65, in main\n    if not resolved.exists():\n  File \"pathlib.py\", line 1290, in exists\n    self.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 36] File name too long: '@ROOT@/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "99ecde7e7e0f0516e91e249211a702a7e6a0d1ed576259b4cbd5db5370fc6cd7"
+   }
+  },
+  "traceback:link-resolve-getcwd": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     397,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     384,
+     "abspath"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 397, in realpath\n    return abspath(path)\n  File \"posixpath.py\", line 384, in abspath\n    cwd = os.getcwd()\nFileNotFoundError: [Errno 2] No such file or directory\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "37d57b7afb5f3912787321dd53d5909771337505a937a9063cc52b31665ab196"
+   }
+  },
+  "traceback:link-resolve-loop": {
+   "exit": 1,
+   "frames": [
+    [
+     "pathlib.py",
+     1087,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ],
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1089,
+     "resolve"
+    ],
+    [
+     "pathlib.py",
+     1074,
+     "check_eloop"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"pathlib.py\", line 1087, in resolve\n    p.stat()\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 40] Too many levels of symbolic links: '@ROOT@/d/loop'\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1089, in resolve\n    check_eloop(e)\n  File \"pathlib.py\", line 1074, in check_eloop\n    raise RuntimeError(\"Symlink loop from %r\" % e.filename)\nRuntimeError: Symlink loop from '@ROOT@/d/loop'\n",
+   "stdout": "",
+   "writes": {
+    "count": 17,
+    "sha256": "46eaa3aa90ea0e4033aff139d290b34355d48b8d8b2db1a582ad18b05c6c6061"
+   }
+  },
+  "traceback:link-resolve-nul": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     431,
+     "_joinrealpath"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 431, in _joinrealpath\n    st = os.lstat(newpath)\nValueError: embedded null byte\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "2648f9daa16bbf031ea47ce80a2da25c3db0c93d5fd6166f53e05ec7f513daa9"
+   }
+  },
+  "traceback:link-resolve-recursion": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     64,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1077,
+     "resolve"
+    ],
+    [
+     "posixpath.py",
+     396,
+     "realpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     456,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     411,
+     "_joinrealpath"
+    ],
+    [
+     "posixpath.py",
+     63,
+     "isabs"
+    ],
+    [
+     "posixpath.py",
+     42,
+     "_get_sep"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 64, in main\n    resolved = (base / target).resolve() if not target.startswith(\"/\") else Path(target)\n  File \"pathlib.py\", line 1077, in resolve\n    s = self._accessor.realpath(self, strict=strict)\n  File \"posixpath.py\", line 396, in realpath\n    path, ok = _joinrealpath(filename[:0], filename, strict, {})\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  File \"posixpath.py\", line 456, in _joinrealpath\n    path, ok = _joinrealpath(path, os.readlink(newpath), strict, seen)\n  [Previous line repeated 990 more times]\n  File \"posixpath.py\", line 411, in _joinrealpath\n    if isabs(rest):\n  File \"posixpath.py\", line 63, in isabs\n    sep = _get_sep(s)\n  File \"posixpath.py\", line 42, in _get_sep\n    if isinstance(path, bytes):\nRecursionError: maximum recursion depth exceeded while calling a Python object\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "a04fa58cf2696a82d6159e48a809630a3cf6dd580c8329e1b8fccc5e46672b93"
+   }
+  },
+  "traceback:print-brokenpipe": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     87,
+     "main"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 87, in main\n    print(f\"ERROR {e}\")\nBrokenPipeError: [Errno 32] Broken pipe\n",
+   "stdout": "",
+   "writes": {
+    "count": 7,
+    "sha256": "3fb9c976d203c553a4ae9337a6d32afdc5012f3bcd9f313d98cd0c83fed7bf38"
+   }
+  },
+  "traceback:read-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 'a.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "092d10bb771242d973eed103927c847bdd708aba5b5febcbf54903d182112cfd"
+   }
+  },
+  "traceback:read-fifo-sigint": {
+   "exit": -2,
+   "last_line": "KeyboardInterrupt",
+   "stdout": "",
+   "stdout_writes": {
+    "count": 0,
+    "sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+   }
+  },
+  "traceback:read-isdir": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nIsADirectoryError: [Errno 21] Is a directory: 'g/x.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "fd50476eb6208d07abd6f75683d81073d86fecab62dd8f8c9dba245dde466c4d"
+   }
+  },
+  "traceback:rglob-deep-enametoolong": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     28,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1047,
+     "rglob"
+    ],
+    [
+     "pathlib.py",
+     493,
+     "_select_from"
+    ],
+    [
+     "pathlib.py",
+     440,
+     "_select_from"
+    ]
+   ],
+   "stderr": {
+    "len": 4838,
+    "sha256": "db7236d4ee356dea52eba760ac78bc2fece341181478da893d65dfc1482f6993"
+   },
+   "stdout": "",
+   "writes": {
+    "count": 14,
+    "sha256": "fc962ce193506182eb867bca6f60e7c9e9d233d68401c51263a970e14b1ebeb2"
+   }
+  },
+  "traceback:rglob-entry-isdir-enametoolong": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     28,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1047,
+     "rglob"
+    ],
+    [
+     "pathlib.py",
+     492,
+     "_select_from"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     476,
+     "_iterate_directories"
+    ]
+   ],
+   "stderr": {
+    "len": 5141,
+    "sha256": "814d8fb034d06f65406f398e1a2479f2c4d50d56a7a37bf2efc20eb9303d16d0"
+   },
+   "stdout": "",
+   "writes": {
+    "count": 21,
+    "sha256": "2ae111412ff04acab97f3eb47be266a8e086a3e3e43021dbef281d6e12a8078c"
+   }
+  },
+  "traceback:rglob-recursion": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     28,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1047,
+     "rglob"
+    ],
+    [
+     "pathlib.py",
+     492,
+     "_select_from"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     482,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     471,
+     "_iterate_directories"
+    ],
+    [
+     "pathlib.py",
+     632,
+     "__fspath__"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 28, in iter_md_files\n    for f in sorted(p.rglob(\"*.md\")):\n  File \"pathlib.py\", line 1047, in rglob\n    for p in selector.select_from(self):\n  File \"pathlib.py\", line 492, in _select_from\n    for starting_point in self._iterate_directories(parent_path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  File \"pathlib.py\", line 482, in _iterate_directories\n    for p in self._iterate_directories(path, is_dir, scandir):\n  [Previous line repeated 986 more times]\n  File \"pathlib.py\", line 471, in _iterate_directories\n    with scandir(parent_path) as scandir_it:\n  File \"pathlib.py\", line 632, in __fspath__\n    return str(self)\nRecursionError: maximum recursion depth exceeded\n",
+   "stdout": "",
+   "writes": {
+    "count": 23,
+    "sha256": "f5c760b24cfa23eae50adc2f70a9265280ed6c39db1fd00eed9469870a8f7acd"
+   }
+  },
+  "traceback:target-isdir-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     27,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1305,
+     "is_dir"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 27, in iter_md_files\n    if p.is_dir():\n  File \"pathlib.py\", line 1305, in is_dir\n    return S_ISDIR(self.stat().st_mode)\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: 'noperm/x'\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "c343a44658791215d20cb800ffee5469b49ce175ae369a09355ad5dcd2842730"
+   }
+  },
+  "traceback:target-isdir-enametoolong": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     27,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1305,
+     "is_dir"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 27, in iter_md_files\n    if p.is_dir():\n  File \"pathlib.py\", line 1305, in is_dir\n    return S_ISDIR(self.stat().st_mode)\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nOSError: [Errno 36] File name too long: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'\n",
+   "stdout": "",
+   "writes": {
+    "count": 12,
+    "sha256": "78d347d96769d60fd5c0594cc4db0815090b04a72d6038a0f39a9569131e9e54"
+   }
+  },
+  "traceback:target-warn-then-eacces": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     51,
+     "main"
+    ],
+    [
+     "check_links.py",
+     27,
+     "iter_md_files"
+    ],
+    [
+     "pathlib.py",
+     1305,
+     "is_dir"
+    ],
+    [
+     "pathlib.py",
+     1097,
+     "stat"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 51, in main\n    for md in iter_md_files(argv):\n  File \"check_links.py\", line 27, in iter_md_files\n    if p.is_dir():\n  File \"pathlib.py\", line 1305, in is_dir\n    return S_ISDIR(self.stat().st_mode)\n  File \"pathlib.py\", line 1097, in stat\n    return self._accessor.stat(self, follow_symlinks=follow_symlinks)\nPermissionError: [Errno 13] Permission denied: 'noperm/x'\n",
+   "stdout": "WARN: 対象が見つかりません: missing\n",
+   "writes": {
+    "count": 13,
+    "sha256": "ece2f0ecfa5fd44295e78c37374be6188808a3776f8f0bbf94f6a6d8a2d408ff"
+   }
+  },
+  "walk-fifo-writer": {
+   "exit": 1,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\nERROR f/a.md:1: リンク切れ -> m\n結果: ERROR 1 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "66a16ffcb9f1351d1e5a124e31e698efb74694b60ceab876a77259e7a0e7b2b0"
+   }
+  },
+  "walk-kinds": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nFileNotFoundError: [Errno 2] No such file or directory: 't/broken.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "a2991cfb88b5281340efae8748efa464c5359fbbb9375b2ffdf623707cb172a0"
+   }
+  },
+  "walk-unreadable-dir": {
+   "exit": 0,
+   "frames": [],
+   "stderr": "",
+   "stdout": "検査ファイル数: 1\n結果: ERROR 0 件 / WARN 0 件\n",
+   "writes": {
+    "count": 1,
+    "sha256": "470d70ac1d91b07168076e6fe2cad2e64d346281c86e3e732fa6b345807f809a"
+   }
+  },
+  "walk-unsearchable-dir": {
+   "exit": 1,
+   "frames": [
+    [
+     "check_links.py",
+     93,
+     "<module>"
+    ],
+    [
+     "check_links.py",
+     52,
+     "main"
+    ],
+    [
+     "pathlib.py",
+     1134,
+     "read_text"
+    ],
+    [
+     "pathlib.py",
+     1119,
+     "open"
+    ]
+   ],
+   "stderr": "Traceback (most recent call last):\n  File \"check_links.py\", line 93, in <module>\n    sys.exit(main(sys.argv[1:]))\n  File \"check_links.py\", line 52, in main\n    text = md.read_text(encoding=\"utf-8\", errors=\"replace\")\n  File \"pathlib.py\", line 1134, in read_text\n    with self.open(mode='r', encoding=encoding, errors=errors) as f:\n  File \"pathlib.py\", line 1119, in open\n    return self._accessor.open(self, mode, buffering, encoding, errors,\nPermissionError: [Errno 13] Permission denied: 't/x/b.md'\n",
+   "stdout": "",
+   "writes": {
+    "count": 10,
+    "sha256": "67c37a760ee27c3edfae539fcfb142228f6d166ad0deed7036d397643c3dc028"
+   }
+  }
+ },
+ "generator": "native/ci/check_r4u.py --measure-cases(または固定期待が無いときの比較器のログ)",
+ "legacy": {
+  "path": "plugins/dev-workflow/skills/update-doc/scripts/check_links.py",
+  "sha256": "b2eea09e6b0c1b4f84b8c4b36f2d04aa517c88b3eb410c5a19e619457e09d4ab"
+ },
+ "legacy_recorded": true,
+ "machines": [
+  "x86_64"
+ ],
+ "marks": {
+  "@LEGACY@": "旧スクリプトの絶対パス(利用者の入力に置いた偽の File の行)",
+  "@ROOT@": "入力の木の根(作業場所)",
+  "@TOP@": "/tmp の直下に作る一時フォルダ",
+  "@TOPNAME@": "その名前"
+ },
+ "platform": "linux",
+ "purpose": "R4U の比較の固定期待(linux。旧版〈本家 CPython 3.10.11〉から作った Rust の期待)",
+ "python": {
+  "stdlib_sha256": {
+   "genericpath.py": "9d58ad64056a89f12258a62596c2073cd9e52b459dde152f710edc0cffcd865b",
+   "pathlib.py": "936f14a3ecc4ac5e896e4d673666d76b25a9d581f3b4c8d8d424e830fda2a69b",
+   "posixpath.py": "2c770bac0680a5a180b1310102d14e1e120f2f2e8e47925b1574ec808cb8ad6d"
+  },
+  "version": "3.10.11"
+ },
+ "schema_version": 1,
+ "skipped": {}
+}

@@ -1,0 +1,58 @@
+{
+ "decision": "2026-11-12 09:58 追加の決定 3 と S3I-A #474 の回答 A。効果を再現せず、比較の入力に使わない",
+ "method": "bash 5.2.21 の variables.c の initialize_shell_variables(取り込みの後に sv_strict_posix・sv_xtracefd・sv_shcompat・sv_funcnest を呼ぶ所)・special_vars の表(sv_*)・initialize_dynamic_variables(代入の関数を持つ動的な変数)と、shell.c の起動(BASH_ENV・SHELLOPTS・BASHOPTS の取り込み)から拾った",
+ "names": [
+  "BASHOPTS",
+  "BASH_ARGV0",
+  "BASH_COMPAT",
+  "BASH_ENV",
+  "BASH_LOADABLES_PATH",
+  "CDPATH",
+  "CHILD_MAX",
+  "EXECIGNORE",
+  "FUNCNEST",
+  "GLIBC_TUNABLES",
+  "GLOBIGNORE",
+  "POSIXLY_CORRECT",
+  "POSIX_PEDANTIC",
+  "SHELLOPTS",
+  "TMOUT"
+ ],
+ "prefixes": [
+  "BASH_FUNC_",
+  "LD_",
+  "MALLOC_"
+ ],
+ "mac_prefixes": [
+  "DYLD_"
+ ],
+ "reasons": {
+  "BASHOPTS": "22:31 の決定(shopt の設定を取り込む)",
+  "BASH_ARGV0": "追加の決定 3 の範囲として採った(設計 v18・3 回目の依頼)。代入の関数 assign_bash_argv0 が $0 と shell_name を変え、子へ渡る BASH の求め方を変える(基準の容器で実測)",
+  "BASH_COMPAT": "sv_shcompat が互換の動きを変える。範囲の外の値は起動時の警告のケースだけで使う",
+  "BASH_ENV": "22:31 の決定(非対話の起動で読み込む)",
+  "BASH_LOADABLES_PATH": "enable -f の探し方を変える",
+  "CDPATH": "sv 表には無いが cd の探し方を変える(旧版は CDPATH= を付けて cd する)",
+  "CHILD_MAX": "sv_childmax が覚える子の数を変える",
+  "EXECIGNORE": "sv_execignore がコマンドの探し方を変える",
+  "FUNCNEST": "sv_funcnest が関数の入れ子の上限を変える(FUNCNEST=1 で taskmd-diff が確かめずに成功を返す)",
+  "GLIBC_TUNABLES": "回答 A の (2)",
+  "GLOBIGNORE": "sv_globignore が glob の結果を変える",
+  "POSIXLY_CORRECT": "22:31 の決定(sv_strict_posix)",
+  "POSIX_PEDANTIC": "sv_strict_posix と同じく POSIX の動きにする",
+  "SHELLOPTS": "22:31 の決定(set -o の設定を取り込む)",
+  "TMOUT": "read と select の待ち時間を変える",
+  "BASH_FUNC_": "22:31 の決定(関数を取り込む)",
+  "LD_": "回答 A の (2)(動的リンカ)",
+  "MALLOC_": "回答 A の (2)(glibc の malloc)",
+  "DYLD_": "回答 A の (2)(Mac の動的リンカ)"
+ },
+ "not_listed": {
+  "PATH": "比較の入力に使う(子の環境の再現と cp の探し方)",
+  "LOCPATH LANG LC_* LANGUAGE TEXTDOMAIN TEXTDOMAINDIR": "地域設定の群。00:35・08:55 の決定どおり再現して入力に使う",
+  "IFS OPTIND OPTERR PS4 LINENO BASH BASH_VERSION EPOCHSECONDS EPOCHREALTIME SHLVL PWD OLDPWD": "bash の動きは変えず、子へ渡る値だけを決め直す(子の環境の表)",
+  "RANDOM SRANDOM SECONDS BASHPID PPID UID EUID GROUPS HISTCMD COMP_WORDBREAKS TERM TZ COLUMNS LINES HOME": "子へ渡らないか、受け継いだ値のまま渡る(子の環境の表)",
+  "HISTCONTROL HISTFILE HISTFILESIZE HISTIGNORE HISTSIZE HISTTIMEFORMAT HOSTFILE IGNOREEOF ignoreeof histchars MAIL MAILCHECK MAILPATH TERMCAP TERMINFO INPUTRC PROMPT_COMMAND PS0 PS1 PS2 PS3": "対話のときだけ効く",
+  "BASH_XTRACEFD": "警告だけを出す(起動時の警告のケースの入力に使う)"
+ }
+}
