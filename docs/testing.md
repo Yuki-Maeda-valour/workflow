@@ -532,7 +532,7 @@ python3 -B native/ci/check_loop_state_mutations.py
 |---|---|
 | `check_loop_state.py` | 同じ物理入力で旧版とRustを起動し、生の標準出力・標準エラー・終了値・状態ファイル・入力の無変更を比べる。部品は`loop_state_arguments.py`・`loop_state_contract_cases.py`・`loop_state_encoding.py`・`loop_state_encoding_matrix.py`・`loop_state_yaml_cases.py`・`loop_state_decision_cases.py`ほか |
 | `test_loop_state.py` | 比較器の自己検査26件。出力・終了値・保存結果の不一致、外す環境変数の残り、固定名の対応づけの誤りを拒否することを確かめる |
-| `check_loop_state_units.py` | 検査用exampleのRustテスト56件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
+| `check_loop_state_units.py` | 検査用exampleのRustテスト57件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
 | `check_loop_state_mutations.py` | ソースのコピーへ誤りを21種類入れ(設定のグラフ10・安全の観測とYAML11)、指定した検査が落ちることを確かめる |
 
 - 件数は比較器が数え、1件でも欠ければ失敗にする。0件・skip・時間切れ・想定外の失敗を合格にしない。
@@ -578,6 +578,25 @@ python3 -B native/ci/check_loop_state_mutations.py
 - R4Bの比較は同じ回で約460秒だった。
 - CIの`build`(120分)・`verify-universal`(60分)の上限の中で、S2Lの比較を含めて完走するかは未確認である。Macでの実際の動作、Linux arm64、最低OSも未確認であり、PRのCIで確かめる。
 - この記録は、PR用CIと、最新mainを含む最終SHAの全回帰テストの成功を意味しない。
+
+#### 試験の repo の自動の手入れによる揺れ(#517・2026-11-25 の記録)
+
+- 検査用の Rust テスト `loop_state::safety_tests::m04_changed_include_rejected_before_any_parser` が、CI の Linux arm64 で1回落ちた(PR #515 の run 45388257894 の attempt 1・job 138424979408・git 2.56.1)。
+  - 落ちたのは確かめる中身ではなく、テスト用の監視(inotify)を作る所(`loop_state_watch.rs` の `Watch::new`)だった。木を並べた後に、並べた要素が消えていた(`NotFound`)。
+- 原因(手元で仕組みを確かめた。CI の回がこれによるかは推測):
+  - 新しい git(2.47 以降の既定)は、`commit` の後に自動の手入れ(`git maintenance run --auto --detach`)を後ろへ切り離して走らせる。手入れは `.git/objects/maintenance.lock` を、`commit` が戻る前に作り、後ろで消す。
+  - 試験の repo を作る `Fixture` の `commit` の直後に子のテストが監視を作ると、並べた lock が監視を付ける前に消えて落ちる。
+  - 容器(git 2.56.0)で、空の repo に1回 commit すると、その後0.5秒の間に lock が見えたのは50回中37回だった。手入れを止める指定を付けると0回だった。
+  - 同じ容器で、直す前の版(main `01998b1`)の m04 を同時64個で1000回流すと、3回落ちた(`OS_WATCH_ADD: …/.git/objects/maintenance.lock` が2回、CI と同じ `NotFound` が1回)。設計の時の同じ条件の回は1回だった。
+- 直し(`native/crates/cli/src/commands/loop_state/safety_tests.rs`・`native/crates/platform/src/loop_state_watch.rs`):
+  - 試験の repo を作る git(`Fixture` の git)に、`-c maintenance.auto=false -c gc.auto=0`(`NO_AUTO_MAINTENANCE`)を付けた。R4G の比較器(`check_r4g.py`)と同じ指定である。S2L の比較器(`loop_state_encoding.py`)も同じ2つを付けている(さらに `maintenance.autoDetach=false` も付ける)。repo の設定には書かない。製品の git の指定(`process::SAFE_GIT`)は変えていない。
+  - 指定が効いていることを `GIT_TRACE` で確かめるテスト `fixture_git_never_starts_background_maintenance` を足した。指定の無い commit が手入れを起こすことも、対照として確かめる。
+  - 監視を作る所の失敗の文に、パスと OS の誤りを出すようにした(`OS_WATCH_LIST`・`OS_WATCH_ADD`)。要素は飛ばさず、落とす動きは変えていない。パスが出ることを確かめる `platform` の単体テスト `missing_root_names_the_path` を足した。
+- 確かめたこと:
+  - 検査用 example の Rust テストは56件から57件、変異の前の基準(`loop_state::safety_tests::`)は26件から27件になった。
+  - わざと入れる誤り(変異)で確かめた: `Fixture` の git から指定を外すと、新しいテストが `FIXTURE_NO_MAINTENANCE` で落ちる。
+  - 直した後の m04 を、同じ容器で同時64個で1000回流し、落ちた回は0だった。
+- 手元で流すときの Python: S2L の検査用 example の Rust テスト(`check_loop_state_units.py` など)は、`os.memfd_create` を持つ Python 3.10 系で流す。uv の3.10.11には無く、`config_tests` の1件が旧版の照らしで落ちる(上の「比較に使うPython」と同じ理由。直す前の版〈main `01998b1`〉でも同じ)。
 
 ### check_links の比較(R4U)
 

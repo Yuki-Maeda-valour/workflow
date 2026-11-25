@@ -162,8 +162,8 @@ def main() -> int:
         if baseline.returncode or b'8 passed; 0 failed; 0 ignored' not in baseline.stdout:
             raise AssertionError('baseline did not execute all 8 properties: '+repr(baseline.stdout+baseline.stderr))
         safety=run([str(binary),'loop_state::safety_tests::','--nocapture'],native,env)
-        if safety.returncode or b'26 passed; 0 failed; 0 ignored' not in safety.stdout:
-            raise AssertionError('baseline did not execute all 26 safety/YAML observations: '+repr(safety.stdout+safety.stderr))
+        if safety.returncode or b'27 passed; 0 failed; 0 ignored' not in safety.stdout:
+            raise AssertionError('baseline did not execute all 27 safety/YAML observations: '+repr(safety.stdout+safety.stderr))
         extra_sources={path:(native/path).read_text() for path,_,_ in EXTRA.values()}
         for name in selected:
             (native/SOURCE).write_text(source)
@@ -180,7 +180,7 @@ def main() -> int:
             if not asserted_failure(result,full,marker):
                 raise AssertionError(f'{name}: specified assertion was not detected: '+repr(result.stdout+result.stderr))
             print(json.dumps({'mutation':name,'test':full,'assertion':marker,'returncode':result.returncode,'detected':True}),flush=True)
-        print(f'結果: 合格 / baseline graph 8 + safety/YAML 26, graph mutation {sum(name in TESTS for name in selected)}, safety/yaml mutation {sum(name in EXTRA for name in selected)}, skip 0 / {time.monotonic()-started:.3f} 秒')
+        print(f'結果: 合格 / baseline graph 8 + safety/YAML 27, graph mutation {sum(name in TESTS for name in selected)}, safety/yaml mutation {sum(name in EXTRA for name in selected)}, skip 0 / {time.monotonic()-started:.3f} 秒')
     return 0
 if __name__=='__main__':
     raise SystemExit(main())
