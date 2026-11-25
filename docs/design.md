@@ -2103,6 +2103,120 @@ APIは [native/README.md](../native/README.md#diff-snapshotの全モードs3d)�
 
 APIは [native/README.md](../native/README.md#残り5本の解析補助r4a)、検査の手順と件数は [testing.md](testing.md#残り5本の解析補助の比較r4a)に記す。
 
+### 候補の採用と改名(R4C)
+
+[Issue #478](https://github.com/Yuki-Maeda-valour/workflow/issues/478)で、旧`adopt-candidate.py`(候補を進行中の名前へ採用する処理)を開発用Rustソースへ移した。
+製品CLIの登録表・help・既存呼出元・版・`CHANGELOG.md`は変えていない。未登録・未配布であり、配布は段階1b・プラグインv4.53.0のままである。
+
+- 入口は`cli/examples/adopt_candidate_contract.rs`だけである。`cli/src/commands/adopt_candidate/`が、引数・計画・流れ・診断・出力・検査用の注入を受け持つ。OS操作は`platform/src/adopt_candidate.rs`に置く。
+- 契約の正本は、Issue #478の本文(維持する契約・Task 2.1の接続表)である。ここには要点だけを書く。
+- 旧版は変えていない。Rustの出力・終了値・残存物は、旧Pythonと同じにする。差は下の一覧にあるものだけである。
+
+契約の要点:
+
+| 区分 | 要点 |
+|---|---|
+| 引数 | `--root`・`--expect-sha256`・位置引数の候補は必須。`--name`・`--accept`・`--unattended`は任意。短縮・重複・`--`・usageとhelpの折返し・端末幅は、旧`argparse`(Python 3.10)に合わせる。`--unattended`は、何も変えずに拒否する |
+| 名前 | 候補は`候補_{名}.md`。採用名の空・`/`・`\`・NUL・改行・`.`・`..`を拒む。rootと候補は旧`Path.absolute()`の字句だけで扱い、OSでリンクを解決しない |
+| 候補の読取り | rootと親を、各段リンクを辿らずに開く。末端は`O_RDONLY\|O_NOFOLLOW\|O_NONBLOCK`。開いた後に、通常ファイルで宣言サイズが8MiB以下かを見る。読む単位は最大65536バイトで、宣言サイズ+1まで読む。読んだ後にdev・ino・大きさ・mtime・ctimeと実際に読んだ長さを照らす |
+| SHAと候補解析 | 保持するSHAは小文字16進64桁で、本文と一致すること。UTF-8 strictの本文を候補解析へ渡し、`skipped`と`skipped-malformed`だけを拒否する。ほかの指摘は、元の順のまま`warnings`へ返す |
+| 衝突 | 候補・進行中・完了・保留・中断の順に、リンクを辿らない`stat`で調べる。元の名前だけ除く。存在する種類を問わず拒否し、不在以外の失敗は握りつぶさない |
+| 無人実行 | 入口と、改名の直前に、環境の印を確かめる。印があれば、何も変えずに拒否する |
+| Git | rootと全祖先の`.git`の有無を調べる(壊れたリンクも数える)。無ければ、事前検査も追跡の判定もしない。あれば、事前検査(60秒)・`rev-parse --show-toplevel`・`ls-files --error-unmatch`の順に流す。事前検査が非0なら、stderrをUTF-8 replaceで読み、`git の事前検査に通らない: `へ付けて止まる(成功時の出力は捨てる)。`rev-parse --show-toplevel`が非0でも止まる。`ls-files --error-unmatch`が非0なら、未追跡として扱う |
+| Gitの起動 | 全`GIT_`を環境から除き、旧版の4変数(`GIT_NO_REPLACE_OBJECTS`・`GIT_NO_LAZY_FETCH`・`GIT_OPTIONAL_LOCKS`・`GIT_TERMINAL_PROMPT`)を足す。旧`SAFE_GIT_PREFIX`を同じ順序で付け、パスはliteral指定にする。子の作業場所は、保持したrootのfdから決める。stdinは継承し、stdoutとstderrだけ捕捉する。各Gitは30秒で打ち切り、直接の子をkillしてwaitする |
+| 追跡済みの採用 | 改名前のindexを`ls-files --stage -z`で1件だけ読む(modeは100644か100755・stageは0・OIDは小文字16進40〜64桁)。`git mv`の後に、本文・dev/ino・改名先のindexのmodeとOIDを、改名前へ照らす。未ステージと部分ステージの本文を混ぜない |
+| 未追跡の採用 | Linuxは`renameat2`の`RENAME_NOREPLACE`を使う。関数が無い・ENOSYS・EINVALのときだけ、排他的なlinkとunlinkへ移る。Macはlinkとunlinkの経路だけを使う |
+| 失敗時の保全 | link直後の確認で先の実体が違うか、statに失敗したときは、先を削除せず残す。元を読み直して確認した後だけ、元をunlinkする。その途中の失敗では、自分が作った先とdev/inoが一致するものだけを削除する。他者の実体と、巻戻しの失敗は残す。元の削除の後の不一致は、自動で戻さない |
+| 出力 | 正常時は`path`・`tracked`・`sha256`・`warnings`の順のJSON(`ensure_ascii=False`)とLFで、終了0。捕捉する失敗は`候補の採用を停止: `に続けてstderrへ出し、終了2。引数の誤りは旧版どおり |
+| SIGINT | 受け取ったら、直接の子を最大0.25秒待ち、終わらなければkillしてwaitする。最後の行`KeyboardInterrupt`を書き、SIGINTで終わる。SIGINTを無視して起動されたときは、旧Pythonと同じく何も入れない。linkの後の元の読み直しからunlinkの直後までは、旧版の`try`と同じ区間である。ここで届いたものは`KeyboardInterrupt`として扱い、自分が作った先を戻して、停止の文と終了2にする(unlinkの直後の窓では、候補の最後の名前を消しうる。旧版と同じ) |
+
+- 同じ利用者権限で環境の印を消す操作と、最終確認からrename・unlinkまでの間の書き込みは、完全には防げない。この限界は旧版のままで、強い保証へ書き換えない。
+- linkとunlinkは原子的ではない。link後に強制終了されると、両方の名前が残りうる。これを成功とは扱わない。
+- `unsafe`は`platform/src/adopt_candidate.rs`の安全な関数の中だけに置く(子の`pre_exec`・信号・fdの印・自分の実行ファイルのパス・SIGINT)。`cli`は使わない。
+  - 検査専用入口`adopt_candidate_contract`は`#![deny(unsafe_code)]`で、`main`の前に起動前の記録を残す初期化子(S3Dのexampleと同じ形)の1項目だけを許す。
+  - `rustix`の機能と依存の版は増やしていない。
+
+#### 依存部品への接続
+
+事前検査(#472のS3D)と候補解析(#471のR4A)は、複製せず、既存の部品を`#[path]`で取り込んでつなぐ。取り込むのは検査専用入口(example)だけで、製品の入口には入れない。
+
+| 旧版 | Rustの接続 | 理由 |
+|---|---|---|
+| `bash`で旧`diff-snapshot.sh --cwd <root> --precheck`を起動する(60秒・空でないときだけ`--accept`) | 自分の実行物を、`argv[0]`を`diff-snapshot.sh`にして直接の子として起動する。子は`argv[0]`が完全に一致するときだけ、`main`の最初でS3Dの入口`diff_snapshot::main_entry`へ入る。60秒の期限・時間切れの表示・直接の子のkillとwait・環境・cwd・stdinは、Gitの子と同じ専用の起動で旧版に合わせる | 同じプロセスで呼ぶと、期限での直接の子の回収と、SIGINTの0.25秒の待ちを旧版と同じにできない。隣の別の実行物を起動する形は、隣が無い状態と、旧bashの起動の警告を親で作る難しさを生む。製品で1つの実行物に両方が入る形に近く、「隣が無い」状態が起きない |
+| `candidate-keys.py`の`check_text(本文, None)`を、`importlib`で読み込んで呼ぶ | `candidate_keys::check_text`を、UTF-8 strictで読めた本文のUnicodeの符号位置の列で呼び、戻りの`problems`を元の順のまま移す。移すのは辞書(キーの順)・文字列・配列だけで、ほかの型が来たら内部の失敗として止める | 取得済みの本文の解析だけを再利用する。R4C自身の文字コードの設定と入出力の故障を、#471のCLIの動作へ置き換えない。`check_text`の経路は`take_sigint`を呼ばず、R4Aの信号の処理を入れない |
+
+- 自分の実行物のパスは、起動したとき(作業場所を変える前)に決める。`/proc`に頼らない。Linuxは`getauxval(AT_EXECFN)`、Macは標準ライブラリの`current_exe`を、起動したときの作業場所で絶対パスにする。決められないときは、停止の文と終了2にする。
+- OS部品の子の起動は、実行するパスと`argv[0]`を分けて渡せる(`run_in_dir_with_executable`)。この経路はPATHを探さず、ほかの実行物や旧shellへ切り替えない。
+- 受け継いだfdは、`/proc/self/fd`(Macは`/dev/fd`)が読めないときも、旧`subprocess`と同じ上限まで閉じる。
+- 取り込んだS3DとR4Aの部品の単体検査は、R4Cのexampleの単体検査から外す(`--skip`)。それぞれのexampleの単体検査(`build`の`quality()`。S3DのMacは`s3d`ジョブの型検査)に残す。
+
+#### R4Cに限る承認済みの差
+
+出典は#478の追加修正記録と、2026-11-11〜11-12の利用者決定である(全コマンド共通の決定を含む)。
+旧版・旧テストの通常比較は変更しない。ほかのコマンドの承認差は流用せず、ここにない差は認めない。
+差のあるケースは、旧版とRustの個別期待のそれぞれに一致することを確かめ、通常の一致件数に数えない。
+
+1. 旧版の実行環境のパスは、固定のファイル名にする(11-11 17:58・21:35・22:26・22:38)。
+   - 対象は、旧スクリプト自身の呼出名(`adopt-candidate.py`)・旧Pythonの標準ライブラリ(`argparse.py`・`pathlib.py`・`re.py`)・事前検査の時間切れの表示の引数列にある旧`diff-snapshot.sh`のパス1要素・中継したBash診断の先頭の呼出名(固定名`diff-snapshot.sh`)である。
+   - 標準ライブラリの行番号とソース行は、本家CPython 3.10.11の値に合わせる。比較器は、比較の前に、呼出履歴に出るファイル(3つ)のSHA-256を本家の値と照らし、違えば全体を失敗にする(成功にもskipにもしない。`verify_old_python`)。
+   - 途中のバイト数までしか通らない書き込みの故障では、故障のない旧版の出力の固定名への置き換えを、同じバイト数で切ったものを期待にする。置き換えた書き込みが切れないときは、故障のない旧版の結果に合わせ、終了値の差(例: 120と1)を認める。
+2. 旧Pythonが起動時に落ちる診断の`Current thread`の値は、一致を求めず、位置と形式だけを検査する(11-11 17:45)。対象は、標準入力・標準出力・標準エラーがディレクトリの条件である。
+3. Pythonの文字コード設定だけで変わる差は、UTF-8と`surrogateescape`へ固定する。標準エラーの`backslashreplace`と生バイトは保つ(11-11 22:24)。
+   - 未知のcodec名や、文字コードでないcodecによる旧Pythonの起動失敗は、Rustでは起きない。
+   - `PYTHONIOENCODING=ascii`・`latin-1`のhelp出力失敗は、旧版は終了1、Rustはhelpを出して終了0とする個別期待に固定する。
+   - stdoutのエラー処理がstrictになるUTF-8のlocale(`en_US.UTF-8`・`ja_JP.UTF-8`)では、UTF-8でない名前を含むJSONを書けず、旧版は改名の後に終了2になる。Rustは生バイトのJSONを出して終了0とする。localeが入っていない機械では、名前と理由を付けて未実施にする。
+   - 整数の変換の上限・端末幅・出力のバッファ・再帰の上限・入出力の故障・標準入力がディレクトリの起動失敗は、旧版に合わせる。
+4. 旧Pythonの起動を変える設定の効果は再現せず、比較の前提の外にする(11-11 22:31・11-12 00:28・00:42)。
+   - `PYTHONPATH`・`sitecustomize`・`PYTHONHOME`・`PYTHONWARNINGS`・`PYTHONMALLOC`などと、`PYTHONMALLOCSTATS`・`PYTHONPLATLIBDIR`などである。
+   - `PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONOPTIMIZE`・不正な`PYTHONHASHSEED`は、旧版どおり再現する。
+   - 記憶域の不足・自分自身を指すパス(`/proc/self`など)・`RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK`で失敗の境目が決まる条件も前提の外にする。`RLIMIT_FSIZE`の書き込み故障は比べる。
+5. 旧版が起動する道具をRustが起動しない差(11-11 23:19)。
+   - `bash`がPATHに無いとき、旧版は`[Errno 2] No such file or directory: 'bash'`で終了2になる。Rustは`bash`を起動しないので、採用に成功する。GNUの道具がPATHに無いときも同じである。
+   - 旧`diff-snapshot.sh`が無い・読めないとき、旧版は`bash`の文を`git の事前検査に通らない: `へ付けて終了2になる。Rustは採用に成功する。
+   - 旧`candidate-keys.py`など(`task-digest.py`を含む)が無い・壊れているとき(E23。3条件)、旧版は`FileNotFoundError`か`SyntaxError`で止まる(#400の決定D5: 製品からPythonへの依存を無くす)。Rustは採用に成功する。
+   - 旧版の停止とRustの採用を、それぞれ個別期待に固定する。補助がそろった旧版と同じ結果になることも確かめる。
+6. 道具の版とsetlocale(11-12 00:35)。
+   - 基準は、Ubuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9)である。基準と違う版の文面と`SHLVL`の差を認める。
+   - 比較器は版を確かめる。版に依る欄を持つケースだけが、基準と違う機械でLinuxは失敗、Macは未実施になる。
+   - bashのsetlocale警告は、旧版が出す条件でRustも出す。差は警告の文の言語だけである。
+7. 子の環境に、旧版の処理系やOSの部品が足す値(11-12 02:41・08:55)。
+   - Macの旧Pythonが足す`__CF_USER_TEXT_ENCODING`は再現せず、子の環境の比較から外す(値と有無を記録する)。
+   - 旧Pythonのlocaleの強制が環境変数だけで決まるときの`LC_CTYPE=C.UTF-8`と警告は再現する。入っているlocaleで変わるときだけ、差を認める。
+8. 起動時に閉じた標準のfd(0〜2)と`strerror`(11-12 08:55)。
+   - 閉じたfdは、Rust標準の初期化が`/dev/null`(読み書き)で開き直す。旧Pythonは閉じたまま動き、`sys.stdout`・`sys.stderr`が`None`になる。この差を認め、群E24(36ケース)の個別期待で検査する。
+   - 経路は、採用の成功・停止・引数の誤り・help・追跡済みの成功と、事前検査の拒否の中継(`CLOSED_CASES`)である。閉じるfdの組は、経路ごとに0・1・2・(1,2)・(0,1,2)などである。
+   - 期待は、前例(R4G〈決定名`rust-std-fd-reopen`〉・R4Aの残り5本)と同じ作り方である。S3I-Aは、閉じたままの旧版とRustを別々の固定期待で照らし、互いには比べない点が違う。
+     - Rustの期待は、閉じたfdを`/dev/null`にして流した旧版の結果(終了値・標準出力・標準エラー・作業ツリーの全部)とする。閉じたまま流したRustが、これと全部で一致することを求める。
+     - 閉じたまま流した旧版は、旧版の個別期待(終了値と、出た文の全体のバイト列)に固定する。何も閉じない旧版は、固定の文と一致することも確かめる。成功・停止・引数の誤り・helpは全文で一致させる。追跡済みの拒否は、中身が旧版の事前検査の出力なので、終了値・空の標準出力・停止の文の先頭(`候補の採用を停止: git の事前検査に通らない: `)だけを固定する。
+     - 旧版の動きの例(閉じたままの旧版)。標準エラーを閉じたとき、停止の文は標準出力へ回る。標準エラーを閉じたとき、引数の誤りは使い方の部分だけが標準出力に出て、終了1になる。標準出力を閉じたとき、helpは標準エラーへ回る。標準出力と標準エラーの両方を閉じたとき、helpは終了1になる。
+   - 追跡済みの経路の旧版は、rootのパスの階層の偶奇でも結果が変わる。ケースは偶数と奇数の両方で流す(`closed_expectation`・`old_root_fd`)。
+     - 旧`directory()`は`/`から1段ずつopenとcloseを繰り返す。保持するrootのfdは、空いている小さい2つの番号a<bの一方を交互に使い、階層が偶数ならa、奇数ならbになる。
+     - rootのfdが1か2になると、子の中で標準出力・標準エラーのpipeがその番号へ上書きされる。起動の前処理(`fchdir`)が失敗し、`Exception occurred in preexec_fn.`の停止の文で終了2になる(成功の経路でも止まる)。
+     - この規則はLinuxの本家3.10.11で確かめた。Macは同じ規則で照らし、違えば失敗にする(未確認。PRのCIで確かめる)。
+   - errnoの文は、LinuxではCIのUbuntu 24.04のglibcの基準の表(131件)をRustが持つ。MacはOSの`strerror`(旧Pythonと同じ関数)を使う。
+     - 表に無いerrnoの差は認めて記録する。Macの実装は旧Pythonと同じ関数なので、この差を生まない。
+     - 比較器は、比較の前に、旧Pythonの`os.strerror`を基準の表(Linux 131件・Mac 12件)と照らし、違えば全体を失敗にする(`verify_errno_baseline`)。
+     - CIのglibc 2.39・macOSとの照合は未確認である(PRのCIで確かめる)。
+9. 競り合いで結果が変わる場面(11-12 06:58)。順序を決めて流すケースは全部を比べる。順序を決めないSIGINTは、旧版・Rustを各20回流し、結果の種類(終了値・残った名前・標準出力の有無・標準エラーの最後の行)を比べる(E17)。Rustの種類が、基準の集合(順序を決めた旧版の種類と固定の3種類)と、旧版の標本の種類の和に収まることを求める。時間で変わるので、標本の種類と回数は記録する。
+
+比較の前提の外(差として認めるのではなく、条件が旧版に無い):
+- 動き始めた後に、自分の実行物が消えた・置き換わった・権限が変わった。Rustは`[Errno <n>] <基準の表のstrerror>: 'diff-snapshot.sh'`を`候補の採用を停止: `へ付けて終了2で止まり、成功にしない。
+- 自分自身を指すパス。`fexecve`などで`/dev/fd/N`として起動されたときの`AT_EXECFN`も含む(11-11 22:31)。
+- 資源の上限で失敗の境目が決まる条件(上の4)。
+- `bash`が4.0未満の機械。旧版の前提(bash 4.0以上)の外であり、承認済みの差には数えない。基準の機械のLinuxでは失敗、Macで用意できなければ名前と理由を付けて未実施にする。
+
+全コマンドの決定の当て方:
+- 22:31(旧Pythonの起動を変える設定・SIGINT・自分自身を指すパス)と00:28(書き込みの途中の失敗・22:31の一覧に無い変数・記憶域の不足)は、比較器の群へ当てた。
+- 06:58(競り合い・実行時刻で変わる値・実行ごとに変わるプロセス番号)は、順序を決めない場面にだけ当たる。順序を決めた場面は全部を比べる。
+- 09:58と14:24のbashの変数の決定は、事前検査の部品(#472)を通じて当たる。R4C自身はbashの変数を読まない。
+- 上の決定の範囲を超える差が必要になったときは、止まって聞く。
+
+進め方の決定(契約ではない)。
+- 2026-11-12 11:57: 共有ファイルは、各担当の作業ブランチで並行して編集してよい。足すだけにする。
+- 同日12:59: R4Cの比較は、`build`と`verify-universal`に入れず、必須ジョブ`r4c`と`r4c-universal`で流す([testing.md](testing.md#r4cの比較))。
+
+APIは [native/README.md](../native/README.md#候補の採用と改名r4c)、比較の流し方と件数は [testing.md](testing.md#r4cの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

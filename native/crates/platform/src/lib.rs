@@ -35,3 +35,6 @@ pub mod diff_snapshot;
 
 /// R4A残り5本専用の標準入出力・端末幅・スレッド値・SIGINT・permlog の OS の操作。
 pub mod r4a_rest;
+
+/// R4C専用の候補の採用の OS の操作。
+pub mod adopt_candidate;
