@@ -1628,7 +1628,7 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
   - 直す前の起こし方で見つからない回数は、回ごとにばらつく(設計の時は446回、この回は208回)。
   - 直した後、手元で `test_a_marked_process_in_another_session_is_found_and_stopped` を20回流して20回合格した(直す前も手元ではふつう落ちない。通常の経路を壊さないことの確かめ)。
 
-CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と次の節にある。
+CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と[4 種類の CI と成果物](#4-種類の-ci-と成果物)にある。
 - 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。
 - 既存のtask-digest・R4B・R4R・保存先解決の比較は、この変更でも通る(2026-11-12。task-digestは `cargo test` の中、保存先解決は714件)。
 
