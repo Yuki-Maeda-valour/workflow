@@ -642,7 +642,7 @@ mod tests {
         let script = write_script(
             &dir.0,
             "pwd",
-            "#!/bin/sh\npwd\necho noise >&2\nhead -c 0 >/dev/null\n",
+            "#!/bin/sh\npwd\necho noise >&2\ncat >/dev/null\n",
         );
         let mut budget = EnvBudget::new();
         let out = git_config_output(&argv_of(&script), b"", &sh_env(), &mut budget).unwrap();
