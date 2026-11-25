@@ -628,6 +628,45 @@ unsafe の置き場は、次の 2 つだけです。
 契約は [設計のR4A節](../docs/design.md#残り5本の解析補助r4a)にあります。
 [比較の手順と件数](../docs/testing.md#残り5本の解析補助の比較r4a)に従ってください。通常の `cargo test --locked` だけでは、旧版との比較は完了しません。
 
+## 候補の採用と改名(R4C)
+
+#478で、旧`adopt-candidate.py`(候補を進行中の名前へ採用する処理)と同じ結果を返す部品を実装しました。
+製品CLIの登録表・help・配布・既存呼出元は変えていません。未登録・未配布です。
+
+- 本体は`crates/cli/src/commands/adopt_candidate/`にあります。役割は次のとおりです。
+  - `args`: 旧`argparse`(Python 3.10)相当の引数の解析・usage・help・端末幅。引数は生バイトのまま持ちます。
+  - `paths`: `Path.absolute()`と`PurePosixPath`の字句だけの扱い。OSでリンクを解決しません。
+  - `plan`: OSを触る前の順序(環境の印→無人実行→rootと候補の絶対化→相対化→候補名→採用名)。
+  - `flow`: 旧`adopt()`の流れ。OS・候補解析・事前検査は、`Ops`・`Candidates`・`Precheck`の3つのtraitの向こうに置きます。
+  - `candidate`・`index`: 保持SHAと読み直しの比較(本文とdev/ino)、改名前後のindex(stageが0の1件)の解析と比較。
+  - `diagnostics`・`output`: 停止の文と旧Pythonの例外の表示、errnoの文(Linuxは基準の表、MacはOSの`strerror`)、正常時のJSON。
+  - `runtime`・`program`: 旧Pythonの起動の失敗・環境変数の効果・標準出力の二段のバッファと出力の故障、`main()`全体。
+  - `real`: 実際のOS操作(`RealOps`)と、事前検査(`SelfPrecheck`)。
+  - `inject`: 検査専用の注入(下)。
+- `crates/platform/src/adopt_candidate.rs`は、R4Cだけが使うOS操作を、安全な関数で公開します。
+  - 保持したディレクトリ(`open_chain`)と、旧版と同じ手順の候補の読取り(`read_candidate`・`read_candidate_with`)。
+  - リンクを辿らない`stat`(`stat_nofollow`)、無上書きの改名(`rename_noreplace`・`classify_rename`)、排他的な`link_noreplace`と`unlink`。
+  - 保持したrootのfdから作業場所を決める子の実行(`run_in_dir`)。stdinは継承し、stdoutとstderrだけ捕捉します。
+  - 実行するパスと`argv[0]`を分ける子の実行(`run_in_dir_with_executable`)。事前検査が、自分の実行物を`argv[0]=diff-snapshot.sh`で起動するために使います。
+  - 自分の実行物の絶対パス(`own_executable_path`)。起動したとき(作業場所を変える前)に決めます。
+  - SIGINT(`install_interrupt_handler`・`interrupt_protection`・`interrupted`・`interrupt_exit`)と、標準fdの調べ・書込み(`write_standard`・`standard_is_directory`・`standard_is_terminal`・`standard_blksize`)。
+- `crates/cli/examples/adopt_candidate_contract.rs`は検査専用入口です。
+  - S3Dの`diff_snapshot`と、R4Aの`candidate_keys`とその依存(`r4a_rest_support`・`resolve_task_dir`・`task_digest`)を`#[path]`で取り込みます(複製しません)。R4Aの`r4a_rest_contract`と同じ形で、exampleの中に`mod commands`の置き場を作ります。
+  - 子のモード: `main`の最初に`argv[0]`だけを見ます。`diff-snapshot.sh`と完全に一致するときは、R4Cの設定(信号・起動時の調べ・注入の読取り)より前に、S3Dの入口`diff_snapshot::main_entry`へ入ります。事前検査は、この形で自分自身を子として起動します。
+  - 候補解析は、`CandidateKeys`が`candidate_keys::check_text(本文, None)`を呼び、戻りの`problems`を元の順のまま移します。辞書・文字列・配列以外が来たら内部の失敗として止めます。
+  - `#![deny(unsafe_code)]`で、`main`の前に起動前の状態を記録する初期化子の1項目だけを許します(S3Dのexampleと同じ)。
+- 注入の仕組み: 環境変数`R4C_FAULT_SPEC`が指すJSONの仕様を、`Ops`と`Precheck`の境界(`Injected`・`InjectedPrecheck`)が読みます。
+  - 旧版の比較用の道具が、旧テストと同じ点に差し込む操作を、Rustも同じ点へ差し込みます。点`start`では、`R4C_FAULT_NOTIFY`と`R4C_FAULT_WAIT`のfdで、比較器と同期します。
+  - 仕様の書き方は`native/ci/adopt_candidate_fixtures/fault_scenarios.json`と`check_adopt_candidate.py`にあります。
+  - この環境変数は、このexampleだけにあります。製品の入口にはありません。
+- 製品の`commands/mod.rs`には、登録していません。
+- 既知の窓: forkの直後から`prepare_child`の信号のmaskの設定までの短い間に届いたSIGINTは、子へ届くのが少し遅れます(2026-11-12の実装レビュー4回目のトリアージで決めました)。旧版にも似た窓があり、0.25秒の待ちの中に収まります。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example adopt_candidate_contract -- --skip diff_snapshot:: --skip candidate_keys:: --skip r4a_rest_support:: --skip resolve_task_dir_definition:: --skip task_digest_definition::`です。取り込んだS3DとR4Aの部品の単体テストは、それぞれのexampleの単体検査(`build`の`quality()`。S3DのMacは`s3d`ジョブの型検査)に残すので外します。件数は未確認です。
+
+認めた旧版との差と、比較の前提の外は、全コマンドの決定の範囲だけです。時刻つきの一覧は [設計のR4C節](../docs/design.md#r4cに限る承認済みの差)にあります。
+契約は [設計のR4C節](../docs/design.md#候補の採用と改名r4c)にあります。
+[比較の手順と件数](../docs/testing.md#r4cの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
