@@ -1222,6 +1222,9 @@ def block_cases(folder):
 def make_main2():
     import tempfile
 
+    if sys.platform != "linux":
+        raise SystemExit("main2 の固定期待(疑似端末を使う tty_cases を含む)は Linux で作る。Mac の疑似端末の挙動は未確認")
+
     with tempfile.TemporaryDirectory() as folder:
         return {"main_flush_cases.json": flush_cases(folder), "main_tty_cases.json": tty_cases(folder), "main_block_cases.json": block_cases(folder)}
 

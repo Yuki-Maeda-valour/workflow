@@ -915,6 +915,47 @@ child.wait()
 """
 
 
+class SelfCheckGate(unittest.TestCase):
+    """比較器自身の検査を流すか省くかの分かれ目(--no-selftest)。"""
+
+    def setUp(self):
+        self.m = get_subject()
+
+    def test_without_the_flag_the_suite_is_loaded_and_run_and_its_count_returned(self):
+        with mock.patch.object(self.m, 'load_module') as load, mock.patch.object(self.m, 'run_suite', return_value=7) as run, \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(self.m.run_self_checks(False), 7)
+        load.assert_called_once()
+        self.assertEqual(load.call_args.args[0].name, 'test_s2e.py')
+        run.assert_called_once()
+        self.assertNotIn('省いた', out.getvalue())
+
+    def test_with_the_flag_nothing_runs_and_the_skip_is_printed(self):
+        with mock.patch.object(self.m, 'load_module') as load, mock.patch.object(self.m, 'run_suite') as run, \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            self.assertEqual(self.m.run_self_checks(True), 0)
+        load.assert_not_called()
+        run.assert_not_called()
+        self.assertIn('比較器自身の検査は省いた', out.getvalue())
+        self.assertIn('--no-selftest', out.getvalue())
+
+    def test_main_passes_the_no_selftest_flag_to_run_self_checks(self):
+        """main が --no-selftest の値をそのまま run_self_checks へ渡すこと(例外で main を止め、その後の比較は流さない)。"""
+        class Stop(Exception):
+            pass
+
+        for argv, expected in ((['--fixture', '/x'], False), (['--fixture', '/x', '--no-selftest'], True)):
+            with self.subTest(argv=argv):
+                # main は大域変数の FIXTURE を書き換えるので、比較器の中で流れるときのために元へ戻す。
+                with mock.patch.object(self.m, 'FIXTURE', self.m.FIXTURE), \
+                        mock.patch.object(self.m, 'fixture_path', return_value=Path('/x')), \
+                        mock.patch.object(self.m, 'is_simulation', return_value=False), \
+                        mock.patch.object(self.m, 'run_self_checks', side_effect=Stop) as gate:
+                    with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(Stop):
+                        self.m.main(argv)
+                gate.assert_called_once_with(expected)
+
+
 class CommandComparison(unittest.TestCase):
     """9 コマンドの旧新比較(`s2e_commands.py`)が、壊れた Rust を見つけること。偽の Rust は、旧 guard を包んで 1 つずつ壊した実行ファイルで、
     製品の example の外(テストの一時フォルダ)に作る。環境変数やテスト専用の組み立ての feature では作らない。

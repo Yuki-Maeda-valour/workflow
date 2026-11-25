@@ -914,11 +914,23 @@ def load_module(path, name):
     return module
 
 
+def run_self_checks(no_selftest):
+    """比較器自身の検査(test_s2e.py)を、比較の前に流す。件数を返す。`no_selftest` のときは流さず 0 を返し、省いたことを出力に出す。"""
+    if no_selftest:
+        print('S2E: 比較器自身の検査は省いた(--no-selftest。同じジョブの 1 回目で流した前提)')
+        return 0
+    module = load_module(Path(__file__).with_name('test_s2e.py'), 's2e_comparator_tests')
+    module.subject = sys.modules[__name__]
+    return run_suite(unittest.defaultTestLoader.loadTestsFromModule(module))
+
+
 def main(argv=None):
     global FIXTURE
     parser = argparse.ArgumentParser()
     parser.add_argument('--fixture')
     parser.add_argument('--write-mapping', action='store_true')
+    # 比較器自身の検査(test_s2e.py。手元で約 186 秒)を省く。CI の s2e ジョブの 2 回目の比較で使う(1 回目は必ず流す)。
+    parser.add_argument('--no-selftest', action='store_true')
     args = parser.parse_args(argv)
     if args.write_mapping:
         check_mapping()
@@ -934,10 +946,7 @@ def main(argv=None):
     if simulated:
         print(SIMULATION_NOTICE)
     started = time.monotonic()
-    # 比較器自身の検査を先に通す。
-    module = load_module(Path(__file__).with_name('test_s2e.py'), 's2e_comparator_tests')
-    module.subject = sys.modules[__name__]
-    self_checks = run_suite(unittest.defaultTestLoader.loadTestsFromModule(module))
+    self_checks = run_self_checks(args.no_selftest)
     summary = check_mapping()
     if MAPPING_MD.read_text(encoding='utf-8') != mapping_markdown():
         raise AssertionError('test_mapping.md が TEST_MAPPING と違う(--write-mapping で作り直す)')
@@ -961,7 +970,7 @@ def main(argv=None):
         print(f'未実装の印(件数に入れない): {name}')
     check_pending_is_empty()
     print(f'S2E: 比較 {tally["matched"] + tally["approved"]} 件(通常の一致 {tally["matched"]}・認めた差 {tally["approved"]}。うち U4 {tally["u4"]})'
-          f'・未実装の印 {len(tally["unimplemented"])} 件・予定の枠 {len(PENDING_2B)} 件・自己検査 {self_checks} 件'
+          f'・未実装の印 {len(tally["unimplemented"])} 件・予定の枠 {len(PENDING_2B)} 件・自己検査 {"省略(--no-selftest)" if args.no_selftest else f"{self_checks} 件"}'
           f'・既存テストの対応 {summary["total"]} 件(両方 {summary["counts"][B]}・置換 {summary["counts"][R]}・対象外 {summary["counts"][O]}。'
           f'うち比較済み・実装済み・対象外 {summary["compared"]}・予定 {summary["planned"]})')
     print(f'S2E: 9 コマンドの旧新比較 {executed} 項目(Rust を起動した比較 {cmd_tally.rust_runs} 件): 起動の一致 {cmd_tally.runs} 件(読取りだけのコマンドの前後確認 {cmd_tally.readonly} 件を別に確かめた)'
