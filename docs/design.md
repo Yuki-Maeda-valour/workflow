@@ -1610,7 +1610,7 @@ R4E の比較(`check_r4e.py`)は、`build` と `verify-universal` に入れず�
   - 内訳は、`check_r4b.py` が 2 回で約 27 分 40 秒、`check_r4r.py` が 1 回 約 54 秒、品質の検査が約 10 分、2 回のビルドが約 1 分 15 秒である。
   - `verify-universal` は 16 分 43 秒(上限 30 分)だった。
 - `build` を 48 分までに収めると、R4E の比較に使えるのは約 50 秒しかない。設計が最初に置いた形(`build` で 2 回・`verify-universal` で 1 回)は収まらない。
-- `r4e` は `build` の後に、4 機種で `build` の 2 本の `r4e_contract` を比べる(上限 30 分)。`r4e-universal` は `combine` の後に、Mac 2 機種で署名後の 1 本を比べる(上限 30 分)。
+- `r4e` は `build` の後に、4 機種で `build` の 2 本の `r4e_contract` を比べる(上限 30 分)。`r4e-universal` は `combine` の後に、Mac 2 機種で署名後の 1 本を比べる(上限 30 分)。#516 の後の `r4e` は、2本が同じことを `cmp` で確かめてから、1本目だけで比べる(上限は変えない)。
 - `build` には、`r4e_contract` の 2 回のビルドと 2 本の一致・Linux の ELF の検査・example の単体テストが残る。`combine` と `verify-universal` は、既存の処理で `r4e_contract` の結合・署名・確かめを行う。既存のジョブの時間の上限は変えない。
 - `distribution` は 2 つのジョブの成功を待つ(`needs` の末尾に足した)。R4B・R4R と同じく、比較が落ちたら配布用 tar を作らない。
 - この形は、2026-11-12 12:59 に、Rust 移行の全体をまとめる担当(R4E の作業をまとめる担当とは別の、複数のコマンドの移行を通して利用者から判断を任された担当)が、新しいコマンドの比較のすべてに当てる決まりにした(コマンドごとの必須のジョブ。`build` に足してよいのは example のビルドと単体テストの分だけ)。`check_workflow.py` は `native.yml` の必須のジョブの集合を持ち、欠けたら失敗にする。
@@ -1816,7 +1816,7 @@ R4Gの設計は、2026-11-11 22:31までの決定で確定した(それまでは
 - 12:59の決定(管理担当が利用者の委任で決めた。R4E #482の知らせから): 新しいコマンドの比較は、`build` と `verify-universal` に入れず、コマンドごとの新しい必須ジョブで流す。既存のジョブの上限は、理由と実測なしに上げない。ジョブを足すときは、`check_workflow.py` の許す形と必須の数え方も同じPRで直す。理由は、`build` の上限の余裕が小さく、担当が並行して比較を足すと越えるためである。
 - R4Gでは、`build` に残すのは `r4g_contract` のビルド(配布でないtarへ入れる)と、exampleの単体検査だけにした。`build`(60分)と `verify-universal`(30分)の上限は、mainのままである。
 - 比較は2つのジョブで流す。
-  - `r4g`: `build` の後に4機種で、`build` のtarを受け取り、2回のビルドの `r4g_contract` のそれぞれで `check_r4g.py` を流す。上限60分。
+  - `r4g`: `build` の後に4機種で、`build` のtarを受け取り、2回のビルドの `r4g_contract` のそれぞれで `check_r4g.py` を流す。上限60分。#516 の後は、2本が同じことを `cmp` で確かめてから、1本目だけで流す(上限は変えない)。
   - `r4g-universal`: `combine` の後にMac 2機種で、署名後の `r4g_contract` を流す。上限30分。
   - `distribution` は、この2つを待つ。落ちたら配布のtarを作らない。
 - `check_workflow.py` は、必須のジョブ(`REQUIRED_NATIVE_JOBS`)と、2つのジョブの工程と機種(`R4G_JOBS`)を確かめる。上限の根拠と見込みは [native/ci/README.md](../native/ci/README.md) にある。CIでの実測は未記録である。
