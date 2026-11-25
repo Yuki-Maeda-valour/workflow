@@ -4,8 +4,8 @@
 `python3 -B native/ci/check_s2e.py --write-mapping` で作り直す。
 
 - 全 117 テスト: 旧新の両方で比較 54・Rust の検査へ置換 51・対象外 12
-- うち予定を含まない(比較済み・実装済みの Rust のテスト・対象外): 100 件・「予定」(2 段目 b で作る)を含む: 17 件
-- 「実装済み」を含み、「予定」を含まない行: 50 件
+- うち比較済み・実装済みの Rust のテスト・対象外: 117 件・「予定」(まだ作っていない比較。0 件でなければ不合格): 0 件
+- 「実装済み」を含む行: 53 件
 - U2 の差(テストの配布物に guard が無い): 「旧新の両方で比較」の行のうち、既存テストの本文が bootstrap を使い、旧 guard を足した配布物で固定入力を作り直すテスト: 53 件(「Rust の検査へ置換」・対象外の行は数えない)
 - 読み込み器を通すテストと、Python の内部だけを観察するテストは、理由を書いて対象外にした。
 
@@ -14,7 +14,7 @@
 | テスト | 分類 | 対応先・理由 | Linux だけの比較 |
 |---|---|---|---|
 | `NativeDistributionEnvironmentTests.test_full_distribution_is_retained_and_binary_changes_are_rejected` | 旧新の両方で比較 | 比較[x-real-distribution, x-real-distribution-flip](配布物の全体の保持と、Rust のバイナリ・launch.sh・resolve-task-dir.py の 1 ビットの書き換えの拒否と戻した後。旧版との比較)。Budget の計上は budget.rs::tick_stops_just_after_ten_thousand_items。check_plugin_launch は対象外(D2。固定の読み込み器と launch の入口) | - |
-| `EnvironmentGuardTests.test_normal_and_copy_exec` | 旧新の両方で比較 | bootstrap と verify は 比較[basic]。exec は次の段(予定) | - |
+| `EnvironmentGuardTests.test_normal_and_copy_exec` | 旧新の両方で比較 | bootstrap と verify は 比較[basic]。read・exec は 比較[cp-read, cp-exec](生バイト・子の終了コードと信号・PATH の探し方・子の環境) | - |
 | `EnvironmentGuardTests.test_source_fixed_output_and_skill_change` | 旧新の両方で比較 | 比較[verify-edit-plugin-file, verify-edit-plugin-file-same-size, verify-skill-edit, x-source-guard-changed] | - |
 | `EnvironmentGuardTests.test_copy_modified` | 旧新の両方で比較 | 比較[verify-copy-edit, verify-copy-remove, verify-copy-add, verify-copy-chmod, verify-copy-dir-chmod] | - |
 | `EnvironmentGuardTests.test_manifest_and_hash_forgery` | 旧新の両方で比較 | 比較[x-forged-state, verify-state-edit, verify-state-remove] | - |
@@ -32,7 +32,7 @@
 | `EnvironmentGuardMoreTests.test_parent_replacement_does_not_read_external_secret` | Rust の検査へ置換 | 実装済み: fsio.rs::a_swapped_parent_is_rejected_after_the_body と race_tests.rs::a_subdirectory_swapped_between_lstat_and_open_is_refused と 比較[x-race-verify-parent-swap, x-parent-swap-host-settings] | - |
 | `EnvironmentGuardMoreTests.test_shell_and_xdg_settings_change` | 旧新の両方で比較 | 比較[verify-shell-created, verify-xdg-config-created] | - |
 | `EnvironmentGuardMoreTests.test_active_plugin_inventory_and_content_change` | 旧新の両方で比較 | 比較[options](verify --current-inventory)と、実装済みの pyjson の plugin_inventory の固定期待 | - |
-| `EnvironmentGuardMoreTests.test_direct_read_exec_no_original_import` | 旧新の両方で比較 | read・exec/direct(予定) | - |
+| `EnvironmentGuardMoreTests.test_direct_read_exec_no_original_import` | 旧新の両方で比較 | 比較[cp-read, cp-exec](控えの隣のコピーを照合してから読む・実行する。exec の scripts/importer.py は兄弟の sibling.py をコピーから import し、read は scripts/sibling.py を読む。`__pycache__` を作らないことは、前後の入力の完全一致で確かめる。CLI で旧新を比べる) | - |
 | `EnvironmentGuardMoreTests.test_replaced_external_receipt_is_not_an_isolation_boundary` | 旧新の両方で比較 | 比較[x-receipt-replaced] | - |
 | `HostSettingsTests.test_permission_sources_preserve_identity_presence_and_private_values` | Rust の検査へ置換 | 実装済み: settings.rs::read_host_settings_cases_match_python_3_10 と 内部 reader の旧新比較(source の値を含む型の印つきの値の一致。比較[options-readers]) | - |
 | `HostSettingsTests.test_permission_reader_keeps_bash_conversion_cli_user_only` | Rust の検査へ置換 | 実装済み: settings::host_allowlist_cases_match_python_3_10 と rule_cases | - |
@@ -50,7 +50,7 @@
 | `HostSettingsTests.test_new_managed_dropin_between_snapshot_and_descriptors_is_rejected` | Rust の検査へ置換 | 比較[x-race-bootstrap-new-managed-dropin, x-race-verify-new-managed-dropin](PATH の偽の git が解析中に書き足す。旧版の回と Rust の回で、終了コード・標準エラー・Git の起動回数・出力フォルダの構成を比べる) | x-race-bootstrap-new-managed-dropin |
 | `EnvironmentUnattendedEntryDocumentationTests.test_update_doc_standalone_entry_binds_to_verified_copy_before_modes` | 対象外 | SKILL.md の文書と固定の読み込み器の字面の検査(読み込み器を通す) | - |
 | `EnvironmentLauncherTests.test_held_launcher_rejects_replaced_fixed_success_code` | 対象外 | loop.sh 側の固定の読み込み器(Python の字面)の検査。D2 の混在の条件で扱う | - |
-| `EnvironmentLauncherTests.test_post_check_execution_gap_is_detected_only_on_next_check` | 旧新の両方で比較 | exec/post-check-gap(予定) | - |
+| `EnvironmentLauncherTests.test_post_check_execution_gap_is_detected_only_on_next_check` | 旧新の両方で比較 | 比較[cp-pair-after-edit-copy, cp-pair-after-edit-source, cp-pair-after-edit-guard-copy](verify-pair の 1 回目の照合に成功して verified を出した後、2 回目の照合の前にコピー・元・guard のコピーを書き換える。照合の後の変更は、次の照合で拒否する) | - |
 | `EnvironmentIncludePathsTests.test_symlink_dotdot_is_not_lexically_hidden` | 旧新の両方で比較 | 比較[x-git-include-dotdot-symlink] | x-git-include-dotdot-symlink |
 | `EnvironmentIncludePathsTests.test_regular_dotdot_include_and_git_path_expansion` | 旧新の両方で比較 | 比較[x-git-include-expansion, include-absolute] | - |
 | `InstallationLinksTests.test_official_global_install_and_target_change` | 旧新の両方で比較 | 比較[x-install-link-official, x-install-link-agents] | - |
@@ -70,17 +70,17 @@
 | `EnvironmentConfigPrereadTests.test_changed_known_include_stops_before_new_nested_target` | 旧新の両方で比較 | 比較[verify-include-target-edit, x-race-verify-include-target-edit, x-preread-include-edit-fifo, x-preread-include-edit-0200] | - |
 | `EnvironmentConfigPrereadTests.test_absent_include_candidate_stops_before_new_body` | 旧新の両方で比較 | 比較[include-missing-target, x-race-bootstrap-new-include-target, x-preread-absent-include-fifo, x-preread-absent-include-0200] | x-race-bootstrap-new-include-target |
 | `EnvironmentConfigPrereadTests.test_known_nested_and_missing_graph_stays_normal` | 旧新の両方で比較 | 比較[include-chain-two, include-missing-target, x-preread-nested-missing-graph] | - |
-| `VerifyPairTests.test_go_after_verified_succeeds_with_nothing_on_stderr` | 旧新の両方で比較 | verify-pair/go(予定) | - |
-| `VerifyPairTests.test_go_arriving_in_pieces_still_proceeds` | 旧新の両方で比較 | verify-pair/go-pieces(予定) | - |
-| `VerifyPairTests.test_stop_eof_wrong_word_and_unterminated_go_exit_20_silently` | 旧新の両方で比較 | verify-pair/stop-eof-word(予定) | - |
+| `VerifyPairTests.test_go_after_verified_succeeds_with_nothing_on_stderr` | 旧新の両方で比較 | 比較[cp-pair](go の後の成功。標準エラーは無出力) | - |
+| `VerifyPairTests.test_go_arriving_in_pieces_still_proceeds` | 旧新の両方で比較 | 比較[cp-pair](go を分けて送る) | - |
+| `VerifyPairTests.test_stop_eof_wrong_word_and_unterminated_go_exit_20_silently` | 旧新の両方で比較 | 比較[cp-pair](stop・EOF・違う語・改行なしの go は無出力の 20) | - |
 | `VerifyPairTests.test_stop_through_loader_adds_no_false_diagnostic` | 対象外 | 読み込み器を通す(os._exit(20) が読み込み器の変換を迂回する性質の検査)。D2 で扱う | - |
-| `VerifyPairTests.test_waiting_for_go_has_a_time_limit` | 旧新の両方で比較 | verify-pair/go-timeout(予定) | - |
-| `VerifyPairTests.test_first_failure_never_prints_verified` | 旧新の両方で比較 | verify-pair/first-failure(予定) | - |
-| `VerifyPairTests.test_second_check_compares_the_inventory` | 旧新の両方で比較 | verify-pair/second-inventory(予定) | - |
-| `VerifyPairTests.test_second_check_reads_the_state_again_and_sees_a_change_between` | 旧新の両方で比較 | verify-pair/change-between(予定) | - |
-| `VerifyPairTests.test_guard_body_rewritten_between_the_checks_is_found` | 旧新の両方で比較 | verify-pair/guard-rewritten(予定。U2: コピーを照らす) | - |
-| `VerifyPairTests.test_a_different_guard_hash_is_rejected_after_go` | 旧新の両方で比較 | verify-pair/guard-hash(予定) | - |
-| `VerifyPairTests.test_bad_arguments_are_rejected_before_any_check` | 旧新の両方で比較 | verify-pair/bad-run-pair-arguments(予定。引数の解析は実装済みの args/verify-pair/* で比べる。解析を通った後の run_pair の検査〈guard の SHA-256 が 64 桁の 16 進でない・--go-timeout が 0 → ERROR の行と 20〉は verify-pair の本体で比べる) | - |
+| `VerifyPairTests.test_waiting_for_go_has_a_time_limit` | 旧新の両方で比較 | 比較[cp-pair](待ち時間の上限。go_timeout の極大値は機種ごと。Mac は 100000000 以下と 100000002 以上) | - |
+| `VerifyPairTests.test_first_failure_never_prints_verified` | 旧新の両方で比較 | 比較[cp-pair, cp-refusal-edit-source, cp-refusal-edit-copy](1 回目の照合の失敗では verified を出さない) | - |
+| `VerifyPairTests.test_second_check_compares_the_inventory` | 旧新の両方で比較 | 比較[cp-pair, cp-pair-after-edit-inventory, cp-pair-after-remove-inventory, cp-pair-after-rewrite-inventory](2 回目の照合は一覧も比べる) | - |
+| `VerifyPairTests.test_second_check_reads_the_state_again_and_sees_a_change_between` | 旧新の両方で比較 | 比較[cp-pair-after-edit-source, cp-pair-after-edit-copy, cp-pair-after-edit-copy-and-restore, cp-pair-after-edit-state, cp-pair-after-rewrite-state, cp-pair-after-edit-home-settings](2 回の照合の間の変更。コピーを書き戻す競合を含む) | - |
+| `VerifyPairTests.test_guard_body_rewritten_between_the_checks_is_found` | 旧新の両方で比較 | 比較[cp-pair-after-edit-guard-copy, cp-pair-after-rewrite-guard-copy, cp-pair-after-guard-to-link, cp-pair-after-guard-copy-as-directory](U2: 控えの隣のコピーを照らし直す) | - |
+| `VerifyPairTests.test_a_different_guard_hash_is_rejected_after_go` | 旧新の両方で比較 | 比較[cp-pair](控えの guard の SHA-256 と違う値は go の後に拒否する) | - |
+| `VerifyPairTests.test_bad_arguments_are_rejected_before_any_check` | 旧新の両方で比較 | 比較[cp-pair](引数の解析は実装済みの args/verify-pair/* でも比べる。解析を通った後の run_pair の検査〈guard の SHA-256 が 64 桁の 16 進でない・--go-timeout が 0 → ERROR の行と 20〉は cp-pair) | - |
 | `VerifyPairTests.test_existing_verify_is_unchanged` | 旧新の両方で比較 | 比較[basic] | - |
 | `GitConfigIncludeSkipTests.test_no_include_means_no_git_start_on_verify_but_always_on_bootstrap_snapshot` | Rust の検査へ置換 | 実装済み: command_tests.rs::include_text_is_matched_by_bytes_ignoring_ascii_case と 比較[verify-gitconfig-edit-keeps-include-text, include-comment-upper, basic](Git の起動回数を旧新で比べる) | - |
 | `GitConfigIncludeSkipTests.test_include_spellings_still_reach_git_and_follow_the_target` | 旧新の両方で比較 | 比較[include-comment-upper, include-section-mixed, include-quoted, include-absolute](Git の起動回数も比べる) | - |
@@ -125,8 +125,8 @@
 | `ComponentDescriptorTests.test_missing_manifest_creation_before_return_is_rejected` | Rust の検査へ置換 | 実装済み: race_tests.rs::a_manifest_created_between_the_two_missing_checks_is_refused | - |
 | `ComponentDescriptorTests.test_policy_digest_normalizes_only_workflow_run_copy_root` | Rust の検査へ置換 | 実装済み: state の digest の固定期待(workflow の根だけ @workflow) | - |
 | `ComponentDescriptorTests.test_policy_digest_ignores_missing_parent_location_but_tracks_component` | Rust の検査へ置換 | 実装済み: state の digest の固定期待(@route の除外) | - |
-| `CopyCommandCharacterizationTests.test_success_output_and_return_values` | 旧新の両方で比較 | read の生バイト・exec の子の終了コード・-B・PYTHONDONTWRITEBYTECODE・bash の引数(予定。CLI で比べる) | - |
-| `CopyCommandCharacterizationTests.test_stop_lines` | 旧新の両方で比較 | read・exec・hook の run_copy の理由の行(予定。Rust にはまだ無い。output::main_cases の変換は実装済みだが、理由の行は本体と一緒に比べる) | - |
-| `CopyCommandCharacterizationTests.test_seam_order` | 旧新の両方で比較 | bootstrap・verify の拒否の順と観測の順は 比較[order-files, order-files-before-directories, order-directories-before-components, order-components-before-configs, verify-state-edit, x-race-verify-settings-edit, x-race-bootstrap-settings-edit](CLI で比べる。モンキーパッチは使っていない)。read・exec の拒否の順は次の段(予定) | x-race-bootstrap-settings-edit |
+| `CopyCommandCharacterizationTests.test_success_output_and_return_values` | 旧新の両方で比較 | 比較[cp-read, cp-exec](read の生バイト・exec の子の終了コード・-B・PYTHONDONTWRITEBYTECODE・bash の引数。CLI で比べる) | - |
+| `CopyCommandCharacterizationTests.test_stop_lines` | 旧新の両方で比較 | 比較[cp-read, cp-exec, cp-hook, cp-hook-missing, cp-refusal-edit-source](read・exec・hook の run_copy の理由の行。output::main_cases の変換は実装済み) | - |
+| `CopyCommandCharacterizationTests.test_seam_order` | 旧新の両方で比較 | bootstrap・verify の拒否の順と観測の順は 比較[order-files, order-files-before-directories, order-directories-before-components, order-components-before-configs, verify-state-edit, x-race-verify-settings-edit, x-race-bootstrap-settings-edit](CLI で比べる。モンキーパッチは使っていない)。read・exec の拒否の順は 比較[cp-refusal-edit-source, cp-refusal-edit-copy, cp-refusal-add-copy-file, cp-refusal-remove-copy-file, cp-refusal-garbage-state, cp-refusal-remove-state] | x-race-bootstrap-settings-edit |
 | `CopyCommandCharacterizationTests.test_hook_runs_copy_in_same_process` | 対象外 | U3: Rust の hook は確認の後に終了コード 20。Python の同じプロセスでの exec の観察 | - |
-| `CopyCommandCharacterizationTests.test_hook_exceptions_are_caught_by_main` | Rust の検査へ置換 | 実装済み: output::main_cases_match_python_3_10(例外の変換の部分だけ)。hook の本体を Python が exec する経路は U3 の差。Rust は確認の後に 20 を返すので、2 段目 b で U3 の予定の行へ移す(予定) | - |
+| `CopyCommandCharacterizationTests.test_hook_exceptions_are_caught_by_main` | Rust の検査へ置換 | 実装済み: output::main_cases_match_python_3_10(例外の変換の部分だけ)。hook の本体を Python が exec する経路は U3 の差。Rust は確認の後に 20 を返すので、比較[cp-hook](U3: 旧版は判定器を実行し Rust は確認の後に 20。旧新それぞれの固定期待を別に検査し、通常の一致に数えない)で確かめる | - |

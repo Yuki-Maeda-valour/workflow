@@ -198,13 +198,41 @@ fn probes_of(root_path: &Path, root: &str) -> Value {
     names.sort();
     for name in names {
         let raw = std::fs::read(probe.join(&name)).unwrap();
+        // 固定期待は、子の作業フォルダが一時フォルダの根(`{r}`)の状態で作った。この検査は同じプロセスの中で動くので、
+        // 子の作業フォルダはこのプロセスのもの(bash の `PWD`)。それも `{r}` に置き換えて比べる。
+        let cwd = std::env::current_dir().unwrap();
         let text = String::from_utf8_lossy(&raw)
             .replace(root, "{r}")
+            .replace(cwd.to_str().unwrap(), "{r}")
             .replace(&path_value, "{PATH}");
         found.insert(name.clone(), Value::String(text));
         std::fs::remove_file(probe.join(&name)).unwrap();
     }
     Value::Object(found)
+}
+
+/// 旧 Python 3.10 が起動時に(PEP 538 で)環境へ足す `LC_CTYPE=C.UTF-8` を、検査の環境の一覧に同じく足す(Linux の規則)。
+/// 製品は `prepare_process` が起動時にプロセスの環境へ足すが、この検査は環境の一覧を直接渡すので、ここで足す。
+/// `LC_ALL` が空でなければ足さない。`LC_CTYPE`(空でなければ。無ければ `LANG`)が `C`・`POSIX` か、どちらも無いときに足す。
+/// 既にある `LC_CTYPE` は同じ位置で置き換え、無ければ末尾に足す。
+fn coerce_like_python(pairs: &mut Vec<(String, String)>) {
+    let value = |pairs: &[(String, String)], name: &str| {
+        pairs
+            .iter()
+            .find(|(key, value)| key == name && !value.is_empty())
+            .map(|(_, value)| value.clone())
+    };
+    if value(pairs, "LC_ALL").is_some() {
+        return;
+    }
+    let held = value(pairs, "LC_CTYPE").or_else(|| value(pairs, "LANG"));
+    if held.is_some_and(|held| held != "C" && held != "POSIX") {
+        return;
+    }
+    match pairs.iter().position(|(key, _)| key == "LC_CTYPE") {
+        Some(at) => pairs[at].1 = "C.UTF-8".to_owned(),
+        None => pairs.push(("LC_CTYPE".to_owned(), "C.UTF-8".to_owned())),
+    }
 }
 
 fn run_step(root_path: &Path, root: &str, step: &Value, want: &Value, label: &str) {
@@ -225,6 +253,7 @@ fn run_step(root_path: &Path, root: &str, step: &Value, want: &Value, label: &st
             }
         }
     }
+    coerce_like_python(&mut pairs);
     if let Some(ops) = step.get("ops_before").and_then(Value::as_array) {
         apply(root_path, ops);
     }
@@ -410,12 +439,12 @@ fn the_fixture_covers_every_command_and_case_kind() {
 
 /// 固定期待の件数(流れの数・回数・コマンドごとの回数)。増減は、固定期待を作り直したときに見直す。
 const EXPECTED_FLOWS: usize = 33;
-const EXPECTED_STEPS: usize = 234;
+const EXPECTED_STEPS: usize = 240;
 const EXPECTED_COMMANDS: &[(&str, usize)] = &[
     ("bootstrap", 33),
-    ("exec", 60),
+    ("exec", 65),
     ("hook", 23),
-    ("read", 38),
+    ("read", 39),
     ("verify-pair", 80),
 ];
 

@@ -21,6 +21,7 @@ import os
 from pathlib import Path
 import re
 import resource
+import select
 import shutil
 import signal
 import stat
@@ -35,6 +36,8 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 from support_native import RunResult  # noqa: E402
 
 ALL, LINUX_ONLY = 'all', 'linux'
+COPY_COMMANDS = ('read', 'exec', 'hook', 'verify-pair')
+GUARD_TOKEN = re.compile(r'\{guard:[A-Za-z0-9_-]+\}')
 IS_LINUX = sys.platform.startswith('linux')
 IS_MAC = sys.platform == 'darwin'
 # 比較器の検査用: Linux で Mac の経路(旧版の bootstrap は patched・Rust の bootstrap は流さない・Linux だけの印の項目は流さない)を模擬する。
@@ -46,6 +49,8 @@ MAC_PATH = IS_MAC or SIMULATE_MAC
 SIMULATED_MAC_ONLY = SIMULATE_MAC and not IS_MAC
 LANG_NAME = 'C.UTF-8' if IS_LINUX else 'en_US.UTF-8'
 TOOL_TIMEOUT = 120
+CF_VARIABLE = '__CF_USER_TEXT_ENCODING'
+U3_NEW_STDERR = 'ERROR [environment-guard] hook は R4P まで旧版の判定器で実行する\n'.encode()
 GEN_PATH = HERE / 's2e_fixtures/gen_cases.py'
 GUARD_REL = 'plugin/skills/ship-task/scripts/environment-guard.py'
 MAX_FILE = 8 * 1024 * 1024
@@ -69,6 +74,14 @@ def gen():
 
 # ---------------------------------------------------------------- 起動
 
+def check_module():
+    """U4 の比較の関数(`check_s2e.py`)。同じ関数を使うため、使う時に読む(`check_s2e.py` はこの部品を使う側)。"""
+    if str(HERE) not in sys.path:
+        sys.path.insert(0, str(HERE))
+    import check_s2e
+    return check_s2e
+
+
 def GUARD_BYTES():
     return (ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/environment-guard.py').read_bytes()
 
@@ -78,15 +91,23 @@ def inherited_nofile():
     return resource.getrlimit(resource.RLIMIT_NOFILE)
 
 
-def run_tool(argv, *, env, cwd, timeout=None, stdin=None, fsize=None):
+def reset_hangup():
+    """子の SIGHUP を既定へ戻す(比較器を `nohup` などで起動しても、子が `kill -HUP` で終わる入力の結果が変わらないように。旧新の両方に同じ扱いを与える)。"""
+    signal.signal(signal.SIGHUP, signal.SIG_DFL)
+
+
+def run_tool(argv, *, env, cwd, timeout=None, stdin=None, fsize=None, close=()):
     """別のプロセスグループで起動する。`fsize` は書けるファイルの大きさの上限(RLIMIT_FSIZE。None なら変えない)。
-    上限を設定できなければ AssertionError(黙って続けない)。NOFILE などの処理系の資源は設定しない。
-    起動できなければ OSError をそのまま投げる。時間切れは `timed_out` を立てる。"""
+    上限を設定できなければ AssertionError(黙って続けない)。NOFILE などの処理系の資源は設定しない。`close` は、子で閉じる標準の fd(U7。
+    起動の後に閉じるので、子の fd は閉じたまま始まる)。起動できなければ OSError をそのまま投げる。時間切れは `timed_out` を立てる。"""
     timeout = TOOL_TIMEOUT if timeout is None else timeout
 
     def preexec():
+        reset_hangup()
         if fsize is not None:
             resource.setrlimit(resource.RLIMIT_FSIZE, (fsize, fsize))
+        for fd in close:
+            os.close(fd)
     try:
         process = subprocess.Popen(argv, cwd=cwd, env=env, start_new_session=True, preexec_fn=preexec,
                                    stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL,
@@ -118,6 +139,70 @@ def run_tool(argv, *, env, cwd, timeout=None, stdin=None, fsize=None):
             except ProcessLookupError:
                 pass
             raise
+
+
+def run_with_stdin(argv, *, env, cwd, spec, between=None, timeout=None):
+    """verify-pair の標準入力の流し方(`spec`)を守って起動する。`verified\\n` が出る(か、終わる)まで待ち、出たら `between()`(入力の変更)を呼び、
+    `delay` 秒待ち、`chunks` を `gap` 秒の間をおいて書き、`close` なら閉じる。閉じない流れは、開いたまま終わるのを待つ(待ち時間の件)。
+    終わらなければ時間切れにして、プロセスグループごと止める。"""
+    timeout = TOOL_TIMEOUT if timeout is None else timeout
+    process = subprocess.Popen(argv, cwd=cwd, env=env, start_new_session=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               preexec_fn=reset_hangup)
+    seen = b''
+    timed_out = False
+    try:
+        deadline = time.monotonic() + timeout
+        while b'verified\n' not in seen and time.monotonic() < deadline:
+            ready, _, _ = select.select([process.stdout], [], [], 0.2)
+            if ready:
+                chunk = os.read(process.stdout.fileno(), 4096)
+                if not chunk:
+                    break
+                seen += chunk
+            elif process.poll() is not None:
+                break
+        if b'verified\n' in seen:
+            if between is not None:
+                between()
+            time.sleep(spec.get('delay', 0))
+            try:
+                for chunk in spec.get('chunks', []):
+                    process.stdin.write(chunk.encode('latin-1'))
+                    process.stdin.flush()
+                    time.sleep(spec.get('gap', 0))
+                if spec.get('close'):
+                    process.stdin.close()
+            except BrokenPipeError:
+                pass
+        try:
+            process.wait(timeout=max(1.0, deadline - time.monotonic()))
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            for number in (signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.killpg(process.pid, number)
+                except ProcessLookupError:
+                    pass
+                try:
+                    process.wait(timeout=1)
+                    break
+                except subprocess.TimeoutExpired:
+                    continue
+        out, err = process.stdout.read(), process.stderr.read()
+        return RunResult(process.returncode, seen + out, err, timed_out)
+    except BaseException:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        raise
+    finally:
+        for handle in (process.stdin, process.stdout, process.stderr):
+            try:
+                handle.close()
+            except (BrokenPipeError, OSError):
+                pass
+        process.poll()
 
 
 def os_bytes(value):
@@ -174,6 +259,21 @@ def tree_snapshot(root, *, skip=(), content=True):
                 if child not in skip:
                     stack.append(child)
     return result
+
+
+def tree_shape(root):
+    """実行の後の入力の姿。別々に作り直した入力どうしを比べるので、時刻・inode・フォルダの大きさは持たない(内容・mode・リンクの先は持つ)。
+    控え(`environment.json`)の内容は、dev・ino・時刻の位置だけを伏せた値で持つ(別々に作った控えは、その位置だけが違う)。"""
+    shape = {}
+    for rel, info in tree_snapshot(root).items():
+        info = list(info)
+        info[5:8] = []   # mtime・ctime・ino
+        if stat.S_IFMT(info[0]) == stat.S_IFDIR:
+            info[4] = 0
+        if rel.endswith('/environment.json') and stat.S_IFMT(info[0]) == stat.S_IFREG and info[-1] != 'unreadable':
+            info[-1] = state_digest((Path(root) / rel).read_bytes(), str(root))
+        shape[rel] = info
+    return shape
 
 
 def tree_bytes(root):
@@ -526,6 +626,9 @@ class Flow:
         self.counter = 0
         self.log = []
         self.raced = False
+        self.expect_checked = False      # `expect_old` の手順を、実際に旧版の結果と照らしたか
+        self.recorded_checked = set()    # 旧版の記録(`recorded`)と照らした手順の番号
+        self.step_index = -1
         self.mac_link = True   # Mac の経路の模擬で、patched なしの旧版の bootstrap の既定の監視先を /etc へのリンクにするか
 
     # -- 後始末
@@ -609,7 +712,7 @@ class Flow:
                 group.append(op)
                 continue
             if group:
-                self.g.obs_apply(str(self.root), group)
+                self.g.cp_apply(str(self.root), group)
                 group = []
             time.sleep(0.03)
             path = self.root / op['path']
@@ -620,7 +723,7 @@ class Flow:
                 handle.seek(offset)
                 handle.write(bytes([byte[0] ^ 1]))
         if group:
-            self.g.obs_apply(str(self.root), group)
+            self.g.cp_apply(str(self.root), group)
 
     def reset_calls(self):
         if self.calls.exists():
@@ -655,16 +758,37 @@ class Flow:
             if self.tool == 'both':
                 if self.case['name'].startswith('x-tilde-'):
                     self.tally.excluded.append(f'{self.case["name"]}: {U6_UNCONFIRMED}')
-                if self.case.get('no_readers'):
+                if self.case.get('no_readers_quiet'):
+                    pass   # read・exec・hook・verify-pair の流れ。reader は別の流れで比べる(比較から外した物ではない)
+                elif self.case.get('no_readers'):
                     reason = self.case.get('no_readers_reason')
                     if not reason:
                         raise AssertionError(f'{self.case["name"]}: reader を比べない流れには理由が要る')
                     self.tally.excluded.append(f'{self.case["name"]}: reader を比べない({reason})')
                 else:
                     self.compare_readers()
+            self.check_fixed_expectations_used()
             return self.tally
         finally:
             self.close()
+
+    def check_fixed_expectations_used(self):
+        """旧版の固定期待を持つ流れは、その期待を全手順で実際に照らしたことを確かめる(手順を 1 つ飛ばす・番号が合わない・記録の数が手順の数と違う流れを見逃さない)。
+        旧版を流さない回(`tool == 'new'`)と、旧版の記録を使わない Mac の経路の記録の照合は対象外。"""
+        if self.tool not in ('both', 'old'):
+            return
+        name = self.case['name']
+        want = self.case.get('expect_old')
+        if want and not self.expect_checked:
+            raise AssertionError(f'{name}: 固定期待(expect_old)の手順 {want["index"]} を旧版の結果と照らしていない(手順の番号が合わない)')
+        recorded = self.case.get('recorded')
+        if recorded is not None and not MAC_PATH:
+            runs = len(self.case['runs'])
+            if len(recorded) != runs:
+                raise AssertionError(f'{name}: 旧版の記録(copy_cases.json)の数 {len(recorded)} が手順の数 {runs} と違う')
+            missing = sorted(set(range(runs)) - self.recorded_checked)
+            if missing:
+                raise AssertionError(f'{name}: 旧版の記録と照らしていない手順がある: {missing}')
 
     def step(self, index, run):
         g, root = self.g, str(self.root)
@@ -674,7 +798,7 @@ class Flow:
             self.shas[name] = g.cmd_rewrite_state(root, self.env, name, run['rewrite']['change'])
         if run.get('ops_before'):
             self.apply_ops(run['ops_before'])
-        args = [self.sha_token(g.cmd_sub(self.sha_sub(a), root)) for a in run['args']]
+        args = [GUARD_TOKEN.sub(g.OLD_GUARD_SHA256, self.sha_token(g.cmd_sub(self.sha_sub(a), root))) for a in run['args']]
         label = f'{self.case["name"]}#{index} {args[0]}'
         self.run_env = None
         if run.get('env'):
@@ -688,9 +812,11 @@ class Flow:
         self.step_index = index
         self.raced = bool(run.get('race'))
         if self.tool != 'both':
-            self.solo(label, args)
+            self.solo(label, args, run)
         elif args[0] == 'bootstrap':
             self.bootstrap_pair(label, args)
+        elif args[0] in COPY_COMMANDS:
+            self.copy_pair(label, args, run)
         else:
             self.readonly_pair(label, args)
 
@@ -720,9 +846,11 @@ class Flow:
                 text = text.replace(token.group(0), value)
         return text
 
-    def solo(self, label, args):
+    def solo(self, label, args, run=None):
         """旧版か Rust の 1 つだけで流し、結果を記録する(競合の差し込みの回。入力が 1 回の実行で変わるので、同じ入力を 2 度は読めない)。"""
         self.reset_calls()
+        if args[0] in COPY_COMMANDS:
+            return self.copy_solo(label, args, run or {})
         out = Path(args[args.index('--output') + 1]) if args[0] == 'bootstrap' and '--output' in args else None
         if args[0] == 'bootstrap' and self.mode == 'patched' and not self.raced:
             # Mac: 競合の無い bootstrap の控えは、旧版を既定の監視先だけ実パスへ置き換えて作る(旧新の回で同じ控えにする)。競合の回だけを旧新で流す。
@@ -730,6 +858,8 @@ class Flow:
         else:
             result = (self.run_old if self.tool == 'old' else self.run_new)(args, env=self.run_env)
         record = {'label': label, 'code': result.returncode, 'stderr': result.stderr, 'timed_out': result.timed_out, 'calls': self.call_count()}
+        if self.tool == 'old':
+            self.check_recorded_old(label, result)
         if args[0] == 'bootstrap':
             if result.returncode == 0:
                 receipt = json.loads(result.stdout)
@@ -755,6 +885,7 @@ class Flow:
         new_calls = self.call_count()
         after_new = tree_snapshot(root)
         self.check_expected_old(label, old)
+        self.check_recorded_old(label, old)
         same_result(label, old, new)
         if old_calls != new_calls:
             raise AssertionError(f'{label}: Git の起動回数が違う(旧 {old_calls}・新 {new_calls})')
@@ -766,19 +897,187 @@ class Flow:
     def check_expected_old(self, label, old):
         """流れが固定期待(`expect_old`: 手順の番号・終了コード・標準エラー)を持つときは、旧版のその手順の結果が決まった理由であることを確かめる。"""
         want = self.case.get('expect_old')
+        if want and want['index'] == self.step_index:
+            self.expect_checked = True
         if want and want['index'] == self.step_index and (old.timed_out or (old.returncode, old.stdout, old.stderr) != (want['code'], b'', want['stderr'])):
             raise AssertionError(f'{label}: 旧版が決まった理由で止まらない(配置が変わった): 終了コード {old.returncode}・標準出力 {old.stdout[:100]!r}・'
                                  f'標準エラー {old.stderr[:300]!r}。期待: {want["code"]}・{want["stderr"]!r}')
+
+    # -- read・exec・hook・verify-pair
+    def copy_argv(self, tool, args):
+        if tool == 'new':
+            return [str(self.fixture), *map(os_bytes, args)]
+        argv = self.old_argv(args)
+        if args[0] == 'verify-pair':
+            # verify-pair は、読み込み器が起動するのと同じ、控え `a` の隣の guard のコピーから起動する(旧版は自分の `__file__` を照らし直す。固定期待の生成と同じ)。
+            argv[argv.index(str(self.guard))] = str(self.root / 'out' / 'a' / 'environment-guard.py')
+        return argv
+
+    def copy_run(self, tool, args, run, between=None):
+        """旧版か Rust の 1 回の実行。exec の子が書いた観測用のファイル(`probe` の下)を読んで消す。(結果, 観測用のファイルの正規化した値)を返す。"""
+        probe = self.root / 'probe'
+        argv = self.copy_argv(tool, args)
+        env = getattr(self, 'run_env', None) or self.env
+        spec = run.get('stdin')
+        if spec is not None or args[0] == 'verify-pair':
+            result = run_with_stdin(argv, env=env, cwd=self.root, spec=spec or {}, between=between)
+        else:
+            result = run_tool(argv, env=env, cwd=self.root)
+        probes = {}
+        if probe.is_dir():
+            for name in sorted(os.listdir(probe)):
+                probes[name] = self.normalize_probe((probe / name).read_bytes(), tool)
+                (probe / name).unlink()
+        if tool == 'new' and self.is_meaningful_rust_run(args):
+            self.tally.rust_runs += 1
+        return result, probes
+
+    def normalize_probe(self, raw, tool):
+        """子が書いた観測用のファイル。Python の子の環境の一覧から `__CF_USER_TEXT_ENCODING` だけを外し(2026-11-12 02:41 の決定。Mac の旧 Python が
+        旧版の子の環境へ自分で足す値で、Rust は再現しない)、値と有無を記録する。ほかの値・並びは旧版に合わせる。"""
+        try:
+            value = json.loads(raw)
+        except ValueError:
+            return self.normalize_shell_probe(raw, tool)
+        if isinstance(value, dict) and isinstance(value.get('env'), list):
+            kept = []
+            for item in value['env']:
+                if item[0] == CF_VARIABLE:
+                    self.tally.notes.append(f'{CF_VARIABLE}(子の環境の比較から外した。{"旧版" if tool == "old" else "Rust"}の子): {item[1]!r}')
+                else:
+                    kept.append(item)
+            value['env'] = kept
+        return value
+
+    def normalize_shell_probe(self, raw, tool):
+        """bash の子が書いた観測用のファイル(`env` の行の後に、環境の変数を `名前=値` の NUL 区切りで持つ)。Python の子と同じく、
+        `__CF_USER_TEXT_ENCODING` だけ外して値を記録する。ほかの変数・値・有無・並びは旧版に合わせる。形が違う(`env` の行が無い)物は、そのまま返す。"""
+        head, marker, tail = raw.partition(b'\nenv\n')
+        if not marker:
+            return raw
+        kept = []
+        for entry in tail.split(b'\0'):
+            if entry.startswith(CF_VARIABLE.encode() + b'='):
+                self.tally.notes.append(f'{CF_VARIABLE}(子の環境の比較から外した。{"旧版" if tool == "old" else "Rust"}の bash の子): {entry.split(b"=", 1)[1]!r}')
+            else:
+                kept.append(entry)
+        return head + marker + b'\0'.join(kept)
+
+    def copy_pair(self, label, args, run):
+        root = self.root
+        before = tree_snapshot(root, skip=('probe',))
+        self.reset_calls()
+        old, old_probes = self.copy_run('old', args, run)
+        old_calls = self.call_count()
+        after_old = tree_snapshot(root, skip=('probe',))
+        self.reset_calls()
+        new, new_probes = self.copy_run('new', args, run)
+        new_calls = self.call_count()
+        after_new = tree_snapshot(root, skip=('probe',))
+        self.check_recorded_old(label, old)
+        if old.timed_out or new.timed_out:
+            raise AssertionError(f'{label}: 時間切れ')
+        if run.get('u3'):
+            # U3: 旧版は判定器を実行し、Rust は確認の後に終了コード 20(R4P まで)。旧新それぞれの固定期待を別に確かめ、通常の一致に数えない。
+            if (old.returncode, old.stdout, old.stderr) != (7, b'hook-ran\n', b''):
+                raise AssertionError(f'{label}: U3 の旧版の固定期待と違う: {old.returncode} {old.stdout[:100]!r} {old.stderr[:200]!r}')
+            if (new.returncode, new.stdout, new.stderr) != (20, b'', U3_NEW_STDERR):
+                raise AssertionError(f'{label}: U3 の Rust の固定期待と違う: {new.returncode} {new.stdout[:100]!r} {new.stderr[:200]!r}')
+            self.tally.approved += 1
+        elif run.get('uncaught'):
+            self.approved_u4(label, old, new)
+        else:
+            same_result(label, old, new)
+            self.tally.runs += 1
+        if old_probes != new_probes:
+            raise AssertionError(f'{label}: 子が書いた観測用のファイルが旧新で違う\n旧: {old_probes!r}\n新: {new_probes!r}')
+        if old_calls != new_calls:
+            raise AssertionError(f'{label}: Git の起動回数が違う(旧 {old_calls}・新 {new_calls})')
+        if not (before == after_old == after_new):
+            raise AssertionError(f'{label}: 読取りだけのコマンドが入力を変えた')
+        self.tally.readonly += 1
+
+    def approved_u4(self, label, old, new):
+        """U4: 捕まえない例外。終了コードと標準出力は旧版どおり、標準エラーは旧版の traceback の途中の行と旧版の実行環境のパスだけを除いた物が
+        Rust の出力と同じ(最後の行・因果の区切りは除かない)。旧版が traceback を出さなければ前提が崩れたので不合格。"""
+        if b'Traceback (most recent call last):' not in old.stderr:
+            raise AssertionError(f'{label}: 旧版が捕まえない例外の traceback を出さない(前提が崩れた): {old.stderr[:200]!r}')
+        module = check_module()
+        try:
+            module.approved_u4(old, new, script=self.guard, stdlib=module.stdlib_dir())
+        except AssertionError as error:
+            raise AssertionError(f'{label}: {error}\n旧: {old.returncode} {old.stdout[:100]!r} {old.stderr[-300:]!r}\n新: {new.returncode} {new.stdout[:100]!r} {new.stderr[-300:]!r}') from None
+        self.tally.approved += 1
+
+    def check_recorded_old(self, label, old):
+        """流れが記録した旧版の結果(`copy_cases.json`。Linux で作った固定期待)を持つとき、旧版のこの手順の結果が同じであることを確かめる
+        (入力が変わって、決まった理由で止まらなくなったことを見つける)。標準出力と標準エラーは一時フォルダの名前を `{r}` にして比べる。
+        Mac の旧版の値は未測定なので、この確かめは Linux だけ(Mac の経路では行わない)。"""
+        recorded = self.case.get('recorded')
+        if recorded is None or MAC_PATH:
+            return
+        if self.step_index >= len(recorded):
+            raise AssertionError(f'{label}: 旧版の記録(copy_cases.json)に、この手順({self.step_index})の結果が無い(記録の数 {len(recorded)})')
+        self.recorded_checked.add(self.step_index)
+        want = recorded[self.step_index]
+        root = str(self.root)
+        run = self.case['runs'][self.step_index]
+        text = lambda raw: re.sub(gen().CMD_SHA_RE, '"sha256": "*"', raw.decode('utf-8', 'replace').replace(root, '{r}'))  # noqa: E731
+        if len(old.stdout) > 2000:
+            got = {'code': old.returncode, 'stdout_len': len(old.stdout), 'stdout_sha256': sha256(old.stdout)}
+            if (got['code'], got['stdout_len'], got['stdout_sha256']) != (want['code'], want.get('stdout_len'), want.get('stdout_sha256')):
+                raise AssertionError(f'{label}: 旧版の結果が固定期待(copy_cases.json)と違う(長い標準出力): {got}')
+            return
+        stdout = old.stdout.decode('latin-1').replace(root, '{r}')
+        stdout = re.sub(gen().CMD_SHA_RE, '"sha256": "*"', stdout)
+        if run.get('uncaught'):
+            last = text(old.stderr).strip().splitlines()[-1]
+            ok = (old.returncode, stdout, last) == (want['code'], want['stdout'], want['stderr_last'])
+        elif run.get('ignore_stderr'):
+            ok = (old.returncode, stdout) == (want['code'], want['stdout'])
+        else:
+            ok = (old.returncode, stdout, text(old.stderr)) == (want['code'], want['stdout'], want['stderr'])
+        if not ok:
+            raise AssertionError(f'{label}: 旧版の結果が固定期待(copy_cases.json。決まった理由で止まる)と違う(入力が変わった): '
+                                 f'{old.returncode} {stdout[:200]!r} {text(old.stderr)[:300]!r}')
+
+    def copy_solo(self, label, args, run):
+        """入力が実行の途中で変わる流れ(`ops_after_verified`)。旧版の回と Rust の回で、同じパスに配置を作り直して別々に流す。
+        記録するもの: 終了コード・標準出力・標準エラー・Git の起動回数・子が書いた観測用のファイル・実行の後の入力の姿(時刻と inode を除く)。"""
+        ops = run.get('ops_after_verified')
+        between = (lambda: self.g.cp_apply(str(self.root), ops)) if ops else None
+        result, probes = self.copy_run(self.tool, args, run, between)
+        if self.tool == 'old':
+            self.check_recorded_old(label, result)
+        self.log.append({'label': label, 'code': result.returncode, 'stdout': result.stdout, 'stderr': result.stderr, 'timed_out': result.timed_out,
+                         'calls': self.call_count(), 'probes': probes, 'tree': tree_shape(self.root)})
+
+    def other_outputs(self, out):
+        """`out/` の下の、今回の出力先(とそれを含む物)以外のバイト列。前の bootstrap の出力一式が、今回の bootstrap で書き換わっていないことを確かめるため。
+        退避した旧版の出力(`old-out-*`)は `out/` の外(`base` の下)にあるので、ここには入らない。"""
+        folder = self.root / 'out'
+        if not folder.is_dir() or folder.is_symlink():
+            return {}
+        current = os.path.abspath(out) if out is not None else None
+        result = {}
+        for name in sorted(os.listdir(folder)):
+            child = os.path.join(folder, name)
+            if current is not None and (current == child or current.startswith(child + os.sep)):
+                continue
+            result[name] = tree_bytes(child)
+        return result
 
     def bootstrap_pair(self, label, args):
         root = self.root
         out = Path(args[args.index('--output') + 1]) if '--output' in args else None
         existed = out is not None and os.path.lexists(out)
         before = tree_snapshot(root, skip=('out',))
+        others_before = self.other_outputs(out)
         out_before = tree_bytes(out) if existed and out.is_dir() and not out.is_symlink() else None
         self.reset_calls()
         old = self.run_old(args, patched=self.mode == 'patched')
         old_calls = self.call_count()
+        self.check_recorded_old(label, old)
         saved = None
         if out is not None and not existed and os.path.lexists(out):
             self.counter += 1
@@ -818,6 +1117,10 @@ class Flow:
                 self.tally.cross += 1
         if before != tree_snapshot(root, skip=('out',)):
             raise AssertionError(f'{label}: bootstrap が出力先の外の入力を変えた')
+        others_after = self.other_outputs(out)
+        if others_before != others_after:
+            changed = sorted(name for name in set(others_before) | set(others_after) if others_before.get(name) != others_after.get(name))
+            raise AssertionError(f'{label}: bootstrap が今回の出力先のほかの出力一式(out/ の下の {changed})を変えた')
         expected = self.case.get('expect_bootstrap')
         if expected is not None and not getattr(self, 'expect_done', False):
             self.expect_done = True
@@ -957,7 +1260,10 @@ def run_solo_pair(case, fixture, tmp_parent, mode=None):
             if old['timed_out'] or new['timed_out']:
                 raise AssertionError(f'{old["label"]}: 時間切れ')
             if old != new:
-                raise AssertionError(f'{old["label"]}: 旧新が一致しない\n旧: {old}\n新: {new}')
+                keys = sorted(key for key in set(old) | set(new) if old.get(key) != new.get(key))
+                detail = {key: (first_tree_difference(old[key], new[key]) if key == 'tree' else (old.get(key), new.get(key))) for key in keys}
+                raise AssertionError(f'{old["label"]}: 旧新が一致しない({", ".join(keys)})\n旧新の違い: {detail}\n旧: {old.get("code")} {old.get("stdout")!r:.300} {old.get("stderr")!r:.400}\n'
+                                     f'新: {new.get("code")} {new.get("stdout")!r:.300} {new.get("stderr")!r:.400}')
             tally.runs += 1
         return tally
     finally:
@@ -1476,7 +1782,7 @@ def interrupted_run(flow, argv):
     flow.reset_calls()
     (flow.base / 'race.json').write_text(json.dumps({'call': 1, 'ops': [], 'stop': True}))
     process = subprocess.Popen(argv, cwd=flow.root, env=flow.env, start_new_session=True, stdin=subprocess.DEVNULL,
-                               stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=default_sigint)
     try:
         deadline = time.monotonic() + 30
         while not marker.exists():
@@ -1613,6 +1919,305 @@ def run_patched_sample(fixture, tmp_parent):
     return tally
 
 
+# ---------------------------------------------------------------- read・exec・hook・verify-pair(2 段目 b-2b)
+
+COPY_JSON = HERE / 's2e_fixtures/copy_cases.json'
+SLEEPER = "import os, sys, time\nwith open(sys.argv[1], 'w') as handle:\n    handle.write(str(os.getpid()))\ntime.sleep(60)\n"
+HOOK_AFTER_VERIFY_REASON = ('hook-after-verify: verify の直後、判定器を読む前にコピーの判定器が書き換わる窓は、Rust の cfg(test) の差し込み点(site `hook-after-verify`)でだけ作れる'
+                            '(製品の example の CLI からは作れない)。Rust の検査 copy_tests.rs(固定期待 copy_cases.json の流れ hook-after-verify)で確かめた')
+GO_TIMEOUT_MAC = {'100000001': '100000002'}   # Mac の go_timeout=100000001 は旧版でも揺れる境目(推測)。Mac は 100000000 以下と 100000002 以上を使う
+
+
+def copy_flow_cases():
+    """固定期待の生成スクリプトの read・exec・hook・verify-pair の流れ(`cp_cases`)を、旧版と Rust で実際に順に流す入力にする。
+    旧版が記録した結果(`copy_cases.json`)は、旧版のこの手順の結果が決まった理由で止まるかの確かめ(Linux だけ)に使う。
+    入力が実行の途中で変わる流れ(`ops_after_verified`)は、旧版の回と Rust の回を別々に流す('solo')。"""
+    g = gen()
+    recorded = {case['name']: case['results'] for case in json.loads(COPY_JSON.read_text(encoding='utf-8'))['cases']}
+    python3, bash = shutil.which('python3'), shutil.which('bash')
+    cases = []
+    for case in g.cp_cases():
+        if case['name'] == 'hook-after-verify':
+            continue
+        layout = [dict(item, target=item['target'].replace('{python3}', python3).replace('{bash}', bash)) if item.get('kind') == 'link' else item
+                  for item in case['layout']]
+        runs = []
+        for step in case['steps']:
+            run = dict(step)
+            if MAC_PATH:
+                run['args'] = [GO_TIMEOUT_MAC.get(arg, arg) for arg in run['args']]
+            runs.append(run)
+        solo = any(run.get('ops_after_verified') for run in runs)
+        cases.append(('solo' if solo else 'both', {'name': 'cp-' + case['name'], 'layout': layout, 'runs': runs, 'recorded': recorded[case['name']],
+                                                   'no_readers': True, 'no_readers_quiet': True}))
+    return cases
+
+
+def run_copy_flow(case, kind, fixture, tmp_parent):
+    if kind == 'solo':
+        return run_solo_pair(case, fixture, tmp_parent)
+    tally = run_flow(case, fixture, tmp_parent)
+    if case['name'] == 'cp-hook':
+        tally.excluded.append(HOOK_AFTER_VERIFY_REASON)
+    return tally
+
+
+PIPE_WAIT = 30     # 残った物を止めた後に、標準出力・標準エラーのパイプが閉じるのを待つ秒数
+def default_sigint():
+    """起動する子の SIGINT を既定へ戻す。背景で起動された比較器(`&` や nohup)は SIGINT が無視のまま始まり、子も無視を引き継いで、
+    中断の比較の前提(旧版が KeyboardInterrupt で終わる)が崩れるため。"""
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+
+
+SIGINT_WAIT = 30   # SIGINT を送ってから、中断した guard 自身が終わるまで待つ秒数
+
+
+def stop_remaining(process, child):
+    """中断の比較の後始末: guard のプロセスグループと、分かっていれば子の pid(別のプロセスグループにいても)へ SIGKILL を送る。"""
+    for kill, target in ((os.killpg, process.pid), (os.kill, child)):
+        if target is None:
+            continue
+        try:
+            kill(target, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def interrupted_copy(flow, argv, kind):
+    """exec は子が観測用のファイルを書いた時(子が動いている決まった止まり所)、verify-pair は `verified` が出た時(`go` を待つ決まった止まり所)に、
+    信号 2(SIGINT)を送る。記録: 終了値・標準出力・標準エラーの最後の行・子が残ったか(exec)。"""
+    ready = flow.root / 'probe' / 'ready'
+    if ready.exists():
+        ready.unlink()
+    process = subprocess.Popen(argv, cwd=flow.root, env=flow.env, start_new_session=True, stdin=subprocess.PIPE if kind == 'pair' else subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=default_sigint)
+    seen = b''
+    child = None
+    left = False
+    try:
+        deadline = time.monotonic() + 30
+        while True:
+            if kind == 'exec':
+                if ready.exists() and ready.read_text():
+                    child = int(ready.read_text())
+                    break
+                time.sleep(0.02)
+            else:
+                readable, _, _ = select.select([process.stdout], [], [], 0.1)
+                if readable:
+                    chunk = os.read(process.stdout.fileno(), 4096)
+                    if not chunk:
+                        break
+                    seen += chunk
+                if b'verified\n' in seen:
+                    break
+            if process.poll() is not None or time.monotonic() > deadline:
+                raise AssertionError(f'決まった止まり所に届かなかった(終了値 {process.poll()})')
+        os.kill(process.pid, signal.SIGINT)
+        # 子が残ると、残った子が標準出力・標準エラーのパイプを持ち続けて EOF が来ないので、パイプではなく guard 自身の終了を待つ。
+        try:
+            process.wait(timeout=SIGINT_WAIT)
+        except subprocess.TimeoutExpired:
+            raise AssertionError(f'SIGINT を送っても {SIGINT_WAIT} 秒以内に終わらない(子が残ったか、中断で止まらない)') from None
+        # 終わった後、子が生きているかを、後始末(プロセスグループの kill)の前に確かめる。
+        left = False
+        if child is not None:
+            left = True
+            for _ in range(200):
+                try:
+                    os.kill(child, 0)
+                except ProcessLookupError:
+                    left = False
+                    break
+                time.sleep(0.03)
+    except BaseException:
+        stop_remaining(process, child)
+        process.communicate()
+        raise
+    # 残った子も含めて止めてから出力を読む(パイプの端を持つ者がいなくなる)。子が別のプロセスグループにいても止めるよう、残った子の pid にも送る。
+    stop_remaining(process, child if left else None)
+    try:
+        out, err = process.communicate(timeout=PIPE_WAIT)
+    except subprocess.TimeoutExpired:
+        stop_remaining(process, child)
+        for pipe in (process.stdin, process.stdout, process.stderr):   # パイプを持ち続ける物がいるので、読み切らずに閉じる
+            if pipe is not None:
+                pipe.close()
+        process.wait(timeout=PIPE_WAIT)
+        raise AssertionError('SIGINT の後に子が残った・パイプが閉じない(残った物を止めた)') from None
+    lines = [line for line in err.decode('utf-8', 'replace').splitlines() if line.strip()]
+    return {'code': process.returncode, 'stdout': seen + out, 'last': lines[-1] if lines else '', 'left': left}
+
+
+def run_sigint_copy(kind, fixture, tmp_parent):
+    """SIGINT(利用者の決定: 信号で終わること・終了値・最後の行 KeyboardInterrupt・それまでの標準出力・子を残さないことを比べる。呼出履歴の途中の行は比べない)。"""
+    g = gen()
+    layout = g.cp_layout() + [g.L('plugin/scripts/sleeper.py', body=SLEEPER)]
+    flow = Flow({'name': f'sigint-{kind}', 'layout': layout, 'runs': []}, fixture, tmp_parent)
+    try:
+        flow.setup()
+        flow.bootstrap_pair(f'sigint-{kind}#prepare', _bootstrap_args(flow.root, 'a', '--inventory', f'{flow.root}/inv.json'))
+        state = str(flow.root / 'out/a/environment.json')
+        common = ['--state', state, '--expect-sha256', flow.shas['a']]
+        if kind == 'exec':
+            args = ['exec', *common, '--path', 'scripts/sleeper.py', '--', 'python3', f'{flow.root}/probe/ready']
+        else:
+            args = ['verify-pair', *common, '--current-inventory', f'{flow.root}/inv.json', '--guard-sha256', g.OLD_GUARD_SHA256, '--go-timeout', '60']
+        records = {}
+        for tool in ('old', 'new'):
+            before = tree_snapshot(flow.root, skip=('probe',))
+            records[tool] = interrupted_copy(flow, flow.copy_argv(tool, args), kind)
+            if before != tree_snapshot(flow.root, skip=('probe',)):
+                raise AssertionError(f'sigint-{kind} {tool}: 中断が入力を変えた')
+            if tool == 'new':
+                flow.tally.rust_runs += 1
+        old = records['old']
+        if old['code'] != -signal.SIGINT or old['last'] != 'KeyboardInterrupt' or old['left']:
+            raise AssertionError(f'sigint-{kind}: 旧版が信号 2 で終わらない・最後の行が KeyboardInterrupt でない・子が残った(前提が崩れた): {old}')
+        if old != records['new']:
+            raise AssertionError(f'sigint-{kind}: 旧新が一致しない\n旧: {old}\n新: {records["new"]}')
+        flow.tally.runs += 1
+        return flow.tally
+    finally:
+        flow.close()
+
+
+FD_PROBE = ("import os, stat, sys\nstates = []\nfor fd in (0, 1, 2):\n    try:\n        mode = os.fstat(fd).st_mode\n"
+            "        states.append('devnull' if stat.S_ISCHR(mode) else 'open')\n    except OSError:\n        states.append('closed')\n"
+            "with open(sys.argv[1], 'w') as handle:\n    handle.write(' '.join(states))\n")
+
+
+def last_line(raw):
+    lines = [line for line in raw.decode('utf-8', 'replace').splitlines() if line.strip()]
+    return lines[-1] if lines else ''
+
+
+U7_PAIR_FD0_OLD = 'ERROR [environment-guard] 検査を完了できない (OSError)\n'.encode()
+
+
+def run_u7_copy(fixture, tmp_parent):
+    """U7: 起動時に閉じた標準の fd。Rust は閉じた fd 0〜2 を `/dev/null` で開き直す。旧版は、fd 0 が閉じた `verify-pair` が `go` を読めず(`OSError` の診断・終了コード 20)、
+    fd 1 が閉じた `read`・`verify-pair` が標準出力へ書けず(`AttributeError`・終了コード 1)、`exec` の子は閉じたまま始まる。旧新それぞれの固定期待を別に確かめ、
+    通常の一致に数えない。読取りだけのコマンドとして、前後で入力が変わらないことも確かめる。"""
+    g = gen()
+    layout = g.cp_layout() + [g.L('plugin/scripts/fdprobe.py', body=FD_PROBE)]
+    flow = Flow({'name': 'u7-copy', 'layout': layout, 'runs': []}, fixture, tmp_parent)
+    try:
+        flow.setup()
+        flow.bootstrap_pair('u7-copy#prepare', _bootstrap_args(flow.root, 'a', '--inventory', f'{flow.root}/inv.json'))
+        common = ['--state', str(flow.root / 'out/a/environment.json'), '--expect-sha256', flow.shas['a']]
+        pair = ['verify-pair', *common, '--current-inventory', f'{flow.root}/inv.json', '--guard-sha256', g.OLD_GUARD_SHA256, '--go-timeout', '5']
+        read = ['read', *common, '--path', 'README.md']
+        probe = ['exec', *common, '--path', 'scripts/fdprobe.py', '--', 'python3', f'{flow.root}/probe/fds']
+        fds = flow.root / 'probe' / 'fds'
+        # (名前, 引数, 閉じる fd, 旧版の固定期待, Rust の固定期待)。期待は (終了コード, 標準出力, 標準エラーの最後の行か全文, 子の fd の状態)。
+        cases = [
+            ('verify-pair-fd0-closed', pair, (0,), (20, b'verified\n', U7_PAIR_FD0_OLD.decode().strip(), None), (20, b'verified\n', '', None)),
+            ('verify-pair-fd1-closed', pair, (1,), (1, b'', "AttributeError: 'NoneType' object has no attribute 'write'", None), (20, b'', '', None)),
+            ('read-fd1-closed', read, (1,), (1, b'', "AttributeError: 'NoneType' object has no attribute 'buffer'", None), (0, b'', '', None)),
+            ('exec-child-fds-closed', probe, (0, 1, 2), (0, b'', '', 'closed closed closed'), (0, b'', '', 'devnull devnull devnull')),
+        ]
+        # 旧版の固定期待を、全件で先に確かめる(旧版の側が違う結果になる入力は、Rust の側の固定期待の前に、旧版の固定期待の文面で落ちる)。その後に Rust を確かめる。
+        for tool, index in (('old', 3), ('new', 4)):
+            for name, args, close, *wants in cases:
+                want = wants[index - 3]
+                before = tree_snapshot(flow.root, skip=('probe',))
+                if fds.exists():
+                    fds.unlink()
+                result = run_tool(flow.copy_argv(tool, args), env=flow.env, cwd=flow.root, close=close)
+                if result.timed_out:
+                    raise AssertionError(f'u7-{name} {tool}: 時間切れ')
+                got = (result.returncode, result.stdout, last_line(result.stderr), fds.read_text() if fds.exists() else None)
+                if got != want:
+                    raise AssertionError(f'u7-{name} {"旧版" if tool == "old" else "Rust"}: 固定期待と違う: {got!r}。期待 {want!r}')
+                if before != tree_snapshot(flow.root, skip=('probe',)):
+                    raise AssertionError(f'u7-{name} {tool}: 読取りだけのコマンドが入力を変えた')
+                if tool == 'new':
+                    flow.tally.rust_runs += 1
+                    flow.tally.approved += 1
+                    flow.tally.readonly += 1
+        return flow.tally
+    finally:
+        flow.close()
+
+
+def run_output_env_copy(fixture, tmp_parent):
+    """U4・U5: read と verify-pair の出力の故障(標準出力が `/dev/full`〈Linux だけ〉か読む側の閉じたパイプ)を、`PYTHONUNBUFFERED` の値ごとに旧版と Rust で比べる。
+    終了コード・標準出力・標準エラーが同じなら通常の一致、旧版が捕まえない例外(traceback)で終わるときは、U4 の比較(途中の行だけ除く)で認めた差に数える。
+    `PYTHONINTMAXSTRDIGITS`(値ごと)と `--go-timeout` の桁数の組み合わせも比べる(整数変換の上限。不正な値は起動時の Fatal)。"""
+    g = gen()
+    module = check_module()
+    flow = Flow({'name': 'u45-copy', 'layout': g.cp_layout(), 'runs': []}, fixture, tmp_parent)
+    try:
+        flow.setup()
+        flow.bootstrap_pair('u45-copy#prepare', _bootstrap_args(flow.root, 'a', '--inventory', f'{flow.root}/inv.json'))
+        common = ['--state', str(flow.root / 'out/a/environment.json'), '--expect-sha256', flow.shas['a']]
+        pair = ['verify-pair', *common, '--current-inventory', f'{flow.root}/inv.json', '--guard-sha256', g.OLD_GUARD_SHA256, '--go-timeout', '5']
+        read = ['read', *common, '--path', 'data/big.bin']
+        targets = ['pipe-closed'] + (['full'] if module.has_dev_full() else [])
+        before = tree_snapshot(flow.root, skip=('probe',))
+
+        def check_old(label, old, want):
+            """旧版が狙った経路へ届いたことの固定期待(旧版で測った値。Linux だけ。Mac の旧版の値は未測定)。違えば「旧版が決まった理由で止まらない」。
+            want は (終了コード, 標準出力の長さ, 標準エラーの最後の行を確かめる関数か文字列)。"""
+            code, length, last = want
+            got_last = last_line(old.stderr)
+            last_ok = last(got_last) if callable(last) else got_last == last
+            if (old.returncode, len(old.stdout)) != (code, length) or not last_ok:
+                raise AssertionError(f'{label}: 旧版が決まった理由で止まらない(狙った経路へ届かない): 終了コード {old.returncode}・標準出力 {len(old.stdout)} バイト・'
+                                     f'最後の行 {got_last[:120]!r}。期待: {code}・{length} バイト・{last if not callable(last) else "(関数)"!r}')
+
+        def compare(label, args, env, redirects=None, stdin=None, want=None):
+            old = module.run_process(flow.copy_argv('old', args), env=env, cwd=flow.root, redirects=redirects, stdin=stdin)
+            new = module.run_process(flow.copy_argv('new', args), env=env, cwd=flow.root, redirects=redirects, stdin=stdin)
+            flow.tally.rust_runs += 1
+            if old.timed_out or new.timed_out:
+                raise AssertionError(f'{label}: 時間切れ')
+            if want is not None and not MAC_PATH:
+                check_old(label, old, want)
+            try:
+                same_result(label, old, new)
+                flow.tally.runs += 1
+            except AssertionError:
+                if b'Traceback (most recent call last):' not in old.stderr:
+                    raise
+                flow.approved_u4(label, old, new)
+            if before != tree_snapshot(flow.root, skip=('probe',)):
+                raise AssertionError(f'{label}: 読取りだけのコマンドが入力を変えた')
+            flow.tally.readonly += 1
+
+        # 旧版で測った固定期待。標準出力が壊れたとき: read は常に 20(`検査を完了できない`)。verify-pair は PYTHONUNBUFFERED が空・未設定・`0` なら
+        # 出力を貯めて終了時に書くので、捕まえない例外で終了コード 120、それ以外(`1`・`abc`。空でない値は無緩衝)は 20。
+        broken_read = (20, 0, lambda text: text.startswith('ERROR [environment-guard] 検査を完了できない ('))
+        broken_pair_buffered = (120, 0, lambda text: text.startswith(('BrokenPipeError: ', 'OSError: ')))
+        broken_pair_unbuffered = (20, 0, lambda text: text.startswith('ERROR [environment-guard] 検査を完了できない ('))
+        for unbuffered in (None, '1', '0', 'abc'):
+            env = dict(flow.env, PYTHONUNBUFFERED=unbuffered) if unbuffered is not None else dict(flow.env)
+            for target in targets:
+                compare(f'u45-read stdout={target} unbuffered={unbuffered!r}', read, env, {1: target}, want=broken_read)
+                compare(f'u45-pair stdout={target} unbuffered={unbuffered!r}', pair, env, {1: target}, b'go\n',
+                        want=broken_pair_buffered if unbuffered in (None, '0') else broken_pair_unbuffered)
+            compare(f'u45-read stdout=pipe unbuffered={unbuffered!r}', read, env, want=(0, 300000, ''))
+            compare(f'u45-pair stdout=pipe unbuffered={unbuffered!r}', pair, env, None, b'go\n', want=(0, len(b'verified\n'), ''))
+        # PYTHONINTMAXSTRDIGITS(下限 640)と go-timeout の桁数。上限を超える桁数は argparse の誤り(終了コード 2・出力なし)、
+        # 上限以内で float にできない桁数は verified の後の OverflowError(終了コード 1)、上限が範囲外の値(639・桁数が大きすぎる値・数でない値)は起動時の Fatal(1)。
+        def argparse_error(count):
+            return (2, 0, lambda text: text.endswith(f"invalid int value: '{'9' * count}'"))
+        overflow = (1, len(b'verified\n'), 'OverflowError: int too large to convert to float')
+        fatal = (1, 0, 'Python runtime state: preinitialized')
+        digit_wants = {('640', 700): argparse_error(700), ('640', 5000): argparse_error(5000), ('1000', 700): overflow, ('1000', 5000): argparse_error(5000),
+                       ('0', 700): overflow, ('0', 5000): overflow, ('639', 700): fatal, ('639', 5000): fatal,
+                       ('99999999999999', 700): fatal, ('99999999999999', 5000): fatal, ('abc', 700): fatal, ('abc', 5000): fatal}
+        for digits in ('640', '639', '1000', '0', '99999999999999', 'abc'):
+            env = dict(flow.env, PYTHONINTMAXSTRDIGITS=digits)
+            for count in (700, 5000):
+                args = [*pair[:-1], '9' * count]
+                compare(f'u45-pair intmaxstrdigits={digits} go-timeout-digits={count}', args, env, None, b'go\n', want=digit_wants[(digits, count)])
+        return flow.tally
+    finally:
+        flow.close()
+
+
 # ---------------------------------------------------------------- 一覧と実行
 
 RUST_BOOTSTRAP_REASON = ('Rust の bootstrap が要る(Mac は既定の監視先の /etc が /private/etc へのリンクで、Rust の bootstrap は失敗する見込み。'
@@ -1670,6 +2275,12 @@ def items(fixture):
                            '上限の端は Rust の bootstrap で比べる。' + RUST_BOOTSTRAP_REASON))
     result.append(Item('signal', 'x-sigint-bootstrap', LINUX_ONLY, lambda tmp: run_sigint('bootstrap', fixture, tmp), '中断された bootstrap は Rust の bootstrap が要る。' + RUST_BOOTSTRAP_REASON))
     result.append(Item('signal', 'x-sigint-verify', ALL, lambda tmp: run_sigint('verify', fixture, tmp)))
+    result.append(Item('signal', 'x-sigint-exec', ALL, lambda tmp: run_sigint_copy('exec', fixture, tmp)))
+    result.append(Item('signal', 'x-sigint-verify-pair', ALL, lambda tmp: run_sigint_copy('pair', fixture, tmp)))
+    result.append(Item('u7', 'u7-copy-fds', ALL, lambda tmp: run_u7_copy(fixture, tmp)))
+    result.append(Item('u45', 'u45-copy-output-env', ALL, lambda tmp: run_output_env_copy(fixture, tmp)))
+    for kind, case in copy_flow_cases():
+        result.append(Item('copy', case['name'], ALL, lambda tmp, case=case, kind=kind: run_copy_flow(case, kind, fixture, tmp)))
     result.append(Item('failure', 'x-fsize-bootstrap', LINUX_ONLY, lambda tmp: run_fsize(fixture, tmp), '書込みの失敗の bootstrap は Rust の bootstrap が要る。' + RUST_BOOTSTRAP_REASON))
     result.append(Item('u2', 'u2-guard-origin', LINUX_ONLY, lambda tmp: run_u2(fixture, tmp),
                        'U2 の旧新それぞれの固定期待は Rust の bootstrap の控える guard の差で、Mac では Rust の bootstrap を流さない。' + '(Mac では未確認)'))

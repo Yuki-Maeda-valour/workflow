@@ -12,7 +12,8 @@
   バイト比較・読取りだけの前後確認・相互読取り・競合・上限の端(旧版で測る)・SIGINT・書込みの失敗・U1・U2・U6)は `s2e_commands.py`。
   各項目に「全機種で必須」か「Linux だけ」の印(と理由)を付け、機種ごとの項目数を完全一致で確かめる。どの項目も Rust を起動した比較が 1 件以上
   ないと不合格。Mac の経路(旧版の bootstrap は patched・Linux だけの項目は流さない)は、環境変数 S2E_SIMULATE_MAC=1 で Linux から模擬できる
-  (比較器の検査用。Mac 実機の動きの確認ではない。模擬の合格は終了コード 3 で、最後の行も「S2E: 合格」ではない)。read・exec・hook・verify-pair の旧新比較は 2 段目 b-2b(起動時の Fatal は 2 段目 b-2a で再現済み)。
+  (比較器の検査用。Mac 実機の動きの確認ではない。模擬の合格は終了コード 3 で、最後の行も「S2E: 合格」ではない)。read・exec・hook・verify-pair の旧新比較(同じ物理入力を実際に順に流す。`ops_after_verified` の流れは旧版の回と Rust の回を別々に流す。U3・U4・U7 は旧新それぞれの固定期待を別に確かめる。
+  SIGINT は exec の子が動いている時と verify-pair の `go` を待つ時に送る)も `s2e_commands.py`(2 段目 b-2b)。起動時の Fatal は 2 段目 b-2a で再現済み。
 """
 import argparse
 import dataclasses
@@ -53,6 +54,11 @@ def fixture_path(value):
 
 # ---------------------------------------------------------------- 実行
 
+def has_dev_full():
+    """`/dev/full`(書くと ENOSPC になる装置)を使えるか。Linux だけにある(Mac に無い)。Mac の経路の模擬(S2E_SIMULATE_MAC=1)では、無い物として扱う。"""
+    return sys.platform.startswith('linux') and os.environ.get('S2E_SIMULATE_MAC') != '1' and os.path.exists('/dev/full')
+
+
 def run_process(argv, *, env, cwd, redirects=None, stdin=None, timeout=OLD_TIMEOUT):
     """別プロセスグループで argv を起動する。`redirects` は {fd: モード}。
 
@@ -72,6 +78,9 @@ def run_process(argv, *, env, cwd, redirects=None, stdin=None, timeout=OLD_TIMEO
         elif mode == 'dir':
             shell.append(f'{fd}</')
         elif mode == 'full':
+            if not has_dev_full():
+                # 無い装置へのリダイレクトは sh が失敗して未起動のまま旧新が一致してしまう。黙って続けず止める。
+                raise AssertionError('/dev/full が無い機種(Mac)では full の故障は使えない。pipe-closed を使う')
             shell.append(f'{fd}>/dev/full')
         elif mode == 'pipe-closed':
             read_end, write_end = os.pipe()
@@ -342,8 +351,9 @@ def host_paths_cases():
 
 def output_failure_cases():
     cases = []
+    targets = ('full', 'pipe-closed') if has_dev_full() else ('pipe-closed',)   # /dev/full は Linux だけ
     for unbuffered in (None, '1', '0', ' 0', '00', '+0', 'abc', '', '0 ', '-1'):
-        for target in ('full', 'pipe-closed'):
+        for target in targets:
             good = base_env({'HOME': '/h', 'PYTHONUNBUFFERED': unbuffered})
             cases.append(Case('output', f'host-paths/stdout={target}/unbuffered={unbuffered!r}', ['host-paths'], good, {1: target}, kind='u4auto'))
             bad = base_env({'HOME': 'rel', 'PYTHONUNBUFFERED': unbuffered})
@@ -452,17 +462,15 @@ def fatal_cases():
     return cases
 
 
-# 2 段目 b-2 で足す本体の成功経路。今は数えない(skip として合格にしない)。b-1d で足した bootstrap・verify・host-settings・host-allowlist・
-# U1・U2・U6・相互読取りは、`s2e_commands.py` の比較に入れた。
-PENDING_2B = (
-    'read・exec: 生バイト・子の終了コードとシグナル・PATH の探索',
-    'hook: 照合と保持値の確認(U3: 確認の後の Rust は終了コード 20)',
-    'verify-pair: verified・go の待ち・2 回の照合・guard のコピーの再照合',
-    'U4: 捕まえない例外の表示(最後の行・因果の区切り)',
-    'U7: fd 0 が閉じた verify-pair・exec の子の fd',
-    'U5: PYTHONUNBUFFERED と PYTHONINTMAXSTRDIGITS だけを比べる。ほかの起動を変える環境変数(PYTHONHASHSEED・PYTHONMALLOC・PYTHONHOME など)は、'
-    '2026-11-11 22:31 の利用者の決定で比較の前提の外(比べるケースは足さない)',
-)
+# 2 段目 b の予定の枠。read・exec・hook・verify-pair・U4・U5・U7 の残りは 2 段目 b-2b で足し終えたので 0 件。
+# 件数が 0 でなければ、比較器は不合格にする(`check_pending_is_empty`。未実装を合格にしない)。
+PENDING_2B = ()
+
+
+def check_pending_is_empty(pending=None):
+    pending = PENDING_2B if pending is None else pending
+    if pending:
+        raise AssertionError(f'予定の枠が 0 件でない(2 段目 b を終える時点で 0 件): {len(pending)} 件。{pending[0]}')
 
 
 # ---------------------------------------------------------------- 実行
@@ -529,8 +537,13 @@ def run_case(runner, case, tally):
         elif case.kind == 'fatal':
             if not fatal_shape_ok(old.stderr):
                 raise AssertionError('旧版の Fatal 診断の形式が想定と違う')
-            approved_fatal(old, new)
-            tally['approved'] += 1
+            if FATAL_SHAPE_CONFIG.match(old.stderr):
+                # 設定の段階の診断(Current thread の行が無い)は、全バイトが旧版と一致するので、通常の一致に数える。
+                same_result(old, new)
+                tally['matched'] += 1
+            else:
+                approved_fatal(old, new)
+                tally['approved'] += 1
         else:
             raise AssertionError('未知のケースの種類')
     except AssertionError as error:
@@ -543,13 +556,14 @@ def all_cases():
 
 def smoke_cases():
     """比較器自身の検査が使う、少数の代表ケース。"""
+    target = 'full' if has_dev_full() else 'pipe-closed'   # Mac では pipe-closed(旧版が -h の出力で traceback を出す形)
     return [
         Case('args', 'help/top', ['-h'], base_env(), kind='parse'),
         Case('args', 'usage-error', ['verify'], base_env(), kind='parse'),
         Case('host-paths', 'ok', ['host-paths'], base_env({'HOME': '/h'})),
         Case('host-paths', 'error', ['host-paths'], base_env({'HOME': 'rel'})),
-        Case('output', 'full', ['host-paths'], base_env({'HOME': '/h'}), {1: 'full'}),
-        Case('output', 'help-full-unbuffered', ['-h'], base_env({'HOME': '/h', 'PYTHONUNBUFFERED': '1'}), {1: 'full'}, kind='u4auto'),
+        Case('output', target, ['host-paths'], base_env({'HOME': '/h'}), {1: target}),
+        Case('output', f'help-{target}-unbuffered', ['-h'], base_env({'HOME': '/h', 'PYTHONUNBUFFERED': '1'}), {1: target}, kind='u4auto'),
     ]
 
 
@@ -578,11 +592,11 @@ def run_suite(suite):
 # ---------------------------------------------------------------- 既存テストの対応表
 
 # (テスト名, 分類, 対応先または理由, 補足)。分類: both=旧新の両方で比較・rust=Rust の検査へ置換・out=対象外。
-# 「予定」は 2 段目 b で作る。「実装済み」は今ある比較か Rust のテスト。
+# 「予定」(まだ作っていない比較)は 0 件(`check_mapping` が不合格にする)。「実装済み」は今ある比較か Rust のテスト。
 B, R, O = 'both', 'rust', 'out'
 TEST_MAPPING = [
     ('test_full_distribution_is_retained_and_binary_changes_are_rejected', B, '比較[x-real-distribution, x-real-distribution-flip](配布物の全体の保持と、Rust のバイナリ・launch.sh・resolve-task-dir.py の 1 ビットの書き換えの拒否と戻した後。旧版との比較)。Budget の計上は budget.rs::tick_stops_just_after_ten_thousand_items。check_plugin_launch は対象外(D2。固定の読み込み器と launch の入口)', ''),
-    ('test_normal_and_copy_exec', B, 'bootstrap と verify は 比較[basic]。exec は次の段(予定)', ''),
+    ('test_normal_and_copy_exec', B, 'bootstrap と verify は 比較[basic]。read・exec は 比較[cp-read, cp-exec](生バイト・子の終了コードと信号・PATH の探し方・子の環境)', ''),
     ('test_source_fixed_output_and_skill_change', B, '比較[verify-edit-plugin-file, verify-edit-plugin-file-same-size, verify-skill-edit, x-source-guard-changed]', ''),
     ('test_copy_modified', B, '比較[verify-copy-edit, verify-copy-remove, verify-copy-add, verify-copy-chmod, verify-copy-dir-chmod]', ''),
     ('test_manifest_and_hash_forgery', B, '比較[x-forged-state, verify-state-edit, verify-state-remove]', ''),
@@ -600,7 +614,7 @@ TEST_MAPPING = [
     ('test_parent_replacement_does_not_read_external_secret', R, '実装済み: fsio.rs::a_swapped_parent_is_rejected_after_the_body と race_tests.rs::a_subdirectory_swapped_between_lstat_and_open_is_refused と 比較[x-race-verify-parent-swap, x-parent-swap-host-settings]', ''),
     ('test_shell_and_xdg_settings_change', B, '比較[verify-shell-created, verify-xdg-config-created]', ''),
     ('test_active_plugin_inventory_and_content_change', B, '比較[options](verify --current-inventory)と、実装済みの pyjson の plugin_inventory の固定期待', ''),
-    ('test_direct_read_exec_no_original_import', B, 'read・exec/direct(予定)', ''),
+    ('test_direct_read_exec_no_original_import', B, '比較[cp-read, cp-exec](控えの隣のコピーを照合してから読む・実行する。exec の scripts/importer.py は兄弟の sibling.py をコピーから import し、read は scripts/sibling.py を読む。`__pycache__` を作らないことは、前後の入力の完全一致で確かめる。CLI で旧新を比べる)', ''),
     ('test_replaced_external_receipt_is_not_an_isolation_boundary', B, '比較[x-receipt-replaced]', ''),
     ('test_permission_sources_preserve_identity_presence_and_private_values', R, '実装済み: settings.rs::read_host_settings_cases_match_python_3_10 と 内部 reader の旧新比較(source の値を含む型の印つきの値の一致。比較[options-readers])', ''),
     ('test_permission_reader_keeps_bash_conversion_cli_user_only', R, '実装済み: settings::host_allowlist_cases_match_python_3_10 と rule_cases', ''),
@@ -618,7 +632,7 @@ TEST_MAPPING = [
     ('test_new_managed_dropin_between_snapshot_and_descriptors_is_rejected', R, '比較[x-race-bootstrap-new-managed-dropin, x-race-verify-new-managed-dropin](PATH の偽の git が解析中に書き足す。旧版の回と Rust の回で、終了コード・標準エラー・Git の起動回数・出力フォルダの構成を比べる)', ''),
     ('test_update_doc_standalone_entry_binds_to_verified_copy_before_modes', O, 'SKILL.md の文書と固定の読み込み器の字面の検査(読み込み器を通す)', ''),
     ('test_held_launcher_rejects_replaced_fixed_success_code', O, 'loop.sh 側の固定の読み込み器(Python の字面)の検査。D2 の混在の条件で扱う', ''),
-    ('test_post_check_execution_gap_is_detected_only_on_next_check', B, 'exec/post-check-gap(予定)', ''),
+    ('test_post_check_execution_gap_is_detected_only_on_next_check', B, '比較[cp-pair-after-edit-copy, cp-pair-after-edit-source, cp-pair-after-edit-guard-copy](verify-pair の 1 回目の照合に成功して verified を出した後、2 回目の照合の前にコピー・元・guard のコピーを書き換える。照合の後の変更は、次の照合で拒否する)', ''),
     ('test_symlink_dotdot_is_not_lexically_hidden', B, '比較[x-git-include-dotdot-symlink]', ''),
     ('test_regular_dotdot_include_and_git_path_expansion', B, '比較[x-git-include-expansion, include-absolute]', ''),
     ('test_official_global_install_and_target_change', B, '比較[x-install-link-official, x-install-link-agents]', ''),
@@ -638,17 +652,17 @@ TEST_MAPPING = [
     ('test_changed_known_include_stops_before_new_nested_target', B, '比較[verify-include-target-edit, x-race-verify-include-target-edit, x-preread-include-edit-fifo, x-preread-include-edit-0200]', ''),
     ('test_absent_include_candidate_stops_before_new_body', B, '比較[include-missing-target, x-race-bootstrap-new-include-target, x-preread-absent-include-fifo, x-preread-absent-include-0200]', ''),
     ('test_known_nested_and_missing_graph_stays_normal', B, '比較[include-chain-two, include-missing-target, x-preread-nested-missing-graph]', ''),
-    ('test_go_after_verified_succeeds_with_nothing_on_stderr', B, 'verify-pair/go(予定)', ''),
-    ('test_go_arriving_in_pieces_still_proceeds', B, 'verify-pair/go-pieces(予定)', ''),
-    ('test_stop_eof_wrong_word_and_unterminated_go_exit_20_silently', B, 'verify-pair/stop-eof-word(予定)', ''),
+    ('test_go_after_verified_succeeds_with_nothing_on_stderr', B, '比較[cp-pair](go の後の成功。標準エラーは無出力)', ''),
+    ('test_go_arriving_in_pieces_still_proceeds', B, '比較[cp-pair](go を分けて送る)', ''),
+    ('test_stop_eof_wrong_word_and_unterminated_go_exit_20_silently', B, '比較[cp-pair](stop・EOF・違う語・改行なしの go は無出力の 20)', ''),
     ('test_stop_through_loader_adds_no_false_diagnostic', O, '読み込み器を通す(os._exit(20) が読み込み器の変換を迂回する性質の検査)。D2 で扱う', ''),
-    ('test_waiting_for_go_has_a_time_limit', B, 'verify-pair/go-timeout(予定)', ''),
-    ('test_first_failure_never_prints_verified', B, 'verify-pair/first-failure(予定)', ''),
-    ('test_second_check_compares_the_inventory', B, 'verify-pair/second-inventory(予定)', ''),
-    ('test_second_check_reads_the_state_again_and_sees_a_change_between', B, 'verify-pair/change-between(予定)', ''),
-    ('test_guard_body_rewritten_between_the_checks_is_found', B, 'verify-pair/guard-rewritten(予定。U2: コピーを照らす)', ''),
-    ('test_a_different_guard_hash_is_rejected_after_go', B, 'verify-pair/guard-hash(予定)', ''),
-    ('test_bad_arguments_are_rejected_before_any_check', B, 'verify-pair/bad-run-pair-arguments(予定。引数の解析は実装済みの args/verify-pair/* で比べる。解析を通った後の run_pair の検査〈guard の SHA-256 が 64 桁の 16 進でない・--go-timeout が 0 → ERROR の行と 20〉は verify-pair の本体で比べる)', ''),
+    ('test_waiting_for_go_has_a_time_limit', B, '比較[cp-pair](待ち時間の上限。go_timeout の極大値は機種ごと。Mac は 100000000 以下と 100000002 以上)', ''),
+    ('test_first_failure_never_prints_verified', B, '比較[cp-pair, cp-refusal-edit-source, cp-refusal-edit-copy](1 回目の照合の失敗では verified を出さない)', ''),
+    ('test_second_check_compares_the_inventory', B, '比較[cp-pair, cp-pair-after-edit-inventory, cp-pair-after-remove-inventory, cp-pair-after-rewrite-inventory](2 回目の照合は一覧も比べる)', ''),
+    ('test_second_check_reads_the_state_again_and_sees_a_change_between', B, '比較[cp-pair-after-edit-source, cp-pair-after-edit-copy, cp-pair-after-edit-copy-and-restore, cp-pair-after-edit-state, cp-pair-after-rewrite-state, cp-pair-after-edit-home-settings](2 回の照合の間の変更。コピーを書き戻す競合を含む)', ''),
+    ('test_guard_body_rewritten_between_the_checks_is_found', B, '比較[cp-pair-after-edit-guard-copy, cp-pair-after-rewrite-guard-copy, cp-pair-after-guard-to-link, cp-pair-after-guard-copy-as-directory](U2: 控えの隣のコピーを照らし直す)', ''),
+    ('test_a_different_guard_hash_is_rejected_after_go', B, '比較[cp-pair](控えの guard の SHA-256 と違う値は go の後に拒否する)', ''),
+    ('test_bad_arguments_are_rejected_before_any_check', B, '比較[cp-pair](引数の解析は実装済みの args/verify-pair/* でも比べる。解析を通った後の run_pair の検査〈guard の SHA-256 が 64 桁の 16 進でない・--go-timeout が 0 → ERROR の行と 20〉は cp-pair)', ''),
     ('test_existing_verify_is_unchanged', B, '比較[basic]', ''),
     ('test_no_include_means_no_git_start_on_verify_but_always_on_bootstrap_snapshot', R, '実装済み: command_tests.rs::include_text_is_matched_by_bytes_ignoring_ascii_case と 比較[verify-gitconfig-edit-keeps-include-text, include-comment-upper, basic](Git の起動回数を旧新で比べる)', ''),
     ('test_include_spellings_still_reach_git_and_follow_the_target', B, '比較[include-comment-upper, include-section-mixed, include-quoted, include-absolute](Git の起動回数も比べる)', ''),
@@ -693,11 +707,11 @@ TEST_MAPPING = [
     ('test_missing_manifest_creation_before_return_is_rejected', R, '実装済み: race_tests.rs::a_manifest_created_between_the_two_missing_checks_is_refused', ''),
     ('test_policy_digest_normalizes_only_workflow_run_copy_root', R, '実装済み: state の digest の固定期待(workflow の根だけ @workflow)', ''),
     ('test_policy_digest_ignores_missing_parent_location_but_tracks_component', R, '実装済み: state の digest の固定期待(@route の除外)', ''),
-    ('test_success_output_and_return_values', B, 'read の生バイト・exec の子の終了コード・-B・PYTHONDONTWRITEBYTECODE・bash の引数(予定。CLI で比べる)', ''),
-    ('test_stop_lines', B, 'read・exec・hook の run_copy の理由の行(予定。Rust にはまだ無い。output::main_cases の変換は実装済みだが、理由の行は本体と一緒に比べる)', ''),
-    ('test_seam_order', B, 'bootstrap・verify の拒否の順と観測の順は 比較[order-files, order-files-before-directories, order-directories-before-components, order-components-before-configs, verify-state-edit, x-race-verify-settings-edit, x-race-bootstrap-settings-edit](CLI で比べる。モンキーパッチは使っていない)。read・exec の拒否の順は次の段(予定)', ''),
+    ('test_success_output_and_return_values', B, '比較[cp-read, cp-exec](read の生バイト・exec の子の終了コード・-B・PYTHONDONTWRITEBYTECODE・bash の引数。CLI で比べる)', ''),
+    ('test_stop_lines', B, '比較[cp-read, cp-exec, cp-hook, cp-hook-missing, cp-refusal-edit-source](read・exec・hook の run_copy の理由の行。output::main_cases の変換は実装済み)', ''),
+    ('test_seam_order', B, 'bootstrap・verify の拒否の順と観測の順は 比較[order-files, order-files-before-directories, order-directories-before-components, order-components-before-configs, verify-state-edit, x-race-verify-settings-edit, x-race-bootstrap-settings-edit](CLI で比べる。モンキーパッチは使っていない)。read・exec の拒否の順は 比較[cp-refusal-edit-source, cp-refusal-edit-copy, cp-refusal-add-copy-file, cp-refusal-remove-copy-file, cp-refusal-garbage-state, cp-refusal-remove-state]', ''),
     ('test_hook_runs_copy_in_same_process', O, 'U3: Rust の hook は確認の後に終了コード 20。Python の同じプロセスでの exec の観察', ''),
-    ('test_hook_exceptions_are_caught_by_main', R, '実装済み: output::main_cases_match_python_3_10(例外の変換の部分だけ)。hook の本体を Python が exec する経路は U3 の差。Rust は確認の後に 20 を返すので、2 段目 b で U3 の予定の行へ移す(予定)', ''),
+    ('test_hook_exceptions_are_caught_by_main', R, '実装済み: output::main_cases_match_python_3_10(例外の変換の部分だけ)。hook の本体を Python が exec する経路は U3 の差。Rust は確認の後に 20 を返すので、比較[cp-hook](U3: 旧版は判定器を実行し Rust は確認の後に 20。旧新それぞれの固定期待を別に検査し、通常の一致に数えない)で確かめる', ''),
 ]
 CATEGORY_NAMES = {B: '旧新の両方で比較', R: 'Rust の検査へ置換', O: '対象外'}
 
@@ -719,7 +733,7 @@ def existing_test_names():
 
 
 def mapping_summary():
-    """対応表の件数の内訳。「予定」を含む行は 2 段目 b で作る物、含まない行は今ある物(実装済みの比較・
+    """対応表の件数の内訳。「予定」を含む行はまだ作っていない物(0 件でなければ `check_mapping` が不合格)、含まない行は今ある物(実装済みの比較・
     Rust のテスト・対象外)。U2 の差(テストの配布物に guard が無い)で固定入力を作り直すテストは、
     「旧新の両方で比較」の行のうち、既存テストの本文が bootstrap を使うものだけを数える。"""
     tests = existing_test_names()
@@ -745,8 +759,8 @@ def mapping_markdown():
              '`native/ci/check_s2e.py` の `TEST_MAPPING` から作る。直すときは `TEST_MAPPING` を直し、',
              '`python3 -B native/ci/check_s2e.py --write-mapping` で作り直す。', '',
              f'- 全 {summary["total"]} テスト: 旧新の両方で比較 {summary["counts"][B]}・Rust の検査へ置換 {summary["counts"][R]}・対象外 {summary["counts"][O]}',
-             f'- うち予定を含まない(比較済み・実装済みの Rust のテスト・対象外): {summary["compared"]} 件・「予定」(2 段目 b で作る)を含む: {summary["planned"]} 件',
-             f'- 「実装済み」を含み、「予定」を含まない行: {summary["done"]} 件',
+             f'- うち比較済み・実装済みの Rust のテスト・対象外: {summary["compared"]} 件・「予定」(まだ作っていない比較。0 件でなければ不合格): {summary["planned"]} 件',
+             f'- 「実装済み」を含む行: {summary["done"]} 件',
              f'- U2 の差(テストの配布物に guard が無い): 「旧新の両方で比較」の行のうち、既存テストの本文が bootstrap を使い、旧 guard を足した配布物で固定入力を作り直すテスト: {summary["rebuilt_for_u2"]} 件(「Rust の検査へ置換」・対象外の行は数えない)',
              '- 読み込み器を通すテストと、Python の内部だけを観察するテストは、理由を書いて対象外にした。', '',
              '- 最後の欄は、指す比較のうち「Linux だけ」の印の項目(Mac の経路では流さない)。印は `s2e_commands.py` の項目の一覧から作る。', '',
@@ -759,7 +773,7 @@ def mapping_markdown():
     return '\n'.join(lines) + '\n'
 
 
-TARGET_WORDS = ('比較[', '.rs::', '予定', '対象外', '実装済み')
+TARGET_WORDS = ('比較[', '.rs::', '対象外', '実装済み')
 RUST_DIR = ROOT / 'native/crates/cli/src/commands/environment_guard'
 CASE_REF = re.compile(r'比較\[([^\]]+)\]')
 RUST_REF = re.compile(r'([a-z_]+)\.rs::([a-z_0-9]+)')
@@ -777,7 +791,7 @@ def commands_module():
 def check_command_totals(tally, per_group):
     """9 コマンドの比較に 0 件の欄が無いことを確かめる(未起動・省略・時間切れを合格にしない)。流した項目の数を返す。"""
     executed = sum(count for count, _ in per_group.values())
-    approved_required = not commands_module().MAC_PATH   # 認めた差(U1・U2)の項目は Linux だけの印。Mac の経路では流さない
+    approved_required = True   # 認めた差(U3・U4・U7 は全機種の項目。U1・U2 は Linux だけ)の固定期待が 0 件の経路は無い
     for label, value, required in (('項目', executed, True), ('起動の一致', tally.runs, True), ('bootstrap の出力一式のバイト比較', tally.bootstrap_bytes, True),
                                    ('相互読取り', tally.cross, True), ('内部 reader の値の比較', tally.readers, True),
                                    ('読取りだけの前後確認', tally.readonly, True), ('認めた差の固定期待', tally.approved, approved_required)):
@@ -789,12 +803,13 @@ def check_command_totals(tally, per_group):
 # 9 コマンドの比較の項目の数。機種ごとに完全一致で確かめる(0 でないことだけ確かめない)。
 # 'linux': Linux で流す全項目。'mac': Mac の経路(Linux だけの印の項目を流さない)の項目。キーは (グループ, 印)。値は項目の数。
 EXPECTED_ITEMS = {
-    'linux': {'total': 197, 'groups': {
-        ('extra', 'all'): 38, ('extra', 'linux'): 12, ('failure', 'linux'): 1, ('flow', 'all'): 99, ('flow', 'linux'): 1,
-        ('flow-deep', 'linux'): 9, ('limit', 'linux'): 4, ('mac', 'all'): 2, ('race', 'all'): 21, ('race', 'linux'): 6, ('signal', 'all'): 1,
-        ('signal', 'linux'): 1, ('u1', 'linux'): 1, ('u2', 'linux'): 1}},
-    'mac': {'total': 161, 'groups': {
-        ('extra', 'all'): 38, ('flow', 'all'): 99, ('mac', 'all'): 2, ('race', 'all'): 21, ('signal', 'all'): 1}},
+    'linux': {'total': 233, 'groups': {
+        ('copy', 'all'): 32, ('extra', 'all'): 38, ('extra', 'linux'): 12, ('failure', 'linux'): 1, ('flow', 'all'): 99, ('flow', 'linux'): 1,
+        ('flow-deep', 'linux'): 9, ('limit', 'linux'): 4, ('mac', 'all'): 2, ('race', 'all'): 21, ('race', 'linux'): 6, ('signal', 'all'): 3,
+        ('signal', 'linux'): 1, ('u1', 'linux'): 1, ('u2', 'linux'): 1, ('u45', 'all'): 1, ('u7', 'all'): 1}},
+    'mac': {'total': 197, 'groups': {
+        ('copy', 'all'): 32, ('extra', 'all'): 38, ('flow', 'all'): 99, ('mac', 'all'): 2, ('race', 'all'): 21, ('signal', 'all'): 3,
+        ('u45', 'all'): 1, ('u7', 'all'): 1}},
 }
 # Linux だけの印を付けた項目の名前(Mac の経路では流さない)。36 件。
 EXPECTED_LINUX_ONLY = (
@@ -862,6 +877,8 @@ def check_mapping():
     for name, category, target, _ in TEST_MAPPING:
         if category not in CATEGORY_NAMES or not target:
             raise AssertionError('分類か対応先が空')
+        if '予定' in target:
+            raise AssertionError(f'対応表 {name}: 「予定」が残っている(2 段目 b を終える時点で 0 件): {target!r}')
         # 対応先が途中で切れた行を通さない(「プ」の 1 文字などの誤り)。旧新の比較・Rust の検査には、行き先を示す語が要る。
         if category != O and not any(word in target for word in TARGET_WORDS):
             raise AssertionError(f'対応表 {name}: 対応先に行き先を示す語({"・".join(TARGET_WORDS)})が無い(切れている): {target!r}')
@@ -942,12 +959,11 @@ def main(argv=None):
     elapsed = time.monotonic() - started
     for name in tally['unimplemented']:
         print(f'未実装の印(件数に入れない): {name}')
-    for name in PENDING_2B:
-        print(f'予定の枠(2 段目 b。件数に入れない): {name}')
+    check_pending_is_empty()
     print(f'S2E: 比較 {tally["matched"] + tally["approved"]} 件(通常の一致 {tally["matched"]}・認めた差 {tally["approved"]}。うち U4 {tally["u4"]})'
           f'・未実装の印 {len(tally["unimplemented"])} 件・予定の枠 {len(PENDING_2B)} 件・自己検査 {self_checks} 件'
           f'・既存テストの対応 {summary["total"]} 件(両方 {summary["counts"][B]}・置換 {summary["counts"][R]}・対象外 {summary["counts"][O]}。'
-          f'うち予定を含まない {summary["compared"]}・予定 {summary["planned"]})')
+          f'うち比較済み・実装済み・対象外 {summary["compared"]}・予定 {summary["planned"]})')
     print(f'S2E: 9 コマンドの旧新比較 {executed} 項目(Rust を起動した比較 {cmd_tally.rust_runs} 件): 起動の一致 {cmd_tally.runs} 件(読取りだけのコマンドの前後確認 {cmd_tally.readonly} 件を別に確かめた)'
           f'・bootstrap の出力一式のバイト比較と受領の確認 {cmd_tally.bootstrap_bytes} 件・相互読取り {cmd_tally.cross} 件'
           f'・内部 reader の値の比較 {cmd_tally.readers} 件・認めた差(旧新それぞれの固定期待) {cmd_tally.approved} 件・比較から外した物 {len(cmd_tally.excluded)} 件')

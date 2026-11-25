@@ -3737,6 +3737,9 @@ CP_PROBE_SH = (
     "#!/bin/bash\n"
     "out=$1\n"
     "printf '%s\\n' \"argv0=$0\" \"args=$*\" \"n=$#\" \"pdwb=$PYTHONDONTWRITEBYTECODE\" \"x=$S2E_X\" > \"$out\"\n"
+    # 子の環境の全体(輸出された変数の名前=値を NUL 区切りで。外部の env は PATH を変える流れで見つからないので、組み込みだけで書く)。
+    "printf 'env\\n' >> \"$out\"\n"
+    "for v in $(compgen -e); do printf '%s=%s\\0' \"$v\" \"${!v}\"; done >> \"$out\"\n"
     "case $2 in exit:*) exit \"${2#exit:}\" ;; kill:*) kill -\"${2#kill:}\" $$ ;; esac\n"
 )
 CP_HOOK_REL = "skills/ship-task/scripts/loop-permission.py"
@@ -3748,6 +3751,8 @@ CP_GUARD_COPY = "{r}/out/a/environment-guard.py"
 def cp_layout(hook=True):
     items = cmd_base_layout(gitconfig="[user]\n\tname = a\n") + [
         L("plugin/scripts/probe.py", body=CP_PROBE_PY), L("plugin/scripts/probe.sh", body=CP_PROBE_SH, mode=0o755),
+        # 控えの隣のコピーの同じ場所から兄弟のモジュールを読む(元の配置からは読まない。`__pycache__` も作らない)。
+        L("plugin/scripts/importer.py", body="import sys\nfrom sibling import VALUE\nwith open(sys.argv[1], 'w') as handle:\n    handle.write(VALUE)\n"), L("plugin/scripts/sibling.py", body='VALUE = "copied"\n'),
         L("plugin/data/empty.bin", body=""), L("plugin/data/big.bin", size=300000),
         L("probe", "dir"),
         L("bin-noexec/python3", body="#!/bin/sh\nexit 0\n", mode=0o644), L("bin-noexec/bash", body="#!/bin/sh\nexit 0\n", mode=0o644),
@@ -3972,7 +3977,7 @@ def cp_cases():
     # ---- read
     add("read", [boot] + [RD(p) for p in (
         "README.md", "data/empty.bin", "data/big.bin", "data/all-bytes.bin", "skills/a/SKILL.md", "skills/ship-task/scripts/run.sh",
-        "./README.md", "skills//a/SKILL.md", "README.md/", "data/./empty.bin", "scripts/probe.py", "private.txt", "group/g.txt",
+        "./README.md", "skills//a/SKILL.md", "README.md/", "data/./empty.bin", "scripts/probe.py", "scripts/sibling.py", "private.txt", "group/g.txt",
         # 拒否: 絶対パス・`..`・空・`.`・ディレクトリ・不在・通常ファイルの下・保持していないファイル
         "/etc/passwd", "../x", "a/../README.md", "..", "", ".", "//x", "skills", "data/", "missing", "README.md/x", "README.md/../README.md",
     )] + [
@@ -4009,11 +4014,19 @@ def cp_cases():
         EX(sh, "bash", "{r}/probe/args", "exit:0", "a b", "", "é", "-x", "--flag", "-h", "--", "tail"),
         EX(py, "--", "python3", "{r}/probe/args-py", "exit:0", "a b", "", "é", "-x", "--flag", "-h", "--", "tail"),
         EX(py, "--", "python3", "{r}/probe/dd", "exit:0", "--"),
+        # 兄弟のモジュールの import(コピーから読む。`__pycache__` を作らない)
+        EX("scripts/importer.py", "--", "python3", "{r}/probe/importer"),
         # 環境(追加の変数・既存の値の置き換え・順序)
         EX(py, "--", "python3", "{r}/probe/env1", "exit:0", env={"S2E_X": "1", "S2E_Y": "é"}),
         EX(py, "--", "python3", "{r}/probe/env2", "exit:0", env={"PYTHONDONTWRITEBYTECODE": "0"}),
         EX(py, "--", "python3", "{r}/probe/env3", "exit:0", env={"PYTHONDONTWRITEBYTECODE": None, "S2E_X": "after"}),
         EX(sh, "--", "bash", "{r}/probe/env4", "exit:0", env={"PYTHONDONTWRITEBYTECODE": "", "S2E_X": "2"}),
+        # ロケール(旧 Python は LANG が C か未設定のとき、起動時に LC_CTYPE=C.UTF-8 を環境へ足し、子へ引き継ぐ。PEP 538。
+        # 02:41 の決定: これまでの決定のまま再現する。既定の流れは LANG=C.UTF-8 なので、足されない。bash の子は環境の全体を書く)。
+        EX(py, "--", "python3", "{r}/probe/lang1", "exit:0", env={"LANG": None}),
+        EX(py, "--", "python3", "{r}/probe/lang2", "exit:0", env={"LANG": "C"}),
+        EX(sh, "--", "bash", "{r}/probe/lang3", "exit:0", env={"LANG": None}),
+        EX(sh, "--", "bash", "{r}/probe/lang4", "exit:0", env={"LANG": "C"}),
         # PATH の探し方
         EX(py, "--", "python3", "{r}/probe/path1", "exit:0", env={"PATH": "{r}/bin-noexec:{r}/pybin"}),
         EX(py, "--", "python3", "{r}/probe/path2", "exit:0", env={"PATH": "{r}/bin-noexec"}),
