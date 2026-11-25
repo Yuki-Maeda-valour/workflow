@@ -472,7 +472,9 @@ def cmd_supervisor_control(mode, pid, parent, start=""):
             return
         fd = os.pidfd_open(pid)
         try:
-            if supervisor_identity(pid) != before:
+            # 状態の文字は監督が眠って起きるたびに変わるので比べない。
+            # PID の再利用は親 PID と開始時刻で見分ける。(#435)
+            if supervisor_identity(pid)[:2] != before[:2]:
                 sys.exit(3)
             signal.pidfd_send_signal(fd, signal.SIGTERM if mode == "term" else signal.SIGKILL)
         finally:
