@@ -23,10 +23,10 @@ class S3DCiTests(unittest.TestCase):
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
 
-    def test_every_build_tar_requires_one_typed_report_and_both_complete_comparisons(self):
-        # 比較は build の外の s3d ジョブで、4 機種の 2 回のビルドのそれぞれに流す(2026-11-12 12:59 の決定)。
+    def test_every_build_tar_requires_same_builds_one_typed_report_and_one_complete_comparison(self):
+        # 比較は build の外の s3d ジョブで、4 機種とも 2 本の一致を cmp で確かめてから 1 回目だけに流す(2026-11-12 12:59 の決定・#516)。
         for name in build.TARGETS:
-            for failure in (None, 'tools', 'typed', 'comparison'):
+            for failure in (None, 'tools', 'typed', 'comparison', 'cmp'):
                 with self.subTest(name=name, failure=failure), contextlib.ExitStack() as stack:
                     stack.enter_context(mock.patch.object(sys, 'argv', ['build.py', 's3d', '--platform', name]))
                     stack.enter_context(mock.patch.object(build, 'workspace', return_value=self.root))
@@ -35,7 +35,9 @@ class S3DCiTests(unittest.TestCase):
                     tools = stack.enter_context(mock.patch.object(s3d_ci, 'prepare_tools'))
                     typed = stack.enter_context(mock.patch.object(s3d_ci, 'typed_report', return_value=self.root/'typed.json'))
                     probe = stack.enter_context(mock.patch.object(s3d_ci, 'probe'))
+                    run = stack.enter_context(mock.patch.object(build, 'run'))
                     error = subprocess.CalledProcessError(1, 'mandatory S3D comparison')
+                    if failure == 'cmp': run.side_effect = error
                     if failure == 'tools': tools.side_effect = error
                     if failure == 'typed': typed.side_effect = error
                     if failure == 'comparison': probe.side_effect = error
@@ -43,13 +45,15 @@ class S3DCiTests(unittest.TestCase):
                     tools.assert_called_once_with(name)
                     if failure is None:
                         extract.assert_called_once_with(name, self.root/'downloads', self.root)
+                        run.assert_called_once_with(['cmp', self.root/'1/diff_snapshot_contract', self.root/'2/diff_snapshot_contract'])
                         typed.assert_called_once()
                         self.assertEqual(typed.call_args.args[0], name)
-                        self.assertEqual([call.args[0] for call in probe.call_args_list],
-                                         [self.root/'1/diff_snapshot_contract', self.root/'2/diff_snapshot_contract'])
+                        self.assertEqual([call.args[0] for call in probe.call_args_list], [self.root/'1/diff_snapshot_contract'])
                         self.assertTrue(all(call.args[1] == self.root/'typed.json' for call in probe.call_args_list))
-                    elif failure in ('tools', 'typed'):
+                    elif failure in ('tools', 'typed', 'cmp'):
                         probe.assert_not_called()
+                    if failure == 'cmp':
+                        typed.assert_not_called()
         with mock.patch.object(sys, 'argv', ['build.py', 's3d']), self.assertRaises(SystemExit):
             build.main()
 

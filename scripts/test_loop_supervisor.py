@@ -235,6 +235,41 @@ with mock.patch('__main__.supervisor_identity', side_effect=[(456, 1, b'S'), (45
         proc = subprocess.run([sys.executable, '-c', source], capture_output=True, timeout=3)
         self.assertEqual(0, proc.returncode, proc.stderr)
 
+    def test_state_change_after_pidfd_open_still_signals(self):
+        # 状態の文字(R・S)は監督が眠って起きるたびに変わる。後の読みで変わっても信号を送る(#435)。
+        definition = self.helper.split('\nCOMMANDS = {', 1)[0]
+        for mode, name in (('term', 'SIGTERM'), ('kill', 'SIGKILL')):
+            with self.subTest(mode=mode):
+                source = definition + f'''
+from unittest import mock
+import signal
+with mock.patch('__main__.supervisor_identity', side_effect=[(456, 1, b'S'), (456, 1, b'R')]), mock.patch('os.pidfd_open', return_value=88), mock.patch('os.close'), mock.patch('signal.pidfd_send_signal') as sent:
+ cmd_supervisor_control('{mode}', '123', '456', '1')
+ sent.assert_called_once_with(88, signal.{name})
+'''
+                proc = subprocess.run([sys.executable, '-c', source], capture_output=True, timeout=3)
+                self.assertEqual(0, proc.returncode, proc.stderr)
+
+    def test_parent_change_after_pidfd_open_does_not_signal(self):
+        # 後の読みで親 PID が変わった(PID の再利用)ときは信号を送らない。
+        definition = self.helper.split('\nCOMMANDS = {', 1)[0]
+        for mode in ('term', 'kill'):
+            with self.subTest(mode=mode):
+                source = definition + f'''
+from unittest import mock
+import signal
+with mock.patch('__main__.supervisor_identity', side_effect=[(456, 1, b'S'), (457, 1, b'S')]), mock.patch('os.pidfd_open', return_value=88), mock.patch('os.close'), mock.patch('signal.pidfd_send_signal') as sent:
+ try:
+  cmd_supervisor_control('{mode}', '123', '456', '1')
+ except SystemExit as exc:
+  assert exc.code == 3
+ else:
+  raise AssertionError('changed parent accepted')
+ sent.assert_not_called()
+'''
+                proc = subprocess.run([sys.executable, '-c', source], capture_output=True, timeout=3)
+                self.assertEqual(0, proc.returncode, proc.stderr)
+
     def test_same_uid_result_edit_is_a_documented_trust_limit(self):
         # 同じ UID が結果の保持領域まで書ける場合、nonce を秘密とは扱えない。
         with tempfile.TemporaryDirectory() as tmp:

@@ -1,0 +1,3225 @@
+{
+ "scenarios": [
+  {
+   "id": "A11-marker-before-rename",
+   "group": "A11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "marker",
+     "after_calls": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: DEV_WORKFLOW_LOOP_ITER があるため候補を採用できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A11-marker-late-does-not-preempt-the-digest-check",
+   "group": "A11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "marker",
+     "after_calls": 1
+    }
+   ],
+   "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補の sha256 が保持値と違う\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A15-replace-before-git-mv",
+   "group": "A15",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "phase": "before",
+     "do": [
+      {
+       "op": "attacker_replace",
+       "path": "候補_例.md",
+       "text": "third party replacement"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後に本文または inode が保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "1b74bd4e9ada81e54d6d558550bb07459d2a5efdc6c130a77990a455d910640f",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "A16-index-replaced-after-git-mv",
+   "group": "A16",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "phase": "after",
+     "do": [
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "third party staged replacement"
+      },
+      {
+       "op": "git",
+       "args": [
+        "add",
+        "--",
+        "進行中_例.md"
+       ]
+      },
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "@BODY"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index stage が改名前の保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "b1db4980659a0ee4b337b7ec00847bb2aed2a43a816365e755ef1700743a764a"
+   }
+  },
+  {
+   "id": "A19-change-while-reading",
+   "group": "A19",
+   "prep": {},
+   "rules": [
+    {
+     "point": "read",
+     "name": "source",
+     "phase": "during",
+     "do": [
+      {
+       "op": "write",
+       "path": "候補_例.md",
+       "text": "changed while reading"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補が読取り中に変わった\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "ae87d2eab21302ca992ad40b2ebef14fdda843c8c7b646b16b0da694e16a4def",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A20-forced-fallback",
+   "group": "A20",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A21-fallback-collision",
+   "group": "A21",
+   "prep": {
+    "files": {
+     "進行中_例.md": "third party"
+    }
+   },
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 同じ名の状態ファイルがある\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "c618a193ffe9c7cac516f0797f69553f5b5c130637f9de8266a1fe61ff9fe07c",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A22-replaced-after-link",
+   "group": "A22",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "phase": "after",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      },
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "third party"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 改名先を自分が作った通常ファイルと確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "c618a193ffe9c7cac516f0797f69553f5b5c130637f9de8266a1fe61ff9fe07c",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A23-unlink-failure-rolls-back",
+   "group": "A23",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "raise": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(自身が作った宛先を戻した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A24-replaced-and-unlink-fails",
+   "group": "A24",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      },
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "third party"
+      }
+     ],
+     "raise": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(候補と宛先を保全した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "c618a193ffe9c7cac516f0797f69553f5b5c130637f9de8266a1fe61ff9fe07c",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A25-kill-between-link-and-unlink",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "kill",
+   "expect": {
+    "code": -9,
+    "stdout": "",
+    "stderr": "",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     }
+    },
+    "both_names_at_window": true,
+    "same_inode": true
+   }
+  },
+  {
+   "id": "A25b-sigint-between-link-and-unlink",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "interrupt",
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(自身が作った宛先を戻した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "both_names_at_window": true,
+    "same_inode": false
+   }
+  },
+  {
+   "id": "A25c-sigint-before-link",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "phase": "before",
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "interrupt",
+   "expect": {
+    "code": -2,
+    "stdout": "",
+    "stderr": "KeyboardInterrupt\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "both_names_at_window": false,
+    "same_inode": false
+   }
+  },
+  {
+   "id": "A25e-sigint-right-after-unlink-rolls-back",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "phase": "after",
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "interrupt",
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(自身が作った宛先を戻した)\n",
+    "tree": {},
+    "both_names_at_window": false,
+    "same_inode": false
+   }
+  },
+  {
+   "id": "A25f-sigint-during-stat-after-link-leaves-both-names",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "stat",
+     "name": "dest",
+     "nth": 2,
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "interrupt",
+   "expect": {
+    "code": -2,
+    "stdout": "",
+    "stderr": "KeyboardInterrupt\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     }
+    },
+    "both_names_at_window": true,
+    "same_inode": true
+   }
+  },
+  {
+   "id": "A25d-sigint-after-unlink-keeps-the-destination",
+   "group": "A25",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "read",
+     "name": "dest",
+     "do": [
+      {
+       "op": "pause"
+      }
+     ]
+    }
+   ],
+   "kind": "interrupt",
+   "expect": {
+    "code": -2,
+    "stdout": "",
+    "stderr": "KeyboardInterrupt\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "both_names_at_window": false,
+    "same_inode": false
+   }
+  },
+  {
+   "id": "A26-same-uid-removes-marker",
+   "group": "A26",
+   "prep": {},
+   "rules": [],
+   "kind": "bypass",
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A01x-untracked-executable",
+   "group": "A01",
+   "prep": {
+    "modes": {
+     "候補_例.md": 493
+    }
+   },
+   "rules": [],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 493,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A12x-tracked-executable",
+   "group": "A12",
+   "prep": {
+    "git": true,
+    "modes": {
+     "候補_例.md": 493
+    }
+   },
+   "rules": [],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 493,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "6a8550f8cd301e3360d05ae02f4a74331e8b171843ca27a6bca5e2f920041e19"
+   }
+  },
+  {
+   "id": "A20x-fallback-executable",
+   "group": "A20",
+   "prep": {
+    "modes": {
+     "候補_例.md": 493
+    }
+   },
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 493,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A01y-untracked-mode-600",
+   "group": "A01",
+   "prep": {
+    "modes": {
+     "候補_例.md": 384
+    }
+   },
+   "rules": [],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 384,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "A12y-tracked-mode-600",
+   "group": "A12",
+   "prep": {
+    "git": true,
+    "modes": {
+     "候補_例.md": 384
+    }
+   },
+   "rules": [],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 384,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "A20y-fallback-mode-664",
+   "group": "A20",
+   "prep": {
+    "modes": {
+     "候補_例.md": 436
+    }
+   },
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 436,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-directory",
+   "group": "E03",
+   "prep": {
+    "source_as": "directory"
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補は 8 MiB 以下の通常ファイルだけを使う\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "directory",
+      "sha256": null,
+      "mode": 493
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-absent",
+   "group": "E03",
+   "prep": {
+    "source_as": "absent"
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: '候補_例.md'\n",
+    "tree": {}
+   }
+  },
+  {
+   "id": "E03-source-unreadable",
+   "group": "E03",
+   "prep": {
+    "source_as": "unreadable"
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 13] Permission denied: '候補_例.md'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "unreadable",
+      "mode": 0,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-empty",
+   "group": "E03",
+   "prep": {
+    "source_as": "empty"
+   },
+   "rules": [],
+   "warnings_from_dependency": true,
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\", \"warnings\": [{\"code\": \"source-count\", \"detail\": \"ヘッダの発見元の行が 0 行(照合パターンに合うもの 0 行)。照合パターンに合う行がちょうど 1 行必要\"}, {\"code\": \"key-count\", \"detail\": \"ヘッダの指摘キーの行が 0 行(値のあるもの 0 個)。ちょうど 1 行が必要\"}]}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-size-8388607",
+   "group": "E03",
+   "prep": {
+    "source_as": "size:8388607"
+   },
+   "rules": [],
+   "warnings_from_dependency": true,
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"51a668d6e54fdb251f9580a57cd4c684dcabdd63da9d49a5e8d0061cf84147f0\", \"warnings\": [{\"code\": \"source-count\", \"detail\": \"ヘッダの発見元の行が 0 行(照合パターンに合うもの 0 行)。照合パターンに合う行がちょうど 1 行必要\"}, {\"code\": \"key-count\", \"detail\": \"ヘッダの指摘キーの行が 0 行(値のあるもの 0 個)。ちょうど 1 行が必要\"}]}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "51a668d6e54fdb251f9580a57cd4c684dcabdd63da9d49a5e8d0061cf84147f0",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-size-8388608",
+   "group": "E03",
+   "prep": {
+    "source_as": "size:8388608"
+   },
+   "rules": [],
+   "warnings_from_dependency": true,
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"1b7f7f67d6d01c90375476c6cf916268ab671fc3b0c314a2adf2dc87770dd696\", \"warnings\": [{\"code\": \"source-count\", \"detail\": \"ヘッダの発見元の行が 0 行(照合パターンに合うもの 0 行)。照合パターンに合う行がちょうど 1 行必要\"}, {\"code\": \"key-count\", \"detail\": \"ヘッダの指摘キーの行が 0 行(値のあるもの 0 個)。ちょうど 1 行が必要\"}]}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "1b7f7f67d6d01c90375476c6cf916268ab671fc3b0c314a2adf2dc87770dd696",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-source-size-8388609",
+   "group": "E03",
+   "prep": {
+    "source_as": "size:8388609"
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補は 8 MiB 以下の通常ファイルだけを使う\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "daef34c5f8814af829233e1e1ca7867ee202266f2598ef7bf7488ac2258b977d",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-same-size-change-during-read",
+   "group": "E03",
+   "prep": {},
+   "rules": [
+    {
+     "point": "read",
+     "name": "source",
+     "phase": "during",
+     "do": [
+      {
+       "op": "write",
+       "path": "候補_例.md",
+       "text": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補が読取り中に変わった\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "2be43ab8b0d31885fc60002c4209e3fdb2fcb67867b003006f0ae215fca0a25e",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E03-growth-during-read",
+   "group": "E03",
+   "prep": {},
+   "rules": [
+    {
+     "point": "read",
+     "name": "source",
+     "phase": "during",
+     "do": [
+      {
+       "op": "write",
+       "path": "候補_例.md",
+       "text": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 候補が読取り中に変わった\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "592ebbaa13e3951148e255098997f65785b09da41d6d448269018e8a077afecd",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E05-dangling-symlink",
+   "group": "E05",
+   "prep": {
+    "symlinks": {
+     "完了_例.md": "nowhere"
+    }
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 同じ名の状態ファイルがある\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "完了_例.md": {
+      "kind": "symlink",
+      "sha256": "20aeff0494e828d188c704e1f488a589b15ae01d11f6cb129f62129caa6cc543"
+     }
+    }
+   }
+  },
+  {
+   "id": "E05-directory",
+   "group": "E05",
+   "prep": {
+    "dirs": [
+     "保留_例.md"
+    ]
+   },
+   "rules": [],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 同じ名の状態ファイルがある\n",
+    "tree": {
+     "保留_例.md": {
+      "kind": "directory",
+      "sha256": null,
+      "mode": 493
+     },
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E05-stat-fails",
+   "group": "E05",
+   "prep": {},
+   "rules": [
+    {
+     "point": "stat",
+     "name": "中断_例.md",
+     "raise": 13
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 13] Permission denied: '中断_例.md'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E05-created-after-check",
+   "group": "E05",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "do": [
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "late third party"
+      }
+     ]
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 17] 上書きしない改名に失敗\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "0df71c8ebc6bf044c64833a3cc07965fa6ee4b068fbd56c17420cbf7beab07f2",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E07-precheck-nonzero-non-utf8",
+   "group": "E07",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "result": {
+      "code": 1,
+      "stdout_hex": "",
+      "stderr_hex": "4552524f522062616420ff0a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git の事前検査に通らない: ERROR bad �\n\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E07-precheck-exit-22",
+   "group": "E07",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "result": {
+      "code": 22,
+      "stdout_hex": "",
+      "stderr_hex": "4552524f52205b66696c7465725d20726566757365640a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git の事前検査に通らない: ERROR [filter] refused\n\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E07-precheck-success-output-discarded",
+   "group": "E07",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "result": {
+      "code": 0,
+      "stdout_hex": "66696c7465722d746f6b656e0a",
+      "stderr_hex": "4e4f544520736f6d657468696e670a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E07-precheck-empty-accept-not-passed",
+   "group": "E07",
+   "prep": {
+    "git": true
+   },
+   "rules": [],
+   "args": [
+    "--accept",
+    ""
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E08-body-changed-during-precheck",
+   "group": "E08",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "do": [
+      {
+       "op": "write",
+       "path": "候補_例.md",
+       "text": "changed during precheck"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 採用直前に候補が変わった\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "b174a3c16755915ddc66aeda508563749bb6f38d97d19d6fb2b841151dd1b5fb",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E08-inode-replaced-during-precheck",
+   "group": "E08",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "do": [
+      {
+       "op": "replace_inode",
+       "path": "候補_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 採用直前に候補が変わった\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E08-marker-after-precheck",
+   "group": "E08",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "marker",
+     "after_calls": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: DEV_WORKFLOW_LOOP_ITER があるため候補を採用できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-nonzero",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 1,
+      "stdout_hex": "",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index を確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-empty",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index を確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-two-records",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d64003130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index を確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-no-final-nul",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d64",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index を確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-no-tab",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203020e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が一意でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-mode-symlink",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3132303030302061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-stage-1",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203109e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-other-path",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "31303036343420616161616161616161616161616161616161616161616161616161616161616161616161616161612030096f746865722e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-oid-39",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "31303036343420616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-oid-65",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "313030363434206161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-oid-upper",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342041414141414141414141414141414141414141414141414141414141414141414141414141414141203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-oid-non-hex",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342067676767676767676767676767676767676767676767676767676767676767676767676767676767203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名前の index が通常ファイル1件でない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E09-before-oid-40-accepted",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index stage が改名前の保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-before-oid-64-accepted",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index stage が改名前の保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-before-mode-executable-accepted",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303735352061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index stage が改名前の保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-nonzero",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 1,
+      "stdout_hex": "",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index を確認できない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-empty",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index を確認できない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-oid-39",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "31303036343420616161616161616161616161616161616161616161616161616161616161616161616161616161203009e980b2e8a18ce4b8ad5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index が通常ファイル1件でない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-oid-65",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "313030363434206161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161616161203009e980b2e8a18ce4b8ad5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index が通常ファイル1件でない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-no-tab",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203020e58099e8a39c5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index が一意でない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-mode-executable-accepted",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303735352061616161616161616161616161616161616161616161616161616161616161616161616161616161203009e980b2e8a18ce4b8ad5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index stage が改名前の保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E09-after-stage-1",
+   "group": "E09",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "result": {
+      "code": 0,
+      "stdout_hex": "3130303634342061616161616161616161616161616161616161616161616161616161616161616161616161616161203109e980b2e8a18ce4b8ad5fe4be8b2e6d6400",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後の index が通常ファイル1件でない。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-mv-nonzero-non-utf8",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "result": {
+      "code": 1,
+      "stdout_hex": "",
+      "stderr_hex": "666174616c3a2062616420ff0a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git mv に失敗: fatal: bad �\n\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-mv-timeout",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "timeout": true
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: Command '['git', '--no-pager', '--no-replace-objects', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'core.ignoreCase=false', '-c', 'core.splitIndex=false', '-c', 'core.ignoreStat=false', '-c', 'commit.gpgSign=false', '-c', 'push.gpgSign=false', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.clean=', '-c', 'filter.lfs.process=', '-c', 'filter.lfs.required=false', '--literal-pathspecs', 'mv', '--', '候補_例.md', '進行中_例.md']' timed out after 30 seconds\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-mv-late-collision",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "phase": "before",
+     "do": [
+      {
+       "op": "write",
+       "path": "進行中_例.md",
+       "text": "third party"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git mv に失敗: fatal: destination exists, source=候補_例.md, destination=進行中_例.md\n\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "c618a193ffe9c7cac516f0797f69553f5b5c130637f9de8266a1fe61ff9fe07c",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-dest-vanishes-after-mv",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "phase": "after",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: '進行中_例.md'\n",
+    "tree": {},
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-dest-inode-replaced-after-mv",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "mv",
+     "phase": "after",
+     "do": [
+      {
+       "op": "replace_inode",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 追跡済み候補の改名後に本文または inode が保持値と違う。候補と index の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-rev-parse-nonzero",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "rev-parse",
+     "result": {
+      "code": 128,
+      "stdout_hex": "",
+      "stderr_hex": "666174616c3a206e6f74206120676974207265706f7369746f72790a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git の作業ツリーを確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-ls-files-nonzero-means-untracked",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--error-unmatch",
+     "result": {
+      "code": 1,
+      "stdout_hex": "",
+      "stderr_hex": "6572726f723a2070617468737065630a"
+     }
+    }
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-after-mv-ls-files-timeout",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "timeout": true
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: Command '['git', '--no-pager', '--no-replace-objects', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'core.ignoreCase=false', '-c', 'core.splitIndex=false', '-c', 'core.ignoreStat=false', '-c', 'commit.gpgSign=false', '-c', 'push.gpgSign=false', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.clean=', '-c', 'filter.lfs.process=', '-c', 'filter.lfs.required=false', '--literal-pathspecs', 'ls-files', '--stage', '-z', '--', '進行中_例.md']' timed out after 30 seconds\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-after-mv-ls-files-spawn-failure",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 2,
+     "spawn_errno": 2
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: 'git'\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-before-mv-ls-files-spawn-failure",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--stage",
+     "nth": 1,
+     "spawn_errno": 2
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: 'git'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-tracked-check-spawn-failure",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "--error-unmatch",
+     "spawn_errno": 2
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: 'git'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E10-mv-under-fsize-limit",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "precheck",
+     "result": {
+      "code": 0,
+      "stdout_hex": "",
+      "stderr_hex": ""
+     }
+    }
+   ],
+   "rlimit_fsize": 100,
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: git mv に失敗: \n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E06-parent-git-environment-removed",
+   "group": "E06",
+   "prep": {
+    "git": true
+   },
+   "rules": [],
+   "env": {
+    "GIT_DIR": "/nonexistent-r4c",
+    "GIT_WORK_TREE": "/nonexistent-r4c",
+    "GIT_INDEX_FILE": "/nonexistent-r4c/index",
+    "GIT_CONFIG_COUNT": "1",
+    "GIT_CONFIG_KEY_0": "core.bare",
+    "GIT_CONFIG_VALUE_0": "true"
+   },
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E06-no-path-uses-the-default-search",
+   "group": "E06",
+   "prep": {
+    "git": true
+   },
+   "rules": [],
+   "env": {
+    "PATH": null
+   },
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": true, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "c8798e41bbf201cc0c9c3f2f8da6cc52724132d01acc03f33c551a19b30b72e4"
+   }
+  },
+  {
+   "id": "E10-git-timeout",
+   "group": "E10",
+   "prep": {
+    "git": true
+   },
+   "rules": [
+    {
+     "point": "run",
+     "match": "rev-parse",
+     "timeout": true
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: Command '['git', '--no-pager', '--no-replace-objects', '-c', 'core.quotePath=false', '-c', 'core.fsmonitor=', '-c', 'core.hooksPath=/dev/null', '-c', 'core.ignoreCase=false', '-c', 'core.splitIndex=false', '-c', 'core.ignoreStat=false', '-c', 'commit.gpgSign=false', '-c', 'push.gpgSign=false', '-c', 'filter.lfs.smudge=', '-c', 'filter.lfs.clean=', '-c', 'filter.lfs.process=', '-c', 'filter.lfs.required=false', 'rev-parse', '--show-toplevel']' timed out after 30 seconds\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    },
+    "index": "f01ffab20c84cae8b569cd4cf7cbc23c269986e597d885fcea9cf10f15c6acc8"
+   }
+  },
+  {
+   "id": "E11-rename-errno-38-falls-back",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 38
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-rename-errno-22-falls-back",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 22
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 0,
+    "stdout": "{\"path\": \"<ROOT>/進行中_例.md\", \"tracked\": false, \"sha256\": \"fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f\", \"warnings\": []}\n",
+    "stderr": "",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-rename-errno-1-stops",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 1
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 1] 上書きしない改名に失敗\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-rename-errno-17-stops",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 17
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 17] 上書きしない改名に失敗\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-rename-errno-13-stops",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 13
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 13] 上書きしない改名に失敗\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-rename-errno-18-stops",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "raise": 18
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 18] 上書きしない改名に失敗\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E11-dest-vanishes-after-rename",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "phase": "after",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: '進行中_例.md'\n",
+    "tree": {}
+   }
+  },
+  {
+   "id": "E11-dest-inode-replaced-after-rename",
+   "group": "E11",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "name": "source",
+     "phase": "after",
+     "do": [
+      {
+       "op": "replace_inode",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "os": [
+    "linux"
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 改名後に宛先が変わった。候補の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-link-eexist",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "raise": 17
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 改名先が既にある\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-link-eacces",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "raise": 13
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 13] Permission denied: '候補_例.md' -> '進行中_例.md'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-dest-vanishes-after-link",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "phase": "after",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 2] No such file or directory: '進行中_例.md'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-dest-becomes-directory-after-link",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "link",
+     "name": "dest",
+     "phase": "after",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      },
+      {
+       "op": "mkdir",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 改名先を自分が作った通常ファイルと確認できない\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "directory",
+      "sha256": null,
+      "mode": 493
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-source-reread-fails",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "read",
+     "name": "source",
+     "nth": 3,
+     "raise": 5
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(自身が作った宛先を戻した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-source-changes-before-unlink",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "read",
+     "name": "source",
+     "nth": 3,
+     "phase": "before",
+     "do": [
+      {
+       "op": "write",
+       "path": "候補_例.md",
+       "text": "changed before unlink"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(自身が作った宛先を戻した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "1fb39b33b6bf5a51fae35771d45ea33aac754210657e66fe425e0abfc6ef822d",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-rollback-sees-non-regular",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "do": [
+      {
+       "op": "unlink",
+       "path": "進行中_例.md"
+      },
+      {
+       "op": "mkdir",
+       "path": "進行中_例.md"
+      }
+     ],
+     "raise": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(候補と宛先を保全した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     },
+     "進行中_例.md": {
+      "kind": "directory",
+      "sha256": null,
+      "mode": 493
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-rollback-stat-fails",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "raise": 1
+    },
+    {
+     "point": "stat",
+     "name": "dest",
+     "nth": 3,
+     "raise": 13
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(候補と宛先を保全した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-rollback-unlink-fails",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "raise": 1
+    },
+    {
+     "point": "unlink",
+     "name": "dest",
+     "raise": 1
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 非原子的な採用を完了できない(候補と宛先を保全した)\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-dest-read-fails-after-unlink",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "read",
+     "name": "dest",
+     "raise": 5
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 5] Input/output error: '進行中_例.md'\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-dest-inode-replaced-after-unlink",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "unlink",
+     "name": "source",
+     "phase": "after",
+     "do": [
+      {
+       "op": "replace_inode",
+       "path": "進行中_例.md"
+      }
+     ]
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: 改名後に宛先が変わった。候補の残存状態を人が確認する\n",
+    "tree": {
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "other-1",
+      "nlink": 1
+     }
+    }
+   }
+  },
+  {
+   "id": "E12-stat-after-link-fails",
+   "group": "E12",
+   "prep": {},
+   "rules": [
+    {
+     "point": "rename",
+     "missing": true
+    },
+    {
+     "point": "stat",
+     "name": "dest",
+     "nth": 2,
+     "raise": 13
+    }
+   ],
+   "expect": {
+    "code": 2,
+    "stdout": "",
+    "stderr": "候補の採用を停止: [Errno 13] Permission denied: '進行中_例.md'\n",
+    "tree": {
+     "候補_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     },
+     "進行中_例.md": {
+      "kind": "file",
+      "sha256": "fe12102725122ea1e2e151a49d6f8e28a99c912c029ac0a021e87726be840a3f",
+      "mode": 420,
+      "inode": "origin",
+      "nlink": 2
+     }
+    }
+   }
+  }
+ ]
+}

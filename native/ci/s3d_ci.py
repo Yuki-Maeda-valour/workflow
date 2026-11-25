@@ -26,8 +26,8 @@ def comparison_limit(system=None):
     return COMPARISON_LIMITS[system or platform.system()]
 
 # 比較はbuildとverify-universalの時間の枠に入らないので、別のジョブで流す(2026-11-12 12:59の決定)。
-# ジョブごとの比較の回数: s3dは2回のビルドの各1回、s3d-universalは署名後の1回。
-JOB_COMPARISONS = {'s3d': 2, 's3d-universal': 1}
+# ジョブごとの比較の回数: s3dは2本の一致を確かめてから1回目の1回(#516)、s3d-universalは署名後の1回。
+JOB_COMPARISONS = {'s3d': 1, 's3d-universal': 1}
 # 比較のほかの準備(Rust・道具の導入・型検査の記録のためのビルド・転送物の展開)に見込む時間。
 JOB_OVERHEAD_SECONDS = 1800
 # 旧版を動かす道具。基準はCIのUbuntu 24.04の版(launch_sites.jsonのbase_versions)。

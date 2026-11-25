@@ -210,6 +210,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
 - S3Dの`diff-snapshot.sh`の全モードは#472で開発用ソースへ実装済み。未登録・未配布であり、配布は段階 1b・v4.53.0 のまま。契約と承認済みの差は [docs/design.md](docs/design.md#diff-snapshotの全モードs3d)、比較の流し方と容器で約18分(1,068秒)の実測は [docs/testing.md](docs/testing.md#s3dの比較)、APIは [native/README.md](native/README.md#diff-snapshotの全モードs3d) にある。
 - S3Dの専用比較は、Python3.10系(PyYAML 6.0.3)・非root・GNU道具・実`git-lfs`・Linuxでは`strace`が必須。版に依る欄の基準はUbuntu 24.04の版で、Macは未実施として記録する。CIでは新しい必須ジョブ `s3d`(4機種)と `s3d-universal`(Mac 2機種)で流す。
 - R4Aの残り5本(`resolve-task-store`・`candidate-keys`・`host-argv`・`loop-task-text`・`loop-child-output`)は#471で開発用ソースへ実装済み。未登録・未配布。認めた差と比較の前提の外は、利用者の決定7つ(2026-11-11 15:53・17:45・17:58〜22:38・22:31、2026-11-12 00:28・00:42・08:55)の範囲だけ。契約は [docs/design.md](docs/design.md#残り5本の解析補助r4a)、APIは [native/README.md](native/README.md#残り5本の解析補助r4a)、必須比較(本家CPython 3.10.11・root以外・`cc` が要る。比較器は、自分を動かしたPythonで旧版を動かす。比較器を本家3.10.11のPythonで起動する)は [docs/testing.md](docs/testing.md#残り5本の解析補助の比較r4a)にある。
+- R4Cの候補の採用と改名(旧`adopt-candidate.py`)は#478で開発用ソースへ実装済み。未登録・未配布であり、配布は段階 1b・v4.53.0 のまま。事前検査は#472のS3Dへ、候補解析は#471の`candidate_keys::check_text`へつないだ。認めた差と比較の前提の外は、全コマンドの決定(2026-11-11 17:45・17:58〜22:38・22:24・22:31、2026-11-12 00:28・00:35・00:42・02:41・06:58・08:55、旧版が起動する道具・補助が無いときは11-11 23:19)の範囲だけ。契約は [docs/design.md](docs/design.md#候補の採用と改名r4c)、APIは [native/README.md](native/README.md#候補の採用と改名r4c)、必須比較(`check_adopt_candidate.py --fixture <adopt_candidate_contractの絶対パス> --diff-snapshot-fixture <同じ成果物のdiff_snapshot_contractの絶対パス> --old-python <本家CPython 3.10.11のpython>`。本家CPython 3.10.11・root以外・bash 4.0以上とGNUの道具・基準の版の容器〈Ubuntu 24.04〉が要る。Linuxでは`unshare -rm`も要り、CIは`--require-userns`を付ける)は [docs/testing.md](docs/testing.md#r4cの比較)にある。
 - Rust を開発する人は、`rustup`(Rust の版を入れて管理する道具)を用意し、`1.99.1` を入れる。導入の説明は [docs/testing.md](docs/testing.md#rust-の開発と検査段階-0a)。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外へ指定する。`native/target/` は無視される設定でも、そこへ出力しない。既存テストのコピーと全体走査に生成物を混ぜないため。
 - 下のコマンドはリポジトリ直下から実行する。後半は Linux x86_64 の実行ファイルを使う。ほかの機械の対象名は [docs/testing.md](docs/testing.md#4-種類の-ci-と成果物) にある。
@@ -242,7 +243,7 @@ DEV_WORKFLOW_TEST_NATIVE_BINARY="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/rel
 python3 -B native/ci/source_input_hash.py --root .
 ```
 
-- Rust の書式・clippy(よくある誤りの検査)・テストは、4 種類の CI でもすべて必須。Linux 2 本と署名後の Mac 1 本は、別々の空の出力先から 2 回作り、バイト列が同じかを確かめる。
+- Rust の書式・clippy(よくある誤りの検査)・テストは、4 種類の CI でもすべて必須。Linux 2 本と署名後の Mac 1 本は、別々の空の出力先から 2 回作り、バイト列が同じかを確かめる(#516 から、Mac の CPU ごとの 2 本も確かめる)。
 - `DEV_WORKFLOW_TEST_NATIVE_BINARY` はテスト専用。未設定・空文字・不在・実行不能なら失敗にする。配布済みの実行ファイルへ切り替えない。
 - `check_resolve_task_dir.py` は、4 種類の各ビルドの 2 本と、署名後の Mac の両 CPU で実行する。権限と非 UTF-8 出力による旧版との差、ファイルの無変更の検査は [docs/testing.md](docs/testing.md#タスク保存先の比較段階-1a) に従う。
 - `scripts/run-all.py` は新しい `scripts/test_*.py` も集める。Cargo と `native/ci/` の検査は別に流す。`run-all-container.sh` へ Cargo や外部ビルドの指定は追加しない。

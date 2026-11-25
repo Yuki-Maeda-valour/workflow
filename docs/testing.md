@@ -943,7 +943,7 @@ python3 -B native/fixtures/r4e/generate_expected.py --legacy-python "$legacy_ven
 #### CIの必須接続と時間
 
 - R4E の比較は、新しい2つの必須のジョブで流す。理由(`build` の時間の予算)は [設計のR4E節](design.md#markdown-の表の-xlsx-出力r4e) にある。
-  - `r4e`: `build` の後に、4機種で、`build` の2本の `r4e_contract` のそれぞれで比べる。上限30分。
+  - `r4e`: `build` の後に、4機種で、`build` の2本の `r4e_contract` のそれぞれで比べる。上限30分。#516 の後は、2本が同じことを `cmp` で確かめてから、1本目だけで比べる。
   - `r4e-universal`: `combine` の後に、Mac 2機種で、署名後の1本で比べる。上限30分。
   - `distribution` は、2つのジョブの成功を待つ(`needs` の末尾に足した)。R4E の比較が落ちたら配布用 tar を作らない。
 - 旧版用の venv は、各ジョブで Python 3.10.11 から `r4e-requirements.txt` で作る。Linuxのジョブは、`strace` を入れて動くことを最初に確かめる。
@@ -1398,7 +1398,7 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
 - `build`は、`diff_snapshot_contract`を作り、検査物の転送とMac結合に含める。`make_dist.py`の配布一覧と`native-dist.tar`には入れない。
   - exampleの単体検査(12件)は、Linux 2機種の`build`だけで流す。Macの`build`ではbrewを入れない。
   - S3Dは、`build`と`verify-universal`の上限を変えない。S2L #468で延ばした120分・60分のままである。
-- `s3d`は`build`の後に、4機種で流す。各ビルド2回それぞれで全体の比較を行う。上限は270分である。
+- `s3d`は`build`の後に、4機種で流す。2回のビルドが同じことを`cmp`で確かめてから、1回目のビルドで全体の比較を行う(#516。前は各ビルド2回それぞれで比べていた)。上限は270分である(2回の時の値のまま)。
   - 各機種で、GNU道具(Macはbrew)と実`git-lfs`(Linuxは`strace`も)を用意し、型reportを作る。
 - `s3d-universal`は`combine`の後に、Mac 2機種で流す。署名後の一致したexampleを実際のMacで比較する。上限は150分である。
 - `s3d`・`s3d-universal`は、`distribution`の`needs`に入れない。R4Uの`r4u`・R4D-1の`r4d1`と同じ形である。
@@ -1406,7 +1406,7 @@ python3 -B -m unittest discover -s native/ci/scripts -p 'test_s3d_ci.py'
   - 理由の2つ目: 必須であることは、マージの条件で担う。マージの条件には、PRの先頭のSHAの、打ち切られていないrunの最新のattempt(やり直しの回)だけを数える。そのattemptで全ジョブが成功していることが要る。失敗したジョブだけをやり直したattemptも数える。
   - 理由の3つ目: `distribution`が、最長270分の比較を待たないようにする。
 - 比較1回の上限は、Linuxが60分、Macが120分である(`native/ci/s3d_ci.py`の`COMPARISON_LIMITS`)。
-  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
+  - ジョブの上限は4機種で共通である。Macの比較1回の上限×回数に、準備の30分を足した値である(#516 で `s3d` の比較は1回になったが、上限は2回の時の値のまま)。`s3d`は2×120+30=270分、`s3d-universal`は1×120+30=150分である。
   - 根拠の1つ目は、Issue #472の設計である。時間の上限は、新旧の専用比較の実測の後に決める。既存の必須の比較を減らして時間内に収めない。
   - 根拠の2つ目は、手で起動したNativeのrun 45118443441(commit 6a43412)である。Mac x86_64の`s3d`で、比較の1回目が当時の上限60分(3,600秒)を超えて止まった。
   - 120分にした後のrun 45133632158では、比較1回の最長はLinuxが1,261秒(Linux arm64)、Macが3,901秒(Mac x86_64)だった。上限は、それぞれの約2.9倍と約1.85倍である。Macは2倍に届かない。
@@ -1648,9 +1648,131 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
   - 直す前の起こし方で見つからない回数は、回ごとにばらつく(設計の時は446回、この回は208回)。
   - 直した後、手元で `test_a_marked_process_in_another_session_is_found_and_stopped` を20回流して20回合格した(直す前も手元ではふつう落ちない。通常の経路を壊さないことの確かめ)。
 
-CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と次の節にある。
+CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と[4 種類の CI と成果物](#4-種類の-ci-と成果物)にある。
 - 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。
 - 既存のtask-digest・R4B・R4R・保存先解決の比較は、この変更でも通る(2026-11-12。task-digestは `cargo test` の中、保存先解決は714件)。
+
+### R4Cの比較
+
+#478の候補の採用と改名(旧`adopt-candidate.py`)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と承認済みの差](design.md#候補の採用と改名r4c)、[APIと入口](../native/README.md#候補の採用と改名r4c)を参照する。
+比較は、旧`adopt-candidate.py`と、今回のソースから作った検査用実行物`adopt_candidate_contract`を、同じ種類の使い捨て入力で動かして行う。
+旧版・Rust・固定期待の3つを使う。両側が同じ誤値でも、固定期待と違えば失敗にする。
+
+必要な環境は次のとおり。欠けたときに止まる単位は、2つに分かれる(省略や切替をしない)。
+
+比較の前に、全体を失敗にするもの:
+- 比較器のPythonは3.10系で、root以外の利用者であること。
+- 比較用の旧Pythonは、本家のCPython 3.10.11であること(`verify_old_python`)。
+  - 版と、標準ライブラリ3ファイル(`argparse.py`・`pathlib.py`・`re.py`)のSHA-256を、本家の値と照らす。
+  - 中身が本家と違うPython(配布元の修正が入ったUbuntuの3.10.12など)は、診断の比較をせず、全体を失敗にする。
+- 旧Pythonの`os.strerror`が、基準のerrnoの表(Linux 131件・Mac 12件)と同じこと(`verify_errno_baseline`)。
+- `--fixture`と`--diff-snapshot-fixture`が、絶対パスで実行できること。2つは別の実行物であること。
+
+ケースごとに、失敗か未実施にするもの:
+- 旧版の事前検査が起動する`bash`は4.0以上で、`grep`・`find`・`mktemp`・`sort`はGNU版であること。基準の版の容器(Ubuntu 24.04)で流す。満たさないとき、Linuxは失敗、Macは名前と理由を付けて未実施にする。
+- 道具の版が基準の版(Ubuntu 24.04の版)と同じであること(版に依るケースだけ)。違うとき、Linuxは失敗、Macは未実施にする。
+- Linuxでは、`/proc`を隠す利用者の名前空間(`unshare -rm`)を作れること。`--require-userns`が無ければ、作れないとき未実施にする。付けて`/proc`を隠す組を作れないときは、E19b・E20bを未実施にせず失敗にする。
+- `diff_snapshot_contract`(S3Dの検査用実行物)は、同じ成果物から作ったものを渡す。子のモードの基準に使う。
+
+一時フォルダの祖先にGitが無いこと(`check_no_git_ancestor`)は、`TMPDIR`の場所の確かめである。止まり方は2段になる。
+- 比較器が最初に流す自己検査(`test_adopt_candidate.py`)の`test_git_ancestor_of_the_scratch_folder_is_refused`が、`setUp`が`TMPDIR`の下に作った自分の一時フォルダで、この関数を呼ぶ。祖先に`.git`があると、この自己検査が失敗する。
+  - `main()`の最初の`run_suite`が、`ADOPT: 不合格: 未実行・失敗・省略したケースがある`と終了コード1で止まる。
+  - `verify_old_python`も、本体の比較も流れない。比較の前に全体を失敗にするものと同じ扱いになる。
+- 本体の各ケースも、一時フォルダを作るとき(`Side.__init__`と、自分で作る各群)に、同じ関数で確かめる。
+- 対処は、`TMPDIR`をGitの外へ指定することである。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example adopt_candidate_contract -- \
+  --skip diff_snapshot:: --skip candidate_keys:: --skip r4a_rest_support:: \
+  --skip resolve_task_dir_definition:: --skip task_digest_definition::)
+(cd native && cargo build --release --locked -p dev-workflow-cli \
+  --example adopt_candidate_contract --example diff_snapshot_contract --target x86_64-unknown-linux-musl)
+<本家3.10.11のPython> -B native/ci/check_adopt_candidate.py \
+  --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/adopt_candidate_contract" \
+  --diff-snapshot-fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/diff_snapshot_contract" \
+  --old-python <本家3.10.11のPythonの絶対パス>
+```
+
+- 上の手元の手順には`--require-userns`を付けない。付けるのはCIのLinuxだけである(CIの`r4c`が、Linuxの機種で付ける)。手元のLinuxで付けるときは、`unshare -rm`を使えるようにしてから流す。
+
+- 出力先はリポジトリの外に置く。他機種は、その機械のRust対象名へ変える。
+- 比較器の引数は次のとおり。
+  - `--fixture`(必須): `adopt_candidate_contract`の絶対パス。未指定・不在・実行不能なら失敗にする。配布済みの実行物やPATHへ切り替えない。
+  - `--diff-snapshot-fixture`(必須): 同じ成果物の`diff_snapshot_contract`の絶対パス。
+  - `--old-python`: 旧版を動かすPython。省略すると、比較器を動かしたPythonを使う。
+  - `--require-userns`: Linuxで`/proc`を隠す組を作れないときに、未実施にせず失敗にする。CIのLinuxだけが付ける。手元とMacでは付けず、名前と理由を付けて未実施にする。
+  - `--evidence`: 機種で変わる旧版の診断の生出力を、`ADOPT-EVIDENCE`の行で出す。CIは付ける。固定期待は、この証拠を見てから確定する。
+- 比較器は、比較の前に自己検査(`native/ci/test_adopt_candidate.py`。66件。2026-11-25に`loadTestsFromModule`で数えた)を流す。落ちたら本体の比較へ進まない。
+- 旧テストの26メソッドは、`OLD_TEST_MAP`の観点の表へ1回ずつ載せる。載っていないメソッドは失敗にする。
+- 旧版は変えず、旧テスト(`scripts/test_adopt_candidate.py`・`scripts/test_safe_git_callers.py`)も変えない。
+
+件数(3つ目の実装commit `383bbdc`の後の作業機の値。2026-11-24。本家CPython 3.10.11・muslのrelease。出典はIssue #478の追加修正記録の、3つ目の実装commitの節):
+
+| 区分 | 件数 |
+|---|---|
+| 旧版の固定期待との照合 | 411件一致 |
+| 基準(S3Dの実行物)の照合 | 16件一致 |
+| Rustの固定期待との一致 | 432件 |
+| 承認済みの差の個別期待(通常の一致件数とは別) | 旧版112件・Rust40件が一致 |
+| 依存部品の未接続で不通過 | 0件 |
+| 未実施(機械で作れない入力。`NOT_RUN`) | 0件 |
+| Rustの側のそれ以外の不一致 | 0件 |
+
+- 承認済みの差の件数は、比較器の`TALLY`の`approved_old`・`approved_native`の値である。作業機の内訳は次のとおり。
+  - 旧版112件: E24が36ケース×3回(閉じたままの旧版・`/dev/null`にした旧版・何も閉じない旧版)の108件と、E21の`bash-missing` 1件と、E23の3件。
+  - Rust40件: E24が36ケース(閉じたままのRust)と、E21の`bash-missing` 1件と、E23の3件。
+  - 基準の版では、E21の版に依る3ケースが加わり、旧版115件・Rust43件になる見込みである(未確認)。
+  - 文字コード・localeの承認済みの差(E14)は、この件数に入らない。最後の行の`承認済みの差 N 件`に入る。`en_US.UTF-8`・`ja_JP.UTF-8`のうち入っていないlocaleごとに、1ケース(最大2ケース)が未実施になる。UTF-8でない名前のファイルを作れない機械(Macで拒まれる見込み)では、その場合もlocaleごとに未実施になり、実際のerrnoを理由に付ける。Linuxでは作れないと失敗にする。
+- Macで未実施になる入力が1つ増える: 注入のE06「PATHを消す」(`E06-no-path-uses-the-default-search`)。既定の探索パスの`bash`が4.0未満(Macの`/bin/bash`は3.2)などで、旧版が事前検査の停止(終了2・停止の文)になったときだけ、旧版の側を未実施に数える。Rustの側は固定期待と照らす。Linuxでは失敗のまま。
+- 固定の未実施(`UNIMPLEMENTED`)は5項目で、機械で作れない入力の未実施(`NOT_RUN`)とは別である。理由は次のとおり。
+  - 短読(`read`が要求より短く返す): 普通のファイルのreadは短く返さない。読取りの塊の境目は、platformの単体テストで固定する。
+  - openの後の親ディレクトリ自身の差替え: 注入を、rootの直下の1成分だけに限る決定のため、rootの外を書き換える差替えは作れない。
+  - 標準エラーの書き込みが失敗した後に、空きが戻って呼出履歴が出る場合: 旧版は失敗した例外の呼出履歴を標準エラーへ書き直す。Rustは呼出履歴の中身ではなく、溜めに残ることだけを模す。書けないままの場合(上限・満杯・閉じたpipe)は旧版と一致を確かめた。待たずに書くpipeの`EAGAIN`や、空きが戻る`ENOSPC`は、作れる入力が無い。
+  - Macでの子の受け継いだfd: `/proc`が無く、fdの数の直接検査はLinuxだけである。信号の状態は、platformの単体テストがMacでも検査する。
+  - UTF-8でないlocale(例: `ja_JP.eucJP`)での引数とパスの解釈: 作業機に該当のlocaleが無い。入っている機種でだけ実行できる。
+- 機種で変わる診断の固定期待は、CIの証拠(`--evidence`)を管理担当が確かめるまで「仮の期待」である。次のケースが、仮の期待に入る(比較器の`PROVISIONAL_RUN`に足す所で確かめた)。
+  - E01b: 起動の失敗と環境変数の13ケース(`PYTHONOPTIMIZE=1`・`2`を含む)。
+  - E13a: helpと引数の誤りの出力の故障。`/dev/full`がある機械で20ケース。
+  - E14: 文字コードの4ケース(未知のcodec・文字コードでないcodec・`ascii`のhelp・`latin-1`のhelp)。
+  - E13c: 本物の端末の標準出力(help)。
+  - 仮の期待と固定の未実施が必ず入るので、最後の行は`合格`ではなく`検査は通過(ただし…合格とは出さない)`になる。終了値は0である。
+  - 仮の期待の件数は、最後の実測の記録に無く、未確認である。
+- 観点A05(`candidate_keys_normal_and_skip_attack`)は、比較器の検査が無い。候補解析は、E04とE04bで旧版と比べる。
+- 旧テストの観点は、26メソッドの全部と追加の群(E01〜E24)に対応づける。比較器の自己検査(`test_adopt_candidate.py`)と、全回帰テストに入る`scripts/test_native_adopt_candidate.py`が、観点の表・引数の固定期待・errnoの表・固定のJSON表の一致を確かめる。
+
+時間: 作業機で比較1回あたり約228秒である(E24を足した後。足す前は約215秒。作業機の負荷でばらつく)。CIでは未測定で、PRの後に足す。
+
+基準の版でない機械での結果:
+- 版に依るケースは、基準(Ubuntu 24.04の版)と違う機械で、設計どおり失敗する(Macでは未実施にする)。対象は、E20c(旧`bash`の起動の警告の中継)と、E21のうち版に依る3ケース(旧`diff-snapshot.sh`が無い・読めない、GNUの道具がPATHに無い)である。
+- 作業機(Ubuntu 22.04・bash 5.1.16)では、この4ケースが失敗した。基準の版の容器(Ubuntu 24.04)では通った。
+- 事前検査が成功するだけのケースなど、版に依る欄の無いケースは、旧版の前提をそろえたどの機械でも比べる。
+- 作業機で全体の比較が終了1で終わるのは、この4ケースが失敗するためである。基準の版での合格ではない。基準の版の確認は、同じ版の容器かCIで行う。
+
+CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物は[CI入口の説明](../native/ci/README.md#r4cの必須比較と検査用実行物)にもある):
+- 比較は`build`と`verify-universal`へ入れず、必須ジョブ`r4c`と`r4c-universal`で流す。
+  - `r4c`は`build`の後に、4機種で、各ビルド2回の`adopt_candidate_contract`を比べる。Linuxでは`--require-userns`を付ける。
+  - `r4c-universal`は`combine`の後に、Mac 2機種で、署名後の一致した実行物を比べる。
+  - どちらも上限は30分で、`build.py`の`prepare_r4c`(`r4c`・`r4c-universal`が比較の前に呼ぶ)が、S3Dの`s3d`と同じ道具の準備(Macはbrewのbash・GNUの道具・git-lfs)をする。Linuxでは、`/proc`を隠す組をAppArmorの制限から外す。
+- 上限30分は、見積もり(約25分)に対して余裕が小さい。CIでは未測定で、PRのCIで機種ごとの時間を記録してから見直す。
+- `r4c`・`r4c-universal`は、`distribution`の`needs`に入れない。理由は、S3Dの`s3d`と同じである。例の実行物は配布物に入らず、必須であることはマージの条件で担う。
+- `build`には、exampleのビルドと単体検査だけを足した。Macの`build`でも流れる。
+  - 単体検査は、取り込んだS3DとR4Aの部品の検査を外す。外す名前は5つ(`build.py`の`ADOPT_IMPORTED_SKIPS`)。
+  - `diff_snapshot::`: S3Dの部品。単体検査は、Linuxは`build`の`quality()`(`s3d_ci.unit_test`)、Macは`s3d`ジョブの型検査に残す。
+  - `candidate_keys::`・`r4a_rest_support::`・`resolve_task_dir_definition::`・`task_digest_definition::`: R4Aの部品。単体検査は、`build`の`quality()`のR4Aのexample`r4a_rest_contract`の検査に残す。
+  - `--skip`は名前の一部に一致したものを外す。そのため、R4Cの検査の名前に、この5つを含めない。
+  - S3DとR4Aの部品を取り込んだことによる、exampleのビルドと`build`の時間の増加は、未測定である。PRのCIで機種ごとに記録する。
+- `native.yml`のジョブの定義は19個で、matrixを展開した実行は53件である(2026-11-24に、`r4a-rest`・`r4a-rest-universal`・`r4c`・`r4c-universal`を含めて数えた)。
+- `check_workflow.py`は、`r4c`・`r4c-universal`のジョブの欠落・機種・`needs`・上限30分・比較の前のPythonの手順の順を確かめる。
+- `test_native_ci.py`の`AdoptConnectionTests`は、exampleの単体検査の`--skip`の5つ・2つのジョブの比較の呼び出し・workflowの形・exampleが配布一覧に入らないこと(`test_example_is_built_but_never_distributed`)を確かめる。
+
+自己検査の補足:
+- 起動の失敗の診断では、`Current thread`の行だけ位置と形式を検査し、ほかは全文を比べる。
+- 事前検査の子の引数・環境・cwd・stdinは、旧版は`PATH`の先頭に置いた`bash`の観測用の包み(記録した後、`exec`で本物に置き換わる)で記録する。Rustは自分自身を子にするので包みを挟めない。引数・cwd・stdinは単体テストで確かめ、環境の値の集合とcwdは、子が起動する`git`の観測用の包みで旧版と比べる。
+- `argv[0]`が`diff-snapshot.sh`と完全に一致するときだけ入る子のモードは、同じ入力の`diff_snapshot_contract`と、出力と終了値が同じことを確かめる(E19。SIGINTを無視して起動したケース・途中のSIGINT・ファイルの大きさの上限のケースを含む)。
+- 順序を決めないSIGINT(E17)は、旧版・Rustを各20回流し、結果の種類(終了値・残った名前・標準出力の有無・標準エラーの最後の行)を記録する。Rustの種類が、基準の集合(順序を決めた旧版の種類と固定の3種類)と旧版の標本の種類の和に収まることを求める。順序を決めたケースは全部を比べる。
+- E24(起動時に閉じた標準のfd)は、閉じたfdを`/dev/null`にして流した旧版の結果をRustの期待にする(承認済みの差の個別期待。経路・期待の作り方・階層の偶奇の規則は[設計](design.md#r4cに限る承認済みの差)の8)。旧版の個別期待と一緒に、承認済みの差の区分で数える。追跡済みの経路は、rootの階層の偶数と奇数の両方で流す。基準の版の容器ではE24の36ケースが通った。
 
 ### 4 種類の CI と成果物
 
@@ -1684,21 +1806,21 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - R4G(#479)で、検査専用の `r4g_contract` も同じ2回のビルドに加わった(`--example r4g_contract`)。その比較は `build` と `verify-universal` では流さず、別のジョブ `r4g`(`build` の後・4機種)と `r4g-universal`(`combine` の後・Mac 2機種)で流す。上限はそれぞれ60分と30分である([R4Gの比較](#r4gの比較)・[CI入口の説明](../native/ci/README.md#r4gの必須比較と検査用実行物))。
 - R4A(#471)から、同じビルドに `--example r4a_rest_contract` も足す(`build.py` の `EXAMPLES`)。
 - R4A残り5本(#471)の専用比較は、`build`・`verify-universal` には入れず、必須の2ジョブで流す。
-  - `r4a-rest`: `build` の後。4機種で、同じ機種の2回のビルドの `r4a_rest_contract` を比べる。上限は60分。
+  - `r4a-rest`: `build` の後。4機種で、同じ機種の2回のビルドの `r4a_rest_contract` が同じことを `cmp` で確かめてから、1回目を比べる(#516)。上限は60分(2回の時の値のまま)。
   - `r4a-rest-universal`: `combine` の後。Mac 2機種で、署名後の同じ実行物を各CPUで比べる。上限は45分。
   - どちらも、`actions/setup-python` の3.10.11の後に `build.py prepare` を流す。
-  - 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めた。
+  - 上限は、比較1回の上限(900秒)×回数 + 自己検査の見込み(900秒)+ 準備と余裕で決めた(`r4a-rest` は2回の時の値。#516 で比較は1回になった)。
   - 自己検査は、絞り込み(`--case`)で短くなった。作業機の実測は、約1319秒(93件、絞り込みの前)から約42秒(105件)になった。
   - CIの実測は、次のとおりである(commit ab0b9ab、自己検査80件、絞り込みの前)。
     - 自己検査: Linux x86_64が1055.9秒、Linux arm64が1026.5秒、Mac x86_64が1286.1秒、Mac arm64が850.1秒。
     - 比較1回: Linux x86_64が約117秒、Linux arm64が約99秒、Mac x86_64が298.8秒、Mac arm64が140.2秒。
   - 絞り込み後の自己検査は、作業機の約42秒(commit e74acea の時点、105件)に、CIのMac x86_64の遅さ(同じ80件で作業機の約1.2倍: 1286秒と1077秒)をあてはめると、約50秒になる(見込み。未確認)。
-  - 見込みの合計(Mac x86_64): `r4a-rest` は 298.8秒×2 + 約50秒 = 約650秒(約11分)、`r4a-rest-universal` は 298.8秒 + 約50秒 = 約350秒(約6分)になる。準備とダウンロードは含まない(Linuxでは約30秒、Mac x86_64では約74秒だった。commit ab0b9ab のジョブの始めから、`r4a-rest` の手順までの時間)。
-  - 最悪の場合(比較が上限900秒を使い切る)でも、`r4a-rest` は 900秒×2 + 約50秒 = 約31分(上限60分)、`r4a-rest-universal` は 900秒 + 約50秒 = 約16分(上限45分)である。どちらも上限の内で、余裕は大きい。
+  - 見込みの合計(Mac x86_64): `r4a-rest` は 298.8秒×2 + 約50秒 = 約650秒(約11分。比較2回の時の見込み。#516 の後は1回)、`r4a-rest-universal` は 298.8秒 + 約50秒 = 約350秒(約6分)になる。準備とダウンロードは含まない(Linuxでは約30秒、Mac x86_64では約74秒だった。commit ab0b9ab のジョブの始めから、`r4a-rest` の手順までの時間)。
+  - 最悪の場合(比較が上限900秒を使い切る)でも、`r4a-rest` は 900秒×2 + 約50秒 = 約31分(上限60分。比較2回の時の見込み)、`r4a-rest-universal` は 900秒 + 約50秒 = 約16分(上限45分)である。どちらも上限の内で、余裕は大きい。
   - 上限(60分・45分)を下げるかは、絞り込み後のCIの実測が出てから決める。今は変えない。
   - R4A残り5本を足した後の`native.yml`は、ジョブの定義が17個、matrixを展開した実行が47件である(2026-11-24に数えた)。増えたのは、`r4a-rest`の定義1個・実行4件と、`r4a-rest-universal`の定義1個・実行2件である。
 - Linux は Rust に付属する musl(実行時に必要な C の処理を提供する部品)を使い、共有ライブラリを要しない実行ファイルを作る。`musl-gcc` や C の追加依存は導入しない。
-  - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。
+  - 実行前に ELF(Linux の実行ファイル形式)の CPU、動的ローダー指定の不在、共有ライブラリ依存の不在を検査する。2 回のバイト列は `cmp` で比べる。Mac も、CPU ごとの 2 回のバイト列を `cmp` で比べる(#516)。
 - Mac の両方で `MACOSX_DEPLOYMENT_TARGET=11.0` を指定する。`combine` が 2 回分をそれぞれ `lipo` で結合し、`codesign --sign -` で簡易署名を付ける。
   - 識別子は `org.dev-workflow.native`、署名の時刻は `--timestamp=none` に固定する。署名を検査してから SHA256 を取り、署名後の 2 本を `cmp` で比べる。
   - `verify-universal` は、同じ最終ファイルを Intel と Apple Silicon の両方へ渡し、`check_probe.py` と `check_resolve_task_dir.py` を実行する。署名し直さない。R4BとR4Rの検査用実行物も同じ結合・署名・比較を通し、両CPUで専用比較を実行する。S2Lの `loop_state_fixture` も同じ結合・署名・比較を通し、両CPUで `check_loop_state.py` と `test_loop_state.py` を流す。
@@ -1738,6 +1860,18 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - マージの条件(同じ SHA の `pull_request` の CI の全ジョブの成功)で数える Native のジョブは、R4U・R4D-1・R4E の後は 23 個になる。内訳は `policy` 1・`build` 4・`combine` 1・`verify-universal` 2・`distribution` 1・`r4d1` 4・`r4u` 4・`r4e` 4・`r4e-universal` 2 である。
   - S3I-A(#474)の `implement-guard`(`build` の後・4 機種)と `implement-guard-universal`(`combine` の後・Mac 2 機種)を足した後は 29 個になる。内訳は、上の 23 個に `implement-guard` 4・`implement-guard-universal` 2 を足したものである。
   - S3I-A の取り込みの後は、`REQUIRED_NATIVE_JOBS` が 11 個になった(`policy`・`build`・`combine`・`verify-universal`・`distribution`・`r4u`・`r4d1`・`r4e`・`r4e-universal`・`implement-guard`・`implement-guard-universal`)。比較のジョブの一覧は `COMPARISON_JOBS` の 1 つにまとめ、`r4e`・`r4e-universal` の `needs`(`build`・`combine`)も確かめる。
+
+#### 比較のジョブの2回目の比較をやめた(#516・2026-11-25 の記録)
+
+- 移植のまとまりごとの、旧版との比較のジョブ(`s3d`・`r4g`・`r4e`・`r4a-rest`・`implement-guard`)は、`build` の tar の `1/` と `2/` が同じことを `cmp` で確かめてから、`1/` だけで比べる(`build.py` の `same_builds`)。2本が違えば、比較を呼ばずに止まる。
+- `reproduce` は、4機種とも、2回のビルドの全部の実行物を `cmp` で比べる。前は Linux だけで、Mac の CPU ごとの2本は直接比べていなかった(`combine` が束ねて署名した後の2本だけを比べていた)。
+- 比較1回の中身(旧版との完全な一致・件数・固定の一覧)と、ジョブの時間の上限は変えていない。
+- 失うもの: 同じ実行ファイルを2回比べて、時々しか出ない差(比較器や機械の揺れ、Rust 版の時々の誤り)に当たる試しの1回分。
+  - 実例: commit e74acea の push 用 CI(run 43296607476)で、`r4a-rest` の Mac arm64 は1回目が合格し、2回目だけが疑似端末の読み残しで落ちた(上の R4A の節)。
+  - 1回の CI でのこの試しの数は、Linux の各機種で2から1に、Mac の各 CPU で3(`1/`・`2/`・署名後)から2(`1/`・署名後)に減る。減ったのは `s3d`・`r4g`・`r4e`・`r4a-rest` の4つである(`implement-guard` は前から1回目だけを比べていたので変わらず、比較の前の `cmp` だけが足された)。
+  - 補う手段: 変更のたびに PR 用と main の push 用の CI が流れる。Mac は署名後の比較(`*-universal`)が残る。
+- `r4c`(R4C #478。#516 の設計の後に main に入った)は、#516 の範囲に入れていない。R4C の設計のとおり、今も2回のビルドの両方で比べる。`reproduce` の `cmp` は `adopt_candidate_contract` も比べる。同じ形にするかは Issue #525 で決める。
+- 直す前の時間(main `01998b1` の push 用の Native の run 45396522756・attempt 1): 全体 227 分、Mac の成功したジョブの合計 604 分、`s3d (macos-x86_64)` 147.1 分、`s3d (macos-arm64)` 68.1 分。直した後の時間は、PR の CI で測って PR の本文と Issue #516 に記録する(この文書を書いた時点では未確認)。
 
 ### ビルド入力の記録
 
@@ -2304,6 +2438,31 @@ bash scripts/run-all-container.sh [--commit <rev> | --worktree] [--image <名前
   - `loop-selftest.sh` の一時フォルダ(`mktemp -d` で作る。既定は `/tmp/tmp.*`)も、後片付けが走らずに残ることがある。
   - 残った一時フォルダは、中断の行の後に `残った一時フォルダ(<節>。確かめてから消す): <パス>` と出る。中を確かめてから消す。
   - この表示の前に、止めた全部のプロセスの出力が閉じるのを、時間で切らずに待つ。別のプロセスグループの子プロセスが標準出力を開いたまま残ると、その子プロセスが終わるまで待つ。
+
+#### hooks の節の揺れ(#435・2026-11-25 の記録)
+
+- `hooks` の節が、混んだ全回帰テストの容器で時々落ちた(2026-11-07 に #431 の全回帰テストで見つけた)。落ち方は次の 3 つだった。
+  - 止める印の「構造差分」の文が無い・節の終わりの「印つきのプロセスが残っていない」の 2 件(#431 で見つけた形)。
+  - 節の終わりの「印つきのプロセスが残っていない」だけ。
+  - `内部の失敗: 30(期待 30・実際 10)` の一群と、節の終わりの確かめ。
+- 形は、どのテストのイテレーションで信号が届かなかったかで変わる、と仕組みから読んでいる(推測)。設定を書き換えるスタブ(`internal2`)なら 1 つ目、ほかのテストなら 2 つ目、設定を書き換えないスタブ(`internal`)なら 3 つ目になる。テストごとの記録は、2026-11-25 に同時 32 個で 96 回流した回(2 回落ちた)の `internal2` だけである。
+- 原因(容器で再現し、記録で確かめた。2026-11-07 の回がこれによるかは推測):
+  - 製品の `loop.sh` の補助 `supervisor-control` の `term`・`kill` は、信号を送る前に、監督(`loop-supervisor.py`)の `/proc/<pid>/stat` を `pidfd_open` の前後で 2 回読む。直す前は、(親 PID・開始時刻・状態の文字)の組が同じかを比べていた。
+  - 状態の文字(`R`・`S`)は、監督が 20 ミリ秒ごとに眠って起きるたびに変わる。混んだ機械では 2 回の読みの間に変わり、補助は TERM を送らずに「消えた」(終了コード 3)で戻った。
+  - `loop.sh` は、`term` の後、`--kill-grace` の秒数(`loop.sh` の変数 `KILL_GRACE`)+ 7 秒で、監督を SIGKILL する。`hooks` の節は `--kill-grace 2` で流すので名目は 9 秒で、記録では 11.0〜16.0 秒だった。監督は後片付けをせずに死ぬので、イテレーションの子が残り、止める印の理由が「残ったプロセス」になった。
+  - 2026-11-07 の回の出力には、`loop.sh` が監督を SIGKILL したときの bash の知らせ(`Killed`)と、残ったプロセスがあった。上の流れと合う。
+  - 容器(`workflow-test:run-all-8d79dffe3580`・git 2.56.0)で、main `01998b1` のコピーの `hooks` の節を同時 48 個で 192 回、3 回流した。落ちたのは 2 回・4 回・6 回だった。
+  - 3 回とも、コピーにだけ調べの記録を足した(リポジトリは変えていない)。1 回目は監督の後片付けの時間と、`loop.sh` が補助の `term`・`kill` を呼んだ時刻、2 回目はさらに監督の起動と信号を記録した。
+  - 3 回目(6 回落ちた回)は、さらに補助に、2 回の読みが食い違ったときの記録を足した。落ちた 6 回のすべてで、2 回の読みの状態の文字が `R` と `S` で入れ替わっていた。食い違いの記録は 6 件だけで、落ちた回と一対一だった。
+- 直し(`loop.sh` の `cmd_supervisor_control`。配るプラグインの修正なので、`CHANGELOG.md` に節を足した):
+  - 後の比較を (親 PID・開始時刻) だけにした。PID の再利用は今までどおり見分ける(`loop-supervisor.py` の `identity` と同じ比べ方。[`references/loop.md`](../plugins/dev-workflow/skills/ship-task/references/loop.md) の停止時の照合の約束とも同じ)。前の読みの `Z`(プロセスが終わって、回収を待っている状態)の確かめは変えていない。
+  - `scripts/test_loop_supervisor.py` に、2 つのテストを足した。どちらも `term`・`kill` の両方で確かめる。
+    - `test_state_change_after_pidfd_open_still_signals`: 状態の文字だけが変わっても信号を送る。
+    - `test_parent_change_after_pidfd_open_does_not_signal`: 後の読みで親 PID が変わったら送らない。
+- 確かめたこと:
+  - 直す前の `loop.sh` では、`test_state_change_after_pidfd_open_still_signals` が `term`・`kill` とも終了コード 3 で落ちる。
+  - わざと入れる誤り(変異)で確かめた。後の比較を `!= before` に戻すと `test_state_change_after_pidfd_open_still_signals` が、開始時刻だけにすると `test_parent_change_after_pidfd_open_does_not_signal` が落ちる。
+  - 直した後に容器で `hooks` の節を繰り返し流して、落ちないかは未確認(この記録を書いた時点)。Issue #435 の完了条件 3 で、main を取り込んだ後の版で流し、結果は PR と Issue に書く。
 
 ## 全回帰テストの手順の経緯(run-all.py の前)
 
