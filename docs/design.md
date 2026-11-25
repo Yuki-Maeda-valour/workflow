@@ -2217,6 +2217,179 @@ APIは [native/README.md](../native/README.md#残り5本の解析補助r4a)、�
 
 APIは [native/README.md](../native/README.md#候補の採用と改名r4c)、比較の流し方と件数は [testing.md](testing.md#r4cの比較)に記す。
 
+### environment-guardの環境照合と内部reader(S2E)
+
+[Issue #470](https://github.com/Yuki-Maeda-valour/workflow/issues/470)で、旧`environment-guard.py`(以下、旧guard)の9コマンドと、`host-check.py`が使う内部reader(保持した控えから設定・部品・方針の値を読む3つの関数)を、開発用Rustソースへ移した。
+製品CLIの登録表・help・既存の呼出元・配布物・版・`CHANGELOG.md`は変えていない。未登録・未配布であり、配布は段階1b・プラグインv4.53.0のままである。
+
+- 移した物: 9コマンド(`bootstrap`・`verify`・`read`・`exec`・`hook`・`verify-pair`・`host-paths`・`host-settings`・`host-allowlist`)と、内部reader3つ(`read_host_settings`・`read_components`・`component_policy_digest`)のRust API。
+- 移していない物: R4H(`host-check.py`の移植)・R4P(`loop-permission.py`の移植)・D2(段階2の配布)の本体。`loop.sh`・3つのSKILL.mdの固定の読み込み器・`host-check.py`・`loop-permission.py`は、旧guardを使い続ける。
+- 契約の正本は、Issue #470の本文である。ここには要点だけを書く。旧版は変えていない。Rustの出力・終了コード・控えは、旧Pythonと同じにする。差は下の一覧にあるものだけである。
+
+入口と部品の境界:
+
+| 場所 | 責務 |
+|---|---|
+| `cli/examples/s2e_contract.rs` | 検査専用の入口。9コマンドと、比較用の内部readerの隠しコマンド3つ(`reader-host-settings`・`reader-components`・`reader-policy-digest`)を動かす。`#![forbid(unsafe_code)]` |
+| `cli/src/commands/environment_guard/` | 引数・出力・Pythonの値とJSON・文字列とパス・予算・ファイル操作・部品の木・記録・Git設定・控え・9コマンド・reader。製品の登録表には入れない |
+| `platform/src/environment_guard.rs` | 安全でないOS呼出しを閉じる所。ディレクトリ一覧・`readlinkat`・排他作成・リンクを辿らない`chmod`・子の起動(`fork`と`execve`)・信号・利用者データベース・`main`より前の初期化 |
+| `native/ci/check_s2e.py`ほか | 旧版との比較器(`s2e_commands.py`)・比較器自身の検査(`test_s2e.py`)・固定入力と固定期待(`s2e_fixtures/`) |
+
+- `unsafe`は`platform`の安全な関数の中だけに置く。`cli`の`environment_guard`と検査専用の入口には置かない。
+- 隠しコマンドは、検査専用の入口だけにある。`lstat`と`open`の間のような細かい競合を差し込むフックは、`cfg(test)`だけにある。製品の入口にも検査専用の入口にも、注入の入口は無い。
+
+契約の要点:
+
+| 区分 | 要点 |
+|---|---|
+| 9コマンド | 引数・短縮・重複・`=`・`--help`・未知引数・`type=int`の解析順・`COLUMNS`・usageの折返しは、旧`argparse`(Python 3.10)に合わせる。プログラム名は`environment-guard.py`に固定する。検査の失敗は`ERROR [environment-guard] <理由>`と終了コード20。`host-*`の3つは`ERROR [<固定コード>] ホスト設定を安全に検査できない`と20 |
+| 控え | `version 3`のまま。旧版の控えをRustが照合し、Rustの控えを旧版と`host-check.py`の読み方が照合できる。新しい版・欄は作らない。`components`の無い旧形式も、旧版と同じ経路で照合する |
+| 観測の順序 | 設定ファイル→設定フォルダ→利用者フォルダ→部品→一覧から足す部品→別名の付与→Git設定(後入れ先出し)。予算(項目10,000・1ファイル8MiB・総量64MiB・15秒)は観測1回ごとに新しく取り、旧版の`tick`と`reserve`の順に数える。親は1段ずつリンクを辿らずに開き、使った後に全段を照らし直す。照合のたびに控えを読み直す |
+| Git設定の解析 | `include`の字面がある本文だけを、保持本文と一致してからGitで解析する(起動時の控えは必ず解析する)。標準エラーは捨て、作業場所は`/`。3秒・出力8MiB・項目10,000で打ち切る |
+| 子の起動 | 旧Python 3.10の`subprocess`に合わせ、`fork`と`execve`で起動する(`Command`は使わない)。PATHの探し方・受け継ぐfd(0〜2だけ)・子で`SIGPIPE`と`SIGXFSZ`を既定へ戻す・信号のmaskの受け継ぎ・`SIGCHLD`無視時の戻り値を旧版に合わせる。fork後の子では確保・ロック・Rustの入出力を使わない |
+| 親の信号 | `SIGPIPE`・`SIGXFSZ`は旧版と同じく無視する |
+| SIGINT | 起動時に既定の扱いのときだけ、旧版の`KeyboardInterrupt`と同じ後始末をする(`exec`の子を最大0.25秒待ってから`kill`、Gitの子を`kill`)。最後の行`KeyboardInterrupt`を出し、信号で終わる。印は、予算の`tick`・`EINTR`・コマンドの正常終了の直後の3か所で見る。無視されて起動されたときは何もしない |
+| 起動時の失敗 | 旧Pythonが起動の時点で止まる経路を、旧版の起動の順に再現する。不正な`PYTHONHASHSEED`→不正な`PYTHONINTMAXSTRDIGITS`→標準入力がディレクトリ→標準出力がディレクトリ→標準エラーがディレクトリ(診断を書けず終了コード1)。診断は標準エラーへ書き、終了コードは1 |
+| 受け継いだ`SIGPIPE`の控え | Rustの実行時は`main`の前に`SIGPIPE`を無視へ変える。旧版は、設定の段階の失敗の診断を、受け継いだ扱いのまま書く。そこで、`main`より前に受け継いだ扱いを読んで控える(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`の初期化関数。書き込みも確保もしない)。控えが無視でなければ、診断を書く前に既定へ戻す。標準エラーが読む側の閉じたパイプのとき、親が`SIGPIPE`を無視していれば終了コード1、既定なら信号13で終わる(旧版と同じ) |
+| 再帰の深さ | 旧Python 3.10.12の数え方(Pythonの関数・Cの呼出し・比較のそれぞれ)を測って合わせた。入口の深さは、深さ990段の木が全コマンドで通り、991段は`host-allowlist`だけが落ち、992段は全部が落ちる(旧版と同じ)。コピーの木は992段が通り、993段が落ちる |
+| guardのコピー(U2) | Rustの`bootstrap`は、同じ観測で保持した配布物の`skills/ship-task/scripts/environment-guard.py`のバイト列を控える。配布物に無いときは、出力フォルダを作る前に`ERROR [environment-guard] guard の配布元が配布物に無い`と終了コード20で止める。`verify-pair`は、最後に控えの隣のguardのコピーを読み直し、`--guard-sha256`と照らす |
+| hook(U3) | 引数の検査・照合・パスの検査・保持値の確認までを旧版どおり行う。その後、判定器を実行せず、`ERROR [environment-guard] hook は R4P まで旧版の判定器で実行する`と終了コード20で止める |
+| 内部reader | `reader.rs`のAPIが、Pythonの値と同じ意味の型(`PyValue`)か、旧版の例外と同じ型名・理由の文字列を持つエラーを返す。観測の範囲は旧版と同じ(`read_host_settings`は全体の照合の後に各設定を読み直す。`read_components`は部品の木だけ。`component_policy_digest`は控えのSHA-256と形だけで、ファイルシステムを観測しない) |
+
+#### S2Eに限る承認済みの差
+
+出典は#470の追加修正記録と、2026-11-11〜11-12の利用者決定である(全コマンド共通の決定を含む)。
+旧版・旧テストの通常比較は変更しない。ほかのコマンドの承認差は流用せず、ここにない差は認めない。
+差のあるケースは、旧版とRustの個別期待のそれぞれに一致することを確かめ、通常の一致件数に数えない。
+
+1. U1(11-11 16:13。S2Eに限る)・22:24の全コマンドの決定: 文字コードの設定だけに由来する解釈(引数・環境変数・ファイル名・標準出力)を、UTF-8と`surrogateescape`へ固定する。標準エラーの`backslashreplace`と生バイトは保つ。
+   - 旧版の標準出力はlocaleで変わる(`en_US.UTF-8`はstrict、`C.UTF-8`と`C`は`surrogateescape`)。差が出るのは、`en_US.UTF-8`でUTF-8でない引数を`host-allowlist`へ渡したときなどである。
+   - 整数変換の上限・端末幅・buffering・再帰・入出力の故障は、旧版に合わせる。
+2. U2(11-11 16:13): 配布物に旧guardが無い入力と、起動したguardが配布物のguardと違う入力(テストのような直接の起動)で、旧版は自分の`__file__`を控えて成功する。Rustは配布物の保持バイト列を使い、無ければ終了コード20。2回目の`bootstrap`で、旧版は1回目のコピーを読み直し、Rustはその時点の配布物を控える(信頼の起点の移動はD2が戻す)。
+3. U3(11-11 16:13): Rustの`hook`は、旧版が判定器を実行する入力でも、確認の後に終了コード20になる。開発用ソースだけの差で、製品の経路には出ない。
+4. U4(11-11 16:13)・22:31の決定: 捕まえない例外の`Traceback`の見出しの行と最後の行の間の途中の行(Pythonのファイルの所在・行番号・ソースの行)は再現しない。最後の行・因果の区切り・出力の順・終了コードは合わせる。
+   - 22:31の決定に従い、`SIGINT`は、信号で終わること・終了コード・最後の行`KeyboardInterrupt`・それまでの標準出力・子を残さないことを比べる。当初の設計の「`SIGINT`ではtracebackを出さない」は、この形へ改めた。
+5. U5(11-11 16:13)・22:31・00:28の決定: 基準の起動は、旧guardを`python3 -B <guard>`で直接起動した形にする。
+   - Rustが読む`PYTHON*`は3つである。`PYTHONUNBUFFERED`と`PYTHONINTMAXSTRDIGITS`は、有効な値の効果と不正な値の起動の失敗を再現する。`PYTHONHASHSEED`は、値を使わず、不正な値の起動時の失敗だけを再現する(00:28の決定。簡単に再現でき、出力を変えるため)。
+   - `PYTHONOPTIMIZE`は読まない。00:28の決定は「簡単に再現でき、出力を変えるものは再現する」である。旧guardは`assert`を使わず、`__doc__`を読まないので、この変数は出力を変えない。再現する物が無い。旧新が一致することを比較で確かめる(値`1`・`2`・`x`・空)。
+   - ほかの`PYTHON*`(`PYTHONPATH`・`PYTHONHOME`・`PYTHONMALLOC`など)は、効果を再現せず、比較の前提の外にする(22:31・00:28)。
+   - 読み込み器を経る起動では、旧版は`PYTHON*`を読まず、呼出しが深い。D2で起動の形を決めるときに検査する。
+6. U6(11-11 16:13): Linuxのmuslの静的ビルドは、利用者情報を`/etc/passwd`とnscdからだけ引く。旧Python(glibc)はNSS(LDAP・sssdなど)も引くので、そこにだけある利用者の`~user`と、HOMEが無いときの`~`が違いうる。Macは旧版と同じ仕組みを使う。差はGitHubのCIでは出ない。NSSだけの利用者は未確認と記録する。
+7. U7(11-11 16:13): 起動時に閉じた標準のfd(0〜2)は、Rust標準の初期化が`/dev/null`で開き直す。旧版は閉じたまま動く(`sys.stdout`・`sys.stderr`が`None`になる)。`exec`の子は、旧版は閉じたまま、Rustは`/dev/null`を受け継ぐ。コマンドごとの個別期待で検査する。
+8. 11-11 17:45の決定: 旧Pythonが起動の時点で落ちる診断の`Current thread`の値は、位置と形式だけを検査する(標準入出力がディレクトリの条件)。ほかの全文・行の順・標準出力・終了コードは旧版に合わせる。設定の段階の失敗(`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`)の診断は`Current thread`の行が無く、旧版と完全に一致するので、通常の一致に数える。
+9. 11-11 17:58(21:35に広げた)・22:26・22:38の決定: 旧版の診断に出る旧版の実行環境のパス(旧スクリプト自身のパスと呼出名)は、固定のスクリプト名(`environment-guard.py`)にする。標準ライブラリの行番号が出る比較を足すときは、旧Pythonが本家CPython 3.10.11かを確かめ、違えば失敗にする。
+10. 11-12 02:41の決定: Macの旧Python(CoreFoundation)が子の環境へ足す`__CF_USER_TEXT_ENCODING`は、Rustで再現しない。`exec`の子(`python3`・`bash`)とGit設定の解析の子の環境の比較から、この変数だけを外し、値と有無を記録する。ほかの変数・値・並びは旧版に合わせる。旧Pythonが足す`LC_CTYPE=C.UTF-8`のうち、環境変数だけで決まる場合は再現する。
+11. 11-12 00:28の決定(差ではない): `RLIMIT_FSIZE`による`bootstrap`の書き込みの失敗(1バイトと20000バイト)は、00:28の決定より強く完全一致を求め、旧新の終了コード・標準出力・標準エラーの全体・出力先の名前を比べる(`run_fsize`)。差は出ず、通常の一致に数える。
+
+全コマンドの決定(11-11 23:19、11-12 00:35・06:58・08:55・09:58・14:24)の当て方は次のとおり。
+- 外部の道具は、同じ結果をRustの中で作れないものだけを起動する。S2Eが起動するのは、Git設定の解析の`git`と、`exec`の子(`python3`・`bash`。コマンドの役目そのもの)だけなので、この決定で変わる所は無い。
+- S2E自身は`bash`のスクリプトを持たない。`bash`を起動するのは`exec`の子だけで、旧新とも同じものを起動する。Rustがファイルへ書く所(`bootstrap`のコピー・控え)の失敗は旧版に合わせる。
+- 競り合いと時刻の決定(06:58)は、順序を決めない`SIGINT`にだけ当たる。順序を決めた場面は全部を比べる。
+- bashの動きを変える変数の決定(11-12 09:58)は、当たらない。この決定は、旧bashスクリプトが環境から読む変数の扱いである。旧guardはPythonで、bashのスクリプトではない。`exec`の子の`bash`には、旧新とも呼出元の環境を同じに渡す。`BASH_ENV`・`ENV`は、旧guardが監視先のパスとして読む値(`default_specs`)で、固定入力(`gen_cases.py`)のケースで比べる入力に使う。
+- 呼出元の環境に旧スクリプトの内部の変数と同じ名前があるときの決定(11-12 14:24)は、当たらない。旧guardはPythonで、環境変数として内部の値を持たない。子へ渡す環境は、呼出元の環境に決まった変数を足すだけである。
+- 起動時の標準fd・`LC_CTYPE`・strerrorの決定(11-12 08:55)は、次のとおり当たる。
+  - 閉じた標準のfd(0〜2)は、U7と同じ決定である(Rust標準の初期化が`/dev/null`で開き直す)。
+  - 子へ渡す`LC_CTYPE`は、上の10項(環境変数だけで決まる場合は再現する)と同じである。
+  - errnoの文(strerror)は、基準の機械(Linuxの`glibc`)の表を`errno_table.rs`が持って出す。muslのビルドでは、`musl_strerror_is_replaced_by_the_glibc_table`がglibcの表へ置き換えた文面を確かめる。
+    - 表は、Python 3.10の`os.strerror`(glibc)から`gen_unicode_tables.py`が作る。どの版のglibcで作ったかは、生成の記録に無く未確認である。
+    - 表の範囲はerrno 0〜140である(`errno_table.rs`)。表に無い番号(負の数と141以上)は`Unknown error N`を出す(`error.rs`の`strerror`)。固定期待(下の単体検査が比べる相手。作業機の`os.strerror`から作った`errno_cases.json`。1〜199)と比べていない番号は、0・負の数・200以上である。errno 0は表(0〜140)にあるが、固定期待には無い(`errno_cases.json`は1から始まる199件)。ほかの番号も、CIのUbuntu 24.04の旧Pythonと同じかは未確認である(下の項)。
+    - 比較器に、範囲外のerrnoを出す項目は無い(`s2e_commands.py`・`check_s2e.py`にerrnoを扱う所は無い)。CIの`s2e`の比較は、比較のケースで実際に出るerrnoの文面だけをCIの旧Pythonと比べる。
+    - Rustの単体検査`errno_cases_match_python_3_10_on_glibc`は、固定期待(`errno_cases.json`。1〜199の199件)と比べる。表の外の141〜199(59件)も、固定期待(glibcの`Unknown error N`)と比べて一致を確かめる。0・負の数・200以上は比べていない(未確認)。差が出たら、08:55の決定のとおり認めて記録する。
+    - 表の全体が08:55の基準(CIのUbuntu 24.04のglibc)と同じかは未確認である。Ubuntu 24.04で、Python 3.10(CIと同じ3.10.11など)を使って`python3 -B native/ci/s2e_fixtures/gen_unicode_tables.py --check --errno-rust native/crates/cli/src/commands/environment_guard/errno_table.rs`を流せば確かめられる(スクリプトは3.10以外では止まる)。`build.py`・`check_s2e.py`・`test_s2e.py`・workflowは、このコマンドを呼ばない(CIでは流していない)。
+    - 作業機(Ubuntu 22.04・glibc 2.35・Python 3.10.12)で、読み取りだけの同じ`--check --errno-rust`を流したところ、`errno_table.rs`と一致した(流す前後でファイルのSHA-256は同じだった)。24.04のglibcとの一致ではない。
+    - Macは表を持たず、OSの`strerror`をそのまま使う(`error.rs`)。旧Pythonと同じOSの文面になる見込みで、Macでの一致は未確認である。
+  - 待たずに書く設定のパイプで空きが無いとき(EAGAIN)の決定は、S2Eでは実機の満杯のパイプを比べない。Rustの単体検査が、偽の書き出し先でEAGAINを固定して確かめる(`output.rs`。番号はOSごと)。起動の途中に届く信号を比べる項目は比較器に無く(`s2e_commands.py`の項目の一覧で確かめる)、その場合の旧新の一致は未確認である。bashの項(ERRの表示・bashの部分の書き込みの失敗)は、旧guardがPythonでbashの部分を持たないので当たらない(`exec`の子のbashは、旧新とも同じものを起動する)。
+
+#### 比較の前提の外
+
+差として認めるのではなく、条件が旧版に無い物である(11-11 22:31・11-12 00:28・00:42)。
+- 記憶域の不足と、自分自身を指すパス(`/proc/self`・`/dev/fd`など)。
+- 処理系の資源の使い方で失敗の境目が決まる条件(`RLIMIT_AS`・`RLIMIT_NOFILE`・`RLIMIT_CPU`・`RLIMIT_STACK`)。比較器は設定せず、受け継いだ値を記録する。
+  - 測った差: 旧版が通る最小の`RLIMIT_NOFILE`は深さ+15、Rustは深さ+17(深さ20・40・60で一定の差2)。理由は未確認で、Rustが走査中か起動時に余分に開く物がある、と推測している(実コードは読んでいない)。
+  - `ulimit -n`の既定が小さい機械(Linuxの既定1024)では、深さ990前後の項目が`EMFILE`になりうる。作業機は1048576で、未発生。CIの値は未確認。
+- 22:31の一覧に無い`PYTHON*`と、旧版の処理系が環境から読んで動きを変える変数。
+- `RLIMIT_FSIZE`の書き込み故障は、前提の外ではなく、比べる(11項)。
+
+#### R4H・R4P・D2との引き渡し契約
+
+R4H・R4P・D2の本体は作っていない。次を渡す。
+
+- 控え: 旧新が`version 3`の同じ形式を読み書きする。1回の実行の中で旧版とRustが同じ控えを交互に使える形にする。どの呼出しをどちらにするかは、D2の設計で決めて検査する。
+- guardのコピー: Rustの`bootstrap`が控えるのは、配布物のPythonの`environment-guard.py`である(U2)。R4Hが移るまで、`host-check.py`と固定の読み込み器は、控えの隣のこのファイルを照合して実行し続ける。
+  - Rustの実行ファイル自身の信頼は、控えのguard欄に入れない。D2で、親が配布の`SHA256SUMS`で確かめたSHA-256を別に保持し、照らしたバイト列か実体そのものを起動する(パスを照らしてから同じパスを起動する形にしない)。
+- 内部reader(R4H): `reader.rs`の3つのAPIを、R4Hが同じプロセスで呼ぶ。R4Hは返した値だけを使い、ファイルを読み直さない。
+  - `host-check.py`の3か所の失敗の変換が同じ結果になることを、旧版を`host-check.py`と同じ深さで呼んで比べた。
+  - 控えの隣のguardのコピーを書き換えた入力では、旧readerは書き換えたコピーを実行し、Rustのreaderはコピーを使わない。どちらの期待にするかは、R4HとD2の設計で決める。今は比較から外し、理由を出力に出している。
+  - `host-check.py`の`verified_components`・`verified_component_digest`が返す値そのものは、Rustのreaderの出力から作れないので、比べていない。R4Hで扱う。
+- permission hook(R4P): Rustの`hook`は確認の後に必ず終了コード20になる(U3)。D2は、R4Pの前は、hookの起動列を旧guardのまま残す。R4Pの前に起動列をRustへ向ける変更は、D2の検査で止める(すべての判定が拒否になるため)。
+  - R4Pは、Rustの`hook`が同じプロセスでRustの判定器を呼ぶ形と、保持値の確認の形を決める。判定するPythonを、hookの時点のPATHで決めない(判定の強さが弱まるため。U3のBは採らなかった)。
+- D2へ渡す条件:
+  - 混在の期間も、P1〜P14を守る。失敗を再試行で成功にしない。
+  - 固定の読み込み器が加える変換(guardの出力を残し、1行を足して終了コード20にする。hookは拒否のJSONと終了コード0)を、Rustの起動の形でも同じ範囲で保つ。
+  - 2回目の受領の`guard_sha256`が1回目と同じことを親が確かめる(U2。信頼の起点を動かさないため)。
+  - このソースから作る製品の`dev-workflow`でも、platformの初期化関数が全コマンドの起動前に`rt_sigaction`(`SIGPIPE`)を1回呼ぶ(読むだけで、動きの差は無い。2026-11-25に、gnuのreleaseを`strace -e rt_sigaction`で確かめた(muslは未確認))。配布中のv4.53.0は前のソースから作ったので、この呼出しは無い。D2の前提として渡す。
+  - スタック: 深さ990段の木の`bootstrap`は、releaseのexampleでスタック1MiBで通り、512KiBで溢れた。旧Pythonは同じ入力で1MiBのとき`SIGSEGV`になった。製品の入口のスタックの大きさをD2で決める。
+  - 基準の起動(U5)と違う起動の形を使うときは、その差をD2で検査する。
+
+#### Linuxだけにした比較の項目
+
+比較器は、各項目に「全機種で必須」か「Linuxだけ」の印と理由を付ける。既定は全機種で必須である。
+Linuxだけにした項目(`check_s2e.py`の`EXPECTED_LINUX_ONLY`)は36件で、機種ごとの項目数(Linux 233・Macの経路197)とともに完全一致で確かめる。Macでは流さず、未確認と記録する。
+
+| 理由 | 件数 | 項目 |
+|---|---|---|
+| Rustの`bootstrap`が要る。Macの既定の監視先`/etc`は`/private/etc`へのリンクで、Rustの`bootstrap`は失敗する見込みである。旧版を既定の監視先だけ実パスへ置き換える経路では、Rustの`bootstrap`を1回も起動しない | 24 | 特殊なファイルや設定の拒否11件(`bootstrap-refusals`・`x-special-*`・`x-settings-size-over`・`x-reused-output`・`x-dropin-tree-link`・`x-dotfile-cycle`・`x-git-include-dotdot-symlink`・`x-install-link-agent-kind`)・`bootstrap`の途中の競合6件(`x-race-bootstrap-*`)・上限の端4件(`x-limit-*`)・`x-sigint-bootstrap`・`x-fsize-bootstrap`・`u2-guard-origin` |
+| Macの`PATH_MAX`(1024)では約990段の絶対パスを作れない(推測。Macでは未確認) | 9 | 深さ990前後の流れ。`depth-*`6件・`x-deep-*`3件 |
+| `~user`の形(U6)は、Linuxの`/etc/passwd`で測った値。Macの利用者の検索は未確認 | 2 | `x-tilde-forms`・`x-tilde-home-unset` |
+| localeの名前が機種で違う。Macの旧版の標準出力のerrorsは`C.UTF-8`の有無で決まる | 1 | `u1-locale` |
+
+- Macの経路では、Linuxだけの印の無い流れの`bootstrap`も、旧版を置き換えた形(`patched`)で作る。そのためMacでは、Rustの`bootstrap`を起動しない。
+  - Macで確かめるRustの`bootstrap`の振る舞いは、既定の監視先での失敗の一致(`run_mac_default`)だけになる。
+  - `verify`以降は、置き換えた旧版が作った出力一式を、旧版とRustで比べる(`run_patched_sample`と、全機種の流れ)。
+- `/dev/full`への出力の故障は、前提の外ではなく、旧版に合わせて比べる。Linuxだけで流すのは、Macに`/dev/full`が無いから(比較器の`has_dev_full`)である。Macの経路では、読む側の閉じたパイプ(`pipe-closed`)だけで比べる。
+  - この分は、36項目の印とは別で、比較の件数の差(Linux 710・Macの経路660)に入る。
+  - 差の内訳(2026-11-26に、`all_cases()`を模擬の有無で数えて確かめた): 差の50件は、すべて`/dev/full`を出力先にしたケースである。`PYTHONUNBUFFERED`の10値ごとに5つの形(`host-paths`の標準出力・`host-paths-error`の標準エラーと両方・`help`の標準出力・`usage-error`の標準エラー)で、10×5=50件である。ほかの差は無い。
+  - 9コマンドの項目数の差(Linux 233・Macの経路197)の36件は、この50件とは別の数え方で、`EXPECTED_LINUX_ONLY`の36項目だけである。
+  - 9コマンドの項目`u45-copy-output-env`(全機種で流す項目)も、`/dev/full`の切り替え(`s2e_commands.py`の`targets`)を持つ。項目数(36)にも、比較の件数の差(50)にも入らず、Rustを起動した比較の件数(1751・1357)の差に入る。この項目の`/dev/full`の比較は、`PYTHONUNBUFFERED`の4値×`read`と`verify-pair`の2つで8件である(コードの数え方。差の394件のうちの8件。実行して数えてはいない)。
+- `/proc/self/fd`は、比較器は使わない。Rustの子の起動が、Linuxでは`/proc/self/fd`、Macでは`/dev/fd`から、開いているfdを列挙する(platformの`enumerate_open_fds`)。
+- 旧版の記録(`copy_cases.json`)と、旧版が狙った経路へ届いた固定期待(`check_recorded_old`・`check_old`)との照らし合わせは、Linuxだけで行う。Macの旧版の値は未測定なので、Macの経路では行わず、旧新の一致と、旧新それぞれの個別期待だけで確かめる(Macでは未確認)。
+- Linuxの手元で、Macの経路を環境変数`S2E_SIMULATE_MAC=1`で模擬できる。これは比較器の検査用で、Mac実機の確認ではない(終了コード3)。
+
+#### Rustの単体検査でLinuxだけの物
+
+比較器(`check_s2e.py`)の項目とは別に、Rustの単体検査(`cargo test`)にも、Linuxだけで流す物がある。件数は`#[cfg(target_os = "linux")]`の付いた`#[test]`を実物で数えた。どれもMacでは未確認である。件数の表の後ろにある、Macで中身を変えて流す物は、Macの実機のCIで初めて流れる。流れたかどうかを、そのCIの結果で確かめる。
+
+| 場所 | 件数 | 理由 |
+|---|---|---|
+| `platform`の`fallback_paths_close_a_leaked_fd`・`a_leaked_fd_is_not_inherited_by_the_child` | 2 | 主な理由は`/proc`である。どちらも`stdio_cases(true)`を流し、唯一の例`fds-0-2-only-with-leaked-fd`が`/proc/$$/fd`を読む。Macでは`fds-`の例を飛ばして0件になり、`assert_eq!(…, 1)`が落ちる。ほかに、`close_range`はLinuxのシステムコールであり、漏れたfdを持つ例は、ほかのテストの子へ渡らないよう別プロセスで流す |
+| `cli`の`errno_cases_match_python_3_10_on_glibc` | 1 | errnoの文面の固定期待は、Linux(glibc)の旧Python 3.10で測った。Macの文面は未測定。musl(Linuxの静的ビルド)は、別の検査`musl_strerror_is_replaced_by_the_glibc_table`でglibcの表へ置き換えた文面を確かめる |
+| `copy_tests.rs` | 12 | 旧版の固定期待との比較など7件(`read`・`exec`・`hook`・`verify-pair`の2件・入口の順序・固定期待の網羅)と、`verified`をパイプへ書き出す順序1件と、別プロセスの信号の検査4件(`SIGINT`3件・受け継いだ`SIGPIPE`の控え1件)。理由は、`bootstrap`の流れ(Macでは失敗する見込み)・子の確認に`/proc/<pid>/stat`と`/proc/thread-self`を使うこと・Linuxで測った固定期待のどれか。1件ごとの理由は確かめていない(未確認) |
+| `command_tests.rs` | 7+5 | 旧版の固定期待との流れの比較6件(流れ・`verify`の拒否・`host-settings`と`host-allowlist`・書き換えた状態・`include`の文面と順序・入口の深さ)と、配布物にguardが無いときの停止1件の計7件と、モジュール`races`(細かい競合のフック)の5件。Macでは、既定の監視先`/etc`が`/private/etc`へのリンクのため、`bootstrap`が失敗する見込み(推測。Macでは未確認)。Macの代わりに、既定の監視先での停止の確かめ1件(`bootstrap_with_the_default_etc_paths_stops_on_mac`)がある |
+
+件数のほかに、Macで中身を変えて流す物がある。
+
+- `stdio_env_cwd_and_fd_cases_match_python_3_10`: `/proc/$$/fd`を読む固定期待`fds-0-2-only`を、Macでは除く(通常の6件がMacでは5件)。
+- `process_environ_matches_the_old_python_dict_of_os_environ`: PEP 538の足し込みの固定期待(`coerce`)3件を、Macでは除く(11件中8件を流す)。足し込みの値はLinuxで測った。
+- `chmod_nofollow_at`の`l`(リンク自身の変更): Linuxは固定期待(`ValueError`)と比べる。Macでは`fchmodat`がリンク自身を変えうるので、結果の種類を比べず、リンクの指す先が変わらないことだけを確かめる。旧版の値は未測定。
+- `signal_cases_match_python_3_10`: Linuxは`/proc/self/status`とCの観測用プログラムの2通り、Macは`cc`で組んだCの観測用プログラムだけで信号の状態を読む(`cc`が要る)。
+
+#### CIの形
+
+- 比較は`build`と`verify-universal`に入れず、必須ジョブ`s2e`と`s2e-universal`で流す(2026-11-12 12:59の決定。[testing.md](testing.md#s2eの比較))。
+  - `s2e`: `build`の後に4機種で、各ビルド2回の`s2e_contract`をそれぞれ比べる。上限は120分。
+  - `s2e-universal`: `combine`の後にMac 2機種で、署名後の実行物を比べる。上限は60分。
+  - 内側の上限は1回の比較で50分(3000秒)である。`s2e`は50分×2+準備5分=105分<120分、`s2e-universal`は50分+5分=55分<60分で、どちらもジョブの上限より小さい(S3Dと同じ決め方)。ジョブの上限は、既存の`build`(120分)・`verify-universal`(60分)と同じ枠である。
+  - 50分にした理由は、時間の順に次のとおりである(どちらも推測。CIでは未測定)。PRのCIの実測で見直す。
+    - 先に、326.1秒(2026-11-25。コマンドに`--no-selftest`が無い回。[testing.md](testing.md#s2eの比較)の時間の表)の見積りで、Mac Intelの1回が約29〜43分になりうる。この上端が当初の内側の上限35分を超えたので、50分にした。
+    - 後で測った自己検査つきの310.1秒でも、約27〜41分で、上端は35分を超える。50分には約550秒の余裕がある。
+- `build`の上限(120分)と`verify-universal`の上限(60分)は変えていない。`build`に足したのは、exampleのビルドと単体検査だけである。
+  - 当初の設計は`build`60分・`verify-universal`30分を前提にしていたが、これはS2Lの前の値である。今の値と、新しい必須ジョブの形で書き直した。
+- `distribution`の`needs`には足さない(S3D・R4Cと同じ)。必須であることは、マージの条件で担う。
+- CIの機種ごとの時間は、PRのCIで記録してから、上限を見直す。
+
+Macの実機のCIで確かめることは、[CI入口の説明](../native/ci/README.md#s2eの必須比較と検査用実行物)の末尾の一覧にある。
+APIは [native/README.md](../native/README.md#environment-guardの環境照合s2e)、比較の流し方と件数は [testing.md](testing.md#s2eの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

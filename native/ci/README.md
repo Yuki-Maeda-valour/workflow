@@ -564,6 +564,8 @@ python3 -B native/ci/implement_guard_mutations.py         # Rust のソースへ
 
 #470の環境照合9コマンドと内部readerは未登録・未配布です。検査用の入口は`s2e_contract`(cargoのexample)で、製品のCLIには登録しません。比較器は`check_s2e.py`(部品は`s2e_commands.py`。自己検査は`test_s2e.py`。固定期待は`s2e_fixtures/`)です。
 
+- 契約は [設計のS2E節](../../docs/design.md#environment-guardの環境照合と内部readers2e)、APIは [native/README.md](../README.md#environment-guardの環境照合s2e)、手順と件数は [testing.md](../../docs/testing.md#s2eの比較)にあります。
+
 ```bash
 python3 -B native/ci/build.py s2e --platform linux-x86_64
 python3 -B native/ci/build.py s2e-universal --platform macos-arm64
@@ -578,11 +580,11 @@ python3 -B native/ci/build.py s2e-universal --platform macos-arm64
   - `s2e_probe()`は環境変数`S2E_SIMULATE_MAC`を外して流します。比較器は、模擬の合格を終了コード3(Linuxの合格ではない)で返すので、CIでは合格にしません。
 - `distribution`の`needs`には足しません(S3D・R4Cと同じ。末尾2つを`r4g`・`r4g-universal`に固定する既存の検査を変えないため)。必須のジョブの一覧(`REQUIRED_NATIVE_JOBS`)には足したので、ジョブが無いと`check_workflow.py`が失敗します。
 - `check_workflow.py`は、`s2e`(4機種・`build`の後)と`s2e-universal`(Mac2機種・`combine`の後)の工程・機種・`needs`(`S2E_JOBS`)と、上限(`S2E_TIMEOUTS`)を確かめます。`test_native_ci.py`の`S2EConnectionTests`が、`build.py`の流れ・署名とCPUの確かめ・ワークフローの形を確かめます。
-- Linuxだけの項目の扱い: Macで動かない物(`/dev/full`・`/proc/self/fd`・`C.UTF-8`など)は、比較器が各項目に付けた「Linuxだけ」の印で、Macでは流しません(流さなかった名前と理由は出力に出ます)。機種ごとの項目数は完全一致で確かめます。
+- Linuxだけの項目の扱い: 比較器が各項目に付けた「Linuxだけ」の印(`EXPECTED_LINUX_ONLY`の36項目)は、Macでは流しません(流さなかった名前と理由は出力に出ます)。理由は、Rustの`bootstrap`が要ること・`PATH_MAX`・`~user`・localeの名前です([設計](../../docs/design.md#linuxだけにした比較の項目)に表があります)。`/dev/full`は、36項目の印とは別に`has_dev_full()`で切り替え、Macの経路では`pipe-closed`だけで比べます。機種ごとの項目数は完全一致で確かめます。
   - 手元のLinuxからMacの経路を模擬するには`S2E_SIMULATE_MAC=1`を付けます(比較器の検査用。Mac実機の確認ではありません)。
-- 比較器自身の検査(`test_s2e.py`。手元で約186秒)は、`s2e`の1回目だけ流します。2回目は`s2e_probe(fixture, selftest=False)`が`check_s2e.py --no-selftest`を付けて省き、比較器が「比較器自身の検査は省いた」と出力します(最後の件数の行は「自己検査 省略(--no-selftest)」)。`s2e-universal`は1回なので必ず流します。
+- 比較器自身の検査(`test_s2e.py`。秒は、各回の全体から比較と9コマンドを引いた「残り」で、[testing.md](../../docs/testing.md#s2eの比較)の「時間」の表にある)は、`s2e`の1回目だけ流します。2回目は`s2e_probe(fixture, selftest=False)`が`check_s2e.py --no-selftest`を付けて省き、比較器が「比較器自身の検査は省いた」と出力します(件数の行の自己検査の欄は「省略(--no-selftest)」。最後の行は`S2E: 合格`です)。`s2e-universal`は1回なので必ず流します。
 - 件数(手元のLinux x86_64で`check_s2e.py`を流した値):
-  - 比較: 710件(通常の一致691・認めた差19)。比較器自身の検査: 81件。
+  - 比較: 710件(通常の一致691・認めた差19)。比較器自身の検査: 84件。
   - 9コマンドの旧新比較: Linux 233項目(全機種で必須197・Linuxだけ36)、Macの経路197項目。機種ごとの項目数は完全一致で確かめ、どの項目もRustを起動した比較が1件以上なければ不合格です(Rustを起動した比較は計1751件)。
   - 既存テストの対応表: 117件。対応表が指す比較のケースとRustのテストの名前: 256件。
 - `gen_cases.py`(`s2e_fixtures/`)はCIで流しません。固定期待を作り直す人がLinuxで流します(`--check`もLinuxで流します)。Linux以外では`main2`の領域が理由を出して止まります。Macの疑似端末の挙動は未確認です。
@@ -591,11 +593,19 @@ python3 -B native/ci/build.py s2e-universal --platform macos-arm64
 
 ジョブの上限(`check_workflow.py`の`S2E_TIMEOUTS`)は、`s2e`が120分、`s2e-universal`が60分です。`build`(120分)・`verify-universal`(60分)と同じ枠にしました。S3Dと同じ形で、内側の上限×比較の回数+準備(約5分)が、ジョブの上限より小さくなるように決めました(内側の上限が先に効きます)。
 - `s2e`(2回): 50分×2+5分=105分<120分。`s2e-universal`(1回): 50分+5分=55分<60分。
-- 測った値(手元の作業機、Linux x86_64): Phase 3 の回は`check_s2e.py`の全体が458秒(比較21秒・9コマンド250秒・自己検査を含む)、`--no-selftest`が270秒でした。後の回は全体477秒・`--no-selftest` 275秒・Macの経路の模擬約326秒でした(見積りは後の回の326秒を使います)。
-- 倍率の出典([testing.md](../../docs/testing.md)の記録): R4Eは手元の40〜60秒に対しCIのMac x86_64が315秒(約5.3〜7.9倍)で、CIのLinux x86_64の98秒の3.2倍でした。R4Aの残りはMac x86_64が298.8秒、Linux x86_64が117.1秒で、2.55倍でした。
-- 見積り(推測。CIでは未測定): 手元のMacの経路の模擬326秒に5.3〜7.9倍を当てると、1回は約29〜43分です。35分では足りないおそれがあるため、50分にしました。Linuxは1回約8分(2回目は約4.5分)で収まります。
+- 測った値(手元の作業機)は、回ごとの表にまとめました([testing.md](../../docs/testing.md#s2eの比較)の「時間」)。CIの見積りに使ったMacの経路の模擬の値は、次の3つです。
+  - 自己検査つきのMacの経路の模擬: 310.1秒(2026-11-26)。
+  - 前の見積りの元: 326.1秒(2026-11-25。コマンドに`--no-selftest`が無い回)。
+  - `--no-selftest`付きのMacの経路の模擬: 177.0秒。
+- Linuxの見積りには、表のLinuxの全体の447.5〜477.4秒の回と、`--no-selftest`の269.9〜315.8秒の回を使いました(1114.1秒・563.6秒の回は使っていません)。
+- 倍率の出典([testing.md](../../docs/testing.md#s2eの比較)の「CIの時間の見積り」に値と節があります): R4Eは手元の40〜60秒に対しCIのMac x86_64が315秒(約5.3〜7.9倍)で、CIのLinux x86_64の98秒の3.2倍でした。R4Aの残りはMac x86_64が298.8秒、Linux x86_64が117.1秒で、2.55倍でした。
+- 見積り(推測。CIでは未測定): 元の値は、自己検査を含むMacの経路の模擬310.1秒(2026-11-26)です。`s2e-universal`の1回と`s2e`の1回目は自己検査を流すので、この条件に当たります。
+  - 手元からCIのMac x86_64への倍率(R4Eの5.3〜7.9倍)を当てると、1回は約1,640〜2,450秒(約27〜41分)です。この倍率はMac x86_64だけに当たる値で、Mac arm64の倍率は確かめていません。以前の元の326.1秒(コマンドに`--no-selftest`が無い回)なら約29〜43分です。
+  - CIのLinuxからMac x86_64への倍率(2.55〜3.2倍)を当てると約13〜17分です(手元とCIのLinuxが同じ速さという仮定。未確認)。
+  - 内側の上限50分は、時間の順に決めました。先に、326.1秒の見積りの上端(約43分)が当初の35分を超えたので50分にしました。後で測った自己検査つきの310.1秒でも、上端は約2,450秒(約41分)で35分を超えます。50分には約550秒(約9分。326.1秒なら約7分)の余裕があり、倍率が上端を超えるかCIが混むと足りないおそれがあります。上限の値は変えていません。
+  - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になります。Mac arm64とLinuxの機種には、この倍率は当たりません。どちらの見積りも、PRのCIの実測で確かめます。Linuxは、手元の値で1回約7.5〜8分(表の447.5〜477.4秒の回)、2回目は約4.5〜5.3分(表の269.9〜315.8秒の回)です。CIのLinuxが手元と同じ速さという仮定です(未確認)。
 - 既存のジョブ(`build`の120分・`verify-universal`の60分など)の上限は変えていません。`build`に足した時間は`s2e_contract`のビルドと単体検査だけです(測定は未実施)。
-- PRのCIで機種ごとの時間を記録してから、上限を見直します。
+- PRのCIで機種ごとの時間を記録してから、上限を見直します。50分を超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直します。
 
 Macの実機のCIで確かめることは次のとおりです(Linuxの手元では確かめられていません)。
 - `/bin/bash`3.2で、環境の全体を書き出す手順(`compgen -e`・`${!v}`・`printf '%s=%s\0'`)がLinuxと同じ形になること。

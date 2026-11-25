@@ -667,6 +667,40 @@ unsafe の置き場は、次の 2 つだけです。
 契約は [設計のR4C節](../docs/design.md#候補の採用と改名r4c)にあります。
 [比較の手順と件数](../docs/testing.md#r4cの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
 
+## environment-guardの環境照合(S2E)
+
+#470で、旧`environment-guard.py`(以下、旧guard)の9コマンドと内部reader(`host-check.py`が使う3つの関数)と同じ結果を返す部品を実装しました。
+製品CLIの登録表・help・配布・既存呼出元は変えていません。未登録・未配布です。
+
+- 本体は`crates/cli/src/commands/environment_guard/`にあります。役割は次のとおりです。
+  - `args`・`output`・`runtime`・`error`・`errno_table`・`startup`: 旧`argparse`(Python 3.10)相当の引数の解析・usage・help、旧Pythonのbuffering・途中のflush・終了時のflush失敗(終了コード120)、旧版の例外の型名と理由、`errno`の文(Linuxはglibcの表)、`PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONHASHSEED`の扱い、旧Pythonが起動時に止まる経路(診断を標準エラーへ書き、終了コード1)。
+  - `pyvalue`・`pyjson`・`pyops`・`pystr`・`pypath`・`unicode_tables`: Pythonの値と等しさ、JSONの読み書き(用途ごとの読取り3種と書き出し5種)、文字列(空白・NFC・切り詰め)、`Path`と`expanduser`。Unicodeの表は、Python 3.10(Unicode 13.0.0)から作ります。
+  - `budget`・`fsio`・`depth`: 観測1回ごとの予算(項目10,000・1ファイル8MiB・総量64MiB・15秒)、リンクを辿らないファイル操作と親の照らし直し、旧Pythonの再帰の深さの数え方。
+  - `component`・`record`・`gitconfig`・`specs`・`inventory`・`settings`・`snapshot`・`state`・`entry`: 部品の木・記録・Git設定の解析(旧版と同じ順序の観測と拒否)・控え`version 3`の値と照合。
+  - `bootstrap`・`copy`・`pair`・`dispatch`: `bootstrap`、`read`・`exec`・`hook`、`verify-pair`と、コマンドの振り分け。
+  - `reader`: 内部reader3つ(`read_host_settings`・`read_components`・`component_policy_digest`)のAPI。Pythonの値と同じ意味の型(`PyValue`)か、旧版の例外と同じ型名と理由を持つエラーを返します。
+- `crates/platform/src/environment_guard.rs`は、S2Eだけが使うOS操作を、安全な関数で公開します。
+  - ディレクトリ一覧・`readlinkat`・排他作成・`fchmod`・リンクを辿らない`chmod`・`fsync`・`mkdirat`・標準入力の期限つき待ち(`poll`。Macの`verify-pair`は旧版の`select`と同じ呼出しを使う)。
+  - 子の起動(`fork`と`execve`。PATHの探し方・受け継ぐfd・子の信号の設定を旧Pythonの`subprocess`に合わせます)と、`SIGINT`・`SIGXFSZ`の扱い、利用者データベースの読取り(`~user`)。
+  - `unsafe`は、この1ファイルの安全な関数の中だけに置きます(各所に安全の理由を書きました)。`cli`の`environment_guard`は`unsafe`を使いません。
+- `crates/cli/examples/s2e_contract.rs`は検査専用入口です。`#![forbid(unsafe_code)]`で、9コマンドを動かします。
+  - 隠しコマンド: 引数が`reader-`で始まるときだけ、内部reader3つを呼び、返した値を型の印つきの1行のJSONで出します。`reader-host-settings <state> <sha256> [呼出し側の深さ]`・`reader-components …`・`reader-policy-digest …`です。比較器が、旧版の同じ関数の値と比べます。
+  - 製品の入口には、この隠しコマンドも、注入の入口もありません。
+- 細かい競合(`lstat`と`open`の間・`EINTR`の注入など)は、`cfg(test)`のフックだけで差し込みます。フックは製品と同じ関数の中にあり、フックを外した経路は製品と同じコードを通ります。単体検査は`observe_tests.rs`・`race_tests.rs`・`command_tests.rs`・`copy_tests.rs`にあります。
+- `main`より前の初期化があります。platformの初期化関数`capture_inherited_sigpipe`が、`main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控えます(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`に登録します)。
+  - Rustの標準ライブラリは、`main`の前に`SIGPIPE`を無視へ変えるので、受け継いだ値はこの時点でしか読めません。
+  - 初期化関数は、確保・ロック・Rustの入出力を使いません。控えは`inherited_sigpipe()`で読みます。設定の段階の起動の失敗の診断を書く前に、控えが無視でなければ既定へ戻すために使います。
+  - Macの実機での動作は未確認です(clippyだけ、aarch64とx86_64のappleで通りました)。
+- 製品の`commands/mod.rs`には、登録していません。
+- このソースから作る製品の`dev-workflow`でも、platformの初期化関数が、全コマンドの起動前に`rt_sigaction`(`SIGPIPE`)を1回呼びます(読むだけで、動きの差はありません)。
+  - 2026-11-25に、gnuのreleaseを`strace -e rt_sigaction`で確かめました(muslは未確認)。
+  - 配布中のv4.53.0は前のソースから作ったので、この呼出しはありません。D2の前提です。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のreleaseで193件が通りました(2026-11-25)。
+
+認めた旧版との差と、比較の前提の外は、利用者の決定(U1〜U7と全コマンドの決定)の範囲だけです。時刻つきの一覧は [設計のS2E節](../docs/design.md#s2eに限る承認済みの差)にあります。
+契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。
+[比較の手順と件数](../docs/testing.md#s2eの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
