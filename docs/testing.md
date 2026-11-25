@@ -1850,6 +1850,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 実例: commit e74acea の push 用 CI(run 43296607476)で、`r4a-rest` の Mac arm64 は1回目が合格し、2回目だけが疑似端末の読み残しで落ちた(上の R4A の節)。
   - 1回の CI でのこの試しの数は、Linux の各機種で2から1に、Mac の各 CPU で3(`1/`・`2/`・署名後)から2(`1/`・署名後)に減る。減ったのは `s3d`・`r4g`・`r4e`・`r4a-rest` の4つである(`implement-guard` は前から1回目だけを比べていたので変わらず、比較の前の `cmp` だけが足された)。
   - 補う手段: 変更のたびに PR 用と main の push 用の CI が流れる。Mac は署名後の比較(`*-universal`)が残る。
+- `r4c`(R4C #478。#516 の設計の後に main に入った)は、#516 の範囲に入れていない。R4C の設計のとおり、今も2回のビルドの両方で比べる。`reproduce` の `cmp` は `adopt_candidate_contract` も比べる。同じ形にするかは Issue #525 で決める。
 - 直す前の時間(main `01998b1` の push 用の Native の run 45396522756・attempt 1): 全体 227 分、Mac の成功したジョブの合計 604 分、`s3d (macos-x86_64)` 147.1 分、`s3d (macos-arm64)` 68.1 分。直した後の時間は、PR の CI で測って PR の本文と Issue #516 に記録する(この文書を書いた時点では未確認)。
 
 ### ビルド入力の記録

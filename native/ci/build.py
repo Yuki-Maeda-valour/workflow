@@ -387,7 +387,8 @@ def reproduce(name, work):
                 destination.chmod(0o755)
                 if machine is not None:
                     check_static_elf(destination, machine)
-    # 2 回のビルドのバイト列が同じことは、4 機種とも確かめる(比較のジョブは 1 回目だけで比べる。#516)。
+    # 2 回のビルドのバイト列が同じことは、4 機種とも確かめる(s3d・r4g・r4e・r4a-rest・implement-guard の比較のジョブは
+    # 1 回目だけで比べる。#516。r4c は 2 回とも比べる。同じ形にするかは #525)。
     for filename in CI_BINARIES:
         run(["cmp", stage / "1" / filename, stage / "2" / filename])
     if identity() != before:
