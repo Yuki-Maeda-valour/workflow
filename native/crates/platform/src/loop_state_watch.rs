@@ -18,9 +18,15 @@ impl Watch {
     pub fn new(root: &Path) -> Self {
         fn paths(root: &Path, out: &mut Vec<PathBuf>) {
             out.push(root.into());
-            if std::fs::symlink_metadata(root).unwrap().is_dir() {
-                for entry in std::fs::read_dir(root).unwrap() {
-                    paths(&entry.unwrap().path(), out)
+            let meta = std::fs::symlink_metadata(root)
+                .unwrap_or_else(|e| panic!("OS_WATCH_LIST: {}: {e}", root.display()));
+            if meta.is_dir() {
+                let entries = std::fs::read_dir(root)
+                    .unwrap_or_else(|e| panic!("OS_WATCH_LIST: {}: {e}", root.display()));
+                for entry in entries {
+                    let entry =
+                        entry.unwrap_or_else(|e| panic!("OS_WATCH_LIST: {}: {e}", root.display()));
+                    paths(&entry.path(), out)
                 }
             }
         }
@@ -32,7 +38,12 @@ impl Watch {
         for path in targets {
             let raw = CString::new(path.as_os_str().as_bytes()).unwrap();
             let wd = unsafe { inotify_add_watch(fd, raw.as_ptr(), 0x2000021) };
-            assert!(wd >= 0, "OS_WATCH_ADD: {}", path.display());
+            assert!(
+                wd >= 0,
+                "OS_WATCH_ADD: {}: {}",
+                path.display(),
+                std::io::Error::last_os_error()
+            );
             paths.insert(wd, path);
         }
         Self {
@@ -75,5 +86,14 @@ impl Watch {
             }
         }
         events
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::Watch;
+    #[test]
+    #[should_panic(expected = "OS_WATCH_LIST: /nonexistent-s2l-watch-root: ")]
+    fn missing_root_names_the_path() {
+        Watch::new(std::path::Path::new("/nonexistent-s2l-watch-root"));
     }
 }
