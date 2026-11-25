@@ -2235,7 +2235,7 @@ APIは [native/README.md](../native/README.md#候補の採用と改名r4c)、比
 | `platform/src/environment_guard.rs` | 安全でないOS呼出しを閉じる所。ディレクトリ一覧・`readlinkat`・排他作成・リンクを辿らない`chmod`・子の起動(`fork`と`execve`)・信号・利用者データベース・`main`より前の初期化 |
 | `native/ci/check_s2e.py`ほか | 旧版との比較器(`s2e_commands.py`)・比較器自身の検査(`test_s2e.py`)・固定入力と固定期待(`s2e_fixtures/`) |
 
-- `unsafe`は`platform`の安全な関数の中だけに置く。`cli`の`environment_guard`と検査専用の入口には置かない。
+- `unsafe`は`platform`の中だけに置く。例外は、公開する`unsafe`関数`capture_inherited_sigpipe`(`#[doc(hidden)]`。展開した側の`static`からローダーが呼ぶ形でだけ使う)と、マクロを展開した側(検査専用入口とplatformのテスト)に生まれる`#[unsafe(link_section)]`の`static`である。外部のマクロの展開なので、`#![forbid(unsafe_code)]`には当たらない。`cli`の`environment_guard`は`unsafe`を使わない。
 - 隠しコマンドは、検査専用の入口だけにある。`lstat`と`open`の間のような細かい競合を差し込むフックは、`cfg(test)`だけにある。製品の入口にも検査専用の入口にも、注入の入口は無い。
 
 契約の要点:
@@ -2250,7 +2250,7 @@ APIは [native/README.md](../native/README.md#候補の採用と改名r4c)、比
 | 親の信号 | `SIGPIPE`・`SIGXFSZ`は旧版と同じく無視する |
 | SIGINT | 起動時に既定の扱いのときだけ、旧版の`KeyboardInterrupt`と同じ後始末をする(`exec`の子を最大0.25秒待ってから`kill`、Gitの子を`kill`)。最後の行`KeyboardInterrupt`を出し、信号で終わる。印は、予算の`tick`・`EINTR`・コマンドの正常終了の直後の3か所で見る。無視されて起動されたときは何もしない |
 | 起動時の失敗 | 旧Pythonが起動の時点で止まる経路を、旧版の起動の順に再現する。不正な`PYTHONHASHSEED`→不正な`PYTHONINTMAXSTRDIGITS`→標準入力がディレクトリ→標準出力がディレクトリ→標準エラーがディレクトリ(診断を書けず終了コード1)。診断は標準エラーへ書き、終了コードは1 |
-| 受け継いだ`SIGPIPE`の控え | Rustの実行時は`main`の前に`SIGPIPE`を無視へ変える。旧版は、設定の段階の失敗の診断を、受け継いだ扱いのまま書く。そこで、`main`より前に受け継いだ扱いを読んで控える(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`の初期化関数。書き込みも確保もしない)。控えが無視でなければ、診断を書く前に既定へ戻す。標準エラーが読む側の閉じたパイプのとき、親が`SIGPIPE`を無視していれば終了コード1、既定なら信号13で終わる(旧版と同じ) |
+| 受け継いだ`SIGPIPE`の控え | Rustの実行時は`main`の前に`SIGPIPE`を無視へ変える。旧版は、設定の段階の失敗の診断を、受け継いだ扱いのまま書く。そこで、`main`より前に受け継いだ扱いを読んで控える(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`の初期化関数。書き込みも確保もしない。登録は、platformのマクロ`s2e_record_startup_state!`を展開した検査専用入口とplatformのテストの実行ファイルだけにあり、製品の`dev-workflow`には入らない)。控えが無視でなければ、診断を書く前に既定へ戻す。標準エラーが読む側の閉じたパイプのとき、親が`SIGPIPE`を無視していれば終了コード1、既定なら信号13で終わる(旧版と同じ) |
 | 再帰の深さ | 旧Python 3.10.12の数え方(Pythonの関数・Cの呼出し・比較のそれぞれ)を測って合わせた。入口の深さは、深さ990段の木が全コマンドで通り、991段は`host-allowlist`だけが落ち、992段は全部が落ちる(旧版と同じ)。コピーの木は992段が通り、993段が落ちる |
 | guardのコピー(U2) | Rustの`bootstrap`は、同じ観測で保持した配布物の`skills/ship-task/scripts/environment-guard.py`のバイト列を控える。配布物に無いときは、出力フォルダを作る前に`ERROR [environment-guard] guard の配布元が配布物に無い`と終了コード20で止める。`verify-pair`は、最後に控えの隣のguardのコピーを読み直し、`--guard-sha256`と照らす |
 | hook(U3) | 引数の検査・照合・パスの検査・保持値の確認までを旧版どおり行う。その後、判定器を実行せず、`ERROR [environment-guard] hook は R4P まで旧版の判定器で実行する`と終了コード20で止める |
@@ -2327,7 +2327,8 @@ R4H・R4P・D2の本体は作っていない。次を渡す。
   - 混在の期間も、P1〜P14を守る。失敗を再試行で成功にしない。
   - 固定の読み込み器が加える変換(guardの出力を残し、1行を足して終了コード20にする。hookは拒否のJSONと終了コード0)を、Rustの起動の形でも同じ範囲で保つ。
   - 2回目の受領の`guard_sha256`が1回目と同じことを親が確かめる(U2。信頼の起点を動かさないため)。
-  - このソースから作る製品の`dev-workflow`でも、platformの初期化関数が全コマンドの起動前に`rt_sigaction`(`SIGPIPE`)を1回呼ぶ(読むだけで、動きの差は無い。2026-11-25に、gnuのreleaseを`strace -e rt_sigaction`で確かめた(muslは未確認))。配布中のv4.53.0は前のソースから作ったので、この呼出しは無い。D2の前提として渡す。
+  - このソースから作る製品の`dev-workflow`には、`main`より前の処理が入らない(登録は検査専用入口とplatformのテストだけ)。2026-11-26に、muslのreleaseを直す前の作りと比べ、`strace -f -e trace=rt_sigaction`の`--version`で、`main`より前の`rt_sigaction(SIGPIPE, NULL, …)`が無くなったこと(標準ライブラリが無視へ変える呼出しだけが残る)と、製品の`.init_array`の大きさがgnu 0x10・musl 0x8(R4Eの前のmainと同じ)であることを確かめた。配布中のv4.53.0も、この処理は無い。D2の前提として渡す。
+  - 製品の入口は登録を展開しないので、`inherited_sigpipe()`は`None`になる。製品へつなぐと、親が`SIGPIPE`を無視して標準エラーが閉じたパイプのとき、設定の段階の失敗は信号13で終わる(旧版は終了コード1。製品の経路では未確認〈コードの読みからの推測〉)。D2で、製品の入口での控え方(S3Dの決まりとの関係を含む)か、差として認めるかを決める。
   - スタック: 深さ990段の木の`bootstrap`は、releaseのexampleでスタック1MiBで通り、512KiBで溢れた。旧Pythonは同じ入力で1MiBのとき`SIGSEGV`になった。製品の入口のスタックの大きさをD2で決める。
   - 基準の起動(U5)と違う起動の形を使うときは、その差をD2で検査する。
 
@@ -2395,7 +2396,7 @@ APIは [native/README.md](../native/README.md#environment-guardの環境照合s2
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。
 - Rust は `native/rust-toolchain.toml` で `1.99.1` に固定する。`rustfmt`・`clippy` を用意し、`Cargo.lock` を共有する。内部の版 `0.1.0` は配布プラグインの版と分ける。
 - `platform` 以外の自作 crate(Rust の部品単位)では `#![forbid(unsafe_code)]` を使う。`platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使い、安全な関数だけを外へ公開する。
-  - 例外は、R4U の `platform::check_links::capture_before_main` と、R4G の `platform::r4g::startup::record_before_std`(`#[doc(hidden)]`)である。どちらも main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
+  - 例外は、R4U の `platform::check_links::capture_before_main` と、R4G の `platform::r4g::startup::record_before_std`(`#[doc(hidden)]`)と、S2E の `platform::environment_guard::capture_inherited_sigpipe`(`#[doc(hidden)]`)である。いずれも main の前に static から呼ぶ形でだけ使う([C0b で採用した OS 呼出しの部品](#c0b-で採用した-os-呼出しの部品))。
 - ビルドの設定は `native/Cargo.toml`・`native/.cargo/`・`native/ci/` に置く。`.github/workflows/native.yml` の実行コマンドは `native/ci/` のスクリプトを呼ぶだけにする。
 - ビルド先は `CARGO_TARGET_DIR` でリポジトリの外に置く。導入と必須の検査は [AGENTS.md の Rust の検査](../AGENTS.md#rust-の検査段階-0a)、4 種類の CI と比較の補助は [testing.md](testing.md#rust-の開発と検査段階-0a) に記す。
 - ソース入力の SHA256(内容の違いを確かめるための値)は、`native/` の Git 追跡ファイルだけから作る。パス順に、リポジトリ直下からの相対パス・Git のモード・作業中の本文を、それぞれの長さと一緒に計算へ入れる。
@@ -2434,7 +2435,7 @@ APIは [native/README.md](../native/README.md#environment-guardの環境照合s2
   - `loop_state_watch.rs`: Linuxの `inotify`(`inotify_init1`・`inotify_add_watch`)で、テストが持つフォルダのopenだけを監視する(製品の経路では使わない)。
 - R4U(#480)は `libc` の crate を使わない。`rustix` の今の機能に無い呼び出し(`sigaction`・`kill`・`getpid`・`pthread_self` など)と libc の `write` を、`native/crates/platform/src/check_links.rs` の中で `unsafe extern "C"` として宣言し、安全な関数で包んだ。`sigaction` の構造体は OS ごとに宣言する。
   - stdout と stderr への書き込みに libc の `write` を使うのは、Linux の `rustix` が libc を通らない(`linux_raw`)ためである。libc を通らないと、比較器が共有ライブラリを差し込んで、記録も故障の注入もできない。
-  - 例外が2つある。main の前に static から呼ぶ `capture_before_main`(R4U)と、R4G の `record_before_std` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
+  - 例外が3つある。main の前に static から呼ぶ `capture_before_main`(R4U)と、R4G の `record_before_std` と、S2E の `capture_inherited_sigpipe` だけは、`pub unsafe extern "C" fn` として公開する。直接は呼ばない。
   - 検査用の実行物 `native/crates/cli/tests/check_links.rs` は `#![deny(unsafe_code)]` の中で、main の前に呼ぶ static の `link_section` のためだけに `unsafe_code` を許す。cli の `commands/check_links/` は `#![forbid(unsafe_code)]` のまま。
   - `rustix` の機能と、依存の版は増やしていない。
 - R4G(#479)でも、R4Rの `libc 0.2.191` の宣言をそのまま使った。R4G が足した自作の `unsafe` は、`native/crates/platform/src/r4g/` の `startup.rs`・`fs.rs`・`process.rs` だけに置く(`restore_taskmd.rs` には足さない)。旧Pythonの `subprocess`・旧bashの子の起動と信号・起動前の状態の記録が、`std::process::Command` と `rustix` だけでは書けないためである。`rustix` の機能と依存の版は増やしていない。

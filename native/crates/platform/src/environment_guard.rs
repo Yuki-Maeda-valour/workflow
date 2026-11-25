@@ -402,7 +402,14 @@ static CAPTURE_CALLS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU3
 /// `main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控える。
 /// Rustの標準ライブラリは、`main`の前(`lang_start`)に`SIGPIPE`を無視へ変えるので、受け継いだ値はこの時点でしか読めない。
 /// 確保・ロック・`Rust`の入出力を使わない(標準ライブラリの初期化より前に走るため)。
-extern "C" fn capture_inherited_sigpipe() {
+/// [`s2e_record_startup_state!`](crate::s2e_record_startup_state)が、展開した側の初期化の表へ載せる。
+///
+/// # Safety
+///
+/// ローダーが`main`より前に1回だけ呼ぶ場合に限る。ほかから呼んではならない。
+/// `main`より後に呼ぶと、標準ライブラリが変えた後の値(無視)を、受け継いだ値として控えてしまう。
+#[doc(hidden)]
+pub unsafe extern "C" fn capture_inherited_sigpipe() {
     #[cfg(test)]
     CAPTURE_CALLS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     // SAFETY: sigactionはすべて0で有効な初期値。第2引数がnullなら設定は変えない。
@@ -419,22 +426,39 @@ extern "C" fn capture_inherited_sigpipe() {
     INHERITED_SIGPIPE.store(code, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// 初期化の関数の表への登録(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`)。ローダーが`main`より前に1回だけ呼ぶ。
-#[used]
-#[cfg_attr(
-    any(target_os = "linux", target_os = "android"),
-    unsafe(link_section = ".init_array")
-)]
-#[cfg_attr(
-    target_vendor = "apple",
-    unsafe(link_section = "__DATA,__mod_init_func")
-)]
-static CAPTURE_INHERITED_SIGPIPE: extern "C" fn() = capture_inherited_sigpipe;
+/// 実行ファイルに1回だけ展開し、受け継いだ`SIGPIPE`の扱いを`main`より前に控えさせる。
+///
+/// 展開した側のcrateに`#[used]`と`#[unsafe(link_section)]`の`static`が生まれる
+/// (外部のマクロの展開なので、展開した側の`#![forbid(unsafe_code)]`には当たらない)。
+/// 展開してよいのは、検査専用の入口`examples/s2e_contract.rs`の1か所と、このモジュールの`#[cfg(test)]`のテストだけ。
+/// 製品の実行ファイル(`dev-workflow`)では展開しない。そのため、製品は`main`より前に何も走らせない。
+///
+/// 登録先は、Linuxが`.init_array`、Macが`__DATA,__mod_init_func`。ローダーが`main`より前に1回だけ呼ぶ。
+/// 対応外のOSでは、何も登録しない(`compile_error!`にしない)。S2Eの設計は、控えが無い機種を
+/// 「受け継いだ扱いが分からない」として扱い、[`inherited_sigpipe`]が`None`を返して既定へ戻す動きに決めている。
+/// この動きは、登録の無かった今までの対応外のOSと同じなので、変えない。
+#[macro_export]
+macro_rules! s2e_record_startup_state {
+    () => {
+        #[cfg(any(target_os = "linux", target_os = "android", target_vendor = "apple"))]
+        const _: () = {
+            #[used]
+            #[cfg_attr(
+                any(target_os = "linux", target_os = "android"),
+                unsafe(link_section = ".init_array")
+            )]
+            #[cfg_attr(
+                target_vendor = "apple",
+                unsafe(link_section = "__DATA,__mod_init_func")
+            )]
+            static CAPTURE_INHERITED_SIGPIPE: unsafe extern "C" fn() =
+                $crate::environment_guard::capture_inherited_sigpipe;
+        };
+    };
+}
 
-/// 起動時に控えた、受け継いだ`SIGPIPE`の扱い。控えていなければ`None`(登録の無い機種など)。
-/// 登録の静的な値を読んで、その目的ファイルが必ずリンクされるようにする。
+/// 起動時に控えた、受け継いだ`SIGPIPE`の扱い。控えていなければ`None`(登録を展開していない実行ファイルや、対応外の機種)。
 pub fn inherited_sigpipe() -> Option<Disposition> {
-    std::hint::black_box(&CAPTURE_INHERITED_SIGPIPE);
     match INHERITED_SIGPIPE.load(std::sync::atomic::Ordering::Relaxed) {
         1 => Some(Disposition::Default),
         2 => Some(Disposition::Ignore),
@@ -1620,6 +1644,8 @@ mod child_tests {
     use serde_json::Value;
     use std::os::fd::AsFd;
     use std::path::{Path, PathBuf};
+
+    crate::s2e_record_startup_state!();
 
     fn cases() -> Value {
         serde_json::from_str(include_str!("../../../ci/s2e_fixtures/child_cases.json"))

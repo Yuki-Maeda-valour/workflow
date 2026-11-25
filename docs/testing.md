@@ -1902,6 +1902,8 @@ CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物�
 - `s2e`・`s2e-universal`は、`distribution`の`needs`に入れない(S3D・R4Cと同じ)。
 - `native.yml`のジョブの定義は21個で、matrixを展開した実行は59件である(2026-11-25に、`s2e`・`s2e-universal`を含めて数えた)。
 - `check_workflow.py`は、`s2e`・`s2e-universal`のジョブの欠落・機種・`needs`・上限(120分・60分)を確かめる。`test_native_ci.py`の`S2EConnectionTests`は、`build.py`の流れ・署名とCPUの確かめ・workflowの形・比較の2回目が`--no-selftest`を付けること・内側の上限とジョブの上限の関係を確かめる。
+- `scripts/test_native_s2e.py`(6件。`scripts/run-all.py`が自動で集める)は、起動前の登録のマクロ`s2e_record_startup_state!`の展開が、`examples/s2e_contract.rs`の1か所と`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけであることを、静的に確かめる(別名・別の括弧・許可の外からの`capture_inherited_sigpipe`の参照・テストのモジュールの外の展開は拒む)。置き場は、R4Gの`scripts/test_native_r4g.py`と同じ。比較器自身の検査(`test_s2e.py`)の84件は変えていない。
+- 製品の`dev-workflow`に`main`より前の処理が入らないことは、2026-11-26に、muslのreleaseを直す前の作りと比べて確かめた(`strace -f -e trace=rt_sigaction <bin> --version`で`rt_sigaction(SIGPIPE, NULL, …)`が無くなった。`.init_array`はgnu 0x10・musl 0x8)。製品へ印を置く変更を止めるのは、次の2つである。`scripts/test_native_s2e.py`は、マクロの展開の場所と、`link_section`・`.init_array`・`__mod_init_func`の場所(マクロの本体の中だけ)を確かめる。platformの単体テスト`inherited_sigpipe_is_recorded_before_main`は、初期化関数が呼ばれた回数(1回)を確かめる。`LoaderInitializer`(`native/ci/test_diff_snapshot.py`)は`environment_guard.rs`を名前で外し、印が「ある」ことしか見ないので、このファイルの登録は止めない。
 
 CIの時間の見積り(推測。CIでは未測定):
 - 既存の記録で確かめた倍率は次のとおりである。

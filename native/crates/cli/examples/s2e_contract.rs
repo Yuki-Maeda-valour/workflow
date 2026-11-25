@@ -3,6 +3,9 @@
 //! 9 コマンド(`bootstrap`・`verify`・`read`・`exec`・`hook`・`verify-pair`・`host-paths`・`host-settings`・`host-allowlist`)と、
 //! 比較用の内部 reader の隠しコマンド(`reader-host-settings`・`reader-components`・`reader-policy-digest`)を動かす。
 //! 旧 Python が起動の時点で止まる経路(不正な `PYTHONHASHSEED`・標準の fd がディレクトリ)も、本体の前に再現する。
+// 受け継いだ`SIGPIPE`の扱いを`main`より前に控える登録は、この検査専用の入口だけが展開する(製品には入れない)。
+dev_workflow_platform::s2e_record_startup_state!();
+
 #[path = "../src/commands/environment_guard/mod.rs"]
 mod environment_guard;
 
