@@ -532,7 +532,7 @@ python3 -B native/ci/check_loop_state_mutations.py
 |---|---|
 | `check_loop_state.py` | 同じ物理入力で旧版とRustを起動し、生の標準出力・標準エラー・終了値・状態ファイル・入力の無変更を比べる。部品は`loop_state_arguments.py`・`loop_state_contract_cases.py`・`loop_state_encoding.py`・`loop_state_encoding_matrix.py`・`loop_state_yaml_cases.py`・`loop_state_decision_cases.py`ほか |
 | `test_loop_state.py` | 比較器の自己検査26件。出力・終了値・保存結果の不一致、外す環境変数の残り、固定名の対応づけの誤りを拒否することを確かめる |
-| `check_loop_state_units.py` | 検査用exampleのRustテスト56件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
+| `check_loop_state_units.py` | 検査用exampleのRustテスト57件を、必須の名前・件数・未実行0で照らす。外部の`CARGO_TARGET_DIR`が必要 |
 | `check_loop_state_mutations.py` | ソースのコピーへ誤りを21種類入れ(設定のグラフ10・安全の観測とYAML11)、指定した検査が落ちることを確かめる |
 
 - 件数は比較器が数え、1件でも欠ければ失敗にする。0件・skip・時間切れ・想定外の失敗を合格にしない。
@@ -578,6 +578,25 @@ python3 -B native/ci/check_loop_state_mutations.py
 - R4Bの比較は同じ回で約460秒だった。
 - CIの`build`(120分)・`verify-universal`(60分)の上限の中で、S2Lの比較を含めて完走するかは未確認である。Macでの実際の動作、Linux arm64、最低OSも未確認であり、PRのCIで確かめる。
 - この記録は、PR用CIと、最新mainを含む最終SHAの全回帰テストの成功を意味しない。
+
+#### 試験の repo の自動の手入れによる揺れ(#517・2026-11-25 の記録)
+
+- 検査用の Rust テスト `loop_state::safety_tests::m04_changed_include_rejected_before_any_parser` が、CI の Linux arm64 で1回落ちた(PR #515 の run 45388257894 の attempt 1・job 138424979408・git 2.56.1)。
+  - 落ちたのは確かめる中身ではなく、テスト用の監視(inotify)を作る所(`loop_state_watch.rs` の `Watch::new`)だった。木を並べた後に、並べた要素が消えていた(`NotFound`)。
+- 原因(手元で仕組みを確かめた。CI の回がこれによるかは推測):
+  - 新しい git(2.47 以降の既定)は、`commit` の後に自動の手入れ(`git maintenance run --auto --detach`)を後ろへ切り離して走らせる。手入れは `.git/objects/maintenance.lock` を、`commit` が戻る前に作り、後ろで消す。
+  - 試験の repo を作る `Fixture` の `commit` の直後に子のテストが監視を作ると、並べた lock が監視を付ける前に消えて落ちる。
+  - 容器(git 2.56.0)で、空の repo に1回 commit すると、その後0.5秒の間に lock が見えたのは50回中37回だった。手入れを止める指定を付けると0回だった。
+  - 同じ容器で、直す前の版(main `01998b1`)の m04 を同時64個で1000回流すと、3回落ちた(`OS_WATCH_ADD: …/.git/objects/maintenance.lock` が2回、CI と同じ `NotFound` が1回)。設計の時の同じ条件の回は1回だった。
+- 直し(`native/crates/cli/src/commands/loop_state/safety_tests.rs`・`native/crates/platform/src/loop_state_watch.rs`):
+  - 試験の repo を作る git(`Fixture` の git)に、`-c maintenance.auto=false -c gc.auto=0`(`NO_AUTO_MAINTENANCE`)を付けた。R4G の比較器(`check_r4g.py`)と同じ指定である。S2L の比較器(`loop_state_encoding.py`)も同じ2つを付けている(さらに `maintenance.autoDetach=false` も付ける)。repo の設定には書かない。製品の git の指定(`process::SAFE_GIT`)は変えていない。
+  - 指定が効いていることを `GIT_TRACE` で確かめるテスト `fixture_git_never_starts_background_maintenance` を足した。指定の無い commit が手入れを起こすことも、対照として確かめる。
+  - 監視を作る所の失敗の文に、パスと OS の誤りを出すようにした(`OS_WATCH_LIST`・`OS_WATCH_ADD`)。要素は飛ばさず、落とす動きは変えていない。パスが出ることを確かめる `platform` の単体テスト `missing_root_names_the_path` を足した。
+- 確かめたこと:
+  - 検査用 example の Rust テストは56件から57件、変異の前の基準(`loop_state::safety_tests::`)は26件から27件になった。
+  - わざと入れる誤り(変異)で確かめた: `Fixture` の git から指定を外すと、新しいテストが `FIXTURE_NO_MAINTENANCE` で落ちる。
+  - 直した後の m04 を、同じ容器で同時64個で1000回流し、落ちた回は0だった。
+- 手元で流すときの Python: S2L の検査用 example の Rust テスト(`check_loop_state_units.py` など)は、`os.memfd_create` を持つ Python 3.10 系で流す。uv の3.10.11には無く、`config_tests` の1件が旧版の照らしで落ちる(上の「比較に使うPython」と同じ理由。直す前の版〈main `01998b1`〉でも同じ)。
 
 ### check_links の比較(R4U)
 
@@ -1441,7 +1460,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
   - `requires_raw_name`: 2件(`candidate-keys` 1・`loop-task-text` 1)。
 - 比較の結果は、2034/2034の合格。接続待ち0・未実施0・捕捉不能10(標準出力などがディレクトリのとき。空の観測に読み替えず、見える出力と終了値だけを比べた)。
 - 境界の組: 21組。21組のすべてで、旧版の出力が境界で変わることを確かめた。
-- 比較器の自己検査: 114件。
+- 比較器の自己検査: 116件(2026-11-25 の #513 で2件足した)。
 - Rustの単体検査: `cargo test --locked` の全体が117件。platformの `r4a_rest` の7件を含む。cliの48件は、`--example r4a_rest_contract` を付けたときだけ流れる。
 - 実測時間(2026-11-23。自己検査114件の時点の作業機): 自己検査が約45秒、比較が約95秒だった(作業機の負荷でばらつく。以前の比較は約100〜123秒)。自己検査は、絞り込み(`--case`)の前は約1319秒(93件)だった。
 
@@ -1586,7 +1605,28 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
 未確認(CI の結果を見てから書く):
 - 入力の渡し方を直した後の、`r4a-rest` 4機種と `r4a-rest-universal` 2機種の結果。
 - `r4a-rest-universal` の Mac x86_64 で、`child/legacy/origin-json: reason-huge` が通るか。
-- 必須 case 2034 件・自己検査 114 件での、各機種の自己検査と比較の時間。
+- 必須 case 2034 件・自己検査 116 件での、各機種の自己検査と比較の時間。
+
+自己検査の、印で子を探す確かめの揺れ(#513):
+- 自己検査 `test_a_marked_process_in_another_session_is_found_and_stopped` が、CI の Linux arm64 で1回落ちた(PR #512 の run 45307421246 の attempt 1・job 138194586040)。
+  - 落ちたのは最初の確かめ(`self.assertIn(child.pid, found)`)で、失敗の文は `AssertionError: 2637 not found in []`。印を持つプロセスが1つも見つからなかった。
+  - 落ちたジョブだけを流し直した attempt 2 では合格した。
+- 原因(手元で仕組みを確かめた。CI の回がこれによるかは推測):
+  - 直す前のテストは、子(`sleep 300`)を `Popen` で起こした直後に、`marked_processes` で印を探していた。
+  - Linux では、`Popen` が戻った時点で、子の新しいプログラムの環境の領域がまだ無いことがある。そのときの `/proc/<pid>/environ` は空で、印が見えない。
+  - 設計の時の手元の実測(x86_64・カーネル 6.8・Python 3.10.12): `Popen` の直後に `environ` を1回読むと、3000回中2860回が空だった。
+  - テストと同じ走査(`/proc` の全部。約400個)では、500回とも見つかった。走査の速い機械をまねて、`/proc` の一覧を子だけに差し替えると、500回中446回で見つからなかった(設計の時の実測。CI と同じ形)。
+  - #511(回収の途中の状態 `X`)と同じ種類で、こちらはプロセスの始まりの側である。#511 の直しは当てはまらない。
+- 直し(`native/ci/test_r4a_rest.py` だけ。比較器の本体 `check_r4a_rest.py` は変えていない):
+  - 印を受け継ぐ子を起こす `start_marked_child` を足した。子は、自分のプログラムを始めた後に、標準出力へ合図の1行を出す。テストは、合図を受けてから探す。
+  - 合図の待ちの上限30秒は、合図が来ないときに止まらないための安全の上限である。待ち時間を延ばして隠す直しではない。合図が来なければ、子の調べを付けて落とす。
+  - 子の調べを1行にする `process_snapshot` を足した。Linux は `/proc/<pid>/stat` の状態・`environ` の長さ・印の有無・コマンドの先頭、Mac は `ps` の状態とコマンド・`ps -E` での印の有無を出す。
+  - 見つからなかったときは、走査の直前と直後の子の調べと、もう1回の走査の結果を、失敗の文に出す。次に落ちたときに、読み込みの途中か・子が先に終わったか・`marked_processes` の誤りかを見分けるためである。
+- テストを2件足した(114件から116件)。
+  - わざと入れる誤り(変異)で確かめた: `start_marked_child` を、合図を待たずに `Popen` の直後に子を返す形にすると、`test_a_started_marked_child_already_shows_the_mark` が FAIL になる。
+  - 走査の速い機械をまねた手元の確かめ(直した後の確かめの回。本家 CPython 3.10.11・500回ずつ): 直す前の起こし方は208回見つからず、`start_marked_child` の後に探すと0回だった。
+  - 直す前の起こし方で見つからない回数は、回ごとにばらつく(設計の時は446回、この回は208回)。
+  - 直した後、手元で `test_a_marked_process_in_another_session_is_found_and_stopped` を20回流して20回合格した(直す前も手元ではふつう落ちない。通常の経路を壊さないことの確かめ)。
 
 CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と次の節にある。
 - 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。

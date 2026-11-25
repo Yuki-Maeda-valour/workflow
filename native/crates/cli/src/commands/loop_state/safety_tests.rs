@@ -58,16 +58,25 @@ impl Fixture {
         ]);
         f
     }
-    fn git(&self, args: &[&str]) {
-        let result = Command::new("git")
+    // 新しい git は commit の後に自動の手入れを後ろへ切り離して走らせ、
+    // `.git/objects/maintenance.lock` を作って消す。子のテストが監視を作る途中に重なると
+    // 消えたファイルで落ちる(#517)。試験の repo を作る git だけに付け、repo の設定には書かない。
+    // gc.auto=0 は、手入れの無い古い git の `gc --auto` も止める。
+    const NO_AUTO_MAINTENANCE: &[&str] = &["-c", "maintenance.auto=false", "-c", "gc.auto=0"];
+    fn git_command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new("git");
+        command
             .arg("-C")
             .arg(&self.root)
             .args(process::SAFE_GIT)
+            .args(Self::NO_AUTO_MAINTENANCE)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", &self.global)
-            .env("GIT_CONFIG_NOSYSTEM", "1")
-            .output()
-            .unwrap();
+            .env("GIT_CONFIG_NOSYSTEM", "1");
+        command
+    }
+    fn git(&self, args: &[&str]) {
+        let result = self.git_command(args).output().unwrap();
         assert!(
             result.status.success(),
             "fixture Git: {}",
@@ -129,6 +138,56 @@ fn budget() -> Budget {
         seconds: 10i128.into(),
     })
     .unwrap()
+}
+#[test]
+fn fixture_git_never_starts_background_maintenance() {
+    // 試験の repo を作る git が、commit の後に自動の手入れを起こさないことを確かめる(#517)。
+    let f = Fixture::new();
+    let identity = [
+        "-c",
+        "user.name=fixture",
+        "-c",
+        "user.email=fixture@example.invalid",
+    ];
+    std::fs::write(f.root.join("traced"), b"traced body").unwrap();
+    f.git(&["add", "traced"]);
+    let mut command = f.git_command(&[
+        identity[0],
+        identity[1],
+        identity[2],
+        identity[3],
+        "commit",
+        "-qm",
+        "traced",
+    ]);
+    let result = command.env("GIT_TRACE", "2").output().unwrap();
+    let trace = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "FIXTURE_TRACED_COMMIT: {trace}");
+    assert!(
+        !trace.contains("maintenance run") && !trace.contains("gc --auto"),
+        "FIXTURE_NO_MAINTENANCE: {trace}"
+    );
+    // 対照: 指定の無い commit は手入れを起こす(前で走らせ、終わってから Fixture を消す)。
+    std::fs::write(f.root.join("control"), b"control body").unwrap();
+    f.git(&["add", "control"]);
+    let result = Command::new("git")
+        .arg("-C")
+        .arg(&f.root)
+        .args(process::SAFE_GIT)
+        .args(["-c", "maintenance.autoDetach=false"])
+        .args(identity)
+        .args(["commit", "-qm", "control"])
+        .env("GIT_CONFIG_GLOBAL", &f.global)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TRACE", "2")
+        .output()
+        .unwrap();
+    let trace = String::from_utf8_lossy(&result.stderr);
+    assert!(result.status.success(), "FIXTURE_CONTROL_COMMIT: {trace}");
+    assert!(
+        trace.contains("maintenance run") || trace.contains("gc --auto"),
+        "FIXTURE_CONTROL_MAINTENANCE: {trace}"
+    );
 }
 fn isolated(name: &str, body: fn(&Fixture)) {
     if std::env::var("S2L_SAFETY_CHILD").ok().as_deref() == Some(name) {
