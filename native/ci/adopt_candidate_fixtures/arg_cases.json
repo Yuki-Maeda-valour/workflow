@@ -1,0 +1,2271 @@
+{
+"argparse_sha256": "a238b700513237e10d26056e42c5b4e42d4961ea70e15ebeef4c61c76615f004",
+"cases": [
+{
+"args": [
+"2d68"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "10",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "20",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を一つの入口で行\nう。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "30",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出\n側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n        show this help\n        message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "40",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help      show this help\n                  message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "45",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help           show this help\n                       message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "60",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "80",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "100",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "100",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68"
+],
+"columns": "7",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d626164"
+],
+"columns": "7",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d68656c70"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"63"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"2d2d6e616d65",
+"6e",
+"2d2d616363657074",
+"61",
+"2d2d756e617474656e646564",
+"63"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": {
+"text": "6e"
+},
+"expect_sha256": {
+"text": "73"
+},
+"accept": {
+"text": "61"
+},
+"unattended": true
+}
+},
+{
+"args": [
+"2d2d726f6f743d72",
+"2d2d6578706563742d7368613235363d73",
+"63"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"63",
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"2d2d",
+"63"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"63",
+"2d2d"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"2d2d",
+"2d2d"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "2d2d"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d6578706563742d736861323536",
+"73",
+"61",
+"62"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: unrecognized arguments: b\n"
+},
+{
+"args": [
+"2d2d726f6f74",
+"72",
+"2d2d726f6f74",
+"7232",
+"2d2d6578706563742d736861323536",
+"73",
+"63"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "7232"
+},
+"candidate": {
+"text": "63"
+},
+"name": null,
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d653d6e",
+"2d312e35"
+],
+"columns": "abc",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"612062",
+"2d2d756e",
+"ff"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31",
+"2d682d",
+"e58099e8a39c5f612e6d64"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument '-'\n"
+},
+{
+"args": [
+"2d2d3d",
+"2d6878",
+"2d2d6e616d653d2d2d",
+"2dff",
+"2d2d68656c70"
+],
+"columns": "٣٠",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [],
+"columns": "2",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d726f6f74",
+"2d2d756e",
+"2d68c3a9",
+"2d68"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d2d726f6f743d",
+"78",
+"2d2d68656c70",
+"2d682d",
+"2d2d3d"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d68656c70",
+"2d2d6e61",
+"2d2d68656c70",
+"2d68c3a9"
+],
+"columns": "40",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help      show this help\n                  message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d78",
+"2d683d",
+"2d2d726f6f743d",
+"2d2d",
+"2d2d2d",
+""
+],
+"columns": "2",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d6e616d653d2d2d",
+"2d683d",
+"2d2d6e616d653d6e",
+"2d2d6578706563742d7368613235363d2d2d",
+"2d2d6578"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d612062",
+"2d2d2d",
+"2dc3a9"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d683d",
+"2d2d756e6b6e6f776e"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d612062",
+"2d2d68",
+"2d2d756e6b6e6f776e",
+"2d2d723d31",
+"2d2d726f6f743d72",
+"2d35"
+],
+"columns": "40",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help      show this help\n                  message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2dff",
+"2d2d68",
+"2d2d",
+"2dc3a9",
+"2d2d756e617474656e646564"
+],
+"columns": "100",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d6868c3a9",
+"e58099e8a39c5f612e6d64",
+"2d68c3a9",
+"2d2d6578706563742d7368613235363d2d2d"
+],
+"columns": "100",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+},
+{
+"args": [],
+"columns": "abc",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d612062",
+"2d2d6e616d65",
+"e58099e8a39c5f612e6d64",
+"2d2d6163636570743d61",
+"78"
+],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d312e35",
+"2d2d6e616d653d2d2d"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d726f6f743d72",
+"2d683d76",
+"2d2d6163636570743d2d2d"
+],
+"columns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e",
+"2d2d68",
+"612062",
+"2d2d6163636570743d61"
+],
+"columns": "20",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を一つの入口で行\nう。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d68656c70",
+"2d2d726f6f74",
+"e58099e8a39c5f612e6d64",
+"2d2d756e617474656e6465643d78"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"",
+"2d2d68656c70",
+"2d2d68",
+"2d612062",
+"2d2d6e61",
+"2d2d723d31"
+],
+"columns": "٣٠",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出\n側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n        show this help\n        message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d78",
+"2d6878"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d2d6e616d653d2d2d",
+"2d2d726f6f74",
+"2d2d756e",
+"ff"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d2d6e616d653d",
+"78",
+"e58099e8a39c5f612e6d64",
+"",
+"2d68",
+"2d2d3d78"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --=x could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d6163",
+"2d",
+""
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d",
+"2d312e35",
+"2d2d726f6f743dff",
+"2d2d6e61"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d726f6f74",
+"63616e64"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256, candidate\n"
+},
+{
+"args": [
+"ff",
+"2d310a",
+"2d2d6578",
+"2d78"
+],
+"columns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --expect-sha256: expected one argument\n"
+},
+{
+"args": [],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d756e617474656e646564",
+"",
+"2d2d756e6b6e6f776e",
+"2d2d756e617474656e646564",
+"2d2d6578706563742d7368613235363d73"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root\n"
+},
+{
+"args": [
+"2d2d723d31",
+"2d2d726f6f743dff",
+"2d6868",
+"2d2d726f6f743d72",
+"2d2d2d",
+"2d68c3a9"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d726f6f74",
+"2d682d",
+"2d682d"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d6878"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d310a",
+"2d2d756e617474656e646564",
+"2d2d6e61",
+"2d683d",
+"2d2d6578706563742d736861323536",
+"2d2d6163636570743d61"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"78",
+"2d2d6163636570743d61"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6163636570743d2d2d",
+"2d683d",
+"2d78",
+"2d6868c3a9",
+"2d2d726f"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d2d6e616d653d6e",
+"2d2d726f6f743d",
+"2d683d76"
+],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"2d2d",
+"ff"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d65",
+"2d6868"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d726f6f743d",
+"2d2d68656c70",
+"2d2d726f6f743d",
+"2d2d68",
+"2d2d616363657074",
+"2d2d726f6f743d72"
+],
+"columns": "20",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を一つの入口で行\nう。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d6163636570743d2d2d",
+"2d612062",
+"2d68c3a9"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+},
+{
+"args": [
+"2d2d2d",
+"2d2d68656c70",
+"2dd9a1",
+"2dff"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message\n                        and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d68656c70",
+"78",
+"612062"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d68c3a9",
+"2d",
+"2dff"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+},
+{
+"args": [
+"2dd9a1",
+"2d2d3d78",
+"2d2d726f6f743d2d2d",
+"2d2d6578706563742d7368613235363d2d2d",
+"2d683d76"
+],
+"columns": "11",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --=x could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d726f6f743d2d2d"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d683d76",
+"2d2d6578706563742d7368613235363d2d2d"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"2d",
+"2d6868",
+"2d2d6e616d653d"
+],
+"columns": null,
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d723d31",
+"2d2d726f6f743d72",
+"2d2d756e6b6e6f776e",
+"2d2d726f6f743dff"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d78",
+"2d2d6163636570743d61",
+"2d2d726f6f743dff",
+"e58099e8a39c5f612e6d64"
+],
+"columns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256\n"
+},
+{
+"args": [
+"2d2d726f6f743d72",
+"2d2d756e",
+"2d2d756e617474656e6465643d78",
+"2d2d6e61"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --unattended: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d756e617474656e6465643d78",
+"2d312e35",
+"2d2d6e616d65",
+"2dc3a9"
+],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --unattended: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d612062",
+"2d312e35"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d310a",
+"2d2d68"
+],
+"columns": "60",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d723d31"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d",
+"ff",
+"2d2d6e616d653d",
+"2d2d6578",
+"2d2d3d78",
+"2d68"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --=x could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d6e616d65",
+"2d2d2d",
+"2d2d756e",
+"",
+"2d2d6e61"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"e58099e8a39c5f612e6d64",
+"63616e64",
+"2d2d68656c703d78"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d2d726f6f743d72",
+"2d2d6578706563742d7368613235363d73",
+"2d2d6e616d653d",
+"2d2d6163636570743d61",
+"2d2d6163636570743d61"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: candidate\n"
+},
+{
+"args": [
+"2d6878"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d612062",
+"2d2d2d",
+"2d6868",
+"2d2d6163"
+],
+"columns": "80",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d6e616d653d6e",
+"2d683d"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31",
+"e58099e8a39c5f612e6d64",
+"2d2d6163636570743d2d2d",
+"2d312e35",
+"2d2d6e616d653d",
+"2d2d756e6b6e6f776e"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d65",
+"2d2d726f",
+"2d2d726f6f743d72",
+"2d2d",
+"2d2d6578706563742d736861323536",
+"2d2d756e"
+],
+"columns": "11",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"2d2d6e616d653d",
+"2d2d6578",
+"2d2d6e616d653d6e",
+"2d310a",
+"2d2d756e6b6e6f776e",
+"ff"
+],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --expect-sha256: expected one argument\n"
+},
+{
+"args": [],
+"columns": "٣٠",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d68656c70",
+"2d",
+"2d2d6578706563742d7368613235363d73",
+"2d6878"
+],
+"columns": "100",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d",
+"63616e64"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d6878",
+"2d2d6e616d65",
+"ff"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d683d",
+"2d2d726f6f74",
+"2d310a",
+"2dc3a9",
+"2d2d726f6f74",
+"2d2d6578706563742d7368613235363d73"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d2d68656c703d78"
+],
+"columns": "٣٠",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d2d6163636570743d61",
+"2d2d6e616d653d6e",
+"2d2d3d"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d68656c703d78",
+"2d2d6163636570743d61",
+"2d2d6578706563742d7368613235363d2d2d",
+"2d2d723d31",
+"2d2d6e616d65"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2dff",
+"63616e64",
+"2d2d726f6f743dff"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256\n"
+},
+{
+"args": [
+"2d6868",
+"2d2d6163636570743d2d2d",
+"2d35",
+"2d2d726f"
+],
+"columns": "10",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"612062"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31",
+"2d2d726f",
+"2d2d3d",
+"2d2d68",
+"2d2d726f"
+],
+"columns": "0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31",
+"2d78"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d68",
+"ff"
+],
+"columns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"63616e64",
+"2d6868c3a9",
+"2d35",
+"2dc3a9",
+"2d2d6e61",
+"2d6868"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+},
+{
+"args": [
+"2d68",
+"2d683d76",
+"2d2d756e617474656e6465643d78",
+"2d2d68656c703d78"
+],
+"columns": "100",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"612062",
+"2d2d6578",
+"2d2d68656c70",
+"2d2d756e"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --expect-sha256: expected one argument\n"
+},
+{
+"args": [
+"2d2d726f"
+],
+"columns": "٣٠",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d2d68656c703d78",
+"2d2d6578"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d310a",
+"2d2d756e6b6e6f776e",
+"2dff",
+"2d2d756e6b6e6f776e3d31"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d68656c703d78",
+"2d2d68",
+"2d2d6578706563742d736861323536",
+"2d6878",
+"",
+"2d2d6578706563742d736861323536"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"ff",
+"2d2d6e61",
+"2d312e35",
+"2d35",
+"2d2d723d31",
+"2d2d616363657074"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --accept: expected one argument\n"
+},
+{
+"args": [
+"e58099e8a39c5f612e6d64",
+"ff",
+"2d2d726f",
+"2d2d6578706563742d736861323536"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d2d756e617474656e646564",
+"2d2d756e617474656e646564",
+"e58099e8a39c5f612e6d64",
+"2d2d616363657074",
+"2d2d616363657074"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --accept: expected one argument\n"
+},
+{
+"args": [
+"2d2d6e616d65",
+"2d2d6163636570743d2d2d"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"2d2d756e6b6e6f776e3d31",
+"2d683d",
+"2d2d6e616d653d",
+"2d68",
+"2d2d616363657074",
+"63616e64"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument ''\n"
+},
+{
+"args": [
+"2d2d726f",
+"2d2d726f6f743dff",
+"2d310a",
+"2dff",
+"2d68c3a9",
+""
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d683d76"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"2d2d6163636570743d61",
+"2d2d726f6f743d2d2d",
+"2d2d6163636570743d2d2d",
+"2dc3a9"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256, candidate\n"
+},
+{
+"args": [
+"e58099e8a39c5f612e6d64",
+"2d2d6578706563742d736861323536"
+],
+"columns": "abc",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --expect-sha256: expected one argument\n"
+},
+{
+"args": [
+"2d2d3d78",
+"",
+"2d6868",
+"63616e64",
+"2d2d3d",
+"2d2d723d31"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --=x could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d726f6f74",
+"2d2d68",
+"2d2d2d"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d6868"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\n\n候補の確認と採用改名を一つの入口で行う。本文の設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help            show this help message and exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d",
+"2d2d726f6f743d",
+"2d2d726f6f743d2d2d"
+],
+"columns": "100",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d653d",
+"2d2d756e6b6e6f776e",
+"2d2d6e616d653d",
+"2d2d6e616d653d"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d6878",
+"2d2d68",
+"2d",
+"2d2d68",
+"2d2d756e617474656e646564",
+"2d310a"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d312e35"
+],
+"columns": null,
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"78"
+],
+"columns": "80",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"612062",
+"2d2d3d",
+"2d68c3a9",
+"2dd9a1"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d726f"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --root: expected one argument\n"
+},
+{
+"args": [
+"2d35",
+"2d2d68656c70",
+"2d2d6163636570743d2d2d",
+"2d2d",
+"2d2d6578"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d6e616d653d2d2d",
+"612062",
+"2d6878",
+"612062"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d612062",
+"612062",
+"2d2d6163",
+"2d2d6163636570743d61",
+"2d612062",
+"e58099e8a39c5f612e6d64"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument --accept: expected one argument\n"
+},
+{
+"args": [
+"2d683d76",
+"2d6868c3a9"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"",
+"2d2d6163",
+"2d2d6163636570743d61",
+"2d6868c3a9",
+"2d6868c3a9",
+"2d2d6578706563742d7368613235363d2d2d"
+],
+"columns": "abc",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --accept: expected one argument\n"
+},
+{
+"args": [
+"2d2d6578706563742d7368613235363d73",
+"2d2d723d31",
+"2d2d6e616d653d6e",
+"2d2d756e6b6e6f776e3d31"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: candidate\n"
+},
+{
+"args": [
+"2d2d756e",
+"2d2d756e617474656e646564",
+"2d2d616363657074",
+"2d6868"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --accept: expected one argument\n"
+},
+{
+"args": [
+"2d68c3a9",
+"2d2d68",
+"2d2d6163636570743d2d2d"
+],
+"columns": "2",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+},
+{
+"args": [
+"2d2d756e",
+"2d612062"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d653d2d2d",
+"2d2d726f6f743d72",
+"78",
+"2d2d6578706563742d7368613235363d73"
+],
+"columns": "45",
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "72"
+},
+"candidate": {
+"text": "78"
+},
+"name": {
+"list": 0
+},
+"expect_sha256": {
+"text": "73"
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d2d6e616d65",
+"2d6878",
+"2d2d6578706563742d7368613235363d2d2d",
+"2d2d6578706563742d7368613235363d73",
+"2d2d6e616d653d"
+],
+"columns": "99999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999999",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: argument --name: expected one argument\n"
+},
+{
+"args": [
+"2dc3a9",
+"2d68c3a9",
+"2d6868c3a9",
+"2d2d6578706563742d7368613235363d73",
+"2d2d3d",
+"2d2d723d31"
+],
+"columns": "40",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root\n                          ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d756e",
+"2dff",
+"2d2d3d78",
+"2d2d68",
+"2d2d6163636570743d61",
+"2d2d726f"
+],
+"columns": "abc",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: ambiguous option: --=x could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d310a"
+],
+"columns": " 70 ",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d6e616d653d6e"
+],
+"columns": "-5",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256 EXPECT_SHA256\n                          [--name NAME] [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"63616e64",
+"2d2d",
+"2d2d6e616d653d6e",
+"2dc3a9"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d2d68656c703d78",
+"2d2d756e"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d2d3d",
+"2d2d756e6b6e6f776e",
+"2d2d726f6f743d",
+"2d2d726f6f743d"
+],
+"columns": "2",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d2d68656c703d78",
+"2d2d2d",
+"2d6868",
+"2d68"
+],
+"columns": "20",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'x'\n"
+},
+{
+"args": [
+"2d2d616363657074",
+"63616e64"
+],
+"columns": "30",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h] --root ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256, candidate\n"
+},
+{
+"args": [
+"2d683d76",
+"2d2d756e6b6e6f776e"
+],
+"columns": "45",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'v'\n"
+},
+{
+"args": [
+"2d68c3a9",
+"2d2d3d",
+"ff",
+"2dff",
+"2d2d723d31",
+"2d2d6163636570743d61"
+],
+"columns": "1_0",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: ambiguous option: --= could match --help, --root, --expect-sha256, --name, --accept, --unattended\n"
+},
+{
+"args": [
+"2d312e35",
+"2d2d"
+],
+"columns": "10",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d68",
+"2d",
+"2d2d756e",
+"2d68",
+"2d683d",
+"2dff"
+],
+"columns": "10",
+"max_digits": null,
+"code": 0,
+"stdout": "usage: adopt-candidate.py\n       [-h]\n       --root\n       ROOT\n       --expect-sha256\n       EXPECT_SHA256\n       [--name NAME]\n       [--accept ACCEPT]\n       [--unattended]\n       candidate\n\n候補の確認と採用改名を\n一つの入口で行う。本文\nの設計は呼出側が行う。\n\npositional arguments:\n  candidate\n\noptions:\n  -h, --help\n    show this\n    help\n    message and\n    exit\n  --root ROOT\n  --expect-sha256 EXPECT_SHA256\n  --name NAME\n  --accept ACCEPT\n  --unattended\n",
+"stderr": ""
+},
+{
+"args": [
+"2d2d726f6f743d",
+"2d2d6e616d653d6e",
+"2d",
+"2d2d6578706563742d7368613235363d2d2d",
+"2d2d726f6f74",
+"63616e64"
+],
+"columns": "60",
+"max_digits": null,
+"code": 0,
+"stdout": "",
+"stderr": "",
+"parsed": {
+"root": {
+"text": "63616e64"
+},
+"candidate": {
+"text": "2d"
+},
+"name": {
+"text": "6e"
+},
+"expect_sha256": {
+"list": 0
+},
+"accept": null,
+"unattended": false
+}
+},
+{
+"args": [
+"2d682d",
+"2d2d6e616d653d2d2d",
+"612062",
+"2d2d6e616d653d",
+"2d2d6578706563742d736861323536"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument '-'\n"
+},
+{
+"args": [
+"2d",
+"2dff"
+],
+"columns": "60",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT --expect-sha256\n                          EXPECT_SHA256 [--name NAME]\n                          [--accept ACCEPT] [--unattended]\n                          candidate\nadopt-candidate.py: error: the following arguments are required: --root, --expect-sha256\n"
+},
+{
+"args": [
+"2d612062",
+"2d68c3a9",
+"2d2d6e61"
+],
+"columns": "+50",
+"max_digits": null,
+"code": 2,
+"stdout": "",
+"stderr": "usage: adopt-candidate.py [-h] --root ROOT\n                          --expect-sha256\n                          EXPECT_SHA256\n                          [--name NAME]\n                          [--accept ACCEPT]\n                          [--unattended]\n                          candidate\nadopt-candidate.py: error: argument -h/--help: ignored explicit argument 'é'\n"
+}
+]
+}

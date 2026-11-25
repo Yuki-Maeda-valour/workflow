@@ -37,6 +37,11 @@ CI_BINARIES += ("diff_snapshot_contract",)
 CI_BINARIES += ("r4a_rest_contract",)
 EXAMPLES += ("diff_snapshot_contract",)
 EXAMPLES += ("r4a_rest_contract",)
+# R4C(#478)の検査専用入口。比較は build の外の別ジョブ(r4c・r4c-universal)で流す。
+# R4C の example が取り込んだ S3D・R4A のモジュールの名前(単体検査を R4C の example の検査から外す `--skip` の値)。
+ADOPT_IMPORTED_SKIPS = ("diff_snapshot::", "candidate_keys::", "r4a_rest_support::", "resolve_task_dir_definition::", "task_digest_definition::")
+CI_BINARIES += ("adopt_candidate_contract",)
+EXAMPLES += ("adopt_candidate_contract",)
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -340,6 +345,11 @@ def quality(name, work):
         # Linux だけで流す(12:59 の決定の CI の時間。Mac は brew が要るので、s3d ジョブの型検査の記録で兼ねる)。
         if name.startswith("linux-"):
             s3d_ci.unit_test(name, work, env, run=run)
+        # 取り込んだ S3D のモジュールの単体検査(diff_snapshot::)は s3d の検査に、取り込んだ R4A のモジュールの単体検査
+        # (candidate_keys・r4a_rest_support・resolve_task_dir_definition・task_digest_definition。`ADOPT_IMPORTED_SKIPS`)は
+        # R4A の example の検査に残し、R4C の example の単体検査からは外す。
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "adopt_candidate_contract", "--",
+             *[argument for module in ADOPT_IMPORTED_SKIPS for argument in ("--skip", module)]], env=env)
 
 
 def r4r_map(env, folder):
@@ -460,6 +470,19 @@ def r4a_rest_universal(name, downloads, work):
     r4a_rest_probe(fixture)
 
 
+def adopt_probe(fixture, diff_snapshot_fixture, env=None, *, require_userns=False):
+    # --evidence: 機種で変わる旧版の診断の生出力を、この機種のログへ残す(固定期待は証拠を見てから作る)。
+    # --diff-snapshot-fixture: 同じ成果物の diff_snapshot_contract(argv[0] で入る子のモードの基準)。
+    # env: 旧版の事前検査(bash と GNU の道具)を動かす PATH(S3D と同じ道具の準備の後)。
+    # --require-userns: Linux の CI では、/proc を隠す組(利用者の名前空間)を作れなければ、未実施にせず失敗にする
+    # (R4G と同じ。prepare_r4c が AppArmor の制限を外すので、作れる前提)。手元とほかの機械は未実施のまま。
+    command = [sys.executable, "-B", ROOT / "native/ci/check_adopt_candidate.py", "--fixture", fixture,
+               "--diff-snapshot-fixture", diff_snapshot_fixture, "--evidence"]
+    if require_userns:
+        command.append("--require-userns")
+    run(command, env=env)
+
+
 def read_record(folder):
     record = read_json(folder / "record.json")
     current = identity()
@@ -563,6 +586,32 @@ def s3d_universal(name, downloads, work):
         raise ValueError("Mac の最終ファイルの CPU が違います")
     report = s3d_ci.typed_report(name, work, root=ROOT, build_environment=build_environment, run=run)
     s3d_ci.probe(fixture, report, work, root=ROOT)
+
+
+def prepare_r4c(name, work):
+    """R4C の比較の準備。旧 adopt は Git があるケースで旧 diff-snapshot.sh を bash で動かすので、S3D と同じ道具の準備
+    (Mac は brew の bash・GNU の道具・git-lfs)と GNU の道具だけの PATH を使う。Linux は、/proc を隠す組
+    (利用者の名前空間)を GitHub の Ubuntu 24.04 の AppArmor の制限から外す。返す環境は比較器へ渡す。"""
+    s3d_ci.prepare_tools(name)
+    if name.startswith("linux-") and R4G_USERNS_RESTRICT.exists() and R4G_USERNS_RESTRICT.read_text(encoding="ascii").strip() != "0":
+        run(["sudo", "sysctl", "-w", "kernel.apparmor_restrict_unprivileged_userns=0"])
+    return s3d_ci.environment(work)
+
+
+def r4c(platform, downloads, work):
+    """R4C の比較。build の 2 回分の実行物を、build とは別のジョブで検査する(CI の時間を分けるため)。"""
+    env = prepare_r4c(platform, work)
+    folder, _ = extract_build(platform, downloads, work)
+    for number in (1, 2):
+        adopt_probe(folder / f"{number}/adopt_candidate_contract", folder / f"{number}/diff_snapshot_contract", env,
+                    require_userns=platform.startswith("linux-"))
+
+
+def r4c_universal(platform, downloads, work):
+    """R4C の比較。署名後の Mac 共通の実行物を、各 CPU のジョブで検査する。"""
+    env = prepare_r4c(platform, work)
+    folder, _ = extract_universal(downloads, work)
+    adopt_probe(folder / "adopt_candidate_contract", folder / "diff_snapshot_contract", env)
 
 
 def package(downloads, work):
@@ -746,7 +795,7 @@ def implement_guard_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -755,7 +804,7 @@ def main():
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -805,6 +854,10 @@ def main():
             s3d(args.platform, downloads, work)
         elif args.command == "s3d-universal":
             s3d_universal(args.platform, downloads, work)
+        elif args.command == "r4c":
+            r4c(args.platform, downloads, work)
+        elif args.command == "r4c-universal":
+            r4c_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
