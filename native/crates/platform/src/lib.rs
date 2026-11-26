@@ -38,3 +38,6 @@ pub mod r4a_rest;
 
 /// R4C専用の候補の採用の OS の操作。
 pub mod adopt_candidate;
+
+/// S2E専用のenvironment-guardのOSの操作。
+pub mod environment_guard;

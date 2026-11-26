@@ -35,7 +35,7 @@ R4Aの残り5本(#471)の解析補助も開発用ソースだけにあり、既�
 - `crates/yaml-parser`: R4S用の固定したYAML解析部品です。上流の版と局所修正は [UPSTREAM.md](crates/yaml-parser/UPSTREAM.md)にあります。
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
-  - 例外は、R4U の `check_links::capture_before_main` と、R4G の `r4g::startup::record_before_std`(`#[doc(hidden)]`)です。どちらも main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
+  - 例外は、R4U の `check_links::capture_before_main` と、R4G の `r4g::startup::record_before_std`(`#[doc(hidden)]`)と、S2E の `environment_guard::capture_inherited_sigpipe`(`#[doc(hidden)]`)です。いずれも main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
 `Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
@@ -392,7 +392,7 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
   - `install_sigint` は、起動時に SIGINT が既定の動作のときだけ、印を立てる処理を `SA_RESTART` なしで置きます。
 - main の前の控え: `capture_before_main`・`captured_before_main`・`sigpipe_ignored_at_start`・`std_valid_at_start`・`restore_start_sigpipe`。
   - `capture_before_main` は、親から受け継いだ SIGPIPE の扱いと、fd 0〜2 が使えるか(Python の `is_valid_fd` と同じ方法)を読むだけです。扱いも fd も errno も変えません。
-  - platform が公開する関数のうち、`unsafe` なのはこの関数と、R4G の `r4g::startup::record_before_std` だけです(どちらも `pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
+  - platform が公開する関数のうち、`unsafe` なのはこの関数と、R4G の `r4g::startup::record_before_std` と、S2E の `environment_guard::capture_inherited_sigpipe` だけです(いずれも `pub unsafe extern "C" fn`)。直接は呼ばず、main の前に static から呼びます。
 - `rustix` に無い `sigaction`・`kill`・`getpid`・`pthread_self` などと libc の `write` は、このファイルの中で `unsafe extern "C"` として宣言し、安全な関数で包みます。`libc` の crate は使いません。
 
 ### main の前に呼ぶ static
@@ -666,6 +666,43 @@ unsafe の置き場は、次の 2 つだけです。
 認めた旧版との差と、比較の前提の外は、全コマンドの決定の範囲だけです。時刻つきの一覧は [設計のR4C節](../docs/design.md#r4cに限る承認済みの差)にあります。
 契約は [設計のR4C節](../docs/design.md#候補の採用と改名r4c)にあります。
 [比較の手順と件数](../docs/testing.md#r4cの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
+## environment-guardの環境照合(S2E)
+
+#470で、旧`environment-guard.py`(以下、旧guard)の9コマンドと内部reader(`host-check.py`が使う3つの関数)と同じ結果を返す部品を実装しました。
+製品CLIの登録表・help・配布・既存呼出元は変えていません。未登録・未配布です。
+
+- 本体は`crates/cli/src/commands/environment_guard/`にあります。役割は次のとおりです。
+  - `args`・`output`・`runtime`・`error`・`errno_table`・`startup`: 旧`argparse`(Python 3.10)相当の引数の解析・usage・help、旧Pythonのbuffering・途中のflush・終了時のflush失敗(終了コード120)、旧版の例外の型名と理由、`errno`の文(Linuxはglibcの表)、`PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONHASHSEED`の扱い、旧Pythonが起動時に止まる経路(診断を標準エラーへ書き、終了コード1)。
+  - `pyvalue`・`pyjson`・`pyops`・`pystr`・`pypath`・`unicode_tables`: Pythonの値と等しさ、JSONの読み書き(用途ごとの読取り3種と書き出し5種)、文字列(空白・NFC・切り詰め)、`Path`と`expanduser`。Unicodeの表は、Python 3.10(Unicode 13.0.0)から作ります。
+  - `budget`・`fsio`・`depth`: 観測1回ごとの予算(項目10,000・1ファイル8MiB・総量64MiB・15秒)、リンクを辿らないファイル操作と親の照らし直し、旧Pythonの再帰の深さの数え方。
+  - `component`・`record`・`gitconfig`・`specs`・`inventory`・`settings`・`snapshot`・`state`・`entry`: 部品の木・記録・Git設定の解析(旧版と同じ順序の観測と拒否)・控え`version 3`の値と照合。
+  - `bootstrap`・`copy`・`pair`・`dispatch`: `bootstrap`、`read`・`exec`・`hook`、`verify-pair`と、コマンドの振り分け。
+  - `reader`: 内部reader3つ(`read_host_settings`・`read_components`・`component_policy_digest`)のAPI。Pythonの値と同じ意味の型(`PyValue`)か、旧版の例外と同じ型名と理由を持つエラーを返します。
+- `crates/platform/src/environment_guard.rs`は、S2Eだけが使うOS操作を、安全な関数で公開します(例外は、`main`より前に呼ぶ`unsafe`関数`capture_inherited_sigpipe`だけです)。
+  - ディレクトリ一覧・`readlinkat`・排他作成・`fchmod`・リンクを辿らない`chmod`・`fsync`・`mkdirat`・標準入力の期限つき待ち(`poll`。Macの`verify-pair`は旧版の`select`と同じ呼出しを使う)。`go`の待ち(`wait_readable_interruptible`)は約100ミリ秒に区切り、待ちの前と区切りごとに`SIGINT`の印を見ます。残りの時間は、入口で決めた期限(単調な時計)から区切りごとに計算し、区切りの回数では数えません(区切り1回が延びても、合計は期限を大きく越えません)。子の`wait`も、`WNOHANG`と最大10ミリ秒の休みで印を見直します(印を見てから待ちに入るまでに届いた信号を取りこぼさないため)。
+  - 子の起動(`fork`と`execve`。PATHの探し方・受け継ぐfd・子の信号の設定を旧Pythonの`subprocess`に合わせます)と、`SIGINT`・`SIGXFSZ`の扱い、利用者データベースの読取り(`~user`)。
+  - `unsafe`は、この1ファイルの関数の中だけに置きます(各所に安全の理由を書きました)。ただし、初期化の表への登録の`static`だけは、マクロを展開した側(`examples/s2e_contract.rs`とplatformのテスト)に生まれます(下の`main`より前の初期化を参照)。`cli`の`environment_guard`は`unsafe`を使いません。
+- `crates/cli/examples/s2e_contract.rs`は検査専用入口です。`#![forbid(unsafe_code)]`で、9コマンドを動かします。
+  - 隠しコマンド: 引数が`reader-`で始まるときだけ、内部reader3つを呼び、返した値を型の印つきの1行のJSONで出します。`reader-host-settings <state> <sha256> [呼出し側の深さ]`・`reader-components …`・`reader-policy-digest …`です。比較器が、旧版の同じ関数の値と比べます。
+  - 製品の入口には、この隠しコマンドも、注入の入口もありません。
+- 細かい競合(`lstat`と`open`の間・`EINTR`の注入など)は、`cfg(test)`のフックだけで差し込みます。フックは製品と同じ関数の中にあり、フックを外した経路は製品と同じコードを通ります。単体検査は`observe_tests.rs`・`race_tests.rs`・`command_tests.rs`・`copy_tests.rs`にあります。
+- `main`より前の初期化は、検査専用入口(`examples/s2e_contract.rs`)とplatformのテストにだけあります。platformのマクロ`s2e_record_startup_state!`を展開した実行ファイルだけが、初期化の表へ`capture_inherited_sigpipe`を載せます(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`)。この関数が、`main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控えます。
+  - 展開してよいのは、`examples/s2e_contract.rs`の1か所と、`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけです。`scripts/test_native_s2e.py`が、展開の場所・別名・許可の外からの関数の参照を静的に確かめます。
+  - 展開した側のcrateに`#[unsafe(link_section)]`の`static`が生まれます(外部のマクロの展開なので、`#![forbid(unsafe_code)]`には当たりません)。対応外のOSでは何も登録せず、`inherited_sigpipe()`は`None`です(`compile_error!`にしません。控えが無い機種は既定へ戻す、という今までの動きを変えないためです)。
+  - Rustの標準ライブラリは、`main`の前に`SIGPIPE`を無視へ変えるので、受け継いだ値はこの時点でしか読めません。
+  - 初期化関数は、確保・ロック・Rustの入出力を使いません。控えは`inherited_sigpipe()`で読みます。設定の段階の起動の失敗の診断を書く前に、控えが無視でなければ既定へ戻すために使います。
+  - Macの実機での動作は未確認です(clippyだけ、aarch64とx86_64のappleで通りました)。
+- 製品の`commands/mod.rs`には、登録していません。
+- このソースから作る製品の`dev-workflow`には、`main`より前の処理が入りません。
+  - 2026-11-26に、muslのreleaseを直す前の作りと比べました。`strace -f -e trace=rt_sigaction dev-workflow --version`で、直す前にあった`rt_sigaction(SIGPIPE, NULL, …)`が無くなり、標準ライブラリが`SIGPIPE`を無視へ変える呼出しだけが残りました。
+  - 製品の`.init_array`の大きさは、gnuが0x10・muslが0x8です(R4Eの前のmainと同じ)。
+  - 配布中のv4.53.0も、`main`より前の処理は無いままです。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のdebugで、glibcは193件、muslは194件が通りました(2026-11-26。`go`の待ちの検査を足した後)。
+
+認めた旧版との差と、比較の前提の外は、利用者の決定(U1〜U7と全コマンドの決定)の範囲だけです。時刻つきの一覧は [設計のS2E節](../docs/design.md#s2eに限る承認済みの差)にあります。
+契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。
+[比較の手順と件数](../docs/testing.md#s2eの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
 
 ## ソース入力の SHA256
 

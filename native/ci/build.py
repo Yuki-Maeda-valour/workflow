@@ -42,6 +42,9 @@ EXAMPLES += ("r4a_rest_contract",)
 ADOPT_IMPORTED_SKIPS = ("diff_snapshot::", "candidate_keys::", "r4a_rest_support::", "resolve_task_dir_definition::", "task_digest_definition::")
 CI_BINARIES += ("adopt_candidate_contract",)
 EXAMPLES += ("adopt_candidate_contract",)
+# S2E(#470)の検査専用入口。比較は build の外の別ジョブ(s2e・s2e-universal)で流す。
+CI_BINARIES += ("s2e_contract",)
+EXAMPLES += ("s2e_contract",)
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -350,6 +353,8 @@ def quality(name, work):
         # R4A の example の検査に残し、R4C の example の単体検査からは外す。
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "adopt_candidate_contract", "--",
              *[argument for module in ADOPT_IMPORTED_SKIPS for argument in ("--skip", module)]], env=env)
+        # S2E の example の単体検査(比較は、新しい必須ジョブ s2e・s2e-universal で流す)。
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "s2e_contract"], env=env)
 
 
 def r4r_map(env, folder):
@@ -615,6 +620,49 @@ def r4c_universal(platform, downloads, work):
     adopt_probe(folder / "adopt_candidate_contract", folder / "diff_snapshot_contract", env)
 
 
+# S2E(#470)の比較は、build と verify-universal の時間の枠に入らないので、別のジョブ(s2e・s2e-universal)で流す
+# (2026-11-12 12:59 の決定)。1 回の比較の上限(内側の上限)は、ジョブの上限より先に効くように決める(S3D と同じ形):
+# 内側の上限 × 比較の回数 + 準備(約 5 分)< ジョブの上限(s2e は 50 × 2 + 5 < 120 分、s2e-universal は 50 + 5 < 60 分)。
+# 50 分の根拠: docs/testing.md の記録の倍率は、R4E が手元の 40〜60 秒に対し CI の Mac x86_64 が 315 秒(約 5.3〜7.9 倍。
+# CI の Linux x86_64 の 98 秒に対し 3.2 倍)、R4A の残りが Mac x86_64 298.8 秒 / Linux x86_64 117.1 秒 = 2.55 倍。
+# 手元の Mac の経路の模擬 326 秒に 5.3〜7.9 倍を当てると 1 回約 29〜43 分(推測)で、35 分では足りないおそれがある。
+# ジョブの上限は既存の build(120 分)・verify-universal(60 分)と同じ枠にした。CI の実測で見直す(native/ci/README.md の S2E の節)。
+S2E_TIMEOUT = 3000
+S2E_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+
+
+def s2e_probe(fixture, selftest=True):
+    """S2E の専用比較(check_s2e.py)。模擬の合格(終了コード 3)は合格にしない(環境変数 S2E_SIMULATE_MAC は渡さず、
+    各機種の比較器の終了コード 0 の『S2E: 合格』だけを合格にする)。Mac で動かない項目は、比較器が Linux だけの印で外す。
+    selftest=False は比較器自身の検査(約 186 秒)を省く(s2e の 2 回目の比較。省いたことは比較器の出力に出る)。"""
+    env = {key: value for key, value in os.environ.items() if key != "S2E_SIMULATE_MAC"}
+    command = [sys.executable, "-B", ROOT / "native/ci/check_s2e.py", "--fixture", fixture]
+    if not selftest:
+        command.append("--no-selftest")
+    run(command, env=env, timeout=S2E_TIMEOUT)
+
+
+def s2e(name, downloads, work):
+    """build の tar を受け取り、2 回のビルドの s2e_contract のそれぞれで比較する。"""
+    target_config(name)
+    folder, _ = extract_build(name, downloads, work)
+    for number in (1, 2):
+        s2e_probe(folder / str(number) / "s2e_contract", selftest=number == 1)
+
+
+def s2e_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、s2e_contract で比較する。"""
+    if name not in S2E_UNIVERSAL_PLATFORMS:
+        raise ValueError("s2e-universal は Mac の 2 機種で実行してください")
+    target_config(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "s2e_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    s2e_probe(fixture)
+
+
 def package(downloads, work):
     binaries, targets = [], {}
     for name in ("linux-x86_64", "linux-arm64"):
@@ -796,7 +844,7 @@ def implement_guard_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -805,7 +853,7 @@ def main():
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -859,6 +907,10 @@ def main():
             r4c(args.platform, downloads, work)
         elif args.command == "r4c-universal":
             r4c_universal(args.platform, downloads, work)
+        elif args.command == "s2e":
+            s2e(args.platform, downloads, work)
+        elif args.command == "s2e-universal":
+            s2e_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1
