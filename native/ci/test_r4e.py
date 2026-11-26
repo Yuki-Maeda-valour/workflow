@@ -19,9 +19,13 @@ import dataclasses
 import errno
 import importlib.util
 import json
+import os
 from pathlib import Path
+import re
+import signal
 import stat
 import struct
+import subprocess
 import sys
 import time
 import unittest
@@ -787,6 +791,43 @@ class Summary(Base):
         self.assertEqual(lines[-1], '合格: 2 件(未実施 3 件)/ 1 秒')
         self.assertEqual(sum(line.startswith('未実施: ') for line in lines), 3)
 
+    def test_the_summary_lists_the_slowest_legacy_runs(self):
+        # 合格の回にも、上限までの余裕を機種ごとに見られるように、旧版の経過の長いケースを上位 5 件出す(#531)。
+        # 数えるのは一致と不一致のケースだけ。skipped と error は、どれより長い経過を持たせても出さない。
+        selected = self.cases(9)
+        plan = [('match', 10.0), ('match', 30.0), ('mismatch', 50.0), ('match', 20.0), ('match', 60.0), ('match', 40.0),
+                ('match', 5.0), ('skipped', 100.0), ('error', 90.0)]
+        results = []
+        for index, (state, seconds) in enumerate(plan):
+            extra = {'problems': ['終了値が違う']} if state == 'mismatch' else {}
+            if state == 'skipped':
+                extra = {'skip_reason': 'Linux だけ'}
+            elif state == 'error':
+                extra = {'problems': ['想定外の失敗: x']}
+            result = self.result(f'c/{index}', state, **extra)
+            # 欄が無い版でも ERROR にせず、行が無いことで落とす。
+            setattr(result, 'legacy_seconds', seconds)
+            setattr(result, 'rust_seconds', seconds / 10)
+            results.append(result)
+        code, lines = self.m.summarize(results, selected, partial=False, seconds=1, skips=[])
+        self.assertEqual(code, self.m.EXIT_FAIL)
+        self.assertTrue(lines[-1].startswith('不合格: '), lines[-1])
+        slow = [line for line in lines if line.startswith('時間の長いケース(旧版): ')]
+        self.assertEqual(len(slow), 1, lines)
+        self.assertLess(lines.index(slow[0]), len(lines) - 1)
+        self.assertGreater(lines.index(slow[0]), max(index for index, line in enumerate(lines) if line.startswith('未実施: ')))
+        self.assertEqual(re.findall(r'(c/[0-9]) [0-9.]+ 秒', slow[0]), ['c/4', 'c/2', 'c/5', 'c/1', 'c/3'])
+        self.assertIn('c/4 60.0 秒(Rust 6.0 秒)', slow[0])
+        for absent in ('c/0', 'c/6', 'c/7', 'c/8'):
+            self.assertNotIn(absent, slow[0])
+        # 全部が一致した回も、最後の行は今までどおり合格の行。
+        passing = [result for result in results if result.state == 'match']
+        chosen = [case(id=result.id) for result in passing]
+        code, lines = self.m.summarize(passing, chosen, partial=False, seconds=1, skips=[])
+        self.assertEqual(code, self.m.EXIT_PASS)
+        self.assertEqual(lines[-1], '合格: 6 件(未実施 0 件)/ 1 秒')
+        self.assertEqual(sum(line.startswith('時間の長いケース(旧版): ') for line in lines[:-1]), 1)
+
 
 class Arguments(Base):
     def test_fixture_and_python_paths(self):
@@ -973,6 +1014,142 @@ class SignalWaits(Base):
         self.assertFalse(any(results[:40]))
         self.assertTrue(results[40] and results[41])
         self.assertEqual(plan.observed, '溜まった量=4096')
+
+
+class TimedOutRuns(Base):
+    """時間切れ(#531): 「ケースの作り方の誤り」と出さず、上限・両側の経過・止める前のプロセスグループの様子を
+    1 行で出す。上限を過ぎた時点で時間切れと決め、様子は 2 秒あけて 2 回取り(その間も出力を読み続ける)、
+    止める信号は必ずプロセスグループへ送る(パイプを持つ孫も、持たない孫も止める)。
+
+    欄や関数が無い版でも ERROR にせず、AssertionError の FAIL で落ちるように書く(修正の前に落ちることを確かめるため)。
+    """
+
+    # ps の CPU 時間の欄。Mac は 0:00.00、procps は 00:00:00(日を超えると 1-00:00:00)。
+    CPU_TIME = r'^[0-9-]*[0-9]+:[0-9]{2}([:.][0-9]{2})?$'
+    SNAPSHOT = ('1 回目: pid=4242 pgid=4242 stat=R time=00:04:59 etime=05:00 rss=65536 command=python3 md_tables_to_xlsx.py'
+                ' / 2 回目(2.0 秒後): pid=4242 pgid=4242 stat=R time=00:05:01 etime=05:02 rss=65536'
+                ' command=python3 md_tables_to_xlsx.py / 負荷の平均 9.50・8.00・7.25(CPU 4)')
+
+    def spec(self, script, timeout=1.0):
+        # 子はファイルを作らないので、現在のディレクトリはこのファイルの場所でよい。
+        place = str(HERE).encode()
+        return self.m.RunSpec(argv=[b'/bin/sh', b'-c', script], cwd=place, components=[], env={}, umask=0o022,
+                              stdin='devnull', stdout='pipe', stderr='pipe', stream_dir=place, timeout=timeout)
+
+    def snapshot_of(self, raw):
+        snapshot = getattr(raw, 'snapshot', '')
+        self.assertIsInstance(snapshot, str)
+        return snapshot
+
+    def assertGroupGone(self, pgid):
+        with self.assertRaises(ProcessLookupError, msg=f'子のプロセスグループ {pgid} が残った'):
+            os.killpg(pgid, 0)
+
+    def process_state(self, pid):
+        listing = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                 stderr=subprocess.DEVNULL, timeout=10)
+        return listing.stdout.decode(errors='replace').strip()
+
+    def wait_stopped(self, pid, limit=5.0):
+        """孫が止まるまで待つ(番号が無いか、状態が Z で始まる)。止めた孫は、引き取った側が回収するまでゾンビとして
+        残り、Mac ではゾンビだけのプロセスグループへの killpg が EPERM になるので、プロセスグループの有無では確かめない。
+        戻り値は最後に読んだ状態(空なら番号が無い)。"""
+        deadline = time.monotonic() + limit
+        while True:
+            state = self.process_state(pid)
+            if not state or state.startswith('Z') or time.monotonic() >= deadline:
+                return state
+            time.sleep(0.05)
+
+    def stop_grandchild(self, pid):
+        """終わりに、まだ動いている孫を止める(テストが起動したプロセスを残さない)。"""
+        state = self.process_state(pid)
+        if state and not state.startswith('Z'):
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+    def test_a_timed_out_run_is_not_reported_as_a_case_mistake(self):
+        the_case = case(expect_legacy={'exit': 0})
+        killed = run(self.m, status=('signal', 'SIGKILL'), timed_out=True, stdout=b'', created=[], contents={}, loads={})
+        self.assertEqual(self.m.expect_problems(the_case, killed, self.paths, linux=True), [])
+        self.assertEqual(self.m.expect_problems(the_case, killed, self.paths, linux=False), [])
+        # 時間切れでない同じ終了値は、今までどおりケースの作り方の誤り。
+        self.assertTrue(self.m.expect_problems(the_case, dataclasses.replace(killed, timed_out=False), self.paths, linux=True))
+
+    def test_the_timeout_line_has_the_limit_the_seconds_and_the_group_snapshot(self):
+        old = run(self.m, status=('signal', 'SIGKILL'), timed_out=True, stdout=b'', created=[], contents={}, loads={},
+                  before=float(T0), after=T0 + 301.5)
+        # 欄が無い版でも ERROR にしないよう、作った後に足す。
+        setattr(old, 'snapshot', self.SNAPSHOT)
+        setattr(old, 'timeout', 300.0)
+        new = run(self.m, 'new', before=float(T0), after=T0 + 2.5)
+        problems = self.compare(case(), old, new)
+        self.assertEqual(len(problems), 1, problems)
+        line = problems[0]
+        self.assertIsInstance(line, str)
+        for part in ('時間切れ', '上限 300 秒', '旧版 True', '301.5 秒', 'Rust False', '2.5 秒', self.SNAPSHOT):
+            self.assertIn(part, line)
+
+    def test_execute_takes_the_group_snapshot_before_killing(self):
+        raw = self.m.execute(self.spec(b'echo $$; exec /bin/sleep 30'))
+        child = int(raw.stdout.split()[0])
+        self.assertTrue(raw.timed_out)
+        snapshot = self.snapshot_of(raw)
+        rows = re.findall(rf'pid={child} pgid={child} stat=(\S+) time=(\S+) (.*?)(?=; | / |$)', snapshot)
+        self.assertEqual(len(rows), 2, snapshot)
+        for state, cpu, rest in rows:
+            # 止める前に取った(止めた後に取ると、回収されるまでゾンビの Z と <defunct> になる)。
+            self.assertFalse(state.startswith('Z'), snapshot)
+            self.assertNotIn('<defunct>', rest, snapshot)
+            self.assertRegex(cpu, self.CPU_TIME)
+        self.assertIn('2 回目', snapshot)
+        self.assertRegex(snapshot, r'負荷の平均 [0-9.]+・[0-9.]+・[0-9.]+\(CPU [0-9]+\)')
+        self.assertGroupGone(child)
+
+    def test_a_child_that_ends_during_the_snapshot_wait_is_still_a_timeout(self):
+        # 上限 1 秒を過ぎた後、2 秒の待ちの間に子が終わる。上限を過ぎた時点で時間切れと決まっているので、時間切れのまま。
+        raw = self.m.execute(self.spec(b'echo $$; exec /bin/sleep 1.5'))
+        child = int(raw.stdout.split()[0])
+        self.assertTrue(raw.timed_out)
+        snapshot = self.snapshot_of(raw)
+        self.assertIn('2 回目', snapshot)
+        self.assertIn('止める前に終わった(終了値 0)', snapshot)
+        self.assertGroupGone(child)
+
+    def test_a_grandchild_holding_the_pipe_is_stopped_after_the_timeout(self):
+        # 子はすぐ終わるが、孫がパイプを持ち続ける(手順 2 の道: 止める時刻に killpg で止める)。
+        raw = self.m.execute(self.spec(b'/bin/sleep 30 & echo $!; exit 0'))
+        grandchild = int(raw.stdout.split()[0])
+        self.addCleanup(self.stop_grandchild, grandchild)
+        self.assertTrue(raw.timed_out)
+        state = self.wait_stopped(grandchild)
+        self.assertTrue(not state or state.startswith('Z'), f'孫 {grandchild} が止まらない: 状態 {state}')
+
+    def test_a_grandchild_without_the_pipe_is_stopped_when_the_child_ends_during_the_wait(self):
+        # 孫はパイプを持たず、子は 2 秒の待ちの間に終わる(手順 3 の道: 抜ける前に killpg を送る)。
+        raw = self.m.execute(self.spec(b'/bin/sleep 30 >/dev/null 2>&1 & echo $!; exec /bin/sleep 1.5'))
+        grandchild = int(raw.stdout.split()[0])
+        self.addCleanup(self.stop_grandchild, grandchild)
+        self.assertTrue(raw.timed_out)
+        state = self.wait_stopped(grandchild)
+        self.assertTrue(not state or state.startswith('Z'), f'孫 {grandchild} が止まらない: 状態 {state}')
+
+    def test_run_fields_copy_the_snapshot_and_the_limit(self):
+        run_fields = getattr(self.m, 'run_fields', None)
+        if run_fields is None:
+            self.fail('RawResult から Run へ写す欄を返す run_fields が無い')
+        raw = self.m.RawResult(('signal', 'SIGKILL'), b'out', b'err', {}, float(T0), T0 + 8.5, True, 0)
+        # 既定値と違う値にして、写し忘れを見分ける。
+        setattr(raw, 'snapshot', self.SNAPSHOT)
+        setattr(raw, 'timeout', 7.0)
+        fields = run_fields(raw)
+        self.assertEqual(fields.get('snapshot'), self.SNAPSHOT)
+        self.assertEqual(fields.get('timeout'), 7.0)
+        self.assertEqual((fields.get('status'), fields.get('timed_out'), fields.get('after')), (('signal', 'SIGKILL'), True, T0 + 8.5))
+        copied = self.m.Run(**fields)
+        self.assertEqual((copied.snapshot, copied.timeout), (self.SNAPSHOT, 7.0))
 
 
 class SelftestSkips(Base):
