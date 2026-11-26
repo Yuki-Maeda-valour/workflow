@@ -2054,20 +2054,34 @@ python3 -B scripts/check_loop_state_mutations.py
 - 今回の成功だけで Rust 版との同等性を確認したとは扱わない。
 - #448 側と全回帰テストを同時に流さない。公開前は管理担当が実行権を確認し、確認済みの commit を指定して全回帰テストを流す。
 
-### CI の Linux arm64 の Rust の入れ直し(#509)
+### CI の Rust の入れ直し(#509・#523)
 
 - CI の Linux arm64 の機械(`ubuntu-24.04-arm`)で、`build.py prepare` の `rustup toolchain install 1.99.1` がときどき失敗していた。
   - 記録の行は `info: recovering from a partially installed toolchain` の後に、`error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu', detected conflict: 'bin/cargo-clippy'`(run 45094423658・job 137431062394)。
-  - 起きたのは、2026-11-12〜11-23 に少なくとも 12 回と、2026-11-24 の 1 回。すべて Linux arm64 のジョブで、x86_64 と Mac では出ていない。
+  - 起きたのは、2026-11-12〜11-23 に少なくとも 12 回と、2026-11-24 の 1 回。#509 の調べの範囲では、すべて Linux arm64 のジョブだった。2026-11-25 には Mac arm64 でも出た(下の #523 の記録)。
 - rustup 1.29.3 のソースでは、この行は、入れた部品の一覧(`lib/rustlib/components`)が空なのに、前の設定(`multirust-config.toml`)が部品を持つときに出る。一覧に無い部品のファイルは消さないので、残ったファイルが入れ直す部品とぶつかる。
 - 手元の使い捨ての `RUSTUP_HOME`(x86_64・rustup 1.29.3)で、1.99.1 を入れた後に `components` を空にし、`multirust-channel-manifest.toml` と `update-hashes/<名前>` を消すと、同じ形で失敗した(`detected conflict: 'bin/cargo-fmt'`。ぶつかるファイルは、先に届いた部品で変わる)。
-- 直し(`native/ci/build.py` の `prepare`): CI の Linux arm64(`GITHUB_ACTIONS` が `true`)だけ、入れる前に `rustup --version` と `rustup toolchain list` を流す。1.99.1 があれば、状態の 1 行を出してから `rustup toolchain uninstall 1.99.1` を流す。
+- 直し(`native/ci/build.py` の `prepare`): CI の機械(`GITHUB_ACTIONS` が `true`)で、入れる前に `rustup --version` と `rustup toolchain list` を流す。1.99.1 があれば、状態の 1 行を出してから `rustup toolchain uninstall 1.99.1` を流す。
   - どれも `RUSTUP_AUTO_INSTALL=0` とリポジトリ直下で流す。手元で確かめると、`native/` の中では、一覧のコマンドも `native/rust-toolchain.toml` の道具を入れ直そうとして、同じぶつかりを起こした。
   - 同じ手元の状態で、直した関数の後の `install` は終了コード 0 で終わり、`rustfmt`・`clippy` が入った。
+  - #509 では CI の Linux arm64 だけに当てた。#523 で、CI の 4 機種に広げた(下の記録)。
 - 機械に入れかけの 1.99.1 がある理由は未確認。次に当たったとき、CI の記録の次の 2 つで調べる。
   - `rustup --version` の出力。
   - 状態の 1 行(`components` の状態・`multirust-config.toml` の部品の名前・`bin/cargo-clippy` と `update-hashes/<名前>` の有無・3 つの更新時刻〈UTC〉)。
 - テスト: `native/ci/scripts/test_native_ci.py` の `BuildTests` に 6 件を足した。`build.py test` は 183 件から 189 件になり、`GITHUB_ACTIONS=true` を付けても通る。main の版の `build.py` では、並びが変わらないことのテストを除く 5 件が落ちることを確かめた。
+
+#### CI の Mac arm64 でも出た(#523・2026-11-25 の記録)
+
+- CI の Mac arm64 でも同じ形で失敗した(Native run 45539632217 の attempt 1・`verify-universal (macos-arm64, macos-15)`・job 138981770435)。流し直した attempt 2 では合格した。
+  - 記録の行は `info: recovering from a partially installed toolchain` → `info: removing previous version of component …`(`rustc`・`cargo`・`rust-std`・`rust-docs`・`rustfmt`・`clippy`)→ `error: failed to install component: 'clippy-preview-aarch64-apple-darwin', detected conflict: 'bin/cargo-clippy'`。
+  - 前に入れかけた物の設定に `rust-docs` があった。このリポジトリは `minimal` の profile で入れるので、`rust-docs` を入れない。入れかけの物は、このリポジトリの工程の外で入ると推測する(未確認)。
+- 直し(#523): 消す処理を呼ぶ条件を、`GITHUB_ACTIONS` が `true` の CI の 4 機種にした。手元の機械では、今までどおり消さない。消す処理の中身は変えていない。
+  - x86_64 の 2 機種では、#509 の調べと run 45539632217 の記録の範囲で、この失敗を見ていない(ほかは未確認)。それでも外す根拠が無いので当てた。
+  - 同じ run の x86_64 の 2 ジョブ(job 138980658435・138980658513)の `prepare` は `downloading 5 components` で、1.99.1 が無かった。無い機械で増えるのは、`rustup --version` と `rustup toolchain list` の 2 つの呼び出しだけ。
+- テスト: `BuildTests` の `prepare` のテストを、4 機種で消す場合・Mac arm64 で飛ばす場合と止まる場合・手元の機械の 4 機種に直した。関数の数は同じで、`build.py test` は 198 件のまま。`GITHUB_ACTIONS` なしと `GITHUB_ACTIONS=true` の両方で通る。
+  - 直す前の `build.py` では、3 つのテスト関数の 9 つの場合(`subTest`。1 つのテスト関数の中で分けて確かめる場合)が `AssertionError` で落ちることを確かめた(`FAILED (failures=9)`)。
+  - わざと入れる誤り(変異)で確かめた: 条件から `GITHUB_ACTIONS` の確かめを外す(いつでも消す)と、`test_prepare_order_is_unchanged_outside_ci` の 4 機種が落ちる。
+  - `GITHUB_ACTIONS` を決めずに `prepare` を呼んでいたテスト(`test_native_ci.py` 3 か所・`test_s3d_ci.py` 1 か所)は、`GITHUB_ACTIONS` を消してから呼ぶ。CI で `GITHUB_ACTIONS=true` のまま `build.py test` を流しても、確かめる中身が変わらない。
 
 ## 全回帰テストのコマンド(run-all.py)
 
