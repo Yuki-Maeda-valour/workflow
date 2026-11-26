@@ -308,24 +308,47 @@ pub fn wait_readable_interruptible(fd: BorrowedFd<'_>, timeout_ms: i64) -> io::R
     if select_timeout_too_large(timeout_ms, cfg!(target_os = "macos")) {
         return Err(io::Error::from_raw_os_error(libc::EINVAL));
     }
-    let mut left = timeout_ms;
+    wait_in_slices(timeout_ms, Instant::now, sigint_pending, |slice| {
+        wait_readable(fd, slice)
+    })
+}
+
+/// 区切りの待ちの本体。時計・印・1回の待ちを引数に取るので、時計に依らずに確かめられる。
+///
+/// 残りの時間は、入口で決めた期限(単調な時計)から区切りごとに計算する。区切りの回数で引いて数えない。
+/// 期限を越える量は、最後の1回の待ちの延び(と1ミリ秒未満の切り上げ)だけ。区切りの数に比例しない(旧版の1回の`select`の延びと同じ)。
+/// ミリ秒は切り上げる(残りがあるのに0ミリ秒の待ちにしない)。期限が0なら、1回だけ待ってから`false`。
+/// 負は無期限。期限が時計の範囲を超える長さは、区切りごとに残りが十分長いだけなので、無期限と同じに動く。
+fn wait_in_slices(
+    timeout_ms: i64,
+    mut now: impl FnMut() -> Instant,
+    interrupted: impl Fn() -> bool,
+    mut wait: impl FnMut(i64) -> io::Result<bool>,
+) -> io::Result<bool> {
+    let deadline = if timeout_ms < 0 {
+        None
+    } else {
+        let ms = u64::try_from(timeout_ms).unwrap_or(0);
+        now().checked_add(Duration::from_millis(ms))
+    };
     loop {
-        if sigint_pending() {
+        if interrupted() {
             return Err(io::Error::from_raw_os_error(libc::EINTR));
         }
-        let slice = if left < 0 {
-            SIGINT_CHECK_INTERVAL_MS
-        } else {
-            left.min(SIGINT_CHECK_INTERVAL_MS)
+        let slice = match deadline {
+            None => SIGINT_CHECK_INTERVAL_MS,
+            Some(deadline) => {
+                let remaining = deadline.saturating_duration_since(now());
+                let ms =
+                    i64::try_from(remaining.as_nanos().div_ceil(1_000_000)).unwrap_or(i64::MAX);
+                ms.min(SIGINT_CHECK_INTERVAL_MS)
+            }
         };
-        if wait_readable(fd, slice)? {
+        if wait(slice)? {
             return Ok(true);
         }
-        if left >= 0 {
-            left -= slice;
-            if left == 0 {
-                return Ok(false);
-            }
+        if deadline.is_some_and(|deadline| now() >= deadline) {
+            return Ok(false);
         }
     }
 }
@@ -1626,6 +1649,103 @@ mod tests {
         } else {
             assert!(over.unwrap());
         }
+    }
+
+    #[test]
+    fn sliced_wait_measures_the_deadline_by_the_clock_not_by_counting_slices() {
+        use std::cell::Cell;
+        let base = Instant::now();
+        let elapsed = Cell::new(0u64);
+        let calls = Cell::new(0u32);
+        // 1回の待ちが、頼まれた長さより250ミリ秒余計にかかる(Macの`select`が延びる状態)。
+        let result = wait_in_slices(
+            1000,
+            || base + Duration::from_millis(elapsed.get()),
+            || false,
+            |slice| {
+                assert!((0..=SIGINT_CHECK_INTERVAL_MS).contains(&slice));
+                calls.set(calls.get() + 1);
+                elapsed.set(elapsed.get() + slice as u64 + 250);
+                Ok(false)
+            },
+        );
+        assert!(!result.unwrap());
+        // 回数で数えると、100ミリ秒 x 10回の約3.5秒まで待つ。時計で測れば、4回・最後の待ちを含めて約1.4秒以内。
+        assert!(calls.get() <= 4, "{}", calls.get());
+        assert!(elapsed.get() < 1000 + 100 + 250, "{}", elapsed.get());
+        // 期限0は1回だけ待つ。残りが1ミリ秒に満たなければ切り上げて1ミリ秒を頼み、使い切った後の最後の待ちは0ミリ秒。
+        let mut asked = Vec::new();
+        let tick = Cell::new(0u64);
+        let result = wait_in_slices(
+            0,
+            || base,
+            || false,
+            |slice| {
+                asked.push(slice);
+                Ok(false)
+            },
+        );
+        assert!(!result.unwrap());
+        assert_eq!(asked, vec![0]);
+        asked.clear();
+        let result = wait_in_slices(
+            1,
+            || base + Duration::from_micros(tick.replace(tick.get() + 400)),
+            || false,
+            |slice| {
+                asked.push(slice);
+                Ok(false)
+            },
+        );
+        assert!(!result.unwrap());
+        assert_eq!(asked, vec![1, 0]);
+        // 印が立っていれば、待つ前に`EINTR`。
+        let error = wait_in_slices(1000, || base, || true, |_| Ok(false)).unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EINTR));
+        // 区切りごとに印を見直す: 2回目の呼び出しから立つ印は、1回だけ待った後の見直しで`EINTR`になる。
+        let checks = Cell::new(0u32);
+        let waits = Cell::new(0u32);
+        let error = wait_in_slices(
+            1000,
+            || base,
+            || {
+                checks.set(checks.get() + 1);
+                checks.get() >= 2
+            },
+            |_| {
+                waits.set(waits.get() + 1);
+                // 印の見直しが無い変異では、2回目の呼び出しですぐ`Ok(true)`を返して落ちる。
+                Ok(waits.get() >= 2)
+            },
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(libc::EINTR));
+        assert_eq!(waits.get(), 1);
+        // 負は無期限: データが来るまで区切りで待つ。
+        let n = Cell::new(0);
+        let result = wait_in_slices(
+            -1,
+            || base,
+            || false,
+            |slice| {
+                assert_eq!(slice, SIGINT_CHECK_INTERVAL_MS);
+                n.set(n.get() + 1);
+                Ok(n.get() == 5)
+            },
+        );
+        assert!(result.unwrap());
+        // 非常に長い期限は、区切りごとに残りが十分あるので無期限と同じに動く。
+        let n = Cell::new(0);
+        let result = wait_in_slices(
+            i64::MAX,
+            || base,
+            || false,
+            |_| {
+                n.set(n.get() + 1);
+                Ok(n.get() == 3)
+            },
+        );
+        assert!(result.unwrap());
     }
 
     #[test]
