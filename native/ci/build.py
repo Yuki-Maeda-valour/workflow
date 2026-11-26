@@ -177,9 +177,9 @@ def build_environment(target_dir, name):
 def prepare(name):
     target, _ = target_config(name)
     run([sys.executable, "-m", "pip", "install", "-r", ROOT / "requirements-dev.txt"])
-    # CI の Linux arm64 の機械には、入れかけの 1.99.1 が残っていることがある(#509)。入れる前に消す。
+    # CI の機械には、入れかけの 1.99.1 が残っていることがある(Linux arm64 は #509、Mac arm64 は #523)。入れる前に消す。
     # 手元の機械では、入れてある 1.99.1 を消さない。
-    if name == "linux-arm64" and os.environ.get("GITHUB_ACTIONS") == "true":
+    if os.environ.get("GITHUB_ACTIONS") == "true":
         remove_installed_toolchain()
     run(["rustup", "toolchain", "install", TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"])
     run(["rustup", "target", "add", "--toolchain", TOOLCHAIN, target])
