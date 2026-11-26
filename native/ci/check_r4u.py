@@ -76,6 +76,8 @@ SHIM_KEYS = (PRELOAD, "R4U_SHIM_LOG", "R4U_SHIM_RULES")
 FIXTURE_FLAG = "--check-links-fixture"
 MATCHER_FLAG = "--check-links-matcher"
 RUN_TIMEOUT = 120
+# 疑似端末の終わりの目印を待つ上限(秒)。読み手を待つ上限(30 秒)より短くして、読み手が先に終わるようにする(#519)。
+PTY_MARKER_TIMEOUT = 20
 TEMP_PREFIX = "r4u-check-"
 ROOT_MARK = b"@ROOT@"
 TOP_MARK = b"@TOP@"
@@ -599,6 +601,8 @@ class Result:
     writes: list
     timed_out: bool = False
     env_names: set | None = None
+    # どちらの実行か(旧版・Rust)。失敗の文に出す。時間切れの結果は空。
+    kind: str = ""
 
 
 @dataclass
@@ -696,22 +700,53 @@ def read_all(fd, sink):
         sink.append(chunk)
 
 
-def read_pty(master, sink, stop):
-    """疑似端末の親の側の端を読む。stop の後は、読めるものが無くなるまで読んで終わる。"""
+def read_pty(master, slave, sink, stop, done, notes, timeout=PTY_MARKER_TIMEOUT):
+    """疑似端末の親の側の端(master)を、時間ではなく目印で読み切る(#519)。
+
+    - 子が終わった知らせ(stop)を見た後に、親が持つ子の側の端(slave)へ、改行を含まない一意の目印を書く。
+      端末の出力は順に届くので、目印が出た時点で、子の出力はすべて出ている。目印は結果(sink)から外す。
+      stop を見る前に届いた出力を落とさないため、「読むもの無し」を見た後に stop を見て終わる形にしない。
+    - stop は select の前に読む。stop を見た後に始めた select が空なら、子の出力は読み終えていて端末の buffer は空なので、
+      目印の書き込みは止まらない。select の後に読んだ stop で決めると、子の最後の出力が端末に残ったまま目印を書き、
+      端末の空きが足りないと書き込みが止まる。
+    - 目印が出たら done を立てる。出ずに終わる(期限・読取りの失敗・EOF・目印を書けない)ときは、それまでの出力を sink に入れ、
+      notes に理由を入れ、done を立てずに終わる(例外は外へ出さない)。
+    """
     import select
+    import uuid
+    marker = ("R4U-PTY-END-" + uuid.uuid4().hex).encode()
+    buffer = b""
+    written = False
+    deadline = None
     while True:
+        finished = stop.is_set()
         ready, _, _ = select.select([master], [], [], 0.05)
         if ready:
             try:
                 chunk = os.read(master, 65536)
-            except OSError:
+            except OSError as error:
+                notes.append(f"端末の読取りが失敗した(errno {error.errno})")
                 break
             if not chunk:
+                notes.append("目印の前に端末が閉じた")
                 break
-            sink.append(chunk)
-            continue
-        if stop.is_set():
+            buffer += chunk
+            if written and marker in buffer:
+                buffer = buffer.replace(marker, b"", 1)
+                done.set()
+                break
+        elif finished and not written:
+            try:
+                os.write(slave, marker)
+            except OSError as error:
+                notes.append(f"目印を書けなかった(errno {error.errno})")
+                break
+            written = True
+            deadline = time.monotonic() + timeout
+        if deadline is not None and time.monotonic() > deadline:
+            notes.append(f"期限 {timeout} 秒までに目印が出なかった")
             break
+    sink.append(buffer)
 
 
 def wait_until(predicate, what, timeout=30):
@@ -835,6 +870,7 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
     fds = {}
     closed = []
     readers = []
+    dones = []
     stop = threading.Event()
     proc = None
     log_sink = []
@@ -865,12 +901,15 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
                 os.close(fd)
         closers = [fd for fd in closers if not isinstance(fd, int)]
         pty_out = {}
-        for which, master, _ in masters:
+        for which, master, slave in masters:
             sink = []
             pty_out[which] = sink
-            reader = threading.Thread(target=read_pty, args=(master, sink, stop), daemon=True)
+            done = threading.Event()
+            notes = []
+            reader = threading.Thread(target=read_pty, args=(master, slave, sink, stop, done, notes), daemon=True)
             reader.start()
             readers.append(reader)
+            dones.append((which, done, notes))
         try:
             run_scenario(ctx, case, proc)
         except BaseException:
@@ -888,6 +927,10 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
             reader.join(timeout=30)
             if reader.is_alive():
                 raise Failure(f"{case.id}/{kind}: 疑似端末を読み切れない")
+        for _, done, notes in dones:
+            if not done.is_set():
+                reason = notes[0] if notes else "理由なし"
+                raise Failure(f"{case.id}/{kind}: 疑似端末の終わりの目印が出なかった({reason})")
         log_reader.join(timeout=30)
         stdout = stdout or b""
         stderr = stderr or b""
@@ -907,8 +950,12 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
                 os.close(item)
         stop.set()
         for reader in readers:
-            reader.join(timeout=5)
-        for _, master, slave in masters:
+            reader.join(timeout=PTY_MARKER_TIMEOUT + 5)
+        for index, (_, master, slave) in enumerate(masters):
+            if index < len(readers) and readers[index].is_alive():
+                # 読み手が動いている間は fd を閉じない(閉じた fd や、次のケースが開き直した同じ番号を読ませない)。
+                # 読み手は daemon のスレッドなので、比較器の終わりで消える。
+                continue
             os.close(master)
             os.close(slave)
         os.close(log_read)
@@ -922,7 +969,8 @@ def execute(ctx, case, kind, *, env=None, rules=None, rlimit=None):
     leftover = sorted(set(os.listdir(work)) - {"stdout.out", "stderr.out"})
     if leftover:
         raise Failure(f"{case.id}/{kind}: 作業フォルダに新しいファイルができた: {leftover}")
-    return Result(proc.returncode, stdout, stderr, writes, False, None if image is None else set(image.names))
+    return Result(proc.returncode, stdout, stderr, writes, False, None if image is None else set(image.names),
+                  {"legacy": "旧版", "rust": "Rust"}[kind])
 
 
 def check_env_names(where, image, child, recorded, chain=(), mac=MAC):
@@ -1112,18 +1160,30 @@ def raw_passed(writes, fds):
     return bytes(out)
 
 
+def capture_difference(result, got, want):
+    """捕まえた出力と記録の違いを見分けるための値(旧版か Rust か・2 つの長さ・最初に違う位置と前後の中身)。"""
+    limit = min(len(got), len(want))
+    position = next((i for i in range(limit) if got[i] != want[i]), limit)
+    lo, hi = max(position - 16, 0), position + 16
+    return (f"({result.kind or '不明'}。捕まえた {len(got)} バイト・記録 {len(want)} バイト・最初に違う位置 {position}。"
+            f"捕まえた側 {got[lo:hi]!r}・記録の側 {want[lo:hi]!r})")
+
+
 def check_capture(case, result):
     """捕まえた出力が、記録の通ったバイトと同じか(記録漏れと余計な出力を拒む)。"""
     if case.stdout in ("pipe", "file"):
         fds = (1, 2) if case.stderr == "stdout" else (1,)
-        if result.stdout != raw_passed(result.writes, fds):
-            raise Failure("捕まえた stdout と書込みの記録が合わない")
+        want = raw_passed(result.writes, fds)
+        if result.stdout != want:
+            raise Failure("捕まえた stdout と書込みの記録が合わない" + capture_difference(result, result.stdout, want))
     elif case.stdout == "pty":
-        if result.stdout != raw_passed(result.writes, (1,)).replace(b"\n", b"\r\n"):
-            raise Failure("捕まえた疑似端末の出力と書込みの記録が合わない")
+        want = raw_passed(result.writes, (1,)).replace(b"\n", b"\r\n")
+        if result.stdout != want:
+            raise Failure("捕まえた疑似端末の出力と書込みの記録が合わない" + capture_difference(result, result.stdout, want))
     if case.stderr in ("pipe", "file"):
-        if result.stderr != raw_passed(result.writes, (2,)):
-            raise Failure("捕まえた stderr と書込みの記録が合わない")
+        want = raw_passed(result.writes, (2,))
+        if result.stderr != want:
+            raise Failure("捕まえた stderr と書込みの記録が合わない" + capture_difference(result, result.stderr, want))
 
 
 def mask_thread(data):

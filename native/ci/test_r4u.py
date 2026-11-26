@@ -8,14 +8,18 @@
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
+import pty
+import select
 import signal
 import stat
 import subprocess
 import sys
 import tempfile
 import textwrap
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -192,6 +196,29 @@ class CompareTests(unittest.TestCase):
         checker.check_capture(pty_case, checker.Result(0, b"a\r\n", b"", [write(1, b"a\n")]))
         with self.assertRaises(checker.Failure):
             checker.check_capture(pty_case, checker.Result(0, b"a\n", b"", [write(1, b"a\n")]))
+
+    def test_capture_failure_names_the_side_lengths_and_first_difference(self):
+        # 失敗の文に、旧版か Rust か・2 つの長さ・最初に違う位置を出す(次に落ちたときに原因を見分けるため)。
+        pty_case = checker.Case("x", "basic", stdout="pty")
+        result = checker.Result(0, b"ab\r\nc", b"", [write(1, b"ab\ncd")], kind="Rust")
+        with self.assertRaises(checker.Failure) as caught:
+            checker.check_capture(pty_case, result)
+        for text in ("Rust", "捕まえた 5 バイト", "記録 6 バイト", "最初に違う位置 5"):
+            self.assertIn(text, str(caught.exception))
+        pipe_case = checker.Case("x", "basic")
+        with self.assertRaises(checker.Failure) as caught:
+            checker.check_capture(pipe_case, checker.Result(0, b"abX", b"", [write(1, b"abc")], kind="旧版"))
+        for text in ("旧版", "捕まえた 3 バイト", "記録 3 バイト", "最初に違う位置 2"):
+            self.assertIn(text, str(caught.exception))
+        with self.assertRaises(checker.Failure) as caught:
+            checker.check_capture(pipe_case, checker.Result(0, b"ab", b"", [write(1, b"abc")]))
+        for text in ("不明", "捕まえた 2 バイト", "記録 3 バイト", "最初に違う位置 2"):
+            self.assertIn(text, str(caught.exception))
+        err_case = checker.Case("x", "basic", stdout="closed", stderr="pipe")
+        with self.assertRaises(checker.Failure) as caught:
+            checker.check_capture(err_case, checker.Result(0, b"", b"zz", [write(2, b"zy")], kind="Rust"))
+        for text in ("Rust", "捕まえた 2 バイト", "記録 2 バイト", "最初に違う位置 1"):
+            self.assertIn(text, str(caught.exception))
 
     def test_log_must_end_with_a_complete_line(self):
         with self.assertRaises(checker.Failure):
@@ -856,6 +883,77 @@ class PartialHelperTests(unittest.TestCase):
             checker.select_write(writes, checker.FILE_PREFIX, 3)
 
 
+class PtyReaderTests(unittest.TestCase):
+    """read_pty(疑似端末を目印で読み切る。#519)を、実際の疑似端末で確かめる。"""
+
+    def setUp(self):
+        self.master, self.slave = pty.openpty()
+        self.addCleanup(os.close, self.master)
+        self.addCleanup(os.close, self.slave)
+        self.sink = []
+        self.stop = threading.Event()
+        self.done = threading.Event()
+        self.notes = []
+
+    def read(self, **kwargs):
+        checker.read_pty(self.master, self.slave, self.sink, self.stop, self.done, self.notes, **kwargs)
+
+    def test_output_written_after_an_empty_wait_is_read(self):
+        # 「読むもの無し」で戻る直前に、子が最後の出力を書いて終わる順番(stop が立つ)を起こしても、出力を落とさない。
+        real_select, real_write = select.select, os.write
+        calls = []
+        leftovers = []
+
+        def fake_select(rlist, wlist, xlist, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                real_write(self.slave, b"TAIL-DATA")
+                self.stop.set()
+                return [], [], []
+            return real_select(rlist, wlist, xlist, timeout)
+
+        def fake_write(fd, data):
+            if data.startswith(b"R4U-PTY-END-"):
+                leftovers.append(bool(real_select([self.master], [], [], 0)[0]))
+            return real_write(fd, data)
+
+        with patch("select.select", fake_select), patch.object(checker.os, "write", fake_write):
+            self.read()
+        self.assertEqual(b"TAIL-DATA", b"".join(self.sink))
+        self.assertTrue(self.done.is_set(), self.notes)
+        self.assertEqual([False], leftovers)
+
+    def test_marker_split_across_reads_is_found_and_removed(self):
+        real_read = os.read
+        os.write(self.slave, b"abc")
+        self.stop.set()
+        with patch.object(checker.os, "read", lambda fd, n: real_read(fd, 1)):
+            self.read(timeout=2)
+        self.assertEqual(b"abc", b"".join(self.sink))
+        self.assertTrue(self.done.is_set(), self.notes)
+
+    def test_missing_marker_is_reported_not_passed(self):
+        self.stop.set()
+        with patch.object(checker.os, "write", lambda fd, data: len(data)):
+            self.read(timeout=0.5)
+        self.assertFalse(self.done.is_set())
+        self.assertEqual(1, len(self.notes))
+        self.assertIn("期限", self.notes[0])
+
+    def test_marker_write_failure_is_reported_not_passed(self):
+        self.stop.set()
+
+        def failing(fd, data):
+            raise OSError(errno.EIO, "入出力エラー")
+
+        with patch.object(checker.os, "write", failing):
+            self.read()
+        self.assertFalse(self.done.is_set())
+        self.assertEqual(1, len(self.notes))
+        self.assertIn("目印を書けなかった", self.notes[0])
+        self.assertIn(str(errno.EIO), self.notes[0])
+
+
 class RealChildTests(unittest.TestCase):
     """実際の子と共有ライブラリで、合格の対照と、拒むべき結果を確かめる。"""
 
@@ -916,6 +1014,28 @@ class RealChildTests(unittest.TestCase):
         self.assertEqual("合格", checker.run_case(ctx, case, fixtures, {}).status)
         result = checker.execute(ctx, case, "legacy")
         self.assertTrue(result.stdout.endswith("件\r\n".encode()))
+
+    def pty_case(self):
+        return checker.Case("x", "output", checker.BASIC, ["docs"], stdout="pty")
+
+    def test_execute_fails_when_the_pty_end_marker_does_not_appear(self):
+        ctx = self.context(self.fake("same-pty-nomarker"))
+
+        def reader(master, slave, sink, stop, done, notes, timeout=0):
+            while not stop.is_set():
+                stop.wait(0.01)
+            notes.append("テストの理由")
+
+        with patch.object(checker, "read_pty", reader):
+            with self.assertRaises(checker.Failure) as caught:
+                checker.execute(ctx, self.pty_case(), "legacy")
+        self.assertIn("疑似端末の終わりの目印が出なかった", str(caught.exception))
+        self.assertIn("テストの理由", str(caught.exception))
+
+    def test_execute_records_which_side_ran(self):
+        ctx = self.context(self.fake("same-pty-kind"))
+        self.assertEqual("旧版", checker.execute(ctx, self.pty_case(), "legacy").kind)
+        self.assertEqual("Rust", checker.execute(ctx, self.pty_case(), "rust").kind)
 
     def test_extra_output_fails(self):
         ctx = self.context(self.fake("extra", after='print("extra")'))
