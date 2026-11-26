@@ -728,8 +728,9 @@ class ProbeSupportIntegrationTests(TempCase):
 
 class BuildTests(TempCase):
     def test_prepare_installs_comparison_dependencies_with_the_running_python(self):
-        with mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+        with mock.patch.dict(os.environ), mock.patch.object(build, "target_config", return_value=("test-target", None)), \
                 mock.patch.object(build, "run") as run:
+            os.environ.pop("GITHUB_ACTIONS", None)
             build.prepare("linux-x86_64")
         self.assertEqual(run.call_args_list[0].args[0],
                          [sys.executable, "-m", "pip", "install", "-r", source_hash.ROOT / "requirements-dev.txt"])
@@ -737,8 +738,9 @@ class BuildTests(TempCase):
                       run.call_args_list)
 
     def test_prepare_dependency_failure_stops_before_build_tool_setup(self):
-        with mock.patch.object(build, "target_config", return_value=("test-target", None)), \
+        with mock.patch.dict(os.environ), mock.patch.object(build, "target_config", return_value=("test-target", None)), \
                 mock.patch.object(build, "run", side_effect=subprocess.CalledProcessError(1, "pip")) as run:
+            os.environ.pop("GITHUB_ACTIONS", None)
             with self.assertRaises(subprocess.CalledProcessError):
                 build.prepare("linux-x86_64")
         self.assertEqual(run.call_count, 1)
@@ -772,7 +774,7 @@ class BuildTests(TempCase):
 
     def toolchain_home(self, name="1.99.1-aarch64-unknown-linux-gnu"):
         """入れかけの道具一式の置き場をまねる(部品の一覧が空・部品の記録と clippy と更新の印が残っている)。"""
-        home = self.root / "rustup-home"
+        home = self.root / name / "rustup-home"
         rustlib = home / "toolchains" / name / "lib" / "rustlib"
         rustlib.mkdir(parents=True)
         (rustlib / "components").write_text("")
@@ -784,60 +786,69 @@ class BuildTests(TempCase):
         (home / "update-hashes" / name).write_text("hash")
         return home
 
-    def test_prepare_removes_installed_toolchain_on_ci_linux_arm64(self):
-        home = self.toolchain_home()
-        outputs = {
-            ("toolchain", "list"): "stable-aarch64-unknown-linux-gnu (default)\n1.99.1-aarch64-unknown-linux-gnu",
-            ("show", "home"): str(home),
-        }
-        calls, error = self.run_prepare("linux-arm64", True, outputs)
-        self.assertEqual([call.args[0] for call in calls], [
-            [sys.executable, "-m", "pip", "install", "-r", source_hash.ROOT / "requirements-dev.txt"],
-            ["rustup", "--version"],
-            ["rustup", "toolchain", "list"],
-            ["rustup", "show", "home"],
-            ["rustup", "toolchain", "uninstall", build.TOOLCHAIN],
-            ["rustup", "toolchain", "install", build.TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"],
-            ["rustup", "target", "add", "--toolchain", build.TOOLCHAIN, "test-target"],
-        ])
-        for call in calls[1:5]:
-            self.assertEqual(call.kwargs["env"], self.expected_env)
-            self.assertEqual(call.kwargs["cwd"], source_hash.ROOT)
-        self.assertNotIn("RUSTUP_AUTO_INSTALL", self.env_after)
-        # 状態の 1 行は、アンインストールより前に出ている。
-        uninstall = self.error_at_call[4]
-        self.assertIn("components=空", uninstall)
-        self.assertIn("bin/cargo-clippy=あり", uninstall)
-        self.assertNotIn("components=空", self.error_at_call[3])
-        self.assertIn("1.99.1-aarch64-unknown-linux-gnu", error)
-        self.assertIn("components", error)
+    CI_MACHINES = (("linux-x86_64", "1.99.1-x86_64-unknown-linux-gnu", "stable-x86_64-unknown-linux-gnu"),
+                   ("linux-arm64", "1.99.1-aarch64-unknown-linux-gnu", "stable-aarch64-unknown-linux-gnu"),
+                   ("macos-x86_64", "1.99.1-x86_64-apple-darwin", "stable-x86_64-apple-darwin"),
+                   ("macos-arm64", "1.99.1-aarch64-apple-darwin", "stable-aarch64-apple-darwin"))
+
+    def test_prepare_removes_installed_toolchain_on_every_ci_machine(self):
+        for machine, toolchain, stable in self.CI_MACHINES:
+            with self.subTest(machine=machine):
+                home = self.toolchain_home(toolchain)
+                outputs = {
+                    ("toolchain", "list"): f"{stable} (default)\n{toolchain}",
+                    ("show", "home"): str(home),
+                }
+                calls, error = self.run_prepare(machine, True, outputs)
+                self.assertEqual([call.args[0] for call in calls], [
+                    [sys.executable, "-m", "pip", "install", "-r", source_hash.ROOT / "requirements-dev.txt"],
+                    ["rustup", "--version"],
+                    ["rustup", "toolchain", "list"],
+                    ["rustup", "show", "home"],
+                    ["rustup", "toolchain", "uninstall", build.TOOLCHAIN],
+                    ["rustup", "toolchain", "install", build.TOOLCHAIN, "--profile", "minimal", "--component", "rustfmt,clippy"],
+                    ["rustup", "target", "add", "--toolchain", build.TOOLCHAIN, "test-target"],
+                ])
+                for call in calls[1:5]:
+                    self.assertEqual(call.kwargs["env"], self.expected_env)
+                    self.assertEqual(call.kwargs["cwd"], source_hash.ROOT)
+                self.assertNotIn("RUSTUP_AUTO_INSTALL", self.env_after)
+                # 状態の 1 行は、アンインストールより前に出ている。
+                uninstall = self.error_at_call[4]
+                self.assertIn("components=空", uninstall)
+                self.assertIn("bin/cargo-clippy=あり", uninstall)
+                self.assertNotIn("components=空", self.error_at_call[3])
+                self.assertIn(toolchain, error)
+                self.assertIn("components", error)
 
     def test_prepare_skips_uninstall_when_toolchain_is_not_listed(self):
-        for listing in ("no installed toolchains",
-                        "stable-aarch64-unknown-linux-gnu (default)\n1.99.10-aarch64-unknown-linux-gnu"):
-            with self.subTest(listing=listing):
-                calls, _ = self.run_prepare("linux-arm64", True, {("toolchain", "list"): listing})
-                self.assertEqual([call.args[0][1:3] for call in calls[1:]], [
-                    ["--version"], ["toolchain", "list"], ["toolchain", "install"], ["target", "add"]])
+        for machine in ("linux-arm64", "macos-arm64"):
+            for listing in ("no installed toolchains",
+                            "stable-aarch64-unknown-linux-gnu (default)\n1.99.10-aarch64-unknown-linux-gnu"):
+                with self.subTest(machine=machine, listing=listing):
+                    calls, _ = self.run_prepare(machine, True, {("toolchain", "list"): listing})
+                    self.assertEqual([call.args[0][1:3] for call in calls[1:]], [
+                        ["--version"], ["toolchain", "list"], ["toolchain", "install"], ["target", "add"]])
 
-    def test_prepare_stops_when_a_rustup_step_fails_on_ci_linux_arm64(self):
-        outputs = {
-            ("toolchain", "list"): "1.99.1-aarch64-unknown-linux-gnu",
-            ("show", "home"): str(self.toolchain_home()),
-        }
-        for fail_at in (("--version",), ("toolchain", "list"), ("show", "home"),
-                        ("toolchain", "uninstall", build.TOOLCHAIN)):
-            with self.subTest(fail_at=fail_at):
-                with self.assertRaises(subprocess.CalledProcessError):
-                    self.run_prepare("linux-arm64", True, outputs, fail_at=fail_at)
-                self.assertEqual(tuple(map(str, self.calls[-1].args[0][1:])), fail_at)
-                self.assertFalse([call for call in self.calls if call.args[0][1:3] == ["toolchain", "install"]])
+    def test_prepare_stops_when_a_rustup_step_fails_on_ci(self):
+        for machine, toolchain in (("linux-arm64", "1.99.1-aarch64-unknown-linux-gnu"),
+                                   ("macos-arm64", "1.99.1-aarch64-apple-darwin")):
+            outputs = {
+                ("toolchain", "list"): toolchain,
+                ("show", "home"): str(self.toolchain_home(toolchain)),
+            }
+            for fail_at in (("--version",), ("toolchain", "list"), ("show", "home"),
+                            ("toolchain", "uninstall", build.TOOLCHAIN)):
+                with self.subTest(machine=machine, fail_at=fail_at):
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        self.run_prepare(machine, True, outputs, fail_at=fail_at)
+                    self.assertEqual(tuple(map(str, self.calls[-1].args[0][1:])), fail_at)
+                    self.assertFalse([call for call in self.calls if call.args[0][1:3] == ["toolchain", "install"]])
 
-    def test_prepare_order_is_unchanged_outside_ci_linux_arm64(self):
-        for name, github_actions in (("linux-x86_64", True), ("macos-x86_64", True), ("macos-arm64", True),
-                                     ("linux-arm64", False)):
-            with self.subTest(name=name, github_actions=github_actions):
-                calls, _ = self.run_prepare(name, github_actions)
+    def test_prepare_order_is_unchanged_outside_ci(self):
+        for name, _, _ in self.CI_MACHINES:
+            with self.subTest(name=name):
+                calls, _ = self.run_prepare(name, False)
                 self.assertEqual([call.args[0][0:3] for call in calls], [
                     [sys.executable, "-m", "pip"], ["rustup", "toolchain", "install"], ["rustup", "target", "add"]])
 
@@ -2962,7 +2973,8 @@ class R4GConnectionTests(TempCase):
                 build.prepare_r4g_linux()
             self.assertEqual([call.args[0] for call in run.call_args_list],expected)
         # prepare(配る工程でも使う)と build・reproduce は R4G の準備をしない。r4g・r4g-universal の始めだけで行う。
-        with mock.patch.object(build,"target_config",return_value=("t",None)),mock.patch.object(build,"run"),mock.patch.object(build,"prepare_r4g_linux") as linux:
+        with mock.patch.dict(os.environ),mock.patch.object(build,"target_config",return_value=("t",None)),mock.patch.object(build,"run"),mock.patch.object(build,"prepare_r4g_linux") as linux:
+            os.environ.pop("GITHUB_ACTIONS",None)
             build.prepare("macos-arm64")
             build.prepare("linux-x86_64")
             linux.assert_not_called()
