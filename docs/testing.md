@@ -1898,8 +1898,27 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - 比べるのは終了コード、出力のバイト列、ファイルの作成・変更・削除、実行権限を含む権限。`allow_differences` は、この比較だけで差を認める項目名と判定関数を指定する。
 - 時刻や絶対パスを出力全体から一括で消さない。時間切れを許される差にしない。
 - 時間切れでは、同じプロセスグループ(信号をまとめて送れるプロセスの集まり)へ終了信号を送り、直接の子を回収する。グループを抜けた子は停止の対象外。孫以降の回収は、その親か OS が受け持つ。
+  - Mac で、プロセスグループへ送る信号が `EPERM` になったときは、直接の子が終わっていれば回収し、最大 5 秒、0.02 秒ごとに送り直す。送れたか、プロセスグループが無くなれば(`ESRCH`)戻る。5 秒たっても `EPERM` なら、今までどおり `PermissionError` を投げる。Linux などは待たずに投げる(#526・#527)。
 - Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。
 - `probe` に旧版は無い。補助のテストと `check_probe.py` が通っても、旧版との同等性を確認したとは扱わない。
+
+#### Mac のプロセスグループへの信号の EPERM(#526・#527・2026-11-26 の記録)
+
+- 2026-11-25 に、CI の Mac で、R4C の比較器の自己検査 `test_stub_that_times_out_or_deletes_a_third_party_entry_fails` が 2 回落ちた。どちらも、`run_command` の時間切れの後の KILL で、`os.killpg` が `PermissionError: [Errno 1] Operation not permitted` を投げた。
+  - このテストは、`#!/bin/sh` の後に `sleep 30` の 1 行だけのスタブを、`run_command(..., timeout=1)` で動かす(`native/ci/test_adopt_candidate.py` :190-193・:222-224)。
+  - 1 回目(#526): main の push(merge commit `da8eac8`)の Native run 45580448719 の attempt 1・`r4c (macos-arm64, macos-15)`・job 139121200731。例外の後始末の KILL でも、同じ `PermissionError` が出た。
+  - 2 回目(#527): PR #521(commit `5c0c5e6`。R4C の比較器と `support_native.py` に触れていない)の Native run 45585747341 の attempt 1・`r4c-universal (macos-x86_64, macos-15-intel)`・job 139192523345。例外の後始末の KILL は通った。
+- 原因: Mac(XNU)は、回収前の終了済みのプロセス(ゾンビ)だけが残るプロセスグループへの `killpg` に、`ESRCH` ではなく `EPERM` を返す(製品の #289 で見つけた応答と同じ)。`_signal_group` は `ProcessLookupError`(`ESRCH`)だけを受け止めていた。
+  - CI の 2 回は、TERM で終わったスタブの `sleep` が、引き取った先(launchd)で回収される前の一瞬に KILL が当たったと推測する(未確認。Mac で手元に再現していない)。2 回目で、後始末の KILL の時点に `EPERM` が消えていたことは、この見立てに合う。
+- 直し(`scripts/support_native.py` の `_signal_group`): 上の「旧版と Rust 版の差分テストの補助」の時間切れの箇条のとおり、Mac の `EPERM` だけを期限つきで送り直す。`EPERM` を「プロセスグループが無い」とは読み替えない。期限を過ぎても `EPERM` なら、止められない子か、回収されない終了済みの子(親がプロセスグループの外にいる)が残るとみて投げる。
+  - `EPERM` が続くと、本線の KILL と後始末の KILL で 5 秒ずつ待ち、失敗が見えるまで最大約 10 秒かかる。
+  - 比較器が自分で `os.killpg` を呼ぶ所(例: `check_r4g.py`・`check_r4e.py`・`check_adopt_candidate.py`)は変えていない。Mac で同じ `EPERM` が起きうる(推測。CI で落ちた記録は #526・#527 のほかに見ていない)。#532 で、止め方の共通の補助にまとめるときに扱う。
+- テスト: `scripts/test_support_native.py` に 6 件を足した(27 件から 33 件)。
+  - `SignalGroupTest`(5 件): 偽の時計と偽の `killpg` で、Mac の `EPERM` を送り直すこと・期限で投げること・Linux では待たないこと・`ESRCH` では送り直さないことを確かめる。
+  - `MacZombieGroupTest`(1 件。`/proc` を読むので Linux だけ): 回収前の直接の子だけが残るプロセスグループを本物のプロセスで作り、Mac の規則(全員がゾンビなら `EPERM`)を `/proc` でまねた `killpg` で、`run_command` が例外を投げずに戻ることを確かめる。
+  - 直す前の `support_native.py` では、4 件が `AssertionError` で落ちることを確かめた。
+  - わざと入れる誤り(変異)で確かめた: 送り直しをやめる・Mac の確かめを外す・`EPERM` で送り直さずに戻る・`process.poll()` を外す・期限の確かめを外す、の 5 つのどれでも、名前を挙げたテストが `AssertionError` で落ちる(Issue #526 の完了条件 2)。
+- `scripts/test_support_native.py` は CI では流れない(全回帰テストで、Linux でだけ流れる)。Mac の実機の動きは、PR の CI の Mac の `r4c`・`r4c-universal` の自己検査で見る(この記録を書いた時点では未確認。時々しか起きない揺れなので、1 回の合格だけで直ったとは扱わない)。
 
 ### タスク保存先の比較(段階 1a)
 
