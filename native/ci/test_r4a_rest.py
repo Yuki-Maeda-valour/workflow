@@ -1204,6 +1204,40 @@ class PtyReadAll(unittest.TestCase):
             os.close(master)
             os.close(slave)
 
+    def test_output_written_after_an_empty_wait_is_read_before_the_marker(self):
+        # 「読むもの無し」で戻る直前に、子が最後の出力を書いて終わる順番を起こしても、読み残しがあるまま目印を書かない(#522)。
+        import pty as pty_module
+        import select as select_module
+        master, slave = pty_module.openpty()
+        self.addCleanup(os.close, master)
+        self.addCleanup(os.close, slave)
+        real_select, real_write, real_read = select_module.select, os.write, os.read
+        calls = []
+        leftovers = []
+
+        class FakeChild:
+            def poll(self):
+                return 0 if calls else None
+
+        def fake_select(rlist, wlist, xlist, timeout=None):
+            calls.append(1)
+            if len(calls) == 1:
+                real_write(slave, b"TAIL-DATA")
+                return [], [], []
+            return real_select(rlist, wlist, xlist, timeout)
+
+        def fake_write(fd, data):
+            if data.startswith(b"R4A-PTY-END-"):
+                leftovers.append(bool(real_select([master], [], [], 0)[0]))
+            return real_write(fd, data)
+
+        with unittest.mock.patch.object(select_module, "select", fake_select), \
+                unittest.mock.patch.object(checker.os, "write", fake_write), \
+                unittest.mock.patch.object(checker.os, "read", lambda fd, n: real_read(fd, min(n, 4))):
+            text = checker.read_terminal_until_marker(master, slave, FakeChild(), "x", timeout=10)
+        self.assertEqual(text, b"TAIL-DATA")
+        self.assertEqual(leftovers, [False])
+
     def test_a_missing_marker_is_a_failure_not_a_silent_loss(self):
         import pty as pty_module
         master, slave = pty_module.openpty()
