@@ -57,6 +57,12 @@ R4D1_SUMMARY = re.compile(
     r"test result: ok\. 1 passed; 0 failed; 0 ignored; 0 measured; [0-9]+ filtered out; "
     r"finished in [0-9]+(\.[0-9]+)?s"
 )
+# R4D-3 の比較(build の後の専用ジョブ r4d3)。R4D-1 と同じ形で、検査で小さくできるように名前を付ける。
+R4D3_TIMEOUT = 1800
+R4D3_JOIN_TIMEOUT = 10
+R4D3_TEST = "rust_matches_the_legacy_state_and_ref_checks_on_every_input"
+# 要約の行の形は R4D-1 と同じ(比較のテスト 1 件だけの合格)。
+R4D3_SUMMARY = R4D1_SUMMARY
 
 
 # R4G の専用比較(check_r4g.py)の1回の上限。手元の Linux x86_64 で約11分、CI の機械では長くなる。
@@ -138,6 +144,29 @@ def r4d1(name, work):
             env=env, timeout=R4D1_TIMEOUT, join_timeout=R4D1_JOIN_TIMEOUT, cwd=ROOT / "native",
         )
     check_r4d1_output(output)
+
+
+def check_r4d3_output(output):
+    lines = output.split("\n")
+    if lines.count(f"test {R4D3_TEST} ... ok") != 1:
+        raise ValueError(f"比較のテスト {R4D3_TEST} の ok の行がちょうど 1 行ではありません")
+    summary = [line for line in lines if line.startswith("test result:")]
+    if len(summary) != 1 or not R4D3_SUMMARY.fullmatch(summary[0]):
+        raise ValueError("test result の行が、比較のテスト 1 件だけの合格ではありません")
+
+
+def r4d3(name, work):
+    """R4D-3 の旧版との比較を、quality() と同じ環境で 1 回流し、1 件の合格を確かめる。
+    自己検査の行は比較器の標準エラーに出るので、ここでは確かめない(比較のテストが確かめる)。"""
+    target_config(name)
+    with tempfile.TemporaryDirectory(prefix="r4d3-", dir=work) as temporary:
+        env = build_environment(Path(temporary), name)
+        output = stream_command(
+            ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "diagnostic_state",
+             "--", "--ignored", "--exact", R4D3_TEST],
+            env=env, timeout=R4D3_TIMEOUT, join_timeout=R4D3_JOIN_TIMEOUT, cwd=ROOT / "native",
+        )
+    check_r4d3_output(output)
 
 
 def workspace():
@@ -844,7 +873,7 @@ def implement_guard_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal", "r4d3"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -853,7 +882,7 @@ def main():
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal", "r4d3") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -911,6 +940,8 @@ def main():
             s2e(args.platform, downloads, work)
         elif args.command == "s2e-universal":
             s2e_universal(args.platform, downloads, work)
+        elif args.command == "r4d3":
+            r4d3(args.platform, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

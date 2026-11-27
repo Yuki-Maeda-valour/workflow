@@ -1091,6 +1091,116 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
   - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
   - 実測は、PR の CI で確かめて PR の本文に書く。
 
+### R4D-3 の保護記録と参照の比較
+
+#485 の保護記録の形式の検査・実名と REV の検査・参照の名前と中身と解決は、製品 CLI へ未登録・未配布の開発用実装である。
+[契約](design.md#保護記録の形式の検査と参照の解決r4d-3)、[API](../native/README.md#保護記録の形式の検査と参照の解決r4d-3) を参照する。
+後半(保護記録と実物の結び付け・専用の管理領域・子の起動・本物の `take` の記録での `State` 全体の比較)は R4D-3b #544 で比べる。
+
+#### 流し方と前提
+
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。比較は、下のコマンドの `-- --ignored --exact …` の行か `build.py r4d3` で流す。CI は `r4d3` のジョブで流す。専用の実行物は要らない。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_state -- --ignored --exact rust_matches_the_legacy_state_and_ref_checks_on_every_input)
+python3 -B native/ci/build.py r4d3 --platform <機械>
+python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_state.py'
+```
+
+- 前提は Python 3.10 系・root 以外の利用者・`sys.get_int_max_str_digits()` が 4300 であることである。欠ければ失敗にする(skip しない)。
+- 本物の `take` の組(T)は、Linux では bash 4.0 以上と git 2.45 以上も前提にする。欠ければ失敗にする。
+- Mac では、`take` の前に、PATH の bash(4.0 以上)・git(2.45 以上)と、旧 `implement-guard.sh` が要る GNU の `stat`・`find`・`grep` を確かめる。
+  - 足りなければ `R4D-3 作れなかった入力: T(darwin・<足りない物>)` の行を出し、その機械では T の下限を 0 にする(4 つの repo をまとめて外す)。
+  - brew で道具は入れない。T は、本物の `take` が作った記録が形式の検査(`check_manifest`・`parse_records`・`parse_origins`)を旧版と同じ結果で通るかの確かめである。
+  - 関数ごとの比較(F〜Q)は 4 機種すべてで流すので、Mac で T が欠けても、比べる関数の範囲は減らない。CI の Mac で T を流せたかは、PR の本文に書く。
+- 比較器は標準ライブラリだけを使う。`requirements-dev.txt` の依存は要らない。
+- 流れは、比較器の `--generate` が入力と旧版の結果(`cases.json`)を作る → Rust が同じ条件で動かす → `--compare` が全件を比べる、である。
+  - `--compare` は、比較器の自己検査(`native/ci/test_diagnostic_state.py`。21 件)も中で流す。
+  - M の組の 1 件の理由を変えた Rust の結果を `--compare --expect-mismatch` へ渡し、不一致が出ることで比較が働くことを確かめる。
+- 比較の検査 1 回の中の、すべての起動の上限は 900 秒である。`build.py r4d3` の 1 回の上限は 1,800 秒、ジョブの上限は 30 分である(R4D-1 と同じ)。
+- 比較器は、本物の `take` と記録を作るための git を `scripts/support_native.py` の `run_command` で起動し、120 秒・60 秒の上限を付ける。
+- 本物の `take` の保護領域は、実 HOME の下の新しい 0700 のフォルダに作り、終わったら消す(`take` は /tmp・TMPDIR・repo の下の保護領域を拒むため)。
+- 乱数の入力は、種を固定した `random.Random(485)` で作る。
+
+#### 入力の組と件数
+
+予算の条件は「通常」「停止の印」「N 回目の確かめで期限」である。M・K・R の組は、各入力で、通常の回数 k に対して N=1〜k+1 の全部と停止の印を流す。ほかの組は通常だけを流す。
+
+| 組 | 対象 | 件数の下限 | 件数(hp-pc の実際の値) |
+|---|---|---|---|
+| F | `cfield` | 400 | 1,072 |
+| L | `lines`・`integer` | 80 | 112 |
+| M | `check_manifest` | 300 | 386 |
+| C | `parse_records` | 200 | 443 |
+| O | `parse_origins` | 120 | 161 |
+| A | `ancestors` | 20 | 71 |
+| P | `literal`・`revision` | 200 | 213 |
+| V | `valid_ref` | 100 | 114 |
+| K | `parse_packed_refs`・`parse_loose_ref` | 120 | 128 |
+| R | `resolve_refs` | 200 | 226 |
+| H | `head_from_file`・`head_from_reftable` | 60 | 118 |
+| Q | `oid` | 80 | 89 |
+| T | 本物の `take` の記録(files・sha256・reftable・linked worktree) | 4(Linux) | 4 |
+
+- 件数は入力の数である。1 つの入力を予算の条件の数だけ流しても 1 件と数える。比べた結果の数(入力 × 条件)は `R4D-3 比べた結果:` の行に出る。
+- hp-pc では、入力は合計 3,137 件、比べた結果は 9,304 件で、不一致は 0 件だった。`R4D-3 予算の条件:` は M=386・K=128・R=226 だった。
+- 件数の下限に加え、各組の名前付きの入力(境目の入力。比較器の `REQUIRED_TAGS`)が 1 件以上あることも確かめる。
+- `parse_records` と `parse_origins` は、予算の確かめの回数を比べない(旧版は `State.__init__` の中の `manifest` と、`origins` の後の結び付けで予算を使うため)。
+  - 比較器は、旧版の `origins` の回数が `candidate` の数と同じことを別に確かめる。
+- T の 3 つの関数(`check_manifest`・`parse_records`・`parse_origins`)の旧版の結果は、どれも成功でなければならない。
+
+#### 旧版の CLI の検査との分担
+
+- 旧版のテスト `scripts/test_diagnostic_state.py`(`:30`・`:50` など)は、壊した記録を旧版の CLI へ渡して終了値 22 を確かめる。
+- これらは、CLI の比較(R4D-5 #487)で比べる。R4D-3 の比較は、同じ形式の検査を関数の単位で比べる。
+
+#### 変異の確かめ(手元だけ)
+
+hp-pc で、Rust に 1 か所ずつ誤りを入れて比較を流し、どれも不一致になることを確かめた(2026-11-27。入れた誤りは戻した。件数は O の `distinct-names` を足した後で、C の `row-order-*` を足す前の入力の値)。
+
+| 入れた誤り | 不一致 |
+|---|---|
+| `integer` の桁の上限を 4299 にする | 10 件 |
+| `resolve_refs` の `cat-file` の名前を並べ替えない | 196 件 |
+| `rev-parse` の出力の上限を 4095 にする | 61 件 |
+| `check_manifest` の 1 行目の予算の確かめを省く | 1,270 件 |
+| `oid` で記録が 0 件でも値を UTF-8 に変換する | 1 件 |
+| 同じフォルダのとき、共有の値を入れ直さない | 241 件 |
+| `parse_origins` の名前の重なりを大文字と小文字を区別せずに見る | 1 件 |
+
+- 最後の誤りは、O の組に大文字と小文字だけが違う名前が無かったため、最初は見つけられなかった。名前付きの入力 `distinct-names` を足して見つけられるようにした。
+
+#### 旧版のコピーでの確かめる順の入れ替え(手元だけ)
+
+C の組が、`State.__init__` の context の行(:82-91)の確かめる順を見分けられるかを、旧版のコピーで確かめた(2026-11-27・hp-pc)。
+- コピーは作業場所の外の一時フォルダに作り、確かめた後に消した。旧版そのものは変えていない。
+- 入れ替えたコピーで C の入力を動かし、元の旧版の結果と比べた。Rust は元の旧版と全件一致したので、違った件数は、比較器が出す不一致の件数と同じになる。
+- 実装の独立レビューで、C の 363 件ではどの入れ替えも見分けられないと分かった。同じ行に結果の違う 2 つの誤りを持つ入力(名前 `row-order-*`。80 件)を足した。
+
+| 入れ替え | 足す前の 363 件 | 足した 80 件 |
+|---|---|---|
+| (1) :85 の `cfield` を :86 の形式の確かめの後へ | 0 件 | 10 件(`row-order-cfield-format`) |
+| (2) :82 の `integer` を読む順を逆に | 0 件 | 20 件(`row-order-integers`) |
+| (3) :89 の第 11 欄の確かめを :90 の `integer(f[11])` の後へ | 0 件 | 10 件(`row-order-held-size`) |
+| (4) :91 の第 13 欄の確かめを :90 の前へ | 0 件 | 10 件(`row-order-size-kind`) |
+| (5) :83 の番号と親の確かめを、深さと有効の `integer` より先に | 0 件 | 10 件(`row-order-binding-integers`) |
+| (6) `cfield` を :82 の `integer` より先に | 0 件 | 10 件(`row-order-cfield-integers`) |
+
+- 入れ替えないコピー(対照)では、どちらも 0 件だった。
+- 足した 80 件はどれも、2 つの誤りを 1 つずつ入れると旧版の結果が違う(`state-schema` と `value-error`、`state-schema` と `unsupported-format`)ことも確かめた。結果が同じになる 2 つの誤りは無い。
+- `row-order-cfield-size`(引用の誤りと第 12 欄の 4301 桁)は、`cfield` を :90 の後へ動かす入れ替えを見分けるための入力である。
+
+#### 時間の記録(hp-pc。Linux x86_64・git 2.56.1・Python 3.10.12)
+
+- 2026-11-27 に流した観測値である。ほかの担当が同時に走っていた(負荷平均は 6〜19)。
+- 生成(旧版の実行 9,224〜9,304 回と、本物の `take` 4 回): 2.7〜10.2 秒。本物の `take` と記録の読み取りは 1 つ 0.5〜2.9 秒だった。
+- Rust の実行: 0.5〜1.3 秒。
+- 比較器の要約の行の秒(生成と、比べる処理と自己検査): 15.7〜35.2 秒。
+- 比較のテスト全体(`diagnostic_state` の比較の 1 件): 17.0〜37.7 秒(長い方は負荷平均 19 のとき)。比較器の自己検査(`test_diagnostic_state.py`)を単独で流すと 11〜23 秒だった。
+- 設計の見積もり(旧版の実行は 60 秒以内・比較は 120 秒以内)より短かった。
+- CI の 4 種類の機械での時間は、この文書を書いた時点では未確認である。PR の CI で測って PR の本文に書く。
+
 ### R4Gの比較
 
 #479の3コマンド(`pending-implementation`・`reviews-dir`・`implementation-git`)は、製品CLIへ未登録・未配布の開発用実装である。
@@ -1938,6 +2048,7 @@ CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物�
   - `build`の上限(120分)と`verify-universal`の上限(60分)は変えていない。`build`には、exampleのビルドと単体検査だけを足した。
 - `s2e`・`s2e-universal`は、`distribution`の`needs`に入れない(S3D・R4Cと同じ)。
 - `native.yml`のジョブの定義は21個で、matrixを展開した実行は59件である(2026-11-25に、`s2e`・`s2e-universal`を含めて数えた)。
+- R4D-3(#485)の`r4d3`を足した後の`native.yml`は、ジョブの定義が22個で、matrixを展開した実行が63件である(2026-11-27に数えた)。増えたのは、`r4d3`の定義1個・実行4件である。
 - `check_workflow.py`は、`s2e`・`s2e-universal`のジョブの欠落・機種・`needs`・上限(120分・60分)を確かめる。`test_native_ci.py`の`S2EConnectionTests`は、`build.py`の流れ・署名とCPUの確かめ・workflowの形・比較の2回目が`--no-selftest`を付けること・内側の上限とジョブの上限の関係を確かめる。
 - `scripts/test_native_s2e.py`(6件。`scripts/run-all.py`が自動で集める)は、起動前の登録のマクロ`s2e_record_startup_state!`の展開が、`examples/s2e_contract.rs`の1か所と`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけであることを、静的に確かめる(別名・別の括弧・許可の外からの`capture_inherited_sigpipe`の参照・テストのモジュールの外の展開は拒む)。置き場は、R4Gの`scripts/test_native_r4g.py`と同じ。比較器自身の検査(`test_s2e.py`)の84件は変えていない。
 - 製品の`dev-workflow`に`main`より前の処理が入らないことは、2026-11-26に、muslのreleaseを直す前の作りと比べて確かめた(`strace -f -e trace=rt_sigaction <bin> --version`で`rt_sigaction(SIGPIPE, NULL, …)`が無くなった。`.init_array`はgnu 0x10・musl 0x8)。製品へ印を置く変更を止めるのは、次の2つである。`scripts/test_native_s2e.py`は、マクロの展開の場所と、`link_section`・`.init_array`・`__mod_init_func`の場所(マクロの本体の中だけ)を確かめる。platformの単体テスト`inherited_sigpipe_is_recorded_before_main`は、初期化関数が呼ばれた回数(1回)を確かめる。`LoaderInitializer`(`native/ci/test_diff_snapshot.py`)は`environment_guard.rs`を名前で外し、印が「ある」ことしか見ないので、このファイルの登録は止めない。
@@ -2032,6 +2143,8 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 上限は 30 分である。`build.py r4d1 --platform <表の値>` が、`quality()` と同じ環境で比較のコマンドを 1 回流す。
   - 比較のテストがちょうど 1 件合格したことを確かめる。0 件・飛ばし・別のテストの合格・時間切れは、合格にしない。
   - `distribution` の `needs` には入れない。必須であることは、必須 CI の全ジョブの成功を確かめてから merge する決まりで担う。
+- `r4d3` のジョブ(R4D-3 #485)は、`r4d1` と同じ形で、`build` の後に 4 機種で R4D-3 の旧版との比較だけを流す。上限は 30 分で、`distribution` の `needs` には入れない。
+  - `build.py r4d3` は、比較のテストがちょうど 1 件合格したことを確かめる。自己検査の行は比較器の標準エラーに出るので、`build.py` では確かめず、比較のテストが確かめる。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
 - S2L(#468)の検査用実行物`loop_state_fixture`も、`build`・`reproduce`の2回のビルドに`--example loop_state_fixture`で含める。各回で`check_loop_state.py`と`test_loop_state.py`を流す。
   - `quality()`は、各OSで1回、`check_loop_state_units.py`と`check_loop_state_mutations.py`を流す。

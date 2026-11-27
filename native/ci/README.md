@@ -9,6 +9,7 @@
 旧版との比較を含む `build`・`reproduce`・`verify-universal` は、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `r4d1` も、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `r4d1` には、reftable(Git が参照を表の形のファイルに保存する形式)を作れる git 2.45 以上も必要です。欠ければ失敗にします。
+`r4d3` も、Python 3.10 系(整数の桁の上限 4300)と root 以外の通常利用者での実行が必要です。Linux では、本物の `take` のための bash 4.0 以上と git 2.45 以上も必要です。欠ければ失敗にします。
 `r4a-rest`・`r4a-rest-universal` も、Python 3.10 系と root 以外の通常利用者での実行が必要です。
 `CARGO_TARGET_DIR` にはリポジトリの外のフォルダを指定してください。
 CIの`build.py`呼出しは、コマンド名を先に置き、その後にオプションを指定します。オプション先行形と`--`を先に置く形はCI定義の検査で拒否します。
@@ -21,6 +22,7 @@ python3 -B native/ci/build.py test
 python3 -B native/ci/build.py prepare --platform linux-x86_64
 python3 -B native/ci/build.py build --platform linux-x86_64
 python3 -B native/ci/build.py r4d1 --platform linux-x86_64
+python3 -B native/ci/build.py r4d3 --platform linux-x86_64
 ```
 
 - `prepare`: 実行中のPythonで`pip install -r requirements-dev.txt`を行い、Rust `1.99.1`・`rustfmt`・`clippy`・対象の標準ライブラリを用意します。
@@ -40,6 +42,8 @@ python3 -B native/ci/build.py r4d1 --platform linux-x86_64
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
 - `r4d1`: `build` の後の必須ジョブです。上限は 30 分です。次の比較のコマンドを `quality()` と同じ環境で流し、比較のテストがちょうど 1 件合格したことを確かめます。比較のテストには `#[ignore]` の印があり、通常の `cargo test` では流れません(結果は `ignored`)。
   - `cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input`
+- `r4d3`: `build` の後の必須ジョブです(R4D-3 #485)。上限は 30 分です。`r4d1` と同じく、次の比較のコマンドを `quality()` と同じ環境で流し、比較のテストがちょうど 1 件合格したことを確かめます。比較のテストには `#[ignore]` の印があり、通常の `cargo test` では流れません(結果は `ignored`)。
+  - `cargo test --locked -p dev-workflow-cli --test diagnostic_state -- --ignored --exact rust_matches_the_legacy_state_and_ref_checks_on_every_input`
 
 Linux で指定する名前は `linux-x86_64`・`linux-arm64` です。
 Mac は `macos-x86_64`・`macos-arm64` です。対象と同じ OS・CPU でビルドします。
@@ -296,6 +300,19 @@ attempt 1 は、build (macos-x86_64) の成果物の保存が GitHub 側の通�
 - `distribution` の `needs` には入れません。必須 CI の全ジョブの成功を確かめてから merge する決まり([testing.md](../../docs/testing.md#共通の終了値と入出力の検査c0a))があるので、必須です。
   - この決まりは、CI が自動で止めるものではありません。merge の前に、管理担当が `r4d1` を含む全ジョブの成功を確かめます。
 - 件数と時間は [testing.md](../../docs/testing.md#r4d-1-の-reftable-の比較) にあります。
+
+## R4D-3の必須比較
+
+#485 の保護記録の形式の検査と参照の解決の比較は、build の後の専用ジョブ `r4d3` で流します。4 機種(Linux 2 種・Mac 2 種)で、`build.py r4d3 --platform <機械>` を流します。
+- 通常の `cargo test --locked` では、比較のテストは流れません。`quality()` も比較を流しません。
+- `r4d3()` は、`quality()` と同じ環境(`build_environment()`・Python 3.10.11・root 以外)で比較のコマンドを 1 回流します。1 回の上限は 1,800 秒(`R4D3_TIMEOUT`)で、ジョブの上限 30 分が先に効きます。標準出力は 1 行ずつ CI のログに出します。
+- 比較のテストがちょうど 1 件合格したことを確かめます。0 件・飛ばし・別のテストの合格・時間切れは、合格にしません。
+- `build.py` が控えるのは cargo test の標準出力だけです。比較器の自己検査の行(標準エラー)は、比較のテスト(`tests/diagnostic_state.rs`)が確かめます。
+- 比較器は `native/ci/check_diagnostic_state.py`、その自己検査は `native/ci/test_diagnostic_state.py` です。自己検査は、印の環境変数 `R4D3_NO_SELFTEST` が無いときの `--compare` の中で流れます。
+- Mac で、本物の `take` の組(T)に要る bash・git の版と GNU の `stat`・`find`・`grep` が足りなければ、`R4D-3 作れなかった入力: T(darwin・<足りない物>)` の行が出ます。その行の名前は PR の本文に書きます。
+- `distribution` の `needs` には入れません。merge の前に、管理担当が `r4d3` を含む全ジョブの成功を確かめます。
+- `check_workflow.py` は、`build.py r4d3` のコマンド・必須のジョブ・上限 30 分(`R4D3_TIMEOUTS`)・比較の前の Python 3.10.11 を確かめます。`test_native_ci.py` の `R4D3Tests` は、ジョブの形・上限・要約の行の確かめ・`main()` の呼び分けを確かめます。
+- 件数と時間は [testing.md](../../docs/testing.md#r4d-3-の保護記録と参照の比較) にあります。
 
 ## R4Gの必須比較と検査用実行物
 

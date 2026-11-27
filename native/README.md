@@ -517,6 +517,38 @@ unsafe の置き場は、次の 2 つだけです。
 
 比較は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
 
+## 保護記録の形式の検査と参照の解決(R4D-3)
+
+#485 で、旧 Python の `diagnostic-state.py`・`diagnostic-paths.py`・`diagnostic-private.py` のうち、ファイルも Git も使わない部分に対応する内部部品を実装しました。
+製品 CLI の登録・help・配布・既存の呼出元は変えていません。呼出元はまだありません(後半の R4D-3b #544 がつなぎます)。契約は [設計のR4D-3節](../docs/design.md#保護記録の形式の検査と参照の解決r4d-3) にあります。
+
+- `crates/cli/src/commands/diagnostic_git/state.rs`
+  - `Error`: `Failure(Failure)`・`Value`(旧版の `ValueError`)・`Unicode`(`UnicodeError`)・`Os(i32)`(`OSError`)。`From<Failure>` を持ちます。
+  - `cfield(raw) -> Result<Vec<u8>, Failure>`・`lines(raw) -> Result<Vec<&[u8]>, Failure>`・`integer(raw, minimum, maximum) -> Result<i64, Error>`(桁の上限 4300 を超えれば `Error::Value`)。
+  - `check_manifest(raw, budget) -> Result<(), Error>`: `manifest.tsv` の形式です。各行の先に予算を確かめます。
+  - `parse_records(meta, contexts, cwd, context_id) -> Result<Records, Error>`: `4-meta.txt` と `config-contexts.txt` を読みます。`cwd` は作業場所の実パス、`context_id` は 0 以上で `u64` に収まる番号だけ `Some` です。
+  - `Records { cwd, toplevel, contexts }`・`Context`(番号・親・深さ・有効・作業ツリー・gitdir・共通の gitdir・`HashFormat`・`Backend`・持っている object の名前)・`Records::ancestors(n) -> Option<Vec<usize>>`。
+  - `parse_origins(raw) -> Result<Origins, Error>`: `config-origins.txt` の形式です。`Origins { groups, admin }` を返します。
+- `crates/cli/src/commands/diagnostic_git/paths.rs`
+  - `literal(raw, under) -> Result<(), Failure>`・`revision(value: Option<&CodepointString>) -> Result<(), Error>`(`None` は文字列でない値)。
+- `crates/cli/src/commands/diagnostic_git/private.rs`
+  - `valid_ref(name) -> bool`・`RefMap`(Python の dict と同じ並び。`insert`・`get`・`iter`)。
+  - `parse_packed_refs(raw, width, budget, into)`・`parse_loose_ref(raw, width)`: `raw` は呼出元が読んだ中身です。`parse_loose_ref` と `head_from_file` は、旧版の `read(4097)` と同じく頭の 4097 バイトだけを見ます(長ければ切ります)。
+  - trait `GitQuery`(`run`)・`RefSource`(`refs`)・`OidSource`(`head` を足したもの)と、引数の `GitArg`(`Bytes`・`Text`。`to_bytes` は UTF-8 と surrogateescape で変換します)。
+  - `resolve_refs(common, local, same_dir, budget, git) -> Result<Resolution, Error>`・`head_from_file(raw, width, budget, refs)`・`head_from_reftable(resolution)`・`oid(value, unborn, width, budget, source)`。
+  - `Resolution { records, head }`・`RefRecord { name, oid, target, resolved }`・`Head { target, oid }`。
+
+検査は `tests/diagnostic_state.rs` が `#[path]` で読み込みます。3 つのファイルの単体検査は、`diagnostic_state` と `diagnostic_reftable` の両方の実行物の中で流れます。
+
+必須の比較は [テストの手順](../docs/testing.md#r4d-3-の保護記録と参照の比較) に従ってください。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れません(結果は `ignored`)。比較は、次のコマンドか `build.py r4d3` で流します。
+
+```sh
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_state -- --ignored --exact rust_matches_the_legacy_state_and_ref_checks_on_every_input)
+```
+
+比較は、Python 3.10 系(整数の桁の上限 4300)・root 以外と、本物の `take` のための bash 4.0 以上・git 2.45 以上を使います。
+
 ## 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
 
 #479で旧 `pending-implementation.py`・`reviews-dir.sh`・`implementation-git.py` と同じ結果を返す部品を実装しました。製品CLIの登録表・help・配布・既存呼出元は変えていません。
