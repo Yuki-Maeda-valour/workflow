@@ -1319,6 +1319,23 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
   - わざと入れる誤り(変異)で確かめた: `DEAD_STATES` を `(None, 'Z')` に戻すと 2 件、`wait_process_dead` が抜けた後にもう 1 回読む形にすると 1 件が FAIL になる。
   - 直した後、手元で `test_pty_run_reads_everything_the_child_wrote_before_exiting` を 20 回流して 20 回合格した(直す前も手元では落ちない。通常の経路を壊さないことの確かめ)。
 
+#### 自己検査の状態の文字の比べ方の揺れ(#524・2026-11-26 の記録)
+
+- 2026-11-25 に、比較器の自己検査 `test_process_report_collects_the_state_and_says_when_missing` が、CI の Mac x86_64 で 1 回落ちた(main の push〈PR #520 の merge〉の Native run 45539632217 の attempt 1・`r4g (macos-x86_64, macos-15-intel)`・job 138980658513)。
+  - 失敗は `native/ci/test_r4g.py` の `AssertionError: 'S' != 'R'`。流し直した attempt 2 では合格した。
+- 原因(コードを読んで確かめた。CI の回がこれによるかは推測): Mac の形(`ps` で読む形)の確かめが、自分のプロセスの状態の文字を `process_report` と `process_state` の 2 回の `ps` で読み、同じかを比べていた。
+  - テストのプロセスは、`ps` を起動して待つ間は眠っていて(`S`)、その前後は走っている(`R`)。どちらの文字になるかは、`ps` が読んだ瞬間で決まる。
+  - Linux の機械で `sys.platform` を `darwin` に差し替えて読むと、状態の欄は `S` だった(CI の回と同じ文字)。
+- 直し(`native/ci/test_r4g.py` だけ。比較器の本体 `check_r4g.py` は変えていない):
+  - 自分の行(`ps` の形。`pid <番号>: <pid> <ppid> <pgid> <stat> <args>`)は、`pid <番号>:` に続く `ps` の出力の 1〜3 番目の欄が自分・親・プロセスグループの番号で、4 番目の欄の 1 文字目が `ps` の状態の文字の 1 つであることを確かめる。状態の文字は、macOS の `ps` と procps(Linux の `ps`)の文字を合わせた `D`・`I`・`R`・`S`・`T`・`t`・`U`・`W`・`X`・`Z`。2 回目の読みとは比べない。
+  - 2 回の読みの比べは、SIGSTOP で状態が止まった状態(`T`)に決まる子で行う。`wait_state` で止まった状態を待ってから、`process_report` の状態の欄と `process_state` が同じことを確かめる。
+  - Linux の形(`/proc` で読む形)は、自分の `/proc` を自分で読む間は `R` に決まる(推測)ので、2 回の読みを比べたままにした。
+  - Linux の機械では、`ps` の形も `sys.platform` を差し替えた `subTest` で流す。今までは Mac の CI でしか流れていなかった。
+- テストの件数は変えていない(`test_r4g.py` 63 件・`test_native_r4g.py` 66 件・CI の比較器が流す `Comparator` 62 件のまま)。
+  - Linux の機械で、直す前のテストに `sys.platform` を `darwin` にする差し替えと、自分の番号への `process_state` だけ `R` を返す差し替えを入れると、`'S' != 'R'` で落ちる(`darwin` の差し替えが無いと、Linux の形の分かれ道を通るので落ちない)。直した後のテストは、同じ差し替えでも通る。
+  - わざと入れる誤り(変異)で確かめた: `ps` の欄から `stat` を外す・`pgid` と `stat` を入れ替える・`process_state` が別の欄を読む・Linux の形の `State` の行を外す・`status` を自分の番号から読む、の 5 つのどれでも、直したテストが落ちる(Issue #524 の完了条件 2)。
+  - Mac の実機の動きは、PR の CI の Mac の `r4g`・`r4g-universal` の自己検査で見る(この記録を書いた時点では未確認)。
+
 ### S3I-Aの比較
 
 #474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
