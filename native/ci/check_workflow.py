@@ -74,6 +74,8 @@ def native_build_command(command):
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4a-rest-universal|r4a-rest)(?: |$)", command)
     # S2E(#470)の比較も、別のジョブ(s2e・s2e-universal)で流す。
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (s2e-universal|s2e)(?: |$)", command)
+    # R4D-2(#484)の比較も、build の後の専用ジョブ(r4d2)で流す。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4d2)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -104,6 +106,7 @@ REQUIRED_NATIVE_JOBS = (
     "r4c-universal",
     "s2e",
     "s2e-universal",
+    "r4d2",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (
@@ -230,6 +233,8 @@ def check_document(document):
         native_timeouts.update(S3D_TIMEOUTS)
         # R4D-1 の比較は build の後の専用ジョブで流す。上限は 30 分。
         native_timeouts["r4d1"] = 30
+        # R4D-2 の比較も build の後の専用ジョブで流す。上限は 30 分。
+        native_timeouts["r4d2"] = 30
         # R4Gは時間の枠に入らないので、別のジョブ(r4g・r4g-universal)で比較する(2026-11-12 12:59 の決定)。
         native_timeouts.update(R4G_TIMEOUTS)
         # R4Eも時間の枠に入らないので、別のジョブ(r4e・r4e-universal)で比較する。
@@ -291,6 +296,7 @@ def check_document(document):
                                and native_build_command(step.get("run")) in R4A_REST_OPERATIONS]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in S2E_TIMEOUTS]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict) and native_build_command(step.get("run")) == "r4d2"]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):

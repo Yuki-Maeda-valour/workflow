@@ -1661,6 +1661,8 @@ R4D の 5 つの単位(Issue は、R4D-1 が #481、R4D-2〜R4D-5 が #484〜#48
 | R4D-4 | 除外の計画(`diagnostic-plan.py`・`diagnostic-git.py` の引数の解析と検査・機密指定の読み取り) |
 | R4D-5 | 観測と入口(`diagnostic-views.py` の 7 操作・除外の照合・`run` と入口全体) |
 
+- 2026-11-27 に、R4D-2 を 2 つに分けた。R4D-2(#484)は厳密な JSON・base64・確認用の値・応答の符号化と `Reader`、R4D-2b(#541)は `Runtime` の残り(一時フォルダ・道具の確かめ・子の監督・後始末・送出・信号)と `diagnostic-output.py` である([R4D-2 の節](#診断の-json-と上限付きの読み取りr4d-2))。
+
 #### 維持する性質
 
 - 旧版と同じ順で処理する。予算を確かめる位置・読む範囲・失敗の理由の決まり方・閉じる順まで 1 対 1 で合わせる。
@@ -1727,6 +1729,108 @@ EINTR は、信号で呼び出しが中断されたときの失敗である。�
 旧版と Rust を、同じ入力・同じ予算の条件で比べる。比較器(`native/ci/check_diagnostic_reftable.py`)は、製品の符号化を使わない table と、本物の git が作った reftable の両方を作る。
 UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
 比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
+
+### 診断の JSON と上限付きの読み取り(R4D-2)
+
+#484 で、R4D の 2 つ目の単位を、開発用ソースへ実装した。製品のコマンドへは登録しない。配布も変えない。呼出元は無い(R4D-3 以降で使う)。
+対象は `diagnostic-runtime.py` の :29-70(JSON・base64・確認用の値)・:89-209(`Reader`)・:338-343(`response_bytes`)である。
+`Runtime` の残りと `diagnostic-output.py` は R4D-2b(#541)で移す。R4D-2 の部品は子のプロセスも信号も使わず、外部コマンドも起動しない(2026-11-11 23:19 の決定)。
+
+- サロゲートは、UTF-16 で U+10000 以上の文字を 2 つの値で表すときの値(U+D800〜U+DFFF)である。組になっていないものを孤立したサロゲートと呼ぶ。Python の文字列は持てるが、Rust の `String` は持てないので、文字の番号の列(`CodepointString`)で持つ。
+- 予算の操作の列は、予算の `check` と `charge` を呼んだ順と値の列である。旧版と Rust でこの列が同じなら、予算を確かめる位置と数える量が同じである。
+- 確かめ直し(`verify`)は、読んだファイル・開いたフォルダ・無かったパス・名前の一覧・所有者を最後にもう一度調べ、変わっていれば失敗にすることである。6 欄は、ファイルの状態の dev・ino・mode・size・mtime_ns・ctime_ns である。
+
+#### 維持する性質
+
+- 旧版と同じ順で処理する。予算を確かめる位置・数える量・確かめ直しの順・失敗の理由と終了値を 1 対 1 で合わせる。
+- `Reader` は元データへ書かない。開く・調べる・読む・一覧を読む・閉じるだけを行う。
+  - リンクは辿らない。各段を `O_NOFOLLOW` で開き、最後の名前は `AT_SYMLINK_NOFOLLOW` で調べる。リンクの拒否は OS の旗で行い、パスの字面で判断しない。
+  - パスは bytes のまま扱う。`directory` と `owner` は `os.path.abspath` と同じ組み立て(先頭がちょうど 2 つの `/` を残す)を通し、`read`・`lstat`・`names` の記録の鍵は渡されたパスのままにする。
+- 上限の数値(1 回に読む 65536 バイト・既定の 16MiB・予算の 9 種類の上限)と、失敗の理由の字面と終了値は変えない。
+- 予算は持たない。各関数が呼出元の 1 つの予算を受ける(旧版の `Reader` と `Runtime` が同じ予算を共有するのと同じ。工程ごとに作り直さない)。
+- 記録 5 つ(`files`・`dirs`・`missing`・`sets`・`owners`)は入れた順を保ち、同じ鍵に入れ直すと位置を保って値を置き換える。呼出元が記録を直接扱う 3 つの口(`files` を引く・入れる、`missing` に足す)を持つ。
+
+#### 失敗の種類
+
+| 部品 | 失敗 | 旧版 |
+|---|---|---|
+| `decode` | `Schema`(`schema`・2)・`Recursion` | `Failure('schema', 2)`・`RecursionError`(`decode` は受けない。入口では `internal`) |
+| `encoded`・`encoded_unicode` | `Value` | `ValueError`(無限大と NaN・桁の超え・UTF-8 にできない孤立したサロゲート) |
+| `response_bytes` | `Budget`(`interrupted`・`time-limit`・`json-limit`)・`Value` | `Failure`・`ValueError` |
+| `unb64`・`keys` | `schema`(2) | `Failure('schema', 2)` |
+| `Reader` | 予算と Reader の失敗(`ownership`〈呼出元の終了値〉・`not-regular` 23・`file-limit` 20・`source-changed` 20・予算の 3 つ)・OS の失敗(errno)・NUL | `Failure`・`OSError`・`ValueError` |
+
+- 旧版が `FileNotFoundError` を受ける所は、errno が ENOENT かで分ける。入口での割り当て(終了値と文)は R4D-5 で行う。
+
+#### decode の再帰の深さ
+
+- `decode(raw, caller_depth)` の `caller_depth` は、`decode` を呼ぶ Python のフレームの深さ(そのフレームを含む)である。旧版は Python の再帰の深さが上限 1000 を超えた最初の呼出しで `RecursionError` になる。Rust は旧版の呼出しを 1 つずつ数え、同じ所で `Recursion` を返す。
+- 数える呼出しは、本家 3.10.11 の `Lib/json/__init__.py`・`Lib/json/decoder.py`・`Modules/_json.c`・`Objects/exceptions.c` と旧版の :21-27・:49-61 で確かめた。深さ D(`caller_depth`)から呼ぶと、次のとおりになる。
+  - `decode` のフレーム D+1、`raw.decode('utf-8')` D+2、`json.loads` のフレーム D+2、`JSONDecoder(**kw)` の `__init__` D+4 と `make_scanner` D+5、`JSONDecoder.decode` D+3、`raw_decode` D+4、scanner の呼出し D+5(B とする)。
+  - 入れ子の辞書と配列に入るたびに +1(`Py_EnterRecursiveCall`)。辞書の終わりの `unique` は辞書の深さ +1、重なった鍵の `fail` はさらに +1〜+4。`NaN`・`Infinity`・`-Infinity` は lambda のフレーム +1 と `fail` の +1〜+4。
+  - `JSONDecodeError` を作る所(C の `raise_errmsg` と `scanstring`・`raw_decode` が `StopIteration` から作る所・`JSONDecoder.decode` の「Extra data」・`loads` の BOM)は、作る所の深さ +1〜+3。`decode` が受けた失敗の `fail('schema', 2)` は D+2〜D+5。
+  - 整数の桁の超えの `ValueError` と、受け手での例外の正規化(例外を捕まえるときに、例外の値を作り直す処理)は数えない。正規化の間は、本家の `recursion_headroom`(例外の処理の間だけ再帰の上限を緩める仕組み)が上限を緩める。
+- 失敗を作る場所ごとに境界が違う。入れ子に依らない道の境界(最初に `RecursionError` になる D)は、BOM・UTF-8 の誤り・入れ子の無い正しい値が 996、最上位の余分なデータが 995、最上位で値が無い誤り(`raw_decode` が `StopIteration` から作る誤り)が 994 である(比較の J3 で、本家 3.10.11 の旧版から測った値と一致した)。
+- 値を渡す呼出元(R4D-4 #486 の `P.load`)は、呼ぶ所が 4 つあり、フレームの深さがそれぞれ違う(`diagnostic-git.py:188`・`:194`、`diagnostic-plan.py:182`〈`--carry-plan`〉・`:220`〈`extend`〉)。深さの値は、`P.load` を移す単位が決めて渡す。
+- 整数の桁の上限は 4300、再帰の上限は 1000 に固定する。旧版は `python3 -I` で起動される(`plugins/dev-workflow/skills/do-task/references/diagnostic-git.md:55-57`)ので、`PYTHONINTMAXSTRDIGITS` も効かない(2026-11-11 22:24 の決定の「ほかの差は旧版に合わせる」)。
+- 入れ子は明示の列で読み、Rust の再帰を使わない(10 万段の入力も、深さの上限で止まる)。
+
+#### missing の確かめ直しの順
+
+- 旧版の `missing` は Python の集合で、確かめ直しの順が bytes の hash の乱数(Python が起動ごとに変える、文字列や bytes の hash の値の種)で実行ごとに変わる。旧版は `-I` で起動されるので、`PYTHONHASHSEED`(Python の hash の種を決める環境変数)も効かない。
+- Rust は入れた順に確かめ直す。2 つ以上の無かったパスが違う理由で失敗する筋書きだけ、旧版の取りうる結果のどれかと同じことを比べる(比較の R7。2026-11-11 22:35 の決定)。
+
+#### 符号化の入れ子の深さを数えない根拠
+
+- `encoded`・`encoded_unicode`・`response_bytes` は入れ子の深さを数えない。旧版の符号化も再帰の上限を持つが、呼出元が渡す値は、呼出元が形を確かめた浅い辞書だけで、上限に届かない。
+- 根拠: 計画は `diagnostic-plan.py:25-120` の `schema` が形を確かめ、`:68`・`:269` で符号化する。結果は `diagnostic-git.py:185-203` で作る。入れ子は 10 段未満(結果の `data` の記録の中の `stages` まで)である。
+
+#### 小数の字面
+
+- `float.__repr__` と同じく、最短で元に戻る 10 進にする(指数は 10 の 16 乗以上か 10 の −4 乗未満で使い、整数の値なら `.0` を付ける)。
+- 本家の `repr` は、最短の桁の中で、元の値に最も近い 10 進を選ぶ。Rust では次の手順にする。
+  1. Rust の `{:e}`(最短の形)で字面を作り、その桁の数を P とする。`{:e}` は、ちょうど 2 の累乗の小数で元に戻る幅が下側だけ半分になることも扱うので、P は本家と同じである。
+  2. P 桁で最も近い 10 進(`{:.(P-1)e}`。ちょうど中間は偶数へ丸める)を作る。
+  3. 2 が元の値に戻れば 2 を、戻らなければ 1 を使う。
+- 2 を使う例: 同じ桁の候補が 2 つ並ぶ中間の値(例 899096400445237.25)では、本家は偶数の側(`…237.2`)を選ぶ。`{:e}` は上の側(`…237.3`)を選ぶ。
+- 1 を使う例: ちょうど 2 の累乗の小数(例 2^-24)では、2(`5.9604644775390625e-08` を 16 桁に丸めた `…062e-08`)が下側の半分の幅の外に出て元に戻らない。本家と同じ `5.960464477539063e-08` は 1 である。
+- 差の見つかり方: 比較の J4 の乱数の値で、`{:e}` だけの実装に、中間の値の 4 件の差が見つかった(J5 の 12 件も同じ値)。次の「桁を 1 から増やす」実装は、2 の累乗(2^-24・2^-44・2^89 など)で 1 桁長い字面を出すことが、レビューで分かった。
+- 上の手順で、本家 3.10.11 の `repr` と、±2^e(e = −1074〜1023)の全部・乱数のビットの並び 20 万件・短い 10 進 10 万件・中間の値の、合わせて 304,086 件が一致した(2026-11-27・hp-pc)。J4 にも ±2^e の全部を入れ、J5 にも 16 件を入れた。
+
+#### 閉じる処理
+
+旧版の `os.close` の失敗は `OSError` になり、結果や元の例外に代わる。Rust も返す。閉じる失敗はローカルのファイルでは起こせない見込み(未確認)なので、検査の差し込みで確かめる。
+
+| 閉じる所 | Rust の扱い |
+|---|---|
+| `directory` で段を進めるときの前の段 | 旧版と同じく閉じる。失敗したら、旧版の `except` が同じ番号をもう一度閉じたのと同じ EBADF を返す(無効になった番号は OS に渡さない。別の物が番号を使い直していた場合に閉じないため)。子は数えない `Drop` で閉じる |
+| `directory` の失敗の `except`(子を受け取った後・ほかの失敗) | 今の fd を閉じる。閉じる失敗が元の失敗に代わる |
+| `lstat`・`names`・`verify` の 2 と 5 の段の `finally` | 閉じる。記録は閉じる前に済む |
+| `read` の `finally` | ファイルを閉じてから親を閉じる。ファイルの close が失敗したら、その失敗を返し、親は数えない `Drop` で閉じる(旧版は閉じずに残すが、結果に表れない) |
+| 一覧の複製の fd | 位置を先頭へ戻してから閉じ、失敗は見ない(本家の `ScandirIterator_closedir`) |
+
+#### EINTR と OS の継ぎ目
+
+- `Reader` は OS の呼出しを、モジュールの中の 1 つの継ぎ目を通して行う。旧版と同じく、開く・`fstat`・読むだけを EINTR で呼び直す。`fstatat`・閉じる・一覧・作業場所は呼び直さない(本家 3.10.11 の `os_open_impl`・`os_fstat_impl`・`_Py_read` と `posix_do_stat`・`os_close_impl`)。
+- 検査のときだけ(`#[cfg(test)]`)、継ぎ目に故障を足せる(作業場所の値・読み取りの 0 バイトの終わりと I/O の異常・読む途中の追加・開く直前の置き換え・開くと一覧の I/O の異常・作業場所の取得の失敗・N 回目の close の失敗・N 回目の EINTR)。製品の経路から故障を起こす手段は無い。
+- 予算の `#[cfg(test)]` の差し込みを 2 つ足した(操作の列の記録と、量を選べる上乗せ)。製品の経路は変えていない。R4D-1 の `management_output` の上乗せは残した。
+
+#### 足した OS の部品と unsafe
+
+- `crates/platform/src/diagnostic.rs` を足した。どの関数も OS を 1 回だけ呼び、NUL を含む名前は OS を呼ばずに失敗にする。
+  - `/` と、フォルダの fd からの名前を `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` で開く。ファイルは `O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC` で開く。
+  - `fstatat(…, AT_SYMLINK_NOFOLLOW)`(空の名前は検査せずに OS へ渡し、ENOENT)・`fstat`・`read`・閉じる(閉じる失敗を返す)・`geteuid`。
+  - 名前の一覧は、fd を `F_DUPFD_CLOEXEC` で複製して読む。Linux は glibc の `readdir` と同じ受け皿の大きさ・d_ino(フォルダの項目が持つ番号)が 0 の項目を飛ばす・ENOENT を終わりとする・明示の位置の移動は、R4G の `r4g/fs.rs` と同じ手順にした(R4G 専用のモジュールなので呼ばない)。
+  - 作業場所は rustix の安全な `process::getcwd` を呼び、Linux で ENAMETOOLONG か `/` で始まらない結果なら、glibc と同じく `..` をたどって求める(R4G と同じ手順を、安全な関数だけで書いた)。
+- 状態の値は旧版の `os.stat_result` と同じにする。dev は符号付き 64 ビット(本家 3.10.11 の `Modules/posixmodule.c` の `_PyLong_FromDev` は `PyLong_FromLongLong`)、時刻は「秒 × 10 億 + ナノ秒」を 128 ビットで持つ(2262 年より後の時刻も桁あふれさせない)。
+- 新しい `unsafe` は足していない。閉じる失敗は、R4D-1 の `fs.rs` の `close_owned` を `pub(crate)` にして使う。`fs.rs` の既存の関数の動きは変えていない。
+
+#### 比較
+
+旧版と Rust を、同じ入力・同じ予算の条件・同じ筋書きで比べる。比較器は `native/ci/check_diagnostic_runtime.py` である。旧版の関数を、比較器と同じ Python の中で固有の名前で読み込んで呼ぶ(R7 の種と R10 の作業場所だけ、子のプロセスで動かす)。
+組は J1〜J8(JSON・base64・確認用の値)と R1〜R10(`Reader` の筋書き)の 18 である。件数・前提・流し方は [testing.md](testing.md#r4d-2-の-json-と-reader-の比較)、API は [native/README.md](../native/README.md#診断の-json-と上限付きの読み取りr4d-2) に記す。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d2` で流す(2026-11-12 12:59 の決定)。
+旧版との差は無い。`missing` の確かめ直しの順だけは、旧版の取りうる順の 1 つ(入れた順)に固定した(2026-11-11 22:35 の決定。R7 で確かめる)。
 
 ### 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
 

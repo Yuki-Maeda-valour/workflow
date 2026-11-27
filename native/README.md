@@ -517,6 +517,39 @@ unsafe の置き場は、次の 2 つだけです。
 
 比較は、reftable を作れる git(2.45 以上)と Python 3.10 系・root 以外を使います。
 
+## 診断の JSON と上限付きの読み取り(R4D-2)
+
+#484 で、旧 Python の `diagnostic-runtime.py` の厳密な JSON・base64・確認用の値・応答の符号化(:29-70・:338-343)と、上限付きの読み取り `Reader`(:89-209)に対応する内部部品を実装しました。
+製品 CLI の登録・help・配布・既存の呼出元は変えていません。呼出元はまだありません(R4D-3 以降で使います)。`Runtime` の残りと `diagnostic-output.py` は R4D-2b(#541)で移します。契約は [設計のR4D-2節](../docs/design.md#診断の-json-と上限付きの読み取りr4d-2) にあります。
+
+- `crates/cli/src/commands/diagnostic_git/json.rs`
+  - `Value`: `Null`・`Bool`・`Int`・`Float(f64)`・`Str(CodepointString)`・`List`・`Dict` です。整数と真偽値は別の型です。
+  - `Int`: 任意の大きさの整数です。10 進の正規の字面で持ちます。`parse(&str)`・`as_str()`・`to_i64()` と、`i64`・`u64`・`i128` からの変換を持ちます。
+  - `Dict`: 入れた順を保つ鍵と値の列です。同じ鍵を入れると、位置を保って値を置き換えます。`insert`・`get`・`get_str`・`iter`・`keys`・`len` を持ちます。
+  - `decode(raw: &[u8], caller_depth: usize) -> Result<Value, DecodeError>`: `DecodeError` は `Schema`(`schema`・2)と `Recursion`(旧版の `RecursionError`)です。`caller_depth` は、呼ぶ Python のフレームの深さです。
+  - `encoded(&Value)`・`encoded_unicode(&Value) -> Result<Vec<u8>, EncodeError>`: 旧版の `encoded` と、`diagnostic-plan.py:22` の `json.dumps(…, ensure_ascii=False, …)` と同じバイトです。
+  - `response_bytes(&Value, &mut Budget) -> Result<Vec<u8>, ResponseError>`: 区切りごとに予算の `json` へ足し、最後に改行の 1 を足します。`ResponseError` は `Budget(Failure)`・`Value` です。
+  - `b64`・`unb64`・`digest`・`keys`・`fingerprint`(`Fingerprint` の 6 欄)・`metadata`・`float_repr` を持ちます。
+- `crates/cli/src/commands/diagnostic_git/reader.rs`
+  - `Reader`: `owner(budget, path, info, code)`・`check_owner`・`directory(budget, path) -> Dir`・`lstat(budget, path, missing)`・`read(budget, path, limit, kind, missing)`・`names(budget, path, kind, record)`・`verify(budget)` を持ちます。予算は持たず、毎回受けます。
+  - 記録を読む口(`files()`・`dirs()`・`missing()`・`sets()`・`owners()`)と、直接扱う 3 つの口(`file_record`・`put_file_record`・`add_missing`)を持ちます。
+  - `ReaderError`: `Failure(Failure)`・`Os(errno)`・`Nul`(パスの段に NUL。旧版の `ValueError`)の 3 種類です。`is_not_found()` は旧版の `FileNotFoundError` です。
+  - `Dir`: `directory` が返す開いたフォルダです。`close()` は閉じる失敗を返します。
+  - 既定の値は `DEFAULT_READ_LIMIT`(16MiB)・`DEFAULT_READ_KIND`・`DEFAULT_NAMES_KIND`・`DEFAULT_OWNER_CODE`(22)です。パスの組み立ての `normpath`・`dirname`・`basename` も公開します。
+- `crates/cli/src/commands/diagnostic_git/budget.rs` に、検査のときだけ使う差し込みを 2 つ足しました(`set_test_log`・`take_test_log` と、`set_test_bias(Kind, u64)`)。製品の経路は変えていません。
+- `crates/platform/src/diagnostic.rs`(新規): `open_root`・`open_dir_at`・`open_file_at`・`stat_at`・`fstat`・`read`・`close`・`names`・`geteuid`・`getcwd`・`errno_name` と、状態の値 `Stat` です。どれも安全な関数です。新しい `unsafe` は足していません(`fs.rs` の `close_owned` を `pub(crate)` にして使います)。
+
+`diagnostic_git` は `commands/mod.rs` に登録していません。検査は `tests/diagnostic_runtime.rs` が `#[path]` で読み込みます。
+
+必須の比較は [テストの手順](../docs/testing.md#r4d-2-の-json-と-reader-の比較) に従ってください。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れません(結果は `ignored`)。比較は、次のコマンドか `build.py r4d2` で流します。
+
+```sh
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_runtime -- --ignored --exact rust_matches_the_legacy_runtime_parts_on_every_input)
+```
+
+比較は、Python 3.10 系・root 以外を使います。`requirements-dev.txt` の依存は要りません。
+
 ## 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
 
 #479で旧 `pending-implementation.py`・`reviews-dir.sh`・`implementation-git.py` と同じ結果を返す部品を実装しました。製品CLIの登録表・help・配布・既存呼出元は変えていません。
