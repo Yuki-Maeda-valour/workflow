@@ -490,7 +490,7 @@ unsafe の置き場は、次の 2 つだけです。
 ## 診断の reftable の読み取り(R4D-1)
 
 #481 で、旧 Python の `diagnostic-reftable.py` と診断の予算の型に対応する内部部品を実装しました。reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式です。table はその 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体です。
-製品 CLI の登録・help・配布・既存の呼出元は変えていません。呼出元はまだありません(R4D-3 で使います)。契約は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
+製品 CLI の登録・help・配布・既存の呼出元は変えていません。製品の呼出元はまだありません。`Failure` は R4D-3(#485)の `state`・`paths`・`private` が使います。予算(`Budget`)は `state` と `private` が使います。`read_stack` は R4D-3b(#544。reftable の参照の読み取り)で使います。契約は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
 
 - `crates/cli/src/commands/diagnostic_git/budget.rs`
   - `Budget`: `new()`(期限 300 秒)・`check()`・`charge(Kind, u64)`・`remaining()`・`stop_flag()`・`request_stop()`・`used(Kind)`。
