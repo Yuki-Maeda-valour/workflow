@@ -782,9 +782,10 @@ Git の全呼び出しに `base-commit.md` の安全用のオプションを同�
 
 Rust は `rust-toolchain.toml` で `1.99.1` に固定しています。
 `Cargo.lock` は共有します。直接依存は `sha2`・`serde`・`serde_json`・C0bの `rustix`・R4Rの `libc 0.2.191`(`platform` だけ。R4Gも同じ宣言を使い、版も機能も変えません)と、R4Sのローカル部品 `workflow-yaml-parser 0.1.0`です。
-`rustix` は `=1.1.6` に固定し、`platform` だけで `fs`・C0cの `event`・task-digestの`termios`と既定の `std` を使います。子の起動・KILL・回収は `std::process` です。`rustix` の `process`・ネットワーク機能は有効にしません。
+`rustix` は `=1.1.6` に固定し、`platform` だけで使います。機能は、workspace の `fs`・C0cの `event`・task-digestの`termios`と既定の `std` に、`platform` の `process`・`rand`・`stdio`(S3D #472 で足しました)と `try_close`(R4D-1 #481 で足しました)を加えたものです。`process` は子の起動には使わず、自分のプロセスの値の関数(`getcwd`・`geteuid`・`getrlimit`・`fchdir`)だけを使います。子の起動・KILL・回収は `std::process` です。`rustix` のネットワーク機能は有効にしません。
 R4Rも子を `std::process::Command` で起動します。ただし、子だけの `RLIMIT_FSIZE`・余分な fd を継がせない印・子の信号の既定と mask・旧版と同じ `execv` は、exec の前に子の中で動く処理が要ります。そのため `platform` の `restore_taskmd` だけが `pre_exec` と `libc` を使います。最初の信号を記録する処理と mask、Mac の地域設定の判定、環境の `LC_CTYPE` の書き換えも、同じファイルの `unsafe` に置きます。`rustix` の採用の根拠と、R4Rが `libc` と `unsafe` を使う理由は、[設計の記録](../docs/design.md#c0b-で採用した-os-呼出しの部品)にあります。
 R4D-1(#481)は、閉じる失敗を返すために `platform` で `try_close` 機能も有効にしました。R4D-1 が足した自作の `unsafe` は、`platform/src/fs.rs` の `close_owned` の 1 か所です。理由は [設計のR4D-1節](../docs/design.md#診断の-reftable-の読み取りr4d-1) にあります。
+R4D-2(#484)の `platform/src/diagnostic.rs` は、`platform` で既に有効な rustix の `process` 機能の `getcwd`・`geteuid` と、`fs` の一覧の読み取り(Linux は `RawDir`、Mac は `Dir`)を使います。新しい機能も自作の `unsafe` も足していません(閉じる失敗は R4D-1 の `close_owned` を使います)。理由は [設計のR4D-2節](../docs/design.md#診断の-json-と上限付きの読み取りr4d-2) にあります。
 R4Gも `platform` の `libc` を使います。R4G が足した自作の `unsafe` は、`platform` の `r4g` の3つのファイル(`startup.rs`・`fs.rs`・`process.rs`)だけに置き、`restore_taskmd` には足しません。理由と範囲は [設計のR4G節](../docs/design.md#保護記録の探索reviewsの配置内蔵のgit読取りr4g)にあります。
 S3I-Aが起動するのは、本文の復元の GNU `cp` だけです(R4R の部品が起動します)。`platform` の `implement_guard` が、検査専用入口の OS の呼び出しに `libc` と `unsafe` を使います(並びの例は上の S3I-A の節)。Macの `strerror_text` は `restore_taskmd` に足しました。`rm -rf` の走査は `rustix` の `openat`・`Dir`・`statat`・`unlinkat` を使い、`unsafe` を増やしていません。
 YAML部品は `saphyr-parser 0.1.2`の局所修正版です。`arraydeque =0.5.1`・`thiserror =2.0.21`を固定し、ライセンス原文を保持します。[出典と更新手順](crates/yaml-parser/UPSTREAM.md)に従い、自動で上流の新版へ替えないでください。

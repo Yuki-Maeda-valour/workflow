@@ -1651,12 +1651,13 @@ table は reftable の 1 つのファイル、stack は `tables.list` に並ん�
 section は table の中の、種類ごとのまとまり(参照・object・log など)、block は section の中の 1 つの区切り、varint は長さが変わる整数の書き方、header と footer は table の頭と末尾の管理情報、CRC は誤りを見つけるための検査値である。
 index は、目的の block を探すための索引の block、シンボリック参照は、ほかの参照を指す参照(例 `HEAD` → `refs/heads/main`)である。
 
-R4D の 5 つの単位(Issue は、R4D-1 が #481、R4D-2〜R4D-5 が #484〜#487)。
+R4D の単位(Issue は、R4D-1 が #481、R4D-2〜R4D-5 が #484〜#487、R4D-2b が #541。2026-11-27 に R4D-2 を 2 つに分けて 6 つになった)。
 
 | 単位 | 対象 |
 |---|---|
 | R4D-1 | `diagnostic-reftable.py` と、診断の予算の型(`diagnostic-runtime.py` の `LIMITS`・`Failure`・`Budget`) |
-| R4D-2 | 実行の土台(`Reader`・`Runtime`・子の監督・後始末・送出)と `diagnostic-output.py` |
+| R4D-2 | 厳密な JSON・base64・確認用の値・応答の符号化と `Reader`(#484) |
+| R4D-2b | `Runtime` の残り(一時フォルダ・道具の確かめ・子の監督・後始末・送出・信号)と `diagnostic-output.py`(#541) |
 | R4D-3 | 保護記録と専用の管理領域(`diagnostic-state.py`・`diagnostic-private.py`・`diagnostic-paths.py`) |
 | R4D-4 | 除外の計画(`diagnostic-plan.py`・`diagnostic-git.py` の引数の解析と検査・機密指定の読み取り) |
 | R4D-5 | 観測と入口(`diagnostic-views.py` の 7 操作・除外の照合・`run` と入口全体) |
@@ -1755,7 +1756,8 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 | 部品 | 失敗 | 旧版 |
 |---|---|---|
 | `decode` | `Schema`(`schema`・2)・`Recursion` | `Failure('schema', 2)`・`RecursionError`(`decode` は受けない。入口では `internal`) |
-| `encoded`・`encoded_unicode` | `Value` | `ValueError`(無限大と NaN・桁の超え・UTF-8 にできない孤立したサロゲート) |
+| `encoded` | `Value` | `ValueError`(無限大と NaN・桁の超え) |
+| `encoded_unicode` | `Value` | `ValueError`(UTF-8 にできない孤立したサロゲート・桁の超え。無限大と NaN は `Infinity`・`-Infinity`・`NaN` と書き、失敗にしない) |
 | `response_bytes` | `Budget`(`interrupted`・`time-limit`・`json-limit`)・`Value` | `Failure`・`ValueError` |
 | `unb64`・`keys` | `schema`(2) | `Failure('schema', 2)` |
 | `Reader` | 予算と Reader の失敗(`ownership`〈呼出元の終了値〉・`not-regular` 23・`file-limit` 20・`source-changed` 20・予算の 3 つ)・OS の失敗(errno)・NUL | `Failure`・`OSError`・`ValueError` |
@@ -1767,7 +1769,7 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 - `decode(raw, caller_depth)` の `caller_depth` は、`decode` を呼ぶ Python のフレームの深さ(そのフレームを含む)である。旧版は Python の再帰の深さが上限 1000 を超えた最初の呼出しで `RecursionError` になる。Rust は旧版の呼出しを 1 つずつ数え、同じ所で `Recursion` を返す。
 - 数える呼出しは、本家 3.10.11 の `Lib/json/__init__.py`・`Lib/json/decoder.py`・`Modules/_json.c`・`Objects/exceptions.c` と旧版の :21-27・:49-61 で確かめた。深さ D(`caller_depth`)から呼ぶと、次のとおりになる。
   - `decode` のフレーム D+1、`raw.decode('utf-8')` D+2、`json.loads` のフレーム D+2、`JSONDecoder(**kw)` の `__init__` D+4 と `make_scanner` D+5、`JSONDecoder.decode` D+3、`raw_decode` D+4、scanner の呼出し D+5(B とする)。
-  - 入れ子の辞書と配列に入るたびに +1(`Py_EnterRecursiveCall`)。辞書の終わりの `unique` は辞書の深さ +1、重なった鍵の `fail` はさらに +1〜+4。`NaN`・`Infinity`・`-Infinity` は lambda のフレーム +1 と `fail` の +1〜+4。
+  - scanner の中の深さは B から始まり、入れ子の辞書と配列に入るたびに +1(`Py_EnterRecursiveCall`)。辞書の終わりの `unique` は辞書の深さ +1、重なった鍵の `fail` はさらに +1〜+4。`NaN`・`Infinity`・`-Infinity` は lambda のフレーム +1 と `fail` の +1〜+4。
   - `JSONDecodeError` を作る所(C の `raise_errmsg` と `scanstring`・`raw_decode` が `StopIteration` から作る所・`JSONDecoder.decode` の「Extra data」・`loads` の BOM)は、作る所の深さ +1〜+3。`decode` が受けた失敗の `fail('schema', 2)` は D+2〜D+5。
   - 整数の桁の超えの `ValueError` と、受け手での例外の正規化(例外を捕まえるときに、例外の値を作り直す処理)は数えない。正規化の間は、本家の `recursion_headroom`(例外の処理の間だけ再帰の上限を緩める仕組み)が上限を緩める。
 - 失敗を作る場所ごとに境界が違う。入れ子に依らない道の境界(最初に `RecursionError` になる D)は、BOM・UTF-8 の誤り・入れ子の無い正しい値が 996、最上位の余分なデータが 995、最上位で値が無い誤り(`raw_decode` が `StopIteration` から作る誤り)が 994 である(比較の J3 で、本家 3.10.11 の旧版から測った値と一致した)。
@@ -1795,7 +1797,7 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 - 2 を使う例: 同じ桁の候補が 2 つ並ぶ中間の値(例 899096400445237.25)では、本家は偶数の側(`…237.2`)を選ぶ。`{:e}` は上の側(`…237.3`)を選ぶ。
 - 1 を使う例: ちょうど 2 の累乗の小数(例 2^-24)では、2(`5.9604644775390625e-08` を 16 桁に丸めた `…062e-08`)が下側の半分の幅の外に出て元に戻らない。本家と同じ `5.960464477539063e-08` は 1 である。
 - 差の見つかり方: 比較の J4 の乱数の値で、`{:e}` だけの実装に、中間の値の 4 件の差が見つかった(J5 の 12 件も同じ値)。次の「桁を 1 から増やす」実装は、2 の累乗(2^-24・2^-44・2^89 など)で 1 桁長い字面を出すことが、レビューで分かった。
-- 上の手順で、本家 3.10.11 の `repr` と、±2^e(e = −1074〜1023)の全部・乱数のビットの並び 20 万件・短い 10 進 10 万件・中間の値の、合わせて 304,086 件が一致した(2026-11-27・hp-pc)。J4 にも ±2^e の全部を入れ、J5 にも 16 件を入れた。
+- 上の手順で、本家 3.10.11 の `repr` と、±2^e(e = −1074〜1023)の全部の 4,196 件・乱数で作ったビットの並び 20 万件から NaN と無限大を除いた 199,886 件(除いたのは 114 件)・短い 10 進 10 万件・中間の値 2 件と ±0 の 2 件の、合わせて 304,086 件が一致した(2026-11-27・hp-pc)。J4 にも ±2^e の全部を入れ、J5 にも 16 件を入れた。
 
 #### 閉じる処理
 
@@ -1817,7 +1819,7 @@ UTF-8 でない参照名の入力も別に数える。比較の自己検査と�
 
 #### 足した OS の部品と unsafe
 
-- `crates/platform/src/diagnostic.rs` を足した。どの関数も OS を 1 回だけ呼び、NUL を含む名前は OS を呼ばずに失敗にする。
+- `crates/platform/src/diagnostic.rs` を足した。どの関数も EINTR で呼び直さない(呼び直しは `Reader` の継ぎ目〈OS を呼ぶ 1 つの口〉で行う)。NUL を含む名前は、OS を呼ばずに失敗にする。
   - `/` と、フォルダの fd からの名前を `O_RDONLY|O_DIRECTORY|O_NOFOLLOW|O_CLOEXEC` で開く。ファイルは `O_RDONLY|O_NONBLOCK|O_NOFOLLOW|O_CLOEXEC` で開く。
   - `fstatat(…, AT_SYMLINK_NOFOLLOW)`(空の名前は検査せずに OS へ渡し、ENOENT)・`fstat`・`read`・閉じる(閉じる失敗を返す)・`geteuid`。
   - 名前の一覧は、fd を `F_DUPFD_CLOEXEC` で複製して読む。Linux は glibc の `readdir` と同じ受け皿の大きさ・d_ino(フォルダの項目が持つ番号)が 0 の項目を飛ばす・ENOENT を終わりとする・明示の位置の移動は、R4G の `r4g/fs.rs` と同じ手順にした(R4G 専用のモジュールなので呼ばない)。

@@ -223,6 +223,7 @@ python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" s
   - 比較は、下のコマンドの塊の `-- --ignored --exact …` の行か `build.py r4d1` で流す。
   - CIは `r4d1` のジョブで流す。
   - reftableを作れるgit 2.45以上・Python3.10系・非rootが必須で、`requirements-dev.txt` の依存は要らない。
+- R4D-2の比較のテストも `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない。下のコマンドの塊の `diagnostic_runtime` の行か `build.py r4d2` で流し、CIは `r4d2` のジョブで流す。この比較のテストだけなら、Python3.10系・非rootが必須で、gitと `requirements-dev.txt` の依存は要らない(FIFOを作る `mkfifo` は使う)。R4Sを含む `cargo test --locked` 全体には、上のとおり `requirements-dev.txt` の依存が要る。
 
 ```bash
 rustup toolchain install 1.99.1 --profile minimal --component rustfmt,clippy
