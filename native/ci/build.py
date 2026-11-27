@@ -45,6 +45,9 @@ EXAMPLES += ("adopt_candidate_contract",)
 # S2E(#470)の検査専用入口。比較は build の外の別ジョブ(s2e・s2e-universal)で流す。
 CI_BINARIES += ("s2e_contract",)
 EXAMPLES += ("s2e_contract",)
+# R4X-1(#545)の検査専用入口。比較は別のジョブ implement-agent・implement-agent-universal で流す。
+CI_BINARIES += ("implement_agent_contract",)
+EXAMPLES += ("implement_agent_contract",)
 BUILD_FILES = tuple(f"{number}/{name}" for number in (1, 2) for name in CI_BINARIES)
 UNIVERSAL_FILES = CI_BINARIES
 # Rust 1.99.1 の src/ci/docker/scripts/musl-toolchain.sh / musl.sh で確認。
@@ -355,6 +358,8 @@ def quality(name, work):
              *[argument for module in ADOPT_IMPORTED_SKIPS for argument in ("--skip", module)]], env=env)
         # S2E の example の単体検査(比較は、新しい必須ジョブ s2e・s2e-universal で流す)。
         run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "s2e_contract"], env=env)
+        # R4X-1(#545)の example の単体検査(比較は、必須ジョブ implement-agent・implement-agent-universal で流す)。
+        run(["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_agent_contract"], env=env)
 
 
 def r4r_map(env, folder):
@@ -394,6 +399,7 @@ def reproduce(name, work):
                     check_static_elf(destination, machine)
     # 2 回のビルドのバイト列が同じことは、4 機種とも確かめる(s3d・r4g・r4e・r4a-rest・implement-guard の比較のジョブは
     # 1 回目だけで比べる。#516。r4c は 2 回とも比べる。同じ形にするかは #525)。
+    # R4X-1(#545)の implement-agent の比較のジョブも、2 本が同じことを確かめてから 1 回目だけで比べる。
     for filename in CI_BINARIES:
         run(["cmp", stage / "1" / filename, stage / "2" / filename])
     if identity() != before:
@@ -842,9 +848,74 @@ def implement_guard_universal(name, downloads, work):
     implement_guard_probe(fixture, "signed")
 
 
+# R4X-1(#545)の比較も、build と verify-universal の時間の枠に入らないので、別のジョブで流す。
+IMPLEMENT_AGENT_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+# 比較器が Linux の範囲 full で使う道具: 日本語の包み(bash・coreutils・libc の翻訳ファイル)と strace。
+IMPLEMENT_AGENT_LINUX_PACKAGES = (*s3d_ci.JAPANESE_PACKAGES, "strace")
+
+
+def implement_agent_missing():
+    """Linux の範囲 full の比較に要るもので、足りないものの一覧(空なら揃っている)。"""
+    missing = []
+    listed = subprocess.run(["locale", "-a"], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, check=False).stdout
+    if not any(name.lower() in (b"ja_jp.utf8", b"ja_jp.utf-8") for name in listed.split()):
+        missing.append("ja_JP.UTF-8 の locale")
+    for domain in ("bash", "coreutils", "libc"):
+        if not any(Path(folder, "ja/LC_MESSAGES", domain + ".mo").is_file()
+                   for folder in ("/usr/share/locale", "/usr/share/locale-langpack")):
+            missing.append(f"{domain} の日本語の翻訳ファイル")
+    for tool in ("strace", "localedef", "cc"):
+        if shutil.which(tool) is None:
+            missing.append(tool)
+    return missing
+
+
+def implement_agent_prepare(name):
+    """機械を確かめ、Linux では比較の前に日本語の包みと strace を入れる(S3D の s3d_ci.py と同じ形)。"""
+    target_config(name)
+    if not name.startswith("linux-"):
+        return
+    if implement_agent_missing():
+        run(["sudo", "apt-get", "update"])
+        run(["sudo", "apt-get", "install", "-y", *IMPLEMENT_AGENT_LINUX_PACKAGES])
+    missing = implement_agent_missing()
+    if missing:
+        raise ValueError("R4X-1 の比較に要るものを用意できません: " + ", ".join(missing))
+
+
+def implement_agent_probe(fixture, scope=None):
+    """check_implement_agent.py の比較を必須で流す。最後の行(合格: <件数> 件…)は CI の記録に残る。"""
+    args = [sys.executable, "-B", ROOT / "native/ci/check_implement_agent.py", "--fixture", fixture]
+    if scope is not None:
+        args += ["--scope", scope]
+    run(args)
+    run([sys.executable, "-B", "-m", "unittest", "discover", "-s", ROOT / "native/ci", "-p", "test_implement_agent.py"])
+
+
+def implement_agent(name, downloads, work):
+    """build の tar を受け取り、2 本が同じことを確かめてから、1 本目の implement_agent_contract で比較する(#516)。"""
+    implement_agent_prepare(name)
+    folder, _ = extract_build(name, downloads, work)
+    same_builds(folder, "implement_agent_contract")
+    implement_agent_probe(folder / "1" / "implement_agent_contract")
+
+
+def implement_agent_universal(name, downloads, work):
+    """署名後の Mac の tar を受け取り、署名と CPU を確かめてから、範囲 mac で比較する。"""
+    if name not in IMPLEMENT_AGENT_UNIVERSAL_PLATFORMS:
+        raise ValueError("implement-agent-universal は Mac の 2 機種で実行してください")
+    implement_agent_prepare(name)
+    folder, _ = extract_universal(downloads, work)
+    fixture = folder / "implement_agent_contract"
+    run(["codesign", "--verify", "--strict", "--verbose=2", fixture])
+    if sorted(run(["lipo", "-archs", fixture], capture=True).split()) != ["arm64", "x86_64"]:
+        raise ValueError("Mac の最終ファイルの CPU が違います")
+    implement_agent_probe(fixture, "mac")
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal", "implement-agent", "implement-agent-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -853,7 +924,7 @@ def main():
             suite = unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_native_ci.py")
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
-        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal") and not args.platform:
+        if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal", "implement-agent", "implement-agent-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -911,6 +982,10 @@ def main():
             s2e(args.platform, downloads, work)
         elif args.command == "s2e-universal":
             s2e_universal(args.platform, downloads, work)
+        elif args.command == "implement-agent":
+            implement_agent(args.platform, downloads, work)
+        elif args.command == "implement-agent-universal":
+            implement_agent_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

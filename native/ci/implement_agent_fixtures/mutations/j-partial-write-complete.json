@@ -1,0 +1,8 @@
+{
+ "name": "j-partial-write-complete",
+ "group": "書き込みの故障",
+ "about": "RLIMIT_FSIZE の途中の書き込みで、書けた分で止めずに全部を書けたことにする",
+ "file": "native/crates/cli/src/commands/implement_agent/stdio.rs",
+ "old": "                Ok(n) => done += n,",
+ "new": "                Ok(_) => done = data.len(),"
+}

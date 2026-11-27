@@ -289,3 +289,36 @@ def compare_runs(legacy_argv: Sequence, native_argv: Sequence, *, initial_tree, 
         compare(f'tree:{relative}', legacy_tree.get(relative), native_tree.get(relative))
     return ComparisonResult(legacy, native, legacy_cwd, native_cwd, before,
                             legacy_tree, native_tree, tuple(differences))
+
+
+def process_alive(pid) -> bool:
+    """pid のプロセスが動いているか(回収前の終了済み〈ゾンビ〉は動いていないと見なす)。
+
+    Linux は /proc/<pid>/stat の状態の欄を読む。ほかは kill(pid, 0) と ps の状態の欄で見る。
+    権限が無くて送れないプロセスは動いていると見なす。比較器が、残った子(PATH の包みと道具)の終わりを待つのに使う(#545)。
+    """
+    if sys.platform.startswith('linux'):
+        try:
+            text = Path(f'/proc/{int(pid)}/stat').read_text()
+        except OSError:
+            return False
+        return text.rsplit(')', 1)[-1].split()[0] != 'Z'
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    done = subprocess.run(['ps', '-o', 'stat=', '-p', str(int(pid))], capture_output=True)
+    state = done.stdout.strip()
+    return bool(state) and not state.startswith(b'Z')
+
+
+def wait_processes_gone(pids, timeout) -> bool:
+    """pids のプロセスが全部終わるまで、最大 timeout 秒待つ。全部が終わったら True(#545)。"""
+    deadline = time.monotonic() + timeout
+    while any(process_alive(pid) for pid in pids):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.01)
+    return True

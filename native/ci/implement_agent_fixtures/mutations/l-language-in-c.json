@@ -1,0 +1,8 @@
+{
+ "name": "l-language-in-c",
+ "group": "地域設定",
+ "about": "翻訳の選び方で、C と C.UTF-8 でも LANGUAGE を見る",
+ "file": "native/crates/cli/src/commands/implement_agent/locale.rs",
+ "old": "    if is_c_locale(messages) {",
+ "new": "    if messages.is_empty() {"
+}

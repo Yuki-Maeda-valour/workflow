@@ -1,0 +1,8 @@
+{
+ "name": "e-cd-dash-without-oldpwd",
+ "group": "--cwd",
+ "about": "`cd -` で OLDPWD が無くても HOME へ移って成功させる",
+ "file": "native/crates/cli/src/commands/implement_agent/paths.rs",
+ "old": "            Some(old) => {\n                print = true;\n                old.clone()\n            }\n            None => return fail(),",
+ "new": "            Some(old) => {\n                print = true;\n                old.clone()\n            }\n            None => match &state.home {\n                Some(home) => home.clone(),\n                None => return fail(),\n            },"
+}

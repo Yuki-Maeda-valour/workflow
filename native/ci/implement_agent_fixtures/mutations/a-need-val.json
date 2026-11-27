@@ -1,0 +1,8 @@
+{
+ "name": "a-need-val",
+ "group": "引数",
+ "about": "need_val の残りの数の境を 1 つずらす(値の無い最後のオプションを空の値として受ける)",
+ "file": "native/crates/cli/src/commands/implement_agent/args.rs",
+ "old": "        if remaining < 2 {",
+ "new": "        if remaining < 1 {"
+}

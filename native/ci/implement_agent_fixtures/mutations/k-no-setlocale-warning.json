@@ -1,0 +1,8 @@
+{
+ "name": "k-no-setlocale-warning",
+ "group": "bash の起動",
+ "about": "352 行の LC_ALL=C を戻すときの setlocale の警告を落とす",
+ "file": "native/crates/cli/src/commands/implement_agent/args.rs",
+ "old": "        shell.internal_warning(sites::GREP_END.line, &text);",
+ "new": "        let _ = &text;"
+}

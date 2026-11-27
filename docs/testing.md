@@ -1957,6 +1957,67 @@ CIの時間の見積り(推測。CIでは未測定):
   - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になる。Mac arm64とLinuxの機種には、この倍率は当たらない。どちらの見積りも、PRのCIの実測で確かめる。
 - 50分を超えるかどうかは、PRのCIで機種ごとの時間を記録して決める。超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直す案を、設計に追記してレビューに通す。既存の上限は、理由と実測なしに変えない。
 
+### R4X-1の比較
+
+#545 の `implement-agent.sh` の引数の検査の区間(1〜714行と725行)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と当てた決定](design.md#implement-agentの引数の検査の区間r4x-1)、[部品と入口](../native/README.md#implement-agentの引数の検査の区間r4x-1)を参照する。
+
+必要な環境は次のとおり。どれかが欠ければ、比較器は省略せずに失敗する。
+
+- Python 3.10 系と、root 以外の通常利用者。
+- C コンパイラ `cc`。比較器が観測用の包み(`native/ci/implement_agent_fixtures/observer.c`)と起動の包み(`launcher.c`)を組む。組めなければ比較全体を失敗にする(R4U・R4R と同じ要件)。
+- 範囲 `full`(Linux の既定): 基準の版(Ubuntu 24.04 の bash 5.2.21・coreutils 9.4・sed 4.9・grep 3.11・glibc 2.39)。違う Linux では失敗にする。
+  - 日本語の包み(`locales`・`language-pack-ja`・`language-pack-ja-base`。`bash.mo`・`coreutils.mo`・`libc.mo` と `ja_JP.UTF-8`)・`localedef`(比較器が `ja_JP.eucJP` を `LOCPATH` の下に作る)・`strace`(包みの有無の段で `grep` の子の環境を照らす)。
+  - 手元では基準の容器(`s3ia-ubuntu2404:local`。`docker run --init` と `--security-opt seccomp=unconfined`)で流す。
+- 範囲 `mac`(Mac の既定): bash 4.0 以上(`/opt/homebrew/bin/bash` など)。無ければ旧版との比較の全部を未実施と記録する。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example implement_agent_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example implement_agent_contract --target x86_64-unknown-linux-musl)
+python3 -B native/ci/check_implement_agent.py --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/implement_agent_contract"
+python3 -B -m unittest discover -s native/ci -p 'test_implement_agent.py'
+python3 -B native/ci/implement_agent_mutations.py --fixture <上の implement_agent_contract の絶対パス>   # 変異(手元だけ。cargo が要る)
+```
+
+- `--fixture` の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物や PATH へ切り替えない。
+- 旧版の sha256(`9486ca07…`)と、使い方の文(`usage.txt`)が旧版の2〜98行と同じことを、最初に照らす。違えば失敗する。
+- 旧版と Rust は、同じ絶対パスの作業フォルダ(ケースごとに作り直す)で順に流す。並べて流す数は `-j`(既定は CPU の数)。
+- 比べるのは、終了値(信号で終わればその番号)・stdout・stderr・作業フォルダと保護領域の候補の下の全エントリ(種類・mode・中身・リンク先。どちらの側も変わらないこと)・PATH の観測用の包みが記録した道具の起動(argv・環境・fd 0〜2 の種類・信号の扱いと止め・cwd)・止め所の印である。
+  - 置き換えるのは、bash の文の先頭の旧版のパス(固定名)と、旧版の bash 自身の訳した行(英語へ戻す。戻せない行は失敗)と、ジョブの知らせの行の pid(伏せて、記録した子の pid と同じかを確かめる)だけ。
+  - 境界に届くケースでは、旧版の最初の `mkdir` の argv の `<cand>` と、Rust の境界の行の `<cand>` を比べ、旧版の stdout・stderr と、Rust の境界の行の前までを比べる。
+  - 途中で切れる出力(`RLIMIT_FSIZE`)は、故障の無い旧版も流し、2026-11-11 22:26・22:38 の3つの場合で期待を作る。
+- 範囲 `full` の段: 12の群・道具の再現(`--r4x1-tool` の出力を、同じ環境の本物の `dirname`・`basename` と比べる。594件)・起動時に閉じた fd(旧版と Rust をそれぞれの固定期待 `closed_fds.json` で照らす。20件)・止め所の揺れ(止め所のケースの旧版を3回ずつ流し、結果が1通りであること)・包みの有無(包みの無い旧版と結果が同じこと。`grep` の子の環境は strace の記録で照らす)。
+- ケースの一覧(範囲ごと・群ごとの件数と名前の sha256)は `case_lists.json`、Mac で流さないケースと理由は `mac_unperformed.json` に固定する。範囲 `full` のたびに、今の結果から作り直した Mac の一覧と同じかを確かめる。一覧の外の未実施は失敗にする。
+- 最後の行が `合格: <N> 件(未実施 <M> 件)` で、終了値が0なら合格である。Linux の基準の機械では未実施を0件にする。部分実行(`--groups`・`--case`)は合格に数えない(終了値3)。
+
+範囲 `full` の群ごとの件数(2026-11-27・基準の容器):
+
+| 群 | 比べた件数 | 境界の印の件数 |
+|---|---|---|
+| 引数 | 59 | 8 |
+| runner と model | 24 | 3 |
+| プロンプトのファイル | 116 | 42 |
+| --cwd | 61 | 25 |
+| 時間 | 33 | 6 |
+| --log-file の正規化 | 76 | 28 |
+| 候補の解決の始め | 25 | 17 |
+| 中止の信号 | 56 | 9 |
+| 書き込みの故障 | 122 | 25 |
+| bash の起動 | 91 | 16 |
+| 地域設定 | 163 | 8 |
+| 想定外の失敗 | 8 | 0 |
+| 群の合計 | 834 | 187 |
+
+- 結果の行の件数は、群の834件・道具の再現594件・起動時に閉じた fd 20件の合計 1448件である。止め所の揺れ(141回)と包みの有無(180件。strace で照らした111件)は、件数の行に出し、結果の行の件数には数えない。
+- 範囲 `mac` を Linux で試すと、`合格: 430 件(未実施 405 件)` だった(Mac の実機では未確認)。
+- 変異の一覧(`implement_agent_fixtures/mutations/`。12の群ごとに1つ以上、13件)は、全部で比較器が不合格になった(2026-11-27・基準の容器・約73秒)。
+- 時間(基準の容器・16 CPU): 3回で 22.9秒・18.3秒・16.7秒(全部合格)。CI の1回目の run の機種ごとの時間は未確認である(PR の CI の後に、この節とジョブの上限を直す)。
+- ジョブの上限は、`implement-agent` 30分・`implement-agent-universal` 20分にした(`check_workflow.py` の `R4X1_TIMEOUTS`)。基準の容器の3回の最長 22.9秒の2倍は5分に切り上がる。CI の機械は遅く、準備(日本語の包みと strace の `apt-get`・Python の用意・tar の取得)の時間も入るので、CI の実測が出るまでは S3I-A の上限(45分・20分)に近い値にした(推測)。
+- 完了条件2(CPU の数と同じ数の `python3 -c 'while True: pass'` を背景で動かしたまま5回): 基準の容器(16 CPU。busy loop 16本)で、5回とも `合格: 1448 件(未実施 0 件)` だった(50.3秒・52.1秒・51.3秒・50.4秒・51.5秒。2026-11-27)。終わった後に、起動した16本の pid だけを止めた。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。

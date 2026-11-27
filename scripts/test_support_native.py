@@ -681,5 +681,26 @@ class CompareRunsTest(TemporaryScripts):
         self.assertEqual('do not replace', (self.work / 'keep').read_text())
 
 
+class ProcessAliveTest(unittest.TestCase):
+    """#545: 残った子の終わりを待つ補助。"""
+
+    def test_running_exited_and_reaped_processes(self):
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            self.assertTrue(support_native.process_alive(child.pid))
+            self.assertFalse(support_native.wait_processes_gone([child.pid], 0.05))
+        finally:
+            child.kill()
+        # 終わったが回収していない(ゾンビ)は動いていないと見なす。
+        deadline = time.monotonic() + 10
+        while support_native.process_alive(child.pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(support_native.process_alive(child.pid))
+        child.wait()
+        self.assertFalse(support_native.process_alive(child.pid))
+        self.assertTrue(support_native.wait_processes_gone([child.pid], 1))
+        self.assertTrue(support_native.wait_processes_gone([], 0))
+
+
 if __name__ == '__main__':
     unittest.main()

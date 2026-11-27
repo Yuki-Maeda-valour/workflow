@@ -1,0 +1,94 @@
+{
+ "full": {
+  "--cwd": {
+   "count": 61,
+   "sha256": "9e5269a244ea90eb93560cdfd88902f3b1c4d963247969385fc8777205b76bb5"
+  },
+  "--log-file の正規化": {
+   "count": 76,
+   "sha256": "951381acde66754734d515f80d3067afe18653865d6d4a285df951d4d105e7c5"
+  },
+  "bash の起動": {
+   "count": 91,
+   "sha256": "9ee09fe2f7cec143e8b8f00e33ad5667ff98f70ddfdd2893f44a7a7137144243"
+  },
+  "runner と model": {
+   "count": 24,
+   "sha256": "81182565cdf0f2ee9db7e0951dac1ac2075651cd2e1404229459cfa82bf1b766"
+  },
+  "プロンプトのファイル": {
+   "count": 116,
+   "sha256": "f1e21bf03f934110137b122c17a81de50fd0e556d661c85ae9b5b7536b61a1b6"
+  },
+  "中止の信号": {
+   "count": 56,
+   "sha256": "0aa282b93e6ee7480c840a65e3879bcdecbed01255cf3db965aa986cd2f1cac3"
+  },
+  "候補の解決の始め": {
+   "count": 25,
+   "sha256": "1d092d8a6c37c6048a94eb03e077603960ee3bc5bc41867f97328237950215c7"
+  },
+  "地域設定": {
+   "count": 163,
+   "sha256": "b6a85c40f479c2082ab88e04b29bb09004a66b9cabb469e2000f43fe7ce81a53"
+  },
+  "引数": {
+   "count": 59,
+   "sha256": "3abee99a3e546a1852c9c9c8db823d5b1848929d48af5ef1232e5836e86a4a65"
+  },
+  "想定外の失敗": {
+   "count": 8,
+   "sha256": "acb4f789341c565b9340126d7cdfe47099b28a7deb76d3e14362e35117401d3a"
+  },
+  "時間": {
+   "count": 33,
+   "sha256": "ab6bde48b03d36383a88e7487ebc730823d0146a4e6dfa594b8651e212e4b4a7"
+  },
+  "書き込みの故障": {
+   "count": 122,
+   "sha256": "760e7c16af7aed042fb8cd1ed2a65e7e1edc94e9bb41cbe0d7731f1cb0d2dff2"
+  }
+ },
+ "mac": {
+  "--cwd": {
+   "count": 61,
+   "sha256": "9e5269a244ea90eb93560cdfd88902f3b1c4d963247969385fc8777205b76bb5"
+  },
+  "--log-file の正規化": {
+   "count": 30,
+   "sha256": "317207f8fb8af050b3299d8921955b2df4660e1319e4ecaf9d75000f68bcd310"
+  },
+  "bash の起動": {
+   "count": 52,
+   "sha256": "d6cd7932f009d68ea63240626a1fc4f7d97ff130aec97e1827d7d2db8fbdb452"
+  },
+  "runner と model": {
+   "count": 24,
+   "sha256": "81182565cdf0f2ee9db7e0951dac1ac2075651cd2e1404229459cfa82bf1b766"
+  },
+  "プロンプトのファイル": {
+   "count": 106,
+   "sha256": "d31c5d876ba7021806b421e9ba0a550cb7ea1e2108d7378e3ed203ffa66f110b"
+  },
+  "中止の信号": {
+   "count": 28,
+   "sha256": "174e82532fb338400e1f3c74e1bf5430d475947dbeb0cb6d94f0020990ce90c2"
+  },
+  "候補の解決の始め": {
+   "count": 25,
+   "sha256": "1d092d8a6c37c6048a94eb03e077603960ee3bc5bc41867f97328237950215c7"
+  },
+  "引数": {
+   "count": 59,
+   "sha256": "3abee99a3e546a1852c9c9c8db823d5b1848929d48af5ef1232e5836e86a4a65"
+  },
+  "時間": {
+   "count": 27,
+   "sha256": "d6a7c5b595c8085b3081c619843e1f71654b4894d05400008de7a559ccf4a7dc"
+  },
+  "書き込みの故障": {
+   "count": 18,
+   "sha256": "465fdecd0ab452fb2c9fadfb264b3d2314539ae690801c0c743d3b7e5cfec90d"
+  }
+ }
+}
