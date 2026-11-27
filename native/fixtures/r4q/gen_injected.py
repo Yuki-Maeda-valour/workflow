@@ -1077,6 +1077,11 @@ def parent_cases():
     case("inj-rc-posix-timeout", "rc", rc("posix", timeout={"float": "0.05"}),
          posix_world(measure=True, responses={"select": [ok(False, advance=0.02), ok(False, advance=0.02),
                                                          ok(False, advance=0.02), ok(False)], "read": []}))
+    # grace=0 の時間切れ: POSIX の stop_group は grace が 0 でも TERM を送り、sleep(0) の後に KILL を送る
+    # (Linux の supervise の「grace=0 なら TERM を送らない」形を持ち込む誤りを、呼出しの並びで見つける)。
+    case("inj-rc-posix-timeout-grace0", "rc", rc("posix", timeout={"float": "0.05"}, grace={"int": "0"}),
+         posix_world(measure=True, responses={"select": [ok(False, advance=0.02), ok(False, advance=0.02),
+                                                         ok(False, advance=0.02), ok(False)], "read": []}))
     case("inj-rc-posix-deadline-equal", "rc", rc("posix", timeout={"int": "1"}),
          posix_world(measure=True, responses={"monotonic": [ok(1000.0), ok(1001.0)],
                                               "select": [ok(False), ok(False)], "read": []}))

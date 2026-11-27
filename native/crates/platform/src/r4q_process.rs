@@ -14,7 +14,7 @@ use rustix::fd::{AsFd, AsRawFd, BorrowedFd, FromRawFd, OwnedFd, RawFd};
 use rustix::fs::{self, Mode, OFlags, SeekFrom};
 use std::ffi::CString;
 use std::io;
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicI32, AtomicU64, Ordering};
 use std::time::Duration;
 
 /// 呼出元が区別するエラー番号。
@@ -64,12 +64,35 @@ fn last_error() -> io::Error {
 }
 
 /// `EINTR` のあいだ同じ呼出しを繰り返す(Python が C の中で自動で繰り返す操作の写しに使う)。
+/// PEP 475 と同じく、繰り返す前に受けた信号の Python の処理を走らせる([`check_signals`])。
 pub fn retry_eintr<T>(mut call: impl FnMut() -> io::Result<T>) -> io::Result<T> {
     loop {
         match call() {
-            Err(error) if error.raw_os_error() == Some(libc::EINTR) => continue,
+            Err(error) if error.raw_os_error() == Some(libc::EINTR) => check_signals(),
             other => return other,
         }
+    }
+}
+
+/// `time.sleep(duration)`(本家 3.10 の `pysleep`)。信号で起きたら、受けた信号の Python の処理を走らせて
+/// ([`check_signals`])、残りを眠る。
+pub fn sleep(duration: Duration) {
+    let mut request = libc::timespec {
+        tv_sec: duration.as_secs().min(libc::time_t::MAX as u64) as libc::time_t,
+        tv_nsec: duration.subsec_nanos() as _,
+    };
+    loop {
+        // SAFETY: 受け取り先を 0 で埋める。
+        let mut remaining: libc::timespec = unsafe { std::mem::zeroed() };
+        // SAFETY: 有効な timespec を渡し、残りを受け取る。
+        if unsafe { libc::nanosleep(&request, &mut remaining) } == 0 {
+            return;
+        }
+        if last_error().raw_os_error() != Some(libc::EINTR) {
+            return;
+        }
+        check_signals();
+        request = remaining;
     }
 }
 
@@ -362,19 +385,52 @@ pub fn select_readable(fd: BorrowedFd<'_>, timeout: Option<Duration>) -> Result<
 pub fn pause() {
     // SAFETY: pause は引数を取らない。戻り値はいつも -1(EINTR)。
     unsafe { libc::pause() };
+    check_signals();
 }
 
 // ---- 信号の処理 ----
 
 static FIRST: AtomicI32 = AtomicI32::new(0);
 static LATEST: AtomicI32 = AtomicI32::new(0);
+/// 処理が受けて、まだ Python の処理の区切り([`check_signals`])で扱っていない信号の印(番号のビット)。
+/// 旧 Python は C の処理で印を立て、処理の区切りで、立った印の Python の処理を小さい番号から順に走らせる
+/// (本家 3.10 の `trip_signal` と `_PyErr_CheckSignalsTstate`)。同時に届いた TERM・INT・HUP の扱いを合わせる。
+static TRIPPED_FIRST: AtomicU64 = AtomicU64::new(0);
+static TRIPPED_LATEST: AtomicU64 = AtomicU64::new(0);
+
+fn signal_bit(number: libc::c_int) -> u64 {
+    if (1..64).contains(&number) {
+        1 << number
+    } else {
+        0
+    }
+}
 
 extern "C" fn record_first(number: libc::c_int) {
-    let _ = FIRST.compare_exchange(0, number, Ordering::SeqCst, Ordering::SeqCst);
+    TRIPPED_FIRST.fetch_or(signal_bit(number), Ordering::SeqCst);
 }
 
 extern "C" fn record_latest(number: libc::c_int) {
-    LATEST.store(number, Ordering::SeqCst);
+    TRIPPED_LATEST.fetch_or(signal_bit(number), Ordering::SeqCst);
+}
+
+/// 旧 Python の処理の区切り(`PyErr_CheckSignals`)。印の立った信号の Python の処理を、小さい番号から順に走らせる。
+/// - [`Handler::RecordFirst`](旧版 `StopSignals.receive` の `number = number or n`): 前に無ければ、一番小さい番号。
+/// - [`Handler::RecordLatest`](旧版 `interrupted` の `STOP = n`): 最後に走るのは一番大きい番号。
+pub fn check_signals() {
+    let latest = TRIPPED_LATEST.swap(0, Ordering::SeqCst);
+    if latest != 0 {
+        LATEST.store(63 - latest.leading_zeros() as i32, Ordering::SeqCst);
+    }
+    let first = TRIPPED_FIRST.swap(0, Ordering::SeqCst);
+    if first != 0 {
+        let _ = FIRST.compare_exchange(
+            0,
+            first.trailing_zeros() as i32,
+            Ordering::SeqCst,
+            Ordering::SeqCst,
+        );
+    }
 }
 
 extern "C" fn do_nothing(_number: libc::c_int) {}
@@ -415,8 +471,11 @@ pub enum Disposition {
     Caught,
 }
 
-/// 処理を置き、前の処理を返す。CPython 3.10 の `PyOS_setsig` と同じく `SA_ONSTACK` だけを付け
-/// (`SA_RESTART` は付けない)、`sa_mask` は空にする。
+/// 処理を置き、前の処理を返す。`SA_RESTART` は付けず、`sa_mask` は空にする(CPython 3.10 の `PyOS_setsig`)。
+/// `SA_ONSTACK` は付けない。CPython は `SA_ONSTACK` を付けるが、旧版の Python の主のスレッドには代わりの信号の
+/// スタック(sigaltstack)が無いので、処理は普通のスタックで動く。Rust の実行時は主のスレッドに小さな代わりの
+/// スタックを置くので、`SA_ONSTACK` を付けると、TERM・INT・HUP が同時に届いて処理が入れ子になったときに
+/// 代わりのスタックを越えて SIGSEGV で落ちる(比較器の cp-anchor-* で見つけた)。普通のスタックで動かして旧版に合わせる。
 pub fn set_handler(number: i32, handler: Handler) -> io::Result<Previous> {
     let pointer: libc::sighandler_t = match handler {
         Handler::Default => libc::SIG_DFL,
@@ -428,7 +487,7 @@ pub fn set_handler(number: i32, handler: Handler) -> io::Result<Previous> {
     // SAFETY: sigaction を 0 で埋めてから必要な欄だけ設定する。
     let mut action: libc::sigaction = unsafe { std::mem::zeroed() };
     action.sa_sigaction = pointer;
-    action.sa_flags = libc::SA_ONSTACK;
+    action.sa_flags = 0;
     // SAFETY: `action.sa_mask` は有効な sigset_t。
     if unsafe { libc::sigemptyset(&mut action.sa_mask) } != 0 {
         return Err(last_error());
@@ -503,23 +562,28 @@ pub fn disposition(number: i32) -> io::Result<Disposition> {
     })
 }
 
-/// [`Handler::RecordFirst`] が記録した最初の番号(無ければ 0)。
+/// [`Handler::RecordFirst`] が記録した最初の番号(無ければ 0)。読む前に処理の区切り([`check_signals`])を通す。
 pub fn first_signal() -> i32 {
+    check_signals();
     FIRST.load(Ordering::SeqCst)
 }
 
 /// [`Handler::RecordFirst`] の記録を消す(旧版 `StopSignals.__init__` の `number = 0`)。
 pub fn clear_first_signal() {
+    TRIPPED_FIRST.store(0, Ordering::SeqCst);
     FIRST.store(0, Ordering::SeqCst);
 }
 
-/// [`Handler::RecordLatest`] が記録した最後の番号(無ければ 0)。
+/// [`Handler::RecordLatest`] が記録した最後の番号(無ければ 0)。読む前に処理の区切り([`check_signals`])を通す。
 pub fn latest_signal() -> i32 {
+    check_signals();
     LATEST.load(Ordering::SeqCst)
 }
 
-/// [`Handler::RecordLatest`] の記録を書く(旧版 `setup` の `interrupted(signal.SIGTERM, None)`)。
+/// [`Handler::RecordLatest`] の記録を書く(旧版 `setup` の `interrupted(signal.SIGTERM, None)`。Python の処理なので、
+/// 前に処理の区切りを通す)。
 pub fn set_latest_signal(number: i32) {
+    check_signals();
     LATEST.store(number, Ordering::SeqCst);
 }
 

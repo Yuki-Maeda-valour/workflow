@@ -3,8 +3,9 @@
 //!   (本家 3.10.11 の `Objects/exceptions.c` の `OSError_str`)。
 //! - strerror(2026-11-12 08:55 の決定): Rust が基準の機械の表を持って出す(OS の strerror を呼ばない)。
 //!   Linux は R4U の glibc の表(`oserror::glibc_strerror`)、Mac は Apple の公開の Libc の
-//!   `gen/errlst.c` の errno 1〜106 の表。表に無い番号は libc と同じ形(Linux `Unknown error <n>`、
-//!   Mac `Unknown error: <n>`)。表を選ぶのは組み立ての時点の判定(cfg)。
+//!   `gen/errlst.c` の errno 1〜107 の表(107 は CI の macOS 15 の実行時の `os.strerror(107)`。設計の 08:55)。
+//!   表に無い番号は libc と同じ形(Linux `Unknown error <n>`、Mac `Unknown error: <n>`)。表を選ぶのは組み立ての
+//!   時点の判定(cfg)。
 //! - `TimeoutExpired`: `Command '<argv の list の repr>' timed out after <秒> seconds`。
 //! - pathlib: `str(PurePosixPath(directory) / name)`。
 
@@ -13,9 +14,11 @@ use super::oserror::{self, Os};
 use super::path::PurePath;
 use super::value::{self, PyValue};
 
-/// Apple の Libc(`gen/errlst.c`)の `sys_errlist` の errno 1〜106。
-/// 出典: <https://github.com/apple-oss-distributions/Libc> の `gen/errlst.c`(106 は EQFULL)。
-pub const MAC_STRERROR: [&str; 106] = [
+/// Apple の Libc(`gen/errlst.c`)の `sys_errlist` の errno 1〜107。
+/// 出典: <https://github.com/apple-oss-distributions/Libc> の `gen/errlst.c`(106 は EQFULL、107 は ENOTCAPABLE)。
+/// 107 は、CI の macOS 15(macos-15・macos-15-intel)の旧版の Python の `os.strerror(107)` と同じ文
+/// (commit 5fbf05d の CI。SDK 15.5 の `sys/errno.h` の ELAST は 106 だが、実行時の C の標準ライブラリは 107 まで持つ)。
+pub const MAC_STRERROR: [&str; 107] = [
     "Operation not permitted",
     "No such file or directory",
     "No such process",
@@ -122,10 +125,11 @@ pub const MAC_STRERROR: [&str; 106] = [
     "State not recoverable",
     "Previous owner died",
     "Interface output queue is full",
+    "Capabilities insufficient",
 ];
 
 /// Mac(Apple の Libc)の strerror。0 は `sys_errlist[0]` の `Undefined error: 0`。表に無い番号
-/// (107 以上と負の数)は `Unknown error: <n>`(`__errstr`)。
+/// (108 以上と負の数)は `Unknown error: <n>`(`__errstr`)。
 pub fn mac_strerror(errno: i32) -> String {
     if errno == 0 {
         return "Undefined error: 0".to_owned();

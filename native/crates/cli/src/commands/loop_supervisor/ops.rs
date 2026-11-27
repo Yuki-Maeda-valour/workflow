@@ -494,7 +494,8 @@ impl Ops for Real {
         if nanoseconds < 0.0 {
             return Err(PyErr::value("sleep length must be non-negative"));
         }
-        std::thread::sleep(Duration::from_nanos(nanoseconds as u64));
+        // 本家 3.10 の pysleep と同じく、信号で起きたら Python の処理を走らせて残りを眠る。
+        os::sleep(Duration::from_nanos(nanoseconds as u64));
         Ok(())
     }
 
@@ -716,7 +717,7 @@ impl Ops for Real {
                 return Err(WaitFailure::Timeout);
             }
             delay = (delay * 2.0).min(remaining).min(0.05);
-            std::thread::sleep(Duration::from_secs_f64(delay));
+            os::sleep(Duration::from_secs_f64(delay));
         }
     }
 
@@ -745,6 +746,8 @@ impl Ops for Real {
                 Err(os::SelectError::Os(error))
                     if error.raw_os_error() == Some(os::errno::EINTR) =>
                 {
+                    // PEP 475: 受けた信号の Python の処理を走らせてから、残りの期限で繰り返す。
+                    os::check_signals();
                     if Instant::now() >= end {
                         return Ok(false);
                     }

@@ -1940,6 +1940,90 @@ CIの時間の見積り(推測。CIでは未測定):
   - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になる。Mac arm64とLinuxの機種には、この倍率は当たらない。どちらの見積りも、PRのCIの実測で確かめる。
 - 50分を超えるかどうかは、PRのCIで機種ごとの時間を記録して決める。超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直す案を、設計に追記してレビューに通す。既存の上限は、理由と実測なしに変えない。
 
+### R4Qの比較
+
+#494 の品質の実行の子の監督(旧 `check-process.py` と `loop-supervisor.py`)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と全コマンド共通の決定の当て方](design.md#r4q品質の実行の子の監督)、[部品と入口](../native/README.md#r4q品質の実行の子の監督)を参照する。
+比較は、テストの引数 `--r4q-compare` を付けたときだけ流れる。`--r4q-compare` を付けない `cargo test --locked`(CI の `build`)では流れない。
+CI では必須ジョブ `r4q` で流れる(2026-11-12 12:59 の決定)。別に作る検査用の実行物(example)は無い。
+
+```text
+cargo test --locked                                   (CI の build。比較は流さない)
+  -> r4q(harness = false。crates/cli/tests/r4q.rs)
+     -> 「R4Q の比較は流していない: 」で始まる 1 行を出して終了 0(比較の合格に数えない)
+  -> r4q_units(固定期待と差し替えの単体テスト)
+
+cargo test --locked -p dev-workflow-cli --test r4q -- --r4q-compare
+                                                      (CI のジョブ r4q の build.py r4q)
+  -> r4q
+     -> python3 -B native/ci/check_r4q.py --rust <今回のテスト実行物>
+        -> 旧版(R4Q_PYTHON)・固定期待・Rust の比較 832 件(Linux)
+     -> python3 -B native/ci/test_r4q.py(比較器の自己検査 43 件)
+```
+
+#### 流し方
+
+要るものは次のとおりである。どれかが欠けると、省かずに失敗する。
+
+- 本家 CPython 3.10.11 と同じ中身で、Linux では pidfd(`os.pidfd_open` と `signal.pidfd_send_signal`)がある Python。旧版を動かす。`R4Q_PYTHON` で渡す。
+  - 標準ライブラリの行番号を比べるので、比較器は、旧版の動きに関わる標準ライブラリの固定の一覧を、本家の SHA-256 の表と照らす。違えば失敗にする(skip にしない)。
+  - 作業機の uv の 3.10.11 には pidfd が無い。作業機の Ubuntu の 3.10.12 は `argparse.py` の行番号が違う。どちらも失敗する。
+  - CI は `actions/setup-python` の 3.10.11 を使う。Linux 2種は pidfd がある。
+- 作業機では、本家のソースから 3.10.11 を作る。`libffi-dev` が要る。
+  - 本家のソース `Python-3.10.11.tgz` を、空の一時フォルダへ取り出す。
+  - 取り出したフォルダで `./configure --prefix=<リポジトリの外の置き場> --without-ensurepip` → `make` → `make install` を流す。
+  - 置き場の `bin/python3.10` を `R4Q_PYTHON` に渡す。
+  - 作った Python は、`argparse.py`・`subprocess.py`・`json`・`signal.py`・`pathlib.py`・`posixpath.py` を含む8ファイルが、CI の 3.10.11 と同じ中身だった。
+- root 以外の通常利用者。
+- C コンパイラ `cc`。品質コマンドの代わりに動く観測用のプログラム `r4q_probe.c` を、比較器が一時フォルダで組む。
+- 比較器と自己検査を動かす PATH の `python3`(3.10系)。
+- `TMPDIR`(リポジトリの外の、自分だけが書けるフォルダ。CI は `RUNNER_TEMP`)。比較器と自己検査は、この下にだけ一時フォルダを作り、作って控えた正確なパスだけを消す。どちらも無ければ止まる(`/tmp` などの共有の場所へは作らない)。
+
+リポジトリ直下で実行する。出力先はリポジトリの外に置く。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+rustup target add --toolchain 1.99.1 x86_64-unknown-linux-musl
+(cd native && TMPDIR=<リポジトリの外の、自分だけが書けるフォルダ> R4Q_PYTHON=<本家のソースから作った 3.10.11 の python3.10> \
+  cargo test --locked --target x86_64-unknown-linux-musl -p dev-workflow-cli --test r4q -- --r4q-compare)
+TMPDIR=<同じフォルダ> R4Q_PYTHON=<同じ python3.10> python3 -B native/ci/test_r4q.py
+(cd native && cargo test --locked -p dev-workflow-cli --test r4q_units)
+```
+
+- Linux は、配布と同じ musl の対象で作る(CI の `build.py r4q` も同じ)。
+- `--r4q-compare` を付けない `cargo test --locked` では比較が流れない。`r4q` のテストは `R4Q の比較は流していない: ` で始まる1行を出して終了0になる。これを比較の合格の代わりにしない。
+- `--r4q-compare` の入口は `PR_SET_CHILD_SUBREAPER` を設定しない。自己検査の、比較器を KILL した後の補助の回収の確かめが、この前提を使うためである。
+- 作業機は、通常の環境か `docker run --init` の容器で流す。子を回収する者のいない環境(init の無い容器など)では、自己検査の確かめが失敗として見つかる。
+- 手元の Linux x86_64 での結果: 比較832件・未実施0件・自己検査43件。時間は下の「件数と時間」にある。
+
+#### 比べる中身
+
+- 実プロセスのケースは、旧版と Rust を同じ入力・同じ環境で流し、旧版の親・Rust の親 × 旧版の監督・Rust の監督の4つの組で比べる。返す辞書・誤りの文・出力のファイル・記録のバイト列・品質コマンドが見る状態・残るプロセスを見る。
+  - 監督の argv は、Linux は `/proc/<pid>/cmdline` で、Mac は `r4q_probe` が `sysctl` の KERN_PROCARGS2 で親の argv を NUL 区切りのまま読む(`ps -o command=` は引数を空白で連ねるので、切れ目を戻せないため)。Mac の実機では未確認で、PR 用の CI で確かめる。親が生きているはずのケースで読めなければ、両側とも読めなくても不合格にする。
+  - loop.sh の `supervisor-result` を、`scripts/test_loop_supervisor.py` と同じ形で loop.sh から取り出し、旧版と Rust の記録の両方に当てる。
+- 実プロセスで起こせない経路(記録の ENOSPC と EIO・pid の再使用・`/proc` の読取りの失敗・EPERM が続く・時計に依る回数など)は、OS の操作と時計を差し替えた単体の比較で比べる。
+  - 固定期待は `native/fixtures/r4q/injected.json`(旧版の関数の mock で `gen_injected.py` が作る)。Rust の単体テスト `r4q_units.rs` が、ケースごとに照らす。
+  - 比較器は、`R4Q_PYTHON` で `gen_injected.py` を流し直し、`injected.json` とバイト列で同じことを確かめる。
+- 緩める欄は、Issue #494 の閉じた一覧の欄だけである。比較器は、緩めた欄の名前と件数をケースごとに出す。
+  - 例: POSIX の方式の grace=0 の時間切れで品質コマンドが受けた TERM の数は、TERM の直後に KILL が来る競り合いで決まるので、両方とも0か1であることを確かめて両方の数を記録する(06:58)。Linux の方式の grace=0 は0回をそのまま比べる。POSIX の方式で grace=0 のときに TERM を送らない誤りは、差し替えの `inj-rc-posix-timeout-grace0` の呼出しの並びで見つける。
+- 旧版の不具合に当たる動き(SIGCHLD を無視で受け継いだ起動。[設計](design.md#旧版の不具合に当たる動きも合わせる))は、旧版と同じ結果になることを、ケースで比べる。旧版の親 × Rust の監督の組は `rc-posix-sigchld-ignored-legacy-rust` で流す。
+- 実時間で効く上限は、実プロセスのケースで確かめる。品質コマンドの所要時間は、期限の10分の1以下か10倍以上にする。
+- Mac で行わなくてよいケースは、閉じた一覧(`/dev/full` が無い・UTF-8 でない名前を作れない・setup の後で結果が決まる `ls-` のケース・anchor の KILL の通知の後で推定が成り立たないとき)だけである。この一覧に無い未実施は失敗にする。
+- 子の環境は、前提の外の変数(`PYTHONPATH` など)を外して起動する。入力のファイルが変わらないことと、残るプロセスが無いこと(保証の外のケースは、旧版と同じこと)も確かめる。
+- 一時フォルダは、比較器が作って控えた正確なパスだけを消す。
+
+#### 件数と時間
+
+- 必須のケースの件数: Linux は832件。内訳は、前提の strerror の確かめ1・差し替え(`inj-`)198・`ls-` 75・`cp-` 46・`rc-` 408・`probe-` 72・`py-` 29・`loop-` 3。
+  - Mac は589件。Linux の832件から Linux の方式の248件(`rc-linux-*` 212件・`probe-linux-*` 36件)を外し、Mac だけの5件(`ls-mac-setup` 1件・`rc-linux-reject-*` 4件)を足した数である(832−248+5=589)。比較器の一覧から数えた値で、Mac の実機ではまだ流していない(未確認。PR 用の CI で確かめる)。
+  - Mac で流さない閉じた一覧の `ls-` の37件は、一覧に残して未実施として数える。Mac で出るはずの未実施は、`ls-` 37件・`py-stderr-devfull` 1件と、条件つきの `rc-posix-directory-non-utf8-*` 4件(UTF-8 でない名前を作れないとき)と `rc-posix-anchor-killed-after-notice-*` 4件(pause に入ったことを期限内に確かめられないとき)まで。
+  - ケースの一覧は、件数と SHA-256 を比較器の `CASE_LIST` に固定している。欠けと重なりは不合格になる。
+- 自己検査の件数: 43件。作業機の Linux で58.1秒(ほかの作業で混んだ時〈負荷平均約20〉は107.5秒)。
+- 手元の Linux x86_64 の所要時間: `--r4q-compare` の全体(比較器と自己検査を並べて流す)は2分39秒(比較器158.7秒・自己検査57.9秒)。ほかの作業で混んだ時(負荷平均約10)は3分5秒(比較器185.0秒)。`build.py r4q --platform linux-x86_64` の全体は、混んだ時に3分11秒。さらに混んだ時(負荷平均約20)は、`--r4q-compare` が4分21秒(比較器257.1秒・自己検査108.2秒)、`build.py r4q` が4分32秒だった(差し替えのケースを1件足した後の832件)。未実施は0件。
+- CI の4機種の所要時間と、ジョブ `r4q` の上限をこの値に決めた理由は、Issue #494 と PR の本文に書く。上限はいま60分(ジョブ)、`R4Q_TIMEOUT` は3300秒である。最も長い所要時間が上限の3分の2を超えたときは、上限を直す。
+- Mac の CI の errno の表の確かめ(108〜1024が `Unknown error: <n>` になること・SDK の `ELAST` が表の最後の番号 107 を超えないこと)は、Issue #494 と PR の本文に書く。
+- 比較に要る時間は、作業機の Linux x86_64 は実測(上の値)。CI の4機種は PR 用の CI で測り、Issue #494 と PR の本文に書く。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。

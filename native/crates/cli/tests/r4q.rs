@@ -4,6 +4,8 @@
 //! - `--r4q-check-process <旧版と同じ引数…>`: check-process の監督として動く(`python3 check-process.py …`)。
 //! - `--r4q-run-command <要求の JSON のパス>`: `StopSignals` に入って `run_command` を呼び、結果か誤りを JSON で
 //!   標準出力へ出す(設計の「検査用の要求と結果の JSON の形」)。
+//! - `--r4q-strerror <最大>`: errno 0〜最大の文(Rust の表と、表に無いときの文を合わせた関数の出力)を JSON で
+//!   出す(比較器が 0〜1024 で、旧版の Python の `os.strerror` と照らす。設計の 08:55 の当て方)。
 //! - `--r4q-compare`: `native/ci/check_r4q.py --rust <自分>` と `native/ci/test_r4q.py` を起動し、どちらかの
 //!   失敗・未実行・時間切れでテストを落とす(CI はジョブ `r4q`)。
 //! - 引数なし(素の `cargo test --locked`。CI の build): 比較を流していないことと流し方を 1 行出して終了 0。
@@ -31,6 +33,8 @@ use std::time::{Duration, Instant};
 const LOOP_SUPERVISOR_FLAG: &str = "--r4q-loop-supervisor";
 const CHECK_PROCESS_FLAG: &str = "--r4q-check-process";
 const RUN_COMMAND_FLAG: &str = "--r4q-run-command";
+/// errno の文の表を出す引数(比較器だけが使う)。
+const STRERROR_FLAG: &str = "--r4q-strerror";
 /// 比較器と自己検査を起動するテストの引数(CI のジョブ `r4q` が渡す)。
 const COMPARE_FLAG: &str = "--r4q-compare";
 /// 引数が無いときに出す 1 行。比較器の結果の行の頭(`R4Q の比較: `)とは別の字面にする。
@@ -175,6 +179,16 @@ fn run_command_mode(path: &Path) -> Result<Value, String> {
         _ => return Err("method は linux か posix か null".to_owned()),
     };
     let monitor = match map["monitor"].as_str() {
+        // 明示の形 {"program": <16 進>, "prefix": [<16 進>, …]}(比較器の偽の監督)。
+        None if map["monitor"].is_object() => Monitor {
+            program: os_text(&map["monitor"]["program"])?,
+            prefix: map["monitor"]["prefix"]
+                .as_array()
+                .ok_or("monitor の prefix が配列でない")?
+                .iter()
+                .map(os_text)
+                .collect::<Result<Vec<_>, _>>()?,
+        },
         Some("rust") => Monitor {
             program: std::env::current_exe()
                 .map_err(|error| error.to_string())?
@@ -190,7 +204,7 @@ fn run_command_mode(path: &Path) -> Result<Value, String> {
                     .into_os_string(),
             ],
         },
-        _ => return Err("monitor は legacy か rust".to_owned()),
+        _ => return Err("monitor は legacy か rust か明示の形".to_owned()),
     };
     let directory = PathBuf::from(os_text(&map["directory"])?);
     let keep = map["keep"].as_u64().ok_or("keep が整数でない")? as usize;
@@ -292,12 +306,19 @@ fn compare() -> ExitCode {
                 }
             }
         }
-        assert!(
-            Instant::now() < deadline,
-            "R4Q の比較が時間切れ(全体 {} 秒){}",
-            DEADLINE.as_secs(),
-            failures.join("・")
-        );
+        if Instant::now() >= deadline {
+            // 期限を過ぎたら、起動した比較器と自己検査の両方を止めて回収してから落とす。
+            for checker in checkers.iter_mut().filter(|checker| !checker.done) {
+                let _ = checker.child.kill();
+                checker.child.wait().expect("専用比較器を回収できない");
+                checker.done = true;
+            }
+            panic!(
+                "R4Q の比較が時間切れ(全体 {} 秒)。比較器と自己検査を止めた{}",
+                DEADLINE.as_secs(),
+                failures.join("・")
+            );
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(failures.is_empty(), "{}", failures.join("・"));
@@ -334,9 +355,25 @@ fn main() -> ExitCode {
     if args.len() == 1 && args[0] == COMPARE_FLAG {
         return compare();
     }
+    if args.len() == 2 && args[0] == STRERROR_FLAG {
+        let Some(last) = args[1].to_str().and_then(|text| text.parse::<i32>().ok()) else {
+            eprintln!("{STRERROR_FLAG} の最大の番号が整数でない: {:?}", args[1]);
+            return ExitCode::from(2);
+        };
+        let table: serde_json::Map<String, Value> = (0..=last)
+            .map(|errno| {
+                (
+                    errno.to_string(),
+                    Value::String(loop_supervisor::r4q_python::exception::strerror(errno)),
+                )
+            })
+            .collect();
+        println!("{}", Value::Object(table));
+        return ExitCode::SUCCESS;
+    }
     eprintln!(
-        "受け付ける引数は {LOOP_SUPERVISOR_FLAG}・{CHECK_PROCESS_FLAG}・{RUN_COMMAND_FLAG} <要求>・{COMPARE_FLAG} \
-         か、引数なし: {args:?}"
+        "受け付ける引数は {LOOP_SUPERVISOR_FLAG}・{CHECK_PROCESS_FLAG}・{RUN_COMMAND_FLAG} <要求>・\
+         {STRERROR_FLAG} <最大>・{COMPARE_FLAG} か、引数なし: {args:?}"
     );
     ExitCode::from(2)
 }

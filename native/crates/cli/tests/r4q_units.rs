@@ -707,9 +707,9 @@ fn oserror_messages_types_and_linux_strerror() {
 
 #[test]
 fn mac_strerror_table_from_apple_libc() {
-    // 表の中身は Apple の公開の Libc(gen/errlst.c)から写した。Mac の CI の比較器(単位 3)が、errno 1〜106 の全部と
-    // 107 を旧版の os.strerror と照らす。ここでは表の形と、表に無い番号の文の形を確かめる。
-    assert_eq!(exception::MAC_STRERROR.len(), 106);
+    // 表の中身は Apple の公開の Libc(gen/errlst.c)から写した。Mac の CI の比較器(単位 3)が、errno 0〜1024 の全部を
+    // 旧版の os.strerror と照らす。ここでは表の形と、表に無い番号の文の形を確かめる。
+    assert_eq!(exception::MAC_STRERROR.len(), 107);
     assert_eq!(exception::mac_strerror(1), "Operation not permitted");
     assert_eq!(
         exception::mac_strerror(35),
@@ -723,7 +723,9 @@ fn mac_strerror_table_from_apple_libc() {
         exception::mac_strerror(106),
         "Interface output queue is full"
     );
-    assert_eq!(exception::mac_strerror(107), "Unknown error: 107");
+    // 107 は CI の macOS 15 の 2 機種の旧版の os.strerror(107)(commit 5fbf05d の CI)。108 は表に無い。
+    assert_eq!(exception::mac_strerror(107), "Capabilities insufficient");
+    assert_eq!(exception::mac_strerror(108), "Unknown error: 108");
     assert_eq!(exception::mac_strerror(-1), "Unknown error: -1");
     assert_eq!(
         exception::strerror_on(Os::Macos, 2),
@@ -1170,16 +1172,30 @@ mod os_parts {
             saved.push(os::set_handler(number, Handler::RecordFirst).unwrap());
             let info = os::handler_info(number).unwrap();
             assert_eq!(info.disposition, Disposition::Caught);
-            assert!(!info.restart && info.onstack && info.empty_mask);
+            // SA_ONSTACK を付けない(Rust の主のスレッドの小さな代わりのスタックで入れ子になって落ちないように。
+            // 旧版の Python の主のスレッドには代わりのスタックが無く、処理は普通のスタックで動く)。
+            assert!(!info.restart && !info.onstack && info.empty_mask);
         }
         os::clear_first_signal();
         assert_eq!(os::first_signal(), 0);
+        // 1 つずつ届いた信号は、旧 Python と同じく、届いた後の処理の区切りで 1 つずつ扱う。
         os::signal_current_thread(os::SIGTERM).unwrap();
+        os::check_signals();
         os::signal_current_thread(os::SIGINT).unwrap();
         assert_eq!(os::first_signal(), os::SIGTERM);
         os::clear_first_signal();
         os::signal_current_thread(os::SIGHUP).unwrap();
         assert_eq!(os::first_signal(), os::SIGHUP);
+        // 同時に届いた TERM・INT・HUP(止めておいて一度に通す。処理は入れ子になる)は、旧 Python と同じく
+        // 処理の区切りで小さい番号から順に扱う(最初の 1 つは HUP)。入れ子でも落ちない。
+        os::clear_first_signal();
+        let mask = os::block_signals(&[os::SIGTERM, os::SIGINT, os::SIGHUP]).unwrap();
+        for number in [os::SIGTERM, os::SIGINT, os::SIGHUP] {
+            os::signal_current_thread(number).unwrap();
+        }
+        os::set_mask(&mask).unwrap();
+        assert_eq!(os::first_signal(), os::SIGHUP);
+        os::clear_first_signal();
         // 前の処理へ戻す(既定の処理へ)。
         for previous in saved.iter().rev() {
             os::restore_handler(previous).unwrap();
@@ -1193,10 +1209,32 @@ mod os_parts {
             assert!(!os::handler_info(number).unwrap().restart);
         }
         os::signal_current_thread(os::SIGHUP).unwrap();
+        os::check_signals();
         os::signal_current_thread(os::SIGINT).unwrap();
         assert_eq!(os::latest_signal(), os::SIGINT);
         os::set_latest_signal(os::SIGTERM);
         assert_eq!(os::latest_signal(), os::SIGTERM);
+        // 同時に届いた信号は小さい番号から順に扱うので、最後に残るのは一番大きい番号(TERM)。
+        os::set_latest_signal(0);
+        let mask = os::block_signals(&[os::SIGTERM, os::SIGINT, os::SIGHUP]).unwrap();
+        for number in [os::SIGHUP, os::SIGTERM, os::SIGINT] {
+            os::signal_current_thread(number).unwrap();
+        }
+        os::set_mask(&mask).unwrap();
+        assert_eq!(os::latest_signal(), os::SIGTERM);
+        // 代わりのスタックを使わないので、何もしない処理も入れ子で落ちない(旧版の anchor の TERM・INT・HUP)。
+        let mut nothing = Vec::new();
+        for number in [os::SIGTERM, os::SIGINT, os::SIGHUP] {
+            nothing.push(os::set_handler(number, Handler::Nothing).unwrap());
+        }
+        let mask = os::block_signals(&[os::SIGTERM, os::SIGINT, os::SIGHUP]).unwrap();
+        for number in [os::SIGTERM, os::SIGINT, os::SIGHUP] {
+            os::signal_current_thread(number).unwrap();
+        }
+        os::set_mask(&mask).unwrap();
+        for previous in nothing.iter().rev() {
+            os::restore_handler(previous).unwrap();
+        }
         // 何もしない処理(TERM でも終わらない)。
         let previous = os::set_handler(os::SIGTERM, Handler::Nothing).unwrap();
         assert_eq!(previous.number(), os::SIGTERM);
@@ -1995,7 +2033,7 @@ mod injected {
 
     const INJECTED: &str = include_str!("../../../fixtures/r4q/injected.json");
     /// 固定期待のケースの数(足したら、ここも直す)。
-    const COUNT: usize = 197;
+    const COUNT: usize = 198;
     /// どの機械でも必ず流す ID。
     const FIXED: [&str; 2] = [
         "inj-posix-anchor-killed-after-notice-linux",
@@ -2006,6 +2044,7 @@ mod injected {
     const EPERM: i32 = 1;
     const ESRCH: i32 = 3;
     const SIGINT: i32 = 2;
+    const SIGTERM: i32 = 15;
 
     /// 否定の検査で当てる、わざと誤った振る舞い(誤った操作の並びや応答の扱い)。
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2023,6 +2062,8 @@ mod injected {
         ReapAnchorEarly,
         /// pidfd が無いと POSIX の方式へ切り替える(pidfd の無い Linux を POSIX の OS に見せる)。
         FallbackToPosix,
+        /// POSIX の方式で grace が 0 のとき TERM を送らない(Linux の supervise の形を POSIX へ持ち込む)。
+        SkipTermWithZeroGrace,
     }
 
     /// 差し替えた OS の世界(`gen_injected.py` の `World` と同じ規則)。
@@ -2049,6 +2090,8 @@ mod injected {
         /// 呼出しが上限を超えた(誤った振る舞いの終わらない待ち。時計を先へ飛ばして期限で抜けさせる)。
         exhausted: bool,
         mutation: Mutation,
+        /// 要求の grace が 0(`SkipTermWithZeroGrace` が見る)。
+        grace_zero: bool,
     }
 
     fn chars(text: &str) -> Vec<u32> {
@@ -2118,6 +2161,7 @@ mod injected {
                 keyboard: false,
                 exhausted: false,
                 mutation,
+                grace_zero: false,
             }
         }
 
@@ -2559,6 +2603,12 @@ mod injected {
         }
 
         fn killpg(&mut self, pgid: i32, number: i32) -> OsResult<()> {
+            if self.mutation == Mutation::SkipTermWithZeroGrace
+                && number == SIGTERM
+                && self.grace_zero
+            {
+                return Ok(());
+            }
             if self.mutation == Mutation::ReapAnchorEarly && !self.reaped_early {
                 self.reaped_early = true;
                 self.record(json!(["poll_monitor", pgid]));
@@ -2792,6 +2842,11 @@ mod injected {
     fn run_case(case: &Value, mutation: Mutation) -> (Vec<Value>, Value, Vec<String>) {
         let mut fake = Fake::new(&case["world"], mutation);
         let given = &case["input"];
+        fake.grace_zero = given["grace"]["int"] == "0"
+            || given["grace"]["float"]
+                .as_str()
+                .and_then(|text| text.parse::<f64>().ok())
+                == Some(0.0);
         let result = match case["kind"].as_str().unwrap() {
             "ls" => {
                 let context = Context {
@@ -2928,7 +2983,7 @@ mod injected {
     /// わざと誤った振る舞いを当てると、決まったケースが必ず食い違う(否定の検査)。
     #[test]
     fn broken_behaviours_always_mismatch() {
-        let expected: [(Mutation, &[&str]); 6] = [
+        let expected: [(Mutation, &[&str]); 7] = [
             (
                 Mutation::IgnoreEperm,
                 &[
@@ -2971,6 +3026,10 @@ mod injected {
             (
                 Mutation::FallbackToPosix,
                 &["inj-rc-method-default-linux-without-pidfd"],
+            ),
+            (
+                Mutation::SkipTermWithZeroGrace,
+                &["inj-rc-posix-timeout-grace0"],
             ),
         ];
         for (mutation, ids) in expected {

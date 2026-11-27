@@ -704,6 +704,62 @@ unsafe の置き場は、次の 2 つだけです。
 契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。
 [比較の手順と件数](../docs/testing.md#s2eの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
 
+## R4Q(品質の実行の子の監督)
+
+#494で、旧版 `plugins/dev-workflow/skills/ship-task/scripts/check-process.py` と `loop-supervisor.py` と同じ結果を返す専用の部品を実装しました。
+製品CLIの登録表・help・配布・既存の呼び出し元(`review-guard.py`・`loop.sh`)は変えていません。未登録・未配布です。
+製品の実行物(`dev-workflow`)には入りません。検査用の実行物(`crates/cli/tests/r4q.rs`)だけが読み込みます。
+
+### 入口
+
+- `crates/cli/src/commands/loop_supervisor::run(args: &[OsString]) -> u8` が、`python3 loop-supervisor.py <引数…>` と同じ動作をして終了値を返します。`args` にプログラム名は含めません。
+- `crates/cli/src/commands/check_process::run(args: &[OsString]) -> u8` が、`python3 check-process.py <引数…>`(監督の内部 CLI。anchor と linux worker)と同じ動作をして終了値を返します。
+- `check_process::run_command::run_command(request: &RunRequest, stop: &StopSignals) -> Result<Vec<(PyValue, PyValue)>, RunError>` が、旧版の親の `run_command` と同じ結果を返します。
+  - `RunRequest` は、argv・cwd・env(渡した順。渡さないこともできる)・timeout・directory・grace・method・keep・監督の起動の仕方(`Monitor`)・JSON の整数の桁の上限・呼出元のフレームの数と再帰の上限を持ちます。
+  - timeout と grace は、Python の int と float を区別する値(`PyNumber`)で渡します。`--timeout` の字面を旧版の `str(timeout)` と同じにするためです。
+  - 返す値は、順序付きの辞書を表す `PyValue` の並びです。鍵の順と型を旧版と同じにします。
+  - 誤りは `RunError` の3つです。`Recovery`(回収を確かめられない)・`Interrupted`(停止の信号を受けた)・`Unwrapped`(旧版が包まずに外へ出す例外の型の名前と文)。
+  - `StopSignals::enter()` が TERM・INT・HUP の最初の1つを記録する処理を置き、drop で前の処理へ戻します。
+- 呼び出し側は、長く生きるスレッド(ふつうは main のスレッド)から `run_command` を呼びます。親の死の通知は、監督を起動したスレッドが終わると届くためです。
+
+### 部品
+
+| 場所 | 受け持ち |
+|---|---|
+| `crates/platform/src/r4q_process.rs` | OS の部品。subreaper と親の死の通知・pidfd(`libc::syscall`)・`waitpid`・プロセスグループへの信号・信号の処理の置き方と戻し方・子の起動(fork と exec の誤りを返すパイプ・信号の mask の受け継ぎ・PATH の候補へ順に試す・0〜2のほかの fd を閉じる) |
+| `crates/cli/src/commands/r4q_python/` | Python の再現の純粋な部品。argparse・`int()`・`float()`・`json.dumps`・`json.loads(bytes)`・`OSError` などの文・`TimeoutExpired` の文・pathlib の整え方・呼出履歴の定型 |
+| `crates/cli/src/commands/loop_supervisor/` | loop-supervisor の CLI と `supervise`。OS の操作と時計は trait(差し替えのための型の約束)で受け、製品は本物の実装を使う |
+| `crates/cli/src/commands/check_process/` | check-process の監督と、親の `run_command` |
+
+- `unsafe` は `platform/src/r4q_process.rs` の安全な関数の中だけに置きます。`cli` の R4Q の部品は `#![forbid(unsafe_code)]` です。
+- 子の起動は std の `Command` を使いません。std は子の信号の mask を空にし、SIGCHLD を無視で受け継いだときの起動の失敗で panic するためです。
+- 外部の crate・`rustix` の機能・依存の版は増やしていません。
+- 回収した子の終わり方は、C0c の公開の型 `core::process::ChildStatus` で持ちます。C0c の `run_child` は、子の標準入出力が必ずパイプになるので使いません([設計](../docs/design.md#c0c-との関係))。
+
+### 検査用の実行物
+
+`crates/cli/tests/r4q.rs`(`harness = false`)は、引数で動きを変えます。
+
+- `--r4q-loop-supervisor <旧版と同じ引数…>`: loop-supervisor として動きます。
+- `--r4q-check-process <旧版と同じ引数…>`: check-process の監督として動きます。
+- `--r4q-run-command <要求の JSON のパス>`: `run_command` を呼び、結果か誤りを JSON で出します。
+- `--r4q-strerror <最大>`: errno 0〜最大の文を JSON で出します(比較器が0〜1024で、旧版の `os.strerror` と照らします)。
+- `--r4q-compare`(`cargo test --locked -p dev-workflow-cli --test r4q -- --r4q-compare`): `native/ci/check_r4q.py --rust <自分>` と `native/ci/test_r4q.py` を起動します。どちらかの失敗・未実行・時間切れでテストを落とします。`PR_SET_CHILD_SUBREAPER` は設定しません。
+- 引数が無いとき: 比較を流さず、`R4Q の比較は流していない: ` で始まる1行(流し方を添える)を出して終了0にします。比較の合格には数えません。
+- ほかの引数は受け付けません。
+
+単体テストは `crates/cli/tests/r4q_units.rs`(harness あり)です。固定期待(`native/fixtures/r4q/units.json`)と、OS の操作と時計を差し替えた比較(`native/fixtures/r4q/injected.json`)を照らします。
+
+### 保証の範囲
+
+- Linux は、監督が所有する子孫だけを回収します。同じ利用者の権限の完全な隔離ではありません。
+- Linux 以外は、元のプロセスグループだけを回収します。子孫が setsid で群を抜けた場合は保証しません。
+- Rust にしたことで、この範囲は広がっていません。旧版の不具合に当たる動き(SIGCHLD を無視で受け継いだ起動)も、旧版と同じにしています。
+
+認めた旧版との差と、比較の前提の外は、全コマンドの決定の範囲だけです。時刻つきの一覧は [設計のR4Q節](../docs/design.md#全コマンド共通の決定の当て方r4q)にあります。
+契約は [設計のR4Q節](../docs/design.md#r4q品質の実行の子の監督)にあります。
+[比較の手順と件数](../docs/testing.md#r4qの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。
