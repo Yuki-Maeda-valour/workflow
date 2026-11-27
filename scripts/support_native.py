@@ -24,6 +24,8 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
+import time
 from typing import Callable, Mapping, Sequence
 
 
@@ -64,12 +66,33 @@ class RunResult:
     timed_out: bool
 
 
+# Mac で、群へ送る信号の EPERM を送り直す期限(秒)。
+ZOMBIE_GROUP_WAIT = 5
+
+
 def _signal_group(process, number):
     # 親が先に終わっていても、出力のパイプを持つ子が同じ群に残ることがある。
-    try:
-        os.killpg(process.pid, number)
-    except ProcessLookupError:
-        pass
+    # Mac(XNU)は、回収前の終了済みのプロセスだけが残る群に、ESRCH ではなく EPERM を返す(#289・#526)。
+    # そのときだけ、直接の子はここで回収し(終わっていれば)、ほかは引き取った先の回収を待って送り直す。
+    # 期限を過ぎても EPERM なら、止められない子か、回収されない終了済みの子(親が群の外にいる)が
+    # 残るとみて投げる。Linux などは待たない。
+    deadline = None
+    while True:
+        try:
+            os.killpg(process.pid, number)
+            return
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            if sys.platform != 'darwin':
+                raise
+            now = time.monotonic()
+            if deadline is None:
+                deadline = now + ZOMBIE_GROUP_WAIT
+            if now >= deadline:
+                raise
+            process.poll()
+            time.sleep(.02)
 
 
 def _drain_after_kill(process):
@@ -94,6 +117,7 @@ def run_command(argv, *, cwd, env=None, input=None, timeout=60) -> RunResult:
     辞書は環境全体を置き換える(空の辞書も有効)。input は bytes か None(None は EOF)。
     終了コードが非 0 でも結果を返す。起動不能は OSError をそのまま投げる。
     timeout は秒数(None は無制限)。時間切れなら群へ TERM を送り、最大 1 秒の後に KILL を送る。
+    Mac で群へ送る信号が EPERM になったときは、最大 5 秒、回収を待って送り直す。続けば PermissionError を投げる。
     KILL 後の読み取りも最大 1 秒。終わらなければパイプを閉じ、読めた分だけを返す。
     直接の子を wait で回収してから timed_out=True を返す。
     孫以降はその親か OS が回収する。呼び出し側が Linux の subreaper(孤児を引き取る処理)なら、
