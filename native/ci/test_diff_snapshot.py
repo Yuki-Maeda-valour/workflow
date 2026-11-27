@@ -815,11 +815,12 @@ class LoaderInitializer(unittest.TestCase):
         native=Path(__file__).resolve().parents[1]
         markers=('.init_array','__mod_init_func','link_section')
         source=native/'crates/platform/src'
-        # 次の2ファイルは、ほかの設計がmain前の処理の印を置くので、名前(srcからの相対パス)で外す。
+        # 次のファイルは、ほかの設計がmain前の処理の印を置くので、名前(srcからの相対パス)で外す。
         # R4E(#482)のr4e.rsは、cfg(test)のテストの実行ファイルだけに印を置く。
         # R4G(#479)のr4g/startup.rsは、検査専用入口examples/r4g_contract.rsが展開するマクロの中に印を置く。
-        # どちらも製品のdev-workflowには入らない。ほかのplatformのファイルは今までどおり確かめる。
-        excluded={'r4e.rs','r4g/startup.rs'}
+        # いずれも製品のdev-workflowには入らない。ほかのplatformのファイルは今までどおり確かめる。
+        # S2E(#470)のenvironment_guard.rsは、検査専用入口examples/s2e_contract.rsが展開するマクロの中とplatformのテストにだけ印を置く。製品のdev-workflowには入らない。
+        excluded={'r4e.rs','r4g/startup.rs','environment_guard.rs'}
         seen=set()
         for path in sorted(source.rglob('*.rs')):
             relative=path.relative_to(source).as_posix()

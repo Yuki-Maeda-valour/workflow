@@ -869,11 +869,22 @@ class Comparator(unittest.TestCase):
                     self.assertIs(self.m.pid_alive(1234), alive)
 
     def test_process_report_collects_the_state_and_says_when_missing(self):
+        # Linux の機械では、Mac の形(ps で読む形)も sys.platform を差し替えて流す(#524)。
+        # check_r4g.py も同じ sys を見るので、process_report と process_state も ps で読む。
+        forms = ['linux', 'darwin'] if sys.platform.startswith('linux') else [sys.platform]
+        for form in forms:
+            with self.subTest(form=form), mock.patch.object(self.m.sys, 'platform', form):
+                self.check_process_report(form.startswith('linux'))
+
+    def check_process_report(self, linux_form):
+        # ps の状態の文字(macOS の I・R・S・T・U・Z と、procps の D・I・R・S・T・t・W・X・Z を合わせた組)。
+        ps_states = set('DIRSTtUWXZ')
         pid = os.getpid()
         report = self.m.process_report(pid)
         self.assertNotIn('\n', report)
         self.assertIn('pid %d' % pid, report)
-        if sys.platform.startswith('linux'):
+        if linux_form:
+            # Linux の形は、自分の /proc を自分で読む間は R に決まるので(推測)、2 回の読みを比べたままにする。
             self.assertIn('stat=%d (' % pid, report)
             self.assertIn('State:' + self.m.process_state(pid), report)
             self.assertIn('PPid:%d' % os.getppid(), report)
@@ -881,9 +892,13 @@ class Comparator(unittest.TestCase):
             self.assertIn('SigCgt:', report)
             self.assertIn('wchan=', report)
         else:
+            # ps の形では、自分の状態の文字は ps を待つ間に R と S が入れ替わるので、2 回の読みを比べない(#524)。
+            # 2 回の読みは、状態が T に決まる止めた子で比べる。
             fields = report.split()
+            self.assertEqual(fields[2], str(pid))
             self.assertEqual(fields[3], str(os.getppid()))
-            self.assertEqual(fields[5][:1], self.m.process_state(pid))
+            self.assertEqual(fields[4], str(os.getpgrp()))
+            self.assertIn(fields[5][:1], ps_states)
         # 改行を含む引数で起動した子でも、1 行になる(子は自分で止めて回収する)。
         child = subprocess.Popen([sys.executable, '-I', '-c', 'import time\ntime.sleep(30)'])
         try:
@@ -892,12 +907,23 @@ class Comparator(unittest.TestCase):
                 time.sleep(0.05)  # 起動の途中(引数がまだ見えない間)を待つ
             multi = self.m.process_report(child.pid)
             self.assertIn('time.sleep', multi)
+            # 止めた子は状態が T に決まる。process_report の状態の欄と process_state が同じになる。
+            os.kill(child.pid, signal.SIGSTOP)
+            self.m.wait_state(child.pid, lambda state: state in ('T', 't'), '止めた子', timeout=10)
+            state = self.m.process_state(child.pid)
+            stopped = self.m.process_report(child.pid)
+            self.assertNotIn('\n', stopped)
+            self.assertIn('pid %d' % child.pid, stopped)
+            if linux_form:
+                self.assertIn('State:' + state, stopped)
+            else:
+                self.assertEqual(stopped.split()[5][:1], state)
         finally:
             child.kill()
             child.wait()
         self.assertNotIn('\n', multi)
         self.assertIn('pid %d' % child.pid, multi)
-        if sys.platform.startswith('linux'):
+        if linux_form:
             self.assertIn('\\n', multi)
         # 回収した子の番号は、例外を投げずに「無い」と返す。
         self.assertEqual(self.m.process_report(child.pid), 'pid %d: 無い' % child.pid)
