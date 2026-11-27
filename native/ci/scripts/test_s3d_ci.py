@@ -142,8 +142,9 @@ class S3DCiTests(unittest.TestCase):
             with self.assertRaises(subprocess.CalledProcessError):
                 build.quality('linux-x86_64', self.root)
         # prepare は S3D の道具を入れない(S3D の道具は比較のジョブだけで入れる)。
-        with mock.patch.object(build, 'target_config', return_value=('target', None)), mock.patch.object(build, 'run'), \
-                mock.patch.object(s3d_ci, 'prepare_tools') as prepare:
+        with mock.patch.dict(os.environ), mock.patch.object(build, 'target_config', return_value=('target', None)), \
+                mock.patch.object(build, 'run'), mock.patch.object(s3d_ci, 'prepare_tools') as prepare:
+            os.environ.pop('GITHUB_ACTIONS', None)
             build.prepare('linux-x86_64')
             prepare.assert_not_called()
 

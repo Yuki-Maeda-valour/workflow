@@ -8,3 +8,6 @@ publish.workspace = true
 [dependencies]
 rustix = { workspace = true, features = ["process", "rand", "stdio", "try_close"] }
 libc.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
