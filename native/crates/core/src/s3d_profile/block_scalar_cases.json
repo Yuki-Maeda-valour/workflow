@@ -1,0 +1,637 @@
+{
+  "python": "3.10.11",
+  "pyyaml": "6.0.3",
+  "helper_sha256": "974fa799a14250966f64591f100c971b1cc43288b822be948b58c849944fee7a",
+  "cases": [
+    {
+      "id": "block-header-000",
+      "raw": "unused: |\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-001",
+      "raw": "unused: |\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-002",
+      "raw": "unused: |\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-003",
+      "raw": "unused: | #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-004",
+      "raw": "unused: | #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-005",
+      "raw": "unused: | #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-006",
+      "raw": "unused: | #0\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-007",
+      "raw": "unused: | #0\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-008",
+      "raw": "unused: | #0\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-009",
+      "raw": "unused: | #123\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-010",
+      "raw": "unused: | #123\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-011",
+      "raw": "unused: | #123\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-012",
+      "raw": "unused: | #+9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-013",
+      "raw": "unused: | #+9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-014",
+      "raw": "unused: | #+9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-015",
+      "raw": "unused: | #-9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-016",
+      "raw": "unused: | #-9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-017",
+      "raw": "unused: | #-9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-018",
+      "raw": "unused: | #9 +2\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-019",
+      "raw": "unused: | #9 +2\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-020",
+      "raw": "unused: | #9 +2\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-021",
+      "raw": "unused: |+ #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-022",
+      "raw": "unused: |+ #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-023",
+      "raw": "unused: |+ #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-024",
+      "raw": "unused: |- #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-025",
+      "raw": "unused: |- #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-026",
+      "raw": "unused: |- #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-027",
+      "raw": "unused: |2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-028",
+      "raw": "unused: |2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-029",
+      "raw": "unused: |2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-030",
+      "raw": "unused: |+2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-031",
+      "raw": "unused: |+2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-032",
+      "raw": "unused: |+2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-033",
+      "raw": "unused: |2+ #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-034",
+      "raw": "unused: |2+ #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-035",
+      "raw": "unused: |2+ #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-036",
+      "raw": "unused: |-2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-037",
+      "raw": "unused: |-2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-038",
+      "raw": "unused: |-2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-039",
+      "raw": "unused: |2- #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-040",
+      "raw": "unused: |2- #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-041",
+      "raw": "unused: |2- #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-042",
+      "raw": "unused: |9 #2\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-043",
+      "raw": "unused: |9 #2\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-044",
+      "raw": "unused: |9 #2\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-045",
+      "raw": "unused: |0\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-046",
+      "raw": "unused: |0\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-047",
+      "raw": "unused: |0\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-048",
+      "raw": "unused: |22\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-049",
+      "raw": "unused: |22\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-050",
+      "raw": "unused: |22\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-051",
+      "raw": "unused: |++\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-052",
+      "raw": "unused: |++\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-053",
+      "raw": "unused: |++\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-054",
+      "raw": "unused: | 2\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-055",
+      "raw": "unused: | 2\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-056",
+      "raw": "unused: | 2\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-057",
+      "raw": "unused: |\t#9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-058",
+      "raw": "unused: |\t#9\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-059",
+      "raw": "unused: |\t#9\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-060",
+      "raw": "unused: |#9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-061",
+      "raw": "unused: |#9\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-062",
+      "raw": "unused: |#9\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-063",
+      "raw": "unused: >\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-064",
+      "raw": "unused: >\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-065",
+      "raw": "unused: >\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-066",
+      "raw": "unused: > #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-067",
+      "raw": "unused: > #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-068",
+      "raw": "unused: > #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-069",
+      "raw": "unused: > #0\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-070",
+      "raw": "unused: > #0\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-071",
+      "raw": "unused: > #0\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-072",
+      "raw": "unused: > #123\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-073",
+      "raw": "unused: > #123\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-074",
+      "raw": "unused: > #123\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-075",
+      "raw": "unused: > #+9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-076",
+      "raw": "unused: > #+9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-077",
+      "raw": "unused: > #+9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-078",
+      "raw": "unused: > #-9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-079",
+      "raw": "unused: > #-9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-080",
+      "raw": "unused: > #-9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-081",
+      "raw": "unused: > #9 +2\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-082",
+      "raw": "unused: > #9 +2\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-083",
+      "raw": "unused: > #9 +2\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-084",
+      "raw": "unused: >+ #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-085",
+      "raw": "unused: >+ #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-086",
+      "raw": "unused: >+ #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-087",
+      "raw": "unused: >- #9\n abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-088",
+      "raw": "unused: >- #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-089",
+      "raw": "unused: >- #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-090",
+      "raw": "unused: >2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-091",
+      "raw": "unused: >2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-092",
+      "raw": "unused: >2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-093",
+      "raw": "unused: >+2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-094",
+      "raw": "unused: >+2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-095",
+      "raw": "unused: >+2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-096",
+      "raw": "unused: >2+ #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-097",
+      "raw": "unused: >2+ #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-098",
+      "raw": "unused: >2+ #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-099",
+      "raw": "unused: >-2 #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-100",
+      "raw": "unused: >-2 #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-101",
+      "raw": "unused: >-2 #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-102",
+      "raw": "unused: >2- #9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-103",
+      "raw": "unused: >2- #9\n  abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-104",
+      "raw": "unused: >2- #9\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-105",
+      "raw": "unused: >9 #2\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-106",
+      "raw": "unused: >9 #2\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-107",
+      "raw": "unused: >9 #2\n         abc\nsecret_paths: [safe]\n",
+      "expected": null
+    },
+    {
+      "id": "block-header-108",
+      "raw": "unused: >0\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-109",
+      "raw": "unused: >0\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-110",
+      "raw": "unused: >0\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-111",
+      "raw": "unused: >22\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-112",
+      "raw": "unused: >22\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-113",
+      "raw": "unused: >22\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-114",
+      "raw": "unused: >++\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-115",
+      "raw": "unused: >++\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-116",
+      "raw": "unused: >++\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-117",
+      "raw": "unused: > 2\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-118",
+      "raw": "unused: > 2\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-119",
+      "raw": "unused: > 2\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-120",
+      "raw": "unused: >\t#9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-121",
+      "raw": "unused: >\t#9\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-122",
+      "raw": "unused: >\t#9\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-123",
+      "raw": "unused: >#9\n abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-124",
+      "raw": "unused: >#9\n  abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    },
+    {
+      "id": "block-header-125",
+      "raw": "unused: >#9\n         abc\nsecret_paths: [safe]\n",
+      "expected": "UnreadableYaml"
+    }
+  ]
+}

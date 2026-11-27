@@ -1,0 +1,241 @@
+{
+ "files": [
+  "test_implementation_git_input.py",
+  "test_implementation_git.py"
+ ],
+ "note": "既存の29件(test_implementation_git.py 19・test_implementation_git_input.py 10)の1対1の対応表。単位5で作成。",
+ "entries": [
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_missing_entry_or_operation",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_cwd_errors",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_expected_hash_shape",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_diff_range_and_combination",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_log_limit_and_show_combination",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_revision_errors",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_path_errors",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_duplicates_and_argparse_errors",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_check_order",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git_input.py",
+   "class": "InputCharacterization",
+   "name": "test_help_output",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "CLIだけの特性テスト。旧版の起動ごとに、同じ引数・環境・作業場所でRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_context_canonical_order_and_binding",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_same_environment_order_and_original_bytes",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_broken_machine_outputs_stop_before_git",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_effective_values_all_four_and_rc",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_target_environment_missing_dependency_and_wrong_root",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_blob_only_and_resolution_failure",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_all_argument_boundaries_before_precheck",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_duplicate_options_all_spellings",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_defaults_allowed_options_and_forced_flags",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "stubのGitと事前検査を使うCLIのテスト。旧版の起動ごとにRustも起動し、出力と、記録の代用品が残す子の起動の列(引数とGIT_の環境の並び)を比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_precheck_exit_codes_timeout_and_git_errors",
+   "kind": "cli-pair-injected",
+   "target": "implementation-git-existing",
+   "reason": "旧版のコピーの期限の書き換え(PRECHECK_TIMEOUT・GIT_TIMEOUTを0.05)を、Rustの--r4g-deadlinesへ対応づける。書き換えていない起動は通常の組"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "StubContractTests",
+   "name": "test_help_strict_input_and_missing_context",
+   "kind": "cli-pair-mock",
+   "target": "test_strict_input_stops_before_precheck",
+   "reason": "CLIの部分(全階層のhelpと照合値の形)は組で比べる。mockの部分(module.mainへNULとsurrogateの文字列を渡し、事前検査を呼ばないこと)は、OSの引数に載る形(UTF-8でないバイト)でRustの起動を比べる。NULと単独のsurrogate(\\ud800)はOSの引数に載らないので旧版だけに当たる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_normal_filter_separate_processes_all_five",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "実Gitと実の事前検査(diff-snapshot.sh)を使うCLIのテスト。旧版の起動ごとにRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_regular_config_change_old_rejected_new_approval_resumes",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "実Gitと実の事前検査(diff-snapshot.sh)を使うCLIのテスト。旧版の起動ごとにRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_literal_paths_all_environment_variants_and_repeat",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "実Gitと実の事前検査(diff-snapshot.sh)を使うCLIのテスト。旧版の起動ごとにRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_index_bytes_stat_refs_and_tracked_files_unchanged",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "実Gitと実の事前検査(diff-snapshot.sh)を使うCLIのテスト。旧版の起動ごとにRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_no_filter_plain_repository",
+   "kind": "cli-pair",
+   "target": "implementation-git-existing",
+   "reason": "実Gitと実の事前検査(diff-snapshot.sh)を使うCLIのテスト。旧版の起動ごとにRustも起動し、全バイトで比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RealRepositoryTests",
+   "name": "test_mutation_removing_only_operation_environment_is_detected",
+   "kind": "cli-pair-injected",
+   "target": "implementation-git-existing",
+   "reason": "旧版のコピーの変異(run_git(cwd, clean_env(), *command))を、Rustの--r4g-mutation operation-envへ対応づける。変異の無い起動は通常の組"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RuntimeAndDocumentTests",
+   "name": "test_runtime_actual_document_command_missing_python_import_and_dependency",
+   "kind": "split",
+   "target": "test_missing_sibling_precheck_script",
+   "reason": "文書の実行環境の確かめ(python3の有無・起動の失敗・importの失敗・版)は旧版の実行環境の前提なので旧版だけに当たる。兄弟のdiff-snapshot.shが無いときの終了20はRustでも比べる"
+  },
+  {
+   "file": "test_implementation_git.py",
+   "class": "RuntimeAndDocumentTests",
+   "name": "test_actual_five_handoff_documents_and_limits",
+   "kind": "legacy-only",
+   "target": "",
+   "reason": "SKILL.mdとreferencesの文書の字面の検査。CLIを起動せず、Rustの動作に当たる部分が無い"
+  }
+ ]
+}

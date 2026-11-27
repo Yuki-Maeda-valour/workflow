@@ -21,7 +21,17 @@ fn marker(line: &str) -> Option<(u8, usize)> {
     (count >= 3).then_some((first, count))
 }
 
-fn fence_flags(lines: &[&str]) -> Result<Vec<bool>, String> {
+/// フェンスの扱い。`task_digest::body` は `Strict`(未閉鎖と対応外の字下げを拒否)。
+/// 旧 candidate-keys・loop-task-text は `Loose`(従来どおり未閉鎖を末尾まで数え、対応外の字下げを通常の行にする)。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FencePolicy {
+    Strict,
+    #[allow(dead_code)]
+    // R4A の専用 example(candidate-keys・loop-task-text)が使う。製品の登録表には載せない。
+    Loose,
+}
+
+pub(crate) fn fence_flags(lines: &[&str], policy: FencePolicy) -> Result<Vec<bool>, String> {
     let mut closing = None;
     let mut flags = Vec::with_capacity(lines.len());
     for line in lines {
@@ -39,7 +49,7 @@ fn fence_flags(lines: &[&str]) -> Result<Vec<bool>, String> {
                 closing = None;
             }
         } else {
-            if candidate.is_none() {
+            if candidate.is_none() && policy == FencePolicy::Strict {
                 let indented = line.trim_start_matches([' ', '\t']);
                 if indented.len() < line.len() && marker(indented).is_some() {
                     return Err(INDENT_ERROR.to_owned());
@@ -49,7 +59,7 @@ fn fence_flags(lines: &[&str]) -> Result<Vec<bool>, String> {
             closing = candidate;
         }
     }
-    if closing.is_some() {
+    if closing.is_some() && policy == FencePolicy::Strict {
         return Err(UNCLOSED_ERROR.to_owned());
     }
     Ok(flags)
@@ -65,7 +75,7 @@ pub fn body(text: &str) -> Result<String, String> {
         .split('\n')
         .map(|line| line.trim_end_matches([' ', '\t']))
         .collect();
-    let fenced = fence_flags(&lines)?;
+    let fenced = fence_flags(&lines, FencePolicy::Strict)?;
     let headings: Vec<_> = lines
         .iter()
         .enumerate()

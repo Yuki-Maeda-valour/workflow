@@ -1,0 +1,318 @@
+{
+ "note": "R4Gで旧版とRustの差として扱ってよいものの一覧。ここに無い差は不合格にする。各項目は決定の日時・出典・対象のコマンドを持つ。対象のケースは各単位の比較の節が、この名前で指す。",
+ "decisions": [
+  {
+   "id": "location-fields",
+   "decided_at": "2026-11-11 17:58(21:35に拡張)",
+   "source": "#479 Pythonの入出力と起動・#471 旧版の実行環境のパスの固定名",
+   "summary": "呼出履歴の所在地の欄(旧スクリプト自身のパス・旧Pythonの標準ライブラリの導入先)を固定のファイル名にする。位置と出現数を照らしてから、その欄だけを対応づける。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/traceback",
+    "pending-io/partial-stderr",
+    "implementation-git/existing",
+    "implementation-git/contract",
+    "implementation-git/io",
+    "implementation-git/installed-locale",
+    "implementation-git/timeout-waiting"
+   ]
+  },
+  {
+   "id": "stdlib-line-numbers",
+   "decided_at": "2026-11-11 22:26",
+   "source": "#479 Pythonの入出力と起動",
+   "summary": "標準ライブラリの行番号とソースの行は本家CPython 3.10.11の値に合わせる。標準ライブラリが本家と違うPythonでは比べず、比べたら失敗にする。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": []
+  },
+  {
+   "id": "partial-write",
+   "decided_at": "2026-11-11 22:26",
+   "source": "#479 Pythonの入出力と起動",
+   "summary": "書込みが途中のバイト数までしか通らない条件では、故障のない旧版の出力を固定名に置き換え、同じバイト数で切ったものをRustの期待にする。終了値と標準出力は旧版に合わせる。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/partial-stderr"
+   ]
+  },
+  {
+   "id": "current-thread",
+   "decided_at": "2026-11-11 17:45",
+   "source": "#479 Pythonの入出力と起動・利用者の決定の原文 rust-decision-startup-fatal-diagnostic.txt(2026-11-11 17:45)",
+   "summary": "旧Pythonが起動の時点で落ちたときの診断の Current thread の値は、位置と形式だけを検査する。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/startup-directory",
+    "implementation-git/startup-directory"
+   ]
+  },
+  {
+   "id": "sigint-traceback",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Q3(実行ごと・時刻ごとに変わる出力)",
+   "summary": "SIGINTでの中断は、信号で終わること・終了値・最後の行 KeyboardInterrupt・それまでの標準出力と、子を残さないことを比べる。呼出履歴の途中の行は比べない。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-boundary/sigint",
+    "pending-io/sigint-blocked-pipe",
+    "implementation-git/sigint"
+   ]
+  },
+  {
+   "id": "timeout-fraction",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Q3(実行ごと・時刻ごとに変わる出力)",
+   "summary": "時間切れの文の残り時間の小数は、Pythonの小数の表記の形と、0より大きく期限以下であることだけを検査する。",
+   "commands": [
+    "implementation-git"
+   ],
+   "cases": [
+    "implementation-git/timeout-waiting"
+   ]
+  },
+  {
+   "id": "encoding-fixed",
+   "decided_at": "2026-11-11 22:24",
+   "source": "#479 Pythonの入出力と起動",
+   "summary": "文字コードの設定だけによる差は、UTF-8とsurrogateescapeに固定したRustの期待をケースごとに固定する。旧版の出力は変えない。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/encoding",
+    "implementation-git/encoding"
+   ]
+  },
+  {
+   "id": "installed-locale-lc-ctype",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Pythonの入出力と起動(22:31の回答)",
+   "summary": "旧Pythonの地域設定の強制が子の環境へ足すLC_CTYPEが、入っている地域設定で変わる場合だけ、ケースごとの固定期待に記録する。",
+   "commands": [
+    "implementation-git"
+   ],
+   "cases": [
+    "implementation-git/installed-locale"
+   ]
+  },
+  {
+   "id": "bash-own-lines-english",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Q1(旧bashの実行環境)",
+   "summary": "bash自身が出す行(書込みエラー・コマンドが見つからない・リダイレクトの失敗とstrerrorの翻訳・setlocaleの警告)は、LC_ALL=Cの英語の文面に固定する。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/language"
+   ]
+  },
+  {
+   "id": "child-env-order",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Q1(旧bashの実行環境)",
+   "summary": "子の環境は、旧bashが渡す値の集合(PWD・SHLVL・_を含む)を比べ、並びは比べない。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/calls"
+   ]
+  },
+  {
+   "id": "bash-tools-baseline",
+   "decided_at": "2026-11-12 00:35",
+   "source": "利用者の決定の原文 rust-decision-bash-tools.txt(S3D #472のAを全コマンドへ)",
+   "summary": "Rustが作るbash自身の行(子の起動の失敗など)とcoreutilsなどの失敗の文面、bashが子に渡すSHLVLなどの基準を、CIのUbuntu 24.04の版(bash 5.2.21・coreutils 9.4・findutils 4.9.0・sed 4.9)に固定する。ほかの版の旧版との文面とSHLVLの差は認める。比較器は版を確かめ、基準と違う機械ではその比較を失敗にする(成功やskipにしない。Macで同じ版を用意できなければ未実施と記録)。setlocaleの警告はbash-own-lines-englishで扱う。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-tools",
+    "reviews-contract",
+    "reviews-signals",
+    "reviews-dir-filter-env"
+   ]
+  },
+  {
+   "id": "write-failure-midway",
+   "decided_at": "2026-11-12 00:28",
+   "source": "利用者の決定の原文 rust-decision-failure-modes.txt(R4E #482のQ1のAを全コマンドへ)",
+   "summary": "書込みの途中の失敗(ENOSPC・EFBIG・EIOなど)で、失敗の位置が実装で変わる場合は、終了値・空の標準出力・呼出履歴の先頭から呼出元の行まで・最後の行(例外の型と文)・入力の無変更・ほかのファイルを作らないことを比べる。最初の書き出しで失敗する場合は所在地の欄のほかは全部の行を比べる。R4Gは書込みの位置を旧版と同じにするので、全バイトで比べ、この決定を当てるケースは無い。",
+   "commands": [
+    "pending-implementation",
+    "reviews-dir",
+    "implementation-git"
+   ],
+   "cases": []
+  },
+  {
+   "id": "per-run-values",
+   "decided_at": "2026-11-11 22:31",
+   "source": "#479 Q3(実行ごと・時刻ごとに変わる出力)の「安定した部分だけを比べる」",
+   "summary": "実行ごとに変わる値の欄だけを伏せて比べる: 旧bashが子の終わり方を知らせる行の番号(pid)。行の形・文・ほかの欄は全部比べる。伏せた番号の並びは、job-pid-sequence(2026-11-12 06:58)で記録した子の番号の並びと等しいことを確かめる。mktempの一時ファイルの名前は、旧版とRustの両方へ同じmktempの代用品を与えて決まった値にし、この決定から外した(2026-11-12 単位5の指示)。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/job-pid"
+   ]
+  },
+  {
+   "id": "partial-write-fits",
+   "decided_at": "2026-11-11 22:38",
+   "source": "利用者の決定の原文 rust-decision-script-path-in-diagnostic.txt の【追加の決定 2】",
+   "summary": "固定名に置き換えて短くなった出力に途中までの書込みの故障を当てる。置き換えた書込みが切れないときは、故障の無かった旧版の結果(所在地を固定名にした出力・終了値・標準出力)と一致することを確かめる(故障ありの旧版との終了値の差、例えば 120 と 1 は認める)。両方が切れるときは partial-write のとおり。",
+   "commands": [
+    "pending-implementation",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/partial-stderr"
+   ]
+  },
+  {
+   "id": "runtime-added-child-env",
+   "decided_at": "2026-11-12 02:41",
+   "source": "rust-decision-runtime-env.txt 【追加の決定】(2026-11-12 02:41)",
+   "summary": "旧版の実行環境やOSの部品が旧版の子の環境へ自分で足す値(Macの旧Python・CoreFoundationの__CF_USER_TEXT_ENCODINGなど)はRustで再現しない。比較では、その変数だけを子の環境の比較から外し、値と有無を記録する。ほかの子の環境の値の集合と、環境変数だけで決まるLC_CTYPE=C.UTF-8の再現は変えない。",
+   "commands": [
+    "implementation-git",
+    "reviews-dir"
+   ],
+   "cases": [
+    "implementation-git/calls",
+    "reviews-dir/calls",
+    "implementation-git/installed-locale"
+   ]
+  },
+  {
+   "id": "race-unordered-outcome",
+   "decided_at": "2026-11-12 06:58",
+   "source": "rust-decision-runtime-env.txt 【追加の決定 2】(2026-11-12 06:58)・#479 の未決3件・群への信号の2つの値へ当てる管理担当の指示(2026-11-12。reviewer-final-a 2回目の指摘1)",
+   "summary": "競り合いで結果が変わる場面(コマンド置換のサブシェルで待つ間の群へのHUPで、一時ファイルが残るか): 順序を決めた流し方では全部を比べる。順序を決めない流し方では、残るかどうかの一致は求めず、Rustが残した一時ファイルが旧版の残しうる物(決まった名前・.claude/reviews の下)の範囲に収まること・ほかの出力と終了値と状態が一致することを比べ、残った回数を旧版とRustの両方で記録する。同じ流し方の群への信号(INT・TERM・HUP)で、シェルが終わった時点で代用品が残っていたか・標準エラーが開いていたかも、一致は求めず範囲だけを確かめ、回数を記録する(放さずに待った後の値と、ほかの出力と終了値は一致を求める)。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/hup-comsub-race",
+    "reviews-dir/comsub-group-race"
+   ]
+  },
+  {
+   "id": "time-valued-env",
+   "decided_at": "2026-11-12 06:58",
+   "source": "rust-decision-runtime-env.txt 【追加の決定 2】(2026-11-12 06:58)・#479 の未決3件",
+   "summary": "実行の時刻で値が変わる環境変数(旧bashのEPOCHSECONDS・EPOCHREALTIMEを子へ渡す場合): 子の環境のその値の欄だけ、bashの表記の形と、実行の始めから終わりの時刻の間にあることを検査し、ほかは全部を比べる。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/bash-special-vars"
+   ]
+  },
+  {
+   "id": "job-pid-sequence",
+   "decided_at": "2026-11-12 06:58",
+   "source": "rust-decision-runtime-env.txt 【追加の決定 2】(2026-11-12 06:58)・#479 の未決3件",
+   "summary": "実行ごとに変わるプロセスの番号(旧bashが前景の子の信号での終わりを知らせる行のpid): 番号を伏せて全文を比べ(per-run-values)、伏せた番号の並びが、記録した子の番号の並びと等しいことを検査する。番号が出ないケースは素のまま比べる。",
+   "commands": [
+    "reviews-dir"
+   ],
+   "cases": [
+    "reviews-dir/job-pid"
+   ]
+  },
+  {
+   "id": "rust-std-fd-reopen",
+   "decided_at": "2026-11-12 08:55",
+   "source": "rust-decision-s3i-startup.txt(2026-11-12 08:55)の「起動時に閉じた標準の fd(0〜2)」",
+   "summary": "起動時に閉じた標準の fd(0〜2)は、Rust の標準の実行時の初期化(閉じた 0〜2 を /dev/null で開き直す)をそのまま使い、旧版との差(旧helperは閉じた stdout で呼出履歴と終了値1など)を認める。期待は、閉じた fd を/dev/null(読み書き)にして流した旧版の結果(終了値・出力・子の起動の列・状態)で、全部を比べる。製品の入口(main.rs)は変えない。",
+   "commands": [
+    "pending-implementation",
+    "reviews-dir",
+    "implementation-git"
+   ],
+   "cases": [
+    "pending-io/closed-fd",
+    "reviews-dir/closed-fd",
+    "implementation-git/closed-fd"
+   ]
+  },
+  {
+   "id": "strerror-table",
+   "decided_at": "2026-11-12 08:55",
+   "source": "rust-decision-s3i-startup.txt(2026-11-12 08:55)の「書き出しの失敗の文」",
+   "summary": "OSError の2行目などの errno の文(strerror)は、Rust が基準の機械の表を持って出す(Linux は CI のUbuntu 24.04 の glibc 2.39、Mac は CI の macOS で照らす Apple の Libc の表)。表に無い errno が出た場合の差は認め、記録する(今の比較のケースでは出ない)。",
+   "commands": [
+    "pending-implementation",
+    "reviews-dir",
+    "implementation-git"
+   ],
+   "cases": []
+  }
+ ],
+ "outside_premises": [
+  {
+   "id": "bash-startup-env",
+   "decided_at": "2026-11-11 22:31",
+   "summary": "BASH_ENV・BASH_FUNC_<名>%%・SHELLOPTS・BASHOPTS・POSIXLY_CORRECT の効果は再現しない。比較では旧版の環境から除く。"
+  },
+  {
+   "id": "python-startup-env",
+   "decided_at": "2026-11-11 22:31",
+   "summary": "PYTHONPATH・sitecustomize・利用者のsite・PYTHONHOME・PYTHONPROFILEIMPORTTIME・PYTHONVERBOSE・PYTHONINSPECT・PYTHONWARNINGS・PYTHONMALLOC・PYTHONDEVMODE・PYTHONFAULTHANDLER・PYTHONTRACEMALLOC・argparseの翻訳ファイルの効果は再現しない。比較では旧版の環境から除く。"
+  },
+  {
+   "id": "self-referring-paths",
+   "decided_at": "2026-11-11 22:31",
+   "summary": "/proc/self・/dev/fd など自分自身を指すパスを置き場や --cwd に使う入力は、比較の前提の外にする。"
+  },
+  {
+   "id": "broken-tools",
+   "decided_at": "2026-11-11 23:19",
+   "summary": "道具が壊れているときの差のうち、Rust で再現できない経路だけを比較の前提の外にする。R4G で当てるのは、旧bashが実行権のある文字のファイルで shebang の無いもの(ENOEXEC)をシェルのスクリプトとして実行する経路(reviews-dir の起動の失敗のケースの shebang-less)だけ。Rust は起動の失敗(126)にする。PATH に無い道具・実行権の無いファイル・解釈系の無い #!・2 進・ディレクトリなど、bash 5.2.21 の規則で再現できる経路は比べる。R4G は 22:35 の決定(外部コマンドは旧版と同じ引数と環境で起動する)のまま(原文 rust-decision-external-commands.txt。2026-11-11 23:19)。"
+  },
+  {
+   "id": "intermediate-write-failure",
+   "decided_at": "2026-11-12 00:35",
+   "summary": "旧版が一時ディレクトリへ中間のファイルを書く所の故障(一時領域が尽きた・書込みの上限)で旧版が止まる差は、比較の前提の外にする。Rustもファイルへ書く所(gitの出力をファイルへ向ける呼出しなど)の失敗は旧版に合わせる(原文 rust-decision-bash-tools.txt)。"
+  },
+  {
+   "id": "memory-exhaustion",
+   "decided_at": "2026-11-12 00:28",
+   "summary": "記憶域の不足は比較の前提の外にする(Rustの異常終了と旧版のMemoryErrorの差を認める)。位置・大きさが実装で変わる欄も前提の外(原文 rust-decision-failure-modes.txt)。"
+  },
+  {
+   "id": "python-startup-env-more",
+   "decided_at": "2026-11-12 00:28",
+   "summary": "旧Pythonの起動を変える環境変数のうち22:31の一覧に無いもの(PYTHONMALLOCSTATS・PYTHONPLATLIBDIR・PYTHONWARNDEFAULTENCODING・PYTHONPYCACHEPREFIX・PYTHONEXECUTABLEなど)の効果は再現せず、比較の前提の外にする。PYTHONOPTIMIZEと不正なPYTHONHASHSEEDは再現する(原文 rust-decision-failure-modes.txt)。"
+  },
+  {
+   "id": "resource-limits",
+   "decided_at": "2026-11-12 00:42",
+   "summary": "旧版の処理系の資源の使い方で境目が決まる条件(RLIMIT_AS・RLIMIT_NOFILE・RLIMIT_CPU・RLIMIT_STACK・メモリ不足での起動の失敗など)は比較の前提の外にする。比較器はこれらを設定せず、受け継いだ値を記録する。RLIMIT_FSIZEなどの書込みの故障は比べる(原文 rust-decision-failure-modes.txt の追加の決定)。"
+  },
+  {
+   "id": "bash-behavior-env",
+   "decided_at": "2026-11-12 09:58",
+   "summary": "bash が環境から読み込んでスクリプトの動きを変えるほかの変数(BASH_LOADABLES_PATH・CHILD_MAX・EXECIGNORE・FUNCNEST・GLOBIGNORE・POSIX_PEDANTIC・PS4・TIMEFORMAT・TMOUT・TZ・範囲の中の BASH_COMPAT。bash 5.2.21 のvariables.c の初期化と sv_* から作り、check_r4g.py の BASH_BEHAVIOR_ENV に固定)の効果は再現せず、比較の入力に使わない。起動時の警告と子の環境へ渡る値は再現する(原文 rust-decision-runtime-env.txtの【追加の決定 3】)。"
+  }
+ ]
+}
