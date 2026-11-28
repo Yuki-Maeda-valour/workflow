@@ -621,3 +621,42 @@ Macの実機のCIで確かめることは次のとおりです(Linuxの手元で
 - `go`の待ちの上限`GO_TIMEOUT_MAC`の境目: 100000000以下と100000002以上を使います。100000001は旧版でも揺れると推測しています(未確認)。
 - 機種ごとの項目数(Mac 197項目。今の値は`check_s2e.py`の`EXPECTED_ITEMS`)が完全一致し、項目ごとにRustを起動した比較が1件以上あること。
 - 木の深さの端の比較は、Macでは流しません(`DEEP_REASON`でLinuxだけの印)。Macの`PATH_MAX`(1024)では約990段の絶対パスを作れないという推測で、Macでは未確認のままです。
+
+## R4Qの必須比較と検査用実行物
+
+#494の品質の実行の子の監督(旧`check-process.py`と`loop-supervisor.py`)は未登録・未配布です。検査用の入口は、テストの実行物`r4q`(`crates/cli/tests/r4q.rs`。`harness = false`)で、製品のCLIには登録しません。
+契約は [設計のR4Q節](../../docs/design.md#r4q品質の実行の子の監督)、APIは [native/README.md](../README.md#r4q品質の実行の子の監督)、手順と件数は [testing.md](../../docs/testing.md#r4qの比較)にあります。
+
+- 比較は、2026-11-12 12:59の決定のとおり、`build`と`verify-universal`に入れず、必須ジョブ`r4q`で流します。
+  - テストの引数`--r4q-compare`を受けたときだけ、`check_r4q.py --rust <今回のテスト実行物>`と`test_r4q.py`を起動します。どちらかの失敗・未実行・時間切れでテストが落ちます。
+  - 引数が無いとき(`build`の`quality()`が流す、`--r4q-compare`を付けない`cargo test --locked`)は、`R4Q の比較は流していない: `で始まる1行を出して終了0にします。比較の合格には数えません。
+- `build`に残るのは、単体テスト(`r4q_units`)と`cargo clippy --all-targets`の検査だけです。`reproduce`と`verify-universal`はR4Qを流しません。
+- R4Qは検査用の実行物を別に作らず、`CI_BINARIES`・`BUILD_FILES`・`UNIVERSAL_FILES`と、配布用の`native-dist.tar`の5ファイルは変わりません。
+
+```bash
+python3 -B native/ci/build.py r4q --platform linux-x86_64
+```
+
+### ジョブ`r4q`と`build.py r4q`
+
+- `.github/workflows/native.yml`のジョブ`r4q`は、`build`の後に、4機種(Linux 2種・Mac 2種。`fail-fast`なし)で流れます。`build`の成果物は使わず、ジョブの中で検査用の実行物を1回だけ作って比べます(`r4u`と同じ形)。2回目の比較はありません。
+- 上限はいま60分(ジョブ)、`R4Q_TIMEOUT`は3300秒です。最も長いジョブの所要時間が上限の3分の2を超えたときは、上限を直します。CIの4機種の所要時間と、上限をこの値に決めた理由は、Issue #494とPRの本文に書きます。
+- 手順は、checkout・`check_workflow.py`・`actions/setup-python`の3.10.11・`build.py prepare --platform <機械>`・`build.py r4q --platform <機械>`です。
+- `distribution`の`needs`には入れません。Mac共通の実行物は比べないので、`combine`の後のジョブも作りません。
+- `build.py r4q`は、`--platform`が必須です。
+  - Rustが`1.99.1`であることを確かめます。
+  - 比べるPython(`R4Q_PYTHON`。無ければ実行中のPython)を確かめます。CPython 3.10.11・標準ライブラリの固定の一覧が本家と同じ・Linuxでは`os.pidfd_open`と`signal.pidfd_send_signal`があること(自分への pidfd と signal 0 の呼出しも含む)です。確かめの結果は、比較の前にログへ出します。違えば比較の前に止まります。
+  - Mac 2種は、`xcrun`でSDKの`sys/errno.h`の`ELAST`を読み、errnoの文の表の最後の番号(107)を超えないことを確かめます。
+  - 確かめた後、その Python を`R4Q_PYTHON`に渡して、`cargo test --locked -p dev-workflow-cli --test r4q -- --r4q-compare`を流します。Linuxは配布と同じmuslの対象(`--target <CPU>-unknown-linux-musl`)で流します。
+  - 全体の上限は`R4Q_TIMEOUT`(3300秒。ジョブの上限より短くします)です。
+- `check_workflow.py`と`scripts/test_native_ci.py`は、ジョブ`r4q`の形(`build`の後・4機種・上限・手順)と、必須のジョブの数え方を確かめます。
+
+### `check_r4q.py`と`test_r4q.py`
+
+- 比較器`check_r4q.py`は、旧版・固定期待(`native/fixtures/r4q/`)・Rustを比べます。部品は`r4q_legacy_parent.py`(旧版の親)・`r4q_fake_monitor.py`(偽の監督)・`r4q_probe.c`(品質コマンドの代わりに動く観測用のプログラム。`cc`で組みます)です。
+  - 旧版の親は、review-guardと同じく`importlib`で`check-process.py`を読み込んで`run_command`を呼びます。
+  - 偽の監督は、本物の監督が書かない記録と通知(壊れた JSON・nonce の違いなど)を、親へ返すために使います。
+  - Mac用の確かめと、Macで行わなくてよいケースの閉じた一覧は、[testing.md](../../docs/testing.md#r4qの比較)にあります。
+- 自己検査`test_r4q.py`は、わざと誤った Rust の代わり(旧版のコピーを1か所だけ変えたもの)を`--rust`へ渡し、比較器が不合格にすることを確かめます。ケースの欠落・重複・0件・skip・時間切れ・両側の同じ誤り・基準でない Python・外すべき変数の残り・残った一時フォルダとプロセスも、不合格にします。
+  - 比較器を KILL した後も、補助が保持した子が30秒以内に回収されることを、Linuxで確かめます。
+- 件数: 必須のケースはLinuxが832件、Macが589件(PR #552の1回目のPR用のCI〈Nativeのrun 45962269782〉で、Mac 2台とも流しました。固定期待のOS依存などで落ちたので直しました。直した後の結果は、Issue #494とPRの本文に書きます)。自己検査は47件です。ケースの一覧は、件数とSHA-256を比較器の`CASE_LIST`に固定し、欠けと重なりは不合格にします。

@@ -2391,6 +2391,133 @@ Linuxだけにした項目(`check_s2e.py`の`EXPECTED_LINUX_ONLY`)は36件で、
 Macの実機のCIで確かめることは、[CI入口の説明](../native/ci/README.md#s2eの必須比較と検査用実行物)の末尾の一覧にある。
 APIは [native/README.md](../native/README.md#environment-guardの環境照合s2e)、比較の流し方と件数は [testing.md](testing.md#s2eの比較)に記す。
 
+### R4Q(品質の実行の子の監督)
+
+[Issue #494](https://github.com/Yuki-Maeda-valour/workflow/issues/494)で、旧版 `plugins/dev-workflow/skills/ship-task/scripts/check-process.py`(337行)と `loop-supervisor.py`(152行)と同じ結果を返す専用の部品を、開発用Rustソースへ実装した。
+2本は、品質コマンド(書式・型・テストなどの検査のコマンド)の子を監督し、子孫を最後まで止めて回収する。
+製品CLIの登録表(`native/crates/cli/src/commands/mod.rs`)・help・配布・既存の呼び出し元(`review-guard.py`・`loop.sh`)へは未接続であり、未配布である。配布は段階1b・プラグインv4.53.0のまま。
+旧版・`plugins/` の下のテスト・版・`CHANGELOG.md` は変えていない。
+
+- 保証の範囲は広げない。
+  - Linux: 監督が所有する子孫(subreaper の下へ来たもの)だけを回収する。同じ利用者の権限で監督を攻撃する場合の隔離ではない。
+  - Linux 以外(Mac): 元のプロセスグループだけを回収する。子孫が setsid(新しいセッションを作って群を抜けること)で群を抜けた場合は保証しない(`original-process-group-only`)。
+  - Rust にしたことで、この範囲が広がったとは書かない。
+- 内部の CLI・結果の記録・回収の失敗の終了値97・親による記録の照合は、旧版と相互に使える形で保つ。旧版の親が Rust の監督を、Rust の親が旧版の監督を使える。
+- 契約の正本は Issue #494 の本文(維持する動作・比べ方の決まり)である。ここには要点だけを書く。
+
+#### 部品の置き場
+
+| 場所 | 受け持ち |
+|---|---|
+| `platform/src/r4q_process.rs` | OS の部品(subreaper・親の死の通知・pidfd・`waitpid`・プロセスグループへの信号・信号の処理の置き方・子の起動) |
+| `cli/src/commands/r4q_python/` | Python の再現の純粋な部品(argparse・数値・JSON・文の形) |
+| `cli/src/commands/loop_supervisor/` | loop-supervisor の CLI と `supervise` |
+| `cli/src/commands/check_process/` | check-process の監督(anchor と linux worker)と、親の `run_command` |
+| `cli/tests/r4q.rs`・`cli/tests/r4q_units.rs` | 検査用の実行物と、固定期待・差し替えの単体テスト |
+
+- 製品の実行物には入らない。検査用の実行物だけが読み込む。
+- `native/Cargo.toml`・`native/Cargo.lock`・`platform/Cargo.toml`・`main.rs`・`commands/mod.rs`・help は変えていない。外部の crate と `rustix` の機能は足していない。
+- OS の呼び出しは platform の `r4q_process.rs` に置き、既存の `libc` の crate で書く。`pidfd_open` と `pidfd_send_signal` は `libc::syscall` で呼ぶ。ほかの crate は `forbid(unsafe_code)` を保つ。
+
+#### C0c との関係
+
+- C0c の `run_child` と `DirectChild` は、子の3本の標準入出力を必ずパイプにし、回収は std の `Child::try_wait` だけである。旧版は出力をファイルへ直接書かせ、`waitpid(-1)` で子孫を回収するので、R4Q の子の起動と回収に `run_child` は使えない。
+- そこで次のように読んだ(R4Q の管理担当が決めた読み方)。
+  - C0c のコードと契約は変えない。
+  - 回収した子の終わり方は、C0c の公開の型 `core::process::ChildStatus` で持つ。旧版の returncode(数値か、負の信号の番号)へは、この型から変える。
+  - C0c が後続へ残した範囲(子孫・プロセスグループ・親の信号の捕捉・親の死)を、R4Q が受け持つ。
+  - 「回収済みの子へ信号を送らない」と「回収を確かめるまで成功にしない」は、C0c と同じ形で守る。
+  - 「最初の原因を後始末の結果で置き換えない」は当てない。旧版の POSIX の方式は、後始末の誤りで最初の誤りを置き換えるので、旧版に合わせる。
+- この読み方は、全体の管理担当の依頼(C0c の部品を土台にする)より狭い。R4Q の完了の報告で、全体の管理担当へ知らせる。
+
+#### 旧版と同じにする動作(要点)
+
+- loop-supervisor の CLI
+  - 引数の全体が `--check` 1個のときだけ、確かめだけをする。成功は出力なしの終了0。失敗は `子プロセスの監督に必要な Linux subreaper・pidfd を使えない` と終了97。
+  - ほかは argparse(Python 3.10.11)と同じ読み方で、誤りの文・終了2・`-h` の出力も旧版と同じにする。
+  - 97の文は `子プロセスの回収を確認できない: ` に Python の `str(exc)` と同じ文を続ける。
+  - 記録のファイルを最初に `O_EXCL` で作り、最後に1回の write と fsync で書く。
+- supervise(Linux)
+  - subreaper(親を失った孫を自分の下へ引き取る設定)と、親が死んだときに届く信号の設定を置く。コマンドを新しいセッションで起動し、所有する子孫へ pidfd(プロセスを番号ではなく参照で指す仕組み)で信号を送る。
+  - 主の待ちは0.02秒刻み。片付けは TERM を約20ミリ秒ごとに送り直し、猶予(grace)の後に KILL を送る。
+  - 監督は1本のスレッドで動かす(`waitpid(-1)` と親の死の通知の前提)。
+- check-process の監督
+  - `--linux` は記録のファイルを先に作って supervise を使う。起動の失敗は returncode 127 の記録にする。
+  - anchor(群が消えないように最後まで残しておく親のプロセス)は、コマンドを起動して待ち、通知の行を1回の write で書いた後、KILL でだけ終わる。
+- 親の `run_command`
+  - 返す辞書の鍵・順・型・値を旧版と同じにする。誤りは、回収を確かめられない(`RecoveryError`)・停止の信号を受けた(`Interrupted`)・包まずに外へ出る例外の3つに分ける。
+  - 記録の照合の順と条件(通常ファイル・4096バイト以下・`nonce`・`clean`・型)と、`linux_command` の判定の順を同じにする。
+  - Linux の方式は pidfd で信号を送り、pidfd が無いときに POSIX の方式へ切り替えない。POSIX の方式は、最後の KILL まで anchor を回収しない。
+- 子の起動は、std の `Command` を使わず、platform の部品が旧 `subprocess.Popen` と同じ結果にする(信号の mask の受け継ぎ・SIGPIPE と SIGXFSZ を既定へ・0〜2のほかの fd を閉じる・PATH の候補へ順に試す・環境の並び)。std の `Command` は、信号の mask を空にし、SIGCHLD を無視で受け継いだときに起動の失敗で panic するため使えない。
+- 停止の信号(TERM・INT・HUP)の扱い(比較で見つけて、Rust を旧版に合わせた)
+  - 同時に届いた信号は、旧版の Python と同じく、信号の処理では印だけを立て、後で小さい番号から順に扱う。
+  - 信号の処理は代わりのスタックを使わない(`SA_ONSTACK` を付けない)。付けると、3つの信号が入れ子になったときに、Rust の主のスレッドの小さな代わりのスタックを越えて落ちた。
+- Python の起動の再現(Rust の監督の側): SIGPIPE と SIGXFSZ の無視・C の地域設定のときの `LC_CTYPE=C.UTF-8`・`PYTHONINTMAXSTRDIGITS`・`PYTHONUNBUFFERED`・`PYTHONOPTIMIZE`・不正な `PYTHONHASHSEED` の起動の失敗。
+
+#### 旧版の不具合に当たる動きも合わせる
+
+- SIGCHLD を無視の設定で受け継いで起動したとき、旧版は次の動きになる(本家 3.10.11 で実測した)。Rust も同じ動きにする。
+  - loop-supervisor と check-process の `--linux`: 子が自動で回収されるので、期限まで待った後に `KeyError: <品質コマンドの pid>` の呼出履歴を出して終了1になる。記録は0バイトで残る。
+  - anchor と親の `Popen.wait`・`poll`: 回収する子が無い(ECHILD)ときに returncode 0 とする。このため POSIX の方式では、`sh -c 'exit 3'` が returncode 0 と報告される。
+  - Mac では、同じ起動で POSIX の方式が 3 を返した。確かめたのは、PR #552 の1回目の PR 用の CI(Native の run 45962269782)の macos-x86_64 の1回だけである(旧版どうしの組が 3 で、Rust の3つの組も同じ結果だった)。macos-arm64 は、監督の argv の頭の不一致で先に落ちたので未確認で、PR 用の CI で確かめる。
+    - anchor の `wait` が品質コマンドの終了値を受け取ったと推測される(未確認)。exec の後に SIGCHLD の無視が残るかは、POSIX では決まっていない。
+    - 比較の固定期待は OS ごとに持つ。
+- 旧版が失敗を成功と報告するのは、安全の性質を弱める不具合である。決定の一覧に、この差を認める決定は無い。09:58 の決定(環境の設定で崩れる動きを再現しない)は bash の環境変数だけが対象なので、広げない。
+- 直すなら、旧版と Rust を一緒に直す別のタスクにする。R4Q の完了の報告で、後続の候補として管理担当へ渡す。
+
+#### 後で使う側と API の境目
+
+| 使う側 | 使う部品 | R4Q で作らないもの |
+|---|---|---|
+| R4V(review-guard) | `check_process::run_command`・`StopSignals`・3つの誤りの型(`RunError`)・Python の int と float を表す値(`PyNumber`)。旧版の review-guard と同じ結果にするには、`caller_frames` を3、`recursion_limit` に呼出元の再帰の上限を渡す | review-guard の本体 |
+| 段階5(loop.sh) | loop-supervisor の CLI(`--check` と監督)・`supervise`・記録の書き方・platform の pidfd と `/proc/<pid>/stat` の (ppid, starttime) の読み方 | loop.sh の `supervisor-control`(監督の照合と停止)と `supervisor-result`(記録の照合)の Rust 版 |
+
+- `run_command` は、長く生きるスレッド(ふつうは main のスレッド)から呼ぶ。親の死の通知は、監督を起動したスレッドが終わると届くため。
+- `waitpid(-1)` を使う監督は、ほかの回収処理(SIGCHLD の自動の回収・別のスレッドの wait)と同じプロセスで動かさない。
+- API の型と関数の形は [native/README.md](../native/README.md#r4q品質の実行の子の監督) にある。
+
+#### 全コマンド共通の決定の当て方(R4Q)
+
+決定の一覧は R4U の節([上](#r4ucheck_linksの文書のリンク検査))の表と同じで、R4Q は次のとおりに当てる(時刻は決定の時刻)。
+
+- 17:45・17:58・21:35: 起動の失敗の診断の `Current thread` の値は、位置と形式だけを確かめる。呼出履歴の旧スクリプトのパスと、usage・help・誤りの prog は、固定名 `check-process.py`・`loop-supervisor.py` にする。`TimeoutExpired` の文の監督の argv は `['python3', '-B', 'check-process.py', '--linux', …]` の形にする。利用者が渡したパス(記録・出力のファイル・作業フォルダ)は固定名にしない。
+- 22:24・22:26・22:38: argv の解釈と出力は UTF-8 と surrogateescape に固定する。argparse の書き出しの失敗の呼出履歴には標準ライブラリの行が出るので、比較に使う Python は本家 3.10.11 と同じ中身にする(下の「比較」)。途中で切れる出力は、固定名にしてから同じバイト数で切る。
+- 22:31・06:58: 旧 Python の実行環境の変数のうち、`PYTHONUNBUFFERED` と `PYTHONINTMAXSTRDIGITS` は再現し、ほか(`PYTHONPATH` など)は再現せず比較器が環境から外す。実行ごとに変わる値(親が作る `nonce`・pid・pgid・sid・TERM を送り直す回数)は、形と関係を確かめてから伏せて比べる。POSIX の方式の grace=0 の時間切れで品質コマンドが受けた TERM の数は、TERM の直後に KILL が来るので順序を決めない競り合いで決まる。一致を求めず、両方とも旧版の取りうる範囲の 0 か 1 であることを確かめて、両方の数を記録する(06:58。Linux の方式の grace=0 は TERM を送らないので、0 回をそのまま比べる)。POSIX の方式で grace=0 のときに TERM を送らない誤りは、実プロセスでは見分けられないので、差し替えの比較の `inj-rc-posix-timeout-grace0`(`killpg(TERM)`・`sleep(0)`・`killpg(KILL)` の呼出しの並び)と、`r4q_units.rs` の否定の検査で見つける。
+- 23:19: Rust は品質コマンドのほかに何も起動しない。親は、渡された監督を起動する。
+- 00:28・00:35・00:42: 記録の write の EFBIG と途中までの書き込みは、`RLIMIT_FSIZE` の実プロセスのケースで全部を比べる。ENOSPC と EIO は、OS の操作を差し替えた単体の比較で当てる。処理系の資源の上限は比較の前提の外。
+- 02:41: Mac の旧 Python が品質コマンドの環境へ足す `__CF_USER_TEXT_ENCODING` は、Rust では足さない。品質コマンドが見る環境の比較からこの変数だけを外し、値と有無を記録する。
+- 08:55: 閉じた fd 0〜2で直接起動した監督は、Rust の標準の初期化をそのまま使い、旧版との差を認める。errno の文は、基準の機械の表を Rust が持って出す。
+  - Linux は R4U の固定表を使う。
+  - Mac は、CI の macOS 15 の 2機種で確かめた範囲(errno 1〜107)の表を新しく持つ。ほかの版の macOS で同じ文になるかは未確認で、保証の外とする。
+  - 比較器は errno 0〜1024 の全番号で、表と旧版の `os.strerror` が同じことを確かめる。
+- 09:58・14:24: bash を使わないので当たらない。上の SIGCHLD の動きへは広げない。
+- 12:59: 比較は `build` と `verify-universal` に入れず、必須ジョブ `r4q` で流す。
+
+R4Q で認めた旧版との差は、`__CF_USER_TEXT_ENCODING`(02:41)と、閉じた fd 0〜2で直接起動した監督(08:55)だけである。ほかの差は認めない。
+
+#### 比較
+
+- 比べる相手は3つである。旧版(本家 3.10.11)・固定期待(`native/fixtures/r4q/`)・Rust。両側が同じ誤りをしても、固定期待と違えば見つける。
+- 実プロセスのケースは、親(旧版・Rust)× 監督(旧版・Rust)の4つの組で、返す辞書・誤りの文・記録と出力のファイル・品質コマンドが見る状態・残るプロセスを比べる。
+  - 実プロセスで起こせない経路(OS の操作と時計の差し替えが要るもの)は、`native/fixtures/r4q/injected.json` の固定期待と、Rust の単体テスト `r4q_units.rs` で比べる。
+  - 旧版の関数の mock(Python の中の差し替え)から固定期待を作るスクリプトが `gen_injected.py` である。比較器は、これを流し直して固定期待とバイト列で同じことを確かめる。
+  - 固定期待は、どの機械で作っても同じバイト列にする。waitpid の状態は、旧版がそのまま使う `os.waitstatus_to_exitcode` の結果が Linux と Mac の wait の macro で同じになる値に限り、`gen_injected.py` がほかを拒む。Mac の `WIFSTOPPED` は、停止の信号の番号が 0x13(Mac の SIGCONT)の状態を外すと推測される(未確認。Mac の SDK のヘッダーは読んでいない。Mac の CI の自己検査 `test_wait_meaning_matches_this_machine` で本物と照らす)。推測の根拠は、この定義で旧版を流すと、PR #552 の1回目の PR 用の CI の Mac 2台と同じ1件だけが違ったことである。停止の状態には、0x13 でない 21(Linux の SIGTTIN)を使う。
+- 比べる欄を緩めるのは、Issue #494 の「緩める欄の閉じた一覧」の欄だけである。一覧に無い欄を緩める比較器は、自己検査(`test_r4q.py`)が不合格にする。
+- 監督の argv は、Linux は `/proc/<pid>/cmdline` で、Mac は品質コマンドの代わりの `r4q_probe` が `sysctl` の KERN_PROCARGS2 で親の argv を NUL 区切りのまま読む(`ps -o command=` の出力は引数を空白で連ねるので、切れ目を戻せないため。PR #552 の1回目の PR 用の CI(Native の run 45962269782)で、Mac 2台とも親の argv を読めた)。親が生きているはずのケースで読めなければ、旧版と Rust の両方が読めなくても不合格にする。
+  - Mac の framework 版の Python(CI の macos-arm64)は、`bin/python3` の起動用のプログラム(本家の `Mac/Tools/pythonw.c`)が、argv の1つ目を `Python.app` の中の実行物に替えて、同じ pid のまま移る。このため、品質コマンドが読む旧版の監督の argv の1つ目は、旧版の親が渡した `sys.executable` と違う。
+  - 比較器は、比較の前に1回だけ旧版の Python を起動し、子の `r4q_probe` が読んだ1つ目が、決まった1つの値(framework 版は `<base_prefix>/Resources/Python.app/Contents/MacOS/<PYTHONFRAMEWORK>`、ほかは `R4Q_PYTHON` そのもの)と同じことと、`sys.executable` が `R4Q_PYTHON` と同じことを確かめる。旧版の頭の1つ目は、この値だけを受ける。
+- 比較に使う Python は、CPython 3.10.11 で、標準ライブラリの固定の一覧が本家と同じ中身で、Linux では `os.pidfd_open` と `signal.pidfd_send_signal` があるものである。
+  - 作業機の uv の 3.10.11 には pidfd が無く、Ubuntu の 3.10.12 は `argparse.py` の行番号が違う。どちらも使えず、失敗にする(skip にしない)。
+  - 作業機では、本家のソース(`Python-3.10.11.tgz`)から作った 3.10.11 を `R4Q_PYTHON` で渡す。作り方は [testing.md](testing.md#r4qの比較) にある。
+  - CI は `actions/setup-python` の 3.10.11 を使う。4機種(Linux 2種・Mac 2種)の確かめで、標準ライブラリの固定の一覧66件が本家と同じだった。Linux 2種は pidfd があり、Mac 2種は pidfd が無い(Mac では使わない)。
+- 必須のケースの件数: Linux は832件。内訳は、前提の strerror の確かめ1・差し替え(`inj-`)198・`ls-` 75・`cp-` 46・`rc-` 408・`probe-` 72・`py-` 29・`loop-` 3。Mac は589件。Linux の832件から Linux の方式の248件(`rc-linux-*` 212件・`probe-linux-*` 36件)を外し、Mac だけの5件(`ls-mac-setup` 1件・`rc-linux-reject-*` 4件)を足した数である(832−248+5=589)。Mac で流さない閉じた一覧の `ls-` の37件は、一覧に残して未実施として数える。Mac で出るはずの未実施は、`ls-` 37件・`py-stderr-devfull` 1件と、条件つきの `rc-posix-directory-non-utf8-*` 4件(UTF-8 でない名前を作れないとき)と `rc-posix-anchor-killed-after-notice-*` 4件(pause に入ったことを期限内に確かめられないとき)まで。Mac の589件は、PR #552 の1回目の PR 用の CI(Native の run 45962269782)で Mac 2台とも流した。固定期待の OS 依存などで落ちたので直した。直した後の結果は Issue #494 と PR の本文に書く。
+- ケースの一覧は、件数と SHA-256 を比較器の `CASE_LIST` に固定している。欠けと重なりは不合格にする。
+- 自己検査の件数: 47件。
+- 比較は、テストの引数 `--r4q-compare` を付けたときだけ流れる。`--r4q-compare` を付けない `cargo test --locked`(CI の `build`)では、`R4Q の比較は流していない: ` で始まる1行を出して終了0になる。この1行は比較の合格に数えない。
+- CI では必須ジョブ `r4q`(`build` の後・Linux 2種・Mac 2種)で流す(2026-11-12 12:59 の決定)。`distribution` の `needs` には入れず、Mac 共通の実行物は比べないので、`combine` の後のジョブは作らない。ジョブの上限はいま60分、`build.py` の `R4Q_TIMEOUT` は3300秒である。CI の4機種の所要時間と、ジョブ `r4q` の上限をこの値に決めた理由は、Issue #494 と PR の本文に書く。作業機の Linux x86_64 の所要時間は [testing.md](testing.md#r4qの比較) にある。
+
+契約の全文は Issue #494 の本文にある。APIは [native/README.md](../native/README.md#r4q品質の実行の子の監督)、比較の流し方と件数は [testing.md](testing.md#r4qの比較)に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

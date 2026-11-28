@@ -41,3 +41,5 @@ pub mod adopt_candidate;
 
 /// S2E専用のenvironment-guardのOSの操作。
 pub mod environment_guard;
+
+pub mod r4q_process;

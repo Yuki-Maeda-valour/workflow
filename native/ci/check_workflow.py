@@ -74,6 +74,9 @@ def native_build_command(command):
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4a-rest-universal|r4a-rest)(?: |$)", command)
     # S2E(#470)の比較も、別のジョブ(s2e・s2e-universal)で流す。
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (s2e-universal|s2e)(?: |$)", command)
+    if match is None:
+        # R4Q(#494)の比較の操作(ジョブ r4q)。既存の名前の並びとは別の行で足す。
+        match = re.match(r"python3 -B native/ci/build[.]py (r4q)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -104,6 +107,7 @@ REQUIRED_NATIVE_JOBS = (
     "r4c-universal",
     "s2e",
     "s2e-universal",
+    "r4q",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (
@@ -242,6 +246,8 @@ def check_document(document):
         native_timeouts.update({"r4c": 30, "r4c-universal": 30})
         # S2E(#470)の比較も別のジョブ(s2e・s2e-universal)で流す。
         native_timeouts.update(S2E_TIMEOUTS)
+        # R4Q(#494)の比較はジョブ r4q で流す。上限は最初の CI で所要時間を測るまで仮に 60 分(設計の Task 3.3)。
+        native_timeouts["r4q"] = 60
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -291,6 +297,9 @@ def check_document(document):
                                and native_build_command(step.get("run")) in R4A_REST_OPERATIONS]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in S2E_TIMEOUTS]
+        # R4Q(#494)の比較も、checkout 直後の検査の後に Python 3.10.11 を用意してから流す。
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) == "r4q"]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):

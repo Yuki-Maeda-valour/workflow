@@ -25,3 +25,8 @@ harness = false
 name = "check_links"
 path = "tests/check_links.rs"
 harness = false
+
+[[test]]
+name = "r4q"
+path = "tests/r4q.rs"
+harness = false
