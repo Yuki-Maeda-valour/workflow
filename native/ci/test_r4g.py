@@ -692,7 +692,7 @@ class Comparator(unittest.TestCase):
             stub.kill()
             stub.wait(timeout=10)
             try:
-                os.killpg(holder.pid, signal.SIGKILL)
+                self.m.signal_group(holder.pid, signal.SIGKILL, reap=holder.poll)
             except ProcessLookupError:
                 pass
             holder.stderr.close()
@@ -729,7 +729,7 @@ class Comparator(unittest.TestCase):
         finally:
             for process in (leader, stuck):
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    self.m.signal_group(process.pid, signal.SIGKILL, reap=process.poll)
                 except ProcessLookupError:
                     pass
             leader.stdin.close()

@@ -34,6 +34,8 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from support_native import RunResult, run_command, snapshot_tree  # noqa: E402
+import support_proc  # noqa: E402
+from support_proc import DEAD_STATES, process_state, signal_group  # noqa: E402
 
 FIXTURES = Path(__file__).with_name('r4g_fixtures')
 SCRIPTS = ROOT / 'plugins/dev-workflow/skills/do-task/scripts'
@@ -3470,24 +3472,8 @@ class ReviewsFilterEnv(unittest.TestCase):
             OBSERVATIONS.append(f'reviews-dir-filter-env {side}: 一覧に excluded.txt なし・fsmonitor の起動なし')
 
 
-def process_state(pid):
-    """プロセスの状態の1文字(R・S・T・Z など)。無ければ None。Linux は /proc、ほかの機種は ps で読む。"""
-    if sys.platform.startswith('linux'):
-        try:
-            with open('/proc/%d/stat' % pid) as handle:
-                return handle.read().split(') ', 1)[1][0]
-        except OSError:
-            return None
-    result = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], stdout=subprocess.PIPE,
-                            stderr=subprocess.DEVNULL)
-    text = result.stdout.strip()
-    return text[:1].decode('ascii') if result.returncode == 0 and text else None
-
-
-# 死んだと読む状態。Z は回収待ち、X は回収されている途中(Linux は Z から消えるまでの短い間、X を出す)。
-# X を生きていると読むと、Z で「死んだ」と読んだ後の読み直しが、X に当たって「生きている」に変わりうる。
-# CI の Linux arm64 で落ちた回の原因は、この形と推測される(未確認)。
-DEAD_STATES = (None, 'Z', 'X')
+# プロセスの状態の1文字の読み(process_state)と、死んだと読む状態(DEAD_STATES)は、共通の補助 support_proc.py に
+# 移した(#532)。名前はこのモジュールに読み込むので、自己検査の self.m.process_state の差し替えは今のまま効く。
 
 
 def pid_alive(pid):
@@ -3706,13 +3692,11 @@ def wait_stub_blocked(pid, what='代用品が FIFO を開いて待つ'):
 
 
 def wait_state(pid, accept, what, timeout=15):
-    """プロセスの状態が accept を満たすまで待つ。満たさなければ失敗。"""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if accept(process_state(pid)):
-            return
-        time.sleep(0.005)
-    raise Difference(f'{what}: 待った状態にならない(状態 {process_state(pid)})')
+    """プロセスの状態が accept を満たすまで待つ。満たさなければ失敗。
+    読み方と待ちの間隔は support_proc.wait_state(#532)。読むのは、呼んだ時点のこのモジュールの process_state。"""
+    ok, _ = support_proc.wait_state(pid, accept, timeout, read=process_state)
+    if not ok:
+        raise Difference(f'{what}: 待った状態にならない(状態 {process_state(pid)})')
 
 
 def read_fifo(path, timeout=15):
@@ -3864,7 +3848,7 @@ def ordered_hup_run(world, argv, env, order):
         if order == 'after-parent':
             os.kill(process.pid, signal.SIGSTOP)
             wait_state(process.pid, lambda state: state in ('T', 't'), f'{order}: 親を止める')
-        os.killpg(process.pid, signal.SIGHUP)
+        signal_group(process.pid, signal.SIGHUP)
         ended = lambda state: state in (None, 'Z')  # noqa: E731
         if order == 'subshell-first':
             wait_state(subshell, ended, f'{order}: サブシェルの終わり')
@@ -3892,11 +3876,11 @@ def ordered_hup_run(world, argv, env, order):
     except (Difference, subprocess.TimeoutExpired) as error:
         # 失敗の調べのため、群のプロセスの状態を添える。
         group = group_report(process.pid)
-        os.killpg(process.pid, signal.SIGKILL)
+        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
         out, err = process.communicate(timeout=60)
         raise Difference(f'{order}: {error}(群: {group}・標準エラー: {err[-300:]!r})') from error
     except BaseException:
-        os.killpg(process.pid, signal.SIGKILL)
+        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
         process.communicate(timeout=60)
         raise
     for name in ('release', 'rm-release'):
@@ -3953,7 +3937,7 @@ def signal_run(world, argv, env, target, signal_number, *, launch=None, raw=None
     if target == 'process':
         os.kill(process.pid, signal_number)
     else:
-        os.killpg(process.pid, signal_number)
+        signal_group(process.pid, signal_number)
     early = b''
     stderr_open = None
     try:
@@ -4011,18 +3995,18 @@ def ordered_git_signal_run(world, argv, env, order, signal_number, launch=None):
         else:
             os.kill(stub_pid, signal.SIGSTOP)
             wait_state(stub_pid, lambda state: state in ('T', 't'), f'{order}: 代用品を止める')
-            os.killpg(process.pid, signal_number)
+            signal_group(process.pid, signal_number)
             process.wait(timeout=15)
         remained = pid_alive(stub_pid)
         if order == 'shell-first':
             os.kill(stub_pid, signal.SIGCONT)
     except (Difference, subprocess.TimeoutExpired) as error:
         group = group_report(process.pid)
-        os.killpg(process.pid, signal.SIGKILL)
+        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
         out, err = process.communicate(timeout=60)
         raise Difference(f'{order}: {error}(群: {group}・標準エラー: {err[-300:]!r})') from error
     except BaseException:
-        os.killpg(process.pid, signal.SIGKILL)
+        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
         process.communicate(timeout=60)
         raise
     release_fifo(release)
@@ -4393,10 +4377,10 @@ class ReviewsSignals(unittest.TestCase):
                         # 決め方(child_caught_sigint)を通らず、負荷で出力が揺れる(比較器の同期の不足)。
                         wait_group_settled(process.pid, f'{variant}: シェルの群が待つ',
                                            functions=GROUP_WAITS + waits('nanosleep'))
-                        os.killpg(process.pid, signal.SIGINT)
+                        signal_group(process.pid, signal.SIGINT)
                         out, err = process.communicate(timeout=30)
                     except BaseException:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
                         process.communicate(timeout=30)
                         raise
                     deadline = time.monotonic() + 10
@@ -5010,7 +4994,7 @@ def pty_run(argv, env, cwd, columns, timeout=60):
         while True:
             if time.monotonic() >= deadline:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    signal_group(process.pid, signal.SIGKILL, reap=process.poll)
                 except ProcessLookupError:
                     pass
                 process.wait(timeout=30)
@@ -5451,7 +5435,7 @@ def ig_signal_run(world, argv, env, target, signal_number, launch=None):
     if target == 'process':
         os.kill(process.pid, signal_number)
     else:
-        os.killpg(process.pid, signal_number)
+        signal_group(process.pid, signal_number)
     finished = False
     try:
         out, err = process.communicate(timeout=3)

@@ -1767,10 +1767,14 @@ class EndToEnd(unittest.TestCase):
 
     def test_unlisted_case_is_rejected(self):
         # 必須の一覧を使わせるため、一覧から 1 件を抜いた複製を作って比較器を起動する。
+        # 比較器は共通の補助(リポジトリの直下の scripts/support_proc.py)を読み込むので、同じ並びにして写す(#532)。
         with tempfile.TemporaryDirectory() as directory:
-            copy = Path(directory) / "ci"
-            copy.mkdir()
+            copy = Path(directory) / "native" / "ci"
+            copy.mkdir(parents=True)
             (copy / "check_r4a_rest.py").write_text((HERE / "check_r4a_rest.py").read_text(encoding="utf-8"))
+            helpers = Path(directory) / "scripts"
+            helpers.mkdir()
+            (helpers / "support_proc.py").write_text((HERE.parents[1] / "scripts" / "support_proc.py").read_text(encoding="utf-8"))
             fixtures = copy / "r4a_rest_fixtures"
             fixtures.mkdir()
             required = json.loads((checker.FIXTURES / "required_cases.json").read_text(encoding="utf-8"))

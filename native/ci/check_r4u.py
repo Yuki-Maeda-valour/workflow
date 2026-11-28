@@ -54,6 +54,8 @@ from pathlib import Path
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from support_proc import read_until_marker  # noqa: E402
 LEGACY_REL = "plugins/dev-workflow/skills/update-doc/scripts/check_links.py"
 LEGACY = ROOT / LEGACY_REL
 LEGACY_SHA256 = "b2eea09e6b0c1b4f84b8c4b36f2d04aa517c88b3eb410c5a19e619457e09d4ab"
@@ -711,42 +713,23 @@ def read_pty(master, slave, sink, stop, done, notes, timeout=PTY_MARKER_TIMEOUT)
       端末の空きが足りないと書き込みが止まる。
     - 目印が出たら done を立てる。出ずに終わる(期限・読取りの失敗・EOF・目印を書けない)ときは、それまでの出力を sink に入れ、
       notes に理由を入れ、done を立てずに終わる(例外は外へ出さない)。
+    - 読み切りの順番は、共通の補助 support_proc.read_until_marker が持つ(#532 で移した)。ここは理由を notes の文へ写す。
     """
-    import select
-    import uuid
-    marker = ("R4U-PTY-END-" + uuid.uuid4().hex).encode()
-    buffer = b""
-    written = False
-    deadline = None
-    while True:
-        finished = stop.is_set()
-        ready, _, _ = select.select([master], [], [], 0.05)
-        if ready:
-            try:
-                chunk = os.read(master, 65536)
-            except OSError as error:
-                notes.append(f"端末の読取りが失敗した(errno {error.errno})")
-                break
-            if not chunk:
-                notes.append("目印の前に端末が閉じた")
-                break
-            buffer += chunk
-            if written and marker in buffer:
-                buffer = buffer.replace(marker, b"", 1)
-                done.set()
-                break
-        elif finished and not written:
-            try:
-                os.write(slave, marker)
-            except OSError as error:
-                notes.append(f"目印を書けなかった(errno {error.errno})")
-                break
-            written = True
-            deadline = time.monotonic() + timeout
-        if deadline is not None and time.monotonic() > deadline:
-            notes.append(f"期限 {timeout} 秒までに目印が出なかった")
-            break
-    sink.append(buffer)
+    got = read_until_marker(master, slave, stop.is_set, prefix=b"R4U-PTY-END-", select_wait=0.05,
+                            marker_timeout=timeout)
+    if got.reason is None:
+        done.set()
+    elif got.reason == "read-error":
+        notes.append(f"端末の読取りが失敗した(errno {got.errno})")
+    elif got.reason == "eof":
+        notes.append("目印の前に端末が閉じた")
+    elif got.reason == "write-error":
+        notes.append(f"目印を書けなかった(errno {got.errno})")
+    elif got.reason == "marker-timeout":
+        notes.append(f"期限 {timeout} 秒までに目印が出なかった")
+    else:
+        notes.append(f"疑似端末の読み切りの理由が想定の外({got.reason})")
+    sink.append(got.data)
 
 
 def wait_until(predicate, what, timeout=30):

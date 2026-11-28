@@ -63,6 +63,8 @@ import zlib
 import zoneinfo
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / 'scripts'))
+from support_proc import signal_group  # noqa: E402
 FIXTURES = ROOT / 'native' / 'fixtures' / 'r4e'
 CASES_JSON = FIXTURES / 'cases.json'
 EXPECTED_DIR = FIXTURES / 'expected'
@@ -1321,11 +1323,13 @@ def execute(spec):
                         second = group_snapshot(process.pid)
                         notes = [ended_text(process.returncode)]
                         try:
-                            os.killpg(process.pid, signal.SIGKILL)
+                            # 直接の子はもう回収したので、回収の関数は渡さない(#532)。
+                            signal_group(process.pid, signal.SIGKILL)
                         except ProcessLookupError:
                             pass
                         except PermissionError:
-                            # 直す前に無かった信号なので、Mac で回収前の孫(ゾンビ)だけが残るときの EPERM も受け止める。
+                            # 直す前に無かった信号なので、Mac で回収前の孫(ゾンビ)だけが残るときの EPERM も受け止める
+                            # (Mac で、回収を待って送り直す期限の後も EPERM が続いたとき)。
                             notes.append('止める信号が EPERM')
                         snapshot_text = timeout_snapshot(first, second, second_at - first_at, load, notes)
                     break
@@ -1347,7 +1351,7 @@ def execute(spec):
                     if process.poll() is not None:
                         notes.append(ended_text(process.returncode))
                     try:
-                        os.killpg(process.pid, signal.SIGKILL)
+                        signal_group(process.pid, signal.SIGKILL, reap=process.poll)
                     except ProcessLookupError:
                         pass
                     process.wait()
@@ -1359,7 +1363,7 @@ def execute(spec):
         except BaseException:
             if process.poll() is None:
                 try:
-                    os.killpg(process.pid, signal.SIGKILL)
+                    signal_group(process.pid, signal.SIGKILL, reap=process.poll)
                 except ProcessLookupError:
                     pass
                 process.wait()

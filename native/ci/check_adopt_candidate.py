@@ -32,6 +32,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from support_native import RunResult, run_command, snapshot_tree  # noqa: E402
+from support_proc import signal_group  # noqa: E402
 
 LEGACY_SCRIPT = ROOT / 'plugins/dev-workflow/skills/create-task/scripts/adopt-candidate.py'
 OLD_TEST = ROOT / 'scripts/test_adopt_candidate.py'
@@ -1077,7 +1078,7 @@ def closed_runner(which, closed, devnull):
             try:
                 process.wait(timeout=timeout)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, 9)
+                signal_group(process.pid, 9, reap=process.poll)
                 process.wait()
                 return RunResult(process.returncode, b'', b'', True)
             read = lambda path: path.read_bytes() if path.exists() else b''  # noqa: E731
@@ -1290,7 +1291,7 @@ def faulty(runner_argv, env, *, stdin='null', stdout='pipe', stderr='pipe', time
             try:
                 out, err = process.communicate(timeout=timeout)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, 9)
+                signal_group(process.pid, 9, reap=process.poll)
                 process.communicate()
                 raise AssertionError('標準の fd を細工した実行が時間切れになった')
             if fds[1][1] is not None:
@@ -1551,7 +1552,7 @@ def _scenario_record(scenario, which, capture_log, extra_env, stdin_data):
                     raise AssertionError('窓への到達の通知が無い: ' + detail)
                 extra['both_names_at_window'] = (root / '候補_例.md').exists() and (root / '進行中_例.md').exists()
                 if kind == 'kill':
-                    os.killpg(process.pid, 9)
+                    signal_group(process.pid, 9)
                 else:
                     os.kill(process.pid, signal.SIGINT)
                 out, err = process.communicate(timeout=30)
@@ -1559,7 +1560,7 @@ def _scenario_record(scenario, which, capture_log, extra_env, stdin_data):
                 os.close(notify_read)
                 os.close(wait_write)
                 if process.poll() is None:
-                    os.killpg(process.pid, 9)
+                    signal_group(process.pid, 9, reap=process.poll)
             result = RunResult(process.returncode, out, err, False)
             extra['same_inode'] = (root / '候補_例.md').exists() and (root / '進行中_例.md').exists() and \
                 os.stat(root / '候補_例.md').st_ino == os.stat(root / '進行中_例.md').st_ino
@@ -1569,7 +1570,7 @@ def _scenario_record(scenario, which, capture_log, extra_env, stdin_data):
             try:
                 out, err = process.communicate(stdin_data, timeout=int(scenario.get('timeout', 60)))
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, 9)
+                signal_group(process.pid, 9, reap=process.poll)
                 process.communicate()
                 raise AssertionError('注入の実行が時間切れになった')
             result = RunResult(process.returncode, out, err, False)
@@ -1732,7 +1733,7 @@ def run_with_shim(which, mode, *, sigint=None, ignore_sigint=False, extra_env=No
 def _kill_group(pgid):
     """起動した実行のプロセスグループ(`start_new_session` で pgid は pid と同じ)に残ったプロセスを止める。無ければ何もしない。"""
     try:
-        os.killpg(pgid, signal.SIGKILL)
+        signal_group(pgid, signal.SIGKILL)
     except ProcessLookupError:
         pass
 
@@ -1785,13 +1786,13 @@ def _run_with_shim(which, mode, sigint, ignore_sigint, extra_env, stdin_data, ti
                     raise AssertionError('git の代役が起動しない: ' + detail.strip())
                 time.sleep(0.02)
             if sigint == 'group':
-                os.killpg(process.pid, signal.SIGINT)
+                signal_group(process.pid, signal.SIGINT)
             else:
                 os.kill(process.pid, signal.SIGINT)
         try:
             out, err = process.communicate(stdin_data, timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, 9)
+            signal_group(process.pid, 9, reap=process.poll)
             process.communicate()
             raise AssertionError('git の代役の実行が時間切れになった')
         elapsed = time.monotonic() - started
@@ -2301,7 +2302,7 @@ def race_kind(which):
         try:
             out, err = process.communicate(timeout=30)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, 9)
+            signal_group(process.pid, 9, reap=process.poll)
             process.communicate()
             raise AssertionError('順序を決めない SIGINT の実行が時間切れになった')
         _kill_group(process.pid)
@@ -2490,7 +2491,7 @@ def run_named(binary, args, cwd, env, *, ignore_sigint=False, fsize=None, hide=N
     try:
         out, err = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, 9)
+        signal_group(process.pid, 9, reap=process.poll)
         process.communicate()
         raise AssertionError('子のモードの実行が時間切れになった')
     return RunResult(process.returncode, out, err, False)
@@ -2615,7 +2616,7 @@ def run_named_with_sigint(binary, args, cwd, shims, *, ignore):
         if process.poll() is not None or time.monotonic() - started > 30:
             raise AssertionError('子の起動する git の包みが起動しない: ' + process.communicate()[1].decode('utf-8', 'replace')[:200])
         time.sleep(0.02)
-    os.killpg(process.pid, signal.SIGINT)
+    signal_group(process.pid, signal.SIGINT)
     # 包みが fifo を開くのを待って続行を知らせる(包みが SIGINT で終わっていれば、プロセスが終わるのでやめる)。
     while process.poll() is None and time.monotonic() - started < 60:
         try:
@@ -2629,7 +2630,7 @@ def run_named_with_sigint(binary, args, cwd, shims, *, ignore):
     try:
         out, err = process.communicate(timeout=60)
     except subprocess.TimeoutExpired:
-        os.killpg(process.pid, 9)
+        signal_group(process.pid, 9, reap=process.poll)
         process.communicate()
         raise AssertionError('SIGINT を送った子のモードの実行が時間切れになった')
     _kill_group(process.pid)
@@ -2764,7 +2765,7 @@ def run_precheck(which, *, accept=None, tamper=False, env_extra=None, stdin_data
         try:
             out, err = process.communicate(stdin_data, timeout=timeout)
         except subprocess.TimeoutExpired:
-            os.killpg(process.pid, 9)
+            signal_group(process.pid, 9, reap=process.poll)
             process.communicate()
             raise AssertionError('事前検査の実行が時間切れになった')
         elapsed = time.monotonic() - started

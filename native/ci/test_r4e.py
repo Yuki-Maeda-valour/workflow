@@ -25,7 +25,6 @@ import re
 import signal
 import stat
 import struct
-import subprocess
 import sys
 import time
 import unittest
@@ -33,6 +32,9 @@ import zlib
 
 subject = None
 HERE = Path(__file__).resolve().parent
+# 共通の補助(リポジトリの直下の scripts/support_proc.py)を読み込む。単独で discover しても読めるように、ここで足す(#532)。
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'scripts'))
+import support_proc  # noqa: E402
 EXPECTED = HERE.parent / 'fixtures' / 'r4e' / 'expected'
 T0 = 1_700_000_000
 
@@ -1042,29 +1044,20 @@ class TimedOutRuns(Base):
         return snapshot
 
     def assertGroupGone(self, pgid):
-        with self.assertRaises(ProcessLookupError, msg=f'子のプロセスグループ {pgid} が残った'):
-            os.killpg(pgid, 0)
-
-    def process_state(self, pid):
-        listing = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, timeout=10)
-        return listing.stdout.decode(errors='replace').strip()
+        # 信号 0 で群の有無を読む(#532)。Mac で終了済みだけが残る群の EPERM は、回収を待って読み直し、不在とは読み替えない。
+        gone, seen = support_proc.group_gone(pgid)
+        self.assertTrue(gone, f'子のプロセスグループ {pgid} が残った({seen})')
 
     def wait_stopped(self, pid, limit=5.0):
-        """孫が止まるまで待つ(番号が無いか、状態が Z で始まる)。止めた孫は、引き取った側が回収するまでゾンビとして
-        残り、Mac ではゾンビだけのプロセスグループへの killpg が EPERM になるので、プロセスグループの有無では確かめない。
-        戻り値は最後に読んだ状態(空なら番号が無い)。"""
-        deadline = time.monotonic() + limit
-        while True:
-            state = self.process_state(pid)
-            if not state or state.startswith('Z') or time.monotonic() >= deadline:
-                return state
-            time.sleep(0.05)
+        """孫が止まるまで待つ(番号が無いか、状態が回収待ちの Z か回収の途中の X)。止めた孫は、引き取った側が回収するまで
+        ゾンビとして残り、Mac ではゾンビだけのプロセスグループへの killpg が EPERM になるので、プロセスグループの有無では
+        確かめない。状態の読みと待ちは support_proc.wait_state(#532。Linux は /proc の 1 文字)。
+        戻り値は (止まったか, 最後に読んだ状態)(状態の None は番号が無い)。"""
+        return support_proc.wait_state(pid, lambda state: state in support_proc.DEAD_STATES, limit)
 
     def stop_grandchild(self, pid):
         """終わりに、まだ動いている孫を止める(テストが起動したプロセスを残さない)。"""
-        state = self.process_state(pid)
-        if state and not state.startswith('Z'):
+        if support_proc.process_state(pid) not in support_proc.DEAD_STATES:
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
@@ -1124,8 +1117,8 @@ class TimedOutRuns(Base):
         grandchild = int(raw.stdout.split()[0])
         self.addCleanup(self.stop_grandchild, grandchild)
         self.assertTrue(raw.timed_out)
-        state = self.wait_stopped(grandchild)
-        self.assertTrue(not state or state.startswith('Z'), f'孫 {grandchild} が止まらない: 状態 {state}')
+        ok, state = self.wait_stopped(grandchild)
+        self.assertTrue(ok, f'孫 {grandchild} が止まらない: 状態 {state}')
 
     def test_a_grandchild_without_the_pipe_is_stopped_when_the_child_ends_during_the_wait(self):
         # 孫はパイプを持たず、子は 2 秒の待ちの間に終わる(手順 3 の道: 抜ける前に killpg を送る)。
@@ -1133,8 +1126,8 @@ class TimedOutRuns(Base):
         grandchild = int(raw.stdout.split()[0])
         self.addCleanup(self.stop_grandchild, grandchild)
         self.assertTrue(raw.timed_out)
-        state = self.wait_stopped(grandchild)
-        self.assertTrue(not state or state.startswith('Z'), f'孫 {grandchild} が止まらない: 状態 {state}')
+        ok, state = self.wait_stopped(grandchild)
+        self.assertTrue(ok, f'孫 {grandchild} が止まらない: 状態 {state}')
 
     def test_run_fields_copy_the_snapshot_and_the_limit(self):
         run_fields = getattr(self.m, 'run_fields', None)
