@@ -32,7 +32,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / 'scripts'))
 from support_native import RunResult, run_command, snapshot_tree
-from support_proc import assert_absent_now, wait_absent, command_line
+from support_proc import assert_absent_now, wait_absent, command_line, signal_group
 
 SCRIPTS = ROOT / 'plugins/dev-workflow/skills/ship-task/scripts'
 COMMANDS = ('origin-repo', 'git-config-digest')
@@ -163,7 +163,7 @@ def run_pty(argv, *, columns, env, cwd=ROOT):
         try:_,stderr=process.communicate(timeout=10)
         except subprocess.TimeoutExpired:
             timed_out=True
-            os.killpg(process.pid,signal.SIGKILL)
+            signal_group(process.pid,signal.SIGKILL,reap=process.poll)
             _,stderr=process.communicate(timeout=2)
         stdout=bytearray()
         os.set_blocking(master,False)

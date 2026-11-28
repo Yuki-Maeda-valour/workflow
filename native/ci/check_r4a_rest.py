@@ -28,6 +28,9 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from support_proc import group_gone, read_until_marker  # noqa: E402
+
 FIXTURES = Path(__file__).resolve().parent / "r4a_rest_fixtures"
 SKILLS = ROOT / "plugins/dev-workflow/skills"
 
@@ -2269,34 +2272,26 @@ def compare_faulted(case, mapper, quiet_result, old, new, fd, mode, quiet_frames
 
 def read_terminal_until_marker(master, slave, process, case_id, timeout=None):
     """端末(master)の出力を、時間に頼らずに読み切る。子が終わった後に、親が持つ slave へ、改行を含まない一意の目印を書く。
-    端末の出力は順に届くので、目印が出た時点で、子の出力はすべて出ている。目印は結果から外す。期限までに目印が出なければ失敗にする。"""
-    import select
-    import uuid
-    marker = ("R4A-PTY-END-" + uuid.uuid4().hex).encode()
+    端末の出力は順に届くので、目印が出た時点で、子の出力はすべて出ている。目印は結果から外す。期限までに目印が出なければ失敗にする。
+    読み切りの順番(子の終わりを select の前に読み、select が空で子が終わっていたときだけ目印を書く。#522・#519 の R4U と同じ形)は、
+    共通の補助 support_proc.read_until_marker が持つ(#532 で移した)。ここは理由を今までの扱い(失敗の文・例外)へ写す。"""
     deadline = time.monotonic() + (CHILD_TIMEOUT if timeout is None else timeout)
-    buffer = b""
-    written = False
-    while marker not in buffer:
-        if time.monotonic() > deadline:
-            stop_group(process, grace=1)
-            process.wait()
-            raise Failure(f"{case_id}: 時間切れ(疑似端末。{'目印が出なかった' if written else '子が終わらなかった'})")
-        # 子の終わりは select の前に読む。終わりを見た後に始めた select が空なら、端末に読み残しは無いので、目印の書き込みは止まらない(#522。#519 の R4U と同じ形)。
-        finished = not written and process.poll() is not None
-        ready, _, _ = select.select([master], [], [], 0.02)
-        if ready:
-            try:
-                data = os.read(master, 65536)
-            except OSError as error:
-                raise Failure(f"{case_id}: 目印の前に端末の読取りが失敗した(errno {error.errno})")
-            if not data:
-                raise Failure(f"{case_id}: 目印の前に端末が閉じた(EOF)")
-            buffer += data
-        elif finished:
-            # 目印は、子が終わったのを見た後の select が空の回(端末の内側の buffer が空のとき)にだけ書く。大きな出力の途中で書いて止まらない。
-            os.write(slave, marker)
-            written = True
-    return buffer.replace(marker, b"", 1)
+    got = read_until_marker(master, slave, lambda: process.poll() is not None, prefix=b"R4A-PTY-END-",
+                            select_wait=0.02, deadline=deadline)
+    if got.reason is None:
+        return got.data
+    if got.reason == "deadline":
+        stop_group(process, grace=1)
+        process.wait()
+        raise Failure(f"{case_id}: 時間切れ(疑似端末。{'目印が出なかった' if got.written else '子が終わらなかった'})")
+    if got.reason == "read-error":
+        raise Failure(f"{case_id}: 目印の前に端末の読取りが失敗した(errno {got.errno})")
+    if got.reason == "eof":
+        raise Failure(f"{case_id}: 目印の前に端末が閉じた(EOF)")
+    if got.reason == "write-error":
+        # 目印を書けないときは、今までどおり os.write と同じ errno の OSError を外へ出す。
+        raise OSError(got.errno, os.strerror(got.errno))
+    raise Failure(f"{case_id}: 疑似端末の読み切りの理由が想定の外({got.reason})")
 
 
 def run_pty(argv, case, env, cwd):
@@ -2482,11 +2477,11 @@ def run_signal(argv, case, env, cwd):
             except subprocess.TimeoutExpired:
                 pass
             raise Failure(f"{case.id}: 信号の後に終わらない(時間切れ)")
-        try:
-            os.killpg(process.pid, 0)
+        # 信号 0 の確かめは group_gone で行う(#532)。Mac で孫の終了済み(引き取った側の回収待ち)だけが残ると EPERM が
+        # 返るので、回収を待って読み直す。EPERM を不在と読み替えない(続けば、残っているとして失敗にする)。
+        gone, _ = group_gone(process.pid)
+        if not gone:
             raise Failure(f"{case.id}: 信号の後に、子のプロセスグループが残っている")
-        except ProcessLookupError:
-            pass
     finally:
         try:
             os.killpg(process.pid, 9)  # 子を残さない
