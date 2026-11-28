@@ -105,7 +105,7 @@ def _run(TMP,NEW):
   clear_output();gitlog.write_bytes(b'')
   env=base.copy();env.update(setting)
   s2l_comparator.verify_child_environment(env,{os.fsdecode(k):v for k,v in setting.items()})
-  prefix=[raw(sys.executable),b'-B',raw(OLD)] if who=='legacy' else [raw(NEW)]
+  prefix=[raw(sys.executable),b'-B',raw(OLD)] if who=='legacy' else [raw(a) for a in s2l_comparator.new_command(NEW)]
   start=time.monotonic();p=subprocess.Popen([*prefix,*[raw(a) for a in commands[command]]],cwd=TMP,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
   timed=False
   try:out,err=p.communicate(timeout=10)

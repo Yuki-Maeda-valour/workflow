@@ -1,8 +1,9 @@
 """S2Eの起動前の記録のマクロを展開する場所を、外部のRustのビルドなしで静的に確かめる(#470)。
 
 `s2e_record_startup_state!`は、展開した側のcrateに`#[unsafe(link_section)]`の`static`を作る。
-展開してよいのは、検査専用の入口`examples/s2e_contract.rs`の1か所と、platformの
-`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけ。製品の`dev-workflow`には入れない。
+展開してよいのは、検査専用の入口`examples/s2e_contract.rs`・`examples/loop_state_fixture.rs`と、製品の入口
+`src/main.rs`(D2・#542のQ2のA。製品へ`loop-state`・`environment-guard`を登録した)の3か所と、platformの
+`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけ。ほかの場所には入れない。
 先例は`scripts/test_native_r4g.py`。比較器自身の検査(`native/ci/test_s2e.py`)は別に流れる。
 """
 from pathlib import Path
@@ -14,8 +15,14 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / 'native'
 
-ALLOWED_EXPANSIONS = ('native/crates/cli/examples/s2e_contract.rs',
+# パスの順(`macro_findings` が見つける順)に並べる。最後が platform のテストのモジュール。
+ALLOWED_EXPANSIONS = ('native/crates/cli/examples/loop_state_fixture.rs',
+                      'native/crates/cli/examples/s2e_contract.rs',
+                      'native/crates/cli/src/main.rs',
                       'native/crates/platform/src/environment_guard.rs')
+# 入口(検査専用の入口と製品の入口)。`#![forbid(unsafe_code)]` で始まり、登録の語を自分では書かない。
+ENTRIES = ALLOWED_EXPANSIONS[:-1]
+PLATFORM = ALLOWED_EXPANSIONS[-1]
 # 括弧の種類(`()`・`{}`・`[]`)と空白を問わず、マクロの呼出しを数える。
 MACRO_CALL = re.compile(r'\bs2e_record_startup_state\s*!')
 MACRO_ALIAS = re.compile(r'\bs2e_record_startup_state\s+as\b')
@@ -45,27 +52,28 @@ def macro_findings(root):
                 calls.append((name, number, code.strip()))
             if MACRO_ALIAS.search(code):
                 aliases.append((name, number, code.strip()))
-            if RECORD_FUNCTION.search(code) and name != ALLOWED_EXPANSIONS[1]:
+            if RECORD_FUNCTION.search(code) and name != PLATFORM:
                 references.append((name, number, code.strip()))
     return calls, aliases, references
 
 
 def check_macro_placement(root):
-    """展開は入口の1か所とplatformのテストの中だけ。別名と、許可の外からの記録の関数の参照を拒む。"""
+    """展開は3つの入口に1か所ずつとplatformのテストの中だけ。別名と、許可の外からの記録の関数の参照を拒む。"""
     calls, aliases, references = macro_findings(root)
     if [item[0] for item in calls] != list(ALLOWED_EXPANSIONS):
         raise AssertionError(f'展開の場所が違う: {calls}')
-    if calls[0][2] != 'dev_workflow_platform::s2e_record_startup_state!();':
-        raise AssertionError(f'入口の展開の形が違う: {calls[0]}')
-    if calls[1][2] != 'crate::s2e_record_startup_state!();':
-        raise AssertionError(f'platform の展開の形が違う: {calls[1]}')
+    for call in calls[:-1]:
+        if call[2] != 'dev_workflow_platform::s2e_record_startup_state!();':
+            raise AssertionError(f'入口の展開の形が違う: {call}')
+    if calls[-1][2] != 'crate::s2e_record_startup_state!();':
+        raise AssertionError(f'platform の展開の形が違う: {calls[-1]}')
     if aliases or references:
         raise AssertionError(f'別名の取り込みか、許可の外の参照: {aliases + references}')
-    platform = (root / ALLOWED_EXPANSIONS[1]).read_text(encoding='utf-8').splitlines()
+    platform = (root / PLATFORM).read_text(encoding='utf-8').splitlines()
     tests_start = next(index for index, line in enumerate(platform, 1) if line.strip() == 'mod child_tests {')
     # テストのモジュールの終わり(行頭の `}`)より前でなければ、モジュールの外。
     tests_end = next(index for index, line in enumerate(platform, 1) if index > tests_start and line == '}')
-    if platform[tests_start - 2].strip() != '#[cfg(test)]' or not tests_start < calls[1][1] < tests_end:
+    if platform[tests_start - 2].strip() != '#[cfg(test)]' or not tests_start < calls[-1][1] < tests_end:
         raise AssertionError('platform の展開がテストのモジュールの外にある')
 
 
@@ -78,7 +86,7 @@ def check_registration_inside_macro(root):
 
     マクロの外に登録を足す変異(別の関数を`main`より前に載せる形を含む)を拒む。
     """
-    lines = (root / ALLOWED_EXPANSIONS[1]).read_text(encoding='utf-8').splitlines()
+    lines = (root / PLATFORM).read_text(encoding='utf-8').splitlines()
     start = next((i for i, line in enumerate(lines, 1) if line.strip() == MACRO_START), None)
     if start is None:
         raise AssertionError('マクロの定義が見つからない')
@@ -111,9 +119,9 @@ class S2EStartupMacroPlacement(unittest.TestCase):
         }
         with tempfile.TemporaryDirectory() as temp:
             copy = Path(temp)
-            (copy / ALLOWED_EXPANSIONS[1]).parent.mkdir(parents=True)
-            original = (ROOT / ALLOWED_EXPANSIONS[1]).read_text(encoding='utf-8')
-            path = copy / ALLOWED_EXPANSIONS[1]
+            (copy / PLATFORM).parent.mkdir(parents=True)
+            original = (ROOT / PLATFORM).read_text(encoding='utf-8')
+            path = copy / PLATFORM
             path.write_text(original, encoding='utf-8')
             check_registration_inside_macro(copy)
             for label, text in mutations.items():
@@ -126,10 +134,13 @@ class S2EStartupMacroPlacement(unittest.TestCase):
         check_macro_placement(ROOT)
 
     def test_contract_entry_keeps_forbid_unsafe_and_has_no_link_section(self):
-        entry = (ROOT / ALLOWED_EXPANSIONS[0]).read_text(encoding='utf-8')
-        self.assertTrue(entry.startswith('#![forbid(unsafe_code)]\n'))
-        for path in [ROOT / ALLOWED_EXPANSIONS[0],
-                     *sorted((NATIVE / 'crates/cli/src/commands/environment_guard').glob('*.rs'))]:
+        for relative in ENTRIES:
+            with self.subTest(entry=relative):
+                entry = (ROOT / relative).read_text(encoding='utf-8')
+                self.assertTrue(entry.startswith('#![forbid(unsafe_code)]\n'))
+        for path in [*(ROOT / relative for relative in ENTRIES),
+                     *sorted((NATIVE / 'crates/cli/src/commands/environment_guard').glob('*.rs')),
+                     *sorted((NATIVE / 'crates/cli/src/commands/loop_state').glob('*.rs'))]:
             for number, code in _code_lines(path):
                 with self.subTest(path=path.name, line=number):
                     self.assertNotRegex(code, r'\bunsafe\b|link_section|no_mangle|export_name')
@@ -170,7 +181,7 @@ class S2EStartupMacroPlacement(unittest.TestCase):
             copy = Path(temp)
             shutil.copytree(ROOT / 'native/crates', copy / 'native/crates',
                             ignore=shutil.ignore_patterns('target', '*.lock'))
-            path = copy / ALLOWED_EXPANSIONS[1]
+            path = copy / PLATFORM
             text = path.read_text(encoding='utf-8')
             moved = text.replace('\n    crate::s2e_record_startup_state!();\n', '\n', 1)
             self.assertNotEqual(text, moved)

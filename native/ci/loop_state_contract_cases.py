@@ -58,7 +58,7 @@ class Pairs:
         old=invoke([sys.executable,'-B',str(check.LEGACY),*map(os.fspath,argv)],env,self.work,out_route,err_route);check.record('old',old)
         old_state=check.output_state(output)
         check.restore_output(output,initial)
-        new=invoke([str(self.fixture),*map(os.fspath,argv)],env,self.work,out_route,err_route)
+        new=invoke([*check.new_command(self.fixture),*map(os.fspath,argv)],env,self.work,out_route,err_route)
         check.remember(label,old,new);check.compare_result(label,old,new)
         actual=check.output_state(output)
         if actual!=old_state:raise check.Mismatch(f'CONTRACT_STATE: {label}: {old_state!r} != {actual!r}')

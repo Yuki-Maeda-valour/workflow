@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""S2LのRust57件を実行し、必須名・件数・未実行0を照合する。"""
+"""S2LのRust58件(D2で1件を足した)を実行し、必須名・件数・未実行0を照合する。"""
 import hashlib,json,os,re,subprocess,sys,time
 from pathlib import Path
 import check_loop_state as check
@@ -20,6 +20,8 @@ REQUIRED.update({'loop_state::decision_tests::r3_enumeration_failure_keeps_surro
                  # 正式実装レビュー r4。
                  'loop_state::decision_tests::onbranch_cleanup_follows_os_walk_bottom_up',
                  'loop_state::decision_tests::entry_readlink_failure_is_stop_with_codepoints'})
+# D2(#542)の決めたことの8・10: 製品へ登録した後の起動の地域設定の警告。
+REQUIRED.add('loop_state::output::tests::a_legacy_locale_warning_left_in_the_stderr_buffer_ends_with_120')
 COUNT=len(REQUIRED)
 
 def assert_listing(raw):

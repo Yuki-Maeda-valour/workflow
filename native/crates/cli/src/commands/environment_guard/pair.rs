@@ -118,7 +118,8 @@ pub fn run_pair(
     site("pair-after-verified");
     let input = host.go_input().map_err(|error| from_io(&error, None))?;
     if !wait_for_go(input.as_fd(), timeout)? {
-        return Ok(20);
+        // 旧版は `os._exit(20)`(固定の読み込み器の変換を通らない)。
+        return Ok(super::output::OS_EXIT_20);
     }
     site("pair-after-go");
     verify(host, &state, &expected, Some(&current), ctx)?;

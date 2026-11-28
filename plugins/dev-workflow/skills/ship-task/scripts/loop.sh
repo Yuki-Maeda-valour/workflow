@@ -662,6 +662,171 @@ py() {
   case "${1:-}" in environment-run|hook-settings) isolation=(-I) ;; esac
   ( cd / && exec python3 "${isolation[@]}" -c "$code" "$@" 7>&- )
 }
+# ── Rust の実行ファイルを照らして起動する読み込み器(D2・#542。DEV_WORKFLOW_ENGINE=rust のときだけ使う)──
+# 字面は、この 1 か所だけに置く(native/ci/check_d2.py が、実行のたびにここから読んで旧版と比べる)。
+# 起動は `<Python> -I -c "$NATIVE_LOADER" <引数>`。Python・作業場所・fd 7 は、置き換える旧版の起動と同じにする
+# (直接の形と loop-state は "$PY_ABS"、読み込み器を経た形は PATH の python3 と cd / と 7>&-)。引数は次の順:
+#   <形> <元の LC_CTYPE の有無 0|1> <元の LC_CTYPE の値(無ければ空)> <受け継ぐ信号> <実行ファイルの SHA-256> <実行ファイル>
+#   <旧 guard のコピーの SHA-256 か -> <旧 guard のコピーか -> <コマンドの引数…>
+# - <形>: environment-guard(直接の形)・environment-guard-held(読み込み器を経た形)・loop-state。
+# - <受け継ぐ信号>: SIGALRM・SIGINT・SIGPIPE・SIGXFSZ の順に、loop.sh の子が無視で受け継ぐなら 1、既定なら 0 の 4 桁
+#   (trap -p で見分ける)。
+# - 旧 guard のコピーは environment-guard-held のときだけ渡し、照らすだけで実行しない(旧版と同じ所で止めるため)。
+# 手順: 親と末尾をリンクを辿らずに開き(ENVIRONMENT_LOADER と同じ開き方)、通常ファイルを 8 MiB・15 秒以内で読む → SHA-256 を
+# 照らす → 封を付けられる memfd(MFD_EXEC。EINVAL なら付けずに作り直す)へ書く(RLIMIT_FSIZE のソフトの上限が足りなければ、
+# 書く間だけハードの上限まで上げる)→ 4 つの封 → 上限を戻して読み直す → 封を確かめ、memfd を読み直して照らし直す →
+# 時間切れの印を 0 にし、4 つの信号と LC_CTYPE を元へ戻す → memfd の fd を execve で起動する(パスで起動し直さない)。
+# 失敗(Exception・SystemExit)は起動せず、1 行と終了 20。KeyboardInterrupt は変換しない。
+# memfd・封の名前を持たない Python(python-build-standalone など)では、Linux の番号と ctypes の memfd_create を使う。
+# os.execve が fd を受けない Python と、memfd を作る手段が無い Python では、起動せずに上と同じく止まる(パスで起動し直さない)。
+read -r -d '' NATIVE_LOADER <<'PY' || true
+import os, sys, stat, re, hashlib, signal
+
+def load(expected, path, limit):
+    if not re.fullmatch("[a-f0-9]{64}", expected):
+        raise RuntimeError("hash")
+    parts = path.split("/")
+    if not path.startswith("/") or len(parts) > 129 or any(p in ("", ".", "..") for p in parts[1:]):
+        raise RuntimeError("path")
+    def expired(*unused):
+        raise RuntimeError("timeout")
+    def identity(st):
+        return st.st_dev, st.st_ino, st.st_mode
+    def version(st):
+        return identity(st), st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    previous = signal.signal(signal.SIGALRM, expired)
+    signal.setitimer(signal.ITIMER_REAL, 15)
+    fd = None
+    try:
+        fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+        for name in parts[1:-1]:
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+            if not stat.S_ISDIR(before.st_mode):
+                raise RuntimeError("directory")
+            child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+            os.close(fd); fd = child
+            if identity(before) != identity(os.fstat(fd)):
+                raise RuntimeError("directory changed")
+        before = os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > limit:
+            raise RuntimeError("file")
+        child = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+        try:
+            if version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            chunks, size = [], 0
+            while size < before.st_size:
+                chunk = os.read(child, min(65536, before.st_size - size))
+                if not chunk:
+                    raise RuntimeError("short read")
+                chunks.append(chunk); size += len(chunk)
+            if os.read(child, 1) or version(before) != version(os.fstat(child)):
+                raise RuntimeError("file changed")
+            if version(before) != version(os.stat(parts[-1], dir_fd=fd, follow_symlinks=False)):
+                raise RuntimeError("path changed")
+            raw = b"".join(chunks)
+            if hashlib.sha256(raw).hexdigest() != expected:
+                raise RuntimeError("hash mismatch")
+            return raw
+        finally:
+            os.close(child)
+    finally:
+        if fd is not None:
+            os.close(fd)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+def memfd_create(name, flags):
+    if hasattr(os, "memfd_create"):
+        return os.memfd_create(name, flags)
+    import ctypes
+    libc = ctypes.CDLL(None, use_errno=True)
+    function = libc.memfd_create
+    function.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+    function.restype = ctypes.c_int
+    fd = function(name.encode(), flags)
+    if fd < 0:
+        number = ctypes.get_errno()
+        raise OSError(number, os.strerror(number))
+    return fd
+
+def start(kind, has_ctype, ctype, inherited, binary_sha, binary, guard_sha, guard, *args):
+    import errno, fcntl, resource
+    if kind not in ("environment-guard", "environment-guard-held", "loop-state"):
+        raise RuntimeError("kind")
+    if has_ctype not in ("0", "1") or (has_ctype == "0" and ctype) or not re.fullmatch("[01]{4}", inherited):
+        raise RuntimeError("arguments")
+    if kind == "environment-guard-held":
+        load(guard_sha, guard, 1048576)
+    elif (guard_sha, guard) != ("-", "-"):
+        raise RuntimeError("guard")
+    raw = load(binary_sha, binary, 8388608)
+    flags = getattr(os, "MFD_CLOEXEC", 1) | getattr(os, "MFD_ALLOW_SEALING", 2)
+    try:
+        memfd = memfd_create("dev-workflow", flags | 0x10)
+    except OSError as exc:
+        if exc.errno != errno.EINVAL:
+            raise
+        memfd = memfd_create("dev-workflow", flags)
+    limit = resource.getrlimit(resource.RLIMIT_FSIZE)
+    soft, hard = limit
+    endless = resource.RLIM_INFINITY
+    raised = soft != endless and soft < len(raw)
+    if raised:
+        if hard != endless and hard < len(raw):
+            raise RuntimeError("file size limit")
+        resource.setrlimit(resource.RLIMIT_FSIZE, (hard, hard))
+    written = 0
+    while written < len(raw):
+        count = os.write(memfd, raw[written:])
+        if count <= 0:
+            raise RuntimeError("short write")
+        written += count
+    seals = (getattr(fcntl, "F_SEAL_SHRINK", 2) | getattr(fcntl, "F_SEAL_GROW", 4) | getattr(fcntl, "F_SEAL_WRITE", 8)
+             | getattr(fcntl, "F_SEAL_SEAL", 1))
+    fcntl.fcntl(memfd, getattr(fcntl, "F_ADD_SEALS", 1033), seals)
+    if raised:
+        resource.setrlimit(resource.RLIMIT_FSIZE, limit)
+    if resource.getrlimit(resource.RLIMIT_FSIZE) != limit:
+        raise RuntimeError("file size limit")
+    if fcntl.fcntl(memfd, getattr(fcntl, "F_GET_SEALS", 1034)) & seals != seals:
+        raise RuntimeError("seals")
+    chunks, offset = [], 0
+    while True:
+        chunk = os.pread(memfd, 1048576, offset)
+        if not chunk:
+            break
+        chunks.append(chunk); offset += len(chunk)
+    if hashlib.sha256(b"".join(chunks)).hexdigest() != binary_sha:
+        raise RuntimeError("memfd changed")
+    env = dict(os.environb)
+    if has_ctype == "1":
+        env[b"LC_CTYPE"] = os.fsencode(ctype)
+    else:
+        env.pop(b"LC_CTYPE", None)
+    argv = [os.fsencode(binary), kind.encode(), *map(os.fsencode, args)]
+    if os.execve not in os.supports_fd:
+        raise RuntimeError("execve fd")
+    numbers = (signal.SIGALRM, signal.SIGINT, signal.SIGPIPE, signal.SIGXFSZ)
+    previous = [signal.getsignal(number) for number in numbers]
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    try:
+        for number, ignored in zip(numbers, inherited):
+            signal.signal(number, signal.SIG_IGN if ignored == "1" else signal.SIG_DFL)
+        os.execve(memfd, argv, env)
+    finally:
+        for number, handler in zip(numbers, previous):
+            signal.signal(number, handler)
+
+try:
+    start(*sys.argv[1:])
+except (Exception, SystemExit):
+    if sys.argv[1:2] == ["loop-state"]:
+        print("ERROR [dev-workflow] 保持した実行ファイルを安全に起動できない", file=sys.stderr)
+    else:
+        print("ERROR [environment-guard] 保持した検査用コピーを安全に実行できない", file=sys.stderr)
+    raise SystemExit(20)
+PY
 
 # ── 報告(状態ディレクトリの <実行 ID>/report.md。要約は stdout)──
 rep() { printf '%s\n' "$@" >>"$REPORT"; }

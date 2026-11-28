@@ -52,6 +52,20 @@ def fixture_path(value):
     return path
 
 
+PRODUCT_VARIABLE = 'DEV_WORKFLOW_TEST_NATIVE_BINARY'
+
+
+def product_path(environ=None):
+    """D2(#542)の `--product`: 製品の実行ファイル(環境変数 DEV_WORKFLOW_TEST_NATIVE_BINARY)。未設定・空・相対・不在・実行不能は止める。"""
+    value = (os.environ if environ is None else environ).get(PRODUCT_VARIABLE, '')
+    if not value or not Path(value).is_absolute():
+        raise ValueError(f'--product には {PRODUCT_VARIABLE} に製品の実行ファイルの絶対パスが必要です')
+    path = Path(value)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise ValueError(f'{PRODUCT_VARIABLE} の製品は実行可能な通常ファイルである必要があります')
+    return path
+
+
 # ---------------------------------------------------------------- 実行
 
 def has_dev_full():
@@ -485,12 +499,24 @@ class Runner:
         self.fixture, self.old_script, self.cwd, self.timeout = fixture, old_script, cwd, timeout
 
     def old(self, case, redirects=None):
+        commands = commands_module()
+        if commands.HELD is not None:
+            # 読み込み器を経た形(`loop.sh` の `( cd / && exec python3 -I -c "$PY_HELPER" environment-run … )`)。
+            argv = commands.held_old_argv(list(map(self._arg, case.args)), self.old_script)
+            return run_process(argv, env=case.env, cwd='/', timeout=self.timeout,
+                               redirects=case.redirects if redirects is None else redirects)
         argv = [sys.executable, '-B', str(self.old_script), *map(self._arg, case.args)]
         return run_process(argv, env=case.env, cwd=self.cwd, timeout=self.timeout,
                            redirects=case.redirects if redirects is None else redirects)
 
     def new(self, case):
-        return run_process([str(self.fixture), *map(self._arg, case.args)], env=case.env, cwd=self.cwd, timeout=self.timeout,
+        commands = commands_module()
+        if commands.HELD is not None:
+            # 新しい読み込み器を経た製品の `environment-guard-held`。受け継ぐ信号は、比較器が子へ渡す扱いと同じにする。
+            signals = '0010' if case.redirects.get('sigpipe') == 'ignore' else '0000'
+            argv = commands.held_new_argv(list(map(self._arg, case.args)), self.old_script, case.env, signals)
+            return run_process(argv, env=case.env, cwd='/', timeout=self.timeout, redirects=case.redirects)
+        return run_process(commands.new_argv(self.fixture, map(self._arg, case.args)), env=case.env, cwd=self.cwd, timeout=self.timeout,
                            redirects=case.redirects)
 
     @staticmethod
@@ -534,6 +560,11 @@ def run_case(runner, case, tally):
             fixed(old, -signal.SIGPIPE if case.kind == 'fatal-sigpipe' else 1)
             same_result(old, new)
             tally['matched'] += 1
+        elif case.kind == 'thread':
+            # D2(#542): 起動の失敗の Current thread の値(17:45 の決定)だけを伏せて、旧新が同じ(警告と Fatal の順・終了値・標準出力)。
+            masked = [dataclasses.replace(result, stderr=normalize_current_thread(result.stderr)) for result in (old, new)]
+            same_result(*masked)
+            tally['matched'] += 1
         elif case.kind == 'fatal':
             if not fatal_shape_ok(old.stderr):
                 raise AssertionError('旧版の Fatal 診断の形式が想定と違う')
@@ -550,8 +581,35 @@ def run_case(runner, case, tally):
         raise AssertionError(f'{label}: {error}') from None
 
 
+def locale_cases():
+    """D2(#542)の決めたことの 8・Q6 の A: 直接の形の `PYTHONCOERCECLOCALE` と 2 種類の地域設定の警告。警告が出る代表の 2 組
+    (`LANG=C`・`LC_ALL=C` に `warn`)× 起動の失敗(無し・`PYTHONHASHSEED`・標準入力がディレクトリ)× 親の `SIGPIPE`(既定・無視)×
+    標準エラー(ふつう・読む側の閉じたパイプ)の 24 組と、警告の有無の組(`PYTHONCOERCECLOCALE` の無し・0・1・warn × 代表の地域設定)。
+    子へ渡す `LC_CTYPE` は、`s2e_commands.py` の項目 `x-locale-copy` が `exec` の子の環境で比べる。"""
+    cases = []
+    locales = (('lang-c', {'LC_ALL': None, 'LANG': 'C'}), ('lc-all-c', {'LC_ALL': 'C'}), ('lc-all-posix', {'LC_ALL': 'POSIX'}),
+               ('lc-ctype-c', {'LC_ALL': None, 'LC_CTYPE': 'C'}), ('none', {'LC_ALL': None}), ('lc-all-utf8', {}))
+    for name, setting in locales:
+        for coerce in (None, '0', '1', 'warn'):
+            cases.append(Case('locale', f'host-paths-{name}-coerce={coerce}', ['host-paths'],
+                              base_env({'HOME': '/h', **setting, 'PYTHONCOERCECLOCALE': coerce})))
+    for name, setting in (('lang-c-warn', {'LC_ALL': None, 'LANG': 'C', 'PYTHONCOERCECLOCALE': 'warn'}),
+                          ('lc-all-c-warn', {'LC_ALL': 'C', 'PYTHONCOERCECLOCALE': 'warn'})):
+        for failure, extra, failure_redirects in (('none', {}, {}), ('hashseed', {'PYTHONHASHSEED': 'bad'}, {}), ('stdin-directory', {}, {0: 'dir'})):
+            for ignored in (False, True):
+                for closed in (False, True):
+                    redirects = dict(failure_redirects)
+                    if closed:
+                        redirects[2] = 'pipe-closed'
+                    if ignored:
+                        redirects['sigpipe'] = 'ignore'
+                    cases.append(Case('locale-sigpipe', f'{name}-{failure}-{"ignore" if ignored else "default"}-{"closed" if closed else "normal"}',
+                                      ['host-paths'], base_env({'HOME': '/h', **setting, **extra}), redirects, kind='thread'))
+    return cases
+
+
 def all_cases():
-    return argument_cases() + host_paths_cases() + output_failure_cases() + u7_cases() + fatal_cases()
+    return argument_cases() + host_paths_cases() + output_failure_cases() + u7_cases() + fatal_cases() + locale_cases()
 
 
 def smoke_cases():
@@ -765,7 +823,7 @@ def mapping_markdown():
              '- 読み込み器を通すテストと、Python の内部だけを観察するテストは、理由を書いて対象外にした。', '',
              '- 最後の欄は、指す比較のうち「Linux だけ」の印の項目(Mac の経路では流さない)。印は `s2e_commands.py` の項目の一覧から作る。', '',
              '| テスト | 分類 | 対応先・理由 | Linux だけの比較 |', '|---|---|---|---|']
-    marks = {item.name: item.mark for item in commands_module().items('/nonexistent-fixture')}
+    marks = {item.name: item.mark for item in commands_module().direct_items('/nonexistent-fixture')}
     for name, category, target, _ in TEST_MAPPING:
         refs = [case.strip() for group in CASE_REF.findall(target) for case in group.split(',')]
         only = ', '.join(dict.fromkeys(case for case in refs if marks.get(case) == commands_module().LINUX_ONLY)) or '-'
@@ -789,11 +847,13 @@ def commands_module():
 
 
 def check_command_totals(tally, per_group):
-    """9 コマンドの比較に 0 件の欄が無いことを確かめる(未起動・省略・時間切れを合格にしない)。流した項目の数を返す。"""
+    """9 コマンドの比較に 0 件の欄が無いことを確かめる(未起動・省略・時間切れを合格にしない)。流した項目の数を返す。
+    読み込み器を経た形の比較(D2)は、起動の形に依らない内部 reader を比べないので、その欄だけは 0 件を許す。"""
     executed = sum(count for count, _ in per_group.values())
     approved_required = True   # 認めた差(U3・U4・U7 は全機種の項目。U1・U2 は Linux だけ)の固定期待が 0 件の経路は無い
+    readers_required = commands_module().HELD is None
     for label, value, required in (('項目', executed, True), ('起動の一致', tally.runs, True), ('bootstrap の出力一式のバイト比較', tally.bootstrap_bytes, True),
-                                   ('相互読取り', tally.cross, True), ('内部 reader の値の比較', tally.readers, True),
+                                   ('相互読取り', tally.cross, True), ('内部 reader の値の比較', tally.readers, readers_required),
                                    ('読取りだけの前後確認', tally.readonly, True), ('認めた差の固定期待', tally.approved, approved_required)):
         if value == 0 and required:
             raise AssertionError(f'9 コマンドの比較が 0 件の欄がある: {label}')
@@ -803,14 +863,18 @@ def check_command_totals(tally, per_group):
 # 9 コマンドの比較の項目の数。機種ごとに完全一致で確かめる(0 でないことだけ確かめない)。
 # 'linux': Linux で流す全項目。'mac': Mac の経路(Linux だけの印の項目を流さない)の項目。キーは (グループ, 印)。値は項目の数。
 EXPECTED_ITEMS = {
-    'linux': {'total': 233, 'groups': {
+    'linux': {'total': 234, 'groups': {
         ('copy', 'all'): 32, ('extra', 'all'): 38, ('extra', 'linux'): 12, ('failure', 'linux'): 1, ('flow', 'all'): 99, ('flow', 'linux'): 1,
         ('flow-deep', 'linux'): 9, ('limit', 'linux'): 4, ('mac', 'all'): 2, ('race', 'all'): 21, ('race', 'linux'): 6, ('signal', 'all'): 3,
-        ('signal', 'linux'): 1, ('u1', 'linux'): 1, ('u2', 'linux'): 1, ('u45', 'all'): 1, ('u7', 'all'): 1}},
-    'mac': {'total': 197, 'groups': {
+        ('signal', 'linux'): 1, ('u1', 'linux'): 1, ('u2', 'linux'): 1, ('u45', 'all'): 1, ('u7', 'all'): 1, ('locale', 'all'): 1}},
+    'mac': {'total': 198, 'groups': {
         ('copy', 'all'): 32, ('extra', 'all'): 38, ('flow', 'all'): 99, ('mac', 'all'): 2, ('race', 'all'): 21, ('signal', 'all'): 3,
-        ('u45', 'all'): 1, ('u7', 'all'): 1}},
+        ('u45', 'all'): 1, ('u7', 'all'): 1, ('locale', 'all'): 1}},
 }
+# 読み込み器を経た形の比較(D2・`--form held`。Linux だけ)で流す項目の数(9 コマンドの流れと、read・exec・hook・verify-pair の流れ)と、
+# 出力の故障の比較のケースの数(`output_failure_cases`。Linux は /dev/full も使う)。
+EXPECTED_ITEMS_HELD = {'total': 136, 'groups': {('copy', 'all'): 32, ('flow', 'all'): 99, ('flow', 'linux'): 1, ('limit', 'linux'): 4}}
+EXPECTED_HELD_CASES = 114
 # Linux だけの印を付けた項目の名前(Mac の経路では流さない)。36 件。
 EXPECTED_LINUX_ONLY = (
     'bootstrap-refusals', 'depth-990', 'depth-991', 'depth-992-after-state', 'depth-992-bootstrap', 'depth-copy-992', 'depth-copy-993', 'u1-locale',
@@ -829,7 +893,7 @@ def check_command_items(per_group, skipped, all_items=None):
     machine = 'mac' if commands.MAC_PATH else 'linux'
     if all_items is None:
         all_items = commands.items('/nonexistent-fixture')
-    expected = EXPECTED_ITEMS[machine]
+    expected = EXPECTED_ITEMS_HELD if commands.HELD is not None else EXPECTED_ITEMS[machine]
     actual = {key: count for key, (count, _) in per_group.items()}
     if actual != expected['groups']:
         raise AssertionError(f'9 コマンドの項目の数がグループごとの期待と違う({machine}): 実際 {sorted(actual.items())}・期待 {sorted(expected["groups"].items())}')
@@ -837,7 +901,12 @@ def check_command_items(per_group, skipped, all_items=None):
     if total != expected['total']:
         raise AssertionError(f'9 コマンドの項目の総数が期待と違う({machine}): 実際 {total}・期待 {expected["total"]}')
     linux_only = tuple(sorted(item.name for item in all_items if item.mark == commands.LINUX_ONLY))
-    if linux_only != EXPECTED_LINUX_ONLY:
+    if commands.HELD is not None:
+        # 読み込み器を経た形は、流れの群と上限の端の群の Linux だけの項目(1 件と 4 件)だけを持つ。
+        linux_only = tuple(sorted(set(EXPECTED_LINUX_ONLY) & set(linux_only)))
+        if len(linux_only) != sum(count for (_, mark), count in expected['groups'].items() if mark == 'linux'):
+            raise AssertionError(f'読み込み器を経た形の Linux だけの項目の数が違う: {linux_only}')
+    elif linux_only != EXPECTED_LINUX_ONLY:
         raise AssertionError(f'Linux だけの印を付けた項目が期待と違う: 余分 {sorted(set(linux_only) - set(EXPECTED_LINUX_ONLY))[:5]}・不足 {sorted(set(EXPECTED_LINUX_ONLY) - set(linux_only))[:5]}')
     if commands.MAC_PATH and tuple(sorted(name for name, _ in skipped)) != EXPECTED_LINUX_ONLY:
         raise AssertionError('Mac の経路で流さなかった項目が、Linux だけの印の項目の一覧と違う')
@@ -850,7 +919,7 @@ def check_command_items(per_group, skipped, all_items=None):
 def check_mapping_references(known_names=None):
     """対応表が指す比較のケースの名前(`比較[…]`)と Rust のテストの名前(`<ファイル>.rs::<名前>`)が、実在することを確かめる。"""
     if known_names is None:
-        known_names = {item.name for item in commands_module().items('/nonexistent-fixture')}
+        known_names = {item.name for item in commands_module().direct_items('/nonexistent-fixture')}
     count = 0
     for name, _, target, _ in TEST_MAPPING:
         for group in CASE_REF.findall(target):
@@ -931,6 +1000,13 @@ def main(argv=None):
     parser.add_argument('--write-mapping', action='store_true')
     # 比較器自身の検査(test_s2e.py。手元で約 186 秒)を省く。CI の s2e ジョブの 2 回目の比較で使う(1 回目は必ず流す)。
     parser.add_argument('--no-selftest', action='store_true')
+    # D2(#542): Rust の側を製品の `dev-workflow environment-guard`(DEV_WORKFLOW_TEST_NATIVE_BINARY)にする。
+    # 隠しの reader コマンドを使う項目は、--fixture の検査専用の入口のまま流す。
+    parser.add_argument('--product', action='store_true')
+    # D2(#542): 起動の形。held は、旧版を `loop.sh` の `py environment-run` の形、Rust を新しい読み込み器を経た製品の
+    # `environment-guard-held` にして、流れ(flow)・read・exec・hook・verify-pair の流れ(copy)・上限の端(limit)・出力の故障を比べる
+    # (--product が要る。Linux だけ。流さない群の理由は s2e_commands.py の HELD_GROUPS の説明)。
+    parser.add_argument('--form', choices=('direct', 'held'), default='direct')
     args = parser.parse_args(argv)
     if args.write_mapping:
         check_mapping()
@@ -940,8 +1016,18 @@ def main(argv=None):
     if not args.fixture:
         parser.error('--fixture が必要です')
     FIXTURE = fixture_path(args.fixture)
+    product = product_path() if args.product else None
+    commands_module().PRODUCT = product
+    if args.form == 'held':
+        if product is None:
+            raise ValueError('--form held には --product が必要です')
+        commands_module().use_held(product)
     if sys.version_info[:2] != (3, 10) or os.geteuid() == 0:
         raise ValueError('S2E 比較は Python 3.10 系・非 root で実行してください')
+    if product is not None and args.form == 'held':
+        print(f'S2E: 読み込み器を経た形: 旧版は loop.sh の py environment-run の形、Rust は新しい読み込み器を経た {product} environment-guard-held')
+    elif product is not None:
+        print(f'S2E: Rust の側は製品の {product} environment-guard(隠しの reader は {FIXTURE})')
     simulated = is_simulation()
     if simulated:
         print(SIMULATION_NOTICE)
@@ -955,7 +1041,10 @@ def main(argv=None):
         script = stage_distribution(base)
         work = base / 'work'
         work.mkdir()
-        tally = run_contract(FIXTURE, all_cases(), old_script=script, cwd=work)
+        cases = output_failure_cases() if args.form == 'held' else all_cases()
+        tally = run_contract(FIXTURE, cases, old_script=script, cwd=work)
+        if args.form == 'held' and tally['matched'] + tally['approved'] != EXPECTED_HELD_CASES:
+            raise AssertionError(f'読み込み器を経た形の出力の故障の比較が {EXPECTED_HELD_CASES} 件でない: {tally["matched"] + tally["approved"]} 件')
         # 9 コマンド(bootstrap・verify・host-settings・host-allowlist と内部 reader)の旧新比較。
         commands = commands_module()
         print('S2E: 9 コマンドの旧新比較を流す')

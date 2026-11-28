@@ -72,6 +72,11 @@ impl Host for ProcessHost {
 /// (`<module>` と `main`)。`json.dumps` を呼ぶフレーム。
 pub const MAIN_DEPTH: usize = 2;
 
+/// 読み込み器を経た形(`loop.sh` の `python3 -I -c <補助> environment-run …`)で、直接の形より深い段の数(D2)。
+/// 補助の `<string>`・`cmd_environment_run`・`exec`(C の呼出し)・読み込み器の `<module>`・`exec`(C の呼出し)の 5 段。
+/// 旧版の再帰の上限に当たる深さは、直接の形が 998、この形が 993(設計のレビューでの試し。`check_d2.py` が境目を比べる)。
+pub const HELD_EXTRA_DEPTH: usize = 5;
+
 /// コマンドの入口の関数のフレームの深さ(旧版の `main` から 1 つ下: `run_copy`・`host_allowlist`)。
 const CALLEE_DEPTH: usize = MAIN_DEPTH + 1;
 
@@ -89,16 +94,56 @@ pub fn dispatch(
     parsed: &Parsed,
     stdout: &mut PyStream<'_>,
 ) -> Result<i64, PyException> {
+    dispatch_from(host, parsed, stdout, 0)
+}
+
+/// 読み込み器を経た形(`environment-guard-held`)の分岐。深さは直接の形より [`HELD_EXTRA_DEPTH`] だけ深い。
+pub fn dispatch_held(
+    host: &dyn Host,
+    parsed: &Parsed,
+    stdout: &mut PyStream<'_>,
+) -> Result<i64, PyException> {
+    dispatch_from(host, parsed, stdout, HELD_EXTRA_DEPTH)
+}
+
+/// 読み込み器を経た形のプロセスの環境。旧版は `-I` で起動するので `PYTHON*` を読まない
+/// (`PYTHONINTMAXSTRDIGITS` は既定の 4300)。ほかは [`ProcessHost`] と同じ。
+pub struct HeldProcessHost;
+
+impl Host for HeldProcessHost {
+    fn env(&self, name: &str) -> Option<Cps> {
+        ProcessHost.env(name)
+    }
+    fn cwd(&self) -> Result<Cps, PyException> {
+        ProcessHost.cwd()
+    }
+    fn users(&self) -> &dyn UserLookup {
+        &PlatformUsers
+    }
+    fn max_str_digits(&self) -> usize {
+        4300
+    }
+}
+
+/// `extra` は、直接の形より深い段の数(直接の形は 0)。
+fn dispatch_from(
+    host: &dyn Host,
+    parsed: &Parsed,
+    stdout: &mut PyStream<'_>,
+    extra: usize,
+) -> Result<i64, PyException> {
     let digits = host.max_str_digits();
+    let main_depth = MAIN_DEPTH + extra;
+    let callee_depth = CALLEE_DEPTH + extra;
     let main_ctx = PyCtx {
-        depth: MAIN_DEPTH,
+        depth: main_depth,
         max_str_digits: digits,
     };
     match parsed.command.as_str() {
         "host-paths" => {
             let paths = host_paths(host)?;
             // 整数を出さないので、桁数の上限は関係しない。
-            let ctx = PyCtx::new(MAIN_DEPTH);
+            let ctx = PyCtx::new(main_depth);
             let line = dumps(&PyValue::Dict(paths), DumpOptions::HOST, ctx)?;
             stdout.print(&line)?;
             Ok(0)
@@ -118,7 +163,7 @@ pub fn dispatch(
             parsed,
             stdout,
             PyCtx {
-                depth: CALLEE_DEPTH,
+                depth: callee_depth,
                 ..main_ctx
             },
         ),
@@ -127,7 +172,7 @@ pub fn dispatch(
             parsed,
             stdout,
             PyCtx {
-                depth: CALLEE_DEPTH,
+                depth: callee_depth,
                 ..main_ctx
             },
         ),
@@ -149,7 +194,7 @@ pub fn dispatch(
                 &arg_text(parsed, "state"),
                 &arg_text(parsed, "expect_sha256"),
                 PyCtx {
-                    depth: CALLEE_DEPTH,
+                    depth: callee_depth,
                     ..main_ctx
                 },
             )?;

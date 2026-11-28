@@ -32,12 +32,13 @@ python3 -B native/ci/build.py r4d1 --platform linux-x86_64
 - `reproduce`: 書式・clippy・Rust テストを省き、2 回のビルドと比較、各回の製品用実行物とR4B・R4R検査用実行物の上記の検査を行います。各回の `loop_state_fixture` の比較(`check_loop_state.py`・`test_loop_state.py`)も行います。
 - `combine`: Mac の 2 回分をそれぞれ `lipo` で結合します。固定識別子で簡易署名し、署名を検査してから `cmp` で比べます。
 - `verify-universal`: 同じ最終 Mac ファイルを受け取り、署名の検査と `check_probe.py`・`check_resolve_task_dir.py` を行います。R4B・R4R検査用実行物の署名検査と専用比較も行います。Intel と Apple Silicon の両方で実行し、署名し直しません。S2Lの `loop_state_fixture` も、署名検査と比較(`check_loop_state.py`・`test_loop_state.py`)を行います。
-- CIの工程全体の上限は`build`が120分、`verify-universal`が60分です(S2L #468の前は60分・30分)。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。Macの`build`は、run 43085911008で当時の上限60分の中で終わりました(x86_64が44分46秒、arm64が28分35秒)。`verify-universal`は、run 43085911008でMac arm64が13分9秒、Mac x86_64が17分8秒で成功しました(上限30分)。同じcommitのpush用のrun 43085900763では、Mac x86_64が26分39秒で、上限まで残り約3分でした。2つのrunとも`distribution`の工程は待ちのまま始まらず、GitHub側の実行機の割り当ての問題と推測しています。推測の根拠(HTTP 502の記録と、mainの過去のrunの`distribution`の成功)は [testing.md](../../docs/testing.md#pr用ciの記録run-43085911008) にあります。
+- CIの工程全体の上限は`build`が120分、`verify-universal`が60分です(S2L #468の前は60分・30分)。Mac IntelでR4Bの1回の比較に838.626秒かかり、2回比較する`build`が従来の40分で打ち切られたため延ばしました。署名後の工程も製品用比較とR4B比較を各1回行うため、従来の15分から延ばしました。[実測と根拠](../../docs/testing.md)を参照してください。Macの`build`は、run 43085911008で当時の上限60分の中で終わりました(x86_64が44分46秒、arm64が28分35秒)。`verify-universal`は、run 43085911008でMac arm64が13分9秒、Mac x86_64が17分8秒で成功しました(上限30分)。同じcommitのpush用のrun 43085900763では、Mac x86_64が26分39秒で、上限まで残り約3分でした。2つのrunとも`distribution`の工程は待ちのまま始まらず、GitHub側の実行機の割り当ての問題と推測しています。推測の根拠(HTTP 502の記録と、mainの過去のrunの`distribution`の成功)は [testing.md](../../docs/testing.md#pr用ciの記録run-43085911008) にあります。
 - `r4a-rest`: `build`の後に、同じ機種の2回のビルド(`1/`・`2/`)の`r4a_rest_contract`が同じことを`cmp`で確かめてから、`1/`を専用比較します(R4A残り5本。2回目の比較は#516でやめました)。Linux 2種・Mac 2種です。
 - `r4a-rest-universal`: `combine`の後に、署名後のMac共通の`r4a_rest_contract`を、Intel/Apple Siliconの両CPUで専用比較します(署名し直しません)。
 - `r4c`: `build`の後に、同じ機種の2回のビルドの`adopt_candidate_contract`を、同じ番号の`diff_snapshot_contract`と組にして専用比較します(R4C)。Linux 2種・Mac 2種です。
 - `r4c-universal`: `combine`の後に、署名後のMac共通の`adopt_candidate_contract`を、Intel/Apple Siliconの両CPUで専用比較します(署名し直しません)。
 - `package`: Linux 2 本と最終 Mac 1 本を集め、`make_dist.py` の検査を通して tar に包みます。
+- `d2`・`d2-universal`: D2(#542)の製品の実行ファイルでの比較の必須ジョブです([D2の節](#d2の必須比較製品の実行ファイル))。
 - `r4d1`: `build` の後の必須ジョブです。上限は 30 分です。次の比較のコマンドを `quality()` と同じ環境で流し、比較のテストがちょうど 1 件合格したことを確かめます。比較のテストには `#[ignore]` の印があり、通常の `cargo test` では流れません(結果は `ignored`)。
   - `cargo test --locked -p dev-workflow-cli --test diagnostic_reftable -- --ignored --exact rust_matches_the_legacy_reftable_reader_on_every_input`
 
@@ -174,10 +175,11 @@ R4Rの上記経路はコード上で必須にしました。今回の手元Linux
 
 ## S2Lの必須比較と検査用実行物
 
-#468の`loop-state`の7コマンドは未登録・未配布です。[契約](../../docs/design.md#loop-stateの状態観測7コマンドs2l)と [実行手順・件数・時間](../../docs/testing.md#s2lの比較)を参照してください。
+#468の`loop-state`の7コマンドは、D2(#542)で製品の登録表へ足しました。D2のPRで配る実行物に取り込み、`DEV_WORKFLOW_ENGINE=rust`のときの`loop.sh`だけが呼びます。[契約](../../docs/design.md)と [実行手順・件数・時間](../../docs/testing.md)を参照してください。
 
-- `quality()`は、各OSで1回、`check_loop_state_units.py`(Rustテスト57件)と`check_loop_state_mutations.py`(誤りを入れた21種類)を流します。
-- 安全の観測のRustテスト(`safety_tests.rs` の `Fixture`)が試験のrepoを作る git には、後ろの自動の手入れを止める指定を付けます(#517)。手入れが作って消す`.git/objects/maintenance.lock`が、テスト用の監視を作る途中に消えて落ちたためです。記録は[testing.md](../../docs/testing.md#s2lの比較)にあります。
+- `quality()`は、各OSで1回、`check_loop_state_units.py`(Rustテスト58件。D2で1件を足した)と`check_loop_state_mutations.py`(誤りを入れた21種類)を流します。
+- D2で、比較器の決定の比較に`locale_coercion`(108組)・`locale_sigpipe`(24組)・`startup_sigpipe`(4組)・`startup_sigxfsz`(4組)を足しました(`decision_groups`)。製品の`loop-state`で比べる入口は`check_loop_state.py --product`です([D2の節](#d2の必須比較製品の実行ファイル))。
+- 安全の観測のRustテスト(`safety_tests.rs` の `Fixture`)が試験のrepoを作る git には、後ろの自動の手入れを止める指定を付けます(#517)。手入れが作って消す`.git/objects/maintenance.lock`が、テスト用の監視を作る途中に消えて落ちたためです。記録は[testing.md](../../docs/testing.md)にあります。
 - Linux2種・Mac2種の`build`/`reproduce`は、製品用`dev-workflow`・検査用`r4b_contract`・`r4r_contract`と同じ2回のビルドで、検査用`loop_state_fixture`も作ります。
 - 各回に`check_loop_state.py --fixture <今回作ったloop_state_fixtureの絶対パス>`と`test_loop_state.py --fixture <同じパス>`を必須実行します。
 - Linuxは4本のELFを検査し、各2回のバイト列を比べます。Macも、CPUごとの各2回のバイト列を比べます(#516)。さらに4本を各2回結合・署名し、署名後のバイト列を比べます。
@@ -187,7 +189,7 @@ R4Rの上記経路はコード上で必須にしました。今回の手元Linux
 - 比較は本家CPython 3.10.11・PyYAML 6.0.3・非rootで行います。件数の欠け・skip・時間切れを成功にしません。
 - 自己検査`test_loop_state.py`の26件は、比較器が不一致・外す環境変数の残り・固定名の誤った対応づけを拒否することを確かめます。
 - 手元の比較は1回176〜235秒でした。CIの工程の上限(`build`120分・`verify-universal`60分)の中で完走するかは未確認です。
-- 上限はS2Lで延ばしました。R4Rのpush用のrun 43085900763で、Mac Intelの`build`が48.2分(上限60分)、`verify-universal`が26.6分(上限30分)を使っており、S2Lの比較を足すと超えるおそれが高いためです。[根拠](../../docs/testing.md#4-種類の-ci-と成果物)を参照してください。
+- 上限はS2Lで延ばしました。R4Rのpush用のrun 43085900763で、Mac Intelの`build`が48.2分(上限60分)、`verify-universal`が26.6分(上限30分)を使っており、S2Lの比較を足すと超えるおそれが高いためです。[根拠](../../docs/testing.md)を参照してください。
 
 ## check_links の必須比較(R4U)
 
@@ -563,9 +565,9 @@ python3 -B native/ci/implement_guard_mutations.py         # Rust のソースへ
 
 ## S2Eの必須比較と検査用実行物
 
-#470の環境照合9コマンドと内部readerは未登録・未配布です。検査用の入口は`s2e_contract`(cargoのexample)で、製品のCLIには登録しません。比較器は`check_s2e.py`(部品は`s2e_commands.py`。自己検査は`test_s2e.py`。固定期待は`s2e_fixtures/`)です。
+#470の環境照合9コマンドは、D2(#542)で製品の登録表へ足しました(`environment-guard`・`environment-guard-held`)。D2のPRで配る実行物に取り込み、`DEV_WORKFLOW_ENGINE=rust`のときの`loop.sh`だけが呼びます。内部readerは製品に入れていません。検査用の入口は`s2e_contract`(cargoのexample)です。比較器は`check_s2e.py`(部品は`s2e_commands.py`。自己検査は`test_s2e.py`。固定期待は`s2e_fixtures/`)です。製品で比べる入口は`check_s2e.py --product`(直接の形)と`--product --form held`(読み込み器を経た形)です([D2の節](#d2の必須比較製品の実行ファイル))。
 
-- 契約は [設計のS2E節](../../docs/design.md#environment-guardの環境照合と内部readers2e)、APIは [native/README.md](../README.md#environment-guardの環境照合s2e)、手順と件数は [testing.md](../../docs/testing.md#s2eの比較)にあります。
+- 契約は [設計のS2E節](../../docs/design.md)、APIは [native/README.md](../README.md#environment-guardの環境照合s2e)、手順と件数は [testing.md](../../docs/testing.md)にあります。
 
 ```bash
 python3 -B native/ci/build.py s2e --platform linux-x86_64
@@ -581,12 +583,12 @@ python3 -B native/ci/build.py s2e-universal --platform macos-arm64
   - `s2e_probe()`は環境変数`S2E_SIMULATE_MAC`を外して流します。比較器は、模擬の合格を終了コード3(Linuxの合格ではない)で返すので、CIでは合格にしません。
 - `distribution`の`needs`には足しません(S3D・R4Cと同じ。末尾2つを`r4g`・`r4g-universal`に固定する既存の検査を変えないため)。必須のジョブの一覧(`REQUIRED_NATIVE_JOBS`)には足したので、ジョブが無いと`check_workflow.py`が失敗します。
 - `check_workflow.py`は、`s2e`(4機種・`build`の後)と`s2e-universal`(Mac2機種・`combine`の後)の工程・機種・`needs`(`S2E_JOBS`)と、上限(`S2E_TIMEOUTS`)を確かめます。`test_native_ci.py`の`S2EConnectionTests`が、`build.py`の流れ・署名とCPUの確かめ・ワークフローの形を確かめます。
-- Linuxだけの項目の扱い: 比較器が各項目に付けた「Linuxだけ」の印(`EXPECTED_LINUX_ONLY`の36項目)は、Macでは流しません(流さなかった名前と理由は出力に出ます)。理由は、Rustの`bootstrap`が要ること・`PATH_MAX`・`~user`・localeの名前です([設計](../../docs/design.md#linuxだけにした比較の項目)に表があります)。`/dev/full`は、36項目の印とは別に`has_dev_full()`で切り替え、Macの経路では`pipe-closed`だけで比べます。機種ごとの項目数は完全一致で確かめます。
+- Linuxだけの項目の扱い: 比較器が各項目に付けた「Linuxだけ」の印(`EXPECTED_LINUX_ONLY`の36項目)は、Macでは流しません(流さなかった名前と理由は出力に出ます)。理由は、Rustの`bootstrap`が要ること・`PATH_MAX`・`~user`・localeの名前です([設計](../../docs/design.md)に表があります)。`/dev/full`は、36項目の印とは別に`has_dev_full()`で切り替え、Macの経路では`pipe-closed`だけで比べます。機種ごとの項目数は完全一致で確かめます。
   - 手元のLinuxからMacの経路を模擬するには`S2E_SIMULATE_MAC=1`を付けます(比較器の検査用。Mac実機の確認ではありません)。
-- 比較器自身の検査(`test_s2e.py`。秒は、各回の全体から比較と9コマンドを引いた「残り」で、[testing.md](../../docs/testing.md#s2eの比較)の「時間」の表にある)は、`s2e`の1回目だけ流します。2回目は`s2e_probe(fixture, selftest=False)`が`check_s2e.py --no-selftest`を付けて省き、比較器が「比較器自身の検査は省いた」と出力します(件数の行の自己検査の欄は「省略(--no-selftest)」。最後の行は`S2E: 合格`です)。`s2e-universal`は1回なので必ず流します。
+- 比較器自身の検査(`test_s2e.py`。秒は、各回の全体から比較と9コマンドを引いた「残り」で、[testing.md](../../docs/testing.md)の「時間」の表にある)は、`s2e`の1回目だけ流します。2回目は`s2e_probe(fixture, selftest=False)`が`check_s2e.py --no-selftest`を付けて省き、比較器が「比較器自身の検査は省いた」と出力します(件数の行の自己検査の欄は「省略(--no-selftest)」。最後の行は`S2E: 合格`です)。`s2e-universal`は1回なので必ず流します。
 - 件数(手元のLinux x86_64で`check_s2e.py`を流した値):
   - 比較: 710件(通常の一致691・認めた差19)。比較器自身の検査: 84件。
-  - 9コマンドの旧新比較: Linux 233項目(全機種で必須197・Linuxだけ36)、Macの経路197項目。機種ごとの項目数は完全一致で確かめ、どの項目もRustを起動した比較が1件以上なければ不合格です(Rustを起動した比較は計1751件)。
+  - 9コマンドの旧新比較: Linux 233項目(全機種で必須197・Linuxだけ36)、Macの経路197項目。D2で項目`x-locale-copy`(全機種で必須。108組の地域設定)を足して、Linux 234項目・Macの経路198項目になりました。比較のケースにも`locale_cases`の48件を足しました。機種ごとの項目数は完全一致で確かめ、どの項目もRustを起動した比較が1件以上なければ不合格です(Rustを起動した比較は計1751件)。
   - 既存テストの対応表: 117件。対応表が指す比較のケースとRustのテストの名前: 256件。
 - `gen_cases.py`(`s2e_fixtures/`)はCIで流しません。固定期待を作り直す人がLinuxで流します(`--check`もLinuxで流します)。Linux以外では`main2`の領域が理由を出して止まります。Macの疑似端末の挙動は未確認です。
 - 注意(機種を問わない): コンテナのPID 1が子を回収しない機械では、`left`が旧新とも真になる誤判定が出ないことを確かめます。
@@ -594,18 +596,20 @@ python3 -B native/ci/build.py s2e-universal --platform macos-arm64
 
 ジョブの上限(`check_workflow.py`の`S2E_TIMEOUTS`)は、`s2e`が120分、`s2e-universal`が60分です。`build`(120分)・`verify-universal`(60分)と同じ枠にしました。S3Dと同じ形で、内側の上限×比較の回数+準備(約5分)が、ジョブの上限より小さくなるように決めました(内側の上限が先に効きます)。
 - `s2e`(2回): 50分×2+5分=105分<120分。`s2e-universal`(1回): 50分+5分=55分<60分。
-- 測った値(手元の作業機)は、回ごとの表にまとめました([testing.md](../../docs/testing.md#s2eの比較)の「時間」)。CIの見積りに使ったMacの経路の模擬の値は、次の3つです。
+- 測った値(手元の作業機)は、回ごとの表にまとめました([testing.md](../../docs/testing.md)の「時間」)。CIの見積りに使ったMacの経路の模擬の値は、次の3つです。
   - 自己検査つきのMacの経路の模擬: 310.1秒(2026-11-26)。
   - 前の見積りの元: 326.1秒(2026-11-25。コマンドに`--no-selftest`が無い回)。
   - `--no-selftest`付きのMacの経路の模擬: 177.0秒。
 - Linuxの見積りには、表のLinuxの全体の447.5〜477.4秒の回と、`--no-selftest`の269.9〜315.8秒の回を使いました(1114.1秒・563.6秒の回は使っていません)。
-- 倍率の出典([testing.md](../../docs/testing.md#s2eの比較)の「CIの時間の見積り」に値と節があります): R4Eは手元の40〜60秒に対しCIのMac x86_64が315秒(約5.3〜7.9倍)で、CIのLinux x86_64の98秒の3.2倍でした。R4Aの残りはMac x86_64が298.8秒、Linux x86_64が117.1秒で、2.55倍でした。
+- 倍率の出典([testing.md](../../docs/testing.md)の「CIの時間の見積り」に値と節があります): R4Eは手元の40〜60秒に対しCIのMac x86_64が315秒(約5.3〜7.9倍)で、CIのLinux x86_64の98秒の3.2倍でした。R4Aの残りはMac x86_64が298.8秒、Linux x86_64が117.1秒で、2.55倍でした。
 - 見積り(推測。CIでは未測定): 元の値は、自己検査を含むMacの経路の模擬310.1秒(2026-11-26)です。`s2e-universal`の1回と`s2e`の1回目は自己検査を流すので、この条件に当たります。
   - 手元からCIのMac x86_64への倍率(R4Eの5.3〜7.9倍)を当てると、1回は約1,640〜2,450秒(約27〜41分)です。この倍率はMac x86_64だけに当たる値で、Mac arm64の倍率は確かめていません。以前の元の326.1秒(コマンドに`--no-selftest`が無い回)なら約29〜43分です。
   - CIのLinuxからMac x86_64への倍率(2.55〜3.2倍)を当てると約13〜17分です(手元とCIのLinuxが同じ速さという仮定。未確認)。
   - 内側の上限50分は、時間の順に決めました。先に、326.1秒の見積りの上端(約43分)が当初の35分を超えたので50分にしました。後で測った自己検査つきの310.1秒でも、上端は約2,450秒(約41分)で35分を超えます。50分には約550秒(約9分。326.1秒なら約7分)の余裕があり、倍率が上端を超えるかCIが混むと足りないおそれがあります。上限の値は変えていません。
   - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になります。Mac arm64とLinuxの機種には、この倍率は当たりません。どちらの見積りも、PRのCIの実測で確かめます。Linuxは、手元の値で1回約7.5〜8分(表の447.5〜477.4秒の回)、2回目は約4.5〜5.3分(表の269.9〜315.8秒の回)です。CIのLinuxが手元と同じ速さという仮定です(未確認)。
-- 既存のジョブ(`build`の120分・`verify-universal`の60分など)の上限は変えていません。`build`に足した時間は`s2e_contract`のビルドと単体検査だけです(測定は未実施)。
+- 既存のジョブ(`build`の120分・`verify-universal`の60分など)の上限は変えていません。`build`に足したのは、`s2e_contract`のビルドと単体検査と、D2で製品の`dev-workflow`に組んだS2L・S2Eのモジュールのビルドです。
+  - D2で、`build`の各回と`verify-universal`が流すS2Lの比較(`build.py`の`loop_state_probe`)の決定の比較が140件増えました(`locale_coercion`108・`locale_sigpipe`24・`startup_sigpipe`4・`startup_sigxfsz`4)。
+  - 時間の記録は[testing.md](../../docs/testing.md)にあります。
 - PRのCIで機種ごとの時間を記録してから、上限を見直します。50分を超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直します。
 
 Macの実機のCIで確かめることは次のとおりです(Linuxの手元では確かめられていません)。
@@ -620,3 +624,42 @@ Macの実機のCIで確かめることは次のとおりです(Linuxの手元で
 - `go`の待ちの上限`GO_TIMEOUT_MAC`の境目: 100000000以下と100000002以上を使います。100000001は旧版でも揺れると推測しています(未確認)。
 - 機種ごとの項目数(Mac 197項目。今の値は`check_s2e.py`の`EXPECTED_ITEMS`)が完全一致し、項目ごとにRustを起動した比較が1件以上あること。
 - 木の深さの端の比較は、Macでは流しません(`DEEP_REASON`でLinuxだけの印)。Macの`PATH_MAX`(1024)では約990段の絶対パスを作れないという推測で、Macでは未確認のままです。
+
+## D2の必須比較(製品の実行ファイル)
+
+#542(D2)で製品の登録表に足した`loop-state`・`environment-guard`・`environment-guard-held`を、製品の実行ファイルで旧版と比べます。`loop.sh`の新しい読み込み器の字面は、`check_d2.py`が実行のたびに`loop.sh`から読みます。
+
+```bash
+python3 -B native/ci/build.py d2 --platform linux-x86_64
+python3 -B native/ci/build.py d2-universal --platform macos-arm64
+```
+
+- `d2`: `build`の後にLinux 2機種で流します。`build`のtarの2回のビルドの`dev-workflow`が同じことを`cmp`で確かめてから、1回目の製品で次の4つを流します(`d2_probe()`)。
+  - `check_s2e.py --fixture <1回目のs2e_contract> --product --no-selftest`(隠しのreaderを使う項目だけ検査専用の入口。比較器自身の検査は`s2e`ジョブで流すので省く)
+  - `check_s2e.py --fixture <同じ> --product --form held --no-selftest`(読み込み器を経た形。旧版は`loop.sh`の`py environment-run`の形、Rustは新しい読み込み器を経た`environment-guard-held`。9コマンドの流れ・read・exec・hook・verify-pairの流れ・上限の端の136項目と、出力の故障114件)
+  - `check_loop_state.py --product`
+  - `check_d2.py`(新しい読み込み器はmemfdを使うのでLinuxだけ)
+- `d2-universal`: `combine`の後にMac 2機種で流します。署名後のMac共通の`dev-workflow`と`s2e_contract`の署名と2種類のCPUを確かめてから、`check_s2e.py --product --no-selftest`と`check_loop_state.py --product`を流します。Linuxの名前を渡すと失敗します。
+- 製品は環境変数`DEV_WORKFLOW_TEST_NATIVE_BINARY`で渡します。`S2E_SIMULATE_MAC`は外します。
+- 読み込み器を経た形の比較(`--form held`)で流す群は、flow・copy・limitです(`s2e_commands.py`の`HELD_GROUPS`)。この形が直接の形と違うのは、`PYTHON*`を読まないこと・終了の変換・5段深い呼出し・作業場所`/`・読み込み器が先に照らす旧guardのコピーだけです。流さない群と理由は次のとおりです。
+  - flow-deep: 呼出しが5段深いので、直接の形の境目の入力では境目が合わない。読み込み器を経た形の境目は`check_d2.py`のdepthが比べる。
+  - extra: 旧版の起動の仕方(配布物の外のguard・guardの無い配布物)に依る入力を含む(U2)。本体の観測は直接の形の比較で比べる。
+  - race: 競合を差し込む点の一部(判定器を読む前の窓など)は、`cfg(test)`と検査専用の入口にしか無い。本体の観測は直接の形の比較で比べる。
+  - signal: SIGINTの扱いは、読み込み器が受け継いだ扱いへ戻すので、起動の形に依らない。読み込み器を経た形は`check_d2.py`のsigintが比べる。
+  - failure: `RLIMIT_FSIZE`は、新しい読み込み器が先にmemfdへ書くので、`check_d2.py`のfsizeが3つの形で比べる。
+  - u1: 文字コードの設定による解釈(U1)は、起動の形に依らない。
+  - u2: guardの出所(U2)は、直接の形の`bootstrap`の差。
+  - u45: `PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`は、読み込み器を経た形では読まない(旧版は`-I`)。
+  - u7: 閉じたfdは、`check_d2.py`のfdsが3つの形で比べる。
+  - locale: 地域設定は、`check_d2.py`が3つの形で比べる。
+  - mac: Macの経路の項目。読み込み器を経た形はLinuxだけ。
+  - 内部readerの値: 起動の形に依らない(直接の形の比較で比べる。flowの中のreaderの比較も流さない)。
+- 比較は`build`・`verify-universal`に入れません(2026-11-12 12:59の決定)。`distribution`の`needs`にも足しません(S2Eと同じ)。必須のジョブの一覧(`REQUIRED_NATIVE_JOBS`)の末尾に足したので、ジョブが無いと`check_workflow.py`が失敗します。
+- `check_workflow.py`は、工程・機種・`needs`(`D2_JOBS`)と上限(`D2_TIMEOUTS`)を確かめます。`test_native_ci.py`の`D2ConnectionTests`が、`build.py`の流れ・署名とCPUの確かめ・ワークフローの形・`check_d2.py`の字面の読み方を確かめます。
+- 上限は、内側の上限の和と準備(約5分)より長くします(S3Dと同じ形)。
+  - `d2`: S2E 50分(`S2E_TIMEOUT`)+ 読み込み器を経た形のS2E 30分(`D2_HELD_TIMEOUT`)+ S2L 30分(`run`の既定)+ D2 20分(`D2_TIMEOUT`)+ 5分 = 135分 < 150分。
+  - `d2-universal`: 50分 + 30分 + 5分 = 85分 < 90分。
+- 手元とCIの時間と、上限との余裕の記録は[testing.md](../../docs/testing.md)にあります。
+- `check_d2.py`の群と件数: basic 52・startup 17・fsize 18・fds 15・sigpipe-locale 80・locale 324・q4 30・depth 24・sigint 4・loader 29・selftest 3。群ごとの件数を固定し、違えば失敗です。
+  - `--only <群>`で一部だけを流すと、最後の行は合格ではなく、終了コードは3です。
+  - `--standalone-python <Python>`を渡すと、memfdの名前を持たないそのPythonで読み込み器を動かす群(3件)を足します(CIでは渡さない。CIでは、名前を消した前置きで同じ形を`loader`の群が再現します)。

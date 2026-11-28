@@ -343,6 +343,35 @@ def exception_locations(raw, expected=None):
     return b"".join(result)
 
 
+# D2(#542): 製品の実行ファイル(`--product`)で比べるときは、Rust の側を `<製品> loop-state <引数>` にする。
+NEW_PREFIX = ()
+PRODUCT_VARIABLE = "DEV_WORKFLOW_TEST_NATIVE_BINARY"
+
+
+def new_command(fixture):
+    """Rust の側の起動の先頭(`[実行ファイル]` か、製品なら `[製品, 'loop-state']`)。"""
+    return [str(fixture), *NEW_PREFIX]
+
+
+def product_path(environ=None):
+    """`--product` の製品の実行ファイル(環境変数 DEV_WORKFLOW_TEST_NATIVE_BINARY)。未設定・空・相対・不在・実行不能は止める。"""
+    value = (os.environ if environ is None else environ).get(PRODUCT_VARIABLE, "")
+    if not value or not Path(value).is_absolute():
+        raise RuntimeError(f"--product には {PRODUCT_VARIABLE} に製品の実行ファイルの絶対パスが必要です")
+    path = Path(value)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        raise RuntimeError(f"{PRODUCT_VARIABLE} の製品は実行可能な通常ファイルである必要があります")
+    return path
+
+
+def use_product(product):
+    """比較の部品(`import check_loop_state as check`)と、この `__main__` の両方の起動の先頭を製品にする。"""
+    import check_loop_state as shared
+    for module in {id(shared): shared, id(sys.modules[__name__]): sys.modules[__name__]}.values():
+        module.NEW_PREFIX = ("loop-state",)
+    return product
+
+
 class Comparison:
     def __init__(self, fixture):
         self.fixture = str(fixture)
@@ -373,7 +402,7 @@ class Comparison:
         record("old", old)
         state = output_state(output)
         restore_output(output, initial)
-        new = _RUN([self.fixture, *target], *args, **kwargs)
+        new = _RUN([*new_command(self.fixture), *target], *args, **kwargs)
         remember(" ".join(map(str, target)), old, new)
         compare_result(" ".join(map(str, target)), old, new)
         actual = output_state(output)
@@ -532,7 +561,11 @@ def decision_groups():
     groups={"startup_directory":49,"hashseed":17,"variables_baseline":5,"pythonhashseed":45,"pythonoptimize":25,
             "sigint":5,"sigterm":5,"sigint_ignored":1,"timeouts":2,"timeouts_10s":2,"write_failure":10,"onbranch":4,
             "r3_tree":4,"r3_realpath":17,"r4_config_snapshot":9,"r4_config_prior":10,"r4_preflight_json":5,
-            "r4_realpath":4,"r5_saved_paths":9,"r5_same_bytes":14,"r6_os_path":27,"r6_strings":15,"r7_held_errors":14,"r7_exception_audit":6,"r7_path_equality":25,"git_only":2}
+            "r4_realpath":4,"r5_saved_paths":9,"r5_same_bytes":14,"r6_os_path":27,"r6_strings":15,"r7_held_errors":14,"r7_exception_audit":6,"r7_path_equality":25,"git_only":2,
+            # D2(#542)の決めたことの 8・Q6 の A(地域設定 108 組・警告と SIGPIPE の 24 組・設定の段階の失敗と SIGPIPE の 4 組)。
+            "locale_coercion":108,"locale_sigpipe":24,"startup_sigpipe":4,
+            # 設定の段階の失敗を書く間の SIGXFSZ(上限 0 の通常ファイルの標準エラー。4 組)。
+            "startup_sigxfsz":4}
     if sys.platform=="darwin":
         # Mac の旧版は、/proc/self/fd/<番号> を渡す git config --file の解析の失敗で snapshot・preflight を拒否する。
         # 前の状態の無い snapshot は、その前に worktree の一覧・停止ファイルの確かめと、名前の順で最初の worktree の
@@ -594,15 +627,19 @@ def require_full_coverage(report):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--fixture",type=Path,required=True)
+    target=parser.add_mutually_exclusive_group(required=True)
+    target.add_argument("--fixture",type=Path)
+    # D2(#542): 製品の `dev-workflow loop-state`(DEV_WORKFLOW_TEST_NATIVE_BINARY)で比べる。
+    target.add_argument("--product",action="store_true")
     parser.add_argument("--case",action="append",help="Linux旧クラスの明示した部分検査。CI全件合格には使わない")
     args=parser.parse_args();start=time.monotonic()
     try:
         environment()
-        fixture=args.fixture.resolve()
+        fixture=use_product(product_path()) if args.product else args.fixture.resolve()
         if not fixture.is_file() or not os.access(fixture,os.X_OK):raise RuntimeError("S2Lの今回ビルドしたexampleが必要です")
         before=hashlib.sha256(fixture.read_bytes()).hexdigest();comparison=Comparison(fixture)
-        report={"binary_sha256":before,"os":platform.system(),"partial":bool(args.case),"legacy_methods":0,"legacy_comparisons":0,"interpreter":interpreter_record()}
+        report={"binary_sha256":before,"os":platform.system(),"partial":bool(args.case),"legacy_methods":0,"legacy_comparisons":0,"interpreter":interpreter_record(),
+                "rust_entry":"product loop-state" if args.product else "example"}
         if sys.platform!="darwin":
             suite=legacy_cases(args.case)
             with mock.patch.object(subprocess,"run",comparison.run):result=unittest.TextTestRunner(verbosity=2).run(suite)

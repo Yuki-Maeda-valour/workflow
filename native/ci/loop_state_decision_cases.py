@@ -97,8 +97,9 @@ class Runner:
         return env
 
     def launch(self, argv, env, *, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-               fsize=None, ignore_int=False, signal_after_mark=None, timeout=20):
-        """1 回の起動。信号を送る case は、止まる git の印を待ってからプロセスグループへ送る。"""
+               fsize=None, ignore_int=False, signal_after_mark=None, timeout=20, ignore_pipe=False):
+        """1 回の起動。信号を送る case は、止まる git の印を待ってからプロセスグループへ送る。
+        `ignore_pipe` は、子を `SIGPIPE` を無視にして起動する(D2 の決めたことの 8。Python の subprocess は既定へ戻して起動する)。"""
         if self.mark.exists():
             self.mark.unlink()
         def prepare():
@@ -106,6 +107,8 @@ class Runner:
                 resource.setrlimit(resource.RLIMIT_FSIZE, (fsize, resource.RLIM_INFINITY))
             if ignore_int:
                 signal.signal(signal.SIGINT, signal.SIG_IGN)
+            if ignore_pipe:
+                signal.signal(signal.SIGPIPE, signal.SIG_IGN)
         check.verify_child_environment(env, {})
         started = time.monotonic()
         child = subprocess.Popen(argv, cwd=self.work, env=env, stdin=stdin, stdout=stdout, stderr=stderr,
@@ -146,7 +149,7 @@ class Runner:
         states = []
         seconds_pair = []
         check.start_case(label)
-        for side, engine in (("old", [sys.executable, "-B", str(check.LEGACY)]), ("new", [str(self.fixture)])):
+        for side, engine in (("old", [sys.executable, "-B", str(check.LEGACY)]), ("new", check.new_command(self.fixture))):
             check.restore_output(output, None)
             result, seconds = self.launch([*engine, *map(os.fspath, argv)], env, **options)
             check.record(side, result)
@@ -1115,6 +1118,146 @@ def static_git_only():
     return len(found)
 
 
+# D2(#542)の決めたことの 8・Q6 の A: 子へ渡す LC_CTYPE と PYTHONCOERCECLOCALE の 2 種類の警告、起動の失敗と警告を受け継いだ
+# SIGPIPE の扱いで書くこと。git の子が受けた LC_CTYPE を、止まる git の前に置いた記録の git で記録する。
+LOCALE_GIT = r'''#!/bin/sh
+if [ "${LC_CTYPE+x}" = x ]; then printf 'set:%s\n' "$LC_CTYPE"; else printf 'unset\n'; fi >> "$S2L_LOCALE_LOG"
+exec "$S2L_LOCALE_NEXT" "$@"
+'''
+SIGPIPE_LOCALES = (("lang-c-warn", {"LC_ALL": None, "LC_CTYPE": None, "LANG": "C", "PYTHONCOERCECLOCALE": "warn"}),
+                   ("lc-all-c-warn", {"LC_ALL": "C", "LC_CTYPE": None, "LANG": None, "PYTHONCOERCECLOCALE": "warn"}))
+
+
+def locale_rows():
+    """地域設定の比較の組(D2 の設計の表): LC_ALL が無し・空なら LC_CTYPE × LANG(12 組 × 2)、空でなければ 1 組(3 組)。
+    それぞれに PYTHONCOERCECLOCALE の 4 つ(無し・0・1・warn)を掛ける(108 組)。"""
+    rows = []
+    for lc_all in (None, ""):
+        for lc_ctype in (None, "C", "POSIX", "C.UTF-8"):
+            for lang in (None, "C", "POSIX"):
+                rows.append({"LC_ALL": lc_all, "LC_CTYPE": lc_ctype, "LANG": lang})
+    rows += [{"LC_ALL": value, "LC_CTYPE": None, "LANG": None} for value in ("C", "POSIX", "C.UTF-8")]
+    return [(row, coerce) for row in rows for coerce in (None, "0", "1", "warn")]
+
+
+def thread_masked(value):
+    return CURRENT.sub(b"Current thread 0x<thread> (most recent call first):\n", value)
+
+
+def locale_pair(runner, label, argv, group, delta, output, log, **options):
+    """`Runner.pair` と同じ順に旧新を流し、git の子が受けた LC_CTYPE の記録も比べる。起動の失敗の Current thread の値だけを伏せる。"""
+    env = runner.env(delta)
+    check.start_case(label)
+    results, states, logs = [], [], []
+    for side, engine in (("old", [sys.executable, "-B", str(check.LEGACY)]), ("new", check.new_command(runner.fixture))):
+        check.restore_output(output, None)
+        if log.exists():
+            log.unlink()
+        result, _ = runner.launch([*engine, *map(os.fspath, argv)], env, **options)
+        check.record(side, result)
+        results.append(result)
+        states.append(check.output_state(output))
+        logs.append(log.read_bytes() if log.exists() else b"")
+    old, new = results
+    check.remember(label, old, new)
+    masked = [subprocess.CompletedProcess(r.args, r.returncode, r.stdout, thread_masked(r.stderr)) for r in results]
+    check.compare_result(label, *masked)
+    if states[0] != states[1]:
+        raise check.Mismatch(f"S2L_STATE: {label}: {states[0]!r} != {states[1]!r}")
+    if logs[0] != logs[1]:
+        raise check.Mismatch(f"S2L_LOCALE_CHILD_ENV: {label}: {logs[0]!r} != {logs[1]!r}")
+    runner.groups[group] = runner.groups.get(group, 0) + 1
+    runner.cases.append(label)
+    return old, new, logs[0]
+
+
+def locale_coercion(runner):
+    """108 組の地域設定で snapshot(git の子を起動する)を流し、終了値・出力・警告・保存・git の子の LC_CTYPE を比べる。
+    続けて、警告が出る代表の 2 組 × 起動の失敗(無し・PYTHONHASHSEED・標準入力がディレクトリ)× 親の SIGPIPE(既定・無視)×
+    標準エラー(ふつう・読む側の閉じたパイプ)の 24 組と、設定の段階の失敗だけ(LC_ALL=C)× SIGPIPE × 閉じたパイプの 4 組。"""
+    root = runner.work / "locale"
+    root.mkdir()
+    initialize(runner, root)
+    bindir = runner.work / "locale-bin"
+    bindir.mkdir()
+    (bindir / "git").write_text(LOCALE_GIT, encoding="utf-8")
+    (bindir / "git").chmod(0o700)
+    log = runner.work / "locale-log"
+    out = root / "out"
+    state = root / "state"
+    state.write_bytes(b'{"schema":7,"stop_control":null}')
+    base = {"PATH": os.fsdecode(os.fsencode(bindir) + b":" + runner.base[b"PATH"]), "S2L_LOCALE_LOG": str(log),
+            "S2L_LOCALE_NEXT": str(runner.bindir / "git")}
+    snapshot = valid_argv(root, state, out)["snapshot"]
+    seen = {"coerced": 0, "warned": 0}
+    for row, coerce in locale_rows():
+        label = "locale-" + ",".join(f"{k}={v}" for k, v in row.items()) + f",PYTHONCOERCECLOCALE={coerce}"
+        old, _, git = locale_pair(runner, label, snapshot, "locale_coercion", {**base, **row, "PYTHONCOERCECLOCALE": coerce}, out, log)
+        if not git and sys.platform != "darwin":
+            raise check.Mismatch(f"S2L_LOCALE_NO_GIT: {label}")
+        seen["coerced"] += b"set:" in git and row["LC_CTYPE"] is None
+        seen["warned"] += b"Python detected LC_CTYPE=C" in old.stderr or b"Python runtime initialized" in old.stderr
+    # 書き換えは「git の子に LC_CTYPE が付いたこと」だけを数える(Mac の書き換え先の名前は C.UTF-8 と違いうる。Mac の POSIX は
+    # 書き換えない)。警告の数は全機種で必須。
+    if not seen["coerced"] or not seen["warned"]:
+        raise check.Mismatch(f"S2L_LOCALE_NOT_OBSERVED: {seen}")
+    failures = (("none", {}, {}), ("hashseed", {"PYTHONHASHSEED": "bad"}, {}), ("stdin-directory", {}, {"stdin": "directory"}))
+    for name, setting in SIGPIPE_LOCALES:
+        for failure, extra, route in failures:
+            for ignored in (False, True):
+                for closed in (False, True):
+                    label = f"locale-sigpipe-{name}-{failure}-{'ignore' if ignored else 'default'}-{'closed' if closed else 'normal'}"
+                    with streams(root, route, closed) as options:
+                        locale_pair(runner, label, ["state-digest", "--state", state], "locale_sigpipe",
+                                    {**base, **setting, **extra}, None, log, ignore_pipe=ignored, **options)
+    for failure, extra in (("hashseed", {"PYTHONHASHSEED": "bad"}), ("intmaxstrdigits", {"PYTHONINTMAXSTRDIGITS": "1"})):
+        for ignored in (False, True):
+            label = f"startup-sigpipe-{failure}-{'ignore' if ignored else 'default'}"
+            with streams(root, {}, True) as options:
+                old, new, _ = locale_pair(runner, label, ["state-digest", "--state", state], "startup_sigpipe", {**base, **extra}, None,
+                                          log, ignore_pipe=ignored, **options)
+            want = 1 if ignored else -signal.SIGPIPE
+            if old.returncode != want:
+                raise check.Mismatch(f"S2L_STARTUP_SIGPIPE: {label}: 旧版の終了値 {old.returncode} が {want} でない")
+    # 旧版は設定を読んだ後に SIGXFSZ を無視にする。RLIMIT_FSIZE のソフトの上限 0 の通常ファイルへ、設定の段階の失敗と
+    # 1 つ目の警告を書くと信号 25 で終わり、標準入力がディレクトリの診断(無視にした後)は書込みの失敗で終了値 1。
+    sink = root / "stderr-file"
+    for failure, extra, route, want in (("hashseed", {"PYTHONHASHSEED": "bad"}, {}, -signal.SIGXFSZ),
+                                        ("intmaxstrdigits", {"PYTHONINTMAXSTRDIGITS": "1"}, {}, -signal.SIGXFSZ),
+                                        ("warn", {"LC_ALL": None, "LANG": "C", "PYTHONCOERCECLOCALE": "warn"}, {}, -signal.SIGXFSZ),
+                                        ("stdin-directory", {}, {"stdin": "directory"}, 1)):
+        label = f"startup-sigxfsz-{failure}"
+        with streams(root, route, False) as options, open(sink, "wb") as handle:
+            old, _, _ = locale_pair(runner, label, ["state-digest", "--state", state], "startup_sigxfsz", {**base, **extra}, None,
+                                    log, fsize=0, stderr=handle.fileno(), **options)
+        if old.returncode != want:
+            raise check.Mismatch(f"S2L_STARTUP_SIGXFSZ: {label}: 旧版の終了値 {old.returncode} が {want} でない")
+
+
+class streams:
+    """標準入力をディレクトリにする・標準エラーを読む側の閉じたパイプにする起動の引数(使い終えたら閉じる)。"""
+
+    def __init__(self, root, route, closed):
+        self.root, self.route, self.closed, self.handles = root, route, closed, []
+
+    def __enter__(self):
+        options = {}
+        if self.route.get("stdin") == "directory":
+            directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
+            self.handles.append(directory)
+            options["stdin"] = directory
+        if self.closed:
+            read_end, write_end = os.pipe()
+            os.close(read_end)
+            self.handles.append(write_end)
+            options["stderr"] = write_end
+        return options
+
+    def __exit__(self, *unused):
+        for handle in self.handles:
+            os.close(handle)
+
+
 def run(fixture, full=True):
     started = time.monotonic()
     with tempfile.TemporaryDirectory(prefix="s2l-decisions-") as temporary:
@@ -1138,6 +1281,7 @@ def run(fixture, full=True):
         r7_exception_audit(runner)
         r7_path_equality(runner)
         sources = git_only(runner)
+        locale_coercion(runner)
         return {"decision_cases": len(runner.cases), "groups": runner.groups, "st_blksize": blocksize,
                 "os_boundaries": runner.boundaries,
                 "timeout_elapsed_seconds": runner.timing,

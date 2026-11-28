@@ -33,6 +33,17 @@ pub fn exit_status(code: i64) -> i32 {
     (code & 0xff) as i32
 }
 
+/// `verify-pair` の `os._exit(20)`(`SystemExit` を投げずに終わる)を表す本体の戻り値。下位 8 ビットは 20 なので、
+/// 直接の形の終了コードは 20。読み込み器を経た形では、固定の読み込み器の変換(1 行を足す)をしない(D2)。
+pub const OS_EXIT_20: i64 = 20 | (1 << 40);
+
+/// 固定の読み込み器(`loop.sh` の `ENVIRONMENT_LOADER`)が、0 以外の `SystemExit` と例外のときに標準エラーへ足す 1 行。
+pub const LOADER_FAILURE: &str =
+    "ERROR [environment-guard] 保持した検査用コピーを安全に実行できない";
+
+/// 固定の読み込み器が `hook` のときに標準出力へ出す拒否の JSON(`json.dumps` の既定の形)。
+pub const LOADER_HOOK_DENY: &str = r#"{"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {"behavior": "deny", "message": "\u74b0\u5883\u306e\u4fdd\u6301\u5024\u3068\u306e\u7167\u5408\u306b\u5931\u6557"}}}"#;
+
 /// コマンドの本体。成功は `SystemExit` の値(`main` の戻り値)、失敗は旧版の例外。
 pub type Dispatch<'a> =
     dyn FnMut(&Parsed, &mut PyStream<'_>, &mut PyStream<'_>) -> Result<i64, PyException> + 'a;
@@ -56,6 +67,55 @@ pub fn run_main(
             // 捕まえない例外: 途中の行を除いた表示を標準エラーへ書き、終了コード 1。
             let _ = stderr.write_text(&error.uncaught_report());
             1
+        }
+    };
+    finalize(stdout, stderr).unwrap_or(status)
+}
+
+/// 読み込み器を経た形(`loop.sh` の `python3 -I -c <補助> environment-run <sha> <guard> <args>`)が終了するまで(D2)。
+///
+/// 旧版は guard を `exec` で動かし、固定の読み込み器が次のとおり変換する。
+/// - 0 以外の `SystemExit`(`main` の戻り値・`argparse` の終了 2・`exec` の子の終了コード)と、捕まえない例外(`Exception`):
+///   guard の出力を残し、[`LOADER_FAILURE`] の 1 行を標準エラーへ足して `SystemExit(20)`。`hook` は、代わりに
+///   [`LOADER_HOOK_DENY`] を標準出力へ出して `SystemExit(0)`。
+/// - 変換しない物: 終了 0・`KeyboardInterrupt`・`verify-pair` の `os._exit(20)`([`OS_EXIT_20`])。
+///
+/// `-c` で動かすので、直接の形の `main` の後の `flush_io`(標準エラー、標準出力の順の flush)は無い。
+/// 足す 1 行を書けなければ、その例外が元の例外の処理中に起きた例外として捕まえずに出る(終了コード 1)。
+pub fn run_main_held(
+    args: &[Vec<u32>],
+    env: &Env,
+    stdout: &mut PyStream<'_>,
+    stderr: &mut PyStream<'_>,
+    dispatch: &mut Dispatch<'_>,
+) -> i32 {
+    let outcome = run_body(args, env, stdout, stderr, dispatch);
+    let status = match outcome {
+        Ok(0) => 0,
+        Ok(OS_EXIT_20) => 20,
+        Err(error) if error.type_name == "KeyboardInterrupt" => {
+            let _ = stderr.write_text(&error.uncaught_report());
+            1
+        }
+        other => {
+            let cause = match other {
+                Ok(code) => PyException::new("SystemExit", &code.to_string()),
+                Err(error) => error,
+            };
+            let hook = args.first().is_some_and(|first| *first == cps("hook"));
+            let written = if hook {
+                stdout.print(&cps(LOADER_HOOK_DENY))
+            } else {
+                stderr.print(&cps(LOADER_FAILURE))
+            };
+            match written {
+                Ok(()) if hook => 0,
+                Ok(()) => 20,
+                Err(failure) => {
+                    let _ = stderr.write_text(&failure.during(cause).uncaught_report());
+                    1
+                }
+            }
         }
     };
     finalize(stdout, stderr).unwrap_or(status)
@@ -246,6 +306,123 @@ mod tests {
         assert_eq!(exit_status(-9), 247);
         assert_eq!(exit_status(256), 0);
         assert_eq!(exit_status(-1), 255);
+    }
+
+    fn drive_held(
+        args: &[&str],
+        stdout_raw: &mut dyn Write,
+        stderr_raw: &mut dyn Write,
+        dispatch: &mut Dispatch<'_>,
+    ) -> i32 {
+        let args: Vec<Vec<u32>> = args.iter().map(|a| decode_fs(a.as_bytes())).collect();
+        let env = env();
+        let mut stdout = PyStream::new(stdout_raw, StreamKind::Stdout, false, 4096, false);
+        let mut stderr = PyStream::new(stderr_raw, StreamKind::Stderr, false, 4096, false);
+        run_main_held(&args, &env, &mut stdout, &mut stderr, dispatch)
+    }
+
+    #[test]
+    fn the_held_form_adds_the_loader_line_to_every_nonzero_exit() {
+        let line = format!("{LOADER_FAILURE}\n");
+        // 引数の誤り(argparse の終了 2): argparse の出力の後に 1 行を足して 20。
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = drive_held(
+            &["verify"],
+            &mut out,
+            &mut err,
+            &mut |_, _, _| unreachable!(),
+        );
+        let err = String::from_utf8(err).unwrap();
+        assert_eq!((code, out.len()), (20, 0));
+        assert!(
+            err.ends_with(&format!("--state, --expect-sha256\n{line}")),
+            "{err}"
+        );
+        // 捕まえる例外(`main` の 20)・子の終了コード・負の値・捕まえない例外: どれも 1 行を足して 20。
+        for result in [
+            Err(PyException::stop("理由")),
+            Ok(3),
+            Ok(-9),
+            Ok(256),
+            Err(PyException::new("AttributeError", "x")),
+        ] {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let thrown = result.clone();
+            let code = drive_held(&verify_args(), &mut out, &mut err, &mut |_, stdout, _| {
+                stdout.print(&cps("partial")).unwrap();
+                thrown.clone()
+            });
+            let err = String::from_utf8(err).unwrap();
+            assert_eq!(code, 20, "{result:?}");
+            assert_eq!(out, b"partial\n");
+            assert!(err.ends_with(&line), "{err}");
+            assert!(!err.contains("Traceback"), "{err}");
+            if result.is_err() && result.as_ref().unwrap_err().is_stop() {
+                assert_eq!(err, format!("ERROR [environment-guard] 理由\n{line}"));
+            }
+        }
+    }
+
+    #[test]
+    fn the_held_form_keeps_zero_os_exit_and_keyboard_interrupt() {
+        for (result, want) in [(Ok(0), 0), (Ok(OS_EXIT_20), 20)] {
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = drive_held(&verify_args(), &mut out, &mut err, &mut |_, _, _| {
+                result.clone()
+            });
+            assert_eq!((code, out.len(), err.len()), (want, 0, 0));
+        }
+        // 直接の形の終了コードは今までどおり 20。
+        assert_eq!(exit_status(OS_EXIT_20), 20);
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = drive_held(&verify_args(), &mut out, &mut err, &mut |_, _, _| {
+            Err(PyException::new("KeyboardInterrupt", ""))
+        });
+        assert_eq!(code, 1);
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "Traceback (most recent call last):\nKeyboardInterrupt\n"
+        );
+    }
+
+    #[test]
+    fn the_held_form_turns_a_failed_hook_into_the_deny_json() {
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let code = drive_held(
+            &[
+                "hook",
+                "--state",
+                "s",
+                "--expect-sha256",
+                "h",
+                "--path",
+                "p",
+            ],
+            &mut out,
+            &mut err,
+            &mut |_, _, _| Err(PyException::stop("理由")),
+        );
+        assert_eq!(code, 0);
+        assert_eq!(
+            String::from_utf8(out).unwrap(),
+            format!("{LOADER_HOOK_DENY}\n")
+        );
+        assert_eq!(
+            String::from_utf8(err).unwrap(),
+            "ERROR [environment-guard] 理由\n"
+        );
+        assert!(LOADER_HOOK_DENY.is_ascii());
+    }
+
+    #[test]
+    fn a_held_loader_line_that_cannot_be_written_is_an_uncaught_error() {
+        // 標準エラーが閉じたパイプ: guard の 1 行も、足す 1 行も書けず、例外の処理中の例外で終了コード 1(終わりの flush で 120)。
+        let (mut out, mut err) = (Vec::new(), Failing(32));
+        let code = drive_held(&verify_args(), &mut out, &mut err, &mut |_, _, _| {
+            Err(PyException::stop("理由"))
+        });
+        assert_eq!(code, 120);
+        assert!(out.is_empty());
     }
 
     #[test]

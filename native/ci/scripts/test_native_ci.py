@@ -3514,5 +3514,212 @@ class S2EConnectionTests(TempCase):
         self.assertFalse(any("s2e" in path for path in make_dist.BINARY_PATHS))
 
 
+
+class D2ConnectionTests(TempCase):
+    """D2(#542)の製品の実行ファイルでの比較の CI への接続。比較は別のジョブ d2(Linux 2 機種)・d2-universal(Mac 2 機種)で流す
+    (2026-11-12 12:59 の決定)。build・verify-universal には入れない。"""
+
+    def test_probe_passes_the_product_and_runs_the_three_comparisons(self):
+        product, fixture = self.root / "dev-workflow", self.root / "s2e_contract"
+        with mock.patch.dict(os.environ, {"S2E_SIMULATE_MAC": "1", "KEEP": "x"}), mock.patch.object(build, "run") as run:
+            build.d2_probe(product, fixture, linux=True)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(commands, [
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_s2e.py", "--fixture", fixture, "--product", "--no-selftest"],
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_s2e.py", "--fixture", fixture, "--product", "--form", "held", "--no-selftest"],
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_loop_state.py", "--product"],
+            [sys.executable, "-B", source_hash.ROOT / "native/ci/check_d2.py"],
+        ])
+        for call in run.call_args_list:
+            self.assertEqual(call.kwargs["env"]["DEV_WORKFLOW_TEST_NATIVE_BINARY"], str(product))
+            self.assertEqual(call.kwargs["env"]["KEEP"], "x")
+            self.assertNotIn("S2E_SIMULATE_MAC", call.kwargs["env"])
+        self.assertEqual(run.call_args_list[0].kwargs["timeout"], build.S2E_TIMEOUT)
+        self.assertEqual(run.call_args_list[1].kwargs["timeout"], build.D2_HELD_TIMEOUT)
+        self.assertNotIn("timeout", run.call_args_list[2].kwargs)
+        self.assertEqual(run.call_args_list[3].kwargs["timeout"], build.D2_TIMEOUT)
+        # Mac では新しい読み込み器(memfd)を使う比較(読み込み器を経た形の S2E と D2)を流さない。
+        with mock.patch.object(build, "run") as run:
+            build.d2_probe(product, fixture, linux=False)
+        self.assertEqual(len(run.call_args_list), 2)
+        self.assertFalse(any("check_d2.py" in str(call.args[0]) or "held" in call.args[0] for call in run.call_args_list))
+        with mock.patch.object(build, "run", side_effect=subprocess.CalledProcessError(1, "comparison")) as run:
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.d2_probe(product, fixture, linux=True)
+            self.assertEqual(run.call_count, 1)
+
+    def test_job_timeouts_leave_room_for_the_inner_timeouts_plus_preparation(self):
+        # 内側の上限の和 + 準備(5 分)< ジョブの上限(内側の上限が先に効く。S3D と同じ形)。S2L は run の既定(1800 秒)。
+        s2e, held, s2l, d2 = build.S2E_TIMEOUT / 60, build.D2_HELD_TIMEOUT / 60, 1800 / 60, build.D2_TIMEOUT / 60
+        self.assertEqual((build.D2_TIMEOUT, build.D2_HELD_TIMEOUT), (1200, 1800))
+        self.assertEqual(build.run.__kwdefaults__["timeout"], 1800)
+        self.assertLess(s2e + held + s2l + d2 + 5, check_workflow.D2_TIMEOUTS["d2"])
+        self.assertLess(s2e + s2l + 5, check_workflow.D2_TIMEOUTS["d2-universal"])
+
+    def test_d2_checks_the_two_builds_then_compares_the_first_product_on_linux_only(self):
+        for name in build.D2_PLATFORMS:
+            commands = []
+            with mock.patch.object(build, "target_config") as config, \
+                    mock.patch.object(build, "extract_build", return_value=(self.root, {})) as extract, \
+                    mock.patch.object(build, "run", side_effect=lambda args, **kwargs: commands.append(list(args))), \
+                    mock.patch.object(build, "d2_probe") as probe:
+                build.d2(name, self.root, self.root)
+            config.assert_called_once_with(name)
+            self.assertEqual(extract.call_args.args[0], name)
+            self.assertEqual(commands, [["cmp", self.root / "1" / "dev-workflow", self.root / "2" / "dev-workflow"]])
+            probe.assert_called_once_with(self.root / "1" / "dev-workflow", self.root / "1" / "s2e_contract", linux=True)
+        for name in ("macos-x86_64", "macos-arm64"):
+            with mock.patch.object(build, "extract_build") as extract, self.assertRaises(ValueError):
+                build.d2(name, self.root, self.root)
+            extract.assert_not_called()
+        with mock.patch.object(build, "target_config"), mock.patch.object(build, "extract_build", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", side_effect=subprocess.CalledProcessError(1, "cmp")), \
+                mock.patch.object(build, "d2_probe") as probe:
+            with self.assertRaises(subprocess.CalledProcessError):
+                build.d2("linux-x86_64", self.root, self.root)
+            probe.assert_not_called()
+
+    def test_d2_universal_checks_signature_and_cpus_of_both_files_then_compares(self):
+        for name in build.D2_UNIVERSAL_PLATFORMS:
+            commands = []
+
+            def run(args, *, env=None, capture=False, timeout=1800):
+                commands.append(list(args))
+                return "arm64 x86_64" if capture else None
+            with mock.patch.object(build, "target_config"), mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                    mock.patch.object(build, "run", side_effect=run), mock.patch.object(build, "d2_probe") as probe:
+                build.d2_universal(name, self.root, self.root)
+            self.assertEqual(commands, [
+                ["codesign", "--verify", "--strict", "--verbose=2", self.root / "dev-workflow"], ["lipo", "-archs", self.root / "dev-workflow"],
+                ["codesign", "--verify", "--strict", "--verbose=2", self.root / "s2e_contract"], ["lipo", "-archs", self.root / "s2e_contract"]])
+            probe.assert_called_once_with(self.root / "dev-workflow", self.root / "s2e_contract", linux=False)
+        with mock.patch.object(build, "target_config"), mock.patch.object(build, "extract_universal", return_value=(self.root, {})), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False, timeout=1800: "arm64" if capture else None), \
+                mock.patch.object(build, "d2_probe") as probe, self.assertRaises(ValueError):
+            build.d2_universal("macos-arm64", self.root, self.root)
+        probe.assert_not_called()
+        for name in build.D2_PLATFORMS:
+            with mock.patch.object(build, "extract_universal") as extracted, self.assertRaises(ValueError):
+                build.d2_universal(name, self.root, self.root)
+            extracted.assert_not_called()
+
+    def test_main_dispatches_and_requires_a_platform(self):
+        for command, function, platform_name in (("d2", "d2", "linux-arm64"), ("d2-universal", "d2_universal", "macos-arm64")):
+            with mock.patch.object(sys, "argv", ["build.py", command, "--platform", platform_name]), \
+                    mock.patch.object(build, "workspace", return_value=self.root), mock.patch.object(build, function) as called:
+                self.assertEqual(build.main(), 0)
+                called.assert_called_once_with(platform_name, self.root / "downloads", self.root)
+            with mock.patch.object(sys, "argv", ["build.py", command]), self.assertRaises(SystemExit):
+                build.main()
+            with mock.patch.object(sys, "argv", ["build.py", command, "--platform", platform_name]), \
+                    mock.patch.object(build, "workspace", return_value=self.root), \
+                    mock.patch.object(build, function, side_effect=subprocess.CalledProcessError(1, "D2")):
+                self.assertEqual(build.main(), 1)
+
+    def test_build_and_verify_universal_do_not_run_the_d2_comparison(self):
+        for command in ("build", "reproduce"):
+            with mock.patch.object(sys, "argv", ["build.py", command, "--platform", "linux-x86_64"]), mock.patch.object(build, "workspace", return_value=self.root), \
+                    mock.patch.object(build, "quality"), mock.patch.object(build, "reproduce", return_value=self.root), mock.patch.object(build, "pack_tar"), \
+                    mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), mock.patch.object(build, "r4r_probe"), mock.patch.object(build, "loop_state_probe"), \
+                    mock.patch.object(build, "d2_probe") as check:
+                self.assertEqual(build.main(), 0)
+                check.assert_not_called()
+        with mock.patch.object(build, "extract_universal", return_value=(self.root, {})), mock.patch.object(build, "run", return_value="arm64 x86_64"), \
+                mock.patch.object(build, "probe"), mock.patch.object(build, "r4b_probe"), mock.patch.object(build, "r4r_probe"), \
+                mock.patch.object(build, "loop_state_probe"), mock.patch.object(build, "d2_probe") as check:
+            build.verify_universal(self.root, self.root)
+            check.assert_not_called()
+
+    def test_workflow_runs_d2_in_two_separate_required_jobs(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        jobs = document["jobs"]
+        self.assertEqual(check_workflow.check_document(document), [])
+        self.assertEqual(check_workflow.check_native_required(document), [])
+        self.assertEqual(check_workflow.REQUIRED_NATIVE_JOBS[-2:], ("d2", "d2-universal"))
+        self.assertEqual((jobs["build"]["timeout-minutes"], jobs["verify-universal"]["timeout-minutes"]), (120, 60))
+        self.assertEqual(check_workflow.D2_TIMEOUTS, {"d2": 150, "d2-universal": 90})
+        linux = {"fail-fast": False, "matrix": {"include": [row for row in jobs["build"]["strategy"]["matrix"]["include"]
+                                                            if row["platform"].startswith("linux-")]}}
+        expected = {
+            "d2": ("build", linux, "native-build-${{ matrix.platform }}",
+                   "python3 -B native/ci/build.py d2 --platform '${{ matrix.platform }}'"),
+            "d2-universal": ("combine", jobs["verify-universal"]["strategy"], "native-universal",
+                             "python3 -B native/ci/build.py d2-universal --platform '${{ matrix.platform }}'"),
+        }
+        for job, (needs, strategy, artifact, command) in expected.items():
+            with self.subTest(job=job):
+                steps = jobs[job]["steps"]
+                self.assertEqual(jobs[job]["needs"], needs)
+                self.assertEqual(jobs[job]["strategy"], strategy)
+                self.assertEqual(jobs[job]["runs-on"], "${{ matrix.runner }}")
+                self.assertEqual(jobs[job]["timeout-minutes"], check_workflow.D2_TIMEOUTS[job])
+                self.assertEqual(steps[:3], jobs["build"]["steps"][:3])
+                self.assertEqual(steps[3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+                self.assertEqual(steps[4]["with"], {"name": artifact, "path": "${{ runner.temp }}/native-ci/downloads", "merge-multiple": True})
+                self.assertEqual(steps[-1]["run"], command)
+                self.assertEqual(len(steps), 6)
+        self.assertEqual({row["platform"] for row in jobs["d2"]["strategy"]["matrix"]["include"]}, set(build.D2_PLATFORMS))
+        self.assertEqual({row["platform"] for row in jobs["d2-universal"]["strategy"]["matrix"]["include"]}, set(build.D2_UNIVERSAL_PLATFORMS))
+
+    def test_checker_rejects_wrong_timeouts_missing_python_missing_jobs_and_wrong_platforms(self):
+        document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+        for name in ("d2", "d2-universal"):
+            for value in (None, check_workflow.D2_TIMEOUTS[name] - 1, check_workflow.D2_TIMEOUTS[name] + 1):
+                with self.subTest(name=name, timeout=value):
+                    changed = copy.deepcopy(document)
+                    if value is None:
+                        changed["jobs"][name].pop("timeout-minutes")
+                    else:
+                        changed["jobs"][name]["timeout-minutes"] = value
+                    self.assertTrue(check_workflow.check_document(changed))
+            with self.subTest(name=name, case="python"):
+                changed = copy.deepcopy(document)
+                del changed["jobs"][name]["steps"][2]
+                self.assertTrue(check_workflow.check_document(changed))
+            with self.subTest(name=name, case="removed"):
+                changed = copy.deepcopy(document)
+                del changed["jobs"][name]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(name=name, case="step"):
+                changed = copy.deepcopy(document)
+                changed["jobs"][name]["steps"] = [s for s in changed["jobs"][name]["steps"] if "build.py d2" not in s.get("run", "")]
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(name=name, case="platform"):
+                changed = copy.deepcopy(document)
+                other = {"platform": "macos-arm64", "runner": "macos-15"} if name == "d2" else {"platform": "linux-x86_64", "runner": "ubuntu-24.04"}
+                changed["jobs"][name]["strategy"]["matrix"]["include"][-1] = other
+                self.assertTrue(check_workflow.check_native_required(changed))
+            with self.subTest(name=name, case="option-first"):
+                changed = copy.deepcopy(document)
+                changed["jobs"][name]["steps"][-1]["run"] = "python3 -B native/ci/build.py --platform '${{ matrix.platform }}' " + name
+                self.assertTrue(check_workflow.check_document(changed))
+        self.assertEqual({(name, needs) for name, _, _, needs in check_workflow.D2_JOBS}, {("d2", "build"), ("d2-universal", "combine")})
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py d2 --platform x"), "d2")
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py d2-universal"), "d2-universal")
+        self.assertIsNone(check_workflow.native_build_command("python3 -B native/ci/build.py d2x"))
+
+    def test_the_d2_checker_reads_the_loader_from_loop_sh_every_run(self):
+        sys.path.insert(0, str(source_hash.ROOT / "native/ci"))
+        import check_d2
+        text = check_d2.LOOP_SH.read_text(encoding="utf-8")
+        loader = check_d2.heredoc(text, "NATIVE_LOADER")
+        self.assertIn("os.memfd_create", loader)
+        self.assertIn("F_SEAL_SEAL", loader)
+        self.assertFalse(loader.startswith(("\n", " ")) or loader.endswith(("\n", " ")))
+        self.assertIn("COMMANDS = {", check_d2.heredoc(text, "PY_HELPER"))
+        with self.assertRaises(AssertionError):
+            check_d2.heredoc(text + "\nread -r -d '' NATIVE_LOADER <<'PY' || true\nx\nPY\n", "NATIVE_LOADER")
+        with self.assertRaises(AssertionError):
+            check_d2.heredoc(text.replace("read -r -d '' NATIVE_LOADER", "read -r -d '' OTHER"), "NATIVE_LOADER")
+        for value in ("", "relative/dev-workflow", str(self.root / "missing")):
+            with self.assertRaises(ValueError):
+                check_d2.product_path({check_d2.PRODUCT_VARIABLE: value})
+        product = self.write("dev-workflow", b"x", 0o644)
+        with self.assertRaises(ValueError):
+            check_d2.product_path({check_d2.PRODUCT_VARIABLE: str(product)})
+        product.chmod(0o755)
+        self.assertEqual(check_d2.product_path({check_d2.PRODUCT_VARIABLE: str(product)}), product)
+
+
 if __name__ == "__main__":
     unittest.main()

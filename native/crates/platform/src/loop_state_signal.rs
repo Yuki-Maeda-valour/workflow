@@ -63,7 +63,7 @@ fn current_interrupt() -> usize {
 }
 
 /// 旧CPythonの起動時と同じ順で、SIGXFSZを無視にし、SIGINTの扱いを決める。
-/// 一度だけ呼ぶ(開発用入口の先頭)。
+/// 一度だけ呼ぶ(`loop_state::main`が、設定の段階の検査の後、標準入出力の検査の前に呼ぶ。旧CPythonと同じ位置)。
 pub fn startup() -> Interrupt {
     // SAFETY: 定数の信号番号と SIG_IGN。戻り値は使わない。
     unsafe {

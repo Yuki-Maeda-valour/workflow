@@ -13,10 +13,13 @@ pub struct LegacyRuntime {
     pub int_limit: usize,
     pub unbuffered: bool,
     pub stdout_terminal: bool,
+    /// 起動の後の2つ目の地域設定の警告を標準エラーへ書けず、旧版のバッファに残ったか(終わりの flush が失敗する)。
+    pub stderr_pending: bool,
 }
-/// 旧CPythonの起動の失敗。標準エラーへ出す全文(生バイト)と終了値1。
+/// 旧CPythonの起動の失敗。標準エラーへ出す全文(生バイト)と終了値1。2つ目は設定の段階の失敗
+/// (`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`)か。旧CPythonは`SIGPIPE`を無視にする前に書く(D2の決めたことの8)。
 #[derive(Debug)]
-pub struct StartupFailure(pub Vec<u8>);
+pub struct StartupFailure(pub Vec<u8>, pub bool);
 const PREINITIALIZED: &str = "Python runtime state: preinitialized\n\n";
 /// PYTHONHASHSEED を CPython3.10 の config_init_hash_seed(strtoul)と同じく読む。
 fn hash_seed_valid(raw: &[u8]) -> bool {
@@ -64,12 +67,23 @@ fn stdio_failure(lines: &str) -> StartupFailure {
             "Fatal Python error: init_sys_streams: {lines}\n\nCurrent thread 0x{thread:016x} (most recent call first):\n  <no Python frame>\n"
         )
         .into_bytes(),
+        false,
     )
 }
 impl LegacyRuntime {
     /// 旧CPythonの起動の順(PYTHONHASHSEED → PYTHONINTMAXSTRDIGITS → 標準入力 →
     /// 標準出力 → 標準エラー)で検査する。文字コードの設定は読まない(12:39 の承認)。
+    /// 地域設定の書き換え(PEP 538)と警告は、`main`がこの前後に行う。`main`は、信号の初期化を挟む`from_environment_with`を使う
+    /// (この関数は単体テストだけが使う)。
+    #[cfg(test)]
     pub fn from_environment() -> std::result::Result<Self, StartupFailure> {
+        Self::from_environment_with(|| {})
+    }
+    /// `from_environment`と同じ検査。`after_config`は、設定の段階の検査(`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`)の後、
+    /// 標準入出力の検査の前に呼ぶ(旧CPythonが信号を初期化する位置。設定の段階の失敗の診断は、受け継いだ`SIGXFSZ`の扱いで書く)。
+    pub fn from_environment_with(
+        after_config: impl FnOnce(),
+    ) -> std::result::Result<Self, StartupFailure> {
         if let Some(seed) = std::env::var_os("PYTHONHASHSEED")
             && !hash_seed_valid(seed.as_bytes())
         {
@@ -78,6 +92,7 @@ impl LegacyRuntime {
                     "Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]\n{PREINITIALIZED}"
                 )
                 .into_bytes(),
+                true,
             ));
         }
         let invalid = || {
@@ -86,6 +101,7 @@ impl LegacyRuntime {
                     "Fatal Python error: config_init_int_max_str_digits: PYTHONINTMAXSTRDIGITS: invalid limit; must be >= 640 or 0 for unlimited.\n{PREINITIALIZED}"
                 )
                 .into_bytes(),
+                true,
             )
         };
         let int_limit = match std::env::var_os("PYTHONINTMAXSTRDIGITS") {
@@ -109,6 +125,7 @@ impl LegacyRuntime {
             }
             _ => 4300,
         };
+        after_config();
         use dev_workflow_platform::loop_state::signal::is_directory;
         if is_directory(0) {
             return Err(stdio_failure(
@@ -142,6 +159,7 @@ impl LegacyRuntime {
             int_limit,
             unbuffered,
             stdout_terminal: std::io::stdout().is_terminal(),
+            stderr_pending: false,
         })
     }
 }

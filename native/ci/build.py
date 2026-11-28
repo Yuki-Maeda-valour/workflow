@@ -663,6 +663,58 @@ def s2e_universal(name, downloads, work):
     s2e_probe(fixture)
 
 
+# D2(#542)の製品の実行ファイルでの比較も、build と verify-universal の時間の枠に入れず、別のジョブ(d2・d2-universal)で流す
+# (2026-11-12 12:59 の決定)。d2 は Linux の 2 機種で、build の 2 本が同じことを確かめてから 1 回目の製品で、S2E(直接の形)・
+# S2L・新しい読み込み器を経た起動(check_d2.py。memfd を使うので Linux だけ)を比べる。d2-universal は署名後の Mac 共通の
+# 製品で、直接の形と loop-state だけを比べる。隠しの reader を使う S2E の項目は、同じ tar の s2e_contract のまま流す。
+# 上限は S3D の形(内側の上限の和 + 準備〈約 5 分〉< ジョブの上限)。d2 は S2E の 50 分 + S2L の 30 分(run の既定)+ D2 の 20 分
+# + 5 分 = 105 < 120 分、d2-universal は 50 + 30 + 5 = 85 < 90 分。d2 は、読み込み器を経た形の S2E の比較(`--form held`。30 分)も流すので、
+# 50 + 30 + 30 + 20 + 5 = 135 < 150 分にする。手元と CI の時間の記録は docs/testing.md に置く。
+D2_PLATFORMS = ("linux-x86_64", "linux-arm64")
+D2_UNIVERSAL_PLATFORMS = ("macos-x86_64", "macos-arm64")
+D2_TIMEOUT = 1200
+D2_HELD_TIMEOUT = 1800
+
+
+def d2_probe(product, s2e_fixture, *, linux):
+    """製品の実行ファイル(DEV_WORKFLOW_TEST_NATIVE_BINARY)で、S2E の直接の形・S2L・(Linux だけ)D2 の比較を流す。
+    S2E の比較器自身の検査は s2e ジョブで流すので省く。S2E の Mac の経路の模擬の変数は渡さない。"""
+    env = {key: value for key, value in os.environ.items() if key != "S2E_SIMULATE_MAC"}
+    env["DEV_WORKFLOW_TEST_NATIVE_BINARY"] = str(product)
+    run([sys.executable, "-B", ROOT / "native/ci/check_s2e.py", "--fixture", s2e_fixture, "--product", "--no-selftest"],
+        env=env, timeout=S2E_TIMEOUT)
+    if linux:
+        # 読み込み器を経た形(新しい読み込み器を経た製品の environment-guard-held と、loop.sh の py environment-run の形)。memfd を使うので Linux だけ。
+        run([sys.executable, "-B", ROOT / "native/ci/check_s2e.py", "--fixture", s2e_fixture, "--product", "--form", "held", "--no-selftest"],
+            env=env, timeout=D2_HELD_TIMEOUT)
+    run([sys.executable, "-B", ROOT / "native/ci/check_loop_state.py", "--product"], env=env)
+    if linux:
+        run([sys.executable, "-B", ROOT / "native/ci/check_d2.py"], env=env, timeout=D2_TIMEOUT)
+
+
+def d2(name, downloads, work):
+    """build の tar を受け取り、2 本の製品が同じことを確かめてから、1 回目の製品で比べる(Linux の 2 機種)。"""
+    if name not in D2_PLATFORMS:
+        raise ValueError("d2 は Linux の 2 機種で実行してください(新しい読み込み器は memfd を使う)")
+    target_config(name)
+    folder, _ = extract_build(name, downloads, work)
+    same_builds(folder, "dev-workflow")
+    d2_probe(folder / "1" / "dev-workflow", folder / "1" / "s2e_contract", linux=True)
+
+
+def d2_universal(name, downloads, work):
+    """署名後の Mac 共通の tar を受け取り、署名と CPU を確かめてから、製品の直接の形と loop-state を比べる。"""
+    if name not in D2_UNIVERSAL_PLATFORMS:
+        raise ValueError("d2-universal は Mac の 2 機種で実行してください")
+    target_config(name)
+    folder, _ = extract_universal(downloads, work)
+    for filename in ("dev-workflow", "s2e_contract"):
+        run(["codesign", "--verify", "--strict", "--verbose=2", folder / filename])
+        if sorted(run(["lipo", "-archs", folder / filename], capture=True).split()) != ["arm64", "x86_64"]:
+            raise ValueError("Mac の最終ファイルの CPU が違います")
+    d2_probe(folder / "dev-workflow", folder / "s2e_contract", linux=False)
+
+
 def package(downloads, work):
     binaries, targets = [], {}
     for name in ("linux-x86_64", "linux-arm64"):
@@ -844,7 +896,7 @@ def implement_guard_universal(name, downloads, work):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal"))
+    parser.add_argument("command", choices=("prepare", "build", "reproduce", "combine", "verify-universal", "package", "test", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "s3d", "s3d-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal", "d2", "d2-universal"))
     parser.add_argument("--platform", choices=TARGETS)
     parser.add_argument("--downloads", type=Path)
     args = parser.parse_args()
@@ -854,6 +906,8 @@ def main():
             suite.addTests(unittest.defaultTestLoader.discover(str(ROOT / "native/ci/scripts"), pattern="test_s3d_ci.py"))
             return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
         if args.command in ("prepare", "build", "reproduce", "r4u", "r4d1", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal", "r4g", "r4g-universal", "r4a-rest", "r4a-rest-universal", "r4c", "r4c-universal", "s2e", "s2e-universal") and not args.platform:
+            parser.error("--platform が必要です")
+        if args.command in ("d2", "d2-universal") and not args.platform:
             parser.error("--platform が必要です")
         if args.command in ("s3d", "s3d-universal") and not args.platform:
             parser.error("--platform が必要です")
@@ -911,6 +965,10 @@ def main():
             s2e(args.platform, downloads, work)
         elif args.command == "s2e-universal":
             s2e_universal(args.platform, downloads, work)
+        elif args.command == "d2":
+            d2(args.platform, downloads, work)
+        elif args.command == "d2-universal":
+            d2_universal(args.platform, downloads, work)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
         return 1

@@ -55,8 +55,9 @@ pub fn bootstrap(
     print: &mut dyn FnMut(&[u32]) -> Result<(), PyException>,
     ctx: PyCtx,
 ) -> Result<(), PyException> {
+    // `bootstrap` のフレームは、呼ぶ `main` の 1 つ下(直接の形は `BOOTSTRAP_DEPTH`。読み込み器を経た形は、その分だけ深い)。
     let frame = PyCtx {
-        depth: BOOTSTRAP_DEPTH,
+        depth: ctx.depth + (BOOTSTRAP_DEPTH - super::dispatch::MAIN_DEPTH),
         ..ctx
     };
     let input = BootstrapInput {

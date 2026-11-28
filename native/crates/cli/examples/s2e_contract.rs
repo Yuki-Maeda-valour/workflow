@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
-//! S2E専用の検査入口。製品登録表を変更しない。
+//! S2E専用の検査入口(製品の登録表とは別)。
 //! 9 コマンド(`bootstrap`・`verify`・`read`・`exec`・`hook`・`verify-pair`・`host-paths`・`host-settings`・`host-allowlist`)と、
 //! 比較用の内部 reader の隠しコマンド(`reader-host-settings`・`reader-components`・`reader-policy-digest`)を動かす。
 //! 旧 Python が起動の時点で止まる経路(不正な `PYTHONHASHSEED`・標準の fd がディレクトリ)も、本体の前に再現する。
-// 受け継いだ`SIGPIPE`の扱いを`main`より前に控える登録は、この検査専用の入口だけが展開する(製品には入れない)。
+// 受け継いだ`SIGPIPE`の扱いを`main`より前に控える登録。製品の入口(`src/main.rs`)とS2Lの検査専用の入口も展開する(D2)。
 dev_workflow_platform::s2e_record_startup_state!();
 
 #[path = "../src/commands/environment_guard/mod.rs"]
@@ -28,12 +28,14 @@ fn main() -> std::process::ExitCode {
         }
     }
     let columns = dev_workflow_platform::r4b_process::stdout_columns();
-    let code = environment_guard::run_process(columns, &mut |parsed, stdout, _stderr| {
-        environment_guard::dispatch::dispatch(
-            &environment_guard::dispatch::ProcessHost,
-            parsed,
-            stdout,
-        )
-    });
+    let form = environment_guard::Form::Direct;
+    let code =
+        environment_guard::run_process(&args, columns, form, &mut |parsed, stdout, _stderr| {
+            environment_guard::dispatch::dispatch(
+                &environment_guard::dispatch::ProcessHost,
+                parsed,
+                stdout,
+            )
+        });
     std::process::ExitCode::from(code)
 }

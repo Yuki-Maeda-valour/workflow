@@ -3,10 +3,12 @@
 このフォルダには、段階 0a(#442)の土台、段階 1a(#448)の保存先解決、C0a(#453)の共通入出力、C0b(#456)の上限と保持実体の検査、C0c(#458)の単一子の実行と回収を実装しています。
 R4Sのうちloop-state用YAML・機密指定・globの純粋部品は、#454の調査を基に#462で追加しました。
 S3I-A(#474)の `implement-guard.sh` のGitを呼ばない3コマンドと記録の読み取りも、開発用ソースだけにあります(未登録・未配布)。
-`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・S2Lのloop-stateの状態観測7コマンド・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、配布は段階 1b・プラグイン v4.53.0 のままです。C0b/C0c/R4S/task-digest/R4B/R4R/S2L/R4Gは既存のCLIへ未接続です。
+`resolve-task-dir` は段階 1b で配布済みです。C0a・C0b・C0c・R4S・R4Aのtask-digest・R4Bのorigin判定とGit設定の確認値・R4Rのタスク本文の復元の部品・R4Gの保護記録の探索とreviewsの配置と内蔵のGit読取りの部品は開発用ソースだけにあり、製品の登録表にも配る実行物にも入っていません。C0b/C0c/R4S/task-digest/R4B/R4R/R4Gは既存のCLIへ未接続です。S2Lの`loop-state`とS2Eの環境照合は、製品の登録表に接続済みです(下の段落)。
 R4U(#480)の文書のリンク検査の部品も開発用ソースだけにあり、既存のCLIへ未接続・未配布です。
 R4Aの残り5本(#471)の解析補助も開発用ソースだけにあり、既存のCLIへ未接続・未配布です。
-現在の配布状況は [README.md](../README.md#e-rust-版を試す段階-1b) を参照してください。
+D2(#542)で、S2Lの`loop-state`とS2Eの`environment-guard`(直接の形)・`environment-guard-held`(読み込み器を経た形)を、製品の登録表に足しました([D2の節](#製品への登録と新しい読み込み器d2))。
+  - D2のPRで、配る実行物に取り込みます。呼ぶのは、`DEV_WORKFLOW_ENGINE=rust`のときの`loop.sh`だけです。未設定・`legacy`では、旧版のPythonを使います。
+現在の配布状況は [README.md](../README.md) を参照してください。
 内部の版は `0.1.0` です。配布プラグインの版とは別に管理します。
 `probe --json` は実行環境とビルド情報を JSON で返します。
 `probe --self-sha256` は自己の実行ファイル全体の SHA256 を返します。
@@ -36,11 +38,14 @@ R4Aの残り5本(#471)の解析補助も開発用ソースだけにあり、既�
 - `platform` 以外の自作 crate(Rust の部品単位)は `#![forbid(unsafe_code)]` を使います。
 - `platform` は `#![deny(unsafe_op_in_unsafe_fn)]` を使います。公開する関数は安全な関数に限ります。
   - 例外は、R4U の `check_links::capture_before_main` と、R4G の `r4g::startup::record_before_std`(`#[doc(hidden)]`)と、S2E の `environment_guard::capture_inherited_sigpipe`(`#[doc(hidden)]`)です。いずれも main の前に static から呼ぶ形でだけ使います([R4U の節](#r4ucheck_linksの文書のリンク検査))。
+  - S2E の `capture_inherited_sigpipe` は、D2(#542)から製品の入口 `src/main.rs` も、マクロ `s2e_record_startup_state!` で載せます。
 
 `crates/cli/src/commands/mod.rs` の `COMMANDS: &[Command]` が名前と関数の固定表です。
 `Command` は `name: &'static str` と `run: fn(&[OsString], &mut CommandIo<'_>) -> CommandResult` を持ちます。
 関数へ渡す引数にはコマンド名を含めません。同じ実行期間の入出力も渡します。
 登録済みの `probe` と `resolve-task-dir` は、短い変換関数から既存の本体を呼びます。
+D2(#542)で足した `loop-state`・`environment-guard`・`environment-guard-held` は、標準出力と標準エラーへ旧版と同じ順に直接書き、終了コードだけを返します(最終出力は空)。
+  - 製品の bin のテストのビルド(`cfg(test)`)では、2 つのモジュールを組みません。登録表の名前と呼出し口だけを持つ小さな置き換えを使います。2 つのモジュールの単体テストは、検査専用の入口(`cargo test --example loop_state_fixture`・`--example s2e_contract`)で流します。
 `resolve-task-dir` は `commands/resolve_task_dir/` に置きます。今後の機能も `commands/<名前>/mod.rs` に追加します。
 `probe.rs` は段階 0 の試しのコマンドとして単独ファイルに置きます。
 
@@ -321,10 +326,14 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 
 ## loop-stateの状態観測7コマンド(S2L)
 
-#468で、旧`loop-state.py`の7コマンドに対応する専用モジュールを実装しました。製品CLIの登録・help・配布・`loop.sh`などの既存呼出元は変えていません。
+#468で、旧`loop-state.py`の7コマンドに対応する専用モジュールを実装しました。D2(#542)で製品の登録表へ足しました(`dev-workflow loop-state <引数>`)。`DEV_WORKFLOW_ENGINE=rust`のときの`loop.sh`が、新しい読み込み器を経て呼びます。
 
-- 未登録で試す入口は`crates/cli/examples/loop_state_fixture.rs`だけです。`args_os()`の最初の要素(実行ファイルの名前)を除いて、`commands/loop_state/mod.rs`の`main`へ渡し、その終了値で終わります。
-- 製品の`dev-workflow`は、引き続き`loop-state`を未登録のコマンドとして拒否します。
+- 検査専用の入口は`crates/cli/examples/loop_state_fixture.rs`です。`args_os()`の最初の要素(実行ファイルの名前)を除いて、`commands/loop_state/mod.rs`の`main`へ渡し、その終了値で終わります。製品の`loop-state`も、コマンド名の後の引数を同じ`main`へ渡します。
+- D2で、起動の処理を旧版に合わせて直しました。
+  - 設定の段階の起動の失敗(`PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`)の診断は、`main`の前に控えた受け継いだ`SIGPIPE`の扱いで書きます(読む側の閉じたパイプで、受け継いだ扱いが既定なら信号13)。そのため検査専用の入口も、マクロ`s2e_record_startup_state!`を展開します。
+  - `SIGXFSZ`を無視にするのは、設定の段階の検査の後、標準入出力の検査の前です(旧版と同じ位置。`LegacyRuntime::from_environment_with`)。書けるファイルの大きさの上限が小さい通常ファイルへ設定の段階の失敗を書くと、旧版と同じく信号25で終わります。
+  - `PYTHONCOERCECLOCALE`(無し・`0`・`1`・`warn`)を読み、子へ渡す`LC_CTYPE`を旧版と同じく書き換えます。1つ目の警告(`Python detected LC_CTYPE=C …`)は起動の失敗より前に、受け継いだ`SIGPIPE`の扱いで書きます。2つ目の警告(`LC_ALL`が`C`・`POSIX`のときの`Python runtime initialized with LC_CTYPE=C …`)は、起動の検査の後に標準エラーへ書きます。書けずにバッファへ残った分は、終わりのflushの失敗(終了値120)になります(`LegacyRuntime::stderr_pending`)。
+  - 判定と警告の文は`crates/platform/src/environment_guard.rs`の`coerce_c_locale_reading_setting`・`write_before_signal_setup`にあります(S2Eの直接の形と共通。R4Rの部品は変えていません)。
 
 | 置き場 | 主な部品と役目 |
 |---|---|
@@ -345,10 +354,10 @@ originのGit/SSH出力は厳密なUTF-8のままで、旧版の通常比較を�
 - `crates/platform/src/fs.rs`へ足したのは、`pub(crate)`のfdの借用と、openとfstatの後に旧版の比較の呼出しを挟む`pub(crate)`の入口です。既存のC0b・C0cのAPIの動作は変えていません。
 - 保持したフォルダの属性は、R4D-1(#481)が足した`HeldDir::snapshot`で取ります。fstatがEINTRで中断されたら呼び直します(旧版の`os.fstat`も呼び直します)。
 - 既存の`core::loop_state::profile_patterns`(R4S)の結果は変えていません。S2Lは`profile_patterns_for_loop`を使います。
-- 単体テストは`*_tests.rs`と各モジュールの`tests`にあります。`check_loop_state_units.py`が必須の名前と件数で照らします。
+- 単体テストは`*_tests.rs`と各モジュールの`tests`にあります。`check_loop_state_units.py`が必須の名前と件数で照らします(D2で1件を足して58件)。
 
-契約・拒否の順序・承認された差は [design.md](../docs/design.md#loop-stateの状態観測7コマンドs2l)にあります。
-[比較の手順・件数・時間](../docs/testing.md#s2lの比較)に従ってください。通常の`cargo test --locked`だけでは旧版との比較は完了しません。
+契約・拒否の順序・承認された差は [design.md](../docs/design.md) のS2Lの節にあります。
+[testing.md](../docs/testing.md) のS2Lの比較の節(手順・件数・時間)に従ってください。通常の`cargo test --locked`だけでは旧版との比較は完了しません。
 
 ## R4U(check_links)の文書のリンク検査
 
@@ -670,7 +679,16 @@ unsafe の置き場は、次の 2 つだけです。
 ## environment-guardの環境照合(S2E)
 
 #470で、旧`environment-guard.py`(以下、旧guard)の9コマンドと内部reader(`host-check.py`が使う3つの関数)と同じ結果を返す部品を実装しました。
-製品CLIの登録表・help・配布・既存呼出元は変えていません。未登録・未配布です。
+D2(#542)で、製品の登録表へ2つの起動の形を足しました(`run_product`)。内部readerは製品へ入れていません(呼び出し元の`host-check.py`は、控えの隣の旧guardのコピーのreaderを使います)。
+
+- `dev-workflow environment-guard <引数>`(直接の形・`Form::Direct`): S2Eの比較の基準(U5)の`python3 -B <guard>`と同じ結果を返します。
+  - D2で、`PYTHONCOERCECLOCALE`と2種類の地域設定の警告を足しました(S2Lと同じ部品。1つ目は起動の失敗より前、2つ目は起動の検査の後に`PyStream`の標準エラーへ書きます)。
+- `dev-workflow environment-guard-held <引数>`(読み込み器を経た形・`Form::Held`): `loop.sh`の`py environment-run`(`python3 -I -c <補助> environment-run <sha> <guard> …`)と同じ結果を返します。
+  - `PYTHON*`を読みません(`PYTHONCOERCECLOCALE`も読まず、`LC_CTYPE`は環境変数だけで書き換えます)。
+  - 0以外の`SystemExit`(`main`の戻り値・`argparse`の終了2・`exec`の子の終了コード)と捕まえない例外は、guardの出力を残し、固定の読み込み器の1行(`ERROR [environment-guard] 保持した検査用コピーを安全に実行できない`)を足して終了20にします。`hook`は、代わりに拒否のJSONと終了0です(`output::run_main_held`)。
+  - 変換しない物: 終了0・`KeyboardInterrupt`・`verify-pair`の`os._exit(20)`(本体の戻り値`OS_EXIT_20`)。`-c`の起動なので、直接の形の`main`の後の`flush_io`はありません。
+  - 呼出しの深さは、直接の形より5段深くします(`dispatch::HELD_EXTRA_DEPTH`)。旧版の境目(利用者フォルダは985段まで通り、986段は`host-allowlist`だけが落ち、987段は全部が落ちる。照合のコピーの木は、987段では`RecursionError`にならずに照合が失敗し、988段は`RecursionError`で照合が失敗する)を`native/ci/check_d2.py`が比べます。
+- `run_process`は、引数の列・端末の幅・起動の形を受け取ります。検査専用の入口は`args_os().skip(1)`と`Form::Direct`を渡します。
 
 - 本体は`crates/cli/src/commands/environment_guard/`にあります。役割は次のとおりです。
   - `args`・`output`・`runtime`・`error`・`errno_table`・`startup`: 旧`argparse`(Python 3.10)相当の引数の解析・usage・help、旧Pythonのbuffering・途中のflush・終了時のflush失敗(終了コード120)、旧版の例外の型名と理由、`errno`の文(Linuxはglibcの表)、`PYTHONUNBUFFERED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONHASHSEED`の扱い、旧Pythonが起動時に止まる経路(診断を標準エラーへ書き、終了コード1)。
@@ -687,22 +705,82 @@ unsafe の置き場は、次の 2 つだけです。
   - 隠しコマンド: 引数が`reader-`で始まるときだけ、内部reader3つを呼び、返した値を型の印つきの1行のJSONで出します。`reader-host-settings <state> <sha256> [呼出し側の深さ]`・`reader-components …`・`reader-policy-digest …`です。比較器が、旧版の同じ関数の値と比べます。
   - 製品の入口には、この隠しコマンドも、注入の入口もありません。
 - 細かい競合(`lstat`と`open`の間・`EINTR`の注入など)は、`cfg(test)`のフックだけで差し込みます。フックは製品と同じ関数の中にあり、フックを外した経路は製品と同じコードを通ります。単体検査は`observe_tests.rs`・`race_tests.rs`・`command_tests.rs`・`copy_tests.rs`にあります。
-- `main`より前の初期化は、検査専用入口(`examples/s2e_contract.rs`)とplatformのテストにだけあります。platformのマクロ`s2e_record_startup_state!`を展開した実行ファイルだけが、初期化の表へ`capture_inherited_sigpipe`を載せます(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`)。この関数が、`main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控えます。
-  - 展開してよいのは、`examples/s2e_contract.rs`の1か所と、`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけです。`scripts/test_native_s2e.py`が、展開の場所・別名・許可の外からの関数の参照を静的に確かめます。
+- `main`より前の初期化は、検査専用入口(`examples/s2e_contract.rs`・`examples/loop_state_fixture.rs`)と、D2からの製品の入口(`src/main.rs`)と、platformのテストにだけあります。platformのマクロ`s2e_record_startup_state!`を展開した実行ファイルだけが、初期化の表へ`capture_inherited_sigpipe`を載せます(Linuxは`.init_array`、Macは`__DATA,__mod_init_func`)。この関数が、`main`より前に、受け継いだ`SIGPIPE`の扱いを`sigaction`で読んで控えます。
+  - 展開してよいのは、この3つの入口に1か所ずつと、`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけです。`scripts/test_native_s2e.py`が、展開の場所・別名・許可の外からの関数の参照を静的に確かめます。
   - 展開した側のcrateに`#[unsafe(link_section)]`の`static`が生まれます(外部のマクロの展開なので、`#![forbid(unsafe_code)]`には当たりません)。対応外のOSでは何も登録せず、`inherited_sigpipe()`は`None`です(`compile_error!`にしません。控えが無い機種は既定へ戻す、という今までの動きを変えないためです)。
   - Rustの標準ライブラリは、`main`の前に`SIGPIPE`を無視へ変えるので、受け継いだ値はこの時点でしか読めません。
   - 初期化関数は、確保・ロック・Rustの入出力を使いません。控えは`inherited_sigpipe()`で読みます。設定の段階の起動の失敗の診断を書く前に、控えが無視でなければ既定へ戻すために使います。
-  - Macの実機での動作は未確認です(clippyだけ、aarch64とx86_64のappleで通りました)。
-- 製品の`commands/mod.rs`には、登録していません。
-- このソースから作る製品の`dev-workflow`には、`main`より前の処理が入りません。
-  - 2026-11-26に、muslのreleaseを直す前の作りと比べました。`strace -f -e trace=rt_sigaction dev-workflow --version`で、直す前にあった`rt_sigaction(SIGPIPE, NULL, …)`が無くなり、標準ライブラリが`SIGPIPE`を無視へ変える呼出しだけが残りました。
-  - 製品の`.init_array`の大きさは、gnuが0x10・muslが0x8です(R4Eの前のmainと同じ)。
-  - 配布中のv4.53.0も、`main`より前の処理は無いままです。
-- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のdebugで、glibcは193件、muslは194件が通りました(2026-11-26。`go`の待ちの検査を足した後)。
+  - Macでは、CIの`s2e-universal`・`d2-universal`が、署名後の実行物を両CPUで比べます。
+- 製品の`commands/mod.rs`には、D2で`environment-guard`・`environment-guard-held`を登録しました。隠しのreaderコマンドと注入の入口は登録していません。
+- D2(#542)から、このソースから作る製品の`dev-workflow`には、`main`より前の処理が1つ入ります(`capture_inherited_sigpipe`。受け継いだ`SIGPIPE`の扱いを読むだけで、書き込みも確保もしません)。
+  - 2026-11-27に、muslのreleaseで確かめました。`strace -f -e trace=rt_sigaction dev-workflow --version`の最初の呼出しが`rt_sigaction(SIGPIPE, NULL, …)`(読むだけ)で、その後に標準ライブラリが`SIGPIPE`を無視へ変えます。
+  - 製品の`.init_array`の大きさは、muslで0x10です(D2の前のソースは0x8)。
+  - `probe`・`resolve-task-dir`の結果が変わらないことは、`native/ci/check_probe.py`・`check_resolve_task_dir.py`で確かめます。
+  - 2026-11-26までの記録: D2の前のソースの製品には、`main`より前の処理が入らなかった(gnu 0x10・musl 0x8。R4Eの前のmainと同じ)。
+- Rustの単体テストは、`cargo test --locked -p dev-workflow-cli --example s2e_contract`です。作業機のdebugで、glibcは193件、muslは194件が通りました(2026-11-26。`go`の待ちの検査を足した後)。D2で読み込み器を経た形の検査を4件足し、glibcは197件が通りました(2026-11-27)。
 
-認めた旧版との差と、比較の前提の外は、利用者の決定(U1〜U7と全コマンドの決定)の範囲だけです。時刻つきの一覧は [設計のS2E節](../docs/design.md#s2eに限る承認済みの差)にあります。
-契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。
-[比較の手順と件数](../docs/testing.md#s2eの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+認めた旧版との差と、比較の前提の外は、利用者の決定(U1〜U7と全コマンドの決定)の範囲だけです。時刻つきの一覧と契約は [design.md](../docs/design.md) のS2Eの節にあります。
+[testing.md](../docs/testing.md) のS2Eの比較の節(手順と件数)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
+
+## 製品への登録と新しい読み込み器(D2)
+
+#542(D2)で、S2LとS2Eを製品の登録表に足し、`loop.sh`に新しい読み込み器を入れました。
+`DEV_WORKFLOW_ENGINE=rust`のときの`loop.sh`だけが、新しい読み込み器を経て3つのコマンドを呼びます。未設定・`legacy`では、旧版のPythonを使います。
+
+| コマンド | 置き換える旧版の起動 | 読む`PYTHON*` |
+|---|---|---|
+| `dev-workflow loop-state <引数>` | `"$PY_ABS" <loop-state.py> <引数>`(`loop.sh`の8か所) | `PYTHONHASHSEED`・`PYTHONINTMAXSTRDIGITS`・`PYTHONUNBUFFERED`と、D2で足した`PYTHONCOERCECLOCALE` |
+| `dev-workflow environment-guard <引数>` | `"$PY_ABS" -B <guard> <引数>`(開始時の`host-paths`・`bootstrap`) | S2EのU5の3つと`PYTHONCOERCECLOCALE` |
+| `dev-workflow environment-guard-held <引数>` | `python3 -I -c "$PY_HELPER" environment-run <sha> <guard> <引数>`(残りの7か所) | 読まない(旧版は`-I`) |
+
+- 実行ファイルの大きさと比較の時間の記録は、[docs/testing.md](../docs/testing.md) にあります。
+- スタックの大きさはOSの既定(`RLIMIT_STACK`)に任せます(`main`のスレッドで動かします)。
+
+### 新しい読み込み器
+
+- 字面は`loop.sh`の`NATIVE_LOADER`の1か所だけです(`read -r -d '' NATIVE_LOADER <<'PY'`)。引数の並びと手順は、その直前のコメントにあります。
+- 起動は`<Python> -I -c "$NATIVE_LOADER" <形> <元のLC_CTYPEの有無> <値> <受け継ぐ信号> <SHA-256> <実行ファイル> <guardのSHA-256か-> <guardか-> <引数>`です。
+  - 親と末尾をリンクを辿らずに開き、通常ファイルを8 MiB・15秒以内で読んで、SHA-256を照らします(`ENVIRONMENT_LOADER`と同じ開き方)。
+  - 封を付けられるmemfd(`MFD_EXEC`。`EINVAL`なら付けずに作り直す)へ書き、4つの封を付けます。`RLIMIT_FSIZE`のソフトの上限が足りなければ、書く間だけハードの上限まで上げ、封の後に戻して読み直します。
+  - 封を確かめ、memfdを読み直して照らし直します。時間切れの印を0にし、`SIGALRM`・`SIGINT`・`SIGPIPE`・`SIGXFSZ`と`LC_CTYPE`を`loop.sh`から受け継いだ値へ戻して、memfdのfdを`execve`で起動します。
+  - 失敗は起動せず、`environment-guard`の形は`ERROR [environment-guard] 保持した検査用コピーを安全に実行できない`、`loop-state`は`ERROR [dev-workflow] 保持した実行ファイルを安全に起動できない`と終了20です。`KeyboardInterrupt`は変換しません。
+  - `environment-guard-held`のときは、旧guardのコピーも同じ開き方(1 MiB)で照らし、実行はしません。
+  - memfd・封の名前を持たないPython(uvが入れるpython-build-standaloneなど)では、Linuxの番号と`ctypes`の`memfd_create`を使います。`os.execve`がfdを受けないPythonと、memfdを作る手段が無いPythonでは、起動せずに上と同じ1行と終了20で止まります(パスで起動し直しません)。
+
+### 旧版との比較
+
+| 入口 | 確かめること |
+|---|---|
+| `native/ci/check_s2e.py --fixture <s2e_contract> --product` | Rustの側を製品の`environment-guard`(直接の形)にしてS2Eの比較を流す。隠しのreaderを使う項目は`--fixture`の検査専用の入口のまま |
+| `native/ci/check_s2e.py --fixture <s2e_contract> --product --form held` | 旧版を`loop.sh`の`py environment-run`の形、Rustを新しい読み込み器を経た製品の`environment-guard-held`にして、9コマンドの流れ・read・exec・hook・verify-pairの流れ・上限の端・出力の故障を比べる(Linuxだけ)。旧版の固定期待には、固定の読み込み器の変換を当てる |
+| `native/ci/check_loop_state.py --product` | Rustの側を製品の`loop-state`にしてS2Lの比較を流す(`--fixture`と同時には指定しない) |
+| `native/ci/check_d2.py` | 新しい読み込み器を経た製品の3つの形を、旧版の`loop.sh`の起動の形と比べる(Linuxだけ) |
+
+- 3つとも、製品を`DEV_WORKFLOW_TEST_NATIVE_BINARY`で渡します。未設定・空・相対・不在・実行不能なら失敗です。
+- D2で、S2EとS2Lの比較器(検査専用の入口でも製品でも流れる)にも、地域設定の場面を足しました。
+  - S2E: `check_s2e.py`の`locale_cases`と、`s2e_commands.py`の項目`x-locale-copy`(全機種で必須)です。
+    - `locale_cases`は、`PYTHONCOERCECLOCALE`の4つ × 代表の地域設定6組と、警告が出る2組 × 起動の失敗3つ × 親の`SIGPIPE` × 標準エラーの24組です。
+    - `x-locale-copy`は、108組の地域設定で、`exec`のbashの子が受けた環境の全体を比べます。
+  - S2L: `loop_state_decision_cases.py`の4つの群です。
+    - `locale_coercion`: 108組の地域設定で`snapshot`を流し、gitの子が受けた`LC_CTYPE`を比べます。
+    - `locale_sigpipe`: 警告が出る2組 × 起動の失敗 × 親の`SIGPIPE` × 標準エラーの24組です。
+    - `startup_sigpipe`: 設定の段階の失敗 × 親の`SIGPIPE`の4組です。
+    - `startup_sigxfsz`: 書けるファイルの大きさの上限0の通常ファイルへ、設定の段階の失敗と警告を書く4組です。
+- `check_d2.py`の群は次のとおりです。群ごとの件数を固定しています。
+  - 通常の9コマンドとloop-stateの入力・起動の失敗(`SIGXFSZ`を含む)・`RLIMIT_FSIZE`・閉じたfd 0〜2。
+  - 受け継いだ`SIGPIPE`と地域設定の警告・地域設定の組(27組 × `PYTHONCOERCECLOCALE`の4つ × 3つの形)。
+  - 起動の失敗の重なり(標準入力・標準出力がディレクトリ)・再帰の深さの境目・`KeyboardInterrupt`。
+  - 読み込み器の性質(`cat`の実体を照らして起動し、戻した信号・`LC_CTYPE`・上限を読む。memfdの名前を持たないPythonと、`os.execve`がfdを受けないPythonの形も、名前を消した前置きで再現する)・比較器の自己検査。
+  - `--standalone-python <Python>`を渡すと、そのPython(例: uvのpython-build-standalone)で読み込み器を動かす群を足します。
+  - 最後の行は、旧新の一致・旧新それぞれの個別の期待・旧版と比べない固定の確かめ・比較器の自己検査の数を出し、その和が総数です。
+- 個別の期待(旧新それぞれ)にするのは、次の場面だけです。
+  - 起動の失敗が2つ重なり、新しい読み込み器(`-I`で`PYTHON*`を読まない)が先に標準入出力の失敗で止まる場面。
+  - 書けるファイルの大きさのハードの上限が実行ファイルより小さく、新しい読み込み器が起動の前に止まる場面。
+  - U3(`hook`)・U7(閉じたfd)。
+- CIでは、新しい必須ジョブ`d2`と`d2-universal`で流します(`build.py d2`・`d2-universal`)。
+  - `d2`: Linux 2機種・`build`の後。直接の形と読み込み器を経た形のS2E・S2L・`check_d2.py`を流します。上限は150分です。
+  - `d2-universal`: Mac 2機種・`combine`の後。直接の形のS2EとS2Lだけを流します。上限は90分です。
+  - 上限は、内側の上限の和と準備の5分より長くしました。
 
 ## ソース入力の SHA256
 

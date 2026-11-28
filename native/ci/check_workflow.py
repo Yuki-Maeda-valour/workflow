@@ -74,6 +74,8 @@ def native_build_command(command):
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4a-rest-universal|r4a-rest)(?: |$)", command)
     # S2E(#470)の比較も、別のジョブ(s2e・s2e-universal)で流す。
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (s2e-universal|s2e)(?: |$)", command)
+    # D2(#542)の製品の実行ファイルでの比較も、別のジョブ(d2・d2-universal)で流す。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (d2-universal|d2)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -104,6 +106,8 @@ REQUIRED_NATIVE_JOBS = (
     "r4c-universal",
     "s2e",
     "s2e-universal",
+    "d2",
+    "d2-universal",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (
@@ -137,6 +141,15 @@ S2E_JOBS = (
 # 98 秒に対し 3.2 倍)、R4A の残りは Mac x86_64 298.8 秒 / Linux x86_64 117.1 秒 = 2.55 倍。手元の Mac の経路の模擬 326 秒に
 # 5.3〜7.9 倍を当てると 1 回約 29〜43 分(推測)。倍率の出典と見積りは native/ci/README.md の S2E の節。CI の実測で見直す。
 S2E_TIMEOUTS = {"s2e": 120, "s2e-universal": 60}
+# D2(#542)の製品の実行ファイルでの比較のジョブ。d2 は Linux の 2 機種(新しい読み込み器は memfd を使う)、d2-universal は Mac の 2 機種。
+D2_JOBS = (
+    ("d2", "d2", {"linux-x86_64", "linux-arm64"}, "build"),
+    ("d2-universal", "d2-universal", {"macos-x86_64", "macos-arm64"}, "combine"),
+)
+# 上限(分)は S3D の形: 内側の上限の和(S2E 50 分・読み込み器を経た形の S2E 30 分・S2L 30 分・D2 20 分。build.py の S2E_TIMEOUT・
+# D2_HELD_TIMEOUT・run の既定・D2_TIMEOUT)+ 準備(約 5 分)< ジョブの上限。d2 は 50 + 30 + 30 + 20 + 5 = 135 < 150 分、
+# d2-universal は 50 + 30 + 5 = 85 < 90 分(Mac は、読み込み器を経た形と D2 を流さない)。
+D2_TIMEOUTS = {"d2": 150, "d2-universal": 90}
 
 
 def check_native_required(document):
@@ -146,7 +159,7 @@ def check_native_required(document):
     jobs = document["jobs"]
     problems = [f"必須のジョブがありません: {name}" for name in REQUIRED_NATIVE_JOBS if name not in jobs]
     # 比較のジョブの一覧を足すときは、この並びに足す。
-    for name, subcommand, platforms, needs in (*COMPARISON_JOBS, *R4G_JOBS, *R4C_JOBS, *S2E_JOBS):
+    for name, subcommand, platforms, needs in (*COMPARISON_JOBS, *R4G_JOBS, *R4C_JOBS, *S2E_JOBS, *D2_JOBS):
         job = jobs.get(name)
         if not isinstance(job, dict):
             continue
@@ -242,6 +255,8 @@ def check_document(document):
         native_timeouts.update({"r4c": 30, "r4c-universal": 30})
         # S2E(#470)の比較も別のジョブ(s2e・s2e-universal)で流す。
         native_timeouts.update(S2E_TIMEOUTS)
+        # D2(#542)の製品の実行ファイルでの比較も別のジョブ(d2・d2-universal)で流す。
+        native_timeouts.update(D2_TIMEOUTS)
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -291,6 +306,8 @@ def check_document(document):
                                and native_build_command(step.get("run")) in R4A_REST_OPERATIONS]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in S2E_TIMEOUTS]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in D2_TIMEOUTS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):

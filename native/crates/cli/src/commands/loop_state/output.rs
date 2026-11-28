@@ -216,7 +216,8 @@ fn emit_to(
         let _ = err.write_all(text.as_bytes());
         code = 120;
     }
-    if err.flush().is_err() {
+    // 起動の後の2つ目の地域設定の警告が標準エラーのバッファに残っていれば、終わりの flush が失敗する(旧版の終了値120)。
+    if err.flush().is_err() || runtime.stderr_pending {
         code = 120;
     }
     code
@@ -239,6 +240,7 @@ mod tests {
             int_limit: 4300,
             unbuffered: false,
             stdout_terminal: false,
+            stderr_pending: false,
         };
         let mut diagnostic = Vec::new();
         assert_eq!(
@@ -275,5 +277,33 @@ mod tests {
         );
         assert!(diagnostic.starts_with(b"Traceback"));
         assert!(!diagnostic.windows(17).any(|s| s == b"Exception ignored"));
+    }
+    #[test]
+    fn a_legacy_locale_warning_left_in_the_stderr_buffer_ends_with_120() {
+        // D2(#542)の決めたことの8: 起動の後の2つ目の地域設定の警告を書けずにバッファへ残すと、成功でも終わりの flush で120。
+        let runtime = LegacyRuntime {
+            int_limit: 4300,
+            unbuffered: false,
+            stdout_terminal: false,
+            stderr_pending: true,
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(
+            emit_to(None, &runtime, b"abc\n", &[], 0, &mut out, &mut err, None),
+            120
+        );
+        assert_eq!(
+            (out.as_slice(), err.as_slice()),
+            (b"abc\n".as_slice(), b"".as_slice())
+        );
+        let runtime = LegacyRuntime {
+            stderr_pending: false,
+            ..runtime
+        };
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        assert_eq!(
+            emit_to(None, &runtime, b"abc\n", &[], 0, &mut out, &mut err, None),
+            0
+        );
     }
 }

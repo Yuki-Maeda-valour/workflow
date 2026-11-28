@@ -189,7 +189,7 @@ def arguments(fixture):
             check.verify_child_environment(env,{os.fsdecode(k):v for k,v in case['env'].items() if k.startswith(b'PYTHON')})
             check.start_case(case['label'])
             old=run([os.fsencode(sys.executable),b'-B',os.fsencode(LEGACY),*case['args']],env,root);check.record('old',old)
-            new=run([os.fsencode(fixture),*case['args']],env,root)
+            new=run([*map(os.fsencode,check.new_command(fixture)),*case['args']],env,root)
             check.remember(case['label'],old,new);equal(case['label'],old,new)
         assert before==[identity(p)for p in inputs], 'CLI_ARGUMENT_INPUT_CHANGED'
     return {'arguments':len(cases),'skipped':0,'os_boundaries':boundaries,'seconds':round(time.monotonic()-started,3)}
@@ -216,7 +216,7 @@ def terminals(fixture):
             import check_loop_state as check
             check.start_case(label)
             old=run_pty([sys.executable,'-B',str(LEGACY)],args,env,temporary,mode,width,'old '+label);check.record('old',old)
-            new=run_pty([str(fixture)],args,env,temporary,mode,width,'new '+label)
+            new=run_pty(check.new_command(fixture),args,env,temporary,mode,width,'new '+label)
             check.remember(label,old,new);equal(label,old,new)
             effective=80 if setting=='80' or mode=='stderr-pty' else width
             equal('PTY_FIXED_WIDTH_EXPECTATION',known[command,effective],old)

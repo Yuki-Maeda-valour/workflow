@@ -58,6 +58,91 @@ MAX_TOTAL = 64 * 1024 * 1024
 MAX_ENTRIES = 10000
 
 _GEN = None
+# D2(#542): 製品の実行ファイル(`check_s2e.py --product`)で比べるときの実行ファイル。設定すると、隠しの reader
+# コマンドのほかの Rust の起動を `<製品> environment-guard <引数>`(直接の形)にする。reader は検査専用の入口のまま。
+PRODUCT = None
+# D2(#542): 読み込み器を経た形(`check_s2e.py --product --form held`)。旧版は `loop.sh` の `py environment-run` と同じく
+# `( cd / && exec python3 -I -c "$PY_HELPER" environment-run <sha> <guard> … 7>&- )`、Rust は `loop.sh` の新しい読み込み器
+# (`NATIVE_LOADER`)を経た製品の `environment-guard-held`。字面は実行のたびに `loop.sh` から読む(`use_held`)。
+HELD = None
+LOOP_SH = ROOT / 'plugins/dev-workflow/skills/ship-task/scripts/loop.sh'
+LOADER_LINE = 'ERROR [environment-guard] 保持した検査用コピーを安全に実行できない\n'.encode()
+HOOK_DENY = (json.dumps({"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": {
+    "behavior": "deny", "message": "環境の保持値との照合に失敗"}}}) + '\n').encode()
+
+
+def loop_heredoc(text, name):
+    """`loop.sh` の `read -r -d '' <名前> <<'PY' || true` の本文(bash の `read` と同じく前後の空白・改行を除く)。"""
+    start = f"\nread -r -d '' {name} <<'PY' || true\n"
+    if text.count(start) != 1:
+        raise AssertionError(f'loop.sh に {name} の字面がちょうど 1 か所ない')
+    body, end, _ = text.split(start, 1)[1].partition('\nPY\n')
+    if not end:
+        raise AssertionError(f'loop.sh の {name} の終わりが無い')
+    return body.strip(' \t\n')
+
+
+def use_held(product):
+    """読み込み器を経た形で比べる。製品の SHA-256 を親が保持する値として渡す(Linux だけ。新しい読み込み器は memfd を使う)。"""
+    global HELD
+    if not IS_LINUX or SIMULATE_MAC:
+        raise AssertionError('読み込み器を経た形の比較は Linux だけで流す(新しい読み込み器は memfd を使う)')
+    text = LOOP_SH.read_text(encoding='utf-8')
+    HELD = {'helper': loop_heredoc(text, 'PY_HELPER'), 'loader': loop_heredoc(text, 'NATIVE_LOADER'),
+            'product': str(product), 'product_sha': sha256(Path(product).read_bytes())}
+
+
+def held_guard(args, trusted):
+    """読み込み器が照らす旧 guard のコピー。`loop.sh` は控えの隣のコピーを使う(`--state` が絶対パスなら、その隣)。
+    控えの無い `bootstrap` などは、配布物と同じバイト列の保持したコピー(`trusted`。入力の変更が届かない所)を使う。"""
+    args = [os.fsdecode(a) for a in args]
+    if '--state' in args and args.index('--state') + 1 < len(args):
+        state = args[args.index('--state') + 1]
+        if os.path.isabs(state):
+            return str(Path(state).parent / 'environment-guard.py')
+    return str(trusted)
+
+
+def held_old_argv(args, trusted):
+    return [sys.executable, '-I', '-c', HELD['helper'], 'environment-run', gen().OLD_GUARD_SHA256, held_guard(args, trusted), *args]
+
+
+def held_new_argv(args, trusted, env, signals='0000'):
+    names = {os.fsdecode(k): v for k, v in env.items()}
+    has = 'LC_CTYPE' in names
+    return [sys.executable, '-I', '-c', HELD['loader'], 'environment-guard-held', '1' if has else '0',
+            os_bytes(names['LC_CTYPE']) if has else '', signals, HELD['product_sha'], HELD['product'],
+            gen().OLD_GUARD_SHA256, held_guard(args, trusted), *args]
+
+
+def held_guard_intact(path):
+    """読み込み器が照らす旧 guard のコピーが、リンクを含まない通常ファイルで、保持した SHA-256 と同じか(違えば、旧新とも
+    読み込み器が起動の前に 1 行と終了 20 で止まる)。"""
+    try:
+        if os.path.realpath(path) != path or not stat.S_ISREG(os.lstat(path).st_mode):
+            return False
+        return sha256(Path(path).read_bytes()) == gen().OLD_GUARD_SHA256
+    except OSError:
+        return False
+
+
+def held_expected(command, code, stdout, stderr):
+    """直接の形の旧版の固定期待に、固定の読み込み器の変換を当てた値(終了 0 はそのまま。`hook` は拒否の JSON と終了 0。
+    `verify-pair` の `os._exit(20)`〈出力が `verified` だけで標準エラーが空〉はそのまま。ほかの 0 以外は 1 行を足して 20)。"""
+    if code == 0:
+        return code, stdout, stderr
+    if command == 'hook':
+        return 0, stdout + HOOK_DENY, stderr
+    if command == 'verify-pair' and code == 20 and not stderr:
+        return code, stdout, stderr
+    return 20, stdout, stderr + LOADER_LINE
+
+
+def new_argv(fixture, args):
+    """Rust の 9 コマンドの起動の列。`PRODUCT` があれば製品の `environment-guard`、無ければ検査専用の入口。"""
+    if PRODUCT is not None:
+        return [str(PRODUCT), 'environment-guard', *args]
+    return [str(fixture), *args]
 
 
 def gen():
@@ -669,6 +754,11 @@ class Flow:
             elsewhere.parent.mkdir()
             elsewhere.write_bytes(GUARD_BYTES())
             self.old_script_override = elsewhere
+        if HELD is not None:
+            # 読み込み器を経た形の旧版が、控えの無い起動で照らす guard の保持したコピー(入力の変更が届かない所)。
+            self.trusted = self.base / 'trusted' / 'environment-guard.py'
+            self.trusted.parent.mkdir()
+            self.trusted.write_bytes(GUARD_BYTES())
         (self.base / 'old_reader.py').write_text(OLD_READER)
         (self.base / 'old_patched.py').write_text(OLD_PATCHED)
         if SIMULATED_MAC_ONLY:
@@ -677,7 +767,14 @@ class Flow:
             (self.base / 'old_maclink.py').write_text(OLD_PATCHED.replace(REAL_ETC_LINE, f'real = {str(link)!r}'))
 
     # -- 起動
+    @property
+    def run_cwd(self):
+        """作業場所。読み込み器を経た形は、`loop.sh` と同じく `/`。"""
+        return '/' if HELD is not None else self.root
+
     def old_argv(self, args, patched=False):
+        if HELD is not None:
+            return held_old_argv(list(map(os_bytes, args)), self.trusted)
         if patched:
             return [sys.executable, '-B', str(self.base / 'old_patched.py'), str(self.guard), *map(os_bytes, args)]
         if SIMULATED_MAC_ONLY and self.mac_link and args and args[0] == 'bootstrap':
@@ -687,12 +784,14 @@ class Flow:
     def run_old(self, args, patched=False, env=None, script=None, fsize=None):
         argv = self.old_argv(args, patched)
         script = script if script is not None else getattr(self, 'old_script_override', None)
-        if script is not None:
+        if script is not None and HELD is None:
             argv[argv.index(str(self.guard))] = str(script)
-        return run_tool(argv, env=env or getattr(self, 'run_env', None) or self.env, cwd=self.root, fsize=fsize)
+        return run_tool(argv, env=env or getattr(self, 'run_env', None) or self.env, cwd=self.run_cwd, fsize=fsize)
 
     def run_new(self, args, env=None, fsize=None):
-        result = run_tool([str(self.fixture), *map(os_bytes, args)], env=env or getattr(self, 'run_env', None) or self.env, cwd=self.root, fsize=fsize)
+        env = env or getattr(self, 'run_env', None) or self.env
+        argv = held_new_argv(list(map(os_bytes, args)), self.trusted, env) if HELD is not None else new_argv(self.fixture, map(os_bytes, args))
+        result = run_tool(argv, env=env, cwd=self.run_cwd, fsize=fsize)
         if self.is_meaningful_rust_run(args):
             self.tally.rust_runs += 1
         return result
@@ -758,8 +857,10 @@ class Flow:
             if self.tool == 'both':
                 if self.case['name'].startswith('x-tilde-'):
                     self.tally.excluded.append(f'{self.case["name"]}: {U6_UNCONFIRMED}')
-                if self.case.get('no_readers_quiet'):
-                    pass   # read・exec・hook・verify-pair の流れ。reader は別の流れで比べる(比較から外した物ではない)
+                if self.case.get('no_readers_quiet') or HELD is not None:
+                    # read・exec・hook・verify-pair の流れ。reader は別の流れで比べる(比較から外した物ではない)。
+                    # 読み込み器を経た形の比較では、起動の形に依らない内部 reader を比べない(直接の形の比較で比べる)。
+                    pass
                 elif self.case.get('no_readers'):
                     reason = self.case.get('no_readers_reason')
                     if not reason:
@@ -809,6 +910,8 @@ class Flow:
                 else:
                     self.run_env[key] = value.replace('{r}', root) if isinstance(value, str) else value
         self.arm_race(run)
+        # 読み込み器を経た形: 手順を始める時点で、照らす旧 guard のコピーが保持値のままか(読み込み器は起動の最初に照らす)。
+        self.held_intact = HELD is None or held_guard_intact(held_guard(list(map(os_bytes, args)), self.trusted))
         self.step_index = index
         self.raced = bool(run.get('race'))
         if self.tool != 'both':
@@ -899,14 +1002,23 @@ class Flow:
         want = self.case.get('expect_old')
         if want and want['index'] == self.step_index:
             self.expect_checked = True
-        if want and want['index'] == self.step_index and (old.timed_out or (old.returncode, old.stdout, old.stderr) != (want['code'], b'', want['stderr'])):
+        expected = (want['code'], b'', want['stderr']) if want else None
+        if want and HELD is not None:
+            command = os.fsdecode(self.case['runs'][self.step_index]['args'][0] if isinstance(self.case['runs'][self.step_index], dict) else self.case['runs'][self.step_index][0])
+            expected = held_expected(command, *expected)
+        if want and want['index'] == self.step_index and (old.timed_out or (old.returncode, old.stdout, old.stderr) != expected):
             raise AssertionError(f'{label}: 旧版が決まった理由で止まらない(配置が変わった): 終了コード {old.returncode}・標準出力 {old.stdout[:100]!r}・'
                                  f'標準エラー {old.stderr[:300]!r}。期待: {want["code"]}・{want["stderr"]!r}')
 
     # -- read・exec・hook・verify-pair
-    def copy_argv(self, tool, args):
+    def copy_argv(self, tool, args, env=None):
+        if HELD is not None:
+            args = list(map(os_bytes, args))
+            if tool == 'new':
+                return held_new_argv(args, self.trusted, env or getattr(self, 'run_env', None) or self.env)
+            return held_old_argv(args, self.trusted)
         if tool == 'new':
-            return [str(self.fixture), *map(os_bytes, args)]
+            return new_argv(self.fixture, map(os_bytes, args))
         argv = self.old_argv(args)
         if args[0] == 'verify-pair':
             # verify-pair は、読み込み器が起動するのと同じ、控え `a` の隣の guard のコピーから起動する(旧版は自分の `__file__` を照らし直す。固定期待の生成と同じ)。
@@ -916,13 +1028,13 @@ class Flow:
     def copy_run(self, tool, args, run, between=None):
         """旧版か Rust の 1 回の実行。exec の子が書いた観測用のファイル(`probe` の下)を読んで消す。(結果, 観測用のファイルの正規化した値)を返す。"""
         probe = self.root / 'probe'
-        argv = self.copy_argv(tool, args)
         env = getattr(self, 'run_env', None) or self.env
+        argv = self.copy_argv(tool, args, env)
         spec = run.get('stdin')
         if spec is not None or args[0] == 'verify-pair':
-            result = run_with_stdin(argv, env=env, cwd=self.root, spec=spec or {}, between=between)
+            result = run_with_stdin(argv, env=env, cwd=self.run_cwd, spec=spec or {}, between=between)
         else:
-            result = run_tool(argv, env=env, cwd=self.root)
+            result = run_tool(argv, env=env, cwd=self.run_cwd)
         probes = {}
         if probe.is_dir():
             for name in sorted(os.listdir(probe)):
@@ -979,14 +1091,18 @@ class Flow:
             raise AssertionError(f'{label}: 時間切れ')
         if run.get('u3'):
             # U3: 旧版は判定器を実行し、Rust は確認の後に終了コード 20(R4P まで)。旧新それぞれの固定期待を別に確かめ、通常の一致に数えない。
-            if (old.returncode, old.stdout, old.stderr) != (7, b'hook-ran\n', b''):
+            # 読み込み器を経た形は、どちらも固定の読み込み器の変換(拒否の JSON と終了 0)を当てた値。
+            want_old, want_new = held_expected('hook', 7, b'hook-ran\n', b'') if HELD is not None else (7, b'hook-ran\n', b''), \
+                held_expected('hook', 20, b'', U3_NEW_STDERR) if HELD is not None else (20, b'', U3_NEW_STDERR)
+            if (old.returncode, old.stdout, old.stderr) != want_old:
                 raise AssertionError(f'{label}: U3 の旧版の固定期待と違う: {old.returncode} {old.stdout[:100]!r} {old.stderr[:200]!r}')
-            if (new.returncode, new.stdout, new.stderr) != (20, b'', U3_NEW_STDERR):
+            if (new.returncode, new.stdout, new.stderr) != want_new:
                 raise AssertionError(f'{label}: U3 の Rust の固定期待と違う: {new.returncode} {new.stdout[:100]!r} {new.stderr[:200]!r}')
             self.tally.approved += 1
-        elif run.get('uncaught'):
+        elif run.get('uncaught') and HELD is None:
             self.approved_u4(label, old, new)
         else:
+            # 読み込み器を経た形の捕まえない例外は、固定の読み込み器が捕まえて 1 行にするので、呼出履歴は出ない(通常の一致)。
             same_result(label, old, new)
             self.tally.runs += 1
         if old_probes != new_probes:
@@ -1030,7 +1146,23 @@ class Flow:
             return
         stdout = old.stdout.decode('latin-1').replace(root, '{r}')
         stdout = re.sub(gen().CMD_SHA_RE, '"sha256": "*"', stdout)
-        if run.get('uncaught'):
+        if HELD is not None:
+            # 読み込み器を経た形: 固定の読み込み器の変換を当てた値と比べる(捕まえない例外は、呼出履歴の代わりに 1 行だけ)。
+            # 照らす旧 guard のコピーを流れが変えた手順は、旧新とも読み込み器が起動の前に止まる(1 行と終了 20)。
+            command = os.fsdecode(run['args'][0])
+            if not self.held_intact:
+                code, want_stdout, want_stderr = 20, '', LOADER_LINE.decode()
+            elif run.get('uncaught'):
+                code, want_stdout, want_stderr = 20, want['stdout'], LOADER_LINE.decode()
+            else:
+                code, want_stdout, want_stderr = held_expected(command, want['code'], want['stdout'].encode('latin-1'),
+                                                               want.get('stderr', '').encode('utf-8'))
+                want_stdout, want_stderr = want_stdout.decode('latin-1'), want_stderr.decode('utf-8')
+            if run.get('ignore_stderr'):
+                ok = (old.returncode, stdout) == (code, want_stdout)
+            else:
+                ok = (old.returncode, stdout, text(old.stderr)) == (code, want_stdout, want_stderr)
+        elif run.get('uncaught'):
             last = text(old.stderr).strip().splitlines()[-1]
             ok = (old.returncode, stdout, last) == (want['code'], want['stdout'], want['stderr_last'])
         elif run.get('ignore_stderr'):
@@ -1835,7 +1967,7 @@ def run_sigint(command, fixture, tmp_parent, mode=None):
             else:
                 state = flow.root / 'out/a/environment.json'
                 args = ['verify', '--state', str(state), '--expect-sha256', flow.shas['a']]
-            argv = flow.old_argv(args) if tool == 'old' else [str(fixture), *args]
+            argv = flow.old_argv(args) if tool == 'old' else new_argv(fixture, args)
             before = tree_snapshot(flow.root, skip=('out',))
             before_out = tree_snapshot(flow.root / 'out/a') if command == 'verify' else None
             record = interrupted_run(flow, argv)
@@ -1926,6 +2058,59 @@ SLEEPER = "import os, sys, time\nwith open(sys.argv[1], 'w') as handle:\n    han
 HOOK_AFTER_VERIFY_REASON = ('hook-after-verify: verify の直後、判定器を読む前にコピーの判定器が書き換わる窓は、Rust の cfg(test) の差し込み点(site `hook-after-verify`)でだけ作れる'
                             '(製品の example の CLI からは作れない)。Rust の検査 copy_tests.rs(固定期待 copy_cases.json の流れ hook-after-verify)で確かめた')
 GO_TIMEOUT_MAC = {'100000001': '100000002'}   # Mac の go_timeout=100000001 は旧版でも揺れる境目(推測)。Mac は 100000000 以下と 100000002 以上を使う
+
+
+def locale_rows():
+    """D2(#542)の地域設定の比較の組: LC_ALL が無し・空なら LC_CTYPE × LANG(12 組 × 2)、空でなければ 1 組(3 組)。
+    それぞれに PYTHONCOERCECLOCALE の 4 つ(無し・0・1・warn)を掛ける(108 組)。"""
+    rows = []
+    for lc_all in (None, ''):
+        for lc_ctype in (None, 'C', 'POSIX', 'C.UTF-8'):
+            for lang in (None, 'C', 'POSIX'):
+                rows.append({'LC_ALL': lc_all, 'LC_CTYPE': lc_ctype, 'LANG': lang})
+    rows += [{'LC_ALL': value, 'LC_CTYPE': None, 'LANG': None} for value in ('C', 'POSIX', 'C.UTF-8')]
+    return [(row, coerce) for row in rows for coerce in (None, '0', '1', 'warn')]
+
+
+def run_locale_copy(fixture, tmp_parent):
+    """D2(#542)の決めたことの 8・Q6 の A: 直接の形で、子へ渡す LC_CTYPE(`exec` の bash の子が書いた環境の全体)と、
+    `PYTHONCOERCECLOCALE` の警告・終了コードを、108 組の地域設定で旧版と比べる(bash の子は自分で地域設定を書き換えない)。"""
+    g = gen()
+    flow = Flow({'name': 'x-locale-copy', 'layout': g.cp_layout(), 'runs': []}, fixture, tmp_parent)
+    seen = {'coerced': 0, 'warned': 0}
+    try:
+        flow.setup()
+        flow.bootstrap_pair('x-locale-copy#prepare', _bootstrap_args(flow.root, 'a'))
+        common = ['--state', str(flow.root / 'out/a/environment.json'), '--expect-sha256', flow.shas['a']]
+        bash = shutil.which('bash')
+        for index, (row, coerce) in enumerate(locale_rows()):
+            env = dict(flow.env)
+            for key, value in {**row, 'PYTHONCOERCECLOCALE': coerce}.items():
+                if value is None:
+                    env.pop(key, None)
+                else:
+                    env[key] = value
+            flow.run_env = env
+            label = f'x-locale-copy {row} PYTHONCOERCECLOCALE={coerce}'
+            args = ['exec', *common, '--path', 'scripts/probe.sh', '--', 'bash', f'{flow.root}/probe/locale{index}']
+            old, old_probes = flow.copy_run('old', args, {})
+            new, new_probes = flow.copy_run('new', args, {})
+            same_result(label, old, new)
+            if old_probes != new_probes or len(old_probes) != 1:
+                raise AssertionError(f'{label}: 子が書いた環境が旧新で違う\n旧: {old_probes!r}\n新: {new_probes!r}')
+            entries = next(iter(old_probes.values())).partition(b'\nenv\n')[2].split(b'\0')
+            # 書き換え先の名前は機種で違いうる(Mac は C.UTF-8 が無ければ UTF-8 など)ので、LC_CTYPE が付いたことだけを数える。
+            seen['coerced'] += any(entry.startswith(b'LC_CTYPE=') for entry in entries) and row['LC_CTYPE'] is None
+            seen['warned'] += b'Python detected LC_CTYPE=C' in old.stderr or b'Python runtime initialized' in old.stderr
+            flow.tally.runs += 1
+            flow.tally.readonly += 1
+        flow.run_env = None
+        if bash is None or not seen['coerced'] or not seen['warned']:
+            raise AssertionError(f'x-locale-copy: 書き換えか警告を観察した組が無い: {seen}')
+        flow.tally.notes.append(f'x-locale-copy: 子が書き換えた LC_CTYPE を受けた組 {seen["coerced"]}・警告が出た組 {seen["warned"]}(108 組)')
+        return flow.tally
+    finally:
+        flow.close()
 
 
 def copy_flow_cases():
@@ -2249,7 +2434,31 @@ def auto_mark(case, kind='both'):
     return ALL, ''
 
 
+# 読み込み器を経た形の比較(D2)で流す項目の群。読み込み器を経た形が直接の形と違うのは、`PYTHON*` を読まないこと・終了の変換・
+# 5 段深い呼出し・作業場所 `/`・読み込み器が先に照らす旧 guard のコピーだけなので、これらに当たる群を流す。出力の故障は
+# check_s2e.py の比較のケース(`output_failure_cases`)で流す。
+#   flow: 9 コマンドの流れ(変換・照合の失敗の止まり方)。copy: read・exec・hook・verify-pair の流れ(変換・hook の拒否・os._exit)。
+#   limit: 項目と読取りの上限の端(P10 の有限の上限。上限は観測 1 回ごとで、起動の形に依らないことを確かめる)。
+# 流さない群と理由(1 行ずつ):
+#   flow-deep: 呼出しが 5 段深いので、直接の形の境目の入力では境目が合わない。読み込み器を経た形の境目は check_d2.py の depth が比べる。
+#   extra: 旧版の起動の仕方(配布物の外の guard・guard の無い配布物)に依る入力を含む(U2)。本体の観測は直接の形の比較で比べる。
+#   race: 競合を差し込む点の一部(判定器を読む前の窓など)は cfg(test) と検査専用の入口にしか無い。本体の観測は直接の形の比較で比べる。
+#   signal: SIGINT の扱いは、読み込み器が受け継いだ扱いへ戻すので起動の形に依らない。読み込み器を経た形は check_d2.py の sigint が比べる。
+#   failure: RLIMIT_FSIZE は新しい読み込み器が先に memfd へ書くので、check_d2.py の fsize が 3 つの形で比べる。
+#   u1: 文字コードの設定による解釈(U1)は起動の形に依らない。u2: guard の出所(U2)は直接の形の bootstrap の差。
+#   u45: PYTHONUNBUFFERED・PYTHONINTMAXSTRDIGITS は、読み込み器を経た形では読まない(旧版は -I)。u7: 閉じた fd は check_d2.py の fds が比べる。
+#   locale: 地域設定は check_d2.py が 3 つの形で比べる。mac: Mac の経路の項目で、読み込み器を経た形は Linux だけ。
+#   内部 reader の値: 起動の形に依らない(直接の形の比較で比べる。flow の中の reader の比較も流さない)。
+HELD_GROUPS = ('flow', 'copy', 'limit')
+
+
 def items(fixture):
+    if HELD is not None:
+        return [item for item in direct_items(fixture) if item.group in HELD_GROUPS]
+    return direct_items(fixture)
+
+
+def direct_items(fixture):
     g = gen()
     result = []
 
@@ -2288,6 +2497,7 @@ def items(fixture):
                        'locale の名前が機種で違う(Mac の旧版の標準出力の errors は C.UTF-8 の有無で決まる)。CI の Linux で locale を確かめて固定する(Mac では未確認)'))
     result.append(Item('mac', 'default-watch-bootstrap', ALL, lambda tmp: run_mac_default(fixture, tmp)))
     result.append(Item('mac', 'patched-bootstrap-sample', ALL, lambda tmp: run_patched_sample(fixture, tmp)))
+    result.append(Item('locale', 'x-locale-copy', ALL, lambda tmp: run_locale_copy(fixture, tmp)))
     return result
 
 

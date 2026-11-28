@@ -1,4 +1,4 @@
-//! S2L開発用入口。製品登録・配布には接続しない。
+//! S2L(#468)の入口。D2(#542)で製品の登録表(`dev-workflow loop-state`)につないだ。
 mod args;
 mod budget;
 mod compare;
@@ -32,12 +32,26 @@ mod walk_recursion;
 mod walk_regex;
 use std::ffi::OsString;
 pub fn main(args: &[OsString]) -> u8 {
-    // 旧CPythonの起動時の信号の初期化(SIGXFSZ を無視・SIGINT は既定のときだけ受ける)。
-    dev_workflow_platform::loop_state::signal::startup();
-    let runtime = match runtime::LegacyRuntime::from_environment() {
+    use dev_workflow_platform::environment_guard as locale;
+    // 旧CPythonの起動の最初の地域設定(PEP 538。`PYTHONCOERCECLOCALE`を読む)。1つ目の警告は、信号の初期化の前に、
+    // 受け継いだ`SIGPIPE`の扱いで標準エラーへ直接書く(D2の決めたことの8・Q6のA)。
+    let coercion = locale::coerce_c_locale_reading_setting();
+    if let Some(warning) = &coercion.coercion_warning {
+        locale::write_before_signal_setup(warning.as_bytes());
+    }
+    // 旧CPythonの起動時の信号の初期化(SIGXFSZ を無視・SIGINT は既定のときだけ受ける)は、設定の段階の検査の後、
+    // 標準入出力の検査の前に行う(旧版と同じ位置。設定の段階の失敗の診断は、受け継いだ SIGXFSZ の扱いで書く)。
+    let mut runtime = match runtime::LegacyRuntime::from_environment_with(|| {
+        dev_workflow_platform::loop_state::signal::startup();
+    }) {
         Ok(v) => v,
-        Err(runtime::StartupFailure(raw)) => return emit_startup(&raw),
+        Err(runtime::StartupFailure(raw, config)) => return emit_startup(&raw, config),
     };
+    if coercion.legacy_warning {
+        // 2つ目の警告: 起動の検査の後、`SIGPIPE`を無視にした後に`sys.stderr`へ書く。書けなければ C の標準エラーへ
+        // 書き直す(失敗は捨てる)。バッファを使うときは書けなかった分が残り、終わりの flush が失敗して終了値120になる。
+        runtime.stderr_pending = !write_legacy_warning() && !runtime.unbuffered;
+    }
     let args = match args::parse(args, runtime.int_limit) {
         Ok(v) => v,
         Err(out) => return output::emit(None, &runtime, &out.stdout, &out.stderr, out.code, None),
@@ -133,9 +147,25 @@ fn run(
     }
     Ok(0)
 }
-fn emit_startup(raw: &[u8]) -> u8 {
+fn emit_startup(raw: &[u8], config: bool) -> u8 {
     use std::io::Write;
+    if config {
+        // 設定の段階の失敗: 旧CPythonは`SIGPIPE`を無視にする前に書く(受け継いだ扱いが既定なら、読む側の閉じたパイプで信号13)。
+        dev_workflow_platform::environment_guard::write_before_signal_setup(raw);
+        return 1;
+    }
     // 標準エラーがディレクトリなら書けない。旧版と同じく失敗を無視して終了値1にする。
     let _ = dev_workflow_platform::loop_state::RawOutput::Stderr(std::io::stderr()).write_all(raw);
     1
+}
+/// 2つ目の地域設定の警告を標準エラーへ書く。書けたら真。書けなければ、もう1回だけ書く(旧版の`fputs`。失敗は捨てる)。
+fn write_legacy_warning() -> bool {
+    use std::io::Write;
+    let text = dev_workflow_platform::environment_guard::LEGACY_LOCALE_WARNING.as_bytes();
+    let mut stderr = dev_workflow_platform::loop_state::RawOutput::Stderr(std::io::stderr());
+    if stderr.write_all(text).is_ok() {
+        return true;
+    }
+    let _ = stderr.write_all(text);
+    false
 }

@@ -2,12 +2,16 @@
 
 mod commands;
 
+// 受け継いだ`SIGPIPE`の扱いを`main`より前に控える(D2・#542のQ2のA)。`loop-state`・`environment-guard`の設定の段階の失敗と
+// 1つ目の地域設定の警告は、旧Pythonと同じく受け継いだ扱いで書く。`main`の前の処理は扱いを読むだけで、書き込みも確保もしない。
+dev_workflow_platform::s2e_record_startup_state!();
+
 use dev_workflow_core::{
     CommandError, CommandIo, CommandOutput, CommandResult, build_info, execute,
 };
 use std::ffi::OsString;
 
-const HELP: &str = "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n  dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]\n";
+const HELP: &str = "使い方:\n  dev-workflow --version\n  dev-workflow --help\n  dev-workflow probe --json\n  dev-workflow probe --self-sha256\n  dev-workflow resolve-task-dir --project-root ROOT [--task-dir PATH]\n  dev-workflow loop-state COMMAND [ARGS...]\n  dev-workflow environment-guard COMMAND [ARGS...]\n  dev-workflow environment-guard-held COMMAND [ARGS...]\n";
 
 fn main() -> std::process::ExitCode {
     let args = std::env::args_os().skip(1).collect::<Vec<_>>();
@@ -113,6 +117,27 @@ mod tests {
         );
     }
 
+    fn stand_in_code(name: &str) -> ExitCode {
+        let output = run(&[name.into(), "argument".into()]);
+        assert!(output.stdout.is_empty() && output.stderr.is_empty());
+        output.code
+    }
+
+    #[test]
+    fn the_direct_environment_guard_reaches_the_direct_form() {
+        assert_eq!(stand_in_code("environment-guard"), ExitCode::new(200));
+    }
+
+    #[test]
+    fn the_held_environment_guard_reaches_the_held_form() {
+        assert_eq!(stand_in_code("environment-guard-held"), ExitCode::new(201));
+    }
+
+    #[test]
+    fn loop_state_reaches_the_loop_state_entry() {
+        assert_eq!(stand_in_code("loop-state"), ExitCode::new(202));
+    }
+
     #[test]
     fn registered_commands_receive_arguments_and_the_same_io() {
         let commands = [commands::Command {
@@ -143,7 +168,13 @@ mod tests {
                 .iter()
                 .map(|command| command.name)
                 .collect::<Vec<_>>(),
-            ["probe", "resolve-task-dir"]
+            [
+                "probe",
+                "resolve-task-dir",
+                "loop-state",
+                "environment-guard",
+                "environment-guard-held"
+            ]
         );
     }
 }

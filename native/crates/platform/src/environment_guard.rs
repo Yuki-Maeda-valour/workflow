@@ -494,8 +494,9 @@ pub unsafe extern "C" fn capture_inherited_sigpipe() {
 ///
 /// 展開した側のcrateに`#[used]`と`#[unsafe(link_section)]`の`static`が生まれる
 /// (外部のマクロの展開なので、展開した側の`#![forbid(unsafe_code)]`には当たらない)。
-/// 展開してよいのは、検査専用の入口`examples/s2e_contract.rs`の1か所と、このモジュールの`#[cfg(test)]`のテストだけ。
-/// 製品の実行ファイル(`dev-workflow`)では展開しない。そのため、製品は`main`より前に何も走らせない。
+/// 展開してよいのは、検査専用の入口`examples/s2e_contract.rs`・`examples/loop_state_fixture.rs`と、製品の入口`src/main.rs`
+/// (D2・#542のQ2のA。製品へ`loop-state`・`environment-guard`を登録したため)の3か所と、このモジュールの`#[cfg(test)]`のテストだけ。
+/// `main`より前に走るのは、受け継いだ`SIGPIPE`の扱いを読む[`capture_inherited_sigpipe`]だけで、書き込みも確保もしない。
 ///
 /// 登録先は、Linuxが`.init_array`、Macが`__DATA,__mod_init_func`。ローダーが`main`より前に1回だけ呼ぶ。
 /// 対応外のOSでは、何も登録しない(`compile_error!`にしない)。S2Eの設計は、控えが無い機種を
@@ -785,6 +786,98 @@ pub fn process_environ() -> Vec<(Vec<u8>, Vec<u8>)> {
 /// `process_environ`の前に、部品の開始時に1回だけ呼ぶ。
 pub fn coerce_c_locale() -> bool {
     crate::restore_taskmd::coerce_c_locale()
+}
+
+/// 旧Python 3.10の起動の地域設定(PEP 538)のうち、`PYTHONCOERCECLOCALE`を読む起動の結果(D2の決めたことの8・Q6のA)。
+/// S2Eの直接の形(`python3 -B <guard>`)とS2L(`python3 loop-state.py`)が使う。読み込み器を経た形は`-I`なので
+/// [`coerce_c_locale`]を使い、この設定を読まない。
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LocaleStartup {
+    /// 1つ目の警告(`PYTHONCOERCECLOCALE=warn`で`LC_CTYPE`を書き換えたとき)。旧Pythonは`SIGPIPE`を無視にする前に、
+    /// `fprintf(stderr, …)`で書く([`write_before_signal_setup`])。
+    pub coercion_warning: Option<String>,
+    /// 2つ目の警告([`LEGACY_LOCALE_WARNING`])を出すか。旧Pythonは起動の検査の後に`sys.stderr`へ書く。
+    pub legacy_warning: bool,
+}
+
+/// 2つ目の警告の文(旧Python 3.10の`_C_LOCALE_WARNING`)。
+pub const LEGACY_LOCALE_WARNING: &str = "Python runtime initialized with LC_CTYPE=C (a locale with default ASCII encoding), which may cause Unicode compatibility problems. Using C.UTF-8, C.utf8, or UTF-8 (if available) as alternative Unicode-compatible locales is recommended.\n";
+
+/// `PYTHONCOERCECLOCALE`を読んで、旧Python 3.10と同じく`LC_CTYPE`を書き換え、出す警告を返す。
+///
+/// - `0`なら書き換えも警告もしない。`warn`なら、書き換えたときに1つ目の警告、書き換えずに地域設定がCのままなら2つ目の警告。
+///   ほかの値(と無し・空)は、警告を出さずに書き換える(`preconfig_init_coerce_c_locale`)。
+/// - 書き換えの判定と名前は[`coerce_c_locale`]と同じ(環境変数だけで決まる場合の再現。2026-11-12 08:55の決定)。
+/// - 2つ目の警告の「Cのまま」(`_Py_LegacyLocaleDetected(1)`): Linuxは環境変数で決める(`LC_ALL`・`LC_CTYPE`・`LANG`の順の
+///   最初の空でない名前が無いか`C`・`POSIX`)。入っている地域設定で決まる名前は警告を出さない(08:55の決定が認める差)。
+///   Macは旧Pythonと同じlibcの`setlocale`で決める(`POSIX`を`C`と同じに扱わない)。
+///
+/// 部品の開始時に1回だけ、ほかのスレッドが無い時に呼ぶ。
+pub fn coerce_c_locale_reading_setting() -> LocaleStartup {
+    let nonempty = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    let setting = nonempty("PYTHONCOERCECLOCALE");
+    if setting.as_deref() == Some(std::ffi::OsStr::new("0")) {
+        return LocaleStartup::default();
+    }
+    let warn = setting.as_deref() == Some(std::ffi::OsStr::new("warn"));
+    let coerced = coerce_c_locale();
+    let coercion_warning = (warn && coerced).then(|| {
+        let name = std::env::var_os("LC_CTYPE").unwrap_or_default();
+        format!(
+            "Python detected LC_CTYPE=C: LC_CTYPE coerced to {} (set another locale or PYTHONCOERCECLOCALE=0 to disable this locale coercion behavior).\n",
+            name.to_string_lossy()
+        )
+    });
+    LocaleStartup {
+        coercion_warning,
+        legacy_warning: warn && !coerced && ctype_is_c_locale(),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn ctype_is_c_locale() -> bool {
+    let nonempty = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
+    match nonempty("LC_ALL")
+        .or_else(|| nonempty("LC_CTYPE"))
+        .or_else(|| nonempty("LANG"))
+    {
+        None => true,
+        Some(name) => name == "C" || name == "POSIX",
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn ctype_is_c_locale() -> bool {
+    use std::ffi::CStr;
+    // SAFETY: 部品の開始時(ほかのスレッドが無い時)だけ呼ぶ。setlocaleが返す文字列は、次のsetlocaleまで有効なので、
+    // すぐ複製するか比べ終える。最後に元の地域設定へ戻す(プロセスの地域設定は子の環境に影響しない)。
+    unsafe {
+        let old = libc::setlocale(libc::LC_CTYPE, std::ptr::null());
+        if old.is_null() {
+            return false;
+        }
+        let old = CStr::from_ptr(old).to_owned();
+        libc::setlocale(libc::LC_CTYPE, c"".as_ptr());
+        let current = libc::setlocale(libc::LC_CTYPE, std::ptr::null());
+        let legacy = !current.is_null() && CStr::from_ptr(current) == c"C";
+        libc::setlocale(libc::LC_CTYPE, old.as_ptr());
+        legacy
+    }
+}
+
+/// 旧Pythonが`SIGPIPE`を無視にする前に標準エラーへ直接書く物(1つ目の警告と、設定の段階の失敗の診断)を書く。
+/// `main`の前に控えた受け継いだ扱い([`inherited_sigpipe`])が無視でなければ既定へ戻して書き、書いた後は無視へ戻す
+/// (読む側の閉じたパイプなら、受け継いだ扱いが既定のときは信号13で終わる。旧版と同じ)。書込みの失敗は捨てる(`fprintf`)。
+pub fn write_before_signal_setup(text: &[u8]) {
+    use std::io::Write;
+    let restore = inherited_sigpipe() != Some(Disposition::Ignore);
+    if restore {
+        let _ = signal_set_default(SIGPIPE);
+    }
+    let _ = std::io::stderr().write_all(text);
+    if restore {
+        let _ = ignore_signal(SIGPIPE);
+    }
 }
 
 pub struct SpawnSpec<'a> {

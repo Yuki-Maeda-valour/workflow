@@ -810,7 +810,7 @@ def startup_markers_in_code(text,markers):
 
 
 class LoaderInitializer(unittest.TestCase):
-    """main前の処理は開発用exampleだけに置き、製品が使うplatformには置かない。"""
+    """S3Dのmain前の処理は開発用exampleだけに置き、製品が使うplatformには置かない(外す名前はファイルごとに理由を書く)。"""
     def test_only_the_example_registers_startup_state(self):
         native=Path(__file__).resolve().parents[1]
         markers=('.init_array','__mod_init_func','link_section')
@@ -819,7 +819,9 @@ class LoaderInitializer(unittest.TestCase):
         # R4E(#482)のr4e.rsは、cfg(test)のテストの実行ファイルだけに印を置く。
         # R4G(#479)のr4g/startup.rsは、検査専用入口examples/r4g_contract.rsが展開するマクロの中に印を置く。
         # いずれも製品のdev-workflowには入らない。ほかのplatformのファイルは今までどおり確かめる。
-        # S2E(#470)のenvironment_guard.rsは、検査専用入口examples/s2e_contract.rsが展開するマクロの中とplatformのテストにだけ印を置く。製品のdev-workflowには入らない。
+        # S2E(#470)のenvironment_guard.rsは、マクロs2e_record_startup_state!の中とplatformのテストにだけ印を置く。
+        # D2(#542)から、このマクロは検査専用入口(examples/s2e_contract.rs・loop_state_fixture.rs)と製品の入口src/main.rsが展開する
+        # (受け継いだSIGPIPEの扱いを読むだけ。#542のQ2のA)。S3Dのremember_startup_stateは、今までどおり製品のソースに入れない(下の検査)。
         excluded={'r4e.rs','r4g/startup.rs','environment_guard.rs'}
         seen=set()
         for path in sorted(source.rglob('*.rs')):
