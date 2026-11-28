@@ -1,0 +1,8 @@
+{
+ "name": "m-err-line",
+ "group": "想定外の失敗",
+ "about": "ERR の罠の行番号を 1 ずらす(390 行の dirname を 391 行にする)",
+ "file": "native/crates/cli/src/commands/implement_agent/sites.rs",
+ "old": "pub const DIRNAME: Site = site(\"dirname\", 390,",
+ "new": "pub const DIRNAME: Site = site(\"dirname\", 391,"
+}

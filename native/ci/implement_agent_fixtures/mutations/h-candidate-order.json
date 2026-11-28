@@ -1,0 +1,8 @@
+{
+ "name": "h-candidate-order",
+ "group": "候補の解決の始め",
+ "about": "候補の飛ばし方の順を変える(.cache を .local/state より先に試す)",
+ "file": "native/crates/cli/src/commands/implement_agent/state.rs",
+ "old": "        [home.as_slice(), b\"/.local/state\"].concat(),\n        [home.as_slice(), b\"/.cache\"].concat(),",
+ "new": "        [home.as_slice(), b\"/.cache\"].concat(),\n        [home.as_slice(), b\"/.local/state\"].concat(),"
+}

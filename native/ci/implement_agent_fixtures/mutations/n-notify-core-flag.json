@@ -1,0 +1,8 @@
+{
+ "name": "n-notify-core-flag",
+ "group": "書き込みの故障",
+ "about": "launch::notify の「(core dumped) 」を付ける条件を逆にする(core を残さずに死んだ子の知らせに付ける)",
+ "file": "native/crates/cli/src/commands/implement_agent/launch.rs",
+ "old": "    if core {\n        text.extend_from_slice(b\"(core dumped) \");",
+ "new": "    if !core {\n        text.extend_from_slice(b\"(core dumped) \");"
+}

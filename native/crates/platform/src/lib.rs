@@ -41,3 +41,6 @@ pub mod adopt_candidate;
 
 /// S2E専用のenvironment-guardのOSの操作。
 pub mod environment_guard;
+
+/// R4X-1専用のimplement-agentの検査専用入口のOSの操作。
+pub mod implement_agent;

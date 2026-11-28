@@ -1,0 +1,8 @@
+{
+ "name": "c-dash-no-grep",
+ "group": "プロンプトのファイル",
+ "about": "`-` で始まるパスで grep を起動しない(Rust がファイルを読む)",
+ "file": "native/crates/cli/src/commands/implement_agent/args.rs",
+ "old": "    let launched = path.first() == Some(&b'-');",
+ "new": "    let launched = false;"
+}

@@ -2391,6 +2391,102 @@ Linuxだけにした項目(`check_s2e.py`の`EXPECTED_LINUX_ONLY`)は36件で、
 Macの実機のCIで確かめることは、[CI入口の説明](../native/ci/README.md#s2eの必須比較と検査用実行物)の末尾の一覧にある。
 APIは [native/README.md](../native/README.md#environment-guardの環境照合s2e)、比較の流し方と件数は [testing.md](testing.md#s2eの比較)に記す。
 
+### implement-agentの引数の検査の区間(R4X-1)
+
+[Issue #545](https://github.com/Yuki-Maeda-valour/workflow/issues/545)で、`plugins/dev-workflow/skills/do-task/scripts/implement-agent.sh`(以下「旧版」。sha256 `9486ca0790125567e44f047fbfe2b7db062fe63ef2145fb753f817a814891f58`)の1〜714行と、保護領域の候補が1つも残らないときの725行を、開発用Rustソースへ移した。
+開発中で未配布である。製品CLIの登録表・help・既存の呼出元・`plugins/` の下・版・`CHANGELOG.md` は変えていない。配布は段階1b・プラグインv4.53.0のまま。
+残りは R4X-2〜R4X-5(保護領域の作成から後・`review-agent.sh`)で、この単位の PR を merge した後に Issue にする。
+
+- 検査専用入口 `implement_agent_contract`(cargoのexample)だけが呼ぶ。部品は `native/crates/cli/src/commands/implement_agent/`、OS の呼出しは `native/crates/platform/src/implement_agent.rs` にある。
+- 境界: 引数の検査を通り、保護領域の最初の候補 `<cand>`(715行の `mkdir -p` の手前)まで進んだら、stderr に `ERROR [r4x-1-boundary] 保護領域の候補 <cand> の mkdir から後は R4X-2 で移す` の1行を出し、EXIT の罠と同じ後始末をして終了値99で終わる。
+  - 99は旧版のどの終わり方にも無い(S3I-A と同じ値)。境界の行の書き込みに失敗しても終了値は99のままである。
+  - 境界での順は、止め所の呼び返し → 罠のある信号を受けていれば `on_signal`(境界の行は出さない) → 受けていなければ境界の行と終了値99である。
+- 製品の入口には止め所の呼び返しを渡さない(何もしない)。比較のための操作は、example だけが受ける先頭の隠しの引数で有効にする(R4G の `--r4g-clock` と同じ形)。
+  - `--r4x1-stop <フォルダ>`: フォルダの `point` に書いた止め所で、`stop-<地点>` の印を書いてから、フォルダの `fifo` の1バイトの合図を待つ。フォルダが使えなければ `ERROR [r4x-1-stop] <理由>` と終了値2。
+  - 隠しの引数は、この1つだけである。先頭でない所の `--r4x1-stop` は、旧版と同じく不明な引数として扱う。
+- 390・391行の道具の Rust の再現は、隠しの引数を使わずに確かめる。
+  - 基準の容器で本物の `dirname`・`basename` を流して測った結果を、固定期待 `native/ci/implement_agent_fixtures/tool_outputs.json`(594件)にした。
+  - Rust の単体テスト(`tests.rs` の `tools_match_the_measured_gnu_outputs`)が、固定期待の訳から作った翻訳ファイルで、Rust の再現と照らす(540件)。道具を起動しないので、全 OS で流れる。残りの54件は `ja_JP.eucJP` の地域設定で、決定の表の (2) のとおり Rust が道具を起動する。
+  - 比較器の範囲 full は、基準の容器で本物の道具をもう一度流し、固定期待が今も出ることを確かめる(合わなければ失敗)。
+
+#### 維持する契約
+
+- 終了値: 2(usage)・20(internal。ERR の罠・`--cwd` の実体を解けない・候補が1つも残らない)・143・129・130(罠を張った後の TERM・HUP・INT)・1(中止の処理の中の書き込みの失敗)と、信号で終わる場合(罠を張る前の TERM・HUP と、コマンド置換の地点の INT と、既定の SIGPIPE・SIGXFSZ。どれも EXIT の罠を走らせてから、その信号で終わる)。
+- stdout: 旧版の道具が stdout へ出す物だけ(`-` で始まるプロンプトのパスの `grep --help` など)。
+- stderr: `ERROR [<理由コード>] <説明>` の行・使い方(旧版の2〜98行のコピー `usage.txt`)・bash の文(起動時の警告・書き込みの誤り・`[` の誤り・cwd の誤り・ジョブの知らせ)・旧版の地点で道具が出す文(`dirname`・`basename` の誤りと、その訳)。
+- ファイル: この区間で旧版はファイルを作らない。
+- bash の実行時の再現(S3I-A の部品をコピーして、`implement-agent.sh` の罠の時点に合わせた):
+  - 罠の時点は3つ: 起動(152行の前)・EXIT の罠の後(152行。bash は終わりの信号に処理を置く)・TERM・HUP・INT の罠の後(517〜519行)。起動時に無視されていた信号には罠を張らない。
+  - EXIT の罠の後に EXIT の罠を走らせてから、その信号で終わる信号は、bash 5.2.21 の `sig.c` の終わりの信号の表(`terminating_signals`)に合わせた。
+    - Linux: SIGHUP・SIGINT・SIGILL・SIGTRAP・SIGABRT・SIGFPE・SIGBUS・SIGSEGV・SIGSYS・SIGPIPE・SIGALRM・SIGTERM・SIGXCPU・SIGXFSZ・SIGVTALRM・SIGUSR1・SIGUSR2。Mac は SIGEMT も入る。
+    - SIGPROF は表の中で `#if 0` なので入らない(EXIT の罠を走らせずに既定で終わる)。表は `platform/src/implement_agent.rs` の `TERMINATING_SIGNALS`(罠の3つを除く)にあり、単体テストが中身を確かめる。
+  - 起動したときに、bash と同じく、自分の SIGQUIT を無視にし、SIGCHLD を既定に戻す(bash は自分には `sigchld_handler` を置く)。起動する子には、exec の前に、受け継いだ扱い(無視されていた SIGCHLD・SIGQUIT は無視のまま)を戻す。
+  - `trap - TERM HUP INT ERR`(中止の処理)の後に同じ信号をもう一度受けると、bash は EXIT の罠を走らせてから、その信号で終わる。Rust も、罠を外した後に受けた信号を記録し、同じ順で終わる。
+  - ERR の罠(`on_err`)の行は、旧版の同じ失敗の場所の行番号を出す。表は `sites.rs` にあり、単体テストが旧版のその行の字面を確かめる。
+  - 組み込みの `echo` の書き込みの失敗の文と glibc 2.39 の溜め方、使い方を出す2つの `sed` の終わり方(4・141・153)を合わせる。
+  - 起動時の `PWD`・`OLDPWD` の取り込み、`shell-init`・`job-working-directory`・`SHLVL`・`BASH_XTRACEFD`・範囲の外の `BASH_COMPAT`・setlocale の警告の文と順を合わせる。
+  - 352行の一時的な `LC_ALL=C` を戻すときの setlocale の警告(行354)と、起動した `grep` が信号で死んだときのジョブの知らせの行(`%5d` の pid・24桁の詰め・`(core dumped) `)を合わせる。
+- 論理の cwd を値として持ち、論理の `cd`(`-L`・`-P`・`-e`・`--`・`-`・`HOME`・`OLDPWD`・字面のまま移り直す)と `pwd -P` と 699行の `real_dir` を再現する。Rust は実際の cwd を移さない。
+- 道具の文の地域設定: gettext の選び方(`LANGUAGE`・`LC_ALL`・`LC_MESSAGES`・`LANG`・`LOCPATH`。`C`・`POSIX`・`C.UTF-8` では `LANGUAGE` を見ない)と、翻訳ファイル(`coreutils.mo`・`libc.mo`)を実行時に読む。探す順は `/usr/share/locale` の全部の形、次に `/usr/share/locale-langpack` の全部の形である(基準の容器で strace で確かめた)。ASCII の地域設定では、ASCII で表せない字を1字ずつ `?` にする。
+- `dirname`・`basename` は GNU coreutils 9.4 と glibc 2.39 の `getopt_long` の規則(短縮・`=値`・`--help`・`--version` の出力・誤りの文と訳)で Rust が作る。
+- bash が子へ渡す環境(352行の `grep` と、決定の表の (2) の `dirname`・`basename`): S3I-A の `childenv` と同じ規則で、表は `implement-agent.sh` 用に作った。`set +o posix` で外れる `POSIXLY_CORRECT` と `unset` した `CDPATH` は渡さない。配列(`CMD`・`WRITE_TOKENS`・`PROBE_TOKENS`)は渡さない。`LOG_SWAP_PY` は受け継いだ値をそのまま渡す。`_` に起動したパスを足す。
+
+#### 当てた決定と、道具を起動する2つの場合
+
+設計(Issue #545)の「旧版との差と、決定の当て方」の表の行だけを当てた。表に無い差は認めていない。
+
+- 旧版の実行環境のパス(2026-11-11 17:58・21:35): bash の文の先頭の呼出名は固定名 `implement-agent.sh`、起動時の警告の先頭は固定名 `bash`。
+- 途中で切れる出力(22:26・22:38): 比較器は、置き換えた故障の無い旧版の出力で3つの場合に分ける。
+- bash の実行環境(22:31)と追加の決定3(09:58): bash 自身の行は英語。`BASH_ENV` などの効果は再現せず、比較の入力に使わない(`native/ci/implement_agent_fixtures/excluded_env.json`)。
+- 旧版の地域設定での bash 自身の行(22:31): 比較器が `bash.mo`・`libc.mo` から作った表で英語へ戻してから比べる(行番号の「1 行:」と「行 1:」の2つの形・ジョブの知らせの詰めの計算し直し・EUC-JP の行を含む)。
+- 外部の道具(23:19): Rust は `sed`・`timeout`・`gtimeout`・`python3` を起動しない。`timeout -k 1 1 true` の確かめ(472〜477行)は、この区間では結果を使わないので行わない。道具が PATH に無い・GNU でない・壊れているときの差は認める。
+- 道具を起動する2つの場合(23:19 の「Rust の中で同じ結果を作れないもの」):
+  1. `-` で始まるプロンプトのパス: `grep -q '[^[:space:]]' <パス>` を、bash と同じ PATH の探し方・bash が子へ渡す環境(`LC_ALL=C` を足す)・stdin と stdout を受け継ぎ stderr を `/dev/null` で起動する。ほかのパスは Rust がファイルを読み、NUL と C の地域設定の空白6文字のほかのバイトがあるかを見る。
+  2. `LC_CTYPE` の文字コードの名前が `UTF-8` でも `ANSI_X3.4-1968` でもない地域設定(と、訳が UTF-8 でない翻訳ファイルにあるとき): 390・391行の `dirname`・`basename` を起動して、その stdout・stderr・終了値を使う(R4X-2 の `mktemp` も同じ当て方にする)。
+  - exec の前に、受け継いだ信号の扱いと止め(`SIGCHLD` を除く)へ戻す。exec に失敗したら 126・127 として扱う。
+- 道具の版(00:35): 基準は Ubuntu 24.04(bash 5.2.21・coreutils 9.4・sed 4.9・grep 3.11・glibc 2.39)。翻訳の包みは、在ることを確かめて記録するだけにする。
+- 競り合いと順序を決めない流し方(06:58 の追加の決定2): 信号は、旧版も Rust も同じ止め所で止めて送り、全部を比べる。止め所ごとに旧版を何回も流し(比較器の段「止め所の揺れ」)、揺れが無いことを確かめた(揺れた地点は無かった)。
+- 起動時に閉じた標準の fd(08:55): Rust の標準の初期化をそのまま使い、旧版と Rust をそれぞれの固定期待(`closed_fds.json`。20件)で確かめる。
+- bash の ERR の表示と書き出しの失敗の文(08:55): C の地域設定の errno の文は R4R の `restore_taskmd::errno_text` の表を使う。
+- 記憶域の不足・処理系の資源の上限(00:28・00:42): 比較の前提の外。`RLIMIT_FSIZE` による書き込みの故障は比べる。core_pattern がファイル名なら、比較器は core を残しうるケースで `RLIMIT_CORE` を0にする。
+- 自分自身を指すパス(22:31): 比較器はこの形の入力を持たない。
+- 子の環境に処理系が足す値(02:41)・旧スクリプトの内部の変数と同じ名前(14:24): 上の「維持する契約」の子の環境のとおり。
+
+#### 止め所
+
+| 地点 | 旧版の行 | 罠 | 地点の種類 | 罠の無い信号の扱い(基準の容器で測った) |
+|---|---|---|---|---|
+| `grep` の後 | 352 | 張る前 | 前面の子を待つ | TERM・HUP は子を待たずに EXIT の罠の後にその信号で終わる。INT は子が普通に終われば続く |
+| `dirname` の後 | 390 | 張る前 | コマンド置換の中の子を待つ | TERM・HUP・INT とも、EXIT の罠の後にその信号で終わる(INT も SIGINT で終わる。終了値130ではない) |
+| `basename` の後 | 391 | 張る前 | コマンド置換の中の子を待つ | 同上 |
+| 境界 | 715(最初の `mkdir`) | 張った後 | 前面の子を待つ | 罠のある信号は、子を待ってから `on_signal`(143・129・130) |
+
+- 旧版は、比較器が PATH の先頭に置いた観測用の包み(`observer.c`。`grep`・`dirname`・`basename`・`mkdir`)で止める。Rust は呼び返しで止める。Rust が道具を起動するケースでは、包みが止め、Rust の呼び返しは止めない。
+- 実測と設計の記述の違い: 設計の止め所の表は「`grep` の後(354 行の setlocale の警告より前)」と書いた。基準の容器の bash 5.2.21 では、bash は `grep` を fork した直後に一時的な `LC_ALL=C` を戻し(354行の警告)、次に `job-working-directory` の文を出してから子を待つ。Rust は実測に合わせ、この2つを止め所より前に出す(比較器のケース「grepとLC_ALL」と「cwdが消えた」で確かめた)。
+
+#### Mac での比べ方
+
+設計(Issue #545)の「Mac は S3I-A と同じ扱いにする」を、次の形で当てた。
+
+- ケースの一覧は、走っている機械に依らない。機械で分かれるケースは、範囲 full に常に入れ、範囲 mac では Mac で流さない理由(`mac_unperformed.json`。414件)で外す。範囲 mac は443件である。
+- bash 4.0 以上がある Mac では、旧版と Rust を直接比べる。
+- bash 4.0 以上が無い Mac(GitHub の Mac の実行機)では、Rust の結果を Mac の固定期待 `native/ci/implement_agent_fixtures/mac_fixed.json` と、旧版との比較と同じ置き換えの規則で比べる。
+  - 固定期待は、基準の容器の範囲 full で旧版を流した結果だけから作り、範囲 full のたびに作り直して同じかを確かめる。
+  - 範囲 mac の443件のうち344件を入れる。旧版の結果が Linux と Mac で変わりうる99件(Rust も `grep` を起動する98件・`//` で始まる `dirname` の値の1件)は、名前と理由を付けて Mac の未実施にする。一覧の外の未実施は失敗にする。
+  - Linux では `R4X1_SIMULATE_MAC=1` で、この流れを模擬できる(終了値3。合格に数えない)。件数と手順は [testing.md](testing.md#mac-の固定期待bash-40-以上が無い-mac) にある。
+
+#### この区間で旧版との比較では見えない部分
+
+設計の表のとおり、論理の `cd` の値・EXIT の罠の中身・翻訳ファイルを探す順・組み込みの書き込みの誤りの文・訳した errno の文は、Rust の単体テスト(`tests.rs`。論理の `cd` は基準の容器の bash で測った24件の固定期待)で確かめる。変異の一覧には入れない。R4X-2 で旧版との比較と変異に入れる。
+
+```text
+旧版(bash implement-agent.sh <引数>) ──┐
+                                        ├─ 同じパスの配置・同じ argv・同じ環境・同じ stdin → 終了値・stdout・stderr・ファイルの残り・道具の起動の記録を比べる
+implement_agent_contract <引数> ────────┘   (旧版は観測用の mkdir で止める。Rust は境界の印と終了値99)
+```
+
+API は [native/README.md](../native/README.md#implement-agentの引数の検査の区間r4x-1)、比較の手順と件数は [testing.md](testing.md#r4x-1の比較) に記す。
+
 ### Rust の構成とビルド入力(段階 0a)
 
 - `native/Cargo.toml` は、`native/` 内の `crates/cli`・`crates/core`・`crates/platform`・R4Sの `crates/yaml-parser` をまとめる。公開コマンドへ移植する機能は `native/crates/cli/src/commands/<名前>/mod.rs` に追加する。試しの `probe.rs` は単独ファイルとする。

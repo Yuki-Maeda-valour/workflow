@@ -1,0 +1,8 @@
+{
+ "name": "d-nul-counts",
+ "group": "プロンプトのファイル",
+ "about": "NUL を空白でない字と数える",
+ "file": "native/crates/cli/src/commands/implement_agent/args.rs",
+ "old": "                    .any(|b| !matches!(b, 0 | b' ' | b'\\t' | b'\\n' | 11 | 12 | b'\\r'))",
+ "new": "                    .any(|b| !matches!(b, b' ' | b'\\t' | b'\\n' | 11 | 12 | b'\\r'))"
+}

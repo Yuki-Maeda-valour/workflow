@@ -1,0 +1,8 @@
+{
+ "name": "g-dirname-no-abbrev",
+ "group": "--log-file の正規化",
+ "about": "dirname の長い選択肢の短縮を読まない",
+ "file": "native/crates/cli/src/commands/implement_agent/tools.rs",
+ "old": "                    .filter(|option| option.name.starts_with(name))",
+ "new": "                    .filter(|option| option.name == name)"
+}

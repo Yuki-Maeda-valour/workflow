@@ -1,0 +1,8 @@
+{
+ "name": "o-notify-pad",
+ "group": "書き込みの故障",
+ "about": "launch::notify の信号の名前の詰め(LONGEST_SIGNAL_DESC の 24)を 1 つずらす",
+ "file": "native/crates/cli/src/commands/implement_agent/launch.rs",
+ "old": "    let pad = 24i64 - description.len() as i64;",
+ "new": "    let pad = 23i64 - description.len() as i64;"
+}

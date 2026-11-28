@@ -1,0 +1,8 @@
+{
+ "name": "i-int-at-grep-stops",
+ "group": "中止の信号",
+ "about": "罠の前の SIGINT を前面の子(grep)の地点で止める(旧版は続く)",
+ "file": "native/crates/cli/src/commands/implement_agent/shell.rs",
+ "old": "            && !child_died_by_int",
+ "new": "            && child_died_by_int"
+}

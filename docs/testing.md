@@ -1957,6 +1957,113 @@ CIの時間の見積り(推測。CIでは未測定):
   - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になる。Mac arm64とLinuxの機種には、この倍率は当たらない。どちらの見積りも、PRのCIの実測で確かめる。
 - 50分を超えるかどうかは、PRのCIで機種ごとの時間を記録して決める。超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直す案を、設計に追記してレビューに通す。既存の上限は、理由と実測なしに変えない。
 
+### R4X-1の比較
+
+#545 の `implement-agent.sh` の引数の検査の区間(1〜714行と725行)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と当てた決定](design.md#implement-agentの引数の検査の区間r4x-1)、[部品と入口](../native/README.md#implement-agentの引数の検査の区間r4x-1)を参照する。
+
+必要な環境は次のとおり。どれかが欠ければ、比較器は省略せずに失敗する。
+
+- Python 3.10 系と、root 以外の通常利用者。
+- C コンパイラ `cc`。比較器が観測用の包み(`native/ci/implement_agent_fixtures/observer.c`)と起動の包み(`launcher.c`)を組む。組めなければ比較全体を失敗にする(R4U・R4R と同じ要件)。
+- 範囲 `full`(Linux の既定): 基準の版(Ubuntu 24.04 の bash 5.2.21・coreutils 9.4・sed 4.9・grep 3.11・glibc 2.39)。違う Linux では失敗にする。
+  - 日本語の包み(`locales`・`language-pack-ja`・`language-pack-ja-base`。`bash.mo`・`coreutils.mo`・`libc.mo` と `ja_JP.UTF-8`)・`localedef`(比較器が `ja_JP.eucJP` を `LOCPATH` の下に作る)・`strace`(包みの有無の段で `grep` の子の環境を照らす)。
+  - 手元では基準の容器(`s3ia-ubuntu2404:local`。`docker run --init` と `--security-opt seccomp=unconfined`)で流す。
+- 範囲 `mac`(Mac の既定): bash 4.0 以上(`/opt/homebrew/bin/bash` など)があれば、旧版と Rust を直接比べる。
+  - 無ければ(GitHub の Mac の実行機は Bash 3.2.57 だけ)、S3I-A と同じく、Rust の結果を Mac の固定期待 `implement_agent_fixtures/mac_fixed.json` と比べる。下の「Mac の固定期待」を参照する。
+
+リポジトリ直下で実行する。出力先はリポジトリ外に置く。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example implement_agent_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example implement_agent_contract --target x86_64-unknown-linux-musl)
+python3 -B native/ci/check_implement_agent.py --fixture "$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/examples/implement_agent_contract"
+python3 -B -m unittest discover -s native/ci -p 'test_implement_agent.py'
+python3 -B native/ci/implement_agent_mutations.py --fixture <上の implement_agent_contract の絶対パス>   # 変異(手元だけ。cargo が要る)
+```
+
+- `--fixture` の省略・空・相対パス・不在・実行不能・通常ファイル以外を拒否する。配布済み実行物や PATH へ切り替えない。
+- 旧版の sha256(`9486ca07…`)と、使い方の文(`usage.txt`)が旧版の2〜98行と同じことを、最初に照らす。違えば失敗する。
+- 旧版と Rust は、同じ絶対パスの作業フォルダ(ケースごとに作り直す)で順に流す。並べて流す数は `-j`(既定は CPU の数)。
+- 比べるのは、終了値(信号で終わればその番号)・stdout・stderr・作業フォルダと保護領域の候補の下の全エントリ(種類・mode・中身・リンク先。どちらの側も変わらないこと)・PATH の観測用の包みが記録した道具の起動(argv・環境・fd 0〜2 の種類・信号の扱いと止め・cwd)・止め所の印である。
+  - 置き換えるのは、bash の文の先頭の旧版のパス(固定名)と、旧版の bash 自身の訳した行(英語へ戻す。戻せない行は失敗)と、ジョブの知らせの行の pid(伏せて、記録した子の pid と同じかを確かめる)だけ。
+  - 境界に届くケースでは、旧版の最初の `mkdir` の argv の `<cand>` と、Rust の境界の行の `<cand>` を比べ、旧版の stdout・stderr と、Rust の境界の行の前までを比べる。
+  - 途中で切れる出力(`RLIMIT_FSIZE`)は、故障の無い旧版も流し、2026-11-11 22:26・22:38 の3つの場合で期待を作る。
+- 範囲 `full` の段: 12の群・道具の固定期待(基準の容器で本物の `dirname`・`basename` をもう一度流し、固定期待 `tool_outputs.json` と同じかを確かめる。594件。Rust の再現は、単体テスト `tools_match_the_measured_gnu_outputs` が同じ固定期待と照らす)・起動時に閉じた fd(旧版と Rust をそれぞれの固定期待 `closed_fds.json` で照らす。20件)・止め所の揺れ(止め所のケースの旧版を3回ずつ流し、結果が1通りであること)・包みの有無(包みの無い旧版と結果が同じこと。`grep` の子の環境は strace の記録で照らす)。
+- 道具の固定期待 `tool_outputs.json` は、11の地域設定(C・C.UTF-8・ja_JP.UTF-8・ASCII の ja・`LANGUAGE` の並び・`LOCPATH`・ja_JP.eucJP など)と、2つの道具と27の値(54の組)で、本物の `dirname`・`basename` の stdout・stderr・終了値と、使った訳(`coreutils` 32件・`libc` 4件)を持つ。旧版か道具の版が変わったときは、基準の容器で `--write-tool-fixture <出力先>` を流して作り直す(合格に数えない)。
+- ケースの一覧(範囲ごと・群ごとの件数と名前の sha256)は `case_lists.json`、Mac で流さないケースと理由は `mac_unperformed.json` に固定する。範囲 `full` のたびに、今の結果から作り直した Mac の一覧と同じかを確かめる。一覧の外の未実施は失敗にする。
+  - ケースの一覧は、走っている機械に依らない(Linux でも Mac でも同じ一覧を作る)。機械で分かれるケース(`/dev/full`・日本語の地域設定・`localedef` で作る地域設定など)は、範囲 `full` には常に入れ、範囲 `mac` では Mac で流さない理由で外す。自己検査 `test_case_lists_do_not_depend_on_the_machine` が、Mac に差し替えて作った一覧が `case_lists.json` と同じことを確かめる。
+- 最後の行が `合格: <N> 件(未実施 <M> 件)` で、終了値が0なら合格である。部分実行(`--groups`・`--case`)は合格に数えない(終了値3)。
+  - 範囲 `full` では、未実施が1件でもあれば不合格にする。`strace` で execve を記録できないときと、`locale -a` に `ja_JP.utf8` が無いときも、不一致として数えて不合格にする。
+  - CI の Linux の機種の `implement-agent` では、`build.py` が、比較器の最後の行が `未実施 0 件` であることも確かめる。
+
+範囲 `full` の群ごとの件数(2026-11-27・基準の容器):
+
+| 群 | 比べた件数 | 境界の印の件数 |
+|---|---|---|
+| 引数 | 60 | 8 |
+| runner と model | 24 | 3 |
+| プロンプトのファイル | 116 | 42 |
+| --cwd | 61 | 25 |
+| 時間 | 33 | 6 |
+| --log-file の正規化 | 76 | 28 |
+| 候補の解決の始め | 25 | 17 |
+| 中止の信号 | 60 | 11 |
+| 書き込みの故障 | 130 | 31 |
+| bash の起動 | 101 | 16 |
+| 地域設定 | 163 | 8 |
+| 想定外の失敗 | 8 | 0 |
+| 群の合計 | 857 | 195 |
+
+- 結果の行の件数は、群の857件・道具の固定期待594件・起動時に閉じた fd 20件の合計 1471件である。止め所の揺れ(141回)と包みの有無(181件。strace で照らした111件)は、件数の行に出し、結果の行の件数には数えない。
+- 2026-11-27 の独立レビューの指摘で足したケース(群の834件から857件へ。23件):
+  - 引数: 先頭の `--r4x1-tool`(隠しの引数でないので、旧版と同じく不明な引数になる)。1件。
+  - bash の起動: `SHLVL` が `7` と改行・`999` と改行・`7` と CR・`7` と TAB・改行と `7` の5つと、その `-` で始まるプロンプト(`grep` を起動する)版。10件。
+  - 中止の信号: 起動時に SIGCHLD が無視のときの、`-` で始まるプロンプトの `grep` の起動・境界まで・`ja_JP.eucJP` の `dirname` の起動(誤りで止まる形と通る形)。4件。
+  - 書き込みの故障: 起動した `grep` の出力が `RLIMIT_FSIZE` に当たるケース(stderr はファイル・上限1000バイト。`--help` と `--version`・C と `LANG=ja_JP.UTF-8`・SIGXFSZ の無視の有無)。8件。
+    - ジョブの知らせの行が出るのは、`--help` で SIGXFSZ が既定の2件(C・ja)だけである。この2件は、旧版と Rust の両方の stderr に知らせの行がちょうど1つあり、伏せた pid が1つであることも確かめる(`expect_grep_notice`。環境の違いで `grep` が死ななくなったら失敗にする)。
+    - この2件は、起動の包みの `--core1` で `RLIMIT_CORE` を1にする。Linux は上限1では core を作らないので、知らせの行に `(core dumped) ` が付かないことが決まる。上限0では、パイプの core_pattern(Ubuntu の apport)へ core を送り、同時に死ぬ数の上限(`core_pipe_limit`。作業機は10)などで `(core dumped)` の有無が揺れた(基準の容器の全体の比較で、旧版だけに付かない回が出た)。`(core dumped) ` の字面と詰めは、Rust の単体テスト `job_notice_line_matches_bash_format` と、比較器の自己検査が確かめる。
+    - 残りの6件は、信号で死なない形の確かめである。`--version` の出力(C で409バイト)は1000バイトに届かない。SIGXFSZ を無視すると、`grep` は書き込みの誤りの終了値2で終わる。
+- 範囲 `mac` を Linux で試すと(bash 4.0 以上がある Mac と同じ流れ)、`合格: 443 件(未実施 415 件)` だった(Mac の実機では未確認)。bash 4.0 以上が無い Mac の流れは、上の「Mac の固定期待」の模擬で確かめる。
+- 変異の一覧(`implement_agent_fixtures/mutations/`。12の群ごとに1つ以上、15件)は、全部で比較器が不合格になった(2026-11-27・基準の容器・117秒。再レビューの直しの後は118秒)。2026-11-27 の指摘で、ジョブの知らせの行(`launch::notify`)を狙う2件(`(core dumped) ` を付ける条件を逆にする・詰めを1つずらす)を足した。
+- 時間(基準の容器・16 CPU): 3回で 22.9秒・18.3秒・16.7秒(全部合格)。2026-11-27 の指摘の直しの後は、ほかの作業で混んだ機械で 36.1秒・34.8秒・35.3秒(全部 `合格: 1471 件(未実施 0 件)`)。CI の1回目の run の機種ごとの時間は未確認である(PR の CI の後に、この節とジョブの上限を直す)。
+- ジョブの上限は、`implement-agent` 30分・`implement-agent-universal` 20分にした(`check_workflow.py` の `R4X1_TIMEOUTS`)。基準の容器の3回の最長(直しの後は 36.1秒)の2倍は5分に切り上がる。CI の機械は遅く、準備(日本語の包みと strace の `apt-get`・Python の用意・tar の取得)の時間も入るので、CI の実測が出るまでは S3I-A の上限(45分・20分)に近い値にした(推測)。
+- 比較器の内側の上限(`build.py` の `implement_agent_timeout`)は、ジョブの上限(`R4X1_TIMEOUTS` の1か所)から、準備に見込む5分(`IMPLEMENT_AGENT_PREPARE_MINUTES`。S2E の見積りと同じ)と余りの1分(比較の後の自己検査とジョブの後始末)を引いて決める。
+  - 今の値は `implement-agent` 24分(1440秒)・`implement-agent-universal` 14分(840秒)で、どちらも「内側の上限 + 準備 < ジョブの上限」になる。前の値(両方とも1500秒)は、`implement-agent-universal` の20分より長かった。
+  - `test_native_ci.py` の `test_inner_timeout_plus_preparation_is_shorter_than_each_job_limit` が、この大小と、比較器にそのジョブの内側の上限を渡すことを確かめる。ジョブの上限を変えると、内側の上限も合わせて変わる。
+- 完了条件2(CPU の数と同じ数の `python3 -c 'while True: pass'` を背景で動かしたまま5回): 基準の容器(16 CPU。busy loop 16本)で、5回とも `合格: 1448 件(未実施 0 件)` だった(50.3秒・52.1秒・51.3秒・50.4秒・51.5秒。2026-11-27)。終わった後に、起動した16本の pid だけを止めた。
+  - 2026-11-27 の指摘の直しの後も、同じ形で5回とも `合格: 1471 件(未実施 0 件)` だった(70.1秒・67.8秒・64.4秒・69.1秒・73.4秒。ほかの作業で混んだ機械)。
+  - 再レビューの指摘(ジョブの知らせの2件の `--core1` と確かめ)の直しの後も、5回とも合格だった(68.0秒・69.9秒・55.8秒・55.0秒・52.1秒)。
+
+#### Mac の固定期待(bash 4.0 以上が無い Mac)
+
+- 2026-11-27 の測定の CI(run 45974821589)では、Mac の4ジョブがすべて落ちた。bash 4.0 以上が無いので比べた件数が0件になり、Mac で作ったケースの一覧も Linux の固定と違ったためである。
+- 今は、bash 4.0 以上が無い Mac では、Rust の結果を Mac の固定期待と比べる。置き換えの規則は、旧版との比較と同じ(`compare_sides`)。
+- 固定期待は、基準の容器の範囲 `full` で旧版を流した結果だけから作る(Rust の出力は使わない)。範囲 `full` のたびに作り直して、固定したファイルと同じかを確かめる(違えば失敗)。
+- 範囲 `mac` の443件を、固定期待に入れる344件と、理由を付けて入れない99件に分ける。入れない99件は、Mac の未実施として名前と理由を出す。
+  - Rust も `grep` を起動するケース(`-` で始まるプロンプトのパス。Mac の BSD の `grep` の結果と起動の記録を、Linux の GNU の `grep` の旧版と照らせない): 98件。
+  - `dirname`・`basename` の値が `//` で始まるケース(`//` で始まる値の結果は、POSIX が処理系に任せている): 1件。
+  - 入れる条件は、ほかに、旧版がファイルを変えないこと・途中で切れる出力でないこと・C ライブラリの errno の文が出ないこと(glibc と Mac の libSystem で文が違いうる)。今は、この3つに当たるケースは無い。
+  - 旧版が起動する `grep`(`-` で始まらないパス)と `dirname`・`basename`(`-` と `//` で始まらない値)は、Rust が起動しない形なので入れる。起動の記録は、argv と、親が旧版かだけを持つ。
+- 固定期待の件数は、群ごとに、引数 60・runner と model 24・プロンプトのファイル 38・--cwd 61・時間 27・--log-file の正規化 29・候補の解決の始め 25・中止の信号 27・書き込みの故障 14・bash の起動 39 である。範囲 `mac` の10の群のどれにも1件以上ある(地域設定と想定外の失敗の群は、範囲 `mac` に無い)。
+- Mac の最後の行は `合格: 344 件(未実施 514 件)` になる見込みである(未実施は、Mac で流さないケースの414件・固定期待に入れない99件・範囲 `full` だけの段の1行)。Mac の実機では未確認(管理担当が測定の CI で確かめる)。
+- 作り方(旧版か道具の版が変わったとき。基準の容器で流す。合格に数えない):
+
+```bash
+python3 -B native/ci/check_implement_agent.py --fixture <implement_agent_contract の絶対パス> --write-mac-fixed <出力先>/mac_fixed.json
+cp <出力先>/mac_fixed.json native/ci/implement_agent_fixtures/mac_fixed.json
+```
+
+- Linux で Mac の流れを確かめる模擬: `R4X1_SIMULATE_MAC=1` を付けて範囲 `mac` を流す。機械を Mac と見なし、bash 4.0 以上が無い扱いで、Mac の固定期待と比べる。
+  - 模擬の合格は終了値3で、合格に数えない。最後の行は `R4X-1: 模擬の合格(Mac の経路の模擬。Linux の合格でも、Mac の実機の確認でもない): 344 件(未実施 514 件)` である(2026-11-28・基準の容器・全体1.6秒と3.4秒の2回。作業機の上でも約3秒で合格)。
+  - 自己検査 `test_mac_simulation_compares_rust_with_the_mac_fixed` が、模擬が終了値3・不一致0件・比べた件数が0件でないことを確かめる。`R4X1_TEST_FIXTURE` に実行物の絶対パスを渡した Linux だけで流れる(渡さなければ skip)。CI の Linux の `implement-agent` では `build.py` が渡す。CI の比較と自己検査には `R4X1_SIMULATE_MAC` を渡さない。
+
+```bash
+R4X1_SIMULATE_MAC=1 python3 -B native/ci/check_implement_agent.py --fixture <implement_agent_contract の絶対パス>   # 終了値3が模擬の合格
+R4X1_TEST_FIXTURE=<implement_agent_contract の絶対パス> python3 -B -m unittest discover -s native/ci -p 'test_implement_agent.py'
+```
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。

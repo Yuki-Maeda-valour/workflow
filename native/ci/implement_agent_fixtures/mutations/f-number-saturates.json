@@ -1,0 +1,8 @@
+{
+ "name": "f-number-saturates",
+ "group": "時間",
+ "about": "intmax を超える値を誤りにせず、最大の値として読む",
+ "file": "native/crates/cli/src/commands/implement_agent/childenv.rs",
+ "old": "            value.checked_mul(10)?.checked_add(digit)?",
+ "new": "            value.saturating_mul(10).saturating_add(digit)"
+}

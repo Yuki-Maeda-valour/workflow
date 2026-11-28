@@ -681,5 +681,73 @@ class CompareRunsTest(TemporaryScripts):
         self.assertEqual('do not replace', (self.work / 'keep').read_text())
 
 
+class ProcessAliveTest(unittest.TestCase):
+    """#545: 残った子の終わりを待つ補助。"""
+
+    def test_running_exited_and_reaped_processes(self):
+        child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])
+        try:
+            self.assertTrue(support_native.process_alive(child.pid))
+            self.assertFalse(support_native.wait_processes_gone([child.pid], 0.05))
+        finally:
+            child.kill()
+        # 終わったが回収していない(ゾンビ)は動いていないと見なす。
+        deadline = time.monotonic() + 10
+        while support_native.process_alive(child.pid) and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertFalse(support_native.process_alive(child.pid))
+        child.wait()
+        self.assertFalse(support_native.process_alive(child.pid))
+        self.assertTrue(support_native.wait_processes_gone([child.pid], 1))
+        self.assertTrue(support_native.wait_processes_gone([], 0))
+
+
+class PublicSignalGroupTest(unittest.TestCase):
+    """#545: 比較器が使うプロセスグループへの信号の外向けの名前。"""
+
+    def test_signal_group_stops_the_whole_group_and_ignores_a_gone_group(self):
+        # 子は孫を起動し、孫の pid を stdout に書いてから待つ。子と孫は同じプロセスグループにいる。
+        child = subprocess.Popen([sys.executable, '-c', 'import subprocess, sys, time; '
+                                  'g = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"]); '
+                                  'print(g.pid, flush=True); time.sleep(60)'],
+                                 stdout=subprocess.PIPE, start_new_session=True)
+        grandchild = None
+        try:
+            grandchild = int(child.stdout.readline())
+            self.assertTrue(support_native.process_alive(grandchild))
+            self.assertEqual(os.getpgid(grandchild), child.pid)
+            support_native.signal_group(child, signal.SIGKILL)
+            self.assertEqual(child.wait(timeout=10), -signal.SIGKILL)
+            # 直接の子だけでなく、孫も期限の中で止まる(群の全部へ届いた)。
+            self.assertTrue(support_native.wait_processes_gone([grandchild], 10),
+                            f'孫 {grandchild} が signal_group の後も動いている')
+            self.assertFalse(support_native.process_alive(grandchild))
+            # 群が無くなるのを待つ(孫を引き取った先が回収するまで)。期限を過ぎたら失敗にする。
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    os.killpg(child.pid, 0)
+                except ProcessLookupError:
+                    break
+                except PermissionError:
+                    pass  # Mac は、回収前の終了済みのプロセスだけが残る群に EPERM を返す。
+                self.assertLess(time.monotonic(), deadline, f'プロセスグループ {child.pid} が期限の中で無くならない')
+                time.sleep(0.02)
+            # 群が無くなった後に送っても、例外にしない。
+            support_native.signal_group(child, signal.SIGKILL)
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait()
+            child.stdout.close()
+            if grandchild is not None and support_native.process_alive(grandchild):
+                try:
+                    # 同じ群にいる(自分が起動した孫の)ときだけ止める。
+                    if os.getpgid(grandchild) == child.pid:
+                        os.kill(grandchild, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
 if __name__ == '__main__':
     unittest.main()

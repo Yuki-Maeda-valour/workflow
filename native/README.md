@@ -704,6 +704,30 @@ unsafe の置き場は、次の 2 つだけです。
 契約は [設計のS2E節](../docs/design.md#environment-guardの環境照合と内部readers2e)にあります。
 [比較の手順と件数](../docs/testing.md#s2eの比較)に従ってください。通常の`cargo test --locked`だけでは、旧版との比較は完了しません。
 
+## implement-agentの引数の検査の区間(R4X-1)
+
+#545で、`implement-agent.sh` の1〜714行(引数・使い方・値の検査・`--log-file` の語彙の正規化・既定表・指標・保護領域の候補の解決の始め)と、候補が1つも残らないときの725行を実装しました。製品CLIの登録表・help・配布・既存の呼出元は変えていません。715行の `mkdir -p` から後は R4X-2 以降で移します。
+
+- `crates/cli/src/commands/implement_agent/` に部品があります。
+  - `mod.rs`: 入口 `main_entry(argv, stop)` と、旧版の行との対応表(先頭)。最初の候補まで進んだら、境界の印(stderr の `ERROR [r4x-1-boundary] 保護領域の候補 <cand> の mkdir から後は R4X-2 で移す` と終了値99)で止めます。起動したときに、bash と同じく自分の SIGQUIT を無視にし、SIGCHLD を既定に戻します。
+  - `shell.rs`・`stdio.rs`・`sites.rs`: bash の実行時の再現(3つの罠の時点・組み込みの `echo` の書き出しと失敗・`on_err`・`die`・`fail_usage`・`on_signal`・EXIT の罠・止め所)と、失敗の場所と行番号の表。`die`・`on_err`・`on_signal` はログの有無(`LogState`)を値で持ち、R4X-2・R4X-3 がログの書き込みを足せる形です。
+  - `args.rs`・`usage.txt`: 引数・使い方(旧版の2〜98行)・値の検査・352行の空白だけかの確かめ。
+  - `paths.rs`: `[ -f ]` などの判定・論理の `cd`・`pwd -P`・`real_dir`・bash のコマンドの探し方。
+  - `locale.rs`・`tools.rs`: glibc の setlocale・`LC_CTYPE` の文字コード・gettext の選び方と翻訳ファイルの読み方・訳した errno の文、`dirname`・`basename`(GNU coreutils 9.4 と glibc の `getopt_long`)。
+  - `childenv.rs`・`launch.rs`: bash が子へ渡す環境と、道具の起動(決定の表の (1)(2) の場合だけ)・待ち方・ジョブの知らせの行。
+  - `state.rs`: `--log-file` の正規化・実装用既定表と形の検査・保護領域の候補。
+  - `tests.rs`: 単体テスト(21件。既定表の形の崩れ G1・G4・行番号の表・使い方の写し・gettext と翻訳ファイル〈2つの所に分かれた翻訳ファイルを含む〉・`dirname`・`basename` の固定期待・論理の `cd` の固定期待・EXIT の罠の時点・罠を外した後の2回目の信号・`SHLVL` の数の読み方・書き込みの誤りの文・訳した errno の文)。`locale.rs` の4件・`tools.rs` の4件と合わせて29件です(2026-11-27)。
+- `crates/platform/src/implement_agent.rs` は、起動の前の記録(信号の扱いと止め)・信号の扱いと受けた印・`raise`・fd の `fstat`・`write`・`read`・環境の読み取り・`getpwuid`・`faccessat`・道具の起動(`fork`・`dup2`・`execve`・`waitpid`・`pipe`)・Mac の `newlocale` と `nl_langinfo_l` を、安全な関数で公開します。R4X-1 の `unsafe` は、このファイルの中だけにあります。
+- `crates/cli/examples/implement_agent_contract.rs` は検査専用入口です。`args_os()` からプログラム名を除いた argv を、旧版と同じ形で受けます。
+  - `#![deny(unsafe_code)]` の中で、初期化の表への登録(Linuxは `.init_array`、Macは `__DATA,__mod_init_func`)の1項目だけを `#[allow(unsafe_code)]` にしています。製品の実行ファイルはこの関数を参照しません。
+  - 先頭の隠しの引数 `--r4x1-stop <フォルダ>`(止め所で合図を待つ)は、この実行物だけが受けます。隠しの引数は、この1つだけです。
+  - `dirname`・`basename` の Rust の再現は、隠しの引数で流さず、単体テストが固定期待 `native/ci/implement_agent_fixtures/tool_outputs.json`(基準の容器で本物の道具を測った594件)と照らします。
+- 比較器は、bash 4.0 以上が無い Mac では、Rust の結果を Mac の固定期待(`native/ci/implement_agent_fixtures/mac_fixed.json`。344件。基準の容器で旧版を流して作る)と比べます。範囲 mac の残りの99件は、名前と理由を付けて未実施にします。扱いは [設計のR4X-1節](../docs/design.md#mac-での比べ方) にあります。
+- Rust の単体テストは、`cargo test --locked -p dev-workflow-cli --example implement_agent_contract` で流れます(Linux で89件。R4R の60件を含む)。platform の3件(終わりの信号の表・受けた印・子の信号の扱い。最後の1件は Linux だけ)は `cargo test --locked` で流れます。
+
+契約と当てた決定は [設計のR4X-1節](../docs/design.md#implement-agentの引数の検査の区間r4x-1)にあります。
+[比較の手順と件数](../docs/testing.md#r4x-1の比較)に従ってください。通常の`cargo test --locked`だけでは、exampleの単体検査と旧版比較は完了しません。
+
 ## ソース入力の SHA256
 
 Task 2.2 の Python の計算も、次のバイト列をそのまま使います。

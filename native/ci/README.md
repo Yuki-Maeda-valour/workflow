@@ -620,3 +620,34 @@ Macの実機のCIで確かめることは次のとおりです(Linuxの手元で
 - `go`の待ちの上限`GO_TIMEOUT_MAC`の境目: 100000000以下と100000002以上を使います。100000001は旧版でも揺れると推測しています(未確認)。
 - 機種ごとの項目数(Mac 197項目。今の値は`check_s2e.py`の`EXPECTED_ITEMS`)が完全一致し、項目ごとにRustを起動した比較が1件以上あること。
 - 木の深さの端の比較は、Macでは流しません(`DEEP_REASON`でLinuxだけの印)。Macの`PATH_MAX`(1024)では約990段の絶対パスを作れないという推測で、Macでは未確認のままです。
+
+## R4X-1の必須比較と検査専用入口
+
+- 比較器`check_implement_agent.py`は、2つのジョブ`implement-agent`(`build`の後・4機種)と`implement-agent-universal`(`combine`の後・Mac2機種)で流します。`build`と`verify-universal`では流しません(2026-11-12 12:59の決定)。比較の後に、比較器の自己検査(`test_implement_agent.py`)も流します。
+- 4機種と署名後のMacのCIでの成功は未確認です。
+
+比較はPython3.10系・root以外の利用者で行い、Cコンパイラ(`cc`)を要ります。#545の部品は未登録・未配布です。検査専用入口は`implement_agent_contract`(cargoのexample)です。[契約](../../docs/design.md#implement-agentの引数の検査の区間r4x-1)と [実行手順・件数](../../docs/testing.md#r4x-1の比較)を参照してください。
+
+- `quality()`は、`cargo test --locked -p dev-workflow-cli --example implement_agent_contract`を実行します。
+- `build`/`reproduce`は、`implement_agent_contract`を`CI_BINARIES`の1つとして各2回作ります(`CI_BINARIES += …` の行)。転送の一覧(`BUILD_FILES`・`UNIVERSAL_FILES`)にも入ります。
+- `implement-agent`: Linuxでは比較の前に、日本語の包み(`locales`・`language-pack-ja`・`language-pack-ja-base`)と`strace`を、足りないときだけ`apt-get`で入れます(S3Dの`s3d_ci.py`と同じ形)。入れた後も`bash`・`coreutils`・`libc`の日本語の翻訳ファイル・`ja_JP.UTF-8`・`strace`・`localedef`・`cc`のどれかが無ければ失敗にします。`build`のtarを受け取り、2本が同じバイト列であることを`cmp`で確かめてから、1本目で比較します(#516)。範囲はLinuxが`full`、Macが`mac`です(比較器が機械で決めます)。Linuxでは、比較器の最後の行が`未実施 0 件`であることも確かめます(`build.py`の`IMPLEMENT_AGENT_FULL_LINE`)。
+- `implement-agent-universal`: 署名と2種類のCPUを確かめてから、範囲`mac`で比較します。Linuxの名前を渡すと失敗します。
+- Macの実行機にbash 4.0以上が無いとき(GitHubのMacはBash 3.2.57だけ)、比較器は、Rustの結果をMacの固定期待(`implement_agent_fixtures/mac_fixed.json`。344件)と比べます。
+- Linuxの機種の自己検査には、`build.py`が実行物の絶対パス(`R4X1_TEST_FIXTURE`)を渡し、Macの経路の模擬(`R4X1_SIMULATE_MAC=1`)も流します。CIの比較には`R4X1_SIMULATE_MAC`を渡しません。
+- 上限は`implement-agent`が30分、`implement-agent-universal`が20分です(`check_workflow.py`の`R4X1_TIMEOUTS`)。根拠は [testing.md](../../docs/testing.md#r4x-1の比較)にあります。CIの実測で見直します。
+- 比較器の内側の上限は、ジョブの上限から準備の5分と余りの1分を引いた値です(`build.py`の`implement_agent_timeout`。今は1440秒と840秒)。
+- `package`は製品用のLinux2本とMac1本だけを配布用へ渡します。`implement_agent_contract`は`native-dist.tar`の5ファイルへ入りません。
+- `distribution`の`needs`の末尾に2つのジョブを足しました。`check_workflow.py`の`REQUIRED_NATIVE_JOBS`の末尾と`COMPARISON_JOBS`の末尾にも足しました。
+
+CIのジョブの手元での再現(リポジトリ直下):
+
+```sh
+python3 -B native/ci/build.py implement-agent --platform linux-x86_64
+python3 -B native/ci/build.py implement-agent-universal --platform macos-arm64
+```
+
+次はCIでは流しません。旧版か道具の版が変わったときに、手元の基準の容器で流します(cargo が要ります)。
+
+```sh
+python3 -B native/ci/implement_agent_mutations.py --fixture <implement_agent_contract の絶対パス>   # Rust のソースへの変異の確かめ(15件)
+```

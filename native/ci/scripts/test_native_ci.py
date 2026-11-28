@@ -938,12 +938,12 @@ class BuildTests(TempCase):
                 target_dir = Path(env["CARGO_TARGET_DIR"])
                 self.assertEqual(list(target_dir.iterdir()), [])
                 output_dirs.append(target_dir)
-                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--example", "diff_snapshot_contract", "--example", "r4a_rest_contract", "--example", "adopt_candidate_contract", "--example", "s2e_contract", "--target", "test-target"])
+                self.assertEqual(args, ["cargo", "build", "--release", "--locked", "-p", "dev-workflow-cli", "--bin", "dev-workflow", "--example", "r4b_contract", "--example", "r4r_contract", "--example", "loop_state_fixture", "--example", "r4e_contract", "--example", "implement_guard_contract", "--example", "r4g_contract", "--example", "diff_snapshot_contract", "--example", "r4a_rest_contract", "--example", "adopt_candidate_contract", "--example", "s2e_contract", "--example", "implement_agent_contract", "--target", "test-target"])
                 binary = target_dir / "test-target/release/dev-workflow"
                 binary.parent.mkdir(parents=True)
                 binary.write_bytes(elf() if len(output_dirs) == 1 else second)
                 (binary.parent / "examples").mkdir()
-                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract"):
+                for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract", "implement_agent_contract"):
                     (binary.parent / "examples" / example).write_bytes(elf())
             elif args[0] == "cmp":
                 subprocess.run(args, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -987,6 +987,7 @@ class BuildTests(TempCase):
                 self.write(f"{name}/{number}/r4a_rest_contract", b"fixture")
                 self.write(f"{name}/{number}/adopt_candidate_contract", b"fixture")
                 self.write(f"{name}/{number}/s2e_contract", b"fixture")
+                self.write(f"{name}/{number}/implement_agent_contract", b"fixture")
         signed = []
 
         def sign(path):
@@ -1008,9 +1009,10 @@ class BuildTests(TempCase):
                 mock.patch.object(build, "sign", side_effect=sign), \
                 mock.patch.object(build.shutil, "which", return_value=sys.executable):
             build.combine(self.root, self.root)
-        self.assertEqual(len(signed), 22)
+        # R4X-1(#545)の implement_agent_contract の 2 本を足した。
+        self.assertEqual(len(signed), 24)
         self.assertEqual({path.name for path in signed},set(build.CI_BINARIES))
-        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract", "record.json"])
+        output = binary_tools.unpack_tar(self.root / "macos-universal.tar", self.root / "unpacked", ["dev-workflow", "r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract", "implement_agent_contract", "record.json"])
         self.assertEqual((output / "dev-workflow").read_bytes(), b"left1right1signed")
 
 
@@ -1466,10 +1468,10 @@ class R4BConnectionTests(TempCase):
             make_dist.write_json(self.root/"record.json",record)
 
     def test_fixture_is_not_a_distribution_binary(self):
-        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract","s2e_contract"))
+        self.assertEqual(build.CI_BINARIES,("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract","s2e_contract","implement_agent_contract"))
         self.assertFalse(any("r4b" in path or "r4r" in path or "r4e" in path or "r4g" in path or "r4a_rest" in path for path in make_dist.BINARY_PATHS))
         self.assertFalse(any("loop_state" in path for path in make_dist.BINARY_PATHS))
-        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract","s2e_contract")})
+        self.assertEqual(set(build.BUILD_FILES),{f"{number}/{name}" for number in (1,2) for name in ("dev-workflow","r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract","adopt_candidate_contract","s2e_contract","implement_agent_contract")})
 
 
 class R4RConnectionTests(TempCase):
@@ -1524,7 +1526,7 @@ class R4RConnectionTests(TempCase):
             with self.assertRaises(subprocess.CalledProcessError):build.verify_universal(self.root,self.root)
 
     def test_reproduce_builds_and_extracts_all_examples(self):
-        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract", "adopt_candidate_contract", "s2e_contract"))
+        self.assertEqual(build.EXAMPLES,("r4b_contract","r4r_contract","loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract","diff_snapshot_contract","r4a_rest_contract", "adopt_candidate_contract", "s2e_contract", "implement_agent_contract"))
         self.assertTrue(set(build.EXAMPLES)<=set(build.CI_BINARIES))
 
 
@@ -1848,9 +1850,10 @@ class R4D1Tests(TempCase):
 
     def test_distribution_needs_do_not_include_r4d1(self):
         # R4E(#482)と S3I-A(#474)の 2 つずつのジョブを足した後の値(r4d1 は入れない)。R4G(#479)の 2 つは後ろに足した。
+        # R4X-1(#545)の 2 つ(implement-agent・implement-agent-universal)は後ろに足した。
         self.assertEqual(self.document["jobs"]["distribution"]["needs"],
                          ["build", "combine", "verify-universal", "r4e", "r4e-universal", "implement-guard", "implement-guard-universal",
-                          "r4g", "r4g-universal"])
+                          "r4g", "r4g-universal", "implement-agent", "implement-agent-universal"])
         self.assertNotIn("r4d1", self.document["jobs"]["distribution"]["needs"])
 
     # (b) 上限
@@ -2347,7 +2350,7 @@ class R4EConnectionTests(TempCase):
                     folder = Path(env["CARGO_TARGET_DIR"]) / "test-target/release"
                     (folder / "examples").mkdir(parents=True)
                     (folder / "dev-workflow").write_bytes(elf())
-                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract"):
+                    for example in ("r4b_contract", "r4r_contract", "loop_state_fixture", "r4e_contract", "implement_guard_contract", "r4g_contract", "diff_snapshot_contract", "r4a_rest_contract", "adopt_candidate_contract", "s2e_contract", "implement_agent_contract"):
                         if missing and example == "r4e_contract":
                             continue
                         data = second if example == "r4e_contract" and len(count) == 2 and second is not None else elf()
@@ -2505,7 +2508,8 @@ class R4EConnectionTests(TempCase):
         jobs = document["jobs"]
         self.assertEqual(check_workflow.check_document(document), [])
         self.assertEqual(jobs["distribution"]["needs"], ["build", "combine", "verify-universal", "r4e", "r4e-universal",
-                                                          "implement-guard", "implement-guard-universal", "r4g", "r4g-universal"])
+                                                          "implement-guard", "implement-guard-universal", "r4g", "r4g-universal",
+                                                          "implement-agent", "implement-agent-universal"])
         expected = {
             "r4e": ("build", jobs["build"]["strategy"], "native-build-${{ matrix.platform }}",
                     "python3 -B native/ci/build.py r4e --platform '${{ matrix.platform }}'"),
@@ -3040,7 +3044,9 @@ class R4GConnectionTests(TempCase):
         self.assertEqual(check_workflow.check_document(document), [])
         # R4G の比較が落ちたら配布の tar を作らない(R4B・R4R と同じ)。既存の並びの後ろに足した。
         self.assertEqual(jobs["distribution"]["needs"][:3], ["build", "combine", "verify-universal"])
-        self.assertEqual(jobs["distribution"]["needs"][-2:], ["r4g", "r4g-universal"])
+        # R4X-1(#545)の 2 つは、その後ろに足した。
+        needs = jobs["distribution"]["needs"]
+        self.assertEqual(needs[needs.index("r4g"):needs.index("r4g") + 2], ["r4g", "r4g-universal"])
         # R4G は build と verify-universal の上限を変えない(比較を外したので。main の値のまま)。
         self.assertEqual((jobs["build"]["timeout-minutes"], jobs["verify-universal"]["timeout-minutes"]), (120, 60))
         expected = {
@@ -3512,6 +3518,247 @@ class S2EConnectionTests(TempCase):
         self.assertIn("s2e_contract", build.EXAMPLES)
         self.assertIn("s2e_contract", build.CI_BINARIES)
         self.assertFalse(any("s2e" in path for path in make_dist.BINARY_PATHS))
+
+
+class ImplementAgentConnectionTests(TempCase):
+    """R4X-1(#545)の検査専用入口 implement_agent_contract の CI への接続。比較は別のジョブ
+    implement-agent(build の後・4 機種)と implement-agent-universal(combine の後・Mac 2 機種)で流す。"""
+
+    CHECKER = "native/ci/check_implement_agent.py"
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def fake_run(self, calls, *, fail=None, archs="arm64 x86_64"):
+        def run(args, *, env=None, capture=False):
+            args = list(args)
+            calls.append(args)
+            self.run_envs.append((args, env))
+            if fail is not None and fail(args):
+                raise subprocess.CalledProcessError(1, args)
+            if args[0] == "lipo":
+                return archs
+            return "" if capture else None
+        return run
+
+    def fake_stream(self, calls, *, last="合格: 1448 件(未実施 0 件)", fail=None):
+        def stream(args, *, env, timeout, join_timeout, cwd=None):
+            args = list(args)
+            calls.append(args)
+            self.timeouts.append(timeout)
+            self.stream_envs.append(env)
+            if fail is not None and fail(args):
+                raise subprocess.CalledProcessError(1, args)
+            return f"R4X-1: 群 …\n{last}\n"
+        return stream
+
+    def call(self, function, name, calls, missing=(), last="合格: 1448 件(未実施 0 件)", **kwargs):
+        self.timeouts = []
+        self.stream_envs = []
+        self.run_envs = []
+        received = self.root / "received"
+        answers = iter([list(missing), []])
+        with mock.patch.object(build, "target_config", return_value=("test-target", None)) as config, \
+                mock.patch.object(build, "extract_build", return_value=(received, {})) as extract, \
+                mock.patch.object(build, "extract_universal", return_value=(received, {})) as universal, \
+                mock.patch.object(build, "implement_agent_missing", side_effect=lambda: next(answers, [])), \
+                mock.patch.object(build, "stream_command", side_effect=self.fake_stream(calls, last=last,
+                                                                                       fail=kwargs.get("fail"))), \
+                mock.patch.object(build, "run", side_effect=self.fake_run(calls, **kwargs)):
+            self.target_config, self.extract_build, self.extract_universal = config, extract, universal
+            function(name, self.root / "downloads", self.root)
+        return received
+
+    def test_inner_timeout_plus_preparation_is_shorter_than_each_job_limit(self):
+        # 内側の上限は、ジョブの上限(check_workflow.R4X1_TIMEOUTS の 1 か所)から決まり、準備を足してもジョブの上限より短い。
+        self.assertEqual(set(check_workflow.R4X1_TIMEOUTS), {"implement-agent", "implement-agent-universal"})
+        for job, minutes in check_workflow.R4X1_TIMEOUTS.items():
+            with self.subTest(job=job):
+                inner = build.implement_agent_timeout(job)
+                self.assertGreater(inner, 0)
+                self.assertLess(inner + build.IMPLEMENT_AGENT_PREPARE_MINUTES * 60, minutes * 60)
+        # 比較器には、そのジョブの内側の上限を渡す。
+        self.call(build.implement_agent, "linux-x86_64", [])
+        self.assertEqual(self.timeouts, [build.implement_agent_timeout("implement-agent")])
+        self.call(build.implement_agent_universal, "macos-arm64", [])
+        self.assertEqual(self.timeouts, [build.implement_agent_timeout("implement-agent-universal")])
+        # ジョブの上限が準備と余りより短ければ、黙って 0 秒以下にせずに止める。
+        with mock.patch.dict(check_workflow.R4X1_TIMEOUTS, {"implement-agent-universal": 6}), \
+                self.assertRaises(ValueError):
+            build.implement_agent_timeout("implement-agent-universal")
+
+    def test_mac_simulation_is_dropped_and_linux_self_test_gets_the_fixture(self):
+        # 模擬(R4X1_SIMULATE_MAC=1)は CI の比較にも自己検査にも渡さない。Linux の自己検査には実行物を渡し、
+        # 自己検査が Mac の経路の模擬を流す。Mac の機種には渡さない(模擬は Linux だけ)。
+        for function, name, linux in ((build.implement_agent, "linux-x86_64", True),
+                                      (build.implement_agent, "macos-arm64", False),
+                                      (build.implement_agent_universal, "macos-x86_64", False)):
+            with self.subTest(platform=name), mock.patch.dict(os.environ, {"R4X1_SIMULATE_MAC": "1", "KEEP": "x"}):
+                received = self.call(function, name, [], last="合格: 1448 件(未実施 0 件)" if linux
+                                     else "合格: 430 件(未実施 405 件)")
+                self.assertEqual(len(self.stream_envs), 1)
+                self.assertNotIn("R4X1_SIMULATE_MAC", self.stream_envs[0])
+                self.assertEqual(self.stream_envs[0]["KEEP"], "x")
+                tests = [env for args, env in self.run_envs if args[:4] == [sys.executable, "-B", "-m", "unittest"]]
+                self.assertEqual(len(tests), 1)
+                self.assertNotIn("R4X1_SIMULATE_MAC", tests[0])
+                if linux:
+                    self.assertEqual(tests[0]["R4X1_TEST_FIXTURE"], str(received / "1" / "implement_agent_contract"))
+                else:
+                    self.assertNotIn("R4X1_TEST_FIXTURE", tests[0])
+
+    def test_linux_requires_no_unperformed_on_the_last_line(self):
+        for last in ("合格: 1448 件(未実施 1 件)", "不合格: 1 件の不一致(1448 件中)", ""):
+            with self.subTest(last=last), self.assertRaises(ValueError):
+                self.call(build.implement_agent, "linux-x86_64", [], last=last)
+        # Mac の範囲 mac は未実施があってよい。
+        self.call(build.implement_agent, "macos-arm64", [], last="合格: 430 件(未実施 405 件)")
+        self.call(build.implement_agent_universal, "macos-x86_64", [], last="合格: 430 件(未実施 405 件)")
+
+    def comparisons(self, calls):
+        return [call for call in calls if call[:3] == [sys.executable, "-B", source_hash.ROOT / self.CHECKER]]
+
+    def self_tests(self, calls):
+        return [call for call in calls if call[:4] == [sys.executable, "-B", "-m", "unittest"]]
+
+    def test_compares_the_first_built_binary_on_all_four_platforms(self):
+        for name in build.TARGETS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call(build.implement_agent, name, calls)
+                self.extract_build.assert_called_once_with(name, self.root / "downloads", self.root)
+                cmp_call = ["cmp", received / "1" / "implement_agent_contract", received / "2" / "implement_agent_contract"]
+                checks = self.comparisons(calls)
+                self.assertEqual(checks, [[sys.executable, "-B", source_hash.ROOT / self.CHECKER,
+                                           "--fixture", received / "1" / "implement_agent_contract"]])
+                self.assertEqual(calls[0], cmp_call)
+                self.assertEqual(len(self.self_tests(calls)), 1)
+                self.assertLess(calls.index(checks[0]), calls.index(self.self_tests(calls)[0]))
+
+    def test_linux_installs_japanese_packages_and_strace_only_when_missing(self):
+        calls = []
+        self.call(build.implement_agent, "linux-x86_64", calls, missing=["strace"])
+        self.assertIn(["sudo", "apt-get", "install", "-y", *build.IMPLEMENT_AGENT_LINUX_PACKAGES], calls)
+        self.assertEqual(build.IMPLEMENT_AGENT_LINUX_PACKAGES,
+                         ("locales", "language-pack-ja", "language-pack-ja-base", "strace"))
+        calls = []
+        self.call(build.implement_agent, "linux-arm64", calls)
+        self.assertFalse([call for call in calls if call[:1] == ["sudo"]])
+        calls = []
+        self.call(build.implement_agent, "macos-arm64", calls, missing=["strace"])
+        self.assertFalse([call for call in calls if call[:1] == ["sudo"]])
+        received = self.root / "received"
+        with mock.patch.object(build, "target_config", return_value=("t", None)), \
+                mock.patch.object(build, "extract_build", return_value=(received, {})), \
+                mock.patch.object(build, "implement_agent_missing", return_value=["cc"]), \
+                mock.patch.object(build, "run", side_effect=self.fake_run([])), self.assertRaises(ValueError):
+            build.implement_agent("linux-x86_64", self.root / "downloads", self.root)
+
+    def test_comparison_and_cmp_failures_are_fatal(self):
+        for name in ("linux-x86_64", "macos-arm64"):
+            with self.subTest(platform=name), self.assertRaises(subprocess.CalledProcessError):
+                self.call(build.implement_agent, name, [], fail=lambda args: self.CHECKER in str(args))
+            calls = []
+            with self.subTest(platform=name, failure="cmp"), self.assertRaises(subprocess.CalledProcessError):
+                self.call(build.implement_agent, name, calls, fail=lambda args: args[0] == "cmp")
+            self.assertEqual(self.comparisons(calls), [])
+
+    def test_universal_checks_signature_and_cpus_then_runs_the_mac_scope(self):
+        for name in build.IMPLEMENT_AGENT_UNIVERSAL_PLATFORMS:
+            calls = []
+            with self.subTest(platform=name):
+                received = self.call(build.implement_agent_universal, name, calls)
+                self.extract_build.assert_not_called()
+                fixture = received / "implement_agent_contract"
+                checks = self.comparisons(calls)
+                self.assertEqual(checks, [[sys.executable, "-B", source_hash.ROOT / self.CHECKER,
+                                           "--fixture", fixture, "--scope", "mac"]])
+                signature = ["codesign", "--verify", "--strict", "--verbose=2", fixture]
+                cpus = ["lipo", "-archs", fixture]
+                self.assertLess(calls.index(signature), calls.index(cpus))
+                self.assertLess(calls.index(cpus), calls.index(checks[0]))
+        for name in ("linux-x86_64", "linux-arm64"):
+            with self.subTest(platform=name), self.assertRaises(ValueError):
+                self.call(build.implement_agent_universal, name, [])
+        with self.assertRaises(ValueError):
+            self.call(build.implement_agent_universal, "macos-x86_64", [], archs="arm64")
+
+    def test_main_requires_platform_and_dispatches_the_two_commands(self):
+        for command, called, other in (("implement-agent", "implement_agent", "implement_agent_universal"),
+                                       ("implement-agent-universal", "implement_agent_universal", "implement_agent")):
+            with self.subTest(command=command):
+                with mock.patch.object(sys, "argv", ["build.py", command]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, called) as target, \
+                        mock.patch("sys.stderr"), self.assertRaises(SystemExit) as stopped:
+                    build.main()
+                self.assertEqual(stopped.exception.code, 2)
+                target.assert_not_called()
+                with mock.patch.object(sys, "argv", ["build.py", command, "--platform", "macos-arm64"]), \
+                        mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, called) as target, \
+                        mock.patch.object(build, other) as unused, \
+                        mock.patch.object(build, "quality") as quality:
+                    self.assertEqual(build.main(), 0)
+                    target.assert_called_once_with("macos-arm64", self.root / "downloads", self.root)
+                    unused.assert_not_called()
+                    quality.assert_not_called()
+                    target.side_effect = subprocess.CalledProcessError(1, "R4X-1")
+                    self.assertEqual(build.main(), 1)
+
+    def test_quality_runs_the_example_tests(self):
+        test = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--example", "implement_agent_contract"]
+        with mock.patch.object(build, "build_environment", return_value={}), \
+                mock.patch.object(build, "run", side_effect=lambda args, *, env=None, capture=False: "" if capture else None) as run:
+            build.quality("linux-x86_64", self.root)
+        self.assertIn(test, [call.args[0] for call in run.call_args_list])
+
+    def test_fixture_is_built_twice_but_not_distributed(self):
+        self.assertIn("implement_agent_contract", build.CI_BINARIES)
+        self.assertIn("implement_agent_contract", build.EXAMPLES)
+        self.assertIn("1/implement_agent_contract", build.BUILD_FILES)
+        self.assertIn("2/implement_agent_contract", build.BUILD_FILES)
+        self.assertIn("implement_agent_contract", build.UNIVERSAL_FILES)
+        self.assertFalse(any("implement_agent" in path for path in make_dist.BINARY_PATHS))
+
+    def test_workflow_has_the_two_required_jobs(self):
+        jobs = self.document["jobs"]
+        self.assertEqual(check_workflow.check_native_required(self.document), [])
+        self.assertEqual(check_workflow.check_document(self.document), [])
+        job = jobs["implement-agent"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["timeout-minutes"], check_workflow.R4X1_TIMEOUTS["implement-agent"])
+        self.assertEqual({row["platform"] for row in job["strategy"]["matrix"]["include"]}, set(build.TARGETS))
+        self.assertEqual(job["steps"][-1]["run"], "python3 -B native/ci/build.py implement-agent --platform '${{ matrix.platform }}'")
+        universal = jobs["implement-agent-universal"]
+        self.assertEqual(universal["needs"], "combine")
+        self.assertEqual(universal["timeout-minutes"], check_workflow.R4X1_TIMEOUTS["implement-agent-universal"])
+        self.assertEqual({row["platform"] for row in universal["strategy"]["matrix"]["include"]},
+                         set(build.IMPLEMENT_AGENT_UNIVERSAL_PLATFORMS))
+        for name in ("implement-agent", "implement-agent-universal"):
+            self.assertEqual(jobs[name]["steps"][2]["with"], {"python-version": "3.10.11"})
+            self.assertIn(name, jobs["distribution"]["needs"])
+            self.assertIn(name, check_workflow.REQUIRED_NATIVE_JOBS)
+        for name in ("implement-agent", "implement-agent-universal"):
+            for change in ("timeout", "python", "needs", "step"):
+                changed = copy.deepcopy(self.document)
+                target = changed["jobs"][name]
+                if change == "timeout":
+                    target["timeout-minutes"] += 1
+                elif change == "python":
+                    target["steps"].pop(2)
+                elif change == "needs":
+                    target["needs"] = "policy"
+                else:
+                    target["steps"] = [s for s in target["steps"] if "build.py implement-agent" not in s.get("run", "")]
+                with self.subTest(job=name, change=change):
+                    self.assertTrue(check_workflow.check_document(changed) + check_workflow.check_native_required(changed))
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py implement-agent --platform x"),
+                         "implement-agent")
+        self.assertEqual(check_workflow.native_build_command("python3 -B native/ci/build.py implement-agent-universal"),
+                         "implement-agent-universal")
+        self.assertIsNone(check_workflow.native_build_command("python3 -B native/ci/build.py implement-agents"))
 
 
 if __name__ == "__main__":
