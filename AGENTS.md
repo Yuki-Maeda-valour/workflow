@@ -72,7 +72,7 @@ plugins/dev-workflow/
 └── skills/<name>/SKILL.md          # 各 skill(+ references/ + scripts/ + templates/)
 native/                             # Rust 1.99.1 の開発用ソース(Cargo.toml・Cargo.lock・rust-toolchain.toml・crates/{cli,core,platform,yaml-parser}・.cargo/ のビルド設定・ci/ のビルドと検査)
 .github/workflows/                  # native.yml(4 種類の機械のビルド)と dist-check.yml(配布入口の起動)の CI(変更を送るたびに自動で検査する仕組み)
-scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ・実装の担当の保存〈test_implementer_choice.py〉。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py。配布入口は check_dist_launch.py、専用設定先への実導入は check_plugin_install.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付け。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
+scripts/                            # 規約の検査スクリプト(validate.py)と、言葉の検査の除外の一覧(wording-exceptions.json)と、全回帰テストを 1 つのコマンドで流すスクリプト(run-all.py)と、その部品(回帰テストを並べて流す run-tests.py・loop-selftest.sh を節ごとに分けて流す run-loop-selftest.py・共通の処理の run_units.py)と、プロセスと時間を扱う自己検査を負荷の下で何度も流す道具(stress-tests.py)と、新しい git の容器で流す入口(run-all-container.sh・container/Dockerfile)と、回帰テスト(test_*.py。validate.py・タスク保存先の解決・Issue 本文の書き換え・タスクの置き場・本文ダイジェスト・既知のキーの収集・origin の URL の読み方・ローカルの git 設定のダイジェスト・シェルの必要環境・書き方の決まりのコピーの一致・完了報告の型・道具の版の確かめ・実装の担当の保存〈test_implementer_choice.py〉。Rust の配布物の検査は test_native_distribution.py、比較の補助の検査は test_support_native.py、プロセスの扱いの補助の検査は test_support_proc.py、負荷の下で流す道具の検査は test_stress_tests.py。配布入口は check_dist_launch.py、専用設定先への実導入は check_plugin_install.py)と、回帰テストの共通の補助(support_*.py。git の実行・スクリプトの読み込み・CLI の実行・プロセスの片付けと、比較器〈旧版と Rust 版の動きを比べる検査〉の止め方・状態の読み・疑似端末〈テスト用のまねの端末〉の読み切り〈support_proc.py〉。旧版と Rust 版の比較は support_native.py、診断のテストの準備は diagnostic_test_support.py)
 docs/design.md                      # 設計書(3 層吸収・統一規約・執筆規約・出典)
 docs/testing.md                     # テストの流し方の詳しい説明と時間の記録(AGENTS.md の「検証」の節から指す)
 docs/minutes/                       # 壁打ち・決定録(design の出典)
@@ -154,7 +154,7 @@ python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-wor
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/create-task/scripts/resolve-task-store.py
 python3 -c "import ast,sys; ast.parse(open(sys.argv[1]).read())" plugins/dev-workflow/skills/do-task/scripts/restore-taskmd.py
 python3 -c 'import ast,pathlib; [ast.parse(p.read_text()) for p in pathlib.Path("plugins/dev-workflow/skills/do-task/scripts").glob("*.py")]'   # 診断入口と内部モジュールを含む全構文
-python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" scripts/run_units.py scripts/run-all.py scripts/run-tests.py scripts/run-loop-selftest.py
+python3 -c "import ast,sys; [ast.parse(open(p).read()) for p in sys.argv[1:]]" scripts/run_units.py scripts/run-all.py scripts/run-tests.py scripts/run-loop-selftest.py scripts/stress-tests.py
 ```
 
 `*-selftest.sh` はスタブか scratch リポジトリだけで動く(外部 CLI もネットワークも不要)。

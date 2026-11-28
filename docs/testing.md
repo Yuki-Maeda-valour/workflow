@@ -795,6 +795,7 @@ Mac で行わなくてよいのは、次の3つの条件に当たるケースだ
   - 自己検査は79件から86件になった。直す前の `check_r4u.py` では、足した7件がすべて落ちる。
   - わざと入れる誤り(変異)8個で、それぞれ名前を挙げたテストが落ちる(Issue #519 の完了条件 2)。
   - 作業機(Linux x86_64・旧 Python 3.10.11)の `--r4u-compare` は、合格508件 / 全508件・不合格0件だった。
+- その後(#532): `read_pty` の読み切りの中身は、共通の補助 `scripts/support_proc.py` の `read_until_marker` へ移した。順番(`stop` を `select` の前に読む)・待ち(0.05 秒)・目印の期限(`PTY_MARKER_TIMEOUT`)・`notes` の文は変えていない(「プロセスの扱いの補助(support_proc.py)」)。
 
 #### R4U の時間の記録
 
@@ -866,7 +867,8 @@ python3 -B -m unittest discover -s native/ci -p 'test_r4e.py'
   - その前に、`生成器:` の3行・`固定期待:`・`検査入口:`・`旧版:`・`資源の上限(受け継いだ値。比較の前提の外):` の行と、`未実施:`・`不一致:`・`時間の長いケース(旧版):` の行を出す。
   - `時間の長いケース(旧版):` の行は、一致と不一致のケースのうち、旧版の経過の長い順に上位 5 件を `<ID> <秒> 秒(Rust <秒> 秒)` の形で並べる。合格の回にも出るので、1 件あたりの上限(300 秒)までの余裕を機種ごとに見られる(#531)。
   - ケースの旧版と Rust の起動の時間切れは、`不一致: <ID>: 時間切れ(上限 <秒> 秒): 旧版 <真偽>(<秒> 秒)/ Rust <真偽>(<秒> 秒)。旧版の止める前の様子: …` の 1 行だけで出す。「ケースの作り方の誤り」とは出さない。Rust が時間切れなら `Rust の止める前の様子: …` が付く(両方なら両方)。止める前の様子は、2 秒あけて 2 回取ったプロセスグループの `ps` の行(状態・CPU 時間・経過・常駐メモリ・コマンド。Linux では `/proc` の utime+stime も)と、負荷の平均と CPU の数である。待つ間に子が終わったときは、2 回目をその時点で取り、`止める前に終わった(終了値 <値>)` を足す(止める信号が `EPERM` なら、そのことも足す)。2 回の間に CPU 時間が増えていれば動いていた(遅かった)、増えていなければ止まっていた、負荷の平均が CPU の数より大きければ CPU の取り合いで遅かった、と読める(#531)。
-  - 通常の条件の旧版・上限を測る実行・起動前の記録の時間切れは、今までどおり別の文で出る(#532 で扱う)。
+  - 通常の条件の旧版・上限を測る実行・起動前の記録の時間切れは、今までどおり別の文で出る(#532 では扱わなかった。#539 で上限と並べ方を決めるときに扱う)。
+  - 時間切れの道で止める信号は、#532 から共通の補助の `signal_group` で送る(Mac で回収前の終了済みだけが残るプロセスグループの `EPERM` を、期限つきで送り直す)。
 - 比較器は、次の順に流す。どれかが失敗すると、その場で `不合格:` で止まる(固定期待と必須のケースの不一致は、全部を流してから数える)。
   1. 比較器の自己検査 `native/ci/test_r4e.py`(58 件)。落ちた件か、未実施の件があれば止まる。
   2. 旧版用の Python の確かめ(上の版と部品)。
@@ -1698,6 +1700,7 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
 - テストを1件足した(116件から117件)。`test_output_written_after_an_empty_wait_is_read_before_the_marker` は、`select`・`os.write`・`os.read`(1 回に 4 バイト)を差し替えて順番を決め、目印を書く時点で読み残しが無いことを確かめる。
   - 直す前の比較器では、`AssertionError: [True] != [False]` で落ちる。
   - わざと入れる誤り(変異)で確かめた: 終わりを `select` の後に読む・読んだ回でも目印を書く・読み残しを確かめずに先に書く、の 3 つのどれでも、足したテストが落ちる(Issue #522 の完了条件 2)。
+- その後(#532): `read_terminal_until_marker` の読み切りの中身は、共通の補助 `scripts/support_proc.py` の `read_until_marker` へ移した。順番・待ち(0.02 秒)・全体の期限・失敗の文は変えていない。目印を書けないときは、今までと同じ errno の `OSError` を投げる(「プロセスの扱いの補助(support_proc.py)」)。
 
 CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と[4 種類の CI と成果物](#4-種類の-ci-と成果物)にある。
 - 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。
@@ -2116,7 +2119,7 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - 時刻や絶対パスを出力全体から一括で消さない。時間切れを許される差にしない。
 - 時間切れでは、同じプロセスグループ(信号をまとめて送れるプロセスの集まり)へ終了信号を送り、直接の子を回収する。グループを抜けた子は停止の対象外。孫以降の回収は、その親か OS が受け持つ。
   - Mac で、プロセスグループへ送る信号が `EPERM` になったときは、直接の子が終わっていれば回収し、最大 5 秒、0.02 秒ごとに送り直す。送れたか、プロセスグループが無くなれば(`ESRCH`)戻る。5 秒たっても `EPERM` なら、今までどおり `PermissionError` を投げる。Linux などは待たずに投げる(#526・#527)。
-- Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。
+- Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。比較器の止め方・状態の読み・疑似端末の読み切りは、下の「[プロセスの扱いの補助(support_proc.py)](#プロセスの扱いの補助support_procpy)」にある。
 - `probe` に旧版は無い。補助のテストと `check_probe.py` が通っても、旧版との同等性を確認したとは扱わない。
 
 #### Mac のプロセスグループへの信号の EPERM(#526・#527・2026-11-26 の記録)
@@ -2129,13 +2132,55 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - CI の 2 回は、TERM で終わったスタブの `sleep` が、引き取った先(launchd)で回収される前の一瞬に KILL が当たったと推測する(未確認。Mac で手元に再現していない)。2 回目で、後始末の KILL の時点に `EPERM` が消えていたことは、この見立てに合う。
 - 直し(`scripts/support_native.py` の `_signal_group`): 上の「旧版と Rust 版の差分テストの補助」の時間切れの箇条のとおり、Mac の `EPERM` だけを期限つきで送り直す。`EPERM` を「プロセスグループが無い」とは読み替えない。期限を過ぎても `EPERM` なら、止められない子か、回収されない終了済みの子(親がプロセスグループの外にいる)が残るとみて投げる。
   - `EPERM` が続くと、本線の KILL と後始末の KILL で 5 秒ずつ待ち、失敗が見えるまで最大約 10 秒かかる。
-  - 比較器が自分で `os.killpg` を呼ぶ所(例: `check_r4g.py`・`check_r4e.py`・`check_adopt_candidate.py`)は変えていない。Mac で同じ `EPERM` が起きうる(推測。CI で落ちた記録は #526・#527 のほかに見ていない)。#532 で、止め方の共通の補助にまとめるときに扱う。
+  - 比較器が自分で `os.killpg` を呼ぶ所(例: `check_r4g.py`・`check_r4e.py`・`check_adopt_candidate.py`)は変えていない。Mac で同じ `EPERM` が起きうる(推測。CI で落ちた記録は #526・#527 のほかに見ていない)。#532 で、R4G・`test_r4g.py`・R4E・R4C・R4B の送信を `support_proc.signal_group` に移した(下の「プロセスの扱いの補助(support_proc.py)」)。ほかの比較器の同じ形は #557、S2E の比較器は #540 で扱う。
 - テスト: `scripts/test_support_native.py` に 6 件を足した(27 件から 33 件)。
   - `SignalGroupTest`(5 件): 偽の時計と偽の `killpg` で、Mac の `EPERM` を送り直すこと・期限で投げること・Linux では待たないこと・`ESRCH` では送り直さないことを確かめる。
   - `MacZombieGroupTest`(1 件。`/proc` を読むので Linux だけ): 回収前の直接の子だけが残るプロセスグループを本物のプロセスで作り、Mac の規則(全員がゾンビなら `EPERM`)を `/proc` でまねた `killpg` で、`run_command` が例外を投げずに戻ることを確かめる。
   - 直す前の `support_native.py` では、4 件が `AssertionError` で落ちることを確かめた。
   - わざと入れる誤り(変異)で確かめた: 送り直しをやめる・Mac の確かめを外す・`EPERM` で送り直さずに戻る・`process.poll()` を外す・期限の確かめを外す、の 5 つのどれでも、名前を挙げたテストが `AssertionError` で落ちる(Issue #526 の完了条件 2)。
 - `scripts/test_support_native.py` は CI では流れない(全回帰テストで、Linux でだけ流れる)。Mac の実機の動きは、PR の CI の Mac の `r4c`・`r4c-universal` の自己検査で見る(この記録を書いた時点では未確認。時々しか起きない揺れなので、1 回の合格だけで直ったとは扱わない)。
+
+### プロセスの扱いの補助(support_proc.py)
+
+`scripts/support_proc.py` は、プロセスの不在の確かめと片付け(#388)に加えて、比較器の止め方・状態の読み・疑似端末の読み切りを持つ(#532)。標準ライブラリだけを使い、ほかの `support_*.py` を読み込まない。`native/ci` の比較器は、`Path(__file__).resolve().parents[2] / 'scripts'` を `sys.path` に足して読み込む。
+
+| 関数 | 使い方と確かめる内容 |
+|---|---|
+| `signal_group(pgid, number, *, reap=None)` | `os.killpg` と同じに送る(Linux の動きは同じ)。最初の `ESRCH` は `ProcessLookupError` を投げる。Mac の `EPERM`(送れる生きたプロセスが無いプロセスグループ。回収前の終了済みだけが残るプロセスグループ)だけ、`reap` を呼び、0.02 秒ごとに最大 5 秒(`ZOMBIE_GROUP_WAIT`)送り直す。送り直しで `ESRCH` になれば戻る。期限を過ぎても `EPERM` なら投げる |
+| `group_gone(pgid, *, wait=ZOMBIE_GROUP_WAIT, reap=None)` | 信号 0 でプロセスグループの有無を読み、`(不在か, 見た結果)` を返す。`EPERM` を不在と読まない。Mac の `EPERM` だけ `wait` 秒まで読み直す |
+| `process_state(pid)`・`DEAD_STATES` | 状態の 1 文字(Linux は `/proc`、ほかは `ps`。1 回の読み)。`DEAD_STATES` は `None`・`Z`・`X`(回収の途中)を死んだと読む |
+| `wait_state(pid, accept, timeout, *, read=None)` | 0.005 秒ごとに読み、`(合ったか, 最後の状態)` を返す。例外は投げない(失敗の文は呼び出し側が決める) |
+| `read_until_marker(master, slave, finished, *, prefix, select_wait, deadline=None, marker_timeout=None)` | 疑似端末を目印で読み切り、`MarkerRead(data, reason, errno, written)` を返す。子の終わりを `select` の前に読み、`select` が空で終わっていたときだけ目印を書く。例外は投げない |
+
+- 使い分け:
+  - `assert_absent_now` は、製品が「止めて回収した」と返した直後の確かめで、生きていれば待たずに失敗にする(`EPERM` は OS を問わず 1 秒だけ確かめ直す)。
+  - `group_gone` は、比較器が止めた後のプロセスグループの確かめで、孫の終了済みを引き取った側が回収するのを待つ(Mac だけ 5 秒)。
+- 試す信号(比べる場面そのものの信号)には `reap` を渡さない。止めるための送信(時間切れ・例外・`finally`)で、この後に直接の子を回収する所は `reap=process.poll` を渡す。
+- `scripts/support_native.py` は、ほかの補助を読み込まない決まりなので、`_signal_group`(#526)をコピーとして持つ。最初の `ESRCH` の扱い(`_signal_group` は黙って戻り、`signal_group` は `ProcessLookupError` を投げる)のほかは同じ動きをすることを、`scripts/test_support_proc.py` の `SignalGroupParityTest` が確かめる。
+- `scripts/test_support_proc.py` の `KillpgCallSitesTest` は、移した比較器(R4A の残り・R4U・R4G・`test_r4g.py`・R4E・`test_r4e.py`・R4C・R4B)に、`PermissionError` か `OSError` を受け止める `try` の本体の外に、`signal_group` を通さない `os.killpg` が無いことと、ファイルごとの `signal_group(` の数と `reap=` の数を確かめる。
+- R4A の残りの `kill_group`・`group_alive` は、記録したプロセスグループの番号が使い回されて他人のプロセスグループになったときに、止めたり残っていると数えたりしないため、`PermissionError` を「自分の子のプロセスグループではない」と読む。この決まりは変えていない。
+
+#### 負荷の下で何度も流す確かめ(stress-tests.py)
+
+- プロセスと時間を扱う自己検査を足すか直すときは、`scripts/stress-tests.py` で、同時 16・負荷 16(作業機の 16 CPU の 2 倍の混み)で、100 回以上流して失敗 0 を確かめる(#532)。
+  - 例: `python3 -B scripts/stress-tests.py --repeat 200 --jobs 16 --load 16 test_support_proc.ProcessStateTest`
+  - `native/ci` のテストは `--dir native/ci` を付けて、`test_r4g.Comparator.<テスト>` の形で渡す。R4A の残りの自己検査は、本家 CPython 3.10.11 で道具を起動し、`R4A_REST_FIXTURE` を渡す(子は道具を動かした Python で流れる)。
+  - 1 回ずつ別のセッションで流し、終わった後と時間切れ(`--timeout`。既定 3600 秒)のときに、その回のプロセスグループへ SIGKILL を送り、直接の子を回収する(孫の回収は、その親か OS が受け持つ)。`--load` の負荷の子は 1 つの別のプロセスグループで動かし、終わりに止めて、`group_gone` で残りが無いことを確かめる。
+  - 全部合格なら終了 0、1 回でも落ちれば(時間切れも)終了 1。止める合図を受けたときは 130(負荷のプロセスグループが残れば 1)。
+- 1 回あたり 1% で落ちる揺れを、200 回で 87%、100 回で 63% の確率で見つける。移す前のコードでも同じ混みで流して比べる。移す前も 0 回なら、その混みが元の揺れを起こせるとは言い切らない。
+- 道具の自己検査は `scripts/test_stress_tests.py`(5 件)。
+
+#### 比較器の止め方を共通の補助にまとめた(#532・2026-11-28 の記録)
+
+- 2026-11-23〜26 に、CI の揺れの Issue が 10 件できた(Rust の入れ直しの #509・#523 を含む)。比較器の自己検査の揺れの多くは、止め方・生死の確かめ方・疑似端末の読み切り方を、比較器ごとに別々に書いていたことによる(#511・#519・#522・#524・#526・#531 の直し。状態の文字を 2 回読んで比べない形は、製品の loop-selftest の #435 でも直した)。
+- 移した所: `signal_group(` は 30 か所(R4G 11・`test_r4g.py` 2・R4C 13・R4E 3・R4B 1)、うち `reap=` は 20 か所。R4A の残りの信号 0 の確かめ 1 か所を `group_gone` へ、R4A の残りと R4U の目印の読み切りを `read_until_marker` へ、R4G の状態の読みを `process_state`・`wait_state` へ移した。R4E の自己検査の孫の止まりの確かめは、`DEAD_STATES` で決める形にした(Linux の `/proc` は回収の途中に `X` を出すため)。
+- 比べる中身・ケース・件数・上限の秒数は変えていない。移す前と移した後で、比較器の自己検査の件数(`test_r4a_rest.py` 117・`test_r4u.py` 86・`test_r4g.py` 63・`test_native_r4g.py` 66・`test_r4e.py` 58・`native/ci/test_adopt_candidate.py` 66・`test_r4b.py` 16)と、手元の比較(R4A の残り 2034/2034・R4E 810 件・R4B 合格〈自己検査 16・旧版のテスト 46・追加の比較 23〉・R4U 508/508)は同じだった。
+- 負荷の下の確かめ(作業機の Linux x86_64・同時 16・負荷 16):
+  - 揺れた自己検査 4 つ(R4U の `PtyReaderTests`・R4A の `PtyReadAll`・R4G の `test_process_report_collects_the_state_and_says_when_missing`・R4E の `TimedOutRuns`)は、移す前と移した後のどちらでも、100 回ずつ流して失敗 0 だった。移す前も 0 回なので、この混みが元の揺れを起こせるとは言い切らない。
+  - 共通の補助のテスト 3 クラス(`ProcessStateTest`・`ReadUntilMarkerTest`・`MacZombieGroupTest`)は、移した後に 200 回流して失敗 0 だった(移す前は関数が無いので流していない)。
+- テスト: `scripts/test_support_proc.py`(37 件)と `scripts/test_stress_tests.py`(5 件)を足した。直す前のコードでは、`test_support_proc.py` の足したテストが `AssertionError` で落ちることを確かめた。
+- わざと入れる誤り(変異)22 通りで、名前を挙げたテストが `AssertionError` で落ちることを確かめた(Issue #532 の完了条件 2)。
+- Mac で揺れが減ったかは未確認。merge の後の main の push の CI と、その後の PR の CI で、移した比較器の自己検査が落ちたら新しい Issue にする。移さなかった所(`diff_snapshot_fixtures/`・`loop_state_*`・`check_loop_state.py`・`test_loop_state.py`・`run_units.py`・`test_git_config_digest.py` の `killpg`、時間に頼る疑似端末の読み)と、#511・#513 の自己検査を `stress-tests.py` で流して揺れを測ることは #557、S2E の比較器は #540 で扱う。
 
 ### タスク保存先の比較(段階 1a)
 
@@ -2622,16 +2667,17 @@ bash scripts/run-all-container.sh [--commit <rev> | --worktree] [--image <名前
 - 失敗したプロセスの出力は、最後にまとめて出る。
 - 限界: 入れ子の実行で、内側の別のグループの子孫が合図を無視すると、外側の SIGKILL の後に残ることがある。そのときは、残ったプロセスを pid を指定して止める。
 - 件数と結果は、1 つのプロセスで順に流す `python3 -m unittest discover -s scripts -p 'test_*.py'` と同じ。
+- プロセスと時間を扱う自己検査を足すか直すときは、`scripts/stress-tests.py` で負荷の下で何度も流し、失敗 0 を確かめる(上の「負荷の下で何度も流す確かめ(stress-tests.py)」)。
 - テストのファイルを足すときは、ほかのテストと同じパスの一時フォルダ・ポートを使わない。`HOME` の下に作るときは、一意な名前のフォルダにする。同時に流すと取り合うため。
 - テストの共通の処理は、`scripts/` の `support_*.py`(共通の補助)を使う(#388)。名前を `test_` で始めないので、discover は拾わない。
   - `support_git.py`: テストが git を流す関数。git の自動の保守(`maintenance`・`gc`)を止めて流す。
   - `support_load.py`: 製品のスクリプトの読み込み(`__pycache__` を書かない)と、`__pycache__` を除いたコピー。
   - `support_cli.py`: CLI(コマンドとして起動する入口)の実行・確かめが外れたときの文・同じプロセスでの `main` の呼び出し。
-  - `support_proc.py`: プロセスの不在の確かめと片付け。
+  - `support_proc.py`: プロセスの不在の確かめと片付けと、比較器の止め方・状態の読み・疑似端末の読み切り(#532)。使い方は上の「プロセスの扱いの補助(support_proc.py)」にある。
   - `support_native.py`: 旧版と Rust 版の出力・終了コード・ファイルの比較。使い方は上の「旧版と Rust 版の差分テストの補助」にある。
   - 診断のテストの準備は `diagnostic_test_support.py`(共通の補助とは別のファイル)。
   - dotted の形(`python3 -m unittest scripts.<名前>`)では、`import support_*` が失敗する。`diagnostic_test_support.py` も同じく読み込めない。
-  - dotted の形で流す手順がある `test_check_process.py`・`test_review_guard.py` だけ、失敗したときに `from scripts import support_*` で読み込み直す。
+  - dotted の形で流す手順がある `test_check_process.py`・`test_review_guard.py` と、`test_support_native.py`・`test_support_proc.py`・`test_stress_tests.py` は、失敗したときに `from scripts import support_*` で読み込み直す。
 
 ### run-loop-selftest.py(loop-selftest)
 
