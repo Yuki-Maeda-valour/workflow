@@ -790,7 +790,7 @@ Mac で行わなくてよいのは、次の3つの条件に当たるケースだ
   - 目印を書くかは、`select` の前に読んだ `stop` で決める。`stop` を見た後に始めた `select` が空なら、端末に読み残しは無いので、目印の書き込みは止まらない。`select` の後に読んだ `stop` で決めると、出力が残ったまま目印を書き、端末の空きが足りないと書き込みが止まる(設計レビューで、作業機で確かめた)。
   - 目印が期限(`PTY_MARKER_TIMEOUT` = 20秒)までに出ないか、読み取りが失敗したか、目印の前に端末が閉じたか、目印の書き込みが失敗したら、理由を付けて不合格にする。
   - `check_capture` の失敗の文に、旧版か Rust か・捕まえた長さ・記録の長さ・最初に違う位置と前後16バイトずつの中身を出す。
-  - 前例の `check_r4a_rest.py`(`read_terminal_until_marker`)も、`select` が空で戻った後に子の終わりを見て、目印を書く(コードで確かめた)。その時点で子の出力が端末に残っていると、目印の書き込みが止まり、期限の確かめへ戻らないおそれがある(推測。R4A の比較器では流していない)。別の Issue(#522)にした。
+  - 前例の `check_r4a_rest.py`(`read_terminal_until_marker`)も、`select` が空で戻った後に子の終わりを見て、目印を書く(コードで確かめた)。その時点で子の出力が端末に残っていると、目印の書き込みが止まり、期限の確かめへ戻らないおそれがある(推測。R4A の比較器では流していない)。別の Issue(#522)にした。#522 で、子の終わりを `select` の前に読む形に直した(記録は R4A の残りの節の「疑似端末の読み切りで、目印の書き込みが止まりうる順番(#522)」)。
 - 確かめたこと:
   - 自己検査は79件から86件になった。直す前の `check_r4u.py` では、足した7件がすべて落ちる。
   - わざと入れる誤り(変異)8個で、それぞれ名前を挙げたテストが落ちる(Issue #519 の完了条件 2)。
@@ -1237,6 +1237,23 @@ python3 -B -m unittest discover -s scripts -p 'test_native_r4g.py'
   - わざと入れる誤り(変異)で確かめた: `DEAD_STATES` を `(None, 'Z')` に戻すと 2 件、`wait_process_dead` が抜けた後にもう 1 回読む形にすると 1 件が FAIL になる。
   - 直した後、手元で `test_pty_run_reads_everything_the_child_wrote_before_exiting` を 20 回流して 20 回合格した(直す前も手元では落ちない。通常の経路を壊さないことの確かめ)。
 
+#### 自己検査の状態の文字の比べ方の揺れ(#524・2026-11-26 の記録)
+
+- 2026-11-25 に、比較器の自己検査 `test_process_report_collects_the_state_and_says_when_missing` が、CI の Mac x86_64 で 1 回落ちた(main の push〈PR #520 の merge〉の Native run 45539632217 の attempt 1・`r4g (macos-x86_64, macos-15-intel)`・job 138980658513)。
+  - 失敗は `native/ci/test_r4g.py` の `AssertionError: 'S' != 'R'`。流し直した attempt 2 では合格した。
+- 原因(コードを読んで確かめた。CI の回がこれによるかは推測): Mac の形(`ps` で読む形)の確かめが、自分のプロセスの状態の文字を `process_report` と `process_state` の 2 回の `ps` で読み、同じかを比べていた。
+  - テストのプロセスは、`ps` を起動して待つ間は眠っていて(`S`)、その前後は走っている(`R`)。どちらの文字になるかは、`ps` が読んだ瞬間で決まる。
+  - Linux の機械で `sys.platform` を `darwin` に差し替えて読むと、状態の欄は `S` だった(CI の回と同じ文字)。
+- 直し(`native/ci/test_r4g.py` だけ。比較器の本体 `check_r4g.py` は変えていない):
+  - 自分の行(`ps` の形。`pid <番号>: <pid> <ppid> <pgid> <stat> <args>`)は、`pid <番号>:` に続く `ps` の出力の 1〜3 番目の欄が自分・親・プロセスグループの番号で、4 番目の欄の 1 文字目が `ps` の状態の文字の 1 つであることを確かめる。状態の文字は、macOS の `ps` と procps(Linux の `ps`)の文字を合わせた `D`・`I`・`R`・`S`・`T`・`t`・`U`・`W`・`X`・`Z`。2 回目の読みとは比べない。
+  - 2 回の読みの比べは、SIGSTOP で状態が止まった状態(`T`)に決まる子で行う。`wait_state` で止まった状態を待ってから、`process_report` の状態の欄と `process_state` が同じことを確かめる。
+  - Linux の形(`/proc` で読む形)は、自分の `/proc` を自分で読む間は `R` に決まる(推測)ので、2 回の読みを比べたままにした。
+  - Linux の機械では、`ps` の形も `sys.platform` を差し替えた `subTest` で流す。今までは Mac の CI でしか流れていなかった。
+- テストの件数は変えていない(`test_r4g.py` 63 件・`test_native_r4g.py` 66 件・CI の比較器が流す `Comparator` 62 件のまま)。
+  - Linux の機械で、直す前のテストに `sys.platform` を `darwin` にする差し替えと、自分の番号への `process_state` だけ `R` を返す差し替えを入れると、`'S' != 'R'` で落ちる(`darwin` の差し替えが無いと、Linux の形の分かれ道を通るので落ちない)。直した後のテストは、同じ差し替えでも通る。
+  - わざと入れる誤り(変異)で確かめた: `ps` の欄から `stat` を外す・`pgid` と `stat` を入れ替える・`process_state` が別の欄を読む・Linux の形の `State` の行を外す・`status` を自分の番号から読む、の 5 つのどれでも、直したテストが落ちる(Issue #524 の完了条件 2)。
+  - Mac の実機の動きは、PR の CI の Mac の `r4g`・`r4g-universal` の自己検査で見る(この記録を書いた時点では未確認)。
+
 ### S3I-Aの比較
 
 #474の `implement-guard.sh` のGitを呼ばない部分は、製品CLIへ未登録・未配布の開発用実装である。
@@ -1501,7 +1518,7 @@ export CARGO_TARGET_DIR="$(mktemp -d)"
   - `requires_raw_name`: 2件(`candidate-keys` 1・`loop-task-text` 1)。
 - 比較の結果は、2034/2034の合格。接続待ち0・未実施0・捕捉不能10(標準出力などがディレクトリのとき。空の観測に読み替えず、見える出力と終了値だけを比べた)。
 - 境界の組: 21組。21組のすべてで、旧版の出力が境界で変わることを確かめた。
-- 比較器の自己検査: 116件(2026-11-25 の #513 で2件足した)。
+- 比較器の自己検査: 117件(2026-11-25 の #513 で2件、2026-11-26 の #522 で1件足した)。
 - Rustの単体検査: `cargo test --locked` の全体が117件。platformの `r4a_rest` の7件を含む。cliの48件は、`--example r4a_rest_contract` を付けたときだけ流れる。
 - 実測時間(2026-11-23。自己検査114件の時点の作業機): 自己検査が約45秒、比較が約95秒だった(作業機の負荷でばらつく。以前の比較は約100〜123秒)。自己検査は、絞り込み(`--case`)の前は約1319秒(93件)だった。
 
@@ -1646,7 +1663,7 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
 未確認(CI の結果を見てから書く):
 - 入力の渡し方を直した後の、`r4a-rest` 4機種と `r4a-rest-universal` 2機種の結果。
 - `r4a-rest-universal` の Mac x86_64 で、`child/legacy/origin-json: reason-huge` が通るか。
-- 必須 case 2034 件・自己検査 116 件での、各機種の自己検査と比較の時間。
+- 必須 case 2034 件・自己検査 117 件での、各機種の自己検査と比較の時間。
 
 自己検査の、印で子を探す確かめの揺れ(#513):
 - 自己検査 `test_a_marked_process_in_another_session_is_found_and_stopped` が、CI の Linux arm64 で1回落ちた(PR #512 の run 45307421246 の attempt 1・job 138194586040)。
@@ -1668,6 +1685,19 @@ commit 63e111a の push 用 CI([Native run 45097810895](https://github.com/Yuki-
   - 走査の速い機械をまねた手元の確かめ(直した後の確かめの回。本家 CPython 3.10.11・500回ずつ): 直す前の起こし方は208回見つからず、`start_marked_child` の後に探すと0回だった。
   - 直す前の起こし方で見つからない回数は、回ごとにばらつく(設計の時は446回、この回は208回)。
   - 直した後、手元で `test_a_marked_process_in_another_session_is_found_and_stopped` を20回流して20回合格した(直す前も手元ではふつう落ちない。通常の経路を壊さないことの確かめ)。
+
+疑似端末の読み切りで、目印の書き込みが止まりうる順番(#522・2026-11-26 の記録):
+- CI で落ちた記録ではなく、#519(R4U の疑似端末の読み切りの直し)の設計レビューで見つけた恐れである。CI でこの形で止まった記録は見ていない(未確認)。
+- 直す前の `read_terminal_until_marker` は、`select` が「読むもの無し」で戻った後に、子が終わったかを見て(`process.poll()`)、終わっていれば子の側の端(slave)へ終わりの目印を書いていた。
+  - その間に子が最後の出力を書いて終わると、目印を書く時点で、子の出力が端末に残っている。端末の空きが足りないと `os.write` が止まり、読むのは同じスレッドだけなので戻らない(期限の確かめはループの先頭にだけある)。
+- 作業機(Linux x86_64・カーネル 6.8・Python 3.10.12)での確かめ:
+  - `select` を差し替えて、最初の呼び出しで子の出力をまねた N バイトを書き、偽の子を「終わった」にする順番を起こした。N が 9・4,096・8,192・10,000〜10,450 バイトのどれでも、直す前の関数は、目印を書く時点で端末に読み残しがあった。直した形では読み残しは無かった。
+  - 1 つのプロセスで何回も試した回のうち、N = 12,000 バイトの 1 回で、直す前の関数の目印の書き込みが止まった(5 秒たっても戻らない)。新しいプロセスで同じ N を試すと、子の出力をまねた書き込み自体が端末に入りきらず、止まる場面を毎回は作れなかった。止まるかは、端末の中の溜め方で変わると推測する。
+  - #519 の設計レビューの記録では、R4U 用に同じ順番で作った読み方は、出力が 17,978〜17,982 バイトのときに止まった。
+- 直し(`native/ci/check_r4a_rest.py`): 子の終わりを `select` の前に読み(`finished`)、`select` が空で `finished` が真のときだけ目印を書く(#519 の R4U と同じ形)。終わりを見た後に始めた `select` が空なら、端末に読み残しは無い。期限・`select` の 0.02 秒・失敗の扱い・比べる中身は変えていない。
+- テストを1件足した(116件から117件)。`test_output_written_after_an_empty_wait_is_read_before_the_marker` は、`select`・`os.write`・`os.read`(1 回に 4 バイト)を差し替えて順番を決め、目印を書く時点で読み残しが無いことを確かめる。
+  - 直す前の比較器では、`AssertionError: [True] != [False]` で落ちる。
+  - わざと入れる誤り(変異)で確かめた: 終わりを `select` の後に読む・読んだ回でも目印を書く・読み残しを確かめずに先に書く、の 3 つのどれでも、足したテストが落ちる(Issue #522 の完了条件 2)。
 
 CIの必須ジョブ(2つ)は、[CI入口の説明](../native/ci/README.md#r4a残り5本の必須比較と検査用実行物)と[4 種類の CI と成果物](#4-種類の-ci-と成果物)にある。
 - 専用exampleはCI内の転送物に含め、配布用の `native-dist.tar` には含めない。
@@ -1795,6 +1825,172 @@ CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物�
 - 順序を決めないSIGINT(E17)は、旧版・Rustを各20回流し、結果の種類(終了値・残った名前・標準出力の有無・標準エラーの最後の行)を記録する。Rustの種類が、基準の集合(順序を決めた旧版の種類と固定の3種類)と旧版の標本の種類の和に収まることを求める。順序を決めたケースは全部を比べる。
 - E24(起動時に閉じた標準のfd)は、閉じたfdを`/dev/null`にして流した旧版の結果をRustの期待にする(承認済みの差の個別期待。経路・期待の作り方・階層の偶奇の規則は[設計](design.md#r4cに限る承認済みの差)の8)。旧版の個別期待と一緒に、承認済みの差の区分で数える。追跡済みの経路は、rootの階層の偶数と奇数の両方で流す。基準の版の容器ではE24の36ケースが通った。
 
+### S2Eの比較
+
+#470のenvironment-guardの環境照合9コマンドと内部reader(旧`environment-guard.py`)は、製品CLIへ未登録・未配布の開発用実装である。
+[契約と承認済みの差](design.md#environment-guardの環境照合と内部readers2e)、[APIと入口](../native/README.md#environment-guardの環境照合s2e)を参照する。
+比較は、旧`environment-guard.py`(旧guard)と、今回のソースから作った検査用実行物`s2e_contract`を、同じ物理入力で順に動かして行う。
+旧版・Rust・固定期待の3つを使う。両側が同じ誤値でも、固定期待と違えば失敗にする。
+これは、Linuxの経路の9コマンドに当たる。Macの経路(と模擬)では、旧版の記録(`copy_cases.json`)と、旧版が狙った経路へ届いた固定期待との照らし合わせ(`check_recorded_old`・`check_old`)を行わない。Macの旧版の値が未測定だからである。Macの9コマンドは、旧新の一致と、旧新それぞれの個別期待(認めた差)で確かめる。Macの実機では未確認。
+
+必要な環境は次のとおり。
+
+- 比較器のPythonは3.10系で、root以外の利用者であること。違えば、比較の前に止まる。CIは`actions/setup-python`で3.10.11に固定する。手元の3.10.12でも通った(2026-11-25)。
+- `requirements-dev.txt`の依存は、比較には要らない。比較器(`check_s2e.py`・`s2e_commands.py`・`test_s2e.py`・`scripts/support_native.py`)と旧guard・`gen_cases.py`の`import`は、標準ライブラリだけである(2026-11-25に`import`の行を読んで確かめた)。`host-check.py`は任意の`import yaml`(`yaml_loader()`。無ければ`None`)を持つが、比較が通る`verified_*`の経路では呼ばない(2026-11-26に確かめた)。CIの`build.py prepare`が依存も入れるのは、`prepare`の共通の手順だからで、S2Eの比較のためではない。`prepare`が要る理由は、受け取ったtarの記録を照らす`read_record`→`identity()`が`rustc 1.99.1`を使うことである。
+- `git`・`python3`・`bash`がPATHにあること。`exec`の子と、Git設定の解析の比較が使う。
+- `cc`(Cコンパイラ)は、比較の手順(`cargo test -p dev-workflow-cli --example s2e_contract`と`check_s2e.py`)には要らない。使うのは、`platform`crateの単体検査`signal_cases_match_python_3_10`(ワークスペースの`cargo test --locked`)だけで、信号の状態を読む小さなCのプログラムを組む。Macでは必須で、`xcode-select --install`で入れる。Linuxは、無ければ`/proc/self/status`だけで流す。
+- 旧guardは変えない。比較器は、旧guardのバイト列のSHA-256(`5770210377a1c5ef79effbcbf8f5f0678946f14ad9f75143fd1c219daf64d796`)を確かめる。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --example s2e_contract)
+(cd native && cargo build --release --locked -p dev-workflow-cli --example s2e_contract)
+python3 -B native/ci/check_s2e.py \
+  --fixture "$CARGO_TARGET_DIR/release/examples/s2e_contract"
+```
+
+- 出力先はリポジトリの外に置く。他機種は、その機械のRust対象名へ変える(CIは、`build`が作った2本をそれぞれ流す)。
+- 比較器の引数は次のとおり。
+  - `--fixture`(必須): `s2e_contract`の絶対パス。未指定・不在・実行不能なら失敗にする。配布済みの実行物やPATHへ切り替えない。
+  - `--no-selftest`: 比較器自身の検査(`test_s2e.py`)を省く。省いたことを`S2E: 比較器自身の検査は省いた(--no-selftest。…)`の行と、件数の行の`自己検査 省略(--no-selftest)`の欄に出す。CIの`s2e`の2回目の比較だけが付ける(1回目は必ず流す)。
+  - `--write-mapping`: 既存テストの対応表(`s2e_fixtures/test_mapping.md`)を作り直す。対応表を直したときだけ使う。
+  - 環境変数`S2E_SIMULATE_MAC=1`: Linuxから、Macの経路を模擬する(下)。
+- 最後の行が`S2E: 合格`で、終了コードが0なら合格である。件数の行は、最後の行より前にある。
+- 未起動・時間切れ・件数0を合格にしない。Rustを起動した比較が、どの項目にも1件以上必要である。`--no-selftest`で省いた検査は、省いたことを出力に出す。
+
+Macの経路の模擬(`S2E_SIMULATE_MAC=1`):
+- 旧版の`bootstrap`を、既定の監視先だけ実パスへ置き換えた形(`patched`)で流し、Linuxだけの印の項目を流さず、`/dev/full`が無いものとして扱う。
+- 比較器の検査用であり、Mac実機の確認ではない。Linuxの必須項目を流していないので、最後の行は`S2E: 模擬の合格(…Linux の合格ではない。…)`で、終了コードは3である。終了コード3は「模擬としては合格」を表す。CIは、この環境変数を外して流す(`s2e_probe()`)。
+
+Macの経路の`bootstrap`:
+- Macでは、既定の監視先`/etc`が`/private/etc`へのリンクで、旧版もRustも`bootstrap`で失敗する見込みである(推測。Mac実機は未確認)。
+- そこで、Linuxだけの印の無い流れの`bootstrap`も、旧版を置き換えた形(`patched`)で作る。Rustの`bootstrap`は起動しない。
+- そのため、MacでのRustの`bootstrap`の確かめは、既定の監視先での失敗どうしの一致(`run_mac_default`)だけになる。
+- `verify`以降は、置き換えた旧版が作った出力一式を、旧版とRustで比べる。
+
+件数(2026-11-25に、作業機のLinux x86_64で、releaseの`s2e_contract`・Python 3.10.12・非rootで`check_s2e.py`を流した2回(Linuxと、`S2E_SIMULATE_MAC=1`の模擬)の値。この表の値は、2026-11-25夜〜11-26の再測でも同じ件数の行になった):
+
+| 区分 | Linux | Macの経路の模擬 |
+|---|---|---|
+| 比較 | 710件(通常の一致691・認めた差19。うちU4が8) | 660件(通常の一致645・認めた差15。うちU4が4) |
+| 未実装の印・予定の枠 | 0件・0件 | 0件・0件 |
+| 比較器自身の検査(`test_s2e.py`) | 84件 | 84件 |
+| 9コマンドの項目 | 233項目(全機種で必須197・Linuxだけ36) | 197項目 |
+| Rustを起動した比較 | 1751件 | 1357件 |
+| 起動の一致 | 1062件 | 775件 |
+| 読取りだけのコマンドの前後確認(別に数える) | 1583件 | 1460件 |
+| `bootstrap`の出力一式のバイト比較と受領の確認 | 542件 | 171件 |
+| 相互読取り | 368件 | 170件 |
+| 内部readerの値の比較 | 495件 | 450件 |
+| 認めた差(旧新それぞれの固定期待) | 19件 | 14件 |
+| 比較から外した物(理由を出力に出す) | 8件 | 2件 |
+| 既存テストの対応表 | 117件(旧新の両方で比較54・Rustの検査へ置換51・対象外12) | 同じ |
+| 対応表が指す名前(比較のケースとRustのテスト)の確認 | 256件 | 256件 |
+
+- 上の表の各列は、その回の`check_s2e.py`の件数の行で確かめた。Macの経路の列は、Linuxの`S2E_SIMULATE_MAC=1`の模擬の値で、Mac実機の値ではない(Mac実機は未確認)。
+- 機種ごとの項目数(Linux 233・Macの経路197)は、グループごとに完全一致で確かめる。`EXPECTED_ITEMS`と、Linuxだけの印の項目の名前の一覧(`EXPECTED_LINUX_ONLY`。36件)が正本である。
+- Linuxだけにした36件の理由と、Macで未確認の点は、[設計](design.md#linuxだけにした比較の項目)にある。
+- 比較から外した物(Linuxで8件)は、旧版と同じ入力を作れない物と、比べない理由のある物である。理由は出力の`比較から外した物:`の行に出る。
+  - U6(NSSだけの利用者の`~user`と、HOMEが無いときの`~`)は未確認と記録する。
+  - 上限の端の流れ4件は、readerを比べない(端の外の流れで比べる)。
+  - `x-source-guard-changed`は、guardのコピーを書き換えた入力でのreaderの差で、R4H・D2の設計で期待を決める。
+  - `hook-after-verify`は、`cfg(test)`の差し込み点でだけ作れるので、Rustの検査(`copy_tests.rs`)で確かめる。
+- Rustの単体検査(`cargo test --locked -p dev-workflow-cli --example s2e_contract`)は、作業機のreleaseで193件が通った(2026-11-25)。
+- 受け継いだ`RLIMIT_NOFILE`は、比較器が設定せず、`S2E: 受け継いだ RLIMIT_NOFILE(…)`の行で記録する(作業機はsoft・hardとも1048576)。
+
+比較の中身(要点):
+- 同じ物理入力を、旧版とRustで順に流す。読取りだけのコマンドは、前後で入力の内容・属性・リンクが変わらないことも確かめる。
+- `bootstrap`は、旧版の出力先を退避してから同じ出力先でRustを流し、控えと受領のバイト列を置き換えなしで比べる。受領の`sha256`が、その実行の控えの生バイトのSHA-256と一致することも別に確かめる。
+- 相互読取り: 旧版の控えをRustが照合し、Rustの控えを旧版が照合する。内部readerは、`host-check.py`と同じ呼出しの深さで旧版を呼び、Rustの隠しコマンドの出力と比べる。
+- 競合(偽の`git`が解析中に設定を変える・`go`待ちの間の書換え・2回の照合の間のguardのコピーの書戻しなど)は、公開CLIとOSの観測点で再現する。
+- 上限の端(項目数の足し数・読取りバイト数の足し数)は、旧版を上限の定数だけ変えて流して測る。項目数の足し数は、一時フォルダの深さで変わるので、毎回旧版で測る(`calibrate_entry_edge`。作業機では9,880〜9,904を観測した)。読取りバイト数の足し数は67,042,031だった(2026-11-25の実測)。測った足し数は、出力の`測った値:`の行に出る。
+- U1〜U7などの認めた差は、通常の一致の件数に入れず、旧新それぞれの固定期待を別に検査する。認めていない差は不合格にする。
+
+比較器自身の検査(`native/ci/test_s2e.py`。84件):
+- 不具合を1つずつ入れた偽のRustを、比較器が不合格にすることを確かめる。入れるのは、順序・予算・再照合・include・Gitの起動回数・部品の集合・guardのコピー・受領のJSON・readerの型・読取りだけの前後確認・出力の途中書き込み・SIGINTの後始末・子の残りなどである。
+- 比較器は、最初にこの検査を流す。落ちたら本体の比較へ進まない(`--no-selftest`を付けたときを除く)。
+- 検査を足すときの決まり: 壊し方ごとに、落ちた比較の文面を`assertRaisesRegex`で固定する。
+
+固定期待の作り直し:
+- 固定期待(`native/ci/s2e_fixtures/*.json`)は、Python 3.10(Unicode 13.0.0)から作る。作り直すのは、旧版か契約を変えたときだけである。
+- `gen_cases.py`は、Linux・root以外・Python 3.10系で流す(CIでは流さない)。Linux以外では、`main2`の領域が理由を出して止まる(Macの疑似端末の挙動は未確認)。
+
+```bash
+python3 -B native/ci/s2e_fixtures/gen_cases.py --check          # 既存の固定期待が今のPythonから作った内容と同じか
+python3 -B native/ci/s2e_fixtures/gen_cases.py --only <領域>     # 作り直す(領域の名前は`gen_cases.py`の`AREAS`)
+python3 -B native/ci/s2e_fixtures/gen_unicode_tables.py --check \
+  --rust native/crates/cli/src/commands/environment_guard/unicode_tables.rs \
+  --errno-rust native/crates/cli/src/commands/environment_guard/errno_table.rs \
+  --expect native/ci/s2e_fixtures
+```
+
+- 既存テストの対応表を直したときは、`python3 -B native/ci/check_s2e.py --write-mapping`で`test_mapping.md`を作り直す。
+
+時間(手元の作業機。Linux x86_64・16コア)。記録にある、最後まで流れた測定のうち、次の 14 回を表に並べる。
+- 全体は、同じ回の比較・9コマンド・比較器自身の検査の和である。表の「残り」は、全体から比較と9コマンドを引いた値である。
+- 日時は日本時間。始めはコマンドを起動した記録の時刻、終わりは結果を受け取った記録の時刻である(終わりは、結果を受け取った記録だけを使う。結果を出すコマンドの中の`uptime`の時刻は使わない)。始めに秒を足した値と、0〜約9秒の範囲で合う(差が最も大きいのは311.7秒の回の約8.5秒。結果を10秒ごとに確かめたため)。
+- 負荷平均は`uptime`の1・5・15分の値である。記録に無い値は「未記録」と書く。
+
+| 日時(2026-11-25〜26) | 流し方 | 秒 | 内訳(比較・9コマンド・残り) | 流す直前の負荷平均 | 終わりの負荷平均 |
+|---|---|---|---|---|---|
+| 11-25 19:15〜19:20 | Mac の経路の模擬の全体 | 311.7 | 19.4・157.1・135.2 | 未記録 | 未記録 |
+| 11-25 20:46〜20:53 | Linux の全体 | 458.0 | 21.0・250.2・186.8 | 未記録 | 未記録 |
+| 11-25 20:53〜20:58(始めは終わりから秒を引いた計算値) | Linux の`--no-selftest` | 269.9 | 21.2・248.6・自己検査なし | 未記録 | 未記録 |
+| 11-25 21:55〜22:03 | Linux の全体 | 477.4 | 21.0・267.4・189.0 | 未記録 | 未記録 |
+| 11-25 22:06〜22:11 | Linux の`--no-selftest` | 275.0 | 21.0・253.9・自己検査なし | 未記録 | 未記録 |
+| 11-25 22:11〜22:16 | Mac の経路の模擬の全体 | 326.1 | 19.4・170.8・135.9 | 未記録 | 未記録 |
+| 11-25 23:04〜23:14 | Linux の`--no-selftest` | 563.6 | 56.4・506.9・自己検査なし | 3.68・2.06・1.40(23:04:13。始めの45秒前) | 45.38・26.42・13.58(23:14:29。終わりの約7秒後) |
+| 11-25 23:14〜23:21 | Mac の経路の模擬の`--no-selftest` | 406.2 | 51.0・354.9・自己検査なし | 45.38・26.42・13.58(前の回の終わり。約9秒前) | 50.56・44.92・27.10(23:21:24) |
+| 11-25 23:29〜23:48 | Linux の全体 | 1114.1 | 67.9・654.0・392.2 | 50.55・48.06・35.83(23:29:28。始めの約1秒前) | 51.95・51.47・46.71(23:48:04) |
+| 11-25 23:48〜23:54 | Mac の経路の模擬の`--no-selftest` | 374.3 | 59.9・314.2・自己検査なし | 51.95・51.47・46.71(前の回の終わり。約22秒前) | 16.56・41.24・44.89(23:54:45。終わりの約2秒後) |
+| 11-25 23:54〜11-26 00:02 | Linux の全体 | 447.5 | 22.9・236.3・188.3 | 16.56・41.24・44.89(23:54:45。始めの約5秒前) | 1.02・9.67・27.81(00:02:17) |
+| 11-26 00:02〜00:07 | Linux の`--no-selftest` | 315.8 | 23.2・292.4・自己検査なし | 1.02・9.67・27.81(前の回の終わり。9.3秒前) | 1.20・4.09・19.96(00:07:42) |
+| 11-26 00:07〜00:10 | Mac の経路の模擬の`--no-selftest` | 177.0 | 20.6・156.3・自己検査なし | 1.20・4.09・19.96(前の回の終わり。7.9秒前) | 0.86・2.59・16.50(00:10:47) |
+| 11-26 00:21〜00:27 | Mac の経路の模擬の全体 | 310.1 | 20.4・157.6・132.1 | 0.55・0.50・8.15(00:21:56) | 0.76・0.71・6.02(00:27:10。終わりと同じ時刻) |
+
+表の注:
+- 「前の回の終わり」と書いた4回(406.2・374.3・315.8・177.0秒)は、始める直前の`uptime`が記録に無いので、前の回の終わりの`uptime`を使った。
+- 記録には、表に無い回(最後まで流れた回と、途中で止まった回)もある。
+- 563.6秒の回を流している間に、別のMacの経路の模擬の`--no-selftest`が2回(23:02:21〜23:07:00・23:07:03〜23:12:37)動いていた。
+- 269.9秒の回は、単独の起動の記録が無い(458.0秒の回と同じコマンドで続けて起動した)。始めの20:53は、終わりの記録の時刻から秒を引いた計算値である。
+- 311.7・326.1秒の回は、コマンドに`--no-selftest`が無い(記録で確かめた)。
+- 流している間の負荷平均は、記録に無い。
+- 比較器の版は、回によって違う。結果の行に「自己検査 N 件」が出た回で確かめた値は次のとおりである。
+  - 311.7・458.0秒の回は81件。477.4・326.1・1114.1秒の回は84件。
+  - ほかの回(`--no-selftest`の回と、件数の行が記録に見つからなかった447.5・310.1秒の回)は、版が未確認である。
+
+表から分かることと、分からないことは次のとおりである。
+- 同じ流し方でも、秒が大きく違う回がある(例: Linuxの全体は447.5〜1114.1秒)。
+- 理由は、回ごとの機械の負荷と推測する。流している間の負荷は記録に無いので、確かめていない。
+- 下のCIの見積りは、手元の310.1秒(流す直前の負荷平均は0.55)に、手元からCIへの倍率を当てたもので、CIの混み具合は含まない。
+
+CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物は[CI入口の説明](../native/ci/README.md#s2eの必須比較と検査用実行物)にもある):
+- 比較は`build`と`verify-universal`へ入れず、必須ジョブ`s2e`と`s2e-universal`で流す。
+  - `s2e`は`build`の後に、4機種で、各ビルド2回の`s2e_contract`を比べる。上限は120分。
+  - `s2e-universal`は`combine`の後に、Mac 2機種で、署名後の1本を比べる。上限は60分。
+  - 内側の上限(1回の比較)は50分(3000秒。`build.py`の`S2E_TIMEOUT`)である。`s2e`は50分×2+準備5分=105分<120分、`s2e-universal`は50分+5分=55分<60分で、どちらもジョブの上限より小さい。ジョブの上限は、既存の`build`(120分)・`verify-universal`(60分)と同じ枠である。
+  - `build`の上限(120分)と`verify-universal`の上限(60分)は変えていない。`build`には、exampleのビルドと単体検査だけを足した。
+- `s2e`・`s2e-universal`は、`distribution`の`needs`に入れない(S3D・R4Cと同じ)。
+- `native.yml`のジョブの定義は21個で、matrixを展開した実行は59件である(2026-11-25に、`s2e`・`s2e-universal`を含めて数えた)。
+- `check_workflow.py`は、`s2e`・`s2e-universal`のジョブの欠落・機種・`needs`・上限(120分・60分)を確かめる。`test_native_ci.py`の`S2EConnectionTests`は、`build.py`の流れ・署名とCPUの確かめ・workflowの形・比較の2回目が`--no-selftest`を付けること・内側の上限とジョブの上限の関係を確かめる。
+- `scripts/test_native_s2e.py`(6件。`scripts/run-all.py`が自動で集める)は、起動前の登録のマクロ`s2e_record_startup_state!`の展開が、`examples/s2e_contract.rs`の1か所と`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけであることを、静的に確かめる(別名・別の括弧・許可の外からの`capture_inherited_sigpipe`の参照・テストのモジュールの外の展開は拒む)。置き場は、R4Gの`scripts/test_native_r4g.py`と同じ。比較器自身の検査(`test_s2e.py`)の84件は変えていない。
+- 製品の`dev-workflow`に`main`より前の処理が入らないことは、2026-11-26に、muslのreleaseを直す前の作りと比べて確かめた(`strace -f -e trace=rt_sigaction <bin> --version`で`rt_sigaction(SIGPIPE, NULL, …)`が無くなった。`.init_array`はgnu 0x10・musl 0x8)。製品へ印を置く変更を止めるのは、次の2つである。`scripts/test_native_s2e.py`は、マクロの展開の場所と、`link_section`・`.init_array`・`__mod_init_func`の場所(マクロの本体の中だけ)を確かめる。platformの単体テスト`inherited_sigpipe_is_recorded_before_main`は、初期化関数が呼ばれた回数(1回)を確かめる。`LoaderInitializer`(`native/ci/test_diff_snapshot.py`)は`environment_guard.rs`を名前で外し、印が「ある」ことしか見ないので、このファイルの登録は止めない。
+
+CIの時間の見積り(推測。CIでは未測定):
+- 既存の記録で確かめた倍率は次のとおりである。
+  - R4E: CIのMac x86_64は315秒で、CIのLinux x86_64(98秒)の3.2倍(上の「R4Eの比較」の表)。手元のLinuxの約40〜60秒(「手元のLinux実装検証」)に対しては約5.3〜7.9倍。
+  - R4Aの残り5本: CIのMac x86_64の比較1回目は298.8秒で、CIのLinux x86_64(117.1秒)の2.55倍(「CIで確かめた事実」)。
+  - 自己検査(R4Aの残り5本): CIのMac x86_64は、作業機の約1.2倍(1286秒と1077秒)。
+- 見積りの元は、自己検査を含むMacの経路の模擬の310.1秒(2026-11-26。流す直前の負荷平均は0.55・0.50・8.15。上の表)である。`s2e-universal`の1回と、`s2e`の1回目は、自己検査を流すので、この条件に当たる。`--no-selftest`付きの177.0秒は、`s2e`の2回目の条件で、`s2e-universal`と1回目には当たらない。
+- CIのLinuxからMac x86_64への倍率(2.55〜3.2倍)を310.1秒に当てると、1回は約790〜990秒(約13〜17分)になる(手元とCIのLinuxが同じ速さという仮定。未確認)。
+- 手元からCIのMac x86_64への倍率(R4Eの約5.3〜7.9倍)を310.1秒に当てると、約1,640〜2,450秒(約27〜41分)になる。この倍率はMac x86_64だけに当たる値で、Mac arm64の倍率は確かめていない(Mac arm64とLinuxの機種には当たらない)。
+  - 内側の上限50分は、時間の順に次の2段で決めた。
+    - 先に、326.1秒(2026-11-25。上の表。コマンドに`--no-selftest`が無い回)に同じ倍率を当てると約29〜43分になり、上端が当初の内側の上限35分(2,100秒)を超えたので、50分(3,000秒)にした。
+    - 後で測った自己検査つきの310.1秒でも、上端は約2,450秒(約41分)で35分を超える。50分(3,000秒)には約550秒(約9分。326.1秒の見積りなら約425秒で約7分)の余裕がある。
+  - 倍率が上端を超えるか、CIの機械が混むと、足りないおそれがある。上限の値は、ここでは変えない。
+  - 177.0秒(自己検査を含まない)に同じ倍率を当てると約16〜23分で、Mac x86_64(Mac Intel)の`s2e`の2回目の見積り(推測)になる。Mac arm64とLinuxの機種には、この倍率は当たらない。どちらの見積りも、PRのCIの実測で確かめる。
+- 50分を超えるかどうかは、PRのCIで機種ごとの時間を記録して決める。超えるときは、内側の上限・ジョブの上限・`check_workflow.py`を同じPRで直す案を、設計に追記してレビューに通す。既存の上限は、理由と実測なしに変えない。
+
 ### 4 種類の CI と成果物
 
 CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・CPU でビルドする。
@@ -1919,8 +2115,27 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
 - 比べるのは終了コード、出力のバイト列、ファイルの作成・変更・削除、実行権限を含む権限。`allow_differences` は、この比較だけで差を認める項目名と判定関数を指定する。
 - 時刻や絶対パスを出力全体から一括で消さない。時間切れを許される差にしない。
 - 時間切れでは、同じプロセスグループ(信号をまとめて送れるプロセスの集まり)へ終了信号を送り、直接の子を回収する。グループを抜けた子は停止の対象外。孫以降の回収は、その親か OS が受け持つ。
+  - Mac で、プロセスグループへ送る信号が `EPERM` になったときは、直接の子が終わっていれば回収し、最大 5 秒、0.02 秒ごとに送り直す。送れたか、プロセスグループが無くなれば(`ESRCH`)戻る。5 秒たっても `EPERM` なら、今までどおり `PermissionError` を投げる。Linux などは待たずに投げる(#526・#527)。
 - Git の状態と、正常終了後の子プロセスの残存は、呼び出し側で `support_git.py`・`support_proc.py` を組み合わせて確かめる。補助は実行を隔離する仕組みではない。
 - `probe` に旧版は無い。補助のテストと `check_probe.py` が通っても、旧版との同等性を確認したとは扱わない。
+
+#### Mac のプロセスグループへの信号の EPERM(#526・#527・2026-11-26 の記録)
+
+- 2026-11-25 に、CI の Mac で、R4C の比較器の自己検査 `test_stub_that_times_out_or_deletes_a_third_party_entry_fails` が 2 回落ちた。どちらも、`run_command` の時間切れの後の KILL で、`os.killpg` が `PermissionError: [Errno 1] Operation not permitted` を投げた。
+  - このテストは、`#!/bin/sh` の後に `sleep 30` の 1 行だけのスタブを、`run_command(..., timeout=1)` で動かす(`native/ci/test_adopt_candidate.py` :190-193・:222-224)。
+  - 1 回目(#526): main の push(merge commit `da8eac8`)の Native run 45580448719 の attempt 1・`r4c (macos-arm64, macos-15)`・job 139121200731。例外の後始末の KILL でも、同じ `PermissionError` が出た。
+  - 2 回目(#527): PR #521(commit `5c0c5e6`。R4C の比較器と `support_native.py` に触れていない)の Native run 45585747341 の attempt 1・`r4c-universal (macos-x86_64, macos-15-intel)`・job 139192523345。例外の後始末の KILL は通った。
+- 原因: Mac(XNU)は、回収前の終了済みのプロセス(ゾンビ)だけが残るプロセスグループへの `killpg` に、`ESRCH` ではなく `EPERM` を返す(製品の #289 で見つけた応答と同じ)。`_signal_group` は `ProcessLookupError`(`ESRCH`)だけを受け止めていた。
+  - CI の 2 回は、TERM で終わったスタブの `sleep` が、引き取った先(launchd)で回収される前の一瞬に KILL が当たったと推測する(未確認。Mac で手元に再現していない)。2 回目で、後始末の KILL の時点に `EPERM` が消えていたことは、この見立てに合う。
+- 直し(`scripts/support_native.py` の `_signal_group`): 上の「旧版と Rust 版の差分テストの補助」の時間切れの箇条のとおり、Mac の `EPERM` だけを期限つきで送り直す。`EPERM` を「プロセスグループが無い」とは読み替えない。期限を過ぎても `EPERM` なら、止められない子か、回収されない終了済みの子(親がプロセスグループの外にいる)が残るとみて投げる。
+  - `EPERM` が続くと、本線の KILL と後始末の KILL で 5 秒ずつ待ち、失敗が見えるまで最大約 10 秒かかる。
+  - 比較器が自分で `os.killpg` を呼ぶ所(例: `check_r4g.py`・`check_r4e.py`・`check_adopt_candidate.py`)は変えていない。Mac で同じ `EPERM` が起きうる(推測。CI で落ちた記録は #526・#527 のほかに見ていない)。#532 で、止め方の共通の補助にまとめるときに扱う。
+- テスト: `scripts/test_support_native.py` に 6 件を足した(27 件から 33 件)。
+  - `SignalGroupTest`(5 件): 偽の時計と偽の `killpg` で、Mac の `EPERM` を送り直すこと・期限で投げること・Linux では待たないこと・`ESRCH` では送り直さないことを確かめる。
+  - `MacZombieGroupTest`(1 件。`/proc` を読むので Linux だけ): 回収前の直接の子だけが残るプロセスグループを本物のプロセスで作り、Mac の規則(全員がゾンビなら `EPERM`)を `/proc` でまねた `killpg` で、`run_command` が例外を投げずに戻ることを確かめる。
+  - 直す前の `support_native.py` では、4 件が `AssertionError` で落ちることを確かめた。
+  - わざと入れる誤り(変異)で確かめた: 送り直しをやめる・Mac の確かめを外す・`EPERM` で送り直さずに戻る・`process.poll()` を外す・期限の確かめを外す、の 5 つのどれでも、名前を挙げたテストが `AssertionError` で落ちる(Issue #526 の完了条件 2)。
+- `scripts/test_support_native.py` は CI では流れない(全回帰テストで、Linux でだけ流れる)。Mac の実機の動きは、PR の CI の Mac の `r4c`・`r4c-universal` の自己検査で見る(この記録を書いた時点では未確認。時々しか起きない揺れなので、1 回の合格だけで直ったとは扱わない)。
 
 ### タスク保存先の比較(段階 1a)
 
@@ -2075,20 +2290,34 @@ python3 -B scripts/check_loop_state_mutations.py
 - 今回の成功だけで Rust 版との同等性を確認したとは扱わない。
 - #448 側と全回帰テストを同時に流さない。公開前は管理担当が実行権を確認し、確認済みの commit を指定して全回帰テストを流す。
 
-### CI の Linux arm64 の Rust の入れ直し(#509)
+### CI の Rust の入れ直し(#509・#523)
 
 - CI の Linux arm64 の機械(`ubuntu-24.04-arm`)で、`build.py prepare` の `rustup toolchain install 1.99.1` がときどき失敗していた。
   - 記録の行は `info: recovering from a partially installed toolchain` の後に、`error: failed to install component: 'clippy-preview-aarch64-unknown-linux-gnu', detected conflict: 'bin/cargo-clippy'`(run 45094423658・job 137431062394)。
-  - 起きたのは、2026-11-12〜11-23 に少なくとも 12 回と、2026-11-24 の 1 回。すべて Linux arm64 のジョブで、x86_64 と Mac では出ていない。
+  - 起きたのは、2026-11-12〜11-23 に少なくとも 12 回と、2026-11-24 の 1 回。#509 の調べの範囲では、すべて Linux arm64 のジョブだった。2026-11-25 には Mac arm64 でも出た(下の #523 の記録)。
 - rustup 1.29.3 のソースでは、この行は、入れた部品の一覧(`lib/rustlib/components`)が空なのに、前の設定(`multirust-config.toml`)が部品を持つときに出る。一覧に無い部品のファイルは消さないので、残ったファイルが入れ直す部品とぶつかる。
 - 手元の使い捨ての `RUSTUP_HOME`(x86_64・rustup 1.29.3)で、1.99.1 を入れた後に `components` を空にし、`multirust-channel-manifest.toml` と `update-hashes/<名前>` を消すと、同じ形で失敗した(`detected conflict: 'bin/cargo-fmt'`。ぶつかるファイルは、先に届いた部品で変わる)。
-- 直し(`native/ci/build.py` の `prepare`): CI の Linux arm64(`GITHUB_ACTIONS` が `true`)だけ、入れる前に `rustup --version` と `rustup toolchain list` を流す。1.99.1 があれば、状態の 1 行を出してから `rustup toolchain uninstall 1.99.1` を流す。
+- 直し(`native/ci/build.py` の `prepare`): CI の機械(`GITHUB_ACTIONS` が `true`)で、入れる前に `rustup --version` と `rustup toolchain list` を流す。1.99.1 があれば、状態の 1 行を出してから `rustup toolchain uninstall 1.99.1` を流す。
   - どれも `RUSTUP_AUTO_INSTALL=0` とリポジトリ直下で流す。手元で確かめると、`native/` の中では、一覧のコマンドも `native/rust-toolchain.toml` の道具を入れ直そうとして、同じぶつかりを起こした。
   - 同じ手元の状態で、直した関数の後の `install` は終了コード 0 で終わり、`rustfmt`・`clippy` が入った。
+  - #509 では CI の Linux arm64 だけに当てた。#523 で、CI の 4 機種に広げた(下の記録)。
 - 機械に入れかけの 1.99.1 がある理由は未確認。次に当たったとき、CI の記録の次の 2 つで調べる。
   - `rustup --version` の出力。
   - 状態の 1 行(`components` の状態・`multirust-config.toml` の部品の名前・`bin/cargo-clippy` と `update-hashes/<名前>` の有無・3 つの更新時刻〈UTC〉)。
 - テスト: `native/ci/scripts/test_native_ci.py` の `BuildTests` に 6 件を足した。`build.py test` は 183 件から 189 件になり、`GITHUB_ACTIONS=true` を付けても通る。main の版の `build.py` では、並びが変わらないことのテストを除く 5 件が落ちることを確かめた。
+
+#### CI の Mac arm64 でも出た(#523・2026-11-25 の記録)
+
+- CI の Mac arm64 でも同じ形で失敗した(Native run 45539632217 の attempt 1・`verify-universal (macos-arm64, macos-15)`・job 138981770435)。流し直した attempt 2 では合格した。
+  - 記録の行は `info: recovering from a partially installed toolchain` → `info: removing previous version of component …`(`rustc`・`cargo`・`rust-std`・`rust-docs`・`rustfmt`・`clippy`)→ `error: failed to install component: 'clippy-preview-aarch64-apple-darwin', detected conflict: 'bin/cargo-clippy'`。
+  - 前に入れかけた物の設定に `rust-docs` があった。このリポジトリは `minimal` の profile で入れるので、`rust-docs` を入れない。入れかけの物は、このリポジトリの工程の外で入ると推測する(未確認)。
+- 直し(#523): 消す処理を呼ぶ条件を、`GITHUB_ACTIONS` が `true` の CI の 4 機種にした。手元の機械では、今までどおり消さない。消す処理の中身は変えていない。
+  - x86_64 の 2 機種では、#509 の調べと run 45539632217 の記録の範囲で、この失敗を見ていない(ほかは未確認)。それでも外す根拠が無いので当てた。
+  - 同じ run の x86_64 の 2 ジョブ(job 138980658435・138980658513)の `prepare` は `downloading 5 components` で、1.99.1 が無かった。無い機械で増えるのは、`rustup --version` と `rustup toolchain list` の 2 つの呼び出しだけ。
+- テスト: `BuildTests` の `prepare` のテストを、4 機種で消す場合・Mac arm64 で飛ばす場合と止まる場合・手元の機械の 4 機種に直した。関数の数は同じで、`build.py test` は 198 件のまま。`GITHUB_ACTIONS` なしと `GITHUB_ACTIONS=true` の両方で通る。
+  - 直す前の `build.py` では、3 つのテスト関数の 9 つの場合(`subTest`。1 つのテスト関数の中で分けて確かめる場合)が `AssertionError` で落ちることを確かめた(`FAILED (failures=9)`)。
+  - わざと入れる誤り(変異)で確かめた: 条件から `GITHUB_ACTIONS` の確かめを外す(いつでも消す)と、`test_prepare_order_is_unchanged_outside_ci` の 4 機種が落ちる。
+  - `GITHUB_ACTIONS` を決めずに `prepare` を呼んでいたテスト(`test_native_ci.py` 3 か所・`test_s3d_ci.py` 1 か所)は、`GITHUB_ACTIONS` を消してから呼ぶ。CI で `GITHUB_ACTIONS=true` のまま `build.py test` を流しても、確かめる中身が変わらない。
 
 ## 全回帰テストのコマンド(run-all.py)
 

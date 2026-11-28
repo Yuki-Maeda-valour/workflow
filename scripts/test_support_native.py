@@ -1,5 +1,6 @@
 """旧版と Rust 版の比較用補助を、一時フォルダの実行ファイルだけで検査する。"""
 import ctypes
+import errno
 import hashlib
 import os
 from pathlib import Path
@@ -206,6 +207,124 @@ class RunCommandTest(TemporaryScripts):
             support_proc.assert_group_absent_now(pgid)
 
 
+class FakeClock:
+    """差し替えた time.sleep の引数の分だけ進む時計。0 から始め、上限は無い。"""
+
+    def __init__(self):
+        self.now = 0
+        self.sleeps = []
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now += seconds
+
+
+class FakeKillpg:
+    """呼ばれた (pid, 信号, 時計) を控え、outcomes の順に答える killpg。最後の答えを繰り返す。
+
+    答えは 'EPERM'・'ESRCH'・None(送れた)。送り直しが止まらない変異でもすぐ FAIL で止まるよう、
+    1000 回を超えて呼ばれたら AssertionError を投げる。
+    """
+
+    LIMIT = 1000
+
+    def __init__(self, clock, outcomes):
+        self.clock = clock
+        self.outcomes = outcomes
+        self.calls = []
+
+    def __call__(self, pid, number):
+        self.calls.append((pid, number, self.clock.now))
+        if len(self.calls) > self.LIMIT:
+            raise AssertionError(f'killpg が {self.LIMIT} 回を超えて呼ばれた(送り直しが止まらない)')
+        outcome = self.outcomes[min(len(self.calls), len(self.outcomes)) - 1]
+        if outcome == 'EPERM':
+            raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+        if outcome == 'ESRCH':
+            raise ProcessLookupError(errno.ESRCH, os.strerror(errno.ESRCH))
+
+
+class FakeProcess:
+    """pid と、呼ばれた数を数える poll だけを持つ偽の Popen。"""
+
+    pid = 4242
+
+    def __init__(self):
+        self.polls = 0
+
+    def poll(self):
+        self.polls += 1
+
+
+class SignalGroupTest(unittest.TestCase):
+    """_signal_group が、Mac の EPERM だけを期限つきで送り直すことを確かめる(#526)。
+
+    support_native の属性ではなく os・sys・time のモジュールそのものを差し替える。
+    直す前の support_native は sys・time を読み込まないので、属性を差し替えると ERROR になるため。
+    """
+
+    def prepare(self, outcomes):
+        self.clock = FakeClock()
+        self.killpg = FakeKillpg(self.clock, outcomes)
+        self.process = FakeProcess()
+
+    def send(self, platform):
+        # 差し替えは _signal_group を呼ぶ間だけにする。
+        with mock.patch.object(os, 'killpg', self.killpg), mock.patch.object(sys, 'platform', platform), \
+                mock.patch.object(time, 'monotonic', self.clock.monotonic), \
+                mock.patch.object(time, 'sleep', self.clock.sleep):
+            support_native._signal_group(self.process, signal.SIGKILL)
+
+    def sent(self):
+        return [(pid, number) for pid, number, _ in self.killpg.calls]
+
+    def test_mac_retries_eperm_until_the_group_is_gone(self):
+        self.prepare(['EPERM', 'EPERM', 'ESRCH'])
+        try:
+            self.send('darwin')
+        except PermissionError as error:
+            self.fail(f'Mac の EPERM を送り直さずに投げた: {error!r}')
+        self.assertEqual([(FakeProcess.pid, signal.SIGKILL)] * 3, self.sent())
+        self.assertEqual(2, self.process.polls)
+
+    def test_mac_retries_eperm_until_the_signal_is_delivered(self):
+        self.prepare(['EPERM', None])
+        try:
+            self.send('darwin')
+        except PermissionError as error:
+            self.fail(f'Mac の EPERM を送り直さずに投げた: {error!r}')
+        self.assertEqual([(FakeProcess.pid, signal.SIGKILL)] * 2, self.sent())
+
+    def test_mac_raises_eperm_that_lasts_past_the_deadline(self):
+        self.prepare(['EPERM'])
+        with self.assertRaises(PermissionError):
+            self.send('darwin')
+        times = [at for _, _, at in self.killpg.calls]
+        self.assertGreaterEqual(len(times), 2, '期限まで送り直していない')
+        self.assertEqual({(FakeProcess.pid, signal.SIGKILL)}, set(self.sent()))
+        # 境目(最初の EPERM から 5 秒)に初めて届いた時に投げる。
+        self.assertGreaterEqual(self.clock.now, 5, '期限の前に投げた')
+        self.assertLess(times[-2], 5, '期限を過ぎても送り直した')
+
+    def test_other_platforms_raise_eperm_at_once(self):
+        self.prepare(['EPERM'])
+        with self.assertRaises(PermissionError):
+            self.send('linux')
+        self.assertEqual([(FakeProcess.pid, signal.SIGKILL)], self.sent())
+        self.assertEqual(0, self.process.polls)
+        self.assertEqual([], self.clock.sleeps)
+
+    def test_esrch_is_not_retried(self):
+        for platform in ('darwin', 'linux'):
+            with self.subTest(platform=platform):
+                self.prepare(['ESRCH'])
+                self.send(platform)
+                self.assertEqual([(FakeProcess.pid, signal.SIGKILL)], self.sent())
+
+
 @unittest.skipUnless(sys.platform.startswith('linux'), '孤児の停止と回収の区別には Linux の subreaper が必要')
 class TimeoutDescendantsTest(TemporaryScripts):
     def setUp(self):
@@ -296,6 +415,88 @@ class TimeoutDescendantsTest(TemporaryScripts):
                     support_proc.assert_group_absent_now(pgid)
                 finally:
                     self.assertEqual([], support_proc.cleanup(self.root, records=[parent_record, child_record]))
+
+
+class XnuZombieGroupKillpg:
+    """Linux の上で、Mac(XNU の killpg1)の規則をまねる killpg。
+
+    /proc/<pid>/stat の最後の ')' の後の欄(状態・親・群)で群の全員を集める。群が空なら ESRCH、
+    全員の状態が Z か X(回収前の終了済み)なら EPERM(数を数える)、ほかは本物の os.killpg に渡す。
+    """
+
+    def __init__(self):
+        self.real = os.killpg
+        self.eperm = 0
+        self.last = None  # 最後に EPERM を返した時の群の (pid, 状態, 親)。
+
+    @staticmethod
+    def members(pgid):
+        found = []
+        for entry in os.listdir('/proc'):
+            if not entry.isdigit():
+                continue
+            try:
+                data = Path('/proc', entry, 'stat').read_bytes()
+            except OSError:
+                continue  # 読む間に消えたプロセス。
+            state, parent, group = data[data.rindex(b')') + 2:].split()[:3]
+            if int(group) == pgid:
+                found.append((int(entry), state.decode(), int(parent)))
+        return found
+
+    def __call__(self, pgid, number):
+        members = self.members(pgid)
+        if not members:
+            raise ProcessLookupError(errno.ESRCH, os.strerror(errno.ESRCH))
+        if all(state in ('Z', 'X') for _, state, _ in members):
+            self.eperm += 1
+            self.last = members
+            raise PermissionError(errno.EPERM, os.strerror(errno.EPERM))
+        return self.real(pgid, number)
+
+
+@unittest.skipUnless(sys.platform.startswith('linux'), '群の全員の状態を /proc で読む(Linux だけ)')
+class MacZombieGroupTest(TemporaryScripts):
+    """回収前の直接の子だけが残る群への KILL を、Mac の規則をまねて確かめる(#526・#527)。"""
+
+    def test_run_command_returns_when_mac_eperm_ends_after_reaping_the_direct_child(self):
+        parent_record = self.root / 'parent.json'
+        child_record = self.root / 'detached.json'
+        script = self.script(f'''
+            import json, os, time
+            from pathlib import Path
+            {support_proc.record(parent_record)}
+            if os.fork() == 0:
+                os.setsid()
+                {support_proc.record(child_record)}
+                # 群を抜けた子が出力のパイプを持つので、TERM で終わった親は回収前のまま群に残る。
+                time.sleep(8)
+                os._exit(0)
+            time.sleep(60)
+        ''')
+        rule = XnuZombieGroupKillpg()
+        try:
+            # 差し替えは run_command を呼ぶ間だけにする。timeout は、混んだ機械でも
+            # TERM の前に群を抜けた子が出力のパイプを持つように 3 秒にする。
+            with mock.patch.object(os, 'killpg', rule), mock.patch.object(sys, 'platform', 'darwin'):
+                try:
+                    result = support_native.run_command([script], cwd=self.root, timeout=3)
+                except PermissionError as error:
+                    self.fail(f'回収前の直接の子だけが残る群の EPERM で投げた: {error!r}'
+                              f'(EPERM {rule.eperm} 回・最後に見た群: {rule.last})')
+            parent = support_proc.read_record(parent_record)
+            child = support_proc.read_record(child_record)
+            self.assertIsNotNone(parent, '親の記録が無い')
+            self.assertIsNotNone(child, '群を抜けた子の記録が無い(場面ができていない)')
+            self.assertNotEqual(parent[1], child[1], '子が群を抜けていない')
+            self.assertTrue(result.timed_out)
+            self.assertEqual(-signal.SIGTERM, result.returncode)
+            self.assertGreaterEqual(rule.eperm, 1, 'EPERM の場面ができていない')
+            parent_pid, parent_pgid = parent
+            support_proc.assert_absent_now(parent_pid)
+            support_proc.assert_group_absent_now(parent_pgid)
+        finally:
+            self.assertEqual([], support_proc.cleanup(self.root, records=[parent_record, child_record]))
 
 
 class SnapshotTreeTest(TemporaryScripts):
