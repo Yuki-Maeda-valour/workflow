@@ -1646,6 +1646,7 @@ APIは [native/README.md](../native/README.md#markdown-の表の-xlsx-出力r4e)
 
 #481 で、診断 9 本(`diagnostic-*.py`)の Rust 移植(R4D)の 1 つ目の単位を、開発用ソースへ実装した。
 製品のコマンドへは登録しない。配布も変えない。呼出元は無い。
+(#481 の時点の記述。#485 の後は、R4D-3 の `state`・`paths`・`private` が `Failure` を、`state`・`private` が予算を使う。製品の呼出元は無い。`read_stack` は R4D-3b #544 で使う。)
 reftable は、Git が参照(ブランチ名などと、その指す先)を表の形のファイルに保存する形式である。
 table は reftable の 1 つのファイル、stack は `tables.list` に並んだ table を古い順に重ねた全体である。
 section は table の中の、種類ごとのまとまり(参照・object・log など)、block は section の中の 1 つの区切り、varint は長さが変わる整数の書き方、header と footer は table の頭と末尾の管理情報、CRC は誤りを見つけるための検査値である。
@@ -1660,6 +1661,8 @@ R4D の 5 つの単位(Issue は、R4D-1 が #481、R4D-2〜R4D-5 が #484〜#48
 | R4D-3 | 保護記録と専用の管理領域(`diagnostic-state.py`・`diagnostic-private.py`・`diagnostic-paths.py`) |
 | R4D-4 | 除外の計画(`diagnostic-plan.py`・`diagnostic-git.py` の引数の解析と検査・機密指定の読み取り) |
 | R4D-5 | 観測と入口(`diagnostic-views.py` の 7 操作・除外の照合・`run` と入口全体) |
+
+- R4D-3 は 2 つに分けた(2026-11-27 の #485 の設計)。前半の R4D-3(#485)はファイルも Git も使わない形式の検査と参照の解決の手順、後半の R4D-3b(#544)は結び付け・専用の管理領域(診断が一時フォルダに作る、保持した管理データだけのコピー)・子の起動である。`diagnostic-paths.py:24-100`(`glob_ere`・`Matcher`・`selected`)は R4D-4 #486 と R4D-5 #487 の範囲である。
 
 #### 維持する性質
 
@@ -1727,6 +1730,86 @@ EINTR は、信号で呼び出しが中断されたときの失敗である。�
 旧版と Rust を、同じ入力・同じ予算の条件で比べる。比較器(`native/ci/check_diagnostic_reftable.py`)は、製品の符号化を使わない table と、本物の git が作った reftable の両方を作る。
 UTF-8 でない参照名の入力も別に数える。比較の自己検査と流し方は [testing.md](testing.md#r4d-1-の-reftable-の比較)、APIは [native/README.md](../native/README.md#診断の-reftable-の読み取りr4d-1) に記す。
 比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d1` で流す(2026-11-12 12:59 の管理担当の決定。#488)。
+
+### 保護記録の形式の検査と参照の解決(R4D-3)
+
+#485 で、診断 9 本の Rust 移植(R4D)の 3 つ目の単位の前半を、開発用ソースへ実装した。
+製品のコマンドへは登録しない。配布・`plugins/` の下・版・`CHANGELOG.md` は変えない。呼出元は無い(後半の R4D-3b #544 がつなぐ)。
+
+言葉。
+- 保護記録は、旧 `implement-guard.sh` の `take` が作る記録のフォルダ(`guard-*`)である。中に `manifest.tsv` と `snapshot/` がある。
+- context は、診断が見る 1 つの Git の作業場所である(最上位の作業場所と、その中に入れた別の作業場所〈submodule〉など)。
+- C 形式の引用は、Git と旧 `implement-guard.sh` がパスを書くときの引用である(`"` で囲み、`\n`・`\t`・3 桁の 8 進数などで書く)。
+- 参照は、ブランチ名などとその指す先である。REV は利用者が渡す見る版の指定(`HEAD`・object の名前・`refs/` で始まる名前)、実名は利用者が渡すパスの指定である。
+- trait は、Rust で、型が持つべき関数の組を決める仕組みである。子の起動と参照の解決の結果を trait で受け取り、本物の実装は R4D-3b が作る。
+- 専用の管理領域は、診断が一時フォルダに作る、保持した管理データだけのコピーである(旧版の `Private`)。元の Git 設定を読ませずに Git を起動するために使う。
+- N 回目の期限は、予算の N 回目の `check` で期限に当たるように、時計を差し込むことである(R4D-1 の比較の `n` の条件と同じ)。
+- 差し替えの部品(stub)は、比較器が旧版の関数を呼ぶときに、ファイルや子の起動の代わりに、決めた値を返す小さな部品である。
+- 孤立したサロゲートは、UTF-16 で組になっていない U+D800〜U+DFFF の値である。surrogateescape は、UTF-8 でないバイトを、文字の番号 U+DC80〜U+DCFF の孤立したサロゲートで表す Python の決まりである。
+
+#### 2 つに分けたこと
+
+| 単位 | 対象 |
+|---|---|
+| R4D-3(#485) | `diagnostic-state.py` の `cfield`・`lines`・`integer`・`State.manifest`・`State.__init__` の記録の読み取り(:67-101)・`State.origins` の形式の部分(:118-138)・`State.ancestors`、`diagnostic-paths.py` の `literal`・`revision`、`diagnostic-private.py` の `valid_ref`・参照のファイルの中身・参照の解決・`head`・`oid`(ファイルを読む所と子を起動する所を除く) |
+| R4D-3b(#544) | 保護記録と実物の結び付け、専用の管理領域(`config` と `alternates` の中身を含む)、2 回目からの参照の解決で前の結果を返す所、参照のファイルとフォルダの読み取り、子の起動(trait の本物の実装) |
+
+- R4D-3 の部分は、main にある R4D-1 の部品だけで作れる。旧版の関数を同じ Python の中で呼んで比べられる。
+- R4D-3b の部分は、R4D-2 #484 の `Reader` と R4D-2b #541(#484 の設計で R4D-2 から分けた後半。診断の子の監督と応答の送出を移す。未実装)の一時フォルダと子の起動を使う。本物の保護記録と、Git の起動を記録する偽の git で比べる。
+
+#### 維持する性質
+
+- 旧版と同じ順で処理する。予算を確かめる位置と回数・失敗の理由と終了値・失敗の種類まで合わせる(同じ入力に 2 つの誤りがあるとき、旧版と同じ方を返す)。
+- 予算は呼出元のものを毎回 `&mut Budget` で受け取り、関数の中で作り直さない。
+  - 予算を確かめるのは、`manifest.tsv` と `packed-refs` の 1 行ごとと、参照の解決の 1 つの名前ごとだけである。
+  - `parse_records` と `parse_origins` は予算を使わない(旧版もこの部分では使わない)。
+- bytes は bytes のまま扱い、UTF-8 として解釈しない。文字列は REV と `oid` の値だけである(`CodepointString`。孤立したサロゲートを持てる)。
+- 上限の数値を変えない(4096 バイト・1024 バイト・4097 バイト・番号 1999・深さ 40・16777216・桁の上限 4300)。
+- 文字コードの設定による差は UTF-8 と surrogateescape に固定し、整数の変換の桁の上限は旧版に合わせる(2026-11-11 22:24 の決定)。
+- 参照の値の列 `RefMap` は、Python の dict と同じ並びを持つ(同じ名前は位置を保って置き換える)。N 回目の期限と `symbolic-ref-cycle` のどちらになるかは、たどる順で決まるため。
+- `bytes.splitlines()`(LF・CR・CRLF)と、`bytes.strip()`・`bytes.split()`(空白・TAB・LF・VT・FF・CR)の分け方を、旧版と同じにした。
+
+#### 失敗の種類
+
+| 種類 | 旧版 | 出る場面 |
+|---|---|---|
+| `Error::Failure` | `Failure`(理由と終了値) | `state-schema`・`state-binding`・`old-state`・`context-binding`(22)、`unsupported-format`・`invalid-ref`・`symbolic-ref-cycle`・`incomplete-metadata`・`revision-unavailable`・`git-failed`(23)、`path`・`revision`(2)、予算の `interrupted`・`time-limit`(20) |
+| `Error::Value` | `ValueError` | `integer` の桁の上限(4300)を超えた |
+| `Error::Unicode` | `UnicodeError` | REV の値の UTF-8 への変換・`rev-parse` の出力の ASCII での読み取り・子へ渡す引数の変換(孤立したサロゲート) |
+| `Error::Os(errno)` | `OSError` | R4D-3 の関数は作らない。trait の本物の実装(R4D-3b)が返す |
+
+- 入口で終了値と文に直すのは R4D-5 #487 の仕事である(旧版は `ValueError` と `UnicodeError` を `io`〈20〉にする)。
+- 桁の上限は、Python 3.10.11 の `int()` と同じく、`-` の後の数字の数(先頭の 0 を含む)で数える。
+  - 旧版は `python3 -I` で起動されるので、`PYTHONINTMAXSTRDIGITS` は効かない(Python の起動の決まりからの推論)。
+
+#### trait で受け取る子の起動と参照の結果
+
+- `GitQuery::run(budget, args, input, limit)`: 子の起動。`args` は、git の場所と Git の安全用のオプションの並び(`SAFE`)を除いた引数である。前に付けるのは R4D-3b の部品である。
+- `RefSource::refs(budget)`: 参照の解決の結果(`Resolution`)。`OidSource` は、この 2 つに `head(budget)` を足した trait である。
+- 終了値の許す範囲の確かめは、呼ぶ側が行う。`cat-file` は 0 以外を `incomplete-metadata`、`rev-parse` は 0・1・128 の外を `git-failed` にする。
+- `GitArg::Text` の bytes への変換(`GitArg::to_bytes`)は、旧版の `subprocess.Popen` と同じく UTF-8 と surrogateescape で行う(U+DC80〜U+DCFF は 1 バイト、ほかのサロゲートは `Error::Unicode`)。
+
+#### 確かめる順の要点
+
+- `parse_records`: `4-meta.txt` の `cwd` が作業場所の実パスと違えば、`config-contexts.txt` を読む前に `state-binding` にする。LF で終わらない記録は、形式名の確かめより先に `state-schema` にする。
+- `resolve_refs`: 名前と指す先の文法を全部確かめてから、名前ごとに予算を確かめて解決する。行き着いた名前が 0 件なら `cat-file` を起動しない。
+- `head_from_file`: `ref: ` の指す先が文法に合うときだけ参照の解決を呼ぶ。object の名前の `HEAD` では呼ばない。`head_from_reftable` は、呼出元が先に参照の解決を行う。
+- `oid`: `refs/` で始まる値は、参照の解決の記録が 1 件以上あるときだけ UTF-8 に変換する(記録が 0 件なら、変換できない値でも `revision-unavailable`)。旧版の :129 の条件は、字面を変えずに Rust へ移した。
+
+#### R4D-3b へ渡す条件
+
+- `GitQuery::run` の本物の実装は、旧版の `rt.process` と同じく、先に `budget.check()`、次に `Text` の引数の変換、次に起動の順で動かす。R4D-3 の比較の差し替えの部品は `check` を呼ばない。
+- `RefSource::refs` の本物の実装は、旧版の :135 と同じく 2 回目からは前の結果を返す。参照のファイルとフォルダは、旧版の `os.scandir` の順で `RefMap` に入れる(項目ごとに予算を 1 回確かめる。旧版の :188)。
+- files の `HEAD` は、専用の管理領域の `HEAD` の頭の 4097 バイトを読んでから `head_from_file` を呼ぶ。reftable の `HEAD` は、先に参照の解決を行ってから `head_from_reftable` を呼ぶ。
+- `State` の組み立ては、旧版の `__init__` の順で、`check_manifest` を `parse_records` より先に呼ぶ。`parse_origins` は記録の読み取りの後に呼ぶ(旧版の :103)。
+
+#### 比較
+
+旧版と Rust を、同じ入力・同じ予算の条件・同じ差し替えの部品で比べる。比較器(`native/ci/check_diagnostic_state.py`)は、旧版の関数を同じ Python の中で直接呼ぶ。差し替えの部品は、旧版のファイルの読み取りと子の起動の代わりだけをする。
+比べるのは、成否・失敗の種類と理由と終了値・値・予算の確かめの回数・差し替えの部品の呼出し(引数・標準入力・出力の種類・上限・回数)である。本物の `take` が作った記録(4 つの repo)も比べる。
+組と件数と流し方は [testing.md](testing.md#r4d-3-の保護記録と参照の比較)、APIは [native/README.md](../native/README.md#保護記録の形式の検査と参照の解決r4d-3) に記す。
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。CI は build の後の必須ジョブ `r4d3` で流す(2026-11-12 12:59 の決定)。
+hp-pc(Linux x86_64)で 2026-11-27 に流した比較では、旧版との差は見つからなかった。認めた差は無い。CI の 4 機種(Linux 2 種・Mac 2 種)での比較は、この文書を書いた時点では未確認である(PR の CI で確かめる)。
 
 ### 保護記録の探索・reviewsの配置・内蔵のGit読取り(R4G)
 

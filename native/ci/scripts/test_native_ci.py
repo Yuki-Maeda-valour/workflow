@@ -2087,6 +2087,218 @@ class R4D1Tests(TempCase):
                        "--", "--list", "--ignored"], commands)
 
 
+class R4D3Tests(TempCase):
+    """R4D-3(#485)の専用の必須ジョブ r4d3。R4D1Tests と同じ形で確かめる。"""
+    NAME = "rust_matches_the_legacy_state_and_ref_checks_on_every_input"
+    SUMMARY = "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 43 filtered out; finished in 16.84s"
+    GOOD = f"running 1 test\ntest {NAME} ... ok\n\n{SUMMARY}\n"
+    COMMAND = ["cargo", "test", "--locked", "-p", "dev-workflow-cli", "--test", "diagnostic_state",
+               "--", "--ignored", "--exact", NAME]
+    RUN = "python3 -B native/ci/build.py r4d3 --platform '${{ matrix.platform }}'"
+
+    def setUp(self):
+        super().setUp()
+        self.document = make_dist.read_json(source_hash.ROOT / ".github/workflows/native.yml")
+
+    def quiet(self):
+        stack = contextlib.ExitStack()
+        stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
+        stack.enter_context(contextlib.redirect_stderr(io.StringIO()))
+        return stack
+
+    # (a) 実際の native.yml の r4d3 のジョブ
+    def test_actual_r4d3_job_has_the_required_shape(self):
+        jobs = self.document["jobs"]
+        job = jobs["r4d3"]
+        self.assertEqual(job["needs"], "build")
+        self.assertEqual(job["strategy"]["matrix"], jobs["build"]["strategy"]["matrix"])
+        self.assertEqual(len(job["strategy"]["matrix"]["include"]), 4)
+        self.assertIs(job["strategy"]["fail-fast"], False)
+        self.assertEqual(job["runs-on"], "${{ matrix.runner }}")
+        self.assertEqual(job["timeout-minutes"], 30)
+        steps = job["steps"]
+        self.assertEqual(len(steps), 5)
+        self.assertTrue(steps[0]["uses"].startswith("actions/checkout@"))
+        self.assertEqual(steps[1]["run"], "python3 -B native/ci/check_workflow.py")
+        self.assertTrue(steps[2]["uses"].startswith("actions/setup-python@"))
+        self.assertEqual(steps[2]["with"], {"python-version": "3.10.11"})
+        self.assertEqual(steps[3]["run"], "python3 -B native/ci/build.py prepare --platform '${{ matrix.platform }}'")
+        self.assertEqual(steps[4]["run"], self.RUN)
+        callers = [name for name, value in jobs.items()
+                   if any(check_workflow.native_build_command(step.get("run")) == "r4d3" for step in value["steps"])]
+        self.assertEqual(callers, ["r4d3"])
+        self.assertIn("r4d3", check_workflow.REQUIRED_NATIVE_JOBS)
+        self.assertEqual(check_workflow.R4D3_TIMEOUTS, {"r4d3": 30})
+
+    def test_distribution_needs_do_not_include_r4d3(self):
+        self.assertNotIn("r4d3", self.document["jobs"]["distribution"]["needs"])
+
+    # (b) 上限
+    def test_r4d3_timeout_is_fixed_at_30(self):
+        for renamed in (False, True):
+            base = copy.deepcopy(self.document)
+            key = "r4d3"
+            if renamed:
+                key = "comparison"
+                base["jobs"][key] = base["jobs"].pop("r4d3")
+            self.assertEqual(check_workflow.check_document(base), [])
+            for value in (None, 0, 29, 31, "30", True):
+                changed = copy.deepcopy(base)
+                if value is None:
+                    changed["jobs"][key].pop("timeout-minutes")
+                else:
+                    changed["jobs"][key]["timeout-minutes"] = value
+                with self.subTest(renamed=renamed, value=value):
+                    self.assertTrue(check_workflow.check_document(changed))
+
+    def test_r4d3_step_in_the_build_job_is_rejected_by_timeout(self):
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["build"]["steps"].append({"name": "x", "run": self.RUN})
+        errors = check_workflow.check_document(changed)
+        self.assertTrue(any("timeout-minutes は 30 が必要です" in error for error in errors))
+
+    # (c) 工程の並びとオプション先行形・必須のジョブ
+    def test_r4d3_requires_python_before_the_comparison(self):
+        changed = copy.deepcopy(self.document)
+        del changed["jobs"]["r4d3"]["steps"][2]
+        self.assertTrue(check_workflow.check_document(changed))
+        changed = copy.deepcopy(self.document)
+        steps = changed["jobs"]["r4d3"]["steps"]
+        steps.append(steps.pop(2))
+        self.assertTrue(check_workflow.check_document(changed))
+
+    def test_r4d3_option_first_forms_are_rejected(self):
+        for arguments in ("--platform linux-x86_64 r4d3", "--downloads downloads r4d3", "-- r4d3"):
+            changed = copy.deepcopy(self.document)
+            changed["jobs"]["r4d3"]["steps"][4]["run"] = "python3 -B native/ci/build.py " + arguments
+            with self.subTest(arguments=arguments):
+                errors = check_workflow.check_document(changed)
+                self.assertTrue(any("コマンド名をオプションより先" in error for error in errors))
+
+    def test_removing_the_r4d3_job_is_rejected(self):
+        changed = copy.deepcopy(self.document)
+        del changed["jobs"]["r4d3"]
+        self.assertTrue(any("r4d3" in problem for problem in check_workflow.check_native_required(changed)))
+
+    def without(self, line):
+        """check_workflow.py から r4d3 の 1 行だけを除いた版(その行が欠けたときに何が起きるかを見る)。"""
+        import types
+        path = Path(check_workflow.__file__)
+        source = path.read_text(encoding="utf-8")
+        self.assertEqual(source.count(line), 1, line)
+        module = types.ModuleType("check_workflow_without_r4d3")
+        module.__file__ = str(path)
+        exec(compile(source.replace(line, ""), str(path), "exec"), module.__dict__)
+        return module
+
+    def test_each_r4d3_entry_in_check_workflow_is_needed(self):
+        # 操作の名前に r4d3 が無いと、ジョブ r4d3 の手順を正しい形の build.py として読めない。
+        names = self.without('''    match = match or re.match(r"python3 -B native/ci/build\\.py" r" (r4d3)(?: |$)", command)\n''')
+        self.assertTrue(any("コマンド名をオプションより先" in error for error in names.check_document(self.document)))
+        # 上限の表に r4d3 が無いと、上限の違うジョブ r4d3 を通してしまう(実際の check_workflow.py は拒む)。
+        timeouts = self.without("        native_timeouts.update(R4D3_TIMEOUTS)\n")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4d3"]["timeout-minutes"] = 60
+        self.assertEqual(timeouts.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
+        # 比較の操作に r4d3 が無いと、Python 3.10.11 を用意しないジョブ r4d3 を通してしまう。
+        comparisons = self.without(
+            "        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)\n"
+            "                               and native_build_command(step.get(\"run\")) in R4D3_TIMEOUTS]\n")
+        changed = copy.deepcopy(self.document)
+        changed["jobs"]["r4d3"]["steps"].pop(2)
+        self.assertEqual(comparisons.check_document(changed), [])
+        self.assertTrue(check_workflow.check_document(changed))
+        # 必須のジョブの一覧に r4d3 が無いと、ジョブ r4d3 を消した native.yml を通してしまう。
+        required = self.without('    "r4d3",\n')
+        changed = copy.deepcopy(self.document)
+        del changed["jobs"]["r4d3"]
+        self.assertEqual(required.check_native_required(changed), [])
+        self.assertTrue(check_workflow.check_native_required(changed))
+
+    # (d) r4d3() が比較のコマンドを流す所と、要約の行の確かめ
+    def run_r4d3(self, output):
+        with mock.patch.object(build, "target_config", return_value=("t", None)) as target, \
+                mock.patch.object(build, "build_environment", return_value={"MARK": "1"}) as environment, \
+                mock.patch.object(build, "stream_command", return_value=output) as stream:
+            build.r4d3("linux-x86_64", self.root)
+        self.target = target
+        return environment, stream
+
+    def test_r4d3_runs_the_comparison_once_with_the_quality_environment(self):
+        environment, stream = self.run_r4d3(self.GOOD)
+        self.target.assert_called_once_with("linux-x86_64")
+        self.assertEqual(build.R4D3_TIMEOUT, 1800)
+        self.assertEqual(build.R4D3_JOIN_TIMEOUT, 10)
+        stream.assert_called_once()
+        self.assertEqual(stream.call_args.args[0], self.COMMAND)
+        self.assertEqual(stream.call_args.kwargs["env"], {"MARK": "1"})
+        self.assertEqual(stream.call_args.kwargs["cwd"], source_hash.ROOT / "native")
+        self.assertEqual(stream.call_args.kwargs["timeout"], build.R4D3_TIMEOUT)
+        self.assertEqual(stream.call_args.kwargs["join_timeout"], build.R4D3_JOIN_TIMEOUT)
+        self.assertEqual(environment.call_args.args[1], "linux-x86_64")
+        self.assertEqual(environment.call_args.args[0].parent, self.root)
+
+    def test_r4d3_rejects_outputs_that_are_not_exactly_one_passed_test(self):
+        ok = f"test {self.NAME} ... ok"
+        cases = {
+            "0 passed": f"{ok}\n" + self.SUMMARY.replace("1 passed", "0 passed") + "\n",
+            "1 ignored": f"{ok}\n" + self.SUMMARY.replace("0 ignored", "1 ignored") + "\n",
+            "1 failed": f"{ok}\n" + self.SUMMARY.replace("0 failed", "1 failed") + "\n",
+            "two summaries": f"{ok}\n{self.SUMMARY}\n{self.SUMMARY}\n",
+            "no summary": f"{ok}\n",
+            "no ok line": f"running 1 test\n{self.SUMMARY}\n",
+            "other name": f"test rust_matches_the_legacy_reftable_reader_on_every_input ... ok\n{self.SUMMARY}\n",
+            "longer name": f"test {self.NAME}_2 ... ok\n{self.SUMMARY}\n",
+            "prefixed": f"test x::{self.NAME} ... ok\n{self.SUMMARY}\n",
+            "trailing text": f"{ok} extra\n{self.SUMMARY}\n",
+            "leading space": f" {ok}\n{self.SUMMARY}\n",
+            "carriage return": f"{ok}\r\n{self.SUMMARY}\n",
+            "ok twice": f"{ok}\n{ok}\n{self.SUMMARY}\n",
+            "ignored line": f"test {self.NAME} ... ignored\n{self.SUMMARY}\n",
+            "trailing summary text": f"{ok}\n{self.SUMMARY} extra\n",
+        }
+        for label, output in cases.items():
+            with self.subTest(label=label), self.assertRaises(ValueError):
+                self.run_r4d3(output)
+
+    # (e) main() の呼び分け
+    def test_main_dispatches_r4d3_for_each_platform(self):
+        for platform_name in build.TARGETS:
+            argv = ["build.py", "r4d3", "--platform", platform_name]
+            with self.subTest(platform=platform_name):
+                with mock.patch.object(sys, "argv", argv), mock.patch.object(build, "workspace", return_value=self.root), \
+                        mock.patch.object(build, "r4d3") as called:
+                    self.assertEqual(build.main(), 0)
+                    called.assert_called_once_with(platform_name, self.root)
+                for error in (ValueError("x"), subprocess.CalledProcessError(1, "x")):
+                    with mock.patch.object(sys, "argv", argv), mock.patch.object(build, "workspace", return_value=self.root), \
+                            mock.patch.object(build, "r4d3", side_effect=error), self.quiet():
+                        self.assertEqual(build.main(), 1)
+
+    def test_main_requires_platform_for_r4d3(self):
+        errors = io.StringIO()
+        with mock.patch.object(sys, "argv", ["build.py", "r4d3"]), mock.patch.object(build, "r4d3") as called, \
+                contextlib.redirect_stderr(errors), self.assertRaises(SystemExit):
+            build.main()
+        called.assert_not_called()
+        self.assertIn("--platform が必要です", errors.getvalue())
+
+    # (f) quality() は比較を流さない
+    def test_quality_does_not_run_the_comparison(self):
+        def run(args, *, env=None, capture=False):
+            return "" if capture else None
+        with mock.patch.object(build, "build_environment", return_value={}), mock.patch.object(build, "run", side_effect=run) as called, \
+                mock.patch.object(build, "r4d3", create=True) as comparison, \
+                mock.patch.object(build, "stream_command", create=True) as stream:
+            build.quality("linux-x86_64", self.root)
+        comparison.assert_not_called()
+        stream.assert_not_called()
+        commands = [" ".join(map(str, call.args[0])) for call in called.call_args_list]
+        self.assertFalse(any("diagnostic_state" in command for command in commands))
+        self.assertFalse(any(self.NAME in command for command in commands))
+
+
 class R4EConnectionTests(TempCase):
     """R4E(#482)の検査入口 r4e_contract の CI への接続。比較は別のジョブ r4e・r4e-universal で流す。"""
 

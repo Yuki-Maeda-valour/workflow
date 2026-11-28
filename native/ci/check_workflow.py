@@ -74,6 +74,8 @@ def native_build_command(command):
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4a-rest-universal|r4a-rest)(?: |$)", command)
     # S2E(#470)の比較も、別のジョブ(s2e・s2e-universal)で流す。
     match = match or re.match(r"python3 -B native/ci/build\.py" r" (s2e-universal|s2e)(?: |$)", command)
+    # R4D-3(#485)の比較も、build の後の専用ジョブ(r4d3)で流す。
+    match = match or re.match(r"python3 -B native/ci/build\.py" r" (r4d3)(?: |$)", command)
     return match[1] if match else None
 
 
@@ -104,6 +106,7 @@ REQUIRED_NATIVE_JOBS = (
     "r4c-universal",
     "s2e",
     "s2e-universal",
+    "r4d3",
 )
 # 比較のジョブ(R4E #482・S3I-A #474): (ジョブ名, build.py の位置引数, matrix の機種の集合, needs)。
 COMPARISON_JOBS = (
@@ -137,6 +140,8 @@ S2E_JOBS = (
 # 98 秒に対し 3.2 倍)、R4A の残りは Mac x86_64 298.8 秒 / Linux x86_64 117.1 秒 = 2.55 倍。手元の Mac の経路の模擬 326 秒に
 # 5.3〜7.9 倍を当てると 1 回約 29〜43 分(推測)。倍率の出典と見積りは native/ci/README.md の S2E の節。CI の実測で見直す。
 S2E_TIMEOUTS = {"s2e": 120, "s2e-universal": 60}
+# R4D-3(#485)の比較のジョブの上限(分)。R4D-1 の r4d1 と同じ 30 分(build.py の R4D3_TIMEOUT 1800 秒より先にジョブの上限に当たる)。
+R4D3_TIMEOUTS = {"r4d3": 30}
 
 
 def check_native_required(document):
@@ -242,6 +247,8 @@ def check_document(document):
         native_timeouts.update({"r4c": 30, "r4c-universal": 30})
         # S2E(#470)の比較も別のジョブ(s2e・s2e-universal)で流す。
         native_timeouts.update(S2E_TIMEOUTS)
+        # R4D-3(#485)の比較も別のジョブ(r4d3)で流す。
+        native_timeouts.update(R4D3_TIMEOUTS)
         steps = job.get("steps")
         for step in steps if isinstance(steps, list) else []:
             command = step.get("run") if isinstance(step, dict) else None
@@ -291,6 +298,8 @@ def check_document(document):
                                and native_build_command(step.get("run")) in R4A_REST_OPERATIONS]
         comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
                                and native_build_command(step.get("run")) in S2E_TIMEOUTS]
+        comparison_indices += [index for index, step in enumerate(steps) if isinstance(step, dict)
+                               and native_build_command(step.get("run")) in R4D3_TIMEOUTS]
         python_indices = [index for index, step in enumerate(steps) if isinstance(step, dict)
                           and str(step.get("uses", "")).startswith("actions/setup-python@")]
         if comparison_indices and (len(python_indices) != 1 or not 2 <= python_indices[0] < min(comparison_indices)):
