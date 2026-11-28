@@ -22,6 +22,11 @@
 - 時計は 1000.0 から始め、sleep(s) は s だけ進める。monotonic の {"ok": v} は時計を v にする。
 - errno は Linux と Mac で番号と例外の型が同じものに限る。Python が C の中で繰り返す EINTR(PEP 475)を
   応答に使わない(拒む)。文は応答で与え、OS の表を引かない(どの機械でも同じバイト列になる)。
+- waitpid_any の状態は、旧版がそのまま渡す os.waitstatus_to_exitcode(差し替えない)の結果が、Linux と Mac の
+  <sys/wait.h> の macro で同じになる値に限る(拒む。判定は wait_meaning)。Mac の WIFSTOPPED は停止の信号の番号が
+  0x13(Mac の SIGCONT)の状態を外す(WIFCONTINUED)と推測される(Mac の SDK のヘッダーは読んでいない。未確認)。
+  根拠: Mac の macro を写した計算で前の生成器(0x137f を使った版)を流すと、PR #552 の 1 回目の PR 用の CI の
+  Mac 2 種類と同じ 1 件(inj-ls-waitpid-stopped)だけが違った。このため Linux の SIGSTOP(19 = 0x13)の停止を使わない。
 - 使い方(Linux でも Mac でも同じ出力):
   "$R4Q_PYTHON" -B native/fixtures/r4q/gen_injected.py [--out <ファイル>]
 """
@@ -199,6 +204,31 @@ def validate(name, response):
             raise Abort(f"{name}: Linux と Mac で揃わない errno {error['errno']}")
         if error["errno"] == ERRNO["EINTR"] and name in RETRIED:
             raise Abort(f"{name}: Python が繰り返す EINTR を応答に使わない")
+    if name == "waitpid_any" and "ok" in response:
+        status_value = response["ok"][1]
+        if (not -2 ** 31 <= status_value < 2 ** 31
+                or wait_meaning(status_value, "linux") != wait_meaning(status_value, "darwin")):
+            raise Abort(f"waitpid_any: Linux と Mac で os.waitstatus_to_exitcode の結果が揃わない状態 {status_value}")
+
+
+def wait_meaning(status_value, system):
+    """os.waitstatus_to_exitcode(Modules/posixmodule.c)が見る wait の macro の結果(system は linux か darwin)。
+
+    Linux は glibc の bits/waitstatus.h、Mac は sys/wait.h の定義(Mac の WIFSTOPPED は WSTOPSIG が 0x13 の
+    状態を外し、WSTOPSIG は下の 8 ビットで切らない)。どちらも WIFEXITED・WIFSIGNALED・WIFSTOPPED の順に見る。
+    Linux の計算は本物の関数と照らした。Mac の SDK のヘッダーは手元で読んでいない(未確認)が、この計算で旧版を
+    流すと、PR #552 の 1 回目の PR 用の CI の Mac 2 種類と同じ 1 件(inj-ls-waitpid-stopped)だけが違った。"""
+    low = status_value & 0x7F
+    if low == 0:
+        return ("exit", (status_value >> 8) & 0xFF)
+    if low != 0x7F:
+        return ("signal", low)
+    if system == "linux":
+        if status_value & 0xFF == 0x7F:
+            return ("stopped", (status_value >> 8) & 0xFF)
+    elif status_value >> 8 != 0x13:
+        return ("stopped", status_value >> 8)
+    return ("invalid", status_value)
 
 
 def ok(value=None, **extra):
@@ -640,6 +670,17 @@ def status(code=None, signal_number=None):
     return signal_number if signal_number is not None else code << 8
 
 
+def stopped(signal_number):
+    """waitpid の停止の状態(信号の番号 << 8 | 0x7f)。旧版は WUNTRACED を使わないので、ふつうは本物の waitpid から
+    来ない(Linux の waitpid(2) は、ptrace で追跡された子の停止を WUNTRACED が無くても返す)。"""
+    return signal_number << 8 | 0x7F
+
+
+# 停止の状態に使う信号の番号(SIGTTIN。Mac の番号も 21 と推測される〈未確認〉)。0x13 でないので、wait_meaning の
+# Linux と Mac のどちらの WIFSTOPPED でも停止になる(Linux の SIGSTOP の 19 = 0x13 は、Mac の WIFSTOPPED が外すと
+# 推測される。上の説明の根拠)。
+STOP_SIGNAL = 21
+
 LS_ARGS = ["--result", "/inj/rec.json", "--nonce", "n", "--timeout", "5", "--grace", "0.2", "--", "cmd", "a"]
 
 
@@ -787,7 +828,8 @@ def supervise_cases():
          {"responses": {"getppid": [ok(50, signal=2)], "close": [err("EIO")]}})
     case("inj-ls-check-ki", "ls", {"args": ["--check"]}, {"responses": {"getppid": [ok(50, signal=2)]}})
     case("inj-ls-waitpid-einval", "ls", {"args": LS_ARGS}, {"responses": {"waitpid_any": [err("EINVAL")]}})
-    case("inj-ls-waitpid-stopped", "ls", {"args": LS_ARGS}, {"responses": {"waitpid_any": [ok([200, 0x137f])]}})
+    case("inj-ls-waitpid-stopped", "ls", {"args": LS_ARGS},
+         {"responses": {"waitpid_any": [ok([200, stopped(STOP_SIGNAL)])]}})
     case("inj-ls-sigchld-keyerror", "ls", {"args": ls_args("0.05", "0.2")}, {"defaults": {"waitpid_any": ECHILD}})
     case("inj-ls-grandchild-reaped", "ls", {"args": LS_ARGS},
          {"responses": {"waitpid_any": [ok([200, status(0)]), RUNNING, RUNNING, ok([201, status(5)]), ECHILD]},

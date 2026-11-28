@@ -1975,7 +1975,7 @@ cargo test --locked -p dev-workflow-cli --test r4q -- --r4q-compare
   -> r4q
      -> python3 -B native/ci/check_r4q.py --rust <今回のテスト実行物>
         -> 旧版(R4Q_PYTHON)・固定期待・Rust の比較 832 件(Linux)
-     -> python3 -B native/ci/test_r4q.py(比較器の自己検査 43 件)
+     -> python3 -B native/ci/test_r4q.py(比較器の自己検査 47 件)
 ```
 
 #### 流し方
@@ -2011,16 +2011,19 @@ TMPDIR=<同じフォルダ> R4Q_PYTHON=<同じ python3.10> python3 -B native/ci/
 - `--r4q-compare` を付けない `cargo test --locked` では比較が流れない。`r4q` のテストは `R4Q の比較は流していない: ` で始まる1行を出して終了0になる。これを比較の合格の代わりにしない。
 - `--r4q-compare` の入口は `PR_SET_CHILD_SUBREAPER` を設定しない。自己検査の、比較器を KILL した後の補助の回収の確かめが、この前提を使うためである。
 - 作業機は、通常の環境か `docker run --init` の容器で流す。子を回収する者のいない環境(init の無い容器など)では、自己検査の確かめが失敗として見つかる。
-- 手元の Linux x86_64 での結果: 比較832件・未実施0件・自己検査43件。時間は下の「件数と時間」にある。
+- 手元の Linux x86_64 での結果: 比較832件・未実施0件・自己検査47件。時間は下の「件数と時間」にある。
 
 #### 比べる中身
 
 - 実プロセスのケースは、旧版と Rust を同じ入力・同じ環境で流し、旧版の親・Rust の親 × 旧版の監督・Rust の監督の4つの組で比べる。返す辞書・誤りの文・出力のファイル・記録のバイト列・品質コマンドが見る状態・残るプロセスを見る。
-  - 監督の argv は、Linux は `/proc/<pid>/cmdline` で、Mac は `r4q_probe` が `sysctl` の KERN_PROCARGS2 で親の argv を NUL 区切りのまま読む(`ps -o command=` は引数を空白で連ねるので、切れ目を戻せないため)。Mac の実機では未確認で、PR 用の CI で確かめる。親が生きているはずのケースで読めなければ、両側とも読めなくても不合格にする。
+  - 監督の argv は、Linux は `/proc/<pid>/cmdline` で、Mac は `r4q_probe` が `sysctl` の KERN_PROCARGS2 で親の argv を NUL 区切りのまま読む(`ps -o command=` は引数を空白で連ねるので、切れ目を戻せないため)。PR #552 の1回目の PR 用の CI(Native の run 45962269782)で、Mac 2台とも親の argv を読めた。親が生きているはずのケースで読めなければ、両側とも読めなくても不合格にする。
+  - Mac の framework 版の Python では、旧版の監督の argv の1つ目が `Python.app` の中の実行物になる。比較器は、比較の前に1回だけその値を確かめて(`旧版の Python の実行物` の行に出す)、旧版の頭の1つ目として、その値だけを受ける。
   - loop.sh の `supervisor-result` を、`scripts/test_loop_supervisor.py` と同じ形で loop.sh から取り出し、旧版と Rust の記録の両方に当てる。
 - 実プロセスで起こせない経路(記録の ENOSPC と EIO・pid の再使用・`/proc` の読取りの失敗・EPERM が続く・時計に依る回数など)は、OS の操作と時計を差し替えた単体の比較で比べる。
   - 固定期待は `native/fixtures/r4q/injected.json`(旧版の関数の mock で `gen_injected.py` が作る)。Rust の単体テスト `r4q_units.rs` が、ケースごとに照らす。
   - 比較器は、`R4Q_PYTHON` で `gen_injected.py` を流し直し、`injected.json` とバイト列で同じことを確かめる。
+  - Linux と Mac で同じバイト列にするため、`gen_injected.py` は、OS で番号の違う errno と、Linux と Mac の wait の macro で `os.waitstatus_to_exitcode` の結果が違う waitpid の状態を拒む。
+  - 自己検査の `InjectedGeneratorTests` が、この拒否(`0x137f`・`0xff`・`0x1157f`・int32 の外などを拒み、21(Linux の SIGTTIN)の停止の `0x157f` を通す)と、その機械の OS の判定が本物の `os.waitstatus_to_exitcode` と同じことを確かめる。Mac の判定(Mac の SDK のヘッダーを読まずに写したもの。未確認)は、Mac の CI のこの検査で本物と照らす。
 - 緩める欄は、Issue #494 の閉じた一覧の欄だけである。比較器は、緩めた欄の名前と件数をケースごとに出す。
   - 例: POSIX の方式の grace=0 の時間切れで品質コマンドが受けた TERM の数は、TERM の直後に KILL が来る競り合いで決まるので、両方とも0か1であることを確かめて両方の数を記録する(06:58)。Linux の方式の grace=0 は0回をそのまま比べる。POSIX の方式で grace=0 のときに TERM を送らない誤りは、差し替えの `inj-rc-posix-timeout-grace0` の呼出しの並びで見つける。
 - 旧版の不具合に当たる動き(SIGCHLD を無視で受け継いだ起動。[設計](design.md#旧版の不具合に当たる動きも合わせる))は、旧版と同じ結果になることを、ケースで比べる。旧版の親 × Rust の監督の組は `rc-posix-sigchld-ignored-legacy-rust` で流す。
@@ -2032,10 +2035,10 @@ TMPDIR=<同じフォルダ> R4Q_PYTHON=<同じ python3.10> python3 -B native/ci/
 #### 件数と時間
 
 - 必須のケースの件数: Linux は832件。内訳は、前提の strerror の確かめ1・差し替え(`inj-`)198・`ls-` 75・`cp-` 46・`rc-` 408・`probe-` 72・`py-` 29・`loop-` 3。
-  - Mac は589件。Linux の832件から Linux の方式の248件(`rc-linux-*` 212件・`probe-linux-*` 36件)を外し、Mac だけの5件(`ls-mac-setup` 1件・`rc-linux-reject-*` 4件)を足した数である(832−248+5=589)。比較器の一覧から数えた値で、Mac の実機ではまだ流していない(未確認。PR 用の CI で確かめる)。
+  - Mac は589件。Linux の832件から Linux の方式の248件(`rc-linux-*` 212件・`probe-linux-*` 36件)を外し、Mac だけの5件(`ls-mac-setup` 1件・`rc-linux-reject-*` 4件)を足した数である(832−248+5=589)。PR #552 の1回目の PR 用の CI(Native の run 45962269782)で Mac 2台とも流した。固定期待の OS 依存などで落ちたので直した。直した後の結果は Issue #494 と PR の本文に書く。
   - Mac で流さない閉じた一覧の `ls-` の37件は、一覧に残して未実施として数える。Mac で出るはずの未実施は、`ls-` 37件・`py-stderr-devfull` 1件と、条件つきの `rc-posix-directory-non-utf8-*` 4件(UTF-8 でない名前を作れないとき)と `rc-posix-anchor-killed-after-notice-*` 4件(pause に入ったことを期限内に確かめられないとき)まで。
   - ケースの一覧は、件数と SHA-256 を比較器の `CASE_LIST` に固定している。欠けと重なりは不合格になる。
-- 自己検査の件数: 43件。作業機の Linux で58.1秒(ほかの作業で混んだ時〈負荷平均約20〉は107.5秒)。
+- 自己検査の件数: 47件。作業機の Linux で、43件の時に58.1秒(ほかの作業で混んだ時〈負荷平均約20〉は107.5秒)。47件にした後は、混んだ時(負荷平均約28〜35)に134.1秒(`--r4q-compare` の全体は314秒・比較器307.1秒)。
 - 手元の Linux x86_64 の所要時間: `--r4q-compare` の全体(比較器と自己検査を並べて流す)は2分39秒(比較器158.7秒・自己検査57.9秒)。ほかの作業で混んだ時(負荷平均約10)は3分5秒(比較器185.0秒)。`build.py r4q --platform linux-x86_64` の全体は、混んだ時に3分11秒。さらに混んだ時(負荷平均約20)は、`--r4q-compare` が4分21秒(比較器257.1秒・自己検査108.2秒)、`build.py r4q` が4分32秒だった(差し替えのケースを1件足した後の832件)。未実施は0件。
 - CI の4機種の所要時間と、ジョブ `r4q` の上限をこの値に決めた理由は、Issue #494 と PR の本文に書く。上限はいま60分(ジョブ)、`R4Q_TIMEOUT` は3300秒である。最も長い所要時間が上限の3分の2を超えたときは、上限を直す。
 - Mac の CI の errno の表の確かめ(108〜1024が `Unknown error: <n>` になること・SDK の `ELAST` が表の最後の番号 107 を超えないこと)は、Issue #494 と PR の本文に書く。

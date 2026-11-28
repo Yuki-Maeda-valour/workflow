@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import ctypes
+import importlib.util
 import json
 import os
 import re
@@ -462,7 +463,7 @@ class RelaxRuleTests(unittest.TestCase):
         self.assertEqual(other, checker.normalize_timeout_text(ctx, other, checker.Relax(), "legacy"))
 
     def test_monitor_argv_head_must_be_the_one_of_this_run(self):
-        ctx = mock.Mock(python="/py/bin/python3.10", rust_head=["/r/rust"])
+        ctx = mock.Mock(python="/py/bin/python3.10", legacy_exec="/py/bin/python3.10", rust_head=["/r/rust"])
         legacy = ["/py/bin/python3.10", "-B", str(checker.LS_SCRIPT), "--nonce", "n"]
         rust = ["/r/rust", "--r4q-loop-supervisor", "--nonce", "n"]
         fixed = ["python3", "-B", "loop-supervisor.py", "--nonce", "n"]
@@ -471,6 +472,30 @@ class RelaxRuleTests(unittest.TestCase):
         for monitor, argv in (("legacy", rust), ("rust", legacy)):
             with self.subTest(monitor=monitor), self.assertRaisesRegex(checker.Failure, "この回の監督"):
                 checker.monitor_argv_fixed(ctx, "ls", monitor, argv, checker.Relax())
+
+    def test_framework_python_head_is_the_one_checked_value(self):
+        # Mac の framework 版の Python: 品質コマンドが読む 1 つ目は、比較の前に確かめた Python.app の中の実行物
+        # (ctx.legacy_exec)の 1 つの値だけを受ける。起動に渡した bin のパスもほかの値も、旧版の頭として受けない。
+        app = "/f/Versions/3.10/Resources/Python.app/Contents/MacOS/Python"
+        ctx = mock.Mock(python="/f/Versions/3.10/bin/python3", legacy_exec=app,
+                        rust_head=["/f/Versions/3.10/bin/python3", "-B", "/r/rust"])
+        seen = [app, "-B", str(checker.CP_SCRIPT), "--anchor-fd", "4"]
+        fixed = ["python3", "-B", "check-process.py", "--anchor-fd", "4"]
+        relax = checker.Relax()
+        self.assertEqual(fixed, checker.monitor_argv_fixed(ctx, "cp", "legacy", seen, relax))
+        self.assertEqual({"監督の argv の頭": 1}, relax.counts)
+        # 自己検査の偽の Rust(#! の行で旧版の Python を使う)の頭も、同じ 1 つの値へ替わる。
+        rust = [app, "-B", "/r/rust", "--r4q-check-process", "--anchor-fd", "4"]
+        self.assertEqual(fixed, checker.monitor_argv_fixed(ctx, "cp", "rust", rust, checker.Relax()))
+        for other in ("/f/Versions/3.10/bin/python3", "/f/Versions/3.10/bin/python3.10",
+                      "/g/Versions/3.10/Resources/Python.app/Contents/MacOS/Python"):
+            with self.subTest(other=other), self.assertRaisesRegex(checker.Failure, "この回の監督"):
+                checker.monitor_argv_fixed(ctx, "cp", "legacy", [other, *seen[1:]], checker.Relax())
+        # 旧版の親の TimeoutExpired の文の頭は、親が起動に渡した sys.executable のまま(替えない)。
+        text = ("Command '['/f/Versions/3.10/bin/python3', '-B', '" + str(checker.CP_SCRIPT)
+                + "', '--linux']' timed out after 2 seconds")
+        self.assertEqual("Command '['python3', '-B', 'check-process.py', '--linux']' timed out after 2 seconds",
+                         checker.normalize_timeout_text(ctx, text, checker.Relax(), "legacy"))
 
     def test_sigint_rule_compares_signal_last_line_and_output_before(self):
         def obs(exit_code, err):
@@ -529,6 +554,45 @@ class EnvironmentAndPythonTests(unittest.TestCase):
         with self.assertRaises(checker.Failure):
             checker.check_python("/bin/false")
 
+    def test_legacy_exec_is_one_checked_value(self):
+        # 旧版の Python の実行物は、framework 版なら Python.app の中の実行物、ほかは R4Q_PYTHON そのもの。
+        # 読んだ値・argv の残り・sys.executable・確かめの終了値が違えば、比較の前に失敗にする。
+        rest = ["-B", "-c", "code", "/p", "state"]
+        linux = {"returncode": 0, "executable": "/py/bin/python3.10", "framework": "", "base_prefix": "/py",
+                 "platform": "linux"}
+        self.assertEqual("/py/bin/python3.10",
+                         checker.check_legacy_exec("/py/bin/python3.10", linux, ["/py/bin/python3.10", *rest], rest))
+        prefix = Path(temp(), "framework", "Versions", "3.10")
+        app = prefix / "Resources" / "Python.app" / "Contents" / "MacOS" / "Python"
+        app.parent.mkdir(parents=True)
+        app.write_bytes(b"")
+        python = str(prefix / "bin" / "python3")
+        mac = dict(linux, executable=python, framework="Python", base_prefix=str(prefix), platform="darwin")
+        os.chmod(app, 0o644)
+        with self.assertRaisesRegex(checker.Failure, "実行できない"):
+            checker.check_legacy_exec(python, mac, [str(app), *rest], rest)
+        os.chmod(app, 0o755)
+        self.assertEqual(str(app), checker.check_legacy_exec(python, mac, [str(app), *rest], rest))
+        for given, report, seen, word in (
+                (python, mac, [python, *rest], "決まった値と違う"),
+                ("/py/bin/python3.10", linux, [str(app), *rest], "決まった値と違う"),
+                (python, dict(mac, platform="linux"), [str(app), *rest], "決まった値と違う"),
+                (python, mac, [str(app), "-B", "-c", "other", "/p", "state"], "2 つ目から後"),
+                (python, dict(mac, executable=str(app)), [str(app), *rest], "sys.executable"),
+                (python, dict(mac, returncode=1), [str(app), *rest], "失敗した"),
+                (python, mac, None, "null")):
+            with self.subTest(word=word, seen=seen), self.assertRaisesRegex(checker.Failure, word):
+                checker.check_legacy_exec(given, report, seen, rest)
+        # この機械の実物: 比較の前の確かめと同じ値になる(Mac の framework 版では Python.app の中の実行物)。
+        ctx = open_ctx(make_fake("same"))
+        try:
+            value, report = checker.find_legacy_exec(ctx)
+            self.assertEqual(ctx.legacy_exec, value)
+            self.assertEqual(checker.framework_exec(report) or PYTHON, value)
+            self.assertEqual(0, checker.sweep(ctx.token))
+        finally:
+            checker.close_context(ctx)
+
     def test_out_of_scope_variable_seen_by_the_command_fails(self):
         state = {"pid": 5, "ppid": 4, "pgid": 5, "sid": 5, "cwd": "2f", "fds": [0, 1, 2], "stdin": None,
                  "blocked": [], "ignored": [], "caught": [], "parent_sigblk": None, "parent_sigign": None,
@@ -564,9 +628,17 @@ class EnvironmentAndPythonTests(unittest.TestCase):
         broken = Path(temp(), "r4q_probe_null_argv.c")
         broken.write_text(source.replace(old, "    *len = 0;\n    if (ppid > 0) return NULL;\n#ifdef __linux__\n"
                                               "    char path[64];"), encoding="utf-8")
-        with mock.patch.object(checker, "PROBE_SOURCE", broken):
-            ctx = open_ctx(make_fake("same"))
+        # 比較の前の旧版の Python の実行物の確かめも、null を受けずに止まる。
+        with mock.patch.object(checker, "PROBE_SOURCE", broken), \
+                self.assertRaisesRegex(checker.Failure, "parent_argv が null"):
+            open_ctx(make_fake("same"))
+        # 確かめの後に null を返す probe へ替えると、実プロセスのケースが不合格になる。
+        ctx = open_ctx(make_fake("same"))
         try:
+            folder = os.path.join(temp(), "null-argv-probe")
+            os.makedirs(folder)
+            with mock.patch.object(checker, "PROBE_SOURCE", broken):
+                ctx.probe = checker.build_probe(folder)
             case = next(case for case in checker.cli_cases() if case.id == "cp-anchor-probe")
             with self.assertRaisesRegex(checker.Failure, "監督の argv を読めない"):
                 checker.run_case(ctx, case)
@@ -631,6 +703,63 @@ def open_ctx(rust):
     report = checker.check_python(python)
     return checker.open_context(os.path.realpath(rust), python, report, checker.LOCALE_OF[checker.platform_name()],
                                 base_for("ctx"))
+
+
+def load_gen_injected():
+    """差し替えの固定期待の生成器 gen_injected.py を読み込む(main は流さない。-B と同じく .pyc を作らない)。"""
+    spec = importlib.util.spec_from_file_location("r4q_gen_injected", checker.GEN_INJECTED)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class InjectedGeneratorTests(unittest.TestCase):
+    """gen_injected.py が、Linux と Mac で os.waitstatus_to_exitcode の結果が違う waitpid の状態を拒むこと。
+    拒否が後の変更で消えると、injected.json が OS に依るバイト列になり、Mac の流し直しだけが落ちる(PR #552 の
+    1 回目の PR 用の CI)。比較器の流し直しの前に、どの機械でも見つけるため、自己検査に置く。"""
+
+    def test_os_dependent_wait_status_is_refused(self):
+        gen = load_gen_injected()
+        # 0x137F は、Linux は停止 19・Mac は 0x13 を外して invalid。0xFF・-1・2 ** 31 - 1 は下の 8 ビットが 0xff で、
+        # Linux は invalid・Mac は停止。0x1157F と -0x81 は両方とも停止で、Mac だけ WSTOPSIG を下の 8 ビットで切らない
+        # (Linux は 21 と 255・Mac は 277 と -1)。2 ** 31 と -2 ** 31 - 1 は C の int の外(OverflowError になる)。
+        for value in (0x137F, 0xFF, -1, 2 ** 31 - 1, 0x1157F, -0x81, 2 ** 31, -2 ** 31 - 1):
+            with self.subTest(status=hex(value)), self.assertRaisesRegex(gen.Abort, "揃わない状態"):
+                gen.validate("waitpid_any", gen.ok([200, value]))
+        # ケースの応答と既定の応答のどちらに書いても、世界を組む前に拒む。
+        for spec in ({"responses": {"waitpid_any": [gen.ok([200, 0x137F])]}},
+                     {"defaults": {"waitpid_any": gen.ok([200, 0x137F])}}):
+            with self.subTest(spec=spec), self.assertRaisesRegex(gen.Abort, "揃わない状態"):
+                gen.World(spec)
+        self.assertEqual(0x157F, gen.stopped(gen.STOP_SIGNAL))
+        for value in (gen.stopped(gen.STOP_SIGNAL), gen.status(0), gen.status(3), gen.status(255),
+                      gen.status(signal_number=9), gen.status(signal_number=15), 0x8B, -2 ** 31):
+            with self.subTest(status=hex(value)):
+                gen.validate("waitpid_any", gen.ok([200, value]))
+        self.assertEqual(("stopped", 21), gen.wait_meaning(0x157F, "linux"))
+        self.assertEqual(("stopped", 21), gen.wait_meaning(0x157F, "darwin"))
+        self.assertEqual(("stopped", 19), gen.wait_meaning(0x137F, "linux"))
+        self.assertEqual(("invalid", 0x137F), gen.wait_meaning(0x137F, "darwin"))
+
+    def test_wait_meaning_matches_this_machine(self):
+        # この機械の本物の os.waitstatus_to_exitcode と、wait_meaning のこの OS の判定が、どの値でも同じこと。
+        # Mac の CI では、手元で読めない Mac の sys/wait.h を写した判定(未確認)を、本物と照らすことになる。
+        gen = load_gen_injected()
+        system = "darwin" if MAC else "linux"
+        values = list(range(0, 0x20000)) + [-1, -0x7F, -0x100, 2 ** 31 - 1, -2 ** 31]
+        different = []
+        for value in values:
+            try:
+                real = ("ok", os.waitstatus_to_exitcode(value))
+            except ValueError as exc:
+                real = ("ValueError", str(exc))
+            kind, number = gen.wait_meaning(value, system)
+            want = {"exit": ("ok", number), "signal": ("ok", -number),
+                    "stopped": ("ValueError", f"process stopped by delivery of signal {number}"),
+                    "invalid": ("ValueError", f"invalid wait status: {value}")}[kind]
+            if real != want:
+                different.append((hex(value), real, want))
+        self.assertEqual([], different[:10], f"{system} で本物と違う値 {len(different)} 件")
 
 
 class MacPauseTests(unittest.TestCase):

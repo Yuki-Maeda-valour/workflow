@@ -21,9 +21,10 @@
 - 残るプロセスは、品質コマンドの argv に入れた印で見つける。保証の外のケースのほかは 0 件で、
   保証の外のケースは旧版と同じ件数であることを確かめる。失敗の経路(時間切れ・途中の例外)でも残さないよう、
   ケースごとの後と最後に印の付いたプロセスを止め、見つけたらそのケース(か全体)を不合格にして件数を出す。
-- 監督の argv の頭は、その回の監督(旧版・Rust)で決まった頭だけを固定名へ戻す。品質コマンドが監督の argv を
-  読めなければ(r4q_probe の parent_argv が null)、親が先に消えるケースの固定の一覧(PARENT_GONE_IDS)のほかは
-  不合格にする。
+- 監督の argv の頭は、その回の監督(旧版・Rust)で決まった頭だけを固定名へ戻す。旧版の Python の 1 つ目は、
+  比較の前に 1 回だけ確かめた実行物(Mac の framework 版の Python では Python.app の中の実行物)の 1 つの値だけを
+  受ける。品質コマンドが監督の argv を読めなければ(r4q_probe の parent_argv が null)、親が先に消えるケースの
+  固定の一覧(PARENT_GONE_IDS)のほかは不合格にする。
 - Mac で行わなくてよいケースは、設計の閉じた一覧(CLOSED_LIST・MAC_SKIPPED_LS)だけ。件数と理由を出し、
   成功に数えない。
 """
@@ -180,6 +181,8 @@ class Ctx:
     injected_problem: str | None = None
     hold_report: str | None = None
     notes: list = field(default_factory=list)
+    # 旧版の Python(python)を起動したときに、品質コマンドが読む親の argv の 1 つ目(find_legacy_exec で確かめた値)。
+    legacy_exec: str = ""
 
 
 def platform_name():
@@ -421,8 +424,9 @@ def check_nonce(value, where):
     return value
 
 
-def expected_head(ctx, kind, monitor):
-    """その回の監督の種類(legacy・rust・fake)で決まる argv の頭(設計の「緩める欄の閉じた一覧」の 2 行目)。"""
+def launch_head(ctx, kind, monitor):
+    """その回の監督の種類(legacy・rust・fake)で決まる、親が起動に渡す argv の頭(設計の「緩める欄の閉じた一覧」の
+    2 行目。旧版の親の TimeoutExpired の文に出る頭)。"""
     if monitor == "legacy":
         return [ctx.python, "-B", str(SCRIPT_OF[kind])]
     if monitor == "rust":
@@ -430,6 +434,19 @@ def expected_head(ctx, kind, monitor):
     if monitor == "fake":
         return [ctx.python, "-B", str(FAKE)]
     raise Failure(f"監督の種類が違う: {monitor}")
+
+
+def seen_head(ctx, head):
+    """起動の頭を、品質コマンドが読む親の argv の頭にする。替えるのは、1 つ目が旧版の Python のときの 1 つ目だけで、
+    替える先は比較の前に確かめた 1 つの値(ctx.legacy_exec。Mac の framework 版では Python.app の中の実行物)。"""
+    if head[:1] == [ctx.python]:
+        return [ctx.legacy_exec, *head[1:]]
+    return list(head)
+
+
+def expected_head(ctx, kind, monitor):
+    """その回の監督の種類で決まる、品質コマンドが読む監督の argv の頭。"""
+    return seen_head(ctx, launch_head(ctx, kind, monitor))
 
 
 def fixed_head(kind):
@@ -452,7 +469,7 @@ def normalize_timeout_text(ctx, text, relax, monitor):
     種類で決まった頭だけ。"""
     if "timed out after" not in text:
         return text
-    literal = "[" + ", ".join(repr(item) for item in expected_head(ctx, "cp", monitor))
+    literal = "[" + ", ".join(repr(item) for item in launch_head(ctx, "cp", monitor))
     fixed = "[" + ", ".join(repr(item) for item in fixed_head("cp"))
     count = text.count(literal)
     relax.add("監督の argv の頭", count)
@@ -616,6 +633,80 @@ def build_probe(temp):
     if done.returncode != 0:
         raise Failure("r4q_probe.c を作れない: " + done.stdout.decode(errors="replace"))
     return out
+
+
+# 旧版の Python を起動して、子の r4q_probe に自分の argv を読ませる(find_legacy_exec)。報告は 1 行の JSON。
+LEGACY_EXEC_CODE = (
+    "import json, subprocess, sys, sysconfig\n"
+    "done = subprocess.run(sys.argv[1:], stdin=subprocess.DEVNULL)\n"
+    "print(json.dumps({'executable': sys.executable, 'base_prefix': sys.base_prefix, 'platform': sys.platform,"
+    " 'framework': sysconfig.get_config_var('PYTHONFRAMEWORK') or '', 'returncode': done.returncode}))\n"
+)
+
+
+def framework_exec(report):
+    """Mac の framework 版の Python が起動の後に移る実行物。ほかは None。
+
+    組み立ては、本家のソース Python-3.10.11 の Mac/Tools/pythonw.c の get_python_path(58〜88 行。85 行で
+    framework の版のフォルダに Resources/Python.app/Contents/MacOS/<PYTHONFRAMEWORK> を足す)と同じ。R4U の
+    check_r4u.py の direct_executable と同じ値。"""
+    if report["platform"] != "darwin" or not report["framework"]:
+        return None
+    return os.path.join(report["base_prefix"], "Resources", "Python.app", "Contents", "MacOS", report["framework"])
+
+
+def check_legacy_exec(python, report, seen, rest):
+    """旧版の Python を python で起動したときに品質コマンドが読む親の argv(seen)の 1 つ目を、決まった 1 つの値として
+    確かめて返す。値は、framework 版なら framework_exec の実行物、ほかは python そのもの。2 つ目から後(rest)と、
+    旧版の親が監督の頭に使う sys.executable(python)も確かめる。"""
+    if report.get("returncode") != 0:
+        raise Failure(f"旧版の Python の実行物を確かめる r4q_probe が失敗した(終了値 {report.get('returncode')})")
+    if report.get("executable") != python:
+        raise Failure(f"旧版の Python の sys.executable が R4Q_PYTHON と違う: {report.get('executable')!r}")
+    if seen is None:
+        raise Failure("旧版の Python の実行物を確かめられない(r4q_probe の parent_argv が null)")
+    if seen[1:] != rest:
+        raise Failure(f"旧版の Python の argv の 2 つ目から後が、起動に渡した値と違う: {seen[1:4]}")
+    framework = framework_exec(report)
+    want = python if framework is None else framework
+    if seen[:1] != [want]:
+        raise Failure(f"旧版の Python の実行物が、決まった値と違う: {seen[:1]}(期待 {want!r}・framework "
+                      f"{report['framework']!r}・base_prefix {report['base_prefix']!r})")
+    if framework is not None and not (os.path.isfile(framework) and os.access(framework, os.X_OK)):
+        raise Failure(f"framework 版の Python の実行物を実行できない: {framework}")
+    return want
+
+
+def find_legacy_exec(ctx):
+    """比較の前に 1 回だけ、旧版の Python(ctx.python)を起動し、子の r4q_probe が読む親の argv の 1 つ目を確かめる。
+
+    Mac の framework 版の Python(actions/setup-python の macos-arm64 など)は、bin の実行物が argv[0] を
+    Python.app の中の実行物に替えて、同じ pid のまま移る。読んだ本家のソースは Python-3.10.11 の
+    Mac/Tools/pythonw.c(211 行で __PYVENV_LAUNCHER__ に元のパスを入れ、220 行で argv[0] を替え、146 行の
+    POSIX_SPAWN_SETEXEC と 231 行の posix_spawn で移る)。本体は Python/initconfig.c の 1511 行でこの変数を読んで
+    program_name(sys.executable の元)にし、1532 行で消す(子の環境に残らない)。このため、品質コマンドが読む監督の argv の 1 つ目は、
+    旧版の親が渡した sys.executable と違う(PR #552 の 1 回目の PR 用の CI の macos-arm64 のログで観測した)。"""
+    work = os.path.join(ctx.temp, "legacy-exec")
+    os.makedirs(work)
+    try:
+        probe = [ctx.probe, "state", os.path.join(work, "state.json"), "--mark", ctx.token]
+        rest = ["-B", "-c", LEGACY_EXEC_CODE, *probe]
+        done = subprocess.run([ctx.python, *rest], env=child_env(ctx), cwd=work, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        if done.returncode != 0 or done.stderr:
+            raise Failure("旧版の Python の実行物を確かめられない: " + done.stderr.decode(errors="replace"))
+        try:
+            report = json.loads(done.stdout)
+        except ValueError as exc:
+            raise Failure(f"旧版の Python の実行物の報告が JSON でない: {done.stdout[:200]!r}") from exc
+        state = read_state(work)
+        if state is None:
+            raise Failure("旧版の Python の実行物を確かめる r4q_probe が状態を書かない")
+        seen = None if state["parent_argv"] is None else \
+            [bytes.fromhex(item).decode("utf-8", "surrogateescape") for item in state["parent_argv"]]
+        return check_legacy_exec(ctx.python, report, seen, rest), report
+    finally:
+        remove_tree(work)
 
 
 def check_locale(python, locale_name):
@@ -1993,6 +2084,11 @@ def check_basic_exit3(obs):
     return None
 
 
+# Mac の旧版の、後始末の誤りが置き換えた文。終了済みだけの群(回収前の anchor だけ)への killpg が EPERM になると
+# 推測される(どの killpg かはログから読めない。未確認)。
+MAC_EPERM = "品質プロセスの回収を確認できない: [Errno 1] Operation not permitted"
+
+
 def rc_cases():
     """run_command のケース(rc-・probe-)。4 つの組 × 方式(Linux は linux と posix、Mac は posix と linux の拒否)。"""
     cases = []
@@ -2048,8 +2144,13 @@ def rc_cases():
                 action=send_monitor(signal.SIGKILL), leftover_ok=True,
                 expect=ok("RecoveryError", message="監督が正常に終了しなかった"))
         else:
+            # Mac: PR #552 の 1 回目の PR 用の CI(Native の run 45962269782)の macos-x86_64 で、旧版どうしの組の
+            # 文が MAC_EPERM で、Rust の 3 つの組も同じ結果だった。macos-arm64 は監督の argv の頭の不一致で先に
+            # 落ちたので未確認(PR 用の CI で確かめる)。stop_group の TERM で品質コマンドが終わった後の KILL の
+            # killpg が EPERM になると推測される(未確認)。
             add("anchor-killed-before-notice", method, probe_cmd("--started", "@D@/started", "--sleep", "30"),
-                action=anchor_before_notice, expect=ok("RecoveryError", message="anchor が終了通知の前に失われた"))
+                action=anchor_before_notice, expect=ok("RecoveryError", message="anchor が終了通知の前に失われた")
+                if LINUX else ok("RecoveryError", message=MAC_EPERM))
         add("env-dup", method, probe_cmd(), env=[["Z", "1"], ["PATH", CHILD_PATH], ["A", "2"], ["Z", "3"]],
             expect=ok("ok", 0))
         add("env-none", method, probe_cmd(), env=None, expect=ok("ok", 0))
@@ -2087,10 +2188,15 @@ def rc_cases():
             expect=ok("RecoveryError", message="品質プロセスの回収を確認できない: [Errno 2]"))
         add("directory-non-utf8", method, probe_cmd(), directory="control\udcff", non_utf8=True,
             expect=ok("ok", 0))
+        # POSIX の方式の 0 は Linux の実測(anchor の wait が ECHILD)。Mac の 3 は、PR #552 の 1 回目の PR 用の
+        # CI(Native の run 45962269782)の macos-x86_64 の 1 回だけで確かめた(旧版どうしの組が 3 で、Rust の
+        # 3 つの組も同じ結果)。macos-arm64 は監督の argv の頭の不一致で先に落ちたので未確認(PR 用の CI で
+        # 確かめる)。anchor の wait が終了値を受け取ったと推測される(未確認。exec の後に SIGCHLD の無視が残るかは
+        # POSIX では決まっていない)。
         add("sigchld-ignored", method, probe_cmd("--exit", "3"), sigchld_ignored=True, keyerror=linux,
             timeout={"float": "0.3"}, grace={"int": "0"},
             expect=ok("RecoveryError", message="品質プロセスの回収を確認できない: Expecting value")
-            if linux else ok("ok", 0))
+            if linux else ok("ok", 0 if LINUX else 3))
         for shape in ("double", "setsid", "hold"):
             escapes = shape == "setsid" and not linux
             add(f"grandchild-{shape}", method, probe_cmd("--grandchild", shape, "--grandchild-pid", "@D@/grand",
@@ -2117,7 +2223,7 @@ def rc_cases():
     add("anchor-killed-after-notice", "posix", probe_cmd("--started", "@D@/started", "--sleep", "600"),
         timeout={"int": "600"}, action=anchor_after_notice, run_timeout=200,
         expect=ok("RecoveryError", message="anchor が回収前に失われた") if LINUX
-        else ok("RecoveryError", message="品質プロセスの回収を確認できない: [Errno 1] Operation not permitted"))
+        else ok("RecoveryError", message=MAC_EPERM))
     add("outside-writer", "posix", probe_cmd("--write-stdout", "10", "--grandchild", "writer", "--grandchild-pid",
                                              "@D@/grand", "--exit", "0"), keep=4, outside_writer=10,
         leftover_ok=True, expect=ok("ok", 0))
@@ -2183,8 +2289,12 @@ def rc_fake_cases(add):
         ("notice-too-big", {"data": b"x" * 4097}, ok("RecoveryError", message="anchor の通知が大きすぎる")),
         ("notice-extra-after-newline", {"data": raw(notice) + b"x"},
          ok("RecoveryError", message="Extra data")),
+        # Mac: PR #552 の 1 回目の PR 用の CI(Native の run 45962269782)の Mac 2 種類で、旧版の親の文が
+        # MAC_EPERM で、Rust の親も同じ結果だった。書かずに終わった偽の anchor だけの群への killpg が EPERM に
+        # なると推測される(未確認)。
         ("notice-silent-exit", {"end": "silent-exit"},
-         ok("RecoveryError", message="anchor が終了通知の前に失われた")),
+         ok("RecoveryError", message="anchor が終了通知の前に失われた") if LINUX
+         else ok("RecoveryError", message=MAC_EPERM)),
         ("notice-nested-below", {"nested": "below"}, bad_notice),
         ("notice-nested-limit", {"nested": "limit"}, ok("RecursionError")),
     ]
@@ -2197,8 +2307,7 @@ def rc_fake_cases(add):
             expect=ok("RecoveryError", message="プロセスグループの不在を確認できない"))
     else:
         add("fake-notice-error-stop-group-fails", "posix", ["true", "@T@"], combos_used=fake,
-            fake={"data": b"{\n", "end": "exit"},
-            expect=ok("RecoveryError", message="品質プロセスの回収を確認できない: [Errno 1] Operation not permitted"))
+            fake={"data": b"{\n", "end": "exit"}, expect=ok("RecoveryError", message=MAC_EPERM))
 
 
 def check_rc_exit3(obs):
@@ -2392,13 +2501,17 @@ def print_plan(cases):
 
 
 def open_context(rust, python, report, locale_name, base, hold_report=None):
-    """比べる前提の揃った状態(一時フォルダ・r4q_probe・差し替えの固定期待の流し直し)。close_context で片付ける。"""
+    """比べる前提の揃った状態(一時フォルダ・r4q_probe・旧版の Python の実行物・差し替えの固定期待の流し直し)。
+    close_context で片付ける。"""
     temp = tempfile.mkdtemp(prefix="r4q-check-", dir=base)
     try:
         os.makedirs(os.path.join(temp, "c"))
         ctx = Ctx(rust=rust, rust_head=run_head(rust), python=python, stdlib=report["stdlib"], temp=temp, probe="",
                   locale=locale_name, token=f"r4qmark-{os.getpid()}-{int(time.time())}", hold_report=hold_report)
         ctx.probe = build_probe(temp)
+        ctx.legacy_exec, exec_report = find_legacy_exec(ctx)
+        ctx.notes.append(f"旧版の Python の実行物(品質コマンドが読む監督の argv の 1 つ目): {ctx.legacy_exec}"
+                         f"(sys.executable {exec_report['executable']}・framework {exec_report['framework'] or 'なし'})")
         try:
             document, problem = regenerate_injected(ctx)
             ctx.injected = {item["id"]: item for item in document["cases"]}
@@ -2458,6 +2571,8 @@ def main(argv=None):
         ctx = open_context(rust, python, report, locale_name, base, args.hold_report)
         temp = ctx.temp
         print(f"一時フォルダ: {temp}", flush=True)
+        for note in ctx.notes:
+            print(note, flush=True)
     except (Failure, OSError) as exc:
         print(f"R4Q の比較: 不合格(前提): {exc}", flush=True)
         return 1
