@@ -46,7 +46,9 @@ def setUpModule():
 
     J3 は呼出しの深さを測るので、unittest の呼出し(C の関数の呼出しを含む)の外の子のプロセスで作る。
     """
-    root = Path(tempfile.mkdtemp(prefix='r4d2-selftest-'))
+    # Mac の一時フォルダ(/var/folders)は、/private/var へのリンクを含む。
+    # Reader は途中のリンクを辿らないので、実体のパスにしてから使う。
+    root = Path(os.path.realpath(tempfile.mkdtemp(prefix='r4d2-selftest-')))
     _state['root'] = root
     try:
         destination = root / 'gen'
