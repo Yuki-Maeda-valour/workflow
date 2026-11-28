@@ -13,6 +13,9 @@
 - 合格のときだけ「合格: <件数> 件(未実施 <件数> 件)/ <秒> 秒」で終了 0。
 - --only を使った回は、選んだケースが全部一致しても「一部だけ: …」で終了 3(合格にしない)。
 - 不一致・未実行・想定外の失敗・時間切れ・0 件は「不合格: …」で終了 1。
+最後の行の前に、旧版の経過の長いケース(一致と不一致のケースだけ)を上位 5 件、「時間の長いケース(旧版): …」の
+1 行で出す(上限までの余裕を見る材料。#531)。時間切れは「時間切れ(上限 <秒> 秒): …」の 1 行だけで出し、両側の経過と、
+止める前に 2 秒あけて 2 回取ったプロセスグループの様子(ps の行・負荷の平均と CPU の数)を入れる。
 
 比べる前に、検査入口の隠しの切り替えで、起動前の記録(ふつう・fd 1 を閉じた・fd 2 を閉じた起動)と、呼出履歴の段の表
 (固定名・行番号・関数・ソースの行)が旧版の環境の実物と同じことを確かめる(fixture_preflight)。
@@ -964,6 +967,8 @@ class RawResult:
     after: float
     timed_out: bool
     sent: int
+    snapshot: str = ''            # 時間切れのときだけ: 止める前のプロセスグループの様子(#531)
+    timeout: float = RUN_TIMEOUT  # この起動の上限(秒)
 
 
 def configure_pty(slave, columns, rows):
@@ -1070,6 +1075,70 @@ def status_of(returncode):
     if returncode < 0:
         return ('signal', signal.Signals(-returncode).name)
     return ('exit', returncode)
+
+
+SNAPSHOT_WAIT = 2.0  # 時間切れの様子の 1 回目と 2 回目の間(秒。#531)
+SNAPSHOT_COMMAND_LIMIT = 200  # 様子の行に残すコマンドの末尾の文字数
+
+
+def group_snapshot(pgid):
+    """時間切れの調べのため、プロセスグループ pgid の各プロセスの様子を 1 行にまとめる(#531)。
+
+    check_r4g.py の group_report と同じく ps で全プロセスを取り(-A は -e と同じ)、プロセスグループで選ぶ。欄は pid・pgid・stat・
+    time(CPU 時間)・etime(経過)・rss(常駐メモリ)・command。
+    各プロセスを「pid= pgid= stat= time= etime= rss= command=」(コマンドは末尾の 200 文字)で書き、「; 」でつなぐ。
+    Linux では、/proc/<pid>/stat の utime と stime の和(秒。小数 2 桁)を「utime+stime=」で足す(procps の time は
+    秒単位で、2 秒の間の小さな増えが見えないことがある)。time と etime の書式は Mac と procps で違うので、文字列のまま出す。
+    失敗の調べのためだけに使い、比較の観測には使わない。取れなければ、理由を書いた 1 行を返す(例外は投げない)。
+    """
+    try:
+        listing = subprocess.run(['ps', '-A', '-o', 'pid=,pgid=,stat=,time=,etime=,rss=,command='], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
+    except (OSError, subprocess.SubprocessError) as error:
+        return f'ps を流せない: {type(error).__name__}: {error}'
+    if listing.returncode != 0:
+        return f'ps が失敗した(終了 {listing.returncode}): {show(listing.stderr)}'
+    rows = []
+    for line in listing.stdout.decode(errors='replace').splitlines():
+        fields = line.split(None, 6)
+        if len(fields) < 6 or fields[1] != str(pgid):
+            continue
+        pid, group, state, cpu, elapsed, rss = fields[:6]
+        command = fields[6] if len(fields) > 6 else ''
+        extra = ''
+        if IS_LINUX:
+            try:
+                with open(f'/proc/{pid}/stat') as handle:
+                    tail = handle.read().rpartition(')')[2].split()
+                # 最後の ) の後ろの 12 番目と 13 番目(1 から数えて)が utime と stime(クロックの刻みの数)。
+                extra = f' utime+stime={(int(tail[11]) + int(tail[12])) / os.sysconf("SC_CLK_TCK"):.2f}秒'
+            except (OSError, ValueError, IndexError) as error:
+                extra = f' utime+stime=読めない({type(error).__name__})'
+        rows.append(f'pid={pid} pgid={group} stat={state} time={cpu} etime={elapsed} rss={rss}{extra}'
+                    f' command={command[-SNAPSHOT_COMMAND_LIMIT:]}')
+    return '; '.join(rows) if rows else f'プロセスグループ {pgid} の行が無い'
+
+
+def load_and_cpus():
+    """負荷の平均(1 分・5 分・15 分)と CPU の数の文。負荷の平均が CPU の数より大きければ、CPU の取り合いで遅かったと読める。"""
+    try:
+        load = '・'.join(f'{value:.2f}' for value in os.getloadavg())
+    except OSError as error:
+        load = f'読めない({error})'
+    return f'負荷の平均 {load}(CPU {os.cpu_count() or "不明"})'
+
+
+def ended_text(returncode):
+    """止める前に子が終わったことと、その終了値の文(終了値は、終了なら数、信号なら信号の名前)。"""
+    _, value = status_of(returncode)
+    return f'止める前に終わった(終了値 {value})'
+
+
+def timeout_snapshot(first, second, gap, load, notes):
+    """時間切れの様子の文。「1 回目: <行> / 2 回目(<秒> 秒後): <行> / 負荷の平均 …(CPU <数>)」に、notes(止める前に
+    終わった・止める信号が EPERM)を足す。2 回の間に CPU 時間が増えていれば動いていた(遅かった)、増えていなければ
+    止まっていたと読める。"""
+    return ' / '.join([f'1 回目: {first}', f'2 回目({gap:.1f} 秒後): {second}', load, *notes])
 
 
 def execute(spec):
@@ -1199,6 +1268,10 @@ def execute(spec):
             timed_out = False
             exited_at = None
             quiet_since = None
+            # 時間切れ(#531): 上限を過ぎた最初の回に時間切れと決め、止める前のプロセスグループの様子を 2 秒あけて
+            # 2 回取る。その間も出力は読み続ける。止める信号は必ずプロセスグループへ送る(パイプを持つ孫も、持たない孫も止める)。
+            first = first_at = stop_at = load = None
+            snapshot_text = ''
             while True:
                 got = False
                 for key, _ in selector.select(0.02):
@@ -1221,6 +1294,7 @@ def execute(spec):
                     if plan.drain and not full_open:
                         register(full)
                         full_open = True
+                finished = False
                 if process.poll() is not None:
                     if exited_at is None:
                         exited_at = now
@@ -1232,18 +1306,52 @@ def execute(spec):
                         full_open = True
                     if not [name for name, fd in active.items() if fd not in masters]:
                         if not any(fd in masters for fd in active.values()):
-                            break
-                        if got or quiet_since is None:
-                            quiet_since = now
-                        if now - quiet_since >= 0.2:
-                            break
-                if now - started > spec.timeout:
-                    timed_out = True
+                            finished = True
+                        else:
+                            if got or quiet_since is None:
+                                quiet_since = now
+                            if now - quiet_since >= 0.2:
+                                finished = True
+                if finished:
+                    if timed_out:
+                        # 手順 3: 止める時刻の前に、子が終わって出力を読み切った。時間切れのまま(上限を過ぎた時点で
+                        # 決めた)、2 回目を取り、止める前に終わったことと終了値を書く。パイプを持たない孫も止めるため、
+                        # 抜ける前にプロセスグループへ止める信号を送る(子だけのプロセスグループなら ESRCH)。
+                        second_at = time.monotonic()
+                        second = group_snapshot(process.pid)
+                        notes = [ended_text(process.returncode)]
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        except PermissionError:
+                            # 直す前に無かった信号なので、Mac で回収前の孫(ゾンビ)だけが残るときの EPERM も受け止める。
+                            notes.append('止める信号が EPERM')
+                        snapshot_text = timeout_snapshot(first, second, second_at - first_at, load, notes)
+                    break
+                if not timed_out:
+                    if now - started > spec.timeout:
+                        # 手順 1: 上限を過ぎた最初の回に時間切れと決め、1 回目の様子と負荷の平均・CPU の数を取る。
+                        # 止める時刻は 2 秒後。それまで出力を読み続ける(待つ間に子が終わっても時間切れのまま)。
+                        timed_out = True
+                        first_at = time.monotonic()
+                        first = group_snapshot(process.pid)
+                        load = load_and_cpus()
+                        stop_at = time.monotonic() + SNAPSHOT_WAIT
+                elif now >= stop_at:
+                    # 手順 2: 止める時刻を過ぎた。2 回目を取り、止める直前にもう一度 poll する(2 回目の ps の間に子が
+                    # 終わっていれば回収して、止める前に終わったと書く)。それからプロセスグループを止めて回収する。
+                    second_at = time.monotonic()
+                    second = group_snapshot(process.pid)
+                    notes = []
+                    if process.poll() is not None:
+                        notes.append(ended_text(process.returncode))
                     try:
                         os.killpg(process.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
                     process.wait()
+                    snapshot_text = timeout_snapshot(first, second, second_at - first_at, load, notes)
                     break
             selector.close()
             returncode = process.wait()
@@ -1271,7 +1379,7 @@ def execute(spec):
             with open(path, 'rb') as handle:
                 files[name] = handle.read()
         return RawResult(status_of(returncode), stdout, stderr, files, before, after, timed_out,
-                         plan.sent if plan is not None else 0)
+                         plan.sent if plan is not None else 0, snapshot=snapshot_text, timeout=spec.timeout)
     finally:
         for fd in own + slaves:
             try:
@@ -1548,6 +1656,16 @@ class Run:
     sent: int = 0
     tmp_touched: bool = False
     execve_extra: object = None
+    snapshot: str = ''            # 時間切れのときだけ: 止める前のプロセスグループの様子(#531)
+    timeout: float = RUN_TIMEOUT  # この起動の上限(秒)
+
+
+def run_fields(raw):
+    """RawResult から Run へ写す欄(#531。止める前の様子と上限を写し忘れないよう、1 か所にまとめる)。"""
+    return {
+        'status': raw.status, 'stdout': raw.stdout, 'stderr': raw.stderr, 'streams': raw.streams, 'before': raw.before,
+        'after': raw.after, 'timed_out': raw.timed_out, 'sent': raw.sent, 'snapshot': raw.snapshot, 'timeout': raw.timeout,
+    }
 
 
 class Context:
@@ -1624,10 +1742,9 @@ def run_side(ctx, case, root, impl, *, variant=None, rlimit=None, strace_log=Non
         if strace_log is not None:
             execve_extra = strace_extra(strace_log)
         runs.append(Run(
-            status=raw.status, stdout=raw.stdout, stderr=raw.stderr, streams=raw.streams, created=created, modified=modified,
-            violations=violations, contents=contents, loads=loads, root=root, tz=None if tz is None else tz.decode(),
-            tmpdir=tmpdir_value.replace(root, ROOT_MARK), before=raw.before, after=raw.after, timed_out=raw.timed_out,
-            sent=raw.sent, tmp_touched=tmp_touched, execve_extra=execve_extra))
+            **run_fields(raw), created=created, modified=modified, violations=violations, contents=contents, loads=loads,
+            root=root, tz=None if tz is None else tz.decode(), tmpdir=tmpdir_value.replace(root, ROOT_MARK),
+            tmp_touched=tmp_touched, execve_extra=execve_extra))
     return runs
 
 
@@ -1834,11 +1951,22 @@ def compare_temp_file(case, old, normal, new, paths, fixed_parts):
     return problems
 
 
+def timeout_problem(old, new):
+    """時間切れの 1 行(#531)。上限・両側の経過と、時間切れの側の止める前のプロセスグループの様子を出す。"""
+    limit = old.timeout if old.timed_out else new.timeout
+    text = (f'時間切れ(上限 {limit:g} 秒): 旧版 {old.timed_out}({old.after - old.before:.1f} 秒)'
+            f'/ Rust {new.timed_out}({new.after - new.before:.1f} 秒)')
+    for label, run in (('旧版の', old), ('Rust の', new)):
+        if run.timed_out:
+            text += f'。{label}止める前の様子: {run.snapshot or "(無い)"}'
+    return text
+
+
 def compare_runs(case, old, new, paths, fixed_parts, *, normal=None):
     """1 組の結果を、ケースが宣言した決定済みの差に従って比べる。不一致の説明の一覧を返す。"""
     diffs = declared(case)
     if old.timed_out or new.timed_out:
-        return [f'時間切れ: 旧版 {old.timed_out} / Rust {new.timed_out}']
+        return [timeout_problem(old, new)]
     if case.get('compare') == 'fixed':
         if 'uncompressed' not in diffs:
             return ['固定期待の比べ方は、決定済みの差 uncompressed の宣言が要る']
@@ -1864,6 +1992,10 @@ def compare_runs(case, old, new, paths, fixed_parts, *, normal=None):
 
 def expect_problems(case, run, paths, *, linux=None):
     """旧版の結果が、ケースの想定(expect_legacy。Mac で違うときは expect_legacy_mac)を満たすか。"""
+    if run.timed_out:
+        # 時間切れは compare_runs が上限・経過・止める前の様子つきの 1 行で出す。終了値が SIGKILL になるのは
+        # 比較器が止めたためで、ケースの作り方の誤りではない(#531)。
+        return []
     linux = IS_LINUX if linux is None else linux
     expect = case.get('expect_legacy') if linux or 'expect_legacy_mac' not in case else case['expect_legacy_mac']
     if not expect:
@@ -1888,6 +2020,8 @@ class CaseResult:
     seconds: float = 0.0
     skip_reason: str = ''
     partial_skips: list = dataclasses.field(default_factory=list)
+    legacy_seconds: float = 0.0  # 旧版の各起動の経過の最大(秒。#531)
+    rust_seconds: float = 0.0    # Rust の各起動の経過の最大(秒)
 
 
 def needs_strace(case):
@@ -1962,7 +2096,9 @@ def run_case(ctx, index, case):
             if strace_log is not None and new.execve_extra != 0:
                 problems.append(f'Rust が外部の道具を起動した(最初の 1 行を除いた execve の行が {new.execve_extra})')
         state = 'mismatch' if problems else 'match'
-        return CaseResult(case['id'], state, problems, time.monotonic() - started, partial_skips=partial_skips)
+        return CaseResult(case['id'], state, problems, time.monotonic() - started, partial_skips=partial_skips,
+                          legacy_seconds=max((run.after - run.before for run in old_runs), default=0.0),
+                          rust_seconds=max((run.after - run.before for run in new_runs), default=0.0))
     except Failure as error:
         return CaseResult(case['id'], 'error', [f'想定外の失敗: {error}'], time.monotonic() - started)
     except Exception as error:  # noqa: BLE001 - 想定外の失敗も結果に残し、合格にしない
@@ -2542,6 +2678,7 @@ def summarize(results, selected, *, partial, seconds, skips, fixed=(0, 0)):
     if len(results) != len(selected):
         return EXIT_FAIL, [f'不合格: 結果の数がケースの数と合わない(未実行がある)/ {seconds:.0f} 秒']
     missing = []
+    timed = []  # 旧版の経過を数えるケース(一致と不一致だけ)
     for case, result in zip(selected, results):
         if result is None or result.id != case['id']:
             missing.append(case['id'])
@@ -2551,6 +2688,8 @@ def summarize(results, selected, *, partial, seconds, skips, fixed=(0, 0)):
             continue
         executed += 1
         skipped += [f'{result.id}: {text}' for text in result.partial_skips]
+        if result.state in ('match', 'mismatch'):
+            timed.append(result)
         if result.state == 'mismatch':
             mismatched += 1
         elif result.state == 'error':
@@ -2562,6 +2701,11 @@ def summarize(results, selected, *, partial, seconds, skips, fixed=(0, 0)):
     fixed_done, fixed_failed = fixed
     for text in skipped:
         lines.append(f'未実施: {text}')
+    # 合格の回にも、旧版の経過の長いケースを上位 5 件出す。CI の記録から、上限までの余裕を機種ごとに見られる(#531)。
+    slowest = sorted(timed, key=lambda result: result.legacy_seconds, reverse=True)[:5]
+    if slowest:
+        lines.append('時間の長いケース(旧版): ' + '・'.join(
+            f'{result.id} {result.legacy_seconds:.1f} 秒(Rust {result.rust_seconds:.1f} 秒)' for result in slowest))
     total = executed + fixed_done
     if missing:
         lines.append(f'不合格: 未実行のケースが {len(missing)} 件(最初 {missing[0]})/ {seconds:.0f} 秒')
