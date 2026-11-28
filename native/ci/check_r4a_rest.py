@@ -2281,6 +2281,8 @@ def read_terminal_until_marker(master, slave, process, case_id, timeout=None):
             stop_group(process, grace=1)
             process.wait()
             raise Failure(f"{case_id}: 時間切れ(疑似端末。{'目印が出なかった' if written else '子が終わらなかった'})")
+        # 子の終わりは select の前に読む。終わりを見た後に始めた select が空なら、端末に読み残しは無いので、目印の書き込みは止まらない(#522。#519 の R4U と同じ形)。
+        finished = not written and process.poll() is not None
         ready, _, _ = select.select([master], [], [], 0.02)
         if ready:
             try:
@@ -2290,8 +2292,8 @@ def read_terminal_until_marker(master, slave, process, case_id, timeout=None):
             if not data:
                 raise Failure(f"{case_id}: 目印の前に端末が閉じた(EOF)")
             buffer += data
-        elif not written and process.poll() is not None:
-            # 目印は、子が終わった後に、読むものが無い回(端末の内側の buffer が空のとき)にだけ書く。大きな出力の途中で書いて止まらない。
+        elif finished:
+            # 目印は、子が終わったのを見た後の select が空の回(端末の内側の buffer が空のとき)にだけ書く。大きな出力の途中で書いて止まらない。
             os.write(slave, marker)
             written = True
     return buffer.replace(marker, b"", 1)
