@@ -41,3 +41,6 @@ pub mod adopt_candidate;
 
 /// S2E専用のenvironment-guardのOSの操作。
 pub mod environment_guard;
+
+/// R4D専用の診断の OS の操作。
+pub mod diagnostic;

@@ -324,7 +324,7 @@ fn reject_nul(path: &Path) -> Result<(), FsError> {
 }
 
 /// 閉じる失敗を返す。所有する fd を取り出して 1 回だけ閉じ、失敗しても再び使わない。
-fn close_owned(fd: OwnedFd) -> Result<(), FsError> {
+pub(crate) fn close_owned(fd: OwnedFd) -> Result<(), FsError> {
     let raw = std::os::fd::IntoRawFd::into_raw_fd(fd);
     // SAFETY: raw は直前に OwnedFd から取り出した、自分だけが持つ有効な fd である。
     // 取り出した後に OwnedFd の Drop で閉じる経路は無く、ここで 1 回だけ閉じる。

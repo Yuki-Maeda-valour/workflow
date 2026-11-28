@@ -111,6 +111,15 @@ fn monotonic() -> f64 {
     START.get_or_init(Instant::now).elapsed().as_secs_f64()
 }
 
+/// 検査のときだけ使う。予算の操作の列の 1 つ(`check` か `charge`。`charge` の後に、その中の `check` が並ぶ)。
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BudgetOp {
+    Check,
+    /// 量の種類と、足した量(上乗せの後の値)。
+    Charge(Kind, u64),
+}
+
 pub struct Budget {
     deadline: f64,
     limits: [u64; 9],
@@ -120,6 +129,10 @@ pub struct Budget {
     clock: Option<Box<dyn FnMut() -> f64>>,
     #[cfg(test)]
     charge_bias: u64,
+    #[cfg(test)]
+    test_log: Option<Vec<BudgetOp>>,
+    #[cfg(test)]
+    test_bias: Option<(Kind, u64)>,
 }
 
 impl Budget {
@@ -144,6 +157,10 @@ impl Budget {
             clock: None,
             #[cfg(test)]
             charge_bias: 0,
+            #[cfg(test)]
+            test_log: None,
+            #[cfg(test)]
+            test_bias: None,
         }
     }
 
@@ -162,6 +179,8 @@ impl Budget {
             stop: Arc::new(AtomicBool::new(false)),
             clock: Some(clock),
             charge_bias: 0,
+            test_log: None,
+            test_bias: None,
         }
     }
 
@@ -175,6 +194,41 @@ impl Budget {
     #[cfg(test)]
     pub(crate) fn test_charge_bias(&self) -> u64 {
         self.charge_bias
+    }
+
+    /// 検査のときだけ使う。真なら、これから呼ぶ `check` と `charge` を順に記録する(既定は記録しない)。
+    #[cfg(test)]
+    pub(crate) fn set_test_log(&mut self, enabled: bool) {
+        self.test_log = enabled.then(Vec::new);
+    }
+
+    /// 検査のときだけ使う。記録した操作の列を取り出す(記録は続ける)。
+    #[cfg(test)]
+    pub(crate) fn take_test_log(&mut self) -> Vec<BudgetOp> {
+        self.test_log
+            .as_mut()
+            .map(std::mem::take)
+            .unwrap_or_default()
+    }
+
+    /// 検査のときだけ使う。`kind` に足す量を、毎回 `amount` だけ多くする(`set_test_charge_bias` とは別の欄)。
+    #[cfg(test)]
+    pub(crate) fn set_test_bias(&mut self, kind: Kind, amount: u64) {
+        self.test_bias = Some((kind, amount));
+    }
+
+    /// 検査のときだけ使う。2 つの上乗せ(`management_output` の `charge_bias` と、選んだ量の `test_bias`)の後の量。
+    #[cfg(test)]
+    fn test_count(&self, kind: Kind, count: u64) -> u64 {
+        let count = if kind == Kind::ManagementOutput {
+            count.saturating_add(self.charge_bias)
+        } else {
+            count
+        };
+        match self.test_bias {
+            Some((biased, amount)) if biased == kind => count.saturating_add(amount),
+            _ => count,
+        }
     }
 
     /// 外から停止の印を立てるための共有の印。
@@ -211,6 +265,10 @@ impl Budget {
 
     /// 停止の印 → 残り時間の順に確かめる。
     pub fn check(&mut self) -> Result<(), Failure> {
+        #[cfg(test)]
+        if let Some(log) = self.test_log.as_mut() {
+            log.push(BudgetOp::Check);
+        }
         if self.stop.load(Ordering::SeqCst) {
             return Err(Failure::new("interrupted", 20));
         }
@@ -223,13 +281,13 @@ impl Budget {
     /// `check()` の後に量を足し、上限を超えれば `<量の名前>-limit`。足した量は失敗しても戻さない。
     /// 足し算が桁あふれするときは `u64::MAX` に張り付ける(旧版は上限を超えた値が残るのと同じ結果)。
     pub fn charge(&mut self, kind: Kind, count: u64) -> Result<(), Failure> {
-        self.check()?;
         #[cfg(test)]
-        let count = if kind == Kind::ManagementOutput {
-            count.saturating_add(self.charge_bias)
-        } else {
-            count
-        };
+        let count = self.test_count(kind, count);
+        #[cfg(test)]
+        if let Some(log) = self.test_log.as_mut() {
+            log.push(BudgetOp::Charge(kind, count));
+        }
+        self.check()?;
         let slot = kind.slot();
         self.used[slot] = self.used[slot].saturating_add(count);
         if self.used[slot] > self.limits[slot] {
@@ -365,6 +423,52 @@ mod tests {
         assert_eq!(calls.get(), 2);
         budget.charge(Kind::Json, 1).unwrap();
         assert_eq!(calls.get(), 3);
+    }
+
+    #[test]
+    fn test_log_records_charges_before_their_checks_and_is_off_by_default() {
+        let mut budget = Budget::new();
+        budget.check().unwrap();
+        assert_eq!(budget.take_test_log(), vec![]);
+        budget.set_test_log(true);
+        budget.check().unwrap();
+        budget.charge(Kind::Json, 3).unwrap();
+        budget.request_stop();
+        assert!(budget.charge(Kind::Body, 1).is_err());
+        assert_eq!(
+            budget.take_test_log(),
+            vec![
+                BudgetOp::Check,
+                BudgetOp::Charge(Kind::Json, 3),
+                BudgetOp::Check,
+                BudgetOp::Charge(Kind::Body, 1),
+                BudgetOp::Check,
+            ]
+        );
+        assert_eq!(budget.take_test_log(), vec![]);
+        budget.set_test_log(false);
+        budget.clear_stop();
+        budget.check().unwrap();
+        assert_eq!(budget.take_test_log(), vec![]);
+    }
+
+    #[test]
+    fn selectable_bias_changes_only_the_chosen_quantity() {
+        let mut budget = Budget::new();
+        budget.set_test_bias(Kind::ManagementEntries, 1);
+        budget.set_test_log(true);
+        budget.charge(Kind::ManagementEntries, 1).unwrap();
+        budget.charge(Kind::ManagementCopy, 4).unwrap();
+        assert_eq!(budget.used(Kind::ManagementEntries), 2);
+        assert_eq!(budget.used(Kind::ManagementCopy), 4);
+        assert_eq!(
+            budget.take_test_log()[0],
+            BudgetOp::Charge(Kind::ManagementEntries, 2)
+        );
+        // 新しい予算には上乗せが無い。
+        let mut fresh = Budget::new();
+        fresh.charge(Kind::ManagementEntries, 1).unwrap();
+        assert_eq!(fresh.used(Kind::ManagementEntries), 1);
     }
 
     #[test]

@@ -1091,6 +1091,109 @@ python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_reftable.py'
   - #488 で比較を `r4d1` のジョブへ移した。build のジョブからは、比較の分が減ると推測される。Mac Intel では、比較器の要約の行 136.4 秒と Rust の実行 40.1 秒を含む約 3 分である(推測。上の CI の値の表から取った。`diagnostic_reftable` 全体は 201 秒)。単体テスト 21 件とビルドは残る。
   - 実測は、PR の CI で確かめて PR の本文に書く。
 
+### R4D-2 の JSON と Reader の比較
+
+#484 の診断の厳密な JSON・base64・確認用の値・応答の符号化と `Reader` は、製品 CLI へ未登録・未配布の開発用実装である。
+[契約](design.md#診断の-json-と上限付きの読み取りr4d-2)、[API](../native/README.md#診断の-json-と上限付きの読み取りr4d-2) を参照する。
+
+- 言葉: 筋書きは、比較器が作るフォルダの木と、その上で `Reader` に行わせる操作と、途中でファイルを変える操作の並びである。
+  - 予算の操作の列は、予算の `check` と `charge` を呼んだ順と値の列である(`charge` の記録の後に、その中の `check` の記録が並ぶ)。
+  - 二分探索は、範囲を半分ずつに狭めて境目を探すやり方である。
+
+#### 流し方と前提
+
+比較のテストには `#[ignore]` の印を付けたので、通常の `cargo test --locked` では流れない(結果は `ignored`)。比較は、下のコマンドの `-- --ignored --exact …` の行か `build.py r4d2` で流す。CI は `r4d2` のジョブで流す。
+
+```bash
+export CARGO_TARGET_DIR="$(mktemp -d)"
+(cd native && cargo test --locked -p dev-workflow-cli --test diagnostic_runtime -- --ignored --exact rust_matches_the_legacy_runtime_parts_on_every_input)
+python3 -B native/ci/build.py r4d2 --platform <機械>
+python3 -B -m unittest discover -s native/ci -p 'test_diagnostic_runtime.py'
+```
+
+- 前提は Python 3.10 系・root 以外の利用者・`sys.get_int_max_str_digits()` が 4300・`sys.getrecursionlimit()` が 1000 である。欠ければ失敗にする(skip にしない)。
+  - 比較器は `python3 -B` で起動されるので、環境の `PYTHONINTMAXSTRDIGITS`(整数の桁の上限を決める環境変数)が同じプロセスの旧版の上限を変えうる。上の確かめで、その場合を失敗にする。
+  - 比較器は標準ライブラリだけを使う。`requirements-dev.txt` の依存は要らない。git も要らない。
+- 流れは、比較器の `--generate` が入力と筋書きの一覧(`cases.json`)と旧版の結果(`legacy.json`)を作る → Rust が同じ入力と筋書きを動かす → `--compare` が全件を並びまで比べる → 差し込みの回を `--compare --expect-mismatch` で比べる、である。
+  - R の筋書きの木は、比較器が決めた同じ絶対パスに、旧版の後に消して、Rust の前に作り直す(作り直しは Rust のテストが仕様から行う)。J8 の `stable/` だけは作り直さない。筋書きの根は `os.path.realpath` でリンクを解いたパスにする(Mac の `/tmp` と `/var` はリンクのため)。
+  - 差し込みの回は、R9 の 1 つの筋書きの `management_copy` に足す量を 1 多くし(予算の `set_test_bias`)、J3 の 1 点の深さに 1 を足す。2 件とも不一致になることを確かめる。
+  - `--compare` は、比較器の自己検査(`native/ci/test_diagnostic_runtime.py` の 19 件)の合格・件数の下限・項目の名前の一覧も確かめる。
+- 上限は、比較のテストを始めてからの経過時間で 900 秒、`build.py r4d2` で 1,800 秒、ジョブで 30 分である(R4D-1 と同じ)。CI では、ジョブの 30 分が先に効く。
+  - 900 秒は、子(比較器・R10 の子)を待つ間に確かめる。経過時間には、Rust の実行時間も含む。過ぎたら、待っている直接の子を止めて回収し、失敗にする。
+- R7 の旧版は、`-I` も `-E` も付けず、環境を辞書で渡した子のプロセス(`support_native.run_command`)で、`PYTHONHASHSEED`(Python の hash の種を決める環境変数)を 0 から順に変えて流し、2 通りの結果がそろうまで種を増やす(上限 64)。本物の旧版は `-I` で起動されるので、種は毎回の乱数(Python が起動ごとに変える、文字列や bytes の hash の値の種)になり、どの種の結果も起こりうる。
+- R10 は、旧版も Rust も子のプロセスを短い場所で起動し、子の中で 1 段ずつ相対パスで作業場所を移る(4096 バイトを超えるパスは、起動の作業場所にもパスを使う mkdir にも渡せないため)。Rust の子は、比較のテストが起動する補助のテスト `r10_child_runs_scenarios_in_its_own_working_directory` で、標準出力と標準エラーはパイプで受け止める。
+- 受け継いだ資源の上限(`RLIMIT_NOFILE`・`RLIMIT_STACK`・`RLIMIT_AS`)は、要約の `R4D-2 資源の上限:` の行に出す。比較器は設定しない(2026-11-12 00:42 の決定)。
+- 自己検査は、時間とプロセスを扱う所の待つ条件を出来事(子の終わり)で決める。J3 は呼出しの深さを測るので、自己検査の小さい組は子のプロセスで作る(unittest の呼出しは C の関数の呼出しを含み、深さの測り方の確かめが失敗にするため)。
+
+#### 入力の組と件数
+
+| 組 | 入力 | 下限 | 件数(hp-pc の実際の値) |
+|---|---|---|---|
+| `j1-decode-corpus` | 名前付きの一覧(全部の型・空白・BOM・後ろのデータ・制御文字・`\` の書き方・サロゲート・UTF-8 の誤り・数・桁 4300 と 4301・`NaN` など・重複の鍵・空) | 一覧の長さ | 78 |
+| `j2-decode-random` | 種を記録した乱数の正しい文書 2,000 件(深さ 8 以下)と、それぞれの 1 バイトの変異 2 件 | 6,000 | 6,000 |
+| `j3-decode-depth` | 入れ子の道 13 × 深さ 4 点 × 境界とその前後(3 件)、入れ子に依らない道 5(BOM・UTF-8 の誤り・余分なデータ・正しい値・最上位で値が無い誤り)× 境界とその前後(3 件) | 168 | 171 |
+| `j4-encode` | 乱数の値 2,000 件(入れ子 8 段まで)と名前付きの一覧(±2^e〈e = −1074〜1023〉の全部の 4,196 件を含む 4,234 件) | 2,000 + 一覧の長さ | 6,234 |
+| `j5-response` | J4 の符号化できる値(2 の累乗を除く)・2 の累乗 16(±2^e。e は −1074・−1022・−44・−24・0・53・89・1023)・診断の結果の形 3・無限大の位置 4 × 9 条件(通常・`json` の上限=合計と合計−1・停止・期限切れ・N 回目の 4 点) | 入力の数 × 9 | 17,631 |
+| `j6-base64` | `unb64` の名前付きの一覧・乱数の正規と非正規の各 500 件・文字列でない値、`b64` の 72 件 | 1,000 + 一覧の長さ + 72 | 1,110 |
+| `j7-keys` | 鍵の過不足・型の違う値・区切りの違う名前 | 一覧の長さ | 22 |
+| `j8-metadata` | `stable/` の通常ファイル・空のファイル・時刻が 2400 年のファイル | 一覧の長さ | 3 |
+| `r1-read-limit` | 大きさ 6 通り × 上限 3 通り(大きさ 0 は 2 通り)× 量 3 通り + 16MiB の 2 件 | 53 | 53 |
+| `r2-paths` | 絶対・相対・`..`・`.`・先頭の `//`・末尾の `/`・空・NUL 2・UTF-8 でない名前 | 10 | 10 |
+| `r3-links-types` | 最後の名前のリンク・途中の段のリンク・FIFO・フォルダの `read`・ファイルの `directory`・無い親 2・権限 2 | 9 | 9 |
+| `r4-owner` | 実行者でない持ち主の `/` と `/usr` × 終了値 3 × 状態を渡す・渡さない、自分のファイルの後の 3・同じパスへ 2 回・`//` の 2 | 18 | 18 |
+| `r5-names` | 空・1 件・2,000 件・2,001 件・`worktree_entries`・`record` の真と偽・変更の後の 2 回目 | 8 | 8 |
+| `r6-verify` | 置き換え・`chmod`・1 バイトの追加・時刻・無かったパスの作成・名前の追加と削除・フォルダの改名とリンクへの置き換えと削除・変更なし・直接の口 2 | 13 | 13 |
+| `r7-missing-order` | 無かったパス 2 つが違う理由(ENOTDIR と `source-changed`)で失敗する筋書き | 1 | 1 |
+| `r8-injection` | 読み取りなどの故障 7・閉じる所 9 | 16 | 16 |
+| `r9-budget` | 3 つの筋書き × 8 条件(期限切れ・停止・N 回目の 4 点・量の上限 L と L−1) | 24 | 24 |
+| `r10-cwd` | 相対パスの読み取り・4096 バイトを超える作業場所・消えた作業場所 | 3 | 3 |
+
+- 入力は合計 31,404 件で、不一致は 0 件だった(hp-pc・Linux x86_64)。
+- J3 の件数は 13 × 4 × 3 + 5 × 3 = 171 である。下限の 168 は、設計のときの入れ子に依らない道 4 本(13 × 4 × 3 + 4 × 3)の数である。5 本目(`flat-missing-value`)の入力が欠けたら、項目の名前の一覧(`REQUIRED_TAGS`)の確かめが止める。
+- 作れない入力は、`R4D-2 作れなかった入力: <名前>(<OS の名前>)` の行を出し、件数の下限から外す。Linux では作れなければ失敗にする。
+  - 対象は、UTF-8 でない名前(`r2-paths` の `non-utf8`。Mac の APFS は作れない)・2400 年の時刻(`j8-metadata` の `year-2400`)・4096 バイトを超える作業場所(`r10-cwd` の `deep`)の 3 つである。Mac でどれが作れないかは、CI で確かめて PR の本文に書く(未確認)。
+- J3 の境界(hp-pc。比較器の自然な深さは 11)は、入れ子の道が呼出しの深さと 1 対 1 でずれ、入れ子に依らない道は BOM・UTF-8 の誤り・正しい値が 996、余分なデータが 995、最上位で値が無い誤り(`raw_decode` が `StopIteration` から作る誤り)が 994 だった。各点で `caller_depth + r` が 999(r は同じ場所から積めた普通の関数の段数)であることも確かめた。
+- R の結果は、操作ごとの結果・記録(鍵の並びと、内容の sha256・名前の列・所有者の終了値。`missing` は並べ替えた集合)・予算の操作の列を比べる。dev・ino・時刻は、木を作り直すと変わるので R では比べず、J8 で比べる。
+- R7 のほかは、確かめ直しの時点の 1 つの `Reader` の `missing` を 1 件までにする。比較器が確かめ、2 件以上の筋書きは失敗にする(旧版の `missing` の順は実行ごとに変わり、予算の操作の列が揺れるため。自己検査に 1 件ある)。
+
+#### 旧版のテストの対応表
+
+`scripts/test_diagnostic_runtime.py` の 23 件を、R4D-1・R4D-2・R4D-2b(#541)に割り振る。R4D-2 の 6 件には、同じ性質の Rust の検査を置いた(`json.rs`・`reader.rs` の `mod tests`)。
+
+| 旧版の検査(行) | 単位 | Rust の検査 |
+|---|---|---|
+| `test_each_quantity_allows_boundary_and_rejects_one_more`(:71) | R4D-1 | `budget::tests::every_quantity_allows_the_boundary_and_rejects_one_more` |
+| `test_budget_uses_original_deadline_and_stop_flag`(:85) | R4D-1 | `budget::tests::deadline_is_fixed_at_creation_and_stop_is_checked_first` |
+| `test_reader_limit_and_exact_contents`(:96) | R4D-2 | `reader::tests::read_limit_and_exact_contents` |
+| `test_reader_rejects_replacement_mode_change_missing_creation_and_set_changes`(:103) | R4D-2 | `reader::tests::verify_rejects_replacement_mode_change_missing_creation_and_set_changes` |
+| `test_reader_refuses_final_and_parent_symlinks`(:121) | R4D-2 | `reader::tests::read_refuses_final_and_parent_symlinks` |
+| `test_reader_catches_growth_during_read`(:130) | R4D-2 | `reader::tests::read_catches_growth_during_read` |
+| `test_reader_rejects_short_read_and_growth_at_exact_limit`(:157) | R4D-2 | `reader::tests::read_rejects_short_read_at_exact_limit` |
+| `test_json_limit_stops_before_a_complete_response_is_returned`(:163) | R4D-2 | `json::tests::json_limit_stops_before_a_complete_response_is_returned` |
+| `test_writer_short_writes_interrupts_and_eagain`(:143) | R4D-2b | (#541 で移す) |
+| `test_process_output_and_stderr_budgets_stop_children`(:171) | R4D-2b | (#541 で移す) |
+| `test_expired_global_budget_still_reaps_and_cleans`(:183) | R4D-2b | (#541 で移す) |
+| `test_term_ignoring_child_is_killed_and_reaped_after_deadline`(:194) | R4D-2b | (#541 で移す) |
+| `test_unreaped_child_retains_private_area_and_does_not_restart_stop_budget`(:206) | R4D-2b | (#541 で移す) |
+| `test_cleanup_failure_keeps_area_and_does_not_restart_cleanup_budget`(:224) | R4D-2b | (#541 で移す) |
+| `DiagnosticOutputTests` の 9 件(:258・:269・:288・:313・:334・:347・:362・:380・:387) | R4D-2b | (#541 で移す) |
+
+- 旧版のテストは変えていない。23 件は全回帰テスト(`run-all.py`)と `python3 -B scripts/run-tests.py test_diagnostic_runtime.py` で流れる。
+
+#### 時間の記録
+
+- 2026-11-27 に hp-pc(Linux x86_64・16 CPU)で流した観測値である。ほかの担当が同時に走っていた(負荷平均は 4〜16)。
+  - 今の組(入力 31,404 件。±2^e を足した後)の 3 回: 比較のテストの関数そのもの(`finished in`)は 15.0〜15.5 秒、比較器の要約の行の秒(生成と比べる処理と自己検査。Rust の実行を含まない)は 8.8〜9.3 秒、旧版の生成は 7.3〜7.9 秒、Rust の実行(デバッグのビルド)は 4.9 秒だった。
+  - 完了条件 1 を確かめた回(本家 3.10.11 の venv・2026-11-27 17:44): 比較のテストの関数は 41.46 秒、要約の行の秒は 23.6 秒、旧版の生成は 19.4 秒、Rust の実行は 14.2 秒だった(入力 31,404 件・不一致 0 件)。そのときの負荷は記録していない。ほかの担当のビルドと並行していたと推測される。
+  - 前の組(入力 27,061 件)の 5 回: 比較のテストの関数は 15.7〜35.8 秒、要約の行の秒は 9.2〜21.5 秒、旧版の生成は 7.8〜21.1 秒、Rust の実行は 5.1〜12.2 秒だった(負荷の違いと推測される)。
+  - 旧版の生成は、設計の見積もり(60 秒以内。推測)の内側だった。
+  - 比較器の Python は、本家 3.10.11 と Ubuntu の 3.10.12 の両方で、不一致 0 件だった(どちらも 31,404 件)。
+  - `build.py r4d2 --platform linux-x86_64`(空の出力先からビルド)は、全体で 20〜21 秒だった。
+- 自己検査(`native/ci/test_diagnostic_runtime.py` の 19 件)は、1 回 1.2〜4.3 秒だった。
+  - 負荷をかけて 20 回ずつ流した組は、全部合格した。18 件の版で 2 組(4 つを同時に 5 回ずつ流した組と、CPU を使い続ける 8 つのプロセスを足して 2 つを同時に 10 回ずつ流した組)、19 件の版で 1 組(後者と同じ形。負荷平均は 4〜11)である。
+- `cargo test --locked` 全体(書式と clippy を含む)は 202〜251 秒だった。比較のテストと R10 の補助のテストは `ignored` になる。
+- CI の 4 種類の機械の時間は未測定である。R4D-1 の倍率(Mac Intel の比較の時間は hp-pc の約 4 倍)から、Mac Intel で 1 回 2〜3 分と推測する。上限(比較のテストの中で 900 秒・`build.py r4d2` で 1,800 秒・ジョブで 30 分)の内側である。実測は、PR の CI で確かめて PR の本文に書く。
+
 ### R4Gの比較
 
 #479の3コマンド(`pending-implementation`・`reviews-dir`・`implementation-git`)は、製品CLIへ未登録・未配布の開発用実装である。
@@ -1951,6 +2054,7 @@ CIでの扱い(出典は2026-11-12 12:59の決定。ジョブの形と実行物�
   - `build`の上限(120分)と`verify-universal`の上限(60分)は変えていない。`build`には、exampleのビルドと単体検査だけを足した。
 - `s2e`・`s2e-universal`は、`distribution`の`needs`に入れない(S3D・R4Cと同じ)。
 - `native.yml`のジョブの定義は21個で、matrixを展開した実行は59件である(2026-11-25に、`s2e`・`s2e-universal`を含めて数えた)。
+- R4D-2(#484)の`r4d2`を足した後は、`native.yml`のジョブの定義は22個で、matrixを展開した実行は63件である(2026-11-27に、`runs-on`とmatrixから数え直した)。
 - `check_workflow.py`は、`s2e`・`s2e-universal`のジョブの欠落・機種・`needs`・上限(120分・60分)を確かめる。`test_native_ci.py`の`S2EConnectionTests`は、`build.py`の流れ・署名とCPUの確かめ・workflowの形・比較の2回目が`--no-selftest`を付けること・内側の上限とジョブの上限の関係を確かめる。
 - `scripts/test_native_s2e.py`(6件。`scripts/run-all.py`が自動で集める)は、起動前の登録のマクロ`s2e_record_startup_state!`の展開が、`examples/s2e_contract.rs`の1か所と`environment_guard.rs`の`#[cfg(test)]`のテストのモジュールの中だけであることを、静的に確かめる(別名・別の括弧・許可の外からの`capture_inherited_sigpipe`の参照・テストのモジュールの外の展開は拒む)。置き場は、R4Gの`scripts/test_native_r4g.py`と同じ。比較器自身の検査(`test_s2e.py`)の84件は変えていない。
 - 製品の`dev-workflow`に`main`より前の処理が入らないことは、2026-11-26に、muslのreleaseを直す前の作りと比べて確かめた(`strace -f -e trace=rt_sigaction <bin> --version`で`rt_sigaction(SIGPIPE, NULL, …)`が無くなった。`.init_array`はgnu 0x10・musl 0x8)。製品へ印を置く変更を止めるのは、次の2つである。`scripts/test_native_s2e.py`は、マクロの展開の場所と、`link_section`・`.init_array`・`__mod_init_func`の場所(マクロの本体の中だけ)を確かめる。platformの単体テスト`inherited_sigpipe_is_recorded_before_main`は、初期化関数が呼ばれた回数(1回)を確かめる。`LoaderInitializer`(`native/ci/test_diff_snapshot.py`)は`environment_guard.rs`を名前で外し、印が「ある」ことしか見ないので、このファイルの登録は止めない。
@@ -2045,6 +2149,9 @@ CI の定義は `.github/workflows/native.yml` にある。対象と同じ OS・
   - 上限は 30 分である。`build.py r4d1 --platform <表の値>` が、`quality()` と同じ環境で比較のコマンドを 1 回流す。
   - 比較のテストがちょうど 1 件合格したことを確かめる。0 件・飛ばし・別のテストの合格・時間切れは、合格にしない。
   - `distribution` の `needs` には入れない。必須であることは、必須 CI の全ジョブの成功を確かめてから merge する決まりで担う。
+- `r4d2` のジョブは、`build` の後に、4 機種で R4D-2 の旧版との比較だけを流す([R4D-2 の比較](#r4d-2-の-json-と-reader-の比較))。
+  - 上限は 30 分である。`build.py r4d2 --platform <表の値>` が、`quality()` と同じ環境で比較のコマンドを 1 回流し、比較のテストがちょうど 1 件合格したことを確かめる。
+  - 比較のテストの実行物を 1 回作り、比較を 1 回だけ流す(配る実行物を 2 回作って比べるジョブではない。比較を 2 回流さない #516 の決まりと同じ)。`distribution` の `needs` には入れない。
 - CI は成果物までを作り、PR 作成や push はしない。段階 0b 以降も、配布への取り込みは人が行う。
 - S2L(#468)の検査用実行物`loop_state_fixture`も、`build`・`reproduce`の2回のビルドに`--example loop_state_fixture`で含める。各回で`check_loop_state.py`と`test_loop_state.py`を流す。
   - `quality()`は、各OSで1回、`check_loop_state_units.py`と`check_loop_state_mutations.py`を流す。
